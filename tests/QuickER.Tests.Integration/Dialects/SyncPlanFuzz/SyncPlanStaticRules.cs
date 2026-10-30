@@ -42,6 +42,8 @@ internal sealed record SyncPlanStaticVerdict(
 ///   <item>R4：方言の名前の範囲で、足す制約の名前が残っている制約と重ならない（SQL Server・Oracle＝スキーマの全制約、
 ///   PostgreSQL＝主キー・一意制約はスキーマ・外部キーは表、MySQL＝外部キーはスキーマ・一意制約は表）。</item>
 ///   <item>R5：外部キーを足すとき、参照する列の集合が親の主キーか一意制約と一致する（候補キーの無い付け直しは DB が断る）。</item>
+///   <item>R6：表の最後の列を消さない（SQL Server 4923・MySQL 1090・Oracle ORA-12983。PostgreSQL は列の無い表を許すので判定しない。
+///   製品は同期後に列の残らない表の列の削除を計画から外す＝<see cref="SyncPlanWarningKind.TableLeftWithoutColumns"/>）。</item>
 /// </list>
 /// <para>
 /// 違反になるのは、断られる文があるのに次のどちらでもないとき：(a) 失敗を予告する警告がある（<see cref="NonPredictingWarnings"/> 以外）
@@ -61,7 +63,8 @@ internal sealed record SyncPlanStaticVerdict(
 internal static class SyncPlanStaticRules
 {
     /// <summary>
-    /// 失敗を予告しない種類の警告（項目を計画から外した・再構築の属性の喪失・列の削除に伴う一意制約の削除・説明の文字の置き換え）
+    /// 失敗を予告しない種類の警告（項目を計画から外した・再構築の属性の喪失・列の削除に伴う一意制約の削除・説明の文字の置き換え・
+    /// 列の残らない表の列の削除を外した）
     /// </summary>
     public static readonly IReadOnlySet<SyncPlanWarningKind> NonPredictingWarnings =
         new HashSet<SyncPlanWarningKind>
@@ -71,6 +74,7 @@ internal static class SyncPlanStaticRules
             SyncPlanWarningKind.UniqueConstraintDroppedWithColumn,
             SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey,
             SyncPlanWarningKind.DescriptionCharactersReplaced,
+            SyncPlanWarningKind.TableLeftWithoutColumns,
         };
 
     /// <summary>計画を規則で判定する</summary>
@@ -393,6 +397,7 @@ internal static class SyncPlanStaticRules
                     : CheckName(step.Table, PrimaryKeyName(step.Item.TableName), false),
                 SchemaDiffKind.AddForeignKey => CheckForeignKeyAdd(step),
                 SchemaDiffKind.AddTable => CheckTableAdd(step),
+                SchemaDiffKind.DropColumn => CheckColumnDrop(step),
                 _ => null,
             };
 
@@ -542,6 +547,27 @@ internal static class SyncPlanStaticRules
             _foreignKeys.FirstOrDefault(f => f.Parent == table && f.Child != table) is { } fk
                 ? $"R1: table {table} is still referenced by {fk.Name}"
                 : null;
+
+        /// <summary>R6：表の最後の列を消さない（SQL Server 4923・MySQL 1090・Oracle ORA-12983。PostgreSQL は列の無い表を許す）</summary>
+        private string? CheckColumnDrop(Step step)
+        {
+            if (
+                dialect is not (DialectNames.SqlServer or DialectNames.MySql or DialectNames.Oracle)
+            )
+            {
+                return null;
+            }
+
+            var dropped = ColumnKey(step.Table, step.Item.ColumnName!);
+            var prefix = step.Table + "|";
+
+            return _types.Keys.Any(k =>
+                k.StartsWith(prefix, StringComparison.Ordinal)
+                && !string.Equals(k, dropped, StringComparison.Ordinal)
+            )
+                ? null
+                : $"R6: dropping {dropped.Replace('|', '.')} leaves table {step.Table} without columns";
+        }
 
         /// <summary>R2：型の変更の前に、列を含む一意制約・主キー・外部キーが外れている</summary>
         private string? CheckAlterColumn(Step step)

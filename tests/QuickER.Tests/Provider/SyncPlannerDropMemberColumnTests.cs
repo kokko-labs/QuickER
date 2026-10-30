@@ -219,6 +219,126 @@ public class SyncPlannerDropMemberColumnTests
             );
     }
 
+    /// <summary>5 方言 × 新しい列を足すか</summary>
+    public static TheoryData<string, bool> DialectsWithAddition()
+    {
+        var data = new TheoryData<string, bool>();
+
+        foreach (var dialect in new[] { "sqlserver", "postgresql", "mysql", "oracle", "sqlite" })
+        {
+            data.Add(dialect, false);
+            data.Add(dialect, true);
+        }
+
+        return data;
+    }
+
+    /// <summary>
+    /// 表の列をすべて消す変更（主キーの解除と列の削除）は、列の削除をすべて計画から外して
+    /// <see cref="SyncPlanWarningKind.TableLeftWithoutColumns"/> で名指しし、外した列を前提にした暗黙の一意制約・外部キーの削除を
+    /// 足さないことを検証する。新しい列も足す変更（元の列を全部消して置き換える）は外さない（同期後に列が残る）。
+    /// </summary>
+    [Theory(
+        DisplayName = "列の削除: 表の列が 1 本も残らないなら列の削除を外して警告し、暗黙の削除も足さない（列を足すなら外さない）"
+    )]
+    [MemberData(nameof(DialectsWithAddition))]
+    public void DropAllColumns_ExcludesDropsUnlessColumnIsAdded(string dialect, bool addColumn)
+    {
+        var provider = ProviderFor(dialect);
+        var (live, _) = Tables();
+        var parent = new Entity { TableName = "p", Columns = { Key("id") } };
+        var fk = new Relationship
+        {
+            SourceEntityId = parent.Id,
+            TargetEntityId = live.Id,
+            Type = RelationshipType.OneToMany,
+            ConstraintName = "FK_t_p",
+            ColumnPairs = [new RelationshipColumnPair(parent.Columns[0].Id, live.Columns[2].Id)],
+        };
+        var target = new Entity { TableName = "t" };
+
+        if (addColumn)
+        {
+            target.Columns.Add(Plain("n"));
+        }
+
+        var targetParent = new Entity { TableName = "p", Columns = { Key("id") } };
+        var diff = new SchemaDiffService().Compute(
+            [live, parent],
+            [fk],
+            [target, targetParent],
+            [],
+            provider.SyncCapabilities
+        );
+
+        foreach (var item in diff.Items)
+        {
+            item.IsSelected =
+                item.Kind
+                    is SchemaDiffKind.AlterPrimaryKey
+                        or SchemaDiffKind.DropColumn
+                        or SchemaDiffKind.AddColumn;
+        }
+
+        var plan = new SyncPlanner().BuildPlan(
+            diff.Items,
+            provider.SyncCapabilities,
+            new SyncPlanContext
+            {
+                LiveEntities = [live, parent],
+                LiveRelationships = [fk],
+                AuxiliaryObjects = [],
+                TableCreateSql = new Dictionary<string, string>(),
+                ColumnDefaults = [],
+            }
+        );
+
+        if (addColumn)
+        {
+            plan.Warnings.Should()
+                .NotContain(w => w.Kind == SyncPlanWarningKind.TableLeftWithoutColumns);
+            plan.ExcludedItems.Should().BeEmpty();
+            return;
+        }
+
+        plan.Warnings.Should()
+            .ContainSingle(w => w.Kind == SyncPlanWarningKind.TableLeftWithoutColumns)
+            .Which.Should()
+            .Be(
+                new SyncPlanWarning(SyncPlanWarningKind.TableLeftWithoutColumns, "t", "a, b, c, d")
+            );
+        plan.ExcludedItems.Select(i => (i.Kind, i.ColumnName))
+            .Should()
+            .BeEquivalentTo(
+                new[] { "a", "b", "c", "d" }.Select(c => (SchemaDiffKind.DropColumn, (string?)c))
+            );
+        plan.Warnings.Should()
+            .NotContain(w => w.Kind == SyncPlanWarningKind.UniqueConstraintDroppedWithColumn);
+
+        if (plan.Rebuilds.Count > 0)
+        {
+            var definition = plan.Rebuilds.Should().ContainSingle().Which;
+            definition.NewDefinition.Columns.Select(c => c.Name).Should().Equal("a", "b", "c", "d");
+            definition.NewDefinition.GetPrimaryKeyColumnsInOrder().Should().BeEmpty();
+            definition.NewDefinition.UniqueConstraints.Should().ContainSingle();
+            definition.ForeignKeys.Should().ContainSingle();
+            definition.CopyColumns.Should().Equal("a", "b", "c", "d");
+            return;
+        }
+
+        plan.Sections.Should()
+            .NotContain(s =>
+                s.Kind == SchemaDiffKind.DropColumn
+                || s.Kind == SchemaDiffKind.DropUniqueConstraint
+                || s.Kind == SchemaDiffKind.DropForeignKey
+            );
+        plan.Sections.Should()
+            .ContainSingle(s =>
+                s.Kind == SchemaDiffKind.AlterPrimaryKey
+                && s.PrimaryKeyPhase == PrimaryKeyPhase.Drop
+            );
+    }
+
     /// <summary>live: t(a PK, b PK, c, d, UNIQUE UQ_t_cd (c, d))・目標: t(a PK, c)</summary>
     private static (Entity Live, Entity Target) Tables()
     {

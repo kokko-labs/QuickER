@@ -294,6 +294,50 @@ public class SqliteSyncScriptBuilderTests
         script.Should().Contain("CREATE INDEX \"idx_orders_note\" ON \"orders\" (\"note\");");
     }
 
+    /// <summary>
+    /// 写す列が無い再構築（元の列をすべて消して新しい列を足す）でも、最初の列へ NULL を入れる INSERT … SELECT で行の数を保つことを
+    /// 検証する。新しい列が NOT NULL でも同じ SQL（行があれば SQLite が断って巻き戻る）。
+    /// </summary>
+    [Theory(DisplayName = "写す列が無い再構築も、最初の列へ NULL を入れて行を写す")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void RebuildWithoutCopyColumns_KeepsRowsWithNulls(bool nullable)
+    {
+        var first = Col("added_a", "varchar(30)");
+        first.IsNullable = nullable;
+        var plan = new SyncPlan
+        {
+            Rebuilds =
+            [
+                new TableRebuildPlan
+                {
+                    TableName = "t",
+                    NewDefinition = new Entity
+                    {
+                        TableName = "t",
+                        Columns = { first, Col("added_b", "int") },
+                    },
+                    CreateOnly = false,
+                    CopyColumns = [],
+                },
+            ],
+        };
+
+        var script = Build(plan);
+
+        const string insert =
+            "INSERT INTO \"t_quicker_rebuild\" (\"added_a\") SELECT NULL FROM \"t\";";
+        script.Should().Contain(insert);
+        script
+            .IndexOf("CREATE TABLE \"t_quicker_rebuild\"", System.StringComparison.Ordinal)
+            .Should()
+            .BeLessThan(script.IndexOf(insert, System.StringComparison.Ordinal));
+        script
+            .IndexOf(insert, System.StringComparison.Ordinal)
+            .Should()
+            .BeLessThan(script.IndexOf("DROP TABLE \"t\";", System.StringComparison.Ordinal));
+    }
+
     /// <summary>構成列が削除された一意制約は再現せず、逆に残っている一意制約は UNIQUE 句へ復元することを検証する</summary>
     [Fact(DisplayName = "削除列を含む一意制約は再現しない")]
     public void UniqueConstraint_ReferencingRemovedColumn_IsDropped()
