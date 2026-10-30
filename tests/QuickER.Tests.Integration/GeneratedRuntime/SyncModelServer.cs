@@ -70,6 +70,7 @@ internal sealed class SyncModelServerRepository<TEntity, TKey>(
 
     public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
+        await faults.InterruptAsync(ModelInterruptPoint.BeforeServerWrite).ConfigureAwait(false);
         faults.ThrowOnServerWrite(typeof(TEntity), readKey(entity)!);
         Stamp(entity);
         await inner.InsertAsync(entity, cancellationToken).ConfigureAwait(false);
@@ -81,6 +82,7 @@ internal sealed class SyncModelServerRepository<TEntity, TKey>(
         CancellationToken cancellationToken = default
     )
     {
+        await faults.InterruptAsync(ModelInterruptPoint.BeforeServerWrite).ConfigureAwait(false);
         faults.ThrowOnServerWrite(typeof(TEntity), readKey(entity)!);
         var key = readKey(entity);
 
@@ -101,11 +103,12 @@ internal sealed class SyncModelServerRepository<TEntity, TKey>(
             .ConfigureAwait(false);
     }
 
-    public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
+    public async Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
     {
+        await faults.InterruptAsync(ModelInterruptPoint.BeforeServerWrite).ConfigureAwait(false);
         faults.ThrowOnServerWrite(typeof(TEntity), id!);
 
-        return inner.DeleteAsync(id, cancellationToken);
+        return await inner.DeleteAsync(id, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<int> SaveAsync(
@@ -117,6 +120,7 @@ internal sealed class SyncModelServerRepository<TEntity, TKey>(
         CancellationToken cancellationToken = default
     )
     {
+        await faults.InterruptAsync(ModelInterruptPoint.BeforeServerWrite).ConfigureAwait(false);
         faults.ThrowOnServerWrite(typeof(TEntity), readKey(entity)!);
 
         // 同期エンジンが使うのは「版ガード付きの削除」だけ（RowState=Removed のスタブ 1 件）
@@ -233,6 +237,7 @@ internal sealed class SyncModelServerSource<TEntity, TKey>(
         CancellationToken cancellationToken = default
     )
     {
+        await faults.InterruptAsync(ModelInterruptPoint.BeforeServerFetch).ConfigureAwait(false);
         faults.ThrowOnServer(ModelFaultKind.ServerFetch);
         var rows = await serverSqlExecutor.QueryBySqlAsync<TEntity>(
             changesSql,
@@ -245,14 +250,19 @@ internal sealed class SyncModelServerSource<TEntity, TKey>(
             cancellationToken
         );
 
-        return new SyncChangeBatch<TEntity>(rows, rows.Count >= batchSize);
+        return await faults.AfterFetchAsync(rows, batchSize).ConfigureAwait(false);
     }
 
-    public Task<IReadOnlyList<TKey>> GetAllKeysAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<TKey>> GetAllKeysAsync(
+        CancellationToken cancellationToken = default
+    )
     {
+        await faults.InterruptAsync(ModelInterruptPoint.BeforeServerFetch).ConfigureAwait(false);
         faults.ThrowOnServer(ModelFaultKind.ServerFetch);
 
-        return serverSqlExecutor.QueryProjectionBySqlAsync<TKey>(keysSql, null, cancellationToken);
+        return await serverSqlExecutor
+            .QueryProjectionBySqlAsync<TKey>(keysSql, null, cancellationToken)
+            .ConfigureAwait(false);
     }
 }
 
@@ -289,6 +299,7 @@ internal sealed class SyncModelVersionlessServerSource<TEntity, TKey>(
         CancellationToken cancellationToken = default
     )
     {
+        await faults.InterruptAsync(ModelInterruptPoint.BeforeServerFetch).ConfigureAwait(false);
         faults.ThrowOnServer(ModelFaultKind.ServerFetch);
         var rows = await serverSqlExecutor.QueryBySqlAsync<TEntity>(
             firstPageSql,
@@ -296,7 +307,7 @@ internal sealed class SyncModelVersionlessServerSource<TEntity, TKey>(
             cancellationToken
         );
 
-        return new SyncChangeBatch<TEntity>(rows, rows.Count >= batchSize);
+        return await faults.AfterFetchAsync(rows, batchSize).ConfigureAwait(false);
     }
 
     public async Task<SyncChangeBatch<TEntity>> GetPageAfterAsync(
@@ -305,6 +316,7 @@ internal sealed class SyncModelVersionlessServerSource<TEntity, TKey>(
         CancellationToken cancellationToken = default
     )
     {
+        await faults.InterruptAsync(ModelInterruptPoint.BeforeServerFetch).ConfigureAwait(false);
         faults.ThrowOnServer(ModelFaultKind.ServerFetch);
         var rows = await serverSqlExecutor.QueryBySqlAsync<TEntity>(
             pageAfterSql,
@@ -312,14 +324,19 @@ internal sealed class SyncModelVersionlessServerSource<TEntity, TKey>(
             cancellationToken
         );
 
-        return new SyncChangeBatch<TEntity>(rows, rows.Count >= batchSize);
+        return await faults.AfterFetchAsync(rows, batchSize).ConfigureAwait(false);
     }
 
-    public Task<IReadOnlyList<TKey>> GetAllKeysAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<TKey>> GetAllKeysAsync(
+        CancellationToken cancellationToken = default
+    )
     {
+        await faults.InterruptAsync(ModelInterruptPoint.BeforeServerFetch).ConfigureAwait(false);
         faults.ThrowOnServer(ModelFaultKind.ServerFetch);
 
-        return serverSqlExecutor.QueryProjectionBySqlAsync<TKey>(keysSql, null, cancellationToken);
+        return await serverSqlExecutor
+            .QueryProjectionBySqlAsync<TKey>(keysSql, null, cancellationToken)
+            .ConfigureAwait(false);
     }
 }
 

@@ -772,6 +772,8 @@ internal static class SyncPlanScenarios
                 ),
                 // ---- D4 の形の行（SyncPlanShapeRows）：主キーの変更 × 参照する外部キーの数 × 型の変更 × 明示の削除 × 一意制約の数 ----
                 .. SyncPlanShapeRows.Rows,
+                // ---- 来歴の行（SyncPlanHistoryRows・PostgreSQL）：DB の来歴 × 子の表名の長さ × 2 本目の外部キー（4m-F1 を含む） ----
+                .. SyncPlanHistoryRows.Rows,
             ]
         );
 
@@ -864,13 +866,20 @@ internal static class SyncPlanScenarios
 /// <param name="build">DB 側の図を作る</param>
 /// <param name="mutate">目標の図を編集する</param>
 /// <param name="select">選ぶ項目（null なら選べる項目を全部選ぶ）</param>
+/// <param name="history">
+/// DB の来歴（null なら来歴を当てない）。当てるときは、DB 側の図の名前の無い外部キーを来歴の規則で名付けてから DB を作り、
+/// 目標の図ではその名前を外す（<see cref="SyncPlanHistories"/>・行は <see cref="SyncPlanHistoryRows"/>）
+/// </param>
 internal sealed class SyncPlanScenarioCase(
     SyncPlanFuzzDialect dialect,
     Action<ScenarioLive> build,
     Action<ScenarioTarget> mutate,
-    Func<IReadOnlyList<SchemaDiffItem>, SchemaDiffItem, bool>? select
+    Func<IReadOnlyList<SchemaDiffItem>, SchemaDiffItem, bool>? select,
+    SyncPlanHistory? history = null
 ) : ISyncPlanFuzzCase
 {
+    private IReadOnlyList<SyncPlanHistories.NamedForeignKey> _named = [];
+
     /// <inheritdoc/>
     public List<string> Mutations { get; } = [];
 
@@ -879,16 +888,35 @@ internal sealed class SyncPlanScenarioCase(
     {
         var live = new FuzzLiveSchema();
         build(new ScenarioLive(live, dialect));
+
+        if (history is { } applied)
+        {
+            _named = SyncPlanHistories.Apply(
+                applied,
+                live.Diagram,
+                dialect.Provider.SyncCapabilities.IdentifierLengthLimit
+            );
+            live.Shapes.UnionWith(SyncPlanHistoryRows.LiveShapes(applied, _named));
+        }
+
         SyncPlanFuzzGenerator.BuildInserts(live, dialect);
         return live;
     }
 
     /// <inheritdoc/>
-    public void Mutate(
-        List<Entity> entities,
-        List<Relationship> relationships,
-        FuzzLiveSchema live
-    ) => mutate(new ScenarioTarget(entities, relationships, dialect, Mutations));
+    public void Mutate(List<Entity> entities, List<Relationship> relationships, FuzzLiveSchema live)
+    {
+        if (history is null)
+        {
+            mutate(new ScenarioTarget(entities, relationships, dialect, Mutations));
+            return;
+        }
+
+        SyncPlanHistories.Forget(_named, entities, relationships);
+        var before = relationships.ToList();
+        mutate(new ScenarioTarget(entities, relationships, dialect, Mutations));
+        live.Shapes.Add(SyncPlanHistoryRows.SecondShape(before, relationships));
+    }
 
     /// <inheritdoc/>
     /// <remarks>選び方は行が決めるので、報告の表記は <see cref="FuzzSelection.All"/>（全部）か <see cref="FuzzSelection.ByKinds"/>（行の述語）</remarks>
@@ -1227,7 +1255,7 @@ internal sealed class ScenarioTarget(
         string childTable,
         string childColumn,
         string parentTable,
-        string name
+        string? name
     )
     {
         var parent = Table(parentTable);

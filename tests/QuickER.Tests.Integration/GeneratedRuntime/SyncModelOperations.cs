@@ -430,6 +430,21 @@ internal sealed record ArmFaultOp(ModelActor Device, ModelFaultKind Kind) : Mode
 }
 
 /// <summary>
+/// 割り込みを仕掛ける：端末の次の同期（洗い替えでない）がその点に来たときに 1 回だけ、実行と別の流れ（同期の抑止も書き込みロックの
+/// リースも引き継がない）から、その端末のローカルの書き込みを 1 つ流す（<see cref="SyncModelFaults.InterruptAsync"/>）。
+/// 割り込みの書き込みは書き手の操作として数える（収束・消失なしの期待に入る）。点に来ないまま静止化に入ったら違反
+/// （<c>interrupt/not-fired:{点}</c>）
+/// </summary>
+internal sealed record ArmInterruptOp(
+    ModelActor Device,
+    ModelInterruptPoint Point,
+    ModelWriteOp Write
+) : ModelOp
+{
+    public override string Describe() => $"{Who(Device)} ArmInterrupt {Point}: {Write.Describe()}";
+}
+
+/// <summary>
 /// 端末のジャーナル・受理記録・blob のコピー待ちのうち、その表のキーのテキストの末尾へ文字列を足す（以前の版が書いた
 /// 形の再現。日時の主キーは Kind つき＝<c>Z</c> やオフセットつきで書いていた）
 /// </summary>

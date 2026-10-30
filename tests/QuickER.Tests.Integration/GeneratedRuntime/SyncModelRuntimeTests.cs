@@ -395,6 +395,45 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         );
     }
 
+    [Fact(
+        DisplayName = "[Sync/モデル] 割り込みの行は、点 × 形の全積をそろえ、どの行も割り込みを 1 つだけ仕掛けて同期する"
+    )]
+    public void InterruptScenarios_CoverEveryPointAndShape()
+    {
+        // 宣言の網（行の点と形）。点が実際に当たったかは、各行の実行が not-fired の違反で見る
+        var declared = SyncModelScenarios
+            .All.SelectMany(s => s.Ops.OfType<ArmInterruptOp>().Select(arm => (s.Name, arm.Point)))
+            .ToList();
+        CoverageGuard.ContainsAll(
+            "interrupt rows (point x shape)",
+            SyncModelScenarios
+                .InterruptCells.Where(cell => declared.Contains((cell.Name, cell.Point)))
+                .Select(cell => $"{cell.Point}/{cell.Shape}"),
+            Enum.GetValues<ModelInterruptPoint>()
+                .SelectMany(point =>
+                    SyncModelScenarios.InterruptShapes.Select(shape => $"{point}/{shape}")
+                )
+        );
+
+        // 既知の失敗の一覧が名指しする 4m-D1 の行は、点 × 形の行の 1 つ
+        ModelSyncScenarioNames
+            .D1Items.Should()
+            .Be(
+                SyncModelScenarios.InterruptName(
+                    ModelInterruptPoint.BeforeServerWrite,
+                    SyncModelScenarios.DeleteRecreatedShape
+                )
+            );
+
+        foreach (
+            var scenario in SyncModelScenarios.All.Where(s => s.Ops.OfType<ArmInterruptOp>().Any())
+        )
+        {
+            scenario.Ops.OfType<ArmInterruptOp>().Should().ContainSingle(scenario.Name);
+            scenario.Ops.OfType<ModelSyncOp>().Should().NotBeEmpty(scenario.Name);
+        }
+    }
+
     [Theory(
         DisplayName = "[Sync/モデル] 決定的なシナリオは、既知の失敗の一覧に載った署名の組どおりに失敗する（載っていなければ失敗しない）"
     )]

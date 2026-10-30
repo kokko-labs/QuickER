@@ -43,6 +43,29 @@ internal enum ModelFaultKind
     ApplySkip,
 }
 
+/// <summary>
+/// 割り込みの点：端末の同期の実行の名前つきの時点。仕掛けた割り込み（<see cref="ArmInterruptOp"/>）は、その端末の同期が
+/// この時点に来たときに 1 回だけ、実行と別の流れからローカルの書き込みを差し込む。
+/// </summary>
+/// <remarks>
+/// どの点も、エンジンがローカルの書き込みロックを持っていない時点に置く。割り込みの書き込みはジャーナル記録のデコレータの
+/// 書き込みロックを待つので、ロックの中に差し込むと互いに待ち合って止まる（エンジンが行の適用・未送信の読み直しをする区間には
+/// 差し込めない）。洗い替えはロックを持ったまま全体を流すので、割り込みは起きない。
+/// </remarks>
+internal enum ModelInterruptPoint
+{
+    /// <summary>サーバーへの行の書き込み（挿入・更新・保存・削除）の直前（アップロードの再生の判定の後・その書き込みの前）</summary>
+    BeforeServerWrite,
+
+    /// <summary>サーバーからの差分・ページ・キーの取得の直前</summary>
+    BeforeServerFetch,
+
+    /// <summary>
+    /// サーバーからの差分・ページの取得が 1 行以上を返した後、エンジンがロックを取ってそのバッチを適用する前（適用の最中ではない）
+    /// </summary>
+    AfterServerFetchBeforeApply,
+}
+
 /// <summary>注入した失敗（モデルは、これを原因とする例外を違反として数えない）</summary>
 internal sealed class InjectedFaultException(ModelFaultKind kind)
     : Exception($"Injected fault: {kind}.")
@@ -101,8 +124,16 @@ internal sealed class SyncModelFaults
     /// <summary><see cref="ModelFaultKind.HookAssignKey"/> のフックが決めるキー（書き込みの間だけ）</summary>
     public int? KeyToAssign { get; set; }
 
-    /// <summary>仕掛けた失敗をすべて外す（静止化の前）</summary>
-    public void Clear() => _armed.Clear();
+    /// <summary>仕掛けた失敗と割り込みをすべて外す（静止化の前）</summary>
+    public void Clear()
+    {
+        _armed.Clear();
+
+        lock (_interruptLock)
+        {
+            _interrupt = null;
+        }
+    }
 
     /// <summary>仕掛けた失敗が起きた回数（操作の前後で比べ、失敗が効いた操作を見分ける）</summary>
     public int Fired { get; private set; }
@@ -127,6 +158,110 @@ internal sealed class SyncModelFaults
         {
             throw new InjectedFaultException(kind);
         }
+    }
+
+    /// <summary>割り込みの書き込みを待つ上限（超えたら待つのをやめ、<see cref="InterruptTimedOut"/> を立てる）</summary>
+    public static readonly TimeSpan InterruptTimeout = TimeSpan.FromSeconds(30);
+
+    private readonly object _interruptLock = new();
+    private (ModelActor Device, ModelInterruptPoint Point, Func<Task> Write)? _interrupt;
+
+    /// <summary>いま洗い替えを流しているか（洗い替えはロックを持ったまま流すので、割り込みを起こさない）</summary>
+    public bool Refreshing { get; set; }
+
+    /// <summary>仕掛けたまま、まだ起きていない割り込みの点（無ければ null）</summary>
+    public ModelInterruptPoint? PendingInterrupt
+    {
+        get
+        {
+            lock (_interruptLock)
+            {
+                return _interrupt?.Point;
+            }
+        }
+    }
+
+    /// <summary>割り込みの書き込みが上限の時間で終わらなかった点（待ち合いの疑い。無ければ null）</summary>
+    public ModelInterruptPoint? InterruptTimedOut { get; private set; }
+
+    /// <summary>
+    /// 割り込みを仕掛ける（端末の次の同期がその点に来たときに 1 回だけ、<paramref name="write"/> を実行と別の流れで流す。
+    /// 同時に仕掛けられるのは 1 つだけ）
+    /// </summary>
+    public void ArmInterrupt(ModelActor device, ModelInterruptPoint point, Func<Task> write)
+    {
+        lock (_interruptLock)
+        {
+            if (_interrupt is not null)
+            {
+                throw new InvalidOperationException("An interrupt is already armed.");
+            }
+
+            _interrupt = (device, point, write);
+        }
+    }
+
+    /// <summary>
+    /// サーバー役の割り込みの点で呼ぶ。同期中の端末にこの点の割り込みが仕掛けてあれば、書き込みを
+    /// <see cref="ExecutionContext.SuppressFlow"/> の下の <see cref="Task.Run(Func{Task})"/> で流して終わりを待つ
+    /// （同期の抑止の印も書き込みロックのリースも引き継がない＝アプリの別の流れの書き込みと同じ）
+    /// </summary>
+    public async Task InterruptAsync(ModelInterruptPoint point)
+    {
+        Func<Task> write;
+
+        lock (_interruptLock)
+        {
+            if (
+                Refreshing
+                || Syncing is not { } device
+                || _interrupt is not { } armed
+                || armed.Device != device
+                || armed.Point != point
+            )
+            {
+                return;
+            }
+
+            write = armed.Write;
+            _interrupt = null;
+        }
+
+        Task task;
+
+        using (ExecutionContext.SuppressFlow())
+        {
+            task = Task.Run(write);
+        }
+
+        if (await Task.WhenAny(task, Task.Delay(InterruptTimeout)) != task)
+        {
+            // 待ち合い（エンジンがロックを持ったまま点に来た）の疑い。止まらないよう待つのをやめ、違反として残す
+            InterruptTimedOut = point;
+
+            return;
+        }
+
+        await task;
+    }
+
+    /// <summary>
+    /// 差分・ページの取得が返した行を、エンジンへ返す前に通す（1 行以上なら
+    /// <see cref="ModelInterruptPoint.AfterServerFetchBeforeApply"/> の割り込みの点）
+    /// </summary>
+    public async Task<SyncChangeBatch<TEntity>> AfterFetchAsync<TEntity>(
+        IReadOnlyList<TEntity> rows,
+        int batchSize
+    )
+        where TEntity : EntityBase, new()
+    {
+        if (rows.Count > 0)
+        {
+            await InterruptAsync(ModelInterruptPoint.AfterServerFetchBeforeApply)
+                .ConfigureAwait(false);
+        }
+
+        return new SyncChangeBatch<TEntity>(rows, rows.Count >= batchSize);
     }
 
     private readonly List<(ModelActor Device, string Table, string Key)> _writeHits = [];

@@ -230,6 +230,17 @@ internal static partial class SyncPlanFuzzKnownFailures
             ["postgresql-386-synthesized-unique-name"],
             IsSynthesizedUniqueNameCollision
         ),
+        // 4m-f1-legacy-fk-name（4m-F1・修正 E・P2-6）：旧版（v0.1.0〜v0.2.0）の DDL で作った PostgreSQL の DB（名前の無い外部キーの
+        // 縮める前の既定名を PostgreSQL が 63 バイトで切り詰めた名前）に、同じ子の表から名前の無い外部キーを図で 1 本足すと、差分の
+        // 吸収が 2 本目の追加にも DB にある 1 本目と同じ切り詰めた名前を与え、既定で選ばれる追加が 42710 で断られる（警告なし）。
+        // 行は来歴の行（SyncPlanHistoryRows）の「旧版 × 長い子の表名 × 2 本目を足す」
+        .. Scenario(
+            SyncPlanHistoryRows.F1Finding,
+            DialectNames.PostgreSql,
+            "修正 E",
+            [SyncPlanHistoryRows.F1Id],
+            IsLegacyForeignKeyNameCollision
+        ),
         // 夜間の実行（Oracle の実 DB の種 100・111）で見つけた。DB にある一意制約と同じ列へ主キーを付け替える変更（AlterPrimaryKey）は
         // ORA-02261 で失敗するのに、計画が警告を出さない（CLAUDE.md の既知の残件を、警告なしの失敗として名指しする）。
         // 主キーの DROP が成功した後で ADD が失敗し、Oracle の DDL は暗黙コミットなので主キーが消えたまま残る。P2-2 で強めた
@@ -382,6 +393,18 @@ internal static partial class SyncPlanFuzzKnownFailures
         )
         && o.Mutations.Any(m => m.StartsWith("change unique ", StringComparison.Ordinal))
         && o.Mutations.Any(m => m.StartsWith("add unique ", StringComparison.Ordinal));
+
+    /// <summary>
+    /// 4m-f1-legacy-fk-name：旧版の名前の吸収が 2 本目の追加に DB の外部キーと同じ名前を与え、追加が 42710 で失敗する（静的な規則 R4 も
+    /// 予言する）
+    /// </summary>
+    private static bool IsLegacyForeignKeyNameCollision(FuzzSeedOutcome o) =>
+        !o.Committed
+        && o.Violations.Count == 1
+        && o.Violations[0].StartsWith("failed without a warning:", StringComparison.Ordinal)
+        && o.Violations[0].Contains("42710", StringComparison.Ordinal)
+        && o.Notes.Contains(SyncPlanFuzzRunner.StaticRulePredictedNote)
+        && o.Mutations.Any(m => m.StartsWith("add fk ", StringComparison.Ordinal));
 
     /// <summary>nightly-oracle-100-111：一意制約のある列への主キーの付け替えが ORA-02261 で失敗し主キーが消える</summary>
     private static bool IsPrimaryKeyOntoUnique(FuzzSeedOutcome o) =>

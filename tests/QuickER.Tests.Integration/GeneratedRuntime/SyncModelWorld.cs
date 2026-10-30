@@ -596,6 +596,7 @@ internal sealed class SyncModelWorld : IAsyncDisposable
     public async Task RefreshAsync(ModelRefreshOp op, CancellationToken ct)
     {
         Faults.Syncing = op.Device;
+        Faults.Refreshing = true;
 
         try
         {
@@ -604,6 +605,7 @@ internal sealed class SyncModelWorld : IAsyncDisposable
         finally
         {
             Faults.Syncing = null;
+            Faults.Refreshing = false;
         }
     }
 

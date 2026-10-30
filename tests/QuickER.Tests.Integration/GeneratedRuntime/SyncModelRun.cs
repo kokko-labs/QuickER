@@ -210,6 +210,22 @@ internal sealed class SyncModelRun : IAsyncDisposable
                 _world.Faults.Arm(arm.Kind, arm.Device);
                 break;
 
+            case ArmInterruptOp interrupt:
+                if (interrupt.Write.Actor != interrupt.Device)
+                {
+                    throw new ArgumentException(
+                        "An interrupt writes on the device whose sync it interrupts.",
+                        nameof(op)
+                    );
+                }
+
+                _world.Faults.ArmInterrupt(
+                    interrupt.Device,
+                    interrupt.Point,
+                    () => InterruptWriteAsync(interrupt)
+                );
+                break;
+
             case LegacyKeyTextsOp legacy:
                 foreach (
                     var table in new[]
@@ -393,6 +409,16 @@ internal sealed class SyncModelRun : IAsyncDisposable
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// 割り込みの書き込みを流す（同期の実行と別の流れから呼ばれる。実行はサーバー役の点で割り込みの終わりを待つので、操作の記録と
+    /// 履歴は逐次のまま）。書き込みは通常の書き込みと同じく書き手の操作として履歴へ積む
+    /// </summary>
+    private async Task InterruptWriteAsync(ArmInterruptOp interrupt)
+    {
+        _log.Add($"  -> interrupt {interrupt.Point}: {interrupt.Write.Describe()}");
+        await WriteAsync(interrupt.Write);
     }
 
     /// <summary>書き込みを 1 つ流す（期待どおりに効いたら true）</summary>
@@ -1087,7 +1113,29 @@ internal sealed class SyncModelRun : IAsyncDisposable
     /// </summary>
     public async Task FinishAsync()
     {
-        // 仕掛けたまま起きなかった失敗は外す（静止化は失敗の無い世界で行う）
+        // 仕掛けたのに点に来なかった割り込みは違反（点の置き場所がずれた・点に来ない操作の列＝黙った空振り）。
+        // 割り込みの書き込みが上限の時間で終わらなかったのも違反（エンジンがロックを持ったまま点に来た疑い）
+        if (_world.Faults.PendingInterrupt is { } pending)
+        {
+            _failures.Add(
+                new(
+                    $"interrupt/not-fired:{pending}",
+                    "The armed interrupt never reached its point."
+                )
+            );
+        }
+
+        if (_world.Faults.InterruptTimedOut is { } timedOut)
+        {
+            _failures.Add(
+                new(
+                    $"interrupt/deadlock:{timedOut}",
+                    "The interrupt write did not finish in time (the engine may hold the local write lock at the point)."
+                )
+            );
+        }
+
+        // 仕掛けたまま起きなかった失敗と割り込みは外す（静止化は失敗の無い世界で行う）
         _world.Faults.Clear();
         var quiesced = await QuiesceAsync();
 
