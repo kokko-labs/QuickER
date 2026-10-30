@@ -46,5 +46,6 @@ public static class BackendParityEfCoreOnlyFixtureDefinition
         };
 
     /// <summary>実装先一致フィクスチャと同じ図</summary>
-    public static ErDiagram Build() => GeneratedBackendParityFixture.BackendParityFixtureDefinition.Build();
+    public static ErDiagram Build() =>
+        GeneratedBackendParityFixture.BackendParityFixtureDefinition.Build();
 }
