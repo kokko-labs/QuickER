@@ -158,6 +158,9 @@
   <data name="Diff_AutoUniqueConstraintDrop" xml:space="preserve">
     <value>Automatically drops the unique constraint because a column it uses is dropped (not re-created): ({0})</value>
   </data>
+  <data name="Diff_AutoUniqueConstraintReplacedByPrimaryKey" xml:space="preserve">
+    <value>Automatically drops the unique constraint because the primary key is moved onto the same columns (the primary key keeps the values unique): ({0})</value>
+  </data>
   <data name="Diff_AutoUniqueConstraintRebuild" xml:space="preserve">
     <value>Unique constraint automatically dropped and re-added to allow the change: ({0})</value>
   </data>

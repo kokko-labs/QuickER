@@ -256,6 +256,12 @@ namespace QuickER.Provider.Resources {
             }
         }
 
+        public static string Diff_AutoUniqueConstraintReplacedByPrimaryKey {
+            get {
+                return ResourceManager.GetString("Diff_AutoUniqueConstraintReplacedByPrimaryKey", resourceCulture);
+            }
+        }
+
         public static string Diff_AutoUniqueConstraintRebuild {
             get {
                 return ResourceManager.GetString("Diff_AutoUniqueConstraintRebuild", resourceCulture);

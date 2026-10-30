@@ -2222,48 +2222,155 @@ public class SyncPlannerTests
     }
 
     /// <summary>
-    /// 明示的に DROP を選択した一意制約は自動 DROP を重複させず、再 ADD もしないことを検証する。
+    /// 明示的に DROP を選択した一意制約は自動 DROP を重複させず、再 ADD もしないこと、照合が DB の名前と列集合で行われることを
+    /// 検証する（同じ列集合の一意制約が 2 つある表で、外した 1 つがもう 1 つまで「外した」ことにしない＝4m-Q6）。
     /// </summary>
-    [Fact(DisplayName = "一意制約: 明示 DROP したものは自動 DROP も再作成もしない")]
-    public void ExplicitlyDroppedUniqueConstraint_IsNeitherDuplicatedNorReAdded()
+    /// <param name="liveNames">live の一意制約の名前（すべて code 列。空文字は名前なし＝SQLite の自動名）</param>
+    /// <param name="dropNames">明示的に外す一意制約の名前（差分の削除の項目は live の名前を運ぶ）</param>
+    /// <param name="addNames">同じ計画で足す図の一意制約の名前（同じ code 列。照合キーの対象でない）</param>
+    /// <param name="dropColumn">code 列の型を変える（false）か、code 列を消す（true）か</param>
+    /// <param name="implicitDrops">計画が足す暗黙の削除（名前）</param>
+    /// <param name="implicitReAdds">計画が足す暗黙の付け直し（名前）</param>
+    [Theory(
+        DisplayName = "一意制約: 明示 DROP したものは自動 DROP も再作成もしない（照合は名前と列集合）"
+    )]
+    [InlineData(
+        new[] { "UQ_customer_code" },
+        new[] { "UQ_customer_code" },
+        new string[0],
+        false,
+        new string[0],
+        new string[0]
+    )]
+    [InlineData(
+        new[] { "UQ1", "UQ2" },
+        new[] { "UQ1" },
+        new string[0],
+        false,
+        new[] { "UQ2" },
+        new[] { "UQ2" }
+    )]
+    [InlineData(
+        new[] { "UQ1", "UQ2" },
+        new[] { "UQ1", "UQ2" },
+        new string[0],
+        false,
+        new string[0],
+        new string[0]
+    )]
+    [InlineData(new[] { "" }, new[] { "" }, new string[0], false, new string[0], new string[0])]
+    [InlineData(
+        new[] { "UQ1" },
+        new string[0],
+        new[] { "" },
+        false,
+        new[] { "UQ1" },
+        new[] { "UQ1" }
+    )]
+    [InlineData(
+        new[] { "UQ1" },
+        new string[0],
+        new[] { "UQ_customer_code" },
+        false,
+        new[] { "UQ1" },
+        new[] { "UQ1" }
+    )]
+    [InlineData(
+        new[] { "UQ1", "UQ2" },
+        new[] { "UQ1" },
+        new string[0],
+        true,
+        new[] { "UQ2" },
+        new string[0]
+    )]
+    [InlineData(
+        new[] { "UQ1", "UQ2" },
+        new[] { "UQ1", "UQ2" },
+        new string[0],
+        true,
+        new string[0],
+        new string[0]
+    )]
+    public void ExplicitlyDroppedUniqueConstraint_IsNeitherDuplicatedNorReAdded(
+        string[] liveNames,
+        string[] dropNames,
+        string[] addNames,
+        bool dropColumn,
+        string[] implicitDrops,
+        string[] implicitReAdds
+    )
     {
         var customer = new Entity
         {
             TableName = "customer",
             Columns = { PkId(), Col("code", "INT") },
         };
-        WithUnique(customer, "UQ_customer_code", "code");
-        var context = new SyncPlanContext { LiveEntities = [customer] };
 
-        var explicitDrop = UniqueItem(
-            SchemaDiffKind.DropUniqueConstraint,
-            "customer",
-            "UQ_customer_code",
-            ["code"]
-        );
+        foreach (var name in liveNames)
+        {
+            WithUnique(customer, name.Length == 0 ? null : name, "code");
+        }
+
+        var context = new SyncPlanContext { LiveEntities = [customer] };
+        var explicitDrops = dropNames
+            .Select(name =>
+                UniqueItem(
+                    SchemaDiffKind.DropUniqueConstraint,
+                    "customer",
+                    name.Length == 0 ? null : name,
+                    ["code"]
+                )
+            )
+            .ToList();
+        var adds = addNames
+            .Select(name =>
+                UniqueItem(
+                    SchemaDiffKind.AddUniqueConstraint,
+                    "customer",
+                    name.Length == 0 ? null : name,
+                    ["code"]
+                )
+            )
+            .ToList();
+        var change = dropColumn
+            ? new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.DropColumn,
+                TableName = "customer",
+                ColumnName = "code",
+                IsSelected = true,
+            }
+            : new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AlterColumn,
+                TableName = "customer",
+                ColumnName = "code",
+                Column = Col("code", "BIGINT"),
+                IsSelected = true,
+            };
 
         var plan = new SyncPlanner().BuildPlan(
-            [
-                explicitDrop,
-                new SchemaDiffItem
-                {
-                    Kind = SchemaDiffKind.AlterColumn,
-                    TableName = "customer",
-                    ColumnName = "code",
-                    Column = Col("code", "BIGINT"),
-                    IsSelected = true,
-                },
-            ],
+            [.. explicitDrops, .. adds, change],
             FkRebuildCaps,
             context
         );
 
-        plan.Sections.Select(s => s.Kind)
+        var drops = plan
+            .Sections.Where(s => s.Kind == SchemaDiffKind.DropUniqueConstraint)
+            .SelectMany(s => s.Items)
+            .ToList();
+        drops
+            .Where(d => !explicitDrops.Contains(d))
+            .Select(d => d.UniqueConstraintName)
             .Should()
-            .Equal(SchemaDiffKind.DropUniqueConstraint, SchemaDiffKind.AlterColumn);
-        plan.Sections.Single(s => s.Kind == SchemaDiffKind.DropUniqueConstraint)
-            .Items.Should()
-            .Equal(explicitDrop);
+            .Equal(implicitDrops);
+        explicitDrops.Should().OnlyContain(d => drops.Contains(d));
+        plan.Sections.Where(s => s.Kind == SchemaDiffKind.AddUniqueConstraint)
+            .SelectMany(s => s.Items)
+            .Where(a => !adds.Contains(a))
+            .Select(a => a.UniqueConstraintName)
+            .Should()
+            .Equal(implicitReAdds);
     }
 
     /// <summary>
@@ -2360,6 +2467,22 @@ public class SyncPlannerTests
             .ColumnIds.Select(id => rebuild.NewDefinition.Columns.Single(c => c.Id == id).Name)
             .Should()
             .Equal("sku");
+
+        // 同じ列集合の名前付きの一意制約が 2 つあれば、外すのは削除の項目と同じ名前の 1 つだけ（照合は名前と列集合）
+        var twins = new Entity { TableName = "product", Columns = { PkId(), Col("sku", "TEXT") } };
+        WithUnique(twins, "UQ1", "sku");
+        WithUnique(twins, "UQ2", "sku");
+        var twinPlan = new SyncPlanner().BuildPlan(
+            [UniqueItem(SchemaDiffKind.DropUniqueConstraint, "product", "UQ1", ["sku"])],
+            RebuildCaps,
+            new SyncPlanContext { LiveEntities = [twins] }
+        );
+        twinPlan
+            .Rebuilds.Should()
+            .ContainSingle()
+            .Which.NewDefinition.UniqueConstraints.Select(c => c.Name)
+            .Should()
+            .Equal("UQ2");
     }
 
     // ---------------- 再構築で失われる列レベル属性の警告 ----------------
@@ -3447,9 +3570,28 @@ public class SyncPlannerTests
             .NotContain(s =>
                 s.Kind == SchemaDiffKind.DropForeignKey || s.Kind == SchemaDiffKind.AddForeignKey
             );
-        plan.Sections.Single(s => s.Kind == SchemaDiffKind.AlterColumn)
-            .Items.Should()
+        plan.Sections.Where(s => s.Kind == SchemaDiffKind.AlterColumn)
+            .SelectMany(s => s.Items)
+            .Should()
             .Contain(i => i.TableName == "customer" && i.ColumnName == "id");
+
+        // DDL が暗黙コミットされ、外部キーを張ったまま両端の型を変えられない方言（MySQL）では、食い違う外部キーに阻まれて
+        // 必ず断られる列の変更を計画の先頭へ移し、何も変えずに失敗させる。ほかの方言は並びを変えない
+        var first = plan.Sections[0];
+
+        if (!capabilities.TransactionalDdl && capabilities.AlterColumnRequiresForeignKeyRebuild)
+        {
+            first.Kind.Should().Be(SchemaDiffKind.AlterColumn);
+            first
+                .Items.Should()
+                .ContainSingle()
+                .Which.Should()
+                .Match<SchemaDiffItem>(i => i.TableName == "customer" && i.ColumnName == "id");
+        }
+        else
+        {
+            plan.Sections.Count(s => s.Kind == SchemaDiffKind.AlterColumn).Should().Be(1);
+        }
     }
 
     /// <summary>
@@ -4577,6 +4719,61 @@ public class SyncPlannerTests
         Warnings(toKeyless, removedContext, AlterPk("customer", keyless))
             .Should()
             .Contain(SyncPlanWarningKind.ForeignKeyNotOnCandidateKey);
+
+        // DDL が暗黙コミットされる方言では、証明できない追加を外部キーの追加の最後へ回す（断られても、ほかの付け直しは済んでいる）。
+        // 巻き戻る方言は選んだ順のまま
+        var (unproven, orderContext) = AddForeignKeyScenario(
+            new ForeignKeyColumnNamePair("code", "customer_code")
+        );
+        var proven = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AddForeignKey,
+            TableName = "orders",
+            ParentEntity = unproven.ParentEntity,
+            ChildEntity = unproven.ChildEntity,
+            Relationship = new Relationship { ConstraintName = "FK_proven" },
+            ForeignKeyName = "FK_proven",
+            ForeignKeyColumnPairs = [new("id", "customer_kind")],
+            IsSelected = true,
+        };
+
+        foreach (
+            var (caps, expected) in new[]
+            {
+                (NonTransactionalOrderedCaps, new[] { "FK_proven", "FK_new" }),
+                (FkRebuildCaps, new[] { "FK_new", "FK_proven" }),
+            }
+        )
+        {
+            new SyncPlanner()
+                .BuildPlan([unproven, proven], caps, orderContext)
+                .Sections.Single(s => s.Kind == SchemaDiffKind.AddForeignKey)
+                .Items.Select(i => i.ForeignKeyName)
+                .Should()
+                .Equal(expected);
+        }
+
+        // 同じ列集合の一意制約が 2 つあれば、1 つを外してももう 1 つが同期後の候補キーとして残る（照合は名前と列集合）
+        var (toTwin, twinContext) = AddForeignKeyScenario(
+            new ForeignKeyColumnNamePair("code", "customer_code")
+        );
+        WithUnique(twinContext.LiveEntities[0], "UQ1", "code");
+        WithUnique(twinContext.LiveEntities[0], "UQ2", "code");
+        Warnings(
+                toTwin,
+                twinContext,
+                UniqueItem(SchemaDiffKind.DropUniqueConstraint, "customer", "UQ1", ["code"])
+            )
+            .Should()
+            .BeEmpty();
+        Warnings(
+                toTwin,
+                twinContext,
+                UniqueItem(SchemaDiffKind.DropUniqueConstraint, "customer", "UQ1", ["code"]),
+                UniqueItem(SchemaDiffKind.DropUniqueConstraint, "customer", "UQ2", ["code"])
+            )
+            .Should()
+            .Contain(SyncPlanWarningKind.ForeignKeyNotOnCandidateKey);
     }
 
     /// <summary>
@@ -5185,15 +5382,30 @@ public class SyncPlannerTests
     // ---------------- 28-6: 外し直し・再構築の細部 ----------------
 
     /// <summary>
-    /// 列の変更で外し直しを要しない方言（PostgreSQL 相当）でも、主キーの変更で付け直す外部キーの構成列の型を変えて
-    /// 両端の型が食い違うなら、外さずに警告することを検証する（付け直しが必ず失敗する）。
+    /// 主キーの変更で付け直す外部キーの構成列の型を変えて両端の型が食い違うなら、外さずに警告すること（付け直しが必ず失敗する）と、
+    /// 主キーの解除がその外部キーに阻まれて必ず断られるので、DDL が暗黙コミットされる方言（MySQL・Oracle）では主キーの解除を
+    /// 計画の先頭へ移すことを、5 方言の実際の能力の宣言で検証する（4m-P1：兄弟の外部キーを先に外して付け直す計画が、主キーの
+    /// 解除の失敗で兄弟を消したまま残していた）。トランザクションの方言は並びを変えない。
     /// </summary>
-    [Fact(
-        DisplayName = "型の食い違い: 主キーの変更で付け直す外部キーも、型が食い違うなら外さずに警告する"
+    /// <param name="dialect">方言名</param>
+    /// <param name="sibling">同じ主キーを参照する兄弟の外部キー（型を変えない）を持つか</param>
+    [Theory(
+        DisplayName = "型の食い違い: 主キーの変更で付け直す外部キーも、型が食い違うなら外さずに警告する（暗黙コミットの方言は主キーの解除を先頭へ）"
     )]
-    public void AlterPrimaryKey_WithMismatchedForeignKeyColumn_WarnsWithoutRebuild()
+    [InlineData(SqlServerProvider.ProviderName, false)]
+    [InlineData(PostgreSqlProvider.ProviderName, false)]
+    [InlineData(MySqlProvider.ProviderName, false)]
+    [InlineData(OracleProvider.ProviderName, false)]
+    [InlineData(SqlServerProvider.ProviderName, true)]
+    [InlineData(PostgreSqlProvider.ProviderName, true)]
+    [InlineData(MySqlProvider.ProviderName, true)]
+    [InlineData(OracleProvider.ProviderName, true)]
+    public void AlterPrimaryKey_WithMismatchedForeignKeyColumn_WarnsWithoutRebuild(
+        string dialect,
+        bool sibling
+    )
     {
-        var (customer, _, _, context) = LiveFkScenario();
+        var (customer, orders, rel, _) = LiveFkScenario();
         customer.Columns.Add(
             new Column
             {
@@ -5202,30 +5414,79 @@ public class SyncPlannerTests
                 IsNullable = false,
             }
         );
-        var target = customer.Clone(preserveId: true);
-        target.Columns.Single(c => c.Name == "code").IsPrimaryKey = true;
+        var invoice = new Entity
+        {
+            TableName = "invoice",
+            Columns = { PkId(), Col("customer_id", "INT") },
+        };
+        var invoiceRel = new Relationship
+        {
+            SourceEntityId = customer.Id,
+            TargetEntityId = invoice.Id,
+            ColumnPairs = [new(customer.Columns[0].Id, invoice.Columns[1].Id)],
+            ConstraintName = "FK_invoice_customer",
+        };
+        var context = new SyncPlanContext
+        {
+            LiveEntities = sibling ? [customer, orders, invoice] : [customer, orders],
+            LiveRelationships = sibling ? [rel, invoiceRel] : [rel],
+        };
 
-        var plan = new SyncPlanner().BuildPlan(
-            [
-                AlterPk("customer", target),
-                new SchemaDiffItem
-                {
-                    Kind = SchemaDiffKind.AlterColumn,
-                    TableName = "orders",
-                    ColumnName = "customer_id",
-                    Column = Col("customer_id", "VARCHAR(10)"),
-                    IsSelected = true,
-                },
-            ],
-            TestDialectCapabilities.Neutral,
-            context
+        // 主キーを code へ付け替え、id に一意制約を足して候補キーを保つ（兄弟の外部キーは付け直せる）。orders の子の列だけ型を変える
+        var target = context.LiveEntities.Select(e => e.Clone(preserveId: true)).ToList();
+        var targetCustomer = target.Single(e => e.TableName == "customer");
+        targetCustomer.Columns.Single(c => c.Name == "id").IsPrimaryKey = false;
+        targetCustomer.Columns.Single(c => c.Name == "code").IsPrimaryKey = true;
+        WithUnique(targetCustomer, "UQ_customer_id", "id");
+        target
+            .Single(e => e.TableName == "orders")
+            .Columns.Single(c => c.Name == "customer_id")
+            .DataType = "VARCHAR(10)";
+
+        var plan = PlanAllDiffs(
+            dialect,
+            context,
+            target,
+            [.. context.LiveRelationships],
+            out var capabilities
         );
 
-        plan.Sections.Should().NotContain(s => s.Kind == SchemaDiffKind.DropForeignKey);
         plan.Warnings.Should()
             .ContainSingle(w => w.Kind == SyncPlanWarningKind.ForeignKeyColumnTypeMismatch)
             .Which.Detail.Should()
             .Be("FK_orders_customer");
+        plan.Sections.SelectMany(s => s.Items)
+            .Should()
+            .NotContain(i => i.Kind == SchemaDiffKind.DropForeignKey && i.TableName == "orders");
+
+        var pkDrop = plan
+            .Sections.ToList()
+            .FindIndex(s =>
+                s.Kind == SchemaDiffKind.AlterPrimaryKey
+                && s.PrimaryKeyPhase == PrimaryKeyPhase.Drop
+            );
+        var fkDrop = plan.Sections.ToList().FindIndex(s => s.Kind == SchemaDiffKind.DropForeignKey);
+
+        if (capabilities.TransactionalDdl)
+        {
+            // 巻き戻る方言は固定順のまま（兄弟の外部キーの解除が主キーの解除より前）
+            if (fkDrop >= 0)
+            {
+                fkDrop.Should().BeLessThan(pkDrop);
+            }
+
+            return;
+        }
+
+        // 暗黙コミットの方言：食い違う外部キーに阻まれる主キーの解除を、兄弟の外部キーを外すより前（計画の先頭）へ移す
+        var first = plan.Sections[0];
+        first.Kind.Should().Be(SchemaDiffKind.AlterPrimaryKey);
+        first.PrimaryKeyPhase.Should().Be(PrimaryKeyPhase.Drop);
+        first.Items.Should().ContainSingle().Which.TableName.Should().Be("customer");
+        plan.Sections.Should()
+            .Contain(s =>
+                s.Kind == SchemaDiffKind.AlterPrimaryKey && s.PrimaryKeyPhase == PrimaryKeyPhase.Add
+            );
     }
 
     /// <summary>

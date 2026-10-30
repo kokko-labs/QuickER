@@ -361,6 +361,10 @@ Do you want to run this against {0}?</value>
     <value>Note: the unique constraints below are dropped because a column they use is dropped, even though dropping them is not selected. They are not re-created; add a unique constraint on the remaining columns if you need one:
 {0}</value>
   </data>
+  <data name="SchemaSync_ExecuteConfirmUniqueConstraintReplacedByPrimaryKey" xml:space="preserve">
+    <value>Note: the unique constraints below are dropped because the primary key is moved onto the same columns, even though dropping them is not selected. This database cannot keep a unique constraint and a primary key on the same columns; the primary key keeps the values unique:
+{0}</value>
+  </data>
   <data name="SchemaSync_ExecuteConfirmSelectedItemRequiresUnselected" xml:space="preserve">
     <value>Note: the selected changes below are skipped because they need a change you did not select (a new table or column, or a primary key change; shown in parentheses). Select that change too to apply them:
 {0}</value>

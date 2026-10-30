@@ -435,64 +435,6 @@ internal static class SyncPlanCapabilityNetKnownFailures
     /// <summary>項目</summary>
     public static readonly IReadOnlyList<KnownEntry> Entries =
     [
-        // 4m-p6-doomed-rebuild（修正 A）：失敗が決まった文（参照される主キーの解除・型の変更）より前に、その後ろで付け直す制約
-        // （選んだ作り直し・主キーの変更・暗黙の外し直し）を外す。実 DB の総当たりの同名の項目と同じ欠陥を、計画の並びで名指しする
-        Random("4m-p6-doomed-rebuild", DialectNames.MySql, "修正 A", IsDoomedRebuild),
-        .. SyncPlanFuzzKnownFailures.Scenario(
-            "4m-p6-doomed-rebuild",
-            DialectNames.MySql,
-            "修正 A",
-            [
-                "p6-alter-fk",
-                "p6-alter-unique",
-                "p6-alter-unique-self-reference",
-                "p6-pk-extend",
-                "p6-pk-shrink",
-                "p6-drop-before-failure-rule4",
-            ],
-            IsDoomedRebuild
-        ),
-        // candidate-key-re-add-collateral（旧名 nightly-mysql-1191・修正 A）：候補キーを証明できない付け直し（警告つき）が断られる
-        // 文より前に、警告していない別の制約を外してその後ろで付け直す（巻き添えで消える）。方言を問わない 1 つの項目
-        // - 網の Oracle の種 1551・1570・2660・3017・3279・3656・4094 で見つけた（実 DB は行 oracle-358-selected-rebuild で確かめた）
-        Random(
-            "candidate-key-re-add-collateral",
-            DialectNames.MySql,
-            "修正 A",
-            IsCandidateKeyCollateral
-        ),
-        Random(
-            "candidate-key-re-add-collateral",
-            DialectNames.Oracle,
-            "修正 A",
-            IsCandidateKeyCollateral
-        ),
-        .. SyncPlanFuzzKnownFailures.Scenario(
-            "candidate-key-re-add-collateral",
-            DialectNames.MySql,
-            "修正 A",
-            ["mysql-1191-remove-pk", "mysql-358-selected-rebuild"],
-            IsCandidateKeyCollateral
-        ),
-        .. SyncPlanFuzzKnownFailures.Scenario(
-            "candidate-key-re-add-collateral",
-            DialectNames.Oracle,
-            "修正 A",
-            ["oracle-358-selected-rebuild"],
-            IsCandidateKeyCollateral
-        ),
-        // 4m-p1（Oracle・修正 A）：型が食い違う外部キーを残したまま（警告つき）主キーを外す文より前に、兄弟の外部キーを外して
-        // その後ろで付け直す（ORA-02273 で止まり、兄弟が消える）
-        // - 網の Oracle の種 4513：参照される複合主キーの並べ替え × 兄弟の外部キー × 片側だけの型の変更（乱数で出た 4m-P1）
-        Random("4m-p1", DialectNames.Oracle, "修正 A", IsDoomedRebuild),
-        .. SyncPlanFuzzKnownFailures.Scenario(
-            "4m-p1",
-            DialectNames.Oracle,
-            "修正 A",
-            // 形の行（D4）：主キーの並べ替え × 参照 2 本 × 子だけの型の変更 × 一意制約の削除
-            ["4m-p1-sibling-foreign-key", SyncPlanShapeRows.IdOf(DialectNames.Oracle, 51)],
-            IsDoomedRebuild
-        ),
         // synthesized-unique-name-collision（MySQL・PostgreSQL・修正 E）：名前の無い一意制約の合成名が、列を変えた名前付きの
         // 一意制約の名前と同じになる（規則 R4 が名前の衝突を予言する）。行は実 DB と同じ mysql-386・postgresql-386
         .. SyncPlanFuzzKnownFailures.Scenario(
@@ -518,78 +460,17 @@ internal static class SyncPlanCapabilityNetKnownFailures
             [SyncPlanHistoryRows.F1Id],
             IsUnwarnedNameCollision
         ),
-        // 4m-q6（SQL Server・修正 A）：同じ列集合の一意制約 2 つの片方だけを外し、もう片方を残したまま型を変える（警告なし・Msg 5074）
-        // - 生成器の「同じ列の並びの一意制約 2 つの片方の削除と型の変更」（drop one of duplicated uniques）の形で、網の普段の種に出る
-        Random("4m-q6", DialectNames.SqlServer, "修正 A", IsUnwarnedAlterOnKeyColumn),
-        .. SyncPlanFuzzKnownFailures.Scenario(
-            "4m-q6",
-            DialectNames.SqlServer,
-            "修正 A",
-            // 形の行（D4）：一意制約 2 つ × 一意制約の削除 × 一意制約の列の型の変更（主キーの並べ替えと、主キーの変更なしの参照 0 本）
-            [
-                "4m-q6-duplicate-unique",
-                SyncPlanShapeRows.IdOf(DialectNames.SqlServer, 23),
-                SyncPlanShapeRows.IdOf(DialectNames.SqlServer, 46),
-            ],
-            IsUnwarnedAlterOnKeyColumn
-        ),
     ];
 
     /// <summary>一覧</summary>
     public static KnownFailureSet Set { get; } = new("SyncPlan.CapabilityNet", Entries);
 
-    /// <summary>乱数の種の項目（普段の既定の種の数で必ず起きる）</summary>
-    private static KnownEntry Random(
-        string finding,
-        string dialect,
-        string fixedIn,
-        Func<FuzzSeedOutcome, bool> matches
-    ) =>
-        SyncPlanFuzzKnownFailures
-            .Entry(finding, [dialect], fixedIn, matches, KnownReproduction.RegularSeeds)
-            .Single();
-
-    /// <summary>
-    /// 違反がすべて D9 で、断られる文の規則が R1・R2・R3、型の食い違いの警告がある（型の食い違いで暗黙の外し直しを止めたために、
-    /// 主キー・一意制約の削除・列の変更が断られる。R3 は網の夜間の MySQL の種 9127＝一意制約の索引の削除）
-    /// </summary>
-    private static bool IsDoomedRebuild(FuzzSeedOutcome o) =>
-        OnlyD9(o)
-        && o.Violations.All(v =>
-            v.Contains(": R1:", StringComparison.Ordinal)
-            || v.Contains(": R2:", StringComparison.Ordinal)
-            || v.Contains(": R3:", StringComparison.Ordinal)
-        )
-        && o.Warnings.Any(w =>
-            w.StartsWith("ForeignKeyColumnTypeMismatch", StringComparison.Ordinal)
-        );
-
-    /// <summary>違反がすべて D9 で、断られる文の規則が R5（候補キーの無い付け直し）、候補キーの警告がある</summary>
-    private static bool IsCandidateKeyCollateral(FuzzSeedOutcome o) =>
-        OnlyD9(o)
-        && o.Violations.All(v => v.Contains(": R5:", StringComparison.Ordinal))
-        && o.Warnings.Any(w =>
-            w.StartsWith("ForeignKeyRebuildMayLoseCandidateKey", StringComparison.Ordinal)
-            || w.StartsWith("ForeignKeyNotOnCandidateKey", StringComparison.Ordinal)
-        );
-
-    /// <summary>違反が 1 つで、警告なしの R2（SQL Server の列の変更の前に一意制約・主キーが残る）</summary>
     /// <summary>警告なしに、名前の衝突（規則 R4）で断られる文がある</summary>
     private static bool IsUnwarnedNameCollision(FuzzSeedOutcome o) =>
         o.Violations.Count == 1
         && o.Violations[0].StartsWith("static rule:", StringComparison.Ordinal)
         && o.Violations[0].Contains(": R4:", StringComparison.Ordinal)
         && o.Violations[0].EndsWith("(no warning predicts the failure)", StringComparison.Ordinal);
-
-    private static bool IsUnwarnedAlterOnKeyColumn(FuzzSeedOutcome o) =>
-        o.Violations.Count == 1
-        && o.Violations[0].StartsWith("static rule:", StringComparison.Ordinal)
-        && o.Violations[0].Contains(": R2:", StringComparison.Ordinal)
-        && o.Violations[0].EndsWith("(no warning predicts the failure)", StringComparison.Ordinal);
-
-    private static bool OnlyD9(FuzzSeedOutcome o) =>
-        o.Violations.Count > 0
-        && o.Violations.All(v => v.StartsWith("static D9", StringComparison.Ordinal));
 
     /// <summary>違反のあった種か行を、照合に渡す失敗にする（範囲＝方言、行なら方言＋"/scenarios"）</summary>
     public static EngineFailure ToFailure(FuzzSeedOutcome outcome) =>

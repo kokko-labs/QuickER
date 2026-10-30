@@ -504,8 +504,8 @@ On the other dialects it is shown for information only, because the type cannot 
 Where the table at the top of this section shows that a unique constraint on exactly the primary key's columns is not kept, such a constraint is not compared and does not become a diff item.
 SQLite does not keep such a constraint, and Oracle rejects it; the primary key already guarantees uniqueness.
 The DDL and the tables the sync creates leave that unique constraint out and add a comment saying so.
-On Oracle, a sync that moves the primary key onto the columns of a unique constraint the database already has fails with ORA-02261.
-Remove that unique constraint from the diagram and select its drop as well, or drop it in the database first.
+On Oracle, a sync that moves the primary key onto the columns of a unique constraint the database already has drops that unique constraint first, even when dropping it is not selected, because Oracle cannot keep both (ORA-02261); the confirmation names it, and the new primary key keeps the values unique.
+A foreign key that refers to that unique constraint is dropped and re-created on the new primary key.
 
 ### Safety by design
 
@@ -558,7 +558,8 @@ SQLite rebuilds tables and uses its own order.
 #### Running the script
 
 - On SQL Server, PostgreSQL, and SQLite the script runs in a transaction and rolls back on failure.
-  On MySQL / Oracle, DDL is implicitly committed by design, so a warning explains that a mid-script failure can leave changes partially applied
+  On MySQL / Oracle, DDL is implicitly committed by design, so a warning explains that a mid-script failure can leave changes partially applied.
+  On these dialects the script is ordered so that a failure does not leave constraints dropped: a statement that the sync knows will be refused (a column change or a primary key drop that a foreign key kept by the sync blocks) runs first, so the database stays unchanged, and among the foreign key additions, those whose referenced columns are not proven to be a key run last
 - The Oracle script and DDL can also be run by hand in SQL*Plus.
   Ordinary statements end with `;`, and a `/` line follows only a PL/SQL block, so each statement runs exactly once (SQL*Plus runs the previous statement again on a `/` line)
 
@@ -610,7 +611,7 @@ SQL Server cannot create a foreign key whose ends differ in length (error 1753),
 The confirmation dialog lists those foreign keys so that you can change both ends to the same type.
 In that case no other foreign key is dropped and re-added either, because the column change fails anyway and the re-adding would never run.
 If a referenced column is no longer part of the new key, the confirmation dialog warns that re-creating those foreign keys may fail.
-Such a failure rolls the whole script back, or, where the table above says so, leaves the foreign keys dropped (partially applied).
+Such a failure rolls the whole script back, or, where the table above says so, leaves the warned foreign key dropped (partially applied); those re-creations run after every other foreign key addition, so no other foreign key is left dropped.
 The same warning appears when a foreign key you add or change refers to columns that are not exactly a primary key or a unique constraint after the sync.
 Such a foreign key is written in the diagram's order, because there is no key to follow.
 Only the set of referenced columns is compared, so a different column order alone is never warned about: where the table above says the referencing columns must follow the order of the referenced key, the sync writes them in that order.

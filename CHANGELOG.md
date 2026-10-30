@@ -37,6 +37,14 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **Mock project generation no longer reports success when screens were not made** — with an API key, a turn that submitted no files fails the run, and for Blazor the final check counts the `@page` routes against the screens in the design. For WPF a shortfall is only logged as a warning
 - **Lines in the mock generation log no longer run on from the end of the AI's text**
 
+#### DB sync & DDL
+
+- **On MySQL and Oracle, a sync that the confirmation warns will fail no longer leaves constraints dropped** — the statement that the database refuses (a column change or a primary key drop blocked by a foreign key whose two ends would have different types) now runs first, so the database stays unchanged
+- **On MySQL and Oracle, re-creating a foreign key whose referenced columns may no longer be a key now runs after every other foreign key addition** — when the database refuses it, only that foreign key is left dropped, not the foreign keys re-created after it
+- **On SQL Server, dropping one of two unique constraints on the same columns and changing the type of those columns no longer fails** — the other unique constraint is dropped and re-added around the change
+- **On Oracle, moving the primary key onto the columns of an existing unique constraint no longer fails with ORA-02261 and leaves the table without a primary key** — the sync drops that unique constraint and names it in the confirmation, and a foreign key that refers to it is re-created on the new primary key
+- **On SQLite, after a sync that changes only one of two foreign keys on the same columns, the diff shows the other one as a change** — it showed only a drop, so the next sync left a single foreign key
+
 ## [0.3.0] - 2026-10-25
 
 Highlights of this release:

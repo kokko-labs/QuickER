@@ -165,6 +165,9 @@ public sealed class SyncPlanner
         // 計画の組み立て中に見つかった注意事項（実行は止めず、表示層が実行確認へ織り込む）
         var warnings = new List<SyncPlanWarning>();
 
+        // 利用者が選んだのに計画から外した項目（外す箇所は警告と一緒に ExcludeSelected で積む）
+        var excluded = new List<SchemaDiffItem>();
+
         // 選択済みの項目のみを対象にする（未選択は完全に除外）。まず選んでいない変更（表・列の追加・主キーの変更）を
         // 前提にする項目を外して名指しする。外部キー・一意制約の作り直しはその後で DROP と ADD の 2 項目へ展開し、
         // 以降は通常の差分として扱う（展開の前に判定する＝作り直しを外すときは削除と追加をまとめて外し、
@@ -173,7 +176,8 @@ public sealed class SyncPlanner
             [.. items.Where(i => i.IsSelected)],
             capabilities,
             context,
-            warnings
+            warnings,
+            excluded
         );
 
         // ALTER COLUMN も FK の後付けもできない方言はテーブル再構築が必要になる
@@ -192,11 +196,13 @@ public sealed class SyncPlanner
                         dependable,
                         capabilities,
                         context,
-                        warnings
+                        warnings,
+                        excluded
                     ),
                 capabilities,
                 context,
-                warnings
+                warnings,
+                excluded
             )
         );
 
@@ -219,6 +225,18 @@ public sealed class SyncPlanner
             warnings,
             capabilities.IdentifierLengthLimit
         );
+
+        // 主キーと同じ列集合の一意制約を持てない逐次 DDL の方言（Oracle）では、選んだ主キーの変更の新しい主キーと同じ列集合の
+        // live の一意制約を、削除を選んでいなくても外して名指しする（再構築の方言は合成がその一意制約を省く）
+        if (!isRebuildDialect && !capabilities.SupportsUniqueConstraintOnPrimaryKey)
+        {
+            selected = InjectUniqueConstraintsReplacedByPrimaryKey(
+                selected,
+                context,
+                warnings,
+                capabilities.IdentifierLengthLimit
+            );
+        }
 
         // 選んだ列の変更（主キーの変更に伴う暗黙の NOT NULL 化を含む）で、DB にある SET NULL の外部キーの子の列が
         // NOT NULL になるときは名指しする（方言に依らない。作れない方言で外し直さないのは暗黙の付け直しの段）
@@ -289,11 +307,26 @@ public sealed class SyncPlanner
                 sectionItems = ArrangeForeignKeysToPostSyncKeys(sectionItems, selected, context);
             }
 
+            var sections = BuildSections(sectionItems);
+
+            // DDL が暗黙コミットされる方言（MySQL・Oracle）では、失敗しても消えたまま残る制約を作らないよう失敗点を並べる：
+            // 候補キーを証明できない外部キーの追加は外部キーの追加の最後へ、必ず断られる文は計画の先頭へ
+            if (!capabilities.TransactionalDdl)
+            {
+                sections = MoveCertainFailureFirst(
+                    ArrangeUnprovenForeignKeyAddsLast(sections, selected, context),
+                    sectionItems,
+                    capabilities,
+                    context
+                );
+            }
+
             return new SyncPlan
             {
-                Sections = BuildSections(sectionItems),
+                Sections = sections,
                 Reorders = reorders,
                 Warnings = warnings,
+                ExcludedItems = excluded,
             };
         }
 
@@ -310,6 +343,7 @@ public sealed class SyncPlanner
             capabilities,
             context,
             warnings,
+            excluded,
             capabilities.IdentifierLengthLimit
         );
     }
@@ -449,7 +483,8 @@ public sealed class SyncPlanner
         List<SchemaDiffItem> selected,
         SyncDialectCapabilities capabilities,
         SyncPlanContext? context,
-        List<SyncPlanWarning> warnings
+        List<SyncPlanWarning> warnings,
+        List<SchemaDiffItem> excluded
     )
     {
         if (context is null)
@@ -493,12 +528,15 @@ public sealed class SyncPlanner
                 continue;
             }
 
-            warnings.Add(
+            ExcludeSelected(
+                item,
                 new SyncPlanWarning(
                     SyncPlanWarningKind.SelectedItemRequiresUnselectedItem,
                     SchemaNames.ToStoredForm(item.TableName),
                     $"{subject} ({string.Join(", ", missing)})"
-                )
+                ),
+                warnings,
+                excluded
             );
 
             // 型の変更も含む列の変更は、NULL 許容化だけを外して型の変更は残す
@@ -918,10 +956,7 @@ public sealed class SyncPlanner
             return selected;
         }
 
-        var explicitlyDropped = selected
-            .Where(i => i.Kind == SchemaDiffKind.DropUniqueConstraint)
-            .Select(i => UniqueConstraintKey(i.TableName, i.UniqueConstraintColumns))
-            .ToHashSet();
+        var explicitlyDropped = ExplicitlyDroppedUniqueConstraints(selected);
         var drops = new List<SchemaDiffItem>();
 
         foreach (var entity in context.LiveEntities)
@@ -942,7 +977,9 @@ public sealed class SyncPlanner
                         out var columns
                     )
                     || !dropped.TouchesColumns(table, columns)
-                    || explicitlyDropped.Contains(UniqueConstraintKey(table, columns))
+                    || explicitlyDropped.Contains(
+                        UniqueConstraintKey(table, constraint.Name, columns)
+                    )
                 )
                 {
                     continue;
@@ -965,6 +1002,93 @@ public sealed class SyncPlanner
                 warnings.Add(
                     new SyncPlanWarning(
                         SyncPlanWarningKind.UniqueConstraintDroppedWithColumn,
+                        table,
+                        $"{constraint.Name ?? UniqueConstraint.SynthesizeName(table, columns, limit)} ({string.Join(", ", columns)})"
+                    )
+                );
+            }
+        }
+
+        return drops.Count == 0 ? selected : [.. drops, .. selected];
+    }
+
+    /// <summary>
+    /// 選んだ主キーの変更の新しい主キーと同じ列集合の live の一意制約を、暗黙の <see cref="SchemaDiffKind.DropUniqueConstraint"/>
+    /// として先頭へ足し、<see cref="SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey"/> で名指しする（付け直さない）。
+    /// 主キーと同じ列集合の一意制約を持てない逐次 DDL の方言（Oracle）でだけ呼ぶ。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Oracle は同じ列に主キーと一意制約を両方は持てず、残すと主キーの付与が ORA-02261 で断られ、DDL が暗黙コミットされるので
+    /// 旧主キーを外したまま主キーが消えた。差分は図の主キーと同じ列集合の一意制約を比較から外し、DB 側の削除も出さないので、
+    /// 利用者は一意制約の削除を選べない。値の一意性は新しい主キーが保ち、図からの DDL もその一意制約を省くので、同期の後に差分は
+    /// 残らない。利用者が同じ一意制約の削除を選んでいれば足さない。
+    /// </para>
+    /// <para>
+    /// その一意制約を参照する外部キーは、主キーの変更の外し直し（<see cref="InjectImplicitForeignKeyRebuilds"/>）が外して、新しい主キー
+    /// へ付け直す（外さないと一意制約の削除が断られる）。
+    /// </para>
+    /// </remarks>
+    private static List<SchemaDiffItem> InjectUniqueConstraintsReplacedByPrimaryKey(
+        List<SchemaDiffItem> selected,
+        SyncPlanContext? context,
+        List<SyncPlanWarning> warnings,
+        IdentifierLengthLimit limit
+    )
+    {
+        if (context is null)
+        {
+            return selected;
+        }
+
+        var pkChangedTables = CollectPrimaryKeyChanges(selected);
+
+        if (pkChangedTables.Count == 0)
+        {
+            return selected;
+        }
+
+        var explicitlyDropped = ExplicitlyDroppedUniqueConstraints(selected);
+        var liveByName = IndexLiveTables(context);
+        var drops = new List<SchemaDiffItem>();
+
+        foreach (var (table, newKey) in pkChangedTables)
+        {
+            if (newKey.Count == 0 || !liveByName.TryGet(table, out var live))
+            {
+                continue;
+            }
+
+            foreach (var constraint in live.UniqueConstraints)
+            {
+                if (
+                    !UniqueConstraintNaming.TryResolveColumnNames(live, constraint, out var columns)
+                    || !IsSameColumnSet(columns, newKey)
+                    || explicitlyDropped.Contains(
+                        UniqueConstraintKey(table, constraint.Name, columns)
+                    )
+                )
+                {
+                    continue;
+                }
+
+                drops.Add(
+                    new SchemaDiffItem
+                    {
+                        Kind = SchemaDiffKind.DropUniqueConstraint,
+                        TableName = table,
+                        Entity = live,
+                        UniqueConstraintName = constraint.Name,
+                        UniqueConstraintColumns = columns,
+                        Description = string.Format(
+                            Strings.Diff_AutoUniqueConstraintReplacedByPrimaryKey,
+                            string.Join(", ", columns)
+                        ),
+                    }
+                );
+                warnings.Add(
+                    new SyncPlanWarning(
+                        SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey,
                         table,
                         $"{constraint.Name ?? UniqueConstraint.SynthesizeName(table, columns, limit)} ({string.Join(", ", columns)})"
                     )
@@ -1011,6 +1135,263 @@ public sealed class SyncPlanner
         }
 
         return sections;
+    }
+
+    // ---------------- 失敗点の並び（DDL が暗黙コミットされる方言） ----------------
+
+    /// <summary>
+    /// 外部キーの追加のセクションの中を、参照先が同期後の候補キーだと証明できる追加 → 証明できない追加の順へ安定に並べ替える。
+    /// </summary>
+    /// <param name="sections">セクション</param>
+    /// <param name="selected">選択済みの項目（同期後の主キー・一意制約の合成に使う）</param>
+    /// <param name="context">live スキーマ（無ければ並べ替えない）</param>
+    /// <remarks>
+    /// 証明できない追加（<see cref="SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey"/>・
+    /// <see cref="SyncPlanWarningKind.ForeignKeyNotOnCandidateKey"/> と同じ証明＝<see cref="StaysCandidateKey"/>）は、
+    /// 取込外の一意索引で通ることがあるので実行は止めないが、DB が断ると計画はそこで止まる。DDL が暗黙コミットされる方言では、
+    /// その後ろにある外部キーの付け直し（同じ計画で先に外したもの）が走らず、警告していない外部キーが消えたまま残った。
+    /// 外部キーの追加は互いに依存せず、外部キーの追加の後ろに制約の文は無いので、証明できない追加を最後へ回せば、断られても
+    /// 消えるのは警告した外部キー自身だけになる。
+    /// </remarks>
+    private static List<SyncPlanSection> ArrangeUnprovenForeignKeyAddsLast(
+        List<SyncPlanSection> sections,
+        IReadOnlyList<SchemaDiffItem> selected,
+        SyncPlanContext? context
+    )
+    {
+        if (context is null)
+        {
+            return sections;
+        }
+
+        var pkChangedTables = CollectPrimaryKeyChanges(selected);
+        var addedTables = CollectAddedTables(selected);
+        var liveByName = IndexLiveTables(context);
+        var postSyncUniques = BuildPostSyncUniqueConstraints(selected, context);
+
+        return
+        [
+            .. sections.Select(section =>
+                section.Kind == SchemaDiffKind.AddForeignKey
+                    ? new SyncPlanSection
+                    {
+                        Kind = section.Kind,
+                        PrimaryKeyPhase = section.PrimaryKeyPhase,
+                        Items = [.. section.Items.OrderBy(item => IsProven(item) ? 0 : 1)],
+                    }
+                    : section
+            ),
+        ];
+
+        // 参照先が同期後の主キーか一意制約と列の集合で一致するか（参照先の表が分からない・列が無いものは証明済みとして扱う）
+        bool IsProven(SchemaDiffItem add)
+        {
+            if (add.ParentEntity is null)
+            {
+                return true;
+            }
+
+            var parentTable = SchemaDiffService.NormalizeTable(add.ParentEntity);
+            var postSyncKey = PostSyncPrimaryKeyOf(
+                parentTable,
+                pkChangedTables,
+                addedTables,
+                liveByName
+            );
+            var referencedColumns = ForeignKeyColumnPairResolver
+                .ParentColumns(SyncScriptBuilderHelper.ResolveColumnPairs(add))
+                .ToList();
+
+            return postSyncKey is null
+                || referencedColumns.Count == 0
+                || StaysCandidateKey(postSyncKey, postSyncUniques, parentTable, referencedColumns);
+        }
+    }
+
+    /// <summary>
+    /// 計画が残す外部キーに阻まれて必ず断られる文があれば、計画の順で最初の 1 文を、計画の先頭の独立したセクションへ移す
+    /// （何も変えずに失敗させる）。
+    /// </summary>
+    /// <param name="sections">セクション</param>
+    /// <param name="sectionItems">セクションへ入れた項目（暗黙の外し直しを含む）</param>
+    /// <param name="capabilities">方言のケーパビリティ</param>
+    /// <param name="context">live スキーマ（無ければ移さない）</param>
+    /// <remarks>
+    /// <para>
+    /// 計画は、両端の型が食い違う外部キー・付け直せない SET NULL の外部キーを外し直さずに残し、その外部キーに阻まれる文で
+    /// 失敗させる（<see cref="InjectImplicitForeignKeyRebuilds"/>・警告で名指しする）。DDL が暗黙コミットされる方言では、その文より前に
+    /// 外して後ろで付け直す制約（選んだ作り直し・主キーの変更・列の削除に伴う削除・兄弟の外部キーの外し直し）が消えたまま残った。
+    /// 必ず断られる文を先頭へ移すと、失敗の時点で何も変わっていない（警告の「DB は変わりません」をそのまま満たす）。
+    /// </para>
+    /// <para>必ず断られる文（計画のどの文も外さない live の外部キー＝残す外部キーに阻まれるもの）：</para>
+    /// <list type="bullet">
+    /// <item>主キーの解除（Drop の段）：旧主キーに支えられた外部キーが残る（SQL Server 3725・PostgreSQL 2BP01・Oracle ORA-02273・
+    /// MySQL 1553）。</item>
+    /// <item>列の型の変更（<see cref="SyncDialectCapabilities.AlterColumnRequiresForeignKeyRebuild"/> の方言）：その列を両端のどちらかに
+    /// 持つ外部キーが残り、同期後に両端の型が食い違う（MySQL 3780）。</item>
+    /// <item>子の列の NOT NULL 化（<see cref="SyncDialectCapabilities.SetNullRequiresNullableChildColumn"/> の方言）：その列を子の列に持つ
+    /// SET NULL の外部キーが残る（MySQL 1830）。</item>
+    /// </list>
+    /// <para>
+    /// 主キーの変更を移すときは Drop の段だけを移す（付与は元の位置のまま）。移した文が予言に反して通っても、ほかの文は元の並びで
+    /// 続く。
+    /// </para>
+    /// </remarks>
+    private static List<SyncPlanSection> MoveCertainFailureFirst(
+        List<SyncPlanSection> sections,
+        IReadOnlyList<SchemaDiffItem> sectionItems,
+        SyncDialectCapabilities capabilities,
+        SyncPlanContext? context
+    )
+    {
+        if (context is null)
+        {
+            return sections;
+        }
+
+        var limit = capabilities.IdentifierLengthLimit;
+        var dropped = CollectExplicitlyDroppedForeignKeys(sectionItems, limit);
+        var retained = EnumerateLiveForeignKeys(context)
+            .Select(fk =>
+                (
+                    Fk: fk,
+                    Child: SchemaDiffService.NormalizeTable(fk.Child),
+                    Parent: SchemaDiffService.NormalizeTable(fk.Parent)
+                )
+            )
+            .Where(fk =>
+                !dropped.Contains(
+                    ForeignKeyKey(fk.Child, fk.Parent, fk.Fk.ColumnPairs, fk.Fk.Relationship, limit)
+                )
+            )
+            .ToList();
+
+        if (retained.Count == 0)
+        {
+            return sections;
+        }
+
+        var liveByName = IndexLiveTables(context);
+        var alteredColumnTypes = new Dictionary<string, string>();
+
+        foreach (
+            var alter in sectionItems.Where(i =>
+                i.Kind == SchemaDiffKind.AlterColumn && i.ColumnName is not null
+            )
+        )
+        {
+            alteredColumnTypes[ColumnKey(alter.TableName, alter.ColumnName!)] =
+                alter.Column?.DataType ?? string.Empty;
+        }
+
+        for (var index = 0; index < sections.Count; index++)
+        {
+            var section = sections[index];
+            var failing = section.Items.FirstOrDefault(item => IsCertainFailure(section, item));
+
+            if (failing is null)
+            {
+                continue;
+            }
+
+            var rest = section.Items.Where(item => !ReferenceEquals(item, failing)).ToList();
+            var moved = new SyncPlanSection
+            {
+                Kind = section.Kind,
+                PrimaryKeyPhase = section.PrimaryKeyPhase,
+                Items = [failing],
+            };
+
+            return
+            [
+                moved,
+                .. sections
+                    .Select(
+                        (other, i) =>
+                            i == index
+                                ? new SyncPlanSection
+                                {
+                                    Kind = other.Kind,
+                                    PrimaryKeyPhase = other.PrimaryKeyPhase,
+                                    Items = rest,
+                                }
+                                : other
+                    )
+                    .Where(other => other.Items.Count > 0),
+            ];
+        }
+
+        return sections;
+
+        bool IsCertainFailure(SyncPlanSection section, SchemaDiffItem item)
+        {
+            var table = SchemaNames.ToStoredForm(item.TableName);
+
+            if (
+                section.Kind == SchemaDiffKind.AlterPrimaryKey
+                && section.PrimaryKeyPhase == PrimaryKeyPhase.Drop
+            )
+            {
+                return liveByName.TryGet(table, out var live)
+                    && live.Columns.Any(c => c.IsPrimaryKey)
+                    && retained.Any(fk =>
+                        SchemaNames.AreSame(fk.Parent, table)
+                        && DependsOnOldPrimaryKey(
+                            liveByName,
+                            capabilities,
+                            fk.Parent,
+                            [.. ForeignKeyColumnPairResolver.ParentColumns(fk.Fk.ColumnPairs)]
+                        )
+                    );
+            }
+
+            if (
+                section.Kind != SchemaDiffKind.AlterColumn
+                || item.ColumnName is null
+                || item.Column is null
+                || !liveByName.TryGet(table, out var liveTable)
+                || liveTable.Columns.FirstOrDefault(c =>
+                    SchemaNames.AreSame(c.Name, item.ColumnName)
+                )
+                    is not { } liveColumn
+            )
+            {
+                return false;
+            }
+
+            var column = ColumnKey(table, item.ColumnName);
+
+            // 残す外部キーの列の型を変え、同期後に両端の型が食い違う
+            if (
+                capabilities.AlterColumnRequiresForeignKeyRebuild
+                && !capabilities.AreSameType(liveColumn.DataType, item.Column.DataType)
+                && retained.Any(fk =>
+                    fk.Fk.ColumnPairs.Any(p =>
+                        ColumnKey(fk.Child, p.ChildColumn) == column
+                        || ColumnKey(fk.Parent, p.ParentColumn) == column
+                    )
+                    && HasPostSyncTypeMismatch(
+                        fk.Fk,
+                        fk.Child,
+                        fk.Parent,
+                        alteredColumnTypes,
+                        capabilities
+                    )
+                )
+            )
+            {
+                return true;
+            }
+
+            // 残す SET NULL の外部キーの子の列を NOT NULL にする
+            return capabilities.SetNullRequiresNullableChildColumn
+                && liveColumn.IsNullable
+                && !item.Column.IsNullable
+                && retained.Any(fk =>
+                    UsesSetNull(fk.Fk.Relationship, capabilities)
+                    && fk.Fk.ColumnPairs.Any(p => ColumnKey(fk.Child, p.ChildColumn) == column)
+                );
+        }
     }
 
     /// <summary>この主キー変更項目が新しい主キー列を持つか（＝付与フェーズを要するか）</summary>
@@ -1195,12 +1576,26 @@ public sealed class SyncPlanner
                 .ParentColumns(fk.ColumnPairs)
                 .ToList();
 
-            // (a) 参照先テーブルの主キーが変わり、その外部キーが旧主キーに支えられている / (b) FK が参加する列の定義が
-            // 変わる / (c) 子表自身の主キーが変わり、旧主キーの先頭が FK の子列（MySQL）
+            // (a) 参照先テーブルの主キーが変わり、その外部キーが旧主キーに支えられているか、新しい主キーと同じ列集合の
+            // 一意制約（この計画で外す）を参照している / (b) FK が参加する列の定義が変わる / (c) 子表自身の主キーが変わり、
+            // 旧主キーの先頭が FK の子列（MySQL）
             // （複合外部キーは全構成列のどれか 1 つでも定義が変われば作り直しになる）
             var parentPkChanged =
                 pkChangedTables.TryGetValue(parentTable, out var newPkColumns)
-                && DependsOnOldPrimaryKey(parentTable, referencedColumns);
+                && (
+                    DependsOnOldPrimaryKey(liveByName, capabilities, parentTable, referencedColumns)
+                    || (
+                        IsSameColumnSet(newPkColumns, referencedColumns)
+                        && selected.Any(i =>
+                            i.Kind == SchemaDiffKind.DropUniqueConstraint
+                            && SchemaNames.AreSame(
+                                SchemaNames.ToStoredForm(i.TableName),
+                                parentTable
+                            )
+                            && IsSameColumnSet(i.UniqueConstraintColumns, referencedColumns)
+                        )
+                    )
+                );
             var columnAltered = fk.ColumnPairs.Any(p =>
                 alteredColumnTypes.ContainsKey(ColumnKey(childTable, p.ChildColumn))
                 || alteredColumnTypes.ContainsKey(ColumnKey(parentTable, p.ParentColumn))
@@ -1359,29 +1754,39 @@ public sealed class SyncPlanner
                 warnings.Add(warning);
             }
         }
+    }
 
-        // 外部キーが参照先の旧主キーに支えられているか（主キーを外すと巻き込まれるか）。参照する列が旧主キーと同じ列集合なら
-        // どの方言でも支えられている。外部キーが参照先の索引の先頭の列を要する方言（MySQL）では、旧主キーの先頭の列だけを
-        // 参照する外部キーも支えられうる（8.0 系や restrict_fk_on_non_standard_key=OFF で作れる非標準キーの外部キー。
-        // ほかに支える索引が無いと主キーの解除がエラー 1553 になる）。一意制約を参照する外部キーは巻き込まれない
-        bool DependsOnOldPrimaryKey(string parentTable, IReadOnlyList<string> referencedColumns)
+    /// <summary>
+    /// 外部キーが参照先の旧主キー（live の主キー）に支えられているか（主キーを外すと巻き込まれるか）。
+    /// </summary>
+    /// <remarks>
+    /// 参照する列が旧主キーと同じ列集合ならどの方言でも支えられている。外部キーが参照先の索引の先頭の列を要する方言（MySQL）では、
+    /// 旧主キーの先頭の列だけを参照する外部キーも支えられうる（8.0 系や restrict_fk_on_non_standard_key=OFF で作れる非標準キーの
+    /// 外部キー。ほかに支える索引が無いと主キーの解除がエラー 1553 になる）。一意制約を参照する外部キーは巻き込まれない。
+    /// 参照先が live に無ければ支えられているとみなす。
+    /// </remarks>
+    private static bool DependsOnOldPrimaryKey(
+        NameLookup<Entity> liveByName,
+        SyncDialectCapabilities capabilities,
+        string parentTable,
+        IReadOnlyList<string> referencedColumns
+    )
+    {
+        if (!liveByName.TryGet(parentTable, out var liveParent))
         {
-            if (!liveByName.TryGet(parentTable, out var liveParent))
-            {
-                return true;
-            }
-
-            var oldKey = liveParent.GetPrimaryKeyColumnsInOrder().Select(c => c.Name).ToList();
-
-            if (IsSameColumnSet(oldKey, referencedColumns))
-            {
-                return true;
-            }
-
-            return capabilities.ForeignKeyRequiresLeadingIndex
-                && oldKey.Count > referencedColumns.Count
-                && IsSameColumnSet(oldKey.Take(referencedColumns.Count), referencedColumns);
+            return true;
         }
+
+        var oldKey = liveParent.GetPrimaryKeyColumnsInOrder().Select(c => c.Name).ToList();
+
+        if (IsSameColumnSet(oldKey, referencedColumns))
+        {
+            return true;
+        }
+
+        return capabilities.ForeignKeyRequiresLeadingIndex
+            && oldKey.Count > referencedColumns.Count
+            && IsSameColumnSet(oldKey.Take(referencedColumns.Count), referencedColumns);
     }
 
     /// <summary>live の外部キーを外す暗黙の DropForeignKey 項目を作る（差分計算の FK 差分と同じフィールド規則）</summary>
@@ -1802,7 +2207,8 @@ public sealed class SyncPlanner
         List<SchemaDiffItem> selected,
         SyncDialectCapabilities capabilities,
         SyncPlanContext? context,
-        List<SyncPlanWarning> warnings
+        List<SyncPlanWarning> warnings,
+        List<SchemaDiffItem> excluded
     )
     {
         if (context is null)
@@ -1852,7 +2258,8 @@ public sealed class SyncPlanner
 
                 if (decidedBySync && mismatch)
                 {
-                    warnings.Add(
+                    ExcludeSelected(
+                        item,
                         new SyncPlanWarning(
                             SyncPlanWarningKind.ForeignKeyColumnTypeMismatch,
                             childTable,
@@ -1862,7 +2269,9 @@ public sealed class SyncPlanner
                                 parentTable,
                                 capabilities.IdentifierLengthLimit
                             )
-                        )
+                        ),
+                        warnings,
+                        excluded
                     );
                     continue;
                 }
@@ -1920,7 +2329,8 @@ public sealed class SyncPlanner
         List<SchemaDiffItem> selected,
         SyncDialectCapabilities capabilities,
         SyncPlanContext? context,
-        List<SyncPlanWarning> warnings
+        List<SyncPlanWarning> warnings,
+        List<SchemaDiffItem> excluded
     )
     {
         var postSyncNullable = PostSyncNullability(selected, context);
@@ -1944,22 +2354,25 @@ public sealed class SyncPlanner
 
                 if (notNull.Count > 0)
                 {
-                    AddSetNullWarning(
-                        warnings,
+                    var constraintName = ResolveForeignKeyName(
+                        relationship,
                         childTable,
-                        ResolveForeignKeyName(
-                            relationship,
-                            childTable,
-                            SchemaDiffService.NormalizeTable(parent),
-                            capabilities.IdentifierLengthLimit
-                        ),
-                        notNull
+                        SchemaDiffService.NormalizeTable(parent),
+                        capabilities.IdentifierLengthLimit
                     );
 
                     if (capabilities.SetNullRequiresNullableChildColumn)
                     {
+                        ExcludeSelected(
+                            item,
+                            SetNullWarning(childTable, constraintName, notNull),
+                            warnings,
+                            excluded
+                        );
                         continue;
                     }
+
+                    AddSetNullWarning(warnings, childTable, constraintName, notNull);
                 }
             }
 
@@ -2135,16 +2548,44 @@ public sealed class SyncPlanner
         IReadOnlyList<string> notNullColumns
     )
     {
-        var warning = new SyncPlanWarning(
-            SyncPlanWarningKind.SetNullOnNotNullColumn,
-            childTable,
-            $"{constraintName} ({string.Join(", ", notNullColumns)})"
-        );
+        var warning = SetNullWarning(childTable, constraintName, notNullColumns);
 
         if (!warnings.Contains(warning))
         {
             warnings.Add(warning);
         }
+    }
+
+    /// <summary><see cref="SyncPlanWarningKind.SetNullOnNotNullColumn"/> の警告（Detail は「制約名 (同期後に NOT NULL の子の列, …)」）</summary>
+    private static SyncPlanWarning SetNullWarning(
+        string childTable,
+        string constraintName,
+        IReadOnlyList<string> notNullColumns
+    ) =>
+        new(
+            SyncPlanWarningKind.SetNullOnNotNullColumn,
+            childTable,
+            $"{constraintName} ({string.Join(", ", notNullColumns)})"
+        );
+
+    /// <summary>
+    /// 選んだ項目を計画から外し、名指しの警告（同じ警告は重ねない）と外した項目の一覧（<see cref="SyncPlan.ExcludedItems"/>）へ
+    /// 一緒に積む。選んだ項目を外す箇所はすべてここを通す（警告だけ・一覧だけになると、外した項目が名指しされないか、
+    /// 名指しされた項目が記録されない）。
+    /// </summary>
+    private static void ExcludeSelected(
+        SchemaDiffItem item,
+        SyncPlanWarning warning,
+        List<SyncPlanWarning> warnings,
+        List<SchemaDiffItem> excluded
+    )
+    {
+        if (!warnings.Contains(warning))
+        {
+            warnings.Add(warning);
+        }
+
+        excluded.Add(item);
     }
 
     /// <summary>
@@ -2542,18 +2983,23 @@ public sealed class SyncPlanner
     /// </summary>
     /// <returns>テーブル名 → 一意制約の構成列（live の宣言順、続いて追加を選んだ表の一意制約、選択済みの追加の順）</returns>
     /// <remarks>
-    /// 削除は列の集合で照合して、同じ列の集合の一意制約をすべて落とす（列の集合で比べる差分・候補キーの証明と同じ）。
+    /// 削除は DB の一意制約の照合キー（<see cref="UniqueConstraintKey"/>＝名前と列集合）で照合し、外す制約だけを落とす
+    /// （同じ列集合の一意制約が 2 つある表で、1 つを外しても、もう 1 つは同期後のキーとして残る）。
     /// </remarks>
     private static Dictionary<string, List<IReadOnlyList<string>>> BuildPostSyncUniqueKeys(
         IReadOnlyList<SchemaDiffItem> selected,
         SyncPlanContext? context
     )
     {
-        var byTable = new Dictionary<string, List<IReadOnlyList<string>>>(SchemaNames.Comparer);
+        // 構成列と、DB の一意制約なら照合キー（外す項目と照合する。図から来た制約は null）
+        var byTable = new Dictionary<
+            string,
+            List<(IReadOnlyList<string> Columns, string? LiveKey)>
+        >(SchemaNames.Comparer);
 
         if (context is null)
         {
-            return byTable;
+            return [];
         }
 
         // live の一意制約を土台にする
@@ -2574,7 +3020,7 @@ public sealed class SyncPlanner
                     continue;
                 }
 
-                Keys(byTable, table).Add(columns);
+                Keys(table).Add((columns, UniqueConstraintKey(table, constraint.Name, columns)));
             }
         }
 
@@ -2595,27 +3041,17 @@ public sealed class SyncPlanner
                     )
                 )
                 {
-                    Keys(byTable, SchemaNames.ToStoredForm(item.TableName)).Add(columns);
+                    Keys(SchemaNames.ToStoredForm(item.TableName)).Add((columns, null));
                 }
             }
         }
 
-        // 選択済みの削除を落とす
-        foreach (var item in selected.Where(i => i.Kind == SchemaDiffKind.DropUniqueConstraint))
+        // 選択済みの削除を落とす（外す DB の一意制約だけ）
+        var dropped = ExplicitlyDroppedUniqueConstraints(selected);
+
+        foreach (var keys in byTable.Values)
         {
-            if (byTable.TryGetValue(SchemaNames.ToStoredForm(item.TableName), out var keys))
-            {
-                var signature = UniqueConstraintNaming.ColumnSetSignature(
-                    item.UniqueConstraintColumns
-                );
-                keys.RemoveAll(key =>
-                    string.Equals(
-                        UniqueConstraintNaming.ColumnSetSignature(key),
-                        signature,
-                        StringComparison.Ordinal
-                    )
-                );
-            }
+            keys.RemoveAll(key => key.LiveKey is not null && dropped.Contains(key.LiveKey));
         }
 
         // 選択済みの追加を足す
@@ -2626,16 +3062,17 @@ public sealed class SyncPlanner
                 continue;
             }
 
-            Keys(byTable, SchemaNames.ToStoredForm(item.TableName))
-                .Add(item.UniqueConstraintColumns);
+            Keys(SchemaNames.ToStoredForm(item.TableName))
+                .Add((item.UniqueConstraintColumns, null));
         }
 
-        return byTable;
+        return byTable.ToDictionary(
+            pair => pair.Key,
+            pair => pair.Value.Select(key => key.Columns).ToList(),
+            SchemaNames.Comparer
+        );
 
-        static List<IReadOnlyList<string>> Keys(
-            Dictionary<string, List<IReadOnlyList<string>>> byTable,
-            string table
-        )
+        List<(IReadOnlyList<string> Columns, string? LiveKey)> Keys(string table)
         {
             if (!byTable.TryGetValue(table, out var keys))
             {
@@ -2692,10 +3129,7 @@ public sealed class SyncPlanner
         }
 
         // 明示的に DROP が選択されている一意制約（自動 DROP の重複も再 ADD も行わない）
-        var explicitlyDropped = selected
-            .Where(i => i.Kind == SchemaDiffKind.DropUniqueConstraint)
-            .Select(i => UniqueConstraintKey(i.TableName, i.UniqueConstraintColumns))
-            .ToHashSet();
+        var explicitlyDropped = ExplicitlyDroppedUniqueConstraints(selected);
         var dropped = DroppedObjects.From(selected);
 
         var autoDrops = new List<SchemaDiffItem>();
@@ -2724,7 +3158,9 @@ public sealed class SyncPlanner
                     continue;
                 }
 
-                if (explicitlyDropped.Contains(UniqueConstraintKey(table, columns)))
+                if (
+                    explicitlyDropped.Contains(UniqueConstraintKey(table, constraint.Name, columns))
+                )
                 {
                     continue;
                 }
@@ -2805,16 +3241,25 @@ public sealed class SyncPlanner
         // 同期で外す外部キー（明示的に外す・端が消える＝計画の入口で外す項目を足している）は壊れようがないので警告しない
         var explicitlyDropped = CollectExplicitlyDroppedForeignKeys(selected, limit);
         var dropped = DroppedObjects.From(selected);
+        var pkChangedTables = CollectPrimaryKeyChanges(selected);
 
         foreach (var fk in EnumerateLiveForeignKeys(context))
         {
             var parentTable = SchemaDiffService.NormalizeTable(fk.Parent);
             var childTable = SchemaDiffService.NormalizeTable(fk.Child);
 
+            // 新しい主キーが参照する列とちょうど同じなら、候補キーは主キーが保つ（主キーの変更の外し直しが新しい主キーへ付け直す）
             if (
                 dropped.Touches(fk, childTable, parentTable)
                 || explicitlyDropped.Contains(
                     ForeignKeyKey(childTable, parentTable, fk.ColumnPairs, fk.Relationship, limit)
+                )
+                || (
+                    pkChangedTables.TryGetValue(parentTable, out var newKey)
+                    && IsSameColumnSet(
+                        newKey,
+                        ForeignKeyColumnPairResolver.ParentColumns(fk.ColumnPairs)
+                    )
                 )
             )
             {
@@ -2860,9 +3305,41 @@ public sealed class SyncPlanner
         }
     }
 
-    /// <summary>一意制約の照合キー（テーブル＋列集合シグネチャ。名前は <see cref="SchemaNames.Key"/> で畳み、列順を無視する）</summary>
-    private static string UniqueConstraintKey(string table, IEnumerable<string> columnNames) =>
-        $"{SchemaNames.Key(table)}|{UniqueConstraintNaming.ColumnSetSignature(columnNames)}";
+    /// <summary>
+    /// DB の一意制約の照合キー（テーブル＋DB の名前＋列集合シグネチャ。名前は <see cref="SchemaNames.Key"/> で畳み、列順を無視する）
+    /// </summary>
+    /// <param name="table">テーブル</param>
+    /// <param name="name">DB の名前（名前の無い制約＝SQLite の自動名は <c>null</c>）</param>
+    /// <param name="columnNames">構成列</param>
+    /// <remarks>
+    /// <para>
+    /// 照合するのは、DB の一意制約（live）と、それを外す項目（差分の DropUniqueConstraint・作り直しを展開した削除＝どちらも
+    /// live の制約の名前をそのまま運ぶ）だけ。図の一意制約（追加の項目）はこのキーで照合しない。名前の無い制約どうしは
+    /// 列集合だけで組む（合成名は使わない＝並び順に依る）。
+    /// </para>
+    /// <para>
+    /// 名前を含めるのは、同じ列集合の一意制約が 2 つある表で、明示的に外した 1 つがもう 1 つまで「外した」ことにして、
+    /// 暗黙の外し直し・列の削除に伴う削除・同期後のキーの集合を変えないため（外部キーの <see cref="ForeignKeyKey"/> と対称。
+    /// 名前を見ないと、残った 1 つが列の変更を阻んだ＝SQL Server の Msg 5074）。
+    /// </para>
+    /// </remarks>
+    private static string UniqueConstraintKey(
+        string table,
+        string? name,
+        IEnumerable<string> columnNames
+    ) =>
+        $"{SchemaNames.Key(table)}|{(name is null ? string.Empty : SchemaNames.Key(name))}|{UniqueConstraintNaming.ColumnSetSignature(columnNames)}";
+
+    /// <summary>外す項目（DropUniqueConstraint）が外す DB の一意制約の照合キー（<see cref="UniqueConstraintKey"/>）</summary>
+    private static HashSet<string> ExplicitlyDroppedUniqueConstraints(
+        IEnumerable<SchemaDiffItem> selected
+    ) =>
+        selected
+            .Where(i => i.Kind == SchemaDiffKind.DropUniqueConstraint)
+            .Select(i =>
+                UniqueConstraintKey(i.TableName, i.UniqueConstraintName, i.UniqueConstraintColumns)
+            )
+            .ToHashSet();
 
     /// <summary>選んだ表・列の削除（制約の端が同じ計画で消えるかの判定に使う）</summary>
     private sealed class DroppedObjects
@@ -3006,6 +3483,7 @@ public sealed class SyncPlanner
         SyncDialectCapabilities capabilities,
         SyncPlanContext context,
         List<SyncPlanWarning> warnings,
+        IReadOnlyList<SchemaDiffItem> excluded,
         IdentifierLengthLimit limit
     )
     {
@@ -3081,6 +3559,7 @@ public sealed class SyncPlanner
             Sections = BuildSections(sectionItems),
             Rebuilds = rebuilds,
             Warnings = warnings,
+            ExcludedItems = excluded,
         };
     }
 
@@ -3471,7 +3950,8 @@ public sealed class SyncPlanner
     /// へ反映する。列の変更を当てる前に呼ぶ（構成列を live の列で引き当てるため）。
     /// </summary>
     /// <remarks>
-    /// 列集合シグネチャの一致で除去する（制約名は live と図で食い違うため照合に使えない）。
+    /// 合成後の定義は live の写しで、削除の項目も live の制約の名前を運ぶので、DB の一意制約の照合キー
+    /// （<see cref="UniqueConstraintKey"/>＝名前と列集合）で除去する（同じ列集合のほかの一意制約は残す）。
     /// </remarks>
     private static void ApplySelectedUniqueConstraintDrops(
         Entity newDef,
@@ -3480,14 +3960,10 @@ public sealed class SyncPlanner
     {
         foreach (var drop in tableItems.Where(i => i.Kind == SchemaDiffKind.DropUniqueConstraint))
         {
-            var signature = UniqueConstraintNaming.ColumnSetSignature(drop.UniqueConstraintColumns);
+            var dropped = ExplicitlyDroppedUniqueConstraints([drop]);
             newDef.UniqueConstraints.RemoveAll(constraint =>
                 UniqueConstraintNaming.TryResolveColumnNames(newDef, constraint, out var columns)
-                && string.Equals(
-                    UniqueConstraintNaming.ColumnSetSignature(columns),
-                    signature,
-                    StringComparison.Ordinal
-                )
+                && dropped.Contains(UniqueConstraintKey(drop.TableName, constraint.Name, columns))
             );
         }
     }

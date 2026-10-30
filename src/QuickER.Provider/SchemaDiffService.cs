@@ -397,7 +397,7 @@ public class SchemaDiffService
         }
 
         // ---------- 外部キーの差分 ----------
-        // 親・子・列・制約名などのシグネチャでキー化し、同一 FK の有無を集合比較で判定する。
+        // 親・子・列・制約名などのシグネチャでキー化し、同一 FK の有無を多重集合（シグネチャごとの本数）で比べる。
         // 追加候補・削除候補はいったん集め、同じ外部キーの作り直しにあたる組を 1 項目へ畳んでから差分へ並べる
         var fkAdds = new List<SchemaDiffItem>();
         var fkDrops = new List<SchemaDiffItem>();
@@ -446,13 +446,16 @@ public class SchemaDiffService
                 )
             )
             .ToList();
-        var liveFkSignatures = liveFks.Select(fk => fk.Signature).ToHashSet();
-        var targetFkSignatures = targetFks.Select(fk => fk.Signature).ToHashSet();
+        // 本数で比べる：名前を保存しない方言（SQLite）では、同じ列ペア・参照アクションの外部キー 2 本は同じシグネチャになる。
+        // 集合で比べると、DB の 2 本のうち 1 本だけを変えた図との差分が「追加なし・削除 1 本」になり（片方の作り直しが消える）、
+        // 次の同期で外部キーが 1 本減る
+        var unmatchedLive = CountSignatures(liveFks.Select(fk => fk.Signature));
+        var unmatchedTarget = CountSignatures(targetFks.Select(fk => fk.Signature));
 
-        // 図にあるが DB に無い外部キーは追加候補
+        // 図にあるが DB に無い外部キーは追加候補（同じシグネチャの DB の外部キーより多い本数）
         foreach (var (fk, signature) in targetFks)
         {
-            if (liveFkSignatures.Contains(signature))
+            if (TryConsume(unmatchedLive, signature))
             {
                 continue;
             }
@@ -483,11 +486,11 @@ public class SchemaDiffService
             );
         }
 
-        // DB にあるが ER 図にない FK は削除候補とする（同じシグネチャの外部キーが図に無いもの。
+        // DB にあるが ER 図にない FK は削除候補とする（同じシグネチャの図の外部キーより多い本数。
         // 名前を保存する方言では名前もシグネチャに入るため、名前だけ変えた外部キーも削除＋追加になる）
         foreach (var (fk, signature) in liveFks)
         {
-            if (targetFkSignatures.Contains(signature))
+            if (TryConsume(unmatchedTarget, signature))
             {
                 continue;
             }
@@ -517,6 +520,23 @@ public class SchemaDiffService
         diff.Items.AddRange(
             PairForeignKeyAlters(fkAdds, fkDrops, includeFkConstraintName, dialect)
         );
+
+        static Dictionary<string, int> CountSignatures(IEnumerable<string> signatures) =>
+            signatures
+                .GroupBy(signature => signature, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+
+        // 相手側に同じシグネチャが残っていれば 1 本ぶん組んで true
+        static bool TryConsume(Dictionary<string, int> unmatched, string signature)
+        {
+            if (!unmatched.TryGetValue(signature, out var count) || count == 0)
+            {
+                return false;
+            }
+
+            unmatched[signature] = count - 1;
+            return true;
+        }
 
         // ---------- 列順の差分（対応方言のみ・既定では非選択） ----------
         // 列順同期は SQLite（テーブル再構築）と MySQL（ネイティブ MODIFY ... AFTER）だけが実現できる。
