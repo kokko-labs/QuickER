@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
@@ -314,10 +315,36 @@ public class GeneratedCodeCompilationTests
         return data;
     }
 
-    /// <summary>マトリクスケース: オプション単発（各種フラグ・Namespace 上書き）</summary>
-    public static TheoryData<string, CodeGenerationOptions> SingleOptionCases()
+    /// <summary>単発オプションのケースが生成に使う図</summary>
+    public enum SingleOptionDiagram
     {
-        var data = new TheoryData<string, CodeGenerationOptions>
+        /// <summary>全ケース共通の <see cref="FullCoverageDiagram"/></summary>
+        FullCoverage,
+
+        /// <summary>
+        /// <see cref="FullCoverageDiagram"/> に、文字列の主キーの表・その列を外部キーで持つ子・その列への名前付きクエリを足した図
+        /// （<see cref="StringKeyDiagram"/>＝GuidKey の値オブジェクトが実際に出る図）
+        /// </summary>
+        StringKey,
+    }
+
+    /// <summary>
+    /// マトリクスケース: オプション単発（各種フラグ・Namespace 上書き）。各行は、そのオプションを既定へ戻した比較用の
+    /// オプションと、生成に使う図を持つ（<see cref="Generate_SingleOptions_ChangeTheOutput"/> が空振りでないことを確かめる）
+    /// </summary>
+    public static TheoryData<
+        string,
+        CodeGenerationOptions,
+        CodeGenerationOptions,
+        SingleOptionDiagram
+    > SingleOptionCases()
+    {
+        var data = new TheoryData<
+            string,
+            CodeGenerationOptions,
+            CodeGenerationOptions,
+            SingleOptionDiagram
+        >
         {
             {
                 "IncludeDataAnnotations=false（Repository 生成不可のため除外）",
@@ -326,7 +353,13 @@ public class GeneratedCodeCompilationTests
                     RootNamespace = "Sample.Domain",
                     IncludeDataAnnotations = false,
                     GenerateRepositories = false,
-                }
+                },
+                new CodeGenerationOptions
+                {
+                    RootNamespace = "Sample.Domain",
+                    GenerateRepositories = false,
+                },
+                SingleOptionDiagram.FullCoverage
             },
             {
                 "IncludeJsonIgnoreOnParentNavigation=false",
@@ -334,16 +367,18 @@ public class GeneratedCodeCompilationTests
                 {
                     RootNamespace = "Sample.Domain",
                     IncludeJsonIgnoreOnParentNavigation = false,
-                }
+                },
+                new CodeGenerationOptions { RootNamespace = "Sample.Domain" },
+                SingleOptionDiagram.FullCoverage
             },
             {
-                "UseGuidKeyForStringPrimaryKey=true（VO 有効時のみ適用）",
-                new CodeGenerationOptions
+                "UseGuidKeyForStringPrimaryKey=true（VO 有効時のみ適用・名前付きクエリのため Repository も生成）",
+                GuidKeyOptions,
+                GuidKeyOptions with
                 {
-                    RootNamespace = "Sample.Domain",
-                    GenerateValueObjects = true,
-                    UseGuidKeyForStringPrimaryKey = true,
-                }
+                    UseGuidKeyForStringPrimaryKey = false,
+                },
+                SingleOptionDiagram.StringKey
             },
             {
                 "ExcludeUnboundedBinaryColumns=true（varbinary(max) の photo 列にマーカー付与）",
@@ -351,11 +386,15 @@ public class GeneratedCodeCompilationTests
                 {
                     RootNamespace = "Sample.Domain",
                     ExcludeUnboundedBinaryColumns = true,
-                }
+                },
+                new CodeGenerationOptions { RootNamespace = "Sample.Domain" },
+                SingleOptionDiagram.FullCoverage
             },
             {
                 "Namespace 上書き（Split off・単一 RootNamespace）",
-                new CodeGenerationOptions { RootNamespace = "Acme.Custom.Domain" }
+                new CodeGenerationOptions { RootNamespace = "Acme.Custom.Domain" },
+                new CodeGenerationOptions { RootNamespace = "Sample.Domain" },
+                SingleOptionDiagram.FullCoverage
             },
             {
                 "Namespace 上書き（Split on・カテゴリ別名前空間）",
@@ -368,7 +407,13 @@ public class GeneratedCodeCompilationTests
                     EditModelNamespace = "Acme.Domain.EditModels",
                     MapperNamespace = "Acme.Domain.Mappers",
                     RepositoryNamespace = "Acme.Domain.Repositories",
-                }
+                },
+                new CodeGenerationOptions
+                {
+                    RootNamespace = "Sample.Domain",
+                    SplitFilesByCategory = true,
+                },
+                SingleOptionDiagram.FullCoverage
             },
         };
         return data;
@@ -427,8 +472,71 @@ public class GeneratedCodeCompilationTests
     [MemberData(nameof(SingleOptionCases))]
     public void Generate_SingleOptions_ShouldProduceCompilableCode(
         string caseName,
-        CodeGenerationOptions options
-    ) => AssertCompiles(caseName, options);
+        CodeGenerationOptions options,
+        CodeGenerationOptions withoutOption,
+        SingleOptionDiagram diagram
+    )
+    {
+        _ = withoutOption;
+        AssertCompiles(caseName, options, BuildDiagram(diagram));
+    }
+
+    /// <summary>
+    /// 空振りの検査：単発オプションのケースは、同じ図でオプションを既定へ戻した生成物と違う生成物を作る
+    /// （オプションを立てても生成物が変わらないケースは、コンパイルが通っても何も確かめていない）
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(SingleOptionCases))]
+    public void Generate_SingleOptions_ChangeTheOutput(
+        string caseName,
+        CodeGenerationOptions options,
+        CodeGenerationOptions withoutOption,
+        SingleOptionDiagram diagram
+    )
+    {
+        var withOption = Render(BuildDiagram(diagram), options);
+        var baseline = Render(BuildDiagram(diagram), withoutOption);
+
+        OutputDiffers(withOption, baseline)
+            .Should()
+            .BeTrue(
+                $"「{caseName}」はオプションを既定へ戻した生成物と同じ（オプションが図に効いていない＝空振り）"
+            );
+    }
+
+    /// <summary>空振りの検査の比較が、同じ生成物を「同じ」と判定することの対照</summary>
+    [Fact]
+    public void OutputDiffers_IsFalseForTheSameOptions()
+    {
+        var options = new CodeGenerationOptions { RootNamespace = "Sample.Domain" };
+
+        OutputDiffers(
+                Render(FullCoverageDiagram(), options),
+                Render(FullCoverageDiagram(), options)
+            )
+            .Should()
+            .BeFalse();
+    }
+
+    /// <summary>生成物（ファイル名と内容）を、比べられる形にする</summary>
+    private static IReadOnlyList<string> Render(ErDiagram diagram, CodeGenerationOptions options) =>
+        new CSharpCodeGenerationService()
+            .Generate(diagram, options)
+            .Files.OrderBy(f => f.FileName, StringComparer.Ordinal)
+            .Select(f => f.FileName + "\n" + f.Content)
+            .ToList();
+
+    /// <summary>2 つの生成物が違うか</summary>
+    private static bool OutputDiffers(IReadOnlyList<string> left, IReadOnlyList<string> right) =>
+        !left.SequenceEqual(right, StringComparer.Ordinal);
+
+    private static ErDiagram BuildDiagram(SingleOptionDiagram diagram) =>
+        diagram switch
+        {
+            SingleOptionDiagram.FullCoverage => FullCoverageDiagram(),
+            SingleOptionDiagram.StringKey => StringKeyDiagram(),
+            _ => throw new ArgumentOutOfRangeException(nameof(diagram)),
+        };
 
     /// <summary>リモート契約生成（GenerateRemoteContracts）の実装先横断ケースで、生成コードがエラー・警告なしでコンパイルできることを検証する</summary>
     [Theory]
@@ -782,9 +890,17 @@ public class GeneratedCodeCompilationTests
     }
 
     /// <summary>指定オプションで生成し、Roslyn コンパイルがエラー・報告対象警告なしで成功することを検証する共通アサーション</summary>
-    private static void AssertCompiles(string caseName, CodeGenerationOptions options)
+    private static void AssertCompiles(string caseName, CodeGenerationOptions options) =>
+        AssertCompiles(caseName, options, FullCoverageDiagram());
+
+    /// <summary>指定の図とオプションで生成し、Roslyn コンパイルがエラー・報告対象警告なしで成功することを検証する</summary>
+    private static void AssertCompiles(
+        string caseName,
+        CodeGenerationOptions options,
+        ErDiagram diagram
+    )
     {
-        var result = new CSharpCodeGenerationService().Generate(FullCoverageDiagram(), options);
+        var result = new CSharpCodeGenerationService().Generate(diagram, options);
 
         result
             .HasErrors.Should()
@@ -1155,5 +1271,141 @@ public class GeneratedCodeCompilationTests
                 },
             ],
         };
+    }
+
+    /// <summary>
+    /// GuidKey のケースの図には GuidKey の値オブジェクトが実際に出て、文字列の主キーを列名の違う外部キーで持つ子の列もその型を
+    /// 共有し、その 2 つの列への部分一致のクエリは警告で飛ばされる（完全一致のクエリは生成される）
+    /// </summary>
+    [Fact]
+    public void GuidKeyCase_EmitsGuidKeyValueObjectSharedByForeignKey()
+    {
+        var result = new CSharpCodeGenerationService().Generate(StringKeyDiagram(), GuidKeyOptions);
+        var content = string.Concat(result.Files.Select(f => f.Content));
+
+        content.Should().Contain(": ValueObjectGuidKeyBase<TenantCodeValue>");
+        content
+            .Should()
+            .Contain(
+                "public TenantCodeValue OwnerTenantCode",
+                "外部キーの列が主キーの型を共有する"
+            );
+
+        var warned = result
+            .Diagnostics.Where(d => d.Severity == GenerationDiagnosticSeverity.Warning)
+            .Select(d => d.Message)
+            .ToList();
+
+        foreach (var skipped in new[] { "CodeContains", "OwnerCodeStartsWith" })
+        {
+            warned.Should().Contain(m => m.Contains(skipped, StringComparison.Ordinal), skipped);
+            HasMethod(content, skipped + "Async").Should().BeFalse(skipped);
+        }
+
+        // 名前は語の境界で照合する（CodeEqualsAsync は OwnerCodeEqualsAsync の部分文字列でもある）
+        foreach (var generated in new[] { "CodeEqualsAsync", "OwnerCodeEqualsAsync" })
+        {
+            HasMethod(content, generated).Should().BeTrue(generated);
+        }
+
+        static bool HasMethod(string text, string name) =>
+            Regex.IsMatch(text, $@"\b{name}\(", RegexOptions.CultureInvariant);
+    }
+
+    /// <summary>GuidKey のケースのオプション（値オブジェクトと、名前付きクエリを出すための Repository を生成する）</summary>
+    private static CodeGenerationOptions GuidKeyOptions { get; } =
+        new()
+        {
+            RootNamespace = "Sample.Domain",
+            GenerateValueObjects = true,
+            GenerateRepositories = true,
+            UseGuidKeyForStringPrimaryKey = true,
+        };
+
+    /// <summary>
+    /// <see cref="FullCoverageDiagram"/> に、文字列の主キーの表（tenants）・その列を列名の違う外部キーで持つ子（tenant_members）・
+    /// 2 つの列への名前付きクエリ（完全一致と部分一致）を足した図。GuidKey のケースが空振りにならない（主キーがすべて int の
+    /// <see cref="FullCoverageDiagram"/> では GuidKey の値オブジェクトが 1 つも出ない）ために使う
+    /// </summary>
+    private static ErDiagram StringKeyDiagram()
+    {
+        var diagram = FullCoverageDiagram();
+        var tenantCode = new Column
+        {
+            Name = "tenant_code",
+            DataType = "nvarchar(36)",
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+        var tenants = new Entity
+        {
+            TableName = "tenants",
+            Columns =
+            {
+                tenantCode,
+                new Column
+                {
+                    Name = "label",
+                    DataType = "nvarchar(50)",
+                    IsNullable = false,
+                },
+            },
+        };
+        var ownerTenantCode = new Column
+        {
+            Name = "owner_tenant_code",
+            DataType = "nvarchar(36)",
+            IsForeignKey = true,
+            IsNullable = false,
+        };
+        var members = new Entity
+        {
+            TableName = "tenant_members",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "member_id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                ownerTenantCode,
+            },
+        };
+        diagram.Entities.Add(tenants);
+        diagram.Entities.Add(members);
+        diagram.Relationships.Add(
+            new Relationship
+            {
+                Type = RelationshipType.OneToMany,
+                SourceEntityId = tenants.Id,
+                TargetEntityId = members.Id,
+                ColumnPairs = [new(tenantCode.Id, ownerTenantCode.Id)],
+            }
+        );
+
+        foreach (
+            var (entity, name, condition) in new[]
+            {
+                (tenants, "CodeEquals", "tenant_code = 'ab'"),
+                (tenants, "CodeContains", "tenant_code CONTAINS 'ab'"),
+                (members, "OwnerCodeEquals", "owner_tenant_code = 'ab'"),
+                (members, "OwnerCodeStartsWith", "owner_tenant_code STARTSWITH 'ab'"),
+            }
+        )
+        {
+            diagram.Queries.Add(
+                new QueryDefinition
+                {
+                    EntityId = entity.Id,
+                    Name = name,
+                    Returns = QueryReturnShape.List,
+                    Condition = condition,
+                }
+            );
+        }
+
+        return diagram;
     }
 }

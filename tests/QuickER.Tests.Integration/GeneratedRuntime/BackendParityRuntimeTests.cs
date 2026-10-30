@@ -107,41 +107,54 @@ public sealed class BackendParityRuntimeTests
         var report = new EngineReport("BackendParity", MaxFailedSeeds);
         var tolerated = new Dictionary<string, int>(StringComparer.Ordinal);
         var coverage = new CoverageCounter(BackendParityDimensions.Table);
+        var outcomes = new CoverageCounter(BackendParityOutcomeDimensions.Table);
         var ranAllSeeds = true;
 
-        // 受け入れた手の差で比べなかったインメモリの手（黙って比較が減らないよう、件数を出力して下限を表明する）
-        var inMemorySteps = 0;
-        var inMemorySkipped = 0;
+        // 手の差で比べなかった手（実装先ごと。黙って比較が減らないよう、件数を出力して下限を表明する）
+        var steps = new Dictionary<ParityBackendKind, int>();
+        var skipped = new Dictionary<ParityBackendKind, int>();
         var cutCounts = new SortedDictionary<string, int>(StringComparer.Ordinal);
+        var pendingCuts = new Dictionary<ParityBackendKind, int>();
 
         foreach (var seed in seeds)
         {
             var scenario = BackendParityGenerator.Create(seed);
             BackendParityDimensions.Observe(coverage, scenario);
             var result = await scenario.RunAsync(Ct);
+            BackendParityOutcomeDimensions.Observe(
+                outcomes,
+                scenario,
+                result.Traces[BackendParityAxis.Baseline]
+            );
 
-            if (scenario.Backends.Contains(ParityBackendKind.InMemory))
+            foreach (var backend in scenario.Backends)
             {
-                inMemorySteps += scenario.Ops.Count;
+                steps[backend] = steps.GetValueOrDefault(backend) + scenario.Ops.Count;
             }
 
             foreach (var cut in result.Cuts)
             {
-                var key = $"{cut.Backend}:{cut.Deviation}";
+                var key = $"{cut.Backend}:{cut.Deviation}{(cut.Pending ? " (pending)" : "")}";
                 cutCounts[key] = cutCounts.GetValueOrDefault(key) + 1;
 
-                // 打ち切りは宣言の一覧の（実装先・手の種類）にだけ起きる（判定の Accepts が実装先を見なくなると、EF Core・
-                // リモートの比較まで黙って打ち切られる）
-                BackendParityKnownDifferences
-                    .AcceptedDeviations.Should()
-                    .Contain(
-                        d => d.Backend == cut.Backend && d.Deviation == cut.Deviation,
-                        $"seed {seed} cut {key}, which is not declared"
-                    );
+                // 打ち切りは宣言の一覧の（実装先・手の種類）にだけ起きる（判定の Accepts・Defers が実装先を見なくなると、
+                // 宣言の外の実装先の比較まで黙って打ち切られる。判定そのものでなく一覧と照らす）
+                (
+                    cut.Pending
+                        ? BackendParityKnownDifferences.PendingDeviations.Any(d =>
+                            d.Backend == cut.Backend && d.Deviation == cut.Deviation
+                        )
+                        : BackendParityKnownDifferences.AcceptedDeviations.Any(d =>
+                            d.Backend == cut.Backend && d.Deviation == cut.Deviation
+                        )
+                )
+                    .Should()
+                    .BeTrue($"seed {seed} cut {key}, which is not declared");
+                skipped[cut.Backend] = skipped.GetValueOrDefault(cut.Backend) + cut.SkippedSteps;
 
-                if (cut.Backend == ParityBackendKind.InMemory)
+                if (cut.Pending)
                 {
-                    inMemorySkipped += cut.SkippedSteps;
+                    pendingCuts[cut.Backend] = pendingCuts.GetValueOrDefault(cut.Backend) + 1;
                 }
             }
 
@@ -200,9 +213,13 @@ public sealed class BackendParityRuntimeTests
             $"seeds={seeds.Count} tolerated=[{string.Join(", ", tolerated.Select(kv => $"{kv.Key}:{kv.Value}"))}]"
         );
         TestContext.Current.TestOutputHelper?.WriteLine(
-            $"accepted deviations cut=[{string.Join(", ", cutCounts.Select(kv => $"{kv.Key}:{kv.Value} seed(s)"))}] "
-                + $"in-memory steps compared {inMemorySteps - inMemorySkipped} of {inMemorySteps} "
-                + $"(skipped {inMemorySkipped})"
+            $"deviations cut=[{string.Join(", ", cutCounts.Select(kv => $"{kv.Key}:{kv.Value} seed(s)"))}] compared "
+                + string.Join(
+                    ", ",
+                    steps.Select(kv =>
+                        $"{kv.Key} {kv.Value - skipped.GetValueOrDefault(kv.Key)} of {kv.Value}"
+                    )
+                )
         );
 
         // 網羅の宣言の誤りは種の結果より先に赤にする
@@ -212,16 +229,35 @@ public sealed class BackendParityRuntimeTests
             BackendParityDimensions.Gaps,
             BackendParityDimensions.RandomScope
         );
+        var outcomeReport = outcomes.Report();
+        outcomeReport.WriteSummary();
         report.Failures.Should().BeEmpty(report.Render());
 
-        // 受け入れた手の差で外したインメモリの比較が、全体の 1 割を超えない（列の末尾にだけ置く前提が崩れていない）
+        // 手の差で外した比較が、実装先ごとに全体の 1 割を超えない（列の末尾にだけ置く前提が崩れていない）。直す区切りのある
+        // 手の差の打ち切りは、それを宣言した実装先で 1 回以上起きる（引き金の手を作らなくなると 0 になる）
         if (ranAllSeeds && plan.IsDefaultCount)
         {
-            CoverageGuard.AtLeast(
-                "in-memory steps compared after accepted-deviation cuts",
-                inMemorySteps - inMemorySkipped,
-                inMemorySteps * 9 / 10
-            );
+            foreach (var backend in CutBackends)
+            {
+                CoverageGuard.AtLeast(
+                    $"{backend} steps compared after deviation cuts",
+                    steps[backend] - skipped.GetValueOrDefault(backend),
+                    steps[backend] * 9 / 10
+                );
+            }
+
+            foreach (
+                var backend in BackendParityKnownDifferences
+                    .PendingDeviations.Select(d => d.Backend)
+                    .Distinct()
+            )
+            {
+                CoverageGuard.AtLeast(
+                    $"{backend} pending-deviation cuts",
+                    pendingCuts.GetValueOrDefault(backend),
+                    1
+                );
+            }
         }
 
         // 網羅しない組は、種の結果を表明してから、すべての種を流したときだけ照合する（打ち切ったときは上で赤）
@@ -232,8 +268,22 @@ public sealed class BackendParityRuntimeTests
                 BackendParityDimensions.RandomScope,
                 plan
             );
+            outcomeReport.AssertGaps(
+                BackendParityOutcomeDimensions.Gaps,
+                BackendParityDimensions.RandomScope,
+                plan
+            );
         }
     }
+
+    /// <summary>手の差で比較を打ち切る実装先（比べた手の下限を表明する）</summary>
+    private static readonly ParityBackendKind[] CutBackends =
+    [
+        ParityBackendKind.InMemory,
+        ParityBackendKind.EfCore,
+        ParityBackendKind.Remote,
+        ParityBackendKind.RemoteEfCoreOnly,
+    ];
 
     /// <summary>乱数の列で、違いのあった種をいくつまで流して報告するか（それ以上は流さない）</summary>
     private const int MaxFailedSeeds = 3;
@@ -392,6 +442,180 @@ public sealed class BackendParityRuntimeTests
                     ),
                 }
             );
+    }
+
+    /// <summary>
+    /// 比べ方の例外 (1)：フックの規則が投げた保存の、リモートの 500（<c>throws store-rejected</c>）を基準の
+    /// <c>throws ParityHookException</c> と同じとみなすのは、リモートの手でフックが実際に投げたときだけ（ほかの実装先・
+    /// フックの投げない保存では違いのまま）
+    /// </summary>
+    [Fact(
+        DisplayName = "[Parity] 比べ方: リモートの 500 をフックの例外と同じとみなすのは、その保存でフックが投げたときだけ"
+    )]
+    public void HookFailure_RemoteOutcome_IsMatchedOnlyWhenTheHookThrew()
+    {
+        var baseline = Step(ParityStep.HookFailure, ["Before:Update:customers/3"], threw: true);
+
+        Groups(
+                baseline,
+                Step(ParityStep.StoreRejected, ["Before:Update:customers/3"], threw: true),
+                ParityBackendKind.Remote
+            )
+            .Should()
+            .BeEmpty();
+        Groups(
+                baseline,
+                Step(ParityStep.StoreRejected, ["Before:Update:customers/3"], threw: false),
+                ParityBackendKind.Remote
+            )
+            .Should()
+            .Equal("outcome");
+        Groups(
+                baseline,
+                Step(ParityStep.StoreRejected, ["Before:Update:customers/3"], threw: true),
+                ParityBackendKind.EfCore
+            )
+            .Should()
+            .Equal("outcome");
+    }
+
+    /// <summary>
+    /// 比べ方の例外 (2)：フックの規則が投げて終わった保存の Before の列は、基準の列が実際の列の先頭とちょうど一致し、後ろが基準に
+    /// 無い別々の呼び出しなら同じとみなす。順序の入れ替え・重複・空の基準と、制約違反で終わった保存は違いのまま
+    /// </summary>
+    [Fact(
+        DisplayName = "[Parity] 比べ方: フックが投げた保存の Before の列だけ、基準が先頭と一致すれば同じとみなす"
+    )]
+    public void HookFailure_BeforeHooks_MatchOnlyAsPrefixOfAHookFailure()
+    {
+        string[] head = ["Before:Update:customers/3"];
+        string[] longer = ["Before:Update:customers/3", "Before:Update:customers/4"];
+        var baseline = Step(ParityStep.HookFailure, head, threw: true);
+
+        Groups(
+                baseline,
+                Step(ParityStep.HookFailure, longer, threw: true),
+                ParityBackendKind.EfCore
+            )
+            .Should()
+            .BeEmpty();
+        Groups(
+                baseline,
+                Step(ParityStep.HookFailure, [.. longer.Reverse()], threw: true),
+                ParityBackendKind.EfCore
+            )
+            .Should()
+            .Equal("hooks-before");
+        Groups(
+                baseline,
+                Step(ParityStep.HookFailure, [.. head, .. head], threw: true),
+                ParityBackendKind.EfCore
+            )
+            .Should()
+            .Equal("hooks-before");
+        Groups(
+                Step(ParityStep.HookFailure, [], threw: true),
+                Step(ParityStep.HookFailure, longer, threw: true),
+                ParityBackendKind.EfCore
+            )
+            .Should()
+            .Equal("hooks-before");
+
+        // 制約違反で終わった保存（フックは投げていない）は、Before の列が等しいことを求めたまま
+        Groups(
+                Step(ParityStep.StoreRejected, head, threw: false),
+                Step(ParityStep.StoreRejected, longer, threw: false),
+                ParityBackendKind.EfCore
+            )
+            .Should()
+            .Equal("hooks-before");
+    }
+
+    /// <summary>1 手の観測（保存先・スロット・After は空）</summary>
+    private static ParityStep Step(string outcome, IReadOnlyList<string> before, bool threw) =>
+        new(
+            0,
+            "SaveManyCustomers",
+            outcome,
+            [],
+            [],
+            before,
+            [],
+            [
+                .. before,
+                .. threw
+                    ? [ParityStep.HookThrewPrefix + "After:Update:customers/3"]
+                    : Array.Empty<string>(),
+            ]
+        );
+
+    /// <summary>1 手どうしを比べた違いの観点</summary>
+    private static IReadOnlyList<string> Groups(
+        ParityStep baseline,
+        ParityStep actual,
+        ParityBackendKind backend
+    ) => ParityStep.Compare([baseline], [actual], backend).Select(v => v.Aspect).ToList();
+
+    /// <summary>
+    /// 直す区切りのある手の差の仕組み：乱数の列（<see cref="ParityScenario.CutPendingDeviations"/>）でだけ、宣言した実装先
+    /// （EF Core と EF Core 単独のサーバー）をその手から後の比較から外し、外したことが <see cref="ParityCut.Pending"/> つきで残る。同じ手の後のほかの
+    /// 実装先の違いは違いのまま。決まった形のシナリオ（打ち切らない）では、宣言した実装先の違いも違いとして出る
+    /// </summary>
+    [Fact(
+        DisplayName = "[Parity] 直す区切りのある手の差は、乱数の列でだけ宣言した実装先をその手から後の比較から外す"
+    )]
+    public async Task PendingDeviation_CutsOnlyTheDeclaredBackendInRandomScenarios()
+    {
+        ParityOp[] ops =
+        [
+            new LoadOp("A", "orders", 10),
+            new DeviatingOp(
+                new DivergeOp(ParityBackendKind.EfCore, DivergeKind.StoredRow),
+                ParityDeviation.AlternateKeyUpdate
+            ),
+            new DivergeOp(ParityBackendKind.Remote, DivergeKind.StoredRow),
+        ];
+        ParityOp[] seeds =
+        [
+            new SeedOp(new CustomerRow(1, "Alice")),
+            new SeedOp(new OrderRow(10, 1, 1m)),
+        ];
+
+        var random = await new ParityScenario(
+            "control-pending-deviation",
+            seeds,
+            ops,
+            CutPendingDeviations: true
+        ).RunAsync(Ct);
+
+        random.Groups.Should().BeEquivalentTo(new[] { (ParityBackendKind.Remote, "state") });
+        random
+            .Cuts.Should()
+            .BeEquivalentTo(
+                new[] { ParityBackendKind.EfCore, ParityBackendKind.RemoteEfCoreOnly }.Select(
+                    backend => new ParityCut(
+                        backend,
+                        1,
+                        "Diverge",
+                        ParityDeviation.AlternateKeyUpdate,
+                        2,
+                        Pending: true
+                    )
+                )
+            );
+
+        var fixedShape = await new ParityScenario(
+            "control-pending-deviation-fixed",
+            seeds,
+            ops
+        ).RunAsync(Ct);
+
+        fixedShape
+            .Groups.Should()
+            .BeEquivalentTo(
+                new[] { (ParityBackendKind.EfCore, "state"), (ParityBackendKind.Remote, "state") }
+            );
+        fixedShape.Cuts.Should().BeEmpty();
     }
 
     /// <summary>対照のための違いの種類</summary>

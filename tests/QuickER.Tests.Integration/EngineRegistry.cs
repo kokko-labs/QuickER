@@ -19,6 +19,7 @@ internal static class EngineRegistry
         SyncPlanCapabilityNetDimensions.Descriptor,
         SyncPlanShapeRows.Descriptor,
         BackendParityDimensions.Descriptor,
+        BackendParityOutcomeDimensions.Descriptor,
         DslFuzzDimensions.SqlServerDescriptor,
         NameFuzzDdlRoundTripDimensions.Descriptor,
     ];

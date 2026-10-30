@@ -16,12 +16,16 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// QuickER 版と比べるか。false のシナリオは、実装先ごとの期待（<see cref="ExpectOp"/>）だけで判定する
 /// （docs に書いてある違いの上に立つ振る舞い＝ナビゲーションの条件など、基準と比べること自体に意味が無いもの）
 /// </param>
+/// <param name="CutPendingDeviations">
+/// 直す区切りのある手の差（<see cref="BackendParityKnownDifferences.PendingDeviations"/>）でも打ち切るか（乱数の操作の列だけ真）
+/// </param>
 public sealed record ParityScenario(
     string Name,
     IReadOnlyList<ParityOp> Seeds,
     IReadOnlyList<ParityOp> Ops,
     ParityBackendOptions? Options = null,
-    bool CompareWithBaseline = true
+    bool CompareWithBaseline = true,
+    bool CutPendingDeviations = false
 )
 {
     /// <summary>全操作がある実装先（QuickER 版を必ず含む＝基準。並びは実装先の軸の正本＝<see cref="BackendParityAxis"/>）</summary>
@@ -67,17 +71,19 @@ public sealed record ParityScenario(
         foreach (var (kind, trace) in traces)
         {
             // 受け入れた手の差を持つ手を流した実装先は、その手から後を比べない（外したことは Cuts に残す）
-            var cut = CutIndex(Ops, kind);
+            var cut = CutIndex(Ops, kind, CutPendingDeviations);
 
             if (cut is { } at)
             {
+                var deviation = ((DeviatingOp)Ops[at]).Deviation;
                 cuts.Add(
                     new ParityCut(
                         kind,
                         at,
                         Ops[at].Name,
-                        ((DeviatingOp)Ops[at]).Deviation,
-                        Ops.Count - at
+                        deviation,
+                        Ops.Count - at,
+                        Pending: !BackendParityKnownDifferences.Accepts(kind, deviation)
                     )
                 );
             }
@@ -107,16 +113,27 @@ public sealed record ParityScenario(
     }
 
     /// <summary>
-    /// その実装先で受け入れた手の差（<see cref="BackendParityKnownDifferences.AcceptedDeviations"/>）を持つ最初の手の位置
-    /// （無ければ null）。その手から後は、その実装先を比べない
+    /// その実装先で受け入れた手の差（<see cref="BackendParityKnownDifferences.AcceptedDeviations"/>）か、
+    /// <paramref name="includePending"/> のときは直す区切りのある手の差（<see cref="BackendParityKnownDifferences.PendingDeviations"/>）
+    /// を持つ最初の手の位置（無ければ null）。その手から後は、その実装先を比べない
     /// </summary>
-    internal static int? CutIndex(IReadOnlyList<ParityOp> ops, ParityBackendKind kind)
+    internal static int? CutIndex(
+        IReadOnlyList<ParityOp> ops,
+        ParityBackendKind kind,
+        bool includePending = false
+    )
     {
         for (var i = 0; i < ops.Count; i++)
         {
             if (
                 ops[i] is DeviatingOp deviating
-                && BackendParityKnownDifferences.Accepts(kind, deviating.Deviation)
+                && (
+                    BackendParityKnownDifferences.Accepts(kind, deviating.Deviation)
+                    || (
+                        includePending
+                        && BackendParityKnownDifferences.Defers(kind, deviating.Deviation)
+                    )
+                )
             )
             {
                 return i;
@@ -205,6 +222,19 @@ public sealed record ParityStep(
 
     /// <summary>期待の手か（基準との比較では戻り値を比べない）</summary>
     public bool IsExpectation => OpName.StartsWith(ExpectOp.NamePrefix, StringComparison.Ordinal);
+
+    /// <summary>フックの規則が例外を投げたときに記録する呼び出しの接頭辞（<c>Threw:Before:Update:customers/3</c> の形）</summary>
+    public const string HookThrewPrefix = "Threw:";
+
+    /// <summary>Save フックの規則（<see cref="ParityHookBehavior.ThrowBefore"/>・<see cref="ParityHookBehavior.ThrowAfter"/>）が投げた例外の戻り値</summary>
+    public const string HookFailure = "throws ParityHookException";
+
+    /// <summary>リモートのサーバーが 500 で返した失敗の戻り値（<see cref="ParityFormat.Exception"/>）</summary>
+    public const string StoreRejected = "throws store-rejected";
+
+    /// <summary>この手の間に、Save フックの規則が例外を投げたか（サーバー側で走るリモートのフックも同じ記録に残る）</summary>
+    public bool HookThrew =>
+        RawHooks.Any(h => h.StartsWith(HookThrewPrefix, StringComparison.Ordinal));
 
     /// <summary>比べる観点（違いの署名の先頭）</summary>
     public static readonly IReadOnlyList<string> Aspects =
@@ -306,7 +336,10 @@ public sealed record ParityStep(
                 var expected = baseline[i].Aspect(aspect);
                 var actual = trace[i].Aspect(aspect);
 
-                if (!string.Equals(expected, actual, StringComparison.Ordinal))
+                if (
+                    !string.Equals(expected, actual, StringComparison.Ordinal)
+                    && !SameHookFailure(baseline[i], trace[i], backend, aspect)
+                )
                 {
                     yield return new ParityViolation(
                         backend,
@@ -318,6 +351,66 @@ public sealed record ParityStep(
                     );
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Save フックの規則が投げた例外で終わった保存を、実装先の作りの違いを除いて同じとみなすか（比べ方の 2 つの例外）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// (1) 戻り値：リモートはサーバーの例外を 500 で包むので型を区別できない。基準が <see cref="ParityStep.HookFailure"/> で、
+    /// リモートの手でフックの規則が実際に投げた（<see cref="ParityStep.HookThrew"/>）ときだけ、リモートの
+    /// <see cref="ParityStep.StoreRejected"/> を同じとみなす。ほかの実装先・制約違反の比較は変えない。
+    /// </para>
+    /// <para>
+    /// (2) Before の列：QuickER 版は行ごとに Before→DML→After を並べ、EF Core は Before をすべて走らせてから SaveChanges の後に
+    /// After をまとめ、インメモリは Before をすべて走らせてから After をまとめる（CLAUDE.md の Save フック節の「実装先差分」と
+    /// docs の「実装先ごとの差分」の表）。そのため After で投げた保存では、QuickER 版の Before の列が投げた行で止まり、ほかの
+    /// 実装先は残りの行の Before まで走らせる。両方の手でフックの規則が投げて終わった保存だけ、基準の列が空でなく、実際の列の
+    /// 先頭とちょうど一致し、先頭より後ろの呼び出しが基準に無い別々の呼び出しなら同じとみなす（順序の入れ替え・余計な重複は
+    /// 違いのまま）。実際の列が「同じ保存を成功させたときの Before の列」の先頭であることまでは見ない（規則を外した保存を
+    /// 実装先ごとにもう一度流す必要があり、比べる仕組みの外に出るため）。
+    /// </para>
+    /// </remarks>
+    internal static bool SameHookFailure(
+        ParityStep baseline,
+        ParityStep actual,
+        ParityBackendKind backend,
+        string aspect
+    )
+    {
+        var actualFailed =
+            actual.HookThrew
+            && (
+                actual.Outcome == ParityStep.HookFailure
+                || (
+                    ParityBackendKinds.IsRemote(backend)
+                    && actual.Outcome == ParityStep.StoreRejected
+                )
+            );
+
+        if (baseline.Outcome != ParityStep.HookFailure || !baseline.HookThrew || !actualFailed)
+        {
+            return false;
+        }
+
+        switch (aspect)
+        {
+            case "outcome":
+                return ParityBackendKinds.IsRemote(backend);
+            case "hooks-before":
+                var head = baseline.BeforeHooks;
+                var all = actual.BeforeHooks;
+                var tail = all.Skip(head.Count).ToList();
+
+                return head.Count > 0
+                    && all.Count >= head.Count
+                    && all.Take(head.Count).SequenceEqual(head, StringComparer.Ordinal)
+                    && tail.Distinct(StringComparer.Ordinal).Count() == tail.Count
+                    && !tail.Intersect(head, StringComparer.Ordinal).Any();
+            default:
+                return false;
         }
     }
 }
@@ -348,12 +441,14 @@ public sealed record ParityViolation(
 /// <param name="OpName">その手の名前</param>
 /// <param name="Deviation">受け入れた手の差</param>
 /// <param name="SkippedSteps">比べなかった手の数</param>
+/// <param name="Pending">直す区切りのある手の差で打ち切ったか（偽＝受け入れた差）</param>
 public sealed record ParityCut(
     ParityBackendKind Backend,
     int StepIndex,
     string OpName,
     ParityDeviation Deviation,
-    int SkippedSteps
+    int SkippedSteps,
+    bool Pending = false
 );
 
 /// <summary>シナリオを全実装先で流した結果（<see cref="Cuts"/>＝受け入れた手の差で比較を打ち切った位置）</summary>

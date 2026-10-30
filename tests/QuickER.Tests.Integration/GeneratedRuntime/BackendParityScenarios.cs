@@ -581,7 +581,346 @@ public static class BackendParityScenarios
                 new LoadOp("A", "orders", 10),
             ]
         ),
+        // 連絡先（主キーと列名の違う値オブジェクトの外部キー 5 本）の挿入・読み込み・付け替え・保存・削除
+        new(
+            "contacts-crud",
+            [.. Basic, new SeedOp(new CustomerRow(3, "Cy"))],
+            [
+                new InsertOp(
+                    new ContactRow(
+                        500,
+                        "c",
+                        1,
+                        Watcher: 2,
+                        Backup: 3,
+                        Fallback: 2,
+                        CustomerCode: "K3"
+                    )
+                ),
+                new InsertOp(new ContactRow(501, "d", 2)),
+                new LoadOp(S, "contacts", 500),
+                new EditContactOp(
+                    S,
+                    500,
+                    "c2",
+                    new ParityContactTarget(ParityContactRelation.Watcher, 3)
+                ),
+                new SaveOp(S),
+                new EditContactOp(
+                    S,
+                    500,
+                    Target: new ParityContactTarget(ParityContactRelation.Backup, null)
+                ),
+                new EditContactOp(
+                    S,
+                    500,
+                    Target: new ParityContactTarget(ParityContactRelation.CustomerCode, null, "K1")
+                ),
+                new SaveOp(S),
+                new LoadOp("B", "customers", 2),
+                new AttachContactOp("B", "customers/2", 501, ParityContactRelation.Owner),
+                // 持っている親（顧客 2）と食い違わない付け替え（watcher を 3 へ）。食い違う形は n2-navigation-overrides-foreign-key
+                new EditContactOp(
+                    "B",
+                    501,
+                    "d2",
+                    new ParityContactTarget(ParityContactRelation.Watcher, 3)
+                ),
+                new SaveOp("B"),
+                new DeleteOp("contacts", 500),
+                new LoadOp("C", "contacts", 501),
+            ]
+        ),
+        // P2-5-N2: 顧客 2 の owner のコレクションに持った連絡先の owner を 3 へ書き換え、顧客 2 から保存する（持っている親と
+        // 外部キーの値が食い違うグラフ）
+        new(
+            "n2-navigation-overrides-foreign-key",
+            [
+                .. Basic,
+                new SeedOp(new CustomerRow(3, "Cy")),
+                new SeedOp(new ContactRow(501, "d", 2)),
+            ],
+            [
+                new LoadOp("B", "customers", 2),
+                new AttachContactOp("B", "customers/2", 501, ParityContactRelation.Owner),
+                new EditContactOp(
+                    "B",
+                    501,
+                    "d2",
+                    new ParityContactTarget(ParityContactRelation.Owner, 3)
+                ),
+                new SaveOp("B"),
+                new LoadOp("C", "contacts", 501),
+            ]
+        ),
+        // 顧客を連絡先と紹介先ごと Include して読み、グラフの連絡先を編集して顧客から保存する（リモートには無い）
+        new(
+            "contacts-include-and-save",
+            [
+                .. Basic,
+                new SeedOp(new CustomerRow(3, "Cy", Referrer: 1)),
+                new SeedOp(
+                    new ContactRow(
+                        500,
+                        "c",
+                        1,
+                        Watcher: 1,
+                        Backup: 1,
+                        Fallback: 1,
+                        CustomerCode: "K1"
+                    )
+                ),
+                new SeedOp(new ContactRow(501, "d", 2, Watcher: 1)),
+            ],
+            [
+                new LoadCustomerWithContactsOp(S, 1),
+                new EditContactOp(S, 500, "c2"),
+                new EditContactOp(
+                    S,
+                    501,
+                    Target: new ParityContactTarget(ParityContactRelation.Watcher, 2)
+                ),
+                new EditCustomerOp(S, 3, Note: "r"),
+                new SaveOp(S),
+                new LoadCustomerWithContactsOp("B", 1),
+            ]
+        ),
+        // H5: 任意の自己参照（NO ACTION）で参照されている顧客を、参照する顧客と一緒に 1 回の保存で消す（再現パッチの形）
+        ReferencedReferrerDelete("h5-referrer-delete-dependent-modified", modifyDependent: true),
+        ReferencedReferrerDelete("h5-referrer-delete-dependent-unmodified", modifyDependent: false),
+        // H5 と、参照アクションごとの同じ形：連絡先が参照している顧客を、その連絡先を持つ別の顧客と一緒に 1 回の保存で消す
+        ReferencedContactDelete(
+            "h5-contact-watcher-delete-dependent-modified",
+            ParityContactRelation.Watcher,
+            true
+        ),
+        ReferencedContactDelete(
+            "h5-contact-watcher-delete-dependent-unmodified",
+            ParityContactRelation.Watcher,
+            false
+        ),
+        ReferencedContactDelete(
+            "contact-owner-delete-dependent-modified",
+            ParityContactRelation.Owner,
+            true
+        ),
+        ReferencedContactDelete(
+            "contact-owner-delete-dependent-unmodified",
+            ParityContactRelation.Owner,
+            false
+        ),
+        ReferencedContactDelete(
+            "contact-backup-delete-dependent-modified",
+            ParityContactRelation.Backup,
+            true
+        ),
+        ReferencedContactDelete(
+            "contact-backup-delete-dependent-unmodified",
+            ParityContactRelation.Backup,
+            false
+        ),
+        ReferencedContactDelete(
+            "contact-fallback-delete-dependent-modified",
+            ParityContactRelation.Fallback,
+            true
+        ),
+        ReferencedContactDelete(
+            "contact-fallback-delete-dependent-unmodified",
+            ParityContactRelation.Fallback,
+            false
+        ),
+        ReferencedContactDelete(
+            "h5-contact-code-delete-dependent-modified",
+            ParityContactRelation.CustomerCode,
+            true
+        ),
+        ReferencedContactDelete(
+            "h5-contact-code-delete-dependent-unmodified",
+            ParityContactRelation.CustomerCode,
+            false
+        ),
+        // H1: 一意制約を参照する外部キーの親の列（代替キー）を更新する（参照あり・なし × UpdateAsync・グラフ保存）
+        AlternateKeyUpdate("h1-alternate-key-referenced-update", referenced: true, viaSave: false),
+        AlternateKeyUpdate("h1-alternate-key-referenced-save", referenced: true, viaSave: true),
+        AlternateKeyUpdate(
+            "h1-alternate-key-unreferenced-update",
+            referenced: false,
+            viaSave: false
+        ),
+        AlternateKeyUpdate("h1-alternate-key-unreferenced-save", referenced: false, viaSave: true),
+        // H3: Before が値を書き換えてから false を返す（更新・削除）
+        HookOnCustomer("h3-edit-then-skip-update", ParityHookBehavior.EditThenSkip, delete: false),
+        HookOnCustomer("h3-edit-then-skip-delete", ParityHookBehavior.EditThenSkip, delete: true),
+        // H3 の挿入の形：新しい顧客 9 をグラフ保存で挿入し、Before が書き換えてから false を返す（乱数の列の末尾の手で見つけた形）
+        new(
+            "h3-edit-then-skip-insert",
+            [.. Basic, new SeedOp(new CustomerRow(4, "Dan"))],
+            [
+                new NewRootOp("A", new CustomerRow(9, "Ivy"), RowState.Added),
+                new LoadOp("B", "customers", 4),
+                new EditCustomerOp("B", 4, Note: "m"),
+                new SaveManyCustomersOp(["A", "B"]),
+                new LoadOp("C", "customers", 9),
+            ],
+            new ParityBackendOptions(
+                HookRules:
+                [
+                    new ParityHookRule("Insert:customers/9", ParityHookBehavior.EditThenSkip),
+                ]
+            )
+        ),
+        // フックのほかの振る舞い（書き換えて続ける・Before で投げる・After で投げる）
+        HookOnCustomer(
+            "hook-edit-then-continue-update",
+            ParityHookBehavior.EditThenContinue,
+            delete: false
+        ),
+        HookOnCustomer(
+            "hook-edit-then-continue-delete",
+            ParityHookBehavior.EditThenContinue,
+            delete: true
+        ),
+        HookOnCustomer("hook-throw-before-update", ParityHookBehavior.ThrowBefore, delete: false),
+        HookOnCustomer("hook-throw-before-delete", ParityHookBehavior.ThrowBefore, delete: true),
+        HookOnCustomer("hook-throw-after-update", ParityHookBehavior.ThrowAfter, delete: false),
+        HookOnCustomer("hook-throw-after-delete", ParityHookBehavior.ThrowAfter, delete: true),
     ];
+
+    /// <summary>
+    /// 顧客 3（注文なし）を紹介者に持つ顧客 4 を読み（<paramref name="modifyDependent"/> のときはメモを編集）、3 に削除の印を付けて、
+    /// 4・3 の並びで 1 回の複数形のグラフ保存にする。紹介者の外部キーは任意 × NO ACTION（DB は断る）
+    /// </summary>
+    private static ParityScenario ReferencedReferrerDelete(string name, bool modifyDependent) =>
+        new(
+            name,
+            [
+                .. Basic,
+                new SeedOp(new CustomerRow(3, "Cy")),
+                new SeedOp(new CustomerRow(4, "Dan", Referrer: 3)),
+            ],
+            [
+                new LoadOp("A", "customers", 4),
+                .. modifyDependent
+                    ? [new EditCustomerOp("A", 4, Note: "edited")]
+                    : Array.Empty<ParityOp>(),
+                new LoadOp("B", "customers", 3),
+                new MarkRemovedOp("B", "customers/3"),
+                // 顧客 3 は顧客 4 に参照されている（インメモリの受け入れた差＝P1）
+                new DeviatingOp(
+                    new SaveManyCustomersOp(["A", "B"]),
+                    ParityDeviation.ParentDeleteWithChildren
+                ),
+                new LoadOp("C", "customers", 4),
+            ]
+        );
+
+    /// <summary>
+    /// 連絡先 500 の <paramref name="relation"/> の外部キーが顧客 3（注文なし）を指す。顧客 2 を読んで連絡先を別の関係
+    /// （owner か watcher＝2 を指す関係）のコレクションに持ち（<paramref name="modifyDependent"/> のときはラベルを編集）、3 に削除の印を
+    /// 付けて、2・3 の並びで 1 回の複数形のグラフ保存にする
+    /// </summary>
+    private static ParityScenario ReferencedContactDelete(
+        string name,
+        ParityContactRelation relation,
+        bool modifyDependent
+    )
+    {
+        var hold =
+            relation == ParityContactRelation.Owner
+                ? ParityContactRelation.Watcher
+                : ParityContactRelation.Owner;
+        var contact = relation switch
+        {
+            ParityContactRelation.Owner => new ContactRow(500, "c", 3, Watcher: 2),
+            ParityContactRelation.Watcher => new ContactRow(500, "c", 2, Watcher: 3),
+            ParityContactRelation.Backup => new ContactRow(500, "c", 2, Backup: 3),
+            ParityContactRelation.Fallback => new ContactRow(500, "c", 2, Fallback: 3),
+            _ => new ContactRow(500, "c", 2, CustomerCode: CustomerRow.DefaultCode(3)),
+        };
+
+        return new(
+            name,
+            [.. Basic, new SeedOp(new CustomerRow(3, "Cy")), new SeedOp(contact)],
+            [
+                new LoadOp("A", "customers", 2),
+                new AttachContactOp("A", "customers/2", 500, hold),
+                .. modifyDependent
+                    ? [new EditContactOp("A", 500, "edited")]
+                    : Array.Empty<ParityOp>(),
+                new LoadOp("B", "customers", 3),
+                new MarkRemovedOp("B", "customers/3"),
+                // 顧客 3 は連絡先 500 に参照されている（インメモリの受け入れた差＝P1）
+                new DeviatingOp(
+                    new SaveManyCustomersOp(["A", "B"]),
+                    ParityDeviation.ParentDeleteWithChildren
+                ),
+                new LoadOp("C", "contacts", 500),
+            ]
+        );
+    }
+
+    /// <summary>
+    /// 顧客 3 のコード（連絡先の customer_code が参照する代替キー）を変える。<paramref name="referenced"/> のときは連絡先 500 が
+    /// そのコードを参照している（外部キーは ON UPDATE NO ACTION＝DB は断る）
+    /// </summary>
+    private static ParityScenario AlternateKeyUpdate(string name, bool referenced, bool viaSave) =>
+        new(
+            name,
+            [
+                .. Basic,
+                new SeedOp(new CustomerRow(3, "Cy")),
+                .. referenced
+                    ?
+                    [
+                        new SeedOp(
+                            new ContactRow(500, "c", 2, CustomerCode: CustomerRow.DefaultCode(3))
+                        ),
+                    ]
+                    : Array.Empty<ParityOp>(),
+            ],
+            [
+                new LoadOp("A", "customers", 3),
+                new EditCustomerOp("A", 3, Note: "n", Code: "NEW3"),
+                // 参照されているコードの更新はインメモリの受け入れた差（P2）
+                referenced
+                    ? new DeviatingOp(Save(viaSave), ParityDeviation.ReferencedKeyUpdate)
+                    : Save(viaSave),
+                new LoadOp("C", "customers", 3),
+            ]
+        );
+
+    /// <summary>顧客 3 を、グラフ保存か UpdateAsync で保存する手</summary>
+    private static ParityOp Save(bool viaSave) =>
+        viaSave ? new SaveOp("A") : new UpdateCustomerOp("A");
+
+    /// <summary>
+    /// 顧客 3（注文なし）の更新か削除に、Save フックの振る舞い <paramref name="behavior"/> を当てる（同じ保存の顧客 4 には当てない）
+    /// </summary>
+    private static ParityScenario HookOnCustomer(
+        string name,
+        ParityHookBehavior behavior,
+        bool delete
+    ) =>
+        new(
+            name,
+            [.. Basic, new SeedOp(new CustomerRow(3, "Cy")), new SeedOp(new CustomerRow(4, "Dan"))],
+            [
+                new LoadOp("A", "customers", 3),
+                delete
+                    ? new MarkRemovedOp("A", "customers/3")
+                    : new EditCustomerOp("A", 3, Note: "n"),
+                new LoadOp("B", "customers", 4),
+                new EditCustomerOp("B", 4, Note: "m"),
+                new SaveManyCustomersOp(["A", "B"]),
+                new LoadOp("C", "customers", 3),
+            ],
+            new ParityBackendOptions(
+                HookRules:
+                [
+                    new ParityHookRule((delete ? "Delete" : "Update") + ":customers/3", behavior),
+                ]
+            )
+        );
 
     /// <summary>名前でシナリオを引く</summary>
     public static ParityScenario Get(string name) => All.Single(s => s.Name == name);

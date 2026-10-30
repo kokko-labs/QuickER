@@ -62,6 +62,8 @@ public static class BackendParityFixtureDefinition
     private static readonly Guid CustomerReferrerColId = new(
         "b9000000-0000-0000-0000-000000000006"
     );
+    private static readonly Guid CustomerCodeColId = new("b9000000-0000-0000-0000-000000000007");
+    private static readonly Guid CustomerCodeUniqueId = new("b9000000-0000-0000-0000-000000000008");
 
     private static readonly Guid OrderId = new("b9100000-0000-0000-0000-000000000001");
     private static readonly Guid OrderPkColId = new("b9100000-0000-0000-0000-000000000002");
@@ -80,9 +82,27 @@ public static class BackendParityFixtureDefinition
     private static readonly Guid LineQuantityColId = new("b9200000-0000-0000-0000-000000000005");
     private static readonly Guid LineDiscountColId = new("b9200000-0000-0000-0000-000000000006");
 
+    private static readonly Guid ContactId = new("b9400000-0000-0000-0000-000000000001");
+    private static readonly Guid ContactPkColId = new("b9400000-0000-0000-0000-000000000002");
+    private static readonly Guid ContactLabelColId = new("b9400000-0000-0000-0000-000000000003");
+    private static readonly Guid ContactOwnerColId = new("b9400000-0000-0000-0000-000000000004");
+    private static readonly Guid ContactWatcherColId = new("b9400000-0000-0000-0000-000000000005");
+    private static readonly Guid ContactBackupColId = new("b9400000-0000-0000-0000-000000000007");
+    private static readonly Guid ContactFallbackColId = new("b9400000-0000-0000-0000-000000000008");
+    private static readonly Guid ContactCustomerCodeColId = new(
+        "b9400000-0000-0000-0000-000000000009"
+    );
+
     private static readonly Guid RelCustomerOrders = new("b9300000-0000-0000-0000-000000000001");
     private static readonly Guid RelOrderLines = new("b9300000-0000-0000-0000-000000000002");
     private static readonly Guid RelCustomerReferrals = new("b9300000-0000-0000-0000-000000000003");
+    private static readonly Guid RelContactOwner = new("b9300000-0000-0000-0000-000000000004");
+    private static readonly Guid RelContactWatcher = new("b9300000-0000-0000-0000-000000000005");
+    private static readonly Guid RelContactBackup = new("b9300000-0000-0000-0000-000000000007");
+    private static readonly Guid RelContactFallback = new("b9300000-0000-0000-0000-000000000008");
+    private static readonly Guid RelContactCustomerCode = new(
+        "b9300000-0000-0000-0000-000000000009"
+    );
 
     /// <summary>一致テスト用の ER 図を決定的に構築する（要素 ID は固定 GUID・型は SQL Server 表記）。</summary>
     public static ErDiagram Build()
@@ -125,6 +145,15 @@ public static class BackendParityFixtureDefinition
                     IsForeignKey = true,
                     IsNullable = true,
                 },
+                // 一意な顧客コード（contacts.customer_code が参照する＝主キーでない一意制約を参照する外部キーの親。EF Core は
+                // HasPrincipalKey で代替キーにする）。EF Core の代替キーは必須なので NOT NULL
+                new Column
+                {
+                    Id = CustomerCodeColId,
+                    Name = "code",
+                    DataType = "nvarchar(20)",
+                    IsNullable = false,
+                },
             },
             UniqueConstraints =
             {
@@ -133,6 +162,12 @@ public static class BackendParityFixtureDefinition
                     Id = CustomerNameUniqueId,
                     Name = "UQ_customers_name",
                     ColumnIds = [CustomerNameColId],
+                },
+                new UniqueConstraint
+                {
+                    Id = CustomerCodeUniqueId,
+                    Name = "UQ_customers_code",
+                    ColumnIds = [CustomerCodeColId],
                 },
             },
         };
@@ -252,9 +287,49 @@ public static class BackendParityFixtureDefinition
             },
         };
 
+        // 顧客を参照する外部キーを参照アクションごとに持つ連絡先。どの外部キーも主キーと列名が違う（値オブジェクトは顧客の
+        // 主キー・コードの型を共有する）。owner は必須 × NO ACTION、ほかは任意（NO ACTION・SET NULL・SET DEFAULT。図は RESTRICT を持たない＝取込が NO ACTION へ畳む）。
+        // SET DEFAULT は図が既定値を持たないので、SQLite は暗黙の既定の NULL を入れる。customer_code は一意制約（customers.code）を
+        // 参照する
+        var contact = new Entity
+        {
+            Id = ContactId,
+            TableName = "contacts",
+            Columns =
+            {
+                new Column
+                {
+                    Id = ContactPkColId,
+                    Name = "contact_id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = ContactLabelColId,
+                    Name = "label",
+                    DataType = "nvarchar(50)",
+                    IsNullable = false,
+                },
+                ContactForeignKey(ContactOwnerColId, "owner_id", nullable: false),
+                ContactForeignKey(ContactWatcherColId, "watcher_id", nullable: true),
+                ContactForeignKey(ContactBackupColId, "backup_id", nullable: true),
+                ContactForeignKey(ContactFallbackColId, "fallback_id", nullable: true),
+                new Column
+                {
+                    Id = ContactCustomerCodeColId,
+                    Name = "customer_code",
+                    DataType = "nvarchar(20)",
+                    IsForeignKey = true,
+                    IsNullable = true,
+                },
+            },
+        };
+
         return new ErDiagram
         {
-            Entities = { customer, order, line },
+            Entities = { customer, order, line, contact },
             Relationships =
             {
                 new Relationship
@@ -279,6 +354,41 @@ public static class BackendParityFixtureDefinition
                     OnDelete = ForeignKeyReferentialAction.NoAction,
                     OnUpdate = ForeignKeyReferentialAction.NoAction,
                 },
+                ContactRelationship(
+                    RelContactOwner,
+                    CustomerPkColId,
+                    ContactOwnerColId,
+                    "FK_contacts_owner",
+                    ForeignKeyReferentialAction.NoAction
+                ),
+                ContactRelationship(
+                    RelContactWatcher,
+                    CustomerPkColId,
+                    ContactWatcherColId,
+                    "FK_contacts_watcher",
+                    ForeignKeyReferentialAction.NoAction
+                ),
+                ContactRelationship(
+                    RelContactBackup,
+                    CustomerPkColId,
+                    ContactBackupColId,
+                    "FK_contacts_backup",
+                    ForeignKeyReferentialAction.SetNull
+                ),
+                ContactRelationship(
+                    RelContactFallback,
+                    CustomerPkColId,
+                    ContactFallbackColId,
+                    "FK_contacts_fallback",
+                    ForeignKeyReferentialAction.SetDefault
+                ),
+                ContactRelationship(
+                    RelContactCustomerCode,
+                    CustomerCodeColId,
+                    ContactCustomerCodeColId,
+                    "FK_contacts_customer_code",
+                    ForeignKeyReferentialAction.NoAction
+                ),
                 new Relationship
                 {
                     Id = RelOrderLines,
@@ -293,4 +403,35 @@ public static class BackendParityFixtureDefinition
             },
         };
     }
+
+    /// <summary>連絡先から顧客の主キーへの外部キーの列（int）</summary>
+    private static Column ContactForeignKey(Guid id, string name, bool nullable) =>
+        new()
+        {
+            Id = id,
+            Name = name,
+            DataType = "int",
+            IsForeignKey = true,
+            IsNullable = nullable,
+        };
+
+    /// <summary>顧客から連絡先への 1 対多（ON UPDATE は NO ACTION）</summary>
+    private static Relationship ContactRelationship(
+        Guid id,
+        Guid parentColumn,
+        Guid childColumn,
+        string name,
+        ForeignKeyReferentialAction onDelete
+    ) =>
+        new()
+        {
+            Id = id,
+            Type = RelationshipType.OneToMany,
+            SourceEntityId = CustomerId,
+            TargetEntityId = ContactId,
+            ColumnPairs = [new(parentColumn, childColumn)],
+            ConstraintName = name,
+            OnDelete = onDelete,
+            OnUpdate = ForeignKeyReferentialAction.NoAction,
+        };
 }

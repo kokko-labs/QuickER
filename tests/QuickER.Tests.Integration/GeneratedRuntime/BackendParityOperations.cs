@@ -15,10 +15,21 @@ public abstract record ParityRow
     public abstract EntityBaseCore Build();
 }
 
-/// <summary>顧客の行（<paramref name="Referrer"/> は紹介者＝自己参照の親の顧客）</summary>
-public sealed record CustomerRow(int Id, string Name, string? Note = null, int? Referrer = null)
-    : ParityRow
+/// <summary>
+/// 顧客の行（<paramref name="Referrer"/> は紹介者＝自己参照の親の顧客。<paramref name="Code"/> は一意な顧客コード＝連絡先の
+/// customer_code が参照する代替キーで、省略すると <c>K{Id}</c>）
+/// </summary>
+public sealed record CustomerRow(
+    int Id,
+    string Name,
+    string? Note = null,
+    int? Referrer = null,
+    string? Code = null
+) : ParityRow
 {
+    /// <summary>省略したときの顧客コード</summary>
+    public static string DefaultCode(int id) => $"K{id}";
+
     public override EntityBaseCore Build() =>
         new CustomerEntity
         {
@@ -26,6 +37,35 @@ public sealed record CustomerRow(int Id, string Name, string? Note = null, int? 
             Name = NameValue.Create(Name),
             Note = Note is null ? null : NoteValue.Create(Note),
             ReferrerId = Referrer is null ? null : CustomerIdValue.Create(Referrer.Value),
+            Code = CodeValue.Create(Code ?? DefaultCode(Id)),
+        };
+}
+
+/// <summary>
+/// 連絡先の行（顧客を参照する外部キーを参照アクションごとに持つ：<paramref name="Owner"/>＝必須 × NO ACTION・
+/// <paramref name="Watcher"/>＝任意 × NO ACTION・<paramref name="Backup"/>＝任意 × SET NULL・<paramref name="Fallback"/>＝
+/// 任意 × SET DEFAULT・<paramref name="CustomerCode"/>＝一意な顧客コードを参照する任意 × NO ACTION）
+/// </summary>
+public sealed record ContactRow(
+    int Id,
+    string Label,
+    int Owner,
+    int? Watcher = null,
+    int? Backup = null,
+    int? Fallback = null,
+    string? CustomerCode = null
+) : ParityRow
+{
+    public override EntityBaseCore Build() =>
+        new ContactEntity
+        {
+            ContactId = ContactIdValue.Create(Id),
+            Label = LabelValue.Create(Label),
+            OwnerId = CustomerIdValue.Create(Owner),
+            WatcherId = Watcher is null ? null : CustomerIdValue.Create(Watcher.Value),
+            BackupId = Backup is null ? null : CustomerIdValue.Create(Backup.Value),
+            FallbackId = Fallback is null ? null : CustomerIdValue.Create(Fallback.Value),
+            CustomerCode = CustomerCode is null ? null : CodeValue.Create(CustomerCode),
         };
 }
 
@@ -126,6 +166,14 @@ public abstract record ParityOp
                 options.Mode,
                 ct
             ),
+            ContactEntity c => backend.Contacts.SaveAsync(
+                c,
+                options.CascadeSave,
+                options.CascadeDelete,
+                options.InsertWhenUpdateMissing,
+                options.Mode,
+                ct
+            ),
             _ => throw new ArgumentException(root.GetType().Name, nameof(root)),
         };
 
@@ -183,6 +231,9 @@ public sealed record SeedOp(ParityRow Row) : ParityOp
             case OrderLineEntity l:
                 await backend.Outside.Lines.InsertAsync(l, ct);
                 break;
+            case ContactEntity c:
+                await backend.Outside.Contacts.InsertAsync(c, ct);
+                break;
         }
 
         return "ok";
@@ -205,6 +256,9 @@ public sealed record InsertOp(ParityRow Row) : ParityOp
             case OrderLineEntity l:
                 await backend.Lines.InsertAsync(l, ct);
                 return ParityFormat.Graph(l)[0];
+            case ContactEntity c:
+                await backend.Contacts.InsertAsync(c, ct);
+                return ParityFormat.Graph(c)[0];
             default:
                 throw new InvalidOperationException();
         }
@@ -221,6 +275,7 @@ public sealed record LoadOp(string Slot, string Table, int Id) : ParityOp
             "customers" => await backend.Customers.GetByIdAsync(CustomerIdValue.Create(Id), ct),
             "orders" => await backend.Orders.GetByIdAsync(OrderIdValue.Create(Id), ct),
             "order_lines" => await backend.Lines.GetByIdAsync(LineIdValue.Create(Id), ct),
+            "contacts" => await backend.Contacts.GetByIdAsync(ContactIdValue.Create(Id), ct),
             _ => throw new ArgumentException(Table),
         };
 
@@ -240,7 +295,7 @@ public sealed record LoadOp(string Slot, string Table, int Id) : ParityOp
 /// <summary>全機能面で注文を明細ごと Include して読み、スロットへ置く（リモートには無い）</summary>
 public sealed record LoadOrderWithLinesOp(string Slot, int Id) : ParityOp
 {
-    public override bool Supports(ParityBackendKind kind) => kind != ParityBackendKind.Remote;
+    public override bool Supports(ParityBackendKind kind) => !ParityBackendKinds.IsRemote(kind);
 
     public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
     {
@@ -372,8 +427,14 @@ public sealed record AddChildCustomerOp(string Slot, CustomerRow Row) : ParityOp
 /// （顧客の下の顧客・顧客の下の注文・注文の下の明細）。保存先の行を読まずに組み立てるので、付け替えた子の元の親は
 /// 保存先にしか無い（リモートや切り離したエンティティの形）
 /// </summary>
-public sealed record AddChildOp(string Slot, string ParentKey, ParityRow Row, RowState State)
-    : ParityOp
+/// <param name="Relation">連絡先を足すときの、顧客から連絡先へのコレクション（ほかの行では使わない）</param>
+public sealed record AddChildOp(
+    string Slot,
+    string ParentKey,
+    ParityRow Row,
+    RowState State,
+    ParityContactRelation Relation = ParityContactRelation.Owner
+) : ParityOp
 {
     public override Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
     {
@@ -390,6 +451,9 @@ public sealed record AddChildOp(string Slot, string ParentKey, ParityRow Row, Ro
                 break;
             case (OrderEntity parent, OrderLineEntity line):
                 parent.OrderLines.Add(line);
+                break;
+            case (CustomerEntity parent, ContactEntity contact):
+                ParityContactRelations.CollectionOf(parent, Relation).Add(contact);
                 break;
             default:
                 throw new InvalidOperationException(
@@ -532,6 +596,7 @@ public sealed record DeleteOp(string Table, int Id) : ParityOp
             "customers" => await backend.Customers.DeleteAsync(CustomerIdValue.Create(Id), ct),
             "orders" => await backend.Orders.DeleteAsync(OrderIdValue.Create(Id), ct),
             "order_lines" => await backend.Lines.DeleteAsync(LineIdValue.Create(Id), ct),
+            "contacts" => await backend.Contacts.DeleteAsync(ContactIdValue.Create(Id), ct),
             _ => throw new ArgumentException(Table),
         };
 
@@ -552,6 +617,7 @@ public sealed record OutsideDeleteOp(string Table, int Id) : ParityOp
             ),
             "orders" => await backend.Outside.Orders.DeleteAsync(OrderIdValue.Create(Id), ct),
             "order_lines" => await backend.Outside.Lines.DeleteAsync(LineIdValue.Create(Id), ct),
+            "contacts" => await backend.Outside.Contacts.DeleteAsync(ContactIdValue.Create(Id), ct),
             _ => throw new ArgumentException(Table),
         };
 
@@ -618,7 +684,7 @@ public sealed record NullKeyBlobOp(bool Write, bool ViaFile) : ParityOp
     public override string Name =>
         $"NullKeyBlob:{(Write ? "Write" : "Read")}{(ViaFile ? ":File" : "")}";
 
-    public override bool Supports(ParityBackendKind kind) => kind != ParityBackendKind.EfCore;
+    public override bool Supports(ParityBackendKind kind) => ParityBackendKinds.HasBlobStream(kind);
 
     public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
     {
@@ -683,7 +749,7 @@ public sealed record PagedOrdersOp(
     public override string Name =>
         $"PagedOrders:{Terminal}:skip={Skip?.ToString() ?? "-"}:take={Take?.ToString() ?? "-"}";
 
-    public override bool Supports(ParityBackendKind kind) => kind != ParityBackendKind.Remote;
+    public override bool Supports(ParityBackendKind kind) => !ParityBackendKinds.IsRemote(kind);
 
     public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
     {
@@ -722,7 +788,7 @@ public sealed record PagedOrdersOp(
 public sealed record ExecuteDeleteOrdersOp(ParityOrderPredicate Predicate, bool CascadeDelete)
     : ParityOp
 {
-    public override bool Supports(ParityBackendKind kind) => kind != ParityBackendKind.Remote;
+    public override bool Supports(ParityBackendKind kind) => !ParityBackendKinds.IsRemote(kind);
 
     public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
     {
@@ -747,7 +813,7 @@ public sealed record ExecuteDeleteOrdersOp(ParityOrderPredicate Predicate, bool 
 /// </summary>
 public sealed record ExecuteDeleteCustomersOp(bool CascadeDelete) : ParityOp
 {
-    public override bool Supports(ParityBackendKind kind) => kind != ParityBackendKind.Remote;
+    public override bool Supports(ParityBackendKind kind) => !ParityBackendKinds.IsRemote(kind);
 
     public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct) =>
         $"rows={await backend.FullCustomers.Query().Where(c => c.CustomerId.Value >= 1).ExecuteDeleteAsync(CascadeDelete, ct)}";
@@ -756,7 +822,7 @@ public sealed record ExecuteDeleteCustomersOp(bool CascadeDelete) : ParityOp
 /// <summary>注文の除外 blob をリモート面の Stream アクセサで書く（EF Core は NotSupported＝docs に書いてある違い）</summary>
 public sealed record WriteBlobOp(int OrderId, string Column, byte[]? Data) : ParityOp
 {
-    public override bool Supports(ParityBackendKind kind) => kind != ParityBackendKind.EfCore;
+    public override bool Supports(ParityBackendKind kind) => ParityBackendKinds.HasBlobStream(kind);
 
     public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
     {
@@ -776,7 +842,7 @@ public sealed record WriteBlobOp(int OrderId, string Column, byte[]? Data) : Par
 /// <summary>注文の除外 blob をリモート面の Stream アクセサで読む（EF Core は NotSupported）</summary>
 public sealed record ReadBlobOp(int OrderId, string Column) : ParityOp
 {
-    public override bool Supports(ParityBackendKind kind) => kind != ParityBackendKind.EfCore;
+    public override bool Supports(ParityBackendKind kind) => ParityBackendKinds.HasBlobStream(kind);
 
     public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
     {
@@ -827,5 +893,237 @@ public sealed record KeepOp(string Slot, string Key, string As) : ParityOp
         backend.Slots[As] = Find(backend, Slot, Key);
 
         return Task.FromResult("kept");
+    }
+}
+
+/// <summary>顧客から連絡先へのコレクション（連絡先の外部キーごと）</summary>
+public enum ParityContactRelation
+{
+    /// <summary>owner_id（必須 × NO ACTION）</summary>
+    Owner,
+
+    /// <summary>watcher_id（任意 × NO ACTION）</summary>
+    Watcher,
+
+    /// <summary>backup_id（任意 × SET NULL）</summary>
+    Backup,
+
+    /// <summary>fallback_id（任意 × SET DEFAULT）</summary>
+    Fallback,
+
+    /// <summary>customer_code（一意な顧客コードを参照する任意 × NO ACTION）</summary>
+    CustomerCode,
+}
+
+/// <summary>連絡先のコレクションを引く</summary>
+public static class ParityContactRelations
+{
+    /// <summary>顧客の、その関係の連絡先のコレクション</summary>
+    public static ICollection<ContactEntity> CollectionOf(
+        CustomerEntity customer,
+        ParityContactRelation relation
+    ) =>
+        relation switch
+        {
+            ParityContactRelation.Owner => customer.ContactsByOwner,
+            ParityContactRelation.Watcher => customer.ContactsByWatcher,
+            ParityContactRelation.Backup => customer.ContactsByBackup,
+            ParityContactRelation.Fallback => customer.ContactsByFallback,
+            ParityContactRelation.CustomerCode => customer.ContactsByCustomerCodeCustomer,
+            _ => throw new ArgumentOutOfRangeException(nameof(relation)),
+        };
+}
+
+/// <summary>連絡先をリモート面で 1 行読み、スロットのグラフの顧客（<paramref name="ParentKey"/>）のその関係のコレクションへ足す</summary>
+public sealed record AttachContactOp(
+    string Slot,
+    string ParentKey,
+    int ContactId,
+    ParityContactRelation Relation
+) : ParityOp
+{
+    public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
+    {
+        var contact = await backend.Contacts.GetByIdAsync(ContactIdValue.Create(ContactId), ct);
+
+        if (contact is null)
+        {
+            return "null";
+        }
+
+        ParityContactRelations
+            .CollectionOf((CustomerEntity)Find(backend, Slot, ParentKey), Relation)
+            .Add(contact);
+
+        return "attached";
+    }
+}
+
+/// <summary>
+/// スロットのグラフの顧客の列を書き換え、Updated にする（Added のままの行は Added のまま）。null の引数は書き換えない
+/// （<paramref name="ClearReferrer"/> のときだけ紹介者を null にする）
+/// </summary>
+public sealed record EditCustomerOp(
+    string Slot,
+    int CustomerId,
+    string? Note = null,
+    string? Code = null,
+    int? Referrer = null,
+    bool ClearReferrer = false
+) : ParityOp
+{
+    public override Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
+    {
+        var customer = (CustomerEntity)Find(backend, Slot, $"customers/{CustomerId}");
+
+        if (Note is not null)
+        {
+            customer.Note = NoteValue.Create(Note);
+        }
+
+        if (Code is not null)
+        {
+            customer.Code = CodeValue.Create(Code);
+        }
+
+        if (Referrer is not null)
+        {
+            customer.ReferrerId = CustomerIdValue.Create(Referrer.Value);
+        }
+
+        if (ClearReferrer)
+        {
+            customer.ReferrerId = null;
+        }
+
+        if (customer.RowState != RowState.Added)
+        {
+            customer.MarkUpdated();
+        }
+
+        return Task.FromResult("edited");
+    }
+}
+
+/// <summary>連絡先の外部キーの付け替え先（null で外す）</summary>
+/// <param name="Relation">付け替える外部キー</param>
+/// <param name="Customer">付け替え先の顧客（<see cref="ParityContactRelation.CustomerCode"/> 以外）</param>
+/// <param name="Code">付け替え先の顧客コード（<see cref="ParityContactRelation.CustomerCode"/> のとき）</param>
+public sealed record ParityContactTarget(
+    ParityContactRelation Relation,
+    int? Customer,
+    string? Code = null
+);
+
+/// <summary>スロットのグラフの連絡先のラベルか外部キーを書き換え、Updated にする（Added のままの行は Added のまま）</summary>
+public sealed record EditContactOp(
+    string Slot,
+    int ContactId,
+    string? Label = null,
+    ParityContactTarget? Target = null
+) : ParityOp
+{
+    public override Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
+    {
+        var contact = (ContactEntity)Find(backend, Slot, $"contacts/{ContactId}");
+
+        if (Label is not null)
+        {
+            contact.Label = LabelValue.Create(Label);
+        }
+
+        if (Target is { } target)
+        {
+            var id = target.Customer is { } c ? CustomerIdValue.Create(c) : null;
+
+            switch (target.Relation)
+            {
+                case ParityContactRelation.Owner:
+                    contact.OwnerId = id!;
+                    break;
+                case ParityContactRelation.Watcher:
+                    contact.WatcherId = id;
+                    break;
+                case ParityContactRelation.Backup:
+                    contact.BackupId = id;
+                    break;
+                case ParityContactRelation.Fallback:
+                    contact.FallbackId = id;
+                    break;
+                case ParityContactRelation.CustomerCode:
+                    contact.CustomerCode = target.Code is null
+                        ? null
+                        : CodeValue.Create(target.Code);
+                    break;
+            }
+        }
+
+        if (contact.RowState != RowState.Added)
+        {
+            contact.MarkUpdated();
+        }
+
+        return Task.FromResult("edited");
+    }
+}
+
+/// <summary>スロットの根（顧客）を <c>UpdateAsync</c> で更新する</summary>
+public sealed record UpdateCustomerOp(
+    string Slot,
+    ConcurrencyMode Mode = ConcurrencyMode.Optimistic
+) : ParityOp
+{
+    public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct) =>
+        $"updated={await backend.Customers.UpdateAsync((CustomerEntity)Root(backend, Slot), Mode, ct)}";
+}
+
+/// <summary>全機能面で顧客を連絡先（全関係）と紹介先ごと Include して読み、スロットへ置く（リモートには無い）</summary>
+public sealed record LoadCustomerWithContactsOp(string Slot, int Id) : ParityOp
+{
+    public override bool Supports(ParityBackendKind kind) => !ParityBackendKinds.IsRemote(kind);
+
+    public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
+    {
+        var customer = await backend
+            .FullCustomers.Query()
+            .Include(c => c.ContactsByOwner)
+            .Include(c => c.ContactsByWatcher)
+            .Include(c => c.ContactsByBackup)
+            .Include(c => c.ContactsByFallback)
+            .Include(c => c.ContactsByCustomerCodeCustomer)
+            .Include(c => c.Customers)
+            .GetByIdAsync(CustomerIdValue.Create(Id), ct);
+
+        if (customer is null)
+        {
+            backend.Slots.Remove(Slot);
+
+            return "null";
+        }
+
+        // 子をキーの順に並べ直す（Include が返す子の並びは決まらない＝LoadOrderWithLinesOp と同じ理由）
+        foreach (var relation in Enum.GetValues<ParityContactRelation>())
+        {
+            var collection = ParityContactRelations.CollectionOf(customer, relation);
+            var sorted = collection.OrderBy(c => c.ContactId.Value).ToList();
+            collection.Clear();
+
+            foreach (var contact in sorted)
+            {
+                collection.Add(contact);
+            }
+        }
+
+        var referrals = customer.Customers.OrderBy(c => c.CustomerId.Value).ToList();
+        customer.Customers.Clear();
+
+        foreach (var referral in referrals)
+        {
+            customer.Customers.Add(referral);
+        }
+
+        backend.Slots[Slot] = customer;
+
+        return "loaded";
     }
 }
