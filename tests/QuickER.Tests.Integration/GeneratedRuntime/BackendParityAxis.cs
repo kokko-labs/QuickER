@@ -30,6 +30,7 @@ public static class BackendParityAxis
                 new(ParityBackendKind.EfCore, IsBaseline: false),
                 new(ParityBackendKind.InMemory, IsBaseline: false),
                 new(ParityBackendKind.Remote, IsBaseline: false),
+                new(ParityBackendKind.RemoteEfCoreOnly, IsBaseline: false),
             ]
         );
 

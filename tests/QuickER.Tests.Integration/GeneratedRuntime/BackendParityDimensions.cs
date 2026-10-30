@@ -42,8 +42,24 @@ internal static class BackendParityDimensions
     /// <summary>受け入れた手の差を持たない手の水準</summary>
     private const string NoDeviation = "None";
 
+    /// <summary>因子：連絡先の手が扱う関係（連絡先を持つコレクション・付け替える外部キー）</summary>
+    public const string ContactRelation = "ContactRelation";
+
+    /// <summary>因子：その保存に当たる Save フックの規則の振る舞い</summary>
+    public const string HookRule = "HookRule";
+
+    /// <summary>規則が当たらない保存・連絡先の関係を持たない手の水準</summary>
+    private const string NoneLevel = "None";
+
     /// <summary>並行性の扱いの引数を渡す操作（グラフ保存の単数・複数と UpdateAsync）</summary>
-    private static readonly string[] ModeTakingKinds = ["Save", "SaveManyOrders", "UpdateOrder"];
+    private static readonly string[] ModeTakingKinds =
+    [
+        "Save",
+        "SaveManyOrders",
+        "UpdateOrder",
+        "SaveCustomer",
+        "UpdateCustomer",
+    ];
 
     /// <summary>リモート面に無い操作（Include の取得・列の条件の一括削除・除外 blob の Stream アクセサ）</summary>
     private static readonly string[] NonRemoteKinds =
@@ -52,6 +68,28 @@ internal static class BackendParityDimensions
         "ExecuteDeleteOrders",
         "WriteBlob",
         "ReadBlob",
+        "LoadCustomerWithContacts",
+    ];
+
+    /// <summary>連絡先の関係を持つ手</summary>
+    private static readonly string[] ContactRelationKinds =
+    [
+        "AttachContact",
+        "RetargetContact",
+        "ClearContactKey",
+    ];
+
+    /// <summary>顧客のグラフ保存（Save フックの規則が当たり得る手）</summary>
+    private static readonly string[] CustomerSaveKinds = ["SaveCustomer", "SaveManyCustomers"];
+
+    /// <summary>顧客のスロット（それ以外は注文のスロット）</summary>
+    private static readonly string[] CustomerSlots =
+    [
+        "C",
+        "D",
+        "TC",
+        "TD",
+        BackendParityGenerator.HookSlot,
     ];
 
     /// <summary>次元表</summary>
@@ -89,8 +127,45 @@ internal static class BackendParityDimensions
                         new Level("ExecuteDeleteOrders"),
                         new Level("WriteBlob"),
                         new Level("ReadBlob"),
+                        new Level("InsertContact"),
+                        new Level("LoadCustomer"),
+                        new Level("LoadCustomerWithContacts"),
+                        new Level("AttachContact"),
+                        new Level("AttachReferral"),
+                        new Level("EditCustomerNote"),
+                        new Level("EditCustomerCode"),
+                        new Level("SetReferrer"),
+                        new Level("ClearReferrer"),
+                        new Level("EditContactLabel"),
+                        new Level("RetargetContact"),
+                        new Level("ClearContactKey"),
+                        new Level("MarkRemovedContact"),
+                        new Level("MarkRemovedCustomer"),
+                        new Level("SaveCustomer"),
+                        new Level("SaveManyCustomers"),
+                        new Level("UpdateCustomer"),
+                        new Level("NewCustomerRoot"),
                     ],
-                    "操作の記録の型（挿入は行の表で、削除の印は根か子かで分ける）"
+                    "操作の記録の型（挿入は行の表で、削除の印は行の表で、顧客の編集は列で、連絡先の編集は付け替えか外すかで分ける。グラフ保存は根の表で分ける）"
+                ),
+                new Factor(
+                    ContactRelation,
+                    [
+                        new Level(NotApplicable),
+                        .. Enum.GetValues<ParityContactRelation>()
+                            .Select(value => new Level(value.ToString())),
+                    ],
+                    "連絡先を持つコレクション（AttachContact）・付け替えるか外す外部キー（RetargetContact・ClearContactKey）。参照アクションごとの外部キー（必須×NO ACTION・任意×NO ACTION・SET NULL・SET DEFAULT・一意制約の参照）"
+                ),
+                new Factor(
+                    HookRule,
+                    [
+                        new Level(NoneLevel),
+                        .. Enum.GetValues<ParityHookBehavior>()
+                            .Where(value => value != ParityHookBehavior.Record)
+                            .Select(value => new Level(value.ToString())),
+                    ],
+                    "その顧客のグラフ保存に当たる Save フックの規則の振る舞い（列の末尾にだけ置く）"
                 ),
                 new Factor(
                     Concurrency,
@@ -139,8 +214,41 @@ internal static class BackendParityDimensions
                         )
                         || (
                             mode == nameof(ParityGeneratorMode.Blob)
-                            && kind is "LoadOrderWithLines" or "ExecuteDeleteOrders"
+                            && kind
+                                is "LoadOrderWithLines"
+                                    or "ExecuteDeleteOrders"
+                                    or "LoadCustomerWithContacts"
                         )
+                ),
+                .. new[]
+                {
+                    (
+                        Mode,
+                        nameof(ParityGeneratorMode.Blob),
+                        ContactRelation,
+                        nameof(ParityContactRelation.CustomerCode)
+                    ),
+                    (
+                        Mode,
+                        nameof(ParityGeneratorMode.Common),
+                        Deviation,
+                        nameof(ParityDeviation.ReferencedKeyUpdate)
+                    ),
+                    (
+                        Mode,
+                        nameof(ParityGeneratorMode.Full),
+                        HookRule,
+                        nameof(ParityHookBehavior.ThrowBefore)
+                    ),
+                }.Select(tuple =>
+                    CoverageGap.Tuple(
+                        RandomScope,
+                        "P2-5",
+                        "P2-末",
+                        "普段の 200 種では、末尾の手（全体の約 3 分の 2 の種に 1 つ）と範囲の組み合わせが足りない（夜間の種の数では埋まる）",
+                        (tuple.Item1, tuple.Item2),
+                        (tuple.Item3, tuple.Item4)
+                    )
                 ),
                 CoverageGap.Tuple(
                     RandomScope,
@@ -165,6 +273,7 @@ internal static class BackendParityDimensions
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityBackend.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityDimensions.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityGenerator.cs",
+                "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityGenerator.Customers.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityKnownDifferences.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityOperations.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityRunner.cs",
@@ -188,6 +297,7 @@ internal static class BackendParityDimensions
     public static void Observe(CoverageCounter counter, ParityScenario scenario)
     {
         var mode = scenario.Name.Split('-')[^1];
+        var rule = scenario.Options?.HookRules?.SingleOrDefault();
 
         foreach (var op in scenario.Ops)
         {
@@ -200,6 +310,11 @@ internal static class BackendParityDimensions
                     [Deviation] = op is DeviatingOp deviating
                         ? deviating.Deviation.ToString()
                         : NoDeviation,
+                    [ContactRelation] = ContactRelationOf(op),
+                    [HookRule] =
+                        rule is not null && HoldsHookSlot(op)
+                            ? rule.Behavior.ToString()
+                            : NoneLevel,
                 }
             );
         }
@@ -213,7 +328,29 @@ internal static class BackendParityDimensions
             InsertOp { Row: CustomerRow } => "InsertCustomer",
             InsertOp { Row: OrderRow } => "InsertOrder",
             InsertOp { Row: LineRow } => "InsertLine",
+            InsertOp { Row: ContactRow } => "InsertContact",
+            LoadOp { Table: "customers" } => "LoadCustomer",
             LoadOp => "Load",
+            LoadCustomerWithContactsOp => "LoadCustomerWithContacts",
+            AttachContactOp => "AttachContact",
+            AttachChildCustomerOp => "AttachReferral",
+            EditCustomerOp { Code: not null } => "EditCustomerCode",
+            EditCustomerOp { Referrer: not null } => "SetReferrer",
+            EditCustomerOp { ClearReferrer: true } => "ClearReferrer",
+            EditCustomerOp => "EditCustomerNote",
+            EditContactOp { Target: null } => "EditContactLabel",
+            EditContactOp { Target: { Customer: null, Code: null } } => "ClearContactKey",
+            EditContactOp => "RetargetContact",
+            MarkRemovedOp removed
+                when removed.Key.StartsWith("contacts/", StringComparison.Ordinal) =>
+                "MarkRemovedContact",
+            MarkRemovedOp removed
+                when removed.Key.StartsWith("customers/", StringComparison.Ordinal) =>
+                "MarkRemovedCustomer",
+            SaveOp save when CustomerSlots.Contains(save.Slot) => "SaveCustomer",
+            SaveManyCustomersOp => "SaveManyCustomers",
+            UpdateCustomerOp => "UpdateCustomer",
+            NewRootOp { Row: CustomerRow } => "NewCustomerRoot",
             LoadOrderWithLinesOp => "LoadOrderWithLines",
             AttachLineOp => "AttachLine",
             AddLineOp => "AddLine",
@@ -245,7 +382,28 @@ internal static class BackendParityDimensions
             SaveOp save => (save.Options ?? new()).Mode.ToString(),
             SaveManyOrdersOp many => (many.Options ?? new()).Mode.ToString(),
             UpdateOrderOp update => update.Mode.ToString(),
+            UpdateCustomerOp update => update.Mode.ToString(),
             _ => NotApplicable,
+        };
+
+    /// <summary>連絡先の手が扱う関係</summary>
+    private static string ContactRelationOf(ParityOp op) =>
+        op switch
+        {
+            DeviatingOp deviating => ContactRelationOf(deviating.Inner),
+            AttachContactOp attach => attach.Relation.ToString(),
+            EditContactOp { Target: { } target } => target.Relation.ToString(),
+            _ => NotApplicable,
+        };
+
+    /// <summary>Save フックの規則の末尾の手のスロットを保存する手か</summary>
+    private static bool HoldsHookSlot(ParityOp op) =>
+        op switch
+        {
+            DeviatingOp deviating => HoldsHookSlot(deviating.Inner),
+            SaveOp save => save.Slot == BackendParityGenerator.HookSlot,
+            SaveManyCustomersOp many => many.SlotNames.Contains(BackendParityGenerator.HookSlot),
+            _ => false,
         };
 
     /// <summary>原理的に起こり得ない組み合わせのときだけ偽（判断に要る因子が割り当てに無ければ真）</summary>
@@ -255,27 +413,111 @@ internal static class BackendParityDimensions
         assignment.TryGetValue(OpKind, out var kind);
         assignment.TryGetValue(Concurrency, out var concurrency);
         assignment.TryGetValue(Deviation, out var deviation);
+        assignment.TryGetValue(ContactRelation, out var relation);
+        assignment.TryGetValue(HookRule, out var hook);
 
-        // 受け入れた手の差の印は、その差を持つ手の種類にだけ付く（子を持つ親の削除＝DeleteAsync(id)・親の無い行の挿入＝
-        // 明細か注文の挿入。どちらも並行性の扱いの引数を持たない）
-        if (deviation is not null && deviation != NoDeviation)
+        // 手の差の印は、その差を持つ手の種類にだけ付く（生成器が末尾に置く手と同じ対応）
+        if (deviation is not null && deviation != NoDeviation && kind is not null)
         {
-            if (concurrency is not null && concurrency != NotApplicable)
+            string[] kinds = deviation switch
+            {
+                nameof(ParityDeviation.ParentDeleteWithChildren) => ["Delete", "SaveManyCustomers"],
+                nameof(ParityDeviation.OrphanInsert) => ["InsertOrder", "InsertLine"],
+                nameof(ParityDeviation.ReferencedKeyUpdate)
+                or nameof(ParityDeviation.AlternateKeyUpdate) => ["SaveCustomer", "UpdateCustomer"],
+                nameof(ParityDeviation.DependentHeldParentDelete) => ["SaveManyCustomers"],
+                _ => CustomerSaveKinds,
+            };
+
+            if (!kinds.Contains(kind))
+            {
+                return false;
+            }
+        }
+
+        // 手の差の印と並行性の扱い：削除・挿入・複数形の顧客の保存は引数を持たず、代替キーの更新は UpdateAsync か単数の
+        // グラフ保存（引数を持つ）
+        if (deviation is not null && concurrency is not null)
+        {
+            if (
+                deviation
+                    is nameof(ParityDeviation.ParentDeleteWithChildren)
+                        or nameof(ParityDeviation.OrphanInsert)
+                        or nameof(ParityDeviation.DependentHeldParentDelete)
+                && concurrency != NotApplicable
+            )
             {
                 return false;
             }
 
             if (
-                kind is not null
-                && !(
-                    (
-                        deviation == nameof(ParityDeviation.ParentDeleteWithChildren)
-                        && kind == "Delete"
-                    )
-                    || (
-                        deviation == nameof(ParityDeviation.OrphanInsert)
-                        && kind is "InsertOrder" or "InsertLine"
-                    )
+                deviation
+                    is nameof(ParityDeviation.ReferencedKeyUpdate)
+                        or nameof(ParityDeviation.AlternateKeyUpdate)
+                && concurrency == NotApplicable
+            )
+            {
+                return false;
+            }
+        }
+
+        // 連絡先の関係を持つ手は、保存でも手の差の印でもない（並行性の扱い・規則・印を持たない）
+        if (relation is not null && relation != NotApplicable)
+        {
+            if (
+                (concurrency is not null && concurrency != NotApplicable)
+                || (hook is not null && hook != NoneLevel)
+                || (deviation is not null && deviation != NoDeviation)
+            )
+            {
+                return false;
+            }
+        }
+
+        // 連絡先の関係は連絡先の手だけが持ち、必須の owner は外さない
+        if (kind is not null && relation is not null)
+        {
+            if (ContactRelationKinds.Contains(kind) != (relation != NotApplicable))
+            {
+                return false;
+            }
+        }
+
+        if (kind == "ClearContactKey" && relation == nameof(ParityContactRelation.Owner))
+        {
+            return false;
+        }
+
+        // Save フックの規則は顧客のグラフ保存にだけ当たり、規則とその手の差の印は対で決まる（書き換えてから飛ばす＝
+        // HookEditsSkippedRow・書き換えて続ける削除＝HookEditsDeletedRow・ほかの規則は印なし）
+        if (
+            hook is not null
+            && hook != NoneLevel
+            && kind is not null
+            && !CustomerSaveKinds.Contains(kind)
+        )
+        {
+            return false;
+        }
+
+        if (hook is not null && deviation is not null)
+        {
+            var hookDeviation =
+                deviation
+                is nameof(ParityDeviation.HookEditsSkippedRow)
+                    or nameof(ParityDeviation.HookEditsDeletedRow);
+
+            if (hook == NoneLevel ? hookDeviation : (deviation != NoDeviation && !hookDeviation))
+            {
+                return false;
+            }
+
+            if (
+                (hook == nameof(ParityHookBehavior.EditThenSkip))
+                    != (deviation == nameof(ParityDeviation.HookEditsSkippedRow))
+                || (
+                    deviation == nameof(ParityDeviation.HookEditsDeletedRow)
+                    && hook != nameof(ParityHookBehavior.EditThenContinue)
                 )
             )
             {

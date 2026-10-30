@@ -65,13 +65,6 @@ public sealed class FactorInventoryGuardTests
             "P3",
             DiffCapabilityReason
         )),
-        .. new[] { "Insert", "Update", "Delete" }.Select(member => new InventoryExclusion(
-            "SaveOperation",
-            member,
-            EngineIds.GeneratedRuntime,
-            "P2",
-            "実装先どうしの一致は Save フックが受けた操作を結果（フックの記録）として比べるだけで、フックの操作の種類を次元表の水準として観測していない（SaveHookRuntimeTestsBase の単体のシナリオが固定）"
-        )),
         .. new[]
         {
             "DomainTypeFlattened",

@@ -41,7 +41,7 @@ public enum ParityGeneratorMode
 /// 制約違反（主キー・一意な名前の重複）はわざと混ぜる。どの実装先も断り、何も書かないことを比べる。
 /// </para>
 /// </remarks>
-public sealed class BackendParityGenerator
+public sealed partial class BackendParityGenerator
 {
     private const int MinSteps = 20;
     private const int MaxSteps = 40;
@@ -76,9 +76,15 @@ public sealed class BackendParityGenerator
             generator.Next();
         }
 
-        generator.AppendAcceptedDeviationTail();
+        generator.AppendTail();
 
-        return new ParityScenario($"seed-{seed}-{generator._mode}", seeds, generator._ops);
+        return new ParityScenario(
+            $"seed-{seed}-{generator._mode}",
+            seeds,
+            generator._ops,
+            generator._hookRule is { } rule ? new ParityBackendOptions(HookRules: [rule]) : null,
+            CutPendingDeviations: true
+        );
     }
 
     /// <summary>種まき（顧客 2・注文 3・明細 3）とモデルの初期値</summary>
@@ -103,6 +109,7 @@ public sealed class BackendParityGenerator
             new SeedOp(new LineRow(100, 10, "pen", 2, 0.5m)),
             new SeedOp(new LineRow(101, 10, "ink", 5)),
             new SeedOp(new LineRow(102, 12, "mug", 1)),
+            .. SeedCustomerData(),
         ];
     }
 
@@ -140,6 +147,8 @@ public sealed class BackendParityGenerator
             candidates.Add((2, SaveMany));
         }
 
+        AddCustomerCandidates(candidates);
+
         if (_mode == ParityGeneratorMode.Full)
         {
             candidates.Add((3, LoadWithLines));
@@ -168,40 +177,12 @@ public sealed class BackendParityGenerator
         }
     }
 
-    // ---- 受け入れた手の差（列の末尾） ----
+    // ---- 受け入れた手の差（列の末尾＝AppendTail が選ぶ） ----
 
     /// <summary>
-    /// 種の半分で、列の末尾に受け入れた手の差を持つ手（子を持つ親の <c>DeleteAsync(id)</c> か親の無い行の挿入）を 1 つ置き、
-    /// 続けて普通の手を 0〜2 回足す。
+    /// 子を持つ親（明細のある注文・注文のある顧客）を DeleteAsync(id) で消す（DB は ON DELETE CASCADE で子も消す）。顧客は、注文の
+    /// ほかに紹介先・連絡先から参照されていないものだけ（それらの外部キーは CASCADE でないので DB が断る）
     /// </summary>
-    /// <remarks>
-    /// 受け入れた差（<see cref="BackendParityKnownDifferences.AcceptedDeviations"/>）の実装先は、この手から後を比べない
-    /// （インメモリは外部キーを検査しないので、この手の後の保存先がずっと食い違う）。ほかの実装先はこの手と後の手も比べる。
-    /// 末尾にだけ置くのは、外す比較を少なくするためと、列の先頭（いままでの手）の乱数の引き方を変えないため
-    /// （種の指紋が変わるのは末尾を足した種だけになる）。
-    /// </remarks>
-    private void AppendAcceptedDeviationTail()
-    {
-        if (_random.Next(2) != 0)
-        {
-            return;
-        }
-
-        // 子を持つ親が無ければ親の無い行の挿入にする
-        if (!(_random.Next(2) == 0 && ParentDeleteWithChildren()))
-        {
-            OrphanInsert();
-        }
-
-        var follow = _random.Next(3);
-
-        for (var i = 0; i < follow; i++)
-        {
-            Next();
-        }
-    }
-
-    /// <summary>子を持つ親（明細のある注文・注文のある顧客）を DeleteAsync(id) で消す（DB は ON DELETE CASCADE で子も消す）</summary>
     private bool ParentDeleteWithChildren()
     {
         var parents = new List<(string Table, int Id)>();
@@ -210,7 +191,12 @@ public sealed class BackendParityGenerator
         );
         parents.AddRange(
             _customers
-                .Keys.Where(id => _orders.Any(o => o.Value.Customer == id))
+                .Keys.Where(id =>
+                    _orders.Any(o => o.Value.Customer == id)
+                    && !_referrers.Any(r => r.Value == id && r.Key != id)
+                    && _contacts.Values.All(c => c.RelationsTo(id, _codes).Count == 0)
+                    && !RemovalPending(id)
+                )
                 .Select(id => ("customers", id))
         );
 
@@ -242,7 +228,7 @@ public sealed class BackendParityGenerator
 
         if (table == "customers")
         {
-            _customers.Remove(key);
+            RemoveCustomer(key);
         }
 
         return true;
@@ -293,20 +279,24 @@ public sealed class BackendParityGenerator
         }
 
         var name = $"C{id}";
+        var referrer = MaybeCustomer();
         _customers[id.Value] = name;
-        _ops.Add(new InsertOp(new CustomerRow(id.Value, name, Pick(null, "n"))));
+        _codes[id.Value] = CustomerRow.DefaultCode(id.Value);
+        _referrers[id.Value] = referrer;
+        _ops.Add(new InsertOp(new CustomerRow(id.Value, name, Pick(null, "n"), referrer)));
     }
 
     private void InsertOrder()
     {
         var id = Fresh(10, 30, _orders.ContainsKey);
+        var live = LiveCustomers();
 
-        if (id is null || _customers.Count == 0)
+        if (id is null || live.Count == 0)
         {
             return;
         }
 
-        var customer = PickFrom([.. _customers.Keys]);
+        var customer = PickFrom(live);
         var amount = Pick(Amounts);
         _orders[id.Value] = (customer, amount);
         _ops.Add(
@@ -634,7 +624,10 @@ public sealed class BackendParityGenerator
 
     // ---- 削除・ほかの書き手 ----
 
-    /// <summary>子を持たない行を、リポジトリかほかの書き手で消す（子を持つ親は消さない＝P1）</summary>
+    /// <summary>
+    /// 子を持たない行を、リポジトリかほかの書き手で消す（子を持つ親は消さない＝P1。顧客は注文・紹介先・連絡先のどれからも
+    /// 参照されていないものだけ。スロットのグラフが指している顧客も消さない）
+    /// </summary>
     private void DeleteLeaf()
     {
         var leaves = new List<(string Table, int Id)>();
@@ -642,11 +635,13 @@ public sealed class BackendParityGenerator
         leaves.AddRange(
             _orders.Keys.Where(id => _lines.All(l => l.Value != id)).Select(id => ("orders", id))
         );
+        var pending = PendingTargets();
         leaves.AddRange(
             _customers
-                .Keys.Where(id => _orders.All(o => o.Value.Customer != id))
+                .Keys.Where(id => !IsReferenced(id) && !pending.Contains(id))
                 .Select(id => ("customers", id))
         );
+        leaves.AddRange(_contacts.Keys.Select(id => ("contacts", id)));
 
         if (leaves.Count == 0)
         {
@@ -666,8 +661,12 @@ public sealed class BackendParityGenerator
                 _orders.Remove(key);
                 MarkStaleHoldingOrder(key);
                 break;
+            case "contacts":
+                _contacts.Remove(key);
+                MarkStaleHoldingContact(key, except: null);
+                break;
             default:
-                _customers.Remove(key);
+                RemoveCustomer(key);
                 break;
         }
     }
