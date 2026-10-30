@@ -129,6 +129,17 @@ internal static class SyncModelKnownFailures
             "n786-thrown-serverwins-removal-then-record-dropped",
             "3/lost:model_items:present-but-absent"
         ),
+        // 4m-D1（修正 C で直す）: 消して作り直した行を、計画の後・再生の前（ほかの行のサーバーへの書き込みの直前）にアプリの別の
+        // 流れがもう一度消すと、再生は作り直しの記録（削除の版を持つ upsert）を「行が無い」として捨て、割り込みの削除の記録は
+        // 版を持たない（作り直した行はミラー版を持たない）ので、次の同期も「サーバーに届いていない行の削除」として捨てる。
+        // サーバーに行が残り、端末の削除が届かない。消える条件：再生の中の読み直しで捨てる記録の版（削除の版）を、残る削除の
+        // 記録へ引き継ぐ（か、割り込みの削除を版つきで記録する）
+        .. D1Entries(
+            ModelSyncScenarioNames.D1Items,
+            ModelTables.Items,
+            "2/diverge:model_items:payload:missing-on-device"
+        ),
+        .. D1Entries(ModelSyncScenarioNames.D1Folders, ModelTables.Folders),
         // 受け入れ：サーバーで一意な値を入れ替えた 2 行は、端末へ適用できず毎回打ち切る（洗い替えで抜ける）
         AcceptedEntry(
             "P2-3",
@@ -171,6 +182,20 @@ internal static class SyncModelKnownFailures
             Entry("4m-D3", "修正 C", $"{prefix}-lww-serverwins", $"5/expect-local:{table}"),
         ];
 
+    /// <summary>
+    /// 4m-D1 の項目（端末が消した行がサーバーに残る＝端末に無い食い違いと、消した行が残る消失。品目は blob の食い違いも出る）
+    /// </summary>
+    private static IEnumerable<KnownEntry> D1Entries(
+        string scenario,
+        string table,
+        params string[] extra
+    ) =>
+        [
+            Entry("4m-D1", "修正 C", scenario, $"2/diverge:{table}:missing-on-device"),
+            Entry("4m-D1", "修正 C", scenario, $"3/lost:{table}:deleted-but-present"),
+            .. extra.Select(signature => Entry("4m-D1", "修正 C", scenario, signature)),
+        ];
+
     /// <summary>P2-3-N14 の署名の本体（例外の段と型）</summary>
     private const string N14Detail =
         "DownloadAsync~SyncTableBase.SaveAppliedRowsAsync>EntityGraphSaver.ExecuteAsync:SQLite19:UNIQUE constraint failed: model_folders.name";
@@ -204,6 +229,13 @@ internal static class SyncModelKnownFailures
     private static readonly HashSet<string> SeedOnlySignatures =
     [
         "3/lost:model_items:present-but-absent",
+        // 4m-D1 の署名（収束・消失なしの広い正規形）。割り込みは乱数の操作の列に無く、乱数の種では起きない。正規形から乱数の項目を
+        // 作るとほかの消失・食い違いを隠すので、決定的なシナリオだけで数える
+        "2/diverge:model_items:missing-on-device",
+        "2/diverge:model_items:payload:missing-on-device",
+        "3/lost:model_items:deleted-but-present",
+        "2/diverge:model_folders:missing-on-device",
+        "3/lost:model_folders:deleted-but-present",
     ];
 
     /// <summary>

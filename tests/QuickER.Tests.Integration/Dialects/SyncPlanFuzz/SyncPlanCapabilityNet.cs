@@ -509,6 +509,15 @@ internal static class SyncPlanCapabilityNetKnownFailures
             ["postgresql-386-synthesized-unique-name"],
             IsUnwarnedNameCollision
         ),
+        // 4m-f1-legacy-fk-name（4m-F1・PostgreSQL・修正 E）：旧版の DDL で作った DB の切り詰めた外部キー名を、差分の吸収が後から図に足した
+        // 2 本目の追加にも与える（規則 R4 が名前の衝突を予言する）。行は実 DB と同じ来歴の行
+        .. SyncPlanFuzzKnownFailures.Scenario(
+            SyncPlanHistoryRows.F1Finding,
+            DialectNames.PostgreSql,
+            "修正 E",
+            [SyncPlanHistoryRows.F1Id],
+            IsUnwarnedNameCollision
+        ),
         // 4m-q6（SQL Server・修正 A）：同じ列集合の一意制約 2 つの片方だけを外し、もう片方を残したまま型を変える（警告なし・Msg 5074）
         // - 生成器の「同じ列の並びの一意制約 2 つの片方の削除と型の変更」（drop one of duplicated uniques）の形で、網の普段の種に出る
         Random("4m-q6", DialectNames.SqlServer, "修正 A", IsUnwarnedAlterOnKeyColumn),
@@ -868,6 +877,31 @@ public abstract class SyncPlanCapabilityNetTestsBase
 
         // 合格側の行は、規則が失敗を予言し（偽陽性の守りが空振りしていない）、違反が 0
         problems.AddRange(SyncPlanScenarios.PassRowProblems(scenarioOutcomes));
+
+        // 来歴の行：4m-F1 の行は静的な規則が名前の衝突を予言し、合格の行は予言しない。行が実際に作った状態（来歴・子の表名の長さ・
+        // 2 本目）で次元表の全組を数える（行を流したときだけ＝来歴の行は PostgreSQL だけ）
+        problems.AddRange(SyncPlanHistoryRows.NetProblems(scenarioOutcomes));
+
+        if (scenarioOutcomes.Any(SyncPlanHistoryRows.IsHistoryRow))
+        {
+            var historyCoverage = new CoverageCounter(SyncPlanHistoryRows.Table);
+
+            foreach (var outcome in scenarioOutcomes.Where(SyncPlanHistoryRows.IsHistoryRow))
+            {
+                SyncPlanHistoryRows.Observe(historyCoverage, outcome);
+            }
+
+            try
+            {
+                historyCoverage
+                    .Report()
+                    .AssertGaps(CoverageGap.Set(EngineIds.SyncPlan, []), dialect.Name);
+            }
+            catch (XunitException ex)
+            {
+                problems.Add(ex.Message);
+            }
+        }
 
         // 形の行（D4）の網羅の配列は、P1・Q6 の 3 つ組を含む
         problems.AddRange(

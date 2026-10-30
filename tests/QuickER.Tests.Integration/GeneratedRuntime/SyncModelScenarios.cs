@@ -27,9 +27,15 @@ internal sealed record SyncModelScenario(
     /// <summary>表を外部の ISyncTable 実装の代役で包む端末</summary>
     public IReadOnlyList<ModelActor> ExternalTables { get; init; } = [];
 
-    /// <summary>サーバー側の失敗（ServerWrite・ServerFetch・BlobDownload・BlobUpload）を仕掛けるか（実 SQL Server では流さない）</summary>
+    /// <summary>
+    /// サーバー役の口（失敗の注入と割り込みの点）を使うか（実 SQL Server では流さない）。サーバー側の失敗（ServerWrite・
+    /// ServerFetch・BlobDownload・BlobUpload）と割り込みの点（<see cref="ArmInterruptOp"/>）は、SQLite のサーバー役の包み
+    /// （<see cref="SyncModelServerRepository{TEntity, TKey}"/>・差分ソース）が起こす。実 SQL Server のサーバー役は生成された
+    /// リポジトリと直結の差分ソースをそのまま使い、この包みを持たないので、仕掛けても起きない（割り込みは not-fired の違反になる）
+    /// </summary>
     public bool ArmsServerFaults =>
-        Ops.OfType<ArmFaultOp>()
+        Ops.OfType<ArmInterruptOp>().Any()
+        || Ops.OfType<ArmFaultOp>()
             .Any(a =>
                 a.Kind
                     is ModelFaultKind.ServerWrite
@@ -78,6 +84,16 @@ internal sealed record SyncModelScenario(
 
         return (failures, run.Log);
     }
+}
+
+/// <summary>既知の失敗の一覧が名指しするシナリオの名前</summary>
+internal static class ModelSyncScenarioNames
+{
+    /// <summary>4m-D1（品目）＝割り込みの点 × 形の行の 1 つ（<c>BeforeServerWrite</c> × 作り直した行の再削除）</summary>
+    public const string D1Items = "interrupt-BeforeServerWrite-delete-recreated";
+
+    /// <summary>4m-D1（フォルダー）＝rs6-offline-delete-reinsert の作り直しに割り込みを組んだ形</summary>
+    public const string D1Folders = "d1-folder-recreate-delete";
 }
 
 /// <summary>決定的なシナリオの一覧（指摘ごとに 1 本＋書き手が 2 人のキーのポリシーごとの期待）</summary>
@@ -1540,8 +1556,104 @@ internal static class SyncModelScenarios
         list.AddRange(UniqueValueTakenScenarios());
         list.AddRange(TransientFaultScenarios());
         list.AddRange(UniqueValueReassignScenarios());
+        list.AddRange(InterruptScenarios());
 
         return list;
+    }
+
+    /// <summary>割り込みの形：未送信の記録がある品目の更新</summary>
+    public const string UpdatePendingShape = "update-pending";
+
+    /// <summary>割り込みの形：未送信の記録がある品目の削除</summary>
+    public const string DeletePendingShape = "delete-pending";
+
+    /// <summary>割り込みの形：消して作り直した（削除の版を持つ記録がある）品目の再削除（4m-D1 の形）</summary>
+    public const string DeleteRecreatedShape = "delete-recreated";
+
+    /// <summary>割り込みの形（点 × 形の行の全積を作る）</summary>
+    /// <remarks>静的な初期化の順（<see cref="All"/> が先に作られる）に依らないよう、毎回作る</remarks>
+    public static IReadOnlyList<string> InterruptShapes =>
+        [UpdatePendingShape, DeletePendingShape, DeleteRecreatedShape];
+
+    /// <summary>割り込みの点 × 形の行（宣言。網羅のテストが全積を含むことを表明する）</summary>
+    public static IReadOnlyList<(
+        ModelInterruptPoint Point,
+        string Shape,
+        string Name
+    )> InterruptCells =>
+        [
+            .. Enum.GetValues<ModelInterruptPoint>()
+                .SelectMany(point =>
+                    InterruptShapes.Select(shape => (point, shape, InterruptName(point, shape)))
+                ),
+        ];
+
+    /// <summary>点 × 形の行の名前（4m-D1 の形は <see cref="ModelSyncScenarioNames.D1Items"/>）</summary>
+    public static string InterruptName(ModelInterruptPoint point, string shape) =>
+        $"interrupt-{point}-{shape}";
+
+    /// <summary>
+    /// 4m-D1 と割り込みの点 × 形の行：同期の実行の名前つきの時点（<see cref="ModelInterruptPoint"/>）で、別の流れから端末の書き込みを
+    /// 1 回差し込む。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 行は同じ形：端末 1 が品目 701 を編集し（再生の順で先頭に来る）、品目 702 に形の書き込み（編集・削除→作り直し）をしてから、
+    /// 702 への割り込みの書き込み（更新か削除）を点に仕掛けて同期する。どの点も当たるように、アップロードの書き込み（701）・取得・
+    /// 1 行以上の差分（アップロードした行の折り返し）がある形にする。
+    /// </para>
+    /// <para>
+    /// 4m-D1＝<c>interrupt-BeforeServerWrite-delete-recreated</c>：計画の後・再生の前（701 の書き込みの直前）にアプリが 702 をもう一度
+    /// 消すと、再生は 702 の作り直しの記録（削除の版を持つ upsert）を「行が無い」として捨て、割り込みの削除の記録は版を持たない
+    /// （作り直した行はミラー版を持たない）ので、次の同期も「サーバーに届いていない行の削除」として捨てる。サーバーに 702 が残る。
+    /// <c>d1-folder-recreate-delete</c> は同じ形のフォルダー版（rs6-offline-delete-reinsert の作り直しに割り込みを組む）。
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<SyncModelScenario> InterruptScenarios()
+    {
+        foreach (var (point, shape, name) in InterruptCells)
+        {
+            List<ModelOp> ops = [new UpdateItemOp(D1, Direct, 701, 700, null, "c-701", "a-edited")];
+
+            if (shape == DeleteRecreatedShape)
+            {
+                ops.Add(new DeleteItemOp(D1, Direct, 702));
+                ops.Add(new AddItemOp(D1, Direct, 702, 700, null, "c-702", "again", "0A0B0702"));
+            }
+            else
+            {
+                ops.Add(new UpdateItemOp(D1, Direct, 702, 700, null, "c-702", "b-offline"));
+            }
+
+            ModelWriteOp write =
+                shape == UpdatePendingShape
+                    ? new UpdateItemOp(D1, Direct, 702, 700, null, "c-702", "b-interrupt")
+                    : new DeleteItemOp(D1, Direct, 702);
+            ops.Add(new ArmInterruptOp(D1, point, write));
+            ops.Add(Sync(D1));
+
+            yield return new(
+                name,
+                [Folder(SV, 700), Item(SV, 701, folder: 700), Item(SV, 702, folder: 700)],
+                ops
+            );
+        }
+
+        yield return new(
+            ModelSyncScenarioNames.D1Folders,
+            [Folder(SV, 710), Folder(SV, 711)],
+            [
+                new UpdateFolderOp(D1, Direct, 710, null, "a-edited"),
+                new DeleteFolderOp(D1, Direct, 711),
+                new AddFolderOp(D1, Direct, 711, null, "again"),
+                new ArmInterruptOp(
+                    D1,
+                    ModelInterruptPoint.BeforeServerWrite,
+                    new DeleteFolderOp(D1, Direct, 711)
+                ),
+                Sync(D1),
+            ]
+        );
     }
 
     /// <summary>
