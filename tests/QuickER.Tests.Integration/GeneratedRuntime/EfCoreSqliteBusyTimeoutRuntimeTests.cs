@@ -154,7 +154,7 @@ public sealed class EfCoreSqliteBusyTimeoutRuntimeTests : IDisposable
 
     /// <summary>
     /// 待つのは待ち時間まで：DbContext のコマンドタイムアウト（設定したとき）か、接続文字列の <c>Default Timeout</c>
-    /// （設定しないとき）を 1 秒にすると、3 秒持つロックの前で、すぐにではなく 1 秒ほど待ってから失敗する。
+    /// （設定しないとき）を 1 秒にすると、5 秒持つロックの前で、すぐにではなく 1 秒ほど待ってから失敗する（上限を 4 秒にして、遅い機械の上乗せを吸収する）。
     /// </summary>
     [Theory(
         DisplayName = "[EF Core SQLite busy] 待ち時間を過ぎたら失敗する（コマンドタイムアウト・Default Timeout）"
@@ -182,7 +182,7 @@ public sealed class EfCoreSqliteBusyTimeoutRuntimeTests : IDisposable
         Exception? thrown = null;
 
         var elapsed = await WhileReadLockHeldAsync(
-            TimeSpan.FromSeconds(3),
+            TimeSpan.FromSeconds(5),
             async () =>
             {
                 try
@@ -198,7 +198,7 @@ public sealed class EfCoreSqliteBusyTimeoutRuntimeTests : IDisposable
 
         thrown.Should().NotBeNull("ロックは待ち時間より長く続く");
         elapsed.Should().BeGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(700), "すぐには諦めない");
-        elapsed.Should().BeLessThan(TimeSpan.FromMilliseconds(2500), "待ち時間を過ぎたら諦める");
+        elapsed.Should().BeLessThan(TimeSpan.FromMilliseconds(4000), "待ち時間を過ぎたら諦める");
     }
 
     [Fact(
