@@ -26,8 +26,7 @@ public enum ParityDeviation
 
     /// <summary>
     /// 子に参照されている親を、編集した依存行を同じ保存に持ったままグラフ保存で消す（DB は NO ACTION なら断り、SET NULL /
-    /// SET DEFAULT なら空ける。EF Core は追跡中の依存行にクライアント側の削除の振る舞いを当てる＝H5・P2-5-N1。外部キーを検査
-    /// しない実装先は親だけを消す）
+    /// SET DEFAULT なら空ける。外部キーを検査しない実装先は親だけを消す）
     /// </summary>
     DependentHeldParentDelete,
 
@@ -130,211 +129,41 @@ public static class BackendParityKnownDifferences
             "区切り 39",
             SameKeyReplaceReason
         ),
-        // H1（修正 D）: 一意制約を参照する外部キーの親の列は、EF Core では HasPrincipalKey の代替キーになり、State=Modified でも
-        // 書かれない。参照されていない代替キーでも書かない（保存先が古いまま）。参照されているとき、QuickER 版は ON UPDATE NO ACTION
-        // で断られ、EF Core は書かずに成功を返す
-        Pending(
-            "h1-alternate-key-referenced-update",
+        // Save フックの段の並び（受容・直さない）: 保存が制約で断られたとき、QuickER 版は行ごとに Before→文なので、断られた行より
+        // 後の行の Before は走らない。EF Core は Before を全部走らせてから文を流すので、同じ保存の後の行（編集した連絡先）の
+        // Before も記録に残る。断られた保存なので、ほかの観点（戻り値・保存先・メモリ）はそろう
+        Accepted(
+            "h1-hook-rewrites-referenced-alternate-key",
             EfCore,
-            "outcome",
-            "H1",
-            FixD,
-            "updated=True"
+            "hooks-before",
+            "Save フックの段",
+            HookStageOrderReason
         ),
-        Pending("h1-alternate-key-referenced-update", EfCore, "state", "H1", FixD),
-        Pending("h1-alternate-key-referenced-update", EfCore, "slots", "H1", FixD),
-        Pending("h1-alternate-key-referenced-save", EfCore, "outcome", "H1", FixD, "rows=1"),
-        Pending("h1-alternate-key-referenced-save", EfCore, "state", "H1", FixD),
-        Pending("h1-alternate-key-referenced-save", EfCore, "slots", "H1", FixD),
-        Pending("h1-alternate-key-referenced-save", EfCore, "hooks-after", "H1", FixD),
-        Pending("h1-alternate-key-unreferenced-update", EfCore, "state", "H1", FixD),
-        Pending("h1-alternate-key-unreferenced-update", EfCore, "slots", "H1", FixD),
-        Pending("h1-alternate-key-unreferenced-save", EfCore, "state", "H1", FixD),
-        Pending("h1-alternate-key-unreferenced-save", EfCore, "slots", "H1", FixD),
-        // H5（修正 D）: 任意 × NO ACTION の外部キーで参照されている親を、依存行を編集して同じ保存に持ったまま消すと、EF Core は
-        // 追跡中の依存行の外部キーを null にして保存を通す（QuickER 版は外部キーで断る）。依存行を編集しない形は割れない（実測）
-        Pending("h5-referrer-delete-dependent-modified", EfCore, "outcome", "H5", FixD, "rows=2"),
-        Pending("h5-referrer-delete-dependent-modified", EfCore, "state", "H5", FixD),
-        Pending("h5-referrer-delete-dependent-modified", EfCore, "slots", "H5", FixD),
-        Pending("h5-referrer-delete-dependent-modified", EfCore, "hooks-after", "H5", FixD),
-        Pending(
-            "h5-contact-watcher-delete-dependent-modified",
-            EfCore,
-            "outcome",
-            "H5",
-            FixD,
-            "rows=2"
-        ),
-        Pending("h5-contact-watcher-delete-dependent-modified", EfCore, "state", "H5", FixD),
-        Pending("h5-contact-watcher-delete-dependent-modified", EfCore, "slots", "H5", FixD),
-        Pending("h5-contact-watcher-delete-dependent-modified", EfCore, "hooks-after", "H5", FixD),
-        Pending(
-            "h5-contact-code-delete-dependent-modified",
-            EfCore,
-            "outcome",
-            "H5",
-            FixD,
-            "rows=2"
-        ),
-        Pending("h5-contact-code-delete-dependent-modified", EfCore, "state", "H5", FixD),
-        Pending("h5-contact-code-delete-dependent-modified", EfCore, "slots", "H5", FixD),
-        Pending("h5-contact-code-delete-dependent-modified", EfCore, "hooks-after", "H5", FixD),
-        // H3（修正 D）: Before が値を書き換えてから false を返すと、EF Core は飛ばした更新のメモリの書き換えを戻し、飛ばした削除を
-        // UPDATE として流す
-        Pending("h3-edit-then-skip-update", EfCore, "slots", "H3", FixD),
-        Pending("h3-edit-then-skip-delete", EfCore, "outcome", "H3", FixD, "rows=2"),
-        Pending("h3-edit-then-skip-delete", EfCore, "state", "H3", FixD),
-        Pending("h3-edit-then-skip-delete", EfCore, "slots", "H3", FixD),
-        // P2-5-N1（修正 D）: H5 と同じ根（追跡中の依存行へのクライアント側の削除の振る舞い）。参照されている親を、依存行を編集して
-        // 同じ保存に持ったまま消すと、EF Core は保存先は QuickER 版と同じにしたまま、依存行の外部キーをメモリで書き換え（必須 × NO
-        // ACTION＝断られる保存でも null・SET NULL＝null）、消す親のコレクションへ依存行を足す
-        Pending("contact-owner-delete-dependent-modified", EfCore, "slots", "P2-5-N1", FixD),
-        Pending("contact-backup-delete-dependent-modified", EfCore, "slots", "P2-5-N1", FixD),
-        Pending("contact-fallback-delete-dependent-modified", EfCore, "slots", "P2-5-N1", FixD),
-        // P2-5-N2（修正 D）: ナビゲーションと外部キーの値の食い違い（どちらを正とするかは修正 D で決める）。親のコレクションに持った
-        // 子の外部キーを別の親へ書き換えて保存すると、QuickER 版は外部キーの値を、EF Core はナビゲーション（持っている親）を書く
-        Pending("n2-navigation-overrides-foreign-key", EfCore, "state", "P2-5-N2", FixD),
-        Pending("n2-navigation-overrides-foreign-key", EfCore, "slots", "P2-5-N2", FixD),
-        // P2-5-N3（修正 D）: 同じ行の別インスタンス。Include が関係ごとに別のインスタンスにした同じ連絡先を含むグラフを保存すると、
-        // QuickER 版は両方の編集を書き、EF Core は同じキーの 2 つめのインスタンスを追跡できずに InvalidOperationException
-        Pending(
-            "contacts-include-and-save",
-            EfCore,
-            "outcome",
-            "P2-5-N3",
-            FixD,
-            "InvalidOperationException"
-        ),
-        Pending("contacts-include-and-save", EfCore, "state", "P2-5-N3", FixD),
-        Pending("contacts-include-and-save", EfCore, "slots", "P2-5-N3", FixD),
-        Pending("contacts-include-and-save", EfCore, "hooks-before", "P2-5-N3", FixD),
-        Pending("contacts-include-and-save", EfCore, "hooks-after", "P2-5-N3", FixD),
-        // P2-5-R1（修正 D）: リモートのフックはサーバーのインスタンスに走り、クライアントへ戻るのは保存した行の値だけなので、
-        // 飛ばした行・削除した行へ Before が書き換えた値はクライアントのグラフに戻らない（戻すか、docs に「戻らない」と書いて受け入れるかは
-        // 修正 D でユーザーが決める）
-        Pending("h3-edit-then-skip-update", Remote, "slots", "P2-5-R1", FixD),
-        Pending("h3-edit-then-skip-delete", Remote, "slots", "P2-5-R1", FixD),
-        Pending("hook-edit-then-continue-delete", Remote, "slots", "P2-5-R1", FixD),
-        // H3 の挿入の形：EF Core は書き換えてから飛ばした挿入を NotFound の競合にして保存全体を戻す（同じ保存のほかの行の更新も
-        // 書かない）。RemoteEfCoreOnly の slots は H3（戻った更新の RowState）と P2-5-R1（挿入の書き換えが戻らない）が重なる
-        Pending("h3-edit-then-skip-insert", EfCore, "outcome", "H3", FixD, "NotFound"),
-        Pending("h3-edit-then-skip-insert", EfCore, "state", "H3", FixD),
-        Pending("h3-edit-then-skip-insert", EfCore, "slots", "H3", FixD),
-        Pending("h3-edit-then-skip-insert", EfCore, "hooks-after", "H3", FixD),
-        Pending("h3-edit-then-skip-insert", Remote, "slots", "P2-5-R1", FixD),
-        Pending("h3-edit-then-skip-insert", RemoteEfCoreOnly, "outcome", "H3", FixD, "NotFound"),
-        Pending("h3-edit-then-skip-insert", RemoteEfCoreOnly, "state", "H3", FixD),
-        Pending("h3-edit-then-skip-insert", RemoteEfCoreOnly, "slots", "H3", FixD),
-        Pending("h3-edit-then-skip-insert", RemoteEfCoreOnly, "hooks-after", "H3", FixD),
-        // EF Core 単独で生成したサーバーのリモート（RemoteEfCoreOnly）も、サーバーの EF Core 版 Repository が同じ違いを持つ（H1・H3・H5・
-        // P2-5-N1・P2-5-N2）。クライアントのグラフはサーバーのインスタンスでなく応答の値で書き戻されるので、フックの書き換えが戻らない
-        // 違いは P2-5-R1（Remote と同じ）、EF Core のメモリの fix-up が見えるのは応答の値に載る SET NULL だけ（P2-5-N1）
-        Pending(
-            "h1-alternate-key-referenced-update",
+        Accepted(
+            "h1-hook-rewrites-referenced-alternate-key",
             RemoteEfCoreOnly,
-            "outcome",
-            "H1",
-            FixD,
-            "updated=True"
+            "hooks-before",
+            "Save フックの段",
+            HookStageOrderReason
         ),
-        Pending("h1-alternate-key-referenced-update", RemoteEfCoreOnly, "state", "H1", FixD),
-        Pending("h1-alternate-key-referenced-update", RemoteEfCoreOnly, "slots", "H1", FixD),
-        Pending(
-            "h1-alternate-key-referenced-save",
-            RemoteEfCoreOnly,
-            "outcome",
-            "H1",
-            FixD,
-            "rows=1"
+        // リモートの断られた保存（受容・直さない）: リモートの Save フックはサーバーのエンティティで走り、書き換えた値は保存の
+        // 応答が運ぶ。断られた保存は値を運ばないので、Before のフックが書き換えた顧客の code はクライアントのメモリに戻らない
+        // （保存先と戻り値はそろう）
+        Accepted(
+            "h1-hook-rewrites-referenced-alternate-key",
+            Remote,
+            "slots",
+            "リモートの断られた保存",
+            RemoteRejectedSaveReason
         ),
-        Pending("h1-alternate-key-referenced-save", RemoteEfCoreOnly, "state", "H1", FixD),
-        Pending("h1-alternate-key-referenced-save", RemoteEfCoreOnly, "slots", "H1", FixD),
-        Pending("h1-alternate-key-referenced-save", RemoteEfCoreOnly, "hooks-after", "H1", FixD),
-        Pending("h1-alternate-key-unreferenced-update", RemoteEfCoreOnly, "state", "H1", FixD),
-        Pending("h1-alternate-key-unreferenced-update", RemoteEfCoreOnly, "slots", "H1", FixD),
-        Pending("h1-alternate-key-unreferenced-save", RemoteEfCoreOnly, "state", "H1", FixD),
-        Pending("h1-alternate-key-unreferenced-save", RemoteEfCoreOnly, "slots", "H1", FixD),
-        Pending(
-            "h5-referrer-delete-dependent-modified",
-            RemoteEfCoreOnly,
-            "outcome",
-            "H5",
-            FixD,
-            "rows=2"
-        ),
-        Pending("h5-referrer-delete-dependent-modified", RemoteEfCoreOnly, "state", "H5", FixD),
-        Pending("h5-referrer-delete-dependent-modified", RemoteEfCoreOnly, "slots", "H5", FixD),
-        Pending(
-            "h5-referrer-delete-dependent-modified",
-            RemoteEfCoreOnly,
-            "hooks-after",
-            "H5",
-            FixD
-        ),
-        Pending(
-            "h5-contact-watcher-delete-dependent-modified",
-            RemoteEfCoreOnly,
-            "outcome",
-            "H5",
-            FixD,
-            "rows=2"
-        ),
-        Pending(
-            "h5-contact-watcher-delete-dependent-modified",
-            RemoteEfCoreOnly,
-            "state",
-            "H5",
-            FixD
-        ),
-        Pending(
-            "h5-contact-watcher-delete-dependent-modified",
+        Accepted(
+            "h1-hook-rewrites-referenced-alternate-key",
             RemoteEfCoreOnly,
             "slots",
-            "H5",
-            FixD
+            "リモートの断られた保存",
+            RemoteRejectedSaveReason
         ),
-        Pending(
-            "h5-contact-watcher-delete-dependent-modified",
-            RemoteEfCoreOnly,
-            "hooks-after",
-            "H5",
-            FixD
-        ),
-        Pending(
-            "h5-contact-code-delete-dependent-modified",
-            RemoteEfCoreOnly,
-            "outcome",
-            "H5",
-            FixD,
-            "rows=2"
-        ),
-        Pending("h5-contact-code-delete-dependent-modified", RemoteEfCoreOnly, "state", "H5", FixD),
-        Pending("h5-contact-code-delete-dependent-modified", RemoteEfCoreOnly, "slots", "H5", FixD),
-        Pending(
-            "h5-contact-code-delete-dependent-modified",
-            RemoteEfCoreOnly,
-            "hooks-after",
-            "H5",
-            FixD
-        ),
-        Pending("h3-edit-then-skip-update", RemoteEfCoreOnly, "slots", "P2-5-R1", FixD),
-        Pending("h3-edit-then-skip-delete", RemoteEfCoreOnly, "outcome", "H3", FixD, "rows=2"),
-        Pending("h3-edit-then-skip-delete", RemoteEfCoreOnly, "state", "H3", FixD),
-        Pending("h3-edit-then-skip-delete", RemoteEfCoreOnly, "slots", "P2-5-R1", FixD),
-        Pending("hook-edit-then-continue-delete", RemoteEfCoreOnly, "slots", "P2-5-R1", FixD),
-        Pending(
-            "contact-backup-delete-dependent-modified",
-            RemoteEfCoreOnly,
-            "slots",
-            "P2-5-N1",
-            FixD
-        ),
-        Pending("n2-navigation-overrides-foreign-key", RemoteEfCoreOnly, "state", "P2-5-N2", FixD),
-        Pending("n2-navigation-overrides-foreign-key", RemoteEfCoreOnly, "slots", "P2-5-N2", FixD),
     ];
-
-    /// <summary>直す区切り（H1・H3・H5 と P2-5 で見つけた EF Core・リモートの違い）</summary>
-    private const string FixD = "修正 D";
 
     /// <summary>
     /// 受け入れた手の差（実装先×手の種類）。宣言した手を流すと、その実装先だけを、その手から後の比較から外す
@@ -372,26 +201,26 @@ public static class BackendParityKnownDifferences
     /// 赤を照合する）。直したら行を消すと比較が戻る。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// 引き金の手は生成器が列の末尾にだけ置く（列の途中で EF Core が割れる手を作ると、その種の EF Core の比較がほぼ消える）。
+    /// </para>
+    /// <para>
+    /// 空のときは、乱数の列も手の差で打ち切らない。仕組みは <c>PendingDeviation_CutsOnlyTheDeclaredBackendInRandomScenarios</c>
+    /// が自前の宣言で確かめる。
+    /// </para>
     /// </remarks>
-    public static IReadOnlyList<PendingDeviation> PendingDeviations { get; } =
-    [
-        new(EfCore, ParityDeviation.DependentHeldParentDelete, "H5", FixD),
-        new(EfCore, ParityDeviation.ReferencedKeyUpdate, "H1", FixD),
-        new(EfCore, ParityDeviation.AlternateKeyUpdate, "H1", FixD),
-        new(EfCore, ParityDeviation.HookEditsSkippedRow, "H3", FixD),
-        new(Remote, ParityDeviation.HookEditsSkippedRow, "P2-5-R1", FixD),
-        new(Remote, ParityDeviation.HookEditsDeletedRow, "P2-5-R1", FixD),
-        new(RemoteEfCoreOnly, ParityDeviation.DependentHeldParentDelete, "H5", FixD),
-        new(RemoteEfCoreOnly, ParityDeviation.ReferencedKeyUpdate, "H1", FixD),
-        new(RemoteEfCoreOnly, ParityDeviation.AlternateKeyUpdate, "H1", FixD),
-        new(RemoteEfCoreOnly, ParityDeviation.HookEditsSkippedRow, "H3", FixD),
-        new(RemoteEfCoreOnly, ParityDeviation.HookEditsDeletedRow, "P2-5-R1", FixD),
-    ];
+    public static IReadOnlyList<PendingDeviation> PendingDeviations { get; } = [];
 
     /// <summary>その実装先で、その手の差を直す区切りつきで見逃しているか</summary>
-    public static bool Defers(ParityBackendKind backend, ParityDeviation deviation) =>
-        PendingDeviations.Any(d => d.Backend == backend && d.Deviation == deviation);
+    /// <param name="declarations">照らす宣言（省略すると <see cref="PendingDeviations"/>）</param>
+    public static bool Defers(
+        ParityBackendKind backend,
+        ParityDeviation deviation,
+        IReadOnlyList<PendingDeviation>? declarations = null
+    ) =>
+        (declarations ?? PendingDeviations).Any(d =>
+            d.Backend == backend && d.Deviation == deviation
+        );
 
     /// <summary>乱数の操作の列で一時的に見逃す違い（<see cref="Tolerance"/> で作る）</summary>
     public static IReadOnlyList<KnownEntry> RandomTolerances { get; } = [];
@@ -403,6 +232,10 @@ public static class BackendParityKnownDifferences
     private const string RowlessDeleteReason = "行なし削除の非対称（F4 の決定で直さない）";
     private const string SameKeyReplaceReason =
         "同じキーの削除と挿入の行数（区切り 39 の決定で直さない）";
+    private const string HookStageOrderReason =
+        "EF Core は Before を全部走らせてから文を流す（docs の Save フックの実装先ごとの違い）";
+    private const string RemoteRejectedSaveReason =
+        "リモートの Save フックの書き換えは保存の応答が運び、断られた保存は値を運ばない（docs のリモートサービスの「サーバーが入れた値も戻ります」）";
     private const string InMemoryForeignKeyReason =
         "インメモリは外部キーと参照動作を再現しない（決定 2026-10-13・docs の実 DB との既知の違い）";
 

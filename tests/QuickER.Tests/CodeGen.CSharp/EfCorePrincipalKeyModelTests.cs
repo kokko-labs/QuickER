@@ -274,12 +274,10 @@ public class EfCorePrincipalKeyModelTests
     }
 
     /// <summary>
-    /// 図の参照アクション（ON DELETE）が EF Core の DeleteBehavior へ実挙動に基づいて写像されることを
-    /// 実モデルで検証する。従来は Cascade 以外がすべて Restrict に畳まれ、SET DEFAULT の図では EF が
-    /// 追跡中の子の FK を null へ更新して DB の既定値設定を横取りしていた（ClientNoAction なら EF は
-    /// 子へ触れず DELETE だけを送り、DB 側の宣言がそのまま効く＝実測）
+    /// 図の参照アクション（ON DELETE）が EF Core の DeleteBehavior へ写像されることを実モデルで検証する。
+    /// CASCADE 以外は ClientNoAction（EF は追跡中の子へ触れず DELETE だけを送り、DB 側の宣言がそのまま効く）
     /// </summary>
-    [Fact(DisplayName = "参照アクションは DeleteBehavior へ実挙動どおり写像される")]
+    [Fact(DisplayName = "参照アクションは CASCADE 以外が ClientNoAction へ写像される")]
     public void 参照アクションはDeleteBehaviorへ写像される()
     {
         var hubId = new Column
@@ -299,13 +297,13 @@ public class EfCorePrincipalKeyModelTests
         )[]
         {
             ("cascade_child", ForeignKeyReferentialAction.Cascade, DeleteBehavior.Cascade),
-            ("setnull_child", ForeignKeyReferentialAction.SetNull, DeleteBehavior.SetNull),
+            ("setnull_child", ForeignKeyReferentialAction.SetNull, DeleteBehavior.ClientNoAction),
             (
                 "setdefault_child",
                 ForeignKeyReferentialAction.SetDefault,
                 DeleteBehavior.ClientNoAction
             ),
-            ("noaction_child", ForeignKeyReferentialAction.NoAction, DeleteBehavior.NoAction),
+            ("noaction_child", ForeignKeyReferentialAction.NoAction, DeleteBehavior.ClientNoAction),
         };
 
         foreach (var (table, action, _) in expectations)

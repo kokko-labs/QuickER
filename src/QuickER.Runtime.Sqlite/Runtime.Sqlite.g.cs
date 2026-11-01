@@ -4123,7 +4123,8 @@ public static class EntityGraphSaver
             cancellationToken,
             hooks,
             changesAlreadyVerified,
-            order: null
+            order: null,
+            consistency: null
         );
 
     /// <summary>
@@ -4146,6 +4147,8 @@ public static class EntityGraphSaver
         SaveHookSession? hooks = null
     )
     {
+        // A navigation and a foreign key that disagree, or a row changed through two instances, stop the save before anything runs
+        var consistency = GraphConsistency.Check(roots, cascadeSave, cascadeDelete);
         var order = GraphSaveOrder.For(roots, cascadeSave, cascadeDelete);
         var rows = 0;
 
@@ -4162,7 +4165,8 @@ public static class EntityGraphSaver
                 cancellationToken,
                 hooks,
                 changesAlreadyVerified: true,
-                order
+                order,
+                consistency
             ).ConfigureAwait(false);
         }
 
@@ -4180,7 +4184,8 @@ public static class EntityGraphSaver
         CancellationToken cancellationToken,
         SaveHookSession? hooks,
         bool changesAlreadyVerified,
-        GraphSaveOrder? order
+        GraphSaveOrder? order,
+        GraphConsistency? consistency
     )
     {
         if (!changesAlreadyVerified && !HasChanges(entity, cascadeSave))
@@ -4240,6 +4245,9 @@ public static class EntityGraphSaver
         // Inserts and updates save the entity itself first, then proceed to the children (child FKs reference the parent PK)
         if (entity.IsAdded)
         {
+            // An unset foreign key takes the parent's key as it stands now, after the parent's own Before hook
+            consistency?.Fill(entity);
+
             if (
                 hooks is null
                 || await hooks.InvokeBeforeAsync(entity, SaveOperation.Insert, cancellationToken).ConfigureAwait(false)
@@ -4311,7 +4319,8 @@ public static class EntityGraphSaver
                     cancellationToken,
                     hooks,
                     changesAlreadyVerified: false,
-                    order
+                    order,
+                    consistency
                 ).ConfigureAwait(false);
             }
         }

@@ -938,6 +938,7 @@ public static class RemoteServerEngine
                         var entity = Required(request.Entity, "Entity");
                         // Listed before the save, which may change the collections the values are matched along
                         var rows = RemoteEntityGraph.CollectSaveRows([entity], request.CascadeSave);
+                        var allRows = RemoteEntityGraph.CollectAllRows([entity]);
                         var affected = await Repository<TRepository>(context)
                             .SaveAsync(
                                 entity,
@@ -953,7 +954,10 @@ public static class RemoteServerEngine
                                 CollectRowVersions([entity], request.CascadeSave),
                                 CollectSkipped([entity], request.CascadeSave),
                                 RemoteEntityGraph.ReadSavedValues(rows)
-                            );
+                            )
+                            {
+                                Unsaved = RemoteEntityGraph.ReadUnsavedValues(allRows),
+                            };
                     }
                 )
         );
@@ -969,6 +973,7 @@ public static class RemoteServerEngine
                         ).ConfigureAwait(false);
                         var entities = Required(request.Entities, "Entities");
                         var rows = RemoteEntityGraph.CollectSaveRows(entities, request.CascadeSave);
+                        var allRows = RemoteEntityGraph.CollectAllRows(entities);
                         var affected = await Repository<TRepository>(context)
                             .SaveAsync(
                                 entities,
@@ -984,7 +989,10 @@ public static class RemoteServerEngine
                                 CollectRowVersions(entities, request.CascadeSave),
                                 CollectSkipped(entities, request.CascadeSave),
                                 RemoteEntityGraph.ReadSavedValues(rows)
-                            );
+                            )
+                            {
+                                Unsaved = RemoteEntityGraph.ReadUnsavedValues(allRows),
+                            };
                     }
                 )
         );

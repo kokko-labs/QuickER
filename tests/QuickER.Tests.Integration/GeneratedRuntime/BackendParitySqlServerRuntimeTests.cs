@@ -69,7 +69,15 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
             "attempt-limit-then-row-gone-update",
             "attempt-limit-then-row-gone-graph-save",
             "move-stale-note-and-delete-old-gadget",
-            "move-stale-note-and-delete-old-gadget-no-hooks"
+            "move-stale-note-and-delete-old-gadget-no-hooks",
+            "alternate-key-referenced-update",
+            "alternate-key-referenced-graph-save",
+            "alternate-key-unreferenced-update",
+            "alternate-key-unreferenced-graph-save",
+            "alternate-key-stale-optimistic-update",
+            "alternate-key-stale-optimistic-graph-save",
+            "alternate-key-stale-force-overwrite-update",
+            "alternate-key-stale-force-overwrite-graph-save"
         );
 
     [Theory(
@@ -361,6 +369,62 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
                 efCore,
                 withHooks: false
             ),
+            "alternate-key-referenced-update" => await AlternateKeyAsync(
+                efCore,
+                graphSave: false,
+                referenced: true,
+                stale: false,
+                ConcurrencyMode.Optimistic
+            ),
+            "alternate-key-referenced-graph-save" => await AlternateKeyAsync(
+                efCore,
+                graphSave: true,
+                referenced: true,
+                stale: false,
+                ConcurrencyMode.Optimistic
+            ),
+            "alternate-key-unreferenced-update" => await AlternateKeyAsync(
+                efCore,
+                graphSave: false,
+                referenced: false,
+                stale: false,
+                ConcurrencyMode.Optimistic
+            ),
+            "alternate-key-unreferenced-graph-save" => await AlternateKeyAsync(
+                efCore,
+                graphSave: true,
+                referenced: false,
+                stale: false,
+                ConcurrencyMode.Optimistic
+            ),
+            "alternate-key-stale-optimistic-update" => await AlternateKeyAsync(
+                efCore,
+                graphSave: false,
+                referenced: false,
+                stale: true,
+                ConcurrencyMode.Optimistic
+            ),
+            "alternate-key-stale-optimistic-graph-save" => await AlternateKeyAsync(
+                efCore,
+                graphSave: true,
+                referenced: false,
+                stale: true,
+                ConcurrencyMode.Optimistic
+            ),
+            "alternate-key-stale-force-overwrite-update" => await AlternateKeyAsync(
+                efCore,
+                graphSave: false,
+                referenced: false,
+                stale: true,
+                ConcurrencyMode.ForceOverwrite
+            ),
+            "alternate-key-stale-force-overwrite-graph-save" => await AlternateKeyAsync(
+                efCore,
+                graphSave: true,
+                referenced: false,
+                stale: true,
+                ConcurrencyMode.ForceOverwrite
+            ),
             _ => throw new ArgumentOutOfRangeException(nameof(name)),
         };
     }
@@ -537,6 +601,115 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
         return [outcome, .. await StateAsync(), .. await NotesStateAsync()];
     }
 
+    /// <summary>
+    /// H1（代替キーの書き込み）：行バージョンを持つ kits の一意なコード（kit_parts.kit_code が参照する）を変えて、UpdateAsync か
+    /// グラフ保存 1 回で保存する。<paramref name="referenced"/> なら kit_parts の行がそのコードを参照しており、DB が断る。
+    /// <paramref name="stale"/> なら読んだ後に他者が名前を変えて版を進めている（Optimistic は競合・ForceOverwrite は書く）。
+    /// 書いたら、手元の版が保存先の版と同じになり、同じインスタンスをもう一度 Optimistic で保存しても競合にならないことを見る
+    /// </summary>
+    private async Task<IReadOnlyList<string>> AlternateKeyAsync(
+        bool efCore,
+        bool graphSave,
+        bool referenced,
+        bool stale,
+        ConcurrencyMode mode
+    )
+    {
+        await using var provider = Build(efCore, withHooks: false);
+        var kits = provider.GetRequiredService<IKitRepository>();
+        await kits.InsertAsync(
+            new KitEntity
+            {
+                KitId = KitIdValue.Create(1),
+                Code = CodeValue.Create("K1"),
+                Name = NameValue.Create("k1"),
+            },
+            Ct
+        );
+
+        if (referenced)
+        {
+            await provider
+                .GetRequiredService<IKitPartRepository>()
+                .InsertAsync(
+                    new KitPartEntity
+                    {
+                        PartId = PartIdValue.Create(10),
+                        KitCode = CodeValue.Create("K1"),
+                    },
+                    Ct
+                );
+        }
+
+        var kit = (await kits.GetByIdAsync(KitIdValue.Create(1), Ct))!;
+
+        if (stale)
+        {
+            await _fixture.ExecuteAsync("UPDATE kits SET name = N'other' WHERE kit_id = 1", Ct);
+        }
+
+        kit.Code = CodeValue.Create("K2");
+        kit.MarkUpdated();
+
+        Task<int> Save() =>
+            graphSave
+                ? kits.SaveAsync(kit, mode: mode, cancellationToken: Ct)
+                : UpdateAsInt(kits.UpdateAsync(kit, mode, Ct));
+
+        var outcome = await OutcomeAsync(Save);
+        List<string> lines =
+        [
+            outcome,
+            $"version-matches-store={await VersionMatchesStoreAsync(kit)}",
+            .. await KitsStateAsync(),
+        ];
+
+        if (outcome == "rows=1")
+        {
+            kit.Name = NameValue.Create("again");
+            kit.MarkUpdated();
+            mode = ConcurrencyMode.Optimistic;
+            lines.Add($"again {await OutcomeAsync(Save)}");
+            lines.AddRange(await KitsStateAsync());
+        }
+
+        return lines;
+    }
+
+    private static async Task<int> UpdateAsInt(Task<bool> update) => await update ? 1 : 0;
+
+    /// <summary>手元の版が保存先の版と同じか（行が無ければ False）</summary>
+    private async Task<bool> VersionMatchesStoreAsync(KitEntity kit)
+    {
+        await using var provider = new ServiceCollection()
+            .AddGeneratedSqlServerRepositories(_fixture.ConnectionString)
+            .BuildServiceProvider();
+        var stored = await provider
+            .GetRequiredService<IKitRepository>()
+            .GetByIdAsync(kit.KitId, Ct);
+
+        return stored is not null && stored.RowVer.Value.SequenceEqual(kit.RowVer.Value);
+    }
+
+    /// <summary>保存先の kits と kit_parts の全行（キー順・版は比べない）</summary>
+    private async Task<IReadOnlyList<string>> KitsStateAsync()
+    {
+        await using var provider = new ServiceCollection()
+            .AddGeneratedSqlServerRepositories(_fixture.ConnectionString)
+            .BuildServiceProvider();
+        var kits = await provider.GetRequiredService<IKitRepository>().GetAllAsync(Ct);
+        var parts = await provider.GetRequiredService<IKitPartRepository>().GetAllAsync(Ct);
+
+        return
+        [
+            .. kits.OrderBy(k => k.KitId.Value)
+                .Select(k => $"kits/{k.KitId.Value} code={k.Code.Value} name={k.Name.Value}"),
+            .. parts
+                .OrderBy(p => p.PartId.Value)
+                .Select(p => $"kit_parts/{p.PartId.Value} kit_code={p.KitCode?.Value}"),
+        ];
+    }
+
     /// <summary>保存先のメモの全行（キー順・版は比べない）</summary>
     private async Task<IReadOnlyList<string>> NotesStateAsync()
     {
@@ -597,6 +770,11 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
         catch (SaveConflictException ex)
         {
             return $"throws SaveConflictException reason={ex.Reason}";
+        }
+        catch (Exception ex) when (ex is DbException or DbUpdateException)
+        {
+            // DB が断った（QuickER 版は SqlException・EF Core は DbUpdateException か SqlException）
+            return "throws store-rejected";
         }
         catch (Exception ex)
         {

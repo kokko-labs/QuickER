@@ -222,6 +222,12 @@ public abstract class QuickER.Runtime.EntityBaseCore
 public static class QuickER.Runtime.GeneratedDisplayNames
     public static System.Func<string, string, string> Resolve { get; set; }
 
+public sealed class QuickER.Runtime.GraphConsistency
+    public bool IsUntracked(QuickER.Runtime.EntityBaseCore entity)
+    public static QuickER.Runtime.GraphConsistency Check(System.Collections.Generic.IEnumerable<QuickER.Runtime.EntityBaseCore> roots, bool cascadeSave, bool cascadeDelete)
+    public void Fill(QuickER.Runtime.EntityBaseCore entity)
+    public void FillAll()
+
 public sealed class QuickER.Runtime.GraphSaveOrder
     public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBaseCore> Deletions { get; }
     public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBaseCore> HeldBack { get; }
@@ -436,9 +442,12 @@ public static class QuickER.Runtime.RemoteEntityGraph
     public static System.Collections.Generic.Dictionary<System.ValueTuple<string, string>, byte[]> RowVersionLookup(System.Collections.Generic.List<QuickER.Runtime.RemoteRowVersionEntry> entries)
     public static System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement> ReadColumnValues(QuickER.Runtime.EntityBaseCore entity)
     public static System.Collections.Generic.HashSet<System.ValueTuple<string, string>> SkippedLookup(System.Collections.Generic.List<QuickER.Runtime.RemoteEntityRef> entries)
+    public static System.Collections.Generic.List<QuickER.Runtime.EntityBaseCore> CollectAllRows(System.Collections.Generic.IEnumerable<QuickER.Runtime.EntityBaseCore> roots)
     public static System.Collections.Generic.List<QuickER.Runtime.EntityBaseCore> CollectSaveRows(System.Collections.Generic.IEnumerable<QuickER.Runtime.EntityBaseCore> roots, bool cascade)
     public static System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement>> ReadSavedValues(System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBaseCore> rows)
+    public static System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement>> ReadUnsavedValues(System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBaseCore> rows)
     public static System.Collections.Generic.List<System.ValueTuple<QuickER.Runtime.EntityBaseCore, System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement>>> MatchSavedValues(System.Collections.Generic.IEnumerable<QuickER.Runtime.EntityBaseCore> roots, bool cascade, System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement>> saved)
+    public static System.Collections.Generic.List<System.ValueTuple<QuickER.Runtime.EntityBaseCore, System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement>>> MatchUnsavedValues(System.Collections.Generic.IEnumerable<QuickER.Runtime.EntityBaseCore> roots, System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement>> unsaved)
     public static System.Reflection.PropertyInfo RowVersionProperty(System.Type entityType)
     public static bool IsSkipped(QuickER.Runtime.EntityBaseCore entity, System.Collections.Generic.HashSet<System.ValueTuple<string, string>> lookup)
     public static byte[] ReadRowVersion(QuickER.Runtime.EntityBaseCore entity)
@@ -516,6 +525,7 @@ public sealed class QuickER.Runtime.RemoteSaveResult : System.IEquatable<QuickER
     public System.Collections.Generic.List<QuickER.Runtime.RemoteEntityRef> Skipped { get; init; }
     public System.Collections.Generic.List<QuickER.Runtime.RemoteRowVersionEntry> RowVersions { get; init; }
     public System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement>> Saved { get; init; }
+    public System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement>> Unsaved { get; init; }
     public int Affected { get; init; }
 
 public sealed class QuickER.Runtime.RemoteUpdateRequest<TEntity> : System.IEquatable<QuickER.Runtime.RemoteUpdateRequest<TEntity>>

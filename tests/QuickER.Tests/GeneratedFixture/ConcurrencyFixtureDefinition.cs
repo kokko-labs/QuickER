@@ -31,6 +31,14 @@ namespace QuickER.Tests.GeneratedConcurrencyFixture;
 /// 文字列列は Unicode（<c>nvarchar</c>）で統一する（可搬フィクスチャの不変条件）。
 /// </para>
 /// <para>
+/// あわせて、行バージョンを持つ表の代替キー（主キーでない一意制約を外部キーが参照する列）の書き込みを SQL Server で確かめる
+/// 2 表を置く（<c>BackendParitySqlServerRuntimeTests</c> のケース。上の 2 表とは独立）:
+/// </para>
+/// <list type="bullet">
+///   <item><c>kits</c>: <c>kit_id</c>（int・PK）／<c>code</c>（nvarchar(20)・NOT NULL・一意制約）／<c>name</c>（nvarchar(50)・NOT NULL）／<c>row_ver</c>（rowversion・NOT NULL）</item>
+///   <item><c>kit_parts</c>: <c>part_id</c>（int・PK）／<c>kit_code</c>（nvarchar(20)・NULL 許容・<c>kits.code</c> への FK・NO ACTION）</item>
+/// </list>
+/// <para>
 /// あわせて「DB 採番列は EditModel の入力必須にしない」も本図で固定する。VO 有無に依らず rowversion 列は
 /// <c>IsRequired=false</c>／Mapper は「入力があるときだけ代入」になり、新規行の EditModel 保存が成立する。
 /// </para>
@@ -83,6 +91,19 @@ public static class ConcurrencyFixtureDefinition
     private static readonly Guid NoteRowVerColId = new("a2000000-0000-0000-0000-000000000005");
 
     private static readonly Guid RelGadgetNotes = new("a3000000-0000-0000-0000-000000000001");
+
+    private static readonly Guid KitId = new("a4000000-0000-0000-0000-000000000001");
+    private static readonly Guid KitPkColId = new("a4000000-0000-0000-0000-000000000002");
+    private static readonly Guid KitCodeColId = new("a4000000-0000-0000-0000-000000000003");
+    private static readonly Guid KitNameColId = new("a4000000-0000-0000-0000-000000000004");
+    private static readonly Guid KitRowVerColId = new("a4000000-0000-0000-0000-000000000005");
+    private static readonly Guid KitCodeUniqueId = new("a4000000-0000-0000-0000-000000000006");
+
+    private static readonly Guid PartId = new("a5000000-0000-0000-0000-000000000001");
+    private static readonly Guid PartPkColId = new("a5000000-0000-0000-0000-000000000002");
+    private static readonly Guid PartKitCodeColId = new("a5000000-0000-0000-0000-000000000003");
+
+    private static readonly Guid RelKitParts = new("a6000000-0000-0000-0000-000000000001");
 
     /// <summary>
     /// rowversion × VO の検証用 ER 図を決定的に構築する（要素 ID は固定 GUID・型は SQL Server 表記）。
@@ -170,9 +191,82 @@ public static class ConcurrencyFixtureDefinition
             },
         };
 
+        var kit = new Entity
+        {
+            Id = KitId,
+            TableName = "kits",
+            Columns =
+            {
+                new Column
+                {
+                    Id = KitPkColId,
+                    Name = "kit_id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                // 一意なコード（kit_parts.kit_code が参照する＝EF Core は HasPrincipalKey で代替キーにする。代替キーは必須なので NOT NULL）
+                new Column
+                {
+                    Id = KitCodeColId,
+                    Name = "code",
+                    DataType = "nvarchar(20)",
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = KitNameColId,
+                    Name = "name",
+                    DataType = "nvarchar(50)",
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = KitRowVerColId,
+                    Name = "row_ver",
+                    DataType = "rowversion",
+                    IsNullable = false,
+                },
+            },
+            UniqueConstraints =
+            {
+                new UniqueConstraint
+                {
+                    Id = KitCodeUniqueId,
+                    Name = "UQ_kits_code",
+                    ColumnIds = [KitCodeColId],
+                },
+            },
+        };
+
+        var part = new Entity
+        {
+            Id = PartId,
+            TableName = "kit_parts",
+            Columns =
+            {
+                new Column
+                {
+                    Id = PartPkColId,
+                    Name = "part_id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = PartKitCodeColId,
+                    Name = "kit_code",
+                    DataType = "nvarchar(20)",
+                    IsForeignKey = true,
+                    IsNullable = true,
+                },
+            },
+        };
+
         return new ErDiagram
         {
-            Entities = { gadget, note },
+            Entities = { gadget, note, kit, part },
             Relationships =
             {
                 // 1対多: gadgets -> gadget_notes（ON DELETE CASCADE）
@@ -185,6 +279,19 @@ public static class ConcurrencyFixtureDefinition
                     ColumnPairs = [new(GadgetPkColId, NoteGadgetFkColId)],
                     ConstraintName = "FK_gadget_notes_gadgets",
                     OnDelete = ForeignKeyReferentialAction.Cascade,
+                    OnUpdate = ForeignKeyReferentialAction.NoAction,
+                },
+                // 1対多: kits.code -> kit_parts.kit_code（主キーでない一意制約を参照する・NO ACTION＝参照されているコードの
+                // 変更は DB が断る）
+                new Relationship
+                {
+                    Id = RelKitParts,
+                    Type = RelationshipType.OneToMany,
+                    SourceEntityId = KitId,
+                    TargetEntityId = PartId,
+                    ColumnPairs = [new(KitCodeColId, PartKitCodeColId)],
+                    ConstraintName = "FK_kit_parts_kits_code",
+                    OnDelete = ForeignKeyReferentialAction.NoAction,
                     OnUpdate = ForeignKeyReferentialAction.NoAction,
                 },
             },

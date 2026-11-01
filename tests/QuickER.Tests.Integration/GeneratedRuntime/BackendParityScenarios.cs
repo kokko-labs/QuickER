@@ -632,7 +632,7 @@ public static class BackendParityScenarios
             ]
         ),
         // P2-5-N2: 顧客 2 の owner のコレクションに持った連絡先の owner を 3 へ書き換え、顧客 2 から保存する（持っている親と
-        // 外部キーの値が食い違うグラフ）
+        // 外部キーの値が食い違うグラフ＝全実装先が保存の前に同じ例外で断る）
         new(
             "n2-navigation-overrides-foreign-key",
             [
@@ -653,7 +653,8 @@ public static class BackendParityScenarios
                 new LoadOp("C", "contacts", 501),
             ]
         ),
-        // 顧客を連絡先と紹介先ごと Include して読み、グラフの連絡先を編集して顧客から保存する（リモートには無い）
+        // 顧客を連絡先と紹介先ごと Include して読み、グラフの連絡先を編集して顧客から保存する（リモートには無い）。連絡先 501 の
+        // watcher を、持っている顧客 1 と違う顧客 2 へ書き換えるので、全実装先が保存の前に同じ例外で断る
         new(
             "contacts-include-and-save",
             [
@@ -683,6 +684,120 @@ public static class BackendParityScenarios
                 new EditCustomerOp(S, 3, Note: "r"),
                 new SaveOp(S),
                 new LoadCustomerWithContactsOp("B", 1),
+            ]
+        ),
+        // P2-5-N2: 変更の無い子でも、持っている親と外部キーが食い違えば断る（EF Core は追跡の fix-up で外部キーを書き換える）
+        new(
+            "n2-unchanged-child-foreign-key-differs",
+            [
+                .. Basic,
+                new SeedOp(new CustomerRow(3, "Cy")),
+                new SeedOp(new ContactRow(501, "d", 2)),
+            ],
+            [
+                new LoadOp("B", "customers", 2),
+                new EditCustomerOp("B", 2, Note: "n"),
+                new AddChildOp(
+                    "B",
+                    "customers/2",
+                    new ContactRow(501, "d", 3),
+                    RowState.Unchanged,
+                    ParityContactRelation.Owner
+                ),
+                new SaveOp("B"),
+                new LoadOp("C", "contacts", 501),
+            ]
+        ),
+        // P2-5-N2: 子の親への参照が同じ保存の行を指し、外部キーと食い違えば断る
+        new(
+            "n2-parent-reference-differs",
+            [.. Basic, new SeedOp(new ContactRow(500, "c", 1, Watcher: 2))],
+            [
+                new LoadOp("S", "customers", 1),
+                new EditCustomerOp("S", 1, Note: "n"),
+                new AttachContactOp("S", "customers/1", 500, ParityContactRelation.Owner),
+                new PointContactAtOp("S", 500, ParityContactRelation.Watcher, 1),
+                new SaveOp("S"),
+                new LoadOp("C", "contacts", 500),
+            ]
+        ),
+        // P2-5-N2: 新しい子の未設定の外部キーは親のキーで埋まる（新しい顧客・注文・明細の 3 段。Save フックなし＝まとめて埋める）
+        new(
+            "n2-new-children-take-parent-keys",
+            [.. Basic],
+            [
+                new NewRootOp("S", new CustomerRow(7, "Seven"), RowState.Added),
+                new AddChildOp("S", "customers/7", new OrderRow(70, 0, 5m), RowState.Added),
+                new AddChildOp("S", "orders/70", new LineRow(71, 0, "y", 2), RowState.Added),
+                new SaveOp("S"),
+                new LoadOp("C", "orders", 70),
+                new LoadOp("D", "order_lines", 71),
+            ],
+            new ParityBackendOptions(WithHooks: false)
+        ),
+        // P2-5-N2: 親の Before フックが親のキーを決める形。新しい子の未設定の外部キーは、子の Before の直前に決まったキーで埋まり、
+        // 子の Before が埋まった外部キーを記録する（hooks-before。EF Core も追跡の時点の値でなく決まったキーを見る）
+        new(
+            "n2-hook-assigned-keys-reach-new-children",
+            [.. Basic],
+            [
+                new NewRootOp("S", new CustomerRow(0, "Zero", Code: "KZ"), RowState.Added),
+                new AddChildOp("S", "customers/0", new OrderRow(0, 0, 5m), RowState.Added),
+                new AddChildOp("S", "orders/0", new LineRow(31, 0, "z", 1), RowState.Added),
+                new SaveOp("S"),
+                new LoadOp("C", "customers", ParityHookRecorder.AssignedCustomerKey),
+                new LoadOp("D", "orders", ParityHookRecorder.AssignedOrderKey),
+                new LoadOp("E", "order_lines", 31),
+            ],
+            new ParityBackendOptions(
+                HookRules:
+                [
+                    new ParityHookRule("Insert:customers", ParityHookBehavior.AssignKey),
+                    new ParityHookRule("Insert:orders", ParityHookBehavior.AssignKey),
+                    new ParityHookRule("Insert:order_lines", ParityHookBehavior.AssignKey),
+                ]
+            )
+        ),
+        // P2-5-N3: 同じ連絡先の 2 つのインスタンスのうち、変更を持つのが 1 つなら保存する（EF Core は変更の無いほうを追跡しない）
+        new(
+            "n3-same-row-one-instance-changed",
+            [.. Basic, new SeedOp(new ContactRow(500, "c", 1, Watcher: 1))],
+            [
+                new LoadOp("S", "customers", 1),
+                new AttachContactOp("S", "customers/1", 500, ParityContactRelation.Owner),
+                new AddChildOp(
+                    "S",
+                    "customers/1",
+                    new ContactRow(500, "c2", 1, Watcher: 1),
+                    RowState.Updated,
+                    ParityContactRelation.Watcher
+                ),
+                new SaveOp("S"),
+                new LoadOp("C", "contacts", 500),
+            ]
+        ),
+        // P2-5-N3: 同じ連絡先の 2 つのインスタンスがどちらも変更を持てば、行を 2 度書くことになるので断る
+        new(
+            "n3-same-row-both-instances-changed",
+            [.. Basic, new SeedOp(new ContactRow(500, "c", 1, Watcher: 1))],
+            [
+                new LoadOp("S", "customers", 1),
+                new AddChildOp(
+                    "S",
+                    "customers/1",
+                    new ContactRow(500, "c2", 1, Watcher: 1),
+                    RowState.Updated,
+                    ParityContactRelation.Owner
+                ),
+                new AddChildOp(
+                    "S",
+                    "customers/1",
+                    new ContactRow(500, "c3", 1, Watcher: 1),
+                    RowState.Updated,
+                    ParityContactRelation.Watcher
+                ),
+                new SaveOp("S"),
+                new LoadOp("C", "contacts", 500),
             ]
         ),
         // H5: 任意の自己参照（NO ACTION）で参照されている顧客を、参照する顧客と一緒に 1 回の保存で消す（再現パッチの形）
@@ -739,6 +854,32 @@ public static class BackendParityScenarios
             ParityContactRelation.CustomerCode,
             false
         ),
+        // 実行戦略のやり直し：連絡先 500 を顧客 2 のグラフに持ったまま、その連絡先の backup（SET NULL）が指す顧客 3 を消す保存の、
+        // EF Core の 1 回目のコミットが一時的に失敗する。2 回目の試行は、1 回目の追跡で EF Core が書き換えたナビゲーション
+        // （3 の連絡先のコレクションに入った 500）を戻してからグラフを辿る（戻さないと 500 を 3 の子として消す）
+        new(
+            "contact-backup-delete-retried-commit",
+            [
+                .. Basic,
+                new SeedOp(new CustomerRow(3, "Cy")),
+                new SeedOp(new ContactRow(500, "c", 2, Backup: 3)),
+            ],
+            [
+                new LoadOp("A", "customers", 2),
+                new AttachContactOp("A", "customers/2", 500, ParityContactRelation.Owner),
+                // 文を 2 つにする（EF Core は文が 1 つの SaveChanges ではトランザクションを開かず、失敗させるコミットが無い）
+                new EditContactOp("A", 500, "edited"),
+                new LoadOp("B", "customers", 3),
+                new MarkRemovedOp("B", "customers/3"),
+                // 顧客 3 は連絡先 500 に参照されている（インメモリの受け入れた差＝P1）
+                new DeviatingOp(
+                    new SaveManyCustomersOp(["A", "B"]),
+                    ParityDeviation.DependentHeldParentDelete
+                ),
+                new LoadOp("C", "contacts", 500),
+            ],
+            new ParityBackendOptions(WithHooks: false, RetryEfCoreFirstCommit: true)
+        ),
         // H1: 一意制約を参照する外部キーの親の列（代替キー）を更新する（参照あり・なし × UpdateAsync・グラフ保存）
         AlternateKeyUpdate("h1-alternate-key-referenced-update", referenced: true, viaSave: false),
         AlternateKeyUpdate("h1-alternate-key-referenced-save", referenced: true, viaSave: true),
@@ -748,7 +889,34 @@ public static class BackendParityScenarios
             viaSave: false
         ),
         AlternateKeyUpdate("h1-alternate-key-unreferenced-save", referenced: false, viaSave: true),
-        // H3: Before が値を書き換えてから false を返す（更新・削除）
+        // H1: 古いコードを参照する依存行を同じグラフ保存に持ったまま、代替キーを変える（保存の前に変える・Before のフックが
+        // 追跡の後で変える）。古いコードは参照されているので全実装先が断り、メモリの依存行の外部キーとナビゲーションは元のまま
+        AlternateKeyUpdateWithDependents(
+            "h1-alternate-key-referenced-save-with-dependents",
+            byHook: false
+        ),
+        AlternateKeyUpdateWithDependents("h1-hook-rewrites-referenced-alternate-key", byHook: true),
+        // H1: Before のフックが追跡の後で代替キーを書き換える（参照なし）。書き換えた値が全実装先で保存先に入る
+        new(
+            "h1-hook-rewrites-alternate-key",
+            [.. Basic, new SeedOp(new CustomerRow(3, "Cy"))],
+            [
+                new LoadOp("A", "customers", 3),
+                new EditCustomerOp("A", 3, Note: "n"),
+                new SaveOp("A"),
+                new LoadOp("C", "customers", 3),
+            ],
+            new ParityBackendOptions(
+                HookRules:
+                [
+                    new ParityHookRule(
+                        "Update:customers/3",
+                        ParityHookBehavior.EditKeyThenContinue
+                    ),
+                ]
+            )
+        ),
+        // H3:Before が値を書き換えてから false を返す（更新・削除）
         HookOnCustomer("h3-edit-then-skip-update", ParityHookBehavior.EditThenSkip, delete: false),
         HookOnCustomer("h3-edit-then-skip-delete", ParityHookBehavior.EditThenSkip, delete: true),
         // H3 の挿入の形：新しい顧客 9 をグラフ保存で挿入し、Before が書き換えてから false を返す（乱数の列の末尾の手で見つけた形）
@@ -888,6 +1056,79 @@ public static class BackendParityScenarios
                 new LoadOp("C", "customers", 3),
             ]
         );
+
+    /// <summary>
+    /// 顧客 3 のコードを変えてグラフ保存する。顧客 3 は連絡先 500（変更なし）と 501（ラベルを編集）を owner のコレクションに持ち、
+    /// 2 つとも customer_code で顧客 3 の古いコードを参照する。<paramref name="byHook"/> のときは Before のフックが追跡の後で
+    /// コードを書き換え、そうでなければ保存の前に書き換える。保存の後、メモリの連絡先の customer_code とその親への参照が元のままかを
+    /// 実装先ごとに確かめる（EF Core が代替キーの変更を拾って依存行を付け替えない）
+    /// </summary>
+    private static ParityScenario AlternateKeyUpdateWithDependents(string name, bool byHook)
+    {
+        var code = CustomerRow.DefaultCode(3);
+
+        return new(
+            name,
+            [
+                .. Basic,
+                new SeedOp(new CustomerRow(3, "Cy")),
+                new SeedOp(new ContactRow(500, "c", 3, CustomerCode: code)),
+                new SeedOp(new ContactRow(501, "d", 3, CustomerCode: code)),
+            ],
+            [
+                new LoadOp("A", "customers", 3),
+                new AttachContactOp("A", "customers/3", 500, ParityContactRelation.Owner),
+                new AttachContactOp("A", "customers/3", 501, ParityContactRelation.Owner),
+                new EditContactOp("A", 501, "d2"),
+                new EditCustomerOp("A", 3, Note: "n", Code: byHook ? null : "NEW3"),
+                // 参照されているコードの更新はインメモリの受け入れた差（P2）
+                new DeviatingOp(new SaveOp("A"), ParityDeviation.ReferencedKeyUpdate),
+                new ExpectOp("dependents-unchanged", e => DependentsKeepOldCode(e, code)),
+                new LoadOp("C", "customers", 3),
+                new LoadOp("D", "contacts", 500),
+                new LoadOp("E", "contacts", 501),
+            ],
+            byHook
+                ? new ParityBackendOptions(
+                    HookRules:
+                    [
+                        new ParityHookRule(
+                            "Update:customers/3",
+                            ParityHookBehavior.EditKeyThenContinue
+                        ),
+                    ]
+                )
+                // フックの無いグラフ保存（Save フックの段の並びの違いを持ち込まない）
+                : new ParityBackendOptions(WithHooks: false)
+        );
+    }
+
+    /// <summary>
+    /// スロット A の顧客が owner で持つ連絡先が、customer_code に <paramref name="code"/> を持ったままで、その親への参照が空か
+    /// （顧客の customer_code のコレクションも空か）。満たさなければ理由を返す
+    /// </summary>
+    private static string? DependentsKeepOldCode(ParityExpectation e, string code)
+    {
+        var customer = (CustomerEntity)e.Backend.Slots["A"];
+
+        if (customer.ContactsByCustomerCodeCustomer.Count != 0)
+        {
+            return $"the customer holds {customer.ContactsByCustomerCodeCustomer.Count} contact(s) by its code";
+        }
+
+        foreach (var contact in customer.ContactsByOwner)
+        {
+            if (contact.CustomerCode?.Value != code || contact.CustomerCodeCustomer is not null)
+            {
+                return $"contacts/{contact.ContactId.Value} customer_code={contact.CustomerCode?.Value} "
+                    + $"navigation={(contact.CustomerCodeCustomer is null ? "null" : "set")}";
+            }
+        }
+
+        return customer.ContactsByOwner.Count == 2
+            ? null
+            : $"the customer holds {customer.ContactsByOwner.Count} contact(s) by owner";
+    }
 
     /// <summary>顧客 3 を、グラフ保存か UpdateAsync で保存する手</summary>
     private static ParityOp Save(bool viaSave) =>

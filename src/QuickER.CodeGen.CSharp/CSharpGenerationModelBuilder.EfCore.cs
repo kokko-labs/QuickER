@@ -277,18 +277,15 @@ internal sealed partial class CSharpGenerationModelBuilder
                 PrincipalKeyPropertyNames = referencesPrimaryKey
                     ? []
                     : [_nameConverter.ToPropertyName(principalColumn.Name)],
-                // 図の参照アクション → EF Core の DeleteBehavior（実挙動を観測して決めた写像）。
-                // NoAction / Restrict はクライアント挙動が同一（必須関係＝保存前に例外・任意関係＝
-                // 追跡中の子の FK を null 化）なので図の宣言どおり NoAction を出す。SetNull は EF が
-                // 追跡中の子を、DB の ON DELETE SET NULL が未追跡の子を、同じ結論へ揃える。
-                // SET DEFAULT だけは EF に対応値が無く、ClientNoAction（EF は子へ触れず DELETE だけ
-                // 送る）でないと EF が子の FK を null へ更新して DB の既定値設定を横取りする
+                // 図の参照アクション → EF Core の DeleteBehavior。CASCADE 以外は ClientNoAction（EF は追跡中の子に
+                // 触れず、親の DELETE だけを送る＝結果は DB の参照アクションが決める。QuickER 版 Repository と同じ）。
+                // NoAction・SetNull にすると、EF は追跡中の子の外部キーを null にして UPDATE を送るか（任意の
+                // NO ACTION＝DB が断るはずの削除が通る・H5）、メモリの外部キーを書き換える（SET NULL）。SET DEFAULT は
+                // EF に対応値が無い。CASCADE は EF も追跡中の子を消すが、DB も子を消すので結果は同じ
                 DeleteBehavior = relationship.OnDelete switch
                 {
                     ForeignKeyReferentialAction.Cascade => "Cascade",
-                    ForeignKeyReferentialAction.SetNull => "SetNull",
-                    ForeignKeyReferentialAction.SetDefault => "ClientNoAction",
-                    _ => "NoAction",
+                    _ => "ClientNoAction",
                 },
             };
 

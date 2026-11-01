@@ -234,7 +234,9 @@ public sealed class BackendParityRuntimeTests
         report.Failures.Should().BeEmpty(report.Render());
 
         // 手の差で外した比較が、実装先ごとに全体の 1 割を超えない（列の末尾にだけ置く前提が崩れていない）。直す区切りのある
-        // 手の差の打ち切りは、それを宣言した実装先で 1 回以上起きる（引き金の手を作らなくなると 0 になる）
+        // 手の差の打ち切りは、それを宣言した実装先で 1 回以上起きる（引き金の手を作らなくなると 0 になる）。
+        // PendingDeviations が空の間は回す実装先が無く、この表明は何も確かめない（打ち切りの仕組みそのものは
+        // PendingDeviation_CutsOnlyTheDeclaredBackendInRandomScenarios が自前の宣言で確かめる）
         if (ranAllSeeds && plan.IsDefaultCount)
         {
             foreach (var backend in CutBackends)
@@ -558,9 +560,13 @@ public sealed class BackendParityRuntimeTests
 
     /// <summary>
     /// 直す区切りのある手の差の仕組み：乱数の列（<see cref="ParityScenario.CutPendingDeviations"/>）でだけ、宣言した実装先
-    /// （EF Core と EF Core 単独のサーバー）をその手から後の比較から外し、外したことが <see cref="ParityCut.Pending"/> つきで残る。同じ手の後のほかの
+    /// （ここで渡す自前の宣言の EF Core）をその手から後の比較から外し、外したことが <see cref="ParityCut.Pending"/> つきで残る。同じ手の後のほかの
     /// 実装先の違いは違いのまま。決まった形のシナリオ（打ち切らない）では、宣言した実装先の違いも違いとして出る
     /// </summary>
+    /// <remarks>
+    /// 宣言は本物の一覧（<see cref="BackendParityKnownDifferences.PendingDeviations"/>）でなく自前で渡す。本物の一覧が空の間も、
+    /// 打ち切りが実際に 1 回起きることを確かめるため。
+    /// </remarks>
     [Fact(
         DisplayName = "[Parity] 直す区切りのある手の差は、乱数の列でだけ宣言した実装先をその手から後の比較から外す"
     )]
@@ -585,23 +591,33 @@ public sealed class BackendParityRuntimeTests
             "control-pending-deviation",
             seeds,
             ops,
-            CutPendingDeviations: true
+            CutPendingDeviations: true,
+            PendingDeclarations:
+            [
+                new PendingDeviation(
+                    ParityBackendKind.EfCore,
+                    ParityDeviation.AlternateKeyUpdate,
+                    "control",
+                    "control"
+                ),
+            ]
         ).RunAsync(Ct);
 
         random.Groups.Should().BeEquivalentTo(new[] { (ParityBackendKind.Remote, "state") });
         random
             .Cuts.Should()
             .BeEquivalentTo(
-                new[] { ParityBackendKind.EfCore, ParityBackendKind.RemoteEfCoreOnly }.Select(
-                    backend => new ParityCut(
-                        backend,
+                new[]
+                {
+                    new ParityCut(
+                        ParityBackendKind.EfCore,
                         1,
                         "Diverge",
                         ParityDeviation.AlternateKeyUpdate,
                         2,
                         Pending: true
-                    )
-                )
+                    ),
+                }
             );
 
         var fixedShape = await new ParityScenario(

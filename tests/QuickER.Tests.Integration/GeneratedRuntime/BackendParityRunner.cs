@@ -19,13 +19,18 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <param name="CutPendingDeviations">
 /// 直す区切りのある手の差（<see cref="BackendParityKnownDifferences.PendingDeviations"/>）でも打ち切るか（乱数の操作の列だけ真）
 /// </param>
+/// <param name="PendingDeclarations">
+/// 直す区切りのある手の差の宣言（省略すると <see cref="BackendParityKnownDifferences.PendingDeviations"/>）。打ち切りの仕組みを
+/// 確かめるテストが、本物の一覧が空の間も自前の宣言で仕組みを流すために渡す
+/// </param>
 public sealed record ParityScenario(
     string Name,
     IReadOnlyList<ParityOp> Seeds,
     IReadOnlyList<ParityOp> Ops,
     ParityBackendOptions? Options = null,
     bool CompareWithBaseline = true,
-    bool CutPendingDeviations = false
+    bool CutPendingDeviations = false,
+    IReadOnlyList<PendingDeviation>? PendingDeclarations = null
 )
 {
     /// <summary>全操作がある実装先（QuickER 版を必ず含む＝基準。並びは実装先の軸の正本＝<see cref="BackendParityAxis"/>）</summary>
@@ -71,7 +76,13 @@ public sealed record ParityScenario(
         foreach (var (kind, trace) in traces)
         {
             // 受け入れた手の差を持つ手を流した実装先は、その手から後を比べない（外したことは Cuts に残す）
-            var cut = CutIndex(Ops, kind, CutPendingDeviations);
+            var cut = CutIndex(
+                Ops,
+                kind,
+                CutPendingDeviations
+                    ? PendingDeclarations ?? BackendParityKnownDifferences.PendingDeviations
+                    : null
+            );
 
             if (cut is { } at)
             {
@@ -114,13 +125,13 @@ public sealed record ParityScenario(
 
     /// <summary>
     /// その実装先で受け入れた手の差（<see cref="BackendParityKnownDifferences.AcceptedDeviations"/>）か、
-    /// <paramref name="includePending"/> のときは直す区切りのある手の差（<see cref="BackendParityKnownDifferences.PendingDeviations"/>）
+    /// <paramref name="pending"/> を渡したときは、その直す区切りのある手の差の宣言
     /// を持つ最初の手の位置（無ければ null）。その手から後は、その実装先を比べない
     /// </summary>
     internal static int? CutIndex(
         IReadOnlyList<ParityOp> ops,
         ParityBackendKind kind,
-        bool includePending = false
+        IReadOnlyList<PendingDeviation>? pending = null
     )
     {
         for (var i = 0; i < ops.Count; i++)
@@ -130,8 +141,8 @@ public sealed record ParityScenario(
                 && (
                     BackendParityKnownDifferences.Accepts(kind, deviating.Deviation)
                     || (
-                        includePending
-                        && BackendParityKnownDifferences.Defers(kind, deviating.Deviation)
+                        pending is not null
+                        && BackendParityKnownDifferences.Defers(kind, deviating.Deviation, pending)
                     )
                 )
             )
