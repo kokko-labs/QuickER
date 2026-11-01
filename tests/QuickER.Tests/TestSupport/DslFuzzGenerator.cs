@@ -12,6 +12,10 @@ namespace QuickER.Tests.TestSupport;
 /// <param name="Queries">クエリ</param>
 /// <param name="ValueObjects">値オブジェクトを生成するか</param>
 /// <param name="Seed">作ったシード（失敗の例に載せる）</param>
+/// <param name="SelfReference">
+/// 主キーを参照する自己参照の外部キーの列の名前（無ければ null）。外部キーの列は主キーの値オブジェクトの型を共有する
+/// （GuidKey の主キーなら NULL 許容の GuidKey の列になる）。行の値は、その行より前の行のキーか NULL にしておくこと
+/// </param>
 public sealed record DslFuzzUnit(
     string Name,
     string TableName,
@@ -19,7 +23,8 @@ public sealed record DslFuzzUnit(
     IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows,
     IReadOnlyList<DslQuery> Queries,
     bool ValueObjects,
-    int Seed = 0
+    int Seed = 0,
+    string? SelfReference = null
 )
 {
     /// <summary>主キーの列</summary>
@@ -36,6 +41,20 @@ public sealed record DslFuzzUnit(
         }
 
         var diagram = new ErDiagram { TargetDbms = targetDbms, Entities = { entity } };
+
+        if (SelfReference is not null)
+        {
+            var child = Columns.Single(column => column.Name == SelfReference);
+            diagram.Relationships.Add(
+                new Relationship
+                {
+                    SourceEntityId = entity.Id,
+                    TargetEntityId = entity.Id,
+                    Type = RelationshipType.OneToMany,
+                    ColumnPairs = { new RelationshipColumnPair(Key.Model.Id, child.Model.Id) },
+                }
+            );
+        }
 
         foreach (var query in Queries)
         {
@@ -190,6 +209,159 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
         }
 
         return queries;
+    }
+
+    /// <summary>網羅の単位の合成のクエリの原子の数の上限</summary>
+    private const int CoverageAtomsPerQuery = 6;
+
+    /// <summary>
+    /// 網羅の単位のクエリ：<paramref name="atomColumns"/> の列の原子のクエリ（<see cref="Queries"/> と同じ作り方）と、
+    /// 戻り形ごと・射影の非 NULL 指定の、原子の形の全水準・自身の否定の 2 水準・列の全種類・NOT の 2 向きを含む合成のクエリ
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 合成のクエリの原子は、列に使える全ての形の原子（<see cref="AllAtoms"/>）を並べ、まだ出していない形・否定・列の種類を
+    /// 足すものだけを先頭から貪欲に選ぶ。型の検査が断る原子と、EF Core（SQLite）が流さない decimal の列の順序比較は使わない
+    /// （その原子を含むクエリは照合されず、同じクエリの他の原子まで数えられなくなる）。選んだ原子を
+    /// <see cref="CoverageAtomsPerQuery"/> 個ずつ OR でまとめ、1 つおきに NOT で包む。射影の非 NULL 指定は、射影する列の
+    /// IS NOT NULL と AND でつなぐ（射影する列が NULL の行を返さない）。
+    /// </para>
+    /// <para>
+    /// 乱数（値とパラメータ名）はこのメソッドの中で引き、<see cref="Queries"/> の引き方には触れない（網羅の単位は種の指紋の外）。
+    /// </para>
+    /// </remarks>
+    /// <param name="columns">列（先頭が主キー）</param>
+    /// <param name="atomColumns">原子のクエリを作る列の名前（網羅の単位で初めて現れる列の種類の列）</param>
+    public List<DslQuery> CoverageQueries(
+        IReadOnlyList<DslColumn> columns,
+        IReadOnlyCollection<string> atomColumns
+    )
+    {
+        var queries = new List<DslQuery>();
+        var filterable = columns
+            .Where(column => !column.PrimaryKey || column.Clr == DslClr.GuidKey)
+            .ToList();
+        var atoms = filterable
+            .Where(column => atomColumns.Contains(column.Name))
+            .SelectMany(AllAtoms)
+            .ToList();
+
+        for (var i = 0; i < atoms.Count; i++)
+        {
+            queries.Add(AtomQuery($"KA{i}", atoms[i]));
+            queries.Add(AtomQuery($"KA{i}n", new DslNot(Rename(atoms[i]))));
+        }
+
+        var forms = filterable
+            .SelectMany(AllAtoms)
+            .Where(atom =>
+                !atom.IsRejectedByTypeCheck
+                && !(
+                    atom is DslCompare { Op: not (DslOp.Eq or DslOp.Ne) }
+                    && atom.Column.Clr == DslClr.Decimal
+                )
+            )
+            .ToList();
+        var projectable = columns.Skip(1).ToList();
+        var shapes = new[]
+        {
+            QueryReturnShape.List,
+            QueryReturnShape.Single,
+            QueryReturnShape.Count,
+            QueryReturnShape.Projection,
+        };
+
+        foreach (var shape in shapes)
+        {
+            var chunks = CoverageChunks(forms);
+
+            for (var i = 0; i < chunks.Count; i++)
+            {
+                var name = $"K{shape}{i}";
+                queries.Add(
+                    new DslQuery
+                    {
+                        Name = name,
+                        Condition = chunks[i],
+                        Returns = shape,
+                        IsAtomQuery = false,
+                        OrderDescending = i % 2 == 0,
+                        ProjectedColumn =
+                            shape == QueryReturnShape.Projection
+                                ? projectable[i % projectable.Count]
+                                : null,
+                        ResultTypeName = shape == QueryReturnShape.Projection ? name + "Row" : null,
+                    }
+                );
+            }
+        }
+
+        // 射影の非 NULL 指定（射影する列は NULL 許容の参照型か値オブジェクトの列＝Queries と同じ条件）
+        var pinned = columns
+            .Skip(1)
+            .First(column => column.Nullable && (column.IsString || valueObjects));
+        var pinnedChunks = CoverageChunks(forms);
+
+        for (var i = 0; i < pinnedChunks.Count; i++)
+        {
+            queries.Add(
+                new DslQuery
+                {
+                    Name = $"KP{i}",
+                    Condition = new DslAnd([
+                        new DslNullCheck(IsNot: true) { Column = pinned },
+                        pinnedChunks[i],
+                    ]),
+                    Returns = QueryReturnShape.Projection,
+                    IsAtomQuery = false,
+                    ProjectedColumn = pinned,
+                    ProjectedNonNull = true,
+                    ResultTypeName = $"KP{i}Row",
+                }
+            );
+        }
+
+        return queries;
+    }
+
+    /// <summary>
+    /// 形・自身の否定・列の種類のまだ出していない水準を足す原子を貪欲に選び、<see cref="CoverageAtomsPerQuery"/> 個ずつ
+    /// OR でまとめた条件（1 つおきに NOT で包む）
+    /// </summary>
+    private List<DslNode> CoverageChunks(IReadOnlyList<DslAtom> forms)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var picked = new List<DslAtom>();
+
+        foreach (var atom in forms)
+        {
+            string[] keys =
+            [
+                $"shape:{DslFuzzDimensions.ShapeOf(atom)}",
+                $"negated:{atom.InherentNegation}",
+                $"clr:{atom.Column.Clr}",
+            ];
+
+            // Count は短絡しない（3 つの水準をすべて記録する）
+            if (keys.Count(seen.Add) > 0)
+            {
+                picked.Add(Rename(atom));
+            }
+        }
+
+        return picked
+            .Chunk(CoverageAtomsPerQuery)
+            .Select(chunk =>
+                (DslNode)
+                    new DslOr(
+                        chunk
+                            .Select(
+                                (atom, index) => index % 2 == 1 ? new DslNot(atom) : (DslNode)atom
+                            )
+                            .ToList()
+                    )
+            )
+            .ToList();
     }
 
     /// <summary>列に使える全ての形の原子（値は乱数）</summary>

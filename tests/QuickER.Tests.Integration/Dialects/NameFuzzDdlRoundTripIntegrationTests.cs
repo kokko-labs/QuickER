@@ -1,3 +1,4 @@
+using AwesomeAssertions;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
@@ -91,8 +92,21 @@ public abstract class NameFuzzDdlRoundTripTestsBase
             NameFuzzDdlRoundTripDimensions.DeclaredLevels[dialect]
         );
 
+        // 網羅の名前（NameFuzzDiagrams.CoverageNames）は、性質が宣言どおり（Plain）で、どの置き場所でも図に入らなければならない
+        // （飛ばされたら名前と置き場所を名指しして赤にする）
+        var coverageProblems = new List<string>();
+
         foreach (var name in NameFuzzDiagrams.NamesForRun(plan))
         {
+            var coverageName = NameFuzzDiagrams.CoverageNames.Contains(name);
+
+            if (coverageName && NameFuzzDiagrams.Classify(name) != "Plain")
+            {
+                coverageProblems.Add(
+                    $"coverage name [{NameFuzz.Describe(name)}] is {NameFuzzDiagrams.Classify(name)}, declared Plain"
+                );
+            }
+
             foreach (var role in Enum.GetValues<NameRole>())
             {
                 if (
@@ -100,6 +114,13 @@ public abstract class NameFuzzDdlRoundTripTestsBase
                     || NameFuzzDiagrams.BuildForRole(dialect, name, role) is not { } diagram
                 )
                 {
+                    if (coverageName)
+                    {
+                        coverageProblems.Add(
+                            $"coverage name [{NameFuzz.Describe(name)}] was skipped as {role} on {dialect}"
+                        );
+                    }
+
                     continue;
                 }
 
@@ -158,6 +179,7 @@ public abstract class NameFuzzDdlRoundTripTestsBase
             NameFuzzDiagrams.Representative.Count / 2 * Enum.GetValues<NameRole>().Length
         );
         ledger.AssertMatchesKnown($"ddl:{dialect}:");
+        coverageProblems.Should().BeEmpty();
 
         // 網羅しない組は、往復の結果を表明してから照合する（既定の種の数のときだけ）
         coverageReport.AssertGaps(NameFuzzDdlRoundTripDimensions.Gaps, dialect, plan);

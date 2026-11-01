@@ -1,4 +1,5 @@
 using System.IO;
+using AwesomeAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using QuickER.CodeGen.CSharp;
@@ -119,6 +120,21 @@ public class DslConditionFuzzTests
         plan.WriteWarnings();
         var coverage = new DslFuzzCoverage(DslFuzzDimensions.SqliteMySqlScopes);
 
+        // 網羅の単位（DslFuzzUnits.Coverage）を種の前に流して数える（種を 1 つだけ流すときは流さない）。単位のクエリは
+        // どの実装先でも照合したクエリにならなければ名指しで赤にする
+        (DslFuzzUnit Unit, DslFuzzTarget Target)[] coverageUnits = plan.IsSingle
+            ? []
+            :
+            [
+                (DslFuzzUnits.Coverage(DialectNames.Sqlite), SqliteTarget),
+                (DslFuzzUnits.Coverage(DialectNames.MySql), MySqlTarget),
+            ];
+
+        foreach (var (unit, target) in coverageUnits)
+        {
+            await DslFuzzRunner.RunAsync(ledger, unit, target, Ct, coverage, minimumChecked: 0);
+        }
+
         foreach (var seed in plan.Seeds)
         {
             foreach (var unit in DslFuzzUnits.Sqlite(seed))
@@ -142,6 +158,16 @@ public class DslConditionFuzzTests
         DslFuzzCoverage.WriteSummaries(coverageReports);
 
         ledger.AssertMatchesKnown($"{Suite}-generate:", $"{Suite}-compile:", $"{Suite}-exec:");
+        coverageUnits
+            .SelectMany(pair =>
+                coverage.UncheckedProblems(
+                    pair.Unit,
+                    pair.Target.Dbms,
+                    pair.Target.Backends.Select(backend => backend.Name)
+                )
+            )
+            .Should()
+            .BeEmpty();
 
         // 網羅しない組は、照合の結果を表明してから照合する（既定の種の数のときだけ）
         DslFuzzCoverage.AssertGaps(coverageReports, plan);

@@ -1,4 +1,5 @@
 using System.Globalization;
+using AwesomeAssertions;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -80,6 +81,17 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
         plan.WriteWarnings();
         var coverage = new DslFuzzCoverage(DslFuzzDimensions.SqlServerScopes);
 
+        // 網羅の単位（DslFuzzUnits.Coverage）を種の前に流して数える（種を 1 つだけ流すときは流さない）。単位のクエリは
+        // どの実装先でも照合したクエリにならなければ名指しで赤にする
+        DslFuzzUnit[] coverageUnits = plan.IsSingle
+            ? []
+            : [DslFuzzUnits.Coverage(DialectNames.SqlServer)];
+
+        foreach (var unit in coverageUnits)
+        {
+            await DslFuzzRunner.RunAsync(ledger, unit, target, Ct, coverage, minimumChecked: 0);
+        }
+
         foreach (var seed in plan.Seeds)
         {
             foreach (var unit in DslFuzzUnits.SqlServer(seed))
@@ -93,6 +105,16 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
         DslFuzzCoverage.WriteSummaries(coverageReports);
 
         ledger.AssertMatchesKnown($"{Suite}-");
+        coverageUnits
+            .SelectMany(unit =>
+                coverage.UncheckedProblems(
+                    unit,
+                    target.Dbms,
+                    target.Backends.Select(backend => backend.Name)
+                )
+            )
+            .Should()
+            .BeEmpty();
 
         // 網羅しない組は、照合の結果を表明してから照合する（既定の種の数のときだけ＝種の数で欠けが変わるため）
         DslFuzzCoverage.AssertGaps(coverageReports, plan);
