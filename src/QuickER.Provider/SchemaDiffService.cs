@@ -79,6 +79,15 @@ public class SchemaDiffService
         var livePartnerOf = matching.LivePartnerOf;
         var matchedLive = livePartnerOf.Values.ToHashSet();
 
+        // 図の一意制約の名前を図全体で 1 回だけ解決する（名前の無い制約の合成名が、ほかの表の制約名・外部キー名と
+        // ぶつかるときは番号つき）。組にした複製の表で求める（複製は一意制約も別のオブジェクトになる）。
+        // 名前の段の照合には使わない（名前の段は図で名前を付けた制約だけを組む）
+        var uniqueConstraintNames = ConstraintNames.ResolveUniqueConstraintNames(
+            targetEntities,
+            targetRelationships,
+            capabilities.IdentifierLengthLimit
+        );
+
         // ---------- テーブル/カラムの差分 ----------
         foreach (var target in targetEntities)
         {
@@ -93,6 +102,7 @@ public class SchemaDiffService
                         Kind = SchemaDiffKind.AddTable,
                         TableName = name,
                         Entity = target,
+                        UniqueConstraintNames = uniqueConstraintNames,
                         Description = string.Format(
                             Strings.Diff_AddTable,
                             name,
@@ -348,7 +358,7 @@ public class SchemaDiffService
             // 一意制約の差分（列集合で照合し、制約名の差だけでは差分にしない）。
             // 図側は制約名が未設定（null＝合成名）なことが多く、SQLite に至っては実名を持たないため、
             // 名前を比較に含めると恒常的な Drop＋Add の誤検出になる。
-            AppendUniqueConstraintDiffs(diff, name, live, target, dialect);
+            AppendUniqueConstraintDiffs(diff, name, live, target, dialect, uniqueConstraintNames);
 
             foreach (var lcol in live.Columns)
             {
@@ -648,7 +658,8 @@ public class SchemaDiffService
         string tableName,
         Entity live,
         Entity target,
-        SyncDialectCapabilities dialect
+        SyncDialectCapabilities dialect,
+        IReadOnlyDictionary<UniqueConstraint, string> targetNames
     )
     {
         var liveConstraints = ResolveUniqueConstraints(live);
@@ -673,7 +684,12 @@ public class SchemaDiffService
         var limit = dialect.IdentifierLengthLimit;
         var remainingLive = liveConstraints.ToList();
         var remainingTarget =
-            new List<(string? Name, List<string> ColumnNames, string Signature)>();
+            new List<(
+                UniqueConstraint Constraint,
+                string? Name,
+                List<string> ColumnNames,
+                string Signature
+            )>();
 
         // 項目は図の制約の順に並べる（名前の段の作り直しと列集合の段の追加が同じ並びに入り、残りの削除が後に続く）
         var adds = new List<SchemaDiffItem>();
@@ -710,7 +726,7 @@ public class SchemaDiffService
                 adds.Add(
                     AlterUniqueConstraintItem(
                         tableName,
-                        AddUniqueConstraintItem(tableName, target, constraint),
+                        AddUniqueConstraintItem(tableName, target, constraint, targetNames),
                         DropUniqueConstraintItem(tableName, live, liveConstraint),
                         limit
                     )
@@ -736,7 +752,7 @@ public class SchemaDiffService
                 continue;
             }
 
-            adds.Add(AddUniqueConstraintItem(tableName, target, constraint));
+            adds.Add(AddUniqueConstraintItem(tableName, target, constraint, targetNames));
         }
 
         var drops = remainingLive
@@ -751,15 +767,23 @@ public class SchemaDiffService
     private static SchemaDiffItem AddUniqueConstraintItem(
         string tableName,
         Entity target,
-        (string? Name, List<string> ColumnNames, string Signature) constraint
+        (
+            UniqueConstraint Constraint,
+            string? Name,
+            List<string> ColumnNames,
+            string Signature
+        ) constraint,
+        IReadOnlyDictionary<UniqueConstraint, string> targetNames
     ) =>
         new()
         {
             Kind = SchemaDiffKind.AddUniqueConstraint,
             TableName = tableName,
             Entity = target,
-            // 図側の名前は未設定（null）でよい＝レンダラーが UQ_{表}_{列…} を合成する
-            UniqueConstraintName = constraint.Name,
+            // 図全体で解決した名前（名前の無い制約の合成名がほかの制約とぶつかれば番号つき）
+            UniqueConstraintName = targetNames.TryGetValue(constraint.Constraint, out var resolved)
+                ? resolved
+                : constraint.Name,
             UniqueConstraintColumns = constraint.ColumnNames,
             IsSelected = true,
             Description = string.Format(
@@ -773,7 +797,12 @@ public class SchemaDiffService
     private static SchemaDiffItem DropUniqueConstraintItem(
         string tableName,
         Entity live,
-        (string? Name, List<string> ColumnNames, string Signature) constraint
+        (
+            UniqueConstraint Constraint,
+            string? Name,
+            List<string> ColumnNames,
+            string Signature
+        ) constraint
     ) =>
         new()
         {
@@ -875,12 +904,13 @@ public class SchemaDiffService
 
     /// <summary>エンティティの一意制約を「制約名・構成列名・照合シグネチャ」へ解決する（解決不能な制約は除外）</summary>
     private static List<(
+        UniqueConstraint Constraint,
         string? Name,
         List<string> ColumnNames,
         string Signature
     )> ResolveUniqueConstraints(Entity entity)
     {
-        var resolved = new List<(string?, List<string>, string)>();
+        var resolved = new List<(UniqueConstraint, string?, List<string>, string)>();
 
         foreach (var constraint in entity.UniqueConstraints)
         {
@@ -890,7 +920,12 @@ public class SchemaDiffService
             }
 
             resolved.Add(
-                (constraint.Name, columns, UniqueConstraintNaming.ColumnSetSignature(columns))
+                (
+                    constraint,
+                    constraint.Name,
+                    columns,
+                    UniqueConstraintNaming.ColumnSetSignature(columns)
+                )
             );
         }
 
@@ -1067,14 +1102,7 @@ public class SchemaDiffService
         SyncDialectCapabilities dialect
     )
     {
-        // 列ペアは対応の集合として、5 方言とも並びを見ずに比べる
-        var pairSignature = string.Concat(
-            fk.ColumnPairs.Select(p =>
-                    SignaturePart(ColumnKey(p.ParentColumn))
-                    + SignaturePart(ColumnKey(p.ChildColumn))
-                )
-                .Order(StringComparer.Ordinal)
-        );
+        var pairSignature = PairSetSignature(fk);
         // 名前は DDL・同期スクリプトが付けるのと同じ実効名で比べる（名前の無いリレーションは既定名、
         // 同じ組の 2 本目は一意化した名前）。素の名前で比べると、名前の無い図と、DDL が既定名で作った
         // live の外部キーが別物に見える
@@ -1092,6 +1120,16 @@ public class SchemaDiffService
             SignaturePart(dialect.EffectiveOnUpdate(fk.Relationship.OnUpdate).ToString())
         );
     }
+
+    /// <summary>外部キーの列ペアを、対応の集合として並びを見ずに表す（5 方言とも並びを見ずに比べる）</summary>
+    private static string PairSetSignature(ResolvedForeignKeyRelationship fk) =>
+        string.Concat(
+            fk.ColumnPairs.Select(p =>
+                    SignaturePart(ColumnKey(p.ParentColumn))
+                    + SignaturePart(ColumnKey(p.ChildColumn))
+                )
+                .Order(StringComparer.Ordinal)
+        );
 
     /// <summary>署名の 1 部分を長さつきで表す（<see cref="UniqueConstraintNaming.ColumnSetSignature"/> と同じ形）</summary>
     private static string SignaturePart(string value) => $"{value.Length}:{value}";
@@ -1118,6 +1156,13 @@ public class SchemaDiffService
     /// DDL へ書き、PostgreSQL が切り詰めて保存していたため、吸収しないと既定名を縮める版で同期したときに同じ外部キーが
     /// 追加と削除の 2 項目になる。保存された名前（利用者が付けた名前）は対象にしない。
     /// </para>
+    /// <para>
+    /// 吸収するのは、live の外部キーと同じ子・同じ親の表の外部キーだけで、live の外部キー 1 本につき 1 本だけ
+    /// （候補が複数なら列ペアが一致するもの、無ければ図の並びの先）。子の表名が長いと、親の違う外部キー
+    /// （<c>FK_{子}_p1</c> と <c>FK_{子}_p2</c>）の縮める前の名前は切り詰めると同じ名前になるので、子と名前だけで
+    /// 吸収すると、後から図に足した 2 本目にも DB の 1 本目と同じ名前を与え、既定で選ばれる追加が同じ名前で
+    /// 断られた（42710）。吸収しなかった外部キーは今の既定名（縮めた名前）で追加する。
+    /// </para>
     /// </remarks>
     private static IReadOnlyDictionary<Relationship, string> ResolveTargetForeignKeyNames(
         IReadOnlyList<Entity> targetEntities,
@@ -1141,42 +1186,71 @@ public class SchemaDiffService
             return names;
         }
 
-        // live の外部キーを「子テーブル＋名前」で引けるようにする
-        var liveTables = liveEntities.ToDictionary(entity => entity.Id);
-        var liveKeys = new HashSet<string>(StringComparer.Ordinal);
+        // live の外部キーを「子テーブル＋名前」で引けるようにする（親の表と列ペアも持つ）
+        var liveByKey = new Dictionary<string, (string Parent, string Pairs)>(
+            StringComparer.Ordinal
+        );
 
-        foreach (var (relationship, name) in liveFkNames)
+        foreach (var fk in ForeignKeyColumnPairResolver.ResolveAll(liveFkNames.Keys, liveEntities))
         {
-            if (liveTables.TryGetValue(relationship.TargetEntityId, out var child))
-            {
-                liveKeys.Add(LegacyForeignKeyKey(NormalizeTable(child), name));
-            }
+            liveByKey.TryAdd(
+                LegacyForeignKeyKey(NormalizeTable(fk.Child), liveFkNames[fk.Relationship]),
+                (NameKey(NormalizeTable(fk.Parent)), PairSetSignature(fk))
+            );
         }
 
-        var targetTables = targetEntities.ToDictionary(entity => entity.Id);
+        // 吸収の候補（名前の無い外部キーで、縮める前の名前を切り詰めると live の外部キーの名前になるもの）を、
+        // live の外部キーごとに図の並びで集める
+        var candidates = new Dictionary<
+            string,
+            List<(Relationship Relationship, string Legacy, string Pairs)>
+        >(StringComparer.Ordinal);
 
-        foreach (var (relationship, resolved) in details)
+        foreach (
+            var fk in ForeignKeyColumnPairResolver.ResolveAll(targetRelationships, targetEntities)
+        )
         {
+            // 上限内の名前は縮めていない＝旧版と同じ名前なので吸収の対象外
             if (
-                resolved.IsStored
-                || !targetTables.TryGetValue(relationship.TargetEntityId, out var child)
+                !details.TryGetValue(fk.Relationship, out var resolved)
+                || resolved.IsStored
+                || limit.Fits(resolved.UnshortenedName)
             )
             {
                 continue;
             }
 
-            // 上限内の名前は縮めていない＝旧版と同じ名前なので吸収の対象外
-            if (limit.Fits(resolved.UnshortenedName))
+            var legacy = limit.Truncate(resolved.UnshortenedName);
+            var key = LegacyForeignKeyKey(NormalizeTable(fk.Child), legacy);
+
+            if (
+                !liveByKey.TryGetValue(key, out var live)
+                || live.Parent != NameKey(NormalizeTable(fk.Parent))
+            )
             {
                 continue;
             }
 
-            var legacy = limit.Truncate(resolved.UnshortenedName);
-
-            if (liveKeys.Contains(LegacyForeignKeyKey(NormalizeTable(child), legacy)))
+            if (!candidates.TryGetValue(key, out var list))
             {
-                names[relationship] = legacy;
+                list = [];
+                candidates.Add(key, list);
             }
+
+            list.Add((fk.Relationship, legacy, PairSetSignature(fk)));
+        }
+
+        foreach (var (key, list) in candidates)
+        {
+            var livePairs = liveByKey[key].Pairs;
+            var chosen = list.FirstOrDefault(candidate => candidate.Pairs == livePairs);
+
+            if (chosen.Relationship is null)
+            {
+                chosen = list[0];
+            }
+
+            names[chosen.Relationship] = chosen.Legacy;
         }
 
         return names;

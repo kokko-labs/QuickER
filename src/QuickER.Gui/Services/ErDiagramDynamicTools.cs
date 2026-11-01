@@ -128,7 +128,7 @@ public static class ErDiagramDynamicTools
             }
 
             AppendPrimaryKeyOrder(sb, entity);
-            AppendUniqueConstraints(sb, entity, vm.CurrentIdentifierLimit());
+            AppendUniqueConstraints(sb, entity);
         }
 
         if (vm.Relationships.Count > 0)
@@ -1253,13 +1253,11 @@ public static class ErDiagramDynamicTools
     }
 
     /// <summary>要約テキストへエンティティの一意制約（解決済み名＋構成列）を追記する</summary>
-    /// <remarks>構成列を解決できない制約（空・壊れた参照）は DDL 生成と同じ規則で読み飛ばす</remarks>
-    /// <param name="limit">合成名に使う識別子の長さの上限（図の対象 DBMS の上限＝DDL と同じ名前を見せる）</param>
-    private static void AppendUniqueConstraints(
-        StringBuilder sb,
-        EntityViewModel entity,
-        IdentifierLengthLimit limit
-    )
+    /// <remarks>
+    /// 構成列を解決できない制約（空・壊れた参照）は DDL 生成と同じ規則で読み飛ばす。名前は DDL と同じく図全体で
+    /// 決めたもの（<see cref="UniqueConstraintViewModel.ResolvedName"/>）
+    /// </remarks>
+    private static void AppendUniqueConstraints(StringBuilder sb, EntityViewModel entity)
     {
         var lines = new List<string>();
 
@@ -1278,10 +1276,7 @@ public static class ErDiagramDynamicTools
                 continue;
             }
 
-            var name = string.IsNullOrWhiteSpace(constraint.Name)
-                ? UniqueConstraint.SynthesizeName(entity.TableName, columnNames, limit)
-                : constraint.Name;
-            lines.Add($"    - {name} ({string.Join(", ", columnNames)})");
+            lines.Add($"    - {constraint.ResolvedName} ({string.Join(", ", columnNames)})");
         }
 
         if (lines.Count == 0)

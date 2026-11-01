@@ -47,6 +47,13 @@ public abstract class DdlGeneratorBase : IDdlGenerator
         );
         sb.AppendLine();
 
+        // 一意制約の名前を図全体で 1 回だけ決める（名前の無い制約の合成名がほかの制約とぶつかれば番号つき）
+        var uniqueConstraintNames = ConstraintNames.ResolveUniqueConstraintNames(
+            diagram.Entities,
+            diagram.Relationships,
+            IdentifierLimit
+        );
+
         // 先に全テーブルを作成し、FOREIGN KEY は後段で ALTER TABLE 追加する
         // （テーブル定義順に依存せず参照整合性制約を張れるようにするため）
         foreach (var entity in diagram.Entities)
@@ -69,6 +76,7 @@ public abstract class DdlGeneratorBase : IDdlGenerator
                 table,
                 QuoteSimpleName,
                 QuoteConstraintName,
+                uniqueConstraintNames,
                 IdentifierLimit,
                 DialectName,
                 UnsupportedFeature.Ddl

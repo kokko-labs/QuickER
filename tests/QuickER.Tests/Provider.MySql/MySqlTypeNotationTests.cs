@@ -26,6 +26,12 @@ public class MySqlTypeNotationTests
     [InlineData("tinyint(1)", "tinyint(1)")]
     [InlineData(" varchar(255) ", "varchar(255)")]
     [InlineData("datetime(6)", "datetime(6)")]
+    [InlineData("datetime(0)", "datetime")]
+    [InlineData("DATETIME( 0 )", "datetime")]
+    [InlineData("time(0)", "time")]
+    [InlineData("timestamp(0)", "timestamp")]
+    [InlineData("time(3)", "time(3)")]
+    [InlineData("datetime", "datetime")]
     public void Normalize_Cases(string input, string expected)
     {
         MySqlTypeNotation.Normalize(input).Should().Be(expected);
@@ -38,6 +44,8 @@ public class MySqlTypeNotationTests
     [InlineData("int")]
     [InlineData("varchar(50)")]
     [InlineData("enum('a','b')")]
+    [InlineData("datetime")]
+    [InlineData("timestamp")]
     public void Normalize_IsIdempotentAndImportIsFixedPoint(string columnType)
     {
         MySqlTypeNotation.Normalize(columnType).Should().Be(columnType);

@@ -95,6 +95,7 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
             item.TableName,
             MySqlIdentifier.QuoteSimple,
             name => $"`{MySqlIdentifier.Escape(name)}`",
+            item.UniqueConstraintNames,
             IdentifierLimit,
             DialectName,
             UnsupportedFeature.Sync

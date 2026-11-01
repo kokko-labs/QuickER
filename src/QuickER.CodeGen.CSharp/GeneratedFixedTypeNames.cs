@@ -286,6 +286,7 @@ public static class GeneratedFixedTypeNames
         Create(
             "Action",
             "Activator",
+            "ActivatorUtilities",
             "AggregateException",
             "ArgumentException",
             "ArgumentNullException",
@@ -474,6 +475,7 @@ public static class GeneratedFixedTypeNames
             "Nullable",
             "NumberStyles",
             "Object",
+            "ObjectFactory",
             "ObservableCollection",
             "OperationCanceledException",
             "OverflowException",

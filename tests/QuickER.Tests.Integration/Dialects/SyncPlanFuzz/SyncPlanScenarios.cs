@@ -635,13 +635,14 @@ internal static class SyncPlanScenarios
                     },
                     SelectFirst(SchemaDiffKind.AlterForeignKey)
                 ),
-                // ---- mysql-temporal-zero-precision-respelling（MySQL・修正 E）：小数秒の精度 0 を明示した綴り（datetime(0)・
-                // time(0)・timestamp(0)）を MySqlTypeNotation が素の綴りへ寄せず、取込の綴り（datetime・time・timestamp）と食い違う
-                // AlterColumn が出て、同期しても消えない（CLAUDE.md の取込の節 (12) の型の欠陥）。実 DB の種 77 で見つけた ----
+                // ---- mysql-temporal-zero-precision-respelling（MySQL・修正 E で直した。行は回帰の網）：小数秒の精度 0 を明示した綴り
+                // （datetime(0)・time(0)・timestamp(0)）を MySqlTypeNotation が素の綴りへ寄せず、取込の綴り（datetime・time・timestamp）と
+                // 食い違う AlterColumn が出て、同期しても消えなかった（CLAUDE.md の取込の節 (12) の型の欠陥）。修正 E で素の綴りへ寄せる規則を
+                // 足した。実 DB の種 77 で見つけた ----
                 Row(
                     "mysql-77-respell-datetime",
                     "mysql-temporal-zero-precision-respelling",
-                    "日時の型を小数秒の精度 0 を明示した綴りへ書き換えると、同期しても消えない AlterColumn が出る",
+                    "日時の型を小数秒の精度 0 を明示した綴りへ書き換えても、取込の綴りと同じ型として差分が残らない",
                     DialectNames.MySql,
                     live =>
                     {
@@ -741,27 +742,73 @@ internal static class SyncPlanScenarios
                     },
                     SelectFirst(SchemaDiffKind.AlterForeignKey)
                 ),
-                // ---- synthesized-unique-name-collision（MySQL・PostgreSQL・修正 E）：実 DB の種 386 の形＝名前付きの一意制約
-                // UQ_u_orders_n0 の列を (n0)→(code) に変え、(n0) に名前の無い一意制約を足す → 合成名 UQ_u_orders_n0 が衝突する ----
-                .. new[] { DialectNames.MySql, DialectNames.PostgreSql }.Select(dialect =>
+                // ---- synthesized-unique-name-collision（実 DB の種 386 の形）：名前付きの一意制約 UQ_u_orders_n0 の列を (n0)→(code)
+                // に変え、(n0) に名前の無い一意制約を足す → 合成名 UQ_u_orders_n0 が衝突していた（MySQL・PostgreSQL・SQL Server・
+                // Oracle。2026-11-01 の修正 E で、名前の無い一意制約の名前を図全体で決め、ぶつかれば番号を足すようにして直した。
+                // 行は回帰の網として残る） ----
+                // SQLite の取込は一意制約の名前を持ち帰らない（sqlite_autoindex_*）ので、名前を保って列を変える形を作れない
+                .. DialectNames
+                    .All.Where(dialect => dialect != DialectNames.Sqlite)
+                    .Select(dialect =>
+                        Row(
+                            $"{dialect}-386-synthesized-unique-name",
+                            "synthesized-unique-name-collision",
+                            "名前の無い一意制約の合成名が、列を変えた名前付きの一意制約の名前と衝突する（実 DB の種 386）",
+                            dialect,
+                            live =>
+                            {
+                                var t = live.Table("u_orders");
+                                live.Int(t, "id", pk: true);
+                                var n0 = live.Int(t, "n0", value: r => Int(r * 10));
+                                live.Int(t, "code", value: r => Int(r * 100));
+                                live.Unique(t, "UQ_u_orders_n0", n0);
+                            },
+                            target =>
+                            {
+                                target.ChangeUnique("u_orders", "UQ_u_orders_n0", "code");
+                                target.AddUnique("u_orders", null, "n0");
+                            }
+                        )
+                    ),
+                // ---- synthesized-unique-name-collision の表をまたぐ形（5 方言）：ほかの表の名前付きの一意制約の名前が、この表の
+                // 名前の無い一意制約の合成名 UQ_ua_b_x と同じ（制約名がスキーマ単位の SQL Server・PostgreSQL・Oracle で断られていた） ----
+                .. DialectNames.All.Select(dialect =>
                     Row(
-                        $"{dialect}-386-synthesized-unique-name",
+                        $"{dialect}-synthesized-unique-name-cross-table",
                         "synthesized-unique-name-collision",
-                        "名前の無い一意制約の合成名が、列を変えた名前付きの一意制約の名前と衝突する（実 DB の種 386）",
+                        "名前の無い一意制約の合成名が、ほかの表の名前付きの一意制約の名前と同じ",
                         dialect,
                         live =>
                         {
-                            var t = live.Table("u_orders");
-                            live.Int(t, "id", pk: true);
-                            var n0 = live.Int(t, "n0", value: r => Int(r * 10));
-                            live.Int(t, "code", value: r => Int(r * 100));
-                            live.Unique(t, "UQ_u_orders_n0", n0);
+                            var a = live.Table("ua_a");
+                            live.Int(a, "id", pk: true);
+                            var y = live.Int(a, "y", value: r => Int(r * 10));
+                            live.Unique(a, "UQ_ua_b_x", y);
+                            var b = live.Table("ua_b");
+                            live.Int(b, "id", pk: true);
+                            live.Int(b, "x", value: r => Int(r * 10));
                         },
-                        target =>
+                        target => target.AddUnique("ua_b", null, "x")
+                    )
+                ),
+                // ---- synthesized-unique-name-collision の外部キーの名前の形（5 方言）：同じ表の名前付きの外部キーの名前が、
+                // 名前の無い一意制約の合成名 UQ_uf_child_x と同じ（SQLite 以外の 4 方言で断られていた） ----
+                .. DialectNames.All.Select(dialect =>
+                    Row(
+                        $"{dialect}-synthesized-unique-name-foreign-key",
+                        "synthesized-unique-name-collision",
+                        "名前の無い一意制約の合成名が、同じ表の名前付きの外部キーの名前と同じ",
+                        dialect,
+                        live =>
                         {
-                            target.ChangeUnique("u_orders", "UQ_u_orders_n0", "code");
-                            target.AddUnique("u_orders", null, "n0");
-                        }
+                            var p = live.Table("uf_parent");
+                            live.Int(p, "id", pk: true);
+                            var c = live.Table("uf_child");
+                            live.Int(c, "id", pk: true);
+                            live.Ref(c, p, "parent_ref", "UQ_uf_child_x");
+                            live.Int(c, "x", value: r => Int(r * 10));
+                        },
+                        target => target.AddUnique("uf_child", null, "x")
                     )
                 ),
                 // ---- 4m-p6-doomed-rebuild の規則 4 の形（MySQL・修正 A）：実 DB の種 645・1014 の形＝一意制約の構成列の削除と、外部キーの

@@ -36,6 +36,8 @@ public sealed class MySqlTypeNotationIntegrationTests(MySqlContainerFixture fixt
         var types = TypeNotationClosure
             .CandidateTypes(provider.TypeCatalog, TypeNotationClosure.DefaultSamples)
             .Concat(["decimal", "numeric", "decimal(12)", "numeric(12,2)"])
+            // 小数秒の精度 0 を明示した日時（取込は精度を書かない）
+            .Concat(["datetime(0)", "time(0)", "timestamp(0)"])
             // 型カタログが解析する型（mediumint・year・tinytext・tinyblob）も、取込の表記のまま閉じること
             .Concat(["mediumint", "mediumint unsigned", "year", "tinytext", "tinyblob"])
             // 方言切替が Oracle の INTEGER から書く型も閉じること

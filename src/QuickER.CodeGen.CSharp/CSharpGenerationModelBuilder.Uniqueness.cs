@@ -102,13 +102,8 @@ internal sealed partial class CSharpGenerationModelBuilder
                 continue;
             }
 
-            var name = string.IsNullOrWhiteSpace(constraint.Name)
-                ? UniqueConstraint.SynthesizeName(
-                    entity.TableName,
-                    columns.Select(column => column.Name),
-                    _identifierLimit
-                )
-                : constraint.Name;
+            // 構成列はすべて解決できているので、図全体の解決に必ず載っている
+            var name = _uniqueConstraintNames[constraint];
 
             resolved.Add(
                 new ResolvedUniqueConstraint(

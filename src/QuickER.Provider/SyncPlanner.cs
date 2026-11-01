@@ -645,12 +645,12 @@ public sealed class SyncPlanner
                     }
 
                     return (
-                        item.UniqueConstraintName
-                            ?? UniqueConstraint.SynthesizeName(
-                                table,
-                                item.UniqueConstraintColumns,
-                                capabilities.IdentifierLengthLimit
-                            ),
+                        UniqueConstraintNaming.Resolve(
+                            item.UniqueConstraintName,
+                            table,
+                            item.UniqueConstraintColumns,
+                            capabilities.IdentifierLengthLimit
+                        ),
                         missing
                     );
 
@@ -1102,7 +1102,7 @@ public sealed class SyncPlanner
                     new SyncPlanWarning(
                         SyncPlanWarningKind.UniqueConstraintDroppedWithColumn,
                         table,
-                        $"{constraint.Name ?? UniqueConstraint.SynthesizeName(table, columns, limit)} ({string.Join(", ", columns)})"
+                        $"{UniqueConstraintNaming.Resolve(constraint.Name, table, columns, limit)} ({string.Join(", ", columns)})"
                     )
                 );
             }
@@ -1189,7 +1189,7 @@ public sealed class SyncPlanner
                     new SyncPlanWarning(
                         SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey,
                         table,
-                        $"{constraint.Name ?? UniqueConstraint.SynthesizeName(table, columns, limit)} ({string.Join(", ", columns)})"
+                        $"{UniqueConstraintNaming.Resolve(constraint.Name, table, columns, limit)} ({string.Join(", ", columns)})"
                     )
                 );
             }

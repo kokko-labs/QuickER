@@ -284,6 +284,62 @@ public partial class MainViewModel : ObservableObject, IDisposable
     internal IdentifierLengthLimit CurrentIdentifierLimit() =>
         IdentifierLengthLimits.ForDbms(_currentProvider.Name);
 
+    /// <summary>
+    /// 一意制約の名前（図全体で決めたもの・<see cref="ConstraintNames.ResolveUniqueConstraintNames"/>）。
+    /// 図が変わるたびに捨て（<see cref="OnUniqueConstraintNamesMayHaveChanged"/>）、読まれたときに作り直す
+    /// </summary>
+    private Dictionary<UniqueConstraintViewModel, string>? _uniqueConstraintNames;
+
+    /// <summary>一意制約の DDL 上の名前（名前の無い制約の合成名がほかの制約とぶつかれば番号つき）</summary>
+    /// <returns>図全体で名前を決めた制約ならその名前。構成列を解決できない制約は <c>null</c></returns>
+    internal string? ResolveUniqueConstraintName(UniqueConstraintViewModel constraint)
+    {
+        _uniqueConstraintNames ??= BuildUniqueConstraintNames();
+        return _uniqueConstraintNames.TryGetValue(constraint, out var name) ? name : null;
+    }
+
+    /// <summary>図全体の一意制約の名前を、一意制約の ViewModel ごとに求める</summary>
+    private Dictionary<UniqueConstraintViewModel, string> BuildUniqueConstraintNames()
+    {
+        // ToModel は一意制約を ViewModel の並びのまま写すので、並びで ViewModel と組む
+        var pairs = Entities
+            .Select(entity => (ViewModel: entity, Model: entity.ToModel()))
+            .ToList();
+        var names = ConstraintNames.ResolveUniqueConstraintNames(
+            pairs.Select(pair => pair.Model),
+            Relationships.Select(relationship => relationship.ToModel()),
+            CurrentIdentifierLimit()
+        );
+        var result = new Dictionary<UniqueConstraintViewModel, string>();
+
+        foreach (var (viewModel, model) in pairs)
+        {
+            for (var index = 0; index < viewModel.UniqueConstraints.Count; index++)
+            {
+                if (names.TryGetValue(model.UniqueConstraints[index], out var name))
+                {
+                    result[viewModel.UniqueConstraints[index]] = name;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// 図が変わったとき（<see cref="DiagramRevision"/> が進んだとき・対象 DBMS が変わったとき）に、一意制約の名前を
+    /// 捨てて表示し直す（ほかの表の制約名・外部キー名が変わると、名前の無い制約の名前の番号が変わり得る）
+    /// </summary>
+    private void OnUniqueConstraintNamesMayHaveChanged()
+    {
+        _uniqueConstraintNames = null;
+
+        foreach (var entity in Entities)
+        {
+            entity.NotifyUniqueConstraintNamesChanged();
+        }
+    }
+
     /// <summary>登録済み DB プロバイダのレジストリ（モック生成の型解決など、方言別マッパ解決に用いる）</summary>
     public DatabaseProviderRegistry Providers => _providers;
 
@@ -494,6 +550,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             ClearUndoRedoHistory();
         }
+
+        // 図の世代は冒頭で進めた。置き換え終わった図で一意制約の名前を決め直す
+        OnUniqueConstraintNamesMayHaveChanged();
 
         // 図全体が置き換わったので fit-to-window を要求する（開く・取込・DB取込・復元の共通点）。
         // 図が現れた経路は読める大きさ（等倍）を優先する＝縮小しない
@@ -1985,10 +2044,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(AvailableDataTypes));
 
         // 一意制約の合成名のプレビューは対象 DBMS の上限で縮めるので、方言が変われば表示し直す
-        foreach (var entity in Entities)
-        {
-            entity.NotifyIdentifierLimitChanged();
-        }
+        OnUniqueConstraintNamesMayHaveChanged();
 
         // フィーチャーモジュール（DB 同期ボタンの活性・ツールチップ再評価など）へ方言切替を通知する
         TargetDbmsChanged?.Invoke(this, EventArgs.Empty);
@@ -2391,6 +2447,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 // テーブル名・列名の書き換えは、同じ名前があれば受け付けずに戻す。戻したことをステータスバーで知らせる
                 entity.NameScope = Entities;
                 entity.IdentifierLimitSource = CurrentIdentifierLimit;
+                entity.UniqueConstraintNameSource = ResolveUniqueConstraintName;
                 entity.NameChangeRejected += OnEntityNameChangeRejected;
 
                 // 一意制約カードのコンボボックス操作は VM 経由で届くため、ここで履歴化の入口へ結ぶ
@@ -2437,6 +2494,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         entity.NameChangeRejected -= OnEntityNameChangeRejected;
         entity.NameScope = null;
         entity.IdentifierLimitSource = null;
+        entity.UniqueConstraintNameSource = null;
         entity.UniqueConstraintMemberSelectionEdited -= OnUniqueConstraintMemberSelectionEdited;
         entity.IsDetachedFromDiagram = true;
         entity.Columns.CollectionChanged -= OnEntityColumnsChangedForSelection;

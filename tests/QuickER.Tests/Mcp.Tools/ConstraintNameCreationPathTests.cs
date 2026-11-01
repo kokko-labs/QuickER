@@ -161,19 +161,50 @@ public sealed class ConstraintNameCreationPathTests : IDisposable
         mcp.Relationships.Single().ConstraintName.Should().Be(expected, "MCP のツール");
     }
 
-    [Fact(
+    /// <summary>
+    /// 一意制約の名前を、ツールの要約が DDL と同じ名前で示すことを検証する。行は 2 つ＝ぶつからない図（安全化した合成名）と、
+    /// 親の表の名前を持つ一意制約が子の合成名と同じ図（DDL も要約も番号つきの名前＝図全体で決めた名前）
+    /// </summary>
+    [Theory(
         DisplayName = "スキーマ付きのテーブル名で、ツールの要約が一意制約の名前を DDL と同じ名前で示す"
     )]
-    public void UniqueConstraintName_InSummaryMatchesDdl()
+    [InlineData(false, "UQ_dbo_Order_code")]
+    [InlineData(true, "UQ_dbo_Order_code_2")]
+    public void UniqueConstraintName_InSummaryMatchesDdl(bool collides, string expected)
     {
-        (string Tool, object Args)[] steps = [.. TableSteps(), AddUnique()];
+        (string Tool, object Args)[] steps = collides
+            ?
+            [
+                .. TableSteps(),
+                (
+                    "set_unique_constraint",
+                    new
+                    {
+                        table_name = Parent,
+                        columns = new[] { "CustomerId" },
+                        name = "UQ_dbo_Order_code",
+                    }
+                ),
+                AddUnique(),
+            ]
+            : [.. TableSteps(), AddUnique()];
         var chat = RunGuiTools(steps);
         var file = RunDocumentTools(steps);
 
         var ddl = new SqlServerDdlGenerator().Build(JsonStorageService.Load(file).Schema);
-        const string expected = "UQ_dbo_Order_code";
 
         ddl.Should().Contain($"[{expected}]", "DDL は安全化した名前で一意制約を作る");
+
+        if (collides)
+        {
+            ddl.Should()
+                .Contain("[UQ_dbo_Order_code] UNIQUE ([CustomerId])", "名前を持つ制約はそのまま");
+            chat.Entities.Single(e => e.TableName == Child)
+                .UniqueConstraints.Single()
+                .ResolvedName.Should()
+                .Be(expected, "プロパティパネルの名前のプレビュー");
+        }
+
         ErDiagramDynamicTools
             .Execute("get_diagram_summary", Json(new { }), chat)
             .Result.Should()

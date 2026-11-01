@@ -19,8 +19,14 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// </remarks>
 public class UniqueConstraintNameGenerationTests
 {
-    [Fact(DisplayName = "スキーマ付きのテーブル名で、生成コードの一意制約名が DDL と一致する")]
-    public void GeneratedUniqueConstraintName_MatchesDdl()
+    /// <summary>
+    /// 行は 2 つ＝ぶつからない図（安全化した合成名）と、ほかの表の名前を持つ一意制約が合成名と同じ図（DDL も生成コードも
+    /// 図全体で決めた番号つきの名前）
+    /// </summary>
+    [Theory(DisplayName = "スキーマ付きのテーブル名で、生成コードの一意制約名が DDL と一致する")]
+    [InlineData(false, "UQ_dbo_Orders_code")]
+    [InlineData(true, "UQ_dbo_Orders_code_2")]
+    public void GeneratedUniqueConstraintName_MatchesDdl(bool collides, string expected)
     {
         var entity = new Entity
         {
@@ -45,6 +51,38 @@ public class UniqueConstraintNameGenerationTests
         entity.UniqueConstraints.Add(new UniqueConstraint { ColumnIds = [entity.Columns[1].Id] });
         var diagram = new ErDiagram { Entities = { entity } };
 
+        if (collides)
+        {
+            var other = new Entity
+            {
+                TableName = "dbo.Other",
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "other_id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                        IsNullable = false,
+                    },
+                    new Column
+                    {
+                        Name = "label",
+                        DataType = "nvarchar(20)",
+                        IsNullable = false,
+                    },
+                },
+            };
+            other.UniqueConstraints.Add(
+                new UniqueConstraint
+                {
+                    Name = "UQ_dbo_Orders_code",
+                    ColumnIds = [other.Columns[1].Id],
+                }
+            );
+            diagram.Entities.Add(other);
+        }
+
         var provider = new SqlServerProvider();
         var generation = DiagramCodeGenerator.Generate(
             provider.TypeMapper,
@@ -59,8 +97,8 @@ public class UniqueConstraintNameGenerationTests
         var ddl = new SqlServerDdlGenerator().Build(diagram);
 
         generation.HasErrors.Should().BeFalse();
-        ddl.Should().Contain("[UQ_dbo_Orders_code]");
-        generation.Files.Single().Content.Should().Contain("Name = \"UQ_dbo_Orders_code\"");
+        ddl.Should().Contain($"[{expected}]");
+        generation.Files.Single().Content.Should().Contain($"Name = \"{expected}\"");
     }
 
     [Fact(

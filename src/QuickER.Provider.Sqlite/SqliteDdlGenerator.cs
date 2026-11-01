@@ -77,9 +77,16 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
         // SQLite は FK を CREATE TABLE 内へ書くため、テーブル生成時点で FK 情報が必要になる。
         var foreignKeysByChild = BuildForeignKeyIndex(diagram, entitiesById);
 
+        // 一意制約の名前を図全体で 1 回だけ決める（名前の無い制約の合成名がほかの制約とぶつかれば番号つき）
+        var uniqueConstraintNames = ConstraintNames.ResolveUniqueConstraintNames(
+            diagram.Entities,
+            diagram.Relationships,
+            IdentifierLimit
+        );
+
         foreach (var entity in diagram.Entities)
         {
-            AppendCreateTable(sb, entity, foreignKeysByChild);
+            AppendCreateTable(sb, entity, foreignKeysByChild, uniqueConstraintNames);
             sb.AppendLine();
         }
 
@@ -111,7 +118,8 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
     private void AppendCreateTable(
         StringBuilder sb,
         Entity entity,
-        IReadOnlyDictionary<Guid, List<ResolvedForeignKey>> foreignKeysByChild
+        IReadOnlyDictionary<Guid, List<ResolvedForeignKey>> foreignKeysByChild,
+        IReadOnlyDictionary<UniqueConstraint, string> uniqueConstraintNames
     )
     {
         var pks = entity.GetPrimaryKeyColumnsInOrder();
@@ -145,7 +153,11 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
         // 主キーと同じ列集合の一意制約は省いて注記する（扱いの表の SQLite の DDL のマス）
         var (uniques, uniqueNotes) = UniqueConstraintOnPrimaryKeyNote.Split(
             entity,
-            UniqueConstraintNaming.ResolveAll(entity, SqliteIdentifier.Limit),
+            UniqueConstraintNaming.ResolveAll(
+                entity,
+                uniqueConstraintNames,
+                SqliteIdentifier.Limit
+            ),
             DialectName,
             UnsupportedFeature.Ddl
         );

@@ -1,7 +1,10 @@
 using System.IO;
 using System.Text.RegularExpressions;
 using AwesomeAssertions;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using QuickER.Tests.Resources;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Model;
 
@@ -99,4 +102,73 @@ public class ConstraintNamesGuardTests
                     + $"（見つかった写し: {string.Join(" / ", copies)}）"
             );
     }
+
+    /// <summary>
+    /// 一意制約の合成名（<c>UniqueConstraint.SynthesizeName</c>）を直接呼ぶのは、図全体の名前の解決
+    /// （<c>ConstraintNames.SynthesizeFreeName</c>）の 1 か所だけであることを、構文木で数えて確かめる
+    /// </summary>
+    /// <remarks>
+    /// 合成名はほかの制約の名前とぶつかり得る。呼び出し側が直接合成すると、DDL・同期・生成コード・ツールの要約のどれかだけが
+    /// 番号を足さない名前を出し、ぶつかる図で DDL が断られる（同期計画の総当たりの種 386）。名前は
+    /// <c>ConstraintNames.ResolveUniqueConstraintNames</c>（図全体）か <c>ResolveUniqueConstraintName</c>（1 つの制約）を通す。
+    /// 呼び出しの形（修飾・<c>using static</c>）に依らず、呼ばれる名前が <c>SynthesizeName</c> の呼び出しを数える。
+    /// </remarks>
+    [Fact(DisplayName = "一意制約の合成名を直接作るのは、図全体の名前の解決の中の 1 か所だけ")]
+    public void SynthesizeName_IsCalledOnlyByTheResolver()
+    {
+        var calls = SourceFiles()
+            .SelectMany(file => FindSynthesizeNameCalls(file.Path, file.Text))
+            .ToList();
+
+        calls
+            .Should()
+            .Equal(
+                ["QuickER.Model/ConstraintNames.cs: SynthesizeFreeName"],
+                "合成名は ConstraintNames.ResolveUniqueConstraintNames / ResolveUniqueConstraintName を通す"
+            );
+    }
+
+    /// <summary>走査の自己検査（修飾した呼び出し・using static の呼び出しを拾い、宣言と別の名前は拾わない）</summary>
+    [Fact(DisplayName = "一意制約の合成名の走査は、呼び出しの形に依らず拾い、宣言は拾わない")]
+    public void SynthesizeNameScan_FindsEveryCallForm()
+    {
+        const string probe = """
+            using static QuickER.Model.UniqueConstraint;
+            class Probe
+            {
+                static string SynthesizeName(string a) => a;
+                void Qualified() => QuickER.Model.UniqueConstraint.SynthesizeName("t", ["c"], limit);
+                void Static() => SynthesizeName("t", ["c"], limit);
+                void Other() => UniqueConstraint.SynthesizeNameLater("t");
+            }
+            """;
+
+        FindSynthesizeNameCalls("probe.cs", probe)
+            .Should()
+            .Equal("probe.cs: Qualified", "probe.cs: Static");
+    }
+
+    private static IEnumerable<string> FindSynthesizeNameCalls(string path, string text) =>
+        ConditionalSourceParse
+            .DescendantNodes(ConditionalSourceParse.Parse(text, path: path))
+            .OfType<InvocationExpressionSyntax>()
+            .Where(invocation =>
+                invocation.Expression switch
+                {
+                    MemberAccessExpressionSyntax member => member.Name.Identifier.ValueText,
+                    IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
+                    _ => null,
+                } == "SynthesizeName"
+            )
+            .Select(invocation =>
+                $"{path}: {invocation.Ancestors().OfType<MemberDeclarationSyntax>().Select(MemberName).FirstOrDefault(name => name is not null)}"
+            );
+
+    private static string? MemberName(MemberDeclarationSyntax member) =>
+        member switch
+        {
+            MethodDeclarationSyntax method => method.Identifier.ValueText,
+            PropertyDeclarationSyntax property => property.Identifier.ValueText,
+            _ => null,
+        };
 }

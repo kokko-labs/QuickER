@@ -22,61 +22,6 @@ internal static class SyncPlanFuzzKnownFailures
     /// <summary>項目（<see cref="Entry"/> で作る）</summary>
     public static readonly IReadOnlyList<KnownEntry> Entries =
     [
-        // mysql-temporal-zero-precision-respelling（MySQL・修正 E・P2-4）：小数秒の精度 0 を明示した綴り（datetime(0)・time(0)・
-        // timestamp(0)）を MySqlTypeNotation.Normalize が素の綴りへ寄せないので、取り込んだ綴り（datetime・time・timestamp）と
-        // 食い違う AlterColumn が出て、同期しても消えない（CLAUDE.md の取込の節 (12) の型の欠陥。表明 2「選んだ項目が残る」）
-        // - 実 DB の種 77：日時の列の型を datetime から datetime(0) へ書き換える（respell type）
-        .. Entry(
-            "mysql-temporal-zero-precision-respelling",
-            [DialectNames.MySql],
-            "修正 E",
-            IsZeroPrecisionRespelling,
-            KnownReproduction.RegularSeeds
-        ),
-        .. Scenario(
-            "mysql-temporal-zero-precision-respelling",
-            DialectNames.MySql,
-            "修正 E",
-            ["mysql-77-respell-datetime"],
-            IsZeroPrecisionRespelling
-        ),
-        // synthesized-unique-name-collision（修正 E・P2-4）：名前付きの一意制約の列を変え（名前は保つ）、元の列に名前の無い一意制約を
-        // 足すと、名前の無い一意制約の合成名（UniqueConstraint.SynthesizeName＝UQ_{表}_{列}）が既存の名前と同じになり、MySQL
-        // 「Duplicate key name」・PostgreSQL 42P07 で失敗する（警告なし。外部キーの既定名は UniqueForeignKey で一意化するが、一意制約の
-        // 合成名は一意化しない）
-        // - 実 DB の夜間の MySQL・PostgreSQL の種 386
-        .. Entry(
-            "synthesized-unique-name-collision",
-            [DialectNames.MySql, DialectNames.PostgreSql],
-            "修正 E",
-            IsSynthesizedUniqueNameCollision,
-            KnownReproduction.NightlySeeds
-        ),
-        .. Scenario(
-            "synthesized-unique-name-collision",
-            DialectNames.MySql,
-            "修正 E",
-            ["mysql-386-synthesized-unique-name"],
-            IsSynthesizedUniqueNameCollision
-        ),
-        .. Scenario(
-            "synthesized-unique-name-collision",
-            DialectNames.PostgreSql,
-            "修正 E",
-            ["postgresql-386-synthesized-unique-name"],
-            IsSynthesizedUniqueNameCollision
-        ),
-        // 4m-f1-legacy-fk-name（4m-F1・修正 E・P2-6）：旧版（v0.1.0〜v0.2.0）の DDL で作った PostgreSQL の DB（名前の無い外部キーの
-        // 縮める前の既定名を PostgreSQL が 63 バイトで切り詰めた名前）に、同じ子の表から名前の無い外部キーを図で 1 本足すと、差分の
-        // 吸収が 2 本目の追加にも DB にある 1 本目と同じ切り詰めた名前を与え、既定で選ばれる追加が 42710 で断られる（警告なし）。
-        // 行は来歴の行（SyncPlanHistoryRows）の「旧版 × 長い子の表名 × 2 本目を足す」
-        .. Scenario(
-            SyncPlanHistoryRows.F1Finding,
-            DialectNames.PostgreSql,
-            "修正 E",
-            [SyncPlanHistoryRows.F1Id],
-            IsLegacyForeignKeyNameCollision
-        ),
         // nightly-sqlite-pk-nonunique（受け入れ・P2-4 で切り分けた）：値が一意でない列への主キーの付け替えは、DB がデータで断る
         // （SQLite は再構築のデータの移送で UNIQUE constraint failed になり、トランザクションを巻き戻して何も変えない）。計画は列の値を
         // 知らないので警告できない（DB の事実）。乱数の種で出ていた形（旧い実 DB の種 12503・18316、P2-4 の夜間の SQLite の種 5631・
@@ -91,40 +36,6 @@ internal static class SyncPlanFuzzKnownFailures
             acceptedReason: "値が一意でない列への主キーは DB がデータで断る（SQLite は再構築を巻き戻して何も変えない）。計画は列の値を知らないので警告できない（DB の事実）"
         ),
     ];
-
-    /// <summary>synthesized-unique-name-collision：名前の無い一意制約の合成名が既存の一意制約の名前と衝突して失敗する</summary>
-    private static bool IsSynthesizedUniqueNameCollision(FuzzSeedOutcome o) =>
-        !o.Committed
-        && o.Violations.Count == 1
-        && o.Violations[0].StartsWith("failed without a warning:", StringComparison.Ordinal)
-        && (
-            o.Violations[0].Contains("Duplicate key name", StringComparison.Ordinal)
-            || o.Violations[0].Contains("42P07", StringComparison.Ordinal)
-        )
-        && o.Mutations.Any(m => m.StartsWith("change unique ", StringComparison.Ordinal))
-        && o.Mutations.Any(m => m.StartsWith("add unique ", StringComparison.Ordinal));
-
-    /// <summary>
-    /// 4m-f1-legacy-fk-name：旧版の名前の吸収が 2 本目の追加に DB の外部キーと同じ名前を与え、追加が 42710 で失敗する（静的な規則 R4 も
-    /// 予言する）
-    /// </summary>
-    private static bool IsLegacyForeignKeyNameCollision(FuzzSeedOutcome o) =>
-        !o.Committed
-        && o.Violations.Count == 1
-        && o.Violations[0].StartsWith("failed without a warning:", StringComparison.Ordinal)
-        && o.Violations[0].Contains("42710", StringComparison.Ordinal)
-        && o.Notes.Contains(SyncPlanFuzzRunner.StaticRulePredictedNote)
-        && o.Mutations.Any(m => m.StartsWith("add fk ", StringComparison.Ordinal));
-
-    /// <summary>mysql-temporal-zero-precision-respelling：精度 0 を明示した日時の綴りの AlterColumn が同期しても残る</summary>
-    private static bool IsZeroPrecisionRespelling(FuzzSeedOutcome o) =>
-        o.Committed
-        && OnlyViolations(o, "selected item remains: AlterColumn")
-        // 選んだ項目の説明は UI の言語で変わるので、変更の記録（言語に依らない）で見る
-        && o.Mutations.Any(m =>
-            m.StartsWith("respell type ", StringComparison.Ordinal)
-            && m.EndsWith("(0)", StringComparison.Ordinal)
-        );
 
     /// <summary>nightly-sqlite-pk-nonunique：一意でない列への主キーの付け替えが UNIQUE 違反</summary>
     private static bool IsNonUniquePrimaryKey(FuzzSeedOutcome o) =>

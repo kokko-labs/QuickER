@@ -896,7 +896,7 @@ var violations = await orders.CheckUniquenessAsync(order);
 
 foreach (var violation in violations)
 {
-    // ConstraintName = the DDL name (a synthesized UQ_{table}_{columns} name when the diagram sets none)
+    // ConstraintName = the DDL name (a synthesized UQ_{table}_{columns} name when the diagram sets none, numbered when taken)
     // PropertyNames  = the entity property names that make up the constraint (declaration order)
     Console.WriteLine($"{violation.ConstraintName}: {string.Join(", ", violation.PropertyNames)}");
 }
@@ -2587,6 +2587,7 @@ A row a `BeforeSaveAsync` returned `false` for was not written, and its entry is
 Without that, its entry would upload the row's current content, over another writer's newer row or as a write that changes nothing yet moves the server's version on.
 A delete a hook skipped needs nothing: its row is still there, which already makes the upload drop the entry.
 A hook that gives a new row its key moves the row's entry to that key in the same way; the entry, made under the key the row had before, would otherwise name a row that does not exist and be dropped at upload, and the row would then be deleted by the next delete propagation.
+A key that has no value until the hook sets it (a value-object key left null) is recorded under a placeholder until then, which a run never reads.
 A process that ends between the save and that check leaves the entries as they were recorded.
 
 A bulk insert or a graph save records all of its rows in one go, as multi-row inserts of 100 rows each, rather than one statement per row.

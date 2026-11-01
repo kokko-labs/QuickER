@@ -142,7 +142,7 @@ At least one column is required, so the tool cannot drop a table's primary key a
 A `name` already used by a foreign key, primary key or unique constraint of the diagram, ignoring case, is an error (a constraint keeps its own name when you redefine it).
 Matched by (`table_name`, set of columns): if a constraint over the same columns exists it is redefined (its id is preserved; the name and column order come from this call), otherwise a new one is added.
 Column order and letter case affect neither the matching nor the meaning of the constraint.
-Omit `name` and the DDL generator synthesizes `UQ_{table}_{columns}`.
+Omit `name` and the DDL generator synthesizes `UQ_{table}_{columns}`, adding a number (`_2` or the next free one) when another constraint in the diagram already has that name.
 The primary key already enforces uniqueness of its own columns, so a constraint over exactly those columns is normally unnecessary.
 
 ### Named queries

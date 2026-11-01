@@ -2086,15 +2086,22 @@ public sealed partial class CSharpCodeGenerationService
     /// 「テーブル.制約名 (構成列)」の 1 行ずつへ整形する（Info 診断専用）。
     /// </summary>
     /// <remarks>
-    /// 名前を持たない制約は、生成側と同じ規則（<see cref="UniqueConstraint.SynthesizeName"/>）で合成した名前を出す。
+    /// 名前を持たない制約は、生成側と同じ名前（<see cref="ConstraintNames.ResolveUniqueConstraintNames"/>）を出す。
     /// 既存の配列列 Info（<c>CodeGen_Info_ArrayColumnsNotEditable</c>）へ相乗りさせないのは、配列列があっても
     /// 制約に絡まないときに「制約を外した」と言ってしまうため。
     /// </remarks>
     private static IReadOnlyList<string> BuildArrayUniqueConstraintLines(
         ErDiagram diagram,
         IReadOnlyDictionary<Guid, CSharpTypeInfo> columnTypes
-    ) =>
-        diagram
+    )
+    {
+        var names = ConstraintNames.ResolveUniqueConstraintNames(
+            diagram.Entities,
+            diagram.Relationships,
+            IdentifierLengthLimits.ForDiagramTarget(diagram.TargetDbms)
+        );
+
+        return diagram
             .Entities.SelectMany(entity =>
             {
                 var columnsById = entity.Columns.ToDictionary(column => column.Id);
@@ -2113,18 +2120,11 @@ public sealed partial class CSharpCodeGenerationService
                         var members = constraint
                             .ColumnIds.Select(id => columnsById[id].Name)
                             .ToList();
-                        var name = string.IsNullOrWhiteSpace(constraint.Name)
-                            ? UniqueConstraint.SynthesizeName(
-                                entity.TableName,
-                                members,
-                                IdentifierLengthLimits.ForDiagramTarget(diagram.TargetDbms)
-                            )
-                            : constraint.Name;
-
-                        return $"{entity.TableName}.{name} ({string.Join(", ", members)})";
+                        return $"{entity.TableName}.{names[constraint]} ({string.Join(", ", members)})";
                     });
             })
             .ToList();
+    }
 
     /// <summary>
     /// 負のスケールを持つ decimal 列を「テーブル.列 (元の DB 型表記)」の 1 行ずつへ整形する（Info 診断専用）。

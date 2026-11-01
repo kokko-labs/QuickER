@@ -84,8 +84,39 @@ public partial class EntityViewModel : ObservableObject
     internal IdentifierLengthLimit IdentifierLimit =>
         IdentifierLimitSource?.Invoke() ?? IdentifierLengthLimit.Unlimited;
 
-    /// <summary>対象 DBMS が変わったとき、一意制約の合成名のプレビューを更新する</summary>
-    internal void NotifyIdentifierLimitChanged() => NotifyUniqueConstraintNames();
+    /// <summary>
+    /// 一意制約の DDL 上の名前を図全体で決める関数（<see cref="MainViewModel"/> が図へ載せるときに渡す。
+    /// 図に載っていなければ <c>null</c>＝この表だけを範囲にして決める）
+    /// </summary>
+    internal Func<UniqueConstraintViewModel, string?>? UniqueConstraintNameSource { get; set; }
+
+    /// <summary>
+    /// 一意制約の DDL 上の名前（名前の無い制約の合成名がほかの制約とぶつかれば番号つき＝
+    /// <see cref="ConstraintNames.ResolveUniqueConstraintNames"/>）
+    /// </summary>
+    /// <returns>構成列を解決できない制約は <c>null</c></returns>
+    internal string? ResolveUniqueConstraintName(UniqueConstraintViewModel constraint)
+    {
+        if (UniqueConstraintNameSource is not null)
+        {
+            return UniqueConstraintNameSource(constraint);
+        }
+
+        // 図に載っていない（VM 単体の利用）: この表だけを範囲にして決める
+        var index = UniqueConstraints.IndexOf(constraint);
+
+        if (index < 0)
+        {
+            return null;
+        }
+
+        var model = ToModel();
+        var names = ConstraintNames.ResolveUniqueConstraintNames([model], [], IdentifierLimit);
+        return names.TryGetValue(model.UniqueConstraints[index], out var name) ? name : null;
+    }
+
+    /// <summary>図が変わったとき・対象 DBMS が変わったとき、一意制約の名前のプレビューを更新する</summary>
+    internal void NotifyUniqueConstraintNamesChanged() => NotifyUniqueConstraintNames();
 
     /// <summary>テーブル名・列名の書き換えを、重複のため受け付けなかったときに発火する（所有者がステータスバーで利用者へ知らせる）</summary>
     internal event EventHandler<NameChangeRejectedEventArgs>? NameChangeRejected;

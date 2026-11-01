@@ -13,12 +13,15 @@ namespace QuickER.Provider;
 /// 制約名がモデルに無い場合の合成規則は、外部キーの <c>FK_{子}_{親}</c>（<see cref="DdlGeneratorBase"/>）と
 /// 対称に <c>UQ_{テーブル名}_{列名…}</c>（宣言順の連結）とする。規則そのものの正本は
 /// <see cref="UniqueConstraint.SynthesizeName"/>（モデル側＝Provider を参照しない MCP ツールホストとも共有する）で、
-/// テーブル名・列名の安全化も <see cref="UniqueConstraint.SynthesizeName"/> 自身が <see cref="ConstraintNames.SafeName"/> で行う
-/// （規則が方言で変わらないので、方言ごとの安全化関数は受け取らない）。
+/// ほかの制約の名前とぶつかるときに番号を足す解決は <see cref="ConstraintNames.ResolveUniqueConstraintNames"/>（図全体）と
+/// <see cref="ConstraintNames.ResolveUniqueConstraintName"/>（1 つの制約だけ）が持つ。ここはそれを呼ぶだけ。
 /// </remarks>
 public static class UniqueConstraintNaming
 {
-    /// <summary>制約名を解決する（モデルに名前があればそのまま、無ければ列構成から合成する）</summary>
+    /// <summary>
+    /// 制約名を解決する（名前があればそのまま、無ければ列構成から合成する。1 つの制約だけを範囲にするので、ほかの制約の
+    /// 名前は避けない＝図全体を持つ呼び出しは <see cref="ConstraintNames.ResolveUniqueConstraintNames"/> の名前を渡す）
+    /// </summary>
     /// <param name="constraintName">モデルが保持する制約名（未設定は <c>null</c> / 空）</param>
     /// <param name="tableName">対象テーブル名</param>
     /// <param name="columnNames">構成列名（宣言順）</param>
@@ -29,18 +32,9 @@ public static class UniqueConstraintNaming
         string tableName,
         IReadOnlyList<string> columnNames,
         IdentifierLengthLimit limit
-    )
-    {
-        if (!string.IsNullOrWhiteSpace(constraintName))
-        {
-            return constraintName;
-        }
+    ) => ConstraintNames.ResolveUniqueConstraintName(constraintName, tableName, columnNames, limit);
 
-        // 合成規則（安全化を含む）はモデル側の UniqueConstraint.SynthesizeName が正本
-        return UniqueConstraint.SynthesizeName(tableName, columnNames, limit);
-    }
-
-    /// <summary>エンティティの一意制約を「解決済み制約名 ＋ 宣言順の構成列名」へ展開する</summary>
+    /// <summary>エンティティの一意制約を「解決済み制約名 ＋ 宣言順の構成列名」へ展開する（その表だけを範囲にして名前を決める）</summary>
     /// <param name="entity">対象エンティティ</param>
     /// <param name="limit">合成名に使う識別子の長さの上限（DDL・同期の方言の上限）</param>
     /// <returns>DDL へ出力可能な一意制約の一覧（モデルの並び順を保つ）</returns>
@@ -52,24 +46,24 @@ public static class UniqueConstraintNaming
     public static List<ResolvedUniqueConstraint> ResolveAll(
         Entity entity,
         IdentifierLengthLimit limit
-    ) => ResolveAll(entity, entity.TableName, limit);
+    ) => ResolveAll(entity, null, limit);
 
-    /// <summary>エンティティの一意制約を、指定したテーブル名を合成名の基として展開する</summary>
+    /// <summary>エンティティの一意制約を、図全体で決めた名前で展開する</summary>
     /// <param name="entity">対象エンティティ</param>
-    /// <param name="tableName">合成名 <c>UQ_{テーブル}_{列…}</c> の基にするテーブル名</param>
+    /// <param name="names">
+    /// <see cref="ConstraintNames.ResolveUniqueConstraintNames"/> が図全体で決めた名前。<c>null</c> ならその表だけを範囲にして
+    /// 決める。辞書に無い制約（差分の後で組み直した定義など）は 1 つの制約だけを範囲にして決める
+    /// </param>
     /// <param name="limit">合成名に使う識別子の長さの上限（DDL・同期の方言の上限）</param>
     /// <returns>DDL へ出力可能な一意制約の一覧（モデルの並び順を保つ）</returns>
-    /// <remarks>
-    /// 差分同期はエンティティではなく差分項目の正規化済みテーブル名（<see cref="SchemaDiffService.NormalizeTable"/>）を
-    /// 制約名の基にするため、テーブル名を明示できる形を用意する。除外規則（構成列が空・解決できない制約は
-    /// 黙って除外）は <see cref="ResolveAll(Entity, IdentifierLengthLimit)"/> と同じ。
-    /// </remarks>
+    /// <remarks>除外規則（構成列が空・解決できない制約は黙って除外）は <see cref="ResolveAll(Entity, IdentifierLengthLimit)"/> と同じ。</remarks>
     public static List<ResolvedUniqueConstraint> ResolveAll(
         Entity entity,
-        string tableName,
+        IReadOnlyDictionary<UniqueConstraint, string>? names,
         IdentifierLengthLimit limit
     )
     {
+        names ??= ConstraintNames.ResolveUniqueConstraintNames([entity], [], limit);
         var resolved = new List<ResolvedUniqueConstraint>();
 
         foreach (var constraint in entity.UniqueConstraints)
@@ -81,7 +75,9 @@ public static class UniqueConstraintNaming
 
             resolved.Add(
                 new ResolvedUniqueConstraint(
-                    Resolve(constraint.Name, tableName, columnNames, limit),
+                    names.TryGetValue(constraint, out var name)
+                        ? name
+                        : Resolve(constraint.Name, entity.TableName, columnNames, limit),
                     columnNames
                 )
             );
@@ -104,30 +100,7 @@ public static class UniqueConstraintNaming
         Entity entity,
         UniqueConstraint constraint,
         out List<string> columnNames
-    )
-    {
-        columnNames = [];
-
-        if (constraint.ColumnIds.Count == 0)
-        {
-            return false;
-        }
-
-        foreach (var columnId in constraint.ColumnIds)
-        {
-            var column = entity.Columns.FirstOrDefault(c => c.Id == columnId);
-
-            if (column is null)
-            {
-                columnNames = [];
-                return false;
-            }
-
-            columnNames.Add(column.Name);
-        }
-
-        return true;
-    }
+    ) => constraint.TryResolveColumnNames(entity, out columnNames);
 
     /// <summary>
     /// 一意制約の同一性判定に使う列集合シグネチャを作る（列名は <see cref="SchemaNames.Key"/> で畳み、順序は問わない）

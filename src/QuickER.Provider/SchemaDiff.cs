@@ -166,11 +166,21 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
     /// </summary>
     /// <remarks>
     /// <see cref="SchemaDiffKind.DropUniqueConstraint"/> では live 側（DB）の実名が入る。
-    /// <see cref="SchemaDiffKind.AddUniqueConstraint"/> では図側のモデル名で、未設定なら <c>null</c>＝
-    /// レンダラーが <see cref="UniqueConstraintNaming.Resolve"/> で <c>UQ_{表}_{列…}</c> を合成する。
-    /// <see cref="SchemaDiffKind.AlterUniqueConstraint"/> では図側（新しい定義）の名前。
+    /// <see cref="SchemaDiffKind.AddUniqueConstraint"/> と <see cref="SchemaDiffKind.AlterUniqueConstraint"/> では、差分が
+    /// 図全体で解決した名前（図側のモデル名、未設定なら <see cref="ConstraintNames.ResolveUniqueConstraintNames"/> の名前＝
+    /// ほかの制約の名前とぶつかれば番号つき）が入る。差分を通らずに組んだ項目で <c>null</c> なら、レンダラーが
+    /// <see cref="UniqueConstraintNaming.Resolve"/>（1 つの制約だけを範囲にした解決）で名前を作る。
     /// </remarks>
     public string? UniqueConstraintName { get; init; }
+
+    /// <summary>
+    /// 表の追加（<see cref="SchemaDiffKind.AddTable"/>）で、<see cref="Entity"/> の一意制約に付ける名前（差分が図全体で解決したもの）
+    /// </summary>
+    /// <remarks>
+    /// <c>null</c>（差分を通らずに組んだ項目）なら、同期スクリプトはその表だけを範囲にして名前を作る
+    /// （<see cref="UniqueConstraintNaming.ResolveAll(Entity, QuickER.Dialects.IdentifierLengthLimit)"/>）。
+    /// </remarks>
+    public IReadOnlyDictionary<UniqueConstraint, string>? UniqueConstraintNames { get; init; }
 
     /// <summary>対象の一意制約の構成列名（宣言順。Add/Drop/AlterUniqueConstraint のみ）。</summary>
     /// <remarks>

@@ -292,6 +292,56 @@ internal sealed class SyncModelRun : IAsyncDisposable
                 break;
             }
 
+            case LeftoverUnsetKeyEntryOp leftover:
+            {
+                var device = _world.Device(leftover.Device);
+                var pendingBefore = await device.Journal.CountPendingAsync(_ct);
+                await device.Sql.ExecuteSqlAsync(
+                    "INSERT INTO quicker_sync_journal (table_name, key_text, operation, "
+                        + "original_row_version, unbounded_binary_columns, recorded_at) "
+                        + "VALUES (@tableName, @keyText, 'Upsert', NULL, NULL, '2026-11-01T00:00:00')",
+                    new { tableName = leftover.Table, keyText = SyncJournal.UnsetKeyText },
+                    _ct
+                );
+
+                if (
+                    (await device.Journal.ReadAllAsync(_ct)).Any(entry =>
+                        entry.KeyText == SyncJournal.UnsetKeyText
+                    )
+                    || await device.Journal.CountPendingAsync(_ct) != pendingBefore
+                )
+                {
+                    _failures.Add(
+                        new(
+                            $"5/unset-key-read:{leftover.Table}",
+                            $"{leftover.Describe()}: the journal readers return the entry"
+                        )
+                    );
+                }
+
+                break;
+            }
+
+            case ExpectNoUnsetKeyEntryOp expect:
+            {
+                var left = await _world
+                    .Device(expect.Device)
+                    .Sql.ExecuteScalarSqlAsync<long>(
+                        "SELECT COUNT(*) FROM quicker_sync_journal WHERE key_text = @keyText",
+                        new { keyText = SyncJournal.UnsetKeyText },
+                        _ct
+                    );
+
+                if (left != 0)
+                {
+                    _failures.Add(
+                        new("5/unset-key-left", $"{expect.Describe()}: {left} entries are left")
+                    );
+                }
+
+                break;
+            }
+
             case ExpectNoAckOp expect:
             {
                 var acks = await _world

@@ -51,6 +51,7 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
             item.TableName,
             SqlIdentifier.BracketSimple,
             name => $"[{SqlIdentifier.Escape(name)}]",
+            item.UniqueConstraintNames,
             IdentifierLimit,
             DialectName,
             UnsupportedFeature.Sync

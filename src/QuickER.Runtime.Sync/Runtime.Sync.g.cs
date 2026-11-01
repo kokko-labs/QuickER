@@ -1012,11 +1012,37 @@ public sealed class SyncJournal
         + "column_name TEXT NOT NULL, "
         + "PRIMARY KEY (table_name, key_text, column_name))";
 
+    /// <summary>
+    /// The key text an entry is recorded under while its row has no key yet - a new row whose key a save hook is still
+    /// to set (see <see cref="SyncTableDescriptor{TEntity, TKey}.FormatEntityKey"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Such an entry exists only inside the write that recorded it: the write holds the local write lock from recording
+    /// to the check that follows it, and the check moves the entry to the key the save gave the row. The readers the
+    /// engine uses leave it out (<see cref="ReadAllAsync"/>, <see cref="CountPendingAsync"/>), since a run reading the
+    /// journal outside that lock could otherwise read the entry mid-write and try to parse a key that is not one.
+    /// </para>
+    /// <para>
+    /// One left behind - the process ended between the write and the check, or the check failed - names no row, so an
+    /// upload removes it when it plans the table, under the write lock (see <see cref="RemoveUnsetKeyEntriesAsync"/>).
+    /// The row the write saved then has no entry of its own, as a row whose integer key the check had yet to move has
+    /// none.
+    /// </para>
+    /// </remarks>
+    internal const string UnsetKeyText = "\u0001quicker:unset-key";
+
     /// <summary>Reads every pending entry in replay order, aliasing the columns onto the DTO's property names.</summary>
     private const string SelectAllSql =
         "SELECT id AS Id, table_name AS TableName, key_text AS KeyText, operation AS Operation, "
         + "original_row_version AS OriginalRowVersion, unbounded_binary_columns AS UnboundedBinaryColumns "
-        + "FROM quicker_sync_journal ORDER BY id";
+        + "FROM quicker_sync_journal WHERE key_text <> @unsetKeyText ORDER BY id";
+
+    /// <summary>Reads one table's pending entries in replay order (the columns as <see cref="SelectAllSql"/> aliases them).</summary>
+    private const string SelectTableSql =
+        "SELECT id AS Id, table_name AS TableName, key_text AS KeyText, operation AS Operation, "
+        + "original_row_version AS OriginalRowVersion, unbounded_binary_columns AS UnboundedBinaryColumns "
+        + "FROM quicker_sync_journal WHERE table_name = @tableName AND key_text <> @unsetKeyText ORDER BY id";
 
     /// <summary>Reads one table's acknowledgements, aliasing the columns onto the DTO's property names.</summary>
     private const string SelectAcksSql =
@@ -1328,6 +1354,10 @@ public sealed class SyncJournal
     private const int RowsPerStatement = 100;
 
     /// <summary>Reads every pending entry in the order it was recorded.</summary>
+    /// <remarks>
+    /// An entry of a row that has no key yet is left out: it belongs to a write still in progress (see
+    /// <see cref="UnsetKeyText"/>).
+    /// </remarks>
     public async Task<IReadOnlyList<SyncJournalRow>> ReadAllAsync(
         CancellationToken cancellationToken = default
     )
@@ -1335,7 +1365,50 @@ public sealed class SyncJournal
         await EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
 
         return await _localSqlExecutor
-            .QueryProjectionBySqlAsync<SyncJournalRow>(SelectAllSql, null, cancellationToken)
+            .QueryProjectionBySqlAsync<SyncJournalRow>(
+                SelectAllSql,
+                new { unsetKeyText = UnsetKeyText },
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Reads the pending entries of one table in the order they were recorded (what <see cref="ReadAllAsync"/> returns for it).</summary>
+    /// <param name="tableName">The table.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    internal async Task<IReadOnlyList<SyncJournalRow>> ReadTableAsync(
+        string tableName,
+        CancellationToken cancellationToken
+    )
+    {
+        await EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
+
+        return await _localSqlExecutor
+            .QueryProjectionBySqlAsync<SyncJournalRow>(
+                SelectTableSql,
+                new { tableName, unsetKeyText = UnsetKeyText },
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Removes the entries of one table a write left under <see cref="UnsetKeyText"/> (called by an upload under the write
+    /// lock, where no write is between recording such an entry and moving it to its key).
+    /// </summary>
+    /// <param name="tableName">The table.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    internal async Task RemoveUnsetKeyEntriesAsync(
+        string tableName,
+        CancellationToken cancellationToken
+    )
+    {
+        await _localSqlExecutor
+            .ExecuteSqlAsync(
+                "DELETE FROM quicker_sync_journal WHERE table_name = @tableName AND key_text = @unsetKeyText",
+                new { tableName, unsetKeyText = UnsetKeyText },
+                cancellationToken
+            )
             .ConfigureAwait(false);
     }
 
@@ -1669,14 +1742,15 @@ public sealed class SyncJournal
     }
 
     /// <summary>Counts the entries still waiting to be uploaded.</summary>
+    /// <remarks>An entry of a row that has no key yet is not counted (see <see cref="ReadAllAsync"/>).</remarks>
     public async Task<int> CountPendingAsync(CancellationToken cancellationToken = default)
     {
         await EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
 
         return await _localSqlExecutor
             .ExecuteScalarSqlAsync<int>(
-                "SELECT COUNT(*) FROM quicker_sync_journal",
-                null,
+                "SELECT COUNT(*) FROM quicker_sync_journal WHERE key_text <> @unsetKeyText",
+                new { unsetKeyText = UnsetKeyText },
                 cancellationToken
             )
             .ConfigureAwait(false);
@@ -2054,11 +2128,16 @@ public sealed class SyncTableDescriptor<TEntity, TKey>
     public Action<TEntity, TEntity> CopyUniqueValues { get; init; } = static (_, _) => { };
 
     /// <inheritdoc />
+    /// <remarks>
+    /// A row with no key yet - a new row whose key a Before save hook is still to set, under a key type that can be
+    /// null - has nothing to format, and gets <see cref="SyncJournal.UnsetKeyText"/>; the decorator's check after the
+    /// write moves the entry to the key the save gave the row.
+    /// </remarks>
     public string FormatEntityKey(EntityBaseCore entity)
     {
         ArgumentNullException.ThrowIfNull(entity);
 
-        return FormatKey(ReadKey((TEntity)entity));
+        return ReadKey((TEntity)entity) is { } key ? FormatKey(key) : SyncJournal.UnsetKeyText;
     }
 
     /// <inheritdoc />
@@ -7298,6 +7377,11 @@ public sealed class SyncEngine
                 .Gate.WriteExclusiveAsync(
                     async () =>
                     {
+                        // An entry still under the unset key once the lock is held is one a write left behind
+                        await _journal
+                            .RemoveUnsetKeyEntriesAsync(table.TableName, cancellationToken)
+                            .ConfigureAwait(false);
+
                         var planned = await PlanReplayAsync(table, rows, cancellationToken)
                             .ConfigureAwait(false);
 
@@ -7500,6 +7584,13 @@ public sealed class SyncEngine
     /// unconditionally. A table the fixed classes do not implement has no way to report which rows are there, and its
     /// rows are replayed by the last entry, as they always were.
     /// </para>
+    /// <para>
+    /// The entries are read again here, under the write lock, and grouped by the key they hold now. The run read them
+    /// before the lock, and a write in progress then could have moved one of them to another key afterwards - a new row
+    /// whose key a save hook set, which the write's check moves its entry to. Grouped by the key read first, the entry
+    /// would be decided by a row that does not exist and dropped by its id, the moved entry with it. Only the entries
+    /// the run read are taken: one recorded after the read belongs to a write this run never saw.
+    /// </para>
     /// </remarks>
     private async Task<TableReplayPlan> PlanReplayAsync(
         ISyncTable table,
@@ -7507,11 +7598,39 @@ public sealed class SyncEngine
         CancellationToken cancellationToken
     )
     {
-        var tableRows = rows.Where(pair =>
+        var readIds = rows.Where(pair =>
                 string.Equals(pair.Key.TableName, table.TableName, StringComparison.Ordinal)
             )
-            .OrderBy(pair => pair.Value.Ids[0])
-            .ToList();
+            .SelectMany(pair => pair.Value.Ids)
+            .ToHashSet();
+        var regrouped = new Dictionary<(string TableName, string KeyText), PendingRow>();
+
+        if (readIds.Count > 0)
+        {
+            foreach (
+                var entry in await _journal
+                    .ReadTableAsync(table.TableName, cancellationToken)
+                    .ConfigureAwait(false)
+            )
+            {
+                if (!readIds.Contains(entry.Id))
+                {
+                    continue;
+                }
+
+                var rowId = (entry.TableName, entry.KeyText);
+
+                if (!regrouped.TryGetValue(rowId, out var row))
+                {
+                    row = new PendingRow();
+                    regrouped.Add(rowId, row);
+                }
+
+                row.Add(entry);
+            }
+        }
+
+        var tableRows = regrouped.OrderBy(pair => pair.Value.Ids[0]).ToList();
         var plan = new TableReplayPlan(table);
 
         if (tableRows.Count == 0)
@@ -9165,7 +9284,7 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepositoryCore<
 
     /// <summary>The entry an insert of the given row records.</summary>
     private SyncJournalRecord InsertRecord(TEntity entity) =>
-        new(TableName, FormatKey(ReadKey(entity)), SyncJournalOperation.Upsert, null)
+        new(TableName, Descriptor.FormatEntityKey(entity), SyncJournalOperation.Upsert, null)
         {
             UnboundedBinaryColumns = Descriptor.UnboundedBinaryColumnNames,
             Entity = entity,

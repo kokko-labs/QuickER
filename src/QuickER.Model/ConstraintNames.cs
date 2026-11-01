@@ -15,7 +15,8 @@ namespace QuickER.Model;
 /// <b>既定名はここのメソッドで組み立てること</b>（<c>$"FK_{…}"</c> / <c>$"PK_{…}"</c> の補間や
 /// <c>"FK_" + …</c> の連結を呼び出し側で書かない）。規則が写されるとそれぞれが別々に古くなるため、
 /// 写しが無いことは <c>ConstraintNamesGuardTests</c> がソースを走査して確かめる。
-/// 一意制約の合成名（<see cref="UniqueConstraint.SynthesizeName"/>）も同じ <see cref="SafeName"/> を通す。
+/// 一意制約の合成名（<see cref="UniqueConstraint.SynthesizeName"/>）も同じ <see cref="SafeName"/> を通し、ほかの制約の名前と
+/// ぶつかるときは <see cref="ResolveUniqueConstraintNames"/> が番号を足す。
 /// </para>
 /// <para>
 /// モデル側に置くのは、Provider を参照しない MCP ツールホストも同じ規則を使うため
@@ -109,7 +110,7 @@ public static class ConstraintNames
     /// <para>
     /// 外部キーは保存された名前、無ければ <see cref="ForeignKey"/> の既定名（名前を持たず外部キーを作らない関係＝
     /// <see cref="DefinesForeignKey"/> が偽のものは、DDL が名前を付けないので数えない）。主キーは主キー列を持つテーブルの
-    /// <see cref="PrimaryKey"/>。一意制約は保存された名前、無ければ <see cref="UniqueConstraint.SynthesizeName"/>
+    /// <see cref="PrimaryKey"/>。一意制約は保存された名前、無ければ <see cref="ResolveUniqueConstraintNames"/> の名前
     /// （構成列を解決できない一意制約は DDL が出さないので数えない）。
     /// </para>
     /// <para>
@@ -125,7 +126,7 @@ public static class ConstraintNames
     )
     {
         var entities = diagram.Entities;
-        var names = CollectTableConstraints(entities, limit);
+        var names = CollectTableConstraints(entities, diagram.Relationships, limit);
 
         foreach (var relationship in diagram.Relationships)
         {
@@ -177,6 +178,12 @@ public static class ConstraintNames
 
         if (replacingUniqueConstraintId is { } id)
         {
+            var resolved = ResolveUniqueConstraintNames(
+                diagram.Entities,
+                diagram.Relationships,
+                limit
+            );
+
             foreach (var entity in diagram.Entities)
             {
                 var own = entity.UniqueConstraints.FirstOrDefault(constraint =>
@@ -188,15 +195,14 @@ public static class ConstraintNames
                     continue;
                 }
 
-                var columnNames = own
-                    .ColumnIds.Select(columnId =>
-                        entity.Columns.FirstOrDefault(column => column.Id == columnId)?.Name
-                    )
-                    .OfType<string>();
-                names.Remove(
-                    own.Name
-                        ?? UniqueConstraint.SynthesizeName(entity.TableName, columnNames, limit)
-                );
+                if (!string.IsNullOrWhiteSpace(own.Name))
+                {
+                    names.Remove(own.Name);
+                }
+                else if (resolved.TryGetValue(own, out var ownName))
+                {
+                    names.Remove(ownName);
+                }
             }
         }
 
@@ -205,21 +211,28 @@ public static class ConstraintNames
 
     /// <summary>テーブルが持つ制約（主キー・一意制約）の名前を、DDL が付ける名前で集める</summary>
     /// <param name="entities">対象のテーブル</param>
+    /// <param name="relationships">
+    /// 図のリレーション（名前を持つ外部キーの名前を、一意制約の合成名が避けるために読む。結果には入れない）
+    /// </param>
     /// <param name="limit">既定名に使う識別子の長さの上限（経路は型の XmlDoc）</param>
     /// <returns>主キー・一意制約の名前の集合（大文字小文字を区別しない・呼び出し側で追加してよい）</returns>
     /// <remarks>
-    /// <see cref="CollectExisting"/> から外部キーを除いた部分で、規則は同じ。
+    /// <see cref="CollectExisting"/> から外部キーを除いた部分で、規則は同じ。一意制約の名前は保存された名前と
+    /// <see cref="ResolveUniqueConstraintNames"/> の名前。
     /// リレーションの名前をまとめて決める処理（Mermaid のラベルの採否・<see cref="NameUnnamedForeignKeys"/>）が、
     /// 予約済みの名前の出発点に使う
     /// </remarks>
     public static HashSet<string> CollectTableConstraints(
         IEnumerable<Entity> entities,
+        IEnumerable<Relationship> relationships,
         IdentifierLengthLimit limit
     )
     {
+        var tables = entities.ToList();
         var names = new HashSet<string>(SchemaNames.Comparer);
+        var resolved = ResolveUniqueConstraintNames(tables, relationships, limit);
 
-        foreach (var entity in entities)
+        foreach (var entity in tables)
         {
             if (entity.Columns.Any(column => column.IsPrimaryKey))
             {
@@ -231,25 +244,156 @@ public static class ConstraintNames
                 if (!string.IsNullOrWhiteSpace(constraint.Name))
                 {
                     names.Add(constraint.Name);
-                    continue;
                 }
-
-                var columnNames = constraint
-                    .ColumnIds.Select(columnId =>
-                        entity.Columns.FirstOrDefault(column => column.Id == columnId)?.Name
-                    )
-                    .ToList();
-
-                if (columnNames.Count > 0 && columnNames.All(name => name is not null))
+                else if (resolved.TryGetValue(constraint, out var name))
                 {
-                    names.Add(
-                        UniqueConstraint.SynthesizeName(entity.TableName, columnNames!, limit)
-                    );
+                    names.Add(name);
                 }
             }
         }
 
         return names;
+    }
+
+    /// <summary>一意制約ごとに、DDL・同期・生成コード・ツールの要約が使う名前を求める（図は書き換えない）</summary>
+    /// <param name="entities">図のテーブル</param>
+    /// <param name="relationships">図のリレーション（名前を持つ外部キーの名前を避けるために読む）</param>
+    /// <param name="limit">合成名に使う識別子の長さの上限（経路は型の XmlDoc）</param>
+    /// <returns>
+    /// 一意制約（参照の同一性で引く）→ 名前。名前を持つ制約は保存された名前、持たない制約は
+    /// <see cref="UniqueConstraint.SynthesizeName"/> の名前で、それがほかの制約の名前とぶつかるときは番号（<c>_2</c>・<c>_3</c>…）を
+    /// 足した名前。構成列を解決できない制約（DDL が出さない）は含めない
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// 避ける名前は、主キー列を持つテーブルの <see cref="PrimaryKey"/>・保存された一意制約の名前（どのテーブルのものでも）・
+    /// 保存された外部キーの名前と、テーブルの並び・制約の並びで先に決めた名前。名前の無い外部キーの既定名は数えない
+    /// （<c>FK_</c> で始まり、<see cref="IdentifierLengthLimit.Fit"/> で縮めても先頭は残るので <c>UQ_</c> とぶつからない）。
+    /// 比較は <see cref="SchemaNames.Comparer"/>。
+    /// </para>
+    /// <para>
+    /// 範囲を図全体にするのは、制約名がスキーマ単位で共有される方言（SQL Server・PostgreSQL・Oracle）と、外部キーの名前の
+    /// 索引を持つ MySQL で、ほかの表の名前・外部キーの名前とぶつかると DDL・同期が失敗するため。ぶつからない図の名前は
+    /// <see cref="UniqueConstraint.SynthesizeName"/> のまま変わらない。
+    /// 外部キーの名前の解決（<see cref="ResolveForeignKeyNames"/>）は、ここで決めた名前を避ける（一意制約を先に決める）。
+    /// </para>
+    /// <para>
+    /// 名前の無い一意制約の名前を作るのは、この関数と <see cref="ResolveUniqueConstraintName"/> だけ
+    /// （<see cref="UniqueConstraint.SynthesizeName"/> を直接呼ぶのは中の <c>SynthesizeFreeName</c> だけ＝
+    /// <c>ConstraintNamesGuardTests</c>）。生成・DDL・差分・同期は 1 回の実行につき 1 回だけ呼び、表ごとに図全体を
+    /// 解決し直さない。
+    /// </para>
+    /// </remarks>
+    public static IReadOnlyDictionary<UniqueConstraint, string> ResolveUniqueConstraintNames(
+        IEnumerable<Entity> entities,
+        IEnumerable<Relationship> relationships,
+        IdentifierLengthLimit limit
+    )
+    {
+        var tables = entities.ToList();
+        var reserved = new HashSet<string>(SchemaNames.Comparer);
+
+        foreach (var table in tables)
+        {
+            if (table.Columns.Any(column => column.IsPrimaryKey))
+            {
+                reserved.Add(PrimaryKey(table.TableName, limit));
+            }
+
+            foreach (var constraint in table.UniqueConstraints)
+            {
+                if (!string.IsNullOrWhiteSpace(constraint.Name))
+                {
+                    reserved.Add(constraint.Name);
+                }
+            }
+        }
+
+        foreach (var relationship in relationships)
+        {
+            if (!string.IsNullOrWhiteSpace(relationship.ConstraintName))
+            {
+                reserved.Add(relationship.ConstraintName);
+            }
+        }
+
+        // UniqueConstraint は等値を上書きしないので、辞書は参照の同一性で引く
+        var names = new Dictionary<UniqueConstraint, string>();
+
+        foreach (var table in tables)
+        {
+            foreach (var constraint in table.UniqueConstraints)
+            {
+                if (!constraint.TryResolveColumnNames(table, out var columnNames))
+                {
+                    continue;
+                }
+
+                names.TryAdd(
+                    constraint,
+                    string.IsNullOrWhiteSpace(constraint.Name)
+                        ? SynthesizeFreeName(table.TableName, columnNames, reserved, limit)
+                        : constraint.Name
+                );
+            }
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// 一意制約 1 つだけを範囲にして名前を求める（<see cref="ResolveUniqueConstraintNames"/> を 1 つの制約へ絞った形）
+    /// </summary>
+    /// <param name="constraintName">保存された名前（未設定は <c>null</c> / 空）</param>
+    /// <param name="tableName">テーブル名</param>
+    /// <param name="columnNames">構成列名（宣言順）</param>
+    /// <param name="limit">合成名に使う識別子の長さの上限（経路は型の XmlDoc）</param>
+    /// <returns>保存された名前、無ければ <see cref="UniqueConstraint.SynthesizeName"/> の名前（避ける名前は無い）</returns>
+    /// <remarks>
+    /// 図全体を持たない呼び出し（名前を持たない差分の項目・ほかの表を知らない SQLite の再構築の定義）のためのもの。
+    /// 図全体を持つ呼び出しは <see cref="ResolveUniqueConstraintNames"/> を使う。
+    /// </remarks>
+    public static string ResolveUniqueConstraintName(
+        string? constraintName,
+        string tableName,
+        IEnumerable<string> columnNames,
+        IdentifierLengthLimit limit
+    ) =>
+        string.IsNullOrWhiteSpace(constraintName)
+            ? SynthesizeFreeName(
+                tableName,
+                columnNames,
+                new HashSet<string>(SchemaNames.Comparer),
+                limit
+            )
+            : constraintName;
+
+    /// <summary>
+    /// 合成名を作り、<paramref name="reserved"/> とぶつかれば番号を足した名前にして、決めた名前を <paramref name="reserved"/> へ加える
+    /// </summary>
+    private static string SynthesizeFreeName(
+        string tableName,
+        IEnumerable<string> columnNames,
+        HashSet<string> reserved,
+        IdentifierLengthLimit limit
+    )
+    {
+        var columns = columnNames.ToList();
+        var name = UniqueConstraint.SynthesizeName(tableName, columns, limit);
+
+        if (reserved.Add(name))
+        {
+            return name;
+        }
+
+        var numbered = FirstFreeNumbered(
+            UniqueConstraint.UnshortenedName(tableName, columns),
+            reserved,
+            limit,
+            () => $"Could not find a free unique constraint name for '{tableName}'"
+        ).Name;
+        reserved.Add(numbered);
+        return numbered;
     }
 
     /// <summary>リレーションごとに、DDL・同期が外部キーへ付ける名前を求める（図は書き換えない）</summary>
@@ -427,7 +571,7 @@ public static class ConstraintNames
     {
         var tables = entities.ToList();
         var targets = relationships.ToList();
-        var reserved = CollectTableConstraints(tables, limit);
+        var reserved = CollectTableConstraints(tables, targets, limit);
         var tablesById = new Dictionary<Guid, Entity>();
         var resolved = new List<KeyValuePair<Relationship, ResolvedForeignKeyName>>(targets.Count);
 
@@ -595,11 +739,31 @@ public static class ConstraintNames
             }
         }
 
-        // 候補は Fit で縮めてから空きを確かめるので、Fit が候補の違いを保てないと空きが見つからない。
-        // 黙って回り続けず（GUI ごと固まる）、上限で例外にして表に出す
+        return FirstFreeNumbered(
+            name,
+            taken,
+            limit,
+            () => $"Could not find a free foreign key name for '{childTable}' -> '{parentTable}'"
+        );
+    }
+
+    /// <summary>
+    /// <paramref name="unshortened"/> に番号（<c>_2</c> から）を足した名前のうち、上限に収めて <paramref name="taken"/> に無い最初のもの
+    /// </summary>
+    /// <remarks>
+    /// 候補は Fit で縮めてから空きを確かめるので、Fit が候補の違いを保てないと空きが見つからない。
+    /// 黙って回り続けず（GUI ごと固まる）、上限で例外にして表に出す（外部キーと一意制約の名前が共有する）
+    /// </remarks>
+    private static (string Name, string Unshortened) FirstFreeNumbered(
+        string unshortened,
+        IReadOnlySet<string> taken,
+        IdentifierLengthLimit limit,
+        Func<string> describe
+    )
+    {
         for (var suffix = 2; suffix <= MaxNumberedCandidates; suffix++)
         {
-            var candidate = name + "_" + suffix;
+            var candidate = unshortened + "_" + suffix;
 
             if (!taken.Contains(limit.Fit(candidate)))
             {
@@ -608,8 +772,7 @@ public static class ConstraintNames
         }
 
         throw new InvalidOperationException(
-            $"Could not find a free foreign key name for '{childTable}' -> '{parentTable}' "
-                + $"after {MaxNumberedCandidates - 1} numbered candidates."
+            $"{describe()} after {MaxNumberedCandidates - 1} numbered candidates."
         );
     }
 

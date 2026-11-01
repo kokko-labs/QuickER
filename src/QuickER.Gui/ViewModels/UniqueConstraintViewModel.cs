@@ -19,8 +19,8 @@ namespace QuickER.ViewModels;
 /// モデルには反映しない）。ユーザーが列を選んだ時点で正本へ確定し、正本が外から変わったときは破棄する。
 /// </para>
 /// <para>
-/// 表示名（<see cref="ResolvedName"/>）は DDL 生成と同じ合成規則
-/// （<see cref="UniqueConstraintNaming.Resolve"/>）を共有する（安全化も同じ規則なので、DDL が出す名前と一致する）。
+/// 表示名（<see cref="ResolvedName"/>）は DDL 生成と同じく図全体で決めた名前
+/// （<see cref="ConstraintNames.ResolveUniqueConstraintNames"/>＝名前の無い制約の合成名がほかの制約とぶつかれば番号つき）。
 /// </para>
 /// </remarks>
 public partial class UniqueConstraintViewModel : ObservableObject
@@ -78,8 +78,10 @@ public partial class UniqueConstraintViewModel : ObservableObject
     partial void OnNameChanged(string value) => OnPropertyChanged(nameof(ResolvedName));
 
     /// <summary>DDL へ出力される制約名（未設定なら列構成から合成した名前）</summary>
+    /// <remarks>構成列を解決できない制約は DDL が出さないので、解決できた列だけで名前を作って見せる</remarks>
     public string ResolvedName =>
-        UniqueConstraintNaming.Resolve(
+        _owner.ResolveUniqueConstraintName(this)
+        ?? UniqueConstraintNaming.Resolve(
             string.IsNullOrWhiteSpace(Name) ? null : Name,
             _owner.TableName,
             MemberColumnNames,

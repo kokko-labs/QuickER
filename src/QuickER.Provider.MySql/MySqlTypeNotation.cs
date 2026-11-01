@@ -18,6 +18,8 @@ namespace QuickER.Provider.MySql;
 ///   <item><c>decimal(p)</c> / <c>numeric(p)</c> → <c>decimal(p,0)</c>（スケールの既定は 0）</item>
 ///   <item>素の <c>decimal</c> / <c>numeric</c> → <c>decimal(10,0)</c>（精度の既定は 10）</item>
 ///   <item><c>numeric(p,s)</c> → <c>decimal(p,s)</c>（<c>numeric</c> は <c>decimal</c> の別名として保存される）</item>
+///   <item><c>datetime(0)</c> / <c>time(0)</c> / <c>timestamp(0)</c> → 素の <c>datetime</c> / <c>time</c> / <c>timestamp</c>
+///   （小数秒の精度の既定は 0 で、<c>COLUMN_TYPE</c> は精度 0 を書かない）</item>
 /// </list>
 /// 当てはまらない表記は前後の空白を落とすだけで変えない。照合は大文字小文字を区別せず、当てはまった表記は小文字で返す。
 /// </para>
@@ -37,6 +39,13 @@ public static partial class MySqlTypeNotation
     public static string Normalize(string dataType)
     {
         var text = dataType.Trim();
+        var temporal = ZeroPrecisionTemporalPattern().Match(text);
+
+        if (temporal.Success)
+        {
+            return temporal.Groups["name"].Value.ToLowerInvariant();
+        }
+
         var number = DecimalPattern().Match(text);
 
         if (!number.Success)
@@ -61,4 +70,11 @@ public static partial class MySqlTypeNotation
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex DecimalPattern();
+
+    // 小数秒の精度 0 を明示した日時（datetime(0) / time(0) / timestamp(0)）
+    [GeneratedRegex(
+        @"^(?<name>datetime|timestamp|time)\s*\(\s*0\s*\)$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex ZeroPrecisionTemporalPattern();
 }
