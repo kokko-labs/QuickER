@@ -325,7 +325,11 @@ public static partial class MermaidImporter
                 group => group.Count(),
                 StringComparer.OrdinalIgnoreCase
             );
-        var reserved = ConstraintNames.CollectTableConstraints(entities.Values, limit);
+        var reserved = ConstraintNames.CollectTableConstraints(
+            entities.Values,
+            relationships,
+            limit
+        );
 
         for (var index = 0; index < relationships.Count; index++)
         {

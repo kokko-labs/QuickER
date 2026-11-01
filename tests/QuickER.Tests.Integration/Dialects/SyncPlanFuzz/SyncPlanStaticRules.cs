@@ -335,9 +335,15 @@ internal static class SyncPlanStaticRules
 
         public void Load(IReadOnlyList<Entity> entities, IReadOnlyList<Relationship> relationships)
         {
+            var uniqueNames = ConstraintNames.ResolveUniqueConstraintNames(
+                entities,
+                relationships,
+                Limit
+            );
+
             foreach (var entity in entities)
             {
-                AddTable(entity);
+                AddTable(entity, uniqueNames);
             }
 
             var names = ConstraintNames.ResolveForeignKeyNames(entities, relationships, Limit);
@@ -430,7 +436,7 @@ internal static class SyncPlanStaticRules
                     _foreignKeyIndexes.RemoveAll(i => i.Table == step.Table);
                     break;
                 case SchemaDiffKind.AddTable when item.Entity is { } entity:
-                    AddTable(entity);
+                    AddTable(entity, item.UniqueConstraintNames);
                     break;
                 case SchemaDiffKind.AddColumn when item.Column is { } column:
                     _types[ColumnKey(step.Table, column.Name)] = column.DataType;
@@ -646,13 +652,19 @@ internal static class SyncPlanStaticRules
                 return pk;
             }
 
+            // 同期スクリプトと同じく、差分が図全体で決めた名前で作る
             return UniqueConstraintNaming
-                .ResolveAll(entity, Limit)
+                .ResolveAll(entity, step.Item.UniqueConstraintNames, Limit)
                 .Select(u => CheckName(step.Table, u.Name, false))
                 .FirstOrDefault(r => r is not null);
         }
 
         /// <summary>R4：名前の範囲で重ならないか</summary>
+        /// <remarks>
+        /// MySQL の一意制約は、同じ表の外部キーが自分の名前で作った索引ともぶつかる（Duplicate key name）が、R4 はこの組を数えない。
+        /// 数えるには、別の索引ができたときに MySQL が黙って外す外部キーの索引と、同期スクリプトが外部キーの削除の後に外す索引の両方を
+        /// 写す必要があり、写し違えると DB が通す計画の失敗を予言してしまう（この組は実 DB の行 mysql-synthesized-unique-name-foreign-key が捕まえる）。
+        /// </remarks>
         private string? CheckName(string table, string name, bool isForeignKey)
         {
             var comparison = dialect is DialectNames.SqlServer or DialectNames.MySql
@@ -688,7 +700,10 @@ internal static class SyncPlanStaticRules
 
         // ---- 状態の更新 ----
 
-        private void AddTable(Entity entity)
+        private void AddTable(
+            Entity entity,
+            IReadOnlyDictionary<UniqueConstraint, string>? uniqueNames
+        )
         {
             var table = Lower(entity.TableName);
 
@@ -711,7 +726,7 @@ internal static class SyncPlanStaticRules
                 );
             }
 
-            foreach (var unique in UniqueConstraintNaming.ResolveAll(entity, Limit))
+            foreach (var unique in UniqueConstraintNaming.ResolveAll(entity, uniqueNames, Limit))
             {
                 _keys.Add(
                     new Key(table, [.. unique.ColumnNames.Select(Lower)], unique.Name, false)

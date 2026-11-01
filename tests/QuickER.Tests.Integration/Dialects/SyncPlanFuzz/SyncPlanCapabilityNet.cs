@@ -435,42 +435,12 @@ internal static class SyncPlanCapabilityNetKnownFailures
     /// <summary>項目</summary>
     public static readonly IReadOnlyList<KnownEntry> Entries =
     [
-        // synthesized-unique-name-collision（MySQL・PostgreSQL・修正 E）：名前の無い一意制約の合成名が、列を変えた名前付きの
-        // 一意制約の名前と同じになる（規則 R4 が名前の衝突を予言する）。行は実 DB と同じ mysql-386・postgresql-386
-        .. SyncPlanFuzzKnownFailures.Scenario(
-            "synthesized-unique-name-collision",
-            DialectNames.MySql,
-            "修正 E",
-            ["mysql-386-synthesized-unique-name"],
-            IsUnwarnedNameCollision
-        ),
-        .. SyncPlanFuzzKnownFailures.Scenario(
-            "synthesized-unique-name-collision",
-            DialectNames.PostgreSql,
-            "修正 E",
-            ["postgresql-386-synthesized-unique-name"],
-            IsUnwarnedNameCollision
-        ),
-        // 4m-f1-legacy-fk-name（4m-F1・PostgreSQL・修正 E）：旧版の DDL で作った DB の切り詰めた外部キー名を、差分の吸収が後から図に足した
-        // 2 本目の追加にも与える（規則 R4 が名前の衝突を予言する）。行は実 DB と同じ来歴の行
-        .. SyncPlanFuzzKnownFailures.Scenario(
-            SyncPlanHistoryRows.F1Finding,
-            DialectNames.PostgreSql,
-            "修正 E",
-            [SyncPlanHistoryRows.F1Id],
-            IsUnwarnedNameCollision
-        ),
+        // synthesized-unique-name-collision（mysql-386・postgresql-386 の行）は 2026-11-01 の修正 E で直して一覧から消した
+        // （名前の無い一意制約の名前を図全体で決め、ぶつかれば番号を足す）。行は回帰の網として残る
     ];
 
     /// <summary>一覧</summary>
     public static KnownFailureSet Set { get; } = new("SyncPlan.CapabilityNet", Entries);
-
-    /// <summary>警告なしに、名前の衝突（規則 R4）で断られる文がある</summary>
-    private static bool IsUnwarnedNameCollision(FuzzSeedOutcome o) =>
-        o.Violations.Count == 1
-        && o.Violations[0].StartsWith("static rule:", StringComparison.Ordinal)
-        && o.Violations[0].Contains(": R4:", StringComparison.Ordinal)
-        && o.Violations[0].EndsWith("(no warning predicts the failure)", StringComparison.Ordinal);
 
     /// <summary>違反のあった種か行を、照合に渡す失敗にする（範囲＝方言、行なら方言＋"/scenarios"）</summary>
     public static EngineFailure ToFailure(FuzzSeedOutcome outcome) =>

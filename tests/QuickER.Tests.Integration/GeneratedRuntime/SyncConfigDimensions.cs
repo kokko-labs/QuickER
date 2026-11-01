@@ -209,39 +209,10 @@ internal static class SyncConfigDimensions
         );
 
     /// <summary>
-    /// 既知の失敗（main で赤になる行）。4m-E1＝非 keyed のローカル登録で同期の DI の登録が必ず投げる。
-    /// 4m-E2＝値オブジェクトのキーを Before フックが決める新しい行のグラフ保存が、ジャーナル記録デコレータ越しだけ失敗する。
+    /// 既知の失敗（main で赤になる行）。空＝修正 E で 4m-E1（非 keyed のローカル登録で同期の DI の登録が必ず投げる）と
+    /// 4m-E2（値オブジェクトのキーを Before フックが決める新しい行のグラフ保存が、ジャーナル記録デコレータ越しだけ失敗する）を直した。
     /// </summary>
-    /// <remarks>
-    /// E1 の行は修正 E まで登録の段で止まり、フック・書き込みの経路・転送の部分は流れていない（網羅の計数は試みた行を数えるので、
-    /// その組も網羅済みに数える）。
-    /// </remarks>
-    public static KnownCaseLedger Known { get; } =
-        new(
-            "SyncConfig",
-            [
-                .. Rows.Select(row => row.Input)
-                    .Where(c => !c.LocalKeyed)
-                    .Select(c =>
-                        KnownCaseLedger.Case(
-                            c.Id,
-                            "4m-E1",
-                            "修正 E",
-                            "is not a factory registration, so the journaling decorator cannot build the instance it wraps"
-                        )
-                    ),
-                .. Rows.Select(row => row.Input)
-                    .Where(c => c.LocalKeyed && c.Fixture == VoKey && c.HookAssignsKey)
-                    .Select(c =>
-                        KnownCaseLedger.Case(
-                            c.Id,
-                            "4m-E2",
-                            "修正 E",
-                            "Object reference not set to an instance of an object"
-                        )
-                    ),
-            ]
-        );
+    public static KnownCaseLedger Known { get; } = new("SyncConfig", []);
 
     /// <summary>台帳の行</summary>
     public static EngineDescriptor Descriptor { get; } =
@@ -264,7 +235,7 @@ internal static class SyncConfigDimensions
             ]
         );
 
-    /// <summary>行の由来の指摘（main で赤になる行だけ）</summary>
+    /// <summary>行の由来の指摘（修正 E で直した 4m-E1・4m-E2 の行）</summary>
     private static string? Finding(SyncConfigCase c) =>
         !c.LocalKeyed ? "4m-E1"
         : c.Fixture == VoKey && c.HookAssignsKey ? "4m-E2"

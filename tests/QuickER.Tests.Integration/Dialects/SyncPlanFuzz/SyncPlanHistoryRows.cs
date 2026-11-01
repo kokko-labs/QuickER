@@ -18,12 +18,15 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 /// 行の図は親の表 <c>hp1</c>・<c>hp2</c> と、<c>hp1</c> を名前の無い外部キーで参照する子の表（列 <c>p2_ref</c> も持つ）。
 /// DB 側の図の名前の無い外部キーは、行の来歴（<see cref="SyncPlanHistory"/>）の規則で名付けてから DB を作り、目標の図ではその名前を
 /// 外す（利用者の図は名前を付けていない）。2 本目の水準 <c>Added</c> は、目標の図で <c>p2_ref</c> から <c>hp2</c> へ名前の無い外部キーを
-/// 足す（旧版の DB には 1 本だけあり、2 本目は後で図に足した＝来歴＋その後の編集）。
+/// 足し、<c>AddedSameParent</c> は同じ親 <c>hp1</c> へ足す（旧版の DB には 1 本だけあり、2 本目は後で図に足した＝来歴＋その後の編集）。
+/// 長い子の表名では、どちらも縮める前の名前を切り詰めると DB の 1 本目と同じ名前になる＝前者は差分の吸収の「同じ親の表だけ」を、
+/// 後者は「live の外部キー 1 本につき 1 回・列ペアの一致を先に」を確かめる。
 /// </para>
 /// <para>
-/// 4m-F1 は「旧版 × 長い子の表名 × 2 本目を足す」の 1 行：旧版の 2 本の既定名は同じ名前に切り詰められ、差分の吸収が 2 本目の追加にも
-/// DB にある 1 本目と同じ名前を与え、既定で選ばれる追加が同じ名前で断られる。ほかの 7 行は合格の行で、網では静的な規則が失敗を予言せず、
-/// 実 PG では既定の同期がコミットし、取り込み直した差分が空になる（<see cref="NetProblems"/>・<see cref="RealProblems"/>）。
+/// 12 行とも合格の行で、網では静的な規則が失敗を予言せず、実 PG では既定の同期がコミットし、取り込み直した差分が空になる
+/// （<see cref="NetProblems"/>・<see cref="RealProblems"/>）。4m-F1 の行（「旧版 × 長い子の表名 × 2 本目を足す」）は、旧版の 2 本の
+/// 既定名が同じ名前に切り詰められ、差分の吸収が 2 本目の追加にも DB にある 1 本目と同じ名前を与えて断られていた行（修正 E で、吸収を
+/// 同じ子・同じ親の外部キーに 1 回だけ掛けるよう直した）。
 /// 切り詰めは PostgreSQL だけの事実なので、ほかの方言の行は作らない（ほかの方言の旧版は長い名前の DDL を DB が断ったので、その来歴の
 /// DB は無い）。
 /// </para>
@@ -45,6 +48,15 @@ internal static class SyncPlanHistoryRows
     /// <summary>行が観測を書く図の形の頭（<see cref="FuzzSeedOutcome.Shapes"/>）</summary>
     public const string ShapePrefix = "history:";
 
+    /// <summary>2 本目の水準：足さない</summary>
+    private const string None = "None";
+
+    /// <summary>2 本目の水準：別の親（hp2）へ足す</summary>
+    private const string Added = "Added";
+
+    /// <summary>2 本目の水準：同じ親（hp1）へ別の列で足す</summary>
+    private const string AddedSameParent = "AddedSameParent";
+
     /// <summary>4m-F1 の指摘の名前</summary>
     public const string F1Finding = "4m-f1-legacy-fk-name";
 
@@ -65,8 +77,8 @@ internal static class SyncPlanHistoryRows
                 ),
                 new Factor(
                     SecondForeignKey,
-                    [new Level("None"), new Level("Added")],
-                    "目標の図で足す 2 本目の名前の無い外部キー"
+                    [new Level(None), new Level(Added), new Level(AddedSameParent)],
+                    "目標の図で足す 2 本目の名前の無い外部キー（別の親・同じ親）"
                 ),
             ],
             [new FactorGroup(History, ChildName, SecondForeignKey)]
@@ -88,22 +100,29 @@ internal static class SyncPlanHistoryRows
         );
 
     /// <summary>行の水準の全積</summary>
-    private static IReadOnlyList<(SyncPlanHistory History, bool Long, bool Second)> Cells =>
+    private static IReadOnlyList<(SyncPlanHistory History, bool Long, string Second)> Cells =>
         [
             .. Enum.GetValues<SyncPlanHistory>()
                 .SelectMany(history =>
                     new[] { false, true }.SelectMany(isLong =>
-                        new[] { false, true }.Select(second => (history, isLong, second))
+                        new[] { None, Added, AddedSameParent }.Select(second =>
+                            (history, isLong, second)
+                        )
                     )
                 ),
         ];
 
     /// <summary>行の Id</summary>
-    public static string IdOf(SyncPlanHistory history, bool isLong, bool second) =>
-        $"{IdPrefix}{history}-{(isLong ? "long" : "short")}-{(second ? "added" : "none")}";
+    public static string IdOf(SyncPlanHistory history, bool isLong, string second) =>
+        $"{IdPrefix}{history}-{(isLong ? "long" : "short")}-{second switch
+        {
+            Added => "added",
+            AddedSameParent => "added-same-parent",
+            _ => "none",
+        }}";
 
     /// <summary>4m-F1 の行の Id</summary>
-    public static string F1Id => IdOf(SyncPlanHistory.PostgreSqlUnshortened, true, true);
+    public static string F1Id => IdOf(SyncPlanHistory.PostgreSqlUnshortened, true, Added);
 
     /// <summary>行</summary>
     public static IEnumerable<ScenarioRow<SyncPlanScenarioInput>> Rows =>
@@ -115,7 +134,7 @@ internal static class SyncPlanHistoryRows
             return new ScenarioRow<SyncPlanScenarioInput>(
                 id,
                 id == F1Id ? F1Finding : null,
-                $"来歴の行：{History}={cell.History} × {ChildName}={(cell.Long ? "Long" : "Short")} × {SecondForeignKey}={(cell.Second ? "Added" : "None")}",
+                $"来歴の行：{History}={cell.History} × {ChildName}={(cell.Long ? "Long" : "Short")} × {SecondForeignKey}={cell.Second}",
                 new SyncPlanScenarioInput(
                     DialectNames.PostgreSql,
                     fuzzDialect => new SyncPlanScenarioCase(
@@ -146,11 +165,16 @@ internal static class SyncPlanHistoryRows
         live.Int(c, "p2_ref");
     }
 
-    private static void Mutate(ScenarioTarget target, string child, bool second)
+    private static void Mutate(ScenarioTarget target, string child, string second)
     {
-        if (second)
+        switch (second)
         {
-            target.AddForeignKey(child, "p2_ref", "hp2", name: null);
+            case Added:
+                target.AddForeignKey(child, "p2_ref", "hp2", name: null);
+                break;
+            case AddedSameParent:
+                target.AddForeignKey(child, "p2_ref", "hp1", name: null);
+                break;
         }
     }
 
@@ -169,11 +193,23 @@ internal static class SyncPlanHistoryRows
         yield return $"{ShapePrefix}{ChildName}={(isLong ? "Long" : "Short")}";
     }
 
-    /// <summary>目標の図で 2 本目を足したかを読む図の形</summary>
+    /// <summary>目標の図で 2 本目を足したか（足したなら DB の 1 本目と同じ親か）を読む図の形</summary>
     internal static string SecondShape(
         IReadOnlyList<Relationship> before,
         IReadOnlyList<Relationship> after
-    ) => $"{ShapePrefix}{SecondForeignKey}={(after.Count > before.Count ? "Added" : "None")}";
+    )
+    {
+        var added = after.Where(relationship => !before.Contains(relationship)).ToList();
+        var level =
+            added.Count == 0 ? None
+            : added.Any(relationship =>
+                before.Any(existing => existing.SourceEntityId == relationship.SourceEntityId)
+            )
+                ? AddedSameParent
+            : Added;
+
+        return $"{ShapePrefix}{SecondForeignKey}={level}";
+    }
 
     /// <summary>行の結果を次元表のケースとして数える（行が書いた図の形から水準を読む）</summary>
     /// <param name="counter">数える先</param>
@@ -193,7 +229,7 @@ internal static class SyncPlanHistoryRows
     /// </summary>
     private static IEnumerable<string> DiffProblems(FuzzSeedOutcome outcome)
     {
-        var added = outcome.Shapes.Contains($"{ShapePrefix}{SecondForeignKey}=Added");
+        var added = !outcome.Shapes.Contains($"{ShapePrefix}{SecondForeignKey}={None}");
         var expected = added ? 1 : 0;
 
         if (
@@ -217,8 +253,7 @@ internal static class SyncPlanHistoryRows
         outcome.ScenarioId?.StartsWith(IdPrefix, StringComparison.Ordinal) == true;
 
     /// <summary>
-    /// 網の表明：差分が来歴どおり（<see cref="DiffProblems"/>）で、4m-F1 の行は静的な規則が失敗を予言し、合格の行は予言せず違反も無い
-    /// （破れた行ごとに問題の文）
+    /// 網の表明：差分が来歴どおり（<see cref="DiffProblems"/>）で、静的な規則が失敗を予言せず違反も無い（破れた行ごとに問題の文）
     /// </summary>
     /// <param name="outcomes">流した行の結果</param>
     public static IEnumerable<string> NetProblems(IEnumerable<FuzzSeedOutcome> outcomes)
@@ -230,19 +265,7 @@ internal static class SyncPlanHistoryRows
                 yield return problem;
             }
 
-            var predicted = outcome.Notes.Contains(SyncPlanFuzzRunner.StaticRulePredictedNote);
-
-            if (outcome.ScenarioId == F1Id)
-            {
-                if (!predicted)
-                {
-                    yield return $"history row {outcome.ScenarioId}: the static rules must predict the name collision";
-                }
-
-                continue;
-            }
-
-            if (predicted)
+            if (outcome.Notes.Contains(SyncPlanFuzzRunner.StaticRulePredictedNote))
             {
                 yield return $"history row {outcome.ScenarioId}: the static rules must not predict a failure";
             }
@@ -255,8 +278,7 @@ internal static class SyncPlanHistoryRows
     }
 
     /// <summary>
-    /// 実 DB の表明：差分が来歴どおり（<see cref="DiffProblems"/>）で、合格の行は既定の同期がコミットし、取り込み直した差分が空
-    /// （4m-F1 の行の失敗は既知の失敗の一覧が受け持つ）
+    /// 実 DB の表明：差分が来歴どおり（<see cref="DiffProblems"/>）で、既定の同期がコミットし、取り込み直した差分が空
     /// </summary>
     /// <param name="outcomes">流した行の結果</param>
     public static IEnumerable<string> RealProblems(IEnumerable<FuzzSeedOutcome> outcomes)
@@ -266,11 +288,6 @@ internal static class SyncPlanHistoryRows
             foreach (var problem in DiffProblems(outcome))
             {
                 yield return problem;
-            }
-
-            if (outcome.ScenarioId == F1Id)
-            {
-                continue;
             }
 
             if (!outcome.Committed)

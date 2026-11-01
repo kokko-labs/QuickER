@@ -51,6 +51,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
             item.TableName,
             PgIdentifier.QuoteSimple,
             name => $"\"{PgIdentifier.Escape(name)}\"",
+            item.UniqueConstraintNames,
             IdentifierLimit,
             DialectName,
             UnsupportedFeature.Sync

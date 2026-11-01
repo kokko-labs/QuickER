@@ -62,6 +62,7 @@ A drop-down offers only the columns that the other rows of the same constraint d
 "×" takes a row back out.
 
 Leave the name empty and `UQ_{table}_{columns}` is synthesized at DDL generation time (while the box is empty it shows that synthesized name as its placeholder).
+When another constraint in the diagram already has that name, a number is added (`_2`, then the next free one).
 Dots and spaces in the names become `_`, and leading or trailing spaces are dropped.
 A name imported from a database is kept as it is.
 Deleting a column deletes the constraints that include it, together with the column, so a constraint is never silently narrowed to its remaining columns.

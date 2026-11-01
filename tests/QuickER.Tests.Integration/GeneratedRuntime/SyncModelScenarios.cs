@@ -1061,6 +1061,19 @@ internal static class SyncModelScenarios
                     ),
                 ]
             ),
+            // 4m-E2: キーの決まっていない行の記録（書き込みの後・突き合わせの前に落ちて残ったもの）は、エンジンの読み取りが返さず、
+            // 次の実行の初めに消える（キーを読もうとして同期が止まらない）。ほかの未送信の記録は普段どおり上がる
+            new(
+                "e2-leftover-unset-key-entry",
+                [Folder(SV, 434)],
+                [
+                    Sync(D1),
+                    Item(D1, 435, folder: 434),
+                    new LeftoverUnsetKeyEntryOp(D1, ModelTables.Items),
+                    Sync(D1),
+                    new ExpectNoUnsetKeyEntryOp(D1),
+                ]
+            ),
             // #25: 同じ形で Kind=Local
             new(
                 "25-datetime-key-local",

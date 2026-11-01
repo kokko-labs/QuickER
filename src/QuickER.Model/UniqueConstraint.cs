@@ -43,22 +43,51 @@ public class UniqueConstraint
     /// </returns>
     /// <remarks>
     /// 「名前なし＝列構成から合成する」は <see cref="Name"/> の意味論そのものなのでモデル側に置く。
-    /// 安全化（前後の空白の除去と記号の置換）もここで行う＝DDL 生成・生成コードの <c>[UniqueConstraint]</c>・
-    /// ツールの要約表示が同じ名前を作る。安全化は冪等なので、方言の <c>SafeName</c> を先に通してから呼ぶ経路
-    /// （<c>QuickER.Provider.UniqueConstraintNaming</c>）でも結果は変わらない。
+    /// 安全化（前後の空白の除去と記号の置換）もここで行う。安全化は冪等なので、方言の <c>SafeName</c> を先に通して
+    /// から呼んでも結果は変わらない。
+    /// この名前はほかの制約の名前とぶつかり得るので、DDL・同期・生成コード・ツールの要約は、ぶつかるときに番号を足す
+    /// <see cref="ConstraintNames.ResolveUniqueConstraintNames"/> を通す（直接呼ぶのはその解決の関数だけ）。
     /// </remarks>
     public static string SynthesizeName(
         string tableName,
         IEnumerable<string> columnNames,
         IdentifierLengthLimit limit
-    ) =>
-        limit.Fit(
-            "UQ_"
-                + ConstraintNames.SafeName(tableName)
-                + string.Concat(
-                    columnNames.Select(column => "_" + ConstraintNames.SafeName(column))
-                )
-        );
+    ) => limit.Fit(UnshortenedName(tableName, columnNames));
+
+    /// <summary><see cref="SynthesizeName"/> の、上限に収める前の名前</summary>
+    internal static string UnshortenedName(string tableName, IEnumerable<string> columnNames) =>
+        "UQ_"
+        + ConstraintNames.SafeName(tableName)
+        + string.Concat(columnNames.Select(column => "_" + ConstraintNames.SafeName(column)));
+
+    /// <summary>構成列の Id を、<paramref name="owner"/> の列名（宣言順）へ解決する</summary>
+    /// <param name="owner">この制約を持つテーブル</param>
+    /// <param name="columnNames">解決できた場合の構成列名（宣言順）。失敗時は空リスト</param>
+    /// <returns>構成列が 1 つ以上あり、そのすべてを解決できたら <c>true</c>（できない制約は DDL が出さない）</returns>
+    public bool TryResolveColumnNames(Entity owner, out List<string> columnNames)
+    {
+        columnNames = [];
+
+        if (ColumnIds.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var columnId in ColumnIds)
+        {
+            var column = owner.Columns.FirstOrDefault(c => c.Id == columnId);
+
+            if (column is null)
+            {
+                columnNames = [];
+                return false;
+            }
+
+            columnNames.Add(column.Name);
+        }
+
+        return true;
+    }
 
     /// <summary>一意制約を複製する</summary>
     /// <param name="preserveId"><c>true</c> の場合は同じ ID を維持し、<c>false</c> の場合は新しい ID を割り当てる</param>

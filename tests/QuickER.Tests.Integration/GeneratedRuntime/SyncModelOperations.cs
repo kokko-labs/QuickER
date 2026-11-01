@@ -454,6 +454,23 @@ internal sealed record LegacyKeyTextsOp(ModelActor Device, string Table, string 
         $"{Who(Device)} LegacyKeyTexts {ModelTables.Short(Table)} suffix={Suffix}";
 }
 
+/// <summary>
+/// 端末のジャーナルへ、キーの決まっていない行の記録（<c>SyncJournal.UnsetKeyText</c>）を直接書く（書き込みの後・突き合わせの
+/// 前に落ちて残った記録の再現）。書いた直後に、エンジンが使う読み取りがその記録を返さないことも確かめる（違反は
+/// 5/unset-key-read）
+/// </summary>
+internal sealed record LeftoverUnsetKeyEntryOp(ModelActor Device, string Table) : ModelOp
+{
+    public override string Describe() =>
+        $"{Who(Device)} LeftoverUnsetKeyEntry {ModelTables.Short(Table)}";
+}
+
+/// <summary>シナリオの途中で、端末のジャーナルにキーの決まっていない行の記録が残っていないことを確かめる（違反は 5/unset-key-left）</summary>
+internal sealed record ExpectNoUnsetKeyEntryOp(ModelActor Device) : ModelOp
+{
+    public override string Describe() => $"{Who(Device)} ExpectNoUnsetKeyEntry";
+}
+
 /// <summary>シナリオの途中で、書き手（端末かサーバー役）の品目の blob を確かめる（違反は 5/expect-payload）</summary>
 internal sealed record ExpectPayloadOp(ModelActor Actor, int ItemId, string? PayloadHex) : ModelOp
 {

@@ -615,6 +615,7 @@ public partial class MainViewModel : IDiagramTransferHost
         if (e.PropertyName == nameof(UndoRedo.ChangeGeneration))
         {
             _diagramRevision++;
+            OnUniqueConstraintNamesMayHaveChanged();
             OnPropertyChanged(nameof(IsDirty));
             OnPropertyChanged(nameof(WindowTitle));
         }

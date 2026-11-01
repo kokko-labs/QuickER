@@ -186,7 +186,9 @@ public class LongDefaultConstraintNameTests
     {
         var provider = ProviderOf("postgresql");
         var limit = provider.SyncCapabilities.IdentifierLengthLimit;
-        var diagram = LongNameDiagrams.Build(limit, "postgresql");
+        // 旧版が作れた DB の形＝外部キー 1 本（同じ子の名前の無い外部キー 2 本は、旧版では同じ切り詰めた名前になり、2 本目の DDL を
+        // PostgreSQL が断ったので、そうした DB は無い）
+        var diagram = LongNameDiagrams.BuildSingleForeignKey(limit.Max, "postgresql");
         var live = LiveAsImported(
             diagram,
             rel => limit.Truncate(UnshortenedName(diagram, rel, limit))

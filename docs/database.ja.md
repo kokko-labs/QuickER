@@ -153,6 +153,13 @@ Oracle では、利用者が `INVISIBLE` にした列も取り込みます（意
 `INVISIBLE` という属性そのものは図が持たないため、図から生成した DDL では通常の可視列として宣言されます。
 関数インデックスがテーブルへ足すシステム生成列（`SYS_NC…$`）は取り込みません。
 
+図は参照アクションの `RESTRICT` を持たないため、`ON DELETE RESTRICT` や `ON UPDATE RESTRICT` と宣言した外部キー（PostgreSQL・MySQL・SQLite）は、警告なしに `NO ACTION` として取り込みます。
+MySQL では 2 つの振る舞いは同じです。
+PostgreSQL と SQLite では、`RESTRICT` はその場で参照を確かめ、`NO ACTION` は文の終わり（制約を遅延させていればコミットのとき）に確かめます。
+そのため図から生成した DDL はこの外部キーを `NO ACTION` で作り、参照をいったん壊して戻す 1 つの文は、`RESTRICT` では断られたのに通るようになります。
+差分は違いを出さないので、同期は DB の `RESTRICT` をそのまま残します。
+SQL Server と Oracle には `RESTRICT` のアクションがありません。
+
 取り込まれるのはここまでです。
 境界の全体と、DDL 生成への影響は[図がモデル化する範囲](#図がモデル化する範囲)を参照してください。
 
@@ -411,7 +418,7 @@ DDL は表の前に注意のコメントを添え、同期は対象の表を実�
 | --- | --- | --- |
 | SQL Server | `numeric(18,0)` と `numeric(18)`、`datetime2(7)` と `datetime2`、`float(24)` と `real`、`float(53)` と `float`、`rowversion` と `timestamp` | `datetime2(3)` と `datetime2` |
 | PostgreSQL | `timestamp` と `timestamp(6)`、`numeric(18,0)` と `numeric(18)` | |
-| MySQL | `decimal(12)` と `decimal(12,0)`、`decimal` と `decimal(10,0)` | |
+| MySQL | `decimal(12)` と `decimal(12,0)`、`decimal` と `decimal(10,0)`、`datetime(0)` と `datetime` | |
 | Oracle | `TIMESTAMP` と `TIMESTAMP(6)`、`INTEGER` と `NUMBER(*,0)` | |
 | SQLite | （宣言のまま比べる） | |
 

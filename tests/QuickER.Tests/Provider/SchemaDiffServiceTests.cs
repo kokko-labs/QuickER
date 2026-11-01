@@ -1713,7 +1713,8 @@ public class SchemaDiffServiceTests
             _ => new SqlServerProvider().SyncCapabilities,
         };
 
-        // 種 75 の形: 名前を保って列を変え、元の列に名前の無い制約を足す → 名前の段の作り直し＋名前の無い追加
+        // 種 75 の形: 名前を保って列を変え、元の列に名前の無い制約を足す → 名前の段の作り直し＋名前の無い追加。
+        // 名前の無い制約の追加の項目は、図全体で決めた名前（ここでは合成名 UQ_Customer_Code）を運ぶ
         var seed75 = UniqueDiff(
             WithUnique(CustomerTable(), "UQ_x", "Code"),
             WithUnique(WithUnique(CustomerTable(), "UQ_x", "Kind"), name: null, "Code"),
@@ -1726,7 +1727,7 @@ public class SchemaDiffServiceTests
             .Should()
             .Equal(
                 (SchemaDiffKind.AlterUniqueConstraint, "UQ_x", "Kind"),
-                (SchemaDiffKind.AddUniqueConstraint, null, "Code")
+                (SchemaDiffKind.AddUniqueConstraint, "UQ_Customer_Code", "Code")
             );
         seed75[0].ReplacedUniqueConstraint!.UniqueConstraintColumns.Should().Equal("Code");
 

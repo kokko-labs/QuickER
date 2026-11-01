@@ -134,6 +134,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
             item.TableName,
             OracleIdentifier.QuoteSimple,
             name => $"\"{OracleIdentifier.Escape(name)}\"",
+            item.UniqueConstraintNames,
             OracleIdentifier.Limit,
             DialectName,
             UnsupportedFeature.Sync

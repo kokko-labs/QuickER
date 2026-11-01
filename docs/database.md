@@ -153,6 +153,13 @@ Oracle gives such a column no ordinal, so it comes after the visible columns in 
 The diagram does not model the `INVISIBLE` attribute itself, so DDL generated from the diagram declares the column as an ordinary visible column.
 The system-generated columns a function-based index adds to the table (`SYS_NC…$`) are not imported.
 
+The diagram has no `RESTRICT` referential action, so a foreign key declared `ON DELETE RESTRICT` or `ON UPDATE RESTRICT` (PostgreSQL, MySQL, SQLite) is imported as `NO ACTION`, without a warning.
+On MySQL the two behave the same.
+On PostgreSQL and SQLite, `RESTRICT` checks the reference at once, while `NO ACTION` checks it at the end of the statement (or at commit, when the constraint is deferred).
+DDL generated from the diagram therefore creates the key as `NO ACTION`, which lets a single statement that breaks and restores the reference succeed where `RESTRICT` refused it.
+The diff sees no difference, so a sync leaves the database's `RESTRICT` as it is.
+SQL Server and Oracle have no `RESTRICT` action.
+
 Nothing else is imported.
 See [Modeling fidelity](#modeling-fidelity) for the full boundary and what it means for DDL generation.
 
@@ -409,7 +416,7 @@ Two spellings of the same type are therefore not a difference.
 | --- | --- | --- |
 | SQL Server | `numeric(18,0)` = `numeric(18)`, `datetime2(7)` = `datetime2`, `float(24)` = `real`, `float(53)` = `float`, `rowversion` = `timestamp` | `datetime2(3)` and `datetime2` |
 | PostgreSQL | `timestamp` = `timestamp(6)`, `numeric(18,0)` = `numeric(18)` | |
-| MySQL | `decimal(12)` = `decimal(12,0)`, `decimal` = `decimal(10,0)` | |
+| MySQL | `decimal(12)` = `decimal(12,0)`, `decimal` = `decimal(10,0)`, `datetime(0)` = `datetime` | |
 | Oracle | `TIMESTAMP` = `TIMESTAMP(6)`, `INTEGER` = `NUMBER(*,0)` | |
 | SQLite | (compared as declared) | |
 

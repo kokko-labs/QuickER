@@ -28,6 +28,10 @@ public static class TableConstraintLineBuilder
     /// <param name="tableName">制約名の基にするテーブル名</param>
     /// <param name="quoteSimpleName">カラム名を方言のクォート方式でクォートする関数</param>
     /// <param name="quoteConstraintName">制約名を方言のクォート方式でクォートする関数（エスケープ込み）</param>
+    /// <param name="uniqueConstraintNames">
+    /// 一意制約の名前（<see cref="ConstraintNames.ResolveUniqueConstraintNames"/> が図全体で決めたもの）。<c>null</c> なら
+    /// その表だけを範囲にして決める
+    /// </param>
     /// <param name="limit">既定名（主キー・一意制約の合成名）に使う識別子の長さの上限（DDL・同期の方言の上限）</param>
     /// <param name="dialect">出力の方言（<see cref="DialectNames"/>。持てない一意制約を省くかを扱いの表で引く）</param>
     /// <param name="feature">DDL か同期か</param>
@@ -40,6 +44,7 @@ public static class TableConstraintLineBuilder
         string tableName,
         Func<string, string> quoteSimpleName,
         Func<string, string> quoteConstraintName,
+        IReadOnlyDictionary<UniqueConstraint, string>? uniqueConstraintNames,
         IdentifierLengthLimit limit,
         string dialect,
         UnsupportedFeature feature
@@ -57,11 +62,11 @@ public static class TableConstraintLineBuilder
             );
         }
 
-        // UNIQUE 制約（制約名が未設定なら UQ_{テーブル}_{列…} を合成する）。
+        // UNIQUE 制約（制約名が未設定なら UQ_{テーブル}_{列…} を合成し、ほかの制約とぶつかれば番号を足す）。
         // 主キーと同じ列集合の一意制約を持てない方言では省いて注記する
         var (uniques, notes) = UniqueConstraintOnPrimaryKeyNote.Split(
             entity,
-            UniqueConstraintNaming.ResolveAll(entity, tableName, limit),
+            UniqueConstraintNaming.ResolveAll(entity, uniqueConstraintNames, limit),
             dialect,
             feature
         );

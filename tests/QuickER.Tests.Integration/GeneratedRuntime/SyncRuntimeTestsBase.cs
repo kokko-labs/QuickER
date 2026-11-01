@@ -2336,6 +2336,38 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
     }
 
     /// <summary>
+    /// 記録を書いた後で Before フックが新しい行のキーを決める書き込みがあっても、書き換えた記録はアップロードの判定で
+    /// 捨てられない（ロックの外で読んだ古いキーで判定しない）。
+    /// </summary>
+    /// <remarks>
+    /// 記録はキーが決まる前（キー 0）に作り、書き込みの後の突き合わせが決まったキーへ書き換える（同じロックの中）。
+    /// アップロードはジャーナルをロックの外で読むので、読んだのは書き換える前の記録になり得る。その古いキーで行の有無を
+    /// 見ると「行が無い」と判定し、id で記録を消すので、書き換え済みの記録まで消える。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/並行] 記録の後で Before フックがキーを決める書き込みの記録はアップロードの判定で捨てられない"
+    )]
+    public async Task InFlightInsertRekeyedByHook_IsNotDiscardedByTheUpload()
+    {
+        var hook = new PausingSaveHook(entity => entity.OrderId = 61);
+        var orders = CreateHookedOrders(hook);
+        var order = new SyncOrderEntity { CustomerName = "rekeyed" };
+        order.MarkAdded();
+
+        await RunSyncWhileSaveIsPausedAsync(
+            hook,
+            () => orders.SaveAsync(order, cancellationToken: Ct)
+        );
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        var server = await ServerOrders.GetByIdAsync(61, Ct);
+        server.Should().NotBeNull("書き換えた記録は捨てられず、着地した行が送られる");
+        server!.CustomerName.Should().Be("rekeyed");
+        (await LocalOrdersRaw.GetByIdAsync(61, Ct)).Should().NotBeNull();
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+    }
+
+    /// <summary>
     /// 削除の記録を書いたが業務の削除がまだ着地していない書き込みがあっても、その記録はアップロードの判定で
     /// 捨てられない（行が残っているのを「削除は着地しなかった」と読み違えない）。
     /// </summary>
@@ -2428,7 +2460,9 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
     }
 
     /// <summary>最初の保存の業務書き込みを、解放されるまで止める Save フック。</summary>
-    private sealed class PausingSaveHook : ISaveHook<SyncOrderEntity>
+    /// <param name="onRelease">解放の後、保存を進める前に行へ当てる変更（キーを決めるなど）</param>
+    private sealed class PausingSaveHook(Action<SyncOrderEntity>? onRelease = null)
+        : ISaveHook<SyncOrderEntity>
     {
         private readonly TaskCompletionSource _release = new(
             TaskCreationOptions.RunContinuationsAsynchronously
@@ -2449,6 +2483,7 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         {
             Entered.TrySetResult();
             await _release.Task;
+            onRelease?.Invoke(entity);
 
             return true;
         }

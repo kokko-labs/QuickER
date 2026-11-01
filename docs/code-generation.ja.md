@@ -940,7 +940,7 @@ var violations = await orders.CheckUniquenessAsync(order);
 
 foreach (var violation in violations)
 {
-    // ConstraintName = DDL 上の名前（図で未設定なら合成名 UQ_{テーブル}_{列連結}）
+    // ConstraintName = DDL 上の名前（図で未設定なら合成名 UQ_{テーブル}_{列連結}。ほかの制約が使っていれば番号つき）
     // PropertyNames  = 制約を構成するエンティティプロパティ名（宣言順）
     Console.WriteLine($"{violation.ConstraintName}: {string.Join(", ", violation.PropertyNames)}");
 }
@@ -2708,6 +2708,7 @@ Unchanged のルート配下で子だけを編集した保存も、カスケー�
 行がまだあるので、アップロードがその記録を捨てます。
 フックが新しい行の主キーを決めたときも、同じ突き合わせでその行の記録を新しいキーへ移します。
 前のキーのままの記録は存在しない行を指し、アップロードで捨てられ、行は次の削除伝搬で消されてしまうためです。
+フックが決めるまで値の無いキー（null のままの値オブジェクトのキー）は、それまで仮の文字列で記録し、同期のランはその記録を読みません。
 保存とこの突き合わせの間にプロセスごと落ちたときは、記録は書いたときのまま残ります。
 
 一括挿入とグラフ保存は、全行を 1 文ずつではなく、100 行ずつの複数行 INSERT でまとめて記録します。

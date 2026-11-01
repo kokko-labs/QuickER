@@ -297,6 +297,7 @@ public class ConstraintNamesTests
 
         var tableConstraints = ConstraintNames.CollectTableConstraints(
             diagram.Entities,
+            diagram.Relationships,
             IdentifierLengthLimit.Unlimited
         );
 
@@ -684,5 +685,184 @@ public class ConstraintNamesTests
             ConstraintNames.UniqueForeignKey("c", "p", [], taken, IdentifierLengthLimit.Unlimited);
 
         act.Should().Throw<InvalidOperationException>();
+    }
+
+    /// <summary>
+    /// 一意制約の名前の図全体の解決の 1 行（表の並び・制約・名前を持つ外部キー・上限と、期待する名前）
+    /// </summary>
+    /// <param name="Id">行の名前</param>
+    /// <param name="Tables">表ごとに「表名, (制約名 or null, 構成列名…)…」。構成列はその表に作る</param>
+    /// <param name="ForeignKeyName">図にある名前を持つ外部キーの名前（無ければ null）</param>
+    /// <param name="Limit">識別子の上限（0 は上限なし）</param>
+    /// <param name="Expected">表の並び・制約の並びの名前（解決しない制約は null）</param>
+    public sealed record UniqueNameRow(
+        string Id,
+        (string Table, (string? Name, string[] Columns)[] Constraints)[] Tables,
+        string? ForeignKeyName,
+        int Limit,
+        string?[] Expected
+    )
+    {
+        public override string ToString() => Id;
+    }
+
+    private static readonly IdentifierLengthLimit Limit30 = new(
+        IdentifierLengthUnit.Characters,
+        30
+    );
+
+    /// <summary>上限 30 を超える合成名の、縮める前の形（表 bbbb… の列 xxxx…）</summary>
+    private const string LongUnshortened = "UQ_bbbbbbbbbbbbbbbbbbbb_xxxxxxxxxxxxxxxxxxxx";
+
+    public static TheoryData<UniqueNameRow> UniqueNameRows =>
+        new()
+        {
+            // ぶつからない図は SynthesizeName のまま
+            new UniqueNameRow("no-collision", [("t", [(null, ["x"])])], null, 0, ["UQ_t_x"]),
+            // ほかの表の名前を持つ制約とぶつかる（同期計画の種 386 の形）
+            new UniqueNameRow(
+                "other-table-named",
+                [("a", [("UQ_b_x", ["y"])]), ("b", [(null, ["x"])])],
+                null,
+                0,
+                ["UQ_b_x", "UQ_b_x_2"]
+            ),
+            // 名前を持つ制約は並びに依らず先に予約する（後ろの表の名前でも避ける）
+            new UniqueNameRow(
+                "later-table-named",
+                [("b", [(null, ["x"])]), ("a", [("UQ_b_x", ["y"])])],
+                null,
+                0,
+                ["UQ_b_x_2", "UQ_b_x"]
+            ),
+            // 名前の比較は大文字小文字を区別しない（SchemaNames の規則）
+            new UniqueNameRow(
+                "case-insensitive",
+                [("a", [("uq_B_X", ["y"])]), ("b", [(null, ["x"])])],
+                null,
+                0,
+                ["uq_B_X", "UQ_b_x_2"]
+            ),
+            // 名前の無い制約どうしの合成名がぶつかる（a_b.c と a.b_c）＝後ろが番号つき
+            new UniqueNameRow(
+                "two-unnamed",
+                [("a_b", [(null, ["c"])]), ("a", [(null, ["b_c"])])],
+                null,
+                0,
+                ["UQ_a_b_c", "UQ_a_b_c_2"]
+            ),
+            // 名前を持つ外部キーとぶつかる（MySQL の外部キーの索引・スキーマ単位の制約名）
+            new UniqueNameRow(
+                "foreign-key-name",
+                [("b", [(null, ["x"])])],
+                "UQ_b_x",
+                0,
+                ["UQ_b_x_2"]
+            ),
+            // 同じ表の名前を持つ制約とぶつかる
+            new UniqueNameRow(
+                "same-table-named",
+                [("b", [("UQ_b_x", ["y"]), (null, ["x"])])],
+                null,
+                0,
+                ["UQ_b_x", "UQ_b_x_2"]
+            ),
+            // 構成列を解決できない制約は名前を決めない（DDL が出さない）
+            new UniqueNameRow("unresolvable", [("t", [(null, [])])], null, 0, [null]),
+            // 上限のある方言では、縮めた合成名がほかの名前とぶつかれば、番号つきの名前も上限に収める
+            new UniqueNameRow(
+                "limit",
+                [
+                    ("a", [(Limit30.Fit(LongUnshortened), ["y"])]),
+                    ("bbbbbbbbbbbbbbbbbbbb", [(null, ["xxxxxxxxxxxxxxxxxxxx"])]),
+                ],
+                null,
+                30,
+                [Limit30.Fit(LongUnshortened), Limit30.Fit(LongUnshortened + "_2")]
+            ),
+        };
+
+    [Theory(DisplayName = "一意制約の名前の図全体の解決: ぶつかる合成名だけに番号を足す")]
+    [MemberData(nameof(UniqueNameRows))]
+    public void ResolveUniqueConstraintNames_NumbersOnlyCollidingSynthesizedNames(UniqueNameRow row)
+    {
+        var limit = row.Limit == 0 ? IdentifierLengthLimit.Unlimited : Limit30;
+        var entities = new List<Entity>();
+        var constraints = new List<UniqueConstraint>();
+
+        foreach (var (table, tableConstraints) in row.Tables)
+        {
+            var entity = new Entity
+            {
+                TableName = table,
+                Columns =
+                {
+                    new Column { Name = "id", IsPrimaryKey = true },
+                },
+            };
+
+            foreach (var (name, columns) in tableConstraints)
+            {
+                var constraint = new UniqueConstraint { Name = name };
+
+                foreach (var columnName in columns)
+                {
+                    var column = new Column { Name = columnName };
+                    entity.Columns.Add(column);
+                    constraint.ColumnIds.Add(column.Id);
+                }
+
+                entity.UniqueConstraints.Add(constraint);
+                constraints.Add(constraint);
+            }
+
+            entities.Add(entity);
+        }
+
+        var relationships = row.ForeignKeyName is null
+            ? new List<Relationship>()
+            : [new Relationship { ConstraintName = row.ForeignKeyName }];
+
+        var names = ConstraintNames.ResolveUniqueConstraintNames(entities, relationships, limit);
+
+        constraints
+            .Select(constraint => names.TryGetValue(constraint, out var name) ? name : null)
+            .Should()
+            .Equal(row.Expected);
+        names.Values.Should().OnlyContain(name => limit.Accepts(name));
+
+        // 既存の制約名の集合も同じ名前を数える（ツールの手作成の外部キー名が避ける）
+        var existing = ConstraintNames.CollectExisting(
+            new ErDiagram { Entities = entities, Relationships = relationships },
+            limit
+        );
+        if (names.Count > 0)
+        {
+            existing.Should().Contain(names.Values);
+        }
+    }
+
+    [Fact(DisplayName = "外部キーの名前の解決は、図全体で決めた一意制約の名前を避ける")]
+    public void ResolveForeignKeyNames_AvoidsResolvedUniqueNames()
+    {
+        // 名前の無い一意制約の番号つきの名前と、名前の無い外部キーの既定名は先頭（UQ_ / FK_）で分かれるので、
+        // 予約に入っていることを CollectTableConstraints で確かめる
+        var b = new Entity
+        {
+            TableName = "b",
+            Columns =
+            {
+                new Column { Name = "id", IsPrimaryKey = true },
+                new Column { Name = "x" },
+            },
+        };
+        b.UniqueConstraints.Add(new UniqueConstraint { ColumnIds = { b.Columns[1].Id } });
+        var relationship = new Relationship { ConstraintName = "UQ_b_x" };
+
+        ConstraintNames
+            .CollectTableConstraints([b], [relationship], IdentifierLengthLimit.Unlimited)
+            .Should()
+            .Contain("UQ_b_x_2")
+            .And.NotContain("UQ_b_x");
     }
 }

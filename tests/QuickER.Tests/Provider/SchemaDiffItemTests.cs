@@ -123,6 +123,14 @@ public class SchemaDiffItemTests
             return new List<ForeignKeyColumnNamePair> { new("p1", "c1"), new("p2", "c2") };
         }
 
+        if (type == typeof(IReadOnlyDictionary<UniqueConstraint, string>))
+        {
+            return new Dictionary<UniqueConstraint, string>
+            {
+                [new UniqueConstraint()] = property.Name,
+            };
+        }
+
         throw new InvalidOperationException(
             $"SchemaDiffItem.{property.Name} の型 {type} の値の作り方がありません。SampleValue に足してください。"
         );

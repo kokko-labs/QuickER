@@ -27,6 +27,13 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// </summary>
     private IdentifierLengthLimit _identifierLimit = IdentifierLengthLimit.Unlimited;
 
+    /// <summary>
+    /// 一意制約の名前（図全体で 1 回だけ決める＝<see cref="ConstraintNames.ResolveUniqueConstraintNames"/>。名前の無い
+    /// 制約の合成名がほかの制約とぶつかれば番号つきで、DDL と同じ名前になる）
+    /// </summary>
+    private IReadOnlyDictionary<UniqueConstraint, string> _uniqueConstraintNames =
+        new Dictionary<UniqueConstraint, string>();
+
     /// <summary>カラム ID → 解決済み C# 型情報。Build 呼び出し時に外部（SQL Server プロバイダ等）から受け取る。
     /// 生成器自体は DB 非依存で、SQL 型のマッピングは行わない</summary>
     private IReadOnlyDictionary<Guid, CSharpTypeInfo> _columnTypes =
@@ -50,6 +57,11 @@ internal sealed partial class CSharpGenerationModelBuilder
     {
         _columnTypes = columnTypes;
         _identifierLimit = IdentifierLengthLimits.ForDiagramTarget(diagram.TargetDbms);
+        _uniqueConstraintNames = ConstraintNames.ResolveUniqueConstraintNames(
+            diagram.Entities,
+            diagram.Relationships,
+            _identifierLimit
+        );
         _queryTokenTypes =
             queryParameterTypes ?? new Dictionary<string, CSharpTypeInfo>(StringComparer.Ordinal);
         _queriesByEntity = CollectValidQueries(diagram, diagnostics);

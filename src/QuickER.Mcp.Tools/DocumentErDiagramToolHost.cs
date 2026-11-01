@@ -313,6 +313,13 @@ public static partial class DocumentErDiagramToolHost
         sb.Append($"Relationships: {schema.Relationships.Count}").Append('\n');
         sb.Append('\n');
 
+        // 一意制約の名前は DDL と同じく図全体で 1 回だけ決める（名前の無い制約の合成名がほかの制約とぶつかれば番号つき）
+        var uniqueConstraintNames = ConstraintNames.ResolveUniqueConstraintNames(
+            schema.Entities,
+            schema.Relationships,
+            IdentifierLengthLimits.ForDiagramTarget(schema.TargetDbms)
+        );
+
         foreach (var entity in schema.Entities)
         {
             sb.Append($"[{entity.TableName}]").Append('\n');
@@ -349,11 +356,7 @@ public static partial class DocumentErDiagramToolHost
             }
 
             AppendPrimaryKeyOrder(sb, entity.GetReorderedPrimaryKeyColumnNames());
-            AppendUniqueConstraints(
-                sb,
-                entity,
-                IdentifierLengthLimits.ForDiagramTarget(schema.TargetDbms)
-            );
+            AppendUniqueConstraints(sb, entity, uniqueConstraintNames);
         }
 
         if (schema.Relationships.Count > 0)
@@ -1492,11 +1495,11 @@ public static partial class DocumentErDiagramToolHost
 
     /// <summary>要約テキストへエンティティの一意制約（解決済み名＋構成列）を追記する</summary>
     /// <remarks>構成列を解決できない制約（空・壊れた参照）は DDL 生成と同じ規則で読み飛ばす</remarks>
-    /// <param name="limit">合成名に使う識別子の長さの上限（図の対象 DBMS の上限＝DDL と同じ名前を見せる）</param>
+    /// <param name="names">図全体で決めた一意制約の名前（<see cref="ConstraintNames.ResolveUniqueConstraintNames"/>＝DDL と同じ名前を見せる）</param>
     private static void AppendUniqueConstraints(
         StringBuilder sb,
         Entity entity,
-        IdentifierLengthLimit limit
+        IReadOnlyDictionary<UniqueConstraint, string> names
     )
     {
         var lines = new List<string>();
@@ -1520,10 +1523,7 @@ public static partial class DocumentErDiagramToolHost
                 continue;
             }
 
-            var name = string.IsNullOrWhiteSpace(constraint.Name)
-                ? UniqueConstraint.SynthesizeName(entity.TableName, columnNames, limit)
-                : constraint.Name!;
-            lines.Add($"    - {name} ({string.Join(", ", columnNames)})");
+            lines.Add($"    - {names[constraint]} ({string.Join(", ", columnNames)})");
         }
 
         if (lines.Count == 0)
