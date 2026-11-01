@@ -85,42 +85,8 @@ internal static class SyncModelOutcomeDimensions
         CoverageGap.Set(
             EngineIds.SyncModel,
             [
-                .. new[] { Mode, Policy }.Select(factor =>
-                    CoverageGap.Matching(
-                        SyncModelDimensions.DirectScope,
-                        "P2-3",
-                        "P2-末",
-                        "DuplicateOnServer（オフラインで挿入した行と同じキーの行がサーバーにある）は、生成器がキーを書き手ごとに別の範囲から採るので起きない（同じキーの行を別の書き手が挿入する形を作っていない）",
-                        Outcome,
-                        factor,
-                        (outcome, _) => outcome == nameof(SyncConflictReason.DuplicateOnServer)
-                    )
-                ),
-                CoverageGap.Tuple(
-                    SyncModelDimensions.DirectScope,
-                    "P2-3",
-                    "P2-末",
-                    "後勝ち＋ServerWins の実行で、ダウンロードの前に捨てる記録の行を消す形（サーバーが断った書き込みを決着させる行がサーバーに無い）は、既定の 60 種ではたまたま出ない",
-                    (Outcome, nameof(SyncLocalRowChangeReason.RemovedBeforeDownload)),
-                    (Mode, nameof(SyncMode.LastWriteWins))
-                ),
-                CoverageGap.Tuple(
-                    SyncModelDimensions.DirectScope,
-                    "P2-3",
-                    "P2-末",
-                    "一意な値の持ち主の読み直し（N8）は、Collect の実行では既定の 60 種でたまたま出ない（ServerWins の実行では出る）",
-                    (Outcome, nameof(SyncLocalRowChangeReason.ReloadedForUniqueValue)),
-                    (Policy, nameof(SyncConflictPolicy.Collect))
-                ),
-                CoverageGap.Tuple(
-                    SyncModelDimensions.DirectScope,
-                    "P2-3",
-                    "P2-末",
-                    "一意な値の持ち主の読み直し（N8）は、LocalWins の実行では既定の 60 種でたまたま出ない（ServerWins の実行では出る）。"
-                        + "修正 C で、断られた取る更新を同じ実行の次の巡で送り直すようになり、それまでこの組を作っていた種では読み直しが要らなくなった",
-                    (Outcome, nameof(SyncLocalRowChangeReason.ReloadedForUniqueValue)),
-                    (Policy, nameof(SyncConflictPolicy.LocalWins))
-                ),
+                // DuplicateOnServer・後勝ちの RemovedBeforeDownload・Collect と LocalWins の ReloadedForUniqueValue は、乱数の種で
+                // 作れないか欠けるので、網羅の行（SyncModelCoverageRows）が種の前に流して埋める
             ]
         );
 

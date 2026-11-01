@@ -1857,6 +1857,23 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
     public FuzzSelection Select(IReadOnlyList<SchemaDiffItem> items)
     {
         var selection = (FuzzSelection)rng.Next(5);
+        ApplySelection(rng, selection, items);
+        return selection;
+    }
+
+    /// <summary>
+    /// 選び方 <paramref name="selection"/> で項目の選択を書き換える（1 項目・種類の集まり・項目ごとの半々を
+    /// <paramref name="rng"/> から引く。引く順と回数は選び方に依らず同じ＝生成器の乱数の列を変えない）
+    /// </summary>
+    /// <param name="rng">乱数</param>
+    /// <param name="selection">選び方</param>
+    /// <param name="items">差分の項目</param>
+    internal static void ApplySelection(
+        Random rng,
+        FuzzSelection selection,
+        IReadOnlyList<SchemaDiffItem> items
+    )
+    {
         var selectable = items.Where(i => i.IsSelectable).ToList();
         var single = selectable.Count == 0 ? null : selectable[rng.Next(selectable.Count)];
         var kinds = selectable
@@ -1876,8 +1893,6 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
                 _ => ReferenceEquals(item, single),
             };
         }
-
-        return selection;
     }
 
     // ---------------- 部品 ----------------

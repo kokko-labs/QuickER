@@ -81,6 +81,7 @@ public abstract class SyncPlanFuzzTestsBase
         var dialect = CreateDialect();
         var outcomes = new List<FuzzSeedOutcome>();
         var scenarioOutcomes = new List<FuzzSeedOutcome>();
+        var coverageOutcomes = new List<FuzzSeedOutcome>();
         var coverage = new CoverageCounter(SyncPlanFuzzDimensions.Table);
 
         try
@@ -115,6 +116,30 @@ public abstract class SyncPlanFuzzTestsBase
                         )
                     );
                 }
+
+                // 網羅の行（SyncPlanCoverageRows）は、決定的な行と違って網羅の計数に数える（乱数の種で欠ける組を埋める行）
+                foreach (var row in SyncPlanCoverageRows.ForRealDatabase(dialect.Name))
+                {
+                    var covered = await SyncPlanFuzzRunner.RunGuardedAsync(
+                        dialect.Name,
+                        0,
+                        () =>
+                            SyncPlanFuzzRunner.RunCaseAsync(
+                                dialect,
+                                SyncPlanCoverageRows.Create(row, dialect),
+                                new FuzzSeedOutcome
+                                {
+                                    Seed = 0,
+                                    Dialect = dialect.Name,
+                                    ScenarioId = row.Id,
+                                },
+                                Ct
+                            ),
+                        row.Id
+                    );
+                    coverageOutcomes.Add(covered);
+                    SyncPlanFuzzDimensions.Observe(coverage, covered);
+                }
             }
 
             foreach (var seed in seeds)
@@ -148,6 +173,11 @@ public abstract class SyncPlanFuzzTestsBase
                     + $"violations {scenario.Violations.Count} ({SyncPlanScenarios.Table[scenario.ScenarioId!].Description})"
             );
         }
+
+        output?.WriteLine(
+            $"{dialect.Name}: coverage rows {coverageOutcomes.Count}, committed {coverageOutcomes.Count(o => o.Committed)}, "
+                + $"violations {coverageOutcomes.Count(o => o.Violations.Count > 0)}"
+        );
 
         // 表明 1b の例外の当たり方と、失敗した種の警告の内訳（警告の中身は測るだけ＝失敗を予告しない種類の警告しか無いのに
         // 失敗した種を数える。強めるかは件数を見て決める）
@@ -194,7 +224,10 @@ public abstract class SyncPlanFuzzTestsBase
         {
             await System.IO.File.AppendAllLinesAsync(
                 log,
-                scenarioOutcomes.Concat(outcomes).Select(o => o.Describe()),
+                scenarioOutcomes
+                    .Concat(coverageOutcomes)
+                    .Concat(outcomes)
+                    .Select(o => o.Describe()),
                 Ct
             );
         }
@@ -252,7 +285,11 @@ public abstract class SyncPlanFuzzTestsBase
             );
         }
 
-        foreach (var failure in scenarioOutcomes.Where(o => o.Violations.Count > 0))
+        foreach (
+            var failure in scenarioOutcomes
+                .Concat(coverageOutcomes)
+                .Where(o => o.Violations.Count > 0)
+        )
         {
             report.Add(
                 SyncPlanFuzzKnownFailures.ToFailure(failure),
@@ -292,6 +329,9 @@ public abstract class SyncPlanFuzzTestsBase
 
         // 来歴の行の合格の行は、既定の同期がコミットし、取り込み直した差分が空（4m-F1 の行は既知の失敗の一覧が受け持つ）
         problems.AddRange(SyncPlanHistoryRows.RealProblems(scenarioOutcomes));
+
+        // 網羅の行が、出すはずの変更の種類と強制した選び方を出している（出さなくなった行が網羅を黙って戻さない）
+        problems.AddRange(SyncPlanCoverageRows.MissingKindProblems(coverageOutcomes));
 
         if (problems.Count > 0)
         {
