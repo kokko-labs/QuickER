@@ -210,11 +210,10 @@ internal static class BackendParityDimensions
         CoverageGap.Set(
             EngineIds.GeneratedRuntime,
             [
-                CoverageGap.Matching(
+                CoverageGap.AcceptedMatching(
                     RandomScope,
                     "P1-3",
-                    "P2",
-                    "生成器は範囲ごとに候補の操作を分け、Full には Include の取得と一括削除だけを、Blob には除外 blob の Stream アクセサだけを足す（混ぜると EF Core もリモートも流せず、比べる相手がインメモリだけになる）",
+                    "EF Core 版 Repository は除外 blob の Stream アクセサを持たず（NotSupportedException＝docs/code-generation.md の「Stream accessors: Read/Write{Column}Async」の「Cannot be used in EF Core mode」）、リモート面は Include の取得と一括削除を持たない（Query() は全機能面だけ＝同じ docs の「Remote-capable interfaces」の面の表）ので、両方の操作を含む列は QuickER 版とインメモリでしか流せず、実装先どうしの一致として比べる意味が無い。Include で読んだ行の除外 blob が保存で消えないことは、Full の範囲の最後の状態の比較（除外 blob を含めて比べる＝BackendParityBackend の Order の includeBlobs）が見ている",
                     Mode,
                     OpKind,
                     (mode, kind) =>
@@ -230,44 +229,8 @@ internal static class BackendParityDimensions
                                     or "LoadCustomerWithContacts"
                         )
                 ),
-                .. new[]
-                {
-                    (
-                        Mode,
-                        nameof(ParityGeneratorMode.Blob),
-                        ContactRelation,
-                        nameof(ParityContactRelation.CustomerCode)
-                    ),
-                    (
-                        Mode,
-                        nameof(ParityGeneratorMode.Common),
-                        Deviation,
-                        nameof(ParityDeviation.ReferencedKeyUpdate)
-                    ),
-                    (
-                        Mode,
-                        nameof(ParityGeneratorMode.Full),
-                        HookRule,
-                        nameof(ParityHookBehavior.ThrowBefore)
-                    ),
-                }.Select(tuple =>
-                    CoverageGap.Tuple(
-                        RandomScope,
-                        "P2-5",
-                        "P2-末",
-                        "普段の 200 種では、末尾の手（全体の約 3 分の 2 の種に 1 つ）と範囲の組み合わせが足りない（夜間の種の数では埋まる）",
-                        (tuple.Item1, tuple.Item2),
-                        (tuple.Item3, tuple.Item4)
-                    )
-                ),
-                CoverageGap.Tuple(
-                    RandomScope,
-                    "P1-3",
-                    "P2",
-                    "生成器の SaveMany は保存の引数を渡さず（SaveManyOrdersOp の Options が null＝既定の Optimistic）、ForceOverwrite の複数形のグラフ保存を作らない",
-                    (OpKind, "SaveManyOrders"),
-                    (Concurrency, nameof(ConcurrencyMode.ForceOverwrite))
-                ),
+                // 普段の 200 種で末尾の手と範囲の組み合わせが足りない 3 組（Blob×CustomerCode・Common×ReferencedKeyUpdate・
+                // Full×ThrowBefore）と、生成器が作らない SaveManyOrders×ForceOverwrite は、網羅の行（BackendParityCoverageRows）が埋める
             ]
         );
 
@@ -281,6 +244,7 @@ internal static class BackendParityDimensions
             BackendParityScenarios.All.Count,
             [
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityBackend.cs",
+                "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityCoverageRows.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityDimensions.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityGenerator.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityGenerator.Customers.cs",
@@ -306,27 +270,35 @@ internal static class BackendParityDimensions
     /// <param name="scenario">種から作ったシナリオ（名前の末尾が操作の範囲）</param>
     public static void Observe(CoverageCounter counter, ParityScenario scenario)
     {
+        foreach (var assignment in Assignments(scenario))
+        {
+            counter.Observe(assignment);
+        }
+    }
+
+    /// <summary>シナリオの操作ごとの割り当て（<see cref="Observe"/> が数える値。網羅の行の名指しの検査も読む）</summary>
+    /// <param name="scenario">シナリオ（名前の末尾が操作の範囲）</param>
+    public static IEnumerable<IReadOnlyDictionary<string, string>> Assignments(
+        ParityScenario scenario
+    )
+    {
         var mode = scenario.Name.Split('-')[^1];
         var rule = scenario.Options?.HookRules?.SingleOrDefault();
 
         foreach (var op in scenario.Ops)
         {
-            counter.Observe(
-                new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    [Mode] = mode,
-                    [OpKind] = KindOf(op),
-                    [Concurrency] = ConcurrencyOf(op),
-                    [Deviation] = op is DeviatingOp deviating
-                        ? deviating.Deviation.ToString()
-                        : NoDeviation,
-                    [ContactRelation] = ContactRelationOf(op),
-                    [HookRule] =
-                        rule is not null && HoldsHookSlot(op)
-                            ? rule.Behavior.ToString()
-                            : NoneLevel,
-                }
-            );
+            yield return new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [Mode] = mode,
+                [OpKind] = KindOf(op),
+                [Concurrency] = ConcurrencyOf(op),
+                [Deviation] = op is DeviatingOp deviating
+                    ? deviating.Deviation.ToString()
+                    : NoDeviation,
+                [ContactRelation] = ContactRelationOf(op),
+                [HookRule] =
+                    rule is not null && HoldsHookSlot(op) ? rule.Behavior.ToString() : NoneLevel,
+            };
         }
     }
 

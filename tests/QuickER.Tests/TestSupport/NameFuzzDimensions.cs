@@ -64,76 +64,13 @@ public static class NameFuzzDimensions
             isValid: IsValid
         );
 
-    /// <summary>
-    /// 入口の名前（<see cref="NameFuzzRunner.Run"/> の entrance。網羅しない組の範囲。入口を足したらここにも足す＝
-    /// 足さなければ、その入口の欠けが一覧に無い欠けとして赤になる）
-    /// </summary>
-    private static readonly string[] Entrances =
-    [
-        "codegen:table",
-        "codegen:column",
-        "codegen:query_name",
-        "codegen:parameter",
-        "codegen:field",
-        "query-dialog:query_name",
-        "query-dialog:parameter",
-        "query-dialog:field",
-        "query-tool:query_name",
-        "query-tool:parameter",
-        "query-tool:field",
-        .. new[] { "gui-tool:", "mcp-tool:" }.SelectMany(prefix =>
-            new[]
-            {
-                "add_entity",
-                "set_entity_property",
-                "add_column",
-                "set_unique_constraint",
-                "add_relationship",
-            }.Select(tool => prefix + tool)
-        ),
-        "gui-vm:EntityViewModel.TableName",
-        "gui-vm:ColumnViewModel.Name",
-        .. new[] { "dbml", "excel", "mermaid" }.SelectMany(format =>
-            new[] { $"import:{format}:table", $"import:{format}:column" }
-        ),
-        "db-import:sqlite:table",
-        "db-import:sqlite:column",
-    ];
-
-    /// <summary>
-    /// 名前から C# の識別子を作る入口（<c>derivedName</c> に <c>CSharpNameConverter</c> 由来の変換を渡すもの）
-    /// </summary>
-    private static readonly string[] IdentifierDerivingEntrances =
-    [
-        "codegen:table",
-        "codegen:column",
-        "codegen:query_name",
-        "codegen:field",
-        "query-dialog:query_name",
-        "query-tool:query_name",
-    ];
-
-    /// <summary>網羅しない組の一覧（範囲は入口の名前）</summary>
-    public static CoverageGapSet Gaps { get; } =
-        CoverageGap.Set(
-            EngineIds.Name,
-            [
-                .. Entrances.SelectMany(entrance =>
-                    FoldGaps(
-                        entrance,
-                        NameDifference.CaseUpperFoldOnly,
-                        "生成器の名前（NameFuzz の BaseNames と FixedPairs）に、OrdinalIgnoreCase では同じで ToLowerInvariant では違う組を作る文字が無い（例に挙げた点の無い i〔U+0131〕は .NET の OrdinalIgnoreCase でも I と同じにならず、FixedPairs の (ıd, ID) は Distinct に分類される）"
-                    )
-                ),
-                .. IdentifierDerivingEntrances.SelectMany(entrance =>
-                    FoldGaps(
-                        entrance,
-                        NameDifference.CaseLowerFoldOnly,
-                        "小文字化だけで同じになる組はケルビン記号の名前（K〔U+212A〕ey と key）だけで、CSharpNameConverter は単語を ToLowerInvariant してから先頭を大文字にするので、作る識別子が同じ（Key）になり、Run が識別子の衝突として組ごと飛ばす"
-                    )
-                ),
-            ]
-        );
+    /// <summary>網羅しない組の一覧（範囲は入口の名前・空）</summary>
+    /// <remarks>
+    /// 大文字化だけで同じになる組（CaseUpperFoldOnly）は網羅の組（<see cref="NameFuzz.CoveragePairs"/>）が全入口で作る。
+    /// 小文字化だけで同じになる組（CaseLowerFoldOnly）は、名前から C# の識別子を作る入口でも、作る識別子が大文字小文字を
+    /// 無視して同じなら断るのが答えとして流す（<see cref="NameFuzzRunner.Run"/> の derivedName）。
+    /// </remarks>
+    public static CoverageGapSet Gaps { get; } = CoverageGap.Set(EngineIds.Name, []);
 
     /// <summary>台帳の行（入口）</summary>
     public static EngineDescriptor Descriptor { get; } =
@@ -190,37 +127,6 @@ public static class NameFuzzDimensions
                 [Shape] = ShapeOf(pair),
             }
         );
-
-    /// <summary>
-    /// 組の違いの 1 つの水準を流さない入口の項目（その水準を含む 2 つの因子の組＝種類×違い・違い×形ごとに 1 項目）
-    /// </summary>
-    private static IEnumerable<CoverageGapEntry> FoldGaps(
-        string entrance,
-        NameDifference difference,
-        string reason
-    )
-    {
-        var level = difference.ToString();
-
-        yield return CoverageGap.Matching(
-            entrance,
-            "P1-3",
-            "P2",
-            reason,
-            Kind,
-            Difference,
-            (_, d) => d == level
-        );
-        yield return CoverageGap.Matching(
-            entrance,
-            "P1-3",
-            "P2",
-            reason,
-            Difference,
-            Shape,
-            (d, _) => d == level
-        );
-    }
 
     /// <summary>原理的に起こり得ない組み合わせのときだけ偽（判断に要る因子が割り当てに無ければ真）</summary>
     private static bool IsValid(IReadOnlyDictionary<string, string> assignment)

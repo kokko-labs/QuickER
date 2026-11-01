@@ -113,32 +113,15 @@ internal static class NameFuzzDdlRoundTripDimensions
         };
 
     /// <summary>網羅しない組の一覧（範囲は方言の名前）</summary>
+    /// <remarks>
+    /// どの性質も持たない名前（Plain）は、網羅の名前（<see cref="NameFuzzDiagrams.CoverageNames"/>）が種の前に流す。
+    /// </remarks>
     public static CoverageGapSet Gaps { get; } =
         CoverageGap.Set(
             EngineIds.Name,
             new[] { "sqlserver", "postgresql", "mysql", "oracle", "sqlite" }.SelectMany(dialect =>
                 (CoverageGapEntry[])
                     [
-                        CoverageGap.Matching(
-                            dialect,
-                            "P1-3",
-                            "P2",
-                            "既定の種で流す名前は代表の名前（NameFuzzDiagrams.Representative＝性質ごとに 1 つ）だけで、どの性質も持たない名前を含まない（ランダムな名前を足すのは既定を超えた種だけ）",
-                            Role,
-                            NameClass,
-                            (_, nameClass) => nameClass == "Plain"
-                        ),
-                        .. new[] { IdentifierLimit, Truncates }.Select(capability =>
-                            CoverageGap.Matching(
-                                dialect,
-                                "P1-3",
-                                "P2",
-                                "既定の種で流す名前は代表の名前（NameFuzzDiagrams.Representative＝性質ごとに 1 つ）だけで、どの性質も持たない名前を含まない（Role × Plain と同じ欠けが、派生ごとに固定した能力の水準との組にも出る）",
-                                capability,
-                                NameClass,
-                                (_, nameClass) => nameClass == "Plain"
-                            )
-                        ),
                         CoverageGap.AcceptedTuple(
                             dialect,
                             "P1-3",

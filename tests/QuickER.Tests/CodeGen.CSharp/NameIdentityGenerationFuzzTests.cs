@@ -69,7 +69,9 @@ public sealed class NameIdentityGenerationFuzzTests
             NameKind.ProjectionField,
             name => Generate(WithFields(name)).Accepted,
             pair => Generate(WithFields(pair.First, pair.Second)).Outcome,
-            QueryDefinitionRules.ToMethodName
+            // 射影のフィールド名は変換せずにそのまま DTO のプロパティ名になる（CSharpGenerationModelBuilder.Queries の DTO の
+            // 宣言）。識別子は名前そのものなので、作る識別子の衝突は名前の規則の重複と同じ（渡す変換は無い）
+            derivedName: null
         );
 
         ledger.AssertMatchesKnown("codegen:");

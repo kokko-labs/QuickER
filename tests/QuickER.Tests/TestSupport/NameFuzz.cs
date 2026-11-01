@@ -180,6 +180,34 @@ public static class NameFuzz
         new("\u00C4pfel ", "\u00E4PFEL"),
     ];
 
+    /// <summary>
+    /// 網羅の組（どの入口でも種の前に必ず流す組・単独の種では流さない。<see cref="Pairs"/> の外＝種の指紋の要約に出ない）と、
+    /// 組が持つはずの違いと形
+    /// </summary>
+    /// <remarks>
+    /// 大文字化（OrdinalIgnoreCase）では同じで小文字化（ToLowerInvariant）では違う組を作る文字は、基底の名前に無い。
+    /// ギリシャ文字の σ（U+03C3）と語末の ς（U+03C2）はどちらも Σ に大文字化され、小文字化では別の文字のまま
+    /// （Unicode の全スカラー値でこの性質を持つ組は 44 組＝2026-11-02 に実測。µ と μ・ϐ と β なども同じ）。
+    /// 入口が 1 つだけでも受け付けずに組を飛ばしたら、<see cref="NameFuzzRunner.Run"/> が入口と組を名指しして赤にする。
+    /// </remarks>
+    public static readonly IReadOnlyList<(
+        NamePair Pair,
+        NameDifference Difference,
+        string Shape
+    )> CoveragePairs =
+    [
+        (
+            new("Orders\u03C3", "ORDERS\u03C2"),
+            NameDifference.CaseUpperFoldOnly,
+            NameFuzzDimensions.Plain
+        ),
+        (
+            new(" Orders\u03C3", "orders\u03C2"),
+            NameDifference.CaseUpperFoldOnly,
+            NameFuzzDimensions.WithWhitespace
+        ),
+    ];
+
     /// <summary>既定のシードの数</summary>
     public const int DefaultSeedCount = 2;
 
@@ -318,7 +346,7 @@ public static class NameFuzzRunner
     /// <param name="run">組を流して結果を返す</param>
     /// <param name="derivedName">
     /// その入口が名前から作る C# の識別子（クラス名・メソッド名・プロパティ名）。規則が「別の名前」と言う組でも、
-    /// 作る識別子が大文字小文字を無視して同じなら生成コードが衝突するので、断ってよい（組ごと流さない）。null は識別子を作らない入口
+    /// 作る識別子が大文字小文字を無視して同じなら生成コードが衝突するので、断るのが答え（同じ名前の組と同じに、後から入れた名前を断ることを表明する）。null は識別子を作らない入口
     /// </param>
     public static void Run(
         FuzzFailureLog ledger,
@@ -349,54 +377,94 @@ public static class NameFuzzRunner
             NameFuzzDimensions.FixedLevelsFor(kind)
         );
 
-        foreach (var seed in plan.Seeds)
-        {
-            foreach (var pair in NameFuzz.Pairs(seed, RandomPairsPerSeed))
-            {
-                var same = NameIdentityRule.AreSame(kind, pair.First, pair.Second);
+        // 網羅の組（NameFuzz.CoveragePairs）を種の前に流す（種を 1 つだけ流すときは流さない）。組が宣言した違い・形と
+        // 分類が食い違う・入口が受け付けずに飛ばした組は、入口と組を名指しして赤にする
+        var coverageProblems = new List<string>();
+        var sources = new List<(string Label, NamePair Pair)>();
 
+        if (!plan.IsSingle)
+        {
+            foreach (var (pair, declaredDifference, declaredShape) in NameFuzz.CoveragePairs)
+            {
                 if (
-                    !Accepts(pair.First)
-                    || !Accepts(pair.Second)
-                    || (
-                        !same
-                        && derivedName is not null
-                        && derivedName(pair.First) is { } firstDerived
-                        && string.Equals(
-                            firstDerived,
-                            derivedName(pair.Second),
-                            StringComparison.OrdinalIgnoreCase
-                        )
-                    )
+                    pair.Difference != declaredDifference
+                    || NameFuzzDimensions.ShapeOf(pair) != declaredShape
                 )
                 {
-                    continue;
+                    coverageProblems.Add(
+                        $"coverage pair {pair} is {pair.Difference} / {NameFuzzDimensions.ShapeOf(pair)}, declared {declaredDifference} / {declaredShape}"
+                    );
                 }
 
-                // 実際に流す組だけを数える（組の記録を読むだけで乱数を引かない）
-                NameFuzzDimensions.Observe(coverage, kind, pair);
-                var outcome = run(pair);
-                var difference = pair.Difference.ToString();
-                var example = $"seed {seed}: {pair} \u2192 {outcome.Detail}";
-
-                if (same && outcome.SecondAccepted)
+                if (!Accepts(pair.First) || !Accepts(pair.Second))
                 {
-                    ledger.Record(new(entrance, "duplicate-accepted", difference), example);
+                    coverageProblems.Add(
+                        $"coverage pair {pair} was skipped at {entrance}: the entrance does not accept one of the names alone"
+                    );
                 }
 
-                if (!same && !outcome.SecondAccepted)
-                {
-                    ledger.Record(new(entrance, "distinct-rejected", difference), example);
-                }
-
-                // 受け付けた後の性質（後の名前で引けるか・保存形）は、組の違いでなく名前が前後に空白を持つかで分ける
-                var shape = NameFuzzDimensions.ShapeOf(pair);
-
-                foreach (var violation in outcome.Violations)
-                {
-                    ledger.Record(new(entrance, violation, shape), example);
-                }
+                sources.Add(("coverage", pair));
             }
+        }
+
+        sources.AddRange(
+            plan.Seeds.SelectMany(seed =>
+                NameFuzz.Pairs(seed, RandomPairsPerSeed).Select(pair => ($"seed {seed}", pair))
+            )
+        );
+
+        foreach (var (label, pair) in sources)
+        {
+            if (!Accepts(pair.First) || !Accepts(pair.Second))
+            {
+                continue;
+            }
+
+            // 名前から C# の識別子を作る入口では、規則が「別の名前」と言う組でも、作る識別子が大文字小文字を無視して同じなら、
+            // 断るのが答え（CLAUDE.md の SchemaNames の項の (3)＝大小だけ違う 2 つの名前が同じ識別子になる衝突は生成時エラーで
+            // 名指しする）
+            var same =
+                NameIdentityRule.AreSame(kind, pair.First, pair.Second)
+                || (
+                    derivedName is not null
+                    && derivedName(pair.First) is { } firstDerived
+                    && string.Equals(
+                        firstDerived,
+                        derivedName(pair.Second),
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                );
+
+            // 実際に流す組だけを数える（組の記録を読むだけで乱数を引かない）
+            NameFuzzDimensions.Observe(coverage, kind, pair);
+            var outcome = run(pair);
+            var difference = pair.Difference.ToString();
+            var example = $"{label}: {pair} \u2192 {outcome.Detail}";
+
+            if (same && outcome.SecondAccepted)
+            {
+                ledger.Record(new(entrance, "duplicate-accepted", difference), example);
+            }
+
+            if (!same && !outcome.SecondAccepted)
+            {
+                ledger.Record(new(entrance, "distinct-rejected", difference), example);
+            }
+
+            // 受け付けた後の性質（後の名前で引けるか・保存形）は、組の違いでなく名前が前後に空白を持つかで分ける
+            var shape = NameFuzzDimensions.ShapeOf(pair);
+
+            foreach (var violation in outcome.Violations)
+            {
+                ledger.Record(new(entrance, violation, shape), example);
+            }
+        }
+
+        if (coverageProblems.Count > 0)
+        {
+            ledger.DeferCoverageCheck(() =>
+                throw new XunitException(string.Join(Environment.NewLine, coverageProblems))
+            );
         }
 
         // 網羅の宣言の誤りはここで赤にし、網羅しない組の照合は既知の失敗の照合の後へ回す

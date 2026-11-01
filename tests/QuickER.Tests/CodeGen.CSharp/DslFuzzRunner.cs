@@ -191,12 +191,17 @@ internal static class DslFuzzRunner
     /// <param name="target">方言の構成</param>
     /// <param name="ct">取り消し</param>
     /// <param name="coverage">実装先が照合したクエリを数える先（数えないなら null）</param>
+    /// <param name="minimumChecked">
+    /// 実装先ごとに照合したクエリの下限（網羅の単位は 0＝クエリが少なく、代わりに全クエリを照合したことを
+    /// <see cref="DslFuzzCoverage.UncheckedProblems"/> が表明する）
+    /// </param>
     public static async Task RunAsync(
         FuzzFailureLog ledger,
         DslFuzzUnit unit,
         DslFuzzTarget target,
         CancellationToken ct,
-        DslFuzzCoverage? coverage = null
+        DslFuzzCoverage? coverage = null,
+        int minimumChecked = MinimumCheckedQueries
     )
     {
         var queries = unit.Queries.ToList();
@@ -296,7 +301,7 @@ internal static class DslFuzzRunner
         {
             var count = executed.GetValueOrDefault(backend.Name);
 
-            if (count < MinimumCheckedQueries)
+            if (count < minimumChecked)
             {
                 ledger.Record(
                     new(

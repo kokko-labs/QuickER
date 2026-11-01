@@ -65,11 +65,20 @@ public static class NameFuzzDiagrams
         new string(NameFuzz.BaseNames[15][0], 43),
     ];
 
-    /// <summary>流す名前（代表の名前＋普段の既定の数を超えたシードごとにランダムな名前 6 つ）</summary>
+    /// <summary>
+    /// 網羅の名前（どの性質も持たない名前＝<see cref="Classify"/> が Plain。代表の名前は性質ごとの名前で Plain を持たない）。
+    /// 単独の種では流さない。置き場所のどれかで図に入らずに飛ばされたら、DDL の往復のテストが名前と置き場所を名指しして赤にする
+    /// </summary>
+    public static IReadOnlyList<string> CoverageNames { get; } = ["Orders"];
+
+    /// <summary>
+    /// 流す名前（網羅の名前〔単独の種のときは流さない〕＋代表の名前＋普段の既定の数を超えたシードごとにランダムな名前 6 つ）
+    /// </summary>
     /// <param name="plan">流すシード（普段の既定の数までのシードは代表の名前で足りるので、名前を足さない）</param>
     public static IReadOnlyList<string> NamesForRun(SeedPlan plan)
     {
-        var names = new List<string>(Representative);
+        var names = new List<string>(plan.IsSingle ? [] : CoverageNames);
+        names.AddRange(Representative);
         var firstExtra = plan.Settings.FirstSeed + plan.Settings.RegularCount;
 
         foreach (var seed in plan.Seeds.Where(seed => seed >= firstExtra))

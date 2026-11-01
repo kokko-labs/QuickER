@@ -116,17 +116,9 @@ public sealed class BackendParityRuntimeTests
         var cutCounts = new SortedDictionary<string, int>(StringComparer.Ordinal);
         var pendingCuts = new Dictionary<ParityBackendKind, int>();
 
-        foreach (var seed in seeds)
+        // 流した手と、手の差で比べなかった手を数える（種と網羅の行で共有）
+        void CountCuts(ParityScenario scenario, ParityRunResult result, string source)
         {
-            var scenario = BackendParityGenerator.Create(seed);
-            BackendParityDimensions.Observe(coverage, scenario);
-            var result = await scenario.RunAsync(Ct);
-            BackendParityOutcomeDimensions.Observe(
-                outcomes,
-                scenario,
-                result.Traces[BackendParityAxis.Baseline]
-            );
-
             foreach (var backend in scenario.Backends)
             {
                 steps[backend] = steps.GetValueOrDefault(backend) + scenario.Ops.Count;
@@ -149,7 +141,7 @@ public sealed class BackendParityRuntimeTests
                         )
                 )
                     .Should()
-                    .BeTrue($"seed {seed} cut {key}, which is not declared");
+                    .BeTrue($"{source} cut {key}, which is not declared");
                 skipped[cut.Backend] = skipped.GetValueOrDefault(cut.Backend) + cut.SkippedSteps;
 
                 if (cut.Pending)
@@ -157,6 +149,53 @@ public sealed class BackendParityRuntimeTests
                     pendingCuts[cut.Backend] = pendingCuts.GetValueOrDefault(cut.Backend) + 1;
                 }
             }
+        }
+
+        // 網羅の行（BackendParityCoverageRows）を種の前に流して数える（種を 1 つだけ流すときは流さない）。違反は既知の失敗の
+        // 一覧で外さず、どれも新しい失敗にする。行が出すはずの組を出さなければ、行を名指しして赤にする
+        var rowProblems = new List<string>();
+
+        if (!plan.IsSingle)
+        {
+            foreach (var row in BackendParityCoverageRows.Table)
+            {
+                var scenario = row.Input.Create();
+                rowProblems.AddRange(BackendParityCoverageRows.MissingTupleProblems(row, scenario));
+                BackendParityDimensions.Observe(coverage, scenario);
+                var result = await scenario.RunAsync(Ct);
+                BackendParityOutcomeDimensions.Observe(
+                    outcomes,
+                    scenario,
+                    result.Traces[BackendParityAxis.Baseline]
+                );
+                CountCuts(scenario, result, $"coverage row {row.Id}");
+
+                foreach (var group in result.Violations.GroupBy(v => (v.Backend, v.Aspect)))
+                {
+                    report.Add(
+                        BackendParityKnownDifferences.ToFailure(
+                            $"{BackendParityKnownDifferences.RandomScope}/{row.Id}",
+                            group.First()
+                        ),
+                        $"網羅の行 `{row.Id}` を流す（RandomSequences_MatchBaseline が種の前に流す）"
+                    );
+                }
+            }
+        }
+
+        rowProblems.Should().BeEmpty();
+
+        foreach (var seed in seeds)
+        {
+            var scenario = BackendParityGenerator.Create(seed);
+            BackendParityDimensions.Observe(coverage, scenario);
+            var result = await scenario.RunAsync(Ct);
+            BackendParityOutcomeDimensions.Observe(
+                outcomes,
+                scenario,
+                result.Traces[BackendParityAxis.Baseline]
+            );
+            CountCuts(scenario, result, $"seed {seed}");
 
             var known = BackendParityKnownDifferences.Set.Classify(
                 result.Violations.Select(v =>

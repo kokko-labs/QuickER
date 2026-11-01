@@ -138,25 +138,11 @@ public static class DslFuzzDimensions
     /// <summary>MySQL の型の対応に無い列の種類（MySQL に UUID の型が無く、Guid へ写す列の型が無い）</summary>
     private static readonly DslClr[] UnmappedInMySql = [DslClr.Guid];
 
-    /// <summary>
-    /// MySQL が列の型として持てるのに、MySQL の単位（DslFuzzUnits の MySqlColumns）が列を定義していない種類
-    /// （MySQL の単位は符号なし整数・sbyte・byte と文字列 1 列だけを持ち、主キーの bigint は条件に使わない）
-    /// </summary>
-    private static readonly DslClr[] UndefinedInMySqlUnit =
-    [
-        DslClr.FixedString,
-        DslClr.Int64,
-        DslClr.Int32,
-        DslClr.Int16,
-        DslClr.Decimal,
-        DslClr.DateTime,
-        DslClr.GuidKey,
-    ];
-
     /// <summary>網羅しない組の一覧（範囲は「方言:実装先」）</summary>
     /// <remarks>
-    /// 合成のクエリの原子と戻り形の組の欠け（<c>SamplingGaps</c>）は、固定した既定の種の並びに合わせて書いている。
-    /// 生成器を変えて種の指紋が変わったら、指紋と一緒にこの一覧も書き直す。
+    /// 残るのは受け入れた組（方言が列の型として持てない種類・EF Core の SQLite プロバイダが翻訳できない比較）だけ。
+    /// 既定の種で出揃わない組・種の単位が作らない組（NULL を許す GuidKey の列・MySQL の単位に無い列の種類・射影の非 NULL 指定の
+    /// 条件の形・合成のクエリの原子の形と戻り形）は、網羅の単位（<see cref="DslFuzzUnits.Coverage"/>）が種の前に埋める。
     /// </remarks>
     public static CoverageGapSet Gaps { get; } =
         CoverageGap.Set(
@@ -164,39 +150,23 @@ public static class DslFuzzDimensions
             [
                 .. new[] { "sqlite:ado", "sqlite:efcore", "sqlite:inmemory" }.SelectMany(scope =>
                     UnmappedClrGaps(
-                            scope,
-                            UnmappedInSqliteAndSqlServer,
-                            "SQLite の型の対応（src/QuickER.Provider.Sqlite/SqliteCSharpTypeMapper.cs の Map）は tinyint→byte・smallint→short・int→int・bigint→long だけを持ち、unsigned を読まない（int unsigned は知らない型として string へ倒れる）ので、sbyte・ushort・uint・ulong の列を作れない"
-                        )
-                        .Concat(GuidKeyPrimaryKeyGaps(scope))
+                        scope,
+                        UnmappedInSqliteAndSqlServer,
+                        "SQLite の型の対応（src/QuickER.Provider.Sqlite/SqliteCSharpTypeMapper.cs の Map）は tinyint→byte・smallint→short・int→int・bigint→long だけを持ち、unsigned を読まない（int unsigned は知らない型として string へ倒れる）ので、sbyte・ushort・uint・ulong の列を作れない"
+                    )
                 ),
                 .. new[] { "sqlserver:ado", "sqlserver:efcore" }.SelectMany(scope =>
                     UnmappedClrGaps(
-                            scope,
-                            UnmappedInSqliteAndSqlServer,
-                            "SQL Server には符号つきの tinyint と、符号なしの smallint・int・bigint の型が無い（src/QuickER.Provider.SqlServer/SqlServerCSharpTypeMapper.cs の Map は tinyint→byte・smallint→short・int→int・bigint→long だけを持つ）ので、sbyte・ushort・uint・ulong の列を作れない"
-                        )
-                        .Concat(GuidKeyPrimaryKeyGaps(scope))
+                        scope,
+                        UnmappedInSqliteAndSqlServer,
+                        "SQL Server には符号つきの tinyint と、符号なしの smallint・int・bigint の型が無い（src/QuickER.Provider.SqlServer/SqlServerCSharpTypeMapper.cs の Map は tinyint→byte・smallint→short・int→int・bigint→long だけを持つ）ので、sbyte・ushort・uint・ulong の列を作れない"
+                    )
                 ),
                 .. UnmappedClrGaps(
                     "mysql:inmemory",
                     UnmappedInMySql,
                     "MySQL に UUID の型は無く、src/QuickER.Provider.MySql/MySqlTypeCatalog.cs は Guid を char(36) で書き、src/QuickER.Provider.MySql/MySqlCSharpTypeMapper.cs の Map は char を string へ写す（Guid へ写す型が無い）ので、Guid の列を作れない"
                 ),
-                .. UndefinedClrGaps(
-                    "mysql:inmemory",
-                    UndefinedInMySqlUnit,
-                    "MySQL の単位（DslFuzzUnits の MySqlColumns）が列を定義していない（MySQL は列として持てる＝MySqlCSharpTypeMapper の Map は char(n)→string・bigint→long・int→int・smallint→short・decimal→decimal・datetime→DateTime へ写し、文字列の主キーは GuidKey にできる。単位に列を足せば作れる）"
-                ),
-                .. new[]
-                {
-                    "sqlite:ado",
-                    "sqlite:efcore",
-                    "sqlite:inmemory",
-                    "mysql:inmemory",
-                    "sqlserver:ado",
-                    "sqlserver:efcore",
-                }.SelectMany(ProjectionNonNullGaps),
                 CoverageGap.AcceptedMatching(
                     "sqlite:efcore",
                     "P1-3",
@@ -208,380 +178,6 @@ public static class DslFuzzDimensions
                         && OrderedOps.Any(op =>
                             shape.StartsWith($"compare-{op}-", StringComparison.Ordinal)
                         )
-                ),
-                .. new[] { "sqlserver:ado", "sqlserver:efcore" }.Select(scope =>
-                    CoverageGap.Tuple(
-                        scope,
-                        "P1-3",
-                        "P2",
-                        "合成のクエリの原子の列は乱数で選び、SQL Server の既定（先頭の種 1 つ）では byte の列（i8）の原子が一覧を返す合成のクエリにたまたま入らない（戻り形ごとに列を割り付ける生成をしていない）",
-                        (Clr, nameof(DslClr.Byte)),
-                        (Query, $"compound-{QueryReturnShape.List}")
-                    )
-                ),
-                .. SamplingGaps(
-                    "sqlite:ado",
-                    new()
-                    {
-                        ["compare-ge-param"] = [QueryReturnShape.Projection],
-                        ["compare-le-literal"] = [QueryReturnShape.Projection],
-                        ["compare-le-param"] = [QueryReturnShape.List, QueryReturnShape.Projection],
-                        ["compare-lt-literal"] = [QueryReturnShape.List],
-                        ["contains-literal"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                        ],
-                        ["contains-param"] = [QueryReturnShape.Single],
-                        ["endswith-literal"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["endswith-param"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["like-contains"] = [QueryReturnShape.Count, QueryReturnShape.Projection],
-                        ["like-exact"] = [QueryReturnShape.Projection],
-                        ["like-param"] = [QueryReturnShape.Projection],
-                        ["like-prefix"] = [QueryReturnShape.Single, QueryReturnShape.Projection],
-                        ["like-suffix"] = [QueryReturnShape.List],
-                        ["startswith-literal"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                        ],
-                        ["startswith-param"] = [QueryReturnShape.List, QueryReturnShape.Count],
-                    }
-                ),
-                .. SamplingGaps(
-                    "sqlite:efcore",
-                    new()
-                    {
-                        ["compare-ge-param"] =
-                        [
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["compare-gt-literal"] = [QueryReturnShape.List],
-                        ["compare-le-literal"] =
-                        [
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["compare-le-param"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["compare-lt-literal"] = [QueryReturnShape.List],
-                        ["contains-literal"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                        ],
-                        ["contains-param"] = [QueryReturnShape.Single, QueryReturnShape.Projection],
-                        ["endswith-literal"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["endswith-param"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["like-contains"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["like-exact"] = [QueryReturnShape.Projection],
-                        ["like-param"] = [QueryReturnShape.Projection],
-                        ["like-prefix"] = [QueryReturnShape.Single, QueryReturnShape.Projection],
-                        ["like-suffix"] = [QueryReturnShape.List],
-                        ["startswith-literal"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                        ],
-                        ["startswith-param"] = [QueryReturnShape.List, QueryReturnShape.Count],
-                    }
-                ),
-                .. SamplingGaps(
-                    "sqlite:inmemory",
-                    new()
-                    {
-                        ["compare-ge-param"] = [QueryReturnShape.Projection],
-                        ["compare-le-literal"] = [QueryReturnShape.Projection],
-                        ["compare-le-param"] = [QueryReturnShape.List, QueryReturnShape.Projection],
-                        ["compare-lt-literal"] = [QueryReturnShape.List],
-                        ["contains-literal"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                        ],
-                        ["contains-param"] = [QueryReturnShape.Single],
-                        ["endswith-literal"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["endswith-param"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["like-contains"] = [QueryReturnShape.Count, QueryReturnShape.Projection],
-                        ["like-exact"] = [QueryReturnShape.Projection],
-                        ["like-param"] = [QueryReturnShape.Projection],
-                        ["like-prefix"] = [QueryReturnShape.Single, QueryReturnShape.Projection],
-                        ["like-suffix"] = [QueryReturnShape.List],
-                        ["startswith-literal"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                        ],
-                        ["startswith-param"] = [QueryReturnShape.List, QueryReturnShape.Count],
-                    }
-                ),
-                .. SamplingGaps(
-                    "mysql:inmemory",
-                    new()
-                    {
-                        ["compare-ge-literal"] = [QueryReturnShape.List],
-                        ["compare-ge-param"] = [QueryReturnShape.List],
-                        ["compare-gt-literal"] = [QueryReturnShape.Single],
-                        ["compare-le-literal"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["compare-ne-param"] = [QueryReturnShape.Projection],
-                        ["contains-literal"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["contains-param"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["endswith-literal"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                        ],
-                        ["endswith-param"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["like-contains"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["like-exact"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["like-param"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["like-prefix"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["like-suffix"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["startswith-literal"] =
-                        [
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["startswith-param"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                    }
-                ),
-                .. SamplingGaps(
-                    "sqlserver:ado",
-                    new()
-                    {
-                        ["compare-eq-literal"] = [QueryReturnShape.Single],
-                        ["compare-ge-literal"] = [QueryReturnShape.Single],
-                        ["compare-ge-param"] = [QueryReturnShape.Projection],
-                        ["compare-gt-literal"] =
-                        [
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["compare-gt-param"] = [QueryReturnShape.List],
-                        ["compare-le-literal"] = [QueryReturnShape.Projection],
-                        ["compare-le-param"] = [QueryReturnShape.List, QueryReturnShape.Projection],
-                        ["compare-lt-literal"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["compare-lt-param"] = [QueryReturnShape.List, QueryReturnShape.Single],
-                        ["contains-literal"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["contains-param"] = [QueryReturnShape.Single],
-                        ["endswith-literal"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["endswith-param"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["like-contains"] =
-                        [
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["like-exact"] = [QueryReturnShape.Count, QueryReturnShape.Projection],
-                        ["like-param"] = [QueryReturnShape.Projection],
-                        ["like-prefix"] = [QueryReturnShape.Single, QueryReturnShape.Projection],
-                        ["like-suffix"] = [QueryReturnShape.List, QueryReturnShape.Single],
-                        ["startswith-literal"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                        ],
-                        ["startswith-param"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                        ],
-                    }
-                ),
-                .. SamplingGaps(
-                    "sqlserver:efcore",
-                    new()
-                    {
-                        ["compare-eq-literal"] = [QueryReturnShape.Single],
-                        ["compare-ge-literal"] = [QueryReturnShape.Single],
-                        ["compare-ge-param"] = [QueryReturnShape.Projection],
-                        ["compare-gt-literal"] =
-                        [
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["compare-gt-param"] = [QueryReturnShape.List],
-                        ["compare-le-literal"] = [QueryReturnShape.Projection],
-                        ["compare-le-param"] = [QueryReturnShape.List, QueryReturnShape.Projection],
-                        ["compare-lt-literal"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["compare-lt-param"] = [QueryReturnShape.List, QueryReturnShape.Single],
-                        ["contains-literal"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["contains-param"] = [QueryReturnShape.Single],
-                        ["endswith-literal"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["endswith-param"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["like-contains"] =
-                        [
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                            QueryReturnShape.Projection,
-                        ],
-                        ["like-exact"] = [QueryReturnShape.Count, QueryReturnShape.Projection],
-                        ["like-param"] = [QueryReturnShape.Projection],
-                        ["like-prefix"] = [QueryReturnShape.Single, QueryReturnShape.Projection],
-                        ["like-suffix"] = [QueryReturnShape.List, QueryReturnShape.Single],
-                        ["startswith-literal"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                        ],
-                        ["startswith-param"] =
-                        [
-                            QueryReturnShape.List,
-                            QueryReturnShape.Single,
-                            QueryReturnShape.Count,
-                        ],
-                    }
                 ),
             ]
         );
@@ -615,15 +211,6 @@ public static class DslFuzzDimensions
                 CoverageGap.AcceptedMatching(scope, "P1-3", reason, Clr, pair.Other, pair.Predicate)
             );
 
-    /// <summary>
-    /// 方言は持てるのに単位が列を定義していない種類を、列の種類を含む因子の組ごとに 1 項目にする（まだ作れない組）
-    /// </summary>
-    private static IEnumerable<CoverageGapEntry> UndefinedClrGaps(
-        string scope,
-        DslClr[] undefined,
-        string reason
-    ) => ClrPairs(undefined).Select(pair => Gap(scope, reason, Clr, pair.Other, pair.Predicate));
-
     /// <summary>列の種類を含む因子の組ごとの、指定した種類に当たる述語</summary>
     private static IEnumerable<(string Other, Func<string, string, bool> Predicate)> ClrPairs(
         DslClr[] kinds
@@ -634,96 +221,6 @@ public static class DslFuzzDimensions
             (other, (Func<string, string, bool>)((clr, _) => names.Contains(clr)))
         );
     }
-
-    /// <summary>GuidKey の列は主キー（NOT NULL）だけなので、NULL 判定と射影の非 NULL 指定に使われない</summary>
-    private static IEnumerable<CoverageGapEntry> GuidKeyPrimaryKeyGaps(string scope)
-    {
-        const string reason =
-            "単位の GuidKey の列は sqlite-vo-guidkey・sqlserver-vo-guidkey の主キー（NOT NULL）だけで、生成器は NULL 判定を NULL を許す列にだけ作り、射影の非 NULL 指定も NULL を許す列だけに作る（GuidKey の値オブジェクトを共有する NULL 許容の外部キー列を持つ単位が無い）";
-
-        yield return CoverageGap.Tuple(
-            scope,
-            "P1-3",
-            "P2",
-            reason,
-            (Clr, nameof(DslClr.GuidKey)),
-            (Shape, "null-check")
-        );
-        yield return CoverageGap.Tuple(
-            scope,
-            "P1-3",
-            "P2",
-            reason,
-            (Clr, nameof(DslClr.GuidKey)),
-            (Query, ProjectionNonNull)
-        );
-    }
-
-    /// <summary>射影の非 NULL 指定のクエリは、条件がいつも IS NOT NULL の原子 1 つ</summary>
-    private static IEnumerable<CoverageGapEntry> ProjectionNonNullGaps(string scope)
-    {
-        const string reason =
-            "生成器（DslFuzzGenerator.Queries）は射影の非 NULL 指定のクエリの条件を、その列の IS NOT NULL の原子 1 つ（NOT で囲まない）だけで作る";
-
-        yield return Gap(
-            scope,
-            reason,
-            Shape,
-            Query,
-            (shape, query) => query == ProjectionNonNull && shape != "null-check"
-        );
-        yield return Gap(
-            scope,
-            reason,
-            Negated,
-            Query,
-            (negated, query) => query == ProjectionNonNull && negated == "No"
-        );
-        yield return Gap(
-            scope,
-            reason,
-            UnderNot,
-            Query,
-            (underNot, query) => query == ProjectionNonNull && underNot == "Yes"
-        );
-    }
-
-    /// <summary>
-    /// 合成のクエリの原子の形と戻り形の組のうち、既定の種で出揃わないものを、原子の形ごとに 1 項目にする
-    /// </summary>
-    /// <param name="scope">範囲</param>
-    /// <param name="missing">原子の形ごとの、組まない戻り形</param>
-    private static IEnumerable<CoverageGapEntry> SamplingGaps(
-        string scope,
-        Dictionary<string, QueryReturnShape[]> missing
-    ) =>
-        missing.Select(pair =>
-        {
-            var queries = pair
-                .Value.Select(shape => $"compound-{shape}")
-                .ToHashSet(StringComparer.Ordinal);
-            var efCore =
-                scope == "sqlite:efcore"
-                    ? "。EF Core（SQLite）は decimal の列の順序比較を含む合成のクエリを流さないので、さらに減る"
-                    : "";
-
-            return Gap(
-                scope,
-                $"合成のクエリは単位ごとに 30 件で、戻り形は 4 つから乱数で選び、原子は列ごとの候補から乱数で 1 つ選ぶ（文字列の列は IN・IS NULL・比較・LIKE・文字列一致の 5 つから選び、LIKE はさらにパラメータと 4 つのパターンの形、文字列一致は 3 つのメソッド×リテラルかパラメータに分かれる）。既定の種では {pair.Key} の原子が {string.Join("・", pair.Value)} の合成のクエリにたまたま入らない（戻り形ごとに原子の形を割り付ける生成をしていない）{efCore}",
-                Shape,
-                Query,
-                (shape, query) => shape == pair.Key && queries.Contains(query)
-            );
-        });
-
-    /// <summary>網羅しない組の項目（指摘 P1-3・直す区切り P2）</summary>
-    private static CoverageGapEntry Gap(
-        string scope,
-        string reason,
-        string factorA,
-        string factorB,
-        Func<string, string, bool> predicate
-    ) => CoverageGap.Matching(scope, "P1-3", "P2", reason, factorA, factorB, predicate);
 
     /// <summary>範囲の名前（「方言:実装先」）</summary>
     /// <param name="dbms">図の対象 DBMS</param>
@@ -923,6 +420,48 @@ public sealed class DslFuzzCoverage(IReadOnlyList<string> scopes)
         }
 
         DslFuzzDimensions.Observe(counter, query);
+
+        lock (_checked)
+        {
+            _checked.Add((scope, query));
+        }
+    }
+
+    /// <summary>照合したクエリ（範囲ごと・クエリの参照で引く）</summary>
+    private readonly HashSet<(string Scope, DslQuery Query)> _checked = [];
+
+    /// <summary>
+    /// 網羅の単位のクエリのうち、構成のどれかの実装先で照合したクエリにならなかったもの（生成時・コンパイルで外れた・
+    /// 実装先が流さない）を名指しする
+    /// </summary>
+    /// <param name="unit">網羅の単位</param>
+    /// <param name="dbms">図の対象 DBMS</param>
+    /// <param name="backends">構成の実装先の名前</param>
+    public IEnumerable<string> UncheckedProblems(
+        DslFuzzUnit unit,
+        string dbms,
+        IEnumerable<string> backends
+    )
+    {
+        foreach (var backend in backends)
+        {
+            var scope = DslFuzzDimensions.ScopeOf(dbms, backend);
+            // 型の検査が断ると決まっている原子（範囲外のリテラル・GuidKey への部分一致）のクエリは、断られることを
+            // DslFuzzRunner が別に表明する（照合したクエリにならないのが正しい）
+            var missing = unit
+                .Queries.Where(query =>
+                    !query.Atoms.Any(atom => atom.IsRejectedByTypeCheck)
+                    && !_checked.Contains((scope, query))
+                )
+                .Select(query => query.Name)
+                .ToList();
+
+            if (missing.Count > 0)
+            {
+                yield return $"coverage unit {unit.Name}: {scope} did not check [{string.Join(", ", missing)}] "
+                    + "(rejected at generation or compilation, or not run by the backend: the coverage queries must all be checked)";
+            }
+        }
     }
 
     /// <summary>範囲ごとの結果（宣言の誤りがあれば、ここで宣言の誤りとして投げる）</summary>
