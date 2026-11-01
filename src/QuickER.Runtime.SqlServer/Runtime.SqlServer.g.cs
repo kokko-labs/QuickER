@@ -4370,6 +4370,7 @@ public static class EntityGraphSaver
             hooks,
             changesAlreadyVerified,
             order: null,
+            consistency: null,
             mode,
             versions
         );
@@ -4396,6 +4397,8 @@ public static class EntityGraphSaver
         RowVersionCollector? versions = null
     )
     {
+        // A navigation and a foreign key that disagree, or a row changed through two instances, stop the save before anything runs
+        var consistency = GraphConsistency.Check(roots, cascadeSave, cascadeDelete);
         var order = GraphSaveOrder.For(roots, cascadeSave, cascadeDelete);
         var rows = 0;
 
@@ -4413,6 +4416,7 @@ public static class EntityGraphSaver
                 hooks,
                 changesAlreadyVerified: true,
                 order,
+                consistency,
                 mode,
                 versions
             ).ConfigureAwait(false);
@@ -4433,6 +4437,7 @@ public static class EntityGraphSaver
         SaveHookSession? hooks,
         bool changesAlreadyVerified,
         GraphSaveOrder? order,
+        GraphConsistency? consistency,
         ConcurrencyMode mode,
         RowVersionCollector? versions
     )
@@ -4496,6 +4501,9 @@ public static class EntityGraphSaver
         // Inserts and updates save the entity itself first, then proceed to the children (child FKs reference the parent PK)
         if (entity.IsAdded)
         {
+            // An unset foreign key takes the parent's key as it stands now, after the parent's own Before hook
+            consistency?.Fill(entity);
+
             if (
                 hooks is null
                 || await hooks.InvokeBeforeAsync(entity, SaveOperation.Insert, cancellationToken).ConfigureAwait(false)
@@ -4571,6 +4579,7 @@ public static class EntityGraphSaver
                     hooks,
                     changesAlreadyVerified: false,
                     order,
+                    consistency,
                     mode,
                     versions
                 ).ConfigureAwait(false);

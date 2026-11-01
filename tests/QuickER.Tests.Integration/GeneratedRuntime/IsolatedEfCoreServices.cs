@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.TestSupport;
 
@@ -30,13 +31,18 @@ public static class IsolatedEfCoreServices
     > Providers = new();
 
     /// <summary>SQLite を、<paramref name="interceptor"/> を登録した自前の内部プロバイダで使う</summary>
+    /// <param name="builder">DbContext のオプション</param>
+    /// <param name="connectionString">接続文字列</param>
+    /// <param name="interceptor">内部プロバイダに登録するインターセプター</param>
+    /// <param name="sqliteOptions">SQLite の設定（実行戦略など。省略可）</param>
     public static DbContextOptionsBuilder UseSqliteWith(
         this DbContextOptionsBuilder builder,
         string connectionString,
-        IInterceptor interceptor
+        IInterceptor interceptor,
+        Action<SqliteDbContextOptionsBuilder>? sqliteOptions = null
     ) =>
         builder
-            .UseSqlite(connectionString)
+            .UseSqlite(connectionString, sqliteOptions)
             .IgnoreServiceProviderCacheLimit()
             .UseInternalServiceProvider(
                 Providers.GetOrAdd(

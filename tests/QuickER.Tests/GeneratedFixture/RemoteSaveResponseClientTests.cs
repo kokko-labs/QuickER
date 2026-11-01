@@ -2,6 +2,7 @@ using System;
 using System.Net;
 using System.Net.Http;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
@@ -141,6 +142,82 @@ public sealed class RemoteSaveResponseClientTests
         gadget.RowState.Should().Be(RowState.Unchanged);
     }
 
+    [Fact(DisplayName = "リモートの保存: 飛ばした行は、Unsaved の値が書き戻され、状態を残す")]
+    public async Task Save_SkippedRow_WritesBackUnsavedValuesAndKeepsState()
+    {
+        var gadget = NewGadget(1);
+        var repository = Client(
+            """
+            {"Affected":0,"RowVersions":[],"Skipped":[],"Saved":[null],
+             "Unsaved":[{"GadgetId":1,"Name":"hook"}]}
+            """
+        );
+
+        await repository.SaveAsync(gadget, cancellationToken: Ct);
+
+        gadget.Name.Value.Should().Be("hook", "サーバーのフックが飛ばす前に書いた値");
+        gadget.RowState.Should().Be(RowState.Added);
+    }
+
+    [Fact(DisplayName = "リモートの保存: 削除した行は、Unsaved の値が書き戻され、Removed のまま")]
+    public async Task Save_RemovedRow_WritesBackUnsavedValuesAndStaysRemoved()
+    {
+        var gadget = NewGadget(1);
+        gadget.MarkRemoved();
+        var repository = Client(
+            """
+            {"Affected":1,"RowVersions":[],"Skipped":[],"Saved":[],
+             "Unsaved":[{"GadgetId":1,"Name":"hook-delete"}]}
+            """
+        );
+
+        await repository.SaveAsync(gadget, cancellationToken: Ct);
+
+        gadget.Name.Value.Should().Be("hook-delete", "サーバーのフックが削除の前に書いた値");
+        gadget.RowState.Should().Be(RowState.Removed);
+    }
+
+    [Fact(DisplayName = "リモートの保存: Unsaved の数が行の数と合わない応答は、Unsaved を使わない")]
+    public async Task Save_MismatchedUnsavedCount_IgnoresUnsaved()
+    {
+        var gadget = NewGadget(1);
+        var repository = Client(
+            """
+            {"Affected":0,"RowVersions":[],"Skipped":[],"Saved":[null],
+             "Unsaved":[{"Name":"a"},{"Name":"b"}]}
+            """
+        );
+
+        await repository.SaveAsync(gadget, cancellationToken: Ct);
+
+        gadget.Name.Value.Should().Be("local");
+        gadget.RowState.Should().Be(RowState.Added);
+    }
+
+    [Fact(
+        DisplayName = "リモートの保存の応答: Unsaved は位置でない init プロパティのまま JSON を往復し、知らない欄は読み捨てる"
+    )]
+    public void SaveResult_UnsavedRoundTripsAndUnknownFieldsAreIgnored()
+    {
+        var result = new RemoteSaveResult(1, [], null, [null])
+        {
+            Unsaved = [new() { ["Name"] = JsonSerializer.SerializeToElement("x") }],
+        };
+
+        var json = JsonSerializer.Serialize(result, RemoteJson.Options);
+        var read = JsonSerializer.Deserialize<RemoteSaveResult>(json, RemoteJson.Options)!;
+
+        read.Unsaved.Should().ContainSingle().Which!["Name"].GetString().Should().Be("x");
+
+        // 旧いクライアントが新しいサーバーの応答を読む形（知らない欄を持つ応答）と、旧いサーバーの応答（Unsaved なし）
+        var withUnknown = JsonSerializer.Deserialize<RemoteSaveResult>(
+            """{"Affected":2,"RowVersions":[],"FieldFromTheFuture":[1]}""",
+            RemoteJson.Options
+        )!;
+        withUnknown.Affected.Should().Be(2);
+        withUnknown.Unsaved.Should().BeNull();
+    }
+
     [Fact(DisplayName = "リモートの挿入: 応答の値が書き戻され、版より値が勝つ")]
     public async Task Insert_WritesBackValues()
     {
@@ -175,18 +252,54 @@ public sealed class RemoteSaveResponseClientTests
         gadget.RowVer.Value.Should().Equal([0x09, 0x0A]);
     }
 
-    /// <summary>どの要求にも同じ本文で 200 を返す</summary>
+    [Fact(
+        DisplayName = "リモートの保存: 外部キーと持っている親が食い違うグラフは、送る前に直結と同じ例外で断る"
+    )]
+    public async Task Save_InconsistentGraph_IsRejectedBeforeSending()
+    {
+        var handler = new StubHandler("{}");
+        var repository = new HttpGadgetRemoteRepository(
+            new HttpClient(handler) { BaseAddress = new Uri("http://localhost/quicker/") }
+        );
+        var gadget = NewGadget(1);
+        var note = new GadgetNoteEntity
+        {
+            NoteId = NoteIdValue.Create(10),
+            GadgetId = GadgetIdValue.Create(2),
+            Note = NoteValue.Create("n"),
+        };
+        note.MarkAdded();
+        gadget.GadgetNotes.Add(note);
+
+        var single = () => repository.SaveAsync(gadget, cancellationToken: Ct);
+        var many = () => repository.SaveAsync([gadget], cancellationToken: Ct);
+
+        (await single.Should().ThrowAsync<InvalidOperationException>()).WithMessage(
+            "*GadgetNoteEntity*GadgetNotes*"
+        );
+        await many.Should().ThrowAsync<InvalidOperationException>();
+        handler.Requests.Should().Be(0);
+    }
+
+    /// <summary>どの要求にも同じ本文で 200 を返す（受けた要求の数を数える）</summary>
     private sealed class StubHandler(string body) : HttpMessageHandler
     {
+        /// <summary>受けた要求の数</summary>
+        public int Requests { get; private set; }
+
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken
-        ) =>
-            Task.FromResult(
+        )
+        {
+            Requests++;
+
+            return Task.FromResult(
                 new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent(body, Encoding.UTF8, "application/json"),
                 }
             );
+        }
     }
 }

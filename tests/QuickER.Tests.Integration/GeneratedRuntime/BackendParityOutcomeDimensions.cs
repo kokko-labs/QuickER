@@ -54,7 +54,15 @@ internal static class BackendParityOutcomeDimensions
                 ),
                 new Factor(
                     Behavior,
+                    // AssignKey と EditKeyThenContinue は決まった形のシナリオだけが使い、この表は乱数の列だけを数える
                     Enum.GetValues<ParityHookBehavior>()
+                        .Where(value =>
+                            value
+                                is not (
+                                    ParityHookBehavior.AssignKey
+                                    or ParityHookBehavior.EditKeyThenContinue
+                                )
+                        )
                         .Select(value => new Level(value.ToString()))
                         .ToList(),
                     "その呼び出しに当たった Save フックの規則の振る舞い（規則の無い呼び出しは Record）"

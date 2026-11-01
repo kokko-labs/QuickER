@@ -1067,6 +1067,45 @@ public sealed record EditContactOp(
     }
 }
 
+/// <summary>
+/// スロットのグラフの連絡先の、その関係の親への参照（ナビゲーション）に、スロットのグラフの顧客を置く（外部キーと状態は変えない＝
+/// 親への参照と外部キーが食い違うグラフを作る）
+/// </summary>
+public sealed record PointContactAtOp(
+    string Slot,
+    int ContactId,
+    ParityContactRelation Relation,
+    int CustomerId
+) : ParityOp
+{
+    public override Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
+    {
+        var contact = (ContactEntity)Find(backend, Slot, $"contacts/{ContactId}");
+        var customer = (CustomerEntity)Find(backend, Slot, $"customers/{CustomerId}");
+
+        switch (Relation)
+        {
+            case ParityContactRelation.Owner:
+                contact.Owner = customer;
+                break;
+            case ParityContactRelation.Watcher:
+                contact.Watcher = customer;
+                break;
+            case ParityContactRelation.Backup:
+                contact.Backup = customer;
+                break;
+            case ParityContactRelation.Fallback:
+                contact.Fallback = customer;
+                break;
+            case ParityContactRelation.CustomerCode:
+                contact.CustomerCodeCustomer = customer;
+                break;
+        }
+
+        return Task.FromResult("pointed");
+    }
+}
+
 /// <summary>スロットの根（顧客）を <c>UpdateAsync</c> で更新する</summary>
 public sealed record UpdateCustomerOp(
     string Slot,

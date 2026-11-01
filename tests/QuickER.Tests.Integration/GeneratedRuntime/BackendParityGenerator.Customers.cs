@@ -12,12 +12,12 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <remarks>
 /// <para>
 /// 顧客のスロット（<see cref="CustomerSlotNames"/>）のグラフは、顧客の根と、根を指す外部キーで持つ連絡先・紹介先だけを持つ。
-/// どの行も、同じ保存の中で持っている行を指す外部キーは、持っている関係の 1 本だけにする（<see cref="Consistent"/>）。EF Core は
-/// 追跡した行の外部キーとナビゲーションを突き合わせて（fix-up）メモリのグラフを書き換えるので、食い違うグラフは決まった形の
-/// シナリオ（P2-5-N2）だけが持ち、乱数の列では作らない。
+/// どの行も、同じ保存の中で持っている行を指す外部キーは、持っている関係の 1 本だけにする（<see cref="Consistent"/>）。外部キーと
+/// ナビゲーションが食い違うグラフは、どの実装先も保存の前に断る（GraphConsistency）ので、乱数の列では作らず、決まった形の
+/// シナリオだけが持つ（作ると、保存の手が断られるだけで、その後の列が何も比べなくなる）。
 /// </para>
 /// <para>
-/// 列の途中では、EF Core が割れると分かっている手（H1・H3・H5・P2-5-N1・P2-5-R1）を作らない。参照されている顧客の削除・代替キーの
+/// 列の途中では、実装先の手の差を宣言する手（<see cref="ParityDeviation"/>）を作らない。参照されている顧客の削除・代替キーの
 /// 更新・Save フックの規則は列の末尾（<see cref="AppendTail"/>）にだけ置き、<see cref="DeviatingOp"/> の印で、受け入れた差
 /// （インメモリ）と直す区切りのある差（EF Core・リモート）の実装先をその手から後の比較から外す。
 /// </para>
@@ -140,7 +140,7 @@ public sealed partial class BackendParityGenerator
         _ops.Add(new LoadOp(slot, "customers", id));
     }
 
-    /// <summary>顧客を連絡先と紹介先ごと Include して読む（読み取りだけ＝保存しない。同じ連絡先が関係ごとに別のインスタンスになり得る＝P2-5-N3）</summary>
+    /// <summary>顧客を連絡先と紹介先ごと Include して読む（読み取りだけ＝保存しない。同じ連絡先が関係ごとに別のインスタンスになり得る。2 つのインスタンスが変更を持つグラフは、どの実装先も保存の前に断る）</summary>
     private void LoadCustomerWithContacts()
     {
         if (_customers.Count == 0)
@@ -564,7 +564,7 @@ public sealed partial class BackendParityGenerator
 
     /// <summary>
     /// 注文の無い顧客 X を、X を指す行（紹介先か連絡先）を別の顧客のグラフに持ったまま 1 回の保存で消す。依存行を編集したときは
-    /// <see cref="ParityDeviation.DependentHeldParentDelete"/>（EF Core＝H5・P2-5-N1）、編集しないときは
+    /// <see cref="ParityDeviation.DependentHeldParentDelete"/>、編集しないときは
     /// <see cref="ParityDeviation.ParentDeleteWithChildren"/>（インメモリ＝P1 だけ）の印を付ける
     /// </summary>
     private bool ReferencedCustomerDeleteTail()

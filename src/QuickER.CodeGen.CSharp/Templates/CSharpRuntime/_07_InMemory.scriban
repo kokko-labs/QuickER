@@ -2053,7 +2053,8 @@ internal static class InMemoryCascade
         bool cascadeDelete,
         CancellationToken cancellationToken,
         bool changesAlreadyVerified = false,
-        GraphSaveOrder? order = null
+        GraphSaveOrder? order = null,
+        GraphConsistency? consistency = null
     )
     {
         // If the caller already verified HasChanges, skip the redundant graph traversal here (recursion into children keeps the default false so each branch is checked).
@@ -2083,6 +2084,9 @@ internal static class InMemoryCascade
 
         if (entity.IsAdded)
         {
+            // An unset foreign key takes the parent's key as it stands now, after the parent's own Before hook
+            consistency?.Fill(entity);
+
             if (!await hooks.InvokeBeforeAsync(entity, SaveOperation.Insert, cancellationToken).ConfigureAwait(false))
             {
                 hooks.Skip(entity);
@@ -2112,7 +2116,8 @@ internal static class InMemoryCascade
                     cascadeSave,
                     cascadeDelete,
                     cancellationToken,
-                    order: order
+                    order: order,
+                    consistency: consistency
                 ).ConfigureAwait(false);
             }
         }
@@ -2670,6 +2675,9 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        // A navigation and a foreign key that disagree, or a row changed through two instances, stop the save before anything runs
+        var consistency = GraphConsistency.Check(roots, cascadeSave, cascadeDelete);
+
         // Copy-on-write staging shared by every root, so the whole call is one all-or-nothing unit: every write goes here and
         // reaches the store only once the last phase has succeeded.
         var staging = new InMemorySaveStaging();
@@ -2701,9 +2709,15 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
                     cascadeDelete,
                     cancellationToken,
                     changesAlreadyVerified: true,
-                    order: order
+                    order: order,
+                    consistency: consistency
                 ).ConfigureAwait(false);
             }
+        }
+        else
+        {
+            // No Before hook can assign a parent's key, so the unset foreign keys are filled at once
+            consistency.FillAll();
         }
 
         // Phase 2 (inside the lock): stage all roots applying the skips and record the (entity, operation) pairs performed.

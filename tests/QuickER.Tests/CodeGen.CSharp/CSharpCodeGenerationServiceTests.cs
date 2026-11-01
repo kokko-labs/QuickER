@@ -5228,9 +5228,8 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain(".HasMany(e => e.Orders)");
         content.Should().Contain(".WithOne(e => e.Customer)");
         content.Should().Contain(".HasForeignKey(e => e.CustomerId)");
-        // OnDelete 既定（NoAction）は図の宣言どおり DeleteBehavior.NoAction を出す
-        // （クライアント挙動は Restrict と同一＝必須関係は保存前に例外・任意関係は追跡中の子の FK を null 化）
-        content.Should().Contain(".OnDelete(DeleteBehavior.NoAction);");
+        // OnDelete 既定（NoAction）は ClientNoAction（EF は追跡中の子に触れず、結果は DB の参照アクションが決める）
+        content.Should().Contain(".OnDelete(DeleteBehavior.ClientNoAction);");
     }
 
     /// <summary>OnDelete=Cascade のリレーションでは OnDelete(DeleteBehavior.Cascade) が構成されることを検証する</summary>

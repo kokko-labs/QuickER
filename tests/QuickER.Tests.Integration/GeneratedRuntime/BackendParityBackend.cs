@@ -3,12 +3,14 @@ using System.Collections.Generic;
 using System.Data.Common;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedBackendParityFixture;
 using QuickER.Tests.TestSupport;
@@ -55,11 +57,16 @@ public static class ParityBackendKinds
 /// <param name="DisableEfCoreSavepoints">EF Core のトランザクションで自動セーブポイントを切るか（MARS と同じ状態を SQLite で作る）</param>
 /// <param name="SkipBefore">Before フックが false を返して飛ばす呼び出し（<c>Delete:order_lines/100</c> の形）</param>
 /// <param name="HookRules">Save フックの振る舞いの規則（<see cref="ParityHookRule"/>。先に当たった規則だけが効く）</param>
+/// <param name="RetryEfCoreFirstCommit">
+/// EF Core に再試行する実行戦略を設定し、DbContext ごとに最初のコミットを一時的な失敗にするか（グラフ保存を 2 回目の試行で
+/// 成立させる＝試行をまたいで持ち越すものを見る）
+/// </param>
 public sealed record ParityBackendOptions(
     bool WithHooks = true,
     bool DisableEfCoreSavepoints = false,
     IReadOnlyList<string>? SkipBefore = null,
-    IReadOnlyList<ParityHookRule>? HookRules = null
+    IReadOnlyList<ParityHookRule>? HookRules = null,
+    bool RetryEfCoreFirstCommit = false
 );
 
 /// <summary>Save フックの振る舞い</summary>
@@ -82,6 +89,20 @@ public enum ParityHookBehavior
 
     /// <summary>After が例外を投げる（行を書いた後に失敗し、保存を巻き戻す）</summary>
     ThrowAfter,
+
+    /// <summary>
+    /// Before が、キーの未設定な新しい行のキーを決めて続け、決めた後の行のキーと外部キーを記録する（親の Before がキーを決める形で、
+    /// 新しい子の外部キーが子の Before の時点で埋まっていることを hooks-before で比べる。決まった形のシナリオだけが使い、乱数の列は
+    /// 作らない）
+    /// </summary>
+    AssignKey,
+
+    /// <summary>
+    /// Before が顧客の code（一意制約を参照する外部キーの親の列＝EF Core の代替キー）を
+    /// <see cref="ParityHookRecorder.RewrittenCode"/> へ書き換えて続ける（顧客にだけ当てる。追跡した後で代替キーが変わる形を、
+    /// 決まった形のシナリオだけが作る。乱数の列は作らない）
+    /// </summary>
+    EditKeyThenContinue,
 }
 
 /// <summary>
@@ -283,6 +304,17 @@ public sealed class ParityBackend : IAsyncDisposable
                             DisableSavepointsInterceptor.Instance
                         );
                     }
+                    else if (options.RetryEfCoreFirstCommit)
+                    {
+                        builder.UseSqliteWith(
+                            connectionString,
+                            FailFirstCommitInterceptor.Instance,
+                            sqlite =>
+                                sqlite.ExecutionStrategy(dependencies => new RetryingStrategy(
+                                    dependencies
+                                ))
+                        );
+                    }
                     else
                     {
                         builder
@@ -471,6 +503,64 @@ public sealed class ParityBackend : IAsyncDisposable
         }
     }
 
+    /// <summary>テストが起こす一時的な失敗（<see cref="RetryingStrategy"/> だけが再試行する）</summary>
+    private sealed class TransientCommitFailure()
+        : Exception("transient commit failure injected by the parity test");
+
+    /// <summary><see cref="TransientCommitFailure"/> だけを再試行する実行戦略</summary>
+    private sealed class RetryingStrategy(ExecutionStrategyDependencies dependencies)
+        : ExecutionStrategy(
+            dependencies,
+            maxRetryCount: 3,
+            maxRetryDelay: TimeSpan.FromMilliseconds(1)
+        )
+    {
+        protected override bool ShouldRetryOn(Exception exception) =>
+            exception is TransientCommitFailure;
+    }
+
+    /// <summary>DbContext ごとに最初のコミットだけを一時的な失敗にする</summary>
+    /// <remarks>
+    /// 状態は DbContext に結びつけて持つので 1 インスタンスを使い回す（<see cref="DisableSavepointsInterceptor"/> と同じ理由）。
+    /// </remarks>
+    private sealed class FailFirstCommitInterceptor : DbTransactionInterceptor
+    {
+        public static readonly FailFirstCommitInterceptor Instance = new();
+
+        private readonly ConditionalWeakTable<DbContext, object> _failed = [];
+
+        public override InterceptionResult TransactionCommitting(
+            DbTransaction transaction,
+            TransactionEventData eventData,
+            InterceptionResult result
+        )
+        {
+            FailOnce(eventData);
+
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult> TransactionCommittingAsync(
+            DbTransaction transaction,
+            TransactionEventData eventData,
+            InterceptionResult result,
+            CancellationToken cancellationToken = default
+        )
+        {
+            FailOnce(eventData);
+
+            return ValueTask.FromResult(result);
+        }
+
+        private void FailOnce(TransactionEventData eventData)
+        {
+            if (eventData.Context is { } context && _failed.TryAdd(context, new object()))
+            {
+                throw new TransientCommitFailure();
+            }
+        }
+    }
+
     /// <summary>複数の破棄対象を順に破棄する</summary>
     private sealed class CompositeDisposable(params IDisposable[] items) : IDisposable
     {
@@ -498,7 +588,19 @@ public sealed class ParityBackend : IAsyncDisposable
         ) =>
             recorder.Before(
                 $"{operation}:{ParityFormat.KeyOf(entity)}",
-                () => entity.Note = NoteValue.Create($"hook-{operation}")
+                () => entity.Note = NoteValue.Create($"hook-{operation}"),
+                () =>
+                {
+                    if (entity.CustomerId is null || entity.CustomerId.Value == 0)
+                    {
+                        entity.CustomerId = CustomerIdValue.Create(
+                            ParityHookRecorder.AssignedCustomerKey
+                        );
+                    }
+
+                    return $"{ParityFormat.KeyOf(entity)} referrer={entity.ReferrerId?.Value}";
+                },
+                () => entity.Code = CodeValue.Create(ParityHookRecorder.RewrittenCode)
             );
 
         public Task AfterSaveAsync(
@@ -515,7 +617,16 @@ public sealed class ParityBackend : IAsyncDisposable
         ) =>
             recorder.Before(
                 $"{operation}:{ParityFormat.KeyOf(entity)}",
-                () => entity.Memo = MemoValue.Create($"hook-{operation}")
+                () => entity.Memo = MemoValue.Create($"hook-{operation}"),
+                () =>
+                {
+                    if (entity.OrderId is null || entity.OrderId.Value == 0)
+                    {
+                        entity.OrderId = OrderIdValue.Create(ParityHookRecorder.AssignedOrderKey);
+                    }
+
+                    return $"{ParityFormat.KeyOf(entity)} customer={entity.CustomerId?.Value}";
+                }
             );
 
         public Task AfterSaveAsync(
@@ -532,7 +643,16 @@ public sealed class ParityBackend : IAsyncDisposable
         ) =>
             recorder.Before(
                 $"{operation}:{ParityFormat.KeyOf(entity)}",
-                () => entity.Discount = DiscountValue.Create((int)operation + 0.5m)
+                () => entity.Discount = DiscountValue.Create((int)operation + 0.5m),
+                () =>
+                {
+                    if (entity.LineId is null || entity.LineId.Value == 0)
+                    {
+                        entity.LineId = LineIdValue.Create(ParityHookRecorder.AssignedLineKey);
+                    }
+
+                    return $"{ParityFormat.KeyOf(entity)} order={entity.OrderId?.Value}";
+                }
             );
 
         public Task AfterSaveAsync(
@@ -549,7 +669,18 @@ public sealed class ParityBackend : IAsyncDisposable
         ) =>
             recorder.Before(
                 $"{operation}:{ParityFormat.KeyOf(entity)}",
-                () => entity.Label = LabelValue.Create($"hook-{operation}")
+                () => entity.Label = LabelValue.Create($"hook-{operation}"),
+                () =>
+                {
+                    if (entity.ContactId is null || entity.ContactId.Value == 0)
+                    {
+                        entity.ContactId = ContactIdValue.Create(
+                            ParityHookRecorder.AssignedContactKey
+                        );
+                    }
+
+                    return $"{ParityFormat.KeyOf(entity)} owner={entity.OwnerId?.Value} code={entity.CustomerCode?.Value}";
+                }
             );
 
         public Task AfterSaveAsync(
@@ -577,7 +708,19 @@ public sealed class ParityBackend : IAsyncDisposable
         ) =>
             recorder.Before(
                 $"{operation}:customers/{entity.CustomerId?.Value}",
-                () => entity.Note = EfOnly.NoteValue.Create($"hook-{operation}")
+                () => entity.Note = EfOnly.NoteValue.Create($"hook-{operation}"),
+                () =>
+                {
+                    if (entity.CustomerId is null || entity.CustomerId.Value == 0)
+                    {
+                        entity.CustomerId = EfOnly.CustomerIdValue.Create(
+                            ParityHookRecorder.AssignedCustomerKey
+                        );
+                    }
+
+                    return $"customers/{entity.CustomerId?.Value} referrer={entity.ReferrerId?.Value}";
+                },
+                () => entity.Code = EfOnly.CodeValue.Create(ParityHookRecorder.RewrittenCode)
             );
 
         public Task AfterSaveAsync(
@@ -594,7 +737,18 @@ public sealed class ParityBackend : IAsyncDisposable
         ) =>
             recorder.Before(
                 $"{operation}:orders/{entity.OrderId?.Value}",
-                () => entity.Memo = EfOnly.MemoValue.Create($"hook-{operation}")
+                () => entity.Memo = EfOnly.MemoValue.Create($"hook-{operation}"),
+                () =>
+                {
+                    if (entity.OrderId is null || entity.OrderId.Value == 0)
+                    {
+                        entity.OrderId = EfOnly.OrderIdValue.Create(
+                            ParityHookRecorder.AssignedOrderKey
+                        );
+                    }
+
+                    return $"orders/{entity.OrderId?.Value} customer={entity.CustomerId?.Value}";
+                }
             );
 
         public Task AfterSaveAsync(
@@ -611,7 +765,18 @@ public sealed class ParityBackend : IAsyncDisposable
         ) =>
             recorder.Before(
                 $"{operation}:order_lines/{entity.LineId?.Value}",
-                () => entity.Discount = EfOnly.DiscountValue.Create((int)operation + 0.5m)
+                () => entity.Discount = EfOnly.DiscountValue.Create((int)operation + 0.5m),
+                () =>
+                {
+                    if (entity.LineId is null || entity.LineId.Value == 0)
+                    {
+                        entity.LineId = EfOnly.LineIdValue.Create(
+                            ParityHookRecorder.AssignedLineKey
+                        );
+                    }
+
+                    return $"order_lines/{entity.LineId?.Value} order={entity.OrderId?.Value}";
+                }
             );
 
         public Task AfterSaveAsync(
@@ -628,7 +793,18 @@ public sealed class ParityBackend : IAsyncDisposable
         ) =>
             recorder.Before(
                 $"{operation}:contacts/{entity.ContactId?.Value}",
-                () => entity.Label = EfOnly.LabelValue.Create($"hook-{operation}")
+                () => entity.Label = EfOnly.LabelValue.Create($"hook-{operation}"),
+                () =>
+                {
+                    if (entity.ContactId is null || entity.ContactId.Value == 0)
+                    {
+                        entity.ContactId = EfOnly.ContactIdValue.Create(
+                            ParityHookRecorder.AssignedContactKey
+                        );
+                    }
+
+                    return $"contacts/{entity.ContactId?.Value} owner={entity.OwnerId?.Value} code={entity.CustomerCode?.Value}";
+                }
             );
 
         public Task AfterSaveAsync(
@@ -646,8 +822,32 @@ public sealed class ParityBackend : IAsyncDisposable
 /// </summary>
 public sealed class ParityHookRecorder(List<string> log, IReadOnlyList<ParityHookRule> rules)
 {
+    /// <summary><see cref="ParityHookBehavior.AssignKey"/> が顧客に決めるキー</summary>
+    public const int AssignedCustomerKey = 900;
+
+    /// <summary><see cref="ParityHookBehavior.AssignKey"/> が注文に決めるキー</summary>
+    public const int AssignedOrderKey = 9000;
+
+    /// <summary><see cref="ParityHookBehavior.AssignKey"/> が明細に決めるキー</summary>
+    public const int AssignedLineKey = 90000;
+
+    /// <summary><see cref="ParityHookBehavior.AssignKey"/> が連絡先に決めるキー</summary>
+    public const int AssignedContactKey = 950;
+
+    /// <summary><see cref="ParityHookBehavior.EditKeyThenContinue"/> が顧客に書く code</summary>
+    public const string RewrittenCode = "HOOKED";
+
     /// <summary>Before：記録し、振る舞いに従って値を書き換え、続けるか（true）飛ばすか（false）を返すか、投げる</summary>
-    public Task<bool> Before(string call, Action edit)
+    /// <param name="call">呼び出し（<c>操作:表/キー</c>）</param>
+    /// <param name="edit">値を書き換える（<see cref="ParityHookBehavior.EditThenSkip"/> と <see cref="ParityHookBehavior.EditThenContinue"/>）</param>
+    /// <param name="assignKey">未設定のキーを決め、決めた後の行のキーと外部キーを返す（<see cref="ParityHookBehavior.AssignKey"/>）</param>
+    /// <param name="editKey">顧客の code を書き換える（<see cref="ParityHookBehavior.EditKeyThenContinue"/>・顧客だけが渡す）</param>
+    public Task<bool> Before(
+        string call,
+        Action edit,
+        Func<string> assignKey,
+        Action? editKey = null
+    )
     {
         Record("Before", call);
 
@@ -664,6 +864,17 @@ public sealed class ParityHookRecorder(List<string> log, IReadOnlyList<ParityHoo
             case ParityHookBehavior.ThrowBefore:
                 Record(ParityStep.HookThrewPrefix + "Before", call);
                 throw new ParityHookException($"Before {call}");
+            case ParityHookBehavior.AssignKey:
+                Record("Before", "AssignKey:" + assignKey());
+                return Task.FromResult(true);
+            case ParityHookBehavior.EditKeyThenContinue:
+                (
+                    editKey
+                    ?? throw new InvalidOperationException(
+                        $"The rule that rewrites the code applies to customers only, not to {call}."
+                    )
+                )();
+                return Task.FromResult(true);
             default:
                 return Task.FromResult(true);
         }

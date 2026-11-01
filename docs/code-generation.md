@@ -640,6 +640,23 @@ A single cascade child has no collection to leave, so it stays on its navigation
 The descendants of a deleted root are left as they are, since the whole subtree went with it.
 Every backend behaves the same way, and so does an edit model when the mapper's `AcceptSaved` accepts the save (see [Removing rows](#removing-rows-remove-versus-markremoved)).
 
+**The navigations and the foreign keys must agree.**
+Before it writes anything or runs a save hook, a graph save checks the rows it saves: the roots, their cascade children, and every row below a deleted row when `cascadeDelete` is on.
+A child held in a parent's collection or single cascade child, and a child whose parent reference points at a row of the save, must carry that parent's key in its foreign key.
+A disagreement is refused with an `InvalidOperationException` that names the row, the navigation and both values, whatever the row's state, an unchanged row included, and nothing is written.
+A deleted child is not checked.
+A new child (`Added`) whose foreign key is unset (null, zero, an empty string, or a value object holding one of them) takes its parent's key instead.
+The key is filled just before the child's Before hook, after the parent's, so a key a parent's hook assigns reaches the child.
+A child held by two parents with its foreign key unset is refused, since the save cannot tell which one it belongs to.
+
+**A row changed through two instances is refused.**
+A graph can hold the same row twice, for example when two Includes each load it.
+When two of those instances carry changes that would write the row twice, the save is refused with an `InvalidOperationException`.
+Deleting one instance and adding another with the same key is a replacement and goes on.
+When only one instance carries changes, the save writes that one, and EF Core leaves the unchanged instances untracked.
+
+Every backend runs both checks; a remote client runs them before it sends the graph.
+
 **A save that deletes rows writes in three stages.**
 A graph save that deletes no row walks each root in graph order: a new or updated row is written before its children.
 A save that deletes rows runs in three stages:
@@ -751,6 +768,7 @@ Direct calls to the low-level APIs `InsertAsync` / `UpdateAsync` / `DeleteAsync`
 
 `false` skips only that entity's single operation; other rows proceed.
 A skipped row does not get an After call, and its `RowState` is left unchanged.
+A value Before wrote to the entity stays on it when the row is skipped, and when it is deleted, on every backend and over the remote services alike.
 The mapper's `AcceptSaved` therefore keeps the edit model of a skipped insert or update as it was, and the next save tries it again (see [Edit model save workflow](#edit-model-save-workflow)).
 A skipped deletion of a child in a collection also stays pending, because the child stays in its parent's collection.
 A skipped deletion of a root or of a single cascade child cannot be told apart from a deletion that ran: both leave the entity `Removed`.
@@ -1016,8 +1034,10 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 - Save is a disconnected-graph save that converts `RowState` to EF Core's state.
   Like the QuickER repositories, it registers only the entities the cascade reaches from the root.
   A parent reference (such as `line.Order`) is not followed, so a parent loaded with `Include` is neither written nor deleted.
-  After the save, EF Core's own fix-up may fill a reference to a parent saved in the same call (such as `profile.Customer` when a customer and its profile are saved together).
-  The QuickER repositories set navigations only in the direction an `Include` follows, when reading.
+  The save leaves the navigations of the entities as it found them, as the QuickER repositories do: the one change is that the children it deleted leave the cascade collections of a parent it kept.
+  EF Core fixes up the references and collections of the entities it tracks, and the save puts them back afterwards, whether it succeeds or fails (a navigation a save hook changes during the save is put back as well).
+- The generated `DbContext` gives every relationship except `ON DELETE CASCADE` the delete behavior `ClientNoAction`.
+  EF Core then leaves the tracked children of a deleted parent alone and sends the parent's `DELETE` only, so the database's referential action decides the result, as with the QuickER repositories: `NO ACTION` refuses the deletion, and `SET NULL` and `SET DEFAULT` change the children in the database.
 - Optimistic concurrency is at parity: `ConcurrencyMode` selects the policy, EF Core's `DbUpdateConcurrencyException` is converted to `SaveConflictException`, and the refreshed concurrency token is left on the entity (see [Optimistic concurrency (rowversion)](#optimistic-concurrency-rowversion)).
 - An update of a table without a rowversion column that matches no row (a trigger or row-level security discarded it) is reported as a missing row, as the QuickER Repository does: `UpdateAsync` returns `false` and a graph save fails with `SaveConflictException` (`NotFound`).
   A row whose statement keeps matching no row although the stored values were taken over (`ForceOverwrite`) is attempted at most 10 times and then fails with `SaveConflictException`.
@@ -1040,6 +1060,12 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   A `Guid` primary key keeps EF Core's convention too: EF Core generates a value when the key is `Guid.Empty`, where the QuickER Repository writes `Guid.Empty` as it is.
 - A relationship whose referenced (principal) column is not the primary key, such as a UNIQUE column or one column of a composite primary key, is configured with an explicit `HasPrincipalKey`.
   The foreign key then joins to that column just as the QuickER Repository does, where EF Core's default would silently join it to the primary key.
+- EF Core treats such a referenced column as an alternate key and never writes it in its own `UPDATE`, so the repository writes a changed value itself, as the QuickER Repository does.
+  For each updated row of a table that has an alternate key, `UpdateAsync` and a graph save first read the row's stored key and row version (one extra query per row), then write a changed value with one more statement in the save's transaction, before `SaveChanges`.
+  The write follows the same rules as the rest of the row: under `Optimistic` a stale row version leaves it unwritten and the save fails with `SaveConflictException`, and `ForceOverwrite` writes it anyway.
+  A value another row still references is refused by the database (`NO ACTION`), and the save writes nothing.
+  A value a save hook's Before sets is written the same way.
+  An `UpdateAsync` of such a table runs in a transaction inside the execution strategy, like a graph save.
 
 **Raw SQL**
 
@@ -3102,7 +3128,9 @@ That covers a value a server-side save hook set, such as an audit column or a ke
 A Save response matches the values to the rows by their position in the graph as it was sent, walking the rows that are not deleted in cascade order, rather than by key, so a key a hook assigned still reaches the right row.
 The server lists the rows before the save, so what the save does to the collections (taking deleted children out, or EF Core moving a child into its parent's collection) does not shift the positions.
 Where the version list and the values disagree, the values win.
-A row a hook skipped gets nothing back, and an excluded unbounded binary column is never carried, so the client's update guard keeps applying.
+A row a hook skipped and a deleted row get the values back as well, without a change to their `RowState`, so what a server-side hook's Before wrote to them reaches the client as it reaches the entity on a direct connection.
+A save the server refuses returns an error instead of a response, so what a server-side hook wrote before the refusal does not reach the client, whereas on a direct connection it stays on the entity.
+An excluded unbounded binary column is never carried, so the client's update guard keeps applying.
 A response without the values, from a server generated before they were carried, is settled by the version list and the skipped rows alone.
 Because a Save response carries every column of every saved row, a large SaveMany gets a response roughly as large as its request.
 
