@@ -2404,7 +2404,7 @@ Each row is listed once per reason, as a `SyncLocalRowChange` (table, key in the
 |---|---|
 | `DiscardedByServerWins` | A `ServerWins` run discarded the row's unsent changes and put the server's content back (or left the row to delete propagation when the server no longer has it) |
 | `ReloadedForUniqueValue` | The row held a unique value a downloaded row needed, and was read again from the server (or removed, when the server no longer has it) |
-| `RemovedBeforeDownload` | A `ServerWins` run removed the row, whose changes it was discarding and which the server does not have, before the server's rows came down |
+| `RemovedBeforeDownload` | A `ServerWins` run removed the row, whose changes it was discarding and which the server does not have, before the server's rows came down, and dropped its entries with it |
 
 Only `SyncAsync` fills it; `UploadAsync` and `DownloadAsync` called on their own return what they did before.
 A `SyncAsync` that throws has still done what it did up to that point, and hands the rows it had changed on in the exception's `Data`, under `SyncEngine.LocalRowChangesDataKey`, as an `IReadOnlyList<SyncLocalRowChange>`; the exception's type is the same as without it.
@@ -2436,11 +2436,15 @@ A row the server deleted is then gone before the server's rows go in, so a row t
 
 **The upload reorders what the foreign keys and the unique constraints need.**
 Upserts go parents first and deletes children first, table by table.
-Within a table the entries go in the order they were first recorded, which is not parent first in a table that refers to itself, so a write the server refuses for a foreign key is tried again once the others have gone, as long as another write of the table went through in between.
-Only what is still refused then is reported (or, in a last-write-wins `ServerWins` run, settled).
+Within a table the entries go in the order they were first recorded, which is not parent first in a table that refers to itself.
+The upload therefore goes in rounds.
+A write the server refuses for a foreign key or a unique value is sent again in the next round, as long as some write of the round before went through, in any table and at any stage.
+That write may be what freed the way, such as an update that gives up the unique value an earlier entry takes, or the move of the last child of a row whose delete was refused.
+There are never more rounds than entries, and a run where nothing is refused has one.
+Only what is still refused when no write goes through any more is reported (or, in a last-write-wins `ServerWins` run, settled).
 A table the run also deletes rows of has each upsert checked against the server's unique constraints first, which costs a round trip per upsert.
 An upsert whose unique value a row still holds on the server goes after the deletes, together with the upserts that refer to it, in the same table or another.
-If it still collides then, because the delete it waited for did not go through, it is reported as `UniqueValueTakenOnServer`.
+If it still collides when no write goes through any more, because the delete it waited for did not go through, it is reported as `UniqueValueTakenOnServer`.
 
 Replaying one change has three outcomes, not two, and `Uploaded` / `Discarded` / `Conflicts` are exactly those three: sent, nothing to send, refused.
 Folding the middle one into either of the others would report a change as delivered when nothing crossed the wire.
@@ -2516,6 +2520,10 @@ The newest entry can describe a write that never landed, and acting on it alone 
 | Gone | Otherwise | Drops the entries: the row never reached the server |
 
 A table without a version column has no version to know, so a delete recorded for a row that is gone is sent unconditionally.
+
+The decision is made when the run plans the table.
+When the application deletes the row again after that, before its update goes, the run sends instead the delete the table gives for a row that is gone, from the entries it planned with.
+The new delete is left for the next run, which finds the row already gone on the server; on its own it could not be sent, because the delete of a recreated row carries no version.
 
 **A delete records the version the local row has, not only the one on the entity.**
 A graph save may delete a stub that carries nothing but the key, or an object held since before the row's last download, and either carries no version or an older one than the row has.
@@ -2731,6 +2739,10 @@ A parent that a `ServerWins` run is discarding the delete of is brought back, si
 **A row whose unique value another local row still holds brings that row up to date first.**
 The download sees each row at its latest version only, so a row that gave a unique value up and was changed again later comes after the row that took the value, and the local copy still holding it refuses the newcomer.
 The local row holding the value is then read from the server and applied first, like a parent brought in (no mirrored version, a receipt recorded), and the batch is tried again; a row the server no longer has is removed instead, when nothing local refers to it and the run propagates deletes.
+The rows still referring to such a row can be rows of the same batch that the server moved under another parent, the waiting row among them.
+Those rows go in first, with the content of their server copies and their own unique values, and the row they referred to can then be removed; when it still cannot, they are put back as they were.
+A local row whose server copy cannot go in only because its new parent is a row still waiting for a value, being brought in further up the same resolution, as in rows moved and renamed in a cycle, gives its unique values up instead.
+The server's values are written into the local row, which keeps its parent and the rest of its content, and the row comes in whole when the download reaches it.
 It is looked into only after a batch has failed to apply, so a batch that goes in makes no extra call, and a batch is tried at most as many times as it has rows.
 The download stops at the server's row instead, reported in `PendingKeyText` like any other stop, when the local row cannot be brought forward: it has an unsent change the run is not discarding, the server no longer has it and it cannot be removed (it is referred to, or `PropagateDeletes` is off), or the rows hold each other's values.
 `ServerWins` treats such a row like one whose parent cannot be had: it is not put back and its entries stay.
@@ -2746,12 +2758,13 @@ Three more reasons come from the server refusing a write, two for its foreign ke
 `ServerWins` settles them by giving up the local change, in a last-write-wins run as well.
 They are reported only after a write to the server has failed, by looking up the state the failure would follow from, so a run where nothing goes wrong makes no extra call.
 A failure they do not explain, such as a dropped connection, is thrown back to the caller unchanged.
+When the lookup fails in turn, the run throws an `AggregateException` holding the write's failure first and the lookup's second; the entry stays, and the next run sends it again.
 
 | `SyncConflictReason` | When | Ways out |
 |---|---|---|
 | `ParentMissingOnServer` | Writing the row failed and a parent it points at is gone from the server (deleted there while the row was edited here). `LocalWins` reports it too, rather than bringing the parent back, and so does last-write-wins under any other policy | Run with `ServerWins` (in either mode), point the row at another parent, or edit the parent locally so it has a change of its own |
-| `DeleteRefusedOnServer` | Deleting the row failed while the server still holds it and some table of the diagram refers to its table, typically because another device has added a row that points at it. The cause itself is not looked up, so a passing failure of another kind can show up this way; the entry stays and the next run tries again | Run with `ServerWins` (in either mode), which brings the row back together with what now points at it |
-| `UniqueValueTakenOnServer` | Writing the row failed and the server's uniqueness check, asked with the local row, finds another row holding one of its unique values: another device took the value meanwhile, or the row deleted here to free it is still there because the delete did not go through. When the server is SQL Server, a NULL counts as a value, so a second row holding NULL in the same unique members is reported this way too (see [Uniqueness pre-check](#uniqueness-pre-check-checkuniquenessasync)). `LocalWins` reports it too, rather than taking the value from the other row. It is not tried again within the run, since no other write of the table frees the value | Change the value, or run with `ServerWins` (in either mode) |
+| `DeleteRefusedOnServer` | Deleting the row failed while the server still holds it and a row the server holds points at it, typically because another device has added one. The rows looked at are the server rows of the synchronized tables that refer to it by its primary key. A referring table outside that reach cannot be asked, and its presence alone reports the delete this way: a table the engine does not synchronize, or a foreign key that refers to a unique constraint or spans several columns. When no row points at it, the failure is thrown back unchanged | Run with `ServerWins` (in either mode), which brings the row back together with what now points at it |
+| `UniqueValueTakenOnServer` | Writing the row failed and the server's uniqueness check, asked with the local row, finds another row holding one of its unique values: another device took the value meanwhile, or the row deleted here to free it is still there because the delete did not go through. When the server is SQL Server, a NULL counts as a value, so a second row holding NULL in the same unique members is reported this way too (see [Uniqueness pre-check](#uniqueness-pre-check-checkuniquenessasync)). `LocalWins` reports it too, rather than taking the value from the other row. It is reported only once no write of the run goes through any more, since an update of another row may free the value | Change the value, or run with `ServerWins` (in either mode) |
 
 Put together, the two tables above settle each combination of policy and kind of conflict as follows.
 The three columns from `Collect` to `LocalWins` are default `Versioned` runs, and the last column is a last-write-wins run.
@@ -2917,11 +2930,14 @@ Nothing is lost by it, and local writes wait until the refresh is over, but a sc
   Give a table a rowversion column when its conflicts should be detected (see [Versionless tables and last-write-wins](#versionless-tables-and-last-write-wins-syncmodelastwritewins)).
 - **Unbounded binary columns are not carried unless you ask for them** (`SyncOptions.IncludeUnboundedBinary`), and carrying them costs one round trip per column per changed row.
   See [Unbounded binary columns](#unbounded-binary-columns).
-- **Two rows whose unique values the server swapped are not applied.**
-  Bringing one of them forward needs the value the other one holds, so neither goes first.
-  When one batch holds rows that swapped a unique value (one row takes the value the other gives up), SQLite checks the constraint statement by statement and refuses the first of them, so that table's download stops at it on every run.
+- **Rows whose unique values were rotated on the device or on the server are not carried across.**
+  Two rows swapping a value and more rows passing one along fare the same, in either direction, however many runs the rotation was spread over.
+  Bringing one of them forward needs the value another one holds, so none goes first.
+  Rotated on the server, the rows meet in one batch, SQLite checks the constraint statement by statement and refuses the first of them, so that table's download stops at it on every run.
   `SyncResult.Truncations` shows it as a stop at a row with no unsent change of its own and no missing parent, run after run.
-  `RefreshAsync` rebuilds the table and clears it.
+  Rotated on the device, the upload sends each row's last values, so a temporary value written in between does not travel, and the server refuses every row with `UniqueValueTakenOnServer`, run after run; `ServerWins` cannot bring them back either.
+  `RefreshAsync` rebuilds the table and clears it (with unsent changes it needs `Force`, which discards them).
+  On the device, synchronizing once after writing the temporary value, before writing the final ones, avoids it.
 - **Rows the server deleted that refer to each other in a cycle stay on the device.**
   Delete propagation removes a row only when nothing local refers to it, and no row of such a cycle qualifies first.
   It takes the server clearing one of the references and that update reaching the device, which is also how the server itself has to delete them.

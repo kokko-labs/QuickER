@@ -285,6 +285,7 @@ public static class GeneratedFixedTypeNames
         Create(
             "Action",
             "Activator",
+            "AggregateException",
             "ArgumentException",
             "ArgumentNullException",
             "ArgumentOutOfRangeException",

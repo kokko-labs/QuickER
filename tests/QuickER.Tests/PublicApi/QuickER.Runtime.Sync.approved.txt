@@ -387,6 +387,7 @@ public abstract class QuickER.Runtime.Sync.SyncTableBase<TEntity, TKey> : QuickE
 
 public sealed class QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> : QuickER.Runtime.Sync.ISyncTableDescriptor
     public .ctor()
+    public System.Action<TEntity, TEntity> CopyUniqueValues { get; init; }
     public System.Action<TEntity, TKey> WriteKey { get; init; }
     public System.Action<TEntity, byte[]> WriteRowVersion { get; init; }
     public System.Action<TEntity> FillUnsetUnboundedBinaries { get; init; }

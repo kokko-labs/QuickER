@@ -108,9 +108,18 @@ internal static class SyncModelOutcomeDimensions
                     SyncModelDimensions.DirectScope,
                     "P2-3",
                     "P2-末",
-                    "一意な値の持ち主の読み直し（N8）は、Collect の実行では既定の 60 種でたまたま出ない（ServerWins・LocalWins の実行では出る）",
+                    "一意な値の持ち主の読み直し（N8）は、Collect の実行では既定の 60 種でたまたま出ない（ServerWins の実行では出る）",
                     (Outcome, nameof(SyncLocalRowChangeReason.ReloadedForUniqueValue)),
                     (Policy, nameof(SyncConflictPolicy.Collect))
+                ),
+                CoverageGap.Tuple(
+                    SyncModelDimensions.DirectScope,
+                    "P2-3",
+                    "P2-末",
+                    "一意な値の持ち主の読み直し（N8）は、LocalWins の実行では既定の 60 種でたまたま出ない（ServerWins の実行では出る）。"
+                        + "修正 C で、断られた取る更新を同じ実行の次の巡で送り直すようになり、それまでこの組を作っていた種では読み直しが要らなくなった",
+                    (Outcome, nameof(SyncLocalRowChangeReason.ReloadedForUniqueValue)),
+                    (Policy, nameof(SyncConflictPolicy.LocalWins))
                 ),
             ]
         );

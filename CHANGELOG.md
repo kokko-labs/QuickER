@@ -6,6 +6,18 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Breaking changes
+
+#### Bidirectional sync
+
+- **When a write to the server fails and the lookup of why fails as well, the sync now throws an `AggregateException` holding the write's failure first and the lookup's second** — the write's own exception was thrown before, so a connection dropped while uploading often reaches the caller in this form. Catch `AggregateException` too where you catch the exception of a failed connection, and look into its inner exceptions. The entry stays, and the next run sends it again
+
+### Added
+
+#### Bidirectional sync
+
+- **`SyncTableDescriptor.CopyUniqueValues` writes the values of a table's unique constraints from one copy of a row into another** — the generated descriptors set it over the same constraints as `LocalUniqueLookups`, and a download uses it to settle rows whose unique values collide. A descriptor you build yourself copies nothing unless you set it; set it together with `LocalUniqueLookups`
+
 ### Changed
 
 #### AI chat & MCP
@@ -46,6 +58,17 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **On SQLite, after a sync that changes only one of two foreign keys on the same columns, the diff shows the other one as a change** — it showed only a drop, so the next sync left a single foreign key
 - **A sync whose selected column drops would leave a table without any column now leaves those drops out and names the table and the columns in the confirmation** — SQL Server refused the sync, MySQL and Oracle refused it after dropping the constraints and some columns, PostgreSQL created a table without columns that could not be imported back, and SQLite failed with a syntax error
 - **On SQLite, a sync that drops all the old columns of a table and adds new ones no longer deletes every row** — the rows are kept and the new columns are NULL, as on the other dialects
+
+#### Bidirectional sync
+
+- **A download no longer stops with a unique constraint error after it has brought in, from the server, the new parent of a row holding a unique value the download needs** — the retry inserted that parent a second time
+- **With `ServerWins` and delete propagation off, a row put back from the server whose parent stays out for a unique value no longer stops the sync on the local foreign key** — the row is held back with its parent
+- **An upload sends again, in the same run, a write the server refused for a foreign key or a unique value once another write has gone through** — an update that takes a unique value another row gives up later in the run, and the delete of a row whose last child is moved later in the run, went up only on a later run (or, in a last-write-wins `ServerWins` run, were discarded)
+- **A row deleted and recreated, then deleted again while a sync is uploading, is deleted on the server** — the upload found the recreated row gone and dropped its entries, and the delete left behind carries no version, so the next run dropped it too and the server kept the row
+- **A `ServerWins` run that removes rows ahead of the download drops their entries at the same time** — when the run failed later, the entries stayed, and the next run dropped them with no record of the discard
+- **A download no longer stops on every run when the server has moved a row under another parent and given it the unique value of a row it then deleted, while the local copy of the moved row still refers to the deleted one** — the deleted row could not be removed while the moved row referred to it, and the moved row could not come in while the deleted row held its value
+- **A `ServerWins` download no longer stops on every run on rows the server moved and renamed in a cycle** — each row waited for the value or the parent another row of the cycle held
+- **A delete that fails is reported as `DeleteRefusedOnServer` only when a row on the server points at it** — a passing failure of a delete no longer shows up as a conflict, and a last-write-wins `ServerWins` run no longer discards the delete for it; the failure is thrown instead, and the next run sends the delete again (an `AggregateException` with the check's failure as well, when the check cannot read the server's rows either; see Breaking changes)
 
 ## [0.3.0] - 2026-10-25
 
