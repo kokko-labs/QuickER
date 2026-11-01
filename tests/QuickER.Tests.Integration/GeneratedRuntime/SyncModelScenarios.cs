@@ -1663,8 +1663,8 @@ internal static class SyncModelScenarios
     /// <remarks>
     /// <para>
     /// <c>repro-b3</c>：サーバーでフォルダー 600 を消し、その名前をフォルダー 601 が更新で取る（601 の子 602 も更新）。端末は
-    /// 602 と 601 を消してある。ServerWins＋削除伝搬なしの同期は、名前がぶつかって外した親 601（ローカルに無い）の子 602
-    /// だけを戻し、ローカルの外部キーで毎回止まる。
+    /// 602 と 601 を消してある。ServerWins＋削除伝搬なしの同期は、名前がぶつかって外した親 601（ローカルに無い）と一緒に
+    /// 子 602 も保留し、ローカルの外部キーで止まらない（修正 C の前は子だけを戻して毎回止まった）。
     /// </para>
     /// <para>
     /// <c>repro-d3-*</c>：同じ表の別の行の更新が一意な値を空け、先に記録のある行がその値を更新で取る。取る更新はサーバーで
@@ -1679,7 +1679,8 @@ internal static class SyncModelScenarios
     {
         // P2-3-N13（乱数の種 13 の形を縮めたもの）：サーバーでフォルダー 772 を別の親へ移し、フォルダー 771 を消して、その名前を
         // 772 が取る。端末のフォルダー 772 はまだ 771 の下にあるので、名前の持ち主 771（サーバーに無い）を、値を取る 772 自身の
-        // 古い参照が残す。削除伝搬も持ち主の読み直しも 771 を消せず、772 は名前がぶつかって降りない（静止化しない）
+        // 古い参照が残す（修正 C の前は、削除伝搬も持ち主の読み直しも 771 を消せず、772 は名前がぶつかって降りなかった）。いまは
+        // 772 をサーバーの内容とローカルの名前で先に入れて参照を外し、771 を消してから 772 が名前を取る
         yield return new(
             "n13-holder-referenced-by-taker",
             [
@@ -1774,9 +1775,8 @@ internal static class SyncModelScenarios
 
         // P2-3-N14（夜間の種 132・146 を縮めたもの）：サーバーでフォルダー 803 が名前を手放し、802 がその名前を取り、その後 803 を
         // 新しく作ったフォルダー 804 の下へ移す。端末のダウンロードは 802 の適用が一意な名前でぶつかり、持ち主 803 を読み直す
-        // （親の 804 も読み直して先に入れる）。見立て（根本原因の切り分けは修正 C）：読み直しの後でバッチをやり直すと、読み直しで
-        // 入れた 804 をバッチがもう一度挿入して一意制約の例外になり、どの行もローカルでぶつからない（持ち主はもう値を手放した）ので、
-        // ぶつかりの検出が元の例外を投げ直す＝打ち切りでなく例外で止まる
+        // （親の 804 も読み直して先に入れる）。読み直しの後のやり直しは、最初の試行で挿入と決めた 804 を、ローカルにある行として
+        // 更新に決め直さなければならない（修正 C の前は MarkUpdated が挿入の印を残し、804 をもう一度挿入して一意制約の例外で止まった）
         yield return new(
             "n14-holder-moved-under-new-parent-in-batch",
             [
@@ -1855,7 +1855,8 @@ internal static class SyncModelScenarios
                 Sync(D1),
             ]
         );
-        // 修正 C で消える条件：ServerWins の読み直しで、ぶつかって外した親の子を戻さない（親と一緒に保留する）
+        // ServerWins の読み直しは、ぶつかって外した親（ローカルに無い）の子を戻さず、親と一緒に保留する（修正 C の前は子だけを
+        // 戻してローカルの外部キーで毎回止まった）
         yield return new(
             "repro-b3",
             [
@@ -1871,6 +1872,115 @@ internal static class SyncModelScenarios
                 new UpdateFolderOp(SV, Direct, 602, 601, "c602x"),
                 Sync(D1, policy: SyncConflictPolicy.ServerWins, propagateDeletes: false),
                 Sync(D1, policy: SyncConflictPolicy.ServerWins, propagateDeletes: false),
+            ]
+        );
+
+        // repro-b3 の 3 段：外した親 651（ローカルに無い）の子 652 もローカルに無いので、その子 653 も一緒に保留する（推移）
+        yield return new(
+            "repro-b3-grandchild",
+            [
+                Folder(SV, 650, name: "h650"),
+                Folder(SV, 651, name: "p651"),
+                Folder(SV, 652, 651, "c652"),
+                Folder(SV, 653, 652, "g653"),
+            ],
+            [
+                new DeleteFolderOp(D1, Direct, 653),
+                new DeleteFolderOp(D1, Direct, 652),
+                new DeleteFolderOp(D1, Direct, 651),
+                new DeleteFolderOp(SV, Direct, 650),
+                new UpdateFolderOp(SV, Direct, 651, null, "h650"),
+                new UpdateFolderOp(SV, Direct, 652, 651, "c652x"),
+                new UpdateFolderOp(SV, Direct, 653, 652, "g653x"),
+                Sync(D1, policy: SyncConflictPolicy.ServerWins, propagateDeletes: false),
+                Sync(D1, policy: SyncConflictPolicy.ServerWins, propagateDeletes: false),
+            ]
+        );
+
+        // 対照：外した親 656 がローカルにあれば、その下の子 657 と孫 658 は戻す（ローカルで消した孫 658 が 1 回目の同期で戻る）
+        yield return new(
+            "repro-b3-grandchild-under-present-child",
+            [
+                Folder(SV, 655, name: "h655"),
+                Folder(SV, 656, name: "p656"),
+                Folder(SV, 657, 656, "c657"),
+                Folder(SV, 658, 657, "g658"),
+            ],
+            [
+                new DeleteFolderOp(D1, Direct, 658),
+                new UpdateFolderOp(D1, Direct, 657, 656, "c657d"),
+                new UpdateFolderOp(D1, Direct, 656, null, "p656d"),
+                new DeleteFolderOp(SV, Direct, 655),
+                new UpdateFolderOp(SV, Direct, 656, null, "h655"),
+                new UpdateFolderOp(SV, Direct, 657, 656, "c657x"),
+                new UpdateFolderOp(SV, Direct, 658, 657, "g658x"),
+                Sync(D1, policy: SyncConflictPolicy.ServerWins, propagateDeletes: false),
+                new ExpectLocalOp(D1, ModelTables.Folders, "657", "parent=656 name=c657x"),
+                new ExpectLocalOp(D1, ModelTables.Folders, "658", "parent=657 name=g658x"),
+            ]
+        );
+
+        // 夜間の種 1119 を縮めたもの（B3 を直すと見えた形）：サーバーでフォルダー 862 を 861 の下へ移し、861 の名前を、端末が 862 に
+        // 付けた名前 x にする。端末は 861 を消し、862 の名前を x にしてある。ServerWins の読み直しは、861 を戻すと名前 x がローカルの
+        // 862 とぶつかり、862 を持ち主として読み直すと新しい親 861 がローカルに無い（循環。修正 C の前はどちらも戻せず、記録が
+        // 残って静止化しなかった）。いまは 862 が一意な値だけを先に手放し、861・862 の順に入る
+        yield return new(
+            "serverwins-holder-moves-under-taker",
+            [Folder(SV, 860), Folder(SV, 861, name: "n861"), Folder(SV, 862, 860, "n862")],
+            [
+                new DeleteFolderOp(D1, Direct, 861),
+                new UpdateFolderOp(D1, Direct, 862, 860, "x"),
+                new UpdateFolderOp(SV, Direct, 862, 861, "z862"),
+                new UpdateFolderOp(SV, Direct, 861, null, "x"),
+                Sync(D1, policy: SyncConflictPolicy.ServerWins),
+            ]
+        );
+
+        // 夜間の種 734 を縮めたもの（N17 の持ち主が 2 段に連なる形・ダウンロードの経路）：端末はフォルダー 872 を 871 の下へ移し、
+        // 872 の元の親 870 を消してある。サーバーでは 872 の名前を z872 に、871 の名前を 872 の古い名前に、870 の名前を 871 の古い
+        // 名前にする（872 の親は 870 のまま）。ServerWins のダウンロードは、872 の親 870 を戻そうとして名前が 871 とぶつかり、871 を
+        // 新しくしようとして名前が 872 とぶつかり、872 は親 870 がまだローカルに無いので戻せない（3 つの循環）。872 が一意な値だけを
+        // 先に手放す（親は 871 のまま）と、871・870・872 の順に入る
+        yield return new(
+            "serverwins-holder-chain-moves-under-taker",
+            [
+                Folder(SV, 870, name: "n870"),
+                Folder(SV, 871, name: "n871"),
+                Folder(SV, 872, 870, "n872"),
+            ],
+            [
+                new UpdateFolderOp(D1, Direct, 872, 871, "n872"),
+                new DeleteFolderOp(D1, Direct, 870),
+                new UpdateFolderOp(SV, Direct, 872, 870, "z872"),
+                new UpdateFolderOp(SV, Direct, 871, null, "n872"),
+                new UpdateFolderOp(SV, Direct, 870, null, "n871"),
+                Sync(D1, policy: SyncConflictPolicy.ServerWins),
+                new ExpectLocalOp(D1, ModelTables.Folders, "870", "parent=null name=n871"),
+                new ExpectLocalOp(D1, ModelTables.Folders, "871", "parent=null name=n872"),
+                new ExpectLocalOp(D1, ModelTables.Folders, "872", "parent=870 name=z872"),
+            ]
+        );
+
+        // 対照（持ち主が別の理由で保留される形）：サーバーでフォルダー 881 の名前を y881 に変え、その古い名前 x881 をフォルダー 882
+        // が取り、続けて 881 を 880 の下へ移す。端末は 880 を消してあり、その削除はサーバーに断られて（881 が参照する）未送信の
+        // まま残る。ダウンロードは 882 が名前 x881 でローカルの 881 とぶつかり、881 を新しくしようとすると親 880 が未送信の削除で
+        // 保留になる。保留の理由が読み直しの途中の行でないので、881 は一意な値を手放さない（手放すと、名前だけがサーバーの値で
+        // 親は古いままの行が残る）。ダウンロードは 882 で止まり、881 も 882 も元のまま
+        yield return new(
+            "holder-held-for-another-reason-keeps-its-values",
+            [
+                Folder(SV, 880, name: "p880"),
+                Folder(SV, 881, name: "x881"),
+                Folder(SV, 882, name: "q882"),
+            ],
+            [
+                new DeleteFolderOp(D1, Direct, 880),
+                new UpdateFolderOp(SV, Direct, 881, null, "y881"),
+                new UpdateFolderOp(SV, Direct, 882, null, "x881"),
+                new UpdateFolderOp(SV, Direct, 881, 880, "y881"),
+                Sync(D1),
+                new ExpectLocalOp(D1, ModelTables.Folders, "881", "parent=null name=x881"),
+                new ExpectLocalOp(D1, ModelTables.Folders, "882", "parent=null name=q882"),
             ]
         );
 
@@ -1994,6 +2104,43 @@ internal static class SyncModelScenarios
                 ]
             );
         }
+
+        // 対照：サーバーに参照する行（品目 726）が本当にあれば、削除は DeleteRefusedOnServer のまま（参照の確認がサーバーの子の
+        // 表の行を読んで見つける）。失敗を仕掛けない行は SQL Server の転送でも流れる。仕掛けた行は、一時的な失敗が当たっても
+        // 参照があれば断られたと報告する
+        foreach (var (name, fault) in new[] { ("", false), ("-after-fault", true) })
+        {
+            yield return new(
+                $"d2-delete-refused-by-referencing-row{name}",
+                [Folder(SV, 725)],
+                [
+                    new DeleteFolderOp(D1, Direct, 725),
+                    Item(SV, 726, 725),
+                    .. fault
+                        ? [new ArmFaultOp(D1, ModelFaultKind.ServerWrite)]
+                        : Array.Empty<ModelOp>(),
+                    Sync(D1),
+                    new ExpectLocalOp(SV, ModelTables.Folders, "725", "parent=null name=f725"),
+                ]
+            );
+        }
+
+        // 確認そのものの失敗：参照する行の無い削除に、サーバーへの書き込みの失敗と、取得の失敗（参照する行の確認の読み取りで
+        // 当たる）の両方を仕掛ける。確認が失敗したら、元の失敗と確認の失敗をまとめた AggregateException を投げ、記録を残す
+        // （後勝ち＋ServerWins でも競合にせず、削除を捨てない）。次の同期で削除が通る
+        yield return new(
+            "d2-delete-check-fails-lww-serverwins",
+            [Folder(SV, 728)],
+            [
+                new DeleteFolderOp(D1, Direct, 728),
+                new ArmFaultOp(D1, ModelFaultKind.ServerWrite),
+                new ArmFaultOp(D1, ModelFaultKind.ServerFetch),
+                Sync(D1, SyncMode.LastWriteWins, SyncConflictPolicy.ServerWins),
+                new ExpectLocalOp(D1, ModelTables.Folders, "728", null),
+                Sync(D1),
+                new ExpectLocalOp(SV, ModelTables.Folders, "728", null),
+            ]
+        );
 
         var cases = new (string Name, SyncMode Mode, SyncConflictPolicy Policy)[]
         {

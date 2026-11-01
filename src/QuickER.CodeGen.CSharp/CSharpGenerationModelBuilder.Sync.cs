@@ -513,12 +513,16 @@ internal sealed partial class CSharpGenerationModelBuilder
                 + "],";
     }
 
-    /// <summary>記述子の、一意制約ごとの引き当ての並び（<c>LocalUniqueLookups</c>）を組み立てる。</summary>
+    /// <summary>
+    /// 記述子の、一意制約ごとの引き当ての並び（<c>LocalUniqueLookups</c>）と、同じ制約の値を書き写す関数
+    /// （<c>CopyUniqueValues</c>）を組み立てる。
+    /// </summary>
     /// <remarks>
     /// 一意制約ごとに、行から制約の値を読む関数（値オブジェクトは内側の値）と、その値を持つローカルの行のキーを返す
     /// <c>SELECT "キー" FROM "表" WHERE "列0" = @values0 AND …</c>（ローカル＝SQLite の引用）を 1 組作る。ダウンロードで
     /// サーバーの行がローカルの行と一意な値でぶつかったとき、値を持つローカルの行を引き当ててサーバーから読み直す。
-    /// 主キーが 1 列でない表・制約の列を解決できない制約は載せない。
+    /// 書き写す関数は、載せた制約の構成列（重ねない）を、片方の行からもう片方へ代入する（引き当てと書き写しが同じ制約の
+    /// 集合を見るよう、ここで一緒に作る）。主キーが 1 列でない表・制約の列を解決できない制約は載せない。
     /// </remarks>
     private string BuildSyncLocalUniqueLookupsBlock(Entity entity, string entityClassName)
     {
@@ -532,6 +536,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         var table = QuoteQualified(entity.TableName, "\"", "\"");
         var key = QuoteIdentifier(keys[0].Name, "\"", "\"");
         var lookups = new List<string>();
+        var copied = new List<string>();
 
         foreach (var constraint in entity.UniqueConstraints)
         {
@@ -542,6 +547,16 @@ internal sealed partial class CSharpGenerationModelBuilder
             if (columns.Count == 0 || columns.Any(column => column is null))
             {
                 continue;
+            }
+
+            foreach (var column in columns)
+            {
+                var propertyName = _nameConverter.ToPropertyName(column!.Name);
+
+                if (!copied.Contains(propertyName))
+                {
+                    copied.Add(propertyName);
+                }
             }
 
             var reads = columns.Select(
@@ -573,7 +588,13 @@ internal sealed partial class CSharpGenerationModelBuilder
             ? string.Empty
             : "            LocalUniqueLookups =\n            [\n"
                 + string.Join("\n", lookups)
-                + "\n            ],";
+                + "\n            ],\n"
+                + "            CopyUniqueValues = (source, target) =>\n            {\n"
+                + string.Join(
+                    "\n",
+                    copied.Select(name => $"                target.{name} = source.{name};")
+                )
+                + "\n            },";
     }
 
     /// <summary>
