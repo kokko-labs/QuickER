@@ -167,11 +167,38 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             StringComparer.Ordinal
         );
 
+        var rowResults = new ConcurrentDictionary<
+            string,
+            (IReadOnlyList<ModelFailure> Failures, IReadOnlyList<string> Log)
+        >(StringComparer.Ordinal);
+
         // 種ごとに世界（SQLite の DB 3 つ）を作るので、種どうしは何も共有しない。並列度は CPU 数で抑える
         await RunObservedAsync(
             [coverage, outcomes],
-            () =>
-                Parallel.ForEachAsync(
+            async () =>
+            {
+                // 網羅の行（SyncModelCoverageRows）を種の前に流して数える（種を 1 つだけ流すときは流さない）。行も種と同じく
+                // 世界を行ごとに作るので並列に流す。決定的なシナリオは別の Theory で流れ、網羅の計数に入らない
+                if (!plan.IsSingle)
+                {
+                    await Parallel.ForEachAsync(
+                        SyncModelCoverageRows.Table,
+                        new ParallelOptions
+                        {
+                            MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 1, 8),
+                            CancellationToken = Ct,
+                        },
+                        async (row, ct) =>
+                            rowResults[row.Id] = await SyncModelCoverageRows.RunAsync(
+                                row,
+                                coverage,
+                                outcomes,
+                                ct
+                            )
+                    );
+                }
+
+                await Parallel.ForEachAsync(
                     plan.Seeds,
                     new ParallelOptions
                     {
@@ -190,7 +217,8 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                         );
                         elapsed[seed] = watch.Elapsed;
                     }
-                )
+                );
+            }
         );
 
         // 宣言の誤りは種の失敗より先に赤にする（Report が Observe の誤りを投げ直す）
@@ -246,7 +274,29 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             );
         }
 
-        output.WriteLine($"seeds: {plan.Seeds.Count}");
+        // 網羅の行の違反は既知の失敗の一覧で外さない（どれも新しい失敗）
+        foreach (
+            var (id, (rowFailures, rowLog)) in rowResults
+                .Where(r => r.Value.Failures.Count > 0)
+                .OrderBy(r => r.Key, StringComparer.Ordinal)
+        )
+        {
+            report.Add(
+                new EngineFailure(
+                    $"coverage/{id}",
+                    rowFailures[0].Signature,
+                    string.Join(
+                        Environment.NewLine,
+                        rowFailures.Select(f => $"{f.Signature}: {f.Detail}")
+                    )
+                        + Environment.NewLine
+                        + string.Join(Environment.NewLine, rowLog)
+                ),
+                $"直結の乱数のテストを流す（網羅の行 `{id}` は種の前に必ず流れる）"
+            );
+        }
+
+        output.WriteLine($"seeds: {plan.Seeds.Count}, coverage rows: {rowResults.Count}");
 
         // 理由ごとの根拠の確認の件数（0 件の理由は確かめが一度も走っていない）
         foreach (

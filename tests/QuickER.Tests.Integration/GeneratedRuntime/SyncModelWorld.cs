@@ -789,7 +789,12 @@ internal sealed class SyncModelWorld : IAsyncDisposable
                 break;
 
             case DeleteStubOp stub:
-                await DeleteStubAsync(device, stub.StubTable, stub.StubKeyText, ct);
+                await DeleteStubAsync(
+                    ModelRepositories.Of(device),
+                    stub.StubTable,
+                    stub.StubKeyText,
+                    ct
+                );
                 break;
 
             case DeleteHeldOp held:
@@ -800,7 +805,7 @@ internal sealed class SyncModelWorld : IAsyncDisposable
                 }
 
                 entity.MarkRemoved();
-                await SaveHeldAsync(device, held.HeldTable, entity, ct);
+                await SaveHeldAsync(ModelRepositories.Of(device), held.HeldTable, entity, ct);
                 break;
             }
 
@@ -811,7 +816,7 @@ internal sealed class SyncModelWorld : IAsyncDisposable
 
     /// <summary>キーだけのスタブ（新しい実体にキーだけ）に RowState=Removed を付けてグラフ保存する</summary>
     private static Task DeleteStubAsync(
-        SyncModelDevice device,
+        ModelRepositories device,
         string table,
         string keyText,
         CancellationToken ct
@@ -857,7 +862,7 @@ internal sealed class SyncModelWorld : IAsyncDisposable
 
     /// <summary>メモリに持っていた実体をグラフ保存する</summary>
     private static Task SaveHeldAsync(
-        SyncModelDevice device,
+        ModelRepositories device,
         string table,
         EntityBase entity,
         CancellationToken ct
@@ -890,13 +895,15 @@ internal sealed class SyncModelWorld : IAsyncDisposable
         switch (op)
         {
             case AddFolderOp add:
-                await Server.Folders.InsertAsync(
+                await InsertOnServerAsync(
+                    Server.Folders,
                     new ModelFolderEntity
                     {
                         FolderId = add.Id,
                         ParentId = add.ParentId,
                         Name = add.Name,
                     },
+                    op,
                     ct
                 );
                 break;
@@ -915,13 +922,15 @@ internal sealed class SyncModelWorld : IAsyncDisposable
                 break;
 
             case AddLabelOp add:
-                await Server.Labels.InsertAsync(
+                await InsertOnServerAsync(
+                    Server.Labels,
                     new ModelLabelEntity
                     {
                         LabelCode = add.Code,
                         FolderId = add.FolderId,
                         Caption = add.Caption,
                     },
+                    op,
                     ct
                 );
                 break;
@@ -940,7 +949,8 @@ internal sealed class SyncModelWorld : IAsyncDisposable
                 break;
 
             case AddItemOp add:
-                await Server.Items.InsertAsync(
+                await InsertOnServerAsync(
+                    Server.Items,
                     new ModelItemEntity
                     {
                         ItemId = add.Id,
@@ -950,6 +960,7 @@ internal sealed class SyncModelWorld : IAsyncDisposable
                         Title = add.Title,
                         Payload = Convert.FromHexString(add.PayloadHex),
                     },
+                    op,
                     ct
                 );
                 break;
@@ -991,13 +1002,15 @@ internal sealed class SyncModelWorld : IAsyncDisposable
             }
 
             case AddEventOp add:
-                await Server.Events.InsertAsync(
+                await InsertOnServerAsync(
+                    Server.Events,
                     new ModelEventEntity
                     {
                         EventAt = add.At,
                         ItemId = add.ItemId,
                         Memo = add.Memo,
                     },
+                    op,
                     ct
                 );
                 break;
@@ -1015,9 +1028,46 @@ internal sealed class SyncModelWorld : IAsyncDisposable
                 await Server.Events.DeleteAsync(delete.At, ct);
                 break;
 
+            // サーバーへ直接書く他者も、キーだけのスタブや持っていた実体をグラフ保存で消せる（サーバー役のリポジトリの SaveAsync）
+            case DeleteStubOp stub:
+                await DeleteStubAsync(
+                    ModelRepositories.Of(Server),
+                    stub.StubTable,
+                    stub.StubKeyText,
+                    ct
+                );
+                break;
+
+            case DeleteHeldOp held:
+            {
+                if (!ServerHeld.TryGetValue((held.HeldTable, held.HeldKeyText), out var entity))
+                {
+                    throw new InvalidOperationException($"No held entity: {op.Describe()}");
+                }
+
+                entity.MarkRemoved();
+                await SaveHeldAsync(ModelRepositories.Of(Server), held.HeldTable, entity, ct);
+                break;
+            }
+
             default:
                 throw new ArgumentOutOfRangeException(nameof(op), op.Describe(), null);
         }
+    }
+
+    /// <summary>サーバーの他者が挿入したときの実体（表とキーで引く）。サーバーの他者の <see cref="DeleteHeldOp"/> が使う</summary>
+    public Dictionary<(string Table, string Key), EntityBase> ServerHeld { get; } = [];
+
+    private async Task InsertOnServerAsync<TEntity, TKey>(
+        IRepository<TEntity, TKey> repository,
+        TEntity entity,
+        ModelWriteOp op,
+        CancellationToken ct
+    )
+        where TEntity : EntityBase, new()
+    {
+        await repository.InsertAsync(entity, ct);
+        ServerHeld[(op.Table, op.KeyText)] = entity;
     }
 
     private static async Task<T> Load<T>(Task<T?> load, ModelOp op)
@@ -1099,4 +1149,21 @@ internal sealed class SyncModelWorld : IAsyncDisposable
 
         await Server.DisposeAsync();
     }
+}
+
+/// <summary>グラフ保存の削除に使う 4 つの表のリポジトリ（端末とサーバー役で共有する）</summary>
+internal sealed record ModelRepositories(
+    IRepository<ModelFolderEntity, int> Folders,
+    IRepository<ModelLabelEntity, string> Labels,
+    IRepository<ModelItemEntity, int> Items,
+    IRepository<ModelEventEntity, DateTime> Events
+)
+{
+    /// <summary>端末のリポジトリ</summary>
+    public static ModelRepositories Of(SyncModelDevice device) =>
+        new(device.Folders, device.Labels, device.Items, device.Events);
+
+    /// <summary>サーバー役のリポジトリ</summary>
+    public static ModelRepositories Of(ISyncModelServerRole server) =>
+        new(server.Folders, server.Labels, server.Items, server.Events);
 }

@@ -227,18 +227,13 @@ internal static class SyncPlanCapabilityNetDimensions
         CoverageGap.Set(
             EngineIds.SyncPlan,
             [
-                .. MutationGaps(
-                    DialectNames.SqlServer,
-                    "fk action",
-                    "P2-末",
-                    "生成器は SQL Server で参照アクションを変えない（SyncPlanFuzzDialect.AllowCascade が偽：連鎖の経路の重なりを CREATE で断る DB の制約に当たらないよう、ON DELETE の切り替えをまとめて作らない。重ならない経路だけで切り替える生成はエンジンの側で作れる）"
-                ),
+                // SQL Server の参照アクションの変更（fk action と ReferentialAction の各組）は、生成器が作らない（AllowCascade が偽）
+                // ので網羅の行（SyncPlanCoverageRows の coverage-sqlserver-fk-actions-*）が埋める
                 .. new[] { "alter type duplicated fk", "drop one of duplicated fks" }.SelectMany(
                     mutation =>
                         MutationGaps(
                             DialectNames.Oracle,
                             mutation,
-                            null,
                             "Oracle は同じ子の列の並びから同じ親へ外部キーを 2 本張れない（ORA-02275・DB の事実）ので、同じ列ペアに外部キーが 2 本ある形を前提にする変更は作れない"
                         )
                 ),
@@ -250,65 +245,41 @@ internal static class SyncPlanCapabilityNetDimensions
                     MutationGaps(
                         DialectNames.Oracle,
                         mutation,
-                        null,
                         "Oracle は同じ列の並びに一意制約を 2 つ張れない（ORA-02261・DB の事実）ので、同じ列の並びに一意制約が 2 つある形を前提にする変更は作れない"
                     )
                 ),
                 .. MutationGaps(
                     DialectNames.Sqlite,
                     "respell type",
-                    null,
                     "SQLite は宣言の型をそのまま覚え、型の正規化を持たない（製品の事実＝NormalizeTypeNotation が恒等）ので、同じ型の別の綴りが無い"
                 ),
                 .. LevelGaps(
                     DialectNames.Sqlite,
                     AlteredType,
                     level => level == "AtLimit",
-                    null,
                     "SQLite は型の長さを検査せず上限を持たない（DB の事実）ので、方言の上限ちょうどの型が無い"
-                ),
-                .. LevelGaps(
-                    DialectNames.SqlServer,
-                    ReferentialAction,
-                    level => level != NotApplicable,
-                    "P2-末",
-                    "生成器は SQL Server で参照アクションを変えない（fk action の欠けと同じ理由）",
-                    // 変更の種類との組（fk action × 行き先）は fk action の項目が受け持つ
-                    except: SyncPlanFuzzDimensions.Mutation
                 ),
             ]
         );
 
     /// <summary>
-    /// 変更の種類が一度も出ない方言の欠け（選び方との組と、固定した能力の水準との組の全部）。
-    /// <paramref name="fixedIn"/> が null なら受け入れ（製品か DB の事実）
+    /// 変更の種類が一度も出ない方言の欠け（選び方との組と、固定した能力の水準との組の全部・受け入れ＝製品か DB の事実）
     /// </summary>
     private static IEnumerable<CoverageGapEntry> MutationGaps(
         string dialect,
         string mutation,
-        string? fixedIn,
         string reason
-    ) =>
-        LevelGaps(
-            dialect,
-            SyncPlanFuzzDimensions.Mutation,
-            kind => kind == mutation,
-            fixedIn,
-            reason
-        );
+    ) => LevelGaps(dialect, SyncPlanFuzzDimensions.Mutation, kind => kind == mutation, reason);
 
     /// <summary>
-    /// 因子 <paramref name="factor"/> の水準（<paramref name="levels"/> が真）が一度も出ない方言の欠け（その因子とほかの全因子との組）。
-    /// <paramref name="fixedIn"/> が null なら受け入れ（製品か DB の事実）。<paramref name="except"/> の因子との組は作らない
-    /// （ほかの項目が受け持つ組）
+    /// 因子 <paramref name="factor"/> の水準（<paramref name="levels"/> が真）が一度も出ない方言の欠け（その因子とほかの全因子との組・
+    /// 受け入れ＝製品か DB の事実）
     /// </summary>
     private static IEnumerable<CoverageGapEntry> LevelGaps(
         string dialect,
         string factor,
         Func<string, bool> levels,
-        string? fixedIn,
-        string reason,
-        string? except = null
+        string reason
     )
     {
         var names = Table.Factors.Select(f => f.Name).ToList();
@@ -316,7 +287,7 @@ internal static class SyncPlanCapabilityNetDimensions
 
         for (var other = 0; other < names.Count; other++)
         {
-            if (other == index || names[other] == except)
+            if (other == index)
             {
                 continue;
             }
@@ -325,9 +296,7 @@ internal static class SyncPlanCapabilityNetDimensions
             Func<string, string, bool> predicate =
                 a == factor ? (level, _) => levels(level) : (_, level) => levels(level);
 
-            yield return fixedIn is null
-                ? CoverageGap.AcceptedMatching(dialect, "P2-4", reason, a, b, predicate)
-                : CoverageGap.Matching(dialect, "P2-4", fixedIn, reason, a, b, predicate);
+            yield return CoverageGap.AcceptedMatching(dialect, "P2-4", reason, a, b, predicate);
         }
     }
 
@@ -338,9 +307,10 @@ internal static class SyncPlanCapabilityNetDimensions
             "CapabilityNet",
             "同期計画の能力の組の網（5 方言の能力・DB なし）",
             Table,
-            SyncPlanScenarios.Table.Count,
+            SyncPlanScenarios.Table.Count + SyncPlanCoverageRows.Table.Count,
             [
                 "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanCapabilityNet.cs",
+                "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanCoverageRows.cs",
                 "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanStaticRules.cs",
                 "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanFuzzGenerator.cs",
                 "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanScenarios.cs",
@@ -607,6 +577,7 @@ public abstract class SyncPlanCapabilityNetTestsBase
         );
         var outcomes = new List<FuzzSeedOutcome>();
         var scenarioOutcomes = new List<FuzzSeedOutcome>();
+        var coverageOutcomes = new List<FuzzSeedOutcome>();
 
         try
         {
@@ -626,6 +597,23 @@ public abstract class SyncPlanCapabilityNetTestsBase
                             }
                         )
                     );
+                }
+
+                // 網羅の行（SyncPlanCoverageRows）は、決定的な行と違って網羅の計数に数える
+                foreach (var row in SyncPlanCoverageRows.ForNet(dialect.Name))
+                {
+                    var covered = RunGuarded(
+                        dialect,
+                        SyncPlanCoverageRows.Create(row, dialect),
+                        new FuzzSeedOutcome
+                        {
+                            Seed = 0,
+                            Dialect = dialect.Name,
+                            ScenarioId = row.Id,
+                        }
+                    );
+                    coverageOutcomes.Add(covered);
+                    SyncPlanCapabilityNetDimensions.Observe(coverage, covered, capabilities);
                 }
             }
 
@@ -687,7 +675,11 @@ public abstract class SyncPlanCapabilityNetTestsBase
             );
         }
 
-        foreach (var failure in scenarioOutcomes.Where(o => o.Violations.Count > 0))
+        foreach (
+            var failure in scenarioOutcomes
+                .Concat(coverageOutcomes)
+                .Where(o => o.Violations.Count > 0)
+        )
         {
             report.Add(
                 SyncPlanCapabilityNetKnownFailures.ToFailure(failure),
@@ -732,6 +724,9 @@ public abstract class SyncPlanCapabilityNetTestsBase
         // 来歴の行：4m-F1 の行は静的な規則が名前の衝突を予言し、合格の行は予言しない。行が実際に作った状態（来歴・子の表名の長さ・
         // 2 本目）で次元表の全組を数える（行を流したときだけ＝来歴の行は PostgreSQL だけ）
         problems.AddRange(SyncPlanHistoryRows.NetProblems(scenarioOutcomes));
+
+        // 網羅の行が、出すはずの変更の種類と強制した選び方を出している
+        problems.AddRange(SyncPlanCoverageRows.MissingKindProblems(coverageOutcomes));
 
         if (scenarioOutcomes.Any(SyncPlanHistoryRows.IsHistoryRow))
         {

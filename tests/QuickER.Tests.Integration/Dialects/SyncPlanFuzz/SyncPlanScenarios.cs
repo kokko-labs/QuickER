@@ -56,7 +56,7 @@ internal static class SyncPlanScenarios
     /// <param name="dialect">方言名</param>
     /// <param name="scenarioId">行の Id</param>
     public static string ScopeOf(string dialect, string scenarioId) =>
-        Table[scenarioId].Input.RegularRun
+        SyncPlanCoverageRows.IsCoverageRow(scenarioId) || Table[scenarioId].Input.RegularRun
             ? ScopeOf(dialect)
             : ScopeOf(dialect) + NightlyScopeSuffix;
 
@@ -1082,7 +1082,8 @@ internal sealed class ScenarioLive(FuzzLiveSchema live, SyncPlanFuzzDialect dial
         string? constraintName,
         ForeignKeyReferentialAction onDelete = ForeignKeyReferentialAction.NoAction,
         bool nullable = false,
-        IReadOnlyList<Column>? referenced = null
+        IReadOnlyList<Column>? referenced = null,
+        ForeignKeyReferentialAction onUpdate = ForeignKeyReferentialAction.NoAction
     )
     {
         var key = referenced ?? parent.GetPrimaryKeyColumnsInOrder();
@@ -1120,6 +1121,7 @@ internal sealed class ScenarioLive(FuzzLiveSchema live, SyncPlanFuzzDialect dial
                 ColumnPairs = pairs,
                 ConstraintName = constraintName,
                 OnDelete = onDelete,
+                OnUpdate = onUpdate,
             }
         );
         return first!;
@@ -1293,6 +1295,13 @@ internal sealed class ScenarioTarget(
     {
         relationship.OnDelete = action;
         mutations.Add($"fk action {Describe(relationship)} ON DELETE {action}");
+    }
+
+    /// <summary>外部キーの ON UPDATE を変える</summary>
+    public void SetOnUpdate(Relationship relationship, ForeignKeyReferentialAction action)
+    {
+        relationship.OnUpdate = action;
+        mutations.Add($"fk action {Describe(relationship)} ON UPDATE {action}");
     }
 
     /// <summary>外部キーの親を、別の表の主キー（整数 1 列）へ付け替える（子の列はそのまま）</summary>

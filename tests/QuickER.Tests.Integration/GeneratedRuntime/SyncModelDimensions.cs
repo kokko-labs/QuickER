@@ -264,54 +264,8 @@ internal static class SyncModelDimensions
         CoverageGap.Set(
             EngineIds.SyncModel,
             [
-                CoverageGap.Matching(
-                    DirectScope,
-                    "P1-3",
-                    "P2",
-                    "Extras の操作（同じキーでの作り直し・キーだけのスタブ・持っていた実体での削除・失敗する書き込み）は、生成器の TryExtra が端末の書き手のときだけ選ぶ（サーバーの他者の書き込みは TryWrite だけ）",
-                    Actor,
-                    OpFamily,
-                    (actor, family) =>
-                        actor == nameof(ModelActor.Server) && ExtraFamilies.Contains(family)
-                ),
-                CoverageGap.Matching(
-                    DirectScope,
-                    "P1-3",
-                    "P2",
-                    "経路 None の書き込みはサーバーの他者だけのもので、Extras の操作は生成器の TryExtra が端末の書き手のときだけ選ぶ（上の Actor × OpFamily の欠けと同じ原因）",
-                    OpFamily,
-                    Via,
-                    (family, via) => ExtraFamilies.Contains(family) && via == NoVia
-                ),
-                CoverageGap.Tuple(
-                    DirectScope,
-                    "P1-3",
-                    "P2",
-                    "失敗する書き込みは、生成器が直接の書き込み（一意な値の重複する AddItemOp と、途中で失敗するストリームの WritePayloadOp）だけで作り、グラフ保存の形を作らない",
-                    (OpFamily, FailingWrite),
-                    (Via, nameof(ModelWriteVia.Graph))
-                ),
-                .. ExtraFamilies.Select(family =>
-                    CoverageGap.Tuple(
-                        DirectScope,
-                        "P2-3",
-                        "P2",
-                        "Extras の操作は生成器の TryExtra が端末の書き手のときだけ選ぶ（上の Actor × OpFamily の欠けと同じ原因。3 因子の組 Actor × OpFamily × UniqueTable にも同じ欠けが出る）",
-                        (Actor, nameof(ModelActor.Server)),
-                        (OpFamily, family),
-                        (UniqueTable, NoUniqueTable)
-                    )
-                ),
-                .. new[] { ModelTables.Folders, ModelTables.Events }.Select(table =>
-                    CoverageGap.Tuple(
-                        DirectScope,
-                        "P2-3",
-                        "P2",
-                        "ダウンロードだけの同期は同期の 10%、表の除外はその 15% で、既定の 60 種ではこの表を除外したダウンロードがたまたま出ない（組を狙って作る生成をしていない）",
-                        (OpFamily, Download),
-                        (Excluded, table)
-                    )
-                ),
+                // サーバーの他者の Extras の操作・グラフ保存の失敗する書き込み・表を除外したダウンロードは、乱数の種で作れないか
+                // 欠ける組なので、網羅の行（SyncModelCoverageRows）が種の前に流して埋める
                 .. Table
                     .Factors.Where(factor => factor.Name != Blobs)
                     .Select(factor =>
@@ -334,8 +288,9 @@ internal static class SyncModelDimensions
             "Random",
             "同期のモデル（乱数の操作の列）",
             Table,
-            SyncModelScenarios.All.Count,
+            SyncModelScenarios.All.Count + SyncModelCoverageRows.Table.Count,
             [
+                "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelCoverageRows.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelDimensions.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelFaults.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelGenerator.cs",
@@ -363,10 +318,29 @@ internal static class SyncModelDimensions
         CoverageCounter counter,
         SyncModelGenerator generator,
         IReadOnlyList<ModelOp> ops
+    ) =>
+        Observe(counter, generator.Mode, generator.Policy, generator.Extras, generator.Faults, ops);
+
+    /// <summary>
+    /// 1 歩の操作を、生成器の代わりに宣言したモード・ポリシー・種の組で数える（網羅の行 <see cref="SyncModelCoverageRows"/> が使う）
+    /// </summary>
+    /// <param name="counter">数える先</param>
+    /// <param name="mode">同期のモード</param>
+    /// <param name="policy">競合ポリシー</param>
+    /// <param name="extras">Extras の操作を含む組か</param>
+    /// <param name="faults">失敗の仕掛けを含む組か</param>
+    /// <param name="ops">その歩の操作</param>
+    public static void Observe(
+        CoverageCounter counter,
+        SyncMode mode,
+        SyncConflictPolicy policy,
+        bool extras,
+        bool faults,
+        IReadOnlyList<ModelOp> ops
     )
     {
         var families = Families(ops);
-        var group = (generator.Extras, generator.Faults) switch
+        var group = (extras, faults) switch
         {
             (false, false) => Plain,
             (true, false) => Extras,
@@ -379,8 +353,8 @@ internal static class SyncModelDimensions
             counter.Observe(
                 new Dictionary<string, string>(StringComparer.Ordinal)
                 {
-                    [Mode] = generator.Mode.ToString(),
-                    [Policy] = generator.Policy.ToString(),
+                    [Mode] = mode.ToString(),
+                    [Policy] = policy.ToString(),
                     [Group] = group,
                     [Actor] = ActorOf(ops[i]),
                     [OpFamily] = families[i],
