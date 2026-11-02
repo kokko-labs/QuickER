@@ -21,6 +21,13 @@ internal sealed class ExpectationSchema
     /// <summary>外部キー（リレーション）</summary>
     public List<Relationship> Relationships { get; } = [];
 
+    /// <summary>取り込んだ図の表・リレーションをそのまま自分の中身にする（オブジェクトを写さない）</summary>
+    public void Adopt(IEnumerable<Entity> entities, IEnumerable<Relationship> relationships)
+    {
+        Entities.AddRange(entities);
+        Relationships.AddRange(relationships);
+    }
+
     /// <summary>名前で表を引く</summary>
     public Entity this[string table] =>
         Entities.Single(e => e.TableName.Equals(table, StringComparison.OrdinalIgnoreCase));
@@ -173,6 +180,21 @@ internal sealed class ExpectationSchema
     }
 
     /// <summary>
+    /// 多対多のリレーション（列ペアなし・名前なし）を足す（<paramref name="index"/> を渡せばその位置へ入れる。null なら末尾）
+    /// </summary>
+    public Relationship ManyToMany(string parent, string child, int? index = null)
+    {
+        var relationship = new Relationship
+        {
+            SourceEntityId = this[parent].Id,
+            TargetEntityId = this[child].Id,
+            Type = RelationshipType.ManyToMany,
+        };
+        Relationships.Insert(index ?? Relationships.Count, relationship);
+        return relationship;
+    }
+
+    /// <summary>
     /// 別の図の複製を自分の中身にする（<paramref name="preserveIds"/> が偽なら Id を新しくし、外部キーの参照を張り替える）
     /// </summary>
     public void CopyFrom(ExpectationSchema other, bool preserveIds)
@@ -226,6 +248,11 @@ internal sealed class ExpectationWorld(string capability, SyncDialectCapabilitie
 
     /// <summary>目標の図（差分の行だけが使う）</summary>
     public ExpectationSchema Target { get; } = new();
+
+    /// <summary>
+    /// <c>TargetFromLive</c> が DB 側の図を同じ Guid のまま写すか（実 DB の段の <c>PreserveIds</c>。網では常に偽＝新しい Guid）
+    /// </summary>
+    public bool TargetPreservesIds { get; set; }
 
     /// <summary>DB 側の図だけを入れた計画の文脈</summary>
     public SyncPlanContext LiveContext() =>

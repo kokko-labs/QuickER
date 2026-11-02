@@ -1,4 +1,3 @@
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
@@ -17,6 +16,8 @@ namespace QuickER.Tests.Integration.Dialects;
 /// <remarks>
 /// <c>ALTER COLUMN … TYPE</c> は <c>COLLATE</c> を書かなければ照合順序を新しい型の既定へ戻す。同期は実行時に
 /// <c>pg_attribute.attcollation</c> を読み、型の既定と違うときだけ書き添える。Docker 必須。
+/// ここに残すのは、取込の範囲（public）の外の別スキーマの表＝差分から作れず手で組んだ項目でしか通らない経路だけ。public の表は
+/// 同期計画の期待の行の実 DB の段（<c>SyncPlanExpectationRows.RealPostgreSql.cs</c>）が持つ。
 /// </remarks>
 [Trait("Category", "Integration")]
 [Collection(PostgreSqlContainerCollection.Name)]
@@ -32,7 +33,6 @@ public sealed class PostgreSqlColumnAttributeSyncIntegrationTests(
     /// （以前は COLLATE を書かず、型の既定へ戻していた）。ドット付きの表名でも ALTER TABLE と同じ表を読む。
     /// </summary>
     [Theory(DisplayName = "[Integration] PostgreSQL 同期: 列の変更は型の既定と違う照合順序を保つ")]
-    [InlineData("cl")]
     [InlineData("sales.cl")]
     public async Task AlterColumn_KeepsNonDefaultCollation(string table)
     {
@@ -57,67 +57,6 @@ public sealed class PostgreSqlColumnAttributeSyncIntegrationTests(
         {
             await fixture.ExecuteAsync("DROP SCHEMA IF EXISTS \"sales\" CASCADE;", Ct);
         }
-    }
-
-    /// <summary>
-    /// 既定値のある列の型の種類を変える同期で、取込の既定値が計画の文脈へ渡り、計画が事前に警告することを検証する（J2）。
-    /// 実行したときの結果も固定する（PostgreSQL は型の変更で既定値を新しい型へ変換するので、合わない既定値では同期が失敗して巻き戻る）。
-    /// </summary>
-    [Fact(
-        DisplayName = "[Integration] PostgreSQL 同期: 既定値のある列の型の種類の変更は事前に警告される"
-    )]
-    public async Task TypeKindChangeWithDefault_IsWarned()
-    {
-        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
-        await fixture.ResetSchemaAsync(Ct);
-        await fixture.ExecuteAsync(
-            "CREATE TABLE \"jd\" (\"id\" integer NOT NULL PRIMARY KEY, \"v\" varchar(20) NOT NULL DEFAULT 'abc');",
-            Ct
-        );
-
-        var provider = new PostgreSqlProvider();
-        var live = await provider.SchemaImporter.ImportAsync(fixture.ConnectionString, 120, Ct);
-        var target = live.Entities.Select(e => e.Clone(preserveId: true)).ToList();
-        target.Single(e => e.TableName == "jd").Columns.Single(c => c.Name == "v").DataType =
-            "integer";
-        var items = new SchemaDiffService()
-            .Compute(
-                live.Entities,
-                live.Relationships,
-                target,
-                live.Relationships,
-                provider.SyncCapabilities
-            )
-            .Items;
-
-        foreach (var item in items)
-        {
-            item.IsSelected = item.Kind == SchemaDiffKind.AlterColumn;
-        }
-
-        var plan = new SyncPlanner().BuildPlan(
-            items,
-            provider.SyncCapabilities,
-            new SyncPlanContext
-            {
-                LiveEntities = live.Entities,
-                LiveRelationships = live.Relationships,
-                ColumnDefaults = live.ColumnDefaults,
-            }
-        );
-
-        plan.Warnings.Should()
-            .ContainSingle(w => w.Kind == SyncPlanWarningKind.DefaultOnColumnTypeKindChange)
-            .Which.Detail.Should()
-            .StartWith("v (");
-
-        var script = provider.SyncScriptBuilder.Build(plan);
-        var result = await provider.SyncExecutor.ExecuteAsync(
-            fixture.ToDbConnectionSettings(),
-            script,
-            Ct
-        );
-        result.Committed.Should().Be(false, $"{result.Error}{System.Environment.NewLine}{script}");
     }
 
     /// <summary>列の変更を同期として実行し、使ったスクリプトを返す</summary>

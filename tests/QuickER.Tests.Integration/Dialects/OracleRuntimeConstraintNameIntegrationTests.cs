@@ -208,21 +208,23 @@ public sealed class OracleRuntimeConstraintNameIntegrationTests(OracleContainerF
     }
 
     /// <summary>
-    /// 修飾しない表の主キーの付け替えと名前の分からない外部キーの削除が、別のスキーマに同じ名前の表があっても、
-    /// 自スキーマの表だけに効くことを検証する（対照）。
+    /// 修飾しない表の名前の分からない外部キーの削除が、別のスキーマに同じ名前の表があっても、自スキーマの表の外部キーだけを
+    /// 外すことを検証する（対照）。
     /// </summary>
+    /// <remarks>
+    /// 修飾しない表の主キーの付け替え（差分から作れる）は、同期計画の期待の行の実 DB の段
+    /// （<c>realdb-oracle-pk-alter-unqualified-table-keeps-same-named-table-in-other-schema</c>）が持つ。
+    /// </remarks>
     [Fact(
-        DisplayName = "[Integration] 修飾しない表の主キーの付け替えと外部キーの削除は、自スキーマの表だけに効く"
+        DisplayName = "[Integration] 修飾しない表の名前不明の外部キー削除は、自スキーマの表の外部キーだけを外す"
     )]
-    public async Task UnqualifiedTables_AffectOwnSchemaOnly()
+    public async Task DropForeignKey_WithoutName_UnqualifiedTables_AffectOwnSchemaOnly()
     {
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
         await PrepareOtherSchemaAsync(
             """
-            CREATE TABLE OTHER."T" ("ID" NUMBER(10) NOT NULL, "CODE" NUMBER(10) NOT NULL, CONSTRAINT "PK_OTHER_T" PRIMARY KEY ("ID"));
             CREATE TABLE OTHER."P" ("ID" NUMBER(10) NOT NULL, CONSTRAINT "PK_OTHER_P" PRIMARY KEY ("ID"));
             CREATE TABLE OTHER."C" ("ID" NUMBER(10) NOT NULL, "PID" NUMBER(10), CONSTRAINT "PK_OTHER_C" PRIMARY KEY ("ID"), CONSTRAINT "FK_OTHER_C_P" FOREIGN KEY ("PID") REFERENCES OTHER."P" ("ID"));
-            GRANT ALTER, SELECT ON OTHER."T" TO ORACLE;
             GRANT ALTER, SELECT ON OTHER."C" TO ORACLE;
             GRANT SELECT ON OTHER."P" TO ORACLE;
             """
@@ -232,25 +234,14 @@ public sealed class OracleRuntimeConstraintNameIntegrationTests(OracleContainerF
         {
             await fixture.ExecuteAsync(
                 """
-                CREATE TABLE "T" ("ID" NUMBER(10) NOT NULL, "CODE" NUMBER(10) NOT NULL, CONSTRAINT "PK_T" PRIMARY KEY ("ID"));
                 CREATE TABLE "P" ("ID" NUMBER(10) NOT NULL, CONSTRAINT "PK_P" PRIMARY KEY ("ID"));
                 CREATE TABLE "C" ("ID" NUMBER(10) NOT NULL, "PID" NUMBER(10), CONSTRAINT "PK_C" PRIMARY KEY ("ID"), CONSTRAINT "FK_C_P" FOREIGN KEY ("PID") REFERENCES "P" ("ID"));
                 """,
                 Ct
             );
 
-            var script = await ApplyAsync(
-                MovePrimaryKeyToCode("T"),
-                DropForeignKeyWithoutName("C", "P")
-            );
+            var script = await ApplyAsync(DropForeignKeyWithoutName("C", "P"));
 
-            (await PrimaryKeysAsync())
-                .Where(k => k.Contains(".T "))
-                .Should()
-                .Equal(
-                    ["ORACLE.T -> PK_T (CODE)", "OTHER.T -> PK_OTHER_T (ID)"],
-                    $"自スキーマの T だけが付け替わるはず\nSQL:\n{script}"
-                );
             (await ForeignKeysAsync())
                 .Should()
                 .Equal(

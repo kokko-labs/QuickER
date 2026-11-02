@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using QuickER.Model;
 using QuickER.Provider;
 
@@ -171,11 +173,26 @@ internal sealed class FuzzLiveSchema
     /// <summary>表ごとの行数（キーは表名・大文字小文字非依存）</summary>
     public Dictionary<string, int> RowCounts { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// 管理者として DDL の前に流す文（別のユーザー・データベースの作成。<see cref="PrepareStatements"/> より前。生成器は使わない＝期待の行の
+    /// 実 DB の段が使う）
+    /// </summary>
+    public List<string> AdminStatements { get; } = [];
+
+    /// <summary>DDL の前に流す文（スキーマの作成など。生成器は使わない＝期待の行の実 DB の段が使う）</summary>
+    public List<string> PrepareStatements { get; } = [];
+
     /// <summary>データを入れる文（親→子の順）</summary>
     public List<string> InsertStatements { get; } = [];
 
     /// <summary>計算列を足す文（データを入れた後に流す）</summary>
     public List<string> ComputedColumnStatements { get; } = [];
+
+    /// <summary>
+    /// 同期の実行器を通さずに DB へ直接流す文（データ・計算列の文の後。実行器が増加を断る前提＝最初から壊れたビュー・既存の外部キー違反を
+    /// 作るため。生成器は使わない＝期待の行の実 DB の段が使う）
+    /// </summary>
+    public List<string> RawStatements { get; } = [];
 
     /// <summary>この種に出た図の形（<see cref="FuzzShape"/>）</summary>
     public HashSet<string> Shapes { get; } = [];
@@ -210,6 +227,19 @@ internal interface ISyncPlanFuzzCase
     /// <summary>差分の選び方を決めて、項目の選択を書き換える</summary>
     /// <param name="items">差分の項目</param>
     FuzzSelection Select(IReadOnlyList<SchemaDiffItem> items);
+
+    /// <summary>
+    /// 同期の前に DB を取り込んだ直後に呼ばれる（<see cref="Mutate"/> より前）。既定は何もしない（生成器と決定的な行は使わない。
+    /// 期待の行の実 DB の段が、取り込んだ図とカタログの探針を同期の前に読むのに使う）
+    /// </summary>
+    /// <param name="dialect">方言</param>
+    /// <param name="before">同期の前に取り込んだ図</param>
+    /// <param name="ct">取り消し</param>
+    Task OnImportedAsync(
+        SyncPlanFuzzDialect dialect,
+        SchemaImportResult before,
+        CancellationToken ct
+    ) => Task.CompletedTask;
 }
 
 /// <summary>

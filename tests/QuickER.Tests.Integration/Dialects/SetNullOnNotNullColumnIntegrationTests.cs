@@ -2,23 +2,23 @@ using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using Microsoft.Data.SqlClient;
-using Microsoft.Data.Sqlite;
 using MySqlConnector;
-using Npgsql;
-using Oracle.ManagedDataAccess.Client;
+using QuickER.Dialects;
 using QuickER.Model;
+using QuickER.Provider;
 using QuickER.Provider.MySql;
 using QuickER.Provider.Oracle;
 using QuickER.Provider.PostgreSql;
 using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
+using QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 
 namespace QuickER.Tests.Integration.Dialects;
 
 /// <summary>
-/// 参照アクション SET NULL の外部キーを NOT NULL の子の列へ張る DDL が、方言ごとにどうなるかを実 DB で固定する
-/// （作れない方言＝SQL Server・MySQL は DDL の適用が断られ、作れる方言＝PostgreSQL・Oracle・SQLite は適用できるが、
-/// 参照される親の行の削除が NOT NULL の違反で失敗する）。どの方言でも DDL は外部キーの前に注記する。
+/// 参照アクション SET NULL の外部キーを NOT NULL の子の列へ張る DDL の図（作れない方言＝SQL Server・MySQL は DDL の適用が
+/// 断られることを実 DB で固定し、どの方言でも DDL は外部キーの前に注記する。作れる方言＝PostgreSQL・Oracle・SQLite で親の削除が
+/// NOT NULL の違反で失敗することは、同期計画の期待の行 <c>realdb-set-null-not-null-child-ddl-applies-delete-fails</c>）。
 /// </summary>
 internal static class SetNullOnNotNullColumnSchema
 {
@@ -74,14 +74,6 @@ internal static class SetNullOnNotNullColumnSchema
             ],
         };
     }
-
-    /// <summary>親と、それを参照する子の行を 1 行ずつ入れる文（識別子は DDL と同じく引用する＝Oracle は小文字の名前で作る）</summary>
-    public const string InsertRows =
-        "INSERT INTO \"sn_parent\" (\"id\") VALUES (1);\n"
-        + "INSERT INTO \"sn_child\" (\"id\", \"parent_id\") VALUES (1, 1);";
-
-    /// <summary>参照される親の行を消す文</summary>
-    public const string DeleteParent = "DELETE FROM \"sn_parent\" WHERE \"id\" = 1";
 }
 
 [Trait("Category", "Integration")]
@@ -134,102 +126,32 @@ public sealed class MySqlSetNullOnNotNullColumnIntegrationTests(MySqlContainerFi
     }
 }
 
+/// <summary>
+/// NOT NULL の子の列への SET NULL の外部キーを作れる方言（PostgreSQL・Oracle・SQLite）の DDL が、外部キーの前に注記することを
+/// 確かめる（DDL の文字列だけ・DB を使わない）。DDL を当てて親の削除が失敗することは、同期計画の期待の行
+/// <c>realdb-set-null-not-null-child-ddl-applies-delete-fails</c>（<see cref="SyncPlanExpectationRows"/>）が実 DB で確かめる。
+/// </summary>
 [Trait("Category", "Integration")]
-[Collection(PostgreSqlContainerCollection.Name)]
-[Trait("RequiresDocker", "true")]
-public sealed class PostgreSqlSetNullOnNotNullColumnIntegrationTests(
-    PostgreSqlContainerFixture fixture
-)
+public sealed class SetNullOnNotNullColumnDdlNoteTests
 {
-    private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
-
-    /// <summary>
-    /// PostgreSQL は NOT NULL の子の列への SET NULL の外部キーを作れるが、参照される親の行の削除は NOT NULL の違反
-    /// （23502）で失敗する
-    /// </summary>
-    [Fact(
-        DisplayName = "[Integration] PostgreSQL: NOT NULL の子の列への SET NULL の外部キーは作れるが、親の削除は 23502"
+    [Theory(
+        DisplayName = "[Integration] NOT NULL の子の列への SET NULL の外部キーを作れる方言の DDL は、外部キーの前に注記する"
     )]
-    public async Task SetNullOnNotNullColumn_IsCreatedButDeleteFails()
+    [InlineData(DialectNames.PostgreSql, "integer")]
+    [InlineData(DialectNames.Oracle, "NUMBER(10)")]
+    [InlineData(DialectNames.Sqlite, "INTEGER")]
+    public void SetNullOnNotNullColumn_DdlHasNote(string dialect, string keyType)
     {
-        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
-        await fixture.ResetSchemaAsync(Ct);
-
-        var ddl = new PostgreSqlDdlGenerator().Build(SetNullOnNotNullColumnSchema.Build("integer"));
-
-        ddl.Should().Contain(SetNullOnNotNullColumnSchema.Note);
-        await fixture.ExecuteAsync(ddl, Ct);
-        await fixture.ExecuteAsync(SetNullOnNotNullColumnSchema.InsertRows, Ct);
-
-        var delete = () => fixture.ExecuteAsync(SetNullOnNotNullColumnSchema.DeleteParent, Ct);
-        (await delete.Should().ThrowAsync<PostgresException>()).Which.SqlState.Should().Be("23502");
-    }
-}
-
-[Trait("Category", "Integration")]
-[Collection(OracleContainerCollection.Name)]
-[Trait("RequiresDocker", "true")]
-public sealed class OracleSetNullOnNotNullColumnIntegrationTests(OracleContainerFixture fixture)
-{
-    private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
-
-    /// <summary>
-    /// Oracle は NOT NULL の子の列への ON DELETE SET NULL の外部キーを作れるが、参照される親の行の削除は ORA-01407 で
-    /// 失敗する
-    /// </summary>
-    [Fact(
-        DisplayName = "[Integration] Oracle: NOT NULL の子の列への SET NULL の外部キーは作れるが、親の削除は ORA-01407"
-    )]
-    public async Task SetNullOnNotNullColumn_IsCreatedButDeleteFails()
-    {
-        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
-        await fixture.ResetSchemaAsync(Ct);
-
-        var ddl = new OracleDdlGenerator().Build(SetNullOnNotNullColumnSchema.Build("NUMBER(10)"));
-
-        ddl.Should().Contain(SetNullOnNotNullColumnSchema.Note);
-        await fixture.ExecuteAsync(ddl, Ct);
-        await fixture.ExecuteAsync(SetNullOnNotNullColumnSchema.InsertRows, Ct);
-
-        var delete = () => fixture.ExecuteAsync(SetNullOnNotNullColumnSchema.DeleteParent, Ct);
-        (await delete.Should().ThrowAsync<OracleException>()).Which.Number.Should().Be(1407);
-    }
-}
-
-[Trait("Category", "Integration")]
-public sealed class SqliteSetNullOnNotNullColumnIntegrationTests
-{
-    private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
-
-    /// <summary>
-    /// SQLite は NOT NULL の子の列への SET NULL の外部キーを作れるが、参照される親の行の削除は NOT NULL の違反
-    /// （SQLITE_CONSTRAINT＝19）で失敗する
-    /// </summary>
-    [Fact(
-        DisplayName = "[Integration] SQLite: NOT NULL の子の列への SET NULL の外部キーは作れるが、親の削除は 19"
-    )]
-    public async Task SetNullOnNotNullColumn_IsCreatedButDeleteFails()
-    {
-        using var db = SqliteTempDatabase.Create();
-        var ddl = new SqliteDdlGenerator().Build(SetNullOnNotNullColumnSchema.Build("INTEGER"));
-
-        ddl.Should().Contain(SetNullOnNotNullColumnSchema.Note);
-        await db.ApplyDdlAsync(ddl, Ct);
-
-        await using var connection = new SqliteConnection(
-            db.ReadWriteConnectionString + ";Foreign Keys=True"
-        );
-        await connection.OpenAsync(Ct);
-        await using (var insert = connection.CreateCommand())
+        IDdlGenerator generator = dialect switch
         {
-            insert.CommandText = SetNullOnNotNullColumnSchema.InsertRows;
-            await insert.ExecuteNonQueryAsync(Ct);
-        }
+            DialectNames.PostgreSql => new PostgreSqlDdlGenerator(),
+            DialectNames.Oracle => new OracleDdlGenerator(),
+            _ => new SqliteDdlGenerator(),
+        };
 
-        await using var delete = connection.CreateCommand();
-        delete.CommandText = SetNullOnNotNullColumnSchema.DeleteParent;
-        var run = () => delete.ExecuteNonQueryAsync(Ct);
-        (await run.Should().ThrowAsync<SqliteException>()).Which.SqliteErrorCode.Should().Be(19);
-        SqliteConnection.ClearPool(connection);
+        generator
+            .Build(SetNullOnNotNullColumnSchema.Build(keyType))
+            .Should()
+            .Contain(SetNullOnNotNullColumnSchema.Note);
     }
 }

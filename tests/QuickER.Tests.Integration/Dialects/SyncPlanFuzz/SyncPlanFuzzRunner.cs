@@ -62,6 +62,18 @@ internal sealed class FuzzSeedOutcome
     /// <summary>違反ではないが数えておく注（表明の例外が当たった回数など）</summary>
     public List<string> Notes { get; } = [];
 
+    /// <summary>同期の前に取り込んだ図（取り込めたときだけ。期待の行の実 DB の段が読む）</summary>
+    public SchemaImportResult? Before { get; set; }
+
+    /// <summary>同期の後（失敗なら失敗の後）に取り込み直した図（期待の行の実 DB の段が読む）</summary>
+    public SchemaImportResult? After { get; set; }
+
+    /// <summary>同期の前の差分の項目（選び方を当てた後の選択のまま）</summary>
+    public IReadOnlyList<SchemaDiffItem>? DiffItems { get; set; }
+
+    /// <summary>同期の後に取り込み直した図と目標の図の差分の項目（コミットしたときだけ）</summary>
+    public IReadOnlyList<SchemaDiffItem>? AfterDiffItems { get; set; }
+
     /// <summary>報告用の 1 件分の文</summary>
     public string Describe()
     {
@@ -205,9 +217,29 @@ internal static class SyncPlanFuzzRunner
         await dialect.ResetAsync(ct).ConfigureAwait(false);
         var liveSchema = generator.BuildLive();
         liveSchema.Diagram.TargetDbms = provider.Name;
-        await dialect
-            .ExecuteSetupAsync(provider.DdlGenerator.Build(liveSchema.Diagram), ct)
-            .ConfigureAwait(false);
+
+        foreach (var admin in liveSchema.AdminStatements)
+        {
+            await dialect.ExecuteAdminAsync(admin, ct).ConfigureAwait(false);
+        }
+
+        if (liveSchema.PrepareStatements.Count > 0)
+        {
+            await dialect
+                .ExecuteSetupAsync(
+                    string.Join(Environment.NewLine, liveSchema.PrepareStatements),
+                    ct
+                )
+                .ConfigureAwait(false);
+        }
+
+        // 表の無い図（期待の行の実 DB の段で、DB を生の SQL だけで作る行）は DDL を流さない
+        if (liveSchema.Diagram.Entities.Count > 0)
+        {
+            await dialect
+                .ExecuteSetupAsync(provider.DdlGenerator.Build(liveSchema.Diagram), ct)
+                .ConfigureAwait(false);
+        }
 
         var setup = liveSchema
             .InsertStatements.Concat(liveSchema.ComputedColumnStatements)
@@ -220,7 +252,14 @@ internal static class SyncPlanFuzzRunner
                 .ConfigureAwait(false);
         }
 
+        foreach (var raw in liveSchema.RawStatements)
+        {
+            await dialect.ExecuteRawAsync(raw, ct).ConfigureAwait(false);
+        }
+
         var before = await ImportAsync(dialect, ct).ConfigureAwait(false);
+        outcome.Before = before;
+        await generator.OnImportedAsync(dialect, before, ct).ConfigureAwait(false);
         var beforeRows = await CountRowsAsync(dialect, before, ct).ConfigureAwait(false);
 
         // 目標の図＝DB の図を新しい Guid 空間へ写したものに変更を加える（GUI と同じく live と別の ID）
@@ -237,6 +276,7 @@ internal static class SyncPlanFuzzRunner
             capabilities
         );
         outcome.Selection = generator.Select(diff.Items);
+        outcome.DiffItems = diff.Items;
         var selected = diff.Items.Where(i => i.IsSelected).ToList();
         var unselected = diff.Items.Where(i => !i.IsSelected).ToList();
         outcome.Selected.AddRange(selected.Select(i => $"{i.Kind}: {i.Description}"));
@@ -256,6 +296,7 @@ internal static class SyncPlanFuzzRunner
                     LiveRelationships = before.Relationships,
                     AuxiliaryObjects = before.AuxiliaryObjects,
                     TableCreateSql = before.TableCreateSql,
+                    ColumnDefaults = before.ColumnDefaults,
                 }
             );
             outcome.Script = provider.SyncScriptBuilder.Build(plan);
@@ -337,6 +378,7 @@ internal static class SyncPlanFuzzRunner
             // 表明 1b: 失敗しても、制約は消えてよい理由のあるものだけが消えている（DDL を暗黙コミットする方言の部分適用で
             // 外部キー・一意制約・主キーが消えたまま残る形）。規則は FailedSyncConstraintLosses
             var failedState = await ImportAsync(dialect, ct).ConfigureAwait(false);
+            outcome.After = failedState;
             var (losses, notes) = FailedSyncConstraintLosses(
                 before,
                 failedState,
@@ -365,6 +407,7 @@ internal static class SyncPlanFuzzRunner
         }
 
         var after = await ImportAsync(dialect, ct).ConfigureAwait(false);
+        outcome.After = after;
         var afterRows = await CountRowsAsync(dialect, after, ct).ConfigureAwait(false);
         var afterDiff = new SchemaDiffService().Compute(
             after.Entities,
@@ -373,6 +416,7 @@ internal static class SyncPlanFuzzRunner
             targetRelationships,
             capabilities
         );
+        outcome.AfterDiffItems = afterDiff.Items;
         // 選択できない案内項目（同期できない差分を知らせるだけ）は差分として数えない。
         // キーは件数で数える＝名前も参照アクションも同じ外部キーが 2 本ある表（SQLite）では同じキーの項目が 2 つ出て、
         // その片方だけを選ぶと 1 本だけ消えるのが正しい（集合で比べると「選んだ項目が残った」と区別できない）

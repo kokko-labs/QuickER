@@ -21,7 +21,7 @@ namespace QuickER.Tests.Provider;
 /// <remarks>
 /// 判定は同期のケーパビリティが指す識別子の上限（<see cref="SyncDialectCapabilities.IdentifierLengthLimit"/>）と、
 /// DDL の生成器の方言の上限の宣言だけで行い、方言名で分岐しない。実 DB の往復は
-/// <c>DescriptionSupplementaryCharacterIntegrationTests</c>。
+/// 同期計画の期待の行 <c>realdb-description-supplementary-*</c>。
 /// </remarks>
 public class DescriptionStoredTextTests
 {
