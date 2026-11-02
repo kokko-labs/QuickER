@@ -7,7 +7,8 @@ namespace QuickER.Tests.Dialects;
 /// </summary>
 /// <remarks>
 /// <para>
-/// テストの名前は「クラス名.メソッド名」で、<see cref="UnsupportedCoverageTests"/> が実在を確かめる。
+/// テストの名前は「クラス名.メソッド名」か、同期計画の期待の行の Id に <see cref="ExpectationRowPrefix"/> を付けたもの（末尾の <c>*</c> は
+/// 前方一致）で、<see cref="UnsupportedCoverageTests"/> が実在を確かめる。
 /// </para>
 /// <para>
 /// まだ実装していないセル・マスは未実装の一覧に、実装するフェーズ（区切り 33 の 2b〜2f）を添えて載せる。
@@ -16,6 +17,9 @@ namespace QuickER.Tests.Dialects;
 /// </remarks>
 public static class UnsupportedCoverage
 {
+    /// <summary>同期計画の期待の行（Integration の <c>SyncPlanExpectationRows</c>）の Id で登録するときの頭</summary>
+    public const string ExpectationRowPrefix = "SyncPlanExpectationRows:";
+
     /// <summary>検出のテスト（方言・種類・テスト）</summary>
     public static readonly (
         string Dialect,
@@ -1002,8 +1006,8 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Diff,
             null,
             [
-                "SchemaDiffServiceTests.ComputedColumn_TypeChange_IsSelectableOnlyWhereSupported",
-                "SchemaDiffServiceTests.ComputedColumn_NullabilityChange_IsNotDiffed",
+                "SyncPlanExpectationRows:diff-computed-column-type-change-selectable-only-where-supported",
+                "SyncPlanExpectationRows:diff-computed-column-nullability-is-not-diffed",
             ]
         ),
         (
@@ -1081,7 +1085,7 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Diff,
             null,
             [
-                "SchemaDiffDialectNormalizationTests.UnsupportedReferentialAction_IsFolded",
+                "SyncPlanExpectationRows:diff-fk-unsupported-referential-action-is-folded-*",
                 "OracleTypeNotationIntegrationTests.UnsupportedReferentialActions_LeaveNoForeignKeyDiff",
             ]
         ),
@@ -1120,8 +1124,8 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Diff,
             null,
             [
-                "SchemaDiffDialectNormalizationTests.UnsupportedReferentialAction_IsFolded",
-                "SchemaDiffDialectNormalizationTests.MySql_FoldsOnlySetDefault",
+                "SyncPlanExpectationRows:diff-fk-unsupported-referential-action-is-folded-*",
+                "SyncPlanExpectationRows:diff-fk-mysql-folds-only-set-default-*",
                 "MySqlReferentialActionIntegrationTests.SetDefault_IsOmitted_AndLeavesNoForeignKeyDiff",
             ]
         ),
@@ -1182,7 +1186,7 @@ public static class UnsupportedCoverage
             UnsupportedDefinitionKind.Description,
             UnsupportedFeature.Diff,
             null,
-            ["SchemaDiffServiceTests.CapabilitiesWithoutDescriptions_SuppressesDescriptionDiffs"]
+            ["SyncPlanExpectationRows:diff-descriptions-suppressed-without-description-support"]
         ),
         (
             UnsupportedDefinitionKind.Description,
@@ -1195,9 +1199,10 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Diff,
             null,
             [
-                "SchemaDiffServiceTests.Reorder_NativeDialect_GeneratesUnselectedReorderItem",
-                "SchemaDiffServiceTests.Reorder_RebuildDialect_GeneratesReorderItem",
-                "SchemaDiffServiceTests.Reorder_NoneDialectOrNoCapabilities_DoesNotGenerate",
+                "SyncPlanExpectationRows:diff-reorder-native-is-unselected-reorder-columns",
+                "SyncPlanExpectationRows:diff-reorder-rebuild-is-reorder-columns",
+                "SyncPlanExpectationRows:diff-reorder-none-is-not-generated",
+                "SchemaDiffServiceTests.Items_CarryDiagramObjects",
             ]
         ),
         (
@@ -1214,7 +1219,7 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Sync,
             DialectNames.Sqlite,
             [
-                "SyncPlannerTests.Rebuild_ReorderColumns_ProducesTargetOrderedRebuild",
+                "SyncPlanExpectationRows:plan-reorder-rebuild-produces-target-ordered-rebuild",
                 "SqliteSchemaSyncIntegrationTests.Rebuild_ColumnReorderWithInsertion_AppliesInOneSync",
             ]
         ),
@@ -1223,8 +1228,8 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Diff,
             null,
             [
-                "SchemaDiffServiceTests.ForeignKeyChange_WithoutPersistedNames_EmitsSingleAlter",
-                "SchemaDiffServiceTests.CapabilitiesWithoutFkConstraintNames_SuppressesNameOnlyForeignKeyDiff",
+                "SyncPlanExpectationRows:diff-fk-without-persisted-names-pairs-by-count-*",
+                "SyncPlanExpectationRows:diff-fk-name-only-difference-suppressed-without-persisted-names",
             ]
         ),
         (
@@ -1263,8 +1268,8 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Diff,
             null,
             [
-                "SchemaDiffServiceTests.CompositeForeignKeyPairOrder_IsNeverADifference",
-                "SchemaDiffServiceTests.CompositeForeignKeyPairOrder_IsNotDescribedAsReferenceChange",
+                "SyncPlanExpectationRows:diff-fk-composite-pair-order-is-not-a-difference",
+                "SyncPlanExpectationRows:diff-fk-composite-pair-order-is-not-described-as-reference-change",
                 "OracleSchemaSyncIntegrationTests.CompositeForeignKeyDeclaredInOtherOrder_ProducesNoDiff",
                 "SqlServerSyncDependencyIntegrationTests.CompositeForeignKeyInOtherOrder_DdlAppliesAndLeavesNoDiff",
                 "MySqlSyncDependencyIntegrationTests.CompositeForeignKeyInOtherOrder_DdlAppliesAndLeavesNoDiff",
@@ -1327,8 +1332,8 @@ public static class UnsupportedCoverage
             null,
             [
                 "SyncPlannerTests.AddForeignKey_NotOnCandidateKey_Warns",
-                "SyncPlannerTests.AlterPrimaryKey_ReferencedColumnLeavesPrimaryKey_AddsWarning",
-                "SyncPlannerTests.DropUniqueConstraint_OnReferencedColumn_AddsWarning",
+                "SyncPlanExpectationRows:plan-alter-pk-referenced-column-leaves-pk-warns-candidate-key-loss",
+                "SyncPlanExpectationRows:plan-uq-drop-on-referenced-column-warns-fk-break",
             ]
         ),
         (
@@ -1342,8 +1347,9 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Diff,
             null,
             [
-                "SchemaDiffServiceTests.UniqueConstraintOnPrimaryKey_IsFoldedWhereUnsupported",
-                "SchemaDiffServiceTests.UniqueConstraintColumnsChanged_NotPaired",
+                "SyncPlanExpectationRows:diff-uq-on-primary-key-folded-where-unsupported",
+                "SyncPlanExpectationRows:diff-uq-on-primary-key-existing-in-live-is-not-dropped",
+                "SyncPlanExpectationRows:diff-uq-on-primary-key-unsupported-leaves-drop-only",
                 "SqliteSchemaSyncIntegrationTests.UniqueConstraintOnPrimaryKey_IsFoldedAndDoesNotRepeat",
             ]
         ),

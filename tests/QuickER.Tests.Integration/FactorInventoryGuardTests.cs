@@ -44,7 +44,7 @@ public sealed class FactorInventoryGuardTests
 
     /// <summary>差分の比較を変える方言の能力の除外の理由</summary>
     private const string DiffCapabilityReason =
-        "差分の比較の正規化は SchemaDiffDialectNormalizationTests・方言ごとの *TypeNotationTests・DialectDocsTableTests の単体のテストが方言ごとに固定しているだけで、方言のエンジン（Dialect）の次元表がまだ無い（単体のテストをエンジンへ移すときに水準にする）";
+        "差分の比較の正規化は同期計画の期待の行（SyncPlanExpectationRows.DiffTypes・DiffForeignKeys）・方言ごとの *TypeNotationTests・DialectDocsTableTests の単体のテストが方言ごとに固定しているだけで、方言のエンジン（Dialect）の次元表がまだ無い（単体のテストをエンジンへ移すときに水準にする）";
 
     /// <summary>取込の警告の種別の除外の理由</summary>
     private const string ImportWarningReason =
