@@ -79,12 +79,12 @@ internal static partial class SyncPlanExpectationRows
         StringComparer.Ordinal
     )
     {
-        [QuickER.Dialects.DialectNames.SqlServer] = 94,
-        [QuickER.Dialects.DialectNames.PostgreSql] = 11,
-        [QuickER.Dialects.DialectNames.MySql] = 33,
-        [QuickER.Dialects.DialectNames.Oracle] = 15,
-        [QuickER.Dialects.DialectNames.Sqlite] = 49,
-        [SyntheticOrComparisonKey] = 19,
+        [QuickER.Dialects.DialectNames.SqlServer] = 174,
+        [QuickER.Dialects.DialectNames.PostgreSql] = 36,
+        [QuickER.Dialects.DialectNames.MySql] = 82,
+        [QuickER.Dialects.DialectNames.Oracle] = 37,
+        [QuickER.Dialects.DialectNames.Sqlite] = 79,
+        [SyntheticOrComparisonKey] = 29,
     };
 
     private static ScenarioTable<SyncPlanExpectationInput> Build()
@@ -167,6 +167,20 @@ internal static partial class SyncPlanExpectationRows
             .. PlanReorderRows(),
             .. PlanPrimaryKeyRows(),
             .. PlanUniqueConstraintRows(),
+            .. PlanForeignKeyRows(),
+            .. PlanImplicitRebuildRows(),
+            .. PlanTypeMismatchRows(),
+            .. PlanVanishingEndpointRows(),
+            .. PlanDependencyRows(),
+            .. PlanCandidateKeyRows(),
+            .. PlanArrangeRows(),
+            .. PlanRebuildDetailRows(),
+            .. PlanSetNullRows(),
+            .. PlanAlterExpansionRows(),
+            .. PlanDropMemberColumnRows(),
+            .. UnnamedForeignKeyRows(),
+            .. CompositeForeignKeyRows(),
+            .. PlanDefaultRows(),
         ];
 
     /// <summary>行を書き始める</summary>

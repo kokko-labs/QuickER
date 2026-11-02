@@ -22,6 +22,10 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 /// <c>uqnames=(…)</c>、<c>pk=(…)</c>（主キーの変更の新しい主キー）、<c>cols=(…)</c>（表の追加の列）、
 /// <c>replaced-fk=[…]</c>・<c>replaced-uq=[…]</c>、<c>newdesc="…"</c>・<c>olddesc="…"</c>、最後に <c>desc="…"</c>。
 /// </para>
+/// <para>
+/// 再構築・列順の移動へ畳んだ元の項目は、その面の <c>source</c> 行（鍵だけ）に加えて、<see cref="ExpectationFacet.Sources"/> の面に
+/// <c>{表} rebuild|reorder &gt; {項目の行}</c> として詳細ごと並べる。
+/// </para>
 /// </remarks>
 internal static class SyncPlanProjection
 {
@@ -81,6 +85,19 @@ internal static class SyncPlanProjection
                                 $"{reorder.TableName} source {Key(i, labels)}"
                             )
                         )
+                ),
+            ],
+            [ExpectationFacet.Sources] =
+            [
+                .. plan.Rebuilds.SelectMany(rebuild =>
+                    rebuild.SourceItems.Select(i =>
+                        $"{rebuild.TableName} rebuild > {Line(i, labels)}"
+                    )
+                ),
+                .. plan.Reorders.SelectMany(reorder =>
+                    reorder.SourceItems.Select(i =>
+                        $"{reorder.TableName} reorder > {Line(i, labels)}"
+                    )
                 ),
             ],
         };

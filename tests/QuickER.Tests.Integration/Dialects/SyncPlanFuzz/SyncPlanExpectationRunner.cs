@@ -160,6 +160,17 @@ internal static class SyncPlanExpectationRunner
             facets[facet] = lines;
         }
 
+        // 計画が空か（IsEmpty）は、セクション・再構築・列順の移動の 3 面が空であることと一致する（行は 3 面で「空」を書く）
+        if (
+            plan.IsEmpty
+            != (plan.Sections.Count == 0 && plan.Rebuilds.Count == 0 && plan.Reorders.Count == 0)
+        )
+        {
+            problems.Add(
+                $"[{key}] plan.IsEmpty is {plan.IsEmpty}, but the sections, rebuilds and reorders say otherwise"
+            );
+        }
+
         if (isDialect)
         {
             // 実方言の行は、網と同じく同期スクリプトまで作り、静的な規則で DB が断る文の並びを見る

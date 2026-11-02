@@ -18,7 +18,7 @@ namespace QuickER.Tests.Integration.Dialects;
 /// 削除は、その一意制約を暗黙に外して名指しする。外さないと、SQL Server は列の削除を断り（エラー 5074）、Oracle は
 /// 複数列の制約の列の削除を断り（ORA-12991）、PostgreSQL は主キー・一意制約を黙って消し、MySQL は残りの列の主キー・
 /// 一意制約へ縮め、SQLite の再構築は選んでいない主キーの縮みを適用していた。単体の対応は
-/// <c>SyncPlannerDropMemberColumnTests</c>。
+/// <c>SyncPlannerDropMemberColumnTests</c>（同期スクリプト）と同期計画の期待の行 <c>plan-drop-member-column-*</c>（計画）。
 /// </remarks>
 [Trait("Category", "Integration")]
 public abstract class SyncDropMemberColumnIntegrationTestsBase

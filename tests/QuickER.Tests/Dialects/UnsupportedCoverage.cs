@@ -1237,12 +1237,12 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Sync,
             null,
             [
-                "SetNullOnNotNullColumnPlanTests.SelectedAdd_OnNotNullChild_IsExcludedWhereNotCreatable",
-                "SetNullOnNotNullColumnPlanTests.SelectedRecreate_ToSetNullOnNotNullChild_IsExcludedWithItsDrop",
-                "SetNullOnNotNullColumnPlanTests.SelectedAdd_PostSyncNullability_DecidesExclusion",
-                "SetNullOnNotNullColumnPlanTests.AlterChildToNotNull_LiveSetNullForeignKey_IsNamedAndNotRebuilt",
-                "SetNullOnNotNullColumnPlanTests.AlterChildToNotNull_WithOtherRebuild_SkipsOnlyThatForeignKeyWhereTransactional",
-                "SetNullOnNotNullColumnPlanTests.PrimaryKeyChange_MakingSetNullChildNotNull_IsNamedAndNotRebuilt",
+                "SyncPlanExpectationRows:plan-set-null-selected-add-on-not-null-child-*",
+                "SyncPlanExpectationRows:plan-set-null-selected-recreate-on-not-null-child-is-excluded-with-its-drop",
+                "SyncPlanExpectationRows:plan-set-null-post-sync-nullability-*",
+                "SyncPlanExpectationRows:plan-set-null-alter-child-to-not-null-names-live-fk-and-does-not-rebuild-it",
+                "SyncPlanExpectationRows:plan-set-null-alter-child-to-not-null-with-other-rebuild",
+                "SyncPlanExpectationRows:plan-set-null-pk-change-making-child-not-null-names-and-does-not-rebuild",
                 "SchemaSyncWarningTextTests.SetNullOnNotNullColumn_TextFollowsCapability",
                 "MySqlSyncDependencyIntegrationTests.AlterSetNullChildToNotNull_NamesForeignKeyAndChangesNothing",
                 "SqlServerSyncDependencyIntegrationTests.AlterSetNullChildToNotNull_KeepsThatForeignKeyAndSucceeds",
@@ -1291,8 +1291,8 @@ public static class UnsupportedCoverage
             null,
             [
                 "ForeignKeyColumnOrderTests.Sync_AddCompositeForeignKey_IsReorderedOnlyWhereDeclared",
-                "SyncPlannerTests.ReorderReferencedCompositeKey_RebuildsForeignKeyInNewOrder",
-                "SyncPlannerTests.AlterForeignKeyInOtherOrder_IsArrangedToKey",
+                "SyncPlanExpectationRows:plan-arrange-reorder-referenced-composite-key-rebuilds-fk-in-new-order",
+                "SyncPlanExpectationRows:plan-arrange-fk-alter-in-other-order-is-arranged-to-key",
                 "SqlServerSyncDependencyIntegrationTests.ReorderReferencedCompositePrimaryKey_RebuildsForeignKeyInNewOrder",
                 "SqlServerSyncDependencyIntegrationTests.AlterForeignKeyInOtherOrder_IsRebuiltInKeyOrder",
                 "MySqlSyncDependencyIntegrationTests.ReorderReferencedCompositePrimaryKey_RebuildsForeignKeyInNewOrder",
@@ -1304,9 +1304,9 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Diff,
             null,
             [
-                "SyncPlannerTests.AlterColumn_StringLengthOnOneSide_RebuildsWhereLengthMayDiffer",
+                "SyncPlanExpectationRows:plan-type-mismatch-string-length-one-side-rebuilds-where-allowed",
                 "SyncPlannerTests.AreForeignKeyCompatibleTypes_AllowsStringLengthOnly",
-                "SyncPlannerTests.AlterPrimaryKey_StringLengthOnlyForeignKey_FollowsDialectDeclaration",
+                "SyncPlanExpectationRows:plan-type-mismatch-pk-change-string-length-only-fk-*",
                 "PostgreSqlSchemaSyncIntegrationTests.PrimaryKeyChange_WithStringLengthOnlyForeignKey_Succeeds",
                 "OracleSchemaSyncIntegrationTests.PrimaryKeyChange_WithStringLengthOnlyForeignKey_Succeeds",
             ]
@@ -1324,14 +1324,14 @@ public static class UnsupportedCoverage
             UnsupportedDefinitionKind.ForeignKeyTypeMismatch,
             UnsupportedFeature.Sync,
             null,
-            ["SyncPlannerTests.AlterColumn_OneSideOfForeignKey_WarnsAndDoesNotInject"]
+            ["SyncPlanExpectationRows:plan-type-mismatch-one-side-warns-and-does-not-inject-*"]
         ),
         (
             UnsupportedDefinitionKind.ForeignKeyNotOnCandidateKey,
             UnsupportedFeature.Sync,
             null,
             [
-                "SyncPlannerTests.AddForeignKey_NotOnCandidateKey_Warns",
+                "SyncPlanExpectationRows:plan-candidate-key-add-fk-*",
                 "SyncPlanExpectationRows:plan-alter-pk-referenced-column-leaves-pk-warns-candidate-key-loss",
                 "SyncPlanExpectationRows:plan-uq-drop-on-referenced-column-warns-fk-break",
             ]
@@ -1360,7 +1360,7 @@ public static class UnsupportedCoverage
             [
                 "UniqueConstraintOnPrimaryKeyNoteTests.Sync_AddTable_OmitsUniqueConstraintOnPrimaryKeyWhereDeclared",
                 "UniqueConstraintOnPrimaryKeyNoteTests.Sync_SqliteRebuild_OmitsUniqueConstraintThatBecomesPrimaryKey",
-                "SyncPlannerTests.AddUniqueOnStayingPrimaryKey_IsExcludedWhereUnsupported",
+                "SyncPlanExpectationRows:plan-dependency-unique-on-staying-pk-*",
                 "OracleDdlRoundTripIntegrationTests.UniqueConstraintOnPrimaryKey_IsOmittedAndApplies",
             ]
         ),
@@ -1398,7 +1398,7 @@ public static class UnsupportedCoverage
                 "SqlServerColumnAttributeSyncIntegrationTests.TypeKindChangeWithDefault_IsWarned",
                 "SchemaSyncDialogViewModelTests.Execute_TypeKindChangeWithDefault_ShowsWarningFromImportedDefaults",
                 "SqlServerSyncScriptBuilderTests.AlterColumn_ReadsBackOnlyWhatMatters",
-                "DefaultOnColumnTypeKindChangeTests.TypeKindChangeWithDefault_WarnsOnlyWhereDeclared",
+                "SyncPlanExpectationRows:plan-default-type-kind-change-warns-only-where-declared",
             ]
         ),
         (
@@ -1407,8 +1407,8 @@ public static class UnsupportedCoverage
             DialectNames.PostgreSql,
             [
                 "PostgreSqlColumnAttributeSyncIntegrationTests.TypeKindChangeWithDefault_IsWarned",
-                "DefaultOnColumnTypeKindChangeTests.TypeKindChangeWithDefault_WarnsOnlyWhereDeclared",
-                "DefaultOnColumnTypeKindChangeTests.SameKindOrNoDefault_DoesNotWarn",
+                "SyncPlanExpectationRows:plan-default-type-kind-change-warns-only-where-declared",
+                "SyncPlanExpectationRows:plan-default-no-warning-*",
             ]
         ),
         (
@@ -1419,7 +1419,7 @@ public static class UnsupportedCoverage
                 "MySqlColumnAttributeSyncIntegrationTests.AlterColumn_ChangesOnlyTypeAndNullability",
                 "MySqlColumnAttributeSyncIntegrationTests.TypeKindChangeWithIncompatibleDefault_IsWarnedAndFails",
                 "MySqlSyncScriptBuilderTests.AlterColumn_RebuildsLiveDefinitionWithTypeAndNullability",
-                "DefaultOnColumnTypeKindChangeTests.TypeKindChangeWithDefault_WarnsOnlyWhereDeclared",
+                "SyncPlanExpectationRows:plan-default-type-kind-change-warns-only-where-declared",
             ]
         ),
         (
@@ -1428,7 +1428,7 @@ public static class UnsupportedCoverage
             DialectNames.Oracle,
             [
                 "OracleSchemaSyncIntegrationTests.TypeKindChangeWithDefault_IsWarned",
-                "DefaultOnColumnTypeKindChangeTests.TypeKindChangeWithDefault_WarnsOnlyWhereDeclared",
+                "SyncPlanExpectationRows:plan-default-type-kind-change-warns-only-where-declared",
             ]
         ),
         (

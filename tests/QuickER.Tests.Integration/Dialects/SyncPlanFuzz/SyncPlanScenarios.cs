@@ -441,7 +441,7 @@ internal static class SyncPlanScenarios
                         target.SetType("r_item", "a", FuzzTypeKind.BigInt);
                     }
                 ),
-                // ---- 合格側の行（製品が意図して「警告して止まる」形。SyncPlannerTests の「型の食い違い:」の形）：
+                // ---- 合格側の行（製品が意図して「警告して止まる」形。同期計画の期待の行 plan-type-mismatch-* の形）：
                 // 両端の型が食い違う外部キーがあると、計画はどの外部キーも外さず ForeignKeyColumnTypeMismatch を警告し、
                 // 列の変更（か主キーの解除）で何も変えずに失敗する。静的な規則も実 DB の表明も違反にしない ----
                 // 型の食い違い: 片側だけの型変更では外部キーを外し直さず警告する

@@ -256,6 +256,53 @@ internal static class ExpectationScenarios
     }
 
     /// <summary>
+    /// <see cref="CustomerOrders"/> に、customer の NULL 許容の列 code・kind（INT）と、orders の NULL 許容の列
+    /// customer_code・customer_kind（INT）を足す（外部キーの追加の参照先を選ぶ形）
+    /// </summary>
+    public static void CustomerOrdersWithCodeAndKind(ExpectationSchema s)
+    {
+        CustomerOrders(s);
+        s["customer"].Columns.Add(ExpectationSchema.Nullable("code", "INT"));
+        s["customer"].Columns.Add(ExpectationSchema.Nullable("kind", "INT"));
+        s["orders"].Columns.Add(ExpectationSchema.Nullable("customer_code", "INT"));
+        s["orders"].Columns.Add(ExpectationSchema.Nullable("customer_kind", "INT"));
+    }
+
+    /// <summary>
+    /// customer(id) と orders(id, customer_id) に、同じ子の列 orders.customer_id の外部キー 2 本を足す：FK_a は customer.id を参照し、
+    /// FK_b は <paramref name="otherParent"/> が真なら表 other(id)（customer と orders の間に足す）の id を、偽なら customer.id を参照する
+    /// （主キー id は INT・customer_id は NULL 許容の INT）
+    /// </summary>
+    public static (Relationship A, Relationship B) TwoForeignKeysOnSameColumn(
+        ExpectationSchema s,
+        bool otherParent
+    )
+    {
+        s.Tbl("customer", ("id", "INT", true));
+
+        if (otherParent)
+        {
+            s.Tbl("other", ("id", "INT", true));
+        }
+
+        s.Tbl("orders", ("id", "INT", true), ("customer_id", "INT", false));
+        var a = s.Fk("customer", "orders", "FK_a", ("id", "customer_id"));
+        var b = s.Fk(otherParent ? "other" : "customer", "orders", "FK_b", ("id", "customer_id"));
+        return (a, b);
+    }
+
+    /// <summary>
+    /// 複合主キー pair(a, b)（NOT NULL の INT・主キーの順序は宣言しない）を、ref(id, ra, rb) の外部キー FK_ref が (a, b) の並びで
+    /// 参照する図を足す（ra・rb は NULL 許容の INT）
+    /// </summary>
+    public static Relationship PairReference(ExpectationSchema s)
+    {
+        s.Tbl("pair", ("a", "INT", true), ("b", "INT", true));
+        s.Tbl("ref", ("id", "INT", true), ("ra", "INT", false), ("rb", "INT", false));
+        return s.Fk("pair", "ref", "FK_ref", ("a", "ra"), ("b", "rb"));
+    }
+
+    /// <summary>
     /// 主キー 2 列（a・b・NOT NULL の INT）と NULL 許容の memo（TEXT）を持つ表 pair を、どの図にも足さずに作る
     /// （<paramref name="pkOrder"/> の列が主キーで、主キーの順序もその並び）
     /// </summary>
@@ -313,6 +360,27 @@ internal static class ExpectationItems
             TableName = table,
             Entity = target,
             IsSelected = selected,
+        };
+
+    /// <summary>
+    /// 外部キーの追加の項目（表は子の表・リレーションは名前だけを持つ新しいもの・列ペアは「親の列, 子の列」）
+    /// </summary>
+    public static SchemaDiffItem AddForeignKey(
+        Entity parent,
+        Entity child,
+        string name,
+        params ForeignKeyColumnNamePair[] pairs
+    ) =>
+        new()
+        {
+            Kind = SchemaDiffKind.AddForeignKey,
+            TableName = child.TableName,
+            ParentEntity = parent,
+            ChildEntity = child,
+            Relationship = new Relationship { ConstraintName = name },
+            ForeignKeyName = name,
+            ForeignKeyColumnPairs = pairs,
+            IsSelected = true,
         };
 
     /// <summary>一意制約の追加・削除の項目</summary>

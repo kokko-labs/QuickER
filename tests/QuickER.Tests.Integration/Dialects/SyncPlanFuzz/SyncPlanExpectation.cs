@@ -29,12 +29,18 @@ internal static class ExpectationFacet
     /// <summary>ネイティブの列順の移動（1 移動につき 1 行）</summary>
     public const string Reorders = "reorders";
 
+    /// <summary>
+    /// 再構築・列順の移動へ畳んだ元の項目（1 項目につき 1 行・<c>{表} rebuild|reorder &gt; {項目の行}</c>）。<see cref="Rebuilds"/> と
+    /// <see cref="Reorders"/> の <c>source</c> 行は鍵だけなので、畳んだ項目の詳細（列ペア・参照アクション・構成列）はこの面で見る
+    /// </summary>
+    public const string Sources = "sources";
+
     /// <summary>差分か計画の組み立てが投げた例外（<c>型名: メッセージ</c>）</summary>
     public const string Exception = "exception";
 
     /// <summary>計画を作る面（ほかは差分の面か例外）</summary>
     public static IReadOnlyList<string> PlanFacets { get; } =
-    [Sections, Items, Warnings, Excluded, Rebuilds, Reorders];
+    [Sections, Items, Warnings, Excluded, Rebuilds, Reorders, Sources];
 }
 
 /// <summary>期待の強さ</summary>
@@ -226,6 +232,9 @@ internal sealed class ExpectationBuilder
 
     /// <summary>ネイティブの列順の移動</summary>
     public FacetExpectations Reorders => new(this, ExpectationFacet.Reorders);
+
+    /// <summary>再構築・列順の移動へ畳んだ元の項目</summary>
+    public FacetExpectations Sources => new(this, ExpectationFacet.Sources);
 
     /// <summary>例外</summary>
     public FacetExpectations Exception => new(this, ExpectationFacet.Exception);
