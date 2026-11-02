@@ -140,10 +140,17 @@ public sealed class UnsupportedCoverageTests
             )
             .ToHashSet(StringComparer.Ordinal);
 
+        var rowIds = ExpectationRowIds();
         var missing = UnsupportedCoverage
             .Detections.SelectMany(d => d.Tests)
             .Concat(UnsupportedCoverage.Treatments.SelectMany(t => t.Tests))
-            .Where(test => !declared.Contains(test))
+            .Where(test =>
+                test.StartsWith(UnsupportedCoverage.ExpectationRowPrefix, StringComparison.Ordinal)
+                    ? !rowIds.Any(id =>
+                        Matches(test[UnsupportedCoverage.ExpectationRowPrefix.Length..], id)
+                    )
+                    : !declared.Contains(test)
+            )
             .Distinct()
             .ToList();
 
@@ -151,4 +158,70 @@ public sealed class UnsupportedCoverageTests
         UnsupportedCoverage.Treatments.Should().OnlyContain(t => t.Tests.Length > 0);
         missing.Should().BeEmpty("登録したテストは実在する");
     }
+
+    /// <summary>
+    /// 同期計画の期待の行の Id（<c>SyncPlanExpectationRows*.cs</c> の <c>Row("…", …)</c> の第 1 引数。補間した Id は先頭の文字列＋<c>*</c>）
+    /// </summary>
+    private static List<string> ExpectationRowIds()
+    {
+        var folder = Path.Combine(
+            SourceFiles.RepositoryRoot,
+            "tests",
+            "QuickER.Tests.Integration",
+            "Dialects",
+            "SyncPlanFuzz"
+        );
+        var ids = new List<string>();
+
+        foreach (var path in Directory.EnumerateFiles(folder, "SyncPlanExpectationRows*.cs"))
+        {
+            foreach (
+                var call in ConditionalSourceParse
+                    .DescendantNodes(
+                        ConditionalSourceParse.Parse(
+                            File.ReadAllText(path),
+                            cancellationToken: TestContext.Current.CancellationToken
+                        ),
+                        TestContext.Current.CancellationToken
+                    )
+                    .OfType<InvocationExpressionSyntax>()
+                    .Where(c =>
+                        c.Expression is IdentifierNameSyntax { Identifier.ValueText: "Row" }
+                    )
+            )
+            {
+                switch (call.ArgumentList.Arguments.FirstOrDefault()?.Expression)
+                {
+                    case LiteralExpressionSyntax literal:
+                        ids.Add(literal.Token.ValueText);
+                        break;
+                    case InterpolatedStringExpressionSyntax interpolated:
+                        ids.Add(
+                            string.Concat(
+                                interpolated
+                                    .Contents.TakeWhile(c => c is InterpolatedStringTextSyntax)
+                                    .Select(c =>
+                                        ((InterpolatedStringTextSyntax)c).TextToken.ValueText
+                                    )
+                            ) + "*"
+                        );
+                        break;
+                }
+            }
+        }
+
+        ids.Should().NotBeEmpty("期待の行の Id を読めている");
+        return ids;
+    }
+
+    /// <summary>
+    /// 登録の Id（末尾の <c>*</c> は前方一致）が行の Id に当たるか。補間した行の Id（末尾が <c>*</c>）は、登録が同じ先頭で始まれば当たる
+    /// </summary>
+    private static bool Matches(string registered, string id) =>
+        registered.EndsWith('*')
+            ? id.TrimEnd('*').StartsWith(registered.TrimEnd('*'), StringComparison.Ordinal)
+                || registered.TrimEnd('*').StartsWith(id.TrimEnd('*'), StringComparison.Ordinal)
+                    && id.EndsWith('*')
+        : id.EndsWith('*') ? registered.StartsWith(id.TrimEnd('*'), StringComparison.Ordinal)
+        : registered == id;
 }

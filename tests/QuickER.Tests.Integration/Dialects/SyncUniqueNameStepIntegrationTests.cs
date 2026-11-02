@@ -17,7 +17,7 @@ namespace QuickER.Tests.Integration.Dialects;
 /// 列集合だけで組むと、名前の無い制約が DB の制約と組み、名前を保った制約の追加が同じ名前で失敗していた
 /// （SQL Server・MySQL）。名前の段で組むと、名前を保った制約の作り直しと名前の無い制約の追加になる。SQLite は
 /// 取り込んだ一意制約が名前を持たないので名前の段で組まず、再構築が図のとおりに作る。単体の対応は
-/// <c>SchemaDiffServiceTests.UniqueConstraints_PairByDiagramNameFirst</c>。
+/// 同期計画の期待の行 <c>diff-uq-name-step-*</c>（<see cref="SyncPlanFuzz.SyncPlanExpectationRows"/>）。
 /// </remarks>
 [Trait("Category", "Integration")]
 public abstract class SyncUniqueNameStepIntegrationTestsBase

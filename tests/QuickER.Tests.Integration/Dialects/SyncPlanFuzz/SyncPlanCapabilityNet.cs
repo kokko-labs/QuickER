@@ -563,6 +563,41 @@ public abstract class SyncPlanCapabilityNetTestsBase
     /// <summary>方言の部品を作る（DB には触れない）</summary>
     internal abstract SyncPlanFuzzDialect CreateDialect();
 
+    [Fact(
+        DisplayName = "[Integration] 同期計画の能力の組の網: 期待の行の差分と計画が期待どおりで、DB の規則を守る"
+    )]
+    public void ExpectationRows_Match()
+    {
+        var dialect = CreateDialect();
+
+        try
+        {
+            var rows = SyncPlanExpectationRows.ForDialect(dialect.Name).ToList();
+            var problems = rows.SelectMany(row =>
+                    SyncPlanExpectationRunner.Run(row, [dialect.Name])
+                )
+                .ToList();
+            TestContext.Current.TestOutputHelper?.WriteLine(
+                $"{dialect.Name}: expectation rows {rows.Count}, problems {problems.Count}"
+            );
+
+            if (problems.Count > 0)
+            {
+                throw new XunitException(string.Join("\n\n", problems));
+            }
+
+            CoverageGuard.AtLeast(
+                $"{dialect.Name}: 照合した期待の行",
+                rows.Count,
+                SyncPlanExpectationRows.MinimumRowsFor(dialect.Name)
+            );
+        }
+        finally
+        {
+            (dialect as IDisposable)?.Dispose();
+        }
+    }
+
     [Fact(DisplayName = "[Integration] 同期計画の能力の組の網: 計画の文の並びが DB の規則を守る")]
     [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public void Plans_FollowDatabaseRules()

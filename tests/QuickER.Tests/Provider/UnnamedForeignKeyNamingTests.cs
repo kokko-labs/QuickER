@@ -10,8 +10,9 @@ using QuickER.Provider.SqlServer;
 namespace QuickER.Tests.Provider;
 
 /// <summary>
-/// 同じテーブルの組に名前の無いリレーションが 2 本ある図で、DDL・同期の差分・同期スクリプトが
-/// 同じ一意な外部キー名を使うことを 5 方言で検証するテストクラス
+/// 同じテーブルの組に名前の無いリレーションが 2 本ある図で、DDL・同期スクリプトが
+/// 同じ一意な外部キー名を使うことを 5 方言で検証するテストクラス（差分が同じ名前を使うことは、同期計画の期待の行
+/// <c>diff-unnamed-fk-*</c>＝SyncPlanExpectationRows.UnnamedForeignKeys が見る）
 /// </summary>
 /// <remarks>
 /// <para>
@@ -140,40 +141,6 @@ public class UnnamedForeignKeyNamingTests
     }
 
     [Fact(
-        DisplayName = "名前の無い同じ組の外部キー 2 本の図は、DDL が付けた名前の live と外部キーの差分を出さない（名前を保存する 4 方言）"
-    )]
-    public void Diff_SamePairTwice_MatchesLiveNamedByDdl()
-    {
-        foreach (
-            var provider in Providers.Where(p =>
-                p.SyncCapabilities.PersistsForeignKeyConstraintNames
-            )
-        )
-        {
-            // live は DDL が付けた名前をそのまま持ち帰った図（取込の結果に当たる）
-            var live = BuildDiagram(BillName, ShipName);
-            var target = BuildDiagram();
-
-            var diff = new SchemaDiffService().Compute(
-                live.Entities,
-                live.Relationships,
-                target.Entities,
-                target.Relationships,
-                provider.SyncCapabilities
-            );
-
-            diff.Items.Should()
-                .NotContain(
-                    i =>
-                        i.Kind == SchemaDiffKind.AddForeignKey
-                        || i.Kind == SchemaDiffKind.DropForeignKey
-                        || i.Kind == SchemaDiffKind.AlterForeignKey,
-                    provider.Name
-                );
-        }
-    }
-
-    [Fact(
         DisplayName = "名前の無い 2 本目の参照アクションを変えると、同じ名前で外して付け直す外部キー変更になる（名前を保存する 4 方言）"
     )]
     public void Alter_SecondUnnamed_ReplacesUnderSameName()
@@ -196,17 +163,8 @@ public class UnnamedForeignKeyNamingTests
                 provider.SyncCapabilities
             );
 
-            var alter = diff
-                .Items.Should()
-                .ContainSingle(
-                    i =>
-                        i.Kind == SchemaDiffKind.AddForeignKey
-                        || i.Kind == SchemaDiffKind.DropForeignKey
-                        || i.Kind == SchemaDiffKind.AlterForeignKey,
-                    provider.Name
-                )
-                .Which;
-            alter.Kind.Should().Be(SchemaDiffKind.AlterForeignKey, provider.Name);
+            // 差分が外部キー変更 1 項目になることは期待の行 diff-unnamed-fk-second-referential-action-change-replaces-under-same-name が見る
+            var alter = diff.Items.Single(i => i.Kind == SchemaDiffKind.AlterForeignKey);
             alter.IsSelected = true;
 
             var script = provider.SyncScriptBuilder.Build(
@@ -259,39 +217,6 @@ public class UnnamedForeignKeyNamingTests
             ddl.Should().NotContain("FK_orders_customers_bill_customer_id", provider.Name);
             ddl.Should().Contain(ShipName, provider.Name);
             CountOf(ddl, BillName).Should().Be(2, provider.Name);
-        }
-    }
-
-    [Fact(
-        DisplayName = "名前の無い多対多が先に並ぶ図は、既定名で外部キーを作った live と外部キーの差分を出さない（名前を保存する 4 方言）"
-    )]
-    public void Diff_ManyToManyFirst_MatchesLiveWithDefaultName()
-    {
-        foreach (
-            var provider in Providers.Where(p =>
-                p.SyncCapabilities.PersistsForeignKeyConstraintNames
-            )
-        )
-        {
-            var live = BuildDiagram(BillName, ShipName);
-            var target = BuildDiagramWithManyToManyFirst();
-
-            var diff = new SchemaDiffService().Compute(
-                live.Entities,
-                live.Relationships,
-                target.Entities,
-                target.Relationships,
-                provider.SyncCapabilities
-            );
-
-            diff.Items.Should()
-                .NotContain(
-                    i =>
-                        i.Kind == SchemaDiffKind.AddForeignKey
-                        || i.Kind == SchemaDiffKind.DropForeignKey
-                        || i.Kind == SchemaDiffKind.AlterForeignKey,
-                    provider.Name
-                );
         }
     }
 
