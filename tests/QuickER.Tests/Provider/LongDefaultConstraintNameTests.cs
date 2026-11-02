@@ -24,7 +24,7 @@ namespace QuickER.Tests.Provider;
 /// <para>
 /// PostgreSQL は旧版の QuickER が長い既定名で作った外部キー（PostgreSQL が 63 バイトで切り詰めた名前）を
 /// 同じ外部キーとみなす（<see cref="SyncDialectCapabilities.TruncatesLongIdentifiers"/>）。実 DB では
-/// Integration の <c>LongDefaultConstraintNameIntegrationTests</c> が固定する。
+/// 同期計画の期待の行 <c>realdb-long-default-*</c> と、吸収の対照の <c>PostgreSqlLongDefaultConstraintNameIntegrationTests</c> が固定する。
 /// </para>
 /// </remarks>
 public class LongDefaultConstraintNameTests

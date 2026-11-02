@@ -67,7 +67,7 @@ public static class UnsupportedCoverage
             UnsupportedDefinitionKind.NonUniqueIndex,
             [
                 "SqliteImportFidelityIntegrationTests.Import_MultipleVirtualTablesWithOrdinaryForeignKey_ExcludesEachBodyOnly",
-                "SqliteSchemaSyncIntegrationTests.Rebuild_PreservesDataAndAuxiliaryObjects",
+                "SyncPlanExpectationRows:realdb-rebuild-keeps-data-and-auxiliary-objects",
             ]
         ),
         (
@@ -80,7 +80,7 @@ public static class UnsupportedCoverage
         (
             DialectNames.Sqlite,
             UnsupportedDefinitionKind.Trigger,
-            ["SqliteSchemaSyncIntegrationTests.Rebuild_PreservesDataAndAuxiliaryObjects"]
+            ["SyncPlanExpectationRows:realdb-rebuild-keeps-data-and-auxiliary-objects"]
         ),
         (
             DialectNames.SqlServer,
@@ -655,7 +655,7 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Sync,
             DialectNames.Sqlite,
             [
-                "SqliteSchemaSyncIntegrationTests.Rebuild_WarnsTableOptionsAndConstraintClausesLost",
+                "SyncPlanExpectationRows:realdb-rebuild-warns-table-options-and-constraint-clauses",
                 "TableRebuildAttributeDetectorTests.Detects_OnConflict",
                 "TableRebuildAttributeDetectorTests.Detects_DeferredForeignKey",
             ]
@@ -664,19 +664,19 @@ public static class UnsupportedCoverage
             UnsupportedDefinitionKind.NonUniqueIndex,
             UnsupportedFeature.Sync,
             DialectNames.Sqlite,
-            ["SqliteSchemaSyncIntegrationTests.Rebuild_PreservesDataAndAuxiliaryObjects"]
+            ["SyncPlanExpectationRows:realdb-rebuild-keeps-data-and-auxiliary-objects"]
         ),
         (
             UnsupportedDefinitionKind.NonConstraintUniqueIndex,
             UnsupportedFeature.Sync,
             DialectNames.Sqlite,
-            ["SqliteSchemaSyncIntegrationTests.Rebuild_PreservesNonConstraintUniqueIndexes"]
+            ["SyncPlanExpectationRows:realdb-rebuild-keeps-non-constraint-unique-indexes"]
         ),
         (
             UnsupportedDefinitionKind.Trigger,
             UnsupportedFeature.Sync,
             DialectNames.Sqlite,
-            ["SqliteSchemaSyncIntegrationTests.Rebuild_PreservesDataAndAuxiliaryObjects"]
+            ["SyncPlanExpectationRows:realdb-rebuild-keeps-data-and-auxiliary-objects"]
         ),
         (
             UnsupportedDefinitionKind.DefaultValue,
@@ -870,8 +870,8 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Sync,
             DialectNames.Sqlite,
             [
-                "SqliteSchemaSyncIntegrationTests.Rebuild_WithDependentView_Succeeds",
-                "SqliteSchemaSyncIntegrationTests.Rebuild_BreakingView_RollsBack",
+                "SyncPlanExpectationRows:realdb-rebuild-with-dependent-view-succeeds",
+                "SyncPlanExpectationRows:realdb-rebuild-breaking-view-rolls-back",
             ]
         ),
         (
@@ -917,7 +917,7 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Sync,
             DialectNames.Sqlite,
             [
-                "SqliteSchemaSyncIntegrationTests.Rebuild_WarnsTableOptionsAndConstraintClausesLost",
+                "SyncPlanExpectationRows:realdb-rebuild-warns-table-options-and-constraint-clauses",
                 "TableRebuildAttributeDetectorTests.Detects_TableOptions",
             ]
         ),
@@ -1126,7 +1126,7 @@ public static class UnsupportedCoverage
             [
                 "SyncPlanExpectationRows:diff-fk-unsupported-referential-action-is-folded-*",
                 "SyncPlanExpectationRows:diff-fk-mysql-folds-only-set-default-*",
-                "MySqlReferentialActionIntegrationTests.SetDefault_IsOmitted_AndLeavesNoForeignKeyDiff",
+                "SyncPlanExpectationRows:realdb-mysql-set-default-is-omitted-and-leaves-no-fk-diff",
             ]
         ),
         (
@@ -1149,7 +1149,7 @@ public static class UnsupportedCoverage
                 "ForeignKeyStatementNotesTests.Plan_SetDefaultOnNotNullColumn_WarnsOnlyWhereDeclared",
                 "ForeignKeyStatementNotesTests.Plan_SetDefaultOnNullableColumn_DoesNotWarn",
                 "ForeignKeyStatementNotesTests.Plan_AlterForeignKeyToSetDefault_OnNotNullColumn_WarnsOnlyWhereDeclared",
-                "SqlServerSyncDependencyIntegrationTests.AddSetDefaultForeignKey_OnNotNullColumn_WarnsAndNeedsDefault",
+                "SyncPlanExpectationRows:realdb-fk-set-default-on-not-null-warns-*",
             ]
         ),
         (
@@ -1211,7 +1211,7 @@ public static class UnsupportedCoverage
             DialectNames.MySql,
             [
                 "MySqlSyncScriptBuilderTests.Reorder_GeneratesModifyAfterWithHeading",
-                "MySqlSchemaSyncIntegrationTests.SchemaSync_ColumnReorder_AppliesToRealDb",
+                "SyncPlanExpectationRows:realdb-mysql-column-reorder-with-insertion-applies",
             ]
         ),
         (
@@ -1220,7 +1220,7 @@ public static class UnsupportedCoverage
             DialectNames.Sqlite,
             [
                 "SyncPlanExpectationRows:plan-reorder-rebuild-produces-target-ordered-rebuild",
-                "SqliteSchemaSyncIntegrationTests.Rebuild_ColumnReorderWithInsertion_AppliesInOneSync",
+                "SyncPlanExpectationRows:realdb-rebuild-reorder-with-insertion-in-one-sync",
             ]
         ),
         (
@@ -1244,9 +1244,9 @@ public static class UnsupportedCoverage
                 "SyncPlanExpectationRows:plan-set-null-alter-child-to-not-null-with-other-rebuild",
                 "SyncPlanExpectationRows:plan-set-null-pk-change-making-child-not-null-names-and-does-not-rebuild",
                 "SchemaSyncWarningTextTests.SetNullOnNotNullColumn_TextFollowsCapability",
-                "MySqlSyncDependencyIntegrationTests.AlterSetNullChildToNotNull_NamesForeignKeyAndChangesNothing",
-                "SqlServerSyncDependencyIntegrationTests.AlterSetNullChildToNotNull_KeepsThatForeignKeyAndSucceeds",
-                "SqlServerSyncDependencyIntegrationTests.AlterSetNullChildTypeAndNotNull_FailsAndChangesNothing",
+                "SyncPlanExpectationRows:realdb-mysql-fk-set-null-child-not-null-names-fk-and-changes-nothing",
+                "SyncPlanExpectationRows:realdb-fk-set-null-child-not-null-keeps-that-fk",
+                "SyncPlanExpectationRows:realdb-fk-set-null-child-type-and-not-null-fails-5074",
             ]
         ),
         (
@@ -1258,9 +1258,8 @@ public static class UnsupportedCoverage
                 "ForeignKeyStatementNotesTests.Ddl_SetNullNotApplicable_IsNotAnnotated",
                 "SqlServerSetNullOnNotNullColumnIntegrationTests.SetNullOnNotNullColumn_DdlIsRefused",
                 "MySqlSetNullOnNotNullColumnIntegrationTests.SetNullOnNotNullColumn_DdlIsRefused",
-                "PostgreSqlSetNullOnNotNullColumnIntegrationTests.SetNullOnNotNullColumn_IsCreatedButDeleteFails",
-                "OracleSetNullOnNotNullColumnIntegrationTests.SetNullOnNotNullColumn_IsCreatedButDeleteFails",
-                "SqliteSetNullOnNotNullColumnIntegrationTests.SetNullOnNotNullColumn_IsCreatedButDeleteFails",
+                "SetNullOnNotNullColumnDdlNoteTests.SetNullOnNotNullColumn_DdlHasNote",
+                "SyncPlanExpectationRows:realdb-set-null-not-null-child-ddl-applies-delete-fails",
             ]
         ),
         (
@@ -1270,9 +1269,9 @@ public static class UnsupportedCoverage
             [
                 "SyncPlanExpectationRows:diff-fk-composite-pair-order-is-not-a-difference",
                 "SyncPlanExpectationRows:diff-fk-composite-pair-order-is-not-described-as-reference-change",
-                "OracleSchemaSyncIntegrationTests.CompositeForeignKeyDeclaredInOtherOrder_ProducesNoDiff",
-                "SqlServerSyncDependencyIntegrationTests.CompositeForeignKeyInOtherOrder_DdlAppliesAndLeavesNoDiff",
-                "MySqlSyncDependencyIntegrationTests.CompositeForeignKeyInOtherOrder_DdlAppliesAndLeavesNoDiff",
+                "SyncPlanExpectationRows:realdb-oracle-fk-composite-declared-other-order-no-diff",
+                "SyncPlanExpectationRows:realdb-fk-composite-other-order-ddl-applies-no-diff",
+                "SyncPlanExpectationRows:realdb-mysql-fk-composite-other-order-ddl-applies-no-diff",
             ]
         ),
         (
@@ -1281,8 +1280,8 @@ public static class UnsupportedCoverage
             null,
             [
                 "ForeignKeyColumnOrderTests.Ddl_CompositeForeignKey_IsReorderedOnlyWhereDeclared",
-                "SqlServerSyncDependencyIntegrationTests.CompositeForeignKeyInOtherOrder_DdlAppliesAndLeavesNoDiff",
-                "MySqlSyncDependencyIntegrationTests.CompositeForeignKeyInOtherOrder_DdlAppliesAndLeavesNoDiff",
+                "SyncPlanExpectationRows:realdb-fk-composite-other-order-ddl-applies-no-diff",
+                "SyncPlanExpectationRows:realdb-mysql-fk-composite-other-order-ddl-applies-no-diff",
             ]
         ),
         (
@@ -1293,10 +1292,10 @@ public static class UnsupportedCoverage
                 "ForeignKeyColumnOrderTests.Sync_AddCompositeForeignKey_IsReorderedOnlyWhereDeclared",
                 "SyncPlanExpectationRows:plan-arrange-reorder-referenced-composite-key-rebuilds-fk-in-new-order",
                 "SyncPlanExpectationRows:plan-arrange-fk-alter-in-other-order-is-arranged-to-key",
-                "SqlServerSyncDependencyIntegrationTests.ReorderReferencedCompositePrimaryKey_RebuildsForeignKeyInNewOrder",
-                "SqlServerSyncDependencyIntegrationTests.AlterForeignKeyInOtherOrder_IsRebuiltInKeyOrder",
-                "MySqlSyncDependencyIntegrationTests.ReorderReferencedCompositePrimaryKey_RebuildsForeignKeyInNewOrder",
-                "MySqlSyncDependencyIntegrationTests.AlterForeignKeyInOtherOrder_IsRebuiltInKeyOrder",
+                "SyncPlanExpectationRows:realdb-fk-reorder-referenced-composite-pk-rebuilds-in-new-order",
+                "SyncPlanExpectationRows:realdb-fk-alter-in-other-order-rebuilt-in-key-order",
+                "SyncPlanExpectationRows:realdb-mysql-fk-reorder-referenced-composite-pk-rebuilds-in-new-order",
+                "SyncPlanExpectationRows:realdb-mysql-fk-alter-in-other-order-rebuilt-in-key-order",
             ]
         ),
         (
@@ -1307,8 +1306,8 @@ public static class UnsupportedCoverage
                 "SyncPlanExpectationRows:plan-type-mismatch-string-length-one-side-rebuilds-where-allowed",
                 "SyncPlannerTests.AreForeignKeyCompatibleTypes_AllowsStringLengthOnly",
                 "SyncPlanExpectationRows:plan-type-mismatch-pk-change-string-length-only-fk-*",
-                "PostgreSqlSchemaSyncIntegrationTests.PrimaryKeyChange_WithStringLengthOnlyForeignKey_Succeeds",
-                "OracleSchemaSyncIntegrationTests.PrimaryKeyChange_WithStringLengthOnlyForeignKey_Succeeds",
+                "SyncPlanExpectationRows:realdb-pg-pk-change-with-string-length-only-fk-keeps-fk",
+                "SyncPlanExpectationRows:realdb-oracle-pk-change-with-string-length-only-fk-keeps-fk",
             ]
         ),
         (
@@ -1350,7 +1349,7 @@ public static class UnsupportedCoverage
                 "SyncPlanExpectationRows:diff-uq-on-primary-key-folded-where-unsupported",
                 "SyncPlanExpectationRows:diff-uq-on-primary-key-existing-in-live-is-not-dropped",
                 "SyncPlanExpectationRows:diff-uq-on-primary-key-unsupported-leaves-drop-only",
-                "SqliteSchemaSyncIntegrationTests.UniqueConstraintOnPrimaryKey_IsFoldedAndDoesNotRepeat",
+                "SyncPlanExpectationRows:realdb-unique-on-pk-folded-no-repeat",
             ]
         ),
         (
@@ -1379,7 +1378,7 @@ public static class UnsupportedCoverage
             null,
             [
                 "SchemaQualifiedTableNameTests.Plan_DottedTableName_WarnsOnlyWhereDeclared",
-                "SqliteSchemaSyncIntegrationTests.DottedTableName_WarnsAndFailsAsUnknownDatabase",
+                "SyncPlanExpectationRows:realdb-dotted-table-name-warns-and-fails",
             ]
         ),
         (
@@ -1393,9 +1392,9 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Sync,
             DialectNames.SqlServer,
             [
-                "SqlServerColumnAttributeSyncIntegrationTests.AlterColumn_WithDefaultConstraint_ReaddsSameDefault",
-                "SqlServerColumnAttributeSyncIntegrationTests.AlterColumn_IncompatibleDefault_SucceedsButInsertFails",
-                "SqlServerColumnAttributeSyncIntegrationTests.TypeKindChangeWithDefault_IsWarned",
+                "SyncPlanExpectationRows:realdb-column-alter-readds-default-*",
+                "SyncPlanExpectationRows:realdb-column-alter-incompatible-default-commits-insert-fails",
+                "SyncPlanExpectationRows:realdb-column-type-kind-change-with-default-warns",
                 "SchemaSyncDialogViewModelTests.Execute_TypeKindChangeWithDefault_ShowsWarningFromImportedDefaults",
                 "SqlServerSyncScriptBuilderTests.AlterColumn_ReadsBackOnlyWhatMatters",
                 "SyncPlanExpectationRows:plan-default-type-kind-change-warns-only-where-declared",
@@ -1406,7 +1405,7 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Sync,
             DialectNames.PostgreSql,
             [
-                "PostgreSqlColumnAttributeSyncIntegrationTests.TypeKindChangeWithDefault_IsWarned",
+                "SyncPlanExpectationRows:realdb-pg-column-type-kind-change-with-default-warns",
                 "SyncPlanExpectationRows:plan-default-type-kind-change-warns-only-where-declared",
                 "SyncPlanExpectationRows:plan-default-no-warning-*",
             ]
@@ -1417,7 +1416,7 @@ public static class UnsupportedCoverage
             DialectNames.MySql,
             [
                 "MySqlColumnAttributeSyncIntegrationTests.AlterColumn_ChangesOnlyTypeAndNullability",
-                "MySqlColumnAttributeSyncIntegrationTests.TypeKindChangeWithIncompatibleDefault_IsWarnedAndFails",
+                "SyncPlanExpectationRows:realdb-mysql-column-type-kind-change-incompatible-default-warns-and-fails",
                 "MySqlSyncScriptBuilderTests.AlterColumn_RebuildsLiveDefinitionWithTypeAndNullability",
                 "SyncPlanExpectationRows:plan-default-type-kind-change-warns-only-where-declared",
             ]
@@ -1427,7 +1426,7 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Sync,
             DialectNames.Oracle,
             [
-                "OracleSchemaSyncIntegrationTests.TypeKindChangeWithDefault_IsWarned",
+                "SyncPlanExpectationRows:realdb-oracle-column-type-kind-change-with-default-warns",
                 "SyncPlanExpectationRows:plan-default-type-kind-change-warns-only-where-declared",
             ]
         ),
@@ -1436,7 +1435,7 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Sync,
             DialectNames.SqlServer,
             [
-                "SqlServerColumnAttributeSyncIntegrationTests.AlterColumn_KeepsCollation",
+                "SyncPlanExpectationRows:realdb-column-alter-keeps-collation",
                 "SqlServerSyncScriptBuilderTests.AlterColumn_GeneratesAlterColumn",
             ]
         ),
@@ -1446,6 +1445,7 @@ public static class UnsupportedCoverage
             DialectNames.PostgreSql,
             [
                 "PostgreSqlColumnAttributeSyncIntegrationTests.AlterColumn_KeepsNonDefaultCollation",
+                "SyncPlanExpectationRows:realdb-pg-column-alter-keeps-non-default-collation-public-table",
                 "PostgreSqlSyncScriptBuilderTests.AlterColumn_StringType_ReadsBackNonDefaultCollation",
             ]
         ),

@@ -12,9 +12,12 @@ using QuickER.Tests.TestSupport;
 namespace QuickER.Tests.Integration.Dialects;
 
 /// <summary>
-/// C: <see cref="SchemaDiffService"/> + <see cref="MySqlSyncScriptBuilder"/> +
-/// <see cref="MySqlSchemaSyncExecutor"/> によるスキーマ同期の実往復を検証する統合テスト。
+/// C: <see cref="MySqlSyncScriptBuilder"/> + <see cref="MySqlSchemaSyncExecutor"/> による同期のうち、差分からは作れない項目
+/// （名前不明の外部キーの削除）と、計画が警告しない失敗（存在しない型）を実 DB で検証する統合テスト。
 /// </summary>
+/// <remarks>
+/// 差分から作れる同期は、同期計画の期待の行の実 DB の段（<c>SyncPlanExpectationRows.RealMySql.cs</c>）が持つ。
+/// </remarks>
 [Trait("Category", "Integration")]
 [Collection(MySqlContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
@@ -22,172 +25,44 @@ public sealed class MySqlSchemaSyncIntegrationTests(MySqlContainerFixture fixtur
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
-    private readonly SchemaDiffService _diff = new();
     private readonly MySqlSyncScriptBuilder _builder = new();
     private readonly MySqlSchemaSyncExecutor _executor = new();
     private readonly MySqlSchemaImporter _importer = new();
 
     /// <summary>
-    /// AddTable（説明付き）/ AddColumn / AlterColumn / DropColumn / DropTable /
-    /// AddForeignKey / DropForeignKey（制約名既知・不明の両方）が実 DB へ適用され、往復で検証できることを確認する。
+    /// 制約名を渡さない外部キーの削除（名前不明＝プリペアド動的 SQL でカタログを逆引きする経路）が、実 DB の外部キーを外すことを
+    /// 検証する。MySQL は外部キーの名前を保存するので差分の外部キーの削除は必ず名前を持ち、この経路は手で組んだ項目でしか通らない。
     /// </summary>
-    [Fact(DisplayName = "[Integration] C: スキーマ同期が Add/Alter/Drop/FK まで実 DB に適用される")]
-    public async Task SchemaSync_AppliesAllKinds()
+    [Fact(
+        DisplayName = "[Integration] C: 名前不明の外部キーの削除がカタログの逆引きで実 DB に適用される"
+    )]
+    public async Task SchemaSync_DropForeignKeyWithoutName_UsesCatalogLookup()
     {
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
         await fixture.ResetSchemaAsync(Ct);
 
         var settings = fixture.ToDbConnectionSettings();
 
-        // ========== フェーズ1: 空 DB → 初期スキーマ（AddTable 説明付き・AddColumn・AddForeignKey） ==========
-        var parent = new Entity { TableName = "parent", Description = "親テーブルの説明" };
-        var parentId = Pk("id");
-        parent.Columns.Add(parentId);
-        parent.Columns.Add(Col("name", "varchar(50)", nullable: true, desc: "名称"));
-
-        var child = new Entity { TableName = "child" };
-        var childId = Pk("id");
-        var childParentId = Col("parent_id", "int", nullable: true);
-        child.Columns.Add(childId);
-        child.Columns.Add(childParentId);
-        child.Columns.Add(Col("to_alter", "varchar(50)", nullable: true));
-        child.Columns.Add(Col("to_drop", "int", nullable: true));
-
-        var rel = new Relationship
-        {
-            SourceEntityId = parent.Id,
-            TargetEntityId = child.Id,
-            Type = RelationshipType.OneToMany,
-            ColumnPairs = [new(parentId.Id, childParentId.Id)],
-            ConstraintName = "FK_child_parent",
-            OnDelete = ForeignKeyReferentialAction.Cascade,
-        };
-
-        var live0 = await ImportAsync();
-        var diff1 = _diff.Compute(
-            live0.Entities,
-            live0.Relationships,
-            new[] { parent, child },
-            new[] { rel },
-            TestDialectCapabilities.Neutral
-        );
-        diff1
-            .Items.Should()
-            .Contain(i => i.Kind == SchemaDiffKind.AddTable && i.TableName == "parent");
-        diff1
-            .Items.Should()
-            .Contain(i => i.Kind == SchemaDiffKind.AddTable && i.TableName == "child");
-        diff1.Items.Should().Contain(i => i.Kind == SchemaDiffKind.AddForeignKey);
-        diff1
-            .Items.Should()
-            .Contain(i =>
-                i.Kind == SchemaDiffKind.SetTableDescription
-                && i.NewDescription == "親テーブルの説明"
-            );
-
-        await ApplyAsync(settings, diff1.Items);
-
-        // 再取込で往復確認
-        var live1 = await ImportAsync();
-        live1.Entities.Select(e => e.TableName).Should().BeEquivalentTo("parent", "child");
-        live1
-            .Entities.Single(e => e.TableName == "parent")
-            .Description.Should()
-            .Be("親テーブルの説明");
-        live1
-            .Entities.Single(e => e.TableName == "parent")
-            .Columns.Single(c => c.Name == "name")
-            .Description.Should()
-            .Be("名称");
-        live1.Relationships.Should().ContainSingle();
-        live1.Relationships[0].ConstraintName.Should().Be("FK_child_parent");
-        live1.Relationships[0].OnDelete.Should().Be(ForeignKeyReferentialAction.Cascade);
-
-        // ========== フェーズ2: AddColumn / AlterColumn（型変更・NULL→NOT NULL） / DropColumn ==========
-        var child2 = new Entity { TableName = "child" };
-        child2.Columns.Add(Pk("id"));
-        var child2ParentId = Col("parent_id", "int", nullable: true);
-        child2.Columns.Add(child2ParentId);
-        child2.Columns.Add(Col("to_alter", "varchar(100)", nullable: false)); // 型変更＋NULL→NOT NULL
-        child2.Columns.Add(Col("added", "int", nullable: true)); // 追加
-
-        var parentLive = live1.Entities.Single(e => e.TableName == "parent");
-        var parentTarget = CloneAsTarget(parentLive);
-
-        var relKeep = new Relationship
-        {
-            SourceEntityId = parentTarget.Id,
-            TargetEntityId = child2.Id,
-            Type = RelationshipType.OneToMany,
-            ColumnPairs =
-            [
-                new(parentTarget.Columns.Single(c => c.IsPrimaryKey).Id, child2ParentId.Id),
-            ],
-            ConstraintName = "FK_child_parent",
-            OnDelete = ForeignKeyReferentialAction.Cascade,
-        };
-
-        var diff2 = _diff.Compute(
-            live1.Entities,
-            live1.Relationships,
-            new[] { parentTarget, child2 },
-            new[] { relKeep },
-            TestDialectCapabilities.Neutral
-        );
-        diff2
-            .Items.Should()
-            .Contain(i => i.Kind == SchemaDiffKind.AddColumn && i.ColumnName == "added");
-        diff2
-            .Items.Should()
-            .Contain(i => i.Kind == SchemaDiffKind.AlterColumn && i.ColumnName == "to_alter");
-        diff2
-            .Items.Should()
-            .Contain(i => i.Kind == SchemaDiffKind.DropColumn && i.ColumnName == "to_drop");
-
-        // 破壊的差分は既定で未選択のため、全項目を選択して実行する
-        foreach (var item in diff2.Items)
-        {
-            item.IsSelected = true;
-        }
-
-        await ApplyAsync(settings, diff2.Items);
-
-        var live2 = await ImportAsync();
-        var childLive2 = live2.Entities.Single(e => e.TableName == "child");
-        childLive2.Columns.Select(c => c.Name).Should().Contain("added");
-        childLive2.Columns.Select(c => c.Name).Should().NotContain("to_drop");
-        var alteredCol = childLive2.Columns.Single(c => c.Name == "to_alter");
-        alteredCol.DataType.Should().Be("varchar(100)");
-        alteredCol.IsNullable.Should().BeFalse();
-
-        // ========== フェーズ3: DropForeignKey（制約名既知） ==========
-        var parentTarget3 = CloneAsTarget(live2.Entities.Single(e => e.TableName == "parent"));
-        var childTarget3 = CloneAsTarget(childLive2);
-        var diff3 = _diff.Compute(
-            live2.Entities,
-            live2.Relationships,
-            new[] { parentTarget3, childTarget3 },
-            new List<Relationship>(), // FK 無し
-            TestDialectCapabilities.Neutral
-        );
-        var dropFk = diff3.Items.Single(i => i.Kind == SchemaDiffKind.DropForeignKey);
-        dropFk.ForeignKeyName.Should().Be("FK_child_parent"); // 制約名既知
-        dropFk.IsSelected = true;
-        await ApplyAsync(settings, new[] { dropFk });
-
-        var live3 = await ImportAsync();
-        live3.Relationships.Should().BeEmpty();
-
-        // ========== フェーズ4: DropForeignKey（制約名不明 → プリペアド動的 SQL 経路） ==========
         // MySQL の FK は参照インデックスを要求するため parent.id（PK）を参照する FK を直接張る
+        await fixture.ExecuteAsync(
+            "CREATE TABLE `parent` (`id` int NOT NULL, `name` varchar(50) NULL, "
+                + "CONSTRAINT `PK_parent` PRIMARY KEY (`id`));",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "CREATE TABLE `child` (`id` int NOT NULL, `parent_id` int NULL, "
+                + "`to_alter` varchar(100) NOT NULL, `added` int NULL, "
+                + "CONSTRAINT `PK_child` PRIMARY KEY (`id`));",
+            Ct
+        );
         await fixture.ExecuteAsync(
             "ALTER TABLE `child` ADD CONSTRAINT `fk_unknown_name` "
                 + "FOREIGN KEY (`parent_id`) REFERENCES `parent` (`id`);",
             Ct
         );
-        var live4 = await ImportAsync();
-        var parentE = live4.Entities.Single(e => e.TableName == "parent");
-        var childE = live4.Entities.Single(e => e.TableName == "child");
+        var live = await ImportAsync();
+        var parentE = live.Entities.Single(e => e.TableName == "parent");
+        var childE = live.Entities.Single(e => e.TableName == "child");
         var dropFkUnknown = new SchemaDiffItem
         {
             Kind = SchemaDiffKind.DropForeignKey,
@@ -199,26 +74,7 @@ public sealed class MySqlSchemaSyncIntegrationTests(MySqlContainerFixture fixtur
         };
         await ApplyAsync(settings, new[] { dropFkUnknown });
 
-        var live5 = await ImportAsync();
-        live5.Relationships.Should().BeEmpty();
-
-        // ========== フェーズ5: DropTable ==========
-        var childTarget5 = CloneAsTarget(live5.Entities.Single(e => e.TableName == "child"));
-        var diff5 = _diff.Compute(
-            live5.Entities,
-            live5.Relationships,
-            new[] { childTarget5 },
-            new List<Relationship>(),
-            TestDialectCapabilities.Neutral
-        );
-        var dropTable = diff5.Items.Single(i =>
-            i.Kind == SchemaDiffKind.DropTable && i.TableName == "parent"
-        );
-        dropTable.IsSelected = true;
-        await ApplyAsync(settings, new[] { dropTable });
-
-        var live6 = await ImportAsync();
-        live6.Entities.Select(e => e.TableName).Should().BeEquivalentTo("child");
+        (await ImportAsync()).Relationships.Should().BeEmpty();
     }
 
     /// <summary>
@@ -314,304 +170,7 @@ public sealed class MySqlSchemaSyncIntegrationTests(MySqlContainerFixture fixtur
         live.Entities.Select(e => e.TableName).Should().NotContain("bad_table");
     }
 
-    /// <summary>
-    /// 列順変更（並び替え＋真ん中への列追加）がネイティブ MODIFY ... AFTER で実 DB へ反映され、
-    /// information_schema の ORDINAL_POSITION で列順が確認でき、データが温存されることを検証する。
-    /// </summary>
-    [Fact(
-        DisplayName = "[Integration] C: 列順変更（並び替え＋真ん中への列追加）が実 DB に反映される"
-    )]
-    public async Task SchemaSync_ColumnReorder_AppliesToRealDb()
-    {
-        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
-        await fixture.ResetSchemaAsync(Ct);
-
-        var settings = fixture.ToDbConnectionSettings();
-
-        await fixture.ExecuteAsync(
-            "CREATE TABLE `item` (`id` int NOT NULL, `a` int NULL, `b` int NULL, "
-                + "CONSTRAINT `PK_item` PRIMARY KEY (`id`));",
-            Ct
-        );
-        await fixture.ExecuteAsync("INSERT INTO `item` (`id`, `a`, `b`) VALUES (1, 10, 20);", Ct);
-
-        var live = await ImportAsync();
-        var liveItem = live.Entities.Single(e => e.TableName == "item");
-
-        // 目標列順: id, new_col（真ん中へ追加）, b, a（a と b を入れ替え）
-        var target = liveItem.Clone(preserveId: true);
-        var id = target.Columns.Single(c => c.Name == "id");
-        var a = target.Columns.Single(c => c.Name == "a");
-        var b = target.Columns.Single(c => c.Name == "b");
-        target.Columns.Clear();
-        target.Columns.Add(id);
-        target.Columns.Add(Col("new_col", "int", nullable: true));
-        target.Columns.Add(b);
-        target.Columns.Add(a);
-
-        var caps = new MySqlProvider().SyncCapabilities;
-        var diff = _diff.Compute(
-            live.Entities,
-            live.Relationships,
-            new[] { target },
-            new List<Relationship>(),
-            caps
-        );
-        diff.Items.Should().Contain(i => i.Kind == SchemaDiffKind.ReorderColumns);
-
-        // 列順変更は既定で未選択のため、全項目を選択して実行する
-        foreach (var it in diff.Items)
-        {
-            it.IsSelected = true;
-        }
-
-        var context = new SyncPlanContext
-        {
-            LiveEntities = live.Entities,
-            LiveRelationships = live.Relationships,
-        };
-        var script = _builder.Build(new SyncPlanner().BuildPlan(diff.Items, caps, context));
-        var result = await _executor.ExecuteAsync(settings, script, Ct);
-        result.Committed.Should().BeTrue($"同期に失敗: {result.Error}\nSQL:\n{script}");
-
-        // ORDINAL_POSITION で列順が id, new_col, b, a に反映される
-        var order = await QueryColumnOrderAsync("item");
-        order.Should().Equal("id", "new_col", "b", "a");
-
-        // データは温存される（a=10, b=20・追加列は NULL）
-        var (rowA, rowB, newIsNull) = await QueryItemRowAsync(1);
-        rowA.Should().Be(10);
-        rowB.Should().Be(20);
-        newIsNull.Should().BeTrue();
-    }
-
-    /// <summary>
-    /// 主キーの付け替え（id → code）が実 DB へ適用され、行データが温存されることを検証する。
-    /// </summary>
-    /// <remarks>参照してくる FK が無いテーブルで、主キー変更単体の往復を確認する</remarks>
-    [Fact(DisplayName = "[Integration] C: 主キーを id から code へ付け替えてもデータが温存される")]
-    public async Task SchemaSync_AlterPrimaryKey_MovesPrimaryKeyAndKeepsRows()
-    {
-        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
-        await fixture.ResetSchemaAsync(Ct);
-
-        var settings = fixture.ToDbConnectionSettings();
-
-        await fixture.ExecuteAsync(
-            "CREATE TABLE `pk_item` (`code` varchar(20) NOT NULL, `id` int NOT NULL, "
-                + "CONSTRAINT `PK_pk_item` PRIMARY KEY (`id`));",
-            Ct
-        );
-        await fixture.ExecuteAsync(
-            "INSERT INTO `pk_item` (`code`, `id`) VALUES ('A-001', 1), ('A-002', 2);",
-            Ct
-        );
-
-        var live = await ImportAsync();
-        var liveItem = live.Entities.Single(e => e.TableName == "pk_item");
-
-        // 目標: 列構成・型は変えず、主キーだけ id から code へ移す
-        var target = CloneAsTarget(liveItem);
-        target.Columns.Single(c => c.Name == "id").IsPrimaryKey = false;
-        target.Columns.Single(c => c.Name == "code").IsPrimaryKey = true;
-
-        var caps = new MySqlProvider().SyncCapabilities;
-        var diff = _diff.Compute(
-            live.Entities,
-            live.Relationships,
-            new[] { target },
-            new List<Relationship>(),
-            caps
-        );
-
-        // 主キー変更は既定で未選択のため、対象項目だけを明示的に選択する
-        var alterPk = diff
-            .Items.Should()
-            .ContainSingle(i =>
-                i.Kind == SchemaDiffKind.AlterPrimaryKey && i.TableName == "pk_item"
-            )
-            .Which;
-        alterPk.IsSelected = true;
-
-        var context = new SyncPlanContext
-        {
-            LiveEntities = live.Entities,
-            LiveRelationships = live.Relationships,
-        };
-        var script = _builder.Build(new SyncPlanner().BuildPlan(diff.Items, caps, context));
-        var result = await _executor.ExecuteAsync(settings, script, Ct);
-        result.Committed.Should().BeTrue($"主キー変更に失敗: {result.Error}\nSQL:\n{script}");
-
-        // 再取込: 主キーが code へ移っている
-        var live2 = await ImportAsync();
-        var item2 = live2.Entities.Single(e => e.TableName == "pk_item");
-        item2.Columns.Single(c => c.Name == "code").IsPrimaryKey.Should().BeTrue();
-        item2.Columns.Single(c => c.Name == "id").IsPrimaryKey.Should().BeFalse();
-
-        // 行データは失われない
-        var rows = await QueryPkItemRowsAsync();
-        rows.Should().Equal(("A-001", 1), ("A-002", 2));
-    }
-
-    /// <summary>
-    /// 被参照列が候補キーでなくなる主キー変更は、自動再 ADD される FK が実行時に失敗し、
-    /// DDL の暗黙コミットにより<b>部分適用</b>（FK が消えたまま主キーだけ変わる）で残ることを検証する。
-    /// </summary>
-    /// <remarks>
-    /// 既知の限界の現状固定。SQL Server / PostgreSQL は単一トランザクションのためロールバックされる
-    /// （<c>SqlServerSchemaSyncIntegrationTests.PrimaryKeyChange_BreakingDependentForeignKey_RollsBack</c>）が、
-    /// MySQL は DDL が暗黙コミットされるため元に戻らない。計画側はこのリスクを警告として積む
-    /// （<see cref="SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey"/>）。
-    /// </remarks>
-    [Fact(
-        DisplayName = "[Integration] C: AlterPrimaryKey: 被参照列が候補キーでなくなる変更は失敗し部分適用で残る"
-    )]
-    public async Task PrimaryKeyChange_BreakingDependentForeignKey_PartiallyApplies()
-    {
-        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
-        await fixture.ResetSchemaAsync(Ct);
-
-        var settings = fixture.ToDbConnectionSettings();
-
-        await fixture.ExecuteAsync(
-            "CREATE TABLE `pk_parent` (`id` int NOT NULL, `code` varchar(20) NOT NULL, "
-                + "CONSTRAINT `PK_pk_parent` PRIMARY KEY (`id`));",
-            Ct
-        );
-        await fixture.ExecuteAsync(
-            "CREATE TABLE `pk_child` (`id` int NOT NULL, `parent_id` int NULL, "
-                + "CONSTRAINT `PK_pk_child` PRIMARY KEY (`id`), "
-                + "CONSTRAINT `FK_pk_child_pk_parent` FOREIGN KEY (`parent_id`) "
-                + "REFERENCES `pk_parent` (`id`));",
-            Ct
-        );
-        await fixture.ExecuteAsync("INSERT INTO `pk_parent` (`id`, `code`) VALUES (1, 'P-1');", Ct);
-        await fixture.ExecuteAsync("INSERT INTO `pk_child` (`id`, `parent_id`) VALUES (1, 1);", Ct);
-
-        var live = await ImportAsync();
-        var liveParent = live.Entities.Single(e => e.TableName == "pk_parent");
-        var liveChild = live.Entities.Single(e => e.TableName == "pk_child");
-        var liveFk = live.Relationships.Single(r => r.TargetEntityId == liveChild.Id);
-
-        // 目標: 親の主キーを id から code へ移す（子の FK は id を参照したまま維持）
-        var parentTarget = CloneAsTarget(liveParent);
-        parentTarget.Columns.Single(c => c.Name == "id").IsPrimaryKey = false;
-        parentTarget.Columns.Single(c => c.Name == "code").IsPrimaryKey = true;
-        var childTarget = CloneAsTarget(liveChild);
-        var relKeep = new Relationship
-        {
-            SourceEntityId = parentTarget.Id,
-            TargetEntityId = childTarget.Id,
-            Type = RelationshipType.OneToMany,
-            ColumnPairs =
-            [
-                new(
-                    parentTarget.Columns.Single(c => c.Name == "id").Id,
-                    childTarget.Columns.Single(c => c.Name == "parent_id").Id
-                ),
-            ],
-            ConstraintName = liveFk.ConstraintName,
-        };
-
-        var caps = new MySqlProvider().SyncCapabilities;
-        var diff = _diff.Compute(
-            live.Entities,
-            live.Relationships,
-            new[] { parentTarget, childTarget },
-            new[] { relKeep },
-            caps
-        );
-        var alterPk = diff
-            .Items.Should()
-            .ContainSingle(i =>
-                i.Kind == SchemaDiffKind.AlterPrimaryKey && i.TableName == "pk_parent"
-            )
-            .Which;
-        alterPk.IsSelected = true;
-
-        var context = new SyncPlanContext
-        {
-            LiveEntities = live.Entities,
-            LiveRelationships = live.Relationships,
-        };
-        var plan = new SyncPlanner().BuildPlan(diff.Items, caps, context);
-
-        // 計画側は候補キー喪失の恐れを警告として積む（一意制約は取り込んでいないため実行はブロックしない）
-        plan.Warnings.Should()
-            .Contain(w => w.Kind == SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey);
-
-        var script = _builder.Build(plan);
-        var result = await _executor.ExecuteAsync(settings, script, Ct);
-
-        // 再 ADD できない FK があるため実行は失敗する
-        result
-            .Committed.Should()
-            .BeFalse($"再 ADD できない FK があるため失敗するはず\nSQL:\n{script}");
-        result.Error.Should().NotBeNullOrEmpty();
-        // 部分適用があり得る旨の説明が付く（文言は表示言語依存のため culture 安定トークンで確認する）
-        result.Error.Should().Contain("MySQL");
-
-        // ---------- MySQL の DDL は暗黙コミット＝部分適用が残る ----------
-        var live2 = await ImportAsync();
-        var parent2 = live2.Entities.Single(e => e.TableName == "pk_parent");
-        parent2
-            .Columns.Single(c => c.Name == "code")
-            .IsPrimaryKey.Should()
-            .BeTrue("主キーの付け替えは適用済みのまま残る");
-        parent2.Columns.Single(c => c.Name == "id").IsPrimaryKey.Should().BeFalse();
-        live2.Relationships.Should().BeEmpty("自動で外した FK は戻らない（部分適用）");
-    }
-
     // ---------------- ヘルパー ----------------
-
-    /// <summary>主キー変更の検証用テーブルの行を取得する（データ温存の確認用）</summary>
-    private async Task<List<(string Code, int Id)>> QueryPkItemRowsAsync()
-    {
-        var rows = new List<(string Code, int Id)>();
-
-        await using var conn = await fixture.OpenConnectionAsync(Ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT `code`, `id` FROM `pk_item` ORDER BY `id`;";
-        await using var reader = await cmd.ExecuteReaderAsync(Ct).ConfigureAwait(false);
-
-        while (await reader.ReadAsync(Ct).ConfigureAwait(false))
-        {
-            rows.Add((reader.GetString(0), reader.GetInt32(1)));
-        }
-
-        return rows;
-    }
-
-    /// <summary>information_schema.COLUMNS から ORDINAL_POSITION 順の列名一覧を取得する</summary>
-    private async Task<List<string>> QueryColumnOrderAsync(string table)
-    {
-        var names = new List<string>();
-
-        await using var conn = await fixture.OpenConnectionAsync(Ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText =
-            "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
-            + $"WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '{table}' ORDER BY ORDINAL_POSITION;";
-        await using var reader = await cmd.ExecuteReaderAsync(Ct).ConfigureAwait(false);
-
-        while (await reader.ReadAsync(Ct).ConfigureAwait(false))
-        {
-            names.Add(reader.GetString(0));
-        }
-
-        return names;
-    }
-
-    /// <summary>item テーブルの 1 行から a / b の値と new_col が NULL かを取得する（検証用）</summary>
-    private async Task<(long A, long B, bool NewIsNull)> QueryItemRowAsync(long id)
-    {
-        await using var conn = await fixture.OpenConnectionAsync(Ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"SELECT `a`, `b`, `new_col` FROM `item` WHERE `id` = {id};";
-        await using var reader = await cmd.ExecuteReaderAsync(Ct).ConfigureAwait(false);
-        await reader.ReadAsync(Ct).ConfigureAwait(false);
-        return (reader.GetInt64(0), reader.GetInt64(1), reader.IsDBNull(2));
-    }
 
     private static Column Pk(string name) =>
         new()
@@ -622,16 +181,13 @@ public sealed class MySqlSchemaSyncIntegrationTests(MySqlContainerFixture fixtur
             IsNullable = false,
         };
 
-    private static Column Col(string name, string type, bool nullable, string desc = "") =>
+    private static Column Col(string name, string type, bool nullable) =>
         new()
         {
             Name = name,
             DataType = type,
             IsNullable = nullable,
-            Description = desc,
         };
-
-    private static Entity CloneAsTarget(Entity e) => e.Clone(preserveId: true);
 
     private async Task<SchemaImportResult> ImportAsync()
     {
@@ -647,329 +203,5 @@ public sealed class MySqlSchemaSyncIntegrationTests(MySqlContainerFixture fixtur
         );
         var result = await _executor.ExecuteAsync(settings, script, Ct);
         result.Committed.Should().BeTrue($"同期に失敗: {result.Error}\nSQL:\n{script}");
-    }
-
-    /// <summary>図に足した一意制約が実 DB へ追加され、外した一意制約が実 DB から消えることを検証する</summary>
-    /// <remarks>MySQL の一意制約は実体が一意インデックスのため、削除は <c>DROP INDEX</c> 構文で行う。</remarks>
-    [Fact(DisplayName = "[Integration] C: 一意制約の追加・削除が実 DB へ反映される")]
-    public async Task UniqueConstraintSync_AddsAndDrops()
-    {
-        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
-        await fixture.ResetSchemaAsync(Ct);
-
-        var settings = fixture.ToDbConnectionSettings();
-
-        await fixture.ExecuteAsync(
-            "CREATE TABLE `uq_item` (`id` int NOT NULL, `code` varchar(20) NOT NULL, "
-                + "CONSTRAINT `PK_uq_item` PRIMARY KEY (`id`));",
-            Ct
-        );
-
-        // ========== 追加 ==========
-        var live = await ImportAsync();
-        var target = WithUniqueOnCode(live);
-        var addDiff = _diff.Compute(
-            live.Entities,
-            live.Relationships,
-            new[] { target },
-            new List<Relationship>(),
-            TestDialectCapabilities.Neutral
-        );
-        // 一意制約の追加は既定で選択される（制約を増やすだけで既存定義を壊さないため）
-        addDiff
-            .Items.Should()
-            .ContainSingle(i => i.Kind == SchemaDiffKind.AddUniqueConstraint)
-            .Which.IsSelected.Should()
-            .BeTrue();
-
-        await ApplyAsync(settings, addDiff.Items);
-
-        var live2 = await ImportAsync();
-        var item2 = SingleUqItem(live2);
-        var added = item2.UniqueConstraints.Should().ContainSingle().Which;
-        added
-            .ColumnIds.Select(id => item2.Columns.Single(c => c.Id == id).Name)
-            .Should()
-            .Equal("code");
-
-        // ========== 削除 ==========
-        var target2 = CloneAsTarget(item2);
-        target2.UniqueConstraints.Clear();
-        var dropDiff = _diff.Compute(
-            live2.Entities,
-            live2.Relationships,
-            new[] { target2 },
-            new List<Relationship>(),
-            TestDialectCapabilities.Neutral
-        );
-        var drop = dropDiff
-            .Items.Should()
-            .ContainSingle(i => i.Kind == SchemaDiffKind.DropUniqueConstraint)
-            .Which;
-        // 削除は破壊的のため既定では未選択＝明示的に選ぶ
-        drop.IsSelected.Should().BeFalse();
-        drop.IsSelected = true;
-
-        await ApplyAsync(settings, dropDiff.Items);
-
-        SingleUqItem(await ImportAsync()).UniqueConstraints.Should().BeEmpty();
-    }
-
-    /// <summary>検証用テーブルの取込エンティティを取り出す</summary>
-    private static Entity SingleUqItem(SchemaImportResult result) =>
-        result.Entities.Single(e => e.TableName == "uq_item");
-
-    /// <summary>取込結果の検証用テーブルへ「code 列の一意制約」を足した目標図を作る</summary>
-    private static Entity WithUniqueOnCode(SchemaImportResult live)
-    {
-        var target = CloneAsTarget(SingleUqItem(live));
-        target.UniqueConstraints.Add(
-            new UniqueConstraint { ColumnIds = [target.Columns.Single(c => c.Name == "code").Id] }
-        );
-        return target;
-    }
-
-    // ---------------- 複合外部キー ----------------
-
-    /// <summary>複合外部キーの追加・削除が、構成列を保ったまま実 DB へ反映されることを検証する</summary>
-    [Fact(DisplayName = "[Integration] C: 複合外部キーの追加・削除が実 DB へ反映される")]
-    public async Task CompositeForeignKeySync_AddsAndDrops()
-    {
-        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
-        await fixture.ResetSchemaAsync(Ct);
-
-        var settings = fixture.ToDbConnectionSettings();
-
-        await fixture.ExecuteAsync(
-            "CREATE TABLE `cfk_parent` (`a` int NOT NULL, `b` int NOT NULL, "
-                + "CONSTRAINT `PK_cfk_parent` PRIMARY KEY (`a`, `b`));",
-            Ct
-        );
-        await fixture.ExecuteAsync(
-            "CREATE TABLE `cfk_child` (`id` int NOT NULL, `a_ref` int NOT NULL, "
-                + "`b_ref` int NOT NULL, CONSTRAINT `PK_cfk_child` PRIMARY KEY (`id`));",
-            Ct
-        );
-
-        // ========== 追加 ==========
-        var live = await ImportAsync();
-        var (parentTarget, childTarget, targetRel) = BuildCompositeForeignKeyTarget(live);
-
-        var addDiff = _diff.Compute(
-            live.Entities,
-            live.Relationships,
-            new[] { parentTarget, childTarget },
-            new[] { targetRel },
-            TestDialectCapabilities.Neutral
-        );
-        var add = addDiff
-            .Items.Should()
-            .ContainSingle(i => i.Kind == SchemaDiffKind.AddForeignKey)
-            .Which;
-        add.ForeignKeyColumnPairs.Select(p => (p.ParentColumn, p.ChildColumn))
-            .Should()
-            .Equal(("a", "a_ref"), ("b", "b_ref"));
-
-        await ApplyAsync(settings, addDiff.Items);
-
-        // 再取込: 構成列を 2 組とも保った 1 本の外部キーとして戻る
-        var live2 = await ImportAsync();
-        AssertCompositeForeignKey(live2);
-
-        // 実 DB 側でも全構成列が FK に載っている（単列 FK へ縮んでいない）
-        var fkColumns = await QueryForeignKeyColumnsAsync("cfk_child", "FK_cfk_child_cfk_parent");
-        fkColumns.Should().Equal(("a_ref", "a"), ("b_ref", "b"));
-
-        // ========== 削除 ==========
-        var dropDiff = _diff.Compute(
-            live2.Entities,
-            live2.Relationships,
-            live2.Entities.Select(CloneAsTarget).ToArray(),
-            new List<Relationship>(),
-            TestDialectCapabilities.Neutral
-        );
-        var drop = dropDiff
-            .Items.Should()
-            .ContainSingle(i => i.Kind == SchemaDiffKind.DropForeignKey)
-            .Which;
-        // 削除は破壊的のため既定では未選択＝明示的に選ぶ
-        drop.IsSelected = true;
-
-        await ApplyAsync(settings, dropDiff.Items);
-
-        (await ImportAsync()).Relationships.Should().BeEmpty();
-    }
-
-    /// <summary>
-    /// 複合主キーの変更に巻き込まれる複合外部キーが、全構成列のまま自動で外して張り直されることを検証する。
-    /// </summary>
-    /// <remarks>
-    /// MySQL はプレフィックス（先頭列だけ）の外部キーも受け付けるため、劣化した定義で作り直すと
-    /// <b>実行は成功したまま制約だけが静かに壊れる</b>のが劣化時代の最大の危険だった。ここでは実 DB の
-    /// カタログを直接引いて、再作成後も構成列が 2 組とも残っていることを固定する。
-    /// </remarks>
-    [Fact(
-        DisplayName = "[Integration] C: 複合主キー変更に伴う複合外部キーの張り直しで構成列が失われない"
-    )]
-    public async Task CompositeForeignKey_SurvivesPrimaryKeyChange()
-    {
-        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
-        await fixture.ResetSchemaAsync(Ct);
-
-        var settings = fixture.ToDbConnectionSettings();
-
-        await SetUpPrimaryKeyChangeScenarioAsync();
-
-        var live = await ImportAsync();
-        var alterPk = BuildPrimaryKeyShrinkDiff(live, out var caps, out var context);
-
-        var plan = new SyncPlanner().BuildPlan(alterPk, caps, context);
-
-        // 被参照列 (a, b) は同期後も一意制約として残るため、候補キー喪失の警告は出ない
-        plan.Warnings.Should().BeEmpty();
-
-        var script = _builder.Build(plan);
-        var result = await _executor.ExecuteAsync(settings, script, Ct);
-        result.Committed.Should().BeTrue($"主キー変更に失敗: {result.Error}\nSQL:\n{script}");
-
-        // 主キーは縮み、複合外部キーは構成列を保ったまま残る
-        var live2 = await ImportAsync();
-        live2
-            .Entities.Single(e => e.TableName == "cfk_parent")
-            .Columns.Where(c => c.IsPrimaryKey)
-            .Select(c => c.Name)
-            .Should()
-            .Equal("id");
-        AssertCompositeForeignKey(live2);
-
-        // 実 DB のカタログでも 2 列とも残っている（プレフィックス FK へ縮んでいない）
-        var fkColumns = await QueryForeignKeyColumnsAsync("cfk_child", "FK_cfk_child_cfk_parent");
-        fkColumns.Should().Equal(("a_ref", "a"), ("b_ref", "b"));
-    }
-
-    /// <summary>主キー変更シナリオの live スキーマ（複合 PK 親＋一意制約参照の複合 FK）を用意する</summary>
-    private async Task SetUpPrimaryKeyChangeScenarioAsync()
-    {
-        await fixture.ExecuteAsync(
-            "CREATE TABLE `cfk_parent` (`id` int NOT NULL, `code` int NOT NULL, "
-                + "`a` int NOT NULL, `b` int NOT NULL, "
-                + "CONSTRAINT `PK_cfk_parent` PRIMARY KEY (`id`, `code`), "
-                + "CONSTRAINT `UQ_cfk_parent_a_b` UNIQUE (`a`, `b`));",
-            Ct
-        );
-        await fixture.ExecuteAsync(
-            "CREATE TABLE `cfk_child` (`id` int NOT NULL, `a_ref` int NOT NULL, "
-                + "`b_ref` int NOT NULL, CONSTRAINT `PK_cfk_child` PRIMARY KEY (`id`), "
-                + "CONSTRAINT `FK_cfk_child_cfk_parent` FOREIGN KEY (`a_ref`, `b_ref`) "
-                + "REFERENCES `cfk_parent` (`a`, `b`));",
-            Ct
-        );
-    }
-
-    /// <summary>親の複合主キー (id, code) を (id) へ縮める差分項目を組み立てる</summary>
-    private List<SchemaDiffItem> BuildPrimaryKeyShrinkDiff(
-        SchemaImportResult live,
-        out SyncDialectCapabilities caps,
-        out SyncPlanContext context
-    )
-    {
-        var parentTarget = CloneAsTarget(live.Entities.Single(e => e.TableName == "cfk_parent"));
-        parentTarget.Columns.Single(c => c.Name == "code").IsPrimaryKey = false;
-        var childTarget = CloneAsTarget(live.Entities.Single(e => e.TableName == "cfk_child"));
-
-        // 外部キー自体は図にも残す（FK 差分を出さず、主キー変更だけを見るため）
-        var relKeep = BuildCompositeRelationship(parentTarget, childTarget);
-
-        caps = new MySqlProvider().SyncCapabilities;
-        var diff = _diff.Compute(
-            live.Entities,
-            live.Relationships,
-            new[] { parentTarget, childTarget },
-            new[] { relKeep },
-            caps
-        );
-        // 主キー変更は既定で未選択のため明示的に選択する
-        diff.Items.Single(i => i.Kind == SchemaDiffKind.AlterPrimaryKey).IsSelected = true;
-
-        context = new SyncPlanContext
-        {
-            LiveEntities = live.Entities,
-            LiveRelationships = live.Relationships,
-        };
-        return diff.Items;
-    }
-
-    /// <summary>取込結果へ複合外部キーを足した目標図（親・子・リレーション）を作る</summary>
-    private static (
-        Entity Parent,
-        Entity Child,
-        Relationship Relationship
-    ) BuildCompositeForeignKeyTarget(SchemaImportResult live)
-    {
-        var parent = CloneAsTarget(live.Entities.Single(e => e.TableName == "cfk_parent"));
-        var child = CloneAsTarget(live.Entities.Single(e => e.TableName == "cfk_child"));
-        return (parent, child, BuildCompositeRelationship(parent, child));
-    }
-
-    /// <summary>(a, b) → (a_ref, b_ref) の複合外部キーを表すリレーションを組み立てる</summary>
-    private static Relationship BuildCompositeRelationship(Entity parent, Entity child) =>
-        new()
-        {
-            SourceEntityId = parent.Id,
-            TargetEntityId = child.Id,
-            Type = RelationshipType.OneToMany,
-            ColumnPairs =
-            [
-                new(
-                    parent.Columns.Single(c => c.Name == "a").Id,
-                    child.Columns.Single(c => c.Name == "a_ref").Id
-                ),
-                new(
-                    parent.Columns.Single(c => c.Name == "b").Id,
-                    child.Columns.Single(c => c.Name == "b_ref").Id
-                ),
-            ],
-            ConstraintName = "FK_cfk_child_cfk_parent",
-        };
-
-    /// <summary>取込結果に、構成列を 2 組とも保った複合外部キーが 1 本だけあることを検証する</summary>
-    private static void AssertCompositeForeignKey(SchemaImportResult live)
-    {
-        var parent = live.Entities.Single(e => e.TableName == "cfk_parent");
-        var child = live.Entities.Single(e => e.TableName == "cfk_child");
-        var rel = live.Relationships.Should().ContainSingle().Which;
-
-        rel.ColumnPairs.Select(p =>
-                (
-                    parent.Columns.Single(c => c.Id == p.SourceColumnId).Name,
-                    child.Columns.Single(c => c.Id == p.TargetColumnId).Name
-                )
-            )
-            .Should()
-            .Equal(("a", "a_ref"), ("b", "b_ref"));
-    }
-
-    /// <summary>実 DB のカタログから外部キーの構成列（子列名, 親列名）を序数順に取得する</summary>
-    private async Task<List<(string ChildColumn, string ParentColumn)>> QueryForeignKeyColumnsAsync(
-        string table,
-        string constraintName
-    )
-    {
-        var columns = new List<(string, string)>();
-
-        await using var conn = await fixture.OpenConnectionAsync(Ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText =
-            "SELECT COLUMN_NAME, REFERENCED_COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE "
-            + $"WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '{table}' "
-            + $"AND CONSTRAINT_NAME = '{constraintName}' ORDER BY ORDINAL_POSITION;";
-        await using var reader = await cmd.ExecuteReaderAsync(Ct).ConfigureAwait(false);
-
-        while (await reader.ReadAsync(Ct).ConfigureAwait(false))
-        {
-            columns.Add((reader.GetString(0), reader.GetString(1)));
-        }
-
-        return columns;
     }
 }

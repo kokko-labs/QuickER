@@ -132,6 +132,26 @@ internal abstract class SyncPlanFuzzDialect
     /// <summary>行数を数えるための接続を作る（開くのは呼び出し側）</summary>
     public abstract DbConnection CreateConnection();
 
+    /// <summary>
+    /// 期待の行の実 DB の段の問い合わせ（同期の後の DML を含む）を流す接続を作る（開くのは呼び出し側。既定は
+    /// <see cref="CreateConnection"/>＝読み取り専用の接続を作る方言だけが上書きする）
+    /// </summary>
+    public virtual DbConnection CreateQueryConnection() => CreateConnection();
+
+    /// <summary>
+    /// 管理者の接続を作る（開くのは呼び出し側）。期待の行の実 DB の段が、別のユーザー・スキーマの物を読むのに使う（持たない方言は
+    /// <see cref="NotSupportedException"/>）
+    /// </summary>
+    public virtual DbConnection CreateAdminConnection() =>
+        throw new NotSupportedException($"[{Name}] 管理者の接続を持たない");
+
+    /// <summary>
+    /// 管理者としてスクリプトを流す（失敗は例外）。期待の行の実 DB の段が、別のユーザー・データベースを作る・消すのに使う（持たない方言は
+    /// <see cref="NotSupportedException"/>）
+    /// </summary>
+    public virtual Task ExecuteAdminAsync(string sql, CancellationToken ct) =>
+        throw new NotSupportedException($"[{Name}] 管理者の実行を持たない");
+
     /// <summary>DB を空にする（種ごとに呼ぶ）</summary>
     public abstract Task ResetAsync(CancellationToken ct);
 
@@ -149,6 +169,19 @@ internal abstract class SyncPlanFuzzDialect
 
     /// <summary>文字列のリテラル</summary>
     public virtual string StringLiteral(string value) => $"'{value.Replace("'", "''")}'";
+
+    /// <summary>
+    /// 文を同期の実行器を通さずに 1 つのコマンドで流す（<see cref="CreateQueryConnection"/> の接続・失敗は例外）。実行器の検査
+    /// （SQLite の壊れたビュー・外部キー違反の増加）を通らない前提を作るためにだけ使う
+    /// </summary>
+    public async Task ExecuteRawAsync(string sql, CancellationToken ct)
+    {
+        await using var connection = CreateQueryConnection();
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
 
     /// <summary>セットアップのスクリプトを同期の実行器で流す（失敗は例外）</summary>
     public async Task ExecuteSetupAsync(string script, CancellationToken ct)
@@ -181,6 +214,9 @@ internal sealed class SqliteSyncPlanFuzzDialect : SyncPlanFuzzDialect, IDisposab
 
     public override DbConnection CreateConnection() =>
         new SqliteConnection(_db.ReadOnlyConnectionString);
+
+    public override DbConnection CreateQueryConnection() =>
+        new SqliteConnection(_db.ReadWriteConnectionString);
 
     /// <summary>
     /// 種ごとに新しいファイルを作る（前の種の接続プール・ジャーナルを持ち越さない）。
@@ -240,6 +276,12 @@ internal sealed class MySqlSyncPlanFuzzDialect(MySqlContainerFixture fixture) : 
 
     public override DbConnection CreateConnection() =>
         new MySqlConnection(fixture.ConnectionString);
+
+    public override DbConnection CreateAdminConnection() =>
+        new MySqlConnection(fixture.RootConnectionString);
+
+    public override Task ExecuteAdminAsync(string sql, CancellationToken ct) =>
+        fixture.ExecuteAsRootAsync(sql, ct);
 
     public override Task ResetAsync(CancellationToken ct) => fixture.ResetSchemaAsync(ct);
 
@@ -415,6 +457,12 @@ internal sealed class OracleSyncPlanFuzzDialect(OracleContainerFixture fixture)
 
     public override DbConnection CreateConnection() =>
         new OracleConnection(fixture.ConnectionString);
+
+    public override DbConnection CreateAdminConnection() =>
+        new OracleConnection(fixture.SystemConnectionString);
+
+    public override Task ExecuteAdminAsync(string sql, CancellationToken ct) =>
+        fixture.ExecuteAsSystemAsync(sql, ct);
 
     public override string ImportConnectionString => fixture.ConnectionString;
 

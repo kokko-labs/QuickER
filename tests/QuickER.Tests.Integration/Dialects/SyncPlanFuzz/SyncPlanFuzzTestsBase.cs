@@ -66,6 +66,62 @@ public abstract class SyncPlanFuzzTestsBase
     /// <summary>方言の部品を作る（DB には触れない＝方言の名前は Docker なしで読める）</summary>
     internal abstract SyncPlanFuzzDialect CreateDialect();
 
+    /// <summary>
+    /// 期待の行のうち実 DB の段を持つ行（<see cref="SyncPlanExpectationRows.ForRealDatabase"/>）を、この方言の実 DB で流す。
+    /// 汎用の表明 1〜5 と、行の実 DB の段の期待を照合する（既知の失敗の一覧を通さない＝違反はすべて赤）。
+    /// </summary>
+    /// <remarks>
+    /// 種を使わない（<see cref="SeedSource"/> を呼ばない）ので夜間の目印（<see cref="NightlyEngineTrait"/>）は付けない＝夜間の
+    /// 絞り込み（<c>NightlyEngine=true</c>）には入らず、普段の CI で流す（行は決定的で、夜間に流し直しても結果は同じ）。
+    /// 網羅の計数には数えない（決定的な行と同じ扱い）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] 同期計画の期待の行（実 DB）: 汎用の表明と行の実 DB の期待を満たす"
+    )]
+    public async Task ExpectationRows_MatchOnRealDatabase()
+    {
+        Assert.SkipWhen(UnavailableReason is not null, UnavailableReason ?? string.Empty);
+
+        var dialect = CreateDialect();
+
+        try
+        {
+            var rows = SyncPlanExpectationRows.ForRealDatabase(dialect.Name).ToList();
+            var problems = new List<string>();
+
+            foreach (var row in rows)
+            {
+                problems.AddRange(await SyncPlanRealRunner.RunAsync(row, dialect, Ct));
+            }
+
+            TestContext.Current.TestOutputHelper?.WriteLine(
+                $"{dialect.Name}: real-database expectation rows {rows.Count}, problems {problems.Count}"
+            );
+
+            if (problems.Count > 0)
+            {
+                throw new XunitException(string.Join("\n\n", problems));
+            }
+
+            if (SyncPlanExpectationRows.MinimumRealRowsFor(dialect.Name) is { } minimum)
+            {
+                CoverageGuard.AtLeast(
+                    $"{dialect.Name}: 実 DB で照合した期待の行",
+                    rows.Count,
+                    minimum
+                );
+            }
+            else
+            {
+                rows.Should().BeEmpty("実 DB の段の行の数の下限を書いていない方言は行を持たない");
+            }
+        }
+        finally
+        {
+            (dialect as IDisposable)?.Dispose();
+        }
+    }
+
     [Fact(
         DisplayName = "[Integration] 同期計画の総当たり: 成功か事前の警告・選んだ差分だけが消える"
     )]

@@ -306,7 +306,7 @@ internal static class SyncPlanProjection
             ? section.Kind.ToString()
             : $"{section.Kind}/{section.PrimaryKeyPhase}";
 
-    private static string ColumnText(Column column) =>
+    internal static string ColumnText(Column column) =>
         column.DataType
         + (column.IsNullable ? " null" : " notnull")
         + (column.IsPrimaryKey ? " pk" : "")

@@ -15,6 +15,8 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 /// <param name="Context">計画の文脈（null を返せば文脈なしで計画を作る）</param>
 /// <param name="Expect">期待</param>
 /// <param name="Plans">計画を作るか（偽なら差分の期待だけ。実方言では静的な規則のため常に作る）</param>
+/// <param name="LiveIsModel">DB 側の図を行の <c>Live</c> で組んだか（偽なら空の図＝実 DB の段で生の SQL だけで DB を作る行）</param>
+/// <param name="Real">実 DB の段（null なら網でだけ流す）</param>
 internal sealed record SyncPlanExpectationInput(
     IReadOnlyList<string> Capabilities,
     Action<ExpectationWorld> Live,
@@ -23,9 +25,20 @@ internal sealed record SyncPlanExpectationInput(
     Action<IReadOnlyList<SchemaDiffItem>>? Select,
     Func<ExpectationWorld, SyncPlanContext?> Context,
     ExpectationBuilder Expect,
-    bool Plans
+    bool Plans,
+    bool LiveIsModel = true,
+    RealStageInput? Real = null
 )
 {
+    /// <summary>網で流すか（実 DB だけの行でない）</summary>
+    public bool RunsOnNet => Real is not { RealOnly: true };
+
+    /// <summary>実 DB の段で流す方言</summary>
+    public IReadOnlyList<string> RealDialects =>
+        Real is null
+            ? []
+            : Real.Dialects ?? [.. Capabilities.Where(SyncPlanExpectationCapabilities.IsDialect)];
+
     /// <summary>計画の面を照合する期待があるか</summary>
     public bool ExpectsPlan =>
         Expect.SamePlanAcrossCapabilities
@@ -56,15 +69,24 @@ internal static partial class SyncPlanExpectationRows
     /// <summary>実方言の行のうち、その方言の網の派生が流す行（複数の能力を比べる行は除く）</summary>
     public static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> ForDialect(string dialect) =>
         Table.Where(row =>
-            !row.Input.Expect.SamePlanAcrossCapabilities
+            row.Input.RunsOnNet
+            && !row.Input.Expect.SamePlanAcrossCapabilities
             && row.Input.Capabilities.Contains(dialect, StringComparer.Ordinal)
         );
+
+    /// <summary>実 DB の段を持つ行のうち、その方言の実 DB の総当たりの派生が流す行</summary>
+    public static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> ForRealDatabase(
+        string dialect
+    ) => Table.Where(row => row.Input.RealDialects.Contains(dialect, StringComparer.Ordinal));
 
     /// <summary><see cref="SyncPlanExpectationTests"/> が流す行（合成の能力を含む行と、能力を比べる行）</summary>
     public static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> ForSyntheticOrComparison() =>
         Table.Where(row =>
-            row.Input.Expect.SamePlanAcrossCapabilities
-            || row.Input.Capabilities.Any(c => !SyncPlanExpectationCapabilities.IsDialect(c))
+            row.Input.RunsOnNet
+            && (
+                row.Input.Expect.SamePlanAcrossCapabilities
+                || row.Input.Capabilities.Any(c => !SyncPlanExpectationCapabilities.IsDialect(c))
+            )
         );
 
     /// <summary><see cref="SyncPlanExpectationTests"/> の行の数の下限の鍵</summary>
@@ -74,6 +96,31 @@ internal static partial class SyncPlanExpectationRows
     /// 照合する行の数の下限（黙った空振りの守り＝行を消したらここも下げる）。鍵は方言名か <see cref="SyntheticOrComparisonKey"/>
     /// </summary>
     public static int MinimumRowsFor(string key) => MinimumRows[key];
+
+    /// <summary>
+    /// 実 DB の段で照合する行の数の下限（鍵は方言名。黙った空振りの守り＝行を消したらここも下げる）。実 DB の段の行をまだ持たない方言は
+    /// null（行が 0 であることを表明する）
+    /// </summary>
+    public static int? MinimumRealRowsFor(string dialect) =>
+        MinimumRealRows.TryGetValue(dialect, out var minimum) && minimum > 0 ? minimum : null;
+
+    /// <summary>実 DB の段の行の数の下限（値は方言の行のファイル <c>SyncPlanExpectationRows.Real{方言}.cs</c> の定数）</summary>
+    private static readonly System.Collections.Generic.Dictionary<string, int> MinimumRealRows =
+        new(StringComparer.Ordinal)
+        {
+            [QuickER.Dialects.DialectNames.SqlServer] =
+                RealSqlServerRowCount
+                + RealCrossDialectRowCount(QuickER.Dialects.DialectNames.SqlServer),
+            [QuickER.Dialects.DialectNames.PostgreSql] =
+                RealPostgreSqlRowCount
+                + RealCrossDialectRowCount(QuickER.Dialects.DialectNames.PostgreSql),
+            [QuickER.Dialects.DialectNames.MySql] =
+                RealMySqlRowCount + RealCrossDialectRowCount(QuickER.Dialects.DialectNames.MySql),
+            [QuickER.Dialects.DialectNames.Oracle] =
+                RealOracleRowCount + RealCrossDialectRowCount(QuickER.Dialects.DialectNames.Oracle),
+            [QuickER.Dialects.DialectNames.Sqlite] =
+                RealSqliteRowCount + RealCrossDialectRowCount(QuickER.Dialects.DialectNames.Sqlite),
+        };
 
     private static readonly System.Collections.Generic.Dictionary<string, int> MinimumRows = new(
         StringComparer.Ordinal
@@ -97,10 +144,16 @@ internal static partial class SyncPlanExpectationRows
         {
             var input = row.Input;
 
-            if (input.Expect.Expectations.Count == 0 && !input.Expect.SamePlanAcrossCapabilities)
+            if (
+                input.Expect.Expectations.Count == 0
+                && !input.Expect.SamePlanAcrossCapabilities
+                && input.Real is null
+            )
             {
                 problems.Add($"{row.Id}: 期待が 1 つも無い");
             }
+
+            problems.AddRange(RealStageProblems(row.Id, input));
 
             if (input.Capabilities.Count == 0)
             {
@@ -152,6 +205,151 @@ internal static partial class SyncPlanExpectationRows
         return new ScenarioTable<SyncPlanExpectationInput>(EngineIds.SyncPlan, rows);
     }
 
+    /// <summary>実 DB の段の書き方の問題</summary>
+    private static IEnumerable<string> RealStageProblems(string id, SyncPlanExpectationInput input)
+    {
+        foreach (
+            var facet in input
+                .Expect.Expectations.Select(e => e.Facet)
+                .Where(ExpectationFacet.IsRealOnly)
+                .Distinct()
+        )
+        {
+            yield return $"{id}: 網の期待に実 DB の段の面 {facet}（OnRealDatabase の中に書く）";
+        }
+
+        if (input.Real is not { } real)
+        {
+            yield break;
+        }
+
+        if (real.Expect.Expectations.Count == 0)
+        {
+            yield return $"{id}: 実 DB の段の期待が 1 つも無い";
+        }
+
+        if (input.Items is not null)
+        {
+            yield return $"{id}: 手で組む項目の行は実 DB の段で流せない";
+        }
+
+        if (input.LiveIsModel == (real.LiveSql.Count > 0))
+        {
+            yield return $"{id}: DB 側の図は Live か LiveSql のちょうど一方で作る";
+        }
+
+        if (real.RealOnly && input.Expect.Expectations.Count > 0)
+        {
+            yield return $"{id}: 網で流さない行に網の期待がある";
+        }
+
+        if (input.Expect.SamePlanAcrossCapabilities)
+        {
+            yield return $"{id}: 能力を比べる行は実 DB の段で流せない";
+        }
+
+        foreach (
+            var dialect in input.RealDialects.Where(d =>
+                !SyncPlanExpectationCapabilities.IsDialect(d)
+                || !input.Capabilities.Contains(d, StringComparer.Ordinal)
+            )
+        )
+        {
+            yield return $"{id}: 実 DB の段の方言 {dialect} が行の実方言でない";
+        }
+
+        if (input.RealDialects.Count == 0)
+        {
+            yield return $"{id}: 実 DB の段で流す方言が無い";
+        }
+
+        foreach (
+            var scoped in real
+                .Expect.Expectations.Where(e => e.Capability is not null)
+                .Select(e => e.Capability!)
+                .Where(k => !input.RealDialects.Contains(k, StringComparer.Ordinal))
+                .Distinct()
+        )
+        {
+            yield return $"{id}: 実 DB の段で流さない方言 {scoped} への期待";
+        }
+
+        var declared = real
+            .Probes.Concat(real.Queries.Select(q => q.Name))
+            .Concat(real.AdminQueries.Select(q => q.Name))
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (
+            var facet in real
+                .Expect.Expectations.SelectMany(e =>
+                    e.Match == ExpectationMatch.SameAs
+                        ? new[] { e.Facet, e.Patterns[0] }
+                        : new[] { e.Facet }
+                )
+                .Where(f =>
+                    f.StartsWith(ExpectationFacet.ProbePrefix, StringComparison.Ordinal)
+                    || f.StartsWith(ExpectationFacet.ProbeBeforePrefix, StringComparison.Ordinal)
+                )
+                .Distinct()
+        )
+        {
+            var name = facet[(facet.IndexOf(':', StringComparison.Ordinal) + 1)..];
+
+            if (!declared.Contains(name))
+            {
+                yield return $"{id}: 宣言していない探針 {name} への期待";
+            }
+        }
+
+        foreach (
+            var (dialect, name) in input.RealDialects.SelectMany(d =>
+                real.Probes.Where(n => !SyncPlanCatalogProbes.Has(d, n)).Select(n => (d, n))
+            )
+        )
+        {
+            yield return $"{id}: 方言 {dialect} に探針 {name} が無い";
+        }
+
+        if (real.UnwarnedFailureReason is { } reason)
+        {
+            if (string.IsNullOrWhiteSpace(reason))
+            {
+                yield return $"{id}: 計画が警告しない失敗の理由が空";
+            }
+
+            if (
+                !real.Expect.Expectations.Any(e =>
+                    e.Facet == ExpectationFacet.Outcome
+                    && e.Patterns.Count > 0
+                    && e.Patterns.All(p =>
+                        p.StartsWith(FailedPrefix, StringComparison.Ordinal)
+                        && p.Trim('*', ' ').Length > FailedPrefix.Trim().Length
+                    )
+                )
+            )
+            {
+                yield return $"{id}: 計画が警告しない失敗の行に失敗の形（Outcome の failed: とエラーの断片）が無い";
+            }
+
+            if (
+                !real.Expect.Expectations.Any(e =>
+                    e.Facet == ExpectationFacet.After && e.Match == ExpectationMatch.SameAs
+                )
+            )
+            {
+                yield return $"{id}: 計画が警告しない失敗の行に DB が変わらないこと（Unchanged）が無い";
+            }
+        }
+
+        if (real.PreserveIdsReason is { } preserve && string.IsNullOrWhiteSpace(preserve))
+        {
+            yield return $"{id}: 同じ Guid のまま写す理由が空";
+        }
+    }
+
+    /// <summary>実 DB の段の失敗の結果の行の頭</summary>
+    private const string FailedPrefix = "failed: ";
+
     /// <summary>主題ごとの行を並べる（主題のファイルが足す）</summary>
     private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> AllRows() =>
         [
@@ -181,6 +379,12 @@ internal static partial class SyncPlanExpectationRows
             .. UnnamedForeignKeyRows(),
             .. CompositeForeignKeyRows(),
             .. PlanDefaultRows(),
+            .. RealSqlServerRows(),
+            .. RealSqliteRows(),
+            .. RealMySqlRows(),
+            .. RealPostgreSqlRows(),
+            .. RealOracleRows(),
+            .. RealCrossDialectRows(),
         ];
 
     /// <summary>行を書き始める</summary>
@@ -201,6 +405,8 @@ internal static partial class SyncPlanExpectationRows
 internal sealed class ExpectationRow(string id, string description, string[] capabilities)
 {
     private Action<ExpectationWorld> _live = _ => { };
+    private bool _liveIsModel;
+    private RealStageInput? _real;
     private Action<ExpectationWorld>? _target;
     private Func<ExpectationWorld, IEnumerable<SchemaDiffItem>>? _items;
     private Action<IReadOnlyList<SchemaDiffItem>>? _select;
@@ -212,6 +418,7 @@ internal sealed class ExpectationRow(string id, string description, string[] cap
     public ExpectationRow Live(Action<ExpectationSchema> build)
     {
         _live = world => build(world.Live);
+        _liveIsModel = true;
         return this;
     }
 
@@ -219,6 +426,7 @@ internal sealed class ExpectationRow(string id, string description, string[] cap
     public ExpectationRow LiveWith(Action<ExpectationWorld> build)
     {
         _live = build;
+        _liveIsModel = true;
         return this;
     }
 
@@ -234,7 +442,7 @@ internal sealed class ExpectationRow(string id, string description, string[] cap
     {
         _target = world =>
         {
-            world.Target.CopyFrom(world.Live, preserveIds: false);
+            world.Target.CopyFrom(world.Live, preserveIds: world.TargetPreservesIds);
             edit(world.Target);
         };
         return this;
@@ -278,6 +486,16 @@ internal sealed class ExpectationRow(string id, string description, string[] cap
         return this;
     }
 
+    /// <summary>
+    /// 実 DB の段を書く（方言の実 DB の総当たりの派生でも流す。汎用の表明 1〜5 を当て、実 DB の段の期待を照合する）
+    /// </summary>
+    public ExpectationRow OnRealDatabase(Action<RealStage> configure)
+    {
+        _real ??= new RealStageInput();
+        configure(new RealStage(_real));
+        return this;
+    }
+
     /// <summary>期待を書く</summary>
     public ExpectationRow Expect(Action<ExpectationBuilder> expect)
     {
@@ -299,7 +517,9 @@ internal sealed class ExpectationRow(string id, string description, string[] cap
                 row._select,
                 row._context,
                 row._expect,
-                row._plans
+                row._plans,
+                row._liveIsModel || row._real is null,
+                row._real
             )
         );
 

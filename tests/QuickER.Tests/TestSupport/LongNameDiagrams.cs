@@ -6,7 +6,7 @@ namespace QuickER.Tests.TestSupport;
 /// <summary>
 /// QuickER が付ける既定の制約名が方言の上限を超える図（表の名前が長い図）を組み立てる
 /// </summary>
-/// <remarks>単体（<c>LongDefaultConstraintNameTests</c>）と Integration（<c>LongDefaultConstraintNameIntegrationTests</c>）が共有する。</remarks>
+/// <remarks>単体（<c>LongDefaultConstraintNameTests</c>）と Integration（同期計画の期待の行 <c>realdb-long-default-*</c> と <c>PostgreSqlLongDefaultConstraintNameIntegrationTests</c>）が共有する。</remarks>
 public static class LongNameDiagrams
 {
     /// <summary>

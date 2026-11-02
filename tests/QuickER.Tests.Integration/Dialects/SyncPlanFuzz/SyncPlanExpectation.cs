@@ -41,6 +41,39 @@ internal static class ExpectationFacet
     /// <summary>計画を作る面（ほかは差分の面か例外）</summary>
     public static IReadOnlyList<string> PlanFacets { get; } =
     [Sections, Items, Warnings, Excluded, Rebuilds, Reorders, Sources];
+
+    /// <summary>実 DB の段：同期の実行の結果（<c>committed</c> か <c>failed: {エラーの 1 行目}</c>）</summary>
+    public const string Outcome = "outcome";
+
+    /// <summary>
+    /// 実 DB の段：同期の実行の失敗のメッセージの全文（1 行＝メッセージの 1 行・行末の空白を除く・空行を除く。コミットしたら空）。
+    /// <see cref="Outcome"/> は 1 行目だけなので、2 行目以降に乗る説明（Oracle の部分適用の説明など）はこの面で見る
+    /// </summary>
+    public const string Error = "error";
+
+    /// <summary>実 DB の段：流した同期スクリプト（1 行＝スクリプトの 1 行・行末の空白を除く）</summary>
+    public const string Script = "script";
+
+    /// <summary>実 DB の段：同期の前に取り込んだ図（書式は <see cref="SyncPlanRealProjection.Schema"/>）</summary>
+    public const string Before = "before";
+
+    /// <summary>実 DB の段：同期の後（失敗なら失敗の後）に取り込み直した図（書式は <see cref="Before"/> と同じ）</summary>
+    public const string After = "after";
+
+    /// <summary>実 DB の段：同期の後に取り込み直した図と目標の図の差分（書式は <see cref="Diff"/> と同じ・コミットしたときだけ）</summary>
+    public const string AfterDiff = "afterdiff";
+
+    /// <summary>実 DB の段：同期の後のカタログの探針の面の接頭辞（<c>probe:{名前}</c>）</summary>
+    public const string ProbePrefix = "probe:";
+
+    /// <summary>実 DB の段：同期の前（取り込んだ直後）のカタログの探針の面の接頭辞（<c>probe-before:{名前}</c>）</summary>
+    public const string ProbeBeforePrefix = "probe-before:";
+
+    /// <summary>実 DB の段にだけある面か</summary>
+    public static bool IsRealOnly(string facet) =>
+        facet is Outcome or Error or Script or Before or After or AfterDiff
+        || facet.StartsWith(ProbePrefix, StringComparison.Ordinal)
+        || facet.StartsWith(ProbeBeforePrefix, StringComparison.Ordinal);
 }
 
 /// <summary>期待の強さ</summary>
@@ -60,6 +93,12 @@ internal enum ExpectationMatch
 
     /// <summary>パターンに合う行がちょうど <see cref="SyncPlanExpectation.Count"/> 個</summary>
     Count,
+
+    /// <summary>
+    /// 面の行が、別の面（<see cref="SyncPlanExpectation.Patterns"/> の先頭）の行と同じ（2 つ目以降のパターンに合う行は両方から除いて比べる。
+    /// 実 DB の段の「DB が変わらない」＝同期の前と後の比較）
+    /// </summary>
+    SameAs,
 }
 
 /// <summary>期待 1 つ（面・強さ・パターン。能力を指定すればその能力で流したときだけ照合する）</summary>
@@ -80,6 +119,11 @@ internal sealed record SyncPlanExpectation(
     /// <param name="lines">面の行</param>
     public string? Check(IReadOnlyList<string> lines)
     {
+        if (Match == ExpectationMatch.SameAs)
+        {
+            throw new InvalidOperationException("SameAs は 2 つの面を比べる（CheckSame を使う）");
+        }
+
         var globs = Patterns.Select(Glob.Of).ToList();
         string? problem = Match switch
         {
@@ -97,11 +141,37 @@ internal sealed record SyncPlanExpectation(
                 + (lines.Count == 0 ? "(none)" : string.Join("\n        ", lines));
     }
 
+    /// <summary>
+    /// <see cref="ExpectationMatch.SameAs"/> の期待を照合する（除くパターンに合う行を両方から除き、残りが同じ並びか）
+    /// </summary>
+    /// <param name="lines">この面の行</param>
+    /// <param name="other">比べる面（<see cref="Patterns"/> の先頭）の行</param>
+    public string? CheckSame(IReadOnlyList<string> lines, IReadOnlyList<string> other)
+    {
+        var excluded = Patterns.Skip(1).Select(Glob.Of).ToList();
+        var mine = lines.Where(l => !excluded.Any(g => g.IsMatch(l))).ToList();
+        var theirs = other.Where(l => !excluded.Any(g => g.IsMatch(l))).ToList();
+
+        if (mine.SequenceEqual(theirs, StringComparer.Ordinal))
+        {
+            return null;
+        }
+
+        return $"{Facet} {Describe()}: the lines differ\n      {Patterns[0]}:\n        "
+            + (theirs.Count == 0 ? "(none)" : string.Join("\n        ", theirs))
+            + $"\n      {Facet}:\n        "
+            + (mine.Count == 0 ? "(none)" : string.Join("\n        ", mine));
+    }
+
     /// <summary>期待を 1 行で表す（報告用）</summary>
     public string Describe() =>
-        Match == ExpectationMatch.Count
-            ? $"Count({Count}) of [{Patterns[0]}]"
-            : $"{Match} [{string.Join(" | ", Patterns)}]";
+        Match switch
+        {
+            ExpectationMatch.Count => $"Count({Count}) of [{Patterns[0]}]",
+            ExpectationMatch.SameAs => $"SameAs {Patterns[0]}"
+                + (Patterns.Count > 1 ? $" except [{string.Join(" | ", Patterns.Skip(1))}]" : ""),
+            _ => $"{Match} [{string.Join(" | ", Patterns)}]",
+        };
 
     private static string? CheckExact(IReadOnlyList<string> lines, List<Glob> globs)
     {
@@ -238,6 +308,47 @@ internal sealed class ExpectationBuilder
 
     /// <summary>例外</summary>
     public FacetExpectations Exception => new(this, ExpectationFacet.Exception);
+
+    /// <summary>実 DB の段：同期の実行の結果</summary>
+    public FacetExpectations Outcome => new(this, ExpectationFacet.Outcome);
+
+    /// <summary>実 DB の段：同期の実行の失敗のメッセージの全文（1 行＝メッセージの 1 行）</summary>
+    public FacetExpectations Error => new(this, ExpectationFacet.Error);
+
+    /// <summary>実 DB の段：流した同期スクリプト</summary>
+    public FacetExpectations Script => new(this, ExpectationFacet.Script);
+
+    /// <summary>実 DB の段：同期の前に取り込んだ図</summary>
+    public FacetExpectations Before => new(this, ExpectationFacet.Before);
+
+    /// <summary>実 DB の段：同期の後に取り込み直した図</summary>
+    public FacetExpectations After => new(this, ExpectationFacet.After);
+
+    /// <summary>実 DB の段：同期の後に取り込み直した図と目標の図の差分</summary>
+    public FacetExpectations AfterDiff => new(this, ExpectationFacet.AfterDiff);
+
+    /// <summary>実 DB の段：同期の後のカタログの探針（行の <c>Probe</c> で宣言した名前）</summary>
+    public FacetExpectations Probe(string name) => new(this, ExpectationFacet.ProbePrefix + name);
+
+    /// <summary>実 DB の段：同期の前（取り込んだ直後）のカタログの探針</summary>
+    public FacetExpectations ProbeBefore(string name) =>
+        new(this, ExpectationFacet.ProbeBeforePrefix + name);
+
+    /// <summary>
+    /// 実 DB の段：DB が変わらない（同期の後に取り込み直した図が、同期の前に取り込んだ図と同じ。<paramref name="except"/> に合う行は比べない）
+    /// </summary>
+    public ExpectationBuilder Unchanged(params string[] except) =>
+        Add(ExpectationFacet.After, ExpectationMatch.SameAs, [ExpectationFacet.Before, .. except]);
+
+    /// <summary>
+    /// 実 DB の段：カタログの探針の行が同期の前と後で同じ（<paramref name="except"/> に合う行は比べない）
+    /// </summary>
+    public ExpectationBuilder ProbeUnchanged(string name, params string[] except) =>
+        Add(
+            ExpectationFacet.ProbePrefix + name,
+            ExpectationMatch.SameAs,
+            [ExpectationFacet.ProbeBeforePrefix + name, .. except]
+        );
 
     /// <summary>能力 1 つで流したときだけ照合する期待を書く</summary>
     /// <param name="capability">能力の鍵</param>

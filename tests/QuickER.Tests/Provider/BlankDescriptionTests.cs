@@ -22,7 +22,7 @@ namespace QuickER.Tests.Provider;
 /// </summary>
 /// <remarks>
 /// 判定は <see cref="DescriptionText"/> の 1 つだけ（写しを置かない＝<see cref="DescriptionPredicate_IsOnlyInDescriptionText"/>
-/// が src を走査して固定する）。実 DB の往復は <c>BlankDescriptionIntegrationTests</c>。
+/// が src を走査して固定する）。実 DB の往復は同期計画の期待の行 <c>realdb-blank-description-*</c>。
 /// </remarks>
 public class BlankDescriptionTests
 {
