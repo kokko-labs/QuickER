@@ -35,6 +35,16 @@ internal static partial class SyncPlanCatalogProbes
                 SELECT SCHEMA_NAME(t.schema_id) + N'.' + t.name, N'FK', fk.name
                 FROM sys.foreign_keys fk JOIN sys.tables t ON fk.parent_object_id = t.object_id;
                 """,
+            // DEFAULT 制約の名前と object_id（外して付け直すと object_id が変わる＝触れていないことを前後の一致で見る。
+            // 例：realdb-column-alter-nullability-only-int-keeps-default）
+            ["defaults"] = """
+                SELECT SCHEMA_NAME(t.schema_id) + N'.' + t.name + N'.' + c.name AS subject,
+                       dc.name AS name,
+                       dc.object_id AS object_id
+                FROM sys.default_constraints dc
+                JOIN sys.tables t ON t.object_id = dc.parent_object_id
+                JOIN sys.columns c ON c.object_id = dc.parent_object_id AND c.column_id = dc.parent_column_id;
+                """,
             // 説明（MS_Description・スキーマ.表[.列]ごと）
             ["descriptions"] = """
                 SELECT SCHEMA_NAME(t.schema_id) + N'.' + t.name + ISNULL(N'.' + c.name, N'') AS subject,

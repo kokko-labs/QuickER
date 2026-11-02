@@ -4,6 +4,7 @@ using System.Linq;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.MySql;
 using QuickER.Tests.TestSupport.Engines;
 using ProviderStrings = QuickER.Provider.Resources.Strings;
 
@@ -12,7 +13,7 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 internal static partial class SyncPlanExpectationRows
 {
     /// <summary>MySQL の実 DB の段の行の数の下限（行を足したら・消したら合わせる）</summary>
-    private const int RealMySqlRowCount = 50;
+    private const int RealMySqlRowCount = 75;
 
     /// <summary>実 DB の段：MySQL の同期（外部キー・主キー・一意制約・列の属性・説明・列順・参照アクション）</summary>
     private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealMySqlRows() =>
@@ -22,6 +23,7 @@ internal static partial class SyncPlanExpectationRows
             .. RealMySqlColumnAttributeRows(),
             .. RealMySqlSchemaSyncRows(),
             .. RealMySqlDescriptionRows(),
+            .. RealMySqlScriptRows(),
         ];
 
     /// <summary>外部キーの両端の型・並び・共有の索引・SET NULL・型の食い違い</summary>
@@ -122,7 +124,9 @@ internal static partial class SyncPlanExpectationRows
                                 "DropForeignKey: DropForeignKey md_ref fk=fk_md_ref"
                             );
                             e.Script.Contains(
-                                "*FOREIGN KEY (`rb`, `ra`) REFERENCES `md_pair` (`b`, `a`)*"
+                                "*FOREIGN KEY (`rb`, `ra`) REFERENCES `md_pair` (`b`, `a`)*",
+                                // 主キーの順序の宣言どおりに付与する（列の宣言の並びは a, b）
+                                "*ALTER TABLE `md_pair` ADD PRIMARY KEY (`b`, `a`);*"
                             );
                             e.Outcome.Exact("committed");
                             e.After.Single(
@@ -152,6 +156,11 @@ internal static partial class SyncPlanExpectationRows
                         .Expect(e =>
                         {
                             e.Warnings.Empty();
+                            // 同じ子表の外部キーを続けて外すとき、先に外した外部キーの名前の索引を、後の外部キーを外した後に
+                            // もう一度確かめる（1 本目を外す時点ではもう 1 本が使っていて残る）
+                            e.Script.Count("*s.INDEX_NAME = 'fk_md_first'*", 2);
+                            e.Script.Count("*s.INDEX_NAME = 'fk_md_second'*", 1);
+                            // 確かめ直さないと、並びを変えた付け直しが同じ名前の索引を作ろうとしてエラー 1061 になる
                             e.Outcome.Exact("committed");
                             e.After.Single(
                                 "fk md_ref fk_md_first (rb,ra) -> md_pair(b,a) *",
@@ -200,11 +209,20 @@ internal static partial class SyncPlanExpectationRows
                 .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.DropForeignKey))
                 .OnRealDatabase(r =>
                     r.LiveSql(RealMySqlScenarios.SharedIndexChildSql(withOtherColumn: false))
+                        .Probe("indexes")
                         .Expect(e =>
                         {
+                            e.Script.Contains("*s.INDEX_NAME = 'fk_second'*");
                             e.Outcome.Exact("committed");
                             e.After.Count("fk *", 1);
                             e.After.Single("fk md_child fk_first *");
+                            // 残った外部キーが使う共有の索引は、その外部キーの名前へ付け替わる
+                            e.Probe("indexes").Count("indexes md_child.* *", 2);
+                            e.Probe("indexes")
+                                .Single(
+                                    "indexes md_child.PRIMARY first_column=id",
+                                    "indexes md_child.fk_first first_column=parent_id"
+                                );
                         })
                 ),
             Row(
@@ -264,6 +282,19 @@ internal static partial class SyncPlanExpectationRows
                         )
                         .Expect(e =>
                         {
+                            // 外部キーを外した後に、MySQL が残した同じ名前の一意でない索引を探して外すか付け替える
+                            e.Script.Contains(
+                                "*ALTER TABLE `md_child` DROP FOREIGN KEY `fk_a`;*",
+                                "*SET @ix = NULL;*",
+                                "*SET @to = NULL;*",
+                                "*s.INDEX_NAME = 'fk_a'*",
+                                "*s.TABLE_SCHEMA = DATABASE()*",
+                                "*s.NON_UNIQUE = 1*",
+                                // 付け替える先は、索引の先頭の列を先頭に使うほかの外部キーの名前（名前順で最初）
+                                "*k.REFERENCED_TABLE_NAME IS NOT NULL AND k.ORDINAL_POSITION = 1 AND k.COLUMN_NAME = s.COLUMN_NAME ORDER BY k.CONSTRAINT_NAME LIMIT 1) INTO @ix, @to*",
+                                "*SET @sql = CASE WHEN @ix IS NULL THEN 'DO 0' WHEN @to IS NULL THEN CONCAT('ALTER TABLE `md_child` DROP INDEX `', REPLACE(@ix, '`', '``'), '`') WHEN EXISTS (SELECT 1 FROM information_schema.STATISTICS x WHERE x.TABLE_SCHEMA = DATABASE() AND x.TABLE_NAME = 'md_child' AND x.INDEX_NAME = @to) THEN 'DO 0' ELSE CONCAT('ALTER TABLE `md_child` RENAME INDEX `', REPLACE(@ix, '`', '``'), '` TO `', REPLACE(@to, '`', '``'), '`') END;*"
+                            );
+                            // 索引は外部キーを外した後に探す（外す前だと外部キーが使っていて DROP INDEX が断られる）＝コミットが並びを示す
                             e.Outcome.Exact("committed");
                             e.Probe("indexes").Count("indexes md_child.* *", 2);
                             e.Probe("indexes")
@@ -629,6 +660,23 @@ internal static partial class SyncPlanExpectationRows
                         .Expect(e =>
                         {
                             RealMySqlScenarios.ExpectAttrsFixtureAttributes(e);
+                            RealMySqlScenarios.ExpectLiveRebuildScript(e);
+                            // 実定義の取得元と対象列の特定（SELECT ... INTO は該当行が無いと変数を書き換えないので先に初期化する）
+                            e.Script.Contains(
+                                "SET @gen = '';",
+                                "SET @dfx = '';",
+                                "SET @cmt = '';",
+                                "SET @exists = 0;",
+                                "*FROM information_schema.COLUMNS c*",
+                                "*WHERE c.TABLE_SCHEMA = DATABASE() AND c.TABLE_NAME = 'attrs' AND c.COLUMN_NAME = 'id' LIMIT 1;*",
+                                "*INTO @def*",
+                                // 新しい説明はライブの検索（@cmt へ既存の説明を読む）の後に代入する
+                                "SET @cmt = 'note for id';",
+                                "*SET @sql = IF(@def IS NOT NULL, CONCAT('ALTER TABLE `attrs` MODIFY COLUMN `id` ', @def, ' COMMENT ', QUOTE(@cmt)), IF(@exists = 0, 'DO 0', 'QuickER sync: attrs.id definition could not be rebuilt'));*",
+                                "*PREPARE stmt FROM @sql;*",
+                                "*EXECUTE stmt;*",
+                                "*DEALLOCATE PREPARE stmt;*"
+                            );
                             e.Outcome.Exact("committed");
                             // COMMENT だけが変わり、他は 1 項目も動かない
                             e.ProbeUnchanged("columns", "columns *.COLUMN_COMMENT *");
@@ -696,6 +744,8 @@ internal static partial class SyncPlanExpectationRows
                         .Probe("columns")
                         .Expect(e =>
                         {
+                            // 説明の同期はモデルの型・NULL 制約を出さない
+                            e.Script.Absent("*varchar(200)*", "*MODIFY COLUMN `memo` varchar*");
                             e.Outcome.Exact("committed");
                             e.Probe("columns")
                                 .Single(
@@ -724,6 +774,13 @@ internal static partial class SyncPlanExpectationRows
                         .Probe("columns")
                         .Expect(e =>
                         {
+                            e.Script.Contains(
+                                // 修飾の無い表のカタログ検索は接続先 DB を指す
+                                "*WHERE c.TABLE_SCHEMA = DATABASE() AND c.TABLE_NAME = 't' AND c.COLUMN_NAME = 'memo' LIMIT 1;*",
+                                // 説明の ' と \ は SET 文のリテラルとして 1 段だけエスケープする（改行はそのまま行を分ける）
+                                "SET @cmt = 'O''Brien \\\\ 「説明」",
+                                "2 行目 -- not a comment\t末尾';"
+                            );
                             e.Outcome.Exact("committed");
                             e.Probe("columns")
                                 .Single(
@@ -758,6 +815,12 @@ internal static partial class SyncPlanExpectationRows
                         .Expect(e =>
                         {
                             e.Reorders.Contains("*");
+                            // 生成列の式と式既定は、サーバー自身のパーサへ通して復元する
+                            e.Script.Contains(
+                                "*SELECT 1, c.GENERATION_EXPRESSION, IF(INSTR(c.EXTRA, 'DEFAULT_GENERATED') > 0, IFNULL(c.COLUMN_DEFAULT, ''), ''), c.COLUMN_COMMENT*",
+                                "*INTO @exists, @gen, @dfx, @cmt*",
+                                "*SET @sql = CONCAT('SELECT ''', IFNULL(@gen, ''), ''', ''', IFNULL(@dfx, ''), ''' INTO @gen, @dfx');*"
+                            );
                             e.Outcome.Exact("committed");
                             RealMySqlScenarios.ExpectPositions(e, "gx", ["g", "id", "s"]);
                             e.Probe("columns")
@@ -1060,6 +1123,7 @@ internal static partial class SyncPlanExpectationRows
                             "AlterColumn child.to_alter *",
                             "DropColumn child.to_drop *"
                         );
+                        e.Script.Contains("*ALTER TABLE `child` DROP COLUMN `to_drop`;*");
                         e.Outcome.Exact("committed");
                         e.After.Contains("col child.added *");
                         e.After.Absent("col child.to_drop *");
@@ -1081,6 +1145,9 @@ internal static partial class SyncPlanExpectationRows
                             "DropForeignKey *",
                             "DropForeignKey child fk=FK_child_parent *"
                         );
+                        e.Script.Contains(
+                            "*ALTER TABLE `child` DROP FOREIGN KEY `FK_child_parent`;*"
+                        );
                         e.Outcome.Exact("committed");
                         e.After.Absent("fk *");
                     })
@@ -1097,6 +1164,7 @@ internal static partial class SyncPlanExpectationRows
                     r.Expect(e =>
                     {
                         e.Diff.Single("DropTable parent *");
+                        e.Script.Contains("*DROP TABLE `parent`;*");
                         e.Outcome.Exact("committed");
                         e.After.Count("table *", 1);
                         e.After.Single("table child");
@@ -1239,6 +1307,10 @@ internal static partial class SyncPlanExpectationRows
                             e.Diff.Single(
                                 "DropUniqueConstraint uq_item *",
                                 "DropUniqueConstraint uq_item * sel=0 *"
+                            );
+                            // MySQL の一意制約の実体は一意索引なので DROP INDEX で外す
+                            e.Script.Contains(
+                                "*ALTER TABLE `uq_item` DROP INDEX `UQ_uq_item_code`;*"
                             );
                             e.Outcome.Exact("committed");
                             e.After.Absent("uq *");
@@ -1462,6 +1534,19 @@ internal static partial class SyncPlanExpectationRows
                     .Expect(e =>
                     {
                         var (table, column) = RealMySqlScenarios.ItemsDescriptions(stage + 1);
+
+                        if (stage == 0)
+                        {
+                            e.Script.Contains(
+                                "*ALTER TABLE `items` COMMENT = '商品テーブル ''マスタ''';*"
+                            );
+                        }
+                        else if (stage == 2)
+                        {
+                            // 空の説明は空文字の COMMENT（削除）
+                            e.Script.Contains("*ALTER TABLE `items` COMMENT = '';*");
+                        }
+
                         e.Outcome.Exact("committed");
 
                         if (stage < 2)
@@ -1479,6 +1564,761 @@ internal static partial class SyncPlanExpectationRows
                         }
                     })
             );
+
+    /// <summary>
+    /// 同期スクリプトの文の形（表・列・列の変更・外部キー・説明・列順・主キー・一意制約の文）を実 DB で流し、結果と流れた文の形を見る
+    /// </summary>
+    private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealMySqlScriptRows() =>
+        [
+            .. RealMySqlScriptTableAndColumnRows(),
+            .. RealMySqlScriptForeignKeyAndDescriptionRows(),
+            .. RealMySqlScriptReorderRows(),
+            .. RealMySqlScriptKeyRows(),
+        ];
+
+    /// <summary>表・列の追加と、列の変更の文（実行時の定義の組み直し・照合順序・型の表記の引用）</summary>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > RealMySqlScriptTableAndColumnRows() =>
+        [
+            Row(
+                    "realdb-mysql-script-add-table-create",
+                    "AddTable は CREATE TABLE と PK を含む",
+                    DialectNames.MySql
+                )
+                .Live(_ => { })
+                .TargetFromLive(s =>
+                    s.Table(
+                        "customer",
+                        ExpectationSchema.Pk("id", "int"),
+                        ExpectationSchema.Nullable("name", "varchar(50)")
+                    )
+                )
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddTable))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "*CREATE TABLE `customer`*",
+                            "*`id` int NOT NULL*",
+                            "*CONSTRAINT `PK_customer` PRIMARY KEY (`id`)*"
+                        );
+                        e.Script.Absent("*UNIQUE*");
+                        e.Outcome.Exact("committed");
+                        e.After.Single(
+                            "table customer",
+                            "col customer.id int notnull pk",
+                            "col customer.name varchar(50) null",
+                            "pk customer (id)"
+                        );
+                        e.After.Absent("uq *");
+                    })
+                ),
+            Row(
+                    "realdb-mysql-script-add-table-unique-constraints-sync",
+                    "AddTable の UNIQUE 句は DDL 生成と同形",
+                    DialectNames.MySql
+                )
+                .Live(_ => { })
+                .TargetFromLive(RealMySqlScenarios.Shops)
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddTable))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "*CONSTRAINT `PK_shops` PRIMARY KEY (`id`),*",
+                            "*CONSTRAINT `UQ_shops_code` UNIQUE (`code`),*",
+                            // 最後の制約行には区切りのカンマが付かない（行がここで終わる）
+                            "*CONSTRAINT `UQ_shops_region_code` UNIQUE (`region`, `code`)"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Count("uq *", 2);
+                        e.After.Single(
+                            "uq shops UQ_shops_code (code)",
+                            "uq shops UQ_shops_region_code (region,code)"
+                        );
+                    })
+                ),
+            Row(
+                    "realdb-mysql-script-add-table-unique-constraints-ddl",
+                    "AddTable の UNIQUE 句は DDL 生成と同形",
+                    DialectNames.MySql
+                )
+                .Live(RealMySqlScenarios.Shops)
+                .Target(RealMySqlScenarios.Shops)
+                .Select(items => RealScenarios.SelectKinds(items))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Before.Count("uq *", 2);
+                        e.Before.Single(
+                            "uq shops UQ_shops_code (code)",
+                            "uq shops UQ_shops_region_code (region,code)"
+                        );
+                        e.Diff.Empty();
+                        e.Outcome.Exact("committed");
+                    })
+                ),
+            Row(
+                    "realdb-mysql-script-add-column-not-null",
+                    "AddColumn は ALTER TABLE ADD COLUMN を生成する",
+                    DialectNames.MySql
+                )
+                .Live(s => s.Table("customer", ExpectationSchema.Pk("id", "int")))
+                .TargetFromLive(s =>
+                    s["customer"].Columns.Add(ExpectationSchema.NotNull("email", "varchar(200)"))
+                )
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddColumn))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "*ALTER TABLE `customer` ADD COLUMN `email` varchar(200) NOT NULL;*"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Single("col customer.email varchar(200) notnull");
+                    })
+                ),
+            Row(
+                    "realdb-mysql-script-unselected-add-column-not-emitted",
+                    "選択されていない項目はスクリプトに含まれない",
+                    DialectNames.MySql
+                )
+                .Live(s => s.Table("customer", ExpectationSchema.Pk("id", "int")))
+                .TargetFromLive(s =>
+                    s["customer"].Columns.Add(ExpectationSchema.Nullable("email", "varchar(200)"))
+                )
+                .Select(items => RealScenarios.SelectKinds(items))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Diff.Single("AddColumn customer.email *");
+                        e.Script.Absent("*email*");
+                        e.Outcome.Exact("committed");
+                        e.After.Absent("col customer.email *");
+                    })
+                ),
+            MySqlAlterColumnRebuildRow(nullable: false),
+            MySqlAlterColumnRebuildRow(nullable: true),
+            MySqlAlterColumnKeepsCollationRow("varchar", "varchar(100)"),
+            MySqlAlterColumnKeepsCollationRow("enum", "enum('a','b')"),
+            MySqlAlterColumnKeepsCollationRow("longtext", "longtext"),
+        ];
+
+    /// <summary>
+    /// 列の変更は実行時のカタログから列定義を組み直し、型と NULL 許容だけを図の値へ差し替える（DEFAULT・INVISIBLE・
+    /// AUTO_INCREMENT・SRID・COMMENT は DB のまま・図の説明は使わない）。<paramref name="nullable"/> が偽なら NOT NULL へ
+    /// （AUTO_INCREMENT の主キー列の型も変える）、真なら NULL 許容へ（SRID つきの列の NULL 許容も変える）
+    /// </summary>
+    private static ExpectationRow MySqlAlterColumnRebuildRow(bool nullable) =>
+        Row(
+                $"realdb-mysql-script-alter-column-rebuilds-live-definition-{(nullable ? "null" : "not-null")}",
+                "AlterColumn は実行時の定義から組み、型と NULL 許容だけを差し替える",
+                DialectNames.MySql
+            )
+            .TargetFromLive(s =>
+            {
+                var name = s.Col("ac", "name");
+                name.DataType = "varchar(100)";
+                name.IsNullable = nullable;
+                // 図の説明は DB と違うが、説明の項目は選ばない（列の変更は DB の COMMENT で書く）
+                name.Description = "図の説明";
+
+                if (nullable)
+                {
+                    s.Col("ac", "geo").IsNullable = true;
+                }
+                else
+                {
+                    s.Col("ac", "id").DataType = "bigint";
+                }
+            })
+            .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterColumn))
+            .OnRealDatabase(r =>
+                r.LiveSql(
+                        nullable
+                            ? "CREATE TABLE `ac` (`id` int NOT NULL, "
+                                + "`name` varchar(50) NOT NULL DEFAULT 'x' INVISIBLE COMMENT 'db note', "
+                                + "`geo` geometry NOT NULL SRID 4326, PRIMARY KEY (`id`));"
+                            : "CREATE TABLE `ac` (`id` int NOT NULL AUTO_INCREMENT, "
+                                + "`name` varchar(50) NULL DEFAULT 'x' INVISIBLE COMMENT 'db note', "
+                                + "PRIMARY KEY (`id`));"
+                    )
+                    .Probe("columns")
+                    .Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "*'varchar(100)',*",
+                            nullable ? "*' NULL',*" : "*' NOT NULL',*",
+                            // 図に無い列属性はカタログから組み立て直す
+                            "*c.COLUMN_DEFAULT*",
+                            "*INSTR(c.EXTRA, 'INVISIBLE')*",
+                            "*c.SRS_ID*",
+                            "*' AUTO_INCREMENT'*",
+                            // COMMENT は DB の値（@cmt）で書く
+                            "*' COMMENT ', QUOTE(@cmt)*",
+                            "*IF(@exists = 0, 'QuickER sync: ac.name does not exist'*"
+                        );
+                        e.Script.Absent("*図の説明*", "*'DO 0'*");
+                        e.Outcome.Exact("committed");
+                        e.Probe("columns")
+                            .Single(
+                                "columns ac.name.COLUMN_TYPE value=varchar(100)",
+                                $"columns ac.name.IS_NULLABLE value={(nullable ? "YES" : "NO")}",
+                                "columns ac.name.COLUMN_DEFAULT value=x",
+                                "columns ac.name.EXTRA value=INVISIBLE",
+                                "columns ac.name.COLUMN_COMMENT value=db note"
+                            );
+
+                        if (nullable)
+                        {
+                            e.Probe("columns")
+                                .Single(
+                                    "columns ac.geo.IS_NULLABLE value=YES",
+                                    "columns ac.geo.SRS_ID value=4326"
+                                );
+                            e.ProbeUnchanged(
+                                "columns",
+                                [
+                                    .. RealMySqlScenarios.TypeFieldPatterns("ac", "name"),
+                                    "columns ac.name.CHARACTER_MAXIMUM_LENGTH *",
+                                    "columns ac.name.IS_NULLABLE *",
+                                    "columns ac.geo.IS_NULLABLE *",
+                                ]
+                            );
+                        }
+                        else
+                        {
+                            e.Probe("columns")
+                                .Single(
+                                    "columns ac.id.COLUMN_TYPE value=bigint",
+                                    "columns ac.id.EXTRA value=auto_increment"
+                                );
+                            e.ProbeUnchanged(
+                                "columns",
+                                [
+                                    .. RealMySqlScenarios.TypeFieldPatterns("ac", "id", "name"),
+                                    "columns ac.name.CHARACTER_MAXIMUM_LENGTH *",
+                                    "columns ac.name.IS_NULLABLE *",
+                                ]
+                            );
+                        }
+                    })
+            );
+
+    /// <summary>
+    /// 照合順序つきの文字列の列を文字列型（<paramref name="type"/>）へ変える列の変更は、照合順序を書き添えて保つ
+    /// （型の表記の <c>'</c> は文字列リテラルとして二重化して埋める）
+    /// </summary>
+    private static ExpectationRow MySqlAlterColumnKeepsCollationRow(string shape, string type) =>
+        Row(
+                $"realdb-mysql-script-alter-column-keeps-collation-{shape}",
+                "AlterColumn は新しい型が文字列型のときだけ照合順序を書き添える",
+                DialectNames.MySql
+            )
+            .TargetFromLive(s => s.Col("cl", "v").DataType = type)
+            .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterColumn))
+            .OnRealDatabase(r =>
+                r.LiveSql(
+                        "CREATE TABLE `cl` (`id` int NOT NULL, `v` varchar(50) COLLATE utf8mb4_bin NULL, "
+                            + "PRIMARY KEY (`id`));"
+                    )
+                    .Probe("columns")
+                    .Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "*CONCAT(' COLLATE ', c.COLLATION_NAME)*",
+                            $"*'{type.Replace("'", "''", System.StringComparison.Ordinal)}',*"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Single($"col cl.v {type} null");
+                        e.Probe("columns")
+                            .Single(
+                                $"columns cl.v.COLUMN_TYPE value={type}",
+                                "columns cl.v.COLLATION_NAME value=utf8mb4_bin"
+                            );
+                    })
+            );
+
+    /// <summary>外部キーの追加（参照アクション・SET DEFAULT の省略）・表と列の追加と外部キーの並び・説明の文</summary>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > RealMySqlScriptForeignKeyAndDescriptionRows() =>
+        [
+            Row(
+                    "realdb-mysql-script-add-fk-named-with-referential-actions",
+                    "AddForeignKey は ADD CONSTRAINT FOREIGN KEY と参照アクションを生成する",
+                    DialectNames.MySql
+                )
+                .Live(RealMySqlScenarios.CustomerOrder)
+                .TargetFromLive(s =>
+                    s.Fk(
+                        "customer",
+                        "order",
+                        "FK_order_customer",
+                        ForeignKeyReferentialAction.Cascade,
+                        ForeignKeyReferentialAction.SetNull,
+                        ("id", "customer_id")
+                    )
+                )
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddForeignKey))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "*ALTER TABLE `order` ADD CONSTRAINT `FK_order_customer`*",
+                            "*FOREIGN KEY (`customer_id`) REFERENCES `customer` (`id`)*",
+                            "*ON DELETE CASCADE*",
+                            "*ON UPDATE SET NULL*"
+                        );
+                        e.Script.Absent(MySqlReferentialAction.SetDefaultNote);
+                        e.Outcome.Exact("committed");
+                        e.After.Count("fk *", 1);
+                        e.After.Single(
+                            "fk order FK_order_customer (customer_id) -> customer(id) del=Cascade upd=SetNull"
+                        );
+                    })
+                ),
+            MySqlAddForeignKeySetDefaultRow(onDelete: true),
+            MySqlAddForeignKeySetDefaultRow(onDelete: false),
+            Row(
+                    "realdb-mysql-script-add-table-and-column-before-fk",
+                    "実行順序: AddTable → AddColumn → AddForeignKey",
+                    DialectNames.MySql
+                )
+                .Live(s => s.Table("order", ExpectationSchema.Pk("id", "int")))
+                .TargetFromLive(s =>
+                {
+                    s.Table("customer", ExpectationSchema.Pk("id", "int"));
+                    s["order"].Columns.Add(ExpectationSchema.Nullable("customer_id", "int"));
+                    s.Fk("customer", "order", null, ("id", "customer_id"));
+                })
+                .Select(items =>
+                    RealScenarios.SelectKinds(
+                        items,
+                        SchemaDiffKind.AddTable,
+                        SchemaDiffKind.AddColumn,
+                        SchemaDiffKind.AddForeignKey
+                    )
+                )
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "*CREATE TABLE `customer`*",
+                            "*ALTER TABLE `order` ADD COLUMN `customer_id` int NULL;*",
+                            "*ALTER TABLE `order` ADD CONSTRAINT `FK_order_customer`*"
+                        );
+                        // 外部キーが表・列より前に流れると断られる
+                        e.Outcome.Exact("committed");
+                        e.After.Single(
+                            "table customer",
+                            "col order.customer_id int null",
+                            "fk order FK_order_customer (customer_id) -> customer(id) *"
+                        );
+                    })
+                ),
+            Row(
+                    "realdb-mysql-script-table-description-escapes-quote-and-backslash",
+                    "説明内の ' と \\ がエスケープされる",
+                    DialectNames.MySql
+                )
+                .Live(s => s.Table("customer", ExpectationSchema.Pk("id", "int")))
+                .TargetFromLive(s => s["customer"].Description = @"O'Brien\path")
+                .Select(items =>
+                    RealScenarios.SelectKinds(items, SchemaDiffKind.SetTableDescription)
+                )
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(@"*ALTER TABLE `customer` COMMENT = 'O''Brien\\path';*");
+                        e.Outcome.Exact("committed");
+                        e.After.Single(@"desc customer ""O'Brien\path""");
+                    })
+                ),
+            Row(
+                    "realdb-mysql-script-column-description-name-with-quote",
+                    "SetColumnDescription の動的 SQL は名前の ' を二重化する",
+                    DialectNames.MySql
+                )
+                .TargetFromLive(s => s.Col("o'rders", "na'me").Description = "説明")
+                .Select(items =>
+                    RealScenarios.SelectKinds(items, SchemaDiffKind.SetColumnDescription)
+                )
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE `o'rders` (`id` int NOT NULL, `na'me` varchar(20) NULL, "
+                                + "PRIMARY KEY (`id`));"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Script.Contains(
+                                // カタログ検索の WHERE 句（素の名前をリテラルとして渡す）
+                                "*c.TABLE_NAME = 'o''rders' AND c.COLUMN_NAME = 'na''me' LIMIT 1;*",
+                                // 組み立てる ALTER 文（クォート済みの名前をさらにリテラルとしてエスケープする）
+                                "*CONCAT('ALTER TABLE `o''rders` MODIFY COLUMN `na''me` ', @def, *"
+                            );
+                            e.Outcome.Exact("committed");
+                            e.After.Single("desc o'rders.na'me \"説明\"");
+                        })
+                ),
+        ];
+
+    /// <summary>
+    /// 外部キーの SET DEFAULT（<paramref name="onDelete"/> が真なら ON DELETE・偽なら ON UPDATE）は句を出さず、注意コメントを添える
+    /// （InnoDB は SET DEFAULT を効かせないので、DB には NO ACTION で張られ、取り込み直しても差分が出ない）
+    /// </summary>
+    private static ExpectationRow MySqlAddForeignKeySetDefaultRow(bool onDelete) =>
+        Row(
+                $"realdb-mysql-script-add-fk-set-default-omitted-{(onDelete ? "on-delete" : "on-update")}",
+                "AddForeignKey は SET DEFAULT の句を出さず注意コメントを添える",
+                DialectNames.MySql
+            )
+            .Live(RealMySqlScenarios.CustomerOrder)
+            .TargetFromLive(s =>
+                s.Fk(
+                    "customer",
+                    "order",
+                    "FK_order_customer",
+                    onDelete
+                        ? ForeignKeyReferentialAction.SetDefault
+                        : ForeignKeyReferentialAction.Cascade,
+                    onDelete
+                        ? ForeignKeyReferentialAction.Cascade
+                        : ForeignKeyReferentialAction.SetDefault,
+                    ("id", "customer_id")
+                )
+            )
+            .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddForeignKey))
+            .OnRealDatabase(r =>
+                r.Probe("referential")
+                    .Expect(e =>
+                    {
+                        e.Script.Contains(
+                            MySqlReferentialAction.SetDefaultNote,
+                            onDelete
+                                ? "*REFERENCES `customer` (`id`) ON UPDATE CASCADE;"
+                                : "*REFERENCES `customer` (`id`) ON DELETE CASCADE;"
+                        );
+                        e.Script.Absent("*SET DEFAULT *");
+                        e.Outcome.Exact("committed");
+                        e.After.Single(
+                            onDelete
+                                ? "fk order FK_order_customer (customer_id) -> customer(id) del=NoAction upd=Cascade"
+                                : "fk order FK_order_customer (customer_id) -> customer(id) del=Cascade upd=NoAction"
+                        );
+                        e.Probe("referential")
+                            .Exact(
+                                onDelete
+                                    ? "referential order.FK_order_customer delete_rule=NO ACTION update_rule=CASCADE"
+                                    : "referential order.FK_order_customer delete_rule=CASCADE update_rule=NO ACTION"
+                            );
+                        // SET DEFAULT は NO ACTION へ畳んで比べる
+                        e.AfterDiff.Empty();
+                    })
+            );
+
+    /// <summary>列順の同期（MODIFY ... AFTER / FIRST・表ごと）の文</summary>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > RealMySqlScriptReorderRows() =>
+        [
+            Row(
+                    "realdb-mysql-script-reorder-modify-after",
+                    "ReorderColumns はライブ再構成した MODIFY COLUMN ... AFTER を生成する",
+                    DialectNames.MySql
+                )
+                .TargetFromLive(s => RealMySqlScenarios.Reorder(s["t"], ["id", "c", "a", "b"]))
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.ReorderColumns))
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE `t` (`id` int NULL, `a` int NULL, `b` int NULL, "
+                                + "`c` int NULL DEFAULT 5 COMMENT 'c note');"
+                        )
+                        .Probe("columns")
+                        .Expect(e =>
+                        {
+                            e.Script.Contains(
+                                "*WHERE c.TABLE_SCHEMA = DATABASE() AND c.TABLE_NAME = 't' AND c.COLUMN_NAME = 'c' LIMIT 1;*",
+                                "*SET @sql = IF(@def IS NOT NULL, CONCAT('ALTER TABLE `t` MODIFY COLUMN `c` ', @def, ' COMMENT ', QUOTE(@cmt), ' AFTER `id`'), IF(@exists = 0, 'DO 0', 'QuickER sync: t.c definition could not be rebuilt'));*",
+                                "*DEALLOCATE PREPARE stmt;*"
+                            );
+                            // モデルの列定義を出さず、説明はライブの COLUMN_COMMENT（@cmt へ代入するのは検索前の空の初期化だけ）
+                            e.Script.Absent("*MODIFY COLUMN `c` int*");
+                            e.Script.Count("SET @cmt*", 1);
+                            e.Script.Count("SET @cmt = '';", 1);
+                            e.Outcome.Exact("committed");
+                            RealMySqlScenarios.ExpectPositions(e, "t", ["id", "c", "a", "b"]);
+                            e.ProbeUnchanged("columns", "columns *.ORDINAL_POSITION *");
+                            e.Probe("columns")
+                                .Single(
+                                    "columns t.c.COLUMN_DEFAULT value=5",
+                                    "columns t.c.COLUMN_COMMENT value=c note"
+                                );
+                        })
+                ),
+            Row(
+                    "realdb-mysql-script-reorder-move-to-front-first",
+                    "ReorderColumns は先頭移動で FIRST を生成する",
+                    DialectNames.MySql
+                )
+                .Live(s =>
+                    s.Table(
+                        "t",
+                        ExpectationSchema.Nullable("a", "int"),
+                        ExpectationSchema.Nullable("b", "int"),
+                        ExpectationSchema.Nullable("c", "int")
+                    )
+                )
+                .TargetFromLive(s => RealMySqlScenarios.Reorder(s["t"], ["c", "a", "b"]))
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.ReorderColumns))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "*SET @sql = IF(@def IS NOT NULL, CONCAT('ALTER TABLE `t` MODIFY COLUMN `c` ', @def, ' COMMENT ', QUOTE(@cmt), ' FIRST'), IF(@exists = 0, 'DO 0', 'QuickER sync: t.c definition could not be rebuilt'));*"
+                        );
+                        e.Script.Absent("*AFTER*");
+                        e.Outcome.Exact("committed");
+                        e.After.Exact(
+                            "table t",
+                            "col t.c int null",
+                            "col t.a int null",
+                            "col t.b int null"
+                        );
+                    })
+                ),
+            Row(
+                    "realdb-mysql-script-reorder-multiple-tables",
+                    "ReorderColumns は複数テーブルをテーブルごとに出力する",
+                    DialectNames.MySql
+                )
+                .Live(s =>
+                {
+                    s.Table(
+                        "t1",
+                        ExpectationSchema.Nullable("id", "int"),
+                        ExpectationSchema.Nullable("a", "int"),
+                        ExpectationSchema.Nullable("b", "int"),
+                        ExpectationSchema.Nullable("c", "int")
+                    );
+                    s.Table(
+                        "t2",
+                        ExpectationSchema.Nullable("x", "int"),
+                        ExpectationSchema.Nullable("y", "int"),
+                        ExpectationSchema.Nullable("z", "int")
+                    );
+                })
+                .TargetFromLive(s =>
+                {
+                    RealMySqlScenarios.Reorder(s["t1"], ["id", "c", "a", "b"]);
+                    RealMySqlScenarios.Reorder(s["t2"], ["z", "x", "y"]);
+                })
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.ReorderColumns))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "*CONCAT('ALTER TABLE `t1` MODIFY COLUMN `c` ', @def, ' COMMENT ', QUOTE(@cmt), ' AFTER `id`')*",
+                            "*CONCAT('ALTER TABLE `t2` MODIFY COLUMN `z` ', @def, ' COMMENT ', QUOTE(@cmt), ' FIRST')*"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Exact(
+                            "table t1",
+                            "col t1.id int null",
+                            "col t1.c int null",
+                            "col t1.a int null",
+                            "col t1.b int null",
+                            "table t2",
+                            "col t2.z int null",
+                            "col t2.x int null",
+                            "col t2.y int null"
+                        );
+                    })
+                ),
+        ];
+
+    /// <summary>主キーの付け替え（存在を確かめる動的な解除・付与・列の変更を挟む並び・名前の引用）と一意制約の追加の文</summary>
+    private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealMySqlScriptKeyRows() =>
+        [
+            Row(
+                    "realdb-mysql-script-pk-single-to-composite",
+                    "AlterPrimaryKey は存在確認付き DROP と複合 PK の ADD を生成する",
+                    DialectNames.MySql
+                )
+                .Live(s =>
+                    s.Table(
+                        "orders",
+                        ExpectationSchema.Nullable("memo", "varchar(50)"),
+                        ExpectationSchema.Pk("order_id", "int"),
+                        ExpectationSchema.NotNull("line_no", "int")
+                    )
+                )
+                .TargetFromLive(s => s.Col("orders", "line_no").IsPrimaryKey = true)
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterPrimaryKey))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            // 主キーが無いテーブルでは DROP PRIMARY KEY がエラーになるため存在確認してから動的 SQL で外す
+                            "*SET @pk = NULL;*",
+                            "*FROM information_schema.TABLE_CONSTRAINTS tc*",
+                            "*WHERE tc.CONSTRAINT_SCHEMA = DATABASE() AND tc.TABLE_NAME = 'orders' AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY' LIMIT 1;*",
+                            "*SET @sql = IF(@pk IS NULL, 'DO 0', IF(@def IS NULL, 'ALTER TABLE `orders` DROP PRIMARY KEY', CONCAT('ALTER TABLE `orders` MODIFY COLUMN `', REPLACE(@ai, '`', '``'), '` ', @def, ' COMMENT ', QUOTE(@cmt), ', DROP PRIMARY KEY')));*",
+                            "*PREPARE stmt FROM @sql;*",
+                            "*ALTER TABLE `orders` ADD PRIMARY KEY (`order_id`, `line_no`);*"
+                        );
+                        // MySQL の主キー名は PRIMARY 固定のため CONSTRAINT 名は指定しない
+                        e.Script.Absent("*ADD CONSTRAINT*");
+                        e.Outcome.Exact("committed");
+                        e.After.Single("pk orders (order_id,line_no)");
+                    })
+                ),
+            Row(
+                    "realdb-mysql-script-pk-add-only-guarded-drop",
+                    "AlterPrimaryKey は PK 付与のみでも DROP を no-op 形で出す",
+                    DialectNames.MySql
+                )
+                .Live(s =>
+                    s.Table(
+                        "customer",
+                        ExpectationSchema.Nullable("memo", "varchar(50)"),
+                        ExpectationSchema.NotNull("id", "int")
+                    )
+                )
+                .TargetFromLive(s => s.Col("customer", "id").IsPrimaryKey = true)
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterPrimaryKey))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Before.Absent("pk *");
+                        e.Script.Contains(
+                            "*IF(@pk IS NULL, 'DO 0'*",
+                            "*ALTER TABLE `customer` ADD PRIMARY KEY (`id`);*"
+                        );
+                        // 主キーの無い表で DROP が無害に流れる
+                        e.Outcome.Exact("committed");
+                        e.After.Single("pk customer (id)");
+                    })
+                ),
+            Row(
+                    "realdb-mysql-script-pk-drop-only-omits-add",
+                    "AlterPrimaryKey は PK 解除のみなら ADD を出さない",
+                    DialectNames.MySql
+                )
+                .Live(s =>
+                    s.Table(
+                        "customer",
+                        ExpectationSchema.Nullable("memo", "varchar(50)"),
+                        ExpectationSchema.Pk("id", "int")
+                    )
+                )
+                .TargetFromLive(s => s.Col("customer", "id").IsPrimaryKey = false)
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterPrimaryKey))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains("*IF(@pk IS NULL, 'DO 0'*");
+                        e.Script.Absent("*ADD PRIMARY KEY*");
+                        e.Outcome.Exact("committed");
+                        e.After.Absent("pk *");
+                    })
+                ),
+            Row(
+                    "realdb-mysql-script-pk-change-splits-around-alter-column",
+                    "AlterPrimaryKey は AlterColumn を挟んで DROP → MODIFY → ADD の順に出る",
+                    DialectNames.MySql
+                )
+                .Live(s =>
+                    s.Table(
+                        "orders",
+                        ExpectationSchema.Pk("old_id", "int"),
+                        ExpectationSchema.NotNull("order_id", "int")
+                    )
+                )
+                .TargetFromLive(s =>
+                {
+                    var oldId = s.Col("orders", "old_id");
+                    oldId.IsPrimaryKey = false;
+                    oldId.IsNullable = true;
+                    s.Col("orders", "order_id").IsPrimaryKey = true;
+                })
+                .Select(items =>
+                    RealScenarios.SelectKinds(
+                        items,
+                        SchemaDiffKind.AlterPrimaryKey,
+                        SchemaDiffKind.AlterColumn
+                    )
+                )
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "*SET @pk = NULL;*",
+                            "*MODIFY COLUMN `old_id`*",
+                            "*ALTER TABLE `orders` ADD PRIMARY KEY (`order_id`);*"
+                        );
+                        // 主キーが残ったままの旧主キー列の NULL 許容化は断られる＝コミットが並びを示す
+                        e.Outcome.Exact("committed");
+                        e.After.Single("pk orders (order_id)", "col orders.old_id int null");
+                    })
+                ),
+            Row(
+                    "realdb-mysql-script-pk-change-table-name-with-quote",
+                    "AlterPrimaryKey の動的 SQL はテーブル名の ' を二重化する",
+                    DialectNames.MySql
+                )
+                .TargetFromLive(s =>
+                {
+                    s.Col("o'rders", "id").IsPrimaryKey = false;
+                    s.Col("o'rders", "order_id").IsPrimaryKey = true;
+                })
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterPrimaryKey))
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE `o'rders` (`id` int NOT NULL, `order_id` int NOT NULL, "
+                                + "PRIMARY KEY (`id`));"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Script.Contains(
+                                "*'ALTER TABLE `o''rders` DROP PRIMARY KEY'*",
+                                "*CONCAT('ALTER TABLE `o''rders` MODIFY COLUMN `'*"
+                            );
+                            e.Script.Absent("*'ALTER TABLE `o'rders`*");
+                            e.Outcome.Exact("committed");
+                            e.After.Single("pk o'rders (order_id)");
+                        })
+                ),
+            Row(
+                    "realdb-mysql-script-unique-add-synthesized-composite-name",
+                    "AddUniqueConstraint は ADD CONSTRAINT UNIQUE を生成する",
+                    DialectNames.MySql
+                )
+                .Live(s =>
+                    s.Table(
+                        "customer",
+                        ExpectationSchema.Pk("id", "int"),
+                        ExpectationSchema.NotNull("code", "varchar(20)"),
+                        ExpectationSchema.NotNull("kind", "varchar(10)")
+                    )
+                )
+                .TargetFromLive(s => s.Unique("customer", null, "code", "kind"))
+                .Select(items =>
+                    RealScenarios.SelectKinds(items, SchemaDiffKind.AddUniqueConstraint)
+                )
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        // 制約名は未設定のため UQ_{テーブル}_{列…} が合成される
+                        e.Script.Contains(
+                            "*ALTER TABLE `customer` ADD CONSTRAINT `UQ_customer_code_kind` UNIQUE (`code`, `kind`);*"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Single("uq customer UQ_customer_code_kind (code,kind)");
+                    })
+                ),
+        ];
 }
 
 /// <summary>MySQL の実 DB の段の図・SQL・選び方の部品</summary>
@@ -1656,6 +2496,36 @@ internal static class RealMySqlScenarios
             );
 
     /// <summary>
+    /// 列定義の組み直しの CONCAT が、列に付き得る属性（照合順序・生成列・NULL 制約・SRID・DEFAULT の 4 分岐・INVISIBLE・
+    /// AUTO_INCREMENT・ON UPDATE）の句をすべて組み込むこと（説明の同期・列順の同期が流す文の形）
+    /// </summary>
+    public static void ExpectLiveRebuildScript(ExpectationBuilder e) =>
+        e.Script.Contains(
+            // 型・照合順序
+            "*c.COLUMN_TYPE,*",
+            "*IF(c.COLLATION_NAME IS NULL, '', CONCAT(' COLLATE ', c.COLLATION_NAME)),*",
+            // 生成列（式が在るときだけ・VIRTUAL / STORED の別は EXTRA から）
+            "*IF(@gen = '', '', CONCAT(' GENERATED ALWAYS AS (', @gen, ') ', IF(INSTR(c.EXTRA, 'STORED GENERATED') > 0, 'STORED', 'VIRTUAL'))),*",
+            // NULL 制約・空間参照系
+            "*IF(c.IS_NULLABLE = 'YES', ' NULL', ' NOT NULL'),*",
+            "*IF(c.SRS_ID IS NULL, '', CONCAT(' SRID ', c.SRS_ID)),*",
+            // DEFAULT の 4 分岐（なし / CURRENT_TIMESTAMP / 式既定 / リテラル。BIT・BINARY・VARBINARY は生出力）
+            "*IF(c.COLUMN_DEFAULT IS NULL, '',*",
+            "*IF(c.DATA_TYPE IN ('timestamp', 'datetime') AND (UPPER(c.COLUMN_DEFAULT) = 'CURRENT_TIMESTAMP' OR UPPER(c.COLUMN_DEFAULT) LIKE 'CURRENT\\_TIMESTAMP(%)'), CONCAT(' DEFAULT ', c.COLUMN_DEFAULT),*",
+            "*IF(INSTR(c.EXTRA, 'DEFAULT_GENERATED') > 0, CONCAT(' DEFAULT (', @dfx, ')'),*",
+            "*IF(c.DATA_TYPE IN ('bit', 'binary', 'varbinary'), CONCAT(' DEFAULT ', c.COLUMN_DEFAULT),*",
+            "*CONCAT(' DEFAULT ', QUOTE(c.COLUMN_DEFAULT))*",
+            // EXTRA 由来の属性（ON UPDATE は精度込みで切り出し、続く INVISIBLE を巻き込まない）
+            "*IF(INSTR(c.EXTRA, 'INVISIBLE') > 0, ' INVISIBLE', ''),*",
+            "*IF(INSTR(c.EXTRA, 'auto_increment') > 0, ' AUTO_INCREMENT', ''),*",
+            "*IF(INSTR(c.EXTRA, 'on update ') > 0, CONCAT(' ON UPDATE ', SUBSTRING_INDEX(SUBSTRING(c.EXTRA, INSTR(c.EXTRA, 'on update ') + 10), ' ', 1)), '')*",
+            // 生成列の式と式既定は、サーバー自身のパーサへ通して復元する
+            "*SELECT 1, c.GENERATION_EXPRESSION, IF(INSTR(c.EXTRA, 'DEFAULT_GENERATED') > 0, IFNULL(c.COLUMN_DEFAULT, ''), ''), c.COLUMN_COMMENT*",
+            "*INTO @exists, @gen, @dfx, @cmt*",
+            "*SET @sql = CONCAT('SELECT ''', IFNULL(@gen, ''), ''', ''', IFNULL(@dfx, ''), ''' INTO @gen, @dfx');*"
+        );
+
+    /// <summary>
     /// 探針 <c>columns</c> の型の項目（COLUMN_TYPE・DATA_TYPE・NUMERIC_PRECISION）の行のパターン（型を変えた列の、比べない行）
     /// </summary>
     public static IEnumerable<string> TypeFieldPatterns(string table, params string[] columns) =>
@@ -1775,6 +2645,33 @@ internal static class RealMySqlScenarios
             + ", CONSTRAINT `PK_items` PRIMARY KEY (`id`))"
             + (table.Length > 0 ? $" COMMENT='{table.Replace("'", "''")}'" : string.Empty)
             + ";";
+    }
+
+    /// <summary>
+    /// shops(id 主キー・code・region) と、名前つき単一列の一意制約 UQ_shops_code (code) と、名前なしの複合の一意制約
+    /// (region, code)（宣言の並びは列の並びと逆）
+    /// </summary>
+    public static void Shops(ExpectationSchema s)
+    {
+        s.Table(
+            "shops",
+            ExpectationSchema.Pk("id", "int"),
+            ExpectationSchema.NotNull("code", "varchar(20)"),
+            ExpectationSchema.NotNull("region", "varchar(10)")
+        );
+        s.Unique("shops", "UQ_shops_code", "code");
+        s.Unique("shops", null, "region", "code");
+    }
+
+    /// <summary>親 customer(id) と、外部キーの無い子 order(id, customer_id int NULL)</summary>
+    public static void CustomerOrder(ExpectationSchema s)
+    {
+        s.Table("customer", ExpectationSchema.Pk("id", "int"));
+        s.Table(
+            "order",
+            ExpectationSchema.Pk("id", "int"),
+            ExpectationSchema.Nullable("customer_id", "int")
+        );
     }
 
     /// <summary>

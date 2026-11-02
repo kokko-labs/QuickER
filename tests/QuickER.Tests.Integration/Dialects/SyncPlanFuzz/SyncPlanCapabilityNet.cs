@@ -51,6 +51,8 @@ internal static class SyncPlanCapabilityNetDimensions
         nameof(SyncDialectCapabilities.ReferencedKeyRequiresSameColumnOrder),
         nameof(SyncDialectCapabilities.ForeignKeyAllowsStringLengthDifference),
         nameof(SyncDialectCapabilities.TransactionalDdl),
+        nameof(SyncDialectCapabilities.SupportsOnUpdateAction),
+        nameof(SyncDialectCapabilities.SupportsSetDefaultAction),
     ];
 
     /// <summary>
@@ -76,6 +78,8 @@ internal static class SyncPlanCapabilityNetDimensions
         ("ReferencedKeyRequiresSameColumnOrder", ["True", "False", "True", "False", "False"]),
         ("ForeignKeyAllowsStringLengthDifference", ["False", "True", "True", "True", "True"]),
         ("TransactionalDdl", ["True", "True", "False", "False", "True"]),
+        ("SupportsOnUpdateAction", ["True", "True", "True", "False", "True"]),
+        ("SupportsSetDefaultAction", ["True", "True", "False", "False", "True"]),
     ];
 
     private static readonly string[] DeclaredDialects =

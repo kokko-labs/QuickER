@@ -4,6 +4,7 @@ using System.Linq;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.Oracle;
 using QuickER.Tests.TestSupport.Engines;
 using ProviderStrings = QuickER.Provider.Resources.Strings;
 
@@ -12,7 +13,7 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 internal static partial class SyncPlanExpectationRows
 {
     /// <summary>Oracle の実 DB の段の行の数の下限（行を足したら・消したら合わせる）</summary>
-    private const int RealOracleRowCount = 24;
+    private const int RealOracleRowCount = 41;
 
     /// <summary>実 DB の段：Oracle の同期</summary>
     private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealOracleRows() =>
@@ -21,6 +22,7 @@ internal static partial class SyncPlanExpectationRows
             .. RealOracleKeyRows(),
             .. RealOracleColumnRows(),
             .. RealOracleDescriptionRows(),
+            .. RealOracleScriptRows(),
         ];
 
     /// <summary>スキーマ同期の往復（表・列・外部キーの追加と削除・一意制約・複合外部キー）</summary>
@@ -89,6 +91,11 @@ internal static partial class SyncPlanExpectationRows
                             "AlterColumn child.to_alter *",
                             "DropColumn child.to_drop *"
                         );
+                        // NULL 許容が変わるので MODIFY に NOT NULL を付ける。列の削除は DROP COLUMN
+                        e.Script.Contains(
+                            "ALTER TABLE \"child\" MODIFY (\"to_alter\" VARCHAR2(100) NOT NULL);",
+                            "ALTER TABLE \"child\" DROP COLUMN \"to_drop\";"
+                        );
                         e.Outcome.Exact("committed");
                         e.After.Contains("col child.added *");
                         e.After.Absent("col child.to_drop *");
@@ -110,6 +117,10 @@ internal static partial class SyncPlanExpectationRows
                             "DropForeignKey *",
                             "DropForeignKey child fk=FK_child_parent *"
                         );
+                        // 名前が分かるので PL/SQL の逆引きでなく DROP CONSTRAINT で外す
+                        e.Script.Contains(
+                            "ALTER TABLE \"child\" DROP CONSTRAINT \"FK_child_parent\";"
+                        );
                         e.Outcome.Exact("committed");
                         e.After.Absent("fk *");
                     })
@@ -126,6 +137,7 @@ internal static partial class SyncPlanExpectationRows
                     r.Expect(e =>
                     {
                         e.Diff.Single("DropTable parent *");
+                        e.Script.Contains("DROP TABLE \"parent\";");
                         e.Outcome.Exact("committed");
                         e.After.Count("table *", 1);
                         e.After.Single("table child");
@@ -532,6 +544,12 @@ internal static partial class SyncPlanExpectationRows
                         .Expect(e =>
                         {
                             e.Diff.Count("AlterColumn *", 2);
+                            // NULL 許容が変わらないので NULL / NOT NULL の句を付けない
+                            // （付けると今と同じ指定を ORA-01442 / ORA-01451 で断られる）
+                            e.Script.Contains(
+                                "ALTER TABLE \"alt_item\" MODIFY (\"name\" VARCHAR2(100));",
+                                "ALTER TABLE \"alt_item\" MODIFY (\"note\" VARCHAR2(100));"
+                            );
                             e.Outcome.Exact("committed");
                             e.After.Single(
                                 "col alt_item.name VARCHAR2(100) notnull",
@@ -672,6 +690,11 @@ internal static partial class SyncPlanExpectationRows
 
                         if (stage < 2)
                         {
+                            // 説明の ' は二重化する（しなければ文字列リテラルが閉じて構文エラーになる）
+                            e.Script.Contains(
+                                $"COMMENT ON TABLE \"items\" IS '{table.Replace("'", "''")}';",
+                                $"COMMENT ON COLUMN \"items\".\"name\" IS '{column.Replace("'", "''")}';"
+                            );
                             e.After.Single(
                                 $"desc items \"{table}\"",
                                 $"desc items.name \"{column}\""
@@ -679,11 +702,528 @@ internal static partial class SyncPlanExpectationRows
                         }
                         else
                         {
-                            // Oracle は COMMENT ... IS ''（空文字）が削除に相当する
+                            // Oracle は COMMENT ... IS ''（空文字）が削除に相当する（IS NULL は構文エラーで断られる）
+                            e.Script.Contains(
+                                "COMMENT ON TABLE \"items\" IS '';",
+                                "COMMENT ON COLUMN \"items\".\"name\" IS '';"
+                            );
+                            e.Script.Absent("*IS NULL*");
                             e.After.Absent("desc *");
                         }
                     })
             );
+
+    /// <summary>
+    /// 同期スクリプトの文の形（表・列・外部キー・主キー・一意制約の文）を実 DB で流し、結果と流れた文の形を見る
+    /// </summary>
+    private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealOracleScriptRows() =>
+        [
+            .. RealOracleScriptTableAndColumnRows(),
+            .. RealOracleScriptForeignKeyRows(),
+            .. RealOracleScriptKeyRows(),
+        ];
+
+    /// <summary>表・列の追加と列の変更の文</summary>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > RealOracleScriptTableAndColumnRows() =>
+        [
+            Row(
+                    "realdb-oracle-script-add-table-create",
+                    "AddTable は CREATE TABLE と PK を生成する",
+                    DialectNames.Oracle
+                )
+                .Live(_ => { })
+                .TargetFromLive(s =>
+                    s.Table(
+                        "customer",
+                        ExpectationSchema.Pk("id", "NUMBER(10)"),
+                        ExpectationSchema.Nullable("name", "VARCHAR2(50)")
+                    )
+                )
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddTable))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "CREATE TABLE \"customer\" (",
+                            "*\"id\" NUMBER(10) NOT NULL,",
+                            "*CONSTRAINT \"PK_customer\" PRIMARY KEY (\"id\")"
+                        );
+                        e.Script.Absent("*UNIQUE*");
+                        e.Outcome.Exact("committed");
+                        e.After.Single(
+                            "table customer",
+                            "col customer.id NUMBER(10) notnull pk",
+                            "col customer.name VARCHAR2(50) null",
+                            "pk customer (id)"
+                        );
+                        e.After.Absent("uq *");
+                    })
+                ),
+            Row(
+                    "realdb-oracle-script-add-table-unique-constraints-sync",
+                    "AddTable の UNIQUE 句は DDL 生成と同形",
+                    DialectNames.Oracle
+                )
+                .Live(_ => { })
+                .TargetFromLive(RealOracleScenarios.Shops)
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddTable))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        // 名前つきの単一列は名前のまま・名前なしの複合は合成名で宣言の並び。最後の制約行にカンマは付かない
+                        e.Script.Contains(
+                            "*CONSTRAINT \"PK_shops\" PRIMARY KEY (\"id\"),",
+                            "*CONSTRAINT \"UQ_shops_code\" UNIQUE (\"code\"),",
+                            "*CONSTRAINT \"UQ_shops_region_code\" UNIQUE (\"region\", \"code\")"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Count("uq *", 2);
+                        e.After.Single(
+                            "uq shops UQ_shops_code (code)",
+                            "uq shops UQ_shops_region_code (region,code)"
+                        );
+                    })
+                ),
+            Row(
+                    "realdb-oracle-script-add-table-unique-constraints-ddl",
+                    "AddTable の UNIQUE 句は DDL 生成と同形",
+                    DialectNames.Oracle
+                )
+                .Live(RealOracleScenarios.Shops)
+                .Target(RealOracleScenarios.Shops)
+                .Select(items => RealScenarios.SelectKinds(items))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Before.Count("uq *", 2);
+                        e.Before.Single(
+                            "uq shops UQ_shops_code (code)",
+                            "uq shops UQ_shops_region_code (region,code)"
+                        );
+                        e.Diff.Empty();
+                        e.Outcome.Exact("committed");
+                    })
+                ),
+            Row(
+                    "realdb-oracle-script-add-column-not-null",
+                    "AddColumn は ALTER TABLE ADD (...) を生成する",
+                    DialectNames.Oracle
+                )
+                .Live(s => s.Table("customer", ExpectationSchema.Pk("id", "NUMBER(10)")))
+                .TargetFromLive(s =>
+                    s["customer"].Columns.Add(ExpectationSchema.NotNull("email", "VARCHAR2(200)"))
+                )
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddColumn))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "ALTER TABLE \"customer\" ADD (\"email\" VARCHAR2(200) NOT NULL);"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Single("col customer.email VARCHAR2(200) notnull");
+                    })
+                ),
+            Row(
+                    "realdb-oracle-script-unselected-add-column-not-emitted",
+                    "選択されていない項目はスクリプトに含まれない",
+                    DialectNames.Oracle
+                )
+                .Live(s => s.Table("customer", ExpectationSchema.Pk("id", "NUMBER(10)")))
+                .TargetFromLive(s =>
+                    s["customer"].Columns.Add(ExpectationSchema.Nullable("email", "VARCHAR2(200)"))
+                )
+                .Select(items => RealScenarios.SelectKinds(items))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Diff.Single("AddColumn customer.email *");
+                        e.Script.Absent("*email*");
+                        e.Outcome.Exact("committed");
+                        e.After.Absent("col customer.email *");
+                    })
+                ),
+            Row(
+                    "realdb-oracle-script-alter-column-modify-null",
+                    "AlterColumn は NULL 許容化で MODIFY ... NULL を明示する",
+                    DialectNames.Oracle
+                )
+                .Live(s =>
+                    s.Table(
+                        "customer",
+                        ExpectationSchema.Pk("id", "NUMBER(10)"),
+                        ExpectationSchema.NotNull("note", "VARCHAR2(200)")
+                    )
+                )
+                .TargetFromLive(s => s.Col("customer", "note").IsNullable = true)
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterColumn))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        // 句を付けない MODIFY は NULL 許容を変えない＝取り込み直した列が NULL 許容であることが句の明示を示す
+                        e.Script.Contains(
+                            "ALTER TABLE \"customer\" MODIFY (\"note\" VARCHAR2(200) NULL);"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Single("col customer.note VARCHAR2(200) null");
+                    })
+                ),
+        ];
+
+    /// <summary>外部キーの追加（Oracle が持たない参照アクションの省略）と、表・列の追加と外部キーの並び</summary>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > RealOracleScriptForeignKeyRows() =>
+        [
+            Row(
+                    "realdb-oracle-script-add-fk-on-update-omitted-with-note",
+                    "AddForeignKey は ON DELETE を出し ON UPDATE は出さず注意コメントを付す",
+                    DialectNames.Oracle
+                )
+                .Live(RealOracleScenarios.CustomerOrder)
+                .TargetFromLive(s =>
+                    s.Fk(
+                        "customer",
+                        "order",
+                        "FK_order_customer",
+                        ForeignKeyReferentialAction.Cascade,
+                        ForeignKeyReferentialAction.SetDefault,
+                        ("id", "customer_id")
+                    )
+                )
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddForeignKey))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        // Oracle は ON UPDATE を持たない＝句を出すと断られる。省いた旨は注意コメントで残す
+                        e.Script.Contains(
+                            OracleReferentialAction.OnUpdateNote,
+                            "ALTER TABLE \"order\" ADD CONSTRAINT \"FK_order_customer\" FOREIGN KEY (\"customer_id\") REFERENCES \"customer\" (\"id\") ON DELETE CASCADE;"
+                        );
+                        e.Script.Absent(
+                            "*REFERENCES \"customer\" (\"id\") ON DELETE CASCADE ON UPDATE*",
+                            OracleReferentialAction.SetDefaultNote
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Count("fk *", 1);
+                        e.After.Single(
+                            "fk order FK_order_customer (customer_id) -> customer(id) del=Cascade upd=NoAction"
+                        );
+                    })
+                ),
+            Row(
+                    "realdb-oracle-script-add-fk-on-delete-set-default-omitted-with-note",
+                    "AddForeignKey は ON DELETE SET DEFAULT の句を省いて注意コメントを付ける",
+                    DialectNames.Oracle
+                )
+                .Live(RealOracleScenarios.CustomerOrder)
+                .TargetFromLive(s =>
+                    s.Fk(
+                        "customer",
+                        "order",
+                        "FK_order_customer",
+                        ForeignKeyReferentialAction.SetDefault,
+                        ("id", "customer_id")
+                    )
+                )
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddForeignKey))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        // Oracle は ON DELETE SET DEFAULT を持たない＝句を出すと断られる。NO ACTION として張る
+                        e.Script.Contains(
+                            OracleReferentialAction.SetDefaultNote,
+                            "*REFERENCES \"customer\" (\"id\");"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Count("fk *", 1);
+                        e.After.Single(
+                            "fk order FK_order_customer (customer_id) -> customer(id) del=NoAction upd=NoAction"
+                        );
+                    })
+                ),
+            Row(
+                    "realdb-oracle-script-add-table-and-column-before-fk",
+                    "実行順序: AddTable → AddColumn → AddForeignKey",
+                    DialectNames.Oracle
+                )
+                .Live(s => s.Table("t", ExpectationSchema.Pk("id", "NUMBER(10)")))
+                .TargetFromLive(s =>
+                {
+                    s.Table("customer", ExpectationSchema.Pk("id", "NUMBER(10)"));
+                    s["t"].Columns.Add(ExpectationSchema.Nullable("customer_id", "NUMBER(10)"));
+                    s.Fk("customer", "t", null, ("id", "customer_id"));
+                })
+                .Select(items =>
+                    RealScenarios.SelectKinds(
+                        items,
+                        SchemaDiffKind.AddTable,
+                        SchemaDiffKind.AddColumn,
+                        SchemaDiffKind.AddForeignKey
+                    )
+                )
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        // 外部キーが表・列より前に流れると断られる＝コミットが並びを示す
+                        e.Script.Contains(
+                            "CREATE TABLE \"customer\" (",
+                            "ALTER TABLE \"t\" ADD (\"customer_id\" NUMBER(10));",
+                            "ALTER TABLE \"t\" ADD CONSTRAINT \"FK_t_customer\" FOREIGN KEY (\"customer_id\")*"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Single(
+                            "table customer",
+                            "col t.customer_id NUMBER(10) null",
+                            "fk t FK_t_customer (customer_id) -> customer(id) *"
+                        );
+                    })
+                ),
+        ];
+
+    /// <summary>主キーの付け替え・付与・解除と一意制約の追加・削除の文</summary>
+    private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealOracleScriptKeyRows() =>
+        [
+            Row(
+                    "realdb-oracle-script-pk-single-to-composite",
+                    "AlterPrimaryKey は PL/SQL ブロックの DROP と複合 PK の ADD を生成する",
+                    DialectNames.Oracle
+                )
+                .TargetFromLive(s =>
+                {
+                    s.Col("orders", "line_no").IsPrimaryKey = true;
+                    s.PrimaryKeyOrder("orders", "order_id", "line_no");
+                })
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterPrimaryKey))
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE \"orders\" (\"order_id\" NUMBER(10) NOT NULL, \"line_no\" NUMBER(10) NOT NULL, "
+                                + "\"memo\" VARCHAR2(50) NULL, CONSTRAINT \"pk_orders_old\" PRIMARY KEY (\"order_id\"));"
+                        )
+                        .Probe("keys")
+                        .Expect(e =>
+                        {
+                            // 旧主キーの名前は差分に無いので、現在のスキーマの all_constraints から逆引きして PL/SQL ブロックで外す
+                            e.Script.Contains(
+                                "DECLARE",
+                                "*FROM all_constraints c",
+                                "*WHERE c.constraint_type = 'P' AND c.owner = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') AND c.table_name = 'orders';",
+                                "*EXECUTE IMMEDIATE 'ALTER TABLE \"orders\" DROP CONSTRAINT \"' || v_name || '\"';",
+                                "*WHEN NO_DATA_FOUND THEN NULL;",
+                                "ALTER TABLE \"orders\" ADD CONSTRAINT \"PK_orders\" PRIMARY KEY (\"order_id\", \"line_no\");"
+                            );
+                            e.Outcome.Exact("committed");
+                            e.After.Single("pk orders (order_id,line_no)");
+                            e.Probe("keys")
+                                .Exact(
+                                    "keys orders kind=PK name=PK_orders columns=order_id,line_no"
+                                );
+                        })
+                ),
+            Row(
+                    "realdb-oracle-script-pk-add-only-guarded-drop",
+                    "AlterPrimaryKey は PK 付与のみでも DROP を no-op 形で出す",
+                    DialectNames.Oracle
+                )
+                .TargetFromLive(s => s.Col("customer", "id").IsPrimaryKey = true)
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterPrimaryKey))
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE \"customer\" (\"id\" NUMBER(10) NOT NULL, \"memo\" VARCHAR2(50) NULL);"
+                        )
+                        .Probe("keys")
+                        .Expect(e =>
+                        {
+                            e.Before.Absent("pk *");
+                            // 主キーが無いので逆引きは NO_DATA_FOUND になる＝握り潰さなければ失敗する
+                            e.Script.Contains(
+                                "*WHEN NO_DATA_FOUND THEN NULL;",
+                                "ALTER TABLE \"customer\" ADD CONSTRAINT \"PK_customer\" PRIMARY KEY (\"id\");"
+                            );
+                            e.Outcome.Exact("committed");
+                            e.After.Single("pk customer (id)");
+                            e.Probe("keys")
+                                .Exact("keys customer kind=PK name=PK_customer columns=id");
+                        })
+                ),
+            Row(
+                    "realdb-oracle-script-pk-drop-only-omits-add",
+                    "AlterPrimaryKey は PK 解除のみなら ADD を出さない",
+                    DialectNames.Oracle
+                )
+                .TargetFromLive(s =>
+                {
+                    s.Col("customer", "id").IsPrimaryKey = false;
+                    s["customer"].PrimaryKeyColumnIds.Clear();
+                })
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterPrimaryKey))
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE \"customer\" (\"id\" NUMBER(10) NOT NULL, \"memo\" VARCHAR2(50) NULL, "
+                                + "CONSTRAINT \"PK_customer\" PRIMARY KEY (\"id\"));"
+                        )
+                        .Probe("keys")
+                        .Expect(e =>
+                        {
+                            e.Script.Contains("*WHEN NO_DATA_FOUND THEN NULL;");
+                            e.Script.Absent("*ADD CONSTRAINT*");
+                            e.Outcome.Exact("committed");
+                            e.After.Absent("pk *");
+                            e.Probe("keys").Empty();
+                        })
+                ),
+            Row(
+                    "realdb-oracle-script-pk-change-splits-around-alter-column",
+                    "AlterPrimaryKey は AlterColumn を挟んで DROP → MODIFY → ADD の順に出る",
+                    DialectNames.Oracle
+                )
+                .TargetFromLive(s =>
+                {
+                    var oldId = s.Col("orders", "old_id");
+                    oldId.IsPrimaryKey = false;
+                    oldId.IsNullable = true;
+                    s.Col("orders", "order_id").IsPrimaryKey = true;
+                    s["orders"].PrimaryKeyColumnIds.Clear();
+                })
+                .Select(items =>
+                    RealScenarios.SelectKinds(
+                        items,
+                        SchemaDiffKind.AlterPrimaryKey,
+                        SchemaDiffKind.AlterColumn
+                    )
+                )
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE \"orders\" (\"old_id\" NUMBER(10) NOT NULL, \"order_id\" NUMBER(10) NOT NULL, "
+                                + "\"memo\" VARCHAR2(50) NULL, CONSTRAINT \"pk_orders_old\" PRIMARY KEY (\"old_id\"));"
+                        )
+                        .Expect(e =>
+                        {
+                            // 主キーが残ったままの旧主キー列の NULL 許容化は断られる＝コミットが並び（DROP → MODIFY → ADD）を示す
+                            e.Script.Contains(
+                                "DECLARE",
+                                "*WHERE c.constraint_type = 'P' AND c.owner = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') AND c.table_name = 'orders';",
+                                "ALTER TABLE \"orders\" MODIFY (\"old_id\" NUMBER(10) NULL);",
+                                "ALTER TABLE \"orders\" ADD CONSTRAINT \"PK_orders\" PRIMARY KEY (\"order_id\");"
+                            );
+                            e.Outcome.Exact("committed");
+                            e.After.Single(
+                                "pk orders (order_id)",
+                                "col orders.old_id NUMBER(10) null"
+                            );
+                        })
+                ),
+            Row(
+                    "realdb-oracle-script-pk-reorder-follows-primary-key-order",
+                    "AlterPrimaryKey は PrimaryKeyColumnIds の順で複合 PK を付与する",
+                    DialectNames.Oracle
+                )
+                .TargetFromLive(s => s.PrimaryKeyOrder("orders", "line_no", "order_id"))
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterPrimaryKey))
+                .OnRealDatabase(r =>
+                    // 列の宣言の並びは (order_id, line_no)。主キーの実効順だけを逆にする
+                    r.LiveSql(
+                            "CREATE TABLE \"orders\" (\"order_id\" NUMBER(10) NOT NULL, \"line_no\" NUMBER(10) NOT NULL, "
+                                + "CONSTRAINT \"PK_orders\" PRIMARY KEY (\"order_id\", \"line_no\"));"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Diff.Single("AlterPrimaryKey orders *");
+                            e.Script.Contains(
+                                "ALTER TABLE \"orders\" ADD CONSTRAINT \"PK_orders\" PRIMARY KEY (\"line_no\", \"order_id\");"
+                            );
+                            e.Outcome.Exact("committed");
+                            e.After.Single("pk orders (line_no,order_id)");
+                        })
+                ),
+            Row(
+                    "realdb-oracle-script-pk-change-table-name-with-quote",
+                    "AlterPrimaryKey の PL/SQL ブロックはテーブル名の ' を二重化する",
+                    DialectNames.Oracle
+                )
+                .TargetFromLive(s => RealScenarios.MovePrimaryKeyToCode(s, "o'rders"))
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterPrimaryKey))
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE \"o'rders\" (\"id\" NUMBER(10) NOT NULL, \"code\" NUMBER(10) NOT NULL, "
+                                + "CONSTRAINT \"pk_o_old\" PRIMARY KEY (\"id\"));"
+                        )
+                        .Probe("keys")
+                        .Expect(e =>
+                        {
+                            // EXECUTE IMMEDIATE '…' の中身は文字列リテラル＝クォートした名前の ' も二重化する
+                            e.Script.Contains(
+                                "*WHERE c.constraint_type = 'P' AND c.owner = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') AND c.table_name = 'o''rders';",
+                                "*EXECUTE IMMEDIATE 'ALTER TABLE \"o''rders\" DROP CONSTRAINT \"' || v_name || '\"';"
+                            );
+                            e.Script.Absent("*EXECUTE IMMEDIATE 'ALTER TABLE \"o'rders\"*");
+                            e.Outcome.Exact("committed");
+                            e.After.Single("pk o'rders (code)");
+                            e.Probe("keys")
+                                .Exact("keys o'rders kind=PK name=PK_o'rders columns=code");
+                        })
+                ),
+            Row(
+                    "realdb-oracle-script-unique-add-synthesized-composite-name",
+                    "AddUniqueConstraint は ADD CONSTRAINT UNIQUE を生成する",
+                    DialectNames.Oracle
+                )
+                .Live(s =>
+                    s.Table(
+                        "customer",
+                        ExpectationSchema.Pk("id", "NUMBER(10)"),
+                        ExpectationSchema.NotNull("code", "VARCHAR2(10)"),
+                        ExpectationSchema.NotNull("kind", "VARCHAR2(10)")
+                    )
+                )
+                .TargetFromLive(s => s.Unique("customer", null, "code", "kind"))
+                .Select(items =>
+                    RealScenarios.SelectKinds(items, SchemaDiffKind.AddUniqueConstraint)
+                )
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        // 制約名は未設定のため UQ_{テーブル}_{列…} を合成する
+                        e.Script.Contains(
+                            "ALTER TABLE \"customer\" ADD CONSTRAINT \"UQ_customer_code_kind\" UNIQUE (\"code\", \"kind\");"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Single("uq customer UQ_customer_code_kind (code,kind)");
+                    })
+                ),
+            Row(
+                    "realdb-oracle-script-unique-drop-by-live-name",
+                    "DropUniqueConstraint は実名で DROP CONSTRAINT を生成する",
+                    DialectNames.Oracle
+                )
+                .Live(s =>
+                {
+                    s.Table(
+                        "customer",
+                        ExpectationSchema.Pk("id", "NUMBER(10)"),
+                        ExpectationSchema.NotNull("code", "VARCHAR2(10)")
+                    );
+                    s.Unique("customer", "uq_legacy", "code");
+                })
+                .TargetFromLive(s => s["customer"].UniqueConstraints.Clear())
+                .Select(items =>
+                    RealScenarios.SelectKinds(items, SchemaDiffKind.DropUniqueConstraint)
+                )
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Before.Single("uq customer uq_legacy (code)");
+                        // 合成名（UQ_customer_code）でなく DB の実名で外す（名前を違えると断られる）
+                        e.Script.Contains(
+                            "ALTER TABLE \"customer\" DROP CONSTRAINT \"uq_legacy\";"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Absent("uq *");
+                    })
+                ),
+        ];
 }
 
 /// <summary>Oracle の実 DB の段の図・SQL・選び方の部品</summary>
@@ -893,5 +1433,32 @@ internal static class RealOracleScenarios
                     ? $"\nCOMMENT ON COLUMN \"items\".\"name\" IS '{column.Replace("'", "''")}';"
                     : string.Empty
             );
+    }
+
+    /// <summary>
+    /// shops(id 主キー・code・region) と、名前つき単一列の一意制約 UQ_shops_code (code) と、名前なしの複合の一意制約
+    /// (region, code)（宣言の並びは列の並びと逆）
+    /// </summary>
+    public static void Shops(ExpectationSchema s)
+    {
+        s.Table(
+            "shops",
+            ExpectationSchema.Pk("id", "NUMBER(10)"),
+            ExpectationSchema.NotNull("code", "VARCHAR2(20)"),
+            ExpectationSchema.NotNull("region", "VARCHAR2(10)")
+        );
+        s.Unique("shops", "UQ_shops_code", "code");
+        s.Unique("shops", null, "region", "code");
+    }
+
+    /// <summary>親 customer(id) と、外部キーの無い子 order(id, customer_id NULL 許容)</summary>
+    public static void CustomerOrder(ExpectationSchema s)
+    {
+        s.Table("customer", ExpectationSchema.Pk("id", "NUMBER(10)"));
+        s.Table(
+            "order",
+            ExpectationSchema.Pk("id", "NUMBER(10)"),
+            ExpectationSchema.Nullable("customer_id", "NUMBER(10)")
+        );
     }
 }

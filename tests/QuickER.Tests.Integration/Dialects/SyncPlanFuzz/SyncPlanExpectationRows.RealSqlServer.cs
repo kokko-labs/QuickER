@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using QuickER.Dialects;
@@ -10,7 +11,7 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 internal static partial class SyncPlanExpectationRows
 {
     /// <summary>SQL Server の実 DB の段の行の数の下限（行を足したら・消したら合わせる）</summary>
-    private const int RealSqlServerRowCount = 35;
+    private const int RealSqlServerRowCount = 58;
 
     /// <summary>実 DB の段：SQL Server の同期（外部キー・主キー・列の属性・実行時の制約名の逆引き）</summary>
     private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealSqlServerRows() =>
@@ -20,6 +21,7 @@ internal static partial class SyncPlanExpectationRows
             .. RealSqlServerColumnAttributeRows(),
             .. RealSqlServerConstraintNameRows(),
             .. RealSqlServerCompositeForeignKeyRows(),
+            .. RealSqlServerScriptRows(),
         ];
 
     /// <summary>外部キーの照合・作り直し・型の食い違い・SET DEFAULT / SET NULL</summary>
@@ -88,6 +90,10 @@ internal static partial class SyncPlanExpectationRows
                 .OnRealDatabase(r =>
                     r.Expect(e =>
                     {
+                        e.Script.Contains(
+                            "*ALTER TABLE [sd_child] DROP CONSTRAINT [fk_sd_b];*",
+                            "*ALTER COLUMN [parent_id]*"
+                        );
                         e.Outcome.Exact("committed");
                         e.After.Count("fk *", 1);
                         e.After.Single("fk sd_child fk_sd_a (parent_id) -> sd_parent(id) *");
@@ -292,7 +298,8 @@ internal static partial class SyncPlanExpectationRows
                                 "DropForeignKey: DropForeignKey sd_ref fk=fk_sd_ref"
                             );
                             e.Script.Contains(
-                                "*FOREIGN KEY ([rb], [ra]) REFERENCES [sd_pair] ([b], [a])*"
+                                "*FOREIGN KEY ([rb], [ra]) REFERENCES [sd_pair] ([b], [a])*",
+                                "*ALTER TABLE [sd_pair] ADD CONSTRAINT [PK_sd_pair] PRIMARY KEY ([b], [a]);*"
                             );
                             e.Outcome.Exact("committed");
                             e.After.Single(
@@ -689,6 +696,27 @@ internal static partial class SyncPlanExpectationRows
                     .Probe("columns")
                     .Expect(e =>
                     {
+                        // 型の変わる変更は DEFAULT 制約を読んで外し、同じ名前で付け直す（素の ALTER COLUMN は 5074 で断られる）
+                        e.Script.Contains(
+                            "*FROM sys.default_constraints dc*",
+                            "*WHERE dc.parent_object_id = OBJECT_ID(N'[cd]') AND c.name = N'v';*",
+                            $"*SET @sql = N'ALTER TABLE [cd] ALTER COLUMN [v] {newType}' + ISNULL(N' COLLATE ' + @coll, N'') + N' NOT NULL';*",
+                            "*QUOTENAME(@df) + N' DEFAULT ' + @dfdef + N' FOR [v]';*"
+                        );
+                        e.Script.Absent("ALTER TABLE [cd] ALTER COLUMN *");
+
+                        // 文字列型の列だけ照合順序を読み直す
+                        if (newType.StartsWith("nvarchar", StringComparison.Ordinal))
+                        {
+                            e.Script.Contains(
+                                "*SELECT @coll = c.collation_name FROM sys.columns c*"
+                            );
+                        }
+                        else
+                        {
+                            e.Script.Absent("*SELECT @coll = *");
+                        }
+
                         e.Outcome.Exact("committed");
                         e.Probe("columns")
                             .Single(
@@ -719,7 +747,8 @@ internal static partial class SyncPlanExpectationRows
                     {
                         e.Outcome.Exact("committed");
                         e.Script.Contains(
-                            "*N'ALTER TABLE [dd] DROP CONSTRAINT ' + QUOTENAME(@df)*"
+                            "*N'ALTER TABLE [dd] DROP CONSTRAINT ' + QUOTENAME(@df)*",
+                            "*ALTER TABLE [dd] DROP COLUMN [v];*"
                         );
                         e.Probe("columns").Absent("columns dbo.dd.v *");
                         e.Probe("columns").Single("columns dbo.dd2.v * default=DF_other *");
@@ -747,6 +776,7 @@ internal static partial class SyncPlanExpectationRows
                         .Expect(e =>
                         {
                             e.Diff.Single("AlterPrimaryKey *");
+                            e.Script.Contains("*QUOTENAME(@pk)*");
                             e.Outcome.Exact("committed");
                             e.Probe("keys").Exact("keys dbo.odd_orders kind=PK name=PK_odd_orders");
                         })
@@ -824,6 +854,9 @@ internal static partial class SyncPlanExpectationRows
                         .Expect(e =>
                         {
                             e.Diff.Single("DropForeignKey *");
+                            e.Script.Contains(
+                                "*ALTER TABLE [cfk_child] DROP CONSTRAINT [FK_cfk_child_cfk_parent];*"
+                            );
                             e.Outcome.Exact("committed");
                             e.After.Absent("fk *");
                         })
@@ -856,6 +889,724 @@ internal static partial class SyncPlanExpectationRows
                             e.After.Count("fk *", 1);
                             e.After.Single("fk cfk_child * (a_ref,b_ref) -> cfk_parent(a,b) *");
                         })
+                ),
+        ];
+
+    /// <summary>
+    /// 同期スクリプトの文の形（表・列・外部キー・一意制約・主キー・説明の文）を実 DB で流し、結果と流れた文の形を見る
+    /// </summary>
+    private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealSqlServerScriptRows() =>
+        [
+            .. RealSqlServerScriptTableAndColumnRows(),
+            .. RealSqlServerScriptForeignKeyRows(),
+            .. RealSqlServerScriptDescriptionRows(),
+            .. RealSqlServerScriptKeyRows(),
+        ];
+
+    /// <summary>表・列の追加と列の変更・削除の文</summary>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > RealSqlServerScriptTableAndColumnRows() =>
+        [
+            Row(
+                    "realdb-script-add-table-create",
+                    "AddTable は CREATE TABLE と PK を含む",
+                    DialectNames.SqlServer
+                )
+                .Live(_ => { })
+                .TargetFromLive(s =>
+                    s.Table(
+                        "Customer",
+                        ExpectationSchema.Pk("Id", "int"),
+                        ExpectationSchema.Nullable("Name", "nvarchar(50)")
+                    )
+                )
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddTable))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "*CREATE TABLE [Customer]*",
+                            "*[Id] int NOT NULL*",
+                            "*PRIMARY KEY ([Id])*"
+                        );
+                        e.Script.Absent("*UNIQUE*");
+                        e.Outcome.Exact("committed");
+                        e.After.Single(
+                            "table Customer",
+                            "col Customer.Id int notnull pk",
+                            "col Customer.Name nvarchar(50) null",
+                            "pk Customer (Id)"
+                        );
+                        e.After.Absent("uq *");
+                    })
+                ),
+            Row(
+                    "realdb-script-add-table-unique-constraints-sync",
+                    "AddTable の UNIQUE 句は DDL 生成と同形",
+                    DialectNames.SqlServer
+                )
+                .Live(_ => { })
+                .TargetFromLive(Shops)
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddTable))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "*CONSTRAINT [PK_shops] PRIMARY KEY ([id]),*",
+                            "*CONSTRAINT [UQ_shops_code] UNIQUE ([code]),*",
+                            "*CONSTRAINT [UQ_shops_region_code] UNIQUE ([region], [code])"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Count("uq *", 2);
+                        e.After.Single(
+                            "uq shops UQ_shops_code (code)",
+                            "uq shops UQ_shops_region_code (region,code)"
+                        );
+                    })
+                ),
+            Row(
+                    "realdb-script-add-table-unique-constraints-ddl",
+                    "AddTable の UNIQUE 句は DDL 生成と同形",
+                    DialectNames.SqlServer
+                )
+                .Live(Shops)
+                .Target(Shops)
+                .Select(items => RealScenarios.SelectKinds(items))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Before.Count("uq *", 2);
+                        e.Before.Single(
+                            "uq shops UQ_shops_code (code)",
+                            "uq shops UQ_shops_region_code (region,code)"
+                        );
+                        e.Diff.Empty();
+                        e.Outcome.Exact("committed");
+                    })
+                ),
+            Row(
+                    "realdb-script-add-column-not-null",
+                    "AddColumn は ALTER TABLE ADD を生成する",
+                    DialectNames.SqlServer
+                )
+                .Live(s => s.Table("Customer", ExpectationSchema.Pk("Id", "int")))
+                .TargetFromLive(s =>
+                    s["Customer"].Columns.Add(ExpectationSchema.NotNull("Email", "nvarchar(200)"))
+                )
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddColumn))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "*ALTER TABLE [Customer] ADD [Email] nvarchar(200) NOT NULL;*"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Single("col Customer.Email nvarchar(200) notnull");
+                    })
+                ),
+            Row(
+                    "realdb-script-unselected-add-column-not-emitted",
+                    "選択されていない項目はスクリプトに含まれない",
+                    DialectNames.SqlServer
+                )
+                .Live(s => s.Table("Customer", ExpectationSchema.Pk("Id", "int")))
+                .TargetFromLive(s =>
+                    s["Customer"].Columns.Add(ExpectationSchema.Nullable("Email", "nvarchar(200)"))
+                )
+                .Select(items => RealScenarios.SelectKinds(items))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Diff.Single("AddColumn Customer.Email *");
+                        e.Script.Absent("*Email*");
+                        e.Outcome.Exact("committed");
+                        e.After.Absent("col Customer.Email *");
+                    })
+                ),
+            AlterNullabilityOnlyRow(
+                "int-keeps-default",
+                "[code] int NOT NULL CONSTRAINT [DF_ra_code] DEFAULT ((1))",
+                "int",
+                "type=int * nullable=True * default=DF_ra_code definition=((1))"
+            ),
+            AlterNullabilityOnlyRow(
+                "string-keeps-collation-and-default",
+                "[code] nvarchar(10) COLLATE Japanese_CI_AS NOT NULL CONSTRAINT [DF_ra_code] DEFAULT (N'x')",
+                "nvarchar(10)",
+                "type=nvarchar len=10 nullable=True collation=Japanese_CI_AS default=DF_ra_code definition=(N'x')"
+            ),
+            Row(
+                    "realdb-script-drop-column-default-with-quoted-names",
+                    "DropColumn は列の DEFAULT 制約を同じ表に絞って読み、列を消す前に外す",
+                    DialectNames.SqlServer
+                )
+                .TargetFromLive(s => s["Cu]st'omer"].Columns.RemoveAll(c => c.Name == "O'ld"))
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.DropColumn))
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE [Cu]]st'omer] ([id] int NOT NULL PRIMARY KEY, "
+                                + "[O'ld] int NOT NULL CONSTRAINT [DF_cust_old] DEFAULT ((1)));"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Script.Contains(
+                                "*FROM sys.default_constraints dc*",
+                                "*WHERE dc.parent_object_id = OBJECT_ID(N'[Cu]]st''omer]') AND c.name = N'O''ld';*",
+                                "*SET @sql = N'ALTER TABLE [Cu]]st''omer] DROP CONSTRAINT ' + QUOTENAME(@df);*",
+                                "*ALTER TABLE [Cu]]st'omer] DROP COLUMN [O'ld];*"
+                            );
+                            e.Script.Absent("*ADD CONSTRAINT*");
+                            e.Outcome.Exact("committed");
+                            e.After.Single("col Cu]st'omer.id *");
+                            e.After.Absent("col Cu]st'omer.O'ld *");
+                        })
+                ),
+        ];
+
+    /// <summary>
+    /// shops(id 主キー・code・region) と、名前つき単一列の一意制約 UQ_shops_code (code) と、名前なしの複合の一意制約
+    /// (region, code)（宣言の並びは列の並びと逆）
+    /// </summary>
+    private static void Shops(ExpectationSchema s)
+    {
+        s.Table(
+            "shops",
+            ExpectationSchema.Pk("id", "int"),
+            ExpectationSchema.NotNull("code", "nvarchar(20)"),
+            ExpectationSchema.NotNull("region", "nvarchar(10)")
+        );
+        s.Unique("shops", "UQ_shops_code", "code");
+        s.Unique("shops", null, "region", "code");
+    }
+
+    /// <summary>
+    /// DEFAULT 制約のある列の NULL 許容だけの変更（型は変わらない＝DEFAULT 制約に触れない。文字列型なら照合順序を保つ）
+    /// </summary>
+    private static ExpectationRow AlterNullabilityOnlyRow(
+        string shape,
+        string columnDefinition,
+        string type,
+        string probe
+    ) =>
+        Row(
+                $"realdb-column-alter-nullability-only-{shape}",
+                "AlterColumn は、照合順序も DEFAULT 制約も関わらない変更を素の ALTER COLUMN で書く",
+                DialectNames.SqlServer
+            )
+            .TargetFromLive(s => s.Col("ra", "code").IsNullable = true)
+            .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterColumn))
+            .OnRealDatabase(r =>
+                r.LiveSql($"CREATE TABLE [ra] ([id] int NOT NULL PRIMARY KEY, {columnDefinition});")
+                    .Probe("columns", "defaults")
+                    .Expect(e =>
+                    {
+                        // 型が変わらないので DEFAULT 制約を読まない（外して付け直すと object_id が変わる）
+                        e.Script.Absent("*sys.default_constraints*");
+
+                        if (type.StartsWith("nvarchar", StringComparison.Ordinal))
+                        {
+                            // 文字列型は照合順序を読み直して書き添える（素の ALTER COLUMN は DB の既定へ戻す）
+                            e.Script.Contains(
+                                "*SELECT @coll = c.collation_name FROM sys.columns c*",
+                                $"*SET @sql = N'ALTER TABLE [ra] ALTER COLUMN [code] {type}' + ISNULL(N' COLLATE ' + @coll, N'') + N' NULL';*"
+                            );
+                            e.Script.Absent("ALTER TABLE [ra] ALTER COLUMN *");
+                        }
+                        else
+                        {
+                            e.Script.Contains($"ALTER TABLE [ra] ALTER COLUMN [code] {type} NULL;");
+                        }
+
+                        e.Outcome.Exact("committed");
+                        e.Probe("columns").Single($"columns dbo.ra.code {probe}");
+                        e.ProbeUnchanged("defaults");
+                        e.Probe("defaults").Single("defaults dbo.ra.code name=DF_ra_code *");
+                    })
+            );
+
+    /// <summary>外部キーの追加と、表・列の追加と外部キーの並び</summary>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > RealSqlServerScriptForeignKeyRows() =>
+        [
+            Row(
+                    "realdb-script-add-fk-unnamed-uses-default-name",
+                    "AddForeignKey は ALTER ADD CONSTRAINT FOREIGN KEY を生成する",
+                    DialectNames.SqlServer
+                )
+                .Live(s =>
+                {
+                    s.Table("Customer", ExpectationSchema.Pk("Id", "int"));
+                    s.Table(
+                        "Order",
+                        ExpectationSchema.Pk("Id", "int"),
+                        ExpectationSchema.Nullable("Customer_Id", "int"),
+                        ExpectationSchema.Nullable("CustomerRef", "int")
+                    );
+                })
+                .TargetFromLive(s => s.Fk("Customer", "Order", null, ("Id", "CustomerRef")))
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddForeignKey))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "*ALTER TABLE [Order] ADD CONSTRAINT [FK_Order_Customer]*",
+                            "*FOREIGN KEY ([CustomerRef]) REFERENCES [Customer] ([Id])*"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Count("fk *", 1);
+                        e.After.Single(
+                            "fk Order FK_Order_Customer (CustomerRef) -> Customer(Id) *"
+                        );
+                    })
+                ),
+            Row(
+                    "realdb-script-add-fk-named-with-referential-actions",
+                    "AddForeignKey は制約名と参照アクションを生成する",
+                    DialectNames.SqlServer
+                )
+                .Live(s =>
+                {
+                    s.Table("Customer", ExpectationSchema.Pk("Id", "int"));
+                    s.Table(
+                        "Order",
+                        ExpectationSchema.Pk("Id", "int"),
+                        ExpectationSchema.Nullable("CustomerId", "int")
+                    );
+                })
+                .TargetFromLive(s =>
+                    s.Fk(
+                        "Customer",
+                        "Order",
+                        "FK_Order_Customer_Custom",
+                        ForeignKeyReferentialAction.Cascade,
+                        ForeignKeyReferentialAction.SetDefault,
+                        ("Id", "CustomerId")
+                    )
+                )
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddForeignKey))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "*CONSTRAINT [FK_Order_Customer_Custom]*",
+                            "*ON DELETE CASCADE*",
+                            "*ON UPDATE SET DEFAULT*"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Single(
+                            "fk Order FK_Order_Customer_Custom (CustomerId) -> Customer(Id) del=Cascade upd=SetDefault"
+                        );
+                    })
+                ),
+            Row(
+                    "realdb-script-add-table-and-column-before-fk",
+                    "実行順序: AddTable → AddColumn → AddForeignKey",
+                    DialectNames.SqlServer
+                )
+                .Live(s => s.Table("Order", ExpectationSchema.Pk("Id", "int")))
+                .TargetFromLive(s =>
+                {
+                    s.Table("Customer", ExpectationSchema.Pk("Id", "int"));
+                    s["Order"].Columns.Add(ExpectationSchema.Nullable("Customer_Id", "int"));
+                    s.Fk("Customer", "Order", null, ("Id", "Customer_Id"));
+                })
+                .Select(items =>
+                    RealScenarios.SelectKinds(
+                        items,
+                        SchemaDiffKind.AddTable,
+                        SchemaDiffKind.AddColumn,
+                        SchemaDiffKind.AddForeignKey
+                    )
+                )
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "*CREATE TABLE [Customer]*",
+                            "*ALTER TABLE [Order] ADD [Customer_Id] int NULL;*",
+                            "*ALTER TABLE [Order] ADD CONSTRAINT [FK_Order_Customer] FOREIGN KEY ([Customer_Id])*"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Single(
+                            "table Customer",
+                            "col Order.Customer_Id int null",
+                            "fk Order FK_Order_Customer (Customer_Id) -> Customer(Id) *"
+                        );
+                    })
+                ),
+        ];
+
+    /// <summary>説明（MS_Description）の追加・更新・削除と、修飾の有無で変わるスキーマの指し方</summary>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > RealSqlServerScriptDescriptionRows() =>
+        [
+            Row(
+                    "realdb-script-table-description-added",
+                    "SetTableDescription は sp_addextendedproperty / sp_updateextendedproperty を出力する",
+                    DialectNames.SqlServer
+                )
+                .Live(s => s.Table("Customer", ExpectationSchema.Pk("Id", "int")))
+                .TargetFromLive(s => s["Customer"].Description = "顧客マスタ")
+                .Select(items =>
+                    RealScenarios.SelectKinds(items, SchemaDiffKind.SetTableDescription)
+                )
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "*sp_addextendedproperty*",
+                            "*sp_updateextendedproperty*",
+                            "*MS_Description*",
+                            "*@level1type=N'TABLE'*",
+                            "*@level1name=N'Customer'*",
+                            "*N'顧客マスタ'*"
+                        );
+                        e.Script.Absent("*@level2type*");
+                        e.Outcome.Exact("committed");
+                        e.After.Single("desc Customer \"顧客マスタ\"");
+                    })
+                ),
+            Row(
+                    "realdb-script-column-description-updated",
+                    "SetColumnDescription は @level2type=COLUMN を含む",
+                    DialectNames.SqlServer
+                )
+                .Live(s =>
+                    s.Table(
+                            "Customer",
+                            ExpectationSchema.Pk("Id", "int"),
+                            ExpectationSchema.Nullable("Name", "nvarchar(50)")
+                        )
+                        .Columns[1]
+                        .Description = "旧"
+                )
+                .TargetFromLive(s => s.Col("Customer", "Name").Description = "顧客名")
+                .Select(items =>
+                    RealScenarios.SelectKinds(items, SchemaDiffKind.SetColumnDescription)
+                )
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Before.Single("desc Customer.Name \"旧\"");
+                        e.Script.Contains(
+                            "*@level2type=N'COLUMN'*",
+                            "*@level2name=N'Name'*",
+                            "*N'顧客名'*"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Single("desc Customer.Name \"顧客名\"");
+                        e.After.Absent("desc Customer.Name \"旧\"");
+                    })
+                ),
+            Row(
+                    "realdb-script-empty-table-description-dropped",
+                    "新値が空ならば sp_dropextendedproperty が出力される",
+                    DialectNames.SqlServer
+                )
+                .Live(s =>
+                    s.Table("Customer", ExpectationSchema.Pk("Id", "int")).Description = "古い"
+                )
+                .TargetFromLive(s => s["Customer"].Description = "")
+                .Select(items =>
+                    RealScenarios.SelectKinds(items, SchemaDiffKind.SetTableDescription)
+                )
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Before.Single("desc Customer \"古い\"");
+                        e.Script.Contains("*sp_dropextendedproperty*");
+                        e.Script.Absent("*sp_addextendedproperty*");
+                        e.Outcome.Exact("committed");
+                        e.After.Absent("desc *");
+                    })
+                ),
+            Row(
+                    "realdb-script-description-unqualified-and-qualified-tables",
+                    "修飾の無い表の説明は既定スキーマ（SCHEMA_NAME()）を指し、修飾つきはスキーマ名を書く",
+                    DialectNames.SqlServer
+                )
+                .Live(s =>
+                {
+                    s.Table(
+                        "Customer",
+                        ExpectationSchema.Pk("Id", "int"),
+                        ExpectationSchema.Nullable("Name", "nvarchar(50)")
+                    );
+                    s.Table("sales.Order", ExpectationSchema.Pk("Id", "int"));
+                })
+                .TargetFromLive(s =>
+                {
+                    s.Col("Customer", "Name").Description = "顧客名";
+                    s["sales.Order"].Description = "注文";
+                })
+                .Select(items =>
+                    RealScenarios.SelectKinds(
+                        items,
+                        SchemaDiffKind.SetColumnDescription,
+                        SchemaDiffKind.SetTableDescription
+                    )
+                )
+                .OnRealDatabase(r =>
+                    r.Prepare("IF SCHEMA_ID(N'sales') IS NULL EXEC(N'CREATE SCHEMA [sales]');")
+                        .Probe("descriptions")
+                        .Expect(e =>
+                        {
+                            e.Script.Contains(
+                                "DECLARE @default_schema sysname = SCHEMA_NAME();",
+                                "*@level0name=@default_schema*",
+                                "*OBJECT_ID(N'[Customer]')*",
+                                "*@level0name=N'sales'*",
+                                "*OBJECT_ID(N'sales.Order')*"
+                            );
+                            e.Script.Count("DECLARE @default_schema *", 1);
+                            e.Outcome.Exact("committed");
+                            e.Probe("descriptions")
+                                .Exact(
+                                    "descriptions dbo.Customer.Name value=顧客名",
+                                    "descriptions sales.Order value=注文"
+                                );
+                            e.After.Single(
+                                "desc Customer.Name \"顧客名\"",
+                                "desc sales.Order \"注文\""
+                            );
+                        })
+                ),
+        ];
+
+    /// <summary>主キーの付け替え・付与・解除と一意制約の追加・削除の文</summary>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > RealSqlServerScriptKeyRows() =>
+        [
+            Row(
+                    "realdb-script-pk-single-to-composite",
+                    "AlterPrimaryKey は旧 PK の動的 DROP と複合 PK の ADD を生成する",
+                    DialectNames.SqlServer
+                )
+                .TargetFromLive(s =>
+                {
+                    s.Col("Order", "LineNo").IsPrimaryKey = true;
+                    s.PrimaryKeyOrder("Order", "OrderId", "LineNo");
+                })
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterPrimaryKey))
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE [Order] ([OrderId] int NOT NULL, [LineNo] int NOT NULL, "
+                                + "[Memo] nvarchar(50) NULL, CONSTRAINT [PK_Order_Old] PRIMARY KEY ([OrderId]));"
+                        )
+                        .Probe("keys")
+                        .Expect(e =>
+                        {
+                            e.Script.Contains(
+                                "DECLARE @pk sysname;",
+                                "*FROM sys.key_constraints kc*",
+                                "*WHERE kc.type = 'PK' AND kc.parent_object_id = OBJECT_ID(N'[Order]');*",
+                                "*DECLARE @sql nvarchar(max) = N'ALTER TABLE [Order] DROP CONSTRAINT ' + QUOTENAME(@pk);*",
+                                "*IF @pk IS NOT NULL EXEC sys.sp_executesql @sql;*",
+                                "*ALTER TABLE [Order] ADD CONSTRAINT [PK_Order] PRIMARY KEY ([OrderId], [LineNo]);*"
+                            );
+                            e.Outcome.Exact("committed");
+                            e.After.Single("pk Order (OrderId,LineNo)");
+                            e.Probe("keys").Exact("keys dbo.Order kind=PK name=PK_Order");
+                        })
+                ),
+            Row(
+                    "realdb-script-pk-add-only-guarded-drop",
+                    "AlterPrimaryKey は PK 付与のみでも DROP を no-op 形で出す",
+                    DialectNames.SqlServer
+                )
+                .TargetFromLive(s => s.Col("Customer", "Id").IsPrimaryKey = true)
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterPrimaryKey))
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE [Customer] ([Id] int NOT NULL, [Memo] nvarchar(50) NULL);"
+                        )
+                        .Probe("keys")
+                        .Expect(e =>
+                        {
+                            e.Before.Absent("pk *");
+                            e.Script.Contains(
+                                "*IF @pk IS NOT NULL EXEC sys.sp_executesql @sql;*",
+                                "*ALTER TABLE [Customer] ADD CONSTRAINT [PK_Customer] PRIMARY KEY ([Id]);*"
+                            );
+                            e.Outcome.Exact("committed");
+                            e.After.Single("pk Customer (Id)");
+                            e.Probe("keys").Exact("keys dbo.Customer kind=PK name=PK_Customer");
+                        })
+                ),
+            Row(
+                    "realdb-script-pk-drop-only-omits-add",
+                    "AlterPrimaryKey は PK 解除のみなら ADD を出さない",
+                    DialectNames.SqlServer
+                )
+                .TargetFromLive(s => s.Col("Customer", "Id").IsPrimaryKey = false)
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterPrimaryKey))
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE [Customer] ([Id] int NOT NULL, [Memo] nvarchar(50) NULL, "
+                                + "CONSTRAINT [PK_Customer] PRIMARY KEY ([Id]));"
+                        )
+                        .Probe("keys")
+                        .Expect(e =>
+                        {
+                            e.Script.Contains("*IF @pk IS NOT NULL EXEC sys.sp_executesql @sql;*");
+                            e.Script.Absent("*ADD CONSTRAINT*", "*PRIMARY KEY (*");
+                            e.Outcome.Exact("committed");
+                            e.After.Absent("pk *");
+                            e.Probe("keys").Empty();
+                        })
+                ),
+            Row(
+                    "realdb-script-pk-change-splits-around-alter-column",
+                    "AlterPrimaryKey は AlterColumn を挟んで DROP → ALTER → ADD の順に出る",
+                    DialectNames.SqlServer
+                )
+                .TargetFromLive(s =>
+                {
+                    var oldId = s.Col("Order", "OldId");
+                    oldId.IsPrimaryKey = false;
+                    oldId.IsNullable = true;
+                    s.Col("Order", "OrderId").IsPrimaryKey = true;
+                    s["Order"].PrimaryKeyColumnIds.Clear();
+                })
+                .Select(items =>
+                    RealScenarios.SelectKinds(
+                        items,
+                        SchemaDiffKind.AlterPrimaryKey,
+                        SchemaDiffKind.AlterColumn
+                    )
+                )
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE [Order] ([OldId] int NOT NULL, [OrderId] int NOT NULL, "
+                                + "[Memo] nvarchar(50) NULL, CONSTRAINT [PK_Order_Old] PRIMARY KEY ([OldId]));"
+                        )
+                        .Expect(e =>
+                        {
+                            // 主キーが残ったままの ALTER COLUMN（NULL 許容化）は断られる＝コミットが並びを示す
+                            e.Script.Contains(
+                                "DECLARE @pk sysname;",
+                                "ALTER TABLE [Order] ALTER COLUMN [OldId] int NULL;",
+                                "*ALTER TABLE [Order] ADD CONSTRAINT [PK_Order] PRIMARY KEY ([OrderId]);*"
+                            );
+                            e.Outcome.Exact("committed");
+                            e.After.Single("pk Order (OrderId)", "col Order.OldId int null");
+                        })
+                ),
+            Row(
+                    "realdb-script-pk-change-table-name-with-quote",
+                    "AlterPrimaryKey の動的 SQL はテーブル名の ' を二重化する",
+                    DialectNames.SqlServer
+                )
+                .TargetFromLive(s => RealScenarios.MovePrimaryKeyToCode(s, "o'rders"))
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterPrimaryKey))
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE [o'rders] ([id] int NOT NULL, [code] int NOT NULL, "
+                                + "CONSTRAINT [PK_o_old] PRIMARY KEY ([id]));"
+                        )
+                        .Probe("keys")
+                        .Expect(e =>
+                        {
+                            e.Script.Contains(
+                                "*DECLARE @sql nvarchar(max) = N'ALTER TABLE [o''rders] DROP CONSTRAINT ' + QUOTENAME(@pk);*",
+                                "*OBJECT_ID(N'[o''rders]')*"
+                            );
+                            e.Script.Absent(
+                                "*N'ALTER TABLE [o'rders]*",
+                                "*OBJECT_ID(N'[o'rders]')*"
+                            );
+                            e.Outcome.Exact("committed");
+                            e.After.Single("pk o'rders (code)");
+                            e.Probe("keys").Exact("keys dbo.o'rders kind=PK name=PK_o'rders");
+                        })
+                ),
+            Row(
+                    "realdb-script-pk-change-qualified-table-scoped-by-object-id",
+                    "AlterPrimaryKey の逆引きは OBJECT_ID でスキーマ込みの 1 テーブルに絞る",
+                    DialectNames.SqlServer
+                )
+                .TargetFromLive(s => RealScenarios.MovePrimaryKeyToCode(s, "sales.Orders"))
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterPrimaryKey))
+                .OnRealDatabase(r =>
+                    r.Prepare("IF SCHEMA_ID(N'sales') IS NULL EXEC(N'CREATE SCHEMA [sales]');")
+                        .LiveSql(
+                            "CREATE TABLE [dbo].[Orders] ([id] int NOT NULL, [code] int NOT NULL, "
+                                + "CONSTRAINT [PK_dbo_Orders] PRIMARY KEY ([id]));"
+                                + "CREATE TABLE [sales].[Orders] ([id] int NOT NULL, [code] int NOT NULL, "
+                                + "CONSTRAINT [PK_sales_Orders_Old] PRIMARY KEY ([id]));"
+                        )
+                        .Probe("keys")
+                        .Expect(e =>
+                        {
+                            e.Diff.Single("AlterPrimaryKey *");
+                            e.Script.Contains(
+                                "*WHERE kc.type = 'PK' AND kc.parent_object_id = OBJECT_ID(N'[sales].[Orders]');*"
+                            );
+                            e.Outcome.Exact("committed");
+                            e.Probe("keys")
+                                .Exact(
+                                    "keys dbo.Orders kind=PK name=PK_dbo_Orders",
+                                    "keys sales.Orders kind=PK name=PK_sales_Orders"
+                                );
+                        })
+                ),
+            Row(
+                    "realdb-script-unique-add-synthesized-name",
+                    "AddUniqueConstraint は ADD CONSTRAINT UNIQUE を生成する",
+                    DialectNames.SqlServer
+                )
+                .Live(s =>
+                    s.Table(
+                        "Customer",
+                        ExpectationSchema.Pk("Id", "int"),
+                        ExpectationSchema.NotNull("Code", "nvarchar(10)"),
+                        ExpectationSchema.NotNull("Kind", "nvarchar(10)")
+                    )
+                )
+                .TargetFromLive(s => s.Unique("Customer", null, "Code", "Kind"))
+                .Select(items =>
+                    RealScenarios.SelectKinds(items, SchemaDiffKind.AddUniqueConstraint)
+                )
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "*ALTER TABLE [Customer] ADD CONSTRAINT [UQ_Customer_Code_Kind] UNIQUE ([Code], [Kind]);*"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Single("uq Customer UQ_Customer_Code_Kind (Code,Kind)");
+                    })
+                ),
+            Row(
+                    "realdb-script-unique-drop-by-live-name",
+                    "DropUniqueConstraint は実名で DROP CONSTRAINT を生成する",
+                    DialectNames.SqlServer
+                )
+                .Live(s =>
+                {
+                    s.Table(
+                        "Customer",
+                        ExpectationSchema.Pk("Id", "int"),
+                        ExpectationSchema.NotNull("Code", "nvarchar(10)")
+                    );
+                    s.Unique("Customer", "UQ_Legacy", "Code");
+                })
+                .TargetFromLive(s => s["Customer"].UniqueConstraints.Clear())
+                .Select(items =>
+                    RealScenarios.SelectKinds(items, SchemaDiffKind.DropUniqueConstraint)
+                )
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Before.Single("uq Customer UQ_Legacy (Code)");
+                        e.Script.Contains("*ALTER TABLE [Customer] DROP CONSTRAINT [UQ_Legacy];*");
+                        e.Outcome.Exact("committed");
+                        e.After.Absent("uq *");
+                    })
                 ),
         ];
 }
