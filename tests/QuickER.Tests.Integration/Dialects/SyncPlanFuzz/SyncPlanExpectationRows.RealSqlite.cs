@@ -12,11 +12,16 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 internal static partial class SyncPlanExpectationRows
 {
     /// <summary>SQLite の実 DB の段の行の数の下限（行を足したら・消したら合わせる）</summary>
-    private const int RealSqliteRowCount = 33;
+    private const int RealSqliteRowCount = 39;
 
     /// <summary>実 DB の段：SQLite の同期（テーブル再構築・外部キー・主キー・一意制約・ビュー）</summary>
     private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealSqliteRows() =>
-        [.. RealSqliteRebuildRows(), .. RealSqliteKeyRows(), .. RealSqliteViewRows()];
+        [
+            .. RealSqliteRebuildRows(),
+            .. RealSqliteKeyRows(),
+            .. RealSqliteViewRows(),
+            .. RealSqliteScriptRows(),
+        ];
 
     /// <summary>再構築で温存するもの・失うもの（行・補助オブジェクト・外部キー・列順・属性）</summary>
     private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealSqliteRebuildRows() =>
@@ -57,6 +62,18 @@ internal static partial class SyncPlanExpectationRows
                         )
                         .Expect(e =>
                         {
+                            e.Script.Contains(
+                                "-- ===== RebuildTable: product =====",
+                                "CREATE TABLE \"product_quicker_rebuild\" (",
+                                "*FOREIGN KEY (\"category_id\")*",
+                                "*REFERENCES \"category\" (\"id\") ON DELETE CASCADE*",
+                                "*CONSTRAINT \"UQ_product_sku\" UNIQUE (\"sku\")*",
+                                "INSERT INTO \"product_quicker_rebuild\" (\"id\", \"category_id\", \"sku\", \"note\") "
+                                    + "SELECT \"id\", \"category_id\", \"sku\", \"note\" FROM \"product\";",
+                                "DROP TABLE \"product\";",
+                                "ALTER TABLE \"product_quicker_rebuild\" RENAME TO \"product\";",
+                                "CREATE INDEX \"idx_product_note\" ON \"product\" (\"note\");"
+                            );
                             e.Outcome.Exact("committed");
                             e.After.Absent("col product.legacy_col *");
                             e.After.Single("col product.note VARCHAR(200) *");
@@ -220,6 +237,10 @@ internal static partial class SyncPlanExpectationRows
                         .Query("rows", "SELECT \"id\", \"a\", \"b\", \"new_col\" FROM \"item\";")
                         .Expect(e =>
                         {
+                            e.Script.Contains(
+                                "-- ===== RebuildTable: item =====",
+                                "CREATE TABLE \"item_quicker_rebuild\" ("
+                            );
                             e.Outcome.Exact("committed");
                             e.After.Exact(
                                 "table item",
@@ -928,6 +949,200 @@ internal static partial class SyncPlanExpectationRows
                         })
                 ),
         ];
+
+    /// <summary>同期スクリプトの文の形（新しい表・写す列の無い再構築・逐次の文・型の引用・主キーの順序）</summary>
+    private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealSqliteScriptRows() =>
+        [
+            Row(
+                    "realdb-sqlite-script-create-only-inline-fk",
+                    "CreateOnly は FK 句インラインの CREATE のみ",
+                    DialectNames.Sqlite
+                )
+                .Live(s => s.Table("orders", ExpectationSchema.Pk("id", "int")))
+                .TargetFromLive(s =>
+                {
+                    s.Table(
+                        "invoice",
+                        ExpectationSchema.Pk("id", "int"),
+                        ExpectationSchema.Nullable("orders_id", "int")
+                    );
+                    s.Fk("orders", "invoice", "FK_invoice_orders", ("id", "orders_id"));
+                })
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Rebuilds.Single("invoice create-only");
+                        e.Rebuilds.Absent("* rebuild");
+                        e.Script.Contains(
+                            "CREATE TABLE \"invoice\" (",
+                            "*FOREIGN KEY (\"orders_id\")*",
+                            "*REFERENCES \"orders\" (\"id\")*"
+                        );
+                        e.Script.Absent("*INSERT INTO*", "*_quicker_rebuild*");
+                        e.Outcome.Exact("committed");
+                        e.After.Count("table *", 2);
+                        e.After.Single(
+                            "fk invoice * (orders_id) -> orders(id) del=NoAction upd=NoAction"
+                        );
+                    })
+                ),
+            RebuildWithoutCopyColumnsRow(nullable: true),
+            RebuildWithoutCopyColumnsRow(nullable: false),
+            Row(
+                    "realdb-sqlite-script-add-column-and-drop-table-sections",
+                    "AddColumn / DropTable は逐次セクションになる",
+                    DialectNames.Sqlite
+                )
+                .Live(s =>
+                {
+                    s.Table("customer", ExpectationSchema.Pk("id", "int"));
+                    s.Table("legacy", ExpectationSchema.Pk("id", "int"));
+                })
+                .TargetFromLive(s =>
+                {
+                    s["customer"].Columns.Add(ExpectationSchema.Nullable("email", "text"));
+                    s.Entities.RemoveAll(e => e.TableName == "legacy");
+                })
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Rebuilds.Empty();
+                        e.Script.Contains(
+                            "ALTER TABLE \"customer\" ADD COLUMN \"email\" text NULL;",
+                            "DROP TABLE \"legacy\";"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Single("col customer.email TEXT null");
+                        e.After.Absent("table legacy");
+                    })
+                ),
+            Row(
+                    "realdb-sqlite-script-rebuild-quotes-non-numeric-type-argument",
+                    "NVARCHAR(MAX) 等の宣言型はクォートされる",
+                    DialectNames.Sqlite
+                )
+                .Live(s =>
+                    s.Table(
+                        "orders",
+                        ExpectationSchema.Pk("id", "int"),
+                        ExpectationSchema.Nullable("payload", "TEXT")
+                    )
+                )
+                .TargetFromLive(s => s.Col("orders", "payload").DataType = "NVARCHAR(MAX)")
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.Setup("INSERT INTO \"orders\" (\"id\", \"payload\") VALUES (1, 'p');")
+                        .Query("rows", "SELECT \"id\", \"payload\" FROM \"orders\";")
+                        .Expect(e =>
+                        {
+                            e.Script.Contains(
+                                "-- ===== RebuildTable: orders =====",
+                                "*\"payload\" \"NVARCHAR(MAX)\"*"
+                            );
+                            e.Outcome.Exact("committed");
+                            e.After.Single("col orders.payload NVARCHAR(MAX) null");
+                            e.Probe("rows").Exact("1 payload=p");
+                        })
+                ),
+            Row(
+                    "realdb-sqlite-script-create-only-pk-follows-primary-key-order",
+                    "再構築の PRIMARY KEY 句は PrimaryKeyColumnIds の順で出力される",
+                    DialectNames.Sqlite
+                )
+                .Live(_ => { })
+                .TargetFromLive(s =>
+                {
+                    s.Table(
+                        "pair",
+                        ExpectationSchema.Pk("a", "int"),
+                        ExpectationSchema.Pk("b", "int")
+                    );
+                    s.PrimaryKeyOrder("pair", "b", "a");
+                })
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddTable))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Rebuilds.Single("pair create-only");
+                        e.Script.Contains("*PRIMARY KEY (\"b\", \"a\")*");
+                        e.Outcome.Exact("committed");
+                        e.After.Single("pk pair (b,a)");
+                    })
+                ),
+        ];
+
+    /// <summary>元の列をすべて消して新しい列を足す再構築（新しい最初の列が NULL 許容か）</summary>
+    private static ScenarioRow<SyncPlanExpectationInput> RebuildWithoutCopyColumnsRow(
+        bool nullable
+    ) =>
+        Row(
+                "realdb-sqlite-script-rebuild-without-copy-columns-"
+                    + (nullable ? "keeps-rows-with-nulls" : "not-null-first-column-fails"),
+                "写す列が無い再構築も、最初の列へ NULL を入れて行を写す",
+                DialectNames.Sqlite
+            )
+            .Live(s =>
+                s.Table(
+                    "t",
+                    ExpectationSchema.Nullable("old_a", "TEXT"),
+                    ExpectationSchema.Nullable("old_b", "INTEGER")
+                )
+            )
+            .TargetFromLive(s =>
+            {
+                var t = s["t"];
+                t.Columns.Clear();
+                t.Columns.Add(
+                    nullable
+                        ? ExpectationSchema.Nullable("added_a", "varchar(30)")
+                        : ExpectationSchema.NotNull("added_a", "varchar(30)")
+                );
+                t.Columns.Add(ExpectationSchema.Nullable("added_b", "int"));
+            })
+            .Select(RealScenarios.SelectAll)
+            .OnRealDatabase(r =>
+            {
+                r.Setup(
+                    "INSERT INTO \"t\" (\"old_a\", \"old_b\") VALUES ('x', 1);"
+                        + "INSERT INTO \"t\" (\"old_a\", \"old_b\") VALUES ('y', 2);"
+                );
+
+                if (nullable)
+                {
+                    r.Query("rows", "SELECT \"added_a\", \"added_b\" FROM \"t\";");
+                }
+                else
+                {
+                    r.ExpectsUnwarnedFailure(
+                        "データの都合：行のある表で、写す列の無い再構築が NOT NULL の新しい最初の列へ NULL を入れると SQLite が断る"
+                    );
+                }
+
+                r.Expect(e =>
+                {
+                    e.Script.Contains(
+                        "INSERT INTO \"t_quicker_rebuild\" (\"added_a\") SELECT NULL FROM \"t\";"
+                    );
+
+                    if (nullable)
+                    {
+                        e.Outcome.Exact("committed");
+                        e.After.Exact(
+                            "table t",
+                            "col t.added_a varchar(30) null",
+                            "col t.added_b INT null"
+                        );
+                        e.Probe("rows").Exact("- added_b=-", "- added_b=-");
+                    }
+                    else
+                    {
+                        e.Outcome.Exact("failed: *NOT NULL*");
+                        e.Unchanged();
+                    }
+                });
+            });
 }
 
 /// <summary>SQLite の実 DB の段の図・SQL・選び方の部品</summary>

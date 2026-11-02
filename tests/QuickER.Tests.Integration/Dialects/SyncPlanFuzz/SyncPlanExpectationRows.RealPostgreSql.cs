@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -12,7 +13,7 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 internal static partial class SyncPlanExpectationRows
 {
     /// <summary>PostgreSQL の実 DB の段の行の数の下限（行を足したら・消したら合わせる）</summary>
-    private const int RealPostgreSqlRowCount = 24;
+    private const int RealPostgreSqlRowCount = 46;
 
     /// <summary>実 DB の段：PostgreSQL の同期</summary>
     private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealPostgreSqlRows() =>
@@ -21,6 +22,7 @@ internal static partial class SyncPlanExpectationRows
             .. RealPostgreSqlKeyRows(),
             .. RealPostgreSqlColumnRows(),
             .. RealPostgreSqlDescriptionRows(),
+            .. RealPostgreSqlScriptRows(),
         ];
 
     /// <summary>スキーマ同期の往復（表・列・外部キーの追加と削除・一意制約・複合外部キー）</summary>
@@ -91,6 +93,12 @@ internal static partial class SyncPlanExpectationRows
                             "AlterColumn child.to_alter *",
                             "DropColumn child.to_drop *"
                         );
+                        // 型の変更（照合順序を読み直す DO ブロックの中・同じ系統なので USING なし）と NOT NULL は別の文
+                        e.Script.Contains(
+                            "*EXECUTE 'ALTER TABLE \"child\" ALTER COLUMN \"to_alter\" TYPE varchar(100)' || COALESCE(' COLLATE ' || coll, '') || '';",
+                            "ALTER TABLE \"child\" ALTER COLUMN \"to_alter\" SET NOT NULL;",
+                            "ALTER TABLE \"child\" DROP COLUMN \"to_drop\";"
+                        );
                         e.Outcome.Exact("committed");
                         e.After.Contains("col child.added *");
                         e.After.Absent("col child.to_drop *");
@@ -112,6 +120,9 @@ internal static partial class SyncPlanExpectationRows
                             "DropForeignKey *",
                             "DropForeignKey child fk=FK_child_parent *"
                         );
+                        e.Script.Contains(
+                            "ALTER TABLE \"child\" DROP CONSTRAINT IF EXISTS \"FK_child_parent\";"
+                        );
                         e.Outcome.Exact("committed");
                         e.After.Absent("fk *");
                     })
@@ -128,6 +139,7 @@ internal static partial class SyncPlanExpectationRows
                     r.Expect(e =>
                     {
                         e.Diff.Single("DropTable parent *");
+                        e.Script.Contains("DROP TABLE \"parent\";");
                         e.Outcome.Exact("committed");
                         e.After.Count("table *", 1);
                         e.After.Single("table child");
@@ -354,6 +366,9 @@ internal static partial class SyncPlanExpectationRows
                         .Expect(e =>
                         {
                             e.Diff.Single("AlterPrimaryKey *");
+                            // 実行時に読んだ主キー名（PK_a"b）は quote_ident を通して動的 SQL へ埋める（生の連結は無い）
+                            e.Script.Contains("*quote_ident(pk_name)*");
+                            e.Script.Absent("*|| pk_name*");
                             e.Outcome.Exact("committed");
                             // 主キーが id から code へ付け替わる
                             e.Probe("keys")
@@ -464,6 +479,9 @@ internal static partial class SyncPlanExpectationRows
                         .Expect(e =>
                         {
                             // USING で '42' を integer へ変換できる
+                            e.Script.Contains(
+                                "ALTER TABLE \"u\" ALTER COLUMN \"qty\" TYPE integer USING \"qty\"::integer;"
+                            );
                             e.Outcome.Exact("committed");
                             e.After.Single("col u.qty integer *");
                             e.Probe("row").Exact("42 name=abcdefghij");
@@ -487,6 +505,10 @@ internal static partial class SyncPlanExpectationRows
                         .Expect(e =>
                         {
                             // 長すぎる値は切り詰めずにエラーにする（USING を付けない）
+                            e.Script.Contains(
+                                "*EXECUTE 'ALTER TABLE \"u\" ALTER COLUMN \"name\" TYPE varchar(5)' || COALESCE(' COLLATE ' || coll, '') || '';"
+                            );
+                            e.Script.Absent("*USING*");
                             e.Outcome.Exact(RealPostgreSqlScenarios.RolledBack("*value too long*"));
                             e.Unchanged();
                             e.Probe("row").Exact("42 name=abcdefghij");
@@ -608,6 +630,12 @@ internal static partial class SyncPlanExpectationRows
                     .Expect(e =>
                     {
                         e.ProbeBefore("columns").Single("columns public.cl.c collation=C *");
+                        // 実行時に列の照合順序を読み、型の既定と違うときだけ COLLATE を書き添える（表は to_regclass で絞る）
+                        e.Script.Contains(
+                            "*SELECT CASE WHEN a.attcollation = 0 OR a.attcollation = t.typcollation THEN NULL",
+                            "*ELSE quote_ident(n.nspname) || '.' || quote_ident(co.collname) END INTO coll",
+                            "*WHERE a.attrelid = to_regclass('\"cl\"') AND a.attname = 'c' AND NOT a.attisdropped;"
+                        );
                         e.Outcome.Exact("committed");
                         e.Probe("columns")
                             .Single(
@@ -663,6 +691,11 @@ internal static partial class SyncPlanExpectationRows
 
                         if (stage < 2)
                         {
+                            // 説明は COMMENT ON の文字列リテラルで書き、' を二重化する
+                            e.Script.Contains(
+                                $"COMMENT ON TABLE \"items\" IS '{table.Replace("'", "''", StringComparison.Ordinal)}';",
+                                $"COMMENT ON COLUMN \"items\".\"name\" IS '{column.Replace("'", "''", StringComparison.Ordinal)}';"
+                            );
                             e.After.Single(
                                 $"desc items \"{table}\"",
                                 $"desc items.name \"{column}\""
@@ -670,10 +703,603 @@ internal static partial class SyncPlanExpectationRows
                         }
                         else
                         {
+                            // 空の説明は IS NULL で消す
+                            e.Script.Contains(
+                                "COMMENT ON TABLE \"items\" IS NULL;",
+                                "COMMENT ON COLUMN \"items\".\"name\" IS NULL;"
+                            );
                             e.After.Absent("desc *");
                         }
                     })
             );
+
+    /// <summary>
+    /// 同期スクリプトの文の形（表・列・外部キー・主キー・一意制約の文）を実 DB で流し、結果と流れた文の形を見る
+    /// </summary>
+    private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealPostgreSqlScriptRows() =>
+        [
+            .. RealPostgreSqlScriptTableAndColumnRows(),
+            .. RealPostgreSqlScriptForeignKeyRows(),
+            .. RealPostgreSqlScriptKeyRows(),
+        ];
+
+    /// <summary>表・列の追加と列の変更の文</summary>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > RealPostgreSqlScriptTableAndColumnRows() =>
+        [
+            Row(
+                    "realdb-pg-script-add-table-create",
+                    "AddTable は CREATE TABLE と PK を含み GO を使わない",
+                    DialectNames.PostgreSql
+                )
+                .Live(_ => { })
+                .TargetFromLive(s =>
+                    s.Table(
+                        "customer",
+                        ExpectationSchema.Pk("id", "integer"),
+                        ExpectationSchema.Nullable("name", "varchar(50)")
+                    )
+                )
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddTable))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "CREATE TABLE \"customer\" (",
+                            "*\"id\" integer NOT NULL,",
+                            "*CONSTRAINT \"PK_customer\" PRIMARY KEY (\"id\")"
+                        );
+                        // スクリプトは 1 回で流す＝GO の行があれば構文エラーになる
+                        e.Script.Absent("*GO*", "*UNIQUE*");
+                        e.Outcome.Exact("committed");
+                        e.After.Single(
+                            "table customer",
+                            "col customer.id integer notnull pk",
+                            "col customer.name varchar(50) null",
+                            "pk customer (id)"
+                        );
+                        e.After.Absent("uq *");
+                    })
+                ),
+            Row(
+                    "realdb-pg-script-add-table-unique-constraints-sync",
+                    "AddTable の UNIQUE 句は DDL 生成と同形",
+                    DialectNames.PostgreSql
+                )
+                .Live(_ => { })
+                .TargetFromLive(RealPostgreSqlScenarios.Shops)
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddTable))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        // 名前つきの単一列は名前のまま・名前なしの複合は合成名で宣言の並び。最後の制約行にカンマは付かない
+                        e.Script.Contains(
+                            "*CONSTRAINT \"PK_shops\" PRIMARY KEY (\"id\"),",
+                            "*CONSTRAINT \"UQ_shops_code\" UNIQUE (\"code\"),",
+                            "*CONSTRAINT \"UQ_shops_region_code\" UNIQUE (\"region\", \"code\")"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Count("uq *", 2);
+                        e.After.Single(
+                            "uq shops UQ_shops_code (code)",
+                            "uq shops UQ_shops_region_code (region,code)"
+                        );
+                    })
+                ),
+            Row(
+                    "realdb-pg-script-add-table-unique-constraints-ddl",
+                    "AddTable の UNIQUE 句は DDL 生成と同形",
+                    DialectNames.PostgreSql
+                )
+                .Live(RealPostgreSqlScenarios.Shops)
+                .Target(RealPostgreSqlScenarios.Shops)
+                .Select(items => RealScenarios.SelectKinds(items))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Before.Count("uq *", 2);
+                        e.Before.Single(
+                            "uq shops UQ_shops_code (code)",
+                            "uq shops UQ_shops_region_code (region,code)"
+                        );
+                        e.Diff.Empty();
+                        e.Outcome.Exact("committed");
+                    })
+                ),
+            Row(
+                    "realdb-pg-script-add-column-not-null",
+                    "AddColumn は ALTER TABLE ADD COLUMN を生成する",
+                    DialectNames.PostgreSql
+                )
+                .Live(s => s.Table("customer", ExpectationSchema.Pk("id", "integer")))
+                .TargetFromLive(s =>
+                    s["customer"].Columns.Add(ExpectationSchema.NotNull("email", "varchar(200)"))
+                )
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddColumn))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "ALTER TABLE \"customer\" ADD COLUMN \"email\" varchar(200) NOT NULL;"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Single("col customer.email varchar(200) notnull");
+                    })
+                ),
+            Row(
+                    "realdb-pg-script-unselected-add-column-not-emitted",
+                    "選択されていない項目はスクリプトに含まれない",
+                    DialectNames.PostgreSql
+                )
+                .Live(s => s.Table("customer", ExpectationSchema.Pk("id", "integer")))
+                .TargetFromLive(s =>
+                    s["customer"].Columns.Add(ExpectationSchema.Nullable("email", "varchar(200)"))
+                )
+                .Select(items => RealScenarios.SelectKinds(items))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Diff.Single("AddColumn customer.email *");
+                        e.Script.Absent("*email*");
+                        e.Outcome.Exact("committed");
+                        e.After.Absent("col customer.email *");
+                    })
+                ),
+            Row(
+                    "realdb-pg-script-alter-column-drop-not-null",
+                    "AlterColumn は NULL 許容化で DROP NOT NULL を生成する",
+                    DialectNames.PostgreSql
+                )
+                .Live(s =>
+                    s.Table(
+                        "customer",
+                        ExpectationSchema.Pk("id", "integer"),
+                        ExpectationSchema.NotNull("note", "text")
+                    )
+                )
+                .TargetFromLive(s => s.Col("customer", "note").IsNullable = true)
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterColumn))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "ALTER TABLE \"customer\" ALTER COLUMN \"note\" DROP NOT NULL;"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Single("col customer.note text null");
+                    })
+                ),
+            UsingCastRow("text-to-date", "text", "date", "'2024-01-02'", "2024-01-02"),
+            UsingCastRow("integer-to-boolean", "integer", "boolean", "1", "true"),
+            UsingCastRow(
+                "varchar-to-uuid",
+                "varchar(36)",
+                "uuid",
+                "'0f8fad5b-d9cb-469f-a165-70867728950e'",
+                "0f8fad5b-d9cb-469f-a165-70867728950e"
+            ),
+            UsingCastRow("text-to-jsonb", "text", "jsonb", "'{\"a\": 1}'", "{\"a\": 1}"),
+            Row(
+                    "realdb-pg-script-alter-column-integer-to-varchar-fails-without-truncation",
+                    "AlterColumn は型の系統をまたぐ変更にだけ USING を付ける",
+                    DialectNames.PostgreSql
+                )
+                .Live(s =>
+                    s.Table(
+                        "uc",
+                        ExpectationSchema.Pk("id", "integer"),
+                        ExpectationSchema.Nullable("v", "integer")
+                    )
+                )
+                .TargetFromLive(s => s.Col("uc", "v").DataType = "varchar(10)")
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterColumn))
+                .OnRealDatabase(r =>
+                    r.Setup("INSERT INTO \"uc\" (\"id\", \"v\") VALUES (1, -2147483648);")
+                        .Query("row", "SELECT \"v\" FROM \"uc\";")
+                        .ExpectsUnwarnedFailure(
+                            "データの都合：v の値 -2147483648（11 文字）は varchar(10) に収まらない（計画は列の値を見ない）"
+                        )
+                        .Expect(e =>
+                        {
+                            // 文字列系への変更には USING を付けない（明示キャストは長すぎる値を黙って切り詰める）
+                            e.Script.Contains(
+                                "*EXECUTE 'ALTER TABLE \"uc\" ALTER COLUMN \"v\" TYPE varchar(10)' || COALESCE(' COLLATE ' || coll, '') || '';"
+                            );
+                            e.Script.Absent("*USING*");
+                            e.Outcome.Exact(RealPostgreSqlScenarios.RolledBack("*value too long*"));
+                            e.Unchanged();
+                            e.Probe("row").Exact("-2147483648");
+                        })
+                ),
+        ];
+
+    /// <summary>
+    /// 型の系統をまたぐ列の変更（<paramref name="oldType"/> → <paramref name="newType"/>）は USING 列::新型 で通る
+    /// （USING が無いと代入キャストが無く断られる）
+    /// </summary>
+    private static ExpectationRow UsingCastRow(
+        string shape,
+        string oldType,
+        string newType,
+        string value,
+        string expected
+    ) =>
+        Row(
+                $"realdb-pg-script-alter-column-using-cast-{shape}",
+                "AlterColumn は型の系統をまたぐ変更にだけ USING を付ける",
+                DialectNames.PostgreSql
+            )
+            .Live(s =>
+                s.Table(
+                    "uc",
+                    ExpectationSchema.Pk("id", "integer"),
+                    ExpectationSchema.Nullable("v", oldType)
+                )
+            )
+            .TargetFromLive(s => s.Col("uc", "v").DataType = newType)
+            .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterColumn))
+            .OnRealDatabase(r =>
+                r.Setup($"INSERT INTO \"uc\" (\"id\", \"v\") VALUES (1, {value});")
+                    .Query("row", "SELECT \"v\"::text AS \"v\" FROM \"uc\";")
+                    .Expect(e =>
+                    {
+                        e.Script.Contains(
+                            $"ALTER TABLE \"uc\" ALTER COLUMN \"v\" TYPE {newType} USING \"v\"::{newType};"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Single($"col uc.v {newType} null");
+                        e.Probe("row").Exact(expected);
+                    })
+            );
+
+    /// <summary>外部キーの追加と、表・列の追加と外部キーの並び</summary>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > RealPostgreSqlScriptForeignKeyRows() =>
+        [
+            Row(
+                    "realdb-pg-script-add-fk-named-with-referential-actions",
+                    "AddForeignKey は ADD CONSTRAINT FOREIGN KEY と参照アクションを生成する",
+                    DialectNames.PostgreSql
+                )
+                .Live(RealPostgreSqlScenarios.CustomerOrder)
+                .TargetFromLive(s =>
+                    s.Fk(
+                        "customer",
+                        "order",
+                        "FK_order_customer",
+                        ForeignKeyReferentialAction.Cascade,
+                        ForeignKeyReferentialAction.SetDefault,
+                        ("id", "customer_id")
+                    )
+                )
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddForeignKey))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Script.Contains(
+                            "*ALTER TABLE \"order\" ADD CONSTRAINT \"FK_order_customer\" FOREIGN KEY (\"customer_id\") REFERENCES \"customer\" (\"id\")*",
+                            "*ON DELETE CASCADE*",
+                            "*ON UPDATE SET DEFAULT*"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Count("fk *", 1);
+                        e.After.Single(
+                            "fk order FK_order_customer (customer_id) -> customer(id) del=Cascade upd=SetDefault"
+                        );
+                    })
+                ),
+            Row(
+                    "realdb-pg-script-add-table-and-column-before-fk",
+                    "実行順序: AddTable → AddColumn → AddForeignKey",
+                    DialectNames.PostgreSql
+                )
+                .Live(s => s.Table("t", ExpectationSchema.Pk("id", "integer")))
+                .TargetFromLive(s =>
+                {
+                    s.Table("customer", ExpectationSchema.Pk("id", "integer"));
+                    s["t"].Columns.Add(ExpectationSchema.Nullable("customer_id", "integer"));
+                    s.Fk("customer", "t", null, ("id", "customer_id"));
+                })
+                .Select(items =>
+                    RealScenarios.SelectKinds(
+                        items,
+                        SchemaDiffKind.AddTable,
+                        SchemaDiffKind.AddColumn,
+                        SchemaDiffKind.AddForeignKey
+                    )
+                )
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        // 外部キーが表・列より前に流れると断られる＝コミットが並びを示す
+                        e.Script.Contains(
+                            "CREATE TABLE \"customer\" (",
+                            "ALTER TABLE \"t\" ADD COLUMN \"customer_id\" integer NULL;",
+                            "ALTER TABLE \"t\" ADD CONSTRAINT \"FK_t_customer\" FOREIGN KEY (\"customer_id\")*"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Single(
+                            "table customer",
+                            "col t.customer_id integer null",
+                            "fk t FK_t_customer (customer_id) -> customer(id) *"
+                        );
+                    })
+                ),
+        ];
+
+    /// <summary>主キーの付け替え・付与・解除と一意制約の追加・削除の文</summary>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > RealPostgreSqlScriptKeyRows() =>
+        [
+            Row(
+                    "realdb-pg-script-pk-single-to-composite",
+                    "AlterPrimaryKey は DO ブロックの DROP と複合 PK の ADD を生成する",
+                    DialectNames.PostgreSql
+                )
+                .TargetFromLive(s =>
+                {
+                    s.Col("orders", "line_no").IsPrimaryKey = true;
+                    s.PrimaryKeyOrder("orders", "order_id", "line_no");
+                })
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterPrimaryKey))
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE \"orders\" (\"order_id\" integer NOT NULL, \"line_no\" integer NOT NULL, "
+                                + "\"memo\" text NULL, CONSTRAINT \"pk_orders_old\" PRIMARY KEY (\"order_id\"));"
+                        )
+                        .Probe("keys")
+                        .Expect(e =>
+                        {
+                            // 旧主キーの名前は差分に無いので pg_constraint から逆引きして DO ブロックで外す
+                            e.Script.Contains(
+                                "DO $$",
+                                "*FROM pg_constraint con",
+                                "*WHERE con.contype = 'p' AND con.conrelid = to_regclass('\"orders\"');",
+                                "*IF pk_name IS NOT NULL THEN",
+                                "*EXECUTE 'ALTER TABLE \"orders\" DROP CONSTRAINT ' || quote_ident(pk_name);",
+                                "ALTER TABLE \"orders\" ADD CONSTRAINT \"PK_orders\" PRIMARY KEY (\"order_id\", \"line_no\");"
+                            );
+                            e.Outcome.Exact("committed");
+                            e.After.Single("pk orders (order_id,line_no)");
+                            e.Probe("keys")
+                                .Exact(
+                                    "keys public.orders kind=PK name=PK_orders columns=order_id,line_no"
+                                );
+                        })
+                ),
+            Row(
+                    "realdb-pg-script-pk-add-only-guarded-drop",
+                    "AlterPrimaryKey は PK 付与のみでも DROP を no-op 形で出す",
+                    DialectNames.PostgreSql
+                )
+                .TargetFromLive(s => s.Col("customer", "id").IsPrimaryKey = true)
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterPrimaryKey))
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE \"customer\" (\"id\" integer NOT NULL, \"memo\" text NULL);"
+                        )
+                        .Probe("keys")
+                        .Expect(e =>
+                        {
+                            e.Before.Absent("pk *");
+                            e.Script.Contains(
+                                "*IF pk_name IS NOT NULL THEN",
+                                "ALTER TABLE \"customer\" ADD CONSTRAINT \"PK_customer\" PRIMARY KEY (\"id\");"
+                            );
+                            e.Outcome.Exact("committed");
+                            e.After.Single("pk customer (id)");
+                            e.Probe("keys")
+                                .Exact("keys public.customer kind=PK name=PK_customer columns=id");
+                        })
+                ),
+            Row(
+                    "realdb-pg-script-pk-drop-only-omits-add",
+                    "AlterPrimaryKey は PK 解除のみなら ADD を出さない",
+                    DialectNames.PostgreSql
+                )
+                .TargetFromLive(s =>
+                {
+                    s.Col("customer", "id").IsPrimaryKey = false;
+                    s["customer"].PrimaryKeyColumnIds.Clear();
+                })
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterPrimaryKey))
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE \"customer\" (\"id\" integer NOT NULL, \"memo\" text NULL, "
+                                + "CONSTRAINT \"PK_customer\" PRIMARY KEY (\"id\"));"
+                        )
+                        .Probe("keys")
+                        .Expect(e =>
+                        {
+                            e.Script.Contains("*IF pk_name IS NOT NULL THEN");
+                            e.Script.Absent("*ADD CONSTRAINT*", "*PRIMARY KEY (*");
+                            e.Outcome.Exact("committed");
+                            e.After.Absent("pk *");
+                            e.Probe("keys").Empty();
+                        })
+                ),
+            Row(
+                    "realdb-pg-script-pk-change-splits-around-alter-column",
+                    "AlterPrimaryKey は AlterColumn を挟んで DROP → ALTER → ADD の順に出る",
+                    DialectNames.PostgreSql
+                )
+                .TargetFromLive(s =>
+                {
+                    var oldId = s.Col("orders", "old_id");
+                    oldId.IsPrimaryKey = false;
+                    oldId.IsNullable = true;
+                    s.Col("orders", "order_id").IsPrimaryKey = true;
+                    s["orders"].PrimaryKeyColumnIds.Clear();
+                })
+                .Select(items =>
+                    RealScenarios.SelectKinds(
+                        items,
+                        SchemaDiffKind.AlterPrimaryKey,
+                        SchemaDiffKind.AlterColumn
+                    )
+                )
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE \"orders\" (\"old_id\" integer NOT NULL, \"order_id\" integer NOT NULL, "
+                                + "\"memo\" text NULL, CONSTRAINT \"pk_orders_old\" PRIMARY KEY (\"old_id\"));"
+                        )
+                        .Expect(e =>
+                        {
+                            // 主キーが残ったままの DROP NOT NULL は断られる（主キーの列）＝コミットが並びを示す
+                            e.Script.Contains(
+                                "DO $$",
+                                "ALTER TABLE \"orders\" ALTER COLUMN \"old_id\" TYPE integer;",
+                                "ALTER TABLE \"orders\" ALTER COLUMN \"old_id\" DROP NOT NULL;",
+                                "ALTER TABLE \"orders\" ADD CONSTRAINT \"PK_orders\" PRIMARY KEY (\"order_id\");"
+                            );
+                            e.Outcome.Exact("committed");
+                            e.After.Single(
+                                "pk orders (order_id)",
+                                "col orders.old_id integer null"
+                            );
+                        })
+                ),
+            Row(
+                    "realdb-pg-script-pk-reorder-follows-primary-key-order",
+                    "AlterPrimaryKey は PrimaryKeyColumnIds の順で複合 PK を付与する",
+                    DialectNames.PostgreSql
+                )
+                .TargetFromLive(s => s.PrimaryKeyOrder("orders", "line_no", "order_id"))
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterPrimaryKey))
+                .OnRealDatabase(r =>
+                    // 列の宣言の並びは (order_id, line_no)。主キーの実効順だけを逆にする
+                    r.LiveSql(
+                            "CREATE TABLE \"orders\" (\"order_id\" integer NOT NULL, \"line_no\" integer NOT NULL, "
+                                + "CONSTRAINT \"PK_orders\" PRIMARY KEY (\"order_id\", \"line_no\"));"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Diff.Single("AlterPrimaryKey orders *");
+                            e.Script.Contains(
+                                "ALTER TABLE \"orders\" ADD CONSTRAINT \"PK_orders\" PRIMARY KEY (\"line_no\", \"order_id\");"
+                            );
+                            e.Outcome.Exact("committed");
+                            e.After.Single("pk orders (line_no,order_id)");
+                        })
+                ),
+            Row(
+                    "realdb-pg-script-pk-change-table-name-with-quote",
+                    "AlterPrimaryKey の DO ブロックはテーブル名の ' を二重化する",
+                    DialectNames.PostgreSql
+                )
+                .TargetFromLive(s => RealScenarios.MovePrimaryKeyToCode(s, "o'rders"))
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterPrimaryKey))
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE \"o'rders\" (\"id\" integer NOT NULL, \"code\" integer NOT NULL, "
+                                + "CONSTRAINT \"pk_o_old\" PRIMARY KEY (\"id\"));"
+                        )
+                        .Probe("keys")
+                        .Expect(e =>
+                        {
+                            // EXECUTE '…' の中身は文字列リテラル＝クォートした名前の ' も二重化する
+                            e.Script.Contains(
+                                "*WHERE con.contype = 'p' AND con.conrelid = to_regclass('\"o''rders\"');",
+                                "*EXECUTE 'ALTER TABLE \"o''rders\" DROP CONSTRAINT ' || quote_ident(pk_name);"
+                            );
+                            e.Script.Absent("*EXECUTE 'ALTER TABLE \"o'rders\"*");
+                            e.Outcome.Exact("committed");
+                            e.After.Single("pk o'rders (code)");
+                            e.Probe("keys")
+                                .Exact("keys public.o'rders kind=PK name=PK_o'rders columns=code");
+                        })
+                ),
+            Row(
+                    "realdb-pg-script-pk-drop-table-name-with-dollar-tag",
+                    "AlterPrimaryKey の DO ブロックは $$ 入りテーブル名でも終端されない",
+                    DialectNames.PostgreSql
+                )
+                .TargetFromLive(s =>
+                {
+                    s.Col("o$$rders", "id").IsPrimaryKey = false;
+                    s["o$$rders"].PrimaryKeyColumnIds.Clear();
+                })
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterPrimaryKey))
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE \"o$$rders\" (\"id\" integer NOT NULL, \"memo\" text NULL, "
+                                + "CONSTRAINT \"pk_o_dollar\" PRIMARY KEY (\"id\"));"
+                        )
+                        .Probe("keys")
+                        .Expect(e =>
+                        {
+                            // タグが $$ のままなら、本文の名前の $$ でブロックが閉じて構文エラーになる＝コミットが示す
+                            e.Script.Contains(
+                                "*EXECUTE 'ALTER TABLE \"o$$rders\" DROP CONSTRAINT ' || quote_ident(pk_name);"
+                            );
+                            e.Script.Absent("DO $$", "END $$;");
+                            e.Outcome.Exact("committed");
+                            e.After.Absent("pk *");
+                            e.Probe("keys").Empty();
+                        })
+                ),
+            Row(
+                    "realdb-pg-script-unique-add-synthesized-composite-name",
+                    "AddUniqueConstraint は ADD CONSTRAINT UNIQUE を生成する",
+                    DialectNames.PostgreSql
+                )
+                .Live(s =>
+                    s.Table(
+                        "customer",
+                        ExpectationSchema.Pk("id", "integer"),
+                        ExpectationSchema.NotNull("code", "varchar(10)"),
+                        ExpectationSchema.NotNull("kind", "varchar(10)")
+                    )
+                )
+                .TargetFromLive(s => s.Unique("customer", null, "code", "kind"))
+                .Select(items =>
+                    RealScenarios.SelectKinds(items, SchemaDiffKind.AddUniqueConstraint)
+                )
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        // 制約名は未設定のため UQ_{テーブル}_{列…} を合成する
+                        e.Script.Contains(
+                            "ALTER TABLE \"customer\" ADD CONSTRAINT \"UQ_customer_code_kind\" UNIQUE (\"code\", \"kind\");"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Single("uq customer UQ_customer_code_kind (code,kind)");
+                    })
+                ),
+            Row(
+                    "realdb-pg-script-unique-drop-by-live-name",
+                    "DropUniqueConstraint は実名で DROP CONSTRAINT を生成する",
+                    DialectNames.PostgreSql
+                )
+                .Live(s =>
+                {
+                    s.Table(
+                        "customer",
+                        ExpectationSchema.Pk("id", "integer"),
+                        ExpectationSchema.NotNull("code", "varchar(10)")
+                    );
+                    s.Unique("customer", "uq_legacy", "code");
+                })
+                .TargetFromLive(s => s["customer"].UniqueConstraints.Clear())
+                .Select(items =>
+                    RealScenarios.SelectKinds(items, SchemaDiffKind.DropUniqueConstraint)
+                )
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Before.Single("uq customer uq_legacy (code)");
+                        // 合成名（UQ_customer_code）でなく DB の実名で外す（名前を違えると断られる）
+                        e.Script.Contains(
+                            "ALTER TABLE \"customer\" DROP CONSTRAINT \"uq_legacy\";"
+                        );
+                        e.Outcome.Exact("committed");
+                        e.After.Absent("uq *");
+                    })
+                ),
+        ];
 }
 
 /// <summary>PostgreSQL の実 DB の段の図・SQL・選び方の部品</summary>
@@ -830,5 +1456,32 @@ internal static class RealPostgreSqlScenarios
                     ? $"COMMENT ON COLUMN \"items\".\"name\" IS '{column.Replace("'", "''")}';"
                     : string.Empty
             );
+    }
+
+    /// <summary>
+    /// shops(id 主キー・code・region) と、名前つき単一列の一意制約 UQ_shops_code (code) と、名前なしの複合の一意制約
+    /// (region, code)（宣言の並びは列の並びと逆）
+    /// </summary>
+    public static void Shops(ExpectationSchema s)
+    {
+        s.Table(
+            "shops",
+            ExpectationSchema.Pk("id", "integer"),
+            ExpectationSchema.NotNull("code", "varchar(20)"),
+            ExpectationSchema.NotNull("region", "varchar(10)")
+        );
+        s.Unique("shops", "UQ_shops_code", "code");
+        s.Unique("shops", null, "region", "code");
+    }
+
+    /// <summary>親 customer(id) と、外部キーの無い子 order(id, customer_id NULL 許容)</summary>
+    public static void CustomerOrder(ExpectationSchema s)
+    {
+        s.Table("customer", ExpectationSchema.Pk("id", "integer"));
+        s.Table(
+            "order",
+            ExpectationSchema.Pk("id", "integer"),
+            ExpectationSchema.Nullable("customer_id", "integer")
+        );
     }
 }

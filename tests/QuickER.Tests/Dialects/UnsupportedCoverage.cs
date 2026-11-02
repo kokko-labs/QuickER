@@ -1093,7 +1093,7 @@ public static class UnsupportedCoverage
             UnsupportedDefinitionKind.OnUpdateReferentialAction,
             UnsupportedFeature.Sync,
             DialectNames.Oracle,
-            ["OracleSyncScriptBuilderTests.AddForeignKey_GeneratesConstraint_NoOnUpdate"]
+            ["SyncPlanExpectationRows:realdb-oracle-script-add-fk-on-update-omitted-with-note"]
         ),
         (
             UnsupportedDefinitionKind.OnUpdateReferentialAction,
@@ -1133,13 +1133,18 @@ public static class UnsupportedCoverage
             UnsupportedDefinitionKind.SetDefaultReferentialAction,
             UnsupportedFeature.Sync,
             DialectNames.MySql,
-            ["MySqlSyncScriptBuilderTests.AddForeignKey_SetDefault_IsOmittedWithNote"]
+            [
+                "MySqlSyncScriptBuilderTests.AddForeignKey_SetDefault_IsOmittedWithNote",
+                "SyncPlanExpectationRows:realdb-mysql-script-add-fk-set-default-omitted-*",
+            ]
         ),
         (
             UnsupportedDefinitionKind.SetDefaultReferentialAction,
             UnsupportedFeature.Sync,
             DialectNames.Oracle,
-            ["OracleSyncScriptBuilderTests.AddForeignKey_OnDeleteSetDefault_OmitsClauseWithNote"]
+            [
+                "SyncPlanExpectationRows:realdb-oracle-script-add-fk-on-delete-set-default-omitted-with-note",
+            ]
         ),
         (
             UnsupportedDefinitionKind.SetDefaultReferentialAction,
@@ -1210,7 +1215,7 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Sync,
             DialectNames.MySql,
             [
-                "MySqlSyncScriptBuilderTests.Reorder_GeneratesModifyAfterWithHeading",
+                "SyncPlanExpectationRows:realdb-mysql-script-reorder-modify-after",
                 "SyncPlanExpectationRows:realdb-mysql-column-reorder-with-insertion-applies",
             ]
         ),
@@ -1396,7 +1401,7 @@ public static class UnsupportedCoverage
                 "SyncPlanExpectationRows:realdb-column-alter-incompatible-default-commits-insert-fails",
                 "SyncPlanExpectationRows:realdb-column-type-kind-change-with-default-warns",
                 "SchemaSyncDialogViewModelTests.Execute_TypeKindChangeWithDefault_ShowsWarningFromImportedDefaults",
-                "SqlServerSyncScriptBuilderTests.AlterColumn_ReadsBackOnlyWhatMatters",
+                "SyncPlanExpectationRows:realdb-column-alter-nullability-only-*",
                 "SyncPlanExpectationRows:plan-default-type-kind-change-warns-only-where-declared",
             ]
         ),
@@ -1417,7 +1422,7 @@ public static class UnsupportedCoverage
             [
                 "MySqlColumnAttributeSyncIntegrationTests.AlterColumn_ChangesOnlyTypeAndNullability",
                 "SyncPlanExpectationRows:realdb-mysql-column-type-kind-change-incompatible-default-warns-and-fails",
-                "MySqlSyncScriptBuilderTests.AlterColumn_RebuildsLiveDefinitionWithTypeAndNullability",
+                "SyncPlanExpectationRows:realdb-mysql-script-alter-column-rebuilds-live-definition-*",
                 "SyncPlanExpectationRows:plan-default-type-kind-change-warns-only-where-declared",
             ]
         ),
@@ -1436,7 +1441,7 @@ public static class UnsupportedCoverage
             DialectNames.SqlServer,
             [
                 "SyncPlanExpectationRows:realdb-column-alter-keeps-collation",
-                "SqlServerSyncScriptBuilderTests.AlterColumn_GeneratesAlterColumn",
+                "SyncPlanExpectationRows:realdb-column-alter-readds-default-varchar-to-nvarchar",
             ]
         ),
         (
@@ -1446,7 +1451,6 @@ public static class UnsupportedCoverage
             [
                 "PostgreSqlColumnAttributeSyncIntegrationTests.AlterColumn_KeepsNonDefaultCollation",
                 "SyncPlanExpectationRows:realdb-pg-column-alter-keeps-non-default-collation-public-table",
-                "PostgreSqlSyncScriptBuilderTests.AlterColumn_StringType_ReadsBackNonDefaultCollation",
             ]
         ),
         (
@@ -1455,7 +1459,7 @@ public static class UnsupportedCoverage
             DialectNames.MySql,
             [
                 "MySqlColumnAttributeSyncIntegrationTests.AlterColumn_ChangesOnlyTypeAndNullability",
-                "MySqlSyncScriptBuilderTests.AlterColumn_KeepsCollationOnlyForStringTypes",
+                "SyncPlanExpectationRows:realdb-mysql-script-alter-column-keeps-collation-*",
             ]
         ),
         (
