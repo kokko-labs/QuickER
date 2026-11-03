@@ -49,7 +49,7 @@ internal sealed record ModelFailure(string Signature, string Detail);
 /// 確かめる（<see cref="SyncModelScenarios"/>）。
 /// </para>
 /// </remarks>
-internal sealed class SyncModelRun : IAsyncDisposable
+internal sealed partial class SyncModelRun : IAsyncDisposable
 {
     /// <summary>静止化の周回の上限（1 周＝端末 2 台 × 2 モード）</summary>
     public const int QuiesceRounds = 6;
@@ -425,14 +425,24 @@ internal sealed class SyncModelRun : IAsyncDisposable
             case ModelRefreshOp refresh:
                 try
                 {
-                    await _world.RefreshAsync(refresh, _ct);
+                    RecordRefreshResult(
+                        refresh,
+                        refresh.Device,
+                        await _world.RefreshAsync(refresh, _ct)
+                    );
+                }
+                catch (Exception ex) when (ConsumeExpectedThrow(refresh.Device, ex))
+                {
+                    // 期待した例外（結果の面に残した）
                 }
                 catch (Exception ex) when (InjectedFaultException.IsInjected(ex))
                 {
                     _log.Add($"  -> injected fault: {ex.GetType().Name}");
+                    _lastResult[refresh.Device] = ExceptionLines(ex);
                 }
                 catch (Exception ex)
                 {
+                    _lastResult[refresh.Device] = ExceptionLines(ex);
                     var phase = Phase(ex);
                     var diagnosis = await DiagnoseForeignKeyAsync(
                         ex,
@@ -455,7 +465,12 @@ internal sealed class SyncModelRun : IAsyncDisposable
                 break;
 
             default:
-                throw new ArgumentOutOfRangeException(nameof(op), op.Describe(), null);
+                if (!await ExecuteScenarioOpAsync(op))
+                {
+                    throw new ArgumentOutOfRangeException(nameof(op), op.Describe(), null);
+                }
+
+                break;
         }
 
         return true;
@@ -580,6 +595,15 @@ internal sealed class SyncModelRun : IAsyncDisposable
         ModelSyncOutcome outcome;
         var fired = _world.Faults.Fired;
 
+        if (!quiescing)
+        {
+            _journalAtLastSync[op.Device] = (
+                await _world.Device(op.Device).Journal.ReadAllAsync(_ct)
+            )
+                .Select(e => e.Id)
+                .ToHashSet();
+        }
+
         // 消された品目をこの同期が上げ直したか（挿入の経路になった）を、サーバーの行の有無の前後で見る
         var serverItemsBefore = before
             ?.Server.Rows(ModelTables.Items)
@@ -597,6 +621,12 @@ internal sealed class SyncModelRun : IAsyncDisposable
             )
         {
             _log.Add($"  -> injected fault: {ex.GetType().Name}");
+
+            if (!quiescing && !ConsumeExpectedThrow(op.Device, ex))
+            {
+                _lastResult[op.Device] = ExceptionLines(ex);
+            }
+
             await RecordRecreatorsAsync(op.Device, serverItemsBefore);
             _lastLocalRowChanges[op.Device] =
                 ex.Data[SyncEngine.LocalRowChangesDataKey] as IReadOnlyList<SyncLocalRowChange>
@@ -621,6 +651,10 @@ internal sealed class SyncModelRun : IAsyncDisposable
 
             return false;
         }
+        catch (Exception ex) when (!quiescing && ConsumeExpectedThrow(op.Device, ex))
+        {
+            return false;
+        }
         catch (Exception ex)
         {
             var phase = Phase(ex);
@@ -637,6 +671,11 @@ internal sealed class SyncModelRun : IAsyncDisposable
 
         _lastLocalRowChanges[op.Device] = outcome.LocalRowChanges;
         RecordOutcomes(op, quiescing, outcome.Conflicts, outcome.LocalRowChanges);
+
+        if (!quiescing)
+        {
+            RecordSyncResult(op, outcome);
+        }
         await RecordRecreatorsAsync(op.Device, serverItemsBefore);
 
         foreach (var change in outcome.LocalRowChanges)
@@ -1175,6 +1214,16 @@ internal sealed class SyncModelRun : IAsyncDisposable
             );
         }
 
+        foreach (var device in _expectThrow)
+        {
+            _failures.Add(
+                new(
+                    "op/expect-throw-unused",
+                    $"{device} expected a throw, but no sync or refresh followed."
+                )
+            );
+        }
+
         if (_world.Faults.InterruptTimedOut is { } timedOut)
         {
             _failures.Add(
@@ -1533,6 +1582,11 @@ internal sealed class SyncModelRun : IAsyncDisposable
 
             foreach (var key in keys)
             {
+                if (_untrackedKeys.Contains((table, key)))
+                {
+                    continue;
+                }
+
                 initial.TryGetValue(key, out var initialRow);
                 current.TryGetValue(key, out var finalRow);
                 _rows.TryGetValue((table, key), out var history);
@@ -1560,6 +1614,11 @@ internal sealed class SyncModelRun : IAsyncDisposable
 
         foreach (var (key, hex) in final.Payloads())
         {
+            if (_untrackedKeys.Contains((ModelTables.Items, key)))
+            {
+                continue;
+            }
+
             initialPayloads.TryGetValue(key, out var initialHex);
             _blobs.TryGetValue(key, out var history);
             history ??= [];

@@ -28,6 +28,34 @@ internal sealed record SyncModelScenario(
     public IReadOnlyList<ModelActor> ExternalTables { get; init; } = [];
 
     /// <summary>
+    /// 初期データの末尾の行（<see cref="SyncModelScenarios.Tail"/>）を足さない（空のサーバーから始める形。アンカーの順序を
+    /// 確かめないシナリオだけが使う）
+    /// </summary>
+    public bool OmitsTail { get; init; }
+
+    /// <summary>すべての転送（既定）</summary>
+    public static IReadOnlySet<SyncModelTransport> AllTransports { get; } =
+        new HashSet<SyncModelTransport>(Enum.GetValues<SyncModelTransport>());
+
+    /// <summary>直結と HTTP（SyncRuntimeTestsBase から移したシナリオの既定＝元のテストが流れていた 2 つ）</summary>
+    public static IReadOnlySet<SyncModelTransport> DirectAndHttp { get; } =
+        new HashSet<SyncModelTransport> { SyncModelTransport.Direct, SyncModelTransport.Http };
+
+    /// <summary>
+    /// シナリオを流す転送（直結のテスト・HTTP のテスト・実 SQL Server のテストがこの宣言から行を作る）。直結は必ず含む
+    /// （HTTP と実 SQL Server のテストは直結の結果と比べる）。実 SQL Server は、サーバー役の口を使うシナリオ
+    /// （<see cref="ArmsServerFaults"/>）では宣言があっても流さない
+    /// </summary>
+    public IReadOnlySet<SyncModelTransport> Transports { get; init; } = AllTransports;
+
+    /// <summary>この転送のテストで流すか</summary>
+    public bool RunsOn(SyncModelTransport transport) =>
+        Transports.Contains(SyncModelTransport.Direct)
+            ? Transports.Contains(transport)
+                && (transport != SyncModelTransport.SqlServer || !ArmsServerFaults)
+            : throw new InvalidOperationException($"{Name} must run on the direct transport.");
+
+    /// <summary>
     /// サーバー役の口（失敗の注入と割り込みの点）を使うか（実 SQL Server では流さない）。サーバー側の失敗（ServerWrite・
     /// ServerFetch・BlobDownload・BlobUpload）と割り込みの点（<see cref="ArmInterruptOp"/>）は、SQLite のサーバー役の包み
     /// （<see cref="SyncModelServerRepository{TEntity, TKey}"/>・差分ソース）が起こす。実 SQL Server のサーバー役は生成された
@@ -35,6 +63,8 @@ internal sealed record SyncModelScenario(
     /// </summary>
     public bool ArmsServerFaults =>
         Ops.OfType<ArmInterruptOp>().Any()
+        || Ops.OfType<ArmServerInterruptOp>().Any()
+        || Ops.OfType<ArmEmptyFetchOp>().Any()
         || Ops.OfType<ArmFaultOp>()
             .Any(a =>
                 a.Kind
@@ -53,7 +83,7 @@ internal sealed record SyncModelScenario(
     )
     {
         await using var run = await SyncModelRun.StartAsync(
-            [.. Setup, .. SyncModelScenarios.Tail],
+            [.. Setup, .. (OmitsTail ? [] : SyncModelScenarios.Tail)],
             ct,
             (options ?? SyncModelWorldOptions.Direct) with
             {
@@ -97,7 +127,7 @@ internal static class ModelSyncScenarioNames
 }
 
 /// <summary>決定的なシナリオの一覧（指摘ごとに 1 本＋書き手が 2 人のキーのポリシーごとの期待）</summary>
-internal static class SyncModelScenarios
+internal static partial class SyncModelScenarios
 {
     private const ModelActor D1 = ModelActor.Device1;
     private const ModelActor D2 = ModelActor.Device2;
@@ -128,7 +158,8 @@ internal static class SyncModelScenarios
         SyncConflictPolicy policy = SyncConflictPolicy.Collect,
         IReadOnlyList<string>? excluded = null,
         int batch = 500,
-        bool propagateDeletes = true
+        bool propagateDeletes = true,
+        bool blobs = true
     ) =>
         new(
             device,
@@ -136,7 +167,7 @@ internal static class SyncModelScenarios
             mode,
             policy,
             excluded ?? [],
-            true,
+            blobs,
             batch,
             propagateDeletes
         );
@@ -1570,6 +1601,12 @@ internal static class SyncModelScenarios
         list.AddRange(TransientFaultScenarios());
         list.AddRange(UniqueValueReassignScenarios());
         list.AddRange(InterruptScenarios());
+        list.AddRange(EngineBasicScenarios());
+        list.AddRange(EngineForeignKeysScenarios());
+        list.AddRange(EnginePropagationLwwScenarios());
+        list.AddRange(EngineConflictsScenarios());
+        list.AddRange(EngineRefreshScenarios());
+        list.AddRange(EngineBlobsScenarios());
 
         return list;
     }

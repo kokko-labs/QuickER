@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -128,6 +129,9 @@ internal sealed class SyncModelFaults
     public void Clear()
     {
         _armed.Clear();
+        _emptyFetches.Clear();
+        _applySkips.Clear();
+        _hookBlobWrite = null;
 
         lock (_interruptLock)
         {
@@ -137,6 +141,116 @@ internal sealed class SyncModelFaults
 
     /// <summary>仕掛けた失敗が起きた回数（操作の前後で比べ、失敗が効いた操作を見分ける）</summary>
     public int Fired { get; private set; }
+
+    // 決定的なシナリオだけが仕掛ける口（ModelFaultKind に値を足さない＝生成器は Enum.GetValues で失敗の種類を選ぶので、
+    // 足すと種の指紋が変わる）
+    private readonly HashSet<(ModelActor Device, string Table)> _emptyFetches = [];
+    private readonly HashSet<(ModelActor Device, string Table, string Key)> _applySkips = [];
+    private (
+        ModelActor Device,
+        int? Target,
+        byte[] Content,
+        bool KeyAsInt64,
+        bool ThrowAfter
+    )? _hookBlobWrite;
+    private readonly List<string> _hookBlobWrites = [];
+
+    /// <summary>端末の次の同期で、その表の最初の差分の取得を空（続きなし）で返す（<see cref="ArmEmptyFetchOp"/>）</summary>
+    public void ArmEmptyFetch(ModelActor device, string table) =>
+        _emptyFetches.Add((device, table));
+
+    /// <summary>差分の取得の入口で呼ぶ（同期中の端末にその表の空の取得が仕掛けてあれば true＝空で返す）</summary>
+    public bool TakeEmptyFetch(Type entityType)
+    {
+        if (
+            Syncing is { } device
+            && _emptyFetches.Remove((device, ModelTables.TableOf(entityType)))
+        )
+        {
+            Fired++;
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>端末の同期の適用で、その行の保存をローカルの Before フックが 1 回飛ばす（<see cref="ArmApplySkipOp"/>）</summary>
+    public void ArmApplySkip(ModelActor device, string table, string key) =>
+        _applySkips.Add((device, table, key));
+
+    /// <summary>ローカルの Before フックの入口で呼ぶ（その行の適用の飛ばしが仕掛けてあれば true）</summary>
+    public bool TakeApplySkipFor(object entity)
+    {
+        if (Syncing is not { } device || Writing is not null)
+        {
+            return false;
+        }
+
+        var (table, key) = ModelEntityKeys.Of(entity);
+
+        if (_applySkips.Remove((device, table, key)))
+        {
+            Fired++;
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 端末の次の品目の保存の After フックで、品目の blob を context から書く（<see cref="ArmHookBlobWriteOp"/>）。
+    /// 書き込みの結果は <see cref="HookBlobWrites"/> に残る
+    /// </summary>
+    public void ArmHookBlobWrite(
+        ModelActor device,
+        int? target,
+        byte[] content,
+        bool keyAsInt64,
+        bool throwAfter
+    ) => _hookBlobWrite = (device, target, content, keyAsInt64, throwAfter);
+
+    /// <summary>After フックの blob の書き込みの結果（<c>blob-write key={キー} returned={true|false}</c>）</summary>
+    public IReadOnlyList<string> HookBlobWrites => _hookBlobWrites;
+
+    /// <summary>ローカルの After フックで呼ぶ（仕掛けてあれば品目の blob を書く）</summary>
+    public async Task AfterSaveBlobWriteFor(
+        object entity,
+        ISaveHookContext context,
+        CancellationToken ct
+    )
+    {
+        if (
+            entity is not ModelItemEntity item
+            || _hookBlobWrite is not { } armed
+            || armed.Device != Writing
+        )
+        {
+            return;
+        }
+
+        _hookBlobWrite = null;
+        var target = armed.Target ?? item.ItemId;
+        object key = armed.KeyAsInt64 ? (long)target : target;
+        var written = await context.WriteBinaryColumnAsync(
+            nameof(ModelItemEntity.Payload),
+            key,
+            new MemoryStream(armed.Content),
+            cancellationToken: ct
+        );
+        _hookBlobWrites.Add(
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"blob-write key={target} returned={(written ? "true" : "false")}"
+            )
+        );
+
+        if (armed.ThrowAfter)
+        {
+            throw new InvalidOperationException("The after hook failed on purpose.");
+        }
+    }
 
     /// <summary>対象の動作の最中なら、仕掛けた失敗を 1 回起こす（起きたら true）</summary>
     public bool TryFire(ModelFaultKind kind, ModelActor? who)
@@ -329,6 +443,7 @@ internal sealed class SyncModelHook<TEntity>(
         if (
             faults.TryFire(ModelFaultKind.HookSkip, faults.Writing)
             || faults.TryFire(ModelFaultKind.ApplySkip, faults.Syncing)
+            || faults.TakeApplySkipFor(entity)
         )
         {
             return Task.FromResult(false);
@@ -359,15 +474,20 @@ internal sealed class SyncModelHook<TEntity>(
         return Task.FromResult(true);
     }
 
-    public Task AfterSaveAsync(
+    public async Task AfterSaveAsync(
         TEntity entity,
         SaveOperation operation,
         ISaveHookContext context,
         CancellationToken cancellationToken = default
-    ) =>
-        faults.TryFire(ModelFaultKind.LocalAfterSave, faults.Writing)
-            ? throw new InjectedFaultException(ModelFaultKind.LocalAfterSave)
-            : Task.CompletedTask;
+    )
+    {
+        if (faults.TryFire(ModelFaultKind.LocalAfterSave, faults.Writing))
+        {
+            throw new InjectedFaultException(ModelFaultKind.LocalAfterSave);
+        }
+
+        await faults.AfterSaveBlobWriteFor(entity, context, cancellationToken);
+    }
 }
 
 /// <summary>読み進めると途中で注入した失敗を投げるストリーム（blob の書き込みの失敗の注入）</summary>
