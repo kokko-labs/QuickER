@@ -85,6 +85,20 @@ internal sealed class ModelDbState
         await using var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync(ct);
 
+        // 決定的なシナリオがローカルの表を一時的に消すことがある（DropLocalTableOp）。無い表は空として読む
+        var tables = new HashSet<string>(StringComparer.Ordinal);
+
+        await foreach (
+            var r in QueryAsync(
+                connection,
+                "SELECT name FROM sqlite_master WHERE type = 'table'",
+                ct
+            )
+        )
+        {
+            tables.Add(r.GetString(0));
+        }
+
         await foreach (
             var r in QueryAsync(
                 connection,
@@ -99,7 +113,9 @@ internal sealed class ModelDbState
         await foreach (
             var r in QueryAsync(
                 connection,
-                "SELECT label_code, folder_id, caption FROM model_labels",
+                tables.Contains(ModelTables.Labels)
+                    ? "SELECT label_code, folder_id, caption FROM model_labels"
+                    : "SELECT NULL, NULL, NULL WHERE 0",
                 ct
             )
         )
@@ -156,7 +172,7 @@ internal sealed class ModelDbState
     }
 }
 
-/// <summary>同期 1 回の結果（モデルの照合に使う分だけ）</summary>
+/// <summary>同期 1 回の結果（モデルの照合と、シナリオの結果の面に使う分だけ）</summary>
 internal sealed record ModelSyncOutcome(
     IReadOnlyList<SyncConflict> Conflicts,
     IReadOnlyList<SyncDownloadTruncation> Truncations
@@ -164,6 +180,18 @@ internal sealed record ModelSyncOutcome(
 {
     /// <summary>同期（SyncAsync）が自分から変えたローカルの行（SyncResult.LocalRowChanges）</summary>
     public IReadOnlyList<SyncLocalRowChange> LocalRowChanges { get; init; } = [];
+
+    /// <summary>上げた件数（SyncAsync と UploadAsync が返す。DownloadAsync は null）</summary>
+    public int? Uploaded { get; init; }
+
+    /// <summary>降ろした件数（SyncAsync と DownloadAsync が返す。UploadAsync は null）</summary>
+    public int? Downloaded { get; init; }
+
+    /// <summary>削除伝搬で消した件数（SyncAsync と DownloadAsync が返す）</summary>
+    public int? DeletedLocally { get; init; }
+
+    /// <summary>送らずに捨てた記録の件数（SyncAsync と UploadAsync が返す）</summary>
+    public int? Discarded { get; init; }
 }
 
 /// <summary>端末 1 台（ローカル SQLite・ジャーナル・ジャーナル記録デコレータ・同期エンジン）</summary>
@@ -192,6 +220,15 @@ internal sealed class SyncModelDevice : IDisposable
     public IModelItemRepository Items { get; private set; } = null!;
 
     public IModelEventRepository Events { get; private set; } = null!;
+
+    /// <summary>記録しないフォルダーのリポジトリ（ジャーナル記録デコレータの内側。記録しない書き込みの手が使う）</summary>
+    public IModelFolderRepository RawFolders { get; private set; } = null!;
+
+    /// <summary>記録しない品目のリポジトリ</summary>
+    public IModelItemRepository RawItems { get; private set; } = null!;
+
+    /// <summary>記録しないラベルのリポジトリ</summary>
+    public IModelLabelRepository RawLabels { get; private set; } = null!;
 
     public SyncEngine Engine { get; private set; } = null!;
 
@@ -247,18 +284,12 @@ internal sealed class SyncModelDevice : IDisposable
             )
             .Add(new SyncModelHook<ModelEventEntity>(faults, null));
 
-        device.Folders = new JournalingModelFolderRepository(
-            new ModelFolderRepository(factory, hooks),
-            device.Journal
-        );
-        device.Labels = new JournalingModelLabelRepository(
-            new ModelLabelRepository(factory, hooks),
-            device.Journal
-        );
-        device.Items = new JournalingModelItemRepository(
-            new ModelItemRepository(factory, hooks),
-            device.Journal
-        );
+        device.RawFolders = new ModelFolderRepository(factory, hooks);
+        device.RawLabels = new ModelLabelRepository(factory, hooks);
+        device.RawItems = new ModelItemRepository(factory, hooks);
+        device.Folders = new JournalingModelFolderRepository(device.RawFolders, device.Journal);
+        device.Labels = new JournalingModelLabelRepository(device.RawLabels, device.Journal);
+        device.Items = new JournalingModelItemRepository(device.RawItems, device.Journal);
         device.Events = new JournalingModelEventRepository(
             new ModelEventRepository(factory, hooks),
             device.Journal
@@ -571,21 +602,35 @@ internal sealed class SyncModelWorld : IAsyncDisposable
                 return new ModelSyncOutcome(result.Conflicts, result.Truncations)
                 {
                     LocalRowChanges = result.LocalRowChanges,
+                    Uploaded = result.Uploaded,
+                    Downloaded = result.Downloaded,
+                    DeletedLocally = result.DeletedLocally,
+                    Discarded = result.Discarded,
                 };
             }
 
             case ModelSyncKind.Upload:
             {
                 var conflicts = new List<SyncConflict>();
-                await engine.UploadAsync(options, conflicts, ct);
+                var (uploaded, discarded) = await engine.UploadAsync(options, conflicts, ct);
 
-                return new ModelSyncOutcome(conflicts, []);
+                return new ModelSyncOutcome(conflicts, [])
+                {
+                    Uploaded = uploaded,
+                    Discarded = discarded,
+                };
             }
 
             case ModelSyncKind.Download:
-                await engine.DownloadAsync(options, ct);
+            {
+                var (downloaded, deletedLocally) = await engine.DownloadAsync(options, ct);
 
-                return new ModelSyncOutcome([], []);
+                return new ModelSyncOutcome([], [])
+                {
+                    Downloaded = downloaded,
+                    DeletedLocally = deletedLocally,
+                };
+            }
 
             default:
                 throw new ArgumentOutOfRangeException(nameof(op), op.Kind, null);
@@ -593,14 +638,22 @@ internal sealed class SyncModelWorld : IAsyncDisposable
     }
 
     /// <summary>洗い替えを 1 回流す</summary>
-    public async Task RefreshAsync(ModelRefreshOp op, CancellationToken ct)
+    public Task<SyncRefreshResult> RefreshAsync(ModelRefreshOp op, CancellationToken ct) =>
+        RefreshAsync(op.Device, op.ToOptions(), ct);
+
+    /// <summary>洗い替えを、オプションを指定して 1 回流す（モデルの手が持たないオプション＝Force・除外を使うシナリオの手）</summary>
+    public async Task<SyncRefreshResult> RefreshAsync(
+        ModelActor device,
+        SyncRefreshOptions options,
+        CancellationToken ct
+    )
     {
-        Faults.Syncing = op.Device;
+        Faults.Syncing = device;
         Faults.Refreshing = true;
 
         try
         {
-            await Device(op.Device).Engine.RefreshAsync(op.ToOptions(), ct);
+            return await Device(device).Engine.RefreshAsync(options, ct);
         }
         finally
         {
@@ -809,8 +862,101 @@ internal sealed class SyncModelWorld : IAsyncDisposable
                 break;
             }
 
+            case SaveFolderGraphOp graph:
+                await SaveFolderGraphAsync(device, graph, ct);
+                break;
+
             default:
                 throw new ArgumentOutOfRangeException(nameof(op), op.Describe(), null);
+        }
+    }
+
+    /// <summary>フォルダーを根に、子の品目・ラベルを RowState つきで 1 回の SaveAsync で保存する</summary>
+    private static async Task SaveFolderGraphAsync(
+        SyncModelDevice device,
+        SaveFolderGraphOp op,
+        CancellationToken ct
+    )
+    {
+        var root =
+            op.Root.State == ModelRowState.Added
+                ? new ModelFolderEntity
+                {
+                    FolderId = op.Root.Id,
+                    Name = op.Root.Name ?? $"f{op.Root.Id}",
+                }
+                : await Load(device.Folders.GetByIdAsync(op.Root.Id, ct), op);
+
+        if (op.Root.State == ModelRowState.Updated && op.Root.Name is { } name)
+        {
+            root.Name = name;
+        }
+
+        Mark(root, op.Root.State);
+
+        foreach (var spec in op.Items)
+        {
+            var item =
+                spec.State == ModelRowState.Added
+                    ? new ModelItemEntity
+                    {
+                        ItemId = spec.Id,
+                        FolderId = op.Root.Id,
+                        Code = $"c-{spec.Id}",
+                        Title = spec.Title ?? $"t{spec.Id}",
+                        Payload = Convert.FromHexString($"0A0B{spec.Id:X4}"),
+                    }
+                    : await Load(device.Items.GetByIdAsync(spec.Id, ct), op);
+
+            if (spec.State == ModelRowState.Updated && spec.Title is { } title)
+            {
+                item.Title = title;
+            }
+
+            Mark(item, spec.State);
+            root.ModelItems.Add(item);
+        }
+
+        foreach (var spec in op.Labels)
+        {
+            var label =
+                spec.State == ModelRowState.Added
+                    ? new ModelLabelEntity
+                    {
+                        LabelCode = spec.Code,
+                        FolderId = op.Root.Id,
+                        Caption = spec.Caption ?? spec.Code,
+                    }
+                    : await Load(device.Labels.GetByIdAsync(spec.Code, ct), op);
+
+            if (spec.State == ModelRowState.Updated && spec.Caption is { } caption)
+            {
+                label.Caption = caption;
+            }
+
+            Mark(label, spec.State);
+            root.ModelLabels.Add(label);
+        }
+
+        await device.Folders.SaveAsync(root, cancellationToken: ct);
+
+        static void Mark(EntityBase entity, ModelRowState state)
+        {
+            switch (state)
+            {
+                case ModelRowState.Added:
+                    entity.MarkAdded();
+                    break;
+                case ModelRowState.Updated:
+                    entity.MarkUpdated();
+                    break;
+                case ModelRowState.Removed:
+                    entity.MarkRemoved();
+                    break;
+                default:
+                    entity.MarkUnchanged();
+                    break;
+            }
         }
     }
 

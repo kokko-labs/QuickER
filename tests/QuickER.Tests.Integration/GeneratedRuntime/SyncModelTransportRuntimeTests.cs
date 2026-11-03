@@ -174,7 +174,20 @@ public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output) : ISyncM
 
     SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => Http;
 
-    public static TheoryData<string> ScenarioNames() => SyncModelRuntimeTests.ScenarioNames();
+    /// <summary>HTTP で流す決定的なシナリオの名前（シナリオの <see cref="SyncModelScenario.Transports"/> から作る）</summary>
+    public static TheoryData<string> ScenarioNames()
+    {
+        var data = new TheoryData<string>();
+
+        foreach (
+            var scenario in SyncModelScenarios.All.Where(s => s.RunsOn(SyncModelTransport.Http))
+        )
+        {
+            data.Add(scenario.Name);
+        }
+
+        return data;
+    }
 
     [Theory(
         DisplayName = "[Sync/モデル/HTTP] 決定的なシナリオは、HTTP 越しでも直結と同じ違反（正規化した署名）になる"
@@ -264,7 +277,11 @@ public sealed class SyncModelSqlServerRuntimeTests(
     {
         var data = new TheoryData<string>();
 
-        foreach (var scenario in SyncModelScenarios.All.Where(s => !s.ArmsServerFaults))
+        foreach (
+            var scenario in SyncModelScenarios.All.Where(s =>
+                s.RunsOn(SyncModelTransport.SqlServer)
+            )
+        )
         {
             data.Add(scenario.Name);
         }

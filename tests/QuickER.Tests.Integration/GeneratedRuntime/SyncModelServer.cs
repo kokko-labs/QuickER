@@ -239,6 +239,13 @@ internal sealed class SyncModelServerSource<TEntity, TKey>(
     {
         await faults.InterruptAsync(ModelInterruptPoint.BeforeServerFetch).ConfigureAwait(false);
         faults.ThrowOnServer(ModelFaultKind.ServerFetch);
+
+        // 決定的なシナリオが仕掛ける「最初の差分の取得を空で返す」（ダウンロードが届かなかった形）
+        if (faults.TakeEmptyFetch(typeof(TEntity)))
+        {
+            return new SyncChangeBatch<TEntity>([], false);
+        }
+
         var rows = await serverSqlExecutor.QueryBySqlAsync<TEntity>(
             changesSql,
             new

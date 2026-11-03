@@ -58,12 +58,14 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         SyncModelRun.SettledUpsertKind,
     ];
 
-    /// <summary>決定的なシナリオの名前（HTTP の派生も使う）</summary>
+    /// <summary>直結で流す決定的なシナリオの名前（シナリオの <see cref="SyncModelScenario.Transports"/> から作る）</summary>
     public static TheoryData<string> ScenarioNames()
     {
         var data = new TheoryData<string>();
 
-        foreach (var scenario in SyncModelScenarios.All)
+        foreach (
+            var scenario in SyncModelScenarios.All.Where(s => s.RunsOn(SyncModelTransport.Direct))
+        )
         {
             data.Add(scenario.Name);
         }
