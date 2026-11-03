@@ -29,7 +29,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <b>方言差</b>: SQLite の翻訳器は識別子を二重引用符で、LIKE パターンを <c>||</c> で連結する（SQL Server は
 /// 角括弧・<c>+</c>）。ただしこの差は生成 SQL 文字列の見た目に閉じ、<b>行集合の観測結果は両方言で一致</b>する。
 /// decimal 比較は QuickER の SQLite 版 Repository が数値として扱う（EF Core Sqlite の decimal 制約は本経路には
-/// 無関係。既存 <see cref="GeneratedSqliteRuntimeTestsBase"/> の <c>Balance!.Value &gt;= 300m</c> と同経路）。
+/// 無関係。実装先の一致のシナリオ <c>query-where-expression-and-paging</c> の <c>o.Amount.Value &gt;= 300m</c> と同経路）。
 /// </para>
 /// <para>
 /// <b>到達不能な分岐（bool メンバ）について</b>: 翻訳器の「bool 列メンバ真＝<c>"col"=1</c>」「bool 列の NOT＝

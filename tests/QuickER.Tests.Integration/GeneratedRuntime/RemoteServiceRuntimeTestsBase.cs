@@ -27,9 +27,12 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <c>Http{Entity}RemoteRepository</c> だけを使う＝利用者が組む 3 階層とまったく同じ経路で検証する。
 /// </para>
 /// <para>
-/// 検証の柱: (1) リモート面の CRUD・グラフ保存（保存後の RowState 確定＝直結と同じ挙動）、
-/// (2) 名前付きクエリの全形（DSL・VO 型引数・IN・射影・スカラー・自由 SQL・manual）が HTTP 越しに同じ結果を返す、
-/// (3) 例外伝搬（サーバーの SaveConflictException がクライアントで同型として復元される）。
+/// 検証の柱: (1) 名前付きクエリの全形（DSL・VO 型引数・IN・射影・スカラー・自由 SQL・manual）が HTTP 越しに同じ結果を返す、
+/// (2) HTTP 固有の振る舞い（400・413・500 の分類と OnServerError フック・HttpClient の登録の形と寿命・ページング引数の検査）。
+/// リモート面の CRUD・グラフ保存（保存後の RowState 確定）・SaveConflictException の型の復元・null の引数と要素の扱いは、
+/// 実装先の一致のシナリオ（<c>remote-crud-round-trip</c>・<c>remote-save-round-trip</c>・
+/// <c>save-missing-row-conflicts-unless-insert-when-missing</c>・<c>null-argument-is-refused</c>・
+/// <c>remote-save-writes-back-hook-values</c>）が直結の 3 つとリモートの 2 つの実装先で見る。
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
@@ -107,56 +110,6 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
             Memo = memo is null ? null : MemoValue.Create(memo),
         };
 
-    /// <summary>1. CRUD（挿入・単一取得・更新・削除・全件）が HTTP 越しに機能する</summary>
-    [Fact(DisplayName = "[RemoteService] 1: CRUD が HTTP 越しに機能する")]
-    public async Task Crud_WorksOverHttp()
-    {
-        await Customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
-        await Orders.InsertAsync(NewOrder(10, 1, 100m, "apple pie"), Ct);
-
-        var loaded = await Orders.GetByIdAsync(OrderIdValue.Create(10), Ct);
-        loaded.Should().NotBeNull();
-        loaded!.Memo!.Value.Should().Be("apple pie");
-        loaded.Amount!.Value.Should().Be(100m);
-
-        loaded.Memo = MemoValue.Create("apple tart");
-        (await Orders.UpdateAsync(loaded, cancellationToken: Ct)).Should().BeTrue();
-        (await Orders.GetByIdAsync(OrderIdValue.Create(10), Ct))!
-            .Memo!.Value.Should()
-            .Be("apple tart");
-
-        (await Orders.DeleteAsync(OrderIdValue.Create(10), Ct)).Should().BeTrue();
-        (await Orders.GetAllAsync(Ct)).Should().BeEmpty();
-        (await Orders.GetByIdAsync(OrderIdValue.Create(10), Ct)).Should().BeNull();
-    }
-
-    /// <summary>2. グラフ保存（Save）が機能し、保存後にローカルの RowState が直結時と同じく確定する</summary>
-    [Fact(DisplayName = "[RemoteService] 2: グラフ保存が機能しローカル RowState が確定する")]
-    public async Task Save_PersistsAndAcceptsLocalChanges()
-    {
-        await Customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
-
-        var order = NewOrder(10, 1, 100m, "apple pie");
-        order.MarkAdded();
-        order.IsAdded.Should().BeTrue();
-
-        (await Orders.SaveAsync(order, cancellationToken: Ct)).Should().Be(1);
-
-        // 直結（EntityGraphSaver.AcceptChanges）と同じく、保存成功後は Unchanged に確定する
-        order.IsAdded.Should().BeFalse();
-        order.HasChanges.Should().BeFalse();
-
-        (await Orders.GetByIdAsync(OrderIdValue.Create(10), Ct)).Should().NotBeNull();
-
-        // 変更→再保存（更新経路）も機能する（エンティティは自動変更追跡しないため MarkUpdated が必要＝直結時と同じ）
-        order.Memo = MemoValue.Create("apple tart");
-        order.MarkUpdated();
-        (await Orders.SaveAsync(order, cancellationToken: Ct)).Should().Be(1);
-        (await Orders.GetByIdAsync(OrderIdValue.Create(10), Ct))!
-            .Memo!.Value.Should()
-            .Be("apple tart");
-    }
-
     /// <summary>3. 名前付きクエリ（DSL 一覧＋ページング・件数・単一）が HTTP 越しに同じ結果を返す</summary>
     [Fact(DisplayName = "[RemoteService] 3: DSL クエリ（一覧・件数・単一）が HTTP 越しに機能する")]
     public async Task DslQueries_WorkOverHttp()
@@ -220,66 +173,6 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
         // manual（サーバー側 partial 実装へ委譲される）
         var first = await Orders.SpecialLookupAsync(1, Ct);
         first!.OrderId.Value.Should().Be(10);
-    }
-
-    /// <summary>6. サーバーの SaveConflictException がクライアントで同型として復元される（直結時と同じ catch が機能する）</summary>
-    [Fact(DisplayName = "[RemoteService] 6: SaveConflictException が HTTP 越しに型ごと復元される")]
-    public async Task SaveConflict_IsRestoredAsSameExceptionType()
-    {
-        await Customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
-
-        // 存在しない注文の更新保存（insertWhenUpdateMissing=false）はサーバー側で SaveConflictException になる
-        var missing = NewOrder(999, 1, 10m, null);
-        missing.MarkUpdated();
-
-        var act = () => Orders.SaveAsync(missing, cancellationToken: Ct);
-
-        await act.Should().ThrowAsync<SaveConflictException>();
-    }
-
-    /// <summary>
-    /// 7. SaveMany（複数集約の一括保存）が HTTP 越しに機能し、Added+Updated 混在でも保存後に各ローカル RowState が確定する。
-    /// 既存の単一 Save テスト（#2）の複数版で、サーバー側 SaveMany エンドポイントを経由する。
-    /// </summary>
-    [Fact(
-        DisplayName = "[RemoteService] 7: SaveMany（複数一括・Added+Updated 混在）が HTTP 越しに機能する"
-    )]
-    public async Task SaveMany_PersistsMixedStatesAndAcceptsLocalChanges()
-    {
-        await Customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
-
-        // まず 2 件を一括 Added で保存する（IEnumerable 版の SaveAsync＝SaveMany エンドポイント経由）
-        var order10 = NewOrder(10, 1, 100m, "apple pie");
-        var order11 = NewOrder(11, 1, 50m, "banana");
-        order10.MarkAdded();
-        order11.MarkAdded();
-
-        (await Orders.SaveAsync([order10, order11], cancellationToken: Ct)).Should().Be(2);
-
-        // 直結（EntityGraphSaver.AcceptChanges）と同じく、保存成功後は各ローカル RowState が Unchanged に確定する
-        order10.IsAdded.Should().BeFalse();
-        order11.IsAdded.Should().BeFalse();
-        order10.HasChanges.Should().BeFalse();
-        order11.HasChanges.Should().BeFalse();
-
-        (await Orders.GetByIdAsync(OrderIdValue.Create(10), Ct)).Should().NotBeNull();
-        (await Orders.GetByIdAsync(OrderIdValue.Create(11), Ct)).Should().NotBeNull();
-
-        // Added（新規 12）＋ Updated（既存 10 の更新）を混在させた一括保存
-        order10.Memo = MemoValue.Create("apple tart");
-        order10.MarkUpdated();
-        var order12 = NewOrder(12, 1, 200m, "cherry");
-        order12.MarkAdded();
-
-        (await Orders.SaveAsync([order10, order12], cancellationToken: Ct)).Should().Be(2);
-
-        order10.HasChanges.Should().BeFalse();
-        order12.IsAdded.Should().BeFalse();
-
-        (await Orders.GetByIdAsync(OrderIdValue.Create(10), Ct))!
-            .Memo!.Value.Should()
-            .Be("apple tart");
-        (await Orders.GetByIdAsync(OrderIdValue.Create(12), Ct))!.Amount!.Value.Should().Be(200m);
     }
 
     /// <summary>
@@ -676,62 +569,6 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
     }
 
     /// <summary>
-    /// null 引数の拒否は直結とリモートで同型（<see cref="ArgumentNullException"/>）・同じパラメータ名になる。
-    /// </summary>
-    /// <remarks>
-    /// 直結実装（QuickER / EF Core）は入口で <c>ArgumentNullException.ThrowIfNull</c> を通すのに対し、HTTP 実装は
-    /// null をそのまま直列化してサーバー奥まで運び、リポジトリ内の別の例外＝500 に化けていた。実装を差し替えても
-    /// catch の型が変わらないことが契約なので、同じ図・同じ操作で両者の例外が一致することを表明する。
-    /// </remarks>
-    [Fact(
-        DisplayName = "[RemoteService] 20: null 引数は直結・リモートとも ArgumentNullException（パリティ）"
-    )]
-    public async Task NullArgument_ThrowsArgumentNullException_LikeDirectConnection()
-    {
-        var services = new ServiceCollection();
-        ConfigureServerRepositories(services, _db.ReadWriteCreateConnectionString);
-        await using var directProvider = services.BuildServiceProvider();
-
-        var direct = directProvider.GetRequiredService<ICustomerRepository>();
-        var remote = Customers;
-
-        var cases = new (string Parameter, Func<Task> Direct, Func<Task> Remote)[]
-        {
-            ("entity", () => direct.InsertAsync(null!, Ct), () => remote.InsertAsync(null!, Ct)),
-            (
-                "entity",
-                () => direct.UpdateAsync(null!, cancellationToken: Ct),
-                () => remote.UpdateAsync(null!, cancellationToken: Ct)
-            ),
-            (
-                "entity",
-                () => direct.SaveAsync((CustomerEntity)null!, cancellationToken: Ct),
-                () => remote.SaveAsync((CustomerEntity)null!, cancellationToken: Ct)
-            ),
-            (
-                "entities",
-                () => direct.SaveAsync((IEnumerable<CustomerEntity>)null!, cancellationToken: Ct),
-                () => remote.SaveAsync((IEnumerable<CustomerEntity>)null!, cancellationToken: Ct)
-            ),
-            (
-                "entity",
-                () => direct.CheckUniquenessAsync(null!, Ct),
-                () => remote.CheckUniquenessAsync(null!, Ct)
-            ),
-        };
-
-        foreach (var (parameter, directCall, remoteCall) in cases)
-        {
-            (await directCall.Should().ThrowAsync<ArgumentNullException>())
-                .Which.ParamName.Should()
-                .Be(parameter);
-            (await remoteCall.Should().ThrowAsync<ArgumentNullException>())
-                .Which.ParamName.Should()
-                .Be(parameter, "リモートも HTTP を投げる前に直結と同じ例外で弾く");
-        }
-    }
-
-    /// <summary>
     /// 21. 名前付きクエリのページング引数（<c>take</c> / <c>skip</c>）が不正な値のリクエストは 400（BadRequest）になる。
     /// </summary>
     /// <remarks>
@@ -790,7 +627,7 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
     /// <para>
     /// 直結実装は <c>Query().Skip(skip).Take(take)</c> を通るため <c>SqlQuery.Skip</c> / <c>Take</c> が
     /// <see cref="ArgumentOutOfRangeException"/> で拒否するのに対し、生成 HTTP クライアントは値をそのまま載せて
-    /// サーバーの 400 へ倒していた＝実装を差し替えると catch の型が変わっていた。null 引数（テスト 20）と同じく
+    /// サーバーの 400 へ倒していた＝実装を差し替えると catch の型が変わっていた。null 引数（実装先の一致の <c>null-argument-is-refused</c>）と同じく
     /// 「入口で直結と同じ例外」を契約とするため、型・<c>ParamName</c>・メッセージの一致まで表明する。
     /// </para>
     /// <para>
@@ -845,52 +682,6 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
         (await remote.GetByCustomerAsync(1, take: 1, skip: 0, Ct))
             .Should()
             .BeEmpty();
-    }
-
-    /// <summary>
-    /// 23. 複数集約の一括保存（SaveAsync(IEnumerable)）はリスト内の null 要素を飛ばし、直結とリモートで同じ件数を返す。
-    /// </summary>
-    /// <remarks>
-    /// 直結の 3 実装はいずれも null 要素を黙って無視し、サーバー側の応答収集も null を飛ばす。HTTP クライアントだけが
-    /// 送信前のガード（除外列の検査）と保存後の RowState 確定で null 要素を読みに行き、NullReferenceException になっていた。
-    /// </remarks>
-    [Fact(
-        DisplayName = "[RemoteService] 23: SaveMany はリスト内の null 要素を飛ばす（直結とのパリティ）"
-    )]
-    public async Task SaveMany_SkipsNullElements_LikeDirectConnection()
-    {
-        await Customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
-
-        var services = new ServiceCollection();
-        ConfigureServerRepositories(services, _db.ReadWriteCreateConnectionString);
-        await using var directProvider = services.BuildServiceProvider();
-        var direct = directProvider.GetRequiredService<IOrderRepository>();
-
-        var directFirst = NewOrder(20, 1, 10m, "direct a");
-        var directSecond = NewOrder(21, 1, 20m, "direct b");
-        directFirst.MarkAdded();
-        directSecond.MarkAdded();
-        var directAffected = await direct.SaveAsync(
-            [directFirst, null!, directSecond],
-            cancellationToken: Ct
-        );
-
-        var remoteFirst = NewOrder(10, 1, 100m, "remote a");
-        var remoteSecond = NewOrder(11, 1, 50m, "remote b");
-        remoteFirst.MarkAdded();
-        remoteSecond.MarkAdded();
-        var remoteAffected = await Orders.SaveAsync(
-            [remoteFirst, null!, remoteSecond],
-            cancellationToken: Ct
-        );
-
-        remoteAffected.Should().Be(directAffected).And.Be(2);
-
-        // 直結と同じく、保存できた要素のローカル RowState は確定する
-        remoteFirst.HasChanges.Should().BeFalse();
-        remoteSecond.HasChanges.Should().BeFalse();
-        (await Orders.GetByIdAsync(OrderIdValue.Create(10), Ct)).Should().NotBeNull();
-        (await Orders.GetByIdAsync(OrderIdValue.Create(11), Ct)).Should().NotBeNull();
     }
 
     /// <summary>使い終えたクライアント DI・サーバー・一時 DB を破棄する</summary>

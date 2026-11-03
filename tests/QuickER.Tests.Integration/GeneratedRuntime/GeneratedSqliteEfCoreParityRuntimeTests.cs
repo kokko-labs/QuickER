@@ -15,7 +15,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 基底 <see cref="GeneratedSqliteRuntimeTestsBase"/> の全シナリオを EF Core Sqlite で流すことで、
+/// 基底 <see cref="GeneratedSqliteRuntimeTestsBase"/> のシナリオを EF Core Sqlite で流すことで、
 /// <b>「AddGeneratedSqliteRepositories（QuickER の SQLite）⇔ AddGeneratedEfCoreRepositories＋UseSqlite（EF Core）を差し替える
 /// だけで交換可能」</b>という契約を、<see cref="GeneratedSqliteAdoRuntimeTests"/> と同一のアサーション集合で
 /// 証明する（＝SQLite AdoParity）。両派生が同じ基底シナリオを緑にすることが、同一 DB 状態への読み書き双方向で

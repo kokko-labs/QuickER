@@ -24,8 +24,10 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 生成された HTTP リモート実装のみを使う。
 /// </summary>
 /// <remarks>
-/// 柱: (1) クライアント経由の Insert→GetById でも除外列は未取得状態で返る、(2) 除外列に値を残した UpdateAsync は
-/// <b>HTTP 送信前</b>にクライアント側ガードで弾かれる、(3) 射影（GetPayloads）は除外列 payload を Base64 経由で取れる。
+/// 除外列が未取得で返ること・除外列に値を残した更新をクライアントで断ること・Stream の往復と契約（行なしと NULL・NULL の設定・
+/// 空の本文・シークできない Stream の長さ・渡した Stream を閉じないこと・ファイル糖衣）は、実装先どうしの一致のシナリオ
+/// （<c>blob-*</c>）がリモートでも QuickER 版と並べて見る。ここに残すのは、その図に無いもの（有界バイナリ・名前付きクエリ）と、
+/// HTTP に固有のもの（リクエストサイズの上限と 413・411・400・marker のない 404）。
 /// </remarks>
 [Trait("Category", "Integration")]
 public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
@@ -60,9 +62,12 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
     private IDocumentRemoteRepository Documents =>
         _clientProvider!.GetRequiredService<IDocumentRemoteRepository>();
 
-    /// <summary>1. クライアント経由の Insert→GetById でも除外列は未取得状態で返る</summary>
-    [Fact(DisplayName = "[Binary/Remote] 1: Insert→GetById で除外列は未取得状態で返る")]
-    public async Task Crud_ExcludesUnboundedBinaryOverHttp()
+    /// <summary>
+    /// 1. クライアント経由の Insert→GetById で有界バイナリ（除外対象外）は HTTP 越しに取れる（除外列が未取得で返ることは
+    /// 実装先どうしの一致の <c>blob-excluded-columns-read-and-write-guard</c> が見る。その図は有界バイナリを持たない）
+    /// </summary>
+    [Fact(DisplayName = "[Binary/Remote] 1: Insert→GetById で有界バイナリは除外されずに返る")]
+    public async Task Crud_KeepsBoundedBinaryOverHttp()
     {
         await Documents.InsertAsync(
             new DocumentEntity
@@ -78,42 +83,8 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
 
         var loaded = await Documents.GetByIdAsync(1, Ct);
         loaded.Should().NotBeNull();
-        loaded!.Title.Should().Be("alpha");
-        loaded.Payload.Should().BeNull("除外列 payload はサーバーの SELECT で外れる");
-        loaded.Thumb.Should().BeEmpty("除外列 thumb はサーバーの SELECT で外れる");
+        loaded!.Payload.Should().BeNull("除外列 payload はサーバーの SELECT で外れる");
         loaded.Checksum.Should().Equal([7, 7], "有界バイナリ checksum は除外対象外＝取れる");
-    }
-
-    /// <summary>2. 除外列に値を残した UpdateAsync は HTTP 送信前にクライアント側ガードで弾かれる</summary>
-    [Fact(DisplayName = "[Binary/Remote] 2: 除外列非空の UpdateAsync は送信前ガードで例外になる")]
-    public async Task Update_WithAssignedExcludedColumn_ThrowsBeforeSend()
-    {
-        await Documents.InsertAsync(
-            new DocumentEntity
-            {
-                DocumentId = 1,
-                Title = "alpha",
-                Thumb = Doc1Thumb,
-            },
-            Ct
-        );
-
-        // サーバーを止めても例外になる＝HTTP を投げる前にクライアント側ガードで弾かれていることを示す
-        await _server!.StopAsync(Ct);
-
-        var doc = new DocumentEntity
-        {
-            DocumentId = 1,
-            Title = "alpha",
-            Thumb = Doc1Thumb,
-            Payload = [5, 5],
-        };
-
-        var act = () => Documents.UpdateAsync(doc, cancellationToken: Ct);
-
-        (await act.Should().ThrowAsync<InvalidOperationException>())
-            .Which.Message.Should()
-            .Contain("Payload");
     }
 
     /// <summary>3. 射影（GetPayloads）は除外列 payload を Base64 経由で取得できる</summary>
@@ -153,138 +124,6 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
             },
             Ct
         );
-    }
-
-    /// <summary>4. クライアント経由で数 MB を Write→Read 往復し一致する（ファイル糖衣でも 1 往復）</summary>
-    [Fact(
-        DisplayName = "[Binary/Remote] 4: 数 MB の Write→Read 往復が一致（Stream・ファイル糖衣）"
-    )]
-    public async Task Stream_WriteThenRead_RoundTripsLargeData()
-    {
-        await SeedAsync(1, null, Doc1Thumb);
-
-        var large = new byte[3 * 1024 * 1024];
-        new Random(20260715).NextBytes(large);
-
-        // Stream 版の往復
-        (await Documents.WritePayloadAsync(1, new MemoryStream(large), cancellationToken: Ct))
-            .Should()
-            .BeTrue();
-
-        using var destination = new MemoryStream();
-        (await Documents.ReadPayloadAsync(1, destination, Ct)).Should().BeTrue();
-        destination.ToArray().Should().Equal(large, "HTTP 越しの Stream 往復で blob が一致する");
-
-        // ファイル糖衣の往復（拡張メソッドはリモート面を対象にするため HTTP クライアントでも動く）
-        var sourcePath = Path.GetTempFileName();
-        var destinationPath = Path.GetTempFileName();
-
-        try
-        {
-            await File.WriteAllBytesAsync(sourcePath, large, Ct);
-            (await Documents.WritePayloadFromFileAsync(1, sourcePath, Ct)).Should().BeTrue();
-            (await Documents.ReadPayloadToFileAsync(1, destinationPath, Ct)).Should().BeTrue();
-            (await File.ReadAllBytesAsync(destinationPath, Ct))
-                .Should()
-                .Equal(large, "ファイル糖衣でも往復で一致する");
-        }
-        finally
-        {
-            File.Delete(sourcePath);
-            File.Delete(destinationPath);
-        }
-    }
-
-    /// <summary>5. 行なし/NULL の Read は false（HTTP 404 経由）・行なしの Write/Delete も false</summary>
-    [Fact(DisplayName = "[Binary/Remote] 5: 行なし/NULL の Read/Write/Delete は false（404 経由）")]
-    public async Task Stream_MissingRowOrNull_ReturnsFalse()
-    {
-        await SeedAsync(1, null, Doc1Thumb);
-
-        // 行なしの Read
-        using var noRow = new MemoryStream();
-        (await Documents.ReadPayloadAsync(999, noRow, Ct)).Should().BeFalse("行なしは 404→false");
-
-        // 列 NULL の Read（payload を NULL で挿入した行）
-        using var nullColumn = new MemoryStream();
-        (await Documents.ReadPayloadAsync(1, nullColumn, Ct))
-            .Should()
-            .BeFalse("列 NULL は 404→false");
-        nullColumn.Length.Should().Be(0, "false のとき宛先へ何も書かない");
-
-        // 行なしの Write / Delete
-        (
-            await Documents.WritePayloadAsync(
-                999,
-                new MemoryStream([1, 2, 3]),
-                cancellationToken: Ct
-            )
-        )
-            .Should()
-            .BeFalse("行なしの Write は 404→false");
-        (await Documents.WritePayloadAsync(999, null, cancellationToken: Ct))
-            .Should()
-            .BeFalse("行なしの Delete は 404→false");
-    }
-
-    /// <summary>6. DELETE（source=null）で DB が NULL になる（行は残る）</summary>
-    [Fact(DisplayName = "[Binary/Remote] 6: DELETE（source=null）で列が NULL になる")]
-    public async Task Stream_Delete_SetsColumnNull()
-    {
-        await SeedAsync(1, Doc1Payload, Doc1Thumb);
-
-        // 事前: payload は読める
-        using (var before = new MemoryStream())
-        {
-            (await Documents.ReadPayloadAsync(1, before, Ct)).Should().BeTrue();
-        }
-
-        // DELETE で NULL 化
-        (await Documents.WritePayloadAsync(1, null, cancellationToken: Ct))
-            .Should()
-            .BeTrue();
-
-        // 事後: Read は false（NULL）だが行は残っている
-        using var after = new MemoryStream();
-        (await Documents.ReadPayloadAsync(1, after, Ct)).Should().BeFalse("DELETE 後は列 NULL");
-        (await Documents.GetByIdAsync(1, Ct)).Should().NotBeNull("行自体は削除されない");
-    }
-
-    /// <summary>7. PUT 空ボディ（空 MemoryStream）は 0 バイト書き込み（NULL と区別される）</summary>
-    [Fact(DisplayName = "[Binary/Remote] 7: PUT 空ボディは 0 バイト書き込み（NULL と区別）")]
-    public async Task Stream_EmptyBody_WritesZeroBytesNotNull()
-    {
-        await SeedAsync(1, Doc1Payload, Doc1Thumb);
-
-        // 空 Stream の PUT ＝ 0 バイトの blob（NULL 化ではない）
-        (await Documents.WritePayloadAsync(1, new MemoryStream([]), cancellationToken: Ct))
-            .Should()
-            .BeTrue();
-
-        using var destination = new MemoryStream();
-        (await Documents.ReadPayloadAsync(1, destination, Ct))
-            .Should()
-            .BeTrue("0 バイトの blob は存在する（true）＝NULL（false）と区別される");
-        destination.Length.Should().Be(0, "書き込んだ blob は空");
-    }
-
-    /// <summary>8. 非シーク Stream＋length なしはクライアント側で送信前に ArgumentException</summary>
-    [Fact(
-        DisplayName = "[Binary/Remote] 8: 非シーク Stream＋length なしは送信前に ArgumentException"
-    )]
-    public async Task Stream_NonSeekableWithoutLength_ThrowsBeforeSend()
-    {
-        await SeedAsync(1, null, Doc1Thumb);
-
-        // サーバーを止めても例外になる＝HTTP を投げる前にクライアント側の長さ検証で弾かれている
-        await _server!.StopAsync(Ct);
-
-        var act = () =>
-            Documents.WritePayloadAsync(1, new NonSeekableStream([1, 2, 3]), cancellationToken: Ct);
-
-        (await act.Should().ThrowAsync<ArgumentException>())
-            .Which.Message.Should()
-            .Contain("length");
     }
 
     /// <summary>
@@ -694,40 +533,6 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
         return client.SendAsync(request, Ct);
     }
 
-    /// <summary>
-    /// 10. Thumb 列（第 2 の除外列）も HTTP 越しに Write→Read 往復し、再書き込みで全置換される。
-    /// Thumb は非 nullable 列（BinaryFixtureDefinition の設計）のため SET NULL（DELETE）は制約違反となる。
-    /// NULL 化系の検証は nullable な Payload 側のテストが担う。
-    /// </summary>
-    [Fact(DisplayName = "[Binary/Remote] 10: Thumb 列の Write→Read 往復と再書き込みによる全置換")]
-    public async Task Stream_Thumb_WriteReadOverwriteRoundTrips()
-    {
-        await SeedAsync(1, null, Doc1Thumb);
-
-        var data = new byte[64 * 1024];
-        new Random(20260719).NextBytes(data);
-
-        // Thumb 列（Payload とは別の除外列）へ Stream で書き込み、読み戻して一致する
-        (await Documents.WriteThumbAsync(1, new MemoryStream(data), cancellationToken: Ct))
-            .Should()
-            .BeTrue();
-
-        using var destination = new MemoryStream();
-        (await Documents.ReadThumbAsync(1, destination, Ct)).Should().BeTrue();
-        destination.ToArray().Should().Equal(data, "Thumb 列も HTTP 越しの Stream 往復で一致する");
-
-        // より小さいデータで再書き込み → 旧データが残らず全置換される
-        var smaller = new byte[1024];
-        new Random(20260720).NextBytes(smaller);
-        (await Documents.WriteThumbAsync(1, new MemoryStream(smaller), cancellationToken: Ct))
-            .Should()
-            .BeTrue();
-
-        using var after = new MemoryStream();
-        (await Documents.ReadThumbAsync(1, after, Ct)).Should().BeTrue();
-        after.ToArray().Should().Equal(smaller, "再書き込みは旧データを残さず全置換する");
-    }
-
     /// <summary>11. バイナリ図の名前付きクエリ（GetByTitle・CountWithPayload）が HTTP 越しに機能する</summary>
     [Fact(
         DisplayName = "[Binary/Remote] 11: 名前付きクエリ（GetByTitle・CountWithPayload）が HTTP 越しに機能する"
@@ -903,33 +708,6 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
         (await delete.Should().ThrowAsync<RemoteRepositoryException>())
             .Which.StatusCode.Should()
             .Be(404);
-    }
-
-    /// <summary>
-    /// 16. リモートの Write も渡された Stream を閉じない（直結実装＝<c>BinaryColumnAdoRuntimeTests</c> と同じ所有権契約）。
-    /// </summary>
-    [Fact(
-        DisplayName = "[Binary/Remote] 16: Write は渡された source Stream を閉じない（直結と対称）"
-    )]
-    public async Task Stream_Write_LeavesSourceStreamOpen()
-    {
-        await SeedAsync(1, null, Doc1Thumb);
-
-        var payload = new byte[4096];
-        new Random(77).NextBytes(payload);
-
-        using var source = new MemoryStream(payload);
-        (await Documents.WritePayloadAsync(1, source, cancellationToken: Ct)).Should().BeTrue();
-
-        // 破棄済み MemoryStream は CanRead=false になる＝HTTP レイヤのコンテンツ破棄が呼び出し側 Stream へ波及していない
-        source
-            .CanRead.Should()
-            .BeTrue("Stream の所有権は呼び出し側にあり、リモート実装も閉じない");
-        source.Position.Should().Be(payload.Length, "読み切られてはいるが破棄はされていない");
-
-        // 同じ Stream を巻き戻して再送できる＝閉じられていないことの実用的な確認
-        source.Position = 0;
-        (await Documents.WriteThumbAsync(1, source, cancellationToken: Ct)).Should().BeTrue();
     }
 
     /// <summary>CanSeek でない Stream（length を渡さないと長さ不明）＝クライアント側検証の再現用</summary>

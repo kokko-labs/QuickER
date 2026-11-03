@@ -9,7 +9,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 一致テストの決まった形のシナリオ。どれも QuickER 版（SQLite 実ファイル）を基準に、ほかの実装先が同じ結果になることを
 /// 表明する。今わかっている違いは <see cref="BackendParityKnownDifferences"/> が名指しする。
 /// </summary>
-public static class BackendParityScenarios
+public static partial class BackendParityScenarios
 {
     private const string S = "A";
 
@@ -38,11 +38,25 @@ public static class BackendParityScenarios
                 new InsertOp(new OrderRow(13, 3, 12.5m, "n", Payload: [0x05], Thumb: [0x06])),
                 new InsertOp(new LineRow(103, 13, "cup", 3, 1.25m)),
                 new LoadOp(S, "orders", 13),
+                ParityExpect.RootState("crud-basic-loaded-unchanged", S, RowState.Unchanged),
+                ParityExpect.SlotRow(
+                    "crud-basic-loaded-values",
+                    S,
+                    "orders/13",
+                    "customer=3",
+                    "amount=12.5",
+                    "memo='n'"
+                ),
                 new EditMemoOp(S, 13, null),
                 new UpdateOrderOp(S),
+                ParityExpect.Outcome("crud-basic-update", "updated=True"),
+                ParityExpect.StateRow("crud-basic-update-to-null", "orders/13", "memo=null"),
                 new LoadOp("B", "orders", 99),
+                ParityExpect.Outcome("crud-basic-missing-key", "null"),
                 new DeleteOp("order_lines", 103),
+                ParityExpect.Outcome("crud-basic-delete", "deleted=True"),
                 new DeleteOp("order_lines", 103),
+                ParityExpect.Outcome("crud-basic-delete-again", "deleted=False"),
             ]
         ),
         // 根を読み、明細を個別に読んで足したグラフ（リモートでも組める形）を編集・保存する
@@ -168,7 +182,21 @@ public static class BackendParityScenarios
                 new AttachChildCustomerOp(S, 5),
                 new MarkRemovedOp(S, "customers/5"),
                 new SaveOp(S),
+                ParityExpect.Succeeds("unique-value-freed-by-delete-succeeds"),
                 new LoadOp("C", "customers", 6),
+                ParityExpect.StateKeys(
+                    "unique-value-freed-by-delete-rows",
+                    "customers/1",
+                    "customers/2",
+                    "customers/6",
+                    "orders/10",
+                    "orders/11",
+                    "orders/12",
+                    "order_lines/100",
+                    "order_lines/101",
+                    "order_lines/102"
+                ),
+                ParityExpect.StateRow("unique-value-taken-by-new-row", "customers/6", "name=Eve"),
             ]
         ),
         // DB にある行を消し、同じキーの新しい行を足して 1 回で保存すると、削除が先に走り、行が置き換わる（ルートの並びに依らない）
@@ -431,6 +459,13 @@ public static class BackendParityScenarios
             [
                 new NewRootOp(S, new OrderRow(20, 1, 1m, "re", UnsetBlobs: true), RowState.Updated),
                 new SaveOp(S, new(InsertWhenUpdateMissing: true)),
+                // 更新の対象が無く挿入へ切り替わると、Before は Update で 1 回・After は実際の操作の Insert で走り、行ができる
+                ParityExpect.Succeeds("insert-missing-succeeds"),
+                ParityExpect.RawHooks(
+                    "insert-missing-before-update-after-insert",
+                    ["Before:Update:orders/20", "After:Insert:orders/20"]
+                ),
+                ParityExpect.StateRow("insert-missing-row", "orders/20", "memo='re'"),
             ]
         ),
         // #33: 他者が消した 9 行を、insertWhenUpdateMissing のグラフ保存 1 回で保存し直す（やり直しの上限の下）
@@ -494,7 +529,21 @@ public static class BackendParityScenarios
         new(
             "execute-delete-cascade-column-predicate",
             Basic,
-            [new ExecuteDeleteOrdersOp(ParityOrderPredicate.AmountAtLeast100, CascadeDelete: true)]
+            [
+                new ExecuteDeleteOrdersOp(
+                    ParityOrderPredicate.AmountAtLeast100,
+                    CascadeDelete: true
+                ),
+                ParityExpect.Outcome("cascade-delete-counts-root-and-children", "rows=3"),
+                ParityExpect.StateKeys(
+                    "cascade-delete-rows-left",
+                    "customers/1",
+                    "customers/2",
+                    "orders/11",
+                    "orders/12",
+                    "order_lines/102"
+                ),
+            ]
         ),
         // #37: カスケードの一括削除をナビゲーションの条件で流す。EF Core は最初に根のキーを読み、そのキーで子孫から根まで
         // 消す＝条件に合う根（明細を持つ注文 10・12）と明細がすべて消える（決定 2026-10-13）。QuickER 版とインメモリは
@@ -514,7 +563,11 @@ public static class BackendParityScenarios
         new(
             "execute-delete-cyclic-cascade",
             Basic,
-            [new ExecuteDeleteCustomersOp(CascadeDelete: true)]
+            [
+                new ExecuteDeleteCustomersOp(CascadeDelete: true),
+                ParityExpect.Throws("cyclic-cascade-is-refused", "NotSupportedException"),
+                ParityExpect.StateRows("cyclic-cascade-changes-nothing", 8),
+            ]
         ),
         // 除外 blob の Stream アクセサ（EF Core には無い）
         new(
@@ -538,7 +591,15 @@ public static class BackendParityScenarios
             Basic,
             [
                 new InsertOp(new CustomerRow(1, "Dup")),
+                ParityExpect.Throws("insert-duplicate-key-refused", "store-rejected"),
+                ParityExpect.StateRow(
+                    "insert-duplicate-key-keeps-row",
+                    "customers/1",
+                    "name=Alice"
+                ),
                 new InsertOp(new CustomerRow(5, "Alice")),
+                ParityExpect.Throws("insert-duplicate-unique-refused", "store-rejected"),
+                ParityExpect.StateRows("insert-duplicate-unique-writes-nothing", 8),
                 new NewRootOp("x", new OrderRow(60, 1, 1m), RowState.Added),
                 new AddLineOp("x", new LineRow(160, 60, "a", 1)),
                 new AddLineOp("x", new LineRow(100, 60, "dupkey", 1)),
@@ -730,6 +791,10 @@ public static class BackendParityScenarios
                 new AddChildOp("S", "customers/7", new OrderRow(70, 0, 5m), RowState.Added),
                 new AddChildOp("S", "orders/70", new LineRow(71, 0, "y", 2), RowState.Added),
                 new SaveOp("S"),
+                // フックを登録しなくてもグラフ保存は動き、行を保存して Unchanged にする
+                ParityExpect.Outcome("n2-no-hooks-save-rows", "rows=3"),
+                ParityExpect.RootState("n2-no-hooks-root-unchanged", "S", RowState.Unchanged),
+                ParityExpect.StateRow("n2-no-hooks-row-stored", "customers/7", "name=Seven"),
                 new LoadOp("C", "orders", 70),
                 new LoadOp("D", "order_lines", 71),
             ],
@@ -745,6 +810,15 @@ public static class BackendParityScenarios
                 new AddChildOp("S", "customers/0", new OrderRow(0, 0, 5m), RowState.Added),
                 new AddChildOp("S", "orders/0", new LineRow(31, 0, "z", 1), RowState.Added),
                 new SaveOp("S"),
+                // リモートはサーバーのフックが決めたキーを、保存の応答の値で呼び出し側のグラフへ書き戻す（根は Unchanged に確定する）
+                ParityExpect.RootState("n2-assigned-key-root-settles", "S", RowState.Unchanged),
+                ParityExpect.SlotKeys(
+                    "n2-assigned-keys-reach-caller",
+                    "S",
+                    "customers/900",
+                    "orders/9000",
+                    "order_lines/31"
+                ),
                 new LoadOp("C", "customers", ParityHookRecorder.AssignedCustomerKey),
                 new LoadOp("D", "orders", ParityHookRecorder.AssignedOrderKey),
                 new LoadOp("E", "order_lines", 31),
@@ -950,8 +1024,36 @@ public static class BackendParityScenarios
         ),
         HookOnCustomer("hook-throw-before-update", ParityHookBehavior.ThrowBefore, delete: false),
         HookOnCustomer("hook-throw-before-delete", ParityHookBehavior.ThrowBefore, delete: true),
-        HookOnCustomer("hook-throw-after-update", ParityHookBehavior.ThrowAfter, delete: false),
+        // After が投げると、保存の段の更新は全実装先で残らない（リモートはサーバーの 500）
+        HookOnCustomer(
+            "hook-throw-after-update",
+            ParityHookBehavior.ThrowAfter,
+            delete: false,
+            afterSave:
+            [
+                ParityExpect.OutcomeByKind(
+                    "throw-after-update-fails",
+                    ParityStep.HookFailure,
+                    remote: ParityStep.StoreRejected,
+                    remoteEfCoreOnly: ParityStep.StoreRejected
+                ),
+                ParityExpect.StateRow("throw-after-update-rolled-back", "customers/3", "note=null"),
+                ParityExpect.StateRow(
+                    "throw-after-update-other-row-rolled-back",
+                    "customers/4",
+                    "note=null"
+                ),
+            ]
+        ),
         HookOnCustomer("hook-throw-after-delete", ParityHookBehavior.ThrowAfter, delete: true),
+        // P3-3a: 生成コードのランタイムテストから移した行（系統ごとのファイル）
+        .. GraphSaveOrderScenarios(),
+        .. EfCoreRuntimeScenarios(),
+        .. CrudRuntimeScenarios(),
+        .. GraphSaveRuntimeScenarios(),
+        .. SaveHookRuntimeScenarios(),
+        .. BlobRuntimeScenarios(),
+        .. RemoteRuntimeScenarios(),
     ];
 
     /// <summary>
@@ -1137,10 +1239,12 @@ public static class BackendParityScenarios
     /// <summary>
     /// 顧客 3（注文なし）の更新か削除に、Save フックの振る舞い <paramref name="behavior"/> を当てる（同じ保存の顧客 4 には当てない）
     /// </summary>
+    /// <param name="afterSave">保存の直後に差し込む期待（手の並びは変えない）</param>
     private static ParityScenario HookOnCustomer(
         string name,
         ParityHookBehavior behavior,
-        bool delete
+        bool delete,
+        IReadOnlyList<ExpectOp>? afterSave = null
     ) =>
         new(
             name,
@@ -1153,6 +1257,7 @@ public static class BackendParityScenarios
                 new LoadOp("B", "customers", 4),
                 new EditCustomerOp("B", 4, Note: "m"),
                 new SaveManyCustomersOp(["A", "B"]),
+                .. afterSave ?? [],
                 new LoadOp("C", "customers", 3),
             ],
             new ParityBackendOptions(
@@ -1199,6 +1304,8 @@ public static class BackendParityScenarios
                     "Update:customers/6",
                     "Delete:customers/4"
                 ),
+                ParityExpect.StateKeys("D-move-rows", KeysWithCustomers(1, 2, 5, 6)),
+                ParityExpect.StateRow("D-move-referrer", "customers/6", "referrer=5"),
                 new LoadOp("C", "customers", 6),
             ]
         );
@@ -1352,7 +1459,7 @@ public static class BackendParityScenarios
 }
 
 /// <summary>決定した振る舞いへの期待（<see cref="ExpectOp"/>）を組み立てる</summary>
-public static class ParityExpect
+public static partial class ParityExpect
 {
     /// <summary>スロットの根（注文）のコレクションに、指定の明細がこの順でちょうど並ぶ</summary>
     public static ExpectOp ChildrenOf(string label, string slot, params int[] lineIds) =>

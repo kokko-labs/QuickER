@@ -1,7 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
@@ -13,25 +10,16 @@ using Xunit;
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
-/// Save フック（<see cref="ISaveHook{TEntity}"/>）が<b>リモート構成のサーバー側</b>で発火することを、実 HTTP
-/// （Kestrel を 127.0.0.1 の空きポートで in-process 起動）＋実 SQLite（一時ファイル DB・Docker 不要＝CI 常時実行）で
-/// end-to-end 検証する。サーバー実体はQuickER の <c>SqliteRepository</c>（<c>AddGeneratedSqliteRepositories</c>）で、
-/// フックは<b>サーバー側の DI</b>に登録する。クライアントは生成された HTTP リモート実装
-/// （<c>AddGeneratedHttpRemoteRepositories</c>）だけを使う＝利用者が組む 3 階層とまったく同じ経路で検証する。
+/// Save フック（<see cref="ISaveHook{TEntity}"/>）が<b>リモート構成のサーバー側</b>でスキップした行を、クライアントが同じインスタンスの
+/// まま再保存できることを、実 HTTP（Kestrel を 127.0.0.1 の空きポートで in-process 起動）＋実 SQLite（一時ファイル DB・Docker 不要＝
+/// CI 常時実行）で検証する。サーバー実体は QuickER の <c>SqliteRepository</c>（<c>AddGeneratedSqliteRepositories</c>）で、
+/// フックは<b>サーバー側の DI</b>に登録する。あわせて、<c>Skipped</c> を持たない旧応答ボディの読み方を確かめる。
 /// </summary>
 /// <remarks>
-/// <para>
-/// このスイートは<b>生成コードの変更を伴わない検証</b>である（フック発火の配線はサーバー側 Repository で既に成立している）。
-/// 柱: (1) HTTP 越しの SaveAsync でサーバー側フックが Before/After ともに発火、(2) Before false 行は DB に残らずクライアントの
-/// Save は成功として返る、(3) After の <c>WriteBinaryColumnAsync</c> で書いた blob がコミット済み＝バイナリ GET
-/// エンドポイント（クライアントの <c>ReadPayloadAsync</c>）で読める、(4) After 例外→サーバー 500→クライアントで
-/// <see cref="RemoteRepositoryException"/>・行も blob も残らない（サーバー側トランザクションのロールバック実証）。
-/// </para>
-/// <para>
-/// <b>スキップの伝搬（テスト 5〜8）</b>: Before false でサーバー側がスキップした行は保存応答の <c>Skipped</c> に載って戻り、
-/// クライアントの <c>AcceptChanges</c> がその行を <c>MarkUnchanged</c> しない＝直結（ADO / EF Core / インメモリ）と同じく
-/// RowState が据え置かれ、次回の保存で再試行できる（旧「クライアントは Unchanged に確定する」既知の制限の解消）。
-/// </para>
+/// サーバー側フックの発火・スキップした行の RowState の据え置き（子のスキップを含む）・After の blob の書き込みと After 例外での
+/// 巻き戻りは、実装先の一致のシナリオ（<c>hook-skip-insert-others-saved</c>・<c>hook-skip-new-child-keeps-it-added</c>・
+/// <c>hook-after-writes-blobs</c>・<c>hook-after-writes-blob-then-later-after-throws</c> ほか）がリモートの実装先でも持つ。
+/// スキップの原因を解いてから同じインスタンスを再保存する形は、途中でフックの規則を差し替える手が要るのでここに残す。
 /// </remarks>
 [Trait("Category", "Integration")]
 public sealed class SaveHookRemoteRuntimeTests : IAsyncLifetime
@@ -89,212 +77,6 @@ public sealed class SaveHookRemoteRuntimeTests : IAsyncLifetime
             Payload = payload,
             Thumb = thumb,
         };
-
-    // ── 1. HTTP 越しの SaveAsync でサーバー側フックが Before/After ともに発火する ──
-
-    /// <summary>1. サーバー DI に登録したフックが、クライアント→サーバーの SaveAsync で Before/After ともに発火する</summary>
-    [Fact(DisplayName = "[SaveHook/Remote] 1: HTTP 越しの SaveAsync でサーバー側フックが発火する")]
-    public async Task Save_OverHttp_FiresServerSideHooks()
-    {
-        var log = new List<string>();
-        var hook = new RecordingHook<DocumentEntity>(log, e => e.DocumentId);
-        var documents = await StartServerAsync(hook);
-
-        var doc = NewDocument(1, "alpha", null, [9, 9]);
-        doc.MarkAdded();
-
-        await documents.SaveAsync(doc, cancellationToken: Ct);
-
-        // サーバー側で Before→After が発火している（in-process のため共有ログで確認できる）
-        log.Should().Equal("before:Insert:1", "after:Insert:1");
-        (await documents.GetByIdAsync(1, Ct)).Should().NotBeNull("フックが通した行は保存される");
-    }
-
-    // ── 2. Before false 行は DB に残らず、クライアントの Save は成功として返る ──
-
-    /// <summary>2. Before が false を返す行はサーバーでスキップされ DB に存在しない（クライアントの Save は例外にならない）</summary>
-    [Fact(DisplayName = "[SaveHook/Remote] 2: Before false 行は DB になく Save は成功として返る")]
-    public async Task Before_False_SkipsRow_SaveReturnsSuccessfully()
-    {
-        var log = new List<string>();
-        var hook = new RecordingHook<DocumentEntity>(log, e => e.DocumentId)
-        {
-            BeforePredicate = (_, _) => false,
-        };
-        var documents = await StartServerAsync(hook);
-
-        var doc = NewDocument(2, "beta", null, [8]);
-        doc.MarkAdded();
-
-        // クライアントの Save は例外にならず成功として返る（スキップは正常系）
-        var act = () => documents.SaveAsync(doc, cancellationToken: Ct);
-        await act.Should().NotThrowAsync();
-
-        // Before は発火するが After は発火せず（スキップ）、行は DB に存在しない
-        log.Should().Contain("before:Insert:2").And.NotContain("after:Insert:2");
-        (await documents.GetByIdAsync(2, Ct))
-            .Should()
-            .BeNull("Before false でスキップされた行は保存されない");
-    }
-
-    // ── 3. After の WriteBinaryColumnAsync で書いた blob がコミット済み＝バイナリ GET で読める ──
-
-    /// <summary>3. After が context.WriteBinaryColumnAsync で書いた除外列 blob が、バイナリ GET エンドポイント経由で読める</summary>
-    [Fact(
-        DisplayName = "[SaveHook/Remote] 3: After が書いた blob がバイナリ GET エンドポイントで読める"
-    )]
-    public async Task After_WritesBinaryColumn_ReadableViaBinaryEndpoint()
-    {
-        var newPayload = new byte[128 * 1024];
-        new Random(7).NextBytes(newPayload);
-
-        var hook = new RecordingHook<DocumentEntity>([], e => e.DocumentId)
-        {
-            AfterAction = async (entity, _, context) =>
-                await context.WriteBinaryColumnAsync(
-                    nameof(DocumentEntity.Payload),
-                    entity.DocumentId,
-                    new MemoryStream(newPayload),
-                    cancellationToken: Ct
-                ),
-        };
-        var documents = await StartServerAsync(hook);
-
-        // 新規挿入（payload は null）→ After が同一トランザクションで blob を書く
-        var doc = NewDocument(3, "gamma", null, [6]);
-        doc.MarkAdded();
-        await documents.SaveAsync(doc, cancellationToken: Ct);
-
-        // コミット後、After が書いた blob をバイナリ GET エンドポイント（クライアントの ReadPayloadAsync）で読める
-        using var destination = new MemoryStream();
-        (await documents.ReadPayloadAsync(3, destination, Ct))
-            .Should()
-            .BeTrue("After が書いた blob は存在する");
-        destination
-            .ToArray()
-            .Should()
-            .Equal(newPayload, "After がコミット前に書いた blob が HTTP 越しに読める");
-    }
-
-    // ── 4. After 例外 → サーバー 500 → クライアントで RemoteRepositoryException・行も blob も残らない ──
-
-    /// <summary>
-    /// 4. After が（blob 書き込みの後で）例外を投げると、サーバーは 500 を返しクライアントで
-    /// <see cref="RemoteRepositoryException"/> になる。サーバー側は 1 トランザクションのため行も blob も残らない。
-    /// </summary>
-    [Fact(
-        DisplayName = "[SaveHook/Remote] 4: After 例外→500→RemoteRepositoryException・行も blob も残らない"
-    )]
-    public async Task After_Throws_ServerRollsBack_NoRowNoBlob()
-    {
-        var hook = new RecordingHook<DocumentEntity>([], e => e.DocumentId)
-        {
-            AfterAction = async (entity, _, context) =>
-            {
-                // 同一トランザクションで blob を書いた後に例外を投げる
-                await context.WriteBinaryColumnAsync(
-                    nameof(DocumentEntity.Payload),
-                    entity.DocumentId,
-                    new MemoryStream([42, 42, 42, 42, 42]),
-                    cancellationToken: Ct
-                );
-                throw new InvalidOperationException("after-boom");
-            },
-        };
-        var documents = await StartServerAsync(hook);
-
-        var doc = NewDocument(4, "delta", null, [7]);
-        doc.MarkAdded();
-
-        // After 例外 → サーバー 500 → クライアントで RemoteRepositoryException
-        var act = () => documents.SaveAsync(doc, cancellationToken: Ct);
-        await act.Should().ThrowAsync<RemoteRepositoryException>();
-
-        // サーバー側トランザクションのロールバックにより、行も blob も残らない
-        (await documents.GetByIdAsync(4, Ct))
-            .Should()
-            .BeNull("After 例外で行はロールバックされる");
-        using var destination = new MemoryStream();
-        (await documents.ReadPayloadAsync(4, destination, Ct))
-            .Should()
-            .BeFalse("行がないため blob も存在しない（404→false）");
-    }
-
-    // ── 5. スキップ行のクライアント側 RowState は据え置かれ、非スキップ行だけが確定する ──
-
-    /// <summary>
-    /// 5. サーバー側でスキップされた行は保存応答の <c>Skipped</c> に載って戻り、クライアントの <c>AcceptChanges</c> が
-    /// その行を確定しない＝ RowState が据え置かれる。同じ保存単位の非スキップ行は <c>Unchanged</c> へ確定する。
-    /// </summary>
-    /// <remarks>
-    /// 直結（ADO / EF Core / インメモリ）と同じ挙動
-    /// （<see cref="SaveHookRuntimeTestsBase.Before_False_SkipsSingleEntity_OthersSaved"/>）へ揃える回帰ガード。
-    /// </remarks>
-    [Fact(
-        DisplayName = "[SaveHook/Remote] 5: スキップ行の RowState は据え置かれ非スキップ行だけ確定する"
-    )]
-    public async Task Before_False_SkippedRowKeepsRowState_OthersAreAccepted()
-    {
-        // 5 番だけスキップし、6 番は通す
-        var hook = new RecordingHook<DocumentEntity>([], e => e.DocumentId)
-        {
-            BeforePredicate = (entity, _) => entity.DocumentId != 5,
-        };
-        var documents = await StartServerAsync(hook);
-
-        var skipped = NewDocument(5, "epsilon", null, [5]);
-        var saved = NewDocument(6, "zeta", null, [6]);
-        skipped.MarkAdded();
-        saved.MarkAdded();
-
-        await documents.SaveAsync([skipped, saved], cancellationToken: Ct);
-
-        // スキップ行は保存されていないので Added のまま（次回の保存で再試行できる）
-        skipped
-            .RowState.Should()
-            .Be(RowState.Added, "サーバーのスキップが応答で伝わり RowState は据え置かれる");
-
-        // 同じ保存単位の非スキップ行は確定する
-        saved.RowState.Should().Be(RowState.Unchanged, "スキップされていない行は確定する");
-
-        (await documents.GetByIdAsync(5, Ct)).Should().BeNull("スキップ行は保存されない");
-        (await documents.GetByIdAsync(6, Ct)).Should().NotBeNull("非スキップ行は保存される");
-    }
-
-    // ── 6. 子（カスケード先）のスキップも同じ走査で伝わる ──
-
-    /// <summary>
-    /// 6. カスケード先の子だけがスキップされた場合も、親は確定・子は据え置きになる（応答の走査が
-    /// [NavigationReference(Cascade)] 経路をたどり、クライアントの <c>AcceptChanges</c> と一致することの検証）。
-    /// </summary>
-    [Fact(DisplayName = "[SaveHook/Remote] 6: 子のスキップも伝わる（親は確定・子は据え置き）")]
-    public async Task Before_False_OnChild_PropagatesThroughCascade()
-    {
-        var noteHook = new RecordingHook<DocumentNoteEntity>([], e => e.NoteId)
-        {
-            BeforePredicate = (_, _) => false,
-        };
-        var documents = await StartServerAsync(noteHook);
-
-        var doc = NewDocument(7, "eta", null, [7]);
-        var note = new DocumentNoteEntity
-        {
-            NoteId = 70,
-            DocumentId = 7,
-            Note = "child",
-        };
-        doc.DocumentNotes.Add(note);
-        doc.MarkAdded();
-        note.MarkAdded();
-
-        await documents.SaveAsync(doc, cancellationToken: Ct);
-
-        doc.RowState.Should().Be(RowState.Unchanged, "親はスキップされていないので確定する");
-        note.RowState.Should()
-            .Be(RowState.Added, "子のスキップがカスケード走査を通って伝わり据え置かれる");
-
-        (await documents.GetByIdAsync(7, Ct)).Should().NotBeNull("親は保存される");
-    }
 
     // ── 7. スキップ解除後に同じインスタンスをそのまま再保存できる ──
 

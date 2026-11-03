@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -103,6 +104,29 @@ public enum ParityHookBehavior
     /// 決まった形のシナリオだけが作る。乱数の列は作らない）
     /// </summary>
     EditKeyThenContinue,
+
+    /// <summary>
+    /// After が context で注文の除外 blob を書いて続ける（payload は <c>WriteBinaryColumnAsync</c> の Stream で
+    /// <see cref="ParityHookRecorder.HookPayload"/> を、thumb はファイル糖衣の <c>WriteBinaryColumnFromFileAsync</c> で
+    /// <see cref="ParityHookRecorder.HookThumb"/> を書く。注文にだけ当てる。EF Core の context は NotSupported＝docs に書いてある違い。
+    /// 決まった形のシナリオだけが使い、乱数の列は作らない）
+    /// </summary>
+    AfterWriteBlob,
+
+    /// <summary>
+    /// After が context の <c>ExecuteSqlAsync</c> で <see cref="ParityHookRecorder.AuditSql"/>（顧客 2 の note を書く＝保存した行と別の
+    /// 表の行）を流して続ける（注文にだけ当てる。インメモリの context は NotSupported＝docs に書いてある違い。決まった形のシナリオ
+    /// だけが使い、乱数の列は作らない）
+    /// </summary>
+    AfterExecuteSql,
+
+    /// <summary>
+    /// Before が注文の除外 blob（payload を <see cref="ParityHookRecorder.HookPayload"/>・thumb を
+    /// <see cref="ParityHookRecorder.HookThumb"/>）をエンティティに書いて続ける（注文の挿入にだけ当てる。リモートの保存の応答は
+    /// 除外列を運ばないので、サーバーのフックが書いた blob はクライアントのエンティティへ戻らない＝docs に書いてある振る舞いを、
+    /// 決まった形のシナリオだけが見る。乱数の列は作らない）
+    /// </summary>
+    EditBlobsThenContinue,
 }
 
 /// <summary>
@@ -170,6 +194,12 @@ public sealed class ParityBackend : IAsyncDisposable
 
     /// <summary>操作が読み込んだ・組み立てたグラフの置き場（スロット名 → 根）</summary>
     public Dictionary<string, EntityBaseCore> Slots { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// 直前の <see cref="MessageOp"/> が受けた例外の文言（例外でなければ null）。戻り値の書式（<see cref="ParityFormat.Exception"/>）は
+    /// 文言を比べないので、文言を表明する期待（<see cref="ParityExpect.Message"/>）はここを読む
+    /// </summary>
+    public string? LastExceptionMessage { get; set; }
 
     /// <summary>リモート面の顧客リポジトリ（全実装先にある）</summary>
     public ICustomerRemoteRepository Customers =>
@@ -626,6 +656,11 @@ public sealed class ParityBackend : IAsyncDisposable
                     }
 
                     return $"{ParityFormat.KeyOf(entity)} customer={entity.CustomerId?.Value}";
+                },
+                editBlobs: () =>
+                {
+                    entity.Payload = PayloadValue.Create(ParityHookRecorder.HookPayload);
+                    entity.Thumb = ThumbValue.Create(ParityHookRecorder.HookThumb);
                 }
             );
 
@@ -634,7 +669,28 @@ public sealed class ParityBackend : IAsyncDisposable
             SaveOperation operation,
             ISaveHookContext context,
             CancellationToken cancellationToken = default
-        ) => recorder.After($"{operation}:{ParityFormat.KeyOf(entity)}");
+        ) =>
+            recorder.After(
+                $"{operation}:{ParityFormat.KeyOf(entity)}",
+                () =>
+                    ParityHookRecorder.WriteBlobsAsync(
+                        (property, source) =>
+                            context.WriteBinaryColumnAsync(
+                                property,
+                                entity.OrderId.Value,
+                                source,
+                                cancellationToken: cancellationToken
+                            ),
+                        (property, path) =>
+                            context.WriteBinaryColumnFromFileAsync(
+                                property,
+                                entity.OrderId.Value,
+                                path,
+                                cancellationToken
+                            )
+                    ),
+                () => context.ExecuteSqlAsync(ParityHookRecorder.AuditSql, null, cancellationToken)
+            );
 
         public Task<bool> BeforeSaveAsync(
             OrderLineEntity entity,
@@ -748,6 +804,11 @@ public sealed class ParityBackend : IAsyncDisposable
                     }
 
                     return $"orders/{entity.OrderId?.Value} customer={entity.CustomerId?.Value}";
+                },
+                editBlobs: () =>
+                {
+                    entity.Payload = EfOnly.PayloadValue.Create(ParityHookRecorder.HookPayload);
+                    entity.Thumb = EfOnly.ThumbValue.Create(ParityHookRecorder.HookThumb);
                 }
             );
 
@@ -756,7 +817,28 @@ public sealed class ParityBackend : IAsyncDisposable
             EfOnly.SaveOperation operation,
             EfOnly.ISaveHookContext context,
             CancellationToken cancellationToken = default
-        ) => recorder.After($"{operation}:orders/{entity.OrderId?.Value}");
+        ) =>
+            recorder.After(
+                $"{operation}:orders/{entity.OrderId?.Value}",
+                () =>
+                    ParityHookRecorder.WriteBlobsAsync(
+                        (property, source) =>
+                            context.WriteBinaryColumnAsync(
+                                property,
+                                entity.OrderId!.Value,
+                                source,
+                                cancellationToken: cancellationToken
+                            ),
+                        (property, path) =>
+                            context.WriteBinaryColumnFromFileAsync(
+                                property,
+                                entity.OrderId!.Value,
+                                path,
+                                cancellationToken
+                            )
+                    ),
+                () => context.ExecuteSqlAsync(ParityHookRecorder.AuditSql, null, cancellationToken)
+            );
 
         public Task<bool> BeforeSaveAsync(
             EfOnly.OrderLineEntity entity,
@@ -842,11 +924,13 @@ public sealed class ParityHookRecorder(List<string> log, IReadOnlyList<ParityHoo
     /// <param name="edit">値を書き換える（<see cref="ParityHookBehavior.EditThenSkip"/> と <see cref="ParityHookBehavior.EditThenContinue"/>）</param>
     /// <param name="assignKey">未設定のキーを決め、決めた後の行のキーと外部キーを返す（<see cref="ParityHookBehavior.AssignKey"/>）</param>
     /// <param name="editKey">顧客の code を書き換える（<see cref="ParityHookBehavior.EditKeyThenContinue"/>・顧客だけが渡す）</param>
+    /// <param name="editBlobs">注文の除外 blob を書き換える（<see cref="ParityHookBehavior.EditBlobsThenContinue"/>・注文だけが渡す）</param>
     public Task<bool> Before(
         string call,
         Action edit,
         Func<string> assignKey,
-        Action? editKey = null
+        Action? editKey = null,
+        Action? editBlobs = null
     )
     {
         Record("Before", call);
@@ -875,25 +959,90 @@ public sealed class ParityHookRecorder(List<string> log, IReadOnlyList<ParityHoo
                     )
                 )();
                 return Task.FromResult(true);
+            case ParityHookBehavior.EditBlobsThenContinue:
+                (
+                    editBlobs
+                    ?? throw new InvalidOperationException(
+                        $"The rule that rewrites the excluded blobs applies to orders only, not to {call}."
+                    )
+                )();
+                return Task.FromResult(true);
             default:
                 return Task.FromResult(true);
         }
     }
 
-    /// <summary>After：記録し、振る舞いが <see cref="ParityHookBehavior.ThrowAfter"/> なら投げる</summary>
-    public Task After(string call)
+    /// <summary><see cref="ParityHookBehavior.AfterWriteBlob"/> が注文の payload へ Stream で書く値</summary>
+    public static byte[] HookPayload => [0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8];
+
+    /// <summary><see cref="ParityHookBehavior.AfterWriteBlob"/> が注文の thumb へファイル糖衣で書く値</summary>
+    public static byte[] HookThumb => [0xC1, 0xC2, 0xC3];
+
+    /// <summary><see cref="ParityHookBehavior.AfterExecuteSql"/> が流す SQL（顧客 2 の note を書く＝保存した行と別の表の行）</summary>
+    public const string AuditSql = "UPDATE customers SET note = 'audit' WHERE customer_id = 2";
+
+    /// <summary>
+    /// After：記録し、振る舞いが <see cref="ParityHookBehavior.ThrowAfter"/> なら投げ、<see cref="ParityHookBehavior.AfterWriteBlob"/>・
+    /// <see cref="ParityHookBehavior.AfterExecuteSql"/> なら context で書く（書く処理を渡さない表＝注文以外に当てたら書き誤り）
+    /// </summary>
+    /// <param name="call">呼び出し（<c>操作:表/キー</c>）</param>
+    /// <param name="writeBlobs">context で除外 blob を書く（注文だけが渡す）</param>
+    /// <param name="executeSql">context で <see cref="AuditSql"/> を流す（注文だけが渡す）</param>
+    public async Task After(
+        string call,
+        Func<Task>? writeBlobs = null,
+        Func<Task<int>>? executeSql = null
+    )
     {
         Record("After", call);
 
-        if (BehaviorOf(call) != ParityHookBehavior.ThrowAfter)
+        switch (BehaviorOf(call))
         {
-            return Task.CompletedTask;
+            case ParityHookBehavior.ThrowAfter:
+                Record(ParityStep.HookThrewPrefix + "After", call);
+                throw new ParityHookException($"After {call}");
+            case ParityHookBehavior.AfterWriteBlob:
+                await (writeBlobs ?? throw NotOnOrders(call))();
+                break;
+            case ParityHookBehavior.AfterExecuteSql:
+                await (executeSql ?? throw NotOnOrders(call))();
+                break;
+        }
+    }
+
+    /// <summary>
+    /// 除外 blob を書く：payload は <see cref="HookPayload"/> を Stream で、thumb は <see cref="HookThumb"/> を一時ファイルに置いて
+    /// ファイル糖衣で（一時ファイルは書いた後に消す）
+    /// </summary>
+    /// <param name="writeStream">プロパティ名と Stream で書く（context の <c>WriteBinaryColumnAsync</c>）</param>
+    /// <param name="writeFile">プロパティ名とファイルのパスで書く（context の <c>WriteBinaryColumnFromFileAsync</c>）</param>
+    public static async Task WriteBlobsAsync(
+        Func<string, Stream, Task<bool>> writeStream,
+        Func<string, string, Task<bool>> writeFile
+    )
+    {
+        using (var source = new MemoryStream(HookPayload))
+        {
+            await writeStream("Payload", source);
         }
 
-        Record(ParityStep.HookThrewPrefix + "After", call);
+        var path = Path.Combine(Path.GetTempPath(), $"quicker-parity-thumb-{Guid.NewGuid():N}.bin");
 
-        throw new ParityHookException($"After {call}");
+        try
+        {
+            await File.WriteAllBytesAsync(path, HookThumb);
+            await writeFile("Thumb", path);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
+
+    private static InvalidOperationException NotOnOrders(string call) =>
+        new(
+            $"The rule that writes through the save hook context applies to orders only, not to {call}."
+        );
 
     private ParityHookBehavior BehaviorOf(string call) =>
         rules.FirstOrDefault(rule => rule.Matches(call))?.Behavior ?? ParityHookBehavior.Record;

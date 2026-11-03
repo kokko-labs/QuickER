@@ -16,7 +16,8 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// <remarks>
 /// EF Core は 1 回の SaveChanges の中で文の順を自分で決め、モデルの一意インデックスを見て、一意な値が削除する行から別の行へ
 /// 移るときに削除を先に並べる。インデックスが無いと、更新が削除より先に走って一意制約に断られることがある（実行時は
-/// GraphSaveRuntimeTestsBase の「削除する注文の一意な値を別の注文の更新で取る」が固定する）。DB には何も作らない。
+/// 実装先どうしの一致のシナリオ <c>graph-updated-row-takes-unique-value-of-deleted-row-with-children-*</c> と、EF Core on SQL Server の
+/// GraphSaveEfCoreSqlServerRuntimeTests の「削除する注文の一意な値を別の注文の更新で取る」が固定する）。DB には何も作らない。
 /// </remarks>
 public class EfCoreUniqueIndexGenerationTests
 {

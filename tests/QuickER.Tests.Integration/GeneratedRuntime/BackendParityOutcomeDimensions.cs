@@ -54,13 +54,17 @@ internal static class BackendParityOutcomeDimensions
                 ),
                 new Factor(
                     Behavior,
-                    // AssignKey と EditKeyThenContinue は決まった形のシナリオだけが使い、この表は乱数の列だけを数える
+                    // AssignKey・EditKeyThenContinue・AfterWriteBlob・AfterExecuteSql・EditBlobsThenContinue は決まった形のシナリオだけが使い、
+                    // この表は乱数の列だけを数える
                     Enum.GetValues<ParityHookBehavior>()
                         .Where(value =>
                             value
                                 is not (
                                     ParityHookBehavior.AssignKey
                                     or ParityHookBehavior.EditKeyThenContinue
+                                    or ParityHookBehavior.AfterWriteBlob
+                                    or ParityHookBehavior.AfterExecuteSql
+                                    or ParityHookBehavior.EditBlobsThenContinue
                                 )
                         )
                         .Select(value => new Level(value.ToString()))

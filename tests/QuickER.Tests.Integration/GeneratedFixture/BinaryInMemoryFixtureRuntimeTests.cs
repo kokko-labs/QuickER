@@ -11,6 +11,9 @@ namespace QuickER.Tests.GeneratedBinaryFixture;
 /// <summary>
 /// 無制限バイナリ除外フィクスチャ（<c>BinaryFixture.g.cs</c>）のインメモリ Repository が、実 DB と同じ除外の意味論
 /// （読み取り複製の除外列 strip・UPDATE ガード・射影は完全クローンから）を満たすことを検証する。
+/// 除外の読み書き・<c>WithUnboundedBinary()</c>・射影のフォールバック・Stream アクセサの契約は、実装先どうしの一致のシナリオ
+/// （<c>blob-*</c>）が QuickER 版と並べて見る。ここに残すのは、その図に無いもの（有界バイナリ・素の <c>byte[]</c>・名前付きクエリ）と
+/// 割り当て量。
 /// </summary>
 /// <remarks>
 /// インメモリは DB を持たないため、実 DB の「SELECT が除外列を返さない」を「読み取り複製で除外列を未取得状態へ
@@ -49,18 +52,18 @@ public sealed class BinaryInMemoryFixtureRuntimeTests
         return (store, documents);
     }
 
-    /// <summary>1. 読み取り複製は除外列を未取得状態へ strip する（除外対象外は保持）</summary>
-    [Fact(
-        DisplayName = "[Binary/InMemory] 1: 読み取り複製は除外列を strip する（有界バイナリは保持）"
-    )]
-    public async Task GetById_StripsExcludedColumns()
+    /// <summary>
+    /// 1. 読み取り複製は有界バイナリ（除外対象外）を strip しない（除外列を strip することは実装先どうしの一致の
+    /// <c>blob-excluded-columns-read-and-write-guard</c> が見る。その図は有界バイナリを持たない）
+    /// </summary>
+    [Fact(DisplayName = "[Binary/InMemory] 1: 読み取り複製は有界バイナリを strip しない")]
+    public async Task GetById_KeepsBoundedBinary()
     {
         var (_, documents) = await SeededAsync();
 
         var doc = await documents.GetByIdAsync(1, Ct);
         doc.Should().NotBeNull();
         doc!.Payload.Should().BeNull("除外列 payload（nullable）は未取得状態＝null");
-        doc.Thumb.Should().BeEmpty("除外列 thumb（非 nullable）は未取得状態＝空配列");
         doc.Checksum.Should().Equal(Doc1Checksum, "有界バイナリ checksum は除外対象外＝保持される");
     }
 
@@ -105,68 +108,6 @@ public sealed class BinaryInMemoryFixtureRuntimeTests
         byId!.Payload.Should().BeNull("除外列は未取得状態で返る");
         listed.Should().ContainSingle().Which.Payload.Should().BeNull();
         allocated.Should().BeLessThan(blob.Length / 4, "読み取りは捨てる blob を写さない");
-    }
-
-    /// <summary>3. 除外列へ非空値を代入した UpdateAsync は例外になる（実 DB と同じガード）</summary>
-    [Fact(DisplayName = "[Binary/InMemory] 3: 除外列へ非空値代入後の UpdateAsync が例外になる")]
-    public async Task Update_WithAssignedExcludedColumn_Throws()
-    {
-        var (_, documents) = await SeededAsync();
-
-        var doc = await documents.GetByIdAsync(1, Ct);
-        doc!.Payload = [5, 5];
-
-        var act = async () => await documents.UpdateAsync(doc, cancellationToken: Ct);
-
-        await act.Should().ThrowAsync<InvalidOperationException>();
-    }
-
-    /// <summary>5. 除外列が未取得状態のままなら UpdateAsync は成功する（非除外列の変更が反映される）</summary>
-    [Fact(
-        DisplayName = "[Binary/InMemory] 5: 除外列が未取得状態なら UpdateAsync 成功（変更が反映）"
-    )]
-    public async Task Update_WithUnsetExcludedColumn_Succeeds()
-    {
-        var (_, documents) = await SeededAsync();
-
-        var doc = await documents.GetByIdAsync(1, Ct);
-        doc!.Title = "alpha2";
-
-        (await documents.UpdateAsync(doc, cancellationToken: Ct)).Should().BeTrue();
-        (await documents.GetByIdAsync(1, Ct))!.Title.Should().Be("alpha2");
-
-        // 実 DB の UPDATE は除外列を SET に含めない＝blob は温存される。行ごと差し替えるインメモリも同じ結果になること
-        var stored = await documents
-            .Query()
-            .Where(d => d.DocumentId == 1)
-            .WithUnboundedBinary()
-            .FirstOrDefaultAsync(Ct);
-        stored!
-            .Payload.Should()
-            .Equal(Doc1Payload, "未取得状態のまま更新しても除外列 payload は消えない");
-        stored.Thumb.Should().Equal(Doc1Thumb, "非 nullable の除外列 thumb も消えない");
-    }
-
-    /// <summary>グラフ保存（SaveAsync）経由の更新でも除外列の blob は温存される</summary>
-    [Fact(DisplayName = "[Binary/InMemory] 5b: グラフ保存の更新でも除外列 blob は温存される")]
-    public async Task Save_WithUnsetExcludedColumn_PreservesBlob()
-    {
-        var (_, documents) = await SeededAsync();
-
-        var doc = await documents.GetByIdAsync(1, Ct);
-        doc!.Title = "alpha3";
-        doc.RowState = RowState.Updated;
-
-        await documents.SaveAsync(doc, cancellationToken: Ct);
-
-        var stored = await documents
-            .Query()
-            .Where(d => d.DocumentId == 1)
-            .WithUnboundedBinary()
-            .FirstOrDefaultAsync(Ct);
-        stored!.Title.Should().Be("alpha3");
-        stored.Payload.Should().Equal(Doc1Payload, "グラフ保存でも除外列 payload は消えない");
-        stored.Thumb.Should().Equal(Doc1Thumb);
     }
 
     /// <summary>バイナリ列の OrderBy は例外にならず辞書式バイト順に並ぶ（実 DB の varbinary 順序と同じ）</summary>
@@ -218,70 +159,6 @@ public sealed class BinaryInMemoryFixtureRuntimeTests
         rows[0].Payload.Should().Equal(Doc1Payload, "射影は完全クローンから作るため除外列も取れる");
     }
 
-    /// <summary>WithUnboundedBinary は除外列を strip しない完全クローンを返す（blob が取れる・返却は複製）</summary>
-    [Fact(
-        DisplayName = "[Binary/InMemory] WithUnboundedBinary は除外列 strip なしの複製を返す（blob が取れる）"
-    )]
-    public async Task WithUnboundedBinary_ReturnsUnstrippedClone()
-    {
-        var (store, documents) = await SeededAsync();
-
-        var doc = await documents
-            .Query()
-            .Where(d => d.DocumentId == 1)
-            .WithUnboundedBinary()
-            .FirstOrDefaultAsync(Ct);
-
-        doc.Should().NotBeNull();
-        doc!.Payload.Should().Equal(Doc1Payload, "strip されず除外列 payload が取れる");
-        doc.Thumb.Should().Equal(Doc1Thumb, "strip されず除外列 thumb が取れる");
-
-        // 返却は複製＝取得エンティティを書き換えてもストアの実体（次回取得）へは波及しない
-        doc.Payload![0] = 0xFF;
-        var reread = await documents
-            .Query()
-            .Where(d => d.DocumentId == 1)
-            .WithUnboundedBinary()
-            .FirstOrDefaultAsync(Ct);
-        reread!
-            .Payload.Should()
-            .Equal(Doc1Payload, "返却は完全クローンのためストアは書き換わらない");
-    }
-
-    /// <summary>
-    /// 射影のフォールバック経路（列抽出不能なセレクタ）でも <c>WithUnboundedBinary</c> が効く（方言側とパリティ）。
-    /// </summary>
-    /// <remarks>
-    /// 方言側のフォールバックは <c>ToListAsync</c> 委譲なので自然にフラグを拾う。インメモリだけが常に strip して
-    /// いたため、同じ呼び出しが実 DB では blob を返しインメモリでは null という乖離があった。
-    /// 対照は <c>BinaryColumnAdoRuntimeTests</c> の 8b。
-    /// </remarks>
-    [Fact(
-        DisplayName = "[Binary/InMemory] 射影のフォールバックでも WithUnboundedBinary で除外列が取れる"
-    )]
-    public async Task Projection_Fallback_HonorsWithUnboundedBinary()
-    {
-        var (_, documents) = await SeededAsync();
-
-        // エンティティを丸ごと引数に取るためセレクタから列を抽出できない＝完全クローンからのフォールバック射影になる
-        var withFlag = await documents
-            .Query()
-            .Where(d => d.DocumentId == 1)
-            .WithUnboundedBinary()
-            .ToProjectionListAsync(d => PayloadOf(d), Ct);
-        withFlag.Should().ContainSingle().Which.Should().Equal(Doc1Payload);
-
-        // 指定しなければ除外列は未取得状態のまま射影される
-        var withoutFlag = await documents
-            .Query()
-            .Where(d => d.DocumentId == 1)
-            .ToProjectionListAsync(d => PayloadOf(d), Ct);
-        withoutFlag.Should().ContainSingle().Which.Should().BeNull();
-    }
-
-    /// <summary>射影セレクタからの列抽出を成立させないためのヘルパー（エンティティ全体を引数に取る）</summary>
-    private static byte[]? PayloadOf(DocumentEntity document) => document.Payload;
-
     /// <summary>
     /// 保存後に呼び出し側が byte[] 列を破壊的に書き換えても、ストアの行には波及しない（列コピーの独立性）。
     /// </summary>
@@ -316,118 +193,5 @@ public sealed class BinaryInMemoryFixtureRuntimeTests
             .FirstOrDefaultAsync(Ct);
         stored!.Checksum.Should().Equal([1, 2, 3], "ストアは自分の複製を持つ");
         stored.Payload.Should().Equal([7, 7, 7]);
-    }
-
-    /// <summary>WithUnboundedBinary と Include の併用はインメモリでも例外になる（実 DB とパリティ）</summary>
-    [Fact(DisplayName = "[Binary/InMemory] WithUnboundedBinary と Include の併用は例外になる")]
-    public async Task WithUnboundedBinary_WithInclude_Throws()
-    {
-        var (_, documents) = await SeededAsync();
-
-        var act = async () =>
-            await documents
-                .Query()
-                .Where(d => d.DocumentId == 1)
-                .Include(d => d.DocumentNotes)
-                .WithUnboundedBinary()
-                .FirstOrDefaultAsync(Ct);
-
-        await act.Should().ThrowAsync<InvalidOperationException>();
-    }
-
-    // ── Stream アクセサ（Read/Write{Column}Async）のインメモリ・パリティ ──
-
-    /// <summary>Stream が length どおりのバイト数を出さない書き込みは、実 DB と同じく ArgumentException で失敗し既存の blob を変えない</summary>
-    [Fact(
-        DisplayName = "[Binary/InMemory] Stream: length と食い違う Stream は例外で既存の blob を変えない"
-    )]
-    public async Task Stream_Write_LengthMismatch_Throws_AndKeepsBlob()
-    {
-        var (_, documents) = await SeededAsync();
-
-        foreach (
-            var (
-                label,
-                source,
-                length
-            ) in QuickER.Tests.Integration.BinaryLengthMismatchCases.Create()
-        )
-        {
-            var write = async () => await documents.WritePayloadAsync(1, source, length, Ct);
-            (await write.Should().ThrowExactlyAsync<ArgumentException>(label))
-                .Which.ParamName.Should()
-                .Be("length", label);
-
-            using var destination = new MemoryStream();
-            (await documents.ReadPayloadAsync(1, destination, Ct)).Should().BeTrue(label);
-            destination.ToArray().Should().Equal(Doc1Payload, label);
-        }
-    }
-
-    /// <summary>Write→Read の往復でデータが一致する（MemoryStream パリティ）</summary>
-    [Fact(DisplayName = "[Binary/InMemory] Stream: Write→Read の往復が一致する")]
-    public async Task Stream_WriteThenRead_RoundTrips()
-    {
-        var (_, documents) = await SeededAsync();
-
-        var payload = new byte[64 * 1024];
-        new Random(11).NextBytes(payload);
-        (await documents.WritePayloadAsync(1, new MemoryStream(payload), cancellationToken: Ct))
-            .Should()
-            .BeTrue();
-
-        using var destination = new MemoryStream();
-        (await documents.ReadPayloadAsync(1, destination, Ct)).Should().BeTrue();
-        destination.ToArray().Should().Equal(payload);
-    }
-
-    /// <summary>Read は行なし・列 NULL で false（宛先へ何も書かない）</summary>
-    [Fact(DisplayName = "[Binary/InMemory] Stream: Read は行なし・NULL で false")]
-    public async Task Stream_Read_ReturnsFalse_ForMissingRowOrNull()
-    {
-        var (_, documents) = await SeededAsync();
-
-        using var noRow = new MemoryStream();
-        (await documents.ReadPayloadAsync(999, noRow, Ct)).Should().BeFalse();
-        noRow.Length.Should().Be(0);
-
-        // payload を NULL に設定してから読むと false
-        (await documents.WritePayloadAsync(1, null, cancellationToken: Ct))
-            .Should()
-            .BeTrue();
-        using var nullColumn = new MemoryStream();
-        (await documents.ReadPayloadAsync(1, nullColumn, Ct)).Should().BeFalse();
-        nullColumn.Length.Should().Be(0);
-    }
-
-    /// <summary>Write はストア実体を直接書き換えず複製を差し戻す（既に取得済みのエンティティに影響しない）</summary>
-    [Fact(DisplayName = "[Binary/InMemory] Stream: Write はストア実体を直接書き換えない")]
-    public async Task Stream_Write_DoesNotMutateStoreInPlace()
-    {
-        var (_, documents) = await SeededAsync();
-
-        // WithUnboundedBinary で取得した複製（元 payload を保持）
-        var before = await documents
-            .Query()
-            .Where(d => d.DocumentId == 1)
-            .WithUnboundedBinary()
-            .FirstOrDefaultAsync(Ct);
-
-        var replacement = new byte[256];
-        new Random(22).NextBytes(replacement);
-        (await documents.WritePayloadAsync(1, new MemoryStream(replacement), cancellationToken: Ct))
-            .Should()
-            .BeTrue();
-
-        // 先に取得していた複製は書き換わらない（返却複製の独立性）
-        before!.Payload.Should().Equal(Doc1Payload, "取得済み複製は Write の影響を受けない");
-
-        // ストアには新しい blob が反映されている
-        var after = await documents
-            .Query()
-            .Where(d => d.DocumentId == 1)
-            .WithUnboundedBinary()
-            .FirstOrDefaultAsync(Ct);
-        after!.Payload.Should().Equal(replacement);
     }
 }

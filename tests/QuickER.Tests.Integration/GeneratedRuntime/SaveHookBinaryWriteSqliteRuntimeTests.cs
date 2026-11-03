@@ -55,7 +55,8 @@ internal sealed class FailingBlobStream(byte[] data, bool throwAtEnd) : Stream
 /// </summary>
 /// <remarks>
 /// SQLite の書き込みは、宣言の長さの zeroblob を確保してから写すので、書き込みが失敗すると、確保した 0 と写した途中の
-/// バイトが残る。参加モードの書き込みはセーブポイントの中で行い、失敗したらそこまで戻す。
+/// バイトが残る。参加モードの書き込みはセーブポイントの中で行い、失敗したらそこまで戻す。成功した書き込みが保存と一緒に
+/// コミットされることは、実装先の一致のシナリオ <c>hook-after-writes-blobs</c> が持つ。
 /// </remarks>
 [Trait("Category", "Integration")]
 public sealed class SaveHookBinaryWriteSqliteRuntimeTests
@@ -105,44 +106,6 @@ public sealed class SaveHookBinaryWriteSqliteRuntimeTests
         (await documents.GetByIdAsync(1, Ct))!.Title.Should().Be("b", "保存の残りはコミットされる");
     }
 
-    [Fact(
-        DisplayName = "[SaveHook/blob] After フックの書き込みが成功すれば、保存と一緒にコミットされる"
-    )]
-    public async Task SuccessfulWriteInHook_IsCommitted()
-    {
-        using var db = SqliteTempDatabase.Create();
-        await db.ApplyDdlAsync(Bin.BinaryFixtureDefinition.Build(), Ct);
-        using var provider = new ServiceCollection()
-            .AddGeneratedSqliteRepositories(db.ReadWriteCreateConnectionString)
-            .AddSaveHook(new WritingHook())
-            .BuildServiceProvider();
-        var documents = provider.GetRequiredService<Bin.IDocumentRepository>();
-        await documents.InsertAsync(
-            new Bin.DocumentEntity
-            {
-                DocumentId = 1,
-                Title = "a",
-                Thumb = [1],
-                Payload = [1, 2],
-            },
-            Ct
-        );
-
-        var document = (await documents.GetByIdAsync(1, Ct))!;
-        document.Title = "b";
-        document.MarkUpdated();
-        await documents.SaveAsync(document, cancellationToken: Ct);
-
-        (
-            await documents.ExecuteScalarSqlAsync<byte[]>(
-                "SELECT payload FROM documents WHERE document_id = 1",
-                cancellationToken: Ct
-            )
-        )
-            .Should()
-            .Equal([4, 4, 4]);
-    }
-
     /// <summary>After で、宣言より短い Stream（または途中で失敗する Stream）を書こうとし、例外を握りつぶす</summary>
     private sealed class SwallowingWriteHook(bool throwInTheMiddle)
         : Bin.ISaveHook<Bin.DocumentEntity>
@@ -171,22 +134,5 @@ public sealed class SaveHookBinaryWriteSqliteRuntimeTests
                 Caught = ex;
             }
         }
-    }
-
-    /// <summary>After で payload を書く</summary>
-    private sealed class WritingHook : Bin.ISaveHook<Bin.DocumentEntity>
-    {
-        public Task AfterSaveAsync(
-            Bin.DocumentEntity entity,
-            Bin.SaveOperation operation,
-            Bin.ISaveHookContext context,
-            CancellationToken cancellationToken = default
-        ) =>
-            context.WriteBinaryColumnAsync(
-                nameof(Bin.DocumentEntity.Payload),
-                entity.DocumentId,
-                new MemoryStream([4, 4, 4]),
-                cancellationToken: cancellationToken
-            );
     }
 }

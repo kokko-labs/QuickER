@@ -21,7 +21,14 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 直結の EF Core は従来どおり全列を読み書きする（対照）。
 /// </para>
 /// <para>
-/// 射影の DTO（名前付きクエリの射影が除外列を参照するもの）はエンティティでないので戻さない。挿入は送られた値を書く。
+/// 射影の DTO（名前付きクエリの射影が除外列を参照するもの）はエンティティでないので戻さない。
+/// </para>
+/// <para>
+/// GetById・GetAll の読み取り・読んで編集した更新・挿入は実装先の一致のシナリオ
+/// （<c>blob-excluded-columns-read-and-write-guard</c>）が、未取得のまま組み立てた行の UpdateAsync（Optimistic と ForceOverwrite）と
+/// グラフ保存（単数形と複数形）は <c>blob-unset-update-from-new-entity-keeps-blobs</c> が、EF Core 単独で生成したサーバーの
+/// リモート（RemoteEfCoreOnly）を含む 5 つの実装先で見る。ここには名前付きクエリ（その図に無い）と、同じプロセスで直結の
+/// EF Core を続けて呼ぶ形だけを残す。
 /// </para>
 /// </remarks>
 public sealed class RemoteEfCoreUnboundedBinaryRuntimeTests : IAsyncLifetime
@@ -105,20 +112,10 @@ public sealed class RemoteEfCoreUnboundedBinaryRuntimeTests : IAsyncLifetime
         return rows.Single();
     }
 
-    [Fact(
-        DisplayName = "EF Core のサーバー: GetById・GetAll・名前付きクエリの一覧は除外列を運ばない"
-    )]
-    public async Task Reads_DoNotCarryExcludedColumns()
+    [Fact(DisplayName = "EF Core のサーバー: 名前付きクエリの一覧は除外列を運ばない")]
+    public async Task NamedQueryList_DoesNotCarryExcludedColumns()
     {
         var documents = await RemoteAsync();
-
-        var loaded = await documents.GetByIdAsync(1, Ct);
-        loaded!.Payload.Should().BeNull();
-        loaded.Thumb.Should().BeEmpty();
-
-        var all = await documents.GetAllAsync(Ct);
-        all.Should().ContainSingle().Which.Payload.Should().BeNull();
-        all[0].Thumb.Should().BeEmpty();
 
         var byTitle = await documents.GetByTitleAsync("t1", Ct);
         byTitle.Should().ContainSingle().Which.Payload.Should().BeNull();
@@ -133,84 +130,6 @@ public sealed class RemoteEfCoreUnboundedBinaryRuntimeTests : IAsyncLifetime
         var rows = await documents.GetPayloadsAsync(Ct);
 
         rows.Should().ContainSingle().Which.Payload.Should().Equal(StoredPayload);
-    }
-
-    [Fact(
-        DisplayName = "EF Core のサーバー: GetById で読んで編集した行の UpdateAsync は成功し、blob を残す"
-    )]
-    public async Task GetByIdEditUpdate_SucceedsAndKeepsBlobs()
-    {
-        var documents = await RemoteAsync();
-        var loaded = await documents.GetByIdAsync(1, Ct);
-        loaded!.Title = "edited";
-
-        (await documents.UpdateAsync(loaded, cancellationToken: Ct)).Should().BeTrue();
-
-        var stored = await StoredAsync(1);
-        stored.Title.Should().Be("edited");
-        stored.Payload.Should().Equal(StoredPayload);
-        stored.Thumb.Should().Equal(StoredThumb);
-    }
-
-    [Theory(
-        DisplayName = "EF Core のサーバー: 除外列を未取得のまま送った UpdateAsync は blob を消さない"
-    )]
-    [InlineData(ConcurrencyMode.Optimistic)]
-    [InlineData(ConcurrencyMode.ForceOverwrite)]
-    public async Task UpdateWithUnsetExcludedColumns_KeepsBlobs(ConcurrencyMode mode)
-    {
-        var documents = await RemoteAsync();
-        var entity = new DocumentEntity { DocumentId = 1, Title = "unset" };
-
-        (await documents.UpdateAsync(entity, mode, Ct)).Should().BeTrue();
-
-        var stored = await StoredAsync(1);
-        stored.Title.Should().Be("unset");
-        stored.Payload.Should().Equal(StoredPayload);
-        stored.Thumb.Should().Equal(StoredThumb);
-    }
-
-    [Fact(
-        DisplayName = "EF Core のサーバー: 除外列を未取得のまま送ったグラフ保存の更新は blob を消さない"
-    )]
-    public async Task SaveUpdatedWithUnsetExcludedColumns_KeepsBlobs()
-    {
-        var documents = await RemoteAsync();
-        var single = new DocumentEntity { DocumentId = 1, Title = "saved" };
-        single.MarkUpdated();
-
-        await documents.SaveAsync(single, cancellationToken: Ct);
-
-        var many = new DocumentEntity { DocumentId = 1, Title = "saved-many" };
-        many.MarkUpdated();
-
-        await documents.SaveAsync([many], cancellationToken: Ct);
-
-        var stored = await StoredAsync(1);
-        stored.Title.Should().Be("saved-many");
-        stored.Payload.Should().Equal(StoredPayload);
-        stored.Thumb.Should().Equal(StoredThumb);
-    }
-
-    [Fact(DisplayName = "EF Core のサーバー: リモートの挿入は送った blob を書く")]
-    public async Task Insert_WritesSentBlobs()
-    {
-        var documents = await RemoteAsync();
-
-        await documents.InsertAsync(
-            new DocumentEntity
-            {
-                DocumentId = 2,
-                Title = "t2",
-                Payload = [5, 5],
-                Thumb = [4],
-            },
-            Ct
-        );
-
-        var stored = await StoredAsync(2);
-        stored.Payload.Should().Equal(5, 5);
-        stored.Thumb.Should().Equal(4);
     }
 
     [Fact(DisplayName = "EF Core のサーバーへの要求の後も、直結の EF Core の更新は全列を書く")]
