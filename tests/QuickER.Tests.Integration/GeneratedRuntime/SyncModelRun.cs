@@ -669,6 +669,24 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             return false;
         }
 
+        // 結果が名乗る有無は、一覧の件数と食い違わない
+        if (
+            outcome.ReportedFlags is { } flags
+            && (
+                flags.Conflicts != outcome.Conflicts.Count > 0
+                || flags.Truncations != outcome.Truncations.Count > 0
+            )
+        )
+        {
+            _failures.Add(
+                new(
+                    "5/result-flags",
+                    $"{op.Describe()}: HasConflicts={flags.Conflicts} for {outcome.Conflicts.Count} conflicts, "
+                        + $"HasTruncations={flags.Truncations} for {outcome.Truncations.Count} truncations"
+                )
+            );
+        }
+
         _lastLocalRowChanges[op.Device] = outcome.LocalRowChanges;
         RecordOutcomes(op, quiescing, outcome.Conflicts, outcome.LocalRowChanges);
 

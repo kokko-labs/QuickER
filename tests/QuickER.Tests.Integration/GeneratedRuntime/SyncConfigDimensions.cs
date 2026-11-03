@@ -177,22 +177,7 @@ internal static class SyncConfigDimensions
         );
 
     /// <summary>網羅しない組の一覧</summary>
-    public static CoverageGapSet Gaps { get; } =
-        CoverageGap.Set(
-            EngineIds.SyncModel,
-            [
-                CoverageGap.Matching(
-                    Scope,
-                    "P2-3",
-                    "P3",
-                    "SyncVoFixture にリモートサービスが無い（GenerateRemoteServices を有効にしていない）ので、値オブジェクトのキーで HTTP の差分ソースを組めない",
-                    Fixture,
-                    Server,
-                    (fixture, server) =>
-                        fixture == VoKey && server is HttpAddress or HttpClientFactory
-                ),
-            ]
-        );
+    public static CoverageGapSet Gaps { get; } = CoverageGap.Set(EngineIds.SyncModel, []);
 
     /// <summary>行（有効な組の全積から、フィクスチャのアダプタが作れる組だけ）</summary>
     public static ScenarioTable<SyncConfigCase> Rows { get; } =

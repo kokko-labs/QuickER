@@ -297,7 +297,7 @@ internal static partial class SyncModelScenarios
                     new ExpectPayloadOp(SV, 11, "0707"),
                 ]
             ),
-            Moved(
+            MovedAll(
                 "blob-uploaded-blob-does-not-echo",
                 [],
                 [
@@ -311,7 +311,7 @@ internal static partial class SyncModelScenarios
                     new ExpectPayloadOp(D1, 5, "090807"),
                 ]
             ),
-            Moved(
+            MovedAll(
                 "blob-refresh-refuses-when-blobs-would-be-lost",
                 [],
                 [
@@ -319,7 +319,7 @@ internal static partial class SyncModelScenarios
                     Sync(D1, blobs: false),
                     new LocalSqlOp(D1, $"UPDATE {I} SET payload = X'030303' WHERE item_id = 11"),
                     new ExpectThrowOp(D1),
-                    new RefreshWithOptionsOp(D1, SyncMode.LastWriteWins, false, false, false, []),
+                    RefreshWithOptionsOp.Defaults(D1),
                     Expect
                         .Result(D1)
                         .Contains(
@@ -346,7 +346,7 @@ internal static partial class SyncModelScenarios
                     new ModelRefreshOp(D1, SyncMode.LastWriteWins, IncludeBlobs: true),
                 ]
             ),
-            Moved(
+            MovedAll(
                 "blob-refresh-include-reloads-blobs",
                 [],
                 [

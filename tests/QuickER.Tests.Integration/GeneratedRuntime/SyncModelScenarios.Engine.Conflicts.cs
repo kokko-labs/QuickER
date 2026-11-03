@@ -11,7 +11,7 @@ internal static partial class SyncModelScenarios
 {
     private static IEnumerable<SyncModelScenario> EngineConflictsScenarios() =>
         [
-            Moved(
+            MovedAll(
                 "conflict-collected-by-default-with-both-rows",
                 [.. Seed(1, "alice", 11, "widget")],
                 [

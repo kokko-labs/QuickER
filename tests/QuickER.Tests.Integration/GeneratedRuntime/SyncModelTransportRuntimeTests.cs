@@ -174,26 +174,21 @@ public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output) : ISyncM
 
     SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => Http;
 
-    /// <summary>HTTP で流す決定的なシナリオの名前（シナリオの <see cref="SyncModelScenario.Transports"/> から作る）</summary>
-    public static TheoryData<string> ScenarioNames()
-    {
-        var data = new TheoryData<string>();
-
-        foreach (
-            var scenario in SyncModelScenarios.All.Where(s => s.RunsOn(SyncModelTransport.Http))
-        )
-        {
-            data.Add(scenario.Name);
-        }
-
-        return data;
-    }
+    /// <summary>
+    /// HTTP で流す決定的なシナリオの名前のうち、このクラスが受け持つ分（残りは <see cref="SyncModelScenarioParts"/> の
+    /// 分けたクラスが受け持つ）
+    /// </summary>
+    public static TheoryData<string> ScenarioNames() =>
+        SyncModelScenarioParts.Names(SyncModelTransport.Http, 0);
 
     [Theory(
         DisplayName = "[Sync/モデル/HTTP] 決定的なシナリオは、HTTP 越しでも直結と同じ違反（正規化した署名）になる"
     )]
     [MemberData(nameof(ScenarioNames))]
-    public async Task Scenario_MatchesDirect(string name)
+    public Task Scenario_MatchesDirect(string name) => AssertMatchesDirect(name);
+
+    /// <summary>決定的なシナリオを直結と HTTP で流し、同じ違反（正規化した署名）になることを表明する</summary>
+    internal static async Task AssertMatchesDirect(string name)
     {
         var scenario = SyncModelScenarios.Get(name);
         var (direct, _) = await scenario.RunAsync(Ct);

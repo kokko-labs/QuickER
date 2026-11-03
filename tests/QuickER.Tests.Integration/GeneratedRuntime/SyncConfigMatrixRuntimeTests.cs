@@ -179,6 +179,13 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
         adapter.AddServerRepositories(serverSide, null, fixture.ConnectionString);
         await using var serverProvider = serverSide.BuildServiceProvider();
 
+        adapter
+            .RegistrationProblems(provider, localKey, serverKey, c.OverHttp)
+            .Should()
+            .BeEmpty(
+                "the registration builds the decorated local repositories and the source of the transport"
+            );
+
         await using (var scope = provider.CreateAsyncScope())
         {
             await adapter.WriteLocalAsync(
@@ -190,7 +197,7 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
                 Ct
             );
             (await adapter.SyncAsync(scope.ServiceProvider, Ct))
-                .Should()
+                .Problem.Should()
                 .BeNull("the upload of a new row has nothing to conflict with");
         }
 
@@ -202,9 +209,16 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
 
         await using (var scope = provider.CreateAsyncScope())
         {
-            (await adapter.SyncAsync(scope.ServiceProvider, Ct))
-                .Should()
+            var second = await adapter.SyncAsync(scope.ServiceProvider, Ct);
+            second
+                .Problem.Should()
                 .BeNull("the download of a new row has nothing to conflict with");
+            second
+                .Downloaded.Should()
+                .Be(
+                    1,
+                    "the anchor derived from the mirrored server versions leaves only the new server row"
+                );
             (await adapter.ExistsAsync(scope.ServiceProvider, localKey, keys.Server, Ct))
                 .Should()
                 .BeTrue("the server new row reaches the local database in one sync");

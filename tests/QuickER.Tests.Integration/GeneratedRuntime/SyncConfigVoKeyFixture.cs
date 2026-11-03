@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
@@ -11,15 +12,14 @@ using QuickER.Tests.GeneratedSyncVoFixture.Repositories.SqlServer;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
-/// <summary>同期の構成の行列の、値オブジェクトのキーのフィクスチャ（SyncVoFixture・リモートサービスなし）</summary>
+/// <summary>同期の構成の行列の、値オブジェクトのキーのフィクスチャ（SyncVoFixture・リモートサービスあり）</summary>
 internal sealed class SyncConfigVoKeyFixture : ISyncConfigFixture
 {
     public string AxisValue => SyncConfigDimensions.VoKey;
 
-    public bool HasRemoteServices => false;
+    public bool HasRemoteServices => true;
 
-    public string RemotePrefix =>
-        throw new NotSupportedException("SyncVoFixture has no remote services.");
+    public string RemotePrefix => RemotePaths.DefaultPrefix;
 
     public ErDiagram ServerDiagram => SyncVoFixtureDefinition.Build();
 
@@ -67,12 +67,12 @@ internal sealed class SyncConfigVoKeyFixture : ISyncConfigFixture
         services.AddGeneratedDirectSyncSources(serverKey);
 
     public void AddHttpSources(IServiceCollection services, string baseAddress) =>
-        throw new NotSupportedException("SyncVoFixture has no remote services.");
+        services.AddGeneratedHttpSyncSources(baseAddress);
 
     public void AddHttpSources(
         IServiceCollection services,
         Func<IServiceProvider, HttpClient> factory
-    ) => throw new NotSupportedException("SyncVoFixture has no remote services.");
+    ) => services.AddGeneratedHttpSyncSources(factory);
 
     public void AddSyncEngine(IServiceCollection services, object? localKey) =>
         services.AddGeneratedSyncEngine(localKey);
@@ -80,7 +80,16 @@ internal sealed class SyncConfigVoKeyFixture : ISyncConfigFixture
     public Task<InProcessRemoteServer> StartRemoteServerAsync(
         string connectionString,
         CancellationToken ct
-    ) => throw new NotSupportedException("SyncVoFixture has no remote services.");
+    ) =>
+        InProcessRemoteServer.StartAsync(
+            services =>
+            {
+                services.AddGeneratedSqlServerRepositories(connectionString);
+                services.AddGeneratedDirectSyncSources(null);
+            },
+            app => app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous),
+            ct
+        );
 
     public async Task WriteLocalAsync(
         IServiceProvider provider,
@@ -129,17 +138,36 @@ internal sealed class SyncConfigVoKeyFixture : ISyncConfigFixture
         CancellationToken ct
     ) => await Repository(provider, key).GetByIdAsync(OrderIdValue.Create(id), ct) is not null;
 
-    public async Task<string?> SyncAsync(IServiceProvider provider, CancellationToken ct)
+    public async Task<(string? Problem, int Downloaded)> SyncAsync(
+        IServiceProvider provider,
+        CancellationToken ct
+    )
     {
         var result = await provider
             .GetRequiredService<SyncEngine>()
             .SyncAsync(cancellationToken: ct);
 
-        return result.Conflicts.Count == 0 && result.Truncations.Count == 0
-            ? null
-            : $"conflicts=[{string.Join(", ", result.Conflicts.Select(c => $"{c.TableName}:{c.KeyText}:{c.Reason}"))}] "
-                + $"truncations=[{string.Join(", ", result.Truncations.Select(t => t.TableName))}]";
+        return (
+            result.Conflicts.Count == 0 && result.Truncations.Count == 0
+                ? null
+                : $"conflicts=[{string.Join(", ", result.Conflicts.Select(c => $"{c.TableName}:{c.KeyText}:{c.Reason}"))}] "
+                    + $"truncations=[{string.Join(", ", result.Truncations.Select(t => t.TableName))}]",
+            result.Downloaded
+        );
     }
+
+    public IReadOnlyList<string> RegistrationProblems(
+        IServiceProvider provider,
+        object? localKey,
+        object? serverKey,
+        bool overHttp
+    ) =>
+        SyncConfigFixtures.RegistrationProblems(
+            Repository(provider, localKey),
+            provider.GetRequiredService<ISyncServerSource<SyncvoOrderEntity, OrderIdValue>>(),
+            overHttp || Equals(serverKey, localKey) ? null : Repository(provider, serverKey),
+            overHttp
+        );
 
     private static ISyncvoOrderRepository Repository(IServiceProvider provider, object? key) =>
         key is null

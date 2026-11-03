@@ -83,8 +83,22 @@ internal interface ISyncConfigFixture : IMatrixAdapter
     /// <summary>リポジトリにその注文があるか</summary>
     Task<bool> ExistsAsync(IServiceProvider provider, object? key, int id, CancellationToken ct);
 
-    /// <summary>同期を 1 回流し、競合・打ち切りがあればその説明を返す（無ければ null）</summary>
-    Task<string?> SyncAsync(IServiceProvider provider, CancellationToken ct);
+    /// <summary>同期を 1 回流し、競合・打ち切りがあればその説明（無ければ null）と、降ろした行の数を返す</summary>
+    Task<(string? Problem, int Downloaded)> SyncAsync(
+        IServiceProvider provider,
+        CancellationToken ct
+    );
+
+    /// <summary>
+    /// 登録の形の食い違い（<see cref="SyncConfigFixtures.RegistrationProblems"/>）。ローカルのリポジトリ・差分ソース・
+    /// サーバーのリポジトリ（HTTP の行では null）を解決して渡す
+    /// </summary>
+    IReadOnlyList<string> RegistrationProblems(
+        IServiceProvider provider,
+        object? localKey,
+        object? serverKey,
+        bool overHttp
+    );
 }
 
 /// <summary>同期の構成の行列のフィクスチャの軸</summary>
@@ -105,4 +119,47 @@ internal static class SyncConfigFixtures
             Values,
             [new SyncConfigIntKeyFixture(), new SyncConfigVoKeyFixture()]
         );
+
+    /// <summary>
+    /// 登録の形が意図どおりか：ローカルのリポジトリはジャーナル記録デコレータ（Journaling…）・差分ソースは転送経路の型
+    /// （HTTP は HttpSyncServerSource・直結は DirectSyncSource）・サーバーのリポジトリは素のまま（記録するのはローカルの編集だけ）
+    /// </summary>
+    /// <remarks>
+    /// 生成物の型はフィクスチャごとの名前空間にあるので、型の名前で見る（ジェネリックの型は `1 などの接尾辞を除いた名前）。
+    /// </remarks>
+    public static IReadOnlyList<string> RegistrationProblems(
+        object localRepository,
+        object source,
+        object? serverRepository,
+        bool overHttp
+    )
+    {
+        var problems = new List<string>();
+
+        if (!localRepository.GetType().Name.StartsWith("Journaling", StringComparison.Ordinal))
+        {
+            problems.Add(
+                $"local repository is {localRepository.GetType().Name}, not the journaling decorator"
+            );
+        }
+
+        var expectedSource = overHttp ? "HttpSyncServerSource" : "DirectSyncSource";
+        var sourceName = source.GetType().Name;
+        var arity = sourceName.IndexOf('`');
+
+        if ((arity < 0 ? sourceName : sourceName[..arity]) != expectedSource)
+        {
+            problems.Add($"server source is {sourceName}, not {expectedSource}");
+        }
+
+        if (
+            serverRepository is not null
+            && serverRepository.GetType().Name.StartsWith("Journaling", StringComparison.Ordinal)
+        )
+        {
+            problems.Add("server repository is decorated (only local edits are journaled)");
+        }
+
+        return problems;
+    }
 }
