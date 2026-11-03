@@ -30,9 +30,9 @@ public sealed class SyncVoFixtureDriftTests
             primary,
             byDialect,
             SyncVoFixtureDefinition.Options,
-            SyncVoFixtureDefinition.OutputFileName,
+            SyncVoFixtureDefinition.OutputFileNames,
             "コミット済み同期支援 × 値オブジェクトフィクスチャが現在のテンプレート出力と乖離しています。"
-                + "SyncVoFixtureDefinition（同期支援 × sqlserver / sqlite のQuickER 版 Repository ＋ 値オブジェクト）"
+                + "SyncVoFixtureDefinition（同期支援 × sqlserver / sqlite のQuickER 版 Repository ＋ 値オブジェクト ＋ リモートサービス）"
                 + "から再生成が必要です。"
         );
     }

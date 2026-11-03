@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
@@ -128,17 +129,36 @@ internal sealed class SyncConfigIntKeyFixture : ISyncConfigFixture
         CancellationToken ct
     ) => await Repository(provider, key).GetByIdAsync(id, ct) is not null;
 
-    public async Task<string?> SyncAsync(IServiceProvider provider, CancellationToken ct)
+    public async Task<(string? Problem, int Downloaded)> SyncAsync(
+        IServiceProvider provider,
+        CancellationToken ct
+    )
     {
         var result = await provider
             .GetRequiredService<SyncEngine>()
             .SyncAsync(cancellationToken: ct);
 
-        return result.Conflicts.Count == 0 && result.Truncations.Count == 0
-            ? null
-            : $"conflicts=[{string.Join(", ", result.Conflicts.Select(c => $"{c.TableName}:{c.KeyText}:{c.Reason}"))}] "
-                + $"truncations=[{string.Join(", ", result.Truncations.Select(t => t.TableName))}]";
+        return (
+            result.Conflicts.Count == 0 && result.Truncations.Count == 0
+                ? null
+                : $"conflicts=[{string.Join(", ", result.Conflicts.Select(c => $"{c.TableName}:{c.KeyText}:{c.Reason}"))}] "
+                    + $"truncations=[{string.Join(", ", result.Truncations.Select(t => t.TableName))}]",
+            result.Downloaded
+        );
     }
+
+    public IReadOnlyList<string> RegistrationProblems(
+        IServiceProvider provider,
+        object? localKey,
+        object? serverKey,
+        bool overHttp
+    ) =>
+        SyncConfigFixtures.RegistrationProblems(
+            Repository(provider, localKey),
+            provider.GetRequiredService<ISyncServerSource<SyncOrderEntity, int>>(),
+            overHttp || Equals(serverKey, localKey) ? null : Repository(provider, serverKey),
+            overHttp
+        );
 
     private static ISyncOrderRepository Repository(IServiceProvider provider, object? key) =>
         key is null

@@ -222,9 +222,30 @@ internal sealed record RefreshWithOptionsOp(
     bool DiscardLocalBlobs,
     bool Force,
     IReadOnlyList<string> Excluded,
-    int BatchSize = 2000
+    int BatchSize = 2000,
+    bool OmitOptions = false
 ) : ModelOp
 {
+    /// <summary>
+    /// オプションを渡さない洗い替え（<c>RefreshAsync(cancellationToken: …)</c>）。モデルの記録に使う値は
+    /// <see cref="SyncRefreshOptions"/> の既定から取る
+    /// </summary>
+    public static RefreshWithOptionsOp Defaults(ModelActor device)
+    {
+        var defaults = new SyncRefreshOptions();
+
+        return new(
+            device,
+            defaults.Mode,
+            defaults.IncludeUnboundedBinary,
+            defaults.DiscardLocalUnboundedBinaries,
+            defaults.Force,
+            [.. defaults.ExcludedEntityTypes.Select(ModelTables.TableOf)],
+            defaults.BatchSize,
+            OmitOptions: true
+        );
+    }
+
     /// <summary>エンジンへ渡すオプション</summary>
     public SyncRefreshOptions ToOptions() =>
         new()
@@ -239,7 +260,8 @@ internal sealed record RefreshWithOptionsOp(
 
     public override string Describe() =>
         $"{Who(Device)} RefreshWith mode={Mode} blobs={IncludeBlobs} discard-blobs={DiscardLocalBlobs} "
-        + $"force={Force} excluded=[{string.Join(",", Excluded.Select(ModelTables.Short))}] batch={BatchSize}";
+        + $"force={Force} excluded=[{string.Join(",", Excluded.Select(ModelTables.Short))}] batch={BatchSize}"
+        + (OmitOptions ? " options=omitted" : "");
 }
 
 /// <summary>キーの並びを短く書く（連続する範囲は <c>a..b</c>）</summary>
@@ -362,6 +384,13 @@ internal sealed record SaveFolderGraphOp(
 }
 
 /// <summary>端末のローカル DB へ生の SQL を流す（記録しない・外部キーの検査を切って流す）</summary>
+/// <remarks>
+/// 元のテストの前提（ジャーナル記録デコレータを通らないローカルの書き込み・ローカルだけの表・トリガー）を作るためだけに使う。
+/// 書き込みの履歴に残らない（同期のモデルの汎用の表明〔消失なし〕が根拠にする書き手の値にならない）。使うシナリオは blob-refresh-discard-drops-local-blobs・
+/// blob-refresh-refuses-when-blobs-would-be-lost・blob-default-preserves-existing-local-blobs-new-rows-arrive-empty・
+/// refresh-excluding-referencing-child-refuses-under-cascade・refresh-failed-wipe-keeps-acks・
+/// refresh-leaves-local-only-tables-alone。
+/// </remarks>
 internal sealed record LocalSqlOp(ModelActor Device, string Sql) : ModelOp
 {
     public override string Describe() => $"{Who(Device)} LocalSql {Sql}";

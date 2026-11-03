@@ -24,6 +24,16 @@ internal static partial class SyncModelScenarios
         IReadOnlyList<ModelOp> ops
     ) => new(name, setup, ops) { Transports = SyncModelScenario.DirectAndHttp };
 
+    /// <summary>
+    /// 移したシナリオのうち、実 SQL Server の転送でも流すもの（元の SyncSqlServerRuntimeTests が守っていた
+    /// 本物の rowversion・MIN_ACTIVE_ROWVERSION() の上限・外部キーエラーの分類・TOP のページングを、期待の手で表明する）
+    /// </summary>
+    private static SyncModelScenario MovedAll(
+        string name,
+        IReadOnlyList<ModelWriteOp> setup,
+        IReadOnlyList<ModelOp> ops
+    ) => new(name, setup, ops) { Transports = SyncModelScenario.AllTransports };
+
     /// <summary>元のテストの既定の同期（blob は運ぶ＝型の注を見る）</summary>
     private static ModelSyncOp Plain(
         ModelActor device,
@@ -57,7 +67,7 @@ internal static partial class SyncModelScenarios
 
     private static IEnumerable<SyncModelScenario> EngineBasicScenarios() =>
         [
-            Moved(
+            MovedAll(
                 "dl-initial-downloads-everything",
                 [],
                 [
@@ -70,9 +80,10 @@ internal static partial class SyncModelScenarios
                         .Exact("1 parent=null name=alice", "2 parent=null name=bob", "999 *"),
                     Expect.Rows(D1, I).Exact("11 *", "12 *", "999 *"),
                     Expect.Mirror(D1, F).Contains("key=1 mirror=server"),
+                    Expect.Journal(D1).Empty(),
                 ]
             ),
-            Moved(
+            MovedAll(
                 "dl-incremental-downloads-only-newer-rows",
                 [.. Seed(1, "alice", 11, "widget")],
                 [
@@ -193,16 +204,18 @@ internal static partial class SyncModelScenarios
                 [],
                 [.. Seed(1, "alice", 11, "widget"), Plain(D1), Expect.Journal(D1).Empty()]
             ),
-            Moved(
+            MovedAll(
                 "ul-local-update-is-uploaded",
                 [.. Seed(1, "alice", 11, "widget")],
                 [
+                    new CaptureMirrorOp(D1, F, "1", "before"),
                     Rename(D1, 1, "alice-local"),
                     Expect.Journal(D1).Count("*", 1),
                     Plain(D1),
                     Expect.Result(D1).Contains("uploaded=1").Absent("conflict *"),
                     Expect.Rows(SV, F).Contains("1 parent=null name=alice-local"),
                     Expect.Journal(D1).Empty(),
+                    Expect.Mirror(D1, F).Contains("key=1 mirror=server before=changed"),
                 ]
             ),
             Moved(

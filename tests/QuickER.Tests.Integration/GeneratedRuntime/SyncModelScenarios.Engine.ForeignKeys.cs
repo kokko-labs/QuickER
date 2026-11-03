@@ -293,7 +293,7 @@ internal static partial class SyncModelScenarios
         SyncMode mode,
         SyncConflictPolicy policy
     ) =>
-        Moved(
+        MovedAll(
             $"fk-write-of-row-whose-parent-is-gone-is-reported-as-parent-missing-{shape}",
             [.. Seed(1, "alice", 11, "widget")],
             [
@@ -324,7 +324,7 @@ internal static partial class SyncModelScenarios
         string shape,
         SyncConflictPolicy policy
     ) =>
-        Moved(
+        MovedAll(
             $"fk-delete-refused-on-server-holds-back-child-{shape}",
             [Folder(SV, 1, name: "alice"), Folder(SV, 2, name: "bob")],
             [

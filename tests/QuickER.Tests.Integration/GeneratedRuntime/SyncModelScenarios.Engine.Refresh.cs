@@ -22,7 +22,7 @@ internal static partial class SyncModelScenarios
 
     private static IEnumerable<SyncModelScenario> EngineRefreshScenarios() =>
         [
-            Moved(
+            MovedAll(
                 "refresh-rebuilds-local-from-server",
                 [],
                 [
@@ -50,7 +50,7 @@ internal static partial class SyncModelScenarios
                     Expect.Mirror(D1, F).Contains("key=1 mirror=server"),
                 ]
             ),
-            Moved(
+            MovedAll(
                 "refresh-leaves-anchor-next-sync-resumes-from",
                 [.. Seed(1, "alice", 11, "widget")],
                 [
@@ -320,7 +320,7 @@ internal static partial class SyncModelScenarios
                     new ModelRefreshOp(D1, SyncMode.LastWriteWins, IncludeBlobs: true),
                 ]
             ),
-            Moved(
+            MovedAll(
                 "blob-include-downloads-blobs",
                 [],
                 [

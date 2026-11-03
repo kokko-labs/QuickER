@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -58,20 +59,12 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         SyncModelRun.SettledUpsertKind,
     ];
 
-    /// <summary>直結で流す決定的なシナリオの名前（シナリオの <see cref="SyncModelScenario.Transports"/> から作る）</summary>
-    public static TheoryData<string> ScenarioNames()
-    {
-        var data = new TheoryData<string>();
-
-        foreach (
-            var scenario in SyncModelScenarios.All.Where(s => s.RunsOn(SyncModelTransport.Direct))
-        )
-        {
-            data.Add(scenario.Name);
-        }
-
-        return data;
-    }
+    /// <summary>
+    /// 直結で流す決定的なシナリオの名前のうち、このクラスが受け持つ分（残りは <see cref="SyncModelScenarioParts"/> の
+    /// 分けたクラスが受け持つ）
+    /// </summary>
+    public static TheoryData<string> ScenarioNames() =>
+        SyncModelScenarioParts.Names(SyncModelTransport.Direct, 0);
 
     /// <summary>種 1 つを流す（操作の列と違反を返す）</summary>
     /// <param name="seed">種</param>
@@ -448,6 +441,93 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
     }
 
     [Fact(
+        DisplayName = "[Sync/モデル] 決定的なシナリオを分けたクラスの行は、転送ごとに流すシナリオをちょうど 1 回ずつ受け持つ"
+    )]
+    public void ScenarioParts_CoverEveryScenarioOncePerTransport()
+    {
+        // この名前空間の Theory の MemberData のうち、SyncModelScenarioParts.Names を呼ぶものを集める（分けたクラスと
+        // 転送の本体のクラス）。分ける数を変えてクラスを足し忘れる・クラスを消す・同じ番号を 2 つ書く、のどれでも赤になる
+        var parts = typeof(SyncModelRuntimeTests)
+            .Assembly.GetTypes()
+            .Where(type =>
+                type.Namespace == typeof(SyncModelRuntimeTests).Namespace
+                && type is { IsClass: true, IsAbstract: false, IsGenericTypeDefinition: false }
+            )
+            .SelectMany(type =>
+                type.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                    .Where(method => method.GetCustomAttribute<TheoryAttribute>() is not null)
+                    .SelectMany(method => method.GetCustomAttributes<MemberDataAttribute>())
+                    .Select(data =>
+                        (data.MemberType ?? type).GetMethod(
+                            data.MemberName,
+                            BindingFlags.Public | BindingFlags.Static,
+                            Type.EmptyTypes
+                        )
+                    )
+                    .Where(member => member?.ReturnType == typeof(TheoryData<string>))
+                    .Select(member =>
+                    {
+                        TheoryData<string>? rows = null;
+                        var calls = SyncModelScenarioParts.Record(() =>
+                            rows = (TheoryData<string>)member!.Invoke(null, null)!
+                        );
+                        return (Class: type.Name, Calls: calls, Rows: rows!);
+                    })
+            )
+            .Where(part => part.Calls.Count > 0)
+            .ToList();
+
+        var problems = new List<string>();
+        problems.AddRange(
+            parts
+                .Where(part => part.Calls.Count != 1)
+                .Select(part => $"{part.Class}: calls Names {part.Calls.Count} times")
+        );
+
+        foreach (var transport in new[] { SyncModelTransport.Direct, SyncModelTransport.Http })
+        {
+            var mine = parts
+                .Where(part => part.Calls.Count == 1 && part.Calls[0].Transport == transport)
+                .ToList();
+            var expected = SyncModelScenarios
+                .All.Where(s => s.RunsOn(transport))
+                .Select(s => s.Name)
+                .ToList();
+            var rows = mine.SelectMany(part => part.Rows.Select(row => (string)row.Data)).ToList();
+
+            if (mine.Count < 2)
+            {
+                problems.Add($"{transport}: only {mine.Count} class(es) take scenario rows");
+            }
+
+            problems.AddRange(
+                mine.GroupBy(part => part.Calls[0].Part)
+                    .Where(group => group.Count() > 1)
+                    .Select(group =>
+                        $"{transport}: part {group.Key} is taken by "
+                        + string.Join(", ", group.Select(part => part.Class))
+                    )
+            );
+            problems.AddRange(
+                rows.GroupBy(row => row, StringComparer.Ordinal)
+                    .Where(group => group.Count() > 1)
+                    .Select(group => $"{transport}: '{group.Key}' runs {group.Count()} times")
+            );
+            problems.AddRange(
+                expected
+                    .Except(rows, StringComparer.Ordinal)
+                    .Select(name => $"{transport}: '{name}' runs in no class")
+            );
+            problems.AddRange(
+                rows.Except(expected, StringComparer.Ordinal)
+                    .Select(name => $"{transport}: '{name}' does not run on this transport")
+            );
+        }
+
+        problems.Should().BeEmpty();
+    }
+
+    [Fact(
         DisplayName = "[Sync/モデル] 割り込みの行は、点 × 形の全積をそろえ、どの行も割り込みを 1 つだけ仕掛けて同期する"
     )]
     public void InterruptScenarios_CoverEveryPointAndShape()
@@ -490,7 +570,10 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         DisplayName = "[Sync/モデル] 決定的なシナリオは、既知の失敗の一覧に載った署名の組どおりに失敗する（載っていなければ失敗しない）"
     )]
     [MemberData(nameof(ScenarioNames))]
-    public async Task Scenario_FailsExactlyAsListed(string name)
+    public Task Scenario_FailsExactlyAsListed(string name) => AssertFailsExactlyAsListed(name);
+
+    /// <summary>決定的なシナリオを直結で流し、既知の失敗の一覧に載った署名の組どおりに失敗することを表明する</summary>
+    internal static async Task AssertFailsExactlyAsListed(string name)
     {
         var (failures, log) = await SyncModelScenarios.Get(name).RunAsync(Ct);
 

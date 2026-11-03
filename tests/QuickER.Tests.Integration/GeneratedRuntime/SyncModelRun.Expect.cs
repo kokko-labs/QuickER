@@ -146,7 +146,12 @@ internal sealed partial class SyncModelRun
             }
 
             case RefreshWithOptionsOp refresh:
-                await RefreshAsync(refresh, refresh.Device, refresh.ToOptions());
+                await RefreshAsync(
+                    refresh,
+                    refresh.Device,
+                    refresh.ToOptions(),
+                    refresh.OmitOptions
+                );
                 return true;
 
             case ArmServerInterruptOp interrupt:
@@ -389,7 +394,13 @@ internal sealed partial class SyncModelRun
     }
 
     /// <summary>オプションを指定した洗い替え（例外の期待・結果の面を扱う）</summary>
-    private async Task RefreshAsync(ModelOp op, ModelActor device, SyncRefreshOptions options)
+    /// <remarks><paramref name="omitOptions"/> のときエンジンへはオプションを渡さない（<paramref name="options"/> はモデルの記録に使う既定の値）</remarks>
+    private async Task RefreshAsync(
+        ModelOp op,
+        ModelActor device,
+        SyncRefreshOptions options,
+        bool omitOptions = false
+    )
     {
         // Force の洗い替えが捨てる範囲内の未送信の記録（利用者が明示して破棄した変更＝ClearJournalOp と同じく、成功したら
         // そのキーを消失なしの規則の対象から外す）
@@ -402,7 +413,7 @@ internal sealed partial class SyncModelRun
 
         try
         {
-            var result = await _world.RefreshAsync(device, options, _ct);
+            var result = await _world.RefreshAsync(device, omitOptions ? null : options, _ct);
             _untrackedKeys.UnionWith(discarded);
             RecordRefreshResult(op, device, result);
         }

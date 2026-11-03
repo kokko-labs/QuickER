@@ -232,7 +232,9 @@ internal sealed class SyncModelFaults
 
         _hookBlobWrite = null;
         var target = armed.Target ?? item.ItemId;
-        object key = armed.KeyAsInt64 ? (long)target : target;
+        // 主キーの型（int）で渡す既定の形を long へそろえない（三項演算子の両方の枝を同じ型に推論させると、既定の形まで
+        // 主キーの型と違う型のキーになる）
+        object key = armed.KeyAsInt64 ? (long)target : (object)target;
         var written = await context.WriteBinaryColumnAsync(
             nameof(ModelItemEntity.Payload),
             key,

@@ -45,7 +45,7 @@ internal static partial class SyncModelScenarios
                     new RestoreLocalTableOp(D1, L),
                 ]
             ),
-            Moved(
+            MovedAll(
                 "prop-spares-row-with-pending-journal-entry",
                 [.. Seed(1, "alice", 11, "widget")],
                 [
@@ -166,7 +166,7 @@ internal static partial class SyncModelScenarios
                     Expect.Journal(D1).Count("*", 1),
                 ]
             ),
-            Moved(
+            MovedAll(
                 "lww-downloads-versionless-table-every-run",
                 [],
                 [
@@ -177,9 +177,13 @@ internal static partial class SyncModelScenarios
                     Expect.Rows(D1, L).Contains("L101 folder=1 caption=server note"),
                     Plain(D1, mode: SyncMode.LastWriteWins),
                     Expect.Result(D1).Contains("downloaded=1"),
+                    new AddLabelOp(SV, Direct, "L102", 1, "second note"),
+                    Plain(D1, mode: SyncMode.LastWriteWins, batch: 1),
+                    Expect.Result(D1).Contains("downloaded=2").Absent("conflict *"),
+                    Expect.Rows(D1, L).Exact("L101 *", "L102 folder=1 caption=second note"),
                 ]
             ),
-            Moved(
+            MovedAll(
                 "lww-uploads-versionless-edits",
                 [
                     .. Seed(1, "alice", 11, "widget"),
@@ -226,7 +230,7 @@ internal static partial class SyncModelScenarios
                         ),
                 ]
             ),
-            Moved(
+            MovedAll(
                 "lww-bypasses-version-guard-on-versioned-tables",
                 [.. Seed(1, "alice", 11, "widget")],
                 [

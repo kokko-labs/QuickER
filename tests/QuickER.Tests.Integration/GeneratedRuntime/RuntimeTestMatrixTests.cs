@@ -681,8 +681,13 @@ public class RuntimeTestMatrixTests
         new("SyncVoRuntimeTests", "SyncSupport", Backend.AdoSqlite),
         // 同期エンジンのモデルベーステスト（端末 2 台＋サーバー役・乱数の操作の列と指摘ごとの決定的なシナリオ）
         new("SyncModelRuntimeTests", "SyncSupport", Backend.AdoSqlite),
+        // 決定的なシナリオの Theory を並列に流すために分けたクラス（SyncModelScenarioParts）
+        new("SyncModelRuntimeTestsPart2", "SyncSupport", Backend.AdoSqlite),
         new("SyncKeyTextRuntimeTests", "SyncSupport", Backend.AdoSqlite),
         new("SyncModelHttpRuntimeTests", "SyncSupport", Backend.Remote),
+        new("SyncModelHttpRuntimeTestsPart2", "SyncSupport", Backend.Remote),
+        new("SyncModelHttpRuntimeTestsPart3", "SyncSupport", Backend.Remote),
+        new("SyncModelHttpRuntimeTestsPart4", "SyncSupport", Backend.Remote),
         new("SyncModelSqlServerRuntimeTests", "SyncSupport", Backend.AdoSqlServer),
         new("SyncSqlServerRuntimeTests", "SyncSupport", Backend.AdoSqlServer),
         new("SyncHttpRuntimeTests", "SyncSupport", Backend.Remote),

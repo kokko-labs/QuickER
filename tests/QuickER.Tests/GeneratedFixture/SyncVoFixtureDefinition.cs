@@ -40,8 +40,8 @@ namespace QuickER.Tests.GeneratedSyncVoFixture;
 /// （記述子の <c>FillUnsetUnboundedBinaries</c> が空の値を入れる）。この交差を実行時に通すための列。
 /// </para>
 /// <para>
-/// EditModel・Mapper・EF Core・リモートサービスは交差の焦点でないため生成しない（EF Core はマルチターゲットと
-/// 排他でもある）。
+/// リモートサービスを生成する（同期の構成の行列が、値オブジェクトのキーの HTTP の差分ソースと同期専用のエンドポイントを
+/// 流すため）。EditModel・Mapper・EF Core は交差の焦点でないため生成しない（EF Core はマルチターゲットと排他でもある）。
 /// </para>
 /// </remarks>
 public static class SyncVoFixtureDefinition
@@ -49,8 +49,15 @@ public static class SyncVoFixtureDefinition
     /// <summary>生成フィクスチャの契約 namespace（既存フィクスチャと衝突しない専用 namespace）</summary>
     public const string NamespaceName = "QuickER.Tests.GeneratedSyncVoFixture";
 
-    /// <summary>コミット済みフィクスチャファイル名</summary>
+    /// <summary>コミット済みフィクスチャファイル名（本体）</summary>
     public const string OutputFileName = "SyncVoFixture.g.cs";
+
+    /// <summary>コミット済みフィクスチャファイル名（リモートエンドポイント＝同期専用エンドポイントを含む）</summary>
+    public const string RemoteServerOutputFileName = "SyncVoFixture.RemoteServer.g.cs";
+
+    /// <summary>期待する出力ファイル構成（ファイル構成そのものもドリフト検知の対象）</summary>
+    public static IReadOnlyList<string> OutputFileNames { get; } =
+    [OutputFileName, RemoteServerOutputFileName];
 
     /// <summary>
     /// フィクスチャ生成に用いる決定的なオプション。
@@ -67,6 +74,7 @@ public static class SyncVoFixtureDefinition
             GenerateValueObjects = true,
             GenerateEfCoreRepositories = false,
             GenerateSyncSupport = true,
+            GenerateRemoteServices = true,
             ExcludeUnboundedBinaryColumns = true,
             RepositoryDialects = ["sqlserver", "sqlite"],
             SplitFilesByCategory = false,

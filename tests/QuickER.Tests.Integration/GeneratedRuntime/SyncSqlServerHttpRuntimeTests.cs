@@ -19,7 +19,9 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// ここでしか確かめられないのは「<b>生成された</b>直結差分ソースが、<b>生成された</b>同期エンドポイント越しに
 /// 同じ答えを返すか」＝本物の <c>rowversion</c>・<c>MIN_ACTIVE_ROWVERSION()</c> による上限・<c>OUTPUT INSERTED</c> で
 /// 回収した版の書き戻しが、HTTP を挟んでも成立するか。エンジンの筋（バッチ継続・アンカー導出・削除伝搬・競合分類）は
-/// <see cref="SyncHttpRuntimeTests"/> が Docker 不在の CI でも常時通す。
+/// <see cref="SyncHttpRuntimeTests"/> が Docker 不在の CI でも常時通す。DI の組み上がり（HTTP 差分ソースとジャーナル記録
+/// デコレータ）と、初回の全件と 2 回目の差分（アンカー）は、同期の構成の行列（<see cref="SyncConfigMatrixRuntimeTests"/>）の
+/// HTTP の行が見る。ここに残すのは、上限の値そのものの往復・409 の競合・NULL の一意な値の 3 つ（構成の行列は競合と上限を表明しない）。
 /// </para>
 /// <para>
 /// サーバープロセスの DI は実運用と同じ形＝リポジトリを素直に登録し、<c>AddGeneratedDirectSyncSources(null)</c> で
@@ -111,16 +113,6 @@ public sealed class SyncSqlServerHttpRuntimeTests(SqlServerContainerFixture fixt
     private ISyncServerSource<SyncOrderEntity, int> OrderSource =>
         _clientProvider.GetRequiredService<ISyncServerSource<SyncOrderEntity, int>>();
 
-    /// <summary>DI 構成だけで転送経路が HTTP になる（ローカルのデコレータ差し替えは直結構成と同じ）</summary>
-    [Fact(
-        DisplayName = "[Sync/SqlServer/HTTP] DI は HTTP 差分ソース＋ローカルのジャーナルデコレータで組み上がる"
-    )]
-    public void Registration_UsesHttpSourceAndJournalingLocalRepositories()
-    {
-        OrderSource.Should().BeOfType<HttpSyncServerSource<SyncOrderEntity, int>>();
-        LocalOrders.Should().BeOfType<JournalingSyncOrderRepository>();
-    }
-
     /// <summary>
     /// 実 <c>MIN_ACTIVE_ROWVERSION()</c> の値が HTTP 越しに（Base64 の byte[] として）そのまま届く。
     /// </summary>
@@ -135,42 +127,6 @@ public sealed class SyncSqlServerHttpRuntimeTests(SqlServerContainerFixture fixt
                 "SQL Server は常に「実行中トランザクションの最小版」を返す（上限なしにはならない）"
             );
         ceiling!.Length.Should().Be(8, "rowversion は 8 バイト＝転送で崩れていない");
-    }
-
-    /// <summary>
-    /// 初回同期と差分同期が HTTP 越しに成立し、DB 採番の版がミラー列へ入って次回のアンカーになる。
-    /// </summary>
-    [Fact(
-        DisplayName = "[Sync/SqlServer/HTTP] 初回全量と 2 回目の差分が HTTP 越しに成立する（本物の rowversion）"
-    )]
-    public async Task Sync_DownloadsAndResumesOverHttp()
-    {
-        await ServerOrders.InsertAsync(
-            new SyncOrderEntity { OrderId = 1, CustomerName = "alice" },
-            Ct
-        );
-
-        var first = await Engine.SyncAsync(cancellationToken: Ct);
-
-        first.Downloaded.Should().Be(1);
-        var local = await LocalOrders.GetByIdAsync(1, Ct);
-        local!.RowVer.Should().NotBeNullOrEmpty("SQL Server が採番した版がそのままミラーされる");
-        (await Journal.CountPendingAsync(Ct)).Should().Be(0, "適用はジャーナルへ記録されない");
-
-        await ServerOrders.InsertAsync(
-            new SyncOrderEntity { OrderId = 2, CustomerName = "bob" },
-            Ct
-        );
-
-        var second = await Engine.SyncAsync(cancellationToken: Ct);
-
-        second
-            .Downloaded.Should()
-            .Be(
-                1,
-                "アンカー（ミラー MAX）より下の行は再取得されない＝アンカーが正しく往復している"
-            );
-        (await LocalOrders.GetByIdAsync(2, Ct)).Should().NotBeNull();
     }
 
     /// <summary>

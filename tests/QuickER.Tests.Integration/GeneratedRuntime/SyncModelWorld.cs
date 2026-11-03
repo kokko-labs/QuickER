@@ -192,6 +192,9 @@ internal sealed record ModelSyncOutcome(
 
     /// <summary>送らずに捨てた記録の件数（SyncAsync と UploadAsync が返す）</summary>
     public int? Discarded { get; init; }
+
+    /// <summary>結果が名乗る「競合がある」「打ち切りがある」（SyncAsync の SyncResult だけが持つ。ほかは null）</summary>
+    public (bool Conflicts, bool Truncations)? ReportedFlags { get; init; }
 }
 
 /// <summary>端末 1 台（ローカル SQLite・ジャーナル・ジャーナル記録デコレータ・同期エンジン）</summary>
@@ -606,6 +609,7 @@ internal sealed class SyncModelWorld : IAsyncDisposable
                     Downloaded = result.Downloaded,
                     DeletedLocally = result.DeletedLocally,
                     Discarded = result.Discarded,
+                    ReportedFlags = (result.HasConflicts, result.HasTruncations),
                 };
             }
 
@@ -644,7 +648,7 @@ internal sealed class SyncModelWorld : IAsyncDisposable
     /// <summary>洗い替えを、オプションを指定して 1 回流す（モデルの手が持たないオプション＝Force・除外を使うシナリオの手）</summary>
     public async Task<SyncRefreshResult> RefreshAsync(
         ModelActor device,
-        SyncRefreshOptions options,
+        SyncRefreshOptions? options,
         CancellationToken ct
     )
     {
