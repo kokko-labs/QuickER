@@ -17,9 +17,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </summary>
 /// <remarks>
 /// これは Phase T の「SQLite QuickER 版 Repository の方言ランタイムテスト」に相当する。基底
-/// <see cref="GeneratedSqliteRuntimeTestsBase"/> の全シナリオ（CRUD・式木・ページング・Include マルチクエリ・
-/// 生 SQL・グラフ保存・BulkInsert・削除カスケード）を、SQLite 固有の実行経路（プレーン SELECT＋DataReader・
-/// LIMIT/OFFSET・IncludeLoader・AddWithValue・1Tx INSERT ループ）で流す。
+/// <see cref="GeneratedSqliteRuntimeTestsBase"/> のシナリオ（自列参照の Contains・ThenInclude の循環・生 SQL）を、SQLite 固有の
+/// 実行経路（プレーン SELECT＋DataReader・IncludeLoader・AddWithValue）で流す。
 /// </remarks>
 public sealed class GeneratedSqliteAdoRuntimeTests : GeneratedSqliteRuntimeTestsBase
 {

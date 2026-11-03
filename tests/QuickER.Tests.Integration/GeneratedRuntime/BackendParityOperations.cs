@@ -656,6 +656,12 @@ public enum ParityOrderPredicate
 
     /// <summary>カスケードのナビゲーションを読む条件（<c>OrderLines.Any()</c>）</summary>
     HasLines,
+
+    /// <summary>
+    /// 主キーの値オブジェクトの等値（<c>OrderId == 10</c>）。<c>.Value</c> を読まないので、値オブジェクトの翻訳を登録しない EF Core の
+    /// 構成（再試行の構成＝自前の内部サービスプロバイダ）でも翻訳できる
+    /// </summary>
+    OrderIs10,
 }
 
 /// <summary>リモート面の <c>GetByIdAsync</c> か <c>DeleteAsync</c> を、null のキーで呼ぶ</summary>
@@ -800,11 +806,16 @@ public sealed record ExecuteDeleteOrdersOp(ParityOrderPredicate Predicate, bool 
             ParityOrderPredicate.HasLines => backend
                 .FullOrders.Query()
                 .Where(o => o.OrderLines.Any()),
+            ParityOrderPredicate.OrderIs10 => OrderIs(backend, OrderIdValue.Create(10)),
             _ => throw new ArgumentOutOfRangeException(nameof(Predicate)),
         };
 
         return $"rows={await query.ExecuteDeleteAsync(CascadeDelete, ct)}";
     }
+
+    /// <summary>主キーが <paramref name="key"/> の注文（キーは変数で渡す＝EF Core はパラメータにする）</summary>
+    private static SqlQuery<OrderEntity> OrderIs(ParityBackend backend, OrderIdValue key) =>
+        backend.FullOrders.Query().Where(o => o.OrderId == key);
 }
 
 /// <summary>
@@ -1164,5 +1175,95 @@ public sealed record LoadCustomerWithContactsOp(string Slot, int Id) : ParityOp
         backend.Slots[Slot] = customer;
 
         return "loaded";
+    }
+}
+
+/// <summary>
+/// ほかの書き手が保存先へ生 SQL を流す（トリガーを張るなど・Save フックなし）。インメモリの保存先は生 SQL を持たないので
+/// 流さない（docs に書いてある違い）。種まきの後の最初の手として置く（種まきの段の手は流す実装先を絞らない）
+/// </summary>
+public sealed record OutsideSqlOp(string Sql) : ParityOp
+{
+    public override string Name => "OutsideSql";
+
+    public override bool Supports(ParityBackendKind kind) => kind != ParityBackendKind.InMemory;
+
+    public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
+    {
+        await backend.Outside.Orders.ExecuteSqlAsync(Sql, cancellationToken: ct);
+
+        return "ok";
+    }
+}
+
+/// <summary>
+/// ほかの手を流し、例外で終わったらその文言を <see cref="ParityBackend.LastExceptionMessage"/> へ控えてから投げ直す。名前・流せる
+/// 実装先・戻り値は中の手のもの（戻り値の書式は文言を比べないので、基準との比較は変わらない）
+/// </summary>
+public sealed record MessageOp(ParityOp Inner) : ParityOp
+{
+    public override string Name => Inner.Name;
+
+    public override bool Supports(ParityBackendKind kind) => Inner.Supports(kind);
+
+    public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
+    {
+        backend.LastExceptionMessage = null;
+
+        try
+        {
+            return await Inner.RunAsync(backend, ct);
+        }
+        catch (Exception ex)
+        {
+            backend.LastExceptionMessage = ex.Message;
+            throw;
+        }
+    }
+}
+
+/// <summary>
+/// 注文をリモート面で 1 行読み、顧客 <paramref name="Customer"/> へ付け替えて Updated にし、スロットのグラフの顧客
+/// （<paramref name="ParentKey"/>）の注文のコレクションへ足す（読んだ行を付け替える形＝除外 blob は読んだときのまま保存へ回る）
+/// </summary>
+public sealed record AttachMovedOrderOp(string Slot, string ParentKey, int OrderId, int Customer)
+    : ParityOp
+{
+    public override string Name => "AttachMovedOrder";
+
+    public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
+    {
+        var order = await backend.Orders.GetByIdAsync(OrderIdValue.Create(OrderId), ct);
+
+        if (order is null)
+        {
+            return "null";
+        }
+
+        order.CustomerId = CustomerIdValue.Create(Customer);
+        order.MarkUpdated();
+        ((CustomerEntity)Find(backend, Slot, ParentKey)).Orders.Add(order);
+
+        return "attached";
+    }
+}
+
+/// <summary>
+/// スロットのグラフの行（<paramref name="Key"/>）が Include で持つ親の顧客（注文 → 顧客）のメモ（note）を書き換え、Updated にする
+/// （親はカスケードの外なので、保存を頼まない親の変更になる。親はスロットに置かない＝比べ方のスロットの列に出さない）
+/// </summary>
+public sealed record EditIncludedParentOp(string Slot, string Key, string Note) : ParityOp
+{
+    public override string Name => "EditIncludedParent";
+
+    public override Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
+    {
+        var parent =
+            ((OrderEntity)Find(backend, Slot, Key)).Customer
+            ?? throw new InvalidOperationException($"'{Key}' has no included customer.");
+        parent.Note = NoteValue.Create(Note);
+        parent.MarkUpdated();
+
+        return Task.FromResult("edited");
     }
 }

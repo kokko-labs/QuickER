@@ -31,13 +31,13 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 ///     <see cref="NamedQueryRuntimeTestsBase.DslProjection_ReturnsDtoRows"/> /
 ///     <see cref="NamedQueryRuntimeTestsBase.Projection_WithInclude_FallsBackAndProjectsNavigation"/>）</item>
 ///   <item><c>SqlQuery&lt;T&gt;.ExecuteDeleteAsync</c>（cascade / 非 cascade。
-///     <see cref="GeneratedSqliteRuntimeTestsBase.ExecuteDelete_Cascade_DeletesChildrenAndParent"/>）</item>
+///     SQLite 側は実装先の一致のシナリオ <c>execute-delete-cascade-column-predicate</c>）</item>
 ///   <item><c>SqlQuery&lt;T&gt;.OrderByDescending</c>＋Skip/Take（OFFSET/FETCH。
-///     <see cref="GeneratedSqliteRuntimeTestsBase.OrderBy_And_Paging_ReturnsOrderedWindow"/>）</item>
+///     SQLite 側は実装先の一致のシナリオ <c>query-where-expression-and-paging</c>）</item>
 ///   <item><c>ThenInclude</c> 再帰（親→子→親のサイクル。
 ///     <see cref="GeneratedSqliteRuntimeTestsBase.ThenInclude_Recursive_LoadsParentReference"/>）</item>
 ///   <item><c>Repository.SaveAsync(コレクション)</c> オーバーロード（複数グラフの一括保存。SQLite 側は
-///     <see cref="SaveHookRuntimeTestsBase"/> 系が共有基底で流すが SQL Server 側は未実行だった）</item>
+///     実装先の一致のシナリオ <c>hook-save-many-fires-each-entity</c> が流すが SQL Server 側は未実行だった）</item>
 ///   <item>DatePart 翻訳（Year/Month/Day/Hour/Minute/Second/DayOfYear/Date → SQL Server の
 ///     YEAR()/MONTH()/DAY()/DATEPART()/CAST AS date。
 ///     <see cref="GeneratedSqliteAdoRuntimeTests.DateParts_StrftimeFragments_ReturnCorrectIntegersOnRealData"/> と対称）</item>
@@ -224,7 +224,7 @@ public sealed class SqlServerQueryPipelineRuntimeTests(SqlServerContainerFixture
     /// <summary>
     /// 3b. <c>SqlQuery&lt;T&gt;.ExecuteDeleteAsync(cascadeDelete: true)</c> が FK チェーンをたどり子ごと削除する。
     /// </summary>
-    /// <remarks>SQLite 側 <see cref="GeneratedSqliteRuntimeTestsBase.ExecuteDelete_Cascade_DeletesChildrenAndParent"/> と対称（子 2＋親 1＝3 件）。</remarks>
+    /// <remarks>SQLite 側は実装先の一致のシナリオ <c>execute-delete-cascade-column-predicate</c>（注文 1＋明細 2＝3 件）が同じ形を見る。</remarks>
     [Fact(
         DisplayName = "[SqlServerPipeline] 3b: ExecuteDeleteAsync（cascade）が子ごと削除し件数が一致する"
     )]
@@ -252,7 +252,7 @@ public sealed class SqlServerQueryPipelineRuntimeTests(SqlServerContainerFixture
     /// <summary>
     /// 4. <c>SqlQuery&lt;T&gt;.OrderByDescending</c>＋Skip/Take（SQL Server の OFFSET/FETCH）が降順の正しい窓を返す。
     /// </summary>
-    /// <remarks>SQLite 側 <see cref="GeneratedSqliteRuntimeTestsBase.OrderBy_And_Paging_ReturnsOrderedWindow"/> の LIMIT/OFFSET と対称。</remarks>
+    /// <remarks>SQLite 側は実装先の一致のシナリオ <c>query-where-expression-and-paging</c> の LIMIT/OFFSET が同じ形を見る。</remarks>
     [Fact(
         DisplayName = "[SqlServerPipeline] 4: OrderByDescending＋Skip/Take（OFFSET/FETCH）が降順の窓を返す"
     )]
@@ -326,8 +326,8 @@ public sealed class SqlServerQueryPipelineRuntimeTests(SqlServerContainerFixture
     /// 6. <c>Repository.SaveAsync(コレクション)</c> オーバーロードが複数グラフ（親＋子）を一括保存する。
     /// </summary>
     /// <remarks>
-    /// SQLite 側は SaveHook 系スイートが共有基底でコレクション保存を通すが、SQL Server 側の
-    /// <c>SaveHookSqlServerRuntimeTests</c> は共有基底を継承しないためコレクション版が未実行だった。
+    /// SQLite 側は実装先の一致のシナリオ <c>hook-save-many-fires-each-entity</c> がコレクション保存を通すが、SQL Server 側は
+    /// コレクション版が未実行だった。
     /// </remarks>
     [Fact(
         DisplayName = "[SqlServerPipeline] 6: SaveAsync（コレクション）が複数グラフを一括保存する"

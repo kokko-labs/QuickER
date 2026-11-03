@@ -77,8 +77,72 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
             "alternate-key-stale-optimistic-update",
             "alternate-key-stale-optimistic-graph-save",
             "alternate-key-stale-force-overwrite-update",
-            "alternate-key-stale-force-overwrite-graph-save"
+            "alternate-key-stale-force-overwrite-graph-save",
+            "include-child-delete-keeps-parent-and-siblings",
+            "move-note-and-delete-old-gadget-kept-first",
+            "hook-sql-stamps-same-row",
+            "hook-sql-stamps-saved-parent",
+            "hook-without-writes-no-reread",
+            "hook-audit-row-no-reread",
+            "hook-skip-parent-child-fk"
         );
+
+    /// <summary>
+    /// 行の文字列の値そのものを固定するケース（ケースの名前 → QuickER 版の行。EF Core の行は QuickER 版と比べるので、一致すれば
+    /// 両方がこの値になる）。基準どうしを比べるだけでは、両方が同じ向きに壊れても緑になるため、移したテストの絶対値をここに書く
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string[]> ExpectedLines = new Dictionary<
+        string,
+        string[]
+    >(StringComparer.Ordinal)
+    {
+        // After が SQL で同じ行を書くと版を読み直さず、次の保存は競合（Modified）になり、フックが書いた値を上書きしない
+        ["hook-sql-stamps-same-row"] =
+        [
+            "rows=1",
+            "version-matches-store=False",
+            "gadgets/1 name=stamped",
+            "again throws SaveConflictException reason=Modified",
+            "gadgets/1 name=stamped",
+            "gadget_notes/10 gadget=1 note=first",
+        ],
+        // 子の After が同じ保存の親の行を SQL で書くと、親の版を読み直さず、親の次の保存は競合になる
+        ["hook-sql-stamps-saved-parent"] =
+        [
+            "rows=2",
+            "version-matches-store=False",
+            "gadgets/1 name=stamped",
+            "again throws SaveConflictException reason=Modified",
+            "gadgets/1 name=stamped",
+            "gadget_notes/10 gadget=1 note=second",
+        ],
+        // context で何も書かないフックの保存は、版を読み直す SELECT を出さず、手元の版は保存先と同じ
+        ["hook-without-writes-no-reread"] =
+        [
+            "rows=1",
+            "selects=0",
+            "version-matches-store=True",
+            "gadgets/1 name=first",
+            "gadget_notes/10 gadget=1 note=first",
+        ],
+        // SQL で別の表へ監査の行を足すフックの保存も、SELECT を出さない（監査の行は残る）
+        ["hook-audit-row-no-reread"] =
+        [
+            "rows=1",
+            "selects=0",
+            "version-matches-store=True",
+            "gadgets/1 name=first",
+            "gadget_notes/10 gadget=1 note=first",
+            "gadget_notes/99 gadget=1 note=audit",
+        ],
+        // 新しい親の挿入を Before が飛ばし、新しい子を保存すると、外部キーに断られて全体が巻き戻る
+        ["hook-skip-parent-child-fk"] =
+        [
+            "throws store-rejected",
+            "gadgets/1 name=alpha",
+            "gadget_notes/10 gadget=1 note=first",
+        ],
+    };
 
     [Theory(
         DisplayName = "[Parity/SqlServer] ケースの結果は、既知の違いを除いて QuickER 版と EF Core でそろう"
@@ -91,6 +155,12 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
         var report =
             $"QuickER:\n  {string.Join("\n  ", baseline)}\nEF Core:\n  {string.Join("\n  ", efCore)}";
 
+        // 値を固定したケースは、基準の行がその値になる（EF Core は下で基準と比べる）
+        if (ExpectedLines.TryGetValue(name, out var expected))
+        {
+            baseline.Should().Equal(expected, report);
+        }
+
         // 一致しなければ失敗 1 件（載っていれば既知・載っているのに一致すれば「起きなかった」で赤）
         EngineFailure[] observed = efCore.SequenceEqual(baseline, StringComparer.Ordinal)
             ? []
@@ -100,11 +170,14 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
             .AssertClean($"[Parity/SqlServer] ケース {name}");
     }
 
-    [Fact(DisplayName = "[Parity/SqlServer] 既知の違いは、存在するケースを名指しする")]
+    [Fact(
+        DisplayName = "[Parity/SqlServer] 既知の違いと値を固定する行は、存在するケースを名指しする"
+    )]
     public void Known_NamesExistingCases()
     {
         var cases = Cases().Select(row => (string)row.Data).ToHashSet();
         KnownSet.Entries.Select(entry => entry.Scope).Should().BeSubsetOf(cases);
+        ExpectedLines.Keys.Should().BeSubsetOf(cases);
     }
 
     /// <summary>
@@ -425,6 +498,18 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
                 stale: true,
                 ConcurrencyMode.ForceOverwrite
             ),
+            "include-child-delete-keeps-parent-and-siblings" => await IncludedNoteDeleteAsync(
+                efCore
+            ),
+            "move-note-and-delete-old-gadget-kept-first" => await MoveNoteAsync(efCore),
+            "hook-sql-stamps-same-row" => await HookStampsSameRowAsync(efCore),
+            "hook-sql-stamps-saved-parent" => await HookStampsSavedParentAsync(efCore),
+            "hook-without-writes-no-reread" => await HookNoRereadAsync(
+                efCore,
+                new NoWriteOnAfter()
+            ),
+            "hook-audit-row-no-reread" => await HookNoRereadAsync(efCore, new AuditNoteOnAfter()),
+            "hook-skip-parent-child-fk" => await HookSkipParentAsync(efCore),
             _ => throw new ArgumentOutOfRangeException(nameof(name)),
         };
     }
@@ -676,6 +761,231 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
         return lines;
     }
 
+    /// <summary>
+    /// グラフ保存の追跡の形（GraphSave の EF Core on SQL Server から移した行）：gadget 1 をメモ 10・11 ごと Include で読み
+    /// （EF Core はメモの親への参照を埋める）、メモ 10 だけを削除の印にして、メモのリポジトリから直接保存する。保存はメモ 10 の
+    /// 1 行だけを消し、親の gadget と兄弟のメモ 11 を消さず、親の RowState も触らない（親への参照を辿って追跡すると、親と兄弟
+    /// まで削除する）
+    /// </summary>
+    private async Task<IReadOnlyList<string>> IncludedNoteDeleteAsync(bool efCore)
+    {
+        await using var provider = Build(efCore, withHooks: false);
+        var gadgets = provider.GetRequiredService<IGadgetRepository>();
+        var notes = provider.GetRequiredService<IGadgetNoteRepository>();
+        await gadgets.InsertAsync(NewGadget(1, "g1"), Ct);
+        await notes.InsertAsync(NewNote(10, 1, "a"), Ct);
+        await notes.InsertAsync(NewNote(11, 1, "b"), Ct);
+
+        var gadget = (
+            await gadgets
+                .Query()
+                .Include(g => g.GadgetNotes)
+                .GetByIdAsync(GadgetIdValue.Create(1), Ct)
+        )!;
+        var note = gadget.GadgetNotes.Single(n => n.NoteId.Value == 10);
+        note.MarkRemoved();
+
+        var outcome = await OutcomeAsync(() => notes.SaveAsync(note, cancellationToken: Ct));
+
+        return
+        [
+            outcome,
+            $"parent={gadget.RowState} note={note.RowState}",
+            .. await StateAsync(),
+            .. await NotesStateAsync(),
+        ];
+    }
+
+    /// <summary>
+    /// 付け替えの形（GraphSave の EF Core on SQL Server から移した行）：メモ 10 を gadget 1 から 2 へ付け替え、gadget 1 を消す
+    /// （gadget → メモは CASCADE）。版は新しく、Optimistic・フックなし。根の並びは付け替え先が先（版の古い ForceOverwrite の形は
+    /// <c>move-stale-note-and-delete-old-gadget</c> が消す側を先に並べて持つ）。削除が先に走ると付け替えたメモまで消え、続く更新が
+    /// 「行なし」になる
+    /// </summary>
+    private async Task<IReadOnlyList<string>> MoveNoteAsync(bool efCore)
+    {
+        await using var provider = Build(efCore, withHooks: false);
+        var gadgets = provider.GetRequiredService<IGadgetRepository>();
+        var notes = provider.GetRequiredService<IGadgetNoteRepository>();
+        await gadgets.InsertAsync(NewGadget(1, "g1"), Ct);
+        await gadgets.InsertAsync(NewGadget(2, "g2"), Ct);
+        await notes.InsertAsync(NewNote(10, 1, "n"), Ct);
+
+        var oldParent = (await gadgets.GetByIdAsync(GadgetIdValue.Create(1), Ct))!;
+        var newParent = (await gadgets.GetByIdAsync(GadgetIdValue.Create(2), Ct))!;
+        var note = (await notes.GetByIdAsync(NoteIdValue.Create(10), Ct))!;
+        note.GadgetId = GadgetIdValue.Create(2);
+        note.MarkUpdated();
+        newParent.GadgetNotes.Add(note);
+        oldParent.MarkRemoved();
+
+        var outcome = await OutcomeAsync(() =>
+            gadgets.SaveAsync([newParent, oldParent], cancellationToken: Ct)
+        );
+
+        return [outcome, .. await StateAsync(), .. await NotesStateAsync()];
+    }
+
+    /// <summary>Save フックのケースの種（SaveHook の版の系統から移した形＝gadget 1 "alpha" とメモ 10 "first"）</summary>
+    private Task SeedHookCaseAsync() =>
+        _fixture.ExecuteAsync(
+            "INSERT INTO gadgets (gadget_id, name) VALUES (1, N'alpha');"
+                + "INSERT INTO gadget_notes (note_id, gadget_id, note) VALUES (10, 1, N'first');",
+            Ct
+        );
+
+    /// <summary>
+    /// Save フックの版（同じ行）：gadget の After が SQL で同じ行の名前を書き換える保存の後、手元の版は保存先と違い（SQL の書き込みでは
+    /// 版を読み直さない）、同じインスタンスの次の保存は競合（Modified）になり、フックの書いた値を上書きしない
+    /// </summary>
+    private async Task<IReadOnlyList<string>> HookStampsSameRowAsync(bool efCore)
+    {
+        await SeedHookCaseAsync();
+        await using var provider = Build(
+            efCore,
+            withHooks: false,
+            hooks: [new StampGadgetOnAfter()]
+        );
+        var gadgets = provider.GetRequiredService<IGadgetRepository>();
+        var gadget = (await gadgets.GetByIdAsync(GadgetIdValue.Create(1), Ct))!;
+
+        gadget.Name = NameValue.Create("first");
+        gadget.MarkUpdated();
+        var outcome = await OutcomeAsync(() => gadgets.SaveAsync(gadget, cancellationToken: Ct));
+        List<string> lines =
+        [
+            outcome,
+            $"version-matches-store={await GadgetVersionMatchesStoreAsync(gadget)}",
+            .. await StateAsync(),
+        ];
+
+        gadget.Name = NameValue.Create("second");
+        gadget.MarkUpdated();
+        lines.Add(
+            $"again {await OutcomeAsync(() => gadgets.SaveAsync(gadget, cancellationToken: Ct))}"
+        );
+
+        return [.. lines, .. await StateAsync(), .. await NotesStateAsync()];
+    }
+
+    /// <summary>
+    /// Save フックの版（同じ保存の親）：gadget をメモごと Include で読み、両方を編集して保存する。メモの After が SQL で同じ保存の親の
+    /// 名前を書き換えるので、親の手元の版は保存先と違い、親の次の保存（カスケードなし）は競合になる
+    /// </summary>
+    private async Task<IReadOnlyList<string>> HookStampsSavedParentAsync(bool efCore)
+    {
+        await SeedHookCaseAsync();
+        await using var provider = Build(
+            efCore,
+            withHooks: false,
+            hooks: [new StampParentOnAfter()]
+        );
+        var gadgets = provider.GetRequiredService<IGadgetRepository>();
+        var key = GadgetIdValue.Create(1);
+        var gadget = (
+            await gadgets
+                .Query()
+                .Where(g => g.GadgetId == key)
+                .Include(g => g.GadgetNotes)
+                .ToListAsync(Ct)
+        ).Single();
+        var note = gadget.GadgetNotes.Single();
+
+        gadget.Name = NameValue.Create("first");
+        gadget.MarkUpdated();
+        note.Note = NoteValue.Create("second");
+        note.MarkUpdated();
+        var outcome = await OutcomeAsync(() => gadgets.SaveAsync(gadget, cancellationToken: Ct));
+        List<string> lines =
+        [
+            outcome,
+            $"version-matches-store={await GadgetVersionMatchesStoreAsync(gadget)}",
+            .. await StateAsync(),
+        ];
+
+        gadget.Name = NameValue.Create("third");
+        gadget.MarkUpdated();
+        lines.Add(
+            $"again {await OutcomeAsync(() => gadgets.SaveAsync(gadget, cascadeSave: false, cancellationToken: Ct))}"
+        );
+
+        return [.. lines, .. await StateAsync(), .. await NotesStateAsync()];
+    }
+
+    /// <summary>
+    /// Save フックの版（読み直さない）：After が context で無制限バイナリ列を書かない保存（何も書かない・SQL で別の表へ監査の行を足す）
+    /// は、保存の間に版を読み直す SELECT を出さず（SqlClient のコマンドを数える）、手元の版は保存先と同じ
+    /// </summary>
+    private async Task<IReadOnlyList<string>> HookNoRereadAsync(bool efCore, object hook)
+    {
+        await SeedHookCaseAsync();
+        await using var provider = Build(efCore, withHooks: false, hooks: [hook]);
+        var gadgets = provider.GetRequiredService<IGadgetRepository>();
+        var gadget = (await gadgets.GetByIdAsync(GadgetIdValue.Create(1), Ct))!;
+        string outcome;
+        int selects;
+
+        using (var capture = new SqlCommandObserver("gadget"))
+        {
+            gadget.Name = NameValue.Create("first");
+            gadget.MarkUpdated();
+            outcome = await OutcomeAsync(() => gadgets.SaveAsync(gadget, cancellationToken: Ct));
+            selects = capture.Commands.Count(text =>
+                text.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase)
+            );
+        }
+
+        return
+        [
+            outcome,
+            $"selects={selects}",
+            $"version-matches-store={await GadgetVersionMatchesStoreAsync(gadget)}",
+            .. await StateAsync(),
+            .. await NotesStateAsync(),
+        ];
+    }
+
+    /// <summary>
+    /// Save フックのスキップ（SaveHook の SQL Server の系統から移した形）：新しい gadget の挿入を Before が飛ばし、新しいメモを子に
+    /// 持たせて保存すると、メモの挿入が外部キーに断られて全体が巻き戻る
+    /// </summary>
+    private async Task<IReadOnlyList<string>> HookSkipParentAsync(bool efCore)
+    {
+        await SeedHookCaseAsync();
+        await using var provider = Build(efCore, withHooks: false, hooks: [new SkipGadgetInsert()]);
+        var gadgets = provider.GetRequiredService<IGadgetRepository>();
+        var parent = NewGadget(50, "orphan-parent");
+        parent.MarkAdded();
+        var child = NewNote(500, 50, "orphan-child");
+        child.MarkAdded();
+        parent.GadgetNotes.Add(child);
+
+        var outcome = await OutcomeAsync(() => gadgets.SaveAsync(parent, cancellationToken: Ct));
+
+        return [outcome, .. await StateAsync(), .. await NotesStateAsync()];
+    }
+
+    /// <summary>手元の gadget の版が保存先の版と同じか（行が無ければ False）</summary>
+    private async Task<bool> GadgetVersionMatchesStoreAsync(GadgetEntity gadget)
+    {
+        await using var provider = new ServiceCollection()
+            .AddGeneratedSqlServerRepositories(_fixture.ConnectionString)
+            .BuildServiceProvider();
+        var stored = await provider
+            .GetRequiredService<IGadgetRepository>()
+            .GetByIdAsync(gadget.GadgetId, Ct);
+
+        return stored is not null && stored.RowVer.Value.SequenceEqual(gadget.RowVer.Value);
+    }
+
+    private static GadgetNoteEntity NewNote(int id, int gadget, string note) =>
+        new()
+        {
+            NoteId = NoteIdValue.Create(id),
+            GadgetId = GadgetIdValue.Create(gadget),
+            Note = NoteValue.Create(note),
+        };
+
     private static async Task<int> UpdateAsInt(Task<bool> update) => await update ? 1 : 0;
 
     /// <summary>手元の版が保存先の版と同じか（行が無ければ False）</summary>
@@ -732,7 +1042,8 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
         bool efCore,
         bool withHooks,
         bool mars = false,
-        IInterceptor? interceptor = null
+        IInterceptor? interceptor = null,
+        IReadOnlyList<object>? hooks = null
     )
     {
         var connectionString = mars
@@ -755,6 +1066,11 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
         if (withHooks)
         {
             services.AddSaveHook(new NoOpHook());
+        }
+
+        foreach (var hook in hooks ?? [])
+        {
+            services.AddSaveHook(hook);
         }
 
         return services.BuildServiceProvider();
@@ -802,6 +1118,75 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
 
     /// <summary>何もしない Save フック（EF Core の保存をフックありの経路へ回す）</summary>
     private sealed class NoOpHook : ISaveHook<GadgetEntity>, ISaveHook<GadgetNoteEntity>;
+
+    /// <summary>gadget の After で、同じ行の名前を SQL で書き換える</summary>
+    private sealed class StampGadgetOnAfter : ISaveHook<GadgetEntity>
+    {
+        public Task AfterSaveAsync(
+            GadgetEntity entity,
+            SaveOperation operation,
+            ISaveHookContext context,
+            CancellationToken cancellationToken = default
+        ) =>
+            context.ExecuteSqlAsync(
+                "UPDATE gadgets SET name = N'stamped' WHERE gadget_id = @id",
+                new { id = entity.GadgetId.Value },
+                cancellationToken
+            );
+    }
+
+    /// <summary>メモの After で、同じ保存の親の gadget の名前を SQL で書き換える</summary>
+    private sealed class StampParentOnAfter : ISaveHook<GadgetNoteEntity>
+    {
+        public Task AfterSaveAsync(
+            GadgetNoteEntity entity,
+            SaveOperation operation,
+            ISaveHookContext context,
+            CancellationToken cancellationToken = default
+        ) =>
+            context.ExecuteSqlAsync(
+                "UPDATE gadgets SET name = N'stamped' WHERE gadget_id = @id",
+                new { id = entity.GadgetId.Value },
+                cancellationToken
+            );
+    }
+
+    /// <summary>gadget の After で、別の表へ監査の行を SQL で足す（保存した行には触れない）</summary>
+    private sealed class AuditNoteOnAfter : ISaveHook<GadgetEntity>
+    {
+        public Task AfterSaveAsync(
+            GadgetEntity entity,
+            SaveOperation operation,
+            ISaveHookContext context,
+            CancellationToken cancellationToken = default
+        ) =>
+            context.ExecuteSqlAsync(
+                "INSERT INTO gadget_notes (note_id, gadget_id, note) VALUES (99, @id, N'audit')",
+                new { id = entity.GadgetId.Value },
+                cancellationToken
+            );
+    }
+
+    /// <summary>After を持つが context で何も書かない</summary>
+    private sealed class NoWriteOnAfter : ISaveHook<GadgetEntity>
+    {
+        public Task AfterSaveAsync(
+            GadgetEntity entity,
+            SaveOperation operation,
+            ISaveHookContext context,
+            CancellationToken cancellationToken = default
+        ) => Task.CompletedTask;
+    }
+
+    /// <summary>新しい gadget の挿入（Insert）だけを Before で飛ばす</summary>
+    private sealed class SkipGadgetInsert : ISaveHook<GadgetEntity>
+    {
+        public Task<bool> BeforeSaveAsync(
+            GadgetEntity entity,
+            SaveOperation operation,
+            CancellationToken cancellationToken = default
+        ) => Task.FromResult(operation != SaveOperation.Insert);
+    }
 
     /// <summary>gadgets の UPDATE を最初の決めた回数だけ当たらなくし、その次の UPDATE の前に行を消す</summary>
     /// <remarks>

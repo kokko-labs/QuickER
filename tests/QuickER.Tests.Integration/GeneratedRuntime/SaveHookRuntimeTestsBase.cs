@@ -9,22 +9,18 @@ using Xunit;
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
-/// Save フック（<see cref="ISaveHook{TEntity}"/>）の意味論を、実装先（QuickER 版 Repository の SQLite・EF Core・インメモリ）を
-/// 跨いでパリティ検証する共通基底。バックエンド非依存のシナリオ（スキップ・短絡順序・insertWhenUpdateMissing の非対称・
-/// サブツリー削除の per-node 発火・直接操作の素通り・未登録 no-op・IEnumerable 形態）を <c>[Fact]</c> として持ち、
-/// 各派生はリポジトリ生成・シードだけを差し込む。
+/// Save フック（<see cref="ISaveHook{TEntity}"/>）の、複数のフックを登録したときの順序と短絡を、実装先（QuickER 版 Repository の
+/// SQLite・EF Core・インメモリ）を跨いで検証する共通基底。各派生はリポジトリ生成・シードだけを差し込む。
 /// </summary>
 /// <remarks>
 /// <para>
-/// 入力はバイナリフィクスチャ（<see cref="BinaryFixtureDefinition"/>）。<c>documents</c>（親）と子 <c>document_notes</c> を使う。
-/// 状態の確認は生 SQL ではなくリポジトリ API（<c>GetByIdAsync</c> / <c>Query()</c>）で行うため、生 SQL を持たないインメモリでも
-/// 同じアサーションが成立する。
+/// 入力はバイナリフィクスチャ（<see cref="BinaryFixtureDefinition"/>）の <c>documents</c>。状態の確認はリポジトリ API
+/// （<c>GetByIdAsync</c>）で行うため、生 SQL を持たないインメモリでも同じアサーションが成立する。
 /// </para>
 /// <para>
-/// <b>「After 例外時の残留」</b>は全実装先で共通の期待（残らない）である。QuickER 版 Repository・EF Core は 1 トランザクション、
-/// インメモリは copy-on-write ステージングによる保存単位の all-or-nothing で、いずれもロールバックする。After の同一トランザクション
-/// 書き込み（除外列 blob・生 SQL）や FK 制約ロールバックは、context 操作の対応が実装先で異なるため各派生のバックエンド固有
-/// <c>[Fact]</c> で検証する。
+/// ほかの Save フックの意味論（スキップ・After 例外での巻き戻り・insertWhenUpdateMissing・サブツリー削除・直接の書き込みの素通り・
+/// 未登録・複数形の保存・After の context の書き込み）は、実装先の一致のシナリオ（<c>BackendParityScenarios.SaveHook.cs</c>）が
+/// 5 つの実装先で持つ。複数のフックの登録順と短絡は、実装先の一致の記録フックが 1 つだけなので、ここに残す。
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
@@ -74,79 +70,6 @@ public abstract class SaveHookRuntimeTestsBase
     protected async Task<bool> DocumentExistsAsync(int id) =>
         await Documents().GetByIdAsync(id, Ct) is not null;
 
-    /// <summary>指定文書に属する子メモの件数（バックエンド非依存＝Query().Count で確認）</summary>
-    protected Task<int> NoteCountAsync(int documentId) =>
-        Notes().Query().Where(n => n.DocumentId == documentId).CountAsync(Ct);
-
-    // ── 1. Before false の単独スキップ ──
-
-    /// <summary>1. Before が false のエンティティは操作されず（行なし・RowState 据え置き・After 未発火）、他の行は保存される</summary>
-    [Fact(
-        DisplayName = "[SaveHook] 1: Before false は単独スキップ（据え置き・After 未発火・他行は保存）"
-    )]
-    public async Task Before_False_SkipsSingleEntity_OthersSaved()
-    {
-        await ResetAndSeedAsync();
-
-        var log = new List<string>();
-        var hook = new RecordingHook<DocumentEntity>(log, e => e.DocumentId, "h")
-        {
-            // 文書 10 の挿入だけをスキップする
-            BeforePredicate = (e, _) => e.DocumentId != 10,
-        };
-        var documents = Documents(hook);
-
-        var skipped = NewDocument(10, "skip-me", null, [1]);
-        skipped.MarkAdded();
-        var saved = NewDocument(11, "save-me", null, [2]);
-        saved.MarkAdded();
-
-        await documents.SaveAsync([skipped, saved], cancellationToken: Ct);
-
-        // スキップした行は保存されず、RowState は Added のまま据え置き。After は呼ばれない
-        (await DocumentExistsAsync(10))
-            .Should()
-            .BeFalse();
-        skipped.RowState.Should().Be(RowState.Added, "スキップされた行は状態が据え置かれる");
-        log.Should().Contain("h:before:Insert:10").And.NotContain("h:after:Insert:10");
-
-        // 他の行は通常どおり保存され、状態も確定する
-        (await DocumentExistsAsync(11))
-            .Should()
-            .BeTrue();
-        saved.RowState.Should().Be(RowState.Unchanged);
-        log.Should().Contain("h:before:Insert:11").And.Contain("h:after:Insert:11");
-    }
-
-    // ── 4（row 版）. After 例外で保存フェーズの変更が残らない（全実装先で共通） ──
-
-    /// <summary>
-    /// After が例外を投げると、保存フェーズで行った更新は全実装先で残らない（QuickER 版 Repository・EF Core は
-    /// 1 トランザクション、インメモリはステージング破棄＝未公開）。
-    /// </summary>
-    [Fact(DisplayName = "[SaveHook] After 例外で保存フェーズの変更は残らない（全実装先で共通）")]
-    public async Task After_Throws_RollsBackSavePhase()
-    {
-        await ResetAndSeedAsync();
-
-        var hook = new RecordingHook<DocumentEntity>([], e => e.DocumentId, "h")
-        {
-            AfterAction = (_, _, _) => throw new InvalidOperationException("after-boom"),
-        };
-        var documents = Documents(hook);
-
-        var doc = await documents.GetByIdAsync(1, Ct);
-        doc!.Title = "alpha-doomed";
-        doc.MarkUpdated();
-
-        var act = () => documents.SaveAsync(doc, cancellationToken: Ct);
-        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("*after-boom*");
-
-        var reread = await Documents().GetByIdAsync(1, Ct);
-
-        reread!.Title.Should().Be("alpha", "After 例外で保存フェーズの更新はロールバックされる");
-    }
-
     // ── 5. 複数フックの短絡と順序 ──
 
     /// <summary>5. Before は登録順で最初の false で短絡（残りは呼ばれない）、全 true のとき After も登録順に呼ばれる</summary>
@@ -193,157 +116,5 @@ public abstract class SaveHookRuntimeTestsBase
                 "o2:after:Insert:21",
                 "o3:after:Insert:21"
             );
-    }
-
-    // ── 6. insertWhenUpdateMissing の Before=Update・After=Insert ──
-
-    /// <summary>6. 更新対象が無く INSERT へ切り替わると、Before は Update で 1 回・After は実操作 Insert で発火する</summary>
-    [Fact(DisplayName = "[SaveHook] 6: insertWhenUpdateMissing は Before=Update・After=Insert")]
-    public async Task InsertWhenUpdateMissing_BeforeUpdate_AfterInsert()
-    {
-        await ResetAndSeedAsync();
-
-        var log = new List<string>();
-        var hook = new RecordingHook<DocumentEntity>(log, e => e.DocumentId, "h");
-        var documents = Documents(hook);
-
-        // 子を持たない文書 2 を取得 → 削除 → Updated として保存（更新対象なし → INSERT へ切替）
-        var doc = await documents.GetByIdAsync(2, Ct);
-        (await Documents().DeleteAsync(2, Ct)).Should().BeTrue();
-        doc!.MarkUpdated();
-
-        await documents.SaveAsync(doc, insertWhenUpdateMissing: true, cancellationToken: Ct);
-
-        // Before は Update で 1 回、After は実際に行った Insert で発火
-        log.Should().Equal("h:before:Update:2", "h:after:Insert:2");
-        (await DocumentExistsAsync(2)).Should().BeTrue();
-    }
-
-    // ── 7. サブツリー削除の per-node 発火と D2 帰結 ──
-
-    /// <summary>7. サブツリー削除は子ごとに Before/After(Delete) を発火し、root だけ Before=false なら「子は消え root は残る」</summary>
-    [Fact(
-        DisplayName = "[SaveHook] 7: サブツリー削除は per-node 発火・root だけ false で子は消え root は残る"
-    )]
-    public async Task SubtreeDelete_PerNodeFiring_RootSkippedChildrenDeleted()
-    {
-        await ResetAndSeedAsync();
-
-        var log = new List<string>();
-        // 親（DocumentEntity）の Delete だけをスキップし、子（DocumentNoteEntity）は削除する
-        var docHook = new RecordingHook<DocumentEntity>(log, e => e.DocumentId, "doc")
-        {
-            BeforePredicate = (_, op) => op != SaveOperation.Delete,
-        };
-        var noteHook = new RecordingHook<DocumentNoteEntity>(log, e => e.NoteId, "note");
-        var documents = Documents(docHook, noteHook);
-
-        // 文書 1（子 100/101 を持つ）を Include して取得し、削除としてグラフ保存する
-        var doc = await documents
-            .Query()
-            .Where(d => d.DocumentId == 1)
-            .Include(d => d.DocumentNotes)
-            .FirstOrDefaultAsync(Ct);
-        doc!.MarkRemoved();
-
-        await documents.SaveAsync(doc, cancellationToken: Ct);
-
-        // 子ごとに Before/After(Delete) が発火し、root は Before(Delete) が false でスキップ（After なし）。
-        // per-node の発火順は実装先で異なる（QuickER/InMemory は子先行・EF Core は追跡順）ため Contain で検証する
-        log.Should()
-            .Contain("note:before:Delete:100")
-            .And.Contain("note:after:Delete:100")
-            .And.Contain("note:before:Delete:101")
-            .And.Contain("note:after:Delete:101")
-            .And.Contain("doc:before:Delete:1")
-            .And.NotContain("doc:after:Delete:1");
-
-        // 子は消え、root（文書 1）は残る（D2 の帰結）
-        (await NoteCountAsync(1))
-            .Should()
-            .Be(0, "子は削除された");
-        (await DocumentExistsAsync(1)).Should().BeTrue("root はスキップされ残る");
-    }
-
-    // ── 8. 直接操作・BulkInsert の素通り ──
-
-    /// <summary>8. Insert/Update/Delete の直接呼び出しと BulkInsert はフックを発火しない（Save 経路のみが契約）</summary>
-    [Fact(DisplayName = "[SaveHook] 8: 直接 Insert/Update/Delete・BulkInsert はフックを素通りする")]
-    public async Task DirectOperations_AndBulkInsert_DoNotFireHooks()
-    {
-        await ResetAndSeedAsync();
-
-        var log = new List<string>();
-        var hook = new RecordingHook<DocumentEntity>(log, e => e.DocumentId, "h");
-        var documents = Documents(hook);
-
-        await documents.InsertAsync(NewDocument(40, "direct-insert", null, [1]), Ct);
-        var updated = await documents.GetByIdAsync(40, Ct);
-        updated!.Title = "direct-update";
-        await documents.UpdateAsync(updated, cancellationToken: Ct);
-        await documents.DeleteAsync(40, Ct);
-        await documents.BulkInsertAsync([NewDocument(41, "bulk", null, [1])], Ct);
-
-        log.Should().BeEmpty("直接操作・BulkInsert は Save フックを発火しない");
-    }
-
-    // ── 9. 未登録 no-op ──
-
-    /// <summary>9. フックを 1 つも登録しなければ SaveAsync は動く（レジストリは既定登録されるが完全 no-op）</summary>
-    [Fact(DisplayName = "[SaveHook] 9: フック未登録なら SaveAsync は no-op として動く")]
-    public async Task NoHooks_SaveWorksAsBefore()
-    {
-        await ResetAndSeedAsync();
-
-        var documents = Documents();
-
-        var doc = NewDocument(60, "no-hooks", null, [1]);
-        doc.MarkAdded();
-        (await documents.SaveAsync(doc, cancellationToken: Ct)).Should().BeGreaterThan(0);
-
-        doc.RowState.Should().Be(RowState.Unchanged);
-        (await DocumentExistsAsync(60)).Should().BeTrue();
-    }
-
-    // ── 10. SaveAsync(IEnumerable) 形態 ──
-
-    /// <summary>10. SaveAsync(IEnumerable) でも各エンティティで Before/After が発火する（各エンティティ内で Before→After の順は保たれる）</summary>
-    /// <remarks>
-    /// After の発火位置は実装先で異なる（QuickER 版 Repository＝各 DML 直後の interleave・EF Core/InMemory＝バッチ後）ため、
-    /// エンティティを跨いだ厳密な順序ではなく「各エンティティで Before が自身の After より前」という不変条件で検証する。
-    /// </remarks>
-    [Fact(
-        DisplayName = "[SaveHook] 10: SaveAsync(IEnumerable) でも各エンティティでフックが発火する"
-    )]
-    public async Task SaveAsyncEnumerable_FiresHooksPerEntity()
-    {
-        await ResetAndSeedAsync();
-
-        var log = new List<string>();
-        var hook = new RecordingHook<DocumentEntity>(log, e => e.DocumentId, "h");
-        var documents = Documents(hook);
-
-        var a = NewDocument(70, "a", null, [1]);
-        a.MarkAdded();
-        var b = NewDocument(71, "b", null, [2]);
-        b.MarkAdded();
-
-        await documents.SaveAsync([a, b], cancellationToken: Ct);
-
-        log.Should()
-            .HaveCount(4)
-            .And.Contain([
-                "h:before:Insert:70",
-                "h:after:Insert:70",
-                "h:before:Insert:71",
-                "h:after:Insert:71",
-            ]);
-
-        // 各エンティティで Before が自身の After より前に発火する（実装先に依らない不変条件）
-        log.IndexOf("h:before:Insert:70").Should().BeLessThan(log.IndexOf("h:after:Insert:70"));
-        log.IndexOf("h:before:Insert:71").Should().BeLessThan(log.IndexOf("h:after:Insert:71"));
-
-        (await DocumentExistsAsync(70)).Should().BeTrue();
-        (await DocumentExistsAsync(71)).Should().BeTrue();
     }
 }

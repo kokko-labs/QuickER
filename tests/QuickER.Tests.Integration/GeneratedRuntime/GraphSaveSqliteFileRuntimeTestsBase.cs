@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using QuickER.Tests.GeneratedQueryFixture;
@@ -8,18 +9,38 @@ using Xunit;
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
-/// グラフ保存のランタイムスイートを<b>実ファイル SQLite</b>（Docker 不要＝CI 常時実行）で流す派生の共通基底。
+/// グラフ保存の、NULL を許す一意な列の並べ方を<b>実ファイル SQLite</b>（Docker 不要＝CI 常時実行）で確かめる共通基底。
 /// QuickER の <c>SqliteRepository</c> 版と EF Core Sqlite 版がリポジトリの解決だけを差し込む。
 /// </summary>
-public abstract class GraphSaveSqliteFileRuntimeTestsBase : GraphSaveRuntimeTestsBase, IDisposable
+/// <remarks>
+/// 入力はクエリフィクスチャ（注文のメモが NULL を許す一意制約を持つ）。グラフ保存のほかのシナリオ（カスケードの閉包だけを
+/// 保存する・付け替えと元の親の削除・削除する行の一意な値を取る更新）は、実装先どうしの一致のエンジン
+/// （<see cref="BackendParityRuntimeTests"/> の <c>graph-include-*</c>・<c>graph-move-order-and-delete-old-customer-*</c>・
+/// <c>graph-updated-row-takes-unique-value-of-deleted-row-with-children-*</c>）が持つ。この形だけは、その図に NULL を許す一意な
+/// 列が無いので、ここで流す。
+/// </remarks>
+public abstract class GraphSaveSqliteFileRuntimeTestsBase : IDisposable
 {
+    /// <summary>テストのキャンセルトークン</summary>
+    protected static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
+
     /// <summary>各テストが読み書きする一時ファイル DB</summary>
     private readonly SqliteTempDatabase _db = SqliteTempDatabase.Create();
 
     /// <summary>書き込み可能な接続文字列（バックエンドはこの実ファイルへ読み書きする）</summary>
     protected string ConnectionString => _db.ReadWriteCreateConnectionString;
 
-    protected override async Task ResetStorageAsync()
+    /// <summary>顧客リポジトリを生成する</summary>
+    protected abstract ICustomerRepository CreateCustomerRepository();
+
+    /// <summary>注文リポジトリを生成する</summary>
+    protected abstract IOrderRepository CreateOrderRepository();
+
+    /// <summary>注文明細リポジトリを生成する</summary>
+    protected abstract IOrderLineRepository CreateOrderLineRepository();
+
+    /// <summary>保存先のスキーマを空の状態へ戻す</summary>
+    private async Task ResetStorageAsync()
     {
         await _db.ResetSchemaAsync(Ct);
         await _db.ApplyDdlAsync(QueryFixtureDefinition.Build(), Ct);

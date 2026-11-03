@@ -93,7 +93,17 @@ public class RuntimeTestMatrixTests
     private sealed record FeatureRow(string Description, IReadOnlyDictionary<Backend, Cell> Cells);
 
     /// <summary>テストクラスがどのセルを埋めるかの登録（1 クラスが複数行に現れてよい）</summary>
-    private sealed record Registration(string ClassName, string Feature, Backend Backend);
+    /// <param name="Scenarios">
+    /// 実装先どうしの一致（<see cref="BackendParityRuntimeTests"/>）の決定的なシナリオがセルを埋めるときの、そのシナリオの名前
+    /// （<c>BackendParity</c> の行以外へ BackendParityRuntimeTests を登録するときは必須。名前が実在し、その列の実装先で流れることを
+    /// <see cref="BackendParityRegistrations_NameScenariosRunningOnTheColumn"/> が照合する）
+    /// </param>
+    private sealed record Registration(
+        string ClassName,
+        string Feature,
+        Backend Backend,
+        IReadOnlyList<string>? Scenarios = null
+    );
 
     /// <summary>担当テストが実在するべきセル</summary>
     private static Cell Covered() => new(CellKind.Covered);
@@ -198,17 +208,16 @@ public class RuntimeTestMatrixTests
             Row(Covered(), Covered(), Covered(), Covered(), Covered())
         ),
         ["UniquenessEnforcement"] = new(
-            "書き込み時の UNIQUE 制約強制（インメモリが実 DB の制約の代役を務める）",
+            "書き込み時の UNIQUE 制約強制（インメモリが実 DB の制約の代役を務める。実 DB の実装先は、DB の拒否が呼び出し側へ同じ形で届き何も書かないことを実装先の一致が比べる）",
             Row(
                 NotApplicable(
                     "実 DB では制約が DDL の実体として存在し、拒否するのは DB 自身＝生成コードの挙動ではない"
+                        + "（SQLite の実装先の拒否の届き方は実装先の一致が比べ、SQL Server 方言の実装先の一致は版の系統だけを持つ）"
                 ),
-                NotApplicable("同上"),
-                NotApplicable("同上"),
                 Covered(),
-                NotApplicable(
-                    "サーバーの背後に居る実装（実 DB かインメモリ）が拒否し、転送層は例外を運ぶだけ"
-                )
+                Covered(),
+                Covered(),
+                Covered()
             )
         ),
         ["IncludeGraph"] = new(
@@ -230,9 +239,7 @@ public class RuntimeTestMatrixTests
                 Covered(),
                 Covered(),
                 Covered(),
-                Gap(
-                    "リモートの保存はサーバー側の直結実装が行うため、走査の意味論は直結の各セルが持つ"
-                )
+                Covered()
             )
         ),
         ["BackendParity"] = new(
@@ -260,7 +267,7 @@ public class RuntimeTestMatrixTests
                 NotApplicable(
                     "インメモリにはトリガー・行レベルセキュリティが無く、文が当たらない状況が生まれない"
                 ),
-                NotApplicable("リモートの保存はサーバー側の直結実装が行う")
+                Covered()
             )
         ),
         ["IncludeGraphSelfReference"] = new(
@@ -444,11 +451,11 @@ public class RuntimeTestMatrixTests
         ["EditModelValidateUnique"] = new(
             "EditModel.ValidateUniqueAsync（DB 照合による重複検出）",
             Row(
-                Gap(
-                    "DB 照合の実 DB 検証は SQLite のみ。照合 SQL は UniquenessCheck 側で 5 実装を通している"
-                ),
                 Covered(),
-                Gap("同上"),
+                Covered(),
+                Gap(
+                    "DB 照合の実 DB 検証は QuickER 版（SQLite・SQL Server）だけ。照合 SQL は UniquenessCheck 側で 5 実装を通している"
+                ),
                 Gap("同上"),
                 Gap("同上")
             )
@@ -467,7 +474,7 @@ public class RuntimeTestMatrixTests
             "HTTP 転送層（health・エラー分類と詳細秘匿・応答本文・VO 本文・keyed 登録・認可の明示選択）",
             Row(
                 NotApplicable(
-                    "転送層はサーバー背後のエンジンに依らない（サーバー側実装は Ado/EfCore の 2 通りで実証）"
+                    "転送層はサーバー背後のエンジンに依らない（サーバーの背後が QuickER 版と EF Core の 2 通りでも同じことは、CrudParity 行の RemoteService 系と実装先の一致のリモート 2 つの実装先が見る）"
                 ),
                 NotApplicable("同上"),
                 NotApplicable("同上"),
@@ -538,6 +545,8 @@ public class RuntimeTestMatrixTests
         new("InMemoryFixtureRuntimeTests", "CrudParity", Backend.InMemory),
         new("RemoteServiceAdoRuntimeTests", "CrudParity", Backend.Remote),
         new("RemoteServiceEfCoreRuntimeTests", "CrudParity", Backend.Remote),
+        // リモート面の CRUD・グラフ保存・競合の型の復元・null の引数は、実装先の一致のシナリオがリモートの 2 つの実装先で見る
+        new(nameof(BackendParityRuntimeTests), "CrudParity", Backend.Remote, [.. CrudParityRemote]),
         // --- 実装先どうしの一致 ---
         new("BackendParitySqlServerRuntimeTests", "BackendParity", Backend.AdoSqlServer),
         new("BackendParitySqlServerRuntimeTests", "BackendParity", Backend.EfCore),
@@ -567,10 +576,39 @@ public class RuntimeTestMatrixTests
         new("SaveHookInMemoryRuntimeTests", "SaveHook", Backend.InMemory),
         new("SaveHookRegistrationRuntimeTests", "SaveHook", Backend.InMemory),
         new("SaveHookRemoteRuntimeTests", "SaveHook", Backend.Remote),
-        new("RemoteSaveWriteBackRuntimeTests", "SaveHook", Backend.Remote),
-        new("RemoteSaveRowOrderRuntimeTests", "SaveHook", Backend.Remote),
-        new("SaveHookContextWriteVersionSqlServerRuntimeTests", "SaveHook", Backend.AdoSqlServer),
-        new("SaveHookContextWriteVersionSqlServerRuntimeTests", "SaveHook", Backend.EfCore),
+        // After が SQL で書いた行の版を読み直さないこと・親スキップ×子保存の外部キー違反は、SQL Server の 2 者比較の行が持つ
+        new(nameof(BackendParitySqlServerRuntimeTests), "SaveHook", Backend.AdoSqlServer),
+        new(nameof(BackendParitySqlServerRuntimeTests), "SaveHook", Backend.EfCore),
+        new(
+            nameof(BackendParityRuntimeTests),
+            "SaveHook",
+            Backend.AdoSqlite,
+            [
+                .. SaveHook,
+                .. SaveHookFullSurface,
+                .. SaveHookBlobStream,
+                .. SaveHookForeignKey,
+                .. SaveHookWriteBack,
+            ]
+        ),
+        new(
+            nameof(BackendParityRuntimeTests),
+            "SaveHook",
+            Backend.EfCore,
+            [.. SaveHook, .. SaveHookFullSurface, .. SaveHookForeignKey, .. SaveHookWriteBack]
+        ),
+        new(
+            nameof(BackendParityRuntimeTests),
+            "SaveHook",
+            Backend.InMemory,
+            [.. SaveHook, .. SaveHookFullSurface, .. SaveHookBlobStream, .. SaveHookWriteBack]
+        ),
+        new(
+            nameof(BackendParityRuntimeTests),
+            "SaveHook",
+            Backend.Remote,
+            [.. SaveHook, .. SaveHookBlobStream, .. SaveHookForeignKey, .. SaveHookWriteBack]
+        ),
         new("SaveHookBinaryWriteSqlServerRuntimeTests", "SaveHook", Backend.AdoSqlServer),
         new("SaveHookBinaryWriteSqliteRuntimeTests", "SaveHook", Backend.AdoSqlite),
         // --- 無制限バイナリ列 ---
@@ -584,6 +622,42 @@ public class RuntimeTestMatrixTests
         new("RemoteEfCoreUnboundedBinaryRuntimeTests", "BinaryColumn", Backend.Remote),
         new("RemoteEfCoreUnboundedBinarySqlServerRuntimeTests", "BinaryColumn", Backend.Remote),
         new("RemoteRequestMarkRuntimeTests", "BinaryColumn", Backend.Remote),
+        // 除外の読み書き・WithUnboundedBinary・射影・生 SQL・Stream アクセサの契約は、実装先どうしの一致のシナリオが持つ
+        new(
+            nameof(BackendParityRuntimeTests),
+            "BinaryColumn",
+            Backend.AdoSqlite,
+            [
+                .. BinaryColumn,
+                .. BinaryColumnFullSurface,
+                .. BinaryColumnRawSql,
+                .. BinaryColumnBlobStream,
+                .. BinaryColumnBlobStreamFullSurface,
+            ]
+        ),
+        new(
+            nameof(BackendParityRuntimeTests),
+            "BinaryColumn",
+            Backend.EfCore,
+            [.. BinaryColumn, .. BinaryColumnFullSurface, .. BinaryColumnRawSql]
+        ),
+        new(
+            nameof(BackendParityRuntimeTests),
+            "BinaryColumn",
+            Backend.InMemory,
+            [
+                .. BinaryColumn,
+                .. BinaryColumnFullSurface,
+                .. BinaryColumnBlobStream,
+                .. BinaryColumnBlobStreamFullSurface,
+            ]
+        ),
+        new(
+            nameof(BackendParityRuntimeTests),
+            "BinaryColumn",
+            Backend.Remote,
+            [.. BinaryColumn, .. BinaryColumnBlobStream]
+        ),
         new("BinaryVoEditModelRuntimeTests", "BinaryColumnEditModel", Backend.AdoSqlite),
         // --- 一意性の事前チェック ---
         new("UniquenessCheckSqlServerRuntimeTests", "UniquenessCheck", Backend.AdoSqlServer),
@@ -592,15 +666,68 @@ public class RuntimeTestMatrixTests
         new("UniquenessCheckInMemoryRuntimeTests", "UniquenessCheck", Backend.InMemory),
         new("UniquenessCheckRemoteRuntimeTests", "UniquenessCheck", Backend.Remote),
         new("InMemoryUniquenessRuntimeTests", "UniquenessEnforcement", Backend.InMemory),
+        new(
+            nameof(BackendParityRuntimeTests),
+            "UniquenessEnforcement",
+            Backend.AdoSqlite,
+            UniquenessEnforcement
+        ),
+        new(
+            nameof(BackendParityRuntimeTests),
+            "UniquenessEnforcement",
+            Backend.EfCore,
+            UniquenessEnforcement
+        ),
+        new(
+            nameof(BackendParityRuntimeTests),
+            "UniquenessEnforcement",
+            Backend.Remote,
+            UniquenessEnforcement
+        ),
         // --- 名前付きクエリ ---
-        new("EfCoreExecutionStrategyRuntimeTests", "EfCoreExecutionStrategy", Backend.EfCore),
-        new("IgnoredWriteAdoRuntimeTests", "IgnoredWrite", Backend.AdoSqlite),
-        new("IgnoredWriteEfCoreRuntimeTests", "IgnoredWrite", Backend.EfCore),
+        new(
+            nameof(BackendParityRuntimeTests),
+            "EfCoreExecutionStrategy",
+            Backend.EfCore,
+            [
+                "ef-retry-move-order-and-delete-old-customer",
+                "ef-retry-save-with-hooks-runs-hooks-per-attempt",
+                "ef-retry-execute-delete-cascade",
+                "contact-backup-delete-retried-commit",
+            ]
+        ),
+        new(nameof(BackendParityRuntimeTests), "IgnoredWrite", Backend.AdoSqlite, IgnoredWrite),
+        new(nameof(BackendParityRuntimeTests), "IgnoredWrite", Backend.EfCore, IgnoredWrite),
+        new(nameof(BackendParityRuntimeTests), "IgnoredWrite", Backend.Remote, IgnoredWrite),
         new("GraphSaveAdoRuntimeTests", "GraphSave", Backend.AdoSqlite),
         new("GraphSaveEfCoreRuntimeTests", "GraphSave", Backend.EfCore),
         new("GraphSaveEfCoreSqlServerRuntimeTests", "GraphSave", Backend.EfCore),
-        new("GraphSaveInMemoryRuntimeTests", "GraphSave", Backend.InMemory),
-        new("GraphSaveOrderRuntimeTests", "GraphSave", Backend.AdoSqlite),
+        // EF Core on SQL Server の追跡の形（Include で読んだ子の削除・付け替えと元の親の削除）は、SQL Server の 2 者比較の行が持つ
+        new(nameof(BackendParitySqlServerRuntimeTests), "GraphSave", Backend.EfCore),
+        new(
+            nameof(BackendParityRuntimeTests),
+            "GraphSave",
+            Backend.AdoSqlite,
+            [.. GraphSaveOrder, .. GraphSaveRuntime]
+        ),
+        new(
+            nameof(BackendParityRuntimeTests),
+            "GraphSave",
+            Backend.EfCore,
+            [.. GraphSaveOrder, .. GraphSaveRuntime]
+        ),
+        new(
+            nameof(BackendParityRuntimeTests),
+            "GraphSave",
+            Backend.InMemory,
+            [.. GraphSaveOrder, .. GraphSaveRuntime]
+        ),
+        new(
+            nameof(BackendParityRuntimeTests),
+            "GraphSave",
+            Backend.Remote,
+            [.. GraphSaveOrder, .. GraphSaveRuntimeRemote]
+        ),
         new("IncludeGraphSqlServerRuntimeTests", "IncludeGraph", Backend.AdoSqlServer),
         new("IncludeGraphAdoRuntimeTests", "IncludeGraph", Backend.AdoSqlite),
         new("IncludeGraphEfCoreRuntimeTests", "IncludeGraph", Backend.EfCore),
@@ -635,6 +762,8 @@ public class RuntimeTestMatrixTests
         new("NamedQueryInMemoryRuntimeTests", "NamedQuery", Backend.InMemory),
         new("RemoteServiceAdoRuntimeTests", "NamedQuery", Backend.Remote),
         new("RemoteServiceAdoRuntimeTests", "NamedQueryRawSql", Backend.Remote),
+        new("RemoteServiceEfCoreRuntimeTests", "NamedQuery", Backend.Remote),
+        new("RemoteServiceEfCoreRuntimeTests", "NamedQueryRawSql", Backend.Remote),
         // --- 式木翻訳 ---
         new("SqlServerTranslatorOperatorRuntimeTests", "TranslatorOperator", Backend.AdoSqlServer),
         new(
@@ -713,6 +842,11 @@ public class RuntimeTestMatrixTests
         new("GeneratedEfCoreOracleRuntimeTests", "DialectPortability", Backend.EfCore),
         // --- EditModel の DB 照合 ---
         new("EditModelValidateUniqueRuntimeTests", "EditModelValidateUnique", Backend.AdoSqlite),
+        new(
+            "UniquenessCheckSqlServerRuntimeTests",
+            "EditModelValidateUnique",
+            Backend.AdoSqlServer
+        ),
         // --- リモート ---
         new("RemoteContractRuntimeTests", "RemoteContract", Backend.AdoSqlite),
         new("RemoteContractRuntimeTests", "RemoteContract", Backend.EfCore),
@@ -733,6 +867,190 @@ public class RuntimeTestMatrixTests
         new("EfCoreSqliteBusyTimeoutRuntimeTests", "BusyTimeoutDefault", Backend.EfCore),
         new("SqliteValueConversionRuntimeTests", "ValueConversion", Backend.AdoSqlite),
     ];
+
+    /// <summary>一意制約に断られる書き込み（挿入・更新・グラフ保存）が何も書かないシナリオ（実装先の一致）</summary>
+    private static IReadOnlyList<string> UniquenessEnforcement =>
+        [
+            "constraint-violations",
+            "unique-update-collides-or-keeps-own-value",
+            "unique-graph-save-duplicate-is-refused",
+        ];
+
+    /// <summary>版の無い表で文が当たらない書き込みのシナリオ（実装先の一致）</summary>
+    private static IReadOnlyList<string> IgnoredWrite =>
+        [
+            "ignored-write-update-returns-false-optimistic",
+            "ignored-write-update-returns-false-force-overwrite",
+            "ignored-write-save-reports-not-found-optimistic",
+            "ignored-write-save-reports-not-found-force-overwrite",
+        ];
+
+    /// <summary>Save フックのシナリオ（実装先の一致・5 つの実装先で流れる）</summary>
+    private static IReadOnlyList<string> SaveHook =>
+        [
+            "hook-skip-insert-others-saved",
+            "hook-skip-update-keeps-stored-row",
+            "hook-skip-new-child-keeps-it-added",
+            "hook-skip-root-delete-children-deleted",
+            "hook-save-many-fires-each-entity",
+            "hook-direct-crud-does-not-fire",
+            "hook-after-write-blob-not-supported-on-ef-core",
+            "hook-after-writes-blob-then-later-after-throws",
+            "hook-after-executes-sql",
+            "hook-after-sql-then-later-after-throws",
+            "hook-throw-after-update",
+            "insert-when-missing-single",
+            "n2-new-children-take-parent-keys",
+        ];
+
+    /// <summary>
+    /// Save フックのシナリオのうち、保存の応答がサーバーのフックの書いた値・決めたキーを呼び出し側へ書き戻すことを見るもの
+    /// （5 つの実装先で流れる。直結は同じインスタンスなので、リモートの書き戻しと同じ結果になることを比べる）
+    /// </summary>
+    private static IReadOnlyList<string> SaveHookWriteBack =>
+        [
+            "remote-save-writes-back-hook-values",
+            "remote-write-back-by-position",
+            "n2-hook-assigned-keys-reach-new-children",
+        ];
+
+    /// <summary>リモート面の CRUD・グラフ保存・保存の競合・null の引数のシナリオ（実装先の一致・5 つの実装先で流れる）</summary>
+    private static IReadOnlyList<string> CrudParityRemote =>
+        [
+            "remote-crud-round-trip",
+            "remote-save-round-trip",
+            "save-missing-row-conflicts-unless-insert-when-missing",
+            "null-argument-is-refused",
+        ];
+
+    /// <summary>Save フックのシナリオのうち、全機能面の手（BulkInsert）を使うもの（リモートでは流れない）</summary>
+    private static IReadOnlyList<string> SaveHookFullSurface => ["hook-bulk-insert-does-not-fire"];
+
+    /// <summary>Save フックのシナリオのうち、除外 blob の Stream アクセサで読むもの（EF Core の実装先では流れない）</summary>
+    private static IReadOnlyList<string> SaveHookBlobStream => ["hook-after-writes-blobs"];
+
+    /// <summary>無制限バイナリ列のシナリオのうち、全実装先で流れるもの（EF Core は除外を持たないことを実装先ごとの期待で見る）</summary>
+    private static IReadOnlyList<string> BinaryColumn =>
+        [
+            "blob-excluded-columns-read-and-write-guard",
+            "blob-stream-not-supported-on-ef-core",
+            "blob-unset-update-from-new-entity-keeps-blobs",
+        ];
+
+    /// <summary>無制限バイナリ列のシナリオのうち、全機能面（Query()・BulkInsert・射影）を使うもの（リモートには無い）</summary>
+    private static IReadOnlyList<string> BinaryColumnFullSurface =>
+        ["blob-excluded-columns-full-surface"];
+
+    /// <summary>無制限バイナリ列のシナリオのうち、生 SQL のエンティティ取得（QuickER 版と EF Core だけ）</summary>
+    private static IReadOnlyList<string> BinaryColumnRawSql => ["blob-raw-sql-entity-retrieval"];
+
+    /// <summary>無制限バイナリ列のシナリオのうち、Stream アクセサを使うもの（EF Core には無い）</summary>
+    private static IReadOnlyList<string> BinaryColumnBlobStream => ["blob-stream-contract"];
+
+    /// <summary>無制限バイナリ列のシナリオのうち、Stream アクセサと全機能面の両方を使うもの（QuickER 版とインメモリだけ）</summary>
+    private static IReadOnlyList<string> BinaryColumnBlobStreamFullSurface =>
+        ["blob-stream-write-then-with-unbounded-binary"];
+
+    /// <summary>Save フックのシナリオのうち、外部キーで断られるもの（インメモリは受け入れた差で打ち切る）</summary>
+    private static IReadOnlyList<string> SaveHookForeignKey => ["hook-skip-parent-orphans-child"];
+
+    /// <summary>削除を含む保存で新しい行を後回しにしないグラフ保存の書く順のシナリオ（実装先の一致）</summary>
+    private static IReadOnlyList<string> GraphSaveOrder =>
+        [
+            "graph-move-child-and-delete-old-parent-removed-first",
+            "graph-move-child-and-delete-old-parent-kept-first",
+            "graph-move-child-to-new-parent-and-delete-old-parent",
+            "graph-new-row-referenced-by-another-root-deletes-old-parent",
+            "graph-new-row-referenced-by-another-root-deletes-unrelated-row",
+        ];
+
+    /// <summary>
+    /// グラフ保存がカスケードの閉包だけを保存するシナリオ（実装先の一致。Include で読む形は全機能面の手なのでリモートで流れない）
+    /// </summary>
+    private static IReadOnlyList<string> GraphSaveRuntime =>
+        [
+            "graph-include-delete-child-saved-from-child",
+            "graph-include-delete-child-with-parent-included",
+            "graph-include-delete-child-through-root-keeps-siblings",
+            "graph-include-save-roots-sharing-parent-key",
+            "graph-include-save-child-does-not-write-parent",
+            "graph-include-delete-root-without-cascade-save",
+            .. GraphSaveRuntimeRemote,
+        ];
+
+    /// <summary>グラフ保存がカスケードの閉包だけを保存するシナリオのうち、リモートでも流れるもの</summary>
+    private static IReadOnlyList<string> GraphSaveRuntimeRemote =>
+        [
+            "graph-delete-root-without-cascade-save-attached",
+            "graph-move-order-and-delete-old-customer-removed-first",
+            "graph-move-order-and-delete-old-customer-kept-first",
+            "graph-updated-row-takes-unique-value-of-deleted-row-with-children-updated-first",
+            "graph-updated-row-takes-unique-value-of-deleted-row-with-children-removed-first",
+        ];
+
+    /// <summary>列の実装先に当たる、実装先の一致の実装先（AdoSqlServer は実装先の一致に無い）</summary>
+    private static IReadOnlyList<ParityBackendKind> ParityKindsOf(Backend backend) =>
+        backend switch
+        {
+            Backend.AdoSqlite => [ParityBackendKind.Ado],
+            Backend.EfCore => [ParityBackendKind.EfCore],
+            Backend.InMemory => [ParityBackendKind.InMemory],
+            Backend.Remote => [ParityBackendKind.Remote, ParityBackendKind.RemoteEfCoreOnly],
+            _ => [],
+        };
+
+    /// <summary>
+    /// 実装先の一致の登録が指すシナリオが実在し、その列の実装先で流れることを検証する（消した派生のセルを、移した先のシナリオへ
+    /// 付け替えたとき、シナリオの改名・実装先の絞り込みでセルが黙って空になるのを防ぐ）。
+    /// </summary>
+    [Fact(DisplayName = "実装先の一致の登録は、その列の実装先で流れる実在のシナリオを名指しする")]
+    public void BackendParityRegistrations_NameScenariosRunningOnTheColumn()
+    {
+        var problems = new List<string>();
+        var names = BackendParityScenarios.All.ToDictionary(s => s.Name, StringComparer.Ordinal);
+
+        foreach (
+            var registration in Registrations.Where(r =>
+                r.ClassName == nameof(BackendParityRuntimeTests)
+            )
+        )
+        {
+            var cell = $"[{registration.Feature} × {registration.Backend}]";
+
+            if (registration.Scenarios is null)
+            {
+                if (registration.Feature != "BackendParity")
+                {
+                    problems.Add($"{cell} は担当のシナリオを名指ししていない");
+                }
+
+                continue;
+            }
+
+            if (registration.Scenarios.Count == 0)
+            {
+                problems.Add($"{cell} のシナリオの一覧が空");
+            }
+
+            var kinds = ParityKindsOf(registration.Backend);
+
+            foreach (var name in registration.Scenarios)
+            {
+                if (!names.TryGetValue(name, out var scenario))
+                {
+                    problems.Add($"{cell} のシナリオ '{name}' が実装先の一致に無い");
+                }
+                else if (!scenario.Backends.Any(kinds.Contains))
+                {
+                    problems.Add(
+                        $"{cell} のシナリオ '{name}' はその列の実装先（{string.Join("/", kinds)}）で流れない"
+                    );
+                }
+            }
+        }
+
+        problems.Should().BeEmpty(string.Join(Environment.NewLine, problems));
+    }
 
     /// <summary>走査規約に合致する実行時テストクラス（xUnit が実際に実行する単位）を列挙する</summary>
     private static IReadOnlyList<Type> RuntimeTestClasses() =>

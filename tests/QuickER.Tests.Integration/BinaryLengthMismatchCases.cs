@@ -24,8 +24,8 @@ internal static class BinaryLengthMismatchCases
         yield return ("非シークで length より長い", new NonSeekableStream(new byte[20]), 10);
     }
 
-    /// <summary>CanSeek を持たない読み取り専用ストリーム。</summary>
-    private sealed class NonSeekableStream(byte[] data) : Stream
+    /// <summary>CanSeek を持たない読み取り専用ストリーム（実装先の一致の Stream の手も使う）。</summary>
+    internal sealed class NonSeekableStream(byte[] data) : Stream
     {
         private readonly MemoryStream _inner = new(data);
 

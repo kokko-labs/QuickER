@@ -4,7 +4,6 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
-using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Provider.SqlServer;
 using QuickER.Tests.GeneratedSqlServerBinaryFixture;
@@ -15,15 +14,16 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
 /// Save フック（<see cref="ISaveHook{TEntity}"/>）の<b>エンジン方言分岐</b>を、実 SQL Server（Testcontainers・Docker 依存）で
-/// 検証する部分集合。SQLite 一時ファイル DB（<see cref="SaveHookAdoRuntimeTests"/>）では確認できない SQL Server 固有の
-/// 参加モード書き込み（<c>SqlParameter(VarBinary,-1)</c>＝Stream 値のストリーミング送信）と、FK 制約の既定有効を突く。
+/// 検証する部分集合。SQLite（実装先の一致のシナリオ <c>hook-after-writes-blobs</c> など）では確認できない SQL Server 固有の
+/// 参加モード書き込み（<c>SqlParameter(VarBinary,-1)</c>＝Stream 値のストリーミング送信）を突く。
 /// </summary>
 /// <remarks>
 /// <para>
 /// 入力は SQL Server 方言のバイナリフィクスチャ（<see cref="SqlServerBinaryFixtureDefinition"/>・SQLite 版と同一図）。
-/// 検証観点は 3 つ——(3) After の <c>WriteBinaryColumnAsync</c> が同一トランザクションで blob を書きコミット後に読める、
-/// (4) After 例外で行・blob・監査行がすべてロールバックされる（アトミック性）、(2) 新規親スキップ×新規子保存の FK 違反で
-/// 全体ロールバック——で、いずれも SQL Server のトランザクション文脈でエンジンが正しく動くことを実証する。
+/// 検証観点は 2 つ——(3) After の <c>WriteBinaryColumnAsync</c> が同一トランザクションで blob を書きコミット後に読める、
+/// (4) After 例外で行・blob・監査行がすべてロールバックされる（アトミック性）——で、いずれも SQL Server のトランザクション文脈で
+/// エンジンが正しく動くことを実証する。新規親スキップ×新規子保存の FK 違反での全体ロールバックは、SQL Server の 2 者比較
+/// （<see cref="BackendParitySqlServerRuntimeTests"/> のケース <c>hook-skip-parent-child-fk</c>）が QuickER 版と EF Core で持つ。
 /// </para>
 /// <para>Docker 不在時は <see cref="SqlServerContainerFixture"/> の検出でスキップされる（CI では常にスキップ）。</para>
 /// </remarks>
@@ -95,14 +95,6 @@ public sealed class SaveHookSqlServerRuntimeTests(SqlServerContainerFixture fixt
             Title = title,
             Payload = payload,
             Thumb = thumb,
-        };
-
-    private static DocumentNoteEntity NewNote(int id, int documentId, string note) =>
-        new()
-        {
-            NoteId = id,
-            DocumentId = documentId,
-            Note = note,
         };
 
     private async Task<long> ScalarAsync(string sql) =>
@@ -186,35 +178,6 @@ public sealed class SaveHookSqlServerRuntimeTests(SqlServerContainerFixture fixt
         (await ScalarAsync("SELECT DATALENGTH(payload) FROM documents WHERE document_id = 1"))
             .Should()
             .Be(Doc1Payload.Length, "payload の blob は元のまま（書き込みはロールバック）");
-    }
-
-    /// <summary>2. 新規親スキップ×新規子保存は FK 違反で全体ロールバックする（SQL Server は FK 既定有効）</summary>
-    [Fact(
-        DisplayName = "[SaveHook/SqlServer] 2: 親スキップ×子保存は FK 違反で全体ロールバックする"
-    )]
-    public async Task Parent_Skipped_ChildSaved_ForeignKeyRollsBackAll()
-    {
-        var hook = new DelegateHook<DocumentEntity>
-        {
-            BeforePredicate = (_, op) => op != SaveOperation.Insert,
-        };
-        var documents = BuildProvider(hook).GetRequiredService<IDocumentRepository>();
-
-        var parent = NewDocument(50, "orphan-parent", null, [1]);
-        parent.MarkAdded();
-        var child = NewNote(500, 50, "orphan-child");
-        child.MarkAdded();
-        parent.DocumentNotes.Add(child);
-
-        var act = () => documents.SaveAsync(parent, cancellationToken: Ct);
-        await act.Should().ThrowAsync<SqlException>();
-
-        (await ScalarAsync("SELECT COUNT_BIG(*) FROM documents WHERE document_id = 50"))
-            .Should()
-            .Be(0);
-        (await ScalarAsync("SELECT COUNT_BIG(*) FROM document_notes WHERE note_id = 500"))
-            .Should()
-            .Be(0);
     }
 
     /// <summary>Before の返り値・After の副作用を差し込めるテスト用フック</summary>

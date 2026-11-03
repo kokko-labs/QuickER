@@ -161,9 +161,9 @@ internal static class BackendParityDimensions
                     HookRule,
                     [
                         new Level(NoneLevel),
-                        // AssignKey と EditKeyThenContinue は決まった形のシナリオだけが使う（乱数の列は作らない）。
-                        // 生成器にこの手を足すと種の列が変わり、既知の失敗の一覧と網羅しない組の一覧が書いた再現が
-                        // 別の形になるので、水準に載せずに外す
+                        // AssignKey・EditKeyThenContinue・AfterWriteBlob・AfterExecuteSql・EditBlobsThenContinue は決まった形のシナリオだけが使う
+                        // （乱数の列は作らない）。生成器にこの手を足すと種の列が変わり、既知の失敗の一覧と網羅しない組の一覧が
+                        // 書いた再現が別の形になるので、水準に載せずに外す
                         .. Enum.GetValues<ParityHookBehavior>()
                             .Where(value =>
                                 value
@@ -171,6 +171,9 @@ internal static class BackendParityDimensions
                                         ParityHookBehavior.Record
                                         or ParityHookBehavior.AssignKey
                                         or ParityHookBehavior.EditKeyThenContinue
+                                        or ParityHookBehavior.AfterWriteBlob
+                                        or ParityHookBehavior.AfterExecuteSql
+                                        or ParityHookBehavior.EditBlobsThenContinue
                                     )
                             )
                             .Select(value => new Level(value.ToString())),

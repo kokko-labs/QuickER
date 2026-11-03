@@ -163,6 +163,10 @@ public static class BackendParityKnownDifferences
             "リモートの断られた保存",
             RemoteRejectedSaveReason
         ),
+        // 修正 F（Pending）: EF Core の代替キーの書き込み（WriteAlternateKeysAsync）は SaveChanges の前に走るので、同じ保存で消す行の
+        // 代替キーの値を別の行の更新が取ると、削除より先に書いて一意制約に断られる（QuickER 版は削除の後に書いて成立する）
+        .. AlternateKeyBeforeDelete(EfCore),
+        .. AlternateKeyBeforeDelete(RemoteEfCoreOnly),
     ];
 
     /// <summary>
@@ -249,6 +253,21 @@ public static class BackendParityKnownDifferences
         var index = signature.IndexOf(':', StringComparison.Ordinal);
         return (Enum.Parse<ParityBackendKind>(signature[..index]), signature[(index + 1)..]);
     }
+
+    /// <summary>
+    /// 修正 F の違い（EF Core の代替キーの書き込みが、同じ保存で消す行の値とぶつかる）の、実装先ごとの 4 観点（戻り値・保存先・
+    /// 呼び出し側のグラフと、成立した保存の値そのものへの期待）
+    /// </summary>
+    private static IEnumerable<KnownEntry> AlternateKeyBeforeDelete(ParityBackendKind backend) =>
+        new[] { "outcome", "state", "slots", ParityStep.ExpectAspect }.Select(aspect =>
+            Pending(
+                "graph-updated-row-takes-alternate-key-of-deleted-row",
+                backend,
+                aspect,
+                "P3-3a（EF Core の代替キーの書き込みが SaveChanges の前に走り、同じ保存で消す行の値とぶつかる）",
+                "修正 F"
+            )
+        );
 
     /// <summary>直さないと決めた違いの項目を作る</summary>
     public static KnownEntry Accepted(
