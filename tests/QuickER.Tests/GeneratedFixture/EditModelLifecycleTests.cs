@@ -15,6 +15,9 @@ namespace QuickER.Tests.GeneratedFixture;
 /// 検証対象は BeginEdit/EndEdit/CancelEdit（IEditableObject）、RevertInput、AcceptChanges、HasGraphChanges、
 /// CollectErrors、兄弟／親ナビゲーション（GetNext/GetPrevious/MoveTo*/RemoveFromParent/IndexInParent/ParentModel）、
 /// および <see cref="EditModelCollection{T}"/> の AddRange/InsertRange/RemoveAll/RemoveRange/MoveTo/削除追跡。
+/// <para>
+/// Remove→（Clear）→Add した要素の保存グラフと RemoveRange の範囲外指定は <see cref="EditModelScenarioTests"/> の em-removed・em-range の表にある。
+/// </para>
 /// </remarks>
 public sealed class EditModelLifecycleTests
 {
@@ -60,7 +63,7 @@ public sealed class EditModelLifecycleTests
     }
 
     /// <summary>ロード済み（RowState=Unchanged）の CustomerEditModel を作る。</summary>
-    private static CustomerEditModel LoadedCustomer(int orderCount = 2) =>
+    internal static CustomerEditModel LoadedCustomer(int orderCount = 2) =>
         new CustomerMapper().CreateEditModel(BuildCustomerEntity(1, "Alice", true, orderCount));
 
     /// <summary>ロード済み（RowState=Unchanged）の OrderEditModel を作る。</summary>
@@ -744,26 +747,6 @@ public sealed class EditModelLifecycleTests
     }
 
     [Fact(
-        DisplayName = "RemoveRange: index + count が int を超える指定も、1 件も消さずに範囲外として断る"
-    )]
-    public void RemoveRangeの桁あふれ()
-    {
-        var col = new EditModelCollection<OrderEditModel>
-        {
-            new OrderEditModel(),
-            new OrderEditModel(),
-            new OrderEditModel(),
-        };
-
-        // index + count が負へ桁あふれする指定は、素の足し算の比較では範囲内に見えて途中まで消してしまう
-        var act = () => col.RemoveRange(1, int.MaxValue);
-
-        act.Should().Throw<ArgumentOutOfRangeException>().Which.ParamName.Should().Be("count");
-        col.Should().HaveCount(3);
-        col.RemovedItems.Should().BeEmpty();
-    }
-
-    [Fact(
         DisplayName = "CollectionChanged ハンドラからの入れ子範囲操作は最外の末尾 1 回に合流する"
     )]
     public void 入れ子範囲操作の通知合流()
@@ -895,24 +878,6 @@ public sealed class EditModelLifecycleTests
         updated.RowState.Should().Be(RowState.Updated);
     }
 
-    [Fact(
-        DisplayName = "Remove→Clear→Add: 戻した要素は保存対象（includeRemoved）の削除分に現れない"
-    )]
-    public void ClearをはさんだRemove後のAddは削除分に出ない()
-    {
-        var customer = LoadedCustomer(orderCount: 2);
-        var order = customer.Orders[0];
-
-        customer.Orders.Remove(order);
-        customer.Orders.Clear();
-        customer.Orders.Add(order);
-
-        var entity = new CustomerMapper().CreateEntity(customer, includeRemoved: true);
-
-        entity.Orders.Should().ContainSingle();
-        entity.Orders.Should().NotContain(o => o.RowState == RowState.Removed);
-    }
-
     [Fact(DisplayName = "Clear: 追跡リセット・所有解除・位置通知は従来どおり")]
     public void Clearの既存挙動()
     {
@@ -938,22 +903,7 @@ public sealed class EditModelLifecycleTests
         positionNotified.Should().Contain(nameof(OrderEditModel.IndexInParent));
     }
 
-    [Fact(DisplayName = "Remove→Add: 戻した要素は保存対象（includeRemoved）の削除分に現れない")]
-    public void 削除の取り消し後は削除分に出ない()
-    {
-        var customer = LoadedCustomer(orderCount: 2);
-        var order = customer.Orders[0];
-
-        customer.Orders.Remove(order);
-        customer.Orders.Add(order);
-
-        var entity = new CustomerMapper().CreateEntity(customer, includeRemoved: true);
-
-        entity.Orders.Should().HaveCount(2);
-        entity.Orders.Should().NotContain(o => o.RowState == RowState.Removed);
-    }
-
-    [Fact(DisplayName = "RemoveRange: 指定範囲を削除し、範囲外指定は ArgumentOutOfRangeException")]
+    [Fact(DisplayName = "RemoveRange: 指定範囲を削除する")]
     public void RemoveRange()
     {
         var a = new OrderEditModel();
@@ -968,10 +918,7 @@ public sealed class EditModelLifecycleTests
         col[0].Should().BeSameAs(a);
         col[1].Should().BeSameAs(d);
 
-        var bad = () => col.RemoveRange(-1, 1);
-        bad.Should().Throw<ArgumentOutOfRangeException>();
-        var bad2 = () => col.RemoveRange(0, 99);
-        bad2.Should().Throw<ArgumentOutOfRangeException>();
+        // 範囲外の指定は EditModelScenarioTests.Range（em-range）が確かめる
     }
 
     // ===== EditModelCollection: MoveTo =====

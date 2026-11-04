@@ -53,6 +53,9 @@ public sealed class PlainTagValue
 /// A-2 の要は「基底クラスから継承した静的メソッドが static abstract インターフェイスメンバを満たす」こと。
 /// 手書き VO（上の 2 型）が型名経由・型引数経由の両方で Create でき、生成 VO と同じ経路
 /// （JSON 変換・<see cref="SqlValueObjectActivator"/>・行 materializer の高速経路）に乗ることを固定する。
+/// Create / TryCreate / Validate・型引数経由の Create の決まった形の表明は <see cref="ValueObjectScenarioTests"/>
+/// の表にあり、ここに残すのは JSON の往復・Validate の戻り値（同じコレクションへ 2 回呼ぶ順序依存）・
+/// Wrap と materializer の高速経路（生成テンプレートの XmlDoc が名指しする）だけ。
 /// </para>
 /// <para>
 /// A-1 の網: <see cref="SqlValueObjectActivator.Wrap"/> と <c>EntitySaveMetadata.ResolveValueObjectReader</c> は
@@ -65,42 +68,6 @@ public sealed class HandwrittenValueObjectTests
 {
     // ===== A-2: 手書き VO の 3 メンバレシピ =====
 
-    [Fact(
-        DisplayName = "[手書きVO] Create は検証を通し、違反は ValueObjectValidationException になる"
-    )]
-    public void 手書きVOのCreateが基底実装で動く()
-    {
-        ContactMailValue.Create("a@example.com").Value.Should().Be("a@example.com");
-
-        var act = () => ContactMailValue.Create("no-at-mark");
-
-        var ex = act.Should().Throw<ValueObjectValidationException>().Which;
-        ex.ValueObjectType.Should().Be(typeof(ContactMailValue));
-        ex.Errors.Should().ContainSingle().Which.Should().Be("Mail address must contain '@'.");
-    }
-
-    [Fact(DisplayName = "[手書きVO] TryCreate は成功と失敗の両側で基底実装が動く")]
-    public void 手書きVOのTryCreateが両側で動く()
-    {
-        ContactMailValue.TryCreate("a@example.com", out var ok, out var noErrors).Should().BeTrue();
-        ok!.Value.Should().Be("a@example.com");
-        noErrors.Should().BeEmpty();
-
-        ContactMailValue.TryCreate("bad", out var ng, out var errors).Should().BeFalse();
-        ng.Should().BeNull();
-        errors.Should().ContainSingle();
-    }
-
-    [Fact(DisplayName = "[手書きVO] Validate は VO を作らずに違反だけを既存コレクションへ足す")]
-    public void 手書きVOのValidateが基底実装で動く()
-    {
-        var errors = new List<string> { "existing" };
-
-        ContactMailValue.Validate("bad", errors).Should().BeFalse();
-
-        errors.Should().Equal("existing", "Mail address must contain '@'.");
-    }
-
     // 集約先を共有する使い方では、コレクションの件数からは「今回の値が失格したか」を読めない。
     // 戻り値がその 1 回の判定だけを表すことを固定する（既存要素があっても true を返す）。
     [Fact(DisplayName = "[手書きVO] Validate の戻り値はその呼び出しの判定だけを表す")]
@@ -112,31 +79,6 @@ public sealed class HandwrittenValueObjectTests
         ContactMailValue.Validate("ok@example.com", errors).Should().BeTrue();
 
         errors.Should().ContainSingle();
-    }
-
-    [Fact(
-        DisplayName = "[手書きVO] 検証規則なしの VO は ValidateCore の既定実装（検証なし）で成立する"
-    )]
-    public void 検証なし手書きVOは2メンバで成立する()
-    {
-        PlainTagValue.Create("anything").Value.Should().Be("anything");
-
-        PlainTagValue.TryCreate("x", out var created, out var errors).Should().BeTrue();
-        created!.Value.Should().Be("x");
-        errors.Should().BeEmpty();
-    }
-
-    [Fact(
-        DisplayName = "[手書きVO] 型引数経由の TVo.Create（static abstract ディスパッチ）が継承実装へ届く"
-    )]
-    public void 型引数経由のCreateが継承実装へ届く()
-    {
-        CreateViaTypeParameter<ContactMailValue, string>("t@example.com")
-            .Value.Should()
-            .Be("t@example.com");
-
-        // 生成 VO も同じ経路（従来からの利用形が不変であることの対照）
-        CreateViaTypeParameter<NameValue, string>("Alice").Value.Should().Be("Alice");
     }
 
     [Fact(
@@ -191,8 +133,4 @@ public sealed class HandwrittenValueObjectTests
             .Should()
             .NotBeNull("VO 列は SetColumnValue フォールバックでなく型特化の高速経路に乗る");
     }
-
-    /// <summary>型引数経由で Create を呼ぶ（static abstract ディスパッチの再現）。</summary>
-    private static TVo CreateViaTypeParameter<TVo, TValue>(TValue value)
-        where TVo : IValueObject<TVo, TValue> => TVo.Create(value);
 }

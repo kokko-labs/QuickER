@@ -21,6 +21,9 @@ namespace QuickER.Tests.GeneratedFixture;
 /// 行自身の <c>HasErrors</c> / <c>GetErrors</c>（INotifyDataErrorInfo＝画面の行単位表示）は触らないため、
 /// 削除を取り消して行が復活すれば同じエラーが検証へ戻ってくる。
 /// </para>
+/// <para>
+/// 削除行が重複検証でも変換エラーでも除外されることは <see cref="EditModelScenarioTests"/> の em-sibling の表にある。
+/// </para>
 /// </remarks>
 public sealed class EditModelRemovedValidationTests
 {
@@ -40,7 +43,7 @@ public sealed class EditModelRemovedValidationTests
     }
 
     /// <summary>必須項目を埋めた顧客プロフィール EditModel を作る（UNIQUE 制約 UQ_customer_profiles_customer_id を持つ）</summary>
-    private static CustomerProfileEditModel NewProfile(int profileId, int customerId, string bio)
+    internal static CustomerProfileEditModel NewProfile(int profileId, int customerId, string bio)
     {
         var model = new CustomerProfileEditModel
         {
@@ -162,39 +165,5 @@ public sealed class EditModelRemovedValidationTests
             .BeEmpty("収集も部分木ごと除外される（行自身の HasErrors は別）");
         customer.Orders[0].HasErrors.Should().BeTrue("子のエラーストアは触られない");
         customer.CustomerProfile!.HasErrors.Should().BeTrue();
-    }
-
-    /// <summary>
-    /// 削除行のスキップと、コレクション内重複検証（<see cref="EditModelUniquenessValidator"/>）の
-    /// <c>IsRemoved</c> 除外が同じ結果になる（＝非対称の解消）。
-    /// </summary>
-    [Fact(DisplayName = "削除行は重複検証でも変換エラーでも同じく除外される（非対称の解消）")]
-    public void RemovedItem_IsExcludedByBothUniquenessAndInputChecks()
-    {
-        // 重複側: 同じ customer_id を持つ 2 行のうち片方を削除マークすると重複ではなくなる
-        var duplicates = new EditModelCollection<CustomerProfileEditModel>
-        {
-            NewProfile(1, 7, "bio-a"),
-            NewProfile(2, 7, "bio-b"),
-        };
-        duplicates.Validate().Should().BeFalse("同じ customer_id の 2 行は重複");
-
-        duplicates[1].MarkRemoved();
-        duplicates.Validate().Should().BeTrue("削除される行は重複検証の対象外（従来からの挙動）");
-
-        // 入力エラー側: 同じコレクション形で、削除マークした行の変換エラーも検証を止めない
-        var invalid = new EditModelCollection<CustomerProfileEditModel>
-        {
-            NewProfile(1, 7, "bio-a"),
-            NewProfile(2, 8, "bio-b"),
-        };
-        invalid[1].BindingProfileId = "not-a-number";
-        invalid.Validate().Should().BeFalse();
-
-        invalid[1].MarkRemoved();
-        invalid
-            .Validate()
-            .Should()
-            .BeTrue("入力エラーも重複と同じく削除行では見ない（2 つの検査で線引きが揃う）");
     }
 }
