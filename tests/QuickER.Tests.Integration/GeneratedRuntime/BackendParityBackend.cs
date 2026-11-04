@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -242,10 +243,18 @@ public sealed class ParityBackend : IAsyncDisposable
             : _scope.ServiceProvider.GetRequiredService<IOrderLineRepository>();
 
     /// <summary>実装先を組み立てる（保存先は空のスキーマ）</summary>
+    /// <param name="kind">実装先の種類</param>
+    /// <param name="options">シナリオが求める条件</param>
+    /// <param name="ct">キャンセルトークン</param>
+    /// <param name="efCoreUserConnections">
+    /// EF Core の DbContext を、接続文字列でなく、利用者が持つ 2 本の既存の接続（<c>UseSqlite(connection)</c>・持ち主は利用者）を
+    /// 作るたびに交互に渡すファクトリで作るか（<see cref="ParityScenario.EfCoreUserConnections"/>。ほかの実装先には効かない）
+    /// </param>
     public static async Task<ParityBackend> CreateAsync(
         ParityBackendKind kind,
         ParityBackendOptions options,
-        CancellationToken ct
+        CancellationToken ct,
+        bool efCoreUserConnections = false
     )
     {
         var hooks = new List<string>();
@@ -325,7 +334,19 @@ public sealed class ParityBackend : IAsyncDisposable
 
             case ParityBackendKind.EfCore:
             {
-                var services = new ServiceCollection().AddGeneratedEfCoreRepositories(builder =>
+                // 利用者の接続を交互に渡すファクトリ（生成の DI 登録より先に置くと、その登録はファクトリを足さない。接続は
+                // 実装先の破棄で、一時 DB より先に閉じる）
+                var userConnections = efCoreUserConnections
+                    ? new UserConnectionsFactory(connectionString)
+                    : null;
+                var services = new ServiceCollection();
+
+                if (userConnections is not null)
+                {
+                    services.AddSingleton<IDbContextFactory<QuickErDbContext>>(userConnections);
+                }
+
+                services.AddGeneratedEfCoreRepositories(builder =>
                 {
                     if (options.DisableEfCoreSavepoints)
                     {
@@ -364,7 +385,9 @@ public sealed class ParityBackend : IAsyncDisposable
                     services.BuildServiceProvider(),
                     sqliteOutside,
                     hooks,
-                    storage,
+                    userConnections is null
+                        ? storage
+                        : new CompositeDisposable(userConnections, storage),
                     null
                 );
             }
@@ -592,6 +615,71 @@ public sealed class ParityBackend : IAsyncDisposable
     }
 
     /// <summary>複数の破棄対象を順に破棄する</summary>
+    /// <summary>
+    /// 破棄した後に開こうとすると断る SQLite の接続（ADO.NET の契約どおり。SQL Server の接続は破棄で接続文字列を失うが、SQLite の
+    /// 接続は破棄の後も開き直せるので、利用者の接続を誤って破棄する壊れ方が SQLite では見えない）
+    /// </summary>
+    private sealed class DisposeOnceSqliteConnection(string connectionString)
+        : SqliteConnection(connectionString)
+    {
+        private bool _disposed;
+
+        public override void Open()
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            base.Open();
+        }
+
+        public override Task OpenAsync(CancellationToken cancellationToken)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return base.OpenAsync(cancellationToken);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            _disposed |= disposing;
+        }
+    }
+
+    /// <summary>
+    /// 利用者が持つ 2 本の既存の接続を、DbContext を作るたびに交互に渡すファクトリ（<see cref="ParityScenario.EfCoreUserConnections"/>）。
+    /// 接続の持ち主は利用者（このファクトリ）で、DbContext の破棄では閉じない
+    /// </summary>
+    private sealed class UserConnectionsFactory : IDbContextFactory<QuickErDbContext>, IDisposable
+    {
+        private readonly DisposeOnceSqliteConnection[] _connections;
+        private readonly DbContextOptions<QuickErDbContext>[] _options;
+        private int _next = -1;
+
+        public UserConnectionsFactory(string connectionString)
+        {
+            _connections = [new(connectionString), new(connectionString)];
+            _options =
+            [
+                .. _connections.Select(connection =>
+                    new DbContextOptionsBuilder<QuickErDbContext>()
+                        .UseSqlite(connection)
+                        .IgnoreServiceProviderCacheLimit()
+                        .AddInterceptors(SqliteLightJournal.EfCoreInterceptor)
+                        .Options
+                ),
+            ];
+        }
+
+        public QuickErDbContext CreateDbContext() =>
+            new(_options[Interlocked.Increment(ref _next) & 1]);
+
+        public void Dispose()
+        {
+            foreach (var connection in _connections)
+            {
+                connection.Dispose();
+            }
+        }
+    }
+
     private sealed class CompositeDisposable(params IDisposable[] items) : IDisposable
     {
         public void Dispose()

@@ -308,8 +308,9 @@ public static class GeneratedDisplayNames
     private readonly List<EntityBaseCore> _heldBack = [];
     private readonly HashSet<EntityBaseCore> _deferred = new(ReferenceEqualityComparer.Instance);
     private readonly List<EntityBaseCore> _startingPoints = [];
+    private readonly HashSet<UniqueValue> _deleted;
 
-    private GraphSaveOrder() { }
+    private GraphSaveOrder(HashSet<UniqueValue> deleted) => _deleted = deleted;
 
     /// <summary>
     /// Gets where the walks start, in the order they run: the roots that are neither deleted nor held back, then
@@ -343,7 +344,7 @@ public static class GeneratedDisplayNames
             return null;
         }
 
-        var order = new GraphSaveOrder();
+        var order = new GraphSaveOrder(deleted);
 
         foreach (var root in rootList)
         {
@@ -362,6 +363,15 @@ public static class GeneratedDisplayNames
     /// </summary>
     /// <param name="entity">A child the walk reached.</param>
     public bool Defers(EntityBaseCore entity) => _deferred.Contains(entity);
+
+    /// <summary>
+    /// Returns whether <paramref name="entity"/> takes a value a row of the save deletes still holds (the rule that holds a
+    /// row back), counting only the unique values made of <paramref name="propertyNames"/> alone.
+    /// </summary>
+    /// <param name="entity">A row of the save.</param>
+    /// <param name="propertyNames">The properties a unique value may be made of (for example the columns of an alternate key).</param>
+    public bool TakesDeletedValue(EntityBaseCore entity, IReadOnlyCollection<string> propertyNames) =>
+        TakesDeletedValue(entity, _deleted, propertyNames);
 
     /// <summary>Sorts a row the walk reaches into the stage that writes it.</summary>
     private void Plan(
@@ -398,9 +408,14 @@ public static class GeneratedDisplayNames
 
     /// <summary>
     /// Returns whether a new row takes the primary key or a unique value of a deleted row, or an updated row takes a unique
-    /// value (other than the primary key) of one.
+    /// value (other than the primary key) of one; with <paramref name="propertyNames"/>, only the unique values made of those
+    /// properties alone count.
     /// </summary>
-    private static bool TakesDeletedValue(EntityBaseCore entity, HashSet<UniqueValue> deleted)
+    private static bool TakesDeletedValue(
+        EntityBaseCore entity,
+        HashSet<UniqueValue> deleted,
+        IReadOnlyCollection<string>? propertyNames = null
+    )
     {
         if (deleted.Count == 0)
         {
@@ -409,10 +424,10 @@ public static class GeneratedDisplayNames
 
         if (entity.IsAdded)
         {
-            return ValuesOf(entity, includeKey: true).Any(deleted.Contains);
+            return ValuesOf(entity, includeKey: true, propertyNames).Any(deleted.Contains);
         }
 
-        return entity.IsUpdated && ValuesOf(entity, includeKey: false).Any(deleted.Contains);
+        return entity.IsUpdated && ValuesOf(entity, includeKey: false, propertyNames).Any(deleted.Contains);
     }
 
     /// <summary>
@@ -476,8 +491,15 @@ public static class GeneratedDisplayNames
         }
     }
 
-    /// <summary>Returns the entity's unique values, with or without the primary key (a group with a null part is left out).</summary>
-    private static IEnumerable<UniqueValue> ValuesOf(EntityBaseCore entity, bool includeKey)
+    /// <summary>
+    /// Returns the entity's unique values, with or without the primary key (a group with a null part is left out); with
+    /// <paramref name="propertyNames"/>, only the groups made of those properties alone.
+    /// </summary>
+    private static IEnumerable<UniqueValue> ValuesOf(
+        EntityBaseCore entity,
+        bool includeKey,
+        IReadOnlyCollection<string>? propertyNames = null
+    )
     {
         var type = entity.GetType();
         var resolved = _uniqueGroups.GetOrAdd(type, ResolveUniqueGroups);
@@ -486,6 +508,12 @@ public static class GeneratedDisplayNames
         for (var index = includeKey || !resolved.FirstIsKey ? 0 : 1; index < groups.Length; index++)
         {
             var properties = groups[index];
+
+            if (propertyNames is not null && !properties.All(property => propertyNames.Contains(property.Name)))
+            {
+                continue;
+            }
+
             var parts = new object[properties.Length];
             var complete = true;
 
@@ -613,6 +641,11 @@ public static class GeneratedDisplayNames
 /// EF Core does not track the unchanged instances (<see cref="IsUntracked"/>): it walks below them, but registering a
 /// second instance of a tracked row fails.
 /// </para>
+/// <para>
+/// One instance with changes of its own that the save reaches through two paths (held by two collections of the save, or
+/// passed twice in the list of roots) is refused as well: the save would write it once per path. One instance without
+/// changes reached twice goes on.
+/// </para>
 /// </remarks>
 {{ infra_visibility }} sealed class GraphConsistency
 {
@@ -632,7 +665,7 @@ public static class GeneratedDisplayNames
     /// <param name="roots">The roots the save is asked to save (null elements are skipped).</param>
     /// <param name="cascadeSave">Whether the save walks the cascade children.</param>
     /// <param name="cascadeDelete">Whether deleting a row deletes the rows below it.</param>
-    /// <exception cref="InvalidOperationException">A navigation and a foreign key disagree, or a row is changed through two instances.</exception>
+    /// <exception cref="InvalidOperationException">A navigation and a foreign key disagree, a row is changed through two instances, or one instance with changes is reached through two paths.</exception>
     public static GraphConsistency Check(
         IEnumerable<EntityBaseCore?> roots,
         bool cascadeSave,
@@ -697,7 +730,16 @@ public static class GeneratedDisplayNames
         entity.HasChanges
         || (cascade && entity.EnumerateCascadeChildren().Any(child => HasChanges(child, true)));
 
-    /// <summary>Collects the rows the save looks at, each once, and the rows it deletes.</summary>
+    /// <summary>
+    /// Collects the rows the save looks at, each once, and the rows it deletes; an instance with changes of its own that the
+    /// walk reaches a second time is refused.
+    /// </summary>
+    /// <remarks>
+    /// The backends would otherwise write such an instance differently: the QuickER repositories and the in-memory repository
+    /// write it once per path (two INSERTs collide on the primary key, two UPDATEs count twice), EF Core tracks it once and
+    /// writes it once, and the remote client sends it twice. An instance without changes reached twice is written by no path
+    /// and goes on (two Includes of EF Core that resolve to the same row hand back such an instance).
+    /// </remarks>
     private static void Collect(
         EntityBaseCore entity,
         bool cascadeSave,
@@ -710,6 +752,16 @@ public static class GeneratedDisplayNames
     {
         if (!members.Add(entity))
         {
+            if (entity.HasChanges)
+            {
+                var type = entity.GetType();
+                var key = ShapeOf(type).Key?.GetValue(entity);
+
+                throw new InvalidOperationException(
+                    $"The graph cannot be saved: the same {type.Name} instance with key {Describe(key)} is reached through more than one path (two collections, or twice in the list of roots), and it has changes, so the save would write it more than once. Keep the instance in one collection, or pass it once."
+                );
+            }
+
             return;
         }
 

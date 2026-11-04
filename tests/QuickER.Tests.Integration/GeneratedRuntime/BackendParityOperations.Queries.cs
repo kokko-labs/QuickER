@@ -82,6 +82,48 @@ public sealed record BulkInsertOp(
 }
 
 /// <summary>
+/// 親の顧客の紹介先のコレクションに子の顧客を置き（子の外部キーは <paramref name="Child"/> のまま・親への参照は置かない）、親・子・
+/// <paramref name="Extra"/> の順に 1 回の全機能面の BulkInsert で入れる（リモートには無い）。スロット <c>b0</c>＝親・<c>b1</c>＝子
+/// </summary>
+/// <remarks>
+/// 外部キーとナビゲーションが食い違う行を一括挿入へ渡したとき、どの実装先も外部キーのとおりに書き、呼び出し側のナビゲーションと
+/// 外部キーを変えないことを見る（スロットの比べ方が親の子のコレクションと子の外部キーを書く）。
+/// </remarks>
+public sealed record BulkInsertWithNavigationOp(
+    CustomerRow Parent,
+    CustomerRow Child,
+    IReadOnlyList<CustomerRow>? Extra = null
+) : ParityOp
+{
+    public override string Name => "BulkInsertWithNavigation";
+
+    public override bool Supports(ParityBackendKind kind) => !ParityBackendKinds.IsRemote(kind);
+
+    public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
+    {
+        var parent = (CustomerEntity)Parent.Build();
+        var child = (CustomerEntity)Child.Build();
+        parent.Customers.Add(child);
+        List<CustomerEntity> rows =
+        [
+            parent,
+            child,
+            .. (Extra ?? []).Select(row => (CustomerEntity)row.Build()),
+        ];
+
+        foreach (var row in rows)
+        {
+            row.MarkAdded();
+        }
+
+        backend.Slots["b0"] = parent;
+        backend.Slots["b1"] = child;
+
+        return $"inserted={await backend.FullCustomers.BulkInsertAsync(rows, ct)}";
+    }
+}
+
+/// <summary>
 /// 組み立てたエンティティを Added にしてリモート面の <c>InsertAsync</c> で挿入し、そのエンティティそのものをスロットの根に置く
 /// （直接の挿入が RowState を触らないことと、同じインスタンスを続けてグラフ保存する形を見るため）。戻り値は
 /// <see cref="InsertOp"/> と同じ形

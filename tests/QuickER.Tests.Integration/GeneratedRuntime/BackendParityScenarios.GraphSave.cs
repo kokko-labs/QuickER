@@ -292,9 +292,8 @@ public static partial class BackendParityScenarios
             ["R", "U"]
         );
 
-        // 削除する行の代替キーの値（顧客の code＝連絡先の customer_code が参照する）を、別の行の更新が取る。QuickER 版は削除の後に
-        // 更新を書いて成立する。EF Core は代替キーを SaveChanges の前に自分で書く（WriteAlternateKeysAsync）ので、同じ保存で消す行の
-        // 値とぶつかって断られる（既知の違いの一覧に Pending＝修正 F で載せる）
+        // 削除する行の代替キーの値（顧客の code＝連絡先の customer_code が参照する）を、別の行の更新が取る。どの実装先も削除の後に
+        // 代替キーを書いて成立する（EF Core は代替キーを自分で書くので、後回しの行を 2 つめの文脈で削除の後に保存する）
         yield return new(
             "graph-updated-row-takes-alternate-key-of-deleted-row",
             [
@@ -308,6 +307,83 @@ public static partial class BackendParityScenarios
                 new SaveManyCustomersOp(["A", "B"]),
                 ParityExpect.Outcome("alternate-key-taken-saves-two-rows", "rows=2"),
                 ParityExpect.StateRow("alternate-key-taken-by-update", "customers/5", "code='K4'"),
+            ],
+            new ParityBackendOptions(WithHooks: false)
+        );
+
+        // 同じ形を、EF Core の DbContext を利用者が持つ 2 本の既存の接続から交互に作るファクトリで流し、続けて同じ実装先で読み、
+        // もう 1 回保存する（後回しの行の 2 つめの文脈は、1 つめの接続を借りた後、自分の接続を利用者の持ち物のまま戻す。持ち主と
+        // して戻すと、文脈の破棄が利用者の接続を破棄し、その接続を渡された次の文脈が開けない）
+        yield return new(
+            "graph-updated-row-takes-alternate-key-of-deleted-row-user-connections",
+            [
+                .. Basic,
+                new SeedOp(new CustomerRow(4, "Dan")),
+                new SeedOp(new CustomerRow(5, "Eve")),
+            ],
+            [
+                new NewRootOp("A", new CustomerRow(5, "Eve", Code: "K4"), RowState.Updated),
+                new NewRootOp("B", new CustomerRow(4, "Dan"), RowState.Removed),
+                new SaveManyCustomersOp(["A", "B"]),
+                ParityExpect.Outcome("user-connections-saves-two-rows", "rows=2"),
+                new LoadOp("C", "customers", 5),
+                new NewRootOp("D", new CustomerRow(5, "Eve2", Code: "K4"), RowState.Updated),
+                new SaveManyCustomersOp(["D"]),
+                ParityExpect.Outcome("user-connections-saves-again", "rows=1"),
+                ParityExpect.StateRow(
+                    "user-connections-written-again",
+                    "customers/5",
+                    "name=Eve2",
+                    "code='K4'"
+                ),
+            ],
+            new ParityBackendOptions(WithHooks: false),
+            EfCoreUserConnections: true
+        );
+
+        // 同じ形で、値を取る行の下に、その新しい値を customer_code で参照する新しい連絡先を足す。後回しの行の下の行は、代替キーを
+        // 書いた後に書く（EF Core が代替キーを SaveChanges の後に書くと、連絡先の挿入が先に走って外部キーに断られる）。連絡先の
+        // watcher は同じ保存の別の根（顧客 1＝EF Core では 1 つめの文脈が追跡する）を指す。2 つめの文脈がその参照を辿って顧客 1 を
+        // 追跡すると、顧客 1 を 2 度書くか挿入しようとして断られる
+        yield return new(
+            "graph-updated-row-takes-alternate-key-of-deleted-row-with-new-dependent",
+            [
+                .. Basic,
+                new SeedOp(new CustomerRow(4, "Dan")),
+                new SeedOp(new CustomerRow(5, "Eve")),
+            ],
+            [
+                new NewRootOp("A", new CustomerRow(5, "Eve", Code: "K4"), RowState.Updated),
+                new AddChildOp(
+                    "A",
+                    "customers/5",
+                    new ContactRow(600, "n", 5, Watcher: 1, CustomerCode: "K4"),
+                    RowState.Added,
+                    ParityContactRelation.CustomerCode
+                ),
+                new NewRootOp("B", new CustomerRow(4, "Dan"), RowState.Removed),
+                new NewRootOp("C", new CustomerRow(1, "Alice", "gold"), RowState.Updated),
+                new PointContactAtOp("A", 600, ParityContactRelation.Watcher, 1, CustomerSlot: "C"),
+                new SaveManyCustomersOp(["A", "B", "C"]),
+                ParityExpect.Outcome(
+                    "alternate-key-taken-with-dependent-saves-four-rows",
+                    "rows=4"
+                ),
+                ParityExpect.StateRow(
+                    "alternate-key-taken-other-root-written-once",
+                    "customers/1",
+                    "note='gold'"
+                ),
+                ParityExpect.StateRow(
+                    "alternate-key-taken-with-dependent-by-update",
+                    "customers/5",
+                    "code='K4'"
+                ),
+                ParityExpect.StateRow(
+                    "alternate-key-taken-dependent-refers-new-value",
+                    "contacts/600",
+                    "customer_code='K4'"
+                ),
             ],
             new ParityBackendOptions(WithHooks: false)
         );

@@ -23,6 +23,10 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 直す区切りのある手の差の宣言（省略すると <see cref="BackendParityKnownDifferences.PendingDeviations"/>）。打ち切りの仕組みを
 /// 確かめるテストが、本物の一覧が空の間も自前の宣言で仕組みを流すために渡す
 /// </param>
+/// <param name="EfCoreUserConnections">
+/// EF Core の実装先の DbContext を、利用者が持つ 2 本の既存の接続を交互に渡すファクトリで作るか（決まった形のシナリオだけが
+/// 使う実装先の組み立ての指定。<see cref="Options"/> は乱数の列の種の指紋の要約に入るので、そこへ置くと全部の種の指紋が変わる）
+/// </param>
 public sealed record ParityScenario(
     string Name,
     IReadOnlyList<ParityOp> Seeds,
@@ -30,7 +34,8 @@ public sealed record ParityScenario(
     ParityBackendOptions? Options = null,
     bool CompareWithBaseline = true,
     bool CutPendingDeviations = false,
-    IReadOnlyList<PendingDeviation>? PendingDeclarations = null
+    IReadOnlyList<PendingDeviation>? PendingDeclarations = null,
+    bool EfCoreUserConnections = false
 )
 {
     /// <summary>全操作がある実装先（QuickER 版を必ず含む＝基準。並びは実装先の軸の正本＝<see cref="BackendParityAxis"/>）</summary>
@@ -160,7 +165,12 @@ public sealed record ParityScenario(
         CancellationToken ct
     )
     {
-        await using var backend = await ParityBackend.CreateAsync(kind, Options ?? new(), ct);
+        await using var backend = await ParityBackend.CreateAsync(
+            kind,
+            Options ?? new(),
+            ct,
+            EfCoreUserConnections
+        );
 
         foreach (var seed in Seeds)
         {

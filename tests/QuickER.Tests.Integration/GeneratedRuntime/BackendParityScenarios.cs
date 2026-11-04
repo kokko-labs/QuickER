@@ -874,6 +874,24 @@ public static partial class BackendParityScenarios
                 new LoadOp("C", "contacts", 500),
             ]
         ),
+        // N3（同じインスタンス）: 変更を持つ同じインスタンスに 2 つの道（顧客の owner と watcher のコレクション）で届く保存は、
+        // 新しい行・更新・削除のどれでも、書く前・フックの前に断る（断らないと、行を道ごとに書く実装先と 1 回だけ書く実装先とで
+        // 結果が割れる）
+        SameInstanceTwoCollections("n3-same-instance-two-collections-new", RowState.Added),
+        SameInstanceTwoCollections("n3-same-instance-two-collections-update", RowState.Updated),
+        SameInstanceTwoCollections("n3-same-instance-two-collections-delete", RowState.Removed),
+        // 同じく、変更を持つ同じ根を複数形の保存の一覧に 2 回渡す保存も断る
+        new(
+            "n3-same-instance-twice-in-roots",
+            Basic,
+            [
+                new NewRootOp("A", new CustomerRow(1, "Alice2", "vip"), RowState.Updated),
+                new SaveManyCustomersOp(["A", "A"]),
+                ParityExpect.Throws("twice-in-roots-refused", "InvalidOperationException"),
+                ParityExpect.RawHooks("twice-in-roots-fires-no-hook", []),
+                ParityExpect.StateRow("twice-in-roots-writes-nothing", "customers/1", "name=Alice"),
+            ]
+        ),
         // H5: 任意の自己参照（NO ACTION）で参照されている顧客を、参照する顧客と一緒に 1 回の保存で消す（再現パッチの形）
         ReferencedReferrerDelete("h5-referrer-delete-dependent-modified", modifyDependent: true),
         ReferencedReferrerDelete("h5-referrer-delete-dependent-unmodified", modifyDependent: false),
@@ -1055,6 +1073,48 @@ public static partial class BackendParityScenarios
         .. BlobRuntimeScenarios(),
         .. RemoteRuntimeScenarios(),
     ];
+
+    /// <summary>
+    /// 顧客 40 の owner のコレクションに連絡先 500（<paramref name="state"/>・owner も watcher も 40）を置き、同じインスタンスを
+    /// watcher のコレクションへも足して保存する（外部キーとナビゲーションは食い違わない）。どの実装先も書く前に断り、フックは
+    /// 鳴らず、保存先は変わらない
+    /// </summary>
+    private static ParityScenario SameInstanceTwoCollections(string name, RowState state) =>
+        new(
+            name,
+            state == RowState.Added
+                ? Basic
+                :
+                [
+                    .. Basic,
+                    new SeedOp(new CustomerRow(40, "Dee")),
+                    new SeedOp(new ContactRow(500, "x", 40, Watcher: 40)),
+                ],
+            [
+                new NewRootOp(
+                    "A",
+                    new CustomerRow(40, "Dee"),
+                    state == RowState.Added ? RowState.Added : RowState.Unchanged
+                ),
+                new AddChildOp(
+                    "A",
+                    "customers/40",
+                    new ContactRow(500, "y", 40, Watcher: 40),
+                    state,
+                    ParityContactRelation.Owner
+                ),
+                new LinkContactOp(
+                    "A",
+                    "customers/40",
+                    "contacts/500",
+                    ParityContactRelation.Watcher
+                ),
+                new SaveOp("A"),
+                ParityExpect.Throws($"{name}-refused", "InvalidOperationException"),
+                ParityExpect.RawHooks($"{name}-fires-no-hook", []),
+                ParityExpect.StateRows($"{name}-writes-nothing", state == RowState.Added ? 8 : 10),
+            ]
+        );
 
     /// <summary>
     /// 顧客 3（注文なし）を紹介者に持つ顧客 4 を読み（<paramref name="modifyDependent"/> のときはメモを編集）、3 に削除の印を付けて、
