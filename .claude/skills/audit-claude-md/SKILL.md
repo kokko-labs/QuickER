@@ -1,11 +1,11 @@
 ---
 name: audit-claude-md
-description: CLAUDE.md の記述が実コードと食い違っていないか（陳腐化）を多エージェントで全域監査する。「CLAUDE.md を監査して」「陳腐化チェック」の依頼、大型リファクタの後、public 化・リリース前の健診で使用する。
+description: CLAUDE.md 群（ルートの索引と領域のフォルダの CLAUDE.md）の記述が実コードと食い違っていないか（陳腐化）を多エージェントで全域監査する。「CLAUDE.md を監査して」「陳腐化チェック」の依頼、大型リファクタの後、public 化・リリース前の健診で使用する。
 ---
 
 # CLAUDE.md 陳腐化監査
 
-CLAUDE.md（プロジェクト規約と不変条件の正本）の全域を実コードと突合し、陳腐化した記述を洗い出して是正する。
+CLAUDE.md 群（プロジェクト規約と不変条件の正本＝ルートの索引と、領域のフォルダの CLAUDE.md）の全域を実コードと突合し、陳腐化した記述を洗い出して是正する。
 2026-08-25 の初回監査で確立した手順。当時の結果＝食い違い 11 件（9 件が依存図・フォルダ列挙などの「受動的な一覧」・
 不変条件の名指し 3 件・散文の設計判断はゼロ）＋エージェント誤検出 1 件。
 
@@ -14,22 +14,22 @@ CLAUDE.md（プロジェクト規約と不変条件の正本）の全域を実�
 ### 0. 機械の網を先に流す
 
 ```powershell
-dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "FullyQualifiedName~ClaudeMdParityTests"
+dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "FullyQualifiedName~ClaudeMdParityTests|FullyQualifiedName~ClaudeMdReferenceTests"
 ```
 
-依存方向図の矢印 ⇔ csproj・src 全プロジェクトの登場・テストフォルダ一覧はこのテストが常時照合している。
+依存方向図の矢印 ⇔ csproj・src 全プロジェクトの登場・テストフォルダ一覧・固定フィクスチャの一覧（ルートの CLAUDE.md）は ClaudeMdParityTests が、全 CLAUDE.md が名指すテスト名・期待の行の Id・CLAUDE.md のパスと見出しは ClaudeMdReferenceTests が常時照合している。
 赤ならまず CLAUDE.md 側を実体に合わせて直す（このスキルの残りは機械網が届かない散文層の監査）。
 
 ### 1. 5 系統の検証エージェントを並列起動する
 
 Explore エージェント（読み取り専用・model: sonnet）を 5 体、担当範囲を分けて**並列**に起動する。
-範囲は CLAUDE.md の現在の節構成に合わせて調整してよいが、初回の分割は次のとおり:
+範囲はファイル単位で分ける（CLAUDE.md の一覧は `git ls-files "*CLAUDE.md"`）。分割の目安は次のとおり:
 
-1. 冒頭（プロジェクト概要）・コマンド節・テスト構成の箇条書き群
-2. アーキテクチャ図・プロジェクト説明・フィーチャーモジュール／MCP／document-based／AI モックの 4 項目
-3. DB 面の設計判断（意味と視覚の分離〜出力形式の情報欠落告知）
-4. 生成コード節前半（生成コードの汎用性〜EF Core モード〜DB 定義メタ属性）
-5. 生成コード節後半（LayeredOutput〜Velopack）＋不変条件節＋コーディング規約・ワークフロー節
+1. ルートの CLAUDE.md（概要・コマンド・依存図・固定フィクスチャ・索引・規約・ワークフロー）＋ tests/ の CLAUDE.md
+2. src/QuickER.Provider と 5 方言の Provider.* ・Dialects・Model・Document
+3. src/QuickER.CodeGen.CSharp（Queries・Templates を含む）・CodeGen.UI・src/QuickER.Runtime（Core）
+4. ほかのランタイム（Runtime.SqlServer / Sqlite / EntityFrameworkCore / InMemory / AspNetCore / Sync）
+5. GUI（Gui とその下位・Gui.Common・Extensibility・Db.UI）・AI・MCP・Platform・Settings
 
 各エージェントへの指示の骨子（全員共通）:
 
@@ -53,5 +53,6 @@ create_diagram＝12」で CLAUDE.md が正。エージェントはカタログ�
 - 確定した食い違いは CLAUDE.md を実体に合わせて修正する（一覧の漏れは追記・所在の移動は追従・
   存在しない名前は実名へ）
 - 「実施予定」と書かれた計画が実施済みでないかは必ず疑う（適用済みの計画文は陳腐化爆弾になる）
-- 新しく見つかった食い違いのパターンが機械照合できる形なら、ClaudeMdParityTests へ網を足すことを検討する
+- 新しく見つかった食い違いのパターンが機械照合できる形なら、ClaudeMdParityTests か ClaudeMdReferenceTests へ網を足すことを検討する
+- ルートの索引の行と、詳細の CLAUDE.md の節が食い違っていないか（片方だけ直した跡）も見る
 - 結果の要約と教訓は tasks/lessons.md の「CLAUDE.md の陳腐化は『受動的な一覧』に溜まる」へ追記する

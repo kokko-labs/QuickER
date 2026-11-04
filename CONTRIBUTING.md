@@ -47,13 +47,13 @@ Issues and pull requests are welcome, but support is **best-effort** (no promise
   Write an entry as follows
   - **Headings**: under the type heading (`### Breaking changes` / `### Added` / `### Changed` / `### Security` / `### Fixed` / `### Removed`; the Japanese file keeps these in English), group entries by area with a sub-heading (`#### Diagram editing & files` / `#### DB import` / `#### DB sync & DDL` / `#### C# code import` / `#### Code generation dialog` / `#### Generated code` / `#### Bidirectional sync` / `#### AI chat & mock generation` / `#### CLI & MCP` / `#### Distribution & settings` / `#### License`, and so on), adding the heading if it is not there yet
   - **Length**: a bold summary followed by one to three sentences.
-    Say what changed and what the user needs to do, nothing more; the reasoning and the internals belong in the docs (for users) or CLAUDE.md (for developers), linked if needed
+    Say what changed and what the user needs to do, nothing more; the reasoning and the internals belong in the docs (for users) or the CLAUDE.md files (for developers: the root index and the file in the area's folder), linked if needed
   - **Breaking changes**: write them under `### Breaking changes` only (not repeated in another section), with a one- or two-sentence migration step
   - **Consolidation**: fold a change into the existing entry on the same topic.
     A fix to a feature added during the same Unreleased period gets no entry, since no user ever saw the bug
   - **Highlights**: at release time, open the section with a three-to-five-line list of highlights
 
-The architecture and the invariants that break silently (not caught by the build or the type checker) are documented in [CLAUDE.md](CLAUDE.md).
+The architecture and the invariants that break silently (not caught by the build or the type checker) are documented in the CLAUDE.md files: the root [CLAUDE.md](CLAUDE.md) is the index, and the details are in the CLAUDE.md in each area's folder (for example, [src/QuickER.Provider/CLAUDE.md](src/QuickER.Provider/CLAUDE.md)).
 
 ## License and rights handling for contributions
 

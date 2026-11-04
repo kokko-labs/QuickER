@@ -1,0 +1,78 @@
+# QuickER.Gui/Services
+
+エクスポート／インポートの実行本体（`DiagramExportService` / `DiagramImportService`）と、Mermaid・DBML・Excel/HTML 定義書の入出力の規則。
+完了通知の提示先は `src/QuickER.Gui/CLAUDE.md`「完了通知の提示先」。
+
+## 出力形式の情報欠落告知（Mermaid / DBML）
+- 形式が構造的に表現できない情報を、出力完了時に内訳として告知する。
+- 判定は各エクスポータの `DetectOmissions`（出力ロジックと同居させ、「出力を変えたのに検出が古いまま」の乖離を防ぐ）が**図の実際の中身から**行う（説明が空の図で「説明が落ちる」とは言わない）。言語中立の `ExportOmissionKind` を返し、件数は持たない。
+- 表示側 `DiagramExportService.DescribeOmission` が resx で文言化する（`SyncPlan.Warnings` と同じ流儀）。
+- エクスポート／インポートのコマンド実行本体は `DiagramExportService` / `DiagramImportService`。VM は 1 行委譲と `IDiagramTransferHost` の実装だけを持つ。
+- 提示は `ShowInformationDetails`（要約＝完了文＋導入文・詳細＝項目の箇条書き。型変換警告と同じ形式）で、**形式ごとにセッション 1 回**だけ。Mermaid は NOT NULL 列がある限りほぼ必ず立ち、毎回出すと通知が形骸化する（`_omissionNotifiedFormats`。未対応方言フォールバックの `_fallbackWarningShown` と同じ流儀）。
+- **SQL DDL・Excel/HTML 定義書・画像は告知しない**。落ちるものが「その形式の目的上、出さないのが正しいもの」ばかりで、告知すると本当に危険な欠落が埋もれる。
+
+### Mermaid の欠落（17 種）
+- テーブル説明／メモ／列の説明／NULL 許可／複合 UNIQUE 制約／UNIQUE 制約名／FK 列ペア／参照アクション／名前付きクエリ。
+- 列名の書き換え（属性名に使えない文字を畳んだとき）。
+- 複合主キーの順序（列の並びと食い違うとき。構文が無いため告知する）。
+- 計算列／DB が採番する列。
+- 型の書き換え：取込の復元 `MermaidImporter.DenormalizeDataType` で元へ戻らないとき。判定は書き出しと復元を実際に往復させる。
+- テーブル名の書き換え：引用の中にも書けない `"` `%` `\` を畳んだとき。素で書けない名前は引用して書く。
+- 外部キー列の単一列 UNIQUE：キー標識は 1 つで FK が優先。判定は出力と `KeyMarker` を共有する。
+- リレーションの制約名：素で書けない名前は関係行のラベルを引用して書き、取込は引用ラベルを採らない。判定は出力を `MermaidImporter.Parse` で実際に取り込み直して、書いた順に名前を突き合わせる。ガード：`MermaidRelationshipLabelTests`。
+
+### DBML の欠落（6 種）
+- DBML はテーブル説明を標準 `Note:` 行、制約名を名前付き Ref（`Ref 名前: …`）、参照アクションを Ref 行の端点の後ろの設定ブロック（`delete` / `update`）で往復対応している。
+  - 既定 NoAction は出力を省略し、DBML の `restrict` は取込で NoAction へ倒れる。
+  - 出力は DBML 標準の記法だけ（`@dbml/core` が読める）。素の名前は ASCII の英数字・アンダースコアだけで、それ以外は日本語も引用する。
+- 欠落になるのは次の 6 種だけ。
+  - メモ：`Note` を説明に使うので、独自拡張なしには載せられない割り切り。
+  - 名前付きクエリ。
+  - どのリレーションの子側の列でもない列の外部キー印：DBML に列単独で印を付ける設定が無い。判定は `DbmlExporter.HasForeignKeyMarkerOutsideRelationships`。
+  - 計算列。
+  - DB が採番する列。
+  - 端点の列を書けないため `Ref` 行を出さないリレーション：列ペアの無い 1 対 1・1 対多（先頭列で代用すると、取込が定義していない外部キーを作る）、列の無いテーブルにつながる多対多。出すかの判定は出力と告知が `DbmlExporter.ResolveEndpointColumns` を共有する。
+
+## 一意制約・主キーの順序・列ペアの入出力
+モデルの規則は `src/QuickER.Model/CLAUDE.md`「一意制約」「主キーの順序の出力判定」「リレーションの列ペア」。ここでは各形式での扱いだけを置く。
+
+### 一意制約
+- DBML：単一列無名は列設定 `unique`、複合／名前付きは `Indexes { … [unique, name: …] }`。往復できる。
+- Mermaid：**単一列制約のみ** UK。複合は構文が無く非出力の割り切り。
+- Excel/HTML 定義書：キー列 `UQ{n}`、同番＝同一制約で複合を表現する。Excel 取込は制約名が落ちて合成名になり、構成列は列の並び順になる。マージ取込では、構成列の集合が同じ現在図の制約から順序と名前を引き継ぐ（`TableDefinitionMergePostProcessor`）。
+
+### 主キーの順序
+- DBML：順序が列の並びと食い違うテーブルだけ、主キーを列の `pk` でなく `Indexes` 先頭の `(列, …) [pk]` で書く。取込は `[pk]` 索引を構成列と順序として読む（一意制約は作らない・索引の名前は捨てる）。列の `pk` と集合が違う／`[pk]` 索引が 2 つ／索引内の同じ列の重複は、行を名指しして断る。
+- Mermaid：順序の構文が無いので `ExportOmissionKind.PrimaryKeyOrder` で告知する。
+- Excel：順序を運ばない（docs へ明記）。マージ取込は C# リバースと同じ規則で現在図の順序を引き継ぐ（`TableDefinitionMergePostProcessor`）。
+- 順序を載せるか欠落として告知するかの判定は `Entity.GetReorderedPrimaryKeyColumnNames()` だけ（C# 生成の `[DbTableMeta].PrimaryKeyOrder`・DBML の `[pk]` 索引・Mermaid の告知の 3 箇所が共有する）。ガード：`DbmlPrimaryKeyOrderTests`（往復・列順どおりは出力不変・他ツール形式・断る 4 条件）・`MermaidPrimaryKeyOrderTests`。
+
+### 複合外部キー・制約名
+- DBML：複合 Ref 構文 `Ref: p.(a,b) < c.(x,y)` を出力し、取込む。取込の列再推論は廃止で、Ref 行の列名が正本。不整合行はペアだけ破棄する。
+- Excel/HTML 定義書：列セルをカンマ区切りの複数列表記にする。`FK{n}` は複合の全構成子列に同番（`UQ{n}` と同流儀）。
+- Mermaid：列構文が無いので出力は現状維持。取込推論は PK 全列ペア化へ統一。必須のラベルは制約名を運ぶ。
+  - 名前の無いリレーションの出力値は `relates`（`MermaidExporter.UnnamedRelationshipLabel`）。
+  - 引用つきや複数語・図の中で重複するもの・主キー/一意制約名と重なるものは採らない。採らなかった関係は、既定名が空いていれば名前なし、ふさがっていれば `UniqueForeignKey`。ガード：`MermaidConstraintNameTests`。
+- 「名前の無い関係の既定名がふさがっていれば一意化」は `ConstraintNames.NameUnnamedForeignKeys` が正本。Mermaid・DBML・Excel 定義書の 3 取込と C# リバースが共有する。明示された名前は重複していても変えない（PostgreSQL では外部キー名がテーブル単位で一意なため）。ガード：`DbmlConstraintNameTests`・`TableDefinitionConstraintNameTests`。
+
+## DBML の取込：テーブルブロック内の行をキーワードだけでブロックと判定しない
+- `records int` / `checks int` / `note varchar` という**列**が実在する。`^(checks|records)\b` や `^note\b` で判定すると、前者はブロックとみなされて**列が無言で消え**、後者は複数行 Note とみなされて**取込全体が失敗**する。
+- エクスポートは列名を素の識別子で書く（これらの名前は引用符を要しない）ので、誤ると自分が書き出したファイルを読み戻せない。往復が壊れる。
+- 見分け方は構文で行う。
+  - **ブロック**は「キーワードのあと、設定の `[` より前に `{` がある」。`^(checks|records)\b[^\[\r\n]*\{` が、`records t(id) {` のように名前や引数を挟む形と、1 行で閉じる `checks { … }` の両方を拾う。列定義は `名前 型 [設定]` なので、`{` は `[` より後ろにしか来ない。
+  - **複数行 Note** はキーワードの直後が `:` か `{`（`^note\s*[:{]`）。1 行の `Note: '…'` は手前の `TableNoteRegex` が先に食べる。
+- 「行が `{` で終わる」で判定してはいけない。1 行で閉じるブロックを取りこぼして幻の列ができる。
+- トップレベルの `^ref\b` はテーブルの外でしか当たらないので、同じ問題を持たない。
+- ガード：`DbmlKeywordColumnNameTests`。mutation 実証済み。
+
+## Excel 定義書の取込：名前が空の行
+- `TableDefinitionDocumentImporter.ReadColumns` は、カラム名が空の行で、説明・データ型・必須・キー・参照先・備考（3 列目〜`TableDefinitionDocumentLayout.DetailColumnCount`）のどれかに値があれば `TableDoc_ColumnMissingName`（テーブルとシートの行番号）で断る。すべて空なら表の終わりにする。No. の列は数えない（行の番号を振っただけ）。
+- 確かめずに終わりにすると、名前を消した行・カラムの下に名前なしで入力した行で、その行と後ろのカラムが黙って消える（出力は変えない）。
+- 列数の定数は出力の表の列数と同じでなければならない。列を足して定数を直し忘れると、足した列だけの行を見落とす。
+- ガード：`TableDefinitionDocumentImporterTests` の `Load_RowWithoutColumnNameButOtherContent_Throws`（3〜8 列目の 6 行・出力の見出しの最後の列が定数と一致）・`Load_MiddleRowWithoutColumnName_Throws`・`Load_RowWithOnlyNumberOrEmpty_EndsTable`（No. だけの行とすべて空の行・その下の行は読まない）。mutation 実証済み。
+
+## 出力のエスケープ
+- Mermaid / DBML の識別子・ラベルは `ExportTextSanitizer.Sanitize` を通す（`SqlComment.Sanitize` と同じ実装への 1 行委譲）。ガード：`ExportNameInjectionTests`。
+- DBML のリテラルは `DbmlLiteral.Escape` / `Unescape` の対で扱う。
+  - `\` 二重化 → `'` エスケープ。復元は左から 1 パスで行う（逐次 `Replace` にすると、解いた結果がもう一方のエスケープに見えて二重に解ける）。
+  - 改行は空白へ畳む。複数行 Note の `'''` ブロックは `DbmlImporter` が行単位解析で非対応のため。
