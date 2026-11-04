@@ -78,6 +78,9 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
             "alternate-key-stale-optimistic-graph-save",
             "alternate-key-stale-force-overwrite-update",
             "alternate-key-stale-force-overwrite-graph-save",
+            "alternate-key-taken-from-deleted-kit-with-parts",
+            "alternate-key-taken-from-deleted-kit-stale-optimistic",
+            "alternate-key-taken-from-deleted-kit-stale-force-overwrite",
             "include-child-delete-keeps-parent-and-siblings",
             "move-note-and-delete-old-gadget-kept-first",
             "hook-sql-stamps-same-row",
@@ -134,6 +137,34 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
             "gadgets/1 name=first",
             "gadget_notes/10 gadget=1 note=first",
             "gadget_notes/99 gadget=1 note=audit",
+        ],
+        // 部品ごと消す kit 1 の代替キーを kit 2 の更新が取る保存は、削除の後に代替キーを書いて成立し、手元の版は保存先と同じ
+        ["alternate-key-taken-from-deleted-kit-with-parts"] =
+        [
+            "rows=4",
+            "version-matches-store=True",
+            "kits/2 code=K1 name=k2",
+            "again rows=1",
+            "kits/2 code=K1 name=again",
+        ],
+        // 値を取る kit 2 の版が古いと、2 つめの文脈の SaveChanges が 0 行で終わり、Optimistic は競合で全体が巻き戻る
+        ["alternate-key-taken-from-deleted-kit-stale-optimistic"] =
+        [
+            "throws SaveConflictException reason=Modified",
+            "version-matches-store=False",
+            "kits/1 code=K1 name=k1",
+            "kits/2 code=K2 name=other",
+            "kit_parts/10 kit_code=K1",
+            "kit_parts/11 kit_code=K1",
+        ],
+        // ForceOverwrite は保存先の値を採ってやり直し（削除も組み直す）、代替キーと名前を書く
+        ["alternate-key-taken-from-deleted-kit-stale-force-overwrite"] =
+        [
+            "rows=4",
+            "version-matches-store=True",
+            "kits/2 code=K1 name=k2",
+            "again rows=1",
+            "kits/2 code=K1 name=again",
         ],
         // 新しい親の挿入を Before が飛ばし、新しい子を保存すると、外部キーに断られて全体が巻き戻る
         ["hook-skip-parent-child-fk"] =
@@ -498,6 +529,24 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
                 stale: true,
                 ConcurrencyMode.ForceOverwrite
             ),
+            "alternate-key-taken-from-deleted-kit-with-parts" =>
+                await AlternateKeyTakenFromDeletedKitAsync(
+                    efCore,
+                    stale: false,
+                    ConcurrencyMode.Optimistic
+                ),
+            "alternate-key-taken-from-deleted-kit-stale-optimistic" =>
+                await AlternateKeyTakenFromDeletedKitAsync(
+                    efCore,
+                    stale: true,
+                    ConcurrencyMode.Optimistic
+                ),
+            "alternate-key-taken-from-deleted-kit-stale-force-overwrite" =>
+                await AlternateKeyTakenFromDeletedKitAsync(
+                    efCore,
+                    stale: true,
+                    ConcurrencyMode.ForceOverwrite
+                ),
             "include-child-delete-keeps-parent-and-siblings" => await IncludedNoteDeleteAsync(
                 efCore
             ),
@@ -759,6 +808,79 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
         }
 
         return lines;
+    }
+
+    /// <summary>
+    /// 代替キーの書く順：kit_parts 2 行に参照される kit 1（K1）を部品ごと消し、同じグラフ保存 1 回で kit 2 の code を K1 にする
+    /// （値を取る kit 2 を先に渡す）。どちらの実装先も削除の後に代替キーを書いて成立する（EF Core は後回しの kit 2 を 2 つめの
+    /// 文脈で保存する）。<paramref name="stale"/> なら読んだ後に他者が kit 2 の名前を変えて版を進めている（2 つめの文脈の
+    /// SaveChanges が 0 行で終わり、Optimistic は競合・ForceOverwrite は保存先の値を採ってやり直す）。書いたら、手元の版が
+    /// 保存先と同じで、同じインスタンスをもう一度 Optimistic で保存しても競合にならないことを見る
+    /// </summary>
+    private async Task<IReadOnlyList<string>> AlternateKeyTakenFromDeletedKitAsync(
+        bool efCore,
+        bool stale,
+        ConcurrencyMode mode
+    )
+    {
+        await using var provider = Build(efCore, withHooks: false);
+        var kits = provider.GetRequiredService<IKitRepository>();
+        var parts = provider.GetRequiredService<IKitPartRepository>();
+        await kits.InsertAsync(NewKit(1, "K1"), Ct);
+        await kits.InsertAsync(NewKit(2, "K2"), Ct);
+        await parts.InsertAsync(NewPart(10, "K1"), Ct);
+        await parts.InsertAsync(NewPart(11, "K1"), Ct);
+
+        var deleted = (await kits.GetByIdAsync(KitIdValue.Create(1), Ct))!;
+
+        foreach (var id in new[] { 10, 11 })
+        {
+            deleted.KitParts.Add((await parts.GetByIdAsync(PartIdValue.Create(id), Ct))!);
+        }
+
+        deleted.MarkRemoved();
+        var taker = (await kits.GetByIdAsync(KitIdValue.Create(2), Ct))!;
+
+        if (stale)
+        {
+            await _fixture.ExecuteAsync("UPDATE kits SET name = N'other' WHERE kit_id = 2", Ct);
+        }
+
+        taker.Code = CodeValue.Create("K1");
+        taker.MarkUpdated();
+
+        var outcome = await OutcomeAsync(() =>
+            kits.SaveAsync([taker, deleted], mode: mode, cancellationToken: Ct)
+        );
+        List<string> lines =
+        [
+            outcome,
+            $"version-matches-store={await VersionMatchesStoreAsync(taker)}",
+            .. await KitsStateAsync(),
+        ];
+
+        if (outcome.StartsWith("rows=", StringComparison.Ordinal))
+        {
+            taker.Name = NameValue.Create("again");
+            taker.MarkUpdated();
+            lines.Add(
+                $"again {await OutcomeAsync(() => kits.SaveAsync(taker, mode: ConcurrencyMode.Optimistic, cancellationToken: Ct))}"
+            );
+            lines.AddRange(await KitsStateAsync());
+        }
+
+        return lines;
+
+        static KitEntity NewKit(int id, string code) =>
+            new()
+            {
+                KitId = KitIdValue.Create(id),
+                Code = CodeValue.Create(code),
+                Name = NameValue.Create($"k{id}"),
+            };
+
+        static KitPartEntity NewPart(int id, string code) =>
+            new() { PartId = PartIdValue.Create(id), KitCode = CodeValue.Create(code) };
     }
 
     /// <summary>

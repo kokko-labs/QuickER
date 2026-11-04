@@ -96,7 +96,8 @@
 - 値そのもの（行の数・フックの順・戻り値）は期待の手（`ParityExpect`）で書く。
 - 図に載らない形（EditModel・名前付きクエリ・有界バイナリ・素の int の主キー・HTTP 固有・rowversion・SQL Server の採番列）は元のクラスに残す。
 - `RuntimeTestMatrixTests` の行列の登録は、担当のクラスに加えて実装先の一致のシナリオの一覧（`Scenarios`）を持てる。`BackendParityRegistrations_NameScenariosRunningOnTheColumn` が、一覧のシナリオが実在し、その列の実装先で流れることを照合する。
-- EF Core の代替キーの書き込みが同じ保存の削除より先に走る違いは、シナリオ `graph-updated-row-takes-alternate-key-of-deleted-row` と既知の違いの一覧の Pending 8 項目（EfCore・RemoteEfCoreOnly × 4 観点）で照合する。
+- 削除する行の値を代替キーで取る保存（EF Core が後回しの行を 2 つめの文脈で書く形）は、シナリオ `graph-updated-row-takes-alternate-key-of-deleted-row`・`-with-new-dependent`・`-user-connections`（`ParityScenario.EfCoreUserConnections`＝EF Core の DbContext を利用者が持つ 2 本の接続から交互に作る構成。接続は破棄の後に開くと断る）・`ef-retry-updated-row-takes-alternate-key-of-deleted-row` と SQL Server のケース `alternate-key-taken-from-deleted-kit-*` が 5 実装先（SQL Server は 2 者）の一致で持つ。
+- 代替キーでない一意な値の J3 を SQL Server の EF Core で見るのは `GraphSaveEfCoreSqlServerRuntimeTests` だけ（SQL Server のケースの図の一意な列は代替キーだけで、EF Core は代替キーを `HasIndex` で並べないので、`HasIndex` を外す壊し方はケースの図では赤にならない）。
 
 ## 双方向同期のテスト
 

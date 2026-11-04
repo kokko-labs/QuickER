@@ -971,6 +971,27 @@ public sealed record AttachContactOp(
 }
 
 /// <summary>
+/// スロットのグラフの連絡先（同じインスタンス）を、同じグラフの顧客のその関係のコレクションへも足す（保存が同じインスタンスに
+/// 2 つの道で届くグラフを作る。外部キーは変えない）
+/// </summary>
+public sealed record LinkContactOp(
+    string Slot,
+    string ParentKey,
+    string ContactKey,
+    ParityContactRelation Relation
+) : ParityOp
+{
+    public override Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
+    {
+        var parent = (CustomerEntity)Find(backend, Slot, ParentKey);
+        var contact = (ContactEntity)Find(backend, Slot, ContactKey);
+        ParityContactRelations.CollectionOf(parent, Relation).Add(contact);
+
+        return Task.FromResult("linked");
+    }
+}
+
+/// <summary>
 /// スロットのグラフの顧客の列を書き換え、Updated にする（Added のままの行は Added のまま）。null の引数は書き換えない
 /// （<paramref name="ClearReferrer"/> のときだけ紹介者を null にする）
 /// </summary>
@@ -1080,19 +1101,25 @@ public sealed record EditContactOp(
 
 /// <summary>
 /// スロットのグラフの連絡先の、その関係の親への参照（ナビゲーション）に、スロットのグラフの顧客を置く（外部キーと状態は変えない＝
-/// 親への参照と外部キーが食い違うグラフを作る）
+/// 外部キーと違う顧客を置けば、親への参照と外部キーが食い違うグラフを作る）。<paramref name="CustomerSlot"/> を渡すと、顧客を
+/// その別のスロットのグラフから取る
 /// </summary>
 public sealed record PointContactAtOp(
     string Slot,
     int ContactId,
     ParityContactRelation Relation,
-    int CustomerId
+    int CustomerId,
+    string? CustomerSlot = null
 ) : ParityOp
 {
     public override Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
     {
         var contact = (ContactEntity)Find(backend, Slot, $"contacts/{ContactId}");
-        var customer = (CustomerEntity)Find(backend, Slot, $"customers/{CustomerId}");
+        var customer = (CustomerEntity)Find(
+            backend,
+            CustomerSlot ?? Slot,
+            $"customers/{CustomerId}"
+        );
 
         switch (Relation)
         {

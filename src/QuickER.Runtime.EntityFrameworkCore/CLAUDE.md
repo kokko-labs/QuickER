@@ -30,6 +30,10 @@ EF Core モード（`GenerateEfCoreRepositories`）の固定ランタイムと�
 - 既知の制限：保存の途中で Save フックが変えたナビゲーションも戻る（fix-up とフックの変更を見分けられない。QuickER 版では残る）。docs の EF Core モードの「保存」に明記。
 - 削除した子を残った親のカスケードのコレクションから外す共通規則は `src/QuickER.Runtime/CLAUDE.md`「削除した子の外れ方」を参照する（EF Core は `EntityGraphSaver.AcceptChanges` から呼ぶ）。
 - ガード：`BackendParityRuntimeTests` の `graph-remove-child-through-root`・`graph-remove-children-one-skipped-by-hook`・`graph-remove-root-with-children`、`BackendParitySqlServerRuntimeTests.DeletedSingleChild_StaysOnItsNavigation`。mutation 実証済み。
+- 一括挿入（`BulkInsertAsync`）は、追跡する前にバッチの行だけのナビゲーションを写して空にし（`NavigationSnapshot.TakeRows`＋`Clear`。参照は null・コレクションは同じインスタンスを空にする）、保存の後に成功・失敗とも戻す。
+  - 空にしないと、EF Core が同じバッチの行どうしのナビゲーションで外部キーを上書きして保存し（ナビゲーションが勝つ）、呼び出し側の外部キーも書き換える。戻さないと、登録の fix-up が親のコレクションへ子を足したまま残る。
+  - 単独の `InsertAsync` は 1 行だけを追跡するので fix-up の相手がいない（触らない）。
+  - ガード：`BackendParityRuntimeTests` の `bulk-insert-self-reference-parent-first`（戻さないと親のコレクションに子が残る）・`bulk-insert-navigation-without-foreign-key`・`bulk-insert-navigation-other-foreign-key`（空にしないと外部キーが上書きされる）・`bulk-insert-navigation-rejected-keeps-navigations`（失敗の後に戻す）。mutation 実証済み。
 
 ## 削除の振る舞いとフックの順
 
@@ -45,7 +49,7 @@ EF Core モード（`GenerateEfCoreRepositories`）の固定ランタイムと�
 ## 書く順への対応
 
 書く順の規則本体（`GraphSaveOrder`）は `src/QuickER.Runtime/CLAUDE.md`「書く順」を参照する。
-EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、文の順は 1 回の SaveChanges の中で EF Core が決める。次の 2 つで補う。
+EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、文の順は 1 回の SaveChanges の中で EF Core が決める。次の 2 つで補う（削除する行の値を代替キーで取る行だけは、3 段目を 2 つめの SaveChanges に分ける＝「変わった代替キーを自分で書く」）。
 
 - 外部キーの保存先の値を読む（`AdoptStoredForeignKeysAsync`）。
   - 削除を含む保存は、試行ごとに SaveChanges の直前・同じトランザクションの中で、Modified のエントリの外部キー（`entry.Metadata.GetForeignKeys()` から一般に求める。自己参照・複数の外部キーを含む）の保存先の値を射影 1 クエリ（除外 blob は読まない）で読み、`OriginalValue` へ入れる。
@@ -66,9 +70,18 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
   - 変わった列だけを `ExecuteUpdate` で保存と同じトランザクションの中で書く（Optimistic は版も条件にする）。
   - 書いたら版を読み直して並行性トークンの元の値に入れ、代替キーの元の値を今の値にする（変更検出がキーの変更と見ない）。
 - 呼ぶ位置：グラフ保存では Before のフックの後・明示のトランザクションの試行ごとの最初（`KeepStoredUnboundedBinaries` と `AdoptStoredForeignKeysAsync` は変更検出を走らせるので、その前）。`UpdateAsync` では代替キーを持つ表のときだけ、実行戦略の中の試行ごとのトランザクション（`UpdateWithAlternateKeysAsync`）。
+- 同じ保存で消す行がまだ持つ値を代替キーで取る更新は、削除の後に書く（`HeldBackContextAsync`）。
+  - SaveChanges の前に書くと、消す前の行とぶつかって一意制約に断られる。1 回の SaveChanges の中では文の間に何も挟めず、一意インデックスの並べ替えはキーの列に効かない。
+  - そのため、3 段目（`GraphSaveOrder.HeldBack` から歩く行）を、接続とトランザクションを共有する 2 つめの文脈（`SetDbConnection`＋試行のトランザクションごとの `UseTransaction`）で追跡し、1 つめの SaveChanges の後に、代替キー → SaveChanges の順で書く。3 段目の新しい子が新しい値を参照しても通る。
+  - 2 つめの文脈（`HeldBackContext`）は、破棄の前にトランザクションから外し、自分の接続を元の所有のまま戻す。所有はオプションの `RelationalOptionsExtension` から読む（接続文字列で構成＝文脈が持ち主、利用者が渡した接続＝`IsConnectionOwned` のとおり）。ファクトリが両方の文脈に同じ接続を渡すなら差し替えない。
+    - 持ち主として戻すと、文脈の破棄が利用者の接続を破棄し、その接続を渡された次の文脈が開けない。戻さないと、プールの文脈が前の保存の接続を持ったまま次に貸し出される（生成の `QuickErDbContext` は値オブジェクトありで `OnConfiguring` を持つので EF Core がプールを断るが、値オブジェクトなしの構成ではプールできる）。
+    - ガード：`BackendParityRuntimeTests` の `graph-updated-row-takes-alternate-key-of-deleted-row-user-connections`（`ParityScenario.EfCoreUserConnections`＝利用者が持つ 2 本の接続を交互に渡すファクトリ。破棄した後に開くと断る接続で、SQLite でも SQL Server と同じに破棄が見える）。mutation 実証済み。
+  - 分けるかの判定は `GraphSaveOrder.TakesDeletedValue`（後回しの判定と同じ本体を、モデルの代替キーの列だけに絞る）。代替キーでない一意な値の後回しは分けず、1 回の SaveChanges の中で `HasIndex` が並べる（分けると下の `HasIndex` のガードが効かなくなる）。
+  - 両方の文脈のエントリはコミットまで保留のまま（`acceptAllChangesOnSuccess: false`）。そのため、0 行の文の分類とやり直し（`IsRowGoneAsync`）・実行戦略の試行の組み直し・採番値のコミット後の反映は、1 つの文脈のときと同じに効く。競合のロールバックの後は、2 つめの文脈をトランザクションから外してから保存先を読む。
 - ほかの行が参照している値は DB が断る（`NO ACTION`。QuickER 版と同じ）。
 - 値が同じなら書かない判定は、外しても緑のまま（同じ値の書き込みは DB が断らず、版を読み直すので観測できない）。
 - ガード：`BackendParityRuntimeTests` の `h1-*` の 7 シナリオ（参照あり・なし × `UpdateAsync`・グラフ保存・Before のフックの書き換え〔`ParityHookBehavior.EditKeyThenContinue`＝決まった形のシナリオだけが使う〕・同じ保存に古いコードを参照する依存行を持つ形）、`BackendParitySqlServerRuntimeTests` の `alternate-key-*`（ConcurrencyFixture の kits / kit_parts、実 SQL Server）。mutation 実証済み。
+- 削除の後に書くガード：`BackendParityRuntimeTests` の `graph-updated-row-takes-alternate-key-of-deleted-row`・`-with-new-dependent`（後から書くと新しい子の挿入が先に走る）・`ef-retry-updated-row-takes-alternate-key-of-deleted-row`（実行戦略の試行の組み直し）、`BackendParitySqlServerRuntimeTests` の `alternate-key-taken-from-deleted-kit-*`（部品を持つ kit の削除・2 つめの文脈の 0 行の競合の Optimistic と ForceOverwrite）。mutation 実証済み。
 
 ## 保存のやり直しと実行戦略
 
