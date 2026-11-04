@@ -19,6 +19,9 @@ namespace QuickER.Tests.GeneratedInMemoryFixture;
 /// 削除追跡を経由せずに外し、外れた行は Removed のまま・_removed にも残らない
 /// （旧: Unchanged へ戻り、消したはずの行が通常行として画面に復活していた）。単一カスケード子は外す先が
 /// 無いので Removed のまま残る＝アプリ側で null にする（docs / XmlDoc の明記とセット）。
+/// <para>
+/// 削除行の保存グラフ（コレクションから外す・残して削除マーク）と削除確定行の受理（コレクション・親）は <see cref="EditModelScenarioTests"/> の em-removed-graph・em-removed-accept の表にある。
+/// </para>
 /// </remarks>
 public sealed class EditModelRemovedRowTests
 {
@@ -61,45 +64,8 @@ public sealed class EditModelRemovedRowTests
     }
 
     /// <summary>ロード済み（Unchanged）の CustomerEditModel を作る。</summary>
-    private static CustomerEditModel BuildLoadedModel() =>
+    internal static CustomerEditModel BuildLoadedModel() =>
         new CustomerMapper().CreateEditModel(BuildCustomerEntity());
-
-    [Fact]
-    public void 削除行の必須欄が空でも保存用のグラフ生成は失敗せずキーが載る()
-    {
-        var model = BuildLoadedModel();
-        var row = model.Orders[0];
-
-        // 必須列 Amount を空欄にしてから行を削除する（レビュー再現プローブと同じ手順）
-        row.BindingAmount = string.Empty;
-        model.Orders.Remove(row);
-
-        model.Validate().Should().BeTrue("削除行は検証対象外");
-
-        var entity = new CustomerMapper().CreateEntity(model, includeRemoved: true);
-
-        var removed = entity.Orders.Should().ContainSingle().Subject;
-        removed.RowState.Should().Be(RowState.Removed);
-        removed.OrderId.Should().Be(100, "削除にはキーが要るため、キーは削除行でも必ず載る");
-    }
-
-    [Fact]
-    public void コレクションに残した削除マーク行も未入力の非キー列で保存グラフ生成が止まらない()
-    {
-        var model = BuildLoadedModel();
-        var row = model.Orders[0];
-
-        row.BindingAmount = string.Empty;
-        row.MarkRemoved();
-
-        model.Validate().Should().BeTrue();
-
-        var entity = new CustomerMapper().CreateEntity(model, includeRemoved: true);
-
-        var removed = entity.Orders.Should().ContainSingle().Subject;
-        removed.RowState.Should().Be(RowState.Removed);
-        removed.OrderId.Should().Be(100);
-    }
 
     [Fact]
     public void 削除行でも入力済みの値とキーは写り未入力の非キー列だけが初期値に残る()
@@ -138,37 +104,6 @@ public sealed class EditModelRemovedRowTests
         row.RowState.Should()
             .Be(RowState.Added, "受理済みの行は退避リストに居ないため復元では上書きされない");
         model.Orders.HasChanges.Should().BeTrue("戻した行は次の保存で INSERT される");
-    }
-
-    [Fact]
-    public void AcceptChangesは削除確定行をコレクションから外しRemovedのまま追跡にも残さない()
-    {
-        var model = BuildLoadedModel();
-        var row = model.Orders[0];
-
-        row.MarkRemoved();
-        model.Orders.AcceptChanges();
-
-        model.Orders.Should().NotContain(row, "削除が確定した行を通常行として画面に残さない");
-        row.RowState.Should()
-            .Be(RowState.Removed, "外れた行は保存済みの削除を表したまま＝受理で Added にしない");
-        model
-            .Orders.RemovedItems.Should()
-            .BeEmpty("削除追跡を経由せずに外す＝次の保存の削除対象にならない");
-    }
-
-    [Fact]
-    public void 親のAcceptChanges経由でも削除確定行はコレクションから外れる()
-    {
-        var model = BuildLoadedModel();
-        var row = model.Orders[0];
-
-        row.MarkRemoved();
-        model.AcceptChanges(includeChildren: true);
-
-        model.Orders.Should().NotContain(row);
-        row.RowState.Should().Be(RowState.Removed);
-        model.Orders.RemovedItems.Should().BeEmpty();
     }
 
     [Fact]

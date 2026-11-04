@@ -178,45 +178,11 @@ public sealed class DeclaredBlob
 /// 引き当て（Materialize のフック優先→レジストリ→new）と未定義値の拒否（RunValidation の
 /// ValidateCore→メンバーシップ検査）の両アームを、成功・失敗・合成・安全弁・誤用 fail-fast で固定する。
 /// 属性を持たない既存型の挙動・割り当てゼロが変わらないことも同じファイルで固定する。
+/// 決まった形の表明（生成・引き当て・拒否・呼び形・表示など）は <see cref="ValueObjectScenarioTests"/> の表にある。ここに残すのは、
+/// 一覧の性質・型の初回使用を観測するもの・割り当ての測定だけ。
 /// </remarks>
 public sealed class ValueObjectDeclaredInstanceTests
 {
-    [Fact(
-        DisplayName = "[宣言済み] 属性付きフィールドが全生成経路で定義済みインスタンスとして返る"
-    )]
-    public void 属性付きフィールドが全生成経路で返る()
-    {
-        MeasureStatus.Create(1).Should().BeSameAs(MeasureStatus.Preparing);
-
-        MeasureStatus.TryCreate(2, out var inProgress, out var errors).Should().BeTrue();
-        inProgress.Should().BeSameAs(MeasureStatus.InProgress);
-        errors.Should().BeEmpty();
-
-        // DB 読み出し経路（値→VO の再ラップ）も同じインスタンス
-        SqlValueObjectActivator
-            .Wrap(9, typeof(MeasureStatus))
-            .Should()
-            .BeSameAs(MeasureStatus.Completed);
-    }
-
-    [Fact(DisplayName = "[宣言済み] 集合外の値は Create / TryCreate / Validate すべてで拒否される")]
-    public void 集合外の値は拒否される()
-    {
-        MeasureStatus.TryCreate(5, out var value, out var errors).Should().BeFalse();
-        value.Should().BeNull();
-        errors.Should().ContainSingle().Which.Should().Be("'5' is not a defined MeasureStatus.");
-
-        var act = () => MeasureStatus.Create(5);
-        act.Should().Throw<ValueObjectValidationException>();
-
-        var collected = new List<string>();
-        MeasureStatus.Validate(5, collected).Should().BeFalse();
-        collected.Should().ContainSingle();
-
-        // 属性なしの便宜定数（Legacy=99）は集合に入らない＝99 も拒否される
-        MeasureStatus.TryCreate(99, out _, out _).Should().BeFalse();
-    }
-
     [Fact(DisplayName = "[宣言済み] GetDeclaredInstances は宣言順で、属性なしフィールドを含まない")]
     public void 一覧は宣言順で属性なしを含まない()
     {
@@ -227,36 +193,6 @@ public sealed class ValueObjectDeclaredInstanceTests
 
         // 属性を持たない型は空（例外にしない）
         CustomerIdValue.GetDeclaredInstances().Should().BeEmpty();
-    }
-
-    [Fact(DisplayName = "[宣言済み] DeclaredDisplayName は [Display] の名前を返し、無い欄は null")]
-    public void 表示名はDisplay属性から引ける()
-    {
-        MeasureStatus.Preparing.DisplayValue.Should().Be("拾い出し");
-        MeasureStatus.InProgress.DisplayValue.Should().Be("測定中");
-
-        // [Display] なし → DeclaredDisplayName は null → base.DisplayValue（ToString）へフォールバック
-        MeasureStatus.Completed.DisplayValue.Should().Be("9");
-
-        // 値等値で引くので、同値の別インスタンス（new 直呼びは型内でしかできないため Legacy で代用不可）でも
-        // 定義済み側の値なら名前が届く＝Create が返す共有インスタンスで検証
-        MeasureStatus.Create(1).DisplayValue.Should().Be("拾い出し");
-    }
-
-    // フック（GetDefinedInstance / OnValidate）と属性が同じ差し込み口を取り合わないことの固定。
-    // ソースジェネレータ方式を退けた理由（合成が壊れる）の裏返しをテストで表明する。
-    [Fact(DisplayName = "[宣言済み] フックと属性は併用でき、引き当てはフックが優先される")]
-    public void フックと属性は併用できる()
-    {
-        // フックが値 2 を引き当てる → レジストリ（Published）より優先
-        StageMode.Create(2).Should().BeSameAs(StageMode.HookPublished);
-
-        // フックが扱わない値 1 はレジストリが引き当てる
-        StageMode.Create(1).Should().BeSameAs(StageMode.Draft);
-
-        // OnValidate とメンバーシップ検査は両方走る（値 3 は両方の違反が積まれる）
-        StageMode.TryCreate(3, out _, out var errors).Should().BeFalse();
-        errors.Should().Equal("custom rule for 3", "'3' is not a defined StageMode.");
     }
 
     [Fact(
@@ -300,35 +236,6 @@ public sealed class ValueObjectDeclaredInstanceTests
 
         // 一覧も空のまま
         UninitializedDeclaredStatus.GetDeclaredInstances().Should().BeEmpty();
-    }
-
-    [Fact(
-        DisplayName = "[宣言済み] readonly でないフィールドへの付与は初回使用時に fail-fast する"
-    )]
-    public void 不正な形への付与はfailfastする()
-    {
-        var act = () => BrokenDeclaredStatus.Create(1);
-
-        act.Should()
-            .Throw<InvalidOperationException>()
-            .WithMessage("*public static readonly*Oops*");
-    }
-
-    [Fact(DisplayName = "[宣言済み] バイナリ VO への付与は初回使用時に fail-fast する")]
-    public void バイナリVOへの付与はfailfastする()
-    {
-        var act = () => DeclaredBlob.Create(new byte[] { 1 });
-
-        act.Should()
-            .Throw<InvalidOperationException>()
-            .WithMessage("*not supported on a binary value object*DeclaredBlob*");
-    }
-
-    [Fact(DisplayName = "[宣言済み] 属性を持たない型の挙動は従来どおり（毎回新しいインスタンス）")]
-    public void 属性なし型は従来どおり()
-    {
-        CustomerIdValue.Create(5).Should().NotBeSameAs(CustomerIdValue.Create(5));
-        CustomerIdValue.Create(5).Should().Be(CustomerIdValue.Create(5));
     }
 
     // 宣言済み集合の成功パス（検証＝線形走査＋引き当て＝線形走査）が何も確保しないこと。

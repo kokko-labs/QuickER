@@ -13,11 +13,19 @@ namespace QuickER.Tests.GeneratedQueryFixture;
 /// フィクスチャの orders には単一列制約 <c>UQ_orders_memo</c>（NULL 許容列）と複合制約
 /// （<c>customer_id</c>＋<c>amount</c>）がある。DB 照合（<c>ValidateUniqueAsync</c>）は別スイート
 /// （<c>EditModelValidateUniqueRuntimeTests</c>）が担当し、ここは実 DB を使わない要素間比較だけを扱う。
+/// <para>
+/// コレクション内の重複の登録先と、確定値の編集で DB 由来の重複エラーが取り下げられることは <see cref="EditModelScenarioTests"/> の em-sibling・em-db-error の表にある。
+/// </para>
 /// </remarks>
 public class EditModelUniquenessTests
 {
     /// <summary>入力済みの注文 EditModel を組み立てる（必須項目はすべて埋める）</summary>
-    private static OrderEditModel NewOrder(int orderId, int customerId, decimal amount, string memo)
+    internal static OrderEditModel NewOrder(
+        int orderId,
+        int customerId,
+        decimal amount,
+        string memo
+    )
     {
         var model = new OrderEditModel
         {
@@ -30,7 +38,7 @@ public class EditModelUniquenessTests
     }
 
     /// <summary>指定プロパティのエラー一覧を取り出す</summary>
-    private static string[] GetErrors(EditModelBaseCore model, string propertyName) =>
+    internal static string[] GetErrors(EditModelBaseCore model, string propertyName) =>
         ((IEnumerable)model.GetErrors(propertyName)).Cast<string>().ToArray();
 
     /// <summary>クラスが図の UNIQUE 制約を制約テーブルとして宣言する（構成列は確定値プロパティ名・宣言順）</summary>
@@ -66,79 +74,6 @@ public class EditModelUniquenessTests
     public void UniquenessConstraints_WithoutConstraints_AreEmpty()
     {
         new CustomerEditModel().UniquenessConstraints.Should().BeEmpty();
-    }
-
-    /// <summary>同じ値の組を持つ要素すべてに重複エラーが登録される（登録先は構成列のバインディングプロパティ）</summary>
-    [Fact(DisplayName = "コレクション内の重複が全要素へ登録される")]
-    public void Duplicate_RegistersErrorOnEveryMember()
-    {
-        var collection = new EditModelCollection<OrderEditModel>
-        {
-            NewOrder(10, 1, 100m, "apple pie"),
-            NewOrder(11, 2, 50m, "apple pie"),
-            NewOrder(12, 3, 20m, "banana"),
-        };
-
-        collection.Validate().Should().BeFalse();
-
-        GetErrors(collection[0], nameof(OrderEditModel.BindingMemo)).Should().ContainSingle();
-        GetErrors(collection[1], nameof(OrderEditModel.BindingMemo)).Should().ContainSingle();
-        GetErrors(collection[2], nameof(OrderEditModel.BindingMemo)).Should().BeEmpty();
-
-        // 重複していない列（確定値プロパティそのもの）には登録しない
-        GetErrors(collection[0], nameof(OrderEditModel.Memo)).Should().BeEmpty();
-    }
-
-    /// <summary>複合制約は構成列すべてが一致したときだけ、全構成列のバインディングプロパティへ登録される</summary>
-    [Fact(DisplayName = "複合制約の重複は全構成列へ登録される")]
-    public void CompositeDuplicate_RegistersErrorOnAllMembers()
-    {
-        var collection = new EditModelCollection<OrderEditModel>
-        {
-            NewOrder(10, 1, 100m, "apple pie"),
-            NewOrder(11, 1, 100m, "banana"),
-        };
-
-        collection.Validate().Should().BeFalse();
-
-        GetErrors(collection[0], nameof(OrderEditModel.BindingCustomerId)).Should().ContainSingle();
-        GetErrors(collection[0], nameof(OrderEditModel.BindingAmount)).Should().ContainSingle();
-        GetErrors(collection[1], nameof(OrderEditModel.BindingCustomerId)).Should().ContainSingle();
-
-        // 単一列制約（memo）は重複していないのでエラーなし
-        GetErrors(collection[0], nameof(OrderEditModel.BindingMemo)).Should().BeEmpty();
-    }
-
-    /// <summary>構成列の値に null を含む組は判定対象外（未入力の memo が並んでも重複にならない）</summary>
-    [Fact(DisplayName = "NULL を含む組は重複判定から外れる")]
-    public void NullMember_IsNotTreatedAsDuplicate()
-    {
-        var collection = new EditModelCollection<OrderEditModel>
-        {
-            NewOrder(10, 1, 100m, string.Empty),
-            NewOrder(11, 2, 50m, string.Empty),
-        };
-
-        collection.Validate().Should().BeTrue();
-
-        GetErrors(collection[0], nameof(OrderEditModel.BindingMemo)).Should().BeEmpty();
-        GetErrors(collection[1], nameof(OrderEditModel.BindingMemo)).Should().BeEmpty();
-    }
-
-    /// <summary>削除対象（RowState.Removed）の要素は比較から外れる</summary>
-    [Fact(DisplayName = "削除対象の要素は重複判定から外れる")]
-    public void RemovedElement_IsExcluded()
-    {
-        var collection = new EditModelCollection<OrderEditModel>
-        {
-            NewOrder(10, 1, 100m, "apple pie"),
-            NewOrder(11, 2, 50m, "apple pie"),
-        };
-        collection[1].MarkRemoved();
-
-        collection.Validate().Should().BeTrue();
-
-        GetErrors(collection[0], nameof(OrderEditModel.BindingMemo)).Should().BeEmpty();
     }
 
     /// <summary>重複を解消して再検証すると、前回登録された重複エラーが残らない</summary>
@@ -355,54 +290,6 @@ public class EditModelUniquenessTests
         collection[1].ClearDuplicateErrors(DuplicateErrorSource.Database);
         GetErrors(collection[1], nameof(OrderEditModel.BindingMemo)).Should().BeEmpty();
         collection.Validate().Should().BeTrue();
-    }
-
-    /// <summary>DB 照合の所見は、確定値が変わった時点で（陳腐化するため）取り下げられる</summary>
-    /// <remarks>
-    /// 照合したのは編集前の値なので、値が変われば結論は無効になる。複合制約は構成列すべての組で判定して
-    /// いるため、1 列でも変われば同じモデルの DB 由来所見はすべて取り下げる。
-    /// </remarks>
-    [Fact(DisplayName = "確定値を編集すると DB 由来の重複エラーが解消される")]
-    public void ConfirmedValueChange_ClearsDatabaseDuplicateErrors()
-    {
-        var model = NewOrder(10, 1, 100m, "apple pie");
-
-        model.SetDuplicateError(
-            nameof(OrderEditModel.BindingMemo),
-            "already used in the database",
-            DuplicateErrorSource.Database
-        );
-        model.HasErrors.Should().BeTrue();
-        model.Validate().Should().BeFalse();
-
-        // 重複していた欄そのものを編集する（バインディング経由＝確定値まで変わる）
-        model.BindingMemo = "banana";
-
-        GetErrors(model, nameof(OrderEditModel.BindingMemo)).Should().BeEmpty();
-        model.HasErrors.Should().BeFalse();
-        model.Validate().Should().BeTrue("値が変われば DB 突合の結論は持ち越さない");
-    }
-
-    /// <summary>複合制約の別列を編集しても DB 由来の所見は残らない（判定はすべての構成列の組で行うため）</summary>
-    [Fact(DisplayName = "複合制約の別列を編集しても DB 由来の重複エラーが残らない")]
-    public void ConfirmedValueChange_ClearsDatabaseDuplicateErrorsOnOtherColumns()
-    {
-        var model = NewOrder(10, 1, 100m, "apple pie");
-
-        // 複合制約（customer_id + amount）の違反は先頭の構成列へ載る
-        model.SetDuplicateError(
-            nameof(OrderEditModel.BindingCustomerId),
-            "already used in the database",
-            DuplicateErrorSource.Database
-        );
-
-        // 組のもう一方の列を編集する
-        model.BindingAmount = "999";
-
-        GetErrors(model, nameof(OrderEditModel.BindingCustomerId))
-            .Should()
-            .BeEmpty("組の一部が変われば組全体の突合結果が無効になる");
-        model.HasErrors.Should().BeFalse();
     }
 
     /// <summary>対照: 兄弟間チェックの所見は確定値の編集では消えない（再検証が判断する）</summary>

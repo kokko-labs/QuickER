@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
-using System.Globalization;
 using AwesomeAssertions;
 using Xunit;
 
@@ -173,151 +171,10 @@ public sealed class EmptyInputState
 /// 基底 TryCreateFrom の 2 駅（空欄: フック → ClaimsAbsent → null／文字列入力: フック → InputText →
 /// 通常変換）を、成功・不一致・フック優先・fail-fast で固定する。照合は Ordinal 完全一致・Trim なし・
 /// string 入力のみで、[Display] の名前は入力として受けない。
+/// 決まった形の表明（生成・引き当て・拒否・呼び形・表示など）は <see cref="ValueObjectScenarioTests"/> の表にある。ここに残すのは割り当ての測定だけ。
 /// </remarks>
 public sealed class ValueObjectDeclaredInputTests
 {
-    private static T? ReadCell<T>(object? cell, List<string> errors)
-        where T : class, IValueObject<T>
-    {
-        if (T.TryCreateFrom(cell, null, out var value, out var messages))
-        {
-            return value;
-        }
-
-        errors.AddRange(messages);
-
-        return null;
-    }
-
-    [Fact(DisplayName = "[入力表記] InputText はどの呼び形でも効く（4 引数の型名呼びを含む）")]
-    public void InputTextは全呼び形で効く()
-    {
-        // 4 引数・具象型名
-        CheckMark
-            .TryCreateFrom("○", CultureInfo.InvariantCulture, out var viaFourArgs, out var errors1)
-            .Should()
-            .BeTrue();
-        viaFourArgs.Should().BeSameAs(CheckMark.Marked);
-        errors1.Should().BeEmpty();
-
-        // 3 引数・具象型名
-        CheckMark.TryCreateFrom("○", out var viaThreeArgs, out _).Should().BeTrue();
-        viaThreeArgs.Should().BeSameAs(CheckMark.Marked);
-
-        // CreateFrom（例外版）
-        CheckMark.CreateFrom("○").Should().BeSameAs(CheckMark.Marked);
-
-        // 型引数経由（ジェネリック取り込み経路）
-        var errors = new List<string>();
-        ReadCell<CheckMark>("○", errors).Should().BeSameAs(CheckMark.Marked);
-        errors.Should().BeEmpty();
-    }
-
-    [Fact(
-        DisplayName = "[入力表記] ClaimsAbsent は空欄 3 形（null / DBNull / 空文字）すべてで効く"
-    )]
-    public void ClaimsAbsentは空欄3形で効く()
-    {
-        CheckMark.TryCreateFrom("", out var fromEmpty, out var errors).Should().BeTrue();
-        fromEmpty.Should().BeSameAs(CheckMark.Unmarked);
-        errors.Should().BeEmpty();
-
-        CheckMark.CreateFrom(null).Should().BeSameAs(CheckMark.Unmarked);
-        CheckMark
-            .CreateFrom(DBNull.Value, CultureInfo.InvariantCulture)
-            .Should()
-            .BeSameAs(CheckMark.Unmarked);
-    }
-
-    // 照合規則の固定: Ordinal 完全一致・Trim なし。空白や末尾スペースの揺れは受けない（受けたければフックの領分）
-    [Fact(DisplayName = "[入力表記] 空白のみ・表記ゆれの文字列は一致せず通常変換のまま")]
-    public void 不一致の文字列は通常変換のまま()
-    {
-        // 空白のみは「空欄」でも「○」でもない → bool への通常変換に失敗して検証エラー
-        CheckMark.TryCreateFrom(" ", out var whitespace, out var errors1).Should().BeFalse();
-        whitespace.Should().BeNull();
-        errors1.Should().ContainSingle();
-
-        // 末尾スペース付きは Trim されない＝不一致
-        CheckMark.TryCreateFrom("○ ", out _, out var errors2).Should().BeFalse();
-        errors2.Should().ContainSingle();
-    }
-
-    [Fact(
-        DisplayName = "[入力表記] 非文字列と通常変換可能な文字列は従来どおり変換され、同じ宣言済みインスタンスに解決される"
-    )]
-    public void 非文字列は通常変換経由で同じインスタンスに解決される()
-    {
-        // bool そのもの → 通常変換 → Materialize のレジストリが宣言済みへ引き当てる
-        CheckMark.CreateFrom(true).Should().BeSameAs(CheckMark.Marked);
-
-        // bool へ変換可能な文字列も従来どおり（表記の追加は通常変換を奪わない）
-        CheckMark.CreateFrom("True").Should().BeSameAs(CheckMark.Marked);
-    }
-
-    [Fact(DisplayName = "[入力表記] int のコード列挙でも表記と通常変換が同居する")]
-    public void intコード列挙でも効く()
-    {
-        WorkState.CreateFrom("済").Should().BeSameAs(WorkState.Done);
-
-        // 数字の文字列は通常変換 → 宣言済みへ解決（表記なしの Open も同様）
-        WorkState.CreateFrom("9").Should().BeSameAs(WorkState.Done);
-        WorkState.CreateFrom("1").Should().BeSameAs(WorkState.Open);
-
-        // 閉じた集合の拒否（既存機能）はそのまま効いている
-        WorkState.TryCreate(5, out _, out var errors).Should().BeFalse();
-        errors.Should().ContainSingle();
-    }
-
-    // [Display] の名前は表示専用で、入力としては受けない（InputText の明示オプトインだけが入力になる）。
-    // 将来「Display 名の自動パース」が紛れ込むとここが赤くなる。
-    [Fact(DisplayName = "[入力表記] Display の名前は入力として受けない")]
-    public void Display名は入力にならない()
-    {
-        MeasureStatus.TryCreateFrom("拾い出し", out var value, out var errors).Should().BeFalse();
-        value.Should().BeNull();
-        errors.Should().ContainSingle();
-    }
-
-    [Fact(DisplayName = "[入力表記] フックは宣言表記より優先される（書かれる側・空欄側とも）")]
-    public void フックが宣言表記より優先される()
-    {
-        // 「○」: フックが HookMarked を返す → InputText の Marked ではない
-        OverrideMark.CreateFrom("○").Should().BeSameAs(OverrideMark.HookMarked);
-        OverrideMark.CreateFrom("○").Should().NotBeSameAs(OverrideMark.Marked);
-
-        // 空欄: フックが HookAbsent を返す → ClaimsAbsent の Unmarked ではない
-        OverrideMark.CreateFrom(null).Should().BeSameAs(OverrideMark.HookAbsent);
-        OverrideMark.CreateFrom("").Should().NotBeSameAs(OverrideMark.Unmarked);
-    }
-
-    [Fact(
-        DisplayName = "[入力表記] InputText の重複・ClaimsAbsent の複数・空の InputText は初回使用時に fail-fast する"
-    )]
-    public void 不正な宣言はfailfastする()
-    {
-        var dup = () => DupInputState.Create(1);
-        dup.Should().Throw<InvalidOperationException>().WithMessage("*InputText '×'*");
-
-        var doubleAbsent = () => DoubleAbsentState.Create(1);
-        doubleAbsent
-            .Should()
-            .Throw<InvalidOperationException>()
-            .WithMessage("*claim the absent input more than once*");
-
-        var empty = () => EmptyInputState.Create(1);
-        empty.Should().Throw<InvalidOperationException>().WithMessage("*empty InputText*");
-    }
-
-    [Fact(DisplayName = "[入力表記] 表示側は Display 名がそのまま出る（空文字の Display も含む）")]
-    public void 表示はDisplay名がそのまま出る()
-    {
-        CheckMark.Marked.DisplayValue.Should().Be("○");
-
-        // Display(Name = "") は「空欄として表示する」の宣言＝旧 DisplaySymbol の置き換え
-        CheckMark.Unmarked.DisplayValue.Should().Be("");
-    }
-
     // InputText 一致パス（空欄述語 → フック照会 → レジストリの線形走査 → 既存インスタンス返却）が
     // 何も確保しないこと。表記の照合を LINQ 化・正規化付きへ書き換えると赤くなる。
     [Fact(DisplayName = "[入力表記] InputText 一致パスは割り当てゼロ")]

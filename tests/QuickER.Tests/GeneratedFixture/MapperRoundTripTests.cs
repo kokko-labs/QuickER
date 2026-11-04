@@ -12,13 +12,16 @@ namespace QuickER.Tests.GeneratedFixture;
 /// 検証対象は CreateEntity()（新規）、CreateEditModel(entity)/CreateEditModel()、ApplyToEntity/ApplyToEditModel、
 /// MapperBase.CreateEntity(em, includeRemoved) の両分岐、CreateEntities（削除済み除外／包含）、
 /// CreateEditModels（→ <see cref="EditModelCollection{T}"/>）、および Entity→EditModel→Entity の往復一致（VO 込み）。
+/// <para>
+/// NULL の列の往復と includeRemoved の両分岐は <see cref="EditModelScenarioTests"/> の em-mapper-null・em-mapper-removed の表にある。
+/// </para>
 /// </remarks>
 public sealed class MapperRoundTripTests
 {
     // ===== テストデータ生成 =====
 
     /// <summary>Orders×2・CustomerProfile を持つ Unchanged な CustomerEntity を作る（withProfile=false で子プロファイル無し）。</summary>
-    private static CustomerEntity BuildFullCustomer(
+    internal static CustomerEntity BuildFullCustomer(
         decimal? balance = 250.75m,
         bool withProfile = true
     )
@@ -63,7 +66,7 @@ public sealed class MapperRoundTripTests
         return entity;
     }
 
-    private static OrderEntity BuildOrder(int id, DateTime? orderedAt = null) =>
+    internal static OrderEntity BuildOrder(int id, DateTime? orderedAt = null) =>
         new OrderEntity
         {
             OrderId = OrderIdValue.Create(id),
@@ -238,44 +241,8 @@ public sealed class MapperRoundTripTests
         entity.CustomerProfile.Should().BeNull();
     }
 
-    // ===== MapperBase.CreateEntity(em, includeRemoved) の両分岐 =====
-
-    [Fact(
-        DisplayName = "CreateEntity(em, includeRemoved): 子コレクションの削除済み要素を分岐で除外／包含する"
-    )]
-    public void CreateEntity_includeRemoved両分岐()
-    {
-        var mapper = new CustomerMapper();
-        var em = mapper.CreateEditModel(BuildFullCustomer()); // Orders×2
-        em.Orders.RemoveAt(1); // 既存要素を削除追跡
-
-        var without = mapper.CreateEntity(em, includeRemoved: false);
-        without.Orders.Should().HaveCount(1);
-
-        var with = mapper.CreateEntity(em, includeRemoved: true);
-        with.Orders.Should().HaveCount(2);
-        with.Orders.Should().Contain(o => o.RowState == RowState.Removed);
-    }
-
-    // ===== CreateEntities（コレクション→エンティティ群） =====
-
-    [Fact(DisplayName = "CreateEntities: 削除済みを includeRemoved で除外／包含する")]
-    public void CreateEntities_削除済み()
-    {
-        var orders = new EditModelCollection<OrderEditModel>
-        {
-            new OrderMapper().CreateEditModel(BuildOrder(1)),
-            new OrderMapper().CreateEditModel(BuildOrder(2)),
-        };
-        orders.RemoveAt(1); // 既存要素を削除追跡
-
-        var om = new OrderMapper();
-        om.CreateEntities(orders, includeRemoved: false).Should().HaveCount(1);
-
-        var withRemoved = om.CreateEntities(orders, includeRemoved: true);
-        withRemoved.Should().HaveCount(2);
-        withRemoved.Should().Contain(o => o.RowState == RowState.Removed);
-    }
+    // MapperBase.CreateEntity(em, includeRemoved) の両分岐と CreateEntities（削除済み除外／包含）は
+    // EditModelScenarioTests.MapperRemoved（em-mapper-removed）が確かめる
 
     // ===== CreateEditModels（→ EditModelCollection） =====
 
@@ -457,30 +424,6 @@ public sealed class MapperRoundTripTests
             .CreateEntity(em, includeRemoved: false)
             .DeliveryDate!.Value.Should()
             .Be(deliveryDate);
-    }
-
-    [Fact(DisplayName = "ロード: NULL の date 列は null のまま往復し、表示文字列は空になる")]
-    public void ロード_null日付()
-    {
-        var mapper = new OrderMapper();
-
-        var em = mapper.CreateEditModel(BuildOrder(1));
-
-        em.DeliveryDate.Should().BeNull();
-        em.BindingDeliveryDate.Should().BeEmpty();
-        mapper.CreateEntity(em, includeRemoved: false).DeliveryDate.Should().BeNull();
-    }
-
-    [Fact(DisplayName = "ロード: NULL の DateTime 列は null のまま往復し、表示文字列は空になる")]
-    public void ロード_null日時()
-    {
-        var mapper = new OrderMapper();
-
-        var em = mapper.CreateEditModel(BuildOrder(1));
-
-        em.OrderedAt.Should().BeNull();
-        em.BindingOrderedAt.Should().BeEmpty();
-        mapper.CreateEntity(em, includeRemoved: false).OrderedAt.Should().BeNull();
     }
 
     [Fact(

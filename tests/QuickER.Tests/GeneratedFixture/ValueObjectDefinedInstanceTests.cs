@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using AwesomeAssertions;
 using Xunit;
@@ -205,135 +204,9 @@ public sealed partial class BioValue
 }
 
 /// <summary>定義済みインスタンスのみを受け付ける値オブジェクト（<c>TryGetDefined</c>）の検証。</summary>
+/// <remarks>決まった形の表明（生成・引き当て・拒否・呼び形・表示など）は <see cref="ValueObjectScenarioTests"/> の表にある。ここに残すのは割り当ての測定だけ。</remarks>
 public sealed class ValueObjectDefinedInstanceTests
 {
-    private static T? ReadCell<T>(object? cell, List<string> errors)
-        where T : class, IValueObject<T>
-    {
-        if (T.TryCreateFrom(cell, null, out var value, out var messages))
-        {
-            return value;
-        }
-
-        errors.AddRange(messages);
-
-        return null;
-    }
-
-    [Fact(DisplayName = "[定義済み] 手書きの列挙型 VO は Create で定義済みインスタンスを返す")]
-    public void 手書き列挙VOは定義済みを返す()
-    {
-        DataAccessMode.Create(2).Should().BeSameAs(DataAccessMode.Database);
-        DataAccessMode.TryCreate(3, out var fake, out _).Should().BeTrue();
-        fake.Should().BeSameAs(DataAccessMode.Fake);
-        DataAccessMode.Create(1).ModeName.Should().Be("Web");
-    }
-
-    [Fact(DisplayName = "[定義済み] 未定義の値は検証エラーになる")]
-    public void 未定義値は検証エラー()
-    {
-        DataAccessMode.TryCreate(9, out var value, out var errors).Should().BeFalse();
-
-        value.Should().BeNull();
-        errors.Should().ContainSingle().Which.Should().Be("DataAccessMode 9 is not defined.");
-
-        var act = () => DataAccessMode.Create(9);
-
-        act.Should().Throw<ValueObjectValidationException>();
-    }
-
-    // 生成 VO は New もブリッジも出力済みなので差し替えられない。GetDefinedInstance は Create / TryCreate 側に
-    // 割り込むブリッジから照会されるため、利用者の partial だけで列挙型へ拡張できる。
-    [Fact(
-        DisplayName = "[定義済み] 生成形の VO も partial の GetDefinedInstance だけで列挙型にできる"
-    )]
-    public void 生成VOをpartialで列挙型にできる()
-    {
-        ScreenMode.Create(1).Should().BeSameAs(ScreenMode.List);
-        ScreenMode.TryCreate(2, out var edit, out _).Should().BeTrue();
-        edit.Should().BeSameAs(ScreenMode.Edit);
-
-        // New が作る素のインスタンスでは ModeName が空になる。定義済みが返っていることの裏取り。
-        ScreenMode.Create(2).ModeName.Should().Be("Edit");
-        ScreenMode.TryCreate(9, out _, out var errors).Should().BeFalse();
-        errors.Should().ContainSingle().Which.Should().Be("ScreenMode 9 is not defined.");
-    }
-
-    [Fact(DisplayName = "[定義済み] 名前からの生成をジェネリック経路へ乗せられる")]
-    public void 名前からの生成をジェネリック経路へ乗せられる()
-    {
-        var errors = new List<string>();
-
-        ReadCell<DataAccessMode>("Fake", errors).Should().BeSameAs(DataAccessMode.Fake);
-        ReadCell<DataAccessMode>("2", errors).Should().BeSameAs(DataAccessMode.Database);
-        ReadCell<ScreenMode>("Edit", errors).Should().BeSameAs(ScreenMode.Edit);
-        ReadCell<ScreenMode>(1, errors).Should().BeSameAs(ScreenMode.List);
-
-        errors.Should().BeEmpty();
-
-        ReadCell<DataAccessMode>("Nope", errors).Should().BeNull();
-        errors.Should().ContainSingle();
-    }
-
-    // 変換フック導入の眼目＝旧設計では「4 引数の TryCreateFrom を具象型名で呼ぶ」形だけが override を
-    // 静的束縛で迂回した。基底がどの呼び形でも TSelf.TryConvertCustomInput を照会することを 4 形すべてで固定する。
-    [Fact(DisplayName = "[定義済み] 変換フックはどの呼び形でも効く（4 引数の型名呼びを含む）")]
-    public void 変換フックは全呼び形で効く()
-    {
-        // 4 引数・具象型名（旧設計で唯一 override を迂回した形）
-        ScreenMode
-            .TryCreateFrom("Edit", CultureInfo.InvariantCulture, out var viaFourArgs, out _)
-            .Should()
-            .BeTrue();
-        viaFourArgs.Should().BeSameAs(ScreenMode.Edit);
-
-        // 3 引数・具象型名
-        ScreenMode.TryCreateFrom("Edit", out var viaThreeArgs, out _).Should().BeTrue();
-        viaThreeArgs.Should().BeSameAs(ScreenMode.Edit);
-
-        // CreateFrom（例外版）
-        ScreenMode
-            .CreateFrom("Edit", CultureInfo.InvariantCulture)
-            .Should()
-            .BeSameAs(ScreenMode.Edit);
-
-        // 型引数経由（ジェネリック取り込み経路）
-        var errors = new List<string>();
-        ReadCell<ScreenMode>("Edit", errors).Should().BeSameAs(ScreenMode.Edit);
-        errors.Should().BeEmpty();
-
-        // 手書き型（interface フック直接実装）も同じ 4 引数型名呼びで効く
-        DataAccessMode
-            .TryCreateFrom("Database", CultureInfo.InvariantCulture, out var handwritten, out _)
-            .Should()
-            .BeTrue();
-        handwritten.Should().BeSameAs(DataAccessMode.Database);
-    }
-
-    // 実際に生成されたブリッジ（GeneratedFixture.g.cs の BioValue）が partial フックへ配線されていることの検証。
-    // ScreenMode はテスト内のミラーなので、テンプレート出力そのものはこちらで固定する。
-    [Fact(DisplayName = "[定義済み] 実生成 VO のブリッジが partial フックへ配線されている")]
-    public void 実生成VOのブリッジが配線されている()
-    {
-        // GetDefinedInstance: Create と DB 読み出し（Wrap）の両経路で定義済みインスタンスが返る
-        BioValue.Create("#defined").Should().BeSameAs(BioValue.DefinedBio);
-        SqlValueObjectActivator
-            .Wrap("#defined", typeof(BioValue))
-            .Should()
-            .BeSameAs(BioValue.DefinedBio);
-
-        // ConvertCustomInput: 4 引数の型名呼び（旧設計の迂回形）でもフックが先に効く
-        BioValue
-            .TryCreateFrom("@defined", CultureInfo.InvariantCulture, out var custom, out _)
-            .Should()
-            .BeTrue();
-        custom.Should().BeSameAs(BioValue.DefinedBio);
-
-        // フックが扱わない値は通常の変換・生成のまま（他テストへの不干渉の裏取り）
-        BioValue.Create("plain").Should().NotBeSameAs(BioValue.DefinedBio);
-        BioValue.CreateFrom("plain")!.Value.Should().Be("plain");
-    }
-
     // OnValidate の ref 化（遅延確保）の網: 実装した型でも検証を通る生成はリストを確保しない。
     // 対象は実生成 VO（BioValue＝生成された ValidateCore がフックを呼ぶ）＝テンプレートが旧形
     // （呼び出し前に errors ??= new List<string>() で必ず確保）へ戻ると 1 回あたり +32 bytes でここが赤くなる。
@@ -364,13 +237,5 @@ public sealed class ValueObjectDefinedInstanceTests
         }
 
         delta.Should().Be(0, "定義済みインスタンス＋遅延確保の成功パスは何も確保しない");
-    }
-
-    // TryGetDefined / フックを書かない型の挙動が変わっていないこと（既定は「定義済みなし・通常変換のみ」）。
-    [Fact(DisplayName = "[定義済み] フックを書かない VO は従来どおり毎回新しいインスタンスを作る")]
-    public void フックなしVOは従来どおり()
-    {
-        CustomerIdValue.Create(5).Should().NotBeSameAs(CustomerIdValue.Create(5));
-        CustomerIdValue.Create(5).Should().Be(CustomerIdValue.Create(5));
     }
 }

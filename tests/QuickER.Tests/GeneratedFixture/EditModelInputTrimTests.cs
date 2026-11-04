@@ -22,6 +22,9 @@ namespace QuickER.Tests.GeneratedFixture;
 /// <c>string.IsNullOrEmpty</c> 分岐で確定値 null になる。VO を通さない「非 null 文字列列→空文字」
 /// 経路はこの図には存在しない（VO 有効フィクスチャのため）。
 /// </para>
+/// <para>
+/// 名前欄の空白のみ・null の入力の決まった形の表明は <see cref="EditModelScenarioTests"/> の em-blank の表にある。
+/// </para>
 /// </remarks>
 public sealed class EditModelInputTrimTests
 {
@@ -62,33 +65,6 @@ public sealed class EditModelInputTrimTests
 
         // ロードは確定値変更を Updated へ昇格させない（元 Entity の鏡像）
         model.RowState.Should().Be(RowState.Unchanged);
-    }
-
-    [Fact(DisplayName = "空白のみ入力: nullable 文字列列（VO）は確定値 null になる")]
-    public void 空白のみ入力は確定値nullになる()
-    {
-        var model = new CustomerEditModel { BindingName = "abc" };
-        model.Name.Should().NotBeNull();
-
-        model.BindingName = "   \t 　  ";
-
-        model.BindingName.Should().BeEmpty();
-        model.Name.Should().BeNull();
-        model.HasErrors.Should().BeFalse();
-    }
-
-    [Fact(
-        DisplayName = "null 入力は落ちず未入力扱いになる（ComboBox 等が null を書き込むケースとの互換）"
-    )]
-    public void null入力は未入力扱いになる()
-    {
-        var model = new CustomerEditModel { BindingName = "abc" };
-
-        model.BindingName = null!;
-
-        model.BindingName.Should().BeNull();
-        model.Name.Should().BeNull();
-        model.HasErrors.Should().BeFalse();
     }
 
     [Fact(
