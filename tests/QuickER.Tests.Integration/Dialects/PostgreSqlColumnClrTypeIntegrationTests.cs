@@ -13,8 +13,8 @@ using QuickER.Tests.TestSupport;
 namespace QuickER.Tests.Integration.Dialects;
 
 /// <summary>
-/// PostgreSQL の列型について「ドライバが実際に返す CLR 型」と
-/// <see cref="PostgreSqlCSharpTypeMapper"/> の解決結果が一致することを実 DB で固定する統合テスト。
+/// PostgreSQL の列型を、<see cref="PostgreSqlCSharpTypeMapper"/> が解決した C# 型のまま EF Core で読み書きできることを
+/// 実 DB で固定する統合テスト。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -22,9 +22,8 @@ namespace QuickER.Tests.Integration.Dialects;
 /// 生成 Entity のプロパティ型が実際に使われるのは EF Core です。読み書きまで通して固定します。
 /// </para>
 /// <para>
-/// <c>time with time zone</c> は従来 <c>TimeSpan</c> へ解決しており、Npgsql が返す
-/// <c>DateTimeOffset</c> と食い違うため<b>読み取り自体が</b>失敗していました。行の組み立ては全列を
-/// まとめて読むため、その列が 1 本あるだけでテーブルが丸ごと使えない状態でした。
+/// <c>time with time zone</c> のマッパーの型とドライバの実測の CLR 型（<c>DateTimeOffset</c>）の一致は、方言の型の表の
+/// 実 DB の段（<see cref="PostgreSqlDialectTypeRealDbTests"/>）が確かめる。
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
@@ -33,61 +32,6 @@ namespace QuickER.Tests.Integration.Dialects;
 public sealed class PostgreSqlColumnClrTypeIntegrationTests(PostgreSqlContainerFixture fixture)
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
-
-    /// <summary>
-    /// <c>time with time zone</c> の解決結果が、ドライバが返す CLR 型と一致する（TM4）。
-    /// </summary>
-    [Fact(
-        DisplayName = "[Integration] time with time zone はドライバの実測 CLR 型（DateTimeOffset）と一致する"
-    )]
-    public async Task Map_TimeWithTimeZone_MatchesDriverClrType()
-    {
-        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
-        await fixture.ResetSchemaAsync(Ct);
-
-        await fixture.ExecuteAsync(
-            """
-            CREATE TABLE tz_columns (
-                id integer NOT NULL PRIMARY KEY,
-                t_tz time with time zone NOT NULL,
-                t_plain time without time zone NOT NULL
-            );
-            INSERT INTO tz_columns VALUES (1, '10:30:00+07', '10:30:00');
-            """,
-            Ct
-        );
-
-        await using var conn = await fixture.OpenConnectionAsync(Ct);
-        var import = await new PostgreSqlSchemaImporter().ImportAsync(conn, Ct);
-        var declared = import
-            .Entities.Single(entity => entity.TableName == "tz_columns")
-            .Columns.ToDictionary(column => column.Name, column => column.DataType);
-
-        declared["t_tz"].Should().Be("time with time zone");
-
-        var driverTypes = new Dictionary<string, Type>(StringComparer.Ordinal);
-
-        await using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = "SELECT t_tz FROM tz_columns WHERE id = 1";
-            await using var reader = await cmd.ExecuteReaderAsync(Ct);
-
-            (await reader.ReadAsync(Ct)).Should().BeTrue();
-
-            for (var i = 0; i < reader.FieldCount; i++)
-            {
-                driverTypes[reader.GetName(i)] = reader.GetFieldType(i);
-            }
-        }
-
-        driverTypes["t_tz"].Should().Be<DateTimeOffset>();
-
-        var mapper = new PostgreSqlCSharpTypeMapper();
-        mapper.Map(declared["t_tz"]).TypeName.Should().Be("DateTimeOffset");
-
-        // 時間帯なしの time は従来どおり TimeSpan（EF Core が TimeSpan で読み書きできる）
-        mapper.Map(declared["t_plain"]).TypeName.Should().Be("TimeSpan");
-    }
 
     /// <summary>
     /// 解決後の型（<c>DateTimeOffset</c>）で、EF Core 経由の読み取りと UTC オフセットの書き込みが通る（TM4）。

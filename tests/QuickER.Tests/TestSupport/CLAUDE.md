@@ -75,15 +75,15 @@
     - Accepted は**製品・プロバイダ・ツールのスキーマの事実でエンジンを直しても埋まらない欠けだけ**。述語は 1 つの因子の組の中だけに当たる。
     - 照合は `CoverageReport.AssertGaps(CoverageGapSet, scope, SeedPlan?)` が `KnownFailureSet` の規則のまま行う。一覧に無い欠けも、一覧にあるのに網羅した組も赤。照合は既定の種の数で流したときだけ。一覧の項目が次元表の組を指していないことは、種の数に依らず宣言の誤りにする。
   - `EngineIds`（13 の ID）と `EngineDescriptor`（ID・部分・次元表・シナリオの数・ソース・守る src の領域）と、アセンブリごとの登録簿。
-    - `tests/QuickER.Tests/TestSupport/EngineRegistry.cs`：Dsl/SqliteMySql・Name/Entrances・DiagramEdit/ToolArgument・DiagramEdit/Undo。
-    - `tests/QuickER.Tests.Integration/EngineRegistry.cs`：SyncModel/Random・SyncModel/Outcomes・SyncModel/Config・SyncPlan/Fuzz・SyncPlan/CapabilityNet・SyncPlan/ShapeRows・SyncPlan/HistoryRows・GeneratedRuntime/Parity・GeneratedRuntime/ParityOutcomes・Dsl/SqlServer・Name/DdlRoundTrip。Guard は登録しない。
+    - `tests/QuickER.Tests/TestSupport/EngineRegistry.cs`：Dsl/SqliteMySql・Name/Entrances・DiagramEdit/ToolArgument・DiagramEdit/Undo・Dialect/Types。
+    - `tests/QuickER.Tests.Integration/EngineRegistry.cs`：SyncModel/Random・SyncModel/Outcomes・SyncModel/Config・SyncPlan/Fuzz・SyncPlan/CapabilityNet・SyncPlan/ShapeRows・SyncPlan/HistoryRows・GeneratedRuntime/Parity・GeneratedRuntime/ParityOutcomes・Dsl/SqlServer・Name/DdlRoundTrip・Dialect/TypesRealDb。Guard は登録しない。
   - 因子の棚卸し：`FactorInventoryGuard` は、製品の仕様の軸の全項目が、そのアセンブリの登録簿の次元表の Source に載っているか、理由つきの除外（担当のエンジン ID・区切り・空や仮置きでない理由）の**ちょうど一方**であることを検査する。
     13 の軸をどちらのアセンブリが見るかは `FactorInventoryAssignment` が決め、各ガードは自分の軸の並びが割り当てと一致することを表明する。
   - 行列の軸：`MatrixAxis<TAdapter>` は、正本の値ごとにアダプタがちょうど 1 つあるか、理由つきで外してあるかを構築時に検査する。`[MatrixAxisValue]` と `MatrixAxisGuard.DerivedClassesCover`（基底か目印のインターフェースの具象の派生と正本の照合）、`DeclaredValuesMatch`（派生の名乗る値と実際の値の照合）で固める。
     値ごとの違いはアダプタの抽象メンバーにし、アダプタの中で値を名指しして分岐しない。
-- 各エンジンの次元表・一覧・記述は、エンジンの隣の `*Dimensions.cs` に置く：`SyncModelDimensions`・`SyncModelOutcomeDimensions`・`SyncConfigDimensions`・`SyncPlanFuzzDimensions`・`BackendParityDimensions`・`NameFuzzDdlRoundTripDimensions`・`DslFuzzDimensions`・`NameFuzzDimensions`・`ToolArgumentFuzzDimensions`・`RelationshipTypeChangeDimensions`。
+- 各エンジンの次元表・一覧・記述は、エンジンの隣の `*Dimensions.cs` に置く：`SyncModelDimensions`・`SyncModelOutcomeDimensions`・`SyncConfigDimensions`・`SyncPlanFuzzDimensions`・`BackendParityDimensions`・`NameFuzzDdlRoundTripDimensions`・`DslFuzzDimensions`・`NameFuzzDimensions`・`ToolArgumentFuzzDimensions`・`RelationshipTypeChangeDimensions`・`DialectTypeDimensions`・`DialectTypeRealDbDimensions`。
 - 乱数で操作の列を作るエンジン（同期のモデル・同期計画・実装先の一致）の `Observe` は、生成器が返し終えた値と、コンストラクタで決まる公開プロパティだけを読む（乱数を引かない・生成器の中に置かない。種の指紋が守る）。
-- 行列の軸として登録したもの：同期計画の総当たりと名前の DDL の往復の方言の派生 5 つずつ（正本 `DialectNames.All`）・同期のモデルの転送経路（正本 `SyncModelTransport`・目印 `ISyncModelTransportTests`）・実装先の一致（`BackendParityAxis`＝`ParityScenario.Backends` の並びの出どころ）・簡易 DSL の実装先（`DslFuzzBackends.Names` と構成ごとの軸）。
+- 行列の軸として登録したもの：同期計画の総当たりと名前の DDL の往復の方言の派生 5 つずつ（正本 `DialectNames.All`）・同期のモデルの転送経路（正本 `SyncModelTransport`・目印 `ISyncModelTransportTests`）・実装先の一致（`BackendParityAxis`＝`ParityScenario.Backends` の並びの出どころ）・簡易 DSL の実装先（`DslFuzzBackends.Names` と構成ごとの軸）・方言の型の表のアダプタ 5 つ（`DialectTypeAxis`・正本 `DialectNames.All`）と実 DB の段の方言の派生 5 つ（`DialectTypeRealDbTestsBase`・正本 `DialectNames.All`）。
   名乗りの照合は Docker が無くても流れる（ガードの Fact はコレクションにもスキップにも入れない）。
 - 運用：
   1. 一覧に載っている組が出るようになったら赤になるので、その項目を一覧から消す。除外も同じ（次元表に載った項目は除外から消す）。
@@ -230,7 +230,7 @@
   - `CultureInvariantExportTests`：Mermaid・DBML・HTML・Excel・SVG の出力と、Mermaid・DBML・Excel の取込。
   - `CultureInvariantToolOutputTests`：MCP の要約・名前付きクエリの一覧・変更系ツールが保存する図。
   - `RegexCultureGuardTests`：src の `RegexOptions.IgnoreCase` を含むビット和に `CultureInvariant` があることとインラインの `(?i` が無いことの構文木の全数走査と、文字列リテラルの `\d`（奇数個の `\` に続く `d`）が `ECMAScript` の付いた呼び出し・属性の引数の外に無いこと。
-  - `FullWidthDigitTypeNotationTests`：全角の数字を含む型の表記を 5 方言の型カタログ・型マッパー・正規化と `SqlTypeText.IsSafe`・型トークン・長さだけの違いの判定・Mermaid の型の復元・Excel の `UQ` 番号へ流し、例外にならず数字として読まないこと。
+  - 全角の数字：`DialectTypeTableTests` の `fullwidth-*` の行が、全角の数字を含む型の表記を 5 方言の型カタログ・型マッパー・正規化と `SqlTypeText.IsSafe` へ流し、例外にならず数字として読まないことを確かめる。`FullWidthDigitTypeNotationTests` が型トークン・長さだけの違いの判定・Mermaid の型の復元・Excel の `UQ` 番号で同じことを確かめる。
   - `GeneratedCodeCultureAnalyzerTests`：ランタイム 7 本と全フィクスチャ。自己検査は、auto-generated の印のあるソースで 4 規則が出て式木の中では出ないこと。
   - `InMemoryStringMatchOrdinalTests`：値オブジェクトの有無 × カルチャで、簡易 DSL の LIKE と手書きの LINQ の前方・後方一致を SQLite の QuickER 版 Repository とインメモリで照合する。
   - `SchemaSignatureTests` の並び順の 2 件。`MockResumePromptTests` と `ClipboardImageAttachmentReaderTests` の各カルチャの日時。

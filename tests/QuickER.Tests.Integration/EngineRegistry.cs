@@ -23,5 +23,6 @@ internal static class EngineRegistry
         BackendParityOutcomeDimensions.Descriptor,
         DslFuzzDimensions.SqlServerDescriptor,
         NameFuzzDdlRoundTripDimensions.Descriptor,
+        DialectTypeRealDbDimensions.Descriptor,
     ];
 }

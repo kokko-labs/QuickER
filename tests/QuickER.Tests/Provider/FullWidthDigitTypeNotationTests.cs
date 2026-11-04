@@ -1,11 +1,5 @@
 using AwesomeAssertions;
-using QuickER.CodeGen.CSharp;
 using QuickER.Provider;
-using QuickER.Provider.MySql;
-using QuickER.Provider.Oracle;
-using QuickER.Provider.PostgreSql;
-using QuickER.Provider.Sqlite;
-using QuickER.Provider.SqlServer;
 using QuickER.Services;
 
 namespace QuickER.Tests.Provider;
@@ -21,46 +15,7 @@ namespace QuickER.Tests.Provider;
 public sealed class FullWidthDigitTypeNotationTests
 {
     private const string Fifty = "５０";
-    private const string Ten = "１０";
     private const string Two = "２";
-    private const string Three = "３";
-
-    public static TheoryData<string, string> TypesByDialect() =>
-        new()
-        {
-            { "sqlserver", $"nvarchar({Fifty})" },
-            { "sqlserver", $"decimal({Ten},{Two})" },
-            { "sqlserver", $"datetime2({Three})" },
-            { "sqlserver", $"float({Two}4)" },
-            { "mysql", $"varchar({Fifty})" },
-            { "mysql", $"decimal({Ten},{Two})" },
-            { "mysql", $"decimal({Ten})" },
-            { "oracle", $"VARCHAR2({Fifty} CHAR)" },
-            { "oracle", $"NUMBER({Ten},{Two})" },
-            { "oracle", $"TIMESTAMP({Three})" },
-            { "postgresql", $"character varying({Fifty})" },
-            { "postgresql", $"numeric({Ten},0)" },
-            { "postgresql", $"time({Three}) with time zone" },
-            { "sqlite", $"VARCHAR({Fifty})" },
-            { "sqlite", $"DECIMAL({Ten},{Two})" },
-        };
-
-    [Theory(
-        DisplayName = "全角の数字を含む型の表記は、型カタログが解析せず・型マッパーが長さと精度を読まず・正規化が書き換えず・安全な表記とみなさない"
-    )]
-    [MemberData(nameof(TypesByDialect))]
-    public void FullWidthDigits_AreNotDigits(string dialect, string type)
-    {
-        var (catalog, map, normalize) = Dialect(dialect);
-
-        catalog.TryParse(type, out _).Should().BeFalse();
-        var info = map(type);
-        info.MaxLength.Should().BeNull();
-        info.Precision.Should().BeNull();
-        info.Scale.Should().BeNull();
-        normalize(type).Should().Be(type);
-        SqlTypeText.IsSafe(type).Should().BeFalse("DB は全角の数字の長さ・精度を読めない");
-    }
 
     [Fact(
         DisplayName = "全角の数字は、型トークン・長さだけの違いの判定・Mermaid の型の復元・Excel の UQ 番号でも数字として読まない"
@@ -83,39 +38,4 @@ public sealed class FullWidthDigitTypeNotationTests
             .Should()
             .Equal(1, 12);
     }
-
-    private static (
-        ITypeCatalog Catalog,
-        Func<string, CSharpTypeInfo> Map,
-        Func<string, string> Normalize
-    ) Dialect(string dialect) =>
-        dialect switch
-        {
-            "sqlserver" => (
-                new SqlServerProvider().TypeCatalog,
-                new SqlServerCSharpTypeMapper().Map,
-                SqlServerTypeNotation.Normalize
-            ),
-            "mysql" => (
-                new MySqlProvider().TypeCatalog,
-                new MySqlCSharpTypeMapper().Map,
-                MySqlTypeNotation.Normalize
-            ),
-            "oracle" => (
-                new OracleProvider().TypeCatalog,
-                new OracleCSharpTypeMapper().Map,
-                OracleTypeNotation.Normalize
-            ),
-            "postgresql" => (
-                new PostgreSqlProvider().TypeCatalog,
-                new PostgreSqlCSharpTypeMapper().Map,
-                PostgreSqlTypeNotation.Normalize
-            ),
-            "sqlite" => (
-                new SqliteProvider().TypeCatalog,
-                new SqliteCSharpTypeMapper().Map,
-                type => type
-            ),
-            _ => throw new ArgumentOutOfRangeException(nameof(dialect), dialect, null),
-        };
 }

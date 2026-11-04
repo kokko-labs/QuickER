@@ -57,7 +57,7 @@ public class ClaudeMdReferenceTests
 
     /// <summary>期待の行・シナリオの Id の接頭辞</summary>
     internal const string RowIdPrefix =
-        "(?:plan|diff|realdb|repro|coverage|pass|graph|blob|sw|fk|rec|lww|hook|conc|replay|prop|refresh|ef|h[0-9]|interrupt|d[0-9]|n[0-9])";
+        "(?:plan|diff|realdb|repro|coverage|pass|graph|blob|sw|fk|rec|lww|hook|conc|replay|prop|refresh|ef|h[0-9]|interrupt|d[0-9]|n[0-9]|catalog|convert|format|fullwidth|import-spelling|lengthless|map|matrix|normalize|param|parse|roundtrip|safe|token)";
 
     /// <summary>中括弧の省略 <c>Prefix{A,B}Suffix</c></summary>
     private static readonly Regex BraceAbbreviation = new(

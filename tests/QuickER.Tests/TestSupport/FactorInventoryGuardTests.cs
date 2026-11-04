@@ -38,10 +38,6 @@ public sealed class FactorInventoryGuardTests
     private const string CodegenOptionReason =
         "コード生成の設定のエンジン（CodegenConfig）の次元表がまだ無く、設定の真偽は生成フィクスチャごとに固定した組み合わせと個別の生成テスト・GenerationSettingsParityTests（設定とダイアログの往復）が確かめているだけで、水準として網羅を数えていない";
 
-    /// <summary>正規型の除外の理由</summary>
-    private const string CanonicalTypeReason =
-        "正規型は CanonicalTypeTokenTests（5 方言の書き出しの表）と方言ごとの型カタログ・型マッパーの単体のテストが固定しているだけで、方言のエンジン（Dialect）の次元表がまだ無い（単体のテストをエンジンへ移すときに水準にする）";
-
     /// <summary>まだどのエンジンの次元表にも載っていない項目（軸・項目・受け持つエンジン・区切り・理由）</summary>
     private static IReadOnlyList<InventoryExclusion> Exclusions { get; } =
     [
@@ -70,38 +66,6 @@ public sealed class FactorInventoryGuardTests
             EngineIds.CodegenConfig,
             "P3",
             CodegenOptionReason
-        )),
-        .. new[]
-        {
-            "Boolean",
-            "TinyInt",
-            "SmallInt",
-            "Int32",
-            "Int64",
-            "Decimal",
-            "Float32",
-            "Float64",
-            "Money",
-            "String",
-            "AnsiString",
-            "FixedString",
-            "AnsiFixedString",
-            "Binary",
-            "FixedBinary",
-            "Date",
-            "Time",
-            "DateTime",
-            "DateTimeOffset",
-            "Guid",
-            "Xml",
-            "Json",
-            "RowVersion",
-        }.Select(member => new InventoryExclusion(
-            "CanonicalTypeKind",
-            member,
-            EngineIds.Dialect,
-            "P3",
-            CanonicalTypeReason
         )),
     ];
 

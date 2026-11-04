@@ -40,13 +40,13 @@
 - `TryFormat` の上限：numeric の精度 1〜1000・スケール -1000〜1000・小数秒の精度 6（7 以上は断らずに 6 へ丸める＝変換の結果が元の精度と違う）・varchar／char 10,485,760（bytea は上限なし）。
 - `numeric` は精度なしでスケールだけを宣言できないので、精度なし・スケールありの Decimal は書き出さない（素の `numeric` へ写すと丸めの宣言が黙って落ちる）。
 - パラメータの型解決では上限の判定だけを外す（`TryFormatParameterType`）。
-- 固定は `PostgreSqlTypeCatalogTests`（`TryFormat_Respects*Limits`・`TryFormatParameterType_IgnoresColumnLimits`・負スケール往復）・`PostgreSqlTypeLimitsIntegrationTests`。
+- 固定は `DialectTypeTableTests`（上限の対・`format-param-postgresql-*`・負のスケールの往復の行）・`PostgreSqlDialectTypeRealDbTests`（上限の対の DDL・小数秒の 6 への丸め）。
 
 ### 型マッパー
 
 - 基本型名の取り出し（`PostgreSqlCSharpTypeMapper.GetBaseType`）は括弧の部分だけを除去する。括弧より後ろを切り捨てると、PostgreSQL が括弧の後ろへ置く時間帯の語ごと落ち、`timestamp(6) with time zone`／`time(3) with time zone` の列が黙って `DateTime`／`TimeSpan` に化ける。長さ・精度は元の表記から読む。
 - ドライバ（Npgsql）が返す CLR 型へ写す：`timetz` は `DateTimeOffset`（`TimeSpan` では読み取り自体が `InvalidCastException`）・`interval`（範囲の修飾つきも）は `TimeSpan`・`cidr` は `System.Net.IPNetwork`・`inet` は `System.Net.IPAddress`（ネットマスクは落ちる＝Npgsql の既定）。文字列へ落とすと Npgsql が読めず表ごと使えない。
-- 固定は `PostgreSqlCSharpTypeMapperTests`（精度つきでも時間帯の語を落とさない・time with time zone は DateTimeOffset）・`PostgreSqlColumnClrTypeIntegrationTests`（ドライバの実測 CLR 型との一致・UTC 書き込み・EF Core の読み書き）。mutation 実証済み。
+- 固定は `DialectTypeTableTests` のマッパーの行（`map-postgresql-timestamp-precision-*`＝精度つきでも時間帯の語を落とさない・`map-postgresql-timetz-*`＝time with time zone は DateTimeOffset）・`PostgreSqlDialectTypeRealDbTests`（ドライバの実測 CLR 型との一致）・`PostgreSqlColumnClrTypeIntegrationTests`（UTC 書き込み・EF Core の読み書き）。mutation 実証済み。
 
 ## 同期スクリプト
 

@@ -4,12 +4,11 @@ using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.Sqlite;
-using QuickER.Provider.SqlServer;
 
 namespace QuickER.Tests.Provider.Sqlite;
 
 /// <summary>
-/// <see cref="SqliteProvider"/> の結線・メタデータ・接続文字列・同期スタブを検証するテストクラス。
+/// <see cref="SqliteProvider"/> の図を通した型解決・コード生成の窓口・接続文字列・同期スクリプト・同期の実行器・DB ファイルの作成を検証するテストクラス（結線とメタデータは方言の型の表）。
 /// </summary>
 public class SqliteProviderTests
 {
@@ -43,34 +42,6 @@ public class SqliteProviderTests
                 },
             ],
         };
-
-    /// <summary>SqliteProvider が識別名・表示名・既定ポート（null）・型カタログを公開することを検証する</summary>
-    [Fact(
-        DisplayName = "SqliteProvider は name / DisplayName / DefaultPort / 型カタログを公開する"
-    )]
-    public void SqliteProvider_ExposesMetadataAndDataTypes()
-    {
-        var provider = new SqliteProvider();
-
-        provider.Name.Should().Be("sqlite");
-        provider.DisplayName.Should().Be("SQLite");
-        provider.DefaultPort.Should().BeNull();
-        provider.TypeCatalog.DataTypes.Should().NotBeEmpty();
-    }
-
-    /// <summary>プロバイダのすべての機能スロットが結線されていることを検証する</summary>
-    [Fact(DisplayName = "SqliteProvider の各機能が結線されている")]
-    public void SqliteProvider_WiresUpAllComponents()
-    {
-        var provider = new SqliteProvider();
-
-        provider.SchemaImporter.Should().BeOfType<SqliteSchemaImporter>();
-        provider.TypeMapper.Should().BeOfType<SqliteCSharpTypeMapper>();
-        provider.TypeCatalog.Should().BeOfType<SqliteTypeCatalog>();
-        provider.SyncScriptBuilder.Should().BeOfType<SqliteSyncScriptBuilder>();
-        provider.SyncExecutor.Should().BeOfType<SqliteSchemaSyncExecutor>();
-        provider.DdlGenerator.Should().BeOfType<SqliteDdlGenerator>();
-    }
 
     /// <summary>プロバイダの型マッパが interface 経由で全カラムの型を解決することを検証する</summary>
     [Fact(DisplayName = "IColumnTypeMapper 経由で全カラムの型が解決される")]
@@ -176,20 +147,6 @@ public class SqliteProviderTests
 
         result.Committed.Should().BeTrue();
         result.Error.Should().BeNull();
-    }
-
-    /// <summary>レジストリに SQL Server と SQLite を登録し、両方が名前で解決できることを検証する</summary>
-    [Fact(DisplayName = "レジストリに sqlserver と sqlite の 2 プロバイダが並ぶ")]
-    public void Registry_ContainsBothProviders()
-    {
-        var registry = new DatabaseProviderRegistry([
-            new SqlServerProvider(),
-            new SqliteProvider(),
-        ]);
-
-        registry.All.Should().HaveCount(2);
-        registry.Get("sqlserver").Should().BeOfType<SqlServerProvider>();
-        registry.Get("sqlite").Should().BeOfType<SqliteProvider>();
     }
 
     /// <summary>CreateEmpty が存在しないパスに有効な空 SQLite DB ファイルを作成することを検証する</summary>

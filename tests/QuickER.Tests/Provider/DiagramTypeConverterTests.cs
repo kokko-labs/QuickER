@@ -10,23 +10,14 @@ using QuickER.Provider.SqlServer;
 namespace QuickER.Tests.Provider;
 
 /// <summary>
-/// <see cref="DiagramTypeConverter"/> の変換計画作成・適用を検証するテストクラス。
+/// <see cref="DiagramTypeConverter"/> の変換計画作成・適用のうち、偽のカタログを使う検証と、
+/// 全方言の型の選択肢を総当たりする検証を持つテストクラス。
 /// </summary>
+/// <remarks>
+/// 実在の方言の組の変換結果は方言の型の表（<c>DialectTypeRows.Convert.cs</c> の <c>convert-x-*</c>）が固定する。
+/// </remarks>
 public class DiagramTypeConverterTests
 {
-    /// <summary>from と to が参照同一なら空の計画を返すことを検証する</summary>
-    [Fact(DisplayName = "from と to が同一カタログなら空の計画を返す")]
-    public void CreatePlan_SameCatalogInstance_ReturnsEmptyPlan()
-    {
-        var catalog = new SqlServerTypeCatalog();
-        var diagram = BuildDiagram("nvarchar(100)");
-
-        var plan = DiagramTypeConverter.CreatePlan(diagram, catalog, catalog);
-
-        plan.Converted.Should().BeEmpty();
-        plan.Unconverted.Should().BeEmpty();
-    }
-
     /// <summary>変換可能な型が Converted に入り、新しい型が算出されることを検証する</summary>
     [Fact(DisplayName = "変換可能な型は Converted に入る")]
     public void CreatePlan_ConvertibleType_AddsToConverted()
@@ -93,34 +84,6 @@ public class DiagramTypeConverterTests
         diagram.Entities[0].Columns[1].DataType.Should().Be("hierarchyid");
     }
 
-    /// <summary>
-    /// SQL Server の rowversion が SQLite では BLOB（ただのバイナリ列）へ落ち、NOT NULL も解除されることを検証する。
-    /// </summary>
-    /// <remarks>
-    /// ローカル側では DB が採番しないため、同期が値を書き込むまでその列は空になる。NOT NULL のままだと
-    /// ローカルで新しい行を作れない（＝ハイブリッド構成が成立しない）ので、変換にあわせて NULL 許容へ倒す。
-    /// </remarks>
-    [Fact(DisplayName = "SQL Server の rowversion は SQLite では BLOB かつ NULL 許容へ変換される")]
-    public void CreatePlan_RowVersionToSqlite_ConvertsToNullableBlob()
-    {
-        var diagram = BuildDiagram("rowversion");
-        diagram.Entities[0].Columns[0].IsNullable = false;
-
-        var plan = DiagramTypeConverter.CreatePlan(
-            diagram,
-            new SqlServerTypeCatalog(),
-            new SqliteTypeCatalog()
-        );
-
-        plan.Converted.Should().ContainSingle();
-        plan.Converted[0].NewType.Should().Be("BLOB");
-        plan.Converted[0].MakeNullable.Should().BeTrue();
-
-        DiagramTypeConverter.Apply(diagram, plan);
-        diagram.Entities[0].Columns[0].DataType.Should().Be("BLOB");
-        diagram.Entities[0].Columns[0].IsNullable.Should().BeTrue();
-    }
-
     /// <summary>行バージョンのまま持てる方言へ変換する場合は NOT NULL を解除しないことを検証する</summary>
     /// <remarks>
     /// 判定は「変換先の型を読み直しても行バージョンのままか」で行うため、方言名では分岐しない。
@@ -141,144 +104,6 @@ public class DiagramTypeConverterTests
         plan.Converted.Should().ContainSingle();
         plan.Converted[0].NewType.Should().Be("ROWVERSION");
         plan.Converted[0].MakeNullable.Should().BeFalse();
-    }
-
-    /// <summary>元から NULL 許容の行バージョン列は「解除するもの」が無いことを検証する</summary>
-    [Fact(DisplayName = "元から NULL 許容の行バージョン列は MakeNullable が立たない")]
-    public void CreatePlan_NullableRowVersion_DoesNotFlagMakeNullable()
-    {
-        var diagram = BuildDiagram("rowversion");
-        diagram.Entities[0].Columns[0].IsNullable = true;
-
-        var plan = DiagramTypeConverter.CreatePlan(
-            diagram,
-            new SqlServerTypeCatalog(),
-            new SqliteTypeCatalog()
-        );
-
-        plan.Converted[0].MakeNullable.Should().BeFalse();
-    }
-
-    /// <summary>主キーの行バージョン列は変換に成功しても NOT NULL を解除しないことを検証する</summary>
-    /// <remarks>
-    /// DDL 生成・差分同期・列 ViewModel の 3 層が主キー列を NOT NULL へクランプするため実害は無いが、
-    /// モデル層に「NULL 許容の主キー」が一時的に載るのを避けるため、変換計画の段階で除外する。
-    /// </remarks>
-    [Fact(DisplayName = "主キーの行バージョン列は BLOB へ変換されるが MakeNullable は立たない")]
-    public void CreatePlan_PrimaryKeyRowVersionToSqlite_DoesNotFlagMakeNullable()
-    {
-        var diagram = BuildDiagram("rowversion");
-        diagram.Entities[0].Columns[0].IsNullable = false;
-        diagram.Entities[0].Columns[0].IsPrimaryKey = true;
-
-        var plan = DiagramTypeConverter.CreatePlan(
-            diagram,
-            new SqlServerTypeCatalog(),
-            new SqliteTypeCatalog()
-        );
-
-        plan.Converted.Should().ContainSingle();
-        plan.Converted[0].NewType.Should().Be("BLOB");
-        plan.Converted[0].MakeNullable.Should().BeFalse();
-
-        DiagramTypeConverter.Apply(diagram, plan);
-        diagram.Entities[0].Columns[0].DataType.Should().Be("BLOB");
-        diagram.Entities[0].Columns[0].IsNullable.Should().BeFalse();
-    }
-
-    /// <summary>SQLite の BLOB を SQL Server へ戻しても rowversion には戻らない（非可逆）ことを固定する</summary>
-    [Fact(DisplayName = "SQLite の BLOB は SQL Server へ戻すと varbinary(max) になる（非可逆）")]
-    public void CreatePlan_SqliteBlobBackToSqlServer_IsNotRowVersion()
-    {
-        var diagram = BuildDiagram("BLOB");
-
-        var plan = DiagramTypeConverter.CreatePlan(
-            diagram,
-            new SqliteTypeCatalog(),
-            new SqlServerTypeCatalog()
-        );
-
-        plan.Converted[0].NewType.Should().Be("varbinary(max)");
-    }
-
-    /// <summary>
-    /// Oracle の精度なし・スケール 0 の整数（<c>INTEGER</c> / <c>SMALLINT</c> / <c>NUMBER(*,0)</c>）は、
-    /// 精度なしの decimal を書けない方言へは 38 桁の decimal として注意つきで変換されることを検証する
-    /// </summary>
-    /// <remarks>
-    /// SQLite は精度なしの <c>DECIMAL</c> をそのまま書けるので注意を付けない（桁の上限が新しく付かない）。
-    /// </remarks>
-    [Theory(
-        DisplayName = "Oracle の精度なし・スケール 0 の整数は、精度を書く方言へ 38 桁の decimal として注意つきで変換される"
-    )]
-    [InlineData("INTEGER", "sqlserver", "decimal(38,0)", true)]
-    [InlineData("SMALLINT", "sqlserver", "decimal(38,0)", true)]
-    [InlineData("NUMBER(*,0)", "sqlserver", "decimal(38,0)", true)]
-    [InlineData("INTEGER", "postgresql", "numeric(38,0)", true)]
-    [InlineData("NUMBER(*,0)", "postgresql", "numeric(38,0)", true)]
-    [InlineData("INTEGER", "mysql", "decimal(38,0)", true)]
-    [InlineData("NUMBER(*,0)", "mysql", "decimal(38,0)", true)]
-    [InlineData("INTEGER", "sqlite", "DECIMAL", false)]
-    [InlineData("NUMBER(*,0)", "sqlite", "DECIMAL", false)]
-    public void CreatePlan_OracleUnlimitedInteger_ConvertsWithPrecisionCap(
-        string oracleType,
-        string target,
-        string expectedType,
-        bool expectedCapped
-    )
-    {
-        var diagram = BuildDiagram(oracleType);
-
-        var plan = DiagramTypeConverter.CreatePlan(
-            diagram,
-            new OracleTypeCatalog(),
-            Catalog(target)
-        );
-
-        plan.Unconverted.Should().BeEmpty();
-        var conversion = plan.Converted.Should().ContainSingle().Subject;
-        conversion.NewType.Should().Be(expectedType);
-        conversion.PrecisionCapped.Should().Be(expectedCapped);
-        conversion.MakeNullable.Should().BeFalse();
-
-        DiagramTypeConverter.Apply(diagram, plan);
-        diagram.Entities[0].Columns[0].DataType.Should().Be(expectedType);
-    }
-
-    /// <summary>
-    /// 精度なし・スケールなしの <c>NUMBER</c> と、0 以外のスケールの <c>NUMBER(*,s)</c> は 38 桁へ倒さず、
-    /// 従来どおり変換できない（または注意なしで変換する）ことを検証する
-    /// </summary>
-    [Theory(DisplayName = "Oracle の NUMBER と 0 以外のスケールの NUMBER(*,s) は 38 桁へ倒さない")]
-    [InlineData("NUMBER", "sqlserver", null)]
-    [InlineData("NUMBER", "mysql", null)]
-    [InlineData("NUMBER", "postgresql", "numeric")]
-    [InlineData("NUMBER(*,2)", "sqlserver", null)]
-    [InlineData("NUMBER(*,2)", "postgresql", null)]
-    [InlineData("NUMBER(*,2)", "mysql", null)]
-    [InlineData("NUMBER(*,2)", "sqlite", "DECIMAL")]
-    public void CreatePlan_OracleNumberWithoutIntegerScale_IsNotCapped(
-        string oracleType,
-        string target,
-        string? expectedType
-    )
-    {
-        var plan = DiagramTypeConverter.CreatePlan(
-            BuildDiagram(oracleType),
-            new OracleTypeCatalog(),
-            Catalog(target)
-        );
-
-        if (expectedType is null)
-        {
-            plan.Converted.Should().BeEmpty();
-            plan.Unconverted.Should().ContainSingle();
-            return;
-        }
-
-        var conversion = plan.Converted.Should().ContainSingle().Subject;
-        conversion.NewType.Should().Be(expectedType);
-        conversion.PrecisionCapped.Should().BeFalse();
     }
 
     /// <summary>
@@ -336,16 +161,6 @@ public class DiagramTypeConverterTests
 
         capped.Should().BePositive("Oracle の整数を精度を書く方言へ変換した組み合わせがある");
     }
-
-    private static ITypeCatalog Catalog(string dialect) =>
-        dialect switch
-        {
-            "sqlserver" => new SqlServerTypeCatalog(),
-            "postgresql" => new PostgreSqlTypeCatalog(),
-            "mysql" => new MySqlTypeCatalog(),
-            "sqlite" => new SqliteTypeCatalog(),
-            _ => throw new ArgumentOutOfRangeException(nameof(dialect)),
-        };
 
     private static ErDiagram BuildDiagram(string dataType)
     {

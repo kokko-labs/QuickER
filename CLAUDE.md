@@ -166,14 +166,14 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 
 ### 型表記
 
-- **型表記の比較は方言の `*TypeNotation.Normalize`（取込の表記）へ寄せ、差分・同期は `SyncDialectCapabilities.AreSameType` を通す**：素の比較だと同期しても消えない ALTER COLUMN が出る。ガード：`{SqlServer,PostgreSql,MySql,Oracle}TypeNotationIntegrationTests`・`MySqlTypeNotationTests`・`OracleTypeNotationTests`。→ `src/QuickER.Provider/CLAUDE.md`「型表記の比較は取込の表記へ寄せる」
-- **`SqlTypeText` は構造的なホワイトリストで、括弧引数は数値・語・`*`、列定義句の密輸を断り、値リスト型に長さの上限を掛けない**：キーワード許可集合や数値限定にすると実在の型の 1 列で図全体が止まる。ガード：`SqlTypeTextTests`・`PostGisImportIntegrationTests`。→ `src/QuickER.Provider/CLAUDE.md`「SqlTypeText の安全パターン」
-- **`TryFormat` は書き出せない型（負のスケール・長さ無し・精度なし・方言の上限超え）を false で返す**：true だと方言切替が適用で失敗するか意味の違う型を黙って作る。ガード：`CanonicalTypeTokenTests`・`LengthlessTypeFormattingTests`・各方言の `*TypeCatalogTests`。→ `src/QuickER.Provider/CLAUDE.md`「TryFormat が書き出さない型」
-- **クエリのパラメータには列の制約を当てない（可変長の長さ無しは無制限・固定長は入れない）**：巻き込むと動いているクエリが生成時エラーへ落ちる。ガード：`LengthlessTypeTokenQueryGenerationTests`・`QueryParameterTypeResolverTests`・`CSharpReverseLengthlessTokenTests`。→ `src/QuickER.Provider/CLAUDE.md`「クエリのパラメータの型解決」
-- **スケールの符号は 3 箇所同時に許し、型マッパーは負のスケールを読まない**：片肺だと取り込んだ列のトークンが読み戻せない。ガード：`PostgreSqlTypeCatalogTests`・`OracleTypeCatalogTests`・`NegativeScaleColumnGenerationTests`。→ `src/QuickER.Provider/CLAUDE.md`「スケールの符号」
-- **精度なしの Decimal を 38 桁へ読み替えるのは方言切替（`DiagramTypeConverter`）だけ**：`TryFormat` へ移すとトークン・リバース・パラメータまで黙って 38 桁へ化ける。ガード：`DiagramTypeConverterTests`・`MainViewModelTargetDbmsTests`・`CSharpReversePrecisionlessDecimalTests`・`CSharpReverseBareDecimalTests`。→ `src/QuickER.Provider/CLAUDE.md`「方言切替の精度の読み替え」
-- **型マッパーはドライバが返す CLR 型へ写す（PG の時間帯の語・timetz・inet、Oracle の LOCAL TIME ZONE と単位語、SQLite の REAL、MySQL の tinytext、SQL Server の float(n)）**：違う型だと読み取りが `InvalidCastException` で表ごと使えない。ガード：各方言の `*ColumnClrTypeIntegrationTests`・`PostgreSqlCSharpTypeMapperTests`・`FallbackTypeGenerationTests`。→ `src/QuickER.Provider/CLAUDE.md`「型マッパーはドライバの CLR 型へ写す」
-- **方言の型の上限と取込の表記**：上限の値・正規化の規則は方言の宣言。ガード：`SqlServerTypeCatalogTests`・`MySqlTypeCatalogTests`・`PostgreSqlTypeCatalogTests`・`MySqlTypeLimitsIntegrationTests`・`PostgreSqlTypeLimitsIntegrationTests`。→ 各方言の CLAUDE.md「型表記」
+- **型表記の比較は方言の `*TypeNotation.Normalize`（取込の表記）へ寄せ、差分・同期は `SyncDialectCapabilities.AreSameType` を通す**：素の比較だと同期しても消えない ALTER COLUMN が出る。ガード：`{SqlServer,PostgreSql,MySql,Oracle}TypeNotationIntegrationTests`・`DialectTypeTableTests`（正規化と同じ型の判定の行）。→ `src/QuickER.Provider/CLAUDE.md`「型表記の比較は取込の表記へ寄せる」
+- **`SqlTypeText` は構造的なホワイトリストで、括弧引数は数値・語・`*`、列定義句の密輸を断り、値リスト型に長さの上限を掛けない**：キーワード許可集合や数値限定にすると実在の型の 1 列で図全体が止まる。ガード：`DialectTypeTableTests`（安全性の行）・`SqlTypeTextTests`・`PostGisImportIntegrationTests`。→ `src/QuickER.Provider/CLAUDE.md`「SqlTypeText の安全パターン」
+- **`TryFormat` は書き出せない型（負のスケール・長さ無し・精度なし・方言の上限超え）を false で返す**：true だと方言切替が適用で失敗するか意味の違う型を黙って作る。ガード：`DialectTypeTableTests`（書き出しの行と上限の対）。→ `src/QuickER.Provider/CLAUDE.md`「TryFormat が書き出さない型」
+- **クエリのパラメータには列の制約を当てない（可変長の長さ無しは無制限・固定長は入れない）**：巻き込むと動いているクエリが生成時エラーへ落ちる。ガード：`LengthlessTypeTokenQueryGenerationTests`・`DialectTypeTableTests`（パラメータの型解決の行）・`CSharpReverseLengthlessTokenTests`。→ `src/QuickER.Provider/CLAUDE.md`「クエリのパラメータの型解決」
+- **スケールの符号は 3 箇所同時に許し、型マッパーは負のスケールを読まない**：片肺だと取り込んだ列のトークンが読み戻せない。ガード：`DialectTypeTableTests`（負のスケールの行）・`NegativeScaleColumnGenerationTests`。→ `src/QuickER.Provider/CLAUDE.md`「スケールの符号」
+- **精度なしの Decimal を 38 桁へ読み替えるのは方言切替（`DiagramTypeConverter`）だけ**：`TryFormat` へ移すとトークン・リバース・パラメータまで黙って 38 桁へ化ける。ガード：`DialectTypeTableTests`（方言切替の行）・`DiagramTypeConverterTests`・`MainViewModelTargetDbmsTests`・`CSharpReversePrecisionlessDecimalTests`・`CSharpReverseBareDecimalTests`。→ `src/QuickER.Provider/CLAUDE.md`「方言切替の精度の読み替え」
+- **型マッパーはドライバが返す CLR 型へ写す（PG の時間帯の語・timetz・inet、Oracle の LOCAL TIME ZONE と単位語、SQLite の REAL、MySQL の tinytext、SQL Server の float(n)）**：違う型だと読み取りが `InvalidCastException` で表ごと使えない。ガード：`DialectTypeTableTests`（マッパーの行）・各方言の `*DialectTypeRealDbTests`（同じ行を実 DB で流し、ドライバの `GetFieldType` と比べる）・`FallbackTypeGenerationTests`。→ `src/QuickER.Provider/CLAUDE.md`「型マッパーはドライバの CLR 型へ写す」
+- **方言の型の上限と取込の表記**：上限の値・正規化の規則は方言の宣言。ガード：`DialectTypeTableTests`（上限の対・網羅の照合）・`{MySql,PostgreSql}DialectTypeRealDbTests`（上限の対を実 DB で適用して取り込み直す）。→ 各方言の CLAUDE.md「型表記」
 
 ### 差分と同期
 

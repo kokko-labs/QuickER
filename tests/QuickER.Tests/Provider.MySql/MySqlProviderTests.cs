@@ -3,13 +3,11 @@ using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.MySql;
-using QuickER.Provider.PostgreSql;
-using QuickER.Provider.SqlServer;
 
 namespace QuickER.Tests.Provider.MySql;
 
 /// <summary>
-/// <see cref="MySqlProvider"/> の結線と、レジストリに SQL Server / PostgreSQL / MySQL の 3 プロバイダが並ぶことを検証するテストクラス。
+/// <see cref="MySqlProvider"/> を通した型解決・コード生成・接続文字列を検証するテストクラス。
 /// </summary>
 public class MySqlProviderTests
 {
@@ -43,32 +41,6 @@ public class MySqlProviderTests
                 },
             ],
         };
-
-    /// <summary>MySqlProvider が識別名・表示名・既定ポート・型カタログを公開することを検証する</summary>
-    [Fact(DisplayName = "MySqlProvider は name / DisplayName / DefaultPort / 型カタログを公開する")]
-    public void MySqlProvider_ExposesMetadataAndDataTypes()
-    {
-        var provider = new MySqlProvider();
-
-        provider.Name.Should().Be("mysql");
-        provider.DisplayName.Should().Be("MySQL");
-        provider.DefaultPort.Should().Be(3306);
-        provider.TypeCatalog.DataTypes.Should().NotBeEmpty();
-    }
-
-    /// <summary>プロバイダのすべての機能スロットが結線されていることを検証する</summary>
-    [Fact(DisplayName = "MySqlProvider の各機能が結線されている")]
-    public void MySqlProvider_WiresUpAllComponents()
-    {
-        var provider = new MySqlProvider();
-
-        provider.SchemaImporter.Should().BeOfType<MySqlSchemaImporter>();
-        provider.TypeMapper.Should().BeOfType<MySqlCSharpTypeMapper>();
-        provider.TypeCatalog.Should().BeOfType<MySqlTypeCatalog>();
-        provider.SyncScriptBuilder.Should().BeOfType<MySqlSyncScriptBuilder>();
-        provider.SyncExecutor.Should().BeOfType<MySqlSchemaSyncExecutor>();
-        provider.DdlGenerator.Should().BeOfType<MySqlDdlGenerator>();
-    }
 
     /// <summary>プロバイダの型マッパが interface 経由で全カラムの型を解決することを検証する</summary>
     [Fact(DisplayName = "IColumnTypeMapper 経由で全カラムの型が解決される")]
@@ -138,21 +110,5 @@ public class MySqlProviderTests
         );
 
         connStr.Should().Contain("Port=3306");
-    }
-
-    /// <summary>レジストリに 3 プロバイダを登録し、すべてが名前で解決できることを検証する</summary>
-    [Fact(DisplayName = "レジストリに sqlserver / postgresql / mysql の 3 プロバイダが並ぶ")]
-    public void Registry_ContainsAllThreeProviders()
-    {
-        var registry = new DatabaseProviderRegistry([
-            new SqlServerProvider(),
-            new PostgreSqlProvider(),
-            new MySqlProvider(),
-        ]);
-
-        registry.All.Should().HaveCount(3);
-        registry.Get("sqlserver").Should().BeOfType<SqlServerProvider>();
-        registry.Get("postgresql").Should().BeOfType<PostgreSqlProvider>();
-        registry.Get("mysql").Should().BeOfType<MySqlProvider>();
     }
 }
