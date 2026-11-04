@@ -35,7 +35,7 @@
 
 - `SqlServerTypeNotation.Normalize` が正本（規則は `src/QuickER.Provider/CLAUDE.md`「型表記の比較は取込の表記へ寄せる」）。`numeric(18,0)` は `numeric(18)` で返る。
 - `float(1)`〜`float(24)` は `real`、`float(25)`〜`float(53)` は `float` へ寄せる（DB は n を覚えない）。型マッパー・型カタログも同じ判定（`SqlServerTypeNotation.IsSinglePrecisionFloat`）で単精度（C# は `float`・正規型 Float32）とする。
-  - `double` にすると速い読み取りの `GetDouble` も EF Core も `InvalidCastException`（`SqlServerColumnClrTypeIntegrationTests`）。
+  - `double` にすると速い読み取りの `GetDouble` も EF Core も `InvalidCastException`（`SqlServerDialectTypeRealDbTests`）。
 - 取込は `DATETIME_PRECISION` を読み、既定の 7 は括弧を省く（読まないと `datetime2(3)` が `datetime2` で入り、同期が精度を黙って 7 へ変える）。
 - 固定は `SqlServerTypeNotationIntegrationTests`・`SqlServerDdlRoundTripIntegrationTests`（起点 DDL の表記との照合）。
 
@@ -45,7 +45,7 @@
 - 負のスケールは書き出さない（`Msg 1002`）。長さを要する型の長さ無しは書き出さない（黙って 1 文字の列になる）。
 - 精度なしの Decimal は書き出さない。素の `decimal`／`numeric` は (18,0) と読む（精度なしと読むと C# リバースが偽の警告を出し、切替も意味の違う型になる。素の decimal の列は `[DbColumnMeta("decimal(18,0)", NativeType = "decimal")]` と生成時 Info の対象）。
 - パラメータの型解決でも上限の判定を外さない（固定長の max を書かない規則と一体）。
-- 固定は `SqlServerTypeCatalogTests` の `TryFormat_Respects*Limits`・`CanonicalTypeTokenTests`。
+- 固定は `DialectTypeTableTests` の上限の行（`format-sqlserver-limit-*`）と型トークンの書き出しの行（`format-token-*`）。
 
 ## 同期スクリプト
 

@@ -1,4 +1,5 @@
 using QuickER.Tests.Gui.UndoRedo;
+using QuickER.Tests.Provider;
 using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.TestSupport;
@@ -17,5 +18,6 @@ internal static class EngineRegistry
         NameFuzzDimensions.Descriptor,
         ToolArgumentFuzzDimensions.Descriptor,
         RelationshipTypeChangeDimensions.Descriptor,
+        DialectTypeDimensions.Descriptor,
     ];
 }

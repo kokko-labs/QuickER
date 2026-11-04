@@ -3,12 +3,11 @@ using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.PostgreSql;
-using QuickER.Provider.SqlServer;
 
 namespace QuickER.Tests.Provider.PostgreSql;
 
 /// <summary>
-/// <see cref="PostgreSqlProvider"/> の結線と、レジストリに SQL Server / PostgreSQL の 2 プロバイダが並ぶことを検証するテストクラス。
+/// <see cref="PostgreSqlProvider"/> を通した型解決・コード生成・接続文字列を検証するテストクラス。
 /// </summary>
 public class PostgreSqlProviderTests
 {
@@ -42,34 +41,6 @@ public class PostgreSqlProviderTests
                 },
             ],
         };
-
-    /// <summary>PostgreSqlProvider が識別名・表示名・既定ポート・型カタログを公開することを検証する</summary>
-    [Fact(
-        DisplayName = "PostgreSqlProvider は name / DisplayName / DefaultPort / 型カタログを公開する"
-    )]
-    public void PostgreSqlProvider_ExposesMetadataAndDataTypes()
-    {
-        var provider = new PostgreSqlProvider();
-
-        provider.Name.Should().Be("postgresql");
-        provider.DisplayName.Should().Be("PostgreSQL");
-        provider.DefaultPort.Should().Be(5432);
-        provider.TypeCatalog.DataTypes.Should().NotBeEmpty();
-    }
-
-    /// <summary>プロバイダのすべての機能スロットが結線されていることを検証する</summary>
-    [Fact(DisplayName = "PostgreSqlProvider の各機能が結線されている")]
-    public void PostgreSqlProvider_WiresUpAllComponents()
-    {
-        var provider = new PostgreSqlProvider();
-
-        provider.SchemaImporter.Should().BeOfType<PostgreSqlSchemaImporter>();
-        provider.TypeMapper.Should().BeOfType<PostgreSqlCSharpTypeMapper>();
-        provider.TypeCatalog.Should().BeOfType<PostgreSqlTypeCatalog>();
-        provider.SyncScriptBuilder.Should().BeOfType<PostgreSqlSyncScriptBuilder>();
-        provider.SyncExecutor.Should().BeOfType<PostgreSqlSchemaSyncExecutor>();
-        provider.DdlGenerator.Should().BeOfType<PostgreSqlDdlGenerator>();
-    }
 
     /// <summary>プロバイダの型マッパが interface 経由で全カラムの型を解決することを検証する</summary>
     [Fact(DisplayName = "IColumnTypeMapper 経由で全カラムの型が解決される")]
@@ -139,19 +110,5 @@ public class PostgreSqlProviderTests
         );
 
         connStr.Should().Contain("Port=5432");
-    }
-
-    /// <summary>レジストリに 2 プロバイダを登録し、両方が名前で解決できることを検証する</summary>
-    [Fact(DisplayName = "レジストリに sqlserver と postgresql の 2 プロバイダが並ぶ")]
-    public void Registry_ContainsBothProviders()
-    {
-        var registry = new DatabaseProviderRegistry([
-            new SqlServerProvider(),
-            new PostgreSqlProvider(),
-        ]);
-
-        registry.All.Should().HaveCount(2);
-        registry.Get("sqlserver").Should().BeOfType<SqlServerProvider>();
-        registry.Get("postgresql").Should().BeOfType<PostgreSqlProvider>();
     }
 }

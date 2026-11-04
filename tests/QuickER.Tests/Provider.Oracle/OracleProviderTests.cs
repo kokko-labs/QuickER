@@ -3,13 +3,12 @@ using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.Oracle;
-using QuickER.Provider.PostgreSql;
-using QuickER.Provider.SqlServer;
 
 namespace QuickER.Tests.Provider.Oracle;
 
 /// <summary>
-/// <see cref="OracleProvider"/> の結線と、レジストリに SQL Server / PostgreSQL / Oracle の 3 プロバイダが並ぶことを検証するテストクラス。
+/// <see cref="OracleProvider"/> が図を通して型を解決し、コード生成と接続文字列を組めることを検証するテストクラス。
+/// 結線・メタデータ・レジストリは方言の型の表の <c>Provider_IsWired</c>（oracle）が固定する。
 /// </summary>
 public class OracleProviderTests
 {
@@ -44,34 +43,6 @@ public class OracleProviderTests
             ],
         };
 
-    /// <summary>OracleProvider が識別名・表示名・既定ポート・型カタログを公開することを検証する</summary>
-    [Fact(
-        DisplayName = "OracleProvider は name / DisplayName / DefaultPort / 型カタログを公開する"
-    )]
-    public void OracleProvider_ExposesMetadataAndDataTypes()
-    {
-        var provider = new OracleProvider();
-
-        provider.Name.Should().Be("oracle");
-        provider.DisplayName.Should().Be("Oracle");
-        provider.DefaultPort.Should().Be(1521);
-        provider.TypeCatalog.DataTypes.Should().NotBeEmpty();
-    }
-
-    /// <summary>プロバイダのすべての機能スロットが結線されていることを検証する</summary>
-    [Fact(DisplayName = "OracleProvider の各機能が結線されている")]
-    public void OracleProvider_WiresUpAllComponents()
-    {
-        var provider = new OracleProvider();
-
-        provider.SchemaImporter.Should().BeOfType<OracleSchemaImporter>();
-        provider.TypeMapper.Should().BeOfType<OracleCSharpTypeMapper>();
-        provider.TypeCatalog.Should().BeOfType<OracleTypeCatalog>();
-        provider.SyncScriptBuilder.Should().BeOfType<OracleSyncScriptBuilder>();
-        provider.SyncExecutor.Should().BeOfType<OracleSchemaSyncExecutor>();
-        provider.DdlGenerator.Should().BeOfType<OracleDdlGenerator>();
-    }
-
     /// <summary>プロバイダの型マッパが interface 経由で全カラムの型を解決することを検証する</summary>
     [Fact(DisplayName = "IColumnTypeMapper 経由で全カラムの型が解決される")]
     public void TypeMapper_ResolvesAllColumnsViaInterface()
@@ -101,23 +72,6 @@ public class OracleProviderTests
         result.HasErrors.Should().BeFalse();
         result.Files.Should().NotBeEmpty();
         result.Files[0].Content.Should().Contain("namespace Sample.Domain");
-    }
-
-    /// <summary>NUMBER(10) の PK が C# の int として生成されることを検証する（型マッパの主要規則）</summary>
-    [Fact(DisplayName = "TypeMapper は NUMBER(10) を int、VARCHAR2 を string に解決する")]
-    public void TypeMapper_MapsNumberAndVarchar()
-    {
-        var mapper = new OracleCSharpTypeMapper();
-
-        mapper.Map("NUMBER(10)").TypeName.Should().Be("int");
-        mapper.Map("NUMBER(1)").TypeName.Should().Be("bool");
-        mapper.Map("NUMBER(19)").TypeName.Should().Be("long");
-        mapper.Map("NUMBER(10,2)").TypeName.Should().Be("decimal");
-        mapper.Map("VARCHAR2(100)").TypeName.Should().Be("string");
-        mapper.Map("VARCHAR2(100)").MaxLength.Should().Be(100);
-        mapper.Map("RAW(16)").TypeName.Should().Be("byte[]");
-        mapper.Map("TIMESTAMP WITH TIME ZONE").TypeName.Should().Be("DateTimeOffset");
-        mapper.Map("DATE").TypeName.Should().Be("DateTime");
     }
 
     /// <summary>接続文字列に EZConnect 形式の DataSource / User Id が反映されることを検証する</summary>
@@ -162,21 +116,5 @@ public class OracleProviderTests
         );
 
         connStr.Should().Contain("localhost:1521/XEPDB1");
-    }
-
-    /// <summary>レジストリに 3 プロバイダを登録し、すべてが名前で解決できることを検証する</summary>
-    [Fact(DisplayName = "レジストリに sqlserver / postgresql / oracle の 3 プロバイダが並ぶ")]
-    public void Registry_ContainsThreeProviders()
-    {
-        var registry = new DatabaseProviderRegistry([
-            new SqlServerProvider(),
-            new PostgreSqlProvider(),
-            new OracleProvider(),
-        ]);
-
-        registry.All.Should().HaveCount(3);
-        registry.Get("sqlserver").Should().BeOfType<SqlServerProvider>();
-        registry.Get("postgresql").Should().BeOfType<PostgreSqlProvider>();
-        registry.Get("oracle").Should().BeOfType<OracleProvider>();
     }
 }

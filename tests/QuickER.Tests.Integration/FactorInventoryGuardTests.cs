@@ -42,10 +42,6 @@ public sealed class FactorInventoryGuardTests
         ),
     ];
 
-    /// <summary>型の表記の正規化の除外の理由</summary>
-    private const string TypeNotationReason =
-        "型の表記の正規化は値（bool・列挙）でなく方言ごとの関数で、能力の網の次元表の固定の水準にできない。方言ごとの規則は同期計画の期待の行（SyncPlanExpectationRows.DiffTypes の diff-type-normalized-per-dialect-*）・方言ごとの *TypeNotationTests と実 DB の *TypeNotationIntegrationTests（閉包）が固定しているだけで、方言のエンジン（Dialect）の次元表がまだ無い（区切り P3-5 で方言の単体のテストをエンジンへ移すときに、正規化の規則の種類を水準にする）";
-
     /// <summary>取込の警告の種別の除外の理由</summary>
     private const string ImportWarningReason =
         "取込の警告の種別は SchemaImportWarningTextTests（全種別の文言）・SchemaImportWarningKindMapTests（扱いの表との写像）と方言ごとの *ImportFidelityIntegrationTests の単体のテストが固定しているだけで、方言のエンジン（Dialect）の次元表がまだ無い（単体のテストをエンジンへ移すときに水準にする）";
@@ -53,13 +49,6 @@ public sealed class FactorInventoryGuardTests
     /// <summary>まだどのエンジンの次元表にも載っていない項目（軸・項目・受け持つエンジン・区切り・理由）</summary>
     private static IReadOnlyList<InventoryExclusion> Exclusions { get; } =
     [
-        new InventoryExclusion(
-            "SyncDialectCapabilities",
-            "NormalizeTypeNotation",
-            EngineIds.Dialect,
-            "P3",
-            TypeNotationReason
-        ),
         .. new[]
         {
             "DomainTypeFlattened",

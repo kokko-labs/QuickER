@@ -1,163 +1,31 @@
-using System;
-using System.Linq;
 using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider;
-using QuickER.Provider.MySql;
-using QuickER.Provider.Oracle;
-using QuickER.Provider.PostgreSql;
 using QuickER.Provider.SqlServer;
 
 namespace QuickER.Tests.Provider;
 
 /// <summary>
 /// 「長さを要する型の長さ無しは書き出せない」（<see cref="ITypeCatalog.TryFormat"/> が <c>false</c>）ことの
-/// 波及先を、呼び出し元ごとに固定するテストクラス。
+/// 波及先のうち、コード生成の出力（verbatim 併記）を固定するテストクラス。
 /// </summary>
 /// <remarks>
 /// <para>
 /// <see cref="ITypeCatalog.TryFormat"/> の呼び出し元は 4 つで、長さ無しの正規型に対する振る舞いは次のとおり:
 /// </para>
 /// <list type="bullet">
-///   <item><see cref="DiagramTypeConverter"/>: 対象 DBMS 切替の<b>変換不能一覧</b>へ載る（当クラス）</item>
+///   <item><see cref="DiagramTypeConverter"/>: 対象 DBMS 切替の<b>変換不能一覧</b>へ載る（方言の型の表の <c>lengthless-convert-*</c>）</item>
 ///   <item><see cref="CanonicalTypeTokenAttacher"/>: 書き戻せないので<b>verbatim 併記</b>が付く（当クラス）</item>
 ///   <item><c>CSharpReverseParser</c>: 警告つきで<b>トークン文字列をそのまま列の型に採る</b>（CodeReverse 側のテスト）</item>
 ///   <item><c>QueryParameterTypeResolver</c>: パラメータは列を作らないので<b>「無制限」として解決し直す</b>（CodeGen 側のテスト）</item>
 /// </list>
 /// <para>
-/// 種別ごとの可否そのものは <c>CanonicalTypeTokenTests</c> の 5 方言表が正本。
+/// 種別ごとの可否そのものは方言の型の表（<c>DialectTypeRows.Token.cs</c> の <c>format-token-*</c>）が正本。
 /// </para>
 /// </remarks>
 public class LengthlessTypeFormattingTests
 {
-    /// <summary>
-    /// 固定長へ長さ <c>-1</c>（max）を渡すと、方言の整形は「実在しない表記」または「別の種別の表記」を
-    /// <c>true</c> で返す——<c>QueryParameterTypeResolver</c> のフォールバックが可変長 3 種別に限られる理由。
-    /// </summary>
-    /// <remarks>
-    /// <c>FormatLength</c> 系は長さ <c>-1</c> に対して機械的に <c>(max)</c> を付ける（または LOB 型へ倒す）ため、
-    /// 「長さが無いなら無制限として読み直す」を固定長まで広げると、固定長が可変長 LOB に化けた表記が生まれる
-    /// （SQL Server と Oracle は固定長の max を書き出さない＝下のテスト）。
-    /// ここはその実測を固定して、フォールバックの対象種別を安易に広げられないようにするためのもの。
-    /// </remarks>
-    [Theory(
-        DisplayName = "固定長へ max（-1）を渡すと実在しない／別種別の表記が返る（対象外の根拠）"
-    )]
-    [InlineData("MySql", CanonicalTypeKind.FixedString, "longtext")]
-    [InlineData("MySql", CanonicalTypeKind.FixedBinary, "longblob")]
-    public void TryFormat_FixedLengthWithMax_ProducesUnusableText(
-        string dialect,
-        CanonicalTypeKind kind,
-        string expected
-    )
-    {
-        ITypeCatalog catalog = dialect switch
-        {
-            "SqlServer" => new SqlServerTypeCatalog(),
-            "MySql" => new MySqlTypeCatalog(),
-            "Oracle" => new OracleTypeCatalog(),
-            _ => throw new ArgumentOutOfRangeException(nameof(dialect)),
-        };
-
-        catalog
-            .TryFormat(new CanonicalType(kind, Length: -1), out var nativeType)
-            .Should()
-            .BeTrue();
-        nativeType.Should().Be(expected);
-    }
-
-    /// <summary>
-    /// SQL Server と Oracle は固定長の max（-1）を書き出さない＝<c>nchar(max)</c> のような存在しない表記や、
-    /// 1 文字の列になる素の <c>NCHAR</c> / <c>CHAR</c> を返さず、対象 DBMS 切替の変換不能一覧に載せる
-    /// （上限を超える長さと同じ扱い）。Oracle の固定長バイナリの max は <c>BLOB</c> へ写せるので対象外。
-    /// </summary>
-    [Theory(DisplayName = "SQL Server と Oracle は固定長の文字列の max（-1）を書き出さない")]
-    [InlineData("SqlServer", CanonicalTypeKind.FixedString)]
-    [InlineData("SqlServer", CanonicalTypeKind.AnsiFixedString)]
-    [InlineData("SqlServer", CanonicalTypeKind.FixedBinary)]
-    [InlineData("Oracle", CanonicalTypeKind.FixedString)]
-    [InlineData("Oracle", CanonicalTypeKind.AnsiFixedString)]
-    public void TryFormat_FixedLengthWithMax_IsNotFormattable(
-        string dialect,
-        CanonicalTypeKind kind
-    )
-    {
-        ITypeCatalog catalog =
-            dialect == "Oracle" ? new OracleTypeCatalog() : new SqlServerTypeCatalog();
-
-        catalog.TryFormat(new CanonicalType(kind, Length: -1), out _).Should().BeFalse();
-    }
-
-    /// <summary>PostgreSQL の長さ無し <c>varchar</c> 1 列だけを持つ図を作る</summary>
-    private static (ErDiagram Diagram, Guid ColumnId) BuildLengthlessVarcharDiagram()
-    {
-        var column = new Column
-        {
-            Name = "memo",
-            DataType = "varchar",
-            IsNullable = true,
-        };
-        var entity = new Entity { TableName = "notes", Columns = { column } };
-
-        return (new ErDiagram { Entities = { entity } }, column.Id);
-    }
-
-    /// <summary>
-    /// PostgreSQL の長さ無し <c>varchar</c> は、長さを要する 3 方言への切替で変換不能一覧に載る。
-    /// </summary>
-    /// <remarks>
-    /// PostgreSQL では長さ無し <c>varchar</c> が正当な宣言（上限なしの可変長）で、実 DB の取込がそのまま
-    /// 持ち帰る。これを黙って <c>varchar</c> / <c>VARCHAR2</c> として書き出すと、SQL Server は長さ 1 の列を作り
-    /// MySQL / Oracle は構文エラーになるため、切替前の一覧で名指しするのが正しい。
-    /// </remarks>
-    [Theory(
-        DisplayName = "長さ無し varchar の図は SQL Server / MySQL / Oracle への切替で変換不能一覧に載る"
-    )]
-    [InlineData("SqlServer")]
-    [InlineData("MySql")]
-    [InlineData("Oracle")]
-    public void CreatePlan_LengthlessVarchar_IsUnconverted(string targetDialect)
-    {
-        var (diagram, columnId) = BuildLengthlessVarcharDiagram();
-
-        ITypeCatalog target = targetDialect switch
-        {
-            "SqlServer" => new SqlServerTypeCatalog(),
-            "MySql" => new MySqlTypeCatalog(),
-            "Oracle" => new OracleTypeCatalog(),
-            _ => throw new ArgumentOutOfRangeException(nameof(targetDialect)),
-        };
-
-        var plan = DiagramTypeConverter.CreatePlan(diagram, new PostgreSqlTypeCatalog(), target);
-
-        plan.Converted.Should().BeEmpty();
-        var unconverted = plan.Unconverted.Should().ContainSingle().Subject;
-        unconverted.ColumnId.Should().Be(columnId);
-        unconverted.TableName.Should().Be("notes");
-        unconverted.ColumnName.Should().Be("memo");
-        unconverted.OldType.Should().Be("varchar");
-        unconverted.NewType.Should().BeNull();
-    }
-
-    /// <summary>長さを与えれば同じ図が 3 方言とも変換できる（長さ無しだけを弾いていることの対照）</summary>
-    [Fact(DisplayName = "長さ付き varchar(30) は SQL Server への切替で従来どおり変換される")]
-    public void CreatePlan_VarcharWithLength_IsConverted()
-    {
-        var (diagram, _) = BuildLengthlessVarcharDiagram();
-        diagram.Entities[0].Columns[0].DataType = "varchar(30)";
-
-        var plan = DiagramTypeConverter.CreatePlan(
-            diagram,
-            new PostgreSqlTypeCatalog(),
-            new SqlServerTypeCatalog()
-        );
-
-        plan.Unconverted.Should().BeEmpty();
-        // PostgreSQL の varchar は Unicode 可変長＝SQL Server では nvarchar
-        plan.Converted.Should().ContainSingle().Which.NewType.Should().Be("nvarchar(30)");
-    }
-
     /// <summary>
     /// 長さ無しの文字列列には <c>[DbColumnMeta]</c> の verbatim 併記（<c>NativeType</c>）が付く。
     /// </summary>

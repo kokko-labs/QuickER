@@ -98,6 +98,26 @@ public sealed class MatrixAxisGuardTests
         );
 
     [Fact(
+        DisplayName = "方言の型の表の実 DB の段の派生クラスは、方言の名前の正本と一対一に対応する"
+    )]
+    public void DialectTypeRealDbDialects_CoverDialectNames() =>
+        MatrixAxisGuard.DerivedClassesCover(
+            typeof(DialectTypeRealDbTestsBase),
+            DialectTypeRealDbTestsBase.DialectAxis,
+            DialectNames.All
+        );
+
+    [Fact(
+        DisplayName = "方言の型の表の実 DB の段の派生クラスが名乗る方言は、プロバイダの名前に一致する（Docker なし）"
+    )]
+    public void DialectTypeRealDbDialects_DeclareTheirRealDialect() =>
+        MatrixAxisGuard.DeclaredValuesMatch(
+            typeof(DialectTypeRealDbTestsBase),
+            DialectTypeRealDbTestsBase.DialectAxis,
+            type => WithInstance<DialectTypeRealDbTestsBase, string>(type, test => test.DialectName)
+        );
+
+    [Fact(
         DisplayName = "同期のモデルベーステストのクラスは、転送経路の正本（SyncModelTransport）と一対一に対応する"
     )]
     public void SyncModelTransports_CoverTransports() =>

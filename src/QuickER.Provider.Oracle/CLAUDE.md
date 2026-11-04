@@ -41,7 +41,7 @@
 - `OracleTypeCatalog.TryParseScaleArg` は符号を許す 3 箇所の 1 つ（`src/QuickER.Provider/CLAUDE.md`「スケールの符号」）。`OracleTypeCatalog.TryParseNumber` は `scale is not null and not 0` で Decimal 側へ倒す（`is > 0` だと `NUMBER(10,-2)` が Int32 に化ける）。
 - 精度なし・スケールありの `NUMBER(*,s)` を書き出せるのは Oracle だけ。`*` は 38 ではない（実 Oracle で `NUMBER(*,2)` が 39 桁の整数を受けた）。
 - `TryFormat` の上限：`MAX_STRING_SIZE = STANDARD` の値（NVARCHAR2 2000・VARCHAR2 4000・NCHAR 1000・CHAR／RAW 2000）・NUMBER の精度 38・スケール -84〜127・TIMESTAMP の精度 9。接続先の設定を知らないので EXTENDED の DB でも同じ上限（安全側）。長さ無しの長さを要する型は書き出さない（構文エラー）。パラメータの型解決でも上限を外さない。
-- 固定は `OracleTypeCatalogTests`（`TryFormat_Respects*Limits`・負スケール往復）・`OracleTypeNotationTests`・`OracleTypeNotationIntegrationTests`。
+- 固定は `DialectTypeTableTests`（上限の対・負のスケールの往復・正規化の行 `normalize-oracle-*`）・`OracleTypeNotationIntegrationTests`。
 
 ### 型マッパー
 
@@ -50,7 +50,7 @@
 - `INTEGER`／`SMALLINT` は `NUMBER(*,0)` と同じ `decimal`（ODP.NET は decimal で返す）。
 - `MapNumber` は `scale is > 0` で判定している。今は `PrecisionScaleRegex` が負のスケールに一致しないので害は無いが、正規表現に符号を足すと `NUMBER(10,-2)` が `int` へ落ちるので同時に直す。
 - 既知の残件：`NUMBER(*,s)` の `*` を読まず、値オブジェクトの小数の検証は付かない（直すにはテンプレートとランタイムの規則まで要る）。
-- 固定は `OracleCSharpTypeMapperTests`（`Map_AnsiInteger_IsDecimalLikeNumberStarZero`）・`OracleColumnClrTypeIntegrationTests`。mutation 実証済み。
+- 固定は `DialectTypeTableTests` のマッパーの行（`map-oracle-ansi-integer-*`）・`OracleDialectTypeRealDbTests`（ドライバの型と取込の `NUMBER(*,0)`）。mutation 実証済み。
 
 ## 同期スクリプト
 
@@ -75,7 +75,7 @@
 
 - DDL は暗黙コミットされる（`TransactionalDdl` が偽）。
 - 外部キーの `ON UPDATE` と `ON DELETE SET DEFAULT` を持たない。DDL・同期は注意コメントを出して句を省き（`OracleReferentialAction.AppendNotes`＝DDL・同期の共有）、比較は実効値へ畳む（畳まないと既定の追加だけで ORA-02275）。
-  - 固定は `OracleTypeNotationIntegrationTests.UnsupportedReferentialActions_LeaveNoForeignKeyDiff`・`OracleTypeNotationTests` の配線テスト・`Oracle{DdlGenerator,SyncScriptBuilder}Tests` の ON DELETE SET DEFAULT の注記。
+  - 固定は `OracleTypeNotationIntegrationTests.UnsupportedReferentialActions_LeaveNoForeignKeyDiff`・`OracleTypeNotationTests.Provider_WiresNormalizationAndActionFolding`（参照アクションの畳み込みの配線）・`Oracle{DdlGenerator,SyncScriptBuilder}Tests` の ON DELETE SET DEFAULT の注記。
 - 主キーと同じ列集合の一意制約を作れない（ORA-02261）。DB にある一意制約と同じ列へ主キーを付け替える同期は、その一意制約を暗黙に外して名指しする（`src/QuickER.Provider/CLAUDE.md`「計算列と主キーと同じ列集合の一意制約」）。固定は同期計画の総当たりの行 `oracle-100-111-move-pk-onto-unique`・`oracle-move-pk-onto-referenced-unique`。
 - 既定値のある列の型の種類の変更は警告する（実 Oracle の行 `realdb-oracle-column-type-kind-change-with-default-warns`）。
 - 列の変更では外部キーを外し直さない。外部キーの両端は同じ文字列型の長さだけの違いを許す（単位語 CHAR／BYTE は両端で同じこと）。固定は実 Oracle の行 `realdb-oracle-pk-change-with-string-length-only-fk-keeps-fk`。

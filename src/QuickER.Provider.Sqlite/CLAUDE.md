@@ -44,7 +44,7 @@
   - 判定は `SqliteTypeAffinity.IsReal`（SQLite の判定順 INT → CHAR/CLOB/TEXT → BLOB → REAL/FLOA/DOUB）を型カタログと型マッパーが共有する（写しを作らない）。
   - `TryFormat` は Float32→`REAL`・Float64→`FLOAT` のまま据え置くので、`REAL` の列は型トークンで `FLOAT` へ畳まれ、verbatim 併記（`NativeType = "REAL"`）と生成時 Info の対象になる。
 - `DECIMAL` は NUMERIC アフィニティの宣言でしかなく丸めの単位を持たないので、負のスケールは書き出さない。精度なしの Decimal は `DECIMAL` のまま。
-- 固定は `SqliteRealColumnGenerationTests`・`SqliteColumnClrTypeIntegrationTests`・`SqliteCSharpTypeMapperTests`／`SqliteTypeCatalogTests` の REAL アフィニティの表。mutation 実証済み。
+- 固定は `SqliteRealColumnGenerationTests`・`SqliteDialectTypeRealDbTests`・`DialectTypeTableTests` の REAL アフィニティの行（`map-sqlite-real-affinity-*`・`roundtrip-sqlite-real-affinity-*`）。mutation 実証済み。
 
 ## 同期
 

@@ -45,16 +45,6 @@ public class SqlServerProviderTests
         };
     }
 
-    /// <summary>SqlServerProvider が識別名・型カタログを公開することを検証する</summary>
-    [Fact(DisplayName = "SqlServerProvider は name と型カタログを公開する")]
-    public void SqlServerProvider_ExposesNameAndDataTypes()
-    {
-        var provider = new SqlServerProvider();
-
-        provider.Name.Should().Be("sqlserver");
-        provider.TypeCatalog.DataTypes.Should().NotBeEmpty();
-    }
-
     /// <summary>プロバイダの型マッパが interface 経由で全カラムの型を解決することを検証する</summary>
     [Fact(DisplayName = "IColumnTypeMapper 経由で全カラムの型が解決される")]
     public void TypeMapper_ResolvesAllColumnsViaInterface()

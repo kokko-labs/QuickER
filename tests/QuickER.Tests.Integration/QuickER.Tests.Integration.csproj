@@ -141,6 +141,18 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!--
+      方言の型の表（行・アダプタ・実行部・次元表。実体は QuickER.Tests の Provider）。実 DB の段（Dialects/DialectTypeRealDb*）が
+      同じ行のうち実 DB の印のあるものを流す（行と期待は 1 か所で持つ）。単体の Theory（DialectTypeTableTests）はリンクしない
+    -->
+    <Compile
+      Include="..\QuickER.Tests\Provider\DialectType*.cs"
+      Exclude="..\QuickER.Tests\Provider\DialectTypeTableTests.cs"
+      LinkBase="Provider"
+    />
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
 </Project>

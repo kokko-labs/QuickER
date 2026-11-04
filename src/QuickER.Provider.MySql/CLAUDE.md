@@ -29,7 +29,7 @@
 ### 取込の表記の正規化
 
 - `MySqlTypeNotation.Normalize` が正本。`decimal(12)` は `decimal(12,0)`、`datetime(0)`／`time(0)`／`timestamp(0)` は素の綴りで返る。
-- 固定は `MySqlTypeNotationTests` の表・`MySqlTypeNotationIntegrationTests` の閉包・同期計画の行 `mysql-77-respell-datetime`。mutation 実証済み。
+- 固定は `DialectTypeTableTests` の正規化の行（`normalize-mysql-*`）・`MySqlTypeNotationIntegrationTests` の閉包・同期計画の行 `mysql-77-respell-datetime`。mutation 実証済み。
 
 ### 型カタログと型マッパー
 
@@ -39,7 +39,7 @@
 - 精度なしの Decimal は書き出さない。素の `decimal`／`numeric` は (10,0) と読む。
 - パラメータの型解決では上限の判定だけを外す（`TryFormatParameterType`）。
 - 型マッパーは `tinytext` を `string` へ写す（フォールバックの型にしない）。
-- 固定は `MySqlTypeCatalogTests`（`TryFormat_Respects*Limits`・`TryFormatParameterType_IgnoresColumnLimits`）・`MySqlTypeLimitsIntegrationTests`・`MySqlCSharpTypeMapperTests.Map_TinyText_IsStringWithoutFallback`・`MySqlColumnClrTypeIntegrationTests.Map_TinyTextAndTinyBlob_MatchDriverClrTypes`。mutation 実証済み。
+- 固定は `DialectTypeTableTests`（上限の対・`format-param-mysql-*`・`map-mysql-tinytext-string-without-fallback`）・`MySqlDialectTypeRealDbTests`（上限の対の DDL・tinytext / tinyblob のドライバの型）。mutation 実証済み。
 
 ## 識別子と説明の文字
 

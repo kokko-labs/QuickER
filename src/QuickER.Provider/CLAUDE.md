@@ -150,19 +150,19 @@
   - 型は列定義の途中へ補間されるので、`int NOT NULL` や `int AS (price)` は構文エラーにならず図の宣言と静かに食い違う。
 - 長さの上限 200 は値リスト型（MySQL の `enum`／`set`）に掛けない（十数個の値の実在の enum で超え、その 1 列のせいで図全体が止まる）。
   - `IsSafe` の順は「前後の空白の拒否 → 値リストなら true → 長さ上限 → 安全パターン＋句の密輸判定」。`ValueListTypePattern` は線形の正規表現なので長さで先に切らなくてよい。
-- 固定は `SqlTypeTextTests`（5 方言カタログの全表記・取込の実在表記の全数照合・PostGIS の表記・`NUMBER(*,2)`・`integer[][]`・句の密輸・長い enum・型を書き出さない表の削除）と `PostGisImportIntegrationTests`（実 PostGIS コンテナで取込→図全体の DDL 生成→再適用）。mutation 実証済み。
+- 固定は `DialectTypeTableTests`（安全性の行 `safe-*`＝取込の実在表記の全数照合・PostGIS の表記・`NUMBER(*,2)`・`integer[][]`・句の密輸、5 方言カタログの全表記の `catalog-safe-all-data-types`）・`SqlTypeTextTests`（長い enum・DDL と同期の入口・型を書き出さない表の削除）と `PostGisImportIntegrationTests`（実 PostGIS コンテナで取込→図全体の DDL 生成→再適用）。mutation 実証済み。
 
 ### TryFormat が書き出さない型
 
 - `TryFormat` が true を返すと、対象 DBMS の切替が「DDL の適用で失敗するか意味の違う型」を変換済みとして黙って作る。書き出せない型は false を返して変換不能一覧に載せる。読む側（`TryParse`）と書く側は対で考える。
 - 方言をまたぐ規則は次の 4 つ。各方言の上限の値は各方言の CLAUDE.md「型表記」。
-  - 負のスケールは PostgreSQL・Oracle だけが書き出す（ほかの 3 方言の `TryFormat` は `Scale < 0` で false）。固定は `CanonicalTypeTokenTests.NegativeScale_IsFormattableOnlyByPostgreSqlAndOracle`。
+  - 負のスケールは PostgreSQL・Oracle だけが書き出す（ほかの 3 方言の `TryFormat` は `Scale < 0` で false）。固定は `DialectTypeTableTests` の `format-token-negative-scale-decimal`（5 方言）。
   - 長さを要する型（`CanonicalTypeToken.HasLengthArgument` が真の種別）で `Length` が null の正規型は、SQL Server・MySQL・Oracle が書き出さない（PostgreSQL・SQLite は長さ無しが正当）。種別の集合は `CanonicalTypeToken.LengthKinds` が単一の正本で、方言側へ書き写さない。
   - 精度なし・スケールありの Decimal（`decimal(*,s)`）は Oracle だけが書き出す。精度なしの Decimal(null,null) は SQL Server・MySQL が書き出さない。
   - 方言の上限を超える長さ・精度は書き出さない（SQL Server でよく使う `nvarchar(4000)` が Oracle の `NVARCHAR2(4000)` になると ORA-00910）。
 - 長さ無しの副作用 2 つは受け入れる：`CanonicalTypeTokenAttacher` が verbatim 併記を付ける（往復は保たれる）・`CSharpReverseParser` が警告つきでトークン文字列を列の型に採る。
 - 型トークンは `decimal(*,s)` で精度なしを運ぶ（`decimal(*)` は拒否）。スケールを落として `decimal` と刻むと、C# リバースで素の `NUMBER` へ戻り整数の制約が消える。`*` は 38 ではないので、`TryFormat`・型トークン・C# リバース・クエリのパラメータで Decimal(38,s) へ読み替えない。
-- 固定は `CanonicalTypeTokenTests`（5 方言 × 種別の表）・`CanonicalTypeTokenTests.PrecisionlessScaledDecimal_IsFormattableOnlyByOracle`・`LengthlessTypeFormattingTests`・`CSharpReverseLengthlessTokenTests`・`CSharpReversePrecisionlessDecimalTests`・`CSharpReverseBareDecimalTests`・各方言の `*TypeCatalogTests` の `TryFormat_Respects*Limits`・`{MySql,PostgreSql}TypeLimitsIntegrationTests`。mutation 実証済み。
+- 固定は `DialectTypeTableTests`（5 方言 × 種別の書き出しの行 `matrix-format-*`・`format-token-precisionless-scaled-decimal`・長さ無しの `format-token-lengthless-*`・各方言の上限の対〔網羅の照合が、上限を持つ種類 × 方言ごとに「ちょうど」と「1 つ超え」を必須にする〕）・`LengthlessTypeFormattingTests`（長さ無しの verbatim 併記）・`CSharpReverseLengthlessTokenTests`・`CSharpReversePrecisionlessDecimalTests`・`CSharpReverseBareDecimalTests`・`{MySql,PostgreSql}DialectTypeRealDbTests`（上限の対を実 DB で適用して取り込み直す）。mutation 実証済み。
 
 ### クエリのパラメータの型解決
 
@@ -171,7 +171,7 @@
   - 固定長 3 種別を同じフォールバックへ入れない。`FormatLength(-1)` は機械的に `(max)` を付けるので、SQL Server が実在しない `nchar(max)` を返し、Oracle は長さ無しの `NCHAR`、MySQL は固定長が `longtext` に化ける（実測）。
 - 列の上限は `ITypeCatalog.TryFormatParameterType`（既定は `TryFormat`）で外す。MySQL・PostgreSQL だけが上限の判定を外し、長さ無し・負のスケール・精度なしの規則は残す。SQL Server・Oracle は上限の判定が固定長の max を書かない規則と一体なので分けない。
   - 外すと、いま解決できている `string(20000)`（MySQL）・`decimal(1001,0)`（PostgreSQL）のトークンが生成時エラーへ落ちる。
-- 固定は `LengthlessTypeTokenQueryGenerationTests`・`{MySql,PostgreSql}TypeCatalogTests.TryFormatParameterType_IgnoresColumnLimits`・`QueryParameterTypeResolverTests.Resolve_TokensBeyondColumnLimits_ResolveLikeTokensWithinLimits`。mutation 実証済み。
+- 固定は `LengthlessTypeTokenQueryGenerationTests`・`DialectTypeTableTests`（パラメータの書き出しの行 `format-param-*` と型解決の行 `param-*`）。mutation 実証済み。
 
 ### スケールの符号
 
@@ -181,7 +181,7 @@
   - 値オブジェクトの桁数検証を付けないのは、負のスケールが「DB に丸めさせる」ために書く型だから（重大度も Info）。
   - 型マッパーへ符号を足すなら、Oracle の `MapNumber` も同時に直す（`src/QuickER.Provider.Oracle/CLAUDE.md`「型表記」）。
   - 検出は型名を見ず、括弧の第 2 引数が負であることだけで判定する。
-- 固定は `PostgreSqlTypeCatalogTests`／`OracleTypeCatalogTests` の負スケール往復・`CanonicalTypeTokenTests` の `decimal(10,-2)`・`NegativeScaleColumnGenerationTests`。mutation 実証済み。
+- 固定は `DialectTypeTableTests`（PostgreSQL・Oracle の負のスケールの解析と往復の行・型トークンの `decimal(10,-2)` の行）・`NegativeScaleColumnGenerationTests`。mutation 実証済み。
 
 ### 方言切替の精度の読み替え
 
@@ -189,12 +189,12 @@
 - `DiagramTypeConverter.CreatePlan` は、スケールが 0 の精度なしの Decimal（Oracle の `INTEGER`／`SMALLINT`／`NUMBER(*,0)`）を移行先が `TryFormat` できないときに限り、`DiagramTypeConverter.CappedPrecision`（38）桁の Decimal として書き出し直し、`ColumnTypeConversion.PrecisionCapped` を立てる（SQL Server・MySQL は `decimal(38,0)`・PostgreSQL は `numeric(38,0)`・SQLite は `DECIMAL` のままで印なし）。
   - 0 以外のスケールの `NUMBER(*,s)` と精度もスケールも無い `NUMBER` には桁を足さない。
   - GUI の切替は印の列を確認ダイアログの「注意つきで変換した列」の節（`TypeConversion_PrecisionCappedHeader`・変換できない列の節の次）で名指しし、この節だけでも確認を出す（Undo は型の変換と同じ 1 履歴）。
-- 固定は `DiagramTypeConverterTests` の `CreatePlan_OracleUnlimitedInteger_ConvertsWithPrecisionCap`／`CreatePlan_OracleNumberWithoutIntegerScale_IsNotCapped`／`CreatePlan_PrecisionCap_OnlyForPrecisionlessIntegerDecimal`・`MainViewModelTargetDbmsTests` の `ChangeDbms_OracleUnlimitedInteger_ConfirmsCappedColumnAndUndoes`／`ChangeDbms_PrecisionCappedSection_FollowsUnconvertedSection`／`ChangeDbms_OracleUnlimitedInteger_CancelKeepsType`・docs の `unconvertible-types` の表の照合・`{SqlServer,MySql,PostgreSql}TypeNotationIntegrationTests`（変換の出力 `TypeNotationClosure.ConvertedOracleInteger` で同期→再取込→差分 0）。mutation 実証済み。
+- 固定は `DialectTypeTableTests` の方言切替の行（`convert-x-oracle-*`＝精度の上限なしの整数と NUMBER の桁）・`DiagramTypeConverterTests.CreatePlan_PrecisionCap_OnlyForPrecisionlessIntegerDecimal`・`MainViewModelTargetDbmsTests` の `ChangeDbms_OracleUnlimitedInteger_ConfirmsCappedColumnAndUndoes`／`ChangeDbms_PrecisionCappedSection_FollowsUnconvertedSection`／`ChangeDbms_OracleUnlimitedInteger_CancelKeepsType`・docs の `unconvertible-types` の表の照合・`{SqlServer,MySql,PostgreSql}TypeNotationIntegrationTests`（変換の出力 `TypeNotationClosure.ConvertedOracleInteger` で同期→再取込→差分 0）。mutation 実証済み。
 
 ### 型マッパーはドライバの CLR 型へ写す
 
 - 型マッパーは、ドライバがその列を返す CLR 型へ写す。違う型で受けると読み取り自体が `InvalidCastException` になり、行の組み立ては全列をまとめて読むので、その列を持つ表が丸ごと使えない。
-- 方言ごとの写し方は各方言の CLAUDE.md「型表記」。固定は各方言の `*CSharpTypeMapperTests` と `*ColumnClrTypeIntegrationTests`（ドライバの `GetFieldType` とマッパーの一致）。
+- 方言ごとの写し方は各方言の CLAUDE.md「型表記」。固定は `DialectTypeTableTests` のマッパーの行（`map-*`）と、同じ行を実 DB で流す `*DialectTypeRealDbTests`（手順は `DialectTypeRealDbRows`＝ドライバの `GetFieldType` とマッパーの一致）。
 
 ## 差分と同期
 
