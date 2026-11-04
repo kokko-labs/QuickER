@@ -26,9 +26,11 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// グラフ保存のほかのシナリオ（カスケードの閉包だけを保存する・付け替えと元の親の削除）は、SQLite の実装先どうしの一致
 /// （<see cref="BackendParityRuntimeTests"/> の <c>graph-include-*</c> ほか）と、SQL Server の 2 者比較
 /// （<see cref="BackendParitySqlServerRuntimeTests"/> の <c>include-child-delete-keeps-parent-and-siblings</c>・
-/// <c>move-note-and-delete-old-gadget-kept-first</c>）が持つ。J3 だけは、SQL Server の 2 者比較の図（<c>ConcurrencyFixture</c>）の
-/// 一意な列が代替キー（kit_parts が参照する kits の code）しか無く、EF Core はそれを SaveChanges の前に自分で書くので同じ形を
-/// 作れない。そのためここで流す（注文のメモは代替キーでない一意制約）。
+/// <c>move-note-and-delete-old-gadget-kept-first</c>）が持つ。代替キーでない一意な値の J3 を SQL Server の EF Core で見るのは
+/// このクラスだけ。SQL Server の 2 者比較の図（<c>ConcurrencyFixture</c>）の一意な列は代替キー（kit_parts が参照する kits の
+/// code）しか無く、EF Core は代替キーを <c>HasIndex(...).IsUnique()</c> で並べない（自分で書き、削除する行の値を取るときは後回しの
+/// 行を 2 つめの文脈で削除の後に保存する＝<c>alternate-key-taken-from-deleted-kit-*</c>）。そのため、一意インデックスを外す
+/// 壊し方を SQL Server で捕まえる形はここにしか作れない（注文のメモは代替キーでない一意制約）。
 /// </para>
 /// </remarks>
 [Collection(SqlServerContainerCollection.Name)]

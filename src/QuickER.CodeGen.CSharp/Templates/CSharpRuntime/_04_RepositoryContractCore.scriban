@@ -273,9 +273,14 @@ public interface IRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity,
     /// <item><description>The return value counts the rows actually inserted, so skipped elements are not part of it.</description></item>
     /// <item><description>An empty collection inserts nothing and returns 0 without opening a connection.</description></item>
     /// <item><description>A cancellation already requested on entry throws before anything is written.</description></item>
+    /// <item><description>Each row is written with the foreign keys it carries; the navigations of the entities are neither
+    /// read nor changed, so the caller's entities keep the navigations and foreign keys they had.</description></item>
     /// </list>
     /// The insert itself is one unit of work per backend (SqlBulkCopy, a single transaction, one SaveChanges, or one staged
-    /// batch), but only the in-memory backend validates the whole batch for duplicate primary keys up front.
+    /// batch), but only the in-memory backend validates the whole batch for duplicate primary keys up front. The rows are not
+    /// reordered: the QuickER repositories insert them in the order given, so pass a self-referencing parent before the rows
+    /// that refer to it (EF Core orders the statements by their dependencies, and the in-memory backend does not check
+    /// foreign keys).
     /// </remarks>
     /// <param name="entities">The list of entities to insert (null elements are skipped).</param>
     /// <param name="cancellationToken">The cancellation token.</param>

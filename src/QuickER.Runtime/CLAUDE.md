@@ -44,9 +44,11 @@ ADO の 2 方言が共有する `EntitySaveMetadata` の規則もここに置く
   - 戻り値は実際に挿入した行数（スキップ分は数えない）。
   - 空コレクションは接続を開かず 0 を返す。
   - 冒頭で `cancellationToken.ThrowIfCancellationRequested()` を呼ぶ。
+  - 各行は持っている外部キーのとおりに書き、呼び出し側のナビゲーションと外部キーを変えない（EF Core は行のナビゲーションを空にして保存し、成功・失敗とも戻す＝`src/QuickER.Runtime.EntityFrameworkCore/CLAUDE.md`「渡したエンティティのナビゲーションを変えない」）。
+  - 並べ替えない。QuickER 版は渡した順に挿入するので、自己参照の子が先だと外部キーに断られる（EF Core は依存の順に並べ、インメモリは外部キーを検査しない。docs の BulkInsert の契約が「親を先に渡す」と書く）。
 - 正本は `IRepositoryCore.BulkInsertAsync` の XmlDoc。
 - バッチ全体の主キー事前検証は InMemory だけの上乗せ。
-- ガード：`GeneratedRuntimeParityTestsBase`（SqlServer / EF Core）、実装先の一致のシナリオ `bulk-insert-contract`・`bulk-insert-duplicate-rejects-whole-batch`（QuickER 版〔SQLite〕・EF Core・インメモリ）。
+- ガード：`GeneratedRuntimeParityTestsBase`（SqlServer / EF Core）、実装先の一致のシナリオ `bulk-insert-contract`・`bulk-insert-duplicate-rejects-whole-batch`・`bulk-insert-self-reference-parent-first`・`bulk-insert-navigation-without-foreign-key`・`bulk-insert-navigation-other-foreign-key`・`bulk-insert-navigation-rejected-keeps-navigations`（QuickER 版〔SQLite〕・EF Core・インメモリ）。
 - SQL Server の `SqlBulkCopyOptions` は `src/QuickER.Runtime.SqlServer/CLAUDE.md`「BulkInsert のオプション」、SQLite のコマンドの使い回しは `src/QuickER.Runtime.Sqlite/CLAUDE.md`「INSERT コマンドの使い回し」。
 
 ## EditModel のロード意味論と検証経路
@@ -356,7 +358,7 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
 - 段の中はグラフの順なので、新しい行を参照する行はその後に書く。値が重なる新しい行を、それより前に書く行が参照する形は 1 回では通らない（docs の既知の制限＝3 回の保存に分ける）。2 行の一意な値の入れ替えも DB が最初の更新で断る（インメモリは通す）。
 - キーも同じで、同じ保存で行を削除し同じキーの行を足すと置き換わる（DB に無いキーでは新しい行が残る）。EF Core は同じキーの削除と挿入を 1 つの UPDATE に畳むので、戻り値の行数だけが 1 になる（BackendParity の既知の違い）。
 - 実装：QuickER 版は `EntityGraphSaver.SaveGraphsAsync`（Repository の単一・複数の入口が通る。既存の `SaveAsync` はグラフの順のまま）、インメモリは Before の走査と書き込みの走査が同じ計画を歩く。
-- EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、文の順は 1 回の SaveChanges の中で EF Core が決める。補いは `src/QuickER.Runtime.EntityFrameworkCore/CLAUDE.md`「書く順への対応」「変わった代替キーを自分で書く」（試行ごとの外部キーの読み取りと、一意制約ごとの `HasIndex(…).IsUnique()`）。
+- EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、文の順は 1 回の SaveChanges の中で EF Core が決める。補いは `src/QuickER.Runtime.EntityFrameworkCore/CLAUDE.md`「書く順への対応」「変わった代替キーを自分で書く」（試行ごとの外部キーの読み取りと、一意制約ごとの `HasIndex(…).IsUnique()`。削除する行の値を代替キーで取る行があるときは、3 段目を 2 つめの文脈の SaveChanges で書く。分ける判定は `GraphSaveOrder.TakesDeletedValue`＝後回しの判定の本体を列で絞ったもの）。
 - ガード：`GraphSaveOrderTests`、`BackendParityRuntimeTests` のシナリオ（`graph-delete-then-add-same-unique-value-*`・`graph-remove-and-add-same-key-*`・`graph-move-*`・J3 の `graph-updated-row-takes-deleted-unique-value-*` と、子を持つ形の `graph-updated-row-takes-unique-value-of-deleted-row-with-children-*`、新しい行を後回しにしない `graph-new-row-referenced-by-another-root-*`・`graph-save-new-row-without-shared-value-keeps-order`、順序を固定する `graph-save-*-keeps-order` など）、`GraphSaveEfCoreSqlServerRuntimeTests`、`GraphSaveSqliteFileRuntimeTestsBase.NullUniqueValues_DoNotOrderTheSave`、`BackendParitySqlServerRuntimeTests`（`move-stale-note-and-delete-old-gadget`）、`InMemoryConcurrencyRuntimeTests.SaveAsync_RemoveAndAddSameKeyInOneSave_KeepsNewRow`。mutation 実証済み。
 
 ### 削除した子の外れ方
@@ -378,6 +380,10 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
 - 同じ行を 2 回書く：同じ (型, 正規化したキー) の行に複数のインスタンスで届くとき、書き込み（更新・新しい行）が 2 つ以上、削除が 2 つ以上、削除と更新の両方、のどれかなら断る。
   - 削除と新しい行の組（置き換え）は断らない（`GraphSaveOrder` の後回しが置き換えにする）。
   - どのインスタンスも変更を持たなければ、2 つめ以降を EF Core が追跡しない（`IsUntracked`。追跡すると同じキーの 2 つのインスタンスで EF Core が断る）。キーが未設定の行は数えない。
+- 同じインスタンスに 2 つの道で届く：保存の 2 つのコレクションに持った同じインスタンスや、複数のルートの保存の一覧に 2 回渡した同じ根が、自分の変更（新しい行・更新・削除）を持てば、`Collect` が 2 度目に届いたところで断る（キーが未設定の新しい行も）。
+  - 変更の無いインスタンスへの 2 度目は今どおり通す（削除の下の変更の無い行も、書くのは削除 1 回だけ）。
+  - 外すと、QuickER 版とインメモリは道ごとに書き（2 回の INSERT は主キーで断られ、2 回の UPDATE は 2 行と数える）、EF Core は 1 回だけ書き、リモートのクライアントは 2 回送ってサーバーに断られる。EF Core で同じ行を持つ 2 つのナビゲーションを Include して編集したグラフがこの形になる（docs のグラフ保存と EF Core モード・CHANGELOG の Breaking）。
+  - ガード：`BackendParityRuntimeTests` のシナリオ `n3-same-instance-two-collections-new`・`-update`・`-delete`・`n3-same-instance-twice-in-roots`（5 実装先とも書く前に断り、フックは鳴らない）。mutation 実証済み。
 - 外すと、実装先ごとに保存の結果が割れる（QuickER 版とインメモリはナビゲーションを無視して外部キーで書き、EF Core は fix-up でナビゲーションを採り、同じ行の 2 回の書き込みは後勝ちか追跡の衝突になる）。
 - 乱数の列では食い違うグラフを作らない（どの実装先も断るので、後の列が何も比べなくなる）。
 - ガード：`BackendParityRuntimeTests` のシナリオ `n2-navigation-overrides-foreign-key`・`n2-unchanged-child-foreign-key-differs`・`n2-parent-reference-differs`・`n2-new-children-take-parent-keys`・`n2-hook-assigned-keys-reach-new-children`・`n3-same-row-one-instance-changed`・`n3-same-row-both-instances-changed`、`RemoteSaveResponseClientTests.Save_InconsistentGraph_IsRejectedBeforeSending`。mutation 実証済み。

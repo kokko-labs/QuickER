@@ -394,6 +394,10 @@ await customers.BulkInsertAsync(manyCustomers);   // bulk insert
 `BulkInsertAsync` keeps the same contract on every backend.
 A `null` element is skipped, as it is in a graph save's list, and the return value counts only the rows actually inserted.
 An empty collection returns 0 without opening a connection, and a cancellation already requested on entry throws before anything is written.
+Each row is written with the foreign keys it carries, and the navigations of the entities are neither read nor changed.
+A row whose navigation points at another row of the same batch keeps its own foreign key, and the caller's entities keep the navigations and foreign keys they had.
+The QuickER Repository inserts the rows in the order given, so pass a self-referencing parent before the rows that refer to it.
+EF Core sorts the statements by their dependencies and the in-memory repository does not check foreign keys, so parents first is the order that works on every backend.
 
 On SQL Server the bulk insert runs through `SqlBulkCopy` with `CheckConstraints` always on.
 Foreign key and CHECK constraints are honored, so a row the row-at-a-time `InsertAsync` would reject fails the copy too.
@@ -655,7 +659,14 @@ When two of those instances carry changes that would write the row twice, the sa
 Deleting one instance and adding another with the same key is a replacement and goes on.
 When only one instance carries changes, the save writes that one, and EF Core leaves the unchanged instances untracked.
 
-Every backend runs both checks; a remote client runs them before it sends the graph.
+**One instance with changes reached through two paths is refused.**
+The same instance can sit in two collections of the save, or be passed twice in the list of a save of many roots.
+When that instance carries changes of its own (new, updated or deleted), the save is refused with an `InvalidOperationException` that names the row, since it would write the row once per path.
+In EF Core mode this is the shape a graph takes when two navigations that hold the same row are both included: EF Core resolves the row to one instance in both collections.
+Take the row out of one of the collections before you save it.
+An instance without changes reached twice goes on.
+
+Every backend runs these checks; a remote client runs them before it sends the graph.
 
 **A save that deletes rows writes in three stages.**
 A graph save that deletes no row walks each root in graph order: a new or updated row is written before its children.
@@ -1036,6 +1047,8 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   A parent reference (such as `line.Order`) is not followed, so a parent loaded with `Include` is neither written nor deleted.
   The save leaves the navigations of the entities as it found them, as the QuickER repositories do: the one change is that the children it deleted leave the cascade collections of a parent it kept.
   EF Core fixes up the references and collections of the entities it tracks, and the save puts them back afterwards, whether it succeeds or fails (a navigation a save hook changes during the save is put back as well).
+  A bulk insert leaves the navigations alone as well and writes each row's own foreign keys (see the `BulkInsertAsync` contract under [QuickER Repository](#quicker-repository)).
+  Including two navigations that hold the same row gives one instance in both collections, and a save of that graph with the row changed is refused; take the row out of one of the collections first (see [Graph save](#graph-save-save-parent-and-children-in-one-call)).
 - The generated `DbContext` gives every relationship except `ON DELETE CASCADE` the delete behavior `ClientNoAction`.
   EF Core then leaves the tracked children of a deleted parent alone and sends the parent's `DELETE` only, so the database's referential action decides the result, as with the QuickER repositories: `NO ACTION` refuses the deletion, and `SET NULL` and `SET DEFAULT` change the children in the database.
 - Optimistic concurrency is at parity: `ConcurrencyMode` selects the policy, EF Core's `DbUpdateConcurrencyException` is converted to `SaveConflictException`, and the refreshed concurrency token is left on the entity (see [Optimistic concurrency (rowversion)](#optimistic-concurrency-rowversion)).
@@ -1066,6 +1079,8 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   A value another row still references is refused by the database (`NO ACTION`), and the save writes nothing.
   A value a save hook's Before sets is written the same way.
   An `UpdateAsync` of such a table runs in a transaction inside the execution strategy, like a graph save.
+  A row that takes the alternate key of a row the same save deletes is written after the deletion, as in the QuickER repositories: the held-back rows (and the rows below them) are saved by a second `SaveChanges` on a second context that shares the connection and the transaction, after their keys are written.
+  A context the factory builds from a connection the application passed (`UseSqlServer(connection)`) is given back its connection as the application owns it.
 
 **Raw SQL**
 

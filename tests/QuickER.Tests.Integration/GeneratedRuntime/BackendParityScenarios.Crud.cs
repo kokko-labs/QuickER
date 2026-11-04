@@ -124,6 +124,77 @@ public static partial class BackendParityScenarios
             ]
         );
 
+        // 一括挿入は渡した行を外部キーのとおりに書き、呼び出し側のナビゲーションと外部キーを変えない（スロットの比べ方が、親の
+        // 紹介先のコレクションと子の外部キーを書く）。EF Core は、同じバッチの行どうしのナビゲーションと外部キーを保存の間に
+        // 合わせる（fix-up）ので、行のナビゲーションを空にして保存し、後で戻す。並びは渡した順で、自己参照の親を先に渡す
+        // （QuickER 版は子が先だと外部キーに断られる＝docs の BulkInsert の契約）
+        yield return new(
+            "bulk-insert-self-reference-parent-first",
+            Basic,
+            [
+                new BulkInsertOp(
+                    [new CustomerRow(30, "P"), new CustomerRow(31, "C", Referrer: 30)],
+                    KeepAs: "b"
+                ),
+                ParityExpect.Outcome("bulk-self-reference-counts-rows", "inserted=2"),
+                ParityExpect.StateRow(
+                    "bulk-self-reference-child-refers-parent",
+                    "customers/31",
+                    "referrer=30"
+                ),
+            ]
+        );
+
+        // 親の紹介先のコレクションに子を置いたまま、子の外部キーを空にして一括挿入する。子は外部キーのとおり紹介者なしで保存され、
+        // 呼び出し側の子の外部キーも空のまま
+        yield return new(
+            "bulk-insert-navigation-without-foreign-key",
+            Basic,
+            [
+                new BulkInsertWithNavigationOp(new CustomerRow(30, "P"), new CustomerRow(31, "C")),
+                ParityExpect.Outcome("bulk-navigation-without-key-counts-rows", "inserted=2"),
+                ParityExpect.StateRow(
+                    "bulk-navigation-without-key-keeps-null",
+                    "customers/31",
+                    "referrer=null"
+                ),
+            ]
+        );
+
+        // 同じ形で、子の外部キーを別の顧客（顧客 1）にしておく。子は外部キーのとおり顧客 1 を紹介者として保存される
+        yield return new(
+            "bulk-insert-navigation-other-foreign-key",
+            Basic,
+            [
+                new BulkInsertWithNavigationOp(
+                    new CustomerRow(30, "P"),
+                    new CustomerRow(31, "C", Referrer: 1)
+                ),
+                ParityExpect.Outcome("bulk-navigation-other-key-counts-rows", "inserted=2"),
+                ParityExpect.StateRow(
+                    "bulk-navigation-other-key-keeps-key",
+                    "customers/31",
+                    "referrer=1"
+                ),
+            ]
+        );
+
+        // 同じ形のバッチに保存先の主キーと重なる行を混ぜると、全体が断られ、呼び出し側のナビゲーションと外部キーは保存の前のまま
+        // 残る（失敗の後もナビゲーションを戻す）
+        yield return new(
+            "bulk-insert-navigation-rejected-keeps-navigations",
+            Basic,
+            [
+                new BulkInsertWithNavigationOp(
+                    new CustomerRow(30, "P"),
+                    new CustomerRow(31, "C"),
+                    [new CustomerRow(1, "Dup")]
+                ),
+                ParityExpect.Throws("bulk-navigation-rejected", "store-rejected"),
+                ParityExpect.StateRows("bulk-navigation-rejected-writes-nothing", 8),
+            ]
+        );
+
         // 保存は列だけを写すので、保存の後で呼び出し側のエンティティ（列・子のコレクション）を書き換えても保存先は変わらない
         yield return new(
             "save-leaves-store-independent-of-caller",

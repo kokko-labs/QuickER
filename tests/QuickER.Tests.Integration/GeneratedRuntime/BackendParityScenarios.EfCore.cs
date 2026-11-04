@@ -55,6 +55,29 @@ public static partial class BackendParityScenarios
             new ParityBackendOptions(WithHooks: false, RetryEfCoreFirstCommit: true)
         );
 
+        // 実行戦略：削除する顧客の代替キーを別の顧客の更新が取る保存（EF Core は後回しの行を 2 つめの文脈で保存する）も、1 回目の
+        // コミットが失敗した後の試行で、2 つの SaveChanges を 1 つの試行として組み直して成立する
+        yield return new(
+            "ef-retry-updated-row-takes-alternate-key-of-deleted-row",
+            [
+                .. Basic,
+                new SeedOp(new CustomerRow(4, "Dan")),
+                new SeedOp(new CustomerRow(5, "Eve")),
+            ],
+            [
+                new NewRootOp("A", new CustomerRow(5, "Eve", Code: "K4"), RowState.Updated),
+                new NewRootOp("B", new CustomerRow(4, "Dan"), RowState.Removed),
+                new SaveManyCustomersOp(["A", "B"]),
+                ParityExpect.Outcome("retry-alternate-key-saves-two-rows", "rows=2"),
+                ParityExpect.StateRow("retry-alternate-key-taken", "customers/5", "code='K4'"),
+                ParityExpect.StateKeys(
+                    "retry-alternate-key-old-customer-gone",
+                    KeysWithCustomers(1, 2, 5)
+                ),
+            ],
+            new ParityBackendOptions(WithHooks: false, RetryEfCoreFirstCommit: true)
+        );
+
         // 実行戦略：Save フックありの保存は明示のトランザクションを開く。1 回目のコミットが失敗すると試行し直し、EF Core のフックは
         // 試行の回数だけ走る（docs の Save フック節）。1 回目の試行はロールバックされ、行は 1 つだけ残る。フックの列が実装先で違う
         // のは docs に書いてある違いなので、基準とは比べず実装先ごとの期待で書く

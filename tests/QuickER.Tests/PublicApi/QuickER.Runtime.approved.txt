@@ -233,6 +233,7 @@ public sealed class QuickER.Runtime.GraphSaveOrder
     public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBaseCore> HeldBack { get; }
     public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBaseCore> StartingPoints { get; }
     public bool Defers(QuickER.Runtime.EntityBaseCore entity)
+    public bool TakesDeletedValue(QuickER.Runtime.EntityBaseCore entity, System.Collections.Generic.IReadOnlyCollection<string> propertyNames)
     public static QuickER.Runtime.GraphSaveOrder For(System.Collections.Generic.IEnumerable<QuickER.Runtime.EntityBaseCore> roots, bool cascadeSave, bool cascadeDelete)
 
 public abstract class QuickER.Runtime.HttpRemoteRepositoryCore<TEntity, TKey> : QuickER.Runtime.IRemoteRepositoryCore<TEntity, TKey>
