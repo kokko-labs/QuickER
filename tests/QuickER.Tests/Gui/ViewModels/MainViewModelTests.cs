@@ -1,11 +1,9 @@
 ﻿using System.IO;
 using AwesomeAssertions;
-using QuickER.Documents;
 using QuickER.Model;
 using QuickER.Resources;
 using QuickER.Services;
 using QuickER.Tests.TestDoubles;
-using QuickER.UndoRedo;
 using QuickER.ViewModels;
 
 namespace QuickER.Tests.Gui.ViewModels;
@@ -14,61 +12,38 @@ namespace QuickER.Tests.Gui.ViewModels;
 /// <remarks>WPF UI スレッドに依存しないロジックのみを対象とする</remarks>
 public class MainViewModelTests
 {
-    /// <summary>AddEntityCommand 実行でエンティティが 1 件追加されることを検証する</summary>
-    [Fact(DisplayName = "AddEntityCommand 実行でエンティティが 1 件増える")]
-    public void AddEntity_AddsOne()
+    /// <summary>AutoArrangeNewDiagram がエンティティを整列しつつ Undo 履歴に積まないこと（エンティティが無ければ何も起きないこと）を検証する</summary>
+    /// <param name="entityCount">追加するエンティティの数（0 は何も無い図）</param>
+    [Theory(
+        DisplayName = "AutoArrangeNewDiagram: 整列するが履歴に積まれない（空の図では何もしない）"
+    )]
+    [InlineData(2)] // 整列するが履歴に積まれない
+    [InlineData(0)] // 空の図では何もしない
+    public void AutoArrangeNewDiagram_ArrangesWithoutHistory(int entityCount)
     {
         var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
 
-        vm.Entities.Should().HaveCount(1);
-        vm.UndoRedo.CanUndo.Should().BeTrue();
-        vm.SelectedEntity.Should().Be(vm.Entities[0]);
-    }
-
-    /// <summary>追加が Undo で取り消され、Redo で復活することを検証する</summary>
-    [Fact(DisplayName = "Undo で追加が取り消され、Redo で復活する")]
-    public void Add_Then_Undo_Then_Redo()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        var added = vm.Entities[0];
-
-        vm.UndoCommand.Execute(null);
-        vm.Entities.Should().BeEmpty();
-
-        vm.RedoCommand.Execute(null);
-        vm.Entities.Should().Contain(added);
-    }
-
-    /// <summary>AutoArrangeNewDiagram がエンティティを整列しつつ Undo 履歴に積まないことを検証する</summary>
-    [Fact(DisplayName = "AutoArrangeNewDiagram: 整列するが履歴に積まれない")]
-    public void AutoArrangeNewDiagram_ArrangesWithoutHistory()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        vm.AddEntityCommand.Execute(null);
+        for (var i = 0; i < entityCount; i++)
+        {
+            vm.AddEntityCommand.Execute(null);
+        }
 
         vm.AutoArrangeNewDiagram();
 
-        // 先頭エンティティが格子レイアウトの左上余白へ移動している（初期の階段状座標 60,60 から変化）
-        vm.Entities[0].X.Should().Be(40);
-        vm.Entities[0].Y.Should().Be(40);
+        vm.Entities.Should().HaveCount(entityCount);
 
-        // 整列は履歴に積まれないため、2 件の追加分を取り消すと完全に空になり Undo 不能へ戻る
-        vm.UndoCommand.Execute(null);
-        vm.UndoCommand.Execute(null);
-        vm.Entities.Should().BeEmpty();
-        vm.UndoRedo.CanUndo.Should().BeFalse();
-    }
+        if (entityCount > 0)
+        {
+            // 先頭エンティティが格子レイアウトの左上余白へ移動している（初期の階段状座標 60,60 から変化）
+            vm.Entities[0].X.Should().Be(40);
+            vm.Entities[0].Y.Should().Be(40);
+        }
 
-    /// <summary>エンティティが無い状態で AutoArrangeNewDiagram を呼んでも何も起きないことを検証する</summary>
-    [Fact(DisplayName = "AutoArrangeNewDiagram: 空の図では何もしない")]
-    public void AutoArrangeNewDiagram_EmptyDiagram_DoesNothing()
-    {
-        var vm = new MainViewModel();
-
-        vm.AutoArrangeNewDiagram();
+        // 整列は履歴に積まれないため、追加分を取り消すと完全に空になり Undo 不能へ戻る
+        for (var i = 0; i < entityCount; i++)
+        {
+            vm.UndoCommand.Execute(null);
+        }
 
         vm.Entities.Should().BeEmpty();
         vm.UndoRedo.CanUndo.Should().BeFalse();
@@ -114,75 +89,6 @@ public class MainViewModelTests
         vm.Relationships[0].ConstraintName.Should().Be("FK_NewTable_NewTable");
     }
 
-    /// <summary>リレーション作成時に既定の参照先列と外部キー列が設定されることを検証する</summary>
-    /// <remarks>参照先列は「親テーブル名+Id」の命名規則（NewTable → NewTableId）で解決される</remarks>
-    [Fact(DisplayName = "リレーション作成時に既定の参照先列と外部キー列が設定される")]
-    public void RelationshipMode_SetsDefaultColumns()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        vm.AddEntityCommand.Execute(null);
-        vm.Entities[0].Columns[0].Name = "ParentKey";
-        vm.Entities[1]
-            .Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
-
-        vm.StartAddOneToManyCommand.Execute(null);
-        vm.OnEntityClicked(vm.Entities[0]);
-        vm.OnEntityClicked(vm.Entities[1]);
-
-        var pair = vm.Relationships[0].ColumnPairs.Should().ContainSingle().Subject;
-        pair.SourceColumnId.Should().Be(vm.Entities[0].Columns[0].Id);
-        pair.TargetColumnId.Should().Be(vm.Entities[1].Columns[1].Id);
-    }
-
-    /// <summary>親 PK が Id でも「親テーブル名+Id」の列が参照先として解決されることを検証する</summary>
-    [Fact(DisplayName = "親 PK が Id でも 親テーブル名+Id の列が参照先に解決される")]
-    public void RelationshipMode_ResolvesTableNameIdConvention()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        vm.AddEntityCommand.Execute(null);
-        vm.Entities[0].TableName = "Customer";
-        vm.Entities[1].TableName = "Order";
-        vm.Entities[1]
-            .Columns.Add(
-                new ColumnViewModel(new Column { Name = "OrderDate", DataType = "datetime2" })
-            );
-        vm.Entities[1]
-            .Columns.Add(new ColumnViewModel(new Column { Name = "CustomerId", DataType = "int" }));
-
-        vm.StartAddOneToManyCommand.Execute(null);
-        vm.OnEntityClicked(vm.Entities[0]);
-        vm.OnEntityClicked(vm.Entities[1]);
-
-        var customerIdColumn = vm.Entities[1].Columns.Single(c => c.Name == "CustomerId");
-        vm.Relationships[0]
-            .ColumnPairs.Should()
-            .ContainSingle()
-            .Subject.TargetColumnId.Should()
-            .Be(customerIdColumn.Id);
-        customerIdColumn.IsForeignKey.Should().BeTrue();
-    }
-
-    /// <summary>FK らしい列が無い場合に参照先列が未割当となり、無関係な列が FK 化されないことを検証する</summary>
-    [Fact(DisplayName = "FK らしい列が無ければ参照先列は未割当となる")]
-    public void RelationshipMode_NoLikelyColumn_LeavesTargetUnassigned()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        vm.AddEntityCommand.Execute(null);
-        vm.Entities[1]
-            .Columns.Add(new ColumnViewModel(new Column { Name = "Quantity", DataType = "int" }));
-
-        vm.StartAddOneToManyCommand.Execute(null);
-        vm.OnEntityClicked(vm.Entities[0]);
-        vm.OnEntityClicked(vm.Entities[1]);
-
-        vm.Relationships.Should().ContainSingle();
-        vm.Relationships[0].ColumnPairs.Should().BeEmpty();
-        vm.Entities[1].Columns.Single(c => c.Name == "Quantity").IsForeignKey.Should().BeFalse();
-    }
-
     /// <summary>同じエンティティを 2 回クリックすると自己参照リレーションが追加されることを検証する</summary>
     [Fact(
         DisplayName = "リレーション作成モードで同じエンティティを2回クリックすると自己参照リレーションが追加される"
@@ -209,106 +115,165 @@ public class MainViewModelTests
         vm.Relationships[0].ConstraintName.Should().Be("FK_NewTable_NewTable");
     }
 
-    /// <summary>同一始点・終点のリレーションは種別が違っても重複追加されないことを検証する</summary>
-    [Fact(DisplayName = "同じ始点と終点のリレーションは種別が違っても重複追加されない")]
-    public void RelationshipMode_DoesNotCreateDuplicateRelationship()
+    /// <summary>
+    /// リレーション作成時に、親の先頭列を起点に子の列が既定の参照先として引き当てられ（引き当てられなければ未割当）、
+    /// 引き当てた列だけが外部キーの印を持つことを検証する
+    /// </summary>
+    /// <remarks>
+    /// 子の列の引き当ては「親テーブル名+Id」の命名規則・親の主キーと同名の列の優先で決まる（NewTable → NewTableId）。
+    /// 2 つのテーブルは追加コマンドで作る（既定の先頭列は主キー）。
+    /// </remarks>
+    /// <param name="parentTable">親テーブル名（null は既定のまま）</param>
+    /// <param name="parentFirstColumn">親の先頭列の名前（null は既定のまま）</param>
+    /// <param name="childTable">子テーブル名（null は既定のまま）</param>
+    /// <param name="childFirstColumn">子の先頭列の名前（null は既定のまま）</param>
+    /// <param name="childExtraColumns">子へ足す列（「名前:型」のカンマ区切り。空は足さない）</param>
+    /// <param name="expectedTarget">引き当てられるはずの子の列の名前（null は未割当）</param>
+    [Theory(
+        DisplayName = "リレーション作成時の列ペアの自動解決は、子の列を引き当て、引き当てた列だけを外部キーにする"
+    )]
+    [InlineData(null, "ParentKey", null, null, "NewTableId:int", "NewTableId")] // 既定の参照先列と外部キー列が設定される
+    [InlineData(
+        "Customer",
+        null,
+        "Order",
+        null,
+        "OrderDate:datetime2,CustomerId:int",
+        "CustomerId"
+    )] // 親 PK が Id でも 親テーブル名+Id の列が参照先に解決される
+    [InlineData(null, null, null, null, "Quantity:int", null)] // FK らしい列が無ければ参照先列は未割当となる
+    [InlineData(null, "CustomerId", null, "Id", "CustomerId:int", "CustomerId")] // 参照先 PK と同名の列があれば既定 FK に選ばれ、FK チェックも入る
+    public void RelationshipMode_ResolvesColumnPair(
+        string? parentTable,
+        string? parentFirstColumn,
+        string? childTable,
+        string? childFirstColumn,
+        string childExtraColumns,
+        string? expectedTarget
+    )
     {
-        var vm = new MainViewModel(new StubDialogService());
+        var vm = new MainViewModel();
         vm.AddEntityCommand.Execute(null);
         vm.AddEntityCommand.Execute(null);
+        var parent = vm.Entities[0];
+        var child = vm.Entities[1];
+
+        if (parentTable is not null)
+        {
+            parent.TableName = parentTable;
+        }
+
+        if (childTable is not null)
+        {
+            child.TableName = childTable;
+        }
+
+        if (parentFirstColumn is not null)
+        {
+            parent.Columns[0].Name = parentFirstColumn;
+        }
+
+        if (childFirstColumn is not null)
+        {
+            child.Columns[0].Name = childFirstColumn;
+        }
+
+        var extraNames = new List<string>();
+
+        foreach (var spec in childExtraColumns.Split(',', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = spec.Split(':');
+            extraNames.Add(parts[0]);
+            child.Columns.Add(
+                new ColumnViewModel(new Column { Name = parts[0], DataType = parts[1] })
+            );
+        }
 
         vm.StartAddOneToManyCommand.Execute(null);
-        vm.OnEntityClicked(vm.Entities[0]);
-        vm.OnEntityClicked(vm.Entities[1]);
-
-        vm.StartAddOneToOneCommand.Execute(null);
-        vm.OnEntityClicked(vm.Entities[0]);
-        vm.OnEntityClicked(vm.Entities[1]);
+        vm.OnEntityClicked(parent);
+        vm.OnEntityClicked(child);
 
         vm.Relationships.Should().ContainSingle();
+
+        if (expectedTarget is null)
+        {
+            vm.Relationships[0].ColumnPairs.Should().BeEmpty();
+            child
+                .Columns.Where(column => extraNames.Contains(column.Name))
+                .Should()
+                .OnlyContain(column => !column.IsForeignKey);
+
+            return;
+        }
+
+        var target = child.Columns.Single(column => column.Name == expectedTarget);
+        var pair = vm.Relationships[0].ColumnPairs.Should().ContainSingle().Subject;
+        pair.SourceColumnId.Should().Be(parent.Columns[0].Id);
+        pair.TargetColumnId.Should().Be(target.Id);
+        target.IsForeignKey.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 同じ始点・終点（自己参照を含む）のリレーションは、種別が違っても重複追加されず、情報ダイアログで知らせることを検証する
+    /// </summary>
+    /// <param name="selfReferencing">始点と終点が同じテーブルか</param>
+    /// <param name="secondIsOneToOne">2 本目を 1 対 1 で作るか（偽なら 1 本目と同じ 1 対多）</param>
+    [Theory(
+        DisplayName = "同じ始点と終点のリレーションは、種別が違っても自己参照でも重複追加されない"
+    )]
+    [InlineData(false, true)] // 同じ始点と終点のリレーションは種別が違っても重複追加されない
+    [InlineData(true, true)] // 自己参照リレーションも重複追加されない
+    [InlineData(false, false)] // 重複リレーション作成時は情報ダイアログが表示され追加されない
+    public void RelationshipMode_DoesNotCreateDuplicateRelationship(
+        bool selfReferencing,
+        bool secondIsOneToOne
+    )
+    {
+        var dialogs = new StubDialogService();
+        var vm = new MainViewModel(dialogs);
+        vm.AddEntityCommand.Execute(null);
+
+        if (selfReferencing)
+        {
+            vm.Entities[0]
+                .Columns.Add(
+                    new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" })
+                );
+        }
+        else
+        {
+            vm.AddEntityCommand.Execute(null);
+        }
+
+        var source = vm.Entities[0];
+        var target = selfReferencing ? vm.Entities[0] : vm.Entities[1];
+
+        vm.StartAddOneToManyCommand.Execute(null);
+        vm.OnEntityClicked(source);
+        vm.OnEntityClicked(target);
+
+        if (secondIsOneToOne)
+        {
+            vm.StartAddOneToOneCommand.Execute(null);
+        }
+        else
+        {
+            vm.StartAddOneToManyCommand.Execute(null);
+        }
+
+        vm.OnEntityClicked(source);
+        vm.OnEntityClicked(target);
+
+        vm.Relationships.Should().ContainSingle();
+        vm.Relationships[0].Source.Should().Be(source);
+        vm.Relationships[0].Target.Should().Be(target);
         vm.IsRelationshipMode.Should().BeFalse();
         vm.PendingRelationshipSource.Should().BeNull();
-    }
-
-    /// <summary>自己参照リレーションも重複追加されないことを検証する</summary>
-    [Fact(DisplayName = "自己参照リレーションも重複追加されない")]
-    public void RelationshipMode_DoesNotCreateDuplicateSelfRelationship()
-    {
-        var vm = new MainViewModel(new StubDialogService());
-        vm.AddEntityCommand.Execute(null);
-        vm.Entities[0]
-            .Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
-
-        vm.StartAddOneToManyCommand.Execute(null);
-        vm.OnEntityClicked(vm.Entities[0]);
-        vm.OnEntityClicked(vm.Entities[0]);
-
-        vm.StartAddOneToOneCommand.Execute(null);
-        vm.OnEntityClicked(vm.Entities[0]);
-        vm.OnEntityClicked(vm.Entities[0]);
-
-        vm.Relationships.Should().ContainSingle();
-        vm.Relationships[0].Source.Should().Be(vm.Entities[0]);
-        vm.Relationships[0].Target.Should().Be(vm.Entities[0]);
-    }
-
-    /// <summary>リレーションの制約名と参照アクションの変更が Undo / Redo できることを検証する</summary>
-    [Fact(DisplayName = "リレーションの制約名と参照アクションは Undo/Redo できる")]
-    public void RelationshipMetadata_CanUndoRedo()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        vm.AddEntityCommand.Execute(null);
-        vm.Entities[1]
-            .Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
-        vm.StartAddOneToManyCommand.Execute(null);
-        vm.OnEntityClicked(vm.Entities[0]);
-        vm.OnEntityClicked(vm.Entities[1]);
-        var relationship = vm.Relationships[0];
-
-        relationship.ConstraintName = "FK_Test";
-        relationship.OnDelete = ForeignKeyReferentialAction.Cascade;
-        relationship.OnUpdate = ForeignKeyReferentialAction.SetDefault;
-
-        vm.UndoCommand.Execute(null);
-        relationship.OnUpdate.Should().Be(ForeignKeyReferentialAction.NoAction);
-
-        vm.UndoCommand.Execute(null);
-        relationship.OnDelete.Should().Be(ForeignKeyReferentialAction.NoAction);
-
-        vm.UndoCommand.Execute(null);
-        relationship.ConstraintName.Should().Be("FK_NewTable_NewTable");
-
-        vm.RedoCommand.Execute(null);
-        vm.RedoCommand.Execute(null);
-        vm.RedoCommand.Execute(null);
-        relationship.ConstraintName.Should().Be("FK_Test");
-        relationship.OnDelete.Should().Be(ForeignKeyReferentialAction.Cascade);
-        relationship.OnUpdate.Should().Be(ForeignKeyReferentialAction.SetDefault);
-    }
-
-    /// <summary>参照先 PK と同名の列があれば既定 FK に選ばれ、FK チェックも入ることを検証する</summary>
-    [Fact(DisplayName = "参照先 PK と同名の列があれば既定 FK に選ばれ、FK チェックも入る")]
-    public void RelationshipMode_PrefersSameNamedColumnAndChecksFk()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        vm.AddEntityCommand.Execute(null);
-        vm.Entities[0].Columns[0].Name = "CustomerId";
-        vm.Entities[1].Columns[0].Name = "Id";
-        vm.Entities[1]
-            .Columns.Add(new ColumnViewModel(new Column { Name = "CustomerId", DataType = "int" }));
-
-        vm.StartAddOneToManyCommand.Execute(null);
-        vm.OnEntityClicked(vm.Entities[0]);
-        vm.OnEntityClicked(vm.Entities[1]);
-
-        vm.Relationships[0]
-            .ColumnPairs.Should()
+        dialogs
+            .InformationMessages.Should()
             .ContainSingle()
-            .Subject.TargetColumnId.Should()
-            .Be(vm.Entities[1].Columns[1].Id);
-        vm.Entities[1].Columns[1].IsForeignKey.Should().BeTrue();
+            .Which.Should()
+            .Be(Strings.Relationship_DuplicateMessage);
     }
 
     /// <summary>リレーションにより自動管理される列は PK / FK チェックを編集できないことを検証する</summary>
@@ -331,33 +296,6 @@ public class MainViewModelTests
 
         vm.Entities[0].Columns[0].IsPrimaryKeyEditable.Should().BeFalse();
         fkColumn.IsForeignKeyEditable.Should().BeFalse();
-    }
-
-    /// <summary>リレーション削除で自動設定された FK チェックが外れることを検証する</summary>
-    [Fact(DisplayName = "リレーション削除で自動設定された FK チェックが外れる")]
-    public void RemoveRelationship_UnchecksManagedForeignKey()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        vm.AddEntityCommand.Execute(null);
-        vm.Entities[0].Columns[0].Name = "ParentKey";
-        vm.Entities[1]
-            .Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
-
-        vm.StartAddOneToManyCommand.Execute(null);
-        vm.OnEntityClicked(vm.Entities[0]);
-        vm.OnEntityClicked(vm.Entities[1]);
-        var relationship = vm.Relationships[0];
-        var fkColumn = vm.Entities[1]
-            .Columns.First(c => c.Id == relationship.ColumnPairs[0].TargetColumnId);
-
-        fkColumn.IsForeignKey.Should().BeTrue();
-        vm.OnRelationshipClicked(relationship);
-        vm.DeleteSelectedCommand.Execute(null);
-
-        vm.Relationships.Should().BeEmpty();
-        fkColumn.IsForeignKey.Should().BeFalse();
-        fkColumn.IsForeignKeyEditable.Should().BeTrue();
     }
 
     /// <summary>リレーション選択中の DeleteSelected がそのリレーションを削除することを検証する</summary>
@@ -405,150 +343,6 @@ public class MainViewModelTests
 
         rel.X1.Should().Be(oldX1 + 100);
         rel.X2.Should().Be(oldX2);
-    }
-
-    /// <summary>エンティティ名変更が Undo / Redo できることを検証する</summary>
-    [Fact(DisplayName = "エンティティ名変更は Undo/Redo できる")]
-    public void EntityPropertyChange_CanUndoRedo()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        var entity = vm.Entities[0];
-
-        entity.TableName = "Customer";
-
-        vm.UndoCommand.Execute(null);
-        entity.TableName.Should().Be("NewTable");
-
-        vm.RedoCommand.Execute(null);
-        entity.TableName.Should().Be("Customer");
-    }
-
-    /// <summary>エンティティ見出し背景色の変更が Undo / Redo できることを検証する</summary>
-    [Fact(DisplayName = "エンティティ見出し色変更は Undo/Redo できる")]
-    public void EntityTitleBackgroundColorChange_CanUndoRedo()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        var entity = vm.Entities[0];
-
-        entity.TitleBackgroundColor = "#E4F1C9";
-
-        vm.UndoCommand.Execute(null);
-        entity.TitleBackgroundColor.Should().Be(EntityLayout.DefaultTitleBackgroundColor);
-
-        vm.RedoCommand.Execute(null);
-        entity.TitleBackgroundColor.Should().Be("#E4F1C9");
-    }
-
-    /// <summary>リレーション種別の変更が Undo / Redo できることを検証する</summary>
-    [Fact(DisplayName = "リレーション種別変更は Undo/Redo できる")]
-    public void RelationshipPropertyChange_CanUndoRedo()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        vm.AddEntityCommand.Execute(null);
-        vm.StartAddOneToOneCommand.Execute(null);
-        vm.OnEntityClicked(vm.Entities[0]);
-        vm.OnEntityClicked(vm.Entities[1]);
-        var relationship = vm.Relationships[0];
-
-        relationship.Type = RelationshipType.OneToMany;
-
-        vm.UndoCommand.Execute(null);
-        relationship.Type.Should().Be(RelationshipType.OneToOne);
-
-        vm.RedoCommand.Execute(null);
-        relationship.Type.Should().Be(RelationshipType.OneToMany);
-    }
-
-    /// <summary>多対多への変更に伴う列選択クリアも 1 回の Undo / Redo で往復することを検証する</summary>
-    [Fact(DisplayName = "多対多への変更で列選択クリアも 1 回の Undo/Redo で往復する")]
-    public void RelationshipTypeChange_WithDependentColumnClear_CanUndoRedoAsSingleStep()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        vm.AddEntityCommand.Execute(null);
-        vm.Entities[1]
-            .Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
-        vm.StartAddOneToManyCommand.Execute(null);
-        vm.OnEntityClicked(vm.Entities[0]);
-        vm.OnEntityClicked(vm.Entities[1]);
-        var relationship = vm.Relationships[0];
-        var originalPair = relationship.ColumnPairs.Should().ContainSingle().Subject;
-
-        relationship.Type = RelationshipType.ManyToMany;
-
-        relationship.ColumnPairs.Should().BeEmpty();
-        relationship.ColumnPairRows.Should().BeEmpty();
-
-        vm.UndoCommand.Execute(null);
-        relationship.Type.Should().Be(RelationshipType.OneToMany);
-        relationship
-            .ColumnPairs.Should()
-            .ContainSingle()
-            .Subject.Should()
-            .BeEquivalentTo(originalPair);
-        relationship.ColumnPairRows.Should().ContainSingle();
-
-        vm.RedoCommand.Execute(null);
-        relationship.Type.Should().Be(RelationshipType.ManyToMany);
-        relationship.ColumnPairs.Should().BeEmpty();
-    }
-
-    /// <summary>リレーションの FK 列変更にカラム定義側の FK 状態が追従することを検証する</summary>
-    [Fact(DisplayName = "リレーションの FK 列変更でカラム定義側の FK 状態も追従する")]
-    public void RelationshipTargetColumnChange_UpdatesForeignKeyFlags()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        vm.AddEntityCommand.Execute(null);
-        vm.Entities[1]
-            .Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
-        vm.Entities[1]
-            .Columns.Add(new ColumnViewModel(new Column { Name = "ParentCode", DataType = "int" }));
-        vm.StartAddOneToManyCommand.Execute(null);
-        vm.OnEntityClicked(vm.Entities[0]);
-        vm.OnEntityClicked(vm.Entities[1]);
-        var relationship = vm.Relationships[0];
-        var originalTargetColumn = vm.Entities[1]
-            .Columns.First(column => column.Id == relationship.ColumnPairs[0].TargetColumnId);
-        var newTargetColumn = vm.Entities[1].Columns.Single(column => column.Name == "ParentCode");
-
-        // プロパティパネルの列ペア行で子列を選び直すのと同じ経路をたどる
-        relationship.ColumnPairRows[0].SelectedTargetColumn = newTargetColumn;
-
-        originalTargetColumn.IsForeignKey.Should().BeFalse();
-        originalTargetColumn.IsForeignKeyEditable.Should().BeTrue();
-        newTargetColumn.IsForeignKey.Should().BeTrue();
-        newTargetColumn.IsForeignKeyEditable.Should().BeFalse();
-
-        vm.UndoCommand.Execute(null);
-        originalTargetColumn.IsForeignKey.Should().BeTrue();
-        originalTargetColumn.IsForeignKeyEditable.Should().BeFalse();
-        newTargetColumn.IsForeignKey.Should().BeFalse();
-        newTargetColumn.IsForeignKeyEditable.Should().BeTrue();
-    }
-
-    /// <summary>カラム追加が Undo / Redo できることを検証する</summary>
-    [Fact(DisplayName = "カラム追加は Undo/Redo できる")]
-    public void AddColumn_CanUndoRedo()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        vm.SelectedEntity = vm.Entities[0];
-        var initialCount = vm.SelectedEntity.Columns.Count;
-
-        vm.AddColumnCommand.Execute(null);
-
-        vm.SelectedEntity.Columns.Should().HaveCount(initialCount + 1);
-        vm.SelectedColumn.Should().Be(vm.SelectedEntity.Columns.Last());
-
-        vm.UndoCommand.Execute(null);
-        vm.SelectedEntity.Columns.Should().HaveCount(initialCount);
-
-        vm.RedoCommand.Execute(null);
-        vm.SelectedEntity.Columns.Should().HaveCount(initialCount + 1);
     }
 
     /// <summary>選択エンティティをコピーして位置をずらした複製として貼り付けできることを検証する</summary>
@@ -602,39 +396,6 @@ public class MainViewModelTests
         original.IsSelected.Should().BeFalse();
     }
 
-    /// <summary>エンティティ貼り付けが連続実行で位置・名前がずれ、Undo / Redo できることを検証する</summary>
-    [Fact(DisplayName = "エンティティ貼り付けは連続実行で位置と名前がずれ、Undo/Redo できる")]
-    public void PasteCopiedEntity_CanRepeatAndUndoRedo()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        var original = vm.Entities[0];
-        original.TableName = "Order";
-        original.X = 90;
-        original.Y = 140;
-        vm.OnEntityClicked(original);
-
-        vm.CopySelectedEntityCommand.Execute(null);
-        vm.PasteCopiedEntityCommand.Execute(null);
-        vm.PasteCopiedEntityCommand.Execute(null);
-
-        vm.Entities.Select(entity => entity.TableName)
-            .Should()
-            .Equal("Order", "Order_Copy", "Order_Copy2");
-        vm.Entities[1].X.Should().Be(120);
-        vm.Entities[1].Y.Should().Be(170);
-        vm.Entities[2].X.Should().Be(150);
-        vm.Entities[2].Y.Should().Be(200);
-
-        vm.UndoCommand.Execute(null);
-        vm.Entities.Select(entity => entity.TableName).Should().Equal("Order", "Order_Copy");
-
-        vm.RedoCommand.Execute(null);
-        vm.Entities.Select(entity => entity.TableName)
-            .Should()
-            .Equal("Order", "Order_Copy", "Order_Copy2");
-    }
-
     /// <summary>選択カラムをコピーして選択行の直下へ複製挿入できることを検証する</summary>
     [Fact(DisplayName = "選択カラムはコピーして直下へ貼り付けできる")]
     public void CopyPasteSelectedColumn_InsertsCloneBelowSelection()
@@ -672,137 +433,6 @@ public class MainViewModelTests
         vm.SelectedColumn.DataType.Should().Be("nvarchar(50)");
         vm.SelectedColumn.IsNullable.Should().BeTrue();
         vm.SelectedColumn.Description.Should().Be("コード");
-    }
-
-    /// <summary>カラム貼り付けが Undo / Redo できることを検証する</summary>
-    [Fact(DisplayName = "カラム貼り付けは Undo/Redo できる")]
-    public void PasteCopiedColumn_CanUndoRedo()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        vm.SelectedEntity = vm.Entities[0];
-        vm.SelectedEntity.Columns.Add(
-            new ColumnViewModel(new Column { Name = "Code", DataType = "int" })
-        );
-        vm.SelectedColumn = vm.SelectedEntity.Columns[1];
-
-        vm.CopySelectedColumnCommand.Execute(null);
-        vm.PasteCopiedColumnCommand.Execute(null);
-
-        vm.SelectedEntity.Columns.Select(column => column.Name)
-            .Should()
-            .Equal("ID", "Code", "Code");
-
-        vm.UndoCommand.Execute(null);
-        vm.SelectedEntity.Columns.Select(column => column.Name).Should().Equal("ID", "Code");
-
-        vm.RedoCommand.Execute(null);
-        vm.SelectedEntity.Columns.Select(column => column.Name)
-            .Should()
-            .Equal("ID", "Code", "Code");
-    }
-
-    /// <summary>カラム削除が Undo / Redo できることを検証する</summary>
-    [Fact(DisplayName = "カラム削除は Undo/Redo できる")]
-    public void RemoveColumn_CanUndoRedo()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        vm.SelectedEntity = vm.Entities[0];
-        vm.SelectedEntity.Columns.Add(
-            new ColumnViewModel(new Column { Name = "B", DataType = "int" })
-        );
-        var removed = vm.SelectedEntity.Columns[0];
-
-        vm.RemoveColumnCommand.Execute(removed);
-
-        vm.SelectedEntity.Columns.Select(c => c.Name).Should().Equal("B");
-
-        vm.UndoCommand.Execute(null);
-        vm.SelectedEntity.Columns.Select(c => c.Name).Should().Equal("ID", "B");
-
-        vm.RedoCommand.Execute(null);
-        vm.SelectedEntity.Columns.Select(c => c.Name).Should().Equal("B");
-    }
-
-    /// <summary>FK 設定済みカラムを削除して Undo すると、リレーションの FK 設定も復元されることを検証する</summary>
-    [Fact(
-        DisplayName = "FK に設定済みのカラムを削除して Undo するとリレーションの FK 設定も復元される"
-    )]
-    public void RemoveColumn_UsedAsFk_UndoRestoresRelationshipFk()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        vm.AddEntityCommand.Execute(null);
-
-        // Entity[1] に FK 列（親テーブル名+Id の命名規則）を追加してリレーションを作成する
-        vm.Entities[1]
-            .Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
-        vm.StartAddOneToManyCommand.Execute(null);
-        vm.OnEntityClicked(vm.Entities[0]);
-        vm.OnEntityClicked(vm.Entities[1]);
-
-        var relationship = vm.Relationships[0];
-
-        // FK 列として設定された子列を記憶する
-        var originalTargetColumnId = relationship
-            .ColumnPairs.Should()
-            .ContainSingle()
-            .Subject.TargetColumnId;
-
-        // FK カラムを削除する
-        vm.SelectedEntity = vm.Entities[1];
-        var columnToRemove = vm.Entities[1].Columns.First(c => c.Id == originalTargetColumnId);
-        vm.RemoveColumnCommand.Execute(columnToRemove);
-
-        // 削除後: 列ペアがクリアされている
-        relationship.ColumnPairs.Should().BeEmpty();
-
-        // Undo: カラムが復元され、リレーションの列ペアも復元される
-        vm.UndoCommand.Execute(null);
-        vm.Entities[1].Columns.Should().Contain(c => c.Id == originalTargetColumnId);
-        relationship
-            .ColumnPairs.Should()
-            .ContainSingle()
-            .Subject.TargetColumnId.Should()
-            .Be(originalTargetColumnId);
-
-        // Redo: 再度削除され列ペアもクリアされる
-        vm.RedoCommand.Execute(null);
-        vm.Entities[1].Columns.Should().NotContain(c => c.Id == originalTargetColumnId);
-        relationship.ColumnPairs.Should().BeEmpty();
-    }
-
-    /// <summary>主キー変更に伴う NULL 許容の連動変更も 1 回の Undo / Redo で往復することを検証する</summary>
-    [Fact(DisplayName = "PK チェック変更に伴う NULL 変更も 1 回の Undo/Redo で往復する")]
-    public void PrimaryKeyChange_WithDependentNullableChange_CanUndoRedoAsSingleStep()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        vm.SelectedEntity = vm.Entities[0];
-        vm.SelectedEntity.Columns.Add(
-            new ColumnViewModel(
-                new Column
-                {
-                    Name = "Code",
-                    DataType = "int",
-                    IsNullable = true,
-                }
-            )
-        );
-        var column = vm.SelectedEntity.Columns[1];
-
-        column.IsPrimaryKey = true;
-
-        column.IsNullable.Should().BeFalse();
-
-        vm.UndoCommand.Execute(null);
-        column.IsPrimaryKey.Should().BeFalse();
-        column.IsNullable.Should().BeTrue();
-
-        vm.RedoCommand.Execute(null);
-        column.IsPrimaryKey.Should().BeTrue();
-        column.IsNullable.Should().BeFalse();
     }
 
     /// <summary>新規作成で図をクリアすると Undo / Redo 履歴もリセットされることを検証する</summary>
@@ -937,30 +567,6 @@ public class MainViewModelTests
         }
     }
 
-    /// <summary>ツールボックスを畳むとリレーション作成モードが中断されることを検証する</summary>
-    /// <remarks>
-    /// 作成モードの表示と「キャンセル」ボタンはツールボックス内にしかなく、Esc でも解除されない。
-    /// 畳んだまま残すと、画面のどこにも現れないモードだけが生き続ける。
-    /// </remarks>
-    [Fact(DisplayName = "ツールボックスを畳むとリレーション作成モードは中断される")]
-    public void HidingToolbox_CancelsRelationshipMode()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        vm.AddEntityCommand.Execute(null);
-        vm.StartAddOneToManyCommand.Execute(null);
-        vm.OnEntityClicked(vm.Entities[0]);
-
-        vm.IsRelationshipMode.Should().BeTrue();
-        vm.PendingRelationshipSource.Should().NotBeNull();
-
-        vm.IsToolboxVisible = false;
-
-        vm.IsRelationshipMode.Should().BeFalse();
-        vm.PendingRelationshipSource.Should().BeNull();
-        vm.Relationships.Should().BeEmpty();
-    }
-
     /// <summary>簡易表示の切替が全エンティティへ伝播することを検証する</summary>
     [Fact(DisplayName = "簡易表示の切替は全エンティティへ伝播する")]
     public void IsCompactViewInDiagram_PropagatesToAllEntities()
@@ -1021,83 +627,6 @@ public class MainViewModelTests
         }
     }
 
-    /// <summary>カラム並び順の変更が Undo / Redo できることを検証する</summary>
-    [Fact(DisplayName = "カラム順変更は Undo/Redo できる")]
-    public void ColumnOrderChange_CanUndoRedo()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        var entity = vm.Entities[0];
-        entity.Columns[0].Name = "A";
-        entity.Columns.Add(new ColumnViewModel(new Column { Name = "B", DataType = "int" }));
-        entity.Columns.Add(new ColumnViewModel(new Column { Name = "C", DataType = "int" }));
-
-        vm.UndoRedo.Execute(new MoveColumnOrderCommand(entity.Columns, entity.Columns[0], 2));
-
-        entity.Columns.Select(c => c.Name).Should().Equal("B", "C", "A");
-
-        vm.UndoCommand.Execute(null);
-        entity.Columns.Select(c => c.Name).Should().Equal("A", "B", "C");
-
-        vm.RedoCommand.Execute(null);
-        entity.Columns.Select(c => c.Name).Should().Equal("B", "C", "A");
-    }
-
-    /// <summary>格子整列が Undo / Redo できることを検証する</summary>
-    [Fact(DisplayName = "格子整列は Undo/Redo できる")]
-    public void AutoLayoutGrid_CanUndoRedo()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        vm.AddEntityCommand.Execute(null);
-        vm.Entities[0].X = 500;
-        vm.Entities[0].Y = 300;
-        vm.Entities[1].X = 120;
-        vm.Entities[1].Y = 700;
-        var before = vm.Entities.Select(entity => (entity.X, entity.Y)).ToArray();
-
-        vm.AutoLayoutGridCommand.Execute(null);
-
-        var after = vm.Entities.Select(entity => (entity.X, entity.Y)).ToArray();
-        after.Should().NotEqual(before);
-
-        vm.UndoCommand.Execute(null);
-        vm.Entities.Select(entity => (entity.X, entity.Y)).Should().Equal(before);
-
-        vm.RedoCommand.Execute(null);
-        vm.Entities.Select(entity => (entity.X, entity.Y)).Should().Equal(after);
-    }
-
-    /// <summary>木整列が Undo / Redo できることを検証する</summary>
-    [Fact(DisplayName = "木整列は Undo/Redo できる")]
-    public void AutoLayoutTree_CanUndoRedo()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        vm.AddEntityCommand.Execute(null);
-        vm.Entities[1]
-            .Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
-        vm.StartAddOneToManyCommand.Execute(null);
-        vm.OnEntityClicked(vm.Entities[0]);
-        vm.OnEntityClicked(vm.Entities[1]);
-        vm.Entities[0].X = 600;
-        vm.Entities[0].Y = 500;
-        vm.Entities[1].X = 100;
-        vm.Entities[1].Y = 150;
-        var before = vm.Entities.Select(entity => (entity.X, entity.Y)).ToArray();
-
-        vm.AutoLayoutTreeCommand.Execute(null);
-
-        var after = vm.Entities.Select(entity => (entity.X, entity.Y)).ToArray();
-        after.Should().NotEqual(before);
-
-        vm.UndoCommand.Execute(null);
-        vm.Entities.Select(entity => (entity.X, entity.Y)).Should().Equal(before);
-
-        vm.RedoCommand.Execute(null);
-        vm.Entities.Select(entity => (entity.X, entity.Y)).Should().Equal(after);
-    }
-
     // ---------------- ダイアログサービス (IDialogService) ----------------
 
     /// <summary>新規作成の確認でキャンセルすると現在のダイアグラムが保持されることを検証する（未保存編集ありのため警告水準の確認）</summary>
@@ -1136,32 +665,5 @@ public class MainViewModelTests
         vm.Entities.Should().BeEmpty();
         dialogs.WarningConfirmMessages.Should().HaveCount(1);
         dialogs.ConfirmMessages.Should().BeEmpty();
-    }
-
-    /// <summary>重複リレーション作成時に情報ダイアログが表示され、追加されないことを検証する</summary>
-    [Fact(DisplayName = "重複リレーション作成時は情報ダイアログが表示され追加されない")]
-    public void RelationshipMode_DuplicateRelationship_ShowsInformation()
-    {
-        var dialogs = new StubDialogService();
-        var vm = new MainViewModel(dialogs);
-        vm.AddEntityCommand.Execute(null);
-        vm.AddEntityCommand.Execute(null);
-        var a = vm.Entities[0];
-        var b = vm.Entities[1];
-
-        vm.StartAddOneToManyCommand.Execute(null);
-        vm.OnEntityClicked(a);
-        vm.OnEntityClicked(b);
-
-        vm.StartAddOneToManyCommand.Execute(null);
-        vm.OnEntityClicked(a);
-        vm.OnEntityClicked(b);
-
-        vm.Relationships.Should().HaveCount(1);
-        dialogs
-            .InformationMessages.Should()
-            .ContainSingle()
-            .Which.Should()
-            .Be(Strings.Relationship_DuplicateMessage);
     }
 }

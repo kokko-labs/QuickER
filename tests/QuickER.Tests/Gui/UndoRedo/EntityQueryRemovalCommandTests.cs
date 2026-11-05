@@ -37,43 +37,6 @@ public class EntityQueryRemovalCommandTests
         main.Queries.Select(query => query.Name).ToList();
 
     [Fact(
-        DisplayName = "RemoveEntityCommand: そのエンティティのクエリを取り除き、Undo で元の位置へ戻す"
-    )]
-    public void RemoveEntityCommand_RemovesAndRestoresQueries()
-    {
-        var (main, order, _) = Build();
-        var original = main.Queries.ToList();
-        var command = new RemoveEntityCommand(main, order);
-
-        command.Execute();
-        QueryNames(main).Should().Equal("FindByName");
-
-        command.Undo();
-        main.Queries.Should()
-            .Equal(original, (actual, expected) => ReferenceEquals(actual, expected));
-
-        command.Execute();
-        QueryNames(main).Should().Equal("FindByName");
-    }
-
-    [Fact(
-        DisplayName = "GroupRemoveEntitiesCommand: 対象すべてのクエリを取り除き、Undo で元の位置へ戻す"
-    )]
-    public void GroupRemoveEntitiesCommand_RemovesAndRestoresQueries()
-    {
-        var (main, order, customer) = Build();
-        var original = main.Queries.ToList();
-        var command = new GroupRemoveEntitiesCommand(main, [order, customer]);
-
-        command.Execute();
-        main.Queries.Should().BeEmpty();
-
-        command.Undo();
-        main.Queries.Should()
-            .Equal(original, (actual, expected) => ReferenceEquals(actual, expected));
-    }
-
-    [Fact(
         DisplayName = "RemoveEntityCommand: 削除後にクエリ一覧が差し替わっても、Undo は一覧の長さまでで挿し戻す"
     )]
     public void RemoveEntityCommand_Undo_AfterQueriesReplaced_ClampsPosition()

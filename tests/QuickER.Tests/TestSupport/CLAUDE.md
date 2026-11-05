@@ -103,7 +103,7 @@
 2. 2 つのツールホスト：`TestSupport/TwoHostToolHarness`（WPF 依存なので Engines/ の外）。
    - ホストを行列の軸 `MatrixAxis<IToolHostAdapter>` として登録する。正本の列挙は `ToolHostKind { Gui, File }`。
    - ホストごとに違う部分（ツールの実行・現在の図・図への直接の書き込み）は `ToolHostSession` の抽象メンバー。GUI のセッションは方言を指定せず（MainViewModel の既定）、File は呼び出し側の方言で図ファイルを作る。
-   - 使うのは `TwoHostToolTestBase`・`NameIdentityToolFuzzTests`・`ErDiagramToolHostParityTests`・`ConstraintNameCreationPathTests`。Parity は 2 つのホストを同時に持って 1 手ずつ比べる。CNCP は DDL と同じ名前を独立の期待値として照合する。ホストどうしを比べるだけでは両方が同時に退行しても緑のままなので、作成経路の照合を Parity へ載せない。
+   - 使うのは `ToolScenarioTests`（`OpenAligned`＝GUI も 5 方言のレジストリと画面を出さないダイアログで行の方言の図を開き、開けなければ例外・`ToolHostSession.WroteDiagram`＝GUI は Undo の世代と未保存の状態・File はファイルのバイトと、呼び出しの前に過去の固定の値へ戻した更新日時で「図を書いたか」を見る＝同じ内容の書き直しも書いたとみなす）・`NameIdentityToolFuzzTests`・`ErDiagramToolHostParityTests`・`ConstraintNameCreationPathTests`。Parity は 2 つのホストを同時に持って 1 手ずつ比べる。CNCP は DDL と同じ名前を独立の期待値として照合する。ホストどうしを比べるだけでは両方が同時に退行しても緑のままなので、作成経路の照合を Parity へ載せない。
    - `TestSupport/ToolHostAxisGuardTests` は、`ToolHostKind` を引数に取る Theory を反射で集め、ほかの引数の組ごとに軸の全ホストの行（InlineData・MemberData・ClassData）があることを照合する。
    - 前提の図ファイルは `TestSupport/DiagramFiles.Create`（WPF 非依存・create_diagram を実行して成功を表明する）で作る。create_diagram そのものを確かめるテストは使わない。
 3. 引数の形の総当たり：`TestSupport/ToolArgumentShapeFuzzRunner`（WPF 非依存）。順は「ベースライン → 崩したケース → `KnownCaseLedger` → 3 つの表明 → 台帳の古い項目 → 網羅の計数 → 最低件数」。3 つの入口は `Entrance` の抽象メンバーだけを渡す。
@@ -230,7 +230,7 @@
   - `CultureInvariantDialectOutputTests`：5 方言の DDL・同期スクリプト・型の解析と変換と正規化を、`CultureScope.Cultures`（tr-TR・de-DE・ja-JP・sv-SE・th-TH）でインバリアントと照合する。生成日時が西暦であること。`CultureInvariantDialectOutputTests.ImportedTypeSpelling_IsCultureInvariant` は、取込が DB のカタログから型の表記を組み立てる関数（SQL Server・Oracle の `FormatDataType`・PostgreSQL の `NormalizeFormatType`・MySQL の `MySqlTypeNotation.Normalize`）へ、負の値を含む長さ・精度・スケールの組み合わせを総当たりで流す（SQLite は宣言の型をそのまま入れるので対象に無い）。
   - `CultureInvariantGenerationTests`：生成物の全ドリフトテストを各カルチャで流し直す。
   - `CultureInvariantExportTests`：Mermaid・DBML・HTML・Excel・SVG の出力と、Mermaid・DBML・Excel の取込。
-  - `CultureInvariantToolOutputTests`：MCP の要約・名前付きクエリの一覧・変更系ツールが保存する図。
+  - `CultureInvariantToolOutputTests`：MCP の要約・変更系ツールが保存する図。名前付きクエリの一覧は `QueryToolFormatterTests` の行 `formatter-listing-is-culture-invariant-english`。
   - `RegexCultureGuardTests`：src の `RegexOptions.IgnoreCase` を含むビット和に `CultureInvariant` があることとインラインの `(?i` が無いことの構文木の全数走査と、文字列リテラルの `\d`（奇数個の `\` に続く `d`）が `ECMAScript` の付いた呼び出し・属性の引数の外に無いこと。
   - 全角の数字：`DialectTypeTableTests` の `fullwidth-*` の行が、全角の数字を含む型の表記を 5 方言の型カタログ・型マッパー・正規化と `SqlTypeText.IsSafe` へ流し、例外にならず数字として読まないことを確かめる。`FullWidthDigitTypeNotationTests` が型トークン・長さだけの違いの判定・Mermaid の型の復元・Excel の `UQ` 番号で同じことを確かめる。
   - `GeneratedCodeCultureAnalyzerTests`：ランタイム 7 本と全フィクスチャ。自己検査は、auto-generated の印のあるソースで 4 規則が出て式木の中では出ないこと。

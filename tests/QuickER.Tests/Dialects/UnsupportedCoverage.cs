@@ -1359,7 +1359,10 @@ public static class UnsupportedCoverage
             UnsupportedDefinitionKind.ForeignKeyNotOnCandidateKey,
             UnsupportedFeature.ToolHosts,
             null,
-            ["ErDiagramToolResponseNoteTests.AddRelationship_ExplicitNonCandidateKey_IsReported"]
+            [
+                "ToolScenarioRows:note-add-relationship-explicit-non-candidate-key-is-reported-single",
+                "ToolScenarioRows:note-add-relationship-explicit-non-candidate-key-is-reported-composite",
+            ]
         ),
         (
             UnsupportedDefinitionKind.UniqueConstraintOnPrimaryKey,

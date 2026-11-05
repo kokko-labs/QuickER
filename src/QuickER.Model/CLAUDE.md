@@ -96,7 +96,7 @@ QuickER が付ける既定の制約名は識別子の長さの上限に収め、
 
 - `LongDefaultConstraintNameTests`（4 方言の DDL・同期・差分が同じ縮めた名前・PostgreSQL の吸収と吸収しないときの対照・利用者の名前は吸収しない）。
 - `PostgreSqlLongDefaultConstraintNameIntegrationTests`（能力を差し替えて吸収しない対照）。実 DB の期待の行 `realdb-long-default-names-apply-and-round-trip-no-diff` / `realdb-long-default-pg-legacy-truncated-fk-name-is-absorbed`（`SyncPlanExpectationRows.RealCrossDialect.cs`）。同期計画の来歴の行 `SyncPlanHistoryRows`。
-- `ErDiagramToolLongDefaultNameTests`（両ホストの保存名と要約・縮めた既定名との衝突・名前の無い外部キーの要約と削除と重複の名指し）・`MainViewModelRelationshipConstraintNameTests`（GUI の手作成）・`ImportLongDefaultNameTests`。
+- `ToolScenarioTests`（行 `long-default-name-*`＝両ホストの保存名と要約・縮めた既定名との衝突・名前の無い外部キーの要約と削除と重複の名指し）・`MainViewModelRelationshipConstraintNameTests`（GUI の手作成）・`ImportLongDefaultNameTests`。
 - `UniqueConstraintNameGenerationTests`・`UniqueConstraintResolvedNameLimitTests`（方言の切替で表示し直す。`ResolvedName_FollowsCollisionsAcrossTables`）・`IdentifierLengthLimitTests`（`Fit` / `Truncate`）。
 - mutation 実証済み。
 
@@ -108,7 +108,7 @@ QuickER が付ける既定の制約名は識別子の長さの上限に収め、
 - (1) GUI の名前の確定：`DiagramChangeTracker.NameEdited`（履歴へ積んだ編集でだけ発火。Undo / Redo・一括置換では発火しない。対象はテーブル名・カラム名・外部キー名・一意制約名）を `MainViewModel.OnNameEdited` が受け、図の対象 DBMS の上限で超過なら `NotifyStatus` で警告する（値は受け付ける）。
 - (2) ツールの応答：`NameLimitNotes`（Model）が変更の前後の違反を比べ、その呼び出しで新しく生じたものだけを英語の注意文にする。MCP のツールホストは `Mutate`、内蔵チャットのツールは `ErDiagramDynamicTools.Execute` が同じ関数を通る。
 - (3) 対象 DBMS の切替：`MainViewModel.CollectNamesRejectedBy` が切替先の上限で保存された名前を判定し、型の変換と同じ `ConfirmWarningDetails` に場所と理由つきで全件並べる。これだけでも確認のトリガーになる。
-- ガード：`NameLimitStatusWarningTests`（4 種類の名前・MySQL の表せない文字とファイル名・Undo / Redo と丸ごと置換で警告しない・切替の確認の一覧とキャンセル）・`ErDiagramToolNameLimitNoteTests`（両ホストで 5 つのツールと、以前からの違反を繰り返さないこと）・`NameLimitNotesTests`。mutation 実証済み。
+- ガード：`NameLimitStatusWarningTests`（4 種類の名前・MySQL の表せない文字とファイル名・Undo / Redo と丸ごと置換で警告しない・切替の確認の一覧とキャンセル）・`ToolScenarioTests`（行 `name-limit-*`＝両ホストで 5 つのツールと、以前からの違反を繰り返さないこと）・`NameLimitNotesTests`。mutation 実証済み。
 
 ## 一意制約
 
@@ -145,7 +145,7 @@ PK の順序の正本は `Entity.PrimaryKeyColumnIds`（列 Guid・宣言順）�
 - 編集経路は 2 つ。MCP／内蔵チャットの `set_primary_key`（テーブル名のみで照合する全体置換。挙げた列は NOT NULL 正規化・外れた列の NULL 許容は据え置き・列は最低 1 つ必要）と、GUI の「主キーの順序」カード（複合 PK のときだけ表示）。詳細は GUI・MCP の領域の CLAUDE.md に従う。一度でも順序を明示すると、その図では順序が固定される。
 - 往復統合テストの不動点表明だけでは取込の順序喪失を検出できない（取込が順序を落とすと 1 回目の射影・再生成 DDL・2 回目の射影がそろって列順になり一致する）。5 方言の `*DdlRoundTripIntegrationTests` は起点 DDL の宣言順と突き合わせる `SchemaReapplyAssertions.ShouldHavePrimaryKeyOrder` を併用する。射影側の `PrimaryKey` は join 文字列なので、`BeEquivalentTo` がコレクション順序を既定で無視する List では検出できない。
 - ガード：`EntityPrimaryKeyOrderTests`（merge 規則・Clone 張り替え）・`SchemaSignatureTests` の順序系・`EntityViewModelTests`（パススルー・並び替え行の実効順と行インスタンス使い回し）・`DiagramMergeReconcilerTests`・`PrimaryKeyOrderPersistenceTests`（欠落・明示 null の読み）・同期計画の期待の行の主キーの順序の行（`diff-pk-order-*`・`plan-rebuild-selected-alter-pk-remaps-pk-order` など）・5 方言の `*DdlGeneratorTests` / `*SyncScriptBuilderTests` の FollowsPrimaryKeyColumnIds 系。
-- 編集経路のガード：`MainViewModelPrimaryKeyOrderTests`（Undo 1 回で戻る・NULL 許容の復活・端の行・ピン留めの履歴化）・`PrimaryKeyOrderCardTests`（カードの配線）・`ErDiagramDynamicToolsPrimaryKeyTests` / `DocumentErDiagramPrimaryKeyToolTests`（両ホストのツール）・`ErDiagramToolHostParityTests`（`EntitySnap.PrimaryKeyOrder`＝実効順と `StoredPrimaryKeyColumnIds`＝保存リストの列名写像〔解決不能 Guid は `?`〕の両方を射影し、順序の食い違いを検知する。最後に成功する `set_primary_key` は列宣言順と食い違う並び）。mutation 実証済み。
+- 編集経路のガード：`UndoOperationTests`（行 `primary-key-*`＝Undo 1 回で戻る・NULL 許容の復活・端の行・ピン留めの履歴化）・`PrimaryKeyOrderCardTests`（カードの配線）・`ToolScenarioTests`（行 `primary-key-*`＝両ホストのツール）・`ErDiagramDynamicToolsPrimaryKeyTests`（GUI のツールの Undo）・`ErDiagramToolHostParityTests`（`EntitySnap.PrimaryKeyOrder`＝実効順と `StoredPrimaryKeyColumnIds`＝保存リストの列名写像〔解決不能 Guid は `?`〕の両方を射影し、順序の食い違いを検知する。最後に成功する `set_primary_key` は列宣言順と食い違う並び）。mutation 実証済み。
 
 ## 主キーの順序の出力判定
 
@@ -172,7 +172,7 @@ PK の順序の正本は `Entity.PrimaryKeyColumnIds`（列 Guid・宣言順）�
 - 制約名は AI ツールと同じ `ConstraintNames.UniqueForeignKey`（衝突しなければ既定名のまま）。
 - 列削除は当該リレーションの全ペアをクリアする（線・種別・制約名は残す。1 Undo 単位。MCP remove_column とパリティ）。
 - MCP / 内蔵チャットの add_relationship：`source_columns` / `target_columns`（並行配列・同数・宣言順・省略時は親 PK 全列自動ペア化）と任意の `constraint_name`。
-  - 明示した親側の列が `Entity.IsCandidateKey`（主キー全列か一意制約の列集合と一致）でなければ、拒否せず注意文を添える（MySQL は一意でない索引列を参照できるため）。`ErDiagramToolResponseNoteTests` が両ホストで固定する。
+  - 明示した親側の列が `Entity.IsCandidateKey`（主キー全列か一意制約の列集合と一致）でなければ、拒否せず注意文を添える（MySQL は一意でない索引列を参照できるため）。`ToolScenarioTests`（行 `note-add-relationship-explicit-non-candidate-key-is-reported-*`）が両ホストで固定する。
   - `constraint_name` は、図の既存の FK・PK・一意制約の名前（`ConstraintNames.CollectExisting`＝DDL が付ける名前）と大文字小文字を無視して衝突すれば拒否する。省略時は `ConstraintNames.UniqueForeignKey` が既定名・子の列名・番号の順に衝突しない名前を付ける。
   - remove_relationship は複数一致時に `constraint_name` で特定する（無指定なら候補列挙エラー）。get_diagram_summary に列ペアと制約名を表示する。
 - DBML は複合 Ref 構文 `Ref: p.(a,b) < c.(x,y)` の出力＋取込（取込の列再推論は無く、Ref 行の列名が正本。不整合行はペアだけ破棄）。Excel/HTML 定義書は列セルをカンマ区切り複数列表記（`FK{n}` は複合の全構成子列に同番。`UQ{n}` と同流儀）。Mermaid は列構文が無いので出力現状維持、取込推論は PK 全列ペア化。

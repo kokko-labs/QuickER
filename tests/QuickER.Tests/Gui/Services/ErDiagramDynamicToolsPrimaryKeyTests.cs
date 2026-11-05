@@ -7,9 +7,8 @@ using QuickER.ViewModels;
 namespace QuickER.Tests.Gui.Services;
 
 /// <summary>
-/// GUI 実行ホスト（<see cref="ErDiagramDynamicTools"/>）の主キーツール（<c>set_primary_key</c>）と、
-/// 要約出力・Undo 可能性を検証する。意味論の対はファイル実行ホスト側の
-/// <c>DocumentErDiagramPrimaryKeyToolTests</c>。
+/// GUI 実行ホスト（<see cref="ErDiagramDynamicTools"/>）の主キーツール（<c>set_primary_key</c>）の Undo 可能性を検証する。
+/// 主キーの意味論（指定順・NOT NULL 化・不正な引数）は 2 ホストの表（<c>ToolScenarioRows.PrimaryKey.cs</c>）が見る。
 /// </summary>
 public class ErDiagramDynamicToolsPrimaryKeyTests
 {
@@ -124,60 +123,5 @@ public class ErDiagramDynamicToolsPrimaryKeyTests
         code = TenantRegion(vm).Columns.Single(column => column.Name == "Code");
         code.IsPrimaryKey.Should().BeFalse();
         code.IsNullable.Should().BeTrue();
-    }
-
-    [Fact(DisplayName = "set_primary_key は列名の大文字小文字を無視して照合する")]
-    public void SetPrimaryKey_ColumnNames_AreMatchedCaseInsensitively()
-    {
-        var vm = CreateVmWithTenantRegion();
-
-        var (_, success) = Exec(
-            vm,
-            "set_primary_key",
-            new { table_name = "TenantRegion", columns = new[] { "regioncode", "tenantid" } }
-        );
-
-        success.Should().BeTrue();
-        Order(TenantRegion(vm)).Should().Equal("RegionCode", "TenantId");
-    }
-
-    [Fact(DisplayName = "set_primary_key は不正な引数をエラーにし図を変更しない")]
-    public void SetPrimaryKey_InvalidArguments_FailWithoutTouchingDiagram()
-    {
-        var invalidArguments = new object[]
-        {
-            new { table_name = "Ghost", columns = new[] { "TenantId" } },
-            new { table_name = "TenantRegion", columns = Array.Empty<string>() },
-            new { table_name = "TenantRegion", columns = new[] { "NoSuchColumn" } },
-            new { table_name = "TenantRegion", columns = new[] { "TenantId", "tenantid" } },
-            new { table_name = "TenantRegion" },
-        };
-
-        foreach (var args in invalidArguments)
-        {
-            var vm = CreateVmWithTenantRegion();
-
-            var (_, success) = Exec(vm, "set_primary_key", args);
-
-            success.Should().BeFalse();
-            Order(TenantRegion(vm)).Should().Equal("TenantId", "RegionCode");
-            vm.UndoRedo.CanUndo.Should().BeFalse();
-        }
-    }
-
-    [Fact(DisplayName = "get_diagram_summary は set_primary_key で設定した主キー順を注記する")]
-    public void GetDiagramSummary_NotesPrimaryKeyOrder()
-    {
-        var vm = CreateVmWithTenantRegion();
-        Exec(
-            vm,
-            "set_primary_key",
-            new { table_name = "TenantRegion", columns = new[] { "RegionCode", "TenantId" } }
-        );
-
-        var (result, success) = Exec(vm, "get_diagram_summary", new { });
-
-        success.Should().BeTrue();
-        result.Should().Contain("RegionCode, TenantId");
     }
 }

@@ -76,3 +76,16 @@
 - DBML のリテラルは `DbmlLiteral.Escape` / `Unescape` の対で扱う。
   - `\` 二重化 → `'` エスケープ。復元は左から 1 パスで行う（逐次 `Replace` にすると、解いた結果がもう一方のエスケープに見えて二重に解ける）。
   - 改行は空白へ畳む。複数行 Note の `'''` ブロックは `DbmlImporter` が行単位解析で非対応のため。
+
+## 自動整列の共通の性質
+- 4 つの整列（`AutoLayoutService` の `LayoutGrid`〔リレーション考慮〕・`LayoutTree`・`LayoutForceDirected`・`LayoutAppend`）は、図の形に依らず次を満たす。
+  - 例外を出さない（空の図も）。
+  - 決定的（同じ入力を 2 回流すと座標が同じ）。乱数を使わない。
+  - 表の矩形（`Width` × `DisplayHeight`・間隔を足さない）が重ならない。
+  - 置いた表は配置前の座標から動く（追記は新しい表）。追記は固定の表を動かさない。
+  - 追記は新しい表を固定の群の下か右（占有面積の小さい側）へまとめて置き、固定の群に食い込ませない。
+- 壊すと：同じ図を開くたびに配置が変わる、表が重なって読めない、追記で既存の配置が崩れる。どれもビルドは通る。
+- ガード：`AutoLayoutScenarioTests`。
+  - `Combo_KeepsCommonProperties`：図の形 12（`LayoutShapes`）× 整列の種類 4 の全組に共通の性質を当てる。追記の組は、形ごとに宣言した置き場所（`LayoutShapes.AppendPlacementOf`）と実際の置き場所を照合する（下を選ぶ形と右を選ぶ形の両方を持つ）。
+  - `Row_MeetsMetrics`：元のテストの図と閾値の行（交差数・占有面積・軸整列・中心の距離・Margin）。
+- 座標そのものが仕様のもの（格子の並び・旧実装との一致・階層の深さと中央寄せ・追記の近傍・説明込みの高さ・最適化のダイジェスト）は、個別のテスト（`AutoLayoutServiceTests`・`AutoLayoutAppendTests`・`AutoLayoutOptimizationTests`）が持つ。

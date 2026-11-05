@@ -1,4 +1,6 @@
+using QuickER.Tests.Gui.Services;
 using QuickER.Tests.Gui.UndoRedo;
+using QuickER.Tests.Mcp.Tools;
 using QuickER.Tests.Provider;
 using QuickER.Tests.TestSupport.Engines;
 
@@ -22,5 +24,9 @@ internal static class EngineRegistry
         CodeGen.CSharp.CodegenConfig.CodegenConfigDimensions.ErrorsDescriptor,
         CodeGen.CSharp.CodegenConfig.CodegenConfigDimensions.SuccessDescriptor,
         CodeGen.CSharp.CodegenConfig.CodegenConfigDimensions.CasesDescriptor,
+        ToolScenarioDimensions.Descriptor,
+        UndoOperationDimensions.Descriptor,
+        SelectionInvariantDimensions.Descriptor,
+        AutoLayoutDimensions.Descriptor,
     ];
 }

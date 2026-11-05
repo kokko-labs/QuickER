@@ -14,7 +14,9 @@ namespace QuickER.Tests.Gui.ViewModels;
 /// </summary>
 /// <remarks>
 /// 選択数に追従する派生プロパティ（<c>IsMultiSelectionActive</c> / <c>SelectedEntityCountText</c>）の通知と、
-/// 一括削除・一括色変更が「複合 1 エントリ」で Undo できること（履歴の分裂・二重登録が無いこと）を確認する。
+/// 実変更のない一括色変更が履歴を積まないことを確認する。一括削除・一括色変更が「複合 1 エントリ」で Undo できること
+/// （履歴の分裂・二重登録が無いこと）は、操作の往復の表（<see cref="QuickER.Tests.Gui.UndoRedo.UndoOperationRows"/> の
+/// <c>entity-bulk-*</c>・<c>entity-single-selection-*</c> の行）が流す。
 /// </remarks>
 public class MainViewModelBulkOperationTests
 {
@@ -55,28 +57,6 @@ public class MainViewModelBulkOperationTests
         var entity = new EntityViewModel(model, layout);
         vm.Entities.Add(entity);
         return entity;
-    }
-
-    /// <summary>2 つのエンティティを結ぶリレーション ViewModel を生成してキャンバスへ追加する</summary>
-    private static RelationshipViewModel AddRelationship(
-        MainViewModel vm,
-        EntityViewModel source,
-        EntityViewModel target
-    )
-    {
-        var relationship = new RelationshipViewModel(
-            new Relationship
-            {
-                SourceEntityId = source.Id,
-                TargetEntityId = target.Id,
-                Type = RelationshipType.OneToMany,
-            },
-            source,
-            target
-        );
-
-        vm.Relationships.Add(relationship);
-        return relationship;
     }
 
     /// <summary>指定 ViewModel のプロパティ変更通知を記録するトラッカーを取り付ける</summary>
@@ -149,162 +129,37 @@ public class MainViewModelBulkOperationTests
         raised.Should().Contain(nameof(MainViewModel.SelectedEntityCountText));
     }
 
-    // ---------------- 一括削除（複合 1 エントリ Undo） ----------------
+    // ---------------- 一括色変更（実変更なしは履歴を積まない） ----------------
 
-    [Fact(
-        DisplayName = "一括削除: 3 個選択→削除でエンティティ・接続線が消え、1 回の Undo で全復元"
+    /// <summary>実変更のない一括色変更（全員同色・同じ色の別表記）が、履歴を積まず未保存にもならないことを検証する</summary>
+    /// <param name="existingColor">全員が持っている見出しの色</param>
+    /// <param name="firstColor">1 回目に指定する色</param>
+    /// <param name="secondColor">2 回目に指定する色（null は指定しない）</param>
+    [Theory(
+        DisplayName = "一括色変更: 全員同色なら、同じ色の別表記（小文字・色名・前後の空白）でも履歴を積まず未保存にならない"
     )]
-    public void BulkDelete_RemovesAllAndSingleUndoRestores()
+    [InlineData("#ABCDEF", "#ABCDEF", null)] // 全員同色なら履歴を積まない（実変更なし）
+    [InlineData("#FFCC00", "#ffcc00", " #FFCC00 ")] // 同じ色の別表記（小文字・前後の空白）を指定しても、履歴を積まず未保存にならない
+    public void BulkColorChange_NoOpWhenAlreadySameColor(
+        string existingColor,
+        string firstColor,
+        string? secondColor
+    )
     {
         var vm = new MainViewModel();
-        var a = AddEntity(vm, "A");
-        var b = AddEntity(vm, "B");
-        var c = AddEntity(vm, "C");
-        var relAb = AddRelationship(vm, a, b);
-        var relBc = AddRelationship(vm, b, c);
-
-        vm.SelectAllEntitiesCommand.Execute(null);
-        vm.SelectedEntities.Should().HaveCount(3);
-
-        vm.RemoveSelectedEntityCommand.Execute(null);
-
-        // 全エンティティ・接続リレーションが消滅
-        vm.Entities.Should().BeEmpty();
-        vm.Relationships.Should().BeEmpty();
-
-        // Undo は複合 1 エントリ: 1 回で全復元、その後 CanUndo が偽
-        vm.UndoRedo.CanUndo.Should().BeTrue();
-        vm.UndoRedo.Undo();
-
-        vm.Entities.Should().BeEquivalentTo(new[] { a, b, c });
-        vm.Relationships.Should().BeEquivalentTo(new[] { relAb, relBc });
-        vm.UndoRedo.CanUndo.Should().BeFalse();
-    }
-
-    [Fact(DisplayName = "一括削除: Delete 経路（DeleteSelectedCommand）も選択中全員に作用")]
-    public void BulkDelete_ViaDeleteSelectedCommand()
-    {
-        var vm = new MainViewModel();
-        AddEntity(vm, "A");
-        AddEntity(vm, "B");
-        AddEntity(vm, "C");
-
-        vm.SelectAllEntitiesCommand.Execute(null);
-        vm.DeleteSelectedCommand.Execute(null);
-
-        vm.Entities.Should().BeEmpty();
-        vm.UndoRedo.CanUndo.Should().BeTrue();
-
-        vm.UndoRedo.Undo();
-        vm.Entities.Should().HaveCount(3);
-        vm.UndoRedo.CanUndo.Should().BeFalse();
-    }
-
-    // ---------------- 一括色変更（複合 1 エントリ Undo・二重登録なし） ----------------
-
-    [Fact(
-        DisplayName = "一括色変更: 3 個選択→色変更で全員反映、1 回の Undo で全員元の色（履歴 1 エントリ）"
-    )]
-    public void BulkColorChange_AppliesToAllAndSingleUndo()
-    {
-        var vm = new MainViewModel();
-        var a = AddEntity(vm, "A", titleColor: "#111111");
-        var b = AddEntity(vm, "B", titleColor: "#222222");
-        var c = AddEntity(vm, "C", titleColor: "#333333");
-
-        vm.SelectAllEntitiesCommand.Execute(null);
-
-        const string target = "#ABCDEF";
-        vm.BulkChangeTitleColorCommand.Execute(target);
-
-        a.TitleBackgroundColor.Should().Be(target);
-        b.TitleBackgroundColor.Should().Be(target);
-        c.TitleBackgroundColor.Should().Be(target);
-
-        // 履歴は複合 1 エントリ: 1 回の Undo で全員元の色へ戻り、CanUndo は偽になる
-        // （DiagramChangeTracker の自動記録による N 件分裂・二重登録が無いことの検証）
-        vm.UndoRedo.CanUndo.Should().BeTrue();
-        vm.UndoRedo.Undo();
-
-        a.TitleBackgroundColor.Should().Be("#111111");
-        b.TitleBackgroundColor.Should().Be("#222222");
-        c.TitleBackgroundColor.Should().Be("#333333");
-        vm.UndoRedo.CanUndo.Should().BeFalse();
-    }
-
-    [Fact(DisplayName = "一括色変更: 全員同色なら履歴を積まない（実変更なし）")]
-    public void BulkColorChange_NoOpWhenAlreadySameColor()
-    {
-        var vm = new MainViewModel();
-        AddEntity(vm, "A", titleColor: "#ABCDEF");
-        AddEntity(vm, "B", titleColor: "#ABCDEF");
-
-        vm.SelectAllEntitiesCommand.Execute(null);
-        vm.BulkChangeTitleColorCommand.Execute("#ABCDEF");
-
-        vm.UndoRedo.CanUndo.Should().BeFalse();
-    }
-
-    [Fact(
-        DisplayName = "一括色変更: 同じ色の別表記（小文字・色名）を指定しても、履歴を積まず未保存にならない"
-    )]
-    public void BulkColorChange_NoOpWhenSameColorInOtherNotation()
-    {
-        var vm = new MainViewModel();
-        AddEntity(vm, "A", titleColor: "#FFCC00");
-        AddEntity(vm, "B", titleColor: "#FFCC00");
+        AddEntity(vm, "A", titleColor: existingColor);
+        AddEntity(vm, "B", titleColor: existingColor);
         vm.SelectAllEntitiesCommand.Execute(null);
         var generation = vm.UndoRedo.ChangeGeneration;
 
-        vm.BulkChangeTitleColorCommand.Execute("#ffcc00");
-        vm.BulkChangeTitleColorCommand.Execute(" #FFCC00 ");
+        vm.BulkChangeTitleColorCommand.Execute(firstColor);
+
+        if (secondColor is not null)
+        {
+            vm.BulkChangeTitleColorCommand.Execute(secondColor);
+        }
 
         vm.UndoRedo.CanUndo.Should().BeFalse("実変更のない履歴を積まない");
         vm.UndoRedo.ChangeGeneration.Should().Be(generation, "未保存の判定も動かさない");
-    }
-
-    [Fact(DisplayName = "一括色変更: 別表記で指定した色は正規化して適用し、Undo / Redo で往復する")]
-    public void BulkColorChange_NormalizesNotationAndRoundTrips()
-    {
-        var vm = new MainViewModel();
-        var a = AddEntity(vm, "A", titleColor: "#111111");
-        var b = AddEntity(vm, "B", titleColor: "#FFCC00");
-        vm.SelectAllEntitiesCommand.Execute(null);
-
-        vm.BulkChangeTitleColorCommand.Execute("#ffcc00");
-
-        a.TitleBackgroundColor.Should().Be("#FFCC00");
-        b.TitleBackgroundColor.Should().Be("#FFCC00", "既に同じ色のメンバーは変更対象から外れる");
-
-        vm.UndoCommand.Execute(null);
-
-        a.TitleBackgroundColor.Should().Be("#111111");
-        b.TitleBackgroundColor.Should().Be("#FFCC00");
-        vm.UndoRedo.CanUndo.Should().BeFalse("履歴は 1 件だけ");
-
-        vm.RedoCommand.Execute(null);
-
-        a.TitleBackgroundColor.Should().Be("#FFCC00");
-    }
-
-    // ---------------- 単一選択時の従来挙動（非回帰） ----------------
-
-    [Fact(DisplayName = "単一選択: 削除は単一エンティティに作用（複合化しない）")]
-    public void SingleSelection_DeleteRemovesOnlyPrimary()
-    {
-        var vm = new MainViewModel();
-        var a = AddEntity(vm, "A");
-        var b = AddEntity(vm, "B");
-
-        vm.SelectedEntity = a;
-        a.IsSelected = true;
-
-        vm.IsMultiSelectionActive.Should().BeFalse();
-        vm.RemoveSelectedEntityCommand.Execute(null);
-
-        vm.Entities.Should().ContainSingle().Which.Should().Be(b);
-
-        vm.UndoRedo.Undo();
-        vm.Entities.Should().BeEquivalentTo(new[] { a, b });
     }
 }

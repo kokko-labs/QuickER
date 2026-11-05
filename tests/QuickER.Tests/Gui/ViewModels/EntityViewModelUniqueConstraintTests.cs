@@ -44,17 +44,44 @@ public class EntityViewModelUniqueConstraintTests
         };
     }
 
-    [Fact(DisplayName = "モデル → VM → ToModel で一意制約（名前・構成列・Id）が保存される")]
-    public void ToModel_RoundTrips_UniqueConstraints()
+    /// <summary>
+    /// モデル → VM → ToModel で一意制約（名前・構成列・Id）が保存され、制約名なしは null のまま、空欄の制約名は null へ戻ることを検証する
+    /// </summary>
+    /// <param name="modelName">モデルの制約名（null は制約名なし＝自動命名）</param>
+    /// <param name="rename">VM で制約名を書き換えるか</param>
+    /// <param name="renamedTo">書き換える制約名（書き換えないときは使わない）</param>
+    /// <param name="expectedName">ToModel の制約名</param>
+    [Theory(
+        DisplayName = "ToModel: 一意制約（名前・構成列・Id）が往復で保存され、空欄の制約名は null へ戻る"
+    )]
+    [InlineData("UQ_Item_Code_Kind", false, "", "UQ_Item_Code_Kind")] // モデル → VM → ToModel で一意制約（名前・構成列・Id）が保存される
+    [InlineData(null, false, "", null)] // 制約名なし（自動命名）は往復後も null のまま
+    [InlineData("UQ_Item_Code_Kind", true, "   ", null)] // 空欄の制約名はモデルでは null（未設定）へ戻る
+    public void ToModel_RoundTrips_UniqueConstraints(
+        string? modelName,
+        bool rename,
+        string renamedTo,
+        string? expectedName
+    )
     {
-        var model = NewModelWithCompositeConstraint(out var code, out var kind);
+        var model = NewModelWithCompositeConstraint(
+            out var code,
+            out var kind,
+            constraintName: modelName
+        );
         var constraintId = model.UniqueConstraints[0].Id;
+        var entity = new EntityViewModel(model);
 
-        var restored = new EntityViewModel(model).ToModel();
+        if (rename)
+        {
+            entity.UniqueConstraints[0].Name = renamedTo;
+        }
+
+        var restored = entity.ToModel();
 
         restored.UniqueConstraints.Should().ContainSingle();
         restored.UniqueConstraints[0].Id.Should().Be(constraintId);
-        restored.UniqueConstraints[0].Name.Should().Be("UQ_Item_Code_Kind");
+        restored.UniqueConstraints[0].Name.Should().Be(expectedName);
         restored
             .UniqueConstraints[0]
             .ColumnIds.Should()
@@ -63,27 +90,6 @@ public class EntityViewModelUniqueConstraintTests
         // 復元後の構成列 Guid が、同じ復元モデルの列 Guid を指していること（参照の自己整合）
         var restoredColumnIds = restored.Columns.Select(column => column.Id).ToList();
         restored.UniqueConstraints[0].ColumnIds.Should().BeSubsetOf(restoredColumnIds);
-    }
-
-    [Fact(DisplayName = "制約名なし（自動命名）は往復後も null のまま")]
-    public void ToModel_KeepsNullConstraintName()
-    {
-        var model = NewModelWithCompositeConstraint(out _, out _, constraintName: null);
-
-        var restored = new EntityViewModel(model).ToModel();
-
-        restored.UniqueConstraints[0].Name.Should().BeNull();
-    }
-
-    [Fact(DisplayName = "空欄の制約名はモデルでは null（未設定）へ戻る")]
-    public void ToModel_ConvertsBlankNameToNull()
-    {
-        var model = NewModelWithCompositeConstraint(out _, out _);
-        var entity = new EntityViewModel(model);
-
-        entity.UniqueConstraints[0].Name = "   ";
-
-        entity.ToModel().UniqueConstraints[0].Name.Should().BeNull();
     }
 
     [Fact(DisplayName = "構成列に含まれる列は IsUniqueConstraintMember が立つ")]

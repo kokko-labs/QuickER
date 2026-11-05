@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Windows;
 using AwesomeAssertions;
 using QuickER.Model;
@@ -10,8 +11,8 @@ namespace QuickER.Tests.Gui.ViewModels;
 /// グループ移動のクランプ純関数を検証するテストクラス（S1 分）
 /// </summary>
 /// <remarks>
-/// 選択の正は <see cref="EntityViewModel.IsSelected"/> フラグであり、選択操作は Undo 履歴を汚さない
-/// （<see cref="QuickER.UndoRedo.UndoRedoManager.CanUndo"/> が偽のまま）ことも併せて検証する。
+/// 選択の正は <see cref="EntityViewModel.IsSelected"/> フラグ。選択操作が Undo 履歴を汚さないことは、
+/// 操作の往復の表（<see cref="QuickER.Tests.Gui.UndoRedo.UndoOperationRows"/> の <c>selection-*</c> の行）が流す。
 /// </remarks>
 public class MainViewModelSelectionTests
 {
@@ -172,99 +173,96 @@ public class MainViewModelSelectionTests
 
     // ---------------- ラバーバンド ----------------
 
-    [Fact(DisplayName = "ラバーバンド: 触れたら選択（交差・完全包含不要）")]
-    public void RubberBand_SelectsIntersecting()
+    /// <summary>ラバーバンドが、触れたテーブル（交差・完全包含は不要）を選び、非追加なら矩形外の選択を落とし、追加なら既存の選択を保つことを検証する</summary>
+    /// <param name="entities">配置するテーブル（「名前:X 座標」の「;」区切り・Y は 0・幅は 200）</param>
+    /// <param name="alreadySelected">先に選んでおくテーブルの名前（空は無し）</param>
+    /// <param name="areaX">矩形の X</param>
+    /// <param name="areaY">矩形の Y</param>
+    /// <param name="areaWidth">矩形の幅</param>
+    /// <param name="areaHeight">矩形の高さ</param>
+    /// <param name="additive">追加モードか</param>
+    /// <param name="expectedSelected">選ばれているはずのテーブルの名前（宣言順に並べたもの）</param>
+    [Theory(
+        DisplayName = "ラバーバンド: 触れたら選択し、非追加は矩形外の選択を落とし、追加は既存選択を維持する"
+    )]
+    [InlineData("A:0;B:400;C:1000", "", 100, -10, 350, 60, false, "AB")] // 触れたら選択（交差・完全包含不要）。矩形は A の右部と B の左部に交差し、C とは交差しない
+    [InlineData("A:0;B:1000", "B", 0, 0, 50, 50, false, "A")] // 非追加モードは矩形外の選択を落とす
+    [InlineData("A:0;B:1000", "B", 0, 0, 50, 50, true, "AB")] // 追加モードは既存選択を維持する
+    public void RubberBand_AppliesSelection(
+        string entities,
+        string alreadySelected,
+        double areaX,
+        double areaY,
+        double areaWidth,
+        double areaHeight,
+        bool additive,
+        string expectedSelected
+    )
     {
         var vm = new MainViewModel();
+        var added = entities
+            .Split(';')
+            .Select(spec => spec.Split(':'))
+            .Select(parts =>
+                AddEntity(
+                    vm,
+                    parts[0],
+                    x: double.Parse(parts[1], CultureInfo.InvariantCulture),
+                    y: 0,
+                    width: 200
+                )
+            )
+            .ToList();
 
-        // A: (0,0,200x?)・B: (400,0)・C: (1000,0)
-        var a = AddEntity(vm, "A", x: 0, y: 0, width: 200);
-        var b = AddEntity(vm, "B", x: 400, y: 0, width: 200);
-        var c = AddEntity(vm, "C", x: 1000, y: 0, width: 200);
+        foreach (var name in alreadySelected.Select(letter => $"{letter}"))
+        {
+            var entity = added.Single(e => e.TableName == name);
+            vm.ToggleEntitySelection(entity);
+            entity.IsSelected.Should().BeTrue();
+        }
 
-        // 矩形 (100,-10)-(450,50): A の右部と B の左部に交差、C とは交差しない
-        var area = new Rect(100, -10, 350, 60);
-        vm.ApplyRubberBandSelection(area, additive: false);
+        vm.ApplyRubberBandSelection(new Rect(areaX, areaY, areaWidth, areaHeight), additive);
 
-        a.IsSelected.Should().BeTrue();
-        b.IsSelected.Should().BeTrue();
-        c.IsSelected.Should().BeFalse();
-        vm.SelectedEntities.Should().BeEquivalentTo(new[] { a, b });
-    }
+        foreach (var entity in added)
+        {
+            entity
+                .IsSelected.Should()
+                .Be(expectedSelected.Contains(entity.TableName, StringComparison.Ordinal));
+        }
 
-    [Fact(DisplayName = "ラバーバンド: 非追加モードは矩形外の選択を落とす")]
-    public void RubberBand_NonAdditive_ReplacesSelection()
-    {
-        var vm = new MainViewModel();
-        var a = AddEntity(vm, "A", x: 0, y: 0, width: 200);
-        var b = AddEntity(vm, "B", x: 1000, y: 0, width: 200);
-
-        // 先に B を選択しておく
-        vm.ToggleEntitySelection(b);
-        b.IsSelected.Should().BeTrue();
-
-        // A のみに交差する矩形で置換選択 → B は落ちる
-        vm.ApplyRubberBandSelection(new Rect(0, 0, 50, 50), additive: false);
-
-        a.IsSelected.Should().BeTrue();
-        b.IsSelected.Should().BeFalse();
-    }
-
-    [Fact(DisplayName = "ラバーバンド: 追加モードは既存選択を維持する")]
-    public void RubberBand_Additive_KeepsExistingSelection()
-    {
-        var vm = new MainViewModel();
-        var a = AddEntity(vm, "A", x: 0, y: 0, width: 200);
-        var b = AddEntity(vm, "B", x: 1000, y: 0, width: 200);
-
-        vm.ToggleEntitySelection(b);
-
-        // A のみに交差する矩形で追加選択 → B も残る
-        vm.ApplyRubberBandSelection(new Rect(0, 0, 50, 50), additive: true);
-
-        a.IsSelected.Should().BeTrue();
-        b.IsSelected.Should().BeTrue();
-        vm.SelectedEntities.Should().BeEquivalentTo(new[] { a, b });
+        vm.SelectedEntities.Should()
+            .BeEquivalentTo(
+                added.Where(e => expectedSelected.Contains(e.TableName, StringComparison.Ordinal))
+            );
     }
 
     // ---------------- グループ剛体クランプ（純関数） ----------------
 
-    [Fact(DisplayName = "クランプ: 負に振れない範囲ではデルタをそのまま返す")]
-    public void ClampGroupDelta_WithinBounds_PassesThrough()
+    /// <summary>グループ移動のデルタが、負に振れない範囲ではそのまま返り、左端・上端が 0 を割るなら 0 到達で止まり、正方向は制限されないことを検証する</summary>
+    [Theory(
+        DisplayName = "クランプ: 左端・上端が 0 を割るデルタは 0 到達で止め、それ以外はそのまま返す"
+    )]
+    [InlineData(100, 100, -50, -30, -50, -30)] // 負に振れない範囲ではデルタをそのまま返す
+    [InlineData(50, 20, -200, -100, -50, -20)] // 最小座標 50 に対し -200 を要求 → -50 でクランプ（min が 0 に到達）
+    [InlineData(0, 0, 300, 400, 300, 400)] // 正方向のデルタは制限しない
+    public void ClampGroupDelta_StopsAtZero(
+        double minX,
+        double minY,
+        double deltaX,
+        double deltaY,
+        double expectedDeltaX,
+        double expectedDeltaY
+    )
     {
         var (dx, dy) = MainViewModel.ClampGroupDelta(
-            minX: 100,
-            minY: 100,
-            deltaX: -50,
-            deltaY: -30
+            minX: minX,
+            minY: minY,
+            deltaX: deltaX,
+            deltaY: deltaY
         );
 
-        dx.Should().Be(-50);
-        dy.Should().Be(-30);
-    }
-
-    [Fact(DisplayName = "クランプ: 左端・上端が 0 を割るデルタは 0 到達で止める")]
-    public void ClampGroupDelta_BeyondZero_ClampsToMinCoordinate()
-    {
-        // 最小座標 50 に対し -200 を要求 → -50 でクランプ（min が 0 に到達）
-        var (dx, dy) = MainViewModel.ClampGroupDelta(
-            minX: 50,
-            minY: 20,
-            deltaX: -200,
-            deltaY: -100
-        );
-
-        dx.Should().Be(-50);
-        dy.Should().Be(-20);
-    }
-
-    [Fact(DisplayName = "クランプ: 正方向のデルタは制限しない")]
-    public void ClampGroupDelta_PositiveDelta_Unrestricted()
-    {
-        var (dx, dy) = MainViewModel.ClampGroupDelta(minX: 0, minY: 0, deltaX: 300, deltaY: 400);
-
-        dx.Should().Be(300);
-        dy.Should().Be(400);
+        dx.Should().Be(expectedDeltaX);
+        dy.Should().Be(expectedDeltaY);
     }
 
     // ---------------- ハイライト連動 ----------------
@@ -314,23 +312,5 @@ public class MainViewModelSelectionTests
         f.IsDimmed.Should().BeTrue();
         relEf.IsDimmed.Should().BeTrue();
         relEf.IsEmphasized.Should().BeFalse();
-    }
-
-    // ---------------- 履歴汚染なし ----------------
-
-    [Fact(DisplayName = "履歴汚染なし: 選択操作で CanUndo が偽のまま")]
-    public void SelectionOperations_DoNotPolluteUndoHistory()
-    {
-        var vm = new MainViewModel();
-        var a = AddEntity(vm, "A", x: 0, y: 0, width: 200);
-        var b = AddEntity(vm, "B", x: 400, y: 0, width: 200);
-
-        vm.ToggleEntitySelection(a);
-        vm.ToggleEntitySelection(b);
-        vm.ApplyRubberBandSelection(new Rect(0, 0, 50, 50), additive: false);
-        vm.SelectAllEntitiesCommand.Execute(null);
-        vm.ClearSelectionCommand.Execute(null);
-
-        vm.UndoRedo.CanUndo.Should().BeFalse();
     }
 }

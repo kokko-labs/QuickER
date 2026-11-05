@@ -105,70 +105,6 @@ public class RelationshipViewModelTests
         rel.LabelX.Should().Be(300);
     }
 
-    /// <summary>縦方向配置で端点マーカーがエンティティ外側にずれて配置されることを検証する</summary>
-    [Fact(DisplayName = "端点マーカーはエンティティと重ならない位置に表示される")]
-    public void Markers_ArePositionedOutsideEntities()
-    {
-        var a = new EntityViewModel(
-            new Entity(),
-            new EntityLayout
-            {
-                X = 100,
-                Y = 100,
-                Width = 200,
-            }
-        );
-        var b = new EntityViewModel(
-            new Entity(),
-            new EntityLayout
-            {
-                X = 100,
-                Y = 400,
-                Width = 200,
-            }
-        );
-        var rel = new RelationshipViewModel(
-            new Relationship { Type = RelationshipType.OneToMany },
-            a,
-            b
-        );
-
-        rel.SourceMarkerY.Should().BeGreaterThan(a.Y + a.DisplayHeight + 10);
-        rel.TargetMarkerY.Should().BeLessThan(b.Y - 10);
-    }
-
-    /// <summary>横方向配置でも端点マーカーがエンティティ外側にずれて配置されることを検証する</summary>
-    [Fact(DisplayName = "横方向でも端点マーカーはエンティティと重ならない位置に表示される")]
-    public void Markers_ArePositionedOutsideEntities_Horizontally()
-    {
-        var a = new EntityViewModel(
-            new Entity(),
-            new EntityLayout
-            {
-                X = 100,
-                Y = 100,
-                Width = 200,
-            }
-        );
-        var b = new EntityViewModel(
-            new Entity(),
-            new EntityLayout
-            {
-                X = 400,
-                Y = 100,
-                Width = 200,
-            }
-        );
-        var rel = new RelationshipViewModel(
-            new Relationship { Type = RelationshipType.OneToMany },
-            a,
-            b
-        );
-
-        rel.SourceMarkerX.Should().BeGreaterThan(a.X + a.Width + 10);
-        rel.TargetMarkerX.Should().BeLessThan(b.X - 10);
-    }
-
     /// <summary>マーカー描画領域の中央がマーカー座標（線上）と一致することを検証する</summary>
     [Fact(DisplayName = "端点マーカーの描画領域中央はリレーション線上に一致する")]
     public void MarkerBounds_AreCenteredOnMarkerCoordinates()
@@ -243,9 +179,14 @@ public class RelationshipViewModelTests
         (rel.TargetMarkerX + 12).Should().BeApproximately(rel.X2, 0.001);
     }
 
-    /// <summary>終点側の多マーカーが終点エンティティ方向を向く角度になることを検証する</summary>
-    [Fact(DisplayName = "N側マーカーは対象エンティティ側を向く")]
-    public void TargetManyMarker_FacesTargetEntity()
+    /// <summary>端点マーカーがエンティティ外側にずれて配置される（縦・横どちらの並びでも）ことを検証する</summary>
+    /// <param name="vertical">縦に並べるか（偽なら横に並べる）</param>
+    [Theory(
+        DisplayName = "端点マーカーは縦方向でも横方向でもエンティティと重ならない位置に表示される"
+    )]
+    [InlineData(true)] // 縦方向配置：端点マーカーがエンティティ外側にずれて配置される
+    [InlineData(false)] // 横方向配置：端点マーカーがエンティティ外側にずれて配置される
+    public void Markers_ArePositionedOutsideEntities(bool vertical)
     {
         var a = new EntityViewModel(
             new Entity(),
@@ -260,8 +201,8 @@ public class RelationshipViewModelTests
             new Entity(),
             new EntityLayout
             {
-                X = 400,
-                Y = 100,
+                X = vertical ? 100 : 400,
+                Y = vertical ? 400 : 100,
                 Width = 200,
             }
         );
@@ -271,12 +212,30 @@ public class RelationshipViewModelTests
             b
         );
 
-        rel.TargetMarkerAngle.Should().BeApproximately(0, 0.001);
+        if (vertical)
+        {
+            rel.SourceMarkerY.Should().BeGreaterThan(a.Y + a.DisplayHeight + 10);
+            rel.TargetMarkerY.Should().BeLessThan(b.Y - 10);
+        }
+        else
+        {
+            rel.SourceMarkerX.Should().BeGreaterThan(a.X + a.Width + 10);
+            rel.TargetMarkerX.Should().BeLessThan(b.X - 10);
+        }
     }
 
-    /// <summary>起点側の多マーカーが起点エンティティ方向を向く角度になることを検証する</summary>
-    [Fact(DisplayName = "起点がN側のときマーカーは起点エンティティ側を向く")]
-    public void SourceManyMarker_FacesSourceEntity()
+    /// <summary>多マーカーが、それを持つ側のエンティティ方向を向く角度になることを検証する</summary>
+    /// <param name="type">リレーション種別</param>
+    /// <param name="atSource">起点側のマーカーを見るか（偽なら終点側）</param>
+    /// <param name="expectedAngle">期待する角度</param>
+    [Theory(DisplayName = "N側マーカーは、それを持つ側のエンティティ方向を向く")]
+    [InlineData(RelationshipType.OneToMany, false, 0.0)] // N側マーカーは対象エンティティ側を向く
+    [InlineData(RelationshipType.ManyToMany, true, 180.0)] // 起点がN側のときマーカーは起点エンティティ側を向く
+    public void ManyMarker_FacesItsEntity(
+        RelationshipType type,
+        bool atSource,
+        double expectedAngle
+    )
     {
         var a = new EntityViewModel(
             new Entity(),
@@ -296,38 +255,11 @@ public class RelationshipViewModelTests
                 Width = 200,
             }
         );
-        var rel = new RelationshipViewModel(
-            new Relationship { Type = RelationshipType.ManyToMany },
-            a,
-            b
-        );
+        var rel = new RelationshipViewModel(new Relationship { Type = type }, a, b);
 
-        rel.SourceMarkerAngle.Should().BeApproximately(180, 0.001);
-    }
-
-    /// <summary>選択中リレーションが RemoveSelectedRelationship で削除されることを検証する</summary>
-    [Fact(DisplayName = "MainViewModel.RemoveSelectedRelationship でリレーションが削除される")]
-    public void RemoveSelectedRelationship_Works()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        vm.AddEntityCommand.Execute(null);
-        vm.StartAddOneToManyCommand.Execute(null);
-        vm.OnEntityClicked(vm.Entities[0]);
-        vm.OnEntityClicked(vm.Entities[1]);
-        var rel = vm.Relationships[0];
-
-        vm.OnRelationshipClicked(rel);
-        vm.SelectedRelationship.Should().Be(rel);
-
-        vm.RemoveSelectedRelationshipCommand.Execute(null);
-
-        vm.Relationships.Should().BeEmpty();
-        vm.SelectedRelationship.Should().BeNull();
-
-        // Undo で復元されること
-        vm.UndoCommand.Execute(null);
-        vm.Relationships.Should().Contain(rel);
+        (atSource ? rel.SourceMarkerAngle : rel.TargetMarkerAngle)
+            .Should()
+            .BeApproximately(expectedAngle, 0.001);
     }
 
     /// <summary>エンティティ 2 つと 1 対多リレーション 1 本を持つ ViewModel を用意する</summary>
@@ -623,20 +555,6 @@ public class RelationshipViewModelTests
 
         column.IsPrimaryKey.Should().BeTrue();
         column.IsForeignKey.Should().BeTrue();
-    }
-
-    /// <summary>RemoveColumn で指定カラムがエンティティから削除されることを検証する</summary>
-    [Fact(DisplayName = "MainViewModel.RemoveColumn で指定カラムが削除される")]
-    public void RemoveColumn_Works()
-    {
-        var vm = new MainViewModel();
-        vm.AddEntityCommand.Execute(null);
-        var entity = vm.Entities[0];
-        var col = entity.Columns[0];
-
-        vm.RemoveColumnCommand.Execute(col);
-
-        entity.Columns.Should().NotContain(col);
     }
 
     /// <summary>親列候補が「PK 列 ∪ UNIQUE 制約の構成列」になることを検証する</summary>

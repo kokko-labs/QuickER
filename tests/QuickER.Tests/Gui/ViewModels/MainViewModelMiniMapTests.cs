@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Windows;
 using AwesomeAssertions;
 using QuickER.Documents;
@@ -46,64 +47,54 @@ public class MainViewModelMiniMapTests
         return vm;
     }
 
-    /// <summary>空図ではトグルが ON でもミニマップは非表示であることを検証する</summary>
-    [Fact(DisplayName = "MiniMap: 空図は非表示")]
-    public void MiniMap_EmptyDiagram_NotVisible()
-    {
-        var vm = new MainViewModel { ViewportContentBounds = new Rect(0, 0, 800, 600) };
-
-        vm.IsMiniMapEnabled.Should().BeTrue();
-        vm.IsMiniMapVisible.Should().BeFalse();
-    }
-
-    /// <summary>図がビューポートに収まっているときは自動的に非表示になることを検証する</summary>
-    [Fact(DisplayName = "MiniMap: 収まっている図は非表示")]
-    public void MiniMap_ContentFits_NotVisible()
+    /// <summary>
+    /// ミニマップの可視判定が、空図・ビューポートに収まる図・ビューポート未確定では非表示、収まらない図では表示になり、
+    /// トグルを切れば常に非表示になることを検証する
+    /// </summary>
+    /// <param name="entities">投入するエンティティの座標（「X,Y」の「;」区切り。空は空図）</param>
+    /// <param name="viewportWidth">表示範囲の幅（null はビューポート未確定＝既定のまま）</param>
+    /// <param name="viewportHeight">表示範囲の高さ（null はビューポート未確定＝既定のまま）</param>
+    /// <param name="expectedVisible">トグルが ON のときに表示されるはずか</param>
+    [Theory(
+        DisplayName = "MiniMap: 可視判定は図の大きさとビューポートで決まり、トグル OFF は常に非表示"
+    )]
+    [InlineData("", 800.0, 600.0, false)] // 空図は非表示
+    [InlineData("100,100;300,200", 2000.0, 2000.0, false)] // 収まっている図は非表示（コンテンツ全体 100..500, 100..300 を包含する広いビューポート）
+    [InlineData("0,0;3000,2000", 800.0, 600.0, true)] // 収まらない図は表示（コンテンツ 0..3200, 0..2100 付近の一部しか映さない狭いビューポート）
+    [InlineData("0,0;3000,2000", null, null, false)] // ビューポート未確定は非表示（ViewportContentBounds は既定の空矩形のまま）
+    public void MiniMap_Visibility(
+        string entities,
+        double? viewportWidth,
+        double? viewportHeight,
+        bool expectedVisible
+    )
     {
         var vm = new MainViewModel();
-        AddEntity(vm, 100, 100);
-        AddEntity(vm, 300, 200);
 
-        // コンテンツ全体（100..500, 100..300）を包含する広いビューポート
-        vm.ViewportContentBounds = new Rect(0, 0, 2000, 2000);
+        foreach (
+            var parts in entities
+                .Split(';', StringSplitOptions.RemoveEmptyEntries)
+                .Select(spec => spec.Split(','))
+        )
+        {
+            AddEntity(
+                vm,
+                double.Parse(parts[0], CultureInfo.InvariantCulture),
+                double.Parse(parts[1], CultureInfo.InvariantCulture)
+            );
+        }
 
-        vm.IsMiniMapVisible.Should().BeFalse();
-    }
+        if (viewportWidth is not null && viewportHeight is not null)
+        {
+            vm.ViewportContentBounds = new Rect(0, 0, viewportWidth.Value, viewportHeight.Value);
+        }
 
-    /// <summary>図がビューポートに収まらないときは自動表示されることを検証する</summary>
-    [Fact(DisplayName = "MiniMap: 収まらない図は表示")]
-    public void MiniMap_ContentOverflows_Visible()
-    {
-        var vm = BuildOverflowingDiagram();
-
-        // コンテンツ（0..3200, 0..2100 付近）の一部しか映さない狭いビューポート
-        vm.ViewportContentBounds = new Rect(0, 0, 800, 600);
-
-        vm.IsMiniMapVisible.Should().BeTrue();
-    }
-
-    /// <summary>トグル OFF なら収まらない図でも常に非表示であることを検証する</summary>
-    [Fact(DisplayName = "MiniMap: トグル OFF は常に非表示")]
-    public void MiniMap_ToggleOff_AlwaysHidden()
-    {
-        var vm = BuildOverflowingDiagram();
-        vm.ViewportContentBounds = new Rect(0, 0, 800, 600);
-
-        vm.IsMiniMapVisible.Should().BeTrue();
+        vm.IsMiniMapEnabled.Should().BeTrue();
+        vm.IsMiniMapVisible.Should().Be(expectedVisible);
 
         vm.IsMiniMapEnabled = false;
 
-        vm.IsMiniMapVisible.Should().BeFalse();
-    }
-
-    /// <summary>ビューポート未確定（ヘッドレス）では収まり判定不能のため非表示であることを検証する</summary>
-    [Fact(DisplayName = "MiniMap: ビューポート未確定は非表示")]
-    public void MiniMap_ViewportUnknown_NotVisible()
-    {
-        var vm = BuildOverflowingDiagram();
-
-        // ViewportContentBounds は既定の空矩形のまま
-        vm.IsMiniMapVisible.Should().BeFalse();
+        vm.IsMiniMapVisible.Should().BeFalse("トグル OFF は常に非表示");
     }
 
     /// <summary>エンティティ追加でミニマップの射影データ（矩形）が再計算されることを検証する</summary>
