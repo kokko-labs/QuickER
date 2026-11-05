@@ -8,7 +8,10 @@ internal static partial class FormatMergeRows
 {
     /// <summary>マージの行の表</summary>
     public static ScenarioTable<FormatMerge> Table { get; } =
-        new(EngineIds.FormatRoundTrip, AllRows());
+        // 行の期待が resx から組む文（断り方・警告）を、ケースと同じ UI のカルチャで組む（FormatUiCulture）
+        FormatUiCulture.Run(() =>
+            new ScenarioTable<FormatMerge>(EngineIds.FormatRoundTrip, AllRows())
+        );
 
     private static IEnumerable<ScenarioRow<FormatMerge>> AllRows() =>
         [.. ReconcileRows(), .. ExcelMergeRows(), .. CSharpReverseMergeRows()];

@@ -19,24 +19,29 @@ public abstract class FormatShapeTestsBase
 
     [Theory(DisplayName = "形の行：往復・告知・注入・マージの共通の表明")]
     [MemberData(nameof(ShapeIds))]
-    public void Shape_KeepsCommonProperties(string id)
-    {
-        FormatRoundTripKnownFailures.Ledger.Run(
-            FormatRoundTripKnownFailures.CaseId(id, Format),
-            () =>
-            {
-                var problems = FormatRoundTripRunner.Check(
-                    FormatAxis.Axis.Get(Format),
-                    FormatShapeRows.Table[id].Input
-                );
+    public void Shape_KeepsCommonProperties(string id) => RunShapeCase(id, Format);
 
-                Assert.True(
-                    problems.Count == 0,
-                    $"{id} × {Format}:\n  " + string.Join("\n  ", problems)
-                );
-            }
+    /// <summary>形の行 × 形式の 1 ケースを、エンジンの UI のカルチャで流して既知の失敗の台帳と照合する</summary>
+    /// <param name="id">形の行の Id</param>
+    /// <param name="format">形式</param>
+    internal static void RunShapeCase(string id, string format) =>
+        FormatUiCulture.Run(() =>
+            FormatRoundTripKnownFailures.Ledger.Run(
+                FormatRoundTripKnownFailures.CaseId(id, format),
+                () =>
+                {
+                    var problems = FormatRoundTripRunner.Check(
+                        FormatAxis.Axis.Get(format),
+                        FormatShapeRows.Table[id].Input
+                    );
+
+                    Assert.True(
+                        problems.Count == 0,
+                        $"{id} × {format}:\n  " + string.Join("\n  ", problems)
+                    );
+                }
+            )
         );
-    }
 }
 
 /// <summary>形の行 × DBML</summary>
@@ -87,12 +92,17 @@ public sealed class FormatRuleTests
 
     [Theory(DisplayName = "規則の行：形式の固有の入力の取込と不動点")]
     [MemberData(nameof(RuleIds))]
-    public void Rule_Matches(string id)
-    {
-        var problems = FormatRuleRunner.Check(FormatRuleRows.Table[id].Input);
+    public void Rule_Matches(string id) => RunRuleCase(id);
 
-        Assert.True(problems.Count == 0, $"{id}:\n  " + string.Join("\n  ", problems));
-    }
+    /// <summary>規則の行の 1 ケースを、エンジンの UI のカルチャで流す</summary>
+    /// <param name="id">規則の行の Id</param>
+    internal static void RunRuleCase(string id) =>
+        FormatUiCulture.Run(() =>
+        {
+            var problems = FormatRuleRunner.Check(FormatRuleRows.Table[id].Input);
+
+            Assert.True(problems.Count == 0, $"{id}:\n  " + string.Join("\n  ", problems));
+        });
 }
 
 /// <summary>マージの行（現在の図と取込の図からマージ後の図・Id の引き継ぎ・クエリ）</summary>
@@ -103,10 +113,11 @@ public sealed class FormatMergeTests
 
     [Theory(DisplayName = "マージの行：現在の図と取込の図からマージ後の図・Id の引き継ぎ・クエリ")]
     [MemberData(nameof(MergeIds))]
-    public void Merge_Matches(string id)
-    {
-        var problems = FormatMergeRunner.Check(FormatMergeRows.Table[id].Input);
+    public void Merge_Matches(string id) =>
+        FormatUiCulture.Run(() =>
+        {
+            var problems = FormatMergeRunner.Check(FormatMergeRows.Table[id].Input);
 
-        Assert.True(problems.Count == 0, $"{id}:\n  " + string.Join("\n  ", problems));
-    }
+            Assert.True(problems.Count == 0, $"{id}:\n  " + string.Join("\n  ", problems));
+        });
 }

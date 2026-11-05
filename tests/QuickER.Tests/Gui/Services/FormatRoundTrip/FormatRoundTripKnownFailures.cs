@@ -5,7 +5,7 @@ namespace QuickER.Tests.Gui.Services.FormatRoundTrip;
 /// <summary>形の行 × 形式の既知の失敗（直す区切りのある製品の違いと、受け入れた形式の仕様）</summary>
 /// <remarks>
 /// <para>
-/// ケース ID は「形の行の Id|形式」。範囲がケース ID と序数で一致し、失敗のメッセージが理由の断片を含むときだけ当たる。
+/// ケース ID は「形の行の Id|形式」。理由の断片は製品の中立（英語）の文で書く（エンジンは UI のカルチャを <see cref="FormatUiCulture"/> に置いて流す）。範囲がケース ID と序数で一致し、失敗のメッセージが理由の断片を含むときだけ当たる。
 /// 載っているのに起きない項目・載っていない失敗・理由の断片の食い違いはどれも赤になる（直ったら項目を消す）。
 /// </para>
 /// <para>
@@ -53,15 +53,15 @@ internal static class FormatRoundTripKnownFailures
                     CaseId("mermaid-empty-data-type", "Dbml"),
                     "P3-8-D",
                     FixedIn,
-                    "を解析できません"
+                    "Cannot parse column definition"
                 ),
-                // D と同じ根：Excel の定義書も型の空の列を書き出すが、自分の取込が「データ型がありません」で断る
+                // D と同じ根：Excel の定義書も型の空の列を書き出すが、自分の取込が「has no data type」で断る
                 // （src/QuickER.Gui/Services/TableDefinitionDocumentImporter.cs）。元の形式の根拠は D と同じ
                 KnownCaseLedger.Case(
                     CaseId("mermaid-empty-data-type", "Excel"),
                     "P3-8-D",
                     FixedIn,
-                    "データ型がありません"
+                    "has no data type"
                 ),
                 // J：C# リバースの SQLite で、列の型 `int` が往復で `INT` になる（同義の表記の verbatim 併記が効いていない疑い）。
                 // 元の形式の根拠：DBML では int のまま往復する（形の行 dbml-long-default-name-sqlite の DBML の期待）
@@ -110,7 +110,7 @@ internal static class FormatRoundTripKnownFailures
                     FixedIn,
                     "ForeignKeyMarker "
                 ),
-                // Q：同じ列ペアのリレーションが 2 本ある図を、Excel は書き出すが自分の取込が「リレーションが重複しています」で断る（D と同じ型）
+                // Q：同じ列ペアのリレーションが 2 本ある図を、Excel は書き出すが自分の取込が「The relationship between tables … is duplicated」で断る（D と同じ型）
                 .. new[]
                 {
                     "mermaid-plain-constraint-name-not-read-back-duplicate",
@@ -120,7 +120,7 @@ internal static class FormatRoundTripKnownFailures
                         CaseId(shape, "Excel"),
                         "P3-8-Q",
                         FixedIn,
-                        "リレーションが重複しています"
+                        "relationship between tables"
                     )
                 ),
                 // Q：同じ図を C# の生成は生成前に止める（受け入れた仕様）
@@ -135,7 +135,7 @@ internal static class FormatRoundTripKnownFailures
                     GenerationDuplicateForeignKeyReason,
                     CaseId(shape, CSharpReverseAdapter.Value),
                     KnownMatch.KeyOnly,
-                    ReasonContains: "同じ外部キーが 2 回以上定義されている"
+                    ReasonContains: "The same foreign key is defined more than once"
                 )),
                 // L：名前・型・説明に改行を含む図を、C# の生成は生成前の診断で止める（受け入れた仕様）
                 .. new[]
@@ -150,16 +150,16 @@ internal static class FormatRoundTripKnownFailures
                     GenerationControlCharacterReason,
                     CaseId(shape, CSharpReverseAdapter.Value),
                     KnownMatch.KeyOnly,
-                    ReasonContains: "改行または制御文字"
+                    ReasonContains: "a line break or a control character"
                 )),
                 // R：表 'A B' と 'a b' のように名前の同一性（大文字小文字を無視）で同じ表を並べた図は、取込が断り、C# の生成が止める
                 // （受け入れた仕様：docs/import-export.ja.md「形式に共通の規則」・src/QuickER.CodeGen.CSharp/CLAUDE.md「型名のぶつかりを生成時に止める」）。
                 // 元の形式（HTML の定義書）は取込を持たず、アンカーの Id が重ならないことだけを見る
                 .. new (string Format, string Reason)[]
                 {
-                    ("Dbml", "が重複しています"),
-                    ("Mermaid", "が重複しています"),
-                    ("Excel", "重複したテーブル名"),
+                    ("Dbml", "is duplicated"),
+                    ("Mermaid", "is duplicated"),
+                    ("Excel", "duplicate table name"),
                     (CSharpReverseAdapter.Value, "C# の生成がエラーで止まった"),
                 }.Select(item => new KnownEntry(
                     "P3-8-R",

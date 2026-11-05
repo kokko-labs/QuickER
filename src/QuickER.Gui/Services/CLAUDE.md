@@ -19,6 +19,7 @@
   - その形式が告知しうる種類が説明できる面は、宣言で黙らせない（告知が無ければ取りこぼしとして赤にする）。
   - 面は狭く分ける（名前は「付いていた名前」と「無名に名前が付いた」、印は「子の列に付け直した」、補った列は「元が列 0 本の表」、畳み込みは「制御文字が空白へ畳まれた違いだけ」など）。存在の面の欠け・余りと属性の違いは、元の図の形で振り分ける。
   - 取込のできる形式は、製品の `DiagramImportFormat` と C# リバースにちょうど一致する。
+- エンジンは UI のカルチャをインバリアント（製品の中立＝英語の文）に置いて流す（`FormatUiCulture`。書式のカルチャには触らない）。ケースの本体も、resx から期待の文を組む表の構築もこの中で行い、既知の失敗の理由の断片は中立の文で書く。機械の UI のカルチャで照合が変わると、日本語の機械では緑・英語の CI では赤になる。ガード：`FormatRoundTripTests.KnownComparisons_DoNotDependOnMachineUiCulture`（外側の UI のカルチャ ja-JP・en-US × 台帳の項目と、断り方・警告を期待する規則の行）。
 - 宣言で受けられない違い（表・列の増減・取込と生成の例外・製品の修正を決めた違い）は既知の失敗の一覧（`FormatRoundTripKnownFailures`。ケース ID は「形の行|形式」）に、直す区切り（Pending）か受け入れた理由（Accepted）つきで載せる。
 - 次元表と網羅の計数は `FormatRoundTripDimensions`（形式 × 図の特徴・告知する形式 × 告知の種類・取込のできる形式 × 規則の種類・マージの経路 × 取込の図の出どころ）。図の特徴（`FormatShapeFeatures`）は図の中身から機械で決める。
 - 流すクラス：形の行は形式ごとの派生 `FormatShape{Dbml,Mermaid,Excel,Html,CSharpReverse}Tests`（基底 `FormatShapeTestsBase`・クラスどうしが並列に流れる）、規則の行は `FormatRuleTests`、マージの行は `FormatMergeTests`、カルチャの代表の形と軸・宣言・網羅のガードは `FormatRoundTripTests`。CLAUDE.md の各所の `FormatRoundTripTests`（形の行 `…` / 規則の行 `…` / マージの行 `…`）の書き方は、このエンジンの行の名指し。

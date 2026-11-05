@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using AwesomeAssertions;
 using QuickER.Services;
@@ -31,9 +32,12 @@ public sealed class FormatRoundTripTests
     [MemberData(nameof(CultureCases))]
     public void CultureProbe_IsInvariant(string id, string format)
     {
-        var problems = FormatRoundTripRunner.CheckCulture(
-            FormatAxis.Axis.Get(format),
-            FormatShapeRows.Table[id].Input
+        // UI のカルチャだけをエンジンの値に置く（CheckCulture は書式のカルチャを動かして比べる）
+        var problems = FormatUiCulture.Run(() =>
+            FormatRoundTripRunner.CheckCulture(
+                FormatAxis.Axis.Get(format),
+                FormatShapeRows.Table[id].Input
+            )
         );
 
         Assert.True(problems.Count == 0, $"{id} × {format}:\n  " + string.Join("\n  ", problems));
@@ -78,6 +82,60 @@ public sealed class FormatRoundTripTests
         omissions.Report().AssertGaps(FormatRoundTripDimensions.OmissionGaps, scope);
         rules.Report().AssertGaps(FormatRoundTripDimensions.RuleGaps, scope);
         merges.Report().AssertGaps(FormatRoundTripDimensions.MergeGaps, scope);
+    }
+
+    /// <summary>機械の UI のカルチャ × 既知の失敗の台帳のケースと、断り方・警告を期待する規則の行</summary>
+    public static TheoryData<string, string> MachineUiCultureCases()
+    {
+        var data = new TheoryData<string, string>();
+        var ruleIds = FormatRuleRows
+            .Table.Where(row =>
+                row.Input.Expectation.Rejects is not null || !row.Input.Expectation.Warnings.IsEmpty
+            )
+            .Select(row => "rule:" + row.Id)
+            .ToList();
+
+        foreach (var culture in new[] { "ja-JP", "en-US" })
+        {
+            foreach (
+                var id in FormatRoundTripKnownFailures
+                    .Ledger.Ids.Order(StringComparer.Ordinal)
+                    .Concat(ruleIds)
+            )
+            {
+                data.Add(culture, id);
+            }
+        }
+
+        return data;
+    }
+
+    [Theory(
+        DisplayName = "機械の UI のカルチャ（ja-JP・en-US）に依らず、既知の失敗の台帳と規則の行の断り方・警告の照合が一致する"
+    )]
+    [MemberData(nameof(MachineUiCultureCases))]
+    public void KnownComparisons_DoNotDependOnMachineUiCulture(string culture, string caseId)
+    {
+        var previous = CultureInfo.CurrentUICulture;
+
+        try
+        {
+            CultureInfo.CurrentUICulture = new CultureInfo(culture);
+
+            if (caseId.StartsWith("rule:", StringComparison.Ordinal))
+            {
+                FormatRuleTests.RunRuleCase(caseId["rule:".Length..]);
+            }
+            else
+            {
+                var separator = caseId.LastIndexOf('|');
+                FormatShapeTestsBase.RunShapeCase(caseId[..separator], caseId[(separator + 1)..]);
+            }
+        }
+        finally
+        {
+            CultureInfo.CurrentUICulture = previous;
+        }
     }
 
     [Fact(
