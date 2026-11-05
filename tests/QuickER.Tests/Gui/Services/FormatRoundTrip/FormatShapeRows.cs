@@ -10,7 +10,10 @@ internal static partial class FormatShapeRows
 {
     /// <summary>形の行の表</summary>
     public static ScenarioTable<FormatShape> Table { get; } =
-        new(EngineIds.FormatRoundTrip, AllRows());
+        // 行の期待が resx から組む文（断り方・警告）を、ケースと同じ UI のカルチャで組む（FormatUiCulture）
+        FormatUiCulture.Run(() =>
+            new ScenarioTable<FormatShape>(EngineIds.FormatRoundTrip, AllRows())
+        );
 
     private static IEnumerable<ScenarioRow<FormatShape>> AllRows() =>
         [

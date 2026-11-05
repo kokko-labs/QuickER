@@ -12,7 +12,10 @@ internal static partial class FormatRuleRows
 {
     /// <summary>規則の行の表</summary>
     public static ScenarioTable<FormatRule> Table { get; } =
-        new(EngineIds.FormatRoundTrip, AllRows());
+        // 行の期待が resx から組む文（断り方・警告）を、ケースと同じ UI のカルチャで組む（FormatUiCulture）
+        FormatUiCulture.Run(() =>
+            new ScenarioTable<FormatRule>(EngineIds.FormatRoundTrip, AllRows())
+        );
 
     private static IEnumerable<ScenarioRow<FormatRule>> AllRows() =>
         [.. Dbml(), .. Mermaid(), .. Excel(), .. CSharpReverse()];
