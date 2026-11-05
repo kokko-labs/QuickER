@@ -127,17 +127,13 @@ public class StoreGeneratedCapabilityGenerationTests
     /// <c>["sqlite","sqlserver"]</c> の順のときだけ <c>Runtime.InMemory.g.cs</c> が
     /// 「ただの列・版ガードなし」の doc になった。両方の順序を名指しで固定する。
     /// </remarks>
-    [Theory(
-        DisplayName = "InMemory 基盤の rowversion doc は方言の指定順に依らず擬似版採番＋版ガードを述べる"
+    // 残す理由（P3-4b）：インメモリ基盤の rowversion の XmlDoc（生成器の固定の英文）。方言の指定順に依らない（入れ替えても出力が同じ）ことは行 relation-store-generated-dialect-order-independent（関係 DialectOrder）へ移したので、旧実装で転んだ順（sqlite, sqlserver）だけを文で見る
+    [Fact(
+        DisplayName = "InMemory 基盤の rowversion doc は擬似版採番＋版ガードを述べる（指定順の独立は決まった行が見る）"
     )]
-    [InlineData("sqlite", "sqlserver")]
-    [InlineData("sqlserver", "sqlite")]
-    public void InMemoryRuntime_RowVersionDoc_IsIndependentOfDialectOrder(
-        string first,
-        string second
-    )
+    public void InMemoryRuntime_RowVersionDoc_IsIndependentOfDialectOrder()
     {
-        var files = Generate(SplitInMemoryOptions(first, second));
+        var files = Generate(SplitInMemoryOptions("sqlite", "sqlserver"));
 
         var inMemory = files["Runtime.InMemory.g.cs"];
         inMemory.Should().Contain(InMemoryDoc);
@@ -151,6 +147,7 @@ public class StoreGeneratedCapabilityGenerationTests
     }
 
     /// <summary>方言エンジンの固定部は、それぞれ自分の store-generated 意味論を述べる</summary>
+    // 残す理由（P3-4b）：方言エンジンの rowversion の XmlDoc（生成器の固定の英文）と書き込み除外の式（SQL Server の式本体）。構造に言い換えられる表明が無いので全部残した
     [Fact(
         DisplayName = "方言エンジン固定部の rowversion doc は SQL Server＝並行トークン／SQLite＝通常列のまま"
     )]
@@ -173,6 +170,7 @@ public class StoreGeneratedCapabilityGenerationTests
     }
 
     /// <summary>EF Core 基盤の固定部は EF Core 自身が版ガードを行うことを述べる</summary>
+    // 残す理由（P3-4b）：EF Core 基盤の rowversion の XmlDoc（生成器の固定の英文）。構造に言い換えられる表明が無いので全部残した
     [Fact(DisplayName = "EF Core 基盤の rowversion doc は EF Core 自身の版ガードを述べる")]
     public void EfCoreRuntime_RowVersionDoc_DescribesEfCoreGuard()
     {
@@ -199,6 +197,7 @@ public class StoreGeneratedCapabilityGenerationTests
     /// 契約は 1 回しか出力されないため実装ごとの doc では補えない。
     /// 単一方言の出力にはこの文が混ざってはならないので、両アームを名指しで固定する。
     /// </remarks>
+    // 残す理由（P3-4b）：契約の mode の XmlDoc の固定文の出現回数（生成器の固定の英文）。構造に言い換えられる表明が無いので全部残した
     [Fact(DisplayName = "マルチターゲットの契約は mode を無視するエンジンがある旨を doc へ載せる")]
     public void Contract_MultiTarget_DocumentsThatSomeEngineIgnoresMode()
     {
@@ -218,6 +217,7 @@ public class StoreGeneratedCapabilityGenerationTests
     }
 
     /// <summary>単一方言の契約 doc は従来のまま（マルチターゲット向けの 1 文が入らない）</summary>
+    // 残す理由（P3-4b）：単一方言の契約の mode の XmlDoc の固定文（生成器の固定の英文）。構造に言い換えられる表明が無いので全部残した
     [Theory(DisplayName = "単一方言の契約 mode doc はマルチターゲット向けの注記を持たない")]
     [InlineData("sqlserver")]
     [InlineData("sqlite")]

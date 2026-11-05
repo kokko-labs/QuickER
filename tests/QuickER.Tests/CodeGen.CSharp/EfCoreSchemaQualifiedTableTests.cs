@@ -43,32 +43,6 @@ public sealed class EfCoreSchemaQualifiedTableTests
         """;
 
     [Fact(
-        DisplayName = "スキーマで修飾されたテーブル名は ToTable(テーブル, スキーマ) を出し、素のテーブル名は ToTable(テーブル) のまま"
-    )]
-    public void ToTable_SplitsSchemaQualifiedName()
-    {
-        var code = string.Concat(Generate().Files.Select(file => file.Content));
-
-        code.Should().Contain("entity.ToTable(\"orders\", \"sales\");");
-        code.Should()
-            .Contain(
-                "entity.ToTable(\"line.items\", \"sales\");",
-                "2 つ目以降の . はテーブル名の一部"
-            );
-        code.Should().Contain("entity.ToTable(\"notes\");");
-    }
-
-    [Fact(DisplayName = "ToTable のテーブルとスキーマは、どちらも C# リテラルとしてエスケープする")]
-    public void ToTable_EscapesBothArguments()
-    {
-        var diagram = Diagram("q\"s.t\\x", "lines", "notes");
-
-        var code = string.Concat(Generate(diagram).Files.Select(file => file.Content));
-
-        code.Should().Contain("entity.ToTable(\"t\\\\x\", \"q\\\"s\");");
-    }
-
-    [Fact(
         DisplayName = "生成した DbContext は、スキーマで修飾されたテーブルを [スキーマ].[テーブル] として読む（QuickER 版 Repository と同じテーブル）"
     )]
     public void GeneratedDbContext_ReadsSchemaQualifiedTable()

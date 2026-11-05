@@ -38,6 +38,12 @@ internal enum CodegenRelation
 
     /// <summary><c>RepositoryDialects</c> の綴りの大小を変えても同じ出力（決まった行だけ）</summary>
     DialectCasing,
+
+    /// <summary>
+    /// 比較用のオプションの生成物と全ファイル・診断が同じ（<see cref="OptionEffect"/> の逆：使われない・不正でも影響しないオプションが出力を変えない。
+    /// 決まった行だけ）
+    /// </summary>
+    OptionNoEffect,
 }
 
 /// <summary>関係が読む入力</summary>
@@ -80,7 +86,12 @@ internal static class Relations
 
     /// <summary>決まった行だけに掛ける関係（網羅の配列の行には掛けない）</summary>
     public static IReadOnlyList<CodegenRelation> CasesOnly { get; } =
-    [CodegenRelation.Deterministic, CodegenRelation.OptionEffect, CodegenRelation.DialectCasing];
+    [
+        CodegenRelation.Deterministic,
+        CodegenRelation.OptionEffect,
+        CodegenRelation.DialectCasing,
+        CodegenRelation.OptionNoEffect,
+    ];
 
     /// <summary>関係の段の名前</summary>
     /// <param name="relation">関係</param>
@@ -95,6 +106,7 @@ internal static class Relations
             CodegenRelation.Deterministic => "relation:deterministic",
             CodegenRelation.OptionEffect => "relation:option-effect",
             CodegenRelation.DialectCasing => "relation:dialect-casing",
+            CodegenRelation.OptionNoEffect => "relation:option-no-effect",
             _ => $"relation:{relation}",
         };
 
@@ -120,6 +132,7 @@ internal static class Relations
             CodegenRelation.Deterministic => Deterministic(input),
             CodegenRelation.OptionEffect => OptionEffect(input),
             CodegenRelation.DialectCasing => DialectCasing(input),
+            CodegenRelation.OptionNoEffect => OptionNoEffect(input),
             _ => [$"関係: 知らない関係 {relation}"],
         };
 
@@ -629,6 +642,41 @@ internal static class Relations
             problems.Add(
                 "関係（オプションが効く）: 同じオプションで生成し直した生成物と違う（比べ方が同じものを同じと判定しない）"
             );
+        }
+
+        return problems;
+    }
+
+    /// <summary>
+    /// 比較用のオプションで生成しても、全ファイル（相対パスと内容）と診断が同じ（使われない・不正でも影響しないオプションが出力を変えない）
+    /// </summary>
+    private static IReadOnlyList<string> OptionNoEffect(RelationInput input)
+    {
+        if (input.ComparisonOptions is not { } comparison)
+        {
+            return ["関係（オプションが効かない）: 行に比較用のオプションが無い"];
+        }
+
+        var other = CodegenRunner.Generate(input.Diagram, input.TypeDialect, comparison);
+        var problems = new List<string>();
+
+        if (!Render(input.Result).SequenceEqual(Render(other), StringComparer.Ordinal))
+        {
+            problems.Add(
+                "関係（オプションが効かない）: 比較用のオプションの生成物と違う（効かないはずのオプションが出力を変えた）"
+            );
+        }
+
+        if (
+            !input
+                .Result.Diagnostics.Select(diagnostic => diagnostic.Message)
+                .SequenceEqual(
+                    other.Diagnostics.Select(diagnostic => diagnostic.Message),
+                    StringComparer.Ordinal
+                )
+        )
+        {
+            problems.Add("関係（オプションが効かない）: 比較用のオプションと診断が違う");
         }
 
         return problems;

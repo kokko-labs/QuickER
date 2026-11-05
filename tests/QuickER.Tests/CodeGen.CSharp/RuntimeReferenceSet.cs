@@ -162,7 +162,7 @@ internal sealed class RuntimeReferenceSet
         {
             foreach (var path in trustedAssembliesPaths)
             {
-                if (IsExcluded(Path.GetFileNameWithoutExtension(path)))
+                if (IsExcluded(path))
                 {
                     continue;
                 }
@@ -210,20 +210,99 @@ internal sealed class RuntimeReferenceSet
     }
 
     /// <summary>TPA のこのアセンブリを除外するか</summary>
-    private bool IsExcluded(string fileName)
+    /// <remarks>
+    /// 許さない依存は、本体のアセンブリ（ファイル名の一覧）だけでなく、その依存の名前空間（<c>Microsoft.Data.SqlClient</c>・
+    /// <c>Microsoft.Data.Sqlite</c>・<c>Microsoft.EntityFrameworkCore</c>）に型を宣言するアセンブリも全部外す
+    /// （<c>Microsoft.Data.SqlClient.Extensions.Abstractions</c>・<c>Microsoft.EntityFrameworkCore.SqlServer</c>・
+    /// <c>Npgsql.EntityFrameworkCore.PostgreSQL</c> など、名前の違う衛星が同じ名前空間に拡張メソッドを置く）。
+    /// 残すと許さない依存の <c>using</c> が解決されてしまい、「この参照集合でコンパイルできる」が依存の混入を止めない。
+    /// 名前空間はメタデータの型定義から読む（読み込みはしない）。許す依存のアセンブリは TPA のまま残す。
+    /// </remarks>
+    private bool IsExcluded(string path)
     {
         if (_excludeNothing)
         {
             return false;
         }
 
-        return ExclusiveAssemblyFileNames.Contains(fileName, StringComparer.OrdinalIgnoreCase)
+        var fileName = Path.GetFileNameWithoutExtension(path);
+
+        if (
+            ExclusiveAssemblyFileNames.Contains(fileName, StringComparer.OrdinalIgnoreCase)
             || (
                 _excludeRuntimePackages
                 && RuntimePackageAssemblyFileNames.Contains(
                     fileName,
                     StringComparer.OrdinalIgnoreCase
                 )
-            );
+            )
+        )
+        {
+            return true;
+        }
+
+        var forbidden = new List<string>();
+
+        if (!_sqlClient)
+        {
+            forbidden.Add("Microsoft.Data.SqlClient");
+        }
+
+        if (!_sqlite)
+        {
+            forbidden.Add("Microsoft.Data.Sqlite");
+        }
+
+        if (!_efCore)
+        {
+            forbidden.Add("Microsoft.EntityFrameworkCore");
+        }
+
+        return forbidden.Count > 0
+            && DeclaredNamespaces(path)
+                .Any(ns =>
+                    forbidden.Any(root =>
+                        ns.Equals(root, StringComparison.Ordinal)
+                        || ns.StartsWith(root + ".", StringComparison.Ordinal)
+                    )
+                );
     }
+
+    /// <summary>アセンブリが型を宣言する名前空間の集合（パスごとに 1 回だけメタデータを読む。読めなければ空）</summary>
+    private static IReadOnlySet<string> DeclaredNamespaces(string path) =>
+        NamespaceCache.GetOrAdd(
+            path,
+            static file =>
+            {
+                try
+                {
+                    using var stream = File.OpenRead(file);
+                    using var reader = new System.Reflection.PortableExecutable.PEReader(stream);
+
+                    if (!reader.HasMetadata)
+                    {
+                        return new HashSet<string>(StringComparer.Ordinal);
+                    }
+
+                    var metadata = System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(
+                        reader
+                    );
+                    return metadata
+                        .TypeDefinitions.Select(handle =>
+                            metadata.GetString(metadata.GetTypeDefinition(handle).Namespace)
+                        )
+                        .ToHashSet(StringComparer.Ordinal);
+                }
+                catch (Exception ex) when (ex is IOException or BadImageFormatException)
+                {
+                    return new HashSet<string>(StringComparer.Ordinal);
+                }
+            }
+        );
+
+    /// <summary>アセンブリのパス → 宣言する名前空間（参照集合をまたいで共有する）</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<
+        string,
+        IReadOnlySet<string>
+    > NamespaceCache = new(StringComparer.OrdinalIgnoreCase);
 }

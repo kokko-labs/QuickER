@@ -101,7 +101,7 @@ ADO の 2 方言が共有する `EntitySaveMetadata` の規則もここに置く
 - 生成 `ValidateUniqueAsync` は EditModel の全列を Entity へ写し、値を運べない列を `uncheckedPropertyNames` で渡す（共有ボディの 4 引数の多重定義が、その列を名指しする違反を捨てる）。
   - 運べない列は、未入力の値型の列（実行時）と EditModel に載らない列（配列・inet＝静的）。
   - 構成列と主キーだけを写すと、カスタムチェックが残りの列を既定値で判定する。未入力の値型の構成列が 1 つでもあるとメソッド全体を true で打ち切り、無関係な制約の照合と DB 照合の所見まで消える。
-  - ガード：`EditModelValidateUniqueExecutionTests`（インメモリで生成→実行）、`UniquenessGenerationTests`、`PostgreSqlArrayColumnGenerationTests`（出力の形）。
+  - ガード：`EditModelValidateUniqueExecutionTests`（インメモリで生成→実行）、`UniquenessGenerationTests`、`CodegenCaseTests` の行 `code-postgresql-array-columns-validate-unique-passes-unchecked`（出力の形）。
 
 ### 列テーブルと基底ループ
 
@@ -211,7 +211,7 @@ ADO の 2 方言が共有する `EntitySaveMetadata` の規則もここに置く
   - シムの `IRepository<,>` は Core だけでなく、シムの `IRemoteRepository<,>` も継承する。リモート面へ足した既定実装が全機能面の参照からも見える（この 2 本目の継承辺が層の要）。
 - 実装側は独立 5 枝（`SqlServerRepository` / `SqliteRepository` / `EfCoreRepository` / `InMemoryRepository` / `HttpRemoteRepository`。共通の親を持たない）。用途は per-entity partial の手書き実装が使う `protected` 共有ヘルパの置き場。コンストラクタ引数を正確に転送し、省略可能引数の既定値も写して手動 new の書き味を不変に保つ（VO シムと同じ「空ボディ原則の例外」）。
 - インターフェイスを持つ拡張面は Repository 契約と VO マーカーだけ。前者は利用側のアクセス経路がそもそもインターフェイスだから、後者は開ジェネリックの共通ルート `ValueObjectBase<TSelf, TValue>` を非ジェネリック 1 型で束ねる必要があるから。Entity / EditModel / Mapper は具象クラスで持つ単一実装で、対応するインターフェイスは設けない。
-- ガード：`ExtensionShimGenerationTests`（emit 先と per-型宣言句を、インライン / 分割 / パッケージ / 層別 / マルチ方言で固定）、`ExtensionShimAcceptanceTests`・`ExtensionShimBinaryAcceptanceTests`・`ExtensionShimRepositoryAcceptanceTests`（実フィクスチャ上で partial 拡張が全 Entity・全 VO・全系統・全リポジトリ・全 Mapper へ届く。Repository は InMemory フィクスチャ＝DB 不要で、既定実装がデコレータ越しに転送されることも実測）。
+- ガード：`CodegenCaseTests` の行 `code-extension-shim-*`（emit 先と per-型宣言句を、インライン / 分割 / パッケージ / 層別 / マルチ方言で、宣言のシンボルとコンパイルで固定）、`ExtensionShimAcceptanceTests`・`ExtensionShimBinaryAcceptanceTests`・`ExtensionShimRepositoryAcceptanceTests`（実フィクスチャ上で partial 拡張が全 Entity・全 VO・全系統・全リポジトリ・全 Mapper へ届く。Repository は InMemory フィクスチャ＝DB 不要で、既定実装がデコレータ越しに転送されることも実測）。
 - `Column` 判定のガード：`ExtensionShimAcceptanceTests` の 2 本（シム追加プロパティは列でない／`[Column]` 付き手書きプロパティは列になる）。
 
 ## 式の翻訳と NULL 補償
@@ -292,7 +292,7 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
 - NOT NULL の除外列は新規行（RowState=Added）でのみ必須にする（`IsRequiredWhenAdded`＝列テーブルの独立フラグ）。
   - VO×NOT NULL では null の INSERT は DB の NOT NULL 違反で必ず落ちる。正当な 2 段方式（INSERT→Write）は空の値（VO は `Create([])`・非 VO は空配列＝初期値で自然成立）を入れる形でしか成立しないので、この検証は DB 行き確定の null だけを列名つきで止め、正当な経路を塞がない。
   - 判定は基底 ValidateSelf ループの `IsRequired || (IsRequiredWhenAdded && RowState==Added)`。Added を抜けた行の必須エラーは else 枝の `ClearRequiredError` が取り下げる。
-  - ガード：`ExcludedBinaryRequiredWhenAddedGenerationTests`、`BinaryVoEditModelRuntimeTests`（2 段方式の実測）。
+  - ガード：`CodegenCaseTests` の行 `exec-excluded-binary-required-when-added-*`、`BinaryVoEditModelRuntimeTests`（2 段方式の実測）。
 - WithUnboundedBinary 取得後の Mapper 経由保存が UPDATE ガードで拒否されるのは設計どおり。組合せは `BinaryVoFixture` ＋ `BinaryVoEditModelRuntimeTests` が固定する。
 
 ### 取得・実装先ごとの扱い
@@ -333,7 +333,7 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
   - ガード：`RuntimePackageProjectDependencyGuardTests`。
 - ランタイムパッケージ 7 種の公開 API 面はスナップショットで固定する（`tests/QuickER.Tests/PublicApi/{アセンブリ名}.approved.txt`）。
   - リフレクションで型・基底 / 実装インターフェイス・public / protected メンバーのシグネチャ・省略可能引数の既定値・定数値・列挙体の値を正規化した CRLF テキスト。属性・XmlDoc・NULL 許容注釈・コンパイラ生成物は対象外。正規化仕様の正本は `PublicApiSnapshot` の XmlDoc。
-  - ロックステップ版で「同一メジャー内は互換」を SemVer で宣言している以上、メンバーの削除・シグネチャ変更は利用者のコンパイル済みコードを黙って壊す。依存集合・型集合（`SplitRuntimeSymmetryTests`）に加えて面そのものを固定する。
+  - ロックステップ版で「同一メジャー内は互換」を SemVer で宣言している以上、メンバーの削除・シグネチャ変更は利用者のコンパイル済みコードを黙って壊す。依存集合・型集合（`CodegenCaseTests` の行 `code-split-runtime-files-hold-no-schema-dependent-types`）に加えて面そのものを固定する。
   - 承認ファイルの更新は既存フィクスチャと同じ 1 コマンド（`QUICKER_REGEN_FIXTURES=1` ＋ `--filter "FullyQualifiedName~Drift"`）。再生成は承認であって検証ではない。差分が出たら先に「利用者を壊す変更か」を判断する。
   - スナップショットはコンパイル済みアセンブリを読むため、テンプレート変更がパッケージの公開 API 面を変えるときは「regen → 再ビルド → regen」の 2 回が要る。1 回目は旧アセンブリの面で承認してしまい、環境変数なしの検証実行でスナップショットだけが赤になるのが正常な合図。2 回目の承認前に差分の目視判断を飛ばさない。
 
@@ -398,7 +398,7 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
 - 除外した無制限バイナリ列がある図は、EF Core のリポジトリを生成しない構成でだけ、生成 Mapper の `LoadSavedColumns` が読み戻しの前に Entity の除外列を未取得の値へ戻す（NOT NULL の非 VO＝空配列・NULL 許容＝null・NOT NULL の VO＝`null!`）。外すと、保存した Entity を使い回した次の保存が更新ガードで止まる。
   - EF Core を生成する構成（QuickER 版と併せる構成も）では出さない。EF Core は全列を読み書きするので、戻すと次の保存が空の値で blob を黙って消す（併せる構成で blob を持つ EditModel を QuickER 版で保存すると更新ガードが断る＝docs に明記）。
 - Added のまま削除の印を付けた行（`IsDiscardedNewRow`＝RowState の setter が Added から Removed へ変わったときだけ立てる）は、Entity のグラフに入れない（コレクションは `CreateEntities` の絞り込み・単一の子は `IsLeftOutOfSave`）。入れると、キーが未入力の行は `Required` で例外になり、キーのある行は存在しない行の削除になる。受け入れはその行をコレクションから外す（挿入し直さない。単一の子はナビゲーションに残る）。
-- ガード：`EditModelSaveRuntimeTestsBase`（ConcurrencyFixture・7 シナリオ × インメモリ・リモート・SQL Server・EF Core の派生）、`BinaryVoEditModelRuntimeTests.AcceptSaved_NewRowWithBlobs_NextSaveKeepsStoredBlobs`、`BinaryColumnEfCoreRuntimeTests.AcceptSaved_ThenSaveAgain_KeepsStoredBlobs`、`AcceptSavedExcludedBinaryGenerationTests`（QuickER 版だけ・インメモリだけでは出て、EF Core だけ・QuickER 版と併せる構成では出ない）、`InMemoryFixtureRuntimeTests.EditModel_SingleChildAddedThenMarkedRemoved_IsLeftOutOfTheSave`。mutation 実証済み。
+- ガード：`EditModelSaveRuntimeTestsBase`（ConcurrencyFixture・7 シナリオ × インメモリ・リモート・SQL Server・EF Core の派生）、`BinaryVoEditModelRuntimeTests.AcceptSaved_NewRowWithBlobs_NextSaveKeepsStoredBlobs`、`BinaryColumnEfCoreRuntimeTests.AcceptSaved_ThenSaveAgain_KeepsStoredBlobs`、`CodegenCaseTests` の行 `exec-accept-saved-excluded-binary-override-*`（QuickER 版だけ・インメモリだけでは出て、EF Core だけ・QuickER 版と併せる構成では出ない）、`InMemoryFixtureRuntimeTests.EditModel_SingleChildAddedThenMarkedRemoved_IsLeftOutOfTheSave`。mutation 実証済み。
 
 ### Save フックが無制限バイナリ列を書いたとき
 

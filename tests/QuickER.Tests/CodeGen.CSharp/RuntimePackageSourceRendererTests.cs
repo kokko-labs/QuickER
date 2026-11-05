@@ -149,45 +149,6 @@ public class RuntimePackageSourceRendererTests
             );
     }
 
-    /// <summary>AspNetCore ソースには方言 ADO / EF Core の名前空間文字列が現れない（依存排他の文字列ガード）</summary>
-    /// <remarks>
-    /// DI（<c>Microsoft.Extensions.DependencyInjection</c>）は EF Core パッケージと同じ例外で、固定エンジン自身が
-    /// リポジトリ・<c>ILoggerFactory</c> の解決に使うため許容する（ASP.NET Core が推移的に持ち込むので依存は増えない）。
-    /// </remarks>
-    [Fact]
-    public void RenderAspNetCore_DoesNotReferenceDialectOrEfNamespaces()
-    {
-        var aspNetCore = _renderer.RenderAspNetCore();
-
-        aspNetCore.Should().NotContain("Microsoft.Data.SqlClient");
-        aspNetCore.Should().NotContain("Microsoft.Data.Sqlite");
-        aspNetCore.Should().NotContain("EntityFrameworkCore");
-    }
-
-    /// <summary>InMemory ソースには方言 ADO / EF Core / DI の名前空間文字列が現れない（依存排他の文字列ガード）</summary>
-    [Fact]
-    public void RenderInMemory_DoesNotReferenceDialectEfOrDiNamespaces()
-    {
-        var inMemory = _renderer.RenderInMemory();
-
-        inMemory.Should().NotContain("Microsoft.Data.SqlClient");
-        inMemory.Should().NotContain("Microsoft.Data.Sqlite");
-        inMemory.Should().NotContain("EntityFrameworkCore");
-        // DI 登録拡張（AddGeneratedInMemoryRepositories）はスキーマ依存物として生成側にだけ出る
-        inMemory.Should().NotContain("Microsoft.Extensions.DependencyInjection");
-    }
-
-    /// <summary>Core ソースには方言 ADO / EF Core の名前空間文字列が現れない（依存排他の文字列ガード）</summary>
-    [Fact]
-    public void RenderCore_DoesNotReferenceDialectOrEfNamespaces()
-    {
-        var core = _renderer.RenderCore();
-
-        core.Should().NotContain("Microsoft.Data.SqlClient");
-        core.Should().NotContain("Microsoft.Data.Sqlite");
-        core.Should().NotContain("EntityFrameworkCore");
-    }
-
     /// <summary>各パッケージソースは固定名前空間で出力され、方言／EF Core はコア契約を using する</summary>
     [Fact]
     public void RenderedSources_UseFixedNamespacesAndCoreUsing()

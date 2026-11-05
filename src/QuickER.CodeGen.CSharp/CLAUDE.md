@@ -17,7 +17,7 @@ C# コード生成の生成器の側（オプション・モデルビルダー�
   - 関係 OptionEffect が、同じ図の比較用の生成物と同じなら赤にする（空振りの検査）
   - GuidKey の行は文字列の主キーの表・その列を列名の違う外部キーで持つ子・2 つの列への完全一致と部分一致のクエリを持つ `CompileDiagrams.StringKey` を使う
     - 主キーがすべて int の図では GuidKey の値オブジェクトが 1 つも出ず、空振りになる
-    - 部分一致の 2 本が警告で飛ばされることは同じ行の診断の期待が、GuidKey の値オブジェクト・外部キーの型の共有・飛ばしたメソッドが出ないことは `ValueObjectForeignKeyUnificationTests.GuidKeyCase_EmitsGuidKeyValueObjectSharedByForeignKey` がメソッド名の語の境界で表明する
+    - 部分一致の 2 本が警告で飛ばされることは同じ行の診断の期待が、GuidKey の値オブジェクト・外部キーの型の共有・飛ばしたメソッドが出ないことは `CodegenCaseTests` の行 `code-guid-key-value-object-shared-by-foreign-key` が宣言のシンボルで表明する
   - 対照（同じオプションで生成し直した生成物とは同じ）も関係 OptionEffect が見る。mutation 実証済み
 - 生成コードの Roslyn コンパイル検証（`CodegenCaseTests` の行 `compile-*`）は Docker 不要で常時実行される
 
@@ -63,7 +63,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 - 主キーが計算列の図は生成時エラー。生成時 Info 診断が除外列を名指しする
 - C# リバースは `[ComputedColumn]` で往復する。DBML / Mermaid / Excel は運ばない（DBML / Mermaid は出力時に欠落告知、Excel のマージ取込は一致した列の指定を現在図から引き継ぐ）
 - GUI は `ColumnViewModel` のパススルーのみ（編集 UI なし）。図ファイルは v1 のまま。マルチターゲットの SQLite ミラーへは同期でも値が運ばれない（docs の既知の割り切り）
-- ガード：`ComputedColumnGenerationTests`・`DialectDdlTableTests`（行 `ddl-computed-column-*`・`sync-*-computed-column-*`）・`{Sqlite,SqlServer}ComputedColumnRuntimeTests`・5 方言の `*ImportFidelityIntegrationTests`・`DocumentFormatTests`（行 `*-is-computed-*`・`roundtrip-computed-column-flag-preserved`）。mutation 実証済み
+- ガード：`CodegenCaseTests` の行 `code-computed-column-*`・`CodegenCaseTests` の行 `model-computed-column-*`・`CodegenCaseTests` の行 `exec-computed-column-*`・`DialectDdlTableTests`（行 `ddl-computed-column-*`・`sync-*-computed-column-*`）・`{Sqlite,SqlServer}ComputedColumnRuntimeTests`・5 方言の `*ImportFidelityIntegrationTests`・`DocumentFormatTests`（行 `*-is-computed-*`・`roundtrip-computed-column-flag-preserved`）。mutation 実証済み
 
 ### DB が値を拒む採番列
 
@@ -91,7 +91,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
   - CodeGen.CSharp は Provider を参照できないので、持てるかの判定の正本は QuickER.Dialects の `DialectDeclarations.CanOccur` に置き、`IdentityColumnMarks.CanBeHeldBy` はそれへ委譲する
 - 実 DB の書き込み除外は IdentityColumnFixture（SQL Server 方言の QuickER 版 Repository＋EF Core・非主キーの採番列 1 本）で固定する
   - SqlBulkCopy は KeepIdentity なしでは送った値を無視して採番するので、BulkInsert の除外は実 DB では観測できない（回帰の網としてだけ持つ）
-- ガード：`DialectDdlTableTests`（行 `ddl-identity-column-*`・`sync-*-identity-column-*`。注記を出す方言を書き下ろした期待で照合し、扱いの表との一致は行の Treats の自動の照合）・`IdentityColumnGenerationTests`・`IdentityColumnSaveMetadataTests`・`{SqlServer,PostgreSql,Oracle}ImportFidelityIntegrationTests` の `Import_*Identity*`・`{SqlServer,PostgreSql}IdentityColumnRuntimeTests`・`DocumentFormatTests`（行 `*-is-identity-*`・`roundtrip-identity-column-flag-preserved`）・`SchemaSignatureTests` の `Compute_IdentityFlag_ChangesSignature`
+- ガード：`DialectDdlTableTests`（行 `ddl-identity-column-*`・`sync-*-identity-column-*`。注記を出す方言を書き下ろした期待で照合し、扱いの表との一致は行の Treats の自動の照合）・`CodegenCaseTests` の行 `code-identity-column-*`・`CodegenCaseTests` の行 `model-identity-column-*`・`CodegenCaseTests` の行 `exec-identity-column-*`・`IdentityColumnSaveMetadataTests`・`{SqlServer,PostgreSql,Oracle}ImportFidelityIntegrationTests` の `Import_*Identity*`・`{SqlServer,PostgreSql}IdentityColumnRuntimeTests`・`DocumentFormatTests`（行 `*-is-identity-*`・`roundtrip-identity-column-flag-preserved`）・`SchemaSignatureTests` の `Compute_IdentityFlag_ChangesSignature`
 - 切替・CLI・MCP・コード取込側のガード：`MainViewModelTargetDbmsTests` の「採番の…」3 件・`UndoCommandRoundTripTests` の `ChangeTargetDbmsCommand`・`ProviderMismatchWarningTests` の採番の 4 件・`CSharpReverseRoundTripTests` の `Merge_IdentityPrimaryKey_KeepsMarkAndNeedsNoReplacementConfirmation`・`CodeReverseCommandServiceTests` の `Run_IdentityPrimaryKey_NoConfirmAndKeepsMark`
 - mutation 実証済み
 
@@ -136,7 +136,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 - 統一列は Info 診断（`CodeGen_Info_ValueObjectForeignKeyUnified`）で名指しする（型名が変わる破壊的変更のため）
 - グループの定義の正（型・長さ・PK 優先判定）は、自列名でそのキーを名乗る native 列に限る（寄ってきた FK 列が PK のとき VO 名が FK 列名に化けるのを防ぐ）
 - FK 列名＝PK 列名の図と VO 無効の図は出力がバイト不変
-- ガード：`ValueObjectForeignKeyUnificationTests`（統一・チェーン・循環）・`CodegenCaseTests` の行 `diag-vo-foreign-key-*`（退化エラー・Info）・`CodegenCaseTests` の行 `probe-efcore-model-vo-foreign-key-name-mismatch`（生成→コンパイル→実 `DbContext.Model` でモデル検証が通る）
+- ガード：`CodegenCaseTests` の行 `code-vo-foreign-key-*` / `model-vo-foreign-key-*`（統一・チェーン・循環。宣言のシンボルと EF Core のモデルで見る）・`CodegenCaseTests` の行 `diag-vo-foreign-key-*`（退化エラー・Info）・`CodegenCaseTests` の行 `probe-efcore-model-vo-foreign-key-name-mismatch`（生成→コンパイル→実 `DbContext.Model` でモデル検証が通る）
 
 ## DB 定義メタ属性
 
@@ -146,7 +146,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 - 付与は `IncludeDataAnnotations` ON かつ Entity 生成時のみで、対象 DB・Repository / EF Core 設定に依らない
 - トークンは図の方言の `ITypeCatalog.TryParse` → `CanonicalTypeToken.Format` を `DiagramCodeGenerator` の後処理（`CanonicalTypeTokenAttacher`）で主辞書へ付加する
   - マッパ実装は変えない。解析不能な自由記述型はトークン null（属性省略）
-- 可搬図では方言に依らず同一トークンになる（`PortableFixtureDialectIndependenceTests`）
+- 可搬図では方言に依らず同一トークンになる（`CodegenCaseTests` の行 `code-portable-fixture-identical-across-postgresql-mysql-oracle`・`CodegenCaseTests` の行 `code-portable-fixture-sqlserver-adds-sql-column-type`）
   - 可搬フィクスチャの文字列は Unicode で統一する（Ansi / Unicode の差でトークンが割れるため）
 - 実行時型付けの `[SqlColumnType]`（SQL Server 専用・Size ガード）とは責務分離で無関係
 
@@ -214,7 +214,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
   - 判定は、計画が名前空間を決めた出所の記録 `GeneratedFilePlanner.UsedNamespaceSources` から行う。名前空間オプションの検証も同じ記録から「使われる値だけ」を検証する
   - パッケージ参照モードの `RuntimeNamespace`・層別出力の `RootNamespace` は検証しない
   - **計画の中で計算して捨てる名前空間の解決を作らない**。作ると使っていないオプションが記録に載り、使われない値で生成が止まる（通常分割の EF Core / インメモリ / 同期 / HTTP は `ResolveNamespace` を通さず契約の名前空間から組み立てる）
-- ガード：`CSharpCodeGenerationServiceTests` の `Generate_InvalidButUnusedNamespaceOption_ShouldSucceed`・`CodegenCaseTests` の行 `diag-invalid-used-namespace-inline-runtime` / `diag-invalid-used-namespace-split-root-fallback` / `diag-invalid-used-namespace-split-remote-server-root`・`CodegenCaseTests` の行 `diag-layered-folder-not-namespace` / `diag-layered-folder-not-namespace-allowed-when-all-explicit` / `diag-layered-invalid-layer-directory` / `diag-layered-invalid-layer-directory-layered-off` / `diag-layered-unused-server-layer-directory`。mutation 実証済み
+- ガード：`CodegenCaseTests` の行 `relation-unused-invalid-namespace-package-runtime` / `relation-unused-invalid-namespace-layered-root` / `relation-unused-invalid-namespace-split-all-explicit-root`（不正でも使われない値は、正しい値を入れた生成物と全ファイル・診断が同じ）・`CodegenCaseTests` の行 `diag-invalid-used-namespace-inline-runtime` / `diag-invalid-used-namespace-split-root-fallback` / `diag-invalid-used-namespace-split-remote-server-root`・`CodegenCaseTests` の行 `diag-layered-folder-not-namespace` / `diag-layered-folder-not-namespace-allowed-when-all-explicit` / `diag-layered-invalid-layer-directory` / `diag-layered-invalid-layer-directory-layered-off` / `diag-layered-unused-server-layer-directory`。mutation 実証済み
 
 #### 固定 infra の可視性
 
@@ -284,7 +284,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
   - C# の型名は別軸で不変：`EfCore{Entity}Repository`・`QuickErDbContext`・`AddGeneratedEfCoreRepositories`
   - Runtime 系は有効にした機能の分だけ出る。方言ファイルは QuickER 版 Repository 生成時、EF Core / InMemory / AspNetCore / Sync は各オプション（`GenerateEfCoreRepositories` / `GenerateInMemoryRepositories` / `GenerateRemoteServices` / `GenerateSyncSupport`）が有効なとき
 - `UseRuntimePackages` の意味は「Runtime 系ファイルを 1 本も出さず、生成コードの using が固定パッケージ名前空間（`QuickER.Runtime*`）を指す」だけ。`Repositories*` 系はモードの on / off で内容が変わらない
-  - ガード：`CodegenCaseTests` の行 `relation-runtime-type-set-*`（Runtime 系ファイルの型集合＝対応パッケージの型集合）・`SplitRuntimeSymmetryTests`（Runtime 系にスキーマ依存型が混ざらない）・`CodegenCaseTests` の行 `relation-runtime-packages-split-multi-dialect`（スキーマ依存ファイルはモード間で同一）・`CodegenCaseTests` の行 `files-split-runtime-packages-no-fixed-runtime-file`（パッケージモードで Runtime 系が 1 本も出ない）
+  - ガード：`CodegenCaseTests` の行 `relation-runtime-type-set-*`（Runtime 系ファイルの型集合＝対応パッケージの型集合）・`CodegenCaseTests` の行 `code-split-runtime-files-hold-no-schema-dependent-types`（Runtime 系にスキーマ依存型が混ざらない）・`CodegenCaseTests` の行 `code-split-sync-fixed-engine-and-per-entity-code`（同期の固定部と表ごとのコードの分割）・`CodegenCaseTests` の行 `relation-runtime-packages-split-multi-dialect`（スキーマ依存ファイルはモード間で同一）・`CodegenCaseTests` の行 `files-split-runtime-packages-no-fixed-runtime-file`（パッケージモードで Runtime 系が 1 本も出ない）
 
 ### 併用の可否
 
@@ -390,7 +390,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 - 判定の正本は `CSharpMappingPropertyPair.NullableValueNeedsUnwrap`（`EditModelIsNullable && !IsReferenceType && 型名相違`）。**参照型へ広げない**（`string` / `byte[]` / VO が `.Value` を持たず、コンパイル不能になる）
 - 通常列は同条件で `Required(...)` を通すので、このフラグを見ない（必須検証を通す列と、未入力が正常な列で意味論が違う）
 - 行バージョン列と除外バイナリ列は実装上つねに `byte[]` なので、この欠陥が表面化するのは値型の計算列・採番列だけ
-- ガード：`CodegenCaseTests` の行 `compile-*`（共通図 `CompileDiagrams.FullCoverage` の `customers.valid_from`＝NOT NULL の値型計算列と `seq_no`＝主キーでない NOT NULL の値型採番列を全ケースの実コンパイルへ通す）・`ComputedColumnGenerationTests` の `.Value` 1 件。mutation 実証済み
+- ガード：`CodegenCaseTests` の行 `compile-*`（共通図 `CompileDiagrams.FullCoverage` の `customers.valid_from`＝NOT NULL の値型計算列と `seq_no`＝主キーでない NOT NULL の値型採番列を全ケースの実コンパイルへ通す）・`CodegenCaseTests` の行 `exec-computed-column-not-null-value-type-mapper-unwraps-nullable`（`.Value` の 1 件）。mutation 実証済み
 
 ### 配列列と inet の列
 
@@ -405,7 +405,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 - NOT NULL の配列列は、Entity の初期化子とインメモリのシード値を空配列にする（EditModel に載らない列が null のまま INSERT へ行かないため）
   - NOT NULL の inet は、Entity を `= null!`、インメモリのシード値を決定的なアドレスにする
 - Entity のプロパティ・EF Core・インメモリ・リモート転送では通常どおり扱う。`HasSameValues` / `GetValueHashCode` は `StructuralComparisons` が配列全般を構造比較するので変更不要
-- ガード：`PostgreSqlArrayColumnGenerationTests`（Info の名指し・C# リバースがトークンの無い列として警告つきで飛ばす）・`PostgreSqlNetworkTypeGenerationTests`・`CodegenCaseTests` の行 `compile-postgresql-array-*`（EditModel × VO の 4 通り＋インメモリ併用 2 通り＋UNIQUE 制約 2 通りの実コンパイル）/ `compile-postgresql-network-types-*`（EditModel × VO × インメモリの 6 通りの実コンパイルでエラー・警告 0）。mutation 実証済み
+- ガード：`CodegenCaseTests` の行 `diag-postgresql-array-*`（Info の名指し）・`parsed-postgresql-array-columns-have-no-token-and-reverse-skips`（C# リバースがトークンの無い列として警告つきで飛ばす）・`code-postgresql-array-columns-*`・`CodegenCaseTests` の行 `code-postgresql-network-types-inet-excluded-from-editmodel`・`CodegenCaseTests` の行 `compile-postgresql-array-*`（EditModel × VO の 4 通り＋インメモリ併用 2 通り＋UNIQUE 制約 2 通りの実コンパイル）/ `compile-postgresql-network-types-*`（EditModel × VO × インメモリの 6 通りの実コンパイルでエラー・警告 0）。mutation 実証済み
 
 ## インメモリのシード値
 

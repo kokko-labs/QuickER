@@ -117,6 +117,11 @@ internal sealed record FileRule(
 /// 層別出力も層ごとの別プロジェクトでなく 1 アセンブリへまとめてコンパイルする（層をまたぐ同名の型など、1 アセンブリでしか出ない崩れを見る形。
 /// 層別でなければ意味を持たない）
 /// </param>
+/// <param name="Code">生成コードの宣言の期待（<see cref="CodeRule"/>。null なら見ない）</param>
+/// <param name="CompileWithout">参照を絞ったコンパイル（<see cref="ReducedReferences"/>。null なら掛けない）</param>
+/// <param name="Exec">生成物を読み込んで動かす期待（<see cref="ExecCheck"/>。null なら無し）</param>
+/// <param name="Parsed">生成結果を製品の解析器に通す期待（<see cref="ParsedCheck"/>。null なら無し）</param>
+/// <param name="Markdown">API リファレンスの Markdown の構文木の期待（<see cref="MarkdownRule"/>。null なら無し）</param>
 internal sealed record CodegenCase(
     Func<ErDiagram> Diagram,
     CodeGenerationOptions Options,
@@ -134,7 +139,12 @@ internal sealed record CodegenCase(
     CodegenProbeFacts? ProbeFacts = null,
     CodeGenerationOptions? ComparisonOptions = null,
     IReadOnlyList<string>? ExactRuntimeTypeSets = null,
-    bool CompileAsOneAssembly = false
+    bool CompileAsOneAssembly = false,
+    IReadOnlyList<CodeRule>? Code = null,
+    ReducedReferences? CompileWithout = null,
+    IReadOnlyList<ExecCheck>? Exec = null,
+    IReadOnlyList<ParsedCheck>? Parsed = null,
+    IReadOnlyList<MarkdownRule>? Markdown = null
 )
 {
     /// <summary>期待を作る</summary>
@@ -157,7 +167,12 @@ internal sealed record CodegenCase(
             ProbeFacts,
             ComparisonOptions,
             ExactRuntimeTypeSets,
-            CompileAsOneAssembly
+            CompileAsOneAssembly,
+            Code ?? [],
+            CompileWithout,
+            Exec ?? [],
+            Parsed ?? [],
+            Markdown ?? []
         );
 
     /// <summary>ファイルが宣言する名前空間が <see cref="FileNamespaces"/> と完全に一致するか（問題を返す）</summary>
@@ -216,6 +231,11 @@ internal static partial class CodegenCases
                 .. CompileRows(),
                 .. GuiRows(),
                 .. CompositeKeyOnlyRows(),
+                .. TextRows(),
+                .. EfCoreTextRows(),
+                .. QueryTextRows(),
+                .. FeatureTextRows(),
+                .. ColumnTextRows(),
             ]
         );
 

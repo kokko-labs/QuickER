@@ -22,9 +22,8 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// 診断エラーになり、サーバー＝SQL Server・ローカル＝SQLite のハイブリッド構成が組めない。
 /// </para>
 /// <para>
-/// ここで守るのは (1) 行バージョンの解決へ統一されること (2) 非対称を Info 診断で通知すること
-/// (3) SQL Server 実装だけが書き込み除外＋版ガードを持ち、SQLite 実装は通常列として書き込むこと
-/// (4) 単一方言 sqlite（<c>timestamp</c>＝日時）の解釈が変わらないこと。
+/// ここで守るのは、SQL Server 実装だけが書き込み除外＋版ガードを持ち、SQLite 実装は通常列として書き込むこと、と、実生成経路で Repository 非生成なら方言辞書が無視されること。
+/// 行バージョンの解決への統一・単一方言 sqlite（<c>timestamp</c>＝日時）の解釈・EF Core 単独で方言辞書が出力を変えないことは、決まった行（<c>CodegenCaseTests</c> の <c>code-rowversion-*</c>・<c>relation-rowversion-*</c>）が持つ。
 /// </para>
 /// </remarks>
 public sealed class MultiTargetRowVersionGenerationTests
@@ -76,34 +75,13 @@ public sealed class MultiTargetRowVersionGenerationTests
         return string.Join("\n", lines[start..(end < 0 ? lines.Length : end)]);
     }
 
-    [Fact(
-        DisplayName = "rowversion 列を持つ図のマルチターゲット生成がエラーにならず共有 Entity は byte[] になる"
-    )]
-    public void Generate_RowVersionMultiTarget_UnifiesToByteArrayWithoutError()
-    {
-        var result = GenerateMultiTarget();
-
-        result
-            .HasErrors.Should()
-            .BeFalse(
-                "行バージョン列は統一先が一意に決まるため、方言間の型の食い違いをエラーにしてはならない"
-            );
-
-        var content = result.Files.Single().Content;
-        content
-            .Should()
-            .Contain("public byte[] RowVer { get; set; }")
-            .And.Contain("[StoreGeneratedColumn]");
-        content
-            .Should()
-            .NotContain("public DateTime RowVer", "sqlite 側の解決（日時）へ倒れてはならない");
-    }
-
     // rowversion 列のマルチターゲット統一が Info 診断で通知されること、行バージョン列のない図では通知されないことは、
     // 決まった行 diag-rowversion-multitarget-info-names-column-and-owner / diag-rowversion-multitarget-no-info-without-rowversion-column
 
+    // 残す理由（P3-4b）：両方言の実装の書き込み除外の式と版ガード SQL のパラメータ名（式本体・SQL の断片）。版ガード付き SQL の持ち主が
+    // SQL Server 実装だけであること（UpdateVersionedSql）は行 code-rowversion-multitarget-dialect-asymmetry-in-metadata へ移した
     [Fact(
-        DisplayName = "SQL Server 実装は rowversion 列を書き込みから外し版ガード SQL を持つ／SQLite 実装は通常列として書き込む"
+        DisplayName = "SQL Server 実装は rowversion 列を書き込みから外し版ガード SQL を持ち、SQLite 実装は持たない"
     )]
     public void Generate_RowVersionMultiTarget_DialectAsymmetryInMetadata()
     {
@@ -113,18 +91,17 @@ public sealed class MultiTargetRowVersionGenerationTests
             content,
             MultiTargetRowVersionFixtureDefinition.NamespaceName + ".Repositories.SqlServer"
         );
+
         var sqlite = DialectBlock(
             content,
             MultiTargetRowVersionFixtureDefinition.NamespaceName + ".Repositories.Sqlite"
         );
 
         // SQL Server 側: store-generated 列を INSERT / UPDATE の対象から外し、版ガード付き SQL を組み立てる
-        // （除外対象の集合は「store-generated ＋ 計算列・採番列」。計算列・採番列は方言に依らず常に外れる）
         sqlServer
             .Should()
             .Contain("storeGeneratedColumns.Concat(dbAssignedColumns).ToList()")
-            .And.Contain("@originalRowVersion")
-            .And.Contain("UpdateVersionedSql");
+            .And.Contain("@originalRowVersion");
 
         // SQLite 側: store-generated の除外なし（通常列として INSERT / UPDATE が書き込む）・版ガード SQL は存在しない
         sqlite.Should().Contain("var readOnlyColumns = dbAssignedColumns;");
@@ -135,178 +112,6 @@ public sealed class MultiTargetRowVersionGenerationTests
                 "SQLite では store-generated 列の書き込み除外を行わない"
             );
         sqlite.Should().NotContain("@originalRowVersion", "SQLite 側に版ガードは存在しない");
-    }
-
-    [Fact(
-        DisplayName = "図の方言が sqlite でも sqlserver がターゲットなら timestamp 列は byte[] へ統一される"
-    )]
-    public void Generate_SqliteDiagramWithSqlServerTarget_UnifiesTimestampToRowVersion()
-    {
-        // 図の方言＝sqlite（主辞書は timestamp を DateTime として解決する）。
-        // 非推奨別名 timestamp は SQL Server では行バージョンだが SQLite では日時（datetime2）の別名で、
-        // DB 取込で最も踏みやすい食い違いのため、この綴りで固定する（フィクスチャ側は代表表記 rowversion）
-        var diagram = BuildTimestampSpellingDiagram();
-        var primary = SqliteCSharpTypeMapper.ResolveColumnTypes(diagram);
-        var rowVerColumnId = diagram.Entities[0].Columns[2].Id;
-        primary[rowVerColumnId]
-            .TypeName.Should()
-            .Be("DateTime", "前提: sqlite マッパは timestamp を日時として解決する");
-
-        var byDialect = new Dictionary<string, IReadOnlyDictionary<Guid, CSharpTypeInfo>>(
-            StringComparer.OrdinalIgnoreCase
-        )
-        {
-            ["sqlserver"] = SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram),
-            ["sqlite"] = primary,
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            primary,
-            byDialect,
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Mixed",
-                GenerateRepositories = true,
-                RepositoryDialects = ["sqlserver", "sqlite"],
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        result
-            .Files.Single()
-            .Content.Should()
-            .Contain("public byte[] RowVer { get; set; }")
-            .And.Contain("[StoreGeneratedColumn]");
-    }
-
-    /// <summary>
-    /// 実運用の入口（<see cref="DiagramCodeGenerator"/>＝GUI / CLI が通るファサード）でも、SQL Server 図の
-    /// <c>timestamp</c> 列 × <c>RepositoryDialects=["sqlserver","sqlite"]</c> がエラーなく通ることを検証する。
-    /// </summary>
-    /// <remarks>
-    /// 報告された再現ケースそのもの。ファサードは主辞書へ中立トークンを付加してから生成へ渡すため、
-    /// トークン付加を挟んでも統一と Info 診断が成立することまで一度に押さえる。
-    /// </remarks>
-    [Fact(
-        DisplayName = "実生成経路（DiagramCodeGenerator）でも timestamp × マルチターゲットがエラーなく通り Info 診断が出る"
-    )]
-    public void DiagramCodeGenerator_TimestampMultiTarget_SucceedsWithInfo()
-    {
-        var diagram = BuildTimestampSpellingDiagram();
-        var sqlServer = new SqlServerProvider();
-        var sqlite = new SqliteProvider();
-
-        var result = DiagramCodeGenerator.Generate(
-            sqlServer.TypeMapper,
-            sqlServer.TypeCatalog,
-            new Dictionary<string, IColumnTypeMapper>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["sqlserver"] = sqlServer.TypeMapper,
-                ["sqlite"] = sqlite.TypeMapper,
-            },
-            diagram,
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Hybrid",
-                GenerateRepositories = true,
-                RepositoryDialects = ["sqlserver", "sqlite"],
-            }
-        );
-
-        // Info 診断が出ることは決まった行 diag-rowversion-timestamp-multitarget-info-via-facade
-        result.HasErrors.Should().BeFalse();
-        result.Files.Single().Content.Should().Contain("public byte[] RowVer { get; set; }");
-    }
-
-    [Fact(DisplayName = "単一方言 sqlite 生成では timestamp は日時で store-generated にならない")]
-    public void Generate_SqliteOnly_TimestampStaysDateTime()
-    {
-        var diagram = BuildTimestampSpellingDiagram();
-        var primary = SqliteCSharpTypeMapper.ResolveColumnTypes(diagram);
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            primary,
-            new Dictionary<string, IReadOnlyDictionary<Guid, CSharpTypeInfo>>(
-                StringComparer.OrdinalIgnoreCase
-            )
-            {
-                ["sqlite"] = primary,
-            },
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.LocalOnly",
-                GenerateRepositories = true,
-                RepositoryDialects = ["sqlite"],
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-
-        var content = result.Files.Single().Content.ReplaceLineEndings("\n");
-        content.Should().Contain("public DateTime RowVer { get; set; }");
-        // 属性の「定義」は常に出力されるため、「付与」（プロパティ直前の行）が無いことで確認する
-        content
-            .Should()
-            .NotContain(
-                "[StoreGeneratedColumn]\n    public",
-                "単一方言 sqlite の解釈（日時の通常列）は不変"
-            );
-
-        // 統一していないので通知もしないことは決まった行 diag-rowversion-sqlite-only-timestamp-no-info
-    }
-
-    /// <summary>
-    /// QuickER 版 Repository を生成しない構成（EF Core 単独）では、渡された方言辞書が無視され、
-    /// 出力が単一方言経路とバイト同一になることを検証する。
-    /// </summary>
-    /// <remarks>
-    /// 従来は GUI が DB アクセスの選択に依らず <c>RepositoryDialects</c> を渡していたため、隠れた
-    /// 2 方言辞書が型統合（SQLite 図の <c>timestamp</c> が <c>byte[]</c> 行バージョン化）・Info 診断・
-    /// <c>[SqlColumnType]</c> 補完として効き、同じ図・同じ選択のフィクスチャ／CLI 出力と食い違っていた。
-    /// </remarks>
-    [Fact(
-        DisplayName = "Repository 非生成では方言辞書が無視され EF Core 単独の出力は単一方言と同一になる"
-    )]
-    public void Generate_EfCoreOnlyWithHiddenDialects_IgnoresDialectDictionaries()
-    {
-        var diagram = BuildTimestampSpellingDiagram();
-        var primary = SqliteCSharpTypeMapper.ResolveColumnTypes(diagram);
-        var byDialect = new Dictionary<string, IReadOnlyDictionary<Guid, CSharpTypeInfo>>(
-            StringComparer.OrdinalIgnoreCase
-        )
-        {
-            ["sqlserver"] = SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram),
-            ["sqlite"] = primary,
-        };
-        var options = new CodeGenerationOptions
-        {
-            RootNamespace = "Sample.EfOnly",
-            GenerateEfCoreRepositories = true,
-            RepositoryDialects = ["sqlserver", "sqlite"],
-        };
-
-        var withDialects = new CSharpCodeGenerationService().Generate(
-            diagram,
-            primary,
-            byDialect,
-            options
-        );
-        var single = new CSharpCodeGenerationService().Generate(diagram, primary, options);
-
-        withDialects.HasErrors.Should().BeFalse();
-        withDialects
-            .Files.Select(f => f.Content)
-            .Should()
-            .Equal(single.Files.Select(f => f.Content), "方言辞書は生成物に影響しないべき");
-
-        var content = withDialects.Files.Single().Content.ReplaceLineEndings("\n");
-
-        content.Should().Contain("public DateTime RowVer { get; set; }", "型統合は走らない");
-        content.Should().NotContain("[SqlColumnType(", "sqlserver 辞書からの補完も走らない");
-
-        // 統一の Info 診断も出ないことは決まった行 diag-rowversion-efcore-only-hidden-dialects-no-info
     }
 
     /// <summary>

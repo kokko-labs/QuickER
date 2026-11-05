@@ -87,6 +87,7 @@ public class QueryGenerationTests
         string.Join("\n", result.Files.Select(file => file.Content));
 
     /// <summary>ミニ DSL の一覧クエリ（条件・並び順・ページング）が契約・QuickER 版 Repository・EF Core 版 Repository に同一本体で出ることを検証する</summary>
+    // 残す理由（P3-4b）：共有本体の式（条件・並び替え・ページングの訳し方＝P3-6〔簡易 DSL〕の領分）。構造の表明（契約・実装の宣言・説明の XmlDoc）は行 code-query-dsl-list-contract-and-both-implementations へ移した
     [Fact(DisplayName = "DSL 一覧クエリ: 契約＋QuickER＋EF Core に同一の Query() 本体が出る")]
     public void Generate_DslListQuery_EmitsSharedBody()
     {
@@ -115,19 +116,6 @@ public class QueryGenerationTests
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
         var content = AllContent(result);
 
-        // 契約（インターフェイスが一行 { } でなくブロック展開され、メソッド宣言を含む）
-        content
-            .Should()
-            .Contain("public partial interface IOrderRepository : IRepository<OrderEntity, int>")
-            .And.NotContain(
-                "public partial interface IOrderRepository : IRepository<OrderEntity, int> { }"
-            );
-        content
-            .Should()
-            .Contain(
-                "Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default);"
-            );
-
         // 共有本体（QuickER 版 Repository と EF Core の双方に同一テキスト）
         var body =
             "Query().Where(e => e.CustomerId == customerId).OrderByDescending(e => e.Amount).Skip(skip).Take(take).ToListAsync(cancellationToken)";
@@ -135,12 +123,10 @@ public class QueryGenerationTests
             .Split(body)
             .Length.Should()
             .Be(3, "QuickER 版 Repository と EF Core 版 Repository の 2 箇所に同一本体が出る");
-
-        // XML doc に説明が載る
-        content.Should().Contain("/// <summary>顧客IDで注文を検索する</summary>");
     }
 
     /// <summary>単一・件数・文字列一致・IN の各形が生成されることを検証する</summary>
+    // 残す理由（P3-4b）：4 つの本体の式（条件・並び替え・文字列一致・IN の訳し方＝P3-6〔簡易 DSL〕の領分）。構造の表明（各メソッドの宣言）は行 code-query-dsl-shapes-declared-on-contract-and-implementations へ移した
     [Fact(DisplayName = "DSL 単一/件数/LIKE/IN の各形が生成される")]
     public void Generate_DslShapes_EmitBodies()
     {
@@ -203,11 +189,6 @@ public class QueryGenerationTests
         content
             .Should()
             .Contain(
-                "public Task<OrderEntity?> FindTopAsync(CancellationToken cancellationToken = default) =>"
-            );
-        content
-            .Should()
-            .Contain(
                 "Query().OrderByDescending(e => e.Amount).FirstOrDefaultAsync(cancellationToken)"
             );
         content
@@ -220,194 +201,11 @@ public class QueryGenerationTests
             );
         content
             .Should()
-            .Contain("IReadOnlyList<int> ids")
-            .And.Contain(
-                "Query().Where(e => ids.Contains(e.OrderId)).ToListAsync(cancellationToken)"
-            );
-    }
-
-    /// <summary>射影クエリ: DTO クラスと ToProjectionListAsync 本体が生成されることを検証する</summary>
-    [Fact(DisplayName = "DSL 射影クエリ: DTO＋選択式が生成される")]
-    public void Generate_DslProjection_EmitsDtoAndSelector()
-    {
-        var customerId = _order.Columns.First(c => c.Name == "CustomerId");
-        var amount = _order.Columns.First(c => c.Name == "Amount");
-        var diagram = CreateDiagram(
-            new QueryDefinition
-            {
-                Name = "GetSummaries",
-                Returns = QueryReturnShape.Projection,
-                ResultTypeName = "OrderSummaryRow",
-                Parameters =
-                {
-                    new QueryParameter { Name = "minAmount", Type = "decimal(12,2)" },
-                },
-                Condition = "Amount >= @minAmount",
-                Fields =
-                {
-                    new ProjectionField
-                    {
-                        Name = "CustomerId",
-                        Type = "int32",
-                        SourceColumnId = customerId.Id,
-                    },
-                    new ProjectionField
-                    {
-                        Name = "Amount",
-                        Type = "decimal(12,2)",
-                        SourceColumnId = amount.Id,
-                    },
-                },
-            }
-        );
-
-        var result = Generate(diagram, CreateOptions());
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        var content = AllContent(result);
-
-        // DTO（settable＝寛容マッパー互換。NULL 許容は列から引き当てる＝両列とも非 NULL）
-        content.Should().Contain("public sealed partial class OrderSummaryRow");
-        content.Should().Contain("public int CustomerId { get; set; }");
-        content.Should().Contain("public decimal Amount { get; set; }");
-
-        // 選択式は static readonly フィールドへ巻き上げる（メソッド内のラムダは呼び出しのたびに新しい式ツリー
-        // インスタンスになり、実行器の参照同一性キーの compile-once キャッシュが一度もヒットしないため）
-        content
-            .Should()
-            .Contain(
-                "private static readonly Expression<Func<OrderEntity, OrderSummaryRow>> _getSummariesAsyncSelector = e => new OrderSummaryRow { CustomerId = e.CustomerId, Amount = e.Amount };"
-            );
-
-        // 本体（射影終端は巻き上げたフィールドを渡す）
-        content
-            .Should()
-            .Contain(".ToProjectionListAsync(_getSummariesAsyncSelector, cancellationToken)");
-
-        // 巻き上げた以上、選択式がメソッド本体へ直書きされて残っていてはならない
-        content
-            .Should()
-            .NotContain(
-                ".ToProjectionListAsync(e => new OrderSummaryRow",
-                "選択式の直書きが残ると呼び出しごとに新しい式ツリーになり、compile-once キャッシュが効かない"
-            );
-    }
-
-    /// <summary>
-    /// 射影 DTO の NULL 許容が「列参照＝列の NULL 許容・自由フィールド＝既定 NULL 許容・明示指定＝優先」で
-    /// 引き当てられ、非 NULL の参照型には null! 初期化子が付くことを検証する（C-2）。
-    /// </summary>
-    [Fact(DisplayName = "射影 DTO の NULL 許容は列参照・自由・明示指定で正しく引き当てる")]
-    public void Generate_ProjectionDto_DerivesNullabilityFromColumns()
-    {
-        var customerId = _order.Columns.First(c => c.Name == "CustomerId");
-        var memo = _order.Columns.First(c => c.Name == "Memo");
-        var diagram = CreateDiagram(
-            new QueryDefinition
-            {
-                Name = "GetRows",
-                Returns = QueryReturnShape.Projection,
-                ResultTypeName = "OrderRow",
-                Implementation = QueryImplementationKind.Sql,
-                Sql = { ["sqlserver"] = "SELECT ..." },
-                Fields =
-                {
-                    // 列参照×非 NULL 列 → 非 NULL の値型
-                    new ProjectionField { Name = "CustomerId", SourceColumnId = customerId.Id },
-                    // 列参照×NULL 許容列 → NULL 許容の参照型
-                    new ProjectionField { Name = "Memo", SourceColumnId = memo.Id },
-                    // 列参照×明示 IsNullable=true → 列が非 NULL でも NULL 許容へ上書き
-                    new ProjectionField
-                    {
-                        Name = "OptionalId",
-                        SourceColumnId = customerId.Id,
-                        IsNullable = true,
-                    },
-                    // 自由フィールド → 既定で NULL 許容（寛容マッパーの列欠落・集計 NULL を安全に受ける）
-                    new ProjectionField { Name = "Total", Type = "decimal(12,2)" },
-                    // 自由フィールド×明示 IsNullable=false → 非 NULL（参照型は null! 初期化）
-                    new ProjectionField
-                    {
-                        Name = "Label",
-                        Type = "string(50)",
-                        IsNullable = false,
-                    },
-                },
-            }
-        );
-
-        var result = Generate(diagram, CreateOptions());
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        var content = AllContent(result);
-
-        content.Should().Contain("public int CustomerId { get; set; }");
-        content.Should().Contain("public string? Memo { get; set; }");
-        content.Should().Contain("public int? OptionalId { get; set; }");
-        content.Should().Contain("public decimal? Total { get; set; }");
-        content.Should().Contain("public string Label { get; set; } = null!;");
-    }
-
-    /// <summary>
-    /// ダングリング Guid 参照（存在しないエンティティ・列参照）のクエリ定義は、生成前の整合性検証で
-    /// ローカライズ済みの警告としてスキップされ、他のクエリと生成全体は継続することを検証する（C-5）。
-    /// </summary>
-    [Fact(DisplayName = "ダングリング Guid 参照のクエリは警告でスキップし生成は継続する")]
-    public void Generate_DanglingGuidReferences_WarnAndSkip()
-    {
-        var missingColumnId = Guid.NewGuid();
-        var diagram = CreateDiagram(
-            new QueryDefinition
-            {
-                Name = "ValidQuery",
-                Returns = QueryReturnShape.Count,
-                Condition = "Amount > 0",
-            },
-            new QueryDefinition
-            {
-                Name = "DanglingParameter",
-                Parameters =
-                {
-                    new QueryParameter { Name = "typedId", SourceColumnId = missingColumnId },
-                },
-            },
-            new QueryDefinition
-            {
-                Name = "DanglingField",
-                Returns = QueryReturnShape.Projection,
-                ResultTypeName = "DanglingRow",
-                Fields =
-                {
-                    new ProjectionField { Name = "Ghost", SourceColumnId = missingColumnId },
-                },
-            },
-            new QueryDefinition
-            {
-                Name = "DanglingOrderBy",
-                OrderBy = { new QueryOrdering { ColumnId = missingColumnId } },
-            }
-        );
-
-        // 存在しないエンティティを参照するクエリ（削除済みエンティティの残骸）
-        diagram.Queries.Add(new QueryDefinition { EntityId = Guid.NewGuid(), Name = "Orphan" });
-
-        var result = Generate(diagram, CreateOptions());
-
-        // すべて警告（エラーなし）でファイルは生成され、有効なクエリだけが出力される
-        // （警告 4 件の名指しとファイルの有無は決まった行 diag-query-dangling-references-warn-and-skip）
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-
-        var content = AllContent(result);
-        content.Should().Contain("ValidQueryAsync(");
-        content
-            .Should()
-            .NotContain("DanglingParameterAsync(")
-            .And.NotContain("DanglingFieldAsync(")
-            .And.NotContain("DanglingOrderByAsync(")
-            .And.NotContain("OrphanAsync(");
+            .Contain("Query().Where(e => ids.Contains(e.OrderId)).ToListAsync(cancellationToken)");
     }
 
     /// <summary>自由 SQL: QuickER 版 Repository のみ実装され、EF Core 版 Repository は契約宣言のみ（manual 扱い）になることを検証する</summary>
+    // 残す理由（P3-4b）：manual 注記の固定の英文（生成器の固定の英文）と、SQL Server の SQL の断片（逐語リテラルの表記）。構造の表明（契約の 3 宣言・EF Core 版に実装が無いこと・生 SQL を実行する呼び出し）は行 code-query-sql-and-manual-contract-declared-efcore-skips-bodies へ移した
     [Fact(DisplayName = "自由 SQL: QuickER のみ実装・EF Core 版 Repository は manual 扱い")]
     public void Generate_SqlQuery_AdoOnlyAndEfManual()
     {
@@ -444,147 +242,15 @@ public class QueryGenerationTests
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
         var content = AllContent(result);
 
-        // 契約には 3 メソッドとも宣言される（manual 注記つき）
-        content.Should().Contain("Task<IReadOnlyList<OrderEntity>> GetRecentAsync(");
-        content.Should().Contain("Task<decimal?> SumAmountAsync(");
-        content.Should().Contain("Task<OrderEntity?> SpecialLookupAsync(");
+        // 契約の manual 注記（固定の英文）
         content.Should().Contain("Implementation targets that do not get a generated body");
 
-        // QuickER 版 Repository（sqlserver 方言）には SQL 入り本体が出る
-        content.Should().Contain("QueryBySqlAsync(");
+        // QuickER 版 Repository（sqlserver 方言）の SQL 入り本体の SQL の断片
         content.Should().Contain("@\"SELECT * FROM [Order] WHERE [Amount] > 0\"");
-        content.Should().Contain("ExecuteScalarSqlAsync<decimal?>(");
-
-        // EF Core 版 Repository クラスには自由 SQL・manual の実装が出ない（クラス本体に SQL 文字列が含まれない）
-        var efClass = ExtractClassBody(content, "EfCoreOrderRepository");
-        efClass.Should().NotContain("QueryBySqlAsync").And.NotContain("SpecialLookupAsync");
-    }
-
-    /// <summary>空・空白だけの SQL は「その方言の SQL は無い」と同じ扱い（手動実装）で、空の SQL を実行する本体を作らない</summary>
-    [Fact(
-        DisplayName = "生 SQL: 空白だけの SQL は手動実装として扱い、空の SQL を実行する本体を出さない"
-    )]
-    public void Generate_BlankSql_IsTreatedAsManual()
-    {
-        var diagram = CreateDiagram(
-            new QueryDefinition
-            {
-                Name = "GetBlank",
-                Returns = QueryReturnShape.List,
-                Implementation = QueryImplementationKind.Sql,
-                Sql = { ["sqlserver"] = "   \r\n  " },
-            }
-        );
-
-        var result = Generate(diagram, CreateOptions());
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        var content = AllContent(result);
-
-        // 契約には宣言され、実装の本体（空の SQL を渡す QueryBySqlAsync）は出ない
-        content.Should().Contain("Task<IReadOnlyList<OrderEntity>> GetBlankAsync(");
-        var repository = ExtractClassBody(content, "OrderRepository");
-        repository.Should().Contain("GetByIdAsync", "実装クラスを取り出せていること");
-        repository
-            .Should()
-            .NotContain("GetBlankAsync", "空白だけの SQL を実行する本体を作らない（手動実装）");
-    }
-
-    /// <summary>
-    /// 自由 SQL の静的検証: 未宣言パラメータのクエリは警告＋該当クエリのみスキップされ、
-    /// 有効なクエリは生成される（生成全体は成功する）ことを検証する。
-    /// </summary>
-    [Fact(DisplayName = "生 SQL 未宣言パラメータ: 警告＋該当クエリのみスキップ")]
-    public void Generate_RawSqlUndeclaredParameter_WarnsAndSkipsQuery()
-    {
-        var diagram = CreateDiagram(
-            new QueryDefinition
-            {
-                Name = "GetGood",
-                Returns = QueryReturnShape.List,
-                Implementation = QueryImplementationKind.Sql,
-                Parameters =
-                {
-                    new QueryParameter { Name = "customerId", Type = "int32" },
-                },
-                Sql = { ["sqlserver"] = "SELECT * FROM [Order] WHERE [CustomerId] = @customerId" },
-            },
-            new QueryDefinition
-            {
-                Name = "GetBad",
-                Returns = QueryReturnShape.List,
-                Implementation = QueryImplementationKind.Sql,
-                Parameters =
-                {
-                    new QueryParameter { Name = "customerId", Type = "int32" },
-                },
-                // @ghost は宣言に無い → 実行時に必ず失敗するため該当クエリをスキップ
-                Sql = { ["sqlserver"] = "SELECT * FROM [Order] WHERE [X] = @ghost" },
-            }
-        );
-
-        var result = Generate(diagram, CreateOptions());
-
-        // 警告のみ（エラーなし）で生成は成功する
-        // 警告の名指しは決まった行 diag-query-raw-sql-undeclared-parameter-warns-and-skips
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-
-        var content = AllContent(result);
-        // 有効なクエリは生成され、未宣言パラメータのクエリだけがスキップされる
-        content.Should().Contain("GetGoodAsync(");
-        content.Should().NotContain("GetBadAsync(");
-    }
-
-    /// <summary>自由 SQL の静的検証: 未使用パラメータは警告のみで生成が継続することを検証する</summary>
-    [Fact(DisplayName = "生 SQL 未使用パラメータ: 警告のみで生成継続")]
-    public void Generate_RawSqlUnusedParameter_WarnsButGenerates()
-    {
-        var diagram = CreateDiagram(
-            new QueryDefinition
-            {
-                Name = "ListEverything",
-                Returns = QueryReturnShape.List,
-                Implementation = QueryImplementationKind.Sql,
-                Parameters =
-                {
-                    new QueryParameter { Name = "unused", Type = "int32" },
-                },
-                Sql = { ["sqlserver"] = "SELECT * FROM [Order]" },
-            }
-        );
-
-        var result = Generate(diagram, CreateOptions());
-
-        // 警告の名指しは決まった行 diag-query-raw-sql-unused-parameter-warns
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-
-        // 警告のみ＝クエリは生成される
-        AllContent(result).Should().Contain("ListEverythingAsync(");
-    }
-
-    /// <summary>自由 SQL の静的検証: 複文は警告のみで生成が継続することを検証する</summary>
-    [Fact(DisplayName = "生 SQL 複文: 警告のみで生成継続")]
-    public void Generate_RawSqlMultipleStatements_WarnsButGenerates()
-    {
-        var diagram = CreateDiagram(
-            new QueryDefinition
-            {
-                Name = "GetTwo",
-                Returns = QueryReturnShape.List,
-                Implementation = QueryImplementationKind.Sql,
-                Sql = { ["sqlserver"] = "SELECT * FROM [Order]; SELECT * FROM [Order]" },
-            }
-        );
-
-        var result = Generate(diagram, CreateOptions());
-
-        // 警告の名指しは決まった行 diag-query-raw-sql-multiple-statements-warns
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-
-        AllContent(result).Should().Contain("GetTwoAsync(");
     }
 
     /// <summary>マルチターゲット: 共有 DSL 本体は両方言に、方言 SQL は該当方言のみに出ることを検証する</summary>
+    // 残す理由（P3-4b）：共有 DSL 本体の式（P3-6〔簡易 DSL〕の領分）と、SQL Server の SQL の断片。構造の表明（契約・方言ごとの Repository の宣言）は行 code-query-multi-target-shared-on-both-sql-only-on-its-dialect へ移した
     [Fact(DisplayName = "マルチターゲット: DSL は両方言・SQL は該当方言のみ")]
     public void Generate_MultiTarget_DispatchesByDialect()
     {
@@ -689,6 +355,7 @@ public class QueryGenerationTests
     }
 
     /// <summary>列参照で型付けしたパラメータが、VO 図では VO 型引数＋直接比較・VO なし図ではプリミティブ引数になることを検証する</summary>
+    // 残す理由（P3-4b）：VO 図の本体の式（Create なしの直接比較＝P3-6〔簡易 DSL〕の領分）。構造の表明（VO 図は VO 型引数・VO なし図はプリミティブ引数）は行 code-query-column-typed-parameter-follows-value-object / code-query-column-typed-parameter-follows-primitive へ移した
     [Fact(DisplayName = "列参照パラメータ: VO 図は VO 型引数・VO なし図はプリミティブ引数")]
     public void Generate_ColumnTypedParameter_FollowsColumnType()
     {
@@ -706,7 +373,7 @@ public class QueryGenerationTests
                 Condition = "CustomerId = @customerId",
             };
 
-        // VO 有効: 引数が VO 型になり、条件は Create なしの直接比較
+        // VO 有効: 条件は Create なしの直接比較
         var voOptions = new CodeGenerationOptions
         {
             RootNamespace = "Test.Ns",
@@ -717,43 +384,7 @@ public class QueryGenerationTests
         };
         var voResult = Generate(CreateDiagram(CreateQuery()), voOptions);
         voResult.HasErrors.Should().BeFalse(FormatDiagnostics(voResult));
-        var voContent = AllContent(voResult);
-        voContent
-            .Should()
-            .Contain("GetByCustomerTypedAsync(CustomerIdValue customerId,")
-            .And.Contain("Query().Where(e => e.CustomerId == customerId)");
-
-        // VO 無効: 引数は列のプリミティブ型
-        var plainResult = Generate(CreateDiagram(CreateQuery()), CreateOptions());
-        plainResult.HasErrors.Should().BeFalse(FormatDiagnostics(plainResult));
-        AllContent(plainResult).Should().Contain("GetByCustomerTypedAsync(int customerId,");
-    }
-
-    /// <summary>
-    /// クエリなしの図でも契約にクエリメソッドが現れないことを検証する
-    /// （契約本体は重複事前チェック <c>CheckUniquenessAsync</c> のみ＝常時出力される固定メンバー）。
-    /// </summary>
-    [Fact(DisplayName = "クエリなしの図の契約は重複事前チェックのみを持つ")]
-    public void Generate_NoQueries_KeepsContractFreeOfQueryMembers()
-    {
-        var result = Generate(CreateDiagram(), CreateOptions());
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-
-        var content = AllContent(result);
-        content
-            .Should()
-            .Contain("public partial interface IOrderRepository : IRepository<OrderEntity, int>");
-        content.Should().Contain("Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(");
-    }
-
-    /// <summary>クラス本体（宣言行から対応する閉じブレースまで）を素朴に取り出す</summary>
-    private static string ExtractClassBody(string content, string className)
-    {
-        var start = content.IndexOf($"class {className}", StringComparison.Ordinal);
-        start.Should().BeGreaterThan(0, $"クラス {className} が生成されている前提");
-        var end = content.IndexOf("\npublic ", start, StringComparison.Ordinal);
-        return end > start ? content[start..end] : content[start..];
+        AllContent(voResult).Should().Contain("Query().Where(e => e.CustomerId == customerId)");
     }
 
     /// <summary>
@@ -762,6 +393,7 @@ public class QueryGenerationTests
     /// CS1929 でコンパイルできない（VO リストの持ち上げと同じ経路。列が NULL の行は
     /// <c>Contains(null)</c>＝false で SQL / EF Core と揃う）
     /// </summary>
+    // 残す理由（P3-4b）：持ち上げ文の式（IN の訳し方＝P3-6〔簡易 DSL〕の領分）。コンパイルの成否は行 compile-query-in-on-nullable-value-type-column へ移した
     [Fact(DisplayName = "NULL 許容の値型列への IN は NULL 許容型リストへ持ち上げる")]
     public void Generate_InOnNullableValueTypeColumn_LiftsToNullableList()
     {
@@ -800,15 +432,6 @@ public class QueryGenerationTests
             .Should()
             .Contain("var quantitiesValues = quantities.Cast<int?>().ToList();")
             .And.Contain("quantitiesValues.Contains(e.Quantity)");
-
-        var compilation = GeneratedCodeCompiler.Compile(result, "QueryNullableIn");
-
-        compilation
-            .Success.Should()
-            .BeTrue(
-                "NULL 許容値型列への IN はコンパイルできるべき: "
-                    + string.Join(" / ", compilation.Errors.Take(5))
-            );
     }
 
     /// <summary>
@@ -932,6 +555,7 @@ public class QueryGenerationTests
     /// IN の持ち上げリスト変数名（{パラメータ名}Values）が別のパラメータ名と衝突するとき、_ を後置して
     /// 回避することを検証する（衝突したままだとローカル変数が引数を隠して CS0136 になる）
     /// </summary>
+    // 残す理由（P3-4b）：持ち上げ変数のリネームの綴り（式本体＝IN の訳し方で P3-6〔簡易 DSL〕の領分）。コンパイルの成否は既存の行 compile-query-in-lift-variable-renamed が見る
     [Fact(DisplayName = "IN の持ち上げ変数はパラメータ名との衝突を _ 後置で回避する")]
     public void Generate_InLiftVariableCollidingWithParameter_IsRenamed()
     {
@@ -976,337 +600,11 @@ public class QueryGenerationTests
     }
 
     /// <summary>
-    /// 生 SQL × 単一戻り形の本体ローカル（items）が、同名の引数と衝突せずリネームされることを検証する
-    /// （衝突したままだとローカルが引数を隠して CS0136）
-    /// </summary>
-    [Fact(DisplayName = "生 SQL 単一戻り形のローカルは引数名 items との衝突を回避する")]
-    public void Generate_RawSqlSingleWithItemsParameter_RenamesLocal()
-    {
-        var diagram = CreateDiagram(
-            new QueryDefinition
-            {
-                Name = "FindByItems",
-                Returns = QueryReturnShape.Single,
-                Implementation = QueryImplementationKind.Sql,
-                Parameters =
-                {
-                    new QueryParameter { Name = "items", Type = "int32" },
-                },
-                Sql = { ["sqlserver"] = "SELECT * FROM [Order] WHERE [CustomerId] = @items" },
-            }
-        );
-
-        // EF Core を外す（EF Core × 生 SQL は手動実装＝契約宣言のみで、素のコンパイル検証が CS0535 になるため）
-        var result = Generate(
-            diagram,
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Test.Ns",
-                GenerateRepositories = true,
-                IncludeDataAnnotations = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        var content = AllContent(result);
-
-        content
-            .Should()
-            .Contain("var items_ = await this.QueryBySqlAsync(")
-            .And.Contain("return items_.Count > 0 ? items_[0] : null;");
-
-        // コンパイルの成否は決まった行 compile-query-raw-sql-single-items-parameter
-    }
-
-    /// <summary>
-    /// 生 SQL 実装のクエリに残った条件・並び順が、黙って無視されず警告診断で告げられることを検証する
-    /// （WHERE / ORDER BY は SQL 側の責務＝生成は続行する）
-    /// </summary>
-    [Fact(DisplayName = "生 SQL 実装に残った条件・並び順は警告で告げられる")]
-    public void Generate_RawSqlWithConditionAndOrder_WarnsIgnored()
-    {
-        var amount = _order.Columns.First(c => c.Name == "Amount");
-        var diagram = CreateDiagram(
-            new QueryDefinition
-            {
-                Name = "ListBigOrders",
-                Returns = QueryReturnShape.List,
-                Implementation = QueryImplementationKind.Sql,
-                Parameters =
-                {
-                    new QueryParameter { Name = "minAmount", Type = "decimal(12,2)" },
-                },
-                Condition = "Amount >= @minAmount",
-                OrderBy =
-                {
-                    new QueryOrdering { ColumnId = amount.Id, Descending = true },
-                },
-                Sql =
-                {
-                    ["sqlserver"] =
-                        "SELECT * FROM [Order] WHERE [Amount] >= @minAmount ORDER BY [Amount] DESC",
-                },
-            }
-        );
-
-        var result = Generate(diagram, CreateOptions());
-
-        // 条件と並び順の 2 件が別々に告げられることは決まった行 diag-query-raw-sql-with-condition-and-order-warns-ignored
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-
-        // 生成自体は続行し、SQL 実装が出る
-        AllContent(result).Should().Contain("ListBigOrdersAsync");
-    }
-
-    /// <summary>
-    /// DSL 射影で NULL 許容の値型列を非 NULL 指定のフィールドへ写す定義が、CS0266（int? → int 変換不能）で
-    /// 生成アセンブリ全体を壊さず、警告つきでそのクエリだけスキップされることを検証する
-    /// （参照型の列は null 許容性の警告どまりでコンパイルは通るため対象外）
-    /// </summary>
-    [Fact(DisplayName = "DSL 射影の非 NULL 上書き × NULL 許容値型列は警告＋クエリスキップ")]
-    public void Generate_ProjectionNotNullOverrideOnNullableValueColumn_SkipsWithWarning()
-    {
-        _order.Columns.Add(
-            new Column
-            {
-                Name = "Quantity",
-                DataType = "int",
-                IsNullable = true,
-            }
-        );
-        var quantity = _order.Columns.First(c => c.Name == "Quantity");
-        var diagram = CreateDiagram(
-            new QueryDefinition
-            {
-                Name = "GetForcedRows",
-                Returns = QueryReturnShape.Projection,
-                ResultTypeName = "ForcedRow",
-                Fields =
-                {
-                    new ProjectionField
-                    {
-                        Name = "Quantity",
-                        SourceColumnId = quantity.Id,
-                        IsNullable = false,
-                    },
-                },
-            },
-            new QueryDefinition { Name = "ListAll", Returns = QueryReturnShape.List }
-        );
-
-        var result = Generate(diagram, CreateOptions());
-
-        // 警告の名指しは決まった行 compile-query-not-null-override-on-nullable-value-column-skips
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-
-        var content = AllContent(result);
-        content.Should().NotContain("GetForcedRowsAsync", "スキップされたクエリのメソッドは出ない");
-        content.Should().Contain("ListAllAsync", "他のクエリは従来どおり生成される");
-
-        // スキップ後の残存生成物がコンパイルできることは決まった行 compile-query-not-null-override-on-nullable-value-column-skips
-    }
-
-    /// <summary>
-    /// 警告で飛ばされた射影クエリの結果型名は、後に来る有効なクエリが使えることを検証する
-    /// （飛ばしたクエリの DTO は出ないのに名前が登録されたままだと、存在しない DTO との重複で生成全体が止まっていた）
-    /// </summary>
-    [Fact(DisplayName = "警告で飛ばされた射影クエリの結果型名は、後続の有効なクエリが使える")]
-    public void Generate_SkippedProjectionQuery_ReleasesItsResultTypeName()
-    {
-        _order.Columns.Add(
-            new Column
-            {
-                Name = "Quantity",
-                DataType = "int",
-                IsNullable = true,
-            }
-        );
-        var quantity = _order.Columns.First(c => c.Name == "Quantity");
-        var amount = _order.Columns.First(c => c.Name == "Amount");
-        var diagram = CreateDiagram(
-            // NULL 許容の値型列を非 NULL のフィールドへ写す定義＝警告でスキップされる
-            new QueryDefinition
-            {
-                Name = "Skipped",
-                Returns = QueryReturnShape.Projection,
-                ResultTypeName = "SharedRow",
-                Fields =
-                {
-                    new ProjectionField
-                    {
-                        Name = "Quantity",
-                        SourceColumnId = quantity.Id,
-                        IsNullable = false,
-                    },
-                },
-            },
-            new QueryDefinition
-            {
-                Name = "Valid",
-                Returns = QueryReturnShape.Projection,
-                ResultTypeName = "SharedRow",
-                Fields =
-                {
-                    new ProjectionField { Name = "Amount", SourceColumnId = amount.Id },
-                },
-            }
-        );
-
-        var result = Generate(diagram, CreateOptions());
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        var content = AllContent(result);
-        content.Should().Contain("ValidAsync").And.NotContain("SkippedAsync");
-
-        // コンパイルの成否は決まった行 compile-query-skipped-projection-releases-result-type-name
-    }
-
-    /// <summary>
-    /// DSL 射影で NULL 許容の参照型の列（string・値オブジェクト）を非 NULL 指定のフィールドへ写す定義は、
-    /// 選択式の代入に null 抑止（!）を付けて生成され、警告なしでコンパイルできることを検証する
-    /// （NULL を除いてから非 NULL で受ける使い方は正当で、抑止しないと CS8601 になる）
-    /// </summary>
-    [Theory(
-        DisplayName = "DSL 射影の非 NULL 上書き × NULL 許容の参照型列は null 抑止つきで警告なしに生成される"
-    )]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void Generate_ProjectionNotNullOverrideOnNullableReferenceColumn_SuppressesWarning(
-        bool valueObjects
-    )
-    {
-        var memo = _order.Columns.First(c => c.Name == "Memo");
-        var diagram = CreateDiagram(
-            new QueryDefinition
-            {
-                Name = "GetMemoRows",
-                Returns = QueryReturnShape.Projection,
-                ResultTypeName = "MemoRow",
-                Condition = "Memo IS NOT NULL",
-                Fields =
-                {
-                    new ProjectionField
-                    {
-                        Name = "Memo",
-                        SourceColumnId = memo.Id,
-                        IsNullable = false,
-                    },
-                },
-            }
-        );
-
-        var result = Generate(
-            diagram,
-            CreateOptions() with
-            {
-                GenerateValueObjects = valueObjects,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        AllContent(result).Should().Contain("Memo = e.Memo!");
-
-        // 警告なし（診断の完全一致）と、警告ゼロのコンパイル（null 抑止つきの代入は CS8601 にならない）は
-        // 決まった行 compile-query-not-null-override-on-nullable-reference-column / -vo
-    }
-
-    /// <summary>
-    /// GuidKey の値オブジェクト（文字列の主キーを GUID 採番にしたもの）の列には、部分一致（LIKE の前方・後方・部分一致、
-    /// CONTAINS / STARTSWITH / ENDSWITH）を書けず、そのクエリだけが警告で飛ばされることを検証する。
-    /// GuidKey は部分一致のメソッドを持たないので、そのまま生成すると生成ファイル全体が CS1929 でコンパイルできない。
-    /// 完全一致（ワイルドカードなしの LIKE と等値）は <c>==</c> なので書ける
-    /// </summary>
-    [Fact(
-        DisplayName = "GuidKey の列への部分一致は警告でそのクエリだけ飛ばされ、完全一致は生成される"
-    )]
-    public void Generate_StringMatchOnGuidKeyColumn_SkipsOnlyPartialMatches()
-    {
-        var tag = new Entity { TableName = "Tag" };
-        tag.Columns.Add(
-            new Column
-            {
-                Name = "Code",
-                DataType = "nvarchar(36)",
-                IsPrimaryKey = true,
-                IsNullable = false,
-            }
-        );
-        tag.Columns.Add(new Column { Name = "Label", DataType = "nvarchar(50)" });
-        var diagram = new ErDiagram { Entities = { tag } };
-
-        foreach (
-            var (name, condition) in new[]
-            {
-                ("PartialLike", "Code LIKE 'ab%'"),
-                ("ContainsMatch", "Code CONTAINS 'ab'"),
-                ("NegatedStartsWith", "NOT Code STARTSWITH 'ab'"),
-                ("ExactLike", "Code LIKE 'ab'"),
-                ("NotExactLike", "Code NOT LIKE 'ab'"),
-                ("Equality", "Code = 'ab'"),
-                ("OtherColumnStillMatches", "Label CONTAINS 'x'"),
-            }
-        )
-        {
-            diagram.Queries.Add(
-                new QueryDefinition
-                {
-                    EntityId = tag.Id,
-                    Name = name,
-                    Returns = QueryReturnShape.List,
-                    Condition = condition,
-                }
-            );
-        }
-
-        var result = Generate(
-            diagram,
-            CreateOptions() with
-            {
-                GenerateValueObjects = true,
-                UseGuidKeyForStringPrimaryKey = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-
-        // 警告はスキップした 3 件だけ（完全一致と別の列のクエリは警告にならない）は
-        // 決まった行 compile-query-guidkey-string-match-skips-partial-matches
-
-        var content = AllContent(result);
-
-        foreach (
-            var generated in new[]
-            {
-                "ExactLikeAsync",
-                "NotExactLikeAsync",
-                "EqualityAsync",
-                "OtherColumnStillMatchesAsync",
-            }
-        )
-        {
-            content.Should().Contain(generated);
-        }
-
-        foreach (
-            var skipped in new[]
-            {
-                "PartialLikeAsync",
-                "ContainsMatchAsync",
-                "NegatedStartsWithAsync",
-            }
-        )
-        {
-            content.Should().NotContain(skipped);
-        }
-
-        // コンパイルの成否は決まった行 compile-query-guidkey-string-match-skips-partial-matches
-    }
-
-    /// <summary>
     /// 生 SQL の逐語リテラル内の連続空行が、レンダラーの空行畳み込みに書き換えられないことを検証する
     /// （SQL の文字列リテラルに連続空行を含むユーザーの SQL が黙って変わっていた）。
     /// リテラルの外の連続空行は従来どおり 1 空行へ畳まれる
     /// </summary>
+    // 残す理由（P3-4b）：生成テキストに連続空行（改行 3 連）が無いこと（書式）。SQL の値の完全一致は行 exec-query-raw-sql-blank-lines-inside-literal-are-kept（SQLite で実行）へ移した
     [Fact(DisplayName = "生 SQL の逐語リテラル内の連続空行は畳まれない")]
     public void Generate_RawSqlWithBlankLines_PreservesThemInsideVerbatimLiteral()
     {
@@ -1336,11 +634,6 @@ public class QueryGenerationTests
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
         var content = AllContent(result);
 
-        // SQL の値は改行 3 連（空行 2 つ）のまま保たれる（改行はエスケープで書くので生成する OS に依らない）
-        ExtractSqlArgument(content, "FindByBlankMemoAsync")
-            .Should()
-            .Be("SELECT * FROM [Order] WHERE [Memo] = 'first\n\n\nsecond'");
-
         // 生成コードに連続空行は残らない（SQL の改行は文字列の中へ入り、レンダラーの畳み込みの対象外）
         System
             .Text.RegularExpressions.Regex.Matches(
@@ -1357,6 +650,7 @@ public class QueryGenerationTests
     /// LINE SEPARATOR などを改行へ書き換え、SQL の文字列リテラルの値が変わっていた）。改行を含まない SQL は
     /// 従来どおり逐語リテラル 1 つ
     /// </summary>
+    // 残す理由（P3-4b）：1 行の SQL は逐語リテラル 1 つのまま（書式。CLAUDE.md が名指すガード）。改行を含む SQL の値の完全一致は行 exec-query-raw-sql-line-breaks-and-separators-keep-exact-value（SQLite で実行）へ移した
     [Fact(
         DisplayName = "改行を含む生 SQL は値を変えずに埋め込まれ、1 行の SQL は逐語リテラルのまま"
     )]
@@ -1402,9 +696,6 @@ public class QueryGenerationTests
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
         var content = AllContent(result);
 
-        ExtractSqlArgument(content, "FindMultiLineAsync").Should().Be(multiLine);
-        ExtractSqlArgument(content, "CountMultiLineAsync").Should().Be("\n" + multiLine);
-        ExtractSqlArgument(content, "FindSingleLineAsync").Should().Be(singleLine);
         content
             .Should()
             .Contain(
@@ -1413,52 +704,6 @@ public class QueryGenerationTests
             );
 
         // コンパイルの成否は決まった行 compile-query-raw-sql-line-breaks-and-single-line
-    }
-
-    /// <summary>生成コードの指定メソッドで、生 SQL を渡す呼び出しの第 1 引数（文字列リテラルの連結）の値を求める</summary>
-    private static string ExtractSqlArgument(string content, string methodName)
-    {
-        var root = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(content).GetRoot();
-        var method = root.DescendantNodes()
-            .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.MethodDeclarationSyntax>()
-            .Single(declaration =>
-                declaration.Identifier.Text == methodName && declaration.Body is not null
-                || declaration.Identifier.Text == methodName
-                    && declaration.ExpressionBody is not null
-            );
-        var invocation = method
-            .DescendantNodes()
-            .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax>()
-            .First(call =>
-                // 生成本体は this. で修飾して呼ぶ（this.QueryBySqlAsync(...)）
-                (
-                    call.Expression switch
-                    {
-                        Microsoft.CodeAnalysis.CSharp.Syntax.SimpleNameSyntax simple => simple,
-                        Microsoft.CodeAnalysis.CSharp.Syntax.MemberAccessExpressionSyntax member =>
-                            member.Name,
-                        _ => null,
-                    }
-                )
-                    is { } name
-                && name.Identifier.Text.EndsWith("SqlAsync", StringComparison.Ordinal)
-            );
-
-        static string Evaluate(Microsoft.CodeAnalysis.CSharp.Syntax.ExpressionSyntax expression) =>
-            expression switch
-            {
-                Microsoft.CodeAnalysis.CSharp.Syntax.LiteralExpressionSyntax literal => literal
-                    .Token
-                    .ValueText,
-                Microsoft.CodeAnalysis.CSharp.Syntax.BinaryExpressionSyntax binary => Evaluate(
-                    binary.Left
-                ) + Evaluate(binary.Right),
-                _ => throw new InvalidOperationException(
-                    $"文字列リテラルの連結ではない式です: {expression}"
-                ),
-            };
-
-        return Evaluate(invocation.ArgumentList.Arguments[0].Expression);
     }
 
     /// <summary>診断メッセージを失敗理由として整形する</summary>

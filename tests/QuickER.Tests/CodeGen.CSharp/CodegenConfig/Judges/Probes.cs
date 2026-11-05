@@ -2,6 +2,8 @@ using System.Collections;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Globalization;
 using System.Reflection;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.DependencyInjection;
@@ -80,23 +82,51 @@ internal sealed record CodegenProbeFacts(
 /// </remarks>
 internal static class Probes
 {
-    /// <summary>探針が読み込む生成物（<c>.g.cs</c> と手動実装のソース）をコンパイルして読み込む</summary>
+    /// <summary>
+    /// 行の生成物（<c>.g.cs</c> と手動実装のソース）の Roslyn のコンパイルを作る（emit しない。宣言の期待 <see cref="CodeRule"/> と探針で共有する）
+    /// </summary>
     /// <param name="result">生成結果</param>
     /// <param name="manualSources">手動実装のソース</param>
-    public static Assembly Load(
+    public static CSharpCompilation CreateCompilation(
         CodeGenerationResult result,
         IReadOnlyList<GeneratedFile> manualSources
     ) =>
-        GeneratedCodeCompiler.CompileAndLoad(
-            new CodeGenerationResult
-            {
-                Files = result
-                    .Files.Where(file => file.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
-                    .ToList(),
-            },
-            $"QuickER.CodegenConfig.Probe.{Guid.NewGuid():N}",
-            manualSources.Select(file => file.Content).ToArray()
+        GeneratedCodeCompiler.CreateCompilation(
+            result
+                .Files.Where(file => file.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
+                .Concat(manualSources)
+                .Select(file => (FileLayoutOracle.PathOf(file), file.Content)),
+            $"QuickER.CodegenConfig.Probe.{Guid.NewGuid():N}"
         );
+
+    /// <summary>
+    /// 探針が読み込む生成物をコンパイルから emit して読み込む（参照集合は <see cref="GeneratedCodeCompiler.CompileAndLoad"/> と同じ。
+    /// 読み込んだアセンブリはテストホストに読み込み済みの同じ ID のアセンブリ〔EF Core など〕へ束縛される）
+    /// </summary>
+    /// <param name="compilation">行の生成物のコンパイル（<see cref="CreateCompilation"/>）</param>
+    public static Assembly Load(CSharpCompilation compilation)
+    {
+        using var peStream = new System.IO.MemoryStream();
+        var emitted = compilation.Emit(peStream);
+
+        if (!emitted.Success)
+        {
+            throw new InvalidOperationException(
+                "生成コードのコンパイルに失敗:"
+                    + Environment.NewLine
+                    + string.Join(
+                        Environment.NewLine,
+                        emitted
+                            .Diagnostics.Where(diagnostic =>
+                                diagnostic.Severity == DiagnosticSeverity.Error
+                            )
+                            .Select(GeneratedCodeDiagnostics.Describe)
+                    )
+            );
+        }
+
+        return Assembly.Load(peStream.ToArray());
+    }
 
     /// <summary>探針を動かす（問題を返す）</summary>
     /// <param name="probe">探針</param>

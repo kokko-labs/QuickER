@@ -522,7 +522,7 @@ public static class UnsupportedCoverage
             UnsupportedFeature.CSharpGeneration,
             null,
             [
-                "ComputedColumnGenerationTests.Generate_ComputedColumn_MarksAttributeAndExcludesFromWrite",
+                "CodegenCases:code-computed-column-marker-and-write-exclusion",
                 "CodegenCases:diag-computed-column-info-names-excluded-column",
                 "CodegenCases:diag-computed-primary-key-error-items",
             ]
@@ -583,7 +583,7 @@ public static class UnsupportedCoverage
             UnsupportedFeature.CSharpGeneration,
             null,
             [
-                "IdentityColumnGenerationTests.Generate_IdentityColumn_MarksAttributeAndExcludesFromWrite",
+                "CodegenCases:code-identity-column-marker-and-write-exclusion",
                 "CodegenCases:diag-identity-column-info-names-excluded-column",
                 "CodegenCases:diag-identity-primary-key-warns-without-excluding",
                 "IdentityColumnSaveMetadataTests.SqlServer_IdentityColumn_IsExcludedFromWrites",
@@ -1035,7 +1035,8 @@ public static class UnsupportedCoverage
             UnsupportedFeature.CSharpGeneration,
             null,
             [
-                "EfCoreKeylessTableModelTests.主キーなしテーブルは除外されモデルは使える",
+                "CodegenCases:probe-efcore-model-keyless-table-excluded",
+                "CodegenCases:code-efcore-keyless-table-ignored",
                 "CodegenCases:diag-repository-single-key-composite-warning",
                 "CodegenCases:diag-repository-single-key-keyless-warning",
             ]
@@ -1070,7 +1071,10 @@ public static class UnsupportedCoverage
             UnsupportedDefinitionKind.ManyToManyRelationship,
             UnsupportedFeature.CSharpGeneration,
             null,
-            ["CSharpCodeGenerationServiceTests.Generate_ShouldWarnAndSkipManyToManyRelationship"]
+            [
+                "CodegenCases:diag-many-to-many-skipped-once",
+                "CodegenCases:code-many-to-many-relationship-leaves-no-collection-navigation",
+            ]
         ),
         (
             UnsupportedDefinitionKind.NotEditableColumn,

@@ -50,7 +50,7 @@ public sealed record GraphCustomerRow(
 /// <para>
 /// <b>ここで確かめるのは実行器の側</b>である。生成される Include ツリーの「形」（兄弟分岐で同一ナビのノードが
 /// 1 本・パス上の再訪辺を展開しない）は生成テキストに現れるため単体テスト
-/// （<c>IncludeGraphGenerationTests</c>）が固定できる。しかし「その深さのツリーを実行器が本当に解けるか」は
+/// （<c>CodegenCaseTests</c> の行 <c>code-include-graph-*</c>）が固定できる。しかし「その深さのツリーを実行器が本当に解けるか」は
 /// 生成テキストに現れない——SQL Server の FOR JSON・SQLite の <c>IncludeLoader</c> マルチクエリ・
 /// EF Core の Include 変換・インメモリの FK 復元は<b>それぞれ別実装</b>で、2 階層で緑でも 3 階層目が
 /// 黙って空になり得る。
