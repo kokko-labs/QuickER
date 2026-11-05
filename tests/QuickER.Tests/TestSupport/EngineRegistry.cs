@@ -28,5 +28,9 @@ internal static class EngineRegistry
         UndoOperationDimensions.Descriptor,
         SelectionInvariantDimensions.Descriptor,
         AutoLayoutDimensions.Descriptor,
+        Gui.ViewModels.DocumentFileDimensions.ScenariosDescriptor,
+        Gui.ViewModels.DocumentFileDimensions.RandomDescriptor,
+        Document.DocumentFormatDimensions.Descriptor,
+        Settings.SettingsStoreDimensions.Descriptor,
     ];
 }

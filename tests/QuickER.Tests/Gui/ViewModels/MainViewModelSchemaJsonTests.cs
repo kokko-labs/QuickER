@@ -11,7 +11,7 @@ namespace QuickER.Tests.Gui.ViewModels;
 /// <summary>
 /// スキーマのみ JSON（配置情報なし文書）のエクスポートと読み込み時の自動整列を検証するテストクラス。
 /// JSON 直列化そのもの（layout キーの省略・キー欠落の読込）の検証は
-/// tests/Document/JsonStorageServiceTests にあり、ここには MainViewModel の挙動のみ置く。
+/// tests/Document/DocumentFormatRows（図ファイルの形式の表）にあり、ここには MainViewModel の挙動のみ置く。
 /// </summary>
 public class MainViewModelSchemaJsonTests
 {

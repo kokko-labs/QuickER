@@ -542,7 +542,7 @@ public static class UnsupportedCoverage
             null,
             [
                 "EntityViewModelTests.ToModel_PreservesIsComputed",
-                "ComputedColumnPersistenceTests.SaveAndLoad_RoundTripsIsComputed",
+                "DocumentFormatRows:roundtrip-computed-column-flag-preserved",
             ]
         ),
         (
@@ -609,7 +609,7 @@ public static class UnsupportedCoverage
             null,
             [
                 "EntityViewModelTests.ToModel_PreservesIsIdentity",
-                "IdentityColumnPersistenceTests.SaveAndLoad_RoundTripsIsIdentity",
+                "DocumentFormatRows:roundtrip-identity-column-flag-preserved",
                 "MainViewModelTargetDbmsTests.ChangeDbms_ToDialectWithoutIdentity_ListsAndRemovesMarkInOneUndo",
             ]
         ),

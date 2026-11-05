@@ -7,7 +7,7 @@ using QuickER.Tests.TestSupport.Engines;
 namespace QuickER.Tests.TestSupport;
 
 /// <summary>
-/// QuickER.Tests にある乱数のエンジン（簡易 DSL・名前の総当たり）の種の指紋を、記録（<c>engine-fingerprints.json</c>）と照合する
+/// QuickER.Tests にある乱数のエンジン（簡易 DSL・名前の総当たり・文書の状態機械）の種の指紋を、記録（<c>engine-fingerprints.json</c>）と照合する
 /// </summary>
 /// <remarks>
 /// <para>
@@ -35,6 +35,14 @@ public sealed class EngineFingerprintDriftTests
     [Fact(DisplayName = "[指紋] 名前の総当たりの生成器は、記録と同じ名前の組を作る")]
     public void Name_GeneratesRecordedInputs() =>
         Verify("Name", NameFuzz.SeedSettings, NameSummary);
+
+    [Fact(DisplayName = "[指紋] 文書の状態機械の生成器は、記録と同じ手の列を作る")]
+    public void DocumentFile_GeneratesRecordedInputs() =>
+        Verify(
+            "DocumentFile",
+            Gui.ViewModels.DocumentFileGenerator.Seeds,
+            Gui.ViewModels.DocumentFileGenerator.Summary
+        );
 
     /// <summary>種ごとの要約の指紋を記録と照合する（書き直しの指定があれば記録を書き直す）</summary>
     private static void Verify(string engineId, SeedSettings settings, Func<int, string> summary)

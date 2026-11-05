@@ -1,7 +1,10 @@
 using System.IO;
 using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Tasks;
 using AwesomeAssertions;
+using QuickER.Documents;
+using QuickER.Platform;
 using QuickER.Services;
 
 namespace QuickER.Tests.Gui.Services;
@@ -94,5 +97,46 @@ public sealed class DocumentContentHashTests : IDisposable
 
         locker.Join();
         hash.Should().Be(expected, "排他ロック解放後にリトライで正しく算出される");
+    }
+
+    /// <summary>書き出した内容から求めたハッシュが、実ファイルのハッシュと一致することを検証する</summary>
+    /// <remarks>
+    /// 一致しなければ、保存直後の最終既知ハッシュが常に「外部変更あり」に見えて再読込が暴発する。
+    /// 符号化（BOM なし UTF-8）が <see cref="AtomicFile.WriteAllText(string, string)"/> と揃っていることの固定。
+    /// </remarks>
+    [Fact(DisplayName = "書き出した内容のハッシュはファイル内容のハッシュと一致する")]
+    public void ComputeForText_MatchesFileHash()
+    {
+        var path = Path.Combine(_folder, "Text.json");
+        const string contents = "{\n  \"Version\": 1,\n  \"日本語\": \"ü\"\n}";
+
+        AtomicFile.WriteAllText(path, contents);
+
+        DocumentContentHash
+            .ComputeForText(contents)
+            .Should()
+            .Be(DocumentContentHash.TryCompute(path));
+    }
+
+    /// <summary>読み込んだバイト列から求めたハッシュが、実ファイルのハッシュと一致することを検証する（BOM 付き）</summary>
+    /// <remarks>
+    /// 復号済みの文字列から採ると BOM が剥がれて一致せず、開くたびに再読込が暴発する。読み取りに成功すれば、
+    /// 図としての検証の成否に依らずバイト列を返すことも固定する。
+    /// </remarks>
+    [Fact(DisplayName = "読み込んだバイト列のハッシュはファイル内容のハッシュと一致する")]
+    public void ComputeForBytes_MatchesFileHash()
+    {
+        var path = Path.Combine(_folder, "Bytes.json");
+        File.WriteAllText(path, "{ \"日本語\": \"ü\" }", new UTF8Encoding(true));
+
+        JsonStorageService.TryLoad(path, out _, out _, out _, out var rawContents);
+
+        rawContents
+            .Should()
+            .Equal(File.ReadAllBytes(path), "読み取り失敗以外は検証の成否に依らず返す");
+        DocumentContentHash
+            .ComputeForBytes(rawContents)
+            .Should()
+            .Be(DocumentContentHash.TryCompute(path));
     }
 }

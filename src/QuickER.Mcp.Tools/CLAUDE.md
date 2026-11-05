@@ -17,4 +17,4 @@
 - 図の読み込み（`JsonStorageService.TryLoad`）は `AtomicFile.ReadAllBytes`（`TryReadAllText` と同じ読み直しの本体 `ReadWithRetry`）を通す。別プロセスの保存と重なった一瞬の共有違反で失敗しないため。
 - ガード：`DocumentErDiagramFileHandlingTests`（書き直さない 5 ケースを内容と更新日時で、共有違反の読み込みが 60ms 以上粘ること、`create_diagram` の書き込みの手段をソースで確かめる）。
   - 粘りを測るのはロックを通らない `TryLoad`。ツール越しだと、並列のテストがプロセス共通のロックを握る待ちで、粘らない実装でも下限を越える。
-- 置き換えない書き込みそのもの：`AtomicFileTests.CreateText_ExistingFile_ThrowsAndKeepsContent`・`JsonStorageServiceTests.SaveNew_ExistingFile_ThrowsAndKeepsExistingDiagram`（既存の内容が変わらず一時ファイルも残らない）。mutation 実証済み。
+- 置き換えない書き込みそのもの：`AtomicFileTests.CreateText_ExistingFile_ThrowsAndKeepsContent`・`DocumentFormatTests`（行 `savenew-existing-file-throws-and-keeps-existing-diagram`＝既存の内容が変わらず一時ファイルも残らない）。mutation 実証済み。

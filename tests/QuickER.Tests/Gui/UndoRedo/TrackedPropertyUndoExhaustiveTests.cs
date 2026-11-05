@@ -99,7 +99,7 @@ public class TrackedPropertyUndoExhaustiveTests : IDisposable
         ),
         ["EntityViewModel.Width"] = (
             Exclusion.OutsideHistory,
-            "保存文書の一部だが Undo の対象外。未保存の判定だけが別経路（MainViewModelUntrackedChangeDirtyTests）"
+            "保存文書の一部だが Undo の対象外。未保存の判定だけが別経路（DocumentFileTests の行 untracked-autofit-*）"
         ),
         ["EntityViewModel.ShowDescriptionsInDiagram"] = (
             Exclusion.OutsideHistory,
