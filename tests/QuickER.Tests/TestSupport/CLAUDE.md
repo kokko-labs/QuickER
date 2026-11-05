@@ -75,15 +75,16 @@
     - Accepted は**製品・プロバイダ・ツールのスキーマの事実でエンジンを直しても埋まらない欠けだけ**。述語は 1 つの因子の組の中だけに当たる。
     - 照合は `CoverageReport.AssertGaps(CoverageGapSet, scope, SeedPlan?)` が `KnownFailureSet` の規則のまま行う。一覧に無い欠けも、一覧にあるのに網羅した組も赤。照合は既定の種の数で流したときだけ。一覧の項目が次元表の組を指していないことは、種の数に依らず宣言の誤りにする。
   - `EngineIds`（13 の ID）と `EngineDescriptor`（ID・部分・次元表・シナリオの数・ソース・守る src の領域）と、アセンブリごとの登録簿。
-    - `tests/QuickER.Tests/TestSupport/EngineRegistry.cs`：Dsl/SqliteMySql・Name/Entrances・DiagramEdit/ToolArgument・DiagramEdit/Undo・Dialect/Types・DocumentFile/Scenarios・DocumentFile/Random・DocumentFile/Format・DocumentFile/Settings。
+    - `tests/QuickER.Tests/TestSupport/EngineRegistry.cs`：Dsl/SqliteMySql・Name/Entrances・DiagramEdit/ToolArgument・DiagramEdit/Undo・Dialect/Types・Dialect/Identifiers・Dialect/DdlText・Dialect/ImportWarnings・DocumentFile/Scenarios・DocumentFile/Random・DocumentFile/Format・DocumentFile/Settings。
     - `tests/QuickER.Tests.Integration/EngineRegistry.cs`：SyncModel/Random・SyncModel/Outcomes・SyncModel/Config・SyncPlan/Fuzz・SyncPlan/CapabilityNet・SyncPlan/ShapeRows・SyncPlan/HistoryRows・GeneratedRuntime/Parity・GeneratedRuntime/ParityOutcomes・Dsl/SqlServer・Name/DdlRoundTrip・Dialect/TypesRealDb。Guard は登録しない。
   - 因子の棚卸し：`FactorInventoryGuard` は、製品の仕様の軸の全項目が、そのアセンブリの登録簿の次元表の Source に載っているか、理由つきの除外（担当のエンジン ID・区切り・空や仮置きでない理由）の**ちょうど一方**であることを検査する。
     13 の軸をどちらのアセンブリが見るかは `FactorInventoryAssignment` が決め、各ガードは自分の軸の並びが割り当てと一致することを表明する。
   - 行列の軸：`MatrixAxis<TAdapter>` は、正本の値ごとにアダプタがちょうど 1 つあるか、理由つきで外してあるかを構築時に検査する。`[MatrixAxisValue]` と `MatrixAxisGuard.DerivedClassesCover`（基底か目印のインターフェースの具象の派生と正本の照合）、`DeclaredValuesMatch`（派生の名乗る値と実際の値の照合）で固める。
     値ごとの違いはアダプタの抽象メンバーにし、アダプタの中で値を名指しして分岐しない。
-- 各エンジンの次元表・一覧・記述は、エンジンの隣の `*Dimensions.cs` に置く：`SyncModelDimensions`・`SyncModelOutcomeDimensions`・`SyncConfigDimensions`・`SyncPlanFuzzDimensions`・`BackendParityDimensions`・`NameFuzzDdlRoundTripDimensions`・`DslFuzzDimensions`・`NameFuzzDimensions`・`ToolArgumentFuzzDimensions`・`RelationshipTypeChangeDimensions`・`DialectTypeDimensions`・`DialectTypeRealDbDimensions`・`DocumentFileDimensions`・`DocumentFormatDimensions`・`SettingsStoreDimensions`。
+- 各エンジンの次元表・一覧・記述は、エンジンの隣の `*Dimensions.cs` に置く：`SyncModelDimensions`・`SyncModelOutcomeDimensions`・`SyncConfigDimensions`・`SyncPlanFuzzDimensions`・`BackendParityDimensions`・`NameFuzzDdlRoundTripDimensions`・`DslFuzzDimensions`・`NameFuzzDimensions`・`ToolArgumentFuzzDimensions`・`RelationshipTypeChangeDimensions`・`DialectTypeDimensions`・`DialectTypeRealDbDimensions`・`DialectIdentifierDimensions`・`DialectDdlDimensions`・`DialectImportWarningDimensions`・`DocumentFileDimensions`・`DocumentFormatDimensions`・`SettingsStoreDimensions`。
 - 乱数で操作の列を作るエンジン（同期のモデル・同期計画・実装先の一致）の `Observe` は、生成器が返し終えた値と、コンストラクタで決まる公開プロパティだけを読む（乱数を引かない・生成器の中に置かない。種の指紋が守る）。
-- 行列の軸として登録したもの：同期計画の総当たりと名前の DDL の往復の方言の派生 5 つずつ（正本 `DialectNames.All`）・同期のモデルの転送経路（正本 `SyncModelTransport`・目印 `ISyncModelTransportTests`）・実装先の一致（`BackendParityAxis`＝`ParityScenario.Backends` の並びの出どころ）・簡易 DSL の実装先（`DslFuzzBackends.Names` と構成ごとの軸）・方言の型の表のアダプタ 5 つ（`DialectTypeAxis`・正本 `DialectNames.All`）と実 DB の段の方言の派生 5 つ（`DialectTypeRealDbTestsBase`・正本 `DialectNames.All`）。
+- 行列の軸として登録したもの：同期計画の総当たりと名前の DDL の往復の方言の派生 5 つずつ（正本 `DialectNames.All`）・同期のモデルの転送経路（正本 `SyncModelTransport`・目印 `ISyncModelTransportTests`）・実装先の一致（`BackendParityAxis`＝`ParityScenario.Backends` の並びの出どころ）・簡易 DSL の実装先（`DslFuzzBackends.Names` と構成ごとの軸）・方言の型の表のアダプタ 5 つ（`DialectTypeAxis`・正本 `DialectNames.All`）と実 DB の段の方言の派生 5 つ（`DialectTypeRealDbTestsBase`・正本 `DialectNames.All`）・方言の識別子と DDL の表のアダプタ 5 つ（`DialectDdlAxis`・正本 `DialectNames.All`）。
+- 方言の DDL の表（`DialectDdlRows`）は、DDL・同期スクリプトの出力をテスト側の読み取り器（`DialectDdlReader`＝アダプタの区切り文字で識別子を読み戻し、製品のクォートの関数を使わない）で構造の行へ写して照合する。全行に 3 つの照合を自動で掛ける：書式のカルチャで出力が変わらず DDL の生成日時の行が西暦であること・入力に CJK が無ければ出力に CJK が無いこと・`Treats` を書いた行は手で書いた扱いが `UnsupportedTreatments` と一致すること（扱いの表はすべてのマスを持つので、台帳に登録の無い行も照合される）。ガード：`DialectDdlTableTests`。
   名乗りの照合は Docker が無くても流れる（ガードの Fact はコレクションにもスキップにも入れない）。
 - 運用：
   1. 一覧に載っている組が出るようになったら赤になるので、その項目を一覧から消す。除外も同じ（次元表に載った項目は除外から消す）。
@@ -228,7 +229,7 @@
   - 書き出す型の表記（取込の `FormatDataType` と 5 方言の型カタログ・SQL Server の型の表記の正規化）・同期スクリプトの見出し・接続文字列のポート・SQLite の取込の外部キー名・Oracle の説明の `CHR(n)`・識別子の上限の英語の表記（例外文と MCP の注意文）は、一覧に載せず `string.Create` へ直した。
   - 整数の書式がカルチャで変わるのは負号だけ（.NET は数字を置き換えず、既定の書式は桁区切りを入れない）。直した箇所はどれも負の値でだけ食い違う。カタログは負の長さを返さない。
 - その他のガード：
-  - `CultureInvariantDialectOutputTests`：5 方言の DDL・同期スクリプト・型の解析と変換と正規化を、`CultureScope.Cultures`（tr-TR・de-DE・ja-JP・sv-SE・th-TH）でインバリアントと照合する。生成日時が西暦であること。`CultureInvariantDialectOutputTests.ImportedTypeSpelling_IsCultureInvariant` は、取込が DB のカタログから型の表記を組み立てる関数（SQL Server・Oracle の `FormatDataType`・PostgreSQL の `NormalizeFormatType`・MySQL の `MySqlTypeNotation.Normalize`）へ、負の値を含む長さ・精度・スケールの組み合わせを総当たりで流す（SQLite は宣言の型をそのまま入れるので対象に無い）。
+  - `CultureInvariantDialectOutputTests`：5 方言の型の解析と変換と正規化を、`CultureScope.Cultures`（tr-TR・de-DE・ja-JP・sv-SE・th-TH）でインバリアントと照合する。DDL・同期スクリプトは `DialectDdlTableTests` の全行に掛かる自動の照合が、同じカルチャでインバリアントと同じこと・DDL の生成日時の行があって西暦であることを確かめる（固定フィクスチャの定義と方言の型の選択肢を載せた図は `DialectDdlRows.Culture.cs` の行）。`CultureInvariantDialectOutputTests.ImportedTypeSpelling_IsCultureInvariant` は、取込が DB のカタログから型の表記を組み立てる関数（SQL Server・Oracle の `FormatDataType`・PostgreSQL の `NormalizeFormatType`・MySQL の `MySqlTypeNotation.Normalize`）へ、負の値を含む長さ・精度・スケールの組み合わせを総当たりで流す（SQLite は宣言の型をそのまま入れるので対象に無い）。
   - `CultureInvariantGenerationTests`：生成物の全ドリフトテストを各カルチャで流し直す。
   - `CultureInvariantExportTests`：Mermaid・DBML・HTML・Excel・SVG の出力と、Mermaid・DBML・Excel の取込。
   - `CultureInvariantToolOutputTests`：MCP の要約・変更系ツールが保存する図。名前付きクエリの一覧は `QueryToolFormatterTests` の行 `formatter-listing-is-culture-invariant-english`。

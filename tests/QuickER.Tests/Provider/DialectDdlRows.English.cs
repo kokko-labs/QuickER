@@ -1,98 +1,65 @@
-using System.Collections.Generic;
-using System.Text.RegularExpressions;
-using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
-using QuickER.Provider.MySql;
-using QuickER.Provider.Oracle;
-using QuickER.Provider.PostgreSql;
-using QuickER.Provider.Sqlite;
-using QuickER.Provider.SqlServer;
 using QuickER.Tests.TestSupport;
-using Xunit;
+using E = QuickER.Tests.Provider.DialectDdlElements;
+using F = QuickER.Tests.Provider.DialectDdlFacets;
+using P = QuickER.Tests.Provider.DialectDdlPaths;
 
 namespace QuickER.Tests.Provider;
 
 /// <summary>
-/// DDL（<c>.sql</c>）およびスキーマ同期スクリプトの固定文（ヘッダ・注意コメント・セクション見出し・スキップコメント）が
-/// 英語で統一されていること＝日本語（CJK 文字）が紛れ込んでいないことを守る回帰防止ガード。
+/// 固定文が英語。ASCII だけの入力から作った出力に CJK が無いことは、
+/// 全行にかかる自動の照合（英語）が見る。行は入力だけを組み、例外を投げないことだけを期待に書く
 /// </summary>
-/// <remarks>
-/// <para>
-/// 生成される SQL テキストに埋め込まれる固定文は、各方言の <c>DdlGenerator</c>（<see cref="DdlGeneratorBase"/> 派生）と
-/// 各方言の <c>SyncScriptBuilder</c> に由来する。ここへ日本語が混入してもビルド・型検査は通ってしまい静かに回帰するため、
-/// 「日本語を含まない入力（ASCII のみの識別子・説明は空）から生成した SQL に CJK が 1 文字も無い」ことをテストで固定する。
-/// </para>
-/// <para>
-/// <b>ユーザーデータ由来の日本語は正当</b>（テーブル・列・説明が SQL コメントや <c>COMMENT</c> 句へ流れる）。
-/// そのため本テストは入力の説明（<see cref="Entity.Description"/> / <see cref="Column.Description"/> /
-/// <see cref="SchemaDiffItem.NewDescription"/>）をすべて空にし、識別子も ASCII のみで構成する。
-/// 生成 C# コード側の同種ガードは <c>QuickER.Tests.Generator.GeneratedOutputEnglishGuardTests</c>。
-/// </para>
-/// </remarks>
-public sealed class DdlOutputEnglishGuardTests
+internal static partial class DialectDdlRows
 {
-    /// <summary>
-    /// CJK 文字の検出パターン（U+3000-U+9FFF＝CJK 記号・ひらがな・カタカナ・CJK 統合漢字、
-    /// U+FF00-U+FFEF＝全角英数記号・半角カナ）。
-    /// </summary>
-    private static readonly Regex CjkPattern = TestSupport.CjkText.Pattern;
+    private static IEnumerable<DialectDdlRow> EnglishRows() =>
+        [
+            DialectDdlRow
+                .Ddl(
+                    "ddl-table-fixed-text-english",
+                    "5 方言の DDL 出力に日本語（CJK）が含まれない（ASCII のみの図）",
+                    E.Table,
+                    F.English,
+                    _ => EnAsciiDiagram()
+                )
+                .ExpectAll(e => e.NoException()),
+            DialectDdlRow
+                .SyncItems(
+                    "sync-other-fixed-text-english",
+                    "各方言の同期スクリプト出力に日本語（CJK）が含まれない（ASCII のみの差分）",
+                    P.SyncOther,
+                    E.Table,
+                    F.English,
+                    _ => new DdlSyncItems(EnAsciiDiffItems(), TestDialectCapabilities.Neutral)
+                )
+                .Expect([Ss, Pg, My, Or], e => e.NoException()),
+            DialectDdlRow
+                .SyncItems(
+                    "sync-rebuild-fixed-text-english",
+                    "SQLite の再構築の同期スクリプト出力に日本語（CJK）が含まれない（ASCII のみの再構築計画）",
+                    P.SyncRebuild,
+                    E.Table,
+                    F.English,
+                    _ => EnSqliteRebuild()
+                )
+                .Expect(Sl, e => e.NoException()),
+            DialectDdlRow
+                .SyncItems(
+                    "sync-other-column-reorder-fixed-text-english",
+                    "MySQL の列順変更の同期スクリプト出力に日本語（CJK）が含まれない（ASCII のみ）",
+                    P.SyncOther,
+                    E.Column,
+                    F.English,
+                    _ => EnMySqlReorder()
+                )
+                .Expect(My, e => e.NoException()),
+        ];
 
-    /// <summary>
-    /// 5 方言の <c>DdlGenerator</c> が ASCII のみの図から出力する DDL に CJK が含まれないことを検証する。
-    /// ヘッダ（自動生成コメント・生成日時）・多対多コメント・Oracle の ON UPDATE 注意コメントを網羅する。
-    /// </summary>
-    [Fact(DisplayName = "5 方言の DDL 出力に日本語（CJK）が含まれない（ASCII のみの図）")]
-    public void DdlGenerators_ProduceNoCjk()
+    /// <summary>ASCII のみの列順変更（MySQL Native）の入力（live: id,a,b,c → target: c,id,a,b）</summary>
+    private static DdlSyncItems EnMySqlReorder()
     {
-        var diagram = BuildAsciiDiagram();
-
-        var outputs = new (string Dialect, string Sql)[]
-        {
-            ("SqlServer", new SqlServerDdlGenerator().Build(diagram)),
-            ("PostgreSql", new PostgreSqlDdlGenerator().Build(diagram)),
-            ("MySql", new MySqlDdlGenerator().Build(diagram)),
-            ("Oracle", new OracleDdlGenerator().Build(diagram)),
-            ("Sqlite", new SqliteDdlGenerator().Build(diagram)),
-        };
-
-        AssertNoCjk(outputs);
-    }
-
-    /// <summary>
-    /// 各方言の <c>SyncScriptBuilder</c> が ASCII のみの差分から出力する同期スクリプトに CJK が含まれないことを検証する。
-    /// セクション見出し・FK スキップコメント・Oracle の ON UPDATE 注意コメント・MySQL の列スキップコメント・
-    /// 主キー変更の DDL（4 方言はカタログ逆引きの実 DDL・未対応方言は <see cref="SyncScriptBuilderBase"/> の既定スキップコメント）を網羅する。
-    /// SQLite はテーブル再構築（PRAGMA ヘッダ／フッタ・RebuildTable 見出し・補助オブジェクト再作成）を別途網羅する。
-    /// </summary>
-    [Fact(
-        DisplayName = "各方言の同期スクリプト出力に日本語（CJK）が含まれない（ASCII のみの差分）"
-    )]
-    public void SyncScriptBuilders_ProduceNoCjk()
-    {
-        var items = BuildAsciiDiffItems();
-        var plan = new SyncPlanner().BuildPlan(items, TestDialectCapabilities.Neutral);
-
-        var outputs = new (string Dialect, string Sql)[]
-        {
-            ("SqlServer", new SqlServerSyncScriptBuilder().Build(plan)),
-            ("PostgreSql", new PostgreSqlSyncScriptBuilder().Build(plan)),
-            ("MySql", new MySqlSyncScriptBuilder().Build(plan)),
-            ("Oracle", new OracleSyncScriptBuilder().Build(plan)),
-            ("Sqlite", BuildSqliteRebuildScript()),
-            ("MySqlReorder", BuildMySqlReorderScript()),
-        };
-
-        AssertNoCjk(outputs);
-    }
-
-    /// <summary>
-    /// ASCII のみの列順変更（MySQL Native）から同期スクリプトを生成する。
-    /// ReorderColumns 見出しと <c>MODIFY ... AFTER</c> / <c>FIRST</c> の固定文を出力経路で通す。
-    /// </summary>
-    private static string BuildMySqlReorderScript()
-    {
-        Entity Ent(string table, params string[] cols)
+        static Entity Ent(string table, params string[] cols)
         {
             var e = new Entity { TableName = table };
 
@@ -111,32 +78,29 @@ public sealed class DdlOutputEnglishGuardTests
             return e;
         }
 
-        // live: id,a,b,c → target: c,id,a,b（c を先頭へ＝FIRST 経路も通す）
         var live = Ent("t", "id", "a", "b", "c");
         var target = Ent("t", "c", "id", "a", "b");
-        var item = new SchemaDiffItem
-        {
-            Kind = SchemaDiffKind.ReorderColumns,
-            TableName = "t",
-            Entity = target,
-            IsSelected = true,
-        };
-        var plan = new SyncPlanner().BuildPlan(
-            [item],
+
+        return new DdlSyncItems(
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.ReorderColumns,
+                    TableName = "t",
+                    Entity = target,
+                    IsSelected = true,
+                },
+            ],
             TestDialectCapabilities.Neutral with
             {
                 ColumnReorder = ColumnReorderMode.Native,
             },
             new SyncPlanContext { LiveEntities = [live] }
         );
-        return new MySqlSyncScriptBuilder().Build(plan);
     }
 
-    /// <summary>
-    /// ASCII のみの再構築計画（CreateOnly＋FK・既存テーブル再構築＋補助オブジェクト・ADD COLUMN・DROP TABLE）から
-    /// SQLite の同期スクリプトを生成する。PRAGMA ヘッダ／フッタ・RebuildTable 見出しの固定文を出力経路で通す。
-    /// </summary>
-    private static string BuildSqliteRebuildScript()
+    /// <summary>ASCII のみの再構築計画（CreateOnly＋FK・既存テーブル再構築＋補助オブジェクト・ADD COLUMN・DROP TABLE）の入力</summary>
+    private static DdlSyncItems EnSqliteRebuild()
     {
         var orders = new Entity
         {
@@ -279,16 +243,12 @@ public sealed class DdlOutputEnglishGuardTests
             },
         };
 
-        var capabilities = new SqliteProvider().SyncCapabilities;
-        var plan = new SyncPlanner().BuildPlan(items, capabilities, context);
-        return new SqliteSyncScriptBuilder().Build(plan);
+        // 能力は方言の宣言（SQLite の実装の宣言）、文脈は live の表と補助オブジェクト
+        return new DdlSyncItems(items, null, context);
     }
 
-    /// <summary>
-    /// ASCII のみの識別子・空の説明で構成した検証用 ER 図を組み立てる。
-    /// ヘッダ・多対多コメント・Oracle の ON UPDATE 注意コメントの各固定文を出力経路で通す。
-    /// </summary>
-    private static ErDiagram BuildAsciiDiagram()
+    /// <summary>ASCII のみの識別子・空の説明の図（ヘッダ・多対多コメント・Oracle の ON UPDATE 注意コメントを通す）</summary>
+    private static ErDiagram EnAsciiDiagram()
     {
         var parent = new Entity
         {
@@ -352,12 +312,8 @@ public sealed class DdlOutputEnglishGuardTests
         };
     }
 
-    /// <summary>
-    /// ASCII のみで構成した検証用の差分項目一覧を組み立てる。
-    /// セクション見出し・FK スキップ・Oracle 注意コメント・MySQL 列スキップ・主キー変更（実 DDL）の
-    /// 各固定文を出力経路で通す。
-    /// </summary>
-    private static IReadOnlyList<SchemaDiffItem> BuildAsciiDiffItems()
+    /// <summary>ASCII のみで構成した同期の差分項目（セクション見出し・FK スキップ・Oracle 注意・MySQL 列スキップ・主キー変更）</summary>
+    private static IReadOnlyList<SchemaDiffItem> EnAsciiDiffItems()
     {
         var addedTable = new Entity
         {
@@ -433,7 +389,7 @@ public sealed class DdlOutputEnglishGuardTests
             },
             new SchemaDiffItem
             {
-                // 主キー変更 → 4 方言はカタログ逆引きの実 DDL・未対応方言は既定スキップコメントを誘発する
+                // 主キー変更 → 4 方言はカタログ逆引きの実 DDL を誘発する
                 Kind = SchemaDiffKind.AlterPrimaryKey,
                 TableName = "t",
                 Entity = addedTable,
@@ -450,37 +406,5 @@ public sealed class DdlOutputEnglishGuardTests
                 IsSelected = true,
             },
         ];
-    }
-
-    /// <summary>
-    /// 各方言の出力に CJK 文字が含まれないことを検証する。
-    /// 検出時は「どの方言の何行目・該当行の内容」を列挙し、固定文への日本語混入へ誘導するメッセージで失敗させる。
-    /// </summary>
-    private static void AssertNoCjk(IEnumerable<(string Dialect, string Sql)> outputs)
-    {
-        var findings = new List<string>();
-
-        foreach (var (dialect, sql) in outputs)
-        {
-            var lines = sql.Split('\n');
-
-            for (var i = 0; i < lines.Length; i++)
-            {
-                var line = lines[i].TrimEnd('\r');
-
-                if (CjkPattern.IsMatch(line))
-                {
-                    findings.Add($"{dialect}:{i + 1} 「{line.Trim()}」");
-                }
-            }
-        }
-
-        findings
-            .Should()
-            .BeEmpty(
-                "DDL / 同期スクリプトの固定文は英語で統一する必要があります（ユーザーデータ由来の日本語は入力を空にしてあります）。"
-                    + "検出＝方言の DdlGenerator または SyncScriptBuilder の固定文字列に日本語が混入しています。"
-                    + "上記の 方言:行番号・該当行 を確認してください"
-            );
     }
 }

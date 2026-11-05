@@ -75,7 +75,7 @@
 
 - DDL は暗黙コミットされる（`TransactionalDdl` が偽）。
 - 外部キーの `ON UPDATE` と `ON DELETE SET DEFAULT` を持たない。DDL・同期は注意コメントを出して句を省き（`OracleReferentialAction.AppendNotes`＝DDL・同期の共有）、比較は実効値へ畳む（畳まないと既定の追加だけで ORA-02275）。
-  - 固定は `OracleTypeNotationIntegrationTests.UnsupportedReferentialActions_LeaveNoForeignKeyDiff`・`OracleTypeNotationTests.Provider_WiresNormalizationAndActionFolding`（参照アクションの畳み込みの配線）・`Oracle{DdlGenerator,SyncScriptBuilder}Tests` の ON DELETE SET DEFAULT の注記。
+  - 固定は `OracleTypeNotationIntegrationTests.UnsupportedReferentialActions_LeaveNoForeignKeyDiff`・`OracleTypeNotationTests.Provider_WiresNormalizationAndActionFolding`（参照アクションの畳み込みの配線）・ON DELETE SET DEFAULT の注記（DDL は `DialectDdlTableTests` の行 `ddl-fk-on-delete-set-default-omitted-with-note-oracle`、同期は期待の行 `realdb-oracle-script-add-fk-on-delete-set-default-omitted-with-note`）。
 - 主キーと同じ列集合の一意制約を作れない（ORA-02261）。DB にある一意制約と同じ列へ主キーを付け替える同期は、その一意制約を暗黙に外して名指しする（`src/QuickER.Provider/CLAUDE.md`「計算列と主キーと同じ列集合の一意制約」）。固定は同期計画の総当たりの行 `oracle-100-111-move-pk-onto-unique`・`oracle-move-pk-onto-referenced-unique`。
 - 既定値のある列の型の種類の変更は警告する（実 Oracle の行 `realdb-oracle-column-type-kind-change-with-default-warns`）。
 - 列の変更では外部キーを外し直さない。外部キーの両端は同じ文字列型の長さだけの違いを許す（単位語 CHAR／BYTE は両端で同じこと）。固定は実 Oracle の行 `realdb-oracle-pk-change-with-string-length-only-fk-keeps-fk`。

@@ -67,7 +67,7 @@
 
 ## 既知の割り切り
 
-- 各方言の Identifier はドット付きテーブル名を 5 方言対称に `"a"."b"` へ分割クォートする（`SqliteIdentifierTests` が固定）。SQLite では `"a"."b"` が「アタッチ済み DB a のテーブル b」を意味するので、dbo 以外のスキーマを含む図を sqlite へ切り替えて DDL・同期を実行すると `unknown database` エラーになり得る。対称性を優先して直さない。
+- 各方言の Identifier はドット付きテーブル名を 5 方言対称に `"a"."b"` へ分割クォートする（`DialectIdentifierTableTests` の行 `quote-dot-*` が固定）。SQLite では `"a"."b"` が「アタッチ済み DB a のテーブル b」を意味するので、dbo 以外のスキーマを含む図を sqlite へ切り替えて DDL・同期を実行すると `unknown database` エラーになり得る。対称性を優先して直さない。
 - その代わり `SyncDialectCapabilities.SupportsSchemaQualifiedTableNames` が false で、計画は `SyncPlanWarningKind.SchemaQualifiedTableName`（選んだ項目が触れる表・外部キーの親を表ごとに 1 件）を出し、DDL は `SchemaQualifiedTableNameNote` が注記する（扱いの表のマスで判定）。
-  - 固定は `SchemaQualifiedTableNameTests`（5 方言の DDL と計画）・実 SQLite の行 `realdb-dotted-table-name-warns-and-fails`。mutation 実証済み。
+  - 固定は `DialectDdlTableTests` の行 `ddl-schema-qualified-dotted-table-name-note`（5 方言の DDL）・期待の行 `plan-dotted-table-name-warns-only-where-declared`（5 方言の計画）・実 SQLite の行 `realdb-dotted-table-name-warns-and-fails`。mutation 実証済み。
 - 主キーと同じ列集合の一意制約は取込に現れず差分が永久に消えないので作らない（`SupportsUniqueConstraintOnPrimaryKey` が偽＝`src/QuickER.Provider/CLAUDE.md`「計算列と主キーと同じ列集合の一意制約」）。

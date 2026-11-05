@@ -18,7 +18,7 @@ QuickER は WPF 製の ER 図デザイナ。DB スキーマのインポート／
 ```powershell
 dotnet build QuickER.slnx                                # ビルド
 dotnet test QuickER.slnx --no-build                      # 全テスト
-dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "FullyQualifiedName~SqlServerDdlGeneratorTests"   # 単一テストクラス
+dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "FullyQualifiedName~DialectDdlTableTests"   # 単一テストクラス
 csharpier format .                                       # 整形（グローバルツール）。コード修正後は必ず実行
 ```
 
@@ -120,7 +120,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
   - テストのエンジンの種の指紋の記録 2 本（`tests/QuickER.Tests/TestSupport/engine-fingerprints.json`／`tests/QuickER.Tests.Integration/engine-fingerprints.json`・eol=lf）も同じ変数で書き直される（Integration の分は同じコマンドを `tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj` に向ける。各アセンブリの EngineFingerprintDriftTests が検証）。指紋は生成器の乱数の引き方の変化を検出するもので、実行の列は守らない（→ `tests/QuickER.Tests/TestSupport/CLAUDE.md`）
   - **再生成は承認であって検証ではない**：差分が出たら、先に「利用者を壊す変更か」「乱数の引き方を意図して変えたか」を判断する。テンプレートの変更がパッケージの公開 API 面を変えるときは「regen → 再ビルド → regen」の 2 回が要る（1 回目は旧アセンブリの面で承認してしまう）
 - ランタイムパッケージ 7 csproj の依存集合と公開 API 面の固定は → `src/QuickER.Runtime/CLAUDE.md`
-- 生成テンプレート・固定フィクスチャ・DDL 生成・`PasswordBoxBehavior` に触るときは、対応するテスト（各方言の *DdlGeneratorTests / PasswordBoxBehaviorTests / CSharpCodeGenerationServiceTests / GeneratedFixtureDriftTests）を必ず実行する
+- 生成テンプレート・固定フィクスチャ・DDL 生成・`PasswordBoxBehavior` に触るときは、対応するテスト（DialectDdlTableTests / PasswordBoxBehaviorTests / CSharpCodeGenerationServiceTests / GeneratedFixtureDriftTests）を必ず実行する
 
 ## 設計判断と不変条件の索引
 
@@ -128,11 +128,11 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 
 ### 横断の規則
 
-- **書き出す文字列（DDL・同期スクリプト・型の表記・生成コード・エクスポート・ツールの応答）は書式のカルチャに依らず同じ。数値・日時は InvariantCulture、`IgnoreCase` の正規表現は `CultureInvariant` を併せて付け、`\d` は `ECMAScript` のときだけ使う**：sv-SE の負号や th-TH の仏暦、tr-TR の大文字小文字、全角数字が出力や判定を壊す。ガード：`CultureInvariantDialectOutputTests`・`RegexCultureGuardTests`・`NumericInterpolationCultureGuardTests`・`GeneratedCodeCultureAnalyzerTests`。→ `tests/QuickER.Tests/TestSupport/CLAUDE.md`「カルチャのガード」
+- **書き出す文字列（DDL・同期スクリプト・型の表記・生成コード・エクスポート・ツールの応答）は書式のカルチャに依らず同じ。数値・日時は InvariantCulture、`IgnoreCase` の正規表現は `CultureInvariant` を併せて付け、`\d` は `ECMAScript` のときだけ使う**：sv-SE の負号や th-TH の仏暦、tr-TR の大文字小文字、全角数字が出力や判定を壊す。ガード：`CultureInvariantDialectOutputTests`・`DialectDdlTableTests`（全行に掛かる自動のカルチャの照合）・`RegexCultureGuardTests`・`NumericInterpolationCultureGuardTests`・`GeneratedCodeCultureAnalyzerTests`。→ `tests/QuickER.Tests/TestSupport/CLAUDE.md`「カルチャのガード」
 
 ### 名前と制約名
 - **図に保存する名前の同一性は `SchemaNames`（Model）だけが決める（前後の空白を除き `OrdinalIgnoreCase`。綴りは書き換えない。キーは `SchemaNames.Key`）**：入口ごとに比較や `Trim`・`ToLowerInvariant` で書くと、Unicode の特殊な文字で表・列の組と答えが割れる。ガード：`SchemaNamesGuardTests`・`SyncNameComparisonGuardTests`・`SchemaNamesKeyTests`・`NameFuzzCompilationTests`。→ `src/QuickER.Model/CLAUDE.md`「名前の同一性（SchemaNames）」
-- **制約名の安全化と名前の無い制約の既定名は `ConstraintNames` だけで組む**：写すと前後に空白のあるテーブル名で DDL と同期の制約名が食い違い、存在しない制約を外そうとして失敗する。ガード：`ConstraintNamesGuardTests`・`ConstraintNameConsistencyTests`・`ConstraintNameCreationPathTests`。→ `src/QuickER.Model/CLAUDE.md`「制約名の組み立て（ConstraintNames）」
+- **制約名の安全化と名前の無い制約の既定名は `ConstraintNames` だけで組む**：写すと前後に空白のあるテーブル名で DDL と同期の制約名が食い違い、存在しない制約を外そうとして失敗する。ガード：`ConstraintNamesGuardTests`・`DialectDdlTableTests`（行 `ddl-*-trimmed-table`・`sync-*-trimmed-table`）・`ConstraintNameCreationPathTests`。→ `src/QuickER.Model/CLAUDE.md`「制約名の組み立て（ConstraintNames）」
 - **既定の制約名は識別子の長さの上限に収め、上限は省略できない引数で受ける（経路は 2 つだけ）**：省略可能にすると黙って縮めない呼び出しが残り、DDL の適用が断られるか PostgreSQL で別の名前に切り詰められる。ガード：`IdentifierLengthLimitDeclarationTests`・`ModelDialectLookupGuardTests`・`LongDefaultConstraintNameTests`。→ `src/QuickER.Model/CLAUDE.md`「識別子の長さの上限」
 - **名前の入力・ツール・方言切替は、受け付けない名前を入口と同じ判定（`DescribeViolation`）で知らせる**：判定を写すと入口ごとに食い違う。ガード：`NameLimitStatusWarningTests`・`ToolScenarioTests`（行 `name-limit-*`）・`NameLimitNotesTests`。→ `src/QuickER.Model/CLAUDE.md`「名前の上限の通知（NameLimitNotes）」
 
@@ -146,7 +146,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 
 ### 方言の宣言
 - **方言の違いは方言の宣言だけが持ち、宣言は既定値を持たない**：既定値を足すと能力を足したとき書き忘れた方言が旧来の値で黙って動く。ガード：`SyncDialectCapabilitiesNoDefaultsTests`・`DialectNameLiteralGuardTests`・`UnsupportedCoverageTests`。→ `src/QuickER.Dialects/CLAUDE.md`「宣言は既定値を持たない」
-- **図のテーブル名を最初の `.` でスキーマと表に分ける規則は `SchemaQualifiedName` だけが持つ**：別々の規則で分けると `a.b.c` のような名前で DDL と CRUD が別の表を指す。ガード：`SchemaQualifiedNameGuardTests`・`SchemaQualifiedNameParityTests`。→ `src/QuickER.Dialects/CLAUDE.md`「スキーマ修飾名の分け方（SchemaQualifiedName）」
+- **図のテーブル名を最初の `.` でスキーマと表に分ける規則は `SchemaQualifiedName` だけが持つ**：別々の規則で分けると `a.b.c` のような名前で DDL と CRUD が別の表を指す。ガード：`SchemaQualifiedNameGuardTests`・`DialectIdentifierTableTests`（行 `split-*`・`runtime-quote-*`）。→ `src/QuickER.Dialects/CLAUDE.md`「スキーマ修飾名の分け方（SchemaQualifiedName）」
 
 ### 図ファイル
 - **Version 1 のまま足すフィールドは、読み手が欠落を無害に扱える形に限り、無害でなければ Version を上げる**：古い版で保存すると新しいフィールドが消える。ガードなし（設計判断）。→ `src/QuickER.Document/CLAUDE.md`「図ファイル形式の前方互換」
@@ -155,7 +155,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 ### 取込
 
 - **プロバイダの対称性**：5 方言は SchemaImporter／`DdlGeneratorBase` 派生／型マップ／実 DB 統合テストの同じ構造を持ち、インポータの基底クラス化は意図的に見送る。共有部品は `ForeignKeyRelationshipBuilder`・`UniqueConstraintImportBuilder`・`SchemaTableEntry`。→ `src/QuickER.Provider/CLAUDE.md`「プロバイダの対称性」
-- **取込は宣言どおりだけを持ち帰り、持ち帰れなかったものは取込警告で告げる**：文言は `SchemaImportWarningText` だけが持ち、表示側は飾りだけ。黙ると後で DDL・同期が図全体ごと止まる。ガード：`SchemaImportWarningTextTests`。取込の範囲の正本は `docs/database.md`（.ja）。→ `src/QuickER.Provider/CLAUDE.md`「取込警告」
+- **取込は宣言どおりだけを持ち帰り、持ち帰れなかったものは取込警告で告げる**：文言は `SchemaImportWarningText` だけが持ち、表示側は飾りだけ。黙ると後で DDL・同期が図全体ごと止まる。ガード：`SchemaImportWarningTextTests`・`DialectImportWarningTableTests`。取込の範囲の正本は `docs/database.md`（.ja）。→ `src/QuickER.Provider/CLAUDE.md`「取込警告」
 - **大文字小文字だけ違う表名・列名は後着を捨て、全解決点を序数一致で引く**：捨てるだけでは採用した表へ列・制約が混ざる。ガード：`{PostgreSql,Oracle,MySql,SqlServer,Sqlite}ImportFidelityIntegrationTests`・`SchemaTableEntryNameTests`・`NameIdentitySqliteImportFuzzTests`。→ `src/QuickER.Provider/CLAUDE.md`「大文字小文字だけ違うテーブル名」
 - **最初の `.` で分けて元へ戻らない表名は取り込まない**：別の表として読まれる。判定は `SchemaImportTableNames` の 1 つだけ。ガード：`SchemaImportTableNamesTests`・5 方言の `*ImportFidelityIntegrationTests.Import_DottedTableName_*`。→ `src/QuickER.Provider/CLAUDE.md`「ドットを含むテーブル名」
 - **出せない型表記は取込完了時に 5 方言すべてで告げる**：黙って入れると後の DDL・同期が全テーブルごと止まる。ガード：`PostgreSqlImportFidelityIntegrationTests.Import_ColumnTypeNotEmittable_IsReported`・`PostgreSqlSchemaImporterTests`。→ `src/QuickER.Provider/CLAUDE.md`「出せない型表記の告知」
@@ -178,24 +178,24 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 ### 差分と同期
 
 - **同期は差分 → 方言中立の計画 → 方言の SQL の 2 段で、方言差は既定値の無い `SyncDialectCapabilities` で宣言する**：既定値があると足した能力を書き忘れた方言が黙って旧来の値で動く。ガード：`CapabilityTreatmentParityTests`。→ `src/QuickER.Provider/CLAUDE.md`「2 段構造と方言の宣言」
-- **生成 SQL の固定文は英語が正本**：ガード：`DdlOutputEnglishGuardTests`。→ `src/QuickER.Provider/CLAUDE.md`「生成 SQL の固定文」
-- **制約名の安全化と既定名の正本は Model の `ConstraintNames`、識別子は 5 方言対称に分割クォートする**：方言側に写しを置くと DDL と同期の名前が割れる。ガード：`SqliteIdentifierTests`・`SqlServerDefaultSchemaDescriptionIntegrationTests`。→ `src/QuickER.Provider/CLAUDE.md`「制約名の正本と識別子の分割クォート」
-- **SQL の信頼境界（動的 SQL の二段エスケープ・実行時に読んだ名前は DB のクォート関数・逆引きは表の所有者で絞る・`--` コメントは `SqlComment.Sanitize`・型は `SqlTypeText`・名前の入口検証・合成 PK 名の `Escape`・PG のドルタグ）**：外すと名前 1 つで同期が壊れるか別の表の制約を外す。ガード：`SqlCommentSanitizeGuardTests`・`SqlNameTextTests`・`ConstraintNameEscapingTests`。→ `src/QuickER.Provider/CLAUDE.md`「SQL の信頼境界」（C# 側は `src/QuickER.CodeGen.CSharp/CLAUDE.md`「名前・型文字列の信頼境界（C# 生成側）」）
+- **生成 SQL の固定文は英語が正本**：ガード：`DialectDdlTableTests`（全行に掛かる自動の英語の照合・行 `ddl-table-fixed-text-english`・`sync-*-fixed-text-english`）。→ `src/QuickER.Provider/CLAUDE.md`「生成 SQL の固定文」
+- **制約名の安全化と既定名の正本は Model の `ConstraintNames`、識別子は 5 方言対称に分割クォートする**：方言側に写しを置くと DDL と同期の名前が割れる。ガード：`DialectIdentifierTableTests`（行 `quote-dot-*`）・`SqlServerDefaultSchemaDescriptionIntegrationTests`。→ `src/QuickER.Provider/CLAUDE.md`「制約名の正本と識別子の分割クォート」
+- **SQL の信頼境界（動的 SQL の二段エスケープ・実行時に読んだ名前は DB のクォート関数・逆引きは表の所有者で絞る・`--` コメントは `SqlComment.Sanitize`・型は `SqlTypeText`・名前の入口検証・合成 PK 名の `Escape`・PG のドルタグ）**：外すと名前 1 つで同期が壊れるか別の表の制約を外す。ガード：`SqlCommentSanitizeGuardTests`・`SqlNameTextTests`・`DialectDdlTableTests`（行 `ddl-primary-key-name-escaped`・`sync-*-primary-key-name-escaped`）。→ `src/QuickER.Provider/CLAUDE.md`「SQL の信頼境界」（C# 側は `src/QuickER.CodeGen.CSharp/CLAUDE.md`「名前・型文字列の信頼境界（C# 生成側）」）
 - **利用者が付けた名前は縮めずに DDL・同期の入口で上限と表せない文字を断る**：名前を拾い忘れた種類だけが黙って DB に届く。ガード：`OutputIdentifierLimitGuardTests`・`IdentifierLimitEntryTests`・`NameFuzzDdlRoundTripTestsBase`・`MySqlIdentifierLengthLimitIntegrationTests`。→ `src/QuickER.Provider/CLAUDE.md`「利用者が付けた名前の上限」
 - **差分は大文字小文字だけ違う表・列を live の綴りへ揃えた複製で組む**：揃えないと引用識別子の方言でスクリプトが相手を指せない。ガード：`SchemaDiffServiceTests.Items_CarryDiagramObjects`・`SchemaDiffServiceMatchingCountTests`。→ `src/QuickER.Provider/CLAUDE.md`「差分の名前の綴り」
-- **複合外部キーの列ペアは差分で並びを比べず、DDL・同期は参照先の（同期後の）キーの並びで出す**：並びのまま付け直すと失敗し、差分が並びを比べると永久に食い違う。ガード：`ForeignKeyColumnOrderTests`・`SyncPlannerTests`・`SchemaDiffItemTests`。→ `src/QuickER.Provider/CLAUDE.md`「複合外部キーの列ペアの並び」
+- **複合外部キーの列ペアは差分で並びを比べず、DDL・同期は参照先の（同期後の）キーの並びで出す**：並びのまま付け直すと失敗し、差分が並びを比べると永久に食い違う。ガード：`ForeignKeyColumnOrderTests`・`DialectDdlTableTests`（行 `ddl-fk-composite-reordered-to-referenced-key`・`sync-other-add-composite-fk-reordered-to-referenced-key`）・`SyncPlannerTests`・`SchemaDiffItemTests`。→ `src/QuickER.Provider/CLAUDE.md`「複合外部キーの列ペアの並び」
 - **外部キーの作り直しは `AlterForeignKey` 1 項目へ畳み、計画の入口で展開する。差分は外部キーを本数で比べる**：2 項目のままだと既定の追加だけが名前の重複で失敗する。→ `src/QuickER.Provider/CLAUDE.md`「外部キーの作り直しの畳み込み」
 - **一意制約の差分は名前の段 → 列集合の段で組み、同じ実効名の追加と削除は `AlterUniqueConstraint` へ畳んで `ExpandAlters` で展開する**：列集合だけで組むと名前を保った制約の追加が同じ名前で失敗し、展開を外すと作り直しが黙って消える。→ `src/QuickER.Provider/CLAUDE.md`「一意制約の差分」
 - **CREATE TABLE の制約行は `TableConstraintLineBuilder` が単一正本、DB の一意制約の照合キーは `UniqueConstraintKey`（表＋名前＋列集合）**：再インライン化すると同期で作った表だけ UNIQUE が無くなり、キーから名前を外すと双子の一意制約の片方が残って列の変更が止まる。→ `src/QuickER.Provider/CLAUDE.md`「一意制約の照合キーと付け直し」
 - **主キーの同期は 3 フェーズで、旧主キーに支えられた FK を外して付け直し、新しい主キー列は NOT NULL にする**：ガード：期待の行 `plan-implicit-fk-*`。→ `src/QuickER.Provider/CLAUDE.md`「主キーの同期」
 - **候補キーは列の集合の完全一致で証明し、証明できない付け直しは警告して暗黙コミットの方言では最後へ回す**：並べないと警告していない外部キーまで巻き添えで消える。→ `src/QuickER.Provider/CLAUDE.md`「候補キーの証明」
-- **外部キーの暗黙の外し直しは付け直せない外部キーを外したまま残さない（型の食い違いは外さず名指し・必ず断られる文は先頭へ・端が消える外部キーは外すだけ）**：暗黙コミットの方言で外部キーが消えたまま残る。ガード：`SyncPlannerTests`・`ForeignKeyStatementNotesTests`・`MySqlSyncScriptBuilderTests`。→ `src/QuickER.Provider/CLAUDE.md`「外部キーの暗黙の外し直し」
+- **外部キーの暗黙の外し直しは付け直せない外部キーを外したまま残さない（型の食い違いは外さず名指し・必ず断られる文は先頭へ・端が消える外部キーは外すだけ）**：暗黙コミットの方言で外部キーが消えたまま残る。ガード：`SyncPlannerTests`・`DialectDdlTableTests`（行 `ddl-fk-*-note`）・`MySqlSyncScriptBuilderTests`。→ `src/QuickER.Provider/CLAUDE.md`「外部キーの暗黙の外し直し」
 - **選んでいない変更を前提にする項目は外して名指しし、依存先を自動で選ばない**：そのまま実行すると存在しない表・列を参照して失敗するか部分的な定義のまま成功する。ガード：`SchemaSyncWarningTextTests`。→ `src/QuickER.Provider/CLAUDE.md`「選んでいない変更を前提にする項目」
 - **構成列の削除は方言に依らず同じ形で扱い、列が 1 本も残らない表の列の削除は外す**：方言ごとに断られる・黙って消える・縮むと結果が割れる。ガード：`SyncPlannerDropMemberColumnTests.DropColumnsOnly_DropsUniqueConstraintBeforeColumnInScript`・`SchemaSyncWarningTextTests`。→ `src/QuickER.Provider/CLAUDE.md`「構成列の削除と列が残らない表」
 - **同期スクリプトのセクションは固定順で、表の削除を追加より前に置く**：追加が先だと引き継いだ一意制約の名前がぶつかる。→ `src/QuickER.Provider/CLAUDE.md`「セクションの順序」
-- **説明の空欄の判定は `DescriptionText` だけ、BMP の外の文字は方言の宣言で扱う**：経路ごとに判定すると適用直後に偽の差分が出る。ガード：`BlankDescriptionTests`・`DescriptionStoredTextTests`・`DescriptionSupplementaryCharacterDdlNoteTests`。→ `src/QuickER.Provider/CLAUDE.md`「説明の空欄と表せない文字」
-- **方言が表せない参照アクションは比べる前に実効値へ畳む**：取り込み直すたびに作り直しの差分が出る。ガード：`OracleTypeNotationIntegrationTests.UnsupportedReferentialActions_LeaveNoForeignKeyDiff`・`MySqlReferentialActionIntegrationTests.SetDefault_DdlOmitsClauseWithNoteAndApplies`・`OracleDdlGeneratorTests`。→ `src/QuickER.Provider/CLAUDE.md`「参照アクションの畳み込み」
-- **計算列の NULL 許容は差分に出さず、主キーと同じ列集合の一意制約は持てない方言で比較から外して DDL で省く**：比べると意味のない ALTER COLUMN や永久に消えない差分が出る。ガード：`UniqueConstraintOnPrimaryKeyNoteTests`・`OracleDdlRoundTripIntegrationTests.UniqueConstraintOnPrimaryKey_IsOmittedAndApplies`。→ `src/QuickER.Provider/CLAUDE.md`「計算列と主キーと同じ列集合の一意制約」
+- **説明の空欄の判定は `DescriptionText` だけ、BMP の外の文字は方言の宣言で扱う**：経路ごとに判定すると適用直後に偽の差分が出る。ガード：`BlankDescriptionTests`・`DescriptionStoredTextTests`・`DialectDdlTableTests`（行 `ddl-description-*`・`sync-other-description-*`）・期待の行 `diff-blank-description-*`・`diff-description-stored-form-*`・`plan-description-characters-replaced-*`。→ `src/QuickER.Provider/CLAUDE.md`「説明の空欄と表せない文字」
+- **方言が表せない参照アクションは比べる前に実効値へ畳む**：取り込み直すたびに作り直しの差分が出る。ガード：`OracleTypeNotationIntegrationTests.UnsupportedReferentialActions_LeaveNoForeignKeyDiff`・期待の行 `realdb-mysql-set-default-is-omitted-and-leaves-no-fk-diff`・`DialectDdlTableTests`（行 `ddl-fk-on-delete-set-default-omitted-with-note-oracle`・`ddl-fk-set-default-omitted-with-note-mysql`）。→ `src/QuickER.Provider/CLAUDE.md`「参照アクションの畳み込み」
+- **計算列の NULL 許容は差分に出さず、主キーと同じ列集合の一意制約は持てない方言で比較から外して DDL で省く**：比べると意味のない ALTER COLUMN や永久に消えない差分が出る。ガード：`DialectDdlTableTests`（行 `ddl-unique-on-primary-key-columns-omitted-where-unsupported`）・`OracleDdlRoundTripIntegrationTests.UniqueConstraintOnPrimaryKey_IsOmittedAndApplies`。→ `src/QuickER.Provider/CLAUDE.md`「計算列と主キーと同じ列集合の一意制約」
 - **列の変更は図に無い列属性をカタログから読み直して保ち、既定値のある列の型の種類の変更は警告する**：保たないと照合順序・既定値・生成列の式が黙って消える。ガード：`MySqlColumnAttributeSyncIntegrationTests`・`PostgreSqlColumnAttributeSyncIntegrationTests`・`SchemaSyncDialogViewModelTests.Execute_TypeKindChangeWithDefault_ShowsWarningFromImportedDefaults`・`OracleImportFidelityIntegrationTests.Import_EmptyStringAndParenthesizedNullDefaults_AreNotDefaults`。→ `src/QuickER.Provider/CLAUDE.md`「列の変更が保つ属性」
 - **SQLite の再構築の合成は live の列オブジェクトを保ち、失う属性を警告し、写す列が無くても行を保つ**：図の列へ差し替えると一意制約が消え主キーの順序が変わる。ガード：`TableRebuildAttributeDetectorTests`・`SqliteSyncScriptBuilderTests`。→ `src/QuickER.Provider/CLAUDE.md`「テーブル再構築の合成」
 - **SQLite の同期実行器は外部キー違反とビューの破損を前後で比べ、PRAGMA を元へ戻す**：既存の孤児行で無関係な同期が失敗し、戻さないとプールの接続が外部キー検査なしになる。ガード：`SqliteSchemaSyncIntegrationTests`。→ `src/QuickER.Provider.Sqlite/CLAUDE.md`「同期実行器」
@@ -206,7 +206,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **生成の単発オプションのケースは「既定へ戻した比較用」と照合して空振りを検出する**：オプションが出力を変えない空振りが見えなくなる。ガード：`CodegenCaseTests` の行 `compile-single-option-*`（関係 OptionEffect。対照の「同じオプションどうしは同じ」も同じ関係が見る）。→ `src/QuickER.CodeGen.CSharp/CLAUDE.md`「生成の単発オプションのケース」
 - **DB が値を作る列（rowversion・計算列・採番列）は別々のマーカーで書き込みから外し、共用しない**：共用すると版の解決が計算列を版と誤認し、主キーの採番列を外すとキー無しの INSERT になる。ガード：`StoreGeneratedCapabilityGenerationTests`・`ComputedColumnGenerationTests`・`IdentityColumnGenerationTests`。→ `src/QuickER.CodeGen.CSharp/CLAUDE.md`「DB が値を作る列の書き込み除外」
 - **rowversion の書き込み除外は `dialect_assigns_store_generated` ＋ `repositories` のときだけ**：方言を持たないスコープでフラグを単独で読むと意味が崩れる。ガード：`StoreGeneratedCapabilityGenerationTests`。→ 同上「行バージョン列（store-generated）」
-- **計算列は `[ComputedColumn]`・採番列は `[IdentityColumn]` で方言に依らず外し、DDL・同期の注記は単一の正本から出す**：注記が方言名の分岐に散る。ガード：`ComputedColumnCommentTests`・`IdentityColumnCommentTests`。→ 同上「計算列・生成列」「DB が値を拒む採番列」
+- **計算列は `[ComputedColumn]`・採番列は `[IdentityColumn]` で方言に依らず外し、DDL・同期の注記は単一の正本から出す**：注記が方言名の分岐に散る。ガード：`DialectDdlTableTests`（行 `ddl-computed-column-*`・`ddl-identity-column-*`・`sync-*-computed-column-*`・`sync-*-identity-column-*` と扱いの表の自動の照合）。→ 同上「計算列・生成列」「DB が値を拒む採番列」
 - **マルチターゲット × rowversion は型統合・NULL 許容化・トークン不刻印で成り立つ**：版ガードがリバースで黙って消える。ガード：`MultiTargetRowVersionRuntimeTests`・`MultiTargetRowVersionSqliteRuntimeTests`。→ 同上「マルチターゲット × rowversion」
 - **FK 列は親側列の値オブジェクト型を共有し、列名→VO 型の独自解決を下流に作らない**：EF Core のモデル検証が FK と PK の CLR 型不一致で落ちる。ガード：`ValueObjectForeignKeyUnificationTests`・`CodegenCaseTests` の行 `probe-efcore-model-vo-foreign-key-name-mismatch`。→ 同上「FK 列の値オブジェクト型統一」
 - **`[Column]` は常時付与で、生成ランタイムの列判定は `[Column]` を許可リストとして読む**：手書きプロパティが実在しない SQL 列に化ける。ガード：`ExtensionShimAcceptanceTests`。→ 同上「Column 属性は常時付与」
