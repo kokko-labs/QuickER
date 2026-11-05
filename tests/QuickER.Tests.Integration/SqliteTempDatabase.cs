@@ -15,8 +15,9 @@ namespace QuickER.Tests.Integration;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 一時ディレクトリ内に <c>.db</c> ファイルを作り、そのパスを保持する。破棄時に接続プールを解放して
-/// ファイルとディレクトリを削除する。<c>using</c> スコープで使うことを想定する。
+/// 実行ごとの親フォルダ（<see cref="SqliteTempRoot"/>）の下に一時ディレクトリを作り、その中の <c>.db</c> ファイルの
+/// パスを保持する。破棄時に接続プールを解放してファイルとディレクトリを削除する。<c>using</c> スコープで使うことを想定する。
+/// その場で消せなかった分は、<see cref="SqliteTempRoot"/> が全テストの後と次の実行の始めに消す。
 /// </para>
 /// <para>
 /// スキーマ準備は <c>Mode=ReadWriteCreate</c> の接続文字列（<see cref="ReadWriteCreateConnectionString"/>）で
@@ -42,11 +43,7 @@ internal sealed class SqliteTempDatabase : IDisposable
     /// </summary>
     public static SqliteTempDatabase Create()
     {
-        var dir = Path.Combine(
-            Path.GetTempPath(),
-            "quicker-sqlite-" + Guid.NewGuid().ToString("N")
-        );
-        Directory.CreateDirectory(dir);
+        var dir = SqliteTempRoot.CreateDatabaseDirectory();
         var filePath = Path.Combine(dir, "test.db");
         return new SqliteTempDatabase(dir, filePath);
     }
@@ -160,7 +157,7 @@ internal sealed class SqliteTempDatabase : IDisposable
         return conn;
     }
 
-    /// <summary>接続プールを解放し、一時ファイル・ディレクトリを削除する</summary>
+    /// <summary>接続プールを解放し、一時ファイル・ディレクトリを削除する（片付けの 1 段目）</summary>
     public void Dispose()
     {
         // Microsoft.Data.Sqlite はプールでファイルを掴むため、削除前にプールを解放する。
@@ -189,9 +186,10 @@ internal sealed class SqliteTempDatabase : IDisposable
                 Directory.Delete(_directory, recursive: true);
             }
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // 後始末の失敗はテスト結果に影響させない（一時ディレクトリは OS が最終的に回収する）
+            // 生成コードが接続文字列を変えて開いた接続のプールがファイルを掴んでいると、ここでは消せない。
+            // 後始末の失敗はテスト結果に影響させず、SqliteTempRoot が全テストの後に全プールを解放して消す
         }
     }
 }
