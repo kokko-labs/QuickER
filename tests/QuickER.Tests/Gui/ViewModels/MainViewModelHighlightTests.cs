@@ -9,7 +9,8 @@ namespace QuickER.Tests.Gui.ViewModels;
 /// </summary>
 /// <remarks>
 /// 減光・強調は選択状態から再計算される純粋な表示状態であり、Undo 履歴・保存対象には含めない。
-/// そのため選択・減光の変化で <see cref="QuickER.UndoRedo.UndoRedoManager.CanUndo"/> が真にならないことも併せて検証する。
+/// 選択・減光の変化が履歴を積まないことは、操作の往復の表（<see cref="QuickER.Tests.Gui.UndoRedo.UndoOperationRows"/> の
+/// <c>selection-highlight-*</c> の行）が流す。
 /// </remarks>
 public class MainViewModelHighlightTests
 {
@@ -162,23 +163,5 @@ public class MainViewModelHighlightTests
 
         b.IsDimmed.Should().BeTrue();
         c.IsDimmed.Should().BeTrue();
-    }
-
-    /// <summary>選択・減光の変化では Undo 履歴が汚染されない（CanUndo が偽のまま）ことを検証する</summary>
-    [Fact(DisplayName = "履歴汚染なし: 選択・減光変化で CanUndo が偽のまま")]
-    public void HighlightChanges_DoNotPolluteUndoHistory()
-    {
-        var vm = new MainViewModel();
-        var a = AddEntity(vm, "A");
-        var b = AddEntity(vm, "B");
-        var relAb = AddRelationship(vm, a, b);
-
-        vm.SelectedEntity = a;
-        vm.SelectedRelationship = null;
-        vm.SelectedEntity = null;
-
-        // 減光・強調は導出状態であり Undo の対象外であること
-        relAb.IsDimmed.Should().BeFalse();
-        vm.UndoRedo.CanUndo.Should().BeFalse();
     }
 }

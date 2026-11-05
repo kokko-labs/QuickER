@@ -31,7 +31,7 @@ public class DiagramChangeTrackerDetachTests
     }
 
     /// <summary>親子 2 テーブル＋リレーション 1 本の図を組み立てる</summary>
-    private static ErDiagram BuildDiagram(string prefix)
+    internal static ErDiagram BuildDiagram(string prefix)
     {
         var parent = BuildEntity(prefix + "Parent");
         var child = BuildEntity(prefix + "Child");
@@ -45,35 +45,6 @@ public class DiagramChangeTrackerDetachTests
         };
 
         return new ErDiagram { Entities = { parent, child }, Relationships = { relationship } };
-    }
-
-    /// <summary>置換後、旧エンティティ・旧カラム・旧一意制約・旧リレーションの編集が履歴へ届かないことを検証する</summary>
-    [Fact(DisplayName = "図を置換すると旧要素の編集は履歴へ届かない")]
-    public void ReplaceDiagram_DetachesPreviousElementsFromTracking()
-    {
-        var vm = new MainViewModel();
-        vm.ReplaceDiagramFromModule(BuildDiagram("Old"));
-
-        var oldEntity = vm.Entities[0];
-        var oldColumn = oldEntity.Columns[0];
-        var oldConstraint = oldEntity.UniqueConstraints[0];
-        var oldRelationship = vm.Relationships[0];
-
-        // 旧図とは Guid がまったく重ならない図で丸ごと置換する
-        vm.ReplaceDiagramFromModule(BuildDiagram("New"));
-
-        var generationBefore = vm.UndoRedo.ChangeGeneration;
-
-        oldEntity.TableName = "GhostTable";
-        oldEntity.Memo = "GhostMemo";
-        oldColumn.Name = "GhostColumn";
-        oldColumn.DataType = "nvarchar(10)";
-        oldConstraint.Name = "GhostUnique";
-        oldRelationship.ConstraintName = "GhostFk";
-
-        vm.UndoRedo.ChangeGeneration.Should()
-            .Be(generationBefore, "図から外れた要素の変更は変更世代を動かさない");
-        vm.UndoRedo.CanUndo.Should().BeFalse("幽霊コマンドが Undo スタックへ積まれない");
     }
 
     /// <summary>置換後、追跡器のスナップショット辞書に旧要素が残らない（リークしない）ことを検証する</summary>

@@ -22,32 +22,44 @@ public class CandidateListSyncTests
     private static readonly Item C = new("C");
     private static readonly Item D = new("D");
 
-    [Fact(DisplayName = "途中の項目を先頭へ移しても重複せず、望む並びになる")]
-    public void MoveToFront_ProducesDesiredOrderWithoutDuplicates()
+    /// <summary>通知について確かめること</summary>
+    public enum Notifications
     {
-        var candidates = new ObservableCollection<Item>([A, B, C]);
+        /// <summary>確かめない</summary>
+        NotChecked,
 
-        CandidateListSync.SyncTo(candidates, [B, A, C]);
+        /// <summary>何も通知しない</summary>
+        None,
 
-        candidates.Should().Equal(B, A, C);
+        /// <summary>項目を外さず、Move だけで通知する</summary>
+        MovesOnly,
     }
 
-    [Fact(DisplayName = "移動・挿入・削除が同時でも望む並びになる")]
-    public void MixedChanges_ProduceDesiredOrder()
-    {
-        var candidates = new ObservableCollection<Item>([A, B, C]);
+    /// <summary>項目の並びの表記（A〜D の文字の並び。空文字列は空）から項目を作る</summary>
+    private static Item[] Items(string letters) =>
+        [
+            .. letters.Select(letter =>
+                new[] { A, B, C, D }.Single(item => item.Name == $"{letter}")
+            ),
+        ];
 
-        CandidateListSync.SyncTo(candidates, [C, D, A]);
-
-        candidates.Should().Equal(C, D, A);
-    }
-
-    [Fact(
-        DisplayName = "残る項目は外さずに Move で動かす（選択中の項目を ItemsSource から一度も外さない）"
+    [Theory(
+        DisplayName = "差分同期は、現状の並びを重複なく望む並びへ合わせ、通知は決まった形に収める"
     )]
-    public void RetainedItems_AreMovedNotRemoved()
+    [InlineData("ABC", "BAC", Notifications.NotChecked)] // 途中の項目を先頭へ移しても重複せず、望む並びになる
+    [InlineData("ABC", "CDA", Notifications.NotChecked)] // 移動・挿入・削除が同時でも望む並びになる
+    [InlineData("ABC", "CAB", Notifications.MovesOnly)] // 残る項目は外さずに Move で動かす（選択中の項目を ItemsSource から一度も外さない）
+    [InlineData("BACBC", "ABC", Notifications.NotChecked)] // 重複して並んだ壊れた状態からも、重複のない望む並びへ戻る
+    [InlineData("ABC", "ABC", Notifications.None)] // 同じ並びなら何も通知しない
+    [InlineData("AB", "", Notifications.NotChecked)] // 空へ合わせると全部消える
+    [InlineData("", "CA", Notifications.NotChecked)] // 空から合わせると全部入る
+    public void SyncTo_ProducesDesiredOrder(
+        string current,
+        string target,
+        Notifications notifications
+    )
     {
-        var candidates = new ObservableCollection<Item>([A, B, C]);
+        var candidates = new ObservableCollection<Item>(Items(current));
         var removed = new List<object>();
         var actions = new List<NotifyCollectionChangedAction>();
         candidates.CollectionChanged += (_, e) =>
@@ -60,44 +72,19 @@ public class CandidateListSyncTests
             }
         };
 
-        CandidateListSync.SyncTo(candidates, [C, A, B]);
+        CandidateListSync.SyncTo(candidates, Items(target));
 
-        candidates.Should().Equal(C, A, B);
-        removed.Should().BeEmpty("並びの違いだけなら項目を外さない");
-        actions.Should().OnlyContain(action => action == NotifyCollectionChangedAction.Move);
-    }
+        candidates.Should().Equal(Items(target));
 
-    [Fact(DisplayName = "重複して並んだ壊れた状態からも、重複のない望む並びへ戻る")]
-    public void DuplicatedState_IsRepaired()
-    {
-        var candidates = new ObservableCollection<Item>([B, A, C, B, C]);
+        if (notifications == Notifications.None)
+        {
+            actions.Should().BeEmpty("同じ並びなら何も通知しない");
+        }
 
-        CandidateListSync.SyncTo(candidates, [A, B, C]);
-
-        candidates.Should().Equal(A, B, C);
-    }
-
-    [Fact(DisplayName = "同じ並びなら何も通知しない")]
-    public void SameOrder_RaisesNoNotification()
-    {
-        var candidates = new ObservableCollection<Item>([A, B, C]);
-        var raised = 0;
-        candidates.CollectionChanged += (_, _) => raised++;
-
-        CandidateListSync.SyncTo(candidates, [A, B, C]);
-
-        raised.Should().Be(0);
-    }
-
-    [Fact(DisplayName = "空へ合わせると全部消え、空から合わせると全部入る")]
-    public void EmptyBoundaries()
-    {
-        var candidates = new ObservableCollection<Item>([A, B]);
-
-        CandidateListSync.SyncTo(candidates, []);
-        candidates.Should().BeEmpty();
-
-        CandidateListSync.SyncTo(candidates, [C, A]);
-        candidates.Should().Equal(C, A);
+        if (notifications == Notifications.MovesOnly)
+        {
+            removed.Should().BeEmpty("並びの違いだけなら項目を外さない");
+            actions.Should().OnlyContain(action => action == NotifyCollectionChangedAction.Move);
+        }
     }
 }

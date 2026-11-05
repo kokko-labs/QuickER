@@ -27,7 +27,7 @@ docs 不在の外部エージェントが config を自己発見的に書ける�
   - 入力検証：空・大小無視で重複するテーブル名／同じテーブル内の列名・空の型・未知の `relationship_type`・同じ親子で同じ列ペア集合の FK の重複。
   - 応答の注意文：要約先頭の対象 DBMS・主キー列への `is_nullable=true` の無視・列ペア推論の不足。
   - **検証はどの変更よりも前に置く**。GUI 側は変更をその場で VM へ反映するので、途中で弾くと一部だけ反映されて MCP と食い違う。
-  - ガード：`ErDiagramToolInputValidationTests`・`ErDiagramToolResponseNoteTests`（`TwoHostToolTestBase` が `TwoHostToolHarness` のセッションで両ホストへ同じ表明を流す）。
+  - ガード：`ToolScenarioTests`（`ToolScenarioRows` の行＝入力の検証 `validation-*`・注意文 `note-*` ほか。1 行を両ホストのセッションで流し、拒否した呼び出しが図を変えないことも見る）。
 - `remove_entity` はそのテーブルの名前付きクエリも消す。GUI は `RemoveEntityCommand` / `GroupRemoveEntitiesCommand` が共有の `EntityQueryRemoval` で退避し Undo で戻す（MCP は戻らない）。
 
 ## 個別ツールの規則
@@ -41,7 +41,7 @@ docs 不在の外部エージェントが config を自己発見的に書ける�
 - MCP ホストの `add_column` / `set_column_property` も主キー列を NOT NULL へ正規化する（GUI の `ColumnViewModel` と同じ強制）。
 - GUI ミラーを含め、リレーション参加列のロックを持たない。ファイルホストにロックの概念が無く、両ホストのパリティを優先した意図的な非対称。
   ロックされた列をツールで主キーから外すと、グリッドでは再チェックできず Ctrl+Z かリレーション削除でしか戻せない。
-- ガード：`ErDiagramDynamicToolsPrimaryKeyTests`・`DocumentErDiagramPrimaryKeyToolTests`・`ErDiagramToolHostParityTests`。
+- ガード：`ToolScenarioTests`（行 `primary-key-*`）・`ErDiagramDynamicToolsPrimaryKeyTests`（GUI の Undo）・`ErDiagramToolHostParityTests`。
 - 主キーの順序モデル全体は `src/QuickER.Gui/ViewModels/CLAUDE.md`「主キーの順序の GUI」を参照する。
 
 ### set_unique_constraint と remove_unique_constraint
@@ -52,7 +52,7 @@ docs 不在の外部エージェントが config を自己発見的に書ける�
 ### add_relationship と remove_relationship
 
 - `add_relationship` は `source_columns` / `target_columns`（並行配列・同数・宣言順）を受ける。省略時は親 PK 全列を自動ペア化する。
-- 明示した親側の列が `Entity.IsCandidateKey`（主キー全列か一意制約の列集合と一致）でなければ、拒否せず注意文を添える（MySQL は一意でない索引列を参照できるため）。ガード：`ErDiagramToolResponseNoteTests`。
+- 明示した親側の列が `Entity.IsCandidateKey`（主キー全列か一意制約の列集合と一致）でなければ、拒否せず注意文を添える（MySQL は一意でない索引列を参照できるため）。ガード：`ToolScenarioTests`（行 `note-add-relationship-explicit-non-candidate-key-is-reported-*`）
 - 任意の `constraint_name` は、図の既存の FK・PK・一意制約の名前（`ConstraintNames.CollectExisting`＝DDL が付ける名前）と大文字小文字を無視して衝突すれば拒否する。
 - 省略時は `ConstraintNames.UniqueForeignKey` が既定名・子の列名・番号の順に衝突しない名前を付ける。
 - `remove_relationship` は複数一致時に `constraint_name` で特定し、無指定なら候補列挙エラーにする（先頭を黙って削除しない）。
@@ -103,7 +103,7 @@ docs 不在の外部エージェントが config を自己発見的に書ける�
   - `ToolArgumentShapeFuzzTests`（MCP の ER 図操作）
   - `ChatToolArgumentShapeFuzzTests`（内蔵チャット）
   - `CodeGenToolArgumentShapeFuzzTests`（MCP のコード生成）
-  - ホストの `relationship_type` の必須は `ErDiagramToolInputValidationTests.AddRelationship_MissingRelationshipType_IsReportedAsRequired` が見る。
+  - ホストの `relationship_type` の必須は `ToolScenarioTests` の行 `validation-relationship-type-missing-is-reported-as-required` が見る。
 - 引数の値の読み取りは `ToolArguments`（`GetString` / `GetBool`）、`relationship_type` の名前の解釈は `RelationshipTypeNames.TryParse`（Model）、列ペアの比較は `RelationshipColumnPair.HaveSamePairs` の 1 か所だけで、ほかに写さない。
 - ガード：`ToolArgumentParsingGuardTests`。
   - `SourceSymbolScan` で src の `#if` のどの分岐もシンボルで読み、次を正本の外では理由つきの一覧（別の書式を読む Mermaid と Excel 定義書の取込の `ParseRelationshipType`）とファイル・件数で厳密に照合する。
@@ -115,4 +115,4 @@ docs 不在の外部エージェントが config を自己発見的に書ける�
 ## ツールの応答の改行
 
 - ツールの複数行の応答は、改行を LF だけで組む。`AppendLine`（Windows で CRLF）を使わず `.Append('\n')` で組み、1 つの応答で改行を混ぜず、同じツールの応答の改行がホスト間で食い違わないようにする。
-- ガード：`ErDiagramToolResponseLineEndingTests`（両ホストの `get_diagram_summary`）・`QueryToolCoreInputRuleTests.EnglishFormatter_UsesLfOnly`・`QueryToolLocalizedFormatterLineEndingTests`。
+- ガード：`ToolScenarioTests`（行 `line-ending-summary-uses-lf-only`＝両ホストの `get_diagram_summary`）・`QueryToolFormatterTests`（全行に共通の「`\r` を含まない」と行 `formatter-line-ending-*`＝英語の整形とチャットの整形〔en・ja〕）。

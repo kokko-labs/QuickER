@@ -32,7 +32,10 @@ public class CandidateRowReconcileTests
     /// 親（Id＝主キー・Code＝一意制約）と子（ChildId＝主キー・ParentId・ParentCode）を、
     /// (Id → ParentId)・(Code → ParentCode) の複合外部キーで結んだ図を読み込む
     /// </summary>
-    private static (MainViewModel Vm, RelationshipViewModel Relationship) BuildCompositeForeignKey()
+    internal static (
+        MainViewModel Vm,
+        RelationshipViewModel Relationship
+    ) BuildCompositeForeignKey()
     {
         var id = new Column
         {
@@ -89,7 +92,7 @@ public class CandidateRowReconcileTests
     }
 
     /// <summary>Item（Id＝主キー・A・B）に UNIQUE(A, B) を持つ図を読み込み、そのテーブルを選ぶ</summary>
-    private static (
+    internal static (
         MainViewModel Vm,
         EntityViewModel Entity,
         UniqueConstraintViewModel Constraint
@@ -135,7 +138,7 @@ public class CandidateRowReconcileTests
         );
 
     /// <summary>正本の列ペアを名前で返す</summary>
-    private static IEnumerable<(string, string)> ModelPairNames(
+    internal static IEnumerable<(string, string)> ModelPairNames(
         RelationshipViewModel relationship
     ) =>
         relationship.ColumnPairs.Select(pair =>
@@ -146,7 +149,7 @@ public class CandidateRowReconcileTests
         );
 
     /// <summary>正本の構成列を名前で返す</summary>
-    private static IEnumerable<string> MemberNames(
+    internal static IEnumerable<string> MemberNames(
         EntityViewModel entity,
         UniqueConstraintViewModel constraint
     ) =>
@@ -305,86 +308,6 @@ public class CandidateRowReconcileTests
                     .Equal(new[] { "B" }, "外した行の後片付けの書き込みで正本を変えない");
                 vm.UndoRedo.ChangeGeneration.Should()
                     .Be(generation + 1, "外した行の後片付けの書き込みで履歴を積まない");
-            }
-        );
-    }
-
-    [Fact(DisplayName = "図から外れた一意制約の行への書き込みは、Undo で戻る制約を変えない")]
-    public void LateWriteToRemovedConstraint_DoesNotCorruptUndo()
-    {
-        Known.Run(
-            "uq-late-write-removed-constraint",
-            () =>
-            {
-                var (vm, entity, constraint) = BuildUniqueConstraint();
-                var member = constraint.Members[0];
-
-                vm.RemoveUniqueConstraintCommand.Execute(constraint);
-                member.SelectedColumn = null;
-                vm.UndoCommand.Execute(null);
-
-                entity
-                    .UniqueConstraints.Should()
-                    .ContainSingle()
-                    .Which.Should()
-                    .BeSameAs(constraint);
-                MemberNames(entity, constraint)
-                    .Should()
-                    .Equal(new[] { "A", "B" }, "図から外れた制約の行への書き込みは正本を変えない");
-            }
-        );
-    }
-
-    [Fact(
-        DisplayName = "図から外れたリレーションの行への書き込みは、Undo で戻るリレーションを変えない"
-    )]
-    public void LateWriteToRemovedRelationship_DoesNotCorruptUndo()
-    {
-        Known.Run(
-            "fk-late-write-removed-relationship",
-            () =>
-            {
-                var (vm, relationship) = BuildCompositeForeignKey();
-                var row = relationship.ColumnPairRows[0];
-
-                vm.OnRelationshipClicked(relationship);
-                vm.RemoveSelectedRelationshipCommand.Execute(null);
-                row.SelectedSourceColumn = null;
-                vm.UndoCommand.Execute(null);
-
-                vm.Relationships.Should().ContainSingle().Which.Should().BeSameAs(relationship);
-                ModelPairNames(relationship)
-                    .Should()
-                    .Equal(
-                        new[] { ("Id", "ParentId"), ("Code", "ParentCode") },
-                        "図から外れたリレーションの行への書き込みは正本を変えない"
-                    );
-            }
-        );
-    }
-
-    [Fact(
-        DisplayName = "図から外れたテーブルの一意制約の行への書き込みは、Undo で戻る制約を変えない"
-    )]
-    public void LateWriteToConstraintOfRemovedEntity_DoesNotCorruptUndo()
-    {
-        Known.Run(
-            "uq-late-write-removed-entity",
-            () =>
-            {
-                var (vm, entity, constraint) = BuildUniqueConstraint();
-                var member = constraint.Members[0];
-
-                vm.RemoveSelectedEntityCommand.Execute(null);
-                member.SelectedColumn = null;
-                vm.UndoCommand.Execute(null);
-
-                MemberNames(entity, constraint)
-                    .Should()
-                    .Equal(
-                        new[] { "A", "B" },
-                        "図から外れたテーブルの制約の行への書き込みは正本を変えない"
-                    );
             }
         );
     }

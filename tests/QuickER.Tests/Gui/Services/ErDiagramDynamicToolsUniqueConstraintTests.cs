@@ -1,7 +1,6 @@
 using System.Linq;
 using System.Text.Json;
 using AwesomeAssertions;
-using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Services;
 using QuickER.ViewModels;
@@ -10,7 +9,8 @@ namespace QuickER.Tests.Gui.Services;
 
 /// <summary>
 /// GUI 実行ホスト（<see cref="ErDiagramDynamicTools"/>）の一意制約ツール
-/// （<c>set_unique_constraint</c> / <c>remove_unique_constraint</c>）と、要約出力・Undo 可能性を検証する。
+/// （<c>set_unique_constraint</c> / <c>remove_unique_constraint</c>）の Undo 可能性と、同じ列集合の upsert が制約の Id を
+/// 温存することを検証する。それ以外の意味論は 2 ホストの表（<c>ToolScenarioRows.UniqueConstraint.cs</c>）が見る。
 /// </summary>
 public class ErDiagramDynamicToolsUniqueConstraintTests
 {
@@ -138,22 +138,6 @@ public class ErDiagramDynamicToolsUniqueConstraintTests
             );
     }
 
-    [Fact(DisplayName = "set_unique_constraint は存在しない列名をエラーにする")]
-    public void SetUniqueConstraint_UnknownColumn_Fails()
-    {
-        var vm = CreateVmWithCustomer();
-
-        var (result, success) = Exec(
-            vm,
-            "set_unique_constraint",
-            new { table_name = "Customer", columns = new[] { "NoSuchColumn" } }
-        );
-
-        success.Should().BeFalse();
-        result.Should().Contain("NoSuchColumn");
-        Customer(vm).UniqueConstraints.Should().BeEmpty();
-    }
-
     [Fact(DisplayName = "remove_unique_constraint は列集合で特定した制約を削除し Undo で戻せる")]
     public void RemoveUniqueConstraint_RemovesConstraint_AndIsUndoable()
     {
@@ -175,90 +159,5 @@ public class ErDiagramDynamicToolsUniqueConstraintTests
 
         vm.UndoCommand.Execute(null);
         Customer(vm).UniqueConstraints.Should().ContainSingle();
-    }
-
-    [Fact(DisplayName = "remove_unique_constraint は列集合が一致しなければエラーにする")]
-    public void RemoveUniqueConstraint_NoExactMatch_Fails()
-    {
-        var vm = CreateVmWithCustomer();
-        Exec(
-            vm,
-            "set_unique_constraint",
-            new { table_name = "Customer", columns = new[] { "TenantId", "Code" } }
-        );
-
-        var (_, success) = Exec(
-            vm,
-            "remove_unique_constraint",
-            new { table_name = "Customer", columns = new[] { "Code" } }
-        );
-
-        success.Should().BeFalse();
-        Customer(vm).UniqueConstraints.Should().ContainSingle();
-    }
-
-    [Fact(DisplayName = "remove_column は削除列を含む一意制約を制約ごと削除する")]
-    public void RemoveColumn_CascadesToUniqueConstraints()
-    {
-        var vm = CreateVmWithCustomer();
-        Exec(
-            vm,
-            "set_unique_constraint",
-            new { table_name = "Customer", columns = new[] { "Email" } }
-        );
-        Exec(
-            vm,
-            "set_unique_constraint",
-            new { table_name = "Customer", columns = new[] { "TenantId", "Code" } }
-        );
-
-        var (_, success) = Exec(
-            vm,
-            "remove_column",
-            new { table_name = "Customer", column_name = "TenantId" }
-        );
-
-        success.Should().BeTrue();
-        var entity = Customer(vm);
-        entity.UniqueConstraints.Should().ContainSingle();
-        entity
-            .UniqueConstraints[0]
-            .ColumnIds.Should()
-            .Equal(entity.Columns.Single(column => column.Name == "Email").Id);
-    }
-
-    [Fact(DisplayName = "get_diagram_summary は一意制約（名前 or 合成名・構成列）を出力する")]
-    public void GetDiagramSummary_ListsUniqueConstraints()
-    {
-        var vm = CreateVmWithCustomer();
-        Exec(
-            vm,
-            "set_unique_constraint",
-            new { table_name = "Customer", columns = new[] { "Email" } }
-        );
-        Exec(
-            vm,
-            "set_unique_constraint",
-            new
-            {
-                table_name = "Customer",
-                columns = new[] { "TenantId", "Code" },
-                name = "UQ_Tenant_Code",
-            }
-        );
-
-        var (result, success) = Exec(vm, "get_diagram_summary", new { });
-
-        success.Should().BeTrue();
-        result
-            .Should()
-            .Contain(
-                UniqueConstraint.SynthesizeName(
-                    "Customer",
-                    ["Email"],
-                    IdentifierLengthLimit.Unlimited
-                )
-            );
-        result.Should().Contain("UQ_Tenant_Code (TenantId, Code)");
     }
 }

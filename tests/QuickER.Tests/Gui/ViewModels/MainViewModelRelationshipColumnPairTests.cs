@@ -13,7 +13,8 @@ namespace QuickER.Tests.Gui.ViewModels;
 /// </summary>
 /// <remarks>
 /// 永続化先は一時フォルダへ隔離し（<c>UsePersistenceForTests</c>）、実 %LOCALAPPDATA% へは触れない。
-/// 列削除は「巻き添えでリレーションの列ペアを全クリアし、1 回の Undo で両方戻る」ことも併せて固定する。
+/// 列ペアの行の差し替え・削除、多対多への変更と列削除で全ペアが消えて 1 回の Undo で戻ることは、
+/// 操作の往復の表（<see cref="QuickER.Tests.Gui.UndoRedo.UndoOperationRows"/> の <c>relationship-*</c> の行）が流す。
 /// </remarks>
 public class MainViewModelRelationshipColumnPairTests : IDisposable
 {
@@ -115,56 +116,52 @@ public class MainViewModelRelationshipColumnPairTests : IDisposable
         return vm.Relationships[0];
     }
 
-    [Fact(DisplayName = "作成時に親の複合 PK が列ごとに自動でペア化される")]
-    public void CreateRelationship_CompositePrimaryKey_PairsEveryKeyColumn()
+    /// <summary>
+    /// 作成時の複合主キーの自動ペア化が、子に引き当てられた親 PK 列だけを（同じ子列へ重複して寄せずに）ペアにし、
+    /// ペアの両端をロックして子側へ外部キーの印を付けることを検証する
+    /// </summary>
+    /// <param name="childColumns">子テーブルの列（PK 以外）を宣言順にカンマ区切りで指定する</param>
+    /// <param name="expectedPairs">期待する列ペア（「親列&gt;子列」の「;」区切り・宣言順）</param>
+    [Theory(DisplayName = "作成時に親の複合 PK は、子に引き当てられた列だけが重複なくペア化される")]
+    [InlineData("OrderId,LineNo", "OrderId>OrderId;LineNo>LineNo")] // 作成時に親の複合 PK が列ごとに自動でペア化される
+    [InlineData("OrderId", "OrderId>OrderId")] // 子には OrderId しか無いため、LineNo はペアを作れずパネルでの補完に回る
+    [InlineData("OrderLineId", "OrderId>OrderLineId")] // 子の列は「親テーブル名+Id」の 1 本だけ＝両方の親 PK 列が同じ列へ寄る構成
+    public void CreateRelationship_CompositePrimaryKey_PairsResolvedKeyColumns(
+        string childColumns,
+        string expectedPairs
+    )
     {
-        var vm = CreateDiagramWithCompositeKeyParent("OrderId", "LineNo");
+        var vm = CreateDiagramWithCompositeKeyParent(childColumns.Split(','));
         var relationship = CreateRelationship(vm);
         var parent = vm.Entities[0];
         var child = vm.Entities[1];
 
-        relationship.ColumnPairs.Should().HaveCount(2);
+        var expected = expectedPairs
+            .Split(';')
+            .Select(pair => pair.Split('>'))
+            .Select(names =>
+                (
+                    parent.Columns.Single(c => c.Name == names[0]).Id,
+                    child.Columns.Single(c => c.Name == names[1]).Id
+                )
+            );
+
         relationship
             .ColumnPairs.Select(pair => (pair.SourceColumnId, pair.TargetColumnId))
             .Should()
-            .Equal(
-                (parent.Columns[0].Id, child.Columns.Single(c => c.Name == "OrderId").Id),
-                (parent.Columns[1].Id, child.Columns.Single(c => c.Name == "LineNo").Id)
-            );
+            .Equal(expected);
 
-        // 両端の全構成列がロックされ、子側は FK フラグが立つ
-        parent.Columns.Should().OnlyContain(column => !column.IsPrimaryKeyEditable);
-        child
-            .Columns.Where(column => column.Name is "OrderId" or "LineNo")
-            .Should()
-            .OnlyContain(column => column.IsForeignKey && !column.IsForeignKeyEditable);
-    }
-
-    [Fact(DisplayName = "作成時に子列を引き当てられない親 PK 列はペアに含まれない")]
-    public void CreateRelationship_UnresolvedKeyColumn_IsLeftOutOfPairs()
-    {
-        // 子には OrderId しか無いため、LineNo はペアを作れずパネルでの補完に回る
-        var vm = CreateDiagramWithCompositeKeyParent("OrderId");
-        var relationship = CreateRelationship(vm);
-
-        relationship.ColumnPairs.Should().ContainSingle();
-        relationship
-            .ColumnPairs[0]
-            .TargetColumnId.Should()
-            .Be(vm.Entities[1].Columns.Single(c => c.Name == "OrderId").Id);
-    }
-
-    [Fact(DisplayName = "作成時に複数の親 PK 列が同じ子列へ寄っても子列は重複しない")]
-    public void CreateRelationship_DuplicateResolvedTargetColumn_IsSkipped()
-    {
-        // 子の列は「親テーブル名+Id」の 1 本だけ＝両方の親 PK 列が同じ列へ寄る構成
-        var vm = CreateDiagramWithCompositeKeyParent("OrderLineId");
-        var relationship = CreateRelationship(vm);
-        var duplicateCandidate = vm.Entities[1].Columns.Single(c => c.Name == "OrderLineId");
-
-        relationship.ColumnPairs.Should().ContainSingle();
-        relationship.ColumnPairs[0].SourceColumnId.Should().Be(vm.Entities[0].Columns[0].Id);
-        relationship.ColumnPairs[0].TargetColumnId.Should().Be(duplicateCandidate.Id);
+        // ペアの両端はロックされ、子側は FK フラグが立つ
+        foreach (var pair in relationship.ColumnPairs)
+        {
+            parent
+                .Columns.Single(c => c.Id == pair.SourceColumnId)
+                .IsPrimaryKeyEditable.Should()
+                .BeFalse();
+            var target = child.Columns.Single(c => c.Id == pair.TargetColumnId);
+            target.IsForeignKey.Should().BeTrue();
+            target.IsForeignKeyEditable.Should().BeFalse();
+        }
     }
 
     /// <summary>
@@ -242,38 +239,6 @@ public class MainViewModelRelationshipColumnPairTests : IDisposable
             .Equal((firstKey, firstKey), (secondKey, secondKey));
     }
 
-    [Fact(DisplayName = "列ペア行の確定・差し替え・削除はそれぞれ 1 回の Undo で戻る")]
-    public void ColumnPairRow_CommitReplaceRemove_AreSingleUndoSteps()
-    {
-        var vm = CreateDiagramWithCompositeKeyParent("OrderId", "LineNo", "AltLineNo");
-        var relationship = CreateRelationship(vm);
-        var child = vm.Entities[1];
-        var altLineNo = child.Columns.Single(c => c.Name == "AltLineNo");
-        vm.UndoRedo.Clear();
-
-        // 2 行目の子列を差し替える（1 履歴）
-        relationship.ColumnPairRows[1].SelectedTargetColumn = altLineNo;
-        relationship.ColumnPairs[1].TargetColumnId.Should().Be(altLineNo.Id);
-
-        vm.UndoRedo.Undo();
-        relationship
-            .ColumnPairs[1]
-            .TargetColumnId.Should()
-            .Be(child.Columns.Single(c => c.Name == "LineNo").Id);
-
-        vm.UndoRedo.Redo();
-        relationship.ColumnPairs[1].TargetColumnId.Should().Be(altLineNo.Id);
-
-        // 2 行目を丸ごと削除する（1 履歴）。単列外部キーへ戻り FK フラグも追従する
-        vm.RemoveRelationshipColumnPairCommand.Execute(relationship.ColumnPairRows[1]);
-        relationship.ColumnPairs.Should().ContainSingle();
-        altLineNo.IsForeignKey.Should().BeFalse();
-
-        vm.UndoRedo.Undo();
-        relationship.ColumnPairs.Should().HaveCount(2);
-        altLineNo.IsForeignKey.Should().BeTrue();
-    }
-
     [Fact(DisplayName = "空スロット行は片側だけの選択では履歴を動かさない")]
     public void PendingColumnPairRow_PartialSelection_DoesNotTouchHistory()
     {
@@ -306,59 +271,5 @@ public class MainViewModelRelationshipColumnPairTests : IDisposable
 
         vm.UndoRedo.Undo();
         relationship.ColumnPairs.Should().ContainSingle();
-    }
-
-    [Fact(DisplayName = "多対多への変更は複合外部キーの全ペアを消し、1 回の Undo で全て戻る")]
-    public void ManyToMany_ClearsEveryColumnPair_AndUndoRestoresThemAtOnce()
-    {
-        var vm = CreateDiagramWithCompositeKeyParent("OrderId", "LineNo");
-        var relationship = CreateRelationship(vm);
-        var before = relationship.ColumnPairs.Select(pair => pair.TargetColumnId).ToList();
-        before.Should().HaveCount(2);
-        vm.UndoRedo.Clear();
-
-        relationship.Type = RelationshipType.ManyToMany;
-        relationship.ColumnPairs.Should().BeEmpty();
-        relationship.ColumnPairRows.Should().BeEmpty();
-
-        vm.UndoRedo.Undo();
-        relationship.Type.Should().Be(RelationshipType.OneToMany);
-        relationship.ColumnPairs.Select(pair => pair.TargetColumnId).Should().Equal(before);
-        relationship.ColumnPairRows.Should().HaveCount(2);
-
-        vm.UndoRedo.Redo();
-        relationship.Type.Should().Be(RelationshipType.ManyToMany);
-        relationship.ColumnPairs.Should().BeEmpty();
-    }
-
-    [Fact(DisplayName = "列削除は複合外部キーの全ペアを消し、1 回の Undo で全て戻る")]
-    public void RemoveColumn_ClearsEveryColumnPair_AndUndoRestoresThemAtOnce()
-    {
-        var vm = CreateDiagramWithCompositeKeyParent("OrderId", "LineNo");
-        var relationship = CreateRelationship(vm);
-        var before = relationship.ColumnPairs.Select(pair => pair.TargetColumnId).ToList();
-        before.Should().HaveCount(2);
-
-        var child = vm.Entities[1];
-        var removed = child.Columns.Single(column => column.Name == "LineNo");
-        vm.SelectedEntity = child;
-        vm.UndoRedo.Clear();
-
-        vm.RemoveColumnCommand.Execute(removed);
-
-        // 1 組だけ抜いて「縮んだ外部キー」にはせず、リレーション自体は線として残す
-        child.Columns.Should().NotContain(removed);
-        relationship.ColumnPairs.Should().BeEmpty();
-        vm.Relationships.Should().ContainSingle();
-        child.Columns.Single(column => column.Name == "OrderId").IsForeignKey.Should().BeFalse();
-
-        vm.UndoRedo.Undo();
-        child.Columns.Should().Contain(removed);
-        relationship.ColumnPairs.Select(pair => pair.TargetColumnId).Should().Equal(before);
-        child.Columns.Single(column => column.Name == "OrderId").IsForeignKey.Should().BeTrue();
-
-        vm.UndoRedo.Redo();
-        child.Columns.Should().NotContain(removed);
-        relationship.ColumnPairs.Should().BeEmpty();
     }
 }

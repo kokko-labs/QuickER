@@ -36,13 +36,12 @@ namespace QuickER.Tests.Gui.UndoRedo;
 /// </list>
 /// <para>
 /// 状態の物差し（スナップショット）は各シナリオが宣言する。既定は「コマンドが触る意味モデル＋視覚/VM 状態」で、
-/// <b>エンティティ・リレーションシップは Id 順に正規化</b>し（キャンバス上の集合であって並びに意味がない。
-/// 実際 <c>RemoveEntityCommand</c> の Undo は末尾へ再追加する）、<b>列・UNIQUE 制約の構成列は宣言順のまま</b>
+/// <b>エンティティ・リレーションシップは Id 順に正規化</b>し、<b>列・UNIQUE 制約の構成列は宣言順のまま</b>
 /// 比較する（並びが DDL の意味そのもの）。
 /// </para>
 /// <para>
-/// 既存の個別テスト（<see cref="CommandTests"/> 等）は削除しない。性質テストは「網」、個別テストは「意図の名指し」で、
-/// 役割が違う（性質テストは往復することしか言わず、何がどう変わるべきかは言わない）。
+/// このテストはコマンドが往復することだけを言い、何がどう変わるべきかは言わない。VM の操作がどのコマンドを何件積むか・
+/// 表とリレーションの並びの復元・操作の後の中身は、操作の往復の表（<see cref="UndoOperationTests"/>）が見る。
 /// </para>
 /// </remarks>
 public class UndoCommandRoundTripTests
@@ -80,7 +79,7 @@ public class UndoCommandRoundTripTests
         };
 
     /// <summary>QuickER.Gui アセンブリに実在する具象 <see cref="IUndoableCommand"/> 実装をすべて返す</summary>
-    private static IReadOnlyList<Type> ConcreteCommandTypes() =>
+    internal static IReadOnlyList<Type> ConcreteCommandTypes() =>
         typeof(IUndoableCommand)
             .Assembly.GetTypes()
             .Where(type =>

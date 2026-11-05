@@ -1,5 +1,3 @@
-using System.IO;
-using System.Text.Json;
 using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
 using QuickER.CodeGen.CSharp.Queries;
@@ -8,6 +6,7 @@ using QuickER.Mcp.Tools;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.SqlServer;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Mcp.Tools;
 
@@ -20,34 +19,11 @@ namespace QuickER.Tests.Mcp.Tools;
 /// 同じ定義を引数 JSON に直して渡す（<see cref="ToSetQueryArguments"/>）。突き合わせは 3 点＝
 /// (1) <see cref="QueryDefinitionRules.Validate"/> が期待した規則の違反を返す
 /// (2) 生成器がその定義にエラー診断を出し、文言が違反の文言と一致する
-/// (3) <c>set_query</c> が保存せずに失敗し、応答に違反の英語の文言が出る（ツール自身の診断が先に報告する 3 規則は
-/// 失敗することだけを見る）。
+/// (3) <c>set_query</c> が両ホスト（<see cref="ToolHostKind"/>＝GUI はチャットのアダプタ・MCP は図ファイル）で保存せずに
+/// 失敗し、応答に違反の文言（GUI は UI の言語・MCP は英語）が出る（ツール自身の診断が先に報告する 3 規則は失敗することだけを見る）。
 /// </remarks>
-public sealed class QueryToolGenerationRuleTests : IDisposable
+public sealed class QueryToolGenerationRuleTests
 {
-    /// <summary>各テスト専用の一時ディレクトリ</summary>
-    private readonly string _dir = Path.Combine(
-        Path.GetTempPath(),
-        "quicker-mcp-query-rule-" + Guid.NewGuid().ToString("N")
-    );
-
-    public QueryToolGenerationRuleTests()
-    {
-        Directory.CreateDirectory(_dir);
-    }
-
-    public void Dispose()
-    {
-        try
-        {
-            Directory.Delete(_dir, recursive: true);
-        }
-        catch (IOException)
-        {
-            // クリーンアップ失敗はテスト結果に影響させない
-        }
-    }
-
     /// <summary>テスト用の Order テーブル（OrderId 主キー・CustomerId・Amount）を作る</summary>
     private static Entity CreateOrder()
     {
@@ -377,7 +353,24 @@ public sealed class QueryToolGenerationRuleTests : IDisposable
     ];
 
     /// <summary>違反のケースのラベル</summary>
-    public static TheoryData<string> Violations() => new(ViolationCases.Select(c => c.Label));
+    public static TheoryData<string, ToolHostKind> Violations() =>
+        WithHosts(ViolationCases.Select(c => c.Label));
+
+    /// <summary>ラベル × ホスト（<see cref="ToolHostKind"/> の全値）</summary>
+    private static TheoryData<string, ToolHostKind> WithHosts(IEnumerable<string> labels)
+    {
+        var data = new TheoryData<string, ToolHostKind>();
+
+        foreach (var label in labels)
+        {
+            foreach (var host in Enum.GetValues<ToolHostKind>())
+            {
+                data.Add(label, host);
+            }
+        }
+
+        return data;
+    }
 
     /// <summary>ツール自身の診断が先に報告する規則（応答の文言は構造規則のものでなくツールのもの）</summary>
     private static readonly HashSet<QueryRuleKind> ReportedByTool =
@@ -391,7 +384,7 @@ public sealed class QueryToolGenerationRuleTests : IDisposable
         DisplayName = "生成で必ずエラーになる定義は、生成器と set_query の両方が同じ規則で拒否する"
     )]
     [MemberData(nameof(Violations))]
-    public void Violation_IsRejectedByGeneratorAndSetQuery(string label)
+    public void Violation_IsRejectedByGeneratorAndSetQuery(string label, ToolHostKind host)
     {
         var ruleCase = ViolationCases.Single(c => c.Label == label);
         var order = CreateOrder();
@@ -425,24 +418,31 @@ public sealed class QueryToolGenerationRuleTests : IDisposable
             .ToList();
         errors.Should().Contain(violation.Text.Format(null));
 
-        // (3) set_query は保存せずに失敗し、応答に英語の文言が出る
-        var file = CreateDiagramFile(
+        // (3) set_query は保存せずに失敗し、応答に違反の文言（GUI は UI の言語・MCP は英語）が出る
+        using var session = OpenSession(
+            host,
             existing is null ? null : ToSetQueryArguments(order, existing)
         );
-        var before = File.ReadAllBytes(file);
+        var before = ToolSchemaProjection.Lines(session.Schema);
 
-        var (result, success) = DocumentErDiagramToolHost.Execute(
+        var (result, success) = session.Exec(
             QueryToolCore.SetQueryToolName,
-            file,
-            JsonSerializer.SerializeToElement(ToSetQueryArguments(order, candidate))
+            ToSetQueryArguments(order, candidate)
         );
 
         success.Should().BeFalse(result);
-        File.ReadAllBytes(file).Should().Equal(before, "a rejected definition must not be saved");
+        session.WroteDiagram.Should().BeFalse("a rejected definition must not be saved");
+        ToolSchemaProjection.Lines(session.Schema).Should().Equal(before);
 
         if (!ReportedByTool.Contains(ruleCase.Expected))
         {
-            result.Should().Contain(violation.Text.FormatEnglish());
+            result
+                .Should()
+                .Contain(
+                    host == ToolHostKind.File
+                        ? violation.Text.FormatEnglish()
+                        : violation.Text.Format(null)
+                );
         }
     }
 
@@ -514,11 +514,12 @@ public sealed class QueryToolGenerationRuleTests : IDisposable
     ];
 
     /// <summary>通すべき境界の定義のラベル</summary>
-    public static TheoryData<string> ValidDefinitions() => new(ValidCases.Select(c => c.Label));
+    public static TheoryData<string, ToolHostKind> ValidDefinitions() =>
+        WithHosts(ValidCases.Select(c => c.Label));
 
     [Theory(DisplayName = "規則に違反しない境界の定義は、生成器も set_query も通す")]
     [MemberData(nameof(ValidDefinitions))]
-    public void ValidDefinition_IsAcceptedByGeneratorAndSetQuery(string label)
+    public void ValidDefinition_IsAcceptedByGeneratorAndSetQuery(string label, ToolHostKind host)
     {
         var build = ValidCases.Single(c => c.Label == label).Build;
         var order = CreateOrder();
@@ -540,11 +541,10 @@ public sealed class QueryToolGenerationRuleTests : IDisposable
             .HasErrors.Should()
             .BeFalse(string.Join(Environment.NewLine, result.Diagnostics.Select(d => d.Message)));
 
-        var file = CreateDiagramFile(null);
-        var (message, success) = DocumentErDiagramToolHost.Execute(
+        using var session = OpenSession(host, null);
+        var (message, success) = session.Exec(
             QueryToolCore.SetQueryToolName,
-            file,
-            JsonSerializer.SerializeToElement(ToSetQueryArguments(order, candidate))
+            ToSetQueryArguments(order, candidate)
         );
 
         success.Should().BeTrue(message);
@@ -581,27 +581,44 @@ public sealed class QueryToolGenerationRuleTests : IDisposable
         );
     }
 
-    /// <summary>Order テーブルを持つ図ファイルを作り、必要なら先に有効なクエリを 1 件 set_query で入れる</summary>
-    private string CreateDiagramFile(object? existingArguments)
+    /// <summary>
+    /// Order テーブルを持つ図のセッションをホストで開き、必要なら先に有効なクエリを 1 件 set_query で入れる
+    /// （GUI はモジュールの置換の入口で図を入れ、MCP は図ファイルへ保存する）
+    /// </summary>
+    private static ToolHostSession OpenSession(ToolHostKind host, object? existingArguments)
     {
-        var file = Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".json");
-        var document = new DiagramDocument
+        var session = TwoHostToolHarness.OpenAligned(host, "sqlserver");
+        var diagram = new ErDiagram { TargetDbms = "sqlserver", Entities = { CreateOrder() } };
+
+        switch (session)
         {
-            Schema = new ErDiagram { TargetDbms = "sqlserver", Entities = { CreateOrder() } },
-        };
-        JsonStorageService.SaveAtomic(file, document);
+            case GuiToolHostSession gui:
+                gui.ViewModel.ReplaceDiagramFromModule(diagram);
+                break;
+
+            case FileToolHostSession file:
+                JsonStorageService.SaveAtomic(
+                    file.FilePath,
+                    new DiagramDocument { Schema = diagram }
+                );
+                break;
+
+            default:
+                throw new InvalidOperationException(
+                    $"未知のホストのセッション {session.GetType()}"
+                );
+        }
 
         if (existingArguments is not null)
         {
-            var (message, success) = DocumentErDiagramToolHost.Execute(
+            var (message, success) = session.Exec(
                 QueryToolCore.SetQueryToolName,
-                file,
-                JsonSerializer.SerializeToElement(existingArguments)
+                existingArguments
             );
             success.Should().BeTrue(message);
         }
 
-        return file;
+        return session;
     }
 
     /// <summary>意味モデルのクエリ定義を set_query の引数（列は名前）へ直す</summary>

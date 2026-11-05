@@ -96,7 +96,7 @@ MainViewModel と図の ViewModel の規則：文書の保存・外部変更検�
 - ガード：`LayoutRefreshCountTests`（整列 3 種・整列の Undo / Redo・幅の自動調整・グループのドラッグの移動と取り消し・複数テーブルの削除とその Undo / Redo で「ミニマップの作り直し 1 回・キャンバスの通知 1 回」を 20 と 40 テーブルで、列ルールの適用回数、範囲が例外でも閉じること、NULL 許容の表示の切り替え・列名の変更・列の追加・KeyMark・追跡の割り当て）。mutation 実証済み。
 
 ### 選択・検索結果・作成中リレーションの解除
-- 作成中のリレーションの始点は `DetachEntityViewModel` が解く（始点が図から外れたら作成モードを解除。削除・Undo・一括置換の全経路）。ガード：`MainViewModelRelationshipModeTests`。
+- 作成中のリレーションの始点は `DetachEntityViewModel` が解く（始点が図から外れたら作成モードを解除。削除・Undo・一括置換・ツールボックスを畳むの全経路）。ガード：`SelectionInvariantTests`（行 `relationship-mode-*`・`selection-pending-relationship-source-*`）。
 - 選択（`SelectedEntity` / `SelectedColumn` / `SelectedRelationship`）と検索結果（`SearchResults`）も同じ解除の箇所で外す。図に居る要素だけを指す。
   - 列だけが外れる経路（列の追加の Undo）は `OnEntityColumnsChangedForSelection`。Reset は選択中の列が図のどのテーブルにも無くなったときだけ外す。並べ替え（Move）では外さない。
   - 外さないと、プロパティパネルが追跡の外れた要素を編集し（履歴にも未保存にもならない）、Redo で同じインスタンスが記録のない編集ごと戻る。古い検索結果から選んで削除すると、`EntityQueryRemoval` が Id で取り除くため同じ Id の生きている表の名前付きクエリまで消える。
@@ -125,7 +125,7 @@ MainViewModel と図の ViewModel の規則：文書の保存・外部変更検�
 
 ### 削除コマンドの位置の復元
 - 削除コマンドは位置の記録と復元を `IndexedRemoval` に任せる。リレーションが末尾へ戻ると、名前の無い外部キーの既定名が入れ替わる。
-- ガード：`RemovalOrderRoundTripTests`（削除コマンドの全数で Undo 後の並びが削除前と一致・`Remove` を呼ぶ `*Remove*Command.cs` が `IndexedRemoval.RemoveWhere` を使うことのソース走査）。
+- ガード：`UndoOperationTests`（行 `removal-order-*`＝削除の操作ごとに、Undo 後の図が並びまで削除前と一致）・`RemovalOrderRoundTripTests`（`Remove` を呼ぶ `*Remove*Command.cs` が `IndexedRemoval.RemoveWhere` を使うことのソース走査）。
 
 ### 子列の外部キーの印
 - 列を子列にする操作（リレーションの追加・列ペアの変更）は、実行した時点の子列の外部キーの印を控えて Undo で戻す（`ForeignKeyMarkSnapshot` を `AddRelationshipCommand` と `ChangeRelationshipColumnPairsCommand` が共有）。
@@ -158,7 +158,7 @@ MainViewModel と図の ViewModel の規則：文書の保存・外部変更検�
 - ツールの応答：`NameLimitNotes`（Model）が変更の前後の違反を比べ、**その呼び出しで新しく生じたもの**だけを英語の注意文にする。MCP のツールホストは `Mutate`、内蔵チャットのツールは `ErDiagramDynamicTools.Execute` が同じ関数を通す（`src/QuickER.Mcp/CLAUDE.md`「個別ツールの規則」を参照）。
 - 対象 DBMS の切替：`MainViewModel.CollectNamesRejectedBy` が切替先の上限で保存された名前を判定し、型の変換と同じ `ConfirmWarningDetails` に場所と理由つきで全件並べる（これだけでも確認のトリガーになる）。
 
-ガード：`NameLimitStatusWarningTests`（4 種類の名前・MySQL の表せない文字とファイル名・Undo / Redo と丸ごと置換で警告しない・切替の確認の一覧とキャンセル）・`ErDiagramToolNameLimitNoteTests`（両ホストで 5 つのツールと、以前からの違反を繰り返さないこと）・`NameLimitNotesTests`。mutation 実証済み。
+ガード：`NameLimitStatusWarningTests`（4 種類の名前・MySQL の表せない文字とファイル名・Undo / Redo と丸ごと置換で警告しない・切替の確認の一覧とキャンセル）・`ToolScenarioTests`（行 `name-limit-*`＝両ホストで 5 つのツールと、以前からの違反を繰り返さないこと）・`NameLimitNotesTests`。mutation 実証済み。
 
 ## 一意制約の GUI
 モデルと DDL の規則は `src/QuickER.Model/CLAUDE.md`「一意制約」。ここでは GUI の部分だけを置く。
@@ -195,7 +195,7 @@ MainViewModel と図の ViewModel の規則：文書の保存・外部変更検�
   - `ApplyRelationshipColumnRules` を呼ばない理由：ロック判定がリレーションと列ペアだけを読み `IsPrimaryKey` を参照しないので、膜が動いても結果が変わらない。
 - 「変化なし」判定は実効順でなく保存リストと膜で行う。実効順で比べると、「リスト空の図へ同じ並びを明示＝ピン留め」という実変更を取りこぼす。
 
-ガード：`MainViewModelPrimaryKeyOrderTests`（Undo 1 回で戻る・NULL 許容の復活・端の行・ピン留めの履歴化）・`PrimaryKeyOrderCardTests`（カードの配線）・`EntityViewModelTests`（行の実効順・行インスタンス使い回し）。MCP 側は `ErDiagramDynamicToolsPrimaryKeyTests` / `DocumentErDiagramPrimaryKeyToolTests`、両ホストの一致は `ErDiagramToolHostParityTests`（`EntitySnap` に実効順と保存リストの列名写像を射影し、順序の食い違いを検知する）。mutation 実証済み。
+ガード：`UndoOperationTests`（行 `primary-key-*`＝Undo 1 回で戻る・NULL 許容の復活・端の行・ピン留めの履歴化）・`PrimaryKeyOrderCardTests`（カードの配線）・`EntityViewModelTests`（行の実効順・行インスタンス使い回し）。ツールは `ToolScenarioTests`（行 `primary-key-*`＝両ホスト）と `ErDiagramDynamicToolsPrimaryKeyTests`（GUI の Undo）、両ホストの一致は `ErDiagramToolHostParityTests`（`EntitySnap` に実効順と保存リストの列名写像を射影し、順序の食い違いを検知する）。mutation 実証済み。
 
 ## リレーションの GUI
 列ペアの正本・DDL・差分の規則は `src/QuickER.Model/CLAUDE.md`「リレーションの列ペア」。ここでは GUI の部分だけを置く。

@@ -18,7 +18,7 @@ public class EntityLifecycleUndoTests
     private static readonly KnownCaseLedger Known = new("EntityLifecycleUndoTests", []);
 
     /// <summary>2 つのテーブル（それぞれ主キー 1 列）を読み込む</summary>
-    private static MainViewModel Build()
+    internal static MainViewModel Build()
     {
         var vm = new MainViewModel();
         vm.ReplaceDiagramFromModule(
@@ -59,42 +59,6 @@ public class EntityLifecycleUndoTests
         return vm;
     }
 
-    [Fact(DisplayName = "単独のテーブルの削除の Undo で、選択の表示と主選択がそろって戻る")]
-    public void SingleRemove_Undo_RestoresPrimarySelection()
-    {
-        Known.Run(
-            "single-remove-selection",
-            () =>
-            {
-                var vm = Build();
-                var first = vm.Entities[0];
-                vm.OnEntityClicked(first);
-
-                vm.RemoveSelectedEntityCommand.Execute(null);
-                vm.UndoCommand.Execute(null);
-
-                vm.Entities.Should().Contain(first);
-                first.IsSelected.Should().BeTrue();
-                vm.SelectedEntity.Should().BeSameAs(first, "単独の削除の Undo で主選択を戻す");
-                vm.RemoveSelectedEntityCommand.CanExecute(null).Should().BeTrue();
-            }
-        );
-    }
-
-    [Fact(DisplayName = "複数のテーブルの削除の Undo で、選択の表示と主選択がそろって戻る")]
-    public void GroupRemove_Undo_RestoresPrimarySelection()
-    {
-        var vm = Build();
-        vm.SelectAllEntitiesCommand.Execute(null);
-
-        vm.RemoveSelectedEntityCommand.Execute(null);
-        vm.UndoCommand.Execute(null);
-
-        vm.Entities.Should().HaveCount(2).And.OnlyContain(entity => entity.IsSelected);
-        vm.SelectedEntity.Should().NotBeNull();
-        vm.Entities.Should().Contain(vm.SelectedEntity!);
-    }
-
     [Fact(
         DisplayName = "テーブルの追加の Undo で、そのテーブルのクエリも外れ、Redo で元の位置へ戻る"
     )]
@@ -129,53 +93,6 @@ public class EntityLifecycleUndoTests
                 vm.Queries[1].Should().BeSameAs(query);
             }
         );
-    }
-
-    [Fact(
-        DisplayName = "テーブルの複製の Undo で、そのテーブルのクエリも外れ、Redo で元の位置へ戻る"
-    )]
-    public void DuplicateUndo_RemovesQueries_AndRedoRestoresThem()
-    {
-        Known.Run(
-            "duplicate-undo-queries",
-            () =>
-            {
-                var vm = Build();
-                vm.OnEntityClicked(vm.Entities[0]);
-
-                vm.DuplicateSelectedEntityCommand.Execute(null);
-                var duplicate = vm.Entities[^1];
-                var query = new QueryDefinition { EntityId = duplicate.Id, Name = "OnCopy" };
-                vm.Queries.Add(query);
-
-                vm.UndoCommand.Execute(null);
-
-                vm.Entities.Should().NotContain(duplicate);
-                vm.Queries.Should().NotContain(query, "複製の Undo で、そのテーブルのクエリも外す");
-
-                vm.RedoCommand.Execute(null);
-
-                vm.Entities.Should().Contain(duplicate);
-                vm.Queries.Should().ContainSingle().Which.Should().BeSameAs(query);
-            }
-        );
-    }
-
-    [Fact(DisplayName = "テーブルの追加・複製の Undo で、そのテーブルを主選択に残さない")]
-    public void AddAndDuplicateUndo_ClearPrimarySelection()
-    {
-        var vm = Build();
-
-        vm.AddEntityCommand.Execute(null);
-        vm.UndoCommand.Execute(null);
-
-        vm.SelectedEntity.Should().BeNull();
-
-        vm.OnEntityClicked(vm.Entities[0]);
-        vm.DuplicateSelectedEntityCommand.Execute(null);
-        vm.UndoCommand.Execute(null);
-
-        vm.SelectedEntity.Should().BeNull();
     }
 
     [Fact(

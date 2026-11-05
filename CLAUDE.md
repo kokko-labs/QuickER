@@ -134,13 +134,13 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **図に保存する名前の同一性は `SchemaNames`（Model）だけが決める（前後の空白を除き `OrdinalIgnoreCase`。綴りは書き換えない。キーは `SchemaNames.Key`）**：入口ごとに比較や `Trim`・`ToLowerInvariant` で書くと、Unicode の特殊な文字で表・列の組と答えが割れる。ガード：`SchemaNamesGuardTests`・`SyncNameComparisonGuardTests`・`SchemaNamesKeyTests`・`NameFuzzCompilationTests`。→ `src/QuickER.Model/CLAUDE.md`「名前の同一性（SchemaNames）」
 - **制約名の安全化と名前の無い制約の既定名は `ConstraintNames` だけで組む**：写すと前後に空白のあるテーブル名で DDL と同期の制約名が食い違い、存在しない制約を外そうとして失敗する。ガード：`ConstraintNamesGuardTests`・`ConstraintNameConsistencyTests`・`ConstraintNameCreationPathTests`。→ `src/QuickER.Model/CLAUDE.md`「制約名の組み立て（ConstraintNames）」
 - **既定の制約名は識別子の長さの上限に収め、上限は省略できない引数で受ける（経路は 2 つだけ）**：省略可能にすると黙って縮めない呼び出しが残り、DDL の適用が断られるか PostgreSQL で別の名前に切り詰められる。ガード：`IdentifierLengthLimitDeclarationTests`・`ModelDialectLookupGuardTests`・`LongDefaultConstraintNameTests`。→ `src/QuickER.Model/CLAUDE.md`「識別子の長さの上限」
-- **名前の入力・ツール・方言切替は、受け付けない名前を入口と同じ判定（`DescribeViolation`）で知らせる**：判定を写すと入口ごとに食い違う。ガード：`NameLimitStatusWarningTests`・`ErDiagramToolNameLimitNoteTests`・`NameLimitNotesTests`。→ `src/QuickER.Model/CLAUDE.md`「名前の上限の通知（NameLimitNotes）」
+- **名前の入力・ツール・方言切替は、受け付けない名前を入口と同じ判定（`DescribeViolation`）で知らせる**：判定を写すと入口ごとに食い違う。ガード：`NameLimitStatusWarningTests`・`ToolScenarioTests`（行 `name-limit-*`）・`NameLimitNotesTests`。→ `src/QuickER.Model/CLAUDE.md`「名前の上限の通知（NameLimitNotes）」
 
 ### モデル
 
 - **意味と視覚の分離**：`Entity`（Model）は座標・色を持たない。視覚状態は `EntityViewModel` と `EntityLayout`（Document）が持ち、エクスポータ・生成器は意味モデル `ErDiagram` だけを消費する
 - **一意制約の正本は `Entity.UniqueConstraints`。未設定名は `SynthesizeName` で合成し、ぶつかる名前には番号を足す**：ぶつかると SQL Server・PostgreSQL・Oracle・MySQL で DDL・同期が名前の重複で失敗する。ガード：`ConstraintNamesTests`・`ConstraintNamesGuardTests`・`UniqueConstraintResolvedNameLimitTests`。→ `src/QuickER.Model/CLAUDE.md`「一意制約」
-- **主キーの実効順は `Entity.GetPrimaryKeyColumnsInOrder()` だけが決める**：素の `Columns.Where(IsPrimaryKey)` はビルドもテストも緑のまま、取込図でだけ列順へ退行する。ガード：`EntityPrimaryKeyOrderTests`・`PrimaryKeyOrderPersistenceTests`・`MainViewModelPrimaryKeyOrderTests`。→ `src/QuickER.Model/CLAUDE.md`「主キーの実効順」
+- **主キーの実効順は `Entity.GetPrimaryKeyColumnsInOrder()` だけが決める**：素の `Columns.Where(IsPrimaryKey)` はビルドもテストも緑のまま、取込図でだけ列順へ退行する。ガード：`EntityPrimaryKeyOrderTests`・`PrimaryKeyOrderPersistenceTests`・`UndoOperationTests`（行 `primary-key-*`）。→ `src/QuickER.Model/CLAUDE.md`「主キーの実効順」
 - **主キーの順序を生成物・DBML へ載せるか告知するかの判定は `GetReorderedPrimaryKeyColumnNames()` だけ**：独自に変えると順序を明示していない図まで出力が変わる。ガード：`CSharpReversePrimaryKeyOrderTests`・`DbmlPrimaryKeyOrderTests`・`MermaidPrimaryKeyOrderTests`。→ `src/QuickER.Model/CLAUDE.md`「主キーの順序の出力判定」
 - **リレーションの列対応の正本は `Relationship.ColumnPairs`（推測フォールバックなし）**：列ペア 0 件や解決不能な列の FK は DDL・差分の対象外として明示スキップする。ガード：`ForeignKeyColumnResolverTests`・`CSharpReverseUnnamedForeignKeyTests`・`DbmlConstraintNameTests`。→ `src/QuickER.Model/CLAUDE.md`「リレーションの列ペア」
 
@@ -356,6 +356,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **再起動の要求と起動処理を分け、再起動の直前に単一インスタンスの座を手放す**：適用が失敗すると QuickER が閉じたまま戻らず、座を持ったままだと新しいインスタンスが黙って終わる。ガード：`PostExitActionsTests`・`SingleInstanceGuardTests`。→ `src/QuickER.Gui/CLAUDE.md`「再起動と単一インスタンス」
 - **アプリ終了の連鎖は段ごとに `ShutdownSteps.Run` を通し、終了条件は `ShutdownMode="OnMainWindowClose"` ＋ `MainWindow` の明示で紐づける**：前段の失敗で子プロセスが孤児になり、Hide されたウィンドウだけが残る。クラッシュ経路も同じ後始末を通す。ガード：`ShutdownStepsTests`・`AppShutdownModeTests`・`CrashHandlingServiceTests`。→ `src/QuickER.Gui/CLAUDE.md`「終了の連鎖」
 - **モーダルは必ず `DialogOwner.Resolve()` のオーナー付きで出し、実行中フラグを落としてから出す**：モードレスの機能ウィンドウの背面へ回り込んで画面が固まって見える。`PasswordBoxBehavior` の DP 既定値は null 必須。ガード：`DialogOwnerTests`・`PasswordBoxBehaviorTests`。→ `src/QuickER.Gui.Common/CLAUDE.md`「モーダルはオーナー付き」「PasswordBoxBehavior の DP 既定値」
+- **自動整列（格子・階層・力学・追記）は図の形に依らず、決定的で表を重ねず、追記は既存を動かさない**：同じ図の配置が開くたびに変わる・表が重なる・追記で既存が崩れる。ガード：`AutoLayoutScenarioTests`。→ `src/QuickER.Gui/Services/CLAUDE.md`「自動整列の共通の性質」
 
 ### GUI（ViewModel）
 
@@ -366,11 +367,11 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **確認ダイアログの前に図から作った結果は、確認の後で `DiagramRevision` を比べ、変わっていれば当てずに取りやめる**：自動再読込やチャットの編集を古い結果で上書きして捨てる。ガード：`MainViewModelTargetDbmsTests`・`DiagramImportServiceTests`・`MainViewModelErDiagramHostTests`。→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「確認の間に変わった図」
 - **図の一括置換は `ClearDiagramCollections` を通して解除は Clear の後、`RunBulkDiagramUpdate` で再取得を最外側の終了時 1 回にする**：追跡が漏れて幽霊コマンドが積まれ、所要時間が要素数の積で伸びる。ガード：`DiagramChangeTrackerDetachTests`・`MainViewModelBulkDiagramUpdateTests`・`LayoutRefreshCountTests`。→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「図の一括置換」
 - **選択・検索結果・作成中リレーションの始点は図から外れた時点で解く**：追跡の外れた要素を編集して履歴に残らず、古い検索結果から削除すると同じ Id の別の表のクエリまで消える。ガード：`SelectionInvariantTests`・`PendingEditOnDetachTests`。→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「選択・検索結果・作成中リレーションの解除」
-- **図の ViewModel の読み書きプロパティは「Undo で追跡する」か「履歴の外」のどちらかに宣言し、連動変更は 1 履歴に畳み、削除は `IndexedRemoval`、子列の外部キーの印は Undo で戻す**：表に無い新プロパティが履歴に残らず、連動変更が別履歴になる。ガード：`TrackedPropertyUndoExhaustiveTests`・`RemovalOrderRoundTripTests`。→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「Undo の追跡宣言」
+- **図の ViewModel の読み書きプロパティは「Undo で追跡する」か「履歴の外」のどちらかに宣言し、連動変更は 1 履歴に畳み、削除は `IndexedRemoval`、子列の外部キーの印は Undo で戻す**：表に無い新プロパティが履歴に残らず、連動変更が別履歴になる。ガード：`TrackedPropertyUndoExhaustiveTests`・`UndoOperationTests`（行 `removal-order-*`）・`RemovalOrderRoundTripTests`。→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「Undo の追跡宣言」
 - **選択候補コレクションは `CandidateListSync.SyncTo`（Move）で同期し、選択中の項目を ItemsSource から外さない／当て直しは「候補へ足す → 選択 → 絞る」の順**：ComboBox が null を書き戻して正本を変え、Undo/Redo 中にアプリが落ちる。ガード：`CandidateListSyncTests`・`CandidateRowReconcileTests`。→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「選択候補コレクションの同期」
 - **受け付けない名前（識別子の上限・表せない文字）は DDL の入口と同じ判定で、GUI の確定・ツール応答・方言切替の確認に知らせる**：判定の写しが食い違う。ガード：`NameLimitStatusWarningTests`・`NameLimitNotesTests`。→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「名前の上限の通知と方言切替の確認」
 - **一意制約カード（行リストの構成列編集・UQ マーク・列削除でカスケード）**：重複選択や制約の変質を防ぐ。ガード：`UniqueConstraintResolvedNameLimitTests`・`EntityViewModelUniqueConstraintTests`。→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「一意制約の GUI」
-- **主キーの順序の GUI（`EntityViewModel` の保持とミラー、カードに膜の編集を置かない、`SetPrimaryKeyCommand` で 1 履歴）**：取込→保存で順序が消え、ロックを迂回する。ガード：`MainViewModelPrimaryKeyOrderTests`・`PrimaryKeyOrderCardTests`・`ErDiagramToolHostParityTests`。→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「主キーの順序の GUI」
+- **主キーの順序の GUI（`EntityViewModel` の保持とミラー、カードに膜の編集を置かない、`SetPrimaryKeyCommand` で 1 履歴）**：取込→保存で順序が消え、ロックを迂回する。ガード：`UndoOperationTests`（行 `primary-key-*`）・`PrimaryKeyOrderCardTests`・`ErDiagramToolHostParityTests`。→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「主キーの順序の GUI」
 - **リレーションの GUI（ペア行エディタ・親 PK 全列の自動ペア化・列削除で全ペアクリア）**：自動ペア化が単独の `id` を誤爆する。ガード：`ForeignKeyColumnResolverTests`。→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「リレーションの GUI」
 
 ### GUI（ビヘイビア・ビュー）
@@ -398,12 +399,12 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 
 ### MCP
 
-- **MCP ツールの定義の正本は英語の `ErDiagramToolCatalog` 1 つで、GUI の `ErDiagramDynamicTools` と意味論を揃える**：食い違うと同じ呼び出しが GUI と MCP で違う図を作る。検証はどの変更よりも前に置く（GUI は変更をその場で VM へ反映するため）。ガード：`ErDiagramToolInputValidationTests`・`ErDiagramToolResponseNoteTests`・`McpToolStructureGuardTests`。→ `src/QuickER.Mcp/CLAUDE.md`「ツール定義の正本と両ホストのパリティ」
+- **MCP ツールの定義の正本は英語の `ErDiagramToolCatalog` 1 つで、GUI の `ErDiagramDynamicTools` と意味論を揃える**：食い違うと同じ呼び出しが GUI と MCP で違う図を作る。検証はどの変更よりも前に置く（GUI は変更をその場で VM へ反映するため）。ガード：`ToolScenarioTests`・`McpToolStructureGuardTests`。→ `src/QuickER.Mcp/CLAUDE.md`「ツール定義の正本と両ホストのパリティ」
 - **MCP の set_primary_key / set_unique_constraint / add_relationship / set_query の規則**（主キーは全体置換・外れた列の NULL 許容は据え置き・ロックを持たない非対称、制約名の衝突拒否、クエリ定義の検証を生成器と共有）：両ホストで図が割れる。ガード：`ErDiagramToolHostParityTests`・`QueryToolGenerationRuleTests`。→ `src/QuickER.Mcp/CLAUDE.md`「個別ツールの規則」
 - **MCP はステートレスで、レイアウトを書かず、stdout を JSON-RPC 専用にする**：`file` の機械注入と「読込→変更→保存」で完結させ、stdout が汚れるとプロトコルが壊れる。ガード：`McpServerE2ETests.McpServer_IgnoresAppSettingsInWorkingDirectory`。→ `src/QuickER.Mcp/CLAUDE.md`「ステートレス設計」「stdio の純度」
 - **コード生成ツールの結果は英語固定（`CurrentUICulture` だけ InvariantCulture にして戻す）**：CLI と resx を共有するため、外すと言語が漏れる。ガード：`CodeGenToolSetLanguageTests`。→ `src/QuickER.Mcp/CLAUDE.md`「コード生成ツール」
 - **ツールの引数の形は実行前に入口（`ToolArgumentShape`）で 1 回だけ検査する**：外すと黙った既定値・型違いの読み捨て・生の例外になる。値の読み取りと列ペアの比較は正本 1 か所。ガード：`ToolArgumentShapeFuzzTests`・`ToolArgumentParsingGuardTests`。→ `src/QuickER.Mcp/CLAUDE.md`「ツールの引数の形の検査」
-- **ツールの複数行の応答は改行を LF だけで組む**：ホストごとに改行が食い違う。ガード：`ErDiagramToolResponseLineEndingTests`。→ `src/QuickER.Mcp/CLAUDE.md`「ツールの応答の改行」
+- **ツールの複数行の応答は改行を LF だけで組む**：ホストごとに改行が食い違う。ガード：`ToolScenarioTests`（行 `line-ending-summary-uses-lf-only`）。→ `src/QuickER.Mcp/CLAUDE.md`「ツールの応答の改行」
 - **MCP の呼び出しは `DiagramFileGate` で直列化し、何も変えない呼び出しでは図のファイルを書かず、`create_diagram` は上書きしない**：書くと開いている GUI が再読込・確認を出し、並列の変更系が互いの更新を消す。ガード：`DocumentErDiagramFileHandlingTests`・`DocumentErDiagramToolConcurrencyTests`。→ `src/QuickER.Mcp.Tools/CLAUDE.md`「何も変えない呼び出しで書かない」
 
 ### AI チャット

@@ -9,8 +9,12 @@ using QuickER.Tests.TestSupport;
 namespace QuickER.Tests.Mcp.Tools;
 
 /// <summary>
-/// <see cref="DocumentErDiagramToolHost"/> の各ツールの正常系・エラー系を、一時ファイルベースで検証する。
+/// <see cref="DocumentErDiagramToolHost"/> だけが持つ振る舞い（<c>create_diagram</c>・図ファイルの状態の扱い・保存・レイアウトとクエリの温存）を、
+/// 一時ファイルベースで検証する。
 /// </summary>
+/// <remarks>
+/// 両ホストで同じ表明をするツールの振る舞い（エンティティ・列・リレーション・要約）は <see cref="ToolScenarioRows"/> の行へ移した
+/// </remarks>
 public sealed class DocumentErDiagramToolHostTests : IDisposable
 {
     /// <summary>各テスト専用の一時ディレクトリ</summary>
@@ -118,135 +122,229 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
         document.Version.Should().Be(DiagramDocument.CurrentVersion);
     }
 
-    [Fact(DisplayName = "create_diagram は大文字混じりの target_dbms を正規化して受け付ける")]
-    public void CreateDiagram_NormalizesDbmsCase()
+    /// <summary>create_diagram の 1 ケース（呼び出しの形と期待）</summary>
+    /// <param name="RelativePath">図ファイルのパス（一時ディレクトリからの相対）</param>
+    /// <param name="Prepare">呼び出しの前にファイルを用意する（無ければ何もしない）</param>
+    /// <param name="Args">引数</param>
+    /// <param name="ExpectSuccess">期待する成否</param>
+    /// <param name="Fragment">応答に含まれるはずの断片（応答を見ないなら null）</param>
+    /// <param name="Verify">呼び出しの後のファイルの確認</param>
+    private sealed record CreateDiagramCase(
+        string RelativePath,
+        Action<string>? Prepare,
+        object Args,
+        bool ExpectSuccess,
+        string? Fragment,
+        Action<string> Verify
+    );
+
+    /// <summary>create_diagram のケース（名前 → ケース）</summary>
+    private static Dictionary<string, CreateDiagramCase> CreateDiagramCases { get; } =
+        new()
+        {
+            ["normalizes-dbms-case"] = new(
+                "cased.json",
+                null,
+                new { target_dbms = "SqlServer" },
+                true,
+                null,
+                file => JsonStorageService.Load(file).Schema.TargetDbms.Should().Be("sqlserver")
+            ),
+            ["existing-file-is-not-overwritten"] = new(
+                "exists.json",
+                file => File.WriteAllText(file, "original"),
+                new { target_dbms = "sqlite" },
+                false,
+                "already exists",
+                file => File.ReadAllText(file).Should().Be("original")
+            ),
+            ["missing-parent-directory-is-not-created"] = new(
+                Path.Combine("nope", "child.json"),
+                null,
+                new { target_dbms = "sqlite" },
+                false,
+                "does not exist",
+                file => File.Exists(file).Should().BeFalse()
+            ),
+            ["invalid-dbms"] = new(
+                "bad.json",
+                null,
+                new { target_dbms = "db2" },
+                false,
+                "db2",
+                file => File.Exists(file).Should().BeFalse()
+            ),
+            ["missing-dbms"] = new(
+                "nodbms.json",
+                null,
+                new { },
+                false,
+                "target_dbms",
+                file => File.Exists(file).Should().BeFalse()
+            ),
+        };
+
+    /// <summary>create_diagram のケース名</summary>
+    public static TheoryData<string> CreateDiagramCaseNames
     {
-        var file = PathFor("cased.json");
+        get
+        {
+            var data = new TheoryData<string>();
 
-        var (_, success) = Exec(
-            DocumentErDiagramToolHost.CreateDiagramToolName,
-            file,
-            new { target_dbms = "SqlServer" }
-        );
+            foreach (var name in CreateDiagramCases.Keys)
+            {
+                data.Add(name);
+            }
 
-        success.Should().BeTrue();
-        JsonStorageService.Load(file).Schema.TargetDbms.Should().Be("sqlserver");
+            return data;
+        }
     }
 
-    [Fact(DisplayName = "create_diagram は既存ファイルを上書きせずエラーにする")]
-    public void CreateDiagram_ExistingFile_Fails()
+    [Theory(
+        DisplayName = "create_diagram は target_dbms の正規化・既存ファイル・親ディレクトリ・不正値・未指定を期待どおりに扱う"
+    )]
+    [MemberData(nameof(CreateDiagramCaseNames))]
+    public void CreateDiagram_HandlesArgumentsAndExistingFile(string caseName)
     {
-        var file = PathFor("exists.json");
-        File.WriteAllText(file, "original");
+        var testCase = CreateDiagramCases[caseName];
+        var file = PathFor(testCase.RelativePath);
+        testCase.Prepare?.Invoke(file);
 
         var (result, success) = Exec(
             DocumentErDiagramToolHost.CreateDiagramToolName,
             file,
-            new { target_dbms = "sqlite" }
+            testCase.Args
         );
 
-        success.Should().BeFalse();
-        result.Should().Contain("already exists");
-        File.ReadAllText(file).Should().Be("original");
-    }
+        success.Should().Be(testCase.ExpectSuccess);
 
-    [Fact(DisplayName = "create_diagram は親ディレクトリが無ければエラーにする（掘らない）")]
-    public void CreateDiagram_MissingParentDirectory_Fails()
-    {
-        var file = PathFor(Path.Combine("nope", "child.json"));
+        if (testCase.Fragment is { } fragment)
+        {
+            result.Should().Contain(fragment);
+        }
 
-        var (result, success) = Exec(
-            DocumentErDiagramToolHost.CreateDiagramToolName,
-            file,
-            new { target_dbms = "sqlite" }
-        );
-
-        success.Should().BeFalse();
-        result.Should().Contain("does not exist");
-        File.Exists(file).Should().BeFalse();
-    }
-
-    [Fact(DisplayName = "create_diagram は不正な target_dbms をエラーにする")]
-    public void CreateDiagram_InvalidDbms_Fails()
-    {
-        var file = PathFor("bad.json");
-
-        var (result, success) = Exec(
-            DocumentErDiagramToolHost.CreateDiagramToolName,
-            file,
-            new { target_dbms = "db2" }
-        );
-
-        success.Should().BeFalse();
-        result.Should().Contain("db2");
-        File.Exists(file).Should().BeFalse();
-    }
-
-    [Fact(DisplayName = "create_diagram は target_dbms 未指定をエラーにする")]
-    public void CreateDiagram_MissingDbms_Fails()
-    {
-        var file = PathFor("nodbms.json");
-
-        var (result, success) = Exec(
-            DocumentErDiagramToolHost.CreateDiagramToolName,
-            file,
-            new { }
-        );
-
-        success.Should().BeFalse();
-        result.Should().Contain("target_dbms");
-        File.Exists(file).Should().BeFalse();
+        testCase.Verify(file);
     }
 
     // ---------------- guards ----------------
 
-    [Fact(DisplayName = "変更系ツールは存在しないファイルをエラーにする")]
-    public void Mutating_FileNotFound_ReturnsError()
+    /// <summary>図ファイルの状態を替えてツールを呼ぶ 1 ケース</summary>
+    /// <param name="FileName">図ファイルの名前</param>
+    /// <param name="Prepare">呼び出しの前にファイルを用意する（無ければ何もしない）</param>
+    /// <param name="Tool">ツール名</param>
+    /// <param name="Args">引数</param>
+    /// <param name="ExpectSuccess">期待する成否</param>
+    /// <param name="Fragments">応答に含まれるはずの断片</param>
+    /// <param name="Verify">呼び出しの後のファイルの確認（無ければ何もしない）</param>
+    private sealed record FileStateCase(
+        string FileName,
+        Action<string>? Prepare,
+        string Tool,
+        object Args,
+        bool ExpectSuccess,
+        string[] Fragments,
+        Action<string>? Verify
+    );
+
+    /// <summary>図ファイルの状態のケース（名前 → ケース）</summary>
+    private static Dictionary<string, FileStateCase> FileStateCases { get; } =
+        new()
+        {
+            ["mutating-file-not-found"] = new(
+                "missing.json",
+                null,
+                "add_entity",
+                new { table_name = "X" },
+                false,
+                ["not found", DocumentErDiagramToolHost.CreateDiagramToolName],
+                null
+            ),
+            ["mutating-non-diagram-json-is-not-overwritten"] = new(
+                "unrelated.json",
+                file => File.WriteAllText(file, "{\"foo\":1}"),
+                "add_entity",
+                new { table_name = "X" },
+                false,
+                ["not a DiagramDocument"],
+                file => File.ReadAllText(file).Should().Be("{\"foo\":1}")
+            ),
+            ["mutating-invalid-json"] = new(
+                "broken.json",
+                file => File.WriteAllText(file, "this is not json"),
+                "add_entity",
+                new { table_name = "X" },
+                false,
+                ["not valid JSON"],
+                null
+            ),
+            ["mutating-newer-format-is-rejected"] = new(
+                "newer.json",
+                file =>
+                    SaveRaw(
+                        file,
+                        new DiagramDocument { Version = DiagramDocument.CurrentVersion + 5 }
+                    ),
+                "add_entity",
+                new { table_name = "X" },
+                false,
+                ["refusing to modify"],
+                null
+            ),
+            ["summary-newer-format-warns-and-continues"] = new(
+                "newer-summary.json",
+                file =>
+                {
+                    var document = new DiagramDocument
+                    {
+                        Version = DiagramDocument.CurrentVersion + 5,
+                    };
+                    document.Schema.Entities.Add(new Entity { TableName = "Book" });
+                    SaveRaw(file, document);
+                },
+                "get_diagram_summary",
+                new { },
+                true,
+                ["Warning", "Book"],
+                null
+            ),
+        };
+
+    /// <summary>図ファイルの状態のケース名</summary>
+    public static TheoryData<string> FileStateCaseNames
     {
-        var file = PathFor("missing.json");
+        get
+        {
+            var data = new TheoryData<string>();
 
-        var (result, success) = Exec("add_entity", file, new { table_name = "X" });
+            foreach (var name in FileStateCases.Keys)
+            {
+                data.Add(name);
+            }
 
-        success.Should().BeFalse();
-        result.Should().Contain("not found");
-        result.Should().Contain(DocumentErDiagramToolHost.CreateDiagramToolName);
+            return data;
+        }
     }
 
-    [Fact(DisplayName = "変更系ツールは DiagramDocument でない JSON を上書きせずエラーにする")]
-    public void Mutating_NonDiagramJson_ReturnsErrorAndDoesNotOverwrite()
+    [Theory(
+        DisplayName = "ツールは図ファイルが存在しない・図でない JSON・不正な JSON・新しいフォーマットのとき期待どおりに断る・続行する"
+    )]
+    [MemberData(nameof(FileStateCaseNames))]
+    public void Tool_HandlesFileState(string caseName)
     {
-        var file = PathFor("unrelated.json");
-        File.WriteAllText(file, "{\"foo\":1}");
+        var testCase = FileStateCases[caseName];
+        var file = PathFor(testCase.FileName);
+        testCase.Prepare?.Invoke(file);
 
-        var (result, success) = Exec("add_entity", file, new { table_name = "X" });
+        var (result, success) = Exec(testCase.Tool, file, testCase.Args);
 
-        success.Should().BeFalse();
-        result.Should().Contain("not a DiagramDocument");
-        File.ReadAllText(file).Should().Be("{\"foo\":1}");
-    }
+        success.Should().Be(testCase.ExpectSuccess);
 
-    [Fact(DisplayName = "変更系ツールは不正な JSON をエラーにする")]
-    public void Mutating_InvalidJson_ReturnsError()
-    {
-        var file = PathFor("broken.json");
-        File.WriteAllText(file, "this is not json");
+        foreach (var fragment in testCase.Fragments)
+        {
+            result.Should().Contain(fragment);
+        }
 
-        var (result, success) = Exec("add_entity", file, new { table_name = "X" });
-
-        success.Should().BeFalse();
-        result.Should().Contain("not valid JSON");
-    }
-
-    [Fact(DisplayName = "変更系ツールは新しいフォーマットの文書を拒否する")]
-    public void Mutating_NewerFormat_Rejected()
-    {
-        var file = PathFor("newer.json");
-        SaveRaw(file, new DiagramDocument { Version = DiagramDocument.CurrentVersion + 5 });
-
-        var (result, success) = Exec("add_entity", file, new { table_name = "X" });
-
-        success.Should().BeFalse();
-        result.Should().Contain("refusing to modify");
+        testCase.Verify?.Invoke(file);
     }
 
     /// <summary>
@@ -277,538 +375,7 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
             .BeEmpty("変更の保存後にも一時ファイルは残らない");
     }
 
-    [Fact(DisplayName = "get_diagram_summary は新しいフォーマットでも警告付きで続行する")]
-    public void Summary_NewerFormat_WarnsAndContinues()
-    {
-        var file = PathFor("newer-summary.json");
-        var document = new DiagramDocument { Version = DiagramDocument.CurrentVersion + 5 };
-        document.Schema.Entities.Add(new Entity { TableName = "Book" });
-        SaveRaw(file, document);
-
-        var (result, success) = Exec("get_diagram_summary", file, new { });
-
-        success.Should().BeTrue();
-        result.Should().Contain("Warning");
-        result.Should().Contain("Book");
-    }
-
-    // ---------------- entity / column operations ----------------
-
-    [Fact(DisplayName = "add_entity はテーブルを追加し列は自動生成しない")]
-    public void AddEntity_AddsTableWithoutColumns()
-    {
-        var file = PathFor("d.json");
-        DiagramFiles.Create(file, "sqlite");
-
-        var (result, success) = Exec(
-            "add_entity",
-            file,
-            new { table_name = "Book", description = "books" }
-        );
-
-        success.Should().BeTrue();
-        result.Should().Contain("Book");
-        var entity = JsonStorageService.Load(file).Schema.Entities.Single();
-        entity.TableName.Should().Be("Book");
-        entity.Description.Should().Be("books");
-        entity.Columns.Should().BeEmpty();
-    }
-
-    [Fact(DisplayName = "add_column は主キー・NULL 許容フラグを指定どおり設定する")]
-    public void AddColumn_SetsFlags()
-    {
-        var file = PathFor("d.json");
-        DiagramFiles.Create(file, "sqlite");
-        Exec("add_entity", file, new { table_name = "Book" });
-
-        Exec(
-            "add_column",
-            file,
-            new
-            {
-                table_name = "Book",
-                column_name = "BookId",
-                data_type = "int",
-                is_primary_key = true,
-                is_nullable = false,
-            }
-        );
-
-        var column = JsonStorageService.Load(file).Schema.Entities.Single().Columns.Single();
-        column.Name.Should().Be("BookId");
-        column.IsPrimaryKey.Should().BeTrue();
-        column.IsNullable.Should().BeFalse();
-    }
-
-    [Fact(DisplayName = "add_column は is_nullable 省略でも主キー列を NULL 不可にする")]
-    public void AddColumn_PrimaryKeyWithoutNullableFlag_IsNotNullable()
-    {
-        var file = PathFor("d.json");
-        DiagramFiles.Create(file, "sqlite");
-        Exec("add_entity", file, new { table_name = "Book" });
-
-        // is_nullable 省略の既定は「NULL 許容」だが、主キー列では NULL 不可が優先される
-        // （GUI 側 ColumnViewModel も同じ強制を行う＝両ホストのモデルを一致させる）
-        Exec(
-            "add_column",
-            file,
-            new
-            {
-                table_name = "Book",
-                column_name = "BookId",
-                data_type = "int",
-                is_primary_key = true,
-            }
-        );
-
-        var column = JsonStorageService.Load(file).Schema.Entities.Single().Columns.Single();
-        column.IsPrimaryKey.Should().BeTrue();
-        column.IsNullable.Should().BeFalse();
-    }
-
-    [Fact(DisplayName = "add_column は存在しないテーブルをエラーにする")]
-    public void AddColumn_UnknownTable_ReturnsError()
-    {
-        var file = PathFor("d.json");
-        DiagramFiles.Create(file, "sqlite");
-
-        var (_, success) = Exec(
-            "add_column",
-            file,
-            new
-            {
-                table_name = "NoSuch",
-                column_name = "X",
-                data_type = "int",
-            }
-        );
-
-        success.Should().BeFalse();
-    }
-
-    [Fact(DisplayName = "set_entity_property は指定プロパティのみ更新する")]
-    public void SetEntityProperty_UpdatesSpecifiedOnly()
-    {
-        var file = PathFor("d.json");
-        DiagramFiles.Create(file, "sqlite");
-        Exec("add_entity", file, new { table_name = "Book" });
-
-        var (_, success) = Exec(
-            "set_entity_property",
-            file,
-            new
-            {
-                table_name = "Book",
-                new_table_name = "Books",
-                description = "renamed",
-            }
-        );
-
-        success.Should().BeTrue();
-        var entity = JsonStorageService.Load(file).Schema.Entities.Single();
-        entity.TableName.Should().Be("Books");
-        entity.Description.Should().Be("renamed");
-        entity.Memo.Should().BeEmpty();
-    }
-
-    [Fact(DisplayName = "set_entity_property は変更対象未指定をエラーにする")]
-    public void SetEntityProperty_NoChange_ReturnsError()
-    {
-        var file = PathFor("d.json");
-        DiagramFiles.Create(file, "sqlite");
-        Exec("add_entity", file, new { table_name = "Book" });
-
-        var (_, success) = Exec("set_entity_property", file, new { table_name = "Book" });
-
-        success.Should().BeFalse();
-    }
-
-    [Fact(DisplayName = "set_column_property はデータ型と NULL 許容を更新する")]
-    public void SetColumnProperty_UpdatesDataTypeAndNullable()
-    {
-        var file = PathFor("d.json");
-        DiagramFiles.Create(file, "sqlite");
-        Exec("add_entity", file, new { table_name = "Book" });
-        Exec(
-            "add_column",
-            file,
-            new
-            {
-                table_name = "Book",
-                column_name = "Title",
-                data_type = "nvarchar(100)",
-                is_nullable = false,
-            }
-        );
-
-        var (_, success) = Exec(
-            "set_column_property",
-            file,
-            new
-            {
-                table_name = "Book",
-                column_name = "Title",
-                data_type = "nvarchar(500)",
-                is_nullable = true,
-            }
-        );
-
-        success.Should().BeTrue();
-        var column = JsonStorageService
-            .Load(file)
-            .Schema.Entities.Single()
-            .Columns.Single(c => c.Name == "Title");
-        column.DataType.Should().Be("nvarchar(500)");
-        column.IsNullable.Should().BeTrue();
-    }
-
-    /// <summary>
-    /// 主キー列への <c>is_nullable=true</c> が NULL 不可へ正規化されることを検証する。
-    /// </summary>
-    /// <remarks>
-    /// GUI 側の <c>ColumnViewModel.IsNullable</c> は主キー列の NULL 許容を握り潰すため、ここで素通しすると
-    /// 同じ呼び出しで両ホストのモデルが無言で食い違う（保存した図を GUI で開くと黙って戻る）。
-    /// </remarks>
-    [Fact(DisplayName = "set_column_property は主キー列の NULL 許容を NULL 不可へ正規化する")]
-    public void SetColumnProperty_PrimaryKeyColumn_StaysNotNullable()
-    {
-        var file = PathFor("d.json");
-        DiagramFiles.Create(file, "sqlite");
-        Exec("add_entity", file, new { table_name = "Book" });
-        Exec(
-            "add_column",
-            file,
-            new
-            {
-                table_name = "Book",
-                column_name = "BookId",
-                data_type = "int",
-                is_primary_key = true,
-                is_nullable = false,
-            }
-        );
-
-        var (_, success) = Exec(
-            "set_column_property",
-            file,
-            new
-            {
-                table_name = "Book",
-                column_name = "BookId",
-                is_nullable = true,
-            }
-        );
-
-        success.Should().BeTrue();
-        JsonStorageService
-            .Load(file)
-            .Schema.Entities.Single()
-            .Columns.Single(c => c.Name == "BookId")
-            .IsNullable.Should()
-            .BeFalse();
-    }
-
-    // ---------------- relationship operations ----------------
-
-    [Fact(DisplayName = "add_relationship はカラム省略時に命名規則で FK 列を解決する")]
-    public void AddRelationship_ResolvesTargetColumnByConvention()
-    {
-        var file = CreateParentChildFile();
-
-        var (_, success) = Exec(
-            "add_relationship",
-            file,
-            new
-            {
-                source_table = "Customer",
-                target_table = "Order",
-                relationship_type = "OneToMany",
-            }
-        );
-
-        success.Should().BeTrue();
-        var schema = JsonStorageService.Load(file).Schema;
-        var order = schema.Entities.Single(e => e.TableName == "Order");
-        var customerIdColumn = order.Columns.Single(c => c.Name == "CustomerId");
-        var relationship = schema.Relationships.Single();
-        relationship
-            .ColumnPairs.Should()
-            .ContainSingle()
-            .Which.TargetColumnId.Should()
-            .Be(customerIdColumn.Id);
-        // 参照先の FK 列へ FK フラグが付与される
-        customerIdColumn.IsForeignKey.Should().BeTrue();
-    }
-
-    [Fact(DisplayName = "add_relationship は存在しない target_columns をエラーにする")]
-    public void AddRelationship_UnknownTargetColumn_ReturnsError()
-    {
-        var file = CreateParentChildFile();
-
-        var (result, success) = Exec(
-            "add_relationship",
-            file,
-            new
-            {
-                source_table = "Customer",
-                source_columns = new[] { "CustomerId" },
-                target_table = "Order",
-                target_columns = new[] { "NoSuchColumn" },
-                relationship_type = "OneToMany",
-            }
-        );
-
-        success.Should().BeFalse();
-        result.Should().Contain("NoSuchColumn");
-        JsonStorageService.Load(file).Schema.Relationships.Should().BeEmpty();
-    }
-
-    [Fact(DisplayName = "add_relationship は複合外部キーを宣言順の列ペアで登録する")]
-    public void AddRelationship_CompositeColumns_RegistersOrderedPairs()
-    {
-        var file = CreateParentChildFile();
-        Exec(
-            "add_column",
-            file,
-            new
-            {
-                table_name = "Customer",
-                column_name = "RegionCode",
-                data_type = "nvarchar(10)",
-                is_nullable = false,
-            }
-        );
-        Exec(
-            "add_column",
-            file,
-            new
-            {
-                table_name = "Order",
-                column_name = "RegionCode",
-                data_type = "nvarchar(10)",
-                is_nullable = false,
-            }
-        );
-
-        var (_, success) = Exec(
-            "add_relationship",
-            file,
-            new
-            {
-                source_table = "Customer",
-                source_columns = new[] { "CustomerId", "RegionCode" },
-                target_table = "Order",
-                target_columns = new[] { "CustomerId", "RegionCode" },
-                relationship_type = "OneToMany",
-            }
-        );
-
-        success.Should().BeTrue();
-
-        var schema = JsonStorageService.Load(file).Schema;
-        var customer = schema.Entities.Single(e => e.TableName == "Customer");
-        var order = schema.Entities.Single(e => e.TableName == "Order");
-        var relationship = schema.Relationships.Single();
-
-        relationship.ColumnPairs.Should().HaveCount(2);
-        relationship
-            .ColumnPairs[0]
-            .SourceColumnId.Should()
-            .Be(customer.Columns.Single(c => c.Name == "CustomerId").Id);
-        relationship
-            .ColumnPairs[1]
-            .SourceColumnId.Should()
-            .Be(customer.Columns.Single(c => c.Name == "RegionCode").Id);
-        // 構成列はすべて FK フラグが立つ
-        order.Columns.Single(c => c.Name == "CustomerId").IsForeignKey.Should().BeTrue();
-        order.Columns.Single(c => c.Name == "RegionCode").IsForeignKey.Should().BeTrue();
-    }
-
-    [Fact(DisplayName = "add_relationship は列配列の長さ不一致・片側のみの指定をエラーにする")]
-    public void AddRelationship_InvalidColumnArrays_ReturnError()
-    {
-        var file = CreateParentChildFile();
-
-        Exec(
-            "add_relationship",
-            file,
-            new
-            {
-                source_table = "Customer",
-                source_columns = new[] { "CustomerId" },
-                target_table = "Order",
-                target_columns = new[] { "CustomerId", "OrderId" },
-                relationship_type = "OneToMany",
-            }
-        )
-            .Success.Should()
-            .BeFalse();
-
-        Exec(
-            "add_relationship",
-            file,
-            new
-            {
-                source_table = "Customer",
-                target_table = "Order",
-                target_columns = new[] { "CustomerId" },
-                relationship_type = "OneToMany",
-            }
-        )
-            .Success.Should()
-            .BeFalse();
-
-        JsonStorageService.Load(file).Schema.Relationships.Should().BeEmpty();
-    }
-
-    [Fact(DisplayName = "get_diagram_summary は外部キーの列ペアと制約名を表示する")]
-    public void GetDiagramSummary_ShowsColumnPairsAndConstraintName()
-    {
-        var file = CreateParentChildFile();
-        Exec(
-            "add_relationship",
-            file,
-            new
-            {
-                source_table = "Customer",
-                target_table = "Order",
-                relationship_type = "OneToMany",
-            }
-        );
-
-        var (result, success) = Exec("get_diagram_summary", file, new { });
-
-        success.Should().BeTrue();
-        result.Should().Contain("FK: (CustomerId → CustomerId)");
-        result.Should().Contain("[FK_Order_Customer]");
-    }
-
-    [Fact(DisplayName = "remove_relationship は複数一致時に候補を挙げてエラーにする")]
-    public void RemoveRelationship_MultipleMatches_RequiresConstraintName()
-    {
-        var file = CreateParentChildFile();
-        Exec(
-            "add_column",
-            file,
-            new
-            {
-                table_name = "Order",
-                column_name = "BillingCustomerId",
-                data_type = "int",
-                is_nullable = false,
-            }
-        );
-        Exec(
-            "add_relationship",
-            file,
-            new
-            {
-                source_table = "Customer",
-                target_table = "Order",
-                relationship_type = "OneToMany",
-            }
-        );
-        Exec(
-            "add_relationship",
-            file,
-            new
-            {
-                source_table = "Customer",
-                source_columns = new[] { "CustomerId" },
-                target_table = "Order",
-                target_columns = new[] { "BillingCustomerId" },
-                relationship_type = "OneToMany",
-            }
-        );
-
-        // 既定の制約名は同一になるため、2 本目だけ名前を変えて区別できるようにする
-        var document = JsonStorageService.Load(file);
-        document.Schema.Relationships[1].ConstraintName = "FK_Order_Customer_Billing";
-        JsonStorageService.SaveAtomic(file, document);
-
-        var ambiguous = Exec(
-            "remove_relationship",
-            file,
-            new { source_table = "Customer", target_table = "Order" }
-        );
-
-        ambiguous.Success.Should().BeFalse();
-        ambiguous.Result.Should().Contain("FK_Order_Customer_Billing");
-        JsonStorageService.Load(file).Schema.Relationships.Should().HaveCount(2);
-
-        var removed = Exec(
-            "remove_relationship",
-            file,
-            new
-            {
-                source_table = "Customer",
-                target_table = "Order",
-                constraint_name = "FK_Order_Customer_Billing",
-            }
-        );
-
-        removed.Success.Should().BeTrue();
-        JsonStorageService
-            .Load(file)
-            .Schema.Relationships.Should()
-            .ContainSingle()
-            .Which.ConstraintName.Should()
-            .Be("FK_Order_Customer");
-    }
-
-    [Fact(DisplayName = "remove_relationship は指定した端点間のリレーションを削除する")]
-    public void RemoveRelationship_RemovesRelationship()
-    {
-        var file = CreateParentChildFile();
-        Exec(
-            "add_relationship",
-            file,
-            new
-            {
-                source_table = "Customer",
-                target_table = "Order",
-                relationship_type = "OneToMany",
-            }
-        );
-
-        var (_, success) = Exec(
-            "remove_relationship",
-            file,
-            new { source_table = "Customer", target_table = "Order" }
-        );
-
-        success.Should().BeTrue();
-        JsonStorageService.Load(file).Schema.Relationships.Should().BeEmpty();
-    }
-
-    [Fact(DisplayName = "remove_column は FK 列削除時にリレーションの参照をクリアする")]
-    public void RemoveColumn_ClearsRelationshipReference()
-    {
-        var file = CreateParentChildFile();
-        Exec(
-            "add_relationship",
-            file,
-            new
-            {
-                source_table = "Customer",
-                target_table = "Order",
-                relationship_type = "OneToMany",
-            }
-        );
-
-        var (_, success) = Exec(
-            "remove_column",
-            file,
-            new { table_name = "Order", column_name = "CustomerId" }
-        );
-
-        success.Should().BeTrue();
-        var schema = JsonStorageService.Load(file).Schema;
-        var order = schema.Entities.Single(e => e.TableName == "Order");
-        order.Columns.Should().NotContain(c => c.Name == "CustomerId");
-        // 削除カラムを含む列ペアはリレーションごとクリアされる
-        schema.Relationships.Single().ColumnPairs.Should().BeEmpty();
-    }
+    // ---------------- entity removal / preservation ----------------
 
     [Fact(DisplayName = "remove_entity は接続リレーションと孤児レイアウトも削除する")]
     public void RemoveEntity_RemovesRelationshipsAndOrphanLayout()
@@ -841,8 +408,6 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
         reloaded.Schema.Relationships.Should().BeEmpty();
         reloaded.Layout.Should().NotContainKey(orderId);
     }
-
-    // ---------------- preservation ----------------
 
     [Fact(DisplayName = "変更しても既存のレイアウトは温存される")]
     public void Mutation_PreservesExistingLayout()
@@ -892,396 +457,6 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
 
         var reloaded = JsonStorageService.Load(file);
         reloaded.Schema.Queries.Should().ContainSingle(q => q.Name == "GetAllBooks");
-    }
-
-    // ---------------- 主キーの実効順 ----------------
-
-    /// <summary>
-    /// 複合主キーの親 TenantRegion（列宣言順 TenantId, RegionCode）と、同名の外部キー列候補を持つ
-    /// 子 TenantUser を作成した図ファイルを用意する
-    /// </summary>
-    /// <param name="name">ファイル名</param>
-    /// <param name="reversePrimaryKeyOrder">true なら親の主キー実効順を列宣言順の逆へ上書きする</param>
-    private string CreateCompositeKeyFile(string name, bool reversePrimaryKeyOrder)
-    {
-        var file = PathFor(name);
-        DiagramFiles.Create(file, "sqlite");
-
-        Exec("add_entity", file, new { table_name = "TenantRegion" });
-        Exec(
-            "add_column",
-            file,
-            new
-            {
-                table_name = "TenantRegion",
-                column_name = "TenantId",
-                data_type = "int",
-                is_primary_key = true,
-                is_nullable = false,
-            }
-        );
-        Exec(
-            "add_column",
-            file,
-            new
-            {
-                table_name = "TenantRegion",
-                column_name = "RegionCode",
-                data_type = "nvarchar(10)",
-                is_primary_key = true,
-                is_nullable = false,
-            }
-        );
-        Exec("add_entity", file, new { table_name = "TenantUser" });
-        Exec(
-            "add_column",
-            file,
-            new
-            {
-                table_name = "TenantUser",
-                column_name = "TenantUserId",
-                data_type = "int",
-                is_primary_key = true,
-                is_nullable = false,
-            }
-        );
-        Exec(
-            "add_column",
-            file,
-            new
-            {
-                table_name = "TenantUser",
-                column_name = "TenantId",
-                data_type = "int",
-                is_nullable = false,
-            }
-        );
-        Exec(
-            "add_column",
-            file,
-            new
-            {
-                table_name = "TenantUser",
-                column_name = "RegionCode",
-                data_type = "nvarchar(10)",
-                is_nullable = false,
-            }
-        );
-
-        if (reversePrimaryKeyOrder)
-        {
-            // 列宣言順（TenantId → RegionCode）と逆の実効順をツール経由で宣言する
-            Exec(
-                "set_primary_key",
-                file,
-                new { table_name = "TenantRegion", columns = new[] { "RegionCode", "TenantId" } }
-            );
-        }
-
-        return file;
-    }
-
-    [Fact(DisplayName = "add_relationship の自動ペア化は親主キーの実効順に従う")]
-    public void AddRelationship_AutoPairs_FollowPrimaryKeyOrder()
-    {
-        var file = CreateCompositeKeyFile("pk-order-pairs.json", reversePrimaryKeyOrder: true);
-
-        Exec(
-            "add_relationship",
-            file,
-            new
-            {
-                source_table = "TenantRegion",
-                target_table = "TenantUser",
-                relationship_type = "OneToMany",
-            }
-        )
-            .Success.Should()
-            .BeTrue();
-
-        var schema = JsonStorageService.Load(file).Schema;
-        var parent = schema.Entities.Single(e => e.TableName == "TenantRegion");
-        var relationship = schema.Relationships.Single();
-
-        relationship
-            .ColumnPairs.Select(pair =>
-                parent.Columns.Single(c => c.Id == pair.SourceColumnId).Name
-            )
-            .Should()
-            .Equal("RegionCode", "TenantId");
-    }
-
-    /// <summary>
-    /// 列省略時の自動ペア化で、複合主キーの各列が親テーブル名由来の名前の子列を取り違えずに
-    /// 同名の子列へ付くことを検証する
-    /// </summary>
-    /// <param name="parentTable">親テーブル名</param>
-    /// <param name="firstKey">親の主キーの 1 列目</param>
-    /// <param name="secondKey">親の主キーの 2 列目（子にも同名の列がある）</param>
-    [Theory(DisplayName = "add_relationship の複合主キーの自動ペア化は各列を同名の子列へ付ける")]
-    [InlineData("Orders", "OrderId", "Revision")]
-    [InlineData("Projects", "TenantId", "ProjectId")]
-    public void AddRelationship_OmittedColumns_CompositeKeyPairsEachColumnWithSameName(
-        string parentTable,
-        string firstKey,
-        string secondKey
-    )
-    {
-        var file = PathFor($"composite-auto-pairs-{parentTable}.json");
-        DiagramFiles.Create(file, "sqlite");
-        Exec("add_entity", file, new { table_name = parentTable });
-        Exec("add_entity", file, new { table_name = "Child" });
-
-        foreach (
-            var (table, column, isKey) in new[]
-            {
-                (parentTable, firstKey, true),
-                (parentTable, secondKey, true),
-                ("Child", "ChildId", true),
-                ("Child", firstKey, false),
-                ("Child", secondKey, false),
-            }
-        )
-        {
-            Exec(
-                "add_column",
-                file,
-                new
-                {
-                    table_name = table,
-                    column_name = column,
-                    data_type = "int",
-                    is_primary_key = isKey,
-                    is_nullable = false,
-                }
-            )
-                .Success.Should()
-                .BeTrue();
-        }
-
-        Exec(
-            "add_relationship",
-            file,
-            new
-            {
-                source_table = parentTable,
-                target_table = "Child",
-                relationship_type = "OneToMany",
-            }
-        )
-            .Success.Should()
-            .BeTrue();
-
-        var schema = JsonStorageService.Load(file).Schema;
-        var parent = schema.Entities.Single(e => e.TableName == parentTable);
-        var child = schema.Entities.Single(e => e.TableName == "Child");
-
-        schema
-            .Relationships.Single()
-            .ColumnPairs.Select(pair =>
-                (
-                    parent.Columns.Single(c => c.Id == pair.SourceColumnId).Name,
-                    child.Columns.Single(c => c.Id == pair.TargetColumnId).Name
-                )
-            )
-            .Should()
-            .Equal((firstKey, firstKey), (secondKey, secondKey));
-    }
-
-    /// <summary>
-    /// 親 Customers(CustomerId) と、役割の違う外部キー列 2 本（請求先・配送先）と一意制約の候補列 code を持つ
-    /// 子 Orders を作成した図ファイルを用意する
-    /// </summary>
-    private string CreateBillingAndShippingFile()
-    {
-        var file = PathFor($"billing-shipping-{Guid.NewGuid():N}.json");
-        DiagramFiles.Create(file, "sqlite");
-        Exec("add_entity", file, new { table_name = "Customers" });
-        Exec("add_entity", file, new { table_name = "Orders" });
-
-        foreach (
-            var (table, column, isKey) in new[]
-            {
-                ("Customers", "CustomerId", true),
-                ("Orders", "OrderId", true),
-                ("Orders", "BillingCustomerId", false),
-                ("Orders", "ShippingCustomerId", false),
-                ("Orders", "code", false),
-            }
-        )
-        {
-            Exec(
-                "add_column",
-                file,
-                new
-                {
-                    table_name = table,
-                    column_name = column,
-                    data_type = "int",
-                    is_primary_key = isKey,
-                    is_nullable = false,
-                }
-            )
-                .Success.Should()
-                .BeTrue();
-        }
-
-        return file;
-    }
-
-    /// <summary>Customers → Orders の外部キーを 1 本足す（constraint_name は null なら渡さない）</summary>
-    private static (string Result, bool Success) AddCustomerReference(
-        string file,
-        string childColumn,
-        string? constraintName = null
-    ) =>
-        Exec(
-            "add_relationship",
-            file,
-            constraintName is null
-                ? (object)
-                    new
-                    {
-                        source_table = "Customers",
-                        source_columns = new[] { "CustomerId" },
-                        target_table = "Orders",
-                        target_columns = new[] { childColumn },
-                        relationship_type = "OneToMany",
-                    }
-                : new
-                {
-                    source_table = "Customers",
-                    source_columns = new[] { "CustomerId" },
-                    target_table = "Orders",
-                    target_columns = new[] { childColumn },
-                    relationship_type = "OneToMany",
-                    constraint_name = constraintName,
-                }
-        );
-
-    /// <summary>図ファイルのリレーションの制約名を宣言順で返す</summary>
-    private static List<string?> ConstraintNamesIn(string file) =>
-        JsonStorageService.Load(file).Schema.Relationships.Select(r => r.ConstraintName).ToList();
-
-    /// <summary>
-    /// 同じテーブルの組へ役割の違う外部キーを 2 本張ると別々の制約名になり、名前を指定して 1 本ずつ消せることを検証する
-    /// </summary>
-    [Fact(
-        DisplayName = "add_relationship は役割の違う 2 本目に衝突しない制約名を付け、名前で 1 本ずつ消せる"
-    )]
-    public void AddRelationship_SecondRoleForeignKey_GetsDistinctNameAndCanBeRemovedByName()
-    {
-        var file = CreateBillingAndShippingFile();
-
-        var billing = AddCustomerReference(file, "BillingCustomerId");
-        var shipping = AddCustomerReference(file, "ShippingCustomerId");
-
-        billing.Success.Should().BeTrue();
-        billing.Result.Should().Contain("FK_Orders_Customers");
-        shipping.Success.Should().BeTrue();
-        shipping.Result.Should().Contain("FK_Orders_Customers_ShippingCustomerId");
-        ConstraintNamesIn(file)
-            .Should()
-            .Equal("FK_Orders_Customers", "FK_Orders_Customers_ShippingCustomerId");
-
-        Exec(
-            "remove_relationship",
-            file,
-            new
-            {
-                source_table = "Customers",
-                target_table = "Orders",
-                constraint_name = "FK_Orders_Customers_ShippingCustomerId",
-            }
-        )
-            .Success.Should()
-            .BeTrue();
-        ConstraintNamesIn(file).Should().Equal("FK_Orders_Customers");
-
-        Exec(
-            "remove_relationship",
-            file,
-            new
-            {
-                source_table = "Customers",
-                target_table = "Orders",
-                constraint_name = "FK_Orders_Customers",
-            }
-        )
-            .Success.Should()
-            .BeTrue();
-        ConstraintNamesIn(file).Should().BeEmpty();
-    }
-
-    /// <summary>指定した constraint_name が前後の空白を除いて採用されることを検証する</summary>
-    [Fact(DisplayName = "add_relationship は指定した constraint_name を前後の空白を除いて使う")]
-    public void AddRelationship_ExplicitConstraintName_IsTrimmedAndUsed()
-    {
-        var file = CreateBillingAndShippingFile();
-
-        var (result, success) = AddCustomerReference(file, "BillingCustomerId", "  FK_Bill  ");
-
-        success.Should().BeTrue();
-        result.Should().Contain("FK_Bill");
-        ConstraintNamesIn(file).Should().Equal("FK_Bill");
-    }
-
-    /// <summary>空白だけの constraint_name は省略として扱われることを検証する</summary>
-    [Fact(DisplayName = "add_relationship は空白だけの constraint_name を省略として扱う")]
-    public void AddRelationship_BlankConstraintName_IsTreatedAsOmitted()
-    {
-        var file = CreateBillingAndShippingFile();
-
-        AddCustomerReference(file, "BillingCustomerId", "   ").Success.Should().BeTrue();
-
-        ConstraintNamesIn(file).Should().Equal("FK_Orders_Customers");
-    }
-
-    /// <summary>
-    /// 既存の外部キー・主キー・一意制約と（大文字小文字を無視して）同じ名前の指定は、図を変えずに拒否されることを検証する
-    /// </summary>
-    /// <param name="constraintName">指定する名前</param>
-    [Theory(DisplayName = "add_relationship は既存の制約名と衝突する constraint_name を拒否する")]
-    [InlineData("fk_orders_customers")]
-    [InlineData("PK_Customers")]
-    [InlineData("uq_orders_code")]
-    public void AddRelationship_ConflictingConstraintName_IsRejected(string constraintName)
-    {
-        var file = CreateBillingAndShippingFile();
-        AddCustomerReference(file, "BillingCustomerId").Success.Should().BeTrue();
-        Exec(
-            "set_unique_constraint",
-            file,
-            new { table_name = "Orders", columns = new[] { "code" } }
-        )
-            .Success.Should()
-            .BeTrue();
-
-        var (result, success) = AddCustomerReference(file, "ShippingCustomerId", constraintName);
-
-        success.Should().BeFalse();
-        result.Should().Contain(constraintName);
-        ConstraintNamesIn(file).Should().ContainSingle();
-    }
-
-    [Fact(DisplayName = "get_diagram_summary は主キー順が列宣言順と食い違うときだけ注記する")]
-    public void GetDiagramSummary_ShowsPrimaryKeyOrderOnlyWhenItDiffers()
-    {
-        var reordered = CreateCompositeKeyFile(
-            "pk-order-summary.json",
-            reversePrimaryKeyOrder: true
-        );
-        var natural = CreateCompositeKeyFile(
-            "pk-natural-summary.json",
-            reversePrimaryKeyOrder: false
-        );
-
-        Exec("get_diagram_summary", reordered, new { })
-            .Result.Should()
-            .Contain("Primary key order: RegionCode, TenantId");
-        Exec("get_diagram_summary", natural, new { })
-            .Result.Should()
-            .NotContain("Primary key order");
     }
 
     /// <summary>JsonStorageService をそのまま使い、任意バージョンの文書をファイルへ保存する</summary>

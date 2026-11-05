@@ -12,11 +12,12 @@ using QuickER.Tests.TestSupport;
 namespace QuickER.Tests.Mcp.Tools;
 
 /// <summary>
-/// MCP の ER 図操作ツールの応答（図の要約・名前付きクエリの一覧）と、変更系ツールが保存する図ファイルが、
+/// MCP の ER 図操作ツールの応答（図の要約）と、変更系ツールが保存する図ファイルが、
 /// 書式のカルチャ（<see cref="CultureScope.Cultures"/>）に依らずインバリアントで作ったものと一致することを確かめる
 /// </summary>
 /// <remarks>
 /// 応答は英語固定で外部のエージェントが読むので、数値・大文字小文字の書式が実行環境のカルチャで変わってはいけない。
+/// 名前付きクエリの一覧の応答は、整形の表（<see cref="QueryToolFormatterRows"/>）の行が同じことを確かめる。
 /// </remarks>
 public sealed class CultureInvariantToolOutputTests : IDisposable
 {
@@ -59,21 +60,6 @@ public sealed class CultureInvariantToolOutputTests : IDisposable
         }
 
         differences.Should().BeEmpty();
-    }
-
-    [Fact(DisplayName = "名前付きクエリの一覧の応答は、書式のカルチャに依らずインバリアントと同じ")]
-    public void QueryListing_IsCultureInvariant()
-    {
-        CultureScope
-            .FindDifferences(() =>
-            {
-                var outcome = QueryToolCore.ListQueries(QueryFixtureDefinition.Build());
-                outcome.Listing.Should().NotBeNull();
-
-                return QueryToolEnglishFormatter.FormatListing(outcome.Listing!);
-            })
-            .Should()
-            .BeEmpty();
     }
 
     [Fact(
