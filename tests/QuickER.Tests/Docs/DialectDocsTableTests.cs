@@ -16,6 +16,7 @@ using QuickER.Provider.PostgreSql;
 using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
 using QuickER.Tests.Resources;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Docs;
@@ -1204,37 +1205,18 @@ public sealed class DialectDocsTableTests
     {
         const string marker = "connection-settings";
         // 接続プロファイルの保存先は一時フォルダ（AppData を使わない）
-        var folder = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTests_" + Guid.NewGuid().ToString("N")
-        );
+        using var folder = new TestTempFolder();
 
-        Directory.CreateDirectory(folder);
-
-        try
+        foreach (var japanese in new[] { false, true })
         {
-            foreach (var japanese in new[] { false, true })
-            {
-                var file = japanese ? JapaneseFile(Tables[marker].File) : Tables[marker].File;
-                var table = ReadTable(file, marker);
+            var file = japanese ? JapaneseFile(Tables[marker].File) : Tables[marker].File;
+            var table = ReadTable(file, marker);
 
-                table.Rows.Should().HaveCount(Providers.Length, file);
+            table.Rows.Should().HaveCount(Providers.Length, file);
 
-                for (var r = 0; r < table.Rows.Count; r++)
-                {
-                    AssertConnectionRow(table.Rows[r], Providers[r], japanese, file, folder);
-                }
-            }
-        }
-        finally
-        {
-            try
+            for (var r = 0; r < table.Rows.Count; r++)
             {
-                Directory.Delete(folder, recursive: true);
-            }
-            catch (IOException)
-            {
-                // 後始末はベストエフォート
+                AssertConnectionRow(table.Rows[r], Providers[r], japanese, file, folder.Path);
             }
         }
     }

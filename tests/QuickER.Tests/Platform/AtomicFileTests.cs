@@ -1,6 +1,7 @@
 using System.IO;
 using AwesomeAssertions;
 using QuickER.Platform;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Platform;
 
@@ -13,37 +14,17 @@ namespace QuickER.Tests.Platform;
 /// </remarks>
 public class AtomicFileTests : IDisposable
 {
-    /// <summary>テスト用の一時保存先フォルダ</summary>
-    private readonly string _folder;
+    /// <summary>テスト用の一時保存先フォルダ（破棄で中身ごと消す）</summary>
+    private readonly TestTempFolder _temp = new();
 
-    /// <summary>一時保存先フォルダを作成する</summary>
-    public AtomicFileTests()
-    {
-        _folder = Path.Combine(Path.GetTempPath(), "QuickERTests_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_folder);
-    }
-
-    /// <summary>一時保存先フォルダを削除する</summary>
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_folder))
-            {
-                Directory.Delete(_folder, recursive: true);
-            }
-        }
-        catch
-        {
-            // テスト後の後始末はベストエフォートとする
-        }
-    }
+    /// <summary>一時保存先フォルダを消す</summary>
+    public void Dispose() => _temp.Dispose();
 
     /// <summary>保存先が存在しない場合に新規作成し、一時ファイルを残さないことを検証する</summary>
     [Fact(DisplayName = "WriteAllText: 保存先が無ければ新規作成し .tmp を残さない")]
     public void WriteAllText_NewFile_CreatesFileWithoutTemporaryLeftover()
     {
-        var path = Path.Combine(_folder, "new.json");
+        var path = Path.Combine(_temp.Path, "new.json");
 
         // 非 ASCII を含めて、既定の文字コード（BOM なし UTF-8）で往復できることも併せて確認する
         AtomicFile.WriteAllText(path, "{ \"名前\": \"顧客\" }");
@@ -57,7 +38,7 @@ public class AtomicFileTests : IDisposable
     [Fact(DisplayName = "WriteAllText: 既存ファイルを置換し .tmp を残さない")]
     public void WriteAllText_ExistingFile_ReplacesContentWithoutTemporaryLeftover()
     {
-        var path = Path.Combine(_folder, "existing.json");
+        var path = Path.Combine(_temp.Path, "existing.json");
         File.WriteAllText(path, "old");
 
         AtomicFile.WriteAllText(path, "new");
@@ -74,7 +55,7 @@ public class AtomicFileTests : IDisposable
     [Fact(DisplayName = "WriteAllText: 短い内容で上書きしても旧内容が残らない")]
     public void WriteAllText_ShorterContent_LeavesNoTrailingRemnant()
     {
-        var path = Path.Combine(_folder, "shrink.json");
+        var path = Path.Combine(_temp.Path, "shrink.json");
         File.WriteAllText(path, new string('x', 4096));
 
         AtomicFile.WriteAllText(path, "{}");
@@ -91,7 +72,7 @@ public class AtomicFileTests : IDisposable
     [Fact(DisplayName = "WriteAllText: 差し替え失敗時は元ファイル無傷・.tmp なし・例外を伝播")]
     public void WriteAllText_ReplaceFailure_KeepsOriginalAndRemovesTemporary()
     {
-        var path = Path.Combine(_folder, "locked.json");
+        var path = Path.Combine(_temp.Path, "locked.json");
         File.WriteAllText(path, "original");
 
         using (
@@ -116,7 +97,7 @@ public class AtomicFileTests : IDisposable
     [Fact(DisplayName = "WriteAllBytes: 既存ファイルを置換し .tmp を残さない")]
     public void WriteAllBytes_ExistingFile_ReplacesContentWithoutTemporaryLeftover()
     {
-        var path = Path.Combine(_folder, "secret.dat");
+        var path = Path.Combine(_temp.Path, "secret.dat");
         File.WriteAllBytes(path, [1, 2, 3, 4, 5]);
 
         AtomicFile.WriteAllBytes(path, [9, 8]);
@@ -129,7 +110,7 @@ public class AtomicFileTests : IDisposable
     [Fact(DisplayName = "Write: ストリームへ書いた内容で保存先を置換し .tmp を残さない")]
     public void Write_StreamContent_ReplacesFileWithoutTemporaryLeftover()
     {
-        var path = Path.Combine(_folder, "image.png");
+        var path = Path.Combine(_temp.Path, "image.png");
         File.WriteAllText(path, "old");
 
         AtomicFile.Write(path, stream => stream.Write([0x89, 0x50, 0x4E, 0x47]));
@@ -145,7 +126,7 @@ public class AtomicFileTests : IDisposable
     [Fact(DisplayName = "Write: 書き出し処理の途中の失敗で元ファイル無傷・.tmp なし・例外を伝播")]
     public void Write_WriterThrowsMidway_KeepsOriginalAndRemovesTemporary()
     {
-        var path = Path.Combine(_folder, "book.xlsx");
+        var path = Path.Combine(_temp.Path, "book.xlsx");
         File.WriteAllText(path, "original");
 
         var act = () =>
@@ -173,7 +154,7 @@ public class AtomicFileTests : IDisposable
     [Fact(DisplayName = "WriteAllText: 保存先がディレクトリなら .tmp を残さず例外を投げる")]
     public void WriteAllText_PathIsDirectory_RemovesTemporaryAndThrows()
     {
-        var path = Path.Combine(_folder, "as-directory");
+        var path = Path.Combine(_temp.Path, "as-directory");
         Directory.CreateDirectory(path);
 
         var act = () => AtomicFile.WriteAllText(path, "{}");
@@ -202,7 +183,7 @@ public class AtomicFileTests : IDisposable
     {
         const int writerCount = 2;
         const int iterationsPerWriter = 50;
-        var path = Path.Combine(_folder, "concurrent.json");
+        var path = Path.Combine(_temp.Path, "concurrent.json");
 
         var failureCount = 0;
         var tornSamples = new List<string>();
@@ -316,7 +297,7 @@ public class AtomicFileTests : IDisposable
     [Fact(DisplayName = "WriteAllText: 固定名 {path}.tmp を使わない")]
     public void WriteAllText_DoesNotUseFixedTemporaryName()
     {
-        var path = Path.Combine(_folder, "guid.json");
+        var path = Path.Combine(_temp.Path, "guid.json");
         var fixedTemporaryPath = path + ".tmp";
         File.WriteAllText(fixedTemporaryPath, "他プロセスが使用中の一時ファイル");
 
@@ -332,7 +313,7 @@ public class AtomicFileTests : IDisposable
     [Fact(DisplayName = "TryReadAllText: 読めたら Loaded と内容を返す")]
     public void TryReadAllText_ExistingFile_ReturnsLoaded()
     {
-        var path = Path.Combine(_folder, "readable.json");
+        var path = Path.Combine(_temp.Path, "readable.json");
         AtomicFile.WriteAllText(path, "{ \"名前\": \"顧客\" }");
 
         var status = AtomicFile.TryReadAllText(path, out var contents);
@@ -350,7 +331,7 @@ public class AtomicFileTests : IDisposable
     public void TryReadAllText_MissingFile_ReturnsMissing()
     {
         var status = AtomicFile.TryReadAllText(
-            Path.Combine(_folder, "absent.json"),
+            Path.Combine(_temp.Path, "absent.json"),
             out var contents
         );
 
@@ -366,7 +347,7 @@ public class AtomicFileTests : IDisposable
     [Fact(DisplayName = "TryReadAllText: 親フォルダが無くても Missing を返す")]
     public void TryReadAllText_MissingDirectory_ReturnsMissing()
     {
-        var path = Path.Combine(_folder, "not-created", "absent.json");
+        var path = Path.Combine(_temp.Path, "not-created", "absent.json");
 
         AtomicFile.TryReadAllText(path, out _).Should().Be(FileReadStatus.Missing);
     }
@@ -380,7 +361,7 @@ public class AtomicFileTests : IDisposable
     [Fact(DisplayName = "TryReadAllText: 排他で掴まれたファイルは Unavailable を返す")]
     public void TryReadAllText_LockedFile_ReturnsUnavailable()
     {
-        var path = Path.Combine(_folder, "locked-read.json");
+        var path = Path.Combine(_temp.Path, "locked-read.json");
         File.WriteAllText(path, "{ \"kept\": true }");
 
         using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
@@ -409,7 +390,7 @@ public class AtomicFileTests : IDisposable
     [Fact(DisplayName = "TryReadAllText: 読めないときは差し替えと同じだけ粘ってから諦める")]
     public void TryReadAllText_LockedFile_RetriesWithSameBackoffAsReplace()
     {
-        var path = Path.Combine(_folder, "retry-read.json");
+        var path = Path.Combine(_temp.Path, "retry-read.json");
         File.WriteAllText(path, "{}");
 
         using var locked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
@@ -427,7 +408,7 @@ public class AtomicFileTests : IDisposable
     [Fact(DisplayName = "TryReadAllText: 読み取り後もファイルを掴み続けない")]
     public void TryReadAllText_DoesNotKeepFileHandleOpen()
     {
-        var path = Path.Combine(_folder, "handle.json");
+        var path = Path.Combine(_temp.Path, "handle.json");
         AtomicFile.WriteAllText(path, "before");
 
         AtomicFile.TryReadAllText(path, out _).Should().Be(FileReadStatus.Loaded);
@@ -440,7 +421,7 @@ public class AtomicFileTests : IDisposable
     [Fact(DisplayName = "CreateText: 保存先が無ければ新規作成し .tmp を残さない")]
     public void CreateText_NewFile_CreatesFileWithoutTemporaryLeftover()
     {
-        var path = Path.Combine(_folder, "created.json");
+        var path = Path.Combine(_temp.Path, "created.json");
 
         AtomicFile.CreateText(path, "{ \"名前\": \"顧客\" }");
 
@@ -461,7 +442,7 @@ public class AtomicFileTests : IDisposable
     )]
     public void CreateText_ExistingFile_ThrowsAndKeepsContent()
     {
-        var path = Path.Combine(_folder, "existing.json");
+        var path = Path.Combine(_temp.Path, "existing.json");
         File.WriteAllText(path, "original");
 
         var act = () => AtomicFile.CreateText(path, "replacement");
@@ -479,7 +460,7 @@ public class AtomicFileTests : IDisposable
     /// </remarks>
     private string[] FindTemporaryLeftovers() =>
         Directory
-            .GetFiles(_folder, "*.tmp")
+            .GetFiles(_temp.Path, "*.tmp")
             .Where(f => !Path.GetFileName(f).Contains("~RF", StringComparison.OrdinalIgnoreCase))
             .ToArray();
 }

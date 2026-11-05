@@ -1,6 +1,7 @@
 using System.IO;
 using System.Linq;
 using AwesomeAssertions;
+using Microsoft.Data.Sqlite;
 using QuickER.Db.UI;
 using QuickER.Db.UI.Resources;
 using QuickER.Gui.Abstractions;
@@ -12,14 +13,15 @@ using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
 using QuickER.Tests.Resources;
 using QuickER.Tests.TestDoubles;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Db.UI;
 
 /// <summary><see cref="DbConnectionDialogViewModel"/> の初期表示・プロファイル選択・保存・削除・方言固定を検証するテストクラス</summary>
 public class DbConnectionDialogViewModelTests : IDisposable
 {
-    /// <summary>テスト用の一時保存先フォルダ</summary>
-    private readonly string _tempFolder;
+    /// <summary>テスト用の一時保存先フォルダ（破棄で中身ごと消す）</summary>
+    private readonly TestTempFolder _temp = new();
 
     /// <summary>SQL Server のみを登録したレジストリ</summary>
     private static readonly DatabaseProviderRegistry Registry = new(
@@ -43,34 +45,11 @@ public class DbConnectionDialogViewModelTests : IDisposable
         }
     );
 
-    /// <summary>一時保存先フォルダを作成する</summary>
-    public DbConnectionDialogViewModelTests()
-    {
-        _tempFolder = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTests_" + Guid.NewGuid().ToString("N")
-        );
-        Directory.CreateDirectory(_tempFolder);
-    }
-
-    /// <summary>一時保存先フォルダを削除する</summary>
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_tempFolder))
-            {
-                Directory.Delete(_tempFolder, recursive: true);
-            }
-        }
-        catch
-        {
-            // テスト後の後始末はベストエフォートとする
-        }
-    }
+    /// <summary>一時保存先フォルダを消す</summary>
+    public void Dispose() => _temp.Dispose();
 
     /// <summary>DPAPI を使わず一時フォルダへ保存するテスト用ストアを生成する</summary>
-    private SqlConnectionProfileStore CreateStore() => new(_tempFolder, useDpapi: false);
+    private SqlConnectionProfileStore CreateStore() => new(_temp.Path, useDpapi: false);
 
     /// <summary>取込モードの ViewModel を生成する</summary>
     private DbConnectionDialogViewModel CreateVm(
@@ -494,7 +473,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
     public void Sqlite_MissingFile_RejectsOk()
     {
         var vm = CreateSqliteVm(CreateStore());
-        vm.FilePath = Path.Combine(_tempFolder, "does-not-exist.db");
+        vm.FilePath = Path.Combine(_temp.Path, "does-not-exist.db");
 
         vm.OkCommand.Execute(null);
 
@@ -506,7 +485,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
     [Fact(DisplayName = "SQLite: 実在するファイルパスだと OK が確定し結果に保持される")]
     public void Sqlite_ExistingFile_ConfirmsOk_AndKeepsFilePath()
     {
-        var dbPath = Path.Combine(_tempFolder, "sample.db");
+        var dbPath = Path.Combine(_temp.Path, "sample.db");
         File.WriteAllText(dbPath, string.Empty);
 
         var vm = CreateSqliteVm(CreateStore());
@@ -523,7 +502,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
     [Fact(DisplayName = "SQLite: 参照コマンドで選択したパスが FilePath に反映される")]
     public void Sqlite_BrowseFile_SetsFilePath()
     {
-        var picked = Path.Combine(_tempFolder, "picked.sqlite");
+        var picked = Path.Combine(_temp.Path, "picked.sqlite");
         var files = new StubFileDialogService { OpenResult = new FileDialogResult(picked, 1) };
         var vm = CreateSqliteVm(CreateStore(), files);
 
@@ -536,7 +515,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
     [Fact(DisplayName = "SQLite: プロファイル保存→適用でファイルパスが往復する")]
     public void Sqlite_ProfileRoundTrip_PreservesFilePath()
     {
-        var dbPath = Path.Combine(_tempFolder, "roundtrip.db");
+        var dbPath = Path.Combine(_temp.Path, "roundtrip.db");
         var store = CreateStore();
         var vm = CreateSqliteVm(store);
         vm.FilePath = dbPath;
@@ -590,7 +569,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
             mode: DbConnectionDialogMode.Sync
         );
         // 「新規作成」ボタンを経由せず、存在しないパスを手入力した場合
-        vm.FilePath = Path.Combine(_tempFolder, "typo-does-not-exist.db");
+        vm.FilePath = Path.Combine(_temp.Path, "typo-does-not-exist.db");
 
         vm.OkCommand.Execute(null);
 
@@ -603,7 +582,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
     [Fact(DisplayName = "SQLite: 新規作成で選んだパスは OK 確定時に空 DB が作成される")]
     public void Sqlite_CreateNewFile_CreatesFileOnOk()
     {
-        var newPath = Path.Combine(_tempFolder, "brand-new.db");
+        var newPath = Path.Combine(_temp.Path, "brand-new.db");
         var files = new StubFileDialogService { SaveResult = new FileDialogResult(newPath, 1) };
         var vm = CreateSqliteVm(
             CreateStore(),
@@ -617,17 +596,38 @@ public class DbConnectionDialogViewModelTests : IDisposable
         File.Exists(newPath).Should().BeFalse("OK 確定前はまだ作成されない");
 
         vm.OkCommand.Execute(null);
+        ReleaseCreatedDatabase(newPath);
 
         vm.Result.Should().NotBeNull();
         vm.Result!.FilePath.Should().Be(newPath);
         File.Exists(newPath).Should().BeTrue("OK 確定時に空 DB が作成される");
     }
 
+    /// <summary>
+    /// 空 DB の作成が使った接続をプールから放す（放さないとファイルを掴んだままになり、一時フォルダを消せない）
+    /// </summary>
+    /// <remarks>
+    /// SQLite のプールは接続文字列ごとに分かれるので、製品の <c>SqliteDatabaseFile.CreateEmpty</c> と同じ組み方の接続文字列で放す
+    /// （組み方の写し。製品が組み方を変えると、テストは緑のまま一時フォルダだけが残る）。
+    /// <c>ClearAllPools</c> は並列のほかのテストの接続まで放すので使わない。
+    /// </remarks>
+    private static void ReleaseCreatedDatabase(string path)
+    {
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+        }.ConnectionString;
+
+        using var connection = new SqliteConnection(connectionString);
+        SqliteConnection.ClearPool(connection);
+    }
+
     /// <summary>新規作成で選択後に別パスへ手編集すると、存在チェックが復活してエラーになることを検証する</summary>
     [Fact(DisplayName = "SQLite: 新規作成で選択後に別パスへ手編集すると存在チェックが復活する")]
     public void Sqlite_CreateNewFile_ThenEditToDifferentPath_RejectsOk()
     {
-        var newPath = Path.Combine(_tempFolder, "chosen.db");
+        var newPath = Path.Combine(_temp.Path, "chosen.db");
         var files = new StubFileDialogService { SaveResult = new FileDialogResult(newPath, 1) };
         var vm = CreateSqliteVm(
             CreateStore(),
@@ -638,7 +638,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
 
         vm.BrowseNewFileCommand.Execute(null);
         // 新規作成で選んだ後、別の存在しないパスへ手編集する（新規作成の意図ではなくなる）
-        vm.FilePath = Path.Combine(_tempFolder, "edited-elsewhere.db");
+        vm.FilePath = Path.Combine(_temp.Path, "edited-elsewhere.db");
 
         vm.OkCommand.Execute(null);
 
@@ -651,7 +651,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
     public void Sqlite_CreateNewFile_CreationFails_ShowsErrorAndStaysOpen()
     {
         // 親ディレクトリが存在しないパスは ReadWriteCreate でも開けず、作成が失敗する
-        var invalidPath = Path.Combine(_tempFolder, "no-such-dir", "x.db");
+        var invalidPath = Path.Combine(_temp.Path, "no-such-dir", "x.db");
         var files = new StubFileDialogService { SaveResult = new FileDialogResult(invalidPath, 1) };
         var closed = new List<bool>();
         var vm = CreateSqliteVm(
@@ -1151,7 +1151,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
         {
             SelectedProvider = RegistryWithSqlite.Get(SqliteProvider.ProviderName),
         };
-        vm.FilePath = Path.Combine(_tempFolder, "local.db");
+        vm.FilePath = Path.Combine(_temp.Path, "local.db");
         vm.ProfileName = "共通名";
 
         vm.SaveProfileCommand.Execute(null);
@@ -1552,7 +1552,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
     // ---------------- 1-9 の対応（パスワードの読み取り失敗・書き込み失敗・保存名・ポート） ----------------
 
     /// <summary>DPAPI で暗号化するストアを一時フォルダへ作る（読めない暗号ファイルを作るため）</summary>
-    private SqlConnectionProfileStore CreateDpapiStore() => new(_tempFolder, useDpapi: true);
+    private SqlConnectionProfileStore CreateDpapiStore() => new(_temp.Path, useDpapi: true);
 
     /// <summary>プロファイルの暗号ファイルのパス</summary>
     private static string SecretFile(SqlConnectionProfileStore store, Guid id) =>

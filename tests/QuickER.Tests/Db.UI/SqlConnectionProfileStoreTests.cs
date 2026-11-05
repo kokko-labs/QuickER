@@ -4,6 +4,7 @@ using System.Text.Json;
 using AwesomeAssertions;
 using QuickER.Db.UI;
 using QuickER.Provider;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Db.UI;
 
@@ -11,37 +12,14 @@ namespace QuickER.Tests.Db.UI;
 /// <remarks>環境差異を避けるため <c>useDpapi:false</c> で平文保存して検証する</remarks>
 public class SqlConnectionProfileStoreTests : IDisposable
 {
-    /// <summary>テスト用の一時保存先フォルダ</summary>
-    private readonly string _tempFolder;
+    /// <summary>テスト用の一時保存先フォルダ（破棄で中身ごと消す）</summary>
+    private readonly TestTempFolder _temp = new();
 
-    /// <summary>一時保存先フォルダを作成する</summary>
-    public SqlConnectionProfileStoreTests()
-    {
-        _tempFolder = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTests_" + Guid.NewGuid().ToString("N")
-        );
-        Directory.CreateDirectory(_tempFolder);
-    }
-
-    /// <summary>一時保存先フォルダを削除する</summary>
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_tempFolder))
-            {
-                Directory.Delete(_tempFolder, recursive: true);
-            }
-        }
-        catch
-        {
-            // テスト後の後始末はベストエフォートとする
-        }
-    }
+    /// <summary>一時保存先フォルダを消す</summary>
+    public void Dispose() => _temp.Dispose();
 
     /// <summary>DPAPI を使わず一時フォルダへ保存するテスト用ストアを生成する</summary>
-    private SqlConnectionProfileStore CreateStore() => new(_tempFolder, useDpapi: false);
+    private SqlConnectionProfileStore CreateStore() => new(_temp.Path, useDpapi: false);
 
     /// <summary>暗号ファイルが実在するか（フラグとの整合を確かめるために直接見る）</summary>
     private bool SecretExists(SqlConnectionProfileStore store, Guid id) =>
@@ -454,7 +432,7 @@ public class SqlConnectionProfileStoreTests : IDisposable
             password: ""
         );
 
-        Directory.GetFiles(_tempFolder, "*.tmp").Should().BeEmpty();
+        Directory.GetFiles(_temp.Path, "*.tmp").Should().BeEmpty();
     }
 
     /// <summary>前回接続情報がデータベース名・認証情報・パスワードを含めて往復保存・復元されることを検証する</summary>
@@ -542,7 +520,7 @@ public class SqlConnectionProfileStoreTests : IDisposable
     public void SslMode_WrittenAsInteger_IsStillReadable()
     {
         var store = CreateStore();
-        Directory.CreateDirectory(_tempFolder);
+        Directory.CreateDirectory(_temp.Path);
         File.WriteAllText(
             store.ConnectionsPath,
             """
@@ -568,7 +546,7 @@ public class SqlConnectionProfileStoreTests : IDisposable
     public void LegacyJsonWithoutSslMode_LoadsAsUnspecified()
     {
         var store = CreateStore();
-        Directory.CreateDirectory(_tempFolder);
+        Directory.CreateDirectory(_temp.Path);
         File.WriteAllText(
             store.ConnectionsPath,
             """
@@ -742,7 +720,7 @@ public class SqlConnectionProfileStoreTests : IDisposable
     public void Save_CorruptConnectionsFile_BacksUpOnlyOnce()
     {
         var store = CreateStore();
-        Directory.CreateDirectory(_tempFolder);
+        Directory.CreateDirectory(_temp.Path);
         File.WriteAllText(store.ConnectionsPath, "壊れた 1 回目");
 
         store.Upsert(new SqlConnectionProfile { Name = "復旧", Server = "s" }, password: "");
@@ -792,7 +770,7 @@ public class SqlConnectionProfileStoreTests : IDisposable
     [Fact(DisplayName = "LoadPassword: 読めた・無い・読めないを区別して返す")]
     public void LoadPassword_DistinguishesLoadedMissingAndUnreadable()
     {
-        var store = new SqlConnectionProfileStore(_tempFolder, useDpapi: true);
+        var store = new SqlConnectionProfileStore(_temp.Path, useDpapi: true);
         var loaded = SeedWithPassword(store, "読める", "secret");
         var unreadable = SeedWithPassword(store, "読めない", "secret");
         File.WriteAllBytes(SecretFile(store, unreadable.Id), new byte[] { 1, 2, 3, 4 });
@@ -832,7 +810,7 @@ public class SqlConnectionProfileStoreTests : IDisposable
     [Fact(DisplayName = "Rename: 名前だけを変え、対象の暗号ファイルには触れない")]
     public void Rename_ChangesNameOnly_AndLeavesSecretUntouched()
     {
-        var store = new SqlConnectionProfileStore(_tempFolder, useDpapi: true);
+        var store = new SqlConnectionProfileStore(_temp.Path, useDpapi: true);
         var profile = SeedWithPassword(store, "本番DB", "secret");
         var garbage = new byte[] { 5, 6, 7, 8 };
         File.WriteAllBytes(SecretFile(store, profile.Id), garbage);

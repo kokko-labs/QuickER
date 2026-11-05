@@ -16,7 +16,7 @@ namespace QuickER.Tests.Gui.ViewModels;
 /// 固定するテストクラス。
 /// </summary>
 /// <remarks>既知の失敗は台帳（<see cref="Known"/>）に載せる。突き合わせの規則は <see cref="KnownCaseLedger"/>。</remarks>
-public class SettingsAndSelectionConsistencyTests
+public class SettingsAndSelectionConsistencyTests : IDisposable
 {
     /// <summary>既知の失敗（ケース ID → 期待する失敗の理由の断片）</summary>
     private static readonly KnownCaseLedger Known = new("SettingsAndSelectionConsistencyTests", []);
@@ -29,9 +29,14 @@ public class SettingsAndSelectionConsistencyTests
         public void Restart() => RestartCount++;
     }
 
+    /// <summary>設定の保存先の一時フォルダ（破棄で中身ごと消す）</summary>
+    private readonly TestTempFolder _temp = new();
+
+    /// <summary>一時フォルダを消す</summary>
+    public void Dispose() => _temp.Dispose();
+
     /// <summary>一時フォルダの設定ストアを作る</summary>
-    private static GuiAppSettingsStore NewStore() =>
-        new(Path.Combine(Path.GetTempPath(), "QuickERTest_" + Guid.NewGuid().ToString("N")));
+    private GuiAppSettingsStore NewStore() => new(_temp.Path);
 
     [Fact(DisplayName = "保存先を差し替えると、言語と更新確認の設定も差し替えた保存先を使う")]
     public void UsePersistenceForTests_RedirectsSettingsSubViewModels()
@@ -43,10 +48,7 @@ public class SettingsAndSelectionConsistencyTests
                 var store = NewStore();
                 var vm = new MainViewModel();
 
-                vm.UsePersistenceForTests(
-                    store,
-                    Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".json")
-                );
+                vm.UsePersistenceForTests(store, Path.Combine(_temp.Path, "autosave.json"));
 
                 vm.LanguageSwitch.StoreForTests.Should().BeSameAs(store, "差し替えた保存先を使う");
                 vm.UpdateSettings.StoreForTests.Should().BeSameAs(store, "差し替えた保存先を使う");

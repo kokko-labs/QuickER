@@ -6,6 +6,7 @@ using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Platform;
 using QuickER.Provider.SqlServer;
+using QuickER.Tests.TestSupport;
 using CodeGenStrings = QuickER.CodeGen.CSharp.Resources.Strings;
 
 namespace QuickER.Tests.Platform;
@@ -98,25 +99,11 @@ public sealed class PathSegmentEntranceFuzzTests : IDisposable
         new string('a', 250),
     ];
 
-    /// <summary>テスト用の一時フォルダ</summary>
-    private readonly string _folder = Path.Combine(
-        Path.GetTempPath(),
-        "QuickERTests_" + Guid.NewGuid().ToString("N")
-    );
+    /// <summary>テスト用の一時保存先フォルダ（破棄で中身ごと消す）</summary>
+    private readonly TestTempFolder _temp = new();
 
-    public PathSegmentEntranceFuzzTests() => Directory.CreateDirectory(_folder);
-
-    public void Dispose()
-    {
-        try
-        {
-            Directory.Delete(_folder, recursive: true);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // 後始末はベストエフォート
-        }
-    }
+    /// <summary>一時保存先フォルダを消す</summary>
+    public void Dispose() => _temp.Dispose();
 
     /// <summary>入口（名前・入力の組み立て・判定）。判定は「断ったときのメッセージ」を返し、受け付けたら null</summary>
     /// <param name="TrimsWholeValue">値全体の前後の空白を取り除いてから判定する入口（設定の値と提出のパス）</param>
@@ -281,7 +268,11 @@ public sealed class PathSegmentEntranceFuzzTests : IDisposable
             Applies: (v, _) => v != PathSegmentViolation.Separator,
             Build: form => "MockApp/" + form + "/OrderList.xaml",
             Reject: value =>
-                MockProjectEmitTools.ResolveEmitPath(_folder, MockProjectTargetProfile.Wpf, value)
+                MockProjectEmitTools.ResolveEmitPath(
+                    _temp.Path,
+                    MockProjectTargetProfile.Wpf,
+                    value
+                )
                     is { Ok: false } result
                     ? result.Error
                     : null,
@@ -478,7 +469,7 @@ public sealed class PathSegmentEntranceFuzzTests : IDisposable
     /// <summary>生成物 1 つを書き出し、断ったら例外のメッセージを返す</summary>
     private string? WriteGeneratedFile(string fileName)
     {
-        var output = Path.Combine(_folder, "out-" + Guid.NewGuid().ToString("N"));
+        var output = Path.Combine(_temp.Path, "out-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(output);
         var result = new CodeGenerationResult
         {
@@ -500,7 +491,7 @@ public sealed class PathSegmentEntranceFuzzTests : IDisposable
     /// <summary>画面を 1 つ保存し、断ったら例外のメッセージを返す</summary>
     private string? SaveScreen(string file)
     {
-        var folder = Path.Combine(_folder, "mock-" + Guid.NewGuid().ToString("N"));
+        var folder = Path.Combine(_temp.Path, "mock-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(folder);
         var store = MockFolderStore.CreateNew(folder, "title", "schema");
 

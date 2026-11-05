@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json.Nodes;
 using AwesomeAssertions;
 using QuickER.Settings;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Settings;
 
@@ -23,31 +24,11 @@ namespace QuickER.Tests.Settings;
 /// </remarks>
 public class JsonSettingsStoreTests : IDisposable
 {
-    /// <summary>テスト用の一時保存先フォルダ</summary>
-    private readonly string _folder;
+    /// <summary>テスト用の一時保存先フォルダ（破棄で中身ごと消す）</summary>
+    private readonly TestTempFolder _temp = new();
 
-    /// <summary>一時保存先フォルダを作成する</summary>
-    public JsonSettingsStoreTests()
-    {
-        _folder = Path.Combine(Path.GetTempPath(), "QuickERTests_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_folder);
-    }
-
-    /// <summary>一時保存先フォルダを削除する</summary>
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_folder))
-            {
-                Directory.Delete(_folder, recursive: true);
-            }
-        }
-        catch
-        {
-            // テスト後の後始末はベストエフォートとする
-        }
-    }
+    /// <summary>一時保存先フォルダを消す</summary>
+    public void Dispose() => _temp.Dispose();
 
     /// <summary>検証用の設定型（実在の設定型に依存せず「消えると困る値」を 1 つ持つ）</summary>
     public sealed class ProbeSettings
@@ -57,7 +38,8 @@ public class JsonSettingsStoreTests : IDisposable
     }
 
     /// <summary>一時フォルダへ保存するテスト用ストアを生成する</summary>
-    private JsonSettingsStore<ProbeSettings> CreateStore() => new("probe-settings.json", _folder);
+    private JsonSettingsStore<ProbeSettings> CreateStore() =>
+        new("probe-settings.json", _temp.Path);
 
     /// <summary>ファイルが無いだけなら既定値で読め、保存も普通にできることを検証する</summary>
     /// <remarks>初回起動の経路。ここが抑止側へ倒れると、設定を一度も保存できなくなる。</remarks>
@@ -223,11 +205,11 @@ public class JsonSettingsStoreTests : IDisposable
     public void ImportExport_IsUnaffectedBySuppression()
     {
         var store = CreateStore();
-        var exportPath = Path.Combine(_folder, "exported.json");
+        var exportPath = Path.Combine(_temp.Path, "exported.json");
 
         using (
             new FileStream(
-                Path.Combine(_folder, "probe-settings.json"),
+                Path.Combine(_temp.Path, "probe-settings.json"),
                 FileMode.Create,
                 FileAccess.Write,
                 FileShare.None
@@ -242,7 +224,7 @@ public class JsonSettingsStoreTests : IDisposable
         }
 
         store.TryLoadFrom(exportPath)!.Language.Should().Be("ja");
-        store.TryLoadFrom(Path.Combine(_folder, "absent.json")).Should().BeNull();
+        store.TryLoadFrom(Path.Combine(_temp.Path, "absent.json")).Should().BeNull();
     }
 
     /// <summary>入れ子と辞書を持つ検証用の設定型（未知のキーの引き継ぎ範囲を確かめるためのもの）</summary>
@@ -267,15 +249,17 @@ public class JsonSettingsStoreTests : IDisposable
 
     /// <summary>入れ子と辞書を持つテスト用ストアを生成する</summary>
     private JsonSettingsStore<NestedProbeSettings> CreateNestedStore() =>
-        new("probe-settings.json", _folder);
+        new("probe-settings.json", _temp.Path);
 
     /// <summary>設定ファイルを直接書き、読み書きの対象となる JSON を用意する</summary>
     private void WriteRawSettings(string json) =>
-        File.WriteAllText(Path.Combine(_folder, "probe-settings.json"), json);
+        File.WriteAllText(Path.Combine(_temp.Path, "probe-settings.json"), json);
 
     /// <summary>保存後の設定ファイルを JSON オブジェクトとして読み出す</summary>
     private JsonObject ReadWrittenSettings() =>
-        JsonNode.Parse(File.ReadAllText(Path.Combine(_folder, "probe-settings.json")))!.AsObject();
+        JsonNode
+            .Parse(File.ReadAllText(Path.Combine(_temp.Path, "probe-settings.json")))!
+            .AsObject();
 
     /// <summary>型が知らないトップレベルのキーが、保存後もファイルに残ることを検証する</summary>
     /// <remarks>
@@ -464,7 +448,7 @@ public class JsonSettingsStoreTests : IDisposable
     )]
     public void Load_ExplicitNullForNonNullableProperty_KeepsDefault()
     {
-        var store = new JsonSettingsStore<NullProbeSettings>("probe-settings.json", _folder);
+        var store = new JsonSettingsStore<NullProbeSettings>("probe-settings.json", _temp.Path);
         WriteRawSettings("""{"language":null,"note":null,"dialects":null,"view":null}""");
 
         foreach (var loaded in new[] { store.Load(), store.TryLoadFrom(store.SettingsPath)! })
@@ -486,7 +470,7 @@ public class JsonSettingsStoreTests : IDisposable
     [Fact(DisplayName = "Load: リストの要素の null はそのまま読む")]
     public void Load_NullListElement_IsKeptAsIs()
     {
-        var store = new JsonSettingsStore<NullProbeSettings>("probe-settings.json", _folder);
+        var store = new JsonSettingsStore<NullProbeSettings>("probe-settings.json", _temp.Path);
         WriteRawSettings("""{"dialects":[null,"sqlite"]}""");
 
         store.Load().Dialects.Should().Equal(null, "sqlite");

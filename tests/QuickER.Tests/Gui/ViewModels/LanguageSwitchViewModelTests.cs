@@ -5,6 +5,7 @@ using QuickER.Gui.Abstractions;
 using QuickER.Resources;
 using QuickER.Services;
 using QuickER.Tests.TestDoubles;
+using QuickER.Tests.TestSupport;
 using QuickER.ViewModels;
 using Xunit;
 
@@ -26,8 +27,15 @@ public sealed class LanguageSwitchViewModelTests : IDisposable
         .CultureInfo
         .CurrentUICulture;
 
-    /// <summary>テストで変えた UI カルチャを元へ戻す</summary>
-    public void Dispose() => System.Globalization.CultureInfo.CurrentUICulture = _originalUiCulture;
+    /// <summary>設定の保存先の一時フォルダ（破棄で中身ごと消す）</summary>
+    private readonly TestTempFolder _temp = new();
+
+    /// <summary>テストで変えた UI カルチャを元へ戻し、一時フォルダを消す</summary>
+    public void Dispose()
+    {
+        System.Globalization.CultureInfo.CurrentUICulture = _originalUiCulture;
+        _temp.Dispose();
+    }
 
     /// <summary>再起動サービスのスタブ（実際には再起動せず、呼び出し回数だけ記録する）</summary>
     private sealed class FakeRestartService : IApplicationRestartService
@@ -38,18 +46,14 @@ public sealed class LanguageSwitchViewModelTests : IDisposable
     }
 
     /// <summary>一時フォルダのストアと各スタブを注入した VM を生成する（初期言語を保存済みにする）</summary>
-    private static (
+    private (
         LanguageSwitchViewModel Vm,
         StubDialogService Dialogs,
         FakeRestartService Restart,
         GuiAppSettingsStore Store
     ) CreateVm(string initialLanguage)
     {
-        var folder = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTest_" + Guid.NewGuid().ToString("N")
-        );
-        var store = new GuiAppSettingsStore(folder);
+        var store = new GuiAppSettingsStore(_temp.Path);
         store.Save(new GuiAppSettings { Language = initialLanguage });
         System.Globalization.CultureInfo.CurrentUICulture = new System.Globalization.CultureInfo(
             initialLanguage == "ja" ? "ja-JP" : "en-US"
