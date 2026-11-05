@@ -13,14 +13,14 @@ namespace QuickER.Tests.TestSupport;
 public sealed class EngineSummaryEnvironmentTests
 {
     /// <summary>エンジンの名前</summary>
-    public static TheoryData<string> Engines() => new("Dsl", "Name");
+    public static TheoryData<string> Engines() => new("Dsl", "Name", "DocumentFile");
 
     [Theory(DisplayName = "[指紋] 要約は外側のカルチャ（ja-JP・en-US）に依らない")]
     [MemberData(nameof(Engines))]
     public void Summary_DoesNotDependOnCulture(string engineId) =>
         SummaryEnvironmentGuard.AssertCultureIndependent(
             engineId,
-            SummaryEnvironmentGuard.FirstSeeds(NameFuzz.SeedSettings),
+            SummaryEnvironmentGuard.FirstSeeds(SeedsOf(engineId)),
             SummaryOf(engineId)
         );
 
@@ -32,7 +32,7 @@ public sealed class EngineSummaryEnvironmentTests
     public void Summary_HasNoUtcOffset(string engineId) =>
         SummaryEnvironmentGuard.AssertNoUtcOffset(
             engineId,
-            SummaryEnvironmentGuard.FirstSeeds(NameFuzz.SeedSettings),
+            SummaryEnvironmentGuard.FirstSeeds(SeedsOf(engineId)),
             SummaryOf(engineId)
         );
 
@@ -41,6 +41,13 @@ public sealed class EngineSummaryEnvironmentTests
         {
             "Dsl" => EngineFingerprintDriftTests.DslSummary,
             "Name" => EngineFingerprintDriftTests.NameSummary,
+            "DocumentFile" => Gui.ViewModels.DocumentFileGenerator.Summary,
             _ => throw new ArgumentOutOfRangeException(nameof(engineId), engineId, null),
         };
+
+    /// <summary>エンジンの種の決め方（簡易 DSL と名前は同じ決め方を共有する）</summary>
+    private static SeedSettings SeedsOf(string engineId) =>
+        engineId == "DocumentFile"
+            ? Gui.ViewModels.DocumentFileGenerator.Seeds
+            : NameFuzz.SeedSettings;
 }

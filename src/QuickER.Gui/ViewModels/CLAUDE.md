@@ -14,8 +14,12 @@ MainViewModel と図の ViewModel の規則：文書の保存・外部変更検�
   - 監視を張れないときはパスを保持して最長 30 秒間隔で張り直しを試み続け、中断と再開を 1 回ずつ通知する。
 - **クリーンなら無確認で自動再読込**（ビューポート維持＝fit-to-window 抑制・履歴クリア・ステータスバーの一時通知）。**ダーティなら確認ダイアログ**。
   - 「続行」選択後は同一ハッシュの再確認を抑止する。抑止は保存・開く・再読込の共通出口 `UpdateDocumentIdentity` で解く。残すと、同じ内容が後から書き戻されたとき確認も上書き前の照合も素通りする。
-  - ガード：`MainViewModelSaveOverwriteGuardTests` の「続行で無視した版も、保存した後に書き戻されたら…」2 件。
+  - ガード：`DocumentFileTests`（行 `guard-ignored-forgotten-after-save-external` / `guard-ignored-forgotten-after-save-overwrite`）。
 - 破損/新フォーマット文書は取り込まず現状維持＋通知する。起動時の復元後も同じ規則で外部変更をチェックする。
+- 文書の保存・読込・外部変更・自動保存は、状態機械のエンジン `DocumentFileTests` がまとめて確かめる。
+  - 手の列を VM と参照モデル `DocumentFileModel` で流して毎手で突き合わせ、モデルと独立の不変条件 5 つ（`DocumentFileInvariants`：見ていない版・将来版を黙って書き潰さない／最終既知ハッシュは読み書きした内容／クリーンは自動再読込・ダーティは確認／メタが食い違えば前のパスで復元しない／読込の検査は拒否だけ）を当てる。
+  - 決まった形のシナリオ（`DocumentFileScenarios`＝元の単発のテストの入力と期待）と、種を使う乱数の手の列（`DocumentFileGenerator`・普段 150 種・夜間 1500 種・`QUICKER_DOCFILE_SEEDS` / `QUICKER_DOCFILE_SEED`）。最終既知ハッシュと無視したハッシュは反射で読む（`DocumentFileProbe`。読み方は `DocumentFileTests.Probe_ReadsTheRecordedHashes` が固定）。
+  - 監視器そのもの（実 FileSystemWatcher・デバウンス・張り直し）は時計の差し込み点が無いのでモデルの外に置き、`DocumentFileWatcherTests` と `MainViewModelLoadHashRaceTests` が受け持つ。
 
 ### 外部変更の処理とドラッグの打ち切り
 - `HandleExternalModificationCore` は冒頭で `CancelActiveCanvasInteractions`（`DragBehavior.CancelActiveDrag`＋`RubberBandBehavior.CancelActiveSelection`）を呼ぶ。クリーン／ダーティ分岐より前に、座標・幅をドラッグ開始時点へ戻してから静的状態を落としてキャプチャを解放する。
@@ -25,7 +29,7 @@ MainViewModel と図の ViewModel の規則：文書の保存・外部変更検�
 - 打ち切りより前に捨てるものが 2 つある。捨てるだけのイベントで利用者のドラッグを壊さないため。再読込・確認へ分岐する前に打ち切る順序は変わらない。
   - 内容ハッシュが最終既知ハッシュと一致する変更（既に反映済み）。
   - 処理中の再入（確認ダイアログの入れ子のメッセージループの最中に届いた変更）。保留を立てて戻り、処理の後に `CheckExternalChangeAgainstDisk` で最新のディスクと 1 回だけ照らし合わせる。畳まないと確認ダイアログが 2 枚重なる。
-- ガード：`MainViewModelDragCancelTests`・`DragBehaviorCancelTests`・`MainViewModelExternalChangeTests`（再入 2 件・「反映済み: 最終既知ハッシュと同じ内容の変更は確認も再読込もしない」）。mutation 実証済み。
+- ガード：`DocumentFileTests`（行 `drag-*`・再入の行 `ext-reentry-deferred-after-continue` / `ext-reentry-absorbed-by-reload`・反映済みの行 `ext-already-reflected-ignored`）・`DragBehaviorCancelTests`。mutation 実証済み。
 
 ## 最終既知ハッシュ
 `SaveToPath`・`Open`・`ReloadFromDisk` の直後の最終既知ハッシュは「書き出した内容／読み込んだ内容そのもの」から採る。ディスクの読み直しで採ってはいけない。
@@ -34,7 +38,7 @@ MainViewModel と図の ViewModel の規則：文書の保存・外部変更検�
 - 保存：`JsonStorageService.SaveAtomic` が書いた JSON 文字列を返し、`DocumentContentHash.ComputeForText`（符号化は `AtomicFile` の既定＝BOM なし UTF-8 と一致必須）でハッシュ化する。`Resume()` 直後に `CheckExternalChangeAgainstDisk` で 1 回再照合する。
 - 読込：`TryLoad` の 5 引数版が返す**読み取ったバイト列**を `ComputeForBytes` でハッシュ化する。復号済みの文字列から採らない（復号は BOM を剥がすので `TryCompute` と一致せず、開くたびに再読込が暴発する）。
 - 再照合は `Open` だけが記録直後に行う（監視の開始が読み取りより後なので、隙間の書き込みはイベントすら起きない）。`ReloadFromDisk` は再照合しない。監視が最初から動いていて、正しいハッシュを記録すれば隙間の書き込みのイベントが捨てられずに届く。同期で再照合すると、外部が書き続ける間「再読込→再照合→再読込…」が再帰で積み上がる。
-- ガード：`MainViewModelSaveHashRaceTests`・`MainViewModelLoadHashRaceTests`（開くの割り込み・BOM 付きファイル・再読込の割り込みが次の保存で確認になる・実監視経由の追従）。mutation 実証済み。
+- ガード：`DocumentFileTests`（行 `race-*`＝保存と開くの割り込み・BOM 付きファイル・再読込の割り込みが次の保存で確認になる。不変条件 (2) が毎手で最終既知ハッシュを照らし合わせる）・`MainViewModelLoadHashRaceTests`（実監視経由の追従）・`DocumentContentHashTests`（書いた文字列・読んだバイト列のハッシュがファイルのハッシュと一致）。mutation 実証済み。
 
 ## 上書き保存の確認
 - `SaveToPath` 冒頭の `ConfirmOverwriteBeforeSave` が唯一の入口で、`_fileWatcher.Suspend()` より前・書き込みより前に置く。保存後の再照合は自分が書いた内容と一致するので、外部内容を上書きしたことは原理的に検知できない。
@@ -49,7 +53,7 @@ MainViewModel と図の ViewModel の規則：文書の保存・外部変更検�
 - クリーン時の自動再読込は失敗し得る（破損 JSON・将来版・型不一致：一時通知だけを残し、文書はクリーン・`_lastKnownFileHash` は旧値のまま）。この照合が無いと次の Ctrl+S が外部の内容を黙って消す。
 - 確認は多くとも 1 回。両方立つときは失うものが大きい将来版の文言だけを出す（2 つ続けると両方「はい」で流される）。
 - キャンセルは保存しない（ダーティ維持・`UpdateDocumentIdentity` を呼ばない・通知も出さない）。照合から書き込みまでの TOCTOU 窓は保存後の再照合が拾うので許容する。
-- ガード：`MainViewModelSaveOverwriteGuardTests`（大小違いの同一パスを含む）・`MainViewModelNewerFormatSaveTests`（置換後・新規作成後・一度上書きした後の再保存を含む）。mutation 実証済み。
+- ガード：`DocumentFileTests`（行 `guard-*`＝大小違いの同一パスを含む・行 `newer-*`＝置換後・新規作成後・一度上書きした後の再保存を含む。乱数の手の列と不変条件 (1)）。mutation 実証済み。
 
 ## 自動保存の文書メタ
 - 自動保存の文書メタは、一緒に書いた図の内容のハッシュを持ち、起動時に照らし合わせる。
@@ -57,7 +61,7 @@ MainViewModel と図の ViewModel の規則：文書の保存・外部変更検�
   - `CurrentDocumentSettings.AutoSaveHash`（`SaveAtomic` が返した JSON の `DocumentContentHash.ComputeForText`）を `RestoreLastDiagram` が `TryLoad` の読んだバイト列のハッシュと照合する。食い違えば図は残してパスを捨て、無題・未保存として開いてステータスバーで知らせる（上書き保存は名前を付けて保存になる）。
 - ハッシュを持たない旧版のメタは信じる（疑うと、更新した最初の起動で全員の図がファイルから外れる）。
 - 1 つのファイルにまとめる案は採らない。last_diagram.json が利用者のファイル形式と同じ型で、包むと形式検証の経路と旧形式の読み込みが要る。
-- ガード：`MainViewModelAutoSaveMetaTests`（食い違い・両方書けた・旧メタ）。mutation 実証済み。
+- ガード：`DocumentFileTests`（行 `meta-*`＝食い違い・両方書けた・旧メタ。乱数の手の列と不変条件 (4)）。mutation 実証済み。
 
 ## 確認の間に変わった図
 - 確認ダイアログの前に図から作った結果は、確認の後で図の世代を比べ、変わっていれば当てずに取りやめる。

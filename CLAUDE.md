@@ -140,7 +140,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 
 - **意味と視覚の分離**：`Entity`（Model）は座標・色を持たない。視覚状態は `EntityViewModel` と `EntityLayout`（Document）が持ち、エクスポータ・生成器は意味モデル `ErDiagram` だけを消費する
 - **一意制約の正本は `Entity.UniqueConstraints`。未設定名は `SynthesizeName` で合成し、ぶつかる名前には番号を足す**：ぶつかると SQL Server・PostgreSQL・Oracle・MySQL で DDL・同期が名前の重複で失敗する。ガード：`ConstraintNamesTests`・`ConstraintNamesGuardTests`・`UniqueConstraintResolvedNameLimitTests`。→ `src/QuickER.Model/CLAUDE.md`「一意制約」
-- **主キーの実効順は `Entity.GetPrimaryKeyColumnsInOrder()` だけが決める**：素の `Columns.Where(IsPrimaryKey)` はビルドもテストも緑のまま、取込図でだけ列順へ退行する。ガード：`EntityPrimaryKeyOrderTests`・`PrimaryKeyOrderPersistenceTests`・`UndoOperationTests`（行 `primary-key-*`）。→ `src/QuickER.Model/CLAUDE.md`「主キーの実効順」
+- **主キーの実効順は `Entity.GetPrimaryKeyColumnsInOrder()` だけが決める**：素の `Columns.Where(IsPrimaryKey)` はビルドもテストも緑のまま、取込図でだけ列順へ退行する。ガード：`EntityPrimaryKeyOrderTests`・`DocumentFormatTests`（行 `*-primary-key-*`）・`UndoOperationTests`（行 `primary-key-*`）。→ `src/QuickER.Model/CLAUDE.md`「主キーの実効順」
 - **主キーの順序を生成物・DBML へ載せるか告知するかの判定は `GetReorderedPrimaryKeyColumnNames()` だけ**：独自に変えると順序を明示していない図まで出力が変わる。ガード：`CSharpReversePrimaryKeyOrderTests`・`DbmlPrimaryKeyOrderTests`・`MermaidPrimaryKeyOrderTests`。→ `src/QuickER.Model/CLAUDE.md`「主キーの順序の出力判定」
 - **リレーションの列対応の正本は `Relationship.ColumnPairs`（推測フォールバックなし）**：列ペア 0 件や解決不能な列の FK は DDL・差分の対象外として明示スキップする。ガード：`ForeignKeyColumnResolverTests`・`CSharpReverseUnnamedForeignKeyTests`・`DbmlConstraintNameTests`。→ `src/QuickER.Model/CLAUDE.md`「リレーションの列ペア」
 
@@ -150,7 +150,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 
 ### 図ファイル
 - **Version 1 のまま足すフィールドは、読み手が欠落を無害に扱える形に限り、無害でなければ Version を上げる**：古い版で保存すると新しいフィールドが消える。ガードなし（設計判断）。→ `src/QuickER.Document/CLAUDE.md`「図ファイル形式の前方互換」
-- **Id 重複と必須の文字列の欠落の検査は `JsonStorageService.TryLoad` の 1 箇所で拒否だけを行い、修復しない**：呼び出し側に散らすと起動時の復元が検証の外に残り、最悪経路でクラッシュする。ガード：`JsonStorageServiceIdIntegrityTests`・`JsonStorageServiceRequiredTextTests`。→ `src/QuickER.Document/CLAUDE.md`「図ファイルの読込検査」
+- **Id 重複と必須の文字列の欠落の検査は `JsonStorageService.TryLoad` の 1 箇所で拒否だけを行い、修復しない**：呼び出し側に散らすと起動時の復元が検証の外に残り、最悪経路でクラッシュする。ガード：`DocumentFormatTests`（行 `tryload-duplicate-*`・`tryload-null-*`）・`DocumentFileTests`（乱数の手の列・不変条件 (5)）。→ `src/QuickER.Document/CLAUDE.md`「図ファイルの読込検査」
 
 ### 取込
 
@@ -360,10 +360,10 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 
 ### GUI（ViewModel）
 
-- **保存・読込直後の最終既知ハッシュは書き出した／読み取った内容そのものから採る（ディスクを読み直さない）**：隙間に書いた外部内容を自分の内容と誤認し、次の Ctrl+S が照合を素通りする。ガード：`MainViewModelSaveHashRaceTests`・`MainViewModelLoadHashRaceTests`。→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「最終既知ハッシュ」
-- **上書き保存は書き込み前にディスクの現状を見て確認する（将来版は常に、外部変更は開いているファイルのみ、判定材料は VM に持たない）**：外部の内容や将来版のデータを黙って消す。ガード：`MainViewModelSaveOverwriteGuardTests`・`MainViewModelNewerFormatSaveTests`。→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「上書き保存の確認」
-- **自動保存の文書メタは図の内容のハッシュを持ち、起動時に照合する**：落ちた後に別の図が前のファイルのパスつきで復元され、確認なしに上書きする。ガード：`MainViewModelAutoSaveMetaTests`。→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「自動保存の文書メタ」
-- **文書の外部変更検知（クリーンは自動再読込・ダーティは確認）と、処理前のドラッグの打ち切り（開始時点へ復元）**：コミットすると自動再読込が確認ダイアログへ化け、素のリセットは履歴に無い変更を残す。ガード：`MainViewModelDragCancelTests`・`MainViewModelExternalChangeTests`。→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「文書と外部変更検知」「外部変更の処理とドラッグの打ち切り」
+- **保存・読込直後の最終既知ハッシュは書き出した／読み取った内容そのものから採る（ディスクを読み直さない）**：隙間に書いた外部内容を自分の内容と誤認し、次の Ctrl+S が照合を素通りする。ガード：`DocumentFileTests`（行 `race-*` と乱数の手の列・不変条件 (2)）・`MainViewModelLoadHashRaceTests`（実監視の追従）。→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「最終既知ハッシュ」
+- **上書き保存は書き込み前にディスクの現状を見て確認する（将来版は常に、外部変更は開いているファイルのみ、判定材料は VM に持たない）**：外部の内容や将来版のデータを黙って消す。ガード：`DocumentFileTests`（行 `guard-*`・`newer-*` と乱数の手の列・不変条件 (1)）。→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「上書き保存の確認」
+- **自動保存の文書メタは図の内容のハッシュを持ち、起動時に照合する**：落ちた後に別の図が前のファイルのパスつきで復元され、確認なしに上書きする。ガード：`DocumentFileTests`（行 `meta-*` と乱数の手の列・不変条件 (4)）。→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「自動保存の文書メタ」
+- **文書の外部変更検知（クリーンは自動再読込・ダーティは確認）と、処理前のドラッグの打ち切り（開始時点へ復元）**：コミットすると自動再読込が確認ダイアログへ化け、素のリセットは履歴に無い変更を残す。ガード：`DocumentFileTests`（行 `ext-*`・`drag-*` と乱数の手の列・不変条件 (3)）。→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「文書と外部変更検知」「外部変更の処理とドラッグの打ち切り」
 - **確認ダイアログの前に図から作った結果は、確認の後で `DiagramRevision` を比べ、変わっていれば当てずに取りやめる**：自動再読込やチャットの編集を古い結果で上書きして捨てる。ガード：`MainViewModelTargetDbmsTests`・`DiagramImportServiceTests`・`MainViewModelErDiagramHostTests`。→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「確認の間に変わった図」
 - **図の一括置換は `ClearDiagramCollections` を通して解除は Clear の後、`RunBulkDiagramUpdate` で再取得を最外側の終了時 1 回にする**：追跡が漏れて幽霊コマンドが積まれ、所要時間が要素数の積で伸びる。ガード：`DiagramChangeTrackerDetachTests`・`MainViewModelBulkDiagramUpdateTests`・`LayoutRefreshCountTests`。→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「図の一括置換」
 - **選択・検索結果・作成中リレーションの始点は図から外れた時点で解く**：追跡の外れた要素を編集して履歴に残らず、古い検索結果から削除すると同じ Id の別の表のクエリまで消える。ガード：`SelectionInvariantTests`・`PendingEditOnDetachTests`。→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「選択・検索結果・作成中リレーションの解除」
@@ -439,7 +439,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **原子的な書き込みの一時ファイルの名前は `AtomicFile.TemporaryPathFor` だけが組み立てる**：元の名前をそのまま付けると長い名前の保存が必ず失敗する。ガード：`AtomicFileNamingAndMetadataTests`・`UnboundedBinaryReadToFileTests`。→ `src/QuickER.Platform/CLAUDE.md`「一時ファイルの名前」
 
 ### 設定
-- **設定ファイルの保存は型が知らないキーを引き継ぎ、読み直しが `Unavailable` のときは書かない**：古い版で 1 度保存しただけで新しい版のキーが消える。ガード：`JsonSettingsStoreTests`。→ `src/QuickER.Settings/CLAUDE.md`「知らないキーの引き継ぎ」
+- **設定ファイルの保存は型が知らないキーを引き継ぎ、読み直しが `Unavailable` のときは書かない**：古い版で 1 度保存しただけで新しい版のキーが消える。ガード：`SettingsStoreTests`（行 `save-unknown-*`・`save-when-reread-is-unavailable-writes-nothing`）。→ `src/QuickER.Settings/CLAUDE.md`「知らないキーの引き継ぎ」
 - **利用者の 1 操作を保存する呼び出し側は、保存の失敗（例外と `false`）を両方扱う**：握り潰すと保存できていないのに成功に見える。ガード：`ChatConnectionSettingsSaveFailureTests`。→ `src/QuickER.Settings/CLAUDE.md`「保存の失敗の扱い」
 
 ### テストの土台

@@ -13,9 +13,10 @@
 - キー名の比較は読み込み側と同じく大文字小文字を区別しない。読み込みは `PropertyNameCaseInsensitive`（CLI の quicker.json と同じ規則で、PascalCase のファイルを GUI の「設定読込」で読める）。引き継ぎの照合も `OrdinalIgnoreCase` にそろえ、入れ子へ入るときは書き出す側の子を型の綴りで引く。片方だけ区別すると、既知として読んだ `"RootNamespace"` を未知として持ち越し、次の読み込みで古い値が保存した値を上書きする。
 - null を許さない参照型のプロパティへの明示 `null` はキーの欠落と同じに読む：resolver modifier `TreatNullAsMissing`（NRT 注釈の `JsonPropertyInfo.IsSetNullable` で判定。コンストラクタの既定値のまま）。代入すると読み手が NullReferenceException で落ち、コード生成ダイアログが開けなくなる。コレクションの要素の null は対象外。
 - 読み直しが `Unavailable` のときは何も書かない。読めないまま上書きすると、そこにあった未知のキーを黙って捨てる。`Missing` と壊れた JSON はマージせずに書く（`.corrupt` への退避は従来どおり）。
+  - 直前の `Load` が `Unavailable` だったときも、ファイルが読めるようになっていても `Load` し直すまで書かない（`Save` の冒頭の `LastLoadUnavailable`）。読めなかった `Load` は既定値を返すので、そのまま書くと既定値で塗り潰す。読み直しの判定と二重の守りで、片方を外してもロックが続く手順では赤にならないので、ロックを外してから保存する行で固定する。ガード：`SettingsStoreTests`（行 `save-after-unavailable-load-stays-suppressed-after-unlock`）。
 - `SaveTo`（エクスポート）はマージしない。
 - 割り切り：配列の要素の中の未知キーは運べない（要素の増減・並べ替えで突き合わせが決まらない）。`connections.json`（`SqlConnectionProfileStore`）はこのストアを通らないため対象外。
-- ガード：`JsonSettingsStoreTests`（`Save_AfterFailedBackup_DoesNotBackUpHealthyFile` を含む）・`CSharpGenerationDialogViewModelTests`（設定読込は CLI の quicker.json〔PascalCase〕を読む・設定の参照型のキーがすべて明示 null でも開けて確定できる）。mutation 実証済み。
+- ガード：`SettingsStoreTests`（設定 JSON ストアの操作列の表。行 `save-after-failed-backup-does-not-back-up-healthy-file` を含む）・`CSharpGenerationDialogViewModelTests`（設定読込は CLI の quicker.json〔PascalCase〕を読む・設定の参照型のキーがすべて明示 null でも開けて確定できる）。mutation 実証済み。
 
 ## 保存の失敗の扱い
 
@@ -25,4 +26,4 @@
 - 呼び出し側：`GuiAppSettingsStore.TryUpdate`（設定メニューの更新確認・言語切替）・コード生成ダイアログの OK。`false` と書き込みの例外の両方を失敗として知らせる。
 - AI の接続設定（`ChatConnectionSettingsViewModel`）：モデルの履歴の × は保存できたときだけ候補から消す。読み込みが `Unavailable` なら候補を作り直さない（既定値から作り直すと履歴が消えて見える）。失敗はコマンドの外へ例外を出さずに `ModelHistoryRemoveFailed` で親へ知らせる（UI の例外の受け皿がアプリを終了させるため）。成功したターンの記録と接続設定の保存は、`false` も例外にして親の既存の通知へ渡す。
 - 書けたら壊れていた印（`LastLoadCorrupt`）を戻す。残すと、退避に失敗した後の次の保存が正常なファイルを退避先へ写す。接続プロファイルは書く前の読み直しで印を作り直すので要らない。
-- ガード：`ChatConnectionSettingsSaveFailureTests`（書けない・読めないときの × と接続設定の保存）・`JsonSettingsStoreTests.Save_AfterFailedBackup_DoesNotBackUpHealthyFile`。mutation 実証済み。
+- ガード：`ChatConnectionSettingsSaveFailureTests`（書けない・読めないときの × と接続設定の保存）・`SettingsStoreTests`（行 `save-after-failed-backup-does-not-back-up-healthy-file`）。mutation 実証済み。

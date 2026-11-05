@@ -9,7 +9,7 @@ namespace QuickER.Tests.Platform;
 /// <remarks>
 /// 図ファイル・設定ファイル・接続プロファイルの 3 経路が共有する単一正本のため、
 /// 「保存先を壊さない」「一時ファイルを残さない」「失敗を握り潰さない」をここで直接押さえる。
-/// 各ストア側のテスト（JsonStorageServiceTests / GuiAppSettingsStoreTests /
+/// 各ストア側のテスト（DocumentFormatTests の SaveAtomic の行 / GuiAppSettingsStoreTests /
 /// SqlConnectionProfileStoreTests）は、経路ごとに委譲が繋がっていることの保証として併存させる。
 /// </remarks>
 public class AtomicFileTests : IDisposable

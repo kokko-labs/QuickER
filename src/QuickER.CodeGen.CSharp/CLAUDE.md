@@ -63,7 +63,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 - 主キーが計算列の図は生成時エラー。生成時 Info 診断が除外列を名指しする
 - C# リバースは `[ComputedColumn]` で往復する。DBML / Mermaid / Excel は運ばない（DBML / Mermaid は出力時に欠落告知、Excel のマージ取込は一致した列の指定を現在図から引き継ぐ）
 - GUI は `ColumnViewModel` のパススルーのみ（編集 UI なし）。図ファイルは v1 のまま。マルチターゲットの SQLite ミラーへは同期でも値が運ばれない（docs の既知の割り切り）
-- ガード：`ComputedColumnGenerationTests`・`ComputedColumnCommentTests`・`{Sqlite,SqlServer}ComputedColumnRuntimeTests`・5 方言の `*ImportFidelityIntegrationTests`・`ComputedColumnPersistenceTests`。mutation 実証済み
+- ガード：`ComputedColumnGenerationTests`・`ComputedColumnCommentTests`・`{Sqlite,SqlServer}ComputedColumnRuntimeTests`・5 方言の `*ImportFidelityIntegrationTests`・`DocumentFormatTests`（行 `*-is-computed-*`・`roundtrip-computed-column-flag-preserved`）。mutation 実証済み
 
 ### DB が値を拒む採番列
 
@@ -91,7 +91,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
   - CodeGen.CSharp は Provider を参照できないので、持てるかの判定の正本は QuickER.Dialects の `DialectDeclarations.CanOccur` に置き、`IdentityColumnMarks.CanBeHeldBy` はそれへ委譲する
 - 実 DB の書き込み除外は IdentityColumnFixture（SQL Server 方言の QuickER 版 Repository＋EF Core・非主キーの採番列 1 本）で固定する
   - SqlBulkCopy は KeepIdentity なしでは送った値を無視して採番するので、BulkInsert の除外は実 DB では観測できない（回帰の網としてだけ持つ）
-- ガード：`IdentityColumnCommentTests`（注記を出す方言を書き下ろした期待で照合し、表との一致は別のテスト）・`IdentityColumnGenerationTests`・`IdentityColumnSaveMetadataTests`・`{SqlServer,PostgreSql,Oracle}ImportFidelityIntegrationTests` の `Import_*Identity*`・`{SqlServer,PostgreSql}IdentityColumnRuntimeTests`・`IdentityColumnPersistenceTests`・`SchemaSignatureTests` の `Compute_IdentityFlag_ChangesSignature`
+- ガード：`IdentityColumnCommentTests`（注記を出す方言を書き下ろした期待で照合し、表との一致は別のテスト）・`IdentityColumnGenerationTests`・`IdentityColumnSaveMetadataTests`・`{SqlServer,PostgreSql,Oracle}ImportFidelityIntegrationTests` の `Import_*Identity*`・`{SqlServer,PostgreSql}IdentityColumnRuntimeTests`・`DocumentFormatTests`（行 `*-is-identity-*`・`roundtrip-identity-column-flag-preserved`）・`SchemaSignatureTests` の `Compute_IdentityFlag_ChangesSignature`
 - 切替・CLI・MCP・コード取込側のガード：`MainViewModelTargetDbmsTests` の「採番の…」3 件・`UndoCommandRoundTripTests` の `ChangeTargetDbmsCommand`・`ProviderMismatchWarningTests` の採番の 4 件・`CSharpReverseRoundTripTests` の `Merge_IdentityPrimaryKey_KeepsMarkAndNeedsNoReplacementConfirmation`・`CodeReverseCommandServiceTests` の `Run_IdentityPrimaryKey_NoConfirmAndKeepsMark`
 - mutation 実証済み
 
