@@ -90,54 +90,8 @@ public class RemoteServiceGenerationTests
     private static string FormatDiagnostics(CodeGenerationResult result) =>
         string.Join(" / ", result.Diagnostics.Select(d => $"{d.Severity}: {d.Message}"));
 
-    /// <summary>
-    /// 出力ファイル名が <c>.g.cs</c> で終わらなくても、サーバー実装は正規化後の本体名と対になり、
-    /// API リファレンスの生成ファイル構成表も同じ名前を載せることを検証する（単一方言・マルチ方言の両レイアウト）
-    /// </summary>
-    [Theory(
-        DisplayName = "出力ファイル名の正規化はサーバー実装名と API リファレンスの構成表にも効く"
-    )]
-    [InlineData("Shop.cs", "Shop", false)]
-    [InlineData("Shop", "Shop", false)]
-    [InlineData("  Shop.cs  ", "Shop", false)]
-    [InlineData("Shop.G.CS", "Shop", false)]
-    [InlineData("Shop.cs", "Shop", true)]
-    public void Generate_NonGeneratedSuffixOutputFileName_ServerFileNameFollowsNormalizedMain(
-        string outputFileName,
-        string expectedBaseName,
-        bool multiDialect
-    )
-    {
-        var result = Generate(
-            CreateDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Test.Ns",
-                OutputFileName = outputFileName,
-                GenerateRepositories = true,
-                GenerateRemoteServices = true,
-                RepositoryDialects = multiDialect ? ["sqlserver", "sqlite"] : ["sqlserver"],
-                GenerateApiDocs = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-
-        // 大文字小文字違いの .g.cs は正規化で書き換えないため、本体名は入力どおり（前後空白のみ除去）
-        // （出力のファイル名の並びは、決まった行 files-remote-service-output-name-* が見る）
-        var mainName = outputFileName.Trim().EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase)
-            ? outputFileName.Trim()
-            : expectedBaseName + ".g.cs";
-
-        // 構成表は正規化前の名前（Shop.cs 等）を載せず、実際に書き出す名前を載せる
-        var doc = result
-            .Files.Single(f => f.FileName.EndsWith(".g.md", StringComparison.Ordinal))
-            .Content;
-        doc.Should().Contain(mainName).And.Contain(expectedBaseName + ".RemoteServer.g.cs");
-        doc.Should().NotContain(expectedBaseName + ".cs");
-    }
-
     /// <summary>ON: サーバー実装が別ファイルへ出力され、本体にクライアント実装が同梱されることを検証する</summary>
+    // 残す理由（P3-4b）：500 の汎用文言（生成器の固定の英文）と相関 ID の三項式（式本体）。構造の表明は行 code-remote-service-main-client-and-server-engine-declarations へ移した
     [Fact(DisplayName = "ON: 本体＋{ベース名}.RemoteServer.g.cs の 2 ファイルが出力される")]
     public void Generate_RemoteServices_EmitsClientInMainAndServerInSeparateFile()
     {
@@ -154,200 +108,13 @@ public class RemoteServiceGenerationTests
 
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
 
-        // 出力が本体＋サーバーの 2 ファイルであること（名前と並び）は、決まった行 files-remote-service-main-and-server-files が見る
-        var main = result.Files[0].Content;
+        // 出力が本体＋サーバーの 2 ファイルであること（名前と並び）は、決まった行 files-remote-service-main-and-server-files が見る。
+        // 型・メンバーの宣言・using・呼び出しの構造（リモート面の契約・クライアント固定 infra・DI・固定エンジン・エンドポイントのマッピング・
+        // 競合 409 / 要求の不備 400 の分類・500 の詳細公開とフック）は、決まった行 code-remote-service-main-client-and-server-engine-declarations へ移した
         var server = result.Files[1].Content;
 
-        // リモート面（GenerateRemoteContracts）が自動含意される
-        main.Should().Contain("public partial interface IOrderRemoteRepository");
-
-        // クライアント固定 infra＋per-entity 実装＋DI が本体へ同梱される
-        main.Should().Contain("public static class RemoteJson");
-        main.Should().Contain("public sealed class RemoteRepositoryException");
-        main.Should().Contain("public abstract partial class HttpRemoteRepository<TEntity, TKey>");
-        main.Should()
-            .Contain(
-                "public sealed partial class HttpOrderRemoteRepository(HttpClient httpClient)"
-            );
-        main.Should().Contain("AddGeneratedHttpRemoteRepositories(");
-        main.Should()
-            .Contain(
-                "AddClient<IOrderRemoteRepository>(client => new HttpOrderRemoteRepository(client));"
-            );
-
-        // サーバーファイル: 固定エンジン（スキーマ非依存）＋エンドポイントマッピング（スキーマ依存）の 2 層構成
-        server.Should().Contain("internal static class RemoteServerEngine");
-        server.Should().Contain("public static partial class GeneratedRemoteEndpoints");
-        server.Should().Contain("MapGeneratedRemoteEndpoints(");
-        server.Should().Contain("string prefix = RemotePaths.DefaultPrefix");
-        // per-entity のエンドポイントは固定エンジンの汎用マッピングを修飾付きで呼ぶ（別ファイル／別アセンブリでも同一テキスト）
-        server
-            .Should()
-            .Contain("RemoteServerEngine.MapCrud<OrderEntity, int, IOrderRemoteRepository>(");
-        server.Should().Contain("StatusCodes.Status409Conflict");
-        server.Should().Contain("\"SaveConflict\"");
-
-        // リクエスト解釈の失敗は 400（BadRequest）・Kestrel の BadHttpRequestException はステータス素通し
-        // （エンジンから使う例外・メタデータ型はトップレベルへ出す＝入れ子だとエンジン外から参照できない）
-        server.Should().Contain("internal sealed class RemoteBadRequestException : Exception");
-        server.Should().Contain("StatusCodes.Status400BadRequest");
-        server.Should().Contain("catch (BadHttpRequestException ex)");
-        server.Should().Contain("WriteErrorAsync(context, ex.StatusCode, \"BadRequest\"");
-
-        // 500 の詳細公開は実行時引数で、既定は非公開（汎用文言＋相関 ID）。
-        // OnServerError（partial＝アセンブリを跨げない）はラッパー RaiseServerError をデリゲートとして
-        // メタデータへ載せ、エンジンが呼び出す
-        server.Should().Contain("bool exposeErrorDetails = false");
-        server
-            .Should()
-            .Contain(
-                "group.WithMetadata(new RemoteErrorDetailPolicy(exposeErrorDetails, RaiseServerError));"
-            );
-        server.Should().Contain("internal sealed class RemoteErrorDetailPolicy(");
-        server.Should().Contain("public Action<HttpContext, Exception>? OnServerError { get; }");
-        server.Should().Contain("policy?.OnServerError?.Invoke(context, ex);");
-        server.Should().Contain("private static void RaiseServerError(HttpContext context");
-        server.Should().Contain("RemoteServerEngine.LogServerError(context, hookError);");
-        server.Should().Contain("static partial void OnServerError(HttpContext context");
         server.Should().Contain("\"An unexpected error occurred on the server.\"");
         server.Should().Contain("correlationId: expose ? null : context.TraceIdentifier");
-
-        // サーバーファイルは ASP.NET Core の using を持ち、本体は持たない
-        server.Should().Contain("using Microsoft.AspNetCore.Builder;");
-        main.Should().NotContain("Microsoft.AspNetCore");
-    }
-
-    /// <summary>名前付きクエリ: クライアントは転送メソッド・サーバーはリクエストレコード＋ハンドラが出ることを検証する</summary>
-    [Fact(
-        DisplayName = "名前付きクエリが転送メソッド（client）とハンドラ＋レコード（server）になる"
-    )]
-    public void Generate_RemoteServices_ForwardsNamedQueries()
-    {
-        var result = Generate(
-            CreateDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Test.Ns",
-                GenerateRepositories = true,
-                GenerateRemoteServices = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        var main = result.Files[0].Content;
-        var server = result.Files[1].Content;
-
-        // クライアント: シグネチャは契約と同一・本体は InvokeAsync への転送（manual クエリも同様＝実装方式に依らない）
-        main.Should()
-            .Contain(
-                "public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>"
-            );
-        main.Should()
-            .Contain(
-                "InvokeAsync<IReadOnlyList<OrderEntity>>(\"GetByCustomer\", new { customerId, take, skip }, cancellationToken);"
-            );
-        // 単一戻り形（内側の型が nullable）は「null 本文＝正当な結果」の InvokeNullableAsync へ、
-        // 一覧などの非 nullable は「null 本文＝転送失敗として分類」の InvokeAsync へ振り分ける
-        main.Should()
-            .Contain("InvokeNullableAsync<OrderEntity?>(\"FindTop\", null, cancellationToken);");
-
-        // サーバー: リクエストレコード（PascalCase プロパティ・リポジトリ名と操作名は _ 区切り）＋リモート面への委譲ハンドラ
-        server
-            .Should()
-            .Contain(
-                "private sealed record Order_GetByCustomerRequest(int CustomerId, int Take, int Skip);"
-            );
-        server.Should().Contain("\"Order/GetByCustomer\"");
-
-        // ページング引数はリクエスト解釈の境界で検証してから渡す（take <= 0 / skip < 0 は
-        // クエリパイプラインが拒否する値＝素通しするとクライアント起因の不備が 500 に化ける）
-        server
-            .Should()
-            .Contain(
-                "var paging = RemoteServerEngine.ValidatedPaging(request.Take, request.Skip);"
-            );
-        server
-            .Should()
-            .Contain(
-                "repository.GetByCustomerAsync(request.CustomerId, paging.Take, paging.Skip, context.RequestAborted)"
-            );
-
-        // パラメータなしクエリはリクエストレコードを作らず本文も読まない
-        server.Should().Contain("\"Order/FindTop\"");
-        server.Should().NotContain("Order_FindTopRequest");
-    }
-
-    /// <summary>
-    /// リクエストレコード名がエンティティをまたいで衝突しないことを検証する。素の連結
-    /// （<c>{Repo}{Op}Request</c>）だと <c>Order</c>×<c>LineSummary</c> と <c>OrderLine</c>×<c>Summary</c> が
-    /// 同名 <c>OrderLineSummaryRequest</c> になり、同一静的クラス内の 2 宣言＝CS0102 でコンパイル不能だった
-    /// </summary>
-    [Fact(DisplayName = "リクエストレコード名はエンティティをまたいで衝突しない（_ 区切り）")]
-    public void Generate_RemoteServices_RequestRecordNamesDoNotCollideAcrossEntities()
-    {
-        var orderLine = new Entity { TableName = "OrderLine" };
-        orderLine.Columns.Add(
-            new Column
-            {
-                Name = "OrderLineId",
-                DataType = "int",
-                IsPrimaryKey = true,
-                IsNullable = false,
-            }
-        );
-        orderLine.Columns.Add(
-            new Column
-            {
-                Name = "Quantity",
-                DataType = "int",
-                IsNullable = false,
-            }
-        );
-
-        var diagram = new ErDiagram { Entities = { _order, orderLine } };
-        diagram.Queries.Add(
-            new QueryDefinition
-            {
-                EntityId = _order.Id,
-                Name = "LineSummary",
-                Returns = QueryReturnShape.Count,
-                Parameters =
-                {
-                    new QueryParameter { Name = "customerId", Type = "int32" },
-                },
-                Condition = "CustomerId = @customerId",
-            }
-        );
-        diagram.Queries.Add(
-            new QueryDefinition
-            {
-                EntityId = orderLine.Id,
-                Name = "Summary",
-                Returns = QueryReturnShape.Count,
-                Parameters =
-                {
-                    new QueryParameter { Name = "quantity", Type = "int32" },
-                },
-                Condition = "Quantity = @quantity",
-            }
-        );
-
-        var result = Generate(
-            diagram,
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Test.Ns",
-                GenerateRepositories = true,
-                GenerateRemoteServices = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        var server = result.Files[1].Content;
-
-        server.Should().Contain("private sealed record Order_LineSummaryRequest(int CustomerId);");
-        server.Should().Contain("private sealed record OrderLine_SummaryRequest(int Quantity);");
-        server.Should().NotContain("record OrderLineSummaryRequest");
     }
 
     /// <summary>
@@ -359,6 +126,7 @@ public class RemoteServiceGenerationTests
     /// リクエストは Insert と完全に同型なので、per-entity の <c>{Entity}CheckUniquenessRequest</c> は
     /// 廃止して <c>RemoteEntityRequest&lt;TEntity&gt;</c> を共有する（ワイヤ上は同じ 1 フィールドの JSON）。
     /// </remarks>
+    // 残す理由（P3-4b）：ルートの補間文字列と、複数行に整形した式本体（書式）。構造の表明（per-entity のレコード・経路が残らないこと・MapCrud が CheckUniquenessAsync を呼ぶこと）は行 code-remote-service-uniqueness-check-is-mapped-by-generic-crud へ移した
     [Fact(DisplayName = "重複事前チェックは MapCrud が張り per-entity のレコードは残らない")]
     public void Generate_RemoteServices_MapsUniquenessCheckFromTheGenericCrudMapping()
     {
@@ -386,28 +154,6 @@ public class RemoteServiceGenerationTests
                     + "                                .CheckUniquenessAsync(\n"
                     + "                                    Required(request.Entity, \"Entity\"),"
             );
-
-        // per-entity 側には痕跡が残らない
-        server.Should().NotContain("OrderCheckUniquenessRequest");
-        server.Should().NotContain("\"Order/CheckUniqueness\"");
-    }
-
-    /// <summary>OFF（既定）: 出力が 1 ファイルのままで、リモートサービス関連の型が一切出ないことを検証する</summary>
-    [Fact(DisplayName = "OFF（既定）: 1 ファイルのまま・HTTP クライアント/サーバー関連は出ない")]
-    public void Generate_Default_DoesNotEmitRemoteServices()
-    {
-        var result = Generate(
-            CreateDiagram(),
-            new CodeGenerationOptions { RootNamespace = "Test.Ns", GenerateRepositories = true }
-        );
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-
-        // 出力が 1 ファイルのままであることは、決まった行 files-remote-service-off-single-file が見る
-        var main = result.Files[0].Content;
-        main.Should().NotContain("RemoteJson");
-        main.Should().NotContain("HttpRemoteRepository");
-        main.Should().NotContain("AddGeneratedHttpRemoteRepositories");
     }
 
     /// <summary>
@@ -419,6 +165,7 @@ public class RemoteServiceGenerationTests
     /// <c>AddGenerated{方言}Repositories(serviceKey, ...)</c> と対になる。共有 HttpClient も同じキーで登録するため、
     /// 非 keyed 登録とも別キーとも衝突しない（コンテナ所有＝破棄もコンテナが行う）。
     /// </remarks>
+    // 残す理由（P3-4b）：登録のラムダの本体（式本体）。シグネチャ 4 本・keyed / 非 keyed の呼び出しの構造は行 code-remote-service-http-registration-keyed-and-plain-overloads へ移した
     [Fact(DisplayName = "ON: HTTP クライアント DI に keyed オーバーロード 2 本が追加される")]
     public void Generate_RemoteServices_EmitsKeyedHttpRegistrationOverloads()
     {
@@ -434,175 +181,16 @@ public class RemoteServiceGenerationTests
 
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
 
-        // 改行を LF へ正規化して、複数行のシグネチャをそのままの形で照合する
         var main = result.Files[0].Content.ReplaceLineEndings("\n");
-        const string Signature =
-            "public static IServiceCollection AddGeneratedHttpRemoteRepositories(\n        this IServiceCollection services,\n";
 
-        // 非 keyed の 2 本
-        main.Should().Contain(Signature + "        string baseAddress\n    )");
-        main.Should()
-            .Contain(
-                Signature + "        Func<IServiceProvider, HttpClient> httpClientFactory\n    )"
-            );
-
-        // keyed の 2 本
-        main.Should()
-            .Contain(Signature + "        object? serviceKey,\n        string baseAddress\n    )");
-        main.Should()
-            .Contain(
-                Signature
-                    + "        object? serviceKey,\n        Func<IServiceProvider, HttpClient> httpClientFactory\n    )"
-            );
-
-        // 共有 HttpClient は同じキーで登録し、per-entity のリモート面は keyed scoped で登録する
-        main.Should().Contain("services.AddKeyedSingleton(\n            serviceKey,");
         main.Should()
             .Contain("provider.GetRequiredKeyedService<OwnedHttpClient>(serviceKey).Client");
         main.Should()
             .Contain(
                 "services.AddKeyedScoped(serviceKey, (provider, _) => create(httpClientFactory(provider)));"
             );
-
-        // 非 keyed 版は従来どおりキー無しで登録する（keyed へ置き換わっていない）
         main.Should()
             .Contain("services.AddScoped(provider => create(httpClientFactory(provider)));");
-        main.Should()
-            .Contain(
-                "AddClient<IOrderRemoteRepository>(client => new HttpOrderRemoteRepository(client));"
-            );
-        main.Should().Contain("services.AddSingleton(_ => new OwnedHttpClient(");
-    }
-
-    /// <summary>分割出力: サーバーは RemoteServer.g.cs・専用 namespace で出て、他バケットの namespace を using することを検証する</summary>
-    [Fact(DisplayName = "分割出力: RemoteServer.g.cs が専用 namespace＋クロス using で出る")]
-    public void Generate_RemoteServicesWithSplit_EmitsServerFileWithCrossUsings()
-    {
-        var result = Generate(
-            CreateDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Acme",
-                GenerateRepositories = true,
-                GenerateRemoteServices = true,
-                SplitFilesByCategory = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        var server = result.Files.Single(f => f.FileName == "RemoteServer.g.cs");
-
-        server.Content.Should().Contain("namespace Acme.RemoteServer;");
-        server.Content.Should().Contain("using Acme.Entities;");
-        server.Content.Should().Contain("using Acme.Repositories;");
-        server.Content.Should().Contain("using Acme.Runtime;");
-        // 固定部は Runtime.AspNetCore.g.cs へ分かれるため、その namespace も using する
-        server.Content.Should().Contain("using Acme.Runtime.AspNetCore;");
-    }
-
-    /// <summary>
-    /// 分割出力では、サーバー実装が「固定エンジン＝Runtime.AspNetCore.g.cs」と
-    /// 「per-entity＝RemoteServer.g.cs」の 2 ファイルへ分かれることを検証する
-    /// （他バケットと同じ「固定 infra は Runtime 系・スキーマ依存物は各カテゴリ」の対称構成）。
-    /// </summary>
-    [Fact(DisplayName = "分割出力: サーバー固定部が Runtime.AspNetCore.g.cs へ分かれる")]
-    public void Generate_RemoteServicesWithSplit_SeparatesEngineIntoFixedRuntimeFile()
-    {
-        var result = Generate(
-            CreateDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Acme",
-                GenerateRepositories = true,
-                GenerateRemoteServices = true,
-                SplitFilesByCategory = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-
-        var engine = result.Files.Single(f => f.FileName == "Runtime.AspNetCore.g.cs");
-        engine.Content.Should().Contain("namespace Acme.Runtime.AspNetCore;");
-        // 固定部は共通契約（RemoteJson・エンベロープ）をコア相当ファイルから using で参照する
-        engine.Content.Should().Contain("using Acme.Runtime;");
-        engine.Content.Should().Contain("internal static class RemoteServerEngine");
-        engine.Content.Should().Contain("internal sealed class RemoteBadRequestException");
-        engine.Content.Should().Contain("internal sealed class RemoteErrorDetailPolicy(");
-        // スキーマ依存物（エンドポイント本体・per-entity）は 1 つも混ざらない
-        engine.Content.Should().NotContain("class GeneratedRemoteEndpoints");
-        engine.Content.Should().NotContain("MapOrderEndpoints");
-        engine.Content.Should().NotContain("OrderEntity");
-
-        // per-entity 側は固定部の型定義を持たず、修飾付きで呼ぶだけ
-        var server = result.Files.Single(f => f.FileName == "RemoteServer.g.cs");
-        server.Content.Should().Contain("public static partial class GeneratedRemoteEndpoints");
-        server.Content.Should().Contain("RemoteServerEngine.MapCrud<");
-        server.Content.Should().NotContain("static class RemoteServerEngine");
-        server.Content.Should().NotContain("class RemoteBadRequestException");
-    }
-
-    /// <summary>
-    /// パッケージ参照モードでは固定部ファイルを出さず、per-entity のサーバーファイルが
-    /// 固定名前空間（<see cref="RuntimePackages.AspNetCore"/>）を using するだけになることを検証する。
-    /// </summary>
-    [Fact(DisplayName = "パッケージ参照モード: サーバー固定部は出力されず using だけになる")]
-    public void Generate_RemoteServicesWithRuntimePackages_ReferencesAspNetCorePackage()
-    {
-        var result = Generate(
-            CreateDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Acme",
-                OutputFileName = "Shop.g.cs",
-                GenerateRepositories = true,
-                GenerateRemoteServices = true,
-                UseRuntimePackages = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-
-        var server = result.Files.Single(f => f.FileName == "Shop.RemoteServer.g.cs");
-        server.Content.Should().Contain($"using {RuntimePackages.AspNetCore};");
-        server.Content.Should().NotContain("static class RemoteServerEngine");
-        server.Content.Should().NotContain("class RemoteBadRequestException");
-        // per-entity 側のテキストはモードに依らず同一（修飾呼び出しのみ）
-        server.Content.Should().Contain("RemoteServerEngine.MapCrud<");
-
-        // 案内にも ASP.NET Core パッケージが載る（安定順の末尾）
-        RuntimePackageReferenceGuidance
-            .Compute(
-                new CodeGenerationOptions
-                {
-                    GenerateRepositories = true,
-                    GenerateRemoteServices = true,
-                    UseRuntimePackages = true,
-                }
-            )
-            .Should()
-            .Equal(RuntimePackages.Core, RuntimePackages.SqlServer, RuntimePackages.AspNetCore);
-    }
-
-    /// <summary>EF Core 単独＋リモートサービス: 契約・クライアント・サーバーが EF Core 版 Repository 基準でも成立することを検証する</summary>
-    [Fact(DisplayName = "EF Core 単独でもクライアント／サーバーが出力される")]
-    public void Generate_RemoteServicesWithEfCoreOnly_Works()
-    {
-        var result = Generate(
-            CreateDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Test.Ns",
-                GenerateRepositories = false,
-                GenerateEfCoreRepositories = true,
-                GenerateRemoteServices = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-
-        // 出力が 2 ファイルであることは、決まった行 files-remote-service-efcore-only-two-files が見る
-        result.Files[0].Content.Should().Contain("HttpOrderRemoteRepository");
-        result.Files[1].Content.Should().Contain("MapGeneratedRemoteEndpoints");
     }
 
     /// <summary>
@@ -613,6 +201,7 @@ public class RemoteServiceGenerationTests
     /// サーバー既定引数とクライアント DI 登録の双方に <c>"/quicker"</c> がリテラルで散っていた重複の解消。
     /// サーバーファイルにリテラルが残っていないこと（NotContain）まで見て、定数化の抜けを検知する。
     /// </remarks>
+    // 残す理由（P3-4b）：リテラルの不在（定数は定数式なので意味モデルでは参照とリテラルを区別できない）と health のラムダ（式本体）。定数の宣言・値・参照の構造は行 code-remote-service-routes-shared-through-remote-paths / exec-remote-paths-constants へ移した
     [Fact(DisplayName = "リモートのプレフィックスと health ルートが公開定数へ集約される")]
     public void Generate_RemoteServices_SharesRoutesThroughRemotePaths()
     {
@@ -627,96 +216,10 @@ public class RemoteServiceGenerationTests
         );
 
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        var main = result.Files[0].Content;
         var server = result.Files[1].Content;
 
-        // 定数の正本はクライアント側固定 infra（Core パッケージ収載）
-        main.Should().Contain("public static class RemotePaths");
-        main.Should().Contain("public const string DefaultPrefix = \"/quicker\";");
-        main.Should().Contain("public const string HealthRoute = \"health\";");
-
-        // クライアントの liveness チェックも同じ定数を使う
-        main.Should()
-            .Contain(
-                "public async Task<bool> PingAsync(CancellationToken cancellationToken = default)"
-            );
-        main.Should().Contain("RemotePaths.HealthRoute,");
-
-        // サーバー: 既定引数も health ルートも定数参照で、リテラルは残っていない
-        server.Should().Contain("string prefix = RemotePaths.DefaultPrefix");
         server.Should().Contain("group.MapGet(RemotePaths.HealthRoute, () => Results.Ok());");
         server.Should().NotContain("\"/quicker\"");
         server.Should().NotContain("\"health\"");
-    }
-
-    /// <summary>
-    /// 分割時、HTTP クライアント（per-entity クライアント・DI 登録・OwnedHttpClient）が契約ファイルから
-    /// Repositories.Http.g.cs へ分離され、名前空間は契約と同一のままであることを検証する
-    /// （層分け出力で契約＝ドメイン層・HTTP 実装＝インフラ層へ振り分けるための分割。型 FQN は不変）。
-    /// </summary>
-    [Fact(
-        DisplayName = "分割時: HTTP クライアントは Repositories.Http.g.cs へ分離され契約ファイルには残らない"
-    )]
-    public void Generate_Split_MovesHttpClientToOwnFile()
-    {
-        var result = Generate(
-            CreateDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Test.Ns",
-                SplitFilesByCategory = true,
-                GenerateRepositories = true,
-                GenerateRemoteServices = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-
-        var contract = result.Files.Single(file => file.FileName == "Repositories.g.cs").Content;
-        var http = result.Files.Single(file => file.FileName == "Repositories.Http.g.cs").Content;
-
-        // 契約ファイル: リモート面インターフェイスは残り、HTTP 実装・DI 登録・HTTP 系 using は出ない
-        contract.Should().Contain("public partial interface IOrderRemoteRepository");
-        contract.Should().NotContain("HttpOrderRemoteRepository");
-        contract.Should().NotContain("AddGeneratedHttpRemoteRepositories");
-        contract.Should().NotContain("using System.Net.Http;");
-
-        // HTTP クライアントファイル: per-entity クライアント＋DI 登録＋OwnedHttpClient が揃い、
-        // 名前空間は契約と同一（サブ名前空間にしない＝利用側の using・型 FQN が変わらない）
-        http.Should().Contain("namespace Test.Ns.Repositories;");
-        http.Should()
-            .Contain(
-                "public sealed partial class HttpOrderRemoteRepository(HttpClient httpClient)"
-            );
-        http.Should()
-            .Contain(
-                "public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions"
-            );
-        http.Should().Contain("private sealed class OwnedHttpClient(HttpClient client)");
-    }
-
-    /// <summary>非分割時は HTTP クライアントが本体ファイルへ同居することを検証する（分離はファイル分割時のみ）</summary>
-    [Fact(DisplayName = "非分割時: HTTP クライアントは本体ファイルへ同居する")]
-    public void Generate_NonSplit_KeepsHttpClientInMainFile()
-    {
-        var result = Generate(
-            CreateDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Test.Ns",
-                GenerateRepositories = true,
-                GenerateRemoteServices = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-
-        // 出力が 2 ファイルであることは、決まった行 files-remote-service-non-split-two-files が見る
-        var main = result.Files[0].Content;
-        main.Should().Contain("public sealed partial class HttpOrderRemoteRepository");
-        main.Should()
-            .Contain(
-                "public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions"
-            );
     }
 }

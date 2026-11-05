@@ -12,7 +12,7 @@ EF Core モード（`GenerateEfCoreRepositories`）の固定ランタイムと�
 - EF Core 単独のスコープ（EF Core のランタイムパッケージを含む）は、行の組み立て器を出さない。
   - 対象は `SelectMaterializer`・`MapEntity`・型ごとの読み取り・値オブジェクトの速い経路。QuickER 版 Repository のあるスコープだけに出す。
   - EF Core は自分で行を組み立て、生 SQL のエンティティ取得は列ごとの写し `SetColumnValue` で行うので使われない。生 SQL の列の解決の `SelectOrdinals` は残る。
-  - ガード：`EfCoreEntitySaveMetadataTests`（パッケージの型に組み立て器のメンバーが無いこと、インラインの生成物が EF Core 単独では出さず QuickER 版 Repository があれば出すこと）。
+  - ガード：`EfCoreEntitySaveMetadataTests`（パッケージの型に組み立て器のメンバーが無いこと）・`CodegenCaseTests` の行 `code-efcore-save-metadata-no-materializer-efcore-only` / `code-efcore-save-metadata-materializer-quicker-only` / `code-efcore-save-metadata-materializer-quicker-and-efcore`（インラインの生成物が EF Core 単独では出さず QuickER 版 Repository があれば出すこと）。
 
 ## グラフ保存の追跡
 
@@ -58,7 +58,7 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
 - 一意制約ごとの `HasIndex(…).IsUnique()`。Fluent が出す。EF Core はモデルの一意インデックスを見て、一意な値を手放す削除を、その値を取る更新・挿入より先に流す（無いと、削除する行が子を持つときなどに更新が先に走り、一意制約に断られる）。DB には何も作らない（スキーマは DDL 生成が作り、Migrations / EnsureCreated を使わない前提）。
   - 名前（`HasDatabaseName`）は付けない（文の並べ方に名前は関係しない）。構成列は制約の列の並び。構成列を引き当てられない制約は出さない
   - NULL の値どうしは並べ方に影響しない（EF Core は NULL を同じ値とみなさない）。2 行の一意な値の入れ替えは DB が断る（EF Core の循環の例外にはならない）
-  - ガード：`EfCoreUniqueIndexGenerationTests`（一意制約ごと・複合の列の並び・制約の無い表・値オブジェクトの列）・実装先の一致のシナリオ `graph-updated-row-takes-unique-value-of-deleted-row-with-children-updated-first` / `-removed-first`・`GraphSaveEfCoreSqlServerRuntimeTests`・`GraphSaveSqliteFileRuntimeTestsBase.NullUniqueValues_DoNotOrderTheSave`
+  - ガード：`CodegenCaseTests` の行 `model-efcore-unique-constraints-one-unique-index-each` / `model-efcore-unique-constraints-one-unique-index-each-vo`（生成した DbContext のモデルで、一意制約ごとの一意の索引・複合の列の並び・制約の無い表に索引が無い・値オブジェクトの列）・実装先の一致のシナリオ `graph-updated-row-takes-unique-value-of-deleted-row-with-children-updated-first` / `-removed-first`・`GraphSaveEfCoreSqlServerRuntimeTests`・`GraphSaveSqliteFileRuntimeTestsBase.NullUniqueValues_DoNotOrderTheSave`
 
 ガード：`GraphSaveEfCoreSqlServerRuntimeTests`（子を持つ形の J3）、`BackendParityRuntimeTests` の `graph-save-*-keeps-order`・`graph-updated-row-takes-unique-value-of-deleted-row-with-children-*`・`graph-new-row-referenced-by-another-root-*`・`graph-save-new-row-without-shared-value-keeps-order`、`BackendParityRuntimeTests` の `ef-retry-move-order-and-delete-old-customer`、`BackendParitySqlServerRuntimeTests` の `move-stale-note-and-delete-old-gadget`。mutation 実証済み。
 
@@ -125,7 +125,7 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
   - 出す位置は `HasMaxLength` の直後で、値オブジェクトの列にも出す。出さないと EF Core は nvarchar の列と見なし、パラメータと定数を Unicode で送るので、SQL Server は列を変換してから比べる。
   - 対象は SQL Server・Oracle（SQLite の varchar も立つが効果は無い）。MySQL・PostgreSQL の文字列は Unicode の種類なので出ない。
   - 図の方言で決まるので、可搬の図は文字列を Unicode にそろえる運用（docs）。
-- ガード：`EfCoreNonUnicodeColumnTests`、`GeneratedFixtureEfCoreNonUnicodeTests`（生成物のままの DbContext の `ToQueryString` で、varchar の列の比較と LIKE が varchar／`N` なし）。mutation 実証済み。
+- ガード：`CodegenCaseTests` の行 `model-efcore-non-unicode-*`（生成した DbContext のモデルの `IsUnicode`）・`code-efcore-non-unicode-follows-max-length*`（Fluent の鎖で `HasMaxLength` の次に `IsUnicode(false)`）、`GeneratedFixtureEfCoreNonUnicodeTests`（生成物のままの DbContext の `ToQueryString` で、varchar の列の比較と LIKE が varchar／`N` なし）。mutation 実証済み。
 
 ### 値オブジェクトの文字列一致の LIKE
 

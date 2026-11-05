@@ -45,6 +45,11 @@ internal sealed record CodegenInput(
 /// <param name="ComparisonOptions">オプションが効く関係の比較用のオプション</param>
 /// <param name="ExactRuntimeTypeSets">Runtime 系の型集合の関係で、型の集合がパッケージと同じであるべきファイル名</param>
 /// <param name="CompileAsOneAssembly">層別出力も 1 アセンブリへまとめてコンパイルする（決まった行だけ。<see cref="CompileJudge.Check"/>）</param>
+/// <param name="Code">生成コードの宣言の期待（決まった行だけ。<see cref="CodeRule"/>）</param>
+/// <param name="CompileWithout">参照を絞ったコンパイル（決まった行だけ。<see cref="ReducedReferences"/>）</param>
+/// <param name="Exec">生成物を読み込んで動かす期待（決まった行だけ。<see cref="ExecCheck"/>）</param>
+/// <param name="Parsed">生成結果を製品の解析器に通す期待（決まった行だけ。<see cref="ParsedCheck"/>）</param>
+/// <param name="Markdown">API リファレンスの Markdown の期待（決まった行だけ。<see cref="MarkdownRule"/>）</param>
 internal sealed record CodegenExpectation(
     DiagnosticExpectation Diagnostics,
     Func<CodeGenerationOptions, CodeGenerationResult, IReadOnlyList<string>>? Files,
@@ -56,7 +61,12 @@ internal sealed record CodegenExpectation(
     CodegenProbeFacts? ProbeFacts = null,
     CodeGenerationOptions? ComparisonOptions = null,
     IReadOnlyList<string>? ExactRuntimeTypeSets = null,
-    bool CompileAsOneAssembly = false
+    bool CompileAsOneAssembly = false,
+    IReadOnlyList<CodeRule>? Code = null,
+    ReducedReferences? CompileWithout = null,
+    IReadOnlyList<ExecCheck>? Exec = null,
+    IReadOnlyList<ParsedCheck>? Parsed = null,
+    IReadOnlyList<MarkdownRule>? Markdown = null
 )
 {
     /// <summary>生成が成功する（エラーを期待しない）か</summary>
@@ -89,6 +99,15 @@ internal static class CodegenRunner
 
     /// <summary>意味の段</summary>
     public const string SemanticsStage = "semantics";
+
+    /// <summary>宣言の期待の段（<see cref="CodeRule"/>）</summary>
+    public const string CodeStage = "code";
+
+    /// <summary>参照を絞ったコンパイルの段（<see cref="ReducedReferences"/>）</summary>
+    public const string ReducedCompileStage = "compile:reduced";
+
+    /// <summary>Markdown の段（<see cref="MarkdownRule"/>）</summary>
+    public const string MarkdownStage = "markdown";
 
     /// <summary>
     /// 5 プロバイダの登録簿（<c>GenerationExecutor</c> と同じ組み）
@@ -350,9 +369,30 @@ internal static class CodegenRunner
                 Stage(SemanticsStage, () => SemanticJudge.Check(shape, options, result, manual));
             }
 
-            // 探針は行の生成物を 1 回だけコンパイルして読み込み、共有する
+            if (expectation.CompileWithout is { } reduced)
+            {
+                Stage(ReducedCompileStage, () => reduced.Check(result, manual));
+            }
+
+            // 宣言の期待と探針は、行の生成物のコンパイルを 1 つだけ作って共有する（探針はそこから emit して読み込む）
+            var compilation = new Lazy<Microsoft.CodeAnalysis.CSharp.CSharpCompilation>(() =>
+                Judges.Probes.CreateCompilation(result, manual)
+            );
+
+            if (expectation.Code is { Count: > 0 } code)
+            {
+                Stage(
+                    CodeStage,
+                    () =>
+                    {
+                        var context = new CodeRuleContext(compilation.Value);
+                        return code.SelectMany(rule => rule.Check(context)).ToList();
+                    }
+                );
+            }
+
             var assembly = new Lazy<System.Reflection.Assembly>(() =>
-                Judges.Probes.Load(result, manual)
+                Judges.Probes.Load(compilation.Value)
             );
 
             foreach (var probe in expectation.Probes)
@@ -368,6 +408,21 @@ internal static class CodegenRunner
                             expectation.ProbeFacts
                         )
                 );
+            }
+
+            foreach (var check in expectation.Exec ?? [])
+            {
+                Stage(check.Stage, () => check.Run(assembly.Value));
+            }
+
+            foreach (var check in expectation.Parsed ?? [])
+            {
+                Stage(check.Stage, () => check.Run(result));
+            }
+
+            if (expectation.Markdown is { Count: > 0 } markdown)
+            {
+                Stage(MarkdownStage, () => markdown.SelectMany(rule => rule.Run(result)).ToList());
             }
 
             foreach (var relation in SuccessRelations(expectation))
@@ -477,7 +532,25 @@ internal static class CodegenRunner
                 stages.Add(SemanticsStage);
             }
 
+            if (expectation.CompileWithout is not null)
+            {
+                stages.Add(ReducedCompileStage);
+            }
+
+            if (expectation.Code is { Count: > 0 })
+            {
+                stages.Add(CodeStage);
+            }
+
             stages.AddRange(expectation.Probes.Select(ProbeStage));
+            stages.AddRange((expectation.Exec ?? []).Select(check => check.Stage));
+            stages.AddRange((expectation.Parsed ?? []).Select(check => check.Stage));
+
+            if (expectation.Markdown is { Count: > 0 })
+            {
+                stages.Add(MarkdownStage);
+            }
+
             stages.AddRange(SuccessRelations(expectation).Select(Relations.Stage));
         }
 

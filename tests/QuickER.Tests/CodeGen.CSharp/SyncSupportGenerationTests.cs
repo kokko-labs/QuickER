@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using AwesomeAssertions;
@@ -52,80 +52,6 @@ public class SyncSupportGenerationTests
     }
 
     /// <summary>
-    /// 同期支援 OFF の生成物には同期の型が 1 つも現れない（新オプションは純増で、既存構成の出力を変えない）。
-    /// </summary>
-    [Fact(DisplayName = "同期支援 OFF の生成物には同期の型が一切出ない（純増であることの表明）")]
-    public void SyncSupportOff_EmitsNoSyncTypes()
-    {
-        var (files, diagnostics) = Generate(
-            Diagram(),
-            SyncOptions() with
-            {
-                GenerateSyncSupport = false,
-            }
-        );
-
-        diagnostics.Should().NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
-
-        var content = string.Concat(files.Values);
-        content.Should().NotContain("SyncEngine");
-        content.Should().NotContain("SyncJournal");
-        content.Should().NotContain("AddGeneratedSyncSupport");
-        content.Should().NotContain("Journaling");
-
-        // リモートサービスは有効なまま＝サーバーファイルは出るが、そこに同期専用エンドポイントは無い
-        files.Keys.Should().Contain(SyncFixtureDefinition.RemoteServerOutputFileName);
-        content.Should().NotContain("MapSyncEndpoints");
-        content.Should().NotContain("RemoteSyncOperations");
-        content.Should().NotContain("HttpSyncServerSource");
-
-        // 差分ソースの登録検査もゲートの内側（同期の無いサーバーには検査する対象が無い）
-        content.Should().NotContain("RequireSyncSources");
-        content.Should().NotContain("IServiceProviderIsService");
-
-        // HttpClient 共有の注意書きは、同期ソースの登録メソッドが在る構成でしか意味を持たない
-        content.Should().NotContain("AddGeneratedHttpSyncSources");
-    }
-
-    /// <summary>
-    /// 同期支援 ON × リモートサービス OFF の生成物には、HTTP 経路の型が 1 つも現れない。
-    /// </summary>
-    /// <remarks>
-    /// HTTP 対応は同期支援の追加機能で、リモートサービスを生成しない構成（＝直結だけのハイブリッド）では
-    /// 転送用のエンベロープも HTTP 差分ソースも DI 拡張も出てはならない。両アームを名指しで表明することで、
-    /// 「ゲートを外しても生成は通る」たぐいの退行がドリフト再生成で承認されるのを防ぐ。
-    /// </remarks>
-    [Fact(DisplayName = "同期支援 ON × リモートサービス OFF では HTTP 経路の型が一切出ない")]
-    public void SyncSupportWithoutRemoteServices_EmitsNoHttpTransport()
-    {
-        var (files, diagnostics) = Generate(
-            Diagram(),
-            SyncOptions() with
-            {
-                GenerateRemoteServices = false,
-            }
-        );
-
-        diagnostics.Should().NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
-
-        // サーバーファイルそのものが出ない（ファイルが 1 つだけであること）は決まった行 files-sync-without-remote-services-single-file
-
-        var content = string.Concat(files.Values);
-
-        // 同期エンジンと直結経路は出る
-        content.Should().Contain("public sealed class SyncEngine");
-        content.Should().Contain("public sealed class DirectSyncSource<TEntity, TKey>");
-        content.Should().Contain("AddGeneratedDirectSyncSources");
-
-        // HTTP 経路（転送エンベロープ・固定基底・per-entity クライアント・DI）は 1 つも出ない
-        content.Should().NotContain("RemoteSyncOperations");
-        content.Should().NotContain("RemoteSyncChangesRequest");
-        content.Should().NotContain("HttpSyncServerSource");
-        content.Should().NotContain("AddGeneratedHttpSyncSources");
-        content.Should().NotContain("MapSyncEndpoints");
-    }
-
-    /// <summary>
     /// 同期支援 ON × リモートサービス ON では、同期専用エンドポイントと HTTP 差分ソースが両側に出る。
     /// </summary>
     /// <remarks>
@@ -133,6 +59,7 @@ public class SyncSupportGenerationTests
     /// 同期できず、しかもコンパイルは通る）。ルート名は既存のリモート面と同じ規則で、クライアントとサーバーが
     /// 同じ定数（<c>RemoteSyncOperations</c>）から組み立てることで食い違いようがない形にしている。
     /// </remarks>
+    // 残す理由（P3-4b）：経路の文字列の組み立て（補間の形と区切りの `/`＝書式）。構造の表明（エンドポイントの張り方・定数の参照・HTTP 差分ソースの登録）は行 code-sync-remote-services-emit-endpoints-and-http-sources へ移した
     [Fact(
         DisplayName = "同期支援 × リモートサービスで同期専用エンドポイントと HTTP 差分ソースが出る"
     )]
@@ -144,33 +71,10 @@ public class SyncSupportGenerationTests
 
         var server = files[SyncFixtureDefinition.RemoteServerOutputFileName];
 
-        // 同期対象テーブルごとに 1 行ずつ（漏れたテーブルは黙って同期不能になる）
-        server.Should().Contain("MapSyncEndpoints<SyncOrderEntity, int>(group, \"SyncOrder\");");
-        server
-            .Should()
-            .Contain("MapSyncEndpoints<SyncOrderLineEntity, int>(group, \"SyncOrderLine\");");
-
         // 経路はクライアントと共有の定数から組み立てる（片側だけ変えても食い違わない）
         server.Should().Contain("$\"{entityRoute}/{RemoteSyncOperations.Ceiling}\"");
         server.Should().Contain("$\"{entityRoute}/{RemoteSyncOperations.Changes}\"");
         server.Should().Contain("$\"{entityRoute}/{RemoteSyncOperations.Keys}\"");
-
-        // エンドポイントは差分ソースの薄い remoting（実装の二重化をしない）
-        server
-            .Should()
-            .Contain(
-                "context.RequestServices.GetRequiredService<ISyncServerSource<TEntity, TKey>>()"
-            );
-
-        var main = files[SyncFixtureDefinition.OutputFileName];
-        main.Should().Contain("public sealed class HttpSyncServerSource<TEntity, TKey>");
-        main.Should().Contain("AddHttpSource<SyncOrderEntity, int>(");
-        main.Should().Contain("AddHttpSource<SyncOrderLineEntity, int>(");
-        main.Should().Contain("public static IServiceCollection AddGeneratedHttpSyncSources(");
-
-        // 転送経路の選択は DI 1 行の差でしかない（直結の登録も併存する）
-        main.Should().Contain("public static IServiceCollection AddGeneratedDirectSyncSources(");
-        main.Should().Contain("public static IServiceCollection AddGeneratedSyncEngine(");
     }
 
     /// <summary>
@@ -181,6 +85,7 @@ public class SyncSupportGenerationTests
     /// なる。検査はテーブルを 1 つでも取りこぼすとそのテーブルだけ黙って抜けるので、対象ごとに 1 件ずつ
     /// 名指しで表明する（呼び出し側は <c>MapGeneratedRemoteEndpoints</c> の 1 行だけ）。
     /// </remarks>
+    // 残す理由（P3-4b）：例外メッセージの文言（例外の文言）。構造の表明（検査の呼び出し・順・全テーブルぶんの表）は行 code-sync-endpoints-check-source-registration-at-mapping-time へ移した
     [Fact(DisplayName = "同期エンドポイントはマップ時に差分ソースの登録を全テーブル分検査する")]
     public void SyncEndpoints_CheckSourceRegistrationAtMappingTime()
     {
@@ -189,33 +94,6 @@ public class SyncSupportGenerationTests
         diagnostics.Should().NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
 
         var server = files[SyncFixtureDefinition.RemoteServerOutputFileName];
-
-        // マップ側は 1 行（エンドポイントを張る前に検査する）
-        server.Should().Contain("RequireSyncSources(endpoints.ServiceProvider);");
-
-        // 検査は「登録の有無だけを問う面」で行う＝実体を作らずスコープにも触れない
-        server
-            .Should()
-            .Contain("services.GetService<IServiceProviderIsService>() is not { } registrations");
-
-        // 検査そのものは表を 1 周するだけ（per-entity に増えるのは表の行だけ）
-        server.Should().Contain("foreach (var (service, name) in SyncSourceServices)");
-        server.Should().Contain("if (!registrations.IsService(service))");
-
-        // 同期対象テーブルごとに 1 行（漏れたテーブルは検査から静かに抜ける）。
-        // 報告名は型から導かず書き下ろす＝メッセージがコードと同じ綴り（Int32 ではなく int）になる
-        server
-            .Should()
-            .Contain(
-                "(typeof(ISyncServerSource<SyncOrderEntity, int>), "
-                    + "\"ISyncServerSource<SyncOrderEntity, int>\"),"
-            );
-        server
-            .Should()
-            .Contain(
-                "(typeof(ISyncServerSource<SyncOrderLineEntity, int>), "
-                    + "\"ISyncServerSource<SyncOrderLineEntity, int>\"),"
-            );
 
         // 例外は「何をすべきか」まで書く（クライアント側 fail-fast と同水準）
         server.Should().Contain("Call AddGeneratedDirectSyncSources on the server's service");
@@ -242,41 +120,6 @@ public class SyncSupportGenerationTests
             .Contain(
                 "The key keeps this client apart from the one <c>AddGeneratedHttpSyncSources</c> builds as well"
             );
-    }
-
-    /// <summary>
-    /// 同期支援 ON では固定エンジン・記述子・直結差分ソース・デコレータ・DI 登録がすべて出力される。
-    /// </summary>
-    [Fact(DisplayName = "同期支援 ON で固定エンジン・記述子・差分ソース・デコレータ・DI が出る")]
-    public void SyncSupportOn_EmitsEngineAndPerEntityCode()
-    {
-        var (files, diagnostics) = Generate(Diagram(), SyncOptions());
-
-        diagnostics.Should().NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
-
-        var content = string.Concat(files.Values);
-        content.Should().Contain("public sealed class SyncEngine");
-        content.Should().Contain("public sealed class SyncJournal");
-        content.Should().Contain("public sealed class SyncTable<TEntity, TKey>");
-        content.Should().Contain("public sealed class DirectSyncSource<TEntity, TKey>");
-        content.Should().Contain("public static class GeneratedSyncTables");
-        content
-            .Should()
-            .Contain(
-                "public static SyncTableDescriptor<SyncOrderEntity, int> SyncOrder { get; } ="
-            );
-        content
-            .Should()
-            .Contain(
-                "public static SyncTableDescriptor<SyncOrderLineEntity, int> SyncOrderLine { get; } ="
-            );
-        content.Should().Contain("public sealed class JournalingSyncOrderRepository");
-        content.Should().Contain("public sealed class JournalingSyncOrderLineRepository");
-        content.Should().Contain("AddGeneratedSyncSupport");
-
-        // テーブルごとのクラスはもう出ない（記述子 1 つが同じ役目を果たす）
-        content.Should().NotContain("class SyncOrderSyncTable");
-        content.Should().NotContain("class SyncOrderDirectSyncSource");
     }
 
     /// <summary>
@@ -328,6 +171,7 @@ public class SyncSupportGenerationTests
     /// 全ドット分割にすると <c>dbo.sync.orders</c> のような名前で <c>[dbo].[sync].[orders]</c> という
     /// 存在しないオブジェクトを指し、DDL・CRUD が読み書きするテーブルと同期 SQL が食い違う。
     /// </remarks>
+    // 残す理由（P3-4b）：SQL Server の SQL の断片（[dbo].[sync.orders] の分割クォート）。SQLite 側の SQL は行 exec-sync-dotted-table-name-local-sql-quotes-at-first-dot（別 DB を dbo として付けた SQLite で実行）へ移した
     [Fact(DisplayName = "ドット付きテーブル名の同期 SQL は最初のドットだけで分割クォートされる")]
     public void SyncSql_DottedTableName_QuotesAtFirstDotOnly()
     {
@@ -341,38 +185,7 @@ public class SyncSupportGenerationTests
         var content = string.Concat(files.Values);
 
         content.Should().Contain("FROM [dbo].[sync.orders]");
-        content.Should().Contain("FROM \\\"dbo\\\".\\\"sync.orders\\\"");
         content.Should().NotContain("[dbo].[sync].[orders]");
-    }
-
-    /// <summary>
-    /// decimal 主キーのジャーナルキー文字列化が、スケールを正規化して指数表記を使わない共有の書式
-    /// （<c>SyncKeyText.FormatDecimal</c>）を通り、読み取りと以前の形の書き直しも同じ所の関数を通ることを検証する。
-    /// </summary>
-    /// <remarks>
-    /// SQL Server は宣言スケールへ揃えて返し（decimal(10,2) の 1.5 は 1.50）、SQLite は書き込んだ綴りを
-    /// 保存する（1.5 のまま＝実測）。素の ToString だと同じ行のキー文字列がサーバーとローカルで食い違い、
-    /// 削除伝搬・ack・pending の序数照合がすべて外れる。値そのものの往復は <c>CodegenCaseTests</c> の行 <c>probe-sync-key-text-decimal-key</c>。
-    /// </remarks>
-    [Fact(DisplayName = "decimal 主キーのキー文字列化は共有の書式を通り、読み取りと書き直しも持つ")]
-    public void SyncKeyText_DecimalPrimaryKey_NormalizesScale()
-    {
-        var diagram = Diagram();
-        diagram
-            .Entities.First(e => e.TableName == "sync_orders")
-            .Columns.First(c => c.Name == "order_id")
-            .DataType = "decimal(10,2)";
-
-        var (files, diagnostics) = Generate(diagram, SyncOptions());
-
-        diagnostics.Should().NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
-
-        var content = string.Concat(files.Values);
-
-        content.Should().Contain("FormatKey = key => SyncKeyText.FormatDecimal(key),");
-        content.Should().Contain("ParseKey = keyText => SyncKeyText.ParseDecimal(keyText),");
-        content.Should().Contain("NormalizeKeyText = SyncKeyText.WithoutDecimalExponent,");
-        content.Should().NotContain("\"G29\"");
     }
 
     /// <summary>
@@ -484,198 +297,35 @@ public class SyncSupportGenerationTests
     }
 
     /// <summary>
-    /// 循環参照のある図でも、循環の外のテーブルは親の後ろへ並ぶ（行き詰まったら循環に属するテーブルを宣言順で 1 つずつ先に出す）
-    /// </summary>
-    /// <remarks>
-    /// 宣言順 comments, users, teams で users ⇄ teams が循環し、comments が users を参照する図。行き詰まった時点で残りを宣言順に
-    /// 全部出していた頃は Comment → User → Team の順になり、子の comments が親の users より前へ出ていた。
-    /// </remarks>
-    [Fact(DisplayName = "循環参照のある図でも循環の外の子は親の後ろへ並ぶ")]
-    public void SyncTables_CycleDoesNotPullOutsideChildBeforeParent()
-    {
-        static Entity Table(string name, out Column id)
-        {
-            id = new Column
-            {
-                Name = "id",
-                DataType = "int",
-                IsPrimaryKey = true,
-                IsNullable = false,
-            };
-            return new Entity { TableName = name, Columns = [id] };
-        }
-
-        static Column AddForeignKey(Entity entity, string name)
-        {
-            var column = new Column { Name = name, DataType = "int" };
-            entity.Columns.Add(column);
-            return column;
-        }
-
-        var comments = Table("comments", out _);
-        var users = Table("users", out var userId);
-        var teams = Table("teams", out var teamId);
-        var commentUser = AddForeignKey(comments, "user_id");
-        var userTeam = AddForeignKey(users, "team_id");
-        var teamLead = AddForeignKey(teams, "lead_user_id");
-
-        Relationship Reference(Entity parent, Column parentKey, Entity child, Column childKey) =>
-            new()
-            {
-                SourceEntityId = parent.Id,
-                TargetEntityId = child.Id,
-                Type = RelationshipType.OneToMany,
-                ColumnPairs = [new RelationshipColumnPair(parentKey.Id, childKey.Id)],
-            };
-
-        var diagram = new ErDiagram
-        {
-            TargetDbms = "sqlserver",
-            Entities = [comments, users, teams],
-            Relationships =
-            [
-                Reference(users, userId, comments, commentUser),
-                Reference(teams, teamId, users, userTeam),
-                Reference(users, userId, teams, teamLead),
-            ],
-        };
-
-        var (files, diagnostics) = Generate(diagram, SyncOptions());
-
-        diagnostics.Should().NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
-
-        var content = string.Concat(files.Values);
-        int IndexOf(string entityName) =>
-            content.IndexOf(
-                $"AddSyncTable<{entityName}Entity, int, I{entityName}Repository>(",
-                StringComparison.Ordinal
-            );
-
-        IndexOf("User").Should().BeGreaterThan(-1);
-        IndexOf("User").Should().BeLessThan(IndexOf("Comment"), "comments は users の子");
-        IndexOf("Comment").Should().BeLessThan(IndexOf("Team"), "循環の残りは宣言順");
-    }
-
-    /// <summary>
-    /// DI 登録は FK トポロジカル順（親→子）でテーブルを並べる（エンジンはこの順で適用・逆順で削除する）。
-    /// </summary>
-    [Fact(
-        DisplayName = "DI 登録の ISyncTable は FK 順（親 sync_orders → 子 sync_order_lines）で並ぶ"
-    )]
-    public void SyncTables_AreRegisteredInForeignKeyOrder()
-    {
-        var (files, _) = Generate(Diagram(), SyncOptions());
-        var content = string.Concat(files.Values);
-
-        var parentIndex = content.IndexOf(
-            "AddSyncTable<SyncOrderEntity, int, ISyncOrderRepository>(",
-            StringComparison.Ordinal
-        );
-        var childIndex = content.IndexOf(
-            "AddSyncTable<SyncOrderLineEntity, int, ISyncOrderLineRepository>(",
-            StringComparison.Ordinal
-        );
-
-        parentIndex.Should().BeGreaterThan(-1);
-        childIndex.Should().BeGreaterThan(-1);
-        parentIndex
-            .Should()
-            .BeLessThan(
-                childIndex,
-                "ダウンロードの適用は親→子でなければ子行が存在しない親を参照して FK 制約に触れる"
-            );
-    }
-
-    /// <summary>
     /// ジャーナル記録デコレータが全書き込み入口（Insert / Update / Delete / BulkInsert / Save×2）を覆う。
     /// </summary>
     /// <remarks>
     /// 保存フック（<c>ISaveHook</c>）はグラフ保存でしか発火せず直接 CRUD を素通しするため、
     /// デコレータ方式を採った理由そのものがこの網羅性にある。1 つでも抜けるとオフライン編集が黙って失われる。
     /// </remarks>
+    // 残す理由（P3-4b）：SyncGraphRecorder の RowState の比較の向き（== Removed と != Unchanged＝式本体）。構造の表明（全書き込み入口の記録・読み取りの素通し・削除前の読み・per-type の委譲・走査）は行 code-sync-journaling-decorator-covers-every-write-entry-point へ移した
     [Fact(DisplayName = "デコレータは全書き込み入口でジャーナルへ記録する（対の経路監査）")]
     public void JournalingDecorator_CoversEveryWriteEntryPoint()
     {
         var (files, _) = Generate(Diagram(), SyncOptions());
-        var content = string.Concat(files.Values);
 
-        // 書き込み入口の網羅は汎用基底（第 10 次 A-2 で集約）が持つ:
-        // 直接 CRUD と一括追加は「アップサート」として記録し、削除は記録フック経由・グラフ保存は
-        // カスケード閉包の記録（SyncGraphRecorder）を先に呼ぶ。どの入口も記録と業務書き込みを
-        // RecordAndWriteAsync（ローカルの書き込みロックの内側で 1 組）へ渡す
-        var journalingBase = ExtractClass(
-            content,
-            "public abstract class JournalingRepositoryBase<TEntity, TKey>"
-        );
-        journalingBase.Should().Contain("public async Task InsertAsync(");
-        journalingBase.Should().Contain("public Task<bool> UpdateAsync(");
-        journalingBase.Should().Contain("public Task<int> BulkInsertAsync(");
-        journalingBase.Should().Contain("public Task<bool> DeleteAsync(");
-        journalingBase.Should().Contain("GraphRecorder.RecordSaveAsync(");
-        journalingBase.Should().Contain("GraphRecorder.CollectSave(");
-        CountOccurrences(journalingBase, "return RecordAndWriteAsync(")
-            .Should()
-            .Be(
-                6,
-                "Update・BulkInsert・Delete・SaveAsync×2・無制限バイナリ列の書き込みはロックの内側で記録と書き込みを 1 組にする"
-            );
-        journalingBase.Should().Contain("await RecordAndWriteAsync(", "Insert も同じ");
-        journalingBase.Should().Contain("Journal.Gate.WriteExclusiveAsync(");
-
-        // 読み取り経路は素通し（記録しない）
-        journalingBase.Should().Contain("public SqlQuery<TEntity> Query() => Inner.Query();");
-
-        // 削除は「行が消える前に読む」ことでミラー版を捕まえ、版ガード付きで再生できるようにする
-        // （版ありサブクラス基底の担当）
-        var versionedBase = ExtractClass(
-            content,
-            "public abstract class JournalingRepository<TEntity, TKey>"
-        );
-        versionedBase
-            .Should()
-            .Contain("var existing = await Inner.GetByIdAsync(id, cancellationToken)");
-        versionedBase.Should().Contain("SyncJournalOperation.Delete");
-
-        // per-type はテーブルの記述子と共有レコーダを基底へ渡すだけ（契約固有メンバの転送を除く）
-        var decorator = ExtractClass(content, "public sealed class JournalingSyncOrderRepository");
-        decorator.Should().Contain(": JournalingRepository<SyncOrderEntity, int>");
-        decorator.Should().Contain("GeneratedSyncTables.SyncOrder,");
-        decorator.Should().Contain("GeneratedSyncTables.GraphRecorder");
-
-        // テーブル名・キー整形・グラフ記録の委譲は汎用コアが記述子から引く（per-type には出ない）
-        decorator.Should().NotContain("protected override string TableName =>");
-        decorator.Should().NotContain("RecordSaveAsync(");
-
-        // 重複事前チェックはランタイム共通面の member なので、素通しは汎用コア側が 1 回だけ持つ
-        decorator
-            .Should()
-            .NotContain("public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(");
-        ExtractClass(content, "public abstract class JournalingRepositoryBase<TEntity, TKey>")
-            .Should()
-            .Contain("public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(");
-
-        // RowState の分岐と子の走査は SyncGraphRecorder 側にある（保存側の決定手順のミラー）。
-        // 走査は保存側と同じ 1 つの列挙（EntityBase.EnumerateCascadeChildren）で、テーブルごとに
-        // 生成された再帰メソッドではない＝「同じ走査の 2 実装」がそもそも存在しない
+        // RowState の分岐は SyncGraphRecorder 側にある（保存側の決定手順のミラー）
         var recorder = ExtractClass(
             string.Concat(files.Values),
             "public sealed class SyncGraphRecorder"
         );
         recorder.Should().Contain("if (entity.RowState == RowState.Removed)");
         recorder.Should().Contain("if (entity.RowState != RowState.Unchanged");
-        recorder.Should().Contain("foreach (var child in entity.EnumerateCascadeChildren())");
-        recorder.Should().Contain("SyncJournalOperation.Delete");
-        recorder.Should().NotContain("SyncOrderEntity");
     }
 
     /// <summary>ループ防止の抑制フラグを、エンジンの書き込み経路とジャーナル記録の双方が参照する。</summary>
+    // 残す理由（P3-4b）：抑制の文の形（`if (SyncSession.IsSuppressed)` の判定と `using (SyncSession.Suppress())` の範囲＝式本体）。構造の表明（SyncSession の宣言・エンジンとジャーナル記録の双方の参照）は行 code-sync-session-suppresses-journaling-for-engine-writes へ移した
     [Fact(DisplayName = "同期エンジンの書き込みは SyncSession でジャーナル記録を抑制する")]
     public void SyncEngine_SuppressesJournalingForItsOwnWrites()
     {
         var (files, _) = Generate(Diagram(), SyncOptions());
         var content = string.Concat(files.Values);
 
-        content.Should().Contain("public static class SyncSession");
         content.Should().Contain("if (SyncSession.IsSuppressed)");
         content.Should().Contain("using (SyncSession.Suppress())");
     }
@@ -695,6 +345,7 @@ public class SyncSupportGenerationTests
     /// <c>NotSupportedException</c> ③デコレータの Delete は事前読みなしで null 版を記録 ④サーバーの同期
     /// エンドポイントは版なしテーブルだけ <c>MapVersionlessSyncEndpoints</c>（SyncPage＋SyncKeys）を張る。
     /// </remarks>
+    // 残す理由（P3-4b）：SQL Server の SQL の断片（版なしの記述子のキー順ページング SQL・版ありのソースの MIN_ACTIVE_ROWVERSION）。構造の表明（記述子の版・登録・ソース・デコレータの形）は行 code-sync-mixed-diagram-versionless-shapes へ移した（エンドポイントの選別は行 code-sync-versionless-endpoint-map-with-versionless-table へ任せた）
     [Fact(
         DisplayName = "混在図の版なしテーブルは後勝ち専用の生成形（記述子・ソース・エンドポイント）になる"
     )]
@@ -705,154 +356,13 @@ public class SyncSupportGenerationTests
         diagnostics.Should().NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
         var content = string.Concat(files.Values);
 
-        // ① 記述子が版の有無を宣言し、登録側がその値で固定クラスを選ぶ
-        var noteDescriptor = ExtractDescriptor(content, "SyncNoteEntity", "SyncNote");
-        noteDescriptor.Should().Contain("IsVersionless = true,");
-        var orderDescriptor = ExtractDescriptor(content, "SyncOrderEntity", "SyncOrder");
-        orderDescriptor.Should().Contain("IsVersionless = false,");
-        content.Should().Contain("new VersionlessSyncTable<TEntity, TKey>(");
-        content.Should().Contain("return new SyncTable<TEntity, TKey>(");
-        content.Should().Contain("new VersionlessDirectSyncSource<TEntity, TKey>(");
-
-        // ② 走査の形（版あり＝版の昇順／版なし＝キー順ページング）は固定側が持ち、
-        //    記述子はその方言 SQL と版アクセサの有無だけを運ぶ
-        noteDescriptor.Should().Contain("WHERE [note_id] > @afterKey ORDER BY [note_id]");
-        noteDescriptor.Should().NotContain("ServerChangesSql");
-        noteDescriptor.Should().NotContain("ReadRowVersion");
-        orderDescriptor.Should().Contain("ServerChangesSql =");
-        orderDescriptor.Should().Contain("ReadRowVersion = entity => entity.RowVer,");
-        orderDescriptor.Should().NotContain("ServerPageFirstSql");
-
-        // 基底側の両アーム: 版ありは MIN_ACTIVE_ROWVERSION の ceiling・版なしはキー順ページングと null ceiling
+        // 走査の形（版あり＝版の昇順／版なし＝キー順ページング）は固定側が持ち、記述子はその方言 SQL を運ぶ
+        ExtractDescriptor(content, "SyncNoteEntity", "SyncNote")
+            .Should()
+            .Contain("WHERE [note_id] > @afterKey ORDER BY [note_id]");
         ExtractClass(content, "public sealed class DirectSyncSource<TEntity, TKey>")
             .Should()
             .Contain("MIN_ACTIVE_ROWVERSION()");
-        var versionlessSourceBase = ExtractClass(
-            content,
-            "public sealed class VersionlessDirectSyncSource<TEntity, TKey>"
-        );
-        versionlessSourceBase.Should().Contain("GetFirstPageAsync");
-        versionlessSourceBase.Should().Contain("Task.FromResult<byte[]?>(null)");
-
-        // ③ 版なしデコレータは版なし基底（Delete は事前読みなし・null 版で記録）を継承し、
-        //    版ありデコレータは版あり基底（事前読み＋ミラー版）＋ ReadRowVersion override を持つ
-        var noteDecorator = ExtractClass(
-            content,
-            "public sealed class JournalingSyncNoteRepository"
-        );
-        noteDecorator.Should().Contain(": VersionlessJournalingRepository<SyncNoteEntity, int>");
-        noteDecorator.Should().NotContain("ReadRowVersion");
-        var orderDecorator = ExtractClass(
-            content,
-            "public sealed class JournalingSyncOrderRepository"
-        );
-        orderDecorator.Should().Contain(": JournalingRepository<SyncOrderEntity, int>");
-
-        // ④ サーバー側エンドポイントの選別（版あり＝3 本・版なし＝SyncPage＋SyncKeys）
-        var server = files[SyncFixtureDefinition.RemoteServerOutputFileName];
-        server.Should().Contain("MapSyncEndpoints<SyncOrderEntity, int>(group, \"SyncOrder\");");
-        server
-            .Should()
-            .Contain("MapVersionlessSyncEndpoints<SyncNoteEntity, int>(group, \"SyncNote\");");
-        server.Should().NotContain("MapVersionlessSyncEndpoints<SyncOrderEntity");
-
-        // Info 診断が版なしテーブルを後勝ち専用として名指しすることは決まった行 diag-sync-mixed-diagram-names-versionless-table-in-info
-    }
-
-    /// <summary>
-    /// 版なし専用のエンドポイントマップ（<c>MapVersionlessSyncEndpoints</c>）は、呼び出し側になる版なしテーブルが
-    /// 1 つでもあるときだけ出力される（版ありだけの図ではメソッドごと消える＝死蔵コードを残さない）。
-    /// </summary>
-    [Fact(DisplayName = "版なし専用エンドポイントのマップは版なしテーブルが在るときだけ出力される")]
-    public void VersionlessEndpointMap_EmittedOnlyWhenAVersionlessTableExists()
-    {
-        // 版あり＋版なしの混在図: メソッドと呼び出しの両方が出る
-        var (mixedFiles, _) = Generate(Diagram(), SyncOptions());
-        var mixedServer = mixedFiles[SyncFixtureDefinition.RemoteServerOutputFileName];
-        mixedServer
-            .Should()
-            .Contain("private static void MapVersionlessSyncEndpoints<TEntity, TKey>(");
-        mixedServer
-            .Should()
-            .Contain("MapVersionlessSyncEndpoints<SyncNoteEntity, int>(group, \"SyncNote\");");
-
-        // 版なしテーブルを外した図: 呼び出しが無いのでメソッドも出ない（版ありのマップは従来どおり）
-        var versionedOnly = Diagram();
-        var removed = versionedOnly.Entities.Where(e => e.TableName == "sync_notes").ToList();
-        versionedOnly.Relationships.RemoveAll(r =>
-            removed.Any(e => e.Id == r.SourceEntityId || e.Id == r.TargetEntityId)
-        );
-        versionedOnly.Entities.RemoveAll(e => e.TableName == "sync_notes");
-
-        var (versionedFiles, versionedDiagnostics) = Generate(versionedOnly, SyncOptions());
-        versionedDiagnostics
-            .Should()
-            .NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
-
-        var versionedServer = versionedFiles[SyncFixtureDefinition.RemoteServerOutputFileName];
-        versionedServer.Should().NotContain("MapVersionlessSyncEndpoints");
-        versionedServer
-            .Should()
-            .Contain("MapSyncEndpoints<SyncOrderEntity, int>(group, \"SyncOrder\");");
-        versionedServer.Should().Contain("RemoteSyncOperations.Ceiling");
-    }
-
-    /// <summary>
-    /// rowversion 列を 1 つも持たない図でも生成は成立する（全テーブルが後勝ち専用の版なしテーブルになる）。
-    /// </summary>
-    /// <remarks>
-    /// かつては「rowversion 列を持つテーブルが 1 つも無い＝生成時エラー」だったが、版なしテーブルの後勝ち同期
-    /// 対応で列の有無は「対象かどうか」でなく「モード素材」になった。全版なし図は LastWriteWins ラン専用の
-    /// 生成物として有効で、記述子は VersionlessSyncTable 派生になる。
-    /// </remarks>
-    [Fact(DisplayName = "rowversion 列が 1 つも無い図でも同期支援は生成できる（全テーブル後勝ち）")]
-    public void SyncSupport_AllowsAllVersionlessDiagram()
-    {
-        var diagram = Diagram();
-
-        foreach (var entity in diagram.Entities)
-        {
-            entity.Columns.RemoveAll(column => column.DataType == "rowversion");
-        }
-
-        var (files, diagnostics) = Generate(diagram, SyncOptions());
-
-        diagnostics.Should().NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
-        var content = string.Concat(files.Values);
-        var descriptor = ExtractDescriptor(content, "SyncOrderEntity", "SyncOrder");
-        descriptor.Should().Contain("IsVersionless = true,");
-        descriptor.Should().NotContain("ServerChangesSql");
-        descriptor.Should().NotContain("LocalAnchorSql");
-    }
-
-    /// <summary>
-    /// 除外列があるとき、blob の単独編集（Write アクセサ）もジャーナルへ記録される。
-    /// </summary>
-    /// <remarks>
-    /// blob だけを差し替える編集は Insert / Update / Save / Delete のいずれも通らないため、デコレータが
-    /// Write アクセサを包まなければオフライン編集として永久に検出されない。読み取り（Read アクセサ）は
-    /// 素通しであることも同時に固定する（読みを記録すると、取得しただけの行が送り返される）。
-    /// </remarks>
-    [Fact(DisplayName = "ジャーナル記録デコレータは除外列の Write アクセサも journal-first で包む")]
-    public void SyncDecorator_JournalsUnboundedBinaryWrites()
-    {
-        var (files, _) = Generate(Diagram(), SyncOptions());
-        var decorator = ExtractClass(
-            string.Concat(files.Values),
-            "public sealed class JournalingSyncOrderRepository"
-        );
-
-        // 読みは素通し
-        decorator
-            .Should()
-            .Contain("=> _inner.ReadAttachmentAsync(id, destination, cancellationToken);");
-
-        // 書きは journal-first（記録 → 実書き込み）を基底のヘルパーがロックの内側で行う
-        decorator.Should().Contain("public Task<bool> WriteAttachmentAsync(");
-        decorator.Should().Contain("RecordUnboundedBinaryWriteAsync(");
-        decorator
-            .Should()
-            .Contain("() => _inner.WriteAttachmentAsync(id, source, length, cancellationToken)");
     }
 
     /// <summary>
@@ -862,259 +372,17 @@ public class SyncSupportGenerationTests
     /// エンジンはこの面しか見ないため、3 実装のどれか 1 つが欠けると「その転送経路でだけ blob が運ばれない」
     /// という、型検査にもドリフトにも出ない非対称になる。
     /// </remarks>
+    // 残す理由（P3-4b）：HTTP サーバー側の BinaryColumns の条件式（`Count == 0 ? null : this`＝式本体）。構造の表明（記述子の列名・アクセサ・ローカルと直結の面・HTTP の委譲）は行 code-sync-binary-columns-implemented-on-three-surfaces へ移した
     [Fact(DisplayName = "除外列のコピー面はローカル・直結・HTTP の 3 実装として出力される")]
     public void SyncBinaryColumns_AreImplementedOnAllThreeSurfaces()
     {
         var (files, _) = Generate(Diagram(), SyncOptions());
         var content = string.Concat(files.Values);
 
-        // 列ごとのアクセサは記述子が 1 度だけ運ぶ（具象契約を知るのはこのラムダだけ）
-        var descriptor = ExtractDescriptor(content, "SyncOrderEntity", "SyncOrder");
-        descriptor.Should().Contain("UnboundedBinaryColumnNames = [\"Attachment\"],");
-        descriptor
-            .Should()
-            .Contain(
-                "((ISyncOrderRepository)repository).ReadAttachmentAsync(id, destination, cancellationToken)"
-            );
-        descriptor
-            .Should()
-            .Contain(
-                "((ISyncOrderRepository)repository).WriteAttachmentAsync(id, source, length, cancellationToken)"
-            );
-
-        // ローカル（記述子側）: 同じ表をローカルリポジトリの上で開く
-        ExtractClass(content, "public abstract class SyncTableBase<TEntity, TKey>")
-            .Should()
-            .Contain("new SyncRepositoryBinaryColumns<TEntity, TKey>(descriptor, local)");
-
-        // 直結サーバー: 同じ表をサーバーリポジトリ（＝Writer）の上で開く
-        ExtractClass(content, "public abstract class DirectSyncSourceBase<TEntity, TKey>")
-            .Should()
-            .Contain("new SyncRepositoryBinaryColumns<TEntity, TKey>(descriptor, writer)");
-
-        // HTTP サーバー: 既存のバイナリエンドポイント（基底のヘルパー）へ委譲
-        var httpSource = ExtractClass(
-            content,
-            "public sealed class HttpSyncServerSource<TEntity, TKey>"
-        );
-        httpSource
+        // HTTP サーバー：除外列が無ければコピー面を持たず、あれば自分自身がその面になる
+        ExtractClass(content, "public sealed class HttpSyncServerSource<TEntity, TKey>")
             .Should()
             .Contain("_descriptor.UnboundedBinaryColumnNames.Count == 0 ? null : this;");
-        httpSource.Should().Contain("DownloadUnboundedBinaryColumnAsync(");
-    }
-
-    /// <summary>
-    /// 除外列を持たない図では、コピー面も洗い替えの損失ガードの材料も 1 つも出ない。
-    /// </summary>
-    /// <remarks>両アームの名指し（片方だけ見ると「常に出る」への退行が承認される）。</remarks>
-    [Fact(DisplayName = "除外列が無ければ ISyncBinaryColumns の実装は 1 つも出ない")]
-    public void SyncBinaryColumns_AreAbsentWithoutExcludedColumns()
-    {
-        var (files, _) = Generate(
-            Diagram(),
-            SyncOptions() with
-            {
-                ExcludeUnboundedBinaryColumns = false,
-            }
-        );
-        var content = string.Concat(files.Values);
-
-        // 固定エンジン側の宣言（インターフェイス・基底の受け口）は常にある
-        content.Should().Contain("public interface ISyncBinaryColumns<TKey>");
-
-        // per-entity の実装は 1 つも無い
-        content.Should().NotContain("LocalBinaryColumns => this");
-        content.Should().NotContain("BinaryColumns => this");
-        content.Should().NotContain("ReadUnboundedBinaryAsync(\n");
-        content.Should().NotContain("WriteAttachmentAsync");
-    }
-
-    /// <summary>
-    /// 記述子は、単一列で同期対象の親の主キーを参照する外部キーを親参照として持ち、親の側は自分を参照する
-    /// テーブルの名前を持つ。
-    /// </summary>
-    [Fact(DisplayName = "記述子は単一列の外部キーを親参照として、参照される側は子テーブル名を持つ")]
-    public void Descriptors_CarryParentReferencesAndReferencingTables()
-    {
-        var (files, _) = Generate(Diagram(), SyncOptions());
-        var content = string.Concat(files.Values);
-
-        var line = ExtractDescriptor(content, "SyncOrderLineEntity", "SyncOrderLine");
-        line.Should().Contain("new SyncParentReference<SyncOrderLineEntity>(");
-        line.Should().Contain("\"sync_orders\",");
-        line.Should()
-            .Contain(
-                "entity => entity.OrderId is { } value ? value.ToString(CultureInfo.InvariantCulture) : null"
-            );
-        line.Should().NotContain("ReferencingTableNames");
-
-        var order = ExtractDescriptor(content, "SyncOrderEntity", "SyncOrder");
-        order.Should().NotContain("ParentReferences");
-        order.Should().Contain("ReferencingTableNames = [\"sync_order_lines\", \"sync_notes\"],");
-        order
-            .Should()
-            .NotContain("UnlistedReferencingTableNames", "どの参照も LocalReferences に載る");
-    }
-
-    /// <summary>
-    /// 自己参照は親参照に含め、複数列の外部キー・一意制約の列を参照する外部キー・同期対象でない親への外部キーは
-    /// 含めない（子の行から親のキーを組み立てられない・親の記述子が無い）。被参照テーブル名は同期対象かどうかを
-    /// 問わない。
-    /// </summary>
-    [Fact(
-        DisplayName = "親参照は自己参照を含み、複数列・一意制約参照・同期対象外の親への外部キーは含めない"
-    )]
-    public void ParentReferences_CoverSelfReferenceAndSkipWhatCannotBeKeyed()
-    {
-        var diagram = Diagram();
-        var order = diagram.Entities.Single(entity => entity.TableName == "sync_orders");
-        var note = diagram.Entities.Single(entity => entity.TableName == "sync_notes");
-        var orderKey = order.Columns.Single(column => column.IsPrimaryKey);
-        var orderName = order.Columns.Single(column => column.Name == "customer_name");
-
-        // 自己参照（NULL 許容）
-        var parentOrder = new Column
-        {
-            Id = System.Guid.NewGuid(),
-            Name = "parent_order_id",
-            DataType = "int",
-            IsNullable = true,
-        };
-        order.Columns.Add(parentOrder);
-        diagram.Relationships.Add(
-            new Relationship
-            {
-                Id = System.Guid.NewGuid(),
-                SourceEntityId = order.Id,
-                TargetEntityId = order.Id,
-                Type = RelationshipType.OneToMany,
-                ColumnPairs = { new RelationshipColumnPair(orderKey.Id, parentOrder.Id) },
-            }
-        );
-
-        // 一意制約の列（主キーでない）を参照する外部キー（同じ親子の 2 本目はナビゲーション名が重なるので別テーブル）
-        var tagOwner = new Column
-        {
-            Id = System.Guid.NewGuid(),
-            Name = "owner_name",
-            DataType = "nvarchar(50)",
-            IsNullable = true,
-        };
-        var tag = new Entity
-        {
-            Id = System.Guid.NewGuid(),
-            TableName = "sync_tags",
-            Columns =
-            {
-                new Column
-                {
-                    Id = System.Guid.NewGuid(),
-                    Name = "tag_id",
-                    DataType = "int",
-                    IsPrimaryKey = true,
-                },
-                tagOwner,
-            },
-        };
-        diagram.Entities.Add(tag);
-        diagram.Relationships.Add(
-            new Relationship
-            {
-                Id = System.Guid.NewGuid(),
-                SourceEntityId = order.Id,
-                TargetEntityId = tag.Id,
-                Type = RelationshipType.OneToMany,
-                ColumnPairs = { new RelationshipColumnPair(orderName.Id, tagOwner.Id) },
-            }
-        );
-
-        // 同期対象でない親（複合主キー＝Repository 契約が無い）への外部キー
-        var category = new Entity
-        {
-            Id = System.Guid.NewGuid(),
-            TableName = "categories",
-            Columns =
-            {
-                new Column
-                {
-                    Id = System.Guid.NewGuid(),
-                    Name = "region",
-                    DataType = "int",
-                    IsPrimaryKey = true,
-                },
-                new Column
-                {
-                    Id = System.Guid.NewGuid(),
-                    Name = "code",
-                    DataType = "int",
-                    IsPrimaryKey = true,
-                },
-            },
-        };
-        diagram.Entities.Add(category);
-        var noteRegion = new Column
-        {
-            Id = System.Guid.NewGuid(),
-            Name = "region",
-            DataType = "int",
-            IsNullable = true,
-        };
-        var noteCode = new Column
-        {
-            Id = System.Guid.NewGuid(),
-            Name = "code",
-            DataType = "int",
-            IsNullable = true,
-        };
-        note.Columns.Add(noteRegion);
-        note.Columns.Add(noteCode);
-        diagram.Relationships.Add(
-            new Relationship
-            {
-                Id = System.Guid.NewGuid(),
-                SourceEntityId = category.Id,
-                TargetEntityId = note.Id,
-                Type = RelationshipType.OneToMany,
-                ColumnPairs =
-                {
-                    new RelationshipColumnPair(category.Columns[0].Id, noteRegion.Id),
-                    new RelationshipColumnPair(category.Columns[1].Id, noteCode.Id),
-                },
-            }
-        );
-
-        var (files, diagnostics) = Generate(diagram, SyncOptions());
-        diagnostics.Should().NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
-        var content = string.Concat(files.Values);
-
-        var orderDescriptor = ExtractDescriptor(content, "SyncOrderEntity", "SyncOrder");
-        orderDescriptor.Should().Contain("new SyncParentReference<SyncOrderEntity>(");
-        orderDescriptor
-            .Should()
-            .Contain(
-                "entity => entity.ParentOrderId is { } value ? value.ToString(CultureInfo.InvariantCulture) : null"
-            );
-        orderDescriptor
-            .Should()
-            .Contain(
-                "ReferencingTableNames = [\"sync_order_lines\", \"sync_notes\", \"sync_orders\", \"sync_tags\"],"
-            );
-
-        // 一意制約の列への外部キーは LocalReferences に載らない（洗い替えは、範囲の外のその表が在るだけで断る）
-        orderDescriptor.Should().Contain("UnlistedReferencingTableNames = [\"sync_tags\"],");
-        orderDescriptor.Should().NotContain("new SyncLocalReference(\"sync_tags\"");
-
-        var noteDescriptor = ExtractDescriptor(content, "SyncNoteEntity", "SyncNote");
-        CountOccurrences(noteDescriptor, "new SyncParentReference<SyncNoteEntity>(")
-            .Should()
-            .Be(1, "主キーを単一列で参照する注文への外部キーだけ");
-        noteDescriptor.Should().NotContain("\"categories\"");
-        ExtractDescriptor(content, "SyncTagEntity", "SyncTag")
-            .Should()
-            .NotContain(
-                "ParentReferences",
-                "一意制約の列への外部キーからは親のキーを組み立てられない"
-            );
     }
 
     /// <summary>1 テーブル分の記述子（<c>GeneratedSyncTables</c> の静的プロパティ初期化子）を切り出す</summary>
@@ -1148,22 +416,5 @@ public class SyncSupportGenerationTests
         );
 
         return next < 0 ? content[start..] : content[start..next];
-    }
-
-    /// <summary>部分文字列の出現回数を数える</summary>
-    private static int CountOccurrences(string text, string value)
-    {
-        var count = 0;
-
-        for (
-            var index = text.IndexOf(value, StringComparison.Ordinal);
-            index >= 0;
-            index = text.IndexOf(value, index + value.Length, StringComparison.Ordinal)
-        )
-        {
-            count++;
-        }
-
-        return count;
     }
 }

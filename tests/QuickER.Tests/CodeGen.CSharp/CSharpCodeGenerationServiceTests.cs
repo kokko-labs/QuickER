@@ -11,77 +11,10 @@ namespace QuickER.Tests.CodeGen.CSharp;
 public class CSharpCodeGenerationServiceTests
 {
     /// <summary>
-    /// 単一の生成ファイルに Entity・EditModel・EditModelBase と各種属性が出力され、using ディレクティブが重複しないことを検証する
-    /// </summary>
-    [Fact]
-    public void Generate_ShouldCreateSingleGeneratedFileWithEntityAndEditModel()
-    {
-        var customerId = Guid.NewGuid();
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "customers",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = customerId,
-                            Name = "customer_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "name",
-                            DataType = "nvarchar(100)",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        result.Files[0].Content.Should().Contain("namespace Sample.Domain;");
-        result
-            .Files[0]
-            .Content.Split("using System.ComponentModel.DataAnnotations;")
-            .Length.Should()
-            .Be(2);
-        result
-            .Files[0]
-            .Content.Split("using System.ComponentModel.DataAnnotations.Schema;")
-            .Length.Should()
-            .Be(2);
-        result.Files[0].Content.Should().Contain("public partial class CustomerEntity");
-        result.Files[0].Content.Should().Contain("public partial class CustomerEditModel");
-        result.Files[0].Content.Should().Contain("public abstract class EditModelBaseCore");
-        result.Files[0].Content.Should().Contain("[Table(\"customers\")]");
-        result.Files[0].Content.Should().Contain("[Key]");
-        result.Files[0].Content.Should().Contain("[MaxLength(100)]");
-        // EditModel は画面バインディング用の文字列プロパティを持つ
-        result.Files[0].Content.Should().Contain("public string BindingName");
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain("public partial class CustomerEditModel : EditModelBase");
-    }
-
-    /// <summary>
     /// 1対多リレーションからコレクション型ナビゲーションと NavigationReference 属性が生成され、親参照プロパティに JsonIgnore が付与されることを検証する
     /// </summary>
     /// <summary>ナビゲーションプロパティが生成され、親参照側に JsonIgnore 属性が付くことを検証する</summary>
+    // 残す理由（P3-4b）：プロパティの初期化子・JSON オプションの初期化子・式本体の条件演算子（式本体）と、型を完全修飾しない書き方（書式）。構造の表明は行 code-navigation-entity-editmodel-mapper-graph へ移した
     [Fact]
     public void Generate_ShouldCreateNavigationAndJsonIgnoreOnParentReference()
     {
@@ -153,257 +86,28 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        // NavigationReference 属性は (参照元テーブル, 参照元カラム, 参照先テーブル, 参照先カラム, IsCollection, Cascade) の 6 引数形式
-        // 子方向（コレクション）はカスケード対象 true
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain(
-                "[NavigationReference(\"customers\", \"customer_id\", \"orders\", \"customer_id\", true, true, false)]"
-            );
-        result
-            .Files[0]
-            .Content.Should()
+        var content = result.Files[0].Content;
+        // ナビゲーションの初期化子（コレクションは空のリスト・親参照は null!）
+        content
+            .Should()
             .Contain(
                 "public ICollection<OrderEntity> Orders { get; set; } = new List<OrderEntity>();"
             );
-        result.Files[0].Content.Should().Contain("[JsonIgnore]");
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain("public CustomerEntity Customer { get; set; } = null!;");
-        // 親参照（多対1の戻り）はカスケード対象外 false、IsParentReference true
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain(
-                "[NavigationReference(\"customers\", \"customer_id\", \"orders\", \"customer_id\", false, false, true)]"
-            );
-        // エンティティは EntityBase を継承し、RowState を持つ
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain("public partial class CustomerEntity : EntityBase");
-        result.Files[0].Content.Should().Contain("public abstract class EntityBaseCore");
-        // EntityBase は値比較・値ハッシュ・JSON 出力を提供する（値系はメタデータではなく自己完結の列プロパティ走査）
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain("public bool HasSameValues(EntityBaseCore? other)");
-        result.Files[0].Content.Should().Contain("public int GetValueHashCode()");
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain("public string ToJson(bool writeIndented = false)");
-        result.Files[0].Content.Should().Contain("IgnoreReadOnlyProperties = true,");
-        // ToJson を使ったディープコピー（JSON ラウンドトリップ）。戻り値は EntityBase
-        result.Files[0].Content.Should().Contain("public EntityBaseCore Clone()");
+        content.Should().Contain("public CustomerEntity Customer { get; set; } = null!;");
+        content.Should().Contain("IgnoreReadOnlyProperties = true,");
         // EntityBase が使う namespace は using に含め、テンプレートでは完全修飾しない
-        result.Files[0].Content.Should().Contain("using System.Text.Json;");
-        result.Files[0].Content.Should().Contain("using System.Text.Json.Serialization;");
-        result.Files[0].Content.Should().Contain("using System.Collections;");
-        result.Files[0].Content.Should().Contain("using System.Reflection;");
-        result.Files[0].Content.Should().NotContain("System.Text.Json.JsonSerializer");
-        result.Files[0].Content.Should().NotContain("System.Collections.StructuralComparisons");
+        content.Should().NotContain("System.Text.Json.JsonSerializer");
+        content.Should().NotContain("System.Collections.StructuralComparisons");
         // ToJson / Clone は共有 static オプションを使い回し（毎回 new しない）、循環は IgnoreCycles で安全化
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain("ReferenceHandler = ReferenceHandler.IgnoreCycles,");
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain("writeIndented ? _jsonOptionsIndented : _jsonOptions");
-        result.Files[0].Content.Should().NotContain("_cloneJsonOptions");
-
-        var content = result.Files[0].Content;
-        // EditModel も RowState を保持し、確定値変更時に Updated へ昇格する
-        content.Should().Contain("public abstract class EditModelBaseCore");
-        content.Should().Contain("public RowState RowState");
-        content.Should().Contain("public void MarkAdded() => RowState = RowState.Added;");
-        content.Should().Contain("public void MarkRemoved() => RowState = RowState.Removed;");
-        // 確定値（非バインド）setter の共通後段（通知→ロード中以外のみ横断フック＋昇格条件→MarkUpdated）は
-        // 基底 AfterConfirmedValueSet が 1 回だけ持ち、per-type はプロパティ名を渡して呼ぶ
-        content.Should().Contain("protected void AfterConfirmedValueSet(string propertyName)");
-        content.Should().Contain("if (!IsLoading)");
-        content.Should().Contain("OnConfirmedValueChanged(propertyName);");
-        content.Should().Contain("if (ShouldMarkUpdated(propertyName))");
-        content.Should().Contain("MarkUpdated();");
-        content.Should().Contain("AfterConfirmedValueSet(nameof(CustomerId));");
-        // 拡張ポイント：確定値変更の横断フックと昇格条件、SetProperty は override 可能
-        content
-            .Should()
-            .Contain("protected virtual void OnConfirmedValueChanged(string propertyName)");
-        content
-            .Should()
-            .Contain("protected virtual bool ShouldMarkUpdated(string propertyName) => true;");
-        content
-            .Should()
-            .Contain(
-                "protected virtual bool SetProperty<T>(ref T field, T value, string propertyName)"
-            );
-        content.Should().Contain("public void ExecuteLoad(Action action)");
-        // ロードの外枠（読み込み状態・入力文字列の導出・RowState 転写）は基底が持ち、具象は列コピーと後半だけを override する
-        content.Should().Contain("editModel.BeginLoad();");
-        content.Should().Contain("editModel.EndLoad();");
-        content
-            .Should()
-            .Contain(
-                "protected override void LoadColumns(CustomerEntity entity, CustomerEditModel editModel)"
-            );
-        content
-            .Should()
-            .Contain(
-                "protected override void CompleteLoad(CustomerEntity entity, CustomerEditModel editModel)"
-            );
-        // 生成の定型（EditModel 反映・コレクション化）は共通基底 MapperBase が提供し、具象 Mapper はそれを継承する
-        content.Should().Contain("public abstract partial class MapperBase<TEntity, TEditModel>");
-        content.Should().Contain(": MapperBase<CustomerEntity, CustomerEditModel>");
-        content.Should().Contain(": MapperBase<OrderEntity, OrderEditModel>");
-        // 新規入力用ファクトリ（基底が提供）は Entity を基に生成し、具象の生成フックへ橋渡しする
-        content.Should().Contain("public TEditModel CreateEditModel()");
-        content
-            .Should()
-            .Contain(
-                "protected override void AfterEditModelCreated(CustomerEditModel editModel) =>"
-            );
-        content.Should().Contain("partial void OnEditModelCreated(CustomerEditModel editModel);");
-        // ApplyToEntity は MarkUpdated を撤廃し RowState を転写、子コレクションは CreateEntities で代入する
-        content.Should().NotContain("entity.MarkUpdated();");
-        content.Should().Contain("entity.RowState = editModel.RowState;");
-        content
-            .Should()
-            .Contain(
-                "entity.Orders = new OrderMapper().CreateEntities(editModel.Orders, includeRemoved);"
-            );
-        // 削除追跡コレクションと、CreateEntities が includeRemoved 指定時に Removed 分も含める
-        content
-            .Should()
-            .Contain(
-                "public sealed partial class EditModelCollection<T> : ObservableCollection<T>"
-            );
-        content.Should().Contain("public List<TEntity> CreateEntities(");
-        content
-            .Should()
-            .Contain(
-                "editModels.RemovedItems.Select(removed => CreateEntity(removed, includeRemoved))"
-            );
-        // EditModelCollection の変更集約（HasChanges / AcceptChanges）
-        content
-            .Should()
-            .Contain(
-                "public bool HasChanges => _removed.Count > 0 || this.Any(item => item.HasGraphChanges());"
-            );
-        content.Should().Contain("public void AcceptChanges(bool includeChildren = true)");
-        // 親モデル取得（ParentModel）: 基底に保持＋通知、コレクションは OwnerModel を全要素へ伝播する
-        content.Should().Contain("public EditModelBaseCore? ParentModel => _parentModel;");
-        // 親が一意（Order の親は Customer のみ）なので OrderEditModel は型付き ParentModel を生成する
-        content.Should().Contain("public new CustomerEditModel? ParentModel =>");
-        content.Should().Contain("base.ParentModel as CustomerEditModel;");
-        content.Should().Contain("internal void SetParentModel(EditModelBaseCore? parentModel)");
-        content
-            .Should()
-            .Contain(
-                "internal void RaiseParentCollectionChanged() => OnPropertyChanged(\"ParentCollection\");"
-            );
-        content.Should().Contain("internal EditModelBaseCore? OwnerModel");
-        content.Should().Contain("item.SetParentModel(value);");
-        // EditModelCollection の一括操作・検証・並び替え API
-        content
-            .Should()
-            .Contain(
-                "public IEnumerable<EditModelError> CollectErrors(bool includeChildren = true)"
-            );
-        content.Should().Contain("this[i].CollectErrors($\"[{i}]\", includeChildren, errors);");
-        content.Should().Contain("public bool MoveTo(T item, int newIndex)");
-        content.Should().Contain("public void AddRange(IEnumerable<T> items)");
-        content.Should().Contain("public void InsertRange(int index, IEnumerable<T> items)");
-        content.Should().Contain("public void RemoveAll()");
-        content.Should().Contain("public void RemoveRange(int index, int count)");
-        // EditModel 列挙を受け取るコンストラクタと、Entity 列挙から生成する Mapper メソッド
-        content.Should().Contain("public EditModelCollection(IEnumerable<T> items)");
-        content.Should().Contain("public EditModelCollection<TEditModel> CreateEditModels(");
-        // 子コレクションナビはバッキングフィールド＋プロパティで生成され、要素の親モデルリンク（OwnerModel）を張る
-        content
-            .Should()
-            .Contain(
-                "private EditModelCollection<OrderEditModel> _orders = new EditModelCollection<OrderEditModel>();"
-            );
-        content.Should().Contain("public EditModelCollection<OrderEditModel> Orders");
-        // 子コレクションの所有権付け替えは基底ヘルパー 1 か所に集約し、具象は 2 行の委譲だけを持つ
-        content.Should().Contain("get => GetChildren(_orders);");
-        content.Should().Contain("set => SetChildren(ref _orders, value, nameof(Orders));");
-        content.Should().Contain("field.OwnerModel ??= this;");
-        content.Should().Contain("field.OwnerModel = this;");
-        content.Should().Contain("public override void ApplyToEntity(");
-        // ApplyToEditModel は子コレクションを CreateEditModels で代入し、状態は生成元 Entity を基準にする
-        content
-            .Should()
-            .Contain("editModel.Orders = new OrderMapper().CreateEditModels(entity.Orders);");
-        content.Should().Contain("editModel.RowState = entity.RowState;");
-        // EditModel.Validate（必須チェック＋ユーザー定義フック＋子への連鎖検証）
-        // 必須メッセージの既定は全 EditModel 共通の静的プロバイダ、個別調整は具象クラスの partial
-        content.Should().Contain("public static class EditModelMessages");
-        content
-            .Should()
-            .Contain("public static Func<string, string, string> Required { get; set; }");
-        // 呼び出し口（Validate）は Base 側で定義し、必須チェック本体は CRTP 層が列テーブルを回して override する
-        content.Should().Contain("public bool Validate(bool includeChildren = true)");
-        content.Should().Contain("protected virtual void ValidateSelf()");
-        content.Should().Contain("protected override void ValidateSelf()");
-        // 必須チェックは自分のエラーだけを付け外しする（変換エラーは上書きしない・値が入れば自分の分を消す）
-        content
-            .Should()
-            .Contain("EditModelMessages.Required(column.PropertyName, column.DisplayName())");
-        content.Should().Contain("ClearRequiredError(column.BindingPropertyName);");
-        // 列ごとの必須フラグは列テーブルが持つ（PK は必須）
-        content.Should().MatchRegex(@"nameof\(BindingCustomerId\),\s+true,");
-        content.Should().Contain("partial void OnValidate();");
-        content.Should().Contain("if (includeChildren)");
-        // カスケードは ChildLink レジストリに一本化。子用の仮想メソッドと空オーバーライドは廃止
-        content.Should().NotContain("ValidateChildren");
-        content.Should().NotContain("CollectChildErrors");
-        content.Should().Contain("protected virtual void RegisterChildren()");
-        content.Should().Contain("protected virtual void RegisterExtraChildren()");
-        content
-            .Should()
-            .Contain("protected void AddChild(string name, Func<EditModelBaseCore?> accessor)");
-        content
-            .Should()
-            .Contain(
-                "protected void AddChildren<T>(string name, Func<EditModelCollection<T>?> accessor)"
-            );
-        content.Should().Contain("foreach (var link in ChildLinks)");
-        // 子（カスケードナビ）を持つ EditModel は RegisterChildren を override し AddChildren で登録する
-        // （コレクションも単一子と同じ遅延アクセサ形＝ロードで差し替わった新インスタンスを見る）
-        content.Should().Contain("protected override void RegisterChildren()");
-        content.Should().Contain("AddChildren(\"Orders\", () => Orders);");
-        // グラフ全体のエラーをノードのパス付きで収集する（収集は ChildLink レジストリ経由）
-        content
-            .Should()
-            .Contain(
-                "public sealed record EditModelError(string Path, string Property, string Message);"
-            );
-        content
-            .Should()
-            .Contain(
-                "public IEnumerable<EditModelError> CollectErrors(bool includeChildren = true)"
-            );
-        content
-            .Should()
-            .Contain(
-                "internal void CollectErrors(string path, bool includeChildren, List<EditModelError> errors)"
-            );
-        content.Should().Contain("if (!includeChildren)");
-        content.Should().Contain("errors.AddRange(CollectOwnErrors(path));");
-        content.Should().Contain("link.CollectErrors(path, includeChildren, errors);");
-        content.Should().NotContain("OnCollectChildErrors");
+        content.Should().Contain("ReferenceHandler = ReferenceHandler.IgnoreCycles,");
+        content.Should().Contain("writeIndented ? _jsonOptionsIndented : _jsonOptions");
     }
 
     /// <summary>
     /// パスカルケースのテーブル名がそのままエンティティ名・ナビゲーションプロパティ名に反映されることを検証する
     /// </summary>
     /// <summary>パスカルケースのテーブル名がエンティティ名・ナビゲーション名に保持されることを検証する</summary>
+    // 残す理由（P3-4b）：ナビゲーションのプロパティの初期化子（式本体）。構造の表明は行 code-pascal-case-table-names-entity-and-navigation へ移した
     [Fact]
     public void Generate_ShouldPreservePascalCaseTableNamesInEntityAndNavigationNames()
     {
@@ -475,133 +179,17 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain("public partial class AirconditionerCategoryEntity");
-        result
-            .Files[0]
-            .Content.Should()
+        var content = result.Files[0].Content;
+        content
+            .Should()
             .Contain(
                 "public ICollection<AirconditionerEntity> Airconditioners { get; set; } = new List<AirconditionerEntity>();"
             );
-        result
-            .Files[0]
-            .Content.Should()
+        content
+            .Should()
             .Contain(
                 "public AirconditionerCategoryEntity AirconditionerCategory { get; set; } = null!;"
             );
-    }
-
-    /// <summary>スネークケースのテーブル名がパスカルケースのエンティティ名へ変換されることを検証する</summary>
-    [Fact]
-    public void Generate_ShouldConvertSnakeCaseTableNamesToPascalCaseEntityNames()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "airconditioner_category",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "airconditioner_category_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain("public partial class AirconditionerCategoryEntity");
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain("public partial class AirconditionerCategoryEditModel");
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain("public sealed partial class AirconditionerCategoryMapper");
-    }
-
-    /// <summary>多対多リレーションが警告付きで生成スキップされることを検証する</summary>
-    [Fact]
-    public void Generate_ShouldWarnAndSkipManyToManyRelationship()
-    {
-        var left = Guid.NewGuid();
-        var right = Guid.NewGuid();
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = left,
-                    TableName = "users",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "user_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                    ],
-                },
-                new Entity
-                {
-                    Id = right,
-                    TableName = "roles",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "role_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-            Relationships =
-            [
-                new Relationship
-                {
-                    Id = Guid.NewGuid(),
-                    SourceEntityId = left,
-                    TargetEntityId = right,
-                    Type = RelationshipType.ManyToMany,
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        result.Files[0].Content.Should().NotContain("ICollection<RoleEntity>");
     }
 
     /// <summary>リレーション警告の表示名が Guid でなく「親テーブル → 子テーブル」になることを検証する</summary>
@@ -685,131 +273,8 @@ public class CSharpCodeGenerationServiceTests
             .NotContain(relationship.Id.ToString(), "Guid 表示は特定に使えない");
     }
 
-    /// <summary>Entity ↔ EditModel を変換する Mapper クラスが生成されることを検証する</summary>
-    [Fact]
-    public void Generate_ShouldCreateMapperClass()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "products",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "product_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "name",
-                            DataType = "nvarchar(200)",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        // Mapper は具象クラスのみ（インターフェイスなし）。フック宣言のため partial
-        result.Files[0].Content.Should().NotContain("public interface IProductMapper");
-        result.Files[0].Content.Should().Contain("public sealed partial class ProductMapper");
-        result.Files[0].Content.Should().NotContain(": IProductMapper");
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain("public TEditModel CreateEditModel(TEntity entity)");
-        result.Files[0].Content.Should().Contain("void ApplyToEntity(");
-        // 旧 Commit 系の名前は残っていないこと
-        result.Files[0].Content.Should().NotContain("CommitToEditModel");
-        result.Files[0].Content.Should().NotContain("CommitToEntity");
-        // 空生成ファクトリは基底が提供し、具象 Mapper は初期値フックへの橋渡しだけを override する
-        result.Files[0].Content.Should().Contain("public TEntity CreateEntity()");
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain("protected override void AfterEntityCreated(ProductEntity entity) =>");
-        // EditModel 反映を含む生成の定型は共通基底 MapperBase が提供し、具象はそれを継承する
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain("public abstract partial class MapperBase<TEntity, TEditModel>");
-        result.Files[0].Content.Should().Contain(": MapperBase<ProductEntity, ProductEditModel>");
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain("public TEntity CreateEntity(TEditModel editModel, bool includeRemoved)");
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain("partial void OnEntityCreated(ProductEntity entity);");
-        // ApplyToEntity では nullable 化された確定値に対して保存前 null チェックを行う
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain(
-                "entity.ProductId = Required(editModel.ProductId, nameof(editModel.ProductId));"
-            );
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain("entity.Name = Required(editModel.Name, nameof(editModel.Name));");
-        // Entity → EditModel 反映は基底の public な ApplyToEditModel が順序を持ち、具象は列コピー（LoadColumns）と
-        // 後半（CompleteLoad）だけを override する。確定値を直接代入してから RevertInput でバインディング文字列を
-        // 導出する（文字列往復なし＝無損失ロード）
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain("public void ApplyToEditModel(TEntity entity, TEditModel editModel)");
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain(
-                "protected override void LoadColumns(ProductEntity entity, ProductEditModel editModel)"
-            );
-        // 新しい行の空文字列は未入力として読む（保存済みの行の空文字列は値のまま）
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain(
-                "editModel.Name = entity.IsAdded && entity.Name is \"\" ? null : entity.Name;"
-            );
-        result.Files[0].Content.Should().Contain("editModel.RevertInput();");
-        result.Files[0].Content.Should().NotContain("editModel.BindingName = entity.");
-        result.Files[0].Content.Should().NotContain("LoadFrom");
-        // 既定ロード後の後処理フック（partial 実装で追加プロパティをロード）
-        result.Files[0].Content.Should().Contain("OnEditModelLoaded(entity, editModel);");
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain(
-                "partial void OnEditModelLoaded(ProductEntity entity, ProductEditModel editModel);"
-            );
-        // 反映後フック（partial 実装で追加プロパティを保存）
-        result.Files[0].Content.Should().Contain("OnEntityApplied(editModel, entity);");
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain(
-                "partial void OnEntityApplied(ProductEditModel editModel, ProductEntity entity);"
-            );
-    }
-
     /// <summary>EditModel にバインディング文字列を確定値へ戻す処理が生成されることを検証する</summary>
+    // 残す理由（P3-4b）：基底 EditModelBase の XmlDoc の生成器の固定の英文と、per-type のコメントブロックが無いこと（書式）。構造の表明は行 code-editmodel-input-revert-siblings-row-edit へ移した
     [Fact]
     public void Generate_EditModel_ShouldContainRevertInputMethod()
     {
@@ -850,95 +315,7 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-        // 通常プロパティ (private set)
-        content.Should().Contain("public int? OrderId");
-        content.Should().Contain("public decimal? Amount");
-        // バインディング用プロパティ (string)
-        content.Should().Contain("public string BindingOrderId");
-        content.Should().Contain("public string BindingAmount");
-        // TryParse 検証（基底の IParsable 総称ヘルパー経由＝型は型引数で運ぶ・意味は型自身の TryParse と同じ。
-        // 空欄→確定値 null の早期分岐込みの ConvertParsedInput を通る＝VO 有効時と同じ空欄規則）
-        content.Should().Contain("ConvertParsedInput<int>(normalized, out var parsed)");
-        content.Should().Contain("ConvertParsedInput<decimal>(normalized, out var parsed)");
-        // エラーメッセージは中央リゾルバを直接呼び、安定キー（nameof）と表示名を渡す
-        // （Description 無指定は null を渡し、ヘルパ側でプロパティ名へフォールバックする）
-        content
-            .Should()
-            .Contain(
-                "EditModelMessages.ParseFailed(nameof(OrderId), GetDisplayName(nameof(OrderId), null), normalized, \"int\")"
-            );
-        content
-            .Should()
-            .Contain(
-                "EditModelMessages.ParseFailed(nameof(Amount), GetDisplayName(nameof(Amount), null), normalized, \"decimal\")"
-            );
-        // 既定文言は全 EditModel 共通の静的プロバイダ 1 か所で、個別調整もそこで安定キーを見て分岐する
-        content
-            .Should()
-            .Contain(
-                "public static Func<string, string, string, string, string> ParseFailed { get; set; }"
-            );
-        // クラスごとの文言フックと Resolve* ヘルパは廃止済み
-        content.Should().NotContain("CustomizeParseErrorMessage");
-        content.Should().NotContain("CustomizeRequiredErrorMessage");
-        content.Should().NotContain("CustomizeDuplicateErrorMessage");
-        content.Should().NotContain("ResolveParseErrorMessage");
-        // 廃止した EditModelBase の virtual ビルダーは残っていない
-        content.Should().NotContain("BuildParseErrorMessage");
-        content.Should().NotContain("BuildRequiredErrorMessage");
-        // RevertInput は Base 側に集約し、書き戻し本体は CRTP 層が列テーブルを回して override する（per-type には出ない）
-        content.Should().Contain("public void RevertInput() => ExecuteRevert(RevertCore);");
-        content.Should().Contain("protected virtual void RevertCore()");
-        content.Should().Contain("protected override void RevertCore()");
-        content.Should().Contain("column.SetInput(model, column.ToInput(model));");
-        // 兄弟ナビゲーション：Base が所属コレクション（IList）経由の GetNext/GetPrevious を提供し、コレクションが所有者を設定、具象クラスが型付き版を生成する
-        content.Should().Contain("internal IList? Owner { get; set; }");
-        content.Should().Contain("public EditModelBaseCore? GetNext()");
-        content.Should().Contain("public EditModelBaseCore? GetPrevious()");
-        content.Should().Contain("var index = Owner.IndexOf(this);");
-        content.Should().Contain("item.Owner = this;");
-        // 型付き版は per-type でなく CRTP 層（EditModelBase<TSelf>）が 1 回だけ提供し、具象は TSelf を束縛して継承する
-        content
-            .Should()
-            .Contain("public abstract class EditModelBaseCore<TSelf> : EditModelBaseCore");
-        content.Should().Contain("public new TSelf? GetNext() => (TSelf?)base.GetNext();");
-        content.Should().Contain("public new TSelf? GetPrevious() => (TSelf?)base.GetPrevious();");
-        content.Should().Contain(": EditModelBase<OrderEditModel>");
-        // 親コレクション基準の位置取得・削除・並び替え。位置系と削除は Base（IList）、Move は型付き Parent と MoveCore の override で実装する
-        content.Should().Contain("public int IndexInParent => Owner?.IndexOf(this) ?? -1;");
-        content.Should().Contain("public bool IsFirstInParent => IndexInParent == 0;");
-        content.Should().Contain("public bool IsLastInParent");
-        content.Should().Contain("public bool RemoveFromParent()");
-        content.Should().Contain("public bool MoveToFirst() => MoveSelfTo(0);");
-        content
-            .Should()
-            .Contain(
-                "public bool MoveToLast() => Owner is not null && MoveSelfTo(Owner.Count - 1);"
-            );
-        content.Should().Contain("public bool MoveToNext()");
-        content.Should().Contain("public bool MoveToPrevious()");
-        content.Should().Contain("protected virtual void MoveCore(int oldIndex, int newIndex)");
-        // 所属コレクション取得は ParentCollection（親モデル取得の ParentModel と区別）＝CRTP 層が TSelf で提供する
-        content.Should().Contain("public EditModelCollection<TSelf>? ParentCollection =>");
-        content.Should().NotContain("EditModelCollection<OrderEditModel>? Parent =>");
-        // 親（親参照ナビ）を持たない単独エンティティでは型付き ParentModel は生成されず、基底の EditModelBase? のみ
-        content.Should().Contain("public EditModelBaseCore? ParentModel => _parentModel;");
-        content.Should().NotContain("base.ParentModel as");
-        content.Should().Contain("protected override void MoveCore(int oldIndex, int newIndex) =>");
-        // ② RowState 変更時に派生フラグの変更通知も発行する
-        content.Should().Contain("OnPropertyChanged(nameof(IsAdded));");
-        content.Should().Contain("OnPropertyChanged(nameof(HasChanges));");
-        // ① AcceptChanges / ③ HasGraphChanges は Base の公開エントリのみ（カスケードは ChildLink 経由）
-        content.Should().Contain("public void AcceptChanges(bool includeChildren = true)");
-        content.Should().Contain("public bool HasGraphChanges(bool includeChildren = true)");
-        // 子用の仮想メソッド・空オーバーライドは全廃（カスケードなしの EditModel では何も生成されない）
-        content.Should().NotContain("AcceptChildChanges");
-        content.Should().NotContain("ChildHasChanges");
-        content.Should().NotContain("OnAcceptChildChanges");
-        content.Should().NotContain("OnChildHasChanges");
-        // カスケードナビを持たないこの EditModel には RegisterChildren の override は生成されない
-        content.Should().NotContain("protected override void RegisterChildren()");
-        // ② 発見性：拡張ポイント一覧は基底 EditModelBase の XmlDoc へ集約（per-type のコメントブロックは出さない）
+        // 発見性：拡張ポイント一覧は基底 EditModelBase の XmlDoc へ集約（per-type のコメントブロックは出さない）
         content
             .Should()
             .Contain("Extension points of a generated edit model (implement only what you need");
@@ -947,202 +324,10 @@ public class CSharpCodeGenerationServiceTests
             .NotContain(
                 "// ===== Extension points (implement only what you need in a partial class"
             );
-        // ④ IEditableObject（DataGrid 行編集の取り消し対応）
-        content.Should().Contain("IEditableObject");
-        content.Should().Contain("public void BeginEdit()");
-        content.Should().Contain("public void CancelEdit()");
-        content.Should().Contain("public void EndEdit()");
-        content.Should().Contain("protected override void BeginEditCore()");
-        content.Should().Contain("protected override void CancelEditCore()");
-        content.Should().Contain("protected override void EndEditCore() => OnEndEdit();");
-        // 退避も復元も確定値側で行う（バインディング文字列の再パースを経由しないので日時の秒未満・Kind が落ちない）。
-        // 退避・復元の本体は CRTP 層が列テーブルのアクセサ経由で 1 回だけ持つ（per-type のスナップショットフィールドは出ない）
-        content.Should().Contain("_valueSnapshot[i] = columns[i].GetValue(model);");
-        content.Should().Contain("columns[i].SetValue(model, snapshot[i]);");
-        content.Should().Contain("ExecuteRevert(RevertCore);");
-        content.Should().NotContain("_orderIdSnapshot");
-        content.Should().NotContain("_bindingOrderIdSnapshot");
-        // 行編集ライフサイクルの partial フック（partial クラスで追加したフィールドの控え/復元・副作用用）
-        content.Should().Contain("partial void OnBeginEdit();");
-        content.Should().Contain("partial void OnEndEdit();");
-        content.Should().Contain("partial void OnCancelEdit();");
-        // コレクションの増減・並び替えで位置プロパティの変更通知を発行し、バインドでボタン活性を制御できるようにする
-        content.Should().Contain("internal void RaisePositionChanged()");
-        content
-            .Should()
-            .Contain(
-                "internal void RaiseParentCollectionChanged() => OnPropertyChanged(\"ParentCollection\");"
-            );
-        content.Should().Contain("private void NotifyPositionsChanged()");
-        content.Should().Contain("protected override void MoveItem(int oldIndex, int newIndex)");
-    }
-
-    /// <summary>
-    /// 親モデル取得（ParentModel）について、1対1の単一子・自己参照・複数親の各パターンで型付き ParentModel の
-    /// 生成有無と単一子の所有者リンク設定が正しく出力されることを検証する
-    /// </summary>
-    [Fact]
-    public void Generate_EditModel_ShouldEmitTypedParentModelForUnambiguousParents()
-    {
-        var owner = Guid.NewGuid();
-        var ownerPk = Guid.NewGuid();
-        var profile = Guid.NewGuid();
-        var profilePk = Guid.NewGuid();
-        var profileFk = Guid.NewGuid();
-        var category = Guid.NewGuid();
-        var categoryPk = Guid.NewGuid();
-        var categoryParentFk = Guid.NewGuid();
-        var salesOrder = Guid.NewGuid();
-        var salesOrderPk = Guid.NewGuid();
-        var product = Guid.NewGuid();
-        var productPk = Guid.NewGuid();
-        var lineItem = Guid.NewGuid();
-        var lineItemPk = Guid.NewGuid();
-        var lineOrderFk = Guid.NewGuid();
-        var lineProductFk = Guid.NewGuid();
-
-        static Column Pk(Guid id, string name) =>
-            new()
-            {
-                Id = id,
-                Name = name,
-                DataType = "int",
-                IsPrimaryKey = true,
-                IsNullable = false,
-            };
-        static Column Fk(Guid id, string name) =>
-            new()
-            {
-                Id = id,
-                Name = name,
-                DataType = "int",
-                IsForeignKey = true,
-                IsNullable = false,
-            };
-
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new()
-                {
-                    Id = owner,
-                    TableName = "profile_owner",
-                    Columns = [Pk(ownerPk, "profile_owner_id")],
-                },
-                new()
-                {
-                    Id = profile,
-                    TableName = "profile",
-                    Columns = [Pk(profilePk, "profile_id"), Fk(profileFk, "profile_owner_id")],
-                },
-                new()
-                {
-                    Id = category,
-                    TableName = "category",
-                    Columns =
-                    [
-                        Pk(categoryPk, "category_id"),
-                        Fk(categoryParentFk, "parent_category_id"),
-                    ],
-                },
-                new()
-                {
-                    Id = salesOrder,
-                    TableName = "sales_order",
-                    Columns = [Pk(salesOrderPk, "sales_order_id")],
-                },
-                new()
-                {
-                    Id = product,
-                    TableName = "product",
-                    Columns = [Pk(productPk, "product_id")],
-                },
-                new()
-                {
-                    Id = lineItem,
-                    TableName = "line_item",
-                    Columns =
-                    [
-                        Pk(lineItemPk, "line_item_id"),
-                        Fk(lineOrderFk, "sales_order_id"),
-                        Fk(lineProductFk, "product_id"),
-                    ],
-                },
-            ],
-            Relationships =
-            [
-                // 1対1: profile_owner -> profile（単一の子）
-                new()
-                {
-                    Id = Guid.NewGuid(),
-                    Type = RelationshipType.OneToOne,
-                    SourceEntityId = owner,
-                    TargetEntityId = profile,
-                    ColumnPairs = [new(ownerPk, profileFk)],
-                },
-                // 自己参照: category -> category
-                new()
-                {
-                    Id = Guid.NewGuid(),
-                    Type = RelationshipType.OneToMany,
-                    SourceEntityId = category,
-                    TargetEntityId = category,
-                    ColumnPairs = [new(categoryPk, categoryParentFk)],
-                },
-                // 複数親: line_item は sales_order と product の両方を親に持つ
-                new()
-                {
-                    Id = Guid.NewGuid(),
-                    Type = RelationshipType.OneToMany,
-                    SourceEntityId = salesOrder,
-                    TargetEntityId = lineItem,
-                    ColumnPairs = [new(salesOrderPk, lineOrderFk)],
-                },
-                new()
-                {
-                    Id = Guid.NewGuid(),
-                    Type = RelationshipType.OneToMany,
-                    SourceEntityId = product,
-                    TargetEntityId = lineItem,
-                    ColumnPairs = [new(productPk, lineProductFk)],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateMappers = false,
-                GenerateRepositories = false,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result.Files[0].Content;
-
-        // 1対1の単一子: 親 ProfileOwner が Profile を保持し、setter で子の親モデルリンクを張る
-        // （子は行が無くても成立する＝本質的に 0..1 のため nullable）
-        content.Should().Contain("private ProfileEditModel? _profile;");
-        content.Should().Contain("_profile?.SetParentModel(null);");
-        content.Should().Contain("_profile?.SetParentModel(this);");
-        // 子 Profile は親が一意なので型付き ParentModel（ProfileOwnerEditModel）を生成する
-        content.Should().Contain("public new ProfileOwnerEditModel? ParentModel =>");
-        content.Should().Contain("base.ParentModel as ProfileOwnerEditModel;");
-
-        // 自己参照: Category は自分自身の型で型付き ParentModel を生成する
-        content.Should().Contain("public new CategoryEditModel? ParentModel =>");
-        content.Should().Contain("base.ParentModel as CategoryEditModel;");
-
-        // 複数親: LineItem は親が一意に定まらないため型付き ParentModel を生成しない
-        content.Should().NotContain("base.ParentModel as LineItemEditModel;");
-        content.Should().NotContain("base.ParentModel as SalesOrderEditModel;");
-        content.Should().NotContain("base.ParentModel as ProductEditModel;");
     }
 
     /// <summary>Repository インターフェイス・実装・DI 登録などの基盤コードが生成されることを検証する</summary>
+    // 残す理由（P3-4b）：SQL Server の SQL の断片（SELECT・EXISTS・INSERT・UPDATE・DELETE の文と、実在確認に使う文の選び方）・列の並びを組む式（式本体）・主コンストラクタの改行（書式）。構造の表明は行 code-repository-infrastructure-contracts-and-registration へ移した
     [Fact]
     public void Generate_ShouldCreateRepositoryInfrastructure()
     {
@@ -1187,33 +372,11 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-        content.Should().Contain("using Microsoft.Data.SqlClient;");
-        content.Should().Contain("using Microsoft.Extensions.DependencyInjection;");
-        // Repository 関連はユーザー拡張用に partial（インターフェイス・基底クラス・各実装）
-        content.Should().Contain("public partial interface IRepository<TEntity, TKey>");
-        content
-            .Should()
-            .Contain("public abstract partial class SqlServerRepository<TEntity, TKey>");
-        content.Should().Contain("internal sealed class EntitySaveMetadata");
-        content
-            .Should()
-            .Contain(
-                "public partial interface ICustomerRepository : IRepository<CustomerEntity, int>"
-            );
         content
             .Should()
             .Contain(
                 "public sealed partial class CustomerRepository(\r\n    ISqlConnectionFactory connectionFactory,\r\n    ISaveHookRegistry? saveHooks = null,\r\n    ISqlExecutor? sqlExecutor = null\r\n)"
             );
-        // DI 登録は 1 エンティティ 1 行（依存はコンテナが解決＝同じ登録が ISqlConnectionFactory / ISaveHookRegistry /
-        // ISqlExecutor を必ず入れるため、従来のファクトリ形と同じ実体が組まれる）
-        content
-            .Should()
-            .Contain("services.AddScoped<ICustomerRepository, CustomerRepository>();");
-        // テーブル名・列名のクォートは共有ヘルパー経由（名前に含まれる ] を二重化し、スキーマ修飾名を分割クォートする）
-        content
-            .Should()
-            .Contain("var tableName = EntitySaveMetadata.QuoteTableName(tableAttribute.Name);");
         // カラム一覧は columnList へ抽出して SELECT 系で共用する（無制限バイナリ列を除いた SELECT 用列集合）
         content
             .Should()
@@ -1264,6 +427,7 @@ public class CSharpCodeGenerationServiceTests
     /// IRepository インターフェイスと SqlServerRepository 基底の両方に生成され、
     /// パラメータ束縛・厳密マッピングの補助（BindRawSqlParameters / MapEntityFromRawSql）も出力されることを検証する
     /// </summary>
+    // 残す理由（P3-4b）：フィールドの初期化子・パラメータを足す式・例外フィルタ（式本体）と、列不足の例外の文言。構造の表明は行 code-repository-raw-sql-methods-delegate-to-executor へ移した
     [Fact]
     public void Generate_Repository_ShouldEmitRawSqlMethods()
     {
@@ -1278,66 +442,24 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-
-        // インターフェイス側のシグネチャ（3 メソッド。abstract メソッド宣言なので本文なし）
-        content.Should().Contain("Task<IReadOnlyList<TEntity>> QueryBySqlAsync(");
-        content.Should().Contain("Task<int> ExecuteSqlAsync(");
-        content.Should().Contain("Task<TResult?> ExecuteScalarSqlAsync<TResult>(");
-
-        // 実装側（SqlServerRepository 基底）は公開シグネチャを保ちつつ ISqlExecutor へ委譲する
-        content.Should().Contain("public Task<IReadOnlyList<TEntity>> QueryBySqlAsync(");
-        content.Should().Contain("public Task<int> ExecuteSqlAsync(");
-        content.Should().Contain("public Task<TResult?> ExecuteScalarSqlAsync<TResult>(");
-        content
-            .Should()
-            .Contain("_sqlExecutor.QueryBySqlAsync<TEntity>(sql, parameters, cancellationToken);");
-        content
-            .Should()
-            .Contain("_sqlExecutor.ExecuteSqlAsync(sql, parameters, cancellationToken);");
-        content
-            .Should()
-            .Contain(
-                "_sqlExecutor.ExecuteScalarSqlAsync<TResult>(sql, parameters, cancellationToken);"
-            );
         // 委譲先は SqlExecutor（Repository が private readonly で保持）
         content
             .Should()
             .Contain(
                 "private readonly ISqlExecutor _sqlExecutor = sqlExecutor ?? new SqlExecutor(connectionFactory);"
             );
-
-        // SqlCommand 版パラメータ束縛は SqlExecutor 側に集約（束縛対象プロパティの解決は RawSqlMapper と共有）
-        content
-            .Should()
-            .Contain("internal static void BindParameters(SqlCommand command, object? parameters)");
         content
             .Should()
             .Contain(
                 "command.Parameters.AddWithValue($\"@{property.Name}\", value ?? DBNull.Value);"
             );
-        content.Should().NotContain("BindRawSqlParameters");
-        // 厳密マッピング（列不足は全列を含む例外でラップ）は EntitySaveMetadata に残る
-        content
-            .Should()
-            .Contain("public TEntity MapEntityFromRawSql<TEntity>(SqlDataReader reader)");
+        // 厳密マッピング（列不足は全列を含む例外でラップ）
         content
             .Should()
             .Contain(
                 "catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException)"
             );
         content.Should().Contain("columns ({ColumnList})");
-        // スカラー・単一値変換は共有変換ヘルパー経由（ChangeType が扱えない TimeSpan / Guid 等も復元できる）
-        content.Should().Contain("RawValueConverter.ConvertRaw(raw, targetType)");
-        // DB から来た値はカルチャ非依存＝インバリアント固定で、桁区切りも許さない（日時と Guid はドライバの読み方にそろえる）
-        // （人が書いたテキスト用の ConvertInput とはここが分かれる）
-        content
-            .Should()
-            .Contain(
-                "ConvertCore(raw, targetType, CultureInfo.InvariantCulture, fromDatabase: true)"
-            );
-        content.Should().Contain("return Convert.ChangeType(raw, underlying, provider);");
-        // InvariantCulture 使用のため System.Globalization を using
-        content.Should().Contain("using System.Globalization;");
     }
 
     /// <summary>
@@ -1345,6 +467,7 @@ public class CSharpCodeGenerationServiceTests
     /// 任意型射影 <c>QueryProjectionBySqlAsync</c>（単一値モード・DTO モード・typo ガード）と
     /// DI 登録（Singleton）が出力されることを検証する
     /// </summary>
+    // 残す理由（P3-4b）：単一値モードの型判定の式（式本体）と、DTO モード・typo ガードの例外の文言。構造の表明は行 code-repository-sql-executor-and-projection へ移した
     [Fact]
     public void Generate_Repository_ShouldEmitSqlExecutorAndProjection()
     {
@@ -1359,45 +482,11 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-
-        // インターフェイスと実装（partial・sealed・ステートレス）
-        content.Should().Contain("public partial interface ISqlExecutor");
-        content
-            .Should()
-            .Contain(
-                "public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory) : ISqlExecutor"
-            );
-
-        // 任意型射影のシグネチャ（インターフェイス・実装の両方）
-        content
-            .Should()
-            .Contain("Task<IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(");
-        content
-            .Should()
-            .Contain(
-                "public async Task<IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>("
-            );
-        // エンティティ厳密マップも執行器に存在する（型引数版）
-        content
-            .Should()
-            .Contain("public async Task<IReadOnlyList<TEntity>> QueryBySqlAsync<TEntity>(");
-
-        // 単一値モードの型判定（primitive/enum/string/decimal/日時/Guid/byte[]）
-        content.Should().Contain("private static bool IsSingleValueType(Type type)");
         content.Should().Contain("actual == typeof(byte[])");
         // DTO モード: 引数なしコンストラクタ必須・位置指定 record 非対応の例外
         content.Should().Contain("positional records are not supported");
         // typo ガード: 1 列も一致しないと列名・プロパティ名を含む例外
         content.Should().Contain("No column in the result set matches");
-        // 列⇔プロパティ解決子は ConcurrentDictionary でキャッシュ
-        content
-            .Should()
-            .Contain(
-                "private static readonly ConcurrentDictionary<Type, ProjectionAccessor> _projectionAccessorCache"
-            );
-
-        // DI 登録（SqlExecutor は Singleton）
-        content.Should().Contain("services.AddSingleton<ISqlExecutor, SqlExecutor>();");
     }
 
     /// <summary>
@@ -1405,6 +494,7 @@ public class CSharpCodeGenerationServiceTests
     /// DB 型に応じて付与されること（varchar(50)→VarChar+Size50 / nvarchar(max)→NVarChar+Size-1 /
     /// decimal(10,2)→Precision10/Scale2 / int→Int / 未知型→属性なし）を検証する
     /// </summary>
+    // 残す理由（P3-4b）：属性のコンストラクタの式本体と、明示 SqlParameter を組む式・Size の安全ガードの式（式本体）。構造の表明は行 code-repository-sql-column-type-attributes-by-db-type へ移した
     [Fact]
     public void Generate_Repository_ShouldEmitSqlColumnTypeAttributes()
     {
@@ -1470,23 +560,10 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-        // 属性定義（SqlDbType 引数・Size/Precision/Scale の書き換え可能プロパティ）
-        content.Should().Contain("public sealed class SqlColumnTypeAttribute : Attribute");
         content
             .Should()
             .Contain("public SqlColumnTypeAttribute(SqlDbType dbType) => DbType = dbType;");
-        // int → 型だけ（Size/Precision なし）
-        content.Should().Contain("[SqlColumnType(SqlDbType.Int)]");
-        // varchar(50) → VarChar + Size 50
-        content.Should().Contain("[SqlColumnType(SqlDbType.VarChar, Size = 50)]");
-        // nvarchar(max) → NVarChar + Size -1
-        content.Should().Contain("[SqlColumnType(SqlDbType.NVarChar, Size = -1)]");
-        // decimal(10,2) → Decimal + Precision/Scale
-        content.Should().Contain("[SqlColumnType(SqlDbType.Decimal, Precision = 10, Scale = 2)]");
-        // 未知型（geography）は属性を付けない（AddWithValue フォールバック）
-        content.Should().NotContain("SqlColumnType(SqlDbType.Udt");
         // ランタイムは属性から明示 SqlParameter を組み立て、Size 安全ガードで超過時は値長を使う
-        content.Should().Contain("private static void AddColumnParameter(");
         content.Should().Contain("var parameter = new SqlParameter(name, dbType);");
         content
             .Should()
@@ -1495,78 +572,8 @@ public class CSharpCodeGenerationServiceTests
             );
     }
 
-    /// <summary>
-    /// [SqlColumnType] の出力条件が「Repository 生成 または IncludeDataAnnotations」の OR であることを検証する
-    /// （ColumnFacets 廃止・SqlColumnType への統合により、DataAnnotations 単独でも列メタ情報が必要なため）。
-    /// 両方 OFF のときのみ属性が一切出力されない。
-    /// </summary>
-    [Fact]
-    public void Generate_SqlColumnTypeAttribute_IsGatedOnRepositoryOrDataAnnotations()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "items",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "item_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        // 両方 OFF → 属性は一切出力されない
-        var neither = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = false,
-                IncludeDataAnnotations = false,
-            }
-        );
-        neither.HasErrors.Should().BeFalse();
-        neither.Files[0].Content.Should().NotContain("SqlColumnType");
-
-        // Repository ON（Repository は IncludeDataAnnotations 必須のため両方 ON）→ 属性が出力される
-        var repoOn = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = true,
-                IncludeDataAnnotations = true,
-            }
-        );
-        repoOn.HasErrors.Should().BeFalse();
-        repoOn.Files[0].Content.Should().Contain("[SqlColumnType(SqlDbType.Int)]");
-
-        // IncludeDataAnnotations のみ ON（Repository なし）→ 属性が出力される
-        var annotationsOnly = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = false,
-                IncludeDataAnnotations = true,
-            }
-        );
-        annotationsOnly.HasErrors.Should().BeFalse();
-        annotationsOnly.Files[0].Content.Should().Contain("[SqlColumnType(SqlDbType.Int)]");
-    }
-
     /// <summary>Repository にラムダ式ベースのクエリビルダー（Query / Where / OrderBy / 終端メソッド）が生成されることを検証する</summary>
+    // 残す理由（P3-4b）：ページングの SQL Server の SQL の断片。構造の表明は行 code-repository-lambda-query-builder へ移した
     [Fact]
     public void Generate_ShouldCreateLambdaQueryBuilder()
     {
@@ -1581,39 +588,6 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-        // 式木変換に必要な using とクエリ基盤クラス
-        content.Should().Contain("using System.Linq.Expressions;");
-        content.Should().Contain("public sealed class SqlQuery<TEntity>");
-        content.Should().Contain("internal static class SqlExpressionTranslator");
-        // リポジトリ起点のクエリ開始メソッド
-        content.Should().Contain("public SqlQuery<TEntity> Query() =>");
-        // ラムダ式で条件・並び順を指定するチェーンメソッド
-        content
-            .Should()
-            .Contain("public SqlQuery<TEntity> Where(Expression<Func<TEntity, bool>> predicate)");
-        content
-            .Should()
-            .Contain(
-                "public SqlQuery<TEntity> OrderBy(Expression<Func<TEntity, object?>> keySelector)"
-            );
-        content
-            .Should()
-            .Contain(
-                "public SqlQuery<TEntity> OrderByDescending(Expression<Func<TEntity, object?>> keySelector)"
-            );
-        content.Should().Contain("public SqlQuery<TEntity> Take(int count)");
-        content.Should().Contain("public SqlQuery<TEntity> Skip(int count)");
-        // 終端メソッド一式
-        content.Should().Contain("public async Task<IReadOnlyList<TEntity>> ToListAsync(");
-        content.Should().Contain("public async Task<TEntity?> FirstOrDefaultAsync(");
-        content.Should().Contain("public async Task<int> CountAsync(");
-        content.Should().Contain("public async Task<bool> AnyAsync(");
-        // 値はパラメータ化し、列名が判明していれば列型で明示 SqlParameter を構築（なければ AddWithValue へフォールバック）
-        // LIKE のパターンは列の型の可変長形で束縛する（固定長だとパターン自体が空白で詰められる）
-        content
-            .Should()
-            .Contain("metadata.AddQueryParameter(")
-            .And.Contain("parameter.VariableLength");
         content.Should().Contain("FETCH NEXT {take.Value} ROWS ONLY");
     }
 
@@ -1641,6 +615,7 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>コレクションの Contains（配列・List など）が SQL の IN 句へ変換されるコードが生成されることを検証する</summary>
+    // 残す理由（P3-4b）：Contains の判定の条件式（式本体）と、IN 句の SQL Server の SQL の断片。構造の表明は行 code-repository-collection-contains-in-clause-helpers へ移した
     [Fact]
     public void Generate_ShouldTranslateCollectionContainsToInClause()
     {
@@ -1655,12 +630,6 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-        // Contains を IN 変換の対象として判定するヘルパーと、IN 句を組み立てる本体
-        content.Should().Contain("private static bool TryGetIn(");
-        content.Should().Contain("private static string BuildInClause(");
-        // Visit に IN 変換のケースが組み込まれている
-        content.Should().Contain("when TryGetIn(call, out var inColumn, out var inCollection):");
-        content.Should().Contain("return BuildInClause(inColumn, inCollection, parameters);");
         // 静的 Enumerable.Contains（配列・2 引数）／C# 14 の Span 版 MemoryExtensions.Contains（3 引数・比較子 null）と、
         // インスタンス Contains（List/HashSet）の双方を判定
         content.Should().Contain("if (call.Object is null && call.Arguments.Count is 2 or 3)");
@@ -1668,12 +637,6 @@ public class CSharpCodeGenerationServiceTests
             .Should()
             .Contain("is not ConstantExpression { Value: null }", "非 null 比較子は翻訳対象外");
         content.Should().Contain("if (call.Object is not null && call.Arguments.Count == 1)");
-        // 否定の IN は NOT (...) で包まず、補償形を出せるよう IN 句の組み立て側へ畳み込む
-        content
-            .Should()
-            .Contain(
-                "return BuildInClause(notInColumn, notInCollection, parameters, negate: true);"
-            );
         // 非 null 要素をパラメータ化して IN (...) を生成、空コレクションは恒偽（否定は恒真）条件
         content.Should().Contain("(false, false) => $\"{column} IN ({values})\"");
         content.Should().Contain("(false, false) => \"1 = 0\"");
@@ -1688,11 +651,10 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain("(false, true) => $\"({column} NOT IN ({values}) OR {column} IS NULL)\"");
-        // 非ジェネリック IEnumerable を使うため System.Collections を using
-        content.Should().Contain("using System.Collections;");
     }
 
     /// <summary>IsNullOrEmpty・日付コンポーネント・Equals（大文字小文字無視含む）と、値オブジェクトの .Value 解決コードが生成されることを検証する</summary>
+    // 残す理由（P3-4b）：空判定・日付部品・大文字小文字無視の SQL Server の SQL の断片と、値オブジェクトの判定の式（式本体）。構造の表明は行 code-repository-null-or-empty-date-part-equals-helpers へ移した
     [Fact]
     public void Generate_ShouldTranslateNullOrEmptyDatePartAndEquals()
     {
@@ -1708,8 +670,6 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-        // ② IsNullOrEmpty / IsNullOrWhiteSpace
-        content.Should().Contain("private static bool TryGetNullOrEmpty(");
         // SQL Server の空判定はバイト長（= '' は末尾の空白を無視する）・空白判定は char.IsWhiteSpace の全文字の否定クラス
         content.Should().Contain("({neColumn} IS NULL OR DATALENGTH({neColumn}) = 0)");
         content
@@ -1717,15 +677,9 @@ public class CSharpCodeGenerationServiceTests
             .Contain(
                 "({neColumn} IS NULL OR {neColumn} NOT LIKE N'%[^' + {WhiteSpaceCharacters} + N']%')"
             );
-        // ④ 日付コンポーネント
-        content.Should().Contain("private static bool TryGetDatePart(");
         content.Should().Contain("\"Year\" => $\"YEAR({column})\"");
         content.Should().Contain("\"Date\" => $\"CAST({column} AS date)\"");
-        // ⑤ Equals（大文字小文字無視は LOWER で畳む）
-        content.Should().Contain("private static bool TryGetEquals(");
         content.Should().Contain("$\"LOWER({eqColumn}) = LOWER({eqParameter})\"");
-        // 値オブジェクトの .Value を列へ解決する共通ヘルパー
-        content.Should().Contain("private static string? TryColumnName(");
         content
             .Should()
             .Contain("typeof(IValueObjectCore).IsAssignableFrom(member.Member.DeclaringType)");
@@ -1739,6 +693,7 @@ public class CSharpCodeGenerationServiceTests
     /// 全列が <c>GetValue</c>（boxing）＋<c>PropertyInfo.SetValue</c>＋<c>SqlValueObjectActivator.Wrap</c>
     /// （<c>Convert.ChangeType</c> 込み）のフォールバックへ落ちていた。
     /// </remarks>
+    // 残す理由（P3-4b）：型特殊化アクセサ表の鍵と getter の対応・式木を組む分岐（式本体）。構造の表明は行 code-value-object-typed-materializer-table へ移した
     [Fact]
     public void Generate_ValueObjects_ShouldKeepTypeSpecializedMaterializer()
     {
@@ -1754,13 +709,6 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-
-        // 型特殊化アクセサ表そのもの（VO 構成でも出力される）
-        content
-            .Should()
-            .Contain(
-                "private static readonly IReadOnlyDictionary<Type, MethodInfo> _typedReaders ="
-            );
         content.Should().Contain("[typeof(decimal)] = Getter(nameof(DbDataReader.GetDecimal)),");
 
         // 分岐 1: 非 VO プロパティ×対応型は typed getter 直読み
@@ -1801,6 +749,7 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>RowState ベースのカスケード Save 基盤（EntityBase / SaveAsync / 保存エンジン）が生成されることを検証する</summary>
+    // 残す理由（P3-4b）：プロパティ・オブジェクトの初期化子、null 要素を落とす式、ConfigureAwait まで続く呼び出しの連なり、更新欠落時の分岐、ロード時の状態の代入（式本体）。構造の表明は行 code-repository-cascade-save-infrastructure へ移した
     [Fact]
     public void Generate_ShouldCreateCascadeSaveInfrastructure()
     {
@@ -1815,24 +764,8 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-        // 状態管理
-        content.Should().Contain("public enum RowState");
-        content.Should().Contain("public abstract class EntityBaseCore");
         content.Should().Contain("public RowState RowState { get; set; } = RowState.Unchanged;");
-        content.Should().Contain("public void MarkAdded() => RowState = RowState.Added;");
-        content.Should().Contain("public void MarkRemoved() => RowState = RowState.Removed;");
-        // リポジトリ・インターフェイスの Save 入口（既定でカスケード、既定は更新欠落で例外）
-        content.Should().Contain("bool insertWhenUpdateMissing = false,");
-        content.Should().Contain("public async Task<int> SaveAsync(");
-        content.Should().Contain("await connection.BeginTransactionAsync(cancellationToken)");
-        // 複数集約ルートを 1 トランザクションでまとめて保存するコレクション overload
-        content.Should().Contain("IEnumerable<TEntity> entities,");
-        content.Should().Contain("public async Task<int> SaveAsync(");
-        // SqlBulkCopy によるコレクション一括追加（IDataReader でストリーミング）
-        content.Should().Contain("Task<int> BulkInsertAsync(");
-        content.Should().Contain("public async Task<int> BulkInsertAsync(");
         content.Should().Contain("DestinationTableName = _metadata.TableName,");
-        content.Should().Contain("using var reader = _metadata.CreateDataReader(");
         // null 要素はリーダーへ渡す前に落とす（BulkInsert の共通契約＝スキップ）
         content.Should().Contain("entities.Where(entity => entity is not null)");
         content
@@ -1840,26 +773,14 @@ public class CSharpCodeGenerationServiceTests
             .Contain(
                 "await bulkCopy.WriteToServerAsync(reader, cancellationToken).ConfigureAwait(false);"
             );
-        content.Should().Contain("private sealed class EntityDataReader : IDataReader");
-        // 保存エンジン・競合例外・メタデータ・連鎖情報
-        content.Should().Contain("internal static class EntityGraphSaver");
-        content.Should().Contain("internal sealed class EntitySaveMetadata");
-        content.Should().Contain("public sealed class SaveConflictException : Exception");
-        content.Should().Contain("internal sealed record CascadeNavigation(");
-        // 更新欠落時の方針（既定は例外、insertWhenUpdateMissing で INSERT へ切替）。
-        // 競合メッセージは全バックエンド共有のファクトリ（NotFound / Modified）へ集約されている
+        // 更新欠落時の方針（既定は例外、insertWhenUpdateMissing で INSERT へ切替）
         content.Should().Contain("if (insertWhenUpdateMissing)");
-        content.Should().Contain("throw SaveConflictException.NotFound(");
-        content.Should().Contain("public static SaveConflictException NotFound(");
-        content.Should().Contain("public static SaveConflictException Modified(");
         // DB ロード時は Unchanged に確定する
         content.Should().Contain("entity.RowState = RowState.Unchanged;");
-        // ApplyToEntity は EditModel の RowState を転写する（Updated は EditModel 側の確定値変更で立つ）
-        content.Should().Contain("entity.RowState = editModel.RowState;");
-        content.Should().NotContain("entity.MarkUpdated();");
     }
 
     /// <summary>Include のある Query の取得が FOR JSON＋STJ で生成され、Include / ThenInclude（多階層）が生成されることを検証する（Include の無い取得のプレーン SELECT は SqlServerPlainQueryRuntimeTests が実 DB で固定する）</summary>
+    // 残す理由（P3-4b）：FOR JSON・CONVERT・JSON_QUERY の SQL Server の SQL の断片。構造の表明は行 code-repository-json-include-query-helpers へ移した
     [Fact]
     public void Generate_ShouldCreateJsonIncludeQuery()
     {
@@ -1874,20 +795,7 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-        // JSON デシリアライズ基盤
-        content.Should().Contain("using System.Text.Json;");
-        content.Should().Contain("JsonSerializer.Deserialize<List<TEntity>>(json, JsonOptions)");
         content.Should().Contain("FOR JSON PATH;");
-        content.Should().Contain("internal static class JsonQueryPlanner");
-        // Include / ThenInclude（単一・コレクションの両オーバーロード）
-        content.Should().Contain("Expression<Func<TEntity, TProperty>> navigationSelector");
-        content
-            .Should()
-            .Contain("Expression<Func<TEntity, ICollection<TElement>>> navigationSelector");
-        content.Should().Contain("Expression<Func<TProperty, TNext>> navigationSelector");
-        content
-            .Should()
-            .Contain("Expression<Func<TProperty, ICollection<TNext>>> navigationSelector");
         // 列はプロパティ名へ別名付け（float / real の列は可逆な書式の文字列）、単一参照は WITHOUT_ARRAY_WRAPPER
         content
             .Should()
@@ -1902,11 +810,10 @@ public class CSharpCodeGenerationServiceTests
             .Contain(
                 "JSON_QUERY((SELECT {childProjection} FROM {childTable} AS {childAlias} WHERE {correlation} FOR JSON PATH{arrayMode})) AS {EntitySaveMetadata.QuoteIdentifier(node.Property.Name)}"
             );
-        // FOR JSON の複数行結果を連結する
-        content.Should().Contain("string.Concat(chunks)");
     }
 
     /// <summary>条件付き一括削除（ExecuteDeleteAsync）とカスケード削除基盤が生成されることを検証する</summary>
+    // 残す理由（P3-4b）：一括削除・カスケード削除の SQL Server の SQL の断片と、循環カスケードの例外の文言。構造の表明は行 code-repository-execute-delete-and-cascade-planner へ移した
     [Fact]
     public void Generate_ShouldCreateExecuteDeleteOnQuery()
     {
@@ -1921,18 +828,8 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-        // クエリ終端の一括削除（カスケード引数つき）。既存 DeleteAsync(TKey) は維持
-        content.Should().Contain("public async Task<int> ExecuteDeleteAsync(");
-        content
-            .Should()
-            .Contain(
-                "Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default);"
-            );
         // 非カスケードはセットベースの DELETE
         content.Should().Contain("$\"DELETE FROM {TableName}{whereClause};\"");
-        // カスケードは FK のネスト IN(SELECT …) で子から削除（DB 非依存の純粋プランナーで SQL 構築）
-        content.Should().Contain("internal static class CascadeDeletePlanner");
-        content.Should().Contain("public static IReadOnlyList<string> BuildDeleteStatements(");
         // 列名は名前に含まれる ] を二重化する共有ヘルパー経由でクォートする（素の [{…}] 埋め込みではない）
         content
             .Should()
@@ -1941,10 +838,10 @@ public class CSharpCodeGenerationServiceTests
             );
         // 循環カスケードは未対応として明示的に例外
         content.Should().Contain("Cyclic cascade");
-        content.Should().Contain("CascadeNavigations");
     }
 
     /// <summary>Repository の SQL 生成でナビゲーションプロパティが列に含まれないことを検証する</summary>
+    // 残す理由（P3-4b）：ナビゲーションを外す条件式・ナビゲーションの初期化子（式本体）。構造の表明は行 code-repository-navigation-properties-declared へ、SQL にナビゲーションが混ざらないことは行 exec-sqlite-repository-navigation-properties-are-not-columns へ移した
     [Fact]
     public void Generate_RepositorySql_ShouldExcludeNavigationProperties()
     {
@@ -2037,13 +934,10 @@ public class CSharpCodeGenerationServiceTests
                 "public ICollection<OrderEntity> Orders { get; set; } = new List<OrderEntity>();"
             );
         content.Should().Contain("public CustomerEntity Customer { get; set; } = null!;");
-        content.Should().NotContain("@Orders");
-        content.Should().NotContain("@Customer");
-        content.Should().NotContain("[Orders]");
-        content.Should().NotContain("[Customer]");
     }
 
     /// <summary>バイナリ・値型カラムで安全なバインディング変換（Base64 / TryParse）が生成されることを検証する</summary>
+    // 残す理由（P3-4b）：プロパティ・フィールドの初期化子（式本体）。構造の表明は行 code-editmodel-binary-and-value-type-binding-conversions へ移した
     [Fact]
     public void Generate_EditModel_WithBinaryAndValueTypes_ShouldUseSafeBindingConversions()
     {
@@ -2095,30 +989,7 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-        content.Should().Contain("public int? FileId");
-        content.Should().Contain("public bool? IsActive");
         content.Should().Contain("public byte[] Filedata { get; set; } = Array.Empty<byte>();");
-        // Base64 変換は基底ヘルパー（空＝空配列・失敗＝false）経由で、成功時に確定値へ代入する
-        content.Should().Contain("if (TryConvertBase64Input(normalized, out var bytes))");
-        content.Should().Contain("Filedata = bytes;");
-        content
-            .Should()
-            .Contain(
-                "static model => model.Filedata is null ? string.Empty : Convert.ToBase64String(model.Filedata),"
-            );
-        content.Should().Contain("static model => model.FileId?.ToString() ?? string.Empty,");
-        // Mapper のロードは確定値の直接代入（byte[] も Base64 を経由しない＝無損失）。
-        // ただしバイナリ列だけは防御的コピーを挟む（配列を共有すると EditModel の編集が Entity へ波及する）。
-        // 新しい行の空配列は未入力として読む
-        content.Should().Contain("editModel.IsActive = entity.IsActive;");
-        content
-            .Should()
-            .Contain(
-                "editModel.Filedata = entity.IsAdded && entity.Filedata is [] ? null : (byte[]?)entity.Filedata?.Clone();"
-            );
-        content.Should().NotContain("editModel.BindingIsActive = entity.");
-        content.Should().NotContain("Convert.ToBase64String(entity.Filedata)");
-        content.Should().NotContain("private string? _errorFiledata;");
         content
             .Should()
             .Contain(
@@ -2131,742 +1002,8 @@ public class CSharpCodeGenerationServiceTests
             );
     }
 
-    /// <summary>Entity のみ生成設定で EditModel や Mapper が出力されないことを検証する</summary>
-    [Fact]
-    public void Generate_EntityOnly_ShouldNotContainUiModelOrMapper()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "items",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "item_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var options = new CodeGenerationOptions
-        {
-            RootNamespace = "Sample.Domain",
-            GenerateEditModels = false,
-            GenerateMappers = false,
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(diagram, options);
-
-        result.HasErrors.Should().BeFalse();
-        result.Files[0].Content.Should().Contain("public partial class ItemEntity");
-        result.Files[0].Content.Should().NotContain("ItemEditModel");
-        result.Files[0].Content.Should().NotContain("ItemMapper");
-    }
-
-    /// <summary>多数のエンティティでも Scriban のループ上限に達せず生成が完了することを検証する</summary>
-    [Fact]
-    public void Generate_ManyEntities_ShouldNotHitScribanLoopLimit()
-    {
-        var entities = Enumerable
-            .Range(1, 1100)
-            .Select(index => new Entity
-            {
-                Id = Guid.NewGuid(),
-                TableName = $"items_{index}",
-                Columns =
-                [
-                    new Column
-                    {
-                        Id = Guid.NewGuid(),
-                        Name = "item_id",
-                        DataType = "int",
-                        IsPrimaryKey = true,
-                        IsNullable = false,
-                    },
-                ],
-            })
-            .ToList();
-
-        var diagram = new ErDiagram { Entities = entities };
-        var options = new CodeGenerationOptions
-        {
-            RootNamespace = "Sample.Domain",
-            GenerateEditModels = false,
-            GenerateMappers = false,
-            GenerateRepositories = false,
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(diagram, options);
-
-        result.HasErrors.Should().BeFalse();
-        result.Files[0].Content.Should().Contain("public partial class Items1Entity");
-        result.Files[0].Content.Should().Contain("public partial class Items1100Entity");
-    }
-
-    /// <summary>rowversion 列が 1 本だけの図は生成できることを検証する（診断の対照）</summary>
-    [Fact]
-    public void Generate_SingleRowVersionColumn_ShouldSucceed()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "items",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "item_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "row_ver",
-                            DataType = "rowversion",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        result.Files[0].Content.Should().Contain("[StoreGeneratedColumn]");
-    }
-
-    /// <summary>
-    /// 対照: 主キーでない rowversion 列は生成できる（診断は主キーとの組合せだけを止める）
-    /// </summary>
-    [Fact]
-    public void Generate_NonPrimaryKeyRowVersionColumn_ShouldSucceed()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "items",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "item_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "row_ver",
-                            DataType = "timestamp",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        result.Files[0].Content.Should().Contain("[StoreGeneratedColumn]");
-    }
-
-    /// <summary>
-    /// 対照: 主キーでない無制限バイナリ列は除外が有効でも生成できる（診断は主キーとの組合せだけを止める）
-    /// </summary>
-    [Fact]
-    public void Generate_NonPrimaryKeyUnboundedBinaryColumn_WithExclusion_ShouldSucceed()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            BuildUnboundedBinaryDiagram(binaryColumnIsPrimaryKey: false),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                ExcludeUnboundedBinaryColumns = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        result.Files[0].Content.Should().Contain("[UnboundedBinaryColumn]");
-    }
-
-    /// <summary>無制限バイナリ列（varbinary(max)）を持つ検証用の図を作る（主キーの置き場所だけを切り替える）</summary>
-    private static ErDiagram BuildUnboundedBinaryDiagram(bool binaryColumnIsPrimaryKey) =>
-        new()
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "assets",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "asset_id",
-                            DataType = "int",
-                            IsPrimaryKey = !binaryColumnIsPrimaryKey,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "payload",
-                            DataType = "varbinary(max)",
-                            IsPrimaryKey = binaryColumnIsPrimaryKey,
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-    /// <summary>クラス名が衝突しないテーブル名なら生成できることを検証する（衝突検証の偽陽性防止）</summary>
-    [Fact]
-    public void Generate_DistinctEntityClassNames_ShouldSucceed()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "customer",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "customer_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                    ],
-                },
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "customer_address",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "customer_address_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        result.Files[0].Content.Should().Contain("class CustomerEntity");
-        result.Files[0].Content.Should().Contain("class CustomerAddressEntity");
-    }
-
-    /// <summary>プロパティ名が衝突しない列なら生成できることを検証する（衝突検証の偽陽性防止）</summary>
-    [Fact]
-    public void Generate_DistinctColumnPropertyNames_ShouldSucceed()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "users",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "user_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "user_name",
-                            DataType = "nvarchar(50)",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        result.Files[0].Content.Should().Contain("public int UserId");
-        result.Files[0].Content.Should().Contain("public string UserName");
-    }
-
-    /// <summary>
-    /// 別エンティティに同じプロパティ名の列があっても衝突扱いにならないことを検証する
-    /// （プロパティは別クラスのメンバーになるため）
-    /// </summary>
-    [Fact]
-    public void Generate_SamePropertyNameInDifferentEntities_ShouldSucceed()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "users",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "user-id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                    ],
-                },
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "user_profiles",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "user_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        result.Files[0].Content.Should().Contain("class UserEntity");
-        result.Files[0].Content.Should().Contain("class UserProfileEntity");
-    }
-
-    /// <summary>
-    /// 列・ナビゲーション・EditModel の派生名がすべて異なる図は生成できることを検証する
-    /// （シンボル表検証の偽陽性防止）
-    /// </summary>
-    [Fact]
-    public void Generate_DistinctGeneratedMemberNames_ShouldSucceed()
-    {
-        var customerId = Guid.NewGuid();
-        var orderId = Guid.NewGuid();
-        var customerPk = Guid.NewGuid();
-        var orderFk = Guid.NewGuid();
-
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = customerId,
-                    TableName = "customers",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = customerPk,
-                            Name = "user_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "user_name",
-                            DataType = "nvarchar(50)",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-                new Entity
-                {
-                    Id = orderId,
-                    TableName = "orders",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "order_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = orderFk,
-                            Name = "user_id",
-                            DataType = "int",
-                            IsForeignKey = true,
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-            Relationships =
-            [
-                new Relationship
-                {
-                    Id = Guid.NewGuid(),
-                    Type = RelationshipType.OneToMany,
-                    SourceEntityId = customerId,
-                    TargetEntityId = orderId,
-                    ColumnPairs = [new(customerPk, orderFk)],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        result.Files[0].Content.Should().Contain("public int UserId");
-        result.Files[0].Content.Should().Contain("public string UserName");
-        result.Files[0].Content.Should().Contain("public CustomerEntity Customer");
-        result.Files[0].Content.Should().Contain("public string BindingUserName");
-    }
-
-    /// <summary>
-    /// 別エンティティの同名メンバー（一方は列プロパティ・他方はナビゲーション）は衝突扱いにならないことを検証する
-    /// （衝突判定はクラス単位）
-    /// </summary>
-    [Fact]
-    public void Generate_ColumnNameMatchingOtherEntityNavigation_ShouldSucceed()
-    {
-        var customerId = Guid.NewGuid();
-        var orderId = Guid.NewGuid();
-        var customerPk = Guid.NewGuid();
-        var orderFk = Guid.NewGuid();
-
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = customerId,
-                    TableName = "customers",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = customerPk,
-                            Name = "customer_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        // CustomerEntity のプロパティ名は "Customer"。OrderEntity 側のナビゲーション名と
-                        // 同名だが、別クラスのメンバーのため衝突ではない
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "customer",
-                            DataType = "nvarchar(50)",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-                new Entity
-                {
-                    Id = orderId,
-                    TableName = "orders",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "order_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = orderFk,
-                            Name = "customer_id",
-                            DataType = "int",
-                            IsForeignKey = true,
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-            Relationships =
-            [
-                new Relationship
-                {
-                    Id = Guid.NewGuid(),
-                    Type = RelationshipType.OneToMany,
-                    SourceEntityId = customerId,
-                    TargetEntityId = orderId,
-                    ColumnPairs = [new(customerPk, orderFk)],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        result.Files[0].Content.Should().Contain("public string Customer { get; set; }");
-        result.Files[0].Content.Should().Contain("public CustomerEntity Customer { get; set; }");
-    }
-
-    // ===== 生成インフラの固定メンバーとの衝突 =====
-
-    /// <summary>
-    /// 生成インフラの固定メンバーと衝突する列名の図を既定オプションで生成する（衝突検証用の共通ヘルパ）
-    /// </summary>
-    /// <param name="tableName">テーブル名</param>
-    /// <param name="tableDescription">テーブルの説明（<c>DefaultDisplayName</c> の発行条件の出し分けに使う）</param>
-    /// <param name="columnNames">主キー <c>id</c> に続けて追加する列名</param>
-    private static CodeGenerationResult GenerateWithColumns(
-        string tableName,
-        string? tableDescription,
-        params string[] columnNames
-    )
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = tableName,
-                    Description = tableDescription ?? string.Empty,
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        .. columnNames.Select(columnName => new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = columnName,
-                            DataType = "int",
-                            IsNullable = false,
-                        }),
-                    ],
-                },
-            ],
-        };
-
-        return new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-    }
-
-    /// <summary>
-    /// 基底クラス（EntityBase / EditModelBase）にしかないメンバー名と同名の列は診断を出さないことを検証する。
-    /// </summary>
-    /// <remarks>
-    /// 派生クラス側は同名メンバーを宣言しないため CS0108（基底メンバーの隠蔽）の警告になるだけでコンパイルは通る。
-    /// これらを固定メンバー名簿へ入れると正当な図を軒並み弾いてしまうため、入れないことを固定する。
-    /// </remarks>
-    [Fact]
-    public void Generate_ColumnNamedAfterBaseClassOnlyMember_ShouldSucceed()
-    {
-        var result = GenerateWithColumns("items", null, "validate", "accept_changes", "mark_added");
-
-        result.HasErrors.Should().BeFalse();
-        result.Files.Should().NotBeEmpty();
-        result.Files[0].Content.Should().Contain("public int Validate { get; set; }");
-    }
-
-    /// <summary>複数セグメントの正当な RootNamespace はそのまま生成できることを検証する</summary>
-    [Fact]
-    public void Generate_ValidMultiSegmentRootNamespace_ShouldSucceed()
-    {
-        var options = new CodeGenerationOptions { RootNamespace = "My.App.Data" };
-
-        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
-
-        result.HasErrors.Should().BeFalse();
-        result.Files[0].Content.Should().Contain("namespace My.App.Data;");
-    }
-
-    /// <summary>
-    /// 出力に使われない名前空間オプションは不正でも生成を止めないことを検証する
-    /// （パッケージ参照モードの RuntimeNamespace＝Runtime 系ファイルを出さない・層別出力の RootNamespace＝
-    /// 全名前空間を層フォルダか明示オプションから決める・分割で全カテゴリを明示した RootNamespace）
-    /// </summary>
-    [Theory]
-    [InlineData("package-runtime")]
-    [InlineData("layered-root")]
-    [InlineData("split-all-explicit-root")]
-    public void Generate_InvalidButUnusedNamespaceOption_ShouldSucceed(string scenario)
-    {
-        var options = scenario switch
-        {
-            "package-runtime" => new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                SplitFilesByCategory = true,
-                UseRuntimePackages = true,
-                RuntimeNamespace = "123 bad",
-            },
-            "layered-root" => new CodeGenerationOptions
-            {
-                RootNamespace = "123 bad",
-                LayeredOutput = true,
-                GenerateRepositories = true,
-                RepositoryDialects = ["sqlserver", "sqlite"],
-            },
-            _ => new CodeGenerationOptions
-            {
-                RootNamespace = "123 bad",
-                SplitFilesByCategory = true,
-                RuntimeNamespace = "Sample.Runtime",
-                EntityNamespace = "Sample.Entities",
-                EditModelNamespace = "Sample.EditModels",
-                MapperNamespace = "Sample.Mappers",
-                RepositoryNamespace = "Sample.Repositories",
-                ValueObjectNamespace = "Sample.ValueObjects",
-                GenerateRepositories = true,
-                GenerateEfCoreRepositories = true,
-                GenerateInMemoryRepositories = true,
-            },
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
-
-        result
-            .HasErrors.Should()
-            .BeFalse(string.Join(" / ", result.Diagnostics.Select(d => d.Message)));
-        result.Files.Should().NotBeEmpty();
-        result
-            .Files.Should()
-            .NotContain(file => file.Content.Contains("123 bad"), "使われない値は出力に現れない");
-    }
-
-    /// <summary>NULL 許容のバイナリ列が byte[]? として生成されることを検証する</summary>
-    [Fact]
-    public void Generate_NullableBinaryColumn_ShouldUseNullableByteArray()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "files",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "file_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "photo",
-                            DataType = "varbinary(max)",
-                            IsNullable = true,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result.Files[0].Content;
-        // NULL 許容バイナリは byte[]? となり、初期化子は付かない（CS8618 回避は ? 注釈による）
-        content.Should().Contain("public byte[]? Photo { get; set; }");
-        content.Should().NotContain("public byte[] Photo { get; set; } = Array.Empty<byte>();");
-        // EditModel 側でも byte[]? を確定値型とし、Base64 変換で書き戻す
-        content.Should().Contain("entity.Photo = editModel.Photo;");
-    }
-
     /// <summary>出力が 1MB（Scriban 既定の LimitToString）を超える大規模スキーマでも末尾まで生成され、切り捨てられないことを検証する</summary>
+    // 残す理由（P3-4b）：出力の長さ・末尾の省略記号と、主コンストラクタの改行（書式）。構造の表明は行 code-large-schema-emits-last-entity-and-repository へ移した
     [Fact]
     public void Generate_LargeSchemaExceeding1MB_ShouldNotTruncateOutput()
     {
@@ -2926,8 +1063,6 @@ public class CSharpCodeGenerationServiceTests
         content.Length.Should().BeGreaterThan(1_048_576);
         // 切り捨て時に付与される省略記号で終わっていないこと
         content.TrimEnd().Should().NotEndWith("...");
-        // 最後のエンティティ・リポジトリまで出力されていること
-        content.Should().Contain("public partial class Table200Entity");
         content
             .Should()
             .Contain(
@@ -2935,66 +1070,8 @@ public class CSharpCodeGenerationServiceTests
             );
     }
 
-    /// <summary>EditModel の確定値プロパティに変更通知パーシャルメソッド（Changing/Changed）が生成され、setter から呼ばれることを検証する</summary>
-    [Fact]
-    public void Generate_EditModel_ShouldGenerateChangeHookPartialMethods()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "customers",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "customer_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "name",
-                            DataType = "nvarchar(100)",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result.Files[0].Content;
-        // パーシャルメソッドの宣言（本体はユーザーが partial クラスで実装）。新値のみ／旧値・新値の両オーバーロードを生成する
-        content.Should().Contain("partial void OnCustomerIdChanging(int? value);");
-        content
-            .Should()
-            .Contain("partial void OnCustomerIdChanging(int? oldValue, int? newValue);");
-        content.Should().Contain("partial void OnCustomerIdChanged(int? value);");
-        content.Should().Contain("partial void OnCustomerIdChanged(int? oldValue, int? newValue);");
-        content.Should().Contain("partial void OnNameChanged(string? oldValue, string? newValue);");
-        // 確定値 setter から代入前後で、新値版・旧値新値版の両方が呼び出される
-        content.Should().Contain("var oldValue = _customerId;");
-        content.Should().Contain("OnCustomerIdChanging(value);");
-        content.Should().Contain("OnCustomerIdChanging(oldValue, value);");
-        content.Should().Contain("OnCustomerIdChanged(value);");
-        content.Should().Contain("OnCustomerIdChanged(oldValue, value);");
-        // 値が変わらない場合は早期 return
-        content.Should().Contain("if (EqualityComparer<int?>.Default.Equals(_customerId, value))");
-    }
-
     /// <summary>リレーションが無くても Repository を生成する場合に NavigationReference 属性が定義され、生成コードがコンパイル可能であることを検証する</summary>
+    // 残す理由（P3-4b）：属性でナビゲーションを外す条件式（式本体）。構造の表明は行 code-repository-navigation-reference-attribute-defined へ移した
     [Fact]
     public void Generate_RepositoryWithoutRelationships_ShouldEmitNavigationReferenceAttribute()
     {
@@ -3009,64 +1086,13 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-        // Repository の EntitySaveMetadata が参照する属性が未定義だと CS0246 になるため、定義の存在を確認
-        content.Should().Contain("public sealed class NavigationReferenceAttribute : Attribute");
         content
             .Should()
             .Contain("property.GetCustomAttribute<NavigationReferenceAttribute>() is null");
     }
 
-    /// <summary>
-    /// IncludeDataAnnotations=true・GenerateRepositories=false でも [SqlColumnType] が出力され、
-    /// SqlDbType（System.Data）の using が含まれることを検証する（ColumnFacets 廃止に伴う OR 条件）
-    /// </summary>
-    [Fact]
-    public void Generate_IncludeDataAnnotationsWithoutRepository_ShouldEmitSqlColumnTypeAttribute()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            ValueObjectDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = false,
-                IncludeDataAnnotations = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result.Files[0].Content;
-        content.Should().Contain("public sealed class SqlColumnTypeAttribute : Attribute");
-        content.Should().Contain("[SqlColumnType(SqlDbType.NVarChar, Size = 50)]");
-        content.Should().Contain("[SqlColumnType(SqlDbType.Decimal, Precision = 10, Scale = 2)]");
-        // SqlDbType は System.Data（BCL）所属。Repository なし構成でも using が供給される必要がある
-        content.Should().Contain("using System.Data;");
-        // Repository が無いため EntitySaveMetadata 等のランタイム補助コードは出力されない
-        content.Should().NotContain("_columnTypeCache");
-    }
-
-    /// <summary>
-    /// IncludeDataAnnotations=false・GenerateRepositories=false の両方 OFF では [SqlColumnType] が一切出力されないことを検証する
-    /// </summary>
-    [Fact]
-    public void Generate_NoAnnotationsNoRepository_ShouldNotEmitSqlColumnTypeAttribute()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            ValueObjectDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = false,
-                IncludeDataAnnotations = false,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result.Files[0].Content;
-        content.Should().NotContain("SqlColumnTypeAttribute");
-        content.Should().NotContain("[SqlColumnType(");
-    }
-
     /// <summary>[SqlColumnType].IntegralDigits が Precision - Scale を返し、decimal 以外（Precision 未指定）は -1 を返すことを検証する</summary>
+    // 残す理由（P3-4b）：IntegralDigits の式本体。構造の表明は行 code-sql-column-type-integral-digits-property へ移した
     [Fact]
     public void Generate_SqlColumnType_IntegralDigitsProperty_ShouldComputeFromPrecisionAndScale()
     {
@@ -3086,6 +1112,7 @@ public class CSharpCodeGenerationServiceTests
     /// ランタイム中核 API の 4 件（DI なしの SaveHookRegistry・非ジェネリックな AddSaveHook・カスケード版 MarkAdded・
     /// 構造化された SaveConflictException）が、QuickER 版 Repository の生成物へ期待どおりの形で出力されることを検証する
     /// </summary>
+    // 残す理由（P3-4b）：実体の MarkRemoved の式本体と、競合例外の主コンストラクタの改行（書式）。構造の表明は行 code-runtime-core-api-signatures へ移した
     [Fact]
     public void Generate_RuntimeCoreApis_ShouldEmitExpectedSignatures()
     {
@@ -3100,88 +1127,14 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-
-        // 1. DI コンテナなしで組める明示リスト版レジストリ（既定の DI 版と併存する）
+        // MarkRemoved は単一ノードのまま
+        content.Should().Contain("public void MarkRemoved() => RowState = RowState.Removed;");
         content
             .Should()
-            .Contain("internal sealed class SaveHookRegistry : ISaveHookRegistry")
-            .And.Contain("public SaveHookRegistry Add<TEntity>(ISaveHook<TEntity> hook)")
-            .And.Contain("internal sealed class ServiceProviderSaveHookRegistry");
-
-        // 2. フックの実装面から登録先を導く DI 拡張（エンティティ型ごとの分岐が要らない）
-        content
-            .Should()
-            .Contain("public static class SaveHookServiceCollectionExtensions")
-            .And.Contain(
-                "public static IServiceCollection AddSaveHook(this IServiceCollection services, object hook)"
-            );
-
-        // 3. MarkAdded だけがカスケード形を持つ（MarkRemoved / MarkUpdated は単一ノードのまま）
-        content
-            .Should()
-            .Contain("public void MarkAdded(bool includeChildren = false)")
-            .And.Contain("public void MarkRemoved() => RowState = RowState.Removed;")
-            .And.NotContain("public void MarkRemoved(bool includeChildren");
-
-        // 4. 競合の内訳（理由・型名・キー）を公開プロパティで持つ
-        content
-            .Should()
-            .Contain("public enum SaveConflictReason")
-            .And.Contain("public SaveConflictReason Reason { get; }")
-            .And.Contain("public string? EntityTypeName { get; }")
-            .And.Contain(
+            .Contain(
                 "public SaveConflictException(\r\n        string message,\r\n        SaveConflictReason reason,\r\n        string? entityTypeName,\r\n        string? key\r\n    )"
             );
     }
-
-    /// <summary>
-    /// AddSaveHook は契約と同じ「1 回だけ」の条件で出力されるため、QuickER 版 Repository を伴わない
-    /// EF Core 単独出力でも過不足なく 1 つだけ現れることを検証する（DI の using も併せて出る）
-    /// </summary>
-    [Fact]
-    public void Generate_AddSaveHook_ShouldBeEmittedExactlyOnce_EvenForEfCoreOnly()
-    {
-        var service = new CSharpCodeGenerationService();
-
-        var efCoreOnly = service.Generate(
-            SingleEntityDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateEfCoreRepositories = true,
-            }
-        );
-
-        efCoreOnly.HasErrors.Should().BeFalse();
-        var efCoreContent = efCoreOnly.Files[0].Content;
-        efCoreContent.Should().Contain("using Microsoft.Extensions.DependencyInjection;");
-        OccurrencesOf(efCoreContent, "public static class SaveHookServiceCollectionExtensions")
-            .Should()
-            .Be(1, "EF Core 単独でもフック登録の入口は 1 つだけ出る");
-
-        // QuickER 版 Repository ＋ EF Core ＋ インメモリの全部入りでも重複しない（DI 拡張はエンジンごとにあるため）
-        var everything = service.Generate(
-            SingleEntityDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = true,
-                GenerateInMemoryRepositories = true,
-            }
-        );
-
-        everything.HasErrors.Should().BeFalse();
-        OccurrencesOf(
-                everything.Files[0].Content,
-                "public static class SaveHookServiceCollectionExtensions"
-            )
-            .Should()
-            .Be(1, "エンジンが増えても定義は 1 つだけ");
-    }
-
-    /// <summary>指定文字列が本文に現れる回数を数える</summary>
-    private static int OccurrencesOf(string content, string value) =>
-        content.Split(value).Length - 1;
 
     /// <summary>主キー 1 列のみを持つ単純なエンティティ 1 件のダイアグラムを生成する</summary>
     private static ErDiagram SingleEntityDiagram() =>
@@ -3208,62 +1161,8 @@ public class CSharpCodeGenerationServiceTests
             ],
         };
 
-    /// <summary>
-    /// <c>[Column]</c> は永続化の構造マッピングとして <c>IncludeDataAnnotations</c> に依らず全列へ出力し、
-    /// 文書・検証系（<c>[Table]</c> / <c>[Key]</c> / <c>[Required]</c> / <c>[MaxLength]</c>）だけがオプションで出し分けられることを検証する。
-    /// </summary>
-    /// <remarks>
-    /// 生成ランタイムの列判定（<c>EntityBaseCore</c> の値プロパティと <c>EntitySaveMetadata</c> の列集合）は
-    /// <c>[Column]</c> を許可リストとして読む。付与をオプションに委ねると、拡張面や具象 partial へ足した
-    /// プロパティと生成列を区別する手段が無くなる。
-    /// </remarks>
-    [Fact]
-    public void Generate_NoAnnotations_ShouldStillEmitColumnAttributeOnEveryColumn()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            ValueObjectDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = false,
-                IncludeDataAnnotations = false,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result.Files[0].Content;
-
-        // 列は 1 つ残らず [Column] を伴う
-        content.Should().Contain("[Column(\"customer_id\")]");
-        content.Should().Contain("[Column(\"name\")]");
-        content.Should().Contain("System.ComponentModel.DataAnnotations.Schema");
-
-        // 文書・検証系はオプションどおり消える
-        content.Should().NotContain("[Table(");
-        content.Should().NotContain("[Key]");
-        content.Should().NotContain("[Required]");
-        content.Should().NotContain("[MaxLength(");
-    }
-
-    /// <summary>VO 生成 OFF（既定）では値オブジェクトの基底・インターフェイスが一切出力されないことを検証する</summary>
-    [Fact]
-    public void Generate_ValueObjects_Disabled_ShouldNotEmitValueObjectTypes()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            ValueObjectDiagram(),
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result.Files[0].Content;
-        content.Should().NotContain("ValueObjectBase");
-        content.Should().NotContain("interface IValueObject");
-        content.Should().NotContain("ValueObjectJsonConverterFactory");
-        // 既定どおりプリミティブ型のまま
-        content.Should().Contain("public int CustomerId { get; set; }");
-    }
-
     /// <summary>VO 生成 ON で基底・インターフェイス・具象 VO が出力され、Entity/EditModel の型が VO になることを検証する</summary>
+    // 残す理由（P3-4b）：DisplayValue の既定の式本体と、JSON の変換器の登録・VO の主キーの初期化子（式本体）。構造の表明は行 code-value-objects-emitted-and-applied へ移した
     [Fact]
     public void Generate_ValueObjects_Enabled_ShouldEmitAndApplyValueObjects()
     {
@@ -3278,424 +1177,18 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-        // 基底・インターフェイス・例外・JSON 変換器
-        content.Should().Contain("public abstract class ValueObjectBaseCore<TSelf, TValue>");
-        content
-            .Should()
-            .Contain("public abstract partial class ValueObjectOrderedBase<TSelf, TValue>");
-        content.Should().Contain("public abstract partial class ValueObjectStringBase<TSelf>");
-        // 文字列 VO は string / TSelf 両対応の部分一致メソッドを持つ（null 引数は BCL の string.Contains と同じく ArgumentNullException）
-        content.Should().Contain("public bool Contains(TSelf value)");
-        content.Should().Contain("public bool StartsWith(TSelf value)");
-        content.Should().Contain("public bool EndsWith(TSelf value)");
-        content.Should().Contain("public bool Contains(string value)");
-        content.Should().Contain("public bool StartsWith(string value)");
-        content.Should().Contain("public bool EndsWith(string value)");
-        content.Should().Contain("public abstract partial class ValueObjectBinaryBase<TSelf>");
-        content.Should().Contain("public interface IValueObject<TSelf, TValue>");
-        // 表示用プロパティ（マーカー IF に宣言、基底に virtual 既定実装）
-        content.Should().Contain("string DisplayValue { get; }");
         content.Should().Contain("public virtual string DisplayValue => ToString();");
-        content
-            .Should()
-            .Contain("public sealed class ValueObjectJsonConverterFactory : JsonConverterFactory");
-        // 具象 VO（型別の基底を継承）
-        content.Should().Contain(": ValueObjectOrderedBase<CustomerIdValue, int>,");
-        content.Should().Contain(": ValueObjectStringBase<NameValue>,");
-        content.Should().Contain(": ValueObjectBinaryBase<PhotoValue>,");
-        content.Should().Contain(": ValueObjectBooleanBase<IsActiveValue>,");
-        content
-            .Should()
-            .Contain(
-                "public abstract partial class ValueObjectBooleanBase<TSelf> : ValueObjectBase<TSelf, bool>"
-            );
-        // string MaxLength・decimal precision/scale の自動検証は共有ルールクラスへの 1 行委譲になる
-        // （検証の内部経路はエラーリストを遅延確保する＝成功パスで List を作らないため ref 渡し）
-        content
-            .Should()
-            .Contain(
-                "ValueObjectStringRules.ValidateMaxLength(value, 50, DisplayName, ref errors);"
-            );
-        content
-            .Should()
-            .Contain("ValueObjectDecimalRules.Validate(value, 10, 2, DisplayName, ref errors);");
-        // null 値（必須）チェックも共有ルール（false＝以降の規則は値を触れないので打ち切り）
-        content
-            .Should()
-            .Contain("if (!ValueObjectRules.ValidateRequired(value, DisplayName, ref errors))");
-        // 既定メッセージは全 VO 共通の静的プロバイダから取得し、1 か所で差し替えできる（表示名が第 1 引数）
-        content.Should().Contain("public static class ValueObjectValidationMessages");
-        content
-            .Should()
-            .Contain(
-                "public static Func<string, int, int, string> MaxLengthExceeded { get; set; }"
-            );
-        // 検証規則そのものも固定 infra の公開クラスへ集約されている（利用者が OnValidate から呼べる）
-        content.Should().Contain("public static class ValueObjectRules");
-        content.Should().Contain("public static class ValueObjectStringRules");
-        content.Should().Contain("public static class ValueObjectNumberRules");
-        content.Should().Contain("public static class ValueObjectDecimalRules");
-        // 表示名の既定値は全生成メンバー共通の静的リゾルバ経由（一括差し替え点）
-        content.Should().Contain("public static class GeneratedDisplayNames");
-        // VO ごとの文言・表示名 partial フックは廃止済み（差し替え点はリゾルバ 1 本）
-        content.Should().NotContain("CustomizeMaxLengthErrorMessage");
-        content.Should().NotContain("CustomizeScaleErrorMessage");
-        content.Should().NotContain("CustomizePrecisionErrorMessage");
-        content.Should().NotContain("CustomizeValueRequiredErrorMessage");
-        content.Should().NotContain("private static void ValidateDecimal(");
-        // PK と同名 FK は同一 VO 型を共有（CustomerIdValue は 1 定義のみ）
-        content.Split("public sealed partial class CustomerIdValue").Length.Should().Be(2);
-        // Entity プロパティに DB カラムのメタ情報属性が付く（VO 型でも付与）。ColumnFacets は SqlColumnType へ統合済み
-        content.Should().Contain("public sealed class SqlColumnTypeAttribute : Attribute");
-        content.Should().Contain("[SqlColumnType(SqlDbType.NVarChar, Size = 50)]");
-        content.Should().Contain("[SqlColumnType(SqlDbType.Decimal, Precision = 10, Scale = 2)]");
         // Entity の型が VO（非 NULL PK は null! 初期化）
         content.Should().Contain("public CustomerIdValue CustomerId { get; set; } = null!;");
-        // EditModel 確定値は常に VO?（バインド setter は基底の解析＋TryCreate ヘルパー経由で、
-        // 代入と失敗文言だけを per-type が持つ）
-        content.Should().Contain("public CustomerIdValue? CustomerId");
-        content
-            .Should()
-            .Contain(
-                "ConvertParsedValueObjectInput<CustomerIdValue, int>(normalized, out var converted, out var rejection)"
-            );
         // EntityBase / Repository の JSON オプションに VO 変換器が登録される
         content.Should().Contain("Converters = { new ValueObjectJsonConverterFactory() },");
-        // Mapper のロードは VO 列でも VO インスタンスをそのまま代入する（ToString/TryCreate の往復なし）
-        content.Should().Contain("editModel.CustomerId = entity.CustomerId;");
-        content.Should().NotContain("editModel.BindingCustomerId = entity.");
-    }
-
-    /// <summary>string PK ＋ GuidKey オプションで PK が GuidKey 基底になり、非 PK の string は通常の string 基底になることを検証する</summary>
-    [Fact]
-    public void Generate_ValueObjects_GuidKey_ShouldUseGuidKeyBaseForStringPrimaryKey()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "documents",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "document_id",
-                            DataType = "nvarchar(36)",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "title",
-                            DataType = "nvarchar(100)",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateValueObjects = true,
-                UseGuidKeyForStringPrimaryKey = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result.Files[0].Content;
-        content.Should().Contain(": ValueObjectGuidKeyBase<DocumentIdValue>,");
-        // 非 PK の string は通常の string 基底
-        content.Should().Contain(": ValueObjectStringBase<TitleValue>,");
-    }
-
-    /// <summary>GuidKey VO でも宣言幅の長さ検証が string VO と同じ形で生成されることを検証する</summary>
-    /// <remarks>
-    /// 生成器の内部契約は「長さ検証は VO が担うから Entity へ <c>[MaxLength]</c> を出さない」であり、
-    /// GuidKey で幅を落とすと検証がスタック全体から消える（宣言幅超過が INSERT の切り詰めエラーで初めて露見する）。
-    /// </remarks>
-    [Fact]
-    public void Generate_ValueObjects_GuidKey_ShouldEmitMaxLengthValidation()
-    {
-        var result = GenerateGuidKeyDiagram("nvarchar(50)");
-
-        result.HasErrors.Should().BeFalse();
-        var content = result.Files[0].Content;
-        content.Should().Contain(": ValueObjectGuidKeyBase<DocumentIdValue>,");
-        // string VO と同じ長さ検証（共有ルールへの委譲）が GuidKey VO にも出る
-        content
-            .Should()
-            .Contain(
-                "ValueObjectStringRules.ValidateMaxLength(value, 50, DisplayName, ref errors);"
-            );
-    }
-
-    /// <summary>幅 36 未満の GuidKey 列は Warning 診断を 1 件出し、生成は続行して宣言幅どおりの検証を出すことを検証する</summary>
-    [Fact]
-    public void Generate_ValueObjects_GuidKey_ShortColumn_ShouldWarnButGenerate()
-    {
-        var result = GenerateGuidKeyDiagram("nvarchar(20)");
-
-        // Warning であって Error ではない（オプションが図全体へ効くため生成ごと止めない）
-        result.HasErrors.Should().BeFalse();
-
-        // 生成は続行し、宣言幅どおり（20）の長さ検証が出る
-        var content = result.Files[0].Content;
-        content.Should().Contain(": ValueObjectGuidKeyBase<DocumentIdValue>,");
-        content
-            .Should()
-            .Contain(
-                "ValueObjectStringRules.ValidateMaxLength(value, 20, DisplayName, ref errors);"
-            );
-    }
-
-    /// <summary>GuidKey 検証用の最小図（string PK 1 本＋非 PK string 1 本）を指定の PK 型で生成する</summary>
-    private static CodeGenerationResult GenerateGuidKeyDiagram(string primaryKeyDataType)
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "documents",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "document_id",
-                            DataType = primaryKeyDataType,
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "title",
-                            DataType = "nvarchar(100)",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        return new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateValueObjects = true,
-                UseGuidKeyForStringPrimaryKey = true,
-            }
-        );
-    }
-
-    /// <summary>同名列の定義が食い違う場合は Warning 診断を出すが、生成自体は成功する（PK 優先/最大定義で解決）ことを検証する</summary>
-    [Fact]
-    public void Generate_ValueObjects_ConflictingSameNameColumns_ShouldWarnButGenerate()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "customers",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "customer_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "name",
-                            DataType = "nvarchar(50)",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "products",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "product_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "name",
-                            DataType = "nvarchar(100)",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateValueObjects = true,
-            }
-        );
-
-        // 競合は Warning（Error ではない）で、生成は成功する
-        result.HasErrors.Should().BeFalse();
-        // NameValue は 1 定義のみ（共有）
-        result
-            .Files[0]
-            .Content.Split("public sealed partial class NameValue")
-            .Length.Should()
-            .Be(2);
-    }
-
-    /// <summary>
-    /// MySQL の tinyint（表示幅なし＝sbyte）列の値オブジェクトが、比較演算子と IComparable を持つ
-    /// Ordered 基底から派生することを検証する（sbyte を生む方言は MySQL のみ）
-    /// </summary>
-    [Fact]
-    public void Generate_ValueObjects_SByteColumn_ShouldDeriveOrderedBase()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "measures",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "measure_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "level",
-                            DataType = "tinyint",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var columnTypes = QuickER.Provider.MySql.MySqlCSharpTypeMapper.ResolveColumnTypes(diagram);
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            columnTypes,
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateValueObjects = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result.Files[0].Content;
-        content.Should().Contain("public sealed partial class LevelValue");
-        content
-            .Should()
-            .Contain(
-                "ValueObjectOrderedBase<LevelValue, sbyte>",
-                "sbyte を Ordered 分岐から落とすと比較演算子も IComparable も無い VO になり OrderBy が実行時例外になる"
-            );
-    }
-
-    /// <summary>
-    /// 列名 <c>foo</c> と <c>foo_snapshot</c> が同居する正当な図が生成できることを検証する
-    /// （行編集スナップショットは基底の <c>object?[] _valueSnapshot</c> 1 本で、per-EditModel に
-    /// <c>_fooSnapshot</c> は出ない＝存在しないメンバーを名簿が予約し続けて正当な図を弾かない）
-    /// </summary>
-    [Fact]
-    public void Generate_SnapshotSuffixColumn_ShouldGenerate()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "probes",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "probe_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "foo",
-                            DataType = "int",
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "foo_snapshot",
-                            DataType = "int",
-                            IsNullable = true,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result.Files[0].Content;
-        content.Should().Contain("public int? Foo");
-        content.Should().Contain("public int? FooSnapshot");
     }
 
     /// <summary>
     /// 列の説明が確定値プロパティの XmlDoc summary にも載ることを検証する
     /// （バインディングプロパティだけに載せると、コードから主に触る確定値側で説明が引けない）
     /// </summary>
+    // 残す理由（P3-4b）：確定値の XmlDoc の summary の生成器の固定の英文（Confirmed value of … の定型文と、列の説明との連結）。構造で言い換えられる表明は無い
     [Fact]
     public void Generate_EditModel_ColumnDescription_ShouldAppearOnConfirmedProperty()
     {
@@ -3840,541 +1333,12 @@ public class CSharpCodeGenerationServiceTests
         };
     }
 
-    /// <summary>生成結果から指定ファイル名の内容を取得する</summary>
-    private static string Content(CodeGenerationResult result, string fileName) =>
-        result.Files.Single(file => file.FileName == fileName).Content;
-
-    /// <summary>分割時に「生成対象カテゴリ＋Runtime」が 1 カテゴリ 1 ファイルで、規約名・規約名前空間で出力されることを検証する</summary>
-    [Fact]
-    public void Generate_Split_ShouldEmitOneFilePerCategoryPlusRuntime()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            ValueObjectDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                SplitFilesByCategory = true,
-                GenerateValueObjects = true,
-                GenerateRepositories = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-
-        Content(result, "Runtime.g.cs").Should().Contain("namespace Sample.Domain.Runtime;");
-        Content(result, "Runtime.SqlServer.g.cs")
-            .Should()
-            .Contain("namespace Sample.Domain.Runtime.SqlServer;");
-        Content(result, "Entities.g.cs").Should().Contain("namespace Sample.Domain.Entities;");
-        Content(result, "ValueObjects.g.cs")
-            .Should()
-            .Contain("namespace Sample.Domain.ValueObjects;");
-
-        // 共有基盤は Runtime ファイルに集約され、Entity ファイルには基底定義が出ない
-        Content(result, "Runtime.g.cs").Should().Contain("public abstract class EntityBaseCore");
-        Content(result, "Runtime.g.cs").Should().Contain("public abstract class EditModelBaseCore");
-        Content(result, "Entities.g.cs").Should().Contain("public partial class CustomerEntity");
-        Content(result, "Entities.g.cs")
-            .Should()
-            .NotContain("public abstract class EntityBaseCore");
-
-        // クロス参照 using が付与される（Entity→Runtime、Mapper→Entity/EditModel）
-        Content(result, "Entities.g.cs").Should().Contain("using Sample.Domain.Runtime;");
-        Content(result, "Mappers.g.cs").Should().Contain("using Sample.Domain.Entities;");
-        Content(result, "Mappers.g.cs").Should().Contain("using Sample.Domain.EditModels;");
-    }
-
-    /// <summary>分割時に複数カテゴリへ同一名前空間を指定しても、ファイルは分かれ、自分自身の名前空間は using しないことを検証する</summary>
-    [Fact]
-    public void Generate_Split_SameNamespace_ShouldStillEmitSeparateFiles()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            SingleEntityDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                SplitFilesByCategory = true,
-                GenerateEditModels = true,
-                GenerateMappers = false,
-                GenerateRepositories = false,
-                EntityNamespace = "Shared.Models",
-                EditModelNamespace = "Shared.Models",
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        Content(result, "Entities.g.cs").Should().Contain("namespace Shared.Models;");
-        Content(result, "EditModels.g.cs").Should().Contain("namespace Shared.Models;");
-        // 同一名前空間どうしは using しない（自分自身の名前空間を除外）
-        Content(result, "Entities.g.cs").Should().NotContain("using Shared.Models;");
-    }
-
-    /// <summary>分割時に Runtime 名前空間を未指定なら {root}.Runtime にフォールバックすることを検証する</summary>
-    [Fact]
-    public void Generate_Split_RuntimeNamespace_ShouldDefaultToRootDotRuntime()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            SingleEntityDiagram(),
-            new CodeGenerationOptions { RootNamespace = "Acme.App", SplitFilesByCategory = true }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        Content(result, "Runtime.g.cs").Should().Contain("namespace Acme.App.Runtime;");
-    }
-
     // ---- EF Core（DbContext・Fluent 構成）----
-
-    /// <summary>EF Core 生成 ON で DbContext・DbSet・ToTable/HasKey/HasColumnName/IsRequired/HasMaxLength/HasPrecision が出力されることを検証する</summary>
-    [Fact]
-    public void Generate_EfCore_ShouldEmitDbContextWithFluentConfiguration()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            ValueObjectDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateEfCoreRepositories = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result.Files[0].Content;
-
-        // using・DbContext・コンストラクタ・OnModelCreating
-        content.Should().Contain("using Microsoft.EntityFrameworkCore;");
-        content.Should().Contain("public partial class QuickErDbContext : DbContext");
-        content
-            .Should()
-            .Contain("public QuickErDbContext(DbContextOptions<QuickErDbContext> options)");
-        content
-            .Should()
-            .Contain("protected override void OnModelCreating(ModelBuilder modelBuilder)");
-        content.Should().Contain("partial void OnModelCreatingPartial(ModelBuilder modelBuilder);");
-
-        // DbSet（複数形プロパティ名）
-        content
-            .Should()
-            .Contain("public DbSet<CustomerEntity> Customers => Set<CustomerEntity>();");
-        content.Should().Contain("public DbSet<OrderEntity> Orders => Set<OrderEntity>();");
-
-        // テーブル・主キー・列・必須・最大長・精度
-        content.Should().Contain("modelBuilder.Entity<CustomerEntity>(entity =>");
-        content.Should().Contain("entity.ToTable(\"customers\");");
-        content.Should().Contain("entity.HasKey(e => e.CustomerId);");
-        content
-            .Should()
-            .Contain(
-                "entity.Property(e => e.Name).HasColumnName(\"name\").IsRequired().HasMaxLength(50);"
-            );
-        content
-            .Should()
-            .Contain(
-                "entity.Property(e => e.Balance).HasColumnName(\"balance\").HasPrecision(10, 2);"
-            );
-    }
-
-    /// <summary>EF Core 生成で EntityBase の永続化対象外メンバーが Fluent の Ignore で除外されることを検証する</summary>
-    [Fact]
-    public void Generate_EfCore_ShouldIgnoreEntityBaseMembers()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            ValueObjectDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateEfCoreRepositories = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result.Files[0].Content;
-        content.Should().Contain("entity.Ignore(e => e.RowState);");
-        content.Should().Contain("entity.Ignore(e => e.IsAdded);");
-        content.Should().Contain("entity.Ignore(e => e.HasChanges);");
-    }
-
-    /// <summary>EF Core 生成で 1 対多リレーションが HasMany/WithOne/HasForeignKey/OnDelete で構成されることを検証する</summary>
-    [Fact]
-    public void Generate_EfCore_ShouldConfigureOneToManyRelationship()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            ValueObjectDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateEfCoreRepositories = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result.Files[0].Content;
-        content.Should().Contain(".HasMany(e => e.Orders)");
-        content.Should().Contain(".WithOne(e => e.Customer)");
-        content.Should().Contain(".HasForeignKey(e => e.CustomerId)");
-        // OnDelete 既定（NoAction）は ClientNoAction（EF は追跡中の子に触れず、結果は DB の参照アクションが決める）
-        content.Should().Contain(".OnDelete(DeleteBehavior.ClientNoAction);");
-    }
-
-    /// <summary>OnDelete=Cascade のリレーションでは OnDelete(DeleteBehavior.Cascade) が構成されることを検証する</summary>
-    [Fact]
-    public void Generate_EfCore_ShouldConfigureCascadeDeleteFromModel()
-    {
-        var diagram = ValueObjectDiagram();
-        diagram.Relationships[0].OnDelete = ForeignKeyReferentialAction.Cascade;
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateEfCoreRepositories = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        result.Files[0].Content.Should().Contain(".OnDelete(DeleteBehavior.Cascade);");
-    }
-
-    /// <summary>VO 生成 ON の EF Core では各 VO 列に HasConversion が構成されることを検証する</summary>
-    [Fact]
-    public void Generate_EfCore_WithValueObjects_ShouldEmitHasConversion()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            ValueObjectDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateEfCoreRepositories = true,
-                GenerateValueObjects = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result.Files[0].Content;
-        // 主キー VO の変換（v.Value / Create）
-        content.Should().Contain(".HasConversion(v => v!.Value, v => CustomerIdValue.Create(v!))");
-        // VO 列にも Fluent の HasMaxLength/HasPrecision を出す（検証は VO の Create が行うが、列のストア型は EF Core が
-        // パラメータと .Value の CAST に使うため。出さないと既定の nvarchar(max)・decimal(18,2) になる）
-        content.Should().Contain(".HasMaxLength(50).HasConversion(");
-    }
-
-    /// <summary>rowversion 列を持つエンティティの EF Core 構成で IsRowVersion() が出力されることを検証する</summary>
-    [Fact]
-    public void Generate_EfCore_ShouldConfigureRowVersion()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            RowVersionDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateEfCoreRepositories = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result.Files[0].Content;
-        content
-            .Should()
-            .Contain(
-                "entity.Property(e => e.RowVersion).HasColumnName(\"row_version\").IsRequired().IsRowVersion();"
-            );
-    }
-
-    /// <summary>EF Core 生成 OFF（既定）では EF Core への using も DbContext も一切出力されないことを検証する</summary>
-    [Fact]
-    public void Generate_EfCore_Disabled_ShouldNotEmitAnyEfCode()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            ValueObjectDiagram(),
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result.Files[0].Content;
-        content.Should().NotContain("Microsoft.EntityFrameworkCore");
-        content.Should().NotContain("QuickErDbContext");
-        content.Should().NotContain("OnModelCreating");
-        content.Should().NotContain("DbSet<");
-    }
-
-    /// <summary>分割出力時に EfCore カテゴリが独自ファイル・独自名前空間で出力され、他ファイルへ EF Core using が漏れないことを検証する</summary>
-    [Fact]
-    public void Generate_EfCore_Split_ShouldEmitDedicatedFileAndNamespace()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            ValueObjectDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                SplitFilesByCategory = true,
-                GenerateEfCoreRepositories = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-
-        // EF Core 実装は方言別実装と同じ流儀で Repositories.EntityFrameworkCore.g.cs・{Repository}.EntityFrameworkCore へ出力される
-        var efCore = Content(result, "Repositories.EntityFrameworkCore.g.cs");
-        efCore.Should().Contain("namespace Sample.Domain.Repositories.EntityFrameworkCore;");
-        efCore.Should().Contain("using Microsoft.EntityFrameworkCore;");
-        efCore.Should().Contain("public partial class QuickErDbContext : DbContext");
-        // EF Core 固定 infra は Runtime.EntityFrameworkCore.g.cs（配布パッケージと対称）へ分かれる
-        efCore.Should().Contain("using Sample.Domain.Runtime.EntityFrameworkCore;");
-        Content(result, "Runtime.EntityFrameworkCore.g.cs")
-            .Should()
-            .Contain("namespace Sample.Domain.Runtime.EntityFrameworkCore;")
-            .And.Contain("EfCoreRepositoryCore<TEntity, TKey, TContext>");
-
-        // EF Core の using は EF Core 系ファイルにのみ現れ、Entity ファイルには漏れない
-        Content(result, "Entities.g.cs")
-            .Should()
-            .NotContain("using Microsoft.EntityFrameworkCore;");
-    }
-
-    /// <summary>
-    /// 分割×フル構成で、Entity / EditModel / Mapper / ValueObjects / Runtime の各ファイルに、それらが使わない
-    /// 外部 using（EntityFrameworkCore / Data.SqlClient / DependencyInjection）が 1 行も含まれないことを検証する。
-    /// </summary>
-    /// <remarks>
-    /// 本テストは「using をバケット単位で解決する」設計（<see cref="GeneratedFileUsings"/>）の核心を守る。
-    /// 契約のみを持つ Repository ファイル（EF Core 単独時）に SqlClient / DI の using が漏れないことも併せて検証する。
-    /// EF Core 系フラグを両方 ON（GenerateRepositories=true・GenerateEfCoreRepositories=true）にしてすべての外部 using が
-    /// 発生し得る最大構成で確認する。
-    /// </remarks>
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void Generate_Split_ShouldNotLeakForeignUsingsIntoUnrelatedFiles(bool vo)
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            ValueObjectDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                SplitFilesByCategory = true,
-                GenerateValueObjects = vo,
-                GenerateRepositories = true,
-                GenerateEfCoreRepositories = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-
-        // これら 3 つの外部 using は、その依存を実際に使わないファイルへ現れてはならない
-        string[] forbiddenUsings =
-        [
-            "using Microsoft.EntityFrameworkCore",
-            "using Microsoft.Data.SqlClient;",
-            "using Microsoft.Extensions.DependencyInjection",
-        ];
-
-        string[] neutralFiles =
-        [
-            "Entities.g.cs",
-            "EditModels.g.cs",
-            "Mappers.g.cs",
-            "Runtime.g.cs",
-            .. (vo ? new[] { "ValueObjects.g.cs" } : []),
-        ];
-
-        foreach (var fileName in neutralFiles)
-        {
-            var content = Content(result, fileName);
-            foreach (var forbidden in forbiddenUsings)
-            {
-                content
-                    .Should()
-                    .NotContain(
-                        forbidden,
-                        $"{fileName} に外部 using「{forbidden}」が漏れてはならない（VO={vo}）"
-                    );
-            }
-        }
-    }
-
-    /// <summary>
-    /// EF Core 単独出力の分割時、契約のみの Repository ファイルに SqlClient（ADO）の using が漏れないことを検証する。
-    /// DI（DependencyInjection）は Save フックの登録拡張 <c>AddSaveHook</c> が契約と同じ場所へ 1 回だけ出るため、
-    /// 契約ファイルが持つのが正しい（EF Core が DI を連れてくるので新たな依存は増えない）
-    /// </summary>
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void Generate_EfCoreOnly_Split_RepositoryFile_ShouldNotUseSqlClient(bool vo)
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            ValueObjectDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                SplitFilesByCategory = true,
-                GenerateValueObjects = vo,
-                GenerateRepositories = false,
-                GenerateEfCoreRepositories = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-
-        // 契約のみ（QuickER の SQL Server 実装なし）の Repository ファイルは ADO に依存しない
-        var repository = Content(result, "Repositories.g.cs");
-        repository.Should().NotContain("using Microsoft.Data.SqlClient;");
-        repository.Should().NotContain("using Microsoft.Data.Sqlite;");
-
-        // DI は AddSaveHook（エンジン非依存の Save フック登録拡張）のために契約ファイルが持つ
-        repository
-            .Should()
-            .Contain("using Microsoft.Extensions.DependencyInjection;")
-            .And.Contain("public static class SaveHookServiceCollectionExtensions");
-    }
-
-    /// <summary>
-    /// 分割時、EF Core 実装は方言別実装と同じ流儀で Repositories.EntityFrameworkCore.g.cs へ出力され、
-    /// 名前空間が Repository 契約 namespace のサブ名前空間（{RepositoryNamespace}.EntityFrameworkCore）へ
-    /// 導出されることを検証する
-    /// </summary>
-    [Fact]
-    public void Generate_EfCore_Split_ShouldDeriveNamespaceFromRepository()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            ValueObjectDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                SplitFilesByCategory = true,
-                GenerateEfCoreRepositories = true,
-                // Repository 契約 namespace をカスタム指定 → EfCore はそのサブ名前空間へ導出される
-                RepositoryNamespace = "Acme.Persistence.Repos",
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        Content(result, "Repositories.EntityFrameworkCore.g.cs")
-            .Should()
-            .Contain("namespace Acme.Persistence.Repos.EntityFrameworkCore;");
-    }
-
-    /// <summary>EF Core 単独出力（GenerateEfCoreRepositories=true・GenerateRepositories=false）が合法で、エラーなく生成できることを検証する</summary>
-    [Fact]
-    public void Generate_EfCoreOnly_ShouldSucceedWithoutError()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            ValueObjectDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateEfCoreRepositories = true,
-                GenerateRepositories = false,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-
-        var content = string.Concat(result.Files.Select(file => file.Content));
-        // 共通契約は出力される
-        content.Should().Contain("public partial interface ISqlExecutor");
-        content.Should().Contain("public sealed class SqlQuery<TEntity>");
-        content.Should().Contain("internal static class RawSqlMapper");
-        // EF Core 一式は出力される
-        content.Should().Contain("public partial class QuickErDbContext : DbContext");
-        content
-            .Should()
-            .Contain("public static IServiceCollection AddGeneratedEfCoreRepositories(");
-        // QuickER の SQL Server 実装は出力されない
-        content.Should().NotContain("public sealed partial class SqlExecutor(");
-        content.Should().NotContain("public abstract class SqlServerRepositoryCore<");
-        content
-            .Should()
-            .NotContain("public static IServiceCollection AddGeneratedSqlServerRepositories(");
-    }
-
-    /// <summary>EF Core 単独出力（VO 有無 × 分割有無の 4 通り）の生成物全ファイルに Microsoft.Data.SqlClient 依存が一切現れないことを検証する</summary>
-    /// <remarks>
-    /// SqlParameterValue（値オブジェクト unwrap ヘルパー・BCL のみ）は "SqlParameter " のような型参照ではないため、
-    /// 誤検出しないよう "SqlParameter " は末尾スペース付きで（型参照のみ）判定する
-    /// </remarks>
-    [Theory]
-    [InlineData(false, false)]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public void Generate_EfCoreOnly_ShouldNotDependOnSqlClient(bool split, bool vo)
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            ValueObjectDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                SplitFilesByCategory = split,
-                GenerateValueObjects = vo,
-                GenerateEfCoreRepositories = true,
-                GenerateRepositories = false,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        result.Files.Should().NotBeEmpty();
-
-        // SqlClient 由来のトークンが 1 つでも現れたら EF Core 単独出力の前提（プロバイダのみで使える）が崩れる
-        string[] forbidden =
-        [
-            "Microsoft.Data.SqlClient",
-            "SqlCommand",
-            "SqlConnection(",
-            "SqlDataReader",
-            "SqlParameter ", // SqlParameterValue（VO unwrap・BCL のみ）は除外するため末尾スペース付き
-        ];
-
-        foreach (var file in result.Files)
-        {
-            foreach (var token in forbidden)
-            {
-                file.Content.Should()
-                    .NotContain(
-                        token,
-                        $"EF Core 単独出力のファイル {file.FileName} に SqlClient 依存トークン「{token}」が現れてはならない（Split={split} VO={vo}）"
-                    );
-            }
-        }
-    }
-
-    /// <summary>EF Core 単独出力の SqlQuery は SQL Server パス（FOR JSON・接続ファクトリ・SqlExpressionTranslator）を出力せず、実行器委譲のみになることを検証する</summary>
-    [Fact]
-    public void Generate_EfCoreOnly_SqlQuery_ShouldOnlyDelegateToExecutor()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            SingleEntityDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateEfCoreRepositories = true,
-                GenerateRepositories = false,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = string.Concat(result.Files.Select(file => file.Content));
-
-        // 実行器委譲パスは出力される
-        content.Should().Contain("public sealed class SqlQuery<TEntity>");
-        content
-            .Should()
-            .Contain(
-                "=> await _executor.ToListAsync(BuildPlan(), cancellationToken).ConfigureAwait(false);"
-            );
-        // SQL Server 専用の要素は出力されない（コード本体で判定。FOR JSON 等は契約の doc コメントに残るためコードで確認する）
-        content.Should().NotContain("private readonly ISqlConnectionFactory _connectionFactory");
-        content.Should().NotContain("internal static class SqlExpressionTranslator");
-        content.Should().NotContain("internal static class JsonQueryPlanner");
-        content.Should().NotContain("private async Task<string> ReadJsonAsync(");
-        content.Should().NotContain("BuildJsonSelect(");
-        // 各エンティティ用リポジトリインターフェイス（契約）は出力される
-        content.Should().Contain(" : IRepository<");
-    }
 
     // ---- EF Core（EF Core 版 Repository・SqlExecutor・DI 拡張）----
 
     /// <summary>EF Core 生成 ON で EF Core 版 Repository（基底クラス＋エンティティ別実装）が生成されることを検証する</summary>
+    // 残す理由（P3-4b）：基底の主コンストラクタへ渡す引数と、Entry の状態の代入（式本体）。構造の表明は行 code-efcore-repositories-core-shim-and-per-entity へ移した
     [Fact]
     public void Generate_EfCore_ShouldEmitEfCoreRepositories()
     {
@@ -4389,43 +1353,23 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-
-        // 基底クラス（実装＝固定ランタイム側）: 具象 DbContext 非依存で TContext ジェネリック化し、
-        // IDbContextFactory<TContext> を受け取る
-        content
-            .Should()
-            .Contain("public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(");
-        content.Should().Contain("IDbContextFactory<TContext> contextFactory");
-        content.Should().Contain(") : IRepositoryCore<TEntity, TKey>");
-        content.Should().Contain("where TContext : DbContext");
-
         // 拡張シム（現行名）: 実装を Core へ委ね、コンストラクタ引数をそのまま転送する
-        content
-            .Should()
-            .Contain("public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(");
         content
             .Should()
             .Contain(
                 ") : EfCoreRepositoryCore<TEntity, TKey, TContext>(contextFactory, saveHooks, sqlExecutor)"
             );
-
-        // エンティティ別実装: 生成側で TContext=QuickErDbContext を閉じ、既存の I{Entity}Repository を実装する
-        content.Should().Contain("public sealed partial class EfCoreCustomerRepository(");
         content
             .Should()
             .Contain(
                 ") : EfCoreRepository<CustomerEntity, int, QuickErDbContext>(contextFactory, saveHooks, sqlExecutor), ICustomerRepository"
             );
-
-        // 読み取りは AsNoTracking（切断パターン）、事後状態は既存版と同じ Unchanged
-        content.Should().Contain(".AsNoTracking()");
-        content.Should().Contain("entity?.MarkUnchanged();");
-
         // 単発の追加・一括追加は Entry.State 代入（Add/AddRange のグラフ走査を避け、既存版と同じ範囲を挿入する）
         content.Should().Contain("context.Entry(entity).State = EntityState.Added;");
     }
 
     /// <summary>EF Core 版 SaveAsync がカスケードの閉包を RowState → EntityState 変換で登録し、競合を SaveConflictException へ変換することを検証する</summary>
+    // 残す理由（P3-4b）：RowState から EntityState への switch の腕・競合の catch と例外の生成・状態の代入（式本体）。構造の表明は行 code-efcore-save-tracks-cascade-closure へ移した
     [Fact]
     public void Generate_EfCore_ShouldConvertRowStateOfCascadeClosureInSave()
     {
@@ -4440,10 +1384,6 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-
-        // カスケードの閉包だけを 1 件ずつ登録する（ChangeTracker.TrackGraph は親への逆参照まで辿るので使わない）と RowState → EntityState の変換表
-        content.Should().Contain("foreach (var child in entity.EnumerateCascadeChildren())");
-        content.Should().NotContain("ChangeTracker.TrackGraph(");
         content.Should().Contain("RowState.Added => EntityState.Added,");
         content.Should().Contain("RowState.Updated => EntityState.Modified,");
         content.Should().Contain("RowState.Removed => EntityState.Deleted,");
@@ -4453,89 +1393,10 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("catch (DbUpdateConcurrencyException ex)");
         content.Should().Contain("throw new SaveConflictException(");
         content.Should().Contain("entry.State = EntityState.Added;");
-
-        // 保存後の事後状態は既存版と同じ（AcceptChanges で Added/Updated → Unchanged）。
-        // Save フック対応で保存本体は SaveTrackedGraphAsync へ分離され、集約ルートは root 変数で確定する
-        content.Should().Contain("EntityGraphSaver.AcceptChanges(root, cascadeSave);");
-    }
-
-    /// <summary>EF Core 版 SqlExecutor が DbContext の接続上の ADO で既存版とマッピング・束縛を共有することを検証する</summary>
-    [Fact]
-    public void Generate_EfCore_ShouldEmitEfCoreSqlExecutor()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            ValueObjectDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateEfCoreRepositories = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result.Files[0].Content;
-
-        // 具象 DbContext 非依存で TContext ジェネリック化（IDbContextFactory<TContext> を受け取る）
-        content
-            .Should()
-            .Contain(
-                "public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TContext> contextFactory)"
-            );
-        content.Should().Contain("    : ISqlExecutor");
-        content.Should().Contain("where TContext : DbContext");
-
-        // DbContext の接続上で ADO を直接実行し、共有ヘルパー RawSqlMapper のマッピング・束縛を使う
-        content
-            .Should()
-            .Contain("return EfCoreCommands.Create(context.Database, sql, parameters);");
-        content.Should().Contain("var command = database.GetDbConnection().CreateCommand();");
-        content
-            .Should()
-            .Contain("RawSqlMapper.ReadProjectionRowsAsync<TResult>(reader, cancellationToken)");
-        content.Should().Contain("RawSqlMapper.BindParameters(command, parameters);");
-        content
-            .Should()
-            .Contain("internal static void BindParameters(DbCommand command, object? parameters)");
-
-        // 厳密マッピング（全列必須・DbDataReader 版）を既存版と共有する
-        content
-            .Should()
-            .Contain("public TEntity MapEntityFromRawSql<TEntity>(DbDataReader reader)");
-    }
-
-    /// <summary>EF Core 版 DI 拡張が DbContextFactory＋EF Core 版実装一式を既存と同じインターフェイスへ登録することを検証する</summary>
-    [Fact]
-    public void Generate_EfCore_ShouldEmitDiExtension()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            ValueObjectDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateEfCoreRepositories = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result.Files[0].Content;
-
-        content
-            .Should()
-            .Contain("public static IServiceCollection AddGeneratedEfCoreRepositories(");
-        content.Should().Contain("Action<DbContextOptionsBuilder> configureDbContext");
-        content.Should().Contain("services.AddDbContextFactory<QuickErDbContext>(options =>");
-        content.Should().Contain("configureDbContext(options);");
-        content
-            .Should()
-            .Contain("services.AddSingleton<ISqlExecutor, EfCoreSqlExecutor<QuickErDbContext>>();");
-        // 既存と同じインターフェイスへ EF Core 版実装を登録する（DI 差し替えだけで切替可能）
-        content
-            .Should()
-            .Contain("services.AddScoped<ICustomerRepository, EfCoreCustomerRepository>();");
-        content.Should().Contain("services.AddScoped<IOrderRepository, EfCoreOrderRepository>();");
     }
 
     /// <summary>EF Core 生成 ON の SqlQuery に実行器差し替えバックエンド（式木捕捉・EF Core 実行）が追加されることを検証する</summary>
+    // 残す理由（P3-4b）：並び順の捕捉・実行器の注入・Include の合成・OrderBy の名前の式（式本体）。構造の表明は行 code-efcore-sql-query-executor-backend へ移した
     [Fact]
     public void Generate_EfCore_ShouldAddExecutorBackendToSqlQuery()
     {
@@ -4550,26 +1411,9 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-
-        // 内部抽象（BCL 型のみ）と SqlQuery への注入コンストラクタ
-        content.Should().Contain("internal interface ISqlQueryExecutor<TEntity>");
-        content.Should().Contain("internal sealed record SqlQueryPlan<TEntity>(");
-        content.Should().Contain("internal SqlQuery(ISqlQueryExecutor<TEntity> executor)");
-
-        // SqlQuery 本体の公開シグネチャは不変（sealed のまま）
-        content.Should().Contain("public sealed class SqlQuery<TEntity>");
-
-        // EF Core モードではQuickER のトランスレータを通さず式木のまま捕捉する
-        content.Should().Contain("_predicates.Add(predicate);");
         content
             .Should()
             .Contain("_orderSelectors.Add(new SqlQueryOrdering(keySelector, Descending: false));");
-
-        // EF Core 実行器: AsNoTracking・ドットパス Include・boxing を剥がした OrderBy 合成・Repository からの注入
-        // 実行器も TContext ジェネリック（具象 DbContext 非依存）
-        content
-            .Should()
-            .Contain("internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(");
         content
             .Should()
             .Contain("new(new EfCoreSqlQueryExecutor<TEntity, TContext>(_contextFactory));");
@@ -4586,6 +1430,7 @@ public class CSharpCodeGenerationServiceTests
     /// （以前は EF Core 生成時のみ実行器抽象が出て、QuickER 版 Repository は方言 SQL を SqlQuery 内に埋め込んでいた）。
     /// EF Core 依存（EfCore プレフィックスのクラス・DbContext 等）が漏れないことは引き続き守る。
     /// </remarks>
+    // 残す理由（P3-4b）：Query() の式本体（方言別 ADO 実行器の注入）。構造の表明は行 code-efcore-disabled-sql-query-unified-through-ado-executor へ移した
     [Fact]
     public void Generate_EfCore_Disabled_ShouldStillUnifyThroughAdoExecutor()
     {
@@ -4600,134 +1445,23 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-
-        // 実行器抽象と方言別 ADO 実行器は出力される（ランタイム統一）
-        content.Should().Contain("internal interface ISqlQueryExecutor<TEntity>");
-        content.Should().Contain("internal sealed record SqlQueryPlan<TEntity>(");
-        content.Should().Contain("internal sealed class SqlServerSqlQueryExecutor<TEntity>(");
         content
             .Should()
             .Contain(
                 "public SqlQuery<TEntity> Query() => new(new SqlServerSqlQueryExecutor<TEntity>(_connectionFactory));"
             );
-
-        // EF Core 依存（EfCore プレフィックスのクラス・DbContext）は一切出力されない
-        content.Should().NotContain("EfCore");
-        content.Should().NotContain("QuickErDbContext");
-
-        // 既存の SQL Server パスは SqlDataReader ベースのまま（マッピングの互換維持）
-        content
-            .Should()
-            .Contain("public TEntity MapEntityFromRawSql<TEntity>(SqlDataReader reader)");
-    }
-
-    /// <summary>分割出力時、EfCore ファイルの EF Core 版コードが SqlClient の型（SqlCommand 等）に依存しないことを検証する</summary>
-    [Fact]
-    public void Generate_EfCore_Split_ShouldKeepEfCodeFreeOfSqlClientTypes()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            ValueObjectDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                SplitFilesByCategory = true,
-                GenerateEfCoreRepositories = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        // EF Core 系は「固定 infra（Runtime.EntityFrameworkCore.g.cs）＋スキーマ依存物（Repositories.EntityFrameworkCore.g.cs）」の
-        // 2 ファイル構成。いずれにも ADO（SqlClient）の型が出ないことを検証する
-        var efCore =
-            Content(result, "Repositories.EntityFrameworkCore.g.cs")
-            + Content(result, "Runtime.EntityFrameworkCore.g.cs");
-
-        // EF Core 版コードは方言非依存（System.Data.Common の DbCommand/DbConnection/DbDataReader のみ使用）。
-        // SqlBulkCopy は「性能特性が異なる」旨の XML コメントでのみ言及されるため、型使用（"SqlBulkCopy("）だけを禁止する
-        efCore.Should().NotContain("SqlCommand");
-        efCore.Should().NotContain("SqlDataReader");
-        efCore.Should().NotContain("SqlBulkCopy(");
-        efCore.Should().NotContain("new SqlConnection");
-        // 固定 infra（EF Core エンジン）は Runtime.EntityFrameworkCore.g.cs 側に出る
-        Content(result, "Runtime.EntityFrameworkCore.g.cs")
-            .Should()
-            .Contain("EfCoreSqlExecutor")
-            .And.Contain("EfCoreRepositoryCore<TEntity, TKey, TContext>");
-    }
-
-    /// <summary>rowversion 列と単一主キーを持つ最小ダイアグラム（IsRowVersion 構成の検証用）</summary>
-    private static ErDiagram RowVersionDiagram() =>
-        new()
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "documents",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "document_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "row_version",
-                            DataType = "rowversion",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-    /// <summary>インメモリ Repository 単独出力（契約＋インメモリ実装）が生成され、ADO・EF Core 依存を含まないことを検証する</summary>
-    [Fact(
-        DisplayName = "インメモリ Repository 単独出力は契約＋インメモリ実装を出し ADO/EF Core 依存を含まない"
-    )]
-    public void Generate_InMemoryOnly_EmitsContractAndInMemory_NoAdoOrEf()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            SingleEntityDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = false,
-                GenerateEfCoreRepositories = false,
-                GenerateInMemoryRepositories = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result.Files[0].Content;
-
-        // 契約・インメモリ実装・データストア・シーダー・DI が出る
-        content.Should().Contain("public partial interface IItemRepository");
-        content.Should().Contain("class InMemoryDataStore");
-        content.Should().Contain("class InMemoryItemRepository");
-        content.Should().Contain("class InMemorySampleData");
-        content.Should().Contain("AddGeneratedInMemoryRepositories");
-        // 方言非依存: ADO・EF Core・QuickER 版 Repository 実装は一切出ない
-        content.Should().NotContain("Microsoft.Data.SqlClient");
-        content.Should().NotContain("Microsoft.Data.Sqlite");
-        content.Should().NotContain("Microsoft.EntityFrameworkCore");
-        content.Should().NotContain("class ItemRepository");
-        content.Should().NotContain("AddGeneratedSqlServerRepositories");
-        content.Should().NotContain("AddGeneratedSqliteRepositories");
     }
 
     /// <summary>
-    /// インメモリ Repository とランタイムパッケージ参照モードが併用でき（旧・併用不可診断は撤去済み）、
-    /// インメモリ基盤の固定 infra が出力されず <c>QuickER.Runtime.InMemory</c> を using で参照することを検証する。
+    /// インメモリ Repository とランタイムパッケージ参照モードの併用で、参照パッケージの案内が Core＋InMemory になる（ADO / EF Core を含まない）ことを検証する。
     /// </summary>
+    /// <remarks>
+    /// 生成物の側（固定 infra が出ない・InMemory パッケージの using が出る）は決まった行
+    /// <c>code-inmemory-runtime-package-leaves-fixed-infra-out</c> が見る。
+    /// </remarks>
+    // 残す理由（P3-4b）：RuntimePackageReferenceGuidance.Compute の戻り値（生成物ではないので決まった行の判定の外）。生成物の側は行 code-inmemory-runtime-package-leaves-fixed-infra-out が見る
     [Fact(
-        DisplayName = "インメモリ Repository ＋ UseRuntimePackages は併用でき InMemory パッケージを参照する"
+        DisplayName = "インメモリ Repository ＋ UseRuntimePackages の参照パッケージの案内は Core＋InMemory になる"
     )]
     public void Generate_InMemoryWithRuntimePackages_UsesInMemoryPackage()
     {
@@ -4740,21 +1474,6 @@ public class CSharpCodeGenerationServiceTests
             UseRuntimePackages = true,
         };
 
-        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
-
-        result.HasErrors.Should().BeFalse();
-        result.Files.Should().NotBeEmpty();
-
-        var content = string.Join(Environment.NewLine, result.Files.Select(f => f.Content));
-
-        // 固定 infra はパッケージが持つ（生成側には出ない）
-        content.Should().NotContain("class InMemoryDataStore");
-        content.Should().NotContain("abstract class EntityBaseCore");
-        // スキーマ依存物（per-entity 実装・DI 登録）は生成側に残り、パッケージを using で参照する
-        content.Should().Contain($"using {RuntimePackages.InMemory};");
-        content.Should().Contain("AddGeneratedInMemoryRepositories");
-
-        // 案内も Core＋InMemory になる（ADO / EF Core を含まない）
         RuntimePackageReferenceGuidance
             .Compute(options)
             .Should()
@@ -4762,15 +1481,15 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>
-    /// リモートサービス生成とランタイムパッケージ参照モードの併用で、サーバー実装の固定部
-    /// （<c>RemoteServerEngine</c> ほか）が出力されず <c>QuickER.Runtime.AspNetCore</c> を using で参照することを検証する。
+    /// リモートサービス生成とランタイムパッケージ参照モードの併用で、参照パッケージの案内が Core＋SqlServer＋AspNetCore になることを検証する。
     /// </summary>
     /// <remarks>
-    /// per-entity のエンドポイント（<c>GeneratedRemoteEndpoints.MapGeneratedRemoteEndpoints</c>・
-    /// <c>OnServerError</c> partial フック）はスキーマ依存物として生成側に残る＝利用者契約は不変。
+    /// 生成物の側（サーバー実装の固定部が出ない・AspNetCore パッケージの using・エンドポイントと <c>OnServerError</c> の partial フックが残る）は
+    /// 決まった行 <c>code-remote-server-runtime-package-leaves-engine-out</c> が見る。
     /// </remarks>
+    // 残す理由（P3-4b）：RuntimePackageReferenceGuidance.Compute の戻り値（生成物ではないので決まった行の判定の外）。生成物の側は行 code-remote-server-runtime-package-leaves-engine-out が見る
     [Fact(
-        DisplayName = "リモートサービス生成 ＋ UseRuntimePackages はサーバー固定部を出さず AspNetCore パッケージを参照する"
+        DisplayName = "リモートサービス生成 ＋ UseRuntimePackages の参照パッケージの案内は Core＋SqlServer＋AspNetCore になる"
     )]
     public void Generate_RemoteServicesWithRuntimePackages_UsesAspNetCorePackage()
     {
@@ -4782,24 +1501,6 @@ public class CSharpCodeGenerationServiceTests
             UseRuntimePackages = true,
         };
 
-        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
-
-        result.HasErrors.Should().BeFalse();
-
-        var serverFile = result.Files.Single(f =>
-            f.FileName.EndsWith(".RemoteServer.g.cs", StringComparison.Ordinal)
-        );
-
-        // サーバー固定部はパッケージが持つ（生成側には出ない）
-        serverFile.Content.Should().NotContain("class RemoteServerEngine");
-        serverFile.Content.Should().NotContain("class DeferredOctetStreamBody");
-        serverFile.Content.Should().NotContain("class RemoteBadRequestException");
-        // スキーマ依存物（エンドポイント・partial フック）は生成側に残り、パッケージを using で参照する
-        serverFile.Content.Should().Contain($"using {RuntimePackages.AspNetCore};");
-        serverFile.Content.Should().Contain("MapGeneratedRemoteEndpoints");
-        serverFile.Content.Should().Contain("static partial void OnServerError");
-
-        // 案内は Core＋SqlServer＋AspNetCore になる
         RuntimePackageReferenceGuidance
             .Compute(options)
             .Should()
@@ -4850,6 +1551,7 @@ public class CSharpCodeGenerationServiceTests
     /// Info 診断が 1 件出ることを検証する（rowversion 列には付与されない。ヘッダには出さない＝
     /// 生成コード側の可視化は属性が担い、一覧は生成時の診断でのみ通知する）。
     /// </summary>
+    // 残す理由（P3-4b）：ヘッダーに除外列の一覧の固定文を出さないこと（生成器の固定の文）。構造の表明は行 code-excluded-unbounded-binary-marker-on-photo-only へ移した
     [Fact(DisplayName = "無制限バイナリ除外 ON: マーカー付与・Info 診断（rowversion は対象外）")]
     public void Generate_ExcludeUnboundedBinary_On_MarksColumnAndReportsInfo()
     {
@@ -4866,228 +1568,15 @@ public class CSharpCodeGenerationServiceTests
         var content = result
             .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
             .Content;
-
-        // マーカー属性クラスの定義が出る
-        content.Should().Contain("public sealed class UnboundedBinaryColumnAttribute : Attribute");
-        // varbinary(max) の Photo プロパティにマーカーが付く
-        content
-            .Should()
-            .MatchRegex(@"\[UnboundedBinaryColumn\]\s*\r?\n\s*public byte\[\]\? Photo");
-        // 付与は varbinary(max) の 1 列のみ（rowversion の RowVersion には付かない）
-        System
-            .Text.RegularExpressions.Regex.Matches(content, @"\[UnboundedBinaryColumn\]")
-            .Count.Should()
-            .Be(1, "付与対象は無制限バイナリの photo 1 列だけで rowversion は対象外");
         // ヘッダには除外列一覧を出さない（属性と Info 診断で可視化する）
         content.Should().NotContain("無制限バイナリ列（SELECT / UPDATE 除外）");
-        // Info 診断が 1 件出る
-        result
-            .Diagnostics.Should()
-            .ContainSingle(d => d.Severity == GenerationDiagnosticSeverity.Info)
-            .Which.Message.Should()
-            .Contain("DocumentEntity.Photo (documents.photo)");
-    }
-
-    /// <summary>
-    /// ExcludeUnboundedBinaryColumns=false（既定）のとき、マーカー付与・Info 診断が出ないことを検証する
-    /// （属性クラスの定義自体は Repository 生成のため出力される）。
-    /// </summary>
-    [Fact(DisplayName = "無制限バイナリ除外 OFF: 付与・Info なし（属性定義は repo 生成で出る）")]
-    public void Generate_ExcludeUnboundedBinary_Off_DoesNotMarkOrReport()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            BinaryColumnDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result
-            .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
-            .Content;
-
-        // 付与は出ない（Info 診断が出ないことは決まった行 diag-exclude-unbounded-binary-off-reports-nothing が見る）
-        content.Should().NotContain("[UnboundedBinaryColumn]");
-        // ただし属性クラスの定義は Repository 生成（既定 ON）のため出力される（後続ステージの固定 infra が参照する）
-        content.Should().Contain("public sealed class UnboundedBinaryColumnAttribute : Attribute");
-    }
-
-    /// <summary>
-    /// 値オブジェクト × 無制限バイナリ除外 × 非 NULL の除外列で、EditModel / Mapper が
-    /// 「必須検証の対象外」「入力があるときだけ実体へ代入」になることを検証する。
-    /// </summary>
-    /// <remarks>
-    /// 除外列は通常フェッチの SELECT に含まれず未取得状態（VO 非 NULL は初期化子 <c>= null!</c> ＝ null）で届くため、
-    /// 必須検証と <c>?? throw</c> が残っていると「未取得のまま素通しするだけの保存」が成立しない。
-    /// 通常列（label）は従来どおり必須検証と <c>?? throw</c> を保つ＝規則が除外列だけに効くことも同時に固定する。
-    /// </remarks>
-    [Fact(
-        DisplayName = "VO×無制限バイナリ除外 ON: 除外列は必須検証の対象外・Mapper は非 null 代入になる"
-    )]
-    public void Generate_ExcludeUnboundedBinary_On_EditModelAndMapper_TreatUnsetAsCurrentValue()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            BinaryEditModelDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = true,
-                GenerateValueObjects = true,
-                ExcludeUnboundedBinaryColumns = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result
-            .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
-            .Content;
-
-        // (a) Mapper: 除外列は「入力があるときだけ代入」＝欠落を例外にしない
-        content
-            .Should()
-            .NotContain(
-                "Required(editModel.Seal,",
-                "非 NULL の除外列を未入力のまま保存できないと、通常フェッチ後の往復が成立しない"
-            );
-        content.Should().NotContain("Required(editModel.NoteBlob,");
-        content.Should().Contain("if (editModel.Seal is not null)");
-        content.Should().Contain("if (editModel.NoteBlob is not null)");
-
-        // (b) EditModel: 除外列は列テーブルで必須フラグが落ちる（必須チェックの入力そのもの）
-        content.Should().MatchRegex(@"nameof\(BindingSeal\),\s+false,");
-        content.Should().MatchRegex(@"nameof\(BindingNoteBlob\),\s+false,");
-
-        // 通常列は従来どおり（規則が除外列だけに効いていることの対照）
-        content.Should().MatchRegex(@"nameof\(BindingLabel\),\s+true,");
-        content.Should().Contain("Required(editModel.Label, nameof(editModel.Label))");
-    }
-
-    /// <summary>
-    /// 同じ図でも <c>ExcludeUnboundedBinaryColumns</c> が OFF なら従来形（必須フラグあり・欠落は例外）のままであることを検証する。
-    /// </summary>
-    [Fact(DisplayName = "VO×無制限バイナリ除外 OFF: 同じ図でも必須検証と欠落例外は従来どおり残る")]
-    public void Generate_ExcludeUnboundedBinary_Off_EditModelAndMapper_KeepRequiredInput()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            BinaryEditModelDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = true,
-                GenerateValueObjects = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result
-            .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
-            .Content;
-
-        content.Should().Contain("Required(editModel.Seal, nameof(editModel.Seal))");
-        content.Should().MatchRegex(@"nameof\(BindingSeal\),\s+true,");
-        content.Should().NotContain("if (editModel.Seal is not null)");
-    }
-
-    /// <summary>
-    /// 非 NULL / NULL 許容の無制限バイナリ列と通常列を持つ単一エンティティ図
-    /// （EditModel / Mapper の除外規則の検証用）。
-    /// </summary>
-    private static ErDiagram BinaryEditModelDiagram() =>
-        new()
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "vault_items",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "item_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "label",
-                            DataType = "nvarchar(50)",
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "seal",
-                            DataType = "varbinary(max)",
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "note_blob",
-                            DataType = "varbinary(max)",
-                            IsNullable = true,
-                        },
-                    ],
-                },
-            ],
-        };
-
-    /// <summary>
-    /// rowversion（store-generated）列に <c>[StoreGeneratedColumn]</c> が付与され、EntitySaveMetadata が
-    /// 書き込み集合（<c>InsertProperties</c>）から除外することを検証する（付与はオプション非依存で無条件）。
-    /// SELECT 系（プロパティ生成）には残るため rowversion は読める。
-    /// </summary>
-    [Fact(
-        DisplayName = "rowversion 列: [StoreGeneratedColumn] 付与・書き込み集合から除外（SELECT は残す）"
-    )]
-    public void Generate_RowVersionColumn_MarksStoreGeneratedAndExcludesFromWrite()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            BinaryColumnDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result
-            .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
-            .Content;
-
-        // マーカー属性クラスの定義が出る
-        content.Should().Contain("public sealed class StoreGeneratedColumnAttribute : Attribute");
-        // rowversion の RowVersion プロパティ（非 nullable byte[]）にマーカーが付く（オプション非依存で無条件）
-        content
-            .Should()
-            .MatchRegex(@"\[StoreGeneratedColumn\]\s*\r?\n\s*public byte\[\] RowVersion");
-        // 付与は rowversion の 1 列だけ（主キー・photo には付かない）
-        System
-            .Text.RegularExpressions.Regex.Matches(content, @"\[StoreGeneratedColumn\]")
-            .Count.Should()
-            .Be(1, "付与対象は rowversion の row_version 1 列だけ");
-        // EntitySaveMetadata が store-generated 列を検出し、INSERT / UPDATE の書き込み集合から除外する
-        content
-            .Should()
-            .Contain("GetCustomAttribute<StoreGeneratedColumnAttribute>()")
-            .And.Contain("InsertProperties");
-        // SELECT 系: RowVersion プロパティは通常どおり生成され読める（除外は書き込みのみ）
-        content.Should().Contain("public byte[] RowVersion");
     }
 
     /// <summary>
     /// rowversion 列を持つ図の SQL Server 方言で、楽観排他（ConcurrencyMode）の契約と版条件付き SQL 変種が
     /// 生成されることを検証する（意味論の実 DB 検証は SqlServerConcurrencyRuntimeTests）。
     /// </summary>
+    // 残す理由（P3-4b）：版条件・新版の返却の SQL Server の SQL の断片と、競合の例外の文言。構造の表明は行 code-rowversion-concurrency-contract-and-metadata へ移した
     [Fact(
         DisplayName = "楽観排他: ConcurrencyMode 契約と版条件付き SQL 変種が SQL Server 方言に出る"
     )]
@@ -5106,272 +1595,11 @@ public class CSharpCodeGenerationServiceTests
         var content = result
             .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
             .Content;
-
-        // 契約: enum と、リモート面（＝全機能面の基底）のシグネチャへ mode が載る
-        content
-            .Should()
-            .Contain("public enum ConcurrencyMode")
-            .And.Contain("Optimistic,")
-            .And.Contain("ForceOverwrite,")
-            .And.Contain("ConcurrencyMode mode = ConcurrencyMode.Optimistic,");
-        // メタデータ: rowversion プロパティの公開と、版条件付き SQL 変種 4 本
-        content
-            .Should()
-            .Contain("public PropertyInfo? RowVersionProperty { get; init; }")
-            .And.Contain("public string? InsertReturningSql { get; init; }")
-            .And.Contain("public string? UpdateVersionedSql { get; init; }")
-            .And.Contain("public string? UpdateForcedSql { get; init; }")
-            .And.Contain("public string? DeleteVersionedSql { get; init; }");
         // 版条件は @originalRowVersion・新版の返却は OUTPUT INSERTED
         content
             .Should()
             .Contain("OUTPUT INSERTED.")
-            .And.Contain("{rowVersionColumn} = @originalRowVersion;")
-            .And.Contain("public void BindRowVersionParameter(");
-        // コミット後に版を書き戻す収集器と、実在確認・競合生成のヘルパー
-        content
-            .Should()
-            .Contain("sealed class RowVersionCollector")
-            .And.Contain("static class RowVersionConcurrency")
-            .And.Contain("was modified by another user");
-    }
-
-    /// <summary>
-    /// rowversion 列を持たない図では <c>[StoreGeneratedColumn]</c> の付与が起きないことを検証する
-    /// （属性クラスの定義自体は Repository 生成のため出力される）。
-    /// </summary>
-    [Fact(
-        DisplayName = "rowversion なし: [StoreGeneratedColumn] 付与なし（属性定義は repo 生成で出る）"
-    )]
-    public void Generate_NoRowVersion_DoesNotMarkStoreGenerated()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            SingleEntityDiagram(),
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result
-            .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
-            .Content;
-
-        // 付与は起きない
-        content.Should().NotContain("[StoreGeneratedColumn]");
-        // ただし属性クラスの定義は Repository 生成（既定 ON）のため出力される（固定 infra が参照する）
-        content.Should().Contain("public sealed class StoreGeneratedColumnAttribute : Attribute");
-    }
-
-    /// <summary>
-    /// GenerateRepositories &amp;&amp; ExcludeUnboundedBinaryColumns のとき、除外列ごとに Stream アクセサ
-    /// （契約の Read/Write・エンジンへの委譲・ファイル糖衣の拡張メソッド）が生成されることを検証する。
-    /// </summary>
-    [Fact(DisplayName = "Stream アクセサ: 除外列に契約・委譲・ファイル糖衣が生成される")]
-    public void Generate_BinaryStreamAccessors_On_GeneratesContractAndSugar()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            BinaryColumnDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = true,
-                ExcludeUnboundedBinaryColumns = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result
-            .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
-            .Content;
-
-        // 全機能インターフェイスへ Read/Write の Stream 版が載る
-        content
-            .Should()
-            .Contain("Task<bool> ReadPhotoAsync(int id, Stream destination, CancellationToken")
-            .And.Contain(
-                "Task<bool> WritePhotoAsync(int id, Stream? source, long? length = null, CancellationToken"
-            );
-        // 実装は固定 infra のエンジンへ委譲する
-        content
-            .Should()
-            .Contain("ReadUnboundedBinaryColumnAsync(nameof(DocumentEntity.Photo)")
-            .And.Contain("WriteUnboundedBinaryColumnAsync(nameof(DocumentEntity.Photo)");
-        // ファイル糖衣は拡張メソッド静的クラスとして 1 本出る
-        content
-            .Should()
-            .Contain("public static class DocumentRepositoryBinaryStreamExtensions")
-            .And.Contain("ReadPhotoToFileAsync")
-            .And.Contain("WritePhotoFromFileAsync");
-    }
-
-    /// <summary>ExcludeUnboundedBinaryColumns=false（既定）のとき、Stream アクセサは生成されない</summary>
-    [Fact(DisplayName = "Stream アクセサ: 除外 OFF では生成されない")]
-    public void Generate_BinaryStreamAccessors_Off_NotGenerated()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            BinaryColumnDiagram(),
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        var content = result
-            .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
-            .Content;
-        content.Should().NotContain("ReadPhotoAsync");
-        content.Should().NotContain("BinaryStreamExtensions");
-    }
-
-    /// <summary>
-    /// EF Core 単独生成（GenerateRepositories=false・GenerateEfCoreRepositories=true）では、除外オプション ON でも
-    /// Stream アクセサは契約にも現れない（QuickER 版 Repository 前提の機能のため）。
-    /// </summary>
-    [Fact(DisplayName = "Stream アクセサ: EF Core 単独生成では契約にも出ない")]
-    public void Generate_BinaryStreamAccessors_EfOnly_NotGenerated()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            BinaryColumnDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = false,
-                GenerateEfCoreRepositories = true,
-                ExcludeUnboundedBinaryColumns = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result
-            .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
-            .Content;
-        content.Should().NotContain("ReadPhotoAsync");
-        content.Should().NotContain("BinaryStreamExtensions");
-    }
-
-    /// <summary>
-    /// リモート契約生成時、Stream アクセサはリモート面（<c>I{Entity}RemoteRepository</c>）へ移設され、全機能面
-    /// （<c>I{Entity}Repository</c>）はリモート面を継承して見える（ネットワーク境界を越えられる操作の定義に合致）。
-    /// ファイル糖衣もリモート面を対象にする。
-    /// </summary>
-    [Fact(
-        DisplayName = "Stream アクセサ: リモート契約 ON でリモート面へ移設され全機能面から見える"
-    )]
-    public void Generate_BinaryStreamAccessors_OnRemoteInterface_WhenRemoteContracts()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            BinaryColumnDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = true,
-                ExcludeUnboundedBinaryColumns = true,
-                GenerateRemoteContracts = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result
-            .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
-            .Content;
-
-        // リモート面（インターフェイス宣言直後の本体）に Read/Write が載る
-        content
-            .Should()
-            .MatchRegex(
-                @"(?s)interface IDocumentRemoteRepository[^{]*\{[^}]*Task<bool> ReadPhotoAsync\(int id, Stream destination"
-            );
-        // 全機能面はリモート面を継承する空本体（Read/Write を再宣言しない）
-        content
-            .Should()
-            .MatchRegex(@"interface IDocumentRepository\s*:\s*IDocumentRemoteRepository,");
-        // ファイル糖衣はリモート面を対象にする（全機能面でもリモート面経由でも呼べる）
-        content.Should().Contain("this IDocumentRemoteRepository repository");
-    }
-
-    /// <summary>
-    /// リモート契約 OFF（既定）のとき、Stream アクセサは全機能面（<c>I{Entity}Repository</c>）へ直接載り、
-    /// ファイル糖衣も全機能面を対象にする（リモート面インターフェイス自体が生成されないため）。
-    /// </summary>
-    [Fact(DisplayName = "Stream アクセサ: リモート契約 OFF では全機能面へ直載せ")]
-    public void Generate_BinaryStreamAccessors_OnFullInterface_WhenNoRemoteContracts()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            BinaryColumnDiagram(),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = true,
-                ExcludeUnboundedBinaryColumns = true,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result
-            .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
-            .Content;
-
-        // 全機能面（インターフェイス宣言直後の本体）へ直接載る
-        content
-            .Should()
-            .MatchRegex(
-                @"(?s)interface IDocumentRepository\s*:\s*IRepository<[^{]*\{[^}]*Task<bool> ReadPhotoAsync\(int id, Stream destination"
-            );
-        // ファイル糖衣は全機能面を対象にする
-        content.Should().Contain("this IDocumentRepository repository");
-    }
-
-    /// <summary>複合主キーの列を 2 つ持つエンティティ 1 件のダイアグラムを生成する（主キーの順序はテスト側で与える）</summary>
-    /// <param name="reversePrimaryKeyOrder">
-    /// <c>true</c> のとき、列宣言順（a → b）とは逆の主キー順を <see cref="Entity.PrimaryKeyColumnIds"/> で指定する
-    /// </param>
-    private static ErDiagram CompositeKeyDiagram(bool reversePrimaryKeyOrder)
-    {
-        var a = new Column
-        {
-            Id = Guid.NewGuid(),
-            Name = "a",
-            DataType = "int",
-            IsPrimaryKey = true,
-            IsNullable = false,
-        };
-        var b = new Column
-        {
-            Id = Guid.NewGuid(),
-            Name = "b",
-            DataType = "int",
-            IsPrimaryKey = true,
-            IsNullable = false,
-        };
-        var entity = new Entity
-        {
-            Id = Guid.NewGuid(),
-            TableName = "pairs",
-            Columns = [a, b],
-            PrimaryKeyColumnIds = reversePrimaryKeyOrder ? [b.Id, a.Id] : [],
-        };
-
-        return new ErDiagram { Entities = [entity] };
-    }
-
-    /// <summary>EF Core の <c>HasKey</c> が主キーの実効順（順序上書き）に従うことを検証する</summary>
-    [Fact]
-    public void Generate_EfCore_CompositeKey_ShouldFollowPrimaryKeyColumnOrder()
-    {
-        var options = new CodeGenerationOptions
-        {
-            RootNamespace = "Sample.Domain",
-            GenerateEfCoreRepositories = true,
-        };
-
-        // 順序指定なし＝列宣言順
-        new CSharpCodeGenerationService()
-            .Generate(CompositeKeyDiagram(reversePrimaryKeyOrder: false), options)
-            .Files[0]
-            .Content.Should()
-            .Contain("entity.HasKey(e => new { e.A, e.B });");
-
-        // 順序指定あり＝上書きした並び
-        new CSharpCodeGenerationService()
-            .Generate(CompositeKeyDiagram(reversePrimaryKeyOrder: true), options)
-            .Files[0]
-            .Content.Should()
-            .Contain("entity.HasKey(e => new { e.B, e.A });");
+            .And.Contain("{rowVersionColumn} = @originalRowVersion;");
+        content.Should().Contain("was modified by another user");
     }
 }

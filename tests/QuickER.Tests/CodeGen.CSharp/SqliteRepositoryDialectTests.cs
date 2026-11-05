@@ -5,18 +5,52 @@ using QuickER.Model;
 namespace QuickER.Tests.CodeGen.CSharp;
 
 /// <summary>
-/// QuickER 版 Repository の SQLite 方言生成（<see cref="CodeGenerationOptions.RepositoryDialects"/> = ["sqlite"]）が、
-/// SQLite 固有の実行経路（プレーン SELECT・LIMIT/OFFSET・マルチクエリ Include・SqliteXxx 型）を出力し、
-/// SQL Server 依存（Microsoft.Data.SqlClient / FOR JSON / SqlDbType / SqlServerRepository）を一切含まないことを検証する。
+/// QuickER 版 Repository の SQLite 方言生成（<see cref="CodeGenerationOptions.RepositoryDialects"/> = ["sqlite"]）と SQL Server 方言の生成が、
+/// 互いの依存（Microsoft.Data.Sqlite / Microsoft.Data.SqlClient・FOR JSON・SqlDbType・SqlServerRepository）を含まないことの検証。
 /// </summary>
 /// <remarks>
-/// 逆方向（sqlserver 生成物に Microsoft.Data.Sqlite が漏れない）も併せて検証し、依存排他を双方向で守る。
-/// 実 DB でのランタイム検証は別フェーズ（統合テスト）で行い、ここでは生成テキストの静的検証に絞る。
+/// 型・参照・属性・依存の不在・SQLite での実行は、決まった行（<c>CodegenCaseTests</c>）の <c>*-sqlite-dialect-*</c> /
+/// <c>*-sqlserver-dialect-*</c> へ移した。ここには、生成器の固定の英文（<c>ExecuteSqlAsync</c> の XmlDoc）と、
+/// SQL Server の SQL の断片（FOR JSON・OFFSET-FETCH・OUTPUT INSERTED の有無）だけを残す。
 /// </remarks>
 public class SqliteRepositoryDialectTests
 {
-    /// <summary>SQLite 方言で生成した全ファイルを 1 本の文字列に連結する</summary>
-    private static string GenerateSqlite(bool valueObjects = false)
+    /// <summary>
+    /// ExecuteSqlAsync の説明は、SQLite の利用者に T-SQL の <c>BEGIN TRAN ... COMMIT</c> を勧めない
+    /// （SQLite では <c>near "TRAN": syntax error</c>）。方言中立の契約は両方の書き方を併記し、SQLite の実装は SQLite の書き方だけを書く
+    /// </summary>
+    // 残す理由（P3-4b）：XmlDoc の固定の英文（生成器の固定の英文）
+    [Fact(
+        DisplayName = "SQLite の ExecuteSqlAsync の説明はトランザクションを SQLite の構文で勧める"
+    )]
+    public void SqliteDialect_ExecuteSqlDoc_RecommendsSqliteTransactionSyntax()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            SampleDiagram(),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateRepositories = true,
+                RepositoryDialects = ["sqlite"],
+            }
+        );
+        result.HasErrors.Should().BeFalse();
+        var code = string.Join("\n", result.Files.Select(file => file.Content));
+
+        code.Should().NotContain("write <c>BEGIN TRAN ... COMMIT</c>");
+        code.Should().Contain("write <c>BEGIN; ... COMMIT;</c> in the SQL within a single call.");
+    }
+
+    /// <summary>
+    /// SQLite 方言（VO の有無の両方）の生成物に、SQL Server の SQL の構文（FOR JSON・OFFSET-FETCH・OUTPUT INSERTED）が現れない
+    /// （動かさない経路に残っても見落とさないよう、出力の全体で見る）
+    /// </summary>
+    // 残す理由（P3-4b）：SQL Server の SQL の断片の不在。構造の表明（SQL Server の型・属性・参照の不在）は行 code-sqlite-dialect-* と
+    // 参照を絞ったコンパイルへ、SQLite で動くことは行 exec-sqlite-dialect-* へ移した
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SqliteDialect_ShouldNotEmitSqlServerSqlSyntax(bool valueObjects)
     {
         var result = new CSharpCodeGenerationService().Generate(
             SampleDiagram(),
@@ -28,121 +62,20 @@ public class SqliteRepositoryDialectTests
                 GenerateValueObjects = valueObjects,
             }
         );
-
         result.HasErrors.Should().BeFalse();
-        return string.Join("\n", result.Files.Select(file => file.Content));
-    }
+        var code = string.Join("\n", result.Files.Select(file => file.Content));
 
-    /// <summary>SQLite 生成物に SQLite 固有の型・句・エンジンが含まれることを検証する</summary>
-    [Fact]
-    public void SqliteDialect_ShouldEmitSqliteSpecificRuntime()
-    {
-        var code = GenerateSqlite();
-
-        code.Should().Contain("using Microsoft.Data.Sqlite;");
-        code.Should().Contain("SqliteConnection CreateConnection()");
-        code.Should().Contain("new SqliteCommand(");
-        code.Should().Contain("SqliteRepository<");
-        // ページングは OFFSET-FETCH ではなく LIMIT/OFFSET
-        code.Should().Contain("LIMIT ");
-        // マルチクエリ Include エンジンと非ジェネリック実体化
-        code.Should().Contain("class IncludeLoader");
-        code.Should().Contain("MaterializeRootsAsync");
-        code.Should().Contain("MapEntityObject");
-        // 式木トランスレータの日付部品は strftime へ吐き分け
-        code.Should().Contain("strftime(");
-    }
-
-    /// <summary>SQLite 生成物に SQL Server 依存（コードトークン）が一切含まれないことを検証する</summary>
-    /// <summary>
-    /// ExecuteSqlAsync の説明は、SQLite の利用者に T-SQL の <c>BEGIN TRAN ... COMMIT</c> を勧めない
-    /// （SQLite では <c>near "TRAN": syntax error</c>）。方言中立の契約は両方の書き方を併記し、SQLite の実装は SQLite の書き方だけを書く
-    /// </summary>
-    [Fact(
-        DisplayName = "SQLite の ExecuteSqlAsync の説明はトランザクションを SQLite の構文で勧める"
-    )]
-    public void SqliteDialect_ExecuteSqlDoc_RecommendsSqliteTransactionSyntax()
-    {
-        var code = GenerateSqlite();
-
-        code.Should().NotContain("write <c>BEGIN TRAN ... COMMIT</c>");
-        code.Should().Contain("write <c>BEGIN; ... COMMIT;</c> in the SQL within a single call.");
-    }
-
-    [Fact]
-    public void SqliteDialect_ShouldNotEmitSqlServerDependencies()
-    {
-        var code = GenerateSqlite();
-
-        // ADO / DI の SQL Server クライアント依存（接続ファクトリ名 SqlConnectionFactory は方言中立で保つため
-        // "new SqlConnection(" のように開き括弧まで含めて SQL Server ADO 型のインスタンス化のみを検出する）
-        code.Should().NotContain("Microsoft.Data.SqlClient");
-        code.Should().NotContain("new SqlConnection(");
-        code.Should().NotContain("new SqlCommand(");
-        code.Should().NotContain("new SqlParameter(");
-        code.Should().NotContain("SqlDataReader");
-        // FOR JSON 実行経路と JSON プランナ
         code.Should().NotContain("FOR JSON");
-        code.Should().NotContain("JsonQueryPlanner");
-        // SqlBulkCopy による一括挿入（インスタンス化）
-        code.Should().NotContain("new SqlBulkCopy");
-        // [SqlColumnType] / SqlDbType（SQL Server 専用の列型メタ）
-        code.Should().NotContain("SqlDbType");
-        code.Should().NotContain("[SqlColumnType(");
-        // SQL Server 版の基底クラス名
-        code.Should().NotContain("SqlServerRepository");
-        // OFFSET-FETCH ページング構文
-        code.Should().NotContain("FETCH NEXT");
-        // 楽観排他の版返却句と共有部品（SQLite に相当構文がないため SQL Server 方言専用）
-        code.Should().NotContain("OUTPUT INSERTED");
-        code.Should().NotContain("RowVersionConcurrency");
-        code.Should().NotContain("RowVersionCollector");
-    }
 
-    /// <summary>SQLite 方言（VO 有効）でも SQL Server 依存が漏れないことを検証する</summary>
-    [Fact]
-    public void SqliteDialect_WithValueObjects_ShouldNotEmitSqlServerDependencies()
-    {
-        var code = GenerateSqlite(valueObjects: true);
-
-        code.Should().Contain("using Microsoft.Data.Sqlite;");
-        code.Should().NotContain("Microsoft.Data.SqlClient");
-        code.Should().NotContain("SqlDbType");
-        code.Should().NotContain("FOR JSON");
-        code.Should().NotContain("SqlServerRepository");
-    }
-
-    /// <summary>
-    /// SQLite の接続ファクトリが外部キー強制を既定 ON にし（未指定時のみ補う）、DDL 適用ヘルパーを併せて出力することを検証する
-    /// </summary>
-    /// <remarks>
-    /// Microsoft.Data.Sqlite の既定は FK 強制 OFF のため、生成 DDL の FK 制約が黙って無効になる。
-    /// 明示指定（true/false どちら）も尊重するため、判定は「<c>ForeignKeys</c> が null（未指定）か」で行う。
-    /// </remarks>
-    [Fact]
-    public void SqliteDialect_ShouldEnableForeignKeysByDefaultAndEmitSchemaBootstrap()
-    {
-        var code = GenerateSqlite();
-
-        // 未指定のときだけ true を補う（明示指定はそのまま返す＝尊重）
-        code.Should()
-            .Contain("private static string ApplyForeignKeysDefault(string connectionString)");
-        code.Should().Contain("if (builder.ForeignKeys is not null)");
-        code.Should().Contain("builder.ForeignKeys = true;");
-        // 解釈はコンストラクタで 1 回だけ（接続生成ごとに再パースしない）
-        code.Should().Contain("_connectionString = ApplyForeignKeysDefault(connectionString);");
-        code.Should().Contain("var connection = new SqliteConnection(_connectionString);");
-        // 開くたびに SQLite の busy timeout を Default Timeout へ合わせる（実行時の挙動は
-        // SqliteBusyTimeoutDefaultRuntimeTests が固定する）
-        code.Should().Contain("connection.StateChange += ApplyBusyTimeout;");
-
-        // DDL 適用ヘルパー（開発・テスト・サンプル向けブートストラップ）
-        code.Should().Contain("public static class SqliteSchemaBootstrap");
-        code.Should().Contain("public static async Task ApplyDdlAsync(");
-        code.Should().NotContain("public static class SqlServerSchemaBootstrap");
+        if (!valueObjects)
+        {
+            code.Should().NotContain("FETCH NEXT");
+            code.Should().NotContain("OUTPUT INSERTED");
+        }
     }
 
     /// <summary>SQL Server 方言（既定）の生成物に SQLite 依存が漏れないことを検証する（逆方向の排他）</summary>
+    // 残す理由（P3-4b）：SQL Server の SQL の断片（FOR JSON・OUTPUT INSERTED）。構造の表明（型・参照・DDL 適用ヘルパー・SQLite 依存の不在）は行 code-sqlserver-dialect-has-no-sqlite-dependencies へ移した
     [Fact]
     public void SqlServerDialect_ShouldNotEmitSqliteDependencies()
     {
@@ -157,19 +90,10 @@ public class SqliteRepositoryDialectTests
         result.HasErrors.Should().BeFalse();
         var code = string.Join("\n", result.Files.Select(file => file.Content));
 
-        code.Should().NotContain("Microsoft.Data.Sqlite");
-        code.Should().NotContain("SqliteConnection");
-        code.Should().NotContain("SqliteRepository");
-        code.Should().NotContain("IncludeLoader");
-        // SQL Server 版は FOR JSON / SqlServerRepository を維持
-        code.Should().Contain("SqlServerRepository<");
+        // SQL Server 版は FOR JSON を維持
         code.Should().Contain("FOR JSON");
-        // 楽観排他の共有部品は SQL Server 方言側に出る（rowversion 列の有無に依らず固定 infra として存在する）
-        code.Should().Contain("RowVersionConcurrency");
+        // 楽観排他の版返却句（rowversion 列の有無に依らず固定 infra として存在する）
         code.Should().Contain("OUTPUT INSERTED.");
-        // DDL 適用ヘルパーは方言対称に出る（SQL Server 版は接続文字列の補正を持たない素の実装）
-        code.Should().Contain("public static class SqlServerSchemaBootstrap");
-        code.Should().NotContain("ApplyForeignKeysDefault");
     }
 
     /// <summary>親（customers）1 対多 子（orders）の関係を持つ、Include 検証用の最小 ER 図</summary>

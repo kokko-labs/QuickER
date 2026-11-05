@@ -3,8 +3,6 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using AwesomeAssertions;
 using Microsoft.Data.Sqlite;
-using QuickER.CodeGen.CSharp;
-using QuickER.Model;
 using QuickER.Runtime;
 using Xunit;
 using EfCoreMetadata = QuickER.Runtime.EntityFrameworkCore.EntitySaveMetadata;
@@ -19,7 +17,8 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// EF Core は SQLite（int 列を long で返す）や Oracle（NUMBER を decimal で返す）にも接続するため、
 /// 値オブジェクトでない列も <c>RawValueConverter.ConvertRaw</c> を通す。ここではランタイムパッケージの
 /// <c>EntitySaveMetadata</c> を実ファイルでない SQLite のリーダーへ実際に当て、行の写しを見る。
-/// あわせてインラインで出す EF Core 単独の生成物（値オブジェクトなし）が同じ変換を出すことを生成テキストで固定する。
+/// インラインで出す EF Core 単独の生成物（値オブジェクトなし）が同じ変換を出すことは、<c>CodegenCaseTests</c> の行
+/// <c>code-efcore-only-raw-sql-converts-column-values</c>（<c>CodegenCases.EfCoreText.cs</c>）が呼び出しの構造で固定する。
 /// </remarks>
 public class EfCoreRawSqlValueConversionTests
 {
@@ -82,51 +81,5 @@ public class EfCoreRawSqlValueConversionTests
         entity.Flag.Should().BeTrue();
         entity.Count.Should().BeNull();
         entity.RowState.Should().Be(RowState.Unchanged);
-    }
-
-    [Fact(
-        DisplayName = "EF Core 単独・値オブジェクトなしの生成物は生 SQL の列を RawValueConverter で変換する"
-    )]
-    public void Generate_EfCoreOnlyWithoutValueObjects_ConvertsRawColumnValues()
-    {
-        var diagram = new ErDiagram();
-        var table = new Entity { TableName = "probes" };
-        table.Columns.Add(
-            new Column
-            {
-                Name = "probe_id",
-                DataType = "int",
-                IsPrimaryKey = true,
-            }
-        );
-        diagram.Entities.Add(table);
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateEfCoreRepositories = true,
-                GenerateValueObjects = false,
-            }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        var content = result.Files[0].Content;
-        var start = content.IndexOf(
-            "private static void SetColumnValue(",
-            StringComparison.Ordinal
-        );
-        start.Should().BeGreaterThan(0);
-        var body = content[
-            start..content.IndexOf(
-                "public TEntity MapEntityFromRawSql",
-                start,
-                StringComparison.Ordinal
-            )
-        ];
-
-        body.Should().Contain("RawValueConverter.ConvertRaw(value, propertyType)");
-        body.Should().NotContain("property.SetValue(entity, value);");
     }
 }

@@ -97,7 +97,7 @@ QuickER が付ける既定の制約名は識別子の長さの上限に収め、
 - `LongDefaultConstraintNameTests`（4 方言の DDL・同期・差分が同じ縮めた名前・PostgreSQL の吸収と吸収しないときの対照・利用者の名前は吸収しない）。
 - `PostgreSqlLongDefaultConstraintNameIntegrationTests`（能力を差し替えて吸収しない対照）。実 DB の期待の行 `realdb-long-default-names-apply-and-round-trip-no-diff` / `realdb-long-default-pg-legacy-truncated-fk-name-is-absorbed`（`SyncPlanExpectationRows.RealCrossDialect.cs`）。同期計画の来歴の行 `SyncPlanHistoryRows`。
 - `ToolScenarioTests`（行 `long-default-name-*`＝両ホストの保存名と要約・縮めた既定名との衝突・名前の無い外部キーの要約と削除と重複の名指し）・`MainViewModelRelationshipConstraintNameTests`（GUI の手作成）・`FormatRoundTripTests`（DBML・Mermaid の取込＝規則の行 `dbml-rule-long-default-name-*`・`mermaid-rule-carries-target-dbms`、形の行 `dbml-long-default-name-*`）。
-- `UniqueConstraintNameGenerationTests`・`UniqueConstraintResolvedNameLimitTests`（方言の切替で表示し直す。`ResolvedName_FollowsCollisionsAcrossTables`）・`IdentifierLengthLimitTests`（`Fit` / `Truncate`）。
+- `CodegenCaseTests` の行 `code-unique-constraint-name-*`・`UniqueConstraintResolvedNameLimitTests`（方言の切替で表示し直す。`ResolvedName_FollowsCollisionsAcrossTables`）・`IdentifierLengthLimitTests`（`Fit` / `Truncate`）。
 - mutation 実証済み。
 
 ## 名前の上限の通知（NameLimitNotes）
@@ -124,7 +124,7 @@ QuickER が付ける既定の制約名は識別子の長さの上限に収め、
   - 名前の段の照合には使わない（図で名前を付けた制約だけを組む）。外部キー名の解決と `CollectExisting` もこの名前を避ける・数える。
   - ぶつかると、制約名・索引名がスキーマ単位の SQL Server・PostgreSQL・Oracle と、外部キーの索引名を持つ MySQL で、DDL・同期が名前の重複で失敗する。
   - 同期計画の総当たりの行：`{方言}-386-synthesized-unique-name`・`{方言}-synthesized-unique-name-cross-table`・`{方言}-synthesized-unique-name-foreign-key`。
-  - ガード：`ConstraintNamesTests.ResolveUniqueConstraintNames_NumbersOnlyCollidingSynthesizedNames`・`ConstraintNamesGuardTests.SynthesizeName_IsCalledOnlyByTheResolver`（構文木で数える。自己検査つき）・`ConstraintNameCreationPathTests` / `UniqueConstraintNameGenerationTests` のぶつかる行・`UniqueConstraintResolvedNameLimitTests.ResolvedName_FollowsCollisionsAcrossTables`。mutation 実証済み。
+  - ガード：`ConstraintNamesTests.ResolveUniqueConstraintNames_NumbersOnlyCollidingSynthesizedNames`・`ConstraintNamesGuardTests.SynthesizeName_IsCalledOnlyByTheResolver`（構文木で数える。自己検査つき）・`ConstraintNameCreationPathTests` / `CodegenCaseTests` の行 `code-unique-constraint-name-*` のぶつかる行・`UniqueConstraintResolvedNameLimitTests.ResolvedName_FollowsCollisionsAcrossTables`。mutation 実証済み。
 - 1 対 1 判定はモデルの `UniqueConstraints` を参照する（取込時判定・以降の自動再計算なし）。
 - `SchemaSignature` へ含める。UNIQUE だけの差でも置換確認が出る。
 - 文書 JSON は v1 のまま後方互換（旧ファイルは空リスト。`src/QuickER.Document/CLAUDE.md`「図ファイル形式の前方互換」）。

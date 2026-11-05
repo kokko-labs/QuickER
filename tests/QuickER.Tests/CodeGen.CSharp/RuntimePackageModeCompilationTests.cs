@@ -1,8 +1,5 @@
 ﻿using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
-using QuickER.Model;
-using QuickER.Provider.Sqlite;
-using QuickER.Provider.SqlServer;
 
 namespace QuickER.Tests.CodeGen.CSharp;
 
@@ -17,60 +14,11 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// パッケージ用ソースのアセンブリ化と参照集合の組み立ては <c>CodegenConfig/Judges/CompileJudge.cs</c>）が持つ。
 /// </para>
 /// <para>
-/// ここに残るのは、同じ構成の生成テキストに固定 infra の定義（<c>*Core</c> の型）が出ないことの表明と、案内ビルダーの単体の表明。
+/// 同じ構成の生成物に固定 infra の定義（<c>*Core</c> の型）が出ないことは、同じ図・オプションの行 <c>code-package-mode-no-fixed-infra-*</c> が持つ。ここに残るのは、案内ビルダーの単体の表明。
 /// </para>
 /// </remarks>
 public class RuntimePackageModeCompilationTests
 {
-    /// <summary>
-    /// 代表構成×分割の生成物に、固定 infra の定義（パッケージが提供する <c>*Core</c> の型）が出ないことを検証する
-    /// （同じ構成のコンパイルとサーバー実装ファイルの存在は <c>CodegenCaseTests</c> の行 <c>compile-package-*</c>）
-    /// </summary>
-    [Theory]
-    [MemberData(nameof(PackageModeCases))]
-    public void Generate_PackageMode_EmitsNoFixedInfraDefinitions(
-        string caseName,
-        CodeGenerationOptions baseOptions
-    )
-    {
-        var options = WithPackageMode(baseOptions);
-        var diagram = Diagram();
-
-        var (primary, byDialect) = ResolveTypes(diagram, options);
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            primary,
-            byDialect,
-            options
-        );
-
-        // 前提：生成が通り、表明する本文がある（エラーなら本文が空で、下の NotContain が素通りする）
-        result
-            .HasErrors.Should()
-            .BeFalse(
-                $"「{caseName}」の生成自体でエラー: "
-                    + string.Join(
-                        " / ",
-                        result
-                            .Diagnostics.Where(d =>
-                                d.Severity == GenerationDiagnosticSeverity.Error
-                            )
-                            .Select(d => d.Message)
-                    )
-            );
-        result.Files.Should().NotBeEmpty();
-
-        // 生成コードには固定 infra の定義が一切出ない（パッケージが提供する）。
-        // 拡張シム（EntityBase / EditModelBase<TSelf> / VO シム・Repository 契約シム・バックエンド基底シム）は
-        // スキーマ依存側の生成物としてパッケージ参照モードでも出るため、固定 infra 側の型名（*Core）で判定する
-        var allContent = string.Join(Environment.NewLine, result.Files.Select(f => f.Content));
-        allContent.Should().NotContain("abstract class EntityBaseCore");
-        allContent.Should().NotContain("interface IRepositoryCore<TEntity");
-        allContent.Should().NotContain("class SqlServerRepositoryCore<");
-        allContent.Should().NotContain("class SqliteRepositoryCore<");
-        allContent.Should().NotContain("class InMemoryDataStore");
-    }
-
     /// <summary>Entity のみ（Repository/EF Core なし）は Core だけで成立し、参照集合に ADO/EF Core が含まれない</summary>
     [Fact]
     public void EntityOnly_GuidanceIsCoreOnly_NoAdoOrEf()
@@ -93,9 +41,9 @@ public class RuntimePackageModeCompilationTests
         packages.Should().NotContain(RuntimePackages.EntityFrameworkCore);
     }
 
-    /// <summary>SQLite 単独の生成物に "Microsoft.Data.SqlClient" が現れない（依存排他の文字列ガード）</summary>
+    /// <summary>SQLite 単独の案内は Core＋Sqlite のみ（SqlServer / EF Core を含まない）になる</summary>
     [Fact]
-    public void SqliteOnly_GeneratedCode_DoesNotReferenceSqlClient()
+    public void SqliteOnly_Guidance_IsCoreAndSqlite_NoSqlServerOrEf()
     {
         var options = WithPackageMode(
             new CodeGenerationOptions
@@ -105,22 +53,7 @@ public class RuntimePackageModeCompilationTests
                 RepositoryDialects = ["sqlite"],
             }
         );
-        var diagram = Diagram();
-        var (primary, byDialect) = ResolveTypes(diagram, options);
 
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            primary,
-            byDialect,
-            options
-        );
-
-        result.HasErrors.Should().BeFalse();
-
-        var allContent = string.Join(Environment.NewLine, result.Files.Select(f => f.Content));
-        allContent.Should().NotContain("Microsoft.Data.SqlClient");
-
-        // 案内は Core＋Sqlite のみ（SqlServer / EF Core を含まない）
         RuntimePackageReferenceGuidance
             .Compute(options)
             .Should()
@@ -273,223 +206,6 @@ public class RuntimePackageModeCompilationTests
             );
     }
 
-    // ---- テストデータ ----
-
-    /// <summary>代表構成×分割: (a) Entity+EditModel+Mapper+VO のみ (b) QuickER sqlserver (c) QuickER sqlite (d) マルチターゲット</summary>
-    public static TheoryData<string, CodeGenerationOptions> PackageModeCases()
-    {
-        var data = new TheoryData<string, CodeGenerationOptions>();
-
-        foreach (var split in new[] { false, true })
-        {
-            data.Add(
-                $"Entity+EditModel+Mapper+VO のみ Split={split}",
-                new CodeGenerationOptions
-                {
-                    RootNamespace = "Sample.Domain",
-                    SplitFilesByCategory = split,
-                    GenerateValueObjects = true,
-                    GenerateRepositories = false,
-                }
-            );
-            data.Add(
-                $"QuickER sqlserver 単独 Split={split}",
-                new CodeGenerationOptions
-                {
-                    RootNamespace = "Sample.Domain",
-                    SplitFilesByCategory = split,
-                    GenerateRepositories = true,
-                }
-            );
-            data.Add(
-                $"QuickER sqlite 単独 Split={split}",
-                new CodeGenerationOptions
-                {
-                    RootNamespace = "Sample.Domain",
-                    SplitFilesByCategory = split,
-                    GenerateRepositories = true,
-                    RepositoryDialects = ["sqlite"],
-                }
-            );
-            data.Add(
-                $"マルチターゲット sqlserver+sqlite Split={split}",
-                new CodeGenerationOptions
-                {
-                    RootNamespace = "Sample.Domain",
-                    SplitFilesByCategory = split,
-                    GenerateRepositories = true,
-                    RepositoryDialects = ["sqlserver", "sqlite"],
-                }
-            );
-            data.Add(
-                $"EF Core 単独 Split={split}",
-                new CodeGenerationOptions
-                {
-                    RootNamespace = "Sample.Domain",
-                    SplitFilesByCategory = split,
-                    GenerateRepositories = false,
-                    GenerateEfCoreRepositories = true,
-                }
-            );
-            data.Add(
-                $"QuickER sqlserver＋EF Core 併存 Split={split}",
-                new CodeGenerationOptions
-                {
-                    RootNamespace = "Sample.Domain",
-                    SplitFilesByCategory = split,
-                    GenerateRepositories = true,
-                    GenerateEfCoreRepositories = true,
-                }
-            );
-            // インメモリ×パッケージ参照モード（併用可能化の実証。インメモリ基盤の固定 infra は
-            // QuickER.Runtime.InMemory が提供し、per-entity 実装・シーダー・DI 登録は生成側に残る）
-            data.Add(
-                $"インメモリ単独 Split={split}",
-                new CodeGenerationOptions
-                {
-                    RootNamespace = "Sample.Domain",
-                    SplitFilesByCategory = split,
-                    GenerateRepositories = false,
-                    GenerateInMemoryRepositories = true,
-                }
-            );
-            data.Add(
-                $"QuickER sqlserver＋インメモリ併存 Split={split}",
-                new CodeGenerationOptions
-                {
-                    RootNamespace = "Sample.Domain",
-                    SplitFilesByCategory = split,
-                    GenerateRepositories = true,
-                    GenerateInMemoryRepositories = true,
-                }
-            );
-            // インメモリ×VO×無制限バイナリ除外（per-entity 実装が固定 infra の protected/公開メンバーだけで
-            // 成立することを最大構成で確認する）
-            data.Add(
-                $"インメモリ＋VO＋バイナリ除外 Split={split}",
-                new CodeGenerationOptions
-                {
-                    RootNamespace = "Sample.Domain",
-                    SplitFilesByCategory = split,
-                    GenerateRepositories = true,
-                    GenerateInMemoryRepositories = true,
-                    GenerateValueObjects = true,
-                    ExcludeUnboundedBinaryColumns = true,
-                }
-            );
-        }
-
-        // リモート契約生成×パッケージ参照モード（IRemoteRepository は Core パッケージが提供する）
-        data.Add(
-            "remote QuickER sqlserver",
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = true,
-                GenerateRemoteContracts = true,
-            }
-        );
-        data.Add(
-            "remote マルチターゲット sqlserver+sqlite",
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = true,
-                RepositoryDialects = ["sqlserver", "sqlite"],
-                GenerateRemoteContracts = true,
-            }
-        );
-        data.Add(
-            "remote QuickER sqlite＋EF Core 併存",
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = true,
-                RepositoryDialects = ["sqlite"],
-                GenerateEfCoreRepositories = true,
-                GenerateRemoteContracts = true,
-            }
-        );
-
-        // リモートサービス生成×パッケージ参照モード（クライアント固定 infra＝HttpRemoteRepository 等は Core パッケージが提供し、
-        // サーバー固定 infra＝RemoteServerEngine 等は AspNetCore パッケージが提供する。per-entity クライアント・
-        // エンドポイント・DI 登録は生成側に残り、サーバーファイルもそのままコンパイル検証の対象になる）
-        data.Add(
-            "remote-services QuickER sqlserver",
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = true,
-                GenerateRemoteServices = true,
-            }
-        );
-        data.Add(
-            "remote-services QuickER sqlserver Split=true",
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                SplitFilesByCategory = true,
-                GenerateRepositories = true,
-                GenerateRemoteServices = true,
-            }
-        );
-        // 無制限バイナリ除外との併用（バイナリ転送エンドポイント＝サーバー固定部の
-        // ExecuteDownload/Upload/Delete・DeferredOctetStreamBody まで参照するケース）
-        data.Add(
-            "remote-services QuickER sqlserver＋バイナリ除外",
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = true,
-                GenerateRemoteServices = true,
-                ExcludeUnboundedBinaryColumns = true,
-            }
-        );
-
-        // 双方向同期×パッケージ参照モード（同期エンジンの固定部は QuickER.Runtime.Sync が提供し、
-        // 同期記述子・デコレータ・差分ソース・DI 登録は生成側に残る。同期は sqlserver+sqlite の
-        // マルチターゲット構成が前提）
-        foreach (var split in new[] { false, true })
-        {
-            data.Add(
-                $"同期支援 sqlserver+sqlite Split={split}",
-                new CodeGenerationOptions
-                {
-                    RootNamespace = "Sample.Domain",
-                    SplitFilesByCategory = split,
-                    GenerateRepositories = true,
-                    RepositoryDialects = ["sqlserver", "sqlite"],
-                    GenerateSyncSupport = true,
-                }
-            );
-        }
-
-        // 層別出力×パッケージ参照モード（層フォルダへの配置と名前空間導出はパッケージ参照でも
-        // 同じ生成テキストであること＝1 アセンブリへの一括コンパイルが通ることを固定する）
-        data.Add(
-            "層別 QuickER sqlserver",
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                LayeredOutput = true,
-                GenerateRepositories = true,
-            }
-        );
-        data.Add(
-            "層別×同期 sqlserver+sqlite",
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                LayeredOutput = true,
-                GenerateRepositories = true,
-                RepositoryDialects = ["sqlserver", "sqlite"],
-                GenerateSyncSupport = true,
-            }
-        );
-
-        return data;
-    }
-
     /// <summary>ケース定義のオプションをパッケージ参照モードへ切り替える（他の設定はそのまま引き継ぐ）</summary>
     /// <remarks>
     /// 全プロパティを手書きで複製すると、オプションが増えたときに写し漏れてその構成が黙って未検証になる
@@ -500,121 +216,4 @@ public class RuntimePackageModeCompilationTests
         {
             UseRuntimePackages = true,
         };
-
-    /// <summary>実効方言に応じ、主辞書＋方言別辞書を用意する（マルチターゲットは byDialect 必須）</summary>
-    private static (
-        IReadOnlyDictionary<Guid, CSharpTypeInfo> Primary,
-        IReadOnlyDictionary<string, IReadOnlyDictionary<Guid, CSharpTypeInfo>> ByDialect
-    ) ResolveTypes(ErDiagram diagram, CodeGenerationOptions options)
-    {
-        var sqlServer = SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram);
-        var sqlite = SqliteCSharpTypeMapper.ResolveColumnTypes(diagram);
-
-        var primaryDialect = options.ResolveRepositoryDialects()[0];
-        var primary = string.Equals(primaryDialect, "sqlite", StringComparison.OrdinalIgnoreCase)
-            ? sqlite
-            : sqlServer;
-
-        var byDialect = new Dictionary<string, IReadOnlyDictionary<Guid, CSharpTypeInfo>>(
-            StringComparer.OrdinalIgnoreCase
-        )
-        {
-            ["sqlserver"] = sqlServer,
-            ["sqlite"] = sqlite,
-        };
-
-        return (primary, byDialect);
-    }
-
-    /// <summary>2 エンティティ・1対多・int/string/decimal（方言可搬）の小さな ER 図</summary>
-    private static ErDiagram Diagram()
-    {
-        var customer = Guid.NewGuid();
-        var customerPk = Guid.NewGuid();
-        var order = Guid.NewGuid();
-        var orderPk = Guid.NewGuid();
-        var orderFk = Guid.NewGuid();
-
-        return new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = customer,
-                    TableName = "customers",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = customerPk,
-                            Name = "customer_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        // 文字列列は Unicode で統一（Ansi/Unicode 差で canonical トークンが割れるため）
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "name",
-                            DataType = "nvarchar(50)",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-                new Entity
-                {
-                    Id = order,
-                    TableName = "orders",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = orderPk,
-                            Name = "order_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = orderFk,
-                            Name = "customer_id",
-                            DataType = "int",
-                            IsForeignKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "amount",
-                            DataType = "decimal(10,2)",
-                            IsNullable = false,
-                        },
-                        // 無制限バイナリ列（ExcludeUnboundedBinaryColumns のケースで Stream アクセサ・
-                        // 除外ガードの固定 infra 参照までコンパイル検証させる）
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "attachment",
-                            DataType = "varbinary(max)",
-                            IsNullable = true,
-                        },
-                    ],
-                },
-            ],
-            Relationships =
-            [
-                new Relationship
-                {
-                    Id = Guid.NewGuid(),
-                    Type = RelationshipType.OneToMany,
-                    SourceEntityId = customer,
-                    TargetEntityId = order,
-                    ColumnPairs = [new(customerPk, orderFk)],
-                },
-            ],
-        };
-    }
 }

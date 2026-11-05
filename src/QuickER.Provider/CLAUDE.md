@@ -30,7 +30,7 @@
   - 無効化された制約・テンポラル表・SQLite の PRAGMA の固定は `{SqlServer,Oracle,Sqlite}ImportFidelityIntegrationTests`、パーティションと SQLite の主キーの補正の固定は `{MySql,Sqlite}ImportFidelityIntegrationTests`。
 - 型カタログが解析できない DB 型（`geometry`・`hierarchyid`・`sql_variant` など）は 5 方言とも `_ => Reference("string")` の安全側フォールバックへ落とし、`CSharpTypeInfo.IsFallbackType` を立てて生成時 Info 診断で名指しする。
   - 取込警告にはしない（PostGIS の `geometry` のように承知で使う型が取り込むたびに鳴って形骸化するため）。
-  - 固定は `DialectTypeTableTests` のマッパーの行（`map-*`）・`FallbackTypeGenerationTests`・`CodegenCaseTests` の行 `diag-fallback-type-info-names-column`（Info 診断）。
+  - 固定は `DialectTypeTableTests` のマッパーの行（`map-*`）・`CodegenCaseTests` の行 `code-fallback-type-column-is-string-property`・`CodegenCaseTests` の行 `diag-fallback-type-info-names-column`（Info 診断）。
 
 ### 計算列と生成列
 
@@ -181,7 +181,7 @@
   - 値オブジェクトの桁数検証を付けないのは、負のスケールが「DB に丸めさせる」ために書く型だから（重大度も Info）。
   - 型マッパーへ符号を足すなら、Oracle の `MapNumber` も同時に直す（`src/QuickER.Provider.Oracle/CLAUDE.md`「型表記」）。
   - 検出は型名を見ず、括弧の第 2 引数が負であることだけで判定する。
-- 固定は `DialectTypeTableTests`（PostgreSQL・Oracle の負のスケールの解析と往復の行・型トークンの `decimal(10,-2)` の行）・`NegativeScaleColumnGenerationTests`。mutation 実証済み。
+- 固定は `DialectTypeTableTests`（PostgreSQL・Oracle の負のスケールの解析と往復の行・型トークンの `decimal(10,-2)` の行）・`CodegenCaseTests` の行 `code-negative-scale-column-is-decimal-property`。mutation 実証済み。
 
 ### 方言切替の精度の読み替え
 

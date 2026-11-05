@@ -49,7 +49,6 @@ public sealed class SourceParseEntryGuardTests
             GeneratedOutput
         ),
         ("tests/QuickER.Tests/CodeGen.CSharp/QueryCodegenDiagnosticsTests.cs", 1, ComposedSource),
-        ("tests/QuickER.Tests/CodeGen.CSharp/QueryGenerationTests.cs", 1, GeneratedOutput),
         ("tests/QuickER.Tests/CodeGen.CSharp/QueryLiteralEscapeScanTests.cs", 1, GeneratedOutput),
         (
             "tests/QuickER.Tests/TestSupport/ConditionalSourceParse.cs",

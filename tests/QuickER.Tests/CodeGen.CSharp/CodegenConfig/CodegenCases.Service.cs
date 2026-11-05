@@ -1404,52 +1404,36 @@ internal static partial class CodegenCases
         return new ErDiagram { Entities = [parent, child], Relationships = [relationship] };
     }
 
-    /// <summary>CSharpCodeGenerationServiceTests.ValueObjectDiagram の図（customers は列なし）</summary>
+    /// <summary>CSharpCodeGenerationServiceTests.ValueObjectDiagram の図（customers 5 列・orders 2 列の 1 対多。P3-4b で元の図へ戻した）</summary>
     private static ErDiagram Service_ValueObjectDiagram()
     {
-        var customer = Guid.NewGuid();
-        var order = Guid.NewGuid();
-        var custPk = Guid.NewGuid();
-        var orderFk = Guid.NewGuid();
+        var customerPk = Service_Column("customer_id", "int", primaryKey: true);
+        var orderFk = Service_Column("customer_id", "int", foreignKey: true);
+        var customer = Service_Entity(
+            "customers",
+            customerPk,
+            Service_Column("name", "nvarchar(50)"),
+            Service_Column("balance", "decimal(10,2)", nullable: true),
+            Service_Column("photo", "varbinary(max)", nullable: true),
+            Service_Column("is_active", "bit")
+        );
+        var order = Service_Entity(
+            "orders",
+            Service_Column("order_id", "int", primaryKey: true),
+            orderFk
+        );
 
         return new ErDiagram
         {
-            Entities =
-            [
-                new Entity { Id = customer, TableName = "customers" },
-                new Entity
-                {
-                    Id = order,
-                    TableName = "orders",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "order_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = orderFk,
-                            Name = "customer_id",
-                            DataType = "int",
-                            IsForeignKey = true,
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
+            Entities = [customer, order],
             Relationships =
             [
                 new Relationship
                 {
                     Id = Guid.NewGuid(),
-                    SourceEntityId = customer,
-                    TargetEntityId = order,
-                    ColumnPairs = [new(custPk, orderFk)],
+                    SourceEntityId = customer.Id,
+                    TargetEntityId = order.Id,
+                    ColumnPairs = [new(customerPk.Id, orderFk.Id)],
                     Type = RelationshipType.OneToMany,
                 },
             ],

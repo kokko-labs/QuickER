@@ -4,10 +4,6 @@ using System.ComponentModel.DataAnnotations.Schema;
 using System.Linq;
 using System.Reflection;
 using AwesomeAssertions;
-using QuickER.CodeGen.CSharp;
-using QuickER.Model;
-using QuickER.Provider;
-using QuickER.Provider.Sqlite;
 using QuickER.Runtime;
 using Xunit;
 using EfCoreMetadata = QuickER.Runtime.EntityFrameworkCore.EntitySaveMetadata;
@@ -103,62 +99,6 @@ public class EfCoreEntitySaveMetadataTests
         var metadata = EfCoreMetadata.For(typeof(NoDefaultConstructorEntity));
 
         metadata.KeyProperty.Name.Should().Be(nameof(NoDefaultConstructorEntity.OrphanId));
-    }
-
-    [Theory(
-        DisplayName = "インラインの生成物は、EF Core 単独なら行の組み立て器を出さず、QuickER 版 Repository があれば出す"
-    )]
-    [InlineData(false, true, false)]
-    [InlineData(true, false, true)]
-    [InlineData(true, true, true)]
-    public void InlineGeneration_EmitsMaterializerOnlyWithQuickErRepositories(
-        bool quickErRepositories,
-        bool efCore,
-        bool expected
-    )
-    {
-        var provider = new SqliteProvider();
-        var diagram = new ErDiagram
-        {
-            TargetDbms = "sqlite",
-            Entities =
-            {
-                new Entity
-                {
-                    TableName = "items",
-                    Columns =
-                    {
-                        new Column
-                        {
-                            Name = "item_id",
-                            DataType = "INTEGER",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                    },
-                },
-            },
-        };
-
-        var result = DiagramCodeGenerator.Generate(
-            provider.TypeMapper,
-            provider.TypeCatalog,
-            diagram,
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Test.Materializer",
-                GenerateRepositories = quickErRepositories,
-                GenerateEfCoreRepositories = efCore,
-            }
-        );
-        result
-            .HasErrors.Should()
-            .BeFalse(string.Join(" / ", result.Diagnostics.Select(d => d.Message)));
-        var code = string.Concat(result.Files.Select(file => file.Content));
-
-        code.Contains("BuildSelectMaterializer").Should().Be(expected);
-        code.Contains("public TEntity MapEntity<TEntity>").Should().Be(expected);
-        code.Should().NotContain("CompileOnFirstUse");
     }
 
     [Fact(DisplayName = "EF Core のメタデータの列一覧は、方言の引用符で囲まない")]

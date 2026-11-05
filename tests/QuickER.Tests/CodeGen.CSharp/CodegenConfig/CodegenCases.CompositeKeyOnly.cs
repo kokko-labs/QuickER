@@ -105,7 +105,7 @@ internal static partial class CodegenCases
                 Probes: efCoreModel ? [CodegenProbe.EfCoreModel] : null,
                 ProbeFacts: efCoreModel
                     ? new CodegenProbeFacts(
-                        ModelFacts: [new EfCoreModelPrimaryKeyFact("PairEntity", ["B", "A"])]
+                        ModelFacts: [EfCoreModelFact.PrimaryKey("PairEntity", ["B", "A"])]
                     )
                     : null
             )
