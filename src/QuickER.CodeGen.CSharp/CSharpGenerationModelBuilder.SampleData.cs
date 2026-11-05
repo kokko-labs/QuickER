@@ -25,6 +25,11 @@ namespace QuickER.CodeGen.CSharp;
 /// 親に実在する行だけを指すよう行数を減らす（不動点で決める）。重複した値をストアへ入れると、
 /// 以後その行の更新・保存が一意制約違反で必ず失敗するため。
 /// </para>
+/// <para>
+/// 主キーが 1 列でないエンティティ（Repository を作らない表）はシードしない（0 行）。ストアの行は
+/// 単一主キーで引くので入れられないため。それを直接・間接に参照する子も、同じ不動点で 0 行になる
+/// （ストアは外部キーを検査しないので、子だけを入れると実在しない親を指したまま残る）。
+/// </para>
 /// </remarks>
 internal sealed partial class CSharpGenerationModelBuilder
 {
@@ -33,6 +38,9 @@ internal sealed partial class CSharpGenerationModelBuilder
 
     /// <summary>外部キーの子側の列 ID → 参照の連鎖の根の列（サンプル値を共有する列）</summary>
     private Dictionary<Guid, Column> _sampleReferences = [];
+
+    /// <summary>外部キーの子側の列 ID → 直接の参照先の列（シード行数の上限を決める親）</summary>
+    private Dictionary<Guid, Column> _sampleDirectReferences = [];
 
     /// <summary>行ごとに違う値を要する列（主キー・一意制約の構成列）の ID</summary>
     private HashSet<Guid> _sampleDistinctColumns = [];
@@ -57,6 +65,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         // 子の列 → 直接の参照先の列（同じ子の列が複数のリレーションに現れるときは図の宣言順で最初のもの）
         var directReferences = new Dictionary<Guid, Column>();
+        _sampleDirectReferences = directReferences;
 
         foreach (var relationship in diagram.Relationships)
         {
@@ -108,9 +117,11 @@ internal sealed partial class CSharpGenerationModelBuilder
 
     /// <summary>エンティティごとのシード行数を不動点で決める</summary>
     /// <remarks>
-    /// 出発点は「主キー・一意制約がそれぞれ何行ぶん違う値の組を作れるか」の最小。そこから、外部キーの子の列が
-    /// 親に実在する値（参照先の列が NULL でない行）だけを指すよう子の行数を減らす。行数は減る一方なので
-    /// 必ず止まり、自己参照（i 行目が自分自身を指す）も相互参照も同じ規則で収束する。
+    /// 出発点は「主キー・一意制約がそれぞれ何行ぶん違う値の組を作れるか」の最小（主キーが 1 列でない表は 0）。
+    /// そこから、外部キーの子の列が親に実在する値（参照先の列が NULL でない行）だけを指すよう子の行数を減らす。
+    /// 行数は減る一方なので必ず止まり、自己参照（i 行目が自分自身を指す）も相互参照も同じ規則で収束する。
+    /// 上限は参照の連鎖の根でなく直接の親から取る。直接の親の行数はその親の親で抑えてあるので連鎖全体が整合し、
+    /// 根だけを見ると、外部キーの列でできた複合主キーの中間表（0 行）を素通りして実在しない行を指す。
     /// </remarks>
     private Dictionary<Guid, int> ResolveSampleRowCounts(
         ErDiagram diagram,
@@ -120,7 +131,10 @@ internal sealed partial class CSharpGenerationModelBuilder
     {
         var counts = diagram.Entities.ToDictionary(
             entity => entity.Id,
-            entity => Math.Min(MaxSampleRows, ConstraintCapacity(entity, columnsById))
+            entity =>
+                HasSinglePrimaryKey(entity)
+                    ? Math.Min(MaxSampleRows, ConstraintCapacity(entity, columnsById))
+                    : 0
         );
 
         bool changed;
@@ -133,15 +147,15 @@ internal sealed partial class CSharpGenerationModelBuilder
             {
                 foreach (var column in entity.Columns)
                 {
-                    if (!_sampleReferences.TryGetValue(column.Id, out var root))
+                    if (!_sampleDirectReferences.TryGetValue(column.Id, out var parent))
                     {
                         continue;
                     }
 
-                    var parentRows = counts[entityOfColumn[root.Id].Id];
+                    var parentRows = counts[entityOfColumn[parent.Id].Id];
 
                     // 参照先の列が NULL 許容なら、その列は 3 行目で NULL になる（実在する値は 2 行目まで）
-                    var referencedRows = root.IsNullable ? Math.Min(parentRows, 2) : parentRows;
+                    var referencedRows = parent.IsNullable ? Math.Min(parentRows, 2) : parentRows;
 
                     // NULL 許容の子の列も 3 行目は NULL なので、実在を要するのは 2 行目まで
                     var limit =

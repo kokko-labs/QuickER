@@ -2950,20 +2950,26 @@ public sealed partial class InMemory{{ repository.class_name }}(
 /// one) is seeded with fewer rows, and so is a child that refers to it, so that every key and UNIQUE constraint holds and
 /// every foreign key refers to a row that exists.
 /// </para>
+/// <para>
+/// Only an entity with a single-column primary key (one that gets a repository) is seeded, since the store keys every row
+/// by a single primary key. An entity without one gets no rows, and neither does an entity that refers to it, directly or
+/// through other entities, so that no foreign key is left referring to a row that does not exist.
+/// </para>
 /// </remarks>
 public static class InMemorySampleData
 {
     /// <summary>The most rows seeded per entity (an entity whose keys cannot take that many different values gets fewer).</summary>
     public const int RowsPerEntity = 3;
 
-    /// <summary>Seeds sample data for all entities (in parent-to-child FK dependency order).</summary>
+    /// <summary>Seeds sample data for the entities that get rows (in parent-to-child FK dependency order; see the class remarks).</summary>
     public static void Seed(InMemoryDataStore store)
     {
         ArgumentNullException.ThrowIfNull(store);
-{{ for entity in entity_classes }}        Seed{{ entity.class_name }}(store);
-{{ end }}
+{{ for entity in entity_classes }}{{ if entity.sample_row_count > 0 }}        Seed{{ entity.class_name }}(store);
+{{ end }}{{ end }}
     }
 {{~ for entity in entity_classes ~}}
+{{~ if entity.sample_row_count > 0 ~}}
 
     /// <summary>Seeds sample data for {{ entity.table_name_xml_doc }}.</summary>
     private static void Seed{{ entity.class_name }}(InMemoryDataStore store)
@@ -2981,6 +2987,7 @@ public static class InMemorySampleData
             entity.MarkUnchanged();
         }
     }
+{{~ end ~}}
 {{~ end ~}}
 {{~ if generate_value_objects ~}}
 

@@ -407,8 +407,13 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
   - 数値は `index`。文字列は生成時に長さへ収め、**末尾の `index` を残して列名の側を切る**（左から切ると 3 行が同じ値になる）
 - 3 種類の値を作れない列（NOT NULL の `bool`＝2、既定値へ倒す未知の型と配列＝1）だけでできた主キー・一意制約を持つエンティティは、シード行数を減らす
   - それを参照する子も、親に実在する行だけを指すよう減らす。不動点（行数は減る一方なので循環でも止まる）
+- 主キーが 1 列でない表（Repository を作らない表。判定は Repository と同じ `HasSinglePrimaryKey`）はシードしない（0 行）
+  - ストアは行を単一主キーで引く（`EntitySaveMetadata.For` が複合主キー・主キーなしで投げる）ので入れられない
+  - それを直接・間接に参照する表も、同じ不動点で 0 行になる（外部キーの NULL 許容に依らない）。ストアは外部キーを検査しないので、子だけを入れると実在しない親を指したまま残る
+  - 子の行数の上限は、参照の連鎖の根でなく直接の親から取る（値の式は今どおり根から作る）。直接の親の行数はその親で抑えてあるので連鎖全体が整合する。根だけで抑えると、外部キーの列でできた複合主キーの中間表（0 行）を素通りする
+  - テンプレートは行数 0 の表の `Seed{Entity}` を出さない（死んだコードを出さないためで、振る舞いは変えない）
 - 型だけから作ると、既定の `seedSampleData: true` で一意制約が重複したストアができ、以後その行の更新・保存が必ず失敗する（`Put` / `Seed` は一意制約を検査しない。docs 明記の受容）
-- ガード：`CodegenCaseTests` の行 `probe-inmemory-seed-mysql-constraints` / `probe-inmemory-seed-mysql-constraints-vo`（MySQL の図を生成→実コンパイル→シード→`SeededSampleDataInvariants` で主キー・一意制約・外部キーを反射で検査→全行を `UpdateAsync` で保存し直す。VO の有無の 2 通り）・`InMemorySampleSeedExecutionTests` の「既存の全フィクスチャのシーダーも…」（テストアセンブリ内の全 `InMemorySampleData` に同じ検査）・`CodegenCaseTests` の行 `probe-inmemory-seed-row-count-fixed-point-cycles`（シード行数の不動点は自己参照と相互参照でも止まる）。mutation 実証済み
+- ガード：`CodegenCaseTests` の行 `probe-inmemory-seed-mysql-constraints` / `probe-inmemory-seed-mysql-constraints-vo`（MySQL の図を生成→実コンパイル→シード→`SeededSampleDataInvariants` で主キー・一意制約・外部キーを反射で検査→全行を `UpdateAsync` で保存し直す。VO の有無の 2 通り）・`InMemorySampleSeedExecutionTests` の「既存の全フィクスチャのシーダーも…」（テストアセンブリ内の全 `InMemorySampleData` に同じ検査）・`CodegenCaseTests` の行 `probe-inmemory-seed-row-count-fixed-point-cycles`（シード行数の不動点は自己参照と相互参照でも止まる）・`CodegenCaseTests` の行 `probe-inmemory-seed-composite-key`（複合主キーの中間表・それを NOT NULL / NULL 許容の複合外部キーで参照する子・孫・主キーの無い表は 0 行、主キーが 1 列の表は 3 行で読み書きできる）・網羅の配列の主の表のキーが複合でインメモリを生成する行（探針 InMemorySeed の期待はすべての表が 0 行）。mutation 実証済み
 
 ## GuidKey 値オブジェクトの長さ検証
 

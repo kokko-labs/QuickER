@@ -220,7 +220,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **新しい行の EditModel は値オブジェクトでない列の空文字列・空バイト配列を未入力として読む**：空欄の新しい行が必須チェックを素通りする。ガード：`EditModelBlankInputTests`・`EditModelScenarioTests`。→ 同上「新しい行の空の値」
 - **Mapper の 4 分岐は値型のとき `.Value` で取り出す（参照型へ広げない）**：CS0266 でコンパイルできない。ガード：`CodegenCaseTests` の行 `compile-*`（共通図の値型の計算列・採番列）・`ComputedColumnGenerationTests`。→ 同上「Mapper の 4 分岐の Value」
 - **配列列と inet の列は EditModel・Mapper・VO に載せない（`IsExcludedFromEditModel`）**：既定の構成で CS0029、VO の等値が参照比較になる。ガード：`PostgreSqlArrayColumnGenerationTests`・`PostgreSqlNetworkTypeGenerationTests`。→ 同上「配列列と inet の列」
-- **インメモリのシード値は列の型でなく役割から作る**：一意制約が重複したストアができ、更新が必ず失敗する。ガード：`InMemorySampleSeedExecutionTests`。→ 同上「インメモリのシード値」
+- **インメモリのシード値は列の型でなく役割から作り、主キーが 1 列でない表とそれを直接・間接に参照する表には入れない**：一意制約が重複したストアができて更新が必ず失敗し、複合主キーの表で既定の `AddGeneratedInMemoryRepositories()` が起動時に投げる。ガード：`InMemorySampleSeedExecutionTests`・`CodegenCaseTests` の行 `probe-inmemory-seed-composite-key`。→ 同上「インメモリのシード値」
 - **GuidKey 値オブジェクトの長さ検証は素通しした MaxLength が駆動し、36 未満は Warning（Error にしない）**：検証がスタックから消える。ガード：`CodegenCaseTests` の行 `probe-guidkey-create-generates-unique-guid`。→ 同上「GuidKey 値オブジェクトの長さ検証」
 - **生成型名の名簿は実際の出力と一致し続ける**：DTO の型名がコンパイルできない出力になる。ガード：`GeneratedTypeNameDriftTests`。→ 同上「型名の名簿」
 - **テーブル・列から決まる型名のぶつかりは `GeneratedTypeNames.Analyze` が名指しで止める（型名は Ordinal・ルート名だけ大小無視）**：ガード：`GeneratedTypeNameCollisionTests`。→ 同上「型名のぶつかりを生成時に止める」

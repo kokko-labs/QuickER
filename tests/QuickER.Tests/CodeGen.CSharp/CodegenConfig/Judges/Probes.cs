@@ -44,7 +44,8 @@ internal enum CodegenProbe
 /// <summary>決まった行が探針へ渡す追加の事実（元のテストが名指しで見ていたもの）</summary>
 /// <param name="ModelFacts">EF Core のモデルの事実（<see cref="CodegenProbe.EfCoreModel"/>）</param>
 /// <param name="SeedRowCounts">
-/// エンティティの型名 → シードの行数（<see cref="CodegenProbe.InMemorySeed"/>。null なら全エンティティが <c>RowsPerEntity</c> 行）
+/// エンティティの型名 → シードの行数（<see cref="CodegenProbe.InMemorySeed"/>。null なら図の形の行は <see cref="ShapeDiagram.SeedRowCounts"/>、
+/// 図の形の無い決まった行は全エンティティが <c>RowsPerEntity</c> 行）
 /// </param>
 internal sealed record CodegenProbeFacts(
     IReadOnlyList<EfCoreModelFact>? ModelFacts = null,
@@ -65,8 +66,8 @@ internal sealed record CodegenProbeFacts(
 /// </para>
 /// <para>
 /// インメモリのシード：CLAUDE.md「インメモリのシード値」（主キー・一意制約の構成列は行ごとに違う値・外部キーは親の i 行目を指す・
-/// 3 種類の値を作れない列だけの主キー・一意制約を持つ表と、それを参照する子だけが行数を減らす）。図の形の表は整数・文字列の列だけなので、
-/// 全エンティティが <c>RowsPerEntity</c> 行になる。
+/// 3 種類の値を作れない列だけの主キー・一意制約を持つ表と、それを参照する子だけが行数を減らす・主キーが 1 列でない表と、それを
+/// 直接・間接に参照する表は入れない）。図の形の行の期待の行数は <see cref="ShapeDiagram.SeedRowCounts"/>。
 /// </para>
 /// <para>
 /// EF Core のモデル：CLAUDE.md「FK 列の値オブジェクト型統一」（EF Core のモデル検証は外部キーと主キーの CLR 型の一致を要求する）と、
@@ -117,7 +118,10 @@ internal static class Probes
             {
                 CodegenProbe.GuidKeyCreate => GuidKeyCreate(assembly),
                 CodegenProbe.SaveMetadataWriteExclusion => SaveMetadata(assembly, shape!, options),
-                CodegenProbe.InMemorySeed => InMemorySeed(assembly, facts?.SeedRowCounts),
+                CodegenProbe.InMemorySeed => InMemorySeed(
+                    assembly,
+                    facts?.SeedRowCounts ?? shape?.SeedRowCounts
+                ),
                 CodegenProbe.EfCoreModel => EfCoreModel(assembly, shape, facts?.ModelFacts ?? []),
                 CodegenProbe.SyncKeyText => SyncKeyText(assembly),
                 _ => [$"探針: 知らない探針 {probe}"],
