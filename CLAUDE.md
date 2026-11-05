@@ -216,6 +216,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **ランタイム配布は 7 パッケージ（`QuickER.Runtime` / `.SqlServer` / `.Sqlite` / `.EntityFrameworkCore` / `.InMemory` / `.AspNetCore` / `.Sync`）と分割生成が 1:1 対称**：パッケージの型集合と Runtime 系ファイルがずれる。ガード：`SplitRuntimeSymmetryTests`。→ 同上「ランタイム配布」
 - **リモート契約生成は契約が無い構成を生成時エラーで止める**：診断ゼロで何も生成されない。ガード：`RemoteContractRuntimeTests`。→ 同上「リモート契約生成」
 - **QuickER 版 Repository と EF Core は排他の単独出力で、ADO 依存が方言間・EF Core 単独に漏れない**：ガード：`MultiTargetRepositoryRuntimeTests`・`MultiTargetRepositorySqliteKeyedResolutionTests`。→ 同上「DB アクセスの排他と単独出力」
+- **固定 infra は図の主キーの形に依らずオプションだけで出し、DI の登録のローカル関数は Repository があるときだけ出す**：主キーが 1 列の表が無い図で共通契約だけが抜け、生成の診断がエラー 0 のまま QuickER 版・EF Core 版・インメモリのどれもコンパイルできない。ガード：`CodegenCaseTests` の行 `compile-composite-key-only-all-surfaces` / `compile-composite-key-only-efcore` / `compile-keyless-only-all-surfaces` ほか。→ 同上「Repository を作れる表が無い図」
 - **生成 `.g.cs` のヘッダー（版・内容ハッシュ）は生成サービスの 1 箇所で刻み、正規化は `GeneratedContentHash` だけが持つ**：生成直後のファイルが「手編集」と判定される。ガード：`GeneratedContentHashTests`・`GeneratedHeaderStampTests`・`GenerateOverwriteGuardTests`。→ 同上「生成コードのヘッダー」
 - **新しい行の EditModel は値オブジェクトでない列の空文字列・空バイト配列を未入力として読む**：空欄の新しい行が必須チェックを素通りする。ガード：`EditModelBlankInputTests`・`EditModelScenarioTests`。→ 同上「新しい行の空の値」
 - **Mapper の 4 分岐は値型のとき `.Value` で取り出す（参照型へ広げない）**：CS0266 でコンパイルできない。ガード：`CodegenCaseTests` の行 `compile-*`（共通図の値型の計算列・採番列）・`ComputedColumnGenerationTests`。→ 同上「Mapper の 4 分岐の Value」

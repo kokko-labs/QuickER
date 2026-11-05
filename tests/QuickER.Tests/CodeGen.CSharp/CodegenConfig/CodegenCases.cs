@@ -215,6 +215,7 @@ internal static partial class CodegenCases
                 .. RelationRows(),
                 .. CompileRows(),
                 .. GuiRows(),
+                .. CompositeKeyOnlyRows(),
             ]
         );
 

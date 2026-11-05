@@ -337,6 +337,15 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
   - QuickER 版 Repository は常時選択可。対象 DB チェック群（SQL Server / SQLite）で選ぶ。既定は図の方言、未対応方言の図では空、最低 1 つ必須
 - ガード：`MultiTargetRepositoryRuntimeTests`（Docker 依存の実 DB 結合）・`MultiTargetRepositorySqliteKeyedResolutionTests`（keyed 解決の型検証。CI 実行）
 
+## Repository を作れる表が無い図
+
+- 固定 infra（Repository の共通契約・方言エンジン・クエリ / インメモリ / EF Core の土台）はオプションとスペックだけで出し、図の表の主キーの形に依らない。`_04_RepositoryContractCore.scriban` の外側のゲートに `repository_classes` を入れない（パッケージ参照モードで固定 infra が常にパッケージにあるのと同じ形）
+  - 入れると、主キーが 1 列の表が無い図（どの表も複合主キーか主キーなし）で部品 04 の契約（`ISqlExecutor`・`IRepositoryCore`・`ISaveHookRegistry`・`IncludeKeys` など）だけが抜ける。図に依らず出るほかの部品の土台（`_05` のクエリ・`_07`・`_08`・`GraphSaveOrder`）がそれを参照し、生成の診断はエラー 0 のまま、QuickER 版単独・EF Core 版・インメモリのどれでもコンパイルできない
+- Repository を作る表の判定は `HasSinglePrimaryKey`（テンプレートでは `repository_classes`）だけ。表ごとの「Repository をスキップ」の警告は既存のまま
+- DI の登録のローカル関数（`AddRepository` / `AddClient`。`_06` の 4 か所・`_07`・`_08`）は、Repository が 0 件だと使われず CS8321 になるので、既存の判定 `repository_classes.size > 0` のときだけ出す（リモート契約の形は `remote_contracts && repository_classes.size > 0`＝0 件なら else 側の空のループへ進む）
+- `_03` の EditModel 基底の一意制約の照会（`repository_classes.size > 0 || runtime_package_export` のゲート）は、呼ぶ側の `ValidateUniqueAsync` も主キーが 1 列の表にしか出ないので、そのまま残している
+- ガード：`CodegenCaseTests` の行 `compile-composite-key-only-efcore` / `compile-composite-key-only-efcore-with-repositories`（コンパイル＋EF Core のモデルの主キーが実効順）・`compile-composite-key-only-all-surfaces`・`compile-composite-key-only-multitarget-split`・`compile-composite-key-only-packages`・`compile-keyless-only-all-surfaces`（どれもコンパイルのエラー 0・警告 0）。mutation 実証済み（04 のゲートを戻す・ローカル関数のゲートを 1 つずつ外す・主キーの期待を逆にする、の各回で赤）
+
 ## 生成コードのヘッダー
 
 生成 `.g.cs` のヘッダー（版の行・内容ハッシュの行）は、生成サービスの 1 箇所で描画・連結の後に刻む。正規化・計算・照合は `GeneratedContentHash` だけが持つ。

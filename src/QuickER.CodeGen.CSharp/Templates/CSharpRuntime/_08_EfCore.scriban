@@ -3336,7 +3336,7 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-{{~ if remote_contracts ~}}
+{{~ if remote_contracts && repository_classes.size > 0 ~}}
 
         // Both contracts are meant to hand back one repository per scope, so the remote surface forwards to the
         // full-featured registration instead of being registered on its own

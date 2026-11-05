@@ -4322,7 +4322,7 @@ public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionE
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
-{{~ if remote_contracts ~}}
+{{~ if remote_contracts && repository_classes.size > 0 ~}}
 
         // Both contracts are meant to hand back one repository per scope, so the remote surface forwards to the
         // full-featured registration instead of being registered on its own
@@ -4371,6 +4371,7 @@ public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionE
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
+{{~ if repository_classes.size > 0 ~}}
 
         // Every entity is wired the same way, so the local function holds what they share - the captured connection
         // factory, the key, and the keyed SQL executor - and each entity contributes only its contract and constructor
@@ -4400,6 +4401,7 @@ public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionE
 {{~ end ~}}
         }
 
+{{~ end ~}}
 {{~ if remote_contracts ~}}
 {{ for repository in repository_classes }}        AddRepository<{{ repository.interface_name }}, {{ repository.remote_interface_name }}>(
             (factory, hooks, executor) => new {{ repository.class_name }}(factory, hooks, executor)
@@ -4633,12 +4635,14 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(httpClientFactory);
+{{~ if repository_classes.size > 0 ~}}
 
         // Every entity is wired the same way: one client per scope over the HttpClient the factory hands back
         void AddClient<TRemote>(Func<HttpClient, TRemote> create)
             where TRemote : class =>
             services.AddScoped(provider => create(httpClientFactory(provider)));
 
+{{~ end ~}}
 {{ for repository in repository_classes }}        AddClient<{{ repository.remote_interface_name }}>(client => new {{ repository.remote_client_class_name }}(client));
 {{ end ~}}
 
@@ -4737,12 +4741,14 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(httpClientFactory);
+{{~ if repository_classes.size > 0 ~}}
 
         // Every entity is wired the same way: one client per scope, under the key this overload registers
         void AddClient<TRemote>(Func<HttpClient, TRemote> create)
             where TRemote : class =>
             services.AddKeyedScoped(serviceKey, (provider, _) => create(httpClientFactory(provider)));
 
+{{~ end ~}}
 {{ for repository in repository_classes }}        AddClient<{{ repository.remote_interface_name }}>(client => new {{ repository.remote_client_class_name }}(client));
 {{ end ~}}
 
