@@ -108,12 +108,7 @@ public class SyncSupportGenerationTests
 
         diagnostics.Should().NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
 
-        // サーバーファイルそのものが出ない（リモートサービス生成の産物）
-        files
-            .Keys.Should()
-            .ContainSingle()
-            .Which.Should()
-            .Be(SyncFixtureDefinition.OutputFileName);
+        // サーバーファイルそのものが出ない（ファイルが 1 つだけであること）は決まった行 files-sync-without-remote-services-single-file
 
         var content = string.Concat(files.Values);
 
@@ -357,7 +352,7 @@ public class SyncSupportGenerationTests
     /// <remarks>
     /// SQL Server は宣言スケールへ揃えて返し（decimal(10,2) の 1.5 は 1.50）、SQLite は書き込んだ綴りを
     /// 保存する（1.5 のまま＝実測）。素の ToString だと同じ行のキー文字列がサーバーとローカルで食い違い、
-    /// 削除伝搬・ack・pending の序数照合がすべて外れる。値そのものの往復は <c>SyncDecimalKeyExecutionTests</c>。
+    /// 削除伝搬・ack・pending の序数照合がすべて外れる。値そのものの往復は <c>CodegenCaseTests</c> の行 <c>probe-sync-key-text-decimal-key</c>。
     /// </remarks>
     [Fact(DisplayName = "decimal 主キーのキー文字列化は共有の書式を通り、読み取りと書き直しも持つ")]
     public void SyncKeyText_DecimalPrimaryKey_NormalizesScale()
@@ -389,11 +384,12 @@ public class SyncSupportGenerationTests
     /// 既定の形は秒を落として往復しなかった。どちらも不変の往復書式（"c" / "O"）で書く。<c>DateOnly</c> は既定の形
     /// （"MM/dd/yyyy"）で往復するので変えない（変えると、更新前に記録した未送信のジャーナルのキーが読めなくなる）。
     /// 5 方言の型マッパーは <c>TimeOnly</c> / <c>DateOnly</c> を出さないので、列の型はこのテストで直接与える。
+    /// <c>TimeSpan</c> は time の列で作れるので、<c>CodegenCaseTests</c> の行 <c>probe-sync-key-text-timespan-key</c>
+    /// （探針 SyncKeyText）へ移した。
     /// </remarks>
     [Theory(
-        DisplayName = "TimeSpan・TimeOnly・DateOnly の主キーの同期キーはコンパイルでき、文字列化が往復する"
+        DisplayName = "TimeOnly・DateOnly の主キーの同期キーはコンパイルでき、文字列化が往復する"
     )]
-    [InlineData("TimeSpan")]
     [InlineData("TimeOnly")]
     [InlineData("DateOnly")]
     public void SyncKeyText_TimeLikePrimaryKeys_RoundTrip(string keyTypeName)
@@ -462,12 +458,6 @@ public class SyncSupportGenerationTests
 
         object[] samples = keyTypeName switch
         {
-            "TimeSpan" =>
-            [
-                new TimeSpan(2, 13, 45, 30, 123).Add(TimeSpan.FromTicks(4)),
-                TimeSpan.FromHours(-3),
-                TimeSpan.Zero,
-            ],
             "TimeOnly" =>
             [
                 new TimeOnly(13, 45, 30, 123).Add(TimeSpan.FromTicks(4)),
@@ -690,74 +680,11 @@ public class SyncSupportGenerationTests
         content.Should().Contain("using (SyncSession.Suppress())");
     }
 
-    /// <summary>同期対象テーブルの一覧が Info 診断で FK 順のまま通知される。</summary>
-    [Fact(DisplayName = "同期対象テーブルの一覧が Info 診断で通知される")]
-    public void SyncSupport_ReportsTargetTablesAsInfo()
-    {
-        var (_, diagnostics) = Generate(Diagram(), SyncOptions());
-
-        // 文言は UI 言語に追従するため、内容で特定する。両テーブルを列名なしで名指しする Info はこれだけ
-        // （行バージョン統一は row_ver を、除外列の 2 つは attachment / Attachment を伴う）。
-        var info = diagnostics
-            .Should()
-            .ContainSingle(d =>
-                d.Severity == GenerationDiagnosticSeverity.Info
-                && d.Message.Contains("sync_order_lines")
-                && !d.Message.Contains("row_ver")
-            )
-            .Subject;
-
-        info.Message.Should().Contain("sync_orders");
-        info.Message.IndexOf("sync_orders", StringComparison.Ordinal)
-            .Should()
-            .BeLessThan(info.Message.IndexOf("sync_order_lines", StringComparison.Ordinal));
-    }
-
-    /// <summary>方言構成がサーバー＋ローカルの 2 方言でないときは生成時エラーになる。</summary>
-    [Theory(DisplayName = "同期支援は sqlserver + sqlite の 2 方言でなければ生成時エラー")]
-    [InlineData("sqlserver")]
-    [InlineData("sqlite")]
-    public void SyncSupport_RequiresBothDialects(string dialect)
-    {
-        var (_, diagnostics) = Generate(
-            Diagram(),
-            SyncOptions() with
-            {
-                RepositoryDialects = [dialect],
-            }
-        );
-
-        diagnostics
-            .Should()
-            .Contain(d =>
-                d.Severity == GenerationDiagnosticSeverity.Error
-                && d.Message.Contains("sqlserver")
-                && d.Message.Contains("sqlite")
-            );
-    }
-
-    /// <summary>QuickER 版 Repository の実装を生成しない構成では生成時エラーになる。</summary>
-    [Fact(
-        DisplayName = "同期支援は QuickER 版 Repository の実装生成を前提とする（未生成はエラー）"
-    )]
-    public void SyncSupport_RequiresRepositoryImplementations()
-    {
-        var (_, diagnostics) = Generate(
-            Diagram(),
-            SyncOptions() with
-            {
-                GenerateRepositories = false,
-                GenerateInMemoryRepositories = true,
-            }
-        );
-
-        diagnostics
-            .Should()
-            .Contain(d =>
-                d.Severity == GenerationDiagnosticSeverity.Error
-                && d.Message.Contains("GenerateRepositories")
-            );
-    }
+    // 同期対象テーブルの Info 診断（FK 順）・方言構成が 2 方言でないときのエラー・Repository 実装を前提とするエラー・
+    // 同期可能テーブル 0 件のエラーと OFF のときの非発動・無制限バイナリ列の Info は、決まった行（CodegenCaseTests）
+    // diag-sync-target-tables-info-in-foreign-key-order / diag-sync-requires-both-dialects-sqlserver・-sqlite /
+    // diag-sync-requires-repository-implementations / diag-sync-requires-an-eligible-table・diag-sync-off-allows-no-eligible-table /
+    // diag-sync-unbounded-binary-exclusion-reports-info-instead-of-error・diag-sync-no-excluded-column-in-sync-tables-no-binary-info
 
     /// <summary>
     /// 混在図（版あり 2＋版なし 1）の版なしテーブルは、後勝ち専用の生成形になる。
@@ -829,14 +756,7 @@ public class SyncSupportGenerationTests
             .Contain("MapVersionlessSyncEndpoints<SyncNoteEntity, int>(group, \"SyncNote\");");
         server.Should().NotContain("MapVersionlessSyncEndpoints<SyncOrderEntity");
 
-        // Info 診断は版なしテーブルを後勝ち専用として名指しする
-        diagnostics
-            .Should()
-            .Contain(d =>
-                d.Severity == GenerationDiagnosticSeverity.Info
-                && d.Message.Contains("sync_notes")
-                && (d.Message.Contains("後勝ち") || d.Message.Contains("last-write-wins"))
-            );
+        // Info 診断が版なしテーブルを後勝ち専用として名指しすることは決まった行 diag-sync-mixed-diagram-names-versionless-table-in-info
     }
 
     /// <summary>
@@ -903,117 +823,6 @@ public class SyncSupportGenerationTests
         descriptor.Should().Contain("IsVersionless = true,");
         descriptor.Should().NotContain("ServerChangesSql");
         descriptor.Should().NotContain("LocalAnchorSql");
-    }
-
-    /// <summary>
-    /// 同期可能なテーブル（Repository 契約が生成される単一主キーのテーブル）が 1 つも無い図では生成時エラーになる。
-    /// </summary>
-    [Fact(DisplayName = "同期可能なテーブルが 1 つも無ければ同期支援は生成時エラー")]
-    public void SyncSupport_RequiresAtLeastOneEligibleTable()
-    {
-        var (_, diagnostics) = Generate(NoEligibleTableDiagram(), SyncOptions());
-
-        // 「何らかのエラー」ではなく当該ガードの文言そのものを名指しする
-        // （別の理由で落ちても緑にならないようにする）
-        diagnostics
-            .Should()
-            .ContainSingle(d =>
-                d.Severity == GenerationDiagnosticSeverity.Error
-                && d.Message == Strings.CodeGen_Error_SyncSupportRequiresEligibleTables
-            );
-    }
-
-    /// <summary>
-    /// 同期可能なテーブルが 0 件でも、同期支援 OFF なら当該ガードは発動しない（ゲートの成功側）。
-    /// </summary>
-    /// <remarks>
-    /// 「同期可能テーブル 0 件」は同期支援を要求したときだけの問題で、要求していない構成では
-    /// 複合主キーだけの図が正当な入力。ガードが <see cref="CodeGenerationOptions.GenerateSyncSupport"/> の
-    /// 内側にあることを、発動側テストと対で固定する。
-    /// </remarks>
-    [Fact(DisplayName = "同期支援 OFF なら同期可能テーブル 0 件でもエラーにならない")]
-    public void SyncSupportOff_AllowsDiagramWithoutEligibleTables()
-    {
-        var (_, diagnostics) = Generate(
-            NoEligibleTableDiagram(),
-            SyncOptions() with
-            {
-                GenerateSyncSupport = false,
-            }
-        );
-
-        diagnostics
-            .Should()
-            .NotContain(d => d.Message == Strings.CodeGen_Error_SyncSupportRequiresEligibleTables);
-    }
-
-    /// <summary>同期可能テーブル（単一主キー）が 1 つも無い図を作る（全テーブルを複合主キー化する）</summary>
-    private static ErDiagram NoEligibleTableDiagram()
-    {
-        var diagram = Diagram();
-
-        // 全テーブルを複合主キー化して Repository 契約の生成対象から外す＝同期可能テーブル 0 件の図を作る
-        foreach (var entity in diagram.Entities)
-        {
-            foreach (var column in entity.Columns)
-            {
-                column.IsPrimaryKey = column.DataType != "rowversion";
-            }
-        }
-
-        return diagram;
-    }
-
-    /// <summary>
-    /// 無制限バイナリ列の除外との併用は<b>許可</b>され、運ばれない列は Info 診断で名指しされる。
-    /// </summary>
-    /// <remarks>
-    /// かつては生成時エラーで拒否していた組合せ（「ストリーミングアクセサはデコレータから見えない」）を、
-    /// デコレータが Write アクセサも包むようにして解消した。エラーが復活していないことと、代わりの通知が
-    /// 出ていることの両方を名指しする（片方だけでは「黙って通る」への退行に気づけない）。
-    /// </remarks>
-    [Fact(
-        DisplayName = "同期支援と無制限バイナリ列の除外は併用でき、運ばれない列が Info 診断に出る"
-    )]
-    public void SyncSupport_WithUnboundedBinaryExclusion_ReportsInfoInsteadOfError()
-    {
-        var (_, diagnostics) = Generate(Diagram(), SyncOptions());
-
-        diagnostics.Should().NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
-        diagnostics.Should().NotContain(d => d.Message.Contains("ExcludeUnboundedBinaryColumns"));
-
-        var info = diagnostics
-            .Should()
-            .ContainSingle(d =>
-                d.Severity == GenerationDiagnosticSeverity.Info
-                && d.Message.Contains("IncludeUnboundedBinary")
-            )
-            .Subject;
-
-        info.Message.Should().Contain("sync_orders");
-        info.Message.Should().Contain("Attachment");
-        info.Message.Should().NotContain("sync_order_lines", "除外列を持たないテーブルは挙げない");
-    }
-
-    /// <summary>
-    /// 同期対象テーブルに除外列が 1 つも無ければ、除外オプションが ON でも告知は出ない。
-    /// </summary>
-    /// <remarks>
-    /// 「知らせるべき乖離が実在するときだけ知らせる」＝除外列を持つのが同期対象外のテーブルだけ、という
-    /// 構成でも黙っていること（さもないと同期に無関係な列で通知が形骸化する）。
-    /// </remarks>
-    [Fact(DisplayName = "同期対象テーブルに除外列が無ければ同期の除外列 Info は出ない")]
-    public void SyncSupport_WithoutExcludedColumnsInSyncTables_EmitsNoBinaryInfo()
-    {
-        var diagram = Diagram();
-        diagram
-            .Entities.Single(entity => entity.TableName == "sync_orders")
-            .Columns.RemoveAll(column => column.Name == "attachment");
-
-        var (_, diagnostics) = Generate(diagram, SyncOptions());
-
-        diagnostics.Should().NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
-        diagnostics.Should().NotContain(d => d.Message.Contains("IncludeUnboundedBinary"));
     }
 
     /// <summary>

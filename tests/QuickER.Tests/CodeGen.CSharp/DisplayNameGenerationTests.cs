@@ -237,14 +237,7 @@ public class DisplayNameGenerationTests
         result.HasErrors.Should().BeFalse("衝突は警告であり生成は完走する");
         var content = result.Files[0].Content;
 
-        // 警告診断が出る
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Warning
-                && diagnostic.Message.Contains("LabelEntity")
-                && diagnostic.Message.Contains("DefaultDisplayName")
-            );
+        // 警告診断が出ること（LabelEntity を名指しする）は、決まった行 diag-entity-display-name-collision-warning が見る
 
         // 衝突エンティティは列プロパティ DisplayName を持ち、基底の DisplayName を new で隠す
         content.Should().Contain("public new string DisplayName { get; set; }");
@@ -318,6 +311,6 @@ public class DisplayNameGenerationTests
         content.Should().Contain(", Description = \"列\\\"名\\\"\\\\end\")]");
 
         // 生成物が Roslyn でコンパイルできる（エスケープ漏れがあればコンパイル不能になる）ことは
-        // GeneratedCodeCompilationTests がフィクスチャ経由で担保するため、ここでは文字列一致で確認する
+        // 決まった行（CodegenCaseTests の compile-*）と固定フィクスチャのコンパイルが担保するため、ここでは文字列一致で確認する
     }
 }

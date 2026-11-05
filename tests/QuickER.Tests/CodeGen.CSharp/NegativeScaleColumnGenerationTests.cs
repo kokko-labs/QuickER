@@ -9,7 +9,7 @@ namespace QuickER.Tests.CodeGen.CSharp;
 
 /// <summary>
 /// 負のスケールを宣言した decimal 列（PostgreSQL の <c>numeric(10,-2)</c>・Oracle の <c>NUMBER(10,-2)</c>）の
-/// 生成時 Info 診断を検証するテストクラス。
+/// 生成結果を検証するテストクラス。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -21,6 +21,10 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// <b>Warning ではなく Info。</b>負のスケールは誤って書く型ではなく「DB に百単位で丸めさせる」ことを
 /// 意図して書くものなので、生成のたびに警告で鳴らすと形骸化する
 /// （<see cref="FallbackTypeGenerationTests"/> と同じ理屈）。
+/// </para>
+/// <para>
+/// 生成時 Info 診断（VO の有無・正と 0 のスケール・整数の型では出ないこと）は、決まった行（<c>CodegenCaseTests</c> の
+/// <c>diag-negative-scale-*</c>）が持つ。ここではプロパティが通常どおり decimal で出ることを固定する。
 /// </para>
 /// </remarks>
 public class NegativeScaleColumnGenerationTests
@@ -59,66 +63,15 @@ public class NegativeScaleColumnGenerationTests
             ],
         };
 
-    private static CodeGenerationResult Generate(ErDiagram diagram, bool generateValueObjects) =>
+    private static CodeGenerationResult Generate(ErDiagram diagram) =>
         new CSharpCodeGenerationService().Generate(
             diagram,
             new CodeGenerationOptions
             {
                 RootNamespace = "Sample.Domain",
                 GenerateRepositories = true,
-                GenerateValueObjects = generateValueObjects,
             }
         );
-
-    /// <summary>負のスケールの列を Info 診断が「テーブル.列 (元の型表記)」で名指しすることを検証する</summary>
-    [Fact(DisplayName = "負のスケール: Info 診断が「テーブル.列 (元の型表記)」で名指しする")]
-    public void Generate_NegativeScaleColumn_ReportsInfoDiagnostic()
-    {
-        var result = Generate(Diagram("numeric(10,-2)"), generateValueObjects: true);
-
-        result.HasErrors.Should().BeFalse("名指しは Info であって生成を止めない");
-        result
-            .Diagnostics.Should()
-            .ContainSingle(d =>
-                d.Severity == GenerationDiagnosticSeverity.Info
-                && d.Message.Contains("orders.amount (numeric(10,-2))", StringComparison.Ordinal)
-            );
-    }
-
-    /// <summary>値オブジェクトを生成しない構成でも名指しすることを検証する</summary>
-    /// <remarks>
-    /// 丸められるという事実は値オブジェクトと無関係で、値オブジェクトはオプトインなので、
-    /// そちらで絞ると既定の構成では鳴らなくなる。
-    /// </remarks>
-    [Fact(DisplayName = "負のスケール: 値オブジェクトを生成しない構成でも名指しする")]
-    public void Generate_NegativeScaleColumn_ReportsEvenWithoutValueObjects()
-    {
-        var result = Generate(Diagram("numeric(10,-2)"), generateValueObjects: false);
-
-        result
-            .Diagnostics.Should()
-            .ContainSingle(d =>
-                d.Severity == GenerationDiagnosticSeverity.Info
-                && d.Message.Contains("orders.amount (numeric(10,-2))", StringComparison.Ordinal)
-            );
-    }
-
-    /// <summary>正のスケールでは名指ししないことを検証する（負のアーム）</summary>
-    [Theory(DisplayName = "負のスケールでない列は名指ししない")]
-    [InlineData("numeric(10,2)")]
-    [InlineData("numeric(10)")]
-    [InlineData("int")]
-    public void Generate_NonNegativeScaleColumn_DoesNotReport(string amountType)
-    {
-        var result = Generate(Diagram(amountType), generateValueObjects: true);
-
-        result
-            .Diagnostics.Should()
-            .NotContain(
-                d => d.Message.Contains("orders.amount", StringComparison.Ordinal),
-                "桁数の情報が載る列については何も通知しない"
-            );
-    }
 
     /// <summary>負のスケールでも生成コードは通常どおり decimal で出ることを検証する</summary>
     /// <remarks>
@@ -127,7 +80,7 @@ public class NegativeScaleColumnGenerationTests
     [Fact(DisplayName = "負のスケール: プロパティは通常どおり decimal として生成される")]
     public void Generate_NegativeScaleColumn_PropertyIsDecimal()
     {
-        var content = Generate(Diagram("numeric(10,-2)"), generateValueObjects: false)
+        var content = Generate(Diagram("numeric(10,-2)"))
             .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
             .Content;
 

@@ -99,44 +99,8 @@ public sealed class MultiTargetRowVersionGenerationTests
             .NotContain("public DateTime RowVer", "sqlite 側の解決（日時）へ倒れてはならない");
     }
 
-    [Fact(DisplayName = "rowversion 列のマルチターゲット統一は Info 診断で通知される")]
-    public void Generate_RowVersionMultiTarget_ReportsInfoDiagnostic()
-    {
-        var result = GenerateMultiTarget();
-
-        result
-            .Diagnostics.Should()
-            .Contain(d =>
-                d.Severity == GenerationDiagnosticSeverity.Info
-                // 表示言語に依存しないトークン（対象列・行バージョンとして解決した方言名）で確認する
-                && d.Message.Contains("sync_items.row_ver")
-                && d.Message.Contains("sqlserver")
-            );
-    }
-
-    [Fact(
-        DisplayName = "行バージョン列のない図ではマルチターゲットでも rowversion の Info 診断は出ない"
-    )]
-    public void Generate_NoRowVersionColumn_NoInfoDiagnostic()
-    {
-        var diagram =
-            Tests.GeneratedMultiTargetFixture.MultiTargetPortableFixtureDefinition.Build();
-        var (primary, byDialect) =
-            Tests.GeneratedMultiTargetFixture.MultiTargetPortableFixtureDefinition.ResolveColumnTypes(
-                diagram
-            );
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            primary,
-            byDialect,
-            Tests.GeneratedMultiTargetFixture.MultiTargetPortableFixtureDefinition.Options
-        );
-
-        result
-            .Diagnostics.Should()
-            .NotContain(d => d.Message.Contains("row_ver"), "統一した列が無ければ何も通知しない");
-    }
+    // rowversion 列のマルチターゲット統一が Info 診断で通知されること、行バージョン列のない図では通知されないことは、
+    // 決まった行 diag-rowversion-multitarget-info-names-column-and-owner / diag-rowversion-multitarget-no-info-without-rowversion-column
 
     [Fact(
         DisplayName = "SQL Server 実装は rowversion 列を書き込みから外し版ガード SQL を持つ／SQLite 実装は通常列として書き込む"
@@ -250,13 +214,8 @@ public sealed class MultiTargetRowVersionGenerationTests
             }
         );
 
+        // Info 診断が出ることは決まった行 diag-rowversion-timestamp-multitarget-info-via-facade
         result.HasErrors.Should().BeFalse();
-        result
-            .Diagnostics.Should()
-            .Contain(d =>
-                d.Severity == GenerationDiagnosticSeverity.Info
-                && d.Message.Contains("sync_items.row_ver")
-            );
         result.Files.Single().Content.Should().Contain("public byte[] RowVer { get; set; }");
     }
 
@@ -294,9 +253,8 @@ public sealed class MultiTargetRowVersionGenerationTests
                 "[StoreGeneratedColumn]\n    public",
                 "単一方言 sqlite の解釈（日時の通常列）は不変"
             );
-        result
-            .Diagnostics.Should()
-            .NotContain(d => d.Message.Contains("row_ver"), "統一していないので通知もしない");
+
+        // 統一していないので通知もしないことは決まった行 diag-rowversion-sqlite-only-timestamp-no-info
     }
 
     /// <summary>
@@ -347,9 +305,8 @@ public sealed class MultiTargetRowVersionGenerationTests
 
         content.Should().Contain("public DateTime RowVer { get; set; }", "型統合は走らない");
         content.Should().NotContain("[SqlColumnType(", "sqlserver 辞書からの補完も走らない");
-        withDialects
-            .Diagnostics.Should()
-            .NotContain(d => d.Message.Contains("row_ver"), "統一の Info 診断も出ない");
+
+        // 統一の Info 診断も出ないことは決まった行 diag-rowversion-efcore-only-hidden-dialects-no-info
     }
 
     /// <summary>

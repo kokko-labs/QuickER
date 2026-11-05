@@ -375,29 +375,6 @@ public class UniquenessGenerationTests
             );
     }
 
-    /// <summary>名前付きクエリが CheckUniqueness という名前を取ると予約名として拒否される</summary>
-    [Fact(DisplayName = "名前付きクエリの CheckUniqueness は予約名として拒否される")]
-    public void Generate_QueryNamedCheckUniqueness_IsRejected()
-    {
-        var diagram = CreateDiagram();
-        diagram.Queries.Add(
-            new QueryDefinition
-            {
-                EntityId = _order.Id,
-                Name = "CheckUniqueness",
-                Returns = QueryReturnShape.List,
-            }
-        );
-
-        var result = Generate(diagram, CreateOptions());
-
-        result.HasErrors.Should().BeTrue();
-        result
-            .Diagnostics.Select(diagnostic => diagnostic.Message)
-            .Should()
-            .Contain(message => message.Contains("CheckUniquenessAsync"));
-    }
-
     /// <summary>宣言行から次のトップレベル宣言までを素朴に取り出す（面の中身を見るための補助）</summary>
     private static string ExtractDeclarationBody(string content, string declaration)
     {

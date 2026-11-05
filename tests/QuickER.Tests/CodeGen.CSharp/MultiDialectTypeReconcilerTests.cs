@@ -224,30 +224,9 @@ public sealed class MultiDialectTypeReconcilerTests
             );
     }
 
-    [Fact(DisplayName = "owner が 1 方言だけなら Info 診断は 1 件で、その方言の全列がまとまる")]
-    public void ReconcileRowVersionTypes_SingleOwner_ReportsOneInfoWithAllColumns()
-    {
-        var diagram = BuildRowVersionDiagram();
-        var sqlServer = SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram);
-
-        var result = Generate(
-            diagram,
-            sqlServer,
-            ByDialect(sqlServer, CloneSqlite(diagram)),
-            "sqlserver",
-            "sqlite"
-        );
-
-        result.HasErrors.Should().BeFalse();
-
-        var infos = Infos(result);
-        infos.Should().ContainSingle();
-        infos[0]
-            .Message.Should()
-            .Contain("sqlserver")
-            .And.Contain("orders.order_ver")
-            .And.Contain("shipments.shipment_ver");
-    }
+    // owner が 1 方言だけなら Info 診断は 1 件で、その方言の全列がまとまる（各方言の本物のマッパーが作る辞書だけで決まる＝図の方言と
+    // 実効方言だけで再現できる）：決まった行 diag-rowversion-single-owner-reports-one-info-with-all-columns
+    // 残りの 5 つは、辞書を人工的に食い違わせる・列を取り除く・owner をずらすので、入口（本番のマッパー）を通せず残す。
 
     [Fact(
         DisplayName = "方言間で型名だけが食い違う（int と long／どちらも値型）と診断エラーになる"

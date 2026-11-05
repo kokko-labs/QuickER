@@ -22,7 +22,7 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// </para>
 /// <para>
 /// これまで配列列は <c>string</c> へ落ちており、この組み合わせは一度も生成されたことが無い。
-/// EditModel・VO の有無を掛けた実コンパイルで、どの組み合わせでも通ることを固定する。
+/// EditModel・VO の有無を掛けた実コンパイルは、決まった行（<c>CodegenCaseTests</c> の <c>compile-postgresql-array-*</c>）が固定する。
 /// </para>
 /// </remarks>
 public class PostgreSqlArrayColumnGenerationTests
@@ -117,17 +117,21 @@ public class PostgreSqlArrayColumnGenerationTests
         };
 
     /// <summary>
-    /// インメモリ Repository を含めても、配列列の生成コードがコンパイルできることを検証する。
+    /// インメモリ Repository を含めたときの、配列列の列コピーとシード値の形を検証する。
     /// </summary>
     /// <remarks>
+    /// 併用した構成の生成コードがコンパイルできることは、決まった行（<c>CodegenCaseTests</c> の
+    /// <c>compile-postgresql-array-columns-inmemory{,-vo}</c>）が持つ。
     /// インメモリの列コピーは配列を複製する（ストアと呼び出し側で同じ配列を共有すると、
     /// 呼び出し側の書き換えでストアの行が黙って変わる）。シード値も <c>default</c> の null ではなく
     /// 空配列にする（NOT NULL の配列列へ null を入れない）。どちらもこの経路でしか生成されない。
     /// </remarks>
-    [Theory(DisplayName = "配列列はインメモリ Repository と併せてもコンパイルできる")]
+    [Theory(
+        DisplayName = "配列列はインメモリ Repository と併せると、列コピーが配列を複製しシード値は空配列"
+    )]
     [InlineData(false)]
     [InlineData(true)]
-    public void Generate_ArrayColumnsWithInMemory_Compiles(bool valueObjects)
+    public void Generate_ArrayColumnsWithInMemory_CopiesAndSeedsArrays(bool valueObjects)
     {
         var options = BaseOptions(editModels: true, valueObjects: valueObjects) with
         {
@@ -144,59 +148,6 @@ public class PostgreSqlArrayColumnGenerationTests
 
         // NOT NULL の配列列のシード値は空配列（default の null ではない）
         content.Should().Contain("Array.Empty<int>()");
-
-        var compilation = GeneratedCodeCompiler.Compile(
-            result,
-            assemblyName: $"QuickER.Generated.ArraysInMemory.{Guid.NewGuid():N}"
-        );
-
-        compilation
-            .Success.Should()
-            .BeTrue(
-                $"インメモリ併用の生成コードにコンパイルエラー:{Environment.NewLine}{compilation.DescribeErrors()}"
-            );
-        compilation.Warnings.Should().BeEmpty(compilation.DescribeWarnings());
-    }
-
-    [Theory(DisplayName = "配列列を含む図は EditModel・VO の有無に関わらずコンパイルできる")]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    [InlineData(true, true)]
-    public void Generate_ArrayColumns_Compiles(bool editModels, bool valueObjects)
-    {
-        var caseName = $"EditModels={editModels}, ValueObjects={valueObjects}";
-        var result = Generate(BaseOptions(editModels, valueObjects));
-
-        result
-            .HasErrors.Should()
-            .BeFalse(
-                $"「{caseName}」の生成でエラー: "
-                    + string.Join(
-                        " / ",
-                        result
-                            .Diagnostics.Where(d =>
-                                d.Severity == GenerationDiagnosticSeverity.Error
-                            )
-                            .Select(d => d.Message)
-                    )
-            );
-
-        var compilation = GeneratedCodeCompiler.Compile(
-            result,
-            assemblyName: $"QuickER.Generated.Arrays.{Guid.NewGuid():N}"
-        );
-
-        compilation
-            .Success.Should()
-            .BeTrue(
-                $"「{caseName}」の生成コードにコンパイルエラー:{Environment.NewLine}{compilation.DescribeErrors()}"
-            );
-        compilation
-            .Warnings.Should()
-            .BeEmpty(
-                $"「{caseName}」の生成コードに警告:{Environment.NewLine}{compilation.DescribeWarnings()}"
-            );
     }
 
     [Fact(DisplayName = "配列列は要素型の配列として Entity へ生成される")]
@@ -239,32 +190,6 @@ public class PostgreSqlArrayColumnGenerationTests
         content.Should().Contain("public sealed partial class NameValue");
         content.Should().NotContain("class TagsValue");
         content.Should().NotContain("class LabelsValue");
-    }
-
-    [Fact(DisplayName = "EditModel か VO を生成するとき、外した配列列を Info で名指しする")]
-    public void Generate_ArrayColumns_AreReportedAsInfo()
-    {
-        var messages = Generate(BaseOptions(editModels: true, valueObjects: false))
-            .Diagnostics.Where(d => d.Severity == GenerationDiagnosticSeverity.Info)
-            .Select(d => d.Message)
-            .ToList();
-
-        var info = messages
-            .Should()
-            .ContainSingle(message => message.Contains("articles.tags", StringComparison.Ordinal))
-            .Subject;
-
-        info.Should().Contain("articles.labels (varchar(20)[])");
-        info.Should().Contain("articles.codes (bigint[])");
-    }
-
-    [Fact(DisplayName = "EditModel も VO も生成しないなら配列列の Info は出ない")]
-    public void Generate_WithoutEditModelsOrValueObjects_DoesNotReportArrayColumns()
-    {
-        Generate(BaseOptions(editModels: false, valueObjects: false))
-            .Diagnostics.Where(d => d.Severity == GenerationDiagnosticSeverity.Info)
-            .Should()
-            .NotContain(d => d.Message.Contains("articles.tags", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -366,40 +291,6 @@ public class PostgreSqlArrayColumnGenerationTests
     }
 
     /// <summary>
-    /// 配列列を含む UNIQUE 制約があってもコンパイルできることを検証する。
-    /// </summary>
-    /// <remarks>
-    /// EditModel の重複検証は制約の構成列をプロパティ名で参照する（制約テーブルと <c>ValidateUniqueAsync</c>）。
-    /// 配列列は EditModel に載らないので、外さずに出すと実在しないプロパティを指してコンパイルできない
-    /// （実測: 単独列・複合の 2 制約で CS0103 が 3 箇所）。Repository 側は Entity のプロパティを読むので落ちない。
-    /// </remarks>
-    [Theory(DisplayName = "配列列を含む UNIQUE 制約があってもコンパイルできる")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void Generate_ArrayColumnInUniqueConstraint_Compiles(bool valueObjects)
-    {
-        var options = BaseOptions(editModels: true, valueObjects: valueObjects) with
-        {
-            GenerateRepositories = true,
-            GenerateEfCoreRepositories = false,
-        };
-        var result = GenerateWithArrayUniqueConstraints(options);
-
-        result.HasErrors.Should().BeFalse();
-
-        var compilation = GeneratedCodeCompiler.Compile(
-            result,
-            assemblyName: $"QuickER.Generated.ArrayUnique.{Guid.NewGuid():N}"
-        );
-
-        compilation
-            .Success.Should()
-            .BeTrue(
-                $"配列列を含む UNIQUE 制約の生成コードにコンパイルエラー:{Environment.NewLine}{compilation.DescribeErrors()}"
-            );
-    }
-
-    /// <summary>
     /// EditModel の DB 照合（<c>ValidateUniqueAsync</c>）が、EditModel に載らない配列列を「照合できない列」として渡すことを検証する
     /// （Repository 側の照合は配列列を含む制約も調べるが、照合用の Entity の配列列は既定値なので、その結果は捨てる）
     /// </summary>
@@ -421,40 +312,5 @@ public class PostgreSqlArrayColumnGenerationTests
             .Contain(
                 "var uncheckedProperties = new List<string> { nameof(ArticleEntity.Tags), nameof(ArticleEntity.Labels), nameof(ArticleEntity.Codes) };"
             );
-    }
-
-    /// <summary>EditModel の検証から外した制約を Info が名指しすることを検証する</summary>
-    /// <remarks>黙って検証を外さないため。名前を持たない制約は生成側と同じ規則で合成した名前を出す。</remarks>
-    [Fact(DisplayName = "配列列を含む UNIQUE 制約は Info で名指しされる")]
-    public void Generate_ArrayColumnInUniqueConstraint_ReportsInfoDiagnostic()
-    {
-        var result = GenerateWithArrayUniqueConstraints(
-            BaseOptions(editModels: true, valueObjects: false)
-        );
-
-        var message = result
-            .Diagnostics.Should()
-            .ContainSingle(d =>
-                d.Severity == GenerationDiagnosticSeverity.Info
-                && d.Message.Contains("uq_articles_tags", StringComparison.Ordinal)
-            )
-            .Subject.Message;
-
-        message.Should().Contain("articles.uq_articles_tags (tags)");
-        message.Should().Contain("(name, tags)", "名前の無い制約は合成名で名指しする");
-    }
-
-    /// <summary>EditModel を生成しない構成では名指ししないことを検証する（負のアーム）</summary>
-    /// <remarks>外す対象が EditModel の検証だけなので、EditModel が無ければ外すものも無い。</remarks>
-    [Fact(DisplayName = "EditModel を生成しない構成では UNIQUE 制約を名指ししない")]
-    public void Generate_ArrayColumnInUniqueConstraint_IsSilentWithoutEditModels()
-    {
-        var result = GenerateWithArrayUniqueConstraints(
-            BaseOptions(editModels: false, valueObjects: false)
-        );
-
-        result
-            .Diagnostics.Should()
-            .NotContain(d => d.Message.Contains("uq_articles_tags", StringComparison.Ordinal));
     }
 }

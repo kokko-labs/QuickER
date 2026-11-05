@@ -89,6 +89,8 @@
   1. 一覧に載っている組が出るようになったら赤になるので、その項目を一覧から消す。除外も同じ（次元表に載った項目は除外から消す）。
   2. 乱数のエンジンの一覧は、既定の種の決まった列での網羅に合わせて書いてある。種の指紋が変わったら（生成器を変えたら）、指紋と一緒に一覧も書き直す。
   3. 列挙を全数で流すエンジン（水準もテストのループも同じ `Enum.GetValues` から作る）では、列挙に足した値は自動で水準になって実際に流れるので棚卸しは緑のまま。その値の組が出たかは網羅の計数が見る。水準を全数から作ってよいのは、ループや生成器の選び方も同じ列挙から作るときに限る。
+- 表の領域を述語で定義するとき（例：生成が通る構成だけを網羅する表）は、述語を正本の規則（テスト側の予測の規則）から参照し、領域の外の組を別の表で網羅する。isValid の原則（原理的に起こり得ない組だけ）とは別の仕組みで、isValid の意味は変えない。
+  - 例：生成の構成のエンジン（CodegenConfig）は、全組を網羅して診断の予測を照合する Errors の表と、生成が通る構成だけを網羅してコンパイル・意味・探針・関係を数える Success の表に分ける。Success の領域の述語（`CodegenSuccessDomain`）は診断の規則（`DiagnosticRules`）のエラーの規則を参照する。ガード：`CodegenSuccessMatrixTests.Coverage_MatchesGaps`・`CodegenSuccessMatrixTests.DomainPredicate_ReadsOnlyRuleFactors`。
 - ガード：TestSupport 直下の `DimensionTableTests` / `CoveringArrayTests` / `CoverageCounterTests` / `ScenarioTableTests` / `MatrixAxisTests` / `EngineRegistryChecksTests` / `FactorInventoryTests`、両アセンブリの `EngineRegistryTests` / `FactorInventoryGuardTests` / `MatrixAxisGuardTests`。mutation 実証済み（理由つきで外した値は緑のまま）。
 
 ## 共有の土台
@@ -97,7 +99,7 @@
 
 1. 生成コードのコンパイル：`CodeGen.CSharp/GeneratedCodeCompiler`（`Compile` / `CompileProject` / `CreateCompilation` / `CompileAndLoad` と、依存を絞った参照集合でコンパイルする `Emit`。構文木のパースは中の 1 か所だけ）と `CodeGen.CSharp/RuntimeReferenceSet`。
    - `RuntimeReferenceSet` は、TPA から ADO・EF Core・DI（指定があれば配布ランタイムの `QuickER.Runtime*`）を外し、許す依存だけを戻す参照集合。
-   - `Full` は何も外さない集合で、GeneratedCodeCompiler が使う。`RuntimePackageModeCompilationTests` は 9 つの構成を使う（`QuickER.Runtime*` も外す＝その場でコンパイルした同じ型と CS0433 で衝突させない）。`RuntimePackageSourceRendererTests` は `Create(…, excludeRuntimePackages: false)` を使う。Integration は 2 つともリンクする。
+   - `Full` は何も外さない集合で、GeneratedCodeCompiler が使う。生成の構成のエンジンのパッケージ参照のコンパイル（`CodegenConfig/Judges/CompileJudge.cs`。`CodegenCaseTests` の行 `compile-package-*`）は 9 つの構成を使う（`QuickER.Runtime*` も外す＝その場でコンパイルした同じ型と CS0433 で衝突させない）。`RuntimePackageSourceRendererTests` は `Create(…, excludeRuntimePackages: false)` を使う。Integration は 2 つともリンクする。
 2. 2 つのツールホスト：`TestSupport/TwoHostToolHarness`（WPF 依存なので Engines/ の外）。
    - ホストを行列の軸 `MatrixAxis<IToolHostAdapter>` として登録する。正本の列挙は `ToolHostKind { Gui, File }`。
    - ホストごとに違う部分（ツールの実行・現在の図・図への直接の書き込み）は `ToolHostSession` の抽象メンバー。GUI のセッションは方言を指定せず（MainViewModel の既定）、File は呼び出し側の方言で図ファイルを作る。

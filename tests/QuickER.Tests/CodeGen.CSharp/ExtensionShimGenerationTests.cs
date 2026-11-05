@@ -141,8 +141,7 @@ public sealed class ExtensionShimGenerationTests
             Generate(Options() with { SplitFilesByCategory = true, UseRuntimePackages = true })
         );
 
-        files.Keys.Should().NotContain("Runtime.g.cs");
-
+        // Runtime.g.cs が出ないことは、決まった行 files-extension-shim-package-mode-no-core-runtime-file が見る
         files["Entities.g.cs"].Should().Contain(EntityShim);
         files["EditModels.g.cs"].Should().Contain(EditModelShim);
         files["ValueObjects.g.cs"].Should().Contain(ValueObjectMarkerShim);
@@ -164,10 +163,7 @@ public sealed class ExtensionShimGenerationTests
     {
         var result = Generate(Options() with { LayeredOutput = true });
 
-        Layer(result, "Entities.g.cs").Should().Be("Domain");
-        Layer(result, "ValueObjects.g.cs").Should().Be("Domain");
-        Layer(result, "EditModels.g.cs").Should().Be("Presentation");
-
+        // 各ファイルの置き場（層）は、決まった行 files-extension-shim-layered-entity-valueobject-editmodel-layers が見る
         Content(result, "Entities.g.cs").Should().Contain(EntityShim);
         Content(result, "ValueObjects.g.cs").Should().Contain(ValueObjectMarkerShim);
         Content(result, "EditModels.g.cs").Should().Contain(EditModelShim);
@@ -332,8 +328,7 @@ public sealed class ExtensionShimGenerationTests
             )
         );
 
-        files.Keys.Should().NotContain("Runtime.g.cs");
-
+        // Runtime.g.cs が出ないことは、決まった行 files-extension-shim-package-mode-repository-no-core-runtime-file が見る
         foreach (var shim in RepositoryContractShims)
         {
             files["Repositories.g.cs"].Should().Contain(shim);
@@ -401,11 +396,7 @@ public sealed class ExtensionShimGenerationTests
     {
         var result = Generate(BackendOptions() with { LayeredOutput = true });
 
-        Layer(result, "Repositories.g.cs").Should().Be("Domain");
-        Layer(result, "Repositories.SqlServer.g.cs").Should().Be("Infrastructure");
-        Layer(result, "Repositories.Http.g.cs").Should().Be("Infrastructure");
-        Layer(result, "Mappers.g.cs").Should().Be("Presentation");
-
+        // 各ファイルの置き場（層）は、決まった行 files-extension-shim-layered-repository-mapper-layers が見る
         Content(result, "Repositories.g.cs").Should().Contain(RepositoryContractShims[0]);
         Content(result, "Repositories.SqlServer.g.cs")
             .Should()
@@ -543,7 +534,4 @@ public sealed class ExtensionShimGenerationTests
         result.HasErrors.Should().BeFalse();
         return result.Files.Single(file => file.FileName == fileName).Content;
     }
-
-    private static string? Layer(CodeGenerationResult result, string fileName) =>
-        result.Files.Single(file => file.FileName == fileName).RelativeDirectory;
 }

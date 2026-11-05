@@ -13,13 +13,13 @@ C# コード生成の生成器の側（オプション・モデルビルダー�
 
 ## 生成の単発オプションのケース
 
-- 単発オプションのケース（`SingleOptionCases`）は、行ごとに「そのオプションを既定へ戻した比較用のオプション」と図の種類を持つ
-  - `Generate_SingleOptions_ChangeTheOutput` が、同じ図の比較用の生成物と同じなら赤にする（空振りの検査）
-  - GuidKey の行は文字列の主キーの表・その列を列名の違う外部キーで持つ子・2 つの列への完全一致と部分一致のクエリを持つ `StringKeyDiagram` を使う
+- 単発オプションのケース（`CodegenCaseTests` の行 `compile-single-option-*`）は、行ごとに「そのオプションを既定へ戻した比較用のオプション」と図を持つ
+  - 関係 OptionEffect が、同じ図の比較用の生成物と同じなら赤にする（空振りの検査）
+  - GuidKey の行は文字列の主キーの表・その列を列名の違う外部キーで持つ子・2 つの列への完全一致と部分一致のクエリを持つ `CompileDiagrams.StringKey` を使う
     - 主キーがすべて int の図では GuidKey の値オブジェクトが 1 つも出ず、空振りになる
-  - `GuidKeyCase_EmitsGuidKeyValueObjectSharedByForeignKey` が、GuidKey の値オブジェクト・外部キーの型の共有・部分一致の警告による飛ばしをメソッド名の語の境界で表明する
-  - 対照は `OutputDiffers_IsFalseForTheSameOptions`。mutation 実証済み
-- 生成コードの Roslyn コンパイル検証（`GeneratedCodeCompilationTests`）は Docker 不要で常時実行される
+    - 部分一致の 2 本が警告で飛ばされることは同じ行の診断の期待が、GuidKey の値オブジェクト・外部キーの型の共有・飛ばしたメソッドが出ないことは `ValueObjectForeignKeyUnificationTests.GuidKeyCase_EmitsGuidKeyValueObjectSharedByForeignKey` がメソッド名の語の境界で表明する
+  - 対照（同じオプションで生成し直した生成物とは同じ）も関係 OptionEffect が見る。mutation 実証済み
+- 生成コードの Roslyn コンパイル検証（`CodegenCaseTests` の行 `compile-*`）は Docker 不要で常時実行される
 
 ## DB が値を作る列の書き込み除外
 
@@ -136,7 +136,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 - 統一列は Info 診断（`CodeGen_Info_ValueObjectForeignKeyUnified`）で名指しする（型名が変わる破壊的変更のため）
 - グループの定義の正（型・長さ・PK 優先判定）は、自列名でそのキーを名乗る native 列に限る（寄ってきた FK 列が PK のとき VO 名が FK 列名に化けるのを防ぐ）
 - FK 列名＝PK 列名の図と VO 無効の図は出力がバイト不変
-- ガード：`ValueObjectForeignKeyUnificationTests`（統一・チェーン・循環・退化エラー・Info）・`ValueObjectForeignKeyEfCoreModelTests`（生成→コンパイル→実 `DbContext.Model` でモデル検証が通る）
+- ガード：`ValueObjectForeignKeyUnificationTests`（統一・チェーン・循環）・`CodegenCaseTests` の行 `diag-vo-foreign-key-*`（退化エラー・Info）・`CodegenCaseTests` の行 `probe-efcore-model-vo-foreign-key-name-mismatch`（生成→コンパイル→実 `DbContext.Model` でモデル検証が通る）
 
 ## DB 定義メタ属性
 
@@ -214,7 +214,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
   - 判定は、計画が名前空間を決めた出所の記録 `GeneratedFilePlanner.UsedNamespaceSources` から行う。名前空間オプションの検証も同じ記録から「使われる値だけ」を検証する
   - パッケージ参照モードの `RuntimeNamespace`・層別出力の `RootNamespace` は検証しない
   - **計画の中で計算して捨てる名前空間の解決を作らない**。作ると使っていないオプションが記録に載り、使われない値で生成が止まる（通常分割の EF Core / インメモリ / 同期 / HTTP は `ResolveNamespace` を通さず契約の名前空間から組み立てる）
-- ガード：`CSharpCodeGenerationServiceTests` の `Generate_InvalidButUnusedNamespaceOption_ShouldSucceed` / `Generate_InvalidAndUsedNamespaceOption_ShouldFailWithError`・`LayeredOutputTests` の層フォルダ診断。mutation 実証済み
+- ガード：`CSharpCodeGenerationServiceTests` の `Generate_InvalidButUnusedNamespaceOption_ShouldSucceed`・`CodegenCaseTests` の行 `diag-invalid-used-namespace-inline-runtime` / `diag-invalid-used-namespace-split-root-fallback` / `diag-invalid-used-namespace-split-remote-server-root`・`CodegenCaseTests` の行 `diag-layered-folder-not-namespace` / `diag-layered-folder-not-namespace-allowed-when-all-explicit` / `diag-layered-invalid-layer-directory` / `diag-layered-invalid-layer-directory-layered-off` / `diag-layered-unused-server-layer-directory`。mutation 実証済み
 
 #### 固定 infra の可視性
 
@@ -222,10 +222,10 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
   - 多アセンブリ配置では `internal` な Owner / OwnerModel・IncludeNode・CascadeNavigation などを別層の生成物が参照できず、ビルドエラーになる
   - 既存の `infra_visibility` テンプレート変数を `LayeredOutput ? "public" : "internal"` で切り替える。パッケージ配布と同一規則（同じ型は QuickER.Runtime で既に public）
   - `InternalsVisibleTo` の生成は採らない（アセンブリ名を確実に知り得ない）。型の層移動も成立しない（IncludeNode / CascadeNavigation は domain 側の SqlQuery / EntityGraphSaver 自身が参照する）
-- 不変条件：層分けの ON / OFF で、スキーマ依存ファイルは namespace 宣言・using 行以外が一致し、Runtime 系はさらに可視性だけが違う。非層別モードの出力はバイト不変
-  - ガード：`LayeredOutputTests`。`.g.md` のファイル一覧表は導出後の実名前空間を載せる
-- 多アセンブリ検証：生成物を層ごとに別 Roslyn コンパイルし、参照グラフ（Infrastructure→Domain・Presentation→Domain・Server→Domain+Infrastructure）で組む 4 プロジェクト分割のコンパイルテスト（`GeneratedCodeCompilationTests`）。mutation 実証済み
-  - 単一コンパイルでは internal が見えて、境界越えを検出できない
+- 不変条件：層分けの ON / OFF で、スキーマ依存ファイルは namespace 宣言・using 行と、固定 infra と同じ規則で可視性を切り替える型（`{Repository}UniquenessConstraints`）の可視性以外が一致し、Runtime 系はさらに可視性だけが違う。非層別モードの出力はバイト不変
+  - ガード：`CodegenCaseTests` の行 `relation-layered-vs-split-order`・`CodegenSuccessMatrixTests`（層別の行の関係 LayeredVsSplit）・`LayeredOutputTests`。`.g.md` のファイル一覧表は導出後の実名前空間を載せる
+- 多アセンブリ検証：生成物を層ごとに別 Roslyn コンパイルし、参照グラフ（Infrastructure→Domain・Presentation→Domain・Server→Domain+Infrastructure）で組む 4 プロジェクト分割のコンパイル（`CodegenCaseTests` の行 `compile-layered-projects-*`）。mutation 実証済み
+  - 単一コンパイルでは internal が見えて、境界越えを検出できない（1 アセンブリでしか出ない崩れは `CodegenCaseTests` の行 `compile-layered-one-assembly-*` が見る）
 
 ### 出力先のサブフォルダ
 
@@ -239,7 +239,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
     - 名前空間へ出ないので識別子の検証は課さない（`generated-code` も可。「名前空間導出に実際に使われる値だけ検証する」の帰結）
   - `.g.md` は追随しない。置き場の正本は `ApiDocsSubdirectory` だけで、暗黙のフォールバックを作らない
   - 検証は `LayerDirectoryValidator` を共有し、出力モードに依らず効く
-  - 不変条件：サブフォルダの有無で生成テキストはバイト不変（配置だけが変わる）。ガード：`CodeSubdirectoryTests`。mutation 実証済み
+  - 不変条件：サブフォルダの有無で生成テキストはバイト不変（配置だけが変わる）。ガード：`CodegenCaseTests` の行 `relation-code-subdirectory-layered`。mutation 実証済み
 
 ### HTTP クライアントのバケット分離
 
@@ -284,7 +284,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
   - C# の型名は別軸で不変：`EfCore{Entity}Repository`・`QuickErDbContext`・`AddGeneratedEfCoreRepositories`
   - Runtime 系は有効にした機能の分だけ出る。方言ファイルは QuickER 版 Repository 生成時、EF Core / InMemory / AspNetCore / Sync は各オプション（`GenerateEfCoreRepositories` / `GenerateInMemoryRepositories` / `GenerateRemoteServices` / `GenerateSyncSupport`）が有効なとき
 - `UseRuntimePackages` の意味は「Runtime 系ファイルを 1 本も出さず、生成コードの using が固定パッケージ名前空間（`QuickER.Runtime*`）を指す」だけ。`Repositories*` 系はモードの on / off で内容が変わらない
-  - ガード：`SplitRuntimeSymmetryTests`（Runtime 系ファイルの型集合＝対応パッケージの型集合・Runtime 系にスキーマ依存型が混ざらない・パッケージモードで Runtime 系が 1 本も出ない・スキーマ依存ファイルはモード間で同一）
+  - ガード：`CodegenCaseTests` の行 `relation-runtime-type-set-*`（Runtime 系ファイルの型集合＝対応パッケージの型集合）・`SplitRuntimeSymmetryTests`（Runtime 系にスキーマ依存型が混ざらない）・`CodegenCaseTests` の行 `relation-runtime-packages-split-multi-dialect`（スキーマ依存ファイルはモード間で同一）・`CodegenCaseTests` の行 `files-split-runtime-packages-no-fixed-runtime-file`（パッケージモードで Runtime 系が 1 本も出ない）
 
 ### 併用の可否
 
@@ -381,7 +381,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 - 判定の正本は `CSharpMappingPropertyPair.NullableValueNeedsUnwrap`（`EditModelIsNullable && !IsReferenceType && 型名相違`）。**参照型へ広げない**（`string` / `byte[]` / VO が `.Value` を持たず、コンパイル不能になる）
 - 通常列は同条件で `Required(...)` を通すので、このフラグを見ない（必須検証を通す列と、未入力が正常な列で意味論が違う）
 - 行バージョン列と除外バイナリ列は実装上つねに `byte[]` なので、この欠陥が表面化するのは値型の計算列・採番列だけ
-- ガード：`GeneratedCodeCompilationTests`（共通図の `customers.valid_from`＝NOT NULL の値型計算列と `seq_no`＝主キーでない NOT NULL の値型採番列を全ケースの実コンパイルへ通す）・`ComputedColumnGenerationTests` の `.Value` 1 件。mutation 実証済み
+- ガード：`CodegenCaseTests` の行 `compile-*`（共通図 `CompileDiagrams.FullCoverage` の `customers.valid_from`＝NOT NULL の値型計算列と `seq_no`＝主キーでない NOT NULL の値型採番列を全ケースの実コンパイルへ通す）・`ComputedColumnGenerationTests` の `.Value` 1 件。mutation 実証済み
 
 ### 配列列と inet の列
 
@@ -396,7 +396,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 - NOT NULL の配列列は、Entity の初期化子とインメモリのシード値を空配列にする（EditModel に載らない列が null のまま INSERT へ行かないため）
   - NOT NULL の inet は、Entity を `= null!`、インメモリのシード値を決定的なアドレスにする
 - Entity のプロパティ・EF Core・インメモリ・リモート転送では通常どおり扱う。`HasSameValues` / `GetValueHashCode` は `StructuralComparisons` が配列全般を構造比較するので変更不要
-- ガード：`PostgreSqlArrayColumnGenerationTests`（EditModel × VO の 4 通り＋インメモリ併用 2 通りの実コンパイル・Info の名指し・C# リバースがトークンの無い列として警告つきで飛ばす）・`PostgreSqlNetworkTypeGenerationTests`（EditModel × VO × インメモリの 6 通りの実コンパイルでエラー・警告 0）。mutation 実証済み
+- ガード：`PostgreSqlArrayColumnGenerationTests`（Info の名指し・C# リバースがトークンの無い列として警告つきで飛ばす）・`PostgreSqlNetworkTypeGenerationTests`・`CodegenCaseTests` の行 `compile-postgresql-array-*`（EditModel × VO の 4 通り＋インメモリ併用 2 通り＋UNIQUE 制約 2 通りの実コンパイル）/ `compile-postgresql-network-types-*`（EditModel × VO × インメモリの 6 通りの実コンパイルでエラー・警告 0）。mutation 実証済み
 
 ## インメモリのシード値
 
@@ -408,7 +408,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 - 3 種類の値を作れない列（NOT NULL の `bool`＝2、既定値へ倒す未知の型と配列＝1）だけでできた主キー・一意制約を持つエンティティは、シード行数を減らす
   - それを参照する子も、親に実在する行だけを指すよう減らす。不動点（行数は減る一方なので循環でも止まる）
 - 型だけから作ると、既定の `seedSampleData: true` で一意制約が重複したストアができ、以後その行の更新・保存が必ず失敗する（`Put` / `Seed` は一意制約を検査しない。docs 明記の受容）
-- ガード：`InMemorySampleSeedExecutionTests` の「シード値は主キー・一意制約を重複させず…」（MySQL の図を生成→実コンパイル→シード→`SeededSampleDataInvariants` で主キー・一意制約・外部キーを反射で検査→全行を `UpdateAsync` で保存し直す。VO の有無の 2 通り）・「既存の全フィクスチャのシーダーも…」（テストアセンブリ内の全 `InMemorySampleData` に同じ検査）・「シード行数の不動点は自己参照と相互参照でも止まり…」。mutation 実証済み
+- ガード：`CodegenCaseTests` の行 `probe-inmemory-seed-mysql-constraints` / `probe-inmemory-seed-mysql-constraints-vo`（MySQL の図を生成→実コンパイル→シード→`SeededSampleDataInvariants` で主キー・一意制約・外部キーを反射で検査→全行を `UpdateAsync` で保存し直す。VO の有無の 2 通り）・`InMemorySampleSeedExecutionTests` の「既存の全フィクスチャのシーダーも…」（テストアセンブリ内の全 `InMemorySampleData` に同じ検査）・`CodegenCaseTests` の行 `probe-inmemory-seed-row-count-fixed-point-cycles`（シード行数の不動点は自己参照と相互参照でも止まる）。mutation 実証済み
 
 ## GuidKey 値オブジェクトの長さ検証
 
@@ -419,7 +419,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 - **Error にしない**
   - `UseGuidKeyForStringPrimaryKey` は図の全 string PK に効くグローバル指定。GUID を意図しない短い string PK（コード表など）が混在する図で、機能ごと使えなくなる
   - 手動キー供給の運用は正当で、rowversion 2 本の Error の前例とは「生成物が使用不能」の条件が違う
-- ガード：`GuidKeyValueObjectExecutionTests` ＋生成テスト 3 本。mutation 実証済み
+- ガード：`CodegenCaseTests` の行 `probe-guidkey-create-generates-unique-guid` ＋生成テスト 3 本。mutation 実証済み
 
 ## 生成型名・メンバー名のぶつかり
 
@@ -454,7 +454,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
   - 大小を区別せずに比べると、表ごとに綴りの違う列（`user_id` と `userid`）の値オブジェクトを理由なく断る
   - ルート名はリモートを生成しない構成でも止める（後からリモートを有効にしても図が壊れない）
 - 名簿 `ForTable` は生成器の命名規則の写しなので、`GeneratedTypeNameDriftTests` が実際の出力と一致し続けることを固定する
-- ガード：`GeneratedTypeNameCollisionTests`・`CSharpCodeGenerationServiceTests` の `Generate_CollidingEntityClassNames_ShouldFailWithError`。mutation 実証済み
+- ガード：`GeneratedTypeNameCollisionTests`・`CodegenCaseTests` の行 `diag-type-name-collision-singular-plural`。mutation 実証済み
 
 ### エンティティのメンバー名の大文字小文字
 

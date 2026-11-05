@@ -30,7 +30,7 @@
   - 無効化された制約・テンポラル表・SQLite の PRAGMA の固定は `{SqlServer,Oracle,Sqlite}ImportFidelityIntegrationTests`、パーティションと SQLite の主キーの補正の固定は `{MySql,Sqlite}ImportFidelityIntegrationTests`。
 - 型カタログが解析できない DB 型（`geometry`・`hierarchyid`・`sql_variant` など）は 5 方言とも `_ => Reference("string")` の安全側フォールバックへ落とし、`CSharpTypeInfo.IsFallbackType` を立てて生成時 Info 診断で名指しする。
   - 取込警告にはしない（PostGIS の `geometry` のように承知で使う型が取り込むたびに鳴って形骸化するため）。
-  - 固定は 5 方言の `*CSharpTypeMapperTests`・`FallbackTypeGenerationTests`。
+  - 固定は `DialectTypeTableTests` のマッパーの行（`map-*`）・`FallbackTypeGenerationTests`・`CodegenCaseTests` の行 `diag-fallback-type-info-names-column`（Info 診断）。
 
 ### 計算列と生成列
 

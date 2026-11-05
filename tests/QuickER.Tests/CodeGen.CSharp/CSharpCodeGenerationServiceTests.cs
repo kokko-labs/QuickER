@@ -53,8 +53,6 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        result.Files.Should().ContainSingle();
-        result.Files[0].FileName.Should().Be("QuickEREntities.g.cs");
         result.Files[0].Content.Should().Contain("namespace Sample.Domain;");
         result
             .Files[0]
@@ -603,14 +601,6 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        // 警告文言はカルチャ依存のため、resx テンプレートのプレースホルダ前プレフィックスで照合する
-        var manyToManyWarningPrefix = Strings.CodeGen_Warning_ManyToManySkipped.Split("{0}")[0];
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Warning
-                && diagnostic.Message.Contains(manyToManyWarningPrefix)
-            );
         result.Files[0].Content.Should().NotContain("ICollection<RoleEntity>");
     }
 
@@ -2223,164 +2213,6 @@ public class CSharpCodeGenerationServiceTests
         result.Files[0].Content.Should().Contain("public partial class Items1100Entity");
     }
 
-    /// <summary>Repository をデータアノテーション無効で生成しようとするとエラーになることを検証する</summary>
-    [Fact]
-    public void Generate_RepositoryWithoutDataAnnotations_ShouldFailWithError()
-    {
-        var diagram = SingleEntityDiagram();
-        var options = new CodeGenerationOptions
-        {
-            RootNamespace = "Sample.Domain",
-            GenerateRepositories = true,
-            IncludeDataAnnotations = false,
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(diagram, options);
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message == Strings.CodeGen_Error_RepositoryRequiresDataAnnotations
-            );
-    }
-
-    /// <summary>
-    /// Repository 契約が 1 つも生成されない構成でリモート面を要求するとエラーになることを検証する
-    /// （計画が該当バケットを落とすため、止めないと診断ゼロで何も生成されないまま成功に見える）
-    /// </summary>
-    [Theory]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    [InlineData(true, true)]
-    public void Generate_RemoteWithoutRepositoryContract_ShouldFailWithError(
-        bool remoteContracts,
-        bool remoteServices
-    )
-    {
-        var diagram = SingleEntityDiagram();
-        var options = new CodeGenerationOptions
-        {
-            RootNamespace = "Sample.Domain",
-            GenerateRemoteContracts = remoteContracts,
-            GenerateRemoteServices = remoteServices,
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(diagram, options);
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message == Strings.CodeGen_Error_RemoteRequiresContract
-            );
-    }
-
-    /// <summary>
-    /// Repository 契約を生成する 3 構成（QuickER 版 Repository / EF Core / インメモリ）のどれと組んでも
-    /// リモート面は生成できることを検証する（新しい検証が正当な構成まで巻き込んでいないことの対照）
-    /// </summary>
-    [Theory]
-    [InlineData(nameof(CodeGenerationOptions.GenerateRepositories))]
-    [InlineData(nameof(CodeGenerationOptions.GenerateEfCoreRepositories))]
-    [InlineData(nameof(CodeGenerationOptions.GenerateInMemoryRepositories))]
-    public void Generate_RemoteWithRepositoryContract_ShouldSucceed(string contractOption)
-    {
-        var diagram = SingleEntityDiagram();
-        var options = new CodeGenerationOptions
-        {
-            RootNamespace = "Sample.Domain",
-            GenerateRepositories =
-                contractOption == nameof(CodeGenerationOptions.GenerateRepositories),
-            GenerateEfCoreRepositories =
-                contractOption == nameof(CodeGenerationOptions.GenerateEfCoreRepositories),
-            GenerateInMemoryRepositories =
-                contractOption == nameof(CodeGenerationOptions.GenerateInMemoryRepositories),
-            GenerateRemoteContracts = true,
-            GenerateRemoteServices = true,
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(diagram, options);
-
-        result
-            .Diagnostics.Should()
-            .NotContain(diagnostic =>
-                diagnostic.Message == Strings.CodeGen_Error_RemoteRequiresContract
-            );
-        result.HasErrors.Should().BeFalse();
-        // リモートサービス生成はサーバー実装を別ファイルへ出す（契約があれば構成に依らず出力される）
-        result
-            .Files.Should()
-            .Contain(file =>
-                file.FileName.EndsWith(".RemoteServer.g.cs", StringComparison.Ordinal)
-            );
-    }
-
-    /// <summary>
-    /// 同一エンティティに rowversion 列が 2 本以上ある図は生成時にエラーになることを検証する
-    /// （版の読み書きは「1 型につき 1 本」前提で先頭だけを見るため、黙って生成すると DDL 適用で初めて落ちる）
-    /// </summary>
-    [Fact]
-    public void Generate_MultipleRowVersionColumns_ShouldFailWithError()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "items",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "item_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "row_ver",
-                            DataType = "rowversion",
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "row_ver2",
-                            DataType = "timestamp",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty("エラー時は生成物を書き出さない");
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("items")
-                && diagnostic.Message.Contains("'row_ver'")
-                && diagnostic.Message.Contains("'row_ver2'")
-            );
-    }
-
     /// <summary>rowversion 列が 1 本だけの図は生成できることを検証する（診断の対照）</summary>
     [Fact]
     public void Generate_SingleRowVersionColumn_ShouldSucceed()
@@ -2422,60 +2254,6 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         result.Files[0].Content.Should().Contain("[StoreGeneratedColumn]");
-    }
-
-    /// <summary>
-    /// 主キー列が rowversion の図は生成時にエラーになることを検証する
-    /// （rowversion は DB 採番＝書き込み対象から外れるため、生成 INSERT がキーを送らず、
-    /// 行の同一性が更新のたびに変わる値に乗ってしまう。DB 取込では自然に発生し得る構成）
-    /// </summary>
-    [Fact]
-    public void Generate_PrimaryKeyRowVersionColumn_ShouldFailWithError()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "items",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "row_ver",
-                            DataType = "rowversion",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "name",
-                            DataType = "nvarchar(50)",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty("エラー時は生成物を書き出さない");
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("items")
-                && diagnostic.Message.Contains("'row_ver'")
-            );
     }
 
     /// <summary>
@@ -2524,33 +2302,6 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>
-    /// 主キー列が無制限バイナリ列で、かつ無制限バイナリ列の除外が有効な図は生成時にエラーになることを検証する
-    /// （除外列は SELECT から外れるため、キーが読み戻せず GetById / GetAll がキー未設定のエンティティを返す）
-    /// </summary>
-    [Fact]
-    public void Generate_PrimaryKeyUnboundedBinaryColumn_WithExclusion_ShouldFailWithError()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            BuildUnboundedBinaryDiagram(binaryColumnIsPrimaryKey: true),
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                ExcludeUnboundedBinaryColumns = true,
-            }
-        );
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty("エラー時は生成物を書き出さない");
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("assets")
-                && diagnostic.Message.Contains("payload")
-            );
-    }
-
-    /// <summary>
     /// 対照: 主キーでない無制限バイナリ列は除外が有効でも生成できる（診断は主キーとの組合せだけを止める）
     /// </summary>
     [Fact]
@@ -2567,21 +2318,6 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         result.Files[0].Content.Should().Contain("[UnboundedBinaryColumn]");
-    }
-
-    /// <summary>
-    /// 対照: 除外が無効なら主キーが無制限バイナリ列でも生成できる（通常列として全経路で読み書きされるため実害がない）
-    /// </summary>
-    [Fact]
-    public void Generate_PrimaryKeyUnboundedBinaryColumn_WithoutExclusion_ShouldSucceed()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            BuildUnboundedBinaryDiagram(binaryColumnIsPrimaryKey: true),
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        result.Files.Should().NotBeEmpty();
     }
 
     /// <summary>無制限バイナリ列（varbinary(max)）を持つ検証用の図を作る（主キーの置き場所だけを切り替える）</summary>
@@ -2616,93 +2352,6 @@ public class CSharpCodeGenerationServiceTests
                 },
             ],
         };
-
-    /// <summary>Mapper を EditModel なしで生成しようとするとエラーになることを検証する</summary>
-    [Fact]
-    public void Generate_MapperWithoutEditModel_ShouldFailWithError()
-    {
-        var diagram = SingleEntityDiagram();
-        var options = new CodeGenerationOptions
-        {
-            RootNamespace = "Sample.Domain",
-            GenerateEditModels = false,
-            GenerateMappers = true,
-            GenerateRepositories = false,
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(diagram, options);
-
-        result.HasErrors.Should().BeTrue();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("Mapper")
-            );
-    }
-
-    /// <summary>
-    /// 単数形化で同じエンティティクラス名になるテーブル（customer / customers）はエラーになり、
-    /// コンパイル不能な出力を書き出さないことを検証する
-    /// </summary>
-    [Fact]
-    public void Generate_CollidingEntityClassNames_ShouldFailWithError()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "customer",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "customer_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                    ],
-                },
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "customers",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "customer_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("CustomerEntity")
-                && diagnostic.Message.Contains("'customer'")
-                && diagnostic.Message.Contains("'customers'")
-            );
-    }
 
     /// <summary>クラス名が衝突しないテーブル名なら生成できることを検証する（衝突検証の偽陽性防止）</summary>
     [Fact]
@@ -2755,61 +2404,6 @@ public class CSharpCodeGenerationServiceTests
         result.HasErrors.Should().BeFalse();
         result.Files[0].Content.Should().Contain("class CustomerEntity");
         result.Files[0].Content.Should().Contain("class CustomerAddressEntity");
-    }
-
-    /// <summary>
-    /// 正規化で同じプロパティ名になる列（user-id / user_id）が同一エンティティにあるとエラーになり、
-    /// コンパイル不能な出力を書き出さないことを検証する
-    /// </summary>
-    [Fact]
-    public void Generate_CollidingColumnPropertyNames_ShouldFailWithError()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "users",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "user-id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "user_id",
-                            DataType = "int",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("users")
-                && diagnostic.Message.Contains("UserId")
-                && diagnostic.Message.Contains("'user-id'")
-                && diagnostic.Message.Contains("'user_id'")
-            );
     }
 
     /// <summary>プロパティ名が衝突しない列なら生成できることを検証する（衝突検証の偽陽性防止）</summary>
@@ -2910,222 +2504,6 @@ public class CSharpCodeGenerationServiceTests
         result.HasErrors.Should().BeFalse();
         result.Files[0].Content.Should().Contain("class UserEntity");
         result.Files[0].Content.Should().Contain("class UserProfileEntity");
-    }
-
-    /// <summary>
-    /// EditModel の派生名（Binding{Prop}）と衝突する列（id / binding_id）があるとエラーになり、
-    /// コンパイル不能な出力を書き出さないことを検証する（列プロパティ名同士は衝突しないため、
-    /// シンボル表検証だけが検出できる系統）
-    /// </summary>
-    [Fact]
-    public void Generate_CollidingEditModelBindingMemberNames_ShouldFailWithError()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "items",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "binding_id",
-                            DataType = "int",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("ItemEditModel")
-                && diagnostic.Message.Contains("'BindingId'")
-                && diagnostic.Message.Contains("'id'")
-                && diagnostic.Message.Contains("'binding_id'")
-            );
-    }
-
-    /// <summary>
-    /// 列由来プロパティ名がナビゲーションプロパティ名と衝突する（customer 列 ＋ customers への参照）と
-    /// エラーになることを検証する。EditModel を生成しない構成でも Entity 側が壊れるため検出できる必要がある
-    /// </summary>
-    [Fact]
-    public void Generate_ColumnCollidingWithNavigationName_ShouldFailWithError()
-    {
-        var customerId = Guid.NewGuid();
-        var orderId = Guid.NewGuid();
-        var customerPk = Guid.NewGuid();
-        var orderFk = Guid.NewGuid();
-
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = customerId,
-                    TableName = "customers",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = customerPk,
-                            Name = "customer_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                    ],
-                },
-                new Entity
-                {
-                    Id = orderId,
-                    TableName = "orders",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "order_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = orderFk,
-                            Name = "customer_id",
-                            DataType = "int",
-                            IsForeignKey = true,
-                            IsNullable = false,
-                        },
-                        // 親参照ナビゲーション "Customer" と同名のプロパティになる列
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "customer",
-                            DataType = "nvarchar(50)",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-            Relationships =
-            [
-                new Relationship
-                {
-                    Id = Guid.NewGuid(),
-                    Type = RelationshipType.OneToMany,
-                    SourceEntityId = customerId,
-                    TargetEntityId = orderId,
-                    ColumnPairs = [new(customerPk, orderFk)],
-                },
-            ],
-        };
-
-        // EditModel / Mapper を生成しない構成でも Entity 側で衝突するため検出できる
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateEditModels = false,
-                GenerateMappers = false,
-            }
-        );
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("OrderEntity")
-                && diagnostic.Message.Contains("'Customer'")
-                && diagnostic.Message.Contains("'customer'")
-            );
-    }
-
-    /// <summary>
-    /// 列由来のメンバー名が囲むクラス名と同じになる（CS0542）図はエラーになることを検証する
-    /// （orders の列 order_entity → OrderEntity クラスの OrderEntity プロパティ・
-    /// 列 order_edit_model → OrderEditModel クラスの OrderEditModel プロパティ）
-    /// </summary>
-    [Theory]
-    [InlineData("order_entity", "OrderEntity")]
-    [InlineData("order_edit_model", "OrderEditModel")]
-    public void Generate_MemberNamedAsEnclosingClass_ShouldFailWithError(
-        string columnName,
-        string className
-    )
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "orders",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "order_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = columnName,
-                            DataType = "int",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty();
-        result
-            .Diagnostics.Should()
-            .ContainSingle(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains($"'{className}'")
-                && diagnostic.Message.Contains("CS0542")
-            );
     }
 
     /// <summary>
@@ -3358,103 +2736,6 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>
-    /// EditModel の固定フィールド <c>_editModelColumns</c>（列テーブル）と衝突する列（edit_model_columns）はエラーになることを検証する
-    /// </summary>
-    [Fact]
-    public void Generate_ColumnCollidingWithEditModelColumnTable_ShouldFailWithError()
-    {
-        var result = GenerateWithColumns("items", null, "edit_model_columns");
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("ItemEditModel")
-                && diagnostic.Message.Contains("'_editModelColumns'")
-                && diagnostic.Message.Contains("'edit_model_columns'")
-            );
-    }
-
-    /// <summary>
-    /// EditModel の固定プロパティ <c>ParentCollection</c> と衝突する列（parent_collection）はエラーになることを検証する
-    /// </summary>
-    [Fact]
-    public void Generate_ColumnCollidingWithEditModelParentCollection_ShouldFailWithError()
-    {
-        var result = GenerateWithColumns("items", null, "parent_collection");
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("ItemEditModel")
-                && diagnostic.Message.Contains("'ParentCollection'")
-                && diagnostic.Message.Contains("'parent_collection'")
-            );
-    }
-
-    /// <summary>
-    /// 列の値変更フック（<c>On{列}Changing</c>）と衝突する列名（a ＋ on_a_changing）はエラーになることを検証する
-    /// </summary>
-    [Fact]
-    public void Generate_ColumnCollidingWithValueChangeHook_ShouldFailWithError()
-    {
-        var result = GenerateWithColumns("items", null, "a", "on_a_changing");
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("ItemEditModel")
-                && diagnostic.Message.Contains("'OnAChanging'")
-                && diagnostic.Message.Contains("'a'")
-                && diagnostic.Message.Contains("'on_a_changing'")
-            );
-    }
-
-    /// <summary>
-    /// テーブル説明があるとき、Entity の <c>DefaultDisplayName</c> override と衝突する列はエラーになることを検証する
-    /// </summary>
-    [Fact]
-    public void Generate_ColumnCollidingWithEntityDefaultDisplayName_ShouldFailWithError()
-    {
-        var result = GenerateWithColumns("items", "Item master", "default_display_name");
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("ItemEntity")
-                && diagnostic.Message.Contains("'DefaultDisplayName'")
-                && diagnostic.Message.Contains("'default_display_name'")
-            );
-    }
-
-    /// <summary>
-    /// テーブル説明が無ければ <c>DefaultDisplayName</c> の override 自体が生成されないため、
-    /// 同名の列があっても診断を出さないことを検証する（発行条件に連動した出し分けの回帰防止）
-    /// </summary>
-    [Fact]
-    public void Generate_ColumnNamedDefaultDisplayNameWithoutDescription_ShouldSucceed()
-    {
-        var result = GenerateWithColumns("items", null, "default_display_name");
-
-        result.HasErrors.Should().BeFalse();
-        result.Files.Should().NotBeEmpty();
-        result
-            .Diagnostics.Should()
-            .NotContain(diagnostic => diagnostic.Message.Contains("DefaultDisplayName"));
-    }
-
-    /// <summary>
     /// 基底クラス（EntityBase / EditModelBase）にしかないメンバー名と同名の列は診断を出さないことを検証する。
     /// </summary>
     /// <remarks>
@@ -3471,72 +2752,6 @@ public class CSharpCodeGenerationServiceTests
         result.Files[0].Content.Should().Contain("public int Validate { get; set; }");
     }
 
-    /// <summary>C# の名前空間として不正な RootNamespace はエラーになることを検証する</summary>
-    [Fact]
-    public void Generate_InvalidRootNamespace_ShouldFailWithError()
-    {
-        var options = new CodeGenerationOptions { RootNamespace = "Bad-Namespace" };
-
-        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("RootNamespace")
-                && diagnostic.Message.Contains("Bad-Namespace")
-            );
-    }
-
-    /// <summary>
-    /// 空セグメントを含む RootNamespace（先頭・末尾・連続したドット）はエラーになることを検証する
-    /// </summary>
-    /// <remarks>
-    /// 空セグメントを除去してから検証すると <c>namespace .Foo;</c> のようなコンパイル不能な出力が
-    /// 無警告で書き出される（本テストがその回帰を防ぐ）
-    /// </remarks>
-    [Theory]
-    [InlineData(".Sample")]
-    [InlineData("Sample.")]
-    [InlineData("Sample..Domain")]
-    [InlineData("Sample. .Domain")]
-    public void Generate_RootNamespaceWithEmptySegment_ShouldFailWithError(string rootNamespace)
-    {
-        var options = new CodeGenerationOptions { RootNamespace = rootNamespace };
-
-        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("RootNamespace")
-            );
-    }
-
-    /// <summary>C# の予約語をセグメントに含む RootNamespace はエラーになることを検証する</summary>
-    [Fact]
-    public void Generate_RootNamespaceWithReservedKeyword_ShouldFailWithError()
-    {
-        var options = new CodeGenerationOptions { RootNamespace = "Sample.class.Domain" };
-
-        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("RootNamespace")
-                && diagnostic.Message.Contains("Sample.class.Domain")
-            );
-    }
-
     /// <summary>複数セグメントの正当な RootNamespace はそのまま生成できることを検証する</summary>
     [Fact]
     public void Generate_ValidMultiSegmentRootNamespace_ShouldSucceed()
@@ -3547,117 +2762,6 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         result.Files[0].Content.Should().Contain("namespace My.App.Data;");
-    }
-
-    /// <summary>分割時のカテゴリ別名前空間が不正ならエラーになることを検証する（オプション名を診断に含める）</summary>
-    [Fact]
-    public void Generate_InvalidCategoryNamespace_ShouldFailWithError()
-    {
-        var options = new CodeGenerationOptions
-        {
-            RootNamespace = "Sample.Domain",
-            SplitFilesByCategory = true,
-            EntityNamespace = "Sample.1Domain",
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("EntityNamespace")
-            );
-    }
-
-    /// <summary>
-    /// 非分割でもマルチ方言レイアウトなら Repository 名前空間が検証されることを検証する（Repository 特例）
-    /// </summary>
-    /// <remarks>
-    /// 他のカテゴリ別名前空間は分割時にしか使われないが、Repository 名前空間は非分割の
-    /// マルチ方言レイアウト（契約 1 回＋方言別 namespace 実装）でも使われるため、そのときだけ
-    /// 分割の有無に依らず検証される。特例が消えると不正な名前空間が無警告でコンパイル不能な
-    /// 出力になるが、型検査には出ない。
-    /// </remarks>
-    [Fact]
-    public void Generate_InvalidRepositoryNamespace_WithoutSplit_ShouldFailWithError()
-    {
-        var options = new CodeGenerationOptions
-        {
-            RootNamespace = "Sample.Domain",
-            SplitFilesByCategory = false,
-            GenerateRepositories = true,
-            IncludeDataAnnotations = true,
-            RepositoryDialects = ["sqlserver", "sqlite"],
-            RepositoryNamespace = "123 bad",
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("RepositoryNamespace")
-                && diagnostic.Message.Contains("123 bad")
-            );
-    }
-
-    /// <summary>
-    /// 非分割の単一方言では Repository 名前空間が出力へ現れないため検証されないことを検証する
-    /// （「名前空間導出に実際に使われる値だけ検証する」一般則。従来は使われない値でも生成が止まっていた）
-    /// </summary>
-    [Fact]
-    public void Generate_InvalidRepositoryNamespace_SingleDialectWithoutSplit_ShouldSucceed()
-    {
-        var options = new CodeGenerationOptions
-        {
-            RootNamespace = "Sample.Domain",
-            SplitFilesByCategory = false,
-            GenerateRepositories = true,
-            IncludeDataAnnotations = true,
-            RepositoryNamespace = "123 bad",
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
-
-        result.HasErrors.Should().BeFalse();
-        result.Files.Should().NotBeEmpty();
-        result
-            .Diagnostics.Should()
-            .NotContain(diagnostic => diagnostic.Message.Contains("RepositoryNamespace"));
-    }
-
-    /// <summary>
-    /// Repository バケットが非活性なら、非分割で不正な Repository 名前空間を指定しても検証されない（特例の成功側）
-    /// </summary>
-    /// <remarks>
-    /// 検証の条件は「バケットが有効」かつ「分割 or Repository 特例」の 2 段。特例側だけを見て
-    /// バケット条件を落とすと、Repository を 1 行も出さない構成が使われない設定値で落ちるようになる。
-    /// </remarks>
-    [Fact]
-    public void Generate_InvalidRepositoryNamespace_WithoutRepositoryBucket_ShouldSucceed()
-    {
-        var options = new CodeGenerationOptions
-        {
-            RootNamespace = "Sample.Domain",
-            SplitFilesByCategory = false,
-            GenerateRepositories = false,
-            GenerateEfCoreRepositories = false,
-            RepositoryNamespace = "123 bad",
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
-
-        result.HasErrors.Should().BeFalse();
-        result.Files.Should().NotBeEmpty();
-        result
-            .Diagnostics.Should()
-            .NotContain(diagnostic => diagnostic.Message.Contains("RepositoryNamespace"));
     }
 
     /// <summary>
@@ -3712,131 +2816,6 @@ public class CSharpCodeGenerationServiceTests
         result
             .Files.Should()
             .NotContain(file => file.Content.Contains("123 bad"), "使われない値は出力に現れない");
-    }
-
-    /// <summary>
-    /// 出力に使われる名前空間オプションは、モードに依らず従来どおり検証されることを検証する
-    /// （インラインの RuntimeNamespace・分割で導出に使うルート・非分割のルート）
-    /// </summary>
-    [Theory]
-    [InlineData("inline-runtime", "RuntimeNamespace")]
-    [InlineData("split-root-fallback", "RootNamespace")]
-    [InlineData("split-remote-server-root", "RootNamespace")]
-    public void Generate_InvalidAndUsedNamespaceOption_ShouldFailWithError(
-        string scenario,
-        string optionName
-    )
-    {
-        var options = scenario switch
-        {
-            "inline-runtime" => new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                SplitFilesByCategory = true,
-                RuntimeNamespace = "123 bad",
-            },
-            "split-root-fallback" => new CodeGenerationOptions
-            {
-                RootNamespace = "123 bad",
-                SplitFilesByCategory = true,
-                EntityNamespace = "Sample.Entities",
-            },
-            // サーバー実装（{root}.RemoteServer）は明示オプションを持たず、他を全部明示してもルートを使う
-            _ => new CodeGenerationOptions
-            {
-                RootNamespace = "123 bad",
-                SplitFilesByCategory = true,
-                RuntimeNamespace = "Sample.Runtime",
-                EntityNamespace = "Sample.Entities",
-                EditModelNamespace = "Sample.EditModels",
-                MapperNamespace = "Sample.Mappers",
-                RepositoryNamespace = "Sample.Repositories",
-                ValueObjectNamespace = "Sample.ValueObjects",
-                GenerateRepositories = true,
-                GenerateRemoteServices = true,
-            },
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty();
-        result
-            .Diagnostics.Should()
-            .ContainSingle(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains(optionName)
-                && diagnostic.Message.Contains("123 bad")
-            );
-    }
-
-    /// <summary>多対多リレーションの警告がエンティティ数に関係なく 1 回だけ追加されることを検証する（重複解消）</summary>
-    [Fact]
-    public void Generate_ManyToManyWarning_ShouldNotBeDuplicated()
-    {
-        var left = Guid.NewGuid();
-        var right = Guid.NewGuid();
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = left,
-                    TableName = "users",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "user_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                    ],
-                },
-                new Entity
-                {
-                    Id = right,
-                    TableName = "roles",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "role_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-            Relationships =
-            [
-                new Relationship
-                {
-                    Id = Guid.NewGuid(),
-                    SourceEntityId = left,
-                    TargetEntityId = right,
-                    Type = RelationshipType.ManyToMany,
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        // 警告文言はカルチャ依存のため、resx テンプレートのプレースホルダ前プレフィックスで照合する
-        var manyToManyWarningPrefix = Strings.CodeGen_Warning_ManyToManySkipped.Split("{0}")[0];
-        result
-            .Diagnostics.Count(diagnostic => diagnostic.Message.Contains(manyToManyWarningPrefix))
-            .Should()
-            .Be(1);
     }
 
     /// <summary>NULL 許容のバイナリ列が byte[]? として生成されることを検証する</summary>
@@ -4457,13 +3436,6 @@ public class CSharpCodeGenerationServiceTests
             .Contain(
                 "ValueObjectStringRules.ValidateMaxLength(value, 50, DisplayName, ref errors);"
             );
-        // 幅 36 以上なので警告は出ない
-        result
-            .Diagnostics.Should()
-            .NotContain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Warning
-                && diagnostic.Message.Contains("documents.document_id")
-            );
     }
 
     /// <summary>幅 36 未満の GuidKey 列は Warning 診断を 1 件出し、生成は続行して宣言幅どおりの検証を出すことを検証する</summary>
@@ -4474,14 +3446,6 @@ public class CSharpCodeGenerationServiceTests
 
         // Warning であって Error ではない（オプションが図全体へ効くため生成ごと止めない）
         result.HasErrors.Should().BeFalse();
-        var warnings = result
-            .Diagnostics.Where(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Warning
-                && diagnostic.Message.Contains("documents.document_id")
-            )
-            .ToList();
-        warnings.Should().ContainSingle();
-        warnings[0].Message.Should().Contain("20").And.Contain("36");
 
         // 生成は続行し、宣言幅どおり（20）の長さ検証が出る
         var content = result.Files[0].Content;
@@ -4490,25 +3454,6 @@ public class CSharpCodeGenerationServiceTests
             .Should()
             .Contain(
                 "ValueObjectStringRules.ValidateMaxLength(value, 20, DisplayName, ref errors);"
-            );
-    }
-
-    /// <summary>幅 36 ちょうど／幅 max（長さ不明）では警告を出さないことを検証する（境界の固定）</summary>
-    [Theory]
-    // 36 文字ちょうど＝GUID 採番が収まる下限
-    [InlineData("nvarchar(36)")]
-    // max は長さ不明（MaxLength なし）＝長さ検証そのものが出ない
-    [InlineData("nvarchar(max)")]
-    public void Generate_ValueObjects_GuidKey_WideEnoughColumn_ShouldNotWarn(string dataType)
-    {
-        var result = GenerateGuidKeyDiagram(dataType);
-
-        result.HasErrors.Should().BeFalse();
-        result
-            .Diagnostics.Should()
-            .NotContain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Warning
-                && diagnostic.Message.Contains("documents.document_id")
             );
     }
 
@@ -4624,101 +3569,12 @@ public class CSharpCodeGenerationServiceTests
 
         // 競合は Warning（Error ではない）で、生成は成功する
         result.HasErrors.Should().BeFalse();
-        result.Files.Should().ContainSingle();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Warning
-                && diagnostic.Message.Contains("NameValue")
-            );
         // NameValue は 1 定義のみ（共有）
         result
             .Files[0]
             .Content.Split("public sealed partial class NameValue")
             .Length.Should()
             .Be(2);
-    }
-
-    /// <summary>
-    /// 同名列の C# 型（内包値型）そのものが食い違う場合は Error になり生成されないことを検証する
-    /// （FK 統一側の「下地の C# 型が食い違うペアは統一しない」と同じ線引き。畳むと行読み出しの
-    /// InvalidCastException や比較意味の無音変化になるため）
-    /// </summary>
-    [Fact]
-    public void Generate_ValueObjects_SameNameColumnsWithDifferentClrTypes_ShouldError()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "documents",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "document_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "payload",
-                            DataType = "varbinary(max)",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "archives",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "archive_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "payload",
-                            DataType = "nvarchar(20)",
-                            IsNullable = false,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateValueObjects = true,
-            }
-        );
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("PayloadValue")
-                && diagnostic.Message.Contains("documents.payload")
-                && diagnostic.Message.Contains("archives.payload")
-            );
     }
 
     /// <summary>
@@ -4890,59 +3746,6 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("<summary>Confirmed value of AccountId (written by");
     }
 
-    /// <summary>
-    /// 列名 <c>row_state</c> の図が名指しの生成エラーで止まることを検証する
-    /// （Mapper の状態転送 <c>entity.RowState = editModel.RowState;</c> が名前で束縛するため、列プロパティが
-    /// この名前を取ると基底の状態が更新されず、既存行の編集が「変更なし」として静かに保存から抜け落ちる）
-    /// </summary>
-    [Fact]
-    public void Generate_RowStateColumn_ShouldError()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    Id = Guid.NewGuid(),
-                    TableName = "audit_rows",
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "audit_id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Id = Guid.NewGuid(),
-                            Name = "row_state",
-                            DataType = "nvarchar(20)",
-                            IsNullable = true,
-                        },
-                    ],
-                },
-            ],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("RowState")
-            );
-    }
-
     /// <summary>VO 生成テスト用の代表的なダイアグラム（PK/FK 共有・各種型を含む）</summary>
     private static ErDiagram ValueObjectDiagram()
     {
@@ -5057,21 +3860,6 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        // QuickER 版 Repository は単一方言でも契約（Repositories.g.cs）＋方言別実装（Repositories.SqlServer.g.cs）へ分け、
-        // 固定 infra は配布パッケージと対称な Runtime 系ファイル（Runtime.g.cs / Runtime.SqlServer.g.cs）へ分ける
-        result
-            .Files.Select(file => file.FileName)
-            .Should()
-            .BeEquivalentTo([
-                "Runtime.g.cs",
-                "Runtime.SqlServer.g.cs",
-                "ValueObjects.g.cs",
-                "Entities.g.cs",
-                "EditModels.g.cs",
-                "Mappers.g.cs",
-                "Repositories.g.cs",
-                "Repositories.SqlServer.g.cs",
-            ]);
 
         Content(result, "Runtime.g.cs").Should().Contain("namespace Sample.Domain.Runtime;");
         Content(result, "Runtime.SqlServer.g.cs")
@@ -5115,11 +3903,6 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        result
-            .Files.Select(file => file.FileName)
-            .Should()
-            .Contain("Entities.g.cs")
-            .And.Contain("EditModels.g.cs");
         Content(result, "Entities.g.cs").Should().Contain("namespace Shared.Models;");
         Content(result, "EditModels.g.cs").Should().Contain("namespace Shared.Models;");
         // 同一名前空間どうしは using しない（自分自身の名前空間を除外）
@@ -5329,11 +4112,8 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        // EF Core 実装は方言別実装と同じ流儀で Repositories.EntityFrameworkCore.g.cs・{Repository}.EntityFrameworkCore へ出力される
-        result
-            .Files.Should()
-            .Contain(file => file.FileName == "Repositories.EntityFrameworkCore.g.cs");
 
+        // EF Core 実装は方言別実装と同じ流儀で Repositories.EntityFrameworkCore.g.cs・{Repository}.EntityFrameworkCore へ出力される
         var efCore = Content(result, "Repositories.EntityFrameworkCore.g.cs");
         efCore.Should().Contain("namespace Sample.Domain.Repositories.EntityFrameworkCore;");
         efCore.Should().Contain("using Microsoft.EntityFrameworkCore;");
@@ -5489,7 +4269,6 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        result.Files.Should().NotBeEmpty();
 
         var content = string.Concat(result.Files.Select(file => file.Content));
         // 共通契約は出力される
@@ -6130,11 +4909,8 @@ public class CSharpCodeGenerationServiceTests
             .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
             .Content;
 
-        // 付与・Info 診断はいずれも出ない
+        // 付与は出ない（Info 診断が出ないことは決まった行 diag-exclude-unbounded-binary-off-reports-nothing が見る）
         content.Should().NotContain("[UnboundedBinaryColumn]");
-        result
-            .Diagnostics.Should()
-            .NotContain(d => d.Severity == GenerationDiagnosticSeverity.Info);
         // ただし属性クラスの定義は Repository 生成（既定 ON）のため出力される（後続ステージの固定 infra が参照する）
         content.Should().Contain("public sealed class UnboundedBinaryColumnAttribute : Attribute");
     }

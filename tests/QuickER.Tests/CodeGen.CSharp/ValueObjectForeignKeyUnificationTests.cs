@@ -1,8 +1,10 @@
+using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.SqlServer;
+using QuickER.Tests.CodeGen.CSharp.CodegenConfig;
 
 namespace QuickER.Tests.CodeGen.CSharp;
 
@@ -309,56 +311,10 @@ public class ValueObjectForeignKeyUnificationTests
         AllContent(result).Should().Contain("public ShipCustomerIdValue? ShipCustomerId");
     }
 
-    // ===== 診断 =====
+    // ===== 診断（Info の通知・退化ケースのエラーは決まった行 diag-vo-foreign-key-* が持つ） =====
 
-    /// <summary>統一が起きた列は Info 診断で一覧通知される</summary>
-    [Fact(DisplayName = "統一が起きた列は Info 診断で通知される")]
-    public void 統一はInfo診断で通知される()
-    {
-        var result = Generate(MismatchedNameDiagram(), VoOptions());
-
-        var info = result
-            .Diagnostics.Where(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Info
-            )
-            .Select(diagnostic => diagnostic.Message)
-            .ToList();
-
-        info.Should()
-            .ContainSingle(message => message.Contains("orders.ship_customer_id"))
-            .Which.Should()
-            .Contain("CustomerIdValue");
-    }
-
-    /// <summary>列名が一致する図（統一が起きない）では Info 診断を出さない</summary>
-    [Fact(DisplayName = "列名が一致する図では統一の Info 診断を出さない")]
-    public void 統一が起きない図では診断を出さない()
-    {
-        var customerId = Key("customer_id");
-        var customers = new Entity { TableName = "customers", Columns = { customerId } };
-
-        var orderId = Key("order_id");
-        var orderCustomerId = Fk("customer_id");
-        var orders = new Entity { TableName = "orders", Columns = { orderId, orderCustomerId } };
-
-        var diagram = new ErDiagram
-        {
-            Entities = { customers, orders },
-            Relationships = { OneToMany(customers, customerId, orders, orderCustomerId) },
-        };
-
-        var result = Generate(diagram, VoOptions());
-
-        result
-            .Diagnostics.Where(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Info
-            )
-            .Should()
-            .NotContain(diagnostic => diagnostic.Message.Contains("customer_id"));
-    }
-
-    /// <summary>VO 無効の図では統一そのものが働かない（診断も型変更も起きない）</summary>
-    [Fact(DisplayName = "VO 無効の図では統一が働かない（素の型のまま・診断なし）")]
+    /// <summary>VO 無効の図では統一そのものが働かない（型変更は起きない。診断が出ないことは決まった行 diag-vo-foreign-key-value-objects-off-no-info が見る）</summary>
+    [Fact(DisplayName = "VO 無効の図では統一が働かない（素の型のまま）")]
     public void VO無効では統一しない()
     {
         var options = VoOptions() with { GenerateValueObjects = false };
@@ -366,45 +322,6 @@ public class ValueObjectForeignKeyUnificationTests
 
         result.HasErrors.Should().BeFalse();
         AllContent(result).Should().Contain("public int? ShipCustomerId { get; set; }");
-        result
-            .Diagnostics.Should()
-            .NotContain(diagnostic => diagnostic.Message.Contains("ship_customer_id"));
-    }
-
-    /// <summary>退化ケース（型の違う親を複数参照）は生成時診断エラー</summary>
-    [Fact(DisplayName = "退化ケース: 型の違う親を複数参照する子列は生成時エラー")]
-    public void 型の違う親を複数参照する子列はエラー()
-    {
-        var personId = Key("person_id");
-        var people = new Entity { TableName = "people", Columns = { personId } };
-
-        var companyId = Key("company_id");
-        var companies = new Entity { TableName = "companies", Columns = { companyId } };
-
-        var itemId = Key("item_id");
-        var ownerId = Fk("owner_id");
-        var items = new Entity { TableName = "items", Columns = { itemId, ownerId } };
-
-        var diagram = new ErDiagram
-        {
-            Entities = { people, companies, items },
-            Relationships =
-            {
-                OneToMany(people, personId, items, ownerId),
-                OneToMany(companies, companyId, items, ownerId),
-            },
-        };
-
-        var result = Generate(diagram, VoOptions());
-
-        result.HasErrors.Should().BeTrue();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("items.owner_id")
-            );
-        result.Files.Should().BeEmpty();
     }
 
     /// <summary>同じ VO 型へ解決する親を複数参照するのは正常（エラーにしない）</summary>
@@ -436,5 +353,45 @@ public class ValueObjectForeignKeyUnificationTests
 
         result.HasErrors.Should().BeFalse();
         AllContent(result).Should().Contain("public PersonIdValue? OwnerId { get; set; }");
+    }
+
+    /// <summary>
+    /// GuidKey の図（<see cref="CompileDiagrams.StringKey"/>）には GuidKey の値オブジェクトが実際に出て、文字列の主キーを列名の違う外部キーで持つ
+    /// 子の列もその型を共有し、その 2 つの列への部分一致のクエリのメソッドは出ない（完全一致のクエリは生成される）
+    /// </summary>
+    /// <remarks>
+    /// 部分一致の 2 本が警告で飛ばされること（診断）と、この図・オプションでのコンパイルと空振りの検査は、<c>CodegenCaseTests</c> の行
+    /// <c>compile-single-option-guid-key-string-key</c> が持つ。ここは生成テキストの表明だけを持つ。
+    /// </remarks>
+    [Fact]
+    public void GuidKeyCase_EmitsGuidKeyValueObjectSharedByForeignKey()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            CompileDiagrams.StringKey(),
+            CompileDiagrams.GuidKeyOptions()
+        );
+        var content = string.Concat(result.Files.Select(f => f.Content));
+
+        content.Should().Contain(": ValueObjectGuidKeyBase<TenantCodeValue>");
+        content
+            .Should()
+            .Contain(
+                "public TenantCodeValue OwnerTenantCode",
+                "外部キーの列が主キーの型を共有する"
+            );
+
+        foreach (var skipped in new[] { "CodeContains", "OwnerCodeStartsWith" })
+        {
+            HasMethod(content, skipped + "Async").Should().BeFalse(skipped);
+        }
+
+        // 名前は語の境界で照合する（CodeEqualsAsync は OwnerCodeEqualsAsync の部分文字列でもある）
+        foreach (var generated in new[] { "CodeEqualsAsync", "OwnerCodeEqualsAsync" })
+        {
+            HasMethod(content, generated).Should().BeTrue(generated);
+        }
+
+        static bool HasMethod(string text, string name) =>
+            Regex.IsMatch(text, $@"\b{name}\(", RegexOptions.CultureInvariant);
     }
 }

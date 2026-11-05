@@ -4,7 +4,6 @@ using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider.PostgreSql;
-using CodeGenStrings = QuickER.CodeGen.CSharp.Resources.Strings;
 
 namespace QuickER.Tests.CodeGen.CSharp;
 
@@ -21,8 +20,8 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// <c>inet</c>（参照型の <c>IPAddress</c>）は EditModel が入力文字列をそのまま代入する形になりコンパイルできないため、
 /// 配列列と同じ述語（<see cref="CSharpTypeInfo.IsExcludedFromEditModel"/>）で EditModel と値オブジェクトから外し、
 /// 生成時 Info で名指しする。NOT NULL の Entity プロパティは <c>= null!</c>、インメモリのシード値は決定的なアドレスで
-/// 始める（どちらも無いと null 許容の警告が出る）。EditModel・VO・インメモリの組み合わせの実コンパイルで、
-/// エラーも警告も出ないことを固定する。
+/// 始める（どちらも無いと null 許容の警告が出る）。EditModel・VO・インメモリの組み合わせの実コンパイル（エラーも警告も出ない）は、
+/// 決まった行（<c>CodegenCaseTests</c> の <c>compile-postgresql-network-types-*</c>）が固定する。
 /// </para>
 /// </remarks>
 public class PostgreSqlNetworkTypeGenerationTests
@@ -113,45 +112,6 @@ public class PostgreSqlNetworkTypeGenerationTests
             GenerateInMemoryRepositories = inMemory,
         };
 
-    /// <summary>EditModel・VO・インメモリのどの組み合わせでも、エラーも警告も無くコンパイルできることを検証する</summary>
-    [Theory(
-        DisplayName = "inet・cidr・interval を含む図は EditModel・VO・インメモリの有無に関わらずコンパイルできる"
-    )]
-    [InlineData(false, false, false)]
-    [InlineData(true, false, false)]
-    [InlineData(false, true, false)]
-    [InlineData(true, true, false)]
-    [InlineData(true, false, true)]
-    [InlineData(true, true, true)]
-    public void Generate_NetworkTypes_Compiles(bool editModels, bool valueObjects, bool inMemory)
-    {
-        var caseName = $"EditModels={editModels}, ValueObjects={valueObjects}, InMemory={inMemory}";
-        var result = Generate(Options(editModels, valueObjects, inMemory));
-
-        result
-            .HasErrors.Should()
-            .BeFalse(
-                $"「{caseName}」の生成でエラー: "
-                    + string.Join(" / ", result.Diagnostics.Select(d => d.Message))
-            );
-
-        var compilation = GeneratedCodeCompiler.Compile(
-            result,
-            assemblyName: $"QuickER.Generated.NetworkTypes.{Guid.NewGuid():N}"
-        );
-
-        compilation
-            .Success.Should()
-            .BeTrue(
-                $"「{caseName}」の生成コードにコンパイルエラー:{Environment.NewLine}{compilation.DescribeErrors()}"
-            );
-        compilation
-            .Warnings.Should()
-            .BeEmpty(
-                $"「{caseName}」の生成コードに警告:{Environment.NewLine}{compilation.DescribeWarnings()}"
-            );
-    }
-
     /// <summary>
     /// inet の列は EditModel に載らず、cidr・interval の列は載ることと、Entity の型・初期化子を検証する。
     /// </summary>
@@ -170,25 +130,5 @@ public class PostgreSqlNetworkTypeGenerationTests
         content.Should().NotContain("BindingBackupAddr");
         content.Should().Contain("BindingNet");
         content.Should().Contain("BindingLease");
-    }
-
-    /// <summary>EditModel に載らない inet の列を、配列列とは別の Info で名指しすることを検証する</summary>
-    [Fact(DisplayName = "inet の列は生成時 Info で名指しされる")]
-    public void Generate_InetColumns_ReportedAsInfo()
-    {
-        var result = Generate(Options(editModels: true, valueObjects: false, inMemory: false));
-        var prefix = CodeGenStrings.CodeGen_Info_TextInputUnsupportedColumns.Split('{')[0];
-
-        var info = result
-            .Diagnostics.Should()
-            .ContainSingle(d =>
-                d.Severity == GenerationDiagnosticSeverity.Info
-                && d.Message.StartsWith(prefix, StringComparison.Ordinal)
-            )
-            .Which;
-        info.Message.Should().Contain("hosts.addr (inet)");
-        info.Message.Should().Contain("hosts.backup_addr (inet)");
-        info.Message.Should().NotContain("hosts.net");
-        info.Message.Should().NotContain("hosts.lease");
     }
 }

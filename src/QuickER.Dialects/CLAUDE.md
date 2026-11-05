@@ -27,6 +27,8 @@
 
 - `UnsupportedDefinitionExhaustiveTests`：全セル・機能ごとに許される値・宣言の組み合わせの決まりを見て、欠けを止める。
 - `UnsupportedCoverageTests`：「検出する」セルと「なし」以外の扱いのマスを、固定するテストの名前か未実装の一覧のどちらか一方に結び付ける（名前の実在は `tests/` を構文木で照合）。実装との食い違いを止める。
+  - 登録の形は「`{クラス名}.{メソッド名}`」と、表の行の「`{表のクラス名}:{行の Id}`」の 2 つ（例：`SyncPlanExpectationRows:realdb-…`・`CodegenCases:diag-…`）。行の Id は、表のクラスの宣言の中で呼び出しかオブジェクトの生成の第 1 引数の文字列にあれば実在とみなす（末尾の `*` は前方一致）。契約の正本は `UnsupportedCoverage` の XmlDoc。
+  - テストを表の行へ移して元のメソッドを消すときは、登録を行の形へ書き換える。
 - `CapabilityTreatmentParityTests`：能力の値と扱いのマスの一致。
 - `SchemaImportWarningKindMapTests`：取込警告の種別と種類の写像。取込で告知する種類には警告の種別があること、まとめて告げる種別（`IsAggregated`）と扱いの表の「外す＋まとめて告知」が一致すること。
 - 未実装の一覧（`PendingDetections`・`PendingTreatments`・`CapabilityTreatmentParityTests.Pending`）は空のまま保つ。検出しない理由の null は型が止める。

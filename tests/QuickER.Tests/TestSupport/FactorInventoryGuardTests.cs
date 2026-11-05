@@ -34,40 +34,8 @@ public sealed class FactorInventoryGuardTests
         InventoryAxis.Enum<global::QuickER.Provider.CanonicalTypeKind>("CanonicalTypeKind"),
     ];
 
-    /// <summary>コード生成の設定の除外の理由</summary>
-    private const string CodegenOptionReason =
-        "コード生成の設定のエンジン（CodegenConfig）の次元表がまだ無く、設定の真偽は生成フィクスチャごとに固定した組み合わせと個別の生成テスト・GenerationSettingsParityTests（設定とダイアログの往復）が確かめているだけで、水準として網羅を数えていない";
-
     /// <summary>まだどのエンジンの次元表にも載っていない項目（軸・項目・受け持つエンジン・区切り・理由）</summary>
-    private static IReadOnlyList<InventoryExclusion> Exclusions { get; } =
-    [
-        .. new[]
-        {
-            "GenerateEditModels",
-            "GenerateMappers",
-            "GenerateRepositories",
-            "GenerateRemoteContracts",
-            "GenerateRemoteServices",
-            "GenerateEfCoreRepositories",
-            "GenerateInMemoryRepositories",
-            "GenerateSyncSupport",
-            "IncludeDataAnnotations",
-            "IncludeJsonIgnoreOnParentNavigation",
-            "GenerateValueObjects",
-            "UseGuidKeyForStringPrimaryKey",
-            "SplitFilesByCategory",
-            "LayeredOutput",
-            "UseRuntimePackages",
-            "GenerateApiDocs",
-            "ExcludeUnboundedBinaryColumns",
-        }.Select(member => new InventoryExclusion(
-            "CodeGenerationOptions",
-            member,
-            EngineIds.CodegenConfig,
-            "P3",
-            CodegenOptionReason
-        )),
-    ];
+    private static IReadOnlyList<InventoryExclusion> Exclusions { get; } = [];
 
     [Fact(
         DisplayName = "[棚卸し] QuickER.Tests が検査する軸は、軸の割り当ての表の QuickER.Tests の軸とちょうど一致する"

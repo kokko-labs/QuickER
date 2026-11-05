@@ -3,8 +3,6 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
-using QuickER.CodeGen.CSharp.Resources;
-using QuickER.Dialects;
 using QuickER.Model;
 using Xunit;
 
@@ -16,9 +14,10 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// <remarks>
 /// 固定するのは、主キーでない採番列へのマーカー属性 <c>[IdentityColumn]</c> の付与と
 /// <c>EntitySaveMetadata</c> の書き込み除外、EF Core Fluent の <c>ValueGeneratedOnAddOrUpdate()</c>、
-/// EditModel / Mapper の扱い、そして生成時診断（除外した列の Info・主キーの採番列の Warning）。
-/// 主キーの採番列は生成 Repository がキーを書くため印を付けず、生成は止めずに警告する。
+/// EditModel / Mapper の扱い。主キーの採番列は生成 Repository がキーを書くため印を付けない。
 /// いずれも「採番列がある図／無い図」の両アームを名指しする。
+/// 生成時診断（除外した列の Info・主キーの採番列の Warning・ミラーの Warning と、それぞれが出ない側）は、
+/// 決まった行（<c>CodegenCaseTests</c> の <c>diag-identity-*</c>）が持つ。
 /// </remarks>
 public class IdentityColumnGenerationTests
 {
@@ -85,22 +84,15 @@ public class IdentityColumnGenerationTests
     private static string SingleFile(CodeGenerationResult result) =>
         result.Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal)).Content;
 
-    private static bool HasPrimaryKeyWarning(CodeGenerationResult result) =>
-        result.Diagnostics.Any(d =>
-            d.Severity == GenerationDiagnosticSeverity.Warning
-            && d.Message
-                == string.Format(
-                    Strings.CodeGen_Warning_IdentityPrimaryKeyColumn,
-                    "items",
-                    "item_id"
-                )
-        );
-
-    /// <summary>主キーでない採番列にだけマーカー属性が付き、書き込み集合から外れることを検証する</summary>
-    [Fact(DisplayName = "採番列: [IdentityColumn] 付与・書き込み集合から除外（SELECT は残す）")]
+    /// <summary>
+    /// 主キーでない採番列にだけマーカー属性が付き、書き込み集合から外れることを検証する（主キーの採番列には印を付けない）
+    /// </summary>
+    [Fact(
+        DisplayName = "採番列: [IdentityColumn] 付与・書き込み集合から除外（SELECT は残す）。主キーの採番列には付けない"
+    )]
     public void Generate_IdentityColumn_MarksAttributeAndExcludesFromWrite()
     {
-        var result = Generate(Diagram(identity: true));
+        var result = Generate(Diagram(identity: true, identityPrimaryKey: true));
 
         result.HasErrors.Should().BeFalse();
         var content = SingleFile(result);
@@ -112,7 +104,10 @@ public class IdentityColumnGenerationTests
         Regex
             .Matches(content, @"\[IdentityColumn\]")
             .Count.Should()
-            .Be(1, "付与対象は採番列 seq の 1 列だけ");
+            .Be(
+                1,
+                "付与対象は主キーでない採番列 seq の 1 列だけ（主キーの採番列 item_id には付けない）"
+            );
         // EntitySaveMetadata が採番列を検出し、INSERT / UPDATE の書き込み集合から除外する
         content
             .Should()
@@ -129,156 +124,6 @@ public class IdentityColumnGenerationTests
         // 固定 infra が参照するため属性型の定義は常に出る
         content.Should().Contain("public sealed class IdentityColumnAttribute : Attribute");
         Regex.Matches(content, @"\[IdentityColumn\]").Count.Should().Be(0);
-    }
-
-    /// <summary>採番列を除外したことが Info 診断で名指しされることを検証する</summary>
-    [Fact(DisplayName = "採番列: 除外した列を Info 診断が名指しする")]
-    public void Generate_IdentityColumn_ReportsInfoDiagnostic()
-    {
-        var result = Generate(Diagram(identity: true));
-
-        result
-            .Diagnostics.Should()
-            .ContainSingle(d =>
-                d.Severity == GenerationDiagnosticSeverity.Info
-                && d.Message.StartsWith(
-                    Strings.CodeGen_Info_IdentityColumns.Replace("{0}", string.Empty),
-                    StringComparison.Ordinal
-                )
-                && d.Message.Contains("items.seq", StringComparison.Ordinal)
-            );
-    }
-
-    /// <summary>採番列が無い図では除外の Info 診断が出ないことを検証する</summary>
-    [Fact(DisplayName = "採番列なし: 除外の Info 診断は出ない")]
-    public void Generate_NoIdentityColumn_DoesNotReportInfoDiagnostic()
-    {
-        Generate(Diagram(identity: false))
-            .Diagnostics.Should()
-            .NotContain(d => d.Message.Contains("items.seq"), "採番列が無ければ何も通知しない");
-    }
-
-    /// <summary>
-    /// 主キーの採番列は印を付けずに書き込み対象のまま残し、生成を止めずに警告することを検証する
-    /// </summary>
-    /// <remarks>
-    /// 生成 Repository はキーをアプリ側で決めて書くため、主キーを書き込みから外すと INSERT がキーを送らなくなる。
-    /// 指定した値を拒む DB では挿入が失敗するので、生成時に名指しする（計算列の主キーと違い Error にしない）。
-    /// </remarks>
-    [Fact(DisplayName = "主キーの採番列は印を付けず、生成を止めずに Warning で名指しする")]
-    public void Generate_IdentityPrimaryKey_WarnsWithoutMarking()
-    {
-        var result = Generate(Diagram(identity: false, identityPrimaryKey: true));
-
-        result.HasErrors.Should().BeFalse("警告であって生成は止めない");
-        HasPrimaryKeyWarning(result).Should().BeTrue();
-        Regex.Matches(SingleFile(result), @"\[IdentityColumn\]").Count.Should().Be(0);
-        result
-            .Diagnostics.Should()
-            .NotContain(
-                d => d.Message.Contains("items.item_id", StringComparison.Ordinal),
-                "主キーは除外しないので Info には載らない"
-            );
-    }
-
-    /// <summary>主キーが採番列でなければ Warning は出ないことを検証する（両アームの対照）</summary>
-    [Fact(DisplayName = "主キーが採番列でなければ Warning は出ない")]
-    public void Generate_NonIdentityPrimaryKey_DoesNotWarn()
-    {
-        HasPrimaryKeyWarning(Generate(Diagram(identity: true))).Should().BeFalse();
-    }
-
-    /// <summary>
-    /// Repository 契約を生成しない構成では、主キーの採番列の Warning を出さないことを検証する
-    /// </summary>
-    /// <remarks>キーを書き込む生成コードが無いので、警告の前提（キーをアプリが決めて書く）が効かない。</remarks>
-    [Fact(DisplayName = "Repository 契約を生成しない構成では、主キーの採番列の Warning は出ない")]
-    public void Generate_IdentityPrimaryKey_WithoutRepositoryContract_DoesNotWarn()
-    {
-        var result = new CSharpCodeGenerationService().Generate(
-            Diagram(identity: false, identityPrimaryKey: true),
-            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
-        );
-
-        result.HasErrors.Should().BeFalse();
-        HasPrimaryKeyWarning(result).Should().BeFalse();
-    }
-
-    /// <summary>マルチターゲットの生成で NOT NULL の採番列を名指しする警告</summary>
-    private static bool HasMirrorWarning(CodeGenerationResult result) =>
-        result.Diagnostics.Any(d =>
-            d.Severity == GenerationDiagnosticSeverity.Warning
-            && d.Message.StartsWith(
-                Strings.CodeGen_Warning_NotNullIdentityColumns.Split("{0}")[0],
-                StringComparison.Ordinal
-            )
-            && d.Message.Contains("(items.seq)", StringComparison.Ordinal)
-        );
-
-    private static CodeGenerationResult GenerateRepositories(
-        ErDiagram diagram,
-        params string[] dialects
-    ) =>
-        new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = true,
-                RepositoryDialects = dialects,
-            }
-        );
-
-    /// <summary>
-    /// 採番列を持てない方言（SQLite）を含むマルチターゲットで、NOT NULL の採番列を Warning で名指しすることを検証する
-    /// </summary>
-    /// <remarks>
-    /// 生成コードはその列を INSERT から外し、ミラーの DDL は普通の列を作るので、ミラーへの行の追加が NOT NULL で落ちる。
-    /// </remarks>
-    [Fact(
-        DisplayName = "採番列を持てない方言を含むマルチターゲットでは、NOT NULL の採番列を Warning で名指しする"
-    )]
-    public void Generate_MultiTargetWithSqlite_NotNullIdentityColumn_Warns()
-    {
-        var result = GenerateRepositories(
-            Diagram(identity: true),
-            DialectNames.SqlServer,
-            DialectNames.Sqlite
-        );
-
-        result.HasErrors.Should().BeFalse();
-        HasMirrorWarning(result).Should().BeTrue();
-    }
-
-    /// <summary>
-    /// 単一方言でも、採番列を持てない方言（SQLite）なら NOT NULL の採番列を Warning で名指しすることを検証する
-    /// </summary>
-    /// <remarks>生成コードはその列を INSERT から外し、SQLite の DDL は普通の列を作るので、ミラーと同じく落ちる。</remarks>
-    [Fact(DisplayName = "単一方言の SQLite でも、NOT NULL の採番列を Warning で名指しする")]
-    public void Generate_SingleSqlite_NotNullIdentityColumn_Warns()
-    {
-        var result = GenerateRepositories(Diagram(identity: true), DialectNames.Sqlite);
-
-        result.HasErrors.Should().BeFalse();
-        HasMirrorWarning(result).Should().BeTrue();
-    }
-
-    /// <summary>持てる方言だけ・NULL 許容の採番列では、警告を出さないことを検証する（対照）</summary>
-    [Fact(DisplayName = "持てる方言だけ・NULL 許容の採番列では、ミラーの Warning は出ない")]
-    public void Generate_MirrorWarning_IsNotEmittedWithoutMirrorOrForNullableColumn()
-    {
-        HasMirrorWarning(GenerateRepositories(Diagram(identity: true), DialectNames.SqlServer))
-            .Should()
-            .BeFalse("持てる方言だけ");
-
-        var nullable = Diagram(identity: true);
-        nullable.Entities[0].Columns.Single(c => c.Name == "seq").IsNullable = true;
-
-        HasMirrorWarning(
-                GenerateRepositories(nullable, DialectNames.SqlServer, DialectNames.Sqlite)
-            )
-            .Should()
-            .BeFalse("NULL 許容の列はミラーへ NULL のまま書ける");
     }
 
     /// <summary>EF Core の Fluent 構成が主キーでない採番列を DB 生成値として宣言することを検証する</summary>

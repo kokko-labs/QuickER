@@ -12,18 +12,18 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// 計算列・生成列（<see cref="Column.IsComputed"/>）の生成結果を検証するテストクラス。
 /// </summary>
 /// <remarks>
-/// 固定するのは 4 点:
+/// 固定するのは 3 点:
 /// マーカー属性 <c>[ComputedColumn]</c> の付与、<c>EntitySaveMetadata</c> の書き込み除外、
-/// EF Core Fluent の <c>ValueGeneratedOnAddOrUpdate()</c>、そして生成時診断
-/// （主キーが計算列ならエラー・除外した列の Info 通知）。
+/// EF Core Fluent の <c>ValueGeneratedOnAddOrUpdate()</c>。
 /// いずれも「計算列がある図／無い図」の両アームを名指しする（ドリフト検知を承認にしないため）。
+/// 生成時診断（主キーが計算列ならエラー・除外した列の Info・NOT NULL の計算列の Warning と、それぞれが出ない側）は、
+/// 決まった行（<c>CodegenCaseTests</c> の <c>diag-computed-*</c>）が持つ。
 /// </remarks>
 public class ComputedColumnGenerationTests
 {
     /// <summary>計算列 1 本を持つ最小ダイアグラム</summary>
     /// <param name="computed">true なら <c>total</c> 列を計算列にする</param>
-    /// <param name="computedIsPrimaryKey">true なら計算列を主キーにする（診断エラーの検証用）</param>
-    private static ErDiagram Diagram(bool computed, bool computedIsPrimaryKey = false) =>
+    private static ErDiagram Diagram(bool computed) =>
         new()
         {
             Entities =
@@ -39,7 +39,7 @@ public class ComputedColumnGenerationTests
                             Id = Guid.NewGuid(),
                             Name = "item_id",
                             DataType = "int",
-                            IsPrimaryKey = !computedIsPrimaryKey,
+                            IsPrimaryKey = true,
                             IsNullable = false,
                         },
                         new Column
@@ -56,7 +56,6 @@ public class ComputedColumnGenerationTests
                             DataType = "decimal(21,2)",
                             IsNullable = true,
                             IsComputed = computed,
-                            IsPrimaryKey = computedIsPrimaryKey,
                         },
                     ],
                 },
@@ -119,54 +118,6 @@ public class ComputedColumnGenerationTests
         content.Should().Contain("public sealed class ComputedColumnAttribute : Attribute");
         // 付与はゼロ
         Regex.Matches(content, @"\[ComputedColumn\]").Count.Should().Be(0);
-    }
-
-    /// <summary>計算列を除外したことが Info 診断で名指しされることを検証する</summary>
-    [Fact(DisplayName = "計算列: 除外した列を Info 診断が名指しする")]
-    public void Generate_ComputedColumn_ReportsInfoDiagnostic()
-    {
-        var result = Generate(Diagram(computed: true));
-
-        result
-            .Diagnostics.Should()
-            .ContainSingle(d =>
-                d.Severity == GenerationDiagnosticSeverity.Info && d.Message.Contains("items.total")
-            );
-    }
-
-    /// <summary>計算列が無い図では除外の Info 診断が出ないことを検証する</summary>
-    [Fact(DisplayName = "計算列なし: 除外の Info 診断は出ない")]
-    public void Generate_NoComputedColumn_DoesNotReportInfoDiagnostic()
-    {
-        var result = Generate(Diagram(computed: false));
-
-        result
-            .Diagnostics.Should()
-            .NotContain(d => d.Message.Contains("items.total"), "計算列が無ければ何も通知しない");
-    }
-
-    /// <summary>主キー列が計算列の図は生成時エラーになることを検証する</summary>
-    [Fact(DisplayName = "主キーが計算列の図は生成時エラーになる")]
-    public void Generate_ComputedPrimaryKey_FailsWithError()
-    {
-        var result = Generate(Diagram(computed: true, computedIsPrimaryKey: true));
-
-        result.HasErrors.Should().BeTrue();
-        result
-            .Diagnostics.Should()
-            .Contain(d =>
-                d.Severity == GenerationDiagnosticSeverity.Error
-                && d.Message.Contains("items")
-                && d.Message.Contains("total")
-            );
-        result.Files.Should().BeEmpty("エラー検出時はファイルを 1 つも出さない");
-    }
-
-    /// <summary>主キーでない計算列は生成時エラーにならないことを検証する（両アームの対照）</summary>
-    [Fact(DisplayName = "主キーでない計算列は生成時エラーにならない")]
-    public void Generate_NonPrimaryKeyComputedColumn_Succeeds()
-    {
-        Generate(Diagram(computed: true)).HasErrors.Should().BeFalse();
     }
 
     /// <summary>EF Core の Fluent 構成が計算列を DB 生成値として宣言することを検証する</summary>
@@ -263,7 +214,7 @@ public class ComputedColumnGenerationTests
     /// <remarks>
     /// EditModel の確定値は値型なら常に <c>Nullable&lt;T&gt;</c> なので、素の代入は CS0266 になる
     /// （行バージョン列・除外バイナリ列はいずれも <c>byte[]</c>＝参照型でこの経路を踏まない）。
-    /// 実コンパイル水準の網は <c>GeneratedCodeCompilationTests</c> の共通図が持つ。
+    /// 実コンパイル水準の網は <c>CodegenCaseTests</c> の行 <c>compile-*</c> の共通図（<c>CompileDiagrams.FullCoverage</c>）が持つ。
     /// </remarks>
     [Fact(DisplayName = "計算列: NOT NULL の値型は Mapper が .Value で取り出す")]
     public void Generate_NotNullValueTypeComputedColumn_MapperUnwrapsNullable()
@@ -285,87 +236,5 @@ public class ComputedColumnGenerationTests
             .Should()
             .Contain("if (editModel.PeriodStart is not null)")
             .And.Contain("entity.PeriodStart = editModel.PeriodStart.Value;");
-    }
-
-    /// <summary>警告の検証用に、方言・同期支援だけを差し替えて生成する</summary>
-    private static CodeGenerationResult GenerateFor(
-        ErDiagram diagram,
-        string[] dialects,
-        bool syncSupport = false
-    ) =>
-        new CSharpCodeGenerationService().Generate(
-            diagram,
-            new CodeGenerationOptions
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = true,
-                RepositoryDialects = dialects,
-                GenerateSyncSupport = syncSupport,
-            }
-        );
-
-    /// <summary>警告本文の識別に使う語（文面の正本は resx）</summary>
-    private const string NotNullComputedWarningMarker = "temporal_items.period_start";
-
-    private static bool HasNotNullComputedWarning(CodeGenerationResult result) =>
-        result.Diagnostics.Any(d =>
-            d.Severity == GenerationDiagnosticSeverity.Warning
-            && d.Message.Contains(NotNullComputedWarningMarker, StringComparison.Ordinal)
-        );
-
-    /// <summary>
-    /// マルチターゲット構成では NOT NULL の計算列が Warning で名指しされることを検証する。
-    /// </summary>
-    /// <remarks>
-    /// ミラー側（式を持たない方言の DB）には普通の列として作られるため、送られない列の NOT NULL 制約で
-    /// 行の追加が必ず落ちる。Error でなく Warning なのは、ミラー側を既定値や同じ式で整えてある構成が
-    /// 正当に存在し、図からはそれを判定できないため。
-    /// </remarks>
-    [Fact(DisplayName = "マルチターゲット: NOT NULL の計算列を Warning が名指しする")]
-    public void Generate_MultiTarget_NotNullComputedColumn_Warns()
-    {
-        var result = GenerateFor(NotNullComputedDiagram(), ["sqlserver", "sqlite"]);
-
-        result.HasErrors.Should().BeFalse("警告であって生成は止めない");
-        HasNotNullComputedWarning(result).Should().BeTrue();
-    }
-
-    /// <summary>同期支援を有効にした構成でも同じ Warning が出ることを検証する</summary>
-    [Fact(DisplayName = "同期支援: NOT NULL の計算列を Warning が名指しする")]
-    public void Generate_SyncSupport_NotNullComputedColumn_Warns()
-    {
-        var result = GenerateFor(
-            NotNullComputedDiagram(),
-            ["sqlserver", "sqlite"],
-            syncSupport: true
-        );
-
-        result.HasErrors.Should().BeFalse("警告であって生成は止めない");
-        HasNotNullComputedWarning(result).Should().BeTrue();
-    }
-
-    /// <summary>単一方言・同期なしの構成では Warning が出ないことを検証する</summary>
-    /// <remarks>式を持つ DB しか相手にしないため、予告すべき乖離が実在しない。</remarks>
-    [Fact(DisplayName = "単一方言: NOT NULL の計算列でも Warning は出ない")]
-    public void Generate_SingleDialect_NotNullComputedColumn_DoesNotWarn()
-    {
-        HasNotNullComputedWarning(GenerateFor(NotNullComputedDiagram(), ["sqlserver"]))
-            .Should()
-            .BeFalse();
-    }
-
-    /// <summary>NULL 許容の計算列だけならマルチターゲットでも Warning が出ないことを検証する</summary>
-    /// <remarks>ミラー側は NULL のまま書けるため＝これが利用者へ案内する逃げ道そのもの。</remarks>
-    [Fact(DisplayName = "マルチターゲット: NULL 許容の計算列だけなら Warning は出ない")]
-    public void Generate_MultiTarget_NullableComputedColumn_DoesNotWarn()
-    {
-        GenerateFor(Diagram(computed: true), ["sqlserver", "sqlite"])
-            .Diagnostics.Should()
-            .NotContain(
-                d =>
-                    d.Severity == GenerationDiagnosticSeverity.Warning
-                    && d.Message.Contains("items.total", StringComparison.Ordinal),
-                "NULL 許容の計算列はミラー側へ NULL のまま書けるため予告しない"
-            );
     }
 }

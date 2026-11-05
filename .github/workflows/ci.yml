@@ -6,7 +6,7 @@
 # - integration-tests-linux（ubuntu-latest）: 切り出した QuickER.Tests.Integration（net10.0）を実 DB
 #   コンテナで実行する＝実 DB 検証の唯一の CI 経路。厳格モード（QUICKER_REQUIRE_DOCKER=1）により
 #   コンテナ起動失敗はスキップでなく失敗になる（壊れた Docker 構成がスキップ緑に化けない）
-# - 生成コードの Roslyn コンパイル検証（GeneratedCodeCompilationTests）は windows ジョブで常時実行される
+# - 生成コードの Roslyn コンパイル検証（CodegenCaseTests の行 compile-*）は windows ジョブで常時実行される
 name: CI
 
 on:

@@ -13,7 +13,7 @@ C# コード生成ダイアログの設定とオプションの往復の規則�
 - ゲートを外すと、以前の構成で付けたチェックが画面に出ていないまま効き続ける
   - リモート対応と同期支援は、生成時エラー（契約が無い／実効方言が sqlserver + sqlite の 2 つでない）で止まる
   - 無制限バイナリ列の除外は、生成物が静かに変わる。`CSharpGenerationModelBuilder` の EditModel 必須判定（`isExcludedUnboundedBinary`）が `GenerateRepositories` のゲート無しにこのオプションを読むため、QuickER 版 Repository を生成しない構成でも、NOT NULL の無制限バイナリ列が必須入力から外れる
-- ガード：`CSharpGenerationDialogViewModelTests` の `RemoteOptions_AreDroppedWhenHidden_ButKeptInViewModel` / `SyncSupport_IsDroppedWhenHidden_ButKeptInViewModel` / `ExcludeUnboundedBinary_IsDroppedWhenHidden_ButKeptInViewModel`。mutation 実証済み
+- ガード：`CodegenCaseTests` の行 `gui-gate-remote-dropped-no-db-access` / `gui-gate-sync-dropped-single-dialect` / `gui-gate-exclude-binary-dropped-no-db-access`。mutation 実証済み
 
 ## 設定の全キーの往復
 

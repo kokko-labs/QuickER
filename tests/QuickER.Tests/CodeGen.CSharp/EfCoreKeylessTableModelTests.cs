@@ -1,11 +1,8 @@
-using System.Reflection;
 using AwesomeAssertions;
-using Microsoft.EntityFrameworkCore;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.SqlServer;
-using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.CodeGen.CSharp;
 
@@ -24,6 +21,11 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// <para>
 /// FK の子として参加する形（親エンティティが keyless へのコレクションナビゲーションを持つ）が
 /// 自動発見の混入経路なので、図は「PK あり親 → PK なし子」のリレーション入りで組む。
+/// </para>
+/// <para>
+/// Warning の名指しと、実モデル（<c>DbContext.Model</c>）で除外した型が無く親にナビゲーションが無いことは、
+/// <c>CodegenCaseTests</c> の行 <c>probe-efcore-model-keyless-table-excluded</c>（探針 EfCoreModel。<c>CodegenCases.Execution.cs</c>）へ移した。
+/// ここには生成テキストの表明を残す。
 /// </para>
 /// </remarks>
 public class EfCoreKeylessTableModelTests
@@ -93,13 +95,6 @@ public class EfCoreKeylessTableModelTests
             .HasErrors.Should()
             .BeFalse(string.Join(" / ", result.Diagnostics.Select(d => d.Message)));
 
-        // Warning が除外したテーブルを名指しする
-        result
-            .Diagnostics.Should()
-            .Contain(d =>
-                d.Severity == GenerationDiagnosticSeverity.Warning && d.Message.Contains("logs")
-            );
-
         var code = string.Join("\n", result.Files.Select(f => f.Content));
 
         // DbSet・Fluent 構成は出ず、Ignore の明示だけが出る
@@ -109,37 +104,5 @@ public class EfCoreKeylessTableModelTests
 
         // Repository 側と同じスキップ線＝keyless の EF Core Repository・DI 登録も出ない
         code.Should().NotContain("EfCoreLogRepository");
-
-        var assembly = GeneratedCodeCompiler.CompileAndLoad(
-            result,
-            $"QuickER.EfCoreKeyless.Tests.{Guid.NewGuid():N}"
-        );
-
-        using var context = CreateContext(assembly);
-
-        // Model へのアクセスでモデル構築＋検証が走る（keyless が混入していればここで例外）
-        var model = context.Model;
-
-        model.FindEntityType("Test.EfCoreKeyless.LogEntity").Should().BeNull();
-
-        // 親側のコレクションナビゲーション（自動発見の混入経路）もモデルへ紛れ込まない
-        var customer = model.FindEntityType("Test.EfCoreKeyless.CustomerEntity")!;
-        customer.GetNavigations().Should().BeEmpty();
-    }
-
-    /// <summary>生成アセンブリから QuickErDbContext を Sqlite 構成で生成する（実接続はしない）</summary>
-    private static DbContext CreateContext(Assembly assembly)
-    {
-        var contextType =
-            assembly.GetTypes().SingleOrDefault(type => type.Name == "QuickErDbContext")
-            ?? throw new InvalidOperationException("QuickErDbContext が生成されていない");
-
-        var builder = (DbContextOptionsBuilder)
-            Activator.CreateInstance(
-                typeof(DbContextOptionsBuilder<>).MakeGenericType(contextType)
-            )!;
-        builder.UseSqlite("Data Source=:memory:").IgnoreServiceProviderCacheLimit();
-
-        return (DbContext)Activator.CreateInstance(contextType, builder.Options)!;
     }
 }

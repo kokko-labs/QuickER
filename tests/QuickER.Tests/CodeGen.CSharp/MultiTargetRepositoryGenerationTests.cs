@@ -153,44 +153,6 @@ public sealed class MultiTargetRepositoryGenerationTests
         options.ResolveRepositoryDialects().Should().Equal("sqlite", "sqlserver");
     }
 
-    [Fact(DisplayName = "大小違いの方言指定は正規綴り指定とバイト同一の出力になる")]
-    public void Generate_CaseInsensitiveDialectSpelling_MatchesCanonicalOutput()
-    {
-        var diagram = BuildDiagram();
-        var types = SqliteCSharpTypeMapper.ResolveColumnTypes(diagram);
-        var byDialect = new Dictionary<string, IReadOnlyDictionary<Guid, CSharpTypeInfo>>
-        {
-            ["sqlite"] = types,
-        };
-
-        CodeGenerationOptions BuildOptions(string spelling) =>
-            new()
-            {
-                RootNamespace = "Sample.Domain",
-                GenerateRepositories = true,
-                RepositoryDialects = [spelling],
-            };
-
-        var canonical = new CSharpCodeGenerationService().Generate(
-            diagram,
-            types,
-            byDialect,
-            BuildOptions("sqlite")
-        );
-        var mixedCase = new CSharpCodeGenerationService().Generate(
-            diagram,
-            types,
-            byDialect,
-            BuildOptions("SQLite")
-        );
-
-        canonical.HasErrors.Should().BeFalse();
-        mixedCase
-            .Files.Select(f => f.Content)
-            .Should()
-            .Equal(canonical.Files.Select(f => f.Content));
-    }
-
     [Fact(DisplayName = "空要素・空白は除去される")]
     public void EffectiveDialects_TrimsAndDropsBlanks()
     {
@@ -381,34 +343,8 @@ public sealed class MultiTargetRepositoryGenerationTests
             );
     }
 
-    [Fact(DisplayName = "方言間で C# 型が一致する（可搬型）なら診断エラーは出ない")]
-    public void Generate_MatchingTypesAcrossDialects_NoMismatchError()
-    {
-        var diagram = BuildDiagram();
-        var primary = SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram);
-        var byDialect = new Dictionary<string, IReadOnlyDictionary<Guid, CSharpTypeInfo>>(
-            StringComparer.OrdinalIgnoreCase
-        )
-        {
-            ["sqlserver"] = primary,
-            ["sqlite"] = SqliteCSharpTypeMapper.ResolveColumnTypes(diagram),
-        };
-        var options = new CodeGenerationOptions
-        {
-            RootNamespace = "Sample.Domain",
-            GenerateRepositories = true,
-            RepositoryDialects = ["sqlserver", "sqlite"],
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            primary,
-            byDialect,
-            options
-        );
-
-        result.HasErrors.Should().BeFalse();
-    }
+    // 方言間で C# 型が一致する（可搬型）なら診断エラーは出ない：決まった行 diag-multitarget-matching-types-no-mismatch-error
+    // （型辞書を食い違わせる Generate_TypeMismatchBetweenDialects_ReturnsErrorDiagnostic は、改ざんした辞書を直接渡すので入口を通せず残す）
 
     // ---- [SqlColumnType] 補完（図が非 sqlserver でも sqlserver 辞書から補完） ----
 
@@ -562,11 +498,7 @@ public sealed class MultiTargetRepositoryGenerationTests
         content.Should().Contain("namespace Data.Repos.SqlServer");
         content.Should().Contain("using MyApp;");
 
-        var compilation = GeneratedCodeCompiler.Compile(
-            result,
-            $"MultiDialectOutsideRoot_{valueObjects}"
-        );
-        compilation.Success.Should().BeTrue(compilation.DescribeErrors());
+        // 連結ファイルがコンパイルできることは決まった行 compile-multitarget-nonsplit-repository-namespace-outside-root（-vo）
     }
 
     [Fact(
@@ -651,13 +583,8 @@ public sealed class MultiTargetRepositoryGenerationTests
     {
         var files = GenerateMultiTarget(split: true).Files.ToDictionary(f => f.FileName);
 
-        // 方言別ファイルが生成される（スキーマ依存物＝Repositories 系・固定 infra＝Runtime 系）
-        files.Keys.Should().Contain("Repositories.g.cs");
-        files.Keys.Should().Contain("Repositories.SqlServer.g.cs");
-        files.Keys.Should().Contain("Repositories.Sqlite.g.cs");
-        files.Keys.Should().Contain("Runtime.g.cs");
-        files.Keys.Should().Contain("Runtime.SqlServer.g.cs");
-        files.Keys.Should().Contain("Runtime.Sqlite.g.cs");
+        // 方言別ファイルが生成される（スキーマ依存物＝Repositories 系・固定 infra＝Runtime 系）ことは
+        // 決まった行 files-multitarget-split-per-dialect-files
 
         var contract = files["Repositories.g.cs"].Content;
         var sqlServer = files["Repositories.SqlServer.g.cs"].Content;
@@ -702,164 +629,7 @@ public sealed class MultiTargetRepositoryGenerationTests
         runtimeSqlite.Should().NotContain("public partial interface IRepository<TEntity, TKey>");
     }
 
-    [Fact(
-        DisplayName = "マルチ方言＋EF Core は診断エラー（QuickER マルチターゲットと EF Core は排他）"
-    )]
-    public void MultiDialect_WithEfCore_ReturnsErrorDiagnostic()
-    {
-        var diagram = BuildDiagram();
-        var primary = SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram);
-        var byDialect = new Dictionary<string, IReadOnlyDictionary<Guid, CSharpTypeInfo>>(
-            StringComparer.OrdinalIgnoreCase
-        )
-        {
-            ["sqlserver"] = primary,
-            ["sqlite"] = SqliteCSharpTypeMapper.ResolveColumnTypes(diagram),
-        };
-        var options = new CodeGenerationOptions
-        {
-            RootNamespace = "Sample.Domain",
-            GenerateRepositories = true,
-            RepositoryDialects = ["sqlserver", "sqlite"],
-            GenerateEfCoreRepositories = true,
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            primary,
-            byDialect,
-            options
-        );
-
-        result.HasErrors.Should().BeTrue();
-        // 「EF Core」を含む何らかのエラーではなく当該ガードの文言そのものを名指しする
-        result
-            .Diagnostics.Should()
-            .ContainSingle(d =>
-                d.Severity == GenerationDiagnosticSeverity.Error
-                && d.Message == Strings.CodeGen_Error_MultiTargetEfCoreExclusive
-            );
-    }
-
-    /// <summary>
-    /// QuickER 版 Repository を生成しない構成なら、複数方言を指定していても EF Core と併用できる（排他ガードの成功側）。
-    /// </summary>
-    /// <remarks>
-    /// 排他の理由は「マルチ方言レイアウトでは契約 namespace に EntitySaveMetadata 等が置かれず EF Core が
-    /// 解決不能になる」こと。そのレイアウトは <see cref="CodeGenerationOptions.GenerateRepositories"/> が
-    /// 立って初めて出るため、ガードは 3 条件の AND になっている。条件が緩むと EF Core 単独構成が
-    /// 使われない方言指定だけで生成できなくなる（CLI は図の方言名を焼き込むため実際に踏み得る）。
-    /// </remarks>
-    [Fact(DisplayName = "Repository 非生成なら複数方言指定＋EF Core は排他ガードに掛からない")]
-    public void MultiDialect_WithEfCore_WithoutRepositories_ReturnsNoExclusiveError()
-    {
-        var diagram = BuildDiagram();
-        var primary = SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram);
-        var byDialect = new Dictionary<string, IReadOnlyDictionary<Guid, CSharpTypeInfo>>(
-            StringComparer.OrdinalIgnoreCase
-        )
-        {
-            ["sqlserver"] = primary,
-            ["sqlite"] = SqliteCSharpTypeMapper.ResolveColumnTypes(diagram),
-        };
-        var options = new CodeGenerationOptions
-        {
-            RootNamespace = "Sample.Domain",
-            GenerateRepositories = false,
-            RepositoryDialects = ["sqlserver", "sqlite"],
-            GenerateEfCoreRepositories = true,
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            primary,
-            byDialect,
-            options
-        );
-
-        result.HasErrors.Should().BeFalse();
-        result.Files.Should().NotBeEmpty();
-        result
-            .Diagnostics.Should()
-            .NotContain(d => d.Message == Strings.CodeGen_Error_MultiTargetEfCoreExclusive);
-    }
-
-    [Theory(
-        DisplayName = "マルチ方言出力（両方言同梱・keyed 利用）がエラー・警告 0 でコンパイルできる"
-    )]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void MultiDialect_CompilesWithKeyedResolution(bool split)
-    {
-        var result = GenerateMultiTarget(split);
-
-        // keyed DI で 2 接続を登録し、[FromKeyedServices] で方言別実装を解決する利用側コード断片を同梱してコンパイルする。
-        // これにより契約の単一共有型・方言別実装の keyed 解決が実際に型検査を通ることを検証する。
-        var usage =
-            @"// <auto-generated />
-#nullable enable
-using Microsoft.Extensions.DependencyInjection;
-using Sample.Domain.Repositories;
-using Sample.Domain.Repositories.SqlServer;
-using Sample.Domain.Repositories.Sqlite;
-
-namespace Sample.Domain.Usage;
-
-// internal: 公開型だと XmlDoc 診断（DocumentationMode.Diagnose）の CS1591 が
-// このテスト自作の利用例に出る（生成コードの XmlDoc 検証とは無関係のノイズ）
-internal static class MultiTargetUsage
-{
-    public static ICustomerRepository Wire(IServiceCollection services)
-    {
-        // 非 keyed の単独登録（方言別名）
-        services.AddGeneratedSqlServerRepositories(""Server=.;Database=a;Trusted_Connection=True;"");
-
-        // keyed 登録（同一契約 ICustomerRepository を方言別に登録）
-        services.AddGeneratedSqlServerRepositories(""server"", ""Server=.;Database=b;Trusted_Connection=True;"");
-        services.AddGeneratedSqliteRepositories(""local"", ""Data Source=local.db"");
-
-        var provider = services.BuildServiceProvider();
-        var server = provider.GetRequiredKeyedService<ICustomerRepository>(""server"");
-        var local = provider.GetRequiredKeyedService<ICustomerRepository>(""local"");
-        return server;
-    }
-
-    // [FromKeyedServices] で方言別の同一契約を注入解決できる
-    public sealed class Consumer(
-        [FromKeyedServices(""server"")] ICustomerRepository server,
-        [FromKeyedServices(""local"")] ICustomerRepository local
-    )
-    {
-        public ICustomerRepository Server { get; } = server;
-        public ICustomerRepository Local { get; } = local;
-    }
-}
-";
-
-        var withUsage = new CodeGenerationResult
-        {
-            Files =
-            [
-                .. result.Files,
-                new GeneratedFile { FileName = "MultiTargetUsage.g.cs", Content = usage },
-            ],
-            Diagnostics = result.Diagnostics,
-        };
-
-        var compilation = GeneratedCodeCompiler.Compile(
-            withUsage,
-            assemblyName: $"QuickER.MultiTarget.Tests.{Guid.NewGuid():N}"
-        );
-
-        compilation
-            .Success.Should()
-            .BeTrue(
-                $"マルチ方言（split={split}）＋keyed 利用のコンパイルにエラー:{Environment.NewLine}{compilation.DescribeErrors()}"
-            );
-        compilation
-            .Warnings.Should()
-            .BeEmpty(
-                $"マルチ方言（split={split}）の生成コードに警告:{Environment.NewLine}{compilation.DescribeWarnings()}"
-            );
-    }
+    // マルチ方言＋EF Core の排他エラー・Repository 非生成のときの非発動・keyed 利用を同梱したコンパイルは、決まった行（CodegenCaseTests）
+    // diag-multitarget-efcore-is-exclusive / diag-multitarget-efcore-without-repositories-is-not-exclusive /
+    // compile-multitarget-nonsplit-keyed-resolution・compile-multitarget-split-keyed-resolution
 }

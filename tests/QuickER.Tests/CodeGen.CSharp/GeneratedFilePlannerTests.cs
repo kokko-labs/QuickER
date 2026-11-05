@@ -213,41 +213,6 @@ public class GeneratedFilePlannerTests
     }
 
     /// <summary>
-    /// 分割＋リモートサービス生成時、RemoteServer.g.cs が Repositories.g.cs の直後（EfCore / Runtime より前）に
-    /// 並ぶことを検証する（リモート面の契約の隣に置く。プレビュー表示・出力順の両方がこの計画順に従う）。
-    /// </summary>
-    [Fact]
-    public void Plan_Split_RemoteServer_ComesRightAfterRepositories()
-    {
-        var options = new CodeGenerationOptions
-        {
-            RootNamespace = "Acme.App",
-            SplitFilesByCategory = true,
-            GenerateRepositories = true,
-            GenerateRemoteServices = true,
-        };
-
-        var plan = GeneratedFilePlanner.Plan(options);
-
-        // RemoteServer は Repository / Http バケットを含む最後のスキーマ依存スペック（HTTP クライアント）の直後に並ぶ
-        // （Runtime 系の固定 infra ファイルはさらに後ろ。サーバー固定部の Runtime.AspNetCore.g.cs もその一員）
-        plan.Select(spec => spec.FileName)
-            .Should()
-            .Equal(
-                "Entities.g.cs",
-                "EditModels.g.cs",
-                "Mappers.g.cs",
-                "Repositories.g.cs",
-                "Repositories.SqlServer.g.cs",
-                "Repositories.Http.g.cs",
-                "RemoteServer.g.cs",
-                "Runtime.g.cs",
-                "Runtime.SqlServer.g.cs",
-                "Runtime.AspNetCore.g.cs"
-            );
-    }
-
-    /// <summary>
     /// 分割＋リモートサービス生成時、HTTP クライアントが Repositories.Http.g.cs（Http バケット単独・
     /// 契約と同一名前空間・固定 infra なし）へ分かれ、契約ファイルには Http バケットが同居しないことを検証する。
     /// </summary>

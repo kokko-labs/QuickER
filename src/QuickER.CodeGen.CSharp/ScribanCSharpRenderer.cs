@@ -232,7 +232,7 @@ internal sealed class ScribanCSharpRenderer
         // (3) EntityBaseCore 自身（GetCascadeNavigations＝グラフ操作が辿る子方向ナビの走査）の 3 箇所で参照される。
         // (3) はエンティティ生成時に常に出力されるため、リレーション・契約の有無に依らず、
         // エンティティを 1 つでも生成するなら属性定義が必要（リレーションなし・契約なしの最小構成で
-        // コンパイル不能になる不具合の修正。GuidKeyValueObjectExecutionTests が回帰を検知する）。
+        // コンパイル不能になる不具合の修正。CodegenCaseTests の行 probe-guidkey-create-generates-unique-guid が回帰を検知する）。
         var emitNavRefAttr = model.EntityClasses.Count > 0 || options.GeneratesRepositoryContract;
 
         // QuickER 版 Repository の生成方言に応じた原始変数群。sqlserver では識別子クォート [ ]・

@@ -21,7 +21,7 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// </para>
 /// <para>
 /// 同じ親・子・列ペアの外部キーが 2 本ある図は、同じ定義の重複で、役割名でも区別できない。両方の制約名を名指しする
-/// 専用のエラーで止める（片方を消せば直る）。
+/// 専用のエラーで止める（片方を消せば直る）。このエラーは決まった行（<c>CodegenCaseTests</c> の <c>diag-duplicate-foreign-key-*</c>）が固定する。
 /// </para>
 /// </remarks>
 public sealed class NavigationNameCollisionTests
@@ -76,43 +76,6 @@ public sealed class NavigationNameCollisionTests
         // Model へのアクセスで EF Core のモデル構築と検証が走る（Fluent の HasOne / WithOne の組が成り立つこと）
         using var context = CreateContext(assembly);
         context.Model.FindEntityType("Sample.Domain.CustomerEntity").Should().NotBeNull();
-    }
-
-    [Theory(
-        DisplayName = "外部キーの重複: 同じ親・子・列ペアの外部キーが 2 本ある図は、両方の制約名と列を名指しする専用のエラーで止まる"
-    )]
-    [InlineData("FK_first", "FK_second", "FK_first", "FK_second")]
-    [InlineData(null, null, "FK_profiles_customers", "FK_profiles_customers_customer_id")]
-    public void DuplicateForeignKeys_AreRefusedNamingBoth(
-        string? firstName,
-        string? secondName,
-        string firstExpected,
-        string secondExpected
-    )
-    {
-        var (customers, profiles) = Tables();
-        var diagram = Diagram(customers, profiles);
-        diagram.Relationships.Add(
-            Reference(customers, profiles, "customer_id", RelationshipType.OneToMany, firstName)
-        );
-        diagram.Relationships.Add(
-            Reference(customers, profiles, "customer_id", RelationshipType.OneToMany, secondName)
-        );
-
-        var result = Generate(diagram);
-
-        result
-            .Diagnostics.Where(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-            )
-            .Should()
-            .ContainSingle(Describe(result))
-            .Which.Message.Should()
-            .Contain($"'{firstExpected}'")
-            .And.Contain($"'{secondExpected}'")
-            .And.Contain("'profiles'.'customer_id'")
-            .And.Contain("'customers'.'id'");
-        result.Files.Should().BeEmpty();
     }
 
     /// <summary>生成する（QuickER 版 Repository・EF Core・インメモリ・値オブジェクト・EditModel・Mapper・リモートサービス）</summary>
