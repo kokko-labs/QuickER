@@ -35,7 +35,7 @@ csharpier format .                                       # 整形（グローバ
 - `tests/QuickER.Tests.Integration/` は 3 サブフォルダ：`Dialects/`（アプリ自身の DB 面サービスの実 DB 検証・`*IntegrationTests`）・`GeneratedRuntime/`（生成コードの実行時挙動・原則 `*RuntimeTests` だが `*ParityTests` なども同居する。`RuntimeTestMatrixTests` はこのフォルダを名前空間で全数走査するので接尾辞は問わない）・`GeneratedFixture/`（インメモリ系ランタイムテスト）。共有フィクスチャ（*ContainerFixture / SqliteTempDatabase）はプロジェクト直下
   - **生成フィクスチャ（.g.cs・*FixtureDefinition・manual partial）は `tests/QuickER.Tests/GeneratedFixture/` の実体を Compile リンクで二重コンパイル**する（実体パスは不動・再生成は QuickER.Tests 側。manual partial は .g.cs と同一アセンブリ必須）
   - SQL Server / PostgreSQL / MySQL / Oracle は Testcontainers の実コンテナを使い、**Docker 不在時は自動スキップ**、**厳格モード `QUICKER_REQUIRE_DOCKER=1` ではスキップせず失敗**する（壊れた Docker 構成がスキップ緑に化けない。CI の ubuntu ジョブと Docker 稼働の開発機で設定する）。この開発機では Docker 稼働＝全件実行・スキップ 0 が正常値
-  - SQLite 系は実ファイル DB（SqliteTempDatabase）を使うため Docker 不要＝両ジョブとも常時実行される
+  - SQLite 系は実ファイル DB（SqliteTempDatabase）を使うため Docker 不要＝両ジョブとも常時実行される。一時 DB は `%TEMP%\quicker-it\<実行>\<db>` に置き（TEMP 直下に同じ前置きの名前を並べると 8.3 の短い名前がぶつかって作成が遅くなる）、片付けは 3 段で行う（`SqliteTempRoot`）：その場（Dispose）・実行の終わり（全プールを解放して実行の親フォルダを消す）・次の実行の始め（ロックのファイルを開ける＝終わった実行の残りを消す。走っている実行には触らない）
 - Docker 必須テストには `[Trait("RequiresDocker", "true")]` が付き、`--filter "RequiresDocker=true"`（または `!=`）で選別できる（例外：`Integration/Dialects/SqlServerSchemaSyncIntegrationTests` は localhost の実 SQL Server 接続＝接続不可時スキップ）
 - 生成コードの Roslyn コンパイル検証（`CodegenCaseTests` の行 `compile-*`）は Docker 不要で常時実行される（単発オプションの空振りの検査は `src/QuickER.CodeGen.CSharp/CLAUDE.md`）
 - **生成コードのランタイムテストは「共通基底 1＋バックエンド派生 N＋派生固有 Fact」の形に揃え**、存在しない面は条件スキップでなくサブクラス階層で分ける（→ `tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`）
