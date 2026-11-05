@@ -37,7 +37,7 @@ csharpier format .                                       # 整形（グローバ
   - SQL Server / PostgreSQL / MySQL / Oracle は Testcontainers の実コンテナを使い、**Docker 不在時は自動スキップ**、**厳格モード `QUICKER_REQUIRE_DOCKER=1` ではスキップせず失敗**する（壊れた Docker 構成がスキップ緑に化けない。CI の ubuntu ジョブと Docker 稼働の開発機で設定する）。この開発機では Docker 稼働＝全件実行・スキップ 0 が正常値
   - SQLite 系は実ファイル DB（SqliteTempDatabase）を使うため Docker 不要＝両ジョブとも常時実行される
 - Docker 必須テストには `[Trait("RequiresDocker", "true")]` が付き、`--filter "RequiresDocker=true"`（または `!=`）で選別できる（例外：`Integration/Dialects/SqlServerSchemaSyncIntegrationTests` は localhost の実 SQL Server 接続＝接続不可時スキップ）
-- 生成コードの Roslyn コンパイル検証（GeneratedCodeCompilationTests）は Docker 不要で常時実行される（単発オプションの空振りの検査は `src/QuickER.CodeGen.CSharp/CLAUDE.md`）
+- 生成コードの Roslyn コンパイル検証（`CodegenCaseTests` の行 `compile-*`）は Docker 不要で常時実行される（単発オプションの空振りの検査は `src/QuickER.CodeGen.CSharp/CLAUDE.md`）
 - **生成コードのランタイムテストは「共通基底 1＋バックエンド派生 N＋派生固有 Fact」の形に揃え**、存在しない面は条件スキップでなくサブクラス階層で分ける（→ `tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`）
 - **テストのエンジン**（総当たり・モデルベース・実装先どうしの一致・網羅の計数・夜間の深い実行）の共通の枠組みは `tests/QuickER.Tests/TestSupport/Engines/`（→ `tests/QuickER.Tests/TestSupport/CLAUDE.md`）。同期計画の網と行は → `tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`、実装先どうしの一致と同期のモデルは → `tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`
 - **src と tests の C# ソースに、タブ（U+0009）・FF（U+000C）・NEL（U+0085）・U+2028・U+2029 の実文字を置かない**（リテラル・コメントの中でもエスケープ表記で書く。ツール越しの書き込みで実文字に化けると、コンパイルが通ったまま値だけが変わる。`SourceInvisibleCharacterGuardTests`）
@@ -203,25 +203,25 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 ### C# 生成
 
 - **CodeGen.CSharp は DB 非依存（型解決はプロバイダ側・`CSharpTypeInfo` の辞書を入力に受ける）**：Provider が CodeGen.CSharp を参照する契約が崩れる。→ `src/QuickER.CodeGen.CSharp/CLAUDE.md`「DB 非依存」
-- **生成の単発オプションのケースは「既定へ戻した比較用」と照合して空振りを検出する**：オプションが出力を変えない空振りが見えなくなる。ガード：`GeneratedCodeCompilationTests`・`OutputDiffers_IsFalseForTheSameOptions`。→ `src/QuickER.CodeGen.CSharp/CLAUDE.md`「生成の単発オプションのケース」
+- **生成の単発オプションのケースは「既定へ戻した比較用」と照合して空振りを検出する**：オプションが出力を変えない空振りが見えなくなる。ガード：`CodegenCaseTests` の行 `compile-single-option-*`（関係 OptionEffect。対照の「同じオプションどうしは同じ」も同じ関係が見る）。→ `src/QuickER.CodeGen.CSharp/CLAUDE.md`「生成の単発オプションのケース」
 - **DB が値を作る列（rowversion・計算列・採番列）は別々のマーカーで書き込みから外し、共用しない**：共用すると版の解決が計算列を版と誤認し、主キーの採番列を外すとキー無しの INSERT になる。ガード：`StoreGeneratedCapabilityGenerationTests`・`ComputedColumnGenerationTests`・`IdentityColumnGenerationTests`。→ `src/QuickER.CodeGen.CSharp/CLAUDE.md`「DB が値を作る列の書き込み除外」
 - **rowversion の書き込み除外は `dialect_assigns_store_generated` ＋ `repositories` のときだけ**：方言を持たないスコープでフラグを単独で読むと意味が崩れる。ガード：`StoreGeneratedCapabilityGenerationTests`。→ 同上「行バージョン列（store-generated）」
 - **計算列は `[ComputedColumn]`・採番列は `[IdentityColumn]` で方言に依らず外し、DDL・同期の注記は単一の正本から出す**：注記が方言名の分岐に散る。ガード：`ComputedColumnCommentTests`・`IdentityColumnCommentTests`。→ 同上「計算列・生成列」「DB が値を拒む採番列」
 - **マルチターゲット × rowversion は型統合・NULL 許容化・トークン不刻印で成り立つ**：版ガードがリバースで黙って消える。ガード：`MultiTargetRowVersionRuntimeTests`・`MultiTargetRowVersionSqliteRuntimeTests`。→ 同上「マルチターゲット × rowversion」
-- **FK 列は親側列の値オブジェクト型を共有し、列名→VO 型の独自解決を下流に作らない**：EF Core のモデル検証が FK と PK の CLR 型不一致で落ちる。ガード：`ValueObjectForeignKeyUnificationTests`・`ValueObjectForeignKeyEfCoreModelTests`。→ 同上「FK 列の値オブジェクト型統一」
+- **FK 列は親側列の値オブジェクト型を共有し、列名→VO 型の独自解決を下流に作らない**：EF Core のモデル検証が FK と PK の CLR 型不一致で落ちる。ガード：`ValueObjectForeignKeyUnificationTests`・`CodegenCaseTests` の行 `probe-efcore-model-vo-foreign-key-name-mismatch`。→ 同上「FK 列の値オブジェクト型統一」
 - **`[Column]` は常時付与で、生成ランタイムの列判定は `[Column]` を許可リストとして読む**：手書きプロパティが実在しない SQL 列に化ける。ガード：`ExtensionShimAcceptanceTests`。→ 同上「Column 属性は常時付与」
 - **同義の型表記は verbatim 併記（`NativeType`）で保存する**：リバースで型表記が変わり、次の同期が全列へ `ALTER COLUMN` を出す。ガード：`CSharpReverseVerbatimTypeTests`・`PortableFixtureDialectIndependenceTests`。→ 同上「同義の型表記の保存（verbatim 併記）」
-- **層別フォルダ出力は層判定の正本 `LayerOf`・名前空間の出所の記録・固定 infra の public 化で成り立つ**：層分けの ON / OFF で生成テキストが食い違う。ガード：`LayeredOutputTests`・`GeneratedCodeCompilationTests`・`CSharpCodeGenerationServiceTests`。→ 同上「層別フォルダ出力と出力先」
+- **層別フォルダ出力は層判定の正本 `LayerOf`・名前空間の出所の記録・固定 infra の public 化で成り立つ**：層分けの ON / OFF で生成テキストが食い違う。ガード：`LayeredOutputTests`・`CodegenCaseTests` の行 `compile-layered-*`・`CSharpCodeGenerationServiceTests`。→ 同上「層別フォルダ出力と出力先」
 - **`CodeSubdirectory` は名前空間に追随せず、合流点は `GeneratedFilePlanner.Plan` の出口 1 箇所**：非分割で素通りするか、手書き partial が `.Generated.` 名前空間になる。ガード：`CodeSubdirectoryTests`。→ 同上「出力先のサブフォルダ」
 - **ランタイム配布は 7 パッケージ（`QuickER.Runtime` / `.SqlServer` / `.Sqlite` / `.EntityFrameworkCore` / `.InMemory` / `.AspNetCore` / `.Sync`）と分割生成が 1:1 対称**：パッケージの型集合と Runtime 系ファイルがずれる。ガード：`SplitRuntimeSymmetryTests`。→ 同上「ランタイム配布」
 - **リモート契約生成は契約が無い構成を生成時エラーで止める**：診断ゼロで何も生成されない。ガード：`RemoteContractRuntimeTests`。→ 同上「リモート契約生成」
 - **QuickER 版 Repository と EF Core は排他の単独出力で、ADO 依存が方言間・EF Core 単独に漏れない**：ガード：`MultiTargetRepositoryRuntimeTests`・`MultiTargetRepositorySqliteKeyedResolutionTests`。→ 同上「DB アクセスの排他と単独出力」
 - **生成 `.g.cs` のヘッダー（版・内容ハッシュ）は生成サービスの 1 箇所で刻み、正規化は `GeneratedContentHash` だけが持つ**：生成直後のファイルが「手編集」と判定される。ガード：`GeneratedContentHashTests`・`GeneratedHeaderStampTests`・`GenerateOverwriteGuardTests`。→ 同上「生成コードのヘッダー」
 - **新しい行の EditModel は値オブジェクトでない列の空文字列・空バイト配列を未入力として読む**：空欄の新しい行が必須チェックを素通りする。ガード：`EditModelBlankInputTests`・`EditModelScenarioTests`。→ 同上「新しい行の空の値」
-- **Mapper の 4 分岐は値型のとき `.Value` で取り出す（参照型へ広げない）**：CS0266 でコンパイルできない。ガード：`GeneratedCodeCompilationTests`・`ComputedColumnGenerationTests`。→ 同上「Mapper の 4 分岐の Value」
+- **Mapper の 4 分岐は値型のとき `.Value` で取り出す（参照型へ広げない）**：CS0266 でコンパイルできない。ガード：`CodegenCaseTests` の行 `compile-*`（共通図の値型の計算列・採番列）・`ComputedColumnGenerationTests`。→ 同上「Mapper の 4 分岐の Value」
 - **配列列と inet の列は EditModel・Mapper・VO に載せない（`IsExcludedFromEditModel`）**：既定の構成で CS0029、VO の等値が参照比較になる。ガード：`PostgreSqlArrayColumnGenerationTests`・`PostgreSqlNetworkTypeGenerationTests`。→ 同上「配列列と inet の列」
 - **インメモリのシード値は列の型でなく役割から作る**：一意制約が重複したストアができ、更新が必ず失敗する。ガード：`InMemorySampleSeedExecutionTests`。→ 同上「インメモリのシード値」
-- **GuidKey 値オブジェクトの長さ検証は素通しした MaxLength が駆動し、36 未満は Warning（Error にしない）**：検証がスタックから消える。ガード：`GuidKeyValueObjectExecutionTests`。→ 同上「GuidKey 値オブジェクトの長さ検証」
+- **GuidKey 値オブジェクトの長さ検証は素通しした MaxLength が駆動し、36 未満は Warning（Error にしない）**：検証がスタックから消える。ガード：`CodegenCaseTests` の行 `probe-guidkey-create-generates-unique-guid`。→ 同上「GuidKey 値オブジェクトの長さ検証」
 - **生成型名の名簿は実際の出力と一致し続ける**：DTO の型名がコンパイルできない出力になる。ガード：`GeneratedTypeNameDriftTests`。→ 同上「型名の名簿」
 - **テーブル・列から決まる型名のぶつかりは `GeneratedTypeNames.Analyze` が名指しで止める（型名は Ordinal・ルート名だけ大小無視）**：ガード：`GeneratedTypeNameCollisionTests`。→ 同上「型名のぶつかりを生成時に止める」
 - **メンバー名の大文字小文字だけの違いは構成に依らず生成時エラー**：JSON の設定が大小無視のため実行時に型の情報が組めない。ガード：`GeneratedMemberNameCaseTests`・`GeneratedFixedMemberDriftTests`。→ 同上「エンティティのメンバー名の大文字小文字」
@@ -238,7 +238,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 
 ### 生成ダイアログ
 
-- **生成ダイアログで画面に出ていないオプションは設定にも結果にも持ち越さない（画面の値は保持）**：無制限バイナリ除外が静かに効き続け、リモート・同期が生成時エラーで止まる。ガード：`CSharpGenerationDialogViewModelTests`。→ `src/QuickER.CodeGen.UI/CLAUDE.md`「画面に出ていないオプション」
+- **生成ダイアログで画面に出ていないオプションは設定にも結果にも持ち越さない（画面の値は保持）**：無制限バイナリ除外が静かに効き続け、リモート・同期が生成時エラーで止まる。ガード：`CodegenCaseTests` の行 `gui-gate-remote-dropped-no-db-access` / `gui-gate-sync-dropped-single-dialect` / `gui-gate-exclude-binary-dropped-no-db-access`。→ `src/QuickER.CodeGen.UI/CLAUDE.md`「画面に出ていないオプション」
 - **設定の全キーは生成オプションとダイアログの往復で値を落とさない**：キーを足して配線を 1 か所忘れる。ガード：`GenerationSettingsParityTests`。→ 同上「設定の全キーの往復」
 
 ### 生成コードのランタイム（共通）
@@ -324,7 +324,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 
 ### 双方向同期
 
-- **同期の生成条件と診断**：実効方言が sqlserver+sqlite のちょうど 2 つ・`GenerateRepositories`・同期可能テーブル 1 件以上でなければ生成時エラー、固定長文字列の主キーは警告（空白詰めでキーが置き換わり収束しない）。ガード：`SyncSupportGenerationTests`・`SyncFixedLengthKeyWarningTests`。→ `src/QuickER.Runtime.Sync/CLAUDE.md`「生成の条件と診断」
+- **同期の生成条件と診断**：実効方言が sqlserver+sqlite のちょうど 2 つ・`GenerateRepositories`・同期可能テーブル 1 件以上でなければ生成時エラー、固定長文字列の主キーは警告（空白詰めでキーが置き換わり収束しない）。ガード：`SyncSupportGenerationTests`・`CodegenCaseTests` の行 `diag-sync-fixed-length-key-warning-nchar` / `diag-sync-fixed-length-key-warning-char` / `diag-sync-fixed-length-key-variable-nvarchar-no-warning` / `diag-sync-fixed-length-key-variable-varchar-no-warning` / `diag-sync-fixed-length-key-without-sync-support-no-warning` / `diag-sync-fixed-length-non-key-column-no-warning`。→ `src/QuickER.Runtime.Sync/CLAUDE.md`「生成の条件と診断」
 - **アンカーは保存せずミラー版の MAX から導き、ミラー版を書くのはダウンロードだけ**：アップロードの版をミラーへ書くと順序付きの流れを追い越して恒久的に取りこぼす。差分 SQL の `@anchor` は `CAST(... AS binary(8))`。→ `src/QuickER.Runtime.Sync/CLAUDE.md`「アンカーは保存せず導出する」
 - **受理記録（ack）は行単位でアンカーではなく、original は max(ミラー版, ack 版)**：ack 優先固定は掃除漏れで偽競合へ戻る。settle は「補助記録が先・エントリが後」、掃除はコミット後。→ `src/QuickER.Runtime.Sync/CLAUDE.md`「受理記録（ack）はアンカーではない」
 - **ローカル変更はデコレータで journal-first に記録し、グラフ保存はカスケード全体を記録する**：フック方式は直接 CRUD を素通しし、ルートだけ見ると子データが両側から消える。エンジン自身の書き込みは `SyncSession.Suppress()`。ガード：`SyncRuntimeTestsBase.RecordedIds_FollowTheOrderOfTheRecords`。→ `src/QuickER.Runtime.Sync/CLAUDE.md`「デコレータ方式と journal-first」
@@ -343,7 +343,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **blob は書いた列だけを送り、挿入の経路は全列・上書きで送らなかった列はコピー待ちへ**：記録の列だけだと復活行が空の blob で作られ、他者の blob が恒久的に降りない。ガード：`SyncVoRuntimeTests`・`SyncModelRuntimeTests.EmptyBlobWithoutConflict_IsStillAViolation`。→ `src/QuickER.Runtime.Sync/CLAUDE.md`「送る列」
 - **洗い替えは per-table / per-batch でクラッシュ安全にし、範囲外の参照・blob の損失・未送信は何も消す前に断る**：既定 `LastWriteWins` でないと版なし子の図で構造的に失敗し、受理記録を全消しの前に消すと偽の競合になる。ガード：`SyncConstructionExclusionTests.ExcludeFromSync_ReferringLocalRows_RefuseRefresh`・`SyncRefreshBenchmarkRuntimeTests`。→ `src/QuickER.Runtime.Sync/CLAUDE.md`「洗い替え」
 - **版なしテーブルは後勝ちモードのときだけ全量スキャンで同期し、除外はラン単位と構築時の 2 層**：Versioned は版なしに触れない宣言を保つ。ガード：`SyncConstructionExclusionTests`。→ `src/QuickER.Runtime.Sync/CLAUDE.md`「版なしテーブルと後勝ちモード」
-- **キーのテキストは日時の Kind を落とし、decimal を指数表記にせず、文字列キーのページングは列の型へ CAST する**：Kind つき・指数表記・nvarchar 比較でそれぞれ行が一致しない・毎回止まる・読み飛ばす。ガード：`SyncKeyTextRuntimeTests`・`SyncDecimalKeyExecutionTests`。→ `src/QuickER.Runtime.Sync/CLAUDE.md`「キーのテキスト」
+- **キーのテキストは日時の Kind を落とし、decimal を指数表記にせず、文字列キーのページングは列の型へ CAST する**：Kind つき・指数表記・nvarchar 比較でそれぞれ行が一致しない・毎回止まる・読み飛ばす。ガード：`SyncKeyTextRuntimeTests`・`CodegenCaseTests` の行 `probe-sync-key-text-decimal-key`。→ `src/QuickER.Runtime.Sync/CLAUDE.md`「キーのテキスト」
 - **SyncAsync が自分から変えたローカル行は `LocalRowChanges` に残し、例外のときも Data で運ぶ**：載せないと捨てた・読み直した行を利用者が知る手段が無い。→ `src/QuickER.Runtime.Sync/CLAUDE.md`「実行が変えた行の一覧」
 - **差分ソースは `HasMore` で継続を決め、HTTP は差分ソースの薄い remoting で上限は呼び出し側の値**：勝手な ceiling は実行中のトランザクションの行を読み飛ばす。ダウンロードの進捗ガードがハングを止める。ガード：`SyncHttpRuntimeTests`・`SyncSqlServerHttpRuntimeTests`。→ `src/QuickER.Runtime.Sync/CLAUDE.md`「差分ソースと HTTP」
 - **デコレータの差し替えは元の登録の作り方を保つ**：factory 登録だけを受けると非 keyed の `AddGeneratedSyncEngine(null)` が必ず投げる。ガード：`SyncConfigMatrixRuntimeTests`。→ `src/QuickER.Runtime.Sync/CLAUDE.md`「生成と DI」

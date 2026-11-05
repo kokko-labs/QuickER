@@ -504,4 +504,4 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
 
 - GuidKey 値オブジェクトの長さ検証は、素通しした MaxLength が駆動する。GuidKey のとき MaxLength を無条件 null 化すると、「長さ検証は VO が担うから Entity へ `[MaxLength]` を出さない」という内部契約が破れ、検証がスタック全体から消える（宣言幅超過が INSERT の切り詰めエラーで初めて露見する）。`_01_ValueObjects.scriban` の既存 emission（`vo.max_length` 駆動）がそのまま効く。
 - 列幅が正の値かつ 36 未満は生成時 Warning（`CodeGen_Warning_GuidKeyColumnShorterThanGuid`）で名指しする（引数なし `Create()` の採番 36 文字が必ず検証例外になるため。生成は続行）。Error にしない：`UseGuidKeyForStringPrimaryKey` は図の全 string PK に効くグローバル指定で、GUID を意図しない短い string PK（コード表等）が混在する図で機能ごと使えなくなる。手動キー供給の運用は正当。
-- ガード：`GuidKeyValueObjectExecutionTests` と生成テスト 3 本。mutation 実証済み。
+- ガード：`CodegenCaseTests` の行 `probe-guidkey-create-generates-unique-guid` と生成テスト 3 本。mutation 実証済み。

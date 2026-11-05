@@ -8,128 +8,23 @@ using QuickER.Provider.SqlServer;
 namespace QuickER.Tests.CodeGen.CSharp;
 
 /// <summary>
-/// 分割生成の固定 infra ファイル（<c>Runtime*.g.cs</c>）が、配布 NuGet パッケージ
-/// （<see cref="RuntimePackageSourceRenderer"/> の出力）と同じ守備範囲になっていることを検証するテストクラス。
+/// 分割生成の固定 infra ファイル（<c>Runtime*.g.cs</c>）とスキーマ依存物のファイルが分離していることを検証するテストクラス。
 /// </summary>
 /// <remarks>
 /// <para>
-/// 「分割ファイル ⇔ パッケージ」の対応は 1:1（<c>Runtime.g.cs</c>⇔Core・<c>Runtime.SqlServer.g.cs</c>⇔SqlServer・
-/// <c>Runtime.Sqlite.g.cs</c>⇔Sqlite・<c>Runtime.EntityFrameworkCore.g.cs</c>⇔EF Core・<c>Runtime.InMemory.g.cs</c>⇔InMemory・
-/// <c>Runtime.AspNetCore.g.cs</c>⇔AspNetCore）。バイト一致は原理的に成り立たない
-/// （名前空間・可視性 internal/public・パッケージ側のヘッダコメントが異なる）ため、<b>トップレベル型宣言の集合</b>で
-/// 構造一致を固定する。境界がずれれば「片方にしかない型」として必ず落ちる。
+/// 残している検証対象は、固定 infra とスキーマ依存物の型集合が排他であること・同期の固定エンジンと per-entity の分離（本文の文字列）。
 /// </para>
 /// <para>
-/// あわせて、スキーマ依存物の <c>Repositories*.g.cs</c> が「パッケージ参照モードの on/off で本体不変」
-/// （差は using だけ）であることも固定する。これが崩れると「固定 infra は Runtime 系・スキーマ依存物は
-/// Repositories 系」という分離が壊れている。
+/// 「分割ファイル ⇔ パッケージ」の 1:1 対応（<c>Runtime*.g.cs</c> のトップレベル型宣言の集合が、対応するパッケージ用ソース
+/// （<see cref="RuntimePackageSourceRenderer"/> の出力）の型の集合と一致）は、<c>CodegenCaseTests</c> の行
+/// <c>relation-runtime-type-set-*</c> と網羅の配列の分割・インラインの行の関係 RuntimeTypeSet へ、スキーマ依存物が
+/// 「パッケージ参照モードの on/off で本体不変」であることは、<c>CodegenCaseTests</c> の行
+/// <c>relation-runtime-packages-split-multi-dialect</c> と網羅の配列の分割・パッケージ参照の行の関係 RuntimePackages
+/// （<c>Judges/Relations.cs</c>）へ移した。
 /// </para>
 /// </remarks>
 public class SplitRuntimeSymmetryTests
 {
-    private static readonly RuntimePackageSourceRenderer PackageRenderer = new();
-
-    /// <summary>
-    /// 分割の <c>Runtime.g.cs</c> / <c>Runtime.SqlServer.g.cs</c> / <c>Runtime.Sqlite.g.cs</c> が、
-    /// コア／方言エンジンパッケージと同じトップレベル型集合になることを検証する。
-    /// </summary>
-    [Fact]
-    public void SplitRuntimeFiles_ShouldDeclareSameTypesAsRuntimePackages()
-    {
-        var files = GenerateSplit(MultiDialectOptions());
-
-        DeclaredTypes(files["Runtime.g.cs"])
-            .Should()
-            .BeEquivalentTo(
-                DeclaredTypes(PackageRenderer.RenderCore()),
-                "Runtime.g.cs はコアパッケージ QuickER.Runtime と同じ守備範囲でなければならない"
-            );
-
-        DeclaredTypes(files["Runtime.SqlServer.g.cs"])
-            .Should()
-            .BeEquivalentTo(
-                DeclaredTypes(PackageRenderer.RenderSqlServer()),
-                "Runtime.SqlServer.g.cs は QuickER.Runtime.SqlServer と同じ守備範囲でなければならない"
-            );
-
-        DeclaredTypes(files["Runtime.Sqlite.g.cs"])
-            .Should()
-            .BeEquivalentTo(
-                DeclaredTypes(PackageRenderer.RenderSqlite()),
-                "Runtime.Sqlite.g.cs は QuickER.Runtime.Sqlite と同じ守備範囲でなければならない"
-            );
-    }
-
-    /// <summary>
-    /// 分割の <c>Runtime.EntityFrameworkCore.g.cs</c> が EF Core パッケージと同じトップレベル型集合になることを検証する
-    /// （マルチ方言と EF Core は排他のため単独構成で確認する）。
-    /// </summary>
-    [Fact]
-    public void SplitEfCoreRuntimeFile_ShouldDeclareSameTypesAsEfCorePackage()
-    {
-        var files = GenerateSplit(EfCoreOnlyOptions());
-
-        DeclaredTypes(files["Runtime.EntityFrameworkCore.g.cs"])
-            .Should()
-            .BeEquivalentTo(
-                DeclaredTypes(PackageRenderer.RenderEfCore()),
-                "Runtime.EntityFrameworkCore.g.cs は QuickER.Runtime.EntityFrameworkCore と同じ守備範囲でなければならない"
-            );
-    }
-
-    /// <summary>
-    /// 分割の <c>Runtime.InMemory.g.cs</c> がインメモリ基盤パッケージと同じトップレベル型集合になることを検証する。
-    /// </summary>
-    [Fact]
-    public void SplitInMemoryRuntimeFile_ShouldDeclareSameTypesAsInMemoryPackage()
-    {
-        var files = GenerateSplit(InMemoryOptions());
-
-        DeclaredTypes(files["Runtime.InMemory.g.cs"])
-            .Should()
-            .BeEquivalentTo(
-                DeclaredTypes(PackageRenderer.RenderInMemory()),
-                "Runtime.InMemory.g.cs は QuickER.Runtime.InMemory と同じ守備範囲でなければならない"
-            );
-    }
-
-    /// <summary>
-    /// 分割の <c>Runtime.AspNetCore.g.cs</c> がリモートサーバー基盤パッケージと同じトップレベル型集合になることを検証する
-    /// （<see cref="MultiDialectOptions"/> は <c>GenerateRemoteServices=true</c> のためサーバー固定部が計画される）。
-    /// </summary>
-    [Fact]
-    public void SplitAspNetCoreRuntimeFile_ShouldDeclareSameTypesAsAspNetCorePackage()
-    {
-        var files = GenerateSplit(MultiDialectOptions());
-
-        DeclaredTypes(files["Runtime.AspNetCore.g.cs"])
-            .Should()
-            .BeEquivalentTo(
-                DeclaredTypes(PackageRenderer.RenderAspNetCore()),
-                "Runtime.AspNetCore.g.cs は QuickER.Runtime.AspNetCore と同じ守備範囲でなければならない"
-            );
-    }
-
-    /// <summary>
-    /// 分割の <c>Runtime.Sync.g.cs</c> が同期エンジンパッケージと同じトップレベル型集合になることを検証する。
-    /// </summary>
-    /// <remarks>
-    /// 同期支援は rowversion 列を持つマルチターゲット図でしか成立しないため、図・オプションとも専用のものを使う
-    /// （<see cref="MultiDialectOptions"/> は無制限バイナリ除外が ON で、同期支援とは排他）。
-    /// </remarks>
-    [Fact]
-    public void SplitSyncRuntimeFile_ShouldDeclareSameTypesAsSyncPackage()
-    {
-        var files = GenerateSyncSplit();
-
-        DeclaredTypes(files["Runtime.Sync.g.cs"])
-            .Should()
-            .BeEquivalentTo(
-                DeclaredTypes(PackageRenderer.RenderSync()),
-                "Runtime.Sync.g.cs は QuickER.Runtime.Sync と同じ守備範囲でなければならない"
-            );
-    }
-
     /// <summary>
     /// 同期支援の分割生成でも、固定 infra（<c>Runtime.Sync.g.cs</c>）とスキーマ依存物
     /// （<c>Repositories.Sync.g.cs</c>）の分離が保たれることを検証する。
@@ -139,8 +34,7 @@ public class SplitRuntimeSymmetryTests
     {
         var files = GenerateSyncSplit();
 
-        files.Keys.Should().Contain("Runtime.Sync.g.cs");
-        files.Keys.Should().Contain("Repositories.Sync.g.cs");
+        // 2 つのファイルがどちらも出ることは、決まった行 files-split-sync-fixed-engine-and-per-entity-files が見る
 
         // 固定エンジン側に per-entity 生成物（記述子・デコレータ・DI 登録）が混じらない
         // （汎用基底 JournalingRepositoryBase 系は固定エンジンの持ち物＝具象デコレータだけを弾く）
@@ -207,58 +101,11 @@ public class SplitRuntimeSymmetryTests
         }
     }
 
-    /// <summary>
-    /// パッケージ参照モードの分割生成では固定 infra ファイルが 1 本も出力されないことを検証する
-    /// （「Runtime 系が出ない」だけがモードの差になる）。
-    /// </summary>
-    [Fact]
-    public void SplitUseRuntimePackages_ShouldEmitNoFixedRuntimeFile()
-    {
-        var options = MultiDialectOptions();
-        options = CloneWithRuntimePackages(options);
-
-        var files = GenerateSplit(options);
-
-        files.Keys.Should().NotContain(fileName => IsFixedRuntimeFile(fileName));
-        files.Keys.Should().Contain("Repositories.g.cs");
-        files.Keys.Should().Contain("Repositories.SqlServer.g.cs");
-    }
-
-    /// <summary>
-    /// スキーマ依存物のファイル（<c>Repositories*.g.cs</c> ほか）が、パッケージ参照モードの on/off で
-    /// 本体（namespace 宣言以降）が 1 バイトも変わらないことを検証する。
-    /// </summary>
-    /// <remarks>差が出てよいのはヘッダの using と案内コメントだけ（固定 infra の所在が変わるため）。</remarks>
-    [Fact]
-    public void SchemaDependentFiles_ShouldBeIdenticalAcrossRuntimePackageModes()
-    {
-        var inline = GenerateSplit(MultiDialectOptions());
-        var packages = GenerateSplit(CloneWithRuntimePackages(MultiDialectOptions()));
-
-        foreach (var (fileName, content) in packages)
-        {
-            inline.Should().ContainKey(fileName);
-            Body(content)
-                .Should()
-                .Be(
-                    Body(inline[fileName]),
-                    $"{fileName} はスキーマ依存物のみのファイルでランタイム配布方式に依らず不変でなければならない"
-                );
-        }
-    }
-
     // ---- ヘルパー ----
 
     /// <summary>固定 infra ファイル（Runtime 系）かどうか</summary>
     private static bool IsFixedRuntimeFile(string fileName) =>
         fileName.StartsWith("Runtime.", StringComparison.Ordinal);
-
-    /// <summary>ヘッダ（auto-generated・using・案内コメント）を落とし、namespace 宣言以降の本体を返す</summary>
-    private static string Body(string content)
-    {
-        var index = content.IndexOf("namespace ", StringComparison.Ordinal);
-        return index < 0 ? content : content[index..];
-    }
 
     /// <summary>
     /// ソースからトップレベル（列 0）の型宣言名を抽出する。
@@ -373,51 +220,6 @@ public class SplitRuntimeSymmetryTests
             IncludeDataAnnotations = true,
             IncludeJsonIgnoreOnParentNavigation = true,
             ExcludeUnboundedBinaryColumns = true,
-        };
-
-    /// <summary>EF Core 単独（マルチ方言と排他）の分割オプション</summary>
-    private static CodeGenerationOptions EfCoreOnlyOptions() =>
-        new()
-        {
-            RootNamespace = "Sample.Domain",
-            SplitFilesByCategory = true,
-            GenerateEditModels = true,
-            GenerateMappers = true,
-            GenerateRepositories = false,
-            GenerateEfCoreRepositories = true,
-            GenerateRemoteServices = true,
-            GenerateValueObjects = true,
-            IncludeDataAnnotations = true,
-            IncludeJsonIgnoreOnParentNavigation = true,
-            ExcludeUnboundedBinaryColumns = true,
-        };
-
-    /// <summary>インメモリ Repository を含む分割オプション（単一方言＋インメモリ）</summary>
-    private static CodeGenerationOptions InMemoryOptions() =>
-        new()
-        {
-            RootNamespace = "Sample.Domain",
-            SplitFilesByCategory = true,
-            GenerateEditModels = true,
-            GenerateMappers = true,
-            GenerateRepositories = true,
-            GenerateInMemoryRepositories = true,
-            GenerateRemoteServices = true,
-            GenerateValueObjects = true,
-            IncludeDataAnnotations = true,
-            IncludeJsonIgnoreOnParentNavigation = true,
-            ExcludeUnboundedBinaryColumns = true,
-        };
-
-    /// <summary>同じ構成のままパッケージ参照モードへ切り替えたオプションを返す</summary>
-    /// <remarks>
-    /// 全プロパティを手書きで複製するとオプション追加時に写し漏れてその構成が黙って未検証になるため、
-    /// <c>with</c> 式で 1 項目だけ差し替える（<see cref="RuntimePackageModeCompilationTests"/> と同じ流儀）。
-    /// </remarks>
-    private static CodeGenerationOptions CloneWithRuntimePackages(CodeGenerationOptions options) =>
-        options with
-        {
-            UseRuntimePackages = true,
         };
 
     /// <summary>

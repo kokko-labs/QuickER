@@ -7,9 +7,19 @@ namespace QuickER.Tests.Dialects;
 /// </summary>
 /// <remarks>
 /// <para>
-/// テストの名前は「クラス名.メソッド名」か、同期計画の期待の行の Id に <see cref="ExpectationRowPrefix"/> を付けたもの（末尾の <c>*</c> は
-/// 前方一致）で、<see cref="UnsupportedCoverageTests"/> が実在を確かめる。
+/// 登録の形は 2 つで、<see cref="UnsupportedCoverageTests"/> が <c>tests/</c> の構文木で実在を確かめる（2 つのテストプロジェクトのどちらにあってもよい）。
 /// </para>
+/// <list type="bullet">
+/// <item><description>
+/// メソッド：<c>{クラス名}.{メソッド名}</c>。Theory はメソッド名までで、行（InlineData）は指せない。
+/// </description></item>
+/// <item><description>
+/// 表の行：<c>{表のクラス名}:{行の Id}</c>（例：<c>SyncPlanExpectationRows:realdb-…</c>・<c>CodegenCases:diag-…</c>）。
+/// 表のクラスの宣言（partial はファイルをまたいで集める）の中で、呼び出しかオブジェクトの生成の第 1 引数に、その Id の文字列がある。
+/// 末尾の <c>*</c> は前方一致で、補間で組み立てる Id（先頭の文字列＋<c>*</c>）にも当たる。
+/// 表の行へ移したテストのメソッドを消すときは、登録をこの形へ書き換える。
+/// </description></item>
+/// </list>
 /// <para>
 /// まだ実装していないセル・マスは未実装の一覧に、実装するフェーズ（区切り 33 の 2b〜2f）を添えて載せる。
 /// 検出の未実装は 2d の終わりに、扱いの未実装は 2f の終わりに空になる。
@@ -17,8 +27,16 @@ namespace QuickER.Tests.Dialects;
 /// </remarks>
 public static class UnsupportedCoverage
 {
-    /// <summary>同期計画の期待の行（Integration の <c>SyncPlanExpectationRows</c>）の Id で登録するときの頭</summary>
-    public const string ExpectationRowPrefix = "SyncPlanExpectationRows:";
+    /// <summary>
+    /// 表の行の形（<c>{表のクラス名}:{行の Id}</c>）の登録を、表のクラス名と行の Id に分ける（メソッドの形なら false）
+    /// </summary>
+    public static bool TryParseRow(string test, out string table, out string rowId)
+    {
+        var colon = test.IndexOf(':', StringComparison.Ordinal);
+        table = colon < 0 ? string.Empty : test[..colon];
+        rowId = colon < 0 ? string.Empty : test[(colon + 1)..];
+        return colon > 0 && rowId.Length > 0;
+    }
 
     /// <summary>検出のテスト（方言・種類・テスト）</summary>
     public static readonly (
@@ -505,8 +523,8 @@ public static class UnsupportedCoverage
             null,
             [
                 "ComputedColumnGenerationTests.Generate_ComputedColumn_MarksAttributeAndExcludesFromWrite",
-                "ComputedColumnGenerationTests.Generate_ComputedColumn_ReportsInfoDiagnostic",
-                "ComputedColumnGenerationTests.Generate_ComputedPrimaryKey_FailsWithError",
+                "CodegenCases:diag-computed-column-info-names-excluded-column",
+                "CodegenCases:diag-computed-primary-key-error-items",
             ]
         ),
         (
@@ -564,8 +582,8 @@ public static class UnsupportedCoverage
             null,
             [
                 "IdentityColumnGenerationTests.Generate_IdentityColumn_MarksAttributeAndExcludesFromWrite",
-                "IdentityColumnGenerationTests.Generate_IdentityColumn_ReportsInfoDiagnostic",
-                "IdentityColumnGenerationTests.Generate_IdentityPrimaryKey_WarnsWithoutMarking",
+                "CodegenCases:diag-identity-column-info-names-excluded-column",
+                "CodegenCases:diag-identity-primary-key-warns-without-excluding",
                 "IdentityColumnSaveMetadataTests.SqlServer_IdentityColumn_IsExcludedFromWrites",
                 "IdentityColumnSaveMetadataTests.Sqlite_IdentityColumn_IsExcludedFromWrites",
                 "SqlServerIdentityColumnRuntimeTests.Ado_Insert_IgnoresExplicitValueAndReadsAssignedValue",
@@ -951,9 +969,7 @@ public static class UnsupportedCoverage
             UnsupportedDefinitionKind.UnparsableType,
             UnsupportedFeature.CSharpGeneration,
             null,
-            [
-                "FallbackTypeGenerationTests.Generate_FallbackTypeColumn_ReportsInfoDiagnosticWithTableColumnAndDataType",
-            ]
+            ["CodegenCases:diag-fallback-type-info-names-column"]
         ),
         (
             UnsupportedDefinitionKind.UnparsableType,
@@ -1016,7 +1032,8 @@ public static class UnsupportedCoverage
             null,
             [
                 "EfCoreKeylessTableModelTests.主キーなしテーブルは除外されモデルは使える",
-                "RepositorySingleKeyWarningTests.Generate_NonSingleKeyTable_SkipsRepositoryWithWarning",
+                "CodegenCases:diag-repository-single-key-composite-warning",
+                "CodegenCases:diag-repository-single-key-keyless-warning",
             ]
         ),
         (
@@ -1056,17 +1073,15 @@ public static class UnsupportedCoverage
             UnsupportedFeature.CSharpGeneration,
             null,
             [
-                "PostgreSqlArrayColumnGenerationTests.Generate_ArrayColumns_AreReportedAsInfo",
-                "PostgreSqlNetworkTypeGenerationTests.Generate_InetColumns_ReportedAsInfo",
+                "CodegenCases:diag-postgresql-array-columns-info-names-columns",
+                "CodegenCases:diag-postgresql-inet-columns-info",
             ]
         ),
         (
             UnsupportedDefinitionKind.UnrepresentableType,
             UnsupportedFeature.CSharpGeneration,
             null,
-            [
-                "NegativeScaleColumnGenerationTests.Generate_NegativeScaleColumn_ReportsInfoDiagnostic",
-            ]
+            ["CodegenCases:diag-negative-scale-info-with-value-objects"]
         ),
         (
             UnsupportedDefinitionKind.UnrepresentableType,

@@ -1,6 +1,4 @@
-﻿using System.IO;
-using AwesomeAssertions;
-using Microsoft.CodeAnalysis;
+﻿using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider.Sqlite;
@@ -9,31 +7,28 @@ using QuickER.Provider.SqlServer;
 namespace QuickER.Tests.CodeGen.CSharp;
 
 /// <summary>
-/// パッケージ参照モード（<see cref="CodeGenerationOptions.UseRuntimePackages"/>）の生成コードが、
-/// 「案内ビルダー（<see cref="RuntimePackageReferenceGuidance"/>）が指示するパッケージ集合だけを参照して」
-/// Roslyn でコンパイルできることを検証する。
+/// パッケージ参照モード（<see cref="CodeGenerationOptions.UseRuntimePackages"/>）の生成物と、案内ビルダー
+/// （<see cref="RuntimePackageReferenceGuidance"/>）が指示するパッケージ集合を検証する。
 /// </summary>
 /// <remarks>
 /// <para>
-/// ランタイム側は <see cref="RuntimePackageSourceRenderer"/> の出力（Core / SqlServer / Sqlite / EfCore /
-/// InMemory / AspNetCore）を
-/// in-memory アセンブリへ順にコンパイル（Core → 方言/EF Core の参照順）して <see cref="MetadataReference"/> 化し、
-/// 生成コードのコンパイルへ「案内が指示するパッケージだけ」を渡す。これにより案内の十分性（不足なくコンパイル可能）と
-/// 依存最小性（余計なパッケージなしで成立）を同時に証明する。
+/// 「案内が指示するパッケージ集合だけを参照して Roslyn でコンパイルできる」こと（案内の十分性と依存最小性）と、
+/// サーバー実装ファイルが出ることは、<c>CodegenCaseTests</c> の行 <c>compile-package-*</c>（同じ 28 通りの構成。
+/// パッケージ用ソースのアセンブリ化と参照集合の組み立ては <c>CodegenConfig/Judges/CompileJudge.cs</c>）が持つ。
 /// </para>
 /// <para>
-/// 生成コードが直接参照する外部依存は BCL＋<c>Microsoft.Extensions.DependencyInjection</c>（DI 登録拡張）のみ。
-/// 方言 ADO（SqlClient / Sqlite）・EF Core は<b>パッケージ側だけ</b>が参照するため、生成コードのコンパイル参照には含めない。
+/// ここに残るのは、同じ構成の生成テキストに固定 infra の定義（<c>*Core</c> の型）が出ないことの表明と、案内ビルダーの単体の表明。
 /// </para>
 /// </remarks>
 public class RuntimePackageModeCompilationTests
 {
-    private static readonly RuntimePackageSourceRenderer PackageRenderer = new();
-
-    /// <summary>代表構成×分割の生成→案内どおりのパッケージ参照のみでコンパイル成功を検証する</summary>
+    /// <summary>
+    /// 代表構成×分割の生成物に、固定 infra の定義（パッケージが提供する <c>*Core</c> の型）が出ないことを検証する
+    /// （同じ構成のコンパイルとサーバー実装ファイルの存在は <c>CodegenCaseTests</c> の行 <c>compile-package-*</c>）
+    /// </summary>
     [Theory]
     [MemberData(nameof(PackageModeCases))]
-    public void Generate_PackageMode_CompilesWithGuidedPackagesOnly(
+    public void Generate_PackageMode_EmitsNoFixedInfraDefinitions(
         string caseName,
         CodeGenerationOptions baseOptions
     )
@@ -49,6 +44,7 @@ public class RuntimePackageModeCompilationTests
             options
         );
 
+        // 前提：生成が通り、表明する本文がある（エラーなら本文が空で、下の NotContain が素通りする）
         result
             .HasErrors.Should()
             .BeFalse(
@@ -73,30 +69,6 @@ public class RuntimePackageModeCompilationTests
         allContent.Should().NotContain("class SqlServerRepositoryCore<");
         allContent.Should().NotContain("class SqliteRepositoryCore<");
         allContent.Should().NotContain("class InMemoryDataStore");
-
-        // サーバー実装ファイルが出る構成では、それが確かにコンパイル対象へ入っていることを明示的に固定する
-        // （かつては ASP.NET Core 依存を理由に除外していた。撤廃が空振りにならないよう存在を表明する。
-        //   ファイル名は非分割が {ベース名}.RemoteServer.g.cs・分割が RemoteServer.g.cs）
-        if (options.GenerateRemoteServices)
-        {
-            result
-                .Files.Should()
-                .Contain(f => f.FileName.EndsWith("RemoteServer.g.cs", StringComparison.Ordinal));
-        }
-
-        // 案内が指示するパッケージ集合だけを参照集合として構築し、生成コードをコンパイルする。
-        // サーバー実装ファイル（.RemoteServer.g.cs）も対象に含める＝固定部は QuickER.Runtime.AspNetCore が
-        // 提供し、ASP.NET Core 本体はテストホストの共有フレームワーク（TPA）から解決される。
-        var packages = RuntimePackageReferenceGuidance.Compute(options);
-        var packageRefs = BuildPackageReferences(packages);
-
-        var compilation = CompileGenerated(result, packages, packageRefs);
-
-        compilation
-            .Success.Should()
-            .BeTrue(
-                $"「{caseName}」の生成コードが案内どおりのパッケージ参照でコンパイル不能:{Environment.NewLine}{compilation.Describe()}"
-            );
     }
 
     /// <summary>Entity のみ（Repository/EF Core なし）は Core だけで成立し、参照集合に ADO/EF Core が含まれない</summary>
@@ -644,178 +616,5 @@ public class RuntimePackageModeCompilationTests
                 },
             ],
         };
-    }
-
-    // ---- ランタイムパッケージのアセンブリ化と参照集合の構築 ----
-
-    /// <summary>
-    /// 案内パッケージ集合を、実際の in-memory アセンブリ参照へ変換する。
-    /// </summary>
-    /// <remarks>
-    /// Core を先にコンパイルし、方言/EF Core は Core アセンブリを参照してコンパイルする（参照順を守る）。
-    /// 各パッケージのコンパイルは、そのパッケージが正当に必要とする外部依存だけを許して行い（依存最小性の担保）、
-    /// 生成コードのコンパイルには「案内された各パッケージ＋その参照」を渡す。
-    /// </remarks>
-    private static IReadOnlyList<MetadataReference> BuildPackageReferences(
-        IReadOnlyList<string> packages
-    )
-    {
-        var references = new List<MetadataReference>();
-
-        // Core は必ず先に組む（他パッケージが参照する）
-        var coreImage = CompilePackageAssembly(
-            RuntimePackages.Core,
-            [PackageRenderer.RenderCore()],
-            RuntimeReferenceSet.CoreOnly,
-            corePeImage: null
-        );
-        references.Add(MetadataReference.CreateFromImage(coreImage));
-
-        if (packages.Contains(RuntimePackages.SqlServer))
-        {
-            var image = CompilePackageAssembly(
-                RuntimePackages.SqlServer,
-                [PackageRenderer.RenderCore(), PackageRenderer.RenderSqlServer()],
-                RuntimeReferenceSet.SqlServer,
-                corePeImage: coreImage
-            );
-            references.Add(MetadataReference.CreateFromImage(image));
-        }
-
-        if (packages.Contains(RuntimePackages.Sqlite))
-        {
-            var image = CompilePackageAssembly(
-                RuntimePackages.Sqlite,
-                [PackageRenderer.RenderCore(), PackageRenderer.RenderSqlite()],
-                RuntimeReferenceSet.Sqlite,
-                corePeImage: coreImage
-            );
-            references.Add(MetadataReference.CreateFromImage(image));
-        }
-
-        if (packages.Contains(RuntimePackages.EntityFrameworkCore))
-        {
-            var image = CompilePackageAssembly(
-                RuntimePackages.EntityFrameworkCore,
-                [PackageRenderer.RenderCore(), PackageRenderer.RenderEfCore()],
-                RuntimeReferenceSet.EfCore,
-                corePeImage: coreImage
-            );
-            references.Add(MetadataReference.CreateFromImage(image));
-        }
-
-        if (packages.Contains(RuntimePackages.InMemory))
-        {
-            var image = CompilePackageAssembly(
-                RuntimePackages.InMemory,
-                [PackageRenderer.RenderCore(), PackageRenderer.RenderInMemory()],
-                RuntimeReferenceSet.InMemory,
-                corePeImage: coreImage
-            );
-            references.Add(MetadataReference.CreateFromImage(image));
-        }
-
-        if (packages.Contains(RuntimePackages.Sync))
-        {
-            var image = CompilePackageAssembly(
-                RuntimePackages.Sync,
-                [PackageRenderer.RenderCore(), PackageRenderer.RenderSync()],
-                RuntimeReferenceSet.Sync,
-                corePeImage: coreImage
-            );
-            references.Add(MetadataReference.CreateFromImage(image));
-        }
-
-        if (packages.Contains(RuntimePackages.AspNetCore))
-        {
-            var image = CompilePackageAssembly(
-                RuntimePackages.AspNetCore,
-                [PackageRenderer.RenderCore(), PackageRenderer.RenderAspNetCore()],
-                RuntimeReferenceSet.AspNetCore,
-                corePeImage: coreImage
-            );
-            references.Add(MetadataReference.CreateFromImage(image));
-        }
-
-        return references;
-    }
-
-    /// <summary>
-    /// パッケージソースを 1 アセンブリへコンパイルし、PE イメージ（バイト列）を返す。
-    /// </summary>
-    /// <remarks>
-    /// 方言/EF Core パッケージは Core の型（EntityBase・IRepository 等）を参照するため、Core の PE イメージを
-    /// メタデータ参照として渡す。ソースにも Core を含めているのは、Core を単独アセンブリにするための便宜
-    /// （Core アセンブリを渡す構成では方言/EF Core ソースだけを渡すと二重定義になるため、方言/EF Core は Core を参照に持ち
-    /// 方言/EF Core ソースのみをコンパイルする）。
-    /// </remarks>
-    private static byte[] CompilePackageAssembly(
-        string assemblyName,
-        IReadOnlyList<string> allSources,
-        RuntimeReferenceSet referenceSet,
-        byte[]? corePeImage
-    )
-    {
-        // Core アセンブリを参照する構成では、方言/EF Core ソースだけをコンパイルする（Core は参照から解決）。
-        var sources = corePeImage is null ? allSources : allSources.Skip(1).ToArray();
-
-        var references = referenceSet.Build();
-
-        if (corePeImage is not null)
-        {
-            references = [.. references, MetadataReference.CreateFromImage(corePeImage)];
-        }
-
-        var emit = GeneratedCodeCompiler.Emit(
-            sources.Select((source, index) => ($"{assemblyName}.{index}.g.cs", source)),
-            $"{assemblyName}.{Guid.NewGuid():N}",
-            references
-        );
-
-        emit.Success.Should()
-            .BeTrue(
-                $"ランタイムパッケージ '{assemblyName}' のアセンブリ化に失敗:{Environment.NewLine}"
-                    + string.Join(Environment.NewLine, emit.Errors.Select(d => d.GetMessage()))
-            );
-
-        return emit.Image!;
-    }
-
-    /// <summary>生成コードを「案内されたパッケージ参照＋BCL＋DI（＋EF Core 生成時のみ EF Core）」だけでコンパイルする</summary>
-    /// <remarks>
-    /// 生成コードが直接使うのは BCL＋DI（登録拡張）＋案内パッケージ。方言 ADO（SqlClient / Sqlite）はパッケージ側だけが
-    /// 参照するため含めない。ただし EF Core 生成時は、生成側の QuickErDbContext（<c>: DbContext</c>）や
-    /// AddGeneratedEfCoreRepositories（<c>DbContextOptionsBuilder</c> / <c>AddDbContextFactory</c>）が EF Core の型を
-    /// 直接参照するため、EF Core パッケージが案内に含まれるときは EF Core 参照も生成コードのコンパイルへ渡す。
-    /// </remarks>
-    private static GeneratedCompileResult CompileGenerated(
-        CodeGenerationResult result,
-        IReadOnlyList<string> packages,
-        IReadOnlyList<MetadataReference> packageReferences
-    )
-    {
-        var referenceSet = packages.Contains(RuntimePackages.EntityFrameworkCore)
-            ? RuntimeReferenceSet.GeneratedCodeWithEfCore
-            : RuntimeReferenceSet.GeneratedCode;
-        var references = new List<MetadataReference>(referenceSet.Build());
-        references.AddRange(packageReferences);
-
-        var emit = GeneratedCodeCompiler.Emit(
-            result.Files.Select(file => (file.FileName, file.Content)),
-            $"QuickER.PackageMode.Tests.{Guid.NewGuid():N}",
-            references
-        );
-
-        return new GeneratedCompileResult { Success = emit.Success, Errors = emit.Errors };
-    }
-
-    private sealed class GeneratedCompileResult
-    {
-        public required bool Success { get; init; }
-
-        public required IReadOnlyList<Diagnostic> Errors { get; init; }
-
-        public string Describe() =>
-            string.Join(Environment.NewLine, Errors.Select(GeneratedCodeDiagnostics.Describe));
     }
 }

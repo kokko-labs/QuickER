@@ -11,7 +11,7 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// TPA（Trusted Platform Assemblies＝BCL 全体）をベースに、排他の対象のアセンブリ（SqlClient / Sqlite / EF Core / DI と、
 /// 指定があれば配布ランタイム 7 パッケージ）をファイル名で除外し、構成が許すものだけを明示的に戻す。
 /// 許す依存を絞った集合でコンパイルが通ることが、そのソースの依存が最小であることの証明になる
-/// （<c>RuntimePackageModeCompilationTests</c>・<c>RuntimePackageSourceRendererTests</c>）。
+/// （生成の構成のエンジンのパッケージ参照のコンパイル＝<c>CodegenConfig/Judges/CompileJudge.cs</c>・<c>RuntimePackageSourceRendererTests</c>）。
 /// <see cref="Full"/> は何も除外せず全部を許す集合で、<see cref="GeneratedCodeCompiler"/> が使う。
 /// </para>
 /// <para>

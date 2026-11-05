@@ -27,18 +27,36 @@ internal static class SeededSampleDataInvariants
     ) Check(Assembly assembly, string namespaceName)
     {
         var types = assembly.GetTypes().Where(t => t.Namespace == namespaceName).ToList();
-        var storeType = types.Single(t => t.Name == "InMemoryDataStore");
-        var seederType = types.Single(t => t.Name == "InMemorySampleData");
+
+        return Check(
+            types.Single(t => t.Name == "InMemorySampleData"),
+            types
+                .Where(t =>
+                    t.IsClass && !t.IsAbstract && t.GetCustomAttribute<TableAttribute>() is not null
+                )
+                .ToList()
+        );
+    }
+
+    /// <summary>シーダーでストアをシードし、違反の一覧とエンティティごとの行数を返す</summary>
+    /// <remarks>
+    /// 分割出力・パッケージ参照モードでは、シーダー・ストア・エンティティの名前空間（ストアはアセンブリも）が分かれるので、型を直接受ける。
+    /// ストアの型はシーダーの <c>Seed</c> の引数の型から取る。
+    /// </remarks>
+    /// <param name="seederType">生成物の <c>InMemorySampleData</c></param>
+    /// <param name="entityTypes">シードされるエンティティ型（<c>[Table]</c> の付いた具象クラス）</param>
+    public static (
+        IReadOnlyList<string> Violations,
+        IReadOnlyDictionary<string, int> RowCounts
+    ) Check(Type seederType, IReadOnlyList<Type> entityTypes)
+    {
+        var seed = seederType.GetMethod("Seed")!;
+        var storeType = seed.GetParameters()[0].ParameterType;
 
         var store = Activator.CreateInstance(storeType)!;
-        seederType.GetMethod("Seed")!.Invoke(null, [store]);
+        seed.Invoke(null, [store]);
 
         var snapshot = storeType.GetMethod("Snapshot")!;
-        var entityTypes = types
-            .Where(t =>
-                t.IsClass && !t.IsAbstract && t.GetCustomAttribute<TableAttribute>() is not null
-            )
-            .ToList();
 
         var rowsByType = entityTypes.ToDictionary(
             t => t,

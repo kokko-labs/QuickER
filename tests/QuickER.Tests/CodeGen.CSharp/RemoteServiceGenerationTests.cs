@@ -124,13 +124,10 @@ public class RemoteServiceGenerationTests
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
 
         // 大文字小文字違いの .g.cs は正規化で書き換えないため、本体名は入力どおり（前後空白のみ除去）
+        // （出力のファイル名の並びは、決まった行 files-remote-service-output-name-* が見る）
         var mainName = outputFileName.Trim().EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase)
             ? outputFileName.Trim()
             : expectedBaseName + ".g.cs";
-        result
-            .Files.Select(f => f.FileName)
-            .Should()
-            .Equal(mainName, expectedBaseName + ".RemoteServer.g.cs", expectedBaseName + ".g.md");
 
         // 構成表は正規化前の名前（Shop.cs 等）を載せず、実際に書き出す名前を載せる
         var doc = result
@@ -156,8 +153,8 @@ public class RemoteServiceGenerationTests
         );
 
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        result.Files.Select(f => f.FileName).Should().Equal("Shop.g.cs", "Shop.RemoteServer.g.cs");
 
+        // 出力が本体＋サーバーの 2 ファイルであること（名前と並び）は、決まった行 files-remote-service-main-and-server-files が見る
         var main = result.Files[0].Content;
         var server = result.Files[1].Content;
 
@@ -405,8 +402,8 @@ public class RemoteServiceGenerationTests
         );
 
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        result.Files.Should().ContainSingle();
 
+        // 出力が 1 ファイルのままであることは、決まった行 files-remote-service-off-single-file が見る
         var main = result.Files[0].Content;
         main.Should().NotContain("RemoteJson");
         main.Should().NotContain("HttpRemoteRepository");
@@ -602,7 +599,8 @@ public class RemoteServiceGenerationTests
         );
 
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        result.Files.Should().HaveCount(2);
+
+        // 出力が 2 ファイルであることは、決まった行 files-remote-service-efcore-only-two-files が見る
         result.Files[0].Content.Should().Contain("HttpOrderRemoteRepository");
         result.Files[1].Content.Should().Contain("MapGeneratedRemoteEndpoints");
     }
@@ -712,8 +710,8 @@ public class RemoteServiceGenerationTests
         );
 
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        result.Files.Should().HaveCount(2);
 
+        // 出力が 2 ファイルであることは、決まった行 files-remote-service-non-split-two-files が見る
         var main = result.Files[0].Content;
         main.Should().Contain("public sealed partial class HttpOrderRemoteRepository");
         main.Should()

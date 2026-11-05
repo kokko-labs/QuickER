@@ -22,7 +22,7 @@
 - 同期対象の表の主キーが固定長の文字列（nchar / char）なら `CodeGen_Warning_SyncFixedLengthStringPrimaryKeys` で「表.列（型）」を名指しし、可変長の型を勧める。
   - 理由：SQL Server は値を宣言長まで空白で詰めて返すので、ローカルで作った行のキーが同期の後に空白詰めのキーへ置き換わり、詰めていないキーを参照する子の行があると 2 行のまま収束しない（キーの序数照合では直せない）。
   - 判定は型名の文字列でなく正規型の種類（`FixedString` / `AnsiFixedString`）。`CanonicalTypeTokenAttacher` が `CSharpTypeInfo.IsFixedLengthString` を立てる。正本は `CSharpCodeGenerationService.BuildSyncFixedLengthKeyLines`。
-  - ガード：`SyncFixedLengthKeyWarningTests`（mutation 実証済み）。
+  - ガード：`CodegenCaseTests` の行 `diag-sync-fixed-length-key-warning-nchar` / `diag-sync-fixed-length-key-warning-char` / `diag-sync-fixed-length-key-variable-nvarchar-no-warning` / `diag-sync-fixed-length-key-variable-varchar-no-warning` / `diag-sync-fixed-length-key-without-sync-support-no-warning` / `diag-sync-fixed-length-non-key-column-no-warning`（mutation 実証済み）。
 - サーバー側の追加スキーマはゼロ。ローカルにだけ共有テーブル 3 つを `SyncJournal.EnsureCreatedAsync` が実行時に作る＝`quicker_sync_journal`（オフライン編集）・`quicker_sync_blob_pending`（ダウンロードが負う blob のコピー）・`quicker_sync_ack`（`(table_name, key_text)` 主キー・`server_row_version BLOB NOT NULL`＝サーバーが受理したアップロードに採番した版の行単位の受理記録）。
 - 生成の固定：`SyncSupportGenerationTests`（親参照と被参照テーブル名・対象外の外部キー・一意制約参照の表が `UnlistedReferencingTableNames` に載る・decimal 主キーの共有書式・循環参照の FK 順）。
 
@@ -366,7 +366,7 @@
   - 書き直しが同じランの記録まで直すので、整形の誤りは同期の結果から見えないことがある＝整形は記述子で直接確かめる。
 - 版なしの表のキー順ページング：`@afterKey` は型なし（文字列は nvarchar）で束縛されるので、文字列の主キーは `BuildServerAfterKey` が列と同じ型へ CAST する（SQL Server の型マッパーが渡す `SqlDbTypeName` と `SqlDeclaredLength`）。varchar を nvarchar と比べると SQL_* 照合順序で ORDER BY と比較の規則が食い違い、ページの境目で行を読み飛ばす。
 - 固定長の文字列の主キーは生成時に警告する（「生成の条件と診断」）。
-- ガード：`SyncKeyTextRuntimeTests`（Kind ごとの整形・古い形の書き直しと読み取り・decimal の往復）・`SyncDecimalKeyExecutionTests`（decimal の主キーの図を生成→実コンパイル→記述子を実行）・`SyncSupportGenerationTests`、シナリオ `25-datetime-key-utc`・`25-datetime-key-local`・`25-legacy-journal-key-text`・`25-legacy-ack-key-text`・`19-varchar-key-paging-skips-rows`（`SyncModelSqlServerRuntimeTests`）（mutation 実証済み）。
+- ガード：`SyncKeyTextRuntimeTests`（Kind ごとの整形・古い形の書き直しと読み取り・decimal の往復）・`CodegenCaseTests` の行 `probe-sync-key-text-decimal-key`（decimal の主キーの図を生成→実コンパイル→記述子を実行）・`SyncSupportGenerationTests`、シナリオ `25-datetime-key-utc`・`25-datetime-key-local`・`25-legacy-journal-key-text`・`25-legacy-ack-key-text`・`19-varchar-key-paging-skips-rows`（`SyncModelSqlServerRuntimeTests`）（mutation 実証済み）。
 
 ## 実行が変えた行の一覧
 
@@ -400,4 +400,4 @@
 - エンジンの外の仕組み（並行のロックと割り込み・記録の文の形・全書き込み入口の記録・登録簿なしの例外・別の DB の保存のフック・NULL 許容の計算列・サーバーで NULL になった blob・知らない除外の型・一覧に載らない参照）は `SyncRuntimeTestsBase` と転送別の派生 `SyncSqliteRuntimeTests`（直結・サーバー役も SQLite）・`SyncHttpRuntimeTests`（in-process Kestrel）。
 - 実 SQL Server の固有は `SyncSqlServerRuntimeTests`（NULL を許す一意制約・洗い替えの内容の一致の計測）と `SyncSqlServerHttpRuntimeTests`。
 - 値オブジェクト×同期は `SyncVoRuntimeTests`（オフライン新規行のアップロード・キーだけのスタブのグラフ削除記録・版書き戻し）。
-- 構成の行列は `SyncConfigMatrixRuntimeTests`、構築時除外は `SyncConstructionExclusionTests`、洗い替えの計測は `SyncRefreshBenchmarkRuntimeTests`、閉包は `SyncKeptRowsTests`、キーのテキストは `SyncKeyTextRuntimeTests`・`SyncDecimalKeyExecutionTests`、生成は `SyncSupportGenerationTests`・`SyncFixedLengthKeyWarningTests`、フックの登録簿は `SyncLocalSaveHookRegistrationTests`。
+- 構成の行列は `SyncConfigMatrixRuntimeTests`、構築時除外は `SyncConstructionExclusionTests`、洗い替えの計測は `SyncRefreshBenchmarkRuntimeTests`、閉包は `SyncKeptRowsTests`、キーのテキストは `SyncKeyTextRuntimeTests`・`CodegenCaseTests` の行 `probe-sync-key-text-decimal-key`、生成は `SyncSupportGenerationTests`・`CodegenCaseTests` の行 `diag-sync-fixed-length-key-*`（上の 6 行）、フックの登録簿は `SyncLocalSaveHookRegistrationTests`。

@@ -234,6 +234,7 @@ public class IncludeGraphGenerationTests
         result.HasErrors.Should().BeFalse();
 
         // ツリーは空＝no-op 形（辿ると無限に深くなるため展開しない）
+        // （落としたことは生成物に痕跡が残らないため Info 診断で名指しする。その診断は決まった行 diag-include-graph-self-reference-info が見る）
         var extensions = ExtensionsClass(result);
         extensions.Should().NotContain("_nodeEntityGraph");
         extensions
@@ -241,25 +242,6 @@ public class IncludeGraphGenerationTests
             .Contain(
                 "public static SqlQuery<NodeEntity> IncludeGraph(this SqlQuery<NodeEntity> query) => query;"
             );
-
-        // 落としたことは生成物に痕跡が残らないため、Info 診断で名指しする
-        result
-            .Diagnostics.Should()
-            .ContainSingle(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Info
-                && diagnostic.Message.Contains("NodeEntity.Nodes")
-            );
-    }
-
-    /// <summary>スキップが 1 件も無い図では IncludeGraph の Info 診断を出さない</summary>
-    [Fact(DisplayName = "スキップが無い図では IncludeGraph の Info 診断を出さない")]
-    public void NoSkippedEdges_EmitsNoInfo()
-    {
-        var result = Generate(ChainDiagram(), RepositoryOptions());
-
-        result
-            .Diagnostics.Should()
-            .NotContain(diagnostic => diagnostic.Message.Contains("IncludeGraph"));
     }
 
     /// <summary>相互参照（A → B → A）では、パス上のテーブルへ戻る辺だけが落ちる</summary>
@@ -303,12 +285,7 @@ public class IncludeGraphGenerationTests
         CountOf(extensions, "var n1 = ").Should().Be(0);
         CountOf(extensions, "Children.Add(").Should().Be(0);
 
-        // 落とした辺は両方向ぶん Info 診断へ載る
-        var info = result
-            .Diagnostics.Should()
-            .ContainSingle(diagnostic => diagnostic.Severity == GenerationDiagnosticSeverity.Info)
-            .Which;
-        info.Message.Should().Contain("BetaEntity.Alphas").And.Contain("AlphaEntity.Betas");
+        // 落とした辺が両方向ぶん Info 診断へ載ることは、決まった行 diag-include-graph-mutual-reference-info が見る
     }
 
     /// <summary>Repository 契約が出ない構成では拡張クラスごと出力されない</summary>

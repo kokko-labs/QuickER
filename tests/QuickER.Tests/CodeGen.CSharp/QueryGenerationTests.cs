@@ -394,19 +394,8 @@ public class QueryGenerationTests
         var result = Generate(diagram, CreateOptions());
 
         // すべて警告（エラーなし）でファイルは生成され、有効なクエリだけが出力される
+        // （警告 4 件の名指しとファイルの有無は決まった行 diag-query-dangling-references-warn-and-skip）
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        result.Files.Should().NotBeEmpty();
-        result
-            .Diagnostics.Where(d => d.Severity == GenerationDiagnosticSeverity.Warning)
-            .Should()
-            .HaveCount(4);
-        result.Diagnostics.Select(d => d.Message).Should().Contain(m => m.Contains("typedId"));
-        result.Diagnostics.Select(d => d.Message).Should().Contain(m => m.Contains("Ghost"));
-        result
-            .Diagnostics.Select(d => d.Message)
-            .Should()
-            .Contain(m => m.Contains("DanglingOrderBy"));
-        result.Diagnostics.Select(d => d.Message).Should().Contain(m => m.Contains("Orphan"));
 
         var content = AllContent(result);
         content.Should().Contain("ValidQueryAsync(");
@@ -537,14 +526,8 @@ public class QueryGenerationTests
         var result = Generate(diagram, CreateOptions());
 
         // 警告のみ（エラーなし）で生成は成功する
+        // 警告の名指しは決まった行 diag-query-raw-sql-undeclared-parameter-warns-and-skips
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        result
-            .Diagnostics.Should()
-            .Contain(d =>
-                d.Severity == GenerationDiagnosticSeverity.Warning
-                && d.Message.Contains("GetBad")
-                && d.Message.Contains("ghost")
-            );
 
         var content = AllContent(result);
         // 有効なクエリは生成され、未宣言パラメータのクエリだけがスキップされる
@@ -572,12 +555,8 @@ public class QueryGenerationTests
 
         var result = Generate(diagram, CreateOptions());
 
+        // 警告の名指しは決まった行 diag-query-raw-sql-unused-parameter-warns
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        result
-            .Diagnostics.Should()
-            .Contain(d =>
-                d.Severity == GenerationDiagnosticSeverity.Warning && d.Message.Contains("unused")
-            );
 
         // 警告のみ＝クエリは生成される
         AllContent(result).Should().Contain("ListEverythingAsync(");
@@ -599,12 +578,8 @@ public class QueryGenerationTests
 
         var result = Generate(diagram, CreateOptions());
 
+        // 警告の名指しは決まった行 diag-query-raw-sql-multiple-statements-warns
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        result
-            .Diagnostics.Should()
-            .Contain(d =>
-                d.Severity == GenerationDiagnosticSeverity.Warning && d.Message.Contains("GetTwo")
-            );
 
         AllContent(result).Should().Contain("GetTwoAsync(");
     }
@@ -752,36 +727,6 @@ public class QueryGenerationTests
         var plainResult = Generate(CreateDiagram(CreateQuery()), CreateOptions());
         plainResult.HasErrors.Should().BeFalse(FormatDiagnostics(plainResult));
         AllContent(plainResult).Should().Contain("GetByCustomerTypedAsync(int customerId,");
-    }
-
-    /// <summary>検証エラー（未知の列・スカラー×DSL・重複メソッド名）が診断エラーになりファイルが出ないことを検証する</summary>
-    [Fact(DisplayName = "検証エラーは診断になりファイルを出さない")]
-    public void Generate_InvalidQueries_ProduceDiagnostics()
-    {
-        var diagram = CreateDiagram(
-            new QueryDefinition
-            {
-                Name = "BadColumn",
-                Returns = QueryReturnShape.List,
-                Condition = "Nope = 1",
-            },
-            new QueryDefinition
-            {
-                Name = "BadScalar",
-                Returns = QueryReturnShape.Scalar,
-                ScalarType = "int32",
-                Implementation = QueryImplementationKind.Dsl,
-            },
-            new QueryDefinition { Name = "Dup", Returns = QueryReturnShape.List },
-            new QueryDefinition { Name = "Dup", Returns = QueryReturnShape.Count }
-        );
-
-        var result = Generate(diagram, CreateOptions());
-
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty();
-        result.Diagnostics.Select(d => d.Message).Should().Contain(m => m.Contains("Nope"));
-        result.Diagnostics.Should().HaveCountGreaterThanOrEqualTo(3);
     }
 
     /// <summary>
@@ -984,164 +929,6 @@ public class QueryGenerationTests
     }
 
     /// <summary>
-    /// リモートエンドポイントの操作名と衝突するクエリ名が予約名として拒否されることを検証する。
-    /// ルート（<c>POST {prefix}/{エンティティ}/{操作}</c>）が重なると同じパスへハンドラが 2 本張られ
-    /// 実行時に AmbiguousMatch の 500 になるため、C# メンバーと衝突しない名前も予約する
-    /// </summary>
-    [Theory(DisplayName = "リモート操作名と衝突するクエリ名は予約名として拒否される")]
-    [InlineData("SaveMany")]
-    [InlineData("Ping")]
-    [InlineData("SyncCeiling")]
-    [InlineData("SyncChanges")]
-    [InlineData("SyncKeys")]
-    [InlineData("SyncPage")]
-    [InlineData("savemany")] // ルートは大小を区別しないため、大小違いの綴りも同じパスに化ける
-    public void Generate_QueryNamedAfterRemoteOperation_IsRejected(string queryName)
-    {
-        var diagram = CreateDiagram(
-            new QueryDefinition { Name = queryName, Returns = QueryReturnShape.List }
-        );
-
-        var result = Generate(diagram, CreateOptions());
-
-        result.HasErrors.Should().BeTrue();
-        result
-            .Diagnostics.Should()
-            .Contain(d =>
-                d.Severity == GenerationDiagnosticSeverity.Error && d.Message.Contains(queryName)
-            );
-    }
-
-    /// <summary>
-    /// 大小だけ違うクエリ名の 2 本目が重複として拒否されることを検証する。C# メンバーとしては共存できるが、
-    /// リモートのルートは大小を区別しないため同じパスへの 2 本目のハンドラになる
-    /// </summary>
-    [Fact(DisplayName = "大小だけ違うクエリ名は重複として拒否される")]
-    public void Generate_QueriesDifferingOnlyInCase_SecondIsRejected()
-    {
-        var diagram = CreateDiagram(
-            new QueryDefinition { Name = "FindStuff", Returns = QueryReturnShape.List },
-            new QueryDefinition { Name = "findstuff", Returns = QueryReturnShape.List }
-        );
-
-        var result = Generate(diagram, CreateOptions());
-
-        result.HasErrors.Should().BeTrue();
-        result
-            .Diagnostics.Should()
-            .Contain(d =>
-                d.Severity == GenerationDiagnosticSeverity.Error && d.Message.Contains("findstuff")
-            );
-    }
-
-    /// <summary>
-    /// C# の予約語のパラメータ名と、リモートのリクエストの record のメンバー名になるパラメータ名「ToString」が
-    /// 診断エラーで拒否されることを検証する。生成器は識別子を @ エスケープせずそのまま出力するため、予約語は
-    /// 引数宣言がコンパイル不能になり、ToString は record のメンバーとぶつかってコンパイル不能になる
-    /// </summary>
-    [Theory(
-        DisplayName = "予約語・リモートのリクエストの record のメンバー名のパラメータ名は診断エラーで拒否される"
-    )]
-    [InlineData("class")]
-    [InlineData("int")]
-    [InlineData("ToString")]
-    public void Generate_ReservedParameterName_IsRejected(string parameterName)
-    {
-        var diagram = CreateDiagram(
-            new QueryDefinition
-            {
-                Name = "FindReserved",
-                Returns = QueryReturnShape.List,
-                Parameters =
-                {
-                    new QueryParameter { Name = parameterName, Type = "int32" },
-                },
-                Condition = $"CustomerId = @{parameterName}",
-            }
-        );
-
-        var result = Generate(diagram, CreateOptions());
-
-        result.HasErrors.Should().BeTrue();
-        result
-            .Diagnostics.Should()
-            .Contain(d =>
-                d.Severity == GenerationDiagnosticSeverity.Error
-                && d.Message.Contains(parameterName)
-            );
-    }
-
-    /// <summary>
-    /// 小文字の query が使えることを検証する（生成本体は this.Query() で呼ぶので、Query も query も
-    /// メソッドグループを隠さない。文脈キーワードも予約語ではないので合法）
-    /// </summary>
-    [Fact(DisplayName = "小文字の query パラメータ名は従来どおり使える")]
-    public void Generate_LowercaseQueryParameterName_IsAccepted()
-    {
-        var diagram = CreateDiagram(
-            new QueryDefinition
-            {
-                Name = "FindByQueryWord",
-                Returns = QueryReturnShape.List,
-                Parameters =
-                {
-                    new QueryParameter { Name = "query", Type = "string(50)" },
-                },
-                Condition = "Memo LIKE @query",
-            }
-        );
-
-        var result = Generate(diagram, CreateOptions());
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-
-        var compilation = GeneratedCodeCompiler.Compile(result, "QueryLowercaseParam");
-
-        compilation
-            .Success.Should()
-            .BeTrue(
-                "小文字の query は Query() を隠さずコンパイルできるべき: "
-                    + string.Join(" / ", compilation.Errors.Take(5))
-            );
-    }
-
-    /// <summary>
-    /// 射影 DTO の結果型名と同名のフィールドが診断エラーで拒否されることを検証する
-    /// （C# はメンバー名を外側の型名と同じにできない＝素通しすると CS0542 で生成物全体が壊れる）
-    /// </summary>
-    [Fact(DisplayName = "結果型名と同名の射影フィールドは診断エラーで拒否される")]
-    public void Generate_ProjectionFieldNamedAfterResultType_IsRejected()
-    {
-        var amount = _order.Columns.First(c => c.Name == "Amount");
-        var diagram = CreateDiagram(
-            new QueryDefinition
-            {
-                Name = "GetClashRows",
-                Returns = QueryReturnShape.Projection,
-                ResultTypeName = "ClashRow",
-                Fields =
-                {
-                    new ProjectionField
-                    {
-                        Name = "ClashRow",
-                        Type = "decimal(12,2)",
-                        SourceColumnId = amount.Id,
-                    },
-                },
-            }
-        );
-
-        var result = Generate(diagram, CreateOptions());
-
-        result.HasErrors.Should().BeTrue();
-        result
-            .Diagnostics.Should()
-            .Contain(d =>
-                d.Severity == GenerationDiagnosticSeverity.Error && d.Message.Contains("ClashRow")
-            );
-    }
-
-    /// <summary>
     /// IN の持ち上げリスト変数名（{パラメータ名}Values）が別のパラメータ名と衝突するとき、_ を後置して
     /// 回避することを検証する（衝突したままだとローカル変数が引数を隠して CS0136 になる）
     /// </summary>
@@ -1185,14 +972,7 @@ public class QueryGenerationTests
             .Contain("var quantitiesValues_ = quantities.Cast<int?>().ToList();")
             .And.Contain("quantitiesValues_.Contains(e.Quantity)");
 
-        var compilation = GeneratedCodeCompiler.Compile(result, "QueryLiftCollision");
-
-        compilation
-            .Success.Should()
-            .BeTrue(
-                "持ち上げ変数がリネームされてコンパイルできるべき: "
-                    + string.Join(" / ", compilation.Errors.Take(5))
-            );
+        // コンパイルの成否（持ち上げ変数がリネームされてコンパイルできる）は決まった行 compile-query-in-lift-variable-renamed
     }
 
     /// <summary>
@@ -1235,14 +1015,7 @@ public class QueryGenerationTests
             .Contain("var items_ = await this.QueryBySqlAsync(")
             .And.Contain("return items_.Count > 0 ? items_[0] : null;");
 
-        var compilation = GeneratedCodeCompiler.Compile(result, "QueryItemsParam");
-
-        compilation
-            .Success.Should()
-            .BeTrue(
-                "引数名 items の生 SQL 単一戻り形はコンパイルできるべき: "
-                    + string.Join(" / ", compilation.Errors.Take(5))
-            );
+        // コンパイルの成否は決まった行 compile-query-raw-sql-single-items-parameter
     }
 
     /// <summary>
@@ -1278,14 +1051,8 @@ public class QueryGenerationTests
 
         var result = Generate(diagram, CreateOptions());
 
+        // 条件と並び順の 2 件が別々に告げられることは決まった行 diag-query-raw-sql-with-condition-and-order-warns-ignored
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        result
-            .Diagnostics.Where(d =>
-                d.Severity == GenerationDiagnosticSeverity.Warning
-                && d.Message.Contains("ListBigOrders")
-            )
-            .Should()
-            .HaveCount(2, "条件と並び順の 2 件が別々に告げられる");
 
         // 生成自体は続行し、SQL 実装が出る
         AllContent(result).Should().Contain("ListBigOrdersAsync");
@@ -1329,27 +1096,14 @@ public class QueryGenerationTests
 
         var result = Generate(diagram, CreateOptions());
 
+        // 警告の名指しは決まった行 compile-query-not-null-override-on-nullable-value-column-skips
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        result
-            .Diagnostics.Should()
-            .Contain(d =>
-                d.Severity == GenerationDiagnosticSeverity.Warning
-                && d.Message.Contains("GetForcedRows")
-                && d.Message.Contains("Quantity")
-            );
 
         var content = AllContent(result);
         content.Should().NotContain("GetForcedRowsAsync", "スキップされたクエリのメソッドは出ない");
         content.Should().Contain("ListAllAsync", "他のクエリは従来どおり生成される");
 
-        var compilation = GeneratedCodeCompiler.Compile(result, "QueryNotNullOverride");
-
-        compilation
-            .Success.Should()
-            .BeTrue(
-                "スキップ後の残存生成物はコンパイルできるべき: "
-                    + string.Join(" / ", compilation.Errors.Take(5))
-            );
+        // スキップ後の残存生成物がコンパイルできることは決まった行 compile-query-not-null-override-on-nullable-value-column-skips
     }
 
     /// <summary>
@@ -1403,10 +1157,8 @@ public class QueryGenerationTests
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
         var content = AllContent(result);
         content.Should().Contain("ValidAsync").And.NotContain("SkippedAsync");
-        GeneratedCodeCompiler
-            .Compile(result, "QuerySkippedProjectionName")
-            .Success.Should()
-            .BeTrue();
+
+        // コンパイルの成否は決まった行 compile-query-skipped-projection-releases-result-type-name
     }
 
     /// <summary>
@@ -1452,17 +1204,10 @@ public class QueryGenerationTests
         );
 
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        result
-            .Diagnostics.Should()
-            .NotContain(d => d.Severity != GenerationDiagnosticSeverity.Info);
         AllContent(result).Should().Contain("Memo = e.Memo!");
 
-        var compilation = GeneratedCodeCompiler.Compile(result, "QueryNotNullOverrideReference");
-
-        compilation.Success.Should().BeTrue(string.Join(" / ", compilation.Errors.Take(5)));
-        compilation
-            .Warnings.Should()
-            .BeEmpty("null 抑止つきの代入は CS8601 にならない: " + compilation.DescribeWarnings());
+        // 警告なし（診断の完全一致）と、警告ゼロのコンパイル（null 抑止つきの代入は CS8601 にならない）は
+        // 決まった行 compile-query-not-null-override-on-nullable-reference-column / -vo
     }
 
     /// <summary>
@@ -1524,17 +1269,8 @@ public class QueryGenerationTests
 
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
 
-        var warned = result
-            .Diagnostics.Where(d => d.Severity == GenerationDiagnosticSeverity.Warning)
-            .Select(d => d.Message)
-            .ToList();
-
-        foreach (var skipped in new[] { "PartialLike", "ContainsMatch", "NegatedStartsWith" })
-        {
-            warned.Should().Contain(m => m.Contains(skipped) && m.Contains("Code"));
-        }
-
-        warned.Should().HaveCount(3, "完全一致と別の列のクエリは警告にならない");
+        // 警告はスキップした 3 件だけ（完全一致と別の列のクエリは警告にならない）は
+        // 決まった行 compile-query-guidkey-string-match-skips-partial-matches
 
         var content = AllContent(result);
 
@@ -1563,60 +1299,7 @@ public class QueryGenerationTests
             content.Should().NotContain(skipped);
         }
 
-        var compilation = GeneratedCodeCompiler.Compile(result, "QueryGuidKeyStringMatch");
-
-        compilation.Success.Should().BeTrue(string.Join(" / ", compilation.Errors.Take(5)));
-    }
-
-    /// <summary>
-    /// 射影 DTO の型名が、生成コードの型名（BCL・ランタイム・生成されるクラスやインターフェイス・値オブジェクト）と
-    /// 衝突する定義は、生成前の検証で名指しして断られ、生成全体が止まる（コンパイル不能な出力を作らない）ことを検証する。
-    /// 衝突しない名前の射影は従来どおり生成される
-    /// </summary>
-    [Theory(DisplayName = "射影 DTO の型名が生成コードの型名と衝突する定義は名指しして断られる")]
-    [InlineData("Task")]
-    [InlineData("SqlQuery")]
-    [InlineData("OrderEntity")]
-    [InlineData("IOrderRepository")]
-    [InlineData("AmountValue")]
-    public void Generate_ProjectionResultTypeNameCollidingWithGeneratedType_IsRejected(
-        string typeName
-    )
-    {
-        var amount = _order.Columns.First(c => c.Name == "Amount");
-        QueryDefinition Projection(string name, string resultTypeName) =>
-            new()
-            {
-                Name = name,
-                Returns = QueryReturnShape.Projection,
-                ResultTypeName = resultTypeName,
-                Fields =
-                {
-                    new ProjectionField { Name = "Amount", SourceColumnId = amount.Id },
-                },
-            };
-
-        var rejected = Generate(CreateDiagram(Projection("Rows", typeName)), CreateOptions());
-
-        rejected.HasErrors.Should().BeTrue("衝突する DTO 名のまま生成するとコンパイルできない");
-        rejected
-            .Diagnostics.Should()
-            .Contain(d =>
-                d.Severity == GenerationDiagnosticSeverity.Error
-                && d.Message.Contains("Rows")
-                && d.Message.Contains($"'{typeName}'")
-            );
-
-        var accepted = Generate(
-            CreateDiagram(Projection("Rows", "OrderAmountRow")),
-            CreateOptions()
-        );
-
-        accepted.HasErrors.Should().BeFalse(FormatDiagnostics(accepted));
-        GeneratedCodeCompiler
-            .Compile(accepted, "QueryResultTypeNameAccepted")
-            .Success.Should()
-            .BeTrue();
+        // コンパイルの成否は決まった行 compile-query-guidkey-string-match-skips-partial-matches
     }
 
     /// <summary>
@@ -1729,8 +1412,7 @@ public class QueryGenerationTests
                 "1 行の SQL は従来の形のまま"
             );
 
-        var compilation = GeneratedCodeCompiler.Compile(result, "QueryRawSqlLineBreaks");
-        compilation.Success.Should().BeTrue(compilation.DescribeErrors());
+        // コンパイルの成否は決まった行 compile-query-raw-sql-line-breaks-and-single-line
     }
 
     /// <summary>生成コードの指定メソッドで、生 SQL を渡す呼び出しの第 1 引数（文字列リテラルの連結）の値を求める</summary>

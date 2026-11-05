@@ -26,142 +26,32 @@ public class CSharpGenerationDialogViewModelTests
     }
 
     /// <summary>
-    /// 同期支援の表示は「QuickER 版 Repository ＋ 対象 DB が両方言」のときだけ真になることを検証する（CU2）。
-    /// </summary>
-    [Fact(DisplayName = "同期支援の表示は QuickER 版 Repository と両方言の選択に連動する")]
-    public void ShowSyncSupport_FollowsRepositoryAndBothDialects()
-    {
-        var vm = CreateViewModel(out _);
-
-        vm.GenerateRepositories = true;
-        vm.TargetSqlServer = true;
-        vm.TargetSqlite = false;
-        vm.ShowSyncSupport.Should().BeFalse("片方言では同期支援を選べない");
-
-        vm.TargetSqlite = true;
-        vm.ShowSyncSupport.Should().BeTrue("両方言なら選べる");
-
-        vm.GenerateRepositories = false;
-        vm.ShowSyncSupport.Should().BeFalse("QuickER 版 Repository を生成しないなら選べない");
-    }
-
-    /// <summary>
-    /// 片方言の構成で同期支援の行が隠れているとき、保持されたチェック値は結果・設定へ渡さないことを検証する。
+    /// DB アクセスを操作せずに確定すると、QuickER 版 Repository も EF Core も生成しない（既定は「なし」）ことを検証する
     /// </summary>
     /// <remarks>
-    /// 隠れた保存値をそのまま書き戻すと、次に開いたときに「選べないはずの同期支援が ON」の設定が残り、
-    /// 生成が「実効方言が sqlserver+sqlite のちょうど 2 つでない」エラーで止まる。
-    /// </remarks>
-    [Fact(DisplayName = "同期支援は非表示構成では結果・設定へ渡さない（値自体は保持する）")]
-    public void SyncSupport_IsDroppedWhenHidden_ButKeptInViewModel()
-    {
-        var vm = CreateViewModel(out var folder);
-
-        try
-        {
-            vm.RootNamespace = "Acme.App";
-            vm.OutputPath = @"C:\temp\Entities.g.cs";
-            vm.DbAccessRepository = true;
-            vm.TargetSqlServer = true;
-            vm.TargetSqlite = true;
-            vm.ShowSyncSupport.Should().BeTrue("両方言なら同期支援を選べる");
-            vm.GenerateSyncSupport = true;
-
-            // 片方言へ戻すと行が隠れる
-            vm.TargetSqlite = false;
-            vm.ShowSyncSupport.Should().BeFalse();
-
-            vm.OkCommand.Execute(null);
-
-            vm.Result.Should().NotBeNull();
-            vm.Result!.Options.GenerateSyncSupport.Should().BeFalse();
-            vm.GenerateSyncSupport.Should().BeTrue("両方言を選び直せば元の選択が見える");
-
-            var restored = new CSharpGenerationDialogViewModel(
-                new CSharpGenerationSettingsStore(folder)
-            );
-            restored.GenerateSyncSupport.Should().BeFalse("隠れた値は設定へ持ち越さない");
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
-    }
-
-    /// <summary>
-    /// DB アクセス「なし」で無制限バイナリ列の除外の行が隠れているとき、保持されたチェック値は
-    /// 結果・設定へ渡さないことを検証する。
-    /// </summary>
-    /// <remarks>
-    /// このオプションは EditModel の必須判定（<c>IsRequired</c>）にも効くため、隠れた保存値を書き戻すと
-    /// QuickER 版 Repository を生成しない構成でも生成物が変わる。
+    /// 確定の結果（namespace・出力先・閉じること）は <c>CodegenCaseTests</c> の行 <c>gui-no-db-access-single-file</c>（GUI の入口）が見る。
+    /// 入口は全部のプロパティを画面へ入れるので、操作しないときの既定はここで見る。
     /// </remarks>
     [Fact(
-        DisplayName = "無制限バイナリ列の除外は非表示構成では結果・設定へ渡さない（値自体は保持する）"
+        DisplayName = "DB アクセス未操作の確定では QuickER 版 Repository も EF Core も生成しない"
     )]
-    public void ExcludeUnboundedBinary_IsDroppedWhenHidden_ButKeptInViewModel()
-    {
-        var vm = CreateViewModel(out var folder);
-
-        try
-        {
-            vm.RootNamespace = "Acme.App";
-            vm.OutputPath = @"C:\temp\Entities.g.cs";
-            vm.DbAccessRepository = true;
-            vm.ExcludeUnboundedBinaryColumns = true;
-
-            vm.DbAccessNone = true;
-            vm.ShowExcludeUnboundedBinary.Should().BeFalse();
-
-            vm.OkCommand.Execute(null);
-
-            vm.Result.Should().NotBeNull();
-            vm.Result!.Options.ExcludeUnboundedBinaryColumns.Should().BeFalse();
-            vm.ExcludeUnboundedBinaryColumns.Should()
-                .BeTrue("DB アクセスを選び直せば元の選択が見える");
-
-            var restored = new CSharpGenerationDialogViewModel(
-                new CSharpGenerationSettingsStore(folder)
-            );
-            restored.ExcludeUnboundedBinaryColumns.Should().BeFalse("隠れた値は設定へ持ち越さない");
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
-    }
-
-    /// <summary>OK 実行で namespace・出力先・生成オプションが結果へ反映され閉じることを検証する</summary>
-    [Fact(DisplayName = "OK 実行で namespace と出力先が結果へ反映される")]
-    public void Ok_SetsResult()
+    public void Ok_Untouched_GeneratesNoDbAccess()
     {
         var vm = CreateViewModel(out _);
         vm.RootNamespace = "Sample.Domain";
         vm.OutputPath = @"C:\temp\Entities.g.cs";
-        bool? closed = null;
-        vm.CloseAction = result => closed = result;
 
         vm.OkCommand.Execute(null);
 
         vm.Result.Should().NotBeNull();
-        vm.Result!.Options.RootNamespace.Should().Be("Sample.Domain");
-        vm.Result.Options.SplitFilesByCategory.Should().BeFalse();
-        vm.Result.OutputDirectory.Should().Be(@"C:\temp");
         // DB アクセスの既定は「なし」（QuickER 版 Repository も EF Core も生成しない）
-        vm.Result.Options.GenerateRepositories.Should().BeFalse();
+        vm.Result!.Options.GenerateRepositories.Should().BeFalse();
         vm.Result.Options.GenerateEfCoreRepositories.Should().BeFalse();
-        closed.Should().BeTrue();
     }
 
-    /// <summary>DB アクセスラジオが排他で動き、選択が結果オプションへ反映されることを検証する</summary>
-    [Fact(DisplayName = "DB アクセスラジオは排他選択で結果へ反映される")]
-    public void DbAccessRadios_AreExclusive_AndStoredInResult()
+    /// <summary>DB アクセスラジオが排他で動くことを検証する（選択が結果へ渡ることは GUI の入口の行が見る）</summary>
+    [Fact(DisplayName = "DB アクセスラジオは排他選択で動く")]
+    public void DbAccessRadios_AreExclusive()
     {
         var vm = CreateViewModel(out _);
         vm.RootNamespace = "Sample.Domain";
@@ -176,41 +66,6 @@ public class CSharpGenerationDialogViewModelTests
         vm.DbAccessRepository = true;
         vm.GenerateRepositories.Should().BeTrue();
         vm.GenerateEfCoreRepositories.Should().BeFalse("排他選択のため EF Core は外れる");
-
-        vm.DbAccessEfCore = true;
-        vm.OkCommand.Execute(null);
-
-        vm.Result.Should().NotBeNull();
-        vm.Result!.Options.GenerateEfCoreRepositories.Should().BeTrue();
-        vm.Result.Options.GenerateRepositories.Should().BeFalse();
-    }
-
-    /// <summary>
-    /// DB アクセス「なし」でリモート対応の行が隠れているとき、保持されたチェック値は結果オプションへ渡さない
-    /// ことを検証する（隠れた保存値のせいで生成が「リモート面には Repository 契約が必要」エラーで止まらない）
-    /// </summary>
-    [Fact(DisplayName = "リモート対応は非表示構成では結果オプションへ渡さない（値自体は保持する）")]
-    public void RemoteOptions_AreDroppedWhenHidden_ButKeptInViewModel()
-    {
-        var vm = CreateViewModel(out _);
-        vm.RootNamespace = "Sample.Domain";
-        vm.OutputPath = @"C:\temp\Entities.g.cs";
-
-        // いったん Repository を選んでリモート対応を ON にしてから、DB アクセスを「なし」へ戻す
-        vm.DbAccessRepository = true;
-        vm.GenerateRemoteServices = true;
-        vm.GenerateRemoteContracts.Should().BeTrue("HTTP 実装 ON はリモート面を含意する");
-
-        vm.DbAccessNone = true;
-        vm.ShowRemoteContracts.Should().BeFalse("DB アクセス「なし」ではリモート対応の行を隠す");
-
-        vm.OkCommand.Execute(null);
-
-        vm.Result.Should().NotBeNull();
-        vm.Result!.Options.GenerateRemoteContracts.Should().BeFalse();
-        vm.Result.Options.GenerateRemoteServices.Should().BeFalse();
-        vm.GenerateRemoteContracts.Should().BeTrue("DB アクセスを選び直せば元の選択が見える");
-        vm.GenerateRemoteServices.Should().BeTrue();
     }
 
     /// <summary>未対応方言のプロバイダでもQuickER 版 Repository ラジオは常時選択可であり、対象 DB チェックは両方 OFF から始まることを検証する</summary>
@@ -260,26 +115,6 @@ public class CSharpGenerationDialogViewModelTests
         }
     }
 
-    /// <summary>ToOptions がチェックした対象 DB を固定順（sqlserver, sqlite）で RepositoryDialects へ設定することを検証する</summary>
-    [Fact(DisplayName = "ToOptions はチェックした対象 DB を固定順で RepositoryDialects に設定する")]
-    public void ToOptions_SetsRepositoryDialects_InFixedOrder()
-    {
-        var vm = CreateViewModel(
-            out _,
-            currentProvider: new QuickER.Provider.Sqlite.SqliteProvider()
-        );
-        vm.RootNamespace = "Sample.Domain";
-        vm.OutputPath = @"C:\temp\Entities.g.cs";
-        vm.DbAccessRepository = true;
-        vm.TargetSqlServer = true;
-        vm.TargetSqlite = true;
-
-        vm.OkCommand.Execute(null);
-
-        vm.Result.Should().NotBeNull();
-        vm.Result!.Options.RepositoryDialects.Should().Equal("sqlserver", "sqlite");
-    }
-
     /// <summary>対象 DB を 1 つもチェックしないままQuickER 版 Repository を確定しようとすると拒否されることを検証する</summary>
     [Fact(DisplayName = "対象 DB 0 個では確定できない")]
     public void Ok_Repository_WithNoTargetDialects_ShowsError()
@@ -311,47 +146,6 @@ public class CSharpGenerationDialogViewModelTests
 
         vm.DbAccessNone = true;
         vm.ShowRepositoryDialectTargets.Should().BeFalse();
-    }
-
-    /// <summary>
-    /// 対象 DB チェックは %LOCALAPPDATA% の設定へ永続化され、次回起動時はプロバイダの初期値より
-    /// 保存値（非空リスト）が優先して復元されることを検証する
-    /// </summary>
-    [Fact(DisplayName = "対象 DB チェックは保存され、次回は保存値が図の方言より優先して復元される")]
-    public void TargetDialectChecks_ArePersisted_AndRestoredOverProviderDefault()
-    {
-        var vm = CreateViewModel(
-            out var folder,
-            currentProvider: new QuickER.Provider.Sqlite.SqliteProvider()
-        );
-
-        try
-        {
-            vm.RootNamespace = "Acme.App";
-            vm.OutputPath = @"C:\temp\Entities.g.cs";
-            vm.DbAccessRepository = true;
-            vm.TargetSqlServer = true;
-            vm.TargetSqlite = true;
-            vm.OkCommand.Execute(null);
-
-            // 次回はプロバイダを変えて再構築しても、保存された対象 DB（両方 ON）が優先して復元される
-            var restored = new CSharpGenerationDialogViewModel(
-                new CSharpGenerationSettingsStore(folder),
-                currentProvider: new QuickER.Provider.SqlServer.SqlServerProvider()
-            );
-
-            restored.TargetSqlServer.Should().BeTrue("保存値どおり SQL Server は ON");
-            restored
-                .TargetSqlite.Should()
-                .BeTrue("保存値（非空リスト）が優先され SQLite も復元される");
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
     }
 
     /// <summary>
@@ -389,71 +183,15 @@ public class CSharpGenerationDialogViewModelTests
             );
     }
 
-    /// <summary>
-    /// EF Core 選択中もパッケージ参照モードのチェックボックスは操作可能で、
-    /// チェック済みのまま EF Core を選んでも解除されず、結果に両方が反映されることを検証する（併用解禁）
-    /// </summary>
-    [Fact(DisplayName = "EF Core 選択中もパッケージ参照モードは操作可能・併用が結果へ反映される")]
-    public void UseRuntimePackages_StaysEnabled_AndCoexistsWithEfCore()
-    {
-        var vm = CreateViewModel(out _);
-        vm.RootNamespace = "Sample.Domain";
-        vm.OutputPath = @"C:\temp\Entities.g.cs";
-
-        vm.UseRuntimePackages = true;
-        vm.UseRuntimePackages.Should().BeTrue();
-
-        vm.DbAccessEfCore = true;
-
-        vm.UseRuntimePackages.Should().BeTrue("EF Core 選択でもチェックは解除されない");
-
-        vm.OkCommand.Execute(null);
-
-        vm.Result.Should().NotBeNull();
-        vm.Result!.Options.GenerateEfCoreRepositories.Should().BeTrue();
-        vm.Result.Options.UseRuntimePackages.Should()
-            .BeTrue("EF Core とパッケージ参照モードの併用が結果へ反映される");
-    }
-
-    /// <summary>
-    /// QuickER 版 Repository 選択（EF Core ではない）ではパッケージ参照モードが操作可能で、
-    /// チェックした場合に結果オプションへ反映されることを検証する
-    /// </summary>
-    [Fact(DisplayName = "QuickER 版 Repository 選択ではパッケージ参照モードが結果へ反映される")]
-    public void UseRuntimePackages_IsReflectedInResult_WhenRepositorySelected()
-    {
-        var vm = CreateViewModel(
-            out _,
-            currentProvider: new QuickER.Provider.SqlServer.SqlServerProvider()
-        );
-        vm.RootNamespace = "Sample.Domain";
-        vm.OutputPath = @"C:\temp\Entities.g.cs";
-        vm.DbAccessRepository = true;
-
-        vm.UseRuntimePackages = true;
-
-        vm.OkCommand.Execute(null);
-
-        vm.Result.Should().NotBeNull();
-        vm.Result!.Options.UseRuntimePackages.Should().BeTrue();
-        vm.Result.Options.GenerateRepositories.Should().BeTrue();
-    }
-
-    /// <summary>API リファレンス出力チェックの既定は OFF で、ON にすると結果オプションへ反映されることを検証する</summary>
-    [Fact(DisplayName = "API リファレンス出力チェックは既定 OFF・ON で結果へ反映される")]
-    public void GenerateApiDocs_DefaultsOff_AndReflectedInResult()
+    /// <summary>API リファレンス出力チェックの既定は OFF であることを検証する（ON が結果へ渡ることは GUI の入口の行が見る）</summary>
+    [Fact(DisplayName = "API リファレンス出力チェックは既定 OFF")]
+    public void GenerateApiDocs_DefaultsOff()
     {
         var vm = CreateViewModel(out _);
         vm.RootNamespace = "Sample.Domain";
         vm.OutputPath = @"C:\temp\Entities.g.cs";
 
         vm.GenerateApiDocs.Should().BeFalse("既定は OFF");
-
-        vm.GenerateApiDocs = true;
-        vm.OkCommand.Execute(null);
-
-        vm.Result.Should().NotBeNull();
-        vm.Result!.Options.GenerateApiDocs.Should().BeTrue();
     }
 
     /// <summary>API リファレンス出力チェックの既定 OFF が結果オプションにも反映されることを検証する</summary>
@@ -468,34 +206,6 @@ public class CSharpGenerationDialogViewModelTests
 
         vm.Result.Should().NotBeNull();
         vm.Result!.Options.GenerateApiDocs.Should().BeFalse();
-    }
-
-    /// <summary>API リファレンス出力チェックの状態が保存・復元されることを検証する</summary>
-    [Fact(DisplayName = "API リファレンス出力チェックが次回起動時に復元される")]
-    public void GenerateApiDocs_IsPersistedAndRestored()
-    {
-        var vm = CreateViewModel(out var folder);
-
-        try
-        {
-            vm.RootNamespace = "Acme.App";
-            vm.OutputPath = @"C:\temp\Entities.g.cs";
-            vm.GenerateApiDocs = true;
-            vm.OkCommand.Execute(null);
-
-            var restored = new CSharpGenerationDialogViewModel(
-                new CSharpGenerationSettingsStore(folder)
-            );
-
-            restored.GenerateApiDocs.Should().BeTrue();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
     }
 
     /// <summary>
@@ -531,7 +241,6 @@ public class CSharpGenerationDialogViewModelTests
 
         vm.ApiDocsBoth = true;
         vm.ApiDocsLanguage.Should().Be(ApiDocsLanguage.Both);
-        vm.ToOptions().ApiDocsLanguage.Should().Be(ApiDocsLanguage.Both);
     }
 
     /// <summary>
@@ -554,14 +263,11 @@ public class CSharpGenerationDialogViewModelTests
     }
 
     /// <summary>
-    /// 保存した言語が復元され、外部編集で未定義の数値が入っていた場合はどのラジオも選ばれない表示にならず
-    /// 既定（英語）へ戻ることを検証する
+    /// 外部編集で未定義の数値が入っていた言語を復元すると、どのラジオも選ばれない表示にならず既定（英語）へ戻ることを検証する
+    /// （保存した言語の復元は GUI の入口の行が見る）
     /// </summary>
-    [Theory(DisplayName = "設定復元時は言語を復元し、未定義の値は英語へ戻す")]
-    [InlineData(ApiDocsLanguage.Japanese, ApiDocsLanguage.Japanese)]
-    [InlineData(ApiDocsLanguage.Both, ApiDocsLanguage.Both)]
-    [InlineData((ApiDocsLanguage)99, ApiDocsLanguage.English)]
-    public void ApiDocsLanguage_RestoresSavedValue(ApiDocsLanguage saved, ApiDocsLanguage expected)
+    [Fact(DisplayName = "設定復元時に未定義の言語の値は英語へ戻す")]
+    public void ApiDocsLanguage_UndefinedSavedValue_FallsBackToEnglish()
     {
         var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
 
@@ -569,12 +275,16 @@ public class CSharpGenerationDialogViewModelTests
         {
             var store = new CSharpGenerationSettingsStore(folder);
             store.Save(
-                new CSharpGenerationSettings { GenerateApiDocs = true, ApiDocsLanguage = saved }
+                new CSharpGenerationSettings
+                {
+                    GenerateApiDocs = true,
+                    ApiDocsLanguage = (ApiDocsLanguage)99,
+                }
             );
 
             var vm = new CSharpGenerationDialogViewModel(store);
 
-            vm.ApiDocsLanguage.Should().Be(expected);
+            vm.ApiDocsLanguage.Should().Be(ApiDocsLanguage.English);
         }
         finally
         {
@@ -586,13 +296,11 @@ public class CSharpGenerationDialogViewModelTests
     }
 
     /// <summary>
-    /// 無制限バイナリ列の除外チェックを ON にすると、結果オプションの ExcludeUnboundedBinaryColumns が true になり、
-    /// OFF（既定）では false になることを検証する
+    /// 無制限バイナリ列の除外チェックの既定は OFF で、結果オプションの ExcludeUnboundedBinaryColumns も false であることを検証する
+    /// （ON が結果へ渡ることは GUI の入口の行が見る）
     /// </summary>
-    [Fact(
-        DisplayName = "無制限バイナリ列の除外は既定 OFF・ON で ExcludeUnboundedBinaryColumns へ反映される"
-    )]
-    public void ExcludeUnboundedBinary_IsReflectedInResultOptions()
+    [Fact(DisplayName = "無制限バイナリ列の除外は既定 OFF・ExcludeUnboundedBinaryColumns も false")]
+    public void ExcludeUnboundedBinary_DefaultsOff()
     {
         var vm = CreateViewModel(
             out _,
@@ -602,80 +310,16 @@ public class CSharpGenerationDialogViewModelTests
         vm.OutputPath = @"C:\temp\Entities.g.cs";
         vm.DbAccessRepository = true;
 
-        // 既定（OFF）は false
         vm.ExcludeUnboundedBinaryColumns.Should().BeFalse("既定は OFF");
         vm.ToOptions().ExcludeUnboundedBinaryColumns.Should().BeFalse();
-
-        vm.ExcludeUnboundedBinaryColumns = true;
-        vm.OkCommand.Execute(null);
-
-        vm.Result.Should().NotBeNull();
-        vm.Result!.Options.ExcludeUnboundedBinaryColumns.Should().BeTrue();
     }
 
     /// <summary>
-    /// 無制限バイナリ列の除外行の表示フラグはQuickER 版 Repository 生成に追従し、「なし」/ EF Core では非表示・
-    /// QuickER 版 Repository 選択時のみ表示になることを検証する
+    /// リモート対応チェックの既定は OFF で、結果オプションの GenerateRemoteContracts も false であることを検証する
+    /// （ON が結果へ渡ることは GUI の入口の行が見る）
     /// </summary>
-    [Fact(DisplayName = "無制限バイナリ列の除外行はQuickER 版 Repository 選択時のみ表示")]
-    public void ShowExcludeUnboundedBinary_TracksRepositorySelection()
-    {
-        var vm = CreateViewModel(
-            out _,
-            currentProvider: new QuickER.Provider.SqlServer.SqlServerProvider()
-        );
-        vm.RootNamespace = "Sample.Domain";
-
-        vm.ShowExcludeUnboundedBinary.Should().BeFalse("既定は DB アクセス「なし」のため非表示");
-
-        vm.DbAccessRepository = true;
-        vm.ShowExcludeUnboundedBinary.Should().BeTrue("QuickER 版 Repository 選択で表示");
-
-        vm.DbAccessEfCore = true;
-        vm.ShowExcludeUnboundedBinary.Should()
-            .BeFalse("EF Core 選択では非表示（QuickER 版 Repository 専用）");
-
-        vm.DbAccessNone = true;
-        vm.ShowExcludeUnboundedBinary.Should().BeFalse("DB アクセス「なし」でも非表示");
-    }
-
-    /// <summary>無制限バイナリ列の除外チェックの状態が保存・復元されることを検証する</summary>
-    [Fact(DisplayName = "無制限バイナリ列の除外チェックが次回起動時に復元される")]
-    public void ExcludeUnboundedBinary_IsPersistedAndRestored()
-    {
-        var vm = CreateViewModel(out var folder);
-
-        try
-        {
-            vm.RootNamespace = "Acme.App";
-            vm.OutputPath = @"C:\temp\Entities.g.cs";
-            vm.DbAccessRepository = true;
-            vm.ExcludeUnboundedBinaryColumns = true;
-            vm.OkCommand.Execute(null);
-
-            var restored = new CSharpGenerationDialogViewModel(
-                new CSharpGenerationSettingsStore(folder)
-            );
-
-            restored.ExcludeUnboundedBinaryColumns.Should().BeTrue();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
-    }
-
-    /// <summary>
-    /// リモート対応のチェックを ON にすると、結果オプションの GenerateRemoteContracts が true になり、
-    /// OFF（既定）では false になることを検証する
-    /// </summary>
-    [Fact(
-        DisplayName = "リモート対応 ON で GenerateRemoteContracts=true・OFF で false が結果へ反映される"
-    )]
-    public void GenerateRemoteContracts_IsReflectedInResultOptions()
+    [Fact(DisplayName = "リモート対応は既定 OFF・GenerateRemoteContracts も false")]
+    public void GenerateRemoteContracts_DefaultsOff()
     {
         var vm = CreateViewModel(
             out _,
@@ -685,69 +329,8 @@ public class CSharpGenerationDialogViewModelTests
         vm.OutputPath = @"C:\temp\Entities.g.cs";
         vm.DbAccessRepository = true;
 
-        // 既定（OFF）は false
         vm.GenerateRemoteContracts.Should().BeFalse("既定は OFF");
         vm.ToOptions().GenerateRemoteContracts.Should().BeFalse();
-
-        vm.GenerateRemoteContracts = true;
-        vm.OkCommand.Execute(null);
-
-        vm.Result.Should().NotBeNull();
-        vm.Result!.Options.GenerateRemoteContracts.Should().BeTrue();
-    }
-
-    /// <summary>
-    /// リモート対応行の表示フラグは DB アクセス選択に連動し、「なし」では非表示・
-    /// QuickER 版 Repository / EF Core 選択で表示になることを検証する
-    /// </summary>
-    [Fact(DisplayName = "リモート対応行は DB アクセス「なし」で非表示・Repository/EF Core で表示")]
-    public void ShowRemoteContracts_TracksDbAccessSelection()
-    {
-        var vm = CreateViewModel(
-            out _,
-            currentProvider: new QuickER.Provider.SqlServer.SqlServerProvider()
-        );
-        vm.RootNamespace = "Sample.Domain";
-
-        vm.ShowRemoteContracts.Should().BeFalse("既定は DB アクセス「なし」のため非表示");
-
-        vm.DbAccessRepository = true;
-        vm.ShowRemoteContracts.Should().BeTrue("QuickER 版 Repository 選択で表示");
-
-        vm.DbAccessEfCore = true;
-        vm.ShowRemoteContracts.Should().BeTrue("EF Core 選択でも表示");
-
-        vm.DbAccessNone = true;
-        vm.ShowRemoteContracts.Should().BeFalse("DB アクセス「なし」に戻すと非表示");
-    }
-
-    /// <summary>リモート対応チェックの状態が保存・復元されることを検証する</summary>
-    [Fact(DisplayName = "リモート対応チェックが次回起動時に復元される")]
-    public void GenerateRemoteContracts_IsPersistedAndRestored()
-    {
-        var vm = CreateViewModel(out var folder);
-
-        try
-        {
-            vm.RootNamespace = "Acme.App";
-            vm.OutputPath = @"C:\temp\Entities.g.cs";
-            vm.DbAccessRepository = true;
-            vm.GenerateRemoteContracts = true;
-            vm.OkCommand.Execute(null);
-
-            var restored = new CSharpGenerationDialogViewModel(
-                new CSharpGenerationSettingsStore(folder)
-            );
-
-            restored.GenerateRemoteContracts.Should().BeTrue();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
     }
 
     /// <summary>
@@ -845,37 +428,6 @@ public class CSharpGenerationDialogViewModelTests
             );
     }
 
-    /// <summary>HTTP クライアント／サーバー実装チェックの状態が保存・復元されることを検証する</summary>
-    [Fact(DisplayName = "HTTP クライアント／サーバー実装チェックが次回起動時に復元される")]
-    public void GenerateRemoteServices_IsPersistedAndRestored()
-    {
-        var vm = CreateViewModel(out var folder);
-
-        try
-        {
-            vm.RootNamespace = "Acme.App";
-            vm.OutputPath = @"C:\temp\Entities.g.cs";
-            vm.DbAccessRepository = true;
-            vm.GenerateRemoteServices = true;
-            vm.OkCommand.Execute(null);
-
-            var restored = new CSharpGenerationDialogViewModel(
-                new CSharpGenerationSettingsStore(folder)
-            );
-
-            restored.GenerateRemoteServices.Should().BeTrue();
-            // 含意により復元後もリモート面インターフェイスは ON のまま
-            restored.GenerateRemoteContracts.Should().BeTrue();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
-    }
-
     /// <summary>
     /// 層別出力を ON にすると分割出力が強制 ON になること、OFF に戻しても分割の値は維持されることを検証する
     /// </summary>
@@ -971,9 +523,9 @@ public class CSharpGenerationDialogViewModelTests
         vm.ShowServerLayerDirectory.Should().BeFalse("層別出力 OFF でも隠れる");
     }
 
-    /// <summary>層別出力と 4 つの層フォルダが結果オプション（CodeGenerationOptions）へ写像されることを検証する</summary>
-    [Fact(DisplayName = "層別出力と層フォルダが生成オプションへ写像される")]
-    public void LayeredOutput_AndDirectories_AreMappedToOptions()
+    /// <summary>層別出力の既定は OFF で、生成オプションへも層別出力を要求しないことを検証する（ON の写像は GUI の入口の行が見る）</summary>
+    [Fact(DisplayName = "層別出力は既定 OFF で生成オプションへも渡らない")]
+    public void LayeredOutput_DefaultsOff_InOptions()
     {
         var vm = CreateViewModel(
             out _,
@@ -984,27 +536,8 @@ public class CSharpGenerationDialogViewModelTests
         vm.DbAccessRepository = true;
         vm.GenerateRemoteServices = true;
 
-        // 既定（OFF）では層別出力を要求せず、層フォルダも生成オプションへ影響しない
+        // 既定（OFF）では層別出力を要求しない
         vm.ToOptions().LayeredOutput.Should().BeFalse();
-
-        vm.LayeredOutput = true;
-        vm.DomainLayerDirectory = "Acme.Domain/Generated";
-        vm.InfrastructureLayerDirectory = "Acme.Infrastructure";
-        vm.PresentationLayerDirectory = "Acme.App/Generated";
-        vm.ServerLayerDirectory = "Acme.Api";
-
-        vm.OkCommand.Execute(null);
-
-        vm.Result.Should().NotBeNull();
-        var options = vm.Result!.Options;
-        options.LayeredOutput.Should().BeTrue();
-        // 層別出力は分割を含意するため、分割フラグも ON のまま渡る（コア側は EffectiveSplitFilesByCategory で解釈）
-        options.SplitFilesByCategory.Should().BeTrue();
-        options.EffectiveSplitFilesByCategory.Should().BeTrue();
-        options.DomainLayerDirectory.Should().Be("Acme.Domain/Generated");
-        options.InfrastructureLayerDirectory.Should().Be("Acme.Infrastructure");
-        options.PresentationLayerDirectory.Should().Be("Acme.App/Generated");
-        options.ServerLayerDirectory.Should().Be("Acme.Api");
     }
 
     /// <summary>
@@ -1063,45 +596,6 @@ public class CSharpGenerationDialogViewModelTests
 
         vm.PreviewFiles.Should()
             .Contain(line => line.StartsWith("Entities.g.cs", StringComparison.Ordinal));
-    }
-
-    /// <summary>層別出力と層フォルダの設定が保存され、次回起動時に復元されることを検証する</summary>
-    [Fact(DisplayName = "層別出力と層フォルダが次回起動時に復元される")]
-    public void LayeredOutput_AndDirectories_ArePersistedAndRestored()
-    {
-        var vm = CreateViewModel(out var folder);
-
-        try
-        {
-            vm.RootNamespace = "Acme.App";
-            vm.OutputPath = @"C:\out";
-            vm.LayeredOutput = true;
-            vm.DomainLayerDirectory = "Acme.Domain";
-            vm.InfrastructureLayerDirectory = "Acme.Infrastructure";
-            vm.PresentationLayerDirectory = "Acme.App";
-            vm.ServerLayerDirectory = "Acme.Api";
-            vm.OkCommand.Execute(null);
-
-            var restored = new CSharpGenerationDialogViewModel(
-                new CSharpGenerationSettingsStore(folder)
-            );
-
-            restored.LayeredOutput.Should().BeTrue();
-            restored
-                .SplitFilesByCategory.Should()
-                .BeTrue("含意により分割出力も ON のまま復元される");
-            restored.DomainLayerDirectory.Should().Be("Acme.Domain");
-            restored.InfrastructureLayerDirectory.Should().Be("Acme.Infrastructure");
-            restored.PresentationLayerDirectory.Should().Be("Acme.App");
-            restored.ServerLayerDirectory.Should().Be("Acme.Api");
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
     }
 
     /// <summary>
@@ -1264,12 +758,12 @@ public class CSharpGenerationDialogViewModelTests
     }
 
     /// <summary>
-    /// 層別出力時、手編集した名前空間欄だけが明示指定として生成オプションへ渡り、既定のままの欄は
-    /// 導出（null）に任せても同じ名前空間へ解決されること、プレビューが層フォルダ・層由来名前空間の
-    /// 両方を反映することを検証する
+    /// 層別出力時、既定のままの名前空間欄を導出（null）に任せても欄の表示と同じ名前空間へ解決されること、
+    /// プレビューが層フォルダ・層由来名前空間の両方を反映することを検証する
+    /// （手編集欄だけが明示指定で渡り既定欄は null で渡ることは GUI の入口の行が見る）
     /// </summary>
-    [Fact(DisplayName = "層別出力時は手編集欄のみ明示指定で渡り既定欄は導出に任せる")]
-    public void LayeredOutput_NamespaceFields_ArePassedThroughToOptions()
+    [Fact(DisplayName = "層別出力時の既定欄の導出は欄の表示と一致しプレビューへ反映される")]
+    public void LayeredOutput_NamespaceFields_ResolveToDisplayedDefaults()
     {
         var vm = CreateViewModel(out _);
         vm.RootNamespace = "Acme.App";
@@ -1281,11 +775,7 @@ public class CSharpGenerationDialogViewModelTests
 
         var options = vm.ToOptions();
 
-        options.EntityNamespace.Should().Be("Custom.Entities");
-        // 既定のままの欄は明示値として渡さず導出（null）に任せる（既定を明示値化すると
-        // 設定へ持ち越されたとき層フォルダ変更への追従が止まるため）。導出結果は欄の表示と一致する
-        options.MapperNamespace.Should().BeNull();
-        options.RuntimeNamespace.Should().BeNull();
+        // 既定のままの欄は導出に任せる。導出結果は欄の表示と一致する
         GeneratedFilePlanner
             .ResolveNamespace(options, GenerationBucket.Mapper)
             .Should()
@@ -1911,38 +1401,6 @@ public class CSharpGenerationDialogViewModelTests
         vm.StatusMessage.Should().Be(CodeGenStrings.CodeGen_Status_OutputFolderRequired);
     }
 
-    /// <summary>確定で保存した設定が、次回の ViewModel 構築で復元されることを検証する</summary>
-    [Fact(DisplayName = "設定が次回起動時に復元される")]
-    public void Settings_ArePersistedAndRestored()
-    {
-        var vm = CreateViewModel(out var folder);
-
-        try
-        {
-            vm.RootNamespace = "Acme.App";
-            vm.SplitFilesByCategory = true;
-            vm.GenerateValueObjects = true;
-            vm.OutputPath = @"C:\out";
-            vm.OkCommand.Execute(null);
-
-            var restored = new CSharpGenerationDialogViewModel(
-                new CSharpGenerationSettingsStore(folder)
-            );
-
-            restored.RootNamespace.Should().Be("Acme.App");
-            restored.SplitFilesByCategory.Should().BeTrue();
-            restored.GenerateValueObjects.Should().BeTrue();
-            restored.OutputPath.Should().Be(@"C:\out");
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
-    }
-
     /// <summary>クリアで全設定が工場出荷既定へ戻ることを検証する</summary>
     [Fact(DisplayName = "クリアで工場出荷既定へ戻る")]
     public void Clear_RestoresFactoryDefaults()
@@ -1960,39 +1418,6 @@ public class CSharpGenerationDialogViewModelTests
         // 工場出荷既定は DB アクセス「なし」
         vm.DbAccessNone.Should().BeTrue();
         vm.GenerateValueObjects.Should().BeFalse();
-    }
-
-    /// <summary>EF Core の選択と Repository 契約名前空間が保存・復元されることを検証する</summary>
-    [Fact(DisplayName = "EF Core の選択が次回起動時に復元される")]
-    public void EfCoreSelection_IsPersistedAndRestored()
-    {
-        var vm = CreateViewModel(out var folder);
-
-        try
-        {
-            vm.RootNamespace = "Acme.App";
-            vm.SplitFilesByCategory = true;
-            vm.DbAccessEfCore = true;
-            // EF Core 実装は Repository 契約名前空間のサブ名前空間へ導出されるため、契約名前空間を保存・復元する
-            vm.RepositoryNamespace = "Acme.App.Persistence";
-            vm.OutputPath = @"C:\out";
-            vm.OkCommand.Execute(null);
-
-            var restored = new CSharpGenerationDialogViewModel(
-                new CSharpGenerationSettingsStore(folder)
-            );
-
-            restored.DbAccessEfCore.Should().BeTrue();
-            restored.GenerateRepositories.Should().BeFalse();
-            restored.RepositoryNamespace.Should().Be("Acme.App.Persistence");
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
     }
 
     /// <summary>「名前を付けて保存」で現在の設定が任意ファイルへ書き出され、TryLoadFrom で同内容に読み戻せることを検証する</summary>
@@ -2339,41 +1764,16 @@ public class CSharpGenerationDialogViewModelTests
         }
     }
 
-    /// <summary>
-    /// インメモリ実装チェックは既定 OFF で、ON にすると ToOptions・結果オプションへ反映され、次回起動時に復元されることを検証する
-    /// </summary>
-    [Fact(DisplayName = "インメモリ実装チェックは既定 OFF・ON で結果へ反映され復元される")]
-    public void GenerateInMemory_IsReflectedInResult_AndPersisted()
+    /// <summary>インメモリ実装チェックの既定は OFF で、ToOptions も false であることを検証する（ON の反映と復元は GUI の入口の行が見る）</summary>
+    [Fact(DisplayName = "インメモリ実装チェックは既定 OFF")]
+    public void GenerateInMemory_DefaultsOff()
     {
-        var vm = CreateViewModel(out var folder);
+        var vm = CreateViewModel(out _);
+        vm.RootNamespace = "Acme.App";
+        vm.OutputPath = @"C:\temp\Entities.g.cs";
 
-        try
-        {
-            vm.RootNamespace = "Acme.App";
-            vm.OutputPath = @"C:\temp\Entities.g.cs";
-
-            vm.GenerateInMemoryRepositories.Should().BeFalse("既定は OFF");
-            vm.ToOptions().GenerateInMemoryRepositories.Should().BeFalse();
-
-            vm.GenerateInMemoryRepositories = true;
-            vm.OkCommand.Execute(null);
-
-            vm.Result.Should().NotBeNull();
-            vm.Result!.Options.GenerateInMemoryRepositories.Should().BeTrue();
-
-            var restored = new CSharpGenerationDialogViewModel(
-                new CSharpGenerationSettingsStore(folder)
-            );
-
-            restored.GenerateInMemoryRepositories.Should().BeTrue();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+        vm.GenerateInMemoryRepositories.Should().BeFalse("既定は OFF");
+        vm.ToOptions().GenerateInMemoryRepositories.Should().BeFalse();
     }
 
     /// <summary>
@@ -2394,63 +1794,6 @@ public class CSharpGenerationDialogViewModelTests
         vm.Result.Should().NotBeNull();
         vm.Result!.Options.GenerateInMemoryRepositories.Should().BeTrue();
         vm.Result.Options.UseRuntimePackages.Should().BeTrue();
-    }
-
-    /// <summary>
-    /// UI 非表示の属性系（IncludeDataAnnotations / IncludeJsonIgnoreOnParentNavigation）が、
-    /// 読み込んだ設定の値を保持したまま保存で書き戻され、生成オプション（ToOptions）へも反映されることを検証する
-    /// </summary>
-    [Fact(DisplayName = "UI 非表示の属性系は読込→保存で保持され ToOptions へ反映される")]
-    public void HiddenAttributes_ArePreservedAcrossLoadSave_AndReflectedInOptions()
-    {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
-        var presetPath = Path.Combine(folder, "preset.json");
-        var savedPath = Path.Combine(folder, "saved.json");
-        var store = new CSharpGenerationSettingsStore(folder);
-
-        // 既定 true の属性系を false に倒した設定ファイルを用意する（UI には出ないが値は保持されるべき）
-        store.SaveTo(
-            presetPath,
-            new CSharpGenerationSettings
-            {
-                RootNamespace = "Acme.Loaded",
-                IncludeDataAnnotations = false,
-                IncludeJsonIgnoreOnParentNavigation = false,
-            }
-        );
-
-        // 読込は presetPath・保存は savedPath を返すスタブ
-        var files = new StubFileDialogService
-        {
-            OpenResult = new FileDialogResult(presetPath, 1),
-            SaveResult = new FileDialogResult(savedPath, 1),
-        };
-        var vm = new CSharpGenerationDialogViewModel(store, files);
-
-        try
-        {
-            vm.LoadSettingsFromCommand.Execute(null);
-
-            // 読み込んだ属性値が生成オプションへ反映される
-            var options = vm.ToOptions();
-            options.IncludeDataAnnotations.Should().BeFalse();
-            options.IncludeJsonIgnoreOnParentNavigation.Should().BeFalse();
-
-            // 現在の表示状態を「名前を付けて保存」で書き出しても、属性値が失われず書き戻される
-            vm.SaveSettingsAsCommand.Execute(null);
-
-            var reloaded = store.TryLoadFrom(savedPath);
-            reloaded.Should().NotBeNull();
-            reloaded!.IncludeDataAnnotations.Should().BeFalse();
-            reloaded.IncludeJsonIgnoreOnParentNavigation.Should().BeFalse();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
     }
 
     /// <summary>
@@ -2506,10 +1849,10 @@ public class CSharpGenerationDialogViewModelTests
     }
 
     /// <summary>
-    /// 既定と一致する名前空間欄・層フォルダ欄は空で永続化され（既定を明示値として持ち越さない）、
-    /// 生成オプションへも導出（null）として渡ることを検証する
+    /// 既定と一致する名前空間欄・層フォルダ欄は空で永続化される（既定を明示値として持ち越さない）ことを検証する
+    /// （生成オプションへ導出〔null〕として渡ることは GUI の入口の行が見る）
     /// </summary>
-    [Fact(DisplayName = "既定のままの名前空間・層フォルダは空で保存され導出として生成へ渡る")]
+    [Fact(DisplayName = "既定のままの名前空間・層フォルダは空で保存される")]
     public void DefaultNamespacesAndLayerFolders_PersistAsBlank()
     {
         var vm = CreateViewModel(out var folder);
@@ -2524,11 +1867,7 @@ public class CSharpGenerationDialogViewModelTests
 
             vm.OkCommand.Execute(null);
 
-            // 生成オプション: 既定のままの欄は導出（null）・手編集値は明示指定
             vm.Result.Should().NotBeNull();
-            vm.Result!.Options.LayeredOutput.Should().BeTrue();
-            vm.Result.Options.EntityNamespace.Should().BeNull("既定のままの欄は導出に任せる");
-            vm.Result.Options.MapperNamespace.Should().Be("Custom.Mappers");
 
             // 永続化: 既定のままの欄・既定フォルダは空で保存される
             var saved = new CSharpGenerationSettingsStore(folder).Load();
@@ -2548,132 +1887,67 @@ public class CSharpGenerationDialogViewModelTests
     }
 
     /// <summary>
-    /// 生成コードのサブフォルダが生成オプションへ渡り、保存・復元されること、
-    /// および名前空間の既定を一切動かさないことを検証する。
+    /// 生成コードのサブフォルダを入れても名前空間の既定を一切動かさないこと、空欄は null として生成へ渡ることを検証する
+    /// （入れた値が前後の空白を除いて生成オプションへ渡り保存・復元されることは GUI の入口の行が見る）
     /// </summary>
     /// <remarks>
     /// 層フォルダ欄は名前空間の既定を追従させる（<c>ApplyLayerDirectoryChange</c>）が、サブフォルダ欄は
     /// 配置しか変えないため追従させない。ここを取り違えると、サブフォルダを入力しただけで名前空間欄が
     /// 書き換わる（画面上は静かに起きる）。
     /// </remarks>
-    [Fact(
-        DisplayName = "CodeSubdirectory が生成オプションへ渡り保存・復元される（名前空間は不動）"
-    )]
-    public void CodeSubdirectory_MapsToOptions_AndDoesNotMoveNamespaces()
+    [Fact(DisplayName = "CodeSubdirectory は名前空間を動かさず、空欄は null として渡る")]
+    public void CodeSubdirectory_DoesNotMoveNamespaces_AndBlankIsNull()
     {
-        var vm = CreateViewModel(out var folder);
+        var vm = CreateViewModel(out _);
+        vm.RootNamespace = "Acme.App";
+        vm.OutputPath = @"C:\temp\Entities.g.cs";
+        vm.LayeredOutput = true;
+        var namespacesBefore = (vm.EntityNamespace, vm.RepositoryNamespace, vm.MapperNamespace);
 
-        try
-        {
-            vm.RootNamespace = "Acme.App";
-            vm.OutputPath = @"C:\temp\Entities.g.cs";
-            vm.LayeredOutput = true;
-            var namespacesBefore = (vm.EntityNamespace, vm.RepositoryNamespace, vm.MapperNamespace);
+        vm.CodeSubdirectory = " Generated ";
 
-            vm.CodeSubdirectory = " Generated ";
-            vm.CloseAction = _ => { };
+        // 名前空間の既定は層フォルダ由来のまま動かない
+        (vm.EntityNamespace, vm.RepositoryNamespace, vm.MapperNamespace)
+            .Should()
+            .Be(namespacesBefore);
 
-            // 前後空白は除去して明示指定として渡る
-            vm.ToOptions().CodeSubdirectory.Should().Be("Generated");
-
-            // 名前空間の既定は層フォルダ由来のまま動かない
-            (vm.EntityNamespace, vm.RepositoryNamespace, vm.MapperNamespace)
-                .Should()
-                .Be(namespacesBefore);
-
-            vm.OkCommand.Execute(null);
-            var restored = new CSharpGenerationDialogViewModel(
-                new CSharpGenerationSettingsStore(folder)
-            );
-            restored.CodeSubdirectory.Should().Be("Generated");
-
-            // 空欄は null（既定＝サブフォルダなし）として生成へ渡る
-            vm.CodeSubdirectory = string.Empty;
-            vm.ToOptions().CodeSubdirectory.Should().BeNull();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
-    }
-
-    /// <summary>API リファレンスの出力先サブフォルダが生成オプションへ渡り、保存・復元されることを検証する</summary>
-    [Fact(DisplayName = "ApiDocsSubdirectory が生成オプションへ渡り保存・復元される")]
-    public void ApiDocsSubdirectory_MapsToOptions_AndPersists()
-    {
-        var vm = CreateViewModel(out var folder);
-
-        try
-        {
-            vm.RootNamespace = "Acme.App";
-            vm.OutputPath = @"C:\temp\Entities.g.cs";
-            vm.GenerateApiDocs = true;
-            vm.ApiDocsSubdirectory = " docs ";
-            vm.CloseAction = _ => { };
-
-            // 前後空白は除去して明示指定として渡る
-            vm.ToOptions().ApiDocsSubdirectory.Should().Be("docs");
-
-            vm.OkCommand.Execute(null);
-            var restored = new CSharpGenerationDialogViewModel(
-                new CSharpGenerationSettingsStore(folder)
-            );
-            restored.GenerateApiDocs.Should().BeTrue();
-            restored.ApiDocsSubdirectory.Should().Be("docs");
-
-            // 空欄は null（既定＝出力フォルダ直下）として生成へ渡る
-            vm.ApiDocsSubdirectory = string.Empty;
-            vm.ToOptions().ApiDocsSubdirectory.Should().BeNull();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+        // 空欄は null（既定＝サブフォルダなし）として生成へ渡る
+        vm.CodeSubdirectory = string.Empty;
+        vm.ToOptions().CodeSubdirectory.Should().BeNull();
     }
 
     /// <summary>
-    /// API リファレンスの出力ファイル名が生成オプションへ渡り、保存・復元されることを検証する
-    /// （空欄は null＝導出名へフォールバック）
+    /// API リファレンスの出力先サブフォルダの空欄は null（既定＝出力フォルダ直下）として生成へ渡ることを検証する
+    /// （入れた値が生成オプションへ渡り保存・復元されることは GUI の入口の行が見る）
     /// </summary>
-    [Fact(DisplayName = "ApiDocsFileName が生成オプションへ渡り保存・復元される")]
-    public void ApiDocsFileName_MapsToOptions_AndPersists()
+    [Fact(DisplayName = "ApiDocsSubdirectory の空欄は null として渡る")]
+    public void ApiDocsSubdirectory_Blank_IsNull()
     {
-        var vm = CreateViewModel(out var folder);
+        var vm = CreateViewModel(out _);
+        vm.RootNamespace = "Acme.App";
+        vm.OutputPath = @"C:\temp\Entities.g.cs";
+        vm.GenerateApiDocs = true;
+        vm.ApiDocsSubdirectory = " docs ";
 
-        try
-        {
-            vm.RootNamespace = "Acme.App";
-            vm.OutputPath = @"C:\temp\Entities.g.cs";
-            vm.GenerateApiDocs = true;
-            vm.ApiDocsFileName = " Reference ";
-            vm.CloseAction = _ => { };
+        vm.ApiDocsSubdirectory = string.Empty;
+        vm.ToOptions().ApiDocsSubdirectory.Should().BeNull();
+    }
 
-            // 前後空白は除去して明示指定として渡る
-            vm.ToOptions().ApiDocsFileName.Should().Be("Reference");
+    /// <summary>
+    /// API リファレンスの出力ファイル名の空欄は null（既定＝導出名）として生成へ渡ることを検証する
+    /// （入れた値が生成オプションへ渡り保存・復元されることは GUI の入口の行が見る）
+    /// </summary>
+    [Fact(DisplayName = "ApiDocsFileName の空欄は null として渡る")]
+    public void ApiDocsFileName_Blank_IsNull()
+    {
+        var vm = CreateViewModel(out _);
+        vm.RootNamespace = "Acme.App";
+        vm.OutputPath = @"C:\temp\Entities.g.cs";
+        vm.GenerateApiDocs = true;
+        vm.ApiDocsFileName = " Reference ";
 
-            vm.OkCommand.Execute(null);
-            var restored = new CSharpGenerationDialogViewModel(
-                new CSharpGenerationSettingsStore(folder)
-            );
-            restored.ApiDocsFileName.Should().Be("Reference");
-
-            // 空欄は null（既定＝導出名）として生成へ渡る
-            vm.ApiDocsFileName = string.Empty;
-            vm.ToOptions().ApiDocsFileName.Should().BeNull();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+        vm.ApiDocsFileName = string.Empty;
+        vm.ToOptions().ApiDocsFileName.Should().BeNull();
     }
 
     /// <summary>

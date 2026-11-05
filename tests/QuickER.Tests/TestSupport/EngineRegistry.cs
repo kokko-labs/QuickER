@@ -19,5 +19,8 @@ internal static class EngineRegistry
         ToolArgumentFuzzDimensions.Descriptor,
         RelationshipTypeChangeDimensions.Descriptor,
         DialectTypeDimensions.Descriptor,
+        CodeGen.CSharp.CodegenConfig.CodegenConfigDimensions.ErrorsDescriptor,
+        CodeGen.CSharp.CodegenConfig.CodegenConfigDimensions.SuccessDescriptor,
+        CodeGen.CSharp.CodegenConfig.CodegenConfigDimensions.CasesDescriptor,
     ];
 }

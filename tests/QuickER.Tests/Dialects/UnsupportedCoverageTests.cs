@@ -1,5 +1,6 @@
 using System.IO;
 using AwesomeAssertions;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using QuickER.Dialects;
@@ -117,38 +118,51 @@ public sealed class UnsupportedCoverageTests
         pendingOnNone.Should().BeEmpty("「なし」のマスを未実装の一覧に載せない");
     }
 
-    [Fact(DisplayName = "登録したテストの名前は tests/ に実在する（クラス名とメソッド名の組）")]
+    [Fact(
+        DisplayName = "登録したテストは tests/ に実在する（クラス名とメソッド名の組・表のクラス名と行の Id の組）"
+    )]
     public void RegisteredTests_Exist()
     {
-        var declared = SourceFiles
-            .Enumerate("tests")
-            .Select(file => file.FullPath)
-            .SelectMany(path =>
-                ConditionalSourceParse
-                    .DescendantNodes(
-                        ConditionalSourceParse.Parse(
-                            File.ReadAllText(path),
-                            cancellationToken: TestContext.Current.CancellationToken
-                        ),
-                        TestContext.Current.CancellationToken
-                    )
-                    .OfType<MethodDeclarationSyntax>()
-                    .Where(method => method.Parent is TypeDeclarationSyntax)
-                    .Select(method =>
-                        $"{((TypeDeclarationSyntax)method.Parent!).Identifier.ValueText}.{method.Identifier.ValueText}"
-                    )
-            )
-            .ToHashSet(StringComparer.Ordinal);
+        var declared = new HashSet<string>(StringComparer.Ordinal);
+        var rowIds = new Dictionary<string, List<string>>(StringComparer.Ordinal);
 
-        var rowIds = ExpectationRowIds();
+        foreach (var file in SourceFiles.Enumerate("tests"))
+        {
+            var types = ConditionalSourceParse
+                .DescendantNodes(
+                    ConditionalSourceParse.Parse(
+                        File.ReadAllText(file.FullPath),
+                        cancellationToken: TestContext.Current.CancellationToken
+                    ),
+                    TestContext.Current.CancellationToken
+                )
+                .OfType<TypeDeclarationSyntax>();
+
+            foreach (var type in types)
+            {
+                var name = type.Identifier.ValueText;
+
+                foreach (var method in type.Members.OfType<MethodDeclarationSyntax>())
+                {
+                    declared.Add($"{name}.{method.Identifier.ValueText}");
+                }
+
+                if (!rowIds.TryGetValue(name, out var ids))
+                {
+                    ids = [];
+                    rowIds.Add(name, ids);
+                }
+
+                ids.AddRange(RowIds(type));
+            }
+        }
+
         var missing = UnsupportedCoverage
             .Detections.SelectMany(d => d.Tests)
             .Concat(UnsupportedCoverage.Treatments.SelectMany(t => t.Tests))
             .Where(test =>
-                test.StartsWith(UnsupportedCoverage.ExpectationRowPrefix, StringComparison.Ordinal)
-                    ? !rowIds.Any(id =>
-                        Matches(test[UnsupportedCoverage.ExpectationRowPrefix.Length..], id)
-                    )
+                UnsupportedCoverage.TryParseRow(test, out var table, out var rowId)
+                    ? !rowIds.TryGetValue(table, out var ids) || !ids.Any(id => Matches(rowId, id))
                     : !declared.Contains(test)
             )
             .Distinct()
@@ -156,63 +170,52 @@ public sealed class UnsupportedCoverageTests
 
         UnsupportedCoverage.Detections.Should().OnlyContain(d => d.Tests.Length > 0);
         UnsupportedCoverage.Treatments.Should().OnlyContain(t => t.Tests.Length > 0);
-        missing.Should().BeEmpty("登録したテストは実在する");
+        rowIds
+            .GetValueOrDefault("SyncPlanExpectationRows")
+            .Should()
+            .NotBeNullOrEmpty("同期計画の期待の行の Id を読めている");
+        rowIds
+            .GetValueOrDefault("CodegenCases")
+            .Should()
+            .NotBeNullOrEmpty("生成の構成のエンジンの行の Id を読めている");
+        missing.Should().BeEmpty("登録したテスト（メソッド・表の行）は実在する");
     }
 
     /// <summary>
-    /// 同期計画の期待の行の Id（<c>SyncPlanExpectationRows*.cs</c> の <c>Row("…", …)</c> の第 1 引数。補間した Id は先頭の文字列＋<c>*</c>）
+    /// 型の宣言の中の行の Id の候補：呼び出しとオブジェクトの生成の第 1 引数の文字列（補間した Id は先頭の文字列＋<c>*</c>。先頭に文字列の無い補間は Id にしない）
     /// </summary>
-    private static List<string> ExpectationRowIds()
-    {
-        var folder = Path.Combine(
-            SourceFiles.RepositoryRoot,
-            "tests",
-            "QuickER.Tests.Integration",
-            "Dialects",
-            "SyncPlanFuzz"
-        );
-        var ids = new List<string>();
-
-        foreach (var path in Directory.EnumerateFiles(folder, "SyncPlanExpectationRows*.cs"))
-        {
-            foreach (
-                var call in ConditionalSourceParse
-                    .DescendantNodes(
-                        ConditionalSourceParse.Parse(
-                            File.ReadAllText(path),
-                            cancellationToken: TestContext.Current.CancellationToken
-                        ),
-                        TestContext.Current.CancellationToken
-                    )
-                    .OfType<InvocationExpressionSyntax>()
-                    .Where(c =>
-                        c.Expression is IdentifierNameSyntax { Identifier.ValueText: "Row" }
-                    )
-            )
-            {
-                switch (call.ArgumentList.Arguments.FirstOrDefault()?.Expression)
+    /// <remarks>
+    /// 表の行は <c>Row("…", …)</c>・<c>new ScenarioRow&lt;T&gt;("…", …)</c>・表ごとの補助（<c>ColumnsRow("…", …)</c> など）で組むので、
+    /// 補助の名前に依らず第 1 引数の文字列を読む。partial の型はファイルをまたいで同じ名前に集める。
+    /// </remarks>
+    private static IEnumerable<string> RowIds(TypeDeclarationSyntax type) =>
+        type.DescendantNodes()
+            .Select(node =>
+                node switch
                 {
-                    case LiteralExpressionSyntax literal:
-                        ids.Add(literal.Token.ValueText);
-                        break;
-                    case InterpolatedStringExpressionSyntax interpolated:
-                        ids.Add(
-                            string.Concat(
-                                interpolated
-                                    .Contents.TakeWhile(c => c is InterpolatedStringTextSyntax)
-                                    .Select(c =>
-                                        ((InterpolatedStringTextSyntax)c).TextToken.ValueText
-                                    )
-                            ) + "*"
-                        );
-                        break;
+                    InvocationExpressionSyntax call => call.ArgumentList.Arguments.FirstOrDefault(),
+                    BaseObjectCreationExpressionSyntax creation =>
+                        creation.ArgumentList?.Arguments.FirstOrDefault(),
+                    _ => null,
                 }
-            }
-        }
-
-        ids.Should().NotBeEmpty("期待の行の Id を読めている");
-        return ids;
-    }
+            )
+            .Select(argument =>
+                argument?.Expression switch
+                {
+                    LiteralExpressionSyntax literal
+                        when literal.IsKind(SyntaxKind.StringLiteralExpression) => literal
+                        .Token
+                        .ValueText,
+                    InterpolatedStringExpressionSyntax interpolated => string.Concat(
+                        interpolated
+                            .Contents.TakeWhile(c => c is InterpolatedStringTextSyntax)
+                            .Select(c => ((InterpolatedStringTextSyntax)c).TextToken.ValueText)
+                    ) + "*",
+                    _ => null,
+                }
+            )
+            .OfType<string>()
+            .Where(id => id != "*");
 
     /// <summary>
     /// 登録の Id（末尾の <c>*</c> は前方一致）が行の Id に当たるか。補間した行の Id（末尾が <c>*</c>）は、登録が同じ先頭で始まれば当たる
