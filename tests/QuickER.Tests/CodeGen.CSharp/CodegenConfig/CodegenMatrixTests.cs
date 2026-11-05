@@ -316,29 +316,20 @@ public sealed class CodegenSuccessMatrixTests
             );
     }
 
-    [Fact(
-        DisplayName = "[生成の構成] 既知の失敗の一覧の項目は網羅の配列の行を指し、修正 G の項目は複合主キー・インメモリ・生成が通る行だけを指す（同じ組の行を全部載せる）"
-    )]
+    [Fact(DisplayName = "[生成の構成] 既知の失敗の一覧の項目は網羅の配列の行を指す")]
     public void KnownFailures_PointAtRows()
     {
-        var rows = CodegenConfigDimensions
+        var rowIds = CodegenConfigDimensions
             .Rows.Concat(CodegenConfigDimensions.SuccessRows)
             .Concat(CodegenConfigDimensions.NightlyRows)
             .Concat(CodegenConfigDimensions.NightlySuccessRows)
-            .ToList();
-
-        bool HitsFixG(CodegenRow row) =>
-            row[CodegenConfigDimensions.Key] == CodegenConfigDimensions.KeyLevels.Composite
-            && CodegenRunner.EffectiveOptions(row).GenerateInMemoryRepositories
-            && CodegenSuccessDomain.PredictsSuccess(row);
+            .Select(row => row.Id)
+            .ToHashSet(StringComparer.Ordinal);
 
         CodegenKnownFailures
             .Set.Entries.Select(entry => entry.Scope)
             .Should()
-            .BeEquivalentTo(
-                rows.Where(HitsFixG).Select(row => row.Id),
-                "修正 G の項目は、複合主キー・インメモリ・生成が通る行（4 つの表のすべて）とちょうど一致する"
-            );
+            .OnlyContain(scope => rowIds.Contains(scope), "項目の範囲は網羅の配列の行の Id");
     }
 
     [Fact(

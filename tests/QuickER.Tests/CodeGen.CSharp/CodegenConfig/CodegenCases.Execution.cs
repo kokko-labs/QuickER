@@ -55,6 +55,33 @@ internal static partial class CodegenCases
                     }
                 )
             ),
+            // 元のテストを持たない行：修正 G の受け入れ。図の形の行列では、主の表のキーが複合の行はどの表も主の表へ
+            // ぶら下がって全部 0 行になり、主キーが 1 列の表をシードして読めることを示せないので、決まった図で見る
+            ExecutionRow(
+                "probe-inmemory-seed-composite-key",
+                "修正 G の受け入れ（元のテストなし）：主キーが 1 列でない表と、それを直接・間接に参照する表はシードせず、主キーが 1 列の表はシードして読み書きできる",
+                () => ExecutionSeedCompositeKeyDiagram(),
+                ExecutionInMemoryOptions(valueObjects: false),
+                DialectNames.MySql,
+                [CodegenProbe.InMemorySeed],
+                new CodegenProbeFacts(
+                    SeedRowCounts: new Dictionary<string, int>(StringComparer.Ordinal)
+                    {
+                        ["OrderEntity"] = 3,
+                        ["TagEntity"] = 3,
+                        // 複合主キーの中間表はシードしない
+                        ["OrderTagEntity"] = 0,
+                        // 中間表を NOT NULL の複合外部キーで参照する子（参照の連鎖の根は orders / tags）
+                        ["OrderTagNoteEntity"] = 0,
+                        // 中間表を NULL 許容の複合外部キーで参照する子
+                        ["TagMemoEntity"] = 0,
+                        // 中間表を間接に参照する孫
+                        ["NoteReplyEntity"] = 0,
+                        // 主キーの無い表
+                        ["AuditLogEntity"] = 0,
+                    }
+                )
+            ),
             // ===== EF Core のモデル =====
             ExecutionRow(
                 "probe-efcore-model-vo-foreign-key-name-mismatch",
@@ -364,6 +391,71 @@ internal static partial class CodegenCases
                 ExecutionReference(a, aId, b, bToA),
                 ExecutionReference(nodes, nodeId, nodes, parentId),
                 ExecutionReference(b, bId, c, cToB),
+            ],
+        };
+    }
+
+    /// <summary>修正 G の受け入れの図（MySQL）：複合主キーの中間表・それを参照する子と孫・主キーの無い表</summary>
+    /// <remarks>
+    /// 中間表 order_tags の主キーは orders・tags への外部キーの列でできている。order_tag_notes はそれを複合外部キーで参照するので、
+    /// 参照の連鎖の根は orders / tags になる（根だけで行数を抑えると、0 行の中間表を素通りして 3 行入る）。
+    /// </remarks>
+    private static ErDiagram ExecutionSeedCompositeKeyDiagram()
+    {
+        var orderId = ExecutionColumn("order_id", "int", key: true);
+        var orders = new Entity { TableName = "orders", Columns = [orderId] };
+        var tagId = ExecutionColumn("tag_id", "int", key: true);
+        var tags = new Entity { TableName = "tags", Columns = [tagId] };
+
+        var linkOrder = ExecutionColumn("order_id", "int", key: true);
+        var linkTag = ExecutionColumn("tag_id", "int", key: true);
+        var orderTags = new Entity { TableName = "order_tags", Columns = [linkOrder, linkTag] };
+
+        var noteId = ExecutionColumn("note_id", "int", key: true);
+        var noteOrder = ExecutionColumn("order_id", "int");
+        var noteTag = ExecutionColumn("tag_id", "int");
+        var notes = new Entity
+        {
+            TableName = "order_tag_notes",
+            Columns = [noteId, noteOrder, noteTag],
+        };
+
+        var memoId = ExecutionColumn("memo_id", "int", key: true);
+        var memoOrder = ExecutionColumn("order_id", "int", nullable: true);
+        var memoTag = ExecutionColumn("tag_id", "int", nullable: true);
+        var memos = new Entity { TableName = "tag_memos", Columns = [memoId, memoOrder, memoTag] };
+
+        var replyId = ExecutionColumn("reply_id", "int", key: true);
+        var replyNote = ExecutionColumn("note_id", "int");
+        var replies = new Entity { TableName = "note_replies", Columns = [replyId, replyNote] };
+
+        var logMessage = ExecutionColumn("message", "varchar(50)");
+        var logs = new Entity { TableName = "audit_logs", Columns = [logMessage] };
+
+        Relationship CompositeReference(Entity child, Column childOrder, Column childTag) =>
+            new()
+            {
+                SourceEntityId = orderTags.Id,
+                TargetEntityId = child.Id,
+                Type = RelationshipType.OneToMany,
+                ColumnPairs =
+                [
+                    new RelationshipColumnPair(linkOrder.Id, childOrder.Id),
+                    new RelationshipColumnPair(linkTag.Id, childTag.Id),
+                ],
+            };
+
+        return new ErDiagram
+        {
+            TargetDbms = "mysql",
+            Entities = [orders, tags, orderTags, notes, memos, replies, logs],
+            Relationships =
+            [
+                ExecutionReference(orders, orderId, orderTags, linkOrder),
+                ExecutionReference(tags, tagId, orderTags, linkTag),
+                CompositeReference(notes, noteOrder, noteTag),
+                CompositeReference(memos, memoOrder, memoTag),
+                ExecutionReference(notes, noteId, replies, replyNote),
             ],
         };
     }

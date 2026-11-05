@@ -469,6 +469,40 @@ internal sealed class ShapeDiagram
     /// <summary>バイナリ列（無ければ null）</summary>
     public ShapeColumn? BinaryColumn { get; }
 
+    /// <summary>
+    /// インメモリのシーダーが投入する表ごとの行数（Entity の型名 → 行数。<see cref="CodegenProbe.InMemorySeed"/> の期待）
+    /// </summary>
+    /// <remarks>
+    /// src/QuickER.CodeGen.CSharp/CLAUDE.md「インメモリのシード値」と生成物の <c>InMemorySampleData</c> の説明から書く：
+    /// 主キーが 1 列でない表は入れず、それを直接・間接に参照する表も入れない（外部キーの NULL 許容に依らない）。
+    /// ほかは <c>RowsPerEntity</c>（3）行（図の形の表は整数・文字列の列だけで、行数を減らす一意制約を持たない）。
+    /// 図の形では、主の表のキーが複合（Key=composite）なら、どの表も主の表へぶら下がるのですべて 0 行になる。
+    /// </remarks>
+    public IReadOnlyDictionary<string, int> SeedRowCounts
+    {
+        get
+        {
+            var unseeded = _tables.Where(table => !table.HasSinglePrimaryKey).ToHashSet();
+            bool changed;
+
+            do
+            {
+                changed = false;
+
+                foreach (var relation in _relations.Where(r => unseeded.Contains(r.Parent)))
+                {
+                    changed |= unseeded.Add(relation.Child);
+                }
+            } while (changed);
+
+            return _tables.ToDictionary(
+                table => table.EntityClass,
+                table => unseeded.Contains(table) ? 0 : 3,
+                StringComparer.Ordinal
+            );
+        }
+    }
+
     /// <summary>無制限バイナリの列（図の方言の型マッパーが無制限と読むもの）</summary>
     public IEnumerable<ShapeColumn> UnboundedBinaryColumns =>
         _tables.SelectMany(table => table.Columns).Where(c => c.Spelling.IsUnboundedBinary);
