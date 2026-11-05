@@ -279,9 +279,9 @@ public sealed class FactorInventoryTests
     }
 
     [Fact(
-        DisplayName = "軸の割り当ては設計 2.9 の 13 軸を 1 回ずつ、2 つのアセンブリのどちらかへ割り当てる"
+        DisplayName = "軸の割り当ては設計 2.9 の 13 軸と P3-8 の告知の種類を 1 回ずつ、2 つのアセンブリのどちらかへ割り当てる"
     )]
-    public void Assignment_CoversThirteenAxesOnce()
+    public void Assignment_CoversEveryAxisOnce()
     {
         var names = FactorInventoryAssignment.Assignments.Select(pair => pair.Axis).ToList();
 
@@ -300,7 +300,8 @@ public sealed class FactorInventoryTests
                 "RelationshipType",
                 "CodeGenerationOptions",
                 "CanonicalTypeKind",
-                "SchemaImportWarningKind"
+                "SchemaImportWarningKind",
+                "ExportOmissionKind"
             );
         names.Should().OnlyHaveUniqueItems();
         FactorInventoryAssignment

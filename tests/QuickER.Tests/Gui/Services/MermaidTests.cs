@@ -1,149 +1,21 @@
 using System;
 using System.IO;
-using System.Linq;
 using AwesomeAssertions;
 using QuickER.Model;
-using QuickER.Resources;
 using QuickER.Services;
+using QuickER.Tests.Gui.Services.FormatRoundTrip;
 using QuickER.ViewModels;
 
 namespace QuickER.Tests.Gui.Services;
 
-/// <summary>MermaidExporter / MermaidImporter による Mermaid 形式の入出力を検証するテストクラス</summary>
+/// <summary>MermaidExporter.SaveTo / MermaidImporter.Load のファイルの入口をテストするクラス</summary>
+/// <remarks>
+/// Mermaid の出力の記法・告知・取込の規則・往復は、形式の往復のエンジン（<c>FormatRoundTripTests</c> の形の行 <c>mermaid-…</c> と規則の行 <c>mermaid-rule-…</c>）が持つ。
+/// ここはファイルの読み書きそのもの（SaveTo が Build と同じテキストを書き、Load が Parse と同じ図を返す）だけを見る。
+/// </remarks>
 public class MermaidTests
 {
-    /// <summary>PK・FK 列とリレーションを持つ図から erDiagram 記法が生成されることを検証する</summary>
-    [Fact(DisplayName = "Mermaid 出力で erDiagram 記法を生成できる")]
-    public void Export_BuildsErDiagramText()
-    {
-        var vm = new MainViewModel();
-        var customer = new EntityViewModel(
-            new Entity
-            {
-                TableName = "Customer",
-                Columns =
-                {
-                    new Column
-                    {
-                        Name = "CustomerId",
-                        DataType = "int",
-                        IsPrimaryKey = true,
-                        IsNullable = false,
-                    },
-                    new Column
-                    {
-                        Name = "CustomerName",
-                        DataType = "nvarchar(100)",
-                        IsNullable = false,
-                    },
-                },
-            }
-        );
-        var order = new EntityViewModel(
-            new Entity
-            {
-                TableName = "Orders",
-                Columns =
-                {
-                    new Column
-                    {
-                        Name = "OrderId",
-                        DataType = "int",
-                        IsPrimaryKey = true,
-                        IsNullable = false,
-                    },
-                    new Column
-                    {
-                        Name = "CustomerId",
-                        DataType = "int",
-                        IsForeignKey = true,
-                        IsNullable = false,
-                    },
-                },
-            }
-        );
-        vm.Entities.Add(customer);
-        vm.Entities.Add(order);
-        vm.Relationships.Add(
-            new RelationshipViewModel(
-                new Relationship
-                {
-                    SourceEntityId = customer.Id,
-                    TargetEntityId = order.Id,
-                    Type = RelationshipType.OneToMany,
-                    ColumnPairs =
-                    [
-                        new RelationshipColumnPair(customer.Columns[0].Id, order.Columns[1].Id),
-                    ],
-                    ConstraintName = "FK_Orders_Customer",
-                },
-                customer,
-                order
-            )
-        );
-
-        var mermaid = MermaidExporter.Build(vm.ToDiagramModel());
-
-        mermaid.Should().Contain("erDiagram");
-        mermaid.Should().Contain("Customer {");
-        mermaid.Should().Contain("int CustomerId PK");
-        mermaid.Should().Contain("int CustomerId FK");
-        mermaid.Should().Contain("Customer ||--o{ Orders : FK_Orders_Customer");
-    }
-
-    /// <summary>Mermaid テキストの解析でエンティティ・列・リレーションの端点が復元されることを検証する</summary>
-    [Fact(DisplayName = "Mermaid 読込でエンティティとリレーションを復元できる")]
-    public void Import_ParsesEntitiesAndRelationships()
-    {
-        var text = string.Join(
-            Environment.NewLine,
-            [
-                "erDiagram",
-                "    Customer {",
-                "        int CustomerId PK",
-                "        nvarchar(100) CustomerName",
-                "    }",
-                "    Orders {",
-                "        int OrderId PK",
-                "        int CustomerId FK",
-                "    }",
-                "    Customer ||--o{ Orders : FK_Orders_Customer",
-            ]
-        );
-
-        var diagram = MermaidImporter.Parse(text, "sqlserver");
-
-        diagram.Entities.Should().HaveCount(2);
-        diagram.Relationships.Should().ContainSingle();
-        diagram
-            .Entities.Should()
-            .ContainSingle(entity =>
-                entity.TableName == "Customer"
-                && entity.Columns.Any(column => column.Name == "CustomerId" && column.IsPrimaryKey)
-            );
-        diagram
-            .Entities.Should()
-            .ContainSingle(entity =>
-                entity.TableName == "Orders"
-                && entity.Columns.Any(column => column.Name == "CustomerId" && column.IsForeignKey)
-            );
-        diagram.Relationships[0].Type.Should().Be(RelationshipType.OneToMany);
-        diagram.Relationships[0].ConstraintName.Should().Be("FK_Orders_Customer");
-
-        var source = diagram.Entities.Single(entity =>
-            entity.Id == diagram.Relationships[0].SourceEntityId
-        );
-        var target = diagram.Entities.Single(entity =>
-            entity.Id == diagram.Relationships[0].TargetEntityId
-        );
-        source.TableName.Should().Be("Customer");
-        target.TableName.Should().Be("Orders");
-        var columnPair = diagram.Relationships[0].ColumnPairs.Should().ContainSingle().Subject;
-        source.Columns.Should().ContainSingle(column => column.Id == columnPair.SourceColumnId);
-        target.Columns.Should().ContainSingle(column => column.Id == columnPair.TargetColumnId);
-    }
-
-    /// <summary>SaveTo で書き出した Mermaid ファイルを Load で読み戻し、内容が往復保持されることを検証する</summary>
+    /// <summary>SaveTo で書き出した Mermaid ファイルを Load で読み戻せることを検証する（往復の中身は形の行 mermaid-save-load の Mermaid の期待）</summary>
     [Fact(DisplayName = "Mermaid ファイルの SaveTo と Load を往復できる")]
     public void SaveAndLoad_RoundTrip()
     {
@@ -177,19 +49,23 @@ public class MermaidTests
                 ),
             ]);
         vm.Relationships[0].ConstraintName = "FK_Child_Parent";
+        var model = vm.ToDiagramModel();
+        var text = MermaidExporter.Build(model);
 
         var path = Path.Combine(Path.GetTempPath(), $"er-{Guid.NewGuid()}.mmd");
 
         try
         {
-            MermaidExporter.SaveTo(vm.ToDiagramModel(), path);
-            var diagram = MermaidImporter.Load(path, "sqlserver");
+            MermaidExporter.SaveTo(model, path);
 
-            diagram.Entities.Should().HaveCount(2);
-            diagram.Relationships.Should().ContainSingle();
-            diagram.Entities.Should().Contain(entity => entity.TableName == "Parent");
-            diagram.Entities.Should().Contain(entity => entity.TableName == "Child");
-            diagram.Relationships[0].ConstraintName.Should().Be("FK_Child_Parent");
+            File.ReadAllText(path).Should().Be(text, "SaveTo は Build と同じテキストを書く");
+            FormatRoundTripRunner
+                .Describe(MermaidImporter.Load(path, "sqlserver"))
+                .Should()
+                .Equal(
+                    FormatRoundTripRunner.Describe(MermaidImporter.Parse(text, "sqlserver")),
+                    "Load はファイルのテキストを Parse したのと同じ図を返す"
+                );
         }
         finally
         {
@@ -198,316 +74,5 @@ public class MermaidTests
                 File.Delete(path);
             }
         }
-    }
-
-    /// <summary>括弧付き型が出力時に正規化され、読込時に元の SQL 型名へ復元されることを検証する</summary>
-    [Fact(
-        DisplayName = "decimal(10,2) や nvarchar(100) は出力→読込のラウンドトリップで元の型名に復元できる"
-    )]
-    public void Export_Import_NormalizesAndDenormalizesDataTypes()
-    {
-        var vm = new MainViewModel();
-        var entity = new EntityViewModel(
-            new Entity
-            {
-                TableName = "Product",
-                Columns =
-                {
-                    new Column
-                    {
-                        Name = "Price",
-                        DataType = "decimal(10,2)",
-                        IsNullable = false,
-                    },
-                    new Column
-                    {
-                        Name = "ProductName",
-                        DataType = "nvarchar(100)",
-                        IsNullable = false,
-                    },
-                },
-            }
-        );
-        vm.Entities.Add(entity);
-
-        // Act: 出力して Mermaid テキストを確認し、再度読み込む
-        var mermaidText = MermaidExporter.Build(vm.ToDiagramModel());
-        var diagram = MermaidImporter.Parse(mermaidText, "sqlserver");
-
-        // Assert: Mermaid テキスト上では正規化済み形式になっている
-        mermaidText.Should().Contain("decimal_10_2");
-        mermaidText.Should().Contain("nvarchar_100");
-
-        // Assert: 読み込み後は元の SQL 型名に復元されている
-        var product = diagram.Entities.First(e => e.TableName == "Product");
-        product.Columns.First(c => c.Name == "Price").DataType.Should().Be("decimal(10,2)");
-        product.Columns.First(c => c.Name == "ProductName").DataType.Should().Be("nvarchar(100)");
-    }
-
-    /// <summary>親が複合主キーの場合、取込の列補完が全 PK 列を順にペア化することを検証する</summary>
-    [Fact(DisplayName = "Mermaid 取込は親の複合 PK を列ごとにペア化する")]
-    public void Import_CompositePrimaryKeyParent_PairsEveryKeyColumn()
-    {
-        // Mermaid の関係記法に列構文は無いため、列は GUI / MCP と同じ既定解決で補完される
-        var text = string.Join(
-            Environment.NewLine,
-            [
-                "erDiagram",
-                "    TenantRegion {",
-                "        int TenantId PK",
-                "        nvarchar(10) RegionCode PK",
-                "    }",
-                "    TenantUser {",
-                "        int TenantUserId PK",
-                "        int TenantId",
-                "        nvarchar(10) RegionCode",
-                "    }",
-                "    TenantRegion ||--o{ TenantUser : FK_TenantUser_TenantRegion",
-            ]
-        );
-
-        var diagram = MermaidImporter.Parse(text, "sqlserver");
-        var parent = diagram.Entities.Single(entity => entity.TableName == "TenantRegion");
-        var child = diagram.Entities.Single(entity => entity.TableName == "TenantUser");
-        var relationship = diagram.Relationships.Single();
-
-        relationship
-            .ColumnPairs.Select(pair =>
-                (
-                    parent.Columns.Single(column => column.Id == pair.SourceColumnId).Name,
-                    child.Columns.Single(column => column.Id == pair.TargetColumnId).Name
-                )
-            )
-            .Should()
-            .Equal(("TenantId", "TenantId"), ("RegionCode", "RegionCode"));
-        child.Columns.Single(column => column.Name == "TenantId").IsForeignKey.Should().BeTrue();
-        child.Columns.Single(column => column.Name == "RegionCode").IsForeignKey.Should().BeTrue();
-    }
-
-    /// <summary>
-    /// 複合主キーの各列が、親テーブル名由来の名前の子列を取り違えずに同名の子列へ付くことを検証する
-    /// </summary>
-    /// <param name="parentTable">親テーブル名</param>
-    /// <param name="firstKey">親の主キーの 1 列目</param>
-    /// <param name="secondKey">親の主キーの 2 列目（子にも同名の列がある）</param>
-    [Theory(DisplayName = "Mermaid 取込の複合主キーの自動ペア化は各列を同名の子列へ付ける")]
-    [InlineData("Orders", "OrderId", "Revision")]
-    [InlineData("Projects", "TenantId", "ProjectId")]
-    public void Import_CompositePrimaryKey_PairsEachColumnWithSameName(
-        string parentTable,
-        string firstKey,
-        string secondKey
-    )
-    {
-        var text = string.Join(
-            Environment.NewLine,
-            [
-                "erDiagram",
-                $"    {parentTable} {{",
-                $"        int {firstKey} PK",
-                $"        int {secondKey} PK",
-                "    }",
-                "    Child {",
-                "        int ChildId PK",
-                $"        int {firstKey}",
-                $"        int {secondKey}",
-                "    }",
-                $"    {parentTable} ||--o{{ Child : FK_Child_{parentTable}",
-            ]
-        );
-
-        var diagram = MermaidImporter.Parse(text, "sqlserver");
-        var parent = diagram.Entities.Single(entity => entity.TableName == parentTable);
-        var child = diagram.Entities.Single(entity => entity.TableName == "Child");
-
-        diagram
-            .Relationships.Single()
-            .ColumnPairs.Select(pair =>
-                (
-                    parent.Columns.Single(column => column.Id == pair.SourceColumnId).Name,
-                    child.Columns.Single(column => column.Id == pair.TargetColumnId).Name
-                )
-            )
-            .Should()
-            .Equal((firstKey, firstKey), (secondKey, secondKey));
-    }
-
-    /// <summary>行に紐づく解析エラーへ、その行の行番号が前置されることを検証する</summary>
-    [Fact(DisplayName = "Mermaid 取込の解析エラーに行番号が付く")]
-    public void Import_ParseError_PrefixesLineNumber()
-    {
-        // 4 行目のカラム定義がトークン 1 つしかなく解析できない
-        var text = string.Join(
-            Environment.NewLine,
-            ["erDiagram", "    Customer {", "        int CustomerId PK", "        broken", "    }"]
-        );
-
-        var act = () => MermaidImporter.Parse(text, "sqlserver");
-
-        act.Should()
-            .Throw<InvalidDataException>()
-            .WithMessage(
-                string.Format(
-                    Strings.Import_LineDiagnostic,
-                    4,
-                    string.Format(Strings.Mermaid_ColumnParseError, "Customer", "broken")
-                )
-            );
-    }
-
-    /// <summary>未閉じブロックの診断が、エラーの判明位置ではなくブロック開始行を指すことを検証する</summary>
-    [Fact(DisplayName = "Mermaid 取込の未閉じブロックはブロック開始行を指す")]
-    public void Import_MissingClosingBrace_PointsToBlockStartLine()
-    {
-        var text = string.Join(
-            Environment.NewLine,
-            ["erDiagram", "", "    Customer {", "        int CustomerId PK"]
-        );
-
-        var act = () => MermaidImporter.Parse(text, "sqlserver");
-
-        act.Should()
-            .Throw<InvalidDataException>()
-            .WithMessage(
-                string.Format(
-                    Strings.Import_LineDiagnostic,
-                    3,
-                    string.Format(Strings.Mermaid_MissingClosingBrace, "Customer")
-                )
-            );
-    }
-
-    /// <summary>ファイル全体に紐づく診断には（指すべき行が無いため）行番号を付けないことを検証する</summary>
-    [Fact(DisplayName = "Mermaid 取込のファイル全体の診断には行番号を付けない")]
-    public void Import_WholeFileDiagnostic_HasNoLineNumber()
-    {
-        var act = () => MermaidImporter.Parse("erDiagram", "sqlserver");
-
-        act.Should().Throw<InvalidDataException>().WithMessage(Strings.Mermaid_NoEntities);
-    }
-
-    /// <summary>Mermaid が表現できない情報を、図の中身に応じてすべて挙げることを検証する</summary>
-    [Fact(DisplayName = "Mermaid の欠落は表現できない情報をすべて挙げる")]
-    public void DetectOmissions_ListsUnsupportedInformation()
-    {
-        var diagram = BuildOmissionDiagram();
-
-        MermaidExporter
-            .DetectOmissions(diagram)
-            .Should()
-            .Equal(
-                ExportOmissionKind.TableDescription,
-                ExportOmissionKind.TableMemo,
-                ExportOmissionKind.ColumnDescription,
-                ExportOmissionKind.ColumnNullability,
-                ExportOmissionKind.CompositeUniqueConstraint,
-                ExportOmissionKind.UniqueConstraintName,
-                ExportOmissionKind.ForeignKeyColumnPairs,
-                ExportOmissionKind.ReferentialAction,
-                ExportOmissionKind.NamedQuery
-            );
-    }
-
-    /// <summary>該当する中身が無ければ（空の説明・全列 NULL 許可など）欠落を挙げないことを検証する</summary>
-    [Fact(DisplayName = "Mermaid の欠落は中身が無ければ挙げない")]
-    public void DetectOmissions_IgnoresEmptyContent()
-    {
-        var diagram = new ErDiagram
-        {
-            Entities =
-            {
-                new Entity
-                {
-                    TableName = "Customer",
-                    Columns =
-                    {
-                        new Column { Name = "Code", DataType = "int" },
-                    },
-                },
-            },
-        };
-
-        MermaidExporter.DetectOmissions(diagram).Should().BeEmpty();
-    }
-
-    /// <summary>Mermaid で落ちる情報を一通り含む図を作る（説明・メモ・複合制約・列ペア・アクション・クエリ）</summary>
-    private static ErDiagram BuildOmissionDiagram()
-    {
-        var parent = new Entity
-        {
-            TableName = "Customer",
-            Description = "顧客マスタ",
-            Memo = "打ち合わせメモ",
-            Columns =
-            {
-                new Column
-                {
-                    Name = "CustomerId",
-                    DataType = "int",
-                    IsPrimaryKey = true,
-                    IsNullable = false,
-                    Description = "顧客 ID",
-                },
-                new Column
-                {
-                    Name = "TenantId",
-                    DataType = "int",
-                    IsNullable = false,
-                },
-            },
-        };
-        parent.UniqueConstraints.Add(
-            new UniqueConstraint
-            {
-                Name = "UQ_Customer_Tenant",
-                ColumnIds = [parent.Columns[0].Id, parent.Columns[1].Id],
-            }
-        );
-
-        var child = new Entity
-        {
-            TableName = "Orders",
-            Columns =
-            {
-                new Column
-                {
-                    Name = "OrderId",
-                    DataType = "int",
-                    IsPrimaryKey = true,
-                    IsNullable = false,
-                },
-                new Column
-                {
-                    Name = "CustomerId",
-                    DataType = "int",
-                    IsForeignKey = true,
-                    IsNullable = false,
-                },
-            },
-        };
-
-        return new ErDiagram
-        {
-            Entities = [parent, child],
-            Relationships =
-            [
-                new Relationship
-                {
-                    SourceEntityId = parent.Id,
-                    TargetEntityId = child.Id,
-                    Type = RelationshipType.OneToMany,
-                    ColumnPairs =
-                    [
-                        new RelationshipColumnPair(parent.Columns[0].Id, child.Columns[1].Id),
-                    ],
-                    ConstraintName = "FK_Orders_Customer",
-                    OnDelete = ForeignKeyReferentialAction.Cascade,
-                },
-            ],
-            Queries =
-            {
-                new QueryDefinition { Name = "ById", EntityId = parent.Id },
-            },
-        };
     }
 }

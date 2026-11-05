@@ -1,12 +1,9 @@
 using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
-using QuickER.CodeReverse.CSharp;
-using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.SqlServer;
 using CodeGenStrings = QuickER.CodeGen.CSharp.Resources.Strings;
-using ReverseStrings = QuickER.CodeReverse.CSharp.Resources.Strings;
 
 namespace QuickER.Tests.CodeReverse.CSharp;
 
@@ -24,23 +21,14 @@ namespace QuickER.Tests.CodeReverse.CSharp;
 /// <c>[DbColumnMeta(..., NativeType = "...")]</c> として追加で刻み、リバース側は
 /// 「その表記を対象方言で解析した正規型がトークンの正規型と一致する」ときだけ採用する。
 /// </para>
+/// <para>
+/// 往復（非可逆な表記が元の綴りのまま戻る）とリバース側の規則（verbatim とトークンの食い違い・対象方言が解析できない verbatim）は
+/// 形式の往復のエンジン（<c>FormatRoundTrip/</c> の形の行 <c>csharp-verbatim-type-*</c>・規則の行 <c>csharp-rule-verbatim-*</c>）が見る。
+/// ここではリバースを通らない生成側の出力と診断だけを固定する。
+/// </para>
 /// </remarks>
 public class CSharpReverseVerbatimTypeTests
 {
-    /// <summary>非可逆な型表記（左）と、トークン経由で書き戻したときの表記（右）</summary>
-    public static TheoryData<string, string> NonRoundTrippableTypes =>
-        new()
-        {
-            { "datetime", "datetime2" },
-            { "smalldatetime", "datetime2" },
-            { "numeric(10,2)", "decimal(10,2)" },
-            { "ntext", "nvarchar(max)" },
-            { "text", "varchar(max)" },
-            { "image", "varbinary(max)" },
-            { "smallmoney", "money" },
-            { "float(24)", "real" },
-        };
-
     /// <summary>型表記 1 つを持つ 1 テーブルの図を作る</summary>
     private static ErDiagram SingleColumnDiagram(string dataType) =>
         new()
@@ -88,31 +76,6 @@ public class CSharpReverseVerbatimTypeTests
             diagram,
             Options
         );
-    }
-
-    /// <summary>非可逆な型表記は、生成 → リバースの往復で元の綴りのまま戻る</summary>
-    [Theory(DisplayName = "非可逆な型表記は往復で元の綴りのまま戻る")]
-    [MemberData(nameof(NonRoundTrippableTypes))]
-    public void RoundTrip_NonRoundTrippableSpelling_IsPreserved(string dataType, string collapsedTo)
-    {
-        var generation = Generate(SingleColumnDiagram(dataType));
-        generation.HasErrors.Should().BeFalse();
-
-        var source = generation.Files.Single().Content;
-        // 生成物は「元の表記」を verbatim 引数として持つ（トークンだけでは綴りを復元できないため）
-        source.Should().Contain($"NativeType = \"{dataType}\"");
-
-        var reversed = new CSharpReverseParser().Parse(
-            source,
-            new SqlServerTypeCatalog(),
-            IdentifierLengthLimit.Unlimited
-        );
-        var column = reversed
-            .Entities.Single()
-            .Columns.Single(candidate => candidate.Name == "probe");
-
-        column.DataType.Should().Be(dataType, $"verbatim が無ければ '{collapsedTo}' へ化ける");
-        reversed.Warnings.Should().BeEmpty();
     }
 
     /// <summary>綴りが変わらない型（代表表記そのもの）には verbatim 引数を出さない＝既存生成物はバイト不変</summary>
@@ -164,85 +127,6 @@ public class CSharpReverseVerbatimTypeTests
                 diagnostic.Severity == GenerationDiagnosticSeverity.Info
                 && diagnostic.Message.Contains("samples.probe", StringComparison.Ordinal)
                 && diagnostic.Message.Contains("datetime2", StringComparison.Ordinal)
-            );
-    }
-
-    /// <summary>
-    /// 手編集などで verbatim とトークンの意味が食い違ったら、トークン側を採って警告する
-    /// （verbatim を無条件に信じると、型トークンが語る意味と違う型の図ができる）
-    /// </summary>
-    [Fact(DisplayName = "verbatim とトークンが食い違うときはトークンを採り警告する")]
-    public void Parse_VerbatimContradictsToken_PrefersTokenWithWarning()
-    {
-        const string source = """
-            namespace Sample;
-
-            [Table("samples")]
-            public partial class SampleEntity
-            {
-                [Key]
-                [Column("sample_id")]
-                [DbColumnMeta("int32", NativeType = "nvarchar(10)")]
-                public int SampleId { get; set; }
-            }
-            """;
-
-        var result = new CSharpReverseParser().Parse(
-            source,
-            new SqlServerTypeCatalog(),
-            IdentifierLengthLimit.Unlimited
-        );
-
-        result.Entities.Single().Columns.Single().DataType.Should().Be("int");
-        result
-            .Warnings.Should()
-            .ContainSingle()
-            .Which.Should()
-            .Be(
-                string.Format(
-                    ReverseStrings.Reverse_VerbatimTypeMismatch,
-                    "nvarchar(10)",
-                    "samples",
-                    "sample_id",
-                    "int32"
-                )
-            );
-    }
-
-    /// <summary>
-    /// 対象方言が verbatim を解析できないとき（別方言の図から生成したコードをリバースした場合）も、
-    /// トークン側へ倒して警告する＝方言中立トークンによる可搬性は保たれる
-    /// </summary>
-    [Fact(DisplayName = "対象方言が解析できない verbatim はトークンへ倒して警告する")]
-    public void Parse_VerbatimUnknownToTargetDialect_PrefersTokenWithWarning()
-    {
-        var generation = Generate(SingleColumnDiagram("datetime"));
-        var source = generation.Files.Single().Content;
-
-        // SQL Server の 'datetime' を PostgreSQL 方言でリバースする（PostgreSQL に datetime は無い）
-        var result = new CSharpReverseParser().Parse(
-            source,
-            new QuickER.Provider.PostgreSql.PostgreSqlTypeCatalog(),
-            IdentifierLengthLimit.Unlimited
-        );
-
-        result
-            .Entities.Single()
-            .Columns.Single(column => column.Name == "probe")
-            .DataType.Should()
-            .Be("timestamp");
-        result
-            .Warnings.Should()
-            .ContainSingle()
-            .Which.Should()
-            .Be(
-                string.Format(
-                    ReverseStrings.Reverse_VerbatimTypeMismatch,
-                    "datetime",
-                    "samples",
-                    "probe",
-                    "datetime"
-                )
             );
     }
 

@@ -532,8 +532,10 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Export,
             null,
             [
-                "MermaidFormatFidelityTests.DetectOmissions_ComputedColumn_IsReportedOnlyWhenPresent",
-                "DbmlLiteralFidelityTests.DetectOmissions_ComputedColumn_IsReportedOnlyWhenPresent",
+                "FormatShapeRows:mermaid-data-type-token-int",
+                "FormatShapeRows:mermaid-computed-column",
+                "FormatShapeRows:dbml-single-column-int",
+                "FormatShapeRows:dbml-computed-column",
             ]
         ),
         (
@@ -549,7 +551,7 @@ public static class UnsupportedCoverage
             UnsupportedDefinitionKind.ComputedColumn,
             UnsupportedFeature.Reverse,
             null,
-            ["CSharpReverseRoundTripTests.RoundTrip_ComputedColumn_Matches"]
+            ["FormatShapeRows:csharp-computed-column"]
         ),
         (
             UnsupportedDefinitionKind.IdentityRejectingValues,
@@ -599,8 +601,10 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Export,
             null,
             [
-                "MermaidFormatFidelityTests.DetectOmissions_IdentityColumn_IsReportedOnlyWhenPresent",
-                "DbmlLiteralFidelityTests.DetectOmissions_IdentityColumn_IsReportedOnlyWhenPresent",
+                "FormatShapeRows:mermaid-data-type-token-int",
+                "FormatShapeRows:mermaid-identity-column",
+                "FormatShapeRows:dbml-single-column-int",
+                "FormatShapeRows:dbml-identity-column",
             ]
         ),
         (
@@ -618,8 +622,8 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Reverse,
             null,
             [
-                "CSharpReverseRoundTripTests.RoundTrip_IdentityColumn_Matches",
-                "CSharpReverseRoundTripTests.Reverse_IdentityPrimaryKey_ComesBackAsOrdinaryColumn",
+                "FormatShapeRows:csharp-identity-column",
+                "FormatShapeRows:csharp-identity-primary-key",
             ]
         ),
         (
@@ -975,7 +979,7 @@ public static class UnsupportedCoverage
             UnsupportedDefinitionKind.UnparsableType,
             UnsupportedFeature.Reverse,
             null,
-            ["CSharpReverseParserTests.Parse_UnresolvableTypeToken_FallsBackWithWarning"]
+            ["FormatRuleRows:csharp-rule-unresolvable-type-token-falls-back-with-warning"]
         ),
         (
             UnsupportedDefinitionKind.UnemittableTypeNotation,
@@ -1049,8 +1053,8 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Export,
             null,
             [
-                "MermaidTests.DetectOmissions_ListsUnsupportedInformation",
-                "DbmlTests.CompositeForeignKey_RoundTripsThroughCompositeRefSyntax",
+                "FormatShapeRows:mermaid-omissions-unsupported-information",
+                "FormatShapeRows:dbml-composite-foreign-key",
             ]
         ),
         (
@@ -1093,7 +1097,7 @@ public static class UnsupportedCoverage
             UnsupportedDefinitionKind.UnrepresentableType,
             UnsupportedFeature.Reverse,
             null,
-            ["CSharpReverseLengthlessTokenTests.Parse_LengthlessToken_KeepsTokenTextAndWarns"]
+            ["FormatRuleRows:csharp-rule-lengthless-token-*"]
         ),
         (
             UnsupportedDefinitionKind.OnUpdateReferentialAction,
@@ -1121,8 +1125,8 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Export,
             null,
             [
-                "MermaidTests.DetectOmissions_ListsUnsupportedInformation",
-                "DbmlTests.Export_ReferentialActions_RoundTrip",
+                "FormatShapeRows:mermaid-omissions-unsupported-information",
+                "FormatShapeRows:dbml-referential-actions",
             ]
         ),
         (
@@ -1130,8 +1134,8 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Reverse,
             null,
             [
-                "CSharpReverseParserTests.Parse_RestoresForeignKeyMetadata",
-                "CSharpReverseRoundTripTests.RoundTrip_UniqueConstraintsAndForeignKeyMetadata_Matches",
+                "FormatRuleRows:csharp-rule-restores-foreign-key-metadata",
+                "FormatShapeRows:csharp-unique-and-foreign-key-metadata",
             ]
         ),
         (
@@ -1198,8 +1202,8 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Export,
             null,
             [
-                "MermaidTests.DetectOmissions_ListsUnsupportedInformation",
-                "DbmlTests.Export_ReferentialActions_RoundTrip",
+                "FormatShapeRows:mermaid-omissions-unsupported-information",
+                "FormatShapeRows:dbml-referential-actions",
             ]
         ),
         (

@@ -2,8 +2,6 @@ using System;
 using System.Linq;
 using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
-using QuickER.CodeReverse.CSharp;
-using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.MySql;
@@ -84,19 +82,16 @@ public class CSharpReverseBareDecimalTests
     }
 
     /// <summary>
-    /// 素の decimal は既定の精度・スケールのトークンで刻まれ、元の綴りが併記され、生成時 Info で名指しされ、
-    /// C# リバースで警告なしに <c>decimal</c> へ戻る。
+    /// 素の decimal の列は、綴りが変わる列として生成時 Info で名指しされる
+    /// （トークン・元の綴りの併記・警告なしに decimal へ戻る往復は形式の往復のエンジンの形の行 csharp-bare-decimal-* が見る）
     /// </summary>
-    [Theory(DisplayName = "素の decimal は既定の精度のトークンと元の綴りで刻まれ、警告なしに戻る")]
-    [InlineData("SqlServer", "decimal(18,0)")]
-    [InlineData("MySql", "decimal(10,0)")]
-    public void RoundTrip_BareDecimal_KeepsSpellingWithoutWarning(string dialect, string token)
+    [Theory(DisplayName = "素の decimal は綴りが変わる列として生成時 Info で名指しされる")]
+    [InlineData("SqlServer")]
+    [InlineData("MySql")]
+    public void Generate_BareDecimal_ReportsNonCanonicalSpellingInfo(string dialect)
     {
-        var (generation, catalog) = Generate(dialect);
+        var (generation, _) = Generate(dialect);
         generation.HasErrors.Should().BeFalse();
-
-        var source = generation.Files.Single().Content;
-        source.Should().Contain($"[DbColumnMeta(\"{token}\", NativeType = \"decimal\"");
 
         var prefix = CodeGenStrings.CodeGen_Info_NonCanonicalTypeSpellingColumns.Split('{')[0];
         generation
@@ -106,18 +101,6 @@ public class CSharpReverseBareDecimalTests
                 && diagnostic.Message.StartsWith(prefix, StringComparison.Ordinal)
                 && diagnostic.Message.Contains("samples.amount", StringComparison.Ordinal)
             );
-
-        var reversed = new CSharpReverseParser().Parse(
-            source,
-            catalog,
-            IdentifierLengthLimit.Unlimited
-        );
-        reversed
-            .Entities.Single()
-            .Columns.Single(column => column.Name == "amount")
-            .DataType.Should()
-            .Be("decimal");
-        reversed.Warnings.Should().BeEmpty();
     }
 
     /// <summary>
