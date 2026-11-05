@@ -7,7 +7,7 @@ namespace QuickER.Dialects;
 /// 図のテーブル名は最初の <c>.</c> でスキーマの部分と表の部分に分ける（2 つ目以降の <c>.</c> は表の名前の一部。
 /// <c>.</c> の前後が空でもそのまま返す）。DDL・同期・識別子の長さの判定・生成コードの同期 SQL が別々の規則で分けると、
 /// <c>a.b.c</c> のような名前で別々の表を指す。生成ランタイムの <c>EntitySaveMetadata.QuoteTableName</c> はこのアセンブリを
-/// 参照できない（ランタイムのパッケージは依存ゼロ）ので写しを持ち、一致は <c>SchemaQualifiedNameParityTests</c> が固定する。
+/// 参照できない（ランタイムのパッケージは依存ゼロ）ので写しを持ち、一致は <c>DialectIdentifierTableTests</c> の行 <c>runtime-quote-*</c> が固定する。
 /// </remarks>
 public static class SchemaQualifiedName
 {

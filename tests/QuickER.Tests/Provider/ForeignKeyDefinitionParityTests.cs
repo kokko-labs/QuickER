@@ -12,6 +12,7 @@ namespace QuickER.Tests.Provider;
 /// <remarks>
 /// Model は Provider を参照できないので判定は写しになる。食い違うと、DDL が作らない外部キーが既定名を取り、
 /// 同じ組の本物の外部キーの名前がずれる（またはその逆）。
+/// 同じ形の図で DDL に外部キーが現れるかは、方言の DDL の表の行（<c>DialectDdlRows</c> の <c>ddl-foreign-key-defined-*</c>）が固定する。
 /// </remarks>
 public class ForeignKeyDefinitionParityTests
 {
@@ -109,26 +110,5 @@ public class ForeignKeyDefinitionParityTests
             .DefinesForeignKey(relationship, parent, child)
             .Should()
             .Be(providerDefines, shape);
-    }
-
-    [Theory(
-        DisplayName = "外部キーを作らない関係は DDL に外部キーとして現れない（判定の両側を DDL で確かめる）"
-    )]
-    [MemberData(nameof(Shapes))]
-    public void DefinesForeignKey_MatchesWhetherDdlEmitsConstraint(string shape)
-    {
-        var (parent, child, relationship) = Build(shape);
-        relationship.ConstraintName = "FK_probe";
-        var diagram = new ErDiagram
-        {
-            Entities = { parent, child },
-            Relationships = { relationship },
-        };
-
-        var ddl = new QuickER.Provider.SqlServer.SqlServerProvider().DdlGenerator.Build(diagram);
-
-        ddl.Contains("FK_probe", StringComparison.Ordinal)
-            .Should()
-            .Be(ConstraintNames.DefinesForeignKey(relationship, parent, child), shape);
     }
 }

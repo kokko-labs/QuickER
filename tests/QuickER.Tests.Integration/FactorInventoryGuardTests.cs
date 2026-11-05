@@ -15,7 +15,7 @@ namespace QuickER.Tests.Integration;
 /// 生成フィクスチャの写し（<c>QuickER.Tests.GeneratedSyncModelFixture</c>）を、ConcurrencyMode と SaveOperation は
 /// <c>QuickER.Tests.GeneratedBackendParityFixture</c> の写しを反射する（Integration は QuickER.Runtime.Sync を参照しない。
 /// 次元表と違う写しを反射すると、名前が同じでも別の型として載っていないことになる）。
-/// SyncDialectCapabilities と SchemaImportWarningKind は製品の型（QuickER.Provider）。
+/// SyncDialectCapabilities は製品の型（QuickER.Provider）。
 /// </para>
 /// <para>
 /// 除外の項目の名前は文字列で書き、軸から生成しない（製品に値・プロパティを足すと、載せるか除外するまで赤になる）。
@@ -37,57 +37,10 @@ public sealed class FactorInventoryGuardTests
         InventoryAxis.Properties("SyncOptions", typeof(SyncFixture.SyncOptions)),
         InventoryAxis.Enum<ParityFixture.ConcurrencyMode>("ConcurrencyMode"),
         InventoryAxis.Enum<ParityFixture.SaveOperation>("SaveOperation"),
-        InventoryAxis.Enum<global::QuickER.Provider.SchemaImportWarningKind>(
-            "SchemaImportWarningKind"
-        ),
     ];
-
-    /// <summary>取込の警告の種別の除外の理由</summary>
-    private const string ImportWarningReason =
-        "取込の警告の種別は SchemaImportWarningTextTests（全種別の文言）・SchemaImportWarningKindMapTests（扱いの表との写像）と方言ごとの *ImportFidelityIntegrationTests の単体のテストが固定しているだけで、方言のエンジン（Dialect）の次元表がまだ無い（単体のテストをエンジンへ移すときに水準にする）";
 
     /// <summary>まだどのエンジンの次元表にも載っていない項目（軸・項目・受け持つエンジン・区切り・理由）</summary>
-    private static IReadOnlyList<InventoryExclusion> Exclusions { get; } =
-    [
-        .. new[]
-        {
-            "DomainTypeFlattened",
-            "TableColumnsUnavailable",
-            "ForeignKeyOutsideScope",
-            "TableNameCollision",
-            "ColumnNameCollision",
-            "ColumnTypeNotEmittable",
-            "PartitionDefinitionLost",
-            "VirtualTableExcluded",
-            "ComputedColumnExpressionLost",
-            "DisabledConstraintExcluded",
-            "TemporalHistoryTableExcluded",
-            "PrimaryKeyNullabilityAdjusted",
-            "ViewExcluded",
-            "MaterializedViewExcluded",
-            "ExternalTableExcluded",
-            "ChildPartitionExcluded",
-            "TemporaryTableExcluded",
-            "ForeignKeyToExcludedTable",
-            "ColumnDefaultLost",
-            "AutoIncrementLost",
-            "ColumnCollationLost",
-            "InvisibleColumnLost",
-            "ColumnOnUpdateLost",
-            "SpatialReferenceIdLost",
-            "AliasTypeFlattened",
-            "NameTrimmed",
-            "IdentityColumnMarked",
-            "DottedTableNameExcluded",
-            "UndeclaredColumnType",
-        }.Select(member => new InventoryExclusion(
-            "SchemaImportWarningKind",
-            member,
-            EngineIds.Dialect,
-            "P3",
-            ImportWarningReason
-        )),
-    ];
+    private static IReadOnlyList<InventoryExclusion> Exclusions { get; } = [];
 
     [Fact(
         DisplayName = "[棚卸し] Integration が検査する軸は、軸の割り当ての表の Integration の軸とちょうど一致する"

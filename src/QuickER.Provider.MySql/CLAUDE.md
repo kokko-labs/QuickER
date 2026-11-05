@@ -89,4 +89,4 @@
 
 - InnoDB は `SET DEFAULT` を宣言として保存するが効かせない（親を消すと外部キーエラー＝`NO ACTION` と同じ・実 MySQL で確認）。
 - DDL・同期は `MySqlReferentialAction` で句を省いて注意コメントを出し、比較は ON DELETE・ON UPDATE とも `NO ACTION` へ畳む（`SupportsSetDefaultAction` が偽）。
-- 固定は `MySqlReferentialActionIntegrationTests.SetDefault_DdlOmitsClauseWithNoteAndApplies` と実 MySQL の行 `realdb-mysql-set-default-is-omitted-and-leaves-no-fk-diff`。
+- 固定は `DialectDdlTableTests` の行 `ddl-fk-set-default-omitted-with-note-mysql`・`ddl-fk-set-default-omitted-mysql-ra-tables`（DDL の句の省略と注意コメント）と実 MySQL の行 `realdb-mysql-set-default-is-omitted-and-leaves-no-fk-diff`（同じ SET DEFAULT の外部キーを持つ図の DDL を適用して作る）。

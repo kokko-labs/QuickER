@@ -313,7 +313,7 @@ public static class FactorInventoryAssignment
         ("RelationshipType", Tests),
         ("CodeGenerationOptions", Tests),
         ("CanonicalTypeKind", Tests),
-        ("SchemaImportWarningKind", Integration),
+        ("SchemaImportWarningKind", Tests),
     ];
 
     /// <summary>アセンブリが検査する軸の名前（表の並び）</summary>

@@ -32,6 +32,9 @@ public sealed class FactorInventoryGuardTests
             property => property.PropertyType == typeof(bool) && OptionKeys.IsWritable(property)
         ),
         InventoryAxis.Enum<global::QuickER.Provider.CanonicalTypeKind>("CanonicalTypeKind"),
+        InventoryAxis.Enum<global::QuickER.Provider.SchemaImportWarningKind>(
+            "SchemaImportWarningKind"
+        ),
     ];
 
     /// <summary>まだどのエンジンの次元表にも載っていない項目（軸・項目・受け持つエンジン・区切り・理由）</summary>

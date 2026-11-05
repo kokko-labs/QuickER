@@ -20,7 +20,7 @@ namespace QuickER.Tests.Docs;
 /// </para>
 /// <para>
 /// 生成ランタイムの <c>EntitySaveMetadata.QuoteTableName</c>（テンプレートとパッケージ用のソース）は Dialects を参照できないので
-/// 写しを持つ。これはこの走査の外で、一致は <c>SchemaQualifiedNameParityTests</c> が固定する。
+/// 写しを持つ。これはこの走査の外で、一致は <c>DialectIdentifierTableTests</c> の行 <c>runtime-quote-*</c> が固定する。
 /// </para>
 /// </remarks>
 public sealed class SchemaQualifiedNameGuardTests

@@ -18,7 +18,7 @@ namespace QuickER.Tests.Samples;
 /// 走査はテキストのファイル全部が対象で、生成物（<c>.g.cs</c> / <c>.g.md</c> / <c>.sql</c>）も含める。いま英語なので緑で、
 /// 将来テンプレート側から混入したときは
 /// <c>QuickER.Tests.CodeGen.CSharp.GeneratedOutputEnglishGuardTests</c> や
-/// <c>QuickER.Tests.Provider.DdlOutputEnglishGuardTests</c> と二重に拾える。
+/// <c>QuickER.Tests.Provider.DialectDdlTableTests</c>（全行に掛かる自動の英語の照合）と二重に拾える。
 /// </para>
 /// <para>
 /// <b>除外は 3 つだけ</b>＝<c>README.ja.md</c>（日本語版そのもの）・言語切替リンクの行（英語版 README が日本語版を指す

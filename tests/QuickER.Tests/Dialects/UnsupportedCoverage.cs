@@ -506,16 +506,16 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Sync,
             null,
             [
-                "ComputedColumnCommentTests.Sync_AddTable_ComputedColumn_EmitsNote",
-                "ComputedColumnCommentTests.Sync_AddColumn_ComputedColumn_EmitsNote",
-                "ComputedColumnCommentTests.Sync_SqliteRebuild_ComputedColumn_EmitsNote",
+                "DialectDdlRows:sync-add-table-computed-column-note",
+                "DialectDdlRows:sync-add-column-computed-column-note-before-alter-table",
+                "DialectDdlRows:sync-rebuild-computed-column-note",
             ]
         ),
         (
             UnsupportedDefinitionKind.ComputedColumn,
             UnsupportedFeature.Ddl,
             null,
-            ["ComputedColumnCommentTests.Ddl_ComputedColumn_EmitsNoteBeforeColumnLine"]
+            ["DialectDdlRows:ddl-computed-column-note-precedes-column-line"]
         ),
         (
             UnsupportedDefinitionKind.ComputedColumn,
@@ -566,15 +566,15 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Sync,
             null,
             [
-                "IdentityColumnCommentTests.Sync_AddTable_IdentityColumn_IsAnnotatedOnlyWhereTheTableSays",
-                "IdentityColumnCommentTests.Sync_AddColumn_IdentityColumn_IsAnnotatedOnlyWhereTheTableSays",
+                "DialectDdlRows:sync-add-table-identity-column-note",
+                "DialectDdlRows:sync-add-column-identity-column-note-before-alter-table",
             ]
         ),
         (
             UnsupportedDefinitionKind.IdentityRejectingValues,
             UnsupportedFeature.Ddl,
             null,
-            ["IdentityColumnCommentTests.Ddl_IdentityColumn_IsAnnotatedOnlyWhereTheTableSays"]
+            ["DialectDdlRows:ddl-identity-column-note-precedes-column-line"]
         ),
         (
             UnsupportedDefinitionKind.IdentityRejectingValues,
@@ -706,7 +706,7 @@ public static class UnsupportedCoverage
                 "MySqlImportFidelityIntegrationTests.Import_ColumnAttributes_AreReported",
                 "OracleImportFidelityIntegrationTests.Import_ColumnDefaultsAndIdentity_AreReportedOrMarked",
                 "SqliteImportFidelityIntegrationTests.Import_ColumnDefaultsAndAutoIncrement_AreReported",
-                "SchemaImportWarningTextTests.Describe_EveryKind_FormatsInBothCultures",
+                "DialectImportWarningRows:describe-*",
             ]
         ),
         (
@@ -715,7 +715,7 @@ public static class UnsupportedCoverage
             null,
             [
                 "MySqlImportFidelityIntegrationTests.Import_ColumnAttributes_AreReported",
-                "SchemaImportWarningTextTests.Describe_EveryKind_FormatsInBothCultures",
+                "DialectImportWarningRows:describe-*",
             ]
         ),
         (
@@ -727,7 +727,7 @@ public static class UnsupportedCoverage
                 "MySqlImportFidelityIntegrationTests.Import_ColumnAttributes_AreReported",
                 "OracleImportFidelityIntegrationTests.Import_ColumnDefaultsAndIdentity_AreReportedOrMarked",
                 "SqliteImportFidelityIntegrationTests.Import_ColumnDefaultsAndAutoIncrement_AreReported",
-                "SchemaImportWarningTextTests.Describe_EveryKind_FormatsInBothCultures",
+                "DialectImportWarningRows:describe-*",
             ]
         ),
         (
@@ -736,7 +736,7 @@ public static class UnsupportedCoverage
             null,
             [
                 "MySqlImportFidelityIntegrationTests.Import_ColumnAttributes_AreReported",
-                "SchemaImportWarningTextTests.Describe_EveryKind_FormatsInBothCultures",
+                "DialectImportWarningRows:describe-*",
             ]
         ),
         (
@@ -745,7 +745,7 @@ public static class UnsupportedCoverage
             null,
             [
                 "MySqlImportFidelityIntegrationTests.Import_ColumnAttributes_AreReported",
-                "SchemaImportWarningTextTests.Describe_EveryKind_FormatsInBothCultures",
+                "DialectImportWarningRows:describe-*",
             ]
         ),
         (
@@ -754,7 +754,7 @@ public static class UnsupportedCoverage
             null,
             [
                 "MySqlImportFidelityIntegrationTests.Import_ColumnAttributes_AreReported",
-                "SchemaImportWarningTextTests.Describe_EveryKind_FormatsInBothCultures",
+                "DialectImportWarningRows:describe-*",
             ]
         ),
         (
@@ -763,7 +763,7 @@ public static class UnsupportedCoverage
             null,
             [
                 "SqliteImportFidelityIntegrationTests.Import_UndeclaredColumnType_IsImportedAsBlobAndReported",
-                "SchemaImportWarningTextTests.Describe_EveryKind_FormatsInBothCultures",
+                "DialectImportWarningRows:describe-*",
             ]
         ),
         (
@@ -776,7 +776,7 @@ public static class UnsupportedCoverage
                 "MySqlImportFidelityIntegrationTests.Import_PaddedNames_AreTrimmedAndReported",
                 "OracleImportFidelityIntegrationTests.Import_PaddedNames_AreTrimmedAndReported",
                 "SqliteImportFidelityIntegrationTests.Import_PaddedNames_AreTrimmedAndReported",
-                "SchemaImportWarningTextTests.Describe_EveryKind_FormatsInBothCultures",
+                "DialectImportWarningRows:describe-*",
             ]
         ),
         (
@@ -785,7 +785,7 @@ public static class UnsupportedCoverage
             DialectNames.SqlServer,
             [
                 "SqlServerImportFidelityIntegrationTests.Import_ColumnAttributesIdentityAndPartitionedTable_AreReported",
-                "SchemaImportWarningTextTests.Describe_EveryKind_FormatsInBothCultures",
+                "DialectImportWarningRows:describe-*",
             ]
         ),
         (
@@ -794,7 +794,7 @@ public static class UnsupportedCoverage
             DialectNames.SqlServer,
             [
                 "SqlServerImportFidelityIntegrationTests.Import_ColumnAttributesIdentityAndPartitionedTable_AreReported",
-                "SchemaImportWarningTextTests.Describe_EveryKind_FormatsInBothCultures",
+                "DialectImportWarningRows:describe-*",
             ]
         ),
         (
@@ -991,19 +991,19 @@ public static class UnsupportedCoverage
             UnsupportedDefinitionKind.UnemittableTypeNotation,
             UnsupportedFeature.Sync,
             null,
-            ["SqlTypeTextTests.SyncScriptBuilders_RejectUnsafeDataType"]
+            ["DialectDdlRows:sync-add-table-unsafe-data-type-is-rejected"]
         ),
         (
             UnsupportedDefinitionKind.UnemittableTypeNotation,
             UnsupportedFeature.Ddl,
             null,
-            ["SqlTypeTextTests.DdlGenerators_RejectUnsafeDataType"]
+            ["DialectDdlRows:ddl-type-unsafe-data-type-is-rejected"]
         ),
         (
             UnsupportedDefinitionKind.PaddedName,
             UnsupportedFeature.Diff,
             null,
-            ["ExistingUnsupportedBehaviorTests.PaddedLiveNames_AreFoldedInDiff"]
+            ["SyncPlanExpectationRows:diff-padded-live-names-are-folded"]
         ),
         (
             UnsupportedDefinitionKind.TableWithoutReadableColumns,
@@ -1058,8 +1058,8 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Ddl,
             null,
             [
-                "ExistingUnsupportedBehaviorTests.ManyToMany_DdlEmitsJunctionNote_AllDialects",
-                "SqliteDdlGeneratorTests.Build_ManyToMany_EmitsComment",
+                "DialectDdlRows:ddl-many-to-many-junction-note-no-foreign-key",
+                "DialectDdlRows:ddl-many-to-many-junction-note",
             ]
         ),
         (
@@ -1114,7 +1114,7 @@ public static class UnsupportedCoverage
             UnsupportedDefinitionKind.OnUpdateReferentialAction,
             UnsupportedFeature.Ddl,
             DialectNames.Oracle,
-            ["OracleDdlGeneratorTests.Build_OneToMany_EmitsForeignKey_NoOnUpdate"]
+            ["DialectDdlRows:ddl-fk-one-to-many-with-actions"]
         ),
         (
             UnsupportedDefinitionKind.OnUpdateReferentialAction,
@@ -1166,9 +1166,9 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Sync,
             DialectNames.SqlServer,
             [
-                "ForeignKeyStatementNotesTests.Plan_SetDefaultOnNotNullColumn_WarnsOnlyWhereDeclared",
-                "ForeignKeyStatementNotesTests.Plan_SetDefaultOnNullableColumn_DoesNotWarn",
-                "ForeignKeyStatementNotesTests.Plan_AlterForeignKeyToSetDefault_OnNotNullColumn_WarnsOnlyWhereDeclared",
+                "SyncPlanExpectationRows:plan-set-default-on-not-null-child-warns-only-where-declared",
+                "SyncPlanExpectationRows:plan-set-default-on-nullable-child-does-not-warn",
+                "SyncPlanExpectationRows:plan-alter-foreign-key-to-set-default-on-not-null-child-warns-only-where-declared",
                 "SyncPlanExpectationRows:realdb-fk-set-default-on-not-null-warns-*",
             ]
         ),
@@ -1176,21 +1176,21 @@ public static class UnsupportedCoverage
             UnsupportedDefinitionKind.SetDefaultReferentialAction,
             UnsupportedFeature.Ddl,
             DialectNames.MySql,
-            ["MySqlDdlGeneratorTests.Build_SetDefault_IsOmittedWithNote"]
+            ["DialectDdlRows:ddl-fk-set-default-omitted-with-note-mysql"]
         ),
         (
             UnsupportedDefinitionKind.SetDefaultReferentialAction,
             UnsupportedFeature.Ddl,
             DialectNames.Oracle,
-            ["OracleDdlGeneratorTests.Build_OnDeleteSetDefault_OmitsClauseWithNote"]
+            ["DialectDdlRows:ddl-fk-on-delete-set-default-omitted-with-note-oracle"]
         ),
         (
             UnsupportedDefinitionKind.SetDefaultReferentialAction,
             UnsupportedFeature.Ddl,
             DialectNames.SqlServer,
             [
-                "ForeignKeyStatementNotesTests.Ddl_SetDefaultOnNotNullColumn_IsAnnotatedOnlyWhereDeclared",
-                "ForeignKeyStatementNotesTests.Ddl_SetDefaultOnNullableColumn_IsNotAnnotated",
+                "DialectDdlRows:ddl-fk-set-default-on-not-null-child-note",
+                "DialectDdlRows:ddl-fk-set-default-on-nullable-child-no-note",
             ]
         ),
         (
@@ -1212,7 +1212,7 @@ public static class UnsupportedCoverage
             UnsupportedDefinitionKind.Description,
             UnsupportedFeature.Ddl,
             null,
-            ["SqliteDdlGeneratorTests.Build_Descriptions_EmittedAsSqlComments"]
+            ["DialectDdlRows:ddl-description-sql-comment-lines-sqlite"]
         ),
         (
             UnsupportedDefinitionKind.ColumnOrder,
@@ -1274,11 +1274,11 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Ddl,
             null,
             [
-                "ForeignKeyStatementNotesTests.Ddl_SetNullOnNotNullColumn_IsAnnotated",
-                "ForeignKeyStatementNotesTests.Ddl_SetNullNotApplicable_IsNotAnnotated",
+                "DialectDdlRows:ddl-fk-set-null-on-delete-not-null-child-note",
+                "DialectDdlRows:ddl-fk-set-null-on-nullable-child-no-note",
                 "SqlServerSetNullOnNotNullColumnIntegrationTests.SetNullOnNotNullColumn_DdlIsRefused",
                 "MySqlSetNullOnNotNullColumnIntegrationTests.SetNullOnNotNullColumn_DdlIsRefused",
-                "SetNullOnNotNullColumnDdlNoteTests.SetNullOnNotNullColumn_DdlHasNote",
+                "DialectDdlRows:ddl-fk-set-null-on-not-null-child-dialect-key-types",
                 "SyncPlanExpectationRows:realdb-set-null-not-null-child-ddl-applies-delete-fails",
             ]
         ),
@@ -1299,7 +1299,7 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Ddl,
             null,
             [
-                "ForeignKeyColumnOrderTests.Ddl_CompositeForeignKey_IsReorderedOnlyWhereDeclared",
+                "DialectDdlRows:ddl-fk-composite-reordered-to-referenced-key",
                 "SyncPlanExpectationRows:realdb-fk-composite-other-order-ddl-applies-no-diff",
                 "SyncPlanExpectationRows:realdb-mysql-fk-composite-other-order-ddl-applies-no-diff",
             ]
@@ -1309,7 +1309,7 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Sync,
             null,
             [
-                "ForeignKeyColumnOrderTests.Sync_AddCompositeForeignKey_IsReorderedOnlyWhereDeclared",
+                "DialectDdlRows:sync-other-add-composite-fk-reordered-to-referenced-key",
                 "SyncPlanExpectationRows:plan-arrange-reorder-referenced-composite-key-rebuilds-fk-in-new-order",
                 "SyncPlanExpectationRows:plan-arrange-fk-alter-in-other-order-is-arranged-to-key",
                 "SyncPlanExpectationRows:realdb-fk-reorder-referenced-composite-pk-rebuilds-in-new-order",
@@ -1335,8 +1335,8 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Ddl,
             DialectNames.SqlServer,
             [
-                "ForeignKeyStatementNotesTests.Ddl_StringLengthMismatch_IsAnnotatedOnlyWhereDeclared",
-                "ForeignKeyStatementNotesTests.Ddl_NotLengthOnlyDifference_IsNotAnnotated",
+                "DialectDdlRows:ddl-fk-string-length-mismatch-note",
+                "DialectDdlRows:ddl-fk-type-mismatch-*",
             ]
         ),
         (
@@ -1380,8 +1380,8 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Sync,
             null,
             [
-                "UniqueConstraintOnPrimaryKeyNoteTests.Sync_AddTable_OmitsUniqueConstraintOnPrimaryKeyWhereDeclared",
-                "UniqueConstraintOnPrimaryKeyNoteTests.Sync_SqliteRebuild_OmitsUniqueConstraintThatBecomesPrimaryKey",
+                "DialectDdlRows:sync-add-table-unique-on-primary-key-columns-omitted-where-unsupported",
+                "DialectDdlRows:sync-rebuild-unique-that-becomes-primary-key-omitted",
                 "SyncPlanExpectationRows:plan-dependency-unique-on-staying-pk-*",
                 "OracleDdlRoundTripIntegrationTests.UniqueConstraintOnPrimaryKey_IsOmittedAndApplies",
             ]
@@ -1391,7 +1391,7 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Ddl,
             null,
             [
-                "UniqueConstraintOnPrimaryKeyNoteTests.Ddl_OmitsUniqueConstraintOnPrimaryKeyWhereDeclared",
+                "DialectDdlRows:ddl-unique-on-primary-key-columns-omitted-where-unsupported",
                 "OracleDdlRoundTripIntegrationTests.UniqueConstraintOnPrimaryKey_IsOmittedAndApplies",
             ]
         ),
@@ -1400,7 +1400,7 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Sync,
             null,
             [
-                "SchemaQualifiedTableNameTests.Plan_DottedTableName_WarnsOnlyWhereDeclared",
+                "SyncPlanExpectationRows:plan-dotted-table-name-warns-only-where-declared",
                 "SyncPlanExpectationRows:realdb-dotted-table-name-warns-and-fails",
             ]
         ),
@@ -1408,7 +1408,7 @@ public static class UnsupportedCoverage
             UnsupportedDefinitionKind.SchemaQualifiedTableName,
             UnsupportedFeature.Ddl,
             null,
-            ["SchemaQualifiedTableNameTests.Ddl_DottedTableName_IsAnnotatedOnlyWhereDeclared"]
+            ["DialectDdlRows:ddl-schema-qualified-dotted-table-name-note"]
         ),
         (
             UnsupportedDefinitionKind.DefaultValue,

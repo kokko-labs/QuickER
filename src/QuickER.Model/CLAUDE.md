@@ -69,7 +69,7 @@
 ガード：
 
 - `ConstraintNamesGuardTests`：`src/` を走査して置換規則の写しと既定名の組み立てを検出する。`string.Concat` 等の別の形はすり抜ける（検出する形は XmlDoc に明記）。
-- `ConstraintNameConsistencyTests`：前後に空白のあるテーブル名で DDL と同期の FK 名・PK 名が 5 方言とも一致する。
+- `DialectDdlTableTests` の行 `ddl-*-trimmed-table`・`sync-*-trimmed-table`：前後に空白のあるテーブル名で DDL と同期の FK 名・PK 名が 5 方言とも一致する。
 - `ConstraintNameCreationPathTests`：3 つの作成経路が同じ FK 名・要約の一意制約名で DDL と一致する。作成経路の照合を `ErDiagramToolHostParityTests` へ載せないのは、2 つのツールホストどうしを比べるテストは両方が同時に退行しても緑のままになるため。
 - `ConstraintNamesTests`（`ResolveUniqueConstraintNames_NumbersOnlyCollidingSynthesizedNames` を含む）・`UnnamedForeignKeyNamingTests`（5 方言の DDL・同期スクリプト・作り直しの同期スクリプト）
 - 期待の行・実 DB の行の Id（DDL・差分の外部キー名。詳細は `src/QuickER.Provider/CLAUDE.md`「制約名の正本と識別子の分割クォート」）：`diff-fk-unnamed-matches-default-named-live`・`realdb-fk-unnamed-relationship-no-diff-after-ddl`（名前の無いリレーションと DDL が既定名で作った live の外部キーに差分が出ない）・`diff-unnamed-fk-many-to-many-first-matches-live-with-default-name`・`realdb-fk-unnamed-many-to-many-first-ddl-uses-default-name`・`realdb-fk-unnamed-many-to-many-first-no-diff-with-default-named-db`（多対多が先に並んでも外部キーは既定名）・`diff-unnamed-fk-same-pair-twice-matches-live-named-by-ddl`・`diff-unnamed-fk-second-referential-action-change-replaces-under-same-name`・`realdb-fk-unnamed-same-pair-ddl-applies-no-diff`（名前の無い同じ組の外部キー 2 本）・`UnnamedForeignKeyNamingTests.Ddl_ManyToManyFirst_DoesNotShiftForeignKeyNames`（多対多が先に並んでも外部キーは既定名のまま）。
@@ -144,7 +144,7 @@ PK の順序の正本は `Entity.PrimaryKeyColumnIds`（列 Guid・宣言順）�
 - 文書 JSON は v1 のまま（旧ファイルは空リスト・明示 null は Normalize が修復する）。Clone / `DiagramMergeReconciler` は columnIdMap で張り替える（`UniqueConstraint.ColumnIds` と同型）。
 - 編集経路は 2 つ。MCP／内蔵チャットの `set_primary_key`（テーブル名のみで照合する全体置換。挙げた列は NOT NULL 正規化・外れた列の NULL 許容は据え置き・列は最低 1 つ必要）と、GUI の「主キーの順序」カード（複合 PK のときだけ表示）。詳細は GUI・MCP の領域の CLAUDE.md に従う。一度でも順序を明示すると、その図では順序が固定される。
 - 往復統合テストの不動点表明だけでは取込の順序喪失を検出できない（取込が順序を落とすと 1 回目の射影・再生成 DDL・2 回目の射影がそろって列順になり一致する）。5 方言の `*DdlRoundTripIntegrationTests` は起点 DDL の宣言順と突き合わせる `SchemaReapplyAssertions.ShouldHavePrimaryKeyOrder` を併用する。射影側の `PrimaryKey` は join 文字列なので、`BeEquivalentTo` がコレクション順序を既定で無視する List では検出できない。
-- ガード：`EntityPrimaryKeyOrderTests`（merge 規則・Clone 張り替え）・`SchemaSignatureTests` の順序系・`EntityViewModelTests`（パススルー・並び替え行の実効順と行インスタンス使い回し）・`DiagramMergeReconcilerTests`・`PrimaryKeyOrderPersistenceTests`（欠落・明示 null の読み）・同期計画の期待の行の主キーの順序の行（`diff-pk-order-*`・`plan-rebuild-selected-alter-pk-remaps-pk-order` など）・5 方言の `*DdlGeneratorTests` / `*SyncScriptBuilderTests` の FollowsPrimaryKeyColumnIds 系。
+- ガード：`EntityPrimaryKeyOrderTests`（merge 規則・Clone 張り替え）・`SchemaSignatureTests` の順序系・`EntityViewModelTests`（パススルー・並び替え行の実効順と行インスタンス使い回し）・`DiagramMergeReconcilerTests`・`PrimaryKeyOrderPersistenceTests`（欠落・明示 null の読み）・同期計画の期待の行の主キーの順序の行（`diff-pk-order-*`・`plan-rebuild-selected-alter-pk-remaps-pk-order` など）・`DialectDdlTableTests` の行 `ddl-pk-composite-follows-primary-key-column-ids`（DDL の主キーの句の並び）。
 - 編集経路のガード：`UndoOperationTests`（行 `primary-key-*`＝Undo 1 回で戻る・NULL 許容の復活・端の行・ピン留めの履歴化）・`PrimaryKeyOrderCardTests`（カードの配線）・`ToolScenarioTests`（行 `primary-key-*`＝両ホストのツール）・`ErDiagramDynamicToolsPrimaryKeyTests`（GUI のツールの Undo）・`ErDiagramToolHostParityTests`（`EntitySnap.PrimaryKeyOrder`＝実効順と `StoredPrimaryKeyColumnIds`＝保存リストの列名写像〔解決不能 Guid は `?`〕の両方を射影し、順序の食い違いを検知する。最後に成功する `set_primary_key` は列宣言順と食い違う並び）。mutation 実証済み。
 
 ## 主キーの順序の出力判定
