@@ -282,7 +282,7 @@ public static class FactorInventoryGuard
 }
 
 /// <summary>
-/// 製品の仕様の軸（設計 2.9 の 13 軸）を、どのアセンブリの棚卸しが検査するかの表
+/// 製品の仕様の軸（設計 2.9 の 13 軸と、P3-8 で足した出力形式の告知の種類）を、どのアセンブリの棚卸しが検査するかの表
 /// （各アセンブリの棚卸しのテストは、自分の軸の名前がこの表とちょうど一致することを表明する＝2 回も 0 回も検査しない）
 /// </summary>
 /// <remarks>
@@ -314,6 +314,7 @@ public static class FactorInventoryAssignment
         ("CodeGenerationOptions", Tests),
         ("CanonicalTypeKind", Tests),
         ("SchemaImportWarningKind", Tests),
+        ("ExportOmissionKind", Tests),
     ];
 
     /// <summary>アセンブリが検査する軸の名前（表の並び）</summary>

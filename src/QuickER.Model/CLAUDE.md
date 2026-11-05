@@ -96,7 +96,7 @@ QuickER が付ける既定の制約名は識別子の長さの上限に収め、
 
 - `LongDefaultConstraintNameTests`（4 方言の DDL・同期・差分が同じ縮めた名前・PostgreSQL の吸収と吸収しないときの対照・利用者の名前は吸収しない）。
 - `PostgreSqlLongDefaultConstraintNameIntegrationTests`（能力を差し替えて吸収しない対照）。実 DB の期待の行 `realdb-long-default-names-apply-and-round-trip-no-diff` / `realdb-long-default-pg-legacy-truncated-fk-name-is-absorbed`（`SyncPlanExpectationRows.RealCrossDialect.cs`）。同期計画の来歴の行 `SyncPlanHistoryRows`。
-- `ToolScenarioTests`（行 `long-default-name-*`＝両ホストの保存名と要約・縮めた既定名との衝突・名前の無い外部キーの要約と削除と重複の名指し）・`MainViewModelRelationshipConstraintNameTests`（GUI の手作成）・`ImportLongDefaultNameTests`。
+- `ToolScenarioTests`（行 `long-default-name-*`＝両ホストの保存名と要約・縮めた既定名との衝突・名前の無い外部キーの要約と削除と重複の名指し）・`MainViewModelRelationshipConstraintNameTests`（GUI の手作成）・`FormatRoundTripTests`（DBML・Mermaid の取込＝規則の行 `dbml-rule-long-default-name-*`・`mermaid-rule-carries-target-dbms`、形の行 `dbml-long-default-name-*`）。
 - `UniqueConstraintNameGenerationTests`・`UniqueConstraintResolvedNameLimitTests`（方言の切替で表示し直す。`ResolvedName_FollowsCollisionsAcrossTables`）・`IdentifierLengthLimitTests`（`Fit` / `Truncate`）。
 - mutation 実証済み。
 
@@ -144,7 +144,7 @@ PK の順序の正本は `Entity.PrimaryKeyColumnIds`（列 Guid・宣言順）�
 - 文書 JSON は v1 のまま（旧ファイルは空リスト・明示 null は Normalize が修復する）。Clone / `DiagramMergeReconciler` は columnIdMap で張り替える（`UniqueConstraint.ColumnIds` と同型）。
 - 編集経路は 2 つ。MCP／内蔵チャットの `set_primary_key`（テーブル名のみで照合する全体置換。挙げた列は NOT NULL 正規化・外れた列の NULL 許容は据え置き・列は最低 1 つ必要）と、GUI の「主キーの順序」カード（複合 PK のときだけ表示）。詳細は GUI・MCP の領域の CLAUDE.md に従う。一度でも順序を明示すると、その図では順序が固定される。
 - 往復統合テストの不動点表明だけでは取込の順序喪失を検出できない（取込が順序を落とすと 1 回目の射影・再生成 DDL・2 回目の射影がそろって列順になり一致する）。5 方言の `*DdlRoundTripIntegrationTests` は起点 DDL の宣言順と突き合わせる `SchemaReapplyAssertions.ShouldHavePrimaryKeyOrder` を併用する。射影側の `PrimaryKey` は join 文字列なので、`BeEquivalentTo` がコレクション順序を既定で無視する List では検出できない。
-- ガード：`EntityPrimaryKeyOrderTests`（merge 規則・Clone 張り替え）・`SchemaSignatureTests` の順序系・`EntityViewModelTests`（パススルー・並び替え行の実効順と行インスタンス使い回し）・`DiagramMergeReconcilerTests`・`DocumentFormatTests`（行 `*-primary-key-*`＝往復・欠落・明示 null の読み）・同期計画の期待の行の主キーの順序の行（`diff-pk-order-*`・`plan-rebuild-selected-alter-pk-remaps-pk-order` など）・`DialectDdlTableTests` の行 `ddl-pk-composite-follows-primary-key-column-ids`（DDL の主キーの句の並び）。
+- ガード：`EntityPrimaryKeyOrderTests`（merge 規則・Clone 張り替え）・`SchemaSignatureTests` の順序系・`EntityViewModelTests`（パススルー・並び替え行の実効順と行インスタンス使い回し）・`FormatRoundTripTests`（マージの行 `merge-reconcile-primary-key-order-follows-column-ids`・`merge-excel-*-primary-key-*`・`merge-excel-*-order-*`）・`DocumentFormatTests`（行 `*-primary-key-*`＝往復・欠落・明示 null の読み）・同期計画の期待の行の主キーの順序の行（`diff-pk-order-*`・`plan-rebuild-selected-alter-pk-remaps-pk-order` など）・`DialectDdlTableTests` の行 `ddl-pk-composite-follows-primary-key-column-ids`（DDL の主キーの句の並び）。
 - 編集経路のガード：`UndoOperationTests`（行 `primary-key-*`＝Undo 1 回で戻る・NULL 許容の復活・端の行・ピン留めの履歴化）・`PrimaryKeyOrderCardTests`（カードの配線）・`ToolScenarioTests`（行 `primary-key-*`＝両ホストのツール）・`ErDiagramDynamicToolsPrimaryKeyTests`（GUI のツールの Undo）・`ErDiagramToolHostParityTests`（`EntitySnap.PrimaryKeyOrder`＝実効順と `StoredPrimaryKeyColumnIds`＝保存リストの列名写像〔解決不能 Guid は `?`〕の両方を射影し、順序の食い違いを検知する。最後に成功する `set_primary_key` は列宣言順と食い違う並び）。mutation 実証済み。
 
 ## 主キーの順序の出力判定
@@ -159,7 +159,7 @@ PK の順序の正本は `Entity.PrimaryKeyColumnIds`（列 Guid・宣言順）�
 - GUI のマージ取込は、コードが引数を書いていない（古い生成コード）テーブルに限り、主キー列の集合が列名で一致すれば現在図の順序を引き継ぐ（`ReverseMergePostProcessor.ApplyPrimaryKeyOrder`。規則の本体は Excel 定義書のマージ取込と共有する `Entity.InheritPrimaryKeyOrderFrom`。引数があれば、不整合で採らなかった場合もコードが勝つ＝`CodeReverseResult.TablesWithPrimaryKeyOrder`）。
 - DBML は食い違うテーブルだけ主キーを列の `pk` でなく `Indexes` 先頭の `(列, …) [pk]` で書き、取込は `[pk]` 索引を構成列と順序として読む（一意制約は作らない・索引の名前は捨てる。列の `pk` と集合が違う／`[pk]` 索引が 2 つ／索引内の同じ列の重複は行を名指しして断る）。
 - Mermaid は順序の構文が無いので `ExportOmissionKind.PrimaryKeyOrder` で告知する。Excel は順序を運ばない（docs に明記）。
-- ガード：`CSharpReversePrimaryKeyOrderTests`（往復・無明示と宣言順どおりの明示で生成物がバイト一致・不整合 6 種・古い生成コードのマージで順序が保たれる）・`DbmlPrimaryKeyOrderTests`（往復・列順どおりは出力不変・他ツール形式・断る 4 条件）・`MermaidPrimaryKeyOrderTests`。mutation 実証済み。
+- ガード：`CSharpReversePrimaryKeyOrderTests`（無明示と宣言順どおりの明示で生成物がバイト一致）・`FormatRoundTripTests`（C# の往復＝形の行 `csharp-reordered-primary-key`、不整合 6 種＝規則の行 `csharp-rule-primary-key-order-mismatch-*`、古い生成コードのマージで順序が保たれる＝マージの行 `merge-csharp-old-generated-code-keeps-current-key-order`、DBML の往復・列順どおりは出力不変＝形の行 `dbml-reordered-primary-key`・`dbml-primary-key-in-column-order-*`、他ツール形式・断る 4 条件＝規則の行 `dbml-rule-primary-key-*`・`dbml-rule-two-primary-key-indexes-are-rejected`・`dbml-rule-duplicate-column-in-primary-key-index-is-rejected`、Mermaid の告知＝形の行 `mermaid-primary-key-order-*`）。mutation 実証済み。
 
 ## リレーションの列ペア
 
@@ -176,6 +176,6 @@ PK の順序の正本は `Entity.PrimaryKeyColumnIds`（列 Guid・宣言順）�
   - `constraint_name` は、図の既存の FK・PK・一意制約の名前（`ConstraintNames.CollectExisting`＝DDL が付ける名前）と大文字小文字を無視して衝突すれば拒否する。省略時は `ConstraintNames.UniqueForeignKey` が既定名・子の列名・番号の順に衝突しない名前を付ける。
   - remove_relationship は複数一致時に `constraint_name` で特定する（無指定なら候補列挙エラー）。get_diagram_summary に列ペアと制約名を表示する。
 - DBML は複合 Ref 構文 `Ref: p.(a,b) < c.(x,y)` の出力＋取込（取込の列再推論は無く、Ref 行の列名が正本。不整合行はペアだけ破棄）。Excel/HTML 定義書は列セルをカンマ区切り複数列表記（`FK{n}` は複合の全構成子列に同番。`UQ{n}` と同流儀）。Mermaid は列構文が無いので出力現状維持、取込推論は PK 全列ペア化。
-- Mermaid の必須のラベルは制約名を運ぶ。名前の無いリレーションの出力値は `relates`（`MermaidExporter.UnnamedRelationshipLabel`）。引用つきや複数語・図の中で重複するもの・主キー/一意制約名と重なるものは採らず、採らなかった関係は、既定名が空いていれば名前なし・ふさがっていれば `UniqueForeignKey`。ガード：`MermaidConstraintNameTests`。
-- 名前の無い関係の既定名がふさがっていれば一意化する規則は `ConstraintNames.NameUnnamedForeignKeys` が正本で、Mermaid・DBML・Excel 定義書の 3 取込と C# リバースが共有する。C# リバースは、解析の最後と GUI マージの補完（`ReverseMergePostProcessor.Apply`）の後の 2 回呼ぶ（補完が現在図の null で名前を戻すため）。明示された名前は重複していても変えない（PostgreSQL では外部キー名がテーブル単位で一意なため）。ガード：`CSharpReverseUnnamedForeignKeyTests`・`DbmlConstraintNameTests`・`TableDefinitionConstraintNameTests`。
+- Mermaid の必須のラベルは制約名を運ぶ。名前の無いリレーションの出力値は `relates`（`MermaidExporter.UnnamedRelationshipLabel`）。引用つきや複数語・図の中で重複するもの・主キー/一意制約名と重なるものは採らず、採らなかった関係は、既定名が空いていれば名前なし・ふさがっていれば `UniqueForeignKey`。ガード：`FormatRoundTripTests`（形の行 `mermaid-unnamed-relationships-relates`／規則の行 `mermaid-rule-repeated-label-is-not-adopted` ほか `mermaid-rule-*` のラベルの行）。
+- 名前の無い関係の既定名がふさがっていれば一意化する規則は `ConstraintNames.NameUnnamedForeignKeys` が正本で、Mermaid・DBML・Excel 定義書の 3 取込と C# リバースが共有する。C# リバースは、解析の最後と GUI マージの補完（`ReverseMergePostProcessor.Apply`）の後の 2 回呼ぶ（補完が現在図の null で名前を戻すため）。明示された名前は重複していても変えない（PostgreSQL では外部キー名がテーブル単位で一意なため）。ガード：`FormatRoundTripTests`（形の行 `dbml-unnamed-relationships`・`excel-unnamed-same-pair`・`excel-single-unnamed`・`excel-named-row-takes-default`／規則の行 `dbml-rule-same-pair-twice-without-names-second-gets-unique-name`・`dbml-rule-single-unnamed-ref-stays-unnamed`・`dbml-rule-named-ref*`・`excel-rule-hand-written-empty-names-second-gets-unique-name`・`csharp-rule-two-unnamed-references-get-distinct-names-in-ddl`・`csharp-rule-single-unnamed-reference-stays-unnamed`・`csharp-rule-explicit-names-are-kept`／マージの行 `merge-csharp-current-with-duplicate-unnamed-references-gets-distinct-names`・`merge-csharp-names-supplied-by-current-diagram-are-kept`）。
 - 生成コード（C#）はペア 2 組以上を対象外とする（`CodeGen_Warning_RelationshipCompositeSkipped` でナビゲーション / EF Core Fluent をスキップ。単一ペアは従来どおり）。C# リバースも単一列のみ。

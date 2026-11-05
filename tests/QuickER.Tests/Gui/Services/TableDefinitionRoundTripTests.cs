@@ -9,11 +9,12 @@ using QuickER.Tests.TestDoubles;
 namespace QuickER.Tests.Gui.Services;
 
 /// <summary>
-/// Excel 定義書の往復（自分が書き出した定義書を読み戻せること）と、マージ取込で定義書が運べない情報を現在図から引き継ぐことを検証するテストクラス。
+/// Excel 定義書のマージ取込の入口の配線（書き出して読み戻しただけの定義書で置換の確認を出さないこと）を検証するテストクラス。
 /// </summary>
 /// <remarks>
-/// 定義書は計算列の指定と、一意制約の構成列の順序・名前を書かない。マージ取込はそれらを現在図から引き継ぐ
-/// （<see cref="TableDefinitionMergePostProcessor"/>）。引き継ぎが後処理の働きであることは、素の取込結果と比べて確かめる。
+/// 定義書の往復と、マージ取込が定義書の運べない情報を現在図から引き継ぐ規則は、形式の往復のエンジン
+/// （<c>FormatRoundTrip/</c> の形の行 <c>excel-*</c>・マージの行 <c>merge-excel-*</c>）が見る。
+/// ここでは <see cref="DiagramImportService"/> が後処理（<see cref="TableDefinitionMergePostProcessor"/>）を置換の確認より前に通すことだけを固定する。
 /// </remarks>
 public class TableDefinitionRoundTripTests
 {
@@ -55,219 +56,6 @@ public class TableDefinitionRoundTripTests
         return new ErDiagram { Entities = [customers, orders], TargetDbms = "sqlserver" };
     }
 
-    /// <summary>図を定義書へ書き出して読み戻す</summary>
-    private static ErDiagram RoundTrip(ErDiagram diagram)
-    {
-        using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(diagram);
-
-        return TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
-    }
-
-    [Fact(
-        DisplayName = "Excel 往復: 列の対応を持たないリレーションは列ペアなしのまま読み戻せる（同じ組に 2 本でも）"
-    )]
-    public void RoundTrip_PairlessRelationships_AreReadBack()
-    {
-        var diagram = BuildDiagram();
-
-        foreach (var type in new[] { RelationshipType.OneToMany, RelationshipType.OneToOne })
-        {
-            diagram.Relationships.Add(
-                new Relationship
-                {
-                    SourceEntityId = diagram.Entities[0].Id,
-                    TargetEntityId = diagram.Entities[1].Id,
-                    Type = type,
-                }
-            );
-        }
-
-        var restored = RoundTrip(diagram);
-
-        restored
-            .Relationships.Select(relationship => relationship.Type)
-            .Should()
-            .Equal(RelationshipType.OneToMany, RelationshipType.OneToOne);
-        restored
-            .Relationships.Should()
-            .OnlyContain(relationship => relationship.ColumnPairs.Count == 0);
-        restored
-            .Entities.SelectMany(entity => entity.Columns)
-            .Should()
-            .OnlyContain(column => !column.IsForeignKey);
-    }
-
-    [Fact(DisplayName = "Excel 往復: 列の無いテーブルを読み戻せる")]
-    public void RoundTrip_TableWithoutColumns_IsReadBack()
-    {
-        var diagram = BuildDiagram();
-        diagram.Entities.Add(new Entity { TableName = "empty_table" });
-
-        var restored = RoundTrip(diagram);
-
-        restored
-            .Entities.Single(entity => entity.TableName == "empty_table")
-            .Columns.Should()
-            .BeEmpty();
-    }
-
-    [Fact(DisplayName = "Excel 取込: 参照元列・参照先列の片方だけが空の行は従来どおり断る")]
-    public void Load_RelationshipWithOneColumnCellEmpty_IsRejected()
-    {
-        var diagram = BuildDiagram();
-        diagram.Relationships.Add(
-            new Relationship
-            {
-                SourceEntityId = diagram.Entities[0].Id,
-                TargetEntityId = diagram.Entities[1].Id,
-                Type = RelationshipType.OneToMany,
-                ColumnPairs =
-                [
-                    new RelationshipColumnPair(
-                        diagram.Entities[0].Columns[0].Id,
-                        diagram.Entities[1].Columns[1].Id
-                    ),
-                ],
-            }
-        );
-        using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(diagram);
-        workbook.DefinedNames.TryGetValue(
-            TableDefinitionDocumentLayout.RelationshipsDefinedName,
-            out var defined
-        );
-        defined!
-            .Ranges.First()
-            .Worksheet.Cell(TableDefinitionDocumentLayout.RelationshipDataStartRow, 4)
-            .Value = string.Empty;
-
-        var act = () => TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
-
-        act.Should().Throw<InvalidDataException>();
-    }
-
-    /// <summary>計算列と、構成列の順序が列の並びと違う名前付き一意制約 (b, a) を持つ現在図を組み立てる</summary>
-    private static ErDiagram BuildCurrentWithComputedAndUnique()
-    {
-        var diagram = BuildDiagram();
-        var orders = diagram.Entities[1];
-        orders.Columns[2].IsComputed = true;
-        orders.UniqueConstraints.Add(
-            new UniqueConstraint
-            {
-                Name = "UQ_orders_b_a",
-                ColumnIds = [orders.Columns[3].Id, orders.Columns[2].Id],
-            }
-        );
-        orders.UniqueConstraints.Add(new UniqueConstraint { ColumnIds = [orders.Columns[1].Id] });
-
-        return diagram;
-    }
-
-    [Fact(
-        DisplayName = "Excel のマージ取込: 計算列の指定と一意制約の順序・名前を現在図から引き継ぐ"
-    )]
-    public void MergeImport_InheritsComputedAndUniqueOrderAndName()
-    {
-        var current = BuildCurrentWithComputedAndUnique();
-        var dir = Directory.CreateDirectory(
-            Path.Combine(Path.GetTempPath(), "quicker-tabledoc-" + Guid.NewGuid().ToString("N"))
-        );
-
-        try
-        {
-            var path = Path.Combine(dir.FullName, "doc.xlsx");
-            TableDefinitionDocumentExporter.SaveTo(current, path);
-
-            // 素の取込では落ちている（後処理が引き継いでいることの対照）
-            var plain = TableDefinitionDocumentImporter
-                .Load(path, "sqlserver")
-                .Entities.Single(entity => entity.TableName == "orders");
-            plain.Columns.Single(column => column.Name == "a").IsComputed.Should().BeFalse();
-            plain.UniqueConstraints[0].Name.Should().BeNull();
-            plain
-                .UniqueConstraints[0]
-                .ColumnIds.Select(id => plain.Columns.Single(c => c.Id == id).Name)
-                .Should()
-                .Equal("a", "b");
-
-            var host = new StubDiagramTransferHost { Model = current };
-            var service = new DiagramImportService(
-                host,
-                new StubDialogService(),
-                new StubFileDialogService()
-            );
-
-            service.ImportDiagramFile(DiagramImportFormat.Excel, path);
-
-            var merged = host
-                .MergedReplacements.Should()
-                .ContainSingle()
-                .Subject.Entities.Single(entity => entity.TableName == "orders");
-            merged.Columns.Single(column => column.Name == "a").IsComputed.Should().BeTrue();
-            merged.Columns.Single(column => column.Name == "b").IsComputed.Should().BeFalse();
-            merged
-                .UniqueConstraints.Select(constraint =>
-                    $"{constraint.Name}:"
-                    + string.Join(
-                        ",",
-                        constraint.ColumnIds.Select(id =>
-                            merged.Columns.Single(c => c.Id == id).Name
-                        )
-                    )
-                )
-                .Should()
-                .Equal("UQ_orders_b_a:b,a", ":customer_id");
-        }
-        finally
-        {
-            dir.Delete(recursive: true);
-        }
-    }
-
-    [Fact(DisplayName = "Excel のマージ取込: 採番列の指定を現在図から引き継ぐ")]
-    public void MergeImport_InheritsIdentity()
-    {
-        var current = BuildDiagram();
-        current.Entities[1].Columns.Single(column => column.Name == "b").IsIdentity = true;
-        var dir = Directory.CreateDirectory(
-            Path.Combine(Path.GetTempPath(), "quicker-tabledoc-" + Guid.NewGuid().ToString("N"))
-        );
-
-        try
-        {
-            var path = Path.Combine(dir.FullName, "doc.xlsx");
-            TableDefinitionDocumentExporter.SaveTo(current, path);
-
-            // 素の取込では落ちている（後処理が引き継いでいることの対照）
-            TableDefinitionDocumentImporter
-                .Load(path, "sqlserver")
-                .Entities.Single(entity => entity.TableName == "orders")
-                .Columns.Single(column => column.Name == "b")
-                .IsIdentity.Should()
-                .BeFalse();
-
-            var host = new StubDiagramTransferHost { Model = current };
-            var service = new DiagramImportService(
-                host,
-                new StubDialogService(),
-                new StubFileDialogService()
-            );
-
-            service.ImportDiagramFile(DiagramImportFormat.Excel, path);
-
-            var merged = host
-                .MergedReplacements.Should()
-                .ContainSingle()
-                .Subject.Entities.Single(entity => entity.TableName == "orders");
-            merged.Columns.Single(column => column.Name == "b").IsIdentity.Should().BeTrue();
-            merged.Columns.Single(column => column.Name == "a").IsIdentity.Should().BeFalse();
-        }
-        finally
-        {
-            dir.Delete(recursive: true);
-        }
-    }
-
     /// <summary>orders の主キーを (b, a)＝列の並びと逆の順序で明示した現在図を組み立てる</summary>
     private static ErDiagram BuildCurrentWithReorderedPrimaryKey()
     {
@@ -285,14 +73,11 @@ public class TableDefinitionRoundTripTests
         return diagram;
     }
 
-    /// <summary>エンティティの主キー列名を実効順で返す</summary>
-    private static List<string> KeyOrder(Entity entity) =>
-        entity.GetPrimaryKeyColumnsInOrder().Select(column => column.Name).ToList();
-
     /// <summary>
-    /// 定義書は複合主キーの順序を書かないが、マージ取込は現在図が明示した順序を引き継ぎ、
+    /// 定義書は複合主キーの順序を書かないが、マージ取込は後処理で現在図の順序を引き継いでから構造を比べるので、
     /// 書き出して読み戻しただけで置換の確認を出さないことを検証する
     /// </summary>
+    /// <remarks>順序を引き継ぐこと自体はマージの行 merge-excel-inherits-primary-key-order が見る</remarks>
     [Fact(
         DisplayName = "Excel のマージ取込: 主キー列の集合が同じなら現在図の主キーの順序を引き継ぎ、置換の確認を出さない"
     )]
@@ -308,24 +93,13 @@ public class TableDefinitionRoundTripTests
             var path = Path.Combine(dir.FullName, "doc.xlsx");
             TableDefinitionDocumentExporter.SaveTo(current, path);
 
-            // 素の取込では列の並び順へ戻っている（後処理が引き継いでいることの対照）
-            var plain = TableDefinitionDocumentImporter
-                .Load(path, "sqlserver")
-                .Entities.Single(entity => entity.TableName == "orders");
-            KeyOrder(plain).Should().Equal("a", "b");
-            plain.PrimaryKeyColumnIds.Should().BeEmpty();
-
             var host = new StubDiagramTransferHost { Model = current };
             var dialog = new StubDialogService();
             var service = new DiagramImportService(host, dialog, new StubFileDialogService());
 
             service.ImportDiagramFile(DiagramImportFormat.Excel, path);
 
-            var merged = host
-                .MergedReplacements.Should()
-                .ContainSingle()
-                .Subject.Entities.Single(entity => entity.TableName == "orders");
-            KeyOrder(merged).Should().Equal("b", "a");
+            host.MergedReplacements.Should().ContainSingle();
             dialog.ConfirmMessages.Should().BeEmpty("構造が同じなので置換の確認は出ない");
             dialog.WarningConfirmMessages.Should().BeEmpty();
         }
@@ -333,84 +107,5 @@ public class TableDefinitionRoundTripTests
         {
             dir.Delete(recursive: true);
         }
-    }
-
-    [Fact(
-        DisplayName = "Excel のマージ取込: 主キー列の集合が現在図と違えば取込値の主キーの順序のまま"
-    )]
-    public void MergePostProcessor_DifferentPrimaryKeySet_KeepsImportedOrder()
-    {
-        var current = BuildCurrentWithReorderedPrimaryKey();
-        var currentOrders = current.Entities[1];
-        var imported = new Entity
-        {
-            Id = currentOrders.Id,
-            TableName = "orders",
-            Columns = currentOrders
-                .Columns.Select(column => new Column
-                {
-                    Id = column.Id,
-                    Name = column.Name,
-                    DataType = column.DataType,
-                    // 定義書側で customer_id も主キーに加えた
-                    IsPrimaryKey = column.IsPrimaryKey || column.Name == "customer_id",
-                })
-                .ToList(),
-        };
-
-        TableDefinitionMergePostProcessor.Apply(current, [imported]);
-
-        imported.PrimaryKeyColumnIds.Should().BeEmpty();
-        KeyOrder(imported).Should().Equal("customer_id", "a", "b");
-    }
-
-    [Fact(
-        DisplayName = "Excel のマージ取込: 現在図が主キーの順序を明示していなければ明示しないまま"
-    )]
-    public void MergePostProcessor_CurrentOrderNotExplicit_StaysNotExplicit()
-    {
-        var current = BuildCurrentWithReorderedPrimaryKey();
-        var currentOrders = current.Entities[1];
-        currentOrders.PrimaryKeyColumnIds = [];
-        var imported = currentOrders.Clone(preserveId: true);
-
-        TableDefinitionMergePostProcessor.Apply(current, [imported]);
-
-        imported.PrimaryKeyColumnIds.Should().BeEmpty();
-    }
-
-    [Fact(DisplayName = "Excel のマージ取込: 構成列の集合が現在図と違う一意制約は取込値のまま")]
-    public void MergePostProcessor_DifferentColumnSet_KeepsImported()
-    {
-        var current = BuildCurrentWithComputedAndUnique();
-        var currentOrders = current.Entities[1];
-        var imported = new Entity
-        {
-            Id = currentOrders.Id,
-            TableName = "orders",
-            Columns = currentOrders
-                .Columns.Select(column => new Column
-                {
-                    Id = column.Id,
-                    Name = column.Name,
-                    DataType = column.DataType,
-                })
-                .ToList(),
-        };
-        imported.UniqueConstraints.Add(
-            new UniqueConstraint
-            {
-                ColumnIds = [currentOrders.Columns[1].Id, currentOrders.Columns[2].Id],
-            }
-        );
-
-        TableDefinitionMergePostProcessor.Apply(current, [imported]);
-
-        var constraint = imported.UniqueConstraints.Should().ContainSingle().Subject;
-        constraint.Name.Should().BeNull();
-        constraint
-            .ColumnIds.Should()
-            .Equal(currentOrders.Columns[1].Id, currentOrders.Columns[2].Id);
-        imported.Columns[2].IsComputed.Should().BeTrue();
     }
 }

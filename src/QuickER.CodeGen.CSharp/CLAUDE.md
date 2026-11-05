@@ -171,7 +171,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
   - 厳密一致にすると、`TryFormat` が大文字を返す SQLite 方言の図で全列に verbatim が出て、生成物が総入れ替えになる
 - 対象列は生成時 Info 診断（`CodeGen_Info_NonCanonicalTypeSpellingColumns`）で名指しする
 - 行バージョン列はトークンごと不出力なので verbatim も出ない
-- ガード：`CSharpReverseVerbatimTypeTests`（7 表記の往復・大小差の非出力・不一致の警告・行バージョンの非出力）
+- ガード：`CSharpReverseVerbatimTypeTests`（大小差の非出力・行バージョンの非出力）・`FormatRoundTripTests`（7 表記の往復＝形の行 `csharp-verbatim-type-*`・不一致の警告＝規則の行 `csharp-rule-verbatim-*`）
 
 ### DbTableMeta の PrimaryKeyOrder
 

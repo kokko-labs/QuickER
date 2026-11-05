@@ -202,56 +202,6 @@ public class MainViewModelMergeImportTests : IDisposable
             .Equal(positions, "取込の自動整列は AI 生成直後の格子整列と同じでなければならない");
     }
 
-    /// <summary>Excel 再取込の実経路で、テーブル・列が一致するクエリが生存する（Guid 引継）</summary>
-    [Fact(DisplayName = "Excel 再取込経路: 一致するクエリが生存する")]
-    public void ImportExcel_Reimport_SurvivesQuery()
-    {
-        var path = Path.Combine(Path.GetTempPath(), $"er-merge-excel-{Guid.NewGuid()}.xlsx");
-
-        try
-        {
-            var files = new StubFileDialogService
-            {
-                SaveResult = new FileDialogResult(path, 8),
-                OpenResult = new FileDialogResult(path, 3),
-            };
-            var vm = CreateViewModel(files);
-            vm.AddEntityCommand.Execute(null);
-
-            var entity = vm.Entities[0];
-            var entityId = entity.Id;
-            var columnId = entity.Columns[0].Id;
-
-            // 現在図に、エンティティと列を Guid 参照する名前付きクエリを持たせる
-            vm.ReplaceQueries(
-                new[]
-                {
-                    new QueryDefinition
-                    {
-                        Name = "SortById",
-                        EntityId = entityId,
-                        OrderBy = { new QueryOrdering { ColumnId = columnId } },
-                    },
-                }
-            );
-
-            // 現在図を Excel 定義書へ書き出し、そのまま取り込む（テーブル・列名が一致＝マージ対象）
-            vm.ExportDiagramCommand.Execute(null);
-            vm.ImportDiagramCommand.Execute(null);
-
-            // 取込結果は新規 Guid だがマージで Id が現在図へ寄るため、クエリの参照が解決し生存する
-            vm.Queries.Should().ContainSingle().Which.Name.Should().Be("SortById");
-            vm.Entities.Should().ContainSingle().Which.Id.Should().Be(entityId);
-        }
-        finally
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-    }
-
     /// <summary>構造同一の Excel 再取込でも、説明が取込値で上書きされる場合は確認が出て件数が載る</summary>
     /// <remarks>
     /// 構造署名は説明・Memo を含まないため、実差分を見ないと書き出し後に手書きした説明が

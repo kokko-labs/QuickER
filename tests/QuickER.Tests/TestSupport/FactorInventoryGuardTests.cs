@@ -35,6 +35,7 @@ public sealed class FactorInventoryGuardTests
         InventoryAxis.Enum<global::QuickER.Provider.SchemaImportWarningKind>(
             "SchemaImportWarningKind"
         ),
+        InventoryAxis.Enum<global::QuickER.Services.ExportOmissionKind>("ExportOmissionKind"),
     ];
 
     /// <summary>まだどのエンジンの次元表にも載っていない項目（軸・項目・受け持つエンジン・区切り・理由）</summary>

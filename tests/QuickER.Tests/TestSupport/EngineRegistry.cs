@@ -35,5 +35,9 @@ internal static class EngineRegistry
         Gui.ViewModels.DocumentFileDimensions.RandomDescriptor,
         Document.DocumentFormatDimensions.Descriptor,
         Settings.SettingsStoreDimensions.Descriptor,
+        Gui.Services.FormatRoundTrip.FormatRoundTripDimensions.RoundTripDescriptor,
+        Gui.Services.FormatRoundTrip.FormatRoundTripDimensions.OmissionDescriptor,
+        Gui.Services.FormatRoundTrip.FormatRoundTripDimensions.RuleDescriptor,
+        Gui.Services.FormatRoundTrip.FormatRoundTripDimensions.MergeDescriptor,
     ];
 }
