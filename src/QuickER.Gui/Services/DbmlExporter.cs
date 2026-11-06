@@ -456,12 +456,16 @@ public static partial class DbmlExporter
     /// 型が <c>integer</c> へ化ける。二重引用符を含む型（PostgreSQL の引用型名 <c>"MyType"</c>）も囲む——
     /// 囲まないと取込側が型の途中の <c>"</c> を引用の開始と読み、設定ごと型の一部として飲み込むか、
     /// 引用符を剥がして別の型へ変える。
+    /// 空の型は空の引用識別子 <c>""</c> で書く——素で書くと型のトークンが無い行（<c>id  [pk]</c>）になり、
+    /// DBML として型が欠けるうえ取込が読み戻せない。取込は <c>""</c> を空の型として読む。
     /// </remarks>
     private static string TypeName(string? dataType)
     {
         var sanitized = ExportTextSanitizer.Sanitize(dataType);
 
-        return QuotedTypeRegex().IsMatch(sanitized) ? QuoteIdentifier(sanitized) : sanitized;
+        return sanitized.Length == 0 || QuotedTypeRegex().IsMatch(sanitized)
+            ? QuoteIdentifier(sanitized)
+            : sanitized;
     }
 
     /// <summary>DBML の引用識別子（二重引用符）として囲む</summary>

@@ -363,6 +363,7 @@ public static partial class DbmlImporter
     /// <para>
     /// 名前は素の識別子と引用識別子（<c>"列 名"</c>）の双方を受け付ける。型名は空白を含んでもよく、
     /// 素の記法（<c>timestamp without time zone</c>）と引用（<c>"double precision"</c>）の双方に対応する。
+    /// 引用した空の型（<c>""</c>）は型の無い列として読む（エクスポートは型の無い列をこの形で書く）。型のトークンそのものが無い行は断る。
     /// 設定省略時は NULL 許可を既定とし、<c>pk</c>（<c>primary key</c>）指定時は NOT NULL を強制する。
     /// note 内のエスケープ（<c>\\</c> と <c>\'</c>）は <see cref="DbmlLiteral.Unescape"/> で復元する
     /// </para>
@@ -393,7 +394,7 @@ public static partial class DbmlImporter
                 : string.Empty;
         var (name, dataType) = SplitNameAndType(definition);
 
-        if (name.Length == 0 || dataType.Length == 0)
+        if (name.Length == 0 || dataType is null)
         {
             throw new InvalidDataException(
                 string.Format(Strings.Dbml_ColumnParseError, tableName, line)
@@ -513,15 +514,16 @@ public static partial class DbmlImporter
     /// </summary>
     /// <remarks>
     /// 名前は先頭の 1 トークン（引用識別子ならその全体）で、残りがすべて型。
-    /// 型が引用識別子 1 つだけなら引用符を外す（<c>"double precision"</c> → <c>double precision</c>）。
+    /// 型が引用識別子 1 つだけなら引用符を外す（<c>"double precision"</c> → <c>double precision</c>・<c>""</c> → 空）。
+    /// 型のトークンが無ければ型は <c>null</c>（空の型 <c>""</c> と区別する）。
     /// </remarks>
-    private static (string Name, string DataType) SplitNameAndType(string definition)
+    private static (string Name, string? DataType) SplitNameAndType(string definition)
     {
         var text = definition.Trim();
 
         if (text.Length == 0)
         {
-            return (string.Empty, string.Empty);
+            return (string.Empty, null);
         }
 
         int nameEnd;
@@ -536,14 +538,14 @@ public static partial class DbmlImporter
 
             if (nameEnd < 0)
             {
-                return (UnquoteIdentifier(text), string.Empty);
+                return (UnquoteIdentifier(text), null);
             }
         }
 
         var name = UnquoteIdentifier(text[..nameEnd].Trim());
         var dataType = text[nameEnd..].Trim();
 
-        return (name, UnquoteIdentifier(dataType));
+        return (name, dataType.Length == 0 ? null : UnquoteIdentifier(dataType));
     }
 
     /// <summary>

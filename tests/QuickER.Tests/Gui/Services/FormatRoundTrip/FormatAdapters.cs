@@ -238,10 +238,6 @@ internal sealed class MermaidAdapter : FormatAdapter
             ExportOmissionKind.ForeignKeyColumnPairs,
             "docs/import-export.ja.md「形式ごとに運ばれる情報」：外部キーの列対応は Mermaid で「告知して落とす（取込は親の主キーから推論する）」"
         ),
-        new(
-            ExportOmissionKind.ColumnNullability,
-            "src/QuickER.Gui/Services/MermaidImporter.cs（217 行）：取込は PK の標識の列を NOT NULL に戻す。告知は主キーの NOT NULL だけでも出る（docs 未記載）"
-        ),
     ];
 
     /// <inheritdoc/>
@@ -578,6 +574,10 @@ internal sealed class CSharpReverseAdapter : FormatAdapter
             Facet.UniqueNameFilled,
             "docs/import-export.ja.md「C# コード（.cs）」：コード生成は名前の無い制約にも合成した名前を Name に書くため、生成コードから取り込んだ制約はその合成名を名前として持つ"
         ),
+        new(
+            Facet.TypeCase,
+            "src/QuickER.CodeGen.CSharp/CLAUDE.md「同義の型表記の保存（verbatim 併記）」：綴り一致の判定は DbTypeText.AreEquivalent（Trim ＋大小無視）で、大小だけ違う列には NativeType を刻まない。リバースはトークンを方言の表記（SQLite は大文字）で書き戻し、マージ取込が現在図の綴りへ戻す"
+        ),
     ];
 
     /// <inheritdoc/>
@@ -585,7 +585,7 @@ internal sealed class CSharpReverseAdapter : FormatAdapter
 
     /// <inheritdoc/>
     public override IReadOnlySet<Facet> MergeRestores { get; } =
-        new HashSet<Facet> { Facet.Memo, Facet.ManyToMany, Facet.IdentityKey };
+        new HashSet<Facet> { Facet.Memo, Facet.ManyToMany, Facet.IdentityKey, Facet.TypeCase };
 
     /// <summary>C# リバースのマージ取込（製品の <c>CodeReverseCommandService</c> と同じ並び）</summary>
     private static FormatMergeOutcome MergeReverse(ErDiagram current, FormatImport imported)
@@ -609,6 +609,7 @@ internal sealed class CSharpReverseAdapter : FormatAdapter
             reversed.TablesWithPrimaryKeyOrder
         );
         ReverseMergePostProcessor.ApplyPrimaryKeyIdentityMarks(current, merged.Entities);
+        ReverseMergePostProcessor.ApplyTypeSpellings(current, merged.Entities);
 
         return new FormatMergeOutcome(
             new ErDiagram

@@ -30,7 +30,7 @@ For C# code, see [C# code](#c-code-cs).
 | Nullability | ✅ | Dropped with a notice | ✅ | ✅ |
 | Primary keys | ✅ | ✅ | ✅ | ✅ |
 | Composite primary key order | ✅ | Dropped with a notice (back in column order) | Taken over by the merge import | ✅ |
-| Single-column unique constraints | ✅ | ✅ (one on a foreign key column is dropped with a notice) | ✅ | ✅ |
+| Single-column unique constraints | ✅ | ✅ (one on a primary key or foreign key column is dropped with a notice) | ✅ | ✅ |
 | Composite unique constraints | ✅ | Dropped with a notice | ✅ (the column order is taken over by the merge import) | ✅ |
 | Unique constraint names | ✅ | Dropped with a notice | Taken over by the merge import | ✅ |
 | Foreign key column mappings | ✅ (a relationship without a column mapping is not written, with a notice) | Dropped with a notice (the import infers them from the parent's primary key) | ✅ | ✅ |
@@ -102,7 +102,8 @@ The supported syntax is the subset that QuickER's DBML export writes, and both t
   An inline reference has no name and no referential actions.
   A reference that cannot be read, such as a schema-qualified `ref: > public.users.id`, is reported with its line number
 - Quoted identifiers: a table or column name written as `"Order Details"` is read with the quotes removed, and a type written the same way (`"double precision"`, `"integer[]"`) likewise.
-  `\"` and `\` inside the quotes are unescaped
+  `\"` and `\` inside the quotes are unescaped.
+  An empty quoted type (`id "" [pk]`) is read as a column without a type, while a line with no type at all is an import error
 - Comments: `//` to the end of the line, and `/* ... */` including across several lines.
   Neither is treated as a comment inside a string, so a description may contain a URL
 - Keywords are not case-sensitive (`Table` and `table`, `Ref:` and `ref:` are both read)
@@ -142,7 +143,10 @@ A type the import cannot restore, such as `nvarchar(max)` or `double precision`,
 A column without a type is written with the type `_`, which the import reads back as no type.
 A `UK` key marker is imported as a unique constraint over that single column (Mermaid has no syntax for grouping several columns, so composite unique constraints cannot be expressed).
 Mermaid has no syntax for a foreign key's column mapping, so the import infers it: for every primary key column of the parent it pairs a child column found by name and marks that column as a foreign key, the same rule the GUI uses when you create a relationship.
+It does so for a relationship that had no column mapping too, so export reports the column mappings whenever the import would give such a relationship one.
+A primary key column's foreign key marker cannot be written (the column's one marker is `PK`), so it comes back only when the import infers that column as a relationship's child; export reports it otherwise.
 A many-to-many relationship carries no column mapping.
+A table without columns gets a default primary key column (`ID int`), as in DBML.
 A relationship line must carry a label, so export writes the constraint name there, or `relates` for a relationship without a name.
 A name Mermaid cannot write bare, such as one with a space or a symbol, is written in double quotes, with a `"` folded to `_`.
 On import, a label becomes the constraint name only when it is a single word without quotes, is not `relates`, appears on no other relationship, and is not the name of a primary key or unique constraint.
@@ -163,9 +167,12 @@ The target DBMS is embedded in the document and restored, dialect and all, on im
 A document that has lost it (another application that saves the workbook again can drop it) keeps the current diagram's target DBMS.
 The format version is embedded too, and a document written in a newer format than this version supports is reported instead of imported, so information this version cannot read is never silently dropped.
 Older documents that carry no version are imported.
-Count mismatches, duplicates, and references to undefined tables are import errors.
-A relationship row counts as a duplicate only when another row has the same pair of tables **and the same columns**, so a diagram with more than one foreign key between the same two tables (a shipping address and a billing address both pointing at the same table, say) round-trips.
-A one-to-one or one-to-many row whose referencing and referenced column cells are both empty is a relationship without a column mapping (the export writes such rows), is never counted as a duplicate, and a row with only one of the two cells empty is an import error.
+Count mismatches, duplicate tables or columns, and references to undefined tables are import errors.
+Each relationship row is read as a relationship of its own, even when another row has the same pair of tables and the same columns, so every diagram the export writes round-trips, including one with two foreign keys over the same columns.
+For such a row whose constraint name cell is empty, see [Rules shared by the formats](#rules-shared-by-the-formats).
+The import marks the referencing columns of a relationship as foreign keys, as the DBML import does.
+A one-to-one or one-to-many row whose referencing and referenced column cells are both empty is a relationship without a column mapping (the export writes such rows), and a row with only one of the two cells empty is an import error.
+A column whose data type cell is empty is read as a column without a type (the export writes such a column with an empty cell).
 A detail sheet with no column rows is a table without columns.
 On a detail sheet, the column rows end at the first row whose cells are all empty (the No. column is not counted).
 A row with an empty column name but a value in another cell is an import error that names the table and the row.
@@ -228,6 +235,8 @@ For FK metadata the merge is **fallback-only**: for relationships whose endpoint
 This also covers code generated by an older version, which has no named arguments at all: every field counts as unspecified and the current diagram's values are preserved.
 The composite primary key's own column order follows the same rule.
 When the code states no order, as code generated by an older version cannot, the current diagram's order is kept as long as the key still consists of the same columns.
+A column type that differs from the current diagram's only in letter case or surrounding spaces keeps the current diagram's spelling.
+Code generation records no such spelling (the SQLite dialect writes types in upper case, and recording every column would rewrite the whole generated code), so without this the import would turn `int` into `INT` and ask to confirm the replacement.
 **UNIQUE constraints, by contrast, are owned by the code**, and nothing is preserved from the current diagram, because an absent attribute cannot be told apart from a "this table has no constraint" declaration, and preserving it would make a constraint you deleted in code impossible to remove.
 As with the other imports, a replacement confirmation appears when there are structural differences or named queries that would break.
 
@@ -276,6 +285,7 @@ Unique constraints are written as the `unique` column setting for unnamed single
 When a composite primary key's own column order differs from the table's column order, the key is written as a `(col, …) [pk]` index at the top of the `Indexes` block instead of the `pk` column setting, so the order round-trips (a table whose key follows the column order uses the `pk` column setting).
 A table, column or constraint name that is not made only of ASCII letters, digits and underscores is written as a DBML quoted identifier (`"Order Details"`, and likewise a Japanese name), as is a type that contains a space, brackets or a double quote (`"double precision"`, `"integer[]"`, `"\"MyType\""`).
 Without the quotes such a name or type cannot be read back, and DBML tools reject a bare name with other characters, Japanese included.
+A column without a type is written with an empty quoted type (`id "" [pk, not null]`), which the import reads back as no type.
 DBML also writes table descriptions as `Note:` lines and foreign key referential actions in the settings block of the `Ref:` line (`delete` / `update`; the default `NO ACTION` is not written), so those round-trip as well.
 DBML is useful for working with DBML tools such as dbdiagram.org.
 
@@ -288,7 +298,7 @@ Mermaid has no syntax for a composite primary key's own column order, since each
 #### Information a format cannot carry
 
 Information the chosen format cannot represent is listed in the completion dialog (once per format per session, so it does not become noise).
-Mermaid cannot express descriptions, memos, nullability, composite unique constraints, unique constraint names, foreign key column mappings, referential actions, named queries, computed columns, settings of columns the database numbers (identity columns), a single-column unique constraint on a foreign key column (the column's one marker is `FK`), or a composite primary key order that differs from the column order, so it reports whichever of those the diagram actually contains, along with column names, types and table names it had to rewrite and relationship constraint names the import would not read back.
+Mermaid cannot express descriptions, memos, nullability (the import makes only primary key columns NOT NULL), composite unique constraints, unique constraint names, foreign key column mappings, referential actions, named queries, computed columns, settings of columns the database numbers (identity columns), a single-column unique constraint on a primary key or foreign key column (the column's one marker is `PK` or `FK`), or a composite primary key order that differs from the column order, so it reports whichever of those the diagram actually contains, along with column names, types and table names it had to rewrite, relationship constraint names the import would not read back, column mappings the import would infer for a relationship that had none, and primary key columns' foreign key markers the import would not infer back.
 For DBML only table memos, named queries, computed columns and settings of columns the database numbers (both come back as ordinary columns), foreign key markers on columns that are not the child side of any relationship, and relationships left out because their columns cannot be written are reported (`Note` is used for the description, so carrying a memo would need a non-standard extension, and interoperability with other tools was given priority).
 SQL DDL and the definition documents report nothing, because the only things they drop are the ones that format is not meant to carry.
 

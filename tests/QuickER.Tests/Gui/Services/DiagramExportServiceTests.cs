@@ -37,6 +37,14 @@ public class DiagramExportServiceTests
                             IsPrimaryKey = true,
                             IsNullable = false,
                         },
+                        // 主キーでない NOT NULL 列（Mermaid が NULL 許可の欠落を告知する。主キーの NOT NULL は取込が戻すので告知しない）
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "Name",
+                            DataType = "nvarchar(50)",
+                            IsNullable = false,
+                        },
                     ],
                 },
             ],

@@ -34,6 +34,9 @@ namespace QuickER.CodeReverse.CSharp;
 /// 主キーの採番の印は <see cref="ApplyPrimaryKeyIdentityMarks"/> が現在図から引き継ぐ（生成コードは主キーの列に
 /// <c>[IdentityColumn]</c> を刻まないため、コードからは読めない）。
 /// </para>
+/// <para>
+/// 列の型の大小の綴りは <see cref="ApplyTypeSpellings"/> が現在図から引き継ぐ（コードは大小だけ違う綴りを刻まないため）。
+/// </para>
 /// </remarks>
 public static class ReverseMergePostProcessor
 {
@@ -241,6 +244,52 @@ public static class ReverseMergePostProcessor
                 )
                 {
                     column.IsIdentity = true;
+                }
+            }
+        }
+    }
+
+    /// <summary>列の型の綴りを、大文字小文字と前後の空白だけが違う現在図の同じ列から引き継ぐ</summary>
+    /// <param name="current">コード取込前の現在図（綴りの供給元）</param>
+    /// <param name="mergedEntities">
+    /// Guid 引継済みのマージ結果エンティティ（現在図の Id を引き継いでいる）。該当する列の型をその場で書き換える
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// 生成コードの型トークンは型の意味だけを運び、リバースはトークンを対象方言の表記で書き戻す（SQLite 方言は大文字）。
+    /// 生成は綴りの判定を <see cref="DbTypeText.AreEquivalent"/>（前後の空白・大小を無視）で行い、大小だけ違う列には
+    /// <c>NativeType</c> を刻まない（刻むと SQLite の図の全列に出て生成物が総入れ替えになる）。そのためコードからは
+    /// 大小の綴りを読めず、取り込み直すと <c>int</c> が <c>INT</c> へ変わり、構造署名の差として置換の確認も出る。
+    /// </para>
+    /// <para>
+    /// 引き継ぐのは、現在図の同じ Id の列（同じ Id のエンティティの中）の型と <see cref="DbTypeText.AreEquivalent"/> で
+    /// 同じときだけ。同じでない型はコードが正本（コードで型を変えた）。
+    /// </para>
+    /// </remarks>
+    public static void ApplyTypeSpellings(ErDiagram current, IReadOnlyList<Entity> mergedEntities)
+    {
+        ArgumentNullException.ThrowIfNull(current);
+        ArgumentNullException.ThrowIfNull(mergedEntities);
+
+        var currentById = current.Entities.ToDictionary(entity => entity.Id);
+
+        foreach (var entity in mergedEntities)
+        {
+            if (!currentById.TryGetValue(entity.Id, out var existing))
+            {
+                continue;
+            }
+
+            var existingColumns = existing.Columns.ToDictionary(column => column.Id);
+
+            foreach (var column in entity.Columns)
+            {
+                if (
+                    existingColumns.TryGetValue(column.Id, out var existingColumn)
+                    && DbTypeText.AreEquivalent(existingColumn.DataType, column.DataType)
+                )
+                {
+                    column.DataType = existingColumn.DataType;
                 }
             }
         }

@@ -61,8 +61,11 @@ public enum ExportOmissionKind
     /// <summary>列の型表記（形式の記法に合わせて書き換えられ、取込で元へ戻らない）</summary>
     ColumnTypeNormalized,
 
-    /// <summary>外部キー列の単一列 UNIQUE 制約（キー標識が 1 つしか書けない形式で外部キー印に隠れる）</summary>
-    UniqueConstraintOnForeignKeyColumn,
+    /// <summary>主キー列・外部キー列の単一列 UNIQUE 制約（キー標識が 1 つしか書けない形式で主キー・外部キーの標識に隠れる）</summary>
+    UniqueConstraintOnKeyColumn,
+
+    /// <summary>主キー列の外部キーの印（キー標識が 1 つしか書けない形式で主キーの標識に隠れ、取込でも戻らないもの）</summary>
+    ForeignKeyMarkerOnPrimaryKeyColumn,
 
     /// <summary>リレーションの制約名（取込で同じ名前に戻らないもの）</summary>
     RelationshipConstraintName,

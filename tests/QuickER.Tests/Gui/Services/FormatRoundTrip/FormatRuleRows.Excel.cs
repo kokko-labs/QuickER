@@ -304,8 +304,8 @@ internal static partial class FormatRuleRows
                 )
                 .Rejects(InvalidData("*")),
             ExcelRule(
-                    "excel-rule-identical-relationship-row",
-                    "Excel 取込は構成列まで同一のリレーション行を重複として弾く"
+                    "excel-rule-identical-relationship-rows-are-both-read",
+                    "Excel 取込は構成列まで同一のリレーション行も 2 本とも読む（出力は同じ列ペアの 2 本を 2 行で書く。DBML・Mermaid と同じ扱い）"
                 )
                 .Workbook(
                     // 請求先の行の参照元列を配送先と同じにし、構成列まで同一の 2 行を作る
@@ -316,8 +316,13 @@ internal static partial class FormatRuleRows
                         diagram: FormatShapeRows.ExcelAddressOrdersDiagram
                     )
                 )
-                .Rejects(
-                    InvalidData(string.Format(Strings.TableDoc_RelDuplicate, "Address", "Orders"))
+                .Expect(e =>
+                    // 明示した名前は変えない（取込の共通の規則）
+                    e.Imported.Count("RelationshipType *", 2)
+                        .Single("ColumnPairs Address->Orders#0 = AddressId>ShipToAddressId")
+                        .Single("ConstraintName Address->Orders#0 = FK_Orders_ShipToAddress")
+                        .Single("ColumnPairs Address->Orders#1 = AddressId>ShipToAddressId")
+                        .Single("ConstraintName Address->Orders#1 = FK_Orders_BillToAddress")
                 ),
             // 制約名欄が空のリレーションは既定名で DDL に出るため、同じテーブルの組に 2 行あると 2 本目が失敗する
             ExcelRule(

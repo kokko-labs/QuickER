@@ -33,15 +33,19 @@
 - 提示は `ShowInformationDetails`（要約＝完了文＋導入文・詳細＝項目の箇条書き。型変換警告と同じ形式）で、**形式ごとにセッション 1 回**だけ。Mermaid は NOT NULL 列がある限りほぼ必ず立ち、毎回出すと通知が形骸化する（`_omissionNotifiedFormats`。未対応方言フォールバックの `_fallbackWarningShown` と同じ流儀）。
 - **SQL DDL・Excel/HTML 定義書・画像は告知しない**。落ちるものが「その形式の目的上、出さないのが正しいもの」ばかりで、告知すると本当に危険な欠落が埋もれる。
 
-### Mermaid の欠落（17 種）
-- テーブル説明／メモ／列の説明／NULL 許可／複合 UNIQUE 制約／UNIQUE 制約名／FK 列ペア／参照アクション／名前付きクエリ。
+### Mermaid の欠落（18 種）
+- テーブル説明／メモ／列の説明／複合 UNIQUE 制約／UNIQUE 制約名／参照アクション／名前付きクエリ。
+- NULL 許可：主キーでない NOT NULL 列があるときだけ（取込は主キーの標識の列を NOT NULL に戻すので、主キーの NOT NULL だけでは落ちるものが無い）。ガード：`FormatRoundTripTests`（形の行の告知の期待と表明 (2)。Mermaid の `Reinferred` に NULL 許可を宣言しない）。
+- FK 列ペア：列ペアを持つリレーションがあるときと、列ペアの無いリレーションに取込が親の主キーからペアを推論するとき（推論したペアの子の列の印は、エンジンでは列ペアの違いの一部として数える）。ガード：`FormatRoundTripTests`（形の行 `excel-pairless-relationships`・`dbml-pairless-relationship-omitted-*`・`dbml-relationship-to-table-without-columns-onetomany`・`dbml-relationship-without-child-columns-carries-no-marker-pairless-one-to-many`・推論しない図は `mermaid-quoted-entity-name-*`）。
 - 列名の書き換え（属性名に使えない文字を畳んだとき）。
 - 複合主キーの順序（列の並びと食い違うとき。構文が無いため告知する）。
 - 計算列／DB が採番する列。
 - 型の書き換え：取込の復元 `MermaidImporter.DenormalizeDataType` で元へ戻らないとき。判定は書き出しと復元を実際に往復させる。
 - テーブル名の書き換え：引用の中にも書けない `"` `%` `\` を畳んだとき。素で書けない名前は引用して書く。
-- 外部キー列の単一列 UNIQUE：キー標識は 1 つで FK が優先。判定は出力と `KeyMarker` を共有する。
-- リレーションの制約名：素で書けない名前は関係行のラベルを引用して書き、取込は引用ラベルを採らない。判定は出力を `MermaidImporter.Parse` で実際に取り込み直して、書いた順に名前を突き合わせる。ガード：`FormatRoundTripTests`（形の行 `mermaid-quoted-constraint-label-*`・`mermaid-plain-constraint-label-*`・`mermaid-plain-constraint-name-not-read-back-*`・`mermaid-unnamed-relationships-not-reported`）。
+- 主キー列・外部キー列の単一列 UNIQUE（`UniqueConstraintOnKeyColumn`）：キー標識は 1 つで PK > FK > UK。主キー列でも図の制約（名前・DDL の UNIQUE）は戻らない。判定は出力と `KeyMarker` を共有する。ガード：`FormatRoundTripTests`（形の行 `mermaid-unique-on-*`・`dbml-omissions-memo-and-named-query`）。
+- 主キー列の外部キーの印（`ForeignKeyMarkerOnPrimaryKeyColumn`）：キー標識は PK が優先で書けず、取込の列ペアの推論がその列を子に選んだときだけ戻る。ガード：`FormatRoundTripTests`（形の行 `dbml-primary-key-child-column-is-carried`・戻る図は `mermaid-identifying-relationship`）。
+- リレーションの制約名：素で書けない名前は関係行のラベルを引用して書き、取込は引用ラベルを採らない。ガード：`FormatRoundTripTests`（形の行 `mermaid-quoted-constraint-label-*`・`mermaid-plain-constraint-label-*`・`mermaid-plain-constraint-name-not-read-back-*`・`mermaid-unnamed-relationships-not-reported`）。
+- 取込の規則で決まる 3 つ（制約名・推論される列ペア・主キー列の外部キーの印）は、出力を `MermaidImporter.Parse` で実際に取り込み直し、書いた順に表・列・リレーションを突き合わせて判定する（取込の規則を出力側へ写さない）。取り込み直しは `DetectOmissions` の 1 回の呼び出しにつき多くとも 1 回（`Lazy` で 3 判定が共有し、要る判定が無ければ取り込まない）。取込が失敗する図は、名前と印は戻らない側・推論されるペアは無い側へ倒す。
 
 ### DBML の欠落（6 種）
 - DBML はテーブル説明を標準 `Note:` 行、制約名を名前付き Ref（`Ref 名前: …`）、参照アクションを Ref 行の端点の後ろの設定ブロック（`delete` / `update`）で往復対応している。
@@ -92,6 +96,13 @@
 - 確かめずに終わりにすると、名前を消した行・カラムの下に名前なしで入力した行で、その行と後ろのカラムが黙って消える（出力は変えない）。
 - 列数の定数は出力の表の列数と同じでなければならない。列を足して定数を直し忘れると、足した列だけの行を見落とす。
 - ガード：`FormatRoundTripTests` の規則の行 `excel-rule-row-without-column-name-but-other-content-*`（3〜8 列目の 6 行）・`excel-rule-middle-row-without-column-name`・`excel-rule-row-with-only-number-ends-table` / `excel-rule-empty-row-ends-table`（No. だけの行とすべて空の行・その下の行は読まない）と、形の行 `excel-exported-workbook` の Excel の出力の期待（出力の見出しの最後の列が定数と一致）。mutation 実証済み。
+
+## 往復する形式は自分の出力を読む（型の無い列・同じ列ペアの 2 本）
+- 往復する形式（DBML・Excel 定義書）は、出力が書いた形を取込で断らない。断ると自分が書いたファイルを読み戻せない（告知する形式の Mermaid は、戻らないものを書き出しで告知する）。
+- 型の無い列：DBML は空の引用の型 `""` で書き（`DbmlExporter.TypeName`）、取込は `""` を空の型として読む。型のトークンそのものが無い行は今どおり断る（`DbmlImporter.SplitNameAndType` が「トークン無し」を null で返して区別する）。Excel は型のセルを空で書き、取込は空の型として読む。Mermaid は占位語 `_`。
+  - DBML の `""` を他のツールが受けることは、@dbml/core（dbml-parse）の master のソース（字句・構文・検証・解釈の 4 段）を静的に読んで確かめた。公開版での実行は未確認。
+- 同じ表の組・同じ列ペアのリレーション行：Excel の取込は重複として断らず、1 行 1 本で読む（DBML・Mermaid と同じ）。名前の空いた 2 本目は `ConstraintNames.NameUnnamedForeignKeys`。
+- ガード：`FormatRoundTripTests`（形の行 `mermaid-empty-data-type` の DBML・Excel・`mermaid-plain-constraint-name-not-read-back-duplicate` / `mermaid-unnamed-relationships-not-reported` の Excel／規則の行 `excel-rule-identical-relationship-rows-are-both-read`・型のトークン無しを断る `dbml-rule-parse-error-line-number`）。mutation 実証済み。
 
 ## 出力のエスケープ
 - Mermaid / DBML の識別子・ラベルは `ExportTextSanitizer.Sanitize` を通す（`SqlComment.Sanitize` と同じ実装への 1 行委譲）。ガード：`FormatRoundTripTests`（形の行 `injection-names-with-new-line`・`injection-data-type-with-new-line`・`injection-description-with-new-line`・`injection-dbml-description-escape-*`・`dbml-backslash-constraint-names`）。
