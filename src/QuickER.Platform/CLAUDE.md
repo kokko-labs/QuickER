@@ -32,7 +32,7 @@ Platform の外はここの入口を通す。通さない出現は各ガード�
   共有の PATH 走査 `PathExecutableResolver` は相対要素（`.` 等）を読み飛ばし、同じフォルダの `.exe` / `.cmd` / `.bat` は PATHEXT の順に試す（無ければ既定の `.exe`・`.bat`・`.cmd`。PATHEXT に無い候補とほかの拡張子は試さない。コマンドラインで名前を打って起動されるものと同じ）。
 - シムの判定 `IsBatchShim` は拡張子を見る前に末尾の空白と `.` を落とす。Windows が落として開くので、落とさないと `x.cmd ` が包み直しも引数の検査も通らずに cmd へ渡る。
 - `DotnetBuildRunner` の `dotnet` だけは名前のまま。名前だけの起動は `.exe` を補って探し `.cmd` を拾わない（実測）のに対し、共有の PATH 走査は `.cmd` も候補にするため、フルパス化すると PATH 前方の `dotnet.cmd` で引数ガードの無いバッチ経由の起動へ化ける。実測では .NET 10 の `Process.Start` は名前だけの `FileName` をカレントフォルダ・`WorkingDirectory` から探さないため、単独では穴ではない。
-- ガード：`BatchShimProcessGuardTests.WrapCommandLine_シムは決定的な引用形式でラップする`・`BatchShimProcessGuardTests.{WrapCommandLine,Apply}_パーセントを含むシムのパスは拒否する`・`BatchShimProcessGuardTests.CmdExePath_システムフォルダ直下のcmdをフルパスで指す`・`CopilotCliLocatorTests.EnsureSafeToLaunch_{PercentInShimPath,ExclamationInShimPath}_Throws`・`CodexCliLocatorTests.ResolveExecutablePath_SkipsRelativeEntries`・`CodexAppServerClientStartInfoTests.ResolveLaunch_*`・`PathExecutableResolverTests`・`BatchShimTrailingNameTests`（実プロセス）。mutation 実証済み。
+- ガード：`ProcessLaunchTests`（OS との境界のエンジンの起動の表。入口〔Guard の 2 入口・Claude / Codex / Copilot の配線・PATH の走査・ロケータ〕× 入力の形の行：包み直しの決定的な引用形式 `shim-wrap-shim-wrapped-in-quoted-form`・パスの `%` の拒否 `shim-{wrap,apply}-rejects-path-percent`・Copilot の `%` と `!` の拒否 `shim-copilot-rejects-path-{percent,exclamation}`・Codex の起動 `shim-codex-launch-*`・相対の PATH 要素を読み飛ばす `resolve-{codex,copilot}-skips-relative-entries`・PATHEXT の順 `resolve-pathext-*`。網羅しない組は `ProcessLaunchDimensions.Gaps`）・`BatchShimProcessGuardTests.CmdExePath_システムフォルダ直下のcmdをフルパスで指す`（cmd.exe の実在）・`BatchShimTrailingNameTests`（実プロセス）。mutation 実証済み。
 
 ## 外部の起動
 
@@ -46,8 +46,8 @@ Platform の外はここの入口を通す。通さない出現は各ガード�
 - シムのガードと PATH の解決（`BatchShimProcessGuard`・`PathExecutableResolver`）も Platform に置く。
 - 入口ごとに起動を書くと、URL のスキームの制限やフルパスの解決が入口ごとに食い違う（Codex のログイン URL がホストを確かめていなかった例がある）。
 - QuickER がプロセスを作らないもの（GitHub.Copilot.SDK・Velopack・WebView2）は対象外。
-- チャットのリンクを開く側 `ShellChatLinkOpener` も `UrlPolicy.IsSafe` を再検査してから渡す（`ShellChatLinkOpenerTests`）。
-- ガード：`ProcessLaunchGuardTests`（`SourceSymbolScan` で src の Platform の外をシンボルで判定し、静的な `Process.Start`・`Process` の生成〔目的型の `new()` も〕・`UseShellExecute` への定数の false でない値の代入〔値が定数でないものも〕・入口の名前が `ShellExecute` / `CreateProcess` / `WinExec` で始まる P/Invoke を 0 にする。インスタンスの `Start()` は、受け手が `ExternalLauncher.CreateProcess` の結果で初期化した局所変数のときだけ許す。解決できない呼び出しは「未解決」として同じ一覧に出す。自己検査のプローブが、using static・別名・目的型の new・非定数の代入・P/Invoke を拾い、CreateProcess の戻り値の起動・定数の false・無関係な P/Invoke を拾わないことも固定する）・`ExternalLauncherTests`（開いてはいけない URL の表は起動せずに断る・フルパスでない／無いフォルダ・名前だけの実行ファイル・包み直していないシム・シェル経由の子プロセスを断る・`dotnet` だけは名前のまま）。mutation 実証済み。
+- チャットのリンクを開く側 `ShellChatLinkOpener` も `UrlPolicy.IsSafe` を再検査してから渡す（`ProcessLaunchTests` の行 `external-chat-link-*`）。
+- ガード：`ProcessLaunchGuardTests`（`SourceSymbolScan` で src の Platform の外をシンボルで判定し、静的な `Process.Start`・`Process` の生成〔目的型の `new()` も〕・`UseShellExecute` への定数の false でない値の代入〔値が定数でないものも〕・入口の名前が `ShellExecute` / `CreateProcess` / `WinExec` で始まる P/Invoke を 0 にする。インスタンスの `Start()` は、受け手が `ExternalLauncher.CreateProcess` の結果で初期化した局所変数のときだけ許す。解決できない呼び出しは「未解決」として同じ一覧に出す。自己検査のプローブが、using static・別名・目的型の new・非定数の代入・P/Invoke を拾い、CreateProcess の戻り値の起動・定数の false・無関係な P/Invoke を拾わないことも固定する）・`ProcessLaunchTests`（OS との境界のエンジンの起動の表の行 `external-*`：開いてはいけない URL の表は起動せずに断る・フルパスでない／無いフォルダ・名前だけの実行ファイル・包み直していないシム・シェル経由の子プロセスを断る・`dotnet` だけは名前のまま）。mutation 実証済み。
 
 ## パスがフォルダの中にあるかの判定
 
@@ -58,7 +58,7 @@ Platform の外はここの入口を通す。通さない出現は各ガード�
 - 使う入口：Copilot の自動承認（`CopilotWorkspacePermissionPolicy`）・API キー方式の提出の最後の脱出の判定（`ResolveEmitPath`）・モックのプレビューの遷移とサブリソース（`MockPreviewPanel.IsNavigationAllowed` / `IsResourceAllowed`＝直下）・削除してよいかの重なり（`MockProjectFiles.PathsOverlap`。リンクを実体まで解決してから渡す）。
 - 入口ごとに前方一致を書くと末尾の区切りの扱いが食い違う（出力フォルダがドライブ直下のとき Copilot だけが `D:\` に区切りを足して `D:\\` と比べ、配下を 1 件も承認しない、という形）。
 - リンク・8.3 の短い名前・`\\?\` の形の別名は追わない。
-- ガード：`PathContainmentTests`（ドライブ直下・UNC・末尾の区切り・大文字小文字・`..`・兄弟の前方一致・同じパス・正規化できない値の表）・`PathContainmentCallerFuzzTests`（同じ表を 4 つの呼び出し元へそれぞれの入力の形で流す。提出はすべての根の形で中を受け付ける）・`PathPrefixGuardTests`（`string.StartsWith` の第 1 引数〔局所変数なら初期化子を 3 段まで〕が `Path` の区切りの扱いか `GetFullPath` を使う呼び出しを、src の Platform の外で 0 にする。シンボルで判定し、解決できない呼び出しは「未解決」の別の欄。自己検査のプローブと Platform 自身の 1 件で走査の空振りを確かめる）。mutation 実証済み。
+- ガード：`PathContainmentTests`（ドライブ直下・UNC・末尾の区切り・大文字小文字・`..`・兄弟の前方一致・同じパス・正規化できない値の表）・`PathContainmentCallerFuzzTests`（同じ表を 4 つの呼び出し元へそれぞれの入力の形で流す。提出はすべての根の形で中を受け付ける。呼び出し元 × 行の形の網羅は `PathContainmentCallerFuzzTests.Containment_Coverage_MatchesGaps`＝OS との境界のエンジンの部分 Containment）・プレビューの URI の次元（スキーム・fragment・非 .html・null）は `PathEntranceTests` の行 `preview-*`・`PathPrefixGuardTests`（`string.StartsWith` の第 1 引数〔局所変数なら初期化子を 3 段まで〕が `Path` の区切りの扱いか `GetFullPath` を使う呼び出しを、src の Platform の外で 0 にする。シンボルで判定し、解決できない呼び出しは「未解決」の別の欄。自己検査のプローブと Platform 自身の 1 件で走査の空振りを確かめる）。mutation 実証済み。
 
 ## パスの名前の判定
 
@@ -76,7 +76,7 @@ Platform の外はここの入口を通す。通さない出現は各ガード�
 - 設定の値（層フォルダ・出力サブフォルダ・API リファレンスのファイル名）と提出のパスは、値全体の前後の空白を取り除いてから判定する。決まった形への正規化で、意図と違う場所へは書かない。断るのは Windows が黙って落とす区間の内側の空白だけ。
 - 提出のパスはさらに、AI の出力の境界の前処理として空の区間と `.` の区間を落としてから判定する（AI がよく書く `./MockApp/…` を断らない）。先頭の `/` は落とす前に断る（落とすと `/a` が `a` になる）。落として何も残らなければ空として断る。共有の `CheckRelativePath` は `.` も空の区間も断る（設定の入口には `./` を許す理由が無い）。
 - 入口ごとに判定を持つと断る形が食い違う。
-- ガード：`PathSegmentsTests`（規則ごとの表）・`PathSegmentEntranceFuzzTests`（断るべき形 37〔1 区間 26・相対パス 11〕を 9 つの入口のそれぞれで成り立つ形に組み立てて流し、すべて断りメッセージに当たった規則の文言を含むこと、値全体の前後の空白と提出のパスの落とす区間は断らずに受け付けること、正当な名前〔250 文字の名前を含む〕を断らないこと、プロジェクト名の入口が予約のフォルダ名を断ることを見る）・`CodegenCaseTests` の行 `diag-outputfilename-invalid-slash` / `diag-outputfilename-invalid-reserved-name` / `diag-outputfilename-derived-name-too-long`・`MockProjectScaffoldServiceTests`（プロジェクト名で断るフォルダの名前は、提出がすべて断られる名前と同じ）・`MockGenerationDialogViewModelTests`（予約されたフォルダ名のプロジェクト名では生成不可・前後の空白は除いて判定する）・`ApiKeyMockProjectAgentScreenReadTests`・`MockProjectEmitToolsTests`（`./`・空の区間・前後の空白を含む提出のパスを受け付け、落とした後の保護フォルダは断り、`.` だけ・`./` だけは空として断る）・`PathValidationGuardTests`（`Path.GetInvalidFileNameChars` / `GetInvalidPathChars` / `IsPathRooted` が src の Platform の外で 0）。mutation 実証済み。
+- ガード：`PathSegmentsTests`（規則ごとの表）・`PathSegmentEntranceFuzzTests`（形と違反の一覧は `PathSegmentForms` の 1 つを `PathSegmentsTests` と共有する。入口 × 違反の網羅は `PathSegmentEntranceFuzzTests.Segments_Coverage_MatchesGaps`＝OS との境界のエンジンの部分 Segments。断るべき形 37〔1 区間 26・相対パス 11〕を 9 つの入口のそれぞれで成り立つ形に組み立てて流し、すべて断りメッセージに当たった規則の文言を含むこと、値全体の前後の空白と提出のパスの落とす区間は断らずに受け付けること、正当な名前〔250 文字の名前を含む〕を断らないこと、プロジェクト名の入口が予約のフォルダ名を断ることを見る）・`CodegenCaseTests` の行 `diag-outputfilename-invalid-slash` / `diag-outputfilename-invalid-reserved-name` / `diag-outputfilename-derived-name-too-long`・`MockProjectScaffoldServiceTests`（プロジェクト名で断るフォルダの名前は、提出がすべて断られる名前と同じ）・`MockGenerationDialogViewModelTests`（予約されたフォルダ名のプロジェクト名では生成不可・前後の空白は除いて判定する）・`PathEntranceTests`（行 `screen-read-*`＝画面ファイルの素材読みは断る名前を読まない・行 `emit-*`＝`./`・空の区間・前後の空白を含む提出のパスを受け付け、落とした後の保護フォルダは断り、`.` だけ・`./` だけは空として断る）・`PathValidationGuardTests`（`Path.GetInvalidFileNameChars` / `GetInvalidPathChars` / `IsPathRooted` が src の Platform の外で 0）。mutation 実証済み。
 
 ## ファイルの書き込みと文字コード
 
@@ -92,7 +92,7 @@ Platform の外はここの入口を通す。通さない出現は各ガード�
     - 対象の名前でシンボルが解決しない呼び出しは「未解決」として同じ一覧で照合し、`SymbolScan_ResolvesBclCallsInEveryProject` がどのプロジェクトでも BCL の呼び出しを解決できていることを表明する（参照の組み立てが壊れても空振りしない）。
     - 理由つきの一覧：%TEMP% の一時ファイル・一意の名前を CreateNew で作るクラッシュログ・読めない設定の退避の File.Copy・Platform を参照できないランタイムのパッケージ 7・自分の一時物の後片付け・remove_screen の画面の削除・最終ビルドの前の obj / bin の削除・空の値の保存による秘密の削除。厳密に照合する。ガードが拾う書き方は `Describe_FindsEveryWritingForm` のプローブのソースで固定する。
   - `Utf8EncodingGuardTests`：`new UTF8Encoding(` と型が UTF8Encoding の `new(` が Platform の外で 0。
-  - `AtomicFileTests`：`Write` の途中の失敗で保存先が無傷。
+  - `AtomicFileTableTests`（OS との境界のエンジンの原子的な書き込みの表。書く形 × 保存先 × 失敗の段の行で、書く行はすべて一時ファイルの残りが無いことを共通に確かめる）：`Write` の途中の失敗で保存先が無傷（行 `atomic-write-stream-writer-throws-*`）。並行・読み取りのリトライの時間・ハンドルは `AtomicFileTests` が実 OS で見る。
   - mutation 実証済み。
 
 ## 一時ファイルの名前
@@ -103,4 +103,4 @@ Platform の外はここの入口を通す。通さない出現は各ガード�
 - フォルダの中身を写す処理（モックの同梱）は残骸をこの判定で除く。
 - 生成ランタイムの `UnboundedBinaryColumns.ReadToFileAsync` は Platform を参照できないので写しを持つ（同じ名前の規則・ディスクへの確定・保存先があれば File.Replace・競合の再試行）。一致は `UnboundedBinaryReadToFileTests` が一時ファイルの名前を `IsTemporaryFileName` に通して確かめる。
 - File.Replace が使えないときの代わりの移動（`MoveOverPreservingMetadata`）は、保存先の属性（読み取り専用を除く）と ACL を移した先へ写す。最善努力で、写せなくても保存は成功。ACL は Windows でだけ写す。読み取った `FileSecurity` をそのまま渡すと変更の印が無く何も書かれないので、SDDL から作り直す。
-- ガード：`AtomicFileNamingAndMetadataTests`（長さ 1〜255・サロゲート・判定の表・隠し属性・移動の属性と ACL）・`GeneratedFileWriterLongNameTests`・`MockFolderStoreTests.SaveScreen_LongFileName_Succeeds`・`UnboundedBinaryReadToFileTests`（名前の形・隠し属性）・`MockProjectScaffoldRegenerationTests.Scaffold_SkipsAtomicWriteLeftoversInMockFolder`。mutation 実証済み。
+- ガード：`AtomicFileTableTests`（行 `atomic-temporary-path-*`＝長さ 1〜255・サロゲート、行 `atomic-is-temporary-file-name-*`＝判定の表、行 `atomic-write-all-text-long-file-name-*`）・`AtomicFileNamingAndMetadataTests`（隠し属性・移動の属性と ACL）・`GeneratedFileWriterLongNameTests`・`MockFolderStoreTests.SaveScreen_LongFileName_Succeeds`・`UnboundedBinaryReadToFileTests`（名前の形・隠し属性）・`MockProjectScaffoldRegenerationTests.Scaffold_SkipsAtomicWriteLeftoversInMockFolder`。mutation 実証済み。

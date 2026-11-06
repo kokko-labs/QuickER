@@ -3,100 +3,20 @@ using System.IO;
 using System.Text;
 using AwesomeAssertions;
 using QuickER.AI;
-using AiStrings = QuickER.AI.Resources.Strings;
 
 namespace QuickER.Tests.AI;
 
 /// <summary>
-/// <see cref="ClaudeCodeProcessClient"/> が <c>.cmd</c> / <c>.bat</c> シムのガード
-/// （<see cref="BatchShimProcessGuard"/>）へ claude 固有の文言で配線されていることを検証するテストクラス。
+/// <see cref="ClaudeCodeProcessClient"/> のシステムプロンプトのファイル渡し（実ファイル）と、解決の呼び出し回数を検証するテストクラス。
 /// </summary>
 /// <remarks>
-/// ガードのポリシーそのものは <see cref="BatchShimProcessGuardTests"/> が固定する。
-/// ここで守るのは「claude の起動経路がガードを通っていること」と「止まったのが claude だと
-/// メッセージから分かること」の 2 点。
+/// シムのガード（<see cref="BatchShimProcessGuard"/>）への配線と claude 固有の文言は、OS との境界のエンジンの起動の表
+/// （<c>Platform/OsBoundary/ProcessLaunchRows.Shim.cs</c> の行 <c>shim-claude-*</c>）へ移した。
+/// ここに残すのは、保存先に差し込み点の無いシステムプロンプトのファイル（内容・BOM・削除）を実ファイルで見るものと、
+/// 解決をキャッシュしない呼び出し回数の振る舞い。
 /// </remarks>
 public class ClaudeCodeProcessClientStartInfoTests
 {
-    [Fact]
-    public void ApplyBatchShimGuard_exeは書き換えない()
-    {
-        var startInfo = new ProcessStartInfo { FileName = @"C:\tools\claude.exe" };
-        startInfo.ArgumentList.Add("-p");
-
-        ClaudeCodeProcessClient.ApplyBatchShimGuard(startInfo);
-
-        startInfo.FileName.Should().Be(@"C:\tools\claude.exe");
-        startInfo.ArgumentList.Should().Equal("-p");
-    }
-
-    [Fact]
-    public void ApplyBatchShimGuard_cmdシムはCmdExe経由へ包み直す()
-    {
-        var startInfo = new ProcessStartInfo { FileName = @"C:\npm\claude.cmd" };
-        startInfo.ArgumentList.Add("-p");
-
-        ClaudeCodeProcessClient.ApplyBatchShimGuard(startInfo);
-
-        startInfo.FileName.Should().Be(Path.Combine(Environment.SystemDirectory, "cmd.exe"));
-        startInfo.ArgumentList.Should().BeEmpty();
-        startInfo.Arguments.Should().Contain(@"""C:\npm\claude.cmd""");
-    }
-
-    [Fact]
-    public void ApplyBatchShimGuard_引用符を含むパスはClaudeの文言で拒否する()
-    {
-        const string path = @"C:\tools\evil"" & calc & ""x.cmd";
-        var startInfo = new ProcessStartInfo { FileName = path };
-
-        var act = () => ClaudeCodeProcessClient.ApplyBatchShimGuard(startInfo);
-
-        // 製品コードと同じ resx キーからフォーマット済みメッセージを導出し、カルチャに依らず完全一致で検証する
-        act.Should()
-            .Throw<InvalidOperationException>()
-            .WithMessage(string.Format(AiStrings.ClaudeCode_PathHasQuote, path));
-    }
-
-    [Fact]
-    public void ApplyBatchShimGuard_パーセントを含むシムのパスはClaudeの文言で拒否する()
-    {
-        const string path = @"C:\%EVIL%\claude.cmd";
-        var startInfo = new ProcessStartInfo { FileName = path };
-
-        var act = () => ClaudeCodeProcessClient.ApplyBatchShimGuard(startInfo);
-
-        act.Should()
-            .Throw<InvalidOperationException>()
-            .WithMessage(string.Format(AiStrings.ClaudeCode_PathHasEnvExpansion, path));
-    }
-
-    [Fact]
-    public void ApplyBatchShimGuard_環境変数展開を含む引数はClaudeの文言で拒否する()
-    {
-        var startInfo = new ProcessStartInfo { FileName = @"C:\npm\claude.cmd" };
-        startInfo.ArgumentList.Add("%EVIL%");
-
-        var act = () => ClaudeCodeProcessClient.ApplyBatchShimGuard(startInfo);
-
-        act.Should()
-            .Throw<InvalidOperationException>()
-            .WithMessage(string.Format(AiStrings.ClaudeCode_ArgHasEnvExpansion, "%EVIL%"));
-    }
-
-    [Fact]
-    public void ApplyBatchShimGuard_改行を含む引数はClaudeの文言で拒否する()
-    {
-        const string argument = "line1\r\nline2";
-        var startInfo = new ProcessStartInfo { FileName = @"C:\npm\claude.cmd" };
-        startInfo.ArgumentList.Add(argument);
-
-        var act = () => ClaudeCodeProcessClient.ApplyBatchShimGuard(startInfo);
-
-        act.Should()
-            .Throw<InvalidOperationException>()
-            .WithMessage(string.Format(AiStrings.ClaudeCode_ArgHasNewline, argument));
-    }
-
     /// <summary>
     /// 複数行のシステムプロンプトが <c>--append-system-prompt-file</c> のファイル渡しになり、
     /// 引数には改行が 1 つも載らないことを固定する。

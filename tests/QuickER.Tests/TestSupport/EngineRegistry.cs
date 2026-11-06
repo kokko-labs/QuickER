@@ -39,5 +39,16 @@ internal static class EngineRegistry
         Gui.Services.FormatRoundTrip.FormatRoundTripDimensions.OmissionDescriptor,
         Gui.Services.FormatRoundTrip.FormatRoundTripDimensions.RuleDescriptor,
         Gui.Services.FormatRoundTrip.FormatRoundTripDimensions.MergeDescriptor,
+        Platform.OsBoundary.ProcessLaunchDimensions.Descriptor,
+        Platform.OsBoundary.ShellPermissionDimensions.Descriptor,
+        Platform.OsBoundary.PathEntranceDimensions.Descriptor,
+        Platform.OsBoundary.AtomicFileDimensions.Descriptor,
+        Platform.OsBoundary.PathContainmentDimensions.Descriptor,
+        Platform.OsBoundary.PathSegmentsDimensions.Descriptor,
+        Gui.Services.Lifecycle.LifecycleDimensions.Descriptor,
+        Gui.Services.Lifecycle.PostExitExhaustiveDimensions.Descriptor,
+        Gui.Services.Lifecycle.ShutdownChainExhaustiveDimensions.Descriptor,
+        Extensibility.FeatureModuleContractDimensions.Descriptor,
+        Db.UI.ProfileStoreDimensions.Descriptor,
     ];
 }

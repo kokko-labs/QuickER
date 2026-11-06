@@ -9,76 +9,26 @@ public sealed class PathSegmentsTests
 {
     /// <summary>1 区間の名前の判定（断る理由・断らない名前）</summary>
     public static TheoryData<string, PathSegmentViolation?> Segments =>
-        new()
-        {
-            { "", PathSegmentViolation.Empty },
-            { ".", PathSegmentViolation.DotSegment },
-            { "..", PathSegmentViolation.DotSegment },
-            { "a/b", PathSegmentViolation.Separator },
-            { "a\\b", PathSegmentViolation.Separator },
-            { "a:b", PathSegmentViolation.InvalidCharacter },
-            { "C:", PathSegmentViolation.InvalidCharacter },
-            { "a*b", PathSegmentViolation.InvalidCharacter },
-            { "a?b", PathSegmentViolation.InvalidCharacter },
-            { "a<b", PathSegmentViolation.InvalidCharacter },
-            { "a>b", PathSegmentViolation.InvalidCharacter },
-            { "a|b", PathSegmentViolation.InvalidCharacter },
-            { "a\"b", PathSegmentViolation.InvalidCharacter },
-            { "a\u0001b", PathSegmentViolation.InvalidCharacter },
-            { "a\u0009b", PathSegmentViolation.InvalidCharacter },
-            { " a", PathSegmentViolation.LeadingWhitespace },
-            { "\u3000a", PathSegmentViolation.LeadingWhitespace },
-            { "a ", PathSegmentViolation.TrailingDotOrWhitespace },
-            { "a.", PathSegmentViolation.TrailingDotOrWhitespace },
-            { "GENERA~1", PathSegmentViolation.Tilde },
-            { "a~b", PathSegmentViolation.Tilde },
-            { "CON", PathSegmentViolation.ReservedDeviceName },
-            { "con", PathSegmentViolation.ReservedDeviceName },
-            { "NUL.txt", PathSegmentViolation.ReservedDeviceName },
-            { "CON .txt", PathSegmentViolation.ReservedDeviceName },
-            { "COM1", PathSegmentViolation.ReservedDeviceName },
-            { "LPT9.md", PathSegmentViolation.ReservedDeviceName },
-            { "CONIN$", PathSegmentViolation.ReservedDeviceName },
-            { "conout$.txt", PathSegmentViolation.ReservedDeviceName },
-            { "COM¹", PathSegmentViolation.ReservedDeviceName },
-            { "com².txt", PathSegmentViolation.ReservedDeviceName },
-            { "LPT³", PathSegmentViolation.ReservedDeviceName },
-            { "LPT¹.md", PathSegmentViolation.ReservedDeviceName },
-            { "COM⁴", null },
-            { "CONIN", null },
-            { new string('a', PathSegments.MaxLength + 1), PathSegmentViolation.TooLong },
-            { new string('a', PathSegments.MaxLength), null },
-            { "COM10", null },
-            { "CONSOLE", null },
-            { "a..b", null },
-            { "MyApp.Domain", null },
-            { "日本語", null },
-            { ".gitignore", null },
-        };
+        Rows(PathSegmentForms.SegmentChecks);
 
     /// <summary>相対パスの判定（断る理由・断らないパス）</summary>
     public static TheoryData<string, PathSegmentViolation?> RelativePaths =>
-        new()
+        Rows(PathSegmentForms.RelativeChecks);
+
+    /// <summary>形の一覧（<see cref="PathSegmentForms"/>）を Theory のデータにする</summary>
+    private static TheoryData<string, PathSegmentViolation?> Rows(
+        IEnumerable<PathSegmentForms.PathForm> forms
+    )
+    {
+        var data = new TheoryData<string, PathSegmentViolation?>();
+
+        foreach (var form in forms)
         {
-            { "", PathSegmentViolation.Empty },
-            { "/a", PathSegmentViolation.Rooted },
-            { "\\a", PathSegmentViolation.Rooted },
-            { "C:\\a", PathSegmentViolation.Rooted },
-            { "C:a", PathSegmentViolation.Rooted },
-            { "a//b", PathSegmentViolation.Empty },
-            { "a/./b", PathSegmentViolation.DotSegment },
-            { "a/../b", PathSegmentViolation.DotSegment },
-            { "./a", PathSegmentViolation.DotSegment },
-            { "a/ b", PathSegmentViolation.LeadingWhitespace },
-            { "a /b", PathSegmentViolation.TrailingDotOrWhitespace },
-            { "a./b", PathSegmentViolation.TrailingDotOrWhitespace },
-            { "a/CON/b", PathSegmentViolation.ReservedDeviceName },
-            { "a/x~1", PathSegmentViolation.Tilde },
-            { "MyApp.Domain/Generated", null },
-            { "MyApp.Domain\\Generated", null },
-            { "Domain/", null },
-            { "a\\b\\", null },
-        };
+            data.Add(form.Form, form.Violation);
+        }
+
+        return data;
+    }
 
     [Theory(DisplayName = "CheckSegment: 1 区間の名前として断る理由を返す")]
     [MemberData(nameof(Segments))]
