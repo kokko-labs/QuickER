@@ -16,8 +16,11 @@ internal static class MockAgentContractRows
     /// <summary>成功のターンの途中で流すアシスタントの文章</summary>
     private const string StartText = "作業を開始します。\n";
 
-    /// <summary>追加の指示</summary>
+    /// <summary>追加の指示（前後の空白を除いた後の、プロンプトに載る形）</summary>
     private const string Instructions = "ダークテーマで実装して";
+
+    /// <summary>要求に添える追加の指示（<see cref="Instructions"/> の前後に空白・改行を付けた形。載るときに除かれる）</summary>
+    private const string PaddedInstructions = "  \r\n " + Instructions + " \n ";
 
     /// <summary>行の表</summary>
     public static ScenarioTable<MockAgentScenario> Table =>
@@ -491,22 +494,39 @@ internal static class MockAgentContractRows
             ),
             Row(
                 "prompt-additional-instructions-appended-after-heading",
-                "追加の指示が空でなければ、初回のプロンプトの末尾に見出しの後に連結される",
+                "追加の指示が空でなければ、前後の空白を除いて、宣言したプロンプト（初回かシステム）の末尾に見出しの後に連結され、見出しはどのプロンプトを通しても 1 回だけ",
                 MockAgentTarget.Wpf,
                 async c =>
                 {
                     await c.RunAsync(MockAgentScript.SingleSuccess);
 
-                    c.Rig.Prompts[0]
+                    var slot = c.Adapter.AdditionalInstructionsPrompt.Value;
+                    var carrier =
+                        slot == MockAgentPromptSlot.SystemPrompt
+                            ? c.Rig.SystemPrompt
+                            : c.Rig.Prompts[0];
+
+                    carrier
                         .Should()
                         .EndWith(
                             "\n\n"
                                 + MockProjectPromptBuilder.AdditionalInstructionsHeading
                                 + "\n"
-                                + Instructions
+                                + Instructions,
+                            $"追加の指示は {slot} に載る"
                         );
+
+                    // 重ねて載せる退行・別のプロンプトへ黙って移る退行を拾う（システムと全ターンを通して 1 回）
+                    c.Rig.Prompts.Append(c.Rig.SystemPrompt ?? string.Empty)
+                        .Sum(prompt =>
+                            prompt
+                                .Split(MockProjectPromptBuilder.AdditionalInstructionsHeading)
+                                .Length - 1
+                        )
+                        .Should()
+                        .Be(1);
                 },
-                additionalInstructions: Instructions
+                additionalInstructions: PaddedInstructions
             ),
             Row(
                 "prompt-blank-additional-instructions-add-no-heading",

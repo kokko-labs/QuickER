@@ -88,6 +88,13 @@ internal sealed class CodexMockAgentAdapter : MockAgentAdapter
         );
 
     /// <inheritdoc/>
+    public override MockAgentValue<MockAgentPromptSlot> AdditionalInstructionsPrompt { get; } =
+        new(
+            MockAgentPromptSlot.FirstPrompt,
+            $"{Source}:188-192（追加の指示を共有の組み立て BuildPrompt へ渡し、作業全体を依頼する初回のプロンプトの末尾へ載せる。続行の促しは同じスレッドへの別のターン）"
+        );
+
+    /// <inheritdoc/>
     public override MockAgentLaunch ExpectedLaunch(MockProjectAgentRequest request) =>
         new(
             request.WorkingDirectory,

@@ -45,24 +45,17 @@ internal static class MockAgentDimensions
     /// 製品の不具合で流さない組（実行器・行・見つけた区切り・直す区切り・理由）。網羅しない組の一覧の Pending と、
     /// 流すケースから外す組の両方の正本（アダプタの宣言とは関係しない）
     /// </summary>
-    /// <remarks>直したら（直す区切りで）この一覧から消し、その実行器の期待を行へ足す</remarks>
+    /// <remarks>
+    /// 直したら（直す区切りで）この一覧から消し、その実行器の期待を行へ足す。
+    /// いまは空（次の不具合の置き場として、流すケースと網羅しない組への配線を残す）。
+    /// </remarks>
     public static IReadOnlyList<(
         string Agent,
         string RowId,
         string Finding,
         string FixedIn,
         string Reason
-    )> PendingCases { get; } =
-    [
-        (
-            ApiKey,
-            "prompt-additional-instructions-appended-after-heading",
-            "P3-11b",
-            "修正 I",
-            "API キーの実行器が AdditionalInstructions を読まない不具合（ユーザー判断 2026-11-06）。"
-                + "どのプロンプトへ入れるかの期待は修正 I が足す"
-        ),
-    ];
+    )> PendingCases { get; } = [];
 
     /// <summary>網羅しない組の一覧（前提の性質を持たない実行器 × 行と、製品の不具合で流さない組を手で書いた静的な一覧）</summary>
     /// <remarks>
