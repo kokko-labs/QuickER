@@ -44,5 +44,16 @@ internal static class EngineRegistry
         AI.UI.AttachmentListDimensions.Descriptor,
         AI.UI.ConnectionSettingsDimensions.Descriptor,
         AI.Chat.ChatDialogDimensions.Descriptor,
+        Platform.OsBoundary.ProcessLaunchDimensions.Descriptor,
+        Platform.OsBoundary.ShellPermissionDimensions.Descriptor,
+        Platform.OsBoundary.PathEntranceDimensions.Descriptor,
+        Platform.OsBoundary.AtomicFileDimensions.Descriptor,
+        Platform.OsBoundary.PathContainmentDimensions.Descriptor,
+        Platform.OsBoundary.PathSegmentsDimensions.Descriptor,
+        Gui.Services.Lifecycle.LifecycleDimensions.Descriptor,
+        Gui.Services.Lifecycle.PostExitExhaustiveDimensions.Descriptor,
+        Gui.Services.Lifecycle.ShutdownChainExhaustiveDimensions.Descriptor,
+        Extensibility.FeatureModuleContractDimensions.Descriptor,
+        Db.UI.ProfileStoreDimensions.Descriptor,
     ];
 }

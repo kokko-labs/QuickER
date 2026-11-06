@@ -5,12 +5,10 @@ using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Platform;
 
-/// <summary><see cref="AtomicFile"/> の原子的書き込み（新規作成・置換・失敗時の巻き戻り）を検証するテストクラス</summary>
+/// <summary><see cref="AtomicFile"/> の並行・時間・ハンドルの振る舞い（同時保存・読み取りの粘り・ファイルを掴み続けないこと）を検証するテストクラス</summary>
 /// <remarks>
-/// 図ファイル・設定ファイル・接続プロファイルの 3 経路が共有する単一正本のため、
-/// 「保存先を壊さない」「一時ファイルを残さない」「失敗を握り潰さない」をここで直接押さえる。
-/// 各ストア側のテスト（DocumentFormatTests の SaveAtomic の行 / GuiAppSettingsStoreTests /
-/// SqlConnectionProfileStoreTests）は、経路ごとに委譲が繋がっていることの保証として併存させる。
+/// 書く形 × 保存先 × 失敗の段・読み取りの分類の行は <c>Platform/OsBoundary/AtomicFileRows*.cs</c>（<c>AtomicFileTableTests</c>）へ移した。
+/// ここに残すのは並行・時間・ハンドルの OS の振る舞い。
 /// </remarks>
 public class AtomicFileTests : IDisposable
 {
@@ -19,152 +17,6 @@ public class AtomicFileTests : IDisposable
 
     /// <summary>一時保存先フォルダを消す</summary>
     public void Dispose() => _temp.Dispose();
-
-    /// <summary>保存先が存在しない場合に新規作成し、一時ファイルを残さないことを検証する</summary>
-    [Fact(DisplayName = "WriteAllText: 保存先が無ければ新規作成し .tmp を残さない")]
-    public void WriteAllText_NewFile_CreatesFileWithoutTemporaryLeftover()
-    {
-        var path = Path.Combine(_temp.Path, "new.json");
-
-        // 非 ASCII を含めて、既定の文字コード（BOM なし UTF-8）で往復できることも併せて確認する
-        AtomicFile.WriteAllText(path, "{ \"名前\": \"顧客\" }");
-
-        File.Exists(path).Should().BeTrue();
-        File.ReadAllText(path).Should().Be("{ \"名前\": \"顧客\" }");
-        FindTemporaryLeftovers().Should().BeEmpty("一時ファイルは差し替え後に残らない");
-    }
-
-    /// <summary>既存ファイルを置換し、一時ファイルを残さないことを検証する</summary>
-    [Fact(DisplayName = "WriteAllText: 既存ファイルを置換し .tmp を残さない")]
-    public void WriteAllText_ExistingFile_ReplacesContentWithoutTemporaryLeftover()
-    {
-        var path = Path.Combine(_temp.Path, "existing.json");
-        File.WriteAllText(path, "old");
-
-        AtomicFile.WriteAllText(path, "new");
-
-        File.ReadAllText(path).Should().Be("new");
-        FindTemporaryLeftovers().Should().BeEmpty("一時ファイルは差し替え後に残らない");
-    }
-
-    /// <summary>短い内容で上書きしても前の内容が末尾に残らない（切り詰めではなく差し替え）ことを検証する</summary>
-    /// <remarks>
-    /// 「一時ファイルへ書いて差し替える」実装では自明だが、うっかり保存先へ直接追記・部分上書きする
-    /// 実装へ退行すると、旧内容の尻尾が残って壊れた JSON になる。その退行を検知する。
-    /// </remarks>
-    [Fact(DisplayName = "WriteAllText: 短い内容で上書きしても旧内容が残らない")]
-    public void WriteAllText_ShorterContent_LeavesNoTrailingRemnant()
-    {
-        var path = Path.Combine(_temp.Path, "shrink.json");
-        File.WriteAllText(path, new string('x', 4096));
-
-        AtomicFile.WriteAllText(path, "{}");
-
-        File.ReadAllText(path).Should().Be("{}");
-    }
-
-    /// <summary>差し替えに失敗した場合、元ファイルを無傷のまま残し、一時ファイルを掃除して例外を伝えることを検証する</summary>
-    /// <remarks>
-    /// 保存先を <see cref="FileShare.None"/> で開いたままにして、置換（<see cref="File.Replace"/>）と
-    /// そのフォールバック（<see cref="File.Move(string, string, bool)"/>）の双方を確実に失敗させる。
-    /// 原子的書き込みの本命は「失敗しても保存先が書き込み前のまま」であることなので、ここが要。
-    /// </remarks>
-    [Fact(DisplayName = "WriteAllText: 差し替え失敗時は元ファイル無傷・.tmp なし・例外を伝播")]
-    public void WriteAllText_ReplaceFailure_KeepsOriginalAndRemovesTemporary()
-    {
-        var path = Path.Combine(_temp.Path, "locked.json");
-        File.WriteAllText(path, "original");
-
-        using (
-            var lockedFile = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None)
-        )
-        {
-            var act = () => AtomicFile.WriteAllText(path, "replacement");
-
-            // File.Replace は IOException・フォールバックの File.Move は UnauthorizedAccessException を
-            // 投げる（OS/ランタイム依存）ため、どちらの型でも「伝播していること」を検証する
-            var thrown = act.Should().Throw<Exception>("差し替えの失敗を握り潰さない").Which;
-            (thrown is IOException or UnauthorizedAccessException)
-                .Should()
-                .BeTrue($"IO 系の例外であること（実際: {thrown.GetType().Name}）");
-            FindTemporaryLeftovers().Should().BeEmpty("失敗時に一時ファイルを残さない");
-        }
-
-        File.ReadAllText(path).Should().Be("original", "失敗しても保存先は書き込み前のまま");
-    }
-
-    /// <summary>バイト列を原子的に書き、既存ファイルを置換して一時ファイルを残さないことを検証する</summary>
-    [Fact(DisplayName = "WriteAllBytes: 既存ファイルを置換し .tmp を残さない")]
-    public void WriteAllBytes_ExistingFile_ReplacesContentWithoutTemporaryLeftover()
-    {
-        var path = Path.Combine(_temp.Path, "secret.dat");
-        File.WriteAllBytes(path, [1, 2, 3, 4, 5]);
-
-        AtomicFile.WriteAllBytes(path, [9, 8]);
-
-        File.ReadAllBytes(path).Should().Equal(9, 8);
-        FindTemporaryLeftovers().Should().BeEmpty("一時ファイルは差し替え後に残らない");
-    }
-
-    /// <summary>ストリームへ書いた内容がそのまま保存先になり、一時ファイルを残さないことを検証する</summary>
-    [Fact(DisplayName = "Write: ストリームへ書いた内容で保存先を置換し .tmp を残さない")]
-    public void Write_StreamContent_ReplacesFileWithoutTemporaryLeftover()
-    {
-        var path = Path.Combine(_temp.Path, "image.png");
-        File.WriteAllText(path, "old");
-
-        AtomicFile.Write(path, stream => stream.Write([0x89, 0x50, 0x4E, 0x47]));
-
-        File.ReadAllBytes(path).Should().Equal(0x89, 0x50, 0x4E, 0x47);
-        FindTemporaryLeftovers().Should().BeEmpty("一時ファイルは差し替え後に残らない");
-    }
-
-    /// <summary>書き出し処理が途中で例外を投げても、保存先を無傷のまま残し、一時ファイルを掃除して例外を伝えることを検証する</summary>
-    /// <remarks>
-    /// 画像のエンコーダやブックの保存が途中で失敗する形。保存先へ直接書く実装なら、保存先は書きかけで残る。
-    /// </remarks>
-    [Fact(DisplayName = "Write: 書き出し処理の途中の失敗で元ファイル無傷・.tmp なし・例外を伝播")]
-    public void Write_WriterThrowsMidway_KeepsOriginalAndRemovesTemporary()
-    {
-        var path = Path.Combine(_temp.Path, "book.xlsx");
-        File.WriteAllText(path, "original");
-
-        var act = () =>
-            AtomicFile.Write(
-                path,
-                stream =>
-                {
-                    stream.Write([1, 2, 3]);
-
-                    throw new InvalidOperationException("途中で失敗");
-                }
-            );
-
-        act.Should().Throw<InvalidOperationException>().WithMessage("途中で失敗");
-        File.ReadAllText(path).Should().Be("original", "失敗しても保存先は書き込み前のまま");
-        FindTemporaryLeftovers().Should().BeEmpty("失敗時に一時ファイルを残さない");
-    }
-
-    /// <summary>保存先がディレクトリ等で書き込めない場合も一時ファイルを残さないことを検証する</summary>
-    /// <remarks>
-    /// 例外型は差し替え手段（<see cref="File.Replace"/> / <see cref="File.Move(string, string, bool)"/>）と
-    /// OS 依存で <see cref="IOException"/> / <see cref="UnauthorizedAccessException"/> のどちらにもなる。
-    /// ここで押さえたいのは「握り潰さず伝播し、一時ファイルを残さない」ことなので型は両方許容する。
-    /// </remarks>
-    [Fact(DisplayName = "WriteAllText: 保存先がディレクトリなら .tmp を残さず例外を投げる")]
-    public void WriteAllText_PathIsDirectory_RemovesTemporaryAndThrows()
-    {
-        var path = Path.Combine(_temp.Path, "as-directory");
-        Directory.CreateDirectory(path);
-
-        var act = () => AtomicFile.WriteAllText(path, "{}");
-
-        var thrown = act.Should().Throw<Exception>("書き込みの失敗を握り潰さない").Which;
-        (thrown is IOException or UnauthorizedAccessException)
-            .Should()
-            .BeTrue($"IO 系の例外であること（実際: {thrown.GetType().Name}）");
-        FindTemporaryLeftovers().Should().BeEmpty("失敗時に一時ファイルを残さない");
-    }
 
     /// <summary>2 スレッドの同時保存でも保存先が「誰かの完全な 1 回分」にしかならないことを検証する</summary>
     /// <remarks>
@@ -287,94 +139,6 @@ public class AtomicFileTests : IDisposable
         }
     }
 
-    /// <summary>一時ファイル名に固定名 <c>{path}.tmp</c> を使わない（GUID を挟む）ことを検証する</summary>
-    /// <remarks>
-    /// 固定名へ退行すると、同じファイルを同時保存した 2 プロセスが同じ一時ファイルを奪い合い
-    /// 「書き途中の混線した内容を本体へ差し替える」破損へ昇格する。実際にこのドリフト（1 箇所だけ
-    /// 固定名のまま取り残される）が起きた経緯があるため、固定名の一時ファイルをあらかじめ置いて
-    /// 「他プロセスの一時ファイルを踏まない」ことを直接確かめる。
-    /// </remarks>
-    [Fact(DisplayName = "WriteAllText: 固定名 {path}.tmp を使わない")]
-    public void WriteAllText_DoesNotUseFixedTemporaryName()
-    {
-        var path = Path.Combine(_temp.Path, "guid.json");
-        var fixedTemporaryPath = path + ".tmp";
-        File.WriteAllText(fixedTemporaryPath, "他プロセスが使用中の一時ファイル");
-
-        AtomicFile.WriteAllText(path, "{}");
-
-        File.ReadAllText(path).Should().Be("{}");
-        File.ReadAllText(fixedTemporaryPath)
-            .Should()
-            .Be("他プロセスが使用中の一時ファイル", "一時ファイル名には GUID が挟まる");
-    }
-
-    /// <summary>存在するファイルを読み出せることを検証する</summary>
-    [Fact(DisplayName = "TryReadAllText: 読めたら Loaded と内容を返す")]
-    public void TryReadAllText_ExistingFile_ReturnsLoaded()
-    {
-        var path = Path.Combine(_temp.Path, "readable.json");
-        AtomicFile.WriteAllText(path, "{ \"名前\": \"顧客\" }");
-
-        var status = AtomicFile.TryReadAllText(path, out var contents);
-
-        status.Should().Be(FileReadStatus.Loaded);
-        contents.Should().Be("{ \"名前\": \"顧客\" }");
-    }
-
-    /// <summary>ファイルが無いときに Missing を返すことを検証する</summary>
-    /// <remarks>
-    /// 「保存されたものが無い」は既定値・空データへ落としてよい唯一の分類。ここが
-    /// <see cref="FileReadStatus.Unavailable"/> へ化けると、初回起動で保存が一切できなくなる。
-    /// </remarks>
-    [Fact(DisplayName = "TryReadAllText: ファイルが無ければ Missing を返す")]
-    public void TryReadAllText_MissingFile_ReturnsMissing()
-    {
-        var status = AtomicFile.TryReadAllText(
-            Path.Combine(_temp.Path, "absent.json"),
-            out var contents
-        );
-
-        status.Should().Be(FileReadStatus.Missing);
-        contents.Should().BeNull();
-    }
-
-    /// <summary>親フォルダごと無いときも Missing を返すことを検証する</summary>
-    /// <remarks>
-    /// <see cref="DirectoryNotFoundException"/> も <see cref="IOException"/> の派生なので、
-    /// 分類の順序を誤ると「フォルダごと未作成の初回起動」が読み取り失敗として扱われ、保存が止まる。
-    /// </remarks>
-    [Fact(DisplayName = "TryReadAllText: 親フォルダが無くても Missing を返す")]
-    public void TryReadAllText_MissingDirectory_ReturnsMissing()
-    {
-        var path = Path.Combine(_temp.Path, "not-created", "absent.json");
-
-        AtomicFile.TryReadAllText(path, out _).Should().Be(FileReadStatus.Missing);
-    }
-
-    /// <summary>他プロセスが排他で掴んでいるファイルは Unavailable として返すことを検証する</summary>
-    /// <remarks>
-    /// 「中身はあるのに読めない」を <see cref="FileReadStatus.Missing"/>（＝空）と取り違えると、
-    /// 読み込み → 変更 → 書き込みの保存でその空が確定して登録済みの内容が全消えする。
-    /// 再現は <see cref="FileShare.None"/> で開いたままにするだけで決定的に作れる。
-    /// </remarks>
-    [Fact(DisplayName = "TryReadAllText: 排他で掴まれたファイルは Unavailable を返す")]
-    public void TryReadAllText_LockedFile_ReturnsUnavailable()
-    {
-        var path = Path.Combine(_temp.Path, "locked-read.json");
-        File.WriteAllText(path, "{ \"kept\": true }");
-
-        using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
-        {
-            var status = AtomicFile.TryReadAllText(path, out var contents);
-
-            status.Should().Be(FileReadStatus.Unavailable, "中身は無事なので「空」ではない");
-            contents.Should().BeNull();
-        }
-
-        File.ReadAllText(path).Should().Be("{ \"kept\": true }", "読み取りは中身を変えない");
-    }
-
     /// <summary>読み取りが差し替えと同じ回数・同じバックオフで粘ることを検証する</summary>
     /// <remarks>
     /// <para>
@@ -415,41 +179,6 @@ public class AtomicFileTests : IDisposable
         AtomicFile.WriteAllText(path, "after");
 
         File.ReadAllText(path).Should().Be("after");
-    }
-
-    /// <summary>CreateText が、保存先が無ければ内容どおりのファイルを作り、一時ファイルを残さないことを検証する</summary>
-    [Fact(DisplayName = "CreateText: 保存先が無ければ新規作成し .tmp を残さない")]
-    public void CreateText_NewFile_CreatesFileWithoutTemporaryLeftover()
-    {
-        var path = Path.Combine(_temp.Path, "created.json");
-
-        AtomicFile.CreateText(path, "{ \"名前\": \"顧客\" }");
-
-        File.ReadAllText(path).Should().Be("{ \"名前\": \"顧客\" }");
-        FindTemporaryLeftovers().Should().BeEmpty("一時ファイルは置いた後に残らない");
-    }
-
-    /// <summary>
-    /// CreateText が、保存先が既にあれば置き換えずに <see cref="IOException"/> を投げ、
-    /// 既存の内容と一時ファイルの無さを保つことを検証する
-    /// </summary>
-    /// <remarks>
-    /// 存在を確かめてから書く呼び出し側（モックフォルダの作成・MCP の create_diagram）は、その隙間に別のプロセスが
-    /// 作ったファイルをこれで上書きしない。
-    /// </remarks>
-    [Fact(
-        DisplayName = "CreateText: 保存先が既にあれば置き換えずに IOException を投げ .tmp を残さない"
-    )]
-    public void CreateText_ExistingFile_ThrowsAndKeepsContent()
-    {
-        var path = Path.Combine(_temp.Path, "existing.json");
-        File.WriteAllText(path, "original");
-
-        var act = () => AtomicFile.CreateText(path, "replacement");
-
-        act.Should().Throw<IOException>("置き換えない書き込みは既存のファイルで失敗する");
-        File.ReadAllText(path).Should().Be("original");
-        FindTemporaryLeftovers().Should().BeEmpty("失敗時に一時ファイルを残さない");
     }
 
     /// <summary>一時保存先フォルダに残った AtomicFile 自身の一時ファイル（<c>{path}.{GUID}.tmp</c>）を列挙する</summary>

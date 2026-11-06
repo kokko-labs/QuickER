@@ -14,7 +14,7 @@
 - CSharpier はグローバルにインストールされており、ターミナルから `csharpier format .` を実行できる。
 - codex（Codex CLI）は利用者にフルパスを設定させず、PATH から探して見つけたフルパスで起動する（PATH の相対要素は読み飛ばす）。
 - ビルド警告は可能な限り解消する。
-- 実装後に各機能のコードレビューとテストを行う。実 DB のテスト（tests/QuickER.Tests.Integration）は SQL Server / PostgreSQL / MySQL / Oracle を Testcontainers の実コンテナで動かし（Docker が無ければ自動スキップ・`QUICKER_REQUIRE_DOCKER=1` ではスキップせず失敗）、SQLite は実ファイル DB を使う。localhost / TestDB（Windows 認証）へつなぐのは SqlServerSchemaSyncIntegrationTests の 1 クラスだけで、接続できなければスキップされる。
+- 実装後に各機能のコードレビューとテストを行う。実 DB のテスト（tests/QuickER.Tests.Integration）は SQL Server / PostgreSQL / MySQL / Oracle を Testcontainers の実コンテナで動かし（Docker が無ければ自動スキップ・`QUICKER_REQUIRE_DOCKER=1` ではスキップせず失敗）、SQLite は実ファイル DB を使う。
 - コード修正後は必ずユニットテストを実行し、テストの失敗を見落とさないようにする。
 - 文字列リテラルの扱いは一貫性を重視し、一部の表示文言だけを定数化しない。定数化するなら同種の文言をまとめて整理する。
 - 生成コードは CommunityToolkit など特定 UI フレームワークに依存させず、WPF だけでなく Web 等でも汎用利用できる設計を優先する。

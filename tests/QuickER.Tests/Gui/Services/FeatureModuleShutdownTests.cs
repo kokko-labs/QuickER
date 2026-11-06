@@ -1,123 +1,20 @@
 using System.IO;
 using System.Text.RegularExpressions;
 using AwesomeAssertions;
-using Microsoft.Extensions.DependencyInjection;
-using QuickER.Extensibility;
 using QuickER.Services;
 using QuickER.Tests.Resources;
-using QuickER.Tests.TestDoubles;
 
 namespace QuickER.Tests.Gui.Services;
 
 /// <summary>
-/// メインウィンドウ終了時のモジュール後始末（<see cref="FeatureModuleShutdown"/>）を検証するテストクラス。
+/// メインウィンドウ終了時のモジュール後始末（<see cref="FeatureModuleShutdown"/>）の配線を検証するテストクラス。
 /// </summary>
 /// <remarks>
-/// モジュールの後始末は互いに独立なので、1 つが失敗しても残りへ必ず届かなければならない。
-/// 届かないと、そのモジュールが抱えた常駐プロセス（codex app-server・copilot ランタイム・
-/// claude / dotnet の子プロセス）が孤児として残る。
+/// 全モジュールへの通知・1 つの失敗が残りを止めない・1 回だけ実行の行は OS との境界のエンジンのアプリの一生の表
+/// （<c>Gui/Services/Lifecycle/LifecycleRows.Shutdown.cs</c>）へ移した。ここに残すのは App.xaml.cs の配線のソースの検査（P3-12 の受け持ち）。
 /// </remarks>
 public class FeatureModuleShutdownTests
 {
-    /// <summary>後始末の呼び出しを記録するだけの検証用モジュール</summary>
-    private sealed class RecordingModule : IFeatureModule
-    {
-        private readonly List<string> _log;
-        private readonly bool _throws;
-
-        public RecordingModule(string id, List<string> log, bool throws = false)
-        {
-            Id = id;
-            _log = log;
-            _throws = throws;
-        }
-
-        public string Id { get; }
-
-        public void ConfigureServices(IServiceCollection services) { }
-
-        public IReadOnlyList<FeatureToolbarItem> CreateToolbarItems(IServiceProvider services) =>
-            [];
-
-        public void OnMainWindowClosing(IServiceProvider services)
-        {
-            _log.Add(Id);
-
-            if (_throws)
-            {
-                throw new InvalidOperationException($"{Id} の後始末に失敗");
-            }
-        }
-    }
-
-    /// <summary>全モジュールへ後始末が通知されることを検証する</summary>
-    [Fact(DisplayName = "全モジュールへ後始末が通知される")]
-    public void CloseAll_NotifiesEveryModule()
-    {
-        var log = new List<string>();
-        var reporter = new RecordingShutdownFailureReporter();
-        var modules = new IFeatureModule[]
-        {
-            new RecordingModule("a", log),
-            new RecordingModule("b", log),
-        };
-
-        FeatureModuleShutdown.CloseAll(modules, services: null!, reporter);
-
-        log.Should().Equal("a", "b");
-        reporter.Reports.Should().BeEmpty();
-    }
-
-    /// <summary>
-    /// 途中のモジュールが投げても後続のモジュールが呼ばれ、失敗が段の名前つきで記録されることを検証する。
-    /// </summary>
-    [Fact(DisplayName = "1 つのモジュールが投げても後続のモジュールは呼ばれる")]
-    public void CloseAll_WhenModuleThrows_ContinuesToRemainingModules()
-    {
-        var log = new List<string>();
-        var reporter = new RecordingShutdownFailureReporter();
-        var modules = new IFeatureModule[]
-        {
-            new RecordingModule("ai-chat", log, throws: true),
-            new RecordingModule("mock-generation", log, throws: true),
-            new RecordingModule("code-generation", log),
-        };
-
-        var act = () => FeatureModuleShutdown.CloseAll(modules, services: null!, reporter);
-
-        act.Should().NotThrow();
-        log.Should().Equal("ai-chat", "mock-generation", "code-generation");
-        reporter
-            .Steps.Should()
-            .Equal(
-                "FeatureModule.ai-chat.OnMainWindowClosing",
-                "FeatureModule.mock-generation.OnMainWindowClosing"
-            );
-    }
-
-    /// <summary>
-    /// 後始末の入口が 2 つ（メインウィンドウの Closing とクラッシュ経路）あっても、モジュールの終了処理は
-    /// 1 回しか走らないことを検証する（Closing の後にクラッシュした場合）
-    /// </summary>
-    [Fact(
-        DisplayName = "1 回だけ実行のガード: Closing の後にクラッシュ経路から呼ばれても二重に走らない"
-    )]
-    public void ShutdownOnce_SecondCall_DoesNothing()
-    {
-        var log = new List<string>();
-        var reporter = new RecordingShutdownFailureReporter();
-        var shutdown = new FeatureModuleShutdownOnce(
-            [new RecordingModule("ai-chat", log), new RecordingModule("mock-generation", log)],
-            new ServiceCollection().BuildServiceProvider(),
-            reporter
-        );
-
-        shutdown.CloseAll();
-        shutdown.CloseAll();
-
-        log.Should().Equal("ai-chat", "mock-generation");
-    }
-
     /// <summary>
     /// <c>App.xaml.cs</c> の終了処理が、受け止めを持つ <see cref="FeatureModuleShutdown"/> を
     /// 経由していることをソース上で固定する。

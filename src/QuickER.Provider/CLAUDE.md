@@ -119,7 +119,7 @@
   - PG・MySQL のファクトリは `ToXxxSslMode(...) is { } mode`（null＝代入しない）の形を崩さない。
 - 未定義の列挙値は既定へ落とさず `ArgumentOutOfRangeException`（黙って null へ倒すと、検証を要求したつもりの設定が無検証へ降格する）。
 - プロファイル JSON への永続化は名前（`JsonStringEnumConverter<DbSslMode>`）。整数で保存すると、列挙の途中へメンバーを足した瞬間に保存済みの値が別の水準へ読み替わる。旧整数 JSON は読める。
-- 固定は `DbSslModeConnectionStringTests`（`Default_IsUnspecified_AndEmitsNothing`・SQL Server／Oracle／SQLite のバイト不変）と `SqlConnectionProfileStoreTests` の名前保存・整数互換。mutation 実証済み。
+- 固定は `DbSslModeConnectionStringTests`（`Default_IsUnspecified_AndEmitsNothing`・SQL Server／Oracle／SQLite のバイト不変）と `ProfileStoreTests` の行 `tls-ssl-mode-is-persisted-by-name`（名前保存）・`tls-ssl-mode-integer-spelling-is-readable`（整数互換）。mutation 実証済み。
 
 ## 型表記
 

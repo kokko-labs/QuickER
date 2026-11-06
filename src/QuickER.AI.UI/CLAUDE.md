@@ -16,7 +16,7 @@ AI の回答は外部の入力なので、組み立て（`ChatMarkdownRenderer`�
 - **画像（`LinkInline.IsImage`）は代替テキストだけを出す。** Image も Hyperlink も作らず、外部 URL への通信を起こさない。
 - **HTML は解釈しない。** パイプラインの `DisableHtml()` で HTML として扱わせないうえ、`HtmlBlock` / `HtmlInline` が来ても文字として出す（二重化）。
 - パイプラインは `UsePipeTables` / `UseAutoLinks` / `DisableHtml` の 3 つだけを明示する。`UseAdvancedExtensions` のような一括有効化は、属性の付与・数式・図など審査していない構文まで一度に開くので使わない。
-- ガード：`ChatMarkdownRendererTests`（http / https 以外のリンクは押せない普通の文字になる・開いてよいリンク先は絶対 URL でホストを持つものだけ・リンクは押せて NavigateUri が null でツールチップに実際の URL を出す・画像は代替テキストだけ・インラインとブロックの HTML は文字として出す）・`ShellChatLinkOpenerTests`（http / https 以外の URL は渡されてもシェルへ渡さない・開けなかったときは URL と原因を添えてエラーで知らせる）。mutation 実証済み。
+- ガード：`ChatMarkdownRendererTests`（http / https 以外のリンクは押せない普通の文字になる・開いてよいリンク先は絶対 URL でホストを持つものだけ・リンクは押せて NavigateUri が null でツールチップに実際の URL を出す・画像は代替テキストだけ・インラインとブロックの HTML は文字として出す）・`ProcessLaunchTests`（OS との境界のエンジンの起動の表の行 `external-chat-link-*`：http / https 以外の URL・ユーザー情報を持つ URL は渡されてもシェルへ渡さない・開けなかったときは URL と原因を添えてエラーで知らせる）。mutation 実証済み。
 - 外部のプロセス・URL を開く入口の規則は `src/QuickER.Platform/CLAUDE.md`「外部の起動」を参照する。
 
 ## 組み立ての失敗はテキスト表示へ

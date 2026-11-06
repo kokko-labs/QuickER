@@ -36,7 +36,7 @@ csharpier format .                                       # 整形（グローバ
   - **生成フィクスチャ（.g.cs・*FixtureDefinition・manual partial）は `tests/QuickER.Tests/GeneratedFixture/` の実体を Compile リンクで二重コンパイル**する（実体パスは不動・再生成は QuickER.Tests 側。manual partial は .g.cs と同一アセンブリ必須）
   - SQL Server / PostgreSQL / MySQL / Oracle は Testcontainers の実コンテナを使い、**Docker 不在時は自動スキップ**、**厳格モード `QUICKER_REQUIRE_DOCKER=1` ではスキップせず失敗**する（壊れた Docker 構成がスキップ緑に化けない。CI の ubuntu ジョブと Docker 稼働の開発機で設定する）。この開発機では Docker 稼働＝全件実行・スキップ 0 が正常値
   - SQLite 系は実ファイル DB（SqliteTempDatabase）を使うため Docker 不要＝両ジョブとも常時実行される。一時 DB は `%TEMP%\quicker-it\<実行>\<db>` に置き（TEMP 直下に同じ前置きの名前を並べると 8.3 の短い名前がぶつかって作成が遅くなる）、片付けは 3 段で行う（`SqliteTempRoot`）：その場（Dispose）・実行の終わり（全プールを解放して実行の親フォルダを消す）・次の実行の始め（ロックのファイルを開ける＝終わった実行の残りを消す。走っている実行には触らない）
-- Docker 必須テストには `[Trait("RequiresDocker", "true")]` が付き、`--filter "RequiresDocker=true"`（または `!=`）で選別できる（例外：`Integration/Dialects/SqlServerSchemaSyncIntegrationTests` は localhost の実 SQL Server 接続＝接続不可時スキップ）
+- Docker 必須テストには `[Trait("RequiresDocker", "true")]` が付き、`--filter "RequiresDocker=true"`（または `!=`）で選別できる
 - 生成コードの Roslyn コンパイル検証（`CodegenCaseTests` の行 `compile-*`）は Docker 不要で常時実行される（単発オプションの空振りの検査は `src/QuickER.CodeGen.CSharp/CLAUDE.md`）
 - **生成コードのランタイムテストは「共通基底 1＋バックエンド派生 N＋派生固有 Fact」の形に揃え**、存在しない面は条件スキップでなくサブクラス階層で分ける（→ `tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`）
 - **テストのエンジン**（総当たり・モデルベース・実装先どうしの一致・網羅の計数・夜間の深い実行）の共通の枠組みは `tests/QuickER.Tests/TestSupport/Engines/`（→ `tests/QuickER.Tests/TestSupport/CLAUDE.md`）。同期計画の網と行は → `tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`、実装先どうしの一致と同期のモデルは → `tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`
@@ -161,7 +161,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **出せない型表記は取込完了時に 5 方言すべてで告げる**：黙って入れると後の DDL・同期が全テーブルごと止まる。ガード：`PostgreSqlImportFidelityIntegrationTests.Import_ColumnTypeNotEmittable_IsReported`・`PostgreSqlSchemaImporterTests`。→ `src/QuickER.Provider/CLAUDE.md`「出せない型表記の告知」
 - **取り込んだ型表記はその方言の DDL として再適用できる（不動点）**：再適用できない表記はその図を DDL にも同期にも使えなくする。ガード：5 方言の `*DdlRoundTripIntegrationTests.ImportedSchema_RegeneratedDdl_CanBeReapplied`・`SqlServerDdlRoundTripIntegrationTests`・`OracleDdlRoundTripIntegrationTests`。→ `src/QuickER.Provider/CLAUDE.md`「取り込んだ表記の再適用」
 - **取込・同期のコマンドは `DbCommands.Create` で作る**：生成箇所ごとに書くとタイムアウトが静かに漏れる。ガード：`SchemaCommandTimeoutGuardTests`。→ `src/QuickER.Provider/CLAUDE.md`「コマンドのタイムアウト」
-- **`DbSslMode` の未指定はビルダーへ代入しないことで表し、保存は名前で行う**：既定値の代入で既存の接続文字列が変わり、整数保存では列挙の追加で無言の降格になる。ガード：`DbSslModeConnectionStringTests`・`SqlConnectionProfileStoreTests`。→ `src/QuickER.Provider/CLAUDE.md`「接続文字列の TLS 要求水準」
+- **`DbSslMode` の未指定はビルダーへ代入しないことで表し、保存は名前で行う**：既定値の代入で既存の接続文字列が変わり、整数保存では列挙の追加で無言の降格になる。ガード：`DbSslModeConnectionStringTests`・`ProfileStoreTests`（行 `tls-*`）。→ `src/QuickER.Provider/CLAUDE.md`「接続文字列の TLS 要求水準」
 - **方言ごとの取込の事実（PG の `pg_attribute`・Oracle の ENABLED の制約と除外する表・SQLite の PRAGMA と主キーの補正・SQL Server のテンポラル表・MySQL の範囲外の外部キー）**：外すと列ゼロ・DB に無い保証・取込全体の失敗・誤結合が起きる。ガード：`OracleImportFidelityIntegrationTests`・`SqliteImportFidelityIntegrationTests`・`MySqlImportFidelityIntegrationTests`・`SqlServerImportFidelityIntegrationTests`・`PostGisImportIntegrationTests`。→ `src/QuickER.Provider.PostgreSql/CLAUDE.md`「取込」ほか各方言の「取込」
 
 ### 型表記
@@ -353,9 +353,9 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 ### GUI（アプリ）
 
 - **完了通知は「外部とのやり取り＝モーダル／図ファイル自身の読み書き＝ステータスバー」で使い分け、失敗は常にモーダル、内訳つきは `ShowInformationDetails`、判断材料の一覧は `ConfirmWarningDetails`（全件）**：提示先が割れる／MessageBox がスクロールせずボタンが画面外へ出る。→ `src/QuickER.Gui/CLAUDE.md`「完了通知の提示先」
-- **更新フィードの環境変数による差し替えは `#if DEBUG` 限定、更新の適用は通常の終了経路の後（`PostExitActions`）だけ**：配布ビルドで任意フィードが更新の受け口になり、Closing を飛ばすと自動保存が走らない。ガード：`UpdateServiceTests`・`PostExitActionsTests`。→ `src/QuickER.Gui/CLAUDE.md`「配布と自動更新」
-- **再起動の要求と起動処理を分け、再起動の直前に単一インスタンスの座を手放す**：適用が失敗すると QuickER が閉じたまま戻らず、座を持ったままだと新しいインスタンスが黙って終わる。ガード：`PostExitActionsTests`・`SingleInstanceGuardTests`。→ `src/QuickER.Gui/CLAUDE.md`「再起動と単一インスタンス」
-- **アプリ終了の連鎖は段ごとに `ShutdownSteps.Run` を通し、終了条件は `ShutdownMode="OnMainWindowClose"` ＋ `MainWindow` の明示で紐づける**：前段の失敗で子プロセスが孤児になり、Hide されたウィンドウだけが残る。クラッシュ経路も同じ後始末を通す。ガード：`ShutdownStepsTests`・`AppShutdownModeTests`・`CrashHandlingServiceTests`。→ `src/QuickER.Gui/CLAUDE.md`「終了の連鎖」
+- **更新フィードの環境変数による差し替えは `#if DEBUG` 限定、更新の適用は通常の終了経路の後（`PostExitActions`）だけ**：配布ビルドで任意フィードが更新の受け口になり、Closing を飛ばすと自動保存が走らない。ガード：`LifecycleTests`（行 `update-*`・`post-exit-*`）・`PostExitExhaustiveTests`。→ `src/QuickER.Gui/CLAUDE.md`「配布と自動更新」
+- **再起動の要求と起動処理を分け、再起動の直前に単一インスタンスの座を手放す**：適用が失敗すると QuickER が閉じたまま戻らず、座を持ったままだと新しいインスタンスが黙って終わる。ガード：`PostExitExhaustiveTests`・`LifecycleTests`（行 `post-exit-*`）・`SingleInstanceGuardTests`。→ `src/QuickER.Gui/CLAUDE.md`「再起動と単一インスタンス」
+- **アプリ終了の連鎖は段ごとに `ShutdownSteps.Run` を通し、終了条件は `ShutdownMode="OnMainWindowClose"` ＋ `MainWindow` の明示で紐づける**：前段の失敗で子プロセスが孤児になり、Hide されたウィンドウだけが残る。クラッシュ経路も同じ後始末を通す。ガード：`ShutdownChainExhaustiveTests`・`LifecycleTests`（行 `steps-*`・`modules-*`・`crash-*`）・`AppShutdownModeTests`・`CrashHandlingServiceTests`。→ `src/QuickER.Gui/CLAUDE.md`「終了の連鎖」
 - **モーダルは必ず `DialogOwner.Resolve()` のオーナー付きで出し、実行中フラグを落としてから出す**：モードレスの機能ウィンドウの背面へ回り込んで画面が固まって見える。`PasswordBoxBehavior` の DP 既定値は null 必須。ガード：`DialogOwnerTests`・`PasswordBoxBehaviorTests`。→ `src/QuickER.Gui.Common/CLAUDE.md`「モーダルはオーナー付き」「PasswordBoxBehavior の DP 既定値」
 - **自動整列（格子・階層・力学・追記）は図の形に依らず、決定的で表を重ねず、追記は既存を動かさない**：同じ図の配置が開くたびに変わる・表が重なる・追記で既存が崩れる。ガード：`AutoLayoutScenarioTests`。→ `src/QuickER.Gui/Services/CLAUDE.md`「自動整列の共通の性質」
 
@@ -397,7 +397,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **フィーチャーモジュール方式：Gui は機能の型を知らず、依存は「プラグイン → 契約 ← ホスト」、`FeatureToolbarItem` の BeginsGroup は起動時のみ反映**：機能プロジェクトが Gui に混ざる／実行中に変えても折返しが変わらない。ガード：`FeatureToolbarGroupTests`。→ `src/QuickER.Extensibility/CLAUDE.md`「フィーチャーモジュール方式」「FeatureToolbarItem」
 - **`IErDiagramHost` の能力（IsDirty・DiagramRevision・ReplaceDiagram・ReplaceQueries・イベント）と、列リネーム時のクエリ条件追従（`QueryConditionRenameFollower`、読めない新名は書き換えない）**：機能側が図を壊す／Undo で条件が戻らない。ガード：`QueryConditionRenameFollowerTests`・`MainViewModelErDiagramHostTests`。→ `src/QuickER.Extensibility/CLAUDE.md`「IErDiagramHost」「列リネームのクエリ条件追従」
 - **同梱構成は `IncludeDbToolModules` / `IncludeAiModules` / `IncludeCodeGenModules` で独立に外せる**：外した構成で依存が残る。→ `src/QuickER.Extensibility/CLAUDE.md`「同梱構成」
-- **接続プロファイルの暗号ファイルは「消すのは JSON の書き込みの前・書くのは後」**：新しい接続先と古いパスワードの組が残り、前の接続先の資格情報を別のサーバーへ送る。ガード：`SqlConnectionProfileSecretPairingTests`・`DbConnectionDialogViewModelTests`。→ `src/QuickER.Db.UI/CLAUDE.md`「接続プロファイルの暗号ファイルの順序」
+- **接続プロファイルの暗号ファイルは「消すのは JSON の書き込みの前・書くのは後」**：新しい接続先と古いパスワードの組が残り、前の接続先の資格情報を別のサーバーへ送る。ガード：`ProfileStoreTests`（行 `pairing-*`）・`DbConnectionDialogViewModelTests`。→ `src/QuickER.Db.UI/CLAUDE.md`「接続プロファイルの暗号ファイルの順序」
 
 ### MCP
 
@@ -411,12 +411,12 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 
 ### AI チャット
 
-- **Copilot のシェル許可は、パスが取れないなら全要素が許可リスト（`dotnet` のみ）のときだけ承認し、URL 参照・書き込みリダイレクトは両方の枝で拒否する**：緩めると `dotnet build && curl … | sh` のような連結が通る。`dotnet` 自体が外へ出る経路は塞げない（残余）。ガード：`CopilotWorkspacePermissionTests`。→ `src/QuickER.AI/CLAUDE.md`「Copilot のシェル許可」
+- **Copilot のシェル許可は、パスが取れないなら全要素が許可リスト（`dotnet` のみ）のときだけ承認し、URL 参照・書き込みリダイレクトは両方の枝で拒否する**：緩めると `dotnet build && curl … | sh` のような連結が通る。`dotnet` 自体が外へ出る経路は塞げない（残余）。ガード：`ShellPermissionTests`。→ `src/QuickER.AI/CLAUDE.md`「Copilot のシェル許可」
 - **内蔵チャットの CLI バックエンドは作業フォルダを `%TEMP%\QuickER\{backend}\<guid>` へ隔離し、Codex は read-only を明示する**：実行フォルダが承認なしで読まれる。モック生成側は出力先へ書くので workspace-write。ガード：`BackendWorkingDirectoryTests`・`CodexAppServerClientStartInfoTests`。→ `src/QuickER.AI/CLAUDE.md`「CLI バックエンドの作業フォルダ」
 - **チャットエンジン 4 種のツール実行と活動通知は `ChatToolInvocation` を通す**：通知を保護しないと購読側の例外で実行済みの呼び出しに「未実行」の結果が積まれ、AI が二重に操作する。引数は `Func<string>` で try の内側で取り出す。ガード：`ChatToolInvocationTests`・`ChatEngineContractTests`。→ `src/QuickER.AI/CLAUDE.md`「ツール実行と活動通知」
 - **チャットエンジン 4 種の共通の契約は 4 エンジンへ同じ行で流し、違いはアダプタの出典つきの宣言に置く（持たない組は手で書いた一覧）**：エンジンごとに別々に書くと 1 エンジンだけの退行を見逃し、宣言を書き換えると行が黙って外れる。ガード：`ChatEngineContractTests`・`ChatDriverTests`。→ `src/QuickER.AI/CLAUDE.md`「チャットエンジンの共通の契約」
 - **チャットのダイアログは、ターンの外に応答中の吹き出しを残さず、ターン中に接続方式を変えず、切り替えられない状態の切替を確認なしで断る**：外すと吹き出しが Markdown へ戻らない・実行中のエンジンを置き去りにする・開始待ちに会話を消す確認が出る。ガード：`ChatDialogTests`。→ `src/QuickER.AI.Chat/CLAUDE.md`「ダイアログの状態の不変条件」
-- **回答の Markdown 表示は、リンクを http / https に限り、画像を読み込まず、HTML を解釈しない**：AI の回答は外部入力で、他のリンクは UNC などで外部へ接続する。ガード：`ChatMarkdownRendererTests`・`ShellChatLinkOpenerTests`。→ `src/QuickER.AI.UI/CLAUDE.md`「回答の Markdown 表示」
+- **回答の Markdown 表示は、リンクを http / https に限り、画像を読み込まず、HTML を解釈しない**：AI の回答は外部入力で、他のリンクは UNC などで外部へ接続する。ガード：`ChatMarkdownRendererTests`・`ProcessLaunchTests`（行 `external-chat-link-*`）。→ `src/QuickER.AI.UI/CLAUDE.md`「回答の Markdown 表示」
 - **回答の組み立てに失敗したら、その吹き出しだけテキスト表示へ落とす（深さは再帰なしで測り上限 32）**：インラインの深い入れ子はスタックを使い切ってプロセスごと落ちる。ガード：`AssistantMessageViewTests`・`ChatMarkdownRendererTests`。→ `src/QuickER.AI.UI/CLAUDE.md`「組み立ての失敗はテキスト表示へ」
 - **吹き出しを内容の幅へ縮めるときは先に部品を測り、内側の余白は覚えずに毎回読む**：`PagePadding` が最初のレイアウト中に置き換わり、先に幅を決めると最後の文字が次の行へ落ちる。ガード：`AssistantMessageViewTests`。→ `src/QuickER.AI.UI/CLAUDE.md`「吹き出しの幅」
 - **保存済みの API キーは「無い／読めた／読めない」を分け、読めないキーを空で上書きも削除もしない**：保存のオフで暗号ファイルが消える。ガード：`ApiKeyStoreTests`・`ConnectionSettingsTests`（行 `failure-unreadable-api-key-is-neither-overwritten-nor-deleted` と不変条件 1）。→ `src/QuickER.AI.UI/CLAUDE.md`「保存済みの API キー」
@@ -430,17 +430,17 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **最終 `dotnet build` は自分の `.sln` を明示し、MSBuild の自動 import を無効化し、直前に `obj` / `bin` を削除する**：AI が書いた obj のターゲットや rsp がビルドで実行される。祖先の global.json / NuGet.Config は無効化しない。ガード：`DotnetBuildRunnerArgumentsTests`・`MockProjectBuildBoundaryTests`。→ `src/QuickER.AI.Mock/CLAUDE.md`「最終ビルド」
 - **成果物の探索はプロジェクトフォルダ配下だけを、アクセス拒否を無視して `MockProjectFiles` で走査する**：権限のないサブフォルダ 1 つでランが落ちる。ガード：`MockProjectFilesTests`。→ `src/QuickER.AI.Mock/CLAUDE.md`「成果物の探索」
 - **最終ビルド前の変更検知は、ホワイトリスト差分と内容 SHA-256 で行い、読めないフォルダ・リンクは毎回「変更」に出す**：サンドボックス外のビルドで AI のコードが走る。確認手段が null ならビルドしない。ガード：`MockProjectBuildBoundaryTests`・`MockProjectBuildBoundaryAclTests`。→ `src/QuickER.AI.Mock/CLAUDE.md`「最終ビルド前の変更検知」
-- **API キー方式の提出パス（`ResolveEmitPath`）は拡張子ホワイトリストのまま保ち、保護フォルダは綴りの別名にも負けない形で照合する**：拒否リストに戻すと自動 import でビルドが任意コード実行になる。ガード：`MockProjectEmitToolsTests`。→ `src/QuickER.AI.Mock/CLAUDE.md`「提出パスの判定」
+- **API キー方式の提出パス（`ResolveEmitPath`）は拡張子ホワイトリストのまま保ち、保護フォルダは綴りの別名にも負けない形で照合する**：拒否リストに戻すと自動 import でビルドが任意コード実行になる。ガード：`PathEntranceTests`（行 `emit-*`・`find-blocked-folder-*`）・`MockProjectEmitToolsTests`。→ `src/QuickER.AI.Mock/CLAUDE.md`「提出パスの判定」
 - **モックプロジェクト生成の実行器 4 種は権限を QuickER 側で絞らない（API キーだけ境界あり）**：権限差の正本は docs/ai-chat.md の「注意」節。→ `src/QuickER.AI.Mock/CLAUDE.md`「実行器 4 種」
 
 ### OS との境界
 - **アプリ設定・作業状態の保存先はローカル（`AppDataPaths.LocalRoot`）の 1 つだけで、ローミングへ置かない**：DPAPI の秘密が他端末へ複製されても復号できない。ガード：`AppDataPathGuardTests`。→ `src/QuickER.Platform/CLAUDE.md`「保存先」
-- **`.cmd` / `.bat` シムの起動は必ず `BatchShimProcessGuard` を通す**：引数の `"` や `&` が cmd の再解釈で引用の外へ抜け、任意コマンドの実行につながる。ガード：`BatchShimProcessGuardTests`・`PathExecutableResolverTests`・`BatchShimTrailingNameTests`。→ `src/QuickER.Platform/CLAUDE.md`「.cmd / .bat シムの起動」
-- **外部のプロセス・URL・フォルダを開く処理は `ExternalLauncher` を通す**：入口ごとに書くと URL のスキーム制限やフルパス解決が食い違う。ガード：`ProcessLaunchGuardTests`・`ExternalLauncherTests`。→ `src/QuickER.Platform/CLAUDE.md`「外部の起動」
+- **`.cmd` / `.bat` シムの起動は必ず `BatchShimProcessGuard` を通す**：引数の `"` や `&` が cmd の再解釈で引用の外へ抜け、任意コマンドの実行につながる。ガード：`ProcessLaunchTests`（起動の表の行 `shim-*`・`resolve-*`）・`BatchShimProcessGuardTests`・`BatchShimTrailingNameTests`。→ `src/QuickER.Platform/CLAUDE.md`「.cmd / .bat シムの起動」
+- **外部のプロセス・URL・フォルダを開く処理は `ExternalLauncher` を通す**：入口ごとに書くと URL のスキーム制限やフルパス解決が食い違う。ガード：`ProcessLaunchGuardTests`・`ProcessLaunchTests`（行 `external-*`）。→ `src/QuickER.Platform/CLAUDE.md`「外部の起動」
 - **パスがフォルダの中にあるかの判定は `PathContainment` だけが持つ**：前方一致を入口ごとに書くと末尾の区切りの扱いが食い違い、ドライブ直下で配下を 1 件も承認しない。ガード：`PathContainmentTests`・`PathContainmentCallerFuzzTests`・`PathPrefixGuardTests`。→ `src/QuickER.Platform/CLAUDE.md`「パスがフォルダの中にあるかの判定」
 - **利用者・AI から受け取った名前をパスに使う入口の判定は `PathSegments` だけが持つ**：入口ごとに持つと断る形が食い違う。ガード：`PathSegmentsTests`・`PathSegmentEntranceFuzzTests`・`PathValidationGuardTests`。→ `src/QuickER.Platform/CLAUDE.md`「パスの名前の判定」
-- **ファイルへの書き込みは `AtomicFile` を通し、UTF-8 は `TextEncodings` だけが作る**：素の書き込みは途中で落ちると利用者のファイルが中途半端な内容で残る。ガード：`RawFileWriteGuardTests`・`Utf8EncodingGuardTests`・`AtomicFileTests`。→ `src/QuickER.Platform/CLAUDE.md`「ファイルの書き込みと文字コード」
-- **原子的な書き込みの一時ファイルの名前は `AtomicFile.TemporaryPathFor` だけが組み立てる**：元の名前をそのまま付けると長い名前の保存が必ず失敗する。ガード：`AtomicFileNamingAndMetadataTests`・`UnboundedBinaryReadToFileTests`。→ `src/QuickER.Platform/CLAUDE.md`「一時ファイルの名前」
+- **ファイルへの書き込みは `AtomicFile` を通し、UTF-8 は `TextEncodings` だけが作る**：素の書き込みは途中で落ちると利用者のファイルが中途半端な内容で残る。ガード：`RawFileWriteGuardTests`・`Utf8EncodingGuardTests`・`AtomicFileTableTests`・`AtomicFileTests`。→ `src/QuickER.Platform/CLAUDE.md`「ファイルの書き込みと文字コード」
+- **原子的な書き込みの一時ファイルの名前は `AtomicFile.TemporaryPathFor` だけが組み立てる**：元の名前をそのまま付けると長い名前の保存が必ず失敗する。ガード：`AtomicFileTableTests`（行 `atomic-temporary-path-*`・`atomic-is-temporary-file-name-*`）・`AtomicFileNamingAndMetadataTests`・`UnboundedBinaryReadToFileTests`。→ `src/QuickER.Platform/CLAUDE.md`「一時ファイルの名前」
 
 ### 設定
 - **設定ファイルの保存は型が知らないキーを引き継ぎ、読み直しが `Unavailable` のときは書かない**：古い版で 1 度保存しただけで新しい版のキーが消える。ガード：`SettingsStoreTests`（行 `save-unknown-*`・`save-when-reread-is-unavailable-writes-nothing`）。→ `src/QuickER.Settings/CLAUDE.md`「知らないキーの引き継ぎ」

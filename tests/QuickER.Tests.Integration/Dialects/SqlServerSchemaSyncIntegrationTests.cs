@@ -11,37 +11,25 @@ using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.Dialects;
 
-/// <summary>実 SQL Server に対しスキーマ同期を end-to-end で検証する統合テストクラス</summary>
+/// <summary>実 SQL Server（Testcontainers のコンテナ）に対しスキーマ同期を end-to-end で検証する統合テストクラス</summary>
 /// <remarks>
-/// localhost / TestDB / Windows 認証へ接続できない環境では各テストをスキップする
-/// テスト用オブジェクトは <c>_erd_sync_test_</c> プレフィクスで作成し、前後で必ず DROP する
+/// コレクション共有のコンテナ上に専用データベース <c>quicker_schema_sync_test</c> を作って使う
+/// （取込は DB 全体を読んで件数を表明するため、ほかのクラスが表を残し得る master は使わない）。
+/// テスト用オブジェクトは <c>_erd_sync_test_</c> プレフィクスで作成し、前後で必ず DROP する。
+/// データベース自体は消さない（コンテナはコレクションの終わりに破棄され、次の実行へ持ち越さない）。
 /// </remarks>
+[Collection(SqlServerContainerCollection.Name)]
 [Trait("Category", "Integration")]
-public class SqlServerSchemaSyncIntegrationTests : IAsyncLifetime
+[Trait("RequiresDocker", "true")]
+public class SqlServerSchemaSyncIntegrationTests(SqlServerContainerFixture fixture) : IAsyncLifetime
 {
     /// <summary>テスト全体で共有するキャンセルトークン</summary>
     private static readonly CancellationToken TestCancellationToken = TestContext
         .Current
         .CancellationToken;
 
-    /// <summary>テスト対象 DB への接続設定</summary>
-    /// <remarks>
-    /// コマンドタイムアウトは既定（60 秒）より長く取る。フルスイート並列実行では取込・同期の 1 文が
-    /// 負荷で伸びることがあり、既定のままだとタイムアウトによる偽赤が出る。**タイムアウトはスキップにしない**
-    /// （本物の回帰を隠すため）ので、余裕を持たせるのが正しい対処になる。
-    /// </remarks>
-    private static readonly SqlConnectionSettings Settings = new()
-    {
-        Server = "localhost",
-        Database = "TestDB",
-        AuthMode = SqlAuthMode.Windows,
-        TrustServerCertificate = true,
-        CommandTimeoutSeconds = 120,
-    };
-
-    /// <summary>スキップ理由（localhost の実 SQL Server が要る＝Docker 不使用の第 3 機構）</summary>
-    private const string ServerUnavailableReason =
-        "SQL Server (localhost / TestDB / Windows auth) is not available.";
+    /// <summary>専用データベース名（ほかのクラスの DB 名と重ならない）</summary>
+    private const string DatabaseName = "quicker_schema_sync_test";
 
     /// <summary>親テーブル名（FK の参照先）</summary>
     private const string ParentTable = "_erd_sync_test_parent";
@@ -52,41 +40,53 @@ public class SqlServerSchemaSyncIntegrationTests : IAsyncLifetime
     /// <summary>主キー変更の検証に使う単独テーブル名（参照 FK を持たない）</summary>
     private const string ItemTable = "_erd_sync_test_item";
 
-    /// <summary>テスト DB へ接続可能かどうか（不可ならテストをスキップする）</summary>
-    private bool _serverAvailable;
+    /// <summary>テスト対象 DB（コンテナ上の専用データベース）への接続設定</summary>
+    /// <remarks>
+    /// コマンドタイムアウトは既定（60 秒）より長く取る。フルスイート並列実行では取込・同期の 1 文が
+    /// 負荷で伸びることがあり、既定のままだとタイムアウトによる偽赤が出る。**タイムアウトはスキップにしない**
+    /// （本物の回帰を隠すため）ので、余裕を持たせるのが正しい対処になる。
+    /// </remarks>
+    private SqlConnectionSettings Settings { get; set; } = new();
 
-    /// <summary>接続可否を判定し、可能ならテスト用オブジェクトを事前に削除する</summary>
+    /// <summary>専用 DB を（無ければ）作って接続設定を組み、テスト用オブジェクトを事前に削除する</summary>
     public async ValueTask InitializeAsync()
     {
-        try
+        if (!fixture.IsAvailable)
         {
-            await using var conn = new SqlConnection(Settings.Build());
-
-            await conn.OpenAsync(TestCancellationToken);
-            _serverAvailable = true;
-        }
-        catch
-        {
-            _serverAvailable = false;
+            return;
         }
 
-        if (_serverAvailable)
+        await fixture.ExecuteAsync(
+            $"IF DB_ID(N'{DatabaseName}') IS NULL CREATE DATABASE [{DatabaseName}];",
+            TestCancellationToken
+        );
+
+        var b = new SqlConnectionStringBuilder(fixture.ConnectionString);
+        Settings = new SqlConnectionSettings
         {
-            await DropTestObjectsAsync();
-        }
+            Server = b.DataSource,
+            Database = DatabaseName,
+            AuthMode = SqlAuthMode.SqlServer,
+            UserId = b.UserID,
+            Password = b.Password,
+            TrustServerCertificate = true,
+            CommandTimeoutSeconds = 120,
+        };
+
+        await DropTestObjectsAsync();
     }
 
     /// <summary>テスト終了時にテスト用オブジェクトを削除する</summary>
     public async ValueTask DisposeAsync()
     {
-        if (_serverAvailable)
+        if (fixture.IsAvailable)
         {
             await DropTestObjectsAsync();
         }
     }
 
     /// <summary>テスト用の親子テーブルを依存順に DROP する</summary>
-    private static async Task DropTestObjectsAsync()
+    private async Task DropTestObjectsAsync()
     {
         await using var conn = new SqlConnection(Settings.Build());
 
@@ -106,7 +106,7 @@ IF OBJECT_ID(N'{ItemTable}', N'U') IS NOT NULL DROP TABLE [{ItemTable}];";
     [Fact(DisplayName = "[Integration] AddTable / AddColumn / AddForeignKey が実 DB に適用される")]
     public async Task FullSync_AppliesChanges()
     {
-        Assert.SkipUnless(_serverAvailable, ServerUnavailableReason);
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
 
         // ---------- 1) ER 図側の期待状態を構築 ----------
         var parent = new Entity { TableName = ParentTable };
@@ -236,7 +236,7 @@ IF OBJECT_ID(N'{ItemTable}', N'U') IS NOT NULL DROP TABLE [{ItemTable}];";
     )]
     public async Task DestructiveSync_AppliesChanges()
     {
-        Assert.SkipUnless(_serverAvailable, ServerUnavailableReason);
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
 
         var setup =
             $@"
@@ -344,7 +344,7 @@ CREATE TABLE [{ChildTable}] (
     )]
     public async Task DescriptionSync_RoundTrip()
     {
-        Assert.SkipUnless(_serverAvailable, ServerUnavailableReason);
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
 
         // ---------- 1) 期待状態 (説明付き) ----------
         var parent = new Entity { TableName = ParentTable, Description = "親テーブルの説明" };
@@ -481,7 +481,7 @@ CREATE TABLE [{ChildTable}] (
     )]
     public async Task PrimaryKeySync_MovesPrimaryKeyToAnotherColumn()
     {
-        Assert.SkipUnless(_serverAvailable, ServerUnavailableReason);
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
 
         await RunScriptAsync(
             $@"
@@ -566,7 +566,7 @@ INSERT INTO [{ItemTable}] ([Code], [Id]) VALUES (N'A-002', 2);"
     )]
     public async Task AlterColumn_OnForeignKeyColumn_RebuildsDependentForeignKey()
     {
-        Assert.SkipUnless(_serverAvailable, ServerUnavailableReason);
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
 
         await RunScriptAsync(
             $@"
@@ -685,7 +685,7 @@ INSERT INTO [{ChildTable}] ([Id], [ParentCode]) VALUES (1, N'P-1');"
     )]
     public async Task PrimaryKeyChange_BreakingDependentForeignKey_RollsBack()
     {
-        Assert.SkipUnless(_serverAvailable, ServerUnavailableReason);
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
 
         await RunScriptAsync(
             $@"
@@ -790,7 +790,7 @@ INSERT INTO [{ChildTable}] ([Id], [ParentId]) VALUES (1, 1);"
     [Fact(DisplayName = "[Integration] UniqueConstraint: 追加・削除が実 DB へ反映される")]
     public async Task UniqueConstraintSync_AddsAndDrops()
     {
-        Assert.SkipUnless(_serverAvailable, ServerUnavailableReason);
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
 
         await RunScriptAsync(
             $@"
@@ -891,7 +891,7 @@ INSERT INTO [{ItemTable}] ([Code], [Id]) VALUES (N'A-001', 1);"
     )]
     public async Task AlterColumn_OnUniqueConstraintColumn_RebuildsUniqueConstraint()
     {
-        Assert.SkipUnless(_serverAvailable, ServerUnavailableReason);
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
 
         await RunScriptAsync(
             $@"
@@ -976,7 +976,7 @@ INSERT INTO [{ItemTable}] ([Code], [Id]) VALUES (N'A-001', 1);"
         new() { LiveEntities = result.Entities, LiveRelationships = result.Relationships };
 
     /// <summary>セットアップ用の T-SQL をそのまま実行する</summary>
-    private static async Task RunScriptAsync(string sql)
+    private async Task RunScriptAsync(string sql)
     {
         await using var conn = new SqlConnection(Settings.Build());
 
@@ -987,7 +987,7 @@ INSERT INTO [{ItemTable}] ([Code], [Id]) VALUES (N'A-001', 1);"
     }
 
     /// <summary>単一の int スカラーを取得する（件数検証用）</summary>
-    private static async Task<int> QueryScalarIntAsync(string sql)
+    private async Task<int> QueryScalarIntAsync(string sql)
     {
         await using var conn = new SqlConnection(Settings.Build());
 
@@ -998,7 +998,7 @@ INSERT INTO [{ItemTable}] ([Code], [Id]) VALUES (N'A-001', 1);"
     }
 
     /// <summary>主キー変更の検証用テーブルの行を取得する（データ温存の確認用）</summary>
-    private static async Task<List<(string Code, int Id)>> QueryItemRowsAsync()
+    private async Task<List<(string Code, int Id)>> QueryItemRowsAsync()
     {
         var rows = new List<(string Code, int Id)>();
 

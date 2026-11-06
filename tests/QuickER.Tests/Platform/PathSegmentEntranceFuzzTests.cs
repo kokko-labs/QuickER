@@ -6,7 +6,9 @@ using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Platform;
 using QuickER.Provider.SqlServer;
+using QuickER.Tests.Platform.OsBoundary;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 using CodeGenStrings = QuickER.CodeGen.CSharp.Resources.Strings;
 
 namespace QuickER.Tests.Platform;
@@ -36,53 +38,13 @@ namespace QuickER.Tests.Platform;
 /// </remarks>
 public sealed class PathSegmentEntranceFuzzTests : IDisposable
 {
-    /// <summary>1 区間の名前として断るべき形</summary>
+    /// <summary>1 区間の名前として断るべき形（一覧は <see cref="PathSegmentForms"/>）</summary>
     private static readonly (string Form, PathSegmentViolation Violation)[] SegmentForms =
-    [
-        (".", PathSegmentViolation.DotSegment),
-        ("..", PathSegmentViolation.DotSegment),
-        ("a/b", PathSegmentViolation.Separator),
-        ("a\\b", PathSegmentViolation.Separator),
-        // 2 文字目の ":" はドライブ指定（相対パスの入口では Rooted）になるので、3 文字目に置く
-        ("ab:c", PathSegmentViolation.InvalidCharacter),
-        ("a*b", PathSegmentViolation.InvalidCharacter),
-        ("a?b", PathSegmentViolation.InvalidCharacter),
-        ("a<b", PathSegmentViolation.InvalidCharacter),
-        ("a>b", PathSegmentViolation.InvalidCharacter),
-        ("a|b", PathSegmentViolation.InvalidCharacter),
-        ("a\"b", PathSegmentViolation.InvalidCharacter),
-        ("a\u0001b", PathSegmentViolation.InvalidCharacter),
-        (" a", PathSegmentViolation.LeadingWhitespace),
-        ("\u3000a", PathSegmentViolation.LeadingWhitespace),
-        ("a.", PathSegmentViolation.TrailingDotOrWhitespace),
-        ("a ", PathSegmentViolation.TrailingDotOrWhitespace),
-        ("GENERA~1", PathSegmentViolation.Tilde),
-        ("a~b", PathSegmentViolation.Tilde),
-        ("CON", PathSegmentViolation.ReservedDeviceName),
-        ("nul", PathSegmentViolation.ReservedDeviceName),
-        ("COM1", PathSegmentViolation.ReservedDeviceName),
-        ("LPT9", PathSegmentViolation.ReservedDeviceName),
-        ("CONIN$", PathSegmentViolation.ReservedDeviceName),
-        ("COM¹", PathSegmentViolation.ReservedDeviceName),
-        ("AUX.txt", PathSegmentViolation.ReservedDeviceName),
-        (new string('a', PathSegments.MaxLength + 1), PathSegmentViolation.TooLong),
-    ];
+        PathSegmentForms.EntranceSegmentForms();
 
-    /// <summary>相対パスとしてだけ断るべき形（先頭・区間のつながり）</summary>
+    /// <summary>相対パスとしてだけ断るべき形（先頭・区間のつながり。一覧は <see cref="PathSegmentForms"/>）</summary>
     private static readonly (string Form, PathSegmentViolation Violation)[] RelativeForms =
-    [
-        ("/a", PathSegmentViolation.Rooted),
-        ("\\a", PathSegmentViolation.Rooted),
-        ("C:\\a", PathSegmentViolation.Rooted),
-        ("C:a", PathSegmentViolation.Rooted),
-        ("a//b", PathSegmentViolation.Empty),
-        ("a/./b", PathSegmentViolation.DotSegment),
-        ("a/../b", PathSegmentViolation.DotSegment),
-        ("a/ b", PathSegmentViolation.LeadingWhitespace),
-        ("a /b", PathSegmentViolation.TrailingDotOrWhitespace),
-        ("a/CON/b", PathSegmentViolation.ReservedDeviceName),
-        ("a/x~1", PathSegmentViolation.Tilde),
-    ];
+        PathSegmentForms.EntranceRelativeForms();
 
     /// <summary>断らない名前（1 区間）</summary>
     private static readonly string[] AcceptedNames =
@@ -291,27 +253,7 @@ public sealed class PathSegmentEntranceFuzzTests : IDisposable
 
         foreach (var entrance in Entrances())
         {
-            var cases = SegmentForms
-                .Where(item => entrance.Applies(item.Violation, item.Form))
-                .Select(item => (Input: entrance.Build(item.Form), item.Form, item.Violation));
-
-            if (entrance.Relative)
-            {
-                // 相対パスの入口は、先頭・区間のつながりの形をそのまま（提出のパスは末尾にファイル名を付けて）流す
-                cases = cases.Concat(
-                    RelativeForms.Select(item =>
-                        (
-                            Input: entrance.Name == "EmitPath"
-                                ? item.Form + "/OrderList.xaml"
-                                : item.Form,
-                            item.Form,
-                            item.Violation
-                        )
-                    )
-                );
-            }
-
-            foreach (var (input, form, violation) in cases)
+            foreach (var (input, form, violation) in RejectCases(entrance))
             {
                 var message = entrance.Reject(input);
 
@@ -357,25 +299,7 @@ public sealed class PathSegmentEntranceFuzzTests : IDisposable
 
         foreach (var entrance in Entrances())
         {
-            var inputs = AcceptedNames.Select(entrance.Build).ToList();
-
-            if (entrance.Relative)
-            {
-                inputs.Add(entrance.Build("MyApp.Domain/Views"));
-            }
-
-            if (entrance.TrimsWholeValue)
-            {
-                inputs.Add(" " + entrance.Build("Domain") + "　");
-            }
-
-            if (entrance.DropsDotAndEmptySegments)
-            {
-                inputs.Add("./" + entrance.Build("Domain"));
-                inputs.Add(entrance.Build("Domain").Replace("/", "//", StringComparison.Ordinal));
-            }
-
-            foreach (var input in inputs)
+            foreach (var input in AcceptedInputs(entrance))
             {
                 if (entrance.Reject(input) is { } message)
                 {
@@ -385,6 +309,105 @@ public sealed class PathSegmentEntranceFuzzTests : IDisposable
         }
 
         failures.Should().BeEmpty();
+    }
+
+    /// <summary>入口へ流す、断るべき形の入力（その入口で成り立つ形だけ。提出のパスは末尾にファイル名を付ける）</summary>
+    private static IEnumerable<(
+        string Input,
+        string Form,
+        PathSegmentViolation Violation
+    )> RejectCases(Entrance entrance)
+    {
+        var cases = SegmentForms
+            .Where(item => entrance.Applies(item.Violation, item.Form))
+            .Select(item => (Input: entrance.Build(item.Form), item.Form, item.Violation));
+
+        if (entrance.Relative)
+        {
+            // 相対パスの入口は、先頭・区間のつながりの形をそのまま（提出のパスは末尾にファイル名を付けて）流す
+            cases = cases.Concat(
+                RelativeForms.Select(item =>
+                    (
+                        Input: entrance.Name == "EmitPath"
+                            ? item.Form + "/OrderList.xaml"
+                            : item.Form,
+                        item.Form,
+                        item.Violation
+                    )
+                )
+            );
+        }
+
+        return cases;
+    }
+
+    /// <summary>入口へ流す、断らない入力（正当な名前と、前処理で受け付ける形）</summary>
+    private static List<string> AcceptedInputs(Entrance entrance)
+    {
+        var inputs = AcceptedNames.Select(entrance.Build).ToList();
+
+        if (entrance.Relative)
+        {
+            inputs.Add(entrance.Build("MyApp.Domain/Views"));
+        }
+
+        if (entrance.TrimsWholeValue)
+        {
+            inputs.Add(" " + entrance.Build("Domain") + "　");
+        }
+
+        if (entrance.DropsDotAndEmptySegments)
+        {
+            inputs.Add("./" + entrance.Build("Domain"));
+            inputs.Add(entrance.Build("Domain").Replace("/", "//", StringComparison.Ordinal));
+        }
+
+        return inputs;
+    }
+
+    /// <summary>
+    /// 全入口の入力を流して、入口 × 当たった規則を数え、網羅しない組の一覧と照合する
+    /// </summary>
+    /// <remarks>
+    /// 判定そのものは <see cref="Entrances_RejectEveryHostileForm_NamingTheRule"/> と
+    /// <see cref="Entrances_AcceptOrdinaryNames"/> が確かめる。ここは同じ入力の列から、入口ごとにどの規則を流したかを数える。
+    /// 前処理で受け付ける形は受け付けたものとして数える（断る形としては流していない）。
+    /// </remarks>
+    [Fact(DisplayName = "OS との境界: 名前を受け取る入口の網羅は一覧と一致する")]
+    public void Segments_Coverage_MatchesGaps()
+    {
+        var counter = new CoverageCounter(PathSegmentsDimensions.Table);
+
+        foreach (var item in PathSegmentForms.SegmentChecks)
+        {
+            PathSegmentsDimensions.Observe(counter, "CheckSegment", item.Violation);
+        }
+
+        foreach (var item in PathSegmentForms.RelativeChecks)
+        {
+            PathSegmentsDimensions.Observe(counter, "CheckRelativePath", item.Violation);
+        }
+
+        foreach (var entrance in Entrances())
+        {
+            foreach (var (input, form, violation) in RejectCases(entrance))
+            {
+                PathSegmentsDimensions.Observe(
+                    counter,
+                    entrance.Name,
+                    IsAcceptedByPreprocessing(entrance, input, form, violation) ? null : violation
+                );
+            }
+
+            foreach (var _ in AcceptedInputs(entrance))
+            {
+                PathSegmentsDimensions.Observe(counter, entrance.Name, null);
+            }
+        }
+
+        var report = counter.Report();
+        report.WriteSummary();
+        report.AssertGaps(PathSegmentsDimensions.Gaps, PathSegmentsDimensions.Scope);
     }
 
     [Theory(
