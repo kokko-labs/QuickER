@@ -634,6 +634,11 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 Strings.SchemaSync_ExecuteConfirmTableLeftWithoutColumns,
                 BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
             ),
+            // 図の表に列が 1 本も無いので、その表の追加を計画から外した（CREATE TABLE を出せない）
+            SyncPlanWarningKind.TableWithoutColumns => string.Format(
+                Strings.SchemaSync_ExecuteConfirmTableWithoutColumns,
+                BulletList(warnings.Select(w => w.TableName))
+            ),
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
 

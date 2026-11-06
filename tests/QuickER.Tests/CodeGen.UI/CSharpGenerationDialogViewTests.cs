@@ -47,7 +47,7 @@ public class CSharpGenerationDialogViewTests
 
     /// <summary>
     /// 層フォルダ欄は層別出力 ON のときだけ表示され、サーバー層の欄はさらに
-    /// リモートサービス生成 ON のときだけ表示されることを検証する
+    /// リモートサービスを実際に生成するときだけ表示されることを検証する（XAML のバインドの配線）
     /// </summary>
     [Fact(DisplayName = "層フォルダ欄は層別出力 ON・サーバー層はリモートサービス ON で表示される")]
     public void LayerDirectoryFields_FollowViewModelVisibilityFlags()
@@ -91,6 +91,8 @@ public class CSharpGenerationDialogViewTests
                     .Visibility.Should()
                     .Be(Visibility.Collapsed, "リモートサービスを生成しない構成では隠す");
 
+                // HTTP 実装の行は DB アクセス「なし」（既定）では隠れて生成しないので、行が出る構成を選んでから入れる
+                viewModel.DbAccessRepository = true;
                 viewModel.GenerateRemoteServices = true;
                 PumpBindings();
 

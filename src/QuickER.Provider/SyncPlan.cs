@@ -211,6 +211,16 @@ public enum SyncPlanWarningKind
     /// 表を作れない）。主キーの解除・一意制約の削除は単独で正しいので残す。表ごとに 1 件。
     /// </remarks>
     TableLeftWithoutColumns,
+
+    /// <summary>
+    /// 図の表に列が 1 本も無いので、その表の追加を計画から外した（方言に依らない）。
+    /// </summary>
+    /// <remarks>
+    /// 列の無い表は <c>CREATE TABLE t ( );</c> になり、SQL Server・MySQL・Oracle・SQLite は構文エラーで断り、PostgreSQL は
+    /// 列の無い表を作るが取り込み直すと列を読めない表になる。図からの DDL は同じ判定（<see cref="SqlTableShape"/>）で図全体を止める。
+    /// 表ごとに 1 件。
+    /// </remarks>
+    TableWithoutColumns,
 }
 
 /// <summary>
@@ -227,7 +237,8 @@ public enum SyncPlanWarningKind
 /// <see cref="SyncPlanWarningKind.DefaultOnColumnTypeKindChange"/> では列のテーブル（Detail は「列名 (旧の型 → 新しい型)」）、
 /// <see cref="SyncPlanWarningKind.UniqueConstraintDroppedWithColumn"/> と <see cref="SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey"/> では一意制約のテーブル（Detail は「制約名 (構成列, …)」）、
 /// <see cref="SyncPlanWarningKind.DescriptionCharactersReplaced"/> では説明のテーブル（Detail は「表」または「表.列」）、
-/// <see cref="SyncPlanWarningKind.TableLeftWithoutColumns"/> では列を消す表（Detail は計画から外した列の削除の列名をカンマ区切りで並べたもの）。
+/// <see cref="SyncPlanWarningKind.TableLeftWithoutColumns"/> では列を消す表（Detail は計画から外した列の削除の列名をカンマ区切りで並べたもの）、
+/// <see cref="SyncPlanWarningKind.TableWithoutColumns"/> では追加を外した列の無い表（Detail は空）。
 /// </param>
 /// <param name="Detail">
 /// 補足（外部キー制約名など。無ければ空文字）。

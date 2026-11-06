@@ -192,6 +192,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **外部キーの暗黙の外し直しは付け直せない外部キーを外したまま残さない（型の食い違いは外さず名指し・必ず断られる文は先頭へ・端が消える外部キーは外すだけ）**：暗黙コミットの方言で外部キーが消えたまま残る。ガード：`SyncPlannerTests`・`DialectDdlTableTests`（行 `ddl-fk-*-note`）・`MySqlSyncScriptBuilderTests`。→ `src/QuickER.Provider/CLAUDE.md`「外部キーの暗黙の外し直し」
 - **選んでいない変更を前提にする項目は外して名指しし、依存先を自動で選ばない**：そのまま実行すると存在しない表・列を参照して失敗するか部分的な定義のまま成功する。ガード：`SchemaSyncWarningTextTests`。→ `src/QuickER.Provider/CLAUDE.md`「選んでいない変更を前提にする項目」
 - **構成列の削除は方言に依らず同じ形で扱い、列が 1 本も残らない表の列の削除は外す**：方言ごとに断られる・黙って消える・縮むと結果が割れる。ガード：`SyncPlannerDropMemberColumnTests.DropColumnsOnly_DropsUniqueConstraintBeforeColumnInScript`・`SchemaSyncWarningTextTests`。→ `src/QuickER.Provider/CLAUDE.md`「構成列の削除と列が残らない表」
+- **列の無い表は `SqlTableShape` の 1 つの判定で、DDL は入口で図全体を止め、同期は計画が表の追加を外して名指しし、同期スクリプトの入口も断る（5 方言同じ）**：通すと 4 方言が `CREATE TABLE t ( );` の構文エラーで断り、PostgreSQL だけ取り込み直せない表ができる。ガード：`DialectDdlTableTests`（行 `ddl-table-without-columns-is-rejected`・`sync-add-table-without-columns-*`）・期待の行 `plan-add-table-without-columns-is-excluded-with-warning`・`SchemaSyncWarningTextTests`。→ `src/QuickER.Provider/CLAUDE.md`「列の無い表」
 - **同期スクリプトのセクションは固定順で、表の削除を追加より前に置く**：追加が先だと引き継いだ一意制約の名前がぶつかる。→ `src/QuickER.Provider/CLAUDE.md`「セクションの順序」
 - **説明の空欄の判定は `DescriptionText` だけ、BMP の外の文字は方言の宣言で扱う**：経路ごとに判定すると適用直後に偽の差分が出る。ガード：`BlankDescriptionTests`・`DescriptionStoredTextTests`・`DialectDdlTableTests`（行 `ddl-description-*`・`sync-other-description-*`）・期待の行 `diff-blank-description-*`・`diff-description-stored-form-*`・`plan-description-characters-replaced-*`。→ `src/QuickER.Provider/CLAUDE.md`「説明の空欄と表せない文字」
 - **方言が表せない参照アクションは比べる前に実効値へ畳む**：取り込み直すたびに作り直しの差分が出る。ガード：`OracleTypeNotationIntegrationTests.UnsupportedReferentialActions_LeaveNoForeignKeyDiff`・期待の行 `realdb-mysql-set-default-is-omitted-and-leaves-no-fk-diff`・`DialectDdlTableTests`（行 `ddl-fk-on-delete-set-default-omitted-with-note-oracle`・`ddl-fk-set-default-omitted-with-note-mysql`）。→ `src/QuickER.Provider/CLAUDE.md`「参照アクションの畳み込み」
@@ -239,7 +240,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 
 ### 生成ダイアログ
 
-- **生成ダイアログで画面に出ていないオプションは設定にも結果にも持ち越さない（画面の値は保持）**：無制限バイナリ除外が静かに効き続け、リモート・同期が生成時エラーで止まる。ガード：`CodegenCaseTests` の行 `gui-gate-remote-dropped-no-db-access` / `gui-gate-sync-dropped-single-dialect` / `gui-gate-exclude-binary-dropped-no-db-access`。→ `src/QuickER.CodeGen.UI/CLAUDE.md`「画面に出ていないオプション」
+- **生成ダイアログで画面に出ていないオプションは設定にも結果にも持ち越さない（画面の値は保持）。それに従う欄（サーバー層フォルダ）も同じ判定で隠す**：無制限バイナリ除外が静かに効き続け、リモート・同期が生成時エラーで止まる。隠れた値を読む欄は画面に残る。ガード：`CodegenCaseTests` の行 `gui-gate-remote-dropped-no-db-access` / `gui-gate-sync-dropped-single-dialect` / `gui-gate-exclude-binary-dropped-no-db-access`・`CSharpGenerationDialogViewModelTests.ShowServerLayerDirectory_TracksRemoteServices`。→ `src/QuickER.CodeGen.UI/CLAUDE.md`「画面に出ていないオプション」
 - **設定の全キーは生成オプションとダイアログの往復で値を落とさない**：キーを足して配線を 1 か所忘れる。ガード：`GenerationSettingsParityTests`。→ 同上「設定の全キーの往復」
 
 ### 生成コードのランタイム（共通）

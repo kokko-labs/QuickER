@@ -10,6 +10,9 @@ C# コード生成ダイアログの設定とオプションの往復の規則�
   - `GenerateSyncSupport`：`ShowSyncSupport`
   - `ExcludeUnboundedBinaryColumns`：`ShowExcludeUnboundedBinary`
 - 落とすのは保存値と結果オプションだけ。**画面の値は保持する**（構成を選び直せば元のチェックが見える）
+- 隠れたオプションに従う欄も、同じ判定で隠す。サーバー層フォルダの欄（`ShowServerLayerDirectory`）は、`ToSettings` と共有する `EffectiveGenerateRemoteServices`（`ShowRemoteContracts && GenerateRemoteServices`）を読む
+  - 素の `GenerateRemoteServices` を読むと、DB アクセス「なし」で HTTP 実装の行が隠れても、チェックが入ったままなら欄だけが残る（生成物は変わらない）
+  - ガード：`CSharpGenerationDialogViewModelTests.ShowServerLayerDirectory_TracksRemoteServices`（表示と変更通知）。mutation 実証済み
 - ゲートを外すと、以前の構成で付けたチェックが画面に出ていないまま効き続ける
   - リモート対応と同期支援は、生成時エラー（契約が無い／実効方言が sqlserver + sqlite の 2 つでない）で止まる
   - 無制限バイナリ列の除外は、生成物が静かに変わる。`CSharpGenerationModelBuilder` の EditModel 必須判定（`isExcludedUnboundedBinary`）が `GenerateRepositories` のゲート無しにこのオプションを読むため、QuickER 版 Repository を生成しない構成でも、NOT NULL の無制限バイナリ列が必須入力から外れる

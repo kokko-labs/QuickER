@@ -413,6 +413,8 @@ internal static partial class DialectDdlRows
             .. CcShapeRows(),
             // ---- 名前の入口（改行・制御文字を含む名前を断る・クォートで扱える名前は通す） ----
             .. NameEntranceRows(),
+            // ---- 表の形の入口（列の無い表は DDL が断り、同期は表の追加を外して名指しする） ----
+            .. TableWithoutColumnsRows(),
             // ---- 外部キー・主キーの既定名（安全化・一意化・予約） ----
             .. ForeignKeyNameRows(),
             // ---- 方言の上限を超える既定名を縮める ----
@@ -424,6 +426,106 @@ internal static partial class DialectDdlRows
         DdlModel.Diagram(
             DdlModel.Table(tableName, DdlModel.Pk("id", "int"), DdlModel.Col(columnName, "int"))
         );
+
+    /// <summary>
+    /// 列の無い表の行（DDL は図全体を止めて名指しする・同期の計画はその表の追加を外して名指しする・計画を経ずに組んだ計画は
+    /// 同期スクリプトの入口が断る）。5 方言とも同じ結果（PostgreSQL も断る）
+    /// </summary>
+    private static IEnumerable<DialectDdlRow> TableWithoutColumnsRows() =>
+        [
+            DialectDdlRow
+                .Ddl(
+                    "ddl-table-without-columns-is-rejected",
+                    "DDL は列の無い表を名指しで断る（PostgreSQL も断る＝方言で結果を割らない）",
+                    E.Table,
+                    F.Reject,
+                    _ =>
+                        DdlModel.Diagram(
+                            NnMinimal("orders", "memo").Entities[0],
+                            DdlModel.Table("empty")
+                        )
+                )
+                .ExpectAll(e => e.Throws("InvalidOperationException: *no columns*TABLE 'empty'*")),
+            // 見る面はスクリプトの文（列の無い表の CREATE TABLE が出ないこと）。計画の項目・外した項目・警告の面は期待の行
+            // plan-add-table-without-columns-is-excluded-with-warning（SyncPlanFuzz）が見る
+            DialectDdlRow
+                .SyncItems(
+                    "sync-add-table-without-columns-is-excluded-with-warning",
+                    "同期の計画は列の無い表の追加を外して名指しし、ほかの表の追加はそのまま作る",
+                    P.SyncAddTable,
+                    E.Table,
+                    F.Omit,
+                    _ => new DdlSyncItems(
+                        [
+                            new SchemaDiffItem
+                            {
+                                Kind = SchemaDiffKind.AddTable,
+                                TableName = "empty",
+                                Entity = DdlModel.Table("empty"),
+                                IsSelected = true,
+                            },
+                            new SchemaDiffItem
+                            {
+                                Kind = SchemaDiffKind.AddTable,
+                                TableName = "orders",
+                                Entity = NnMinimal("orders", "memo").Entities[0],
+                                IsSelected = true,
+                            },
+                        ],
+                        null,
+                        new SyncPlanContext { LiveEntities = [], LiveRelationships = [] }
+                    )
+                )
+                .ExpectAll(e =>
+                    e.NoException()
+                        .Exact(DialectDdlOutputs.Warnings, "TableWithoutColumns empty")
+                        .Lines("table orders")
+                        .NoLines("table empty")
+                ),
+            DialectDdlRow
+                .SyncPlan(
+                    "sync-add-table-without-columns-plan-is-rejected",
+                    "計画を経ずに組んだ列の無い表を作る計画は、同期スクリプトの入口が名指しで断る（逐次 DDL は表の追加の項目・SQLite は作るだけの再構築）",
+                    P.SyncAddTable,
+                    E.Table,
+                    F.Reject,
+                    dialect =>
+                        dialect == Sl
+                            ? new SyncPlan
+                            {
+                                Rebuilds =
+                                [
+                                    new TableRebuildPlan
+                                    {
+                                        TableName = "empty",
+                                        NewDefinition = DdlModel.Table("empty"),
+                                        CreateOnly = true,
+                                    },
+                                ],
+                            }
+                            : new SyncPlan
+                            {
+                                Sections =
+                                [
+                                    new SyncPlanSection
+                                    {
+                                        Kind = SchemaDiffKind.AddTable,
+                                        Items =
+                                        [
+                                            new SchemaDiffItem
+                                            {
+                                                Kind = SchemaDiffKind.AddTable,
+                                                TableName = "empty",
+                                                Entity = DdlModel.Table("empty"),
+                                                IsSelected = true,
+                                            },
+                                        ],
+                                    },
+                                ],
+                            }
+                )
+                .ExpectAll(e => e.Throws("InvalidOperationException: *no columns*TABLE 'empty'*")),
+        ];
 
     /// <summary>名前の入口の行（改行入りの名前は 1 行も出さずに名指しで断る・引用符を含むだけの名前は通す）</summary>
     private static IEnumerable<DialectDdlRow> NameEntranceRows() =>

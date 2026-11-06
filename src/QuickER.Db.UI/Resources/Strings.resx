@@ -373,6 +373,10 @@ Do you want to run this against {0}?</value>
     <value>Note: the column drops below are skipped because they would leave the table without any column. A database table needs at least one column. To remove the table, delete it from the diagram and select dropping the table:
 {0}</value>
   </data>
+  <data name="SchemaSync_ExecuteConfirmTableWithoutColumns" xml:space="preserve">
+    <value>Note: the tables below are not created because they have no columns in the diagram. A database table needs at least one column. Add columns to them in the diagram, then sync again:
+{0}</value>
+  </data>
   <data name="SchemaSync_ExecuteConfirmForeignKeyNotOnCandidateKey" xml:space="preserve">
     <value>Note: the referenced columns of the foreign keys below are not exactly a primary key or a unique constraint after the sync. Adding them is likely to fail; on MySQL / Oracle, recreating an existing one can leave it dropped:
 {0}</value>

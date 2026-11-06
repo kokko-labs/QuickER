@@ -372,8 +372,19 @@
   - 同期後の列は「DB の列 − 選んだ列の削除 ＋ 選んだ列の追加」で数える（表の削除を選んだ表は数えない）。
   - 依存の除外の直後・`InjectVanishing*` より前に置く（外した列を前提にした暗黙の削除を足さない）。主キーの解除・一意制約の削除は残す。
   - 外さないと、SQL Server は 4923 で断り、MySQL・Oracle は前の制約と列の削除が暗黙コミットで残り、PostgreSQL は列の無い表を作って取り込み直すと `TableColumnsUnavailable` になり、SQLite は列の無い再構築の表が構文エラーになる。
-  - 列 0 本の表の追加は扱わない。
+  - 図で列の無い表（DB に無い表）の追加は、次の節「列の無い表」が扱う。
 - 固定は期待の行 `plan-drop-member-column-*`・`SyncPlannerDropMemberColumnTests.DropColumnsOnly_DropsUniqueConstraintBeforeColumnInScript`・実 DB の行 `realdb-drop-member-column-*`（5 方言）・同期計画の総当たり（列が残らない表の行 `sqlite-empty-rebuild`・`{sqlserver,mysql,oracle,postgresql}-drop-all-columns`・既知の失敗は `SyncPlanFuzzKnownFailures`）・`SchemaSyncWarningTextTests`。mutation 実証済み。
+
+### 列の無い表
+
+- 図で列を 1 本も持たない表は `CREATE TABLE t ( );` になり、SQL Server・MySQL・Oracle・SQLite は構文エラーで断り、PostgreSQL は取り込み直すと `TableColumnsUnavailable` になる列の無い表を作る。5 方言とも同じ扱いにする（方言の宣言に差を持たせない＝PostgreSQL も断る）。
+- 判定は `SqlTableShape`（`HasNoColumns`・差分の項目は `IsAddTableWithoutColumns`）の 1 か所だけで、次の 3 つの経路が共有する。
+  - DDL：5 つの入口が `SqlNameText.Validate` の直後に `SqlTableShape.Validate(diagram)` を通し、表を名指しして図全体を止める（`InvalidOperationException`・英語・`TABLE 'x'`）。
+  - 同期の計画：`SyncPlanner.ExcludeTablesWithoutColumns` が列の無い表の追加を外し、`SyncPlanWarningKind.TableWithoutColumns`（Detail は空）で名指しする（`ExcludedItems` へ積む・方言に依らない）。ほかの変更は実行できるので、隣の「列が残らない表」と同じく外して名指しする。
+    - 依存の除外（`ExcludeItemsRequiringUnselected`）の入力の段に置く。外した表の追加を前提にする項目（その表の説明）は、依存の除外が `SelectedItemRequiresUnselectedItem` で外す。後ろへ置くと、存在しない表への説明の文が残る。
+  - 同期スクリプト：5 つの入口が `SqlTableShape.Validate(plan)` で、表の追加の項目と再構築の合成後の定義（SQLite の作るだけの再構築）を見て断る（計画を経ずに組んだ計画への二重の守り）。
+- 図には列の無い表が入り得る（MCP の `add_entity` の直後・GUI で全列を消した表・列を復元できなかった C# リバース・列の行の無い Excel 定義書のシート）。図の側の入口では知らせず、DDL と同期の入口で名指しする。
+- 固定は `DialectDdlTableTests` の行 `ddl-table-without-columns-is-rejected`・`sync-add-table-without-columns-is-excluded-with-warning`（スクリプトの文の面）・`sync-add-table-without-columns-plan-is-rejected`（手で組んだ計画）・期待の行 `plan-add-table-without-columns-is-excluded-with-warning`（計画の面・中立と 5 方言）・実 DB の行 `realdb-add-table-without-columns-is-excluded-and-other-tables-are-created`（5 方言）・`SchemaSyncWarningTextTests`。mutation 実証済み（DDL の判定・計画の除外・スクリプトの入口・除外の位置）。
 
 ### セクションの順序
 

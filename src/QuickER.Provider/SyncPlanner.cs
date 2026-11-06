@@ -168,12 +168,13 @@ public sealed class SyncPlanner
         // 利用者が選んだのに計画から外した項目（外す箇所は警告と一緒に ExcludeSelected で積む）
         var excluded = new List<SchemaDiffItem>();
 
-        // 選択済みの項目のみを対象にする（未選択は完全に除外）。まず選んでいない変更（表・列の追加・主キーの変更）を
-        // 前提にする項目を外して名指しする。外部キー・一意制約の作り直しはその後で DROP と ADD の 2 項目へ展開し、
-        // 以降は通常の差分として扱う（展開の前に判定する＝作り直しを外すときは削除と追加をまとめて外し、
-        // 削除だけが走って制約が消えたまま残らない）
+        // 選択済みの項目のみを対象にする（未選択は完全に除外）。最初に、列の無い表の追加を外して名指しする（CREATE TABLE を
+        // 出せない＝方言に依らない）。外した表の追加は選ばなかった項目と同じに扱うので、続く依存の除外が、それを前提にする項目を外す。
+        // 次に選んでいない変更（表・列の追加・主キーの変更）を前提にする項目を外して名指しする。外部キー・一意制約の作り直しは
+        // その後で DROP と ADD の 2 項目へ展開し、以降は通常の差分として扱う（展開の前に判定する＝作り直しを外すときは
+        // 削除と追加をまとめて外し、削除だけが走って制約が消えたまま残らない）
         var dependable = ExcludeItemsRequiringUnselected(
-            [.. items.Where(i => i.IsSelected)],
+            ExcludeTablesWithoutColumns([.. items.Where(i => i.IsSelected)], warnings, excluded),
             capabilities,
             context,
             warnings,
@@ -752,6 +753,39 @@ public sealed class SyncPlanner
                 : [];
             return [.. key.Select(c => c.Name)];
         }
+    }
+
+    /// <summary>
+    /// 列の無い表の追加（<see cref="SchemaDiffKind.AddTable"/>）を計画から外し、<see cref="SyncPlanWarningKind.TableWithoutColumns"/>
+    /// で名指しする（方言に依らない）。
+    /// </summary>
+    /// <remarks>
+    /// 列の無い表は <c>CREATE TABLE t ( );</c> になり、どの方言でも正しく作れない（判定と理由は <see cref="SqlTableShape"/>）。
+    /// 図からの DDL は同じ判定で図全体を止めるが、同期は表の追加 1 つを外せばほかの変更を実行できるので、隣の
+    /// <see cref="ExcludeDropsLeavingNoColumns"/> と同じく外して名指しする。依存の除外（<see cref="ExcludeItemsRequiringUnselected"/>）
+    /// より前に置き、外した表の追加を前提にする項目はそこで外す。
+    /// </remarks>
+    private static List<SchemaDiffItem> ExcludeTablesWithoutColumns(
+        List<SchemaDiffItem> selected,
+        List<SyncPlanWarning> warnings,
+        List<SchemaDiffItem> excluded
+    )
+    {
+        foreach (var add in selected.Where(SqlTableShape.IsAddTableWithoutColumns))
+        {
+            ExcludeSelected(
+                add,
+                new SyncPlanWarning(
+                    SyncPlanWarningKind.TableWithoutColumns,
+                    SchemaNames.ToStoredForm(add.TableName),
+                    string.Empty
+                ),
+                warnings,
+                excluded
+            );
+        }
+
+        return [.. selected.Where(i => !SqlTableShape.IsAddTableWithoutColumns(i))];
     }
 
     /// <summary>

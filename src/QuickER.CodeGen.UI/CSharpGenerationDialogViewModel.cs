@@ -150,10 +150,22 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     public bool ShowLayerDirectories => LayeredOutput;
 
     /// <summary>
-    /// サーバー層フォルダの入力欄を表示するか（層別出力 ON かつリモートサービス生成 ON のときのみ）
+    /// サーバー層フォルダの入力欄を表示するか（層別出力 ON かつリモートサービスを実際に生成するときのみ）
     /// </summary>
-    /// <remarks>サーバー層へ出るのはリモートサーバー実装だけのため、生成しない構成では欄ごと隠す</remarks>
-    public bool ShowServerLayerDirectory => LayeredOutput && GenerateRemoteServices;
+    /// <remarks>
+    /// サーバー層へ出るのはリモートサーバー実装だけのため、生成しない構成では欄ごと隠す。HTTP 実装のチェックが入っていても、
+    /// DB アクセス「なし」で行ごと隠れていれば生成しないので、欄も隠す（<see cref="EffectiveGenerateRemoteServices"/>）
+    /// </remarks>
+    public bool ShowServerLayerDirectory => LayeredOutput && EffectiveGenerateRemoteServices;
+
+    /// <summary>
+    /// リモートサービスを実際に生成するか（HTTP 実装のチェックが画面に出ていて、かつ入っている）
+    /// </summary>
+    /// <remarks>
+    /// 画面に出ていないオプションは設定にも結果にも持ち越さない（<see cref="ToSettings"/>）。サーバー層フォルダの欄の表示と
+    /// 設定・結果への書き出しが同じ判定を使う
+    /// </remarks>
+    private bool EffectiveGenerateRemoteServices => ShowRemoteContracts && GenerateRemoteServices;
 
     /// <summary>
     /// 層別出力の切替に伴い、分割出力の強制 ON・名前空間の既定切替・関連する表示制御を反映する
@@ -1093,7 +1105,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             UseRuntimePackages = UseRuntimePackages,
             // 同上（DB アクセス「なし」ではリモート対応の行を隠すため、隠れた保存値が生成時エラーを踏まないよう落とす）
             GenerateRemoteContracts = ShowRemoteContracts && GenerateRemoteContracts,
-            GenerateRemoteServices = ShowRemoteContracts && GenerateRemoteServices,
+            GenerateRemoteServices = EffectiveGenerateRemoteServices,
             GenerateApiDocs = GenerateApiDocs,
             ApiDocsLanguage = ApiDocsLanguage,
             ApiDocsSubdirectory = ApiDocsSubdirectory.Trim(),

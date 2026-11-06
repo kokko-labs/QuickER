@@ -389,7 +389,19 @@ internal sealed class DialectDdlRow
         string element,
         string facet,
         Func<string, SyncPlan> plan
-    ) => new(id, description, DialectDdlPaths.SyncRebuild, element, facet, d => plan(d));
+    ) => SyncPlan(id, description, DialectDdlPaths.SyncRebuild, element, facet, plan);
+
+    /// <summary>
+    /// 手組みの計画から同期スクリプトを作る行（経路を指定する。計画を経ずに組んだ計画を、同期スクリプトの入口へ直接渡す行）
+    /// </summary>
+    public static DialectDdlRow SyncPlan(
+        string id,
+        string description,
+        string path,
+        string element,
+        string facet,
+        Func<string, SyncPlan> plan
+    ) => new(id, description, path, element, facet, d => plan(d));
 
     /// <summary>方言の期待を足す</summary>
     /// <param name="dialect">方言（<see cref="DialectNames"/> の定数）</param>

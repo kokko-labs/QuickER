@@ -18,11 +18,11 @@ internal static partial class SyncPlanExpectationRows
     private static int RealCrossDialectRowCount(string dialect) =>
         dialect switch
         {
-            DialectNames.SqlServer => 12,
-            DialectNames.PostgreSql => 14,
-            DialectNames.MySql => 12,
-            DialectNames.Oracle => 13,
-            DialectNames.Sqlite => 12,
+            DialectNames.SqlServer => 13,
+            DialectNames.PostgreSql => 15,
+            DialectNames.MySql => 13,
+            DialectNames.Oracle => 14,
+            DialectNames.Sqlite => 13,
             _ => 0,
         };
 
@@ -31,6 +31,7 @@ internal static partial class SyncPlanExpectationRows
         [
             .. RealCrossDialectSetNullRows(),
             .. RealCrossDialectDropMemberColumnRows(),
+            .. RealCrossDialectTableWithoutColumnsRows(),
             .. RealCrossDialectNameRows(),
             .. RealCrossDialectDescriptionRows(),
             .. RealCrossDialectLongDefaultNameRows(),
@@ -171,6 +172,60 @@ internal static partial class SyncPlanExpectationRows
                                 "uq t *"
                             );
                         })
+                ),
+        ];
+
+    /// <summary>図で列の無い表の追加（5 方言とも外して名指しし、ほかの表の追加は実行する）</summary>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > RealCrossDialectTableWithoutColumnsRows() =>
+        [
+            Row(
+                    "realdb-add-table-without-columns-is-excluded-and-other-tables-are-created",
+                    "[Integration] 同期: 図で列の無い表の追加は外して名指しし、ほかの表の追加は実行して成功する（PostgreSQL も列の無い表を作らない）",
+                    AllDialects
+                )
+                .LiveWith(w =>
+                    TableWithoutColumnsLive(w.Live, RealCrossDialectScenarios.IntType(w.Capability))
+                )
+                .TargetWith(w =>
+                    TableWithoutColumnsTarget(
+                        w.Target,
+                        RealCrossDialectScenarios.IntType(w.Capability)
+                    )
+                )
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Outcome.Exact("committed");
+                        e.After.Unordered(
+                            "table a",
+                            "col a.id *",
+                            "pk a (id)",
+                            "table orders",
+                            "col orders.id *",
+                            "pk orders (id)"
+                        );
+                        e.AfterDiff.Single("AddTable empty *");
+
+                        // 説明を持つ方言では、外した表の追加を前提にする表の説明も外して名指しする（SQLite は説明を持たない）
+                        foreach (var dialect in SequentialDropMemberColumnDialects)
+                        {
+                            e.For(
+                                dialect,
+                                x =>
+                                    x.Warnings.Unordered(
+                                        "TableWithoutColumns(empty)",
+                                        "SelectedItemRequiresUnselectedItem(empty): COMMENT (*)"
+                                    )
+                            );
+                        }
+
+                        e.For(
+                            DialectNames.Sqlite,
+                            x => x.Warnings.Exact("TableWithoutColumns(empty)")
+                        );
+                    })
                 ),
         ];
 

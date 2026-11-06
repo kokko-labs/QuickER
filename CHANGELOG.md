@@ -38,6 +38,10 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 - **A diagram file in which two relationships share an identifier is now refused, naming where** — this happens only in a hand-edited file. The message names the constraint names, or the parent and child tables
 
+#### DB sync & DDL
+
+- **DDL generation now refuses a diagram that has a table without columns, naming the table, and a sync leaves out adding such a table and names it in the confirmation** — the DDL wrote `CREATE TABLE t ( );`, which SQL Server, MySQL, Oracle and SQLite refused with a syntax error. PostgreSQL accepted it and created a table without columns that cannot be imported back; on PostgreSQL that DDL is now refused as well, so add at least one column to the table in the diagram before generating DDL. The other changes of a sync still run
+
 #### Import and export
 
 - **An Excel definition document's relationship rows that share the same tables and columns are now read as separate relationships instead of being refused as duplicates** — the export writes one row per relationship, so a diagram with two foreign keys over the same columns could not be read back. The name of a second row whose constraint name cell is empty follows the rule shared by the formats, as in DBML and Mermaid
@@ -95,6 +99,10 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **A graph save of the EF Core repositories no longer changes the navigations of the entities it is given** — EF Core's fix-up set references, filled collections (a child held under another parent was added to the collection of the parent the save deleted) and set a child's foreign key to null in memory. As in the QuickER repositories, the one change is that the children the save deleted leave the collections of a parent it kept
 - **`AddGeneratedInMemoryRepositories()` no longer throws at startup when the diagram has a table whose primary key is not a single column** — the default `seedSampleData: true` seeded every table, and a table with a composite primary key, or with none, stopped the registration with an `InvalidOperationException`. Sample data now goes only into the tables with a single-column primary key: a table without one, and any table that refers to it directly or through other tables, gets none. Registering with `seedSampleData: false` to get around it is no longer needed
 - **Generated code for a diagram with no table that can have a repository (every table has a composite primary key, or none) now compiles** — with the QuickER repositories, the EF Core repositories or the in-memory repository turned on, the output referred to the repository contract (`ISqlExecutor`, `IRepositoryCore<TEntity, TKey>`, `ISaveHookRegistry` and more), which was left out when no table had a single-column primary key. The shared infrastructure now follows the options alone, as it does with the runtime packages, so such a diagram gets what the options turn on (the `DbContext`, the SQL executor, the DI registration), and a repository is still added only for a table with a single-column primary key
+
+#### Code generation dialog
+
+- **With layered output, the server layer folder box no longer appears when the HTTP implementation check is hidden** — choosing no DB access hides the remote options, and the generated files already left the remote services out, but the box stayed on screen while the hidden check was still on
 
 #### Bidirectional sync
 

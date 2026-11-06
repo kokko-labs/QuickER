@@ -562,6 +562,8 @@ SQLite rebuilds tables and uses its own order.
 - When the selected column drops would leave a table without any column, those column drops are left out of the script, and the confirmation names the table and the columns.
   A database table needs at least one column (SQL Server, MySQL and Oracle refuse to drop the last one, and a PostgreSQL table without columns cannot be imported back), so delete the table from the diagram and select dropping the table instead.
   Removing the primary key and dropping unique constraints of that table still run
+- Adding a table that has no columns in the diagram is left out of the script, and the confirmation names the table (see [Tables without columns](#tables-without-columns)).
+  A change that needs that table, such as its description, is left out and named with it, and the other changes still run
 - Composite (multi-column) foreign keys are handled as first-class: a relationship holds an ordered list of column pairs, so import, DDL generation, and sync all carry every pair.
   That includes the implicit drop-and-recreate triggered by a primary-key change and SQLite's table rebuilds, and a composite foreign key is never silently narrowed to a single column
 
@@ -871,6 +873,18 @@ C# code generation reports the same names as a pre-generation error.
 
 Quote characters are deliberately fine: `"`, `'`, `]` and backticks occur in real databases and are escaped where they are written.
 Descriptions are not refused either, because a line break in one is legitimate and is folded to a space where it lands in a `--` comment line.
+
+### Tables without columns
+
+A table with no columns would be written as `CREATE TABLE t ( );`.
+SQL Server, MySQL, Oracle and SQLite refuse that statement, and PostgreSQL creates a table without columns that cannot be imported back into a diagram.
+QuickER therefore treats such a table the same way on all five dialects.
+
+- DDL generation refuses the whole diagram, names the table (`TABLE 'x'`), and produces nothing
+- Diff sync leaves adding the table out of the script and names it in the confirmation, as described in [Changes that depend on each other](#changes-that-depend-on-each-other)
+
+A diagram can hold such a table for a while: the MCP tool `add_entity` creates a table without columns, and a table can lose its last column in the editor or come from an import that restored none of its columns.
+Add at least one column to it before generating DDL or syncing it.
 
 ### Identifier length limits
 
