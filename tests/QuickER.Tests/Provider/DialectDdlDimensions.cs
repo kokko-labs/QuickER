@@ -128,25 +128,22 @@ internal static class DialectDdlDimensions
     private static (string FactorA, string LevelA, string FactorB, string LevelsB)[] PendingPairs =>
         [
             (Dialect, "sqlserver", Facet, "comment-sanitize"),
-            (Dialect, "postgresql", Element, "column"),
             (Dialect, "postgresql", Facet, "comment-sanitize"),
             (Dialect, "mysql", Facet, "comment-sanitize"),
-            (Dialect, "oracle", Element, "column"),
             (Dialect, "oracle", Facet, "comment-sanitize"),
-            (Dialect, "sqlite", Element, "column"),
-            (Element, "table", Facet, "constraint-name note order reject comment-sanitize"),
+            (Element, "table", Facet, "constraint-name note order comment-sanitize"),
             (
                 Element,
                 "column",
                 Facet,
-                "quote constraint-name note omit order reject culture comment-sanitize"
+                "quote constraint-name note omit order culture comment-sanitize"
             ),
             (Element, "column", Path, "sync-add-table sync-add-column sync-rebuild"),
             (Element, "pk", Facet, "quote note omit reject english culture comment-sanitize"),
             (Element, "pk", Path, "sync-add-column sync-rebuild"),
-            (Element, "fk", Facet, "quote reject english culture comment-sanitize"),
-            (Element, "fk", Path, "sync-add-table sync-add-column"),
-            (Element, "unique", Facet, "quote note order reject english culture comment-sanitize"),
+            (Element, "fk", Facet, "quote english culture comment-sanitize"),
+            (Element, "fk", Path, "sync-add-column"),
+            (Element, "unique", Facet, "quote note order english culture comment-sanitize"),
             (Element, "unique", Path, "sync-add-column sync-other"),
             (
                 Element,
@@ -195,7 +192,7 @@ internal static class DialectDdlDimensions
             (Facet, "constraint-name", Path, "sync-add-column"),
             (Facet, "note", Path, "sync-other"),
             (Facet, "order", Path, "sync-add-table sync-rebuild"),
-            (Facet, "reject", Path, "sync-add-column sync-rebuild"),
+            (Facet, "reject", Path, "sync-add-column"),
             (Facet, "english", Path, "sync-add-table sync-add-column"),
             (Facet, "culture", Path, "sync-add-column sync-rebuild"),
             (

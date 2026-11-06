@@ -21,6 +21,9 @@ namespace QuickER.Tests.CodeGen.CSharp.CodegenConfig;
 /// <param name="Entrance">入口</param>
 /// <param name="ManualSources">手動実装のクエリのソース（実効のオプションから作る。無ければ空）</param>
 /// <param name="FreshDiagram">図を組み直す（決定的の関係が使う。null なら <paramref name="Diagram"/> をそのまま使う）</param>
+/// <param name="MapperDialects">
+/// 型マッパーを渡す方言（null なら本番と同じく実効方言の全部。direct の入口だけが読む。<see cref="CodegenRunner.Generate"/> を参照）
+/// </param>
 internal sealed record CodegenInput(
     string Label,
     ErDiagram Diagram,
@@ -28,7 +31,8 @@ internal sealed record CodegenInput(
     CodeGenerationOptions Options,
     CodegenEntrance Entrance,
     Func<CodeGenerationOptions, IReadOnlyList<GeneratedFile>> ManualSources,
-    Func<ErDiagram>? FreshDiagram = null
+    Func<ErDiagram>? FreshDiagram = null,
+    IReadOnlyCollection<string>? MapperDialects = null
 );
 
 /// <summary>1 つの入力に掛ける期待（実効のオプションが決まってから作る）</summary>
@@ -127,10 +131,14 @@ internal static class CodegenRunner
     /// <param name="diagram">図</param>
     /// <param name="typeDialect">図の方言</param>
     /// <param name="options">生成オプション</param>
+    /// <param name="mapperDialects">
+    /// 型マッパーを渡す方言（null なら実効方言の全部＝本番と同じ。絞ると、渡さなかった方言は生成器が図の方言の辞書で代わりにする道を通る）
+    /// </param>
     public static CodeGenerationResult Generate(
         ErDiagram diagram,
         string typeDialect,
-        CodeGenerationOptions options
+        CodeGenerationOptions options,
+        IReadOnlyCollection<string>? mapperDialects = null
     )
     {
         var provider = Providers.Get(typeDialect);
@@ -138,7 +146,10 @@ internal static class CodegenRunner
 
         foreach (var dialect in options.ResolveRepositoryDialects())
         {
-            if (Providers.TryGet(dialect, out var dialectProvider))
+            if (
+                (mapperDialects is null || mapperDialects.Contains(dialect))
+                && Providers.TryGet(dialect, out var dialectProvider)
+            )
             {
                 mappers[dialect] = dialectProvider.TypeMapper;
             }
@@ -325,6 +336,7 @@ internal static class CodegenRunner
                             ? [$"診断: エラーなのにファイルを {result.Files.Count} 個出した"]
                             : []
                     )
+                    .Concat(LoneSurrogateProblems(result.Diagnostics))
                     .ToList()
         );
 
@@ -486,6 +498,43 @@ internal static class CodegenRunner
                     + string.Join("\n  ", problems.Select(p => p.Text))
             );
         }
+    }
+
+    /// <summary>
+    /// 全行に掛かる診断の文の性質：どの診断の文にも、対になっていないサロゲートが無い（診断に載せる長いリテラルの切り詰めが
+    /// サロゲートの対を割ると、文が UTF-8 で書けない・表示が化ける）
+    /// </summary>
+    /// <param name="diagnostics">生成の診断</param>
+    public static IEnumerable<string> LoneSurrogateProblems(
+        IReadOnlyList<GenerationDiagnostic> diagnostics
+    ) =>
+        diagnostics
+            .Where(diagnostic => HasLoneSurrogate(diagnostic.Message))
+            .Select(diagnostic =>
+                $"診断: 文に対になっていないサロゲートがある（[{diagnostic.Severity}] {diagnostic.Message.ReplaceLineEndings(" ")}）"
+            );
+
+    /// <summary>対になっていないサロゲートを含むか</summary>
+    private static bool HasLoneSurrogate(string text)
+    {
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (char.IsHighSurrogate(text[i]))
+            {
+                if (i + 1 >= text.Length || !char.IsLowSurrogate(text[i + 1]))
+                {
+                    return true;
+                }
+
+                i++;
+            }
+            else if (char.IsLowSurrogate(text[i]))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>入口の段で見つけた問題の段の名前（既知の失敗の署名）</summary>

@@ -24,7 +24,8 @@ namespace QuickER.Tests.GeneratedTranslatorParityFixture;
 /// <list type="bullet">
 ///   <item>
 ///     <c>probes</c>: 翻訳器の検証用。NULL 許容の可変長文字列・固定長文字列（<c>nchar(10)</c>）・日時・
-///     オフセットつき日時・bool と、予約語の列名 <c>group</c>・閉じ角括弧を含む列名 <c>x]y</c> を持つ
+///     オフセットつき日時・bool・NULL 許容の数値（<c>amount</c>＝<c>decimal(10,2)</c>）と、予約語の列名 <c>group</c>・
+///     閉じ角括弧を含む列名 <c>x]y</c> を持つ
 ///   </item>
 ///   <item>
 ///     <c>order</c> / <c>order_line</c>: 予約語の表名とナビゲーション名（<c>Order</c>）で、
@@ -77,6 +78,7 @@ public static class TranslatorParityFixtureDefinition
     private static readonly Guid ProbeIsActiveColId = new("7a000000-0000-0000-0000-000000000007");
     private static readonly Guid ProbeGroupColId = new("7a000000-0000-0000-0000-000000000008");
     private static readonly Guid ProbeBracketColId = new("7a000000-0000-0000-0000-000000000009");
+    private static readonly Guid ProbeAmountColId = new("7a000000-0000-0000-0000-00000000000a");
 
     private static readonly Guid OrderId = new("7a000000-0000-0000-0000-000000000011");
     private static readonly Guid OrderPkColId = new("7a000000-0000-0000-0000-000000000012");
@@ -125,6 +127,7 @@ public static class TranslatorParityFixtureDefinition
                 },
                 Nullable(ProbeGroupColId, "group", "nvarchar(20)"),
                 Nullable(ProbeBracketColId, "x]y", "nvarchar(20)"),
+                Nullable(ProbeAmountColId, "amount", "decimal(10,2)"),
             },
         };
 

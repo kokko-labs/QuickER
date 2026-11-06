@@ -131,16 +131,71 @@ public static class DslFuzzUnits
                 i % 3 == 0 ? null : rows[i / 2]["id"];
         }
 
+        // 序数で比べる文字列一致の値は SQLite の単位だけ（SQL Server は照合順序で合成済みと分解形が等しくなる）
+        var ordinal = dbms == DialectNames.Sqlite;
+
+        if (ordinal)
+        {
+            PutOrdinalValues(rows);
+        }
+
         return new DslFuzzUnit(
             $"{CoveragePrefix}{dbms}",
             TableName,
             all,
             rows,
-            generator.CoverageQueries(all, atomColumns),
+            [
+                .. generator.CoverageQueries(all, atomColumns),
+                .. generator.FixedQueries(all, ordinalStrings: ordinal),
+            ],
             ValueObjects: true,
             CoverageSeed,
             SelfReference: "parent"
         );
+    }
+
+    /// <summary>
+    /// 値オブジェクトなしの SQLite の網羅の単位（種の単位と同じ列・種に依らない）。網羅の単位（<see cref="Coverage"/>）は
+    /// 値オブジェクトありだけなので、素の string の列・素の値型の列の経路（インメモリの文字列一致の序数への書き換え・
+    /// NOT の押し下げ）を決まった形のクエリ（<see cref="DslFuzzGenerator.FixedQueries"/>）で流す
+    /// </summary>
+    public static DslFuzzUnit PlainCoverage()
+    {
+        var columns = SqliteColumns();
+        var generator = new DslFuzzGenerator(CoverageSeed, valueObjects: false);
+        var rows = generator.Rows(columns, RowCount);
+        PutOrdinalValues(rows);
+
+        return new DslFuzzUnit(
+            $"{CoveragePrefix}{DialectNames.Sqlite}-plain",
+            TableName,
+            columns,
+            rows,
+            generator.FixedQueries(columns, ordinalStrings: true),
+            ValueObjects: false,
+            CoverageSeed
+        );
+    }
+
+    /// <summary>
+    /// 列 <c>s</c> の 3〜7 行目に、カルチャで比べると序数と結果が変わる値を入れる：合成済みの「が」で始まる・分解形で始まる・
+    /// 合成済みで終わる・分解形で終わる・ソフトハイフンを無視すると <c>a</c> で始まる（1 行目の NULL と 2 行目の値は保つ）
+    /// </summary>
+    private static void PutOrdinalValues(List<IReadOnlyDictionary<string, object?>> rows)
+    {
+        string[] values =
+        [
+            DslFuzzGenerator.OrdinalComposed + "-x",
+            DslFuzzGenerator.OrdinalDecomposed + "-x",
+            "x-" + DslFuzzGenerator.OrdinalComposed,
+            "x-" + DslFuzzGenerator.OrdinalDecomposed,
+            "abc",
+        ];
+
+        for (var i = 0; i < values.Length; i++)
+        {
+            ((Dictionary<string, object?>)rows[2 + i])["s"] = values[i];
+        }
     }
 
     /// <summary>射影の結果の型名を、生成物の既存の型名と衝突させる単位（行なし＝コンパイルだけ）</summary>

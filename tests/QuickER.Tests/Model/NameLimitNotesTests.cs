@@ -28,6 +28,10 @@ public class NameLimitNotesTests
         return new ErDiagram { TargetDbms = dbms, Entities = { entity } };
     }
 
+    /// <remarks>
+    /// 残す理由（P3-6）：PostgreSQL の上限の文言（63 UTF-8 bytes）・違反の件数・場所の前置きの形。両ホストのツールが 4 種の名前の違反を
+    /// 告げることは ToolScenarioTests の行 <c>name-limit-*</c>（SQL Server の上限）が持つが、この表明を外すと弱くなるので元の表明をすべて残す
+    /// </remarks>
     [Fact(DisplayName = "Find: 場所と理由つきで、テーブル名・カラム名・制約名の違反を返す")]
     public void Find_ReportsEachKind()
     {
@@ -75,6 +79,11 @@ public class NameLimitNotesTests
             .BeEmpty();
     }
 
+    /// <remarks>
+    /// 残す理由（P3-6）：注意文の前置き・新しい違反だけの本文・違反が減ったときと同じときの null。以前からの違反を繰り返さないことは
+    /// ToolScenarioTests の行 <c>name-limit-within-limit-adds-no-note-and-existing-violation-is-not-repeated</c> が持つが、この表明を外すと
+    /// 弱くなるので元の表明をすべて残す
+    /// </remarks>
     [Fact(DisplayName = "Describe: 変更で新しく生じた違反だけを注意文にし、無ければ null")]
     public void Describe_OnlyNewViolations()
     {

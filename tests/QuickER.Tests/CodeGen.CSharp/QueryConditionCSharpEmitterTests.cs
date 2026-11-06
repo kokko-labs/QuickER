@@ -4,11 +4,223 @@ using QuickER.Model;
 
 namespace QuickER.Tests.CodeGen.CSharp;
 
-/// <summary>ミニ DSL 構文木 → C# ラムダ式エミッタのテストクラス</summary>
+/// <summary>ミニ DSL 構文木 → C# ラムダ式エミッタの出力（ラムダの全文と前置文）を表駆動で固定するテストクラス</summary>
+/// <remarks>
+/// 残す理由（P3-6）：エミッタの出力の契約（綴り）。<see cref="QueryConditionCSharpEmitter"/> が返す式と前置文の文字列の完全一致で、
+/// 括弧の入れ方・NOT を原子まで押し下げた形・NULL 前提の内側の否定・NULL 非許容の列に <c>!</c> と NULL 前提を付けない形・
+/// 値オブジェクトの <c>Create</c> の包み方・持ち上げ変数の綴りを見る（どれも動作に出ない形を含み、実行の結果では言えない）。
+/// 意味（NULL の行・NOT・文字列一致・IN・値オブジェクト）は簡易 DSL の総当たり（<c>DslConditionFuzzTests</c>・NOT の入れ子は
+/// 次元表の因子 NotNesting と <c>DslFuzzUnits.Coverage</c> の決まった形）が、生成→コンパイル→3 実装先の実行でオラクルと照合する。
+/// </remarks>
 public class QueryConditionCSharpEmitterTests
 {
     private readonly Entity _entity;
     private readonly List<QueryParameter> _parameters;
+
+    /// <summary>列の束縛の組み合わせ</summary>
+    public enum Binding
+    {
+        /// <summary>素の C#（Memo だけ NULL 許容）</summary>
+        Plain,
+
+        /// <summary>素の C#・Memo を NULL 非許容にしたもの</summary>
+        PlainMemoNotNull,
+
+        /// <summary>素の C#・Amount を NULL 許容にしたもの</summary>
+        PlainAmountNullable,
+
+        /// <summary>全列が値オブジェクト（Memo だけ NULL 許容）</summary>
+        ValueObjects,
+
+        /// <summary>全列が値オブジェクト・Amount を NULL 許容にしたもの</summary>
+        ValueObjectsAmountNullable,
+    }
+
+    /// <summary>表の行（条件・列の束縛・期待のラムダの全文・期待の前置文）</summary>
+    private sealed record EmitRow(
+        string Condition,
+        Binding Binding,
+        string Lambda,
+        string[] Prelude
+    );
+
+    /// <summary>
+    /// 行（Id → 行）。元のメソッドごとの表明をすべて写した（前置文は元が見ていなかった行でも、前置文が無いことまで見る）
+    /// </summary>
+    private static IReadOnlyDictionary<string, EmitRow> Rows { get; } =
+        new Dictionary<string, EmitRow>(StringComparer.Ordinal)
+        {
+            // 比較・AND/OR・IS NULL（元 Emit_ComparisonAndLogical）
+            ["comparison-and-logical"] = new(
+                "CustomerId = @customerId AND (Amount >= @minAmount OR Memo IS NULL)",
+                Binding.Plain,
+                "e => (e.CustomerId == customerId && (e.Amount >= minAmount || e.Memo == null))",
+                []
+            ),
+            // 文字列一致は Contains / StartsWith / EndsWith の呼び出しで、NULL 許容の列は NULL 前提の内側（元 Emit_StringMatch）
+            ["string-match-like-param"] = new(
+                "Memo LIKE @keyword",
+                Binding.Plain,
+                "e => (e.Memo != null && e.Memo!.Contains(keyword))",
+                []
+            ),
+            ["string-match-like-prefix"] = new(
+                "Memo LIKE 'abc%'",
+                Binding.Plain,
+                "e => (e.Memo != null && e.Memo!.StartsWith(\"abc\"))",
+                []
+            ),
+            ["string-match-not-like-suffix"] = new(
+                "Memo NOT LIKE '%abc'",
+                Binding.Plain,
+                "e => (e.Memo != null && !(e.Memo!.EndsWith(\"abc\")))",
+                []
+            ),
+            ["string-match-startswith-param"] = new(
+                "Memo STARTSWITH @keyword",
+                Binding.Plain,
+                "e => (e.Memo != null && e.Memo!.StartsWith(keyword))",
+                []
+            ),
+            // ワイルドカードなしの LIKE：肯定は素の等値・否定と外側の NOT は NULL 前提の内側（元 Emit_ExactLike_NegatesInsideNullPremise）
+            ["exact-like"] = new("Memo LIKE 'abc'", Binding.Plain, "e => e.Memo == \"abc\"", []),
+            ["exact-like-negated"] = new(
+                "Memo NOT LIKE 'abc'",
+                Binding.Plain,
+                "e => (e.Memo != null && !(e.Memo == \"abc\"))",
+                []
+            ),
+            ["exact-like-under-not"] = new(
+                "NOT Memo LIKE 'abc'",
+                Binding.Plain,
+                "e => (e.Memo != null && !(e.Memo == \"abc\"))",
+                []
+            ),
+            ["exact-like-under-double-not"] = new(
+                "NOT NOT Memo LIKE 'abc'",
+                Binding.Plain,
+                "e => e.Memo == \"abc\"",
+                []
+            ),
+            ["exact-like-in-negated-or"] = new(
+                "NOT (Memo LIKE 'abc' OR CustomerId = 1)",
+                Binding.Plain,
+                "e => ((e.Memo != null && !(e.Memo == \"abc\")) && e.CustomerId != 1)",
+                []
+            ),
+            // 前置 NOT の連鎖は偶奇で畳む（元 Emit_ChainedNot_FoldsByParity）
+            ["chained-not-double"] = new(
+                "NOT NOT Memo LIKE '%x%'",
+                Binding.Plain,
+                "e => (e.Memo != null && e.Memo!.Contains(\"x\"))",
+                []
+            ),
+            ["chained-not-triple"] = new(
+                "NOT NOT NOT Memo LIKE '%x%'",
+                Binding.Plain,
+                "e => (e.Memo != null && !(e.Memo!.Contains(\"x\")))",
+                []
+            ),
+            // NULL 非許容の文字列の列には ! も NULL 前提も付けない（元 Emit_StringMatch_NonNullableColumn）
+            ["string-match-non-nullable-column"] = new(
+                "Memo CONTAINS @keyword",
+                Binding.PlainMemoNotNull,
+                "e => e.Memo.Contains(keyword)",
+                []
+            ),
+            // IN / NOT IN はコレクションの Contains（元 Emit_In）
+            ["in"] = new(
+                "CustomerId IN @ids",
+                Binding.Plain,
+                "e => ids.Contains(e.CustomerId)",
+                []
+            ),
+            ["not-in"] = new(
+                "CustomerId NOT IN @ids",
+                Binding.Plain,
+                "e => !(ids.Contains(e.CustomerId))",
+                []
+            ),
+            // NOT は原子まで押し下げ、NULL 許容の列の順序比較の否定は列が NULL の行も一致させる（元 Emit_Not_IsPushedDownToAtoms）
+            ["not-nullable-ordered"] = new(
+                "NOT Amount < @minAmount",
+                Binding.PlainAmountNullable,
+                "e => (e.Amount == null || !(e.Amount < minAmount))",
+                []
+            ),
+            ["not-non-nullable-ordered"] = new(
+                "NOT CustomerId < 3",
+                Binding.PlainAmountNullable,
+                "e => !(e.CustomerId < 3)",
+                []
+            ),
+            ["not-or-group"] = new(
+                "NOT (Amount < @minAmount OR CustomerId = @customerId)",
+                Binding.PlainAmountNullable,
+                "e => ((e.Amount == null || !(e.Amount < minAmount)) && e.CustomerId != customerId)",
+                []
+            ),
+            ["not-and-group"] = new(
+                "NOT (CustomerId <> 1 AND Memo IS NULL)",
+                Binding.PlainAmountNullable,
+                "e => (e.CustomerId == 1 || e.Memo != null)",
+                []
+            ),
+            ["double-not-nullable-ordered"] = new(
+                "NOT NOT Amount < @minAmount",
+                Binding.PlainAmountNullable,
+                "e => e.Amount < minAmount",
+                []
+            ),
+            ["not-in-group"] = new(
+                "NOT (CustomerId IN @ids)",
+                Binding.PlainAmountNullable,
+                "e => !(ids.Contains(e.CustomerId))",
+                []
+            ),
+            ["not-not-in-group"] = new(
+                "NOT (CustomerId NOT IN @ids)",
+                Binding.PlainAmountNullable,
+                "e => ids.Contains(e.CustomerId)",
+                []
+            ),
+            // 値オブジェクトの NULL 許容の列の順序比較は NULL 前提の内側・否定は列が NULL の行も一致（元 Emit_Not_ValueObjectOrderedComparison）
+            ["value-object-nullable-ordered"] = new(
+                "Amount < 1",
+                Binding.ValueObjectsAmountNullable,
+                "e => (e.Amount != null && e.Amount < AmountValue.Create(1m))",
+                []
+            ),
+            ["value-object-not-nullable-ordered"] = new(
+                "NOT Amount < 1",
+                Binding.ValueObjectsAmountNullable,
+                "e => (e.Amount == null || !(e.Amount < AmountValue.Create(1m)))",
+                []
+            ),
+            // 値オブジェクトの列の比較は Create で包む（元 Emit_ValueObjectComparison）
+            ["value-object-compare-param"] = new(
+                "CustomerId = @customerId",
+                Binding.ValueObjects,
+                "e => e.CustomerId == CustomerIdValue.Create(customerId)",
+                []
+            ),
+            ["value-object-compare-literal"] = new(
+                "Amount > -1.5",
+                Binding.ValueObjects,
+                "e => e.Amount > AmountValue.Create(-1.5m)",
+                []
+            ),
+            // 値オブジェクトの列の IN は前置文で値オブジェクトのリストへ持ち上げる（元 Emit_ValueObjectIn）
+            ["value-object-in"] = new(
+                "CustomerId IN @ids",
+                Binding.ValueObjects,
+                "e => idsValues.Contains(e.CustomerId)",
+                ["var idsValues = ids.Select(CustomerIdValue.Create).ToList();"]
+            ),
+        };
+
+    /// <summary>表の行の Id</summary>
+    public static TheoryData<string> Ids() => [.. Rows.Keys];
 
     /// <summary>Order エンティティ（CustomerId / Amount / Memo）と標準パラメータを用意する</summary>
     public QueryConditionCSharpEmitterTests()
@@ -47,44 +259,36 @@ public class QueryConditionCSharpEmitterTests
         ];
     }
 
-    /// <summary>素の C#（VO なし）の列バインディングを作る</summary>
-    private Dictionary<Guid, QueryColumnBinding> CreatePlainBindings() =>
-        new()
-        {
-            [_entity.Columns[0].Id] = new QueryColumnBinding(
-                "CustomerId",
-                "int",
-                null,
-                false,
-                IsUnderlyingReferenceType: false,
-                IsGuidKeyValueObject: false
-            ),
-            [_entity.Columns[1].Id] = new QueryColumnBinding(
-                "Amount",
-                "decimal",
-                null,
-                false,
-                IsUnderlyingReferenceType: false,
-                IsGuidKeyValueObject: false
-            ),
-            [_entity.Columns[2].Id] = new QueryColumnBinding(
-                "Memo",
-                "string",
-                null,
-                true,
-                IsUnderlyingReferenceType: true,
-                IsGuidKeyValueObject: false
-            ),
-        };
+    [Theory(DisplayName = "エミッタの出力（ラムダの全文と前置文）は表の行の綴りどおり")]
+    [MemberData(nameof(Ids))]
+    public void Emit_WritesExpectedLambdaAndPrelude(string id)
+    {
+        var row = Rows[id];
+        var emitted = Emit(row.Condition, CreateBindings(row.Binding));
 
-    /// <summary>VO（全列値オブジェクト）の列バインディングを作る</summary>
-    private Dictionary<Guid, QueryColumnBinding> CreateVoBindings() =>
-        new()
+        emitted.Lambda.Should().Be(row.Lambda);
+        emitted.PreludeLines.Should().Equal(row.Prelude);
+    }
+
+    /// <summary>列の束縛を作る（NULL 許容を変える組み合わせは、パーサの検証が見る列の NULL 許容もそろえる）</summary>
+    private Dictionary<Guid, QueryColumnBinding> CreateBindings(Binding binding)
+    {
+        var valueObjects = binding is Binding.ValueObjects or Binding.ValueObjectsAmountNullable;
+        var amountNullable =
+            binding is Binding.PlainAmountNullable or Binding.ValueObjectsAmountNullable;
+        var memoNullable = binding != Binding.PlainMemoNotNull;
+
+        if (!memoNullable)
+        {
+            _entity.Columns[2].IsNullable = false;
+        }
+
+        return new()
         {
             [_entity.Columns[0].Id] = new QueryColumnBinding(
                 "CustomerId",
                 "int",
-                "CustomerIdValue",
+                valueObjects ? "CustomerIdValue" : null,
                 false,
                 IsUnderlyingReferenceType: false,
                 IsGuidKeyValueObject: false
@@ -92,26 +296,26 @@ public class QueryConditionCSharpEmitterTests
             [_entity.Columns[1].Id] = new QueryColumnBinding(
                 "Amount",
                 "decimal",
-                "AmountValue",
-                false,
+                valueObjects ? "AmountValue" : null,
+                amountNullable,
                 IsUnderlyingReferenceType: false,
                 IsGuidKeyValueObject: false
             ),
             [_entity.Columns[2].Id] = new QueryColumnBinding(
                 "Memo",
                 "string",
-                "MemoValue",
-                true,
+                valueObjects ? "MemoValue" : null,
+                memoNullable,
                 IsUnderlyingReferenceType: true,
                 IsGuidKeyValueObject: false
             ),
         };
+    }
 
     /// <summary>条件をパース・検証してエミットする</summary>
     private QueryConditionCSharpEmitter.EmitResult Emit(
         string condition,
-        Dictionary<Guid, QueryColumnBinding> bindings,
-        params string[] extraParameterNames
+        Dictionary<Guid, QueryColumnBinding> bindings
     )
     {
         var result = QueryConditionParser.ParseAndValidate(condition, _entity, _parameters);
@@ -121,351 +325,10 @@ public class QueryConditionCSharpEmitterTests
                 $"条件 '{condition}' は検証を通る前提: {string.Join(" / ", result.Diagnostics.Select(d => d.Message))}"
             );
 
-        var names = _parameters.Select(p => p.Name).Concat(extraParameterNames).ToList();
-        return QueryConditionCSharpEmitter.Emit(result.Root!, bindings, names);
-    }
-
-    /// <summary>比較・論理結合・null 判定が期待どおりのラムダになることを検証する</summary>
-    [Fact(DisplayName = "比較・AND/OR・IS NULL のラムダ生成")]
-    public void Emit_ComparisonAndLogical()
-    {
-        var emitted = Emit(
-            "CustomerId = @customerId AND (Amount >= @minAmount OR Memo IS NULL)",
-            CreatePlainBindings()
+        return QueryConditionCSharpEmitter.Emit(
+            result.Root!,
+            bindings,
+            _parameters.Select(p => p.Name).ToList()
         );
-
-        emitted
-            .Lambda.Should()
-            .Be("e => (e.CustomerId == customerId && (e.Amount >= minAmount || e.Memo == null))");
-        emitted.PreludeLines.Should().BeEmpty();
-    }
-
-    /// <summary>数値リテラルに列型のサフィックスが付くことを検証する</summary>
-    [Fact(DisplayName = "数値リテラルは列型に応じたサフィックス付き")]
-    public void Emit_NumberLiteralSuffix()
-    {
-        Emit("Amount > -1.5", CreatePlainBindings()).Lambda.Should().Be("e => e.Amount > -1.5m");
-        Emit("CustomerId <> 0", CreatePlainBindings()).Lambda.Should().Be("e => e.CustomerId != 0");
-    }
-
-    /// <summary>文字列リテラルが C# エスケープされることを検証する</summary>
-    [Fact(DisplayName = "文字列リテラルは C# エスケープされる")]
-    public void Emit_StringLiteral()
-    {
-        Emit("Memo = 'it''s \"quoted\"'", CreatePlainBindings())
-            .Lambda.Should()
-            .Be("e => e.Memo == \"it's \\\"quoted\\\"\"");
-    }
-
-    /// <summary>
-    /// レンダラーの <c>ReplaceLineEndings</c> が実改行へ変える文字（FORM FEED・NEL・行区切り・段落区切り）が
-    /// エスケープシーケンスで書かれることを検証する（生のまま出すとリテラルが行をまたいで壊れる）
-    /// </summary>
-    [Fact(DisplayName = "改行に化ける文字はエスケープシーケンスで書かれる")]
-    public void Emit_StringLiteral_EscapesLineBreakingCharacters()
-    {
-        Emit("Memo = 'a\fb\u0085c\u2028d\u2029e'", CreatePlainBindings())
-            .Lambda.Should()
-            .Be("e => e.Memo == \"a\\fb\\u0085c\\u2028d\\u2029e\"");
-    }
-
-    /// <summary>LIKE / CONTAINS 系が文字列メソッド呼び出しになり、NULL 許容列では NULL 前提が AND されることを検証する</summary>
-    /// <remarks>
-    /// SQL の LIKE は NULL 行を UNKNOWN で落とすため <c>IS NOT NULL AND LIKE</c> は SQL 側で意味が変わらないが、
-    /// インメモリ実行器は式木を<b>実際に評価する</b>ので、前提がないと NULL 行で NullReferenceException になる。
-    /// 否定（NOT LIKE）も同じ前提の内側に入る＝NULL 行はどちらの向きでも一致しない（SQL と同じ観測結果）。
-    /// </remarks>
-    [Fact(
-        DisplayName = "文字列一致は Contains/StartsWith/EndsWith 呼び出し（NULL 許容列は NULL 前提つき）"
-    )]
-    public void Emit_StringMatch()
-    {
-        Emit("Memo LIKE @keyword", CreatePlainBindings())
-            .Lambda.Should()
-            .Be("e => (e.Memo != null && e.Memo!.Contains(keyword))");
-        Emit("Memo LIKE 'abc%'", CreatePlainBindings())
-            .Lambda.Should()
-            .Be("e => (e.Memo != null && e.Memo!.StartsWith(\"abc\"))");
-        Emit("Memo NOT LIKE '%abc'", CreatePlainBindings())
-            .Lambda.Should()
-            .Be("e => (e.Memo != null && !(e.Memo!.EndsWith(\"abc\")))");
-        Emit("Memo STARTSWITH @keyword", CreatePlainBindings())
-            .Lambda.Should()
-            .Be("e => (e.Memo != null && e.Memo!.StartsWith(keyword))");
-    }
-
-    /// <summary>
-    /// ワイルドカードなしの LIKE は、肯定形でも否定形でも完全一致の文字列一致として扱われ、
-    /// 外側の NOT を押し下げても NULL 前提の内側で否定されることを検証する
-    /// （肯定形を等値比較にすると NOT が <c>!=</c> へ反転し、NULL の行が一致に混ざる）
-    /// </summary>
-    [Fact(
-        DisplayName = "ワイルドカードなしの LIKE は肯定でも外側の NOT を NULL 前提の内側で否定する"
-    )]
-    public void Emit_ExactLike_NegatesInsideNullPremise()
-    {
-        Emit("Memo LIKE 'abc'", CreatePlainBindings()).Lambda.Should().Be("e => e.Memo == \"abc\"");
-        Emit("Memo NOT LIKE 'abc'", CreatePlainBindings())
-            .Lambda.Should()
-            .Be("e => (e.Memo != null && !(e.Memo == \"abc\"))");
-        Emit("NOT Memo LIKE 'abc'", CreatePlainBindings())
-            .Lambda.Should()
-            .Be("e => (e.Memo != null && !(e.Memo == \"abc\"))");
-        Emit("NOT NOT Memo LIKE 'abc'", CreatePlainBindings())
-            .Lambda.Should()
-            .Be("e => e.Memo == \"abc\"");
-        Emit("NOT (Memo LIKE 'abc' OR CustomerId = 1)", CreatePlainBindings())
-            .Lambda.Should()
-            .Be("e => ((e.Memo != null && !(e.Memo == \"abc\")) && e.CustomerId != 1)");
-    }
-
-    /// <summary>
-    /// 前置 NOT の連鎖（NOT NOT ...）が偶奇で畳まれることを検証する。偶数個は肯定形＝素の一致に戻り、
-    /// 奇数個は否定形＝NULL 前提の内側の否定になる（畳まずに 1 段ずつ包むと、否定が NULL 前提の外に出て
-    /// NOT LIKE と結果が割れる）
-    /// </summary>
-    [Fact(DisplayName = "前置 NOT の連鎖は偶奇で畳まれる")]
-    public void Emit_ChainedNot_FoldsByParity()
-    {
-        Emit("NOT NOT Memo LIKE '%x%'", CreatePlainBindings())
-            .Lambda.Should()
-            .Be("e => (e.Memo != null && e.Memo!.Contains(\"x\"))");
-        Emit("NOT NOT NOT Memo LIKE '%x%'", CreatePlainBindings())
-            .Lambda.Should()
-            .Be("e => (e.Memo != null && !(e.Memo!.Contains(\"x\")))");
-    }
-
-    /// <summary>NULL 非許容の文字列列には null 抑止（!）も NULL 前提も付かないことを検証する</summary>
-    [Fact(DisplayName = "NULL 非許容列の文字列一致に ! と NULL 前提は付かない")]
-    public void Emit_StringMatch_NonNullableColumn()
-    {
-        var bindings = CreatePlainBindings();
-        bindings[_entity.Columns[2].Id] = new QueryColumnBinding(
-            "Memo",
-            "string",
-            null,
-            false,
-            IsUnderlyingReferenceType: true,
-            IsGuidKeyValueObject: false
-        );
-        // Memo を NULL 非許容へ変更（パーサ検証は IsNullable を見るため列側も揃える）
-        _entity.Columns[2].IsNullable = false;
-
-        Emit("Memo CONTAINS @keyword", bindings)
-            .Lambda.Should()
-            .Be("e => e.Memo.Contains(keyword)");
-    }
-
-    /// <summary>IN / NOT IN がコレクション Contains になることを検証する</summary>
-    [Fact(DisplayName = "IN はコレクション Contains になる")]
-    public void Emit_In()
-    {
-        Emit("CustomerId IN @ids", CreatePlainBindings())
-            .Lambda.Should()
-            .Be("e => ids.Contains(e.CustomerId)");
-        Emit("CustomerId NOT IN @ids", CreatePlainBindings())
-            .Lambda.Should()
-            .Be("e => !(ids.Contains(e.CustomerId))");
-    }
-
-    /// <summary>
-    /// NOT がド・モルガンの法則で原子まで押し下げられ、原子ごとに否定の形になることを検証する
-    /// （等値は演算子の反転・NULL 判定は向きの反転・IN は NOT IN・NULL 許容列の順序比較は「列が NULL」の OR）。
-    /// <c>!(...)</c> で包むと、SQL の UNKNOWN が否定の外へ残って C# の否定と結果が割れる
-    /// </summary>
-    [Fact(
-        DisplayName = "NOT は原子まで押し下げ、NULL 許容列の順序比較の否定は列が NULL の行も一致させる"
-    )]
-    public void Emit_Not_IsPushedDownToAtoms()
-    {
-        var bindings = CreatePlainBindings();
-        bindings[_entity.Columns[1].Id] = new QueryColumnBinding(
-            "Amount",
-            "decimal",
-            null,
-            true,
-            IsUnderlyingReferenceType: false,
-            IsGuidKeyValueObject: false
-        );
-
-        Emit("NOT Amount < @minAmount", bindings)
-            .Lambda.Should()
-            .Be("e => (e.Amount == null || !(e.Amount < minAmount))");
-        Emit("NOT CustomerId < 3", bindings).Lambda.Should().Be("e => !(e.CustomerId < 3)");
-        Emit("NOT (Amount < @minAmount OR CustomerId = @customerId)", bindings)
-            .Lambda.Should()
-            .Be(
-                "e => ((e.Amount == null || !(e.Amount < minAmount)) && e.CustomerId != customerId)"
-            );
-        Emit("NOT (CustomerId <> 1 AND Memo IS NULL)", bindings)
-            .Lambda.Should()
-            .Be("e => (e.CustomerId == 1 || e.Memo != null)");
-        Emit("NOT NOT Amount < @minAmount", bindings)
-            .Lambda.Should()
-            .Be("e => e.Amount < minAmount");
-        Emit("NOT (CustomerId IN @ids)", bindings)
-            .Lambda.Should()
-            .Be("e => !(ids.Contains(e.CustomerId))");
-        Emit("NOT (CustomerId NOT IN @ids)", bindings)
-            .Lambda.Should()
-            .Be("e => ids.Contains(e.CustomerId)");
-    }
-
-    /// <summary>VO 列でも NOT は原子まで押し下げ、NULL 許容列の順序比較の否定は列が NULL の行も一致させる</summary>
-    [Fact(DisplayName = "VO 列: NULL 許容列の順序比較の否定は列が NULL の行も一致させる")]
-    public void Emit_Not_ValueObjectOrderedComparison()
-    {
-        var bindings = CreateVoBindings();
-        bindings[_entity.Columns[1].Id] = new QueryColumnBinding(
-            "Amount",
-            "decimal",
-            "AmountValue",
-            true,
-            IsUnderlyingReferenceType: false,
-            IsGuidKeyValueObject: false
-        );
-
-        Emit("Amount < 1", bindings)
-            .Lambda.Should()
-            .Be("e => (e.Amount != null && e.Amount < AmountValue.Create(1m))");
-        Emit("NOT Amount < 1", bindings)
-            .Lambda.Should()
-            .Be("e => (e.Amount == null || !(e.Amount < AmountValue.Create(1m)))");
-    }
-
-    /// <summary>VO 列の比較が VO.Create で包まれることを検証する</summary>
-    [Fact(DisplayName = "VO 列の比較は VO.Create で包む")]
-    public void Emit_ValueObjectComparison()
-    {
-        Emit("CustomerId = @customerId", CreateVoBindings())
-            .Lambda.Should()
-            .Be("e => e.CustomerId == CustomerIdValue.Create(customerId)");
-        Emit("Amount > -1.5", CreateVoBindings())
-            .Lambda.Should()
-            .Be("e => e.Amount > AmountValue.Create(-1.5m)");
-    }
-
-    /// <summary>VO 列の IN がメソッド冒頭の VO リスト持ち上げ＋Contains になることを検証する</summary>
-    [Fact(DisplayName = "VO 列の IN は前置文で VO リストへ持ち上げる")]
-    public void Emit_ValueObjectIn()
-    {
-        var emitted = Emit("CustomerId IN @ids", CreateVoBindings());
-
-        emitted
-            .PreludeLines.Should()
-            .ContainSingle()
-            .Which.Should()
-            .Be("var idsValues = ids.Select(CustomerIdValue.Create).ToList();");
-        emitted.Lambda.Should().Be("e => idsValues.Contains(e.CustomerId)");
-    }
-
-    /// <summary>
-    /// NULL 許容の VO 列の IN は、持ち上げた <c>List&lt;Vo&gt;.Contains(Vo)</c> に NULL を渡す形になり CS8604 になるため、
-    /// 列に null 抑止（!）を付けることを検証する（NULL 非許容の列には付けない）
-    /// </summary>
-    [Fact(DisplayName = "NULL 許容の VO 列の IN は列に null 抑止を付ける")]
-    public void Emit_ValueObjectIn_NullableColumn_SuppressesNullWarning()
-    {
-        var bindings = CreateVoBindings();
-        bindings[_entity.Columns[0].Id] = new QueryColumnBinding(
-            "CustomerId",
-            "int",
-            "CustomerIdValue",
-            true,
-            IsUnderlyingReferenceType: false,
-            IsGuidKeyValueObject: false
-        );
-
-        Emit("CustomerId IN @ids", bindings)
-            .Lambda.Should()
-            .Be("e => idsValues.Contains(e.CustomerId!)");
-        Emit("CustomerId NOT IN @ids", bindings)
-            .Lambda.Should()
-            .Be("e => !(idsValues.Contains(e.CustomerId!))");
-    }
-
-    /// <summary>
-    /// 持ち上げリスト変数名（{パラメータ名}Values）がメソッド引数名と衝突するとき、_ を後置して
-    /// 回避することを検証する（衝突したままだとローカル変数が引数を隠して CS0136 になる）
-    /// </summary>
-    [Fact(DisplayName = "持ち上げ変数は引数名との衝突を _ 後置で回避する")]
-    public void Emit_ValueObjectIn_AvoidsParameterNameCollision()
-    {
-        var emitted = Emit("CustomerId IN @ids", CreateVoBindings(), "idsValues");
-
-        emitted
-            .PreludeLines.Should()
-            .ContainSingle()
-            .Which.Should()
-            .Be("var idsValues_ = ids.Select(CustomerIdValue.Create).ToList();");
-        emitted.Lambda.Should().Be("e => idsValues_.Contains(e.CustomerId)");
-    }
-
-    /// <summary>VO 型で型付けされたパラメータ（列参照）は Create で包まず直接比較されることを検証する</summary>
-    [Fact(DisplayName = "VO 型パラメータは直接比較・IN も持ち上げなし")]
-    public void Emit_ValueObjectTypedParameter_ComparesDirectly()
-    {
-        var names = _parameters.Select(p => p.Name).ToList();
-        var parameterVos = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["customerId"] = "CustomerIdValue",
-            ["ids"] = "CustomerIdValue",
-        };
-
-        var equal = QueryConditionParser.ParseAndValidate(
-            "CustomerId = @customerId",
-            _entity,
-            _parameters
-        );
-        QueryConditionCSharpEmitter
-            .Emit(equal.Root!, CreateVoBindings(), names, parameterVos)
-            .Lambda.Should()
-            .Be("e => e.CustomerId == customerId");
-
-        var inCondition = QueryConditionParser.ParseAndValidate(
-            "CustomerId IN @ids",
-            _entity,
-            _parameters
-        );
-        var emitted = QueryConditionCSharpEmitter.Emit(
-            inCondition.Root!,
-            CreateVoBindings(),
-            names,
-            parameterVos
-        );
-        emitted.Lambda.Should().Be("e => ids.Contains(e.CustomerId)");
-        emitted.PreludeLines.Should().BeEmpty("VO 型リストはそのまま比較できるため持ち上げ不要");
-    }
-
-    /// <summary>VO 列の文字列一致は string オーバーロードのまま（Create で包まない）ことを検証する</summary>
-    [Fact(DisplayName = "VO 列の文字列一致は string 引数のまま")]
-    public void Emit_ValueObjectStringMatch()
-    {
-        Emit("Memo LIKE @keyword", CreateVoBindings())
-            .Lambda.Should()
-            .Be("e => (e.Memo != null && e.Memo!.Contains(keyword))");
-    }
-
-    /// <summary>ラムダ変数がパラメータ名と衝突しないことを検証する</summary>
-    [Fact(DisplayName = "ラムダ変数は引数名と衝突しない")]
-    public void Emit_LambdaVariableAvoidsCollision()
-    {
-        Emit("CustomerId = @customerId", CreatePlainBindings(), "e")
-            .Lambda.Should()
-            .StartWith("e1 => ");
-    }
-
-    /// <summary>NULL 非許容列への IS NULL が診断エラーになることを検証する（パーサ側ガード）</summary>
-    [Fact(DisplayName = "NULL 非許容列への IS NULL は診断エラー")]
-    public void Validate_NullCheckOnNonNullableColumn_Fails()
-    {
-        var result = QueryConditionParser.ParseAndValidate(
-            "CustomerId IS NULL",
-            _entity,
-            _parameters
-        );
-
-        result.Success.Should().BeFalse();
-        result.Diagnostics.Should().ContainSingle().Which.Message.Should().Contain("CustomerId");
     }
 }

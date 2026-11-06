@@ -6,7 +6,7 @@ namespace QuickER.Tests.TestSupport;
 /// <summary>
 /// QuickER が付ける既定の制約名が方言の上限を超える図（表の名前が長い図）を組み立てる
 /// </summary>
-/// <remarks>単体（<c>LongDefaultConstraintNameTests</c>）と Integration（同期計画の期待の行 <c>realdb-long-default-*</c> と <c>PostgreSqlLongDefaultConstraintNameIntegrationTests</c>）が共有する。</remarks>
+/// <remarks>単体（<c>LongDefaultConstraintNameTests</c>・方言の DDL の表の行 <c>ddl-long-default-names-are-shortened</c>・<c>sync-add-table-long-default-names-are-shortened</c>）と Integration（同期計画の期待の行 <c>diff-long-default-*</c>・<c>diff-pg-user-named-fk-equal-to-shortened-default-is-not-absorbed</c>・<c>realdb-long-default-*</c> と <c>PostgreSqlLongDefaultConstraintNameIntegrationTests</c>）が共有する。</remarks>
 public static class LongNameDiagrams
 {
     /// <summary>

@@ -24,7 +24,8 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// </para>
 /// <para>
 /// これらの規則は式木の中の呼び出しを診断しない（式木の比較は SQL などへ翻訳されるので、多重定義を変えると翻訳できない）。
-/// 簡易 DSL と手書きの LINQ の条件は式木なので、インメモリの実行器での比べ方は <see cref="InMemoryStringMatchOrdinalTests"/> が固定する。
+/// 簡易 DSL と手書きの LINQ の条件は式木なので、インメモリの実行器での比べ方は <see cref="InMemoryStringMatchOrdinalTests"/>（手書きの LINQ）と
+/// <see cref="DslConditionFuzzTests"/>（簡易 DSL）が固定する。
 /// </para>
 /// </remarks>
 public sealed class GeneratedCodeCultureAnalyzerTests(ITestOutputHelper output)
@@ -111,7 +112,7 @@ public sealed class GeneratedCodeCultureAnalyzerTests(ITestOutputHelper output)
             .Should()
             .NotContain(
                 diagnostic => diagnostic.GetMessage(null).Contains("EndsWith"),
-                "式木の中の EndsWith は診断されない（インメモリの式木の比較は InMemoryStringMatchOrdinalTests が固定する）"
+                "式木の中の EndsWith は診断されない（インメモリの式木の比較は InMemoryStringMatchOrdinalTests と DslConditionFuzzTests が固定する）"
             );
     }
 

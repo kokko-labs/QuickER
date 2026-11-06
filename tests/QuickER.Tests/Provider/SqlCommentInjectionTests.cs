@@ -15,7 +15,7 @@ namespace QuickER.Tests.Provider;
 /// </para>
 /// <list type="number">
 ///   <item><b>入口</b>: <c>SqlNameText</c> が名前（テーブル・列・制約）の改行・制御文字を拒否する
-///   （<c>SqlNameTextTests</c>）。名前は出力へ到達しない</item>
+///   （方言の DDL の表の行 <c>ddl-*-name-with-newline-is-rejected</c>・<c>sync-*-name-with-newline-is-rejected</c>）。名前は出力へ到達しない</item>
 ///   <item><b>構造</b>: <c>SqlCommentSanitizeGuardTests</c> が「<c>--</c> コメントへ埋める式は
 ///   <see cref="SqlComment.Sanitize"/> を通る」をソース上で全数検査する（埋め込み箇所の漏れを検知する）</item>
 ///   <item><b>出力</b>: 入口で止めない<b>説明</b>（<see cref="Entity.Description"/> /

@@ -102,27 +102,18 @@ public class MainViewModelRelationshipConstraintNameTests : IDisposable
         return vm.Relationships[^1];
     }
 
+    /// <remarks>
+    /// 残す理由（P3-6）：同じ子にほかの親への外部キー（FK_A_B_C）があっても、既定名 FK_A_B_B_C が空いていればそのまま付けること。1 本目の
+    /// FK_A_B_C と、別の組が同じ既定名になる 2 本目の FK_A_B_C_B_CId は、同じ図の ConstraintNameCreationPathTests.UniqueForeignKeyName_IsTheSameOnEveryCreationPath
+    /// が GUI の手作成・内蔵チャット・MCP の 3 経路と DDL で固定する
+    /// </remarks>
     [Fact(DisplayName = "作成時の制約名は、衝突が無ければ既定名 FK_{子}_{親} のまま")]
     public void CreateRelationship_NoCollision_UsesDefaultName()
     {
         var vm = CreateViewModel();
+        Connect(vm, "C", "A_B");
 
-        Connect(vm, "C", "A_B").ConstraintName.Should().Be("FK_A_B_C");
         Connect(vm, "B_C", "A_B").ConstraintName.Should().Be("FK_A_B_B_C");
-    }
-
-    [Fact(
-        DisplayName = "別の組が同じ既定名になるとき、作成時の制約名は子の列名を足して衝突を避ける"
-    )]
-    public void CreateRelationship_DefaultNameTakenByAnotherPair_GetsUniqueName()
-    {
-        var vm = CreateViewModel();
-
-        var first = Connect(vm, "C", "A_B");
-        var second = Connect(vm, "B_C", "A");
-
-        first.ConstraintName.Should().Be("FK_A_B_C");
-        second.ConstraintName.Should().Be("FK_A_B_C_B_CId");
     }
 
     [Fact(

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
 
@@ -327,6 +328,49 @@ internal static class ExpectationScenarios
         s.Tbl("pair", ("a", "INT", true), ("b", "INT", true));
         s.Tbl("ref", ("id", "INT", true), ("ra", "INT", false), ("rb", "INT", false));
         return s.Fk("pair", "ref", "FK_ref", ("a", "ra"), ("b", "rb"));
+    }
+
+    /// <summary>
+    /// 図を、取込が返すのと同じ形の DB 側の図にして足す：同じ表・列（同じ Id）で、外部キーは DB の名前（<paramref name="liveName"/>）を持ち、
+    /// 一意制約は DDL が付けた合成名（図の対象 DBMS の上限に収めた名前）を持つ
+    /// </summary>
+    /// <param name="s">足す先（DB 側の図）</param>
+    /// <param name="diagram">DDL で DB を作った図</param>
+    /// <param name="liveName">外部キーごとの DB の名前</param>
+    public static void AsImported(
+        ExpectationSchema s,
+        ErDiagram diagram,
+        Func<Relationship, string> liveName
+    )
+    {
+        var entities = diagram.Entities.Select(entity => entity.Clone(preserveId: true)).ToList();
+        var relationships = diagram
+            .Relationships.Select(rel => new Relationship
+            {
+                SourceEntityId = rel.SourceEntityId,
+                TargetEntityId = rel.TargetEntityId,
+                Type = rel.Type,
+                ColumnPairs = rel.ColumnPairs.ToList(),
+                ConstraintName = liveName(rel),
+            })
+            .ToList();
+
+        foreach (var entity in entities)
+        {
+            foreach (var constraint in entity.UniqueConstraints)
+            {
+                var columnNames = constraint.ColumnIds.Select(id =>
+                    entity.Columns.Single(column => column.Id == id).Name
+                );
+                constraint.Name = UniqueConstraint.SynthesizeName(
+                    entity.TableName,
+                    columnNames,
+                    IdentifierLengthLimits.ForDbms(diagram.TargetDbms)
+                );
+            }
+        }
+
+        s.Adopt(entities, relationships);
     }
 
     /// <summary>

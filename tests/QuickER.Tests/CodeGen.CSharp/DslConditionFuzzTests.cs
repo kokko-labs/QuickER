@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using AwesomeAssertions;
 using Microsoft.Data.Sqlite;
@@ -27,6 +28,12 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// <para>
 /// MySQL の単位（符号なし整数・sbyte）は MySQL の QuickER 版 Repository が無いため、インメモリでだけ実行する。
 /// シードの数は <c>QUICKER_FUZZ_SEEDS</c>（既定 2）。
+/// </para>
+/// <para>
+/// 網羅の単位（値オブジェクトありの <see cref="DslFuzzUnits.Coverage"/> と、値オブジェクトなしの
+/// <see cref="DslFuzzUnits.PlainCoverage"/>）は書式のカルチャをインバリアントにして流し、SQLite の 2 単位の序数の比較のクエリ
+/// （<see cref="DslFuzzGenerator.OrdinalQueryPrefix"/>）だけをインメモリの範囲で ja-JP・tr-TR でも流し直す（インメモリの前方・
+/// 後方一致は序数で、カルチャに依らない）。
 /// </para>
 /// </remarks>
 public class DslConditionFuzzTests
@@ -122,16 +129,43 @@ public class DslConditionFuzzTests
 
         // 網羅の単位（DslFuzzUnits.Coverage）を種の前に流して数える（種を 1 つだけ流すときは流さない）。単位のクエリは
         // どの実装先でも照合したクエリにならなければ名指しで赤にする
-        (DslFuzzUnit Unit, DslFuzzTarget Target)[] coverageUnits = plan.IsSingle
-            ? []
-            :
-            [
-                (DslFuzzUnits.Coverage(DialectNames.Sqlite), SqliteTarget),
-                (DslFuzzUnits.Coverage(DialectNames.MySql), MySqlTarget),
-            ];
+        // 網羅の単位は書式のカルチャをインバリアントにして流し、SQLite の 2 単位の序数のクエリ（KO*）はインメモリの範囲だけ
+        // ja-JP・tr-TR でも流す
+        // （インメモリの文字列一致は序数＝docs。カルチャで比べると合成済みと分解形の「が」が等しく、ソフトハイフンが無視される）
+        var coverageUnits = new List<(DslFuzzUnit Unit, DslFuzzTarget Target, string Culture)>();
 
-        foreach (var (unit, target) in coverageUnits)
+        if (!plan.IsSingle)
         {
+            coverageUnits.Add(
+                (DslFuzzUnits.Coverage(DialectNames.Sqlite), SqliteTarget, InvariantCultureName)
+            );
+            coverageUnits.Add((DslFuzzUnits.PlainCoverage(), SqliteTarget, InvariantCultureName));
+            coverageUnits.Add(
+                (DslFuzzUnits.Coverage(DialectNames.MySql), MySqlTarget, InvariantCultureName)
+            );
+
+            foreach (var culture in InMemoryCultures)
+            {
+                coverageUnits.Add(
+                    (
+                        OrdinalOnly(DslFuzzUnits.Coverage(DialectNames.Sqlite), culture),
+                        SqliteInMemoryTarget,
+                        culture
+                    )
+                );
+                coverageUnits.Add(
+                    (
+                        OrdinalOnly(DslFuzzUnits.PlainCoverage(), culture),
+                        SqliteInMemoryTarget,
+                        culture
+                    )
+                );
+            }
+        }
+
+        foreach (var (unit, target, culture) in coverageUnits)
+        {
+            using var scope = new CultureScope(culture);
             await DslFuzzRunner.RunAsync(ledger, unit, target, Ct, coverage, minimumChecked: 0);
         }
 
@@ -171,6 +205,52 @@ public class DslConditionFuzzTests
 
         // 網羅しない組は、照合の結果を表明してから照合する（既定の種の数のときだけ）
         DslFuzzCoverage.AssertGaps(coverageReports, plan);
+    }
+
+    /// <summary>網羅の単位を流す書式のカルチャ（インバリアント）の名前</summary>
+    private static readonly string InvariantCultureName = CultureInfo.InvariantCulture.Name;
+
+    /// <summary>
+    /// SQLite の網羅の単位をインメモリの範囲だけで流し直すカルチャ（合成済みと分解形を等しくみなす日本語と、
+    /// i の大文字小文字が違うトルコ語）
+    /// </summary>
+    private static readonly string[] InMemoryCultures = ["ja-JP", "tr-TR"];
+
+    /// <summary>SQLite の構成のインメモリだけ（網羅の単位をカルチャを変えて流し直す）</summary>
+    private static readonly DslFuzzTarget SqliteInMemoryTarget = SqliteTarget with
+    {
+        Backends = [DslFuzzBackend.InMemory],
+    };
+
+    /// <summary>
+    /// カルチャを変えて流し直す単位：序数の比較を確かめるクエリ（<see cref="DslFuzzGenerator.OrdinalQueryPrefix"/>）だけに絞り、
+    /// 名前にカルチャを添える（失敗のキーと名指し）
+    /// </summary>
+    /// <remarks>
+    /// カルチャで結果が変わり得るのはインメモリの文字列一致の比べ方だけで、ほかのクエリは書式のカルチャに触れない（生成物の
+    /// カルチャ不変は <c>CultureInvariantGenerationTests</c> と生成コードのアナライザが見る）。絞った結果が空なら、黙って空振りしない
+    /// よう例外にする。
+    /// </remarks>
+    private static DslFuzzUnit OrdinalOnly(DslFuzzUnit unit, string culture)
+    {
+        var queries = unit
+            .Queries.Where(query =>
+                query.Name.StartsWith(DslFuzzGenerator.OrdinalQueryPrefix, StringComparison.Ordinal)
+            )
+            .ToList();
+
+        if (queries.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"網羅の単位 {unit.Name} に序数の比較のクエリ（{DslFuzzGenerator.OrdinalQueryPrefix}*）がありません。"
+            );
+        }
+
+        return unit with
+        {
+            Name = $"{unit.Name}@{culture}",
+            Queries = queries,
+        };
     }
 
     /// <summary>

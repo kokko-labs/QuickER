@@ -36,6 +36,31 @@ public static class DslFuzzDimensions
     /// <summary>原子を囲む NOT の数が奇数か</summary>
     public const string UnderNot = "UnderNot";
 
+    /// <summary>原子を囲む NOT の段数と、NOT が包む合成の種類</summary>
+    public const string NotNesting = "NotNesting";
+
+    /// <summary>NOT に囲まれない原子</summary>
+    public const string NestingNone = "none";
+
+    /// <summary>直上の NOT が 1 段（<c>NOT a</c>）</summary>
+    public const string NestingSingle = "single";
+
+    /// <summary>直上の NOT が 2 段（<c>NOT NOT a</c>）</summary>
+    public const string NestingDouble = "double";
+
+    /// <summary>直上の NOT が 3 段以上（<c>NOT NOT NOT a</c>）</summary>
+    public const string NestingTriple = "triple";
+
+    /// <summary>直上に NOT が無く、最も近い NOT が AND を包む（<c>NOT (a AND b)</c>）</summary>
+    public const string NestingGroupAnd = "group-and";
+
+    /// <summary>直上に NOT が無く、最も近い NOT が OR を包む（<c>NOT (a OR b)</c>）</summary>
+    public const string NestingGroupOr = "group-or";
+
+    /// <summary>NOT の入れ子の水準（並びは網羅の単位のクエリの名前の番号に使う）</summary>
+    public static IReadOnlyList<string> NestingLevels { get; } =
+    [NestingNone, NestingSingle, NestingDouble, NestingTriple, NestingGroupAnd, NestingGroupOr];
+
     /// <summary>原子を含むクエリの種類</summary>
     public const string Query = "Query";
 
@@ -106,6 +131,11 @@ public static class DslFuzzDimensions
                     "原子を囲む NOT の数が奇数か（エミッタとオラクルが NOT を原子まで押し下げる向き）"
                 ),
                 new Factor(
+                    NotNesting,
+                    NestingLevels.Select(level => new Level(level)).ToList(),
+                    "原子を囲む NOT の段数と NOT が包む合成の種類（直上の NOT の連鎖が 1・2・3 段以上か、直上に NOT が無ければ最も近い NOT が包む AND / OR。NOT が無ければ none）"
+                ),
+                new Factor(
                     Query,
                     [
                         new Level(AtomQuery),
@@ -118,7 +148,7 @@ public static class DslFuzzDimensions
                         }.Select(shape => new Level($"compound-{shape}", AxisMember.Of(shape))),
                         new Level(ProjectionNonNull),
                     ],
-                    "原子を含むクエリ（原子だけのクエリ・合成のクエリの戻り形・射影の非 NULL 指定）"
+                    "原子を含むクエリ（原子だけのクエリ＝原子 1 つかその NOT 1 つ・合成のクエリの戻り形・射影の非 NULL 指定）"
                 ),
             ],
             isValid: IsValid
@@ -142,7 +172,8 @@ public static class DslFuzzDimensions
     /// <remarks>
     /// 残るのは受け入れた組（方言が列の型として持てない種類・EF Core の SQLite プロバイダが翻訳できない比較）だけ。
     /// 既定の種で出揃わない組・種の単位が作らない組（NULL を許す GuidKey の列・MySQL の単位に無い列の種類・射影の非 NULL 指定の
-    /// 条件の形・合成のクエリの原子の形と戻り形）は、網羅の単位（<see cref="DslFuzzUnits.Coverage"/>）が種の前に埋める。
+    /// 条件の形・合成のクエリの原子の形と戻り形・NOT の入れ子の 2 段以上と合成を包む NOT）は、網羅の単位
+    /// （<see cref="DslFuzzUnits.Coverage"/>）が種の前に埋める。
     /// </remarks>
     public static CoverageGapSet Gaps { get; } =
         CoverageGap.Set(
@@ -217,7 +248,7 @@ public static class DslFuzzDimensions
     )
     {
         var names = kinds.Select(clr => clr.ToString()).ToHashSet(StringComparer.Ordinal);
-        return new[] { Shape, Negated, UnderNot, Query }.Select(other =>
+        return new[] { Shape, Negated, UnderNot, NotNesting, Query }.Select(other =>
             (other, (Func<string, string, bool>)((clr, _) => names.Contains(clr)))
         );
     }
@@ -237,7 +268,14 @@ public static class DslFuzzDimensions
             : query.ProjectedNonNull ? ProjectionNonNull
             : $"compound-{query.Returns}";
 
-        foreach (var (atom, underNot) in AtomsWithPolarity(query.Condition, false))
+        foreach (
+            var (atom, underNot, nesting) in AtomsWithPolarity(
+                query.Condition,
+                underNot: false,
+                chain: 0,
+                group: null
+            )
+        )
         {
             counter.Observe(
                 new Dictionary<string, string>(StringComparer.Ordinal)
@@ -246,6 +284,7 @@ public static class DslFuzzDimensions
                     [Shape] = ShapeOf(atom),
                     [Negated] = atom.InherentNegation ? "Yes" : "No",
                     [UnderNot] = underNot ? "Yes" : "No",
+                    [NotNesting] = nesting,
                     [Query] = queryKind,
                 }
             );
@@ -267,17 +306,42 @@ public static class DslFuzzDimensions
             _ => atom.GetType().Name,
         };
 
-    /// <summary>原子と、それを囲む NOT の数が奇数か（出現順）</summary>
-    private static IEnumerable<(DslAtom Atom, bool UnderNot)> AtomsWithPolarity(
+    /// <summary>
+    /// 原子と、それを囲む NOT の数が奇数か・NOT の入れ子の水準（出現順）
+    /// </summary>
+    /// <param name="node">節</param>
+    /// <param name="underNot">ここまでの NOT の数が奇数か</param>
+    /// <param name="chain">この節の直上に続く NOT の段数</param>
+    /// <param name="group">最も近い NOT が包む合成の水準（NOT の直下の AND / OR を通ったとき。無ければ null）</param>
+    private static IEnumerable<(DslAtom Atom, bool UnderNot, string Nesting)> AtomsWithPolarity(
         DslNode node,
-        bool underNot
+        bool underNot,
+        int chain,
+        string? group
     ) =>
         node switch
         {
-            DslAtom atom => [(atom, underNot)],
-            DslNot not => AtomsWithPolarity(not.Inner, !underNot),
-            DslAnd and => and.Items.SelectMany(item => AtomsWithPolarity(item, underNot)),
-            DslOr or => or.Items.SelectMany(item => AtomsWithPolarity(item, underNot)),
+            DslAtom atom =>
+            [
+                (
+                    atom,
+                    underNot,
+                    chain switch
+                    {
+                        0 => group ?? NestingNone,
+                        1 => NestingSingle,
+                        2 => NestingDouble,
+                        _ => NestingTriple,
+                    }
+                ),
+            ],
+            DslNot not => AtomsWithPolarity(not.Inner, !underNot, chain + 1, group),
+            DslAnd and => and.Items.SelectMany(item =>
+                AtomsWithPolarity(item, underNot, 0, chain > 0 ? NestingGroupAnd : group)
+            ),
+            DslOr or => or.Items.SelectMany(item =>
+                AtomsWithPolarity(item, underNot, 0, chain > 0 ? NestingGroupOr : group)
+            ),
             _ => throw new ArgumentOutOfRangeException(nameof(node), node.GetType().Name, null),
         };
 
@@ -313,12 +377,29 @@ public static class DslFuzzDimensions
     /// <remarks>
     /// 照合したクエリは生成時の型の検査（<c>QueryConditionTypeChecker</c>）を通ったものだけなので、型の検査が必ず断る
     /// 組み合わせは照合したクエリに現れない。NULL 判定は列ごとの NULL 許容で決まり、型では決まらないので規則にしない。
+    /// NOT の入れ子は、NOT が無ければ NOT の数が偶数であることと、原子だけのクエリ（定義が原子 1 つかその NOT 1 つ）が
+    /// 2 段以上の NOT・合成を包む NOT を持たないことだけを規則にする。
     /// </remarks>
     private static bool IsValid(IReadOnlyDictionary<string, string> assignment)
     {
         assignment.TryGetValue(Clr, out var clr);
         assignment.TryGetValue(Shape, out var shape);
         assignment.TryGetValue(Negated, out var negated);
+        assignment.TryGetValue(NotNesting, out var nesting);
+        assignment.TryGetValue(UnderNot, out var underNot);
+        assignment.TryGetValue(Query, out var queryKind);
+
+        // NOT に囲まれない原子を囲む NOT の数は 0（偶数）
+        if (nesting == NestingNone && underNot == "Yes")
+        {
+            return false;
+        }
+
+        // 原子だけのクエリは原子 1 つかその NOT 1 つ（クエリの種類の定義）なので、NOT の 2 段以上と合成を包む NOT を持たない
+        if (queryKind == AtomQuery && nesting is not (null or NestingNone or NestingSingle))
+        {
+            return false;
+        }
 
         // 比較の原子は自身の否定を持たない（否定の向きは <> の演算子か、外側の NOT で書く）
         if (shape is not null && shape.StartsWith("compare-", StringComparison.Ordinal))

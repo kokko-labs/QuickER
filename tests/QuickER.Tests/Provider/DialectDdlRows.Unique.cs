@@ -91,6 +91,33 @@ internal static partial class DialectDdlRows
                 .ExpectAll(e => e.Lines("uq shops UQ_shops_region_code (region, code)*")),
             DialectDdlRow
                 .Ddl(
+                    "ddl-unique-unnamed-synthesized-name-is-safe",
+                    "Build: 名前なし UNIQUE の合成名は、テーブル名（前後の空白・スキーマ）と列名（空白）を安全化して作る",
+                    E.Unique,
+                    F.ConstraintName,
+                    d =>
+                    {
+                        var entity = Table(
+                            " dbo.Orders",
+                            Pk("id", IntType[d]),
+                            Col("order code", VarcharType(d, 20), nullable: false),
+                            Col("tenant", VarcharType(d, 10), nullable: false)
+                        );
+                        entity.UniqueConstraints.Add(
+                            new UniqueConstraint
+                            {
+                                ColumnIds = [entity.Columns[1].Id, entity.Columns[2].Id],
+                            }
+                        );
+
+                        return Diagram(entity);
+                    }
+                )
+                .ExpectAll(e =>
+                    e.Lines("uq * UQ_dbo_Orders_order_code_tenant (order code, tenant)*")
+                ),
+            DialectDdlRow
+                .Ddl(
                     "ddl-unique-without-primary-key-keeps-comma",
                     "Build: PK なしでも UNIQUE 行の前の列にカンマが付く",
                     E.Unique,

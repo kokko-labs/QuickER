@@ -72,6 +72,7 @@
 - `DialectDdlTableTests` の行 `ddl-*-trimmed-table`・`sync-*-trimmed-table`：前後に空白のあるテーブル名で DDL と同期の FK 名・PK 名が 5 方言とも一致する。
 - `ConstraintNameCreationPathTests`：3 つの作成経路が同じ FK 名・要約の一意制約名で DDL と一致する。作成経路の照合を `ErDiagramToolHostParityTests` へ載せないのは、2 つのツールホストどうしを比べるテストは両方が同時に退行しても緑のままになるため。
 - `ConstraintNamesTests`（`ResolveUniqueConstraintNames_NumbersOnlyCollidingSynthesizedNames` を含む）・`UnnamedForeignKeyNamingTests`（5 方言の DDL・同期スクリプト・作り直しの同期スクリプト）
+- `DialectDdlTableTests` の行 `ddl-constraint-names-schema-qualified-trimmed-table`（スキーマ付きで前後に空白のある表名の FK 名・PK 名）・`ddl-unique-unnamed-synthesized-name-is-safe`（一意制約の合成名の安全化）・`ddl-fk-unnamed-non-fk-relationship-first-*`（外部キーを作らない関係が先に並ぶ 3 種）・`ddl-fk-named-many-to-many-reserves-name`・`ddl-fk-unnamed-avoids-unique-constraint-name`・`ddl-fk-unnamed-same-pair-twice-with-named-third`：5 方言の DDL が付ける外部キー名・主キー名・合成名
 - 期待の行・実 DB の行の Id（DDL・差分の外部キー名。詳細は `src/QuickER.Provider/CLAUDE.md`「制約名の正本と識別子の分割クォート」）：`diff-fk-unnamed-matches-default-named-live`・`realdb-fk-unnamed-relationship-no-diff-after-ddl`（名前の無いリレーションと DDL が既定名で作った live の外部キーに差分が出ない）・`diff-unnamed-fk-many-to-many-first-matches-live-with-default-name`・`realdb-fk-unnamed-many-to-many-first-ddl-uses-default-name`・`realdb-fk-unnamed-many-to-many-first-no-diff-with-default-named-db`（多対多が先に並んでも外部キーは既定名）・`diff-unnamed-fk-same-pair-twice-matches-live-named-by-ddl`・`diff-unnamed-fk-second-referential-action-change-replaces-under-same-name`・`realdb-fk-unnamed-same-pair-ddl-applies-no-diff`（名前の無い同じ組の外部キー 2 本）・`UnnamedForeignKeyNamingTests.Ddl_ManyToManyFirst_DoesNotShiftForeignKeyNames`（多対多が先に並んでも外部キーは既定名のまま）。
 - mutation 実証済み。
 
@@ -94,7 +95,7 @@ QuickER が付ける既定の制約名は識別子の長さの上限に収め、
 
 ガード：
 
-- `LongDefaultConstraintNameTests`（4 方言の DDL・同期・差分が同じ縮めた名前・PostgreSQL の吸収と吸収しないときの対照・利用者の名前は吸収しない）。
+- `LongDefaultConstraintNameTests`（4 方言の既定名の関数が上限以内で互いに違う名前を返す）・`DialectDdlTableTests` の行 `ddl-long-default-names-are-shortened`・`sync-add-table-long-default-names-are-shortened`（DDL・同期スクリプトが同じ縮めた名前を使い、縮める前の名前を出さない。SQLite は縮めない）・`SyncPlanExpectationRows` の行 `diff-long-default-fk-names-match-shortened-live`（4 方言の差分が縮めた名前の live を同じ外部キーとみなす）・`diff-long-default-pg-legacy-truncated-fk-name-is-absorbed`（PostgreSQL の吸収と、合成の能力 `PostgreSql-NoTruncation` で吸収しない対照）・`diff-pg-user-named-fk-equal-to-shortened-default-is-not-absorbed`（利用者の名前は吸収しない）。期待の行は DB を使わない。
 - `PostgreSqlLongDefaultConstraintNameIntegrationTests`（能力を差し替えて吸収しない対照）。実 DB の期待の行 `realdb-long-default-names-apply-and-round-trip-no-diff` / `realdb-long-default-pg-legacy-truncated-fk-name-is-absorbed`（`SyncPlanExpectationRows.RealCrossDialect.cs`）。同期計画の来歴の行 `SyncPlanHistoryRows`。
 - `ToolScenarioTests`（行 `long-default-name-*`＝両ホストの保存名と要約・縮めた既定名との衝突・名前の無い外部キーの要約と削除と重複の名指し）・`MainViewModelRelationshipConstraintNameTests`（GUI の手作成）・`FormatRoundTripTests`（DBML・Mermaid の取込＝規則の行 `dbml-rule-long-default-name-*`・`mermaid-rule-carries-target-dbms`、形の行 `dbml-long-default-name-*`）。
 - `CodegenCaseTests` の行 `code-unique-constraint-name-*`・`UniqueConstraintResolvedNameLimitTests`（方言の切替で表示し直す。`ResolvedName_FollowsCollisionsAcrossTables`）・`IdentifierLengthLimitTests`（`Fit` / `Truncate`）。

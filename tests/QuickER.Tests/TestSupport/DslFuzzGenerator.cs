@@ -117,8 +117,9 @@ public sealed record DslFuzzUnit(
 /// <summary>簡易 DSL の条件の総当たりの生成器</summary>
 /// <remarks>
 /// docs と型の検査が「書ける」とする組み合わせだけを作る（文字列・Guid の順序比較・日時のリテラル・LIKE のリテラルの途中の
-/// <c>%</c> / <c>_</c> は作らない）。整数の型の範囲外のリテラルは値オブジェクトなしの単位でだけ作る（値オブジェクトありでは
-/// 型の検査が警告で飛ばす＝CLAUDE.md の名前付きクエリの節）。
+/// <c>%</c> / <c>_</c> は作らない）。型の検査が断る整数のリテラル（列の型〔値オブジェクトなら内包型〕の範囲の外と
+/// <c>ulong</c> を超える値）は、値オブジェクトの有無に依らず原子のクエリでだけ作り（<see cref="AllAtoms"/>）、警告で飛ばされる
+/// ことを表明する（合成の条件には混ぜない＝CLAUDE.md の名前付きクエリの節）。
 /// </remarks>
 public sealed class DslFuzzGenerator(int seed, bool valueObjects)
 {
@@ -321,14 +322,340 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
             );
         }
 
+        queries.AddRange(NestingQueries(forms, shapes, projectable, pinned));
+
         return queries;
     }
+
+    /// <summary>網羅の単位の NOT の入れ子のクエリの原子の数の上限</summary>
+    private const int NestingAtomsPerQuery = 12;
+
+    /// <summary>
+    /// 網羅の単位の NOT の入れ子のクエリ：形・自身の否定・列の種類の全水準を足す原子（<see cref="CoveringForms"/>）を、
+    /// NOT の入れ子の水準（<see cref="DslFuzzDimensions.NestingLevels"/>）ごとにその形で包んで OR でまとめた一覧のクエリ
+    /// （1 つおきに外側をもう 1 つの NOT で包み、NOT の数の奇偶の両方を作る）と、一覧以外の戻り形・射影の非 NULL 指定ごとに
+    /// 全水準を 1 つずつ持つクエリ
+    /// </summary>
+    /// <remarks>
+    /// 水準ごとの包み方は <see cref="WrapForNesting"/>。乱数は引かない（パラメータ名を付け直すだけ）。
+    /// </remarks>
+    private List<DslQuery> NestingQueries(
+        IReadOnlyList<DslAtom> forms,
+        IReadOnlyList<QueryReturnShape> shapes,
+        IReadOnlyList<DslColumn> projectable,
+        DslColumn pinned
+    )
+    {
+        var queries = new List<DslQuery>();
+        var picked = CoveringForms(forms);
+
+        for (var level = 0; level < DslFuzzDimensions.NestingLevels.Count; level++)
+        {
+            var nesting = DslFuzzDimensions.NestingLevels[level];
+            var grouped =
+                nesting is DslFuzzDimensions.NestingGroupAnd or DslFuzzDimensions.NestingGroupOr;
+            var chunks = NestingChunks(WrapForNesting(nesting, picked), grouped);
+
+            // 外側の NOT で包むものと包まないものを 1 つ以上ずつ作る（NOT の数の奇偶の両方）
+            if (chunks.Count == 1)
+            {
+                chunks.Add(NestingChunks(WrapForNesting(nesting, picked), grouped)[0]);
+            }
+
+            for (var i = 0; i < chunks.Count; i++)
+            {
+                DslNode condition = new DslOr(chunks[i]);
+                queries.Add(
+                    new DslQuery
+                    {
+                        Name = $"KN{level}c{i}",
+                        Condition = i % 2 == 1 ? new DslNot(condition) : condition,
+                        Returns = QueryReturnShape.List,
+                        IsAtomQuery = false,
+                    }
+                );
+            }
+        }
+
+        foreach (var shape in shapes.Where(shape => shape != QueryReturnShape.List))
+        {
+            var name = $"KM{shape}";
+            queries.Add(
+                new DslQuery
+                {
+                    Name = name,
+                    Condition = AllNestings(picked),
+                    Returns = shape,
+                    IsAtomQuery = false,
+                    OrderDescending = true,
+                    ProjectedColumn = shape == QueryReturnShape.Projection ? projectable[0] : null,
+                    ResultTypeName = shape == QueryReturnShape.Projection ? name + "Row" : null,
+                }
+            );
+        }
+
+        queries.Add(
+            new DslQuery
+            {
+                Name = "KMP",
+                Condition = new DslAnd([
+                    new DslNullCheck(IsNot: true) { Column = pinned },
+                    AllNestings(picked),
+                ]),
+                Returns = QueryReturnShape.Projection,
+                IsAtomQuery = false,
+                ProjectedColumn = pinned,
+                ProjectedNonNull = true,
+                ResultTypeName = "KMPRow",
+            }
+        );
+
+        return queries;
+    }
+
+    /// <summary>
+    /// 原子をそれぞれ NOT の入れ子の水準の形で包む（none＝そのまま・single / double / triple＝NOT を 1・2・3 段・
+    /// group-and / group-or＝隣り合う 2 つを AND / OR でつないで NOT で包む。数が奇数なら最後は先頭の原子と組む）
+    /// </summary>
+    private List<DslNode> WrapForNesting(string nesting, IReadOnlyList<DslAtom> atoms)
+    {
+        DslNode Not(DslNode node, int times) =>
+            times == 0 ? node : Not(new DslNot(node), times - 1);
+
+        return nesting switch
+        {
+            DslFuzzDimensions.NestingNone => atoms.Select(atom => (DslNode)Rename(atom)).ToList(),
+            DslFuzzDimensions.NestingSingle => atoms.Select(atom => Not(Rename(atom), 1)).ToList(),
+            DslFuzzDimensions.NestingDouble => atoms.Select(atom => Not(Rename(atom), 2)).ToList(),
+            DslFuzzDimensions.NestingTriple => atoms.Select(atom => Not(Rename(atom), 3)).ToList(),
+            _ => Enumerable
+                .Range(0, (atoms.Count + 1) / 2)
+                .Select(index =>
+                {
+                    List<DslNode> pair =
+                    [
+                        Rename(atoms[2 * index]),
+                        Rename(atoms[(2 * index + 1) % atoms.Count]),
+                    ];
+                    return (DslNode)
+                        new DslNot(
+                            nesting == DslFuzzDimensions.NestingGroupAnd
+                                ? new DslAnd(pair)
+                                : new DslOr(pair)
+                        );
+                })
+                .ToList(),
+        };
+    }
+
+    /// <summary>
+    /// 包んだ項目を、原子が <see cref="NestingAtomsPerQuery"/> 個までになるように分ける（項目 1 つだけの塊は前の塊へ足す＝
+    /// 外側の NOT が 1 項目の OR を包むと、描画が NOT の 1 段と区別できない）
+    /// </summary>
+    private static List<List<DslNode>> NestingChunks(List<DslNode> items, bool grouped)
+    {
+        var chunks = items
+            .Chunk(grouped ? NestingAtomsPerQuery / 2 : NestingAtomsPerQuery)
+            .Select(chunk => chunk.ToList())
+            .ToList();
+
+        if (chunks.Count >= 2 && chunks[^1].Count == 1)
+        {
+            chunks[^2].AddRange(chunks[^1]);
+            chunks.RemoveAt(chunks.Count - 1);
+        }
+
+        return chunks;
+    }
+
+    /// <summary>NOT の入れ子の全水準を 1 つずつ持つ条件（原子 8 つ。足りなければ先頭から使い回す）</summary>
+    private DslNode AllNestings(IReadOnlyList<DslAtom> atoms)
+    {
+        DslAtom At(int index) => Rename(atoms[index % atoms.Count]);
+
+        return new DslOr([
+            At(0),
+            new DslNot(At(1)),
+            new DslNot(new DslNot(At(2))),
+            new DslNot(new DslNot(new DslNot(At(3)))),
+            new DslNot(new DslAnd([At(4), At(5)])),
+            new DslNot(new DslOr([At(6), At(7)])),
+        ]);
+    }
+
+    /// <summary>
+    /// 網羅の単位の決まった形のクエリ：NOT の入れ子と NULL 許容の列の組み合わせの代表（NOT NOT 原子・NOT NOT NOT 原子・
+    /// NOT (AND 群)・NOT (AND (比較, IS NULL))・NOT (OR 群)・前置 NOT と NOT LIKE の重ね）・整数の列の範囲の両端のリテラルと、<paramref name="ordinalStrings"/>
+    /// なら合成済みの「が」の前方・後方・部分一致とソフトハイフンで始まる前方一致（序数で比べる実装先と、カルチャで比べると
+    /// 結果が変わる値）
+    /// </summary>
+    /// <remarks>
+    /// 列は NULL 許容の文字列 <c>s</c> と NULL 許容の int <c>i32</c>（どの方言の網羅の単位にもある）。乱数（値とパラメータ名）は
+    /// この生成器から引く（網羅の単位の生成器＝種の列の外）。序数の値の行は呼び出し側が <see cref="DslFuzzUnits"/> で入れる。
+    /// </remarks>
+    /// <param name="columns">列</param>
+    /// <param name="ordinalStrings">序数で比べる文字列一致のクエリも作るか（SQLite の単位だけ）</param>
+    public List<DslQuery> FixedQueries(IReadOnlyList<DslColumn> columns, bool ordinalStrings)
+    {
+        var s = columns.Single(column => column.Name == "s");
+        var i32 = columns.Single(column => column.Name == "i32");
+        DslLike Like(bool negated, string shape) =>
+            new(negated, LikeLiteral(s, shape)) { Column = s };
+        DslCompare OnI32(DslOp op, bool literal) =>
+            new(op, literal ? Literal(i32) : Param(i32)) { Column = i32 };
+        DslNullCheck SIsNull() => new(IsNot: false) { Column = s };
+        DslNode Not(DslNode node) => new DslNot(node);
+        var exact = LikeLiteral(s, "exact");
+        DslNode[] conditions =
+        [
+            // NOT NOT の順序比較（NULL 許容の列）・NOT NOT のワイルドカードなしの LIKE・NOT NOT / NOT NOT NOT の部分一致
+            Not(Not(OnI32(DslOp.Lt, literal: false))),
+            Not(Not(Like(false, "exact"))),
+            Not(Not(Like(false, "contains"))),
+            Not(Not(Not(Like(false, "contains")))),
+            // NOT (比較 AND IS NULL)：パラメータとリテラル
+            Not(new DslAnd([OnI32(DslOp.Ge, literal: false), SIsNull()])),
+            Not(new DslAnd([OnI32(DslOp.Ne, literal: true), SIsNull()])),
+            // NOT (LIKE OR 比較)・NOT (比較 OR 文字列の等値)
+            Not(new DslOr([Like(false, "exact"), OnI32(DslOp.Eq, literal: true)])),
+            Not(new DslOr([Like(false, "exact"), OnI32(DslOp.Lt, literal: false)])),
+            Not(
+                new DslOr([
+                    OnI32(DslOp.Lt, literal: false),
+                    new DslCompare(DslOp.Eq, StringLiteral(s, likeSafe: false)) { Column = s },
+                ])
+            ),
+            // 肯定の LIKE と、同じ LIKE と IS NULL の OR の NOT
+            new DslOr([
+                new DslLike(false, exact) { Column = s },
+                Not(new DslOr([new DslLike(false, exact) { Column = s }, SIsNull()])),
+            ]),
+            // 前置 NOT と NOT LIKE の重ね・前置 NOT の部分一致
+            Not(Like(true, "contains")),
+            Not(Like(false, "contains")),
+            // 整数の列の型（値オブジェクトなら内包型）の範囲の両端のリテラル（型の検査が断らない端）
+            EdgeLiterals(columns),
+        ];
+        var queries = conditions
+            .Select(
+                (condition, index) =>
+                    new DslQuery
+                    {
+                        Name = $"KF{index}",
+                        Condition = condition,
+                        Returns = QueryReturnShape.List,
+                        IsAtomQuery = false,
+                    }
+            )
+            .ToList();
+
+        if (ordinalStrings)
+        {
+            string[] patterns =
+            [
+                OrdinalComposed + "%",
+                "%" + OrdinalComposed,
+                "%" + OrdinalComposed + "%",
+                OrdinalSoftHyphen + "a%",
+            ];
+
+            for (var i = 0; i < patterns.Length; i++)
+            {
+                queries.Add(
+                    new DslQuery
+                    {
+                        Name = $"{OrdinalQueryPrefix}{i}",
+                        Condition = new DslLike(
+                            false,
+                            new DslLiteral(patterns[i], "'" + patterns[i] + "'")
+                        )
+                        {
+                            Column = s,
+                        },
+                        Returns = QueryReturnShape.List,
+                        IsAtomQuery = false,
+                    }
+                );
+            }
+        }
+
+        return queries;
+    }
+
+    /// <summary>
+    /// byte・int・long の列（主キーでなく、どの方言の網羅の単位にもある型）の範囲の両端との等値を OR でつないだ条件
+    /// （元の QueryConditionTypeCheckTests の受理の形 PlainEdges・LongEdges・値オブジェクトの VoEdges。値の池の乱数で選ぶ
+    /// 境界値は種ごとに当たるとは限らないので、決まった形で毎回流す）
+    /// </summary>
+    private static DslNode EdgeLiterals(IReadOnlyList<DslColumn> columns)
+    {
+        var items = new List<DslNode>();
+
+        foreach (
+            var (clr, min, max) in new (DslClr, object, object)[]
+            {
+                (DslClr.Byte, byte.MinValue, byte.MaxValue),
+                (DslClr.Int32, int.MinValue, int.MaxValue),
+                (DslClr.Int64, long.MinValue, long.MaxValue),
+            }
+        )
+        {
+            var column = columns.First(column => column.Clr == clr && !column.PrimaryKey);
+
+            foreach (var value in new[] { min, max })
+            {
+                items.Add(
+                    new DslCompare(DslOp.Eq, new DslLiteral(value, DslFuzz.NumberText(value)))
+                    {
+                        Column = column,
+                    }
+                );
+            }
+        }
+
+        return new DslOr(items);
+    }
+
+    /// <summary>
+    /// 序数の比較を確かめるクエリ（合成済みと分解形の「が」・ソフトハイフンの LIKE）の名前の接頭辞（網羅の単位をカルチャを変えて
+    /// 流し直すときは、このクエリだけを流す）
+    /// </summary>
+    public const string OrdinalQueryPrefix = "KO";
+
+    /// <summary>合成済みの「が」（U+304C）</summary>
+    public const string OrdinalComposed = "\u304C";
+
+    /// <summary>分解形の「か＋濁点」（U+304B U+3099。カルチャで比べると合成済みと等しい）</summary>
+    public const string OrdinalDecomposed = "\u304B\u3099";
+
+    /// <summary>ソフトハイフン（U+00AD。カルチャで比べると無視される）</summary>
+    public const string OrdinalSoftHyphen = "\u00AD";
 
     /// <summary>
     /// 形・自身の否定・列の種類のまだ出していない水準を足す原子を貪欲に選び、<see cref="CoverageAtomsPerQuery"/> 個ずつ
     /// OR でまとめた条件（1 つおきに NOT で包む）
     /// </summary>
     private List<DslNode> CoverageChunks(IReadOnlyList<DslAtom> forms)
+    {
+        var picked = CoveringForms(forms).Select(Rename).ToList();
+
+        return picked
+            .Chunk(CoverageAtomsPerQuery)
+            .Select(chunk =>
+                (DslNode)
+                    new DslOr(
+                        chunk
+                            .Select(
+                                (atom, index) => index % 2 == 1 ? new DslNot(atom) : (DslNode)atom
+                            )
+                            .ToList()
+                    )
+            )
+            .ToList();
+    }
+
+    /// <summary>形・自身の否定・列の種類のまだ出していない水準を足す原子を、並びの先頭から貪欲に選ぶ（名前は付け直さない）</summary>
+    private static List<DslAtom> CoveringForms(IReadOnlyList<DslAtom> forms)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var picked = new List<DslAtom>();
@@ -345,23 +672,11 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
             // Count は短絡しない（3 つの水準をすべて記録する）
             if (keys.Count(seen.Add) > 0)
             {
-                picked.Add(Rename(atom));
+                picked.Add(atom);
             }
         }
 
-        return picked
-            .Chunk(CoverageAtomsPerQuery)
-            .Select(chunk =>
-                (DslNode)
-                    new DslOr(
-                        chunk
-                            .Select(
-                                (atom, index) => index % 2 == 1 ? new DslNot(atom) : (DslNode)atom
-                            )
-                            .ToList()
-                    )
-            )
-            .ToList();
+        return picked;
     }
 
     /// <summary>列に使える全ての形の原子（値は乱数）</summary>

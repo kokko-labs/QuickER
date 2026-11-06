@@ -1125,7 +1125,511 @@ internal static partial class CodegenCases
                     )
                 )
             ),
+            // ===== 名前（P3-6 で NameTrustBoundaryGenerationTests・GeneratedTypeNameCollisionTests・GeneratedMemberNameCaseTests から移した） =====
+            .. Service_ControlCharacterRows(),
+            .. Service_TypeNameRows(),
+            .. Service_MemberNameCaseRows(),
         ];
+
+    // ===== 名前の行（P3-6 で移した） =====
+
+    /// <summary>名前の行を組む（直接の入口・図の方言は SQL Server。説明は元のテストの DisplayName とメソッド名）</summary>
+    private static ScenarioRow<CodegenCase> Service_NameRow(
+        string id,
+        string description,
+        Func<ErDiagram> diagram,
+        CodeGenerationOptions options,
+        DiagnosticExpectation diagnostics,
+        bool compile = false
+    ) =>
+        new(
+            id,
+            null,
+            description,
+            new CodegenCase(diagram, options, DialectNames.SqlServer, diagnostics, Compile: compile)
+        );
+
+    /// <summary>
+    /// NameTrustBoundaryGenerationTests.FullOptions：Entity / EditModel / Mapper / QuickER 版 Repository / インメモリ
+    /// （名前の信頼境界の行が共有する）
+    /// </summary>
+    private static CodeGenerationOptions Service_NameTrustOptions() =>
+        new()
+        {
+            RootNamespace = "Sample.Domain",
+            GenerateEditModels = true,
+            GenerateMappers = true,
+            GenerateRepositories = true,
+            GenerateInMemoryRepositories = true,
+            IncludeDataAnnotations = true,
+        };
+
+    /// <summary>
+    /// 名前の制御文字の診断の行（NameTrustBoundaryGenerationTests.ControlCharacterInName_IsError の 5 か所の改行・
+    /// UnicodeLineSeparatorInColumnName_IsError の列名の Unicode の行区切り 3 つ）。期待は元の「Error で、文に場所の語を含む」に種類（resx のキー）を足したもの
+    /// </summary>
+    private static IEnumerable<ScenarioRow<CodegenCase>> Service_ControlCharacterRows()
+    {
+        const string Origin = "NameTrustBoundaryGenerationTests.";
+
+        foreach (
+            var (suffix, location) in new[]
+            {
+                ("table", "TABLE"),
+                ("column", "COLUMN"),
+                ("unique", "UNIQUE"),
+                ("foreign-key", "FOREIGN KEY"),
+                ("query", "QUERY"),
+            }
+        )
+        {
+            yield return Service_NameRow(
+                "diag-name-control-character-" + suffix,
+                $"名前に改行・制御文字を含む図は生成前診断の Error になる（{Origin}ControlCharacterInName_IsError(\"{location}\")）",
+                () => Service_ControlCharacterDiagram(location),
+                Service_NameTrustOptions(),
+                DiagnosticExpectation.Contains(
+                    ExpectedDiagnostic.ErrorMentioning(
+                        nameof(Strings.CodeGen_Error_NameContainsControlCharacter),
+                        location
+                    )
+                )
+            );
+        }
+
+        // C# 言語仕様の new-line（C0 の外側）。ソースに実文字を置かないよう、符号位置から作る
+        foreach (
+            var (suffix, separator, codePoint) in new[]
+            {
+                ("nel", char.ConvertFromUtf32(0x0085), "U+0085"),
+                ("line-separator", char.ConvertFromUtf32(0x2028), "U+2028"),
+                ("paragraph-separator", char.ConvertFromUtf32(0x2029), "U+2029"),
+            }
+        )
+        {
+            yield return Service_NameRow(
+                "diag-name-control-character-column-" + suffix,
+                $"Unicode の行区切り（{codePoint}）を含む列名も生成前診断の Error になる（{Origin}UnicodeLineSeparatorInColumnName_IsError）",
+                () =>
+                    new ErDiagram
+                    {
+                        Entities =
+                        [
+                            Service_Entity(
+                                "items",
+                                Service_Column("id", "int", primaryKey: true),
+                                Service_Column(
+                                    $"memo{separator}#error injected",
+                                    "nvarchar(50)",
+                                    nullable: true
+                                )
+                            ),
+                        ],
+                    },
+                Service_NameTrustOptions(),
+                DiagnosticExpectation.Contains(
+                    ExpectedDiagnostic.ErrorMentioning(
+                        nameof(Strings.CodeGen_Error_NameContainsControlCharacter),
+                        "COLUMN"
+                    )
+                )
+            );
+        }
+    }
+
+    /// <summary>
+    /// 指定した場所（TABLE・COLUMN・UNIQUE・FOREIGN KEY・QUERY）だけに改行入りの名前 <c>a\nb</c> を置いた図
+    /// （NameTrustBoundaryGenerationTests.BuildControlCharacterDiagram。親子 2 表・一意制約・外部キー・クエリ）
+    /// </summary>
+    private static ErDiagram Service_ControlCharacterDiagram(string location)
+    {
+        const string Injected = "a\nb";
+
+        var parentKey = Service_Column(
+            location == "COLUMN" ? Injected : "customer_id",
+            "int",
+            primaryKey: true
+        );
+        var childKey = Service_Column("customer_id", "int", foreignKey: true);
+        var parent = Service_Entity(location == "TABLE" ? Injected : "customers", parentKey);
+        var child = Service_Entity(
+            "orders",
+            Service_Column("order_id", "int", primaryKey: true),
+            childKey
+        );
+
+        parent.UniqueConstraints.Add(
+            new UniqueConstraint
+            {
+                Name = location == "UNIQUE" ? Injected : "UQ_customers",
+                ColumnIds = [parentKey.Id],
+            }
+        );
+
+        return new ErDiagram
+        {
+            Entities = [parent, child],
+            Relationships =
+            [
+                new Relationship
+                {
+                    Id = Guid.NewGuid(),
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                    Type = RelationshipType.OneToMany,
+                    ConstraintName = location == "FOREIGN KEY" ? Injected : "FK_orders_customers",
+                    ColumnPairs = [new(parentKey.Id, childKey.Id)],
+                },
+            ],
+            Queries =
+            [
+                new QueryDefinition
+                {
+                    EntityId = child.Id,
+                    Name = location == "QUERY" ? Injected : "GetAll",
+                },
+            ],
+        };
+    }
+
+    /// <summary>出力の形（GeneratedTypeNameCollisionTests.Output。行の Id の末尾）</summary>
+    private static IReadOnlyList<string> Service_Outputs => ["single", "split", "layered"];
+
+    /// <summary>
+    /// GeneratedTypeNameCollisionTests.Generate・GeneratedMemberNameCaseTests の構成 Full のオプション（値オブジェクト・EditModel・Mapper・
+    /// QuickER 版 Repository・インメモリ・EF Core・リモートサービス）を、出力の形 <paramref name="output"/> で
+    /// </summary>
+    private static CodeGenerationOptions Service_TypeNameOptions(string output) =>
+        new()
+        {
+            RootNamespace = "Sample.Domain",
+            GenerateEditModels = true,
+            GenerateMappers = true,
+            GenerateValueObjects = true,
+            GenerateRepositories = true,
+            RepositoryDialects = [DialectNames.SqlServer],
+            GenerateInMemoryRepositories = true,
+            GenerateEfCoreRepositories = true,
+            GenerateRemoteServices = true,
+            SplitFilesByCategory = output == "split",
+            LayeredOutput = output == "layered",
+        };
+
+    /// <summary>SQL Server の図（GeneratedTypeNameCollisionTests.Diagram・GeneratedMemberNameCaseTests.Diagram）</summary>
+    private static ErDiagram Service_SqlServerDiagram(params Entity[] entities) =>
+        new() { TargetDbms = DialectNames.SqlServer, Entities = [.. entities] };
+
+    /// <summary>主キー <c>id</c>（int）と、指定した列を持つ表（GeneratedTypeNameCollisionTests.Table）</summary>
+    private static Entity Service_IdTable(string name, params Column[] columns) =>
+        Service_Entity(name, [Service_Column("id", "int", primaryKey: true), .. columns]);
+
+    /// <summary>NULL 許容の nvarchar(50) の列（GeneratedTypeNameCollisionTests.Text）</summary>
+    private static Column Service_TextColumn(string name) =>
+        Service_Column(name, "nvarchar(50)", nullable: true);
+
+    /// <summary>NULL 許容の int の列（GeneratedTypeNameCollisionTests.Int）</summary>
+    private static Column Service_IntColumn(string name) =>
+        Service_Column(name, "int", nullable: true);
+
+    /// <summary>
+    /// 型名のぶつかりの診断の行（GeneratedTypeNameCollisionTests。出力の形に依らない判定は元と同じ 3 つの形に展開し、警告の行は元と同じ 1 ファイル出力）
+    /// </summary>
+    /// <remarks>コンパイルする負の対照（ぶつからない組）は <see cref="CompileNameRows"/>。</remarks>
+    private static IEnumerable<ScenarioRow<CodegenCase>> Service_TypeNameRows()
+    {
+        const string Origin = "GeneratedTypeNameCollisionTests.";
+
+        foreach (var output in Service_Outputs)
+        {
+            foreach (
+                var (table, typeName) in new[]
+                {
+                    ("order_edit_model", "OrderEditModel"),
+                    ("order_mapper", "OrderMapper"),
+                    ("order_entity", "OrderEntity"),
+                    ("orders", "OrderEntity"),
+                    ("i_order", "IOrderRepository"),
+                    ("in_memory_order", "InMemoryOrderRepository"),
+                    ("ef_core_order", "EfCoreOrderRepository"),
+                    ("journaling_order", "JournalingOrderRepository"),
+                }
+            )
+            {
+                yield return Service_NameRow(
+                    $"diag-type-name-collision-{table.Replace('_', '-')}-{output}",
+                    $"型名の衝突: 表 order と型名がぶつかる表は、出力の形に依らず両方の表を名指しするエラーになる（{Origin}CollidingTable_IsRefusedNamingBothTables(\"{table}\", \"{typeName}\")・出力 {output}）",
+                    () =>
+                        Service_SqlServerDiagram(Service_IdTable("order"), Service_IdTable(table)),
+                    Service_TypeNameOptions(output),
+                    DiagnosticExpectation.Contains(
+                        ExpectedDiagnostic.ErrorMentioning(
+                            nameof(Strings.CodeGen_Error_GeneratedTypeNameCollision),
+                            $"'{typeName}'",
+                            "'order'",
+                            $"'{table}'"
+                        )
+                    )
+                );
+            }
+
+            foreach (
+                var (suffix, table, column, typeName, source) in new[]
+                {
+                    ("raw-sql", "raw_sql", (string?)null, "RawSqlMapper", "'raw_sql'"),
+                    (
+                        "sql-parameter",
+                        "orders",
+                        "sql_parameter",
+                        "SqlParameterValue",
+                        "'orders'.'sql_parameter'"
+                    ),
+                    (
+                        "media-type-header",
+                        "orders",
+                        "media_type_header",
+                        "MediaTypeHeaderValue",
+                        "'orders'.'media_type_header'"
+                    ),
+                }
+            )
+            {
+                yield return Service_NameRow(
+                    $"diag-type-name-reserved-{suffix}-{output}",
+                    $"型名の衝突: 生成コードの固定の型名と同じ名前になる表・列は、出力の形に依らず名指しするエラーになる（{Origin}ReservedName_IsRefusedNamingTheSource(\"{table}\", {(column is null ? "null" : $"\"{column}\"")}, \"{typeName}\")・出力 {output}）",
+                    () =>
+                        Service_SqlServerDiagram(
+                            column is null
+                                ? Service_IdTable(table)
+                                : Service_IdTable(table, Service_TextColumn(column))
+                        ),
+                    Service_TypeNameOptions(output),
+                    DiagnosticExpectation.Contains(
+                        ExpectedDiagnostic.ErrorMentioning(
+                            nameof(Strings.CodeGen_Error_GeneratedTypeNameReserved),
+                            typeName,
+                            source
+                        )
+                    )
+                );
+            }
+
+            // 1 ファイル出力の行は RefusedPair_IsNotAlsoWarned("route") と同じ入力なので、エラーだけで警告を重ねないことも Exact で言う
+            yield return Service_NameRow(
+                $"diag-type-name-route-case-collision-{output}",
+                $"型名の衝突: リモートのルート名が大文字小文字だけ違う 2 つの表は、出力の形に依らずエラーになり、警告を重ねない（{Origin}RouteNamesDifferingOnlyInCase_AreRefused・RefusedPair_IsNotAlsoWarned(\"route\")・出力 {output}）",
+                () =>
+                    Service_SqlServerDiagram(
+                        Service_IdTable("order_item"),
+                        Service_IdTable("orderitem")
+                    ),
+                Service_TypeNameOptions(output),
+                DiagnosticExpectation.Exact([
+                    ExpectedDiagnostic.ErrorMentioning(
+                        nameof(Strings.CodeGen_Error_RemoteRouteNameCaseCollision),
+                        "'OrderItem'",
+                        "'Orderitem'",
+                        "'order_item'",
+                        "'orderitem'"
+                    ),
+                ])
+            );
+        }
+
+        yield return Service_NameRow(
+            "diag-type-name-case-only-warning",
+            $"型名の大小違い: 大文字小文字だけ違う型名は警告になり、両方の型名と元の列を名指しする。警告が出る図も生成物はコンパイルできる（{Origin}TypeNamesDifferingOnlyInCase_AreWarnedNamingBoth・WarnedDiagram_Compiles）",
+            () =>
+                Service_SqlServerDiagram(
+                    Service_IdTable("accounts", Service_IntColumn("user_id")),
+                    Service_IdTable("profiles", Service_IntColumn("userid"))
+                ),
+            Service_TypeNameOptions("single"),
+            DiagnosticExpectation.CountOf(
+                ExpectedDiagnostic.WarningMentioning(
+                    nameof(Strings.CodeGen_Warning_GeneratedTypeNamesDifferOnlyInCase),
+                    "'UserIdValue'",
+                    "'UseridValue'",
+                    "'accounts'.'user_id'",
+                    "'profiles'.'userid'"
+                ),
+                1
+            ),
+            compile: true
+        );
+
+        foreach (
+            var (suffix, first, second) in new[]
+            {
+                ("same-spelling", "user_id", "user_id"),
+                ("distinct", "user_id", "account_id"),
+            }
+        )
+        {
+            yield return Service_NameRow(
+                $"diag-type-name-not-warned-{suffix}",
+                $"型名の大小違い: 綴りが同じ・別の名前の組では警告しない（{Origin}SameOrDistinctTypeNames_AreNotWarned(\"{first}\", \"{second}\")）",
+                () =>
+                    Service_SqlServerDiagram(
+                        Service_IdTable("accounts", Service_IntColumn(first)),
+                        Service_IdTable("profiles", Service_IntColumn(second))
+                    ),
+                Service_TypeNameOptions("single"),
+                DiagnosticExpectation.Exact([])
+            );
+        }
+
+        // 列 sql_parameter は固定の型名 SqlParameterValue と同じでエラー、別の表の sqlparameter は SqlparameterValue（大小違いの警告を重ねない）
+        yield return Service_NameRow(
+            "diag-type-name-refused-pair-not-warned-reserved",
+            $"型名の大小違い: 固定の型名と大小だけ違う型名でエラーになる組は重ねて警告しない（{Origin}RefusedPair_IsNotAlsoWarned(\"reserved\")）",
+            () =>
+                Service_SqlServerDiagram(
+                    Service_IdTable("accounts", Service_IntColumn("sql_parameter")),
+                    Service_IdTable("profiles", Service_IntColumn("sqlparameter"))
+                ),
+            Service_TypeNameOptions("single"),
+            DiagnosticExpectation.Exact([
+                ExpectedDiagnostic.ErrorMentioning(
+                    nameof(Strings.CodeGen_Error_GeneratedTypeNameReserved),
+                    "SqlParameterValue",
+                    "'accounts'.'sql_parameter'"
+                ),
+            ])
+        );
+    }
+
+    /// <summary>
+    /// メンバー名の大文字小文字の診断の行（GeneratedMemberNameCaseTests.CaseOnlyMemberNames_AreRefused の 5 つの形 × 構成 2 つ）。
+    /// 構成 Full の列の形は SameTableCaseOnlyColumns_AreNotAlsoWarned と同じ入力なので、エラーだけで警告を重ねないことも Exact で言う
+    /// </summary>
+    /// <remarks>EditModel の中だけの大小違いを止めない対照（コンパイルする）は <see cref="CompileNameRows"/>。</remarks>
+    private static IEnumerable<ScenarioRow<CodegenCase>> Service_MemberNameCaseRows()
+    {
+        const string Origin = "GeneratedMemberNameCaseTests.";
+        var columnKey = nameof(Strings.CodeGen_Error_ColumnPropertyNamesDifferOnlyInCase);
+        var memberKey = nameof(Strings.CodeGen_Error_GeneratedMemberNamesDifferOnlyInCase);
+
+        foreach (
+            var (config, options) in new[]
+            {
+                ("full", Service_TypeNameOptions("single")),
+                (
+                    "plain",
+                    new CodeGenerationOptions
+                    {
+                        RootNamespace = "Sample.Domain",
+                        GenerateEditModels = true,
+                    }
+                ),
+            }
+        )
+        {
+            foreach (
+                var (shape, key, names) in new[]
+                {
+                    (
+                        "columns",
+                        columnKey,
+                        new[] { "'UserId'", "'Userid'", "'user_id'", "'userid'" }
+                    ),
+                    (
+                        "column-navigation",
+                        memberKey,
+                        new[] { "'OrderLines'", "'Orderlines'", "'orderlines'" }
+                    ),
+                    ("row-state", memberKey, new[] { "'RowState'", "'Rowstate'", "'rowstate'" }),
+                    ("is-added", memberKey, new[] { "'IsAdded'", "'Isadded'", "'isadded'" }),
+                    (
+                        "display-name",
+                        memberKey,
+                        new[] { "'DisplayName'", "'Displayname'", "'displayname'" }
+                    ),
+                }
+            )
+            {
+                var expected = ExpectedDiagnostic.ErrorMentioning(key, ["orders", .. names]);
+
+                yield return Service_NameRow(
+                    $"diag-member-name-case-only-{shape}-{config}",
+                    $"メンバー名の大小違い: エンティティの JSON に出るメンバー名が大文字小文字だけ違う図は、構成に依らず表と名前を名指しするエラーになる（{Origin}CaseOnlyMemberNames_AreRefused(\"{shape}\")・構成 {config}"
+                        + (
+                            shape == "columns" && config == "full"
+                                ? "・SameTableCaseOnlyColumns_AreNotAlsoWarned）"
+                                : "）"
+                        ),
+                    () => Service_MemberNameCaseDiagram(shape),
+                    options,
+                    shape == "columns" && config == "full"
+                        ? DiagnosticExpectation.Exact([expected])
+                        : DiagnosticExpectation.Contains(expected)
+                );
+            }
+        }
+    }
+
+    /// <summary>形ごとの図（GeneratedMemberNameCaseTests.DiagramFor。どれも表 orders に大小だけ違う名前を置く）</summary>
+    private static ErDiagram Service_MemberNameCaseDiagram(string shape)
+    {
+        switch (shape)
+        {
+            case "columns":
+                return Service_SqlServerDiagram(
+                    Service_IdTable(
+                        "orders",
+                        Service_IntColumn("user_id"),
+                        Service_IntColumn("userid")
+                    )
+                );
+
+            case "column-navigation":
+            {
+                var orders = Service_IdTable("orders", Service_IntColumn("orderlines"));
+                var lines = Service_IdTable("order_lines", Service_IntColumn("order_id"));
+                var diagram = Service_SqlServerDiagram(orders, lines);
+                diagram.Relationships.Add(Service_Reference(orders, lines, "order_id"));
+                return diagram;
+            }
+
+            case "row-state":
+                return Service_SqlServerDiagram(
+                    Service_IdTable("orders", Service_IntColumn("rowstate"))
+                );
+
+            case "is-added":
+                return Service_SqlServerDiagram(
+                    Service_IdTable("orders", Service_IntColumn("isadded"))
+                );
+
+            case "display-name":
+                return Service_SqlServerDiagram(
+                    Service_IdTable("orders", Service_IntColumn("displayname"))
+                );
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(shape), shape, null);
+        }
+    }
+
+    /// <summary>子の列から親の主キーへの 1 対多のリレーション（GeneratedMemberNameCaseTests.Reference）</summary>
+    private static Relationship Service_Reference(
+        Entity parent,
+        Entity child,
+        string childColumn
+    ) =>
+        new()
+        {
+            Id = Guid.NewGuid(),
+            SourceEntityId = parent.Id,
+            TargetEntityId = child.Id,
+            Type = RelationshipType.OneToMany,
+            ColumnPairs =
+            [
+                new RelationshipColumnPair(
+                    parent.Columns.Single(column => column.IsPrimaryKey).Id,
+                    child.Columns.Single(column => column.Name == childColumn).Id
+                ),
+            ],
+        };
 
     // ---- 元のテストの図（そのまま写す） ----
 

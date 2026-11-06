@@ -58,7 +58,7 @@ SQL Server 方言エンジン（QuickER 版 Repository の ADO 実装）の固�
 - 空・空白の判定は `DATALENGTH(col) = 0`（`= ''` は末尾の空白を無視する）と、`col NOT LIKE N'%[^…]%'`（括弧の中は `char.IsWhiteSpace` の全文字を `NCHAR(n)` で連結）。TRIM の文字指定は 2017 以降で、docs の 2016 宣言に合わないため使わない。
 - 固定長の列は値を空白で詰めて返すので、`EndsWith` は詰めた値で比べる（読み戻した値へ C# を当てた結果と同じにする。`RTRIM` は付けない）。
 - LIKE のパターンは列の型の可変長形（nchar→nvarchar・char→varchar）で束縛する。固定長で束縛するとパターン自体が空白で詰められて一致しない。
-- ガード：`TranslatorParitySqlServerRuntimeTests`、`SqlServerTranslatorOperatorRuntimeTests`（実 DB で C# 意味論と突き合わせ）。mutation 実証済み（可変長束縛・空と空白の判定）。
+- ガード：`TranslatorParitySqlServerRuntimeTests`（述語の表 `TranslatorParityPredicateRows` を実 SQL Server で C# の意味論と突き合わせる）。値オブジェクトの列の IN は `BackendParitySqlServerRuntimeTests`（ケース `value-object-in-null-semantics`）。mutation 実証済み（可変長束縛・空と空白の判定）。
 
 ## Save フックが書いた blob の版の読み直し
 

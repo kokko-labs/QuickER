@@ -122,6 +122,10 @@ internal sealed record FileRule(
 /// <param name="Exec">生成物を読み込んで動かす期待（<see cref="ExecCheck"/>。null なら無し）</param>
 /// <param name="Parsed">生成結果を製品の解析器に通す期待（<see cref="ParsedCheck"/>。null なら無し）</param>
 /// <param name="Markdown">API リファレンスの Markdown の構文木の期待（<see cref="MarkdownRule"/>。null なら無し）</param>
+/// <param name="MapperDialects">
+/// 型マッパーを渡す方言（null なら実効方言の全部＝本番と同じ。絞るのは direct の入口で関係を掛けない行だけ。
+/// 関係と他の入口は全部の方言のマッパーで生成し直すので、絞った入力と比べられない）
+/// </param>
 internal sealed record CodegenCase(
     Func<ErDiagram> Diagram,
     CodeGenerationOptions Options,
@@ -144,7 +148,8 @@ internal sealed record CodegenCase(
     ReducedReferences? CompileWithout = null,
     IReadOnlyList<ExecCheck>? Exec = null,
     IReadOnlyList<ParsedCheck>? Parsed = null,
-    IReadOnlyList<MarkdownRule>? Markdown = null
+    IReadOnlyList<MarkdownRule>? Markdown = null,
+    IReadOnlyList<string>? MapperDialects = null
 )
 {
     /// <summary>期待を作る</summary>
@@ -225,6 +230,7 @@ internal static partial class CodegenCases
                 .. ServiceRows(),
                 .. FileRows(),
                 .. DialectRows(),
+                .. DialectDslRows(),
                 .. ColumnRows(),
                 .. ExecutionRows(),
                 .. RelationRows(),
@@ -472,6 +478,17 @@ internal static partial class CodegenCases
     {
         var row = Table[id];
         var @case = row.Input;
+
+        if (
+            @case.MapperDialects is not null
+            && (@case.Entrance != CodegenEntrance.Direct || @case.Relations is not null)
+        )
+        {
+            throw new InvalidOperationException(
+                $"行 {row.Id}: 型マッパーを絞る行（MapperDialects）は direct の入口で、関係を掛けない"
+            );
+        }
+
         var input = new CodegenInput(
             $"{row.Id}: {row.Description}",
             @case.Diagram(),
@@ -479,7 +496,8 @@ internal static partial class CodegenCases
             @case.Options,
             @case.Entrance,
             _ => @case.ExtraSources ?? [],
-            @case.Diagram
+            @case.Diagram,
+            @case.MapperDialects
         );
 
         return CodegenRunner.RunAsync(input, _ => @case.Expectation(), shape: null, scope: row.Id);

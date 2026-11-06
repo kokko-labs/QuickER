@@ -1935,6 +1935,50 @@ internal static partial class CodegenCases
                 ]
         );
 
+    /// <summary>
+    /// マルチターゲットの図に、方言で C# の型が違う列（SQL Server の real は float・SQLite の real は double）を 1 本足した図
+    /// （型マッパーの無い方言が図の方言の辞書で代わりにすることを、共有 Entity の型で見る）
+    /// </summary>
+    private static ErDiagram QueryText_MultiTargetRealColumnDiagram()
+    {
+        var diagram = QueryText_MultiTargetDiagram();
+        diagram
+            .Entities.Single()
+            .Columns.Add(
+                new Column
+                {
+                    Name = "Ratio",
+                    DataType = "real",
+                    IsNullable = false,
+                }
+            );
+        return diagram;
+    }
+
+    /// <summary>
+    /// マルチターゲットの図の sqlserver 限定の生 SQL のクエリ（ServerOnly）を、SQL の無い sqlite の Repository へ利用者が書く手動の実装
+    /// （src/QuickER.CodeGen.CSharp/Queries/CLAUDE.md「構造」：SQL の無い実装先は契約だけが生成され、実装は partial クラスへ書く）
+    /// </summary>
+    private static GeneratedFile QueryText_MultiTargetSqliteManualSource() =>
+        new()
+        {
+            FileName = "Manual.OrderRepository.Sqlite.cs",
+            Content = """
+                namespace Test.Ns.Repositories.Sqlite
+                {
+                    partial class OrderRepository
+                    {
+                        /// <summary>Hand-written implementation of the named query.</summary>
+                        /// <param name="cancellationToken">The cancellation token.</param>
+                        /// <returns>Always zero.</returns>
+                        public global::System.Threading.Tasks.Task<int> ServerOnlyAsync(
+                            global::System.Threading.CancellationToken cancellationToken = default
+                        ) => global::System.Threading.Tasks.Task.FromResult(0);
+                    }
+                }
+                """,
+        };
+
     /// <summary>QueryGenerationTests.Generate_ColumnTypedParameter_FollowsColumnType の図（列参照で型付けしたパラメータ）</summary>
     private static ErDiagram QueryText_ColumnTypedDiagram() =>
         Dialects_QueryDiagram(
@@ -2004,18 +2048,19 @@ internal static partial class CodegenCases
                 ]
         );
 
-    /// <summary>生成物の Order の行を作る（OrderId・Memo・CustomerId を指定。Amount は 1）</summary>
+    /// <summary>生成物の Order の行を作る（OrderId・Memo・CustomerId・Amount を指定。Amount の既定は 1）</summary>
     private static object QueryText_NewOrder(
         Assembly assembly,
         int orderId,
         string? memo,
-        int customerId = 1
+        int customerId = 1,
+        decimal amount = 1m
     )
     {
         var order = ProbeKit.Create(ProbeKit.Type(assembly, "OrderEntity"));
         ProbeKit.Set(order, "OrderId", orderId);
         ProbeKit.Set(order, "CustomerId", customerId);
-        ProbeKit.Set(order, "Amount", 1m);
+        ProbeKit.Set(order, "Amount", amount);
         ProbeKit.Set(order, "Memo", memo);
         return order;
     }
@@ -2165,7 +2210,7 @@ internal static partial class CodegenCases
             QueryTextRow(
                 "code-query-dsl-list-contract-and-both-implementations",
                 QueryClass,
-                "Generate_DslListQuery_EmitsSharedBody（契約のブロック展開・3 つの宣言・説明の XmlDoc。共有本体の文は P3-6〔簡易 DSL〕の領分で元に残す）",
+                "Generate_DslListQuery_EmitsSharedBody（契約のブロック展開・3 つの宣言・説明の XmlDoc・QuickER 版と EF Core 版の本体が構文として等価。並びとページングの結果は行 exec-query-dsl-list-orders-by-amount-descending-and-pages、条件の訳し方は簡易 DSL の総当たり）",
                 QueryText_DslListDiagram,
                 Dialects_QueryOptions(),
                 code:
@@ -2192,12 +2237,74 @@ internal static partial class CodegenCases
                             $"{efCore}.GetByCustomerAsync",
                         ]
                     ),
+                    SameBody(implementation, "GetByCustomerAsync", efCore, "GetByCustomerAsync"),
+                ]
+            ),
+            QueryTextRow(
+                "exec-query-dsl-list-orders-by-amount-descending-and-pages",
+                QueryClass,
+                "Generate_DslListQuery_EmitsSharedBody（SQLite で実行：条件に合う行を Amount の降順に並べ、take・skip でページを切る。行の OrderId の並びの完全一致）",
+                QueryText_DslListDiagram,
+                QueryText_SqliteOptions(),
+                typeDialect: DialectNames.Sqlite,
+                exec:
+                [
+                    new ExecCheck(
+                        "list-orders-by-amount-descending-and-pages",
+                        assembly =>
+                            ProbeKit.WithSqlite(
+                                assembly,
+                                QueryText_DslListDiagram(),
+                                async (provider, _) =>
+                                {
+                                    await QueryText_InsertOrdersAsync(
+                                        assembly,
+                                        provider,
+                                        QueryText_NewOrder(assembly, 1, null, 7, 1.5m),
+                                        QueryText_NewOrder(assembly, 2, null, 7, 3.75m),
+                                        QueryText_NewOrder(assembly, 3, null, 8, 9m),
+                                        QueryText_NewOrder(assembly, 4, null, 7, 2.25m),
+                                        QueryText_NewOrder(assembly, 5, null, 7, 5m)
+                                    );
+                                    var problems = new List<string>();
+
+                                    foreach (
+                                        var (take, skip, expected) in new (int, int, int[])[]
+                                        {
+                                            (2, 0, [5, 2]),
+                                            (2, 2, [4, 1]),
+                                            (10, 0, [5, 2, 4, 1]),
+                                            (10, 4, []),
+                                        }
+                                    )
+                                    {
+                                        var actual = QueryText_OrderIds(
+                                            QueryText_CallQuery(
+                                                assembly,
+                                                provider,
+                                                "GetByCustomerAsync",
+                                                7,
+                                                take,
+                                                skip
+                                            )
+                                        );
+                                        Text_Expect(
+                                            problems,
+                                            actual.SequenceEqual(expected),
+                                            $"GetByCustomerAsync(7, take: {take}, skip: {skip}) の結果が [{string.Join(",", actual)}]（期待 [{string.Join(",", expected)}]）"
+                                        );
+                                    }
+
+                                    return problems;
+                                }
+                            )
+                    ),
                 ]
             ),
             QueryTextRow(
                 "code-query-dsl-shapes-declared-on-contract-and-implementations",
                 QueryClass,
-                "Generate_DslShapes_EmitBodies（単一・件数・文字列一致・IN の宣言。本体の文は P3-6〔簡易 DSL〕の領分で元に残す）",
+                "Generate_DslShapes_EmitBodies（単一・件数・文字列一致・IN の宣言。単一の非キー列の降順は行 exec-query-dsl-single-orders-by-non-key-column-descending、件数・文字列一致・IN の条件の意味は簡易 DSL の総当たり）",
                 QueryText_DslShapesDiagram,
                 Dialects_QueryOptions(),
                 code:
@@ -2229,6 +2336,58 @@ internal static partial class CodegenCases
                         contract,
                         implementation,
                         efCore
+                    ),
+                ]
+            ),
+            QueryTextRow(
+                "exec-query-dsl-single-orders-by-non-key-column-descending",
+                QueryClass,
+                "Generate_DslShapes_EmitBodies（SQLite で実行：条件の無い単一の FindTop は非キー列 Amount の降順の先頭の行を返し、行が無ければ null）",
+                QueryText_DslShapesDiagram,
+                QueryText_SqliteOptions(),
+                typeDialect: DialectNames.Sqlite,
+                exec:
+                [
+                    new ExecCheck(
+                        "single-orders-by-non-key-column-descending",
+                        assembly =>
+                            ProbeKit.WithSqlite(
+                                assembly,
+                                QueryText_DslShapesDiagram(),
+                                async (provider, _) =>
+                                {
+                                    var problems = new List<string>();
+                                    var empty = QueryText_CallQuery(
+                                        assembly,
+                                        provider,
+                                        "FindTopAsync"
+                                    );
+                                    await QueryText_InsertOrdersAsync(
+                                        assembly,
+                                        provider,
+                                        QueryText_NewOrder(assembly, 1, null, amount: 2.25m),
+                                        QueryText_NewOrder(assembly, 2, null, amount: 9m),
+                                        QueryText_NewOrder(assembly, 3, null, amount: 5m)
+                                    );
+                                    var top = QueryText_CallQuery(
+                                        assembly,
+                                        provider,
+                                        "FindTopAsync"
+                                    );
+
+                                    Text_Expect(
+                                        problems,
+                                        empty is null,
+                                        "行が無いのに null にならない"
+                                    );
+                                    Text_Expect(
+                                        problems,
+                                        top is not null && Equals(ProbeKit.Get(top, "OrderId"), 2),
+                                        $"Amount の降順の先頭（OrderId 2）が返らない（{(top is null ? "null" : ProbeKit.Get(top, "OrderId"))}）"
+                                    );
+                                    return problems;
+                                }
+                            )
                     ),
                 ]
             ),
@@ -2347,7 +2506,7 @@ internal static partial class CodegenCases
             QueryTextRow(
                 "code-query-multi-target-shared-on-both-sql-only-on-its-dialect",
                 QueryClass,
-                "Generate_MultiTarget_DispatchesByDialect（契約と方言ごとの Repository の宣言。共有 DSL 本体と SQL Server の SQL の断片は元に残す）",
+                "Generate_MultiTarget_DispatchesByDialect（契約と方言ごとの Repository の宣言・共有 DSL の本体が両方言の Repository で構文として等価・sqlserver 限定の SQL は sqlserver の Repository の呼び出しの引数だけに出る）",
                 QueryText_MultiTargetDiagram,
                 new CodeGenerationOptions
                 {
@@ -2387,7 +2546,62 @@ internal static partial class CodegenCases
                         ns: "Test.Ns.Repositories.SqlServer"
                     ),
                     NoMember(implementation, "ServerOnlyAsync", ns: "Test.Ns.Repositories.Sqlite"),
+                    SameBody(
+                        implementation,
+                        "GetByCustomerAsync",
+                        implementation,
+                        "GetByCustomerAsync",
+                        ns: "Test.Ns.Repositories.SqlServer",
+                        otherNs: "Test.Ns.Repositories.Sqlite"
+                    ),
+                    CallArguments(
+                        implementation,
+                        "ServerOnlyAsync",
+                        "ExecuteScalarSqlAsync<int?>",
+                        ["\"SELECT COUNT(*) FROM [Order]\"", "null", "cancellationToken"],
+                        ns: "Test.Ns.Repositories.SqlServer"
+                    ),
                 ]
+            ),
+            new ScenarioRow<CodegenCase>(
+                "code-query-multi-target-unmapped-dialect-uses-primary-types",
+                null,
+                QueryClass
+                    + ".Generate_MultiTarget_DispatchesByDialect の入力（型マッパーを sqlserver の分だけ渡す）。マッパーの無い sqlite は図の方言の辞書で代わりにする"
+                    + "（sqlite のマッパーなら double になる real の列が、共有 Entity で sqlserver の float のまま型の食い違いのエラーにならない。生成・sqlite の ServerOnly の手動の実装と一緒にコンパイル・共有 DSL の本体が両方言で等価）",
+                new CodegenCase(
+                    QueryText_MultiTargetRealColumnDiagram,
+                    new CodeGenerationOptions
+                    {
+                        RootNamespace = "Test.Ns",
+                        GenerateRepositories = true,
+                        RepositoryDialects = [DialectNames.SqlServer, DialectNames.Sqlite],
+                        IncludeDataAnnotations = true,
+                    },
+                    DialectNames.SqlServer,
+                    DiagnosticExpectation.Exact([]),
+                    Compile: true,
+                    ExtraSources: [QueryText_MultiTargetSqliteManualSource()],
+                    Code:
+                    [
+                        Member("OrderEntity", "Ratio", "float Ratio { get; set; }"),
+                        Member(
+                            implementation,
+                            "GetByCustomerAsync",
+                            modifiers: "public",
+                            ns: "Test.Ns.Repositories.Sqlite"
+                        ),
+                        SameBody(
+                            implementation,
+                            "GetByCustomerAsync",
+                            implementation,
+                            "GetByCustomerAsync",
+                            ns: "Test.Ns.Repositories.SqlServer",
+                            otherNs: "Test.Ns.Repositories.Sqlite"
+                        ),
+                    ],
+                    MapperDialects: [DialectNames.SqlServer]
+                )
             ),
             QueryTextRow(
                 "code-query-column-typed-parameter-follows-value-object",

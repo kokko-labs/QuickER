@@ -10,17 +10,14 @@ namespace QuickER.Tests.Model;
 /// </summary>
 public sealed class SchemaNameStoredFormTests
 {
-    [Fact(DisplayName = "列名は代入したとき前後の空白が除かれ、綴りはそのまま残る")]
-    public void ColumnName_IsStoredTrimmed()
-    {
-        new Column { Name = "  OrderId　" }
-            .Name.Should()
-            .Be("OrderId");
-        new Column { Name = " Äpfel " }
-            .Name.Should()
-            .Be("Äpfel");
-    }
+    // 列名・クエリ名・パラメータ名・射影のフィールド名が代入で前後の空白を除いた形になり綴りを変えないことは、名前の総当たり
+    // （NameIdentityToolFuzzTests・NameIdentityQueryDialogFuzzTests ほかの保存形と重複の照合＝NameFuzz.FixedPairs の前後の空白つきの組と
+    // 種の組）が入口越しに固定する（setter の除去を外すと赤になることを mutation で確かめた）
 
+    /// <remarks>
+    /// 残す理由（P3-6）：一意制約名・外部キー制約名の setter が前後の空白を除くこと（mutation で確かめたところ、名前の総当たりの制約名の
+    /// 入口は手前でも空白を除くので、setter の除去を外しても赤にならない）と null の契約。元の表明をすべて残す
+    /// </remarks>
     [Fact(
         DisplayName = "一意制約名・外部キー制約名は代入したとき前後の空白が除かれる（null は null のまま）"
     )]
@@ -40,20 +37,16 @@ public sealed class SchemaNameStoredFormTests
             .BeNull();
     }
 
-    [Fact(
-        DisplayName = "クエリ名・パラメータ名・射影のフィールド名・結果の型名は代入したとき前後の空白が除かれる"
-    )]
+    /// <remarks>
+    /// 残す理由（P3-6）：結果の型名は名前の総当たりの名前の種類に無い（保存形と null）。クエリ名・パラメータ名・射影のフィールド名の保存形は
+    /// 名前の総当たりのクエリ・パラメータ・射影のフィールドの保存形の照合へ移した
+    /// </remarks>
+    [Fact(DisplayName = "結果の型名は代入したとき前後の空白が除かれる（null は null のまま）")]
     public void QueryNames_AreStoredTrimmed()
     {
-        new QueryDefinition { Name = " GetAll ", ResultTypeName = " Row " }
-            .Should()
-            .BeEquivalentTo(new { Name = "GetAll", ResultTypeName = "Row" });
-        new QueryParameter { Name = " id " }
-            .Name.Should()
-            .Be("id");
-        new ProjectionField { Name = " total " }
-            .Name.Should()
-            .Be("total");
+        new QueryDefinition { ResultTypeName = " Row " }
+            .ResultTypeName.Should()
+            .Be("Row");
         new QueryDefinition { ResultTypeName = null }
             .ResultTypeName.Should()
             .BeNull();

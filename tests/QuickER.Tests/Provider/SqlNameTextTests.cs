@@ -1,40 +1,28 @@
 using AwesomeAssertions;
-using QuickER.Model;
 using QuickER.Provider;
-using QuickER.Provider.MySql;
-using QuickER.Provider.Oracle;
-using QuickER.Provider.PostgreSql;
-using QuickER.Provider.Sqlite;
-using QuickER.Provider.SqlServer;
-using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Provider;
 
 /// <summary>
-/// 図の名前（テーブル名・列名・制約名）に改行・制御文字が含まれるとき、DDL 生成・同期スクリプト生成が
-/// <b>1 行も出さずに名指しで失敗する</b>ことを検証するテストクラス。
+/// 図の名前（テーブル名・列名・制約名）が SQL へ出せる形かの判定（<see cref="SqlNameText.IsSafe"/>）の公開 API の契約を検証するテストクラス
 /// </summary>
 /// <remarks>
 /// <para>
-/// コメント行のサニタイズ（<see cref="SqlComment.Sanitize"/>）と識別子のエスケープ（方言の <c>Escape</c>）は
-/// 出力側の防壁だが、埋め込み箇所は DDL・同期の全方言に散っており、1 箇所でも通し忘れるとそこが即座に
-/// 武器になる（実際、SQLite の再構築見出しだけがサニタイズ漏れだった）。そこで入口でも同じ検査を行い、
-/// 「改行入りの名前はそもそも出力へ到達しない」を構造で担保する（型表記の <see cref="SqlTypeText"/> と同位置）。
-/// </para>
-/// <para>
 /// 止めるのは改行・制御文字だけで、<c>"</c> や <c>]</c> や <c>'</c> は対象にしない（DB 取込で実在し得る名前で、
 /// 出力側のエスケープで正しく扱える）。C# コード生成側の同じ線引きは生成前診断の Error として実装されている
-/// （<c>NameTrustBoundaryGenerationTests</c>）。
+/// （<c>CodegenCaseTests</c> の行 <c>diag-name-control-character-*</c>）。
+/// </para>
+/// <para>
+/// 改行入りの名前が DDL・同期スクリプトへ 1 行も出ずに名指しで断られることは、方言の DDL の表の行
+/// <c>ddl-{table,column,unique-constraint,foreign-key}-name-with-newline-is-rejected</c>・
+/// <c>sync-add-table-table-name-with-newline-is-rejected</c>・<c>sync-rebuild-table-name-with-newline-is-rejected</c>・
+/// <c>sync-other-alter-column-name-with-newline-is-rejected</c> が、引用符を含むだけの名前を通すことは行
+/// <c>ddl-quote-apostrophe-table-and-double-quote-column-accepted</c> が固定する。
 /// </para>
 /// </remarks>
 public class SqlNameTextTests
 {
-    /// <summary>改行の後に実行可能な SQL を置いた名前</summary>
-    private const string Injected = "a\nDROP TABLE users; --";
-
-    // ---------------- 判定そのもの ----------------
-
     [Theory(DisplayName = "改行・制御文字を含む名前は安全でない")]
     [InlineData("a\nb")]
     [InlineData("a\rb")]
@@ -59,190 +47,4 @@ public class SqlNameTextTests
     [InlineData(null)]
     public void IsSafe_QuotesAndSymbols_Pass(string? name) =>
         SqlNameText.IsSafe(name).Should().BeTrue();
-
-    // ---------------- DDL 生成の関門 ----------------
-
-    [Fact(DisplayName = "5 方言の DDL 生成は改行入りのテーブル名を名指しで拒否する")]
-    public void DdlGenerators_RejectControlCharacterInTableName()
-    {
-        var diagram = BuildDiagram(tableName: Injected, columnName: "memo");
-
-        foreach (var generator in DdlGenerators())
-        {
-            var act = () => generator.Build(diagram);
-
-            act.Should().Throw<InvalidOperationException>().WithMessage("*TABLE*DROP TABLE users*");
-        }
-    }
-
-    [Fact(DisplayName = "5 方言の DDL 生成は改行入りの列名を名指しで拒否する")]
-    public void DdlGenerators_RejectControlCharacterInColumnName()
-    {
-        var diagram = BuildDiagram(tableName: "orders", columnName: Injected);
-
-        foreach (var generator in DdlGenerators())
-        {
-            var act = () => generator.Build(diagram);
-
-            act.Should().Throw<InvalidOperationException>().WithMessage("*COLUMN*orders*");
-        }
-    }
-
-    [Fact(DisplayName = "DDL 生成は改行入りの一意制約名・外部キー制約名も拒否する")]
-    public void DdlGenerators_RejectControlCharacterInConstraintNames()
-    {
-        var diagram = BuildDiagram(tableName: "orders", columnName: "memo");
-        diagram
-            .Entities[0]
-            .UniqueConstraints.Add(
-                new UniqueConstraint
-                {
-                    Name = Injected,
-                    ColumnIds = [diagram.Entities[0].Columns[1].Id],
-                }
-            );
-
-        var act = () => new SqlServerDdlGenerator().Build(diagram);
-
-        act.Should().Throw<InvalidOperationException>().WithMessage("*UNIQUE*");
-    }
-
-    [Fact(DisplayName = "DDL 生成は改行を含まない図をそのまま生成する")]
-    public void DdlGenerators_AcceptNamesWithoutControlCharacters()
-    {
-        var diagram = BuildDiagram(tableName: "o'rders", columnName: "we\"ird");
-
-        foreach (var generator in DdlGenerators())
-        {
-            generator.Build(diagram).Should().Contain("CREATE TABLE");
-        }
-    }
-
-    // ---------------- 同期スクリプト生成の関門 ----------------
-
-    [Fact(DisplayName = "5 方言の同期スクリプト生成は改行入りのテーブル名を名指しで拒否する")]
-    public void SyncScriptBuilders_RejectControlCharacterInTableName()
-    {
-        var diagram = BuildDiagram(tableName: Injected, columnName: "memo");
-        var plan = new SyncPlanner().BuildPlan(
-            [
-                new SchemaDiffItem
-                {
-                    Kind = SchemaDiffKind.AddTable,
-                    TableName = Injected,
-                    Entity = diagram.Entities[0],
-                    IsSelected = true,
-                },
-            ],
-            TestDialectCapabilities.Neutral
-        );
-
-        foreach (var builder in SyncScriptBuilders())
-        {
-            var act = () => builder.Build(plan);
-
-            act.Should().Throw<InvalidOperationException>().WithMessage("*TABLE*");
-        }
-    }
-
-    [Fact(DisplayName = "同期スクリプト生成は再構築計画の改行入りテーブル名も拒否する")]
-    public void SyncScriptBuilders_RejectControlCharacterInRebuildPlan()
-    {
-        var plan = new SyncPlan
-        {
-            Rebuilds =
-            [
-                new TableRebuildPlan
-                {
-                    TableName = Injected,
-                    NewDefinition = BuildDiagram(Injected, "memo").Entities[0],
-                    CreateOnly = false,
-                    CopyColumns = ["id"],
-                },
-            ],
-        };
-
-        var act = () => new SqliteSyncScriptBuilder().Build(plan);
-
-        act.Should().Throw<InvalidOperationException>().WithMessage("*TABLE*");
-    }
-
-    [Fact(DisplayName = "同期スクリプト生成は差分項目単体の改行入り列名も拒否する")]
-    public void SyncScriptBuilders_RejectControlCharacterOnSingleColumn()
-    {
-        var plan = new SyncPlanner().BuildPlan(
-            [
-                new SchemaDiffItem
-                {
-                    Kind = SchemaDiffKind.AlterColumn,
-                    TableName = "orders",
-                    ColumnName = Injected,
-                    Column = new Column
-                    {
-                        Name = Injected,
-                        DataType = "int",
-                        IsNullable = true,
-                    },
-                    IsSelected = true,
-                },
-            ],
-            TestDialectCapabilities.Neutral with
-            {
-                SupportsAlterColumn = true,
-            }
-        );
-
-        var act = () => new SqlServerSyncScriptBuilder().Build(plan);
-
-        act.Should().Throw<InvalidOperationException>().WithMessage("*COLUMN*orders*");
-    }
-
-    /// <summary>5 方言の DDL 生成器</summary>
-    private static IDdlGenerator[] DdlGenerators() =>
-        [
-            new SqlServerDdlGenerator(),
-            new PostgreSqlDdlGenerator(),
-            new MySqlDdlGenerator(),
-            new OracleDdlGenerator(),
-            new SqliteDdlGenerator(),
-        ];
-
-    /// <summary>5 方言の同期スクリプト生成器</summary>
-    private static ISyncScriptBuilder[] SyncScriptBuilders() =>
-        [
-            new SqlServerSyncScriptBuilder(),
-            new PostgreSqlSyncScriptBuilder(),
-            new MySqlSyncScriptBuilder(),
-            new OracleSyncScriptBuilder(),
-            new SqliteSyncScriptBuilder(),
-        ];
-
-    /// <summary>主キー列と指定名の列を 1 本ずつ持つ最小の図を組み立てる</summary>
-    private static ErDiagram BuildDiagram(string tableName, string columnName) =>
-        new()
-        {
-            Entities =
-            [
-                new Entity
-                {
-                    TableName = tableName,
-                    Columns =
-                    [
-                        new Column
-                        {
-                            Name = "id",
-                            DataType = "int",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                        new Column
-                        {
-                            Name = columnName,
-                            DataType = "int",
-                            IsNullable = true,
-                        },
-                    ],
-                },
-            ],
-        };
 }

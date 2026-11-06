@@ -247,7 +247,7 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
 - 文字列一致（Contains / StartsWith / EndsWith）の null 引数は、全バックエンドで `ArgumentNullException` にする（`SqlQuery.Where` の共有ガードで fail-fast 統一）。
 - 手書き LINQ の翻訳器はド・モルガン展開しないまま（docs の既知の割り切り）。
 - 方言固有の部分（空・空白の判定、日付部品、固定長の `EndsWith`）は `src/QuickER.Runtime.SqlServer/CLAUDE.md`「式の翻訳（SQL Server）」・`src/QuickER.Runtime.Sqlite/CLAUDE.md`「式の翻訳（SQLite）」。
-- ガード：`SqlExpressionTranslatorInClauseTests`（SQL 文字列固定）、`SqlExpressionTranslatorFoldingTests`、`{Sqlite,SqlServer}TranslatorOperatorRuntimeTests`（実 DB で C# 意味論と突き合わせ）、`TranslatorParity{SqlServer,Sqlite,InMemory}RuntimeTests`（期待値は同じ実装先から読み戻した全行へ C# のラムダを当てた結果。「ナビゲーションを使う条件・並び替えは NotSupportedException で断る」を含む）。mutation 実証済み。
+- ガード：`TranslatorParity{SqlServer,Sqlite,InMemory}RuntimeTests`（期待値は同じ実装先から読み戻した全行へ C# のラムダを当てた結果。「ナビゲーションを使う条件・並び替えは NotSupportedException で断る」を含む）とその述語の表 `TranslatorParityPredicateRows`（値の側が null の `==` / `!=`・列側の `!=`・列どうし・否定の反転と深さ 1〜4・IN / NOT IN の null の要素と空・bool 列の短縮形・NULL 許容の decimal の行）、値オブジェクトの列の IN / null 変数は `BackendParityRuntimeTests`（シナリオ `query-null-comparison-and-ordering`）と `BackendParitySqlServerRuntimeTests`（ケース `value-object-in-null-semantics`・`value-object-in-all-null-elements`）、SQL の断片でしか言えない表明（パラメータの `ColumnName`・IN の null の要素をパラメータにしない数・等値以外の否定を `NOT (...)` で包む形）は `SqlExpressionTranslatorInClauseTests`・`SqlExpressionTranslatorNullComparisonTests`、`SqlExpressionTranslatorFoldingTests`。mutation 実証済み。
 
 ## 識別子の引用（生成ランタイム）
 

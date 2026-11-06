@@ -12,11 +12,11 @@ namespace QuickER.Tests.Model;
 /// </remarks>
 public sealed class SchemaNamesTests
 {
-    [Theory(DisplayName = "AreSame は前後の空白を除き大文字小文字を無視して比べる")]
-    [InlineData("Orders", "Orders", true)]
-    [InlineData("Orders", "orders", true)]
-    [InlineData(" Orders", "Orders ", true)]
-    [InlineData("Orders", "Order", false)]
+    /// <remarks>
+    /// 残す理由（P3-6）：null と空文字（null と ''・'' と ' '）の公開 API の契約。前後の空白・大文字小文字だけの違い・別の名前の組は、
+    /// 総当たりの規則との照合（<see cref="AreSame_AgreesWithFuzzRule"/>＝<see cref="NameFuzz.FixedPairs"/> の同じ形の組と種の組）へ移した
+    /// </remarks>
+    [Theory(DisplayName = "AreSame は null と空文字を空の名前として比べる")]
     [InlineData("", " ", true)]
     [InlineData(null, "", true)]
     public void AreSame_TrimsAndIgnoresCase(string? first, string? second, bool expected) =>
@@ -45,10 +45,13 @@ public sealed class SchemaNamesTests
         }
     }
 
-    [Fact(DisplayName = "ToStoredForm は前後の空白だけを除き綴りを変えない（null は空文字）")]
+    /// <remarks>
+    /// 残す理由（P3-6）：null は空文字（総当たりの規則は null を受けない）。前後の空白だけを除き綴りを変えないことは
+    /// <see cref="AreSame_AgreesWithFuzzRule"/> の保存形の照合へ移した
+    /// </remarks>
+    [Fact(DisplayName = "ToStoredForm は null を空文字にする")]
     public void ToStoredForm_TrimsOnly()
     {
-        SchemaNames.ToStoredForm("  OrDers ").Should().Be("OrDers");
         SchemaNames.ToStoredForm(null).Should().BeEmpty();
     }
 
