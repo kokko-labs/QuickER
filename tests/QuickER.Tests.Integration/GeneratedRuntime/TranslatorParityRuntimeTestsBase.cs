@@ -62,6 +62,8 @@ public abstract class TranslatorParityRuntimeTestsBase
     /// <remarks>
     /// オフセットつき日時は UTC へ換算すると年・日・時が変わる値を混ぜる（id 1・2・5）。名前は空白だけ・タブ・
     /// 全角空白・空文字・改行を含む値を持つ（IsNullOrEmpty / IsNullOrWhiteSpace の境界）。固定長の code は空白だけ（id 5）と空文字（id 9）を持つ。
+    /// name と group は NULL の 4 つの組を持つ（id 1＝両方非 NULL の異値・id 10＝name だけ NULL・id 11＝両方非 NULL の同値・
+    /// ほか＝group が NULL）。NULL 許容の decimal の amount は 100・200・300 と、境界の 250・重複の 100・NULL を散らす。
     /// </remarks>
     protected static IReadOnlyList<ProbeEntity> SeedProbes() =>
         [
@@ -73,7 +75,8 @@ public abstract class TranslatorParityRuntimeTestsBase
                 new DateTimeOffset(2024, 1, 1, 5, 0, 0, TimeSpan.FromHours(9)),
                 true,
                 group: "g1",
-                xy: "a]b"
+                xy: "a]b",
+                amount: 100m
             ),
             Probe(
                 2,
@@ -81,7 +84,8 @@ public abstract class TranslatorParityRuntimeTestsBase
                 "abcd",
                 new DateTime(2024, 1, 16, 0, 0, 0),
                 new DateTimeOffset(2023, 12, 31, 22, 0, 0, TimeSpan.FromHours(-3)),
-                false
+                false,
+                amount: 200m
             ),
             Probe(
                 3,
@@ -89,7 +93,8 @@ public abstract class TranslatorParityRuntimeTestsBase
                 "xabx",
                 new DateTime(2024, 1, 14, 23, 59, 59),
                 new DateTimeOffset(2024, 6, 30, 23, 30, 0, TimeSpan.Zero),
-                true
+                true,
+                amount: 300m
             ),
             Probe(4, "\t", null, null, null, false),
             Probe(
@@ -98,12 +103,15 @@ public abstract class TranslatorParityRuntimeTestsBase
                 "  ",
                 new DateTime(2023, 5, 1, 0, 0, 0),
                 new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.FromHours(9)),
-                true
+                true,
+                amount: 100m
             ),
             Probe(6, "", "Zc", new DateTime(2024, 1, 15, 0, 0, 0), null, false),
-            Probe(7, "Bob\n", null, new DateTime(2025, 1, 15, 8, 0, 0), null, true),
+            Probe(7, "Bob\n", null, new DateTime(2025, 1, 15, 8, 0, 0), null, true, amount: 250m),
             Probe(8, "label", "ab", null, null, false),
             Probe(9, "x", "", null, null, false),
+            Probe(10, null, null, null, null, true, group: "g10"),
+            Probe(11, "Alicia", null, null, null, false, group: "Alicia"),
         ];
 
     private static ProbeEntity Probe(
@@ -114,7 +122,8 @@ public abstract class TranslatorParityRuntimeTestsBase
         DateTimeOffset? atOffset,
         bool isActive,
         string? group = null,
-        string? xy = null
+        string? xy = null,
+        decimal? amount = null
     ) =>
         new()
         {
@@ -126,24 +135,82 @@ public abstract class TranslatorParityRuntimeTestsBase
             IsActive = isActive,
             Group = group,
             XY = xy,
+            Amount = amount,
         };
 
     /// <summary>
     /// 実装先の Query() が返す行の集合が、同じ実装先から読み戻した全行へ C# のラムダを当てた結果と一致することを表明する。
     /// </summary>
-    protected async Task ShouldMatchCSharpAsync(Expression<Func<ProbeEntity, bool>> predicate)
+    protected Task ShouldMatchCSharpAsync(Expression<Func<ProbeEntity, bool>> predicate) =>
+        ShouldMatchCSharpAsync(
+            Repository<IProbeRepository>(),
+            predicate,
+            p => p.ProbeId,
+            SeedProbes().Count
+        );
+
+    /// <summary>
+    /// <paramref name="repository"/> の Query() が返す行の集合が、同じ実装先から読み戻した全行へ C# のラムダを当てた結果と
+    /// 一致することを表明する（表を問わない形。<paramref name="seeded"/> は読み戻す行の数）。
+    /// </summary>
+    protected static async Task ShouldMatchCSharpAsync<TEntity, TKey>(
+        IRepository<TEntity, TKey> repository,
+        Expression<Func<TEntity, bool>> predicate,
+        Func<TEntity, int> key,
+        int seeded
+    )
+        where TEntity : EntityBaseCore, new()
     {
-        var stored = await Repository<IProbeRepository>().Query().ToListAsync(Ct);
-        stored.Should().HaveCount(SeedProbes().Count);
+        var stored = await repository.Query().ToListAsync(Ct);
+        stored.Should().HaveCount(seeded);
 
-        var expected = stored.Where(predicate.Compile()).Select(p => p.ProbeId).ToList();
+        var expected = stored.Where(predicate.Compile()).Select(key).ToList();
 
-        var actual = await Repository<IProbeRepository>().Query().Where(predicate).ToListAsync(Ct);
+        var actual = await repository.Query().Where(predicate).ToListAsync(Ct);
 
         actual
-            .Select(p => p.ProbeId)
+            .Select(key)
             .Should()
             .BeEquivalentTo(expected, "条件 {0} は C# の意味論と同じ行を返すべき", predicate);
+    }
+
+    // ===== 述語の表 =====
+
+    /// <summary>
+    /// 述語の表（<see cref="TranslatorParityPredicateRows"/>）の 1 行が、C# と同じ行を返すことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 行は式の翻訳の NULL の補償・否定の反転と畳み込み・IN の null の要素・空の IN・bool 列の短縮形などの形を持つ。
+    /// small_child の行は、親子のシード（<see cref="SeedCrossTypeFamilyAsync"/>）を入れてから比べる。
+    /// </remarks>
+    [Theory(DisplayName = "[翻訳パリティ] 述語の表の行が C# と同じ行を返す")]
+    [MemberData(
+        nameof(TranslatorParityPredicateRows.Ids),
+        MemberType = typeof(TranslatorParityPredicateRows)
+    )]
+    public async Task Predicate_MatchesCSharp(string id)
+    {
+        await SetUpAsync();
+
+        switch (TranslatorParityPredicateRows.Table[id].Input)
+        {
+            case ProbePredicate probe:
+                await ShouldMatchCSharpAsync(probe.Predicate);
+                break;
+
+            case SmallChildPredicate child:
+                await SeedCrossTypeFamilyAsync();
+                await ShouldMatchCSharpAsync(
+                    Repository<ISmallChildRepository>(),
+                    child.Predicate,
+                    c => c.Id,
+                    CrossTypeChildCount
+                );
+                break;
+
+            default:
+                throw new InvalidOperationException($"行 {id} の入力の型を扱えない");
+        }
     }
 
     // ===== 列を含まない部分式（クロージャの値・定数）は先に評価する =====
@@ -364,6 +431,9 @@ public abstract class TranslatorParityRuntimeTestsBase
     }
 
     // ===== CLR の型が違うキーの Include =====
+
+    /// <summary><see cref="SeedCrossTypeFamilyAsync"/> が入れる small_child の行の数</summary>
+    private const int CrossTypeChildCount = 4;
 
     /// <summary>
     /// 主キーが long（bigint）・外部キーが int の親子を投入する（SQL Server はこの外部キー制約を作らないが、値の組は同じ）。

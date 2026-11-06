@@ -18,7 +18,8 @@ namespace QuickER.Tests.Integration.Dialects;
 /// <c>realdb-long-default-pg-legacy-truncated-fk-name-is-absorbed</c>（<see cref="SyncPlanExpectationRows"/>）が確かめる。
 /// この対照は能力（<see cref="SyncDialectCapabilities.TruncatesLongIdentifiers"/>）を差し替えて差分を取るので、方言の能力で
 /// 流す期待の行の実 DB の段では書けない。既定名を上限に収める図の往復は期待の行 <c>realdb-long-default-names-apply-and-round-trip-no-diff</c>。
-/// 単体の対応は <c>LongDefaultConstraintNameTests</c>。
+/// DB を使わない対応は同期計画の期待の行 <c>diff-long-default-pg-legacy-truncated-fk-name-is-absorbed</c>（合成の能力
+/// <c>PostgreSql-NoTruncation</c> で吸収しない対照も持つ）。
 /// </remarks>
 [Trait("Category", "Integration")]
 [Trait("RequiresDocker", "true")]

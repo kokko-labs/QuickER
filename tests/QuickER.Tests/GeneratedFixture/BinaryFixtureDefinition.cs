@@ -118,9 +118,9 @@ public static class BinaryFixtureDefinition
                     DataType = "nvarchar(50)",
                     IsNullable = false,
                 },
-                // 素の bool 列（bit・非 nullable）。翻訳器の bool 短縮分岐（[col]=1 / [col]=0）の実 DB 検証用。
-                // VO 化フィクスチャ（GeneratedFixture 等）では素の bool に構造的に到達できないため、
-                // raw 型で生成される本フィクスチャ（SQLite）と SqlServerBinaryFixture（SQL Server）が唯一の担い手
+                // 素の bool 列（bit・非 nullable）。EditModel・Mapper・スキーマの適用のテストが値を読み書きする。
+                // 翻訳器の bool 短縮分岐（[col]=1 / [col]=0）の実 DB 検証は、翻訳器の一致の述語の表
+                // （TranslatorParityPredicateRows・probes.is_active）が持つ
                 new Column
                 {
                     Id = DocumentIsPublishedColId,

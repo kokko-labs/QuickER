@@ -248,6 +248,10 @@ public class IdentifierLengthLimitTests
             .BeLessThan(4, "上限まで使う（1 文字分の端数だけ余り得る）");
     }
 
+    /// <remarks>
+    /// 残す理由（P3-6）：上限の後ろでだけ違う 2 つの名前（70 文字の b と _1 / _2）という具体の入力。長い既定名どうしが縮めても別の名前に
+    /// なることは LongDefaultConstraintNameTests.DefaultNames_AreShortenedWithinLimitAndDistinct が 4 方言の図で見るが、入力が違う
+    /// </remarks>
     [Fact(DisplayName = "Fit: 上限の後ろでだけ違う 2 つの名前は、縮めても別の名前になる")]
     public void Fit_KeepsNamesDistinct()
     {

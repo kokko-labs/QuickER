@@ -238,7 +238,7 @@
   - 説明は対象外（改行が正当。コメント側の `Sanitize` が唯一の防壁なので上のガードが要る）。
   - 判定は `SqlComment.ContainsControlCharacter` と共有する。C# 生成側の同じ規則（`ValidateNameControlCharacters`）は依存方向のため意図的に二重定義している。片方だけ変えない。
 - 合成する制約名のクォート：`PK_{SafeName(テーブル名)}` は `SafeName` が終端クォート文字を二重化しないので、埋め込み側で必ず方言の `Escape` を通す（SQLite の DDL と逐次 4 方言の同期の `CREATE TABLE`／`ADD CONSTRAINT`）。
-- 固定は `SqlTypeTextTests`・`SqlNameTextTests`（入口検証を 5 方言の DDL・同期へ同一ケースで）・`SqlCommentTests`・`SqlCommentInjectionTests`・`SqlCommentSanitizeGuardTests`・`DialectDdlTableTests` の行 `ddl-primary-key-name-escaped`・`sync-*-primary-key-name-escaped`（合成 PK 名を 5 方言まとめて）・`DialectIdentifierTableTests`（5 方言へ同じ危険な文字の行）・`{SqlServer,PostgreSql}RuntimeConstraintNameIntegrationTests`（`]` `'` `"` を含む正当な名前・別スキーマの同名表・表が無いときの no-op）・4 方言の `*SyncScriptBuilderTests` の動的 SQL のケース・`SchemaSyncDialogViewModelTests`（プレビュー生成の失敗はステータス行へ出し、未処理例外にしない）。mutation 実証済み。
+- 固定は `SqlTypeTextTests`・`SqlNameTextTests`（`IsSafe` の判定）・`DialectDdlTableTests` の行 `ddl-*-name-with-newline-is-rejected`（表・列・一意制約・外部キーの名前）・`sync-*-name-with-newline-is-rejected`（入口検証を 5 方言の DDL・同期へ同一ケースで。SQLite の再構築・列の変更の項目 1 つも）・`ddl-quote-apostrophe-table-and-double-quote-column-accepted`（引用符だけを含む名前は通す）・`SqlCommentTests`・`SqlCommentInjectionTests`・`SqlCommentSanitizeGuardTests`・`DialectDdlTableTests` の行 `ddl-primary-key-name-escaped`・`sync-*-primary-key-name-escaped`（合成 PK 名を 5 方言まとめて）・`DialectIdentifierTableTests`（5 方言へ同じ危険な文字の行）・`{SqlServer,PostgreSql}RuntimeConstraintNameIntegrationTests`（`]` `'` `"` を含む正当な名前・別スキーマの同名表・表が無いときの no-op）・4 方言の `*SyncScriptBuilderTests` の動的 SQL のケース・`SchemaSyncDialogViewModelTests`（プレビュー生成の失敗はステータス行へ出し、未処理例外にしない）。mutation 実証済み。
 
 ### 利用者が付けた名前の上限
 

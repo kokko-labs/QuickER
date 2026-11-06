@@ -1,5 +1,4 @@
 using AwesomeAssertions;
-using Microsoft.CodeAnalysis.CSharp;
 using QuickER.CodeGen.CSharp;
 using QuickER.CodeGen.CSharp.Queries;
 using QuickER.Model;
@@ -10,25 +9,22 @@ namespace QuickER.Tests.CodeGen.CSharp;
 
 /// <summary>
 /// 名前付きクエリのパラメータ名に使えない名前（<see cref="QueryDefinitionRules.IsReservedParameterName"/>）が、
-/// 生成されるメソッドの形の中で実際にコンパイルできない名前と一致することを検証するテストクラス。
+/// 予約から外すと生成物が実際にコンパイルできない名前であること（表に要らない名前を載せない）と、保存前の規則がそれを断ることを検証するテストクラス。
 /// </summary>
 /// <remarks>
-/// C# の文脈キーワードは識別子として合法なので <see cref="QueryDefinitionRules.IsValidIdentifier"/> を通るが、
-/// 生成されるメソッドの形によっては識別子として使えない（async メソッドの中の <c>await</c>）。予約名の表を
-/// 文脈キーワードの全数と実コンパイルで突き合わせ、表から漏れた名前と、表に要らない名前の両方を検出する。
+/// <para>
+/// 予約されていない名前（文脈キーワードの全数・生成本体が <c>this.</c> で呼ぶメンバー名など）が断られずに全部の形でコンパイルできること、
+/// 断られる名前の集合がちょうど期待どおりであることは <c>QueryParameterNameSafetyTests</c> が、生成器の診断は <c>CodegenCaseTests</c> の行
+/// <c>diag-query-reserved-parameter-name-*</c> が見る。
+/// </para>
+/// <para>
+/// 残す理由（P3-6）：予約から外した生成物は生成器が出さないので、仮の名前で生成した生成物の識別子を差し替えて実コンパイルが失敗することを示す
+/// （予約の表の要否の実証そのもので、行の判定に言い換えられない）。保存前の規則 <see cref="QueryDefinitionRules.Validate"/> の戻りは
+/// 生成を通らない公開 API の契約。
+/// </para>
 /// </remarks>
 public class QueryReservedParameterNameTests
 {
-    /// <summary>Roslyn が知っている文脈キーワードの全数（予約されたものも含む）</summary>
-    private static IReadOnlyList<string> ContextualKeywords() =>
-        SyntaxFacts
-            .GetContextualKeywordKinds()
-            .Select(SyntaxFacts.GetText)
-            .Where(QueryDefinitionRules.IsValidIdentifier)
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(text => text, StringComparer.Ordinal)
-            .ToList();
-
     /// <summary>1 つのパラメータ名を、生成されるメソッドの形すべてで使うクエリ群を作る</summary>
     private static IEnumerable<QueryDefinition> QueriesUsing(string parameterName, int index)
     {
@@ -170,49 +166,6 @@ public class QueryReservedParameterNameTests
     }
 
     [Theory(
-        DisplayName = "予約されていない文脈キーワードは、生成されるどのメソッドの形でもパラメータ名としてコンパイルできる"
-    )]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void UnreservedContextualKeywords_CompileInEveryMethodShape(bool valueObjects)
-    {
-        var keywords = ContextualKeywords()
-            .Where(keyword => !QueryDefinitionRules.IsReservedParameterName(keyword))
-            .ToList();
-        keywords.Should().NotBeEmpty();
-
-        var (diagram, order) = CreateDiagram();
-        var index = 0;
-
-        foreach (var keyword in keywords)
-        {
-            foreach (var query in QueriesUsing(keyword, index++))
-            {
-                query.EntityId = order.Id;
-                diagram.Queries.Add(query);
-            }
-        }
-
-        BindProjectionFields(diagram, order);
-
-        var result = Generate(diagram, valueObjects);
-
-        result
-            .Diagnostics.Where(diagnostic =>
-                diagnostic.Severity != GenerationDiagnosticSeverity.Info
-            )
-            .Should()
-            .BeEmpty("すべてのクエリが診断なしで生成されるべき");
-
-        var compilation = GeneratedCodeCompiler.Compile(
-            result,
-            $"QueryContextualKeywordParams{valueObjects}"
-        );
-
-        compilation.Success.Should().BeTrue(compilation.DescribeErrors());
-    }
-
-    [Theory(
         DisplayName = "予約された名前は、それだけを予約から外すと生成物がコンパイルできない（表に要らない名前を載せない）"
     )]
     [InlineData("await")]
@@ -273,45 +226,16 @@ public class QueryReservedParameterNameTests
             );
     }
 
-    [Theory(
-        DisplayName = "生成本体が this. で呼ぶメンバーと同じ名前のパラメータは予約せず、生成されるどの形でもコンパイルできる"
-    )]
-    [InlineData("Query")]
-    [InlineData("QueryBySqlAsync")]
-    [InlineData("ExecuteScalarSqlAsync")]
-    [InlineData("QueryProjectionBySqlAsync")]
-    [InlineData("InvokeAsync")]
-    [InlineData("InvokeNullableAsync")]
-    public void MemberNamesCalledWithThis_AreNotReservedAndCompile(string name)
-    {
-        QueryDefinitionRules.IsReservedParameterName(name).Should().BeFalse();
-
-        var (diagram, order) = CreateDiagram();
-
-        foreach (var query in QueriesUsing(name, 0))
-        {
-            query.EntityId = order.Id;
-            diagram.Queries.Add(query);
-        }
-
-        BindProjectionFields(diagram, order);
-
-        var result = Generate(diagram, valueObjects: false, remoteServices: true);
-        result
-            .HasErrors.Should()
-            .BeFalse(string.Join(" | ", result.Diagnostics.Select(d => d.Message)));
-
-        var compilation = GeneratedCodeCompiler.Compile(result, $"QueryMemberNameParam_{name}");
-
-        compilation.Success.Should().BeTrue(compilation.DescribeErrors());
-    }
-
+    /// <remarks>
+    /// 残す理由（P3-6）：保存前の規則 <see cref="QueryDefinitionRules.Validate"/> がちょうど 1 件の違反を返すことは生成を通らない公開 API の契約。
+    /// 生成器が断ること（エラーで、パラメータ名を名指しする）は移した（移した先：<c>CodegenCaseTests</c> の行 <c>diag-query-reserved-parameter-name-selector-field</c>）。
+    /// </remarks>
     [Fact(
-        DisplayName = "簡易 DSL の射影の選択式のフィールドと同じ名前のパラメータは、生成器と保存前の規則の両方で断られる"
+        DisplayName = "簡易 DSL の射影の選択式のフィールドと同じ名前のパラメータは、保存前の規則で断られる"
     )]
     public void SelectorFieldNamedParameter_IsRejected()
     {
-        var (diagram, order) = CreateDiagram();
+        var (_, order) = CreateDiagram();
         var qty = order.Columns.Single(column => column.Name == "Qty");
         var query = new QueryDefinition
         {
@@ -330,22 +254,11 @@ public class QueryReservedParameterNameTests
                 new ProjectionField { Name = "Qty", SourceColumnId = qty.Id },
             },
         };
-        diagram.Queries.Add(query);
 
         QueryDefinitionRules
             .Validate(order, query, [])
             .Should()
             .ContainSingle(violation => violation.Kind == QueryRuleKind.ReservedParameterName);
-
-        var result = Generate(diagram, valueObjects: false);
-
-        result.HasErrors.Should().BeTrue();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("'_rowsAsyncSelector'")
-            );
     }
 
     [Fact(
@@ -406,12 +319,15 @@ public class QueryReservedParameterNameTests
             );
     }
 
-    [Fact(
-        DisplayName = "await という名前のパラメータは生成時エラーになり、保存前の規則でも拒否される"
-    )]
+    /// <remarks>
+    /// 残す理由（P3-6）：保存前の規則 <see cref="QueryDefinitionRules.Validate"/> がちょうど 1 件の違反を返すことは生成を通らない公開 API の契約。
+    /// 生成器が断ること（生 SQL の単一戻りの async メソッドで、エラーでパラメータ名を名指しする）は移した
+    /// （移した先：<c>CodegenCaseTests</c> の行 <c>diag-query-reserved-parameter-name-await-raw-sql-single</c>）。
+    /// </remarks>
+    [Fact(DisplayName = "await という名前のパラメータは、保存前の規則で拒否される")]
     public void AwaitParameter_IsRejected()
     {
-        var (diagram, order) = CreateDiagram();
+        var (_, order) = CreateDiagram();
         var query = new QueryDefinition
         {
             EntityId = order.Id,
@@ -424,21 +340,10 @@ public class QueryReservedParameterNameTests
                 new QueryParameter { Name = "await", Type = "int32" },
             },
         };
-        diagram.Queries.Add(query);
 
         QueryDefinitionRules
             .Validate(order, query, [])
             .Should()
             .ContainSingle(violation => violation.Kind == QueryRuleKind.ReservedParameterName);
-
-        var result = Generate(diagram, valueObjects: false);
-
-        result.HasErrors.Should().BeTrue();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("'await'")
-            );
     }
 }

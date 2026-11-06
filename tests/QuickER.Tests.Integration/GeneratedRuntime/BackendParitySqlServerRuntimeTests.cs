@@ -87,7 +87,10 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
             "hook-sql-stamps-saved-parent",
             "hook-without-writes-no-reread",
             "hook-audit-row-no-reread",
-            "hook-skip-parent-child-fk"
+            "hook-skip-parent-child-fk",
+            "value-object-in-null-semantics",
+            "value-object-in-all-null-elements",
+            "any-without-condition"
         );
 
     /// <summary>
@@ -173,6 +176,19 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
             "gadgets/1 name=alpha",
             "gadget_notes/10 gadget=1 note=first",
         ],
+        // 値オブジェクトの列（NULL 許容の kit_code）の IN / NOT IN は C# の意味論にそろう：null の要素は IS NULL へ畳み、
+        // NOT IN は列が NULL の行を残し（null の要素が無いとき）、null の要素があれば落とす
+        ["value-object-in-null-semantics"] =
+        [
+            "in [K1,K2] ids=[10,11]",
+            "not-in [K1,K2] ids=[12]",
+            "in [K1,null] ids=[10,12]",
+            "not-in [K1,null] ids=[11]",
+        ],
+        // 全要素が null のリストの IN / NOT IN は、NULL の行とそれ以外を二分する
+        ["value-object-in-all-null-elements"] = ["in [null] ids=[12]", "not-in [null] ids=[10]"],
+        // 条件なしの Any は、空の表で false・行を入れた後で true（SQL Server の EXISTS の組み立て）
+        ["any-without-condition"] = ["empty any=False", "seeded any=True"],
     };
 
     [Theory(
@@ -559,8 +575,113 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
             ),
             "hook-audit-row-no-reread" => await HookNoRereadAsync(efCore, new AuditNoteOnAfter()),
             "hook-skip-parent-child-fk" => await HookSkipParentAsync(efCore),
+            "value-object-in-null-semantics" => await ValueObjectInAsync(
+                efCore,
+                [10, 11, 12],
+                [
+                    ["K1", "K2"],
+                    ["K1", null],
+                ]
+            ),
+            "value-object-in-all-null-elements" => await ValueObjectInAsync(
+                efCore,
+                [10, 12],
+                [
+                    [null],
+                ]
+            ),
+            "any-without-condition" => await AnyWithoutConditionAsync(efCore),
             _ => throw new ArgumentOutOfRangeException(nameof(name)),
         };
+    }
+
+    /// <summary>
+    /// 条件なしの Any（SQL Server の実 DB）：空の gadgets で <c>Query().AnyAsync()</c> を読み、1 行入れてからもう一度読む
+    /// </summary>
+    private async Task<IReadOnlyList<string>> AnyWithoutConditionAsync(bool efCore)
+    {
+        await using var provider = Build(efCore, withHooks: false);
+        var gadgets = provider.GetRequiredService<IGadgetRepository>();
+        var empty = await gadgets.Query().AnyAsync(Ct);
+        await gadgets.InsertAsync(NewGadget(1, "g1"), Ct);
+        var seeded = await gadgets.Query().AnyAsync(Ct);
+
+        return [$"empty any={empty}", $"seeded any={seeded}"];
+    }
+
+    /// <summary>
+    /// 値オブジェクトの列の IN / NOT IN（SQL Server の値オブジェクトの束縛と null の要素の畳み込み）：kits K1・K2 と、kit_code が
+    /// 部品 10＝K1・11＝K2・12＝NULL のうち <paramref name="parts"/> の行を入れ、<paramref name="lists"/> の各リスト
+    /// （<c>List&lt;CodeValue?&gt;</c>。null の要素はそのまま）で <c>codes.Contains(p.KitCode)</c> とその否定を読む
+    /// </summary>
+    private async Task<IReadOnlyList<string>> ValueObjectInAsync(
+        bool efCore,
+        IReadOnlyList<int> parts,
+        IReadOnlyList<IReadOnlyList<string?>> lists
+    )
+    {
+        await using var provider = Build(efCore, withHooks: false);
+        var kits = provider.GetRequiredService<IKitRepository>();
+        var kitParts = provider.GetRequiredService<IKitPartRepository>();
+        await kits.InsertAsync(
+            new KitEntity
+            {
+                KitId = KitIdValue.Create(1),
+                Code = CodeValue.Create("K1"),
+                Name = NameValue.Create("k1"),
+            },
+            Ct
+        );
+        await kits.InsertAsync(
+            new KitEntity
+            {
+                KitId = KitIdValue.Create(2),
+                Code = CodeValue.Create("K2"),
+                Name = NameValue.Create("k2"),
+            },
+            Ct
+        );
+        var codeOf = new Dictionary<int, string?>
+        {
+            [10] = "K1",
+            [11] = "K2",
+            [12] = null,
+        };
+
+        foreach (var id in parts)
+        {
+            await kitParts.InsertAsync(
+                new KitPartEntity
+                {
+                    PartId = PartIdValue.Create(id),
+                    KitCode = codeOf[id] is { } code ? CodeValue.Create(code) : null,
+                },
+                Ct
+            );
+        }
+
+        var lines = new List<string>();
+
+        foreach (var list in lists)
+        {
+            var codes = list.Select(c => c is null ? null : CodeValue.Create(c)).ToList();
+            var label = string.Join(",", list.Select(c => c ?? "null"));
+            var inIds = await kitParts
+                .Query()
+                .Where(p => codes.Contains(p.KitCode))
+                .ToListAsync(Ct);
+            var notInIds = await kitParts
+                .Query()
+                .Where(p => !codes.Contains(p.KitCode))
+                .ToListAsync(Ct);
+            lines.Add($"in [{label}] ids=[{Ids(inIds)}]");
+            lines.Add($"not-in [{label}] ids=[{Ids(notInIds)}]");
+        }
+
+        return lines;
+
+        static string Ids(IEnumerable<KitPartEntity> rows) =>
+            string.Join(",", rows.Select(p => p.PartId.Value).Order());
     }
 
     /// <summary>

@@ -27,7 +27,180 @@ internal static partial class CodegenCases
 {
     /// <summary>コンパイルの行</summary>
     private static IEnumerable<ScenarioRow<CodegenCase>> CompileRows() =>
-        [.. CompileMatrixRows(), .. CompileSingleOptionRows(), .. CompilePackageRows()];
+        [
+            .. CompileMatrixRows(),
+            .. CompileSingleOptionRows(),
+            .. CompilePackageRows(),
+            .. CompileNameRows(),
+        ];
+
+    /// <summary>
+    /// 名前の行（P3-6 で NameTrustBoundaryGenerationTests・GeneratedTypeNameCollisionTests・GeneratedMemberNameCaseTests から移した）：
+    /// エスケープの要る名前の図・型名がぶつからない組・EditModel の中だけの大小違いが、診断なしで生成してコンパイルできる
+    /// </summary>
+    /// <remarks>
+    /// 型名がぶつからない組の層別は、元の <c>GeneratedCodeCompiler.Compile</c> と同じ 1 アセンブリでコンパイルする。
+    /// 診断を見る行（ぶつかる組・制御文字・メンバー名の大小）は <see cref="Service_TypeNameRows"/> ほか。
+    /// </remarks>
+    private static IEnumerable<ScenarioRow<CodegenCase>> CompileNameRows()
+    {
+        const string NameTrust = "NameTrustBoundaryGenerationTests.";
+
+        yield return new ScenarioRow<CodegenCase>(
+            "compile-name-quoted-backslash",
+            null,
+            "名前に \" や \\ を含む図の生成コードはコンパイルでき、[Table] / [Column] / [UniqueConstraint] / [NavigationReference] は名前をエスケープして出力し、"
+                + "クォートを含むだけの名前は制御文字の診断にしない（"
+                + NameTrust
+                + "QuotedNames_ProduceCompilableCode・QuotedNames_AreEscapedInAttributes・QuotedNames_AreEscapedInNavigationReference・QuoteInName_IsNotError）",
+            new CodegenCase(
+                Compile_QuotedNameDiagram,
+                Service_NameTrustOptions(),
+                DialectNames.SqlServer,
+                DiagnosticExpectation
+                    .Contains()
+                    .Without(
+                        ExpectedDiagnostic.ErrorAnyItems(
+                            nameof(Strings.CodeGen_Error_NameContainsControlCharacter)
+                        )
+                    ),
+                FileRules: [CompileGenerated],
+                Compile: true,
+                Code:
+                [
+                    CodeRule.Attribute(
+                        "WeIrdCustomerEntity",
+                        null,
+                        """Table("we\"ird\\customers")"""
+                    ),
+                    CodeRule.Attribute("OrDerEntity", null, """Table("or\"ders")"""),
+                    CodeRule.Attribute(
+                        "WeIrdCustomerEntity",
+                        "CusTomerId",
+                        """Column("cus\"tomer\\id")"""
+                    ),
+                    CodeRule.Attribute("OrDerEntity", "CusTomerId", """Column("cus\"tomer\\id")"""),
+                    CodeRule.Attribute(
+                        "WeIrdCustomerEntity",
+                        null,
+                        """UniqueConstraint(["NaMe"], Name = "UQ_\"weird\\")"""
+                    ),
+                    CodeRule.Attribute(
+                        "WeIrdCustomerEntity",
+                        "OrDers",
+                        """NavigationReference("we\"ird\\customers", "cus\"tomer\\id", "or\"ders", "cus\"tomer\\id", true, true, false, ConstraintName = "FK_\"weird\\")"""
+                    ),
+                    CodeRule.Attribute(
+                        "OrDerEntity",
+                        "WeIrdCustomer",
+                        """NavigationReference("we\"ird\\customers", "cus\"tomer\\id", "or\"ders", "cus\"tomer\\id", false, false, true, ConstraintName = "FK_\"weird\\")"""
+                    ),
+                ]
+            )
+        );
+
+        // 波括弧を二重化しないと $"CO{DE}-00{index}" が「存在しない識別子 DE の補間」になりコンパイル不能。探針でシードの値も作る
+        yield return new ScenarioRow<CodegenCase>(
+            "compile-name-braces-inmemory-seed",
+            null,
+            "インメモリのサンプル値式は補間文字列の波括弧を二重化する（"
+                + NameTrust
+                + "BracesInColumnName_AreDoubledInInterpolatedSampleValue）",
+            new CodegenCase(
+                () =>
+                    new ErDiagram
+                    {
+                        Entities =
+                        [
+                            Service_Entity(
+                                "items",
+                                Service_Column("co{de}", "nvarchar(20)", primaryKey: true)
+                            ),
+                        ],
+                    },
+                new CodeGenerationOptions
+                {
+                    RootNamespace = "Sample.Domain",
+                    GenerateEditModels = true,
+                    GenerateMappers = true,
+                    GenerateInMemoryRepositories = true,
+                    IncludeDataAnnotations = true,
+                },
+                DialectNames.SqlServer,
+                DiagnosticExpectation.Contains(),
+                FileRules: [CompileGenerated],
+                Compile: true,
+                Probes: [CodegenProbe.InMemorySeed]
+            )
+        );
+
+        foreach (var output in Service_Outputs)
+        {
+            foreach (var table in new[] { "customer_address", "http_order", "order_line" })
+            {
+                yield return CompileRow(
+                    $"compile-type-names-distinct-{table.Replace('_', '-')}-{output}",
+                    $"型名の衝突: 型名がぶつからない表の組は、どの出力の形でも診断なしで生成してコンパイルできる（GeneratedTypeNameCollisionTests.DistinctTables_GenerateAndCompile(\"{table}\")・出力 {output}）",
+                    () =>
+                        Service_SqlServerDiagram(
+                            Service_IdTable("order", Service_TextColumn("status")),
+                            Service_IdTable(table)
+                        ),
+                    Service_TypeNameOptions(output),
+                    diagnostics: DiagnosticExpectation.Exact([]),
+                    oneAssembly: output == "layered"
+                );
+            }
+        }
+
+        // 列 id の EditModel は BindingId を、列 bindingid は Bindingid を作る（エンティティのメンバーは Id と Bindingid）
+        yield return CompileRow(
+            "compile-member-name-case-editmodel-only",
+            "メンバー名の大小違い: EditModel の中だけで大小が違う名前（JSON に出ない）は止めず、診断なしで生成してコンパイルできる（GeneratedMemberNameCaseTests.EditModelOnlyCaseDifference_GeneratesAndCompiles）",
+            () =>
+                Service_SqlServerDiagram(Service_IdTable("orders", Service_IntColumn("bindingid"))),
+            Service_TypeNameOptions("single"),
+            diagnostics: DiagnosticExpectation.Exact([])
+        );
+    }
+
+    /// <summary>
+    /// C# リテラルのエスケープが要る名前（二重引用符とバックスラッシュ）を表・列・一意制約名・外部キー名に含む図
+    /// （NameTrustBoundaryGenerationTests.BuildQuotedNameDiagram）
+    /// </summary>
+    private static ErDiagram Compile_QuotedNameDiagram()
+    {
+        var customerKey = Service_Column("cus\"tomer\\id", "int", primaryKey: true);
+        var customerName = Service_Column("na\"me", "nvarchar(100)", nullable: true);
+        var orderKey = Service_Column("cus\"tomer\\id", "int", foreignKey: true);
+        var customer = Service_Entity("we\"ird\\customers", customerKey, customerName);
+        var order = Service_Entity(
+            "or\"ders",
+            Service_Column("or\"der_id", "int", primaryKey: true),
+            orderKey
+        );
+
+        customer.UniqueConstraints.Add(
+            new UniqueConstraint { Name = "UQ_\"weird\\", ColumnIds = [customerName.Id] }
+        );
+
+        return new ErDiagram
+        {
+            Entities = [customer, order],
+            Relationships =
+            [
+                new Relationship
+                {
+                    Id = Guid.NewGuid(),
+                    SourceEntityId = customer.Id,
+                    TargetEntityId = order.Id,
+                    Type = RelationshipType.OneToMany,
+                    ConstraintName = "FK_\"weird\\",
+                    ColumnPairs = [new(customerKey.Id, orderKey.Id)],
+                },
+            ],
+        };
+    }
 
     /// <summary>生成が 1 ファイル以上ある（元の <c>result.Files.Should().NotBeEmpty()</c>。層別でも数えるので置き場は見ない）</summary>
     private static FileRule CompileGenerated => new(".g.cs", NonEmpty: true, AnyDirectory: true);

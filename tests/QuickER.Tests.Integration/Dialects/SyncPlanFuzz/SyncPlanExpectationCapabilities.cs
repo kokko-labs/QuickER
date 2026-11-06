@@ -113,6 +113,12 @@ internal static class SyncPlanExpectationCapabilities
     /// </summary>
     public const string NeutralWithoutOnUpdateAndSetDefault = "Neutral-NoOnUpdateNoSetDefault";
 
+    /// <summary>
+    /// 上限を超える識別子を切り詰めるとみなさない PostgreSQL（旧版が切り詰めた外部キー名の吸収の対照）。近い実方言は PostgreSQL で、違う宣言は
+    /// TruncatesLongIdentifiers（偽）だけ
+    /// </summary>
+    public const string PostgreSqlWithoutTruncation = "PostgreSql-NoTruncation";
+
     private static readonly SyncDialectCapabilities MySqlLikeValue =
         TestDialectCapabilities.Neutral with
         {
@@ -193,6 +199,10 @@ internal static class SyncPlanExpectationCapabilities
             SupportsOnUpdateAction = false,
             SupportsSetDefaultAction = false,
         },
+        [PostgreSqlWithoutTruncation] = new PostgreSqlProvider().SyncCapabilities with
+        {
+            TruncatesLongIdentifiers = false,
+        },
     };
 
     private static readonly Dictionary<string, IDatabaseProvider> Providers = new(
@@ -228,6 +238,7 @@ internal static class SyncPlanExpectationCapabilities
             [NonTransactionalOrdered] = DialectNames.MySql,
             [NonTransactionalUnordered] = DialectNames.MySql,
             [NeutralWithoutOnUpdateAndSetDefault] = DialectNames.Oracle,
+            [PostgreSqlWithoutTruncation] = DialectNames.PostgreSql,
         };
 
     /// <summary>実方言 5 つ（<see cref="DialectNames.All"/> の並び）</summary>

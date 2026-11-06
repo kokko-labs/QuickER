@@ -168,7 +168,12 @@ internal sealed class DirectEntrance : ICodegenEntrance
         Task.FromResult(
             new EntranceOutcome(
                 input.Options,
-                CodegenRunner.Generate(input.Diagram, input.TypeDialect, input.Options),
+                CodegenRunner.Generate(
+                    input.Diagram,
+                    input.TypeDialect,
+                    input.Options,
+                    input.MapperDialects
+                ),
                 [],
                 []
             )

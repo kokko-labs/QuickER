@@ -7,6 +7,7 @@ using QuickER.Tests.GeneratedMultiTargetFixture;
 using QuickER.Tests.GeneratedMultiTargetRowVersionFixture;
 using QuickER.Tests.GeneratedSyncFixture;
 using QuickER.Tests.TestSupport.Engines;
+using static QuickER.Tests.CodeGen.CSharp.CodegenConfig.Judges.CodeRule;
 
 namespace QuickER.Tests.CodeGen.CSharp.CodegenConfig;
 
@@ -30,7 +31,8 @@ internal static partial class CodegenCases
         IReadOnlyList<FileRule>? fileRules = null,
         bool compile = false,
         IReadOnlyList<GeneratedFile>? extraSources = null,
-        string typeDialect = DialectNames.SqlServer
+        string typeDialect = DialectNames.SqlServer,
+        IReadOnlyList<CodeRule>? code = null
     ) =>
         new(
             id,
@@ -43,7 +45,8 @@ internal static partial class CodegenCases
                 diagnostics,
                 FileRules: fileRules,
                 Compile: compile,
-                ExtraSources: extraSources
+                ExtraSources: extraSources,
+                Code: code
             )
         );
 
@@ -460,6 +463,82 @@ internal static partial class CodegenCases
                                 : nameof(Strings.CodeGen_Query_InvalidParameterName),
                             parameterName
                         )
+                    )
+                )
+            ),
+            // 生成側の診断（保存前の規則 QueryDefinitionRules.Validate の戻りは公開 API の契約として元のテストに残した）
+            DialectRow(
+                "diag-query-reserved-parameter-name-selector-field",
+                "簡易 DSL の射影の選択式のフィールドと同じ名前のパラメータは、生成器で断られる（QueryReservedParameterNameTests.SelectorFieldNamedParameter_IsRejected の生成側）",
+                () =>
+                    Dialects_QueryDiagram(
+                        Dialects_ReservedNameOrder(),
+                        order =>
+                            [
+                                new QueryDefinition
+                                {
+                                    Name = "Rows",
+                                    Returns = QueryReturnShape.Projection,
+                                    Implementation = QueryImplementationKind.Dsl,
+                                    Condition = "Qty = @_rowsAsyncSelector",
+                                    ResultTypeName = "RowsRow",
+                                    Parameters =
+                                    {
+                                        new QueryParameter
+                                        {
+                                            Name = "_rowsAsyncSelector",
+                                            Type = "int32",
+                                        },
+                                    },
+                                    Fields =
+                                    {
+                                        new ProjectionField
+                                        {
+                                            Name = "Qty",
+                                            SourceColumnId = Dialects_Column(order, "Qty").Id,
+                                        },
+                                    },
+                                },
+                            ]
+                    ),
+                Dialects_QueryRepositoryOnlyOptions(),
+                DiagnosticExpectation.Contains(
+                    ExpectedDiagnostic.ErrorMentioning(
+                        nameof(Strings.CodeGen_Query_ReservedParameterName),
+                        "_rowsAsyncSelector"
+                    )
+                )
+            ),
+            DialectRow(
+                "diag-query-reserved-parameter-name-await-raw-sql-single",
+                "await という名前のパラメータは、生 SQL の単一戻り（async メソッド）で生成時エラーになる（QueryReservedParameterNameTests.AwaitParameter_IsRejected の生成側）",
+                () =>
+                    Dialects_QueryDiagram(
+                        Dialects_ReservedNameOrder(),
+                        _ =>
+                            [
+                                new QueryDefinition
+                                {
+                                    Name = "FindOne",
+                                    Returns = QueryReturnShape.Single,
+                                    Implementation = QueryImplementationKind.Sql,
+                                    Sql =
+                                    {
+                                        [DialectNames.SqlServer] =
+                                            "SELECT * FROM [Order] WHERE [Qty] = @await",
+                                    },
+                                    Parameters =
+                                    {
+                                        new QueryParameter { Name = "await", Type = "int32" },
+                                    },
+                                },
+                            ]
+                    ),
+                Dialects_QueryRepositoryOnlyOptions(),
+                DiagnosticExpectation.Contains(
+                    ExpectedDiagnostic.ErrorMentioning(
+                        nameof(Strings.CodeGen_Query_ReservedParameterName),
+                        "await"
                     )
                 )
             ),
@@ -1160,6 +1239,853 @@ internal static partial class CodegenCases
             ),
         ];
 
+    // ===== 名前付きクエリの簡易 DSL：診断・型の検査・コンパイル（P3-6 で単発のテストから移した行） =====
+
+    /// <summary>
+    /// 簡易 DSL と生 SQL のクエリの診断・型の検査・コンパイルの行（元は <c>QueryCodegenDiagnosticsTests</c>・
+    /// <c>QueryConditionTypeCheckTests</c>・<c>QueryConditionCSharpEmitterTests</c>・<c>QueryInNullableUnknownValueTypeTests</c>）。
+    /// 条件の意味（NULL の行・NOT・文字列一致・IN）は簡易 DSL の総当たり（<c>DslConditionFuzzTests</c>）が見る
+    /// </summary>
+    private static IEnumerable<ScenarioRow<CodegenCase>> DialectDslRows()
+    {
+        const string contract = RepositoryContract;
+        const string implementation = "OrderRepository";
+        const string diagnosticsClass = "QueryCodegenDiagnosticsTests.";
+
+        return
+        [
+            // ===== 生 SQL の未宣言パラメータが、使われない SQL でクエリを止めない =====
+            DialectRow(
+                "code-query-raw-sql-undeclared-parameter-in-unused-dialect-keeps-query",
+                diagnosticsClass
+                    + "UndeclaredParameterInUnsupportedDialect_DoesNotSkipQuery（mysql の SQL の誤りで、使われる sqlserver の実装まで止めない）",
+                () =>
+                    Dialects_OrdersDiagram(
+                        new QueryDefinition
+                        {
+                            Name = "FindByStatus",
+                            Implementation = QueryImplementationKind.Sql,
+                            Sql =
+                            {
+                                ["sqlserver"] = "SELECT * FROM Orders WHERE status = @status",
+                                ["mysql"] = "SELECT * FROM Orders WHERE status = @statsu",
+                            },
+                            Parameters =
+                            {
+                                new QueryParameter { Name = "status", Type = "string(20)" },
+                            },
+                        }
+                    ),
+                Dialects_QueryRepositoryOnlyOptions(),
+                DiagnosticExpectation.Contains(),
+                code:
+                [
+                    Member(contract, "FindByStatusAsync"),
+                    Member(implementation, "FindByStatusAsync"),
+                ]
+            ),
+            DialectRow(
+                "code-query-raw-sql-undeclared-parameter-in-unselected-dialect-keeps-query",
+                diagnosticsClass
+                    + "UndeclaredParameterInUnselectedDialect_DoesNotSkipQuery（sqlite だけの生成。選んでいない sqlserver の SQL の誤りは警告で知らせ、sqlite の実装は生 SQL を実行する）",
+                () =>
+                    Dialects_OrdersDiagram(
+                        DialectNames.Sqlite,
+                        new QueryDefinition
+                        {
+                            Name = "FindByStatus",
+                            Implementation = QueryImplementationKind.Sql,
+                            Sql =
+                            {
+                                ["sqlserver"] = "SELECT * FROM Orders WHERE status = @statsu",
+                                ["sqlite"] = "SELECT * FROM Orders WHERE status = @status",
+                            },
+                            Parameters =
+                            {
+                                new QueryParameter { Name = "status", Type = "string(20)" },
+                            },
+                        }
+                    ),
+                Dialects_QueryRepositoryOnlyOptions() with
+                {
+                    RepositoryDialects = [DialectNames.Sqlite],
+                },
+                DiagnosticExpectation.Contains(
+                    ExpectedDiagnostic.WarningMentioning(
+                        nameof(Strings.CodeGen_Query_RawSqlIssue),
+                        "@statsu"
+                    )
+                ),
+                typeDialect: DialectNames.Sqlite,
+                code: [Calls(implementation, "FindByStatusAsync", "QueryBySqlAsync")]
+            ),
+            DialectRow(
+                "code-query-raw-sql-undeclared-parameter-without-repositories-keeps-contract",
+                diagnosticsClass
+                    + "UndeclaredParameterWithoutRepositories_KeepsContract（QuickER 版 Repository を生成しない構成では、生 SQL の誤りでクエリを飛ばさず契約を出す）",
+                () =>
+                    Dialects_OrdersDiagram(
+                        new QueryDefinition
+                        {
+                            Name = "FindByStatus",
+                            Implementation = QueryImplementationKind.Sql,
+                            Sql = { ["sqlserver"] = "SELECT * FROM Orders WHERE status = @statsu" },
+                            Parameters =
+                            {
+                                new QueryParameter { Name = "status", Type = "string(20)" },
+                            },
+                        }
+                    ),
+                new CodeGenerationOptions
+                {
+                    RootNamespace = "Test.Ns",
+                    GenerateEfCoreRepositories = true,
+                    IncludeDataAnnotations = true,
+                },
+                DiagnosticExpectation.Contains(),
+                code: [Member(contract, "FindByStatusAsync")]
+            ),
+            DialectRow(
+                "diag-query-unresolved-parameter-type-not-reported-as-undeclared",
+                diagnosticsClass
+                    + "UnresolvedParameterType_IsNotAlsoReportedAsUndeclared（型を解決できないパラメータ strng だけを報告し、@status を未宣言として報告しない）",
+                () =>
+                    Dialects_OrdersDiagram(
+                        new QueryDefinition
+                        {
+                            Name = "FindByStatus",
+                            Implementation = QueryImplementationKind.Sql,
+                            Sql = { ["sqlserver"] = "SELECT * FROM Orders WHERE status = @status" },
+                            Parameters =
+                            {
+                                new QueryParameter { Name = "status", Type = "strng" },
+                            },
+                        }
+                    ),
+                Dialects_QueryRepositoryOnlyOptions(),
+                DiagnosticExpectation.Exact([
+                    ExpectedDiagnostic.ErrorMentioning(
+                        nameof(Strings.CodeGen_Query_UnresolvedTypeToken),
+                        "strng"
+                    ),
+                ])
+            ),
+            DialectRow(
+                "diag-query-projection-not-null-override-names-database-column",
+                diagnosticsClass
+                    + "ProjectionNotNullOverride_NamesDatabaseColumn（フィールド Customer の NULL 許容の診断は DB の列名 customer_id を名指しする）",
+                () =>
+                    Dialects_OrdersDiagram(order => new QueryDefinition
+                    {
+                        Name = "Customers",
+                        Returns = QueryReturnShape.Projection,
+                        Implementation = QueryImplementationKind.Dsl,
+                        ResultTypeName = "CustomerRow",
+                        Fields =
+                        {
+                            new ProjectionField
+                            {
+                                Name = "Customer",
+                                SourceColumnId = Dialects_Column(order, "customer_id").Id,
+                                IsNullable = false,
+                            },
+                        },
+                    }),
+                Dialects_QueryRepositoryOnlyOptions(),
+                DiagnosticExpectation.Contains(
+                    ExpectedDiagnostic.WarningMentioning(
+                        nameof(Strings.CodeGen_Query_ProjectionFieldNotNullOverride),
+                        "Customers",
+                        "customer_id"
+                    )
+                )
+            ),
+            .. new[] { ("param", "seen_at LIKE @p"), ("literal", "seen_at LIKE '%1'") }.Select(
+                pair =>
+                    DialectRow(
+                        $"diag-query-like-violation-reported-as-like-{pair.Item1}",
+                        diagnosticsClass
+                            + $"StringMatchViolation_UsesLikeSpelling（{pair.Item2}：日時の列への LIKE の診断は LIKE の名前で報告し、書いていない CONTAINS・ENDSWITH で報告しない）",
+                        () =>
+                            Dialects_OrdersDiagram(
+                                new QueryDefinition
+                                {
+                                    Name = "BySeen",
+                                    Implementation = QueryImplementationKind.Dsl,
+                                    Condition = pair.Item2,
+                                    Parameters =
+                                    {
+                                        new QueryParameter { Name = "p", Type = "string(10)" },
+                                    },
+                                }
+                            ),
+                        Dialects_QueryRepositoryOnlyOptions(),
+                        DiagnosticExpectation
+                            .Exact([
+                                ExpectedDiagnostic.WarningMentioning(
+                                    nameof(Strings.CodeGen_Query_ConditionStringMatchUnsupported),
+                                    "BySeen",
+                                    "LIKE"
+                                ),
+                            ])
+                            .Without(
+                                ExpectedDiagnostic.WarningMentioning(
+                                    nameof(Strings.CodeGen_Query_ConditionStringMatchUnsupported),
+                                    "CONTAINS"
+                                ),
+                                ExpectedDiagnostic.WarningMentioning(
+                                    nameof(Strings.CodeGen_Query_ConditionStringMatchUnsupported),
+                                    "ENDSWITH"
+                                )
+                            )
+                    )
+            ),
+            DialectRow(
+                "diag-query-long-literal-truncation-keeps-surrogate-pairs",
+                diagnosticsClass
+                    + "TruncatedLiteral_DoesNotSplitSurrogatePair（19 文字の後に絵文字を置いた長い文字列リテラルの型の診断。対になっていないサロゲートが無いことは全行に掛かる CodegenRunner.LoneSurrogateProblems）",
+                () =>
+                    Dialects_OrdersDiagram(
+                        new QueryDefinition
+                        {
+                            Name = "ByQty",
+                            Implementation = QueryImplementationKind.Dsl,
+                            Condition =
+                                $"OrderId = '{new string('a', 19)}{char.ConvertFromUtf32(0x1F600)}tail'",
+                        }
+                    ),
+                Dialects_QueryRepositoryOnlyOptions(),
+                DiagnosticExpectation.Contains(
+                    ExpectedDiagnostic.WarningMentioning(
+                        nameof(Strings.CodeGen_Query_ConditionOperandTypeMismatch),
+                        "ByQty"
+                    )
+                )
+            ),
+            DialectRow(
+                "diag-query-string-match-on-non-string-value-object-skips-query",
+                diagnosticsClass
+                    + "StringMatchOnNonStringValueObject_IsRejected（PostgreSQL の cidr の値オブジェクトへの CONTAINS は生成前に断る）",
+                () =>
+                    Dialects_HostsDiagram(
+                        "net",
+                        nullable: false,
+                        "InPrivateRange",
+                        "net CONTAINS '10.'"
+                    ),
+                new CodeGenerationOptions
+                {
+                    RootNamespace = "Test.Ns",
+                    GenerateEfCoreRepositories = true,
+                    IncludeDataAnnotations = true,
+                    GenerateValueObjects = true,
+                },
+                DiagnosticExpectation.Contains(
+                    ExpectedDiagnostic.WarningMentioning(
+                        nameof(Strings.CodeGen_Query_ConditionStringMatchUnsupported),
+                        "InPrivateRange",
+                        "net"
+                    )
+                ),
+                typeDialect: DialectNames.PostgreSql,
+                code: [Text_NoTypeDeclaring("InPrivateRangeAsync")]
+            ),
+            DialectRow(
+                "diag-query-in-on-nullable-unknown-value-type-mismatched-list-skips-query",
+                "QueryInNullableUnknownValueTypeTests.Generate_InOnNullableUnknownValueType_WithMismatchedList_SkipsQuery（型ファミリが未知の NULL 許容の値型の列〔PostgreSQL の cidr〕への IN は、型の違うリストを警告して飛ばす）",
+                () =>
+                    Dialects_HostsDiagram(
+                        "backup_net",
+                        nullable: true,
+                        "FindByNets",
+                        "backup_net IN @nets",
+                        new QueryParameter
+                        {
+                            Name = "nets",
+                            Type = "string",
+                            IsList = true,
+                        }
+                    ),
+                new CodeGenerationOptions
+                {
+                    RootNamespace = "Sample.Domain",
+                    GenerateRepositories = false,
+                    GenerateEfCoreRepositories = true,
+                    GenerateInMemoryRepositories = true,
+                    GenerateEditModels = false,
+                    GenerateMappers = false,
+                },
+                DiagnosticExpectation.Contains(
+                    ExpectedDiagnostic.WarningMentioning(
+                        nameof(Strings.CodeGen_Query_ConditionOperandTypeMismatch),
+                        "FindByNets",
+                        "backup_net"
+                    )
+                ),
+                typeDialect: DialectNames.PostgreSql,
+                code: [Text_NoTypeDeclaring("FindByNetsAsync")]
+            ),
+            // ===== エミッタ：NULL 非許容列の IS NULL・持ち上げ変数とラムダ変数の名前の衝突 =====
+            DialectRow(
+                "diag-query-null-check-on-non-nullable-column-is-error",
+                "QueryConditionCSharpEmitterTests.Validate_NullCheckOnNonNullableColumn_Fails（NULL 非許容の列 CustomerId への IS NULL は、列を名指しする診断 1 件）",
+                () =>
+                    Dialects_QueryDiagram(
+                        Dialects_QueryOrder(),
+                        order =>
+                            [
+                                new QueryDefinition
+                                {
+                                    Name = "NullCustomer",
+                                    Returns = QueryReturnShape.List,
+                                    Condition = "CustomerId IS NULL",
+                                },
+                            ]
+                    ),
+                Dialects_QueryOptions(),
+                DiagnosticExpectation.Exact([
+                    ExpectedDiagnostic.ErrorMentioning(
+                        nameof(Strings.CodeGen_Query_ConditionInvalid),
+                        "CustomerId"
+                    ),
+                ])
+            ),
+            DialectRow(
+                "compile-query-in-lift-variable-renamed-value-object",
+                "QueryConditionCSharpEmitterTests.Emit_ValueObjectIn_AvoidsParameterNameCollision（値オブジェクトの列の IN の持ち上げ変数が引数 idsValues と衝突しない＝CS0136 にならずコンパイルできる）",
+                () =>
+                    Dialects_QueryDiagram(
+                        Dialects_QueryOrder(),
+                        order =>
+                            [
+                                new QueryDefinition
+                                {
+                                    Name = "GetByIdSet",
+                                    Returns = QueryReturnShape.List,
+                                    Parameters =
+                                    {
+                                        new QueryParameter
+                                        {
+                                            Name = "ids",
+                                            Type = "int32",
+                                            IsList = true,
+                                        },
+                                        new QueryParameter { Name = "idsValues", Type = "int32" },
+                                    },
+                                    Condition = "CustomerId IN @ids OR CustomerId = @idsValues",
+                                },
+                            ]
+                    ),
+                Dialects_QueryOptions() with
+                {
+                    GenerateValueObjects = true,
+                },
+                DiagnosticExpectation.Contains(),
+                compile: true,
+                code: [Member(implementation, "GetByIdSetAsync")]
+            ),
+            DialectRow(
+                "compile-query-lambda-variable-avoids-parameter-name",
+                "QueryConditionCSharpEmitterTests.Emit_LambdaVariableAvoidsCollision（ラムダの変数が引数 e と衝突しない＝CS0136 にならずコンパイルできる）",
+                () =>
+                    Dialects_QueryDiagram(
+                        Dialects_QueryOrder(),
+                        order =>
+                            [
+                                new QueryDefinition
+                                {
+                                    Name = "GetByE",
+                                    Returns = QueryReturnShape.List,
+                                    Parameters =
+                                    {
+                                        new QueryParameter { Name = "e", Type = "int32" },
+                                    },
+                                    Condition = "CustomerId = @e",
+                                },
+                            ]
+                    ),
+                Dialects_QueryOptions(),
+                DiagnosticExpectation.Contains(),
+                compile: true,
+                code: [Member(implementation, "GetByEAsync")]
+            ),
+            // ===== 型の検査：コンパイルできない型の組み合わせは警告してそのクエリだけ飛ばす（1 行 1 入力） =====
+            .. Dialects_TypeCheckRejections()
+                .Select(rejection =>
+                    DialectRow(
+                        $"diag-query-type-check-rejects-{rejection.Id}",
+                        (
+                            rejection.ValueObjects
+                                ? "QueryConditionTypeCheckTests.Generate_ValueObjectIncompatibleCondition_IsRejected"
+                                : "QueryConditionTypeCheckTests.Generate_IncompatibleCondition_IsRejectedAndOnlyThatQuerySkipped"
+                        ) + $"（{rejection.Name}: {rejection.Condition}）",
+                        () =>
+                            Dialects_TypeCheckDiagram(order =>
+                                rejection.ValueObjects
+                                    ?
+                                    [
+                                        Dialects_ListQuery(
+                                            rejection.Name,
+                                            rejection.Condition,
+                                            rejection.Parameters(order)
+                                        ),
+                                    ]
+                                    :
+                                    [
+                                        Dialects_ListQuery(
+                                            rejection.Name,
+                                            rejection.Condition,
+                                            rejection.Parameters(order)
+                                        ),
+                                        // 対照：正当なクエリは巻き添えにしない
+                                        Dialects_ListQuery(
+                                            "GetByQty",
+                                            "Qty = @qty",
+                                            [new QueryParameter { Name = "qty", Type = "int32" }]
+                                        ),
+                                    ]
+                            ),
+                        Dialects_QueryRepositoryOnlyOptions() with
+                        {
+                            GenerateValueObjects = rejection.ValueObjects,
+                        },
+                        DiagnosticExpectation.Contains(
+                            ExpectedDiagnostic.WarningMentioning(rejection.Key, rejection.Name)
+                        ),
+                        compile: !rejection.ValueObjects,
+                        code: rejection.ValueObjects
+                            ? [Text_NoTypeDeclaring(rejection.Name + "Async")]
+                            :
+                            [
+                                Text_NoTypeDeclaring(rejection.Name + "Async"),
+                                Member(implementation, "GetByQtyAsync"),
+                            ]
+                    )
+                ),
+            DialectRow(
+                "compile-query-type-check-accepts-widening-forms",
+                "QueryConditionTypeCheckTests.Generate_CompatibleConditions_AreAcceptedAndCompile（総当たりが作らない受理の 3 形：整数列×小数リテラル・bool の列×boolean の引数・NOT NULL の int 列×int64 のリストの IN。残りの 7 形は総当たりが警告 0 のコンパイルと実行で見る）",
+                () =>
+                    Dialects_TypeCheckDiagram(order =>
+                        [
+                            Dialects_ListQuery("FracOnInt", "Qty > 1.5", []),
+                            Dialects_ListQuery(
+                                "FlagParam",
+                                "Flag = @flag",
+                                [new QueryParameter { Name = "flag", Type = "boolean" }]
+                            ),
+                            Dialects_ListQuery(
+                                "WideIn",
+                                "Qty IN @bigs",
+                                [
+                                    new QueryParameter
+                                    {
+                                        Name = "bigs",
+                                        Type = "int64",
+                                        IsList = true,
+                                    },
+                                ]
+                            ),
+                        ]
+                    ),
+                Dialects_QueryRepositoryOnlyOptions(),
+                DiagnosticExpectation.Contains(),
+                compile: true,
+                code:
+                [
+                    Member(implementation, "FracOnIntAsync"),
+                    Member(implementation, "FlagParamAsync"),
+                    Member(implementation, "WideInAsync"),
+                ]
+            ),
+            DialectRow(
+                "compile-query-in-same-list-on-two-value-object-columns",
+                "QueryConditionTypeCheckTests.Generate_SameListOnTwoValueObjectColumns_LiftsTwoVariables（同じリストを値オブジェクトの型が違う 2 列の IN に使うと、持ち上げ変数を別名で宣言する＝CS0128 にならずコンパイルできる）",
+                () =>
+                    Dialects_TypeCheckDiagram(order =>
+                        [
+                            Dialects_ListQuery(
+                                "SharedList",
+                                "Qty IN @ids OR Reorder IN @ids",
+                                [
+                                    new QueryParameter
+                                    {
+                                        Name = "ids",
+                                        Type = "int32",
+                                        IsList = true,
+                                    },
+                                ]
+                            ),
+                        ]
+                    ),
+                Dialects_QueryRepositoryOnlyOptions() with
+                {
+                    GenerateValueObjects = true,
+                },
+                DiagnosticExpectation.Contains(),
+                compile: true,
+                code: [Member(implementation, "SharedListAsync")]
+            ),
+            DialectRow(
+                "compile-query-in-value-object-widening-list",
+                "QueryConditionTypeCheckTests.Generate_ValueObjectInWithWideningList_Compiles（要素型が内包型と違うリスト〔int32 のリスト × bigint の値オブジェクトの列〕の IN と、同じ型のリストの IN がコンパイルできる＝CS0123 にならない）",
+                () =>
+                    Dialects_TypeCheckDiagram(order =>
+                        [
+                            Dialects_ListQuery(
+                                "WidenedList",
+                                "Big IN @ids",
+                                [
+                                    new QueryParameter
+                                    {
+                                        Name = "ids",
+                                        Type = "int32",
+                                        IsList = true,
+                                    },
+                                ]
+                            ),
+                            Dialects_ListQuery(
+                                "ExactList",
+                                "Big IN @bigs",
+                                [
+                                    new QueryParameter
+                                    {
+                                        Name = "bigs",
+                                        Type = "int64",
+                                        IsList = true,
+                                    },
+                                ]
+                            ),
+                        ]
+                    ),
+                Dialects_QueryRepositoryOnlyOptions() with
+                {
+                    GenerateValueObjects = true,
+                },
+                DiagnosticExpectation.Contains(),
+                compile: true,
+                code:
+                [
+                    Member(implementation, "WidenedListAsync"),
+                    Member(implementation, "ExactListAsync"),
+                ]
+            ),
+        ];
+    }
+
+    /// <summary>型の検査が断る条件 1 つ（行の Id の後半・クエリ名・条件・パラメータ・値オブジェクトの有無・警告の種類）</summary>
+    private sealed record Dialects_TypeCheckRejection(
+        string Id,
+        string Name,
+        string Condition,
+        Func<Entity, QueryParameter[]> Parameters,
+        bool ValueObjects,
+        string Key
+    );
+
+    /// <summary>
+    /// QueryConditionTypeCheckTests の拒否の 18 行（値オブジェクトなし）と値オブジェクトの拒否の 5 行。総当たりの型の検査が断るリテラルと
+    /// 重なる行も含めて全部を行にする（総当たりは「そのクエリのメソッドが生成物に無い」を見ない）
+    /// </summary>
+    private static IEnumerable<Dialects_TypeCheckRejection> Dialects_TypeCheckRejections()
+    {
+        const string mismatch = nameof(Strings.CodeGen_Query_ConditionOperandTypeMismatch);
+        static QueryParameter[] None(Entity _) => [];
+        static QueryParameter[] Int32(Entity _) =>
+            [new QueryParameter { Name = "num", Type = "int32" }];
+
+        return
+        [
+            // string 列への順序比較（e.Name > "M" は CS0019）
+            new(
+                "bad-order",
+                "BadOrder",
+                "Name > 'M'",
+                None,
+                false,
+                nameof(Strings.CodeGen_Query_ConditionOrderedOperatorUnsupported)
+            ),
+            // 数値列への文字列一致（int に Contains は無い＝CS1061）
+            new(
+                "bad-contains",
+                "BadContains",
+                "Qty CONTAINS '1'",
+                None,
+                false,
+                nameof(Strings.CodeGen_Query_ConditionStringMatchUnsupported)
+            ),
+            // 日時列への文字列リテラル比較（DateTime == string は CS0019）
+            new("bad-date", "BadDate", "SeenAt > '2026-01-01'", None, false, mismatch),
+            // bool 列への数値リテラル比較（bool == int は CS0019）
+            new("bad-flag", "BadFlag", "Flag = 1", None, false, mismatch),
+            // long 列への小数リテラル（サフィックス L が付いて "1.5L"＝字句エラー）
+            new("bad-long", "BadLong", "Big > 1.5", None, false, mismatch),
+            // string 列の CONTAINS へ int トークン引数（string.Contains(int) は CS1503）
+            new("bad-match-param", "BadMatchParam", "Name CONTAINS @num", Int32, false, mismatch),
+            // string 列の IN へ int リスト（Contains の型推論が一致しない）
+            new(
+                "bad-in",
+                "BadIn",
+                "Name IN @ids",
+                _ =>
+                    [
+                        new QueryParameter
+                        {
+                            Name = "ids",
+                            Type = "int32",
+                            IsList = true,
+                        },
+                    ],
+                false,
+                mismatch
+            ),
+            // NULL 許容 int 列の IN へ long リスト（Cast<int?> の持ち上げが実行時 InvalidCastException）
+            new(
+                "bad-nullable-in",
+                "BadNullableIn",
+                "Quantity IN @bigs",
+                _ =>
+                    [
+                        new QueryParameter
+                        {
+                            Name = "bigs",
+                            Type = "int64",
+                            IsList = true,
+                        },
+                    ],
+                false,
+                mismatch
+            ),
+            // 日時列 × int トークン引数（DateTime == int は CS0019）
+            new("bad-date-param", "BadDateParam", "SeenAt = @num", Int32, false, mismatch),
+            // ulong を超える整数リテラル（"…L" も素のリテラルも CS1021）
+            new(
+                "bad-int-overflow",
+                "BadIntOverflow",
+                "Big = 99999999999999999999",
+                None,
+                false,
+                mismatch
+            ),
+            // long を超える整数リテラル（ulong のリテラル）× int 列（int と ulong は比べられない＝CS0034）
+            new(
+                "bad-ulong-on-int",
+                "BadULongOnInt",
+                "Qty = 10000000000000000000",
+                None,
+                false,
+                mismatch
+            ),
+            // long を超える整数リテラル × long 列（"…L" が ulong になり long と比べられない）
+            new(
+                "bad-ulong-on-long",
+                "BadULongOnLong",
+                "Big = 9223372036854775808",
+                None,
+                false,
+                mismatch
+            ),
+            // 列の型の範囲の外の整数リテラル（範囲の両端のすぐ外・符号なしの列の負の値も）
+            new("bad-tiny-above", "BadTinyAbove", "Tiny = 256", None, false, mismatch),
+            new("bad-tiny-below", "BadTinyBelow", "Tiny <> -1", None, false, mismatch),
+            new("bad-int-above", "BadIntAbove", "Qty < 3000000000", None, false, mismatch),
+            new("bad-int-below", "BadIntBelow", "Qty >= -2147483649", None, false, mismatch),
+            new(
+                "bad-long-below",
+                "BadLongBelow",
+                "Big = -9223372036854775809",
+                None,
+                false,
+                mismatch
+            ),
+            // decimal の範囲を超えるリテラル（"…m" は CS0594）
+            new(
+                "bad-decimal-range",
+                "BadDecimalRange",
+                "Amount = 99999999999999999999999999999999",
+                None,
+                false,
+                mismatch
+            ),
+            // 値オブジェクトあり：整数内包の値オブジェクトへの小数リテラル・decimal 内包の別の値オブジェクトで型付けした引数・内包型の範囲外
+            new("bad-vo-fraction", "BadVoFraction", "Qty = 1.5", None, true, mismatch),
+            new(
+                "bad-vo-param",
+                "BadVoParam",
+                "Qty = @amount",
+                order =>
+                    [
+                        new QueryParameter
+                        {
+                            Name = "amount",
+                            SourceColumnId = Dialects_Column(order, "Amount").Id,
+                        },
+                    ],
+                true,
+                mismatch
+            ),
+            new("bad-vo-tiny-range", "BadVoTinyRange", "Tiny < 300", None, true, mismatch),
+            new("bad-vo-tiny-negative", "BadVoTinyNegative", "Tiny <> -1", None, true, mismatch),
+            new("bad-vo-int-range", "BadVoIntRange", "Qty = 3000000000", None, true, mismatch),
+        ];
+    }
+
+    /// <summary>一覧のクエリ（QueryConditionTypeCheckTests.ListQuery）</summary>
+    private static QueryDefinition Dialects_ListQuery(
+        string name,
+        string condition,
+        IEnumerable<QueryParameter> parameters
+    ) =>
+        new()
+        {
+            Name = name,
+            Returns = QueryReturnShape.List,
+            Condition = condition,
+            Parameters = [.. parameters],
+        };
+
+    /// <summary>QueryConditionTypeCheckTests の型ファミリを網羅する Order（Name・Qty・Big・Amount・SeenAt・Flag・Quantity〔NULL 許容〕・Tiny・Reorder）の図</summary>
+    private static ErDiagram Dialects_TypeCheckDiagram(
+        Func<Entity, IEnumerable<QueryDefinition>> queries
+    )
+    {
+        var order = new Entity { TableName = "Order" };
+        order.Columns.Add(
+            new Column
+            {
+                Name = "OrderId",
+                DataType = "int",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            }
+        );
+
+        foreach (
+            var (name, type, nullable) in new[]
+            {
+                ("Name", "nvarchar(50)", false),
+                ("Qty", "int", false),
+                ("Big", "bigint", false),
+                ("Amount", "decimal(12,2)", false),
+                ("SeenAt", "datetime2", false),
+                ("Flag", "bit", false),
+                ("Quantity", "int", true),
+                ("Tiny", "tinyint", false),
+                ("Reorder", "int", false),
+            }
+        )
+        {
+            order.Columns.Add(
+                new Column
+                {
+                    Name = name,
+                    DataType = type,
+                    IsNullable = nullable,
+                }
+            );
+        }
+
+        return Dialects_QueryDiagram(order, queries);
+    }
+
+    /// <summary>QueryCodegenDiagnosticsTests の Orders（OrderId・status・customer_id〔NULL 許容〕・memo〔NULL 許容〕・seen_at）の図</summary>
+    private static ErDiagram Dialects_OrdersDiagram(params QueryDefinition[] queries) =>
+        Dialects_OrdersDiagram(null, queries);
+
+    /// <summary>Orders の図（図の方言を指定する）</summary>
+    private static ErDiagram Dialects_OrdersDiagram(
+        string? targetDbms,
+        params QueryDefinition[] queries
+    ) => Dialects_OrdersDiagram(targetDbms, _ => queries);
+
+    /// <summary>Orders の図（クエリが列を参照する）</summary>
+    private static ErDiagram Dialects_OrdersDiagram(Func<Entity, QueryDefinition> query) =>
+        Dialects_OrdersDiagram(null, order => [query(order)]);
+
+    private static ErDiagram Dialects_OrdersDiagram(
+        string? targetDbms,
+        Func<Entity, IEnumerable<QueryDefinition>> queries
+    )
+    {
+        var order = new Entity { TableName = "Orders" };
+
+        foreach (
+            var (name, type, key, nullable) in new[]
+            {
+                ("OrderId", "int", true, false),
+                ("status", "nvarchar(20)", false, false),
+                ("customer_id", "int", false, true),
+                ("memo", "nvarchar(100)", false, true),
+                ("seen_at", "datetime2", false, false),
+            }
+        )
+        {
+            order.Columns.Add(
+                new Column
+                {
+                    Name = name,
+                    DataType = type,
+                    IsPrimaryKey = key,
+                    IsNullable = nullable,
+                }
+            );
+        }
+
+        var diagram = Dialects_QueryDiagram(order, queries);
+
+        if (targetDbms is not null)
+        {
+            diagram.TargetDbms = targetDbms;
+        }
+
+        return diagram;
+    }
+
+    /// <summary>PostgreSQL の hosts（id integer の主キー・cidr の列 1 本）とクエリ 1 つの図</summary>
+    private static ErDiagram Dialects_HostsDiagram(
+        string column,
+        bool nullable,
+        string queryName,
+        string condition,
+        params QueryParameter[] parameters
+    )
+    {
+        var hosts = new Entity { TableName = "hosts" };
+        hosts.Columns.Add(
+            new Column
+            {
+                Name = "id",
+                DataType = "integer",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            }
+        );
+        hosts.Columns.Add(
+            new Column
+            {
+                Name = column,
+                DataType = "cidr",
+                IsNullable = nullable,
+            }
+        );
+        var diagram = Dialects_QueryDiagram(
+            hosts,
+            _ =>
+                [
+                    new QueryDefinition
+                    {
+                        Name = queryName,
+                        Returns = QueryReturnShape.List,
+                        Implementation = QueryImplementationKind.Dsl,
+                        Condition = condition,
+                        Parameters = [.. parameters],
+                    },
+                ]
+        );
+        diagram.TargetDbms = DialectNames.PostgreSql;
+        return diagram;
+    }
+
     // ---- 名前付きクエリの図（QueryGenerationTests の Order エンティティと CreateDiagram） ----
 
     /// <summary>QueryGenerationTests のコンストラクタが作る Order エンティティ（Quantity は NULL 許容 int を足したいテストだけ）</summary>
@@ -1210,6 +2136,39 @@ internal static partial class CodegenCases
 
     private static Column Dialects_Column(Entity entity, string name) =>
         entity.Columns.First(column => column.Name == name);
+
+    /// <summary>QueryReservedParameterNameTests.CreateDiagram の表：Order（OrderId・Qty〔int〕・NULL 許容の Quantity〔int〕）</summary>
+    private static Entity Dialects_ReservedNameOrder()
+    {
+        var order = new Entity { TableName = "Order" };
+        order.Columns.Add(
+            new Column
+            {
+                Name = "OrderId",
+                DataType = "int",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            }
+        );
+        order.Columns.Add(
+            new Column
+            {
+                Name = "Qty",
+                DataType = "int",
+                IsNullable = false,
+            }
+        );
+        order.Columns.Add(
+            new Column
+            {
+                Name = "Quantity",
+                DataType = "int",
+                IsNullable = true,
+            }
+        );
+
+        return order;
+    }
 
     /// <summary>QueryGenerationTests.CreateDiagram：クエリをエンティティに結びつけて図に足す</summary>
     private static ErDiagram Dialects_QueryDiagram(

@@ -41,7 +41,7 @@ C# リテラルのエスケープの規則（`GeneratedLiteralText`）は `src/Q
 - 規則：NOT と `<>` は C# の否定と同じ（NULL の行も一致）。文字列一致だけは NULL の行がどちら向きでも一致しない
 - `!(...)` で包むと SQL の `NOT (UNKNOWN)` が行を落とし、C# の否定（インメモリ）と割れる
 - 手書き LINQ の翻訳器はド・モルガン展開しないまま（docs の既知の割り切り）
-- ガード：`QueryNegationExecutionTests`（SQLite の ADO・EF Core・インメモリ × VO の有無で、C# の意味の手計算と照合）・`QueryConditionCSharpEmitterTests` の `Emit_Not_*`。mutation 実証済み
+- ガード：`DslConditionFuzzTests`（SQLite の ADO・EF Core・インメモリ × VO の有無で、docs の意味のオラクルと照合。NOT の段数と NOT が包む合成の種類は次元表の因子 NotNesting で数え、網羅の単位 `DslFuzzUnits.Coverage`〔VO あり〕・`DslFuzzUnits.PlainCoverage`〔VO なし〕の決まった形が NOT NOT・NOT NOT NOT・NOT (AND 群)・NOT (AND (比較, IS NULL)) を毎回流す）・`QueryConditionCSharpEmitterTests`（エミッタの出力の綴りの表）。mutation 実証済み
 
 ## VO × IN の持ち上げ
 
@@ -56,6 +56,7 @@ C# リテラルのエスケープの規則（`GeneratedLiteralText`）は `src/Q
   - 手書き LINQ の同形は検査しない（既知の割り切り）
 - GuidKey の VO 列（FK 列が親の GuidKey VO を共有する場合を含む）への文字列一致は、完全一致の LIKE と `=` 以外を同じく警告で飛ばす
   - `ValueObjectGuidKeyBase` は `IStringMatchValueObject` を持たず、そのまま生成すると生成ファイル全体が CS1929 になる
+- ガード：`CodegenCaseTests` の行 `diag-query-type-check-rejects-*`（断る組み合わせ 1 行 1 入力：警告の種類とクエリ名・そのクエリのメソッドだけが無い・ほかのクエリは生成してコンパイルできる）・`CodegenCaseTests` の行 `compile-query-type-check-accepts-widening-forms`・`DslConditionFuzzTests`（受理する形は警告 0 のコンパイルと実行、断るリテラルは警告で飛ばされること）
 
 ## 射影 DTO の型名
 
@@ -75,7 +76,7 @@ C# リテラルのエスケープの規則（`GeneratedLiteralText`）は `src/Q
   - **未宣言パラメータ＝警告＋該当クエリのみ生成スキップ**（実行時に必ず失敗するため。Guid 参照検証と同方針）
     - スキップするのは、この生成で実装を出す方言（`GenerateRepositories` のときの実効方言。偽なら無し）の SQL の未宣言だけ。ほかの方言の SQL は警告のみ
   - **未使用パラメータ／複文（`;` の後にコード）＝警告のみで生成継続**。GUI / CLI 双方に効く。ダイアログは SQL 入力欄近くにインライン表示し、未宣言は OK をブロックする
-  - ガード：`QueryCodegenDiagnosticsTests` の `UndeclaredParameterInUnselectedDialect_DoesNotSkipQuery` / `UndeclaredParameterWithoutRepositories_KeepsContract`
+  - ガード：`CodegenCaseTests` の行 `code-query-raw-sql-undeclared-parameter-in-unselected-dialect-keeps-query` / `code-query-raw-sql-undeclared-parameter-without-repositories-keeps-contract` / `code-query-raw-sql-undeclared-parameter-in-unused-dialect-keeps-query`・`CodegenCaseTests` の行 `diag-query-raw-sql-undeclared-parameter-warns-and-skips`
 - 生 SQL のバインダ（コレクション値の IN 展開・置換の境界）の規則は `src/QuickER.Runtime/CLAUDE.md` を見る
 
 ## パラメータ名の予約と this 修飾
@@ -87,7 +88,7 @@ C# リテラルのエスケープの規則（`GeneratedLiteralText`）は `src/Q
 - **生成本体が呼ぶメンバー（`Query()`・`QueryBySqlAsync` などの生 SQL の API・同期のデコレータの `_inner`・リモートのクライアントの `InvokeAsync`）は `this.` で修飾する**
   - 外すと同名のパラメータがメンバーを隠し、予約名を増やすしかなくなる。`Query` と `QueryBySqlAsync` の予約はこの修飾で外してある
 - 予約は「外すとコンパイルできない名前だけ」にする
-- ガード：`QueryReservedParameterNameTests`（`QueryReservedParameterNameTests.ReservedName_IsActuallyUncompilable`＝予約から外すとコンパイルできない／`MemberNamesCalledWithThis_AreNotReservedAndCompile`＝`this.` で呼ぶメンバーと同名でもコンパイルできる／ほかの文脈キーワードが全形で通ることを Roslyn の全数で固定）・`QueryParameterNameSafetyTests`（record・object のメンバー名と生成本体が呼ぶ名前の全部を、リモート＋同期つきで生成器と保存前の規則の両方へ通し、断られるかコンパイルできるかを名前ごとに見る）
+- ガード：`QueryReservedParameterNameTests`（`QueryReservedParameterNameTests.ReservedName_IsActuallyUncompilable`＝予約から外すとコンパイルできない／`QueryReservedParameterNameTests.SelectorFieldName_IsActuallyUncompilable`＝選択式のフィールド名も同じ／`await` と選択式のフィールド名を保存前の規則がちょうど 1 件の違反で断る）・`QueryParameterNameSafetyTests`（record・object のメンバー名と生成本体が `this.` で呼ぶ名前と Roslyn の文脈キーワードの全数を、生 SQL・簡易 DSL の全戻り形と NULL 許容列への IN のリスト・値オブジェクトのあり／なし・リモート＋同期つきで生成器と保存前の規則の両方へ通し、断られる名前の集合がちょうど `await` と record のメンバーの 9 名〔先頭の大小の両方〕であることと、それ以外の名前が全部の形でコンパイルできることを見る）・`CodegenCaseTests` の行 `diag-query-reserved-parameter-name-*`（生成器の診断。選択式のフィールド名・生 SQL の単一戻りの `await` を含む）
 
 ## 検証
 

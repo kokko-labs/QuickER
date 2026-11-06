@@ -10,13 +10,20 @@ using QuickER.Tests.TestSupport;
 namespace QuickER.Tests.CodeGen.CSharp;
 
 /// <summary>
-/// インメモリ実装の前方一致・後方一致（簡易 DSL の LIKE と手書きの LINQ の <c>StartsWith</c> / <c>EndsWith</c>）が、
-/// 素の string 列でも序数で比べ、現在のカルチャに依らず SQLite の QuickER 版 Repository と同じ行を返すことを固定する
+/// インメモリ実装の手書きの LINQ の前方一致・後方一致（<c>StartsWith</c> / <c>EndsWith</c>）が、素の string 列でも序数で比べ、
+/// 現在のカルチャに依らず SQLite の QuickER 版 Repository と同じ行を返すことを固定する
 /// </summary>
 /// <remarks>
+/// <para>
 /// C# の <c>string.StartsWith(string)</c> は現在のカルチャで比べるので、合成済みの「が」と分解形の「か＋濁点」を同じとみなし、
-/// ソフトハイフン（U+00AD）を無視する。インメモリの実行器が述語を序数の多重定義へ書き換えるので、
+/// ソフトハイフン（U+00AD）を無視する。インメモリの実行器が述語を序数の多重定義へ書き換えるので（<c>PredicateComparisonRewriter</c>）、
 /// docs の「インメモリは序数」と、同じ実装先の <c>Contains</c>・値オブジェクトの列と同じ答えになる。
+/// </para>
+/// <para>
+/// 残す理由（P3-6）：手書きの LINQ の述語は簡易 DSL でないので、簡易 DSL の総当たりに載らない。簡易 DSL の LIKE の前方・後方・部分一致と
+/// ソフトハイフンは、総当たりの網羅の単位（<c>DslFuzzUnits.Coverage</c> と <c>DslFuzzUnits.PlainCoverage</c> の序数の値とクエリ KO0〜KO3。
+/// KO0〜KO3 はインメモリの範囲を ja-JP・tr-TR でも周回する）へ移した。
+/// </para>
 /// </remarks>
 public sealed class InMemoryStringMatchOrdinalTests
 {
@@ -63,10 +70,6 @@ public sealed class InMemoryStringMatchOrdinalTests
             private static async Task<string> RunAsync(IItemRepository items) =>
                 string.Join(
                     ";",
-                    "StartsWith:" + Ids(await items.StartsComposedAsync()),
-                    "EndsWith:" + Ids(await items.EndsComposedAsync()),
-                    "Contains:" + Ids(await items.ContainsComposedAsync()),
-                    "SoftHyphen:" + Ids(await items.StartsSoftHyphenAsync()),
                     "LinqStartsWith:" + Ids(await items.Query().Where(item => item.Name.StartsWith("が")).ToListAsync()),
                     "LinqEndsWith:" + Ids(await items.Query().Where(item => item.Name.EndsWith("が")).ToListAsync()),
                     "LinqSoftHyphen:" + Ids(await items.Query().Where(item => item.Name.StartsWith("­a")).ToListAsync())
@@ -75,11 +78,10 @@ public sealed class InMemoryStringMatchOrdinalTests
         """;
 
     /// <summary>序数で比べたときの答え（docs の宣言）</summary>
-    private const string OrdinalExpected =
-        "StartsWith:1;EndsWith:3;Contains:1,3;SoftHyphen:;LinqStartsWith:1;LinqEndsWith:3;LinqSoftHyphen:";
+    private const string OrdinalExpected = "LinqStartsWith:1;LinqEndsWith:3;LinqSoftHyphen:";
 
     [Theory(
-        DisplayName = "インメモリの前方一致・後方一致は、簡易 DSL でも手書きの LINQ でも序数で比べ、カルチャに依らない"
+        DisplayName = "インメモリの手書きの LINQ の前方一致・後方一致は序数で比べ、カルチャに依らない"
     )]
     [InlineData(false, "")]
     [InlineData(false, "ja-JP")]
@@ -152,7 +154,7 @@ public sealed class InMemoryStringMatchOrdinalTests
         return assembly.GetType("Sample.Domain.MatchProbe")!;
     }
 
-    /// <summary>素の string 列 1 本の表と、前方・後方・部分一致の簡易 DSL のクエリ</summary>
+    /// <summary>素の string 列 1 本の表（クエリは持たない＝手書きの LINQ だけで比べる）</summary>
     internal static ErDiagram BuildDiagram()
     {
         var items = new Entity
@@ -175,26 +177,6 @@ public sealed class InMemoryStringMatchOrdinalTests
             ],
         };
 
-        QueryDefinition Query(string name, string condition) =>
-            new()
-            {
-                EntityId = items.Id,
-                Name = name,
-                Returns = QueryReturnShape.List,
-                Condition = condition,
-            };
-
-        return new ErDiagram
-        {
-            TargetDbms = "sqlite",
-            Entities = [items],
-            Queries =
-            [
-                Query("StartsComposed", "name LIKE 'が%'"),
-                Query("EndsComposed", "name LIKE '%が'"),
-                Query("ContainsComposed", "name LIKE '%が%'"),
-                Query("StartsSoftHyphen", "name LIKE '­a%'"),
-            ],
-        };
+        return new ErDiagram { TargetDbms = "sqlite", Entities = [items] };
     }
 }

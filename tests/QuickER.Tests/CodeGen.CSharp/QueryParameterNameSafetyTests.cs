@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using QuickER.CodeGen.CSharp;
 using QuickER.CodeGen.CSharp.Queries;
 using QuickER.Model;
@@ -14,16 +15,22 @@ using QuickER.Tests.TestSupport.Engines;
 namespace QuickER.Tests.CodeGen.CSharp;
 
 /// <summary>
-/// 名前付きクエリのパラメータ名が、生成されるどの形（生 SQL・簡易 DSL の全戻り形・リモートのクライアントと
-/// サーバーのリクエスト・同期のジャーナル記録デコレータ）でもコンパイルできるか、そうでなければ生成前に名指しで
-/// 断られることを、名前ごとに固定するテストクラス。
+/// 名前付きクエリのパラメータ名が、生成されるどの形（生 SQL・簡易 DSL の全戻り形と IN のリスト・NULL 許容列・
+/// 値オブジェクトのあり／なし・リモートのクライアントとサーバーのリクエスト・同期のジャーナル記録デコレータ）でも
+/// コンパイルできるか、そうでなければ生成前に名指しで断られることを、名前ごとに固定するテストクラス。
 /// </summary>
 /// <remarks>
 /// <para>
 /// 生成本体は継承メンバー（<c>QueryBySqlAsync</c> など）・フィールド（<c>_inner</c>）を単純名で呼び、
 /// リモートのリクエストはパラメータ名を PascalCase にした positional record のメンバーにする。そのため、
-/// 同じ名前のパラメータはメンバーを隠すか、record が合成するメンバーとぶつかる。
+/// 同じ名前のパラメータはメンバーを隠すか、record が合成するメンバーとぶつかる。C# の文脈キーワードは識別子として
+/// 合法なので名前の検査を通るが、生成されるメソッドの形によっては識別子として使えない（async メソッドの中の <c>await</c>）。
 /// 1 つの図に全部の名前を載せて 1 回だけコンパイルし、エラー・警告の行に現れる名前で失敗を名前へ割り当てる。
+/// </para>
+/// <para>
+/// 断られる名前の集合はちょうど <see cref="ExpectedRejected"/>（生成器・保存前の規則とも）。それ以外の候補は断られず、
+/// 全部の形でコンパイルできる（予約の表に要らない名前を載せない・予約から漏れた名前を見逃さない）。
+/// 予約された名前を予約から外すと実際にコンパイルできないことは <c>QueryReservedParameterNameTests</c> が実証する。
 /// </para>
 /// <para>既知の失敗は台帳（<see cref="Known"/>）に載せる。突き合わせの規則は <see cref="KnownCaseLedger"/>。</para>
 /// </remarks>
@@ -33,7 +40,36 @@ public class QueryParameterNameSafetyTests(ITestOutputHelper output)
     private static readonly KnownCaseLedger Known = new("QueryParameterNameSafetyTests", []);
 
     /// <summary>
-    /// 試す名前。生成本体が単純名で呼ぶメンバーと、record が持つ・合成するメンバーの名前（先頭の大小の両方）
+    /// 候補のうち、生成器と保存前の規則が断る名前の集合（ちょうどこの集合）：生成する async メソッドの中でキーワードになる
+    /// <c>await</c> と、リモートのリクエストの record が持つ・合成するメンバーとぶつかる 9 つの名前（先頭の大小の両方。
+    /// record のメンバーはパラメータ名を PascalCase にするので、小文字始まりも同じメンバーになる）
+    /// </summary>
+    private static readonly HashSet<string> ExpectedRejected = new(StringComparer.Ordinal)
+    {
+        "await",
+        "Deconstruct",
+        "deconstruct",
+        "EqualityContract",
+        "equalityContract",
+        "Equals",
+        "equals",
+        "GetHashCode",
+        "getHashCode",
+        "GetType",
+        "getType",
+        "MemberwiseClone",
+        "memberwiseClone",
+        "PrintMembers",
+        "printMembers",
+        "ReferenceEquals",
+        "referenceEquals",
+        "ToString",
+        "toString",
+    };
+
+    /// <summary>
+    /// 試す名前。生成本体が単純名で呼ぶメンバーと、record が持つ・合成するメンバーの名前（先頭の大小の両方）、
+    /// Roslyn が知っている文脈キーワードの全数
     /// </summary>
     private static IReadOnlyList<string> CandidateNames()
     {
@@ -69,6 +105,7 @@ public class QueryParameterNameSafetyTests(ITestOutputHelper output)
 
         return memberNames
             .SelectMany(name => new[] { name, char.ToLowerInvariant(name[0]) + name[1..] })
+            .Concat(SyntaxFacts.GetContextualKeywordKinds().Select(SyntaxFacts.GetText))
             .Distinct(StringComparer.Ordinal)
             .Where(QueryDefinitionRules.IsValidIdentifier)
             .OrderBy(name => name, StringComparer.Ordinal)
@@ -115,13 +152,23 @@ public class QueryParameterNameSafetyTests(ITestOutputHelper output)
                 continue;
             }
 
+            // 比較と、NULL 許容列への IN のリストの持ち上げの両方
             var query = new QueryDefinition
             {
                 Name = $"{prefix}Dsl{returns}",
                 Returns = returns,
                 Implementation = QueryImplementationKind.Dsl,
-                Condition = $"Qty = @{parameterName}",
-                Parameters = { Scalar() },
+                Condition = $"Qty = @{parameterName} OR Quantity IN @{parameterName}List",
+                Parameters =
+                {
+                    Scalar(),
+                    new QueryParameter
+                    {
+                        Name = parameterName + "List",
+                        Type = "int32",
+                        IsList = true,
+                    },
+                },
                 HasPaging = returns is QueryReturnShape.List,
             };
 
@@ -134,7 +181,7 @@ public class QueryParameterNameSafetyTests(ITestOutputHelper output)
         }
     }
 
-    /// <summary>Orders（OrderId・Qty）の表と、名前ごとのクエリを載せた図を作る</summary>
+    /// <summary>Orders（OrderId・Qty・NULL 許容の Quantity）の表と、名前ごとのクエリを載せた図を作る</summary>
     private static (
         ErDiagram Diagram,
         Entity Order,
@@ -158,6 +205,14 @@ public class QueryParameterNameSafetyTests(ITestOutputHelper output)
             IsNullable = false,
         };
         order.Columns.Add(qty);
+        order.Columns.Add(
+            new Column
+            {
+                Name = "Quantity",
+                DataType = "int",
+                IsNullable = true,
+            }
+        );
         var diagram = new ErDiagram { Entities = { order } };
         var queriesByName = new Dictionary<string, List<QueryDefinition>>(StringComparer.Ordinal);
 
@@ -189,8 +244,8 @@ public class QueryParameterNameSafetyTests(ITestOutputHelper output)
         return (diagram, order, queriesByName);
     }
 
-    /// <summary>sqlserver＋sqlite のマルチターゲットに、リモートサービスと同期支援を足して生成する</summary>
-    private static CodeGenerationResult Generate(ErDiagram diagram)
+    /// <summary>sqlserver＋sqlite のマルチターゲットに、リモートサービスと同期支援を足して生成する（値オブジェクトのあり／なしを切り替える）</summary>
+    private static CodeGenerationResult Generate(ErDiagram diagram, bool valueObjects)
     {
         var sqlServer = new SqlServerProvider();
         var sqlite = new SqliteProvider();
@@ -212,6 +267,7 @@ public class QueryParameterNameSafetyTests(ITestOutputHelper output)
                 RepositoryDialects = ["sqlserver", "sqlite"],
                 GenerateRemoteServices = true,
                 GenerateSyncSupport = true,
+                GenerateValueObjects = valueObjects,
             }
         );
     }
@@ -233,7 +289,7 @@ public class QueryParameterNameSafetyTests(ITestOutputHelper output)
         for (var i = 0; i < names.Count; i++)
         {
             var (diagram, order, queries) = CreateDiagram([(names[i], i)]);
-            var generatorRejects = Generate(diagram).HasErrors;
+            var generatorRejects = Generate(diagram, valueObjects: false).HasErrors;
             var validateRejects = queries[names[i]]
                 .Any(query =>
                     QueryDefinitionRules
@@ -253,41 +309,71 @@ public class QueryParameterNameSafetyTests(ITestOutputHelper output)
             }
         }
 
-        // 2 段目: 断られなかった名前を全部 1 つの図に載せ、1 回だけ生成してコンパイルする
+        // 断られる名前の集合はちょうど期待の集合（断られない名前が断られない＝予約の表に要らない名前が無いことも、ここで言う）
+        rejected
+            .Order(StringComparer.Ordinal)
+            .Should()
+            .Equal(
+                ExpectedRejected.Order(StringComparer.Ordinal),
+                $"断られる名前の集合が期待と違う（実際: {string.Join(", ", rejected.Order(StringComparer.Ordinal))}）"
+            );
+
+        // 2 段目: 断られなかった名前を全部 1 つの図に載せ、値オブジェクトのあり／なしでそれぞれ 1 回だけ生成してコンパイルする
         var accepted = names
             .Select((name, index) => (name, index))
             .Where(pair => !rejected.Contains(pair.name))
             .ToList();
-        var (acceptedDiagram, _, _) = CreateDiagram(accepted);
-        var result = Generate(acceptedDiagram);
-        result
-            .HasErrors.Should()
-            .BeFalse(string.Join(" | ", result.Diagnostics.Select(d => d.Message)));
-        result
-            .Files.Should()
-            .Contain(
-                file => file.Content.Contains("_inner.", StringComparison.Ordinal),
-                "同期のデコレータが生成されている"
-            )
-            .And.Contain(
-                file => file.Content.Contains("Request(", StringComparison.Ordinal),
-                "リモートのリクエストが生成されている"
-            );
+        var problemLines =
+            new List<(
+                Microsoft.CodeAnalysis.Diagnostic Diagnostic,
+                string Line,
+                bool ValueObjects
+            )>();
 
-        var compilation = GeneratedCodeCompiler.Compile(result, "QueryParameterNameSafety");
-        var problemLines = compilation
-            .Errors.Concat(compilation.Warnings)
-            .Select(diagnostic =>
-                (
-                    Diagnostic: diagnostic,
-                    Line: diagnostic.Location.SourceTree is { } tree
-                        ? tree.GetText()
-                            .Lines[diagnostic.Location.GetLineSpan().StartLinePosition.Line]
-                            .ToString()
-                        : string.Empty
+        foreach (var valueObjects in new[] { false, true })
+        {
+            var (acceptedDiagram, _, _) = CreateDiagram(accepted);
+            var result = Generate(acceptedDiagram, valueObjects);
+            result
+                .Diagnostics.Where(diagnostic =>
+                    diagnostic.Severity != GenerationDiagnosticSeverity.Info
                 )
-            )
-            .ToList();
+                .Should()
+                .BeEmpty(
+                    $"値オブジェクト {valueObjects}: 断られなかった名前のクエリはすべて診断（エラー・警告）なしで生成されるべき"
+                );
+            result
+                .Files.Should()
+                .Contain(
+                    file => file.Content.Contains("_inner.", StringComparison.Ordinal),
+                    "同期のデコレータが生成されている"
+                )
+                .And.Contain(
+                    file => file.Content.Contains("Request(", StringComparison.Ordinal),
+                    "リモートのリクエストが生成されている"
+                );
+
+            var compilation = GeneratedCodeCompiler.Compile(
+                result,
+                $"QueryParameterNameSafety{valueObjects}"
+            );
+            problemLines.AddRange(
+                compilation
+                    .Errors.Concat(compilation.Warnings)
+                    .Select(diagnostic =>
+                        (
+                            diagnostic,
+                            diagnostic.Location.SourceTree is { } tree
+                                ? tree.GetText()
+                                    .Lines[diagnostic.Location.GetLineSpan().StartLinePosition.Line]
+                                    .ToString()
+                                : string.Empty,
+                            valueObjects
+                        )
+                    )
+            );
+        }
+
         output.WriteLine(
             $"生成とコンパイル: {watch.ElapsedMilliseconds} ms・名前 {names.Count} 個（断られた名前 {rejected.Count} 個）"
         );
@@ -315,7 +401,9 @@ public class QueryParameterNameSafetyTests(ITestOutputHelper output)
                     );
                     var hits = problemLines
                         .Where(line => pattern.IsMatch(line.Line))
-                        .Select(line => $"{line.Diagnostic.Id}: {line.Line.Trim()}")
+                        .Select(line =>
+                            $"値オブジェクト {line.ValueObjects}: {line.Diagnostic.Id}: {line.Line.Trim()}"
+                        )
                         .ToList();
                     hits.Should()
                         .BeEmpty(
@@ -337,7 +425,9 @@ public class QueryParameterNameSafetyTests(ITestOutputHelper output)
                 )
             )
             .Where(line => line.Diagnostic.Severity == DiagnosticSeverity.Error)
-            .Select(line => $"{line.Diagnostic.Id}: {line.Line.Trim()}")
+            .Select(line =>
+                $"値オブジェクト {line.ValueObjects}: {line.Diagnostic.Id}: {line.Line.Trim()}"
+            )
             .ToList();
         unassigned.Should().BeEmpty("どの名前にも割り当てられないコンパイルエラーがある");
 

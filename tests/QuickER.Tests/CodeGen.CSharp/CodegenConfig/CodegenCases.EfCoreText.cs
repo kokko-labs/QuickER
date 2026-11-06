@@ -640,6 +640,54 @@ internal static partial class CodegenCases
                 EfCoreText_SchemaQualifiedOptions(),
                 model: [EfCoreModelFact.Table("QSTXEntity", "t\\x", "q\"s")]
             ),
+            // --- NameTrustBoundaryGenerationTests（P3-6 で移した） ---
+            new ScenarioRow<CodegenCase>(
+                "model-efcore-quoted-names-escaped",
+                null,
+                "EF Core の ToTable / HasColumnName は名前をエスケープして出力する（NameTrustBoundaryGenerationTests.QuotedNames_AreEscapedInEfCoreFluent。EF Core 単独の構成でもコンパイルできる）",
+                new CodegenCase(
+                    Compile_QuotedNameDiagram,
+                    new CodeGenerationOptions
+                    {
+                        RootNamespace = "Sample.Domain",
+                        GenerateEditModels = true,
+                        GenerateMappers = true,
+                        GenerateEfCoreRepositories = true,
+                        IncludeDataAnnotations = true,
+                    },
+                    DialectNames.SqlServer,
+                    DiagnosticExpectation.Contains(),
+                    Compile: true,
+                    Probes: [CodegenProbe.EfCoreModel],
+                    ProbeFacts: new CodegenProbeFacts(
+                        ModelFacts:
+                        [
+                            EfCoreModelFact.Table("WeIrdCustomerEntity", "we\"ird\\customers"),
+                            EfCoreModelFact.Table("OrDerEntity", "or\"ders"),
+                            EfCoreModelFact.Property(
+                                "WeIrdCustomerEntity",
+                                "CusTomerId",
+                                column: "cus\"tomer\\id"
+                            ),
+                            EfCoreModelFact.Property(
+                                "WeIrdCustomerEntity",
+                                "NaMe",
+                                column: "na\"me"
+                            ),
+                            EfCoreModelFact.Property(
+                                "OrDerEntity",
+                                "OrDerId",
+                                column: "or\"der_id"
+                            ),
+                            EfCoreModelFact.Property(
+                                "OrDerEntity",
+                                "CusTomerId",
+                                column: "cus\"tomer\\id"
+                            ),
+                        ]
+                    )
+                )
+            ),
             // --- EfCoreEntitySaveMetadataTests ---
             EfCoreText_SaveMetadataRow(
                 "code-efcore-save-metadata-no-materializer-efcore-only",

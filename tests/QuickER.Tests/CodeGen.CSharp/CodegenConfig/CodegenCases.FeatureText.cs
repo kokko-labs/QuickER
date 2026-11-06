@@ -1323,6 +1323,198 @@ internal static partial class CodegenCases
         ];
     }
 
+    // ===== NameTrustBoundaryGenerationTests：XmlDoc へ流れる名前・説明（P3-6 で移した） =====
+
+    private const string NameTrustClass = "NameTrustBoundaryGenerationTests";
+
+    /// <summary>説明の FORM FEED を畳んだ 1 行（説明 <c>x</c>＋U+000C＋注入の文 の FF が空白 1 つになったもの）</summary>
+    private const string FeatureText_FoldedFormFeed = "x public static int Injected = 42; //";
+
+    /// <summary>
+    /// 名前の <c>&lt;</c> の XML エスケープ（説明フォールバックの 5 か所と Stream アクセサの定型文）と、説明の FORM FEED の畳み込みの行。
+    /// どれもコンパイルする（<c>DocumentationMode.Diagnose</c> なので CS1570 は警告で、コンパイルの判定が警告 0 を見る）
+    /// </summary>
+    private static IEnumerable<ScenarioRow<CodegenCase>> FeatureTextNameXmlDocRows()
+    {
+        // 説明が無い列・テーブルの XmlDoc は名前をそのまま載せるフォールバック文になる（Entity クラス・Entity プロパティ・値オブジェクト・
+        // EditModel クラス・インメモリのシーダー）
+        yield return FeatureTextRow(
+            "code-xmldoc-name-angle-bracket-fallback",
+            NameTrustClass,
+            "AngleBracketInName_IsEscapedInXmlDocFallback",
+            () =>
+                new ErDiagram
+                {
+                    Entities =
+                    [
+                        Service_Entity(
+                            "it<ems",
+                            Service_Column("it<em_id", "int", primaryKey: true),
+                            Service_Column("co<de", "nvarchar(20)", nullable: true)
+                        ),
+                    ],
+                },
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateEditModels = true,
+                GenerateMappers = true,
+                GenerateRepositories = true,
+                GenerateInMemoryRepositories = true,
+                GenerateValueObjects = true,
+                IncludeDataAnnotations = true,
+            },
+            code:
+            [
+                XmlDocOwners("summary", "Entity for the it&lt;ems table", ["ItEmEntity"]),
+                XmlDocOwners(
+                    "summary",
+                    "Property for the it&lt;em_id column",
+                    ["ItEmEntity.ItEmId"]
+                ),
+                XmlDocOwners("summary", "Property for the co&lt;de column", ["ItEmEntity.CoDe"]),
+                XmlDocOwners("summary", "Value object for the it&lt;em_id column", ["ItEmIdValue"]),
+                XmlDocOwners("summary", "Value object for the co&lt;de column", ["CoDeValue"]),
+                XmlDocOwners(
+                    "summary",
+                    "Edit model for on-screen editing of the it&lt;ems table.",
+                    ["ItEmEditModel"]
+                ),
+                XmlDocOwners(
+                    "summary",
+                    "Seeds sample data for it&lt;ems.",
+                    ["InMemorySampleData.SeedItEmEntity"]
+                ),
+            ],
+            compile: true
+        );
+
+        yield return FeatureTextRow(
+            "code-xmldoc-stream-accessor-name-angle-bracket",
+            NameTrustClass,
+            "AngleBracketInBinaryColumnName_IsEscapedInStreamAccessorXmlDoc",
+            () =>
+                new ErDiagram
+                {
+                    Entities =
+                    [
+                        Service_Entity(
+                            "vaults",
+                            Service_Column("vault_id", "int", primaryKey: true),
+                            Service_Column("da<ta", "varbinary(max)", nullable: true)
+                        ),
+                    ],
+                },
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateRepositories = true,
+                ExcludeUnboundedBinaryColumns = true,
+                IncludeDataAnnotations = true,
+            },
+            code:
+            [
+                XmlDoc("VaultEntity", "DaTa", "summary", "Property for the da&lt;ta column"),
+                XmlDoc(
+                    "IVaultRepository",
+                    "ReadDaTaAsync",
+                    "summary",
+                    "Reads the da&lt;ta column into the destination stream (unbounded binary column, O(chunk) streaming; true = written, false = no row or NULL)."
+                ),
+                XmlDoc(
+                    "IVaultRepository",
+                    "WriteDaTaAsync",
+                    "summary",
+                    "Writes the da&lt;ta column from a stream (unbounded binary column, O(chunk) streaming; source = null sets NULL, non-seekable streams require an explicit length, and a stream that does not yield exactly that many bytes fails; true = updated, false = no row)."
+                ),
+                XmlDoc(
+                    "VaultRepositoryBinaryStreamExtensions",
+                    "ReadDaTaToFileAsync",
+                    "summary",
+                    "Reads the da&lt;ta column into a file (delegates to the Stream overload; true = written, false = no row or NULL, in which case an existing file is left untouched)."
+                ),
+                XmlDoc(
+                    "VaultRepositoryBinaryStreamExtensions",
+                    "WriteDaTaFromFileAsync",
+                    "summary",
+                    "Writes the da&lt;ta column from a file (delegates to the Stream overload; true = updated, false = no row)."
+                ),
+            ],
+            compile: true
+        );
+
+        // FF は C# の new-line ではないが、描画後の ReplaceLineEndings が改行として正規化する。畳み込みから漏れると説明 1 つで
+        // XmlDoc の /// 行やリテラルが行をまたぎ、任意のメンバー宣言を挿入できる。説明の出口（XmlDoc・[DbColumnMeta] の引数・
+        // EditModel の表示名のリテラル）が 1 行のまま残り、注入した名前のメンバーがどこにも無いことを見る
+        // （「生成テキストのどこにも生の U+000C が無い」の 1 点は構造で言えないので、元のテストに残した）
+        yield return FeatureTextRow(
+            "code-xmldoc-form-feed-collapses-and-no-injected-member",
+            NameTrustClass,
+            "FormFeedInDescription_IsFoldedNotBroken",
+            () =>
+                new ErDiagram
+                {
+                    Entities =
+                    [
+                        Service_Entity(
+                            "items",
+                            new Column
+                            {
+                                Id = Guid.NewGuid(),
+                                Name = "item_id",
+                                DataType = "int",
+                                IsPrimaryKey = true,
+                                IsNullable = false,
+                                Description =
+                                    "x"
+                                    + char.ConvertFromUtf32(0x000C)
+                                    + "public static int Injected = 42; //",
+                            }
+                        ),
+                    ],
+                },
+            Service_NameTrustOptions(),
+            code:
+            [
+                XmlDocOwners(
+                    "summary",
+                    FeatureText_FoldedFormFeed,
+                    [
+                        "ItemEntity.ItemId",
+                        "ItemEditModel._bindingItemId",
+                        "ItemEditModel.BindingItemId",
+                    ]
+                ),
+                XmlDoc(
+                    "ItemEditModel",
+                    "ItemId",
+                    "summary",
+                    FeatureText_FoldedFormFeed
+                        + " - Confirmed value of ItemId (written by the input conversion and by the mapper when loading; treat it as read-only elsewhere)."
+                ),
+                Attribute(
+                    "ItemEntity",
+                    "ItemId",
+                    $"DbColumnMeta(\"int32\", Description = \"{FeatureText_FoldedFormFeed}\")"
+                ),
+                CallArguments(
+                    "ItemEditModel",
+                    "BindingItemId",
+                    "GetDisplayName",
+                    ["\"ItemId\"", $"\"{FeatureText_FoldedFormFeed}\""]
+                ),
+                CallArguments(
+                    "ItemEditModel",
+                    "_editModelColumns",
+                    "GetDisplayName",
+                    ["\"ItemId\"", $"\"{FeatureText_FoldedFormFeed}\""]
+                ),
+                FeatureText_NoNameContaining("Injected"),
+            ],
+            compile: true
+        );
+    }
+
     // ===== ExtensionShimGenerationTests =====
 
     private const string ShimClass = "ExtensionShimGenerationTests";
@@ -2111,6 +2303,7 @@ internal static partial class CodegenCases
             .. FeatureTextApiDocsRows(),
             .. FeatureTextVoForeignKeyRows(),
             .. FeatureTextXmlDocRows(),
+            .. FeatureTextNameXmlDocRows(),
             .. FeatureTextExtensionShimRows(),
             .. FeatureTextDbMetaRows(),
             .. FeatureTextRemoteRestRows(),

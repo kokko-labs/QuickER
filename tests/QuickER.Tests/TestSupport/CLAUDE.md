@@ -92,7 +92,9 @@
   3. 列挙を全数で流すエンジン（水準もテストのループも同じ `Enum.GetValues` から作る）では、列挙に足した値は自動で水準になって実際に流れるので棚卸しは緑のまま。その値の組が出たかは網羅の計数が見る。水準を全数から作ってよいのは、ループや生成器の選び方も同じ列挙から作るときに限る。
 - 表の領域を述語で定義するとき（例：生成が通る構成だけを網羅する表）は、述語を正本の規則（テスト側の予測の規則）から参照し、領域の外の組を別の表で網羅する。isValid の原則（原理的に起こり得ない組だけ）とは別の仕組みで、isValid の意味は変えない。
   - 例：生成の構成のエンジン（CodegenConfig）は、全組を網羅して診断の予測を照合する Errors の表と、生成が通る構成だけを網羅してコンパイル・意味・探針・関係を数える Success の表に分ける。Success の領域の述語（`CodegenSuccessDomain`）は診断の規則（`DiagnosticRules`）のエラーの規則を参照する。ガード：`CodegenSuccessMatrixTests.Coverage_MatchesGaps`・`CodegenSuccessMatrixTests.DomainPredicate_ReadsOnlyRuleFactors`。
-  - 生成の構成のエンジンの決まった行（`CodegenCases*.cs`・`CodegenCaseTests`）は、生成テキストの部分文字列・正規表現・行で判定しない。判定の部品は `CodegenConfig/Judges/` にある：宣言（`CodeRule`＝型・メンバーのシグネチャ・属性と引数・using の集合・意味モデルの参照と呼び出しと引数・`new` 式・Fluent の鎖・XmlDoc の入力由来の文）・参照を絞ったコンパイル（`ReducedReferences`）・EF Core のモデル（`EfCoreModelFact`）・実行の探針（`ExecCheck`・`ProbeKit`。SQLite の実行は `ProbeKit.WithSqlite`）・製品の解析器を通す判定（`ParsedCheck`）・API リファレンスの Markdown の構文木（`MarkdownRule`）・2 つの生成物の関係（`Relations`）。
+  - 生成の構成のエンジンの決まった行（`CodegenCases*.cs`・`CodegenCaseTests`）は、生成テキストの部分文字列・正規表現・行で判定しない。判定の部品は `CodegenConfig/Judges/` にある：宣言（`CodeRule`＝型・メンバーのシグネチャ・属性と引数・using の集合・意味モデルの参照と呼び出しと引数・`new` 式・Fluent の鎖・XmlDoc の入力由来の文・2 つのメソッドの本体の構文の等価 `SameBody`）・参照を絞ったコンパイル（`ReducedReferences`）・EF Core のモデル（`EfCoreModelFact`）・実行の探針（`ExecCheck`・`ProbeKit`。SQLite の実行は `ProbeKit.WithSqlite`）・製品の解析器を通す判定（`ParsedCheck`）・API リファレンスの Markdown の構文木（`MarkdownRule`）・2 つの生成物の関係（`Relations`）。
+    - 全行に掛かる診断の文の性質（どの診断の文にも対になっていないサロゲートが無い）は `CodegenRunner.LoneSurrogateProblems` が診断の段で見る。
+    - 簡易 DSL の条件の訳し方は P3-6 で総当たりへ寄せた：意味は `DslConditionFuzzTests`、エミッタの綴りは `QueryConditionCSharpEmitterTests` の表（エミッタの直接の出力）、動作に出ない形の表明だけを元のメソッドに「残す理由（P3-6）：…」で残す。
     - 構造で言えない表明（式本体・SQL Server の SQL の断片・例外の文言・生成器の固定の英文・書式・簡易 DSL の条件の訳し方）は、元のテストのメソッドに文のまま残し、メソッドの前に「残す理由（P3-4b）：…」のコメントで理由と移した先の行を書く。重なる先へ任せて消すのは、同じ入力・同じか強い期待で見ている先だけ（チェックイン済みのフィクスチャで動く Integration のテストは、テンプレートを壊しても再生成するまで赤にならないので重なる先にしない）。
 - ガード：TestSupport 直下の `DimensionTableTests` / `CoveringArrayTests` / `CoverageCounterTests` / `ScenarioTableTests` / `MatrixAxisTests` / `EngineRegistryChecksTests` / `FactorInventoryTests`、両アセンブリの `EngineRegistryTests` / `FactorInventoryGuardTests` / `MatrixAxisGuardTests`。mutation 実証済み（理由つきで外した値は緑のまま）。
 
@@ -209,6 +211,9 @@
   - 列は種の単位と同じ。MySQL は種の単位に無い固定長の文字列・符号つき整数・decimal・日時も持つ。
   - クエリは `DslFuzzGenerator.CoverageQueries`（乱数はこの中だけで引き、`Queries` の引き方に触れない）。網羅の単位で初めて現れる列の種類の列の原子のクエリと、戻り形 4 つと射影の非 NULL 指定のそれぞれで、原子の形・自身の否定・列の種類のまだ出ていない水準を足す原子を貪欲に選んで 6 つずつ OR でまとめ、1 つおきに NOT で包んだ合成のクエリ。型の検査が断る原子と EF Core（SQLite）が流さない decimal の順序比較は使わない。射影の非 NULL 指定は、射影する列の IS NOT NULL と AND でつなぐ。
   - 単位のクエリは、型の検査が断ると決まっている原子のものを除き、構成のどの実装先でも照合したクエリにならなければ、`DslFuzzCoverage.UncheckedProblems` が単位・範囲・クエリを名指しして赤にする。そのため網羅の単位には `MinimumCheckedQueries` を掛けない（`DslFuzzRunner.RunAsync` の `minimumChecked`）。
+  - NOT の入れ子：次元表の因子 NotNesting（none・single・double・triple・group-and・group-or＝原子の直上の NOT の連鎖の段数か、直上に NOT が無ければ最も近い NOT が包む AND / OR）を `DslFuzzDimensions.Observe` が構文木から数える。`isValid` は「NOT が無ければ NOT の数は偶数」「原子だけのクエリ（原子 1 つかその NOT 1 つ）は 2 段以上・合成を包む NOT を持たない」の 2 つだけ。網羅の単位は、形・否定・列の種類の全水準を足す原子を 6 水準ごとにその形で包んだ一覧のクエリ（1 つおきに外側をもう 1 つの NOT で包む）と、一覧以外の戻り形・射影の非 NULL 指定ごとに 6 水準を 1 つずつ持つクエリで、種に依らず全組を埋める。
+  - 決まった形のクエリ（`DslFuzzGenerator.FixedQueries`）：NOT NOT 原子・NOT NOT NOT 原子・NOT (AND (比較, IS NULL))・NOT (LIKE OR 比較)・肯定の LIKE と同じ LIKE と IS NULL の OR の NOT・前置 NOT と NOT LIKE の重ね・整数の列の範囲の両端のリテラル。値オブジェクトなしの経路は SQLite の `DslFuzzUnits.PlainCoverage`（種の単位と同じ列・決まった形のクエリだけ）が流す。
+  - 特殊な文字列とカルチャ：SQLite の 2 単位（`Coverage`・`PlainCoverage`）だけ、列 `s` に合成済みの「が」・分解形の「か＋濁点」・ソフトハイフンを無視すると a で始まる値を入れ、前方・後方・部分一致とソフトハイフンの LIKE を足す（SQL Server は照合順序で合成済みと分解形が等しくなるので足さない）。網羅の単位は書式のカルチャをインバリアントにして流し、SQLite の 2 単位の序数のクエリ（`DslFuzzGenerator.OrdinalQueryPrefix`＝KO0〜KO3）だけをインメモリの範囲で ja-JP・tr-TR でも流し直す（インメモリは序数＝オラクルは `DslCaseRule.Ordinal` のまま。カルチャで結果が変わり得るのはインメモリの文字列一致の比べ方だけなので、ほかのクエリは周回しない）。
   - 網羅しない組の一覧は、受け入れ（方言が列の型として持てない種類・EF Core の SQLite プロバイダの decimal の順序比較）だけ。
 - mutation 実証済み。
 
@@ -238,7 +243,7 @@
   - `RegexCultureGuardTests`：src の `RegexOptions.IgnoreCase` を含むビット和に `CultureInvariant` があることとインラインの `(?i` が無いことの構文木の全数走査と、文字列リテラルの `\d`（奇数個の `\` に続く `d`）が `ECMAScript` の付いた呼び出し・属性の引数の外に無いこと。
   - 全角の数字：`DialectTypeTableTests` の `fullwidth-*` の行が、全角の数字を含む型の表記を 5 方言の型カタログ・型マッパー・正規化と `SqlTypeText.IsSafe` へ流し、例外にならず数字として読まないことを確かめる。`FullWidthDigitTypeNotationTests` が型トークン・長さだけの違いの判定・Mermaid の型の復元・Excel の `UQ` 番号で同じことを確かめる。
   - `GeneratedCodeCultureAnalyzerTests`：ランタイム 7 本と全フィクスチャ。自己検査は、auto-generated の印のあるソースで 4 規則が出て式木の中では出ないこと。
-  - `InMemoryStringMatchOrdinalTests`：値オブジェクトの有無 × カルチャで、簡易 DSL の LIKE と手書きの LINQ の前方・後方一致を SQLite の QuickER 版 Repository とインメモリで照合する。
+  - `InMemoryStringMatchOrdinalTests`：値オブジェクトの有無 × カルチャで、手書きの LINQ の前方・後方一致を SQLite の QuickER 版 Repository とインメモリで照合する。簡易 DSL の LIKE は `DslConditionFuzzTests`（網羅の単位 `DslFuzzUnits.Coverage`・`DslFuzzUnits.PlainCoverage` の序数の値と、序数のクエリ KO0〜KO3 だけをインメモリの範囲で ja-JP・tr-TR にも周回する）。
   - `SchemaSignatureTests` の並び順の 2 件。`MockResumePromptTests` と `ClipboardImageAttachmentReaderTests` の各カルチャの日時。
   - `TableRebuildAttributeDetectorCultureTests`：`QuickER.Provider.dll` を新しい読み込みコンテキストへ読み込み直し、tr-TR の下で型を初期化した実挙動を見る。読み込み直したアセンブリは回収までほかのテストから同じ名前の写しとして見えるので、非並列のコレクション `IsolatedAssemblyLoadTestCollection` で走らせ、回収を確かめてから戻る。WPF を含むアセンブリは読み込み直さない（pack URI が写しへ解決され、全件実行でだけウィンドウの `InitializeComponent` が失敗する）。
   - `CultureInvariantRuntimeTextTests`：同期のキーのテキストの decimal（`SyncKeyText.FormatDecimal` / `ParseDecimal` / `WithoutDecimalExponent`）と SQLite の `PRAGMA busy_timeout`（`SqlConnectionFactory`・`SqliteBusyTimeoutInterceptor`）を各カルチャで。組み立てる側で InvariantCulture を渡しているのを固定するだけ。

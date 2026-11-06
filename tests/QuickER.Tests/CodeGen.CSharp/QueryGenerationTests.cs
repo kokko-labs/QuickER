@@ -86,124 +86,6 @@ public class QueryGenerationTests
     private static string AllContent(CodeGenerationResult result) =>
         string.Join("\n", result.Files.Select(file => file.Content));
 
-    /// <summary>ミニ DSL の一覧クエリ（条件・並び順・ページング）が契約・QuickER 版 Repository・EF Core 版 Repository に同一本体で出ることを検証する</summary>
-    // 残す理由（P3-4b）：共有本体の式（条件・並び替え・ページングの訳し方＝P3-6〔簡易 DSL〕の領分）。構造の表明（契約・実装の宣言・説明の XmlDoc）は行 code-query-dsl-list-contract-and-both-implementations へ移した
-    [Fact(DisplayName = "DSL 一覧クエリ: 契約＋QuickER＋EF Core に同一の Query() 本体が出る")]
-    public void Generate_DslListQuery_EmitsSharedBody()
-    {
-        var amountColumn = _order.Columns.First(c => c.Name == "Amount");
-        var diagram = CreateDiagram(
-            new QueryDefinition
-            {
-                Name = "GetByCustomer",
-                Description = "顧客IDで注文を検索する",
-                Returns = QueryReturnShape.List,
-                Parameters =
-                {
-                    new QueryParameter { Name = "customerId", Type = "int32" },
-                },
-                Condition = "CustomerId = @customerId",
-                OrderBy =
-                {
-                    new QueryOrdering { ColumnId = amountColumn.Id, Descending = true },
-                },
-                HasPaging = true,
-            }
-        );
-
-        var result = Generate(diagram, CreateOptions());
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        var content = AllContent(result);
-
-        // 共有本体（QuickER 版 Repository と EF Core の双方に同一テキスト）
-        var body =
-            "Query().Where(e => e.CustomerId == customerId).OrderByDescending(e => e.Amount).Skip(skip).Take(take).ToListAsync(cancellationToken)";
-        content
-            .Split(body)
-            .Length.Should()
-            .Be(3, "QuickER 版 Repository と EF Core 版 Repository の 2 箇所に同一本体が出る");
-    }
-
-    /// <summary>単一・件数・文字列一致・IN の各形が生成されることを検証する</summary>
-    // 残す理由（P3-4b）：4 つの本体の式（条件・並び替え・文字列一致・IN の訳し方＝P3-6〔簡易 DSL〕の領分）。構造の表明（各メソッドの宣言）は行 code-query-dsl-shapes-declared-on-contract-and-implementations へ移した
-    [Fact(DisplayName = "DSL 単一/件数/LIKE/IN の各形が生成される")]
-    public void Generate_DslShapes_EmitBodies()
-    {
-        var diagram = CreateDiagram(
-            new QueryDefinition
-            {
-                Name = "FindTop",
-                Returns = QueryReturnShape.Single,
-                OrderBy =
-                {
-                    new QueryOrdering
-                    {
-                        ColumnId = _order.Columns.First(c => c.Name == "Amount").Id,
-                        Descending = true,
-                    },
-                },
-            },
-            new QueryDefinition
-            {
-                Name = "CountLarge",
-                Returns = QueryReturnShape.Count,
-                Parameters =
-                {
-                    new QueryParameter { Name = "minAmount", Type = "decimal(12,2)" },
-                },
-                Condition = "Amount >= @minAmount",
-            },
-            new QueryDefinition
-            {
-                Name = "SearchMemo",
-                Returns = QueryReturnShape.List,
-                Parameters =
-                {
-                    new QueryParameter { Name = "keyword", Type = "string(50)" },
-                },
-                Condition = "Memo LIKE @keyword",
-            },
-            new QueryDefinition
-            {
-                Name = "GetByIds",
-                Returns = QueryReturnShape.List,
-                Parameters =
-                {
-                    new QueryParameter
-                    {
-                        Name = "ids",
-                        Type = "int32",
-                        IsList = true,
-                    },
-                },
-                Condition = "OrderId IN @ids",
-            }
-        );
-
-        var result = Generate(diagram, CreateOptions());
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        var content = AllContent(result);
-
-        content
-            .Should()
-            .Contain(
-                "Query().OrderByDescending(e => e.Amount).FirstOrDefaultAsync(cancellationToken)"
-            );
-        content
-            .Should()
-            .Contain("Query().Where(e => e.Amount >= minAmount).CountAsync(cancellationToken)");
-        content
-            .Should()
-            .Contain(
-                "Query().Where(e => (e.Memo != null && e.Memo!.Contains(keyword))).ToListAsync(cancellationToken)"
-            );
-        content
-            .Should()
-            .Contain("Query().Where(e => ids.Contains(e.OrderId)).ToListAsync(cancellationToken)");
-    }
-
     /// <summary>自由 SQL: QuickER 版 Repository のみ実装され、EF Core 版 Repository は契約宣言のみ（manual 扱い）になることを検証する</summary>
     // 残す理由（P3-4b）：manual 注記の固定の英文（生成器の固定の英文）と、SQL Server の SQL の断片（逐語リテラルの表記）。構造の表明（契約の 3 宣言・EF Core 版に実装が無いこと・生 SQL を実行する呼び出し）は行 code-query-sql-and-manual-contract-declared-efcore-skips-bodies へ移した
     [Fact(DisplayName = "自由 SQL: QuickER のみ実装・EF Core 版 Repository は manual 扱い")]
@@ -249,191 +131,6 @@ public class QueryGenerationTests
         content.Should().Contain("@\"SELECT * FROM [Order] WHERE [Amount] > 0\"");
     }
 
-    /// <summary>マルチターゲット: 共有 DSL 本体は両方言に、方言 SQL は該当方言のみに出ることを検証する</summary>
-    // 残す理由（P3-4b）：共有 DSL 本体の式（P3-6〔簡易 DSL〕の領分）と、SQL Server の SQL の断片。構造の表明（契約・方言ごとの Repository の宣言）は行 code-query-multi-target-shared-on-both-sql-only-on-its-dialect へ移した
-    [Fact(DisplayName = "マルチターゲット: DSL は両方言・SQL は該当方言のみ")]
-    public void Generate_MultiTarget_DispatchesByDialect()
-    {
-        var diagram = CreateDiagram(
-            new QueryDefinition
-            {
-                Name = "GetByCustomer",
-                Returns = QueryReturnShape.List,
-                Parameters =
-                {
-                    new QueryParameter { Name = "customerId", Type = "int32" },
-                },
-                Condition = "CustomerId = @customerId",
-            },
-            new QueryDefinition
-            {
-                Name = "ServerOnly",
-                Returns = QueryReturnShape.Count,
-                Implementation = QueryImplementationKind.Sql,
-                Sql = { ["sqlserver"] = "SELECT COUNT(*) FROM [Order]" },
-            }
-        );
-
-        var options = new CodeGenerationOptions
-        {
-            RootNamespace = "Test.Ns",
-            GenerateRepositories = true,
-            RepositoryDialects = ["sqlserver", "sqlite"],
-            IncludeDataAnnotations = true,
-        };
-        var provider = new SqlServerProvider();
-        var result = DiagramCodeGenerator.Generate(
-            provider.TypeMapper,
-            provider.TypeCatalog,
-            new Dictionary<string, IColumnTypeMapper> { ["sqlserver"] = provider.TypeMapper },
-            diagram,
-            options
-        );
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        var content = AllContent(result);
-
-        // 共有 DSL 本体は sqlserver / sqlite の両実装に出る（契約 1＋方言実装 2 で計 2 回）
-        var sharedBody =
-            "Query().Where(e => e.CustomerId == customerId).ToListAsync(cancellationToken)";
-        content.Split(sharedBody).Length.Should().Be(3);
-
-        // sqlserver 限定の SQL 本体は 1 回だけ
-        content.Split("SELECT COUNT(*) FROM [Order]").Length.Should().Be(2);
-    }
-
-    /// <summary>VO 生成時: 比較は VO.Create で包まれ、IN は前置文で持ち上げられることを検証する</summary>
-    [Fact(DisplayName = "VO 図: 比較は VO.Create・IN は前置文つき本体になる")]
-    public void Generate_WithValueObjects_WrapsComparisons()
-    {
-        var diagram = CreateDiagram(
-            new QueryDefinition
-            {
-                Name = "GetByCustomer",
-                Returns = QueryReturnShape.List,
-                Parameters =
-                {
-                    new QueryParameter { Name = "customerId", Type = "int32" },
-                },
-                Condition = "CustomerId = @customerId",
-            },
-            new QueryDefinition
-            {
-                Name = "GetByIds",
-                Returns = QueryReturnShape.List,
-                Parameters =
-                {
-                    new QueryParameter
-                    {
-                        Name = "ids",
-                        Type = "int32",
-                        IsList = true,
-                    },
-                },
-                Condition = "OrderId IN @ids",
-            }
-        );
-
-        var options = new CodeGenerationOptions
-        {
-            RootNamespace = "Test.Ns",
-            GenerateRepositories = true,
-            GenerateEfCoreRepositories = true,
-            IncludeDataAnnotations = true,
-            GenerateValueObjects = true,
-        };
-        var result = Generate(diagram, options);
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        var content = AllContent(result);
-
-        content.Should().Contain("e.CustomerId == CustomerIdValue.Create(customerId)");
-        content
-            .Should()
-            .Contain("var idsValues = ids.Select(OrderIdValue.Create).ToList();")
-            .And.Contain("idsValues.Contains(e.OrderId)");
-    }
-
-    /// <summary>列参照で型付けしたパラメータが、VO 図では VO 型引数＋直接比較・VO なし図ではプリミティブ引数になることを検証する</summary>
-    // 残す理由（P3-4b）：VO 図の本体の式（Create なしの直接比較＝P3-6〔簡易 DSL〕の領分）。構造の表明（VO 図は VO 型引数・VO なし図はプリミティブ引数）は行 code-query-column-typed-parameter-follows-value-object / code-query-column-typed-parameter-follows-primitive へ移した
-    [Fact(DisplayName = "列参照パラメータ: VO 図は VO 型引数・VO なし図はプリミティブ引数")]
-    public void Generate_ColumnTypedParameter_FollowsColumnType()
-    {
-        var customerColumn = _order.Columns.First(c => c.Name == "CustomerId");
-
-        QueryDefinition CreateQuery() =>
-            new()
-            {
-                Name = "GetByCustomerTyped",
-                Returns = QueryReturnShape.List,
-                Parameters =
-                {
-                    new QueryParameter { Name = "customerId", SourceColumnId = customerColumn.Id },
-                },
-                Condition = "CustomerId = @customerId",
-            };
-
-        // VO 有効: 条件は Create なしの直接比較
-        var voOptions = new CodeGenerationOptions
-        {
-            RootNamespace = "Test.Ns",
-            GenerateRepositories = true,
-            GenerateEfCoreRepositories = true,
-            IncludeDataAnnotations = true,
-            GenerateValueObjects = true,
-        };
-        var voResult = Generate(CreateDiagram(CreateQuery()), voOptions);
-        voResult.HasErrors.Should().BeFalse(FormatDiagnostics(voResult));
-        AllContent(voResult).Should().Contain("Query().Where(e => e.CustomerId == customerId)");
-    }
-
-    /// <summary>
-    /// NULL 許容の値型列への IN が、メソッド冒頭で NULL 許容型のリストへ持ち上げてから比較されることを
-    /// 検証する。素のままだと <c>IReadOnlyList&lt;int&gt;.Contains(int?)</c> の型推論が一致せず
-    /// CS1929 でコンパイルできない（VO リストの持ち上げと同じ経路。列が NULL の行は
-    /// <c>Contains(null)</c>＝false で SQL / EF Core と揃う）
-    /// </summary>
-    // 残す理由（P3-4b）：持ち上げ文の式（IN の訳し方＝P3-6〔簡易 DSL〕の領分）。コンパイルの成否は行 compile-query-in-on-nullable-value-type-column へ移した
-    [Fact(DisplayName = "NULL 許容の値型列への IN は NULL 許容型リストへ持ち上げる")]
-    public void Generate_InOnNullableValueTypeColumn_LiftsToNullableList()
-    {
-        _order.Columns.Add(
-            new Column
-            {
-                Name = "Quantity",
-                DataType = "int",
-                IsNullable = true,
-            }
-        );
-        var diagram = CreateDiagram(
-            new QueryDefinition
-            {
-                Name = "GetByQuantities",
-                Returns = QueryReturnShape.List,
-                Parameters =
-                {
-                    new QueryParameter
-                    {
-                        Name = "quantities",
-                        Type = "int32",
-                        IsList = true,
-                    },
-                },
-                Condition = "Quantity IN @quantities",
-            }
-        );
-
-        var result = Generate(diagram, CreateOptions());
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        var content = AllContent(result);
-
-        content
-            .Should()
-            .Contain("var quantitiesValues = quantities.Cast<int?>().ToList();")
-            .And.Contain("quantitiesValues.Contains(e.Quantity)");
-    }
-
     /// <summary>
     /// 否定 LIKE の等値形（ワイルドカードなしの <c>NOT LIKE 'abc'</c>）と前置 <c>NOT</c> の文字列一致が、
     /// どちらも NULL 前提の内側で否定されることを検証する（docs の「NOT LIKE も NULL 前提の内側＝NULL 行は
@@ -441,6 +138,7 @@ public class QueryGenerationTests
     /// NULL 行が一致に含まれ、<c>col NOT LIKE '%x%'</c> と結果が割れていた。肯定形の <c>LIKE 'abc'</c> は
     /// 従来どおり素の等値比較（NULL 行は一致しない＝結論は同じ）
     /// </summary>
+    // 残す理由（P3-6）：動作に出ない最適化の形（NULL 非許容の列の否定に NULL 前提を付けない・肯定のワイルドカードなし LIKE に NULL 前提を付けない）だけを残す。NULL 前提の内側の否定・前置 NOT・二重否定の意味は DslFuzz の NotNesting（single・double）と網羅の単位の決まった形 KF1（NOT NOT LIKE 'x'）・KF10（NOT s NOT LIKE '%x%'）・KF11（NOT s LIKE '%x%'）
     [Fact(DisplayName = "否定 LIKE の等値形と前置 NOT も NULL 前提の内側で否定される")]
     public void Generate_NegatedLike_StaysInsideNullPremise()
     {
@@ -473,14 +171,8 @@ public class QueryGenerationTests
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
         var content = AllContent(result);
 
-        // 等値形の否定: NULL 前提の内側（NULL 行はどちらの向きでも一致しない）
-        content.Should().Contain("(e.Memo != null && !(e.Memo == \"abc\"))");
         // 非 NULL 列は前提が不要（従来どおり素の否定）
         content.Should().Contain("!(e.Code == \"abc\")");
-        // 前置 NOT は Negated へ畳み込まれ、col NOT LIKE と同じ形になる
-        content.Should().Contain("(e.Memo != null && !(e.Memo!.Contains(\"x\")))");
-        // 二重否定は肯定形へ畳まれる（前提は保たれる）
-        content.Should().Contain("(e.Memo != null && e.Memo!.Contains(\"x\"))");
         // 肯定形のワイルドカードなし LIKE は従来どおり素の等値比較
         content
             .Should()
@@ -494,6 +186,7 @@ public class QueryGenerationTests
     /// 素のままだとインメモリ実行器だけが &lt; / &lt;= で NULL 行を返し、SQL・EF Core（UNKNOWN で脱落）と
     /// 観測結果が割れていた。等値比較は従来どおりガードなし（null == 値 は C# でも false＝3 実装先で一致）
     /// </summary>
+    // 残す理由（P3-6）：動作に出ない最適化の形（値オブジェクトの NULL 許容の列の等値に NULL ガードを付けない）だけを残す。順序比較の NULL ガードの意味は DslFuzz の sqlite-vo / sqlserver-vo の単位（NULL 許容の int 列 × compare-lt/le/gt/ge-param をインメモリで実行してオラクルと照合）
     [Fact(DisplayName = "VO 有効: NULL 許容列への順序比較は null ガードの内側にエミットされる")]
     public void Generate_NullableVoOrderedComparison_EmitsNullGuard()
     {
@@ -544,59 +237,8 @@ public class QueryGenerationTests
 
         content
             .Should()
-            .Contain("(e.Quantity != null && e.Quantity < QuantityValue.Create(limit))");
-        content
-            .Should()
             .Contain("e.Quantity == QuantityValue.Create(exact)")
             .And.NotContain("e.Quantity != null && e.Quantity ==");
-    }
-
-    /// <summary>
-    /// IN の持ち上げリスト変数名（{パラメータ名}Values）が別のパラメータ名と衝突するとき、_ を後置して
-    /// 回避することを検証する（衝突したままだとローカル変数が引数を隠して CS0136 になる）
-    /// </summary>
-    // 残す理由（P3-4b）：持ち上げ変数のリネームの綴り（式本体＝IN の訳し方で P3-6〔簡易 DSL〕の領分）。コンパイルの成否は既存の行 compile-query-in-lift-variable-renamed が見る
-    [Fact(DisplayName = "IN の持ち上げ変数はパラメータ名との衝突を _ 後置で回避する")]
-    public void Generate_InLiftVariableCollidingWithParameter_IsRenamed()
-    {
-        _order.Columns.Add(
-            new Column
-            {
-                Name = "Quantity",
-                DataType = "int",
-                IsNullable = true,
-            }
-        );
-        var diagram = CreateDiagram(
-            new QueryDefinition
-            {
-                Name = "GetByQuantitySet",
-                Returns = QueryReturnShape.List,
-                Parameters =
-                {
-                    new QueryParameter
-                    {
-                        Name = "quantities",
-                        Type = "int32",
-                        IsList = true,
-                    },
-                    new QueryParameter { Name = "quantitiesValues", Type = "int32" },
-                },
-                Condition = "Quantity IN @quantities AND CustomerId = @quantitiesValues",
-            }
-        );
-
-        var result = Generate(diagram, CreateOptions());
-
-        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
-        var content = AllContent(result);
-
-        content
-            .Should()
-            .Contain("var quantitiesValues_ = quantities.Cast<int?>().ToList();")
-            .And.Contain("quantitiesValues_.Contains(e.Quantity)");
-
-        // コンパイルの成否（持ち上げ変数がリネームされてコンパイルできる）は決まった行 compile-query-in-lift-variable-renamed
     }
 
     /// <summary>

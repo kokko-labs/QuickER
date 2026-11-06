@@ -765,14 +765,9 @@ public class RuntimeTestMatrixTests
         new("RemoteServiceEfCoreRuntimeTests", "NamedQuery", Backend.Remote),
         new("RemoteServiceEfCoreRuntimeTests", "NamedQueryRawSql", Backend.Remote),
         // --- 式木翻訳 ---
-        new("SqlServerTranslatorOperatorRuntimeTests", "TranslatorOperator", Backend.AdoSqlServer),
-        new(
-            "SqlServerBoolColumnTranslatorRuntimeTests",
-            "TranslatorOperator",
-            Backend.AdoSqlServer
-        ),
-        new("SqliteTranslatorOperatorRuntimeTests", "TranslatorOperator", Backend.AdoSqlite),
-        new("SqliteBoolColumnTranslatorRuntimeTests", "TranslatorOperator", Backend.AdoSqlite),
+        // 演算子の分岐（NULL の補償・否定・IN・bool 列の短縮形）は翻訳器の一致の述語の表（TranslatorParityPredicateRows）が持つ
+        new("TranslatorParitySqlServerRuntimeTests", "TranslatorOperator", Backend.AdoSqlServer),
+        new("TranslatorParitySqliteRuntimeTests", "TranslatorOperator", Backend.AdoSqlite),
         new(
             "StringMatchMethodSqlServerRuntimeTests",
             "ValueObjectStringMatch",

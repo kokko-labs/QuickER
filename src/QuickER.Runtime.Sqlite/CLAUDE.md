@@ -52,4 +52,4 @@ SQLite 方言エンジン（QuickER 版 Repository の ADO 実装）の固定コ
 
 - 空・空白の判定は `col = ''` と `trim(col, char(…))`。
 - 日付部品：`.Date` は `datetime(date(col))` にする（パラメータの `'YYYY-MM-DD HH:MM:SS'` とそろえる）。`DateTimeOffset` の列は、格納した文字列の位置から取り出す（strftime は UTC へ換算するため）。
-- ガード：`TranslatorParitySqliteRuntimeTests`、`SqliteTranslatorOperatorRuntimeTests`。mutation 実証済み（`.Date` と時差の分岐・空と空白の判定）。
+- ガード：`TranslatorParitySqliteRuntimeTests`（述語の表 `TranslatorParityPredicateRows` を実 SQLite で C# の意味論と突き合わせる）。mutation 実証済み（`.Date` と時差の分岐・空と空白の判定）。

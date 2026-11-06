@@ -3,6 +3,7 @@ using System.Linq;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Tests.TestSupport;
 using QuickER.Tests.TestSupport.Engines;
 using S = QuickER.Tests.Integration.Dialects.SyncPlanFuzz.ExpectationSchema;
 
@@ -85,7 +86,164 @@ internal static partial class SyncPlanExpectationRows
                 .Expect(e =>
                     e.Diff.Absent("AddForeignKey *", "DropForeignKey *", "AlterForeignKey *")
                 ),
+            .. LongDefaultForeignKeyNameRows(),
         ];
+
+    /// <summary>方言の上限（行の能力の宣言）</summary>
+    private static IdentifierLengthLimit LimitOf(string capability) =>
+        SyncPlanExpectationCapabilities.Get(capability).IdentifierLengthLimit;
+
+    /// <summary>外部キーの既定名の解決（方言の上限に収めた名前と縮める前の名前）</summary>
+    private static ResolvedForeignKeyName ForeignKeyNameOf(
+        ErDiagram diagram,
+        Relationship relationship,
+        IdentifierLengthLimit limit
+    ) =>
+        ConstraintNames.ResolveForeignKeyNameDetails(
+            diagram.Entities,
+            diagram.Relationships,
+            limit
+        )[relationship];
+
+    /// <summary>
+    /// 差分の期待の行（既定の制約名が方言の上限を超える図＝<see cref="LongNameDiagrams"/>：DDL が縮めた名前で作った外部キーを図の名前の無い
+    /// 外部キーと同じとみなす・PostgreSQL は旧版が 63 バイトで切り詰めた名前も同じとみなし、利用者が付けた名前はそうみなさない）。DB 側の図は
+    /// 取込が返すのと同じ形（<see cref="ExpectationScenarios.AsImported"/>）
+    /// </summary>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > LongDefaultForeignKeyNameRows() =>
+        [
+            Row(
+                    "diff-long-default-fk-names-match-shortened-live",
+                    "DDL が縮めた既定名で作った外部キー・一意制約の live と、名前の無い図の差分は空（上限のある 4 方言）",
+                    DialectNames.SqlServer,
+                    DialectNames.PostgreSql,
+                    DialectNames.MySql,
+                    DialectNames.Oracle
+                )
+                .LiveWith(w =>
+                {
+                    var diagram = LongNameDiagrams.Build(LimitOf(w.Capability), w.Capability);
+                    ExpectationScenarios.AsImported(
+                        w.Live,
+                        diagram,
+                        rel => ForeignKeyNameOf(diagram, rel, LimitOf(w.Capability)).Name
+                    );
+                })
+                .TargetWith(w => RealCrossDialectScenarios.LongNames(w.Target, w.Capability))
+                .Expect(e => e.Diff.Empty()),
+            Row(
+                    "diff-long-default-pg-legacy-truncated-fk-name-is-absorbed",
+                    "PostgreSQL: 旧版が縮める前の既定名を 63 バイトで切り詰めて作った外部キーの live と、名前の無い図の差分は空（切り詰めるとみなさない宣言では別の外部キーに見える＝対照）",
+                    DialectNames.PostgreSql,
+                    SyncPlanExpectationCapabilities.PostgreSqlWithoutTruncation
+                )
+                .LiveWith(w =>
+                {
+                    var limit = LimitOf(DialectNames.PostgreSql);
+                    var diagram = LongNameDiagrams.BuildSingleForeignKey(
+                        limit.Max,
+                        DialectNames.PostgreSql
+                    );
+                    ExpectationScenarios.AsImported(
+                        w.Live,
+                        diagram,
+                        rel => limit.Truncate(ForeignKeyNameOf(diagram, rel, limit).UnshortenedName)
+                    );
+                })
+                .TargetWith(w =>
+                    RealCrossDialectScenarios.Adopt(
+                        w.Target,
+                        LongNameDiagrams.BuildSingleForeignKey(
+                            LimitOf(DialectNames.PostgreSql).Max,
+                            DialectNames.PostgreSql
+                        )
+                    )
+                )
+                .Expect(e =>
+                    e.For(DialectNames.PostgreSql, x => x.Diff.Empty())
+                        .For(
+                            SyncPlanExpectationCapabilities.PostgreSqlWithoutTruncation,
+                            x =>
+                                x.Diff.Unordered(
+                                    NotAbsorbedLines(
+                                        LongNameDiagrams.BuildSingleForeignKey(
+                                            LimitOf(DialectNames.PostgreSql).Max,
+                                            DialectNames.PostgreSql
+                                        ),
+                                        "parent_id"
+                                    )
+                                )
+                        )
+                ),
+            Row(
+                    "diff-pg-user-named-fk-equal-to-shortened-default-is-not-absorbed",
+                    "PostgreSQL: 利用者が付けた外部キーの名前は、旧版の切り詰めた名前の live と同じ外部キーとみなさない",
+                    DialectNames.PostgreSql
+                )
+                .LiveWith(w =>
+                {
+                    var limit = LimitOf(DialectNames.PostgreSql);
+                    var diagram = LongNameDiagrams.Build(limit, DialectNames.PostgreSql);
+                    ExpectationScenarios.AsImported(
+                        w.Live,
+                        diagram,
+                        rel => limit.Truncate(ForeignKeyNameOf(diagram, rel, limit).UnshortenedName)
+                    );
+                })
+                .TargetWith(w =>
+                {
+                    var limit = LimitOf(DialectNames.PostgreSql);
+                    var diagram = LongNameDiagrams.Build(limit, DialectNames.PostgreSql);
+                    var names = diagram.Relationships.ToDictionary(
+                        rel => rel,
+                        rel => ForeignKeyNameOf(diagram, rel, limit).Name
+                    );
+
+                    // 縮めた既定名を、利用者が付けた名前として図に保存する（旧版の切り詰めた名前とは違う）
+                    foreach (var relationship in diagram.Relationships)
+                    {
+                        relationship.ConstraintName = names[relationship];
+                    }
+
+                    RealCrossDialectScenarios.Adopt(w.Target, diagram);
+                })
+                .Expect(e =>
+                    e.Diff.Unordered(
+                        NotAbsorbedLines(
+                            LongNameDiagrams.Build(
+                                LimitOf(DialectNames.PostgreSql),
+                                DialectNames.PostgreSql
+                            ),
+                            "bill_id",
+                            "ship_id"
+                        )
+                    )
+                ),
+        ];
+
+    /// <summary>
+    /// PostgreSQL で旧版の切り詰めた名前の外部キーを吸収しないときの差分の行：外部キーごとに、縮めた名前での追加（選ぶ）と旧版の切り詰めた
+    /// 名前の削除（選ばない）（<paramref name="childColumns"/> は図の外部キーの並びの子の列）
+    /// </summary>
+    private static string[] NotAbsorbedLines(ErDiagram diagram, params string[] childColumns)
+    {
+        var limit = LimitOf(DialectNames.PostgreSql);
+        var child = diagram.Entities[1].TableName;
+
+        return
+        [
+            .. diagram.Relationships.Select(
+                (rel, i) =>
+                    $"AddForeignKey {child}.{childColumns[i]} fk={ForeignKeyNameOf(diagram, rel, limit).Name} sel=1 * pairs=(id>{childColumns[i]}) *"
+            ),
+            .. diagram.Relationships.Select(
+                (rel, i) =>
+                    $"DropForeignKey {child} fk={limit.Truncate(ForeignKeyNameOf(diagram, rel, limit).UnshortenedName)} sel=0 * pairs=(id>{childColumns[i]}) *"
+            ),
+        ];
+    }
 
     /// <summary>
     /// customers(id) と、customers を 2 回参照する orders(id, bill_customer_id, ship_customer_id) の図を足す（外部キーの名前は指定した

@@ -349,6 +349,28 @@ public enum ParityOrderFilter
 
     /// <summary><c>ids.Contains(o.OrderId)</c>（<c>List&lt;OrderIdValue&gt;</c>＝IN）</summary>
     IdIn,
+
+    /// <summary>
+    /// <c>memos.Contains(o.Memo)</c>（<c>List&lt;MemoValue?&gt;</c>＝値オブジェクトの列の IN。要素は
+    /// <see cref="QueryOrdersOp.Texts"/> で渡し、null の要素は null のまま入れる）
+    /// </summary>
+    MemoIn,
+
+    /// <summary><c>!memos.Contains(o.Memo)</c>（値オブジェクトの列の NOT IN。要素の渡し方は <see cref="MemoIn"/> と同じ）</summary>
+    MemoNotIn,
+
+    /// <summary>
+    /// <c>o.Memo!.Contains(memo)</c>（値オブジェクトを受ける多重定義。<c>memo</c> は <c>MemoValue.Create(Text)</c> か null。
+    /// <see cref="QueryOrdersOp.Literal"/> のときは式の中の <c>MemoValue.Create("…")</c>、Text が null なら
+    /// <c>(MemoValue)null!</c> の定数）
+    /// </summary>
+    MemoContainsVo,
+
+    /// <summary><c>o.Memo!.StartsWith(memo)</c>（値オブジェクトを受ける多重定義。値の渡し方は <see cref="MemoContainsVo"/> と同じ）</summary>
+    MemoStartsWithVo,
+
+    /// <summary><c>o.Memo!.EndsWith(memo)</c>（値オブジェクトを受ける多重定義。値の渡し方は <see cref="MemoContainsVo"/> と同じ）</summary>
+    MemoEndsWithVo,
 }
 
 /// <summary><see cref="QueryOrdersOp"/> の並び</summary>
@@ -405,6 +427,7 @@ public enum ParityQueryTerminal
 /// <param name="Skip">Skip</param>
 /// <param name="Take">Take</param>
 /// <param name="Terminal">終端</param>
+/// <param name="Texts">値オブジェクトの列の IN の要素の文字列（null の要素を含めてよい＝null の要素の畳み込みを見る）</param>
 public sealed record QueryOrdersOp(
     ParityOrderFilter Filter = ParityOrderFilter.None,
     string? Text = null,
@@ -414,7 +437,8 @@ public sealed record QueryOrdersOp(
     ParityOrderSort Sort = ParityOrderSort.IdAsc,
     int? Skip = null,
     int? Take = null,
-    ParityQueryTerminal Terminal = ParityQueryTerminal.Ids
+    ParityQueryTerminal Terminal = ParityQueryTerminal.Ids,
+    IReadOnlyList<string?>? Texts = null
 ) : ParityOp
 {
     public override string Name =>
@@ -503,12 +527,24 @@ public sealed record QueryOrdersOp(
                 ParityOrderFilter.AmountAtLeastAndMemoContains => WithConstants(o =>
                     o.Amount.Value >= 0m && o.Memo!.Contains("")
                 ),
+                ParityOrderFilter.MemoContainsVo => text is null
+                    ? o => o.Memo!.Contains((MemoValue)null!)
+                    : WithConstants(o => o.Memo!.Contains(MemoValue.Create(""))),
+                ParityOrderFilter.MemoStartsWithVo => text is null
+                    ? o => o.Memo!.StartsWith((MemoValue)null!)
+                    : WithConstants(o => o.Memo!.StartsWith(MemoValue.Create(""))),
+                ParityOrderFilter.MemoEndsWithVo => text is null
+                    ? o => o.Memo!.EndsWith((MemoValue)null!)
+                    : WithConstants(o => o.Memo!.EndsWith(MemoValue.Create(""))),
                 _ => throw new ArgumentException($"{Filter} has no literal form."),
             };
         }
 
         var memo = text is null ? null : MemoValue.Create(text);
         var ids = (Ids ?? []).Select(OrderIdValue.Create).ToList();
+        var memos = (Texts ?? [])
+            .Select(element => element is null ? null : MemoValue.Create(element))
+            .ToList();
 
         return Filter switch
         {
@@ -524,6 +560,11 @@ public sealed record QueryOrdersOp(
             ParityOrderFilter.AmountAtLeastAndMemoContains => o =>
                 o.Amount.Value >= amount && o.Memo!.Contains(text!),
             ParityOrderFilter.IdIn => o => ids.Contains(o.OrderId),
+            ParityOrderFilter.MemoIn => o => memos.Contains(o.Memo),
+            ParityOrderFilter.MemoNotIn => o => !memos.Contains(o.Memo),
+            ParityOrderFilter.MemoContainsVo => o => o.Memo!.Contains(memo!),
+            ParityOrderFilter.MemoStartsWithVo => o => o.Memo!.StartsWith(memo!),
+            ParityOrderFilter.MemoEndsWithVo => o => o.Memo!.EndsWith(memo!),
             _ => throw new ArgumentOutOfRangeException(nameof(Filter)),
         };
     }

@@ -372,6 +372,24 @@ public static partial class BackendParityScenarios
                 ParityExpect.Outcome("query-not-equal-includes-null", "ids=[20,21,22]"),
                 new QueryOrdersOp(ParityOrderFilter.MemoEquals, "x"),
                 ParityExpect.Outcome("query-equal-excludes-null", "ids=[23]"),
+                // 値オブジェクトの列と null 変数の != / == は IS NOT NULL / IS NULL へ補償する
+                new QueryOrdersOp(ParityOrderFilter.MemoNotEquals, null),
+                ParityExpect.Outcome("query-not-equal-null-variable", "ids=[20,21,23]"),
+                new QueryOrdersOp(ParityOrderFilter.MemoEquals, null),
+                ParityExpect.Outcome("query-equal-null-variable", "ids=[22]"),
+                // 値オブジェクトの列の IN / NOT IN：null の要素は IS NULL へ畳み、NOT IN は列側の NULL を補償する
+                new QueryOrdersOp(ParityOrderFilter.MemoIn, Texts: ["apple", "Banana"]),
+                ParityExpect.Outcome("query-in", "ids=[20,21]"),
+                new QueryOrdersOp(ParityOrderFilter.MemoNotIn, Texts: ["apple", "Banana"]),
+                ParityExpect.Outcome("query-not-in-includes-null", "ids=[22,23]"),
+                new QueryOrdersOp(ParityOrderFilter.MemoIn, Texts: ["apple", null]),
+                ParityExpect.Outcome("query-in-with-null-element", "ids=[20,22]"),
+                new QueryOrdersOp(ParityOrderFilter.MemoNotIn, Texts: ["apple", null]),
+                ParityExpect.Outcome("query-not-in-with-null-element-excludes-null", "ids=[21,23]"),
+                new QueryOrdersOp(ParityOrderFilter.MemoIn, Texts: [null]),
+                ParityExpect.Outcome("query-in-only-null-element", "ids=[22]"),
+                new QueryOrdersOp(ParityOrderFilter.MemoNotIn, Texts: [null]),
+                ParityExpect.Outcome("query-not-in-only-null-element", "ids=[20,21,23]"),
                 new QueryOrdersOp(ParityOrderFilter.MemoIsNotNull, Sort: ParityOrderSort.MemoAsc),
                 ParityExpect.Outcome("query-not-null-ordered", "ids=[21,20,23]"),
                 new QueryOrdersOp(Sort: ParityOrderSort.MemoDesc, Skip: 1, Take: 1),
@@ -410,6 +428,20 @@ public static partial class BackendParityScenarios
                     Terminal: ParityQueryTerminal.First
                 ),
                 ParityExpect.Outcome("query-first-none", "first=none"),
+            ]
+        );
+
+        // 条件なしの AnyAsync：表が空なら False、行を入れた後は True（顧客はあるが注文は空の状態から始める）
+        yield return new(
+            "query-any-without-condition",
+            [new SeedOp(new CustomerRow(1, "Alice"))],
+            [
+                new QueryOrdersOp(Terminal: ParityQueryTerminal.Any),
+                ParityExpect.Outcome("query-any-without-condition-empty", "any=False"),
+                new InsertOp(new OrderRow(20, 1, 300m, "apple")),
+                ParityExpect.Succeeds("query-any-without-condition-insert"),
+                new QueryOrdersOp(Terminal: ParityQueryTerminal.Any),
+                ParityExpect.Outcome("query-any-without-condition-seeded", "any=True"),
             ]
         );
 
@@ -455,8 +487,32 @@ public static partial class BackendParityScenarios
                     "where-ends-with-null",
                     "throws ArgumentNullException param=value"
                 ),
+                // 値オブジェクトを受ける多重定義の null のパターンも Where の時点で断る
+                new QueryOrdersOp(ParityOrderFilter.MemoContainsVo, null, Literal: true),
+                ParityExpect.Outcome(
+                    "where-contains-vo-null",
+                    "throws ArgumentNullException param=value"
+                ),
+                new QueryOrdersOp(ParityOrderFilter.MemoStartsWithVo, null, Literal: true),
+                ParityExpect.Outcome(
+                    "where-starts-with-vo-null",
+                    "throws ArgumentNullException param=value"
+                ),
+                new QueryOrdersOp(ParityOrderFilter.MemoEndsWithVo, null, Literal: true),
+                ParityExpect.Outcome(
+                    "where-ends-with-vo-null",
+                    "throws ArgumentNullException param=value"
+                ),
                 new QueryOrdersOp(ParityOrderFilter.MemoContains, "A", Literal: true),
                 ParityExpect.Outcome("where-contains-non-null-passes", "ids=[20,22,24,25]"),
+                // null でないパターンは、クロージャの値（変数）でも値オブジェクトの多重定義でも Where を通る
+                new QueryOrdersOp(ParityOrderFilter.MemoStartsWith, "A"),
+                ParityExpect.Outcome(
+                    "where-starts-with-variable-non-null-passes",
+                    "ids=[20,22,24,25]"
+                ),
+                new QueryOrdersOp(ParityOrderFilter.MemoEndsWithVo, "OFF", Literal: true),
+                ParityExpect.Outcome("where-ends-with-vo-non-null-passes", "ids=[23]"),
                 new QueryOrdersOp(),
                 ParityExpect.Outcome("order-id-asc", "ids=[20,21,22,23,24,25]"),
                 new QueryOrdersOp(Sort: ParityOrderSort.IdDesc),

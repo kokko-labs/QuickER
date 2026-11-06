@@ -13,7 +13,14 @@ namespace QuickER.Tests.Model;
 /// </remarks>
 public class ConstraintNamesTests
 {
-    [Theory(DisplayName = "SafeName は前後の空白を除いてから . と空白を _ へ置き換える")]
+    /// <summary>
+    /// 安全化の規則と冪等（安全化済みの名前をもう一度通しても変わらない＝先に安全化してから合成する経路と結果が揃う）を、同じ行で確かめる
+    /// </summary>
+    /// <remarks>
+    /// 既定名の合成（<c>FK_{子}_{親}</c>・<c>PK_{表}</c>・一意制約の合成名）が安全化した名前を使うことは、方言の DDL の表の行
+    /// <c>ddl-constraint-names-schema-qualified-trimmed-table</c>・<c>ddl-unique-unnamed-synthesized-name-is-safe</c> が出力の制約名で固定する。
+    /// </remarks>
+    [Theory(DisplayName = "SafeName は前後の空白を除いてから . と空白を _ へ置き換え、冪等")]
     [InlineData("Orders", "Orders")]
     [InlineData(" Orders", "Orders")]
     [InlineData("Orders  ", "Orders")]
@@ -25,51 +32,7 @@ public class ConstraintNamesTests
     public void SafeName_TrimsThenReplaces(string? name, string expected)
     {
         ConstraintNames.SafeName(name).Should().Be(expected);
-    }
-
-    /// <summary>安全化済みの名前をもう一度通しても変わらない（先に安全化してから合成する経路と結果が揃う）</summary>
-    [Theory(DisplayName = "SafeName は冪等")]
-    [InlineData(" dbo.Order Details ")]
-    [InlineData("Orders")]
-    public void SafeName_IsIdempotent(string name)
-    {
-        var once = ConstraintNames.SafeName(name);
-
-        ConstraintNames.SafeName(once).Should().Be(once);
-    }
-
-    [Fact(DisplayName = "外部キーの既定名は FK_{子}_{親}（両方を安全化）")]
-    public void ForeignKey_ComposesSafeNames()
-    {
-        ConstraintNames
-            .ForeignKey(" dbo.Orders", "dbo.Customers", IdentifierLengthLimit.Unlimited)
-            .Should()
-            .Be("FK_dbo_Orders_dbo_Customers");
-    }
-
-    [Fact(DisplayName = "主キーの既定名は PK_{テーブル}（安全化）")]
-    public void PrimaryKey_ComposesSafeName()
-    {
-        ConstraintNames
-            .PrimaryKey(" dbo.Orders ", IdentifierLengthLimit.Unlimited)
-            .Should()
-            .Be("PK_dbo_Orders");
-    }
-
-    /// <summary>
-    /// 一意制約の合成名も同じ安全化を通す（DDL・生成コード・ツールの要約表示が同じ名前を作る）
-    /// </summary>
-    [Fact(DisplayName = "一意制約の合成名もテーブル名と列名を安全化する")]
-    public void UniqueConstraintSynthesizeName_UsesSafeName()
-    {
-        UniqueConstraint
-            .SynthesizeName(
-                " dbo.Orders",
-                ["order code", "tenant"],
-                IdentifierLengthLimit.Unlimited
-            )
-            .Should()
-            .Be("UQ_dbo_Orders_order_code_tenant");
+        ConstraintNames.SafeName(expected).Should().Be(expected, "冪等");
     }
 
     /// <summary>
@@ -93,99 +56,91 @@ public class ConstraintNamesTests
         presanitized.Should().Be(direct);
     }
 
-    [Fact(DisplayName = "衝突しない外部キー名は、既定名が空いていれば既定名のまま")]
-    public void UniqueForeignKey_DefaultNameIsFree_ReturnsDefault()
+    /// <summary>
+    /// 衝突しない外部キー名の 1 行（子・親・子の列・予約済みの名前と、期待する名前）
+    /// </summary>
+    /// <param name="Id">行の名前</param>
+    /// <param name="Columns">子の列（宣言順）</param>
+    /// <param name="Taken">予約済みの名前</param>
+    /// <param name="Expected">期待する名前</param>
+    public sealed record UniqueForeignKeyRow(
+        string Id,
+        string[] Columns,
+        string[] Taken,
+        string Expected
+    )
     {
-        ConstraintNames
-            .UniqueForeignKey(
-                "Orders",
-                "Customers",
+        public override string ToString() => Id;
+    }
+
+    /// <summary>子 Orders・親 Customers の衝突しない外部キー名の行（上限なし）</summary>
+    public static TheoryData<UniqueForeignKeyRow> UniqueForeignKeyRows =>
+        new()
+        {
+            // 既定名が空いていれば既定名のまま
+            new UniqueForeignKeyRow(
+                "default-name-free",
                 ["BillingCustomerId"],
                 ["PK_Orders"],
-                IdentifierLengthLimit.Unlimited
-            )
-            .Should()
-            .Be("FK_Orders_Customers");
-    }
-
-    [Fact(DisplayName = "衝突しない外部キー名は、既定名がふさがっていれば子の列名を足す")]
-    public void UniqueForeignKey_DefaultNameTaken_AppendsChildColumns()
-    {
-        ConstraintNames
-            .UniqueForeignKey(
-                "Orders",
-                "Customers",
+                "FK_Orders_Customers"
+            ),
+            // 既定名がふさがっていれば子の列名を足す
+            new UniqueForeignKeyRow(
+                "default-name-taken-appends-child-columns",
                 ["ShippingCustomerId"],
                 ["FK_Orders_Customers"],
-                IdentifierLengthLimit.Unlimited
-            )
-            .Should()
-            .Be("FK_Orders_Customers_ShippingCustomerId");
-    }
-
-    /// <summary>列名は宣言順に <c>_</c> でつなぎ、それぞれ安全化する</summary>
-    [Fact(DisplayName = "衝突しない外部キー名に足す列名は宣言順につなぎ、安全化する")]
-    public void UniqueForeignKey_AppendsSafeColumnNamesInOrder()
-    {
-        ConstraintNames
-            .UniqueForeignKey(
-                "Orders",
-                "Customers",
+                "FK_Orders_Customers_ShippingCustomerId"
+            ),
+            // 足す列名は宣言順につなぎ、それぞれ安全化する
+            new UniqueForeignKeyRow(
+                "appends-safe-column-names-in-order",
                 ["tenant id", "Ship.Code"],
                 ["FK_Orders_Customers"],
-                IdentifierLengthLimit.Unlimited
-            )
-            .Should()
-            .Be("FK_Orders_Customers_tenant_id_Ship_Code");
-    }
-
-    [Fact(DisplayName = "衝突しない外部キー名は、列名を足してもふさがっていれば番号を足す")]
-    public void UniqueForeignKey_ColumnNameAlsoTaken_AppendsNumber()
-    {
-        ConstraintNames
-            .UniqueForeignKey(
-                "Orders",
-                "Customers",
+                "FK_Orders_Customers_tenant_id_Ship_Code"
+            ),
+            // 列名を足してもふさがっていれば番号を足す
+            new UniqueForeignKeyRow(
+                "column-name-also-taken-appends-number",
                 ["CustomerId"],
                 [
                     "FK_Orders_Customers",
                     "FK_Orders_Customers_CustomerId",
                     "FK_Orders_Customers_CustomerId_2",
                 ],
-                IdentifierLengthLimit.Unlimited
-            )
-            .Should()
-            .Be("FK_Orders_Customers_CustomerId_3");
-    }
-
-    [Fact(DisplayName = "衝突しない外部キー名は、列が無ければ既定名に番号を足す")]
-    public void UniqueForeignKey_NoColumns_AppendsNumberToDefault()
-    {
-        ConstraintNames
-            .UniqueForeignKey(
-                "Orders",
-                "Customers",
+                "FK_Orders_Customers_CustomerId_3"
+            ),
+            // 列が無ければ既定名に番号を足す
+            new UniqueForeignKeyRow(
+                "no-columns-appends-number-to-default",
                 [],
                 ["FK_Orders_Customers"],
-                IdentifierLengthLimit.Unlimited
-            )
-            .Should()
-            .Be("FK_Orders_Customers_2");
-    }
+                "FK_Orders_Customers_2"
+            ),
+            // 大文字小文字だけ違う名前も衝突とみなす
+            new UniqueForeignKeyRow(
+                "ignores-case",
+                ["ShipTo"],
+                ["fk_orders_customers"],
+                "FK_Orders_Customers_ShipTo"
+            ),
+        };
 
-    [Fact(DisplayName = "衝突しない外部キー名は、大文字小文字だけ違う名前も衝突とみなす")]
-    public void UniqueForeignKey_IgnoresCase()
+    [Theory(
+        DisplayName = "衝突しない外部キー名は、既定名・子の列名つき・番号つきの順に空いている名前を選ぶ"
+    )]
+    [MemberData(nameof(UniqueForeignKeyRows))]
+    public void UniqueForeignKey_PicksFirstFreeName(UniqueForeignKeyRow row)
     {
         ConstraintNames
             .UniqueForeignKey(
                 "Orders",
                 "Customers",
-                ["ShipTo"],
-                ["fk_orders_customers"],
+                row.Columns,
+                row.Taken,
                 IdentifierLengthLimit.Unlimited
             )
             .Should()
-            .Be("FK_Orders_Customers_ShipTo");
+            .Be(row.Expected);
     }
 
     /// <summary>既存の制約名は、外部キー・主キー・一意制約を DDL が付ける名前で集める</summary>
@@ -380,40 +335,14 @@ public class ConstraintNamesTests
             ],
         };
 
-    [Fact(DisplayName = "名前の無いリレーションは、既定名が空いていれば名前を持たないまま")]
-    public void NameUnnamedForeignKeys_DefaultNameFree_StaysUnnamed()
-    {
-        var (customers, orders) = BuildCustomersAndOrders();
-        var relationship = Link(customers, orders, "bill_customer_id");
+    // 既定名が空いていれば名前を持たないまま・同じ組の 2 本目に子の列名つきの名前を付ける（NameUnnamedForeignKeys が図へ書く名前）は、
+    // 形式の往復のエンジンの規則の行 dbml-rule-single-unnamed-ref-stays-unnamed・dbml-rule-same-pair-twice-without-names-second-gets-unique-name
+    // が同じ図（customers・orders の bill / ship）の取込で固定する（取込は NameUnnamedForeignKeys を通る）
 
-        ConstraintNames.NameUnnamedForeignKeys(
-            [customers, orders],
-            [relationship],
-            IdentifierLengthLimit.Unlimited
-        );
-
-        relationship.ConstraintName.Should().BeNull();
-    }
-
-    [Fact(
-        DisplayName = "同じテーブルの組に名前の無いリレーションが 2 本あれば、2 本目に子の列名つきの名前を付ける"
-    )]
-    public void NameUnnamedForeignKeys_SamePairTwice_SecondGetsUniqueName()
-    {
-        var (customers, orders) = BuildCustomersAndOrders();
-        var bill = Link(customers, orders, "bill_customer_id");
-        var ship = Link(customers, orders, "ship_customer_id");
-
-        ConstraintNames.NameUnnamedForeignKeys(
-            [customers, orders],
-            [bill, ship],
-            IdentifierLengthLimit.Unlimited
-        );
-
-        bill.ConstraintName.Should().BeNull("渡された順で先のリレーションが既定名を取る");
-        ship.ConstraintName.Should().Be("FK_orders_customers_ship_customer_id");
-    }
-
+    /// <remarks>
+    /// 残す理由（P3-6）：名前を持つ側の綴りが既定名と大文字小文字だけ違っても既定名をふさぐこと（予約の大小無視）と、図へ ConstraintName を
+    /// 書き込む挙動（移した先：同じ綴りの形は形式の往復のエンジンの規則の行 <c>dbml-rule-named-ref-takes-default-unnamed-is-renamed</c>）
+    /// </remarks>
     [Fact(
         DisplayName = "名前を持つリレーションが既定名をふさいでいれば、名前の無い側に名前を付け、名前を持つ側は変えない"
     )]
@@ -434,6 +363,10 @@ public class ConstraintNamesTests
         named.ConstraintName.Should().Be("fk_ORDERS_customers");
     }
 
+    /// <remarks>
+    /// 残す理由（P3-6）：NameUnnamedForeignKeys が図へ ConstraintName を書き込む挙動（取込の経路）。DDL が付ける名前は方言の DDL の表の行
+    /// <c>ddl-fk-unnamed-avoids-unique-constraint-name</c> へ移した
+    /// </remarks>
     [Fact(
         DisplayName = "主キー・一意制約の名前が既定名をふさいでいれば、名前の無い側に名前を付ける"
     )]
@@ -458,26 +391,22 @@ public class ConstraintNamesTests
         relationship.ConstraintName.Should().Be("FK_orders_customers_bill_customer_id");
     }
 
-    [Fact(DisplayName = "外部キーの実効名は、保存された名前が無ければ既定名・あればそのまま")]
-    public void EffectiveForeignKey_FallsBackToDefaultOnlyWhenUnnamed()
+    /// <summary>保存された名前（null・空白だけ・名前あり）ごとの外部キーの実効名（既定名は前後の空白と . を安全化する）</summary>
+    [Theory(DisplayName = "外部キーの実効名は、保存された名前が無ければ既定名・あればそのまま")]
+    [InlineData(null, "orders", "customers", "FK_orders_customers")]
+    [InlineData("  ", " orders ", "dbo.customers", "FK_orders_dbo_customers")]
+    [InlineData("fk_custom", "orders", "customers", "fk_custom")]
+    public void EffectiveForeignKey_FallsBackToDefaultOnlyWhenUnnamed(
+        string? stored,
+        string child,
+        string parent,
+        string expected
+    )
     {
         ConstraintNames
-            .EffectiveForeignKey(null, "orders", "customers", IdentifierLengthLimit.Unlimited)
+            .EffectiveForeignKey(stored, child, parent, IdentifierLengthLimit.Unlimited)
             .Should()
-            .Be("FK_orders_customers");
-        ConstraintNames
-            .EffectiveForeignKey("  ", " orders ", "dbo.customers", IdentifierLengthLimit.Unlimited)
-            .Should()
-            .Be("FK_orders_dbo_customers");
-        ConstraintNames
-            .EffectiveForeignKey(
-                "fk_custom",
-                "orders",
-                "customers",
-                IdentifierLengthLimit.Unlimited
-            )
-            .Should()
-            .Be("fk_custom");
+            .Be(expected);
     }
 
     /// <summary>外部キーを作らない名前の無い関係（多対多・列ペア無し・列を解決できない）を組み立てる</summary>
@@ -514,6 +443,11 @@ public class ConstraintNamesTests
     /// （DDL はその関係に外部キーを作らないので、既定名を取らせると本物の外部キーが一意化した名前へずれる）
     /// </summary>
     /// <param name="kind">外部キーを作らない関係の種類</param>
+    /// <remarks>
+    /// 残す理由（P3-6）：外部キー名の解決の戻りにその関係が無いことと、NameUnnamedForeignKeys がその関係と 1 本目に名前を書かず 2 本目にだけ
+    /// 書くこと（純粋関数の契約）。同じ組の本物の外部キーが DDL で既定名を取り 2 本目が子の列名つきになることは、方言の DDL の表の行
+    /// <c>ddl-fk-unnamed-non-fk-relationship-first-*</c>（3 種）へ移した
+    /// </remarks>
     [Theory(DisplayName = "外部キーを作らない名前の無い関係は既定名を取らず、名前も求めない")]
     [InlineData("ManyToMany")]
     [InlineData("NoPairs")]
@@ -532,8 +466,6 @@ public class ConstraintNamesTests
         );
 
         names.Should().NotContainKey(other);
-        names[bill].Should().Be("FK_orders_customers");
-        names[ship].Should().Be("FK_orders_customers_ship_customer_id");
 
         ConstraintNames.NameUnnamedForeignKeys(
             [customers, orders],
@@ -546,28 +478,7 @@ public class ConstraintNamesTests
         ship.ConstraintName.Should().Be("FK_orders_customers_ship_customer_id");
     }
 
-    /// <summary>名前を持つ多対多は、外部キーを作らなくても名前を予約することを検証する</summary>
-    [Fact(DisplayName = "名前を持つ多対多は外部キーを作らなくても名前を予約する")]
-    public void ResolveForeignKeyNames_NamedManyToMany_StillReservesName()
-    {
-        var (customers, orders) = BuildCustomersAndOrders();
-        var manyToMany = new Relationship
-        {
-            SourceEntityId = customers.Id,
-            TargetEntityId = orders.Id,
-            Type = RelationshipType.ManyToMany,
-            ConstraintName = "FK_orders_customers",
-        };
-        var bill = Link(customers, orders, "bill_customer_id");
-
-        var names = ConstraintNames.ResolveForeignKeyNames(
-            [customers, orders],
-            [manyToMany, bill],
-            IdentifierLengthLimit.Unlimited
-        );
-
-        names[bill].Should().Be("FK_orders_customers_bill_customer_id");
-    }
+    // 名前を持つ多対多が外部キーを作らなくても名前を予約することは、方言の DDL の表の行 ddl-fk-named-many-to-many-reserves-name が固定する
 
     /// <summary>既存の制約名の収集も、外部キーを作らない名前の無い関係の既定名を数えないことを検証する</summary>
     /// <param name="kind">外部キーを作らない関係の種類</param>
@@ -611,9 +522,11 @@ public class ConstraintNamesTests
         relationship.ConstraintName.Should().BeNull();
     }
 
-    [Fact(
-        DisplayName = "外部キー名の解決は、名前の無い同じ組の 2 本目を一意化し、図は書き換えない"
-    )]
+    /// <remarks>
+    /// 残す理由（P3-6）：名前を求めるだけで図の ConstraintName に書かないこと（副作用なし）。求めた 3 つの名前は方言の DDL の表の行
+    /// <c>ddl-fk-unnamed-same-pair-twice-with-named-third</c> へ移した
+    /// </remarks>
+    [Fact(DisplayName = "外部キー名の解決は名前を求めるだけで、図は書き換えない")]
     public void ResolveForeignKeyNames_SamePairTwice_UniqueWithoutMutation()
     {
         var (customers, orders) = BuildCustomersAndOrders();
@@ -621,15 +534,12 @@ public class ConstraintNamesTests
         var ship = Link(customers, orders, "ship_customer_id");
         var named = Link(customers, orders, "ship_customer_id", name: "FK_custom");
 
-        var names = ConstraintNames.ResolveForeignKeyNames(
+        ConstraintNames.ResolveForeignKeyNames(
             [customers, orders],
             [bill, ship, named],
             IdentifierLengthLimit.Unlimited
         );
 
-        names[bill].Should().Be("FK_orders_customers");
-        names[ship].Should().Be("FK_orders_customers_ship_customer_id");
-        names[named].Should().Be("FK_custom");
         bill.ConstraintName.Should().BeNull();
         ship.ConstraintName.Should().BeNull("名前を求めるだけで、図には書き込まない");
     }

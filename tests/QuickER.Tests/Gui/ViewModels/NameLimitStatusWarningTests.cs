@@ -114,84 +114,165 @@ public class NameLimitStatusWarningTests
         return vm;
     }
 
-    [Fact(DisplayName = "テーブル名が対象 DBMS の上限を超えると警告し、値は受け付ける")]
-    public void TableName_OverLimit_WarnsAndKeepsValue()
+    /// <summary>確定した名前に対するステータスバーの期待の形</summary>
+    public enum StatusExpectation
     {
-        var vm = CreateVm("postgresql");
-        var name = Over(PostgreSql);
+        /// <summary>通知が期待の文と完全に一致する</summary>
+        Exact,
 
+        /// <summary>通知が期待の断片をすべて含む</summary>
+        Contains,
+
+        /// <summary>通知が変わらない（警告しない）</summary>
+        Unchanged,
+    }
+
+    /// <summary>
+    /// 名前の確定の 1 行（対象 DBMS・確定する場所・名前・期待の形と断片）
+    /// </summary>
+    /// <param name="Id">行の名前</param>
+    /// <param name="Dbms">図の対象 DBMS</param>
+    /// <param name="Edit">VM の名前を確定する（<see cref="CreateVm"/> の図の場所）</param>
+    /// <param name="Read">確定した場所の名前を読み戻す</param>
+    /// <param name="Name">確定する名前</param>
+    /// <param name="Expectation">期待の形</param>
+    /// <param name="Fragments">完全一致の文（Exact は 1 つ）か、含む断片（Contains）</param>
+    public sealed record NameEditRow(
+        string Id,
+        string Dbms,
+        Action<MainViewModel, string> Edit,
+        Func<MainViewModel, string?> Read,
+        string Name,
+        StatusExpectation Expectation,
+        params string[] Fragments
+    )
+    {
+        public override string ToString() => Id;
+    }
+
+    private static void SetTableName(MainViewModel vm, string name) =>
         vm.Entities[1].TableName = name;
 
-        vm.Entities[1].TableName.Should().Be(name);
-        vm.StatusMessage.Should().Contain(name).And.Contain("63").And.Contain("postgresql");
-    }
+    private static string? GetTableName(MainViewModel vm) => vm.Entities[1].TableName;
 
-    [Fact(DisplayName = "カラム名が対象 DBMS の上限を超えると警告する")]
-    public void ColumnName_OverLimit_Warns()
-    {
-        var vm = CreateVm("postgresql");
+    private static void SetColumnName(MainViewModel vm, string name) =>
+        vm.Entities[1].Columns[1].Name = name;
 
-        vm.Entities[1].Columns[1].Name = Over(PostgreSql);
+    private static string? GetColumnName(MainViewModel vm) => vm.Entities[1].Columns[1].Name;
 
-        vm.StatusMessage.Should().Contain("63");
-    }
+    /// <summary>名前の確定の行（4 種類の名前の上限超え・上限ちょうど・上限なし・MySQL の表せない文字とファイル名）</summary>
+    public static TheoryData<NameEditRow> NameEditRows =>
+        new()
+        {
+            new NameEditRow(
+                "table-name-over-limit",
+                "postgresql",
+                SetTableName,
+                GetTableName,
+                Over(PostgreSql),
+                StatusExpectation.Contains,
+                Over(PostgreSql),
+                "63",
+                "postgresql"
+            ),
+            new NameEditRow(
+                "column-name-over-limit",
+                "postgresql",
+                SetColumnName,
+                GetColumnName,
+                Over(PostgreSql),
+                StatusExpectation.Contains,
+                "63"
+            ),
+            new NameEditRow(
+                "foreign-key-name-over-limit",
+                "postgresql",
+                (vm, name) => vm.Relationships[0].ConstraintName = name,
+                vm => vm.Relationships[0].ConstraintName,
+                Over(PostgreSql),
+                StatusExpectation.Contains,
+                "63"
+            ),
+            new NameEditRow(
+                "unique-constraint-name-over-limit",
+                "postgresql",
+                (vm, name) => vm.Entities[1].UniqueConstraints[0].Name = name,
+                vm => vm.Entities[1].UniqueConstraints[0].Name,
+                Over(PostgreSql),
+                StatusExpectation.Contains,
+                "63"
+            ),
+            // 上限ちょうどの名前は警告しない
+            new NameEditRow(
+                "within-limit-postgresql",
+                "postgresql",
+                SetTableName,
+                GetTableName,
+                new string('a', PostgreSql.Max),
+                StatusExpectation.Unchanged
+            ),
+            // 上限なしの対象 DBMS では警告しない
+            new NameEditRow(
+                "unlimited-sqlite",
+                "sqlite",
+                SetTableName,
+                GetTableName,
+                new string('a', 500),
+                StatusExpectation.Unchanged
+            ),
+            // MySQL では BMP の外の文字を含む名前を、表せない文字として警告する
+            new NameEditRow(
+                "mysql-supplementary-character",
+                "mysql",
+                SetColumnName,
+                GetColumnName,
+                EmojiName,
+                StatusExpectation.Exact,
+                string.Format(Strings.Status_NameNotRepresentable, EmojiName, "mysql")
+            ),
+            // MySQL のテーブル名は、ファイル名での長さを超えても警告する（51 文字の漢字）
+            new NameEditRow(
+                "mysql-table-file-name",
+                "mysql",
+                SetTableName,
+                GetTableName,
+                new string(char.ConvertFromUtf32(0x8868)[0], 51),
+                StatusExpectation.Contains,
+                "251"
+            ),
+        };
 
-    [Fact(DisplayName = "外部キーの制約名が対象 DBMS の上限を超えると警告する")]
-    public void ForeignKeyName_OverLimit_Warns()
-    {
-        var vm = CreateVm("postgresql");
-
-        vm.Relationships[0].ConstraintName = Over(PostgreSql);
-
-        vm.StatusMessage.Should().Contain("63");
-    }
-
-    [Fact(DisplayName = "一意制約の名前が対象 DBMS の上限を超えると警告する")]
-    public void UniqueConstraintName_OverLimit_Warns()
-    {
-        var vm = CreateVm("postgresql");
-
-        vm.Entities[1].UniqueConstraints[0].Name = Over(PostgreSql);
-
-        vm.StatusMessage.Should().Contain("63");
-    }
-
-    [Fact(DisplayName = "上限ちょうどの名前・上限なしの対象 DBMS では警告しない")]
-    public void WithinLimit_DoesNotWarn()
-    {
-        var vm = CreateVm("postgresql");
-        var ready = vm.StatusMessage;
-        vm.Entities[1].TableName = new string('a', PostgreSql.Max);
-
-        vm.StatusMessage.Should().Be(ready);
-
-        var sqlite = CreateVm("sqlite");
-        sqlite.Entities[1].TableName = new string('a', 500);
-
-        sqlite.StatusMessage.Should().Be(ready);
-    }
-
-    [Fact(DisplayName = "MySQL では BMP の外の文字を含む名前を、表せない文字として警告する")]
-    public void MySql_SupplementaryCharacter_WarnsAsUnrepresentable()
-    {
-        var vm = CreateVm("mysql");
-
-        vm.Entities[1].Columns[1].Name = EmojiName;
-
-        vm.StatusMessage.Should()
-            .Be(string.Format(Strings.Status_NameNotRepresentable, EmojiName, "mysql"));
-    }
-
-    [Fact(
-        DisplayName = "MySQL のテーブル名は、ファイル名での長さを超えても警告する（51 文字の漢字）"
+    [Theory(
+        DisplayName = "名前を確定すると、対象 DBMS が受け付けない名前なら警告し（受け付ける名前なら通知を変えず）、値は受け付ける"
     )]
-    public void MySql_TableFileName_Warns()
+    [MemberData(nameof(NameEditRows))]
+    public void NameEdit_WarnsWhenTheTargetRefuses(NameEditRow row)
     {
-        var vm = CreateVm("mysql");
+        var vm = CreateVm(row.Dbms);
+        var ready = vm.StatusMessage;
 
-        vm.Entities[1].TableName = new string(char.ConvertFromUtf32(0x8868)[0], 51);
+        row.Edit(vm, row.Name);
 
-        vm.StatusMessage.Should().Contain("251");
+        row.Read(vm).Should().Be(row.Name, "値は受け付ける");
+
+        switch (row.Expectation)
+        {
+            case StatusExpectation.Exact:
+                vm.StatusMessage.Should().Be(row.Fragments.Single());
+                break;
+
+            case StatusExpectation.Contains:
+                foreach (var fragment in row.Fragments)
+                {
+                    vm.StatusMessage.Should().Contain(fragment);
+                }
+
+                break;
+
+            case StatusExpectation.Unchanged:
+                vm.StatusMessage.Should().Be(ready);
+                break;
+        }
     }
 
     [Fact(DisplayName = "元に戻す・やり直すでは警告しない")]

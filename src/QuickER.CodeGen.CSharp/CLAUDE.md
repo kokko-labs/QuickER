@@ -468,7 +468,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
   - 大小を区別せずに比べると、表ごとに綴りの違う列（`user_id` と `userid`）の値オブジェクトを理由なく断る
   - ルート名はリモートを生成しない構成でも止める（後からリモートを有効にしても図が壊れない）
 - 名簿 `ForTable` は生成器の命名規則の写しなので、`GeneratedTypeNameDriftTests` が実際の出力と一致し続けることを固定する
-- ガード：`GeneratedTypeNameCollisionTests`・`CodegenCaseTests` の行 `diag-type-name-collision-singular-plural`。mutation 実証済み
+- ガード：`CodegenCaseTests` の行 `diag-type-name-collision-*`（表 `order` とぶつかる 8 つの表 × 出力の形 3 つ＝1 ファイル・分割・層別。`diag-type-name-collision-singular-plural` も）・`diag-type-name-reserved-*`（固定の型名・出力の形 3 つ）・`diag-type-name-route-case-collision-*`（出力の形 3 つ。エラーだけで警告を重ねない）・`diag-type-name-case-only-warning`（大小違いの警告がちょうど 1 件で、生成物はコンパイルできる）・`diag-type-name-not-warned-*`・`compile-type-names-distinct-*`（ぶつからない組は出力の形 3 つとも診断なしでコンパイルできる）。mutation 実証済み
 
 ### エンティティのメンバー名の大文字小文字
 
@@ -481,7 +481,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 - 列・ナビゲーション・基底の公開プロパティ：ビルダーの `ReportCaseOnlyMemberNames` が、綴りの違う組だけを `CodeGen_Error_GeneratedMemberNamesDifferOnlyInCase` で止める。綴りまで同じものは従来の Ordinal の検査の担当
   - 基底の公開プロパティの名簿は `GeneratedFixedMemberNames.EntityJsonVisibleBase`（`RowState`・`IsAdded`・`IsUpdated`・`IsRemoved`・`HasChanges`・`DisplayName`）
 - EditModel は JSON で読み書きしないので Ordinal のまま
-- ガード：`GeneratedMemberNameCaseTests`（大小だけ違う列・列とナビゲーション・基底の 3 名 × リモートあり・なしでエラー、同じ表の大小違いの列は警告を重ねない、EditModel だけの大小違いは診断なしでコンパイル、診断の無い図は実際の Kestrel のリモートで全エンティティを書いて読み戻せる。型名側の `sql_parameter` と `sqlparameter` の行も同じ）・`GeneratedTypeNameCollisionTests` の「エラーになる組は重ねて警告しない」・`GeneratedFixedMemberDriftTests`（基底の名簿の一致）・`NameFuzzCompilationTests` の SqlServerFull の実行時の段（`GeneratedRuntimeProbe`＝読み込んだ生成物で全エンティティを両方の JSON の設定で組み立て、エンドポイントを登録して、同じ HTTP メソッドで大小だけ違うパターンを探す。種に依らず `i_d`・`rowstate`・`case_route`・`caseroute` を置く）。mutation 実証済み
+- ガード：`CodegenCaseTests` の行 `diag-member-name-case-only-*`（大小だけ違う列・列とナビゲーション・基底の 3 名 × 構成 2 つ＝リモートあり・なしでエラー。構成 full の列の行は、エラーだけで値オブジェクトの型名の大小違いの警告を重ねないことも見る）・`compile-member-name-case-editmodel-only`（EditModel だけの大小違いは診断なしでコンパイル）・`diag-type-name-refused-pair-not-warned-reserved`（型名側の `sql_parameter` と `sqlparameter` もエラーだけで警告を重ねない）・`GeneratedMemberNameCaseTests`（診断の無い図は実際の Kestrel のリモートで全エンティティを書いて読み戻せる）・`GeneratedFixedMemberDriftTests`（基底の名簿の一致）・`NameFuzzCompilationTests` の SqlServerFull の実行時の段（`GeneratedRuntimeProbe`＝読み込んだ生成物で全エンティティを両方の JSON の設定で組み立て、エンドポイントを登録して、同じ HTTP メソッドで大小だけ違うパターンを探す。種に依らず `i_d`・`rowstate`・`case_route`・`caseroute` を置く）。mutation 実証済み
 
 ### ナビゲーション名と外部キーの重複
 
@@ -509,7 +509,8 @@ SQL 側（動的 SQL・`--` コメント・型文字列・名前の入口検証�
   - 同期 SQL の識別子は `CSharpGenerationModelBuilder.Sync.QuoteIdentifier`（終端クォート二重化）を通す
 - 改行の畳み込みは、`ReplaceLineEndings` が改行にする集合全部（CR / LF / NEL U+0085 / FF U+000C / U+2028 / U+2029）を対象にする（`FoldNewLines`）
   - C# 言語仕様の new-line 5 種に絞ると、描画後のレンダラーの `ReplaceLineEndings` が FF を実改行へ変え、説明 1 つで XmlDoc・リテラルが行をまたぐ
-  - ガード：`NameTrustBoundaryGenerationTests` の FORM FEED テスト（Roslyn 実コンパイル＋診断＋ XmlDoc の XML エスケープ）
+  - ガード：`CodegenCaseTests` の行 `code-xmldoc-form-feed-collapses-and-no-injected-member`（説明の出口＝XmlDoc・`[DbColumnMeta]` の引数・EditModel の表示名のリテラルが畳んだ 1 行のまま残り、注入した名前のメンバーがどこにも無く、コンパイルできる）・`NameTrustBoundaryGenerationTests`（生成テキストのどのファイルにも生の FF が残らない）
+- ガード：`CodegenCaseTests` の行 `compile-name-quoted-backslash`（`"` と `\` を含む表・列・一意制約・外部キーの名前で、`[Table]` / `[Column]` / `[UniqueConstraint]` / `[NavigationReference]` の引数の定数値が名前と完全一致し、コンパイルできる）・`model-efcore-quoted-names-escaped`（EF Core のモデルの表名・列名が名前と完全一致）・`compile-name-braces-inmemory-seed`（波括弧の列名のインメモリのシードがコンパイルでき、値を作れる）
 
 ### 文字列リテラルへ書く規則の正本
 
@@ -526,11 +527,11 @@ SQL 側（動的 SQL・`--` コメント・型文字列・名前の入口検証�
   - `CSharpClassModel.TableNameXmlDoc` / `CSharpPropertyModel.ColumnNameXmlDoc` / `CSharpValueObjectModel.ColumnNameXmlDoc` / `CSharpEditModelClassModel.TableNameXmlDoc` / `CSharpSyncTableModel.TableNameXmlDoc`
   - テンプレートの `*_xml_doc` 参照サイトは 6 か所（`_01` VO・`_02` Entity とプロパティ・`_03` EditModel・`_07` インメモリシーダー・`_10` 同期記述子）。同期記述子の 1 か所だけは、説明が無いときのフォールバックでなく無条件文
 - C# リテラル用のエスケープを XmlDoc へ流用すると、`<` が生のまま残って CS1570 になる。生のまま流すと、U+2028 で `///` 行を抜けて任意の C# を注入できる
-- ガード：`NameTrustBoundaryGenerationTests`
+- ガード：`CodegenCaseTests` の行 `code-xmldoc-name-angle-bracket-fallback`（説明フォールバックの Entity クラス・Entity プロパティ・値オブジェクト・EditModel クラス・インメモリのシーダーの XmlDoc の完全一致）・`code-xmldoc-stream-accessor-name-angle-bracket`（Stream アクセサの契約・ファイル糖衣の定型文）。どちらもコンパイルし、CS1570 は警告 0 の判定が拾う
 
 ### 名前の制御文字の生成前診断
 
 - C# 生成側は `ValidateNameControlCharacters`（生成前診断 Error）で、テーブル名・列名・制約名の改行・制御文字を断る
 - `IsControlCharacter` は Provider 側の判定（`SqlComment.ContainsControlCharacter`）と意図的に二重定義している。依存方向が Provider → CodeGen.CSharp のため。片方だけ変えない
 - 説明は対象外（改行が正当）
-- ガード：`NameTrustBoundaryGenerationTests`（Roslyn 実コンパイル＋診断）
+- ガード：`CodegenCaseTests` の行 `diag-name-control-character-*`（表・列・一意制約・外部キー・クエリの改行 5 か所と、列名の NEL / LINE SEPARATOR / PARAGRAPH SEPARATOR の 3 つ）・`compile-name-quoted-backslash`（クォートを含むだけの名前は制御文字の診断にしない）

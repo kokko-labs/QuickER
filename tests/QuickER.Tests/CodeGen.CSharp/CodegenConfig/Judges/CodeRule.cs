@@ -120,6 +120,30 @@ internal abstract record CodeRule
     public static CodeRule NoMemberInHierarchy(string type, string member) =>
         new NoMemberInHierarchyRule(type, member);
 
+    /// <summary>
+    /// 型 <paramref name="type"/> のメソッド <paramref name="member"/> と、型 <paramref name="otherType"/> のメソッド
+    /// <paramref name="otherMember"/> の本体（ブロックか式の本体）が、構文として等価（<c>SyntaxFactory.AreEquivalent</c>。
+    /// 空白・コメントは見ない）。どちらもちょうど 1 つの宣言を持つこと
+    /// </summary>
+    /// <remarks>
+    /// 同じ条件の訳し方を 2 つの実装（QuickER 版と EF Core 版・方言ごとの Repository）が共有することを、本体のテキストの部分一致でなく
+    /// 構文木で言う。
+    /// </remarks>
+    /// <param name="type">型の単純名</param>
+    /// <param name="member">メソッド名</param>
+    /// <param name="otherType">比べる型の単純名</param>
+    /// <param name="otherMember">比べるメソッド名</param>
+    /// <param name="ns">型の名前空間</param>
+    /// <param name="otherNs">比べる型の名前空間</param>
+    public static CodeRule SameBody(
+        string type,
+        string member,
+        string otherType,
+        string otherMember,
+        string? ns = null,
+        string? otherNs = null
+    ) => new SameBodyRule(type, member, ns, otherType, otherMember, otherNs);
+
     // ===== 属性 =====
 
     /// <summary>
@@ -676,6 +700,81 @@ internal abstract record CodeRule
                     yield return $"コード: {TypeName} の継承の鎖の {current.Name} がメンバー {MemberName} を宣言する";
                 }
             }
+        }
+    }
+
+    private sealed record SameBodyRule(
+        string TypeName,
+        string MemberName,
+        string? Ns,
+        string OtherTypeName,
+        string OtherMemberName,
+        string? OtherNs
+    ) : CodeRule
+    {
+        public override IEnumerable<string> Check(CodeRuleContext context)
+        {
+            var label = $"{TypeName}.{MemberName} と {OtherTypeName}.{OtherMemberName}";
+            var body = Body(context, TypeName, MemberName, Ns, out var problem);
+
+            if (body is null)
+            {
+                yield return problem;
+                yield break;
+            }
+
+            var other = Body(context, OtherTypeName, OtherMemberName, OtherNs, out problem);
+
+            if (other is null)
+            {
+                yield return problem;
+                yield break;
+            }
+
+            if (!SyntaxFactory.AreEquivalent(body, other, topLevel: false))
+            {
+                yield return $"コード: {label} の本体が構文として等価でない（{body.NormalizeWhitespace().ToFullString()} ／ {other.NormalizeWhitespace().ToFullString()}）";
+            }
+        }
+
+        /// <summary>メソッドの本体（ブロックか式の本体）。宣言がちょうど 1 つでなければ null と問題の文</summary>
+        private static SyntaxNode? Body(
+            CodeRuleContext context,
+            string typeName,
+            string memberName,
+            string? ns,
+            out string problem
+        )
+        {
+            if (!context.TryGetType(typeName, ns, out var type, out problem))
+            {
+                return null;
+            }
+
+            var declarations = type.GetMembers(memberName)
+                .Where(member => !member.IsImplicitlyDeclared)
+                .SelectMany(member => member.DeclaringSyntaxReferences)
+                .Select(reference => reference.GetSyntax())
+                .OfType<MethodDeclarationSyntax>()
+                .ToList();
+
+            if (declarations.Count != 1)
+            {
+                problem = string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"コード: {typeName}.{memberName} のメソッドの宣言が {declarations.Count} 個（ちょうど 1 つに決まること）"
+                );
+                return null;
+            }
+
+            SyntaxNode? body = (SyntaxNode?)declarations[0].Body ?? declarations[0].ExpressionBody;
+
+            if (body is null)
+            {
+                problem = $"コード: {typeName}.{memberName} に本体が無い";
+            }
+
+            return body;
         }
     }
 
