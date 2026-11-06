@@ -58,6 +58,9 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
         // あわせて方言の上限を超える名前・方言が表せない文字を含む名前も、場所を名指しして止める
         SqlNameText.Validate(plan, IdentifierLimit);
 
+        // 列の無い表を作る項目も止める（計画は列の無い表の追加を外すので、計画を経ずに組んだ計画への二重の守り）
+        SqlTableShape.Validate(plan);
+
         // 空の計画は空文字列（実行側は空スクリプトを no-op として COMMIT する）
         if (plan.Sections.Count == 0 && plan.Rebuilds.Count == 0)
         {

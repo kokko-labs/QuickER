@@ -12,7 +12,7 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 /// <summary>
 /// 計画の段の期待の行（主キー・一意制約の構成列の削除を、それを前提にする変更を選ばずに選んだとき：主キーの列の削除は、その列を
 /// 外す主キーの変更を選んだときだけ行い、選ばなければ外して名指しする。一意制約の構成列の削除は、その一意制約を暗黙に外して名指し
-/// する。表の列が 1 本も残らない列の削除は外す）
+/// する。表の列が 1 本も残らない列の削除は外す。図で列の無い表の追加は外す）
 /// </summary>
 internal static partial class SyncPlanExpectationRows
 {
@@ -242,7 +242,69 @@ internal static partial class SyncPlanExpectationRows
                             }
                         })
             ),
+            // 見る面は計画（差分・項目・セクション・再構築・外した項目・警告）。同期スクリプトの文の面は方言の DDL の表の行
+            // sync-add-table-without-columns-is-excluded-with-warning（DialectDdlTableTests）が見る
+            Row(
+                    "plan-add-table-without-columns-is-excluded-with-warning",
+                    "表の追加: 図で列の無い表の追加は外して名指しし（方言に依らない）、ほかの表の追加はそのまま計画する",
+                    [C.Neutral, .. AllDialects]
+                )
+                .Live(s => TableWithoutColumnsLive(s, "int"))
+                .Target(s => TableWithoutColumnsTarget(s, "int"))
+                .Expect(e =>
+                {
+                    e.Diff.Contains("AddTable orders *", "AddTable empty *")
+                        .Items.Absent("* AddTable empty *", "* SetTableDescription empty *")
+                        .Rebuilds.Absent("empty *");
+
+                    // 逐次 DDL の方言（と中立）は表の追加のセクションに orders だけを置き、外した表の追加を前提にする表の説明も
+                    // 外して名指しする。SQLite は orders を作るだけの再構築にする（説明を持たないので説明の項目は無い）
+                    foreach (
+                        var capability in (string[])
+                            [C.Neutral, .. SequentialDropMemberColumnDialects]
+                    )
+                    {
+                        e.For(
+                            capability,
+                            d =>
+                                d.Sections.Exact("AddTable: AddTable orders")
+                                    .Warnings.Unordered(
+                                        "TableWithoutColumns(empty)",
+                                        "SelectedItemRequiresUnselectedItem(empty): COMMENT (*)"
+                                    )
+                                    .Excluded.Unordered(
+                                        "AddTable empty",
+                                        "SetTableDescription empty"
+                                    )
+                        );
+                    }
+
+                    e.For(
+                        DialectNames.Sqlite,
+                        d =>
+                            d.Sections.Empty()
+                                .Rebuilds.Contains("orders cols *")
+                                .Warnings.Exact("TableWithoutColumns(empty)")
+                                .Excluded.Exact("AddTable empty")
+                    );
+                }),
         ];
+
+    /// <summary>DB 側の図: a(id PK)</summary>
+    /// <param name="s">図</param>
+    /// <param name="intType">整数型の綴り（実 DB の段は方言の取り込み直した綴り）</param>
+    private static void TableWithoutColumnsLive(S s, string intType) =>
+        s.Table("a", S.Pk("id", intType));
+
+    /// <summary>目標の図: a(id PK)・orders(id PK)・説明を持つ列の無い表 empty</summary>
+    /// <param name="s">図</param>
+    /// <param name="intType">整数型の綴り（実 DB の段は方言の取り込み直した綴り）</param>
+    private static void TableWithoutColumnsTarget(S s, string intType)
+    {
+        s.Table("a", S.Pk("id", intType));
+        s.Table("orders", S.Pk("id", intType));
+        s.Table("empty").Description = "no columns yet";
+    }
 
     /// <summary>逐次 DDL の 4 方言</summary>
     private static string[] SequentialDropMemberColumnDialects =>

@@ -503,10 +503,11 @@ public sealed class CSharpGenerationDialogViewModelTests : IDisposable
     }
 
     /// <summary>
-    /// サーバー層フォルダの欄は「層別出力 ON かつリモートサービス生成 ON」のときだけ表示されることを検証する
-    /// （サーバー層へ出るのはリモートサーバー実装だけのため）
+    /// サーバー層フォルダの欄は「層別出力 ON かつリモートサービスを実際に生成する（HTTP 実装のチェックが画面に出ていて入っている）」
+    /// ときだけ表示されることを検証する（サーバー層へ出るのはリモートサーバー実装だけのため）。DB アクセス「なし」で HTTP 実装の
+    /// 行が隠れたら、チェックが入ったままでも欄は隠れて変更が通知され、DB アクセスを選び直すと再び出る
     /// </summary>
-    [Fact(DisplayName = "サーバー層フォルダ欄はリモートサービス生成 ON のときだけ表示される")]
+    [Fact(DisplayName = "サーバー層フォルダ欄はリモートサービスを実際に生成するときだけ表示される")]
     public void ShowServerLayerDirectory_TracksRemoteServices()
     {
         var vm = CreateViewModel(
@@ -524,6 +525,20 @@ public sealed class CSharpGenerationDialogViewModelTests : IDisposable
 
         vm.GenerateRemoteServices = true;
         vm.ShowServerLayerDirectory.Should().BeTrue("リモートサービス生成 ON で表示する");
+
+        var changed = new List<string?>();
+        vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        vm.DbAccessNone = true;
+        vm.GenerateRemoteServices.Should()
+            .BeTrue("隠れた HTTP 実装のチェックは画面の値として保持する");
+        vm.ShowServerLayerDirectory.Should()
+            .BeFalse("DB アクセス「なし」で HTTP 実装の行が隠れたら生成しないので、欄も隠れる");
+        changed.Should().Contain(nameof(vm.ShowServerLayerDirectory), "欄の表示の変更を通知する");
+
+        vm.DbAccessRepository = true;
+        vm.ShowServerLayerDirectory.Should()
+            .BeTrue("DB アクセスを選び直して HTTP 実装の行が出ると、欄も再び出る");
 
         vm.GenerateRemoteServices = false;
         vm.ShowServerLayerDirectory.Should().BeFalse("OFF に戻すと隠れる");

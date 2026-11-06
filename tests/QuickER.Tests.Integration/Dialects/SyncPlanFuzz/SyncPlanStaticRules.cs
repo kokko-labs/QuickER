@@ -64,7 +64,7 @@ internal static class SyncPlanStaticRules
 {
     /// <summary>
     /// 失敗を予告しない種類の警告（項目を計画から外した・再構築の属性の喪失・列の削除に伴う一意制約の削除・説明の文字の置き換え・
-    /// 列の残らない表の列の削除を外した）
+    /// 列の残らない表の列の削除を外した・列の無い表の追加を外した）
     /// </summary>
     public static readonly IReadOnlySet<SyncPlanWarningKind> NonPredictingWarnings =
         new HashSet<SyncPlanWarningKind>
@@ -75,6 +75,7 @@ internal static class SyncPlanStaticRules
             SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey,
             SyncPlanWarningKind.DescriptionCharactersReplaced,
             SyncPlanWarningKind.TableLeftWithoutColumns,
+            SyncPlanWarningKind.TableWithoutColumns,
         };
 
     /// <summary>計画を規則で判定する</summary>
