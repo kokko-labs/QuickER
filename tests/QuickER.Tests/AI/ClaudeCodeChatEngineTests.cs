@@ -115,33 +115,12 @@ public class ClaudeCodeChatEngineTests
         await engine.DisposeAsync();
     }
 
-    /// <summary>2 ターン目に前ターンのセッション ID が継続（resume）として渡されることを検証する</summary>
-    [Fact(DisplayName = "2 ターン目は前ターンのセッション ID を resume へ渡す")]
-    public async Task SendAsync_SecondTurn_PassesResumeSessionId()
-    {
-        var client = new FakeClaudeCodeClient();
-        client.Outcomes.Enqueue(new ClaudeCodeTurnOutcome(true, null, "s1", false));
-        client.Outcomes.Enqueue(new ClaudeCodeTurnOutcome(true, null, "s2", false));
-        var engine = CreateEngine(client);
-
-        await engine.InitializeAsync(TestContext.Current.CancellationToken);
-        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
-        await engine.SendAsync("1 回目", TestContext.Current.CancellationToken);
-        await engine.SendAsync("2 回目", TestContext.Current.CancellationToken);
-
-        client.ResumeSessionIdsAtCall.Should().Equal(new string?[] { null, "s1" });
-
-        await engine.DisposeAsync();
-    }
-
     /// <summary>未ログイン以外の失敗を、ターン失敗の要約と、詳細の行の原因で表示することを検証する</summary>
-    /// <param name="reported">クライアントが返した原因（null・空・汎用文言なら詳細の行を付けない）</param>
+    /// <param name="reported">クライアントが返した原因（空・汎用文言なら詳細の行を付けない）</param>
     /// <param name="expectDetail">詳細の行に原因を添えるか</param>
     [Theory(
         DisplayName = "未ログイン以外の失敗は要約に原因を詳細として添える（汎用文言・空は要約だけ）"
     )]
-    [InlineData("Claude Code exited with an error (exit code: 1).", true)]
-    [InlineData(null, false)]
     [InlineData("", false)]
     [InlineData("<generic>", false)]
     public async Task SendAsync_ReportedFailure_IsSummaryWithDetail(
@@ -172,69 +151,6 @@ public class ClaudeCodeChatEngineTests
                         + error
                     : Strings.ClaudeCode_TurnFailed
             );
-
-        await engine.DisposeAsync();
-    }
-
-    /// <summary>ターンの実行が例外を投げたら、要約に例外の文言を詳細として添えた失敗で完了することを検証する</summary>
-    [Fact(DisplayName = "ターンの例外は要約＋詳細の失敗として完了する")]
-    public async Task SendAsync_RunThrows_IsSummaryWithDetail()
-    {
-        var client = new FakeClaudeCodeClient
-        {
-            RunException = new InvalidOperationException("The system cannot find the file"),
-        };
-        var engine = CreateEngine(client);
-
-        ErChatTurnResult? completed = null;
-        engine.TurnCompleted += (_, r) => completed = r;
-
-        await engine.InitializeAsync(TestContext.Current.CancellationToken);
-        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
-        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
-
-        completed!.Value.Success.Should().BeFalse();
-        completed!
-            .Value.Error.Should()
-            .Be(
-                Strings.ClaudeCode_TurnFailed
-                    + Environment.NewLine
-                    + Strings.Ai_DetailLabel
-                    + "The system cannot find the file"
-            );
-
-        await engine.DisposeAsync();
-    }
-
-    /// <summary>利用者の中断（自分のトークンが立つ）は、原因の無い失敗でも無音の中断として完了することを検証する</summary>
-    /// <param name="throwCancellation">ターンの実行が取り消しの例外を投げるか（false なら原因なしの失敗を返す）</param>
-    [Theory(DisplayName = "利用者の中断はエラー文言なしで完了する")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task SendAsync_UserInterrupt_CompletesSilently(bool throwCancellation)
-    {
-        var client = new FakeClaudeCodeClient();
-        client.Outcomes.Enqueue(new ClaudeCodeTurnOutcome(false, null, null, false));
-        var engine = CreateEngine(client);
-        client.DuringRun = () =>
-        {
-            engine.InterruptAsync().GetAwaiter().GetResult();
-
-            if (throwCancellation)
-            {
-                throw new OperationCanceledException();
-            }
-        };
-
-        ErChatTurnResult? completed = null;
-        engine.TurnCompleted += (_, r) => completed = r;
-
-        await engine.InitializeAsync(TestContext.Current.CancellationToken);
-        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
-        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
-
-        completed!.Value.Success.Should().BeFalse();
-        completed!.Value.Error.Should().BeNull();
 
         await engine.DisposeAsync();
     }
@@ -305,21 +221,6 @@ public class ClaudeCodeChatEngineTests
             .Be(Strings.ClaudeCode_TurnNotLoggedIn);
     }
 
-    /// <summary>claude が見つからない場合は未準備となることを検証する</summary>
-    [Fact(DisplayName = "claude 未インストール時は IsReady が false")]
-    public async Task Initialize_WhenUnavailable_NotReady()
-    {
-        var client = new FakeClaudeCodeClient { Available = false };
-        var engine = CreateEngine(client);
-
-        await engine.InitializeAsync(TestContext.Current.CancellationToken);
-
-        engine.IsReady.Should().BeFalse();
-        engine.StatusSummary.Should().Be(Strings.ClaudeCode_Status_NotFound);
-
-        await engine.DisposeAsync();
-    }
-
     /// <summary>中断要求がクライアントへ伝わることを検証する</summary>
     [Fact(DisplayName = "Interrupt はクライアントへ中断を伝える")]
     public async Task Interrupt_DelegatesToClient()
@@ -333,61 +234,6 @@ public class ClaudeCodeChatEngineTests
         client.Interrupted.Should().BeTrue();
 
         await engine.DisposeAsync();
-    }
-
-    /// <summary>
-    /// ツールホストが例外を投げても、失敗のツール結果（Success=false）として返り、活動としても
-    /// 通知されることを検証する。ExecuteTool は MCP（DelegatingToolFunction 経由）からしか呼ばれず、
-    /// 素通しした例外の伝播先は MCP SDK 側の変換に委ねられる（実 MCP サーバー起動が要るため検証が重い）。
-    /// ここでは internal 化した ExecuteTool を直接呼び、Codex／Copilot と同じ「失敗のツール結果」の形で
-    /// 返すこと（例外を外へ伝播させないこと）だけを検証する。
-    /// </summary>
-    [Fact(DisplayName = "ツール実行の例外は失敗結果になる")]
-    public void ExecuteTool_ToolHostThrows_ReturnsFailureResult()
-    {
-        var client = new FakeClaudeCodeClient();
-        var toolHost = new ThrowingToolHost { Exception = new InvalidOperationException("boom") };
-        var engine = new ClaudeCodeChatEngine(
-            client,
-            toolHost,
-            new SyncUiDispatcher(),
-            ErDesignProfile.ErDesign
-        );
-
-        var activities = new List<ErChatToolActivity>();
-        engine.ToolActivityReceived += (_, a) => activities.Add(a);
-
-        var (result, success) = engine.ExecuteTool("add_entity", "{}");
-
-        success.Should().BeFalse();
-        result.Should().Contain("boom");
-        activities.Should().ContainSingle();
-        activities[0].ToolName.Should().Be("add_entity");
-        activities[0].Success.Should().BeFalse();
-        activities[0].Result.Should().Be(result);
-    }
-
-    /// <summary>
-    /// ToolActivityReceived の購読側が例外を投げても、実行結果（戻り値）は必ず返されることを検証する
-    /// （軽微 b: 活動通知は戻り値より先に呼ばれるため、素通しすると呼び出し元へ結果が返らずターンが詰まる）。
-    /// </summary>
-    [Fact(DisplayName = "活動通知の購読側の例外があっても実行結果は返される")]
-    public void ExecuteTool_ActivitySubscriberThrows_StillReturnsResult()
-    {
-        var client = new FakeClaudeCodeClient();
-        var toolHost = new RecordingToolHost();
-        var engine = new ClaudeCodeChatEngine(
-            client,
-            toolHost,
-            new SyncUiDispatcher(),
-            ErDesignProfile.ErDesign
-        );
-        engine.ToolActivityReceived += (_, _) => throw new InvalidOperationException("boom");
-
-        var (result, success) = engine.ExecuteTool("add_entity", "{}");
-
-        success.Should().BeTrue();
-        toolHost.Calls.Should().ContainSingle();
     }
 
     /// <summary>

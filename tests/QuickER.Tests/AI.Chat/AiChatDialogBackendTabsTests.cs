@@ -22,7 +22,7 @@ namespace QuickER.Tests.AI.Chat;
 /// 会話を消す確認のキャンセルでの巻き戻し）を検証するテストクラス（C2）。
 /// </summary>
 /// <remarks>
-/// VM 単体テスト（<see cref="AiChatDialogViewModelTests"/>）では XAML の束縛配線切れを検出できないため、
+/// VM の操作の列の表（<see cref="ChatDialogTests"/>）では XAML の束縛配線切れを検出できないため、
 /// 実ダイアログを画面外へ <c>Show</c> して見た目の面（<see cref="TabItem.IsEnabled"/>）を検証する
 /// （クリックが実際に無反応になるかどうかは WPF ランタイムの責務で、ここでは検証しない）。
 /// </remarks>
@@ -33,12 +33,11 @@ public class AiChatDialogBackendTabsTests
         public T Invoke<T>(Func<T> func) => func();
     }
 
-    private static (AiChatDialogViewModel vm, string folder) CreateVm(
-        IDialogService? dialogService = null,
-        string? folder = null
+    private static AiChatDialogViewModel CreateVm(
+        string folder,
+        IDialogService? dialogService = null
     )
     {
-        folder ??= Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
         var keyStore = new InMemoryApiKeyStore();
         var vm = new AiChatDialogViewModel(
             host: null,
@@ -49,46 +48,35 @@ public class AiChatDialogBackendTabsTests
             apiKeyLoader: keyStore.Load,
             apiKeySaver: keyStore.Save
         );
-        return (vm, folder);
+        return vm;
     }
 
     /// <summary>実ダイアログを画面外＋非アクティブで表示し、テスト本体を実行して閉じる</summary>
     private static void WithShownDialog(
         AiChatDialogViewModel vm,
-        string folder,
         Action<TabControl, List<TabItem>> body
     )
     {
+        var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
+            new AiChatDialog(vm, new RecordingShutdownFailureReporter())
+        );
+        dialog.WindowStartupLocation = WindowStartupLocation.Manual;
+        dialog.Left = -4000;
+        dialog.Top = -4000;
+        dialog.ShowActivated = false;
+        dialog.ShowInTaskbar = false;
+        dialog.Show();
+
         try
         {
-            var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
-                new AiChatDialog(vm, new RecordingShutdownFailureReporter())
-            );
-            dialog.WindowStartupLocation = WindowStartupLocation.Manual;
-            dialog.Left = -4000;
-            dialog.Top = -4000;
-            dialog.ShowActivated = false;
-            dialog.ShowInTaskbar = false;
-            dialog.Show();
-
-            try
-            {
-                dialog.UpdateLayout();
-                WpfApplicationTestSupport.DoEvents();
-                var tabControl = (TabControl)dialog.FindName("BackendTabs");
-                body(tabControl, tabControl.Items.Cast<TabItem>().ToList());
-            }
-            finally
-            {
-                dialog.Close();
-            }
+            dialog.UpdateLayout();
+            WpfApplicationTestSupport.DoEvents();
+            var tabControl = (TabControl)dialog.FindName("BackendTabs");
+            body(tabControl, tabControl.Items.Cast<TabItem>().ToList());
         }
         finally
         {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
+            dialog.Close();
         }
     }
 
@@ -146,18 +134,20 @@ public class AiChatDialogBackendTabsTests
     [Fact(DisplayName = "表示時に前回の接続方式のタブが選ばれ VM もその方式になる")]
     public void InitialBackend_IsShownOnLoad()
     {
+        using var temp = new TestTempFolder();
+        var folder = Path.Combine(temp.Path, "settings");
+
         WpfApplicationTestSupport.RunSta(() =>
         {
             WpfApplicationTestSupport.EnsureApplicationResources();
 
-            var (saver, folder) = CreateVm();
+            var saver = CreateVm(folder);
             saver.TryChangeBackend(ErChatBackendKind.Codex).Should().BeTrue();
             saver.SaveSettings();
-            var (vm, _) = CreateVm(folder: folder);
+            var vm = CreateVm(folder);
 
             WithShownDialog(
                 vm,
-                folder,
                 (tabControl, tabItems) =>
                 {
                     vm.Connection.SelectedBackend.Should().Be(ErChatBackendKind.Codex);
@@ -174,15 +164,17 @@ public class AiChatDialogBackendTabsTests
     [Fact(DisplayName = "タブの選択は選択変更の処理の後で VM の接続方式へ確定する")]
     public void SelectingTab_CommitsAfterSelectionChange()
     {
+        using var temp = new TestTempFolder();
+        var folder = Path.Combine(temp.Path, "settings");
+
         WpfApplicationTestSupport.RunSta(() =>
         {
             WpfApplicationTestSupport.EnsureApplicationResources();
 
-            var (vm, folder) = CreateVm(new PumpingConfirmDialogService(true));
+            var vm = CreateVm(folder, new PumpingConfirmDialogService(true));
 
             WithShownDialog(
                 vm,
-                folder,
                 (tabControl, tabItems) =>
                 {
                     SelectViaAutomation(tabControl, tabItems[1]);
@@ -206,16 +198,18 @@ public class AiChatDialogBackendTabsTests
     [Fact(DisplayName = "会話を消す確認のキャンセルでタブの表示が元の接続方式へ戻る")]
     public void ConfirmCancelled_RevertsTab()
     {
+        using var temp = new TestTempFolder();
+        var folder = Path.Combine(temp.Path, "settings");
+
         WpfApplicationTestSupport.RunSta(() =>
         {
             WpfApplicationTestSupport.EnsureApplicationResources();
 
             var dialogs = new PumpingConfirmDialogService(false);
-            var (vm, folder) = CreateVm(dialogs);
+            var vm = CreateVm(folder, dialogs);
 
             WithShownDialog(
                 vm,
-                folder,
                 (tabControl, tabItems) =>
                 {
                     vm.Messages.Add(
@@ -238,16 +232,18 @@ public class AiChatDialogBackendTabsTests
     [Fact(DisplayName = "会話を消す確認の OK でタブは切替先のまま会話が消える")]
     public void ConfirmAccepted_KeepsNewTab()
     {
+        using var temp = new TestTempFolder();
+        var folder = Path.Combine(temp.Path, "settings");
+
         WpfApplicationTestSupport.RunSta(() =>
         {
             WpfApplicationTestSupport.EnsureApplicationResources();
 
             var dialogs = new PumpingConfirmDialogService(true);
-            var (vm, folder) = CreateVm(dialogs);
+            var vm = CreateVm(folder, dialogs);
 
             WithShownDialog(
                 vm,
-                folder,
                 (tabControl, tabItems) =>
                 {
                     vm.Messages.Add(
@@ -266,39 +262,61 @@ public class AiChatDialogBackendTabsTests
         });
     }
 
-    /// <summary>
-    /// ターン実行中は BackendTabs の全 TabItem が IsEnabled=false になり、
-    /// ターン終了後は再び IsEnabled=true へ戻ることを検証する。
-    /// </summary>
-    [Fact(DisplayName = "ターン実行中は接続方式タブが全て無効化される")]
-    public void BackendTabs_DisabledDuringTurn_AndReenabledAfter()
+    /// <summary>ターン実行中に無効化される面（実 XAML の名前付き要素）の種類</summary>
+    public enum DisabledSurface
     {
+        /// <summary>接続方式タブ（BackendTabs の全 TabItem）</summary>
+        BackendTabs,
+
+        /// <summary>API キー接続の設定パネル（ApiKeySettingsPanel）</summary>
+        ApiKeySettingsPanel,
+    }
+
+    /// <summary>
+    /// ターン実行中は接続方式タブの全 TabItem と API キー接続の設定パネルが IsEnabled=false になり、
+    /// ターン終了後は再び IsEnabled=true へ戻ることを検証する（見た目の面＝IsEnabled のみを検証する）。
+    /// </summary>
+    /// <remarks>
+    /// 設定パネルのプロバイダー・モデル・エンドポイント・API キーは実行中ターンの次の往復から即座に効き、
+    /// プロバイダー変更は実行中ループが書き換える会話履歴の列挙も伴うため、実行中は編集させない。
+    /// </remarks>
+    [Theory(
+        DisplayName = "ターン実行中は接続方式タブと API キー接続の設定パネルが無効化され、終了後に戻る"
+    )]
+    [InlineData(DisabledSurface.BackendTabs)]
+    [InlineData(DisabledSurface.ApiKeySettingsPanel)]
+    public void Surface_DisabledDuringTurn_AndReenabledAfter(DisabledSurface surface)
+    {
+        using var temp = new TestTempFolder();
+        var folder = Path.Combine(temp.Path, "settings");
+
         WpfApplicationTestSupport.RunSta(() =>
         {
             WpfApplicationTestSupport.EnsureApplicationResources();
 
-            var (vm, folder) = CreateVm();
+            var vm = CreateVm(folder);
+            var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                new AiChatDialog(vm, new RecordingShutdownFailureReporter())
+            );
+
+            // 画面外＋非アクティブで Show し、テスト実行中に開発者のデスクトップを妨げない
+            dialog.WindowStartupLocation = WindowStartupLocation.Manual;
+            dialog.Left = -4000;
+            dialog.Top = -4000;
+            dialog.ShowActivated = false;
+            dialog.ShowInTaskbar = false;
+            dialog.Show();
 
             try
             {
-                var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
-                    new AiChatDialog(vm, new RecordingShutdownFailureReporter())
-                );
+                dialog.UpdateLayout();
+                WpfApplicationTestSupport.DoEvents();
 
-                // 画面外＋非アクティブで Show し、テスト実行中に開発者のデスクトップを妨げない
-                dialog.WindowStartupLocation = WindowStartupLocation.Manual;
-                dialog.Left = -4000;
-                dialog.Top = -4000;
-                dialog.ShowActivated = false;
-                dialog.ShowInTaskbar = false;
+                // 検証する面の IsEnabled を列挙する（タブは全 TabItem、パネルは 1 要素）
+                Func<List<bool>> enabledStates;
 
-                dialog.Show();
-
-                try
+                if (surface == DisabledSurface.BackendTabs)
                 {
-                    dialog.UpdateLayout();
-                    WpfApplicationTestSupport.DoEvents();
-
                     var tabControl = dialog.FindName("BackendTabs") as TabControl;
                     tabControl
                         .Should()
@@ -308,108 +326,32 @@ public class AiChatDialogBackendTabsTests
                     tabItems
                         .Should()
                         .HaveCount(4, "API キー / Codex / Claude Code / Copilot の 4 タブ");
-
-                    // 見た目の面（IsEnabled）を確認する。初期状態（ターン非実行中）は全タブ有効
-                    tabItems
-                        .Should()
-                        .OnlyContain(
-                            t => t.IsEnabled,
-                            "初期状態ではどのタブも無効化されていないこと"
-                        );
-
-                    vm.IsTurnInProgress = true;
-                    tabControl.UpdateLayout();
-                    WpfApplicationTestSupport.DoEvents();
-
-                    tabItems
-                        .Should()
-                        .OnlyContain(t => !t.IsEnabled, "ターン実行中は全タブが無効化されること");
-
-                    vm.IsTurnInProgress = false;
-                    tabControl.UpdateLayout();
-                    WpfApplicationTestSupport.DoEvents();
-
-                    tabItems
-                        .Should()
-                        .OnlyContain(t => t.IsEnabled, "ターン終了後はタブが再び有効になること");
+                    enabledStates = () => tabItems.Select(t => t.IsEnabled).ToList();
                 }
-                finally
+                else
                 {
-                    dialog.Close();
-                }
-            }
-            finally
-            {
-                if (Directory.Exists(folder))
-                {
-                    Directory.Delete(folder, recursive: true);
-                }
-            }
-        });
-    }
-
-    /// <summary>
-    /// ターン実行中は API キータブの設定パネル（プロバイダー・モデル・エンドポイント・API キー）が
-    /// IsEnabled=false になり、ターン終了後は再び編集できることを検証する。
-    /// これらの設定は実行中ターンの次の往復から即座に効き、プロバイダー変更は実行中ループが書き換える
-    /// 会話履歴の列挙も伴うため、実行中は編集させない（見た目の面＝IsEnabled のみを検証する）。
-    /// </summary>
-    [Fact(DisplayName = "ターン実行中は API キー接続の設定パネルが無効化される")]
-    public void ApiKeySettingsPanel_DisabledDuringTurn_AndReenabledAfter()
-    {
-        WpfApplicationTestSupport.RunSta(() =>
-        {
-            WpfApplicationTestSupport.EnsureApplicationResources();
-
-            var (vm, folder) = CreateVm();
-
-            try
-            {
-                var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
-                    new AiChatDialog(vm, new RecordingShutdownFailureReporter())
-                );
-
-                // 画面外＋非アクティブで Show し、テスト実行中に開発者のデスクトップを妨げない
-                dialog.WindowStartupLocation = WindowStartupLocation.Manual;
-                dialog.Left = -4000;
-                dialog.Top = -4000;
-                dialog.ShowActivated = false;
-                dialog.ShowInTaskbar = false;
-
-                dialog.Show();
-
-                try
-                {
-                    dialog.UpdateLayout();
-                    WpfApplicationTestSupport.DoEvents();
-
                     var panel = dialog.FindName("ApiKeySettingsPanel") as StackPanel;
                     panel.Should().NotBeNull("実 XAML に API キー設定パネルが存在すること");
-                    panel!.IsEnabled.Should().BeTrue("初期状態では設定を編集できること");
-
-                    vm.IsTurnInProgress = true;
-                    dialog.UpdateLayout();
-                    WpfApplicationTestSupport.DoEvents();
-
-                    panel.IsEnabled.Should().BeFalse("ターン実行中は設定パネルが無効化されること");
-
-                    vm.IsTurnInProgress = false;
-                    dialog.UpdateLayout();
-                    WpfApplicationTestSupport.DoEvents();
-
-                    panel.IsEnabled.Should().BeTrue("ターン終了後は再び編集できること");
+                    enabledStates = () => [panel!.IsEnabled];
                 }
-                finally
-                {
-                    dialog.Close();
-                }
+
+                enabledStates().Should().OnlyContain(e => e, "初期状態では無効化されていないこと");
+
+                vm.IsTurnInProgress = true;
+                dialog.UpdateLayout();
+                WpfApplicationTestSupport.DoEvents();
+
+                enabledStates().Should().OnlyContain(e => !e, "ターン実行中は無効化されること");
+
+                vm.IsTurnInProgress = false;
+                dialog.UpdateLayout();
+                WpfApplicationTestSupport.DoEvents();
+
+                enabledStates().Should().OnlyContain(e => e, "ターン終了後は再び有効になること");
             }
             finally
             {
-                if (Directory.Exists(folder))
-                {
-                    Directory.Delete(folder, recursive: true);
-                }
+                dialog.Close();
             }
         });
     }

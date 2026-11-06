@@ -40,4 +40,10 @@ AI チャットエンジンの共通基盤（WPF 非依存）。内蔵チャッ�
 - **引数は `Func<string>` で受け、取り出しも try の内側で行う**。値で受けると呼び出し側の引数評価が try の外で走り、Codex の `arguments` を持たない要求で `JsonElement.GetRawText()` が投げて、応答を送れないまま AI がツール結果を待ち続ける。
 - `rethrowCancellation` が 4 エンジンの唯一の差。API キー接続だけが中断を通す（未実行の呼び出しへ合成結果を補って履歴の tool_use↔tool 対応を保つ経路へ渡すため）。
 - 承認拒否・許可拒否の通知（`CodexChatEngine.RespondToApprovalAsync` / `CopilotChatEngine.OnPermissionDeclined`）も同じ作法で通す。前者は承認応答の送信より前に呼ぶので、保護しないと購読側の例外で応答まで巻き込まれる。
-- ガード：`ChatToolInvocationTests`（作法のテストと、4 エンジンのソースガード＝ヘルパーを通ること・生の失敗文言と裸の `ToolActivityReceived?.Invoke(` が残っていないこと）。mutation 実証済み。
+- ガード：`ChatToolInvocationTests`（作法のテストと、4 エンジンのソースガード＝ヘルパーを通ること・生の失敗文言と裸の `ToolActivityReceived?.Invoke(` が残っていないこと）と、振る舞いを 4 エンジンへ同じ行で流す `ChatEngineContractTests`（行 `tool-host-throws-is-english-failure-result`・`tool-activity-subscriber-throws-still-returns-result`）。mutation 実証済み。
+
+## チャットエンジンの共通の契約
+
+- ターン・ツール・取り消し・失敗・添付・破棄・接続の準備・会話の契約は、4 エンジン（API キー・Codex・Claude Code・Copilot）へ同じ行で流す網が守る（`tests/QuickER.Tests/AI/ChatEngines/`）。エンジンごとの違いは、アダプタの性質の宣言（出典つき）と期待の文の組み方に置き、行の中でエンジンを名指ししない。
+- 宣言で「持たない」とした性質を前提にする行はそのエンジンでは流さず、網羅しない組の一覧（手で書いた静的な一覧）に載せる。宣言を変えて流れる組が増減すると、一覧との照合で赤になる。
+- ガード：`ChatEngineContractTests`（行 × エンジン・`Coverage_MatchesGaps`・`Declarations_CoverEveryCapabilityWithEvidence`・`AttachmentSupport_MatchesEngineAndResolver`）・`ChatDriverTests`（API キー接続のドライバ 2 つへ同じ発話を流す）。mutation 実証済み。

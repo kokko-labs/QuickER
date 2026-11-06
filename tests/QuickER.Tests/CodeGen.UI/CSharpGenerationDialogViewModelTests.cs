@@ -5,20 +5,30 @@ using QuickER.CodeGen.CSharp;
 using QuickER.CodeGen.UI;
 using QuickER.Gui.Abstractions;
 using QuickER.Tests.TestDoubles;
+using QuickER.Tests.TestSupport;
 using CodeGenStrings = QuickER.CodeGen.UI.Resources.Strings;
 
 namespace QuickER.Tests.CodeGen.UI;
 
 /// <summary><see cref="CSharpGenerationDialogViewModel" /> の入力確定・検証・参照・分割・永続化を検証するテストクラス</summary>
-public class CSharpGenerationDialogViewModelTests
+public sealed class CSharpGenerationDialogViewModelTests : IDisposable
 {
+    /// <summary>テストごとの一時フォルダ（設定の保存先・一時プロジェクトはこの下に作り、破棄で中身ごと消す）</summary>
+    private readonly TestTempFolder temp = new();
+
+    /// <inheritdoc />
+    public void Dispose() => temp.Dispose();
+
+    /// <summary>一時フォルダの下に、まだ無い一意のフォルダのパスを返す（作らない）</summary>
+    private string NewFolder() => Path.Combine(temp.Path, Guid.NewGuid().ToString("N"));
+
     /// <summary>一時フォルダのストアで ViewModel を生成する（実 %LOCALAPPDATA% を汚さない）</summary>
-    private static CSharpGenerationDialogViewModel CreateViewModel(
+    private CSharpGenerationDialogViewModel CreateViewModel(
         out string folder,
         QuickER.Provider.IDatabaseProvider? currentProvider = null
     )
     {
-        folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        folder = NewFolder();
         return new CSharpGenerationDialogViewModel(
             new CSharpGenerationSettingsStore(folder),
             currentProvider: currentProvider
@@ -269,7 +279,7 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "設定復元時に未定義の言語の値は英語へ戻す")]
     public void ApiDocsLanguage_UndefinedSavedValue_FallsBackToEnglish()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var folder = NewFolder();
 
         try
         {
@@ -605,7 +615,7 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "層別 ON＋分割 OFF の保存値は復元時に分割 ON へ揃う")]
     public void LayeredOutput_Restore_ForcesSplitOn()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var folder = NewFolder();
 
         try
         {
@@ -635,7 +645,7 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "層別 ON の設定を開くと名前空間が層フォルダ由来でプリフィルされる")]
     public void ApplySettings_LayeredOutput_PrefillsNamespacesFromLayerFolders()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var folder = NewFolder();
 
         try
         {
@@ -670,7 +680,7 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "複数階層の層フォルダはドット区切りの名前空間既定になる")]
     public void ApplySettings_NestedLayerFolder_PrefillsDottedNamespace()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var folder = NewFolder();
 
         try
         {
@@ -910,7 +920,7 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "参照コマンドで出力先ファイルを更新できる")]
     public void BrowseOutputFile_UpdatesPath()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var folder = NewFolder();
         var files = new StubFileDialogService
         {
             SaveResult = new FileDialogResult(@"C:\work\Generated\Entities.g.cs", 1),
@@ -926,14 +936,9 @@ public class CSharpGenerationDialogViewModelTests
     }
 
     /// <summary>一時プロジェクトフォルダに csproj を書き出し、そのプロジェクトディレクトリを返す</summary>
-    private static string CreateProjectFolder(string csprojFileName, string rootNamespace)
+    private string CreateProjectFolder(string csprojFileName, string rootNamespace)
     {
-        var projectDir = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTests",
-            "NsBrowse",
-            Guid.NewGuid().ToString("N")
-        );
+        var projectDir = NewFolder();
         Directory.CreateDirectory(projectDir);
         File.WriteAllText(
             Path.Combine(projectDir, csprojFileName),
@@ -955,11 +960,7 @@ public class CSharpGenerationDialogViewModelTests
     )]
     public void BrowseOutputFolder_ConfirmTrue_DerivesNamespace_AndFollowsChildren()
     {
-        var settingsFolder = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTests",
-            Guid.NewGuid().ToString("N")
-        );
+        var settingsFolder = NewFolder();
         var projectDir = CreateProjectFolder("MyProject.csproj", "Contoso.Sales");
         var target = Path.Combine(projectDir, "Data");
         Directory.CreateDirectory(target);
@@ -1014,11 +1015,7 @@ public class CSharpGenerationDialogViewModelTests
     )]
     public void BrowseOutputFolder_ConfirmFalse_LeavesNamespaceUnchanged()
     {
-        var settingsFolder = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTests",
-            Guid.NewGuid().ToString("N")
-        );
+        var settingsFolder = NewFolder();
         var projectDir = CreateProjectFolder("MyProject.csproj", "Contoso.Sales");
         var target = Path.Combine(projectDir, "Data");
         Directory.CreateDirectory(target);
@@ -1061,11 +1058,7 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "導出候補が現在の namespace と同一なら確認しない")]
     public void BrowseOutputFolder_SuggestionEqualsCurrent_DoesNotConfirm()
     {
-        var settingsFolder = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTests",
-            Guid.NewGuid().ToString("N")
-        );
+        var settingsFolder = NewFolder();
         // プロジェクト直下（相対階層なし）を選ぶと導出候補はベース "Acme.App" のみになる
         var projectDir = CreateProjectFolder("MyProject.csproj", "Acme.App");
 
@@ -1111,7 +1104,7 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "OK で設定を保存できなくてもエラーで知らせて生成は続ける")]
     public void Ok_SettingsSaveFails_ShowsErrorAndContinues()
     {
-        var root = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var root = NewFolder();
         Directory.CreateDirectory(root);
         var blockedFolder = Path.Combine(root, "settings");
         File.WriteAllText(blockedFolder, "not a folder");
@@ -1160,7 +1153,7 @@ public class CSharpGenerationDialogViewModelTests
     )]
     public void Ok_SettingsFileUnreadable_ShowsErrorAndContinues()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var folder = NewFolder();
         var store = new CSharpGenerationSettingsStore(folder);
         store.Save(new CSharpGenerationSettings());
         var dialogs = new RecordingDialogService();
@@ -1236,7 +1229,7 @@ public class CSharpGenerationDialogViewModelTests
     )]
     public void OutputModeToggle_FromSplitWithoutRememberedName_UsesDefaultFileName()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var folder = NewFolder();
         var store = new CSharpGenerationSettingsStore(folder);
         store.Save(
             new CSharpGenerationSettings
@@ -1424,7 +1417,7 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "名前を付けて保存で設定ファイルが生成され読み戻せる")]
     public void SaveSettingsAs_WritesFile_ThatCanBeLoadedBack()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var folder = NewFolder();
         var presetPath = Path.Combine(folder, "preset", "codegen-settings.json");
         var store = new CSharpGenerationSettingsStore(folder);
         var files = new StubFileDialogService { SaveResult = new FileDialogResult(presetPath, 1) };
@@ -1475,7 +1468,7 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "名前を付けて保存キャンセルではファイル書き込みもダイアログ表示もない")]
     public void SaveSettingsAs_WhenCancelled_DoesNotWriteOrShowDialog()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var folder = NewFolder();
         var store = new CSharpGenerationSettingsStore(folder);
         // SaveResult 未設定＝キャンセル扱い（PickSaveFile が null を返す）
         var files = new StubFileDialogService();
@@ -1510,7 +1503,7 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "読み込みで設定ファイルの内容が表示状態へ反映される")]
     public void LoadSettingsFrom_AppliesFileToViewModel()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var folder = NewFolder();
         var presetPath = Path.Combine(folder, "codegen-settings.json");
         var store = new CSharpGenerationSettingsStore(folder);
 
@@ -1567,7 +1560,7 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "設定読込は CLI の quicker.json（PascalCase）を読む")]
     public void LoadSettingsFrom_CliQuickerJson_IsApplied()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var folder = NewFolder();
         Directory.CreateDirectory(folder);
         var configPath = Path.Combine(folder, "quicker.json");
         File.WriteAllText(
@@ -1618,7 +1611,7 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "設定の参照型のキーがすべて明示 null でも開けて確定できる")]
     public void ExplicitNullSettings_OpenAndConfirm()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var folder = NewFolder();
         Directory.CreateDirectory(folder);
         var nulls = new System.Text.Json.Nodes.JsonObject();
 
@@ -1661,7 +1654,7 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "壊れた JSON の読み込みはエラー表示・表示状態は不変")]
     public void LoadSettingsFrom_WhenCorrupt_ShowsError_AndLeavesStateUnchanged()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var folder = NewFolder();
         Directory.CreateDirectory(folder);
         var brokenPath = Path.Combine(folder, "broken.json");
         File.WriteAllText(brokenPath, "{ this is not valid json");
@@ -1713,7 +1706,7 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "対象 DB チェックと namespace が名前を付けて保存→読み込みで往復する")]
     public void SaveThenLoad_RoundTripsTargetDialectsAndNamespace()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var folder = NewFolder();
         var presetPath = Path.Combine(folder, "preset", "codegen-settings.json");
         var store = new CSharpGenerationSettingsStore(folder);
 
@@ -1803,7 +1796,7 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "保存済みの実体化既定は読込時に回復され層フォルダ変更へ追従する")]
     public void LegacyMaterializedNamespaces_AreHealed_AndFollowLayerFolders()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var folder = NewFolder();
 
         try
         {

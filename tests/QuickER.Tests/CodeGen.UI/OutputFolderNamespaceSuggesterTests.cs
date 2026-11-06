@@ -18,12 +18,7 @@ public class OutputFolderNamespaceSuggesterTests
     /// <summary>一時作業フォルダ（テストごとに一意）を作って返す</summary>
     private static string CreateTempRoot()
     {
-        var root = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTests",
-            "NsSuggest",
-            Guid.NewGuid().ToString("N")
-        );
+        var root = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         return root;
     }

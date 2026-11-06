@@ -39,5 +39,10 @@ internal static class EngineRegistry
         Gui.Services.FormatRoundTrip.FormatRoundTripDimensions.OmissionDescriptor,
         Gui.Services.FormatRoundTrip.FormatRoundTripDimensions.RuleDescriptor,
         Gui.Services.FormatRoundTrip.FormatRoundTripDimensions.MergeDescriptor,
+        AI.ChatEngines.ChatEngineDimensions.Descriptor,
+        AI.ChatEngines.ChatDriverDimensions.Descriptor,
+        AI.UI.AttachmentListDimensions.Descriptor,
+        AI.UI.ConnectionSettingsDimensions.Descriptor,
+        AI.Chat.ChatDialogDimensions.Descriptor,
     ];
 }
