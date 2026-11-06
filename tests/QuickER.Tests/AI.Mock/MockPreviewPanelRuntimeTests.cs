@@ -17,7 +17,7 @@ namespace QuickER.Tests.AI.Mock;
 /// ランタイムが無い環境では、黙ってスキップせずに失敗させる（CI の windows-latest にはランタイムが入っている。
 /// スキップに化けると、プレビューの遮断が効いているかを誰も確かめない状態になる）。
 /// </remarks>
-public sealed class MockPreviewPanelRuntimeTests : IDisposable
+public sealed class MockPreviewPanelRuntimeTests : IAsyncLifetime
 {
     private readonly string _folder = Path.Combine(
         Path.GetTempPath(),
@@ -25,22 +25,93 @@ public sealed class MockPreviewPanelRuntimeTests : IDisposable
         "preview-runtime-" + Guid.NewGuid().ToString("N")
     );
 
+    /// <summary>このテストが起こした WebView2 のブラウザプロセス（後片付けで終了を待ってからユーザーデータを消す）</summary>
+    private readonly List<Process> _browsers = [];
+
     public MockPreviewPanelRuntimeTests() => Directory.CreateDirectory(_folder);
 
-    public void Dispose()
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
+
+    /// <summary>ブラウザプロセスの終了を待ってから一時フォルダを消す（どちらも非同期に待ち、テストのスレッドを止めない）</summary>
+    public async ValueTask DisposeAsync()
+    {
+        // ブラウザプロセスはユーザーデータを掴んでいる（テストごとに別のユーザーデータなので、コントロールを破棄すれば終わる）
+        foreach (var browser in _browsers)
+        {
+            using (browser)
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+                try
+                {
+                    await browser.WaitForExitAsync(timeout.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    // 上限を過ぎたら待つのをやめる（下の削除は残せば残すだけ）
+                }
+            }
+        }
+
+        // 描画・GPU の子プロセスがユーザーデータを手放すのは少し遅れることがあるので、短く何度か試す
+        var watch = Stopwatch.StartNew();
+
+        while (true)
+        {
+            try
+            {
+                Directory.Delete(_folder, recursive: true);
+                return;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return;
+            }
+            catch (Exception ex)
+                when ((ex is IOException or UnauthorizedAccessException)
+                    && watch.Elapsed < TimeSpan.FromSeconds(10)
+                )
+            {
+                await Task.Delay(100);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // 後始末はベストエフォート（上限を過ぎても消せなければ残す）
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// WebView2 のコントロールを破棄してからウィンドウを閉じ、ブラウザプロセスを後片付けへ渡す（STA の中で呼ぶ）
+    /// </summary>
+    /// <remarks>
+    /// ウィンドウを閉じるだけではコントロールは破棄されず、ブラウザプロセスがユーザーデータを掴んだまま残る。
+    /// STA の中では待たない（終了は <see cref="DisposeAsync"/> が非同期に待つ）。
+    /// プロセスは破棄の前に開いておく（ID の再利用で別のプロセスを待たない）。
+    /// </remarks>
+    private void CloseAndRelease(MockPreviewPanel panel, Window window)
     {
         try
         {
-            Directory.Delete(_folder, recursive: true);
+            if (panel.WebView.CoreWebView2 is { } core)
+            {
+                _browsers.Add(Process.GetProcessById((int)core.BrowserProcessId));
+            }
         }
-        catch (IOException)
+        catch (Exception ex)
+            when (ex
+                    is InvalidOperationException
+                        or ArgumentException
+                        or System.Runtime.InteropServices.COMException
+            )
         {
-            // WebView2 のプロセスが少し遅れて手放すことがある（後始末の失敗は無視する）
+            // 初期化に失敗した・止めた後のコアは ID を読めないことがある（もう終わっていれば待つ相手が無い）
         }
-        catch (UnauthorizedAccessException)
-        {
-            // 同上
-        }
+
+        panel.WebView.Dispose();
+        window.Close();
+        WpfApplicationTestSupport.DoEvents();
     }
 
     /// <summary>
@@ -64,8 +135,7 @@ public sealed class MockPreviewPanelRuntimeTests : IDisposable
             Pump(() => init.IsCompleted, TimeSpan.FromSeconds(60));
             available = init.IsCompletedSuccessfully && panel.IsPreviewAvailable;
 
-            window.Close();
-            WpfApplicationTestSupport.DoEvents();
+            CloseAndRelease(panel, window);
         });
 
         available
@@ -125,8 +195,7 @@ public sealed class MockPreviewPanelRuntimeTests : IDisposable
                 Pump(() => false, TimeSpan.FromSeconds(2));
             }
 
-            window.Close();
-            WpfApplicationTestSupport.DoEvents();
+            CloseAndRelease(panel, window);
         });
 
         available
@@ -213,8 +282,7 @@ public sealed class MockPreviewPanelRuntimeTests : IDisposable
                     stillAvailable = panel.IsPreviewAvailable;
                 }
 
-                window.Close();
-                WpfApplicationTestSupport.DoEvents();
+                CloseAndRelease(panel, window);
             });
         }
         finally
@@ -251,8 +319,7 @@ public sealed class MockPreviewPanelRuntimeTests : IDisposable
             Pump(() => init.IsCompleted, TimeSpan.FromSeconds(60));
             available = panel.IsPreviewAvailable;
 
-            window.Close();
-            WpfApplicationTestSupport.DoEvents();
+            CloseAndRelease(panel, window);
         });
 
         available.Should().BeFalse();
@@ -329,8 +396,7 @@ public sealed class MockPreviewPanelRuntimeTests : IDisposable
                 webViewVisibilityAfterLaterNavigate = panel.WebView.Visibility;
             }
 
-            window.Close();
-            WpfApplicationTestSupport.DoEvents();
+            CloseAndRelease(panel, window);
         });
 
         initialized

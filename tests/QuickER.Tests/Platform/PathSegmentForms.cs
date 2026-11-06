@@ -50,6 +50,11 @@ internal static class PathSegmentForms
         new("\u3000a", PathSegmentViolation.LeadingWhitespace, InEntrance: true),
         new("a ", PathSegmentViolation.TrailingDotOrWhitespace, InEntrance: true),
         new("a.", PathSegmentViolation.TrailingDotOrWhitespace, InEntrance: true),
+        // モックのプロジェクト名で断っていた綴り（元の MockProjectScaffoldServiceTests の入力をそのまま）
+        new(" Foo", PathSegmentViolation.LeadingWhitespace, InEntrance: true),
+        new("   ", PathSegmentViolation.LeadingWhitespace, InEntrance: true),
+        new("Foo ", PathSegmentViolation.TrailingDotOrWhitespace, InEntrance: true),
+        new("Bar.", PathSegmentViolation.TrailingDotOrWhitespace, InEntrance: true),
         new("GENERA~1", PathSegmentViolation.Tilde, InEntrance: true),
         new("a~b", PathSegmentViolation.Tilde, InEntrance: true),
         new("CON", PathSegmentViolation.ReservedDeviceName, InEntrance: true),

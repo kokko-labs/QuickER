@@ -9,9 +9,11 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
 
 - **保存単位はフォルダ**。`mock.json` マニフェスト（画面一覧・遷移・改訂履歴・スキーマスナップショット）＋画面ごとの `*.html` ＋共有 `style.css` のフラット構成（`MockFolderStore` / `MockManifest`）。
 - 書き込みはすべて `AtomicFile`（文字コードは BOM なし UTF-8 を明示）で行う。素の書き込みは src 全体の `RawFileWriteGuardTests` が拒否する。
-- **変更はマニフェストの複製へ適用し、ファイル → `mock.json` の書き込みが成功してから保持中のマニフェストを差し替える。** 書けなかった変更がメモリに残って次の保存へ紛れ込まないため。ガード：`SaveScreen_ManifestWriteFails_DoesNotLeakIntoLaterSave`。
+- **変更はマニフェストの複製へ適用し、ファイル → `mock.json` の書き込みが成功してから保持中のマニフェストを差し替える。** 書けなかった変更がメモリに残って次の保存へ紛れ込まないため。ガード：`MockFolderTests`（行 `save-screen-manifest-write-failure-does-not-leak-into-later-save`・`*-manifest-write-failure-*`）。
   - `RemoveScreen` だけは HTML の削除が先。`mock.json` で失敗しても remove のやり直しで自己回復する。
-- 新規作成の `mock.json` は置き換えない書き込み（`AtomicFile.CreateText`）で作る。存在の確認の後に別のプロセスが作った `mock.json` を上書きせず、事前の確認と同じ例外にする。ガード：`CreateNew_ManifestCreatedAfterCheck_KeepsForeignManifestAndThrows`。
+  - 失敗で残る一時の食い違いは 3 つだけ：`SaveScreen` が `mock.json` で失敗して残る「宣言の無い HTML」、`RemoveScreen` が `mock.json` で失敗して残る「HTML の無い宣言」、`SaveStylesheet` が `mock.json` で失敗して残る「新しい CSS」（CSS を先に書き、マニフェストは差し替えない＝上の順と合う）。どれもその画面・CSS への次の保存の成功で解ける。
+  - 保存単位の操作の列（`MockFolderTests`）は、組（`MockFolderHarness`）がどの手の後にも見張る：失敗した手は `mock.json` のバイト列もメモリのマニフェストも変えない・メモリは `mock.json` と一緒にしか変わらない・一時ファイルが残らない・宣言と HTML の整合と `style.css` の内容（上の 3 つだけを許す）・`SourceSchema` は初回ターンの成功でだけ変わる・エンジンの完了 1 回につき `TurnCompleted` 1 回・保存の通知は成功したツールのときだけ。
+- 新規作成の `mock.json` は置き換えない書き込み（`AtomicFile.CreateText`）で作る。存在の確認の後に別のプロセスが作った `mock.json` を上書きせず、事前の確認と同じ例外にする。ガード：`MockFolderTests`（行 `create-new-keeps-foreign-manifest-written-after-check`）。
 - 会話開始時にフォルダを指定する（空フォルダ＝新規 `CreateNew`／既存モックフォルダ＝再開）。以降は 1 ターンごとにライブ保存する。
 - **再開は状態再開。** 会話履歴は保存せず、フォルダの現状（画面一覧・遷移・改訂・共有 CSS・最新スキーマ）をプロンプトへ注入して続きから作る。バックエンド非依存で、API キー / Codex / Claude Code で同じ再開ができる。
 
@@ -21,7 +23,7 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
 - VM は送る前に `_firstTurnPending` を立て、`ApplyTurnCompleted` で `_firstMessageSent = result.Success` にする（送信の例外では立てない）。
 - セッションは送る前に保存するスキーマを控え（`_pendingSourceSchema`＝新規はスナップショットが空のときだけ）、エンジンの完了で成否を問わず取り除き、成功のときだけ `UpdateSourceSchema` する。**完了は送信の戻りより先に届くことがある**ので、控えは送る前に置く。
 - 書けなければそのターンを失敗（`Mock_SourceSchemaSaveFailedFormat`）として転送する（VM は初回をやり直す）。
-- ガード：`MockFolderDesignSessionTests`（`StartNewAsync_TurnFails_DoesNotSnapshotUntilSuccess`・`StartResumeAsync_TurnFails_KeepsSchemaChangedMarker`・`FeedbackTurnAfterFailedInitialTurn_DoesNotSnapshot`・`FeedbackTurnAfterInitialSendException_DoesNotSnapshot`・`InitialTurnSucceeds_SnapshotWriteFails_ForwardsFailure`）・`MockGenerationDialogViewModelTests.FirstTurnFailedOrInterrupted_RetriesAsInitialPrompt`。mutation 実証済み。
+- ガード：`MockFolderTests`（行 `session-start-new-turn-*-does-not-snapshot-until-success`・`session-start-resume-turn-*-keeps-schema-changed-marker`・`session-feedback-after-failed-initial-turn-does-not-snapshot`・`session-feedback-after-initial-send-exception-does-not-snapshot`・`session-start-snapshot-write-failure-forwards-failed-turn`。組がどの手の後にも「`SourceSchema` は初回ターンの成功でだけ、控えたスキーマへ変わる」と「エンジンの完了 1 回につき `TurnCompleted` 1 回」を見張る）・`MockDialogTests`（ダイアログの側。行 `converse-first-turn-*-retries-as-initial-prompt`・`converse-first-send-exception-retries-as-initial-prompt`。組がどの行でも「初回ターンの済みは成功で終わったときだけ立つ」を見張る）。mutation 実証済み。
   VM の送信の例外で印を戻す 1 行は外しても緑のまま（次の送信が印を立て直すので二重の守り）。
 
 ### ツールと検証
@@ -48,6 +50,7 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
   - 初回は「設計書出力」ボタンのオプトインで書き出し、以降は README.md が在る限り画面の save / remove に無音で自動追従して再生成する。`save_stylesheet`・スキーマ更新では再生成しない（内容に影響しないため）。
   - CRUD 表は `save_screen` の `entities` 申告（省略＝既存維持・空配列＝消去・正規化は C → R → U → D・図に無い名前は警告のみ）を、遷移図の直後に載せる。
     行は全画面（マニフェスト順・未宣言画面は空セル行）、列は宣言エンティティ名の初出順、セルは正規化済み操作文字列。宣言ゼロならセクションを省略する。
+- ガード：`MockOutputsTests`（リンクの表記の行 `link-*`＝同じリンクを `MockScreenLinks`・検証器・単一 HTML へ流し、検証が解決済みとしたリンクは単一 HTML で `#画面ID` へ書き換わる・画面 ID の行 `id-*`＝画面 ID・設計書のノード ID・単一 HTML の section・行 `doc-*`・`bundle-*`。単一 HTML と設計書を出すどの行にも、決定的であること・外部参照の無い入力から外部参照を出さないこと・設計書に CR と U+2028 が無いことを掛ける）。
 
 ### モックプロジェクト生成
 
@@ -69,6 +72,11 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
   - パス保護は**拡張子ホワイトリスト**（プロファイル宣言〔WPF = .xaml / .cs、Blazor = .razor / .css / .cs〕∩ 中央上限集合 `MockProjectEmitTools.SupportedEmitExtensions` ＝実効の許可集合。拒否メッセージへ許可拡張子を列挙する）。
   - 加えて保護フォルダ（Generated / design / **obj / bin**）、README / .sln / .csproj / NuGet.Config、`..` / 絶対パス / `:` を拒否する。詳細は「提出パスの判定」。
 - **エージェント型の実行権限は QuickER 側で絞らない。** ユーザーが導入した CLI をその CLI 自身の権限モデルで動かす方針で、QuickER が設計した境界は API キー方式だけ（Claude Code は `Bash` から任意コマンドを実行できる＝承知のうえの非対称）。4 バックエンドの権限差の正本は `docs/ai-chat.md`（.ja）の「注意」節の表。
+- 実行器 4 種の共通の契約（結果の写し方・未ログイン・進捗・取り消しと中断・続行の促し・破棄・起動の設定・プロンプト・追加の指示）は、実行器の網が同じ行で全実行器へ流す。軸の正本は `IMockProjectAgent` の具象の型で、実装を足すとアダプタが無いことで赤になる。
+  - 実行器ごとの違いはアダプタの性質と値（`BackendName`・`FinalBuildEscapesSandbox`）の宣言が `src/…:行` の出典つきで持つ。アダプタと行の中で実行器を名指しして分岐しない。
+  - 持たない性質の組（Accepted）と、直す区切りの決まった不具合の組（Pending：API キーの実行器が追加の指示を読まない＝修正 I）は、宣言から導かず手で書いた一覧に置く。宣言だけを書き換えると網羅の照合が赤になる。
+  - 起動の設定（許可・サンドボックス・ツール・作業フォルダ・システムプロンプト）と最終ビルドの境界越えの宣言は、アダプタの期待との一致で固定する。
+- ガード：`MockAgentContractTests`（`MockAgentContractTests.Row_Holds` の行 `launch-options-match-declaration-*`・`declaration-final-build-escapes-sandbox`・`MockAgentContractTests.Coverage_MatchesGaps`・`MockAgentContractTests.Declarations_CoverEveryCapabilityWithEvidence`・`MockAgentContractTests.Axis_CoversAuthoritativeValues`）。ランナーの流れ（成果物・画面の数・最終ビルド・結果の分類）は `MockRunnerTests`（行ごとにランの結果を分類して行の宣言と照合する）。mutation 実証済み。
 
 ### 最終ビルド
 
@@ -84,8 +92,8 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
   - リンクならリンクだけを外す。判定は `MockProjectFiles.IsLink`（`LinkTarget`）。`Directory.Delete(recursive: true)` 自身もリンクを辿らないが、明示チェックで二重化する。
   - **消せずに残ったものは黙って進まず、変更検知と同じ確認一覧へ回す**（フェイルクローズ）。変更検知は obj / bin をフォルダ自身も含めて見ないので、拾えるのはこの残存検査だけ。
     一覧は差分と同じ表記で重複なく 1 つにまとめる。確認手段が null ならビルドしない（`BuildDeclined`）。境界越えを宣言しない実行器ではログへ残すだけ。
-- ガード：`DotnetBuildRunnerArgumentsTests`（パス明示・隔離引数 3 つ・自動 import 無効化 5 プロパティ）・`MockProjectAgentRunnerTests`（ビルド直前の obj / bin 削除・ジャンクションのリンク先温存・自分の sln のパス・最終ビルドのタイムアウト・範囲外の csproj では合格しない）・`MockProjectBuildBoundaryTests`（`ReadOnlyObjTargets_NeverReachBuildUnconfirmed`＝読み取り専用の obj/*.targets を確認なしにビルドへ渡さない性質、`ReadOnlyObjTargets_AreDeletedBeforeBuild`、`UndeletableObjFile_IsListedForConfirmation`・`_WithoutConfirmSeam_SkipsBuild`・`_NonEscapingAgent_IsLoggedOnly`、`UndeletableObjJunction_IsListedOnceWithoutTraversal`）。mutation 実証済み。
-  読み取り専用の解除を外しても `ReadOnlyObjTargets_AreDeletedBeforeBuild` の 1 件だけが赤になる（性質のテストは残存検査が拾うので緑のまま）。
+- ガード：`DotnetBuildRunnerArgumentsTests`（パス明示・隔離引数 3 つ・自動 import 無効化 5 プロパティ）・`MockRunnerTests`（行 `build-targets-own-solution-path`＝自分の sln のパス・`build-timeout-reports-timed-out`＝最終ビルドのタイムアウト・`artifacts-outside-project-folder-not-counted`＝範囲外の csproj では合格しない）・`MockBuildBoundaryTests`（最終ビルドの境界の表の入口 B の行：`clear-obj-and-bin-are-deleted-before-build`＝ビルド直前の obj / bin 削除・`clear-obj-junction-removes-link-and-keeps-target`＝ジャンクションのリンク先温存・`clear-read-only-obj-targets-never-reach-build-unconfirmed-*`＝読み取り専用の obj/*.targets を確認なしにビルドへ渡さない性質・`clear-read-only-obj-targets-are-deleted-before-build`・`clear-read-only-bin-file-is-deleted-before-build`・`clear-undeletable-obj-file-*`＝削除できない obj のファイルは確認一覧・確認手段なしでビルドしない・境界越え非宣言ではログだけ・`clear-undeletable-obj-junction-is-listed-once-without-traversal`。ランナー経由の全行に「境界越え非宣言は確認しない・確認を出したら答えのとおりにビルドする・未検証ならビルドしない」の照合が掛かる）。mutation 実証済み。
+  読み取り専用の解除を外しても `clear-read-only-obj-targets-are-deleted-before-build` の 1 行だけが赤になる（性質の行は残存検査が拾うので緑のまま）。
 
 ### 成果物の探索
 
@@ -94,7 +102,7 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
 - 範囲を出力フォルダ全体にすると、同居する無関係な `.csproj` / `.xaml` や前回実行の `obj` / `bin` で「AI が生成できた」と誤判定する。範囲は `{出力フォルダ}/{プロジェクト名}/` 配下だけ。
 - 共有ヘルパーは `MockProjectFiles`（`IgnoreInaccessible=true`・`obj` / `bin` 除外）1 つ。ランナー・Codex / Copilot の承認待ち判定（`HasAnyInProject`）・API キーのデータ層要約（`SummarizeGeneratedContracts`）の 4 箇所が共有する。1 箇所でも素の列挙へ戻すとその経路だけが静かに落ちる。
 - 再帰は、リンクと中を列挙できない reparse フォルダ（`MockProjectFiles.IsOpaqueDirectory`＝変更検知と同じ判定）の中へ入らない。辿ると、外を指すジャンクション 1 つで出力フォルダの外を数え、列挙できないフォルダでは `IOException` でランごと落ちる。
-- ガード：`MockProjectFilesTests`（obj / bin 除外・範囲・拒否 ACE のフォルダでも落ちない〔素の列挙が実際に投げることも同時に確認〕・列挙できない reparse フォルダでも落ちない・ジャンクションの先を数えない）・`MockProjectAgentRunnerTests`（範囲外の csproj では合格しない）。mutation 実証済み。
+- ガード：`MockBuildBoundaryTests`（最終ビルドの境界の表の入口 C の行 `enumerate-*`＝obj / bin 除外・起点直下だけの除外・範囲・起点が無い・拒否 ACE のフォルダでも落ちない〔素の列挙が実際に投げることも同時に確認〕・列挙できない reparse フォルダでも落ちない・ジャンクションの先を数えない・リンクでない reparse フォルダの中は数える）・`MockRunnerTests`（行 `artifacts-outside-project-folder-not-counted`＝範囲外の csproj では合格しない）。mutation 実証済み。
 
 ### 最終ビルド前の変更検知
 
@@ -102,7 +110,7 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
 - スキャフォールド直後（`RunAsync` の入口）に出力フォルダの内容ハッシュを記録し、**obj / bin 削除 → 差分 → 確認 → ビルド**の順で、UI 層のソース・静的資産以外の追加・変更を `ConfirmWarningDetails` で確認する（`MockProjectBuildBoundary`）。削除する範囲と検知しない範囲を揃えるための順序。
 - キャンセルはビルドを実行せず `MockProjectAgentResult.BuildDeclined` で未検証として完了し、成功扱いにしない。
   - **提示は `ShowError` でなく `ShowInformation`。** 実行しなかったのは利用者自身の選択で失敗が起きたわけではなく、Error は「すでに発生した失敗の報告」専用のため。
-  - フラグは `MockProjectGenerationResult.BuildDeclined` として VM まで運ぶ。メッセージ文字列で判別しない。ガード：`MockGenerationDialogViewModelTests`（検証ビルドの取り消しはエラーでなく情報で案内する・VM が確認 seam を配線する）。
+  - フラグは `MockProjectGenerationResult.BuildDeclined` として VM まで運ぶ。メッセージ文字列で判別しない。ガード：`MockDialogTests`（行 `generate-build-declined-shows-information-not-error`＝検証ビルドの取り消しはエラーでなく情報で案内する・`generate-wires-build-confirmation`＝VM が確認 seam を配線する）。
 - 差分の判定は `MockProjectBuildBoundary.DetectUnexpectedChanges`。
 - 確認 seam は VM → `IMockProjectGenerator.GenerateAsync(confirmBuild:)` → ランナーへ渡る `Func<IReadOnlyList<string>, bool>`。**null ＝確認手段が無い＝ビルドしない**（配線漏れを黙って承認へ倒さない）。
 - `MockProjectBuildBoundary.SafeExtensions` は**通す側の列挙**（UI 層のソース `.cs` / `.razor` / `.xaml` と静的資産 `.css` / `.js` / `.html` / 画像）で、危険なファイル名・拡張子の列挙にしない。
@@ -118,8 +126,9 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
 - **一覧を読めないフォルダ（アクセス拒否・出力フォルダ自身を含む）も、中を読まずにフォルダ自身を毎回「変更」として一覧に出す。**
   変更検知の走査は成果物の探索と分け、`ComparedLevelOptions`（`IgnoreInaccessible = false`）で 1 段ずつ開く `CollectComparedEntries` で行う。開けなかったフォルダ・途中で列挙が失敗したフォルダは、読めた分も捨てて 1 件にする（`Entry.IsUnlistable`・出力フォルダ自身は `.`）。指紋を持たないので記録されず、名前の拡張子でも免除しない。
   エージェントは出力フォルダの ACL を変えて自分に一覧の読み取りだけを拒否でき、ファイルは名前で開けるので MSBuild は `.csproj.user` を読む。アクセス拒否を無視する走査では差分が空になって確認なしにビルドへ進む（実 dotnet build でターゲットの実行を確認済み）。
-- ガード：`MockProjectBuildBoundaryAclTests`（出力フォルダ・サブフォルダの拒否 × スナップショットとラン・記録の時点から読めないフォルダ・確認の要らない拡張子の名前のフォルダ）。
-- ガード：`MockProjectBuildBoundaryTests`（外を指すジャンクションは辿らずリンク自体を出す／外を指すファイルのシンボリックリンクの csproj.user／csproj.user／出力フォルダの global.json／UI ソースのみ／更新日時を戻した csproj／隠し属性／境界越え非宣言の実行器／確認取り消しでビルド不実行／seam 未配線／obj 配下の除外／ホワイトリストに危険拡張子が無いこと／実行器 4 実装の宣言値／`NonLinkReparseFolder_IsTraversed`・`NonLinkReparseFolder_Unchanged_NoConfirmation`・`ObjAsNonLinkReparseFolder_IsDeletedWithContents`〔サードパーティのタグにディレクトリビットを付けて管理者権限なしで再現〕／`UnlistableReparseFolder_IsAlwaysListed`）・`MockProjectFilesTests`（`IsLink_DistinguishesLinksFromOtherReparsePoints`）。mutation 実証済み。
+- **削除は確認に出さない**（記録にあって今は無い項目を走査しない）。削除したファイルはビルドが失敗するだけで、ビルドに何かを実行させはしないため。ガード：`MockBuildBoundaryTests`（行 `change-deleted-file-is-not-confirmed`＝意図として行に明記）。
+- ガード：`MockBuildBoundaryTests`（最終ビルドの境界の表の入口 A の行 `change-acl-*`・`change-snapshot-acl-*`＝出力フォルダ・サブフォルダの拒否 × スナップショットとラン・記録の時点から読めないフォルダ・確認の要らない拡張子の名前のフォルダ）。
+- ガード：`MockBuildBoundaryTests`（入口 A の行：`change-junction-is-listed-without-traversal`＝外を指すジャンクションは辿らずリンク自体を出す／`change-file-symlink-csproj-user-is-confirmed`／`change-csproj-user-added-is-confirmed`／`change-global-json-at-output-root-is-confirmed`／`change-ui-source-only-is-not-confirmed-*`＝UI ソース・静的資産のみ〔大文字小文字を無視〕／`change-rewritten-csproj-with-restored-timestamp-is-confirmed`／`change-hidden-csproj-user-is-confirmed`／`change-non-escaping-agent-is-not-confirmed`／`change-declined-confirmation-skips-build-as-not-verified`／`change-unwired-confirmation-skips-build`／`change-under-project-obj-is-not-confirmed`・`change-nested-obj-below-project-root-is-confirmed`＝除外は {プロジェクト}/obj だけ／`change-build-input-extension-is-confirmed-*`＝自動で読まれる拡張子は実ファイルを書くと確認に出る／`change-non-link-reparse-folder-*`〔サードパーティのタグにディレクトリビットを付けて管理者権限なしで再現〕／`change-unlistable-reparse-folder-is-always-listed`。入口 B の行 `clear-obj-non-link-reparse-folder-is-deleted-with-contents`。入口 C の行 `enumerate-is-link-*`＝IsLink はジャンクションとシンボリックリンクだけを真にする）。mutation 実証済み。
 
 ### 提出パスの判定
 
@@ -132,8 +141,19 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
   - さらに `Path.GetFullPath` で正規化した後の出力フォルダ相対セグメントでも照合する（`FindBlockedFolderInNormalizedPath`）。`GetFullPath` は末尾の `.` を 1 つしか落とさず空白も落とさないため、正規化後の照合だけでは足りない（実測）。二重化。
 - ガード：`PathEntranceTests`（OS との境界のエンジンのパスの入口の表の行 `emit-rejects-protected-folder-alias-*`・`emit-wpf-accepts-legitimate-path-after-alias-guards-*`・`find-blocked-folder-*`＝正規化後の照合を単独で見る）。mutation 実証済み（`Generated./x.cs` / `design./mock/x.cs` は正規化後の照合が拾って、末尾検査だけを外しても緑のまま）。
 
+### ダイアログの状態の不変条件
+
+- モック生成のダイアログ（`MockGenerationDialogViewModel`）は、次を守る。
+  1. ターンの実行中でなければ、応答中（`IsStreaming`）の吹き出しを残さない（`IsTurnInProgress` のセッターが通知を出し終えた後に外す）。
+  2. ターンの実行中は接続方式もモックフォルダも変えない（`TryChangeBackend`・`MockFolder` のセッターが断り、理由を状態の文へ出す）。変えると会話のリセットでセッションを切り離し、届かなくなったターンの完了を待ってダイアログが固まる。
+  3. 作ったエンジンは、切り離しと終了の破棄でちょうど 1 回破棄される（漏れると常駐の子プロセスが残る）。
+  4. 初回ターンの済みは成功で終わったときだけ立つ（「初回ターン」）。
+  5. 生成の可否（`CanGenerateMockProject`）と無効の理由の文（`MockGenDisabledReason`）は別のコードで、食い違わない。生成中は会話の開始も送信もできず、止めている理由（`ConversationDisabledReason`）を出す。
+- ガード：`MockDialogTests`（どの行でも組 `MockDialogHarness` が上の 5 つと、拒否の後も保留のターン・止めた生成を進めれば実行中が解けること・画面一覧と選択の整合・添付の範囲・フルパスでないフォルダで開始できないことを見張る。行 `backend-switch-during-turn-is-refused-and-turn-still-completes`・`folder-change-during-turn-is-refused-and-turn-still-completes`・`converse-streaming-ends-when-turn-*`・`generate-reason-is-turn-in-progress-during-turn` ほか）。mutation 実証済み。
+- 表の組は記録するダイアログ・偽のファイルダイアログ・偽の生成器・4 つの接続方式の偽のエンジンを必ず渡す（省くと失敗の経路で実の MessageBox が出て止まり、PATH の claude / dotnet や実の CLI のプロセスへ行く）。行の終わりに実行中を解き、全エンジンを破棄する。
+
 ### ForceClose
 
 - ウィンドウの `ForceClose` は閉じる前に、(1) VM の `RequestInterrupt()` で実行中のターン・生成を打ち切り、(2) VM の `ShutdownEngines(上限)` でエンジンを破棄する。作法と理由は `src/QuickER.AI.UI/CLAUDE.md`「エンジンの破棄の作法」を参照する。
 - モック生成はさらに (3) ダイアログが接続状態の確認用に持つプローブ用エンジン 3 つを独立した段で破棄する。AI チャットは VM のエンジンが確認を兼ねるので該当しない。段ごとに上限を待つので、閉じるまでの待ちは最大 6 秒。
-- ガード：`MockGenerationDialogViewModelTests`（ShutdownEngines は会話中のエンジンを破棄する）・`MockGenerationDialogTests`（ForceClose はプローブ用エンジン 3 つを破棄する・ForceClose は設定保存が失敗してもプローブ用エンジンを破棄する）。AI チャット側のガードは `src/QuickER.AI.UI/CLAUDE.md` に置く。
+- ガード：`MockDialogTests`（行 `shutdown-disposes-session-engine`＝ShutdownEngines は会話中のエンジンを破棄する。組がどの行の終わりにも「作ったエンジンはちょうど 1 回破棄」を見張る）・`MockGenerationDialogTests`（ForceClose はプローブ用エンジン 3 つを破棄する・ForceClose は設定保存が失敗してもプローブ用エンジンを破棄する）。AI チャット側のガードは `src/QuickER.AI.UI/CLAUDE.md` に置く。

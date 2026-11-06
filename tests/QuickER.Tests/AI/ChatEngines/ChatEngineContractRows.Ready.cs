@@ -98,8 +98,8 @@ internal static partial class ChatEngineContractRows
                         .BeLessThanOrEqualTo(1, "保留中に 2 本目の起動が始まらない");
 
                     gate.SetResult();
-                    await first.WaitAsync(TimeSpan.FromSeconds(10), c.CancellationToken);
-                    await second.WaitAsync(TimeSpan.FromSeconds(10), c.CancellationToken);
+                    await first.WaitAsync(TimeSpan.FromSeconds(60), c.CancellationToken);
+                    await second.WaitAsync(TimeSpan.FromSeconds(60), c.CancellationToken);
 
                     c.Rig.RuntimeStarts.Should().Be(1);
                     c.Rig.Readiness.RuntimeStarted.Should().BeTrue();

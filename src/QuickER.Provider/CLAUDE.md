@@ -238,7 +238,7 @@
   - 説明は対象外（改行が正当。コメント側の `Sanitize` が唯一の防壁なので上のガードが要る）。
   - 判定は `SqlComment.ContainsControlCharacter` と共有する。C# 生成側の同じ規則（`ValidateNameControlCharacters`）は依存方向のため意図的に二重定義している。片方だけ変えない。
 - 合成する制約名のクォート：`PK_{SafeName(テーブル名)}` は `SafeName` が終端クォート文字を二重化しないので、埋め込み側で必ず方言の `Escape` を通す（SQLite の DDL と逐次 4 方言の同期の `CREATE TABLE`／`ADD CONSTRAINT`）。
-- 固定は `SqlTypeTextTests`・`SqlNameTextTests`（`IsSafe` の判定）・`DialectDdlTableTests` の行 `ddl-*-name-with-newline-is-rejected`（表・列・一意制約・外部キーの名前）・`sync-*-name-with-newline-is-rejected`（入口検証を 5 方言の DDL・同期へ同一ケースで。SQLite の再構築・列の変更の項目 1 つも）・`ddl-quote-apostrophe-table-and-double-quote-column-accepted`（引用符だけを含む名前は通す）・`SqlCommentTests`・`SqlCommentInjectionTests`・`SqlCommentSanitizeGuardTests`・`DialectDdlTableTests` の行 `ddl-primary-key-name-escaped`・`sync-*-primary-key-name-escaped`（合成 PK 名を 5 方言まとめて）・`DialectIdentifierTableTests`（5 方言へ同じ危険な文字の行）・`{SqlServer,PostgreSql}RuntimeConstraintNameIntegrationTests`（`]` `'` `"` を含む正当な名前・別スキーマの同名表・表が無いときの no-op）・4 方言の `*SyncScriptBuilderTests` の動的 SQL のケース・`SchemaSyncDialogViewModelTests`（プレビュー生成の失敗はステータス行へ出し、未処理例外にしない）。mutation 実証済み。
+- 固定は `SqlTypeTextTests`・`SqlNameTextTests`（`IsSafe` の判定）・`DialectDdlTableTests` の行 `ddl-*-name-with-newline-is-rejected`（表・列・一意制約・外部キーの名前）・`sync-*-name-with-newline-is-rejected`（入口検証を 5 方言の DDL・同期へ同一ケースで。SQLite の再構築・列の変更の項目 1 つも）・`ddl-quote-apostrophe-table-and-double-quote-column-accepted`（引用符だけを含む名前は通す）・`SqlCommentTests`・`SqlCommentInjectionTests`・`SqlCommentSanitizeGuardTests`・`DialectDdlTableTests` の行 `ddl-primary-key-name-escaped`・`sync-*-primary-key-name-escaped`（合成 PK 名を 5 方言まとめて）・`DialectIdentifierTableTests`（5 方言へ同じ危険な文字の行）・`{SqlServer,PostgreSql}RuntimeConstraintNameIntegrationTests`（`]` `'` `"` を含む正当な名前・別スキーマの同名表・表が無いときの no-op）・4 方言の `*SyncScriptBuilderTests` の動的 SQL のケース・`ImportSyncTests`（行 `sync-dialog-preview-generation-failure-reports-status`。プレビュー生成の失敗はステータス行へ出し、未処理例外にしない）。mutation 実証済み。
 
 ### 利用者が付けた名前の上限
 
@@ -433,7 +433,7 @@
   - 扱いの表の DefaultValue × Sync とのパリティは `CapabilityTreatmentParityTests` の `SetRules`。
   - 既定値は取込の `SchemaImportResult.ColumnDefaults` を同期の画面が `SyncPlanContext.ColumnDefaults` へ渡す（画面と同じ文脈を同期計画の総当たりも使う）。
   - 値が NULL の既定値は告げず `ColumnDefaults` にも入れない（入れると警告が根拠なく出る）。NULL の判定は共有の `SchemaImportWarnings.IsNullDefault`。
-- 固定は期待の行 `plan-default-type-kind-change-warns-only-where-declared`／`plan-default-no-warning-*`・`SchemaSyncDialogViewModelTests.Execute_TypeKindChangeWithDefault_ShowsWarningFromImportedDefaults`・各方言の `*SyncScriptBuilderTests`・方言ごとの実 DB の行（`realdb-column-type-kind-change-with-default-warns`〔SQL Server〕・`realdb-pg-column-type-kind-change-with-default-warns`・`realdb-oracle-column-type-kind-change-with-default-warns`・`realdb-mysql-column-type-kind-change-incompatible-default-warns-and-fails`）。mutation 実証済み。
+- 固定は期待の行 `plan-default-type-kind-change-warns-only-where-declared`／`plan-default-no-warning-*`・`ImportSyncTests`（行 `sync-dialog-type-kind-change-with-default-warns-from-imported-defaults`）・各方言の `*SyncScriptBuilderTests`・方言ごとの実 DB の行（`realdb-column-type-kind-change-with-default-warns`〔SQL Server〕・`realdb-pg-column-type-kind-change-with-default-warns`・`realdb-oracle-column-type-kind-change-with-default-warns`・`realdb-mysql-column-type-kind-change-incompatible-default-warns-and-fails`）。mutation 実証済み。
 
 ### テーブル再構築の合成
 

@@ -57,6 +57,10 @@ public sealed class PathSegmentEntranceFuzzTests : IDisposable
         "x.y.z",
         "COM10",
         "CONSOLE",
+        // モックのプロジェクト名で受け付けていた綴り（元の MockProjectScaffoldServiceTests の入力をそのまま）
+        "AcmeMock",
+        "Acme.Mock",
+        "Acme_Mock2",
         // 拡張子を付けても 1 区間の上限（255 文字）に収まる長い名前
         new string('a', 250),
     ];

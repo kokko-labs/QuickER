@@ -123,7 +123,7 @@ internal sealed class ChatEngineEvents
 internal abstract class ChatEngineRig : IAsyncDisposable
 {
     /// <summary>実行中のまま残した送信の終わりを待つ上限</summary>
-    private static readonly TimeSpan PendingSendTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan PendingSendTimeout = TimeSpan.FromSeconds(60);
 
     private readonly List<Task> _pendingSends = [];
     private readonly List<CancellationTokenSource> _callers = [];

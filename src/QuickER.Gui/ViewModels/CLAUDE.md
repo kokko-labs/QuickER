@@ -73,7 +73,7 @@ MainViewModel と図の ViewModel の規則：文書の保存・外部変更検�
   - ファイルの丸ごと置換とマージ取込（`DiagramImportService.AbandonIfChangedDuringConfirm`）。
   - DB 取込（`DbImportCommandService`）。
   - C# コード取込（`CodeReverseCommandService`）。取込の取りやめはダイアログで知らせる。
-- ガード：`MainViewModelTargetDbmsTests` の `ChangeDbms_DiagramReplacedDuringConfirm_IsAbandoned` / `ChangeDbms_DiagramEditedDuringConfirm_IsAbandoned`・`DiagramImportServiceTests` の `ImportExcel_` / `ImportDbml_DiagramChangedDuringConfirm_IsAbandoned`・`DbImportCommandServiceTests.RunAsync_DiagramChangedDuringConfirm_IsAbandoned`・`CodeReverseCommandServiceTests.Run_DiagramChangedDuringConfirm_IsAbandoned`・`MainViewModelErDiagramHostTests.DiagramRevision_ChangesWithEveryDiagramChange`。確認の中の処理は `StubDialogService` の `OnConfirm` / `OnConfirmWarning` / `OnConfirmWarningDetails` で模す。mutation 実証済み。
+- ガード：`MainViewModelTargetDbmsTests` の `ChangeDbms_DiagramReplacedDuringConfirm_IsAbandoned` / `ChangeDbms_DiagramEditedDuringConfirm_IsAbandoned`・`DiagramImportServiceTests` の `ImportExcel_` / `ImportDbml_DiagramChangedDuringConfirm_IsAbandoned`・`ImportSyncTests`（行 `import-diagram-changed-during-confirm-is-abandoned`・`import-dirty-diagram-changed-during-confirm-is-abandoned`。どの取込の行でも組が世代の一致を見張る）・`CodeReverseCommandServiceTests.Run_DiagramChangedDuringConfirm_IsAbandoned`・`MainViewModelErDiagramHostTests.DiagramRevision_ChangesWithEveryDiagramChange`。確認の中の処理は `StubDialogService` の `OnConfirm` / `OnConfirmWarning` / `OnConfirmWarningDetails` で模す。mutation 実証済み。
 - `ReplaceDiagram` での加算は外しても緑のまま。置き換えの呼び出しはすべて履歴を消して世代も進むので、二重の守りになっている。
 
 ## 図の一括置換
