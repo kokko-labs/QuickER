@@ -211,7 +211,7 @@ internal abstract record MarkdownRule
             return [];
         }
 
-        // パースは GeneratedCodeCompiler の 1 か所だけで行う（SourceParseEntryGuardTests）。コンパイルはしない
+        // パースは GeneratedCodeCompiler の 1 か所だけで行う（SourceRuleTests の規則 direct-roslyn-parses）。コンパイルはしない
         var compilation = GeneratedCodeCompiler.CreateCompilation(
             blocks.Select((code, index) => ($"Example{index}.cs", code)),
             $"QuickER.CodegenConfig.Markdown.{Guid.NewGuid():N}"

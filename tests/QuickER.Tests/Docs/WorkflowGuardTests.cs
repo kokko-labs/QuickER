@@ -34,11 +34,17 @@ namespace QuickER.Tests.Docs;
 /// <c>dotnet.cmd</c>）に差し替え、検証スクリプトも差し替えるので、本物のパックは走らない。
 /// 公開済みの版の確認は、localhost に立てた偽の flat container を照会させる。
 /// </para>
+/// <para>
+/// ワークフローどうし・ワークフローと正本の値の一致は照合の表（<c>ParityTests</c> の行 <c>nightly-actions-pinned-like-other-workflows</c>・
+/// <c>nightly-jobs</c>・<c>nightly-job-test-commands</c>・<c>nightly-job-engine-profile</c>・<c>release-vpk-version</c>・
+/// <c>release-vpk-pack-runtime</c>・<c>pack-velopack-vpk-pack-runtime</c>）へ移した。ここに残すのは 1 ファイルの書き方の規則と、
+/// スクリプトを実際に動かす検査と、行が呼ぶ YAML の読み取り器。
+/// </para>
 /// </remarks>
 public sealed class WorkflowGuardTests
 {
     /// <summary>リポジトリのルート</summary>
-    private static readonly string Root = NeutralResxFiles.FindRepositoryRoot();
+    internal static readonly string Root = NeutralResxFiles.FindRepositoryRoot();
 
     /// <summary>パック用スクリプト（公開パッケージの一覧の正本）のパス</summary>
     private static readonly string PackScriptPath = Path.Combine(
@@ -211,36 +217,6 @@ public sealed class WorkflowGuardTests
         AssertTempOnRunnerTemp(body);
     }
 
-    /// <summary>夜間のワークフローのアクションは、ほかのワークフロー（ci.yml か release.yml）と同じ commit SHA で固定する</summary>
-    /// <remarks>
-    /// タグは可変で、上流の付け替えで実行内容が黙って差し替わる。Dependabot は SHA とバージョンコメントを両方書き換えるので、
-    /// ワークフローどうしの行が同じなら、更新の PR もまとめて持ってくる。夜間のワークフローで初めて使うアクションを足さない。
-    /// </remarks>
-    [Fact(
-        DisplayName = "nightly.yml のアクションは ci.yml か release.yml と同じ commit SHA で固定する"
-    )]
-    public void Nightly_PinsActionsToSameShasAsOtherWorkflows()
-    {
-        var uses = UsesLines(ReadWorkflow("nightly.yml"));
-        var otherUses = UsesLines(ReadWorkflow("ci.yml"))
-            .Concat(UsesLines(ReadWorkflow("release.yml")))
-            .ToHashSet(StringComparer.Ordinal);
-
-        uses.Should().NotBeEmpty("nightly.yml から uses を読み取れなかった");
-
-        foreach (var line in uses)
-        {
-            line.Should()
-                .MatchRegex(
-                    @"^[\w.-]+/[\w.-]+@[0-9a-f]{40} # v\S+$",
-                    "アクションは 40 桁の commit SHA とバージョンコメントで固定する"
-                );
-            otherUses
-                .Should()
-                .Contain(line, "ci.yml か release.yml と同じ SHA・同じバージョンコメントにする");
-        }
-    }
-
     /// <summary>夜間のワークフローは定時と手動でだけ動く</summary>
     /// <remarks>
     /// push・pull_request で動くと、夜間の種の数（1 ジョブ 30〜60 分）が普段の変更のたびに走る。
@@ -268,37 +244,6 @@ public sealed class WorkflowGuardTests
             .Where(line => line.Length > 0 && !line.StartsWith('#'))
             .Should()
             .Equal("contents: read");
-    }
-
-    /// <summary>夜間のワークフローは 2 つのジョブで、夜間のプロファイルと目印の絞り込みでエンジンを流す</summary>
-    /// <remarks>
-    /// プロファイルが消えると普段の種の数で流れ（夜間に何も深く流さないのに緑）、絞り込みが消えるとエンジン以外の全テストが
-    /// 流れて時間の上限を超える。どちらも手元のテストでは気付けない。
-    /// </remarks>
-    [Fact(
-        DisplayName = "nightly.yml の 2 つのジョブは夜間のプロファイルと NightlyEngine の絞り込みでテストを流す"
-    )]
-    public void Nightly_JobsRunNightlyEngines()
-    {
-        var jobs = Jobs(ReadWorkflow("nightly.yml"));
-
-        jobs.Keys.Should().BeEquivalentTo(NightlyJobs.Keys);
-
-        foreach (var (job, project) in NightlyJobs)
-        {
-            var step = NightlyTestStep(jobs[job]);
-            step.Should()
-                .Contain(
-                    $"dotnet test {project} --filter \"{NightlyEngineTrait.Name}={NightlyEngineTrait.Selected}\"",
-                    $"{job} は {project} の目印のテストだけを流す"
-                );
-            Regex
-                .IsMatch(step, $@"(?m)^\s+{SeedSource.ProfileVariable}: {SeedSource.NightlyValue}$")
-                .Should()
-                .BeTrue(
-                    $"{job} の手順は {SeedSource.ProfileVariable} を {SeedSource.NightlyValue} にする"
-                );
-        }
     }
 
     /// <summary>夜間の実 DB のジョブは厳格モードで流す</summary>
@@ -435,70 +380,6 @@ public sealed class WorkflowGuardTests
             );
     }
 
-    /// <summary>配布物を作る vpk は、アプリが参照する Velopack と同じ版を入れる</summary>
-    /// <remarks>
-    /// 版が食い違うと、配布物の形式とアプリ内の自動更新の仕組みが合わなくなり得る。
-    /// その破損はリリース後の自動更新まで分からないので、Directory.Packages.props と並べて照合する。
-    /// </remarks>
-    [Fact(
-        DisplayName = "release.yml が入れる vpk の版は Directory.Packages.props の Velopack の版と同じ"
-    )]
-    public void ReleaseVpk_MatchesVelopackPackageVersion()
-    {
-        var velopack = Regex.Match(
-            File.ReadAllText(Path.Combine(Root, "Directory.Packages.props")),
-            @"<PackageVersion\s+Include=""Velopack""\s+Version=""(?<version>[^""]+)""\s*/>"
-        );
-        velopack.Success.Should().BeTrue("Directory.Packages.props に Velopack の版がある");
-
-        Regex
-            .Matches(
-                ReadWorkflow("release.yml"),
-                @"dotnet tool install --global vpk --version (?<version>\S+)"
-            )
-            .Select(match => match.Groups["version"].Value)
-            .Should()
-            .ContainSingle()
-            .Which.Should()
-            .Be(velopack.Groups["version"].Value);
-    }
-
-    /// <summary>vpk pack は、同じファイルの dotnet publish と同じランタイムを宣言する</summary>
-    /// <remarks>
-    /// vpk は <c>--runtime</c> が無いと x86 と見なし、配布物に入る Velopack の実行ファイル（起動用の実行ファイルと
-    /// Update.exe）を x86 にする。アプリは x64 で publish しているので、publish の <c>-r</c> と並べて照合する。
-    /// </remarks>
-    [Theory(
-        DisplayName = "release.yml と pack-velopack.ps1 の vpk pack は、dotnet publish の -r と同じ --runtime を持つ"
-    )]
-    [InlineData(".github/workflows/release.yml")]
-    [InlineData("scripts/pack-velopack.ps1")]
-    public void VpkPack_DeclaresPublishRuntime(string relativePath)
-    {
-        var text = File.ReadAllText(Path.Combine(Root, relativePath));
-        var publishRuntimes = Regex
-            .Matches(text, @"dotnet publish [^\r\n]*?-r (?<runtime>\S+)")
-            .Select(match => match.Groups["runtime"].Value)
-            .Distinct()
-            .ToList();
-        var packLines = Regex
-            .Matches(text, @"vpk pack --[^\r\n]*")
-            .Select(match => match.Value)
-            .ToList();
-
-        publishRuntimes.Should().ContainSingle("publish は 1 つのランタイムで行う");
-        packLines.Should().NotBeEmpty("vpk pack を実行する行がある");
-
-        foreach (var line in packLines)
-        {
-            Regex
-                .Match(line, @"--runtime (?<runtime>\S+)")
-                .Groups["runtime"]
-                .Value.Should()
-                .Be(publishRuntimes[0], $"vpk pack の行: {line}");
-        }
-    }
-
     /// <summary>公開済みの版の確認は本番の公開だけで push の前に走り、push は --skip-duplicate を残す</summary>
     [Fact(
         DisplayName = "publish.yml は push の前に公開済みの版を確認し、push は --skip-duplicate のまま"
@@ -585,7 +466,7 @@ public sealed class WorkflowGuardTests
     }
 
     /// <summary>夜間のワークフローのジョブと、それが流すテストのプロジェクト</summary>
-    private static readonly IReadOnlyDictionary<string, string> NightlyJobs = new Dictionary<
+    internal static readonly IReadOnlyDictionary<string, string> NightlyJobs = new Dictionary<
         string,
         string
     >
@@ -612,7 +493,7 @@ public sealed class WorkflowGuardTests
     }
 
     /// <summary>ワークフローの uses の値（出てくる順）</summary>
-    private static List<string> UsesLines(string workflow) =>
+    internal static List<string> UsesLines(string workflow) =>
         Regex
             .Matches(workflow, @"(?m)^\s*(?:-\s+)?uses:\s*(?<value>\S[^\r\n]*?)\s*$")
             .Select(match => match.Groups["value"].Value)
@@ -641,7 +522,7 @@ public sealed class WorkflowGuardTests
             .ToList();
 
     /// <summary>jobs のジョブごとの本文（ジョブ名 → 本文）</summary>
-    private static Dictionary<string, string> Jobs(string workflow)
+    internal static Dictionary<string, string> Jobs(string workflow)
     {
         var jobs = new Dictionary<string, string>(StringComparer.Ordinal);
         string? current = null;
@@ -679,7 +560,7 @@ public sealed class WorkflowGuardTests
         Regex.Split(jobBody, @"(?m)^(?=      - )").Skip(1).ToList();
 
     /// <summary>ジョブの中の dotnet test の手順（ちょうど 1 つ）の本文</summary>
-    private static string NightlyTestStep(string jobBody)
+    internal static string NightlyTestStep(string jobBody)
     {
         var steps = JobSteps(jobBody)
             .Where(step => step.Contains("dotnet test", StringComparison.Ordinal))
@@ -691,7 +572,7 @@ public sealed class WorkflowGuardTests
     }
 
     /// <summary>ワークフローの本文を読む</summary>
-    private static string ReadWorkflow(string fileName) =>
+    internal static string ReadWorkflow(string fileName) =>
         File.ReadAllText(Path.Combine(Root, ".github", "workflows", fileName));
 
     /// <summary>pack-packages.ps1 の一覧に並ぶ csproj のファイル名を、並び順のまま読む</summary>

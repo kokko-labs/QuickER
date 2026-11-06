@@ -1,7 +1,5 @@
-using System.IO;
 using AwesomeAssertions;
 using QuickER.AI;
-using QuickER.Tests.Resources;
 using AiStrings = QuickER.AI.Resources.Strings;
 
 namespace QuickER.Tests.AI;
@@ -12,7 +10,8 @@ namespace QuickER.Tests.AI;
 /// <remarks>
 /// この 2 つは 4 エンジンで同じでなければならないが、4 箇所へ写していた間に実際にずれた
 /// （通知を保護していないエンジン・通知の失敗を「応答送信の失敗」と表示するエンジン）。
-/// 作法そのものはここで、4 エンジンがそこを通ることは末尾のソースガードで固定する。
+/// 作法そのものはここで、4 エンジンがそこを通ることは <c>SourceRuleTests</c> の規則
+/// <c>chat-engine-tool-invocation-uses</c>・<c>chat-engine-tool-invocation-copies</c> で固定する。
 /// </remarks>
 public class ChatToolInvocationTests
 {
@@ -177,32 +176,5 @@ public class ChatToolInvocationTests
 
         act.Should().NotThrow();
         statuses.Should().BeEmpty();
-    }
-
-    /// <summary>4 エンジンが共有ヘルパーを通していることをソース上で固定する</summary>
-    /// <remarks>
-    /// 作法を写し取ると、また同じずれ（保護漏れ・文言違い）が起きる。エンジン側に生の文言や
-    /// 裸の通知が残っていないことまで見張る。
-    /// </remarks>
-    [Theory(DisplayName = "4 エンジンは共有ヘルパーを通す")]
-    [InlineData("ChatTurnEngine.cs")]
-    [InlineData("ClaudeCodeChatEngine.cs")]
-    [InlineData("CodexChatEngine.cs")]
-    [InlineData("CopilotChatEngine.cs")]
-    public void Engines_GoThroughTheSharedHelper(string fileName)
-    {
-        var source = File.ReadAllText(
-            Path.Combine(NeutralResxFiles.FindRepositoryRoot(), "src", "QuickER.AI", fileName)
-        );
-
-        source.Should().Contain("ChatToolInvocation.Execute(");
-        source.Should().Contain("ChatToolInvocation.Notify(");
-        source.Should().NotContain("threw an exception:", "失敗結果の文言はヘルパー 1 箇所に置く");
-        source
-            .Should()
-            .NotContain(
-                "ToolActivityReceived?.Invoke(",
-                "保護しない裸の通知を残さない（ヘルパー経由にする）"
-            );
     }
 }

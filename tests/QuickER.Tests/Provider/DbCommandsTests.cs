@@ -12,7 +12,7 @@ namespace QuickER.Tests.Provider;
 /// <remarks>
 /// スキーマ取込・同期のコマンドは全方言がこのヘルパー経由で作られるため、ここが「タイムアウトを必ず設定する」
 /// ことがそのまま 5 方言の保証になる（生成箇所を迂回できないことは
-/// <see cref="SchemaCommandTimeoutGuardTests"/> が構造的に固定する）。
+/// SourceRuleTests の規則 <c>schema-command-bypasses</c>・<c>schema-command-helper-uses</c> が構造的に固定する）。
 /// </remarks>
 public class DbCommandsTests
 {

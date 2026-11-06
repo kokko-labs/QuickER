@@ -18,7 +18,7 @@
 
 ### 素の比較を残す例外
 
-次の 4 種類だけ。理由つきで `SchemaNamesGuardTests` の一覧に載せる。
+次の 4 種類だけ。理由つきで `SourceRuleTests` の規則 `schema-name-comparisons` の既知の一覧に載せる。
 
 - DB 取込のカタログの照合（`SchemaTableEntry.TryGetExact` / `TryGetColumnExact`）。DB には `Dup` と `dup` が共存し得るので序数一致で引く。衝突の判定は `KeyComparer` / `ColumnsByName` が `SchemaNames` の規則で行い、後着を `TableNameCollision` / `ColumnNameCollision` で捨てる。
 - 生 SQL のパラメータの束縛（`RawSqlAnalyzer` の Ordinal）。実行時のバインダと IN 展開が区別する。`DECLARE` したローカル変数は束縛と無関係なので区別しない。
@@ -35,8 +35,8 @@
 
 ### ガード
 
-- `SchemaNamesGuardTests`：`src/` の素の比較・変換を構文木で全数拾い、一覧と厳密に一致させる。拾う単位は文で、一覧の項目は 1 つずつ文を消費する。`Unmigrated` は 0 でなければならない（`Unmigrated_IsEmpty`）。比較の指定は修飾を除いた右端の 2 つの名前で見る（`System.StringComparison.Ordinal`・`global::System.StringComparer.Ordinal` の綴りでも拾う）。
-- `SyncNameComparisonGuardTests`：同期の差分と計画の 4 ファイル（`SchemaDiffService` / `SyncPlanner` / `NameMatching` / `UniqueConstraintNaming`）に、`Trim` 系・`ToLower` / `ToUpper` 系・大小を無視する比較の指定が識別子として現れないこと。比較器をフィールドに入れて使う形や、引数名がモデルの名前でないキーの関数は本体のガードが拾えないための補助。Ordinal は綴りの判定とキーどうしの比較にだけ使ってよい。
+- `SourceRuleTests` の規則 `schema-name-comparisons`：`src/` の素の比較・変換を構文木で全数拾い、理由つきの既知の一覧と件数まで厳密に一致させる。拾う単位は文で、何かは文のトークンを空白なしで連結した先頭 90 字（一覧はファイル・先頭 90 字・件数）。未移行の置き場は持たない（新しい出現は直すか、理由つきの例外として一覧に載せる）。比較の指定は修飾を除いた右端の 2 つの名前で見る（`System.StringComparison.Ordinal`・`global::System.StringComparer.Ordinal` の綴りでも拾う）。
+- `SourceRuleTests` の規則 `sync-name-comparison-tokens`：同期の差分と計画の 4 ファイル（`SchemaDiffService` / `SyncPlanner` / `NameMatching` / `UniqueConstraintNaming`）に、`Trim` 系・`ToLower` / `ToUpper` 系・大小を無視する比較の指定が識別子として現れないこと。比較器をフィールドに入れて使う形や、引数名がモデルの名前でないキーの関数は本体のガードが拾えないための補助。Ordinal は綴りの判定とキーどうしの比較にだけ使ってよい。
 - `SchemaNamesKeyTests`：Unicode の全スカラー値で `Key` の一致が `AreSame` と同じ。前後の空白の扱い・対になっていないサロゲートも固定する。
 - mutation 実証済み。
 
@@ -68,7 +68,7 @@
 
 ガード：
 
-- `ConstraintNamesGuardTests`：`src/` を走査して置換規則の写しと既定名の組み立てを検出する。`string.Concat` 等の別の形はすり抜ける（検出する形は XmlDoc に明記）。
+- `SourceRuleTests` の規則 `constraint-name-safe-rule-copies`・`constraint-name-default-compositions`：`src/` を走査して置換規則の写しと既定名の組み立てを検出する。`string.Concat` 等の別の形はすり抜ける（検出する形は規則の表のコメントに明記）。
 - `DialectDdlTableTests` の行 `ddl-*-trimmed-table`・`sync-*-trimmed-table`：前後に空白のあるテーブル名で DDL と同期の FK 名・PK 名が 5 方言とも一致する。
 - `ConstraintNameCreationPathTests`：3 つの作成経路が同じ FK 名・要約の一意制約名で DDL と一致する。作成経路の照合を `ErDiagramToolHostParityTests` へ載せないのは、2 つのツールホストどうしを比べるテストは両方が同時に退行しても緑のままになるため。
 - `ConstraintNamesTests`（`ResolveUniqueConstraintNames_NumbersOnlyCollidingSynthesizedNames` を含む）・`UnnamedForeignKeyNamingTests`（5 方言の DDL・同期スクリプト・作り直しの同期スクリプト）
@@ -85,7 +85,7 @@ QuickER が付ける既定の制約名は識別子の長さの上限に収め、
 - 省略可能にしない。既定値の上限なしで黙って縮めない呼び出しが残り、SQL Server・MySQL・Oracle では DDL の適用が断られ、PostgreSQL では黙って切り詰められて取り込み直すと別の名前になる。
 - 経路 (1)：図へ保存しない名前（DDL・同期スクリプト・差分・同期の計画）は DDL・同期の方言の上限。`DdlGeneratorBase.IdentifierLimit` / `SyncScriptBuilderBase.IdentifierLimit`（抽象で、方言が宣言を忘れるとビルドで止まる）、差分と計画は `SyncDialectCapabilities.IdentifierLengthLimit`。DDL の方言は図の対象 DBMS と食い違い得るので図からは引かない。
 - 経路 (2)：図へ保存する名前（ツール・GUI の手作成の外部キー名・取込と C# リバースの `NameUnnamedForeignKeys`）と、図の名前として見せる合成名（C# 生成の `[UniqueConstraint(Name = …)]`・ツールの要約・プロパティパネルの一意制約名）は図の対象 DBMS の上限（`IdentifierLengthLimits.ForDiagramTarget(TargetDbms)`）。
-  - GUI は `MainViewModel.CurrentIdentifierLimit()`。図を受け取る `CollectExisting` / `IsTaken` / `ResolveForeignKeyNamesById` と `NameLimitNotes.Find` も上限を引数で受ける。Model は方言名から上限を引かない（`ModelDialectLookupGuardTests`＝Model のソースの `IdentifierLengthLimits` の参照を構文木で数える。既知の一覧なし）。
+  - GUI は `MainViewModel.CurrentIdentifierLimit()`。図を受け取る `CollectExisting` / `IsTaken` / `ResolveForeignKeyNamesById` と `NameLimitNotes.Find` も上限を引数で受ける。Model は方言名から上限を引かない（`SourceRuleTests` の規則 `model-dialect-lookups`＝Model のソースの `IdentifierLengthLimits` の参照を構文木で数える。既知の一覧なし）。
   - DBML・Mermaid の取込は対象 DBMS を引数で受けて返す図の `TargetDbms` にする。Excel 定義書は宣言が無ければ取込先の図の対象 DBMS。
   - 経路の正本は `ConstraintNames` の XmlDoc。
 - PostgreSQL の既存 DB の吸収：長い既定名をそのまま DDL へ書くと PostgreSQL が 63 バイトで切り詰めて保存する。差分は、名前の無いリレーションに限り、live の名前が「縮める前の名前を `IdentifierLengthLimit.Truncate` で切ったもの」なら同じ外部キーとみなす。
@@ -125,7 +125,7 @@ QuickER が付ける既定の制約名は識別子の長さの上限に収め、
   - 名前の段の照合には使わない（図で名前を付けた制約だけを組む）。外部キー名の解決と `CollectExisting` もこの名前を避ける・数える。
   - ぶつかると、制約名・索引名がスキーマ単位の SQL Server・PostgreSQL・Oracle と、外部キーの索引名を持つ MySQL で、DDL・同期が名前の重複で失敗する。
   - 同期計画の総当たりの行：`{方言}-386-synthesized-unique-name`・`{方言}-synthesized-unique-name-cross-table`・`{方言}-synthesized-unique-name-foreign-key`。
-  - ガード：`ConstraintNamesTests.ResolveUniqueConstraintNames_NumbersOnlyCollidingSynthesizedNames`・`ConstraintNamesGuardTests.SynthesizeName_IsCalledOnlyByTheResolver`（構文木で数える。自己検査つき）・`ConstraintNameCreationPathTests` / `CodegenCaseTests` の行 `code-unique-constraint-name-*` のぶつかる行・`UniqueConstraintResolvedNameLimitTests.ResolvedName_FollowsCollisionsAcrossTables`。mutation 実証済み。
+  - ガード：`ConstraintNamesTests.ResolveUniqueConstraintNames_NumbersOnlyCollidingSynthesizedNames`・`SourceRuleTests` の規則 `unique-constraint-synthesize-name-calls`（構文木で数える。自己検査の行 `unique-constraint-synthesize-name-calls-forms`）・`ConstraintNameCreationPathTests` / `CodegenCaseTests` の行 `code-unique-constraint-name-*` のぶつかる行・`UniqueConstraintResolvedNameLimitTests.ResolvedName_FollowsCollisionsAcrossTables`。mutation 実証済み。
 - 1 対 1 判定はモデルの `UniqueConstraints` を参照する（取込時判定・以降の自動再計算なし）。
 - `SchemaSignature` へ含める。UNIQUE だけの差でも置換確認が出る。
 - 文書 JSON は v1 のまま後方互換（旧ファイルは空リスト。`src/QuickER.Document/CLAUDE.md`「図ファイル形式の前方互換」）。

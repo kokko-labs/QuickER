@@ -1,12 +1,7 @@
-using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using AwesomeAssertions;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using QuickER.Provider;
-using QuickER.Tests.Resources;
-using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Provider;
 
@@ -23,6 +18,7 @@ namespace QuickER.Tests.Provider;
 /// (2) ソースのプロパティ宣言が初期化子を持たない（<c>required</c> と初期化子は両立し、既定値が残っても
 /// ビルドは通るため、構文木で確かめる）。
 /// </para>
+/// <para>(2) はソースの規則の表へ移した（SourceRuleTests の規則 <c>sync-capabilities-initializers</c>）。このクラスは (1) の反射だけを持つ。</para>
 /// </remarks>
 public sealed class SyncDialectCapabilitiesNoDefaultsTests
 {
@@ -36,32 +32,5 @@ public sealed class SyncDialectCapabilitiesNoDefaultsTests
             .ToList();
 
         notRequired.Should().BeEmpty("方言の宣言に既定値を持たせない（規則 2）");
-    }
-
-    [Fact(DisplayName = "能力の宣言のプロパティは初期化子（既定値）を持たない")]
-    public void Properties_HaveNoInitializers()
-    {
-        var path = Path.Combine(
-            NeutralResxFiles.FindRepositoryRoot(),
-            "src",
-            "QuickER.Provider",
-            "SyncDialectCapabilities.cs"
-        );
-        var variants = ConditionalSourceParse.Parse(
-            File.ReadAllText(path),
-            cancellationToken: TestContext.Current.CancellationToken
-        );
-        var withInitializer = ConditionalSourceParse
-            .DescendantNodes(variants, TestContext.Current.CancellationToken)
-            .OfType<PropertyDeclarationSyntax>()
-            .Where(property =>
-                property.Parent is RecordDeclarationSyntax record
-                && record.Identifier.ValueText == nameof(SyncDialectCapabilities)
-            )
-            .Where(property => property.Initializer is not null)
-            .Select(property => property.Identifier.ValueText)
-            .ToList();
-
-        withInitializer.Should().BeEmpty("方言の宣言に既定値を持たせない（規則 2）");
     }
 }

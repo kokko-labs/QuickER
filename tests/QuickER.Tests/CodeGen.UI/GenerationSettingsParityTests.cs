@@ -22,31 +22,18 @@ namespace QuickER.Tests.CodeGen.UI;
 /// 後から足したプロパティも書き足しなしに網に入る。対応から外すのは、設定の <c>OutputPath</c>（出力先のパス）と
 /// オプションの <c>OutputFileName</c>（ファイル名だけ）の 1 組だけ（意味が違うので名前で対応しない）。
 /// </para>
+/// <para>
+/// 設定とオプションのキーの 1:1 は照合の表（<c>ParityTests</c> の行 <c>generation-settings-keys-match-options</c>）が見る。
+/// ここに残すのは値の受け渡しとダイアログの往復（製品を実行する振る舞い）と、その網羅の自己検査。
+/// </para>
 /// </remarks>
 public sealed class GenerationSettingsParityTests
 {
     /// <summary>設定だけにあるキー（出力先のパス。オプションのファイル名へは呼び出し側が分けて渡す）</summary>
-    private const string SettingsOnly = nameof(CSharpGenerationSettings.OutputPath);
+    internal const string SettingsOnly = nameof(CSharpGenerationSettings.OutputPath);
 
     /// <summary>オプションだけにあるキー（ファイル名だけ）</summary>
-    private const string OptionsOnly = nameof(CodeGenerationOptions.OutputFileName);
-
-    [Fact(DisplayName = "設定のキーと生成オプションのキーは 1:1 に対応する（出力先の 1 組を除く）")]
-    public void SettingsAndOptions_HaveTheSameKeys()
-    {
-        var settings = OptionKeys
-            .Writable(typeof(CSharpGenerationSettings))
-            .Select(property => property.Name)
-            .Where(name => name != SettingsOnly)
-            .Order(StringComparer.Ordinal);
-        var options = OptionKeys
-            .Writable(typeof(CodeGenerationOptions))
-            .Select(property => property.Name)
-            .Where(name => name != OptionsOnly)
-            .Order(StringComparer.Ordinal);
-
-        settings.Should().Equal(options);
-    }
+    internal const string OptionsOnly = nameof(CodeGenerationOptions.OutputFileName);
 
     [Fact(DisplayName = "設定の全キーを既定と違う値にすると、生成オプションへ同じ値が渡る")]
     public void ToCodeGenerationOptions_CarriesEveryValue()

@@ -24,12 +24,18 @@ namespace QuickER.Tests.Docs;
 /// 省略は展開する。直前が <c>*</c> の名前（<c>*DdlGeneratorTests</c>）はパターンなので照合しない。
 /// (2) <c>XxxTests.cs</c> はファイルの実在、<c>XxxTests.Method</c> はそのクラスを宣言するファイルにメソッド名が
 /// 現れることで照合する（メソッド名が <c>_</c> で終わるか直後が <c>*</c> なら前方一致）。
-/// (3) 期待の行・シナリオの Id は、決まった接頭辞（<see cref="RowIdPrefix"/>）で始まりハイフンを含む
-/// バッククォートの語を拾い、tests/ の C# ソースに現れることで照合する。Id の多くは
+/// (3) 期待の行・シナリオの Id は、ハイフンを含みハイフンで終わらないバッククォートの小文字の語のうち、
+/// 最初のハイフンまでの語が行 Id の接頭辞の集合（<see cref="RowIdPrefixesOf"/>）にあるものを拾い、tests/ の
+/// C# ソースに現れることで照合する。接頭辞の集合は手で持たず、tests/ の C# ソースの文字列リテラル
+/// （補間・連結の先頭を含む）の先頭の、最初のハイフンまでの語から作る（表に新しい接頭辞の行を足せば、
+/// そのまま照合の対象に入る）。接頭辞が当たる行 Id でない語は、理由つきの既知の一覧
+/// （<see cref="NotRowIds"/>）に置く。Id の多くは
 /// <c>$"realdb-column-drop-{…}"</c> や <c>"realdb-pk-on-new-column-" + shape</c> のように組み立てるので、
 /// ハイフンで切った接頭辞（ハイフン 2 つ以上）が補間か連結の直前（<c>P{</c> / <c>P"</c>）に現れるか、
 /// 接頭辞と残りの文字列リテラル <c>"S"</c> の両方が現れれば実在とみなす（組み立てる Id は接頭辞までしか
-/// 照合できない）。<c>*</c> を含む Id は断片ごとに照合する。
+/// 照合できない）。<c>*</c> を含む Id は断片ごとに照合し、ハイフンで始まる断片は、そのまま現れるか、
+/// 先頭のハイフンを外した文字列リテラルの先頭（<c>"S</c>）として現れればよい（<c>$"module-{a}-{b}"</c> の
+/// 後ろを別のリテラルで組み立てる形）。
 /// (4) 別の CLAUDE.md は <c>`path/CLAUDE.md`</c> の形（リポジトリのルートからの相対パス）で書き、直後の
 /// 「」に見出しを書いたときは、その CLAUDE.md にその文字列の見出し（<c>#</c> の行）があることを照合する。
 /// 書式を変えるときはこの契約も更新すること。
@@ -55,9 +61,43 @@ public class ClaudeMdReferenceTests
         "tasks",
     };
 
-    /// <summary>期待の行・シナリオの Id の接頭辞</summary>
-    internal const string RowIdPrefix =
-        "(?:plan|diff|realdb|repro|coverage|pass|graph|blob|sw|fk|rec|lww|hook|conc|replay|prop|refresh|ef|h[0-9]|interrupt|d[0-9]|n[0-9]|catalog|convert|format|fullwidth|import-spelling|lengthless|map|matrix|normalize|param|parse|roundtrip|safe|token|ddl|sync|quote|escape|dynamic|runtime|split|describe|heading|dbml|mermaid|excel|html|csharp|merge|injection|culture|fixture)";
+    /// <summary>
+    /// 行 Id の接頭辞が当たるのに行 Id でない語（CLAUDE.md のパス・語・理由）。照合は件数まで 2 方向
+    /// （<see cref="TestSupport.GuardKnownList"/>）で、CLAUDE.md から消えた語や tests/ に現れるようになった語は赤になる
+    /// </summary>
+    internal static readonly (string Path, string Word, string Reason)[] NotRowIds =
+    [
+        (
+            "src/QuickER.Provider/CLAUDE.md",
+            "a--b",
+            "SQLite が返す宣言型の任意のテキストの例（行 Id でない）"
+        ),
+        (
+            "tests/QuickER.Tests/TestSupport/CLAUDE.md",
+            "integration-nightly-trx",
+            "nightly.yml の成果物の名前（ワークフローの値で、テストのソースには無い）"
+        ),
+        (
+            "tests/QuickER.Tests/TestSupport/CLAUDE.md",
+            "unit-nightly-trx",
+            "nightly.yml の成果物の名前（ワークフローの値で、テストのソースには無い）"
+        ),
+    ];
+
+    /// <summary>行 Id の候補（バッククォートで囲まれ、ハイフンを含み、ハイフンで終わらない小文字の語）</summary>
+    private static readonly Regex RowIdCandidate = new(
+        "`([a-z][0-9a-z]*-[-0-9a-z*]*[0-9a-z*])`",
+        RegexOptions.CultureInvariant
+    );
+
+    /// <summary>文字列リテラル（補間・連結の先頭を含む）の先頭の、最初のハイフンまでの語</summary>
+    private static readonly Regex LiteralRowIdPrefix = new(
+        "\"([a-z][0-9a-z]*)-[0-9a-z{\"]",
+        RegexOptions.CultureInvariant
+    );
+
+    /// <summary>行 Id の候補の最初のハイフン（か <c>*</c>）までの語</summary>
+    private static readonly Regex LeadingSegment = new("^[0-9a-z]+", RegexOptions.CultureInvariant);
 
     /// <summary>中括弧の省略 <c>Prefix{A,B}Suffix</c></summary>
     private static readonly Regex BraceAbbreviation = new(
@@ -68,12 +108,6 @@ public class ClaudeMdReferenceTests
     /// <summary>テストの名前（直後の <c>.cs</c> / <c>.Method</c> / <c>*</c> も読む）</summary>
     private static readonly Regex TestName = new(
         @"(?<![A-Za-z0-9_*.])([A-Z][A-Za-z0-9_]*Tests(?:Base)?)(\.cs\b|\.([^\W\d]\w*)(\*)?)?(?![A-Za-z0-9_])",
-        RegexOptions.CultureInvariant
-    );
-
-    /// <summary>期待の行・シナリオの Id（バッククォートで囲まれ、ハイフンを含み、ハイフンで終わらない）</summary>
-    private static readonly Regex RowId = new(
-        "`(" + RowIdPrefix + "[-0-9a-z]*-[-0-9a-z*]*[0-9a-z*])`",
         RegexOptions.CultureInvariant
     );
 
@@ -91,7 +125,25 @@ public class ClaudeMdReferenceTests
         IReadOnlySet<string> FileNames,
         IReadOnlyDictionary<string, List<string>> Declarations,
         string AllText
-    );
+    )
+    {
+        /// <summary>行 Id の接頭辞の集合（<see cref="RowIdPrefixesOf"/>）</summary>
+        public IReadOnlySet<string> RowIdPrefixes { get; } = RowIdPrefixesOf(AllText);
+    }
+
+    /// <summary>
+    /// 行 Id の接頭辞の集合：ソースの文字列リテラル（補間・連結の先頭を含む）の先頭の、最初のハイフンまでの語
+    /// </summary>
+    /// <remarks>
+    /// 行 Id は表の行の文字列リテラル（<c>"realdb-…"</c>・<c>$"module-{…}"</c>・<c>"coverage-" + x</c>）なので、
+    /// その先頭の語を集めれば、手で接頭辞を足さなくても新しい表の行が照合の対象に入る。
+    /// </remarks>
+    /// <param name="source">tests/ の全ソース</param>
+    internal static IReadOnlySet<string> RowIdPrefixesOf(string source) =>
+        LiteralRowIdPrefix
+            .Matches(source)
+            .Select(match => match.Groups[1].Value)
+            .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>tests/ のソース（1 回だけ読む）</summary>
     private static readonly Lazy<TestSources> Sources = new(ReadTestSources);
@@ -180,7 +232,13 @@ public class ClaudeMdReferenceTests
 
             fileNames.Add(Path.GetFileName(path));
             var source = File.ReadAllText(path);
-            all.Add(source);
+
+            // このファイル自身は Id の照合の本文に入れない（行 Id でない語の一覧と自己検査の架空の Id が写り込み、
+            // 一覧の語や架空の Id が tests/ に実在するように見えてしまう）。宣言とファイル名の照合には入れる
+            if (Path.GetFileName(path) != nameof(ClaudeMdReferenceTests) + ".cs")
+            {
+                all.Add(source);
+            }
 
             foreach (Match match in declaration.Matches(source))
             {
@@ -252,9 +310,14 @@ public class ClaudeMdReferenceTests
     {
         var missing = new SortedSet<string>(StringComparer.Ordinal);
 
-        foreach (Match match in RowId.Matches(text))
+        foreach (Match match in RowIdCandidate.Matches(text))
         {
             var id = match.Groups[1].Value;
+
+            if (!sources.RowIdPrefixes.Contains(LeadingSegment.Match(id).Value))
+            {
+                continue;
+            }
 
             if (!RowIdExists(id, sources.AllText))
             {
@@ -277,7 +340,14 @@ public class ClaudeMdReferenceTests
             !fragments
                 .Skip(1)
                 .Where(f => f.Length > 0)
-                .All(f => source.Contains(f, StringComparison.Ordinal))
+                .All(f =>
+                    source.Contains(f, StringComparison.Ordinal)
+                    || (
+                        f.Length > 1
+                        && f[0] == '-'
+                        && source.Contains("\"" + f[1..], StringComparison.Ordinal)
+                    )
+                )
         )
         {
             return false;
@@ -398,19 +468,21 @@ public class ClaudeMdReferenceTests
     {
         var files = ClaudeMdFiles();
 
-        var problems = files
+        var found = files
             .SelectMany(file =>
-                FindMissingRowIds(file.Value, Sources.Value).Select(id => $"{file.Key}: {id}")
+                FindMissingRowIds(file.Value, Sources.Value).Select(id => (file.Key, id))
             )
-            .ToList();
+            .GroupBy(entry => entry)
+            .ToDictionary(group => group.Key, group => group.Count());
 
-        problems
-            .Should()
-            .BeEmpty(
-                "CLAUDE.md に書いた期待の行・シナリオの Id が tests/ に無い（改名・削除に追従するか、Id を直すこと）:"
-                    + Environment.NewLine
-                    + string.Join(Environment.NewLine, problems)
-            );
+        TestSupport.GuardKnownList.AssertMatches(
+            found,
+            NotRowIds.Select(entry => ((entry.Path, entry.Word), 1)),
+            (key, _) => $"{key.Item1}: {key.Item2}",
+            "CLAUDE.md に書いた期待の行・シナリオの Id が tests/ に無い（改名・削除に追従するか、Id を直すこと。"
+                + "行 Id でない語なら理由を添えて NotRowIds に置く）",
+            "NotRowIds の語が CLAUDE.md から消えたか tests/ に現れるようになった（一覧から消す）"
+        );
     }
 
     /// <summary>全 CLAUDE.md が名指す CLAUDE.md とその見出しが実在すること</summary>
@@ -445,8 +517,16 @@ public class ClaudeMdReferenceTests
             {
                 ["RealGuardTests"] = ["public void Existing_Method() { }"],
             },
-            "\"realdb-real-row\" $\"realdb-built-row-{x}\" \"coverage-\" \"server-stub\""
+            "\"realdb-real-row\" $\"realdb-built-row-{x}\" \"coverage-\" \"server-stub\" \"plan-other\" "
+                + "$\"module-{a}-{b}\" \"launcher-reporter\""
         );
+
+        sources
+            .RowIdPrefixes.Should()
+            .BeEquivalentTo(
+                ["realdb", "coverage", "server", "plan", "module", "launcher"],
+                "接頭辞の集合は文字列リテラル・補間・連結の先頭の語から作る"
+            );
 
         FindMissingTestNames(
                 "ガード：`RealGuardTests`・`NoSuchGuardTests`・Real{Guard,Fake}Tests・"
@@ -464,11 +544,17 @@ public class ClaudeMdReferenceTests
 
         FindMissingRowIds(
                 "`realdb-real-row`・`realdb-built-row-with-default`・`coverage-server-stub`・"
-                    + "`realdb-real-*`・`realdb-no-such-row`・`coverage-no-such-stub`・`plan-*-no-such`",
+                    + "`realdb-real-*`・`realdb-no-such-row`・`coverage-no-such-stub`・`plan-*-no-such`・"
+                    + "`module-*-launcher-reporter`・`module-*-launcher-missing`・`unknown-prefix-word`",
                 sources
             )
             .Should()
-            .BeEquivalentTo("realdb-no-such-row", "coverage-no-such-stub", "plan-*-no-such");
+            .BeEquivalentTo(
+                "realdb-no-such-row",
+                "coverage-no-such-stub",
+                "plan-*-no-such",
+                "module-*-launcher-missing"
+            );
 
         var files = new Dictionary<string, string>(StringComparer.Ordinal)
         {

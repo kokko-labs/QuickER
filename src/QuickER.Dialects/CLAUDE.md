@@ -7,7 +7,7 @@
 
 - `SyncDialectCapabilities` の全プロパティは `required` で初期化子を持たない。5 方言のプロバイダが全プロパティを明示する。`SchemaDiffService.Compute` の capabilities も必須で、null の経路を持たない。テストは `TestDialectCapabilities.Neutral` が旧既定値を明示で再現する。
 - 既定値を足すと、能力を足したときに書き忘れた方言が旧来の値で黙って動く。
-- ガード：`SyncDialectCapabilitiesNoDefaultsTests`（RequiredMemberAttribute と構文木の初期化子）。
+- ガード：`SyncDialectCapabilitiesNoDefaultsTests`（RequiredMemberAttribute）・`SourceRuleTests` の規則 `sync-capabilities-initializers`（構文木の初期化子）。
 
 ## 方言名の引き当て
 
@@ -19,7 +19,7 @@
 
 - 方言名と大文字小文字を無視して完全に一致する文字列リテラルは、`src/` の `QuickER.Dialects` の外では、理由つきの既知の一覧（ファイル・値・件数）にあるものだけ。
 - 方言名で分岐する出現は、方言の宣言へ置き換えたら一覧から消す。
-- ガード：`DialectNameLiteralGuardTests`（部分一致は拾わない。件数まで厳密に照合する）。
+- ガード：`SourceRuleTests` の規則 `dialect-name-literals`（部分一致は拾わない。件数まで厳密に照合する）。
 
 ## 図で表せない定義の種類
 
@@ -52,4 +52,4 @@
 - 別々の規則（`Split('.', 2)` と `LastIndexOf` など）で分けると、`a.b.c` のような名前で DDL と CRUD が別々の表を指す。
 - EF Core の Fluent 構成は、生成モデルの側で分けて `ToTable("表", "スキーマ")` を出す。EF Core の `ToTable(name)` は名前を分けないので、分けずに渡すと EF Core だけが既定のスキーマの `[sales.Orders]` を指す。テンプレートは分けた値を受け取るだけで、分け方の写しを持たない。スキーマの無い表の出力は不変。
 - 生成ランタイムの `EntitySaveMetadata.QuoteTableName` は Dialects を参照できないので写しを持つ。一致は `DialectIdentifierTableTests` の行 `runtime-quote-*` が固定する。
-- ガード：`SchemaQualifiedNameGuardTests`（Dialects・Model・Provider*・CodeGen.CSharp の .cs〔.g.cs を除く〕で、第 1 引数が `.` の `Split` / `IndexOf` / `LastIndexOf` / `Contains` を構文木で数え、理由つきの既知の一覧と厳密に一致させる）・`DialectIdentifierTableTests` の行 `split-*`（規則の表）と `runtime-quote-*`（SQL Server・SQLite の生成ランタイムの引用が方言の識別子クラスと同じ値になること。多ドット・空の部分・終端の引用符を含む名前）・`EfCoreSchemaQualifiedTableTests`（生成テキスト・両引数のエスケープ・SQL Server プロバイダの `ToQueryString`）・実 SQL Server の `SchemaQualifiedTableRuntimeTests`（EF Core 版と QuickER 版 Repository が同じ `[sales].[orders]` を読み書きする）。mutation 実証済み。
+- ガード：`SourceRuleTests` の規則 `schema-qualified-name-dot-splits`（Dialects・Model・Provider*・CodeGen.CSharp の .cs〔.g.cs を除く〕で、第 1 引数が `.` の `Split` / `IndexOf` / `LastIndexOf` / `Contains` を構文木で数え、理由つきの既知の一覧と厳密に一致させる）・`DialectIdentifierTableTests` の行 `split-*`（規則の表）と `runtime-quote-*`（SQL Server・SQLite の生成ランタイムの引用が方言の識別子クラスと同じ値になること。多ドット・空の部分・終端の引用符を含む名前）・`EfCoreSchemaQualifiedTableTests`（生成テキスト・両引数のエスケープ・SQL Server プロバイダの `ToQueryString`）・実 SQL Server の `SchemaQualifiedTableRuntimeTests`（EF Core 版と QuickER 版 Repository が同じ `[sales].[orders]` を読み書きする）。mutation 実証済み。

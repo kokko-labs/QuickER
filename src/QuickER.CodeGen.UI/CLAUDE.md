@@ -21,8 +21,8 @@ C# コード生成ダイアログの設定とオプションの往復の規則�
 ## 設定の全キーの往復
 
 - 設定（`CSharpGenerationSettings`）の全キーは、生成オプションとダイアログの往復で値を落とさない
-- `GenerationSettingsParityTests` が、反射で全数を確かめる（キーを足して 1 か所だけ配線を忘れると赤）
-  1. 設定と生成オプション（`CodeGenerationOptions`）の公開キーの集合が一致する（出力先の 2 つを除く）
+- `GenerationSettingsParityTests` と `ParityTests`（行 `generation-settings-keys-match-options`）が、反射で全数を確かめる（キーを足して 1 か所だけ配線を忘れると赤）
+  1. 設定と生成オプション（`CodeGenerationOptions`）の公開キーの集合が一致する（出力先の 2 つを除く。`ParityTests` の行）
   2. 全キーを既定と違う値にした設定の `ToCodeGenerationOptions` が、同じ値を渡す
   3. ダイアログへ読み込んで書き戻すと、全キーの値が保たれる。画面に出る構成を 2 通り（QuickER 版 Repository と EF Core）で流し、2 通りで全キーを既定と違う値で通ったことも表明する
 - 配線は `ToCodeGenerationOptions`・`ToSettings`・`ApplySettings` の 3 か所で、どれか 1 キーが抜けると赤になる

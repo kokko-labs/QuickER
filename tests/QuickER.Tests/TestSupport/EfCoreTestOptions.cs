@@ -16,7 +16,7 @@ namespace QuickER.Tests.TestSupport;
 /// </para>
 /// <para>
 /// 製品の振る舞いは変えず、テストの構成でこの警告だけを無視する。プロバイダを指定する呼び出し（<c>UseSqlite</c> など）の
-/// 直後に必ずこれを続ける。<c>EfCoreServiceProviderLimitGuardTests</c> が、テストのソースのすべての呼び出しを検査する。
+/// 直後に必ずこれを続ける。<c>SourceRuleTests</c> の規則 <c>ef-core-provider-cache-limit</c> が、テストのソースのすべての呼び出しを検査する。
 /// </para>
 /// </remarks>
 public static class EfCoreTestOptions

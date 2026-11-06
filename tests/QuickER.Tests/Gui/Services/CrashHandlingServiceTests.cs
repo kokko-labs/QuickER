@@ -1,18 +1,17 @@
 ﻿using System.IO;
-using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using QuickER.Services;
-using QuickER.Tests.Resources;
 
 namespace QuickER.Tests.Gui.Services;
 
 /// <summary>
-/// クラッシュ処理（<see cref="CrashHandlingService"/>）の整形・ログ書き出しと、App.xaml.cs の配線を検証するテストクラス。
+/// クラッシュ処理（<see cref="CrashHandlingService"/>）の整形・ログ書き出しを検証するテストクラス。
 /// </summary>
 /// <remarks>
 /// 緊急保存・ログ・後始末・ダイアログの段の順と失敗の隔離・再入・ログの書き出しの行は
-/// <c>Gui/Services/Lifecycle/LifecycleRows.Crash.cs</c> へ移した。ここに残すのは整形の純関数・
-/// 同じ時刻の並行の書き込み（OS の排他）・アセンブリ属性・App.xaml.cs の配線のソースの検査。
+/// <c>Gui/Services/Lifecycle/LifecycleRows.Crash.cs</c> へ移した。App.xaml.cs の配線のソースの検査は
+/// <c>SourceRuleTests</c> の規則 <c>app-ui-crash-handler-uses</c>・<c>app-ui-crash-handler-bypasses</c> へ移した。
+/// ここに残すのは整形の純関数・同じ時刻の並行の書き込み（OS の排他）・アセンブリ属性。
 /// 実ファイル書き込みは一時フォルダへ隔離し、ユーザーの <c>%LOCALAPPDATA%\QuickER</c> を汚さない。
 /// </remarks>
 public class CrashHandlingServiceTests
@@ -124,28 +123,6 @@ public class CrashHandlingServiceTests
         {
             Directory.Delete(folder, recursive: true);
         }
-    }
-
-    /// <summary>App の UI 例外の受け皿が、再入を判断する HandleUiCrash と後始末の共有インスタンスを使うことをソース上で固定する</summary>
-    /// <remarks>
-    /// <c>App</c> は WPF の <c>Application</c> 派生でテストから実体化できないため、判断を切り出した
-    /// <see cref="CrashHandlingService.HandleUiCrash"/> 側を直接検証する。その形が意味を持つのは <c>App</c> が
-    /// 確かにそれを使っているときだけなので、無条件の <c>Environment.Exit</c> へ戻っていないことをここで見張る。
-    /// </remarks>
-    [Fact(DisplayName = "App の UI 例外の受け皿は HandleUiCrash と後始末の共有インスタンスを使う")]
-    public void App_UsesHandleUiCrashWithSharedModuleShutdown()
-    {
-        var source = File.ReadAllText(
-            Path.Combine(NeutralResxFiles.FindRepositoryRoot(), "src", "QuickER.Gui", "App.xaml.cs")
-        );
-
-        source.Should().Contain("CrashHandlingService.HandleUiCrash(");
-        source.Should().Contain("_featureModuleShutdown?.CloseAll()");
-        source.Should().NotContain("CrashHandlingService.HandleCrash(");
-        Regex
-            .Matches(source, @"^\s*Environment\.Exit\(", RegexOptions.Multiline)
-            .Should()
-            .BeEmpty("終了は HandleUiCrash が処理を担ったときだけ行う");
     }
 
     /// <summary>バージョン解決が空でない文字列を返すことを検証する（属性欠落時も既定表記へ落ちる）</summary>

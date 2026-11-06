@@ -18,7 +18,7 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// </para>
 /// <para>
 /// 構文木のパースは <see cref="Parse"/> の 1 か所だけで行う（テストが Roslyn のパースを直接呼ぶ箇所は
-/// <c>SourceParseEntryGuardTests</c> の一覧で数えている）。依存を絞った参照集合でコンパイルする検証は <see cref="Emit"/> を使う。
+/// <c>SourceRuleTests</c> の規則 <c>direct-roslyn-parses</c> の一覧で数えている）。依存を絞った参照集合でコンパイルする検証は <see cref="Emit"/> を使う。
 /// </para>
 /// </remarks>
 internal static class GeneratedCodeCompiler

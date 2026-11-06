@@ -26,6 +26,10 @@ namespace QuickER.Tests.Cli;
 /// <see cref="GenerationConfigSchema"/> だけ更新して CLI フラグを忘れると MCP からは設定できるのに
 /// CLI からは設定できないという非対称が黙って残るため。
 /// </para>
+/// <para>
+/// キー集合の照合は照合の表（<c>ParityTests</c> の行 <c>cli-config-keys-match-options</c>・<c>cli-config-keys-match-schema</c>）へ移した。
+/// ここに残すのはフラグ名の書き方の規則と、行が呼ぶ CLI フラグ表の読み取り。
+/// </para>
 /// </remarks>
 public sealed class GenerationOptionSetParityTests
 {
@@ -37,58 +41,18 @@ public sealed class GenerationOptionSetParityTests
     /// <c>OutputFileName</c> へ導出する。CLI／GUI が書き出す正当な別名で、コア側に <c>OutputPath</c> という
     /// プロパティは存在しない（この 1 件だけが 1:1 対応の例外）。
     /// </remarks>
-    private const string OutputPathKey = "OutputPath";
+    internal const string OutputPathKey = "OutputPath";
 
     /// <summary>別名 <c>OutputPath</c> の解決先プロパティ名</summary>
-    private const string OutputFileNameKey = "OutputFileName";
-
-    /// <summary>設定 JSON の正となるキー集合＝init 設定可能なインスタンスプロパティ（計算 get-only・static は除外）</summary>
-    private static HashSet<string> RecognizedPropertyNames =>
-        OptionKeys
-            .Writable(typeof(CodeGenerationOptions))
-            .Select(property => property.Name)
-            .ToHashSet();
+    internal const string OutputFileNameKey = "OutputFileName";
 
     /// <summary>CLI フラグ表の設定キーを、別名 <c>OutputPath</c> を解決したうえで返す</summary>
-    private static HashSet<string> CliConfigKeys() =>
+    internal static HashSet<string> CliConfigKeys() =>
         new GenerationOptionSet()
             .ConfigKeyFlags.Select(entry =>
                 entry.Key == OutputPathKey ? OutputFileNameKey : entry.Key
             )
             .ToHashSet();
-
-    /// <summary>CLI フラグが書き込む設定キーが、コア側の設定可能プロパティと完全一致する</summary>
-    [Fact(DisplayName = "CLI フラグの設定キーは CodeGenerationOptions のプロパティと完全一致する")]
-    public void ConfigKeys_MatchCodeGenerationOptionsExactly()
-    {
-        CliConfigKeys()
-            .Should()
-            .BeEquivalentTo(
-                RecognizedPropertyNames,
-                "CLI フラグ表（src/QuickER.Cli/GenerationOptionSet.cs）の設定キーは CodeGenerationOptions の"
-                    + "設定可能プロパティと 1:1 でなければなりません。綴り違いはフラグを無警告で無効化し、"
-                    + "欠落は「GUI/MCP では設定できるのに CLI からは設定できない」非対称になります"
-                    + $"（例外は別名 {OutputPathKey} → {OutputFileNameKey} の 1 件のみ）"
-            );
-    }
-
-    /// <summary>CLI フラグが書き込む設定キーが、MCP 向けカタログのキー集合と完全一致する</summary>
-    /// <remarks>
-    /// カタログ側は <c>GenerationConfigSchemaTests</c> がコアと 1:1 であることを別途固定しているため、
-    /// ここは「CLI・カタログ・コアの三者が同じ集合を指す」ことの残り 1 辺にあたる。
-    /// </remarks>
-    [Fact(DisplayName = "CLI フラグの設定キーは設定カタログのキー集合と完全一致する")]
-    public void ConfigKeys_MatchGenerationConfigSchemaExactly()
-    {
-        var catalogNames = GenerationConfigSchema.Keys.Select(key => key.Name).ToHashSet();
-
-        CliConfigKeys()
-            .Should()
-            .BeEquivalentTo(
-                catalogNames,
-                "CLI フラグ表と get_generation_config_schema のカタログは同じ設定キー集合を指す必要があります"
-            );
-    }
 
     /// <summary>フラグ名は kebab-case のロングオプションで、重複しない</summary>
     /// <remarks>

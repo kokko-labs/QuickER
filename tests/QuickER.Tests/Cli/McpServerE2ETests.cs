@@ -25,7 +25,7 @@ public class McpServerE2ETests
     /// <summary>既知の失敗（32-4-P1 の現状）。直したら外し、区切りの最後に空にする</summary>
     private static readonly KnownCaseLedger Ledger = new("McpServerE2ETests", []);
 
-    /// <summary>CJK 文字の検出パターン（ToolDefinitionEnglishGuardTests と同じ範囲）</summary>
+    /// <summary>CJK 文字の検出パターン（TestSupport.CjkText の範囲。ツール定義の英語の検査は PhraseTests の英語の行 tool-definitions-*）</summary>
     private static readonly System.Text.RegularExpressions.Regex CjkPattern = TestSupport
         .CjkText
         .Pattern;

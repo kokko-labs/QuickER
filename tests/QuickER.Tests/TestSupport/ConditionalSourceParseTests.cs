@@ -3,8 +3,8 @@ using AwesomeAssertions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using QuickER.Tests.Platform;
 using QuickER.Tests.Resources;
+using QuickER.Tests.TestSupport.Guards;
 
 namespace QuickER.Tests.TestSupport;
 

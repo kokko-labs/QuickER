@@ -72,7 +72,7 @@
 ## キーの照合
 
 - 外部キーの列ペアは対応の集合で比べる。`SyncPlanFuzzRunner.PairSetText` が「親の列>子の列」の組を並べ替える。製品の差分は並びを見ずに比べ、参照先のキーの並びを要する方言は付け直しをキーの並びにするため。
-- 規則表 `SyncPlanFuzzOracleTests` の `rule5-composite-foreign-key-reordered-pairs-remain` / `swapped-pairs-lost` が固定する。
+- 規則表 `SyncPlanFuzzOracleTests` の `rule5-composite-foreign-key-reordered-pairs-remain` / `rule5-composite-foreign-key-swapped-pairs-lost` が固定する。
 
 ## 来歴の行
 

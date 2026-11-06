@@ -12,7 +12,7 @@ namespace QuickER.Tests.Resources;
 /// </summary>
 /// <remarks>
 /// resx を対象にするガードテスト（<see cref="ResxKeyParityTests"/>＝キー集合パリティ／
-/// <see cref="NeutralResxEnglishGuardTests"/>＝中立 resx の英語固定）が同じ列挙規則を共有するための置き場。
+/// <c>PhraseTests</c> の英語の行 <c>neutral-resx-values</c>＝中立 resx の英語固定）が同じ列挙規則を共有するための置き場。
 /// 列挙規則がテストごとにずれると「走査から漏れた resx が検査されないまま緑になる」ため 1 箇所に集約する。
 /// </remarks>
 internal static class NeutralResxFiles

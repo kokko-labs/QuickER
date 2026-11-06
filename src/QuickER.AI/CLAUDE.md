@@ -40,7 +40,7 @@ AI チャットエンジンの共通基盤（WPF 非依存）。内蔵チャッ�
 - **引数は `Func<string>` で受け、取り出しも try の内側で行う**。値で受けると呼び出し側の引数評価が try の外で走り、Codex の `arguments` を持たない要求で `JsonElement.GetRawText()` が投げて、応答を送れないまま AI がツール結果を待ち続ける。
 - `rethrowCancellation` が 4 エンジンの唯一の差。API キー接続だけが中断を通す（未実行の呼び出しへ合成結果を補って履歴の tool_use↔tool 対応を保つ経路へ渡すため）。
 - 承認拒否・許可拒否の通知（`CodexChatEngine.RespondToApprovalAsync` / `CopilotChatEngine.OnPermissionDeclined`）も同じ作法で通す。前者は承認応答の送信より前に呼ぶので、保護しないと購読側の例外で応答まで巻き込まれる。
-- ガード：`ChatToolInvocationTests`（作法のテストと、4 エンジンのソースガード＝ヘルパーを通ること・生の失敗文言と裸の `ToolActivityReceived?.Invoke(` が残っていないこと）と、振る舞いを 4 エンジンへ同じ行で流す `ChatEngineContractTests`（行 `tool-host-throws-is-english-failure-result`・`tool-activity-subscriber-throws-still-returns-result`）。mutation 実証済み。
+- ガード：`ChatToolInvocationTests`（作法のテスト）と、4 エンジンのソースの規則（`SourceRuleTests` の規則 `chat-engine-tool-invocation-uses`＝ヘルパーを通ること・`chat-engine-tool-invocation-copies`＝生の失敗文言と裸の `ToolActivityReceived?.Invoke(` が残っていないこと）と、振る舞いを 4 エンジンへ同じ行で流す `ChatEngineContractTests`（行 `tool-host-throws-is-english-failure-result`・`tool-activity-subscriber-throws-still-returns-result`）。mutation 実証済み。
 
 ## チャットエンジンの共通の契約
 
