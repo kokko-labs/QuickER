@@ -27,7 +27,7 @@ namespace QuickER.Tests.CodeGen.CSharp.CodegenConfig;
 /// </remarks>
 internal static class CodegenSuccessDomain
 {
-    /// <summary>エラーの規則が読む因子（GUI の入口はオプションを落とすので入口も読む）</summary>
+    /// <summary>エラーの規則が読む因子（GUI の入口はオプションを落とすので入口も読む。同期の対象の表の有無はキーの形が決める）</summary>
     public static IReadOnlyList<string> RuleFactors { get; } =
     [
         EditModels,
@@ -39,6 +39,8 @@ internal static class CodegenSuccessDomain
         Sync,
         Annotations,
         CodegenConfigDimensions.Entrance,
+        // 同期の「対象の表（主キーが 1 列の表）が 1 つ以上」のエラーは図の形のキーを読む
+        Key,
     ];
 
     /// <summary>読む因子の割り当てのうち、領域に入るもの</summary>

@@ -242,6 +242,7 @@ internal static partial class CodegenCases
                 .. QueryTextRows(),
                 .. FeatureTextRows(),
                 .. ColumnTextRows(),
+                .. NullablePrimaryKeyRows(),
             ]
         );
 

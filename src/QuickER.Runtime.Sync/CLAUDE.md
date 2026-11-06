@@ -19,6 +19,7 @@
 - 対象は Repository 契約を持つ全テーブル（単一主キー）。rowversion の有無は対象でなくモードを決める（版あり＝増分＋競合検出／版なし＝後勝ち・全量スキャン）。
 - 生成時エラーは 3 つ：実効方言が sqlserver+sqlite のちょうど 2 つでない／`GenerateRepositories` が false／同期可能テーブルが 0 件（`CodeGen_Error_SyncSupportRequiresEligibleTables`）。
 - 対象一覧は Info 診断 `CodeGen_Info_SyncSupportTables` で FK 順のまま通知する。
+- 主キーの列に NULL 許容の印がある表も対象にする。C# 生成は主キーの列を NOT NULL とみなすので、記述子の `ReadKey` はほかの表と同じく NULL を許さないキーの型を読む（正本は `src/QuickER.CodeGen.CSharp/CLAUDE.md`「主キーの列の NULL 許容」。ガード：`CodegenCaseTests` の行 `compile-nullable-primary-key-sync` / `compile-nullable-primary-key-sync-string-value-objects`）。
 - 同期対象の表の主キーが固定長の文字列（nchar / char）なら `CodeGen_Warning_SyncFixedLengthStringPrimaryKeys` で「表.列（型）」を名指しし、可変長の型を勧める。
   - 理由：SQL Server は値を宣言長まで空白で詰めて返すので、ローカルで作った行のキーが同期の後に空白詰めのキーへ置き換わり、詰めていないキーを参照する子の行があると 2 行のまま収束しない（キーの序数照合では直せない）。
   - 判定は型名の文字列でなく正規型の種類（`FixedString` / `AnsiFixedString`）。`CanonicalTypeTokenAttacher` が `CSharpTypeInfo.IsFixedLengthString` を立てる。正本は `CSharpCodeGenerationService.BuildSyncFixedLengthKeyLines`。

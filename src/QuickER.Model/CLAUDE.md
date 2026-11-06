@@ -162,6 +162,13 @@ PK の順序の正本は `Entity.PrimaryKeyColumnIds`（列 Guid・宣言順）�
 - Mermaid は順序の構文が無いので `ExportOmissionKind.PrimaryKeyOrder` で告知する。Excel は順序を運ばない（docs に明記）。
 - ガード：`CSharpReversePrimaryKeyOrderTests`（無明示と宣言順どおりの明示で生成物がバイト一致）・`FormatRoundTripTests`（C# の往復＝形の行 `csharp-reordered-primary-key`、不整合 6 種＝規則の行 `csharp-rule-primary-key-order-mismatch-*`、古い生成コードのマージで順序が保たれる＝マージの行 `merge-csharp-old-generated-code-keeps-current-key-order`、DBML の往復・列順どおりは出力不変＝形の行 `dbml-reordered-primary-key`・`dbml-primary-key-in-column-order-*`、他ツール形式・断る 4 条件＝規則の行 `dbml-rule-primary-key-*`・`dbml-rule-two-primary-key-indexes-are-rejected`・`dbml-rule-duplicate-column-in-primary-key-index-is-rejected`、Mermaid の告知＝形の行 `mermaid-primary-key-order-*`）。mutation 実証済み。
 
+## 列の NULL 許容（ColumnNullability）
+
+- 列が NULL を持てるかは `ColumnNullability.AllowsNull`（NULL 許容の印があり、主キーの列でない）。主キーの列は図の `IsNullable` に依らず NULL を持てない（DB の主キーの制約。DDL も NOT NULL で作る）
+- `Column` は JSON で保存する POCO なので、プロパティにせず静的な判定にする（読み取り専用のプロパティも書き出しの対象になり、図のファイルの形が変わる）
+- 使うのは C# 生成の入口（`src/QuickER.CodeGen.CSharp/CLAUDE.md`「主キーの列の NULL 許容」）。Provider の DDL・同期スクリプト・差分には、同じ規則の写しがまだ方言ごとに散っている（`DdlGeneratorBase`・`SyncScriptBuilderHelper`・`SchemaDiffService`・`SyncPlanner`・`ComputedColumnComment`・SQLite の DDL と 3 方言の同期スクリプト。寄せるのは後の区切り）
+- ガード：`CodegenCaseTests` の行 `compile-nullable-primary-key-sync` / `probe-inmemory-seed-nullable-primary-key` / `relation-nullable-primary-key-all-surfaces` ほか（詳細は `src/QuickER.CodeGen.CSharp/CLAUDE.md`「主キーの列の NULL 許容」）
+
 ## リレーションの列ペア
 
 リレーションの列対応の正本は `Relationship.ColumnPairs`（`RelationshipColumnPair`＝親列 Guid×子列 Guid・宣言順）。旧 `SourceColumnId` / `TargetColumnId` は後方互換なしで廃止した（旧文書 JSON の列ペア情報は読み捨て。Version 1 のまま）。

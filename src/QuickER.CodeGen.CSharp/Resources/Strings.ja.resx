@@ -193,6 +193,9 @@
   <data name="CodeGen_Info_NonCanonicalTypeSpellingColumns" xml:space="preserve">
     <value>次の列は、方言中立トークンからは同じ綴りの DB 型へ戻りません（トークンを整形し直すと矢印の右の型になります）。そのためコード取込で元の型表記へ戻せるよう、[DbColumnMeta] へ元の表記もそのまま記録しています:{0}</value>
   </data>
+  <data name="CodeGen_Info_NullablePrimaryKeyColumns" xml:space="preserve">
+    <value>次の主キーの列は、図で NULL 許容になっています。主キーは NULL を持てない（生成する DDL もこれらの列を NOT NULL で作ります）ため、生成コードは NOT NULL の列として扱い、ほかの主キーと同じく NULL を許さない型のプロパティにしています。図と合わせるには、これらの列の NULL 許容を外してください:{0}</value>
+  </data>
   <data name="CodeGen_Info_NegativeScaleColumns" xml:space="preserve">
     <value>次の列は負のスケールを宣言しているため、データベースが値を丸めます（numeric(10,-2) は 1234 を 1200 として保存します）。これらの列には精度・スケールを生成コードへ載せません（値オブジェクトの桁数検証・[SqlColumnType] の Precision/Scale・EF Core の HasPrecision のいずれも出ません）。負のスケールは意図して書くものなので、警告ではなくお知らせとして出しています:{0}</value>
   </data>

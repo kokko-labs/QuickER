@@ -114,6 +114,11 @@ public sealed partial class CSharpCodeGenerationService
 
         var diagnostics = new List<GenerationDiagnostic>();
 
+        // 主キーの列は NULL を持てない（DDL も NOT NULL で作る）。NULL 許容の印のある主キーの列は、以降の検証・
+        // モデルの組み立て・テンプレートのすべてで NOT NULL の列として読む（作業用の複製。呼び出し元の図は変えない）
+        var nullablePrimaryKeyLines = BuildNullablePrimaryKeyLines(diagram);
+        diagram = TreatPrimaryKeysAsNotNull(diagram);
+
         // 実効方言の解決（未対応方言の指定は ArgumentException になるため、診断へ変換して返す）。
         // Validate より前に解決する＝層別出力の層フォルダ検証（ファイル計画経由）や名前空間検証も
         // 実効方言へ触れるため、後にすると未対応方言が診断でなく例外のまま呼び出し元へ抜ける
@@ -268,6 +273,14 @@ public sealed partial class CSharpCodeGenerationService
             diagnostics,
             Strings.CodeGen_Info_IdentityColumns,
             BuildIdentityColumnLines(model)
+        );
+
+        // NULL 許容の印のまま NOT NULL として生成した主キーの列を名指しする（図の印と生成物の型が食い違うことは、
+        // 生成物を読んだだけでは気づけないため）
+        AddListInfo(
+            diagnostics,
+            Strings.CodeGen_Info_NullablePrimaryKeyColumns,
+            nullablePrimaryKeyLines
         );
 
         // 型表記が中立トークン経由で復元できない列（[DbColumnMeta] へ元の表記も刻んだ列）を Info 診断で通知する。
@@ -463,6 +476,66 @@ public sealed partial class CSharpCodeGenerationService
         IReadOnlyCollection<string> lines,
         params object[] leadingArguments
     ) => AddListDiagnostic(diagnostics, GenerationDiagnostic.Info, format, lines, leadingArguments);
+
+    /// <summary>NULL 許容の印があるが NULL を持てない列（主キーの列）か（判定の本体は <see cref="ColumnNullability.AllowsNull"/>）</summary>
+    private static bool IsNullableMarkedPrimaryKey(Column column) =>
+        column.IsNullable && !ColumnNullability.AllowsNull(column);
+
+    /// <summary>NULL 許容の印のある主キーの列を「テーブル.列 (型)」の 1 行ずつへ整形する（Info 診断専用・図の宣言順）</summary>
+    private static IReadOnlyList<string> BuildNullablePrimaryKeyLines(ErDiagram diagram) =>
+        diagram
+            .Entities.SelectMany(entity =>
+                entity
+                    .Columns.Where(IsNullableMarkedPrimaryKey)
+                    .Select(column => $"{entity.TableName}.{column.Name} ({column.DataType})")
+            )
+            .ToList();
+
+    /// <summary>
+    /// NULL 許容の印のある主キーの列を NOT NULL にした作業用の図を返す（該当する列が無ければ同じインスタンス）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 判定は <see cref="ColumnNullability.AllowsNull"/>（DDL と同じ「主キーの列は NULL を持てない」）。生成器は列の
+    /// <see cref="Column.IsNullable"/> を Entity の型・EF Core の必須・インメモリのシード値・同期の記述子・API リファレンスで
+    /// 直接読むので、ここで 1 度だけ読み替える。読み替えないと、Entity のプロパティが <c>int?</c> のまま
+    /// Repository の主キーの型（<c>int</c>）と食い違い、同期の記述子がコンパイルできず（CS0266）、インメモリのシードが
+    /// 主キーの null の行を入れて起動時に投げる。
+    /// </para>
+    /// <para>
+    /// 該当する列を持つエンティティだけを <see cref="Entity.Clone"/>（Id を保つ）で複製し、図は
+    /// <see cref="ErDiagram.WithEntities"/>（ほかのプロパティを共有する浅い複製）で組む。列の Id が変わらないので、
+    /// 型の辞書・関係・クエリはそのまま引ける。該当する列が無い図は同じインスタンスを返し、出力は変わらない。
+    /// </para>
+    /// </remarks>
+    private static ErDiagram TreatPrimaryKeysAsNotNull(ErDiagram diagram)
+    {
+        if (!diagram.Entities.Any(entity => entity.Columns.Any(IsNullableMarkedPrimaryKey)))
+        {
+            return diagram;
+        }
+
+        return diagram.WithEntities(
+            diagram
+                .Entities.Select(entity =>
+                {
+                    if (!entity.Columns.Any(IsNullableMarkedPrimaryKey))
+                    {
+                        return entity;
+                    }
+
+                    var copy = entity.Clone(preserveId: true);
+
+                    foreach (var column in copy.Columns)
+                    {
+                        column.IsNullable = ColumnNullability.AllowsNull(column);
+                    }
+
+                    return copy;
+                })
+                .ToList()
+        );
+    }
 
     /// <summary>項目の一覧を字下げして並べた診断を、指定の重大度で 1 件足す（一覧が空なら何もしない）</summary>
     private static void AddListDiagnostic(

@@ -224,7 +224,12 @@ internal static class CodegenRunner
             probes.Add(CodegenProbe.GuidKeyCreate);
         }
 
-        if (options.GenerateRepositories && shape.Levels.DbGenerated != DbGeneratedLevels.None)
+        // 書き込み除外の探針は子の表（orders）の EntitySaveMetadata を読むので、その表が Repository を持つ（主キーが 1 列）ときだけ
+        if (
+            options.GenerateRepositories
+            && shape.Levels.DbGenerated != DbGeneratedLevels.None
+            && shape.Orders.HasSinglePrimaryKey
+        )
         {
             probes.Add(CodegenProbe.SaveMetadataWriteExclusion);
         }
@@ -273,6 +278,12 @@ internal static class CodegenRunner
         if (split && !options.UseRuntimePackages)
         {
             relations.Add(CodegenRelation.RuntimeTypeSet);
+        }
+
+        // NULL 許容の印のある主キーの図は、主キーを NOT NULL にした図と同じ生成物になる（src/QuickER.CodeGen.CSharp/CLAUDE.md「主キーの列の NULL 許容」）
+        if (shape.Tables.Any(table => table.PrimaryKey.Any(column => column.Column.IsNullable)))
+        {
+            relations.Add(CodegenRelation.PrimaryKeyNotNull);
         }
 
         return new CodegenExpectation(

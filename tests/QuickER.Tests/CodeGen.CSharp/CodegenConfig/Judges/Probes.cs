@@ -592,7 +592,8 @@ internal static class Probes
             .Select(descriptor => descriptor.ServiceType)
             .ToList();
 
-        if (contracts.Count == 0)
+        // シードした行がある表は主キーが 1 列なので、インメモリ Repository の登録があるはず（Repository を作れる表が無い図では登録も行も無い）
+        if (contracts.Count == 0 && expected.Values.Any(count => count > 0))
         {
             problems.Add("探針（インメモリのシード）: インメモリ Repository の登録が無い");
         }
@@ -739,15 +740,26 @@ internal static class Probes
     /// <summary>図の形の全部の表がモデルにあり、複合でない関係は子の列 → 親の列（列ペアどおり）の外部キーになる</summary>
     private static IEnumerable<string> ShapeModel(IModel model, ShapeDiagram shape)
     {
+        // 主キーの無い表は DbContext から外れる（警告 CodeGen_Warning_EfCoreKeylessTableExcluded）。モデルに無いことも見る
         foreach (var table in shape.Tables)
         {
-            if (EfCoreModelFact.Find(model, table.EntityClass) is null)
+            var mapped = table.PrimaryKey.Count > 0;
+
+            if ((EfCoreModelFact.Find(model, table.EntityClass) is not null) != mapped)
             {
-                yield return $"探針（EF Core のモデル）: {table.EntityClass} がモデルに無い";
+                yield return mapped
+                    ? $"探針（EF Core のモデル）: {table.EntityClass} がモデルに無い"
+                    : $"探針（EF Core のモデル）: 主キーの無い {table.EntityClass} がモデルにある";
             }
         }
 
-        foreach (var relation in shape.Relations.Where(relation => !relation.IsComposite))
+        foreach (
+            var relation in shape.Relations.Where(relation =>
+                !relation.IsComposite
+                && relation.Parent.PrimaryKey.Count > 0
+                && relation.Child.PrimaryKey.Count > 0
+            )
+        )
         {
             var child = EfCoreModelFact.Find(model, relation.Child.EntityClass);
 

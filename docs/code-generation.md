@@ -171,6 +171,10 @@ QuickER does not generate EF Core's `HasColumnType` (EF Core is for connecting t
 Spell the column type out in the generated `QuickErDbContext`'s `OnModelCreatingPartial` if you need it.
 Reading, and writing with a UTC offset, work as they are.
 
+**A primary key column is generated as NOT NULL whatever its nullable mark in the diagram**, as the generated DDL already declares it.
+Its property gets a non-nullable type like any other primary key, and generation names the columns it read this way in an information diagnostic.
+Clear the nullable mark in the diagram to make the diagram and the generated code agree.
+
 ### DB-definition metadata attributes
 
 By default, an Entity is decorated with DataAnnotations and DB-definition metadata attributes (`[DbTableMeta]` / `[DbColumnMeta]`) that record a dialect-neutral type token (`string(50)` / `decimal(10,2)`, and so on) and a description.

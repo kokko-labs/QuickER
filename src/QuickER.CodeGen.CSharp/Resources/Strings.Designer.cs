@@ -330,6 +330,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Info_NullablePrimaryKeyColumns {
+            get {
+                return ResourceManager.GetString("CodeGen_Info_NullablePrimaryKeyColumns", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Info_FallbackTypeColumns {
             get {
                 return ResourceManager.GetString("CodeGen_Info_FallbackTypeColumns", resourceCulture);

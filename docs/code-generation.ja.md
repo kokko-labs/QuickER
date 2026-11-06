@@ -174,6 +174,10 @@ QuickER は EF Core の `HasColumnType` を生成しないため（EF Core は�
 必要な場合は、生成される `QuickErDbContext` の `OnModelCreatingPartial` で列型を明示してください。
 読み取りと、UTC オフセットでの書き込みは、そのままで通ります。
 
+**主キーの列は、図の NULL 許容の印に依らず NOT NULL として生成します**（生成する DDL も NOT NULL で作ります）。
+プロパティはほかの主キーと同じく NULL を許さない型になり、そう読んだ列は生成時の Info 診断で名指しします。
+図と生成コードを合わせるには、図の NULL 許容の印を外してください。
+
 ### DB 定義メタ属性
 
 Entity には既定で DataAnnotations と DB 定義メタ属性（`[DbTableMeta]` / `[DbColumnMeta]`）が付き、方言中立の型トークン（`string(50)` / `decimal(10,2)` など）と説明が刻まれます。
