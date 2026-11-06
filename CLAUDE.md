@@ -199,7 +199,8 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **計算列の NULL 許容は差分に出さず、主キーと同じ列集合の一意制約は持てない方言で比較から外して DDL で省く**：比べると意味のない ALTER COLUMN や永久に消えない差分が出る。ガード：`DialectDdlTableTests`（行 `ddl-unique-on-primary-key-columns-omitted-where-unsupported`）・`OracleDdlRoundTripIntegrationTests.UniqueConstraintOnPrimaryKey_IsOmittedAndApplies`。→ `src/QuickER.Provider/CLAUDE.md`「計算列と主キーと同じ列集合の一意制約」
 - **列の変更は図に無い列属性をカタログから読み直して保ち、既定値のある列の型の種類の変更は警告する**：保たないと照合順序・既定値・生成列の式が黙って消える。ガード：`MySqlColumnAttributeSyncIntegrationTests`・`PostgreSqlColumnAttributeSyncIntegrationTests`・`ImportSyncTests`（行 `sync-dialog-type-kind-change-with-default-warns-from-imported-defaults`）・`OracleImportFidelityIntegrationTests.Import_EmptyStringAndParenthesizedNullDefaults_AreNotDefaults`。→ `src/QuickER.Provider/CLAUDE.md`「列の変更が保つ属性」
 - **SQLite の再構築の合成は live の列オブジェクトを保ち、失う属性を警告し、写す列が無くても行を保つ**：図の列へ差し替えると一意制約が消え主キーの順序が変わる。ガード：`TableRebuildAttributeDetectorTests`・`SqliteSyncScriptBuilderTests`。→ `src/QuickER.Provider/CLAUDE.md`「テーブル再構築の合成」
-- **SQLite の同期実行器は外部キー違反とビューの破損を前後で比べ、PRAGMA を元へ戻す**：既存の孤児行で無関係な同期が失敗し、戻さないとプールの接続が外部キー検査なしになる。ガード：`SqliteSchemaSyncIntegrationTests`。→ `src/QuickER.Provider.Sqlite/CLAUDE.md`「同期実行器」
+- **SQLite の同期実行器は外部キー違反とビューの破損を前後で比べる。切り替えた PRAGMA は接続をプールしないので接続と一緒に消える**：DB 全体で判定すると既存の孤児行で無関係な同期が失敗する。ガード：`SqliteSchemaSyncIntegrationTests`・`SourceRuleTests`（規則 `sqlite-file-connection-pooling-off`）。→ `src/QuickER.Provider.Sqlite/CLAUDE.md`「同期実行器」
+- **QuickER が SQLite のファイルを開く接続（新規作成・取込・同期）は `SqliteFileConnections.Create` だけが作り、プールしない**：プールした接続は閉じた後もファイルを掴み、操作の直後に利用者がファイルを移動・削除すると Windows で共有違反になる。ガード：`SourceRuleTests`（規則 `sqlite-file-connection-creations`・`sqlite-file-connection-pooling-off`）・`ConnectionDialogTests`（組の不変条件 12）・`SyncPlanFuzzTestsBase.ExpectationRows_MatchOnRealDatabase`（SQLite の汎用の表明 6）。→ `src/QuickER.Provider.Sqlite/CLAUDE.md`「ファイルを掴まない接続」
 
 ### C# 生成
 

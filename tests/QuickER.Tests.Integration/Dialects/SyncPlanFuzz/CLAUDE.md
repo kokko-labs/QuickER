@@ -128,6 +128,9 @@
   - 表明 2 / 2b / 3：選んだ項目が消え、新しい差分が出ず、選ばなかった項目が残る。
   - 表明 4：選んだ変更の外の列属性が変わらない。
   - 表明 5：行数と取込の警告。
+- 実 DB の段だけの汎用の表明 6：行の後に、製品の取込・実行器が DB のファイルを掴んでいない（`SyncPlanFuzzDialect.HeldFileProblem`。ファイルの DB の SQLite だけが実装し、DB のファイルを排他で開けるかで見る）。
+  - SQLite の方言の自分の接続（行数・探針・問い合わせ・空のファイルの作成）はプールしない。製品と同じ組み方の接続文字列でプールすると、製品の掴みとテストの接続を区別できない。取込の接続文字列は画面と同じ `SqliteConnectionStringFactory.Build`。
+  - Linux の排他は SQLite のロックと関係しないので、Windows のジョブでだけ効く（→ `src/QuickER.Provider.Sqlite/CLAUDE.md`「ファイルを掴まない接続」）。総当たりの種には掛けない。
 - 行の実 DB の期待の面は `outcome` / `error` / `script` / `before` / `after` / `afterdiff` / `probe:名前` / `probe-before:名前`。前後が同じことは `Unchanged()` / `ProbeUnchanged()`。
 - 既知の失敗の一覧は通さない。違反はすべて赤にする。
 - ランナーの計画の文脈には取込の `ColumnDefaults` も渡す（画面と同じ。既定値のある列の型の種類の変更を J2 の警告で名指しする。総当たりの種も同じ文脈で計画する）。

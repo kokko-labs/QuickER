@@ -40,13 +40,18 @@ namespace QuickER.Provider.Sqlite;
 public class SqliteSchemaImporter : ISchemaImporter
 {
     /// <summary>接続文字列で接続を開きスキーマを取得する（<see cref="ISchemaImporter"/> 実装・CLI scaffold 用）</summary>
+    /// <remarks>
+    /// 接続はプールしない（接続文字列の <c>Pooling</c> の指定は <c>False</c> で上書きする）。取込の直後に利用者が
+    /// ファイルを移動・削除できるように、閉じたときにファイルも閉じる（<see cref="SqliteFileConnections"/>）。
+    /// 接続文字列は接続プロファイルの SQLite のパスから組まれ、利用者がプールを選ぶ画面は無い。
+    /// </remarks>
     public async Task<SchemaImportResult> ImportAsync(
         string connectionString,
         int commandTimeoutSeconds,
         CancellationToken cancellationToken = default
     )
     {
-        await using var conn = new SqliteConnection(connectionString);
+        await using var conn = SqliteFileConnections.Create(connectionString);
         await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
         return await ImportAsync(conn, cancellationToken, commandTimeoutSeconds)
             .ConfigureAwait(false);

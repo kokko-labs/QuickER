@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.IO;
 using AwesomeAssertions;
-using Microsoft.Data.Sqlite;
 using QuickER.Db.UI;
 using QuickER.Db.UI.Resources;
 using QuickER.Platform;
@@ -53,8 +52,9 @@ internal enum ConnectionDialects
 /// <item>一覧のプロファイルは（DBMS, 名前）で大文字小文字を無視して一意（:664-674・:771-777）。</item>
 /// <item>SQLite の新規作成で選んだファイルは、OK で確定するまで作られない（:896-907・:940-967）。</item>
 /// <item>エラーのモーダルは OK の前回接続の記録の失敗だけで出し、出しても確定は止めない（:982-998）。ほかの失敗はステータス行で知らせる（:703-705）。</item>
+/// <item>SQLite の新規作成で作ったファイルを、作った後に誰も掴んでいない（:952-957 の <c>SqliteDatabaseFile.CreateEmpty</c> はプールしない接続で作る＝src/QuickER.Provider.Sqlite/SqliteFileConnections.cs）。掴んでいると、作った直後に利用者がファイルを移動・削除できない。排他で開けるかで見る。</item>
 /// </list>
-/// 3・4 は VM の変更通知でも見張り、1・2・5・8〜11 は手の後に、6 は保存・名前の変更・削除の後と行の終わりに、7 は行の終わりに見る。
+/// 3・4 は VM の変更通知でも見張り、1・2・5・8〜12 は手の後に、6 は保存・名前の変更・削除の後と行の終わりに、7・12 は行の終わりに見る。
 /// </remarks>
 internal sealed class ConnectionDialogHarness : IDisposable
 {
@@ -399,6 +399,7 @@ internal sealed class ConnectionDialogHarness : IDisposable
 
         CheckStoredProfilesInRange();
         CheckCorruptedSecretsKept();
+        CheckCreatedFilesReleased("行の終わり");
 
         List<string> violations;
 
@@ -410,16 +411,8 @@ internal sealed class ConnectionDialogHarness : IDisposable
         violations.Should().BeEmpty();
     }
 
-    /// <summary>新規作成で作った SQLite のファイルの接続をプールから放してから、一時フォルダを消す</summary>
-    public void Dispose()
-    {
-        foreach (var path in _newFilePaths.Where(File.Exists))
-        {
-            ReleaseCreatedDatabase(path);
-        }
-
-        _folder.Dispose();
-    }
+    /// <summary>一時フォルダを消す（新規作成で作った SQLite のファイルは製品が掴まない＝不変条件 12）</summary>
+    public void Dispose() => _folder.Dispose();
 
     /// <summary>方言の組のレジストリ</summary>
     private DatabaseProviderRegistry Registry(ConnectionDialects dialects) =>
@@ -435,24 +428,31 @@ internal sealed class ConnectionDialogHarness : IDisposable
     /// <summary>5 方言（SQL Server を先頭に、レジストリの登録順）</summary>
     private ConnectionDialogProvider[] All => [SqlServer, PostgreSql, MySql, Oracle, Sqlite];
 
-    /// <summary>
-    /// 空 DB の作成が使った接続をプールから放す（放さないとファイルを掴んだままになり、一時フォルダを消せない）
-    /// </summary>
+    /// <summary>不変条件 12：新規作成で作った SQLite のファイルを排他で開ける（製品の接続がファイルを掴んでいない）</summary>
     /// <remarks>
-    /// SQLite のプールは接続文字列ごとに分かれるので、製品の <c>SqliteDatabaseFile.CreateEmpty</c> と同じ組み方の接続文字列で放す
-    /// （組み方の写し。製品が組み方を変えると、テストは緑のまま一時フォルダだけが残る）。
-    /// <c>ClearAllPools</c> は並列のほかのテストの接続まで放すので使わない。
+    /// 組は取込を偽物にしているので、このファイルを開くのは製品の <c>SqliteDatabaseFile.CreateEmpty</c> だけ。
+    /// Windows では掴まれたファイルを排他で開けず、移動・削除と同じ答えになる（Linux の排他は SQLite のロックと関係しないので常に開ける）。
     /// </remarks>
-    private static void ReleaseCreatedDatabase(string path)
+    private void CheckCreatedFilesReleased(string when)
     {
-        var connectionString = new SqliteConnectionStringBuilder
+        foreach (var path in _newFilePaths.Where(File.Exists))
         {
-            DataSource = path,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-        }.ConnectionString;
-
-        using var connection = new SqliteConnection(connectionString);
-        SqliteConnection.ClearPool(connection);
+            try
+            {
+                using var exclusive = File.Open(
+                    path,
+                    FileMode.Open,
+                    FileAccess.ReadWrite,
+                    FileShare.None
+                );
+            }
+            catch (IOException ex)
+            {
+                Violate(
+                    $"不変条件 12：新規作成のファイル {path} を製品の接続が掴んだまま（{when}・{ex.Message}）"
+                );
+            }
+        }
     }
 
     private void Violate(string message)
@@ -525,6 +525,8 @@ internal sealed class ConnectionDialogHarness : IDisposable
                 );
             }
         }
+
+        CheckCreatedFilesReleased(op);
 
         if (!errorsAllowed && Dialogs.ErrorMessages.Count > _errorsSeen)
         {

@@ -368,6 +368,13 @@ internal static class SyncPlanRealRunner
             }
         }
 
+        // 汎用の表明 6：行の後に、製品の取込・実行器が DB のファイルを掴んでいない（ファイルの DB の方言だけ。
+        // 掴んだままだと、取込・同期の直後に利用者がファイルを移動・削除できない）
+        if (dialect.HeldFileProblem() is { } held)
+        {
+            problems.Add($"[{dialect.Name}] generic assertion: {held}");
+        }
+
         // 汎用の表明 1〜5 の違反はすべて行の問題（計画が警告しない失敗をわざと起こす行だけ、表明 1 を外す）
         foreach (var violation in outcome.Violations)
         {

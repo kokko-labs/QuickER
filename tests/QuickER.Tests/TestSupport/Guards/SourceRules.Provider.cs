@@ -171,7 +171,7 @@ internal static partial class SourceRules
                 new(SchemaCommandFiles[6], "DbCommands.Create", 11, "Oracle の取込"),
                 new(SchemaCommandFiles[7], "DbCommands.Create", 1, "Oracle の同期実行器"),
                 new(SchemaCommandFiles[8], "DbCommands.Create", 7, "SQLite の取込"),
-                new(SchemaCommandFiles[9], "DbCommands.Create", 6, "SQLite の同期実行器")
+                new(SchemaCommandFiles[9], "DbCommands.Create", 5, "SQLite の同期実行器")
             ) with
             {
                 MinimumFiles = SchemaCommandFiles.Length,
@@ -322,7 +322,77 @@ internal static partial class SourceRules
                         : null
                 )
             ),
+            // QuickER 自身が SQLite のファイルを開く接続は SqliteFileConnections.Create だけが作る（プールしない）。既定のプールつきの
+            // 接続は閉じた後もファイルを開いたままにし、新規作成・取込・同期の直後に利用者がファイルを移動・削除できない。
+            // 拾う形は SqliteConnection 型の生成（new SqliteConnection(…)・型を書かない new(…)）をシンボルで数える
+            SourceRule.Forbid(
+                "sqlite-file-connection-creations",
+                "SQLite のファイルを開く接続は SqliteFileConnections.Create で作る（既定のプールつきの接続は閉じた後もファイルを掴む）",
+                Src.Except(
+                    "QuickER.Runtime.Sqlite/",
+                    "生成コードのランタイムの接続は利用者のアプリの接続で、プールは利用者の接続文字列が決める"
+                ),
+                GuardFinder.Symbols(DescribeSqliteConnectionCreation),
+                new GuardKnown(
+                    SqliteFileConnectionsFile,
+                    "new SqliteConnection",
+                    1,
+                    "唯一の作り手（Pooling=False を立てる）"
+                )
+            ) with
+            {
+                Witness = new(
+                    SourceScope.Under("src/QuickER.Runtime.Sqlite"),
+                    [
+                        new(
+                            "src/QuickER.Runtime.Sqlite/Runtime.Sqlite.g.cs",
+                            "new SqliteConnection",
+                            1,
+                            "生成コードの接続ファクトリ（範囲の外の実在の生成を拾えること）"
+                        ),
+                    ]
+                ),
+            },
+            // その唯一の作り手が、接続文字列のビルダーで Pooling を false にしていること（作り手を残したままプールへ戻すのを止める）
+            SourceRule.Require(
+                "sqlite-file-connection-pooling-off",
+                "SqliteFileConnections.Create は接続文字列のビルダーで Pooling = false を立てる",
+                SourceScope.Files("src", SqliteFileConnectionsFile),
+                GuardFinder.Symbols(DescribeSqlitePoolingOff),
+                new GuardKnown(
+                    SqliteFileConnectionsFile,
+                    "Pooling = false",
+                    1,
+                    "閉じた接続がファイルを閉じる（プールに残らない）"
+                )
+            ),
         ];
+
+    /// <summary>SQLite のファイルを開く接続の唯一の作り手</summary>
+    private const string SqliteFileConnectionsFile =
+        "src/QuickER.Provider.Sqlite/SqliteFileConnections.cs";
+
+    /// <summary>節が <c>Microsoft.Data.Sqlite.SqliteConnection</c> の生成なら <c>new SqliteConnection</c></summary>
+    private static string? DescribeSqliteConnectionCreation(SemanticModel model, SyntaxNode node) =>
+        node is BaseObjectCreationExpressionSyntax creation
+        && model.GetTypeInfo(creation).Type?.ToDisplayString()
+            == "Microsoft.Data.Sqlite.SqliteConnection"
+            ? "new SqliteConnection"
+            : null;
+
+    /// <summary>
+    /// 節が <c>SqliteConnectionStringBuilder.Pooling</c> へ定数の <see langword="false"/> を代入する式なら <c>Pooling = false</c>
+    /// </summary>
+    private static string? DescribeSqlitePoolingOff(SemanticModel model, SyntaxNode node) =>
+        node is AssignmentExpressionSyntax assignment
+        && assignment.IsKind(SyntaxKind.SimpleAssignmentExpression)
+        && model.GetSymbolInfo(assignment.Left).Symbol
+            is IPropertySymbol { Name: "Pooling" } property
+        && property.ContainingType.ToDisplayString()
+            == "Microsoft.Data.Sqlite.SqliteConnectionStringBuilder"
+        && model.GetConstantValue(assignment.Right) is { HasValue: true, Value: false }
+            ? "Pooling = false"
+            : null;
 
     /// <summary>src のうち、名前を挙げたプロジェクトだけ（挙げたプロジェクトのフォルダが無ければ例外＝範囲の書き間違い）</summary>
     /// <param name="reason">ほかのプロジェクトを除く理由（範囲の形）</param>

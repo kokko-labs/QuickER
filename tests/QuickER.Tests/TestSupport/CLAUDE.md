@@ -115,7 +115,7 @@
 3. 引数の形の総当たり：`TestSupport/ToolArgumentShapeFuzzRunner`（WPF 非依存）。順は「ベースライン → 崩したケース → `KnownCaseLedger` → 3 つの表明 → 台帳の古い項目 → 網羅の計数 → 最低件数」。3 つの入口は `Entrance` の抽象メンバーだけを渡す。
 4. ツール定義の英語のガード：`PhraseTests`（英語の行 `tool-definitions-*`＝ツール定義の出どころごとの行。文言の表 `TestSupport/Guards/EnglishTextRows.Mcp.cs`）。
 5. 生成オプション・設定のキー：`TestSupport/OptionKeys`（`Writable` / `IsWritable`＝公開の setter か init を持つ公開のインスタンスのプロパティ）。設定 JSON の照合・CLI のフラグ表・GUI の設定の照合と、因子の棚卸しの `CodeGenerationOptions` の軸が使う。
-6. テストの一時フォルダ：`TestSupport/TestTempFolder`（TEMP 直下の固定名の親フォルダの下に guid の名前のフォルダを作り、破棄で中身ごと消す。消せないときは黙って残す）。TEMP 直下に同じ前置きの名前を並べると 8.3 の短い名前がぶつかり、フォルダ 1 つの作成に数百 ms かかるので、直下には固定名の親だけを置く。ファイルを掴むもの（SQLite の接続のプールなど）は作ったテストの側で放す（例：`ConnectionDialogHarness` の `ReleaseCreatedDatabase`）。
+6. テストの一時フォルダ：`TestSupport/TestTempFolder`（TEMP 直下の固定名の親フォルダの下に guid の名前のフォルダを作り、破棄で中身ごと消す。消せないときは黙って残す）。TEMP 直下に同じ前置きの名前を並べると 8.3 の短い名前がぶつかり、フォルダ 1 つの作成に数百 ms かかるので、直下には固定名の親だけを置く。ファイルを掴むもの（テストが開いた SQLite の接続のプールなど）は作ったテストの側で放す（例：`SqliteTempDatabase` の Dispose）。製品が SQLite のファイルを開く接続はプールしない（`src/QuickER.Provider.Sqlite/CLAUDE.md`「ファイルを掴まない接続」）ので、製品の操作の後に放す手当ては要らない。
 7. ソースの走査のガード：`TestSupport/GuardKnownList.AssertMatches`（見つかった出現と理由つきの既知の一覧を件数まで 2 方向で照合する）と `TestSupport/SourceFiles`（ガードが読むファイルの列挙と、bin / obj の判定 `IsBuildOutput` の唯一の場所。パースはしない）。ソースの規則は規則の表（`TestSupport/Guards/`・「ソースを走査するガード」）の行にし、走査・照合・報告は表の 1 か所が持つ。表へ移していないガードは、条件コンパイルの全分岐を読む `ConditionalSourceParse` / `SourceSymbolScan` を自分で呼ぶ。
 
 統合の前後で、該当テストのケースの数と合否は同じ（`-list full -preEnumerateTheories` と実行結果の照合）。mutation 実証済み（obj に置いた禁止の呼び出しは bin / obj の判定を外したときだけ赤）。
