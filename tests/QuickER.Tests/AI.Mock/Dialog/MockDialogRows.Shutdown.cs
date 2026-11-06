@@ -61,7 +61,7 @@ internal static partial class MockDialogRows
                     h.Engine.DisposeCount.Should().Be(0, "会話中はまだ破棄されない");
 
                     // 破棄はスレッドプールで走る。全件の並列実行でプールが詰まっても届くまで待てる上限にする
-                    h.ShutdownEngines(vm, TimeSpan.FromSeconds(60));
+                    h.ShutdownEngines(vm, MockDialogHarness.Patience);
 
                     h.Engine.DisposeCount.Should().Be(1);
                 }
@@ -84,14 +84,14 @@ internal static partial class MockDialogRows
                         vm.StartConversationCommand.Execute(null);
                         oldEngine
                             .DisposeStarted.Wait(
-                                TimeSpan.FromSeconds(30),
+                                MockDialogHarness.Patience,
                                 TestContext.Current.CancellationToken
                             )
                             .Should()
                             .BeTrue("切替で旧セッションの破棄が始まること");
 
                         var shutdown = Task.Run(
-                            () => h.ShutdownEngines(vm, TimeSpan.FromSeconds(30)),
+                            () => h.ShutdownEngines(vm, MockDialogHarness.Patience),
                             TestContext.Current.CancellationToken
                         );
 
@@ -138,7 +138,7 @@ internal static partial class MockDialogRows
                         vm.StartConversationCommand.Execute(null);
                         first
                             .DisposeStarted.Wait(
-                                TimeSpan.FromSeconds(30),
+                                MockDialogHarness.Patience,
                                 TestContext.Current.CancellationToken
                             )
                             .Should()
@@ -149,7 +149,7 @@ internal static partial class MockDialogRows
                         vm.StartConversationCommand.Execute(null);
 
                         var shutdown = Task.Run(
-                            () => h.ShutdownEngines(vm, TimeSpan.FromSeconds(30)),
+                            () => h.ShutdownEngines(vm, MockDialogHarness.Patience),
                             TestContext.Current.CancellationToken
                         );
 

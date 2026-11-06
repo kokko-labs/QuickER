@@ -63,7 +63,7 @@ docs の方言ごとの違いの表は宣言と一致する。表の直前の HT
 `ClaudeMdReferenceTests` は、リポジトリの全 CLAUDE.md（ルートと領域のフォルダ。`bin` / `obj` / `.git` / `.claude`〔worktree のコピーがある〕/ `tasks` は探さない）が書いた名前の実在を固定する。
 索引から詳細を指す書き方と、不変条件ごとにガードの名前を書く運用は、名前が古くなっても誰も気付かないので、書かれた側を実体と突き合わせる。
 
-- テストの名前：末尾が `Tests` か `TestsBase` の識別子を拾い、`Prefix{A,B}Suffix` の中括弧の省略は展開する。tests/ の C# の型の宣言にあること。直前が `*` の名前（`*DdlGeneratorTests`）はパターンなので照合しない。実装先をスラッシュで並べる省略は、最後の部分が別の名前に読まれるので、中括弧の形（`RemoteService{Ado,EfCore}RuntimeTests`）で書く
+- テストの名前：末尾が `Tests` か `TestsBase` の識別子を拾い、`Prefix{A,B}Suffix` の中括弧の省略は展開する。tests/ の C# の型の宣言にあること。直前が `*` の名前（`*DdlGeneratorTests`）はパターンなので照合しない。`…ForTests` で終わる名前（`ResetForTests` など）は製品のテスト用メンバーなので拾わない。実装先をスラッシュで並べる省略は、最後の部分が別の名前に読まれるので、中括弧の形（`RemoteService{Ado,EfCore}RuntimeTests`）で書く
   - 名前の直後が `.cs` ならファイルの実在、`.メソッド名` ならそのクラスを宣言するファイルにメソッド名が現れること。メソッド名が `_` で終わるか直後が `*` なら前方一致
 - 期待の行・シナリオの Id：ハイフンを含み、ハイフンで終わらないバッククォートの小文字の語のうち、最初のハイフンまでの語が行 Id の接頭辞の集合にあるもの。tests/ の C# ソースに現れること
   - 接頭辞の集合は手で持たない。tests/ の C# ソースの文字列リテラル（補間・連結の先頭を含む）の先頭の、最初のハイフンまでの語から機械で作る（`ClaudeMdReferenceTests.RowIdPrefixesOf`）。表に新しい接頭辞の行を足せば、そのまま照合の対象に入る
@@ -73,4 +73,13 @@ docs の方言ごとの違いの表は宣言と一致する。表の直前の HT
   - Id の多くは補間（`$"realdb-column-drop-{…}"`）か連結（`"realdb-pk-on-new-column-" + shape`）で組み立てるので、ハイフンで切った接頭辞（ハイフン 2 つ以上）が補間か連結の直前（`P{` / `P"`）に現れるか、接頭辞と残りの文字列リテラル `"S"` の両方が現れれば実在とみなす。組み立てる Id は接頭辞までしか照合できない
   - `*` を含む Id は断片ごとに照合する。ハイフンで始まる断片は、そのまま現れるか、先頭のハイフンを外した文字列リテラルの先頭（`"S`）として現れればよい（`$"module-{値}-{名前}"` の後ろを別のリテラルで組み立てる形）。Id でない語（`{方言}-386-…` のような書き方の例・ハイフンで終わる接頭辞の言及）は拾わない
 - CLAUDE.md への参照：リポジトリのルートからの相対パスをバッククォートで囲む形（例：`src/QuickER.Provider/CLAUDE.md`「取込」）。直後の「」に見出しを書いたときは、その CLAUDE.md にその文字列の見出し（`#` の行）があること。見出しの文字列には書式記号（`**`・バッククォート）を入れない
-- 自己検査（`Checker_ReportsFictitiousNamesIdsAndLinks`）が、架空のテストの名前・メソッド・ファイル・Id・パス・見出しを名指しすることと、パターン・前方一致・組み立てる Id を名指ししないことを固定する。mutation 実証済み
+- 自己検査（`Checker_ReportsFictitiousNamesIdsAndLinks`）が、架空のテストの名前・メソッド・ファイル・Id・パス・見出しを名指しすることと、パターン・前方一致・組み立てる Id・`…ForTests` のメンバーを名指ししないことを固定する。mutation 実証済み
+
+### src・ワークフロー・スクリプト・生成テンプレートの名指し
+
+- src の XmlDoc・コメント、`.github/workflows`・`scripts`・生成テンプレート（`*.scriban`）が名指すテストの名前と行 Id も実在する。テストを改名したり表の行へ移したりすると、CLAUDE.md と同じく古いまま残る（テストのクラスを表の行へ移したとき、src の XmlDoc 5 か所と Integration のテストの名前の古い形 3 か所が残っていた）。
+- 照合はソースの規則の表の禁止の規則 4 つ（範囲ごとに 1 行：`comment-test-names-src`・`comment-test-names-templates`・`comment-test-names-workflows`・`comment-test-names-scripts`）で、読み方は上の `ClaudeMdReferenceTests.FindMissingTestNames`・`ClaudeMdReferenceTests.FindMissingRowIds` をそのまま使う（写しを作らない。書式の契約を変えると両方に効く）。
+  - C# のソースはコメント（`//`・`///`・`/* */`。条件コンパイルのどの分岐も読む）だけを読む。ワークフロー・スクリプト・テンプレートは本文の全部を読む（テストの絞り込みの文字列もテストの名前を書くので）。
+  - 行 Id は「行」の直後に書いたものだけを拾う（`行 xxx-yyy`・`行 <c>xxx-yyy</c>`・``行 `xxx-yyy` ``）。
+  - 既知の一覧は空（例外を持たない）。
+- ガード：`SourceRuleTests`（規則 `comment-test-names-src`・`comment-test-names-templates`・`comment-test-names-workflows`・`comment-test-names-scripts`／自己検査の行 `comment-test-names-src-forms`・`comment-test-names-src-inactive-branch`・`comment-test-names-workflows-forms`）。mutation 実証済み（src の XmlDoc に消えたクラスの名前を戻す・ワークフローに架空の名前を足す、のどちらも赤）。

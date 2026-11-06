@@ -22,6 +22,7 @@ namespace QuickER.Tests.Docs;
 /// 書式の契約（書き方の正本は <c>tests/QuickER.Tests/Docs/CLAUDE.md</c> の「CLAUDE.md の照合」）：
 /// (1) テストの名前は <c>XxxTests</c> / <c>XxxTestsBase</c> の形で拾い、<c>Prefix{A,B}Suffix</c> の中括弧の
 /// 省略は展開する。直前が <c>*</c> の名前（<c>*DdlGeneratorTests</c>）はパターンなので照合しない。
+/// <c>…ForTests</c> で終わる名前（<c>ResetForTests</c> など）は製品のテスト用メンバーで、テストのクラスではないので拾わない。
 /// (2) <c>XxxTests.cs</c> はファイルの実在、<c>XxxTests.Method</c> はそのクラスを宣言するファイルにメソッド名が
 /// 現れることで照合する（メソッド名が <c>_</c> で終わるか直後が <c>*</c> なら前方一致）。
 /// (3) 期待の行・シナリオの Id は、ハイフンを含みハイフンで終わらないバッククォートの小文字の語のうち、
@@ -105,9 +106,9 @@ public class ClaudeMdReferenceTests
         RegexOptions.CultureInvariant
     );
 
-    /// <summary>テストの名前（直後の <c>.cs</c> / <c>.Method</c> / <c>*</c> も読む）</summary>
+    /// <summary>テストの名前（直後の <c>.cs</c> / <c>.Method</c> / <c>*</c> も読む。<c>…ForTests</c> は製品のテスト用メンバーなので読まない）</summary>
     private static readonly Regex TestName = new(
-        @"(?<![A-Za-z0-9_*.])([A-Z][A-Za-z0-9_]*Tests(?:Base)?)(\.cs\b|\.([^\W\d]\w*)(\*)?)?(?![A-Za-z0-9_])",
+        @"(?<![A-Za-z0-9_*.])([A-Z][A-Za-z0-9_]*(?<!For)Tests(?:Base)?)(\.cs\b|\.([^\W\d]\w*)(\*)?)?(?![A-Za-z0-9_])",
         RegexOptions.CultureInvariant
     );
 
@@ -145,8 +146,8 @@ public class ClaudeMdReferenceTests
             .Select(match => match.Groups[1].Value)
             .ToHashSet(StringComparer.Ordinal);
 
-    /// <summary>tests/ のソース（1 回だけ読む）</summary>
-    private static readonly Lazy<TestSources> Sources = new(ReadTestSources);
+    /// <summary>tests/ のソース（1 回だけ読む。src・ワークフローの名指しの規則〔SourceRules.Comments.cs〕も使う）</summary>
+    internal static readonly Lazy<TestSources> Sources = new(ReadTestSources);
 
     /// <summary>リポジトリの全 CLAUDE.md（ルートからの相対パス → 本文）</summary>
     private static IReadOnlyDictionary<string, string> ClaudeMdFiles()
@@ -531,7 +532,8 @@ public class ClaudeMdReferenceTests
         FindMissingTestNames(
                 "ガード：`RealGuardTests`・`NoSuchGuardTests`・Real{Guard,Fake}Tests・"
                     + "`RealGuardTests.Existing_Method`・`RealGuardTests.NoSuchMethod`・"
-                    + "`RealGuardTests.Existing_*`・`RealGuardTests.cs`・`NoSuchFileTests.cs`・*AnyPatternTests",
+                    + "`RealGuardTests.Existing_*`・`RealGuardTests.cs`・`NoSuchFileTests.cs`・*AnyPatternTests・"
+                    + "`ResetForTests`",
                 sources
             )
             .Should()

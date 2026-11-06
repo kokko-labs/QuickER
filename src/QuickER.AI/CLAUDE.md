@@ -30,6 +30,16 @@ AI チャットエンジンの共通基盤（WPF 非依存）。内蔵チャッ�
   - ターン：`ClaudeCodeProcessClientTurnTests` の「取り消し以外の例外でターンを抜けても、claude の子プロセスを止める」
   - ログインの確認：`ClaudeCodeProcessClientProbeTests`（上限時間・破棄・起動直後の破棄で偽の claude〔`.cmd`〕をプロセスツリーごと止めて Unavailable を返す。既定の上限時間は 60 秒＝`DefaultProbeTimeout_IsSixtySeconds`。すぐ終わる claude では `ProbeLogin_WhenClaudeExitsImmediately_ReturnsUnavailableAndReleasesProcess` が控え `_probeProcess` の解放まで見る）
 
+## Codex の送信の取り消しと書き込みロック
+
+- `CodexAppServerClient.SendMessageAsync` は、標準入力への書き込みのタスクを取り消しと競わせて待つ（`WaitAsync`）。書き込みへ渡したトークンだけに頼らない。
+  - 子プロセスの標準入力は同期のパイプで、書き込みへ渡したトークンは同期の書き込みの最中にしか効かない。スレッドプールが詰まって書き込みの始まりと取り消しがずれると、取り消しが効かないまま書き込みが止まり続ける（実測：1 秒で取り消した書き込みが 90 秒たっても戻らない）。30 秒の応答のタイムアウトも同じトークンなので、競わせないと要求は取り消しでもタイムアウトでも戻らず、Codex が終わるまで止まる。
+  - 取り消しが勝ったら、書き込みの途中かもしれないので接続を捨てる（`AbortConnection`＝子プロセスを止め、パイプが切れて止まっていた書き込みも失敗で終わる）。停止のトークンが勝ったときは接続断の `InvalidOperationException`。
+- 書き込みロックは書き込みが終わるまで持ち、ちょうど 1 回手放す。取り消しが先に戻るときは、解放を書き込みの継続へ渡す（finally の 2 つの枝は排他）。先に手放すと、終わっていない書き込みの後ろに次の行が書かれる。手放し忘れると、以後の送信と停止の上限つきの待ち（`WriteDrainLimit`）が止まる。継続の解放は最終破棄の後なら何もしない。
+- 書き込みを取り消した要求（`SendRequestAsync`）は、応答待ちを見ずに取り消しの理由（タイムアウトか呼び出し元の取り消し。取り消しの登録と同じ優先順）を返す。接続を捨てた後始末が応答待ちを「接続断」で先に完了させ得るため。応答待ちの例外は観測してから捨てる。
+- 取り消しが書き込みの終わりより先に勝つ経路はプールが詰まったときにしか起きないので、テストはテスト専用の `WriteCompletionForTests`（null なら製品の振る舞いは変わらない）で書き込みの終わりを門で止めて通す。
+- ガード：`CodexAppServerClientConnectionTests.Request_CanceledBeforeWriteEnds_ReleasesWriteLockOnceWhenWriteEnds`（取り消しですぐ戻る・書き込みが終わるまでロックの CurrentCount が 0・終わったら 1）・`CodexAppServerClientConnectionTests.Request_WhenWriteIsStuck_CancelsAndAbortsConnection`（取り消しで戻り、接続を捨て、ロックを手放す）。mutation 実証済み（競争を外す・継続の解放を消す・その場でも解放する、のどれも赤）。
+
 ## ツール実行と活動通知
 
 - チャットエンジン 4 種（API キー接続・Claude Code・Codex・Copilot）のツール実行と活動通知は `ChatToolInvocation` を通す。次の 2 つは 4 エンジンで同じでなければならない。

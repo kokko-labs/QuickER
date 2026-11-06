@@ -15,7 +15,7 @@ namespace QuickER.Model;
 /// <para>
 /// 名前の重複の判定・名前での引き当ては、素の <c>string.Equals</c>・<c>StringComparer</c>・<c>Trim</c> を書かずにここを通す
 /// （入口ごとに規則を写すと、入口ごとに答えが割れる）。素の比較を書いた箇所はソース走査のガード
-/// （<c>SchemaNamesGuardTests</c>）が検出する。
+/// （<c>SourceRuleTests</c> の規則 <c>schema-name-comparisons</c>）が検出する。
 /// </para>
 /// <para>
 /// 対象外: データの値の比較（主キーの値・照合順序）。例外（区別する側に残す）は DB 取込のカタログの照合

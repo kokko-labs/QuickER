@@ -420,6 +420,9 @@ Do you want to run this against {0}?</value>
   <data name="SchemaSync_ExecuteFailedMessage" xml:space="preserve">
     <value>Execution failed:</value>
   </data>
+  <data name="SchemaSync_RefreshAfterCommitFailedMessage" xml:space="preserve">
+    <value>The changes were committed, but recomputing the diff afterwards failed:</value>
+  </data>
   <data name="SchemaSync_ExecuteError" xml:space="preserve">
     <value>Execution failed: {0}</value>
   </data>

@@ -245,7 +245,8 @@ public sealed partial record SyncDialectCapabilities
     /// 「縮める前の既定名を <see cref="IdentifierLengthLimit.Truncate"/> で切ったもの」と一致すれば同じ外部キーとみなす。
     /// 旧版の QuickER は長い既定名をそのまま DDL へ書き、PostgreSQL が 63 バイトで切って保存していたため、
     /// 吸収しないと既定名を縮めるようにした版で同期すると、同じ外部キーが追加と削除の 2 項目に化ける
-    /// （<c>PostgreSqlLegacyTruncatedNameIntegrationTests</c> が固定）。
+    /// （同期計画の期待の行 <c>diff-long-default-pg-legacy-truncated-fk-name-is-absorbed</c> が固定し、吸収しないと
+    /// 別の外部キーに見えることを実 DB の <c>PostgreSqlLongDefaultConstraintNameIntegrationTests</c> が対照として確かめる）。
     /// </remarks>
     public required bool TruncatesLongIdentifiers { get; init; }
 

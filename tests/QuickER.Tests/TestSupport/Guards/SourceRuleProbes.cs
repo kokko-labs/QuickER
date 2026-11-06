@@ -4,7 +4,16 @@ namespace QuickER.Tests.TestSupport.Guards;
 internal static partial class SourceRuleProbes
 {
     private static readonly Lazy<IReadOnlyList<SourceRuleProbe>> LazyAll = new(() =>
-        [.. Platform(), .. Names(), .. Provider(), .. Text(), .. Tests(), .. Gui(), .. Mcp()]
+        [
+            .. Platform(),
+            .. Names(),
+            .. Provider(),
+            .. Text(),
+            .. Tests(),
+            .. Gui(),
+            .. Mcp(),
+            .. Comments(),
+        ]
     );
 
     /// <summary>すべての行（宣言の順）</summary>

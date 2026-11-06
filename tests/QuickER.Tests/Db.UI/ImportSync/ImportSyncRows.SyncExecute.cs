@@ -272,6 +272,47 @@ internal static partial class ImportSyncRows
                 }
             ),
             Row(
+                "sync-dialog-execute-success-then-refresh-failure-stays-open-and-shows-error",
+                "実行の成功の後の取り直しが失敗したら、差分 0 件と読んで閉じずに、失敗をモーダルで知らせ、古いスクリプトを残さない",
+                [(SyncDiff, Apply), (SyncDiff, Fail)],
+                async h =>
+                {
+                    var (live, target) = AddColumnScenario();
+                    var provider = ImportSyncHarness.SyncProvider(new SqliteProvider(), live);
+                    var vm = h.CreateSync(
+                        provider,
+                        new DbConnectionSettings { FilePath = "shop.db" },
+                        target
+                    );
+                    await h.RefreshAsync(vm);
+                    vm.DiffItems.Should().NotBeEmpty();
+                    // 実行はコミットし、その後の取り直しだけが失敗する
+                    provider.Importer.Fail("network down");
+
+                    await h.ExecuteAsync(vm);
+
+                    h.Closes(vm)
+                        .Should()
+                        .BeEmpty("取り直せなかったのを「図と DB が一致した」と読まない");
+                    h.Dialogs.InformationMessages.Should().ContainSingle();
+                    h.Dialogs.ErrorMessages.Should()
+                        .ContainSingle()
+                        .Which.Should()
+                        .Be(
+                            DbStrings.SchemaSync_RefreshAfterCommitFailedMessage + "\nnetwork down"
+                        );
+                    vm.StatusMessage.Should()
+                        .Be(string.Format(DbStrings.SchemaSync_DiffFailed, "network down"));
+                    vm.ScriptPreview.Should().BeEmpty();
+
+                    await h.ExecuteAsync(vm);
+
+                    provider
+                        .Executor.Calls.Should()
+                        .Be(1, "取り直せなかった古いスクリプトは流さない");
+                }
+            ),
+            Row(
                 "sync-dialog-execute-foreign-key-rebuild-risk-in-confirm-details",
                 "主キーの変更で被参照列が候補キーでなくなるとき、実行の確認の詳細に外部キーの作り直しの注意を載せる",
                 [(SyncDiff, Confirm)],

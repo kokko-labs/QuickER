@@ -273,7 +273,7 @@ public sealed record IdentifierLengthLimit(
 /// <summary>DB 方言ごとの識別子の長さの上限（正本）</summary>
 /// <remarks>
 /// <para>
-/// 値は実 DB で確かめた（Integration の <c>IdentifierLengthLimitIntegrationTests</c> が、上限ちょうどは通り
+/// 値は実 DB で確かめた（Integration の <c>{SqlServer,PostgreSql,MySql,Oracle}IdentifierLengthLimitIntegrationTests.Limit_MatchesDatabase</c> が、上限ちょうどは通り
 /// 1 つ超えると断られる〔PostgreSQL は切り詰められる〕ことを 4 方言で固定する）。
 /// </para>
 /// <list type="bullet">

@@ -401,7 +401,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **`IErDiagramHost` の能力（IsDirty・DiagramRevision・ReplaceDiagram・ReplaceQueries・イベント）と、列リネーム時のクエリ条件追従（`QueryConditionRenameFollower`、読めない新名は書き換えない）**：機能側が図を壊す／Undo で条件が戻らない。ガード：`QueryConditionRenameFollowerTests`・`MainViewModelErDiagramHostTests`。→ `src/QuickER.Extensibility/CLAUDE.md`「IErDiagramHost」「列リネームのクエリ条件追従」
 - **同梱構成は `IncludeDbToolModules` / `IncludeAiModules` / `IncludeCodeGenModules` で独立に外せる**：外した構成で依存が残る。→ `src/QuickER.Extensibility/CLAUDE.md`「同梱構成」
 - **接続プロファイルの暗号ファイルは「消すのは JSON の書き込みの前・書くのは後」**：新しい接続先と古いパスワードの組が残り、前の接続先の資格情報を別のサーバーへ送る。ガード：`ProfileStoreTests`（行 `pairing-*`）・`ConnectionDialogTests`（行 `delete-secret-delete-fails-*`・`rename-replaced-secret-delete-fails-*`・`ok-last-used-secret-write-fails-*`）。→ `src/QuickER.Db.UI/CLAUDE.md`「接続プロファイルの暗号ファイルの順序」
-- **接続ダイアログは同期モードで方言を固定し、接続テスト中は確定できず、ストアの失敗で一覧をディスクの実体どおりに保つ。DB 取込は世代が同じときだけ図を置き換えて終端の通知をちょうど 1 件出し、同期のダイアログは確認を断ったら実行器を呼ばず、取り直しに失敗したら古いスクリプトを残さない**：固定した方言と違う接続先へ DDL を流す・確認の間の変更を古い取込結果で上書きする・取り直せなかった古いスクリプトを流す。ガード：`ConnectionDialogTests`・`ImportSyncTests`（どの行でも組が見張る）。→ `src/QuickER.Db.UI/CLAUDE.md`「ダイアログとコマンドの状態の不変条件」
+- **接続ダイアログは同期モードで方言を固定し、接続テスト中は確定できず、ストアの失敗で一覧をディスクの実体どおりに保つ。DB 取込は世代が同じときだけ図を置き換えて終端の通知をちょうど 1 件出し、同期のダイアログは確認を断ったら実行器を呼ばず、取り直しに失敗したら古いスクリプトを残さず、コミットの後なら閉じずにモーダルで知らせる**：固定した方言と違う接続先へ DDL を流す・確認の間の変更を古い取込結果で上書きする・取り直せなかった古いスクリプトを流す・取り直せなかった同期を一致したと見せて閉じる。ガード：`ConnectionDialogTests`・`ImportSyncTests`（どの行でも組が見張る）。→ `src/QuickER.Db.UI/CLAUDE.md`「ダイアログとコマンドの状態の不変条件」
 
 ### MCP
 
@@ -417,6 +417,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 
 - **Copilot のシェル許可は、パスが取れないなら全要素が許可リスト（`dotnet` のみ）のときだけ承認し、URL 参照・書き込みリダイレクトは両方の枝で拒否する**：緩めると `dotnet build && curl … | sh` のような連結が通る。`dotnet` 自体が外へ出る経路は塞げない（残余）。ガード：`ShellPermissionTests`。→ `src/QuickER.AI/CLAUDE.md`「Copilot のシェル許可」
 - **内蔵チャットの CLI バックエンドは作業フォルダを `%TEMP%\QuickER\{backend}\<guid>` へ隔離し、Codex は read-only を明示する**：実行フォルダが承認なしで読まれる。モック生成側は出力先へ書くので workspace-write。ガード：`BackendWorkingDirectoryTests`・`CodexAppServerClientStartInfoTests`。→ `src/QuickER.AI/CLAUDE.md`「CLI バックエンドの作業フォルダ」
+- **Codex への送信は書き込みを取り消しと競わせ、書き込みロックは書き込みが終わるまで持ってちょうど 1 回手放す**：同期のパイプの書き込みはプールが詰まると取り消しが効かず、要求が取り消しでもタイムアウトでも戻らない。先に手放すと次の行が混ざり、手放し忘れると以後の送信が止まる。ガード：`CodexAppServerClientConnectionTests.Request_CanceledBeforeWriteEnds_ReleasesWriteLockOnceWhenWriteEnds`。→ `src/QuickER.AI/CLAUDE.md`「Codex の送信の取り消しと書き込みロック」
 - **チャットエンジン 4 種のツール実行と活動通知は `ChatToolInvocation` を通す**：通知を保護しないと購読側の例外で実行済みの呼び出しに「未実行」の結果が積まれ、AI が二重に操作する。引数は `Func<string>` で try の内側で取り出す。ガード：`ChatToolInvocationTests`・`SourceRuleTests`（規則 `chat-engine-tool-invocation-uses`・`chat-engine-tool-invocation-copies`）・`ChatEngineContractTests`。→ `src/QuickER.AI/CLAUDE.md`「ツール実行と活動通知」
 - **チャットエンジン 4 種の共通の契約は 4 エンジンへ同じ行で流し、違いはアダプタの出典つきの宣言に置く（持たない組は手で書いた一覧）**：エンジンごとに別々に書くと 1 エンジンだけの退行を見逃し、宣言を書き換えると行が黙って外れる。ガード：`ChatEngineContractTests`・`ChatDriverTests`。→ `src/QuickER.AI/CLAUDE.md`「チャットエンジンの共通の契約」
 - **チャットのダイアログは、ターンの外に応答中の吹き出しを残さず、ターン中に接続方式を変えず、切り替えられない状態の切替を確認なしで断る**：外すと吹き出しが Markdown へ戻らない・実行中のエンジンを置き去りにする・開始待ちに会話を消す確認が出る。ガード：`ChatDialogTests`。→ `src/QuickER.AI.Chat/CLAUDE.md`「ダイアログの状態の不変条件」
@@ -432,7 +433,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **初回ターンは成功で終わったときだけ済みにする**：失敗を済みにすると開始プロンプトが届かず、次の再開が「変更なし」になる。ガード：`MockFolderTests`（行 `session-start-*`・`session-feedback-*`）・`MockDialogTests`（どの行でも組が見張る・行 `converse-first-turn-*`）。→ `src/QuickER.AI.Mock/CLAUDE.md`「初回ターン」
 - **モック生成のダイアログは、ターン中に接続方式とモックフォルダを変えず、作ったエンジンをちょうど 1 回破棄し、生成の可否と無効の理由を食い違わせない**：変えるとセッションを切り離して完了が届かずダイアログが固まり、破棄が漏れると常駐の子プロセスが残る。ガード：`MockDialogTests`（どの行でも組 `MockDialogHarness` が見張る）。→ `src/QuickER.AI.Mock/CLAUDE.md`「ダイアログの状態の不変条件」
 - **モックのプレビューは遷移をフォルダ直下の html に限り、サブリソースを既定拒否し、ダウンロードを取り消す**：AI の HTML が外部へ通信・ファイルを置く。ガード：`MockPreviewPanelRuntimeTests`。→ `src/QuickER.AI.Mock/CLAUDE.md`「プレビュー」
-- **最終 `dotnet build` は自分の `.sln` を明示し、MSBuild の自動 import を無効化し、直前に `obj` / `bin` を削除する**：AI が書いた obj のターゲットや rsp がビルドで実行される。祖先の global.json / NuGet.Config は無効化しない。ガード：`DotnetBuildRunnerArgumentsTests`・`MockBuildBoundaryTests`（行 `clear-*`）。→ `src/QuickER.AI.Mock/CLAUDE.md`「最終ビルド」
+- **最終 `dotnet build` は自分の `.sln` を明示し、MSBuild の自動 import を無効化し、直前に `obj` / `bin` を削除する**：AI が書いた obj のターゲットや rsp がビルドで実行される。祖先の global.json / NuGet.Config は無効化しない。ガード：`MockBuildBoundaryTests`（行 `args-*`・`clear-*`）。→ `src/QuickER.AI.Mock/CLAUDE.md`「最終ビルド」
 - **成果物の探索はプロジェクトフォルダ配下だけを、アクセス拒否を無視して `MockProjectFiles` で走査する**：権限のないサブフォルダ 1 つでランが落ちる。ガード：`MockBuildBoundaryTests`（行 `enumerate-*`）。→ `src/QuickER.AI.Mock/CLAUDE.md`「成果物の探索」
 - **最終ビルド前の変更検知は、ホワイトリスト差分と内容 SHA-256 で行い、読めないフォルダ・リンクは毎回「変更」に出す**：サンドボックス外のビルドで AI のコードが走る。確認手段が null ならビルドしない。ガード：`MockBuildBoundaryTests`（行 `change-*`）。→ `src/QuickER.AI.Mock/CLAUDE.md`「最終ビルド前の変更検知」
 - **API キー方式の提出パス（`ResolveEmitPath`）は拡張子ホワイトリストのまま保ち、保護フォルダは綴りの別名にも負けない形で照合する**：拒否リストに戻すと自動 import でビルドが任意コード実行になる。ガード：`PathEntranceTests`（行 `emit-*`・`find-blocked-folder-*`）・`MockProjectEmitToolsTests`。→ `src/QuickER.AI.Mock/CLAUDE.md`「提出パスの判定」
@@ -477,6 +478,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 ### docs と CLAUDE.md の照合
 - **docs の方言の表は宣言と一致する（目印 `<!-- dialect-table: 名前 -->`）**：登録の無い表は照合されず静かに嘘になる。ガード：`DialectDocsTableTests`。→ `tests/QuickER.Tests/Docs/CLAUDE.md`「docs の方言の表」
 - **ルートの `CLAUDE.md` の機械照合できる一覧（依存矢印・プロジェクト網羅・フォルダ一覧・固定フィクスチャ一覧）は書式が契約**：書式を変えるときはテストも更新する。ガード：`ClaudeMdParityTests`。→ `tests/QuickER.Tests/Docs/CLAUDE.md`「CLAUDE.md の照合」
+- **src のコメント・ワークフロー・スクリプト・生成テンプレートが名指すテストの名前と行 Id は実在する（読み方は CLAUDE.md の照合と同じ関数）**：テストの改名・表の行への移し替えで名指しが古いまま残る。ガード：`SourceRuleTests`（規則 `comment-test-names-src`・`comment-test-names-templates`・`comment-test-names-workflows`・`comment-test-names-scripts`）。→ `tests/QuickER.Tests/Docs/CLAUDE.md`「src・ワークフロー・スクリプト・生成テンプレートの名指し」
 
 ## コーディング規約
 

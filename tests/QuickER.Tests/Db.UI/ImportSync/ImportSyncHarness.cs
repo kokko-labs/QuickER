@@ -34,11 +34,11 @@ namespace QuickER.Tests.Db.UI.ImportSync;
 /// <para>同期のダイアログ（src/QuickER.Db.UI/SchemaSyncDialogViewModel.cs）の不変条件：</para>
 /// <list type="number" start="8">
 /// <item>実行中（IsExecuting）は閉じられず、再計算・実行の最中（IsBusy）は再計算・実行・全選択・全解除ができない（:136-139）。行の終わりにはどちらも解けている。</item>
-/// <item>実行の結果のモーダル（ShowError / ShowInformation）は実行器を待ち終えた後（IsExecuting が解けた後）に出す（:380-395・:403・:416・:436）。</item>
-/// <item>スクリプトが空か実行の最中なら、確認も実行器も呼ばない（:353-362）。確認は警告つき（詳細つきを含む）だけで 1 回、断ったら実行器を呼ばない（:364-367・:504-506）。</item>
-/// <item>実行器を呼んだら、結果はモーダル 1 件（失敗・例外は ShowError・コミットは ShowInformation）で知らせ、どの結果でも差分を取り直す。自動で閉じるのはコミットして取り直した差分が 0 件のときだけ（:397-444）。</item>
-/// <item>取り直しが失敗したら、差分・スクリプトを残さない（差分 0 件・HasDiff 偽・スクリプト空。:250-269）。</item>
-/// <item>閉じるのは実行中でないときだけで、閉じるときは CloseAction(true)（:647-655）。</item>
+/// <item>実行の結果のモーダル（ShowError / ShowInformation）は実行器を待ち終えた後（IsExecuting が解けた後）に出す（:386-401・:409・:422・:434・:454）。</item>
+/// <item>スクリプトが空か実行の最中なら、確認も実行器も呼ばない（:359-368）。確認は警告つき（詳細つきを含む）だけで 1 回、断ったら実行器を呼ばない（:370-373・:524-526）。</item>
+/// <item>実行器を呼んだら、結果はモーダル 1 件（失敗・例外は ShowError・コミットは ShowInformation）で知らせ、どの結果でも差分を取り直す。自動で閉じるのはコミットし、取り直しが成功し、差分が 0 件のときだけ。コミットの後の取り直しが失敗したら閉じずに ShowError をもう 1 件出す（成功のモーダルの後に黙って閉じない）。失敗・例外の後の取り直しの失敗はステータス行だけ（失敗のモーダルは出した後で、閉じないので理由が残る）（:403-464）。</item>
+/// <item>取り直しが失敗したら、差分・スクリプトを残さない（差分 0 件・HasDiff 偽・スクリプト空。:255-275）。</item>
+/// <item>閉じるのは実行中でないときだけで、閉じるときは CloseAction(true)（:671-680）。</item>
 /// </list>
 /// 8・9 は VM の変更通知とモーダルの直前でも見張り、ほかは手の後と行の終わりに見る。
 /// </remarks>
@@ -524,9 +524,11 @@ internal sealed class ImportSyncHarness
         if (executed == 1)
         {
             var outcome = provider.Executor.LastOutcome;
+            var refreshFailed = provider.Importer.LastFailed;
             var errors = after.Error - before.Error;
             var information = after.Information - before.Information;
-            var expected = outcome == ExecutorOutcome.Committed ? (0, 1) : (1, 0);
+            var expected =
+                outcome == ExecutorOutcome.Committed ? (refreshFailed ? 1 : 0, 1) : (1, 0);
 
             if ((errors, information) != expected)
             {
@@ -541,11 +543,14 @@ internal sealed class ImportSyncHarness
             }
 
             var autoClosed = _closes[vm].Skip(closes).Contains(true);
-            var shouldClose = outcome == ExecutorOutcome.Committed && vm.DiffItems.Count == 0;
+            var shouldClose =
+                outcome == ExecutorOutcome.Committed && !refreshFailed && vm.DiffItems.Count == 0;
 
             if (autoClosed != shouldClose)
             {
-                Violate("不変条件 11：自動で閉じたかどうかが、コミットして差分 0 件と食い違う");
+                Violate(
+                    "不変条件 11：自動で閉じたかどうかが、コミットして取り直しが成功し差分 0 件と食い違う"
+                );
             }
         }
         else if (_closes[vm].Count != closes)

@@ -9,7 +9,7 @@ namespace QuickER.Tests.Dialects;
 /// 識別子の長さの上限（<see cref="IdentifierLengthLimit"/> / <see cref="IdentifierLengthLimits"/>）の測り方を検証するテストクラス
 /// </summary>
 /// <remarks>
-/// 上限の値と単位が実 DB と一致することは Integration の <c>IdentifierLengthLimitIntegrationTests</c> が確かめる。
+/// 上限の値と単位が実 DB と一致することは Integration の <c>{SqlServer,PostgreSql,MySql,Oracle}IdentifierLengthLimitIntegrationTests</c> が確かめる。
 /// ここでは単位ごとの数え方と、上限ちょうど・1 つ超えの境界を確かめる。
 /// </remarks>
 public class IdentifierLengthLimitTests

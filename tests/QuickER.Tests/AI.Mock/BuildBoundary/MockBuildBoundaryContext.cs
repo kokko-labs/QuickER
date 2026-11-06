@@ -26,6 +26,9 @@ internal enum BoundaryEntrance
 
     /// <summary>入口 D：スキャフォールドの上書きの走査（<c>MockProjectOverwriteScanner.Scan</c>）</summary>
     OverwriteScan,
+
+    /// <summary>入口 E：最終ビルドへ渡す引数（<c>DotnetBuildRunner.CreateBuildStartInfo</c>）</summary>
+    BuildArguments,
 }
 
 /// <summary>行が置くファイル・フォルダの種別（次元表の因子 Kind の水準）</summary>

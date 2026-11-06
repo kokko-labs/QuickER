@@ -31,7 +31,7 @@ public sealed class DotnetBuildRunner : IBuildRunner
     /// 最終ビルド（<c>dotnet build {ソリューション}</c>）の起動情報を組み立てる。
     /// </summary>
     /// <remarks>
-    /// 引数の並びはガードテスト（<c>DotnetBuildRunnerArgumentsTests</c>）が固定する。
+    /// 引数の並びは最終ビルドの境界の表（<c>MockBuildBoundaryTests</c> の行 <c>args-*</c>）が固定する。
     /// 警告も検出したいので警告をエラー扱いにはせず、通常のビルドで終了コードを見る。
     /// <c>-nologo</c> と <c>-clp:NoSummary</c> は付けず、ログはそのまま保全する（診断性優先）。
     /// </remarks>
