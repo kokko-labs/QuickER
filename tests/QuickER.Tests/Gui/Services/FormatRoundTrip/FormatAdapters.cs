@@ -535,6 +535,10 @@ internal sealed class CSharpReverseAdapter : FormatAdapter
             "docs/import-export.ja.md「C# コード（.cs）」：複数行の説明はコード生成の時点で空白へ畳まれる"
         ),
         new(
+            Facet.PrimaryKeyNullability,
+            "src/QuickER.CodeGen.CSharp/CLAUDE.md「主キーの列の NULL 許容」：コード生成は主キーの列を NULL 許容の印に依らず NOT NULL とみなす（プロパティは NULL を許さない型）ので、C# コードから取り込むと主キーの列は NOT NULL になる"
+        ),
+        new(
             Facet.BrokenColumnPairs,
             "src/QuickER.Model/CLAUDE.md「リレーションの列ペア」：解決不能な列の FK は DDL・差分の対象外。取込は引けない列を指す列ペアを持ち越さない（2026-11-05 レビュー役の判断）"
         ),

@@ -357,7 +357,8 @@ internal sealed record DiagnosticExpectation(
 ///   <item><term>A MultiTargetRowVersionColumns（情報）</term><description>CLAUDE.md「マルチターゲット × rowversion」1.：統一した列を Info で通知</description></item>
 ///   <item><term>A SyncSupportRequiresRepositories / RequiresDialects</term><description>CLAUDE.md（ルート）「同期の生成条件と診断」・docs/cli.md の GenerateSyncSupport</description></item>
 ///   <item><term>B RelationshipCompositeSkipped（警告）</term><description>複合外部キーは単一キー前提の生成からナビゲーションを外す（CSharpGenerationModelBuilder.ResolveAllNavigations）</description></item>
-///   <item><term>B RepositorySingleKeyOnly（警告）</term><description>docs「What gets generated」：Repository は単一主キーが前提。契約を生成するとき複合主キーの表を名指し</description></item>
+///   <item><term>B RepositorySingleKeyOnly（警告）</term><description>docs「What gets generated」：Repository は単一主キーが前提。契約を生成するとき、主キーが 1 列でない表（複合主キー・主キーなし）を名指し（CSharpGenerationModelBuilder.BuildRepositoryClass の HasSinglePrimaryKey）</description></item>
+///   <item><term>B EfCoreKeylessTableExcluded（警告）</term><description>EF Core はマップする全エンティティ型にキーを要求するので、EF Core を生成するとき主キーの無い表を DbContext から外して名指し（CSharpGenerationModelBuilder.BuildEfCoreModel）</description></item>
 ///   <item><term>B ValueObjectForeignKeyUnified（情報）</term><description>CLAUDE.md「FK 列の値オブジェクト型統一」：列名の違う外部キーが寄ったら名指し</description></item>
 ///   <item><term>B IncludeGraphSkippedNavigations（情報）</term><description>自己参照は有限の Include ツリーに写せない辺を名指し（CSharpGenerationModelBuilder.IncludeGraph のコメント。契約があるときだけ）</description></item>
 ///   <item><term>C ExcludedUnboundedBinaryColumns（情報）</term><description>docs「Excluding unbounded binary columns」：除外 ON で除外した列を名指し</description></item>
@@ -365,6 +366,7 @@ internal sealed record DiagnosticExpectation(
 ///   <item><term>C NotNullComputedColumns（警告）</term><description>同期かマルチターゲットで、式を評価しないエンジンへも書く構成のときだけ（AddNotNullComputedColumnWarning のコメント）</description></item>
 ///   <item><term>C NotNullIdentityColumns（警告）</term><description>CLAUDE.md「DB が値を拒む採番列」：実効方言のどれかが持てない（SQLite）とき</description></item>
 ///   <item><term>C NonCanonicalTypeSpellingColumns（情報）</term><description>CLAUDE.md「同義の型表記の保存」：注釈 ON で綴りが戻らない列があるとき</description></item>
+///   <item><term>C NullablePrimaryKeyColumns（情報）</term><description>src/QuickER.CodeGen.CSharp/CLAUDE.md「主キーの列の NULL 許容」：NULL 許容の印のある主キーの列を NOT NULL とみなして名指し</description></item>
 ///   <item><term>C SyncSupportTables / SyncSupportUnboundedBinaryColumns（情報）</term><description>docs「Bidirectional sync support」・CSharpCodeGenerationService の同期の Info</description></item>
 /// </list>
 /// <para>
@@ -486,12 +488,28 @@ internal static class DiagnosticRules
         if (contract)
         {
             diagnostics.AddRange(
-                compositeTables.Select(table =>
-                    ExpectedDiagnostic.Warning(
-                        nameof(Strings.CodeGen_Warning_RepositorySingleKeyOnly),
-                        table.Name
+                shape
+                    .Tables.Where(table => !table.HasSinglePrimaryKey)
+                    .Select(table =>
+                        ExpectedDiagnostic.Warning(
+                            nameof(Strings.CodeGen_Warning_RepositorySingleKeyOnly),
+                            table.Name
+                        )
                     )
-                )
+            );
+        }
+
+        if (efCore)
+        {
+            diagnostics.AddRange(
+                shape
+                    .Tables.Where(table => table.PrimaryKey.Count == 0)
+                    .Select(table =>
+                        ExpectedDiagnostic.Warning(
+                            nameof(Strings.CodeGen_Warning_EfCoreKeylessTableExcluded),
+                            table.Name
+                        )
+                    )
             );
         }
 
@@ -561,6 +579,25 @@ internal static class DiagnosticRules
                     )
                 );
             }
+        }
+
+        var nullableKeys = shape
+            .Tables.SelectMany(table =>
+                table
+                    .PrimaryKey.Where(column => column.Column.IsNullable)
+                    .Select(column => $"{table.Name}.{column.Name} ({column.Spelling.Text})")
+            )
+            .ToList();
+
+        if (nullableKeys.Count > 0)
+        {
+            diagnostics.Add(
+                new ExpectedDiagnostic(
+                    GenerationDiagnosticSeverity.Info,
+                    nameof(Strings.CodeGen_Info_NullablePrimaryKeyColumns),
+                    nullableKeys
+                )
+            );
         }
 
         if (options.IncludeDataAnnotations && shape.HasNonCanonicalSpelling(options))

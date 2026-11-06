@@ -106,7 +106,8 @@ internal sealed record ShapeRelation(
 /// <remarks>
 /// <para>
 /// どの行にも基本の 2 表（<c>customers</c> 1 対多 <c>orders</c>）を置き、水準ごとに表・列・関係・一意制約・クエリを足す。
-/// キーの形は主の表（<c>customers</c>）のキー。DB が値を作る列・バイナリ列・一意制約・クエリは子の表（<c>orders</c>）に置く。
+/// キーの形は主の表（<c>customers</c>）のキー。複合だけ・主キーなしの水準は、子の表のキーも変える（<see cref="KeyLevels.CompositeOnly"/>・<see cref="KeyLevels.KeylessOnly"/>）。
+/// DB が値を作る列・バイナリ列・一意制約・クエリは子の表（<c>orders</c>）に置く。
 /// </para>
 /// <para>
 /// 型の表記は図の方言で正しく解析できるもの（型カタログが読めて、フォールバックにならないもの）を選ぶ。
@@ -226,11 +227,15 @@ internal sealed class ShapeDiagram
     {
         Levels = levels;
         var spellings = Spellings[levels.TypeDialect];
+        // 主キーなしの水準（keyless-only）はどの表にも主キーを置かず、複合だけの水準（composite-only）は子の表のキーへ
+        // 親のキーを含める（識別関係＝どの表も複合主キーになる）
+        var keyless = levels.Key == KeyLevels.KeylessOnly;
+        var identifying = levels.Key == KeyLevels.CompositeOnly;
 
         // 主の表（キーの形）
         var customerKey = levels.Key switch
         {
-            KeyLevels.Composite => new[]
+            KeyLevels.Composite or KeyLevels.CompositeOnly => new[]
             {
                 ("region_code", ShapeType.Int),
                 ("customer_no", ShapeType.Int),
@@ -241,7 +246,15 @@ internal sealed class ShapeDiagram
         };
 
         var customerColumns = customerKey
-            .Select(key => NewColumn(spellings, key.Item1, key.Item2, primaryKey: true))
+            .Select(key =>
+                NewColumn(
+                    spellings,
+                    key.Item1,
+                    key.Item2,
+                    primaryKey: !keyless,
+                    nullable: levels.Key == KeyLevels.NullableInt
+                )
+            )
             .Append(NewColumn(spellings, "name", ShapeType.String50))
             .ToList();
 
@@ -268,13 +281,24 @@ internal sealed class ShapeDiagram
 
         Customers = AddTable("customers", "Customer", customerColumns);
 
+        // 主の表のキーの列（主キーなしの水準でも、関係はこの列を参照する）
+        var customerKeyColumns = Customers.Columns.Take(customerKey.Length).ToList();
+
         // 子の表（外部キー・DB が値を作る列・バイナリ・一意制約）
         var orderColumns = new List<ShapeColumn>
         {
-            NewColumn(spellings, "order_id", ShapeType.Int, primaryKey: true),
+            NewColumn(spellings, "order_id", ShapeType.Int, primaryKey: !keyless),
         };
         orderColumns.AddRange(
-            customerKey.Select(key => NewColumn(spellings, key.Item1, key.Item2, foreignKey: true))
+            customerKey.Select(key =>
+                NewColumn(
+                    spellings,
+                    key.Item1,
+                    key.Item2,
+                    primaryKey: identifying,
+                    foreignKey: true
+                )
+            )
         );
         orderColumns.Add(NewColumn(spellings, "amount", ShapeType.Decimal));
         orderColumns.Add(NewColumn(spellings, "note", ShapeType.String100, nullable: true));
@@ -354,7 +378,7 @@ internal sealed class ShapeDiagram
         AddRelation(
             Customers,
             Orders,
-            Customers.PrimaryKey.Zip(Orders.Columns.Where(c => c.Column.IsForeignKey)).ToList(),
+            customerKeyColumns.Zip(Orders.Columns.Where(c => c.Column.IsForeignKey)).ToList(),
             RelationshipType.OneToMany,
             "Customer"
         );
@@ -365,8 +389,8 @@ internal sealed class ShapeDiagram
                 AddRelation(
                     Customers,
                     Customers,
-                    Customers
-                        .PrimaryKey.Zip(Customers.Columns.Where(c => c.Column.IsForeignKey))
+                    customerKeyColumns
+                        .Zip(Customers.Columns.Where(c => c.Column.IsForeignKey))
                         .ToList(),
                     RelationshipType.OneToMany,
                     null
@@ -376,11 +400,17 @@ internal sealed class ShapeDiagram
             case RelationLevels.OneToOne:
                 var profileColumns = new List<ShapeColumn>
                 {
-                    NewColumn(spellings, "profile_id", ShapeType.Int, primaryKey: true),
+                    NewColumn(spellings, "profile_id", ShapeType.Int, primaryKey: !keyless),
                 };
                 profileColumns.AddRange(
                     customerKey.Select(key =>
-                        NewColumn(spellings, key.Item1, key.Item2, foreignKey: true)
+                        NewColumn(
+                            spellings,
+                            key.Item1,
+                            key.Item2,
+                            primaryKey: identifying,
+                            foreignKey: true
+                        )
                     )
                 );
                 profileColumns.Add(
@@ -390,8 +420,8 @@ internal sealed class ShapeDiagram
                 AddRelation(
                     Customers,
                     profiles,
-                    Customers
-                        .PrimaryKey.Zip(profiles.Columns.Where(c => c.Column.IsForeignKey))
+                    customerKeyColumns
+                        .Zip(profiles.Columns.Where(c => c.Column.IsForeignKey))
                         .ToList(),
                     RelationshipType.OneToOne,
                     "Customer"
@@ -401,15 +431,29 @@ internal sealed class ShapeDiagram
             case RelationLevels.Chain:
                 var lineColumns = new List<ShapeColumn>
                 {
-                    NewColumn(spellings, "line_id", ShapeType.Int, primaryKey: true),
-                    NewColumn(spellings, "order_id", ShapeType.Int, foreignKey: true),
-                    NewColumn(spellings, "quantity", ShapeType.Int),
+                    NewColumn(spellings, "line_id", ShapeType.Int, primaryKey: !keyless),
                 };
+                // 子の表のキーの列（主キーなしの水準では order_id。複合だけの水準では親のキーを含む複合主キーの全列）
+                IReadOnlyList<ShapeColumn> orderKeyColumns = keyless
+                    ? [Orders.Columns[0]]
+                    : Orders.PrimaryKey;
+                lineColumns.AddRange(
+                    orderKeyColumns.Select(key =>
+                        NewColumn(
+                            spellings,
+                            key.Name,
+                            key.Type,
+                            primaryKey: identifying,
+                            foreignKey: true
+                        )
+                    )
+                );
+                lineColumns.Add(NewColumn(spellings, "quantity", ShapeType.Int));
                 var lines = AddTable("order_lines", "OrderLine", lineColumns);
                 AddRelation(
                     Orders,
                     lines,
-                    [(Orders.PrimaryKey[0], lineColumns[1])],
+                    orderKeyColumns.Zip(lineColumns.Skip(1).Take(orderKeyColumns.Count)).ToList(),
                     RelationshipType.OneToMany,
                     "Order"
                 );
@@ -564,7 +608,12 @@ internal sealed class ShapeDiagram
             _ => null,
         };
 
-        if (methodName is null || !CodegenOptionFacts.GeneratesRepositoryContract(options))
+        // 名前付きクエリは Repository に付く。子の表の主キーが 1 列でなければ Repository が無いので、手で書く実装も無い
+        if (
+            methodName is null
+            || !CodegenOptionFacts.GeneratesRepositoryContract(options)
+            || !Orders.HasSinglePrimaryKey
+        )
         {
             return [];
         }
@@ -676,7 +725,8 @@ internal sealed class ShapeDiagram
 
     private List<QueryDefinition> BuildQueries(string query, ShapeTable orders)
     {
-        var orderId = orders.PrimaryKey[0].Column;
+        // order_id は子の表の先頭の列（主キーなしの水準では主キーでない）
+        var orderId = orders.Columns[0].Column;
 
         return query switch
         {

@@ -345,7 +345,17 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 - Repository を作る表の判定は `HasSinglePrimaryKey`（テンプレートでは `repository_classes`）だけ。表ごとの「Repository をスキップ」の警告は既存のまま
 - DI の登録のローカル関数（`AddRepository` / `AddClient`。`_06` の 4 か所・`_07`・`_08`）は、Repository が 0 件だと使われず CS8321 になるので、既存の判定 `repository_classes.size > 0` のときだけ出す（リモート契約の形は `remote_contracts && repository_classes.size > 0`＝0 件なら else 側の空のループへ進む）
 - `_03` の EditModel 基底の一意制約の照会（`repository_classes.size > 0 || runtime_package_export` のゲート）は、呼ぶ側の `ValidateUniqueAsync` も主キーが 1 列の表にしか出ないので、そのまま残している
-- ガード：`CodegenCaseTests` の行 `compile-composite-key-only-efcore` / `compile-composite-key-only-efcore-with-repositories`（コンパイル＋EF Core のモデルの主キーが実効順）・`compile-composite-key-only-all-surfaces`・`compile-composite-key-only-multitarget-split`・`compile-composite-key-only-packages`・`compile-keyless-only-all-surfaces`（どれもコンパイルのエラー 0・警告 0）。mutation 実証済み（04 のゲートを戻す・ローカル関数のゲートを 1 つずつ外す・主キーの期待を逆にする、の各回で赤）
+- ガード：`CodegenCaseTests` の行 `compile-composite-key-only-efcore` / `compile-composite-key-only-efcore-with-repositories`（コンパイル＋EF Core のモデルの主キーが実効順）・`compile-composite-key-only-all-surfaces`・`compile-composite-key-only-multitarget-split`・`compile-composite-key-only-packages`・`compile-keyless-only-all-surfaces`（どれもコンパイルのエラー 0・警告 0）。mutation 実証済み（04 のゲートを戻す・ローカル関数のゲートを 1 つずつ外す・主キーの期待を逆にする、の各回で赤）。網羅の配列の図の形の水準 `composite-only`・`keyless-only`（どの表も複合主キー・どの表も主キーなし）も同じ見逃しを拾う（04 のゲートと 6 か所のローカル関数のゲートの mutation をそれぞれ配列だけに当てると、どれも 3 行以上が赤。ただし引き金の組は キー × DB アクセス × リモート・方言の 3 因子で、配列の 3 因子の集まりに入っていないため、種に依らない決まった行も残す）
+
+## 主キーの列の NULL 許容
+
+- C# 生成は、主キーの列を図の `IsNullable` に依らず NOT NULL とみなす（DDL・同期スクリプトの `IsPrimaryKey || !IsNullable` と同じ規則）
+  - 判定の正本は Model の `ColumnNullability.AllowsNull`（`Column` は JSON の POCO なのでプロパティにしない）。CodeGen.CSharp に写しを作らない
+  - 読み替えは `CSharpCodeGenerationService.Generate`（全オーバーロードの合流点）の先頭の 1 か所だけ（`TreatPrimaryKeysAsNotNull`）。該当する列を持つエンティティだけを `Entity.Clone(preserveId: true)` で複製し、図は `ErDiagram.WithEntities`（浅い複製）で組む。呼び出し元の図は変えない。該当する列が無い図は同じインスタンスのままで、出力は変わらない
+  - 生成器は列の `IsNullable` を Entity の型・EF Core の必須・インメモリのシード値・同期の記述子・API リファレンスで直接読む。読み替えを外すと、Entity のプロパティが `int?` のまま Repository の主キーの型（`int`）と食い違い、同期の記述子の `ReadKey` がコンパイルできず（CS0266。文字列・値オブジェクトの主キーは CS8603）、インメモリのシードが主キーの null の行を入れて既定の `seedSampleData: true` で起動時に投げる。どちらも生成の診断はエラー 0 のまま
+- 読み替えた列は Info `CodeGen_Info_NullablePrimaryKeyColumns` で「テーブル.列 (型)」を名指しする（C 段＝ファイルを出すときだけ）
+- NULL 許容の主キーは GUI・MCP・DBML / Mermaid・DB 取込では作れず、Excel 定義書の取込（必須の欄が空の PK 行）・C# リバース（`[Key] int?`）・図のファイルの手書きで作れる
+- ガード：`CodegenCaseTests` の行 `compile-nullable-primary-key-sync` / `compile-nullable-primary-key-sync-string-value-objects`（同期のコンパイル）・`probe-inmemory-seed-nullable-primary-key`（シードの探針）・`relation-nullable-primary-key-all-surfaces`（全面のコンパイルと EF Core のモデル）。どの行も関係 PrimaryKeyNotNull（主キーを NOT NULL にした図と同じ生成物）と Info の名指しを掛ける。網羅の配列の図の形の水準 `int-nullable` の行にも関係 PrimaryKeyNotNull を掛ける。mutation 実証済み（読み替えを外すと同期の 2 行はコンパイルと関係の両方で赤）
 
 ## 生成コードのヘッダー
 

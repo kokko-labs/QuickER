@@ -12,10 +12,14 @@ namespace QuickER.Tests.CodeGen.CSharp.CodegenConfig;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 元のテストを持たない行：修正 H の受け入れ。網羅の配列の図の形（<see cref="ShapeDiagram"/>）は、主の表のキーが複合の水準でも
-/// 子の表が主キー 1 列なので、Repository を作る表が 0 になる図を持たない。そのため、Repository の共通契約だけが
-/// 「Repository を作る表が 1 つ以上」のときに出て、図に依らず出る EF Core・インメモリ・クエリの土台がそれを参照して
-/// コンパイルできない（DI の登録のローカル関数が使われない警告も含む）見逃しを、配列は拾えなかった。
+/// 元のテストを持たない行：修正 H の受け入れ。Repository の共通契約だけが「Repository を作る表が 1 つ以上」のときに出て、
+/// 図に依らず出る EF Core・インメモリ・クエリの土台がそれを参照してコンパイルできない（DI の登録のローカル関数が使われない警告も含む）。
+/// </para>
+/// <para>
+/// 網羅の配列の図の形（<see cref="ShapeDiagram"/>）にも、Repository を作る表が 0 になる水準 <see cref="CodegenConfigDimensions.KeyLevels.CompositeOnly"/>・
+/// <see cref="CodegenConfigDimensions.KeyLevels.KeylessOnly"/> がある。それでもこの行を残すのは 2 つの理由から：
+/// 主キーの順序を逆にした EF Core のモデルの主キーの並びは配列に無い事実で、DI の登録のローカル関数のゲートを外したときに
+/// 赤になる組はキー × DB アクセス × リモート・方言の 3 因子で、配列の 3 因子の集まりに入っていない（配列が拾うかは種に依る）。
 /// </para>
 /// <para>
 /// 図は複合主キーの表 <c>pairs(a, b)</c> の 1 表だけ（主キーの順序を <c>b, a</c> に上書き）と、主キーの無い表 <c>logs</c> の 1 表だけ。

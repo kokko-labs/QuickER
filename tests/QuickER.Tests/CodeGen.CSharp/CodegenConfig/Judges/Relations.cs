@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using QuickER.CodeGen.CSharp;
+using QuickER.CodeGen.CSharp.Resources;
 using QuickER.Dialects;
 using QuickER.Model;
 
@@ -44,6 +45,12 @@ internal enum CodegenRelation
     /// 決まった行だけ）
     /// </summary>
     OptionNoEffect,
+
+    /// <summary>
+    /// 図の主キーの列を NOT NULL にした図で生成しても、全ファイルと診断が同じ（NULL 許容の主キーの列を名指しする Info を除く。
+    /// 図に NULL 許容の主キーの列が無ければ空振りとして赤）
+    /// </summary>
+    PrimaryKeyNotNull,
 }
 
 /// <summary>関係が読む入力</summary>
@@ -107,6 +114,7 @@ internal static class Relations
             CodegenRelation.OptionEffect => "relation:option-effect",
             CodegenRelation.DialectCasing => "relation:dialect-casing",
             CodegenRelation.OptionNoEffect => "relation:option-no-effect",
+            CodegenRelation.PrimaryKeyNotNull => "relation:primary-key-not-null",
             _ => $"relation:{relation}",
         };
 
@@ -133,6 +141,7 @@ internal static class Relations
             CodegenRelation.OptionEffect => OptionEffect(input),
             CodegenRelation.DialectCasing => DialectCasing(input),
             CodegenRelation.OptionNoEffect => OptionNoEffect(input),
+            CodegenRelation.PrimaryKeyNotNull => PrimaryKeyNotNull(input),
             _ => [$"関係: 知らない関係 {relation}"],
         };
 
@@ -713,6 +722,61 @@ internal static class Relations
         {
             problems.Add(
                 $"関係（方言の綴りの大小）: [{string.Join(", ", spelled)}] の生成物が [{string.Join(", ", dialects)}] と違う"
+            );
+        }
+
+        return problems;
+    }
+
+    /// <summary>
+    /// 図の主キーの列を NOT NULL にした図で生成しても、全ファイルと診断が同じ（NULL 許容の主キーの列を名指しする Info
+    /// <c>CodeGen_Info_NullablePrimaryKeyColumns</c> を除く）
+    /// </summary>
+    /// <remarks>
+    /// src/QuickER.CodeGen.CSharp/CLAUDE.md「主キーの列の NULL 許容」：C# 生成は主キーの列を図の NULL 許容の印に依らず NOT NULL とみなす
+    /// （DDL と同じ規則）。製品は入口の 1 か所で読み替えるので、この関係は作りの上で成り立つ。読み替えを外したときに、
+    /// 実際の振る舞い（コンパイル・探針）と並んで赤になることを見せるための判定。図に NULL 許容の主キーの列が無ければ空振り。
+    /// </remarks>
+    private static IReadOnlyList<string> PrimaryKeyNotNull(RelationInput input)
+    {
+        var diagram = input.FreshDiagram();
+        var nullableKeys = diagram
+            .Entities.SelectMany(entity => entity.Columns)
+            .Where(column => column.IsPrimaryKey && column.IsNullable)
+            .ToList();
+
+        if (nullableKeys.Count == 0)
+        {
+            return ["関係（主キーは NOT NULL）: 図に NULL 許容の主キーの列が無い（空振り）"];
+        }
+
+        foreach (var column in nullableKeys)
+        {
+            column.IsNullable = false;
+        }
+
+        var other = CodegenRunner.Generate(diagram, input.TypeDialect, input.Options);
+        var problems = new List<string>();
+
+        if (!Render(input.Result).SequenceEqual(Render(other), StringComparer.Ordinal))
+        {
+            problems.Add(
+                "関係（主キーは NOT NULL）: 主キーの列を NOT NULL にした図の生成物と違う（NULL 許容の主キーを NOT NULL とみなしていない）"
+            );
+        }
+
+        var messages = input
+            .Result.Diagnostics.Where(diagnostic =>
+                DiagnosticMatcher.Identify(diagnostic).Key
+                != nameof(Strings.CodeGen_Info_NullablePrimaryKeyColumns)
+            )
+            .Select(diagnostic => $"[{diagnostic.Severity}] {diagnostic.Message}")
+            .Order(StringComparer.Ordinal);
+
+        if (!messages.SequenceEqual(Messages(other), StringComparer.Ordinal))
+        {
+            problems.Add(
+                "関係（主キーは NOT NULL）: 主キーの列を NOT NULL にした図と、NULL 許容の主キーの Info のほかの診断が違う"
             );
         }
 

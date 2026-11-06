@@ -193,6 +193,9 @@
   <data name="CodeGen_Info_NonCanonicalTypeSpellingColumns" xml:space="preserve">
     <value>The dialect-neutral type token does not reproduce the DB type spelling of the columns below (re-formatting the token yields the type shown after the arrow). The original text is therefore recorded verbatim in [DbColumnMeta] as well, so that reversing the generated code restores the column type as written here:{0}</value>
   </data>
+  <data name="CodeGen_Info_NullablePrimaryKeyColumns" xml:space="preserve">
+    <value>The primary key columns below are marked as nullable in the diagram. A primary key cannot hold NULL (the generated DDL declares these columns NOT NULL as well), so the generated code treats them as NOT NULL: their properties have non-nullable types, as for any other primary key. Clear the nullable mark on these columns to make the diagram match:{0}</value>
+  </data>
   <data name="CodeGen_Info_NegativeScaleColumns" xml:space="preserve">
     <value>The columns below declare a negative scale, so the database rounds their values (numeric(10,-2) stores 1234 as 1200). No precision or scale is carried into the generated code for them: no digit validation on the value object, no Precision/Scale on [SqlColumnType], and no HasPrecision in the EF Core model. A negative scale is written on purpose, so this is a note rather than a warning:{0}</value>
   </data>

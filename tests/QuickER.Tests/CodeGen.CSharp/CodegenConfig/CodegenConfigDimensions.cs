@@ -195,6 +195,20 @@ internal static class CodegenConfigDimensions
 
         /// <summary>可変長文字列の単一主キー</summary>
         public const string String = "string";
+
+        /// <summary>
+        /// NULL 許容の印のある整数の単一主キー（C# 生成は NOT NULL とみなす＝src/QuickER.CodeGen.CSharp/CLAUDE.md「主キーの列の NULL 許容」）
+        /// </summary>
+        public const string NullableInt = "int-nullable";
+
+        /// <summary>
+        /// どの表も複合主キー（主の表は <see cref="Composite"/> と同じ。子の表は自分の列＋親のキーの識別関係）。
+        /// Repository を作れる表が 1 つも無い図（src/QuickER.CodeGen.CSharp/CLAUDE.md「Repository を作れる表が無い図」）
+        /// </summary>
+        public const string CompositeOnly = "composite-only";
+
+        /// <summary>どの表も主キーなし（関係は同じ列ペアで、親の列はキーでない）。Repository を作れる表が 1 つも無い図</summary>
+        public const string KeylessOnly = "keyless-only";
     }
 
     /// <summary>関係の形の水準</summary>
@@ -576,6 +590,9 @@ internal static class CodegenConfigDimensions
                     new Level(KeyLevels.Int),
                     new Level(KeyLevels.Composite),
                     new Level(KeyLevels.String),
+                    new Level(KeyLevels.NullableInt),
+                    new Level(KeyLevels.CompositeOnly),
+                    new Level(KeyLevels.KeylessOnly),
                 ],
                 "主の表のキーの形"
             ),
