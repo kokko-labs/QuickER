@@ -78,6 +78,10 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **The Mermaid export no longer reports nullability when the only NOT NULL columns are primary key columns** — the import makes primary key columns NOT NULL, so nothing is lost
 - **Importing C# code into a diagram keeps a column type that differs from the current diagram only in letter case** — on a SQLite diagram, `int` came back as `INT` and every import asked to confirm the replacement, because code generation does not record spellings that differ only in case
 
+#### DB import & connections
+
+- **On Windows, a SQLite database file can now be moved, renamed or deleted right after QuickER creates, imports or syncs it** — QuickER kept the file open for a while after the operation, so these were refused as a sharing violation. This also applies to the connection test
+
 #### DB sync & DDL
 
 - **On MySQL and Oracle, a sync that the confirmation warns will fail no longer leaves constraints dropped** — the statement that the database refuses (a column change or a primary key drop blocked by a foreign key whose two ends would have different types) now runs first, so the database stays unchanged

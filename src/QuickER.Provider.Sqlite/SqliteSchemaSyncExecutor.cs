@@ -20,8 +20,8 @@ namespace QuickER.Provider.Sqlite;
 ///     実行する。SQLite は <c>foreign_keys</c> PRAGMA をトランザクション内では no-op として無視するため、
 ///     再構築（旧テーブル DROP・親を後から作る等）を FK 強制なしで通すには BEGIN より前に切る必要がある。
 ///     <c>legacy_alter_table</c> は、作り直す表を参照するビューがあっても <c>RENAME</c> が失敗しないようにするため
-///     （<see cref="SqliteSyncScriptBuilder"/> の remarks を参照）。接続はプールへ戻り得るので、最後に必ず
-///     <c>foreign_keys</c> を同期前の値へ（同梱の e_sqlite3 の既定は ON）、<c>legacy_alter_table</c> を OFF へ戻す。
+///     （<see cref="SqliteSyncScriptBuilder"/> の remarks を参照）。接続はプールしない（<see cref="SqliteFileConnections"/>）ので、
+///     切り替えた PRAGMA は接続を閉じると一緒に消え、元へ戻す処理は要らない。
 ///   </item>
 ///   <item>
 ///     BEGIN → 同期前の外部キー違反（(子表, 親表) ごとの件数）と壊れたビューを控え、スクリプト本文を実行する
@@ -64,25 +64,10 @@ public sealed class SqliteSchemaSyncExecutor : ISchemaSyncExecutor
             Mode = SqliteOpenMode.ReadWrite,
         }.ConnectionString;
 
-        await using var conn = new SqliteConnection(connectionString);
+        // プールしない接続なので、閉じたときにファイルも閉じ（同期の直後に利用者が移動・削除できる）、
+        // 下で切り替える PRAGMA も接続と一緒に消える（後から開いた接続へ外部キー検査なしの設定が残らない）
+        await using var conn = SqliteFileConnections.Create(connectionString);
         await conn.OpenAsync(ct).ConfigureAwait(false);
-
-        // 接続はプールへ戻り得るので、元の外部キー検査の設定を控えて最後に戻す
-        // （同梱の e_sqlite3 は既定で ON。OFF のまま返すと、同じ接続文字列で後から開いた接続が検査なしになる）
-        long foreignKeysBefore;
-
-        await using (
-            var read = DbCommands.Create(
-                conn,
-                "PRAGMA foreign_keys;",
-                settings.CommandTimeoutSeconds
-            )
-        )
-        {
-            foreignKeysBefore = Convert.ToInt64(
-                await read.ExecuteScalarAsync(ct).ConfigureAwait(false)
-            );
-        }
 
         // FK 強制はトランザクション外で切る（トランザクション内の同 PRAGMA は no-op のため）。
         // RENAME がスキーマ全体を検証し直さないよう旧来の動作にもする（作り直す表を参照するビューで失敗しないため）
@@ -94,28 +79,8 @@ public sealed class SqliteSchemaSyncExecutor : ISchemaSyncExecutor
             )
             .ConfigureAwait(false);
 
-        try
-        {
-            return await ExecuteInTransactionAsync(conn, settings, script, result, ct)
-                .ConfigureAwait(false);
-        }
-        finally
-        {
-            // 接続はプールへ戻り得るので、外部キー検査を元の設定へ戻し、旧来の RENAME の動作を残さない
-            // （どちらもトランザクションの外でしか効かない。後始末の失敗で結果を壊さない）
-            try
-            {
-                await ExecutePragmaAsync(
-                        conn,
-                        $"PRAGMA foreign_keys={(foreignKeysBefore != 0 ? "ON" : "OFF")}; "
-                            + "PRAGMA legacy_alter_table=OFF;",
-                        settings.CommandTimeoutSeconds,
-                        CancellationToken.None
-                    )
-                    .ConfigureAwait(false);
-            }
-            catch (SqliteException) { }
-        }
+        return await ExecuteInTransactionAsync(conn, settings, script, result, ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>トランザクション内でスクリプトを実行し、外部キーとビューを同期の前後で検査してコミットする</summary>

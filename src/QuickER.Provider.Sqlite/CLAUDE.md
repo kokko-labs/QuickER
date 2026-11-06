@@ -1,6 +1,6 @@
 # QuickER.Provider.Sqlite
 
-このファイルの範囲は、SQLite 方言だけの規則（取込の PRAGMA の読み方・型の扱い・再構築の同期スクリプトと実行器）。
+このファイルの範囲は、SQLite 方言だけの規則（取込の PRAGMA の読み方・型の扱い・再構築の同期スクリプトと実行器・ファイルを開く接続）。
 方言横断の規則は `src/QuickER.Provider/CLAUDE.md` を読む（再構築の合成の規則は同じファイルの「テーブル再構築の合成」）。
 
 ## 取込
@@ -62,8 +62,21 @@
 
 - 外部キー違反とビューの破損を同期の前後で比べ、増えたときだけ失敗にする。DB 全体の結果で判定すると、既存の孤児行や壊れたビュー（CREATE VIEW は参照先を検証しない）で無関係な同期まで失敗する。
   - 比べる単位は、外部キー違反が（子表, 親表）ごとの件数、ビューが名前。外部キーの検査は `foreign_key_check` を実行側で行い、PRAGMA はトランザクションの外で流す。
-- 実行器は最後に必ず `foreign_keys` を同期前の値へ（同梱の e_sqlite3 の既定は ON）、`legacy_alter_table` を OFF へ戻す（接続はプールされるので、戻さないと後から開いた接続が外部キー検査なしになる）。
-- 固定は実 SQLite の期待の行（ビューの `realdb-rebuild-with-dependent-view-succeeds`／`realdb-rebuild-breaking-view-rolls-back`・既存の違反の `realdb-existing-fk-violations-unrelated-add-column-succeeds`・`realdb-existing-fk-violations-child-rebuild-succeeds`・`realdb-existing-fk-violations-new-violation-fails`）と `SqliteSchemaSyncIntegrationTests`「同期の後にプールから戻った接続の外部キー検査と RENAME の動作は元のまま」。mutation 実証済み。
+- 実行器はトランザクションの前に `foreign_keys=OFF` と `legacy_alter_table=ON` を流し、元へ戻さない。接続はプールしない（「ファイルを掴まない接続」）ので、切り替えた PRAGMA は接続を閉じると一緒に消え、後から開いた接続へ残らない。
+- 固定は実 SQLite の期待の行（ビューの `realdb-rebuild-with-dependent-view-succeeds`／`realdb-rebuild-breaking-view-rolls-back`・既存の違反の `realdb-existing-fk-violations-unrelated-add-column-succeeds`・`realdb-existing-fk-violations-child-rebuild-succeeds`・`realdb-existing-fk-violations-new-violation-fails`）。PRAGMA が残らないことは、接続をプールしないことの規則（`SourceRuleTests` の規則 `sqlite-file-connection-creations`・`sqlite-file-connection-pooling-off`）が守る。mutation 実証済み。
+
+## ファイルを掴まない接続
+
+- QuickER 自身が SQLite のファイルを開く接続（新規作成 `SqliteDatabaseFile.CreateEmpty`・取込 `SqliteSchemaImporter.ImportAsync(string, …)`・同期 `SqliteSchemaSyncExecutor`）は、`SqliteFileConnections.Create` だけが作り、接続文字列に `Pooling=False` を立てる（呼び出し側の `Pooling` の指定も上書きする）。
+  - Microsoft.Data.Sqlite は既定で接続をプールし、閉じた接続もファイルを開いたままにする。SQLite は Windows でファイルを削除の共有なしで開くので、操作の直後に利用者がファイルを移動・名前の変更・削除すると共有違反（0x80070020）で断られる。接続ダイアログの接続テストも取込の経路を通る。
+  - どの入口も操作 1 回で接続を 1 本しか開かないので、プールを切っても性能は変わらない。`ClearPool` で後から放す形は選ばない（例外の経路で呼び忘れ、同じ接続文字列のほかの接続まで放す）。
+  - `ImportAsync(SqliteConnection, …)` は呼び出し側が開いた接続を使う（テスト・接続の再利用向け）ので対象の外。生成コードのランタイム（QuickER.Runtime.Sqlite）は利用者のアプリの接続なので対象の外。
+- ガード：
+  - `SourceRuleTests` の規則 `sqlite-file-connection-creations`（src の `SqliteConnection` の生成は `SqliteFileConnections.cs` の 1 件だけ。QuickER.Runtime.Sqlite は範囲の外で、Witness がそこの実在の生成を拾う）と `sqlite-file-connection-pooling-off`（その作り手が `Pooling = false` を立てる）。自己検査の行は `sqlite-file-connection-creations-forms`・`sqlite-file-connection-creations-inactive-branch`・`sqlite-file-connection-pooling-off-forms`。
+  - 新規作成：`ConnectionDialogTests`（組 `ConnectionDialogHarness` の不変条件 12＝新規作成で作ったファイルを手の後と行の終わりに排他で開ける）。
+  - 取込・同期：`SyncPlanFuzzTestsBase.ExpectationRows_MatchOnRealDatabase` の SQLite の派生 `SqliteSyncPlanFuzzTests`（期待の行の実 DB の段の汎用の表明 6＝行の後に DB のファイルを排他で開ける。行は製品の取込 → 実行器 → 取り込み直しを流す）。
+  - 排他で開けるかは、Windows で移動・削除と同じ答えになる（再現の実測で全組が一致）。Linux の排他（flock）は SQLite のロック（fcntl）と関係しないので常に開け、受け入れの表明は Windows のジョブでだけ効く。
+  - mutation 実証済み（3 入口それぞれで `Pooling=False` を外すと、該当の行が赤になる）。
 
 ## 既知の割り切り
 

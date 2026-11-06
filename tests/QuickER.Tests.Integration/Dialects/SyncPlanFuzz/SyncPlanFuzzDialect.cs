@@ -155,6 +155,12 @@ internal abstract class SyncPlanFuzzDialect
     /// <summary>DB を空にする（種ごとに呼ぶ）</summary>
     public abstract Task ResetAsync(CancellationToken ct);
 
+    /// <summary>
+    /// 期待の行の実 DB の段の後に、製品の取込・実行器が DB のファイルを掴んだままなら問題の文を返す（掴んでいなければ
+    /// <see langword="null"/>）。ファイルの DB を持たない方言は常に <see langword="null"/>
+    /// </summary>
+    public virtual string? HeldFileProblem() => null;
+
     /// <summary>識別子を引用する</summary>
     public abstract string Quote(string identifier);
 
@@ -200,6 +206,11 @@ internal abstract class SyncPlanFuzzDialect
 }
 
 /// <summary>SQLite（実ファイル・Docker 不要）</summary>
+/// <remarks>
+/// テストの側の接続（行数・探針・問い合わせ・空のファイルの作成）はプールしない。製品の取込・実行器も同じ組み方の接続文字列で
+/// ファイルを開くので、テストの側がプールすると、製品がファイルを掴んだままでもテストの接続と区別できない
+/// （<see cref="HeldFileProblem"/> が測れない）。
+/// </remarks>
 internal sealed class SqliteSyncPlanFuzzDialect : SyncPlanFuzzDialect, IDisposable
 {
     private SqliteTempDatabase _db = SqliteTempDatabase.Create();
@@ -208,27 +219,57 @@ internal sealed class SqliteSyncPlanFuzzDialect : SyncPlanFuzzDialect, IDisposab
 
     public override IDatabaseProvider Provider { get; } = new SqliteProvider();
 
-    public override string ImportConnectionString => _db.ReadOnlyConnectionString;
+    /// <summary>画面の取込と同じ接続文字列（接続プロファイルのパスから <see cref="SqliteConnectionStringFactory"/> で組む）</summary>
+    public override string ImportConnectionString => SqliteConnectionStringFactory.Build(Settings);
 
     public override DbConnectionSettings Settings => new() { FilePath = _db.FilePath };
 
     public override DbConnection CreateConnection() =>
-        new SqliteConnection(_db.ReadOnlyConnectionString);
+        new SqliteConnection(NonPooled(_db.ReadOnlyConnectionString));
 
     public override DbConnection CreateQueryConnection() =>
-        new SqliteConnection(_db.ReadWriteConnectionString);
+        new SqliteConnection(NonPooled(_db.ReadWriteConnectionString));
 
     /// <summary>
-    /// 種ごとに新しいファイルを作る（前の種の接続プール・ジャーナルを持ち越さない）。
+    /// 種ごとに新しいファイルを作る（前の種のジャーナルを持ち越さない）。
     /// 同期の実行器は既存のファイルしか開かないので、ここで空のファイルを作っておく。
     /// </summary>
     public override async Task ResetAsync(CancellationToken ct)
     {
         _db.Dispose();
         _db = SqliteTempDatabase.Create();
-        await using var connection = new SqliteConnection(_db.ReadWriteCreateConnectionString);
+        await using var connection = new SqliteConnection(
+            NonPooled(_db.ReadWriteCreateConnectionString)
+        );
         await connection.OpenAsync(ct).ConfigureAwait(false);
     }
+
+    /// <summary>DB のファイルを排他で開けなければ問題の文を返す（テストの側の接続はプールしないので、掴んでいるのは製品の接続）</summary>
+    /// <remarks>
+    /// Windows では掴まれたファイルを排他で開けず、移動・削除と同じ答えになる。Linux の排他（flock）は SQLite のロック（fcntl）と
+    /// 関係しないので常に開け、この表明は Windows でだけ効く（掴んだファイルを移動・削除できないのは Windows の問題）。
+    /// </remarks>
+    public override string? HeldFileProblem()
+    {
+        try
+        {
+            using var exclusive = File.Open(
+                _db.FilePath,
+                FileMode.Open,
+                FileAccess.ReadWrite,
+                FileShare.None
+            );
+            return null;
+        }
+        catch (IOException ex)
+        {
+            return $"the database file is still held by a product connection after the row ({ex.Message})";
+        }
+    }
+
+    /// <summary>接続文字列にプールなしを立てる</summary>
+    private static string NonPooled(string connectionString) =>
+        new SqliteConnectionStringBuilder(connectionString) { Pooling = false }.ConnectionString;
 
     public override string Quote(string identifier) => $"\"{identifier.Replace("\"", "\"\"")}\"";
 

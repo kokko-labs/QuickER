@@ -34,8 +34,9 @@ public static class SqliteDatabaseFile
             Mode = SqliteOpenMode.ReadWriteCreate,
         }.ConnectionString;
 
-        // 開いて即閉じるだけで空 DB ファイルが確定する（スキーマは同期エンジンが後段で作る）
-        using var connection = new SqliteConnection(connectionString);
+        // 開いて即閉じるだけで空 DB ファイルが確定する（スキーマは同期エンジンが後段で作る）。
+        // プールしない接続なので、閉じたときにファイルも閉じる（作った直後に利用者が移動・削除できる）
+        using var connection = SqliteFileConnections.Create(connectionString);
         connection.Open();
     }
 }

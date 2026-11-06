@@ -311,5 +311,108 @@ internal static partial class SourceRuleProbes
                     ),
                 ]
             ),
+            // SQLite の接続の生成をシンボルで拾う（完全修飾・別名・型を書かない new・初期化子つき）。拾わないのは、接続文字列のビルダー・
+            // コマンド・同じ名前の別の型・SqliteFileConnections.Create の呼び出し
+            new SourceRuleProbe(
+                "sqlite-file-connection-creations-forms",
+                "sqlite-file-connection-creations",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using Microsoft.Data.Sqlite;
+                        using C = Microsoft.Data.Sqlite.SqliteConnection;
+
+                        namespace Other
+                        {
+                            internal sealed class SqliteConnection;
+                        }
+
+                        internal static class Probe
+                        {
+                            public static void Run(string cs)
+                            {
+                                using var a = new SqliteConnection(cs);
+                                using var b = new Microsoft.Data.Sqlite.SqliteConnection();
+                                using var c = new C(cs);
+                                SqliteConnection d = new(cs);
+                                using var e = new SqliteConnection { ConnectionString = cs };
+                                var f = new SqliteConnectionStringBuilder(cs) { Pooling = false };
+                                using var g = new SqliteCommand();
+                                var h = new Other.SqliteConnection();
+                            }
+                        }
+                        """,
+                        "new SqliteConnection",
+                        "new SqliteConnection",
+                        "new SqliteConnection",
+                        "new SqliteConnection",
+                        "new SqliteConnection"
+                    ),
+                ]
+            ),
+            // シンボルの規則は、条件コンパイルの外れる分岐の中も変種のコンパイルで読む
+            new SourceRuleProbe(
+                "sqlite-file-connection-creations-inactive-branch",
+                "sqlite-file-connection-creations",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using Microsoft.Data.Sqlite;
+
+                        internal static class Probe
+                        {
+                            public static object Open(string cs)
+                            {
+                        #if QUICKER_PROBE_BRANCH
+                                return new SqliteConnection(cs);
+                        #else
+                                return cs;
+                        #endif
+                            }
+                        }
+                        """,
+                        "new SqliteConnection"
+                    ),
+                ]
+            ) with
+            {
+                InactiveBranch = true,
+            },
+            // Pooling への定数 false の代入だけを拾う（初期化子・後からの代入）。拾わないのは、true・定数でない値・
+            // 接続文字列のビルダーでない型の同じ名前のプロパティ
+            new SourceRuleProbe(
+                "sqlite-file-connection-pooling-off-forms",
+                "sqlite-file-connection-pooling-off",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using Microsoft.Data.Sqlite;
+
+                        internal sealed class Options
+                        {
+                            public bool Pooling { get; set; }
+                        }
+
+                        internal static class Probe
+                        {
+                            public static string Build(string cs, bool pooling)
+                            {
+                                var a = new SqliteConnectionStringBuilder(cs) { Pooling = false };
+                                a.Pooling = !true;
+                                a.Pooling = true;
+                                a.Pooling = pooling;
+                                var o = new Options { Pooling = false };
+                                return a.ConnectionString;
+                            }
+                        }
+                        """,
+                        "Pooling = false",
+                        "Pooling = false"
+                    ),
+                ]
+            ),
         ];
 }

@@ -203,7 +203,7 @@ internal static class ConnectionDialogDimensions
         new(
             EngineIds.Ai,
             "DbConnectionDialog",
-            "接続ダイアログの操作の列の表（状態 × 手の種類・どの手の後にも不変条件 11 個を見張る）",
+            "接続ダイアログの操作の列の表（状態 × 手の種類・どの手の後にも不変条件 12 個を見張る）",
             Table,
             ConnectionDialogRows.Table.Count,
             [
