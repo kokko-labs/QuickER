@@ -45,7 +45,7 @@ AI の回答は外部の入力なので、組み立て（`ChatMarkdownRenderer`�
 - `ApiKeyStore.Load` は「無い／読めた／読めない」を分けて返し（`SavedApiKey`・`SavedApiKeyStatus`。接続パスワードの `SavedPassword` と同じ形）、読めないキーを空の値で上書きも削除もしない。
 - 読めないもの（別のユーザー・別の PC で暗号化したもの・壊れたファイル・一時的なロック）を空として返すと、保存のオフや接続設定の保存が暗号ファイルを消す。
 - 接続設定の VM（`ChatConnectionSettingsViewModel`）は、読めないときキー欄の下に注記を出し（`IsSavedApiKeyUnreadable`）、新しいキーが入力されるまで保存の呼び出しをしない。
-- ガード：`ApiKeyStoreTests.Load_UndecryptableFile_IsUnreadable`・`ChatConnectionSettingsSaveFailureTests.UnreadableApiKey_IsNeitherOverwrittenNorDeletedUntilNewKeyIsEntered`。mutation 実証済み。
+- ガード：`ApiKeyStoreTests.Load_UndecryptableFile_IsUnreadable`・`ConnectionSettingsTests`（行 `failure-unreadable-api-key-is-neither-overwritten-nor-deleted`。どの行でも、読めない API キーを新しいキーの入力が無いまま保存の関数へ渡さないことを組が見張る＝不変条件 1）。mutation 実証済み。
 
 ## エンジンの破棄の作法
 
@@ -56,4 +56,4 @@ AI の回答は外部の入力なので、組み立て（`ChatMarkdownRenderer`�
 - 破棄は必ずスレッドプールで走らせて上限つきで待つ。終了経路は UI スレッドなので、直接待つとデッドロックし得るのと、ハングした破棄でアプリの終了を長く止めないため。上限は既定 3 秒。
 - 個々のエンジンの破棄は独立で、1 つの失敗が他を止めない。この作法の正本は `EngineShutdown.DisposeAll`。
 - 各段の例外の受け止め（`ShutdownSteps.Run`）と終了の連鎖は `src/QuickER.Gui/CLAUDE.md`「終了の連鎖」を参照する。モック生成の追加の段（プローブ用エンジンの破棄）は `src/QuickER.AI.Mock/CLAUDE.md`「ForceClose」を参照する。
-- ガード：`AiChatDialogForceCloseTests`（ForceClose はエンジンの破棄まで通す）・`AiChatDialogViewModelTests`（ShutdownEngines は全エンジンを破棄する・破棄がハングしても上限で戻る）・`EngineShutdownTests`。
+- ガード：`AiChatDialogForceCloseTests`（ForceClose はエンジンの破棄まで通す）・`ChatDialogTests`（行 `shutdown-disposes-all-engines`＝ShutdownEngines は全エンジンを破棄する・`shutdown-hanging-dispose-returns-within-timeout`＝破棄がハングしても上限で戻る）・`EngineShutdownTests`。

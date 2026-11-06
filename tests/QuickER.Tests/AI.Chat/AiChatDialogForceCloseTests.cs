@@ -54,59 +54,46 @@ public class AiChatDialogForceCloseTests
         {
             WpfApplicationTestSupport.EnsureApplicationResources();
 
-            var folder = Path.Combine(
-                Path.GetTempPath(),
-                "QuickERTests",
-                Guid.NewGuid().ToString("N")
-            );
+            using var temp = new TestTempFolder();
+            var folder = Path.Combine(temp.Path, "settings");
             var codex = new FakeCodexAppServerClient();
             var claudeCode = new DisposeTrackingClaudeCodeClient();
             var copilot = new FakeCopilotRuntimeClient();
             var keyStore = new InMemoryApiKeyStore();
 
-            try
-            {
-                var vm = new AiChatDialogViewModel(
-                    host: null,
-                    dispatcher: new SyncUiDispatcher(),
-                    settingsStore: new AiSettingsStore(folder),
-                    codexClient: codex,
-                    claudeCodeClient: claudeCode,
-                    copilotClient: copilot,
-                    apiKeyLoader: keyStore.Load,
-                    apiKeySaver: keyStore.Save
-                );
+            var vm = new AiChatDialogViewModel(
+                host: null,
+                dispatcher: new SyncUiDispatcher(),
+                settingsStore: new AiSettingsStore(folder),
+                codexClient: codex,
+                claudeCodeClient: claudeCode,
+                copilotClient: copilot,
+                apiKeyLoader: keyStore.Load,
+                apiKeySaver: keyStore.Save
+            );
 
-                var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
-                    new AiChatDialog(vm, new RecordingShutdownFailureReporter())
-                );
+            var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                new AiChatDialog(vm, new RecordingShutdownFailureReporter())
+            );
 
-                // 画面外＋非アクティブで Show し、テスト実行中に開発者のデスクトップを妨げない
-                dialog.WindowStartupLocation = WindowStartupLocation.Manual;
-                dialog.Left = -4000;
-                dialog.Top = -4000;
-                dialog.ShowActivated = false;
-                dialog.ShowInTaskbar = false;
+            // 画面外＋非アクティブで Show し、テスト実行中に開発者のデスクトップを妨げない
+            dialog.WindowStartupLocation = WindowStartupLocation.Manual;
+            dialog.Left = -4000;
+            dialog.Top = -4000;
+            dialog.ShowActivated = false;
+            dialog.ShowInTaskbar = false;
 
-                dialog.Show();
-                WpfApplicationTestSupport.DoEvents();
+            dialog.Show();
+            WpfApplicationTestSupport.DoEvents();
 
-                dialog.ForceClose();
+            dialog.ForceClose();
 
-                AllEnginesDisposed(codex, claudeCode, copilot)
-                    .Should()
-                    .BeTrue("codex app-server・copilot ランタイムは常駐するため破棄が要る");
-                codex.DisposeCount.Should().Be(1);
-                claudeCode.DisposeCount.Should().Be(1);
-                copilot.DisposeCount.Should().Be(1);
-            }
-            finally
-            {
-                if (Directory.Exists(folder))
-                {
-                    Directory.Delete(folder, recursive: true);
-                }
-            }
+            AllEnginesDisposed(codex, claudeCode, copilot)
+                .Should()
+                .BeTrue("codex app-server・copilot ランタイムは常駐するため破棄が要る");
+            codex.DisposeCount.Should().Be(1);
+            claudeCode.DisposeCount.Should().Be(1);
+            copilot.DisposeCount.Should().Be(1);
         });
     }
 
@@ -127,10 +114,8 @@ public class AiChatDialogForceCloseTests
             WpfApplicationTestSupport.EnsureApplicationResources();
 
             // 保存先フォルダと同じパスにファイルを置く＝Directory.CreateDirectory が必ず失敗する
-            var blockedFolder = Path.Combine(
-                Path.GetTempPath(),
-                $"QuickERTests-blocked-{Guid.NewGuid():N}"
-            );
+            using var temp = new TestTempFolder();
+            var blockedFolder = Path.Combine(temp.Path, "blocked");
             File.WriteAllText(blockedFolder, "block");
 
             var codex = new FakeCodexAppServerClient();
@@ -139,55 +124,48 @@ public class AiChatDialogForceCloseTests
             var keyStore = new InMemoryApiKeyStore();
             var reporter = new RecordingShutdownFailureReporter();
 
-            try
-            {
-                var vm = new AiChatDialogViewModel(
-                    host: null,
-                    dispatcher: new SyncUiDispatcher(),
-                    settingsStore: new AiSettingsStore(blockedFolder),
-                    codexClient: codex,
-                    claudeCodeClient: claudeCode,
-                    copilotClient: copilot,
-                    apiKeyLoader: keyStore.Load,
-                    apiKeySaver: keyStore.Save
-                );
+            var vm = new AiChatDialogViewModel(
+                host: null,
+                dispatcher: new SyncUiDispatcher(),
+                settingsStore: new AiSettingsStore(blockedFolder),
+                codexClient: codex,
+                claudeCodeClient: claudeCode,
+                copilotClient: copilot,
+                apiKeyLoader: keyStore.Load,
+                apiKeySaver: keyStore.Save
+            );
 
-                // 前提の確認: この構成では設定保存が実際に落ちる（落ちないと受け止めの検証にならない）
-                var save = vm.SaveSettings;
-                save.Should().Throw<Exception>();
+            // 前提の確認: この構成では設定保存が実際に落ちる（落ちないと受け止めの検証にならない）
+            var save = vm.SaveSettings;
+            save.Should().Throw<Exception>();
 
-                var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
-                    new AiChatDialog(vm, reporter)
-                );
+            var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                new AiChatDialog(vm, reporter)
+            );
 
-                dialog.WindowStartupLocation = WindowStartupLocation.Manual;
-                dialog.Left = -4000;
-                dialog.Top = -4000;
-                dialog.ShowActivated = false;
-                dialog.ShowInTaskbar = false;
+            dialog.WindowStartupLocation = WindowStartupLocation.Manual;
+            dialog.Left = -4000;
+            dialog.Top = -4000;
+            dialog.ShowActivated = false;
+            dialog.ShowInTaskbar = false;
 
-                var closed = false;
-                dialog.Closed += (_, _) => closed = true;
+            var closed = false;
+            dialog.Closed += (_, _) => closed = true;
 
-                dialog.Show();
-                WpfApplicationTestSupport.DoEvents();
+            dialog.Show();
+            WpfApplicationTestSupport.DoEvents();
 
-                var act = dialog.ForceClose;
-                act.Should().NotThrow();
+            var act = dialog.ForceClose;
+            act.Should().NotThrow();
 
-                reporter.Steps.Should().Equal("AiChat.SaveSettings");
-                AllEnginesDisposed(codex, claudeCode, copilot)
-                    .Should()
-                    .BeTrue("保存の失敗で常駐プロセスの停止へ届かなくなってはいけない");
-                codex.DisposeCount.Should().Be(1);
-                claudeCode.DisposeCount.Should().Be(1);
-                copilot.DisposeCount.Should().Be(1);
-                closed.Should().BeTrue("保存の失敗でウィンドウが閉じ残ってはいけない");
-            }
-            finally
-            {
-                File.Delete(blockedFolder);
-            }
+            reporter.Steps.Should().Equal("AiChat.SaveSettings");
+            AllEnginesDisposed(codex, claudeCode, copilot)
+                .Should()
+                .BeTrue("保存の失敗で常駐プロセスの停止へ届かなくなってはいけない");
+            codex.DisposeCount.Should().Be(1);
+            claudeCode.DisposeCount.Should().Be(1);
+            copilot.DisposeCount.Should().Be(1);
+            closed.Should().BeTrue("保存の失敗でウィンドウが閉じ残ってはいけない");
         });
     }
 }

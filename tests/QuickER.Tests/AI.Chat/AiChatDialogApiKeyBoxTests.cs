@@ -31,7 +31,8 @@ public class AiChatDialogApiKeyBoxTests
     public void ApiKeyBox_SavesKeyWhenFocusLeaves()
     {
         var keyStore = new InMemoryApiKeyStore();
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        using var temp = new TestTempFolder();
+        var folder = Path.Combine(temp.Path, "settings");
         var savedWhileTyping = true;
         string? savedAfterLeaving = null;
 
@@ -84,17 +85,7 @@ public class AiChatDialogApiKeyBoxTests
             }
         });
 
-        try
-        {
-            savedWhileTyping.Should().BeFalse("打鍵ごとには保存しない");
-            savedAfterLeaving.Should().Be("sk-typed");
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+        savedWhileTyping.Should().BeFalse("打鍵ごとには保存しない");
+        savedAfterLeaving.Should().Be("sk-typed");
     }
 }

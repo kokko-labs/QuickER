@@ -26,4 +26,4 @@
 - 呼び出し側：`GuiAppSettingsStore.TryUpdate`（設定メニューの更新確認・言語切替）・コード生成ダイアログの OK。`false` と書き込みの例外の両方を失敗として知らせる。
 - AI の接続設定（`ChatConnectionSettingsViewModel`）：モデルの履歴の × は保存できたときだけ候補から消す。読み込みが `Unavailable` なら候補を作り直さない（既定値から作り直すと履歴が消えて見える）。失敗はコマンドの外へ例外を出さずに `ModelHistoryRemoveFailed` で親へ知らせる（UI の例外の受け皿がアプリを終了させるため）。成功したターンの記録と接続設定の保存は、`false` も例外にして親の既存の通知へ渡す。
 - 書けたら壊れていた印（`LastLoadCorrupt`）を戻す。残すと、退避に失敗した後の次の保存が正常なファイルを退避先へ写す。接続プロファイルは書く前の読み直しで印を作り直すので要らない。
-- ガード：`ChatConnectionSettingsSaveFailureTests`（書けない・読めないときの × と接続設定の保存）・`SettingsStoreTests`（行 `save-after-failed-backup-does-not-back-up-healthy-file`）。mutation 実証済み。
+- ガード：`ConnectionSettingsTests`（行 `failure-remove-history-write-fails-keeps-candidate-and-notifies`・`failure-remove-history-file-unreadable-keeps-candidate-and-notifies`・`failure-save-settings-file-unreadable-throws`。どの行でも、設定の保存が投げたら JSON を変えず、戻ったら JSON が VM と一致することを組が見張る＝不変条件 4）・`SettingsStoreTests`（行 `save-after-failed-backup-does-not-back-up-healthy-file`）。mutation 実証済み。

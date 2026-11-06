@@ -72,27 +72,6 @@ public class ClaudeCodeChatEngineAttachmentTests
         );
     }
 
-    /// <summary>Claude Code の添付対応は全種別（画像・PDF・テキスト・バイナリ）であることを検証する</summary>
-    [Fact(DisplayName = "AttachmentSupport は全種別")]
-    public void AttachmentSupport_IsAllKinds()
-    {
-        var engine = new ClaudeCodeChatEngine(
-            new RecordingClaudeCodeClient(),
-            toolHost: null,
-            new SyncUiDispatcher(),
-            ErDesignProfile.ErDesign
-        );
-
-        engine
-            .AttachmentSupport.Should()
-            .Be(
-                AttachmentSupport.Images
-                    | AttachmentSupport.Pdf
-                    | AttachmentSupport.Text
-                    | AttachmentSupport.Binary
-            );
-    }
-
     /// <summary>
     /// 添付あり送信で、ファイルが attachments/ へ書き出され、プロンプトに絶対パスが付記され、
     /// 許可ツールに Read が追加されることを検証する。
@@ -224,9 +203,15 @@ public class ClaudeCodeChatEngineAttachmentTests
         await engine.DisposeAsync();
     }
 
-    /// <summary>バイナリを含む添付では、代替案をユーザーへ伝える一文がプロンプトに付記されることを検証する</summary>
-    [Fact(DisplayName = "バイナリ含む送信は代替案の付記が入る")]
-    public async Task SendAsync_WithBinary_AppendsFallbackNote()
+    /// <summary>
+    /// バイナリを含む添付では、代替案をユーザーへ伝える一文がプロンプトに付記され、
+    /// バイナリを含まない（画像のみ）送信では付記が入らないことを検証する
+    /// </summary>
+    /// <param name="hasBinary">true ならバイナリの添付、false なら画像のみの添付</param>
+    [Theory(DisplayName = "代替案の付記は、バイナリ含む送信にだけ入る（バイナリ無しは入らない）")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SendAsync_FallbackNote_OnlyWithBinary(bool hasBinary)
     {
         var client = new RecordingClaudeCodeClient();
         var engine = new ClaudeCodeChatEngine(
@@ -239,38 +224,20 @@ public class ClaudeCodeChatEngineAttachmentTests
         await engine.InitializeAsync(TestContext.Current.CancellationToken);
         await engine.StartConversationAsync(TestContext.Current.CancellationToken);
         await engine.SendAsync(
-            "これ何？",
-            new[] { BinaryAttachment() },
+            hasBinary ? "これ何？" : "図を見て",
+            new[] { hasBinary ? BinaryAttachment() : PngAttachment() },
             TestContext.Current.CancellationToken
         );
 
-        client.Prompts[0].Should().Contain("the Read tool cannot open");
-        client.Prompts[0].Should().Contain("suggest an alternative");
-
-        await engine.DisposeAsync();
-    }
-
-    /// <summary>バイナリを含まない（画像のみ）送信では、代替案の付記が入らないことを検証する</summary>
-    [Fact(DisplayName = "バイナリ無しは代替案の付記が入らない")]
-    public async Task SendAsync_WithoutBinary_NoFallbackNote()
-    {
-        var client = new RecordingClaudeCodeClient();
-        var engine = new ClaudeCodeChatEngine(
-            client,
-            toolHost: null,
-            new SyncUiDispatcher(),
-            ErDesignProfile.ErDesign
-        );
-
-        await engine.InitializeAsync(TestContext.Current.CancellationToken);
-        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
-        await engine.SendAsync(
-            "図を見て",
-            new[] { PngAttachment() },
-            TestContext.Current.CancellationToken
-        );
-
-        client.Prompts[0].Should().NotContain("the Read tool cannot open");
+        if (hasBinary)
+        {
+            client.Prompts[0].Should().Contain("the Read tool cannot open");
+            client.Prompts[0].Should().Contain("suggest an alternative");
+        }
+        else
+        {
+            client.Prompts[0].Should().NotContain("the Read tool cannot open");
+        }
 
         await engine.DisposeAsync();
     }

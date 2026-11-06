@@ -56,13 +56,20 @@ public class CopilotRuntimeClientConnectionTests
     /// 呼び出しが接続断で失敗したら、例外を投げ直したうえで接続を捨てる（未接続へ戻り、一時作業フォルダも消える）ことを
     /// 検証する。捨てないと IsStarted が true のまま残り、以後の呼び出しがすべて失敗し続ける。
     /// </summary>
-    [Fact(DisplayName = "接続断で失敗した呼び出しは接続を捨てて未接続へ戻す")]
-    public async Task Invoke_WhenConnectionLost_ResetsConnection()
+    /// <param name="isSdkShape">true なら SDK の接続断の例外を包んだ失敗（1.0.26 の形）、false なら素の IOException</param>
+    [Theory(
+        DisplayName = "接続断で失敗した呼び出しは接続を捨てて未接続へ戻す（素の IOException・SDK の接続断の例外を包んだ失敗）"
+    )]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Invoke_WhenConnectionLost_ResetsConnection(bool isSdkShape)
     {
         var (client, workingDirectory) = CreateStartedClient();
+        var failure = isSdkShape
+            ? FakeCopilotRuntimeClient.ConnectionLostError()
+            : new IOException("pipe closed");
 
-        var call = async () =>
-            await client.InvokeAsync(() => Task.FromException(new IOException("pipe closed")));
+        var call = async () => await client.InvokeAsync(() => Task.FromException(failure));
 
         await call.Should().ThrowAsync<IOException>();
         client.IsStarted.Should().BeFalse();
@@ -70,63 +77,42 @@ public class CopilotRuntimeClientConnectionTests
     }
 
     /// <summary>
-    /// ランタイムが返した通常のエラー応答（SDK が IOException に包む）では、例外を投げ直すだけで接続を捨てない
-    /// （会話の文脈を失わない）ことを検証する
+    /// 接続断でない失敗では、例外を投げ直すだけで接続を捨てない（会話の文脈を失わない）ことを検証する。
+    /// ランタイムが返した通常のエラー応答（SDK が IOException に包む）と、それ以外の失敗の両方を見る。
     /// </summary>
-    [Fact(DisplayName = "ランタイムが返した通常のエラー応答では接続を捨てない")]
-    public async Task Invoke_WhenRuntimeReturnsErrorResponse_KeepsConnection()
+    /// <param name="isErrorResponse">true ならランタイムの通常のエラー応答（IOException）、false ならそれ以外の失敗（InvalidOperationException）</param>
+    [Theory(
+        DisplayName = "接続断でない失敗では接続を捨てない（ランタイムの通常のエラー応答・それ以外の失敗）"
+    )]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Invoke_WhenNotConnectionLost_KeepsConnection(bool isErrorResponse)
     {
         var (client, workingDirectory) = CreateStartedClient();
 
         try
         {
-            var call = async () =>
-                await client.InvokeAsync(() =>
-                    Task.FromException(
-                        FakeCopilotRuntimeClient.ErrorResponse("model not available")
+            var call = isErrorResponse
+                ? async () =>
+                    await client.InvokeAsync(() =>
+                        Task.FromException(
+                            FakeCopilotRuntimeClient.ErrorResponse("model not available")
+                        )
                     )
+                : (Func<Task>)(
+                    async () =>
+                        await client.InvokeAsync<int>(() =>
+                            Task.FromException<int>(new InvalidOperationException("rpc error"))
+                        )
                 );
 
-            await call.Should().ThrowAsync<IOException>();
-            client.IsStarted.Should().BeTrue();
-        }
-        finally
-        {
-            await client.DisposeAsync();
-            Directory.Exists(workingDirectory).Should().BeFalse();
-        }
-    }
+            var thrown = await Record.ExceptionAsync(call);
 
-    /// <summary>SDK の接続断の例外を包んだ失敗では接続を捨てる（1.0.26 の形）ことを検証する</summary>
-    [Fact(DisplayName = "SDK の接続断の例外を包んだ失敗では接続を捨てる")]
-    public async Task Invoke_WhenSdkReportsConnectionLost_ResetsConnection()
-    {
-        var (client, workingDirectory) = CreateStartedClient();
-
-        var call = async () =>
-            await client.InvokeAsync(() =>
-                Task.FromException(FakeCopilotRuntimeClient.ConnectionLostError())
-            );
-
-        await call.Should().ThrowAsync<IOException>();
-        client.IsStarted.Should().BeFalse();
-        Directory.Exists(workingDirectory).Should().BeFalse("捨てた接続の一時作業フォルダは消す");
-    }
-
-    /// <summary>接続断でない失敗では接続を捨てない（会話の文脈を失わない）ことを検証する</summary>
-    [Fact(DisplayName = "接続断でない失敗では接続を捨てない")]
-    public async Task Invoke_WhenOtherFailure_KeepsConnection()
-    {
-        var (client, workingDirectory) = CreateStartedClient();
-
-        try
-        {
-            var call = async () =>
-                await client.InvokeAsync<int>(() =>
-                    Task.FromException<int>(new InvalidOperationException("rpc error"))
+            thrown
+                .Should()
+                .BeAssignableTo(
+                    isErrorResponse ? typeof(IOException) : typeof(InvalidOperationException)
                 );
-
-            await call.Should().ThrowAsync<InvalidOperationException>();
             client.IsStarted.Should().BeTrue();
         }
         finally

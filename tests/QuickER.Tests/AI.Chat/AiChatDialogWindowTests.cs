@@ -83,84 +83,66 @@ public class AiChatDialogWindowTests
     public void CloseButton_WhenSaveFails_HidesAndReportsError()
     {
         // 保存先フォルダと同じパスにファイルを置く＝設定の書き込みが必ず失敗する
-        var blockedFolder = Path.Combine(
-            Path.GetTempPath(),
-            $"QuickERTests-blocked-{Guid.NewGuid():N}"
-        );
+        using var temp = new TestTempFolder();
+        var blockedFolder = Path.Combine(temp.Path, "blocked");
         File.WriteAllText(blockedFolder, "block");
         var dialogs = new StubDialogService();
 
-        try
+        WpfApplicationTestSupport.RunSta(() =>
         {
-            WpfApplicationTestSupport.RunSta(() =>
-            {
-                var vm = CreateViewModel(blockedFolder, dialogs);
+            var vm = CreateViewModel(blockedFolder, dialogs);
 
-                WithShownDialog(
-                    vm,
-                    dialog =>
-                    {
-                        var visibleWhenErrorShown = true;
-                        dialogs.OnBeforeShow = () => visibleWhenErrorShown = dialog.IsVisible;
+            WithShownDialog(
+                vm,
+                dialog =>
+                {
+                    var visibleWhenErrorShown = true;
+                    dialogs.OnBeforeShow = () => visibleWhenErrorShown = dialog.IsVisible;
 
-                        var close = dialog.Close;
-                        close.Should().NotThrow();
+                    var close = dialog.Close;
+                    close.Should().NotThrow();
 
-                        dialog.IsVisible.Should().BeFalse("保存の失敗でも × で隠れる");
-                        visibleWhenErrorShown.Should().BeFalse("エラーは隠した後に出す");
-                        dialogs.ErrorMessages.Should().ContainSingle();
-                        dialogs
-                            .ErrorMessages[0]
-                            .Should()
-                            .StartWith(
-                                ChatStrings.Chat_SettingsSaveFailedFormat[
-                                    ..ChatStrings.Chat_SettingsSaveFailedFormat.IndexOf('{')
-                                ]
-                            );
-                        vm.StatusMessage.Should().Be(dialogs.ErrorMessages[0]);
-                    }
-                );
-            });
-        }
-        finally
-        {
-            File.Delete(blockedFolder);
-        }
+                    dialog.IsVisible.Should().BeFalse("保存の失敗でも × で隠れる");
+                    visibleWhenErrorShown.Should().BeFalse("エラーは隠した後に出す");
+                    dialogs.ErrorMessages.Should().ContainSingle();
+                    dialogs
+                        .ErrorMessages[0]
+                        .Should()
+                        .StartWith(
+                            ChatStrings.Chat_SettingsSaveFailedFormat[
+                                ..ChatStrings.Chat_SettingsSaveFailedFormat.IndexOf('{')
+                            ]
+                        );
+                    vm.StatusMessage.Should().Be(dialogs.ErrorMessages[0]);
+                }
+            );
+        });
     }
 
     /// <summary>× で閉じたときに設定を保存できれば、エラーを出さずに隠れることを検証する</summary>
     [Fact(DisplayName = "× で閉じたとき設定を保存できればエラーを出さずに隠れる")]
     public void CloseButton_WhenSaveSucceeds_HidesWithoutError()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        using var temp = new TestTempFolder();
+        var folder = Path.Combine(temp.Path, "settings");
         var dialogs = new StubDialogService();
 
-        try
+        WpfApplicationTestSupport.RunSta(() =>
         {
-            WpfApplicationTestSupport.RunSta(() =>
-            {
-                var vm = CreateViewModel(folder, dialogs);
+            var vm = CreateViewModel(folder, dialogs);
 
-                WithShownDialog(
-                    vm,
-                    dialog =>
-                    {
-                        dialog.Close();
+            WithShownDialog(
+                vm,
+                dialog =>
+                {
+                    dialog.Close();
 
-                        dialog.IsVisible.Should().BeFalse();
-                        dialogs.ErrorMessages.Should().BeEmpty();
-                        File.Exists(new AiSettingsStore(folder).SettingsPath).Should().BeTrue();
-                    }
-                );
-            });
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+                    dialog.IsVisible.Should().BeFalse();
+                    dialogs.ErrorMessages.Should().BeEmpty();
+                    File.Exists(new AiSettingsStore(folder).SettingsPath).Should().BeTrue();
+                }
+            );
+        });
     }
 
     /// <summary>
@@ -170,64 +152,53 @@ public class AiChatDialogWindowTests
     [Fact(DisplayName = "ストリーミングで吹き出しが伸びると末尾を見ているチャット欄は追従する")]
     public void StreamingGrowth_WhenAtBottom_FollowsToEnd()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        using var temp = new TestTempFolder();
+        var folder = Path.Combine(temp.Path, "settings");
 
-        try
+        WpfApplicationTestSupport.RunSta(() =>
         {
-            WpfApplicationTestSupport.RunSta(() =>
-            {
-                var vm = CreateViewModel(folder, new StubDialogService());
+            var vm = CreateViewModel(folder, new StubDialogService());
 
-                WithShownDialog(
-                    vm,
-                    dialog =>
+            WithShownDialog(
+                vm,
+                dialog =>
+                {
+                    for (var i = 0; i < 30; i++)
                     {
-                        for (var i = 0; i < 30; i++)
-                        {
-                            vm.Messages.Add(
-                                new ErChatMessage
-                                {
-                                    Role = ErChatMessageRole.Assistant,
-                                    Content = $"message {i}",
-                                }
-                            );
-                        }
-
-                        WpfApplicationTestSupport.DoEvents();
-                        var viewer = dialog.ChatScrollViewer;
-                        var scrollableBefore = viewer.ScrollableHeight;
-                        scrollableBefore.Should().BeGreaterThan(0, "末尾がある状態を作る");
-
-                        // 新しい吹き出しの ScrollToEnd は位置を「無限大」として覚え、以後の伸びにも自然に付いていく。
-                        // 追従が切れるのは利用者が手で動かした後なので、手で末尾まで戻した状態（有限の位置）を作る
-                        viewer.ScrollToVerticalOffset(scrollableBefore);
-                        WpfApplicationTestSupport.DoEvents();
-                        viewer
-                            .VerticalOffset.Should()
-                            .Be(scrollableBefore, "末尾を見ている状態を作る");
-
-                        var last = vm.Messages[^1];
-
-                        for (var i = 0; i < 20; i++)
-                        {
-                            last.Content += "\nstreamed line " + i;
-                        }
-
-                        WpfApplicationTestSupport.DoEvents();
-
-                        viewer.ScrollableHeight.Should().BeGreaterThan(scrollableBefore);
-                        viewer.VerticalOffset.Should().Be(viewer.ScrollableHeight);
+                        vm.Messages.Add(
+                            new ErChatMessage
+                            {
+                                Role = ErChatMessageRole.Assistant,
+                                Content = $"message {i}",
+                            }
+                        );
                     }
-                );
-            });
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+
+                    WpfApplicationTestSupport.DoEvents();
+                    var viewer = dialog.ChatScrollViewer;
+                    var scrollableBefore = viewer.ScrollableHeight;
+                    scrollableBefore.Should().BeGreaterThan(0, "末尾がある状態を作る");
+
+                    // 新しい吹き出しの ScrollToEnd は位置を「無限大」として覚え、以後の伸びにも自然に付いていく。
+                    // 追従が切れるのは利用者が手で動かした後なので、手で末尾まで戻した状態（有限の位置）を作る
+                    viewer.ScrollToVerticalOffset(scrollableBefore);
+                    WpfApplicationTestSupport.DoEvents();
+                    viewer.VerticalOffset.Should().Be(scrollableBefore, "末尾を見ている状態を作る");
+
+                    var last = vm.Messages[^1];
+
+                    for (var i = 0; i < 20; i++)
+                    {
+                        last.Content += "\nstreamed line " + i;
+                    }
+
+                    WpfApplicationTestSupport.DoEvents();
+
+                    viewer.ScrollableHeight.Should().BeGreaterThan(scrollableBefore);
+                    viewer.VerticalOffset.Should().Be(viewer.ScrollableHeight);
+                }
+            );
+        });
     }
 
     /// <summary>
@@ -237,65 +208,56 @@ public class AiChatDialogWindowTests
     [Fact(DisplayName = "回答の吹き出しは応答の終わりとトグルに従って Markdown 表示を切り替える")]
     public void AssistantBubble_FollowsStreamingAndToggle()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        using var temp = new TestTempFolder();
+        var folder = Path.Combine(temp.Path, "settings");
 
-        try
+        WpfApplicationTestSupport.RunSta(() =>
         {
-            WpfApplicationTestSupport.RunSta(() =>
-            {
-                var vm = CreateViewModel(folder, new StubDialogService());
+            var vm = CreateViewModel(folder, new StubDialogService());
 
-                WithShownDialog(
-                    vm,
-                    dialog =>
-                    {
-                        vm.Messages.Add(
-                            new ErChatMessage
-                            {
-                                Role = ErChatMessageRole.Assistant,
-                                Content = "**done**",
-                            }
-                        );
-                        vm.Messages.Add(
-                            new ErChatMessage
-                            {
-                                Role = ErChatMessageRole.Assistant,
-                                Content = "**partial",
-                                IsStreaming = true,
-                            }
-                        );
-                        WpfApplicationTestSupport.DoEvents();
+            WithShownDialog(
+                vm,
+                dialog =>
+                {
+                    vm.Messages.Add(
+                        new ErChatMessage
+                        {
+                            Role = ErChatMessageRole.Assistant,
+                            Content = "**done**",
+                        }
+                    );
+                    vm.Messages.Add(
+                        new ErChatMessage
+                        {
+                            Role = ErChatMessageRole.Assistant,
+                            Content = "**partial",
+                            IsStreaming = true,
+                        }
+                    );
+                    WpfApplicationTestSupport.DoEvents();
 
-                        var views = FindVisualChildren<AssistantMessageView>(dialog).ToList();
-                        views.Should().HaveCount(2);
-                        views[0].IsShowingMarkdown.Should().BeTrue("応答済みの回答");
-                        views[0].LinkOpener.Should().BeSameAs(vm.LinkOpener);
-                        views[1].IsShowingMarkdown.Should().BeFalse("応答中の回答");
+                    var views = FindVisualChildren<AssistantMessageView>(dialog).ToList();
+                    views.Should().HaveCount(2);
+                    views[0].IsShowingMarkdown.Should().BeTrue("応答済みの回答");
+                    views[0].LinkOpener.Should().BeSameAs(vm.LinkOpener);
+                    views[1].IsShowingMarkdown.Should().BeFalse("応答中の回答");
 
-                        vm.IsTurnInProgress = true;
-                        vm.IsTurnInProgress = false;
-                        views[1].IsShowingMarkdown.Should().BeTrue("ターンが終わったら切り替わる");
+                    vm.IsTurnInProgress = true;
+                    vm.IsTurnInProgress = false;
+                    views[1].IsShowingMarkdown.Should().BeTrue("ターンが終わったら切り替わる");
 
-                        var toggle = FindVisualChildren<CheckBox>(dialog)
-                            .Single(c => Equals(c.Content, ChatStrings.Chat_ShowMarkdown));
-                        toggle.IsChecked.Should().BeTrue();
-                        toggle.IsChecked = false;
-                        vm.Connection.ShowAssistantMarkdown.Should().BeFalse();
-                        views.Should().OnlyContain(v => !v.IsShowingMarkdown);
+                    var toggle = FindVisualChildren<CheckBox>(dialog)
+                        .Single(c => Equals(c.Content, ChatStrings.Chat_ShowMarkdown));
+                    toggle.IsChecked.Should().BeTrue();
+                    toggle.IsChecked = false;
+                    vm.Connection.ShowAssistantMarkdown.Should().BeFalse();
+                    views.Should().OnlyContain(v => !v.IsShowingMarkdown);
 
-                        vm.Connection.ShowAssistantMarkdown = true;
-                        views.Should().OnlyContain(v => v.IsShowingMarkdown);
-                    }
-                );
-            });
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+                    vm.Connection.ShowAssistantMarkdown = true;
+                    views.Should().OnlyContain(v => v.IsShowingMarkdown);
+                }
+            );
+        });
     }
 
     /// <summary>ビジュアルツリーから指定型の子孫を列挙する</summary>

@@ -36,191 +36,140 @@ public class ModelHistoryComboBoxTests
         public T Invoke<T>(Func<T> func) => func();
     }
 
-    /// <summary>
-    /// API キー接続のモデル ComboBox（OpenAI＝カタログ＋履歴の 2 層）で、カタログ候補の × が
-    /// Collapsed・履歴候補の × が Visible かつ Command 解決・Execute で履歴項目のみ消えることを検証する。
-    /// </summary>
-    [Fact(
-        DisplayName = "API モデルドロップダウンの × はカタログ非表示・履歴のみ表示され削除できる"
-    )]
-    public void ApiRemoveButton_VisibleOnlyForHistory_AndRemovesHistoryItem()
+    /// <summary>モデル欄の × を検証する接続方式</summary>
+    public enum ModelRemoveKind
     {
-        WpfApplicationTestSupport.RunSta(() =>
+        /// <summary>API キー接続（OpenAI＝カタログ＋履歴の 2 層）</summary>
+        Api,
+
+        /// <summary>Codex 接続（非 openai プロバイダ＝候補はすべて履歴）</summary>
+        Codex,
+
+        /// <summary>Copilot 接続（実行時列挙＋MRU 履歴の 2 層）</summary>
+        Copilot,
+    }
+
+    /// <summary>
+    /// 接続方式ごとに違う部分（VM の作り方・候補・履歴の位置・削除後の期待）をまとめた 1 件分のシナリオ。
+    /// </summary>
+    /// <param name="ComboName">実ダイアログから本物のテンプレートを取り出すモデル名 ComboBox の名前</param>
+    /// <param name="DialogVm">ダイアログ構築（テンプレート抽出）用の VM</param>
+    /// <param name="Candidates">最小ウィンドウの ComboBox へ流す候補</param>
+    /// <param name="DataContext">最小ウィンドウの ComboBox の DataContext</param>
+    /// <param name="NonRemovableIndex">先に × が Collapsed であることを確かめる × なし候補の位置（無ければ null）</param>
+    /// <param name="NonRemovableExistsMessage">× なし候補にも × ボタン自体があることの表明の理由</param>
+    /// <param name="NonRemovableCollapsedMessage">× なし候補の × が非表示であることの表明の理由</param>
+    /// <param name="HistoryIndex">× を実行する履歴候補の位置</param>
+    /// <param name="AssertAfterRemove">実行後の候補と JSON 側の期待を表明する</param>
+    /// <param name="AfterRemove">表明の後に続ける接続方式固有の確認（無ければ null）</param>
+    private sealed record ModelRemoveScenario(
+        string ComboName,
+        AiChatDialogViewModel DialogVm,
+        System.Collections.IEnumerable Candidates,
+        object DataContext,
+        int? NonRemovableIndex,
+        string NonRemovableExistsMessage,
+        string NonRemovableCollapsedMessage,
+        int HistoryIndex,
+        Action AssertAfterRemove,
+        Action<ComboBox>? AfterRemove
+    );
+
+    private const string CatalogExistsMessage =
+        "カタログ候補にも × ボタン自体はテンプレートから生成されること";
+    private const string CatalogCollapsedMessage =
+        "カタログ候補（IsRemovable=false）の × は非表示であること";
+
+    /// <summary>候補が × なし（IsRemovable=false）なら × ボタンはあっても Collapsed であることを表明する</summary>
+    private static void AssertRemoveButtonCollapsed(
+        ComboBox combo,
+        int index,
+        string existsMessage,
+        string collapsedMessage
+    )
+    {
+        var button = FindRemoveButton(RealizeContainer(combo, index));
+        button.Should().NotBeNull(existsMessage);
+        button!.Visibility.Should().Be(Visibility.Collapsed, collapsedMessage);
+    }
+
+    /// <summary>ダイアログ構築用の VM を、メモリ上のキーストアで作る</summary>
+    private static AiChatDialogViewModel CreateDialogVm(
+        AiSettingsStore store,
+        FakeCopilotRuntimeClient? copilotClient = null
+    )
+    {
+        // API キーは実 %LOCALAPPDATA% の ApiKeyStore ではなくメモリ上のストアへ隔離する
+        var keyStore = new InMemoryApiKeyStore();
+
+        return new AiChatDialogViewModel(
+            host: null,
+            dispatcher: new SyncUiDispatcher(),
+            settingsStore: store,
+            codexClient: new FakeCodexAppServerClient(),
+            copilotClient: copilotClient,
+            apiKeyLoader: keyStore.Load,
+            apiKeySaver: keyStore.Save
+        );
+    }
+
+    /// <summary>接続方式ごとのシナリオを作る（履歴の仕込み・前提の確認を含む）</summary>
+    private static ModelRemoveScenario CreateScenario(ModelRemoveKind kind, string folder)
+    {
+        var store = new AiSettingsStore(folder);
+
+        switch (kind)
         {
-            WpfApplicationTestSupport.EnsureApplicationResources();
-
-            var folder = Path.Combine(
-                Path.GetTempPath(),
-                "QuickERTests",
-                Guid.NewGuid().ToString("N")
-            );
-
-            try
+            case ModelRemoveKind.Api:
             {
                 // openai のカタログ外履歴を 1 件仕込んでおく（カタログの下に × 付きで並ぶ状態）
-                var store = new AiSettingsStore(folder);
                 var seeded = store.Load();
                 seeded.ApiModelHistory.Touch("openai", "custom-model");
                 store.Save(seeded);
 
-                // API キーは実 %LOCALAPPDATA% の ApiKeyStore ではなくメモリ上のストアへ隔離する
-                var keyStore = new InMemoryApiKeyStore();
-                var vm = new AiChatDialogViewModel(
-                    host: null,
-                    dispatcher: new SyncUiDispatcher(),
-                    settingsStore: store,
-                    codexClient: new FakeCodexAppServerClient(),
-                    apiKeyLoader: keyStore.Load,
-                    apiKeySaver: keyStore.Save
-                );
+                var vm = CreateDialogVm(store);
 
                 // 前提: 既定プロバイダ（OpenAI）の候補はカタログ（× なし）＋履歴（× あり）の 2 層
                 vm.Connection.ApiModelCandidates.Select(c => c.Name)
                     .Should()
                     .Equal([.. AiModelCatalog.OpenAiModels, "custom-model"]);
-                var historyIndex = vm.Connection.ApiModelCandidates.Count - 1;
 
-                // 実ダイアログのモデル名 ComboBox から本物の ItemTemplate / ItemContainerStyle を取り出す
-                // （ここに × ボタンの束縛が入っている＝検証対象は実 XAML のテンプレート。
-                // 　BAML ロードは並列テストと競合しないよう直列化する）
-                var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
-                    new AiChatDialog(vm, new RecordingShutdownFailureReporter())
+                return new ModelRemoveScenario(
+                    ComboName: "ApiModelBox",
+                    DialogVm: vm,
+                    Candidates: vm.Connection.ApiModelCandidates,
+                    DataContext: vm,
+                    NonRemovableIndex: 0,
+                    NonRemovableExistsMessage: CatalogExistsMessage,
+                    NonRemovableCollapsedMessage: CatalogCollapsedMessage,
+                    HistoryIndex: vm.Connection.ApiModelCandidates.Count - 1,
+                    AssertAfterRemove: () =>
+                    {
+                        // 履歴項目のみ消え、カタログは残る（JSON 側も消える）
+                        vm.Connection.ApiModelCandidates.Select(c => c.Name)
+                            .Should()
+                            .Equal(AiModelCatalog.OpenAiModels);
+                        store.Load().ApiModelHistory.ModelsFor("openai").Should().BeEmpty();
+                    },
+                    AfterRemove: null
                 );
-                var sourceCombo = dialog.FindName("ApiModelBox") as ComboBox;
-                sourceCombo.Should().NotBeNull("実 XAML にモデル名 ComboBox が存在すること");
-                var itemTemplate = sourceCombo!.ItemTemplate;
-                var itemContainerStyle = sourceCombo.ItemContainerStyle;
-                itemTemplate
-                    .Should()
-                    .NotBeNull("× ボタンの束縛を含む実 XAML の ItemTemplate が取得できること");
-
-                // 本物のテンプレートを、直接ロードされる最小ウィンドウの ComboBox へ適用する
-                var combo = new ComboBox
-                {
-                    IsEditable = true,
-                    ItemsSource = vm.Connection.ApiModelCandidates,
-                    ItemTemplate = itemTemplate,
-                    ItemContainerStyle = itemContainerStyle,
-                    DataContext = vm,
-                };
-                // 画面外＋非アクティブで Show し、テスト実行中にユーザーの画面を邪魔しない
-                var window = new Window
-                {
-                    Content = combo,
-                    Width = 400,
-                    Height = 200,
-                    ShowInTaskbar = false,
-                    ShowActivated = false,
-                    WindowStyle = WindowStyle.None,
-                    WindowStartupLocation = WindowStartupLocation.Manual,
-                    Left = -4000,
-                    Top = -4000,
-                };
-                // テンプレートが参照する StaticResource（BoolToVisibilityConverter は App 側で供給済み）
-                window.Resources["MutedText"] = new SolidColorBrush(Colors.Gray);
-                window.Show();
-
-                try
-                {
-                    window.UpdateLayout();
-                    DoEvents();
-
-                    // ドロップダウンを開いて項目コンテナ（ComboBoxItem）を生成させる
-                    OpenDropDown(combo);
-
-                    // カタログ候補（先頭）: × ボタンは Collapsed
-                    var catalogButton = FindRemoveButton(RealizeContainer(combo, 0));
-                    catalogButton
-                        .Should()
-                        .NotBeNull("カタログ候補にも × ボタン自体はテンプレートから生成されること");
-                    catalogButton!
-                        .Visibility.Should()
-                        .Be(
-                            Visibility.Collapsed,
-                            "カタログ候補（IsRemovable=false）の × は非表示であること"
-                        );
-
-                    // 履歴候補（末尾）: × ボタンが Visible・Command 解決・Execute で削除できる
-                    var removeButton = FindRemoveButton(RealizeContainer(combo, historyIndex));
-                    removeButton
-                        .Should()
-                        .NotBeNull("履歴候補の × ボタンがテンプレートから生成されていること");
-                    removeButton!
-                        .Visibility.Should()
-                        .Be(
-                            Visibility.Visible,
-                            "履歴候補（IsRemovable=true）の × は表示されること"
-                        );
-
-                    // 誤束縛（RelativeSource 解決失敗）だと Command が null になり × が無反応になる
-                    removeButton
-                        .Command.Should()
-                        .NotBeNull("× ボタンの Command が RelativeSource 経由で解決されていること");
-
-                    removeButton.Command!.Execute(removeButton.CommandParameter);
-
-                    // 履歴項目のみ消え、カタログは残る（JSON 側も消える）
-                    vm.Connection.ApiModelCandidates.Select(c => c.Name)
-                        .Should()
-                        .Equal(AiModelCatalog.OpenAiModels);
-                    store.Load().ApiModelHistory.ModelsFor("openai").Should().BeEmpty();
-                }
-                finally
-                {
-                    window.Close();
-                }
             }
-            finally
-            {
-                if (Directory.Exists(folder))
-                {
-                    Directory.Delete(folder, recursive: true);
-                }
-            }
-        });
-    }
 
-    /// <summary>
-    /// Codex モデル ComboBox（非 openai プロバイダ＝候補はすべて履歴）で、× ボタンが Visible かつ
-    /// Command 解決・Execute で履歴項目が消えることを、実 XAML のテンプレートで検証する。
-    /// openai プロバイダの静的カタログ候補（IsRemovable=false）では × が Collapsed であることも確認する。
-    /// </summary>
-    /// <remarks>
-    /// 候補を決定的にするため config.toml は seam で注入し、Connection は単体で構築する。
-    /// ComboBox の DataContext は実ダイアログと同じ形（<c>Connection</c> プロパティ経由）のホストを使い、
-    /// テンプレート内 <c>DataContext.Connection.RemoveCodexModelHistoryCommand</c> の束縛パスをそのまま検証する。
-    /// </remarks>
-    [Fact(
-        DisplayName = "Codex 候補ドロップダウンの × は履歴のみ表示され RemoveCommand で削除できる"
-    )]
-    public void CodexRemoveButton_VisibleOnlyForHistory_AndRemovesHistoryItem()
-    {
-        WpfApplicationTestSupport.RunSta(() =>
-        {
-            WpfApplicationTestSupport.EnsureApplicationResources();
-
-            var folder = Path.Combine(
-                Path.GetTempPath(),
-                "QuickERTests",
-                Guid.NewGuid().ToString("N")
-            );
-
-            try
+            case ModelRemoveKind.Codex:
             {
                 // 履歴に 2 件を仕込み、非 openai プロバイダの候補が履歴のみになる状態を作る
-                var codexStore = new AiSettingsStore(folder);
-                var seeded = codexStore.Load();
+                var seeded = store.Load();
                 seeded.CodexModelHistory.Providers["test-provider"] = new List<string>
                 {
                     "hist-model",
                     "hist-model-2",
                 };
-                codexStore.Save(seeded);
+                store.Save(seeded);
 
                 // 候補を決定的にするため config.toml を seam で注入して Connection を単体構築する
                 var connection = new ChatConnectionSettingsViewModel(
                     AiDialogKind.AiChat,
-                    settingsStore: codexStore,
+                    settingsStore: store,
                     codexConfigReader: () =>
                         new CodexConfigToml
                         {
@@ -239,165 +188,62 @@ public class ModelHistoryComboBoxTests
                     .Should()
                     .Equal(("hist-model", true), ("hist-model-2", true));
 
-                // 実ダイアログの Codex モデル ComboBox から本物の ItemTemplate / ItemContainerStyle を取り出す
-                // （ダイアログ構築用 VM は隔離ストアで生成。テンプレート抽出にのみ使う。
-                // 　BAML ロードは並列テストと競合しないよう直列化する）
-                var keyStore = new InMemoryApiKeyStore();
-                var dialogVm = new AiChatDialogViewModel(
-                    host: null,
-                    dispatcher: new SyncUiDispatcher(),
-                    settingsStore: new AiSettingsStore(folder),
-                    codexClient: new FakeCodexAppServerClient(),
-                    apiKeyLoader: keyStore.Load,
-                    apiKeySaver: keyStore.Save
-                );
-                var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
-                    new AiChatDialog(dialogVm, new RecordingShutdownFailureReporter())
-                );
-                var sourceCombo = dialog.FindName("CodexModelBox") as ComboBox;
-                sourceCombo.Should().NotBeNull("実 XAML に Codex モデル ComboBox が存在すること");
-                var itemTemplate = sourceCombo!.ItemTemplate;
-                var itemContainerStyle = sourceCombo.ItemContainerStyle;
-                itemTemplate
-                    .Should()
-                    .NotBeNull("× ボタンの束縛を含む実 XAML の ItemTemplate が取得できること");
+                return new ModelRemoveScenario(
+                    ComboName: "CodexModelBox",
+                    // ダイアログ構築用 VM は隔離ストアで生成する（テンプレート抽出にのみ使う）
+                    DialogVm: CreateDialogVm(new AiSettingsStore(folder)),
+                    Candidates: connection.CodexModelCandidates,
+                    // DataContext は実ダイアログと同じ「Connection プロパティを持つ」形のホストにする
+                    DataContext: new ConnectionHost(connection),
+                    NonRemovableIndex: null,
+                    NonRemovableExistsMessage: CatalogExistsMessage,
+                    NonRemovableCollapsedMessage: CatalogCollapsedMessage,
+                    HistoryIndex: 0,
+                    AssertAfterRemove: () =>
+                    {
+                        // 実行した項目（先頭＝hist-model）のみ消える（JSON 側も消える）
+                        connection
+                            .CodexModelCandidates.Select(c => c.Name)
+                            .Should()
+                            .Equal("hist-model-2");
+                        store
+                            .Load()
+                            .CodexModelHistory.ModelsFor("test-provider")
+                            .Should()
+                            .Equal("hist-model-2");
+                    },
+                    AfterRemove: combo =>
+                    {
+                        // openai プロバイダへ切替: 静的カタログ候補（IsRemovable=false）の × は Collapsed。
+                        // 実際の画面と同じく、ドロップダウンを閉じてからプロバイダを切り替え、開き直して項目を作らせる
+                        // （開いたまま候補を作り直すと、全件の並列実行の負荷の下で閉じることがあり、
+                        // 閉じていると項目がレイアウトされず × ボタンが作られない）
+                        combo.IsDropDownOpen = false;
+                        DoEvents();
+                        connection.CodexModelProvider = "openai";
+                        OpenDropDown(combo);
 
-                // 本物のテンプレートを、直接ロードされる最小ウィンドウの ComboBox へ適用する。
-                // DataContext は実ダイアログと同じ「Connection プロパティを持つ」形のホストにする
-                var combo = new ComboBox
-                {
-                    IsEditable = true,
-                    ItemsSource = connection.CodexModelCandidates,
-                    ItemTemplate = itemTemplate,
-                    ItemContainerStyle = itemContainerStyle,
-                    DataContext = new ConnectionHost(connection),
-                };
-                // 画面外＋非アクティブで Show し、テスト実行中にユーザーの画面を邪魔しない
-                var window = new Window
-                {
-                    Content = combo,
-                    Width = 400,
-                    Height = 200,
-                    ShowInTaskbar = false,
-                    ShowActivated = false,
-                    WindowStyle = WindowStyle.None,
-                    WindowStartupLocation = WindowStartupLocation.Manual,
-                    Left = -4000,
-                    Top = -4000,
-                };
-                // テンプレートが参照する StaticResource（BoolToVisibilityConverter は App 側で供給済み）
-                window.Resources["MutedText"] = new SolidColorBrush(Colors.Gray);
-                window.Show();
-
-                try
-                {
-                    window.UpdateLayout();
-                    DoEvents();
-
-                    // ドロップダウンを開いて項目コンテナ（ComboBoxItem）を生成させる
-                    OpenDropDown(combo);
-
-                    // 履歴候補（先頭）: × ボタンが Visible・Command 解決・Execute で削除できる
-                    var removeButton = FindRemoveButton(RealizeContainer(combo, 0));
-                    removeButton
-                        .Should()
-                        .NotBeNull("履歴候補の × ボタンがテンプレートから生成されていること");
-                    removeButton!
-                        .Visibility.Should()
-                        .Be(
-                            Visibility.Visible,
-                            "履歴候補（IsRemovable=true）の × は表示されること"
+                        AssertRemoveButtonCollapsed(
+                            combo,
+                            0,
+                            CatalogExistsMessage,
+                            CatalogCollapsedMessage
                         );
-
-                    // 誤束縛（RelativeSource 解決失敗）だと Command が null になり × が無反応になる
-                    removeButton
-                        .Command.Should()
-                        .NotBeNull("× ボタンの Command が RelativeSource 経由で解決されていること");
-
-                    removeButton.Command!.Execute(removeButton.CommandParameter);
-
-                    // 実行した項目（先頭＝hist-model）のみ消える（JSON 側も消える）
-                    connection
-                        .CodexModelCandidates.Select(c => c.Name)
-                        .Should()
-                        .Equal("hist-model-2");
-                    codexStore
-                        .Load()
-                        .CodexModelHistory.ModelsFor("test-provider")
-                        .Should()
-                        .Equal("hist-model-2");
-
-                    // openai プロバイダへ切替: 静的カタログ候補（IsRemovable=false）の × は Collapsed。
-                    // 実際の画面と同じく、ドロップダウンを閉じてからプロバイダを切り替え、開き直して項目を作らせる
-                    // （開いたまま候補を作り直すと、全件の並列実行の負荷の下で閉じることがあり、
-                    // 閉じていると項目がレイアウトされず × ボタンが作られない）
-                    combo.IsDropDownOpen = false;
-                    DoEvents();
-                    connection.CodexModelProvider = "openai";
-                    OpenDropDown(combo);
-
-                    var catalogButton = FindRemoveButton(RealizeContainer(combo, 0));
-                    catalogButton
-                        .Should()
-                        .NotBeNull("カタログ候補にも × ボタン自体はテンプレートから生成されること");
-                    catalogButton!
-                        .Visibility.Should()
-                        .Be(
-                            Visibility.Collapsed,
-                            "カタログ候補（IsRemovable=false）の × は非表示であること"
-                        );
-                }
-                finally
-                {
-                    window.Close();
-                }
+                    }
+                );
             }
-            finally
-            {
-                if (Directory.Exists(folder))
-                {
-                    Directory.Delete(folder, recursive: true);
-                }
-            }
-        });
-    }
 
-    /// <summary>
-    /// Copilot モデル ComboBox（候補＝実行時列挙＋MRU 履歴の 2 層）で、実行時列挙候補の × が Collapsed・
-    /// 履歴候補の × が Visible かつ Command 解決・Execute で履歴項目のみ消えることを、実 XAML の
-    /// テンプレートで検証する。
-    /// </summary>
-    /// <remarks>
-    /// Copilot は静的カタログを持たず、実行時列挙は接続後にしか得られないため、列挙相当の候補は
-    /// <see cref="ChatConnectionSettingsViewModel.CopilotAvailableModels"/> へ直接流し込んで決定的にする。
-    /// </remarks>
-    [Fact(
-        DisplayName = "Copilot 候補ドロップダウンの × は履歴のみ表示され RemoveCommand で削除できる"
-    )]
-    public void CopilotRemoveButton_VisibleOnlyForHistory_AndRemovesHistoryItem()
-    {
-        WpfApplicationTestSupport.RunSta(() =>
-        {
-            WpfApplicationTestSupport.EnsureApplicationResources();
-
-            var folder = Path.Combine(
-                Path.GetTempPath(),
-                "QuickERTests",
-                Guid.NewGuid().ToString("N")
-            );
-
-            try
+            case ModelRemoveKind.Copilot:
             {
                 // 履歴に 2 件を仕込む（実行時列挙の下に × 付きで並ぶ状態）
-                var copilotStore = new AiSettingsStore(folder);
-                var seeded = copilotStore.Load();
+                var seeded = store.Load();
                 seeded.CopilotModelHistory.Providers[CopilotSettings.HistoryProviderKey] =
                     new List<string> { "hist-model", "hist-model-2" };
-                copilotStore.Save(seeded);
+                store.Save(seeded);
 
                 var connection = new ChatConnectionSettingsViewModel(
                     AiDialogKind.AiChat,
-                    settingsStore: copilotStore,
+                    settingsStore: store,
                     codexConfigReader: () => new CodexConfigToml(),
                     apiKeyLoader: _ => string.Empty,
                     apiKeySaver: (_, _) => { }
@@ -412,116 +258,151 @@ public class ModelHistoryComboBoxTests
                     .Should()
                     .Equal(("enum-model", false), ("hist-model", true), ("hist-model-2", true));
 
-                // 実ダイアログの Copilot モデル ComboBox から本物の ItemTemplate / ItemContainerStyle を取り出す
-                // （BAML ロードは並列テストと競合しないよう直列化する）
-                var keyStore = new InMemoryApiKeyStore();
-                var dialogVm = new AiChatDialogViewModel(
-                    host: null,
-                    dispatcher: new SyncUiDispatcher(),
-                    settingsStore: new AiSettingsStore(folder),
-                    codexClient: new FakeCodexAppServerClient(),
-                    copilotClient: new FakeCopilotRuntimeClient(),
-                    apiKeyLoader: keyStore.Load,
-                    apiKeySaver: keyStore.Save
+                return new ModelRemoveScenario(
+                    ComboName: "CopilotModelBox",
+                    DialogVm: CreateDialogVm(
+                        new AiSettingsStore(folder),
+                        new FakeCopilotRuntimeClient()
+                    ),
+                    Candidates: connection.CopilotModelCandidates,
+                    DataContext: new ConnectionHost(connection),
+                    NonRemovableIndex: 0,
+                    NonRemovableExistsMessage: "列挙候補にも × ボタン自体はテンプレートから生成されること",
+                    NonRemovableCollapsedMessage: "実行時列挙の候補（IsRemovable=false）の × は非表示であること",
+                    HistoryIndex: 1,
+                    AssertAfterRemove: () =>
+                    {
+                        // 実行した履歴項目のみ消え、実行時列挙は残る（JSON 側も消える）
+                        connection
+                            .CopilotModelCandidates.Select(c => c.Name)
+                            .Should()
+                            .Equal("enum-model", "hist-model-2");
+                        store
+                            .Load()
+                            .CopilotModelHistory.ModelsFor(CopilotSettings.HistoryProviderKey)
+                            .Should()
+                            .Equal("hist-model-2");
+                    },
+                    AfterRemove: null
                 );
-                var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
-                    new AiChatDialog(dialogVm, new RecordingShutdownFailureReporter())
-                );
-                var sourceCombo = dialog.FindName("CopilotModelBox") as ComboBox;
-                sourceCombo.Should().NotBeNull("実 XAML に Copilot モデル ComboBox が存在すること");
-                var itemTemplate = sourceCombo!.ItemTemplate;
-                var itemContainerStyle = sourceCombo.ItemContainerStyle;
-                itemTemplate
+            }
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(kind), kind, null);
+        }
+    }
+
+    /// <summary>
+    /// API キー・Codex・Copilot のモデル ComboBox で、ドロップダウン項目の × ボタンが、× なし候補（カタログ・実行時列挙）では
+    /// Collapsed、履歴候補では Visible かつ Command 解決で、Execute すると履歴項目のみ消えることを、
+    /// 実 XAML のテンプレートで検証する。
+    /// </summary>
+    /// <remarks>
+    /// 接続方式ごとの違い（VM の作り方・候補・履歴の位置・削除後の期待）は <see cref="ModelRemoveScenario"/> に置く。
+    /// Codex だけは、非 openai プロバイダの候補が履歴のみなので × なしの確認を先に行わず、
+    /// 削除の後に openai プロバイダへ切り替えて静的カタログ候補の × が Collapsed であることを確かめる
+    /// （候補を決定的にするため config.toml は seam で注入する）。
+    /// Copilot は静的カタログを持たず、実行時列挙は接続後にしか得られないため、列挙相当の候補は
+    /// <see cref="ChatConnectionSettingsViewModel.CopilotAvailableModels"/> へ直接流し込む。
+    /// </remarks>
+    [Theory(
+        DisplayName = "モデルドロップダウンの × は × なし候補で非表示・履歴のみ表示され削除できる"
+    )]
+    [InlineData(ModelRemoveKind.Api)]
+    [InlineData(ModelRemoveKind.Codex)]
+    [InlineData(ModelRemoveKind.Copilot)]
+    public void RemoveButton_VisibleOnlyForHistory_AndRemovesHistoryItem(ModelRemoveKind kind)
+    {
+        using var temp = new TestTempFolder();
+        var folder = Path.Combine(temp.Path, "settings");
+
+        WpfApplicationTestSupport.RunSta(() =>
+        {
+            WpfApplicationTestSupport.EnsureApplicationResources();
+
+            var scenario = CreateScenario(kind, folder);
+
+            // 実ダイアログのモデル名 ComboBox から本物の ItemTemplate / ItemContainerStyle を取り出す
+            // （ここに × ボタンの束縛が入っている＝検証対象は実 XAML のテンプレート。
+            // 　BAML ロードは並列テストと競合しないよう直列化する）
+            var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                new AiChatDialog(scenario.DialogVm, new RecordingShutdownFailureReporter())
+            );
+            var sourceCombo = dialog.FindName(scenario.ComboName) as ComboBox;
+            sourceCombo.Should().NotBeNull("実 XAML にモデル名 ComboBox が存在すること");
+            var itemTemplate = sourceCombo!.ItemTemplate;
+            var itemContainerStyle = sourceCombo.ItemContainerStyle;
+            itemTemplate
+                .Should()
+                .NotBeNull("× ボタンの束縛を含む実 XAML の ItemTemplate が取得できること");
+
+            // 本物のテンプレートを、直接ロードされる最小ウィンドウの ComboBox へ適用する
+            var combo = new ComboBox
+            {
+                IsEditable = true,
+                ItemsSource = scenario.Candidates,
+                ItemTemplate = itemTemplate,
+                ItemContainerStyle = itemContainerStyle,
+                DataContext = scenario.DataContext,
+            };
+            // 画面外＋非アクティブで Show し、テスト実行中にユーザーの画面を邪魔しない
+            var window = new Window
+            {
+                Content = combo,
+                Width = 400,
+                Height = 200,
+                ShowInTaskbar = false,
+                ShowActivated = false,
+                WindowStyle = WindowStyle.None,
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Left = -4000,
+                Top = -4000,
+            };
+            // テンプレートが参照する StaticResource（BoolToVisibilityConverter は App 側で供給済み）
+            window.Resources["MutedText"] = new SolidColorBrush(Colors.Gray);
+            window.Show();
+
+            try
+            {
+                window.UpdateLayout();
+                DoEvents();
+
+                // ドロップダウンを開いて項目コンテナ（ComboBoxItem）を生成させる
+                OpenDropDown(combo);
+
+                // × なし候補: × ボタンは Collapsed
+                if (scenario.NonRemovableIndex is { } nonRemovableIndex)
+                {
+                    AssertRemoveButtonCollapsed(
+                        combo,
+                        nonRemovableIndex,
+                        scenario.NonRemovableExistsMessage,
+                        scenario.NonRemovableCollapsedMessage
+                    );
+                }
+
+                // 履歴候補: × ボタンが Visible・Command 解決・Execute で削除できる
+                var removeButton = FindRemoveButton(RealizeContainer(combo, scenario.HistoryIndex));
+                removeButton
                     .Should()
-                    .NotBeNull("× ボタンの束縛を含む実 XAML の ItemTemplate が取得できること");
+                    .NotBeNull("履歴候補の × ボタンがテンプレートから生成されていること");
+                removeButton!
+                    .Visibility.Should()
+                    .Be(Visibility.Visible, "履歴候補（IsRemovable=true）の × は表示されること");
 
-                // 本物のテンプレートを、直接ロードされる最小ウィンドウの ComboBox へ適用する
-                var combo = new ComboBox
-                {
-                    IsEditable = true,
-                    ItemsSource = connection.CopilotModelCandidates,
-                    ItemTemplate = itemTemplate,
-                    ItemContainerStyle = itemContainerStyle,
-                    DataContext = new ConnectionHost(connection),
-                };
-                // 画面外＋非アクティブで Show し、テスト実行中にユーザーの画面を邪魔しない
-                var window = new Window
-                {
-                    Content = combo,
-                    Width = 400,
-                    Height = 200,
-                    ShowInTaskbar = false,
-                    ShowActivated = false,
-                    WindowStyle = WindowStyle.None,
-                    WindowStartupLocation = WindowStartupLocation.Manual,
-                    Left = -4000,
-                    Top = -4000,
-                };
-                // テンプレートが参照する StaticResource（BoolToVisibilityConverter は App 側で供給済み）
-                window.Resources["MutedText"] = new SolidColorBrush(Colors.Gray);
-                window.Show();
+                // 誤束縛（RelativeSource 解決失敗）だと Command が null になり × が無反応になる
+                removeButton
+                    .Command.Should()
+                    .NotBeNull("× ボタンの Command が RelativeSource 経由で解決されていること");
 
-                try
-                {
-                    window.UpdateLayout();
-                    DoEvents();
+                removeButton.Command!.Execute(removeButton.CommandParameter);
 
-                    // ドロップダウンを開いて項目コンテナ（ComboBoxItem）を生成させる
-                    OpenDropDown(combo);
-
-                    // 実行時列挙候補（先頭）: × ボタンは Collapsed
-                    var enumeratedButton = FindRemoveButton(RealizeContainer(combo, 0));
-                    enumeratedButton
-                        .Should()
-                        .NotBeNull("列挙候補にも × ボタン自体はテンプレートから生成されること");
-                    enumeratedButton!
-                        .Visibility.Should()
-                        .Be(
-                            Visibility.Collapsed,
-                            "実行時列挙の候補（IsRemovable=false）の × は非表示であること"
-                        );
-
-                    // 履歴候補（2 番目）: × ボタンが Visible・Command 解決・Execute で削除できる
-                    var removeButton = FindRemoveButton(RealizeContainer(combo, 1));
-                    removeButton
-                        .Should()
-                        .NotBeNull("履歴候補の × ボタンがテンプレートから生成されていること");
-                    removeButton!
-                        .Visibility.Should()
-                        .Be(
-                            Visibility.Visible,
-                            "履歴候補（IsRemovable=true）の × は表示されること"
-                        );
-
-                    // 誤束縛（RelativeSource 解決失敗）だと Command が null になり × が無反応になる
-                    removeButton
-                        .Command.Should()
-                        .NotBeNull("× ボタンの Command が RelativeSource 経由で解決されていること");
-
-                    removeButton.Command!.Execute(removeButton.CommandParameter);
-
-                    // 実行した履歴項目のみ消え、実行時列挙は残る（JSON 側も消える）
-                    connection
-                        .CopilotModelCandidates.Select(c => c.Name)
-                        .Should()
-                        .Equal("enum-model", "hist-model-2");
-                    copilotStore
-                        .Load()
-                        .CopilotModelHistory.ModelsFor(CopilotSettings.HistoryProviderKey)
-                        .Should()
-                        .Equal("hist-model-2");
-                }
-                finally
-                {
-                    window.Close();
-                }
+                scenario.AssertAfterRemove();
+                scenario.AfterRemove?.Invoke(combo);
             }
             finally
             {
-                if (Directory.Exists(folder))
-                {
-                    Directory.Delete(folder, recursive: true);
-                }
+                window.Close();
             }
         });
     }
@@ -540,106 +421,89 @@ public class ModelHistoryComboBoxTests
     [Fact(DisplayName = "Copilot の選択モデルは成功ターン記録・列挙更新後も空へ戻らない")]
     public void CopilotSelectedModel_SurvivesRecordAndReenumeration()
     {
+        using var temp = new TestTempFolder();
+        var folder = Path.Combine(temp.Path, "settings");
+
         WpfApplicationTestSupport.RunSta(() =>
         {
             WpfApplicationTestSupport.EnsureApplicationResources();
 
-            var folder = Path.Combine(
-                Path.GetTempPath(),
-                "QuickERTests",
-                Guid.NewGuid().ToString("N")
+            var connection = new ChatConnectionSettingsViewModel(
+                AiDialogKind.AiChat,
+                settingsStore: new AiSettingsStore(folder),
+                codexConfigReader: () => new CodexConfigToml(),
+                apiKeyLoader: _ => string.Empty,
+                apiKeySaver: (_, _) => { }
             );
+            connection.LoadSettings();
+            connection.SelectedBackend = ErChatBackendKind.Copilot;
+            connection.CopilotAvailableModels = new List<string> { "enum-model", "enum-model-2" };
+
+            // 実ダイアログの CopilotModelBox と同じ束縛を最小ウィンドウの ComboBox へ組む
+            var combo = new ComboBox
+            {
+                IsEditable = true,
+                ItemsSource = connection.CopilotModelCandidates,
+                DataContext = new ConnectionHost(connection),
+            };
+            TextSearch.SetTextPath(combo, "Name");
+            combo.SetBinding(
+                ComboBox.TextProperty,
+                new Binding("Connection.CopilotModel")
+                {
+                    UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged,
+                }
+            );
+            // 画面外＋非アクティブで Show し、テスト実行中にユーザーの画面を邪魔しない
+            var window = new Window
+            {
+                Content = combo,
+                Width = 400,
+                Height = 200,
+                ShowInTaskbar = false,
+                ShowActivated = false,
+                WindowStyle = WindowStyle.None,
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Left = -4000,
+                Top = -4000,
+            };
+            window.Show();
 
             try
             {
-                var connection = new ChatConnectionSettingsViewModel(
-                    AiDialogKind.AiChat,
-                    settingsStore: new AiSettingsStore(folder),
-                    codexConfigReader: () => new CodexConfigToml(),
-                    apiKeyLoader: _ => string.Empty,
-                    apiKeySaver: (_, _) => { }
-                );
-                connection.LoadSettings();
-                connection.SelectedBackend = ErChatBackendKind.Copilot;
+                window.UpdateLayout();
+                DoEvents();
+
+                // 実機の報告手順どおり、ドロップダウン項目の選択でモデルを決める
+                combo.SelectedItem = connection.CopilotModelCandidates[0];
+                DoEvents();
+                connection
+                    .CopilotModel.Should()
+                    .Be("enum-model", "リスト選択が Text 経由で VM へ届くこと");
+
+                // 成功ターン → MRU 記録 → 候補再構築（修正前はここで Text が空へ戻っていた）
+                connection.RecordSuccessfulModel();
+                DoEvents();
+                connection
+                    .CopilotModel.Should()
+                    .Be("enum-model", "MRU 記録の候補再構築で選択モデルが消えないこと");
+                combo.Text.Should().Be("enum-model");
+
+                // 再接続などによる実行時列挙の更新でも保たれる
                 connection.CopilotAvailableModels = new List<string>
                 {
                     "enum-model",
-                    "enum-model-2",
+                    "enum-model-3",
                 };
-
-                // 実ダイアログの CopilotModelBox と同じ束縛を最小ウィンドウの ComboBox へ組む
-                var combo = new ComboBox
-                {
-                    IsEditable = true,
-                    ItemsSource = connection.CopilotModelCandidates,
-                    DataContext = new ConnectionHost(connection),
-                };
-                TextSearch.SetTextPath(combo, "Name");
-                combo.SetBinding(
-                    ComboBox.TextProperty,
-                    new Binding("Connection.CopilotModel")
-                    {
-                        UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged,
-                    }
-                );
-                // 画面外＋非アクティブで Show し、テスト実行中にユーザーの画面を邪魔しない
-                var window = new Window
-                {
-                    Content = combo,
-                    Width = 400,
-                    Height = 200,
-                    ShowInTaskbar = false,
-                    ShowActivated = false,
-                    WindowStyle = WindowStyle.None,
-                    WindowStartupLocation = WindowStartupLocation.Manual,
-                    Left = -4000,
-                    Top = -4000,
-                };
-                window.Show();
-
-                try
-                {
-                    window.UpdateLayout();
-                    DoEvents();
-
-                    // 実機の報告手順どおり、ドロップダウン項目の選択でモデルを決める
-                    combo.SelectedItem = connection.CopilotModelCandidates[0];
-                    DoEvents();
-                    connection
-                        .CopilotModel.Should()
-                        .Be("enum-model", "リスト選択が Text 経由で VM へ届くこと");
-
-                    // 成功ターン → MRU 記録 → 候補再構築（修正前はここで Text が空へ戻っていた）
-                    connection.RecordSuccessfulModel();
-                    DoEvents();
-                    connection
-                        .CopilotModel.Should()
-                        .Be("enum-model", "MRU 記録の候補再構築で選択モデルが消えないこと");
-                    combo.Text.Should().Be("enum-model");
-
-                    // 再接続などによる実行時列挙の更新でも保たれる
-                    connection.CopilotAvailableModels = new List<string>
-                    {
-                        "enum-model",
-                        "enum-model-3",
-                    };
-                    DoEvents();
-                    connection
-                        .CopilotModel.Should()
-                        .Be("enum-model", "実行時列挙の更新で選択モデルが消えないこと");
-                    combo.Text.Should().Be("enum-model");
-                }
-                finally
-                {
-                    window.Close();
-                }
+                DoEvents();
+                connection
+                    .CopilotModel.Should()
+                    .Be("enum-model", "実行時列挙の更新で選択モデルが消えないこと");
+                combo.Text.Should().Be("enum-model");
             }
             finally
             {
-                if (Directory.Exists(folder))
-                {
-                    Directory.Delete(folder, recursive: true);
-                }
+                window.Close();
             }
         });
     }
