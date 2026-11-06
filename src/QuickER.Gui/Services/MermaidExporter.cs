@@ -87,6 +87,11 @@ public static partial class MermaidExporter
     /// </remarks>
     public static IReadOnlyList<ExportOmissionKind> DetectOmissions(ErDiagram diagram)
     {
+        // 取込の規則で決まる欠落（制約名・推論される列ペア・主キー列の外部キーの印）は、出力を実際に取り込み直して判定する。
+        // 取り込み直しは要る判定が最初に来たときに 1 回だけ行い、3 つの判定で共有する
+        var reimported = new Lazy<ErDiagram?>(() => Reimport(diagram));
+        var written = WrittenRelationships(diagram);
+
         var checks = new (bool Detected, ExportOmissionKind Kind)[]
         {
             (
@@ -104,8 +109,11 @@ public static partial class MermaidExporter
                 ExportOmissionKind.ColumnDescription
             ),
             (
-                // Mermaid の属性行は NULL 許可を書けず、取込時は全列が NULL 許可になる
-                diagram.Entities.Any(entity => entity.Columns.Any(column => !column.IsNullable)),
+                // Mermaid の属性行は NULL 許可を書けず、取込時は主キーの標識の列だけが NOT NULL になり、ほかは NULL 許可になる
+                // （主キーの列の NOT NULL は取込が戻すので、それだけでは落ちるものが無い）
+                diagram.Entities.Any(entity =>
+                    entity.Columns.Any(column => !column.IsNullable && !column.IsPrimaryKey)
+                ),
                 ExportOmissionKind.ColumnNullability
             ),
             (
@@ -123,7 +131,9 @@ public static partial class MermaidExporter
                 ExportOmissionKind.UniqueConstraintName
             ),
             (
-                diagram.Relationships.Any(relationship => relationship.ColumnPairs.Count > 0),
+                // 列ペアは書けない。列ペアの無いリレーションでも、取込が親の主キーから推論してペアを作るなら告知する
+                diagram.Relationships.Any(relationship => relationship.ColumnPairs.Count > 0)
+                    || InfersColumnPairs(written, reimported),
                 ExportOmissionKind.ForeignKeyColumnPairs
             ),
             (
@@ -178,22 +188,25 @@ public static partial class MermaidExporter
                 ExportOmissionKind.TableNameNormalized
             ),
             (
-                // キー欄は 1 列 1 標識で FK が UK より優先されるため、外部キー列の単一列 UNIQUE は書けない
-                // （主キー列の UNIQUE は主キー自身が一意なので落としても意味は変わらない）。判定は KeyMarker と共有
+                // キー欄は 1 列 1 標識で PK > FK > UK の順に優先されるため、主キー列・外部キー列の単一列 UNIQUE は書けない
+                // （主キー列でも、図の制約〔名前・DDL の UNIQUE〕は取込で戻らない）。判定は KeyMarker と共有
                 diagram.Entities.Any(entity =>
                 {
                     var uniqueColumnIds = CollectSingleColumnUniqueMembers(entity);
 
                     return entity.Columns.Any(column =>
                         uniqueColumnIds.Contains(column.Id)
-                        && !column.IsPrimaryKey
                         && KeyMarker(column, isUnique: true) != "UK"
                     );
                 }),
-                ExportOmissionKind.UniqueConstraintOnForeignKeyColumn
+                ExportOmissionKind.UniqueConstraintOnKeyColumn
             ),
             (
-                LosesRelationshipConstraintNames(diagram),
+                LosesForeignKeyMarkersOnPrimaryKeys(diagram, reimported),
+                ExportOmissionKind.ForeignKeyMarkerOnPrimaryKeyColumn
+            ),
+            (
+                LosesRelationshipConstraintNames(written, reimported),
                 ExportOmissionKind.RelationshipConstraintName
             ),
         };
@@ -215,35 +228,17 @@ public static partial class MermaidExporter
     /// 取込そのものが失敗する図（大文字小文字だけ違うテーブル名が並ぶ等）は、名前も戻らないものとして扱う
     /// </para>
     /// </remarks>
-    private static bool LosesRelationshipConstraintNames(ErDiagram diagram)
+    private static bool LosesRelationshipConstraintNames(
+        IReadOnlyList<Relationship> written,
+        Lazy<ErDiagram?> reimported
+    )
     {
-        var entityIds = diagram.Entities.Select(entity => entity.Id).ToHashSet();
-
-        // 書き出す関係行は、両端のテーブルが図にあるリレーションだけ（BuildRelationshipLine と同じ条件）で、順序も同じ
-        var written = diagram
-            .Relationships.Where(relationship =>
-                entityIds.Contains(relationship.SourceEntityId)
-                && entityIds.Contains(relationship.TargetEntityId)
-            )
-            .ToList();
-
         if (!written.Any(relationship => !string.IsNullOrWhiteSpace(relationship.ConstraintName)))
         {
             return false;
         }
 
-        ErDiagram reimported;
-
-        try
-        {
-            reimported = MermaidImporter.Parse(Build(diagram), diagram.TargetDbms);
-        }
-        catch (InvalidDataException)
-        {
-            return true;
-        }
-
-        if (reimported.Relationships.Count != written.Count)
+        if (reimported.Value is not { } diagram || diagram.Relationships.Count != written.Count)
         {
             return true;
         }
@@ -253,11 +248,112 @@ public static partial class MermaidExporter
             .Any(item =>
                 !string.IsNullOrWhiteSpace(item.relationship.ConstraintName)
                 && !string.Equals(
-                    reimported.Relationships[item.index].ConstraintName,
+                    diagram.Relationships[item.index].ConstraintName,
                     item.relationship.ConstraintName,
                     StringComparison.Ordinal
                 )
             );
+    }
+
+    /// <summary>列ペアの無い多対多でないリレーションに、取込が列ペアを推論して作るかを判定する</summary>
+    /// <remarks>
+    /// 取込は列ペアの無いリレーションに親の主キーからペアと子の列の外部キーの印を作る（<see cref="MermaidImporter"/>）。
+    /// 推論が当たるかは子の列名と図のほかのリレーションに依るので、出力を取り込み直して書いた順に突き合わせる。
+    /// 列ペアの無いリレーションが無ければ取り込まない。取込が失敗する図・リレーションの数が合わない図では、
+    /// 推論で作られたペアが無いものとして扱う（作られていないペアを告知しない）
+    /// </remarks>
+    private static bool InfersColumnPairs(
+        IReadOnlyList<Relationship> written,
+        Lazy<ErDiagram?> reimported
+    )
+    {
+        static bool IsPairless(Relationship relationship) =>
+            relationship.Type != RelationshipType.ManyToMany && relationship.ColumnPairs.Count == 0;
+
+        if (!written.Any(IsPairless))
+        {
+            return false;
+        }
+
+        if (reimported.Value is not { } diagram || diagram.Relationships.Count != written.Count)
+        {
+            return false;
+        }
+
+        return written
+            .Select((relationship, index) => (relationship, index))
+            .Any(item =>
+                IsPairless(item.relationship)
+                && diagram.Relationships[item.index].ColumnPairs.Count > 0
+            );
+    }
+
+    /// <summary>主キー列の外部キーの印のうち、取込で戻らないものがあるかを判定する</summary>
+    /// <remarks>
+    /// キー欄は 1 列 1 標識で PK が FK より優先されるため、主キー列の外部キーの印は書けない（<see cref="KeyMarker"/>）。
+    /// ただし取込の列ペアの推論がその列を子の列に選べば印は戻るので、出力を取り込み直して、表と列を書いた順に突き合わせる。
+    /// 印を持つ主キー列が無ければ取り込まない。取込が失敗する図・表や列の数が合わない図は、印も戻らないものとして扱う
+    /// </remarks>
+    private static bool LosesForeignKeyMarkersOnPrimaryKeys(
+        ErDiagram diagram,
+        Lazy<ErDiagram?> reimported
+    )
+    {
+        if (
+            !diagram.Entities.Any(entity =>
+                entity.Columns.Any(column => column.IsPrimaryKey && column.IsForeignKey)
+            )
+        )
+        {
+            return false;
+        }
+
+        if (
+            reimported.Value is not { } restored
+            || restored.Entities.Count != diagram.Entities.Count
+        )
+        {
+            return true;
+        }
+
+        return diagram
+            .Entities.Zip(restored.Entities)
+            .Any(pair =>
+                pair.First.Columns.Count != pair.Second.Columns.Count
+                || pair.First.Columns.Zip(pair.Second.Columns)
+                    .Any(columns =>
+                        columns.First.IsPrimaryKey
+                        && columns.First.IsForeignKey
+                        && !columns.Second.IsForeignKey
+                    )
+            );
+    }
+
+    /// <summary>書き出す関係行のリレーション（両端のテーブルが図にあるものだけ・図の順序のまま）</summary>
+    /// <remarks><see cref="BuildRelationshipLine"/> と同じ条件</remarks>
+    private static List<Relationship> WrittenRelationships(ErDiagram diagram)
+    {
+        var entityIds = diagram.Entities.Select(entity => entity.Id).ToHashSet();
+
+        return diagram
+            .Relationships.Where(relationship =>
+                entityIds.Contains(relationship.SourceEntityId)
+                && entityIds.Contains(relationship.TargetEntityId)
+            )
+            .ToList();
+    }
+
+    /// <summary>出力を取り込み直した図（取込が失敗する図は <c>null</c>）</summary>
+    private static ErDiagram? Reimport(ErDiagram diagram)
+    {
+        try
+        {
+            return MermaidImporter.Parse(Build(diagram), diagram.TargetDbms);
+        }
+        catch (InvalidDataException)
+        {
+            return null;
+        }
     }
 
     /// <summary>テーブル ID → Mermaid の実体名（必要なら引用つき）の写像を作る</summary>

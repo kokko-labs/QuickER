@@ -47,8 +47,10 @@ public class MainViewModelExportOmissionTests
                 files: new StubFileDialogService { SaveResult = new FileDialogResult(path, 5) }
             );
 
-            // 既定エンティティは NOT NULL の ID 列を持つため、NULL 許可の指定が落ちる
+            // 既定エンティティの ID 列は主キーで、NOT NULL は取込が戻す。主キーでない列を NOT NULL にすると NULL 許可の指定が落ちる
             vm.AddEntityCommand.Execute(null);
+            vm.AddColumnCommand.Execute(null);
+            vm.Entities[0].Columns[^1].IsNullable = false;
 
             vm.ExportDiagramCommand.Execute(null);
             vm.ExportDiagramCommand.Execute(null);

@@ -298,8 +298,10 @@ internal sealed class DiagramExportService(
             ExportOmissionKind.ComputedColumn => Strings.ExportOmission_ComputedColumn,
             ExportOmissionKind.TableNameNormalized => Strings.ExportOmission_TableNameNormalized,
             ExportOmissionKind.ColumnTypeNormalized => Strings.ExportOmission_ColumnTypeNormalized,
-            ExportOmissionKind.UniqueConstraintOnForeignKeyColumn =>
-                Strings.ExportOmission_UniqueConstraintOnForeignKeyColumn,
+            ExportOmissionKind.UniqueConstraintOnKeyColumn =>
+                Strings.ExportOmission_UniqueConstraintOnKeyColumn,
+            ExportOmissionKind.ForeignKeyMarkerOnPrimaryKeyColumn =>
+                Strings.ExportOmission_ForeignKeyMarkerOnPrimaryKeyColumn,
             ExportOmissionKind.RelationshipConstraintName =>
                 Strings.ExportOmission_RelationshipConstraintName,
             ExportOmissionKind.IdentityColumn => Strings.ExportOmission_IdentityColumn,

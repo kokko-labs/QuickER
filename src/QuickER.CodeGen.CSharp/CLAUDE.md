@@ -169,6 +169,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
   - リバース側は「その表記を対象方言で解析した canonical がトークンの canonical と一致する」ときだけ採用する。不一致（手編集・別方言リバース）はトークンを採って警告する
 - 綴り一致の判定は `DbTypeText.AreEquivalent`（Trim ＋大小無視）。`SchemaDiffService` の `ALTER COLUMN` 判定が方言の正規化の後に使う比較（`AreSameType`）と同じ規則にする
   - 厳密一致にすると、`TryFormat` が大文字を返す SQLite 方言の図で全列に verbatim が出て、生成物が総入れ替えになる
+  - 大小だけ違う綴りはコードから読めないので、C# のマージ取込が現在図の同じ列の綴りへ戻す（`ReverseMergePostProcessor.ApplyTypeSpellings`。`AreEquivalent` で同じときだけ）。戻さないと SQLite の図で取り込むたびに `int` が `INT` へ変わり、構造署名の差として置換の確認が出る。ガード：`FormatRoundTripTests`（形の行 `dbml-long-default-name-sqlite` の C# のマージの表明。エンジンは大小だけの違いを運ばない面 `TypeCase` に宣言し、マージが戻す面に入れる）
 - 対象列は生成時 Info 診断（`CodeGen_Info_NonCanonicalTypeSpellingColumns`）で名指しする
 - 行バージョン列はトークンごと不出力なので verbatim も出ない
 - ガード：`CSharpReverseVerbatimTypeTests`（大小差の非出力・行バージョンの非出力）・`FormatRoundTripTests`（7 表記の往復＝形の行 `csharp-verbatim-type-*`・不一致の警告＝規則の行 `csharp-rule-verbatim-*`）

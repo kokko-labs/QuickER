@@ -15,9 +15,6 @@ namespace QuickER.Tests.Gui.Services.FormatRoundTrip;
 /// </remarks>
 internal static class FormatRoundTripKnownFailures
 {
-    /// <summary>直す区切り</summary>
-    private const string FixedIn = "P3 の後の製品の修正（形式の往復）";
-
     /// <summary>C# リバースで型を解析できない列が消えることを受け入れた理由</summary>
     private const string UnparsableTypeReason =
         "C# リバースの仕様（2026-11-05 ユーザーの判断）：型カタログで解析できない自由記述型は生成が [DbColumnMeta] を省き"
@@ -47,83 +44,7 @@ internal static class FormatRoundTripKnownFailures
         new(
             "FormatRoundTrip",
             [
-                // D：DBML は型の空の列を `id  [pk, not null]` と書き出し、自分の取込が読み戻せない（InvalidDataException）。
-                // 元の形式の根拠：Mermaid では往復する（形の行 mermaid-empty-data-type の Mermaid の期待）
-                KnownCaseLedger.Case(
-                    CaseId("mermaid-empty-data-type", "Dbml"),
-                    "P3-8-D",
-                    FixedIn,
-                    "Cannot parse column definition"
-                ),
-                // D と同じ根：Excel の定義書も型の空の列を書き出すが、自分の取込が「has no data type」で断る
-                // （src/QuickER.Gui/Services/TableDefinitionDocumentImporter.cs）。元の形式の根拠は D と同じ
-                KnownCaseLedger.Case(
-                    CaseId("mermaid-empty-data-type", "Excel"),
-                    "P3-8-D",
-                    FixedIn,
-                    "has no data type"
-                ),
-                // J：C# リバースの SQLite で、列の型 `int` が往復で `INT` になる（同義の表記の verbatim 併記が効いていない疑い）。
-                // 元の形式の根拠：DBML では int のまま往復する（形の行 dbml-long-default-name-sqlite の DBML の期待）
-                KnownCaseLedger.Case(
-                    CaseId("dbml-long-default-name-sqlite", CSharpReverseAdapter.Value),
-                    "P3-8-J",
-                    FixedIn,
-                    "Type "
-                ),
-                // B：Mermaid の取込が、列ペアの無いリレーションに親の主キーからペアと外部キーの印を告知なしで作る
-                // （src/QuickER.Gui/Services/MermaidImporter.cs の推論）。元の形式の根拠：Excel では列ペアの無いまま往復し
-                // （形の行 excel-pairless-relationships の Excel の期待）、DBML は書き出さずに告知する（形の行 dbml-pairless-* の DBML の期待）
-                .. new[]
-                {
-                    "excel-pairless-relationships",
-                    "dbml-pairless-relationship-omitted-onetomany",
-                    "dbml-pairless-relationship-omitted-onetoone",
-                    "dbml-relationship-to-table-without-columns-onetomany",
-                    "dbml-relationship-without-child-columns-carries-no-marker-pairless-one-to-many",
-                }.Select(shape =>
-                    KnownCaseLedger.Case(
-                        CaseId(shape, "Mermaid"),
-                        "P3-8-B",
-                        FixedIn,
-                        "ColumnPairs "
-                    )
-                ),
-                // N：Mermaid のキー欄は PK > FK > UK の 1 標識に畳むが、主キーの列の単一列 UNIQUE と外部キーの印の消失を告知しない
-                // （告知は外部キーの列の UNIQUE だけ。src/QuickER.Gui/Services/MermaidExporter.cs の DetectOmissions）。
-                // 元の形式の根拠：DBML は主キーの列の UNIQUE と印を運ぶ（形の行の DBML の期待）
-                KnownCaseLedger.Case(
-                    CaseId("dbml-omissions-memo-and-named-query", "Mermaid"),
-                    "P3-8-N",
-                    FixedIn,
-                    "UniqueSet "
-                ),
-                KnownCaseLedger.Case(
-                    CaseId("mermaid-unique-on-key-and-plain-columns", "Mermaid"),
-                    "P3-8-N",
-                    FixedIn,
-                    "UniqueSet "
-                ),
-                KnownCaseLedger.Case(
-                    CaseId("dbml-primary-key-child-column-is-carried", "Mermaid"),
-                    "P3-8-N",
-                    FixedIn,
-                    "ForeignKeyMarker "
-                ),
-                // Q：同じ列ペアのリレーションが 2 本ある図を、Excel は書き出すが自分の取込が「The relationship between tables … is duplicated」で断る（D と同じ型）
-                .. new[]
-                {
-                    "mermaid-plain-constraint-name-not-read-back-duplicate",
-                    "mermaid-unnamed-relationships-not-reported",
-                }.Select(shape =>
-                    KnownCaseLedger.Case(
-                        CaseId(shape, "Excel"),
-                        "P3-8-Q",
-                        FixedIn,
-                        "relationship between tables"
-                    )
-                ),
-                // Q：同じ図を C# の生成は生成前に止める（受け入れた仕様）
+                // Q：同じ列ペアのリレーションが 2 本ある図を、C# の生成は生成前に止める（受け入れた仕様。Excel・DBML・Mermaid は往復する）
                 .. new[]
                 {
                     "mermaid-plain-constraint-name-not-read-back-duplicate",

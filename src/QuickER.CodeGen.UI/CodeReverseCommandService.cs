@@ -115,6 +115,9 @@ public sealed class CodeReverseCommandService
         // 主キーの採番の印も温存する（生成コードは主キーの列に印を刻まず、取り込むと消えるため）
         ReverseMergePostProcessor.ApplyPrimaryKeyIdentityMarks(current, merged.Entities);
 
+        // 型の大小の綴りも温存する（生成コードは大小だけ違う綴りを刻まず、取り込むと方言の表記へ変わるため）
+        ReverseMergePostProcessor.ApplyTypeSpellings(current, merged.Entities);
+
         // 構造差分・壊れクエリがある場合のみ置換確認を行う（DB 取込と同じ規則）
         if (!ConfirmDiagramReplacement(current, merged, finalRelationships))
         {

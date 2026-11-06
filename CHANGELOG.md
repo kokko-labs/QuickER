@@ -38,6 +38,11 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 - **A diagram file in which two relationships share an identifier is now refused, naming where** — this happens only in a hand-edited file. The message names the constraint names, or the parent and child tables
 
+#### Import and export
+
+- **An Excel definition document's relationship rows that share the same tables and columns are now read as separate relationships instead of being refused as duplicates** — the export writes one row per relationship, so a diagram with two foreign keys over the same columns could not be read back. The name of a second row whose constraint name cell is empty follows the rule shared by the formats, as in DBML and Mermaid
+- **The Mermaid export notice about single-column unique constraints now covers primary key columns as well as foreign key columns** — a column carries one key marker (`PK`, then `FK`, then `UK`), so the constraint on either kind of key column is not written
+
 #### Distribution
 
 - **The launcher `QuickER.exe` and `Update.exe` that the installer and the portable zip place next to the app are now x64 instead of x86** — the app itself was already x64. An installed QuickER switches to them when it updates to this version
@@ -58,6 +63,15 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **Before generating a mock project, QuickER warns when the tables in the diagram differ from the tables the mock design was made from** — a screen that uses a table no longer in the diagram was not made, but generation still reported success. Differences only in columns, descriptions or relationships are written to the log without a warning
 - **Mock project generation no longer reports success when screens were not made** — with an API key, a turn that submitted no files fails the run, and for Blazor the final check counts the `@page` routes against the screens in the design. For WPF a shortfall is only logged as a warning
 - **Lines in the mock generation log no longer run on from the end of the AI's text**
+
+#### Import and export
+
+- **A DBML file exported from a diagram with a column that has no type can now be imported** — the export wrote `id  [pk, not null]`, which the import refused. The column is now written with an empty quoted type (`id "" [pk, not null]`), which the import reads as no type, and a line with no type at all is still refused. That other DBML tools accept the empty quoted type was checked by reading the @dbml/core (dbml-parse) source on its master branch; it has not been run against a published release
+- **An Excel definition document exported from a diagram with a column that has no type can now be imported** — the import refused the empty data type cell that the export writes
+- **The Mermaid export now reports the foreign key column mappings when the import would infer them for a relationship that had none** — the import pairs the parent's primary key with a child column and marks it as a foreign key, which the notice did not mention
+- **The Mermaid export now reports single-column unique constraints on primary key columns and foreign key markers on primary key columns that the import does not infer back** — both disappeared on re-import without a notice
+- **The Mermaid export no longer reports nullability when the only NOT NULL columns are primary key columns** — the import makes primary key columns NOT NULL, so nothing is lost
+- **Importing C# code into a diagram keeps a column type that differs from the current diagram only in letter case** — on a SQLite diagram, `int` came back as `INT` and every import asked to confirm the replacement, because code generation does not record spellings that differ only in case
 
 #### DB sync & DDL
 

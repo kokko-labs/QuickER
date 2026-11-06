@@ -192,6 +192,12 @@ internal static class FormatRoundTripRunner
         var compositeKeys = composites
             .Select(r => keys.Relationship(r.Id))
             .ToHashSet(StringComparer.Ordinal);
+        // 元の図で列ペアの無かったリレーションに、取込が推論して作った列ペアの子の列（その印は列ペアの違いの一部）
+        var importedKeys = FormatPairing.Pair(original, imported);
+        var inferredChildren = imported
+            .Relationships.Where(r => pairlessKeys.Contains(importedKeys.Relationship(r.Id)))
+            .SelectMany(r => r.ColumnPairs.Select(p => importedKeys.Column(p.TargetColumnId)))
+            .ToHashSet(StringComparer.Ordinal);
         var compositeChildren = composites
             .SelectMany(r => r.ColumnPairs.Select(p => keys.Column(p.TargetColumnId)))
             .ToHashSet(StringComparer.Ordinal);
@@ -236,6 +242,13 @@ internal static class FormatRoundTripRunner
             && !string.Equals(before, after, StringComparison.Ordinal)
             && string.Equals(ExportTextSanitizer.Sanitize(before), after, StringComparison.Ordinal);
 
+        // 型の表記の大文字小文字（と前後の空白）だけの違いか（同期が同じ型とみなす規則＝DbTypeText.AreEquivalent）
+        bool OnlyTypeCase(string key) =>
+            leftRaw.TryGetValue((Facet.Type, key), out var before)
+            && rightRaw.TryGetValue((Facet.Type, key), out var after)
+            && !string.Equals(before, after, StringComparison.Ordinal)
+            && DbTypeText.AreEquivalent(before, after);
+
         // 元の図で列の無かった表の列・並び（取込が補った列の違い）
         bool OnEmptyTable(string key) =>
             emptyTables.Contains(key)
@@ -254,6 +267,7 @@ internal static class FormatRoundTripRunner
                         key.StartsWith($"{table}.", StringComparison.Ordinal)
                     ) => Facet.BrokenColumnPairs,
                 Facet.ForeignKeyMarker when children.Contains(key) => Facet.ForeignKeyMarkerDerived,
+                Facet.ForeignKeyMarker when inferredChildren.Contains(key) => Facet.ColumnPairs,
                 _ => facet,
             };
 
@@ -329,6 +343,7 @@ internal static class FormatRoundTripRunner
                         && line.Value == "null"
                         && value == "notnull"
                             ? Facet.PrimaryKeyNullability
+                        : facet == Facet.Type && OnlyTypeCase(line.Key) ? Facet.TypeCase
                         : facet
                             is Facet.TableName
                                 or Facet.ColumnName

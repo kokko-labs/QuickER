@@ -885,8 +885,11 @@
   <data name="ExportOmission_ColumnTypeNormalized" xml:space="preserve">
     <value>この形式で書けない列の型（空白・記号は「_」へ置き換わり、nvarchar(max) や double precision のように取込で元の表記へ戻りません）</value>
   </data>
-  <data name="ExportOmission_UniqueConstraintOnForeignKeyColumn" xml:space="preserve">
-    <value>外部キー列の単一列 UNIQUE 制約（キー欄は列ごとに標識を 1 つしか持てず、FK が UK より優先されます）</value>
+  <data name="ExportOmission_UniqueConstraintOnKeyColumn" xml:space="preserve">
+    <value>主キー列・外部キー列の単一列 UNIQUE 制約（キー欄は列ごとに標識を 1 つしか持てず、PK・FK・UK の順に優先されます）</value>
+  </data>
+  <data name="ExportOmission_ForeignKeyMarkerOnPrimaryKeyColumn" xml:space="preserve">
+    <value>取込で戻らない主キー列の外部キー印（キー欄は列ごとに標識を 1 つしか持てず、PK が FK より優先されます）</value>
   </data>
   <data name="ExportOmission_RelationshipConstraintName" xml:space="preserve">
     <value>取込で同じ名前に戻らないリレーションの制約名（空白や記号を含むため引用して書いた名前、複数のリレーションで同じ名前、relates や主キー・一意制約と同じ名前）</value>
@@ -1039,9 +1042,6 @@
   <data name="TableDoc_DetailSheetNotFound" xml:space="preserve">
     <value>テーブル '{0}' の詳細シートが見つかりません。</value>
   </data>
-  <data name="TableDoc_ColumnMissingDataType" xml:space="preserve">
-    <value>テーブル '{0}' のカラム '{1}' にデータ型がありません。</value>
-  </data>
   <data name="TableDoc_ColumnMissingName" xml:space="preserve">
     <value>テーブル '{0}' の {1} 行目にカラム名がありません（同じ行のほかのセルには値があります）。</value>
   </data>
@@ -1053,9 +1053,6 @@
   </data>
   <data name="TableDoc_RelChildNotFound" xml:space="preserve">
     <value>リレーション一覧シートの参照元テーブル '{0}' が未定義です。</value>
-  </data>
-  <data name="TableDoc_RelDuplicate" xml:space="preserve">
-    <value>テーブル '{0}' と '{1}' のリレーションが重複しています。</value>
   </data>
   <data name="TableDoc_RelMissingColumn" xml:space="preserve">
     <value>リレーション一覧シートの {0} 行目に参照カラムがありません。</value>

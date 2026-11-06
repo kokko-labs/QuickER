@@ -106,6 +106,15 @@ internal static partial class FormatShapeRows
                         e.OmissionsExclude.Add(ExportOmissionKind.ColumnTypeNormalized);
                     },
                     nameof(DiagramExportFormat.Mermaid)
+                )
+                // DBML は空の型を空の引用識別子で書き、取込が空の型へ戻す（Excel は空のセルで書いて空の型へ戻す）
+                .Expect(
+                    e =>
+                    {
+                        e.Output.Contains("id \"\" [pk");
+                        e.Imported.Single("Type items.id");
+                    },
+                    nameof(DiagramExportFormat.Dbml)
                 ),
             .. new[] { ("Order Details", "Order Lines"), ("orders (2024)", "lines") }.Select(
                 names =>
@@ -588,14 +597,18 @@ internal static partial class FormatShapeRows
                     e => e.OmissionsInclude.Add(ExportOmissionKind.IdentityColumn),
                     nameof(DiagramExportFormat.Mermaid)
                 ),
-            // MermaidFormatFidelityTests.DetectOmissions_UniqueOnForeignKeyColumn（同じ図で、value が外部キーの印を持たないときと持つとき）
-            .. new[] { false, true }.Select(isForeignKey =>
+            // MermaidFormatFidelityTests.DetectOmissions_UniqueOnForeignKeyColumn（同じ図で、主キー列の UNIQUE の有無と value の外部キーの印の有無）。
+            // キー欄は PK > FK > UK の 1 標識なので、主キー列・外部キー列の UNIQUE は告知し、通常列の UNIQUE（UK で書ける）は告知しない
+            .. new (string Id, bool KeyUnique, bool IsForeignKey, string Label)[]
+            {
+                ("mermaid-unique-on-foreign-key-column", true, true, "外部キー列"),
+                ("mermaid-unique-on-key-and-plain-columns", true, false, "主キー列・通常列"),
+                ("mermaid-unique-on-plain-column", false, false, "通常列だけ"),
+            }.Select(item =>
                 Shape(
-                        isForeignKey
-                            ? "mermaid-unique-on-foreign-key-column"
-                            : "mermaid-unique-on-key-and-plain-columns",
-                        "Mermaid の欠落: 外部キー列の単一列 UNIQUE は告知し、主キー列・通常列の UNIQUE は告知しない"
-                            + (isForeignKey ? "（外部キー列）" : "（主キー列・通常列）")
+                        item.Id,
+                        "Mermaid の欠落: 主キー列・外部キー列の単一列 UNIQUE は告知し、通常列の UNIQUE は告知しない"
+                            + $"（{item.Label}）"
                     )
                     .Build(() =>
                     {
@@ -603,30 +616,37 @@ internal static partial class FormatShapeRows
                         var entity = diagram.Entities[0];
                         var key = entity.Columns[0];
                         var value = entity.Columns[1];
-                        entity.UniqueConstraints.Add(new UniqueConstraint { ColumnIds = [key.Id] });
+
+                        if (item.KeyUnique)
+                        {
+                            entity.UniqueConstraints.Add(
+                                new UniqueConstraint { ColumnIds = [key.Id] }
+                            );
+                        }
+
                         entity.UniqueConstraints.Add(
                             new UniqueConstraint { ColumnIds = [value.Id] }
                         );
-                        value.IsForeignKey = isForeignKey;
+                        value.IsForeignKey = item.IsForeignKey;
                         return diagram;
                     })
                     .Expect(
                         e =>
                         {
-                            if (isForeignKey)
+                            if (item.KeyUnique || item.IsForeignKey)
                             {
                                 e.OmissionsInclude.Add(
-                                    ExportOmissionKind.UniqueConstraintOnForeignKeyColumn
+                                    ExportOmissionKind.UniqueConstraintOnKeyColumn
                                 );
-                                e.Output.Contains("int value FK");
                             }
                             else
                             {
                                 e.OmissionsExclude.Add(
-                                    ExportOmissionKind.UniqueConstraintOnForeignKeyColumn
+                                    ExportOmissionKind.UniqueConstraintOnKeyColumn
                                 );
-                                e.Output.Contains("int value UK");
                             }
+
+                            e.Output.Contains(item.IsForeignKey ? "int value FK" : "int value UK");
                         },
                         nameof(DiagramExportFormat.Mermaid)
                     )

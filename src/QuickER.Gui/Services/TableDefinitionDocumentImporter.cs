@@ -295,18 +295,9 @@ public static partial class TableDefinitionDocumentImporter
                 break;
             }
 
+            // 型のセルが空の行は型の無い列として読む（図は型の無い列を持て、出力は空のセルで書く。
+            // 断ると自分が書いた定義書を読み戻せない）
             var dataType = GetCellText(worksheet, row, 4);
-
-            if (string.IsNullOrWhiteSpace(dataType))
-            {
-                throw new InvalidDataException(
-                    string.Format(
-                        Strings.TableDoc_ColumnMissingDataType,
-                        entity.TableName,
-                        columnName
-                    )
-                );
-            }
 
             var keyText = GetCellText(worksheet, row, 6);
             var column = new Column
@@ -393,9 +384,9 @@ public static partial class TableDefinitionDocumentImporter
     /// <summary>リレーション一覧シートからリレーションを復元し、参照列の外部キー化を行う</summary>
     /// <remarks>
     /// 参照元（FK 側）は子テーブル、参照先（PK 側）は親テーブルに対応する。
-    /// 重複の判定はテーブルの組だけでなく<b>構成列まで</b>含める——同じ親子の間に複数の外部キー
-    /// （配送先・請求先など）を持つ図を定義書は 1 行 1 リレーションで書き出せるため、
-    /// テーブルの組だけで弾くとその定義書を読み戻せない。
+    /// 同じテーブルの組・同じ構成列の行が複数あっても、それぞれを 1 本のリレーションとして読む。
+    /// 出力は図のリレーションを 1 行 1 本で書き出すので、断ると自分が書いた定義書を読み戻せない
+    /// （DBML・Mermaid の取込と同じ扱い。名前の空いた 2 本目の名前は <see cref="ConstraintNames.NameUnnamedForeignKeys"/> が付ける）。
     /// </remarks>
     private static List<Relationship> ReadRelationshipSheet(
         IXLWorksheet worksheet,
@@ -403,9 +394,6 @@ public static partial class TableDefinitionDocumentImporter
     )
     {
         var relationships = new List<Relationship>();
-        var existingSignatures = new HashSet<RelationshipSignature>(
-            RelationshipSignatureComparer.Instance
-        );
 
         for (var row = TableDefinitionDocumentLayout.RelationshipDataStartRow; ; row++)
         {
@@ -455,8 +443,7 @@ public static partial class TableDefinitionDocumentImporter
                 OnUpdate = ForeignKeyReferentialActionHelper.Parse(GetCellText(worksheet, row, 9)),
             };
 
-            // 多対多は列対応を持たない（ジャンクションテーブル前提）ため構成列は空のまま＝
-            // 署名はテーブルの組だけになり、同一ペアの 2 行目は従来どおり重複として弾かれる
+            // 多対多は列対応を持たない（ジャンクションテーブル前提）ため構成列は空のまま
             var childColumnNames = new List<string>();
             var parentColumnNames = new List<string>();
             var isPairless = false;
@@ -484,26 +471,6 @@ public static partial class TableDefinitionDocumentImporter
                         string.Format(Strings.TableDoc_RelColumnCountMismatch, row)
                     );
                 }
-            }
-
-            // 構成列まで含めた署名で重複を判定する（列名の解決より前＝行の書かれ方だけで決まる）。
-            // 列の対応を持たないリレーションは判定しない（同じテーブルの組に何本あっても図として成り立ち、
-            // 出力もそのまま書き出すため、断ると自分が書いた定義書を読み戻せない）
-            if (
-                !isPairless
-                && !existingSignatures.Add(
-                    new RelationshipSignature(
-                        parent.TableName,
-                        child.TableName,
-                        string.Join(',', parentColumnNames),
-                        string.Join(',', childColumnNames)
-                    )
-                )
-            )
-            {
-                throw new InvalidDataException(
-                    string.Format(Strings.TableDoc_RelDuplicate, parent.TableName, child.TableName)
-                );
             }
 
             if (type != RelationshipType.ManyToMany && !isPairless)
@@ -616,63 +583,4 @@ public static partial class TableDefinitionDocumentImporter
 
     /// <summary>テーブル一覧シート 1 行分の情報</summary>
     private sealed record TableSummaryRow(string TableName, string Description, string Memo);
-
-    /// <summary>リレーション行の同一性を表す署名（重複検出に用いる）</summary>
-    /// <param name="Parent">親（参照先）テーブル名</param>
-    /// <param name="Child">子（参照元）テーブル名</param>
-    /// <param name="ParentColumns">参照先列をセルの宣言順でカンマ連結したもの（多対多は空文字）</param>
-    /// <param name="ChildColumns">参照元列をセルの宣言順でカンマ連結したもの（多対多は空文字）</param>
-    /// <remarks>
-    /// 構成列を含めるのは、同じ親子の間に複数の外部キーを持つ図を読み戻せるようにするため。
-    /// 制約名は署名へ含めない——テーブルと構成列が同じで名前だけ違う 2 行は、DB としても区別に
-    /// 意味がなく、重複行として止めるほうが検査の意味が残る。
-    /// 列名は定義書の表記どおり（カンマ区切りセルの分割結果）を連結する＝セルが列名にカンマを
-    /// 含められない以上、この連結で取り違えは起きない。
-    /// </remarks>
-    private sealed record RelationshipSignature(
-        string Parent,
-        string Child,
-        string ParentColumns,
-        string ChildColumns
-    );
-
-    /// <summary>リレーション署名を大文字小文字無視で比較する比較器（重複検出に用いる）</summary>
-    private sealed class RelationshipSignatureComparer : IEqualityComparer<RelationshipSignature>
-    {
-        /// <summary>共有インスタンス</summary>
-        public static RelationshipSignatureComparer Instance { get; } = new();
-
-        /// <inheritdoc />
-        public bool Equals(RelationshipSignature? x, RelationshipSignature? y)
-        {
-            if (x is null || y is null)
-            {
-                return ReferenceEquals(x, y);
-            }
-
-            return string.Equals(x.Parent, y.Parent, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(x.Child, y.Child, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(
-                    x.ParentColumns,
-                    y.ParentColumns,
-                    StringComparison.OrdinalIgnoreCase
-                )
-                && string.Equals(
-                    x.ChildColumns,
-                    y.ChildColumns,
-                    StringComparison.OrdinalIgnoreCase
-                );
-        }
-
-        /// <inheritdoc />
-        public int GetHashCode(RelationshipSignature obj)
-        {
-            return HashCode.Combine(
-                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Parent),
-                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Child),
-                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.ParentColumns),
-                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.ChildColumns)
-            );
-        }
-    }
 }

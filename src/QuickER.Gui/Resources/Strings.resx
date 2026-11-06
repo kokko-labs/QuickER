@@ -860,8 +860,11 @@
   <data name="ExportOmission_ColumnTypeNormalized" xml:space="preserve">
     <value>Column types that the format cannot spell (spaces and symbols are folded to "_", and the import cannot restore the original, as with nvarchar(max) or double precision)</value>
   </data>
-  <data name="ExportOmission_UniqueConstraintOnForeignKeyColumn" xml:space="preserve">
-    <value>Single-column unique constraints on foreign key columns (a column carries one key marker, and FK takes precedence over UK)</value>
+  <data name="ExportOmission_UniqueConstraintOnKeyColumn" xml:space="preserve">
+    <value>Single-column unique constraints on primary key and foreign key columns (a column carries one key marker, in the order PK, FK, UK)</value>
+  </data>
+  <data name="ExportOmission_ForeignKeyMarkerOnPrimaryKeyColumn" xml:space="preserve">
+    <value>Foreign key markers on primary key columns that the import does not restore (a column carries one key marker, and PK takes precedence over FK)</value>
   </data>
   <data name="ExportOmission_RelationshipConstraintName" xml:space="preserve">
     <value>Relationship constraint names that the import would not read back as the same name (names that must be quoted, such as ones with spaces or symbols, names shared by several relationships, and names equal to relates or to a primary key or unique constraint name)</value>
@@ -1014,9 +1017,6 @@
   <data name="TableDoc_DetailSheetNotFound" xml:space="preserve">
     <value>The detail sheet for table '{0}' was not found.</value>
   </data>
-  <data name="TableDoc_ColumnMissingDataType" xml:space="preserve">
-    <value>Column '{1}' of table '{0}' has no data type.</value>
-  </data>
   <data name="TableDoc_ColumnMissingName" xml:space="preserve">
     <value>Row {1} of table '{0}' has no column name, although other cells in the row have values.</value>
   </data>
@@ -1028,9 +1028,6 @@
   </data>
   <data name="TableDoc_RelChildNotFound" xml:space="preserve">
     <value>The source table '{0}' in the Relationship List sheet is undefined.</value>
-  </data>
-  <data name="TableDoc_RelDuplicate" xml:space="preserve">
-    <value>The relationship between tables '{0}' and '{1}' is duplicated.</value>
   </data>
   <data name="TableDoc_RelMissingColumn" xml:space="preserve">
     <value>Row {0} of the Relationship List sheet is missing a reference column.</value>

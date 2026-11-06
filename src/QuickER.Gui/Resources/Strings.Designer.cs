@@ -1938,9 +1938,15 @@ namespace QuickER.Resources {
             }
         }
 
-        public static string ExportOmission_UniqueConstraintOnForeignKeyColumn {
+        public static string ExportOmission_UniqueConstraintOnKeyColumn {
             get {
-                return ResourceManager.GetString("ExportOmission_UniqueConstraintOnForeignKeyColumn", resourceCulture);
+                return ResourceManager.GetString("ExportOmission_UniqueConstraintOnKeyColumn", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_ForeignKeyMarkerOnPrimaryKeyColumn {
+            get {
+                return ResourceManager.GetString("ExportOmission_ForeignKeyMarkerOnPrimaryKeyColumn", resourceCulture);
             }
         }
 
@@ -2250,12 +2256,6 @@ namespace QuickER.Resources {
             }
         }
         
-        public static string TableDoc_ColumnMissingDataType {
-            get {
-                return ResourceManager.GetString("TableDoc_ColumnMissingDataType", resourceCulture);
-            }
-        }
-
         public static string TableDoc_ColumnMissingName {
             get {
                 return ResourceManager.GetString("TableDoc_ColumnMissingName", resourceCulture);
@@ -2277,12 +2277,6 @@ namespace QuickER.Resources {
         public static string TableDoc_RelChildNotFound {
             get {
                 return ResourceManager.GetString("TableDoc_RelChildNotFound", resourceCulture);
-            }
-        }
-        
-        public static string TableDoc_RelDuplicate {
-            get {
-                return ResourceManager.GetString("TableDoc_RelDuplicate", resourceCulture);
             }
         }
         

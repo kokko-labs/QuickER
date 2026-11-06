@@ -109,6 +109,9 @@ internal enum Facet
     /// <summary>名前・型の改行・制御文字が空白へ畳まれた違いだけ（ほかの文字は同じ）</summary>
     NameSanitized,
 
+    /// <summary>型の表記の大文字小文字（と前後の空白）だけの違い（<c>DbTypeText.AreEquivalent</c> で同じ）</summary>
+    TypeCase,
+
     /// <summary>説明・メモの改行・制御文字が空白へ畳まれた違いだけ（ほかの文字は同じ）</summary>
     DescriptionLineBreaks,
 
@@ -212,7 +215,12 @@ internal static class FacetKinds
             [ExportOmissionKind.ComputedColumn] = [Facet.Computed],
             [ExportOmissionKind.TableNameNormalized] = [Facet.TableName],
             [ExportOmissionKind.ColumnTypeNormalized] = [Facet.Type],
-            [ExportOmissionKind.UniqueConstraintOnForeignKeyColumn] = [Facet.UniqueSet],
+            [ExportOmissionKind.UniqueConstraintOnKeyColumn] = [Facet.UniqueSet],
+            [ExportOmissionKind.ForeignKeyMarkerOnPrimaryKeyColumn] =
+            [
+                Facet.ForeignKeyMarker,
+                Facet.ForeignKeyMarkerOutsideRelationship,
+            ],
             [ExportOmissionKind.RelationshipConstraintName] = [Facet.ConstraintName],
             [ExportOmissionKind.IdentityColumn] = [Facet.IdentityNonKey, Facet.IdentityKey],
         };
