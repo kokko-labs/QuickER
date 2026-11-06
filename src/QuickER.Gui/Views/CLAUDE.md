@@ -32,4 +32,4 @@ MainWindow などの View の規則：全画面表示、パネルを畳むとき
 - 列一覧（`MainWindow.xaml` の `ColumnsDataGrid`）は `DataGrid.InputBindings` の `KeyBinding Key="Delete"` を、行の削除ボタンと同じ `RemoveColumnCommand`（引数＝`SelectedColumn`・null なら何もしない）へ結ぶ。
   - インスタンスの KeyBinding は CanExecute が偽でもキーを処理済みにする（実測）。列を選んでいないときの Delete も、窓の `DeleteSelected`（テーブルの削除）へは倒れない。
   - セルの編集中の Delete は入力欄（TextBox・編集できる ComboBox）が先に処理するので KeyBinding へは届かない。
-- ガード：`ColumnGridDeleteKeyTests`（実ウィンドウ・`WindowActivationTestCollection`。一意制約の構成列・主キーの列・リレーションの子列を選んだ Delete が行の削除ボタンと同じ図になり Undo 1 回で戻り未保存になる／列を選んでいない Delete は何も消さない／名前と型のセルの編集中は文字を消す）・`DataGridRowEditGuardTests`（src の全 XAML の DataGrid に 2 属性の明示を求める。属性が無いのも赤）。KeyBinding が先に処理するので `CanUserDeleteRows` を外しても挙動のテストは緑のままで、ガードが網になっている。mutation 実証済み。
+- ガード：`ColumnGridDeleteKeyTests`（実ウィンドウ・`WindowActivationTestCollection`。一意制約の構成列・主キーの列・リレーションの子列を選んだ Delete が行の削除ボタンと同じ図になり Undo 1 回で戻り未保存になる／列を選んでいない Delete は何も消さない／名前と型のセルの編集中は文字を消す）・`SourceRuleTests` の規則 `datagrid-row-edits`（src の全 XAML の DataGrid に 2 属性の明示を求める。属性が無いのも赤）。KeyBinding が先に処理するので `CanUserDeleteRows` を外しても挙動のテストは緑のままで、ガードが網になっている。mutation 実証済み。

@@ -105,12 +105,12 @@ docs 不在の外部エージェントが config を自己発見的に書ける�
   - `CodeGenToolArgumentShapeFuzzTests`（MCP のコード生成）
   - ホストの `relationship_type` の必須は `ToolScenarioTests` の行 `validation-relationship-type-missing-is-reported-as-required` が見る。
 - 引数の値の読み取りは `ToolArguments`（`GetString` / `GetBool`）、`relationship_type` の名前の解釈は `RelationshipTypeNames.TryParse`（Model）、列ペアの比較は `RelationshipColumnPair.HaveSamePairs` の 1 か所だけで、ほかに写さない。
-- ガード：`ToolArgumentParsingGuardTests`。
+- ガード：`SourceRuleTests` の規則 `tool-argument-parsing-copies`（正本自身が拾えることは規則 `tool-argument-parsing-owners`）。
   - `SourceSymbolScan` で src の `#if` のどの分岐もシンボルで読み、次を正本の外では理由つきの一覧（別の書式を読む Mermaid と Excel 定義書の取込の `ParseRelationshipType`）とファイル・件数で厳密に照合する。
     - 第 1 引数が `JsonElement` / `JsonObject` / `JsonNode` の `GetString` / `GetBool` の宣言
     - `RelationshipType` を列挙型にする `Enum.Parse` / `TryParse` / `GetValues`（`GetNames` は拾わない）
     - `ParseRelationshipType` / `HasSameColumnPairs` の宣言
-  - 自己検査のプローブと、正本自身が拾えることも確かめる。
+  - 自己検査の行 `tool-argument-parsing-copies-forms`・`tool-argument-parsing-copies-inactive-branch` と、正本自身が拾えること（規則 `tool-argument-parsing-owners`）も確かめる。
 
 ## ツールの応答の改行
 

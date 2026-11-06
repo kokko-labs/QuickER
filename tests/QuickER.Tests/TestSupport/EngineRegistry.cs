@@ -55,5 +55,8 @@ internal static class EngineRegistry
         Gui.Services.Lifecycle.ShutdownChainExhaustiveDimensions.Descriptor,
         Extensibility.FeatureModuleContractDimensions.Descriptor,
         Db.UI.ProfileStoreDimensions.Descriptor,
+        Guards.GuardDimensions.Descriptor,
+        Guards.GuardTextDimensions.ParityDescriptor,
+        Guards.GuardTextDimensions.PhraseDescriptor,
     ];
 }

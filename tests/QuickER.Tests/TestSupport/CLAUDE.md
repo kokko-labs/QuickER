@@ -75,13 +75,13 @@
     - Accepted は**製品・プロバイダ・ツールのスキーマの事実でエンジンを直しても埋まらない欠けだけ**。述語は 1 つの因子の組の中だけに当たる。
     - 照合は `CoverageReport.AssertGaps(CoverageGapSet, scope, SeedPlan?)` が `KnownFailureSet` の規則のまま行う。一覧に無い欠けも、一覧にあるのに網羅した組も赤。照合は既定の種の数で流したときだけ。一覧の項目が次元表の組を指していないことは、種の数に依らず宣言の誤りにする。
   - `EngineIds`（13 の ID）と `EngineDescriptor`（ID・部分・次元表・シナリオの数・ソース・守る src の領域）と、アセンブリごとの登録簿。
-    - `tests/QuickER.Tests/TestSupport/EngineRegistry.cs`：Dsl/SqliteMySql・Name/Entrances・DiagramEdit/ToolArgument・DiagramEdit/Undo・Dialect/Types・Dialect/Identifiers・Dialect/DdlText・Dialect/ImportWarnings・DocumentFile/Scenarios・DocumentFile/Random・DocumentFile/Format・DocumentFile/Settings・FormatRoundTrip/RoundTrip・FormatRoundTrip/Omissions・FormatRoundTrip/Rules・FormatRoundTrip/Merge・Ai/ChatEngines・Ai/Drivers・Ai/Attachments・Ai/ConnectionSettings・Ai/ChatDialog・OsBoundary/ProcessLaunch・OsBoundary/ShellPermission・OsBoundary/PathEntrances・OsBoundary/AtomicFile・OsBoundary/Containment・OsBoundary/Segments・OsBoundary/Lifecycle・OsBoundary/PostExitExhaustive・OsBoundary/ShutdownChainExhaustive・OsBoundary/FeatureModules・OsBoundary/ProfileStore。
-    - `tests/QuickER.Tests.Integration/EngineRegistry.cs`：SyncModel/Random・SyncModel/Outcomes・SyncModel/Config・SyncPlan/Fuzz・SyncPlan/CapabilityNet・SyncPlan/ShapeRows・SyncPlan/HistoryRows・GeneratedRuntime/Parity・GeneratedRuntime/ParityOutcomes・Dsl/SqlServer・Name/DdlRoundTrip・Dialect/TypesRealDb。Guard は登録しない。
+    - `tests/QuickER.Tests/TestSupport/EngineRegistry.cs`：Dsl/SqliteMySql・Name/Entrances・DiagramEdit/ToolArgument・DiagramEdit/Undo・Dialect/Types・Dialect/Identifiers・Dialect/DdlText・Dialect/ImportWarnings・DocumentFile/Scenarios・DocumentFile/Random・DocumentFile/Format・DocumentFile/Settings・FormatRoundTrip/RoundTrip・FormatRoundTrip/Omissions・FormatRoundTrip/Rules・FormatRoundTrip/Merge・Ai/ChatEngines・Ai/Drivers・Ai/Attachments・Ai/ConnectionSettings・Ai/ChatDialog・OsBoundary/ProcessLaunch・OsBoundary/ShellPermission・OsBoundary/PathEntrances・OsBoundary/AtomicFile・OsBoundary/Containment・OsBoundary/Segments・OsBoundary/Lifecycle・OsBoundary/PostExitExhaustive・OsBoundary/ShutdownChainExhaustive・OsBoundary/FeatureModules・OsBoundary/ProfileStore・Guard/SourceRules・Guard/Parity・Guard/Phrases。
+    - `tests/QuickER.Tests.Integration/EngineRegistry.cs`：SyncModel/Random・SyncModel/Outcomes・SyncModel/Config・SyncPlan/Fuzz・SyncPlan/CapabilityNet・SyncPlan/ShapeRows・SyncPlan/HistoryRows・GeneratedRuntime/Parity・GeneratedRuntime/ParityOutcomes・Dsl/SqlServer・Name/DdlRoundTrip・Dialect/TypesRealDb。Guard は QuickER.Tests の台帳に載せる（Integration にはガードが無い）。
   - 因子の棚卸し：`FactorInventoryGuard` は、製品の仕様の軸の全項目が、そのアセンブリの登録簿の次元表の Source に載っているか、理由つきの除外（担当のエンジン ID・区切り・空や仮置きでない理由）の**ちょうど一方**であることを検査する。
     14 の軸（設計 2.9 の 13 軸と P3-8 の `ExportOmissionKind`）をどちらのアセンブリが見るかは `FactorInventoryAssignment` が決め、各ガードは自分の軸の並びが割り当てと一致することを表明する。
   - 行列の軸：`MatrixAxis<TAdapter>` は、正本の値ごとにアダプタがちょうど 1 つあるか、理由つきで外してあるかを構築時に検査する。`[MatrixAxisValue]` と `MatrixAxisGuard.DerivedClassesCover`（基底か目印のインターフェースの具象の派生と正本の照合）、`DeclaredValuesMatch`（派生の名乗る値と実際の値の照合）で固める。
     値ごとの違いはアダプタの抽象メンバーにし、アダプタの中で値を名指しして分岐しない。
-- 各エンジンの次元表・一覧・記述は、エンジンの隣の `*Dimensions.cs` に置く：`SyncModelDimensions`・`SyncModelOutcomeDimensions`・`SyncConfigDimensions`・`SyncPlanFuzzDimensions`・`BackendParityDimensions`・`NameFuzzDdlRoundTripDimensions`・`DslFuzzDimensions`・`NameFuzzDimensions`・`ToolArgumentFuzzDimensions`・`RelationshipTypeChangeDimensions`・`DialectTypeDimensions`・`DialectTypeRealDbDimensions`・`DialectIdentifierDimensions`・`DialectDdlDimensions`・`DialectImportWarningDimensions`・`DocumentFileDimensions`・`DocumentFormatDimensions`・`SettingsStoreDimensions`・`FormatRoundTripDimensions`・`ChatEngineDimensions`・`ChatDriverDimensions`・`AttachmentListDimensions`・`ConnectionSettingsDimensions`・`ChatDialogDimensions`・`ProcessLaunchDimensions`・`ShellPermissionDimensions`・`PathEntranceDimensions`・`AtomicFileDimensions`・`PathContainmentDimensions`・`PathSegmentsDimensions`・`LifecycleDimensions`・`PostExitExhaustiveDimensions`・`ShutdownChainExhaustiveDimensions`・`FeatureModuleContractDimensions`・`ProfileStoreDimensions`。
+- 各エンジンの次元表・一覧・記述は、エンジンの隣の `*Dimensions.cs` に置く：`SyncModelDimensions`・`SyncModelOutcomeDimensions`・`SyncConfigDimensions`・`SyncPlanFuzzDimensions`・`BackendParityDimensions`・`NameFuzzDdlRoundTripDimensions`・`DslFuzzDimensions`・`NameFuzzDimensions`・`ToolArgumentFuzzDimensions`・`RelationshipTypeChangeDimensions`・`DialectTypeDimensions`・`DialectTypeRealDbDimensions`・`DialectIdentifierDimensions`・`DialectDdlDimensions`・`DialectImportWarningDimensions`・`DocumentFileDimensions`・`DocumentFormatDimensions`・`SettingsStoreDimensions`・`FormatRoundTripDimensions`・`ChatEngineDimensions`・`ChatDriverDimensions`・`AttachmentListDimensions`・`ConnectionSettingsDimensions`・`ChatDialogDimensions`・`ProcessLaunchDimensions`・`ShellPermissionDimensions`・`PathEntranceDimensions`・`AtomicFileDimensions`・`PathContainmentDimensions`・`PathSegmentsDimensions`・`LifecycleDimensions`・`PostExitExhaustiveDimensions`・`ShutdownChainExhaustiveDimensions`・`FeatureModuleContractDimensions`・`ProfileStoreDimensions`・`GuardDimensions`・`GuardTextDimensions`。
 - 乱数で操作の列を作るエンジン（同期のモデル・同期計画・実装先の一致）の `Observe` は、生成器が返し終えた値と、コンストラクタで決まる公開プロパティだけを読む（乱数を引かない・生成器の中に置かない。種の指紋が守る）。
 - 行列の軸として登録したもの：同期計画の総当たりと名前の DDL の往復の方言の派生 5 つずつ（正本 `DialectNames.All`）・同期のモデルの転送経路（正本 `SyncModelTransport`・目印 `ISyncModelTransportTests`）・実装先の一致（`BackendParityAxis`＝`ParityScenario.Backends` の並びの出どころ）・簡易 DSL の実装先（`DslFuzzBackends.Names` と構成ごとの軸）・方言の型の表のアダプタ 5 つ（`DialectTypeAxis`・正本 `DialectNames.All`）と実 DB の段の方言の派生 5 つ（`DialectTypeRealDbTestsBase`・正本 `DialectNames.All`）・方言の識別子と DDL の表のアダプタ 5 つ（`DialectDdlAxis`・正本 `DialectNames.All`）・形式の往復のアダプタ 5 つ（`FormatAxis`・正本は製品の `DiagramExportFormat` ＋ C# リバース。画像・SQL・スキーマ JSON は理由つきの除外）と形の行の形式の派生 5 つ（`FormatShapeTestsBase`・同じ正本）・チャットエンジンのアダプタ 4 つ（`ChatEngineAxis`・正本は製品の `ErChatBackendKind`。除外なし）・API キー接続のドライバのアダプタ 2 つ（`ChatDriverAxis`・正本は QuickER.AI の `IChatTurnDriver` の具象。振り分けるだけの `ProviderRoutingTurnDriver` は理由つきの除外）・機能モジュールの契約のアダプタ 2 つ（`FeatureModuleContractRows.Axis`・正本は製品の `FeatureModuleCatalog.CreateModules()` の Id。code-generation と db-tools は P3-10 の受け持ちの外として理由つきの除外。`FeatureModuleContractTests.Axis_CoversCatalog` が正本との一致を固定）。
 - 方言の DDL の表（`DialectDdlRows`）は、DDL・同期スクリプトの出力をテスト側の読み取り器（`DialectDdlReader`＝アダプタの区切り文字で識別子を読み戻し、製品のクォートの関数を使わない）で構造の行へ写して照合する。全行に 3 つの照合を自動で掛ける：書式のカルチャで出力が変わらず DDL の生成日時の行が西暦であること・入力に CJK が無ければ出力に CJK が無いこと・`Treats` を書いた行は手で書いた扱いが `UnsupportedTreatments` と一致すること（扱いの表はすべてのマスを持つので、台帳に登録の無い行も照合される）。ガード：`DialectDdlTableTests`。
@@ -110,10 +110,10 @@
    - `TestSupport/ToolHostAxisGuardTests` は、`ToolHostKind` を引数に取る Theory を反射で集め、ほかの引数の組ごとに軸の全ホストの行（InlineData・MemberData・ClassData）があることを照合する。
    - 前提の図ファイルは `TestSupport/DiagramFiles.Create`（WPF 非依存・create_diagram を実行して成功を表明する）で作る。create_diagram そのものを確かめるテストは使わない。
 3. 引数の形の総当たり：`TestSupport/ToolArgumentShapeFuzzRunner`（WPF 非依存）。順は「ベースライン → 崩したケース → `KnownCaseLedger` → 3 つの表明 → 台帳の古い項目 → 網羅の計数 → 最低件数」。3 つの入口は `Entrance` の抽象メンバーだけを渡す。
-4. ツール定義の英語のガード：`Mcp/ToolDefinitionEnglishGuardTests`（1 つの Theory・行＝ツール定義の出どころ）。
+4. ツール定義の英語のガード：`PhraseTests`（英語の行 `tool-definitions-*`＝ツール定義の出どころごとの行。文言の表 `TestSupport/Guards/EnglishTextRows.Mcp.cs`）。
 5. 生成オプション・設定のキー：`TestSupport/OptionKeys`（`Writable` / `IsWritable`＝公開の setter か init を持つ公開のインスタンスのプロパティ）。設定 JSON の照合・CLI のフラグ表・GUI の設定の照合と、因子の棚卸しの `CodeGenerationOptions` の軸が使う。
 6. テストの一時フォルダ：`TestSupport/TestTempFolder`（TEMP 直下の固定名の親フォルダの下に guid の名前のフォルダを作り、破棄で中身ごと消す。消せないときは黙って残す）。TEMP 直下に同じ前置きの名前を並べると 8.3 の短い名前がぶつかり、フォルダ 1 つの作成に数百 ms かかるので、直下には固定名の親だけを置く。ファイルを掴むもの（SQLite の接続のプールなど）は作ったテストの側で放す（例：`DbConnectionDialogViewModelTests` の `ReleaseCreatedDatabase`）。
-7. ソースの走査のガード：`TestSupport/GuardKnownList.AssertMatches`（見つかった出現と理由つきの既知の一覧を件数まで 2 方向で照合する）と `TestSupport/SourceFiles`（ガードが読むファイルの列挙と、bin / obj の判定 `IsBuildOutput` の唯一の場所。パースはしない）。条件コンパイルの全分岐を読む `ConditionalSourceParse` / `SourceSymbolScan` は各ガードが呼ぶ。
+7. ソースの走査のガード：`TestSupport/GuardKnownList.AssertMatches`（見つかった出現と理由つきの既知の一覧を件数まで 2 方向で照合する）と `TestSupport/SourceFiles`（ガードが読むファイルの列挙と、bin / obj の判定 `IsBuildOutput` の唯一の場所。パースはしない）。ソースの規則は規則の表（`TestSupport/Guards/`・「ソースを走査するガード」）の行にし、走査・照合・報告は表の 1 か所が持つ。表へ移していないガードは、条件コンパイルの全分岐を読む `ConditionalSourceParse` / `SourceSymbolScan` を自分で呼ぶ。
 
 統合の前後で、該当テストのケースの数と合否は同じ（`-list full -preEnumerateTheories` と実行結果の照合）。mutation 実証済み（obj に置いた禁止の呼び出しは bin / obj の判定を外したときだけ赤）。
 
@@ -126,7 +126,7 @@
   - 普段の CI（ci.yml）は変えない。
 - テストの結果は TRX で残す：両ジョブのテストの手順が、console の logger に加えて `--logger "trx;LogFileName=<ジョブ名>.trx"` と `--results-directory "${{ runner.temp }}/nightly-results"` を持つ。続く `if: always()` の `actions/upload-artifact` が、ジョブごとに別の名前（`integration-nightly-trx` / `unit-nightly-trx`）で `retention-days: 14` の成果物として保存する（失敗した夜にも残す）。
   - コンソールのログに出ないテストの出力（`ITestOutputHelper` に書く網羅の要約・夜間なら埋まる組・種の数の警告）と、方言の派生ごとの時間（同期計画の総当たり・名前の DDL の往復の派生は同じ表示名なので、TRX のクラス名で見分ける）はこれで読む。
-  - ガード：`WorkflowGuardTests.Nightly_JobsKeepTestResultsAsArtifacts`（logger・結果のフォルダ・保存の手順が 1 つ・`if: always()`・path・保持日数・名前の重複なし）と `Nightly_PinsActionsToSameShasAsOtherWorkflows`。
+  - ガード：`WorkflowGuardTests.Nightly_JobsKeepTestResultsAsArtifacts`（logger・結果のフォルダ・保存の手順が 1 つ・`if: always()`・path・保持日数・名前の重複なし）と `ParityTests`（行 `nightly-actions-pinned-like-other-workflows`）。
 - 夜間の種の数は各エンジンの `SeedSettings` の第 3 引数（`NightlyCount`＝普段の数以上・普段の種を先頭に含む）に置く。ここに表は持たない。
 - 選び漏れを防ぐ：`SeedSource.Resolve` は、プロセスの環境変数で種を決めるとき、いま走っているテストが `[Trait("NightlyEngine", "true")]`（夜間に流す）か `"false"`（種を使うが夜間に流さない・理由のコメントを添える）の**ちょうど一方**を宣言していなければ、テストの名前と直し方を書いた `XunitException` で赤にする（`NightlyEngineTrait`。テストの外と、環境の読み取りを差し替えた呼び出しでは検査しない）。
   - どのテストが種を使うかを人が一覧で持たないので、補助を経由する使い方も拾える。種の指紋のドリフトテストを別のカルチャで流し直す `CultureInvariantGenerationTests.DriftTests_PassUnderCulture` の付け忘れも、これで見つかった（`"false"` と理由を付けた）。
@@ -136,7 +136,7 @@
 - 同期計画の総当たりの表明 1b（失敗の後に制約が消えていない）の規則 1〜5（`SyncPlanFuzzRunner.FailedSyncConstraintLosses`）、注 `warned-alter-foreign-key-exempt:{own-failure|collateral}`、違反の文の `(rule n; warned=…; dropped-before-failure=…)`、規則を固定する `SyncPlanFuzzOracleTests`（DB なし・1 規則 1 行の表）は `tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`「表明 1b の規則」を参照する。
   1 種の処理の予期しない例外を `seed threw:` として記録して次の種へ進める `SyncPlanFuzzRunner.RunGuardedAsync`（例外でテストごと止まると、それより前の種の違反が隠れる。取り消しは止める）も `tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`「1 種の例外」を参照する。
 - 同期計画の総当たりは、必須の形の表明と網羅しない組の照合を、普段の既定の種の数が 50 以上の方言だけで行う（夜間に種が増えた PostgreSQL・Oracle では行わない）。既知の失敗の照合と必須の形の表明は両方を集めて 1 つの失敗にする（どちらかの赤がもう一方を隠さない）。失敗した種の警告の内訳と「失敗を予告しない種類の警告しか無いのに失敗した種」は出力する（測るだけ）。
-- ガード：`SeedSourceTests`（目印の判定と `Resolve` の検査）・`KnownFailureSetTests.NightlyOnlyRandomEntry_NotObservedOnlyAtNightlyDefaultCount`・`CoverageCounterTests` の夜間の 4 件・`SyncPlanFuzzRunnerGuardTests`（Integration・Docker 不要）・`WorkflowGuardTests` の `Nightly_*` 8 件。`SchemaNamesTests` の目印の付け忘れも `SeedSource` が拾う。mutation 実証済み。
+- ガード：`SeedSourceTests`（目印の判定と `Resolve` の検査）・`KnownFailureSetTests.NightlyOnlyRandomEntry_NotObservedOnlyAtNightlyDefaultCount`・`CoverageCounterTests` の夜間の 4 件・`SyncPlanFuzzRunnerGuardTests`（Integration・Docker 不要）・`WorkflowGuardTests` の `Nightly_*` 6 件・`ParityTests`（行 `nightly-actions-pinned-like-other-workflows`・`nightly-jobs`・`nightly-job-test-commands`・`nightly-job-engine-profile`）。`SchemaNamesTests` の目印の付け忘れも `SeedSource` が拾う。mutation 実証済み。
 
 ## 種の指紋
 
@@ -152,13 +152,13 @@
 - キーボードフォーカス・流したキー入力・ウィンドウの Activated / Deactivated に結果が左右される GUI テストのクラスは `[Collection(TestSupport.WindowActivationTestCollection.Name)]` に入れる（`DisableParallelization`＝並列のテストが全部終わってから単独で走る）。
   - 並列で流すと、ほかのテストが表示したウィンドウにアクティブを奪われ、フォーカスが入らない・Space の判断が変わる形で、全件実行でだけ時々落ちる（単独では合格するので原因に気付けない）。
   - 守る側だけを入れれば足りる（奪う側を入れる必要はない）。ShowActivated=false で表示するだけでフォーカスに触らないテストは入れない。
-  - ガード：`WindowActivationCollectionGuardTests` が、目印の API（`IsKeyboardFocus…`・`Keyboard.PrimaryDevice`・`Keyboard.Focus(`・`MoveFocus(`・`Deactivated`）を使うテストソースに属性が付いていることを全数検査する。
+  - ガード：`SourceRuleTests` の規則 `window-activation-collection` が、目印の API（`IsKeyboardFocus…`・`Keyboard.PrimaryDevice`・`Keyboard.Focus(`・`MoveFocus(`・`Deactivated`）を使うテストソースに属性が付いていることを全数検査する。
 - GUI テストが失敗した瞬間の状態は `TestSupport.GuiFailureDiagnostics` が書き出す（全件実行でだけまれに落ちる GUI テストの原因を測るためで、結果は変えない）。
   - `WpfApplicationTestSupport.RunSta` / `RunInIsolatedWindow` が本体を `catch (Exception ex) when (GuiFailureDiagnostics.Capture(ex))` の層で囲む。フィルターは例外処理の 1 回目の走査で、テストがウィンドウを閉じる finally より前に、所有するスレッドで動く。
   - **`Capture` は必ず false を返し、例外を外へ出さない**。true を返すとこの catch が元の失敗を飲み込み、投げると元の失敗が別の例外に置き換わる。区画ごと・出力先ごとに失敗を受け止め「記録に失敗」と書く。
   - 書き出すもの：入力（フォーカス・キャプチャ・左ボタンの状態＝WPF の `Mouse.LeftButton` と実際の `GetAsyncKeyState(VK_LBUTTON)` の両方）、`Track` したウィンドウ、前面のウィンドウ、`CanvasViewportBehavior` / `DragBehavior` / `RubberBandBehavior` の静的フィールド（反射で全部）、`Track` したウィンドウのイベントの時系列。出力先はテストの出力・標準エラー・`%TEMP%\QuickER.Tests-gui-failure-state.log`。
   - 前面のウィンドウが別のプロセスなら、タイトルを書かずプロセス名だけにする（利用者のほかのアプリのタイトルを %TEMP% のログや CI の出力へ残さない）。
-  - `GuiFailureDiagnostics.cs` は目印の API を使うがテストを持たないので、`WindowActivationCollectionGuardTests` の除外の一覧に理由つきで載せる。
+  - `GuiFailureDiagnostics.cs` は目印の API を使うがテストを持たないので、`SourceRuleTests` の規則 `window-activation-collection` の範囲の除外に理由つきで載せる。
   - ガード：`GuiFailureDiagnosticsTests`（false を返す・区画が投げても false で例外を出さない・RunSta / RunInIsolatedWindow の失敗が元の例外のまま・閉じる前の状態と時系列・前面の別のプロセスのタイトルを書かない）。mutation 実証済み（前面のタイトルは前面が別のプロセスのときだけ観測できる）。
 - Space で押せることを見るテストは、先に `TestSupport.PhysicalMouseButtons.WaitUntilReleased` を通す。
   - 理由：この記録で、実行中に実際のマウスのボタンが押されたままだったために失敗していたと分かった（`Mouse.LeftButton=Pressed`・`GetAsyncKeyState(VK_LBUTTON)` の最上位ビットが立ち、キャプチャがボタンに残る）。WPF の `ButtonBase` は左右のボタンが離されていないと Space の解放で Click しない。製品の不具合ではない。Enter は押下で Click するので関係しない。
@@ -167,13 +167,25 @@
 
 ## ソースを走査するガード
 
+- ソースの規則は、規則の表（`tests/QuickER.Tests/TestSupport/Guards/`・名前空間 `QuickER.Tests.TestSupport.Guards`）の行にする。
+  - 行（`SourceRule`）は、Id・守ること・照合の形・走査する範囲（`SourceScope`＝フォルダ・拡張子・明示のファイル・理由つきの除外）・見つける形（`GuardFinder`＝構文の節・トークン・シンボル・ファイル全体の文字列か XML）・既知の一覧（`GuardKnown`＝ファイル・何か・件数・理由）を持つ。行は領域ごとの partial（`SourceRules.{領域}.cs`）に置く。
+  - 照合の形：禁止（`SourceRule.Forbid`＝一覧は理由つきの例外）と必須（`SourceRule.Require`＝一覧はあるべき出現）。どちらも「ファイル・何か」ごとの件数まで 2 方向で照合する（`GuardKnownList.AssertMatches`）。
+  - 空振りの検知は 3 つ：範囲に入るファイルの最低数（`MinimumFiles`・既定 1）、同じ見つける形を別の範囲に当てた厳密な期待（`Witness`）、範囲の中の候補（規則が調べる対象）の数の下限（`Floor`＝候補を見つける形・下限・名前。同じ 1 回の走査で数える）。拾えることを別の見つける形で確かめるもの（目印が既知のテストを拾う・正本の所有者が見つかる）は、必須の規則として別の行にする。
+  - 走査は `GuardScan` の 1 か所：ファイルで読む規則はすべての規則の範囲に入るファイルを 1 回ずつ読み、そのファイルに当たる規則を全部当てる（構文木はファイルごとに 1 回だけ作り、当て終えたら捨てる）。シンボルの規則は `SourceSymbolScan.SrcProjects` の各プロジェクトを `ScanNodes` で 1 回ずつたどる。
+  - 自己検査の行（`SourceRuleProbe`・`SourceRuleProbes.{領域}.cs`）は、合成のソースへ規則の見つける形を当て、拾う「何か」の並びをソースの順まで照合する（拾わない書き方を拾えば並びが崩れて赤）。シンボルの規則は合成のソースを 1 プロジェクトとしてコンパイルし（条件コンパイルの変種のコンパイルも作る）、エラーが無いことも確かめる。
+  - 網羅：読み方 × 照合の形 × 拾うべき出現の置き場（普通の場所・条件コンパイルの外れる分岐＝自己検査の行 `*-inactive-branch`）の組を、自己検査の行で数える（`GuardDimensions`・台帳の Guard/SourceRules）。XML は分岐を持たないので理由つきの isValid で外す。構文の節・トークン・XML の必須の規則はまだ無いので、その 8 組は直す区切り P4 の網羅しない組（Pending）に置く。
+  - ガード：`SourceRuleTests`（`Rule_Holds`＝1 行 1 規則・`Probe_Holds`・`Table_IsWellFormed`＝Id の重複・理由の空・件数・必須の規則の一覧の空・範囲の除外の理由・`SymbolScan_ResolvesBclCallsInEveryProject`・`Coverage_MatchesGaps`）。
+  - 規則の表のファイル自身の文字列が tests を走査する規則に写り込むときは、範囲を狭めずに綴りを割って避ける。
+- 正本の一覧と写しの一致は照合の表（`ParityRow`・`ParityRows.{領域}.cs`）の行にする。行は正本の関数・写しの関数・比べ方（Set／Multiset／Sequence／CopyWithinCanon／CanonWithinCopy。元の比べ方より弱くしない）・正本の最低数（`MinimumCanon`）を持ち、読み取りの失敗は関数が例外を投げて行の赤になる。使わない比べ方は列挙に残さない。ガード：`ParityTests`（`Parity_Holds`・比べ方の自己検査 `Comparer_DetectsDisagreement`＝比べ方 × 一致・食い違いの網羅・`Table_IsWellFormed`）。台帳は Guard/Parity。
+- 英語であること（CJK が無い）は英語の文言の表（`EnglishTextRow`・`EnglishTextRows.{領域}.cs`）、プロンプトが決めた語を含む・含まないことは必須の文言の表（`PhraseRow`・`PhraseRows.{領域}.cs`）の行にする。英語の行は出どころの関数が返す「どこか・本文」の並びを `CjkText.Pattern` で走査し、例外を「どこか」ごとの件数まで 2 方向で照合する。UI 言語を切り替えて出力を作る行は `EnglishTextRows.UnderUiCulture` を通す（写しを置かない）。ガード：`PhraseTests`（`English_Holds`・`Phrases_Hold`・判定の自己検査 `Judge_DetectsViolation`＝種類 × 違反の有無の網羅・`Table_IsWellFormed`）。台帳は Guard/Phrases。
+- src・`.github/workflows`・`scripts` のコメントがテストのクラス名を名指ししているもの（`ClaudeMdParityTests`・`DocsIndexParityTests`・`ResxKeyParityTests` など）は、表へ移してもクラスを消さない（全部のメソッドが移って空になるなら移さない）。
 - ソースを走査するガードは、条件コンパイル（`#if` / `#elif` / `#else`）のどの分岐も読む。1 通りのプリプロセッサの記号でパースすると、外れる分岐（`#if !DEBUG` の中・`#if QUICKER_*` の `#else`）は無効なテキスト（トリビア）になり、そこに書いた禁止の呼び出しをどのガードも見落とす。
-- 構文のガード 13 か所（AppDataPath・PathValidation・Utf8Encoding・SchemaNames・ModelDialectLookup・SchemaQualifiedName・RegexCulture 2・CjkPattern・DialectNameLiteral・SchemaImportWarningText・SyncNameComparison・SyncDialectCapabilitiesNoDefaults・UnsupportedCoverage）は、`TestSupport.ConditionalSourceParse.Parse` と `DescendantNodes` / `DescendantTokens` を通す。
+- 規則の表へ移していない構文のガード（UnsupportedCoverage）は、`TestSupport.ConditionalSourceParse.Parse` と `DescendantNodes` / `DescendantTokens` を通す。
   - `Parse`：ファイルの `#if` / `#elif` の条件に現れる記号を構文から集め、定義の有無のすべての組み合わせで 1 本ずつ構文木を作る。先頭は基準の設定の構文木。記号の無いファイルは 1 本だけ。
   - `DescendantNodes` / `DescendantTokens`：組み合わせをまたいで種類・範囲・トークンの並びが同じ節を 1 回だけにする（分岐の外の呼び出しを組み合わせの数だけ数えない）。範囲だけで比べないのは、分岐を含む節は範囲が同じでも子が違うため。
-- シンボルのガード（PathPrefix・ProcessLaunch・RawFileWrite・ToolArgumentParsing・NumericInterpolationCulture）：`SourceSymbolScan` が、条件コンパイルを持つファイルのあるプロジェクト（いまは QuickER.Gui だけ＝`DEBUG` と `QUICKER_*` の 3 つで 16 通り）に、そのファイルの構文木だけを差し替えた変種のコンパイル（`SourceProject.Variants`）を作る。`SourceProject.ScanNodes` が同じ規則で重ねずに返す。既知の一覧の件数は変わらない。変種のコンパイルも BCL の呼び出しを解決できることを `RawFileWriteGuardTests` が表明する。
+- シンボルの読み方（規則の表の `GuardFinder.Symbols`）：`SourceSymbolScan` が、条件コンパイルを持つファイルのあるプロジェクト（いまは QuickER.Gui だけ＝`DEBUG` と `QUICKER_*` の 3 つで 16 通り）に、そのファイルの構文木だけを差し替えた変種のコンパイル（`SourceProject.Variants`）を作る。`SourceProject.ScanNodes` が同じ規則で重ねずに返す。既知の一覧の件数は変わらない。変種のコンパイルも BCL の呼び出しを解決できることを `SourceRuleTests.SymbolScan_ResolvesBclCallsInEveryProject` が表明する。
 - 記号は 1 つのファイル（変種はプロジェクト）で 6 個 = 64 通りまで。超えると黙って間引かず、ファイル名を添えて例外にする。
-- テストが Roslyn のパース（`ParseText` / `ParseSyntaxTree`）を直接呼ぶのは、`SourceParseEntryGuardTests` の理由つきの一覧（生成器・レンダラーの出力を 1 つの構成でコンパイル・読み取りするもの・入口そのもの・自己検査の対照とプローブ）にあるものだけ。tests/ の全 `.cs` をファイルと件数で厳密に照合する。
+- テストが Roslyn のパース（`ParseText` / `ParseSyntaxTree`）を直接呼ぶのは、`SourceRuleTests` の規則 `direct-roslyn-parses` の理由つきの一覧（生成器・レンダラーの出力を 1 つの構成でコンパイル・読み取りするもの・入口そのもの・自己検査の対照とプローブ）にあるものだけ。tests/ の全 `.cs` をファイル・メソッド名と件数で厳密に照合する。
 - `SourceSymbolScan` は QuickER.Gui の暗黙の using を読む（ファイル名は AssemblyName でなく .csproj の名前で付く）。
 - ガード：`ConditionalSourceParseTests`（`#if !DEBUG` と `QUICKER_*` の `#else` の中の呼び出しが、1 通りのパースでは見えず全組み合わせでは見える〔構文とシンボルの両方〕・実ファイルの組み合わせの数＝UpdateFeed.cs 2・FeatureModuleCatalog.cs 8・条件コンパイルの無いファイル 1・分岐の外を重ねない・入れ子の条件・上限・QuickER.Gui の 15 の変種〔エラーなし〕）。mutation 実証済み。
 
@@ -181,7 +193,7 @@
 
 - テストで DbContext のプロバイダを指定する呼び出し（`UseSqlite(` / `UseSqlServer(` / `UseNpgsql(` / `UseOracle(` / `UseMySQL(`）の直後には、必ず `.IgnoreServiceProviderCacheLimit()` を続ける。置き場は `tests/QuickER.Tests/TestSupport/EfCoreTestOptions.cs`（Integration は Compile のリンクで同じ 1 ファイルを使う）。
 - 理由：EF Core は構成が違うたびに内部のサービスプロバイダを作ってプロセス全体でキャッシュし、20 を超えると ManyServiceProvidersCreatedWarning（既定でエラー）で、たまたま 21 個目を作った DbContext を失敗させる。テストはフィクスチャごと（値オブジェクトの翻訳の拡張の型が違う）・プロバイダごとに構成が違うので、全件実行で順序しだいに関係の無いテストが落ちる。製品・生成コードは変えず、テストの構成でこの警告だけを無視する。
-- ガード：`EfCoreServiceProviderLimitGuardTests`。テストのソースの全呼び出しの直後にこれが続くこと（括弧の対応を読んで検査）と、内部のサービスプロバイダを 25 個作っても失敗しないこと（インスタンスごとにプロバイダが別になるシングルトンのインターセプター＝`IMaterializationInterceptor` で作る。コマンドのインターセプターでは増えない）を固定する。mutation 実証済み。
+- ガード：`SourceRuleTests` の規則 `ef-core-provider-cache-limit`（候補の数の下限 41）と `EfCoreServiceProviderLimitGuardTests`。テストのソースの全呼び出しの直後にこれが続くこと（括弧の対応を読んで検査）と、内部のサービスプロバイダを 25 個作っても失敗しないこと（インスタンスごとにプロバイダが別になるシングルトンのインターセプター＝`IMaterializationInterceptor` で作る。コマンドのインターセプターでは増えない）を固定する。mutation 実証済み。
 
 ## SQLite のテストの DB
 
@@ -219,14 +231,14 @@
 - 数値・日時をそのまま補間すると、スウェーデン語（sv-SE）の負号 U+2212・タイ語（th-TH）の仏暦がそのまま出る（負のスケールの `numeric(10,−2)` はデータベースが断る・DDL の生成日時が 2569 年になる）。書き出す数値・日時は `string.Create(CultureInfo.InvariantCulture, …)` か `ToString(…, CultureInfo.InvariantCulture)` で書く。
 - 大文字小文字を無視する正規表現は `RegexOptions.CultureInvariant` を併せて付ける。`new Regex` の静的なフィールドは型を初めて使った時点のカルチャで作られ、トルコ語の Windows では `AUTOINCREMENT` が `autoincrement` に一致しない（SQLite の再構築の警告が `AUTOINCREMENT`・`DEFERRABLE`・`WITHOUT ROWID`・`STRICT` を落とし、モックの検証が `@IMPORT` を見落とす）。`[GeneratedRegex]` は実測では tr-TR でも一致したが、同じ規則に含める。
 - アナライザの設定：CA1304・CA1309・CA1310・CA1311 を警告（＝エラー）にする。CA1305・CA1307 は入れない（理由は `.editorconfig` のコメント）。
-  - CA1305 を src で有効にすると診断が多く出るうえ、文字列への素の補間（`$"…"`）と連結を診断しない（診断するのは `string.Format`・`ToString()`・`Convert` と `StringBuilder.Append` / `AppendLine` へ渡した補間など）。入れずに `NumericInterpolationCultureGuardTests` で数える。
+  - CA1305 を src で有効にすると診断が多く出るうえ、文字列への素の補間（`$"…"`）と連結を診断しない（診断するのは `string.Format`・`ToString()`・`Convert` と `StringBuilder.Append` / `AppendLine` へ渡した補間など）。入れずに `SourceRuleTests` の規則 `numeric-interpolation-culture` で数える。
   - テストで翻訳器が受け付ける・断る呼び出しの形そのもの（式木の `Equals(string)`・`ToUpper()`）を確かめる箇所だけ、理由つきの `#pragma` で抑える。
 - 生成コード（ランタイムのパッケージ用ソースとフィクスチャ）は、先頭の `// <auto-generated />` と `.g.cs` の名前でビルドのアナライザから外れる。`GeneratedCodeCultureAnalyzerTests` が同じ 4 規則を `generated_code = false` の設定で掛け、診断を理由つきの既知の一覧（いまは空）と厳密に照合する。アナライザは src と同じ SDK 同梱の DLL で、テストの csproj が `@(Analyzer)` の場所を AssemblyMetadata で渡す。
 - これらの規則は式木の中の呼び出しを診断しない（翻訳される比較なので多重定義を変えられない）。簡易 DSL と手書きの LINQ の条件のインメモリでの比べ方は、実行器の `PredicateComparisonRewriter` が `string.StartsWith(string)` / `EndsWith(string)` を序数の多重定義へ書き換えて揃える。`Contains(string)` と値オブジェクトの文字列一致は元から序数（docs の「インメモリは序数」）。
 - 正規表現の数字は `[0-9]` で書き、`\d` は `RegexOptions.ECMAScript` を付けたときだけ使う。.NET の `\d` は全角などの Unicode の数字にも一致し、インバリアントの数値の解析は ASCII しか読まない。SQL Server の型の表記の正規化と型カタログが `FormatException` で落ち、`SqlTypeText.IsSafe` は DB が断る `varchar(５０)` を安全とみなす。
 - Excel 定義書の `UQ{n}` は、後ろに Unicode の数字が続けば一致させない（`UQ1２` を `UQ1` と読まない）。
 - 名前の並びで決める値（`SchemaSignature` のテーブルとリレーション）は序数で並べる。カルチャが等しいとみなす合成済みの文字と分解形・ソフトハイフンの有無だけが違う名前は、既定の比較では入力の順が残って置き換えの確認が余計に出る。
-- 数値の補間のガード `NumericInterpolationCultureGuardTests`：`QuickER.Provider*` と `QuickER.Dialects` を `SourceSymbolScan` で組み、`ScanNodes` で条件コンパイルのどの分岐も読む。補間の穴と文字列の連結の被演算子のうち、型が数値（整数・decimal・double・float）か日時（DateTime・DateTimeOffset・DateOnly・TimeOnly・TimeSpan。Nullable も）のものをシンボルで数え、第 1 引数が `CultureInfo.InvariantCulture` の `string.Create` の中は数えない。ファイルと件数で理由つきの既知の一覧と厳密に照合する。
+- 数値の補間のガード（`SourceRuleTests` の規則 `numeric-interpolation-culture`・見つける形は `Guards/Finders/CultureDependentText`）：`QuickER.Provider*` と `QuickER.Dialects` を `SourceSymbolScan` で組み、`ScanNodes` で条件コンパイルのどの分岐も読む。補間の穴と文字列の連結の被演算子のうち、型が数値（整数・decimal・double・float）か日時（DateTime・DateTimeOffset・DateOnly・TimeOnly・TimeSpan。Nullable も）のものをシンボルで数え、第 1 引数が `CultureInfo.InvariantCulture` の `string.Create` の中は数えない。ファイルと件数で理由つきの既知の一覧と厳密に照合する。
   - 理由の分類は「利用者向けの文言」「例外のメッセージ」「負にならない値」。いまは「負にならない値」の 3 件だけ（プロセスの外へ出ない照合のキー＝`SchemaDiffService` の外部キーの署名・`UniqueConstraintNaming` の列の集合の署名・`QueryParameterTypeResolver` の仮の列名）。
   - 書き出す型の表記（取込の `FormatDataType` と 5 方言の型カタログ・SQL Server の型の表記の正規化）・同期スクリプトの見出し・接続文字列のポート・SQLite の取込の外部キー名・Oracle の説明の `CHR(n)`・識別子の上限の英語の表記（例外文と MCP の注意文）は、一覧に載せず `string.Create` へ直した。
   - 整数の書式がカルチャで変わるのは負号だけ（.NET は数字を置き換えず、既定の書式は桁区切りを入れない）。直した箇所はどれも負の値でだけ食い違う。カタログは負の長さを返さない。
@@ -235,7 +247,7 @@
   - `CultureInvariantGenerationTests`：生成物の全ドリフトテストを各カルチャで流し直す。
   - `CultureInvariantExportTests`：SVG の出力。Mermaid・DBML・HTML・Excel の出力と、Mermaid・DBML・Excel・C# リバースの取込は、形式の往復のエンジンのカルチャの代表の形（`FormatRoundTripTests.CultureProbe_IsInvariant`・形の行 `fixture-generated`・`culture-turkish-i`）。
   - `CultureInvariantToolOutputTests`：MCP の要約・変更系ツールが保存する図。名前付きクエリの一覧は `QueryToolFormatterTests` の行 `formatter-listing-is-culture-invariant-english`。
-  - `RegexCultureGuardTests`：src の `RegexOptions.IgnoreCase` を含むビット和に `CultureInvariant` があることとインラインの `(?i` が無いことの構文木の全数走査と、文字列リテラルの `\d`（奇数個の `\` に続く `d`）が `ECMAScript` の付いた呼び出し・属性の引数の外に無いこと。
+  - `SourceRuleTests` の規則 `regex-ignore-case-culture`・`regex-digit-classes`（候補の数の下限 `Floor` つき）：src の `RegexOptions.IgnoreCase` を含むビット和に `CultureInvariant` があることとインラインの `(?i` が無いことの構文木の全数走査と、文字列リテラルの `\d`（奇数個の `\` に続く `d`）が `ECMAScript` の付いた呼び出し・属性の引数の外に無いこと。
   - 全角の数字：`DialectTypeTableTests` の `fullwidth-*` の行が、全角の数字を含む型の表記を 5 方言の型カタログ・型マッパー・正規化と `SqlTypeText.IsSafe` へ流し、例外にならず数字として読まないことを確かめる。`FullWidthDigitTypeNotationTests` が型トークン・長さだけの違いの判定・Mermaid の型の復元・Excel の `UQ` 番号で同じことを確かめる。
   - `GeneratedCodeCultureAnalyzerTests`：ランタイム 7 本と全フィクスチャ。自己検査は、auto-generated の印のあるソースで 4 規則が出て式木の中では出ないこと。
   - `InMemoryStringMatchOrdinalTests`：値オブジェクトの有無 × カルチャで、簡易 DSL の LIKE と手書きの LINQ の前方・後方一致を SQLite の QuickER 版 Repository とインメモリで照合する。

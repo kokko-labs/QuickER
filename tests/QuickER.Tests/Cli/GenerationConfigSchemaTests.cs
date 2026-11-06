@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using QuickER.Cli;
 using QuickER.CodeGen.CSharp;
@@ -14,38 +13,22 @@ namespace QuickER.Tests.Cli;
 /// <summary>
 /// <see cref="GenerationConfigSchema"/>（MCP の <c>get_generation_config_schema</c> ツールが返すカタログ）が、
 /// 設定ローダーの正となるキー集合（<see cref="CodeGenerationOptions"/> の init 設定可能プロパティ）と
-/// 完全一致していることを守るドリフト防止ガード＋出力形式・英語ガードのテスト。
+/// 完全一致していることを守るドリフト防止ガード＋出力形式のテスト。
 /// </summary>
 /// <remarks>
 /// <see cref="GenerationConfigLoader"/> は <c>node.Deserialize&lt;CodeGenerationOptions&gt;</c> でリフレクションにより
 /// 設定 JSON を認識するため、正となるキー集合は <see cref="CodeGenerationOptions"/> の
 /// init 設定可能なインスタンスプロパティ（get-only の計算プロパティ・static は除く）である。
-/// 将来オプションが増えてカタログ未更新なら、ここが赤になる。
+/// 将来オプションが増えてカタログ未更新なら、照合の表（<c>ParityTests</c> の行 <c>config-schema-keys-match-options</c>）が赤になる。
+/// 列挙型のキーの allowedValues と列挙体のメンバー名の照合も照合の表（行 <c>config-schema-enum-allowed-values</c>）が見る。
+/// カタログ全文に日本語（CJK）が混入しないことは英語の文言の表（<c>PhraseTests</c> の英語の行 <c>config-schema-catalog</c>）が見る。
+/// ここに残すのは型・既定値の照合と、カタログの出力形式・実行の検査。
 /// </remarks>
 public sealed class GenerationConfigSchemaTests
 {
-    /// <summary>CJK 文字の検出パターン（ErDiagramToolCatalogEnglishGuardTests と同一範囲）</summary>
-    private static readonly Regex CjkPattern = TestSupport.CjkText.Pattern;
-
     /// <summary>設定ローダーが認識する正となるキー集合＝init 設定可能なインスタンスプロパティ</summary>
     private static IReadOnlyList<PropertyInfo> RecognizedProperties =>
         OptionKeys.Writable(typeof(CodeGenerationOptions));
-
-    /// <summary>カタログのキー集合が正となるキー集合と完全一致する（過不足の両方向を検知）</summary>
-    [Fact(DisplayName = "カタログのキー集合は CodeGenerationOptions のプロパティと完全一致する")]
-    public void Keys_MatchCodeGenerationOptionsExactly()
-    {
-        var catalogNames = GenerationConfigSchema.Keys.Select(k => k.Name).ToHashSet();
-        var recognizedNames = RecognizedProperties.Select(p => p.Name).ToHashSet();
-
-        catalogNames
-            .Should()
-            .BeEquivalentTo(
-                recognizedNames,
-                "get_generation_config_schema のカタログ（src/QuickER.Cli/GenerationConfigSchema.cs）は "
-                    + "CodeGenerationOptions の設定キーと 1:1 でなければなりません。差分がある場合はカタログを更新してください"
-            );
-    }
 
     /// <summary>各カタログ項目の型・既定値が CodeGenerationOptions の実宣言と一致する</summary>
     [Fact(DisplayName = "カタログの型・既定値は実宣言と一致する")]
@@ -111,27 +94,6 @@ public sealed class GenerationConfigSchemaTests
             .BeEquivalentTo("sqlserver", "sqlite");
     }
 
-    /// <summary>列挙型のキーは allowedValues に全メンバー名を過不足なく載せる（候補の書き漏れを検知）</summary>
-    [Fact(DisplayName = "列挙型のキーの allowedValues は列挙体のメンバー名と一致する")]
-    public void EnumKeys_AllowedValues_MatchEnumNames()
-    {
-        var byName = RecognizedProperties.ToDictionary(p => p.Name);
-        var enumKeys = GenerationConfigSchema
-            .Keys.Where(key => byName[key.Name].PropertyType.IsEnum)
-            .ToList();
-
-        enumKeys.Should().NotBeEmpty();
-
-        foreach (var key in enumKeys)
-        {
-            key.AllowedValues.Should()
-                .Equal(
-                    Enum.GetNames(byName[key.Name].PropertyType),
-                    $"'{key.Name}' の allowedValues は列挙体のメンバーと一致するはず"
-                );
-        }
-    }
-
     /// <summary>ツールの実行デリゲート経由（引数なし）でも同じカタログ JSON が返る</summary>
     [Fact(DisplayName = "get_generation_config_schema は file 引数なしで実行できる")]
     public void Execute_WithoutFileArgument_ReturnsCatalog()
@@ -143,21 +105,6 @@ public sealed class GenerationConfigSchemaTests
         success.Should().BeTrue(result);
         using var doc = JsonDocument.Parse(result);
         doc.RootElement.TryGetProperty("keys", out _).Should().BeTrue();
-    }
-
-    /// <summary>カタログ全文（説明・rules）に日本語（CJK）が混入しない（英語ガード）</summary>
-    [Fact(DisplayName = "カタログに日本語（CJK）が含まれない")]
-    public void Catalog_ContainsNoCjk()
-    {
-        var json = GenerationConfigSchema.BuildJson();
-
-        CjkPattern
-            .IsMatch(json)
-            .Should()
-            .BeFalse(
-                "get_generation_config_schema のカタログは英語で統一する必要があります"
-                    + "（src/QuickER.Cli/GenerationConfigSchema.cs を確認してください）"
-            );
     }
 
     /// <summary>プロパティ型を JSON 型トークン（boolean / string / string[]）へ写像する</summary>

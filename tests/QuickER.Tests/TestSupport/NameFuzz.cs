@@ -135,7 +135,7 @@ public static class NameIdentityRule
 /// 生成コードが使う型名・数字始まり・日本語を含む名前を、シードから決定的に作る。
 /// </summary>
 /// <remarks>
-/// ソースに制御文字・行区切りを書かない規約（<c>SourceInvisibleCharacterGuardTests</c>）のため、非 ASCII は
+/// ソースに制御文字・行区切りを書かない規約（SourceRuleTests の規則 <c>source-invisible-characters-src</c> / <c>-tests</c>）のため、非 ASCII は
 /// すべてエスケープ表記で書く。シードの数は環境変数 <c>QUICKER_FUZZ_SEEDS</c> で増やせる（既定 2）。
 /// </remarks>
 public static class NameFuzz

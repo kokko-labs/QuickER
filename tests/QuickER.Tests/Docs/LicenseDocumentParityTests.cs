@@ -27,87 +27,16 @@ namespace QuickER.Tests.Docs;
 /// 逆に MIT のパッケージがここに載ると、商用利用できるはずのものを利用者が諦める。どちらの向きの
 /// 食い違いも検出する。
 /// </para>
+/// <para>
+/// 列挙の照合は照合の表（<c>ParityTests</c> の行 <c>licensing-mit-row</c>・<c>licensing-ja-mit-row</c>・
+/// <c>license-nc-scope-holds-nc-packages</c>・<c>license-nc-scope-lists-existing-non-mit-projects</c>）へ移した。
+/// ここに残すのは公開パッケージ 1 つずつの書き方の規則と、行が呼ぶ読み取り器。
+/// </para>
 /// </remarks>
 public sealed class LicenseDocumentParityTests
 {
-    private static readonly string Root = NeutralResxFiles.FindRepositoryRoot();
-
-    /// <summary>LICENSING の MIT 行に並ぶパッケージ名が、MIT で公開する 公開パッケージと一致する</summary>
-    [Theory(DisplayName = "LICENSING の MIT 行は MIT で公開する 公開パッケージと一致する")]
-    [InlineData("LICENSING.md")]
-    [InlineData("LICENSING.ja.md")]
-    public void LicensingMitRow_MatchesPublishedPackages(string fileName)
-    {
-        var row = FindMitRow(fileName);
-
-        row.Should()
-            .NotBeNull(
-                "{0} に MIT のパッケージを並べた表の行（`QuickER.Runtime` を含み `| MIT |` で終わる行）が"
-                    + "見つからない。表の書き方を変えたなら、変更後の記述が実際のライセンスメタデータと"
-                    + "一致することを確かめたうえで本テストのアンカーを更新すること"
-                    + "（見つからないときに検証を飛ばすと、行を書き換えた瞬間にこのガードが静かに無効化される）",
-                fileName
-            );
-
-        ExpandPackageNames(row!)
-            .Should()
-            .BeEquivalentTo(
-                PublishedPackages().Where(p => p.IsMit).Select(p => p.PackageId),
-                "{0} の MIT 行は、PackageLicenseExpression が MIT の 公開パッケージを"
-                    + "過不足なく並べていなければならない（読者はこの行で自分のパッケージが MIT かを確認する）",
-                fileName
-            );
-    }
-
-    /// <summary>LICENSE-NC.md のスコープ列挙が、ライセンスファイルを宣言するプロジェクトと整合する</summary>
-    [Fact(
-        DisplayName = "LICENSE-NC.md のスコープ列挙は NC のパッケージを含み MIT のパッケージを含まない"
-    )]
-    public void NcScopeList_MatchesPackageLicenseMetadata()
-    {
-        var scope = NcScopeDirectories();
-
-        scope.Should().NotBeEmpty("LICENSE-NC.md の冒頭にスコープの箇条書きが見つからない");
-
-        foreach (var directory in scope)
-        {
-            Directory
-                .Exists(Path.Combine(Root, directory.Replace('/', Path.DirectorySeparatorChar)))
-                .Should()
-                .BeTrue(
-                    "LICENSE-NC.md が列挙する {0} が実在しない（プロジェクトを改名・削除したなら"
-                        + "ライセンス文書の列挙も更新すること）",
-                    directory
-                );
-        }
-
-        foreach (var project in PublishedPackages())
-        {
-            var listed = scope.Contains(project.ScopePath, StringComparer.OrdinalIgnoreCase);
-
-            if (project.IsMit)
-            {
-                listed
-                    .Should()
-                    .BeFalse(
-                        "{0} は PackageLicenseExpression が MIT なのに LICENSE-NC.md のスコープへ載っている"
-                            + "（商用利用できるはずのものを利用者が諦める）",
-                        project.PackageId
-                    );
-            }
-            else
-            {
-                listed
-                    .Should()
-                    .BeTrue(
-                        "{0} は PackageLicenseFile で {1} を同梱するのに、その文書のスコープ列挙へ載っていない"
-                            + "（スコープ外は MIT 扱いになるため、同梱した条件が及ばない）",
-                        project.PackageId,
-                        project.LicenseFile
-                    );
-            }
-        }
-    }
+    /// <summary>リポジトリのルート</summary>
+    internal static readonly string Root = NeutralResxFiles.FindRepositoryRoot();
 
     /// <summary>公開パッケージはライセンス式とライセンスファイルのどちらか一方だけを宣言する</summary>
     /// <remarks>NuGet は両方の同時指定を許さない。未指定のまま公開するとライセンス不明のパッケージになる。</remarks>
@@ -129,7 +58,7 @@ public sealed class LicenseDocumentParityTests
     }
 
     /// <summary>LICENSING の、MIT のパッケージを並べた表の行を 1 つ取り出す（見つからなければ null）</summary>
-    private static string? FindMitRow(string fileName) =>
+    internal static string? FindMitRow(string fileName) =>
         File.ReadAllLines(Path.Combine(Root, fileName))
             .FirstOrDefault(line =>
                 line.Contains("`QuickER.Runtime`", StringComparison.Ordinal)
@@ -140,7 +69,7 @@ public sealed class LicenseDocumentParityTests
     /// 表の行に並ぶパッケージ名を展開する。2 つ目以降は先頭を省いた短縮形
     /// （<c>`QuickER.Runtime` / `.SqlServer`</c>）で書かれているため、先頭の名前を補う。
     /// </summary>
-    private static IReadOnlyList<string> ExpandPackageNames(string row)
+    internal static IReadOnlyList<string> ExpandPackageNames(string row)
     {
         var tokens = Regex
             .Matches(row, "`([^`]+)`")
@@ -158,7 +87,7 @@ public sealed class LicenseDocumentParityTests
     }
 
     /// <summary>LICENSE-NC.md の冒頭スコープ列挙（<c>- `src/QuickER.Xxx`</c>）を読む</summary>
-    private static IReadOnlyList<string> NcScopeDirectories() =>
+    internal static IReadOnlyList<string> NcScopeDirectories() =>
         File.ReadAllLines(Path.Combine(Root, "LICENSE-NC.md"))
             .Select(line => Regex.Match(line, @"^- `(src/[^`]+)`\s*$"))
             .Where(match => match.Success)
@@ -172,7 +101,7 @@ public sealed class LicenseDocumentParityTests
     /// 漏れ、唯一の NC パッケージが検証対象外になっていた。公開一覧から引けば、パッケージを追加した
     /// のにライセンスメタデータを書き忘れた場合もここで落ちる。
     /// </remarks>
-    private static IReadOnlyList<PublishedPackage> PublishedPackages()
+    internal static IReadOnlyList<PublishedPackage> PublishedPackages()
     {
         var packScript = File.ReadAllText(Path.Combine(Root, "scripts", "pack-packages.ps1"));
 
@@ -210,7 +139,7 @@ public sealed class LicenseDocumentParityTests
         document.Descendants().FirstOrDefault(e => e.Name.LocalName == propertyName)?.Value.Trim();
 
     /// <summary>公開パッケージのライセンスメタデータ</summary>
-    private sealed record PublishedPackage(
+    internal sealed record PublishedPackage(
         string PackageId,
         string ScopePath,
         string? LicenseExpression,

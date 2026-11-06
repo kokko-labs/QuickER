@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト概要
 
-QuickER は WPF 製の ER 図デザイナ。DB スキーマのインポート／DDL 生成（SQL Server / PostgreSQL / MySQL / Oracle / SQLite の5方言）、Scriban テンプレートによる C# コード生成、AI チャットによる図の操作（MCP サーバ内蔵）、外部 AI エージェント向け stdio MCP サーバ（CLI `quicker mcp`）を持つ。コメント・コミットメッセージは日本語。ただし**生成物（.g.cs の XmlDoc・コメント・実行時例外メッセージ、.g.md）に埋め込む固定文は英語が正本**（製品の中立言語＝resx の中立と同じ英語。テンプレート `Templates/CSharpRuntime/*.scriban` 内の全コメントは生成出力そのものなので英語で書く。図の Description 由来のユーザーデータは無加工。API リファレンスは `ApiDocsLanguage`（English / Japanese / Both）／CLI `--api-docs-lang` で日本語版 `{ベース名}.ja.g.md` だけ・両方も出力可能＝テンプレート対訳ペア `ApiReferenceDoc.scriban`/`ApiReferenceDoc.ja.scriban` は構造パリティテストが同時更新を強制。生成出力の CJK 混入は GeneratedOutputEnglishGuardTests が検知）。**samples/ 配下は手書きコード（Program.cs のコメント・出力・データ）・図の Description も英語**（生成物と同居する国際向けショーケースのため。サンプルの README.ja.md のみ日本語）。この方針は `SampleEnglishGuardTests` が機械で固定する＝`samples/` 配下のテキストファイル全部（生成物の `.g.cs` / `.g.md` / `.sql` も含む）を走査し、除外は `README.ja.md`・言語切替リンクの行（`](README.ja.md)`）・`bin` / `obj` の 3 つだけ（内容がバイナリのファイル＝先頭 8 KB に NUL を含むものは別枠で判定しない）（除外を広げるときは理由をそのテストの XmlDoc へ書く）。文章だけの方針は静かに嘘になる＝実際にサンプルの csproj 4 本が日本語のコメントのまま残っていた。
+QuickER は WPF 製の ER 図デザイナ。DB スキーマのインポート／DDL 生成（SQL Server / PostgreSQL / MySQL / Oracle / SQLite の5方言）、Scriban テンプレートによる C# コード生成、AI チャットによる図の操作（MCP サーバ内蔵）、外部 AI エージェント向け stdio MCP サーバ（CLI `quicker mcp`）を持つ。コメント・コミットメッセージは日本語。ただし**生成物（.g.cs の XmlDoc・コメント・実行時例外メッセージ、.g.md）に埋め込む固定文は英語が正本**（製品の中立言語＝resx の中立と同じ英語。テンプレート `Templates/CSharpRuntime/*.scriban` 内の全コメントは生成出力そのものなので英語で書く。図の Description 由来のユーザーデータは無加工。API リファレンスは `ApiDocsLanguage`（English / Japanese / Both）／CLI `--api-docs-lang` で日本語版 `{ベース名}.ja.g.md` だけ・両方も出力可能＝テンプレート対訳ペア `ApiReferenceDoc.scriban`/`ApiReferenceDoc.ja.scriban` は構造パリティテストが同時更新を強制。生成出力の CJK 混入は GeneratedOutputEnglishGuardTests が検知）。**samples/ 配下は手書きコード（Program.cs のコメント・出力・データ）・図の Description も英語**（生成物と同居する国際向けショーケースのため。サンプルの README.ja.md のみ日本語）。この方針は `PhraseTests`（英語の行 `sample-files`）が機械で固定する＝`samples/` 配下のテキストファイル全部（生成物の `.g.cs` / `.g.md` / `.sql` も含む）を走査し、除外は `README.ja.md`・言語切替リンクの行（`](README.ja.md)`）・`bin` / `obj` の 3 つだけ（内容がバイナリのファイル＝先頭 8 KB に NUL を含むものは別枠で判定しない）（除外は出どころの関数 `EnglishTextRows.SampleLines` の規則で、その自己検査は `SampleEnglishGuardTests`。除外を広げるときは理由を `SampleLines` の remarks へ書く）。文章だけの方針は静かに嘘になる＝実際にサンプルの csproj 4 本が日本語のコメントのまま残っていた。
 
 ## コマンド
 
@@ -40,8 +40,8 @@ csharpier format .                                       # 整形（グローバ
 - 生成コードの Roslyn コンパイル検証（`CodegenCaseTests` の行 `compile-*`）は Docker 不要で常時実行される（単発オプションの空振りの検査は `src/QuickER.CodeGen.CSharp/CLAUDE.md`）
 - **生成コードのランタイムテストは「共通基底 1＋バックエンド派生 N＋派生固有 Fact」の形に揃え**、存在しない面は条件スキップでなくサブクラス階層で分ける（→ `tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`）
 - **テストのエンジン**（総当たり・モデルベース・実装先どうしの一致・網羅の計数・夜間の深い実行）の共通の枠組みは `tests/QuickER.Tests/TestSupport/Engines/`（→ `tests/QuickER.Tests/TestSupport/CLAUDE.md`）。同期計画の網と行は → `tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`、実装先どうしの一致と同期のモデルは → `tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`
-- **src と tests の C# ソースに、タブ（U+0009）・FF（U+000C）・NEL（U+0085）・U+2028・U+2029 の実文字を置かない**（リテラル・コメントの中でもエスケープ表記で書く。ツール越しの書き込みで実文字に化けると、コンパイルが通ったまま値だけが変わる。`SourceInvisibleCharacterGuardTests`）
-- **英語ガードのテストが使う CJK の文字の範囲は `TestSupport.CjkText.Pattern` の 1 つだけ**（範囲の写しを置くと、1 か所だけ狭い写しの出力の混入を見逃す。`CjkPatternGuardTests` が tests/ の文字列リテラルから範囲の端の文字を探し、`CjkText.cs` 以外に現れたら名指しする）
+- **src と tests の C# ソースに、タブ（U+0009）・FF（U+000C）・NEL（U+0085）・U+2028・U+2029 の実文字を置かない**（リテラル・コメントの中でもエスケープ表記で書く。ツール越しの書き込みで実文字に化けると、コンパイルが通ったまま値だけが変わる。`SourceRuleTests`（規則 `source-invisible-characters-src`・`source-invisible-characters-tests`））
+- **英語ガードのテストが使う CJK の文字の範囲は `TestSupport.CjkText.Pattern` の 1 つだけ**（範囲の写しを置くと、1 か所だけ狭い写しの出力の混入を見逃す。`SourceRuleTests`（規則 `cjk-range-copies`） が tests/ の文字列リテラルから範囲の端の文字を探し、`CjkText.cs` 以外に現れたら名指しする）
 - GUI テストのウィンドウのアクティブ・フォーカス・失敗時の状態の記録、条件コンパイルの全分岐を読むソースのガード、テストの DbContext の構成、テストが作る SQLite の DB の開き方は → `tests/QuickER.Tests/TestSupport/CLAUDE.md`
 
 ## アーキテクチャ
@@ -128,25 +128,25 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 
 ### 横断の規則
 
-- **書き出す文字列（DDL・同期スクリプト・型の表記・生成コード・エクスポート・ツールの応答）は書式のカルチャに依らず同じ。数値・日時は InvariantCulture、`IgnoreCase` の正規表現は `CultureInvariant` を併せて付け、`\d` は `ECMAScript` のときだけ使う**：sv-SE の負号や th-TH の仏暦、tr-TR の大文字小文字、全角数字が出力や判定を壊す。ガード：`CultureInvariantDialectOutputTests`・`DialectDdlTableTests`（全行に掛かる自動のカルチャの照合）・`RegexCultureGuardTests`・`NumericInterpolationCultureGuardTests`・`GeneratedCodeCultureAnalyzerTests`。→ `tests/QuickER.Tests/TestSupport/CLAUDE.md`「カルチャのガード」
+- **書き出す文字列（DDL・同期スクリプト・型の表記・生成コード・エクスポート・ツールの応答）は書式のカルチャに依らず同じ。数値・日時は InvariantCulture、`IgnoreCase` の正規表現は `CultureInvariant` を併せて付け、`\d` は `ECMAScript` のときだけ使う**：sv-SE の負号や th-TH の仏暦、tr-TR の大文字小文字、全角数字が出力や判定を壊す。ガード：`CultureInvariantDialectOutputTests`・`DialectDdlTableTests`（全行に掛かる自動のカルチャの照合）・`SourceRuleTests`（規則 `regex-ignore-case-culture`・`regex-digit-classes`）・`SourceRuleTests`（規則 `numeric-interpolation-culture`）・`GeneratedCodeCultureAnalyzerTests`。→ `tests/QuickER.Tests/TestSupport/CLAUDE.md`「カルチャのガード」
 
 ### 名前と制約名
-- **図に保存する名前の同一性は `SchemaNames`（Model）だけが決める（前後の空白を除き `OrdinalIgnoreCase`。綴りは書き換えない。キーは `SchemaNames.Key`）**：入口ごとに比較や `Trim`・`ToLowerInvariant` で書くと、Unicode の特殊な文字で表・列の組と答えが割れる。ガード：`SchemaNamesGuardTests`・`SyncNameComparisonGuardTests`・`SchemaNamesKeyTests`・`NameFuzzCompilationTests`。→ `src/QuickER.Model/CLAUDE.md`「名前の同一性（SchemaNames）」
-- **制約名の安全化と名前の無い制約の既定名は `ConstraintNames` だけで組む**：写すと前後に空白のあるテーブル名で DDL と同期の制約名が食い違い、存在しない制約を外そうとして失敗する。ガード：`ConstraintNamesGuardTests`・`DialectDdlTableTests`（行 `ddl-*-trimmed-table`・`sync-*-trimmed-table`）・`ConstraintNameCreationPathTests`。→ `src/QuickER.Model/CLAUDE.md`「制約名の組み立て（ConstraintNames）」
-- **既定の制約名は識別子の長さの上限に収め、上限は省略できない引数で受ける（経路は 2 つだけ）**：省略可能にすると黙って縮めない呼び出しが残り、DDL の適用が断られるか PostgreSQL で別の名前に切り詰められる。ガード：`IdentifierLengthLimitDeclarationTests`・`ModelDialectLookupGuardTests`・`LongDefaultConstraintNameTests`。→ `src/QuickER.Model/CLAUDE.md`「識別子の長さの上限」
+- **図に保存する名前の同一性は `SchemaNames`（Model）だけが決める（前後の空白を除き `OrdinalIgnoreCase`。綴りは書き換えない。キーは `SchemaNames.Key`）**：入口ごとに比較や `Trim`・`ToLowerInvariant` で書くと、Unicode の特殊な文字で表・列の組と答えが割れる。ガード：`SourceRuleTests`（規則 `schema-name-comparisons`）・`SourceRuleTests`（規則 `sync-name-comparison-tokens`）・`SchemaNamesKeyTests`・`NameFuzzCompilationTests`。→ `src/QuickER.Model/CLAUDE.md`「名前の同一性（SchemaNames）」
+- **制約名の安全化と名前の無い制約の既定名は `ConstraintNames` だけで組む**：写すと前後に空白のあるテーブル名で DDL と同期の制約名が食い違い、存在しない制約を外そうとして失敗する。ガード：`SourceRuleTests`（規則 `constraint-name-safe-rule-copies`・`constraint-name-default-compositions`）・`DialectDdlTableTests`（行 `ddl-*-trimmed-table`・`sync-*-trimmed-table`）・`ConstraintNameCreationPathTests`。→ `src/QuickER.Model/CLAUDE.md`「制約名の組み立て（ConstraintNames）」
+- **既定の制約名は識別子の長さの上限に収め、上限は省略できない引数で受ける（経路は 2 つだけ）**：省略可能にすると黙って縮めない呼び出しが残り、DDL の適用が断られるか PostgreSQL で別の名前に切り詰められる。ガード：`IdentifierLengthLimitDeclarationTests`・`SourceRuleTests`（規則 `model-dialect-lookups`）・`LongDefaultConstraintNameTests`。→ `src/QuickER.Model/CLAUDE.md`「識別子の長さの上限」
 - **名前の入力・ツール・方言切替は、受け付けない名前を入口と同じ判定（`DescribeViolation`）で知らせる**：判定を写すと入口ごとに食い違う。ガード：`NameLimitStatusWarningTests`・`ToolScenarioTests`（行 `name-limit-*`）・`NameLimitNotesTests`。→ `src/QuickER.Model/CLAUDE.md`「名前の上限の通知（NameLimitNotes）」
 
 ### モデル
 
 - **意味と視覚の分離**：`Entity`（Model）は座標・色を持たない。視覚状態は `EntityViewModel` と `EntityLayout`（Document）が持ち、エクスポータ・生成器は意味モデル `ErDiagram` だけを消費する
-- **一意制約の正本は `Entity.UniqueConstraints`。未設定名は `SynthesizeName` で合成し、ぶつかる名前には番号を足す**：ぶつかると SQL Server・PostgreSQL・Oracle・MySQL で DDL・同期が名前の重複で失敗する。ガード：`ConstraintNamesTests`・`ConstraintNamesGuardTests`・`UniqueConstraintResolvedNameLimitTests`。→ `src/QuickER.Model/CLAUDE.md`「一意制約」
+- **一意制約の正本は `Entity.UniqueConstraints`。未設定名は `SynthesizeName` で合成し、ぶつかる名前には番号を足す**：ぶつかると SQL Server・PostgreSQL・Oracle・MySQL で DDL・同期が名前の重複で失敗する。ガード：`ConstraintNamesTests`・`SourceRuleTests`（規則 `unique-constraint-synthesize-name-calls`）・`UniqueConstraintResolvedNameLimitTests`。→ `src/QuickER.Model/CLAUDE.md`「一意制約」
 - **主キーの実効順は `Entity.GetPrimaryKeyColumnsInOrder()` だけが決める**：素の `Columns.Where(IsPrimaryKey)` はビルドもテストも緑のまま、取込図でだけ列順へ退行する。ガード：`EntityPrimaryKeyOrderTests`・`DocumentFormatTests`（行 `*-primary-key-*`）・`UndoOperationTests`（行 `primary-key-*`）。→ `src/QuickER.Model/CLAUDE.md`「主キーの実効順」
 - **主キーの順序を生成物・DBML へ載せるか告知するかの判定は `GetReorderedPrimaryKeyColumnNames()` だけ**：独自に変えると順序を明示していない図まで出力が変わる。ガード：`CSharpReversePrimaryKeyOrderTests`・`FormatRoundTripTests`（形の行 `dbml-reordered-primary-key`・`dbml-primary-key-in-column-order-*`・`mermaid-primary-key-order-*`・`csharp-reordered-primary-key`・`csharp-description-and-primary-key-order`／規則の行 `dbml-rule-primary-key-*`・`csharp-rule-primary-key-order-*`）。→ `src/QuickER.Model/CLAUDE.md`「主キーの順序の出力判定」
 - **リレーションの列対応の正本は `Relationship.ColumnPairs`（推測フォールバックなし）**：列ペア 0 件や解決不能な列の FK は DDL・差分の対象外として明示スキップする。ガード：`ForeignKeyColumnResolverTests`・`FormatRoundTripTests`（形の行 `dbml-unnamed-relationships`／規則の行 `dbml-rule-same-pair-twice-without-names-second-gets-unique-name`・`dbml-rule-single-unnamed-ref-stays-unnamed`・`dbml-rule-named-ref*`・`csharp-rule-two-unnamed-references-get-distinct-names-in-ddl`・`csharp-rule-single-unnamed-reference-stays-unnamed`・`csharp-rule-explicit-names-are-kept`／マージの行 `merge-csharp-current-with-duplicate-unnamed-references-gets-distinct-names`・`merge-csharp-names-supplied-by-current-diagram-are-kept`）。→ `src/QuickER.Model/CLAUDE.md`「リレーションの列ペア」
 
 ### 方言の宣言
-- **方言の違いは方言の宣言だけが持ち、宣言は既定値を持たない**：既定値を足すと能力を足したとき書き忘れた方言が旧来の値で黙って動く。ガード：`SyncDialectCapabilitiesNoDefaultsTests`・`DialectNameLiteralGuardTests`・`UnsupportedCoverageTests`。→ `src/QuickER.Dialects/CLAUDE.md`「宣言は既定値を持たない」
-- **図のテーブル名を最初の `.` でスキーマと表に分ける規則は `SchemaQualifiedName` だけが持つ**：別々の規則で分けると `a.b.c` のような名前で DDL と CRUD が別の表を指す。ガード：`SchemaQualifiedNameGuardTests`・`DialectIdentifierTableTests`（行 `split-*`・`runtime-quote-*`）。→ `src/QuickER.Dialects/CLAUDE.md`「スキーマ修飾名の分け方（SchemaQualifiedName）」
+- **方言の違いは方言の宣言だけが持ち、宣言は既定値を持たない**：既定値を足すと能力を足したとき書き忘れた方言が旧来の値で黙って動く。ガード：`SyncDialectCapabilitiesNoDefaultsTests`・`SourceRuleTests`（規則 `sync-capabilities-initializers`・`dialect-name-literals`）・`UnsupportedCoverageTests`。→ `src/QuickER.Dialects/CLAUDE.md`「宣言は既定値を持たない」
+- **図のテーブル名を最初の `.` でスキーマと表に分ける規則は `SchemaQualifiedName` だけが持つ**：別々の規則で分けると `a.b.c` のような名前で DDL と CRUD が別の表を指す。ガード：`SourceRuleTests`（規則 `schema-qualified-name-dot-splits`）・`DialectIdentifierTableTests`（行 `split-*`・`runtime-quote-*`）。→ `src/QuickER.Dialects/CLAUDE.md`「スキーマ修飾名の分け方（SchemaQualifiedName）」
 
 ### 図ファイル
 - **Version 1 のまま足すフィールドは、読み手が欠落を無害に扱える形に限り、無害でなければ Version を上げる**：古い版で保存すると新しいフィールドが消える。ガードなし（設計判断）。→ `src/QuickER.Document/CLAUDE.md`「図ファイル形式の前方互換」
@@ -160,7 +160,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **最初の `.` で分けて元へ戻らない表名は取り込まない**：別の表として読まれる。判定は `SchemaImportTableNames` の 1 つだけ。ガード：`SchemaImportTableNamesTests`・5 方言の `*ImportFidelityIntegrationTests.Import_DottedTableName_*`。→ `src/QuickER.Provider/CLAUDE.md`「ドットを含むテーブル名」
 - **出せない型表記は取込完了時に 5 方言すべてで告げる**：黙って入れると後の DDL・同期が全テーブルごと止まる。ガード：`PostgreSqlImportFidelityIntegrationTests.Import_ColumnTypeNotEmittable_IsReported`・`PostgreSqlSchemaImporterTests`。→ `src/QuickER.Provider/CLAUDE.md`「出せない型表記の告知」
 - **取り込んだ型表記はその方言の DDL として再適用できる（不動点）**：再適用できない表記はその図を DDL にも同期にも使えなくする。ガード：5 方言の `*DdlRoundTripIntegrationTests.ImportedSchema_RegeneratedDdl_CanBeReapplied`・`SqlServerDdlRoundTripIntegrationTests`・`OracleDdlRoundTripIntegrationTests`。→ `src/QuickER.Provider/CLAUDE.md`「取り込んだ表記の再適用」
-- **取込・同期のコマンドは `DbCommands.Create` で作る**：生成箇所ごとに書くとタイムアウトが静かに漏れる。ガード：`SchemaCommandTimeoutGuardTests`。→ `src/QuickER.Provider/CLAUDE.md`「コマンドのタイムアウト」
+- **取込・同期のコマンドは `DbCommands.Create` で作る**：生成箇所ごとに書くとタイムアウトが静かに漏れる。ガード：`SourceRuleTests`（規則 `schema-command-bypasses`・`schema-command-helper-uses`）。→ `src/QuickER.Provider/CLAUDE.md`「コマンドのタイムアウト」
 - **`DbSslMode` の未指定はビルダーへ代入しないことで表し、保存は名前で行う**：既定値の代入で既存の接続文字列が変わり、整数保存では列挙の追加で無言の降格になる。ガード：`DbSslModeConnectionStringTests`・`ProfileStoreTests`（行 `tls-*`）。→ `src/QuickER.Provider/CLAUDE.md`「接続文字列の TLS 要求水準」
 - **方言ごとの取込の事実（PG の `pg_attribute`・Oracle の ENABLED の制約と除外する表・SQLite の PRAGMA と主キーの補正・SQL Server のテンポラル表・MySQL の範囲外の外部キー）**：外すと列ゼロ・DB に無い保証・取込全体の失敗・誤結合が起きる。ガード：`OracleImportFidelityIntegrationTests`・`SqliteImportFidelityIntegrationTests`・`MySqlImportFidelityIntegrationTests`・`SqlServerImportFidelityIntegrationTests`・`PostGisImportIntegrationTests`。→ `src/QuickER.Provider.PostgreSql/CLAUDE.md`「取込」ほか各方言の「取込」
 
@@ -180,7 +180,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **同期は差分 → 方言中立の計画 → 方言の SQL の 2 段で、方言差は既定値の無い `SyncDialectCapabilities` で宣言する**：既定値があると足した能力を書き忘れた方言が黙って旧来の値で動く。ガード：`CapabilityTreatmentParityTests`。→ `src/QuickER.Provider/CLAUDE.md`「2 段構造と方言の宣言」
 - **生成 SQL の固定文は英語が正本**：ガード：`DialectDdlTableTests`（全行に掛かる自動の英語の照合・行 `ddl-table-fixed-text-english`・`sync-*-fixed-text-english`）。→ `src/QuickER.Provider/CLAUDE.md`「生成 SQL の固定文」
 - **制約名の安全化と既定名の正本は Model の `ConstraintNames`、識別子は 5 方言対称に分割クォートする**：方言側に写しを置くと DDL と同期の名前が割れる。ガード：`DialectIdentifierTableTests`（行 `quote-dot-*`）・`SqlServerDefaultSchemaDescriptionIntegrationTests`。→ `src/QuickER.Provider/CLAUDE.md`「制約名の正本と識別子の分割クォート」
-- **SQL の信頼境界（動的 SQL の二段エスケープ・実行時に読んだ名前は DB のクォート関数・逆引きは表の所有者で絞る・`--` コメントは `SqlComment.Sanitize`・型は `SqlTypeText`・名前の入口検証・合成 PK 名の `Escape`・PG のドルタグ）**：外すと名前 1 つで同期が壊れるか別の表の制約を外す。ガード：`SqlCommentSanitizeGuardTests`・`SqlNameTextTests`・`DialectDdlTableTests`（行 `ddl-primary-key-name-escaped`・`sync-*-primary-key-name-escaped`）。→ `src/QuickER.Provider/CLAUDE.md`「SQL の信頼境界」（C# 側は `src/QuickER.CodeGen.CSharp/CLAUDE.md`「名前・型文字列の信頼境界（C# 生成側）」）
+- **SQL の信頼境界（動的 SQL の二段エスケープ・実行時に読んだ名前は DB のクォート関数・逆引きは表の所有者で絞る・`--` コメントは `SqlComment.Sanitize`・型は `SqlTypeText`・名前の入口検証・合成 PK 名の `Escape`・PG のドルタグ）**：外すと名前 1 つで同期が壊れるか別の表の制約を外す。ガード：`SourceRuleTests`（規則 `sql-comment-unsanitized-holes`）・`SqlNameTextTests`・`DialectDdlTableTests`（行 `ddl-primary-key-name-escaped`・`sync-*-primary-key-name-escaped`）。→ `src/QuickER.Provider/CLAUDE.md`「SQL の信頼境界」（C# 側は `src/QuickER.CodeGen.CSharp/CLAUDE.md`「名前・型文字列の信頼境界（C# 生成側）」）
 - **利用者が付けた名前は縮めずに DDL・同期の入口で上限と表せない文字を断る**：名前を拾い忘れた種類だけが黙って DB に届く。ガード：`OutputIdentifierLimitGuardTests`・`IdentifierLimitEntryTests`・`NameFuzzDdlRoundTripTestsBase`・`MySqlIdentifierLengthLimitIntegrationTests`。→ `src/QuickER.Provider/CLAUDE.md`「利用者が付けた名前の上限」
 - **差分は大文字小文字だけ違う表・列を live の綴りへ揃えた複製で組む**：揃えないと引用識別子の方言でスクリプトが相手を指せない。ガード：`SchemaDiffServiceTests.Items_CarryDiagramObjects`・`SchemaDiffServiceMatchingCountTests`。→ `src/QuickER.Provider/CLAUDE.md`「差分の名前の綴り」
 - **複合外部キーの列ペアは差分で並びを比べず、DDL・同期は参照先の（同期後の）キーの並びで出す**：並びのまま付け直すと失敗し、差分が並びを比べると永久に食い違う。ガード：`ForeignKeyColumnOrderTests`・`DialectDdlTableTests`（行 `ddl-fk-composite-reordered-to-referenced-key`・`sync-other-add-composite-fk-reordered-to-referenced-key`）・`SyncPlannerTests`・`SchemaDiffItemTests`。→ `src/QuickER.Provider/CLAUDE.md`「複合外部キーの列ペアの並び」
@@ -240,7 +240,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 ### 生成ダイアログ
 
 - **生成ダイアログで画面に出ていないオプションは設定にも結果にも持ち越さない（画面の値は保持）**：無制限バイナリ除外が静かに効き続け、リモート・同期が生成時エラーで止まる。ガード：`CodegenCaseTests` の行 `gui-gate-remote-dropped-no-db-access` / `gui-gate-sync-dropped-single-dialect` / `gui-gate-exclude-binary-dropped-no-db-access`。→ `src/QuickER.CodeGen.UI/CLAUDE.md`「画面に出ていないオプション」
-- **設定の全キーは生成オプションとダイアログの往復で値を落とさない**：キーを足して配線を 1 か所忘れる。ガード：`GenerationSettingsParityTests`。→ 同上「設定の全キーの往復」
+- **設定の全キーは生成オプションとダイアログの往復で値を落とさない**：キーを足して配線を 1 か所忘れる。ガード：`GenerationSettingsParityTests`・`ParityTests`（行 `generation-settings-keys-match-options`）。→ 同上「設定の全キーの往復」
 
 ### 生成コードのランタイム（共通）
 
@@ -354,9 +354,9 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 
 - **完了通知は「外部とのやり取り＝モーダル／図ファイル自身の読み書き＝ステータスバー」で使い分け、失敗は常にモーダル、内訳つきは `ShowInformationDetails`、判断材料の一覧は `ConfirmWarningDetails`（全件）**：提示先が割れる／MessageBox がスクロールせずボタンが画面外へ出る。→ `src/QuickER.Gui/CLAUDE.md`「完了通知の提示先」
 - **更新フィードの環境変数による差し替えは `#if DEBUG` 限定、更新の適用は通常の終了経路の後（`PostExitActions`）だけ**：配布ビルドで任意フィードが更新の受け口になり、Closing を飛ばすと自動保存が走らない。ガード：`LifecycleTests`（行 `update-*`・`post-exit-*`）・`PostExitExhaustiveTests`。→ `src/QuickER.Gui/CLAUDE.md`「配布と自動更新」
-- **再起動の要求と起動処理を分け、再起動の直前に単一インスタンスの座を手放す**：適用が失敗すると QuickER が閉じたまま戻らず、座を持ったままだと新しいインスタンスが黙って終わる。ガード：`PostExitExhaustiveTests`・`LifecycleTests`（行 `post-exit-*`）・`SingleInstanceGuardTests`。→ `src/QuickER.Gui/CLAUDE.md`「再起動と単一インスタンス」
-- **アプリ終了の連鎖は段ごとに `ShutdownSteps.Run` を通し、終了条件は `ShutdownMode="OnMainWindowClose"` ＋ `MainWindow` の明示で紐づける**：前段の失敗で子プロセスが孤児になり、Hide されたウィンドウだけが残る。クラッシュ経路も同じ後始末を通す。ガード：`ShutdownChainExhaustiveTests`・`LifecycleTests`（行 `steps-*`・`modules-*`・`crash-*`）・`AppShutdownModeTests`・`CrashHandlingServiceTests`。→ `src/QuickER.Gui/CLAUDE.md`「終了の連鎖」
-- **モーダルは必ず `DialogOwner.Resolve()` のオーナー付きで出し、実行中フラグを落としてから出す**：モードレスの機能ウィンドウの背面へ回り込んで画面が固まって見える。`PasswordBoxBehavior` の DP 既定値は null 必須。ガード：`DialogOwnerTests`・`PasswordBoxBehaviorTests`。→ `src/QuickER.Gui.Common/CLAUDE.md`「モーダルはオーナー付き」「PasswordBoxBehavior の DP 既定値」
+- **再起動の要求と起動処理を分け、再起動の直前に単一インスタンスの座を手放す**：適用が失敗すると QuickER が閉じたまま戻らず、座を持ったままだと新しいインスタンスが黙って終わる。ガード：`PostExitExhaustiveTests`・`LifecycleTests`（行 `post-exit-*`）・`SingleInstanceGuardTests`・`SourceRuleTests`（規則 `program-single-instance-uses`・`program-single-instance-bypasses`）。→ `src/QuickER.Gui/CLAUDE.md`「再起動と単一インスタンス」
+- **アプリ終了の連鎖は段ごとに `ShutdownSteps.Run` を通し、終了条件は `ShutdownMode="OnMainWindowClose"` ＋ `MainWindow` の明示で紐づける**：前段の失敗で子プロセスが孤児になり、Hide されたウィンドウだけが残る。クラッシュ経路も同じ後始末を通す。ガード：`ShutdownChainExhaustiveTests`・`LifecycleTests`（行 `steps-*`・`modules-*`・`crash-*`）・`SourceRuleTests`（規則 `app-shutdown-mode-declaration`・`app-shutdown-mode-overrides`・`app-main-window-assignment`・`app-feature-module-shutdown-uses`・`app-ui-crash-handler-uses`・`app-ui-crash-handler-bypasses`）・`CrashHandlingServiceTests`。→ `src/QuickER.Gui/CLAUDE.md`「終了の連鎖」
+- **モーダルは必ず `DialogOwner.Resolve()` のオーナー付きで出し、実行中フラグを落としてから出す**：モードレスの機能ウィンドウの背面へ回り込んで画面が固まって見える。`PasswordBoxBehavior` の DP 既定値は null 必須。ガード：`SourceRuleTests`（規則 `dialog-owner-resolve-uses`・`file-dialog-ownerless-shows`・`message-box-owner-resolver-copies`）・`PasswordBoxBehaviorTests`。→ `src/QuickER.Gui.Common/CLAUDE.md`「モーダルはオーナー付き」「PasswordBoxBehavior の DP 既定値」
 - **自動整列（格子・階層・力学・追記）は図の形に依らず、決定的で表を重ねず、追記は既存を動かさない**：同じ図の配置が開くたびに変わる・表が重なる・追記で既存が崩れる。ガード：`AutoLayoutScenarioTests`。→ `src/QuickER.Gui/Services/CLAUDE.md`「自動整列の共通の性質」
 
 ### GUI（ViewModel）
@@ -381,7 +381,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **Space のパンは、キーボードで移ったボタン類の Space を横取りしない（`MostRecentInputDevice` を使わない）**：Tab で移ったボタンが押せなくなる。ガード：`CanvasViewportBehaviorSpaceKeyTests`。→ `src/QuickER.Gui/Behaviors/CLAUDE.md`「Space のパンは、キーボードで移ったボタン類の Space を横取りしない」
 - **全画面表示は通常サイズを経由して最大化し、通常サイズへ戻されたら枠を戻す（最小化では解かない）**：タスクバーが前面に残る／掴めないウィンドウが残る。ガード：`PanelVisibilityTests`。→ `src/QuickER.Gui/Views/CLAUDE.md`「全画面表示」
 - **パネルを畳むときは中の論理フォーカスをパネルの外へ出す**：`LostFocus` が発火せず入力途中の値が黙って消える。ガード：`PanelVisibilityTests`。→ `src/QuickER.Gui/Views/CLAUDE.md`「パネルを畳むときは、その中に論理フォーカスを残さない」
-- **DataGrid は行の追加・削除の既定を切り、列一覧の Delete は `RemoveColumnCommand` へ結ぶ**：列の削除が履歴にも未保存にも残らず後始末も通らない。ガード：`ColumnGridDeleteKeyTests`・`DataGridRowEditGuardTests`。→ `src/QuickER.Gui/Views/CLAUDE.md`「DataGrid の行の追加・削除」
+- **DataGrid は行の追加・削除の既定を切り、列一覧の Delete は `RemoveColumnCommand` へ結ぶ**：列の削除が履歴にも未保存にも残らず後始末も通らない。ガード：`ColumnGridDeleteKeyTests`・`SourceRuleTests`（規則 `datagrid-row-edits`）。→ `src/QuickER.Gui/Views/CLAUDE.md`「DataGrid の行の追加・削除」
 
 ### 取込・エクスポートの形式
 
@@ -406,7 +406,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **MCP の set_primary_key / set_unique_constraint / add_relationship / set_query の規則**（主キーは全体置換・外れた列の NULL 許容は据え置き・ロックを持たない非対称、制約名の衝突拒否、クエリ定義の検証を生成器と共有）：両ホストで図が割れる。ガード：`ErDiagramToolHostParityTests`・`QueryToolGenerationRuleTests`。→ `src/QuickER.Mcp/CLAUDE.md`「個別ツールの規則」
 - **MCP はステートレスで、レイアウトを書かず、stdout を JSON-RPC 専用にする**：`file` の機械注入と「読込→変更→保存」で完結させ、stdout が汚れるとプロトコルが壊れる。ガード：`McpServerE2ETests.McpServer_IgnoresAppSettingsInWorkingDirectory`。→ `src/QuickER.Mcp/CLAUDE.md`「ステートレス設計」「stdio の純度」
 - **コード生成ツールの結果は英語固定（`CurrentUICulture` だけ InvariantCulture にして戻す）**：CLI と resx を共有するため、外すと言語が漏れる。ガード：`CodeGenToolSetLanguageTests`。→ `src/QuickER.Mcp/CLAUDE.md`「コード生成ツール」
-- **ツールの引数の形は実行前に入口（`ToolArgumentShape`）で 1 回だけ検査する**：外すと黙った既定値・型違いの読み捨て・生の例外になる。値の読み取りと列ペアの比較は正本 1 か所。ガード：`ToolArgumentShapeFuzzTests`・`ToolArgumentParsingGuardTests`。→ `src/QuickER.Mcp/CLAUDE.md`「ツールの引数の形の検査」
+- **ツールの引数の形は実行前に入口（`ToolArgumentShape`）で 1 回だけ検査する**：外すと黙った既定値・型違いの読み捨て・生の例外になる。値の読み取りと列ペアの比較は正本 1 か所。ガード：`ToolArgumentShapeFuzzTests`・`SourceRuleTests`（規則 `tool-argument-parsing-copies`・`tool-argument-parsing-owners`）。→ `src/QuickER.Mcp/CLAUDE.md`「ツールの引数の形の検査」
 - **ツールの複数行の応答は改行を LF だけで組む**：ホストごとに改行が食い違う。ガード：`ToolScenarioTests`（行 `line-ending-summary-uses-lf-only`）。→ `src/QuickER.Mcp/CLAUDE.md`「ツールの応答の改行」
 - **MCP の呼び出しは `DiagramFileGate` で直列化し、何も変えない呼び出しでは図のファイルを書かず、`create_diagram` は上書きしない**：書くと開いている GUI が再読込・確認を出し、並列の変更系が互いの更新を消す。ガード：`DocumentErDiagramFileHandlingTests`・`DocumentErDiagramToolConcurrencyTests`。→ `src/QuickER.Mcp.Tools/CLAUDE.md`「何も変えない呼び出しで書かない」
 
@@ -414,7 +414,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 
 - **Copilot のシェル許可は、パスが取れないなら全要素が許可リスト（`dotnet` のみ）のときだけ承認し、URL 参照・書き込みリダイレクトは両方の枝で拒否する**：緩めると `dotnet build && curl … | sh` のような連結が通る。`dotnet` 自体が外へ出る経路は塞げない（残余）。ガード：`ShellPermissionTests`。→ `src/QuickER.AI/CLAUDE.md`「Copilot のシェル許可」
 - **内蔵チャットの CLI バックエンドは作業フォルダを `%TEMP%\QuickER\{backend}\<guid>` へ隔離し、Codex は read-only を明示する**：実行フォルダが承認なしで読まれる。モック生成側は出力先へ書くので workspace-write。ガード：`BackendWorkingDirectoryTests`・`CodexAppServerClientStartInfoTests`。→ `src/QuickER.AI/CLAUDE.md`「CLI バックエンドの作業フォルダ」
-- **チャットエンジン 4 種のツール実行と活動通知は `ChatToolInvocation` を通す**：通知を保護しないと購読側の例外で実行済みの呼び出しに「未実行」の結果が積まれ、AI が二重に操作する。引数は `Func<string>` で try の内側で取り出す。ガード：`ChatToolInvocationTests`・`ChatEngineContractTests`。→ `src/QuickER.AI/CLAUDE.md`「ツール実行と活動通知」
+- **チャットエンジン 4 種のツール実行と活動通知は `ChatToolInvocation` を通す**：通知を保護しないと購読側の例外で実行済みの呼び出しに「未実行」の結果が積まれ、AI が二重に操作する。引数は `Func<string>` で try の内側で取り出す。ガード：`ChatToolInvocationTests`・`SourceRuleTests`（規則 `chat-engine-tool-invocation-uses`・`chat-engine-tool-invocation-copies`）・`ChatEngineContractTests`。→ `src/QuickER.AI/CLAUDE.md`「ツール実行と活動通知」
 - **チャットエンジン 4 種の共通の契約は 4 エンジンへ同じ行で流し、違いはアダプタの出典つきの宣言に置く（持たない組は手で書いた一覧）**：エンジンごとに別々に書くと 1 エンジンだけの退行を見逃し、宣言を書き換えると行が黙って外れる。ガード：`ChatEngineContractTests`・`ChatDriverTests`。→ `src/QuickER.AI/CLAUDE.md`「チャットエンジンの共通の契約」
 - **チャットのダイアログは、ターンの外に応答中の吹き出しを残さず、ターン中に接続方式を変えず、切り替えられない状態の切替を確認なしで断る**：外すと吹き出しが Markdown へ戻らない・実行中のエンジンを置き去りにする・開始待ちに会話を消す確認が出る。ガード：`ChatDialogTests`。→ `src/QuickER.AI.Chat/CLAUDE.md`「ダイアログの状態の不変条件」
 - **回答の Markdown 表示は、リンクを http / https に限り、画像を読み込まず、HTML を解釈しない**：AI の回答は外部入力で、他のリンクは UNC などで外部へ接続する。ガード：`ChatMarkdownRendererTests`・`ProcessLaunchTests`（行 `external-chat-link-*`）。→ `src/QuickER.AI.UI/CLAUDE.md`「回答の Markdown 表示」
@@ -435,12 +435,12 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **モックプロジェクト生成の実行器 4 種は権限を QuickER 側で絞らない（API キーだけ境界あり）**：権限差の正本は docs/ai-chat.md の「注意」節。→ `src/QuickER.AI.Mock/CLAUDE.md`「実行器 4 種」
 
 ### OS との境界
-- **アプリ設定・作業状態の保存先はローカル（`AppDataPaths.LocalRoot`）の 1 つだけで、ローミングへ置かない**：DPAPI の秘密が他端末へ複製されても復号できない。ガード：`AppDataPathGuardTests`。→ `src/QuickER.Platform/CLAUDE.md`「保存先」
+- **アプリ設定・作業状態の保存先はローカル（`AppDataPaths.LocalRoot`）の 1 つだけで、ローミングへ置かない**：DPAPI の秘密が他端末へ複製されても復号できない。ガード：`SourceRuleTests`（規則 `app-data-path-lookups`）・`AppDataPathsTests`。→ `src/QuickER.Platform/CLAUDE.md`「保存先」
 - **`.cmd` / `.bat` シムの起動は必ず `BatchShimProcessGuard` を通す**：引数の `"` や `&` が cmd の再解釈で引用の外へ抜け、任意コマンドの実行につながる。ガード：`ProcessLaunchTests`（起動の表の行 `shim-*`・`resolve-*`）・`BatchShimProcessGuardTests`・`BatchShimTrailingNameTests`。→ `src/QuickER.Platform/CLAUDE.md`「.cmd / .bat シムの起動」
-- **外部のプロセス・URL・フォルダを開く処理は `ExternalLauncher` を通す**：入口ごとに書くと URL のスキーム制限やフルパス解決が食い違う。ガード：`ProcessLaunchGuardTests`・`ProcessLaunchTests`（行 `external-*`）。→ `src/QuickER.Platform/CLAUDE.md`「外部の起動」
-- **パスがフォルダの中にあるかの判定は `PathContainment` だけが持つ**：前方一致を入口ごとに書くと末尾の区切りの扱いが食い違い、ドライブ直下で配下を 1 件も承認しない。ガード：`PathContainmentTests`・`PathContainmentCallerFuzzTests`・`PathPrefixGuardTests`。→ `src/QuickER.Platform/CLAUDE.md`「パスがフォルダの中にあるかの判定」
-- **利用者・AI から受け取った名前をパスに使う入口の判定は `PathSegments` だけが持つ**：入口ごとに持つと断る形が食い違う。ガード：`PathSegmentsTests`・`PathSegmentEntranceFuzzTests`・`PathValidationGuardTests`。→ `src/QuickER.Platform/CLAUDE.md`「パスの名前の判定」
-- **ファイルへの書き込みは `AtomicFile` を通し、UTF-8 は `TextEncodings` だけが作る**：素の書き込みは途中で落ちると利用者のファイルが中途半端な内容で残る。ガード：`RawFileWriteGuardTests`・`Utf8EncodingGuardTests`・`AtomicFileTableTests`・`AtomicFileTests`。→ `src/QuickER.Platform/CLAUDE.md`「ファイルの書き込みと文字コード」
+- **外部のプロセス・URL・フォルダを開く処理は `ExternalLauncher` を通す**：入口ごとに書くと URL のスキーム制限やフルパス解決が食い違う。ガード：`SourceRuleTests`（規則 `process-launches`・`process-launch-create-process-starts`）・`ProcessLaunchTests`（行 `external-*`）。→ `src/QuickER.Platform/CLAUDE.md`「外部の起動」
+- **パスがフォルダの中にあるかの判定は `PathContainment` だけが持つ**：前方一致を入口ごとに書くと末尾の区切りの扱いが食い違い、ドライブ直下で配下を 1 件も承認しない。ガード：`PathContainmentTests`・`PathContainmentCallerFuzzTests`・`SourceRuleTests`（規則 `path-prefix-comparisons`）。→ `src/QuickER.Platform/CLAUDE.md`「パスがフォルダの中にあるかの判定」
+- **利用者・AI から受け取った名前をパスに使う入口の判定は `PathSegments` だけが持つ**：入口ごとに持つと断る形が食い違う。ガード：`PathSegmentsTests`・`PathSegmentEntranceFuzzTests`・`SourceRuleTests`（規則 `path-name-checks`）。→ `src/QuickER.Platform/CLAUDE.md`「パスの名前の判定」
+- **ファイルへの書き込みは `AtomicFile` を通し、UTF-8 は `TextEncodings` だけが作る**：素の書き込みは途中で落ちると利用者のファイルが中途半端な内容で残る。ガード：`SourceRuleTests`（規則 `raw-file-writes`・`utf8-encoding-creations`）・`AtomicFileTableTests`・`AtomicFileTests`。→ `src/QuickER.Platform/CLAUDE.md`「ファイルの書き込みと文字コード」
 - **原子的な書き込みの一時ファイルの名前は `AtomicFile.TemporaryPathFor` だけが組み立てる**：元の名前をそのまま付けると長い名前の保存が必ず失敗する。ガード：`AtomicFileTableTests`（行 `atomic-temporary-path-*`・`atomic-is-temporary-file-name-*`）・`AtomicFileNamingAndMetadataTests`・`UnboundedBinaryReadToFileTests`。→ `src/QuickER.Platform/CLAUDE.md`「一時ファイルの名前」
 
 ### 設定
@@ -451,12 +451,12 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 
 - **エンジンの共通の枠組みは `TestSupport/Engines/` の 7 部品（`SeedSource`・`KnownFailureSet`・`KnownCaseLedger`・`EngineReport`・`CoverageGuard`・`SeedFingerprint`・`SeedSummary`）を通す。BCL と xUnit だけに依存する**：WPF に依存すると Compile リンクする Integration のビルドが止まる。既存の 7 エンジンは載せ替え済みで、変数名・既定の種の数・開始番号は不変。ガード：`SeedSourceTests`・`KnownFailureSetTests`・`KnownCaseLedgerTests`・`CoverageGuardTests`。→ `tests/QuickER.Tests/TestSupport/CLAUDE.md`「エンジンの核（Engines/）」「既存エンジンの載せ替え」
 - **エンジンは次元表（`DimensionTable`）と網羅の計数（`CoverageCounter`）、登録簿、因子の棚卸し、行列の軸で「何をどの水準まで流すか」を宣言する**：一覧の組が出るようになったら一覧から消す。種の指紋が変わったら指紋と一緒に一覧も書き直す。`isValid` には原理的に起こり得ない組だけを書く。ガード：`DimensionTableTests`・`CoverageCounterTests`・`FactorInventoryGuardTests`・`MatrixAxisGuardTests`。→ 同上「次元表と網羅」
-- **テストの土台は共有の部品を通す（`GeneratedCodeCompiler`・`RuntimeReferenceSet`・`TwoHostToolHarness`・`ToolArgumentShapeFuzzRunner`・`OptionKeys`・`GuardKnownList`・`SourceFiles`）**：写しを作ると 1 か所だけ取り残される。ガード：`ToolHostAxisGuardTests`・`ToolDefinitionEnglishGuardTests`。→ 同上「共有の土台」
-- **夜間の深い実行は `nightly.yml`（`QUICKER_ENGINE_PROFILE=nightly`・`NightlyEngine` の目印）。種を使うテストは目印の true / false のどちらかを必ず宣言し、結果は TRX で残す**：宣言漏れは `SeedSource.Resolve` が赤にする。夜間なら埋まる組は赤にせず出力へ書く。ガード：`WorkflowGuardTests.Nightly_JobsKeepTestResultsAsArtifacts`・`SeedSourceTests`。→ 同上「夜間の深い実行」
+- **テストの土台は共有の部品を通す（`GeneratedCodeCompiler`・`RuntimeReferenceSet`・`TwoHostToolHarness`・`ToolArgumentShapeFuzzRunner`・`OptionKeys`・`GuardKnownList`・`SourceFiles`）**：写しを作ると 1 か所だけ取り残される。ガード：`ToolHostAxisGuardTests`・`PhraseTests`（英語の行 `tool-definitions-*`）。→ 同上「共有の土台」
+- **夜間の深い実行は `nightly.yml`（`QUICKER_ENGINE_PROFILE=nightly`・`NightlyEngine` の目印）。種を使うテストは目印の true / false のどちらかを必ず宣言し、結果は TRX で残す**：宣言漏れは `SeedSource.Resolve` が赤にする。夜間なら埋まる組は赤にせず出力へ書く。ガード：`WorkflowGuardTests.Nightly_JobsKeepTestResultsAsArtifacts`・`ParityTests`（行 `nightly-jobs`・`nightly-job-test-commands`・`nightly-job-engine-profile`）・`SeedSourceTests`。→ 同上「夜間の深い実行」
 - **種の指紋の要約は機械のカルチャ・時差に依らない（`SeedSummary.UnderInvariantCulture`）**：日本語・日本時間で作った記録が英語・UTC の CI で食い違う。ガード：`EngineSummaryEnvironmentTests`・`SeedFingerprintTests`。→ 同上「種の指紋」
-- **フォーカス・キー入力・Activated に左右される GUI テストは `WindowActivationTestCollection` に入れる。Space を流すテストは先に `PhysicalMouseButtons.WaitUntilReleased` を通す**：並列だと全件実行でだけ落ちる。実際のマウスのボタンが押されたままだと Space で Click しない。失敗時の状態は `GuiFailureDiagnostics`（`Capture` は必ず false を返し例外を出さない）が書く。ガード：`WindowActivationCollectionGuardTests`・`GuiFailureDiagnosticsTests`・`PhysicalMouseButtonsTests`。→ 同上「GUI テストの土台」
-- **ソースを走査するガードは条件コンパイルのどの分岐も読む（`ConditionalSourceParse`・`SourceSymbolScan`）。Roslyn のパースを直接呼ぶのは理由つきの一覧だけ**：1 通りのパースだと外れる分岐の禁止呼び出しを見落とす。ガード：`ConditionalSourceParseTests`・`SourceParseEntryGuardTests`・`RawFileWriteGuardTests`。→ 同上「ソースを走査するガード」
-- **テストで DbContext のプロバイダを指定する呼び出しの直後には `.IgnoreServiceProviderCacheLimit()` を続ける**：EF Core のサービスプロバイダが 20 を超えると関係の無いテストが全件実行で落ちる。ガード：`EfCoreServiceProviderLimitGuardTests`。→ 同上「EF Core のテストの構成」
+- **フォーカス・キー入力・Activated に左右される GUI テストは `WindowActivationTestCollection` に入れる。Space を流すテストは先に `PhysicalMouseButtons.WaitUntilReleased` を通す**：並列だと全件実行でだけ落ちる。実際のマウスのボタンが押されたままだと Space で Click しない。失敗時の状態は `GuiFailureDiagnostics`（`Capture` は必ず false を返し例外を出さない）が書く。ガード：`SourceRuleTests`（規則 `window-activation-collection`・`window-activation-markers`）・`GuiFailureDiagnosticsTests`・`PhysicalMouseButtonsTests`。→ 同上「GUI テストの土台」
+- **ソースを走査するガードは条件コンパイルのどの分岐も読む（`ConditionalSourceParse`・`SourceSymbolScan`）。Roslyn のパースを直接呼ぶのは理由つきの一覧だけ**：1 通りのパースだと外れる分岐の禁止呼び出しを見落とす。ガード：`ConditionalSourceParseTests`・`SourceRuleTests`（規則 `direct-roslyn-parses`）・`SourceRuleTests`（自己検査の行 `*-inactive-branch`・`SourceRuleTests.SymbolScan_ResolvesBclCallsInEveryProject`）。→ 同上「ソースを走査するガード」
+- **テストで DbContext のプロバイダを指定する呼び出しの直後には `.IgnoreServiceProviderCacheLimit()` を続ける**：EF Core のサービスプロバイダが 20 を超えると関係の無いテストが全件実行で落ちる。ガード：`EfCoreServiceProviderLimitGuardTests`・`SourceRuleTests`（規則 `ef-core-provider-cache-limit`）。→ 同上「EF Core のテストの構成」
 - **テストが作る同期・実装先の一致の SQLite の DB は `SqliteLightJournal`（MEMORY・synchronous=OFF）で開く。`PERSIST` にしない**：Windows で既定の接続との混在が `disk I/O error` になる。ガード：`SqliteLightJournalTests`。→ 同上「SQLite のテストの DB」
 - **簡易 DSL の条件の意味は総当たり（`DslConditionFuzzTests`）で docs の意味と照合する。オラクル `DslFuzz.Evaluate` は docs の写しで、実装の挙動を写さない**：既知の失敗の一覧は空で保つ。網羅の単位 `DslFuzzUnits.Coverage` を種の前に流す。ガード：`DslConditionFuzzTests`・`DslConditionFuzzSqlServerRuntimeTests`。→ 同上「簡易 DSL の総当たり」
 

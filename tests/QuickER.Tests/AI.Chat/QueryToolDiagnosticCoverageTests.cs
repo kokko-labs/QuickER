@@ -1,9 +1,8 @@
-using System.Globalization;
-using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using QuickER.AI.Chat;
 using QuickER.Mcp.Tools;
 using QuickER.Model;
+using QuickER.Tests.TestSupport.Guards;
 
 namespace QuickER.Tests.AI.Chat;
 
@@ -14,37 +13,19 @@ namespace QuickER.Tests.AI.Chat;
 /// </summary>
 /// <remarks>
 /// 種別を足してフォーマッタの片方へ書き忘れると、既定の分岐が「想定外の診断」として種別名をそのまま出す。
-/// その種別名が出ていないことと、英語フォーマッタは日本語 UI でも英語のままであることを見る
-/// （resx の英日のキーの対応は Resources/ のパリティテストが見る）
+/// その種別名が出ていないことを見る。英語フォーマッタは日本語 UI でも英語のままであること・内蔵チャットのフォーマッタの英語 UI の
+/// 出力に日本語が無いことは、英語の文言の表（<c>PhraseTests</c> の英語の行 <c>query-tool-english-formatter</c>・
+/// <c>query-tool-localized-formatter-english</c>）が全種別で見る
+/// （resx の英日のキーの対応は照合の表の行 <c>resx-ja-key-sets</c> が見る）
 /// </remarks>
 public class QueryToolDiagnosticCoverageTests
 {
-    /// <summary>CJK 文字の検出パターン（ErDiagramToolCatalogEnglishGuardTests と同じ範囲）</summary>
-    private static readonly Regex CjkPattern = TestSupport.CjkText.Pattern;
-
     /// <summary>全診断種別</summary>
     public static TheoryData<QueryToolDiagnosticCode> AllCodes =>
         new(Enum.GetValues<QueryToolDiagnosticCode>());
 
-    /// <summary>指定カルチャを CurrentUICulture に設定して関数を評価し、必ず元へ復元する</summary>
-    private static T WithCulture<T>(string culture, Func<T> body)
-    {
-        var previousUi = CultureInfo.CurrentUICulture;
-
-        try
-        {
-            CultureInfo.CurrentUICulture = new CultureInfo(culture);
-
-            return body();
-        }
-        finally
-        {
-            CultureInfo.CurrentUICulture = previousUi;
-        }
-    }
-
     /// <summary>指定種別の診断 1 件を警告に持つ set_query 成功結果（プレースホルダは全部埋める）</summary>
-    private static QueryToolOutcome OutcomeWith(QueryToolDiagnosticCode code) =>
+    internal static QueryToolOutcome OutcomeWith(QueryToolDiagnosticCode code) =>
         new()
         {
             Status = QueryToolStatus.Success,
@@ -65,34 +46,32 @@ public class QueryToolDiagnosticCoverageTests
             ],
         };
 
-    [Theory(DisplayName = "英語フォーマッタは全診断種別に文言を持ち、日本語 UI でも英語で出す")]
+    [Theory(DisplayName = "英語フォーマッタは全診断種別に文言を持つ（日本語 UI で作る）")]
     [MemberData(nameof(AllCodes))]
     public void EnglishFormatter_HasTextForEveryCode(QueryToolDiagnosticCode code)
     {
-        var text = WithCulture(
-            "ja",
+        var text = EnglishTextRows.UnderUiCulture(
+            EnglishTextRows.JapaneseUi,
             () => QueryToolEnglishFormatter.FormatSetQuery(OutcomeWith(code))
         );
 
         text.Should().NotContain(code.ToString());
-        CjkPattern.IsMatch(text).Should().BeFalse(text);
     }
 
     [Theory(DisplayName = "内蔵チャットのフォーマッタは全診断種別に英日の文言を持つ")]
     [MemberData(nameof(AllCodes))]
     public void LocalizedFormatter_HasTextForEveryCode(QueryToolDiagnosticCode code)
     {
-        var english = WithCulture(
+        var english = EnglishTextRows.UnderUiCulture(
             "en",
             () => QueryToolLocalizedFormatter.FormatSetQuery(OutcomeWith(code))
         );
-        var japanese = WithCulture(
-            "ja",
+        var japanese = EnglishTextRows.UnderUiCulture(
+            EnglishTextRows.JapaneseUi,
             () => QueryToolLocalizedFormatter.FormatSetQuery(OutcomeWith(code))
         );
 
         english.Should().NotContain(code.ToString());
         japanese.Should().NotContain(code.ToString());
-        CjkPattern.IsMatch(english).Should().BeFalse(english);
     }
 }

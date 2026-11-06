@@ -15,7 +15,7 @@ namespace QuickER.Tests.Provider;
 /// 完了済みトランザクションへの素の Rollback は <see cref="InvalidOperationException"/> になり、
 /// catch 節から呼ぶと伝播中の元の例外を置き換えてしまう。ヘルパーが (1) 完了済みでも投げないこと、
 /// (2) 未コミットなら実際に取り消すこと、を実挙動で固定する（呼び出し側がヘルパーを迂回できないことは
-/// <see cref="SchemaSyncRollbackGuardTests"/> が構造的に固定する）。
+/// SourceRuleTests の規則 <c>schema-sync-raw-rollbacks</c>・<c>schema-sync-rollback-helper-uses</c> が構造的に固定する）。
 /// </para>
 /// <para>
 /// 生成コード側の同じ解法（<c>SqlTransactions.RollbackQuietlyAsync</c>）は

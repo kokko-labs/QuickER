@@ -1,20 +1,19 @@
-using System.IO;
 using System.Security.AccessControl;
 using System.Security.Principal;
-using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using QuickER.Services;
-using QuickER.Tests.Resources;
 using QuickER.Tests.TestDoubles;
 
 namespace QuickER.Tests.Gui.Services;
 
 /// <summary>
-/// 単一インスタンス制御（<see cref="SingleInstanceGuard"/>）と、再起動の直前に座を手放す配線を検証するテストクラス。
+/// 単一インスタンス制御（<see cref="SingleInstanceGuard"/>）と、再起動の直前に座を手放すことを検証するテストクラス。
 /// </summary>
 /// <remarks>
 /// 本物のアプリの名前を使うと、開発機で動いている QuickER と干渉するため、ケースごとに一意の名前を使う。
 /// 名前付きオブジェクトはプロセス内でも名前で開き直せるので、2 つ目の起動は同じプロセスの 2 回目の取得で再現できる。
+/// Program の配線（座の手放しの登録・開けないときの案内）のソースの検査は、<c>SourceRuleTests</c> の規則
+/// <c>program-single-instance-uses</c>・<c>program-single-instance-bypasses</c> へ移した。
 /// </remarks>
 public sealed class SingleInstanceGuardTests
 {
@@ -184,28 +183,5 @@ public sealed class SingleInstanceGuardTests
             // using の終わりの 2 回目の破棄に当たる（冪等）
             current.Dispose();
         }
-    }
-
-    /// <summary>Program が座の手放しを登録し、「開けない」を案内することをソース上で固定する</summary>
-    /// <remarks>Program はエントリポイントでテストから実行できないため、配線だけをソースで見張る</remarks>
-    [Fact(DisplayName = "Program は再起動の前の座の手放しを登録し、開けないときは案内する")]
-    public void Program_RegistersReleaseAndReportsInaccessible()
-    {
-        var source = File.ReadAllText(
-            Path.Combine(NeutralResxFiles.FindRepositoryRoot(), "src", "QuickER.Gui", "Program.cs")
-        );
-
-        source.Should().Contain("ReleaseSingleInstanceBeforeRelaunch(singleInstance.Dispose)");
-        source
-            .Should()
-            .Contain(
-                "RelaunchWith(WpfApplicationRestartService.StartNewInstance)",
-                "更新の適用に失敗したときの代わりの再起動も、起動時に登録した起動処理を使う"
-            );
-        source.Should().Contain("outcome == SingleInstanceOutcome.Inaccessible");
-        Regex
-            .Matches(source, @"SingleInstanceGuard\.TryAcquire\(\)")
-            .Should()
-            .BeEmpty("結果を受け取らない形へ戻っていないこと");
     }
 }

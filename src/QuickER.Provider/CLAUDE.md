@@ -110,7 +110,7 @@
 - 取込・同期のコマンドは必ず `DbCommands.Create` で作る（5 方言の `*SchemaImporter`／`*SchemaSyncExecutor`）。
   - 生成箇所ごとに `CommandTimeout` を書く運用では、クエリを 1 本足したときに設定が静かに漏れる。
 - タイムアウトの正本は `DbConnectionSettings.CommandTimeoutSeconds`（既定 60・`0` は無制限・負値は `ArgumentOutOfRangeException`）。GUI の接続プロファイルと CLI `scaffold --command-timeout` から流れる。
-- 素の `connection.CreateCommand()`／`new XxxCommand(...)` が 1 つでも現れたら `SchemaCommandTimeoutGuardTests` が落ちる。
+- 素の `connection.CreateCommand()`／`new XxxCommand(...)` が 1 つでも現れたら `SourceRuleTests` の規則 `schema-command-bypasses` が落ちる（10 ファイルが `DbCommands.Create` を使っていることは規則 `schema-command-helper-uses`）。
 
 ### 接続文字列の TLS 要求水準
 
@@ -233,12 +233,12 @@
 - 方言ごとの書き方（SQL Server の `QUOTENAME`・PostgreSQL の `quote_ident` とドルタグ・MySQL の 3 つの面・Oracle の所有者）は各方言の CLAUDE.md「同期スクリプト」。
 - `--` コメント行のサニタイズ：コメント行へ埋める名前は `SqlComment.Sanitize`（改行・制御文字 U+0000〜U+001F・U+007F・行区切り U+0085／U+2028／U+2029 を空白 1 つへ・長さ不変）を通す。
   - 経由するのは FK・一意制約のスキップコメント（`SyncScriptBuilderHelper`）・主キー非対応コメント（`SyncScriptBuilderBase`）・SQLite の対象外コメントと説明コメントと再構築の見出し・MySQL の列順見出し・多対多コメント（`DdlGeneratorBase` と `SqliteDdlGenerator` の両方）。Gui の `ExportTextSanitizer.Sanitize` は同じ実装へ委譲する。
-  - 埋め込み箇所の漏れは `SqlCommentSanitizeGuardTests` がソース上で全数検査する（`--` で始まる文字列リテラルを含む文の補間穴が `SqlComment.Sanitize` か明示の安全リストのどれか）。文は「リテラル・コメントの外の `;`」で区切り、穴はリテラルの中身だけから抜く。
+  - 埋め込み箇所の漏れは `SourceRuleTests` の規則 `sql-comment-unsanitized-holes` がソース上で全数検査する（`--` で始まる文字列リテラルを含む文の補間穴が `SqlComment.Sanitize` か、理由つきの既知の一覧〔ファイル・式・件数〕のどれか）。文は「リテラル・コメントの外の `;`」で区切り、穴はリテラルの中身だけから抜く。
 - 名前の入口検証：`SqlNameText.IsSafe`／`Validate(ErDiagram)`／`Validate(SyncPlan)` を `SqlTypeText.Validate` と同じ 5 入口へ並べ、テーブル名・列名・制約名の改行・制御文字を場所つき（`TABLE 'x'`・`COLUMN 'x'.'y'`・`UNIQUE 'x'.'y'`・`FOREIGN KEY 'x'`）で拒否する。
   - 説明は対象外（改行が正当。コメント側の `Sanitize` が唯一の防壁なので上のガードが要る）。
   - 判定は `SqlComment.ContainsControlCharacter` と共有する。C# 生成側の同じ規則（`ValidateNameControlCharacters`）は依存方向のため意図的に二重定義している。片方だけ変えない。
 - 合成する制約名のクォート：`PK_{SafeName(テーブル名)}` は `SafeName` が終端クォート文字を二重化しないので、埋め込み側で必ず方言の `Escape` を通す（SQLite の DDL と逐次 4 方言の同期の `CREATE TABLE`／`ADD CONSTRAINT`）。
-- 固定は `SqlTypeTextTests`・`SqlNameTextTests`（入口検証を 5 方言の DDL・同期へ同一ケースで）・`SqlCommentTests`・`SqlCommentInjectionTests`・`SqlCommentSanitizeGuardTests`・`DialectDdlTableTests` の行 `ddl-primary-key-name-escaped`・`sync-*-primary-key-name-escaped`（合成 PK 名を 5 方言まとめて）・`DialectIdentifierTableTests`（5 方言へ同じ危険な文字の行）・`{SqlServer,PostgreSql}RuntimeConstraintNameIntegrationTests`（`]` `'` `"` を含む正当な名前・別スキーマの同名表・表が無いときの no-op）・4 方言の `*SyncScriptBuilderTests` の動的 SQL のケース・`SchemaSyncDialogViewModelTests`（プレビュー生成の失敗はステータス行へ出し、未処理例外にしない）。mutation 実証済み。
+- 固定は `SqlTypeTextTests`・`SqlNameTextTests`（入口検証を 5 方言の DDL・同期へ同一ケースで）・`SqlCommentTests`・`SqlCommentInjectionTests`・`SourceRuleTests` の規則 `sql-comment-unsanitized-holes`・`DialectDdlTableTests` の行 `ddl-primary-key-name-escaped`・`sync-*-primary-key-name-escaped`（合成 PK 名を 5 方言まとめて）・`DialectIdentifierTableTests`（5 方言へ同じ危険な文字の行）・`{SqlServer,PostgreSql}RuntimeConstraintNameIntegrationTests`（`]` `'` `"` を含む正当な名前・別スキーマの同名表・表が無いときの no-op）・4 方言の `*SyncScriptBuilderTests` の動的 SQL のケース・`SchemaSyncDialogViewModelTests`（プレビュー生成の失敗はステータス行へ出し、未処理例外にしない）。mutation 実証済み。
 
 ### 利用者が付けた名前の上限
 

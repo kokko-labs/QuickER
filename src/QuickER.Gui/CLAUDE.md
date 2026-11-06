@@ -55,7 +55,7 @@ Velopack・2 チャンネル。release.yml（手動トリガ）が win-full（se
   - 要求は言語切替の `PostExitActions.RequestRelaunch` と更新の「今すぐ再起動」（`ScheduleUpdateApply` の `restart`）。
   - 新しいインスタンスを起動する処理は `Program.Main` が `RelaunchWith(WpfApplicationRestartService.StartNewInstance)` で 1 回だけ登録する。
   - どちらの要求でも適用の段が失敗すれば同じ起動処理で自分で再起動する。起動処理を要求側が持つと、更新の「今すぐ再起動」だけのときに適用が失敗した場合に代わりに起動する手段が無く、QuickER が閉じたまま戻らない。
-  - ガード：`LifecycleTests` の行 `post-exit-apply-failure-with-update-restart-falls-back-to-relaunch-apply-fails`、`PostExitExhaustiveTests`（更新の有無と種類・再起動の要求・起動処理・座の手放しの全 60 組を流し、文書から導いたオラクル〔両方あれば更新プログラムに任せる・適用が失敗したときだけ自分で起動・起動の直前にだけ手放す・失敗した段だけを記録・2 回目は何もしない〕と照合する）、`SingleInstanceGuardTests` の Program の配線のソース検査。
+  - ガード：`LifecycleTests` の行 `post-exit-apply-failure-with-update-restart-falls-back-to-relaunch-apply-fails`、`PostExitExhaustiveTests`（更新の有無と種類・再起動の要求・起動処理・座の手放しの全 60 組を流し、文書から導いたオラクル〔両方あれば更新プログラムに任せる・適用が失敗したときだけ自分で起動・起動の直前にだけ手放す・失敗した段だけを記録・2 回目は何もしない〕と照合する）、`SourceRuleTests` の規則 `program-single-instance-uses`・`program-single-instance-bypasses`（Program の配線のソース検査）。
 - 自分で再起動するときは、その直前に単一インスタンスの座を手放す（`PostExitActions.ReleaseSingleInstanceBeforeRelaunch`＝`Program.Main` が `singleInstance.Dispose` を登録）。
   - 再起動は終了処理の途中で起動するので、座を持ったままだと新しいインスタンスが「既に起動中」と判断して黙って終わる。
   - ガード：`SingleInstanceGuardTests` の「再起動の直前に座を手放すので、新しいインスタンスが座を取れる」、`PostExitExhaustiveTests`・`LifecycleTests` の行 `post-exit-relaunch-releases-single-instance-first-none`。
@@ -74,16 +74,16 @@ Velopack・2 チャンネル。release.yml（手動トリガ）が win-full（se
 - 記録先 `IShutdownFailureReporter`（Gui.Abstractions）は必須依存。null 既定も「未登録なら何もしない」も作らない（配線漏れを黙って握り潰さず DI 解決時に失敗させる）。
 - 実装は決して例外を投げない。`ShutdownSteps.Run` は記録側の例外も握り潰す（契約・実装・器の三重）。漏らすと「1 つの失敗が他を止めない」という器の目的が破れる。
 - 書き出し先は `shutdown-*.log` で `crash-*.log` と分ける。本文の形式は `CrashHandlingService.FormatDetails` を共有し接頭辞だけ変える（落ちていないのに crash- が増えると「落ちた」と読み違える）。段の名前は `ShutdownStepFailedException` で包んで本文の 1 行目へ載せる。
-- ガード：`ShutdownChainExhaustiveTests`（4 段の成否 × 記録先の成否の全 32 組で、全段が順に実行され、失敗した段だけがその例外のまま記録され、例外を外へ出さない）・`LifecycleTests`（行 `steps-*`・`modules-*`・`crash-report-*`）・`FeatureModuleContractTests`（行 `module-*-launcher-needs-shutdown-failure-reporter`＝記録先は必須依存）・`FeatureModuleShutdownTests`（App.xaml.cs の配線）・`AiChatDialogForceCloseTests` の「ForceClose は設定保存が失敗してもエンジン破棄とクローズまで進む」・`MockGenerationDialogTests` の同等 1 件。
+- ガード：`ShutdownChainExhaustiveTests`（4 段の成否 × 記録先の成否の全 32 組で、全段が順に実行され、失敗した段だけがその例外のまま記録され、例外を外へ出さない）・`LifecycleTests`（行 `steps-*`・`modules-*`・`crash-report-*`）・`FeatureModuleContractTests`（行 `module-*-launcher-needs-shutdown-failure-reporter`＝記録先は必須依存）・`SourceRuleTests` の規則 `app-feature-module-shutdown-uses`・`app-feature-module-shutdown-bypasses`（App.xaml.cs の配線）・`AiChatDialogForceCloseTests` の「ForceClose は設定保存が失敗してもエンジン破棄とクローズまで進む」・`MockGenerationDialogTests` の同等 1 件。
 
 ### 終了条件はメインウィンドウへ紐づける
 - `ShutdownMode="OnMainWindowClose"`（App.xaml）と `MainWindow = window;` の明示（App.xaml.cs）は対で保つ。
   - AI チャット／モック生成のウィンドウは × で閉じず `Hide` するため、クローズ段が失敗して閉じ残ると、既定の `OnLastWindowClose` では見えるウィンドウが無いままプロセスが残る。
   - 明示代入が要るのは `Application.MainWindow` に入るのが「最初に構築された `Window`」だから。モジュールの初期化中に別の `Window` 派生（詳細ダイアログ等）が先に作られると、それを閉じた瞬間にアプリが終わる。
-  - ガード：`AppShutdownModeTests`。
+  - ガード：`SourceRuleTests` の規則 `app-shutdown-mode-declaration`・`app-shutdown-mode-overrides`・`app-main-window-assignment`。
 
 ### クラッシュ経路も同じ後始末を通す
 - `Environment.Exit` で終わるクラッシュ経路は `Closing` を通らないので、`App` は `FeatureModuleShutdownOnce`（1 回だけ実行のガード）を `Closing` とクラッシュ経路で共有する。
 - `CrashHandlingService.HandleCrash` の段は「緊急保存 → ログ → 機能モジュールの後始末 → 報告ダイアログ」。後始末をダイアログより前に置くのは、ダイアログを読んでいる間に落とされても孤児を残さないため。
 - 終了は `HandleUiCrash` が処理を担ったときだけ行う。報告ダイアログの入れ子のメッセージループで起きた 2 回目の UI 例外は終了させない（読んでいる報告を消さない）。
-- ガード：`LifecycleTests` の行 `crash-handle-failing-and-hanging-modules-reach-dialog-within-bound-hanging-cleanup`（投げる・ハングする後始末が混ざっても上限で戻りダイアログまで届く）・行 `crash-handle-ui-crash-reentry-during-dialog-exits-once-after-dialog-reentry`（ダイアログ表示中の再入は終了させない）・行 `modules-shutdown-once-second-call-does-nothing-reentry`（1 回だけ実行のガード）、`CrashHandlingServiceTests` の「App の UI 例外の受け皿は HandleUiCrash と後始末の共有インスタンスを使う」。
+- ガード：`LifecycleTests` の行 `crash-handle-failing-and-hanging-modules-reach-dialog-within-bound-hanging-cleanup`（投げる・ハングする後始末が混ざっても上限で戻りダイアログまで届く）・行 `crash-handle-ui-crash-reentry-during-dialog-exits-once-after-dialog-reentry`（ダイアログ表示中の再入は終了させない）・行 `modules-shutdown-once-second-call-does-nothing-reentry`（1 回だけ実行のガード）、`SourceRuleTests` の規則 `app-ui-crash-handler-uses`・`app-ui-crash-handler-bypasses`（App の UI 例外の受け皿は HandleUiCrash と後始末の共有インスタンスを使う）。

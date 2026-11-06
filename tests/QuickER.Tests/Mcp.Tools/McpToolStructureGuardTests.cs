@@ -1,28 +1,26 @@
-using System.IO;
 using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using QuickER.Cli;
 using QuickER.Dialects;
 using QuickER.Mcp;
 using QuickER.Mcp.Tools;
-using QuickER.Tests.Resources;
 using QuickER.Tests.TestSupport;
 using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Mcp.Tools;
 
 /// <summary>
-/// MCP ツールの「同じ知識を 1 か所に置く」ことを機械で見張る（方言の一覧・図の読み込みの決まり文句。
-/// ツール引数の読み取りとリレーションの種別の解釈は <see cref="QuickER.Tests.Mcp.ToolArgumentParsingGuardTests"/>）
+/// MCP ツールの「同じ知識を 1 か所に置く」ことを機械で見張る（方言の一覧）
 /// </summary>
+/// <remarks>
+/// ソースの走査は規則の表へ移した：図の読み込みの警告文は <c>SourceRuleTests</c> の規則 <c>newer-format-warning-text</c>、
+/// ツール引数の読み取りとリレーションの種別の解釈は規則 <c>tool-argument-parsing-copies</c>・<c>tool-argument-parsing-owners</c>。
+/// ここに残すのは、実行時のツール定義・型・値の構造の検査。
+/// </remarks>
 public sealed class McpToolStructureGuardTests
 {
     /// <summary>既知の失敗（32-4-P1 の現状）。直したら外し、区切りの最後に空にする</summary>
     private static readonly KnownCaseLedger Ledger = new("McpToolStructureGuardTests", []);
-
-    /// <summary>リポジトリのルート</summary>
-    private static readonly string Root = NeutralResxFiles.FindRepositoryRoot();
 
     [Fact(
         DisplayName = "ツールの説明に載る方言の一覧（create_diagram・generate_csharp・generate_ddl の enum と set_query の sql の説明）は、正本の一覧と一致する"
@@ -78,35 +76,6 @@ public sealed class McpToolStructureGuardTests
                 QuickER.Provider.Oracle.OracleProvider.ProviderName,
                 QuickER.Provider.Sqlite.SqliteProvider.ProviderName,
             ]);
-
-    [Fact(
-        DisplayName = "図を読むツールの「新しい版で保存された」の警告文は、ソースに 1 か所だけ書く（ER 図操作ツールとコード生成ツールで共有）"
-    )]
-    public void NewerFormatWarning_IsWrittenOnce() =>
-        Ledger.Run("NewerFormatWarning_IsWrittenOnce", NewerFormatWarning_IsWrittenOnceCore);
-
-    private void NewerFormatWarning_IsWrittenOnceCore()
-    {
-        var sources = Directory
-            .EnumerateFiles(Path.Combine(Root, "src"), "*.cs", SearchOption.AllDirectories)
-            .Where(path =>
-                !TestSupport.SourceFiles.IsBuildOutput(
-                    Path.GetRelativePath(Path.Combine(Root, "src"), path)
-                )
-            );
-        var hits = sources
-            .SelectMany(path =>
-                Regex
-                    .Matches(
-                        File.ReadAllText(path),
-                        Regex.Escape("Warning: this diagram was saved in a newer format")
-                    )
-                    .Select(_ => Path.GetFileName(path))
-            )
-            .ToList();
-
-        hits.Should().ContainSingle("文言を直すとき 1 か所で済み、ツールどうしで食い違わない");
-    }
 
     /// <summary>ツール定義の引数の enum を取り出す</summary>
     private static List<string> EnumOf(ToolDefinition definition, string property) =>

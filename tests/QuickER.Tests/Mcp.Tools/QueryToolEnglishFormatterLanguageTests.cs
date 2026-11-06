@@ -1,11 +1,10 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using QuickER.Mcp.Tools;
 using QuickER.Model;
+using QuickER.Tests.TestSupport.Guards;
 using Xunit;
 
 namespace QuickER.Tests.Mcp.Tools;
@@ -18,34 +17,16 @@ namespace QuickER.Tests.Mcp.Tools;
 /// <para>
 /// 外部 AI エージェント向け stdio MCP サーバはヘッドレス実行＝英語固定が正本。診断が resx 経由で
 /// ローカライズされる都合上、日本語 OS では英語応答に日本語診断が混ざる回帰が起きやすいためガードする。
+/// ここでは日本語 UI で英語の診断の文言が出ることを見る。同じ出力に日本語（CJK）が無いことは
+/// 英語の文言の表（<c>PhraseTests</c> の英語の行 <c>query-tool-english-formatter</c>）が見る。
 /// </para>
 /// <para>
 /// カルチャ切替はプロセス共有の静的 <c>Strings.Culture</c> を変更せず、スレッドローカルの
-/// <see cref="CultureInfo.CurrentUICulture"/> を try/finally で一時変更・復元して行う。
+/// UI 言語を <see cref="EnglishTextRows.UnderUiCulture"/> で一時変更・復元して行う。
 /// </para>
 /// </remarks>
 public class QueryToolEnglishFormatterLanguageTests
 {
-    /// <summary>CJK 文字の検出パターン（ErDiagramToolCatalogEnglishGuardTests と同じ範囲）</summary>
-    private static readonly Regex CjkPattern = TestSupport.CjkText.Pattern;
-
-    /// <summary>指定カルチャを CurrentUICulture に設定して関数を評価し、必ず元へ復元する</summary>
-    private static T WithCulture<T>(string culture, Func<T> body)
-    {
-        var previousUi = CultureInfo.CurrentUICulture;
-
-        try
-        {
-            CultureInfo.CurrentUICulture = new CultureInfo(culture);
-
-            return body();
-        }
-        finally
-        {
-            CultureInfo.CurrentUICulture = previousUi;
-        }
-    }
-
     /// <summary>単一テーブル（orders）だけの図を作る</summary>
     private static ErDiagram CreateDiagram()
     {
@@ -68,12 +49,10 @@ public class QueryToolEnglishFormatterLanguageTests
     private static JsonElement Args(object value) =>
         JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(value));
 
-    /// <summary>DSL 条件の検証エラーが、日本語 UI でも英語で出力されることを検証する</summary>
-    [Fact(DisplayName = "DSL 条件の診断は日本語 UI でも英語で出力される")]
-    public void FormatSetQuery_ConditionDiagnostic_IsEnglishUnderJapaneseUi()
-    {
-        var text = WithCulture(
-            "ja",
+    /// <summary>DSL 条件の検証エラーを、日本語 UI で英語フォーマッタへ通した出力</summary>
+    internal static string ConditionDiagnosticUnderJapaneseUi() =>
+        EnglishTextRows.UnderUiCulture(
+            EnglishTextRows.JapaneseUi,
             () =>
                 QueryToolEnglishFormatter.FormatSetQuery(
                     QueryToolCore.SetQuery(
@@ -91,18 +70,10 @@ public class QueryToolEnglishFormatterLanguageTests
                 )
         );
 
-        text.Should().Contain("Condition: ");
-        text.Should()
-            .Contain("The condition references column 'no_such_column', which does not exist");
-        CjkPattern.IsMatch(text).Should().BeFalse("MCP 面の応答は英語固定です: " + text);
-    }
-
-    /// <summary>生 SQL の警告が、日本語 UI でも英語で出力されることを検証する</summary>
-    [Fact(DisplayName = "生 SQL の診断は日本語 UI でも英語で出力される")]
-    public void FormatSetQuery_RawSqlDiagnostic_IsEnglishUnderJapaneseUi()
-    {
-        var text = WithCulture(
-            "ja",
+    /// <summary>生 SQL の警告を、日本語 UI で英語フォーマッタへ通した出力</summary>
+    internal static string RawSqlDiagnosticUnderJapaneseUi() =>
+        EnglishTextRows.UnderUiCulture(
+            EnglishTextRows.JapaneseUi,
             () =>
                 QueryToolEnglishFormatter.FormatSetQuery(
                     QueryToolCore.SetQuery(
@@ -125,8 +96,24 @@ public class QueryToolEnglishFormatterLanguageTests
                 )
         );
 
+    /// <summary>DSL 条件の検証エラーが、日本語 UI でも英語で出力されることを検証する</summary>
+    [Fact(DisplayName = "DSL 条件の診断は日本語 UI でも英語で出力される")]
+    public void FormatSetQuery_ConditionDiagnostic_IsEnglishUnderJapaneseUi()
+    {
+        var text = ConditionDiagnosticUnderJapaneseUi();
+
+        text.Should().Contain("Condition: ");
+        text.Should()
+            .Contain("The condition references column 'no_such_column', which does not exist");
+    }
+
+    /// <summary>生 SQL の警告が、日本語 UI でも英語で出力されることを検証する</summary>
+    [Fact(DisplayName = "生 SQL の診断は日本語 UI でも英語で出力される")]
+    public void FormatSetQuery_RawSqlDiagnostic_IsEnglishUnderJapaneseUi()
+    {
+        var text = RawSqlDiagnosticUnderJapaneseUi();
+
         text.Should().Contain("Warning: sqlite: ");
         text.Should().Contain("The declared parameter '@unused' is not used in the raw SQL.");
-        CjkPattern.IsMatch(text).Should().BeFalse("MCP 面の応答は英語固定です: " + text);
     }
 }

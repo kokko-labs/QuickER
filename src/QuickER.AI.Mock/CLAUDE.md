@@ -8,7 +8,7 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
 ### 保存単位とフォルダ
 
 - **保存単位はフォルダ**。`mock.json` マニフェスト（画面一覧・遷移・改訂履歴・スキーマスナップショット）＋画面ごとの `*.html` ＋共有 `style.css` のフラット構成（`MockFolderStore` / `MockManifest`）。
-- 書き込みはすべて `AtomicFile`（文字コードは BOM なし UTF-8 を明示）で行う。素の書き込みは src 全体の `RawFileWriteGuardTests` が拒否する。
+- 書き込みはすべて `AtomicFile`（文字コードは BOM なし UTF-8 を明示）で行う。素の書き込みは src 全体のソースの規則（`SourceRuleTests` の規則 `raw-file-writes`）が拒否する。
 - **変更はマニフェストの複製へ適用し、ファイル → `mock.json` の書き込みが成功してから保持中のマニフェストを差し替える。** 書けなかった変更がメモリに残って次の保存へ紛れ込まないため。ガード：`SaveScreen_ManifestWriteFails_DoesNotLeakIntoLaterSave`。
   - `RemoveScreen` だけは HTML の削除が先。`mock.json` で失敗しても remove のやり直しで自己回復する。
 - 新規作成の `mock.json` は置き換えない書き込み（`AtomicFile.CreateText`）で作る。存在の確認の後に別のプロセスが作った `mock.json` を上書きせず、事前の確認と同じ例外にする。ガード：`CreateNew_ManifestCreatedAfterCheck_KeepsForeignManifestAndThrows`。
@@ -130,7 +130,7 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
 - **保護フォルダ（`Generated/`・`design/`・`obj/`・`bin/`）の照合は綴りの別名に負けない形で行う。** Windows はセグメント末尾の `.` / 空白を落として開く（`Generated./x.cs` は `Generated/` へ書き込まれる）。8.3 短縮名（`GENERA~1`）でも同じフォルダを指せる。
   - 末尾が `.` / 空白のセグメントと `~` を含むセグメントを、共有の `PathSegments.CheckRelativePath` で拒否する（`src/QuickER.Platform/CLAUDE.md`「パスの名前の判定」を参照）。
   - さらに `Path.GetFullPath` で正規化した後の出力フォルダ相対セグメントでも照合する（`FindBlockedFolderInNormalizedPath`）。`GetFullPath` は末尾の `.` を 1 つしか落とさず空白も落とさないため、正規化後の照合だけでは足りない（実測）。二重化。
-- ガード：`PathEntranceTests`（OS との境界のエンジンのパスの入口の表の行 `emit-rejects-protected-folder-alias-*`・`emit-wpf-accepts-legitimate-path-after-alias-guards-*`・`find-blocked-folder-*`＝正規化後の照合を単独で見る）。mutation 実証済み（`Generated./x.cs` / `design./mock/x.cs` は正規化後の照合が拾って、末尾検査だけを外しても緑のまま）。
+- ガード：`PathEntranceTests`（OS との境界のエンジンのパスの入口の表の行 `emit-rejects-protected-folder-alias`・`emit-*-accepts-legitimate-path-after-alias-guards`・`find-blocked-folder-*`＝正規化後の照合を単独で見る）。mutation 実証済み（`Generated./x.cs` / `design./mock/x.cs` は正規化後の照合が拾って、末尾検査だけを外しても緑のまま）。
 
 ### ForceClose
 

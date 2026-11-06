@@ -1,13 +1,6 @@
 using System.Globalization;
-using System.IO;
-using System.Text.RegularExpressions;
 using AwesomeAssertions;
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using QuickER.Provider;
-using QuickER.Tests.Resources;
-using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Provider;
 
@@ -16,7 +9,8 @@ namespace QuickER.Tests.Provider;
 /// </summary>
 /// <remarks>
 /// GUI（DB 取込の内訳）と CLI（<c>quicker scaffold</c> の stderr）は同じ文言を出す。表示側に種別ごとの文言を
-/// 持たせない（持たせると片方だけ直して文言が食い違う）ことを、ソースの走査で固定する。
+/// 持たせない（持たせると片方だけ直して文言が食い違う）ことは、ソースの走査で固定する（SourceRuleTests の規則
+/// <c>schema-import-warning-kind-branches</c>）。
 /// カルチャはスレッドの <see cref="CultureInfo.CurrentUICulture"/> を try/finally で切り替える（静的な <c>Strings.Culture</c> は変えない）。
 /// </remarks>
 public sealed class SchemaImportWarningTextTests
@@ -75,54 +69,6 @@ public sealed class SchemaImportWarningTextTests
             );
 
         act.Should().Throw<ArgumentOutOfRangeException>();
-    }
-
-    [Fact(
-        DisplayName = "取込警告の種別で分岐する switch・パターンは src/QuickER.Provider の外に無い（文言は 1 か所）"
-    )]
-    public void NoSwitchOnWarningKind_OutsideProvider()
-    {
-        var root = NeutralResxFiles.FindRepositoryRoot();
-        var hits = SourceFiles
-            .Enumerate("src")
-            .Where(file =>
-                !file.AreaRelativePath.StartsWith(
-                    "QuickER.Provider/",
-                    StringComparison.OrdinalIgnoreCase
-                )
-            )
-            .Select(file => file.FullPath)
-            .SelectMany(path =>
-                ConditionalSourceParse
-                    .DescendantNodes(
-                        ConditionalSourceParse.Parse(
-                            File.ReadAllText(path),
-                            cancellationToken: TestContext.Current.CancellationToken
-                        ),
-                        TestContext.Current.CancellationToken
-                    )
-                    // 種別で分岐する形（switch のアームの定数パターン・is のパターン・case ラベル・== / != の比較）だけを見る。
-                    // 種別を作る式（方言のインポータの「"view" => ViewExcluded」の右辺）は分岐ではない
-                    .Where(node =>
-                        node is CaseSwitchLabelSyntax or ConstantPatternSyntax
-                        || node.IsKind(SyntaxKind.EqualsExpression)
-                        || node.IsKind(SyntaxKind.NotEqualsExpression)
-                    )
-                    .Where(node =>
-                        node.ToString()
-                            .Contains("SchemaImportWarningKind.", StringComparison.Ordinal)
-                    )
-                    .Select(node =>
-                        $"{Path.GetRelativePath(root, path)}: {node.ToString().Split('\n')[0].Trim()}"
-                    )
-            )
-            .ToList();
-
-        string.Join(Environment.NewLine, hits)
-            .Should()
-            .BeEmpty(
-                "取込警告の文言は SchemaImportWarningText.Describe が持ち、表示側は種別で分岐しない"
-            );
     }
 
     private static T WithCulture<T>(string culture, Func<T> body)

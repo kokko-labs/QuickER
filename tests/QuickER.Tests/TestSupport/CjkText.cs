@@ -8,7 +8,7 @@ namespace QuickER.Tests.TestSupport;
 /// <remarks>
 /// 範囲は U+3000〜U+9FFF（CJK の記号・かな・漢字など）と U+FF00〜U+FFEF（全角と半角の形）。
 /// 英語ガードのテストごとに同じ正規表現を書くと、範囲を直すときに 1 か所だけ取り残される。写しを置かないことは
-/// <c>CjkPatternGuardTests</c> がテストのソースの走査で固定する。
+/// SourceRuleTests の規則 <c>cjk-range-copies</c> がテストのソースの走査で固定する。
 /// </remarks>
 public static class CjkText
 {
