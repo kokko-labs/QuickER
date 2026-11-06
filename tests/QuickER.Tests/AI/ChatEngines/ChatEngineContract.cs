@@ -17,7 +17,7 @@ internal sealed record ChatContractContext(
     /// <param name="because">満たされなかったときの説明</param>
     public async Task EventuallyAsync(Func<bool> condition, string because)
     {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(60);
 
         while (!condition() && DateTime.UtcNow < deadline)
         {

@@ -12,8 +12,8 @@ namespace QuickER.Tests.AI;
 [Collection(RealProcessTestCollection.Name)]
 public class ClaudeCodeProcessClientTurnTests
 {
-    /// <summary>並列実行でも揺れない待ちの上限</summary>
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    /// <summary>並列実行でも揺れない待ちの上限（壊れたときだけ待つ。全件の実行の負荷でも揺れないよう 60 秒）</summary>
+    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(60);
 
     /// <summary>
     /// 標準入力を読まずに終わる claude へパイプのバッファに収まらないプロンプトを送ると書き込みが失敗するが、

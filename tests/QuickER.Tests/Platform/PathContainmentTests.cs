@@ -92,6 +92,11 @@ public sealed record PathContainmentRow(
         {
             Form = PathContainmentForm.SiblingPrefix,
         },
+        // 名前の前方が一致するだけの兄弟のフォルダ（区切りに似た文字で続く。モックの design と design-copy の形）
+        new(@"C:\root-copy", @"C:\root", false, false, false)
+        {
+            Form = PathContainmentForm.SiblingPrefix,
+        },
         new(@"C:\root\..\other\a.html", @"C:\root", false, false, false)
         {
             Form = PathContainmentForm.DotDotEscape,

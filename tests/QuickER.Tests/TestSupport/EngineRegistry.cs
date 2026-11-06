@@ -55,5 +55,14 @@ internal static class EngineRegistry
         Gui.Services.Lifecycle.ShutdownChainExhaustiveDimensions.Descriptor,
         Extensibility.FeatureModuleContractDimensions.Descriptor,
         Db.UI.ProfileStoreDimensions.Descriptor,
+        AI.Mock.Agents.MockAgentDimensions.Descriptor,
+        AI.Mock.Runner.MockRunnerDimensions.Descriptor,
+        AI.Mock.BuildBoundary.MockBuildBoundaryDimensions.Descriptor,
+        AI.Mock.Scaffold.MockScaffoldDimensions.Descriptor,
+        AI.Mock.Folder.MockFolderDimensions.Descriptor,
+        AI.Mock.Outputs.MockOutputsDimensions.Descriptor,
+        AI.Mock.Dialog.MockDialogDimensions.Descriptor,
+        Db.UI.ConnectionDialog.ConnectionDialogDimensions.Descriptor,
+        Db.UI.ImportSync.ImportSyncDimensions.Descriptor,
     ];
 }

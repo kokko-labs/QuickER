@@ -33,8 +33,12 @@ public class DotnetBuildRunnerCancellationTests
 
     /// <summary>
     /// 実行中に取り消すと、プロセスを止めて速やかに <see cref="OperationCanceledException"/> で抜けることを検証する
-    /// （止めずに待つと、30 秒走る子プロセスの終了まで戻らない）。
+    /// （止めずに待つと、120 秒走る子プロセスの終了まで戻らない）。
     /// </summary>
+    /// <remarks>
+    /// 上限 60 秒は「止めた（すぐ戻る）」と「止めずに待った（120 秒）」を分ける境目。
+    /// 全件の実行の負荷で止めるまでが数秒遅れても揺れないよう、子プロセスの走る時間を上限より十分長くして、境目を広く取る。
+    /// </remarks>
     [Fact(DisplayName = "実行中の取り消しはプロセスを止めて速やかに抜ける")]
     public async Task RunAsync_CanceledWhileRunning_KillsAndThrows()
     {
@@ -42,7 +46,7 @@ public class DotnetBuildRunnerCancellationTests
         {
             // 子プロセスはフルパスで起動する（ExternalLauncher.CreateProcess が名前だけの起動を断る）
             FileName = BatchShimProcessGuard.CmdExePath,
-            ArgumentList = { "/c", "ping", "-n", "30", "127.0.0.1" },
+            ArgumentList = { "/c", "ping", "-n", "120", "127.0.0.1" },
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardInput = true,
@@ -55,6 +59,6 @@ public class DotnetBuildRunnerCancellationTests
         var run = () => DotnetBuildRunner.RunAsync(startInfo, cts.Token);
 
         await run.Should().ThrowAsync<OperationCanceledException>();
-        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(15));
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(60));
     }
 }

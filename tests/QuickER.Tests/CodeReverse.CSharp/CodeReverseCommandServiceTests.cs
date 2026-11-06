@@ -16,7 +16,7 @@ namespace QuickER.Tests.CodeReverse.CSharp;
 /// <see cref="CodeReverseCommandService"/> の取込フロー（キャンセル中止・クエリ生存・0 件エラー提示）を検証する。
 /// </summary>
 /// <remarks>
-/// <c>DbImportCommandServiceTests</c> の流儀を踏襲し、ホストは <see cref="StubErDiagramHost"/>、
+/// DB 取込の表（<c>ImportSyncTests</c>）と同じく、ホストは <see cref="StubErDiagramHost"/>、
 /// ファイル選択・ダイアログはテスト用スタブへ差し替える。取込元 C# は実生成物を一時ファイルへ書き出す。
 /// </remarks>
 public class CodeReverseCommandServiceTests

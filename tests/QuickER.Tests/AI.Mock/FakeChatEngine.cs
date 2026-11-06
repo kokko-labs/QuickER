@@ -124,7 +124,14 @@ internal sealed class FakeChatEngine : IErChatEngine
         return Task.CompletedTask;
     }
 
-    public Task InterruptAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    /// <summary>InterruptAsync が呼ばれた回数（中断がエンジンへ届いたかの検証用）</summary>
+    public int InterruptCount { get; private set; }
+
+    public Task InterruptAsync(CancellationToken cancellationToken = default)
+    {
+        InterruptCount++;
+        return Task.CompletedTask;
+    }
 
     /// <summary>DisposeAsync が呼ばれた回数（アプリ終了時のエンジン破棄の検証用）</summary>
     public int DisposeCount { get; private set; }

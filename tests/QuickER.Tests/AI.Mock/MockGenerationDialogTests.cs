@@ -136,6 +136,8 @@ public class MockGenerationDialogTests
     {
         Exception? captured = null;
         var generator = new InterruptRecordingGenerator();
+        // ForceClose は設定を保存する（保存先を作って書く）ので、行ごとの一時フォルダの下に置いて消す
+        using var folder = new TestTempFolder();
 
         var thread = new Thread(() =>
         {
@@ -143,11 +145,7 @@ public class MockGenerationDialogTests
             {
                 WpfApplicationTestSupport.EnsureApplicationResources();
 
-                var settingsFolder = Path.Combine(
-                    Path.GetTempPath(),
-                    "QuickERTests",
-                    Guid.NewGuid().ToString("N")
-                );
+                var settingsFolder = folder.Path;
                 var keyStore = new InMemoryApiKeyStore();
                 var viewModel = new MockGenerationDialogViewModel(
                     new StubDiagramSource(new ErDiagram()),
@@ -352,11 +350,9 @@ public class MockGenerationDialogTests
         var claudeCode = new DisposeTrackingClaudeCodeClient();
         var copilot = new FakeCopilotRuntimeClient();
         var reporter = new RecordingShutdownFailureReporter();
-        var settingsFolder = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTests",
-            Guid.NewGuid().ToString("N")
-        );
+        // ForceClose は設定を保存する（保存先を作って書く）ので、一時フォルダの下に置いて消す
+        using var folder = new TestTempFolder();
+        var settingsFolder = folder.Path;
 
         var captured = RunOnSta(() =>
             CreateDialogWithProbes(
@@ -491,11 +487,9 @@ public class MockGenerationDialogTests
     [Fact(DisplayName = "接続状態の確認が失敗してもウィンドウの外へ漏れずステータスに出る")]
     public void ProbeFailure_IsReportedInStatus_NotThrown()
     {
-        var settingsFolder = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTests",
-            Guid.NewGuid().ToString("N")
-        );
+        // 終わりの ForceClose は設定を保存する（保存先を作って書く）ので、一時フォルダの下に置いて消す
+        using var folder = new TestTempFolder();
+        var settingsFolder = folder.Path;
         string? statusAfterTab = null;
         string? statusAfterRefresh = null;
 
@@ -783,11 +777,9 @@ public class MockGenerationDialogTests
     [Fact(DisplayName = "モックフォルダ欄は入力が止まってから確定する")]
     public void MockFolderBox_CommitsAfterTypingPauses()
     {
-        var baseFolder = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTests",
-            Guid.NewGuid().ToString("N")
-        );
+        // 終わりの ForceClose は設定を保存する（保存先を作って書く）ので、一時フォルダの下に置いて消す
+        using var folder = new TestTempFolder();
+        var baseFolder = folder.Path;
         var target = Path.Combine(baseFolder, "mock");
         string? immediately = null;
         string? later = null;
@@ -822,11 +814,9 @@ public class MockGenerationDialogTests
     [Fact(DisplayName = "モックフォルダ欄は Enter で即座に確定する")]
     public void MockFolderBox_CommitsOnEnter()
     {
-        var baseFolder = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTests",
-            Guid.NewGuid().ToString("N")
-        );
+        // 終わりの ForceClose は設定を保存する（保存先を作って書く）ので、一時フォルダの下に置いて消す
+        using var folder = new TestTempFolder();
+        var baseFolder = folder.Path;
         var target = Path.Combine(baseFolder, "mock");
         string? afterEnter = null;
 
@@ -1027,11 +1017,9 @@ public class MockGenerationDialogTests
     [Fact(DisplayName = "モック生成の API キー欄は離れた時点でキーを保存する")]
     public void ApiKeyBox_SavesKeyWhenFocusLeaves()
     {
-        var baseFolder = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTests",
-            Guid.NewGuid().ToString("N")
-        );
+        // 終わりの ForceClose は設定を保存する（保存先を作って書く）ので、一時フォルダの下に置いて消す
+        using var folder = new TestTempFolder();
+        var baseFolder = folder.Path;
         var keyStore = new InMemoryApiKeyStore();
         var savedWhileTyping = true;
         string? savedAfterLeaving = null;

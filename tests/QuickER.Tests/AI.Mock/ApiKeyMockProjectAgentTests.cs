@@ -1,12 +1,8 @@
 using System.IO;
-using System.Text.Json;
 using AwesomeAssertions;
 using QuickER.AI;
 using QuickER.AI.Mock;
-using QuickER.Model;
-using QuickER.Provider;
-using QuickER.Provider.Sqlite;
-using QuickER.Provider.SqlServer;
+using QuickER.Tests.AI.Mock.Agents;
 using MockStrings = QuickER.AI.Mock.Resources.Strings;
 
 namespace QuickER.Tests.AI.Mock;
@@ -20,79 +16,17 @@ public class ApiKeyMockProjectAgentTests
 {
     private const string Project = "MockApp";
 
-    /// <summary>スクリプト化したビルド結果（成否）をキューで返すフェイクビルド検証器</summary>
-    private sealed class QueueBuildRunner : IBuildRunner
-    {
-        public Queue<bool> Results { get; } = new();
-        public string Output { get; set; } = "BUILD_OUTPUT_CS1002";
-        public int BuildCallCount { get; private set; }
-
-        public Task<BuildRunResult> BuildAsync(
-            string workingDirectory,
-            CancellationToken cancellationToken = default
-        )
-        {
-            BuildCallCount++;
-            var success = Results.Count > 0 ? Results.Dequeue() : true;
-            return Task.FromResult(new BuildRunResult(success, Output));
-        }
-
-        public Task<bool> IsDotnetAvailableAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(true);
-    }
-
-    private static string ScreenHtml(string marker) =>
-        "<!DOCTYPE html><html><head><link rel=\"stylesheet\" href=\"style.css\"></head>"
-        + $"<body><h1>{marker}</h1></body></html>";
+    private static string ScreenHtml(string marker) => ApiKeyMockMaterials.ScreenHtml(marker);
 
     /// <summary>emit_file の引数 JSON を組み立てる</summary>
     private static (string Tool, string Args) Emit(string path, string content = "<x/>") =>
-        (MockProjectEmitTools.EmitFileToolName, JsonSerializer.Serialize(new { path, content }));
+        ApiKeyMockMaterials.Emit(path, content);
 
     /// <summary>スキャフォールド相当の素材（design/mock/ の mock.json・画面 HTML・style.css＋Generated/ の契約）を用意する</summary>
     private static string SetupScaffold(
         string work,
         params (string File, string Name, string Marker)[] screens
-    )
-    {
-        var projectDir = Path.Combine(work, Project);
-        var designDir = Path.Combine(projectDir, "design", "mock");
-        Directory.CreateDirectory(designDir);
-
-        var store = MockFolderStore.CreateNew(
-            designDir,
-            Project,
-            sourceSchema: "SCHEMA-TEXT: Customer(Id, Name)"
-        );
-
-        foreach (var (file, name, marker) in screens)
-        {
-            store.SaveScreen(
-                file,
-                name,
-                $"role of {name}",
-                ScreenHtml(marker),
-                Array.Empty<MockTransition>(),
-                "init"
-            );
-        }
-
-        store.SaveStylesheet("body { color: #111; } /* CSS-MARKER */", "css");
-
-        // データ層（契約要約の抽出対象）
-        var generatedDir = Path.Combine(projectDir, "Generated");
-        Directory.CreateDirectory(generatedDir);
-        File.WriteAllText(
-            Path.Combine(generatedDir, "Repositories.cs"),
-            "namespace Gen;\n"
-                + "public interface ICustomerRepository\n{\n"
-                + "    Task<Customer> GetByIdAsync(int id);\n"
-                + "    Task<IReadOnlyList<Customer>> GetAllAsync();\n}\n"
-                + "public sealed class Customer { public int Id { get; set; } }\n"
-        );
-
-        return work;
-    }
+    ) => ApiKeyMockMaterials.Setup(work, Project, screens);
 
     private static string NewWork()
     {
@@ -241,60 +175,6 @@ public class ApiKeyMockProjectAgentTests
                 .Contain("assign the primary key in the application");
             profileBox[0].BuildSystemPrompt().Should().Contain("GuidKey");
             profileBox[0].BuildSystemPrompt().Should().Contain("NuGet.Config");
-        }
-        finally
-        {
-            Cleanup(work);
-        }
-    }
-
-    /// <summary>Blazor プロファイルでは API キー用システムプロンプトに Blazor 固有規約と共有規約が入ることを検証する</summary>
-    [Fact(DisplayName = "Blazor はシステムプロンプトに Blazor 規約と共有規約を含む")]
-    public async Task RunAsync_BlazorProfile_SystemPromptFragments()
-    {
-        var work = NewWork();
-        SetupScaffold(work, ("OrderList.html", "Order List", "MARKER_S1"));
-
-        var (factory, engineBox, profileBox) = BuildFactory(
-            new IReadOnlyList<(string, string)>[]
-            {
-                new[] { Emit("MockApp/Program.cs"), Emit("MockApp/Components/App.razor") },
-                new[] { Emit("MockApp/Components/Pages/OrderList.razor") },
-            }
-        );
-        var build = new QueueBuildRunner();
-        build.Results.Enqueue(true);
-
-        var agent = new ApiKeyMockProjectAgent(factory, build);
-
-        try
-        {
-            var outcome = await agent.RunAsync(
-                BlazorRequest(work),
-                _ => { },
-                TestContext.Current.CancellationToken
-            );
-
-            outcome.Success.Should().BeTrue();
-
-            var system = profileBox[0].BuildSystemPrompt();
-            system.Should().Contain(".razor");
-            system.Should().Contain("@page");
-            system.Should().Contain("InteractiveServer");
-            system.Should().Contain("style.css");
-
-            // 共有規約（Blazor でも変わらず入る）
-            system.Should().Contain("assign the primary key in the application");
-            system.Should().Contain("NuGet.Config");
-
-            // Blazor プロファイルなので WPF 固有の MVVM 依存語彙・XAML パス例は出ない
-            // （emit_file のパス例もプロファイル供給＝ApiKeyEmitPathExamples）
-            system.Should().NotContain("CommunityToolkit");
-            system.Should().NotContain(".xaml");
-            system.Should().Contain("Components/Pages/OrderList.razor");
-
-            // 共通部プロンプトにも Blazor 固有の提出ファイル案内が入る
-            engineBox[0].SentPrompts[0].Should().Contain("Components/App.razor");
         }
         finally
         {
@@ -532,156 +412,6 @@ public class ApiKeyMockProjectAgentTests
         finally
         {
             Cleanup(work);
-        }
-    }
-
-    /// <summary>キャンセルされたトークンでは OCE を伝播することを検証する</summary>
-    [Fact(DisplayName = "キャンセルで OCE を伝播")]
-    public async Task RunAsync_Cancellation_Throws()
-    {
-        var work = NewWork();
-        SetupScaffold(work, ("OrderList.html", "Order List", "MARKER_S1"));
-
-        var (factory, _, _) = BuildFactory(
-            new IReadOnlyList<(string, string)>[] { new[] { Emit("MockApp/App.xaml") } }
-        );
-        var build = new QueueBuildRunner();
-        build.Results.Enqueue(true);
-
-        var agent = new ApiKeyMockProjectAgent(factory, build);
-        using var cts = new CancellationTokenSource();
-        cts.Cancel();
-
-        try
-        {
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-                await agent.RunAsync(Request(work), _ => { }, cts.Token)
-            );
-        }
-        finally
-        {
-            Cleanup(work);
-        }
-    }
-
-    /// <summary>可用性は常に true・実行前の中断は無害（例外なし）であることを検証する</summary>
-    [Fact(DisplayName = "IsAvailable=true・実行前中断は無害")]
-    public async Task Availability_AndInterruptBeforeRun()
-    {
-        var (factory, _, _) = BuildFactory(Array.Empty<IReadOnlyList<(string, string)>>());
-        var agent = new ApiKeyMockProjectAgent(factory, new QueueBuildRunner());
-
-        agent.IsAvailable().Should().BeTrue();
-        await agent.InterruptAsync();
-    }
-
-    /// <summary>
-    /// 実際のスキャフォールドの上で走らせると、共通部のリクエストに書き出したファイルの実際の名前空間と登録メソッドの所在が入り、
-    /// システムプロンプトに using を書く規約（ターゲットの流儀）が入ることを検証する。
-    /// </summary>
-    [Theory(
-        DisplayName = "実スキャフォールドでは共通部のリクエストに名前空間と using の規約が入る"
-    )]
-    [InlineData("blazor")]
-    [InlineData("wpf")]
-    public async Task RunAsync_RealScaffold_CommonPromptNamesNamespaces(string target)
-    {
-        var work = NewWork();
-        var mock = NewWork();
-
-        try
-        {
-            var store = MockFolderStore.CreateNew(mock, Project, "# schema");
-            store.SaveScreen(
-                "CustomerList.html",
-                "Customer List",
-                "role",
-                ScreenHtml("MARKER_S1"),
-                Array.Empty<MockTransition>(),
-                "init"
-            );
-            var profile =
-                target == "blazor" ? MockProjectTargetProfile.Blazor : MockProjectTargetProfile.Wpf;
-            var diagram = new ErDiagram
-            {
-                TargetDbms = SqlServerProvider.ProviderName,
-                Entities =
-                [
-                    new Entity
-                    {
-                        Id = Guid.NewGuid(),
-                        TableName = "customers",
-                        Columns =
-                        [
-                            new Column
-                            {
-                                Id = Guid.NewGuid(),
-                                Name = "customer_id",
-                                DataType = "int",
-                                IsPrimaryKey = true,
-                                IsNullable = false,
-                            },
-                        ],
-                    },
-                ],
-            };
-            var scaffold = new MockProjectScaffoldService(
-                new DatabaseProviderRegistry([new SqlServerProvider(), new SqliteProvider()])
-            ).Scaffold(diagram, work, Project, mock, profile);
-
-            var (factory, engineBox, profileBox) = BuildFactory(
-                new IReadOnlyList<(string, string)>[]
-                {
-                    new[] { Emit("MockApp/Program.cs", "class P {}") },
-                    new[] { Emit("MockApp/CustomerList.cs", "class C {}") },
-                }
-            );
-            var build = new QueueBuildRunner();
-            build.Results.Enqueue(true);
-            var request = target == "blazor" ? BlazorRequest(work) : Request(work);
-
-            var outcome = await new ApiKeyMockProjectAgent(factory, build).RunAsync(
-                request,
-                _ => { },
-                TestContext.Current.CancellationToken
-            );
-
-            outcome.Success.Should().BeTrue();
-            var generated = scaffold.GeneratedDirectory;
-            var entities = GeneratedNamespaceDeclarations.OfFileContaining(
-                generated,
-                "class CustomerEntity"
-            );
-            var contracts = GeneratedNamespaceDeclarations.OfFileContaining(
-                generated,
-                "interface ICustomerRepository"
-            );
-            var inMemory = GeneratedNamespaceDeclarations.OfFileContaining(
-                generated,
-                "IServiceCollection AddGeneratedInMemoryRepositories("
-            );
-
-            var common = engineBox[0].SentPrompts[0];
-            common.Should().Contain($"- {entities}: Entities.g.cs");
-            common.Should().Contain($"- {contracts}: Repositories.g.cs");
-            common.Should().Contain($"- AddGeneratedInMemoryRepositories (namespace {inMemory})");
-
-            var system = profileBox[0].BuildSystemPrompt();
-            system.Should().Contain("the parent namespace ending in .Generated declares no types");
-
-            if (target == "blazor")
-            {
-                system.Should().Contain("In Components/_Imports.razor, add `@using` lines");
-            }
-            else
-            {
-                system.Should().Contain("In App.xaml.cs, add a `using`");
-            }
-        }
-        finally
-        {
-            Cleanup(work);
-            Cleanup(mock);
         }
     }
 

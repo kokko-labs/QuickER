@@ -196,7 +196,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **説明の空欄の判定は `DescriptionText` だけ、BMP の外の文字は方言の宣言で扱う**：経路ごとに判定すると適用直後に偽の差分が出る。ガード：`BlankDescriptionTests`・`DescriptionStoredTextTests`・`DialectDdlTableTests`（行 `ddl-description-*`・`sync-other-description-*`）・期待の行 `diff-blank-description-*`・`diff-description-stored-form-*`・`plan-description-characters-replaced-*`。→ `src/QuickER.Provider/CLAUDE.md`「説明の空欄と表せない文字」
 - **方言が表せない参照アクションは比べる前に実効値へ畳む**：取り込み直すたびに作り直しの差分が出る。ガード：`OracleTypeNotationIntegrationTests.UnsupportedReferentialActions_LeaveNoForeignKeyDiff`・期待の行 `realdb-mysql-set-default-is-omitted-and-leaves-no-fk-diff`・`DialectDdlTableTests`（行 `ddl-fk-on-delete-set-default-omitted-with-note-oracle`・`ddl-fk-set-default-omitted-with-note-mysql`）。→ `src/QuickER.Provider/CLAUDE.md`「参照アクションの畳み込み」
 - **計算列の NULL 許容は差分に出さず、主キーと同じ列集合の一意制約は持てない方言で比較から外して DDL で省く**：比べると意味のない ALTER COLUMN や永久に消えない差分が出る。ガード：`DialectDdlTableTests`（行 `ddl-unique-on-primary-key-columns-omitted-where-unsupported`）・`OracleDdlRoundTripIntegrationTests.UniqueConstraintOnPrimaryKey_IsOmittedAndApplies`。→ `src/QuickER.Provider/CLAUDE.md`「計算列と主キーと同じ列集合の一意制約」
-- **列の変更は図に無い列属性をカタログから読み直して保ち、既定値のある列の型の種類の変更は警告する**：保たないと照合順序・既定値・生成列の式が黙って消える。ガード：`MySqlColumnAttributeSyncIntegrationTests`・`PostgreSqlColumnAttributeSyncIntegrationTests`・`SchemaSyncDialogViewModelTests.Execute_TypeKindChangeWithDefault_ShowsWarningFromImportedDefaults`・`OracleImportFidelityIntegrationTests.Import_EmptyStringAndParenthesizedNullDefaults_AreNotDefaults`。→ `src/QuickER.Provider/CLAUDE.md`「列の変更が保つ属性」
+- **列の変更は図に無い列属性をカタログから読み直して保ち、既定値のある列の型の種類の変更は警告する**：保たないと照合順序・既定値・生成列の式が黙って消える。ガード：`MySqlColumnAttributeSyncIntegrationTests`・`PostgreSqlColumnAttributeSyncIntegrationTests`・`ImportSyncTests`（行 `sync-dialog-type-kind-change-with-default-warns-from-imported-defaults`）・`OracleImportFidelityIntegrationTests.Import_EmptyStringAndParenthesizedNullDefaults_AreNotDefaults`。→ `src/QuickER.Provider/CLAUDE.md`「列の変更が保つ属性」
 - **SQLite の再構築の合成は live の列オブジェクトを保ち、失う属性を警告し、写す列が無くても行を保つ**：図の列へ差し替えると一意制約が消え主キーの順序が変わる。ガード：`TableRebuildAttributeDetectorTests`・`SqliteSyncScriptBuilderTests`。→ `src/QuickER.Provider/CLAUDE.md`「テーブル再構築の合成」
 - **SQLite の同期実行器は外部キー違反とビューの破損を前後で比べ、PRAGMA を元へ戻す**：既存の孤児行で無関係な同期が失敗し、戻さないとプールの接続が外部キー検査なしになる。ガード：`SqliteSchemaSyncIntegrationTests`。→ `src/QuickER.Provider.Sqlite/CLAUDE.md`「同期実行器」
 
@@ -397,7 +397,8 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **フィーチャーモジュール方式：Gui は機能の型を知らず、依存は「プラグイン → 契約 ← ホスト」、`FeatureToolbarItem` の BeginsGroup は起動時のみ反映**：機能プロジェクトが Gui に混ざる／実行中に変えても折返しが変わらない。ガード：`FeatureToolbarGroupTests`。→ `src/QuickER.Extensibility/CLAUDE.md`「フィーチャーモジュール方式」「FeatureToolbarItem」
 - **`IErDiagramHost` の能力（IsDirty・DiagramRevision・ReplaceDiagram・ReplaceQueries・イベント）と、列リネーム時のクエリ条件追従（`QueryConditionRenameFollower`、読めない新名は書き換えない）**：機能側が図を壊す／Undo で条件が戻らない。ガード：`QueryConditionRenameFollowerTests`・`MainViewModelErDiagramHostTests`。→ `src/QuickER.Extensibility/CLAUDE.md`「IErDiagramHost」「列リネームのクエリ条件追従」
 - **同梱構成は `IncludeDbToolModules` / `IncludeAiModules` / `IncludeCodeGenModules` で独立に外せる**：外した構成で依存が残る。→ `src/QuickER.Extensibility/CLAUDE.md`「同梱構成」
-- **接続プロファイルの暗号ファイルは「消すのは JSON の書き込みの前・書くのは後」**：新しい接続先と古いパスワードの組が残り、前の接続先の資格情報を別のサーバーへ送る。ガード：`ProfileStoreTests`（行 `pairing-*`）・`DbConnectionDialogViewModelTests`。→ `src/QuickER.Db.UI/CLAUDE.md`「接続プロファイルの暗号ファイルの順序」
+- **接続プロファイルの暗号ファイルは「消すのは JSON の書き込みの前・書くのは後」**：新しい接続先と古いパスワードの組が残り、前の接続先の資格情報を別のサーバーへ送る。ガード：`ProfileStoreTests`（行 `pairing-*`）・`ConnectionDialogTests`（行 `delete-secret-delete-fails-*`・`rename-replaced-secret-delete-fails-*`・`ok-last-used-secret-write-fails-*`）。→ `src/QuickER.Db.UI/CLAUDE.md`「接続プロファイルの暗号ファイルの順序」
+- **接続ダイアログは同期モードで方言を固定し、接続テスト中は確定できず、ストアの失敗で一覧をディスクの実体どおりに保つ。DB 取込は世代が同じときだけ図を置き換えて終端の通知をちょうど 1 件出し、同期のダイアログは確認を断ったら実行器を呼ばず、取り直しに失敗したら古いスクリプトを残さない**：固定した方言と違う接続先へ DDL を流す・確認の間の変更を古い取込結果で上書きする・取り直せなかった古いスクリプトを流す。ガード：`ConnectionDialogTests`・`ImportSyncTests`（どの行でも組が見張る）。→ `src/QuickER.Db.UI/CLAUDE.md`「ダイアログとコマンドの状態の不変条件」
 
 ### MCP
 
@@ -424,14 +425,15 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 
 ### AI モック生成
 
-- **モックフォルダの書き込みは `AtomicFile` で、ファイル → `mock.json` の順に成功してからマニフェストを差し替える**：書けなかった変更が次の保存へ紛れ込む。ガード：`MockFolderDesignSessionTests`。→ `src/QuickER.AI.Mock/CLAUDE.md`「保存単位とフォルダ」
-- **初回ターンは成功で終わったときだけ済みにする**：失敗を済みにすると開始プロンプトが届かず、次の再開が「変更なし」になる。ガード：`MockFolderDesignSessionTests`・`MockGenerationDialogViewModelTests`。→ `src/QuickER.AI.Mock/CLAUDE.md`「初回ターン」
+- **モックフォルダの書き込みは `AtomicFile` で、ファイル → `mock.json` の順に成功してからマニフェストを差し替える**：書けなかった変更が次の保存へ紛れ込む。ガード：`MockFolderTests`（どの手の後にも「失敗した手は mock.json もメモリも変えない」を見張る・行 `save-screen-manifest-write-failure-does-not-leak-into-later-save`）。→ `src/QuickER.AI.Mock/CLAUDE.md`「保存単位とフォルダ」
+- **初回ターンは成功で終わったときだけ済みにする**：失敗を済みにすると開始プロンプトが届かず、次の再開が「変更なし」になる。ガード：`MockFolderTests`（行 `session-start-*`・`session-feedback-*`）・`MockDialogTests`（どの行でも組が見張る・行 `converse-first-turn-*`）。→ `src/QuickER.AI.Mock/CLAUDE.md`「初回ターン」
+- **モック生成のダイアログは、ターン中に接続方式とモックフォルダを変えず、作ったエンジンをちょうど 1 回破棄し、生成の可否と無効の理由を食い違わせない**：変えるとセッションを切り離して完了が届かずダイアログが固まり、破棄が漏れると常駐の子プロセスが残る。ガード：`MockDialogTests`（どの行でも組 `MockDialogHarness` が見張る）。→ `src/QuickER.AI.Mock/CLAUDE.md`「ダイアログの状態の不変条件」
 - **モックのプレビューは遷移をフォルダ直下の html に限り、サブリソースを既定拒否し、ダウンロードを取り消す**：AI の HTML が外部へ通信・ファイルを置く。ガード：`MockPreviewPanelRuntimeTests`。→ `src/QuickER.AI.Mock/CLAUDE.md`「プレビュー」
-- **最終 `dotnet build` は自分の `.sln` を明示し、MSBuild の自動 import を無効化し、直前に `obj` / `bin` を削除する**：AI が書いた obj のターゲットや rsp がビルドで実行される。祖先の global.json / NuGet.Config は無効化しない。ガード：`DotnetBuildRunnerArgumentsTests`・`MockProjectBuildBoundaryTests`。→ `src/QuickER.AI.Mock/CLAUDE.md`「最終ビルド」
-- **成果物の探索はプロジェクトフォルダ配下だけを、アクセス拒否を無視して `MockProjectFiles` で走査する**：権限のないサブフォルダ 1 つでランが落ちる。ガード：`MockProjectFilesTests`。→ `src/QuickER.AI.Mock/CLAUDE.md`「成果物の探索」
-- **最終ビルド前の変更検知は、ホワイトリスト差分と内容 SHA-256 で行い、読めないフォルダ・リンクは毎回「変更」に出す**：サンドボックス外のビルドで AI のコードが走る。確認手段が null ならビルドしない。ガード：`MockProjectBuildBoundaryTests`・`MockProjectBuildBoundaryAclTests`。→ `src/QuickER.AI.Mock/CLAUDE.md`「最終ビルド前の変更検知」
+- **最終 `dotnet build` は自分の `.sln` を明示し、MSBuild の自動 import を無効化し、直前に `obj` / `bin` を削除する**：AI が書いた obj のターゲットや rsp がビルドで実行される。祖先の global.json / NuGet.Config は無効化しない。ガード：`DotnetBuildRunnerArgumentsTests`・`MockBuildBoundaryTests`（行 `clear-*`）。→ `src/QuickER.AI.Mock/CLAUDE.md`「最終ビルド」
+- **成果物の探索はプロジェクトフォルダ配下だけを、アクセス拒否を無視して `MockProjectFiles` で走査する**：権限のないサブフォルダ 1 つでランが落ちる。ガード：`MockBuildBoundaryTests`（行 `enumerate-*`）。→ `src/QuickER.AI.Mock/CLAUDE.md`「成果物の探索」
+- **最終ビルド前の変更検知は、ホワイトリスト差分と内容 SHA-256 で行い、読めないフォルダ・リンクは毎回「変更」に出す**：サンドボックス外のビルドで AI のコードが走る。確認手段が null ならビルドしない。ガード：`MockBuildBoundaryTests`（行 `change-*`）。→ `src/QuickER.AI.Mock/CLAUDE.md`「最終ビルド前の変更検知」
 - **API キー方式の提出パス（`ResolveEmitPath`）は拡張子ホワイトリストのまま保ち、保護フォルダは綴りの別名にも負けない形で照合する**：拒否リストに戻すと自動 import でビルドが任意コード実行になる。ガード：`PathEntranceTests`（行 `emit-*`・`find-blocked-folder-*`）・`MockProjectEmitToolsTests`。→ `src/QuickER.AI.Mock/CLAUDE.md`「提出パスの判定」
-- **モックプロジェクト生成の実行器 4 種は権限を QuickER 側で絞らない（API キーだけ境界あり）**：権限差の正本は docs/ai-chat.md の「注意」節。→ `src/QuickER.AI.Mock/CLAUDE.md`「実行器 4 種」
+- **モックプロジェクト生成の実行器 4 種は権限を QuickER 側で絞らない（API キーだけ境界あり）**：権限差の正本は docs/ai-chat.md の「注意」節。起動の設定と最終ビルドの境界越えの宣言は実行器の網がアダプタの宣言（出典つき）と照合する。ガード：`MockAgentContractTests`。→ `src/QuickER.AI.Mock/CLAUDE.md`「実行器 4 種」
 
 ### OS との境界
 - **アプリ設定・作業状態の保存先はローカル（`AppDataPaths.LocalRoot`）の 1 つだけで、ローミングへ置かない**：DPAPI の秘密が他端末へ複製されても復号できない。ガード：`AppDataPathGuardTests`。→ `src/QuickER.Platform/CLAUDE.md`「保存先」

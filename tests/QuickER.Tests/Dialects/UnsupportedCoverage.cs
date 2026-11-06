@@ -1426,7 +1426,7 @@ public static class UnsupportedCoverage
                 "SyncPlanExpectationRows:realdb-column-alter-readds-default-*",
                 "SyncPlanExpectationRows:realdb-column-alter-incompatible-default-commits-insert-fails",
                 "SyncPlanExpectationRows:realdb-column-type-kind-change-with-default-warns",
-                "SchemaSyncDialogViewModelTests.Execute_TypeKindChangeWithDefault_ShowsWarningFromImportedDefaults",
+                "ImportSyncRows:sync-dialog-type-kind-change-with-default-warns-from-imported-defaults",
                 "SyncPlanExpectationRows:realdb-column-alter-nullability-only-*",
                 "SyncPlanExpectationRows:plan-default-type-kind-change-warns-only-where-declared",
             ]
