@@ -749,6 +749,12 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string SchemaSync_RefreshAfterCommitFailedMessage {
+            get {
+                return ResourceManager.GetString("SchemaSync_RefreshAfterCommitFailedMessage", resourceCulture);
+            }
+        }
+
         public static string SchemaSync_ExecuteError {
             get {
                 return ResourceManager.GetString("SchemaSync_ExecuteError", resourceCulture);

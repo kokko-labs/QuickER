@@ -45,9 +45,68 @@ public class CodexAppServerClientConnectionTests
                 .WaitAsync(Patience, TestContext.Current.CancellationToken);
             await disconnected.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
             client.IsStarted.Should().BeFalse("書き込みの途中で止めた接続は捨てる");
+
+            // 取り消しが先に戻っても、書き込みロックは書き込みが終わった（接続を捨てて失敗した）ときにちょうど 1 回手放す
+            // （手放さないと次の接続の送信がすべて止まり、2 回手放すと上限を超えて SemaphoreFullException になる）
+            await WaitUntilAsync(() => GetWriteLock(client).CurrentCount == 1);
         }
         finally
         {
+            await client.DisposeAsync();
+        }
+    }
+
+    /// <summary>
+    /// 取り消しが書き込みの終わりより先に勝っても、呼び出し元へはすぐ取り消しで戻り、書き込みロックは書き込みが終わるまで持ち続け、
+    /// 終わったときにちょうど 1 回手放すことを検証する（プールが詰まったときに起きる経路を、書き込みの終わりを門で止めて作る）。
+    /// </summary>
+    [Fact(
+        DisplayName = "取り消しが書き込みの終わりより先に勝っても、書き込みロックは書き込みが終わったときにちょうど 1 回手放す"
+    )]
+    public async Task Request_CanceledBeforeWriteEnds_ReleasesWriteLockOnceWhenWriteEnds()
+    {
+        await using var server = new FakeCodexAppServerProcess("block");
+        var client = server.CreateClient();
+        var writeEnds = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        var disconnected = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        client.Disconnected += (_, _) => disconnected.TrySetResult();
+
+        try
+        {
+            await server.StartAsync(client, TestContext.Current.CancellationToken);
+
+            // 門は起動の後に掛ける（起動のハンドシェイクの書き込みは止めない）
+            client.WriteCompletionForTests = async write =>
+            {
+                await writeEnds.Task.ConfigureAwait(false);
+                await write.ConfigureAwait(false);
+            };
+
+            using var requestCts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+            var request = async () =>
+                await client.StartTurnAsync("thread", LargePrompt, requestCts.Token);
+
+            await request
+                .Should()
+                .ThrowAsync<OperationCanceledException>()
+                .WaitAsync(Patience, TestContext.Current.CancellationToken);
+            await disconnected.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
+            GetWriteLock(client)
+                .CurrentCount.Should()
+                .Be(0, "終わっていない書き込みの後ろに次の行を書かせない");
+
+            writeEnds.SetResult();
+
+            // 2 回手放すと SemaphoreSlim(1,1) の上限を超える。先に手放していれば上の 0 の表明が赤になる
+            await WaitUntilAsync(() => GetWriteLock(client).CurrentCount == 1);
+        }
+        finally
+        {
+            writeEnds.TrySetResult();
             await client.DisposeAsync();
         }
     }

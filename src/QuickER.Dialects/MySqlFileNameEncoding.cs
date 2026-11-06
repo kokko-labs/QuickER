@@ -22,7 +22,7 @@ namespace QuickER.Dialects;
 /// </para>
 /// <para>
 /// 符号化した長さと実 MySQL の <c>information_schema.INNODB_TABLES</c> の名前との一致は、Integration の
-/// <c>IdentifierLengthLimitIntegrationTests</c> が範囲の境界の文字ごとに確かめる。
+/// <c>MySqlIdentifierLengthLimitIntegrationTests.FileNameEncoding_MatchesDatabaseForEveryTabledCodePoint</c> が範囲の境界の文字ごとに確かめる。
 /// </para>
 /// </remarks>
 public static class MySqlFileNameEncoding

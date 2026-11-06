@@ -7,7 +7,7 @@ using MockStrings = QuickER.AI.Mock.Resources.Strings;
 namespace QuickER.Tests.AI.Mock.BuildBoundary;
 
 /// <summary>
-/// 最終ビルドの境界の表：入口 A＝変更検知・B＝ビルド出力の削除・C＝成果物の探索・D＝上書きの走査（このファイルは表と入口 A）
+/// 最終ビルドの境界の表：入口 A＝変更検知・B＝ビルド出力の削除・C＝成果物の探索・D＝上書きの走査・E＝最終ビルドの引数（このファイルは表と入口 A）
 /// </summary>
 /// <remarks>
 /// <para>
@@ -72,6 +72,7 @@ internal static partial class MockBuildBoundaryRows
                 .. Clear(),
                 .. Enumerate(),
                 .. Overwrite(),
+                .. Arguments(),
             ]
         );
 

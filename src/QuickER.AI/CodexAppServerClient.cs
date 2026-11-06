@@ -754,15 +754,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             {
                 if (timeoutCts.IsCancellationRequested)
                 {
-                    pending.TrySetException(
-                        new TimeoutException(
-                            string.Format(
-                                Strings.Codex_ResponseTimeout,
-                                method,
-                                BuildRecentStandardErrorSuffix()
-                            )
-                        )
-                    );
+                    pending.TrySetException(CreateResponseTimeout(method));
                 }
                 else
                 {
@@ -788,12 +780,35 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         }
         catch (OperationCanceledException) when (linkedCts.IsCancellationRequested)
         {
-            // 取り消しの登録が応答待ちをタイムアウト（または呼び出し元の取り消し）として完了させ済み。
-            // 書き込みの取り消しではなく、そちらの結果を呼び出し元へ返す
+            // 要求を書き終えていない（ロック待ちか書き込みの途中で取り消した）ので、応答は来ない。応答待ちは見ずに、
+            // 取り消しの理由（タイムアウトか呼び出し元の取り消し。取り消しの登録と同じ優先順）を返す。
+            // 書き込みの途中の取り消しは接続を捨てるので、その後始末が応答待ちを接続断で先に完了させ得る
+            _pendingRequests.TryRemove(requestId, out _);
+
+            // 取り消しの登録か接続断の後始末が先に応答待ちを例外で完了させていたら（または完了させたら）、誰も await しない。
+            // 観測しておかないと UnobservedTaskException へ回る
+            _ = completionSource.Task.ContinueWith(
+                static completed => _ = completed.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted
+                    | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default
+            );
+
+            if (timeoutCts.IsCancellationRequested)
+            {
+                throw CreateResponseTimeout(method);
+            }
+
+            throw new OperationCanceledException(cancellationToken);
         }
 
         return await completionSource.Task.ConfigureAwait(false);
     }
+
+    /// <summary>応答のタイムアウトの例外（直近の標準エラーを添える）</summary>
+    private TimeoutException CreateResponseTimeout(string method) =>
+        new(string.Format(Strings.Codex_ResponseTimeout, method, BuildRecentStandardErrorSuffix()));
 
     /// <summary>JSON-RPC 通知（id なし、応答を待たないメッセージ）を送信する</summary>
     private async Task SendNotificationAsync(
@@ -815,6 +830,19 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     }
 
     /// <summary>ペイロードを JSON にシリアライズし、書き込みロック下で stdin へ 1 行として送信する</summary>
+    /// <remarks>
+    /// <para>
+    /// 書き込みの完了は取り消しと競わせて待つ（<see cref="Task.WaitAsync(CancellationToken)"/>）。子プロセスの標準入力は同期の
+    /// パイプで、書き込みへ渡したトークンは「同期の書き込みの最中」にしか効かない。スレッドプールが詰まって書き込みの始まりが
+    /// 取り消しとずれると、取り消しが効かないまま書き込みが止まり続ける（実測：プールが詰まった状態で、1 秒で取り消した
+    /// 書き込みが 90 秒たっても戻らなかった）。30 秒のタイムアウトも同じトークンなので、競わせないと要求はどちらでも戻らない。
+    /// </para>
+    /// <para>
+    /// 取り消しが勝ったら、書き込みの途中かもしれないので接続を捨てる（子プロセスを止める＝パイプが切れて、止まっていた書き込みも
+    /// 失敗で終わる）。書き込みロックは書き込みが終わるまで手放さない（終わっていない書き込みの後ろに次の行を書かせない）。
+    /// 先に戻るときは、ロックの解放を書き込みの継続へ渡す（解放はどの経路でもちょうど 1 回）。
+    /// </para>
+    /// </remarks>
     private async Task SendMessageAsync(object payload, CancellationToken cancellationToken)
     {
         EnsureStarted();
@@ -823,14 +851,22 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
 
         // 停止（StopProcessAsync）は、詰まっている書き込みをこのトークンで取り消す
         var stopToken = _writeCts?.Token ?? CancellationToken.None;
-        using var writeCts = CancellationTokenSource.CreateLinkedTokenSource(
+        var writeCts = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             stopToken
         );
+        Task? write = null;
 
         try
         {
-            await _stdin!.WriteLineAsync(json.AsMemory(), writeCts.Token).ConfigureAwait(false);
+            write = _stdin!.WriteLineAsync(json.AsMemory(), writeCts.Token);
+
+            if (WriteCompletionForTests is { } hold)
+            {
+                write = hold(write);
+            }
+
+            await write.WaitAsync(writeCts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (stopToken.IsCancellationRequested)
         {
@@ -847,7 +883,53 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         }
         finally
         {
+            if (write is { IsCompleted: false })
+            {
+                // 取り消しが先に勝った。書き込みが終わる（接続を捨てたので失敗で終わる）まで、ロックを持ち続ける
+                _ = write.ContinueWith(
+                    completed =>
+                    {
+                        // 失敗（接続を捨てたことによるパイプの切断）は観測だけして捨てる
+                        _ = completed.Exception;
+                        writeCts.Dispose();
+                        ReleaseWriteLock();
+                    },
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default
+                );
+            }
+            else
+            {
+                writeCts.Dispose();
+                _writeLock.Release();
+            }
+        }
+    }
+
+    /// <summary>
+    /// テスト専用：書き込みのタスクの終わりを差し替える（<c>null</c> なら差し替えない＝製品の振る舞い）
+    /// </summary>
+    /// <remarks>
+    /// 取り消しが書き込みの終わりより先に勝つ経路（ロックの解放を書き込みの継続へ渡す経路）は、プールが詰まったときなどにしか
+    /// 起きない。テストは書き込みの終わりを門で止めて、その経路を決定的に通す
+    /// </remarks>
+    internal Func<Task, Task>? WriteCompletionForTests { get; set; }
+
+    /// <summary>書き込みの継続から書き込みロックを手放す（破棄の後なら何もしない）</summary>
+    /// <remarks>
+    /// 停止は、ロックが手放されるのを上限つき（<see cref="WriteDrainLimit"/>）で待ってから先へ進み、最終破棄はロックを破棄する。
+    /// 書き込みがその後に終わったときは、手放す相手が無い
+    /// </remarks>
+    private void ReleaseWriteLock()
+    {
+        try
+        {
             _writeLock.Release();
+        }
+        catch (ObjectDisposedException)
+        {
+            // 最終破棄の後に書き込みが終わった
         }
     }
 

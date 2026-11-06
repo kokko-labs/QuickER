@@ -68,6 +68,7 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **Mock project generation no longer reports success when screens were not made** — with an API key, a turn that submitted no files fails the run, and for Blazor the final check counts the `@page` routes against the screens in the design. For WPF a shortfall is only logged as a warning
 - **Lines in the mock generation log no longer run on from the end of the AI's text**
 - **Mock project generation with an API key now passes the text of the additional-instructions field to the AI** — the other backends passed it, but the API key backend silently dropped it. The instructions go once at the end of the system prompt, so every turn sees them: the shared parts, each screen and the fix
+- **With Codex, a request whose message Codex is not reading now ends when you cancel it or when its 30-second timeout passes** — a large message (a long prompt with attachments) can fill the pipe to the Codex app-server, and when the app was busy, cancelling the stuck write had no effect, so the turn or the mock generation waited until Codex itself exited. The connection is now dropped and opened again on the next request
 
 #### Import and export
 
@@ -90,6 +91,7 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **On MySQL, a column whose type spells a zero fractional-second precision (`datetime(0)`, `time(0)`, `timestamp(0)`) no longer shows a change that syncing never clears** — MySQL stores and imports these as plain `datetime`, `time` and `timestamp`, and the comparison now takes them as the same type
 - **On PostgreSQL, adding an unnamed foreign key to a table whose name is long no longer fails with 42710 on a database an earlier version created** — the name an earlier version gave the existing foreign key, cut to 63 bytes, was taken for the new one as well when the two names cut to the same text; the cut name is now taken only for a foreign key to the same parent table, once, and the new one gets the current default name
 - **A unique constraint without a name no longer takes a name another constraint in the diagram already uses** — its generated name `UQ_{table}_{columns}` could match the name of a unique constraint on another table, a foreign key, or a constraint you renamed, and the DDL and the sync then failed with a duplicate name on SQL Server, PostgreSQL, MySQL and Oracle; it now gets `_2` (or the next free number) only when the name is taken, and the generated code, the tool summaries and the property panel show the same name
+- **When the diff cannot be recomputed after a committed sync, the DB sync dialog no longer closes as if the diagram and the database matched** — a failed recompute empties the diff, and the dialog read that as nothing left to sync and closed right after the success message, taking the reason in its status line with it. It now stays open and shows the failure in an error message; it closes by itself only when the recompute succeeds and finds no differences
 
 #### Generated code
 

@@ -9,7 +9,7 @@ namespace QuickER.Tests.Dialects;
 /// </summary>
 /// <remarks>
 /// 範囲の出典との一致（MySQL のソースの表）と、実 MySQL が作るファイル名との一致は、Integration の
-/// <c>IdentifierLengthLimitIntegrationTests</c> が範囲の境界の文字ごとに確かめる。ここでは 1・3・5 バイトの 3 区分を確かめる。
+/// <c>MySqlIdentifierLengthLimitIntegrationTests.FileNameEncoding_MatchesDatabaseForEveryTabledCodePoint</c> が範囲の境界の文字ごとに確かめる。ここでは 1・3・5 バイトの 3 区分を確かめる。
 /// </remarks>
 public class MySqlFileNameEncodingTests
 {

@@ -164,8 +164,11 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     /// 失敗したときは前回の差分・スクリプト・計画・取込結果をすべて捨てる。残すと、回線断などで
     /// 取り直せなかったのに古いスクリプトを実行できてしまう（MySQL / Oracle の部分適用の後に取り直しが
     /// 失敗した場合、回線が戻ってから古いスクリプトを再実行することになる）。
+    /// 失敗は例外を返して呼び出し側へ知らせる。差分を空にするので、差分の件数だけでは「一致した」と区別できない
+    /// （実行の後の取り直しが、失敗を差分 0 件と読んでダイアログを閉じないようにするため）。
     /// </remarks>
-    private async Task RefreshCoreAsync()
+    /// <returns>失敗したときの例外（成功なら <c>null</c>）</returns>
+    private async Task<Exception?> RefreshCoreAsync()
     {
         StatusMessage = Strings.SchemaSync_Fetching;
 
@@ -246,11 +249,14 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                     ? string.Format(Strings.SchemaSync_DiffCount, DiffItems.Count)
                     : Strings.SchemaSync_NoDiff;
             }
+
+            return null;
         }
         catch (Exception ex)
         {
             ClearDiffState();
             StatusMessage = string.Format(Strings.SchemaSync_DiffFailed, ex.Message);
+            return ex;
         }
     }
 
@@ -418,12 +424,24 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                     Strings.Common_Complete
                 );
                 // 適用後の最新状態を反映するため差分を再計算する
-                await RefreshCoreAsync().ConfigureAwait(true);
+                var refreshFailure = await RefreshCoreAsync().ConfigureAwait(true);
 
-                // 差分が完全に無くなった（案内項目すら残らない＝図と DB が一致した）ときは、
-                // 役目を終えたダイアログを自動で閉じる
-                if (DiffItems.Count == 0)
+                if (refreshFailure is not null)
                 {
+                    // 取り直しの失敗は差分を空にするので、件数では「一致した」と区別できない。閉じずに、
+                    // 成功のモーダルの直後に失敗をモーダルで知らせる（ステータス行だけだと、成功だけが見えて
+                    // 図と DB が一致したと読み違える）
+                    _dialogs.ShowError(
+                        Strings.SchemaSync_RefreshAfterCommitFailedMessage
+                            + "\n"
+                            + refreshFailure.Message,
+                        Strings.Common_Error
+                    );
+                }
+                else if (DiffItems.Count == 0)
+                {
+                    // 差分が完全に無くなった（案内項目すら残らない＝図と DB が一致した）ときは、
+                    // 役目を終えたダイアログを自動で閉じる
                     CloseAction?.Invoke(true);
                 }
             }
@@ -439,7 +457,9 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 );
 
                 // 部分適用が起こりうる方言（MySQL / Oracle）では、失敗しても DB が変わっていることがある。
-                // 古い差分を出し続けないよう、エラーを読み終えた（＝モーダルを閉じた）後に取り直す
+                // 古い差分を出し続けないよう、エラーを読み終えた（＝モーダルを閉じた）後に取り直す。
+                // 取り直しの失敗はステータス行だけで知らせる（失敗のモーダルは出した後で、ダイアログは閉じないので
+                // 理由が残る。モーダルを 2 件続けない。例外で抜けた枝も同じ）
                 await RefreshCoreAsync().ConfigureAwait(true);
             }
         }

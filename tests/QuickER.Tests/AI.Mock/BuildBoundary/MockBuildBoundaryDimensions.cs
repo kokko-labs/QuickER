@@ -25,7 +25,7 @@ internal static class MockBuildBoundaryDimensions
                     Enum.GetValues<BoundaryEntrance>()
                         .Select(entrance => new Level(entrance.ToString()))
                         .ToList(),
-                    "入口（A＝変更検知・B＝ビルド出力の削除・C＝成果物の探索・D＝上書きの走査）"
+                    "入口（A＝変更検知・B＝ビルド出力の削除・C＝成果物の探索・D＝上書きの走査・E＝最終ビルドの引数）"
                 ),
                 new Factor(
                     Kind,
@@ -80,6 +80,17 @@ internal static class MockBuildBoundaryDimensions
                     BoundaryEntryKind.NonLinkReparse,
                     BoundaryEntryKind.UnlistableReparse
                 ),
+                CoverageGap.AcceptedMatching(
+                    Scope,
+                    "修正 N",
+                    "最終ビルドの引数（DotnetBuildRunner.CreateBuildStartInfo）はソリューションのパスから引数を組む純粋な関数で、"
+                        + "フォルダの中身を読まない。通常のファイル以外の種別を置いても引数は変わらない",
+                    Entrance,
+                    Kind,
+                    (e, k) =>
+                        e == BoundaryEntrance.BuildArguments.ToString()
+                        && k != BoundaryEntryKind.Plain.ToString()
+                ),
             ]
         );
 
@@ -117,13 +128,14 @@ internal static class MockBuildBoundaryDimensions
         new(
             EngineIds.Ai,
             "MockBuildBoundary",
-            "モックプロジェクトの最終ビルドの境界の表（変更検知・ビルド出力の削除・成果物の探索・上書きの走査 × 種別）",
+            "モックプロジェクトの最終ビルドの境界の表（変更検知・ビルド出力の削除・成果物の探索・上書きの走査・最終ビルドの引数 × 種別）",
             Table,
             MockBuildBoundaryRows.Table.Count,
             [
                 "tests/QuickER.Tests/AI.Mock/BuildBoundary/MockBuildBoundaryContext.cs",
                 "tests/QuickER.Tests/AI.Mock/BuildBoundary/MockBuildBoundaryDimensions.cs",
                 "tests/QuickER.Tests/AI.Mock/BuildBoundary/MockBuildBoundaryRows.cs",
+                "tests/QuickER.Tests/AI.Mock/BuildBoundary/MockBuildBoundaryRows.Arguments.cs",
                 "tests/QuickER.Tests/AI.Mock/BuildBoundary/MockBuildBoundaryRows.Clear.cs",
                 "tests/QuickER.Tests/AI.Mock/BuildBoundary/MockBuildBoundaryRows.Files.cs",
                 "tests/QuickER.Tests/AI.Mock/BuildBoundary/MockBuildBoundaryTests.cs",
@@ -133,6 +145,7 @@ internal static class MockBuildBoundaryDimensions
                 "src/QuickER.AI.Mock/MockProjectFiles.cs",
                 "src/QuickER.AI.Mock/MockProjectOverwriteScanner.cs",
                 "src/QuickER.AI.Mock/MockProjectAgentRunner.cs",
+                "src/QuickER.AI.Mock/DotnetBuildRunner.cs",
             ]
         );
 }

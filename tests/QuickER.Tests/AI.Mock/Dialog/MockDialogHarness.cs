@@ -41,6 +41,13 @@ namespace QuickER.Tests.AI.Mock.Dialog;
 /// </remarks>
 internal sealed class MockDialogHarness : IDisposable
 {
+    /// <summary>スレッドプールで走る処理（破棄・止めた生成）を待つ上限</summary>
+    /// <remarks>
+    /// 壊れたときだけ待つ上限で、時間そのものは表明しない。製品は破棄を <c>Task.Run</c> でプールへ載せるので、全件の並列で
+    /// プールが詰まると、自明な処理の始まりでも数十秒遅れる（30 秒では全件の実行でだけ赤になった）。
+    /// </remarks>
+    public static readonly TimeSpan Patience = TimeSpan.FromSeconds(60);
+
     /// <summary>画面の HTML（共有の style.css を参照する完全な HTML）</summary>
     public const string ValidHtml =
         "<!DOCTYPE html><html lang=\"ja\"><head><link rel=\"stylesheet\" href=\"style.css\">"
@@ -339,7 +346,7 @@ internal sealed class MockDialogHarness : IDisposable
 
         foreach (var run in _heldGenerations)
         {
-            await run.WaitAsync(TimeSpan.FromSeconds(60));
+            await run.WaitAsync(Patience);
         }
 
         foreach (var engine in Engines.Where(HasPendingTurn).ToList())
@@ -378,12 +385,12 @@ internal sealed class MockDialogHarness : IDisposable
 
             if (!already)
             {
-                vm.ShutdownEngines(TimeSpan.FromSeconds(60));
+                vm.ShutdownEngines(Patience);
             }
 
             if (vm.DetachedDisposalForTests is { } detached)
             {
-                await detached.WaitAsync(TimeSpan.FromSeconds(60));
+                await detached.WaitAsync(Patience);
             }
         }
 

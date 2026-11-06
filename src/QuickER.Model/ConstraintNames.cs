@@ -14,7 +14,8 @@ namespace QuickER.Model;
 /// <para>
 /// <b>既定名はここのメソッドで組み立てること</b>（<c>$"FK_{…}"</c> / <c>$"PK_{…}"</c> の補間や
 /// <c>"FK_" + …</c> の連結を呼び出し側で書かない）。規則が写されるとそれぞれが別々に古くなるため、
-/// 写しが無いことは <c>ConstraintNamesGuardTests</c> がソースを走査して確かめる。
+/// 写しが無いことは <c>SourceRuleTests</c>（規則 <c>constraint-name-safe-rule-copies</c>・
+/// <c>constraint-name-default-compositions</c>）がソースを走査して確かめる。
 /// 一意制約の合成名（<see cref="UniqueConstraint.SynthesizeName"/>）も同じ <see cref="SafeName"/> を通し、ほかの制約の名前と
 /// ぶつかるときは <see cref="ResolveUniqueConstraintNames"/> が番号を足す。
 /// </para>
@@ -40,7 +41,7 @@ namespace QuickER.Model;
 /// 図の名前として見せる合成名（C# 生成の <c>[UniqueConstraint(Name = …)]</c>・ツールの要約・プロパティパネル）:
 /// <b>図の対象 DBMS の上限</b>（呼び出し側が <see cref="IdentifierLengthLimits.ForDiagramTarget"/> に <see cref="ErDiagram.TargetDbms"/> を渡して引く）。
 /// 図を受け取る <see cref="CollectExisting"/> / <see cref="IsTaken"/> / <see cref="ResolveForeignKeyNamesById"/> も上限を引数で受ける
-/// （Model は方言名から上限を引かない＝<c>ModelDialectLookupGuardTests</c>）。
+/// （Model は方言名から上限を引かない＝<c>SourceRuleTests</c>（規則 <c>model-dialect-lookups</c>））。
 /// </item>
 /// </list>
 /// </remarks>
@@ -280,7 +281,7 @@ public static class ConstraintNames
     /// <para>
     /// 名前の無い一意制約の名前を作るのは、この関数と <see cref="ResolveUniqueConstraintName"/> だけ
     /// （<see cref="UniqueConstraint.SynthesizeName"/> を直接呼ぶのは中の <c>SynthesizeFreeName</c> だけ＝
-    /// <c>ConstraintNamesGuardTests</c>）。生成・DDL・差分・同期は 1 回の実行につき 1 回だけ呼び、表ごとに図全体を
+    /// <c>SourceRuleTests</c>（規則 <c>unique-constraint-synthesize-name-calls</c>））。生成・DDL・差分・同期は 1 回の実行につき 1 回だけ呼び、表ごとに図全体を
     /// 解決し直さない。
     /// </para>
     /// </remarks>
