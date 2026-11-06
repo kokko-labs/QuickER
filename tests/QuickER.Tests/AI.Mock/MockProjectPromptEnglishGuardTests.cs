@@ -80,7 +80,7 @@ public class MockProjectPromptEnglishGuardTests
         var profile = ResolveProfile(targetId);
 
         AssertNoCjk(
-            MockProjectPromptBuilder.BuildApiKeySystemPrompt(profile, "MockApp"),
+            MockProjectPromptBuilder.BuildApiKeySystemPrompt(profile, "MockApp", null),
             $"{targetId}: BuildApiKeySystemPrompt"
         );
 

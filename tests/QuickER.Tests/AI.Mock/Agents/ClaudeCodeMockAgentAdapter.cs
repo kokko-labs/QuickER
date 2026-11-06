@@ -88,6 +88,13 @@ internal sealed class ClaudeCodeMockAgentAdapter : MockAgentAdapter
         new(false, $"{Source}:43-47（無制限の Bash を持ち、最終ビルドで新しく越える境界が無い）");
 
     /// <inheritdoc/>
+    public override MockAgentValue<MockAgentPromptSlot> AdditionalInstructionsPrompt { get; } =
+        new(
+            MockAgentPromptSlot.FirstPrompt,
+            $"{Source}:65-69（追加の指示を共有の組み立て BuildPrompt へ渡し、作業全体を依頼する 1 回のターンの初回のプロンプトの末尾へ載せる）"
+        );
+
+    /// <inheritdoc/>
     public override MockAgentLaunch ExpectedLaunch(MockProjectAgentRequest request) =>
         new(
             request.WorkingDirectory,

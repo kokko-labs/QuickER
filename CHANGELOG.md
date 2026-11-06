@@ -67,6 +67,7 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **Before generating a mock project, QuickER warns when the tables in the diagram differ from the tables the mock design was made from** — a screen that uses a table no longer in the diagram was not made, but generation still reported success. Differences only in columns, descriptions or relationships are written to the log without a warning
 - **Mock project generation no longer reports success when screens were not made** — with an API key, a turn that submitted no files fails the run, and for Blazor the final check counts the `@page` routes against the screens in the design. For WPF a shortfall is only logged as a warning
 - **Lines in the mock generation log no longer run on from the end of the AI's text**
+- **Mock project generation with an API key now passes the text of the additional-instructions field to the AI** — the other backends passed it, but the API key backend silently dropped it. The instructions go once at the end of the system prompt, so every turn sees them: the shared parts, each screen and the fix
 
 #### Import and export
 

@@ -56,7 +56,7 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
 
 - ターゲットは `MockProjectTarget` の 2 種（blazor 既定＝Blazor Web App・グローバル InteractiveServer・モック HTML / style.css を可能な限り移植／wpf）。差分は `MockProjectTargetProfile`（csproj / README・プロンプトフラグメント・UI 成果物パターン `*.xaml` / `*.razor`）へ集約する。プロンプトは `MockProjectPromptBuilder` が単一正本（フラグメント合成）。UI は ComboBox で選ぶ。
 - **プロンプト・`README-QuickER.md`・ER スキーマ本文（`MockSchemaSerializer`）は英語固定。** 「対話チャット＝UI 言語追従・ヘッドレス実行と機械向け診断＝英語固定」の線引き。警告・検証エラーも英語固定で、成功文は UI 追従。CJK 混入は英語ガードテスト群が検知する。
-- 流れ：決定的スキャフォールド（`MockProjectScaffoldService`＝データ層コード ＋ csproj ＋ README ＋ モックフォルダを `design/mock/` へ同梱）→ 実行器抽象 `IMockProjectAgent`（選択中バックエンドに連動・追加指示欄を任意でプロンプト末尾へ連結）で UI 層を生成 → 共有オーケストレータ `MockProjectAgentRunner`。
+- 流れ：決定的スキャフォールド（`MockProjectScaffoldService`＝データ層コード ＋ csproj ＋ README ＋ モックフォルダを `design/mock/` へ同梱）→ 実行器抽象 `IMockProjectAgent`（選択中バックエンドに連動・追加指示欄を任意で連結）で UI 層を生成 → 共有オーケストレータ `MockProjectAgentRunner`。
 - `MockProjectAgentRunner` は全体タイムアウト（既定 30 分）・成果物検証・最終ビルド前の変更検知・最終 `dotnet build` の独立検証を行う（実行器の自己申告を信じない）。
 - 最終ビルドには専用タイムアウト `DefaultBuildTimeout`（10 分）を掛け、超過は専用文言でタイムアウト報告する。全体タイムアウトはエージェント実行までで解けており、外部トークンには時間制限が無い。値の根拠は、パッケージ・HTTP 両キャッシュを空にした完全コールドの同形 Blazor ソリューションが 6.8 秒という実測の約 88 倍。
 - 出力フォルダの上書きは `MockProjectOverwriteScanner` が既存物（自分の .sln・直下の別 sln / slnx / csproj・プロジェクトフォルダとその 4 生成物）を列挙し、VM が `ConfirmWarningDetails` で確認する。キャンセルなら出力フォルダ不変。
@@ -68,13 +68,16 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
 - **Copilot**：copilot CLI をヘッドレス実行。自己修正。ER 設計ツールは非公開で、組込みのファイル編集 / シェル実行に委ねる。`AllowWorkspaceTools` は出力フォルダ配下のみ自動承認する。
   判定の正本 `CopilotWorkspacePermissionPolicy` は `src/QuickER.AI/CLAUDE.md`「Copilot のシェル許可」を参照する。
 - エージェント型 3 実装はプロンプト正本 `MockProjectPromptBuilder` を共有する。
+- **追加の指示は、4 実行器とも 1 つのプロンプトの末尾へ 1 回だけ、`MockProjectPromptBuilder` の 1 つの関数（見出し `# Additional instructions`・空白だけなら付けない・前後の空白を除く）で連結する。** エージェント型は作業全体を依頼する初回のプロンプト、API キーはシステムのプロンプトに入れる。
+  - API キーで実行全体の規則を持つのはシステムのプロンプトだけで、共通部・画面・修正のプロンプトはそのターンに閉じた依頼（その末尾に付けると共通部だけの指示に読める）。エンジン（`ChatTurnEngine`）がシステムのプロンプトを履歴の先頭に置いて毎ターン全履歴を送り直すので、1 回でどのターンにも届く。ターンごとに入れるとトークンが画面の数だけ重なるだけ。
+  - ガード：`MockAgentContractTests`（行 `prompt-additional-instructions-appended-after-heading`＝前後に空白・改行を付けた入力が、除かれた形で宣言 `AdditionalInstructionsPrompt` のプロンプトの末尾に載り、見出しはシステムと全ターンを通して 1 回・行 `prompt-blank-additional-instructions-add-no-heading`）。mutation 実証済み（API キーで渡さない・宣言を初回のプロンプトにする・見出しを 2 回付ける・前後の空白を除かない、のどれも赤）。
 - **API キー**：`emit_file` 固定パイプライン（共通部 → 各画面の決定的一発生成）。読取 / ビルドツールは与えない。中間ビルド失敗時のみ修正 1 回。UI に「自己修正なし」注記。
   - パス保護は**拡張子ホワイトリスト**（プロファイル宣言〔WPF = .xaml / .cs、Blazor = .razor / .css / .cs〕∩ 中央上限集合 `MockProjectEmitTools.SupportedEmitExtensions` ＝実効の許可集合。拒否メッセージへ許可拡張子を列挙する）。
   - 加えて保護フォルダ（Generated / design / **obj / bin**）、README / .sln / .csproj / NuGet.Config、`..` / 絶対パス / `:` を拒否する。詳細は「提出パスの判定」。
 - **エージェント型の実行権限は QuickER 側で絞らない。** ユーザーが導入した CLI をその CLI 自身の権限モデルで動かす方針で、QuickER が設計した境界は API キー方式だけ（Claude Code は `Bash` から任意コマンドを実行できる＝承知のうえの非対称）。4 バックエンドの権限差の正本は `docs/ai-chat.md`（.ja）の「注意」節の表。
 - 実行器 4 種の共通の契約（結果の写し方・未ログイン・進捗・取り消しと中断・続行の促し・破棄・起動の設定・プロンプト・追加の指示）は、実行器の網が同じ行で全実行器へ流す。軸の正本は `IMockProjectAgent` の具象の型で、実装を足すとアダプタが無いことで赤になる。
-  - 実行器ごとの違いはアダプタの性質と値（`BackendName`・`FinalBuildEscapesSandbox`）の宣言が `src/…:行` の出典つきで持つ。アダプタと行の中で実行器を名指しして分岐しない。
-  - 持たない性質の組（Accepted）と、直す区切りの決まった不具合の組（Pending：API キーの実行器が追加の指示を読まない＝修正 I）は、宣言から導かず手で書いた一覧に置く。宣言だけを書き換えると網羅の照合が赤になる。
+  - 実行器ごとの違いはアダプタの性質と値（`BackendName`・`FinalBuildEscapesSandbox`・`AdditionalInstructionsPrompt`）の宣言が `src/…:行` の出典つきで持つ。アダプタと行の中で実行器を名指しして分岐しない。
+  - 持たない性質の組（Accepted）と、直す区切りの決まった不具合の組（Pending。いまは空）は、宣言から導かず手で書いた一覧に置く。宣言だけを書き換えると網羅の照合が赤になる。
   - 起動の設定（許可・サンドボックス・ツール・作業フォルダ・システムプロンプト）と最終ビルドの境界越えの宣言は、アダプタの期待との一致で固定する。
 - ガード：`MockAgentContractTests`（`MockAgentContractTests.Row_Holds` の行 `launch-options-match-declaration-*`・`declaration-final-build-escapes-sandbox`・`MockAgentContractTests.Coverage_MatchesGaps`・`MockAgentContractTests.Declarations_CoverEveryCapabilityWithEvidence`・`MockAgentContractTests.Axis_CoversAuthoritativeValues`）。ランナーの流れ（成果物・画面の数・最終ビルド・結果の分類）は `MockRunnerTests`（行ごとにランの結果を分類して行の宣言と照合する）。mutation 実証済み。
 

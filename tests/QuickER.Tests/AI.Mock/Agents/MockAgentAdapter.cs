@@ -47,6 +47,16 @@ internal enum MockAgentCapability
     SubmitsFilesThroughTool,
 }
 
+/// <summary>実行器が追加の指示を載せるプロンプト</summary>
+internal enum MockAgentPromptSlot
+{
+    /// <summary>初回のプロンプト（組の <c>Prompts[0]</c>）</summary>
+    FirstPrompt,
+
+    /// <summary>システムプロンプト（組の <c>SystemPrompt</c>）</summary>
+    SystemPrompt,
+}
+
 /// <summary>性質の宣言（持つか・出典）</summary>
 /// <param name="Has">持つか</param>
 /// <param name="Evidence">出典（製品のコードの <c>src/…:行</c> と説明）</param>
@@ -119,6 +129,9 @@ internal abstract class MockAgentAdapter : IMatrixAdapter
 
     /// <summary>最終ビルドがこの実行器にとって境界越えになるかの宣言</summary>
     public abstract MockAgentValue<bool> FinalBuildEscapesSandbox { get; }
+
+    /// <summary>追加の指示を見出しつきで末尾に 1 回だけ載せるプロンプトの宣言</summary>
+    public abstract MockAgentValue<MockAgentPromptSlot> AdditionalInstructionsPrompt { get; }
 
     /// <summary>性質を持つか</summary>
     /// <param name="capability">性質</param>

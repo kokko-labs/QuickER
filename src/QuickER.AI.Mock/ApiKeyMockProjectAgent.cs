@@ -130,17 +130,15 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
         var targetProfile = request.Profile;
         _targetProfile = targetProfile;
 
+        // 追加指示はシステムのプロンプトの末尾へ 1 回だけ付ける（エンジンが履歴の先頭に置き、毎ターン再送する）
+        var systemPrompt = MockProjectPromptBuilder.BuildApiKeySystemPrompt(
+            targetProfile,
+            request.ProjectName,
+            request.AdditionalInstructions
+        );
         var profile = new ErChatProfile(
-            () =>
-                MockProjectPromptBuilder.BuildApiKeySystemPrompt(
-                    targetProfile,
-                    request.ProjectName
-                ),
-            () =>
-                MockProjectPromptBuilder.BuildApiKeySystemPrompt(
-                    targetProfile,
-                    request.ProjectName
-                ),
+            () => systemPrompt,
+            () => systemPrompt,
             MockProjectEmitTools.GetDefinitions(),
             ProfileServerName
         );

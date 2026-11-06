@@ -35,51 +35,51 @@ internal sealed class ApiKeyMockAgentAdapter : MockAgentAdapter
         {
             [MockAgentCapability.DetectsNotLoggedIn] = new(
                 false,
-                $"{Source}:90-92,154-157（ログインの概念が無い。可否は VM の IsBackendReady が決め、実行器は常に可用で認証を確かめない）"
+                $"{Source}:90-92,152-155（ログインの概念が無い。可否は VM の IsBackendReady が決め、実行器は常に可用で認証を確かめない）"
             ),
             [MockAgentCapability.ProbesLoginBeforeSession] = new(
                 false,
-                $"{Source}:154-157（エンジンの初期化と会話の開始だけで、認証を確かめない）"
+                $"{Source}:152-155（エンジンの初期化と会話の開始だけで、認証を確かめない）"
             ),
             [MockAgentCapability.ForwardsToolActivityToProgress] = new(
                 false,
-                $"{Source}:151-152（エンジンの差分とターンの完了だけを購読し、ツールの活動は購読しない）"
+                $"{Source}:149-150（エンジンの差分とターンの完了だけを購読し、ツールの活動は購読しない）"
             ),
             [MockAgentCapability.ReportsDeclinedPermission] = new(
                 false,
-                $"{Source}:151-152（許可を求めるバックエンドを持たず、断りの通知が無い）"
+                $"{Source}:149-150（許可を求めるバックエンドを持たず、断りの通知が無い）"
             ),
             [MockAgentCapability.TokenCancelCallsBackendInterrupt] = new(
                 false,
-                $"{Source}:331-338（送信の後にトークンを見て投げ直すだけで、エンジンの中断は呼ばない）"
+                $"{Source}:329-336（送信の後にトークンを見て投げ直すだけで、エンジンの中断は呼ばない）"
             ),
             [MockAgentCapability.InterruptCompletesViaEvent] = new(
                 false,
-                $"{Source}:305,341（中断はエンジンへ渡すだけで、理由の無い失敗のターンは打ち切りにもならない）"
+                $"{Source}:303,339（中断はエンジンへ渡すだけで、理由の無い失敗のターンは打ち切りにもならない）"
             ),
             [MockAgentCapability.InterruptReachesBackendWithoutRun] = new(
                 false,
-                $"{Source}:305（実行の外ではエンジンが無く、何もしない）"
+                $"{Source}:303（実行の外ではエンジンが無く、何もしない）"
             ),
             [MockAgentCapability.SendsContinuationNudge] = new(
                 false,
-                $"{Source}:159-225（固定のパイプラインで、続行の促しのターンを持たない）"
+                $"{Source}:157-223（固定のパイプラインで、続行の促しのターンを持たない）"
             ),
             [MockAgentCapability.ReportsDisconnect] = new(
                 false,
-                $"{Source}:151-152（接続断の通知を持たない）"
+                $"{Source}:149-150（接続断の通知を持たない）"
             ),
             [MockAgentCapability.DisposesBackendPerRun] = new(
                 true,
-                $"{Source}:281（1 実行の終わりにエンジンを破棄する）"
+                $"{Source}:279（1 実行の終わりにエンジンを破棄する）"
             ),
             [MockAgentCapability.SharesAgentPromptBuilder] = new(
                 false,
-                $"{Source}:133-146,167-174（BuildApiKeySystemPrompt・BuildApiKeyCommonPrompt の別系統で組む）"
+                $"{Source}:133-144,165-172（BuildApiKeySystemPrompt・BuildApiKeyCommonPrompt の別系統で組む）"
             ),
             [MockAgentCapability.SubmitsFilesThroughTool] = new(
                 true,
-                $"{Source}:144,408-419（emit_file のツールを渡し、実行器自身がツールホストとして提出を書く）"
+                $"{Source}:142,406-417（emit_file のツールを渡し、実行器自身がツールホストとして提出を書く）"
             ),
         };
 
@@ -95,11 +95,24 @@ internal sealed class ApiKeyMockAgentAdapter : MockAgentAdapter
         new(false, $"{Source}:97-103（拡張子のホワイトリストでビルド設定を構造的に書けない）");
 
     /// <inheritdoc/>
+    public override MockAgentValue<MockAgentPromptSlot> AdditionalInstructionsPrompt { get; } =
+        new(
+            MockAgentPromptSlot.SystemPrompt,
+            $"{Source}:133-141（追加の指示を BuildApiKeySystemPrompt へ渡し、実行全体の規則を持つシステムプロンプトの末尾へ載せる。"
+                + "共通部・画面・修正のプロンプトはそのターンに閉じた依頼。"
+                + "src/QuickER.AI/ChatTurnEngine.cs:210-214,252-258,346 がシステムプロンプトを履歴の先頭に置き、毎ターン全履歴を送り直すので、1 回でどのターンにも届く）"
+        );
+
+    /// <inheritdoc/>
     public override MockAgentLaunch ExpectedLaunch(MockProjectAgentRequest request) =>
         new(
             null,
             null,
-            MockProjectPromptBuilder.BuildApiKeySystemPrompt(request.Profile, request.ProjectName),
+            MockProjectPromptBuilder.BuildApiKeySystemPrompt(
+                request.Profile,
+                request.ProjectName,
+                request.AdditionalInstructions
+            ),
             $"tools={MockProjectEmitTools.EmitFileToolName}"
         );
 

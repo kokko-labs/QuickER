@@ -76,6 +76,12 @@ public sealed class MockAgentContractTests
                         nameof(MockAgentAdapter.FinalBuildEscapesSandbox),
                         adapter.FinalBuildEscapesSandbox.Evidence
                     )
+                )
+                .Append(
+                    (
+                        nameof(MockAgentAdapter.AdditionalInstructionsPrompt),
+                        adapter.AdditionalInstructionsPrompt.Evidence
+                    )
                 );
 
             // 出典は「src/…:行」で始め、先頭のパス（最初の : か空白か全角の括弧まで）が実在する

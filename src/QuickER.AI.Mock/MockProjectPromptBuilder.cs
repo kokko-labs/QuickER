@@ -96,14 +96,30 @@ Everything under {projectName}/Generated/ is read-only. Do not edit it.
 
 Do not ask for confirmation or approval: finish the whole task from these instructions alone.";
 
-        // 追加指示があれば末尾へ「# Additional instructions」として連結する（見出しも英語固定）
-        if (!string.IsNullOrWhiteSpace(additionalInstructions))
-        {
-            prompt += "\n\n" + AdditionalInstructionsHeading + "\n" + additionalInstructions.Trim();
-        }
-
-        return prompt;
+        return AppendAdditionalInstructions(prompt, additionalInstructions);
     }
+
+    /// <summary>
+    /// 追加指示があれば、プロンプトの末尾へ「# Additional instructions」の見出しつきで連結する（見出しも英語固定）
+    /// </summary>
+    /// <remarks>
+    /// 4 実行器が追加指示を連結する規則の正本（空・空白だけなら何も付けない・前後の空白を除く）。
+    /// エージェント型は初回のプロンプト（<see cref="BuildPrompt"/>）、API キー方式はシステムのプロンプト
+    /// （<see cref="BuildApiKeySystemPrompt"/>）の末尾へ、それぞれ 1 回だけ付ける。
+    /// </remarks>
+    /// <param name="prompt">連結先のプロンプト</param>
+    /// <param name="additionalInstructions">実装に対する追加指示（空／null なら付与しない）</param>
+    private static string AppendAdditionalInstructions(
+        string prompt,
+        string? additionalInstructions
+    ) =>
+        string.IsNullOrWhiteSpace(additionalInstructions)
+            ? prompt
+            : prompt
+                + "\n\n"
+                + AdditionalInstructionsHeading
+                + "\n"
+                + additionalInstructions.Trim();
 
     // ── API キー方式（固定パイプライン・emit_file による提出） ──
 
@@ -114,14 +130,20 @@ Do not ask for confirmation or approval: finish the whole task from these instru
     /// エージェント型（Claude Code / Codex）の <see cref="BuildSystemPrompt"/> を土台に、探索・自己ビルドの前提を外し、
     /// 「dotnet build を回して自己修正せよ」の指示を「与えられた情報だけで完全なファイルを提出せよ」へ置き換えた版。
     /// 実装ファイルの提出は <c>emit_file</c> ツール（<see cref="MockProjectEmitTools"/>）のみで行わせる。
+    /// 追加指示はこの末尾へ 1 回だけ付ける。API キー方式では実行全体に効く規則を持つのがこのプロンプトだけで
+    /// （共通部・画面・修正の各プロンプトはそのターンに閉じた依頼）、エンジンが履歴の先頭に置いて毎ターン再送するため、
+    /// 1 回でどのターンにも届く。
     /// </remarks>
     /// <param name="profile">ターゲット差分（役割・フレームワーク／ビュー種別・画面再現の規約）</param>
     /// <param name="projectName">プロジェクト名</param>
+    /// <param name="additionalInstructions">実装に対する追加指示（空／null なら付与しない）</param>
     internal static string BuildApiKeySystemPrompt(
         MockProjectTargetProfile profile,
-        string projectName
+        string projectName,
+        string? additionalInstructions
     ) =>
-        $@"You are an expert {profile.Target.DisplayName} engineer, and you implement the UI layer (the screens) of an existing project.
+        AppendAdditionalInstructions(
+            $@"You are an expert {profile.Target.DisplayName} engineer, and you implement the UI layer (the screens) of an existing project.
 QuickER has already generated the data layer (Entity / EditModel / Mapper / I{{Entity}}Repository / the in-memory implementation and so on) under {projectName}/{MockProjectScaffoldService.GeneratedFolderName}/, and you write only the UI layer that consumes it through dependency injection.
 
 # Implementation rules
@@ -140,7 +162,9 @@ QuickER has already generated the data layer (Entity / EditModel / Mapper / I{{E
 - Pass the complete content of the file to emit_file (the whole file, not a diff). Submitting the same path again overwrites it.
 - path is a relative path under the output project (for example {profile.ApiKeyEmitPathExamples(projectName)}).
 - You cannot read files or run dotnet build. Using only the information you are given, submit complete files that compile (never guess at a member whose existence you cannot confirm).
-- In every turn, submit the whole set of files requested for that turn, using emit_file within that same turn.";
+- In every turn, submit the whole set of files requested for that turn, using emit_file within that same turn.",
+            additionalInstructions
+        );
 
     /// <summary>固定パイプラインの第 1 リクエスト（共通部＝App/MainWindow/ナビゲーション骨格/DI）のプロンプトを組み立てる</summary>
     /// <param name="projectName">プロジェクト名</param>
