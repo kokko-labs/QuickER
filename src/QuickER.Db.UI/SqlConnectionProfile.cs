@@ -77,4 +77,17 @@ public class SqlConnectionProfile
             FilePath = FilePath,
             CommandTimeoutSeconds = CommandTimeoutSeconds,
         };
+
+    /// <summary>このプロファイルが指定の（DBMS, 名前）のものか（どちらも大文字小文字を無視して比べる）</summary>
+    /// <remarks>
+    /// 保存済みのプロファイルを一意に決めるのは（DBMS, 名前）の組で、接続ダイアログの上書き先・名前の変更の衝突の探し方と、
+    /// ストアの書き込みの衝突の判定（<see cref="SqlConnectionProfileStore.Upsert"/>・<see cref="SqlConnectionProfileStore.Rename"/>）が
+    /// この 1 つを使う。比べ方が食い違うと、ダイアログが別物とみなした名前をストアが断る（または逆に、ダイアログが確認した
+    /// 上書きをストアが複製として書く）。名前は保存する値どうしで比べ、ここでは加工しない（前後の空白は保存の前に呼び出し側が除く）。
+    /// </remarks>
+    /// <param name="dbms">プロバイダ識別名</param>
+    /// <param name="name">プロファイル名</param>
+    internal bool HasEntryKey(string dbms, string name) =>
+        string.Equals(Dbms, dbms, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(Name, name, StringComparison.OrdinalIgnoreCase);
 }

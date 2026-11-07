@@ -8,7 +8,7 @@ internal enum ConnectionDialogState
     /// <summary>空のストア・取込モード（入力欄は既定）</summary>
     Fresh,
 
-    /// <summary>保存済みのプロファイル・前回接続・旧形式の connections.json がある（未選択）</summary>
+    /// <summary>保存済みのプロファイル・前回接続・旧形式や壊れた connections.json がある（未選択）</summary>
     Profiles,
 
     /// <summary>プロファイルを選んだ</summary>
@@ -95,6 +95,8 @@ internal static partial class ConnectionDialogRows
                 .. SqliteRows(),
                 .. SweepRows(),
                 .. SweepFailureRows(),
+                .. StaleRows(),
+                .. CorruptRows(),
             ]
         );
 

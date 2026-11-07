@@ -256,11 +256,17 @@
   <data name="DbConnection_ProfilesUnavailable" xml:space="preserve">
     <value>保存済み接続のファイルを読み取れなかったため、保存済み接続を表示していません。他のプログラムが使用している可能性があります。少し待ってからダイアログを開き直してください。</value>
   </data>
+  <data name="DbConnection_ProfilesCorrupt" xml:space="preserve">
+    <value>保存済み接続のファイル（{0}）が壊れていて読み取れないため、保存済み接続を表示していません。接続を保存するとファイルを書き直します。最初に壊れていたファイルの写しは {1} に残ります。</value>
+  </data>
   <data name="DbConnection_ProfileWriteFailed" xml:space="preserve">
     <value>保存済み接続の書き込みに失敗しました。一部だけ反映された可能性があるため、一覧をファイルから読み直しました: {0}</value>
   </data>
   <data name="DbConnection_ProfileNotFound" xml:space="preserve">
     <value>プロファイル '{0}' が見つかりませんでした。他のプログラムが削除した可能性があります。一覧を読み直しました。</value>
+  </data>
+  <data name="DbConnection_ProfileNameConflict" xml:space="preserve">
+    <value>'{0}' という名前のプロファイルがほかにも保存されていたため、何も変更していません。他のプログラムが保存した可能性があります。一覧を読み直しました。</value>
   </data>
   <data name="DbConnection_ProfileLoadedPasswordUnreadable" xml:space="preserve">
     <value>プロファイル '{0}' を読み込みましたが、保存済みのパスワードを読み取れなかったため、パスワード欄は空欄です。入力し直してください。</value>

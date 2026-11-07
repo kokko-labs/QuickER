@@ -256,11 +256,17 @@
   <data name="DbConnection_ProfilesUnavailable" xml:space="preserve">
     <value>Could not read the saved connections file, so the saved connections are not shown. Another program may be using it. Reopen this dialog in a moment.</value>
   </data>
+  <data name="DbConnection_ProfilesCorrupt" xml:space="preserve">
+    <value>The saved connections file ({0}) is corrupted and could not be read, so the saved connections are not shown. Saving a connection rewrites the file. A copy of the first corrupted file is kept as {1}.</value>
+  </data>
   <data name="DbConnection_ProfileWriteFailed" xml:space="preserve">
     <value>Could not write the saved connections. The change may have been applied only partly, so the list was reloaded from the file: {0}</value>
   </data>
   <data name="DbConnection_ProfileNotFound" xml:space="preserve">
     <value>Profile '{0}' was not found. Another program may have deleted it. The list was reloaded.</value>
+  </data>
+  <data name="DbConnection_ProfileNameConflict" xml:space="preserve">
+    <value>Another profile named '{0}' is already saved, so nothing was changed. Another program may have saved it. The list was reloaded.</value>
   </data>
   <data name="DbConnection_ProfileLoadedPasswordUnreadable" xml:space="preserve">
     <value>Loaded profile '{0}', but its saved password could not be read, so the password field is empty. Enter the password again.</value>

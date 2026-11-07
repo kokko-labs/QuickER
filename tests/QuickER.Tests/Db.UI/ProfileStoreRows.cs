@@ -332,6 +332,14 @@ internal sealed class ProfileObservation(ProfileContext context, object? value, 
     /// <summary>手が接続情報ファイルを読めず中止した例外を投げたことを確かめる</summary>
     public void ShouldHaveThrownUnavailable() =>
         Thrown.Should().BeOfType<ConnectionProfileStoreUnavailableException>();
+
+    /// <summary>手が同じ（DBMS, 名前）の衝突で断る例外を投げ、衝突したのが指定の Id のプロファイルであることを確かめる</summary>
+    public void ShouldHaveThrownNameConflict(Guid conflictingId) =>
+        Thrown
+            .Should()
+            .BeOfType<ConnectionProfileNameConflictException>()
+            .Which.ConflictingProfile.Id.Should()
+            .Be(conflictingId);
 }
 
 /// <summary>接続プロファイルの操作列のシナリオ</summary>
@@ -382,6 +390,7 @@ internal static class ProfileStoreRunner
                 );
             }
 
+            var duplicatedBefore = WritesProfiles(step.Kind) ? HasDuplicateEntry(context) : null;
             object? value = null;
             Exception? thrown = null;
 
@@ -394,6 +403,7 @@ internal static class ProfileStoreRunner
                 thrown = ex;
             }
 
+            AssertNoNewDuplicateEntry(context, step, duplicatedBefore);
             step.Expect?.Invoke(new ProfileObservation(context, value, thrown));
         }
 
@@ -410,6 +420,58 @@ internal static class ProfileStoreRunner
 
     /// <summary>製品の入口か（表の因子 Op の水準か）</summary>
     private static bool OpOf(ProfileStepKind kind) => kind <= ProfileStepKind.Delete;
+
+    /// <summary>製品の書く入口を呼ぶ手か（下ごしらえの Seed / SeedLast も製品の Upsert / SaveLastUsed を呼ぶ）</summary>
+    private static bool WritesProfiles(ProfileStepKind kind) =>
+        kind
+            is ProfileStepKind.SaveLastUsed
+                or ProfileStepKind.Upsert
+                or ProfileStepKind.UpsertReplacing
+                or ProfileStepKind.Rename
+                or ProfileStepKind.RenameReplacing
+                or ProfileStepKind.Delete
+                or ProfileStepKind.Seed
+                or ProfileStepKind.SeedLast;
+
+    /// <summary>
+    /// ディスクのプロファイルに同じ（DBMS, 名前）が 2 つ以上あるか（大文字小文字を無視。connections.json を読めないときは null）
+    /// </summary>
+    private static bool? HasDuplicateEntry(ProfileContext c)
+    {
+        var read = c.Store.Read();
+
+        if (read.Status == ConnectionFileStatus.Unavailable)
+        {
+            return null;
+        }
+
+        return read
+            .Profiles.GroupBy(p => p.Dbms + "\u0001" + p.Name, StringComparer.OrdinalIgnoreCase)
+            .Any(group => group.Count() > 1);
+    }
+
+    /// <summary>
+    /// 全行に共通：書く入口は、手の前に（DBMS, 名前）で一意だったディスクに同じ（DBMS, 名前）のプロファイルを作らない
+    /// （手の前から重複している＝手で書いた JSON の行と、読めない間の手は対象外）
+    /// </summary>
+    private static void AssertNoNewDuplicateEntry(
+        ProfileContext c,
+        ProfileStep step,
+        bool? duplicatedBefore
+    )
+    {
+        if (duplicatedBefore is not false)
+        {
+            return;
+        }
+
+        HasDuplicateEntry(c)
+            .Should()
+            .NotBe(
+                true,
+                $"書く手（{step.Kind}）は一意だったディスクに同じ（DBMS, 名前）のプロファイルを作らない"
+            );
+    }
 
     private static object? Execute(ProfileContext c, ProfileStep step)
     {
@@ -682,6 +744,7 @@ internal static partial class ProfileStoreRows
                 .. UnreadableRows(),
                 .. PairingRows(),
                 .. SweepRows(),
+                .. ConflictRows(),
             ]
         );
 
@@ -867,4 +930,8 @@ internal static partial class ProfileStoreRows
 
     private static ProfileStep Probe(Action<ProfileObservation> expect) =>
         new(ProfileStepKind.Probe) { Expect = expect };
+
+    /// <summary>製品を呼ばずに、行の中の名前でプロファイルを控える（手で書いた JSON のプロファイルを後の手で指す）</summary>
+    private static ProfileStep Known(string key, Func<ProfileContext, SqlConnectionProfile> make) =>
+        new(ProfileStepKind.Probe) { Key = key, Make = make };
 }

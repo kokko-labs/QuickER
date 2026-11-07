@@ -297,10 +297,10 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             fixedProvider ?? Providers.FirstOrDefault() ?? _providers.Get("sqlserver");
 
         // 先頭プロファイルの自動選択は、直後に復元する前回接続情報を上書きするため初期選択は行わない。
-        // 一覧と前回接続は同じ 1 回の読み取りから取る。読めなかったときは、読めていない前回接続を復元しない
+        // 一覧と前回接続は同じ 1 回の読み取りから取る。読めなかった・壊れていたときは、読めていない前回接続を復元しない
         var read = ReloadProfiles();
 
-        if (!AreProfilesUnavailable)
+        if (!ProfilesNotListed)
         {
             RestoreLastConnection(read.LastUsed);
         }
@@ -320,12 +320,19 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     /// 同じ空として黙って出すと、ディスクに残っているプロファイルが無いように見え、その一覧を前提にした保存が
     /// 確認なしに同じ名前のプロファイルを作る（保存は読み直してから上書き先を探す＝<see cref="SaveProfile"/>）。
     /// </para>
+    /// <para>
+    /// 壊れていたとき（JSON として読めない・旧配列形式＝分類 Corrupt）も、一覧と選択を空にしてステータス行で知らせる。
+    /// 文には、壊れたファイルの場所と、最初に壊れていたファイルの写しの場所（ストアは保存の前に 1 回だけ退避する＝
+    /// <see cref="SqlConnectionProfileStore.CorruptBackupPath"/>）を入れる。黙って空で出すと、保存済みの接続が消えたように見え、
+    /// 次の保存で退避されたことにも気づけない。保存は止めない（書けばファイルは正常に戻る）。
+    /// </para>
     /// </remarks>
     private ConnectionProfilesRead ReloadProfiles()
     {
         var read = _store.Read();
         Profiles.Clear();
         AreProfilesUnavailable = read.Status == ConnectionFileStatus.Unavailable;
+        _profilesCorrupt = read.Status == ConnectionFileStatus.Corrupt;
 
         foreach (var p in read.Profiles)
         {
@@ -342,9 +349,30 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             SelectProfileWithoutApplying(null);
             StatusMessage = Strings.DbConnection_ProfilesUnavailable;
         }
+        else if (_profilesCorrupt)
+        {
+            SelectProfileWithoutApplying(null);
+            StatusMessage = string.Format(
+                Strings.DbConnection_ProfilesCorrupt,
+                _store.ConnectionsPath,
+                _store.CorruptBackupPath
+            );
+        }
 
         return read;
     }
+
+    /// <summary>直前の一覧の読み込みで connections.json が壊れていたか（ストアの分類 Corrupt）</summary>
+    private bool _profilesCorrupt;
+
+    /// <summary>
+    /// 直前の一覧の読み込みが一覧を出せなかったか（読めない・壊れている。どちらもステータス行で知らせ済み）
+    /// </summary>
+    /// <remarks>
+    /// 書き込みの後の読み直しでこれが真なら、ステータス行を成功・失敗の文で上書きせずに戻る（一覧が空のまま
+    /// 「保存しました」と言わない）。保存の前の読み直しは、読めないときだけ（壊れていれば書けば正常化するので止めない）。
+    /// </remarks>
+    private bool ProfilesNotListed => AreProfilesUnavailable || _profilesCorrupt;
 
     partial void OnSelectedProviderChanged(IDatabaseProvider value)
     {
@@ -517,8 +545,8 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     {
         ReloadProfiles();
 
-        // 読み直せなかったときは、一覧を出し直せていないので「読み直した」とは言わず、読めないことを残す
-        if (AreProfilesUnavailable)
+        // 読み直せなかった（読めない・壊れている）ときは、一覧を出し直せていないので「読み直した」とは言わず、その文を残す
+        if (ProfilesNotListed)
         {
             return;
         }
@@ -683,6 +711,8 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     /// 選択中のプロファイル自身の上書き（読み込んで直して保存）は従来どおり確認しない。
     /// 保存名は前後の空白を除いてから照合する（保存する名前と同じ値で探さないと、空白を付けただけで
     /// 上書き確認も上書きもすり抜け、同じ名前のプロファイルが 2 つできる）。
+    /// 一覧は開いたときに読んだものなので、その後にほかのプロセスが同じ名前で保存していると上書き先を見つけられない。
+    /// そのときはストアが書き込みを断り、読み直して確認する（<see cref="ResolveNameConflict"/>）。
     /// </remarks>
     [RelayCommand]
     private void SaveProfile()
@@ -716,12 +746,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
 
         // 同名かつ同一方言のプロファイルのみ上書き対象とする
         var existing = Profiles.FirstOrDefault(p =>
-            string.Equals(p.Profile.Name, name, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(
-                p.Profile.Dbms,
-                SelectedProvider.Name,
-                StringComparison.OrdinalIgnoreCase
-            )
+            p.Profile.HasEntryKey(SelectedProvider.Name, name)
         );
 
         // 保存済みパスワードを読み取れなかったプロファイルを、空欄のまま「パスワードを保存」付きで上書きすると、
@@ -744,30 +769,50 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         }
 
         var profile = CreateCurrentProfile(existing?.Profile.Id, name);
+        Guid? replacedId = null;
+        var retried = false;
 
-        try
+        while (true)
         {
-            _store.Upsert(profile, Password);
-        }
-        catch (ConnectionProfileStoreUnavailableException)
-        {
-            // 保存は行われておらず、登録済みの内容も無傷。利用者が明示的に頼んだ操作なので
-            // 何も変えないまま「できなかった」ことだけを伝える（このダイアログの他の失敗と同じ流儀）
-            StatusMessage = Strings.DbConnection_ProfileStoreUnavailable;
-            return;
-        }
-        catch (Exception ex) when (IsStoreWriteFailure(ex))
-        {
-            ReportStoreWriteFailure(ex, profile.Id);
-            return;
+            try
+            {
+                _store.Upsert(profile, Password, replacedId);
+                break;
+            }
+            catch (ConnectionProfileNameConflictException ex)
+            {
+                // 開いた後にほかのプロセスが同じ名前で保存していた（一覧が古い）。読み直して上書きを確かめ、
+                // 続行なら衝突したプロファイルを置き換え先にして 1 回だけ書き直す
+                if (
+                    ResolveNameConflict(ex, name, retried, SelectedProfile?.Id) is not { } confirmed
+                )
+                {
+                    return;
+                }
+
+                replacedId = confirmed;
+                retried = true;
+            }
+            catch (ConnectionProfileStoreUnavailableException)
+            {
+                // 保存は行われておらず、登録済みの内容も無傷。利用者が明示的に頼んだ操作なので
+                // 何も変えないまま「できなかった」ことだけを伝える（このダイアログの他の失敗と同じ流儀）
+                StatusMessage = Strings.DbConnection_ProfileStoreUnavailable;
+                return;
+            }
+            catch (Exception ex) when (IsStoreWriteFailure(ex))
+            {
+                ReportStoreWriteFailure(ex, profile.Id);
+                return;
+            }
         }
 
         // 保存したので、読めなかったパスワードは入力し直した値か「保存しない」で置き換わった
         _unreadablePasswordProfileId = null;
         ReloadProfiles();
 
-        // 保存の直後に読み直せなかった（ほかのプロセスが掴んだ）ときは、読めないことをステータス行に残す
-        if (AreProfilesUnavailable)
+        // 保存の直後に読み直せなかった（ほかのプロセスが掴んだ・壊した）ときは、その文をステータス行に残す
+        if (ProfilesNotListed)
         {
             return;
         }
@@ -796,6 +841,60 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             string.Format(Strings.DbConnection_OverwriteProfileConfirm, target.Name),
             Strings.Common_Confirm
         );
+    }
+
+    /// <summary>
+    /// ストアが同じ（DBMS, 名前）の衝突で書き込みを断ったとき、一覧を読み直して上書きを確かめる
+    /// （続行して書き直すなら置き換え先＝衝突したプロファイルの Id、やめるなら <c>null</c>）
+    /// </summary>
+    /// <param name="conflict">ストアが投げた衝突の例外</param>
+    /// <param name="name">書こうとした名前</param>
+    /// <param name="retried">衝突の後の書き直しでも断られたか（なら確かめずにやめる）</param>
+    /// <param name="reselectId">読み直した一覧で選び直すプロファイルの Id</param>
+    /// <remarks>
+    /// <para>
+    /// ダイアログの一覧は開いたとき（と書き込みの後）に読んだもので、その後にほかのプロセス（別の QuickER のウィンドウなど）が
+    /// 同じ（DBMS, 名前）のプロファイルを保存していると、上書き先を見つけられずに別のプロファイルとして書こうとする。
+    /// ストアはこれを書き込み用の 1 回の読み取りで見つけて断る（<see cref="ConnectionProfileNameConflictException"/>）。
+    /// ここでは一覧をディスクの実体へ読み直し、通常の上書きと同じ警告つきの確認を出す。衝突したのが選択中のプロファイルでも
+    /// 確かめる（ほかのプロセスが選択中のプロファイルの名前を変えていることがある）。
+    /// </para>
+    /// <para>
+    /// 書き直しでも断られた（確認の間にさらに別の同名が保存された・以前の版でできた同名が 3 つ以上ある）ときは、確認を
+    /// 繰り返さずに何も書かずにやめて知らせる（<c>DbConnection_ProfileNameConflict</c>）。読み直しで一覧を出せなかった（読めない・
+    /// 壊れている）ときは、その文を残したままやめる。
+    /// </para>
+    /// </remarks>
+    private Guid? ResolveNameConflict(
+        ConnectionProfileNameConflictException conflict,
+        string name,
+        bool retried,
+        Guid? reselectId
+    )
+    {
+        ReloadProfiles();
+
+        if (ProfilesNotListed)
+        {
+            return null;
+        }
+
+        SelectProfileWithoutApplying(reselectId);
+
+        if (retried)
+        {
+            StatusMessage = string.Format(Strings.DbConnection_ProfileNameConflict, name);
+            return null;
+        }
+
+        var confirmed = _dialogs.ConfirmWarning(
+            string.Format(
+                Strings.DbConnection_OverwriteProfileConfirm,
+                conflict.ConflictingProfile.Name
+            ),
+            Strings.Common_Confirm
+        );
+        return confirmed ? conflict.ConflictingProfile.Id : null;
     }
 
     /// <summary>名前の変更を実行できるか（プロファイルを選んでいて、保存名が現在の名前と違う）</summary>
@@ -829,9 +928,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         var conflict = Profiles
             .Select(item => item.Profile)
             .FirstOrDefault(profile =>
-                profile.Id != target.Id
-                && string.Equals(profile.Name, newName, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(profile.Dbms, target.Dbms, StringComparison.OrdinalIgnoreCase)
+                profile.Id != target.Id && profile.HasEntryKey(target.Dbms, newName)
             );
 
         if (!ConfirmOverwriteOtherProfile(conflict))
@@ -840,30 +937,47 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         }
 
         var oldName = target.Name;
+        var replacedId = conflict?.Id;
+        var retried = false;
         bool renamed;
 
-        try
+        while (true)
         {
-            // 名前だけを書き換える専用経路を使う（パスワードを読み戻して書き戻すと、一時的に読めなかった
-            // パスワードが空値として書き戻されて消えるため）。置き換え先の削除と改名は 1 回の読み書きで行う
-            // （別々に呼ぶと、2 回目が読めなかったときに置き換え先だけが消えて対象は変わらない状態が残る）
-            renamed = _store.Rename(target.Id, newName, conflict?.Id);
-        }
-        catch (ConnectionProfileStoreUnavailableException)
-        {
-            // 何も書いていないので、一覧も選択もそのままにして伝えるだけにする
-            StatusMessage = Strings.DbConnection_ProfileStoreUnavailable;
-            return;
-        }
-        catch (Exception ex) when (IsStoreWriteFailure(ex))
-        {
-            ReportStoreWriteFailure(ex, target.Id);
-            return;
+            try
+            {
+                // 名前だけを書き換える専用経路を使う（パスワードを読み戻して書き戻すと、一時的に読めなかった
+                // パスワードが空値として書き戻されて消えるため）。置き換え先の削除と改名は 1 回の読み書きで行う
+                // （別々に呼ぶと、2 回目が読めなかったときに置き換え先だけが消えて対象は変わらない状態が残る）
+                renamed = _store.Rename(target.Id, newName, replacedId);
+                break;
+            }
+            catch (ConnectionProfileNameConflictException ex)
+            {
+                // 開いた後にほかのプロセスが同じ名前で保存していた。保存と同じく読み直して確かめ、1 回だけ書き直す
+                if (ResolveNameConflict(ex, newName, retried, target.Id) is not { } confirmed)
+                {
+                    return;
+                }
+
+                replacedId = confirmed;
+                retried = true;
+            }
+            catch (ConnectionProfileStoreUnavailableException)
+            {
+                // 何も書いていないので、一覧も選択もそのままにして伝えるだけにする
+                StatusMessage = Strings.DbConnection_ProfileStoreUnavailable;
+                return;
+            }
+            catch (Exception ex) when (IsStoreWriteFailure(ex))
+            {
+                ReportStoreWriteFailure(ex, target.Id);
+                return;
+            }
         }
 
         ReloadProfiles();
 
-        if (AreProfilesUnavailable)
+        if (ProfilesNotListed)
         {
             return;
         }
@@ -928,7 +1042,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
 
         ReloadProfiles();
 
-        if (AreProfilesUnavailable)
+        if (ProfilesNotListed)
         {
             return;
         }

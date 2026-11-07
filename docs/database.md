@@ -122,6 +122,7 @@ Saving is keyed on the profile name (spaces before and after it are ignored).
 A profile with the same name and the same DB kind is overwritten; otherwise a new profile is created.
 When the profile that would be overwritten is not the one selected in the list, QuickER asks first, because its connection settings and saved password would be replaced with no way back.
 Saving over the profile you loaded is not confirmed.
+When another program (such as another QuickER window) has saved a profile with the same name and the same DB kind since the dialog opened, saving and renaming reload the list and ask before overwriting that profile, so two profiles with the same name are never created.
 Use the "Rename" button when all you want is a different name.
 It changes only the name of the selected profile to the one in the box, keeping its connection settings and its saved password (the encrypted password file is not touched).
 Typing a new name and pressing "Save" stores a separate profile instead of renaming.
@@ -137,6 +138,7 @@ A partly applied change never leaves a profile with the saved password of anothe
 The old encrypted password file is removed before `connections.json` is written, and the new one is written after it.
 If `connections.json` then cannot be written, the profile keeps its old settings without a saved password, and you enter the password again.
 When recording the last connection on OK fails, the connection still goes ahead, and a message tells you that it was not recorded.
+When `connections.json` is corrupted as the dialog opens, the "Saved Connections" list is empty, and the status line says that the file is corrupted, where it is, and where its copy will be kept.
 If the file turns out to be corrupted, it is moved aside once to `connections.json.corrupt` before being overwritten.
 
 ### What gets imported

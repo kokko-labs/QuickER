@@ -450,6 +450,12 @@ namespace QuickER.Db.UI.Resources {
             }
         }
         
+        public static string DbConnection_ProfilesCorrupt {
+            get {
+                return ResourceManager.GetString("DbConnection_ProfilesCorrupt", resourceCulture);
+            }
+        }
+        
         public static string DbConnection_ProfileWriteFailed {
             get {
                 return ResourceManager.GetString("DbConnection_ProfileWriteFailed", resourceCulture);
@@ -465,6 +471,12 @@ namespace QuickER.Db.UI.Resources {
         public static string DbConnection_ProfileNotFound {
             get {
                 return ResourceManager.GetString("DbConnection_ProfileNotFound", resourceCulture);
+            }
+        }
+        
+        public static string DbConnection_ProfileNameConflict {
+            get {
+                return ResourceManager.GetString("DbConnection_ProfileNameConflict", resourceCulture);
             }
         }
         

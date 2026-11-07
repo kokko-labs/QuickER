@@ -89,6 +89,8 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **On Windows, a SQLite database file can now be moved, renamed or deleted right after QuickER creates, imports or syncs it** — QuickER kept the file open for a while after the operation, so these were refused as a sharing violation. This also applies to the connection test
 - **The "Saved Connections" list in the DB Sync dialog now shows only the profiles for the diagram's dialect** — choosing a profile of another dialect left it selected while the fields still showed the previous profile, so Rename and Delete acted on the profile that was not shown, without asking
 - **When the connection dialog cannot read `connections.json` (for example because another program is holding it), it now says so in the status line, and saving no longer creates a second profile with the same name** — the dialog opened with an empty list and no message, and saving after the file became readable again added a profile with the same name as a saved one instead of asking to overwrite it. Saving now reads the file again first
+- **When `connections.json` is corrupted, the connection dialog now says so in the status line, with where the file is and where a copy of it is kept** — the dialog opened with an empty list and no message, so the saved connections looked lost, and the next save moved the file aside without saying so
+- **Saving or renaming a profile no longer creates a second profile with the same name when another program saved one after the dialog opened** — the dialog now reloads the list and asks before overwriting that profile, as it does for a profile already in the list
 
 #### DB sync & DDL
 
