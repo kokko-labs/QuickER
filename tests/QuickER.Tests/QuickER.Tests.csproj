@@ -5,6 +5,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!--
+      テストホストをサーバー GC で動かす（runtimeconfig 経由で testhost に効く）。並列の全件実行では、生成コードのコンパイルと
+      総当たりが大量に割り当て、既定のワークステーション GC だと CPU を余したまま GC の待ちで 2〜8 倍に伸びる。
+      ソースの規則 test-host-server-gc が、この設定が残っていることを確かめる。
+    -->
+    <ServerGarbageCollection>true</ServerGarbageCollection>
   </PropertyGroup>
 
   <ItemGroup>

@@ -61,18 +61,14 @@ internal static class GuardDimensions
 
     /// <summary>網羅しない組の一覧</summary>
     /// <remarks>
-    /// 構文の節・トークン・XML で「あるべき出現」を確かめる規則は表に無い（必須の確認は、元のガードがどれも文字列かシンボルで
+    /// 構文の節・トークンで「あるべき出現」を確かめる規則は表に無い（必須の確認は、どのガードも文字列・シンボル・XML で
     /// 書いている）。規則が無い組は自己検査の行を作れないので、直す区切り（P4）つきで残す（必須の規則を足せば埋まる＝表の今の状態で、受け入れではない）。その読み方の必須の規則を足したら、
     /// 自己検査の行（普通の場所と外れる分岐）も足して、ここから消す。
     /// </remarks>
     public static CoverageGapSet Gaps =>
         CoverageGap.Set(
             EngineIds.Guard,
-            [
-                .. NoRequiredRule(GuardReader.SyntaxNodes),
-                .. NoRequiredRule(GuardReader.Tokens),
-                .. NoRequiredRule(GuardReader.Xml),
-            ]
+            [.. NoRequiredRule(GuardReader.SyntaxNodes), .. NoRequiredRule(GuardReader.Tokens)]
         );
 
     /// <summary>台帳の行</summary>
@@ -142,16 +138,14 @@ internal static class GuardDimensions
     private static IEnumerable<CoverageGapEntry> NoRequiredRule(GuardReader reader)
     {
         var reason =
-            $"読み方 {reader} で「あるべき出現」を確かめる規則が表に無い（必須の確認はどのガードも文字列かシンボルで書いている）。"
+            $"読み方 {reader} で「あるべき出現」を確かめる規則が表に無い（必須の確認はどのガードも文字列・シンボル・XML で書いている）。"
             + "規則が無いので自己検査の行を作れない（その読み方の必須の規則を持つガードがまだ無い）";
         (string Factor, string Level) readerLevel = (Reader, reader.ToString());
         (string Factor, string Level) required = (Expectation, nameof(GuardExpectation.Required));
 
         yield return CoverageGap.Tuple(Scope, "P3-12", "P4", reason, readerLevel, required);
 
-        foreach (
-            var branch in reader == GuardReader.Xml ? [Plain] : new[] { Plain, InactiveBranch }
-        )
+        foreach (var branch in new[] { Plain, InactiveBranch })
         {
             yield return CoverageGap.Tuple(
                 Scope,

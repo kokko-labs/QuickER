@@ -282,5 +282,38 @@ internal static partial class SourceRuleProbes
             {
                 InactiveBranch = true,
             },
+            // 条件の無い PropertyGroup の中の true（大小・前後の空白を問わない）だけを拾う。コメントの中の表記・false・条件つきの
+            // PropertyGroup と要素・PropertyGroup の外の同名の要素は拾わない
+            new SourceRuleProbe(
+                "test-host-server-gc-forms",
+                "test-host-server-gc",
+                [
+                    new ProbeFile(
+                        "Probe.csproj",
+                        """
+                        <Project Sdk="Microsoft.NET.Sdk">
+                          <!-- <PropertyGroup><ServerGarbageCollection>true</ServerGarbageCollection></PropertyGroup> -->
+                          <PropertyGroup>
+                            <!-- <ServerGarbageCollection>true</ServerGarbageCollection> -->
+                            <ServerGarbageCollection>false</ServerGarbageCollection>
+                            <ServerGarbageCollection Condition="'$(CI)' == 'true'">true</ServerGarbageCollection>
+                            <ServerGarbageCollection> True </ServerGarbageCollection>
+                          </PropertyGroup>
+                          <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+                            <ServerGarbageCollection>true</ServerGarbageCollection>
+                          </PropertyGroup>
+                          <ItemGroup>
+                            <ServerGarbageCollection>true</ServerGarbageCollection>
+                          </ItemGroup>
+                          <PropertyGroup>
+                            <ServerGarbageCollection>true</ServerGarbageCollection>
+                          </PropertyGroup>
+                        </Project>
+                        """,
+                        "ServerGarbageCollection=true",
+                        "ServerGarbageCollection=true"
+                    ),
+                ]
+            ),
         ];
 }
