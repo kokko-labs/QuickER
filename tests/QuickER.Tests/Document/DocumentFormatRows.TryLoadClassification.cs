@@ -1,3 +1,4 @@
+using System.IO;
 using AwesomeAssertions;
 using QuickER.Documents;
 using QuickER.Tests.TestSupport.Engines;
@@ -18,6 +19,57 @@ internal static partial class DocumentFormatRows
     /// </remarks>
     private static IEnumerable<ScenarioRow<FormatCase>> TryLoadClassificationRows() =>
         [
+            // 前置きを何も置かない＝対象のパスにファイルが無い（DocumentLoadError.ReadFailed の XmlDoc「不在・アクセス不可などの IO エラー」）
+            Row(
+                "tryload-missing-file-read-failed",
+                "TryLoad: ファイルが無ければ ReadFailed へ分類し、原因の例外を持ち帰り、読み取ったバイト列は null",
+                new FormatCase
+                {
+                    Stage = FormatStage.TryLoad,
+                    Result = FormatResult.ReadFailed,
+                    Expect = o =>
+                    {
+                        o.Loaded.Should().BeNull();
+                        o.Exception.Should()
+                            .BeAssignableTo<FileNotFoundException>("原因を呼び出し側へ持ち帰る");
+                        o.RawContents.Should()
+                            .BeNull("読み取り自体に失敗したときだけ null（TryLoad の XmlDoc）");
+                        File.Exists(o.Path).Should().BeFalse("読み込みはファイルを作らない");
+                    },
+                }
+            ),
+            // 特性の固定の側面：例外の型（JsonStorageService.cs:135 の Load は File.ReadAllText と逆直列化の例外をそのまま出す。
+            // XmlDoc は「自分が書いたファイルを読み戻す」用途と言うだけで、読めないときの型を定めない）
+            Row(
+                "load-missing-file-throws",
+                "特性の固定（文書に定めが無い今の振る舞い）：Load はファイルが無ければ FileNotFoundException を投げる（TryLoad のように分類しない）",
+                new FormatCase
+                {
+                    Stage = FormatStage.Load,
+                    Result = FormatResult.Threw,
+                    Expect = o =>
+                    {
+                        o.Thrown.Should().BeAssignableTo<FileNotFoundException>();
+                        File.Exists(o.Path).Should().BeFalse("読み込みはファイルを作らない");
+                    },
+                }
+            ),
+            Row(
+                "load-invalid-json-throws",
+                "特性の固定（文書に定めが無い今の振る舞い）：Load は JSON として読めない内容に JsonException を投げ、ファイルを変えない",
+                new FormatCase
+                {
+                    Stage = FormatStage.Load,
+                    Result = FormatResult.Threw,
+                    Json = "{ \"Version\": 1, \"Schema\": ",
+                    Expect = o =>
+                    {
+                        o.Thrown.Should().BeAssignableTo<System.Text.Json.JsonException>();
+                        o.BytesAfter.Should()
+                            .Equal(o.BytesBefore, "読み込みはファイルを書き換えない");
+                    },
+                }
+            ),
             Row(
                 "tryload-duplicate-root-keys-invalid-json",
                 "TryLoad: ルートのキー重複は InvalidJson へ分類される",

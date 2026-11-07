@@ -178,39 +178,10 @@ internal static class DocumentFileDimensions
 
     /// <summary>網羅しない組の一覧（シナリオと普段の既定の種の数の乱数の手の列で欠ける組）</summary>
     /// <remarks>
-    /// どれも出やすさの低い手と短命なディスクの状態の組で、普段の既定の 150 種の並びに出ないだけ（夜間の 1500 種では埋まる）。
-    /// 一覧は既定の種の並びに合わせて書いてあるので、生成器を変えて種の指紋が変わったら一緒に書き直す。
+    /// 普段の種の並びに出にくい組（出やすさの低い手と短命なディスクの状態の組）は、決まった形のシナリオで埋める。
+    /// 乱数の生成器を変えて種の指紋が変わり、欠ける組が出たら、一覧に足すより先にシナリオで埋められないかを見る。
     /// </remarks>
-    public static CoverageGapSet Gaps =>
-        CoverageGap.Set(
-            EngineIds.DocumentFile,
-            [
-                CoverageGap.Tuple(
-                    RandomScope,
-                    "P3-9",
-                    "P4",
-                    "普段の既定の種の並びに出ない（削除の通知は他の配送より薄く、Id 重複の外部の書き込みは次の配送・保存・開くで戻る）",
-                    (Op, $"Deliver{DocumentFileChangeKind.Deleted}"),
-                    (Disk, nameof(DocumentLoadError.DuplicateId))
-                ),
-                CoverageGap.Tuple(
-                    RandomScope,
-                    "P3-9",
-                    "P4",
-                    "普段の既定の種の並びに出ない（メタのハッシュを消す手は 2 % で、Id 重複の外部の書き込みは短命）",
-                    (Op, "StripMetaHash"),
-                    (Disk, nameof(DocumentLoadError.DuplicateId))
-                ),
-                CoverageGap.Tuple(
-                    RandomScope,
-                    "P3-9",
-                    "P4",
-                    "普段の既定の種の並びに出ない（無視した版はダーティで続行を選んだ後だけに現れ、次の配送・保存で消える）",
-                    (Op, "Undo"),
-                    (Disk, "Ignored")
-                ),
-            ]
-        );
+    public static CoverageGapSet Gaps => CoverageGap.Set(EngineIds.DocumentFile, []);
 
     /// <summary>決まった形のシナリオの台帳の行</summary>
     public static EngineDescriptor ScenariosDescriptor =>

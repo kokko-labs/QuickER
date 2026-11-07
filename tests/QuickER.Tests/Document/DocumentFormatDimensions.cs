@@ -104,38 +104,8 @@ internal static class DocumentFormatDimensions
         };
     }
 
-    /// <summary>網羅しない組の一覧</summary>
-    /// <remarks>どれも元の単発のテストが持っていなかった組（移すときに単発を足していない）。足すなら表の行で足す。</remarks>
-    public static CoverageGapSet Gaps =>
-        CoverageGap.Set(
-            EngineIds.DocumentFile,
-            [
-                CoverageGap.Tuple(
-                    Scope,
-                    "P3-9",
-                    "P4",
-                    "Load が例外を投げる行が無い（読めない入力の分類は TryLoad の行が持つ）",
-                    (Stage, nameof(FormatStage.Load)),
-                    (Result, nameof(FormatResult.Threw))
-                ),
-                CoverageGap.Tuple(
-                    Scope,
-                    "P3-9",
-                    "P4",
-                    "IO の失敗で読めないファイルの TryLoad の行が無い",
-                    (Stage, nameof(FormatStage.TryLoad)),
-                    (Result, nameof(FormatResult.ReadFailed))
-                ),
-                CoverageGap.Tuple(
-                    Scope,
-                    "P3-9",
-                    "P4",
-                    "書けない保存先の往復の行が無い（書けない保存先は SaveAtomic の行 saveatomic-replace-failure-removes-temporary-and-throws が持つ）",
-                    (Stage, nameof(FormatStage.RoundTrip)),
-                    (Result, nameof(FormatResult.Threw))
-                ),
-            ]
-        );
+    /// <summary>網羅しない組の一覧（段 × 結果の種類の、段が取り得る組の全部を行が持つ）</summary>
+    public static CoverageGapSet Gaps => CoverageGap.Set(EngineIds.DocumentFile, []);
 
     /// <summary>台帳の行</summary>
     public static EngineDescriptor Descriptor =>

@@ -171,6 +171,27 @@ internal static partial class DocumentFileScenarios
                         }),
                 ]
             ),
+            // メタのハッシュを消す手は自動保存の記録だけを書き換え、図のファイルを読まない。ディスクの図が Id 重複に
+            // 書き換わっていても、旧版のメタは照合せずに信じてパスを付けて復元する（読み込むのは自動保存の図）
+            Row(
+                "meta-legacy-without-hash-trusted-while-disk-is-duplicate-id",
+                "図のハッシュを持たない旧版のメタは、図のファイルが Id 重複に書き換わっていても照合せずに信じる",
+                [
+                    .. SaveAThenOpenB(),
+                    Doc.AutoSave(),
+                    Doc.WriteKind(B, DocContentKind.DuplicateId, "duplicate-id"),
+                    Doc.StripMetaHash(),
+                    Doc.Restart()
+                        .Expect(o =>
+                        {
+                            o.Path.Should().Be(o.PathOf(B));
+                            o.Tables.Should()
+                                .ContainSingle()
+                                .Which.Should()
+                                .Be("OnlyInB", "復元するのは自動保存の図");
+                        }),
+                ]
+            ),
         ];
 
     /// <summary>開けない図の案内（Id 重複・必須の文字列の欠落・図でない JSON）</summary>

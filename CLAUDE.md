@@ -174,7 +174,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **スケールの符号は 3 箇所同時に許し、型マッパーは負のスケールを読まない**：片肺だと取り込んだ列のトークンが読み戻せない。ガード：`DialectTypeTableTests`（負のスケールの行）・`CodegenCaseTests` の行 `code-negative-scale-column-is-decimal-property`。→ `src/QuickER.Provider/CLAUDE.md`「スケールの符号」
 - **精度なしの Decimal を 38 桁へ読み替えるのは方言切替（`DiagramTypeConverter`）だけ**：`TryFormat` へ移すとトークン・リバース・パラメータまで黙って 38 桁へ化ける。ガード：`DialectTypeTableTests`（方言切替の行）・`DiagramTypeConverterTests`・`MainViewModelTargetDbmsTests`・`CSharpReverseBareDecimalTests`・`FormatRoundTripTests`（形の行 `csharp-oracle-precisionless-*`・`csharp-bare-decimal-*`／規則の行 `csharp-rule-precisionless-scaled-token-*`）。→ `src/QuickER.Provider/CLAUDE.md`「方言切替の精度の読み替え」
 - **型マッパーはドライバが返す CLR 型へ写す（PG の時間帯の語・timetz・inet、Oracle の LOCAL TIME ZONE と単位語、SQLite の REAL、MySQL の tinytext、SQL Server の float(n)）**：違う型だと読み取りが `InvalidCastException` で表ごと使えない。ガード：`DialectTypeTableTests`（マッパーの行）・各方言の `*DialectTypeRealDbTests`（同じ行を実 DB で流し、ドライバの `GetFieldType` と比べる）・`CodegenCaseTests` の行 `code-fallback-type-column-is-string-property`。→ `src/QuickER.Provider/CLAUDE.md`「型マッパーはドライバの CLR 型へ写す」
-- **方言の型の上限と取込の表記**：上限の値・正規化の規則は方言の宣言。ガード：`DialectTypeTableTests`（上限の対・網羅の照合）・`{MySql,PostgreSql}DialectTypeRealDbTests`（上限の対を実 DB で適用して取り込み直す）。→ 各方言の CLAUDE.md「型表記」
+- **方言の型の上限と取込の表記**：上限の値・正規化の規則は方言の宣言。ガード：`DialectTypeTableTests`（上限の対・網羅の照合）・`{SqlServer,MySql,PostgreSql,Oracle}DialectTypeRealDbTests`（上限の対を実 DB で適用して取り込み直す）。→ 各方言の CLAUDE.md「型表記」
 
 ### 差分と同期
 

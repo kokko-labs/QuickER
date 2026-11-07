@@ -1,14 +1,17 @@
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace QuickER.Tests.TestSupport.Guards;
 
 /// <summary>ソースの規則の表：アプリ（App・Program の配線・ダイアログ・XAML）</summary>
 /// <remarks>
-/// App・Program はエントリポイントと WPF の Application 派生で、テストから実体化・実行できないので、配線をソースの文字列で見張る。
-/// 文字列で読む必須の規則は、コメント・条件コンパイルの外れる分岐の中に書いた表記でも満たされる（構文へは書き直さない。
-/// 読み先はいま <c>#if</c> を持たない）。
+/// App・Program はエントリポイントと WPF の Application 派生で、テストから実体化・実行できないので、配線をソースで見張る。
+/// 文字列で読む必須の規則は、コメント・条件コンパイルの外れる分岐の中に書いた表記でも満たされる。UI 例外の受け皿（トークンの並び）と
+/// 単一インスタンスの配線（構文の節）の必須の規則は構文で読むので、コメントの中だけの表記では満たされない（自己検査の行 *-comment-only）。
 /// </remarks>
 internal static partial class SourceRules
 {
@@ -64,10 +67,11 @@ internal static partial class SourceRules
         TextPattern(".OnMainWindowClosing(", @"\.OnMainWindowClosing\s*\("),
     ];
 
-    private static readonly (string What, Regex Pattern)[] UiCrashHandlerForms =
+    /// <summary>UI 例外の受け皿の必須の形（トークンの並び。何かは並びをつないだ文字列）</summary>
+    private static readonly string[][] UiCrashHandlerTokenForms =
     [
-        FixedText("CrashHandlingService.HandleUiCrash("),
-        FixedText("_featureModuleShutdown?.CloseAll()"),
+        ["CrashHandlingService", ".", "HandleUiCrash", "("],
+        ["_featureModuleShutdown", "?", ".", "CloseAll", "(", ")"],
     ];
 
     private static readonly (string What, Regex Pattern)[] UiCrashHandlerBypassForms =
@@ -76,12 +80,16 @@ internal static partial class SourceRules
         TextPattern("行頭の Environment.Exit(", @"^\s*Environment\.Exit\(", RegexOptions.Multiline),
     ];
 
-    private static readonly (string What, Regex Pattern)[] SingleInstanceForms =
-    [
-        FixedText("ReleaseSingleInstanceBeforeRelaunch(singleInstance.Dispose)"),
-        FixedText("RelaunchWith(WpfApplicationRestartService.StartNewInstance)"),
-        FixedText("outcome == SingleInstanceOutcome.Inaccessible"),
-    ];
+    /// <summary>単一インスタンスの配線の必須の呼び出し（メソッド名と引数リスト。受け手は問わない）</summary>
+    private static readonly HashSet<string> SingleInstanceCallForms = new(StringComparer.Ordinal)
+    {
+        "ReleaseSingleInstanceBeforeRelaunch(singleInstance.Dispose)",
+        "RelaunchWith(WpfApplicationRestartService.StartNewInstance)",
+    };
+
+    /// <summary>座を開けないときの案内の分岐の比較</summary>
+    private const string SingleInstanceInaccessibleForm =
+        "outcome == SingleInstanceOutcome.Inaccessible";
 
     private static readonly (string What, Regex Pattern)[] SingleInstanceBypassForms =
     [
@@ -235,7 +243,7 @@ internal static partial class SourceRules
                 "app-ui-crash-handler-uses",
                 "App の UI 例外の受け皿は HandleUiCrash と後始末の共有インスタンスを使う",
                 SourceScope.Files("src", AppCode),
-                GuardFinder.File(GuardReader.Text, file => FindForms(file, UiCrashHandlerForms)),
+                GuardFinder.Tokens(token => DescribeTokenSequence(token, UiCrashHandlerTokenForms)),
                 new(
                     AppCode,
                     "CrashHandlingService.HandleUiCrash(",
@@ -265,7 +273,7 @@ internal static partial class SourceRules
                 "program-single-instance-uses",
                 "Program は再起動の前の座の手放しを登録し、開けないときは案内する",
                 SourceScope.Files("src", ProgramCode),
-                GuardFinder.File(GuardReader.Text, file => FindForms(file, SingleInstanceForms)),
+                GuardFinder.Nodes(DescribeSingleInstanceNode),
                 new(
                     ProgramCode,
                     "ReleaseSingleInstanceBeforeRelaunch(singleInstance.Dispose)",
@@ -298,6 +306,69 @@ internal static partial class SourceRules
         ];
 
     /// <summary>固定の文字列の形（何かはその文字列）</summary>
+    /// <summary>トークンから始まる並びが形のどれかと一致すれば、並びをつないだ文字列を返す（トリビア＝コメントは並びに入らない）</summary>
+    private static string? DescribeTokenSequence(SyntaxToken token, string[][] forms)
+    {
+        foreach (var form in forms)
+        {
+            var current = token;
+            var matched = true;
+
+            foreach (var text in form)
+            {
+                if (!string.Equals(current.Text, text, StringComparison.Ordinal))
+                {
+                    matched = false;
+                    break;
+                }
+
+                current = current.GetNextToken();
+            }
+
+            if (matched)
+            {
+                return string.Concat(form);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>単一インスタンスの配線の必須の呼び出しと比較の節なら、その表記を返す</summary>
+    private static string? DescribeSingleInstanceNode(SyntaxNode node)
+    {
+        switch (node)
+        {
+            case InvocationExpressionSyntax invocation:
+            {
+                var name = invocation.Expression is MemberAccessExpressionSyntax access
+                    ? access.Name
+                    : invocation.Expression;
+                var call = TokenText(name) + TokenText(invocation.ArgumentList);
+
+                return SingleInstanceCallForms.Contains(call) ? call : null;
+            }
+            case BinaryExpressionSyntax binary when binary.IsKind(SyntaxKind.EqualsExpression):
+            {
+                var comparison = $"{TokenText(binary.Left)} == {TokenText(binary.Right)}";
+
+                return string.Equals(
+                    comparison,
+                    SingleInstanceInaccessibleForm,
+                    StringComparison.Ordinal
+                )
+                    ? comparison
+                    : null;
+            }
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>節のトークンを空白なしでつなぐ（トリビア＝コメント・空白を読まない）</summary>
+    private static string TokenText(SyntaxNode node) =>
+        string.Concat(node.DescendantTokens().Select(token => token.Text));
+
     private static (string What, Regex Pattern) FixedText(string text) =>
         (text, new Regex(Regex.Escape(text), RegexOptions.CultureInvariant));
 

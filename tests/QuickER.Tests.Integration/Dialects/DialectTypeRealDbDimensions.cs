@@ -49,27 +49,8 @@ internal static class DialectTypeRealDbDimensions
             isValid: IsValid
         );
 
-    /// <summary>網羅しない組の一覧（行がまだ無いだけの組。方言が原理的に持てない組は <see cref="IsValid"/> が外す）</summary>
-    public static CoverageGapSet Gaps { get; } =
-        CoverageGap.Set(
-            EngineIds.Dialect,
-            new[] { DialectNames.SqlServer, DialectNames.Oracle }.SelectMany(dialect =>
-                new[]
-                {
-                    DialectTypeRealDbProbeKinds.AtLimit,
-                    DialectTypeRealDbProbeKinds.OverLimit,
-                }.Select(probe =>
-                    CoverageGap.Tuple(
-                        Scope,
-                        "P3-5a",
-                        "P4",
-                        "上限の対の単体の行（format-*-limit-*）はあるが、DB の上限と一致することを実 DB で確かめる手順がまだ無い（移した元の実 DB のテストは MySQL と PostgreSQL だけだった）",
-                        (Dialect, dialect),
-                        (Probe, probe)
-                    )
-                )
-            )
-        );
+    /// <summary>網羅しない組の一覧（方言 × 手順の種類の、起こり得る組の全部を手順が持つ。方言が原理的に持てない組は <see cref="IsValid"/> が外す）</summary>
+    public static CoverageGapSet Gaps { get; } = CoverageGap.Set(EngineIds.Dialect, []);
 
     /// <summary>台帳の行</summary>
     public static EngineDescriptor Descriptor { get; } =

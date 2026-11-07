@@ -188,7 +188,7 @@ internal static partial class SourceRuleProbes
                     ),
                 ]
             ),
-            // 2 つの表記を本文の順に拾う
+            // 2 つの並びを本文の順に拾う（トークンの間の空白・改行は問わない）。null 条件でない呼び出しとコメントの中は拾わない
             new SourceRuleProbe(
                 "app-ui-crash-handler-uses-forms",
                 "app-ui-crash-handler-uses",
@@ -198,12 +198,62 @@ internal static partial class SourceRuleProbes
                         """
                         CrashHandlingService.HandleUiCrash(e.Exception, () => _featureModuleShutdown?.CloseAll());
                         _featureModuleShutdown.CloseAll();
+                        CrashHandlingService
+                            .HandleUiCrash(e.Exception, cleanup);
+                        // CrashHandlingService.HandleUiCrash(e.Exception, () => _featureModuleShutdown?.CloseAll());
                         """,
                         "CrashHandlingService.HandleUiCrash(",
-                        "_featureModuleShutdown?.CloseAll()"
+                        "_featureModuleShutdown?.CloseAll()",
+                        "CrashHandlingService.HandleUiCrash("
                     ),
                 ]
             ),
+            // 呼び出しをコメントアウトした（コメントの中だけにある）ソースでは何も拾わない＝必須の規則が赤になる
+            // （文字列で読んでいたときはコメントの中の表記でも満たされた）
+            new SourceRuleProbe(
+                "app-ui-crash-handler-uses-comment-only",
+                "app-ui-crash-handler-uses",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        internal static class Probe
+                        {
+                            public static void Main()
+                            {
+                                // CrashHandlingService.HandleUiCrash(e.Exception, () => _featureModuleShutdown?.CloseAll());
+                                /* _featureModuleShutdown?.CloseAll() */
+                            }
+                        }
+                        """
+                    ),
+                ]
+            ),
+            // トークンで読むので、条件コンパイルの外れる分岐の中の並びも拾う
+            new SourceRuleProbe(
+                "app-ui-crash-handler-uses-inactive-branch",
+                "app-ui-crash-handler-uses",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        internal static class Probe
+                        {
+                            public static void Main()
+                            {
+                        #if QUICKER_PROBE_BRANCH
+                                CrashHandlingService.HandleUiCrash(e.Exception, cleanup);
+                        #endif
+                            }
+                        }
+                        """,
+                        "CrashHandlingService.HandleUiCrash("
+                    ),
+                ]
+            ) with
+            {
+                InactiveBranch = true,
+            },
             // 再入を判断しない HandleCrash と行頭の Environment.Exit を拾い、HandleUiCrash と行の途中の Exit は拾わない
             new SourceRuleProbe(
                 "app-ui-crash-handler-bypasses-forms",
@@ -259,15 +309,42 @@ internal static partial class SourceRuleProbes
                         actions.ReleaseSingleInstanceBeforeRelaunch(singleInstance.Dispose);
                         actions.RelaunchWith(WpfApplicationRestartService.StartNewInstance);
                         actions.RelaunchWith(Restart);
+                        if (outcome != SingleInstanceOutcome.Inaccessible) { }
+                        Pending.RelaunchWith(
+                            WpfApplicationRestartService.StartNewInstance
+                        );
+                        // actions.ReleaseSingleInstanceBeforeRelaunch(singleInstance.Dispose);
                         """,
                         "outcome == SingleInstanceOutcome.Inaccessible",
                         "ReleaseSingleInstanceBeforeRelaunch(singleInstance.Dispose)",
+                        "RelaunchWith(WpfApplicationRestartService.StartNewInstance)",
                         "RelaunchWith(WpfApplicationRestartService.StartNewInstance)"
                     ),
                 ]
             ),
-            // 文字列で読む必須の規則は、条件コンパイルの外れる分岐の中の表記でも満たされる（偽の緑になりうる側。読み先はいま
-            // #if を持たない）
+            // 呼び出しと比較をコメントアウトした（コメントの中だけにある）ソースでは何も拾わない＝必須の規則が赤になる
+            // （文字列で読んでいたときはコメントの中の表記でも満たされた）
+            new SourceRuleProbe(
+                "program-single-instance-uses-comment-only",
+                "program-single-instance-uses",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        internal static class Probe
+                        {
+                            public static void Main()
+                            {
+                                // if (outcome == SingleInstanceOutcome.Inaccessible) { Report(); }
+                                // actions.ReleaseSingleInstanceBeforeRelaunch(singleInstance.Dispose);
+                                /* actions.RelaunchWith(WpfApplicationRestartService.StartNewInstance); */
+                            }
+                        }
+                        """
+                    ),
+                ]
+            ),
+            // 構文の節で読む（条件コンパイルのどの分岐も読む）ので、外れる分岐の中の呼び出しも拾う
             new SourceRuleProbe(
                 "program-single-instance-uses-inactive-branch",
                 "program-single-instance-uses",

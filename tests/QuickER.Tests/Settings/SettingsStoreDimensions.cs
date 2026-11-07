@@ -43,42 +43,8 @@ internal static class SettingsStoreDimensions
             ]
         );
 
-    /// <summary>網羅しない組の一覧</summary>
-    /// <remarks>
-    /// SaveTo と TryLoadFrom は設定ファイルとは別のファイルを読み書きするので、元の単発のテストは設定ファイルの状態との組を
-    /// 1 つの行（tryloadfrom-and-saveto-unaffected-by-suppression＝ロック中の SaveTo・ロックを外した後の TryLoadFrom）と、
-    /// 設定ファイル自身を読む TryLoadFrom の行しか持たない。足すなら表の行で足す。
-    /// </remarks>
-    public static CoverageGapSet Gaps =>
-        CoverageGap.Set(
-            EngineIds.DocumentFile,
-            [
-                CoverageGap.Matching(
-                    Scope,
-                    "P3-9",
-                    "P4",
-                    "ロック中でない設定ファイルの状態での SaveTo の行が無い",
-                    Op,
-                    State,
-                    (op, state) =>
-                        op == nameof(SettingsOpKind.SaveTo)
-                        && state != nameof(SettingsFileState.Locked)
-                ),
-                CoverageGap.Matching(
-                    Scope,
-                    "P3-9",
-                    "P4",
-                    "設定ファイルが無い・ロック中の TryLoadFrom の行が無い",
-                    Op,
-                    State,
-                    (op, state) =>
-                        op == nameof(SettingsOpKind.TryLoadFrom)
-                        && state
-                            is nameof(SettingsFileState.Missing)
-                                or nameof(SettingsFileState.Locked)
-                ),
-            ]
-        );
+    /// <summary>網羅しない組の一覧（手 × 手の前の設定ファイルの状態の全部を行が触る）</summary>
+    public static CoverageGapSet Gaps => CoverageGap.Set(EngineIds.DocumentFile, []);
 
     /// <summary>台帳の行</summary>
     public static EngineDescriptor Descriptor =>

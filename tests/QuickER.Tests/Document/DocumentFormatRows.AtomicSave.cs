@@ -79,6 +79,36 @@ internal static partial class DocumentFormatRows
                     },
                 }
             ),
+            // 往復は SaveAtomic で書いてから読む。書けなければ読み戻しへ進まず、SaveAtomic の失敗をそのまま伝える
+            // （SaveAtomic の XmlDoc：書き込みは AtomicFile へ委譲＝失敗で既存の内容を壊さない）
+            Row(
+                "roundtrip-unwritable-destination-throws-without-temporary",
+                "往復: 保存先に書けなければ例外を伝え、読み戻さず、一時ファイルを残さず、保存先を変えない",
+                new FormatCase
+                {
+                    Stage = FormatStage.RoundTrip,
+                    Result = FormatResult.Threw,
+                    Directory = true,
+                    Document = () => BuildDocument("Customer", DiagramDocument.CurrentVersion),
+                    Expect = o =>
+                    {
+                        var thrown = o
+                            .Thrown.Should()
+                            .NotBeNull("書き込みの失敗を握り潰さない")
+                            .And.Subject!;
+                        (thrown is IOException or UnauthorizedAccessException)
+                            .Should()
+                            .BeTrue($"IO 系の例外であること（実際: {thrown.GetType().Name}）");
+                        o.Loaded.Should().BeNull("書けなかった図を読み戻さない");
+                        o.Returned.Should().BeNull();
+                        o.Leftovers.Should().BeEmpty("失敗時に一時ファイルを残さない");
+                        System
+                            .IO.Directory.Exists(o.Path)
+                            .Should()
+                            .BeTrue("保存先のフォルダはそのまま");
+                    },
+                }
+            ),
             // 元のテストは同じ図を 2 回 SaveAtomic で別々のファイルへ書いて比べている（比べ方を写す）
             Row(
                 "saveatomic-output-identical-to-another-saveatomic-output",

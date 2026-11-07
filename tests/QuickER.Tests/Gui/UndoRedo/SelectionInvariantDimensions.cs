@@ -40,41 +40,24 @@ internal static class SelectionInvariantDimensions
 
     /// <summary>網羅しない組の一覧</summary>
     /// <remarks>
-    /// どれも Pending（区切り P4）。行を足すかは P4 で判断する（P3-7 では単発を増やさない）。読み直しは図の置換と同じ入口
-    /// （ReplaceDiagram）を通るので、置換の行が同じ経路を見ている。
+    /// 受け入れ（製品の事実）の 4 組だけ：一覧の Reset × {選択中のテーブル・選択中のリレーション・作成中の始点・行の選択候補}。
+    /// 製品はこれらの一覧を Reset しない。<c>Entities</c> / <c>Relationships</c> を <c>Clear()</c> するのは
+    /// <c>MainViewModel.ClearDiagramCollections</c>（MainViewModel.cs:2654）だけで、これは図の置換（<see cref="SelectionDetach.Replace"/>）の
+    /// 経路で行がある。素の <c>Clear()</c> を使わないことは <c>src/QuickER.Gui/ViewModels/CLAUDE.md</c>「Clear と購読解除の順序」の決まり
+    /// （Reset 通知は OldItems を持たず自動の解除が効かない）。行の選択候補は <c>CandidateListSync.SyncTo</c> が RemoveAt / Move / Insert
+    /// だけで合わせ、Clear も差し替えもしない。ObservableCollection としては起こり得るので isValid にはしない。
+    /// 検索結果の Reset（<c>FillSearchResults</c> の <c>SearchResults.Clear()</c>）は行 <c>reset-search-results-rebuilt-from-live-entities</c> が見る。
     /// </remarks>
     public static CoverageGapSet Gaps { get; } =
         CoverageGap.Set(
             EngineIds.DiagramEdit,
             [
-                CoverageGap.Matching(
+                CoverageGap.AcceptedMatching(
                     Scope,
                     "P3-7",
-                    "P4",
-                    "図の読み直し（ファイルを開く・外部変更の自動再読込）で外れる行が無い。読み直しは置換と同じ ReplaceDiagram を通る",
-                    Pointer,
-                    Detach,
-                    (pointer, detach) =>
-                        detach == nameof(SelectionDetach.Reload)
-                        && pointer
-                            is nameof(SelectionPointer.SelectedColumn)
-                                or nameof(SelectionPointer.SelectedRelationship)
-                                or nameof(SelectionPointer.PendingRelationshipSource)
-                                or nameof(SelectionPointer.Candidate)
-                ),
-                CoverageGap.Tuple(
-                    Scope,
-                    "P3-7",
-                    "P4",
-                    "図の置換で選択中のリレーションが外れる行が無い（表・列・検索結果の置換の行はある）",
-                    (Pointer, nameof(SelectionPointer.SelectedRelationship)),
-                    (Detach, nameof(SelectionDetach.Replace))
-                ),
-                CoverageGap.Matching(
-                    Scope,
-                    "P3-7",
-                    "P4",
-                    "一覧の Reset・コマンドを通らない書き換えで外れる行が無い（列の一覧の Reset の行だけある）",
+                    "製品はこの一覧を Reset しない：Entities / Relationships の Clear は MainViewModel.ClearDiagramCollections"
+                        + "（MainViewModel.cs:2654＝図の置換の経路）だけで、素の Clear を使わないことは ViewModels/CLAUDE.md の決まり。"
+                        + "行の選択候補は CandidateListSync.SyncTo が差分だけで合わせる",
                     Pointer,
                     Detach,
                     (pointer, detach) =>
@@ -82,7 +65,6 @@ internal static class SelectionInvariantDimensions
                         && pointer
                             is nameof(SelectionPointer.SelectedEntity)
                                 or nameof(SelectionPointer.SelectedRelationship)
-                                or nameof(SelectionPointer.SearchResults)
                                 or nameof(SelectionPointer.PendingRelationshipSource)
                                 or nameof(SelectionPointer.Candidate)
                 ),
