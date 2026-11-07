@@ -1,6 +1,7 @@
 using System.IO;
 using AwesomeAssertions;
 using QuickER.AI;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.AI;
 
@@ -373,20 +374,13 @@ public class ChatAttachmentFactoryTests
     [Fact(DisplayName = "フォルダは例外を出さず失敗の結果になる")]
     public void CreateFromFile_Directory_FailsWithoutThrowing()
     {
-        var dir = Directory.CreateTempSubdirectory("quicker-attach-");
+        using var temp = new TestTempFolder();
 
-        try
-        {
-            var result = ChatAttachmentFactory.CreateFromFile(dir.FullName);
+        var result = ChatAttachmentFactory.CreateFromFile(temp.Path);
 
-            result.Success.Should().BeFalse();
-            result.Error.Should().Be(ChatAttachmentError.IsDirectory);
-            result.Message.Should().Contain(dir.Name);
-        }
-        finally
-        {
-            dir.Delete();
-        }
+        result.Success.Should().BeFalse();
+        result.Error.Should().Be(ChatAttachmentError.IsDirectory);
+        result.Message.Should().Contain(Path.GetFileName(temp.Path));
     }
 
     /// <summary>存在しないパスは例外を出さず NotFound の失敗結果になることを検証する</summary>

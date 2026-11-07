@@ -118,7 +118,15 @@
 3. 引数の形の総当たり：`TestSupport/ToolArgumentShapeFuzzRunner`（WPF 非依存）。順は「ベースライン → 崩したケース → `KnownCaseLedger` → 3 つの表明 → 台帳の古い項目 → 網羅の計数 → 最低件数」。3 つの入口は `Entrance` の抽象メンバーだけを渡す。
 4. ツール定義の英語のガード：`PhraseTests`（英語の行 `tool-definitions-*`＝ツール定義の出どころごとの行。文言の表 `TestSupport/Guards/EnglishTextRows.Mcp.cs`）。
 5. 生成オプション・設定のキー：`TestSupport/OptionKeys`（`Writable` / `IsWritable`＝公開の setter か init を持つ公開のインスタンスのプロパティ）。設定 JSON の照合・CLI のフラグ表・GUI の設定の照合と、因子の棚卸しの `CodeGenerationOptions` の軸が使う。
-6. テストの一時フォルダ：`TestSupport/TestTempFolder`（TEMP 直下の固定名の親フォルダの下に guid の名前のフォルダを作り、破棄で中身ごと消す。消せないときは黙って残す）。TEMP 直下に同じ前置きの名前を並べると 8.3 の短い名前がぶつかり、フォルダ 1 つの作成に数百 ms かかるので、直下には固定名の親だけを置く。ファイルを掴むもの（テストが開いた SQLite の接続のプールなど）は作ったテストの側で放す（例：`SqliteTempDatabase` の Dispose）。製品が SQLite のファイルを開く接続はプールしない（`src/QuickER.Provider.Sqlite/CLAUDE.md`「ファイルを掴まない接続」）ので、製品の操作の後に放す手当ては要らない。
+6. テストの一時フォルダ：`TestSupport/TestTempFolder`（TEMP 直下の固定名の親フォルダ＝`TestTempFolder.Root` の下に guid の名前のフォルダを作り、破棄で中身ごと消す。消せないときは黙って残す）。Integration も同じ 1 ファイルを Compile リンクで使う。
+   - テストは一時フォルダを自分で組まない（親の名前のリテラル・`Directory.CreateTempSubdirectory` を書かない）。写すと消し忘れと失敗の経路での消し損ねも写り、%TEMP% に残りが溜まる。作るフォルダはインスタンス（クラスのフィールド＋ Dispose か `using var`）で作る。作らない偽のパス（存在の判定を差し込むもの）だけは `TestTempFolder.Root` から組む。ガード：`SourceRuleTests`（規則 `test-temp-folder-root-copies`。tests の全体の、親の名前を含む文字列リテラル・補間の文字の部分と `CreateTempSubdirectory` の呼び出しを構文木で数える＝条件コンパイルのどの分岐も読む）。
+   - TEMP 直下に同じ前置きの名前を並べると 8.3 の短い名前がぶつかり、フォルダ 1 つの作成に数百 ms かかるので、直下には固定名の親だけを置く。
+   - ファイルを掴むもの（テストが開いた SQLite の接続のプールなど）は作ったテストの側で放す（例：`SqliteTempDatabase` の Dispose）。製品が SQLite のファイルを開く接続はプールしない（`src/QuickER.Provider.Sqlite/CLAUDE.md`「ファイルを掴まない接続」）ので、製品の操作の後に放す手当ては要らない。
+   - TEMP を空のフォルダへ向けた全件の実行で、残るのは次のものだけ（中身のある残りは 0）。
+     - 空の親フォルダ（`TestTempFolder.Root` ほか、テストが固定名で作る親）。並列の実行が共有する根なので、テストの側で消すと他の実行の作成と競う。
+     - dotnet CLI が `dotnet test` のたびに書くワークロードのログ（`Microsoft.NET.Workload_<pid>_<時刻>.log`）。テストのものではない。
+     - まれに `MockPreviewPanelRuntimeTests` の WebView2 のユーザーデータ（`userdata\EBWebView`）。ブラウザプロセスの終了を最大 30 秒待ち、削除を 10 秒やり直しても、負荷の高い全件の中では描画・GPU の子プロセスがまだ掴んでいることがある。上限を延ばしても負荷しだいで超える点は変わらず、テストの終わりが遅れるだけなので、消せないものとして残す。
+   - 古い版のコードを流した実行（計測で直す前の版を流すなど）は、その版の残りを本物の %TEMP% に残す。古い版は直せないので、次の実行の始めに古い残りを消す掃除は入れていない（消すかどうかは利用者が決める）。
 7. ソースの走査のガード：`TestSupport/GuardKnownList.AssertMatches`（見つかった出現と理由つきの既知の一覧を件数まで 2 方向で照合する）と `TestSupport/SourceFiles`（ガードが読むファイルの列挙と、bin / obj の判定 `IsBuildOutput` の唯一の場所。パースはしない）。ソースの規則は規則の表（`TestSupport/Guards/`・「ソースを走査するガード」）の行にし、走査・照合・報告は表の 1 か所が持つ。表へ移していないガードは、条件コンパイルの全分岐を読む `ConditionalSourceParse` / `SourceSymbolScan` を自分で呼ぶ。
 
 8. テストホストの GC：`QuickER.Tests` の csproj は `ServerGarbageCollection` を true にする（runtimeconfig の `System.GC.Server` 経由で testhost に効く）。

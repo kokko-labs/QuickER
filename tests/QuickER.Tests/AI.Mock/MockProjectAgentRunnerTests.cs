@@ -14,25 +14,24 @@ namespace QuickER.Tests.AI.Mock;
 /// ランナーの流れ（成果物・画面の数・最終ビルド・タイムアウト・中断・委譲・実行ログ）は <c>MockRunnerTests</c> の行、
 /// 実行器ごとの契約は <c>MockAgentContractTests</c> の行、最終ビルドの直前のビルド出力の削除と変更検知は <c>MockBuildBoundaryTests</c> の行が見る。
 /// </remarks>
-public class MockProjectAgentRunnerTests
+public class MockProjectAgentRunnerTests : IDisposable
 {
     /// <summary>テストで使うプロジェクト名（スキャフォールドのレイアウト規則に合わせてフォルダを作る）</summary>
     private const string ProjectName = "AcmeMock";
 
-    private static string NewTempFolder()
+    /// <summary>テストごとの一時フォルダ（破棄で中身ごと消す）</summary>
+    private readonly TestTempFolder _temp = new();
+
+    /// <summary>テストごとの作業フォルダを作る</summary>
+    private string NewTempFolder()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var folder = Path.Combine(_temp.Path, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(folder);
         return folder;
     }
 
-    private static void Cleanup(string folder)
-    {
-        if (Directory.Exists(folder))
-        {
-            Directory.Delete(folder, recursive: true);
-        }
-    }
+    /// <inheritdoc />
+    public void Dispose() => _temp.Dispose();
 
     /// <summary>プロジェクトフォルダ（<c>{出力フォルダ}/{プロジェクト名}/</c>）のパス</summary>
     private static string ProjectDirectory(string outputDirectory) =>
@@ -122,7 +121,6 @@ public class MockProjectAgentRunnerTests
         finally
         {
             oplock.Dispose();
-            Cleanup(folder);
         }
     }
 

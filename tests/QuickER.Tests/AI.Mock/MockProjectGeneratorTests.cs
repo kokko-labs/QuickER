@@ -6,6 +6,7 @@ using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.AI.Mock;
 
@@ -38,37 +39,28 @@ public class MockProjectGeneratorTests
     [Fact(DisplayName = "エンジンファクトリの無い API キー方式の生成は、何も書き出さずに止まる")]
     public async Task GenerateAsync_ApiKeyWithoutEngineFactory_ThrowsBeforeWriting()
     {
-        var output = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        using var temp = new TestTempFolder();
+        var output = Path.Combine(temp.Path, Guid.NewGuid().ToString("N"));
         var generator = new MockProjectGenerator(BuildRegistry());
 
-        try
-        {
-            var generate = () =>
-                generator.GenerateAsync(
-                    new ErDiagram { TargetDbms = "sqlite" },
-                    mockFolder: output,
-                    additionalInstructions: null,
-                    output,
-                    "AcmeMock",
-                    MockProjectTarget.Blazor,
-                    ErChatBackendKind.ApiKey,
-                    model: string.Empty,
-                    modelProvider: string.Empty,
-                    onProgress: _ => { },
-                    cancellationToken: TestContext.Current.CancellationToken
-                );
+        var generate = () =>
+            generator.GenerateAsync(
+                new ErDiagram { TargetDbms = "sqlite" },
+                mockFolder: output,
+                additionalInstructions: null,
+                output,
+                "AcmeMock",
+                MockProjectTarget.Blazor,
+                ErChatBackendKind.ApiKey,
+                model: string.Empty,
+                modelProvider: string.Empty,
+                onProgress: _ => { },
+                cancellationToken: TestContext.Current.CancellationToken
+            );
 
-            var thrown = await generate.Should().ThrowAsync<InvalidOperationException>();
-            thrown.Which.Message.Should().MatchRegex(@"^[\x20-\x7E]+$", "英語固定の文言");
-            Directory.Exists(output).Should().BeFalse();
-        }
-        finally
-        {
-            if (Directory.Exists(output))
-            {
-                Directory.Delete(output, recursive: true);
-            }
-        }
+        var thrown = await generate.Should().ThrowAsync<InvalidOperationException>();
+        thrown.Which.Message.Should().MatchRegex(@"^[\x20-\x7E]+$", "英語固定の文言");
+        Directory.Exists(output).Should().BeFalse();
     }
 
     /// <summary>
@@ -131,8 +123,9 @@ public class MockProjectGeneratorTests
         bool expectedDeclined
     )
     {
-        var output = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
-        var mock = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        using var temp = new TestTempFolder();
+        var output = Path.Combine(temp.Path, "output");
+        var mock = Path.Combine(temp.Path, "mock");
 
         try
         {

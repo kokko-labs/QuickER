@@ -3,6 +3,7 @@ using System.IO;
 using AwesomeAssertions;
 using QuickER.AI;
 using QuickER.Platform;
+using QuickER.Tests.TestSupport;
 using QuickER.Tests.TestSupport.Engines;
 using static QuickER.Tests.Platform.OsBoundary.LaunchEntrance;
 using static QuickER.Tests.Platform.OsBoundary.LaunchOutcome;
@@ -505,7 +506,7 @@ internal static partial class ProcessLaunchRows
                         string.Join(
                             Path.PathSeparator,
                             Bin(t),
-                            Path.Combine(Path.GetTempPath(), "QuickERTests", "other-bin")
+                            Path.Combine(TestTempFolder.Root, "other-bin")
                         ),
                         _ => false
                     ),
@@ -584,7 +585,7 @@ internal static partial class ProcessLaunchRows
                 true,
                 (t, locate) =>
                 {
-                    var shDirectory = Path.Combine(Path.GetTempPath(), "QuickERTests", "sh-only");
+                    var shDirectory = Path.Combine(TestTempFolder.Root, "sh-only");
 
                     return locate(
                         string.Join(Path.PathSeparator, shDirectory, Bin(t)),

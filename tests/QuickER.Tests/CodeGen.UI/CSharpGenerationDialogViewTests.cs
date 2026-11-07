@@ -12,12 +12,15 @@ namespace QuickER.Tests.CodeGen.UI;
 /// 層別フォルダ出力の入力欄が ViewModel の表示フラグどおりに現れ・畳まれることを検証する
 /// （XAML の StaticResource 参照漏れ・Visibility 配線の回帰防止）。
 /// </summary>
-public class CSharpGenerationDialogViewTests
+public class CSharpGenerationDialogViewTests : IDisposable
 {
     /// <summary>一時フォルダのストアで ViewModel を生成する（実 %LOCALAPPDATA% を汚さない）</summary>
-    private static CSharpGenerationDialogViewModel CreateViewModel(out string folder)
+    /// <summary>テストごとの一時フォルダ（破棄で中身ごと消す）</summary>
+    private readonly TestTempFolder _temp = new();
+
+    private CSharpGenerationDialogViewModel CreateViewModel(out string folder)
     {
-        folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        folder = Path.Combine(_temp.Path, Guid.NewGuid().ToString("N"));
         return new CSharpGenerationDialogViewModel(new CSharpGenerationSettingsStore(folder));
     }
 
@@ -29,19 +32,12 @@ public class CSharpGenerationDialogViewTests
         {
             var viewModel = CreateViewModel(out var folder);
 
-            try
-            {
-                // BAML ロードは並列テストと競合しないよう直列化する
-                var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
-                    new CSharpGenerationDialog(viewModel)
-                );
+            // BAML ロードは並列テストと競合しないよう直列化する
+            var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                new CSharpGenerationDialog(viewModel)
+            );
 
-                dialog.ViewModel.Should().BeSameAs(viewModel);
-            }
-            finally
-            {
-                DeleteFolder(folder);
-            }
+            dialog.ViewModel.Should().BeSameAs(viewModel);
         });
     }
 
@@ -56,54 +52,47 @@ public class CSharpGenerationDialogViewTests
         {
             var viewModel = CreateViewModel(out var folder);
 
-            try
-            {
-                // BAML ロードは並列テストと競合しないよう直列化する
-                var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
-                    new CSharpGenerationDialog(viewModel)
-                );
+            // BAML ロードは並列テストと競合しないよう直列化する
+            var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                new CSharpGenerationDialog(viewModel)
+            );
 
-                // Window を Show せずに検証するため論理ツリーから Visibility バインド先で探す
-                var layerPanel = FindByVisibilityBinding(
-                    dialog,
-                    nameof(CSharpGenerationDialogViewModel.ShowLayerDirectories)
-                );
-                var serverField = FindByVisibilityBinding(
-                    dialog,
-                    nameof(CSharpGenerationDialogViewModel.ShowServerLayerDirectory)
-                );
+            // Window を Show せずに検証するため論理ツリーから Visibility バインド先で探す
+            var layerPanel = FindByVisibilityBinding(
+                dialog,
+                nameof(CSharpGenerationDialogViewModel.ShowLayerDirectories)
+            );
+            var serverField = FindByVisibilityBinding(
+                dialog,
+                nameof(CSharpGenerationDialogViewModel.ShowServerLayerDirectory)
+            );
 
-                layerPanel.Should().NotBeNull("層フォルダ欄のブロックが XAML に存在する前提");
-                serverField.Should().NotBeNull("サーバー層フォルダ欄が XAML に存在する前提");
+            layerPanel.Should().NotBeNull("層フォルダ欄のブロックが XAML に存在する前提");
+            serverField.Should().NotBeNull("サーバー層フォルダ欄が XAML に存在する前提");
 
-                // 未表示のウィンドウでは初期バインドがまだ適用されていないため、まず反映を待つ
-                PumpBindings();
+            // 未表示のウィンドウでは初期バインドがまだ適用されていないため、まず反映を待つ
+            PumpBindings();
 
-                layerPanel!
-                    .Visibility.Should()
-                    .Be(Visibility.Collapsed, "既定（層別出力 OFF）では畳まれている");
+            layerPanel!
+                .Visibility.Should()
+                .Be(Visibility.Collapsed, "既定（層別出力 OFF）では畳まれている");
 
-                viewModel.LayeredOutput = true;
-                PumpBindings();
+            viewModel.LayeredOutput = true;
+            PumpBindings();
 
-                layerPanel.Visibility.Should().Be(Visibility.Visible, "層別出力 ON で表示される");
-                serverField!
-                    .Visibility.Should()
-                    .Be(Visibility.Collapsed, "リモートサービスを生成しない構成では隠す");
+            layerPanel.Visibility.Should().Be(Visibility.Visible, "層別出力 ON で表示される");
+            serverField!
+                .Visibility.Should()
+                .Be(Visibility.Collapsed, "リモートサービスを生成しない構成では隠す");
 
-                // HTTP 実装の行は DB アクセス「なし」（既定）では隠れて生成しないので、行が出る構成を選んでから入れる
-                viewModel.DbAccessRepository = true;
-                viewModel.GenerateRemoteServices = true;
-                PumpBindings();
+            // HTTP 実装の行は DB アクセス「なし」（既定）では隠れて生成しないので、行が出る構成を選んでから入れる
+            viewModel.DbAccessRepository = true;
+            viewModel.GenerateRemoteServices = true;
+            PumpBindings();
 
-                serverField
-                    .Visibility.Should()
-                    .Be(Visibility.Visible, "リモートサービス生成 ON で表示される");
-            }
-            finally
-            {
-                DeleteFolder(folder);
-            }
+            serverField
+                .Visibility.Should()
+                .Be(Visibility.Visible, "リモートサービス生成 ON で表示される");
         });
     }
 
@@ -118,37 +107,30 @@ public class CSharpGenerationDialogViewTests
         {
             var viewModel = CreateViewModel(out var folder);
 
-            try
-            {
-                // BAML ロードは並列テストと競合しないよう直列化する
-                var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
-                    new CSharpGenerationDialog(viewModel)
-                );
+            // BAML ロードは並列テストと競合しないよう直列化する
+            var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                new CSharpGenerationDialog(viewModel)
+            );
 
-                // 下位オプションは 1 つのパネルにまとめて GenerateApiDocs へ Visibility バインドしている
-                var subOptions = FindByVisibilityBinding(
-                    dialog,
-                    nameof(CSharpGenerationDialogViewModel.GenerateApiDocs)
-                );
-                subOptions.Should().NotBeNull("下位オプションのパネルが XAML に存在する前提");
+            // 下位オプションは 1 つのパネルにまとめて GenerateApiDocs へ Visibility バインドしている
+            var subOptions = FindByVisibilityBinding(
+                dialog,
+                nameof(CSharpGenerationDialogViewModel.GenerateApiDocs)
+            );
+            subOptions.Should().NotBeNull("下位オプションのパネルが XAML に存在する前提");
 
-                PumpBindings();
+            PumpBindings();
 
-                subOptions!
-                    .Visibility.Should()
-                    .Be(Visibility.Collapsed, "既定（API リファレンス出力 OFF）では畳まれている");
+            subOptions!
+                .Visibility.Should()
+                .Be(Visibility.Collapsed, "既定（API リファレンス出力 OFF）では畳まれている");
 
-                viewModel.GenerateApiDocs = true;
-                PumpBindings();
+            viewModel.GenerateApiDocs = true;
+            PumpBindings();
 
-                subOptions
-                    .Visibility.Should()
-                    .Be(Visibility.Visible, "API リファレンス出力 ON で表示される");
-            }
-            finally
-            {
-                DeleteFolder(folder);
-            }
+            subOptions
+                .Visibility.Should()
+                .Be(Visibility.Visible, "API リファレンス出力 ON で表示される");
         });
     }
 
@@ -163,38 +145,31 @@ public class CSharpGenerationDialogViewTests
         {
             var viewModel = CreateViewModel(out var folder);
 
-            try
-            {
-                // BAML ロードは並列テストと競合しないよう直列化する
-                var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
-                    new CSharpGenerationDialog(viewModel)
-                );
+            // BAML ロードは並列テストと競合しないよう直列化する
+            var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                new CSharpGenerationDialog(viewModel)
+            );
 
-                var previewList = FindByItemsSourceBinding(
-                    dialog,
-                    nameof(CSharpGenerationDialogViewModel.PreviewFiles)
-                );
-                previewList.Should().NotBeNull("プレビューの ItemsControl が XAML に存在する前提");
+            var previewList = FindByItemsSourceBinding(
+                dialog,
+                nameof(CSharpGenerationDialogViewModel.PreviewFiles)
+            );
+            previewList.Should().NotBeNull("プレビューの ItemsControl が XAML に存在する前提");
 
-                var scrollViewer = FindAncestor<System.Windows.Controls.ScrollViewer>(previewList!);
-                scrollViewer.Should().NotBeNull("プレビューは ScrollViewer に包まれている前提");
-                scrollViewer!
-                    .HorizontalScrollBarVisibility.Should()
-                    .Be(
-                        System.Windows.Controls.ScrollBarVisibility.Auto,
-                        "長い行（層フォルダ＋名前空間）を横スクロールで読めるようにする"
-                    );
-                scrollViewer
-                    .VerticalScrollBarVisibility.Should()
-                    .Be(System.Windows.Controls.ScrollBarVisibility.Auto);
-                scrollViewer
-                    .MaxHeight.Should()
-                    .NotBe(double.PositiveInfinity, "ファイル数が多くても欄内スクロールに収める");
-            }
-            finally
-            {
-                DeleteFolder(folder);
-            }
+            var scrollViewer = FindAncestor<System.Windows.Controls.ScrollViewer>(previewList!);
+            scrollViewer.Should().NotBeNull("プレビューは ScrollViewer に包まれている前提");
+            scrollViewer!
+                .HorizontalScrollBarVisibility.Should()
+                .Be(
+                    System.Windows.Controls.ScrollBarVisibility.Auto,
+                    "長い行（層フォルダ＋名前空間）を横スクロールで読めるようにする"
+                );
+            scrollViewer
+                .VerticalScrollBarVisibility.Should()
+                .Be(System.Windows.Controls.ScrollBarVisibility.Auto);
+            scrollViewer
+                .MaxHeight.Should()
+                .NotBe(double.PositiveInfinity, "ファイル数が多くても欄内スクロールに収める");
         });
     }
 
@@ -213,58 +188,51 @@ public class CSharpGenerationDialogViewTests
         {
             var viewModel = CreateViewModel(out var folder);
 
-            try
-            {
-                // BAML ロードは並列テストと競合しないよう直列化する
-                var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
-                    new CSharpGenerationDialog(viewModel)
+            // BAML ロードは並列テストと競合しないよう直列化する
+            var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                new CSharpGenerationDialog(viewModel)
+            );
+
+            PumpBindings();
+
+            // Window は表示しないと Arrange できないため、コンテンツのルートを直接レイアウトする
+            var content = (FrameworkElement)dialog.Content;
+            content.Measure(new Size(900, 4000));
+            content.Arrange(new Rect(0, 0, 900, 4000));
+            content.UpdateLayout();
+
+            var outputPathBox = FindByTextBinding(
+                content,
+                nameof(CSharpGenerationDialogViewModel.OutputPath)
+            );
+            var subdirectoryBox = FindByTextBinding(
+                content,
+                nameof(CSharpGenerationDialogViewModel.CodeSubdirectory)
+            );
+
+            outputPathBox.Should().NotBeNull("出力先の欄が XAML に存在する前提");
+            subdirectoryBox.Should().NotBeNull("サブフォルダ欄が XAML に存在する前提");
+
+            var outputLeft = outputPathBox!.TranslatePoint(new Point(0, 0), content).X;
+            var subdirectoryTopLeft = subdirectoryBox!.TranslatePoint(new Point(0, 0), content);
+
+            subdirectoryTopLeft
+                .X.Should()
+                .BeApproximately(outputLeft, 0.5, "入力欄の左端が揃っている");
+            subdirectoryBox
+                .ActualWidth.Should()
+                .BeApproximately(
+                    outputPathBox.ActualWidth,
+                    0.5,
+                    "参照ボタンの列へ広げず右端も揃える"
                 );
-
-                PumpBindings();
-
-                // Window は表示しないと Arrange できないため、コンテンツのルートを直接レイアウトする
-                var content = (FrameworkElement)dialog.Content;
-                content.Measure(new Size(900, 4000));
-                content.Arrange(new Rect(0, 0, 900, 4000));
-                content.UpdateLayout();
-
-                var outputPathBox = FindByTextBinding(
-                    content,
-                    nameof(CSharpGenerationDialogViewModel.OutputPath)
+            subdirectoryTopLeft
+                .Y.Should()
+                .BeGreaterThan(
+                    outputPathBox.TranslatePoint(new Point(0, 0), content).Y,
+                    "サブフォルダ欄は出力先の欄の直下に並ぶ"
                 );
-                var subdirectoryBox = FindByTextBinding(
-                    content,
-                    nameof(CSharpGenerationDialogViewModel.CodeSubdirectory)
-                );
-
-                outputPathBox.Should().NotBeNull("出力先の欄が XAML に存在する前提");
-                subdirectoryBox.Should().NotBeNull("サブフォルダ欄が XAML に存在する前提");
-
-                var outputLeft = outputPathBox!.TranslatePoint(new Point(0, 0), content).X;
-                var subdirectoryTopLeft = subdirectoryBox!.TranslatePoint(new Point(0, 0), content);
-
-                subdirectoryTopLeft
-                    .X.Should()
-                    .BeApproximately(outputLeft, 0.5, "入力欄の左端が揃っている");
-                subdirectoryBox
-                    .ActualWidth.Should()
-                    .BeApproximately(
-                        outputPathBox.ActualWidth,
-                        0.5,
-                        "参照ボタンの列へ広げず右端も揃える"
-                    );
-                subdirectoryTopLeft
-                    .Y.Should()
-                    .BeGreaterThan(
-                        outputPathBox.TranslatePoint(new Point(0, 0), content).Y,
-                        "サブフォルダ欄は出力先の欄の直下に並ぶ"
-                    );
-                subdirectoryBox.ActualWidth.Should().BeGreaterThan(0, "レイアウトが成立している");
-            }
-            finally
-            {
-                DeleteFolder(folder);
-            }
+            subdirectoryBox.ActualWidth.Should().BeGreaterThan(0, "レイアウトが成立している");
         });
     }
 
@@ -390,12 +358,6 @@ public class CSharpGenerationDialogViewTests
         return null;
     }
 
-    /// <summary>一時設定フォルダを後始末する</summary>
-    private static void DeleteFolder(string folder)
-    {
-        if (Directory.Exists(folder))
-        {
-            Directory.Delete(folder, recursive: true);
-        }
-    }
+    /// <inheritdoc />
+    public void Dispose() => _temp.Dispose();
 }

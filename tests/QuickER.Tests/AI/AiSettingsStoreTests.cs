@@ -1,6 +1,7 @@
 using System.IO;
 using AwesomeAssertions;
 using QuickER.AI;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.AI;
 
@@ -13,22 +14,20 @@ namespace QuickER.Tests.AI;
 /// 旧構成（ChatUi / Codex / Claude Code / モデル履歴を別ファイルの個別ストアで持つ）を
 /// 1 ファイル <c>ai-settings.json</c> のセクションへ統合した後の等価な振る舞いを守る。
 /// </remarks>
-public class AiSettingsStoreTests
+public class AiSettingsStoreTests : IDisposable
 {
-    /// <summary>一時フォルダに隔離したストアを生成する</summary>
-    private static (AiSettingsStore store, string folder) CreateStore()
+    /// <summary>テストごとの一時フォルダ（破棄で中身ごと消す）</summary>
+    private readonly TestTempFolder _temp = new();
+
+    /// <summary>一時フォルダの下に隔離したストアを生成する</summary>
+    private (AiSettingsStore store, string folder) CreateStore()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var folder = Path.Combine(_temp.Path, Guid.NewGuid().ToString("N"));
         return (new AiSettingsStore(folder), folder);
     }
 
-    private static void Cleanup(string folder)
-    {
-        if (Directory.Exists(folder))
-        {
-            Directory.Delete(folder, recursive: true);
-        }
-    }
+    /// <inheritdoc />
+    public void Dispose() => _temp.Dispose();
 
     /// <summary>すべてのセクション（UI 状態・Codex・Claude Code・モデル履歴）が往復で保持されることを検証する</summary>
     [Fact(DisplayName = "全セクションが Save→Load で復元される")]
@@ -36,47 +35,37 @@ public class AiSettingsStoreTests
     {
         var (store, folder) = CreateStore();
 
-        try
+        var expected = new AiSettings
         {
-            var expected = new AiSettings
+            ChatUi = new ChatUiSettings { LastBackend = "ClaudeCode" },
+            MockUi = new ChatUiSettings { LastBackend = "Codex" },
+            ClaudeCode = new ClaudeCodeSettings { Model = "sonnet" },
+            CodexAppServer = new CodexAppServerSettings
             {
-                ChatUi = new ChatUiSettings { LastBackend = "ClaudeCode" },
-                MockUi = new ChatUiSettings { LastBackend = "Codex" },
-                ClaudeCode = new ClaudeCodeSettings { Model = "sonnet" },
-                CodexAppServer = new CodexAppServerSettings
-                {
-                    ModelProvider = "ollama-launch",
-                    Model = "gemma4:31b-cloud",
-                },
-                Copilot = new CopilotSettings { Model = "claude-sonnet-4.5" },
-            };
-            expected.ApiModelHistory.Touch("openai", "custom-openai");
-            expected.CodexModelHistory.Touch("ollama-launch", "gemma4:31b-cloud");
-            expected.CopilotModelHistory.Touch(
-                CopilotSettings.HistoryProviderKey,
-                "claude-sonnet-4.5"
-            );
+                ModelProvider = "ollama-launch",
+                Model = "gemma4:31b-cloud",
+            },
+            Copilot = new CopilotSettings { Model = "claude-sonnet-4.5" },
+        };
+        expected.ApiModelHistory.Touch("openai", "custom-openai");
+        expected.CodexModelHistory.Touch("ollama-launch", "gemma4:31b-cloud");
+        expected.CopilotModelHistory.Touch(CopilotSettings.HistoryProviderKey, "claude-sonnet-4.5");
 
-            store.Save(expected);
+        store.Save(expected);
 
-            var actual = store.Load();
-            actual.ChatUi.LastBackend.Should().Be("ClaudeCode");
-            actual.MockUi.LastBackend.Should().Be("Codex");
-            actual.ClaudeCode.Model.Should().Be("sonnet");
-            actual.CodexAppServer.ModelProvider.Should().Be("ollama-launch");
-            actual.CodexAppServer.Model.Should().Be("gemma4:31b-cloud");
-            actual.Copilot.Model.Should().Be("claude-sonnet-4.5");
-            actual.ApiModelHistory.ModelsFor("openai").Should().Equal("custom-openai");
-            actual.CodexModelHistory.ModelsFor("ollama-launch").Should().Equal("gemma4:31b-cloud");
-            actual
-                .CopilotModelHistory.ModelsFor(CopilotSettings.HistoryProviderKey)
-                .Should()
-                .Equal("claude-sonnet-4.5");
-        }
-        finally
-        {
-            Cleanup(folder);
-        }
+        var actual = store.Load();
+        actual.ChatUi.LastBackend.Should().Be("ClaudeCode");
+        actual.MockUi.LastBackend.Should().Be("Codex");
+        actual.ClaudeCode.Model.Should().Be("sonnet");
+        actual.CodexAppServer.ModelProvider.Should().Be("ollama-launch");
+        actual.CodexAppServer.Model.Should().Be("gemma4:31b-cloud");
+        actual.Copilot.Model.Should().Be("claude-sonnet-4.5");
+        actual.ApiModelHistory.ModelsFor("openai").Should().Equal("custom-openai");
+        actual.CodexModelHistory.ModelsFor("ollama-launch").Should().Equal("gemma4:31b-cloud");
+        actual
+            .CopilotModelHistory.ModelsFor(CopilotSettings.HistoryProviderKey)
+            .Should()
+            .Equal("claude-sonnet-4.5");
     }
 
     /// <summary>UiFor が種別ごとに別セクション（ChatUi / MockUi）を返し、互いに独立していることを検証する</summary>
@@ -99,22 +88,15 @@ public class AiSettingsStoreTests
     {
         var (store, folder) = CreateStore();
 
-        try
-        {
-            var loaded = store.Load();
-            loaded.ChatUi.LastBackend.Should().BeEmpty();
-            loaded.MockUi.LastBackend.Should().BeEmpty();
-            loaded.ClaudeCode.Model.Should().BeEmpty();
-            loaded.CodexAppServer.ModelProvider.Should().BeEmpty();
-            loaded.Copilot.Model.Should().BeEmpty();
-            loaded.ApiModelHistory.Providers.Should().BeEmpty();
-            loaded.CodexModelHistory.Providers.Should().BeEmpty();
-            loaded.CopilotModelHistory.Providers.Should().BeEmpty();
-        }
-        finally
-        {
-            Cleanup(folder);
-        }
+        var loaded = store.Load();
+        loaded.ChatUi.LastBackend.Should().BeEmpty();
+        loaded.MockUi.LastBackend.Should().BeEmpty();
+        loaded.ClaudeCode.Model.Should().BeEmpty();
+        loaded.CodexAppServer.ModelProvider.Should().BeEmpty();
+        loaded.Copilot.Model.Should().BeEmpty();
+        loaded.ApiModelHistory.Providers.Should().BeEmpty();
+        loaded.CodexModelHistory.Providers.Should().BeEmpty();
+        loaded.CopilotModelHistory.Providers.Should().BeEmpty();
     }
 
     /// <summary>破損ファイルは既定値へフォールバックすることを検証する</summary>
@@ -123,17 +105,10 @@ public class AiSettingsStoreTests
     {
         var (store, folder) = CreateStore();
 
-        try
-        {
-            Directory.CreateDirectory(folder);
-            File.WriteAllText(store.SettingsPath, "{ broken json");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(store.SettingsPath, "{ broken json");
 
-            store.Load().ChatUi.LastBackend.Should().BeEmpty();
-        }
-        finally
-        {
-            Cleanup(folder);
-        }
+        store.Load().ChatUi.LastBackend.Should().BeEmpty();
     }
 
     /// <summary>片方のダイアログのセクション保存が、他方のセクションを消さないことを検証する（read-modify-write の前提）</summary>
@@ -142,26 +117,19 @@ public class AiSettingsStoreTests
     {
         var (store, folder) = CreateStore();
 
-        try
-        {
-            // 先に mock 側のみを書く
-            var first = store.Load();
-            first.MockUi.LastBackend = "Codex";
-            store.Save(first);
+        // 先に mock 側のみを書く
+        var first = store.Load();
+        first.MockUi.LastBackend = "Codex";
+        store.Save(first);
 
-            // 後から chat 側を read-modify-write で書く（mock 側は温存されるべき）
-            var second = store.Load();
-            second.ChatUi.LastBackend = "ClaudeCode";
-            store.Save(second);
+        // 後から chat 側を read-modify-write で書く（mock 側は温存されるべき）
+        var second = store.Load();
+        second.ChatUi.LastBackend = "ClaudeCode";
+        store.Save(second);
 
-            var reloaded = store.Load();
-            reloaded.ChatUi.LastBackend.Should().Be("ClaudeCode");
-            reloaded.MockUi.LastBackend.Should().Be("Codex");
-        }
-        finally
-        {
-            Cleanup(folder);
-        }
+        var reloaded = store.Load();
+        reloaded.ChatUi.LastBackend.Should().Be("ClaudeCode");
+        reloaded.MockUi.LastBackend.Should().Be("Codex");
     }
 
     [Theory(DisplayName = "ParseLastBackend は名前を大文字小文字を無視して解釈する")]
@@ -220,24 +188,17 @@ public class AiSettingsStoreTests
     {
         var (store, folder) = CreateStore();
 
-        try
-        {
-            var settings = store.Load();
-            settings.ChatUi.ApiProvider = nameof(AiProvider.LocalLlm);
-            settings.ChatUi.EndpointOverride = "http://127.0.0.1:1234/v1";
-            settings.MockUi.ApiProvider = nameof(AiProvider.Claude);
-            store.Save(settings);
+        var settings = store.Load();
+        settings.ChatUi.ApiProvider = nameof(AiProvider.LocalLlm);
+        settings.ChatUi.EndpointOverride = "http://127.0.0.1:1234/v1";
+        settings.MockUi.ApiProvider = nameof(AiProvider.Claude);
+        store.Save(settings);
 
-            var actual = new AiSettingsStore(folder).Load();
+        var actual = new AiSettingsStore(folder).Load();
 
-            actual.ChatUi.ParseApiProvider().Should().Be(AiProvider.LocalLlm);
-            actual.ChatUi.EndpointOverride.Should().Be("http://127.0.0.1:1234/v1");
-            actual.MockUi.ParseApiProvider().Should().Be(AiProvider.Claude);
-            actual.MockUi.EndpointOverride.Should().BeEmpty();
-        }
-        finally
-        {
-            Cleanup(folder);
-        }
+        actual.ChatUi.ParseApiProvider().Should().Be(AiProvider.LocalLlm);
+        actual.ChatUi.EndpointOverride.Should().Be("http://127.0.0.1:1234/v1");
+        actual.MockUi.ParseApiProvider().Should().Be(AiProvider.Claude);
+        actual.MockUi.EndpointOverride.Should().BeEmpty();
     }
 }

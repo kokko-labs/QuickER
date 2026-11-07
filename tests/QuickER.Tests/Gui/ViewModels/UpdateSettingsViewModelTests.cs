@@ -3,6 +3,7 @@ using AwesomeAssertions;
 using QuickER.Resources;
 using QuickER.Services;
 using QuickER.Tests.TestDoubles;
+using QuickER.Tests.TestSupport;
 using QuickER.ViewModels;
 
 namespace QuickER.Tests.Gui.ViewModels;
@@ -12,11 +13,16 @@ namespace QuickER.Tests.Gui.ViewModels;
 /// 初期値読み出しと永続化を検証するテストクラス。
 /// 永続化先は一時フォルダへ隔離し、実 %LOCALAPPDATA% へは触れない。
 /// </summary>
-public class UpdateSettingsViewModelTests
+public class UpdateSettingsViewModelTests : IDisposable
 {
-    /// <summary>一意の一時フォルダパスを作る</summary>
-    private static string TempFolder() =>
-        Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+    /// <summary>テストごとの一時フォルダ（破棄で中身ごと消す）</summary>
+    private readonly TestTempFolder _temp = new();
+
+    /// <summary>一時フォルダの下に、まだ無い一意のフォルダパスを作る</summary>
+    private string TempFolder() => Path.Combine(_temp.Path, Guid.NewGuid().ToString("N"));
+
+    /// <inheritdoc />
+    public void Dispose() => _temp.Dispose();
 
     /// <summary>未保存（キーなし）なら「確認する」で初期化されることを検証する</summary>
     [Fact(DisplayName = "未保存なら初期値は確認する")]
@@ -36,22 +42,12 @@ public class UpdateSettingsViewModelTests
     {
         var folder = TempFolder();
 
-        try
-        {
-            var store = new GuiAppSettingsStore(folder);
-            store.Save(new GuiAppSettings { CheckForUpdatesOnStartup = false });
+        var store = new GuiAppSettingsStore(folder);
+        store.Save(new GuiAppSettings { CheckForUpdatesOnStartup = false });
 
-            var vm = new UpdateSettingsViewModel(new StubDialogService(), store);
+        var vm = new UpdateSettingsViewModel(new StubDialogService(), store);
 
-            vm.IsCheckOnStartupEnabled.Should().BeFalse();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+        vm.IsCheckOnStartupEnabled.Should().BeFalse();
     }
 
     /// <summary>
@@ -63,29 +59,19 @@ public class UpdateSettingsViewModelTests
     {
         var folder = TempFolder();
 
-        try
-        {
-            var store = new GuiAppSettingsStore(folder);
-            store.Save(new GuiAppSettings { Language = "ja" });
+        var store = new GuiAppSettingsStore(folder);
+        store.Save(new GuiAppSettings { Language = "ja" });
 
-            var vm = new UpdateSettingsViewModel(new StubDialogService(), store);
-            vm.IsCheckOnStartupEnabled = false;
+        var vm = new UpdateSettingsViewModel(new StubDialogService(), store);
+        vm.IsCheckOnStartupEnabled = false;
 
-            var reloaded = store.Load();
-            reloaded.CheckForUpdatesOnStartup.Should().BeFalse();
-            reloaded.Language.Should().Be("ja");
+        var reloaded = store.Load();
+        reloaded.CheckForUpdatesOnStartup.Should().BeFalse();
+        reloaded.Language.Should().Be("ja");
 
-            // 戻す操作も同じ経路で保存される
-            vm.IsCheckOnStartupEnabled = true;
-            store.Load().CheckForUpdatesOnStartup.Should().BeTrue();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+        // 戻す操作も同じ経路で保存される
+        vm.IsCheckOnStartupEnabled = true;
+        store.Load().CheckForUpdatesOnStartup.Should().BeTrue();
     }
 
     /// <summary>
@@ -141,8 +127,8 @@ public class UpdateSettingsViewModelTests
         }
         finally
         {
+            // 読み取り専用のままだと一時フォルダを消せないので戻す
             File.SetAttributes(store.SettingsPath, FileAttributes.Normal);
-            Directory.Delete(folder, recursive: true);
         }
     }
 }

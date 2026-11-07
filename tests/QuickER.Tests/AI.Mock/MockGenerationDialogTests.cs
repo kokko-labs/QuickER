@@ -25,8 +25,14 @@ namespace QuickER.Tests.AI.Mock;
 /// 奪われないよう並列に走らせない（<see cref="WindowActivationTestCollection"/>）。
 /// </remarks>
 [Collection(WindowActivationTestCollection.Name)]
-public class MockGenerationDialogTests
+public class MockGenerationDialogTests : IDisposable
 {
+    /// <summary>テストごとの一時フォルダ（STA スレッドの処理より後まで残り、破棄で中身ごと消す）</summary>
+    private readonly TestTempFolder _temp = new();
+
+    /// <inheritdoc />
+    public void Dispose() => _temp.Dispose();
+
     /// <summary>同期実行のディスパッチャスタブ</summary>
     private sealed class SyncUiDispatcher : IUiDispatcher
     {
@@ -85,11 +91,7 @@ public class MockGenerationDialogTests
                 // 生成は共有ヘルパーで直列化し、並列テストとの Application 二重生成競合を防ぐ
                 WpfApplicationTestSupport.EnsureApplicationResources();
 
-                var settingsFolder = Path.Combine(
-                    Path.GetTempPath(),
-                    "QuickERTests",
-                    Guid.NewGuid().ToString("N")
-                );
+                var settingsFolder = Path.Combine(_temp.Path, Guid.NewGuid().ToString("N"));
                 // API キーは実 %LOCALAPPDATA% の ApiKeyStore ではなくメモリ上のストアへ隔離する
                 var keyStore = new InMemoryApiKeyStore();
                 var viewModel = new MockGenerationDialogViewModel(
@@ -200,10 +202,7 @@ public class MockGenerationDialogTests
         var closed = false;
 
         // 保存先フォルダと同じパスにファイルを置く＝Directory.CreateDirectory が必ず失敗する
-        var blockedFolder = Path.Combine(
-            Path.GetTempPath(),
-            $"QuickERTests-blocked-{Guid.NewGuid():N}"
-        );
+        var blockedFolder = Path.Combine(_temp.Path, $"blocked-{Guid.NewGuid():N}");
         File.WriteAllText(blockedFolder, "block");
 
         var thread = new Thread(() =>
@@ -245,17 +244,10 @@ public class MockGenerationDialogTests
         thread.Start();
         thread.Join();
 
-        try
-        {
-            captured.Should().BeNull();
-            reporter.Steps.Should().Equal("MockGeneration.SaveSettings");
-            generator.Interrupted.Should().BeTrue("保存の失敗より前の中断は完了していること");
-            closed.Should().BeTrue("保存の失敗でウィンドウが閉じ残ってはいけない");
-        }
-        finally
-        {
-            File.Delete(blockedFolder);
-        }
+        captured.Should().BeNull();
+        reporter.Steps.Should().Equal("MockGeneration.SaveSettings");
+        generator.Interrupted.Should().BeTrue("保存の失敗より前の中断は完了していること");
+        closed.Should().BeTrue("保存の失敗でウィンドウが閉じ残ってはいけない");
     }
 
     /// <summary>STA スレッドで処理を実行し、投げた例外を返す（無ければ null）</summary>
@@ -381,11 +373,7 @@ public class MockGenerationDialogTests
     public void Activated_RefreshesDiagramDependentState()
     {
         var reporter = new RecordingShutdownFailureReporter();
-        var settingsFolder = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTests",
-            Guid.NewGuid().ToString("N")
-        );
+        var settingsFolder = Path.Combine(_temp.Path, Guid.NewGuid().ToString("N"));
         var raised = 0;
 
         var captured = RunOnSta(() =>
@@ -424,33 +412,23 @@ public class MockGenerationDialogTests
         var reporter = new RecordingShutdownFailureReporter();
 
         // 保存先フォルダと同じパスにファイルを置く＝Directory.CreateDirectory が必ず失敗する
-        var blockedFolder = Path.Combine(
-            Path.GetTempPath(),
-            $"QuickERTests-blocked-{Guid.NewGuid():N}"
-        );
+        var blockedFolder = Path.Combine(_temp.Path, $"blocked-{Guid.NewGuid():N}");
         File.WriteAllText(blockedFolder, "block");
 
-        try
-        {
-            var captured = RunOnSta(() =>
-                CreateDialogWithProbes(
-                        new AiSettingsStore(blockedFolder),
-                        reporter,
-                        codex,
-                        claudeCode,
-                        copilot
-                    )
-                    .ForceClose()
-            );
+        var captured = RunOnSta(() =>
+            CreateDialogWithProbes(
+                    new AiSettingsStore(blockedFolder),
+                    reporter,
+                    codex,
+                    claudeCode,
+                    copilot
+                )
+                .ForceClose()
+        );
 
-            captured.Should().BeNull();
-            reporter.Steps.Should().Equal("MockGeneration.SaveSettings");
-            AllProbesDisposed(codex, claudeCode, copilot).Should().BeTrue();
-        }
-        finally
-        {
-            File.Delete(blockedFolder);
-        }
+        captured.Should().BeNull();
+        reporter.Steps.Should().Equal("MockGeneration.SaveSettings");
+        AllProbesDisposed(codex, claudeCode, copilot).Should().BeTrue();
     }
 
     // ── 1-7 の対応（プローブの失敗・プレビューの URI・モックフォルダ欄の確定） ──
@@ -653,61 +631,47 @@ public class MockGenerationDialogTests
     [Fact(DisplayName = "ターン実行中は接続方式タブが全て無効化され半透明になる")]
     public void BackendTabs_DisabledDuringTurn_AndReenabledAfter()
     {
-        var settingsFolder = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTests",
-            Guid.NewGuid().ToString("N")
-        );
+        var settingsFolder = Path.Combine(_temp.Path, Guid.NewGuid().ToString("N"));
 
-        try
+        var captured = RunOnSta(() =>
         {
-            var captured = RunOnSta(() =>
-            {
-                var viewModel = CreateReadyViewModel(settingsFolder);
+            var viewModel = CreateReadyViewModel(settingsFolder);
 
-                WithShownDialog(
-                    viewModel,
-                    dialog =>
-                    {
-                        var tabItems = ((TabControl)dialog.FindName("BackendTabs"))
-                            .Items.Cast<TabItem>()
-                            .ToList();
-                        tabItems.Should().HaveCount(4);
+            WithShownDialog(
+                viewModel,
+                dialog =>
+                {
+                    var tabItems = ((TabControl)dialog.FindName("BackendTabs"))
+                        .Items.Cast<TabItem>()
+                        .ToList();
+                    tabItems.Should().HaveCount(4);
 
-                        Func<TabItem, double> borderOpacity = tab =>
-                            ((Border)tab.Template.FindName("Bd", tab)).Opacity;
+                    Func<TabItem, double> borderOpacity = tab =>
+                        ((Border)tab.Template.FindName("Bd", tab)).Opacity;
 
-                        tabItems.Should().OnlyContain(t => t.IsEnabled && borderOpacity(t) == 1.0);
+                    tabItems.Should().OnlyContain(t => t.IsEnabled && borderOpacity(t) == 1.0);
 
-                        viewModel.IsTurnInProgress = true;
-                        dialog.UpdateLayout();
-                        WpfApplicationTestSupport.DoEvents();
+                    viewModel.IsTurnInProgress = true;
+                    dialog.UpdateLayout();
+                    WpfApplicationTestSupport.DoEvents();
 
-                        tabItems
-                            .Should()
-                            .OnlyContain(
-                                t => !t.IsEnabled && borderOpacity(t) == 0.5,
-                                "ターン実行中は全タブが押せず半透明になる"
-                            );
+                    tabItems
+                        .Should()
+                        .OnlyContain(
+                            t => !t.IsEnabled && borderOpacity(t) == 0.5,
+                            "ターン実行中は全タブが押せず半透明になる"
+                        );
 
-                        viewModel.IsTurnInProgress = false;
-                        dialog.UpdateLayout();
-                        WpfApplicationTestSupport.DoEvents();
+                    viewModel.IsTurnInProgress = false;
+                    dialog.UpdateLayout();
+                    WpfApplicationTestSupport.DoEvents();
 
-                        tabItems.Should().OnlyContain(t => t.IsEnabled && borderOpacity(t) == 1.0);
-                    }
-                );
-            });
+                    tabItems.Should().OnlyContain(t => t.IsEnabled && borderOpacity(t) == 1.0);
+                }
+            );
+        });
 
-            captured.Should().BeNull(captured?.ToString());
-        }
-        finally
-        {
-            if (Directory.Exists(settingsFolder))
-            {
-                Directory.Delete(settingsFolder, recursive: true);
-            }
-        }
+        captured.Should().BeNull(captured?.ToString());
     }
 
     /// <summary>
@@ -716,48 +680,31 @@ public class MockGenerationDialogTests
     [Fact(DisplayName = "表示時に前回の接続方式のタブが選ばれ VM もその方式になる")]
     public void InitialBackend_IsShownOnLoad()
     {
-        var settingsFolder = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTests",
-            Guid.NewGuid().ToString("N")
-        );
+        var settingsFolder = Path.Combine(_temp.Path, Guid.NewGuid().ToString("N"));
 
-        try
+        var captured = RunOnSta(() =>
         {
-            var captured = RunOnSta(() =>
-            {
-                var saver = CreateReadyViewModel(settingsFolder);
-                saver.Connection.SelectedBackend = ErChatBackendKind.Codex;
-                saver.SaveSettings();
-                var viewModel = CreateReadyViewModel(settingsFolder);
+            var saver = CreateReadyViewModel(settingsFolder);
+            saver.Connection.SelectedBackend = ErChatBackendKind.Codex;
+            saver.SaveSettings();
+            var viewModel = CreateReadyViewModel(settingsFolder);
 
-                WithShownDialog(
-                    viewModel,
-                    dialog =>
-                    {
-                        var tabControl = (TabControl)dialog.FindName("BackendTabs");
-                        var tabItems = tabControl.Items.Cast<TabItem>().ToList();
+            WithShownDialog(
+                viewModel,
+                dialog =>
+                {
+                    var tabControl = (TabControl)dialog.FindName("BackendTabs");
+                    var tabItems = tabControl.Items.Cast<TabItem>().ToList();
 
-                        viewModel.Connection.SelectedBackend.Should().Be(ErChatBackendKind.Codex);
-                        tabControl.SelectedIndex.Should().Be(1);
-                        tabItems
-                            .Select(t => t.IsSelected)
-                            .Should()
-                            .Equal(false, true, false, false);
-                        tabControl.SelectedContent.Should().BeSameAs(tabItems[1].Content);
-                    }
-                );
-            });
+                    viewModel.Connection.SelectedBackend.Should().Be(ErChatBackendKind.Codex);
+                    tabControl.SelectedIndex.Should().Be(1);
+                    tabItems.Select(t => t.IsSelected).Should().Equal(false, true, false, false);
+                    tabControl.SelectedContent.Should().BeSameAs(tabItems[1].Content);
+                }
+            );
+        });
 
-            captured.Should().BeNull(captured?.ToString());
-        }
-        finally
-        {
-            if (Directory.Exists(settingsFolder))
-            {
-                Directory.Delete(settingsFolder, recursive: true);
-            }
-        }
+        captured.Should().BeNull(captured?.ToString());
     }
 
     /// <summary>モックフォルダ欄にフォーカスを置いて文字列を打ち込んだ状態にする（ViewModel へはまだ確定しない）</summary>
@@ -862,59 +809,43 @@ public class MockGenerationDialogTests
     [Fact(DisplayName = "フォルダ欄を書き換えて直ちに新しい会話を押すと、新しいフォルダで始まる")]
     public void StartConversation_RightAfterEditing_UsesEditedFolder()
     {
-        var baseFolder = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTests",
-            Guid.NewGuid().ToString("N")
-        );
+        var baseFolder = Path.Combine(_temp.Path, Guid.NewGuid().ToString("N"));
         var oldFolder = Path.Combine(baseFolder, "old");
         var newFolder = Path.Combine(baseFolder, "new");
         string? folderAfterMouseDown = null;
         var buttonFocusedAfterMouseDown = false;
 
-        try
+        var captured = RunOnSta(() =>
         {
-            var captured = RunOnSta(() =>
-            {
-                var viewModel = CreateReadyViewModel(Path.Combine(baseFolder, "settings"));
-                viewModel.MockFolder = oldFolder;
+            var viewModel = CreateReadyViewModel(Path.Combine(baseFolder, "settings"));
+            viewModel.MockFolder = oldFolder;
 
-                WithShownDialog(
-                    viewModel,
-                    dialog =>
-                    {
-                        var button = (Button)dialog.FindName("StartConversationButton");
-                        button.IsEnabled.Should().BeTrue("元のフォルダで会話を始められる状態から");
-                        TypeIntoMockFolderBox(dialog, newFolder);
-                        viewModel.MockFolder.Should().Be(oldFolder, "まだ確定していない");
+            WithShownDialog(
+                viewModel,
+                dialog =>
+                {
+                    var button = (Button)dialog.FindName("StartConversationButton");
+                    button.IsEnabled.Should().BeTrue("元のフォルダで会話を始められる状態から");
+                    TypeIntoMockFolderBox(dialog, newFolder);
+                    viewModel.MockFolder.Should().Be(oldFolder, "まだ確定していない");
 
-                        PressAndClick(
-                            button,
-                            out folderAfterMouseDown,
-                            out buttonFocusedAfterMouseDown,
-                            viewModel
-                        );
-                    }
-                );
-            });
+                    PressAndClick(
+                        button,
+                        out folderAfterMouseDown,
+                        out buttonFocusedAfterMouseDown,
+                        viewModel
+                    );
+                }
+            );
+        });
 
-            captured.Should().BeNull(captured?.ToString());
-            buttonFocusedAfterMouseDown
-                .Should()
-                .BeTrue("マウスを押した時点でボタンがフォーカスを取る");
-            folderAfterMouseDown.Should().Be(newFolder, "フォーカスが移った時点で欄が確定する");
-            File.Exists(Path.Combine(newFolder, MockManifest.ManifestFileName))
-                .Should()
-                .BeTrue("会話は新しいフォルダで始まる");
-            Directory.Exists(oldFolder).Should().BeFalse("確定前の古いフォルダには何も作らない");
-        }
-        finally
-        {
-            if (Directory.Exists(baseFolder))
-            {
-                Directory.Delete(baseFolder, recursive: true);
-            }
-        }
+        captured.Should().BeNull(captured?.ToString());
+        buttonFocusedAfterMouseDown.Should().BeTrue("マウスを押した時点でボタンがフォーカスを取る");
+        folderAfterMouseDown.Should().Be(newFolder, "フォーカスが移った時点で欄が確定する");
+        File.Exists(Path.Combine(newFolder, MockManifest.ManifestFileName))
+            .Should()
+            .BeTrue("会話は新しいフォルダで始まる");
+        Directory.Exists(oldFolder).Should().BeFalse("確定前の古いフォルダには何も作らない");
     }
 
     /// <summary>
@@ -925,60 +856,43 @@ public class MockGenerationDialogTests
     )]
     public void StartConversation_RightAfterEditingToBlockedValue_DoesNotStart()
     {
-        var baseFolder = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTests",
-            Guid.NewGuid().ToString("N")
-        );
+        var baseFolder = Path.Combine(_temp.Path, Guid.NewGuid().ToString("N"));
         var oldFolder = Path.Combine(baseFolder, "old");
         var enabledAfterMouseDown = true;
         var messages = -1;
 
-        try
+        var captured = RunOnSta(() =>
         {
-            var captured = RunOnSta(() =>
-            {
-                var viewModel = CreateReadyViewModel(Path.Combine(baseFolder, "settings"));
-                viewModel.MockFolder = oldFolder;
+            var viewModel = CreateReadyViewModel(Path.Combine(baseFolder, "settings"));
+            viewModel.MockFolder = oldFolder;
 
-                WithShownDialog(
-                    viewModel,
-                    dialog =>
-                    {
-                        var button = (Button)dialog.FindName("StartConversationButton");
-                        // 中身があるのに mock.json の無いフォルダ＝モックフォルダでないので会話に使えない
-                        var notMockFolder = Path.Combine(baseFolder, "not-mock");
-                        Directory.CreateDirectory(notMockFolder);
-                        File.WriteAllText(
-                            Path.Combine(notMockFolder, "index.html"),
-                            "<html></html>"
-                        );
-                        TypeIntoMockFolderBox(dialog, notMockFolder);
+            WithShownDialog(
+                viewModel,
+                dialog =>
+                {
+                    var button = (Button)dialog.FindName("StartConversationButton");
+                    // 中身があるのに mock.json の無いフォルダ＝モックフォルダでないので会話に使えない
+                    var notMockFolder = Path.Combine(baseFolder, "not-mock");
+                    Directory.CreateDirectory(notMockFolder);
+                    File.WriteAllText(Path.Combine(notMockFolder, "index.html"), "<html></html>");
+                    TypeIntoMockFolderBox(dialog, notMockFolder);
 
-                        PressAndClick(
-                            button,
-                            out _,
-                            out _,
-                            viewModel,
-                            () => enabledAfterMouseDown = button.IsEnabled
-                        );
-                        messages = viewModel.Messages.Count;
-                    }
-                );
-            });
+                    PressAndClick(
+                        button,
+                        out _,
+                        out _,
+                        viewModel,
+                        () => enabledAfterMouseDown = button.IsEnabled
+                    );
+                    messages = viewModel.Messages.Count;
+                }
+            );
+        });
 
-            captured.Should().BeNull(captured?.ToString());
-            enabledAfterMouseDown.Should().BeFalse("確定した値では会話を始められない");
-            messages.Should().Be(0, "会話は始まらない");
-            Directory.Exists(oldFolder).Should().BeFalse("確定前の古いフォルダで始めてはいけない");
-        }
-        finally
-        {
-            if (Directory.Exists(baseFolder))
-            {
-                Directory.Delete(baseFolder, recursive: true);
-            }
-        }
+        captured.Should().BeNull(captured?.ToString());
+        enabledAfterMouseDown.Should().BeFalse("確定した値では会話を始められない");
+        messages.Should().Be(0, "会話は始まらない");
+        Directory.Exists(oldFolder).Should().BeFalse("確定前の古いフォルダで始めてはいけない");
     }
 
     /// <summary>
@@ -1089,41 +1003,31 @@ public class MockGenerationDialogTests
     public void CloseButton_WhenSaveFails_HidesAndReportsError()
     {
         // 保存先フォルダと同じパスにファイルを置く＝設定の書き込みが必ず失敗する
-        var blockedFolder = Path.Combine(
-            Path.GetTempPath(),
-            $"QuickERTests-blocked-{Guid.NewGuid():N}"
-        );
+        var blockedFolder = Path.Combine(_temp.Path, $"blocked-{Guid.NewGuid():N}");
         File.WriteAllText(blockedFolder, "block");
         var dialogs = new StubDialogService();
 
-        try
+        WpfApplicationTestSupport.RunSta(() =>
         {
-            WpfApplicationTestSupport.RunSta(() =>
-            {
-                var viewModel = CreateViewModelWithDialogs(blockedFolder, dialogs);
+            var viewModel = CreateViewModelWithDialogs(blockedFolder, dialogs);
 
-                WithShownDialog(
-                    viewModel,
-                    dialog =>
-                    {
-                        var visibleWhenErrorShown = true;
-                        dialogs.OnBeforeShow = () => visibleWhenErrorShown = dialog.IsVisible;
+            WithShownDialog(
+                viewModel,
+                dialog =>
+                {
+                    var visibleWhenErrorShown = true;
+                    dialogs.OnBeforeShow = () => visibleWhenErrorShown = dialog.IsVisible;
 
-                        var close = dialog.Close;
-                        close.Should().NotThrow();
+                    var close = dialog.Close;
+                    close.Should().NotThrow();
 
-                        dialog.IsVisible.Should().BeFalse("保存の失敗でも × で隠れる");
-                        visibleWhenErrorShown.Should().BeFalse("エラーは隠した後に出す");
-                        dialogs.ErrorMessages.Should().ContainSingle();
-                        viewModel.StatusMessage.Should().Be(dialogs.ErrorMessages[0]);
-                    }
-                );
-            });
-        }
-        finally
-        {
-            File.Delete(blockedFolder);
-        }
+                    dialog.IsVisible.Should().BeFalse("保存の失敗でも × で隠れる");
+                    visibleWhenErrorShown.Should().BeFalse("エラーは隠した後に出す");
+                    dialogs.ErrorMessages.Should().ContainSingle();
+                    viewModel.StatusMessage.Should().Be(dialogs.ErrorMessages[0]);
+                }
+            );
+        });
     }
 
     /// <summary>
@@ -1133,64 +1037,52 @@ public class MockGenerationDialogTests
     [Fact(DisplayName = "ストリーミングで吹き出しが伸びると末尾を見ているチャット欄は追従する")]
     public void StreamingGrowth_WhenAtBottom_FollowsToEnd()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var folder = Path.Combine(_temp.Path, Guid.NewGuid().ToString("N"));
 
-        try
+        WpfApplicationTestSupport.RunSta(() =>
         {
-            WpfApplicationTestSupport.RunSta(() =>
-            {
-                var viewModel = CreateViewModelWithDialogs(folder, new StubDialogService());
+            var viewModel = CreateViewModelWithDialogs(folder, new StubDialogService());
 
-                WithShownDialog(
-                    viewModel,
-                    dialog =>
+            WithShownDialog(
+                viewModel,
+                dialog =>
+                {
+                    for (var i = 0; i < 30; i++)
                     {
-                        for (var i = 0; i < 30; i++)
-                        {
-                            viewModel.Messages.Add(
-                                new ErChatMessage
-                                {
-                                    Role = ErChatMessageRole.Assistant,
-                                    Content = $"message {i}",
-                                }
-                            );
-                        }
-
-                        WpfApplicationTestSupport.DoEvents();
-                        var viewer = dialog.ChatScrollViewer;
-                        var scrollableBefore = viewer.ScrollableHeight;
-                        scrollableBefore.Should().BeGreaterThan(0, "末尾がある状態を作る");
-
-                        // 新しい吹き出しの ScrollToEnd は位置を「無限大」として覚え、以後の伸びにも自然に付いていく。
-                        // 追従が切れるのは利用者が手で動かした後なので、手で末尾まで戻した状態（有限の位置）を作る
-                        viewer.ScrollToVerticalOffset(scrollableBefore);
-                        WpfApplicationTestSupport.DoEvents();
-                        viewer
-                            .VerticalOffset.Should()
-                            .Be(scrollableBefore, "末尾を見ている状態を作る");
-
-                        var last = viewModel.Messages[^1];
-
-                        for (var i = 0; i < 20; i++)
-                        {
-                            last.Content += "\nstreamed line " + i;
-                        }
-
-                        WpfApplicationTestSupport.DoEvents();
-
-                        viewer.ScrollableHeight.Should().BeGreaterThan(scrollableBefore);
-                        viewer.VerticalOffset.Should().Be(viewer.ScrollableHeight);
+                        viewModel.Messages.Add(
+                            new ErChatMessage
+                            {
+                                Role = ErChatMessageRole.Assistant,
+                                Content = $"message {i}",
+                            }
+                        );
                     }
-                );
-            });
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+
+                    WpfApplicationTestSupport.DoEvents();
+                    var viewer = dialog.ChatScrollViewer;
+                    var scrollableBefore = viewer.ScrollableHeight;
+                    scrollableBefore.Should().BeGreaterThan(0, "末尾がある状態を作る");
+
+                    // 新しい吹き出しの ScrollToEnd は位置を「無限大」として覚え、以後の伸びにも自然に付いていく。
+                    // 追従が切れるのは利用者が手で動かした後なので、手で末尾まで戻した状態（有限の位置）を作る
+                    viewer.ScrollToVerticalOffset(scrollableBefore);
+                    WpfApplicationTestSupport.DoEvents();
+                    viewer.VerticalOffset.Should().Be(scrollableBefore, "末尾を見ている状態を作る");
+
+                    var last = viewModel.Messages[^1];
+
+                    for (var i = 0; i < 20; i++)
+                    {
+                        last.Content += "\nstreamed line " + i;
+                    }
+
+                    WpfApplicationTestSupport.DoEvents();
+
+                    viewer.ScrollableHeight.Should().BeGreaterThan(scrollableBefore);
+                    viewer.VerticalOffset.Should().Be(viewer.ScrollableHeight);
+                }
+            );
+        });
     }
 
     /// <summary>
@@ -1200,70 +1092,57 @@ public class MockGenerationDialogTests
     [Fact(DisplayName = "回答の吹き出しは応答の終わりとトグルに従って Markdown 表示を切り替える")]
     public void AssistantBubble_FollowsStreamingAndToggle()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var folder = Path.Combine(_temp.Path, Guid.NewGuid().ToString("N"));
 
-        try
+        WpfApplicationTestSupport.RunSta(() =>
         {
-            WpfApplicationTestSupport.RunSta(() =>
-            {
-                var vm = CreateViewModelWithDialogs(folder, new StubDialogService());
+            var vm = CreateViewModelWithDialogs(folder, new StubDialogService());
 
-                WithShownDialog(
-                    vm,
-                    dialog =>
-                    {
-                        vm.Messages.Add(
-                            new ErChatMessage
-                            {
-                                Role = ErChatMessageRole.Assistant,
-                                Content = "**done**",
-                            }
+            WithShownDialog(
+                vm,
+                dialog =>
+                {
+                    vm.Messages.Add(
+                        new ErChatMessage
+                        {
+                            Role = ErChatMessageRole.Assistant,
+                            Content = "**done**",
+                        }
+                    );
+                    vm.Messages.Add(
+                        new ErChatMessage
+                        {
+                            Role = ErChatMessageRole.Assistant,
+                            Content = "**partial",
+                            IsStreaming = true,
+                        }
+                    );
+                    WpfApplicationTestSupport.DoEvents();
+
+                    var views = FindVisualChildren<AssistantMessageView>(dialog).ToList();
+                    views.Should().HaveCount(2);
+                    views[0].IsShowingMarkdown.Should().BeTrue("応答済みの回答");
+                    views[0].LinkOpener.Should().BeSameAs(vm.LinkOpener);
+                    views[1].IsShowingMarkdown.Should().BeFalse("応答中の回答");
+
+                    vm.IsTurnInProgress = true;
+                    vm.IsTurnInProgress = false;
+                    views[1].IsShowingMarkdown.Should().BeTrue("ターンが終わったら切り替わる");
+
+                    var toggle = FindVisualChildren<CheckBox>(dialog)
+                        .Single(c =>
+                            Equals(c.Content, QuickER.AI.Mock.Resources.Strings.Mock_ShowMarkdown)
                         );
-                        vm.Messages.Add(
-                            new ErChatMessage
-                            {
-                                Role = ErChatMessageRole.Assistant,
-                                Content = "**partial",
-                                IsStreaming = true,
-                            }
-                        );
-                        WpfApplicationTestSupport.DoEvents();
+                    toggle.IsChecked.Should().BeTrue();
+                    toggle.IsChecked = false;
+                    vm.Connection.ShowAssistantMarkdown.Should().BeFalse();
+                    views.Should().OnlyContain(v => !v.IsShowingMarkdown);
 
-                        var views = FindVisualChildren<AssistantMessageView>(dialog).ToList();
-                        views.Should().HaveCount(2);
-                        views[0].IsShowingMarkdown.Should().BeTrue("応答済みの回答");
-                        views[0].LinkOpener.Should().BeSameAs(vm.LinkOpener);
-                        views[1].IsShowingMarkdown.Should().BeFalse("応答中の回答");
-
-                        vm.IsTurnInProgress = true;
-                        vm.IsTurnInProgress = false;
-                        views[1].IsShowingMarkdown.Should().BeTrue("ターンが終わったら切り替わる");
-
-                        var toggle = FindVisualChildren<CheckBox>(dialog)
-                            .Single(c =>
-                                Equals(
-                                    c.Content,
-                                    QuickER.AI.Mock.Resources.Strings.Mock_ShowMarkdown
-                                )
-                            );
-                        toggle.IsChecked.Should().BeTrue();
-                        toggle.IsChecked = false;
-                        vm.Connection.ShowAssistantMarkdown.Should().BeFalse();
-                        views.Should().OnlyContain(v => !v.IsShowingMarkdown);
-
-                        vm.Connection.ShowAssistantMarkdown = true;
-                        views.Should().OnlyContain(v => v.IsShowingMarkdown);
-                    }
-                );
-            });
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+                    vm.Connection.ShowAssistantMarkdown = true;
+                    views.Should().OnlyContain(v => v.IsShowingMarkdown);
+                }
+            );
+        });
     }
 
     /// <summary>ビジュアルツリーから指定型の子孫を列挙する</summary>

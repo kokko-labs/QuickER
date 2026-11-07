@@ -3,6 +3,7 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using AwesomeAssertions;
 using QuickER.Platform;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Platform;
 
@@ -15,13 +16,10 @@ namespace QuickER.Tests.Platform;
 /// </remarks>
 public sealed class AtomicFileNamingAndMetadataTests : IDisposable
 {
-    private readonly string _folder = Path.Combine(
-        Path.GetTempPath(),
-        "QuickERTests",
-        "atomic-naming-" + Guid.NewGuid().ToString("N")
-    );
+    /// <summary>テストごとの一時フォルダ（破棄で中身ごと消す）</summary>
+    private readonly TestTempFolder _temp = new();
 
-    public AtomicFileNamingAndMetadataTests() => Directory.CreateDirectory(_folder);
+    private string _folder => _temp.Path;
 
     public void Dispose()
     {
@@ -32,7 +30,7 @@ public sealed class AtomicFileNamingAndMetadataTests : IDisposable
                 File.SetAttributes(file, FileAttributes.Normal);
             }
 
-            Directory.Delete(_folder, recursive: true);
+            _temp.Dispose();
         }
         catch (IOException)
         {

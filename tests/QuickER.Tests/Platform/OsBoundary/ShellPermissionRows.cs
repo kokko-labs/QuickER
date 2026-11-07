@@ -2,6 +2,7 @@ using System.IO;
 using AwesomeAssertions;
 using GitHub.Copilot;
 using QuickER.AI;
+using QuickER.Tests.TestSupport;
 using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Platform.OsBoundary;
@@ -20,7 +21,7 @@ internal static partial class ShellPermissionRows
 {
     /// <summary>自動承認の基準フォルダ（実在しなくてよい＝判定はパス文字列の包含関係だけを見る）</summary>
     public static readonly string Root = CopilotWorkspacePermissionPolicy.NormalizeRoot(
-        Path.Combine(Path.GetTempPath(), "QuickERTests", "copilot-workspace")
+        Path.Combine(TestTempFolder.Root, "copilot-workspace")
     );
 
     /// <summary>表</summary>

@@ -1,6 +1,7 @@
 using System.IO;
 using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.CodeGen.CSharp;
 
@@ -13,25 +14,12 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// </remarks>
 public sealed class GeneratedFileWriterLongNameTests : IDisposable
 {
-    private readonly string _folder = Path.Combine(
-        Path.GetTempPath(),
-        "QuickERTests",
-        "writer-long-" + Guid.NewGuid().ToString("N")
-    );
+    /// <summary>テストごとの一時フォルダ（破棄で中身ごと消す）</summary>
+    private readonly TestTempFolder _temp = new();
 
-    public GeneratedFileWriterLongNameTests() => Directory.CreateDirectory(_folder);
+    private string _folder => _temp.Path;
 
-    public void Dispose()
-    {
-        try
-        {
-            Directory.Delete(_folder, recursive: true);
-        }
-        catch (IOException)
-        {
-            // 後始末の失敗は無視する
-        }
-    }
+    public void Dispose() => _temp.Dispose();
 
     [Theory(DisplayName = "受け付ける長さの生成物のファイル名へ書き出せる")]
     [InlineData(230)]

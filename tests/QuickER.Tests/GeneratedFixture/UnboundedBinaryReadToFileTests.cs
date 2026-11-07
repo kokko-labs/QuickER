@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using QuickER.Platform;
+using QuickER.Tests.TestSupport;
 using Xunit;
 using RuntimeBinaryColumns = QuickER.Runtime.UnboundedBinaryColumns;
 
@@ -20,10 +21,11 @@ namespace QuickER.Tests.GeneratedFixture;
 /// </remarks>
 public sealed class UnboundedBinaryReadToFileTests : IDisposable
 {
+    /// <summary>テストごとの一時フォルダ（破棄で中身ごと消す）</summary>
+    private readonly TestTempFolder _temp = new();
+
     /// <summary>テストごとの作業フォルダ</summary>
-    private readonly DirectoryInfo _directory = Directory.CreateTempSubdirectory(
-        "quicker-read-to-file-"
-    );
+    private readonly DirectoryInfo _directory;
 
     /// <summary>宛先のパス（既存の内容 "old"）</summary>
     private string Destination => Path.Combine(_directory.FullName, "out.bin");
@@ -31,11 +33,12 @@ public sealed class UnboundedBinaryReadToFileTests : IDisposable
     /// <summary>作業フォルダを用意し、宛先へ既存の内容を書く</summary>
     public UnboundedBinaryReadToFileTests()
     {
+        _directory = new DirectoryInfo(_temp.Path);
         File.WriteAllBytes(Destination, "old"u8.ToArray());
     }
 
     /// <summary>作業フォルダを片づける</summary>
-    public void Dispose() => _directory.Delete(recursive: true);
+    public void Dispose() => _temp.Dispose();
 
     /// <summary>作業フォルダに宛先以外のファイル（一時ファイルの残り）が無いことを確かめる</summary>
     private void ShouldLeaveOnlyDestination() =>

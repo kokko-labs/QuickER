@@ -3,6 +3,7 @@ using AwesomeAssertions;
 using QuickER.AI;
 using QuickER.AI.Mock;
 using QuickER.Tests.AI.Mock.Agents;
+using QuickER.Tests.TestSupport;
 using MockStrings = QuickER.AI.Mock.Resources.Strings;
 
 namespace QuickER.Tests.AI.Mock;
@@ -12,7 +13,7 @@ namespace QuickER.Tests.AI.Mock;
 /// パス保護・プロンプト構成（スキーマ/画面 HTML/既提出一覧の引き継ぎ）・emit なしターン・中断を、フェイクエンジン／
 /// ビルド検証器で検証するテストクラス。
 /// </summary>
-public class ApiKeyMockProjectAgentTests
+public class ApiKeyMockProjectAgentTests : IDisposable
 {
     private const string Project = "MockApp";
 
@@ -28,20 +29,19 @@ public class ApiKeyMockProjectAgentTests
         params (string File, string Name, string Marker)[] screens
     ) => ApiKeyMockMaterials.Setup(work, Project, screens);
 
-    private static string NewWork()
+    /// <summary>テストごとの一時フォルダ（破棄で中身ごと消す）</summary>
+    private readonly TestTempFolder _temp = new();
+
+    /// <summary>テストごとの作業フォルダを作る</summary>
+    private string NewWork()
     {
-        var work = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var work = Path.Combine(_temp.Path, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(work);
         return work;
     }
 
-    private static void Cleanup(string folder)
-    {
-        if (Directory.Exists(folder))
-        {
-            Directory.Delete(folder, recursive: true);
-        }
-    }
+    /// <inheritdoc />
+    public void Dispose() => _temp.Dispose();
 
     private static MockProjectAgentRequest Request(string work) =>
         new(
@@ -123,63 +123,54 @@ public class ApiKeyMockProjectAgentTests
         var agent = new ApiKeyMockProjectAgent(factory, build);
         var progress = new List<string>();
 
-        try
-        {
-            var outcome = await agent.RunAsync(
-                Request(work),
-                progress.Add,
-                TestContext.Current.CancellationToken
-            );
+        var outcome = await agent.RunAsync(
+            Request(work),
+            progress.Add,
+            TestContext.Current.CancellationToken
+        );
 
-            outcome.Success.Should().BeTrue();
-            outcome.Error.Should().BeNull();
-            outcome.NotLoggedIn.Should().BeFalse();
+        outcome.Success.Should().BeTrue();
+        outcome.Error.Should().BeNull();
+        outcome.NotLoggedIn.Should().BeFalse();
 
-            // リクエスト回数 = 1（共通部）＋画面数（1）
-            engineBox[0].SentPrompts.Should().HaveCount(2);
+        // リクエスト回数 = 1（共通部）＋画面数（1）
+        engineBox[0].SentPrompts.Should().HaveCount(2);
 
-            // 共通部プロンプトにスキーマ・契約要約・画面一覧が入る
-            var commonPrompt = engineBox[0].SentPrompts[0];
-            commonPrompt.Should().Contain("SCHEMA-TEXT: Customer");
-            commonPrompt.Should().Contain("ICustomerRepository");
-            commonPrompt.Should().Contain("GetByIdAsync");
-            commonPrompt.Should().Contain("OrderList.html");
-            commonPrompt.Should().Contain("CSS-MARKER");
+        // 共通部プロンプトにスキーマ・契約要約・画面一覧が入る
+        var commonPrompt = engineBox[0].SentPrompts[0];
+        commonPrompt.Should().Contain("SCHEMA-TEXT: Customer");
+        commonPrompt.Should().Contain("ICustomerRepository");
+        commonPrompt.Should().Contain("GetByIdAsync");
+        commonPrompt.Should().Contain("OrderList.html");
+        commonPrompt.Should().Contain("CSS-MARKER");
 
-            // 画面プロンプトに該当 HTML と既提出一覧が引き継がれる
-            var screenPrompt = engineBox[0].SentPrompts[1];
-            screenPrompt.Should().Contain("MARKER_S1");
-            screenPrompt.Should().Contain("MockApp/App.xaml");
+        // 画面プロンプトに該当 HTML と既提出一覧が引き継がれる
+        var screenPrompt = engineBox[0].SentPrompts[1];
+        screenPrompt.Should().Contain("MARKER_S1");
+        screenPrompt.Should().Contain("MockApp/App.xaml");
 
-            // emit_file がファイルを実書き込みする
-            File.Exists(Path.Combine(work, "MockApp", "App.xaml")).Should().BeTrue();
-            File.Exists(Path.Combine(work, "MockApp", "MainWindow.xaml")).Should().BeTrue();
-            File.Exists(Path.Combine(work, "MockApp", "Views", "OrderListView.xaml"))
-                .Should()
-                .BeTrue();
+        // emit_file がファイルを実書き込みする
+        File.Exists(Path.Combine(work, "MockApp", "App.xaml")).Should().BeTrue();
+        File.Exists(Path.Combine(work, "MockApp", "MainWindow.xaml")).Should().BeTrue();
+        File.Exists(Path.Combine(work, "MockApp", "Views", "OrderListView.xaml")).Should().BeTrue();
 
-            build.BuildCallCount.Should().Be(1);
+        build.BuildCallCount.Should().Be(1);
 
-            // プロファイルは API キー用システムプロンプト・emit_file ツール
-            profileBox[0].BuildSystemPrompt().Should().Contain("emit_file");
-            profileBox[0].Tools.Should().ContainSingle(t => t.Name == "emit_file");
+        // プロファイルは API キー用システムプロンプト・emit_file ツール
+        profileBox[0].BuildSystemPrompt().Should().Contain("emit_file");
+        profileBox[0].Tools.Should().ContainSingle(t => t.Name == "emit_file");
 
-            // 生成コードの必須使用・XAML View 必須（コード組み立て禁止）の規約が入る
-            profileBox[0].BuildSystemPrompt().Should().Contain("XAML view");
-            profileBox[0].BuildSystemPrompt().Should().Contain("hard-coded list");
+        // 生成コードの必須使用・XAML View 必須（コード組み立て禁止）の規約が入る
+        profileBox[0].BuildSystemPrompt().Should().Contain("XAML view");
+        profileBox[0].BuildSystemPrompt().Should().Contain("hard-coded list");
 
-            // 主キーのアプリ側採番（GuidKey の例外込み）とパッケージソース設定の禁止が入る
-            profileBox[0]
-                .BuildSystemPrompt()
-                .Should()
-                .Contain("assign the primary key in the application");
-            profileBox[0].BuildSystemPrompt().Should().Contain("GuidKey");
-            profileBox[0].BuildSystemPrompt().Should().Contain("NuGet.Config");
-        }
-        finally
-        {
-            Cleanup(work);
-        }
+        // 主キーのアプリ側採番（GuidKey の例外込み）とパッケージソース設定の禁止が入る
+        profileBox[0]
+            .BuildSystemPrompt()
+            .Should()
+            .Contain("assign the primary key in the application");
+        profileBox[0].BuildSystemPrompt().Should().Contain("GuidKey");
+        profileBox[0].BuildSystemPrompt().Should().Contain("NuGet.Config");
     }
 
     /// <summary>パス保護: Generated/ への emit はツール失敗結果になり、ファイルが書かれないことを検証する</summary>
@@ -201,24 +192,13 @@ public class ApiKeyMockProjectAgentTests
         var agent = new ApiKeyMockProjectAgent(factory, build);
         var progress = new List<string>();
 
-        try
-        {
-            await agent.RunAsync(
-                Request(work),
-                progress.Add,
-                TestContext.Current.CancellationToken
-            );
+        await agent.RunAsync(Request(work), progress.Add, TestContext.Current.CancellationToken);
 
-            engineBox[0].LastToolResult!.Value.Success.Should().BeFalse();
-            // 拒否理由（英語・カルチャ非依存）がツール結果として返る
-            engineBox[0].LastToolResult!.Value.Result.Should().Contain("protected 'Generated/'");
-            File.Exists(Path.Combine(work, "MockApp", "Generated", "Evil.cs")).Should().BeFalse();
-            string.Concat(progress).Should().Contain("protected 'Generated/'");
-        }
-        finally
-        {
-            Cleanup(work);
-        }
+        engineBox[0].LastToolResult!.Value.Success.Should().BeFalse();
+        // 拒否理由（英語・カルチャ非依存）がツール結果として返る
+        engineBox[0].LastToolResult!.Value.Result.Should().Contain("protected 'Generated/'");
+        File.Exists(Path.Combine(work, "MockApp", "Generated", "Evil.cs")).Should().BeFalse();
+        string.Concat(progress).Should().Contain("protected 'Generated/'");
     }
 
     /// <summary>
@@ -248,30 +228,21 @@ public class ApiKeyMockProjectAgentTests
         var agent = new ApiKeyMockProjectAgent(factory, build);
         var progress = new List<string>();
 
-        try
-        {
-            var outcome = await agent.RunAsync(
-                Request(work),
-                progress.Add,
-                TestContext.Current.CancellationToken
-            );
+        var outcome = await agent.RunAsync(
+            Request(work),
+            progress.Add,
+            TestContext.Current.CancellationToken
+        );
 
-            // 拒否されたのは 1 件だけで、同ターンの正当な提出は書かれ、run は成功のまま続く
-            File.Exists(Path.Combine(work, "Directory.Build.props")).Should().BeFalse();
-            File.Exists(Path.Combine(work, "MockApp", "App.xaml")).Should().BeTrue();
-            File.Exists(Path.Combine(work, "MockApp", "Views", "OrderListView.xaml"))
-                .Should()
-                .BeTrue();
-            outcome.Success.Should().BeTrue();
+        // 拒否されたのは 1 件だけで、同ターンの正当な提出は書かれ、run は成功のまま続く
+        File.Exists(Path.Combine(work, "Directory.Build.props")).Should().BeFalse();
+        File.Exists(Path.Combine(work, "MockApp", "App.xaml")).Should().BeTrue();
+        File.Exists(Path.Combine(work, "MockApp", "Views", "OrderListView.xaml")).Should().BeTrue();
+        outcome.Success.Should().BeTrue();
 
-            // 拒否理由（許可拡張子の列挙）が進捗ログに残る
-            string.Concat(progress).Should().Contain("only .cs, .xaml files may be submitted");
-            engineBox[0].LastToolResult.Should().NotBeNull();
-        }
-        finally
-        {
-            Cleanup(work);
-        }
+        // 拒否理由（許可拡張子の列挙）が進捗ログに残る
+        string.Concat(progress).Should().Contain("only .cs, .xaml files may be submitted");
+        engineBox[0].LastToolResult.Should().NotBeNull();
     }
 
     /// <summary>中間ビルド失敗→修正ターン 1 回（エラー全文含有）→再ビルド成功で Outcome 成功になることを検証する</summary>
@@ -295,27 +266,20 @@ public class ApiKeyMockProjectAgentTests
 
         var agent = new ApiKeyMockProjectAgent(factory, build);
 
-        try
-        {
-            var outcome = await agent.RunAsync(
-                Request(work),
-                _ => { },
-                TestContext.Current.CancellationToken
-            );
+        var outcome = await agent.RunAsync(
+            Request(work),
+            _ => { },
+            TestContext.Current.CancellationToken
+        );
 
-            outcome.Success.Should().BeTrue();
-            build.BuildCallCount.Should().Be(2);
+        outcome.Success.Should().BeTrue();
+        build.BuildCallCount.Should().Be(2);
 
-            // 修正ターンのプロンプトにビルド出力（全文）と既提出一覧が入る
-            engineBox[0].SentPrompts.Should().HaveCount(3);
-            var fixPrompt = engineBox[0].SentPrompts[2];
-            fixPrompt.Should().Contain("BUILD_OUTPUT_CS1002");
-            fixPrompt.Should().Contain("MockApp/App.xaml");
-        }
-        finally
-        {
-            Cleanup(work);
-        }
+        // 修正ターンのプロンプトにビルド出力（全文）と既提出一覧が入る
+        engineBox[0].SentPrompts.Should().HaveCount(3);
+        var fixPrompt = engineBox[0].SentPrompts[2];
+        fixPrompt.Should().Contain("BUILD_OUTPUT_CS1002");
+        fixPrompt.Should().Contain("MockApp/App.xaml");
     }
 
     /// <summary>修正ターン後も再ビルドが失敗したら Outcome 失敗（ビルド失敗理由）になることを検証する</summary>
@@ -339,22 +303,15 @@ public class ApiKeyMockProjectAgentTests
 
         var agent = new ApiKeyMockProjectAgent(factory, build);
 
-        try
-        {
-            var outcome = await agent.RunAsync(
-                Request(work),
-                _ => { },
-                TestContext.Current.CancellationToken
-            );
+        var outcome = await agent.RunAsync(
+            Request(work),
+            _ => { },
+            TestContext.Current.CancellationToken
+        );
 
-            outcome.Success.Should().BeFalse();
-            outcome.Error.Should().Be(MockStrings.Mock_ApiRun_ErrorBuildFailed);
-            build.BuildCallCount.Should().Be(2);
-        }
-        finally
-        {
-            Cleanup(work);
-        }
+        outcome.Success.Should().BeFalse();
+        outcome.Error.Should().Be(MockStrings.Mock_ApiRun_ErrorBuildFailed);
+        build.BuildCallCount.Should().Be(2);
     }
 
     /// <summary>
@@ -386,33 +343,26 @@ public class ApiKeyMockProjectAgentTests
         var agent = new ApiKeyMockProjectAgent(factory, build);
         var progress = new List<string>();
 
-        try
-        {
-            var outcome = await agent.RunAsync(
-                Request(work),
-                progress.Add,
-                TestContext.Current.CancellationToken
+        var outcome = await agent.RunAsync(
+            Request(work),
+            progress.Add,
+            TestContext.Current.CancellationToken
+        );
+
+        outcome.Success.Should().BeFalse();
+        outcome
+            .Error.Should()
+            .Be(
+                string.Format(
+                    MockStrings.Mock_ApiRun_ErrorTurnsWithoutFilesFormat,
+                    string.Format(MockStrings.Mock_ApiRun_ScreenTurnLabelFormat, "Order List")
+                )
             );
 
-            outcome.Success.Should().BeFalse();
-            outcome
-                .Error.Should()
-                .Be(
-                    string.Format(
-                        MockStrings.Mock_ApiRun_ErrorTurnsWithoutFilesFormat,
-                        string.Format(MockStrings.Mock_ApiRun_ScreenTurnLabelFormat, "Order List")
-                    )
-                );
-
-            // 残りの画面と中間ビルドは続ける（やり直しのターンは無い）
-            engineBox[0].SentPrompts.Should().HaveCount(3);
-            build.BuildCallCount.Should().Be(1);
-            string.Concat(progress).Should().Contain(MockStrings.Mock_ApiRun_NoEmit);
-        }
-        finally
-        {
-            Cleanup(work);
-        }
+        // 残りの画面と中間ビルドは続ける（やり直しのターンは無い）
+        engineBox[0].SentPrompts.Should().HaveCount(3);
+        build.BuildCallCount.Should().Be(1);
+        string.Concat(progress).Should().Contain(MockStrings.Mock_ApiRun_NoEmit);
     }
 
     /// <summary>
@@ -497,7 +447,6 @@ public class ApiKeyMockProjectAgentTests
         finally
         {
             System.Globalization.CultureInfo.CurrentUICulture = previous;
-            Cleanup(work);
         }
     }
 
@@ -521,29 +470,22 @@ public class ApiKeyMockProjectAgentTests
         build.Results.Enqueue(true);
         var progress = new List<string>();
 
-        try
-        {
-            await new ApiKeyMockProjectAgent(factory, build).RunAsync(
-                Request(work),
-                progress.Add,
-                TestContext.Current.CancellationToken
-            );
+        await new ApiKeyMockProjectAgent(factory, build).RunAsync(
+            Request(work),
+            progress.Add,
+            TestContext.Current.CancellationToken
+        );
 
-            engineBox[0].LastToolResult.Should().NotBeNull();
-            string.Concat(progress)
-                .Should()
-                .Contain(
-                    string.Format(
-                        MockStrings.Mock_ApiRun_EmitRejectedFormat,
-                        "content is empty. Submit the complete file content."
-                    )
-                );
-            File.Exists(Path.Combine(work, "MockApp", "App.xaml")).Should().BeFalse();
-        }
-        finally
-        {
-            Cleanup(work);
-        }
+        engineBox[0].LastToolResult.Should().NotBeNull();
+        string.Concat(progress)
+            .Should()
+            .Contain(
+                string.Format(
+                    MockStrings.Mock_ApiRun_EmitRejectedFormat,
+                    "content is empty. Submit the complete file content."
+                )
+            );
+        File.Exists(Path.Combine(work, "MockApp", "App.xaml")).Should().BeFalse();
     }
 
     /// <summary>
@@ -568,32 +510,25 @@ public class ApiKeyMockProjectAgentTests
         build.Results.Enqueue(true);
         var progress = new List<string>();
 
-        try
+        await new ApiKeyMockProjectAgent(factory, build).RunAsync(
+            Request(work),
+            progress.Add,
+            TestContext.Current.CancellationToken
+        );
+
+        var log = string.Concat(progress);
+
+        // 「了解しました。」の直後に続く文字は改行だけ（行が AI の文章の末尾へ続かない）
+        var index = 0;
+
+        while ((index = log.IndexOf("了解しました。", index, StringComparison.Ordinal)) >= 0)
         {
-            await new ApiKeyMockProjectAgent(factory, build).RunAsync(
-                Request(work),
-                progress.Add,
-                TestContext.Current.CancellationToken
-            );
-
-            var log = string.Concat(progress);
-
-            // 「了解しました。」の直後に続く文字は改行だけ（行が AI の文章の末尾へ続かない）
-            var index = 0;
-
-            while ((index = log.IndexOf("了解しました。", index, StringComparison.Ordinal)) >= 0)
-            {
-                index += "了解しました。".Length;
-                log[index].Should().Be('\n');
-            }
-
-            // 診断の行と「[2/2]」の行は、どちらも行の先頭から始まる
-            log.Should().Contain("了解しました。\n").And.Contain("\n[2/2]");
+            index += "了解しました。".Length;
+            log[index].Should().Be('\n');
         }
-        finally
-        {
-            Cleanup(work);
-        }
+
+        // 診断の行と「[2/2]」の行は、どちらも行の先頭から始まる
+        log.Should().Contain("了解しました。\n").And.Contain("\n[2/2]");
     }
 
     /// <summary>修正のターンでファイルを出さなくても、再ビルドが通れば失敗にしないことを検証する（修正のターンは数えない）</summary>
@@ -615,20 +550,13 @@ public class ApiKeyMockProjectAgentTests
         build.Results.Enqueue(false);
         build.Results.Enqueue(true);
 
-        try
-        {
-            var outcome = await new ApiKeyMockProjectAgent(factory, build).RunAsync(
-                Request(work),
-                _ => { },
-                TestContext.Current.CancellationToken
-            );
+        var outcome = await new ApiKeyMockProjectAgent(factory, build).RunAsync(
+            Request(work),
+            _ => { },
+            TestContext.Current.CancellationToken
+        );
 
-            outcome.Success.Should().BeTrue();
-        }
-        finally
-        {
-            Cleanup(work);
-        }
+        outcome.Success.Should().BeTrue();
     }
 
     /// <summary>共通部のターンでファイルを出さなかったときも、最後に失敗にして名指しすることを検証する</summary>
@@ -648,27 +576,20 @@ public class ApiKeyMockProjectAgentTests
         var build = new QueueBuildRunner();
         build.Results.Enqueue(true);
 
-        try
-        {
-            var outcome = await new ApiKeyMockProjectAgent(factory, build).RunAsync(
-                Request(work),
-                _ => { },
-                TestContext.Current.CancellationToken
-            );
+        var outcome = await new ApiKeyMockProjectAgent(factory, build).RunAsync(
+            Request(work),
+            _ => { },
+            TestContext.Current.CancellationToken
+        );
 
-            outcome.Success.Should().BeFalse();
-            outcome
-                .Error.Should()
-                .Be(
-                    string.Format(
-                        MockStrings.Mock_ApiRun_ErrorTurnsWithoutFilesFormat,
-                        MockStrings.Mock_ApiRun_TurnKindCommon
-                    )
-                );
-        }
-        finally
-        {
-            Cleanup(work);
-        }
+        outcome.Success.Should().BeFalse();
+        outcome
+            .Error.Should()
+            .Be(
+                string.Format(
+                    MockStrings.Mock_ApiRun_ErrorTurnsWithoutFilesFormat,
+                    MockStrings.Mock_ApiRun_TurnKindCommon
+                )
+            );
     }
 }
