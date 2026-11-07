@@ -428,6 +428,12 @@ The EF Core Repository leaves translation to EF Core itself, and the in-memory r
 
 `Include` / `ThenInclude` calls naming the same navigation are merged into one node.
 The same branching idiom as EF Core therefore writes multiple branches under `Orders`: `Include(c => c.Orders).ThenInclude(o => o.OrderLines)` followed by `Include(c => c.Orders).ThenInclude(o => o.Customer)`.
+The QuickER Repository and the in-memory repository do not link loaded rows to each other automatically.
+A reference to a parent, such as the `Customer` of each order, is therefore filled only when you `Include` it, and the second branch above is what fills it.
+The EF Core Repository queries without tracking, and EF Core links the loaded rows itself, so the `Customer` of each order is already set and this branch is not needed.
+Writing it there makes EF Core reject the query with an `InvalidOperationException` ("results in a cycle") when the query runs.
+A branch that follows the inverse of the navigation before it (here `Orders` → `Customer`) therefore works only on the QuickER Repository and the in-memory repository.
+A self reference followed in the same direction again, such as `Include(c => c.Children).ThenInclude(c => c.Children)`, is not affected and works on the EF Core Repository too.
 
 Supported: equality, comparison, `&&`/`||`, `Contains`/`StartsWith`/`EndsWith` (LIKE), `Contains` on a list (IN), date parts (`Year`, etc.), `string.IsNullOrEmpty` and `string.IsNullOrWhiteSpace`, and value-object comparison.
 A nullable column can be read through `.Value` (`x.ShippedAt != null && x.ShippedAt.Value.Year == 2024`).
@@ -613,6 +619,7 @@ The fetched graph comes back with `RowState = Unchanged`, so the fetch, edit, sa
   A skipped navigation comes back empty; fetch recursive structures with manual `Include` to whatever depth you need.
   Additional `Include` calls can be stacked after `IncludeGraph()` (`Query().IncludeGraph().Include(x => x.Customer).GetByIdAsync(id)`).
   Adding parent references or skipped navigations is the typical use, and re-including a child-direction navigation the closure already covers is safe: it merges into the node the closure already has, which is useful for hanging a `ThenInclude` branch below it.
+  A `ThenInclude` branch that follows the inverse of the navigation above it (a parent reference below a child collection, for example) works only on the QuickER Repository and the in-memory repository: the EF Core Repository rejects it with the same `InvalidOperationException` ("results in a cycle").
   The save side walks the instance graph, which is finite, and therefore saves to any depth.
   This asymmetry between fetch and save is by design.
 - The method is generated for entities without any cascade child too, where it is a no-op that returns the query unchanged.
