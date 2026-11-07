@@ -37,7 +37,14 @@ internal sealed class ConnectionDialogProvider(IDatabaseProvider inner) : IDatab
     public IDdlGenerator DdlGenerator => inner.DdlGenerator;
 
     // 実接続はしない（偽のインポータが接続文字列を無視する）ため固定値を返す
-    public string BuildConnectionString(DbConnectionSettings settings) => "fake";
+    public string BuildConnectionString(DbConnectionSettings settings)
+    {
+        LastSettings = settings;
+        return "fake";
+    }
+
+    /// <summary>最後に接続文字列を組み立てたときの接続設定（接続テストが何の値で流れたかを見る）</summary>
+    public DbConnectionSettings? LastSettings { get; private set; }
 }
 
 /// <summary>接続テストのスキーマ取込の偽物（既定は空の結果を即座に返す。止める・失敗させる・テーブル数を返すを行ごとに選ぶ）</summary>

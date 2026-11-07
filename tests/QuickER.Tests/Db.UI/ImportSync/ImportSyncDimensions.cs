@@ -73,33 +73,7 @@ internal static class ImportSyncDimensions
                 .. Accepted(
                     [ImportSyncState.SyncBusy],
                     [ImportSyncOp.Confirm],
-                    "再計算・実行の最中の実行は確認の前に抜ける（src/QuickER.Db.UI/SchemaSyncDialogViewModel.cs:353-356）。抜けることは sync-dialog-refresh-in-progress-disables-operations-but-not-close が見る"
-                ),
-                .. Pending(
-                    ImportSyncState.ImportClean,
-                    "中身のある図（未保存でない）への取込の失敗の行は元に無い（元の失敗の行は空の図・未保存の図は元に無い組として足した）",
-                    ImportSyncOp.Fail
-                ),
-                .. Pending(
-                    ImportSyncState.ImportDirty,
-                    "未保存の図での接続ダイアログの取り消し・開き方の行は元に無い",
-                    ImportSyncOp.Pick
-                ),
-                .. Pending(
-                    ImportSyncState.SyncFresh,
-                    "再計算の前（スクリプトを手で置いた状態）の実行の失敗の行は元に無い",
-                    ImportSyncOp.Fail
-                ),
-                .. Pending(
-                    ImportSyncState.SyncDiff,
-                    "差分を再計算した後に閉じる行は元に無い（閉じるの行は再計算の前と実行の最中）",
-                    ImportSyncOp.Close
-                ),
-                .. Pending(
-                    ImportSyncState.SyncBusy,
-                    "再計算・実行の最中の取込の失敗（止めた取込を例外で開ける）と、最中の再計算（:145 で抜ける）の行は元に無い",
-                    ImportSyncOp.Fail,
-                    ImportSyncOp.Refresh
+                    "再計算・実行の最中の実行は確認の前に抜ける（src/QuickER.Db.UI/SchemaSyncDialogViewModel.cs:359-362）。抜けることは sync-dialog-refresh-in-progress-disables-operations-but-not-close が見る"
                 ),
             ]
         );
@@ -122,29 +96,12 @@ internal static class ImportSyncDimensions
             )
         );
 
-    /// <summary>まだ行の無い（状態, 手の種類）の項目（直す区切りは P4）。手の種類ごとに 1 項目</summary>
-    private static IEnumerable<CoverageGapEntry> Pending(
-        ImportSyncState state,
-        string reason,
-        params ImportSyncOp[] ops
-    ) =>
-        ops.Select(op =>
-            CoverageGap.Tuple(
-                Scope,
-                "P3-11b",
-                "P4",
-                reason,
-                (State, state.ToString()),
-                (Op, op.ToString())
-            )
-        );
-
     /// <summary>台帳の行</summary>
     public static EngineDescriptor Descriptor =>
         new(
             EngineIds.Ai,
             "DbImportSync",
-            "DB 取込・DB 同期のコマンドと同期のダイアログの操作の列の表（状態 × 手の種類・どの手の後にも不変条件 13 個を見張る）",
+            "DB 取込・DB 同期のコマンドと同期のダイアログの操作の列の表（状態 × 手の種類・どの手の後にも不変条件 14 個を見張る）",
             Table,
             ImportSyncRows.Table.Count,
             [

@@ -261,5 +261,25 @@ internal static partial class ChatDialogRows
                     vm.Attachments.HasAttachments.Should().BeTrue();
                 }
             ),
+            Row(
+                "attachment-starting-can-add-and-is-kept-after-start",
+                "特性の固定（文書に定めが無い今の振る舞い）：会話の開始を待つ間も添付を足せて、開始の後も添付は残る",
+                [(Starting, Attach)],
+                async h =>
+                {
+                    // 根拠：src/QuickER.AI.UI/AttachmentListViewModel.cs:101（添付を止めるのはターンの実行中だけ）と
+                    // src/QuickER.AI.Chat/AiChatDialogViewModel.cs:368-383（開始はメッセージを消すが添付は消さない）
+                    var vm = h.Create();
+                    var (starting, gate) = h.BeginCopilotStart(vm);
+
+                    vm.Attachments.IsEnabled.Should().BeTrue();
+                    vm.Attachments.AddClipboardImage(PngBytes(), DateTime.Now);
+
+                    gate.SetResult();
+                    await starting;
+
+                    vm.Attachments.Items.Should().HaveCount(1);
+                }
+            ),
         ];
 }

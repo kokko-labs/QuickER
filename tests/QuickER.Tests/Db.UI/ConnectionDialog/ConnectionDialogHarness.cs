@@ -15,6 +15,17 @@ using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Db.UI.ConnectionDialog;
 
+/// <summary>門で止めた接続テスト（門を開けて終わりまで待てる）</summary>
+internal sealed record RunningTest(ImportGate Gate, Task Run)
+{
+    /// <summary>門を開けて接続テストの終わりを待つ</summary>
+    public async Task FinishAsync()
+    {
+        Gate.Release.TrySetResult();
+        await Run.WaitAsync(TimeSpan.FromSeconds(60));
+    }
+}
+
 /// <summary>接続ダイアログの表の VM に登録する方言の組</summary>
 internal enum ConnectionDialects
 {
@@ -197,6 +208,50 @@ internal sealed class ConnectionDialogHarness : IDisposable
         return profile.Id;
     }
 
+    /// <summary>SQLite のプロファイルを 1 件ストアへ入れる（パスワードは持たない）</summary>
+    public Guid SeedSqliteProfile(string name, string filePath)
+    {
+        var profile = new SqlConnectionProfile
+        {
+            Name = name,
+            Dbms = SqliteProvider.ProviderName,
+            FilePath = filePath,
+        };
+        Store.Upsert(profile, string.Empty);
+        return profile.Id;
+    }
+
+    /// <summary>connections.json と暗号ファイル（暗号フォルダの位置にファイルがあればそれも）のバイト列の写し（手の前後で比べる）</summary>
+    public string[] Snapshot()
+    {
+        var parts = new List<string>();
+
+        if (File.Exists(Store.ConnectionsPath))
+        {
+            parts.Add(
+                "connections:" + Convert.ToBase64String(File.ReadAllBytes(Store.ConnectionsPath))
+            );
+        }
+
+        if (Directory.Exists(Store.SecretsFolder))
+        {
+            foreach (
+                var file in Directory.GetFiles(Store.SecretsFolder).Order(StringComparer.Ordinal)
+            )
+            {
+                parts.Add(
+                    Path.GetFileName(file) + ":" + Convert.ToBase64String(File.ReadAllBytes(file))
+                );
+            }
+        }
+        else if (File.Exists(Store.SecretsFolder))
+        {
+            parts.Add("blocked:" + Convert.ToBase64String(File.ReadAllBytes(Store.SecretsFolder)));
+        }
+
+        return [.. parts];
+    }
+
     /// <summary>プロファイルの暗号ファイルのパス</summary>
     public string SecretFile(Guid id) =>
         Path.Combine(Store.SecretsFolder, id.ToString("N") + ".dat");
@@ -286,6 +341,25 @@ internal sealed class ConnectionDialogHarness : IDisposable
 
         After(vm, "接続テストの開始");
         return run;
+    }
+
+    /// <summary>入力欄を変えるだけの手（コマンドは打たない。手の後の見張りは通す）</summary>
+    public void Edit(DbConnectionDialogViewModel vm, Action<DbConnectionDialogViewModel> change)
+    {
+        change(vm);
+        After(vm, "入力");
+    }
+
+    /// <summary>接続テストを門で止めて始め、取込が始まるまで待つ（行の本体で <see cref="RunningTest.FinishAsync"/> を呼んで終わらせてもよい）</summary>
+    public async Task<RunningTest> BeginTest(
+        DbConnectionDialogViewModel vm,
+        ConnectionDialogProvider provider
+    )
+    {
+        var gate = provider.Importer.Hold();
+        var run = StartTest(vm);
+        await gate.Started.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        return new RunningTest(gate, run);
     }
 
     /// <summary>参照（既存ファイル）のコマンドを実行する</summary>

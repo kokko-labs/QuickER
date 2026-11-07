@@ -31,8 +31,9 @@ DB 取込／DB 同期ダイアログ・接続プロファイル（connections.js
 - DB 取込（`DbImportCommandService`）は、図を高々 1 回だけ、取込が成功し・確認が要らないか承認され・図を読んだ時点と置き換える時点の世代が同じときだけ置き換える。終端の通知はちょうど 1 件（取り消し・確認を断ったときは 0 件）で、失敗はモーダル。確認は未保存なら警告つき。
   - 確認が要らないのは `DiagramReplacementCheck.CanSkipConfirmation` が真のとき（失うものが無いか構造が同じで、壊れるクエリも説明の上書きも無い）。未保存の変更があっても、構造が同じならこの判定で確認を省く（未保存かどうかは「失うものが無い」の枝だけが見る）。行 `import-dirty-same-structure-skips-confirmation-and-replaces`。
 - DB 同期は接続を確定した時点の図を目標にし、世代は比べない（確認を挟まずに図を 1 回読むだけ。「確認の間に変わった図」は取込だけ）。
-- 同期のダイアログ（`SchemaSyncDialogViewModel`）は、実行中は閉じられず、最中は操作を受け付けない。確認を断ったら実行器を呼ばず、実行の結果はモーダル 1 件で知らせてから差分を取り直す。取り直しに失敗したら差分とスクリプトを残さない（古いスクリプトを流さない）。
+- 同期のダイアログ（`SchemaSyncDialogViewModel`）は、実行中は閉じられず、最中は操作を受け付けない（最中に始めた再計算は DB を読み直さない）。確認を断ったら実行器を呼ばず、実行の結果はモーダル 1 件で知らせてから差分を取り直す。取り直しに失敗したら差分とスクリプトを残さない（古いスクリプトを流さない）。
   - 自動で閉じるのは、コミットし、取り直しが成功し、差分が 0 件のときだけ。取り直しの失敗も差分を空にするので、件数だけで閉じると、成功のモーダルの直後に失敗の理由（ステータス行）ごと黙って閉じる。コミットの後の取り直しの失敗は閉じずに `ShowError`（`SchemaSync_RefreshAfterCommitFailedMessage`）で知らせる（`RefreshCoreAsync` が失敗の例外を返す）。
   - 実行の失敗・例外の後の取り直しの失敗はステータス行だけで知らせる（失敗のモーダルは出した後で、ダイアログは閉じないので理由が残る。モーダルを 2 件続けない）。
 - 壊すと：同期の固定した方言と違う接続先へ DDL を流す・テスト中の確定で同じ DB を同時に叩く・失敗が黙って消える・確認の間の変更を古い取込結果で上書きする・取り直せなかった古いスクリプトを流す・取り直せなかった同期を「図と DB が一致した」と見せて閉じる。
-- ガード：`ConnectionDialogTests`・`ImportSyncTests`（どの行でも組が見張る。不変条件の一覧と出典の行は各組 `ConnectionDialogHarness`・`ImportSyncHarness` の XmlDoc。取り直しの失敗で閉じないことは組の不変条件 11 と行 `sync-dialog-execute-success-then-refresh-failure-stays-open-and-shows-error`）。mutation 実証済み。
+- ガード：`ConnectionDialogTests`・`ImportSyncTests`（どの行でも組が見張る。不変条件の一覧と出典の行は各組 `ConnectionDialogHarness`・`ImportSyncHarness` の XmlDoc。取り直しの失敗で閉じないことは組の不変条件 11 と行 `sync-dialog-execute-success-then-refresh-failure-stays-open-and-shows-error`。最中に始めた再計算が DB を読み直さないことは `ImportSyncHarness` の不変条件 14 と行 `sync-dialog-refresh-during-execute-does-not-reread-database`）。mutation 実証済み。
+  - connections.json を掴まれたまま接続ダイアログを開く組は、上の「ストアの失敗は…ステータス行で知らせる」と製品が食い違う（空の一覧で黙って開く）ため、行にせず網羅しない組（P5・製品の候補）として `ConnectionDialogDimensions` に残している。

@@ -132,6 +132,48 @@ internal static partial class ChatDialogRows
                 }
             ),
             Row(
+                "persist-save-settings-during-conversation-keeps-conversation",
+                "会話を開いたまま設定を保存すると、接続方式は次回へ復元され、今の会話は残って続けて送信できる",
+                [(Conversation, Persist)],
+                h =>
+                {
+                    // 根拠：SaveSettingsAndHide の XmlDoc（× は設定を保存してウィンドウを隠すだけ＝会話は消さない）
+                    var copilot = h.Copilot;
+                    var vm = h.Create();
+                    ChatDialogHarness.StartCopilotTurn(vm);
+                    copilot.RaiseIdle();
+                    var messages = vm.Messages.Select(m => (m.Role, m.Content)).ToList();
+
+                    vm.SaveSettings();
+
+                    vm.Messages.Select(m => (m.Role, m.Content)).Should().Equal(messages);
+                    vm.UserInput = "次の質問";
+                    vm.CanSendMessage.Should().BeTrue();
+
+                    h.Copilot = new FakeCopilotRuntimeClient();
+                    h.Create().Connection.InitialBackend.Should().Be(ErChatBackendKind.Copilot);
+                }
+            ),
+            Row(
+                "persist-save-settings-while-starting-restores-copilot-backend",
+                "会話の開始を待つ間に設定を保存しても、開始は終わり、接続方式は次回へ復元される",
+                [(Starting, Persist)],
+                async h =>
+                {
+                    // 根拠：SaveSettings の XmlDoc（接続タブの状態を保存する。開始待ちに保存を止める定めは無い）
+                    var vm = h.Create();
+                    var (starting, gate) = h.BeginCopilotStart(vm);
+
+                    vm.SaveSettings();
+                    gate.SetResult();
+                    await starting;
+
+                    vm.CanStartConversation.Should().BeTrue();
+                    h.Copilot = new FakeCopilotRuntimeClient();
+                    h.Create().Connection.InitialBackend.Should().Be(ErChatBackendKind.Copilot);
+                }
+            ),
+            Row(
                 "persist-model-history-save-failure-keeps-successful-turn-successful",
                 "モデル履歴の保存に失敗しても成功したターンは成功のまま",
                 [(TurnInProgress, Persist), (TurnInProgress, Turn)],

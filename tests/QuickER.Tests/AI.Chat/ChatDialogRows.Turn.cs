@@ -146,6 +146,51 @@ internal static partial class ChatDialogRows
                 }
             ),
             Row(
+                "turn-starting-allows-api-provider-change",
+                "特性の固定（文書に定めが無い今の振る舞い）：会話の開始を待つ間も API キー接続のプロバイダーは変えられ、開始は Copilot のまま終わって送信できる",
+                [(Starting, ChangeProvider)],
+                async h =>
+                {
+                    // 根拠：src/QuickER.AI.Chat/AiChatDialogViewModel.cs:118（CanEditConnectionSettings はターンの実行中だけを見る）
+                    var vm = h.Create();
+                    var (starting, gate) = h.BeginCopilotStart(vm);
+
+                    vm.CanEditConnectionSettings.Should().BeTrue();
+                    vm.Connection.ApiProvider = AiProvider.LocalLlm;
+
+                    gate.SetResult();
+                    await starting;
+
+                    vm.Connection.ApiProvider.Should().Be(AiProvider.LocalLlm);
+                    vm.Connection.SelectedBackend.Should().Be(ErChatBackendKind.Copilot);
+                    vm.UserInput = "本のテーブルを作って";
+                    vm.CanSendMessage.Should().BeTrue();
+                }
+            ),
+            Row(
+                "turn-starting-allows-copilot-recheck",
+                "特性の固定（文書に定めが無い今の振る舞い）：会話の開始を待つ間も Copilot の再確認は走ってモデルの一覧を取り直し、開始は終わって送信できる",
+                [(Starting, Connect)],
+                async h =>
+                {
+                    // 根拠：src/QuickER.AI.UI/BackendConnectionChecks.cs:54-64（RunAsync に開始待ちの門が無い）
+                    var copilot = h.Copilot;
+                    var vm = h.Create();
+                    var (starting, gate) = h.BeginCopilotStart(vm);
+                    copilot.Models = ["recheck-model"];
+
+                    await vm.CopilotRefreshCommand.ExecuteAsync(null);
+
+                    vm.Connection.CopilotAvailableModels.Should().Equal("recheck-model");
+
+                    gate.SetResult();
+                    await starting;
+
+                    vm.UserInput = "本のテーブルを作って";
+                    vm.CanSendMessage.Should().BeTrue();
+                }
+            ),
+            Row(
                 "turn-tool-activity-after-assistant-text-starts-new-tool-bubble",
                 "アシスタントの文を挟んだあとのツール活動は新しい吹き出しに出る",
                 [(TurnInProgress, Turn)],

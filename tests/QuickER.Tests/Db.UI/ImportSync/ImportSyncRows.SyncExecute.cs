@@ -46,6 +46,37 @@ internal static partial class ImportSyncRows
                 }
             ),
             Row(
+                "sync-dialog-execute-failure-before-refresh-shows-error-and-refreshes",
+                "再計算の前に手で置いたスクリプトの実行が失敗すると、警告つきの確認 1 回の後にエラー 1 件で知らせ、差分を取り直して閉じない",
+                [(SyncFresh, Fail)],
+                async h =>
+                {
+                    var provider = ImportSyncHarness.SyncProvider(new SqlServerProvider());
+                    provider.Executor.Fail("boom");
+                    var vm = h.CreateSync(provider);
+                    vm.ScriptPreview = "DROP TABLE [X];";
+
+                    await h.ExecuteAsync(vm);
+
+                    h.Dialogs.WarningConfirmMessages.Should().ContainSingle();
+                    h.Dialogs.ConfirmMessages.Should().BeEmpty();
+                    h.Dialogs.ErrorMessages.Should()
+                        .Equal(DbStrings.SchemaSync_ExecuteFailedMessage + "\n" + "boom");
+                    h.Dialogs.InformationMessages.Should().BeEmpty();
+                    h.Dialogs.InformationDetailsMessages.Should().BeEmpty();
+                    provider.Executor.Calls.Should().Be(1);
+                    provider.Importer.Calls.Should().Be(1, "失敗の後に差分を取り直す");
+                    h.Closes(vm).Should().BeEmpty("失敗時にダイアログを自動で閉じない");
+                    vm.IsBusy.Should().BeFalse();
+                    vm.IsExecuting.Should().BeFalse();
+
+                    // 特性の固定（文書に定めが無い今の振る舞い）：取り直しは成功して差分 0 件になり、
+                    // 取り直しの末尾の UpdatePreview が空の計画からスクリプトを作り直すので、手で置いたスクリプトは残らない
+                    // （src/QuickER.Db.UI/SchemaSyncDialogViewModel.cs:243-251 の TryUpdatePreview → :298-308 の ScriptPreview 代入）
+                    vm.ScriptPreview.Should().BeEmpty();
+                }
+            ),
+            Row(
                 "sync-dialog-execute-disabled-while-running",
                 "実行の最中は実行のコマンドを実行できず（二重に実行しない）、終われば実行できる",
                 [(SyncFresh, Apply), (SyncBusy, Apply)],
@@ -647,8 +678,14 @@ internal static partial class ImportSyncRows
             ),
             Row(
                 "sync-dialog-refresh-in-progress-disables-operations-but-not-close",
-                "再計算の最中は実行・全選択・全解除を受け付けず（直接の実行も古いスクリプトを流さない）、閉じることはできる",
-                [(SyncBusy, Select), (SyncBusy, Apply), (SyncBusy, Close), (SyncDiff, Refresh)],
+                "再計算の最中は実行・全選択・全解除を受け付けず（直接の実行も古いスクリプトを流さず、最中の再計算は DB を読み直さない）、閉じることはできる",
+                [
+                    (SyncBusy, Select),
+                    (SyncBusy, Apply),
+                    (SyncBusy, Close),
+                    (SyncBusy, Refresh),
+                    (SyncDiff, Refresh),
+                ],
                 async h =>
                 {
                     var (live, target) = AddColumnScenario();
@@ -673,11 +710,18 @@ internal static partial class ImportSyncRows
                     await h.ExecuteAsync(vm);
                     provider.Executor.Calls.Should().Be(0);
 
+                    // 最中の再計算は DB を読み直さない（SchemaSyncDialogViewModel.cs の RefreshAsync の IsBusy の門）
+                    // 門の前で取込が止まっているので、門を開ける前に 2 本目を待つと門の退行がハングになる。
+                    // 2 本目は待たずに始め、取込の呼び出し回数を同期的に見てから、門を開けて 2 本とも終える
+                    var importCalls = provider.Importer.Calls;
+                    var secondRefresh = h.RefreshAsync(vm);
+                    provider
+                        .Importer.Calls.Should()
+                        .Be(importCalls, "最中の再計算は取込を呼ばない");
+
                     gate.SetResult(live);
-                    await refreshing.WaitAsync(
-                        TimeSpan.FromSeconds(60),
-                        TestContext.Current.CancellationToken
-                    );
+                    await Task.WhenAll(refreshing, secondRefresh)
+                        .WaitAsync(TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
 
                     vm.ExecuteCommand.CanExecute(null).Should().BeTrue();
                     vm.SelectAllCommand.CanExecute(null).Should().BeTrue();
@@ -713,6 +757,95 @@ internal static partial class ImportSyncRows
 
                     vm.IsExecuting.Should().BeFalse();
                     vm.CloseCommand.CanExecute(null).Should().BeTrue();
+                }
+            ),
+            Row(
+                "sync-dialog-refresh-failure-while-in-progress-clears-diff-and-script",
+                "再計算の最中に取込が例外で失敗したら、最中は操作できず、失敗の後は前回の差分とスクリプトを捨て、実行しても古いスクリプトを流さない",
+                [(SyncBusy, Fail), (SyncBusy, Apply)],
+                async h =>
+                {
+                    var (live, target) = AddColumnScenario();
+                    var provider = ImportSyncHarness.SyncProvider(new SqliteProvider(), live);
+                    var vm = h.CreateSync(
+                        provider,
+                        new DbConnectionSettings { FilePath = "shop.db" },
+                        target
+                    );
+                    await h.RefreshAsync(vm);
+                    vm.DiffItems.Should().NotBeEmpty();
+                    vm.ScriptPreview.Should().NotBeEmpty();
+
+                    var gate = provider.Importer.Hold();
+                    var refreshing = h.RefreshAsync(vm);
+
+                    vm.IsBusy.Should().BeTrue();
+                    vm.ExecuteCommand.CanExecute(null).Should().BeFalse();
+
+                    gate.SetException(new InvalidOperationException("network down"));
+                    await refreshing.WaitAsync(
+                        TimeSpan.FromSeconds(60),
+                        TestContext.Current.CancellationToken
+                    );
+
+                    vm.IsBusy.Should().BeFalse();
+                    vm.DiffItems.Should().BeEmpty();
+                    vm.HasDiff.Should().BeFalse();
+                    vm.ScriptPreview.Should().BeEmpty();
+                    vm.StatusMessage.Should()
+                        .Be(string.Format(DbStrings.SchemaSync_DiffFailed, "network down"));
+                    h.Dialogs.ErrorMessages.Should()
+                        .BeEmpty("取り直しの失敗はステータス行だけで知らせる");
+                    h.Dialogs.InformationMessages.Should().BeEmpty();
+
+                    await h.ExecuteAsync(vm);
+
+                    provider
+                        .Executor.Calls.Should()
+                        .Be(0, "取り直せなかった古いスクリプトは流さない");
+                }
+            ),
+            Row(
+                "sync-dialog-refresh-during-execute-does-not-reread-database",
+                "実行の最中は再計算を受け付けず、直接呼んでも DB を読み直さない（実行中の取り直しで実行の結果を乱さない）",
+                [(SyncBusy, Refresh), (SyncBusy, Apply)],
+                async h =>
+                {
+                    var (live, target) = AddColumnScenario();
+                    var provider = ImportSyncHarness.SyncProvider(new SqliteProvider(), live);
+                    var vm = h.CreateSync(
+                        provider,
+                        new DbConnectionSettings { FilePath = "shop.db" },
+                        target
+                    );
+                    await h.RefreshAsync(vm);
+                    vm.ScriptPreview.Should().NotBeEmpty();
+
+                    var gate = provider.Executor.Hold();
+                    var executing = h.ExecuteAsync(vm);
+                    await gate.Started.Task.WaitAsync(
+                        TimeSpan.FromSeconds(60),
+                        TestContext.Current.CancellationToken
+                    );
+
+                    vm.IsBusy.Should().BeTrue();
+                    vm.RefreshCommand.CanExecute(null).Should().BeFalse();
+
+                    // ボタンを通らない直接の呼び出しも DB を読み直さない
+                    // （SchemaSyncDialogViewModel.cs の RefreshAsync の IsBusy の門。IsBusy の XmlDoc の 2 つの危険のうち実行中の再計算）
+                    var importCalls = provider.Importer.Calls;
+                    await h.RefreshAsync(vm);
+                    provider
+                        .Importer.Calls.Should()
+                        .Be(importCalls, "実行の最中の再計算は取込を呼ばない");
+
+                    gate.Release.SetResult();
+                    await executing.WaitAsync(
+                        TimeSpan.FromSeconds(60),
+                        TestContext.Current.CancellationToken
+                    );
+
+                    provider.Executor.Calls.Should().Be(1);
                 }
             ),
         ];

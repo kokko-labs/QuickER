@@ -87,7 +87,15 @@ internal static partial class ConnectionDialogRows
     public static ScenarioTable<ConnectionDialogCase> Table =>
         new(
             EngineIds.Ai,
-            [.. OpenRows(), .. ProfileRows(), .. FailureRows(), .. OkRows(), .. SqliteRows()]
+            [
+                .. OpenRows(),
+                .. ProfileRows(),
+                .. FailureRows(),
+                .. OkRows(),
+                .. SqliteRows(),
+                .. SweepRows(),
+                .. SweepFailureRows(),
+            ]
         );
 
     /// <summary>行を作る</summary>

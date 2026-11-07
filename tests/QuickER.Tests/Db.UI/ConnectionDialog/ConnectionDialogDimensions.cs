@@ -62,93 +62,13 @@ internal static class ConnectionDialogDimensions
                     ConnectionDialogOp.Open,
                     "接続テストは開いた後のダイアログでだけ始まる（:604-637）"
                 ),
-                .. Pending(
-                    ConnectionDialogState.Fresh,
-                    "空のストアでの削除の行は元に無い（未選択の削除は delete-without-selection-asks-to-select が保存済みのプロファイルがある状態で見る）",
-                    ConnectionDialogOp.Delete
-                ),
-                .. Pending(
-                    ConnectionDialogState.Fresh,
-                    "SQL Server を選んだままの参照の行は無い（参照の欄は SQLite のときだけ出る :249・新規作成は SQLite のときだけ実行できる :255・:886）",
-                    ConnectionDialogOp.Browse
-                ),
-                .. Pending(
-                    ConnectionDialogState.Profiles,
-                    "保存済みのプロファイルがあって未選択のときの入力・接続テスト・参照・OK・取り消しの行は元に無い（元の行は選択か保存を伴う）",
-                    ConnectionDialogOp.Edit,
-                    ConnectionDialogOp.Test,
-                    ConnectionDialogOp.Browse,
-                    ConnectionDialogOp.Ok,
-                    ConnectionDialogOp.Cancel
-                ),
-                .. Pending(
-                    ConnectionDialogState.Selected,
-                    "プロファイルを選んだ後の選び直し・入力だけの手・接続テスト・参照・取り消しの行は元に無い",
-                    ConnectionDialogOp.Select,
-                    ConnectionDialogOp.Edit,
-                    ConnectionDialogOp.Test,
-                    ConnectionDialogOp.Browse,
-                    ConnectionDialogOp.Cancel
-                ),
-                .. Pending(
-                    ConnectionDialogState.Sync,
-                    "同期モード（SQL Server 固定）でのプロファイルの保存・名前の変更・削除・接続テスト・取り消しの行は元に無い（元の同期モードの行は開く・方言固定・SQLite の新規作成だけ）",
-                    ConnectionDialogOp.Save,
-                    ConnectionDialogOp.Rename,
-                    ConnectionDialogOp.Delete,
-                    ConnectionDialogOp.Test,
-                    ConnectionDialogOp.Cancel
-                ),
-                .. Pending(
-                    ConnectionDialogState.Sqlite,
-                    "SQLite を選んだ状態での開く（前回接続の SQLite の復元は open-import-mode-restores-dialect-of-last-connection が保存済みの状態として見る）・選択・名前の変更・削除・接続テスト・取り消しの行は元に無い",
-                    ConnectionDialogOp.Open,
-                    ConnectionDialogOp.Select,
-                    ConnectionDialogOp.Rename,
-                    ConnectionDialogOp.Delete,
-                    ConnectionDialogOp.Test,
-                    ConnectionDialogOp.Cancel
-                ),
-                .. Pending(
-                    ConnectionDialogState.StoreLocked,
-                    "connections.json を掴まれた間の開く・選択・入力・接続テスト・参照・取り消し（ストアへ書かない手）の行は元に無い",
-                    ConnectionDialogOp.Open,
-                    ConnectionDialogOp.Select,
-                    ConnectionDialogOp.Edit,
-                    ConnectionDialogOp.Test,
-                    ConnectionDialogOp.Browse,
-                    ConnectionDialogOp.Cancel
-                ),
-                .. Pending(
-                    ConnectionDialogState.WriteFails,
-                    "暗号ファイルを書けない・消せない間の開く・選択・入力・接続テスト・参照・取り消し（暗号ファイルを書かない手）の行は元に無い",
-                    ConnectionDialogOp.Open,
-                    ConnectionDialogOp.Select,
-                    ConnectionDialogOp.Edit,
-                    ConnectionDialogOp.Test,
-                    ConnectionDialogOp.Browse,
-                    ConnectionDialogOp.Cancel
-                ),
-                .. Pending(
-                    ConnectionDialogState.Unreadable,
-                    "読めないパスワードのプロファイルを選んだ後の入力・削除・接続テスト・参照・OK・取り消しの行は元に無い（削除で読めなかった印が消える経路 :541・:867 も行が無い）",
-                    ConnectionDialogOp.Edit,
-                    ConnectionDialogOp.Delete,
-                    ConnectionDialogOp.Test,
-                    ConnectionDialogOp.Browse,
-                    ConnectionDialogOp.Ok,
-                    ConnectionDialogOp.Cancel
-                ),
-                .. Pending(
-                    ConnectionDialogState.Testing,
-                    "接続テストの実行中の選択・入力・保存・名前の変更・削除・二重の接続テスト・参照の行は元に無い（実行中に止めるのは OK だけ :326・:910）",
-                    ConnectionDialogOp.Select,
-                    ConnectionDialogOp.Edit,
-                    ConnectionDialogOp.Save,
-                    ConnectionDialogOp.Rename,
-                    ConnectionDialogOp.Delete,
-                    ConnectionDialogOp.Test,
-                    ConnectionDialogOp.Browse
+                CoverageGap.Tuple(
+                    Scope,
+                    "P3-11b",
+                    "P5",
+                    "製品の候補（P5・ユーザーの判断）：connections.json を掴まれたまま開くと、空の一覧と空の状態の文で黙って開き、掴みが外れても読み直さない（src/QuickER.Db.UI/DbConnectionDialogViewModel.cs:298-307・:345-352。ストアの LoadAll・LoadLastUsed は読めないとき空を返す＝SqlConnectionProfileStore.cs:174-181・:223・:295-316）。Db.UI の CLAUDE.md の『ストアの失敗は…一覧をディスクの実体どおりに保ち、ステータス行で知らせる』と食い違う。特性として固定すると方針を黙って決めるので行にしない",
+                    (State, ConnectionDialogState.StoreLocked.ToString()),
+                    (Op, ConnectionDialogOp.Open.ToString())
                 ),
             ]
         );
@@ -165,23 +85,6 @@ internal static class ConnectionDialogDimensions
             reason,
             (State, state.ToString()),
             (Op, op.ToString())
-        );
-
-    /// <summary>まだ行の無い（状態, 手の種類）の項目（直す区切りは P4）。手の種類ごとに 1 項目</summary>
-    private static IEnumerable<CoverageGapEntry> Pending(
-        ConnectionDialogState state,
-        string reason,
-        params ConnectionDialogOp[] ops
-    ) =>
-        ops.Select(op =>
-            CoverageGap.Tuple(
-                Scope,
-                "P3-11b",
-                "P4",
-                reason,
-                (State, state.ToString()),
-                (Op, op.ToString())
-            )
         );
 
     /// <summary>行の触る組を数える</summary>
@@ -216,6 +119,8 @@ internal static class ConnectionDialogDimensions
                 "tests/QuickER.Tests/Db.UI/ConnectionDialog/ConnectionDialogRows.Open.cs",
                 "tests/QuickER.Tests/Db.UI/ConnectionDialog/ConnectionDialogRows.Profile.cs",
                 "tests/QuickER.Tests/Db.UI/ConnectionDialog/ConnectionDialogRows.Sqlite.cs",
+                "tests/QuickER.Tests/Db.UI/ConnectionDialog/ConnectionDialogRows.Sweep.cs",
+                "tests/QuickER.Tests/Db.UI/ConnectionDialog/ConnectionDialogRows.SweepFailure.cs",
                 "tests/QuickER.Tests/Db.UI/ConnectionDialog/ConnectionDialogTests.cs",
             ],
             ["src/QuickER.Db.UI/DbConnectionDialogViewModel.cs"]

@@ -72,30 +72,6 @@ internal static class ConnectionSettingsDimensions
                     ConnectionOp.CommitKey,
                     ConnectionOp.Build
                 ),
-                CoverageGap.Tuple(
-                    Scope,
-                    "P3-11a",
-                    "P4",
-                    "Codex の設定（プロバイダー・モデル）の既定を見る行が無い（元のテストに無い）",
-                    (Area, nameof(ConnectionArea.Codex)),
-                    (Op, nameof(ConnectionOp.Defaults))
-                ),
-                CoverageGap.Tuple(
-                    Scope,
-                    "P3-11a",
-                    "P4",
-                    "Claude Code のモデルの既定を見る行が無い（元のテストに無い）",
-                    (Area, nameof(ConnectionArea.ClaudeCode)),
-                    (Op, nameof(ConnectionOp.Defaults))
-                ),
-                CoverageGap.Tuple(
-                    Scope,
-                    "P3-11a",
-                    "P4",
-                    "Claude Code のモデルを保存せずに変える行が無い（元のテストは保存と読み込みの往復だけ）",
-                    (Area, nameof(ConnectionArea.ClaudeCode)),
-                    (Op, nameof(ConnectionOp.Change))
-                ),
             ]
         );
 
