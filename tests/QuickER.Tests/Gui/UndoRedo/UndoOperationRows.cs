@@ -34,6 +34,8 @@ internal static partial class UndoOperationRows
             .. PrimaryKeyRows(),
             .. UniqueConstraintRows(),
             .. SelectionRows(),
+            .. ToolRows(),
+            .. TargetDbmsRows(),
         ];
 
     private static UndoRow Row(string id, string description) => new(id, description);

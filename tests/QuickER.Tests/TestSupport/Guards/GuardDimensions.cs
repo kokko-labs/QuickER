@@ -59,17 +59,12 @@ internal static class GuardDimensions
             IsValid
         );
 
-    /// <summary>網羅しない組の一覧</summary>
+    /// <summary>網羅しない組の一覧（読み方 × 照合の形 × 置き場の、起こり得る組の全部を自己検査の行が持つ）</summary>
     /// <remarks>
-    /// 構文の節・トークンで「あるべき出現」を確かめる規則は表に無い（必須の確認は、どのガードも文字列・シンボル・XML で
-    /// 書いている）。規則が無い組は自己検査の行を作れないので、直す区切り（P4）つきで残す（必須の規則を足せば埋まる＝表の今の状態で、受け入れではない）。その読み方の必須の規則を足したら、
-    /// 自己検査の行（普通の場所と外れる分岐）も足して、ここから消す。
+    /// 構文の節・トークンで読む必須の規則は、単一インスタンスの配線（program-single-instance-uses＝節）と UI 例外の受け皿
+    /// （app-ui-crash-handler-uses＝トークンの並び）。どちらかを文字列の読み方へ戻すと、その読み方の組が欠けて赤になる。
     /// </remarks>
-    public static CoverageGapSet Gaps =>
-        CoverageGap.Set(
-            EngineIds.Guard,
-            [.. NoRequiredRule(GuardReader.SyntaxNodes), .. NoRequiredRule(GuardReader.Tokens)]
-        );
+    public static CoverageGapSet Gaps => CoverageGap.Set(EngineIds.Guard, []);
 
     /// <summary>台帳の行</summary>
     public static EngineDescriptor Descriptor =>
@@ -133,29 +128,4 @@ internal static class GuardDimensions
             && assignment.TryGetValue(Branch, out var branch)
             && branch == InactiveBranch
         );
-
-    /// <summary>必須の規則が無い読み方の組（読み方と必須の組と、それを含む置き場の 3 つの組）</summary>
-    private static IEnumerable<CoverageGapEntry> NoRequiredRule(GuardReader reader)
-    {
-        var reason =
-            $"読み方 {reader} で「あるべき出現」を確かめる規則が表に無い（必須の確認はどのガードも文字列・シンボル・XML で書いている）。"
-            + "規則が無いので自己検査の行を作れない（その読み方の必須の規則を持つガードがまだ無い）";
-        (string Factor, string Level) readerLevel = (Reader, reader.ToString());
-        (string Factor, string Level) required = (Expectation, nameof(GuardExpectation.Required));
-
-        yield return CoverageGap.Tuple(Scope, "P3-12", "P4", reason, readerLevel, required);
-
-        foreach (var branch in new[] { Plain, InactiveBranch })
-        {
-            yield return CoverageGap.Tuple(
-                Scope,
-                "P3-12",
-                "P4",
-                reason,
-                readerLevel,
-                required,
-                (Branch, branch)
-            );
-        }
-    }
 }

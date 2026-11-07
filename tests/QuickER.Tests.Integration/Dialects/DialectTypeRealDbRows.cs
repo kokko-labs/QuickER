@@ -88,6 +88,8 @@ internal static class DialectTypeRealDbRows
     [
         .. MySqlLimits(),
         .. PostgreSqlLimits(),
+        .. SqlServerLimits(),
+        .. OracleLimits(),
         .. SqlServerDrivers(),
         .. MySqlDrivers(),
         .. OracleDrivers(),
@@ -178,6 +180,150 @@ internal static class DialectTypeRealDbRows
                 PostgreSql,
                 DialectTypeRealDbProbeKinds.OverLimit,
                 Imported: rounded
+            );
+        }
+    }
+
+    /// <summary>
+    /// SQL Server の上限の対（単体の行 <c>format-sqlserver-limit-{名前}-at</c> / <c>-over</c>。1 つ超えの表記は書き出されないので書き下ろす）
+    /// </summary>
+    private static IEnumerable<DialectTypeRealDbProbe> SqlServerLimits() =>
+        LimitPairs(
+            DialectNames.SqlServer,
+            [
+                (
+                    "format-sqlserver-limit-string-at",
+                    "format-sqlserver-limit-string-over",
+                    "nvarchar(4001)"
+                ),
+                (
+                    "format-sqlserver-limit-fixedstring-at",
+                    "format-sqlserver-limit-fixedstring-over",
+                    "nchar(4001)"
+                ),
+                (
+                    "format-sqlserver-limit-ansistring-at",
+                    "format-sqlserver-limit-ansistring-over",
+                    "varchar(8001)"
+                ),
+                (
+                    "format-sqlserver-limit-ansifixedstring-at",
+                    "format-sqlserver-limit-ansifixedstring-over",
+                    "char(8001)"
+                ),
+                (
+                    "format-sqlserver-limit-binary-at",
+                    "format-sqlserver-limit-binary-over",
+                    "varbinary(8001)"
+                ),
+                (
+                    "format-sqlserver-limit-fixedbinary-at",
+                    "format-sqlserver-limit-fixedbinary-over",
+                    "binary(8001)"
+                ),
+                (
+                    "format-sqlserver-limit-decimal-precision-at",
+                    "format-sqlserver-limit-decimal-precision-over",
+                    "decimal(39,2)"
+                ),
+                (
+                    "format-sqlserver-limit-datetime-fraction-at",
+                    "format-sqlserver-limit-datetime-fraction-over",
+                    "datetime2(8)"
+                ),
+                (
+                    "format-sqlserver-limit-time-fraction-at",
+                    "format-sqlserver-limit-time-fraction-over",
+                    "time(8)"
+                ),
+                (
+                    "format-sqlserver-limit-datetimeoffset-fraction-at",
+                    "format-sqlserver-limit-datetimeoffset-fraction-over",
+                    "datetimeoffset(8)"
+                ),
+            ]
+        );
+
+    /// <summary>
+    /// Oracle の上限の対（単体の行 <c>format-oracle-limit-*-ok</c> / <c>-fails</c>。1 つ超えの表記は書き出されないので書き下ろす。
+    /// 文字列・RAW の上限はコンテナの既定〔<c>MAX_STRING_SIZE=STANDARD</c>〕のもの。固定長の RAW は可変長と同じ RAW へ書き出す）
+    /// </summary>
+    private static IEnumerable<DialectTypeRealDbProbe> OracleLimits() =>
+        LimitPairs(
+            DialectNames.Oracle,
+            [
+                (
+                    "format-oracle-limit-string-2000-ok",
+                    "format-oracle-limit-string-2001-fails",
+                    "NVARCHAR2(2001)"
+                ),
+                (
+                    "format-oracle-limit-ansistring-4000-ok",
+                    "format-oracle-limit-ansistring-4001-fails",
+                    "VARCHAR2(4001)"
+                ),
+                (
+                    "format-oracle-limit-fixedstring-1000-ok",
+                    "format-oracle-limit-fixedstring-1001-fails",
+                    "NCHAR(1001)"
+                ),
+                (
+                    "format-oracle-limit-ansifixedstring-2000-ok",
+                    "format-oracle-limit-ansifixedstring-2001-fails",
+                    "CHAR(2001)"
+                ),
+                (
+                    "format-oracle-limit-binary-2000-ok",
+                    "format-oracle-limit-binary-2001-fails",
+                    "RAW(2001)"
+                ),
+                (
+                    "format-oracle-limit-fixedbinary-2000-ok",
+                    "format-oracle-limit-fixedbinary-2001-fails",
+                    "RAW(2001)"
+                ),
+                (
+                    "format-oracle-limit-decimal-p38-s2-ok",
+                    "format-oracle-limit-decimal-p39-s2-fails",
+                    "NUMBER(39,2)"
+                ),
+                (
+                    "format-oracle-limit-decimal-scale127-ok",
+                    "format-oracle-limit-decimal-p10-s128-fails",
+                    "NUMBER(10,128)"
+                ),
+                (
+                    "format-oracle-limit-decimal-p10-sm84-ok",
+                    "format-oracle-limit-decimal-p10-sm85-fails",
+                    "NUMBER(10,-85)"
+                ),
+                (
+                    "format-oracle-limit-datetime-p9-ok",
+                    "format-oracle-limit-datetime-p10-fails",
+                    "TIMESTAMP(10)"
+                ),
+                (
+                    "format-oracle-limit-datetimeoffset-9-ok",
+                    "format-oracle-limit-datetimeoffset-p10-fails",
+                    "TIMESTAMP(10) WITH TIME ZONE"
+                ),
+            ]
+        );
+
+    /// <summary>上限ちょうどの行と 1 つ超えの行の対から、2 つの手順を作る（1 つ超えは DB が断る）</summary>
+    private static IEnumerable<DialectTypeRealDbProbe> LimitPairs(
+        string dialect,
+        IEnumerable<(string AtRow, string OverRow, string OverSpelling)> pairs
+    )
+    {
+        foreach (var (atRow, overRow, overSpelling) in pairs)
+        {
+            yield return new(atRow, dialect, DialectTypeRealDbProbeKinds.AtLimit);
+            yield return new(
+                overRow,
+                dialect,
+                DialectTypeRealDbProbeKinds.OverLimit,
+                Spelling: overSpelling
             );
         }
     }

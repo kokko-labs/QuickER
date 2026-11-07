@@ -39,7 +39,10 @@ internal static class UndoOperationDimensions
         [nameof(GroupChangeTitleColorCommand)] = [UndoEntry.Screen],
         [nameof(ArrangeEntitiesCommand)] = [UndoEntry.Screen],
         [nameof(PropertyChangeCommand)] = [UndoEntry.Tracker, UndoEntry.Tool],
-        [nameof(SnapshotChangeCommand)] = [UndoEntry.Tracker, UndoEntry.Tool],
+        // 積むのは DiagramChangeTracker.PushGroupedPropertyChanges（DiagramChangeTracker.cs:635）だけで、呼ぶのは追跡の下の
+        // 主キーの切り替え（:424）と関係の種別の変更（:493）。ツールはどちらも追跡の下で起こさない（set_primary_key は
+        // SetPrimaryKeyCommand が追跡を止めて適用し、種別を変えるツールは無い）ので、ツールの入口からは積まれない
+        [nameof(SnapshotChangeCommand)] = [UndoEntry.Tracker],
         [nameof(AddUniqueConstraintCommand)] = [UndoEntry.Screen, UndoEntry.Tool],
         [nameof(RemoveUniqueConstraintCommand)] = [UndoEntry.Screen, UndoEntry.Tool],
         [nameof(ChangeUniqueConstraintColumnsCommand)] = [UndoEntry.Screen, UndoEntry.Tool],
@@ -73,45 +76,9 @@ internal static class UndoOperationDimensions
             IsValid
         );
 
-    /// <summary>網羅しない組の一覧</summary>
-    /// <remarks>
-    /// どれも Pending（区切り P4）。表の行を足すか、今の個別のテスト・既存の網羅のままにするかを P4 で判断する
-    /// （P3-7 では単発を増やさない）。
-    /// </remarks>
-    public static CoverageGapSet Gaps { get; } =
-        CoverageGap.Set(
-            EngineIds.DiagramEdit,
-            [
-                CoverageGap.Matching(
-                    Scope,
-                    "P3-7",
-                    "P4",
-                    "ツールの入口からの往復は表の行に無い。ツールの結果は 2 ホストの表（ToolScenarioTests）が、ツールの Undo は"
-                        + " TrackedPropertyUndoExhaustiveTests.ManualForeignKeyMark_SurvivesUndoOf* と ErDiagramDynamicTools*Tests の個別が見る",
-                    Command,
-                    Entry,
-                    (_, entry) => entry == nameof(UndoEntry.Tool)
-                ),
-                CoverageGap.Tuple(
-                    Scope,
-                    "P3-7",
-                    "P4",
-                    "リレーション作成モードの 2 クリックの往復は表の行に無い（作成モードの始点の解除は選択の不変条件の表が見る・"
-                        + "コマンドの往復は UndoCommandRoundTripTests が見る）",
-                    (Command, nameof(AddRelationshipCommand)),
-                    (Entry, nameof(UndoEntry.Screen))
-                ),
-                CoverageGap.Tuple(
-                    Scope,
-                    "P3-7",
-                    "P4",
-                    "方言の切り替えの往復は MainViewModelTargetDbmsTests（確認ダイアログの偽を使う手順・P3-5a と同じファイルなので"
-                        + "触らない）と UndoCommandRoundTripTests が見る",
-                    (Command, nameof(ChangeTargetDbmsCommand)),
-                    (Entry, nameof(UndoEntry.Screen))
-                ),
-            ]
-        );
+    /// <summary>網羅しない組の一覧（入口 × 積む履歴の型の、製品に実在する組の全部を行が持つ）</summary>
+    /// <remarks>ツールの入口の行は <c>UndoOperationRows.Tool.cs</c>（<c>ToolRows</c>）が持つ。</remarks>
+    public static CoverageGapSet Gaps { get; } = CoverageGap.Set(EngineIds.DiagramEdit, []);
 
     /// <summary>台帳の行</summary>
     public static EngineDescriptor Descriptor { get; } =

@@ -387,5 +387,40 @@ internal static partial class UndoOperationRows
                 vm =>
                     vm.Entities[1].Columns.Should().Contain(Recall<ColumnViewModel>(vm, "removed"))
             );
+
+        yield return Row(
+                "relationship-mode-two-clicks-push-add-relationship-command",
+                "リレーション作成モードの 2 クリック（始点→終点）は AddRelationshipCommand を 1 件積み、Undo / Redo でリレーションが戻る"
+            )
+            .Diagram(EmptyDiagram)
+            .Prepare(
+                "テーブルを 2 つ足す",
+                vm =>
+                {
+                    vm.AddEntityCommand.Execute(null);
+                    vm.AddEntityCommand.Execute(null);
+                }
+            )
+            .Operate(
+                UndoEntry.Screen,
+                "StartAddOneToManyCommand → 1 つ目のテーブルをクリック → 2 つ目のテーブルをクリック",
+                vm => CreateOneToMany(vm)
+            )
+            .Commands(typeof(AddRelationshipCommand))
+            .Check(
+                UndoStage.Operated,
+                "リレーションが 1 本できて作成モードが解け、始点は無い",
+                vm =>
+                {
+                    vm.Relationships.Should().ContainSingle();
+                    vm.IsRelationshipMode.Should().BeFalse();
+                    vm.PendingRelationshipSource.Should().BeNull();
+                }
+            )
+            .Check(
+                UndoStage.Undone,
+                "リレーションが消える",
+                vm => vm.Relationships.Should().BeEmpty()
+            );
     }
 }

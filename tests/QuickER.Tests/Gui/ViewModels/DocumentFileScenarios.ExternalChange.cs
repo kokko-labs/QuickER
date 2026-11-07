@@ -117,6 +117,55 @@ internal static partial class DocumentFileScenarios
                         o.Status.Should().Be(Strings.Status_ExternalFileDeleted);
                     })
             ),
+            // 削除の通知は中身を読まない（通知のみで現状維持）。ディスクが Id 重複の図に書き換わっていても同じで、
+            // 続く変更の配送で初めて読み、断って現状を保つ（src/QuickER.Gui/ViewModels/CLAUDE.md「文書と外部変更検知」）
+            Row(
+                "ext-deleted-notice-while-disk-is-duplicate-id-notifies-only",
+                "削除の通知: ディスクが Id 重複の図でも通知のみで現状維持し、続く変更の配送は読込を断って現状を保つ",
+                Doc.Write(A, "Alive"),
+                OpenClean(),
+                Doc.WriteKind(A, DocContentKind.DuplicateId, "duplicate-id"),
+                Doc.Event(DocumentFileChangeKind.Deleted)
+                    .Expect(o =>
+                    {
+                        o.Path.Should().Be(o.PathOf(A), "削除の通知でもパスは維持する");
+                        o.Tables.Should().ContainSingle().Which.Should().Be("Alive");
+                        o.IsDirty.Should().BeFalse();
+                        o.Status.Should().Be(Strings.Status_ExternalFileDeleted);
+                    }),
+                Doc.Modified()
+                    .Expect(o =>
+                    {
+                        o.Tables.Should()
+                            .ContainSingle()
+                            .Which.Should()
+                            .Be("Alive", "断った読込は図を変えない");
+                        o.Status.Should().Be(Strings.Status_ExternalReloadFailed);
+                    })
+            ),
+            // 続行で無視した版は「次の配送・保存」で捨てる版。Undo はそのどちらでもないので、Undo の後も同じ内容の配送は
+            // 再確認しない（ダーティのまま 1 手戻す。クリーンへ戻ると無視した版は捨てられる＝次元表の isValid）
+            Row(
+                "ext-ignored-version-survives-undo",
+                "ダーティ: 続行で無視した外部の版は、Undo の後も同じ内容なら再確認しない",
+                Doc.Write(A, "Original"),
+                OpenClean(),
+                Doc.Add(),
+                Doc.Add(),
+                Doc.Write(A, "External"),
+                Doc.Modified().No().Expect(o => o.WarningConfirms.Should().ContainSingle()),
+                Doc.Undo()
+                    .Expect(o =>
+                    {
+                        o.Tables.Should().HaveCount(2, "元の表と、残った追加の 1 つ");
+                        o.IsDirty.Should().BeTrue();
+                    }),
+                Doc.Modified()
+                    .No()
+                    .Expect(o =>
+                        o.WarningConfirms.Should().BeEmpty("無視した版と同じ内容では再確認しない")
+                    )
+            ),
             Row(
                 "ext-untitled-ignores-events",
                 "無題: パス不一致の外部変更は無視する",

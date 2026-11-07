@@ -41,7 +41,7 @@
 - `OracleTypeCatalog.TryParseScaleArg` は符号を許す 3 箇所の 1 つ（`src/QuickER.Provider/CLAUDE.md`「スケールの符号」）。`OracleTypeCatalog.TryParseNumber` は `scale is not null and not 0` で Decimal 側へ倒す（`is > 0` だと `NUMBER(10,-2)` が Int32 に化ける）。
 - 精度なし・スケールありの `NUMBER(*,s)` を書き出せるのは Oracle だけ。`*` は 38 ではない（実 Oracle で `NUMBER(*,2)` が 39 桁の整数を受けた）。
 - `TryFormat` の上限：`MAX_STRING_SIZE = STANDARD` の値（NVARCHAR2 2000・VARCHAR2 4000・NCHAR 1000・CHAR／RAW 2000）・NUMBER の精度 38・スケール -84〜127・TIMESTAMP の精度 9。接続先の設定を知らないので EXTENDED の DB でも同じ上限（安全側）。長さ無しの長さを要する型は書き出さない（構文エラー）。パラメータの型解決でも上限を外さない。
-- 固定は `DialectTypeTableTests`（上限の対・負のスケールの往復・正規化の行 `normalize-oracle-*`）・`OracleTypeNotationIntegrationTests`。
+- 固定は `DialectTypeTableTests`（上限の対・負のスケールの往復・正規化の行 `normalize-oracle-*`）・`OracleTypeNotationIntegrationTests`・`OracleDialectTypeRealDbTests`（上限の対を実 DB〔コンテナの既定の STANDARD〕で適用して取り込み直し、1 つ超えを DB が断る）。
 
 ### 型マッパー
 

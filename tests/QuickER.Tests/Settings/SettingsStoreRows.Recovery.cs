@@ -169,5 +169,97 @@ internal static partial class SettingsStoreRows
                     Expect = o => o.TryLoaded.Should().BeNull(),
                 }
             ),
+            // ここから 3 行は、エクスポート（SaveTo）とインポート（TryLoadFrom）が設定ファイルの状態に依らず
+            // 指定のパスだけを読み書きし、設定ファイルに触れないことを、設定ファイルの状態ごとに見る
+            // （SaveTo・TryLoadFrom の XmlDoc：任意のパスへ保存する・任意のパスから読み込む）
+            Row(
+                "export-and-import-without-settings-file-leave-it-absent",
+                "SaveTo/TryLoadFrom: 設定ファイルが無くても書き出し・読み込みでき、設定ファイルを作らない",
+                Step<ProbeSettings>(SaveTo) with
+                {
+                    Name = "exported.json",
+                    Make = () => new ProbeSettings { Language = "ja" },
+                    Expect = o => o.FileText.Should().BeNull("設定ファイルを作らない"),
+                },
+                Step<ProbeSettings>(TryLoadFrom) with
+                {
+                    Name = "exported.json",
+                    Expect = o =>
+                    {
+                        o.TryLoaded!.Language.Should().Be("ja");
+                        o.FileText.Should().BeNull("設定ファイルを作らない");
+                    },
+                }
+            ),
+            Row(
+                "export-beside-healthy-or-corrupt-settings-file-leaves-it-unchanged",
+                "SaveTo: 設定ファイルが読める・壊れているどちらでも書き出せ、設定ファイルを変えず、その未知のキーを書き出し先へ混ぜない",
+                Step<ProbeSettings>(WriteFile) with
+                {
+                    Text = "{\"Language\":\"en\",\"Unknown\":1}",
+                },
+                Step<ProbeSettings>(SaveTo) with
+                {
+                    Name = "exported.json",
+                    Make = () => new ProbeSettings { Language = "ja" },
+                    Expect = o =>
+                    {
+                        o.FileText.Should().Be("{\"Language\":\"en\",\"Unknown\":1}");
+                        System
+                            .IO.File.ReadAllText(o.PathOf("exported.json"))
+                            .Should()
+                            .NotContain(
+                                "Unknown",
+                                "エクスポートは未知のキーを引き継がない（SaveTo の XmlDoc）"
+                            );
+                    },
+                },
+                Step<ProbeSettings>(WriteFile) with
+                {
+                    Text = "{ broken",
+                },
+                Step<ProbeSettings>(SaveTo) with
+                {
+                    Name = "exported-again.json",
+                    Make = () => new ProbeSettings { Language = "fr" },
+                    Expect = o =>
+                    {
+                        o.FileText.Should().Be("{ broken", "壊れた設定ファイルも書き換えない");
+                        System
+                            .IO.File.ReadAllText(o.PathOf("exported-again.json"))
+                            .Should()
+                            .Contain("fr");
+                    },
+                },
+                Step<ProbeSettings>(TryLoadFrom) with
+                {
+                    Name = "exported-again.json",
+                    Expect = o => o.TryLoaded!.Language.Should().Be("fr"),
+                }
+            ),
+            Row(
+                "import-while-settings-file-is-locked-reads-the-given-file",
+                "TryLoadFrom: 設定ファイルが別のハンドルに排他で開かれていても、指定のファイルは読める",
+                Step<ProbeSettings>(Save) with
+                {
+                    Make = () => new ProbeSettings { Language = "en" },
+                },
+                Step<ProbeSettings>(SaveTo) with
+                {
+                    Name = "exported.json",
+                    Make = () => new ProbeSettings { Language = "ja" },
+                },
+                Step<ProbeSettings>(LockFile),
+                Step<ProbeSettings>(TryLoadFrom) with
+                {
+                    Name = "exported.json",
+                    Expect = o => o.TryLoaded!.Language.Should().Be("ja"),
+                },
+                Step<ProbeSettings>(UnlockFile),
+                Step<ProbeSettings>(Load) with
+                {
+                    Expect = o => o.Loaded!.Language.Should().Be("en", "設定ファイルはそのまま"),
+                }
+            ),
         ];
 }

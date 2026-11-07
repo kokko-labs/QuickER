@@ -192,7 +192,7 @@
   - 空振りの検知は 3 つ：範囲に入るファイルの最低数（`MinimumFiles`・既定 1）、同じ見つける形を別の範囲に当てた厳密な期待（`Witness`）、範囲の中の候補（規則が調べる対象）の数の下限（`Floor`＝候補を見つける形・下限・名前。同じ 1 回の走査で数える）。拾えることを別の見つける形で確かめるもの（目印が既知のテストを拾う・正本の所有者が見つかる）は、必須の規則として別の行にする。
   - 走査は `GuardScan` の 1 か所：ファイルで読む規則はすべての規則の範囲に入るファイルを 1 回ずつ読み、そのファイルに当たる規則を全部当てる（構文木はファイルごとに 1 回だけ作り、当て終えたら捨てる）。シンボルの規則は `SourceSymbolScan.SrcProjects` の各プロジェクトを `ScanNodes` で 1 回ずつたどる。
   - 自己検査の行（`SourceRuleProbe`・`SourceRuleProbes.{領域}.cs`）は、合成のソースへ規則の見つける形を当て、拾う「何か」の並びをソースの順まで照合する（拾わない書き方を拾えば並びが崩れて赤）。シンボルの規則は合成のソースを 1 プロジェクトとしてコンパイルし（条件コンパイルの変種のコンパイルも作る）、エラーが無いことも確かめる。
-  - 網羅：読み方 × 照合の形 × 拾うべき出現の置き場（普通の場所・条件コンパイルの外れる分岐＝自己検査の行 `*-inactive-branch`）の組を、自己検査の行で数える（`GuardDimensions`・台帳の Guard/SourceRules）。XML は分岐を持たないので理由つきの isValid で外す。構文の節・トークンの必須の規則はまだ無いので、その 6 組は直す区切り P4 の網羅しない組（Pending）に置く。
+  - 網羅：読み方 × 照合の形 × 拾うべき出現の置き場（普通の場所・条件コンパイルの外れる分岐＝自己検査の行 `*-inactive-branch`）の組を、自己検査の行で数える（`GuardDimensions`・台帳の Guard/SourceRules）。XML は分岐を持たないので理由つきの isValid で外す。網羅しない組は 0。構文の節・トークンの必須の規則は `program-single-instance-uses`（節）と `app-ui-crash-handler-uses`（トークンの並び）で、文字列で読む必須の規則と違いコメントの中だけの表記では満たされない（自己検査の行 `*-comment-only`）。
   - ガード：`SourceRuleTests`（`Rule_Holds`＝1 行 1 規則・`Probe_Holds`・`Table_IsWellFormed`＝Id の重複・理由の空・件数・必須の規則の一覧の空・範囲の除外の理由・`SymbolScan_ResolvesBclCallsInEveryProject`・`Coverage_MatchesGaps`）。
   - 規則の表のファイル自身の文字列が tests を走査する規則に写り込むときは、範囲を狭めずに綴りを割って避ける。
 - 正本の一覧と写しの一致は照合の表（`ParityRow`・`ParityRows.{領域}.cs`）の行にする。行は正本の関数・写しの関数・比べ方（Set／Multiset／Sequence／CopyWithinCanon／CanonWithinCopy。元の比べ方より弱くしない）・正本の最低数（`MinimumCanon`）を持ち、読み取りの失敗は関数が例外を投げて行の赤になる。使わない比べ方は列挙に残さない。ガード：`ParityTests`（`Parity_Holds`・比べ方の自己検査 `Comparer_DetectsDisagreement`＝比べ方 × 一致・食い違いの網羅・`Table_IsWellFormed`）。台帳は Guard/Parity。

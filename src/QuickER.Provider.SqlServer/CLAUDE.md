@@ -45,7 +45,7 @@
 - 負のスケールは書き出さない（`Msg 1002`）。長さを要する型の長さ無しは書き出さない（黙って 1 文字の列になる）。
 - 精度なしの Decimal は書き出さない。素の `decimal`／`numeric` は (18,0) と読む（精度なしと読むと C# リバースが偽の警告を出し、切替も意味の違う型になる。素の decimal の列は `[DbColumnMeta("decimal(18,0)", NativeType = "decimal")]` と生成時 Info の対象）。
 - パラメータの型解決でも上限の判定を外さない（固定長の max を書かない規則と一体）。
-- 固定は `DialectTypeTableTests` の上限の行（`format-sqlserver-limit-*`）と型トークンの書き出しの行（`format-token-*`）。
+- 固定は `DialectTypeTableTests` の上限の行（`format-sqlserver-limit-*`）と型トークンの書き出しの行（`format-token-*`）・`SqlServerDialectTypeRealDbTests`（上限の対を実 DB で適用して取り込み直し、1 つ超えを DB が断る）。
 
 ## 同期スクリプト
 

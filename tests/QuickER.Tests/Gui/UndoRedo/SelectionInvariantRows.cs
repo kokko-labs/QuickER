@@ -25,6 +25,7 @@ internal static partial class SelectionInvariantRows
             .. ColumnRows(),
             .. RelationshipModeRows(),
             .. DetachedWriteRows(),
+            .. ReloadRows(),
         ];
 
     private static SelectionRow Row(string id, string description) => new(id, description);
