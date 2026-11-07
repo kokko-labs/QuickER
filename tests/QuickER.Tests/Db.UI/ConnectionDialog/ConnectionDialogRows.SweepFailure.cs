@@ -156,6 +156,224 @@ internal static partial class ConnectionDialogRows
                 }
             ),
             Row(
+                "open-store-locked-shows-empty-list-and-reports-unavailable",
+                "connections.json を掴まれたまま開くと、取込・同期のどちらも一覧を空にし、前回接続を復元せず、読めなかったことをステータス行で知らせる（モーダルなし・何も書かない）",
+                [(StoreLocked, Open)],
+                h =>
+                {
+                    h.SeedProfile("本番DB");
+                    SaveLastUsedSqlServer(h);
+                    var before = h.Snapshot();
+                    DbConnectionDialogViewModel importVm;
+                    DbConnectionDialogViewModel syncVm;
+
+                    // 根拠：src/QuickER.Db.UI/CLAUDE.md「ストアの失敗は…ステータス行で知らせる」・SqlConnectionProfileStore.Read（分類 Unavailable）
+                    using (h.LockConnectionsFile())
+                    {
+                        importVm = h.Create();
+                        syncVm = h.Create(
+                            ConnectionDialects.WithSqlite,
+                            DbConnectionDialogMode.Sync,
+                            h.SqlServer
+                        );
+                    }
+
+                    foreach (var vm in new[] { importVm, syncVm })
+                    {
+                        vm.AreProfilesUnavailable.Should().BeTrue();
+                        vm.Profiles.Should().BeEmpty();
+                        vm.StatusMessage.Should().Be(Strings.DbConnection_ProfilesUnavailable);
+                        vm.Host.Should().Be("localhost", "読めていない前回接続は復元しない");
+                        vm.Database.Should().BeEmpty();
+                    }
+
+                    h.Snapshot().Should().Equal(before);
+                    h.Dialogs.ErrorMessages.Should().BeEmpty();
+                }
+            ),
+            Row(
+                "save-after-store-locked-open-still-locked-writes-nothing",
+                "connections.json を掴まれたまま開き、掴まれたまま保存名を付けて保存すると、読み直しても読めないので中止を知らせ、確認も出さず何も書かない",
+                [(StoreLocked, Save)],
+                h =>
+                {
+                    h.SeedProfile("本番DB");
+                    var before = h.Snapshot();
+
+                    // 根拠：SqlConnectionProfileStore.Upsert（読めなければ何も書かずに中止）・保存の前の読み直し
+                    using (h.LockConnectionsFile())
+                    {
+                        var vm = h.Create();
+                        vm.Host = "new-server";
+                        vm.Database = "new-db";
+                        vm.ProfileName = "本番DB";
+
+                        h.Save(vm);
+
+                        vm.StatusMessage.Should().Be(Strings.DbConnection_ProfileStoreUnavailable);
+                        vm.AreProfilesUnavailable.Should().BeTrue();
+                        vm.Profiles.Should().BeEmpty();
+                    }
+
+                    h.Dialogs.WarningConfirmMessages.Should().BeEmpty();
+                    h.Snapshot().Should().Equal(before);
+                }
+            ),
+            Row(
+                "save-after-store-locked-open-released-rereads-and-asks-overwrite",
+                "connections.json を掴まれたまま開いた後に掴みが外れてから同じ名前で保存すると、一覧を読み直して上書きの確認を出し、断れば何も書かず、承諾なら同じプロファイルを上書きする（同じ名前を 2 つ作らない）",
+                [(StoreLocked, Save)],
+                h =>
+                {
+                    var prodId = h.SeedProfile("本番DB");
+                    DbConnectionDialogViewModel vm;
+
+                    using (h.LockConnectionsFile())
+                    {
+                        vm = h.Create();
+                    }
+
+                    vm.Host = "other.example.com";
+                    vm.Database = "OtherDb";
+                    vm.ProfileName = "本番DB";
+                    h.Dialogs.ConfirmResult = false;
+
+                    // 根拠：保存の前の読み直し・:730-741（選択中でない別のプロファイルへの上書きは警告つきで確認する）
+                    h.Save(vm);
+
+                    h.Dialogs.WarningConfirmMessages.Should()
+                        .Equal(
+                            string.Format(Strings.DbConnection_OverwriteProfileConfirm, "本番DB")
+                        );
+                    vm.AreProfilesUnavailable.Should().BeFalse();
+                    vm.Profiles.Select(item => item.Profile.Id).Should().Equal(prodId);
+                    h.Store.Read()
+                        .Profiles.Should()
+                        .ContainSingle()
+                        .Which.Server.Should()
+                        .Be("prod.example.com", "断ったので書かない");
+
+                    h.Dialogs.ConfirmResult = true;
+                    h.Save(vm);
+
+                    var stored = h.Store.Read().Profiles.Should().ContainSingle().Subject;
+                    stored.Id.Should().Be(prodId);
+                    stored.Server.Should().Be("other.example.com");
+                    vm.StatusMessage.Should()
+                        .Be(string.Format(Strings.DbConnection_ProfileSaved, "本番DB"));
+                }
+            ),
+            Row(
+                "save-store-locked-right-after-write-reports-unavailable-and-keeps-write",
+                "選んだプロファイルを上書き保存した直後の読み直しで connections.json を掴まれると、保存した文で上書きせずに読めないことを知らせ、一覧と選択を空にする（ディスクは保存のとおり）",
+                [(StoreLocked, Save)],
+                h =>
+                {
+                    var id = h.SeedProfile("本番DB");
+                    var vm = h.Create();
+                    h.Select(vm, ItemOf(vm, id));
+                    vm.Host = "edited.example.com";
+                    h.LockConnectionsFileOnNextRead();
+
+                    // 根拠：DbConnectionDialogViewModel.SaveProfile（保存の後の読み直しが読めなければ、そこで戻る）・ReloadProfiles
+                    h.Save(vm);
+
+                    vm.StatusMessage.Should().Be(Strings.DbConnection_ProfilesUnavailable);
+                    vm.AreProfilesUnavailable.Should().BeTrue();
+                    vm.Profiles.Should().BeEmpty();
+                    vm.SelectedProfileItem.Should().BeNull();
+
+                    h.ReleaseReadLock();
+                    var stored = h.Store.Read().Profiles.Should().ContainSingle().Subject;
+                    stored.Id.Should().Be(id);
+                    stored.Server.Should().Be("edited.example.com");
+                }
+            ),
+            Row(
+                "rename-store-locked-right-after-write-reports-unavailable-and-keeps-write",
+                "名前の変更の直後の読み直しで connections.json を掴まれると、変更した文で上書きせずに読めないことを知らせ、一覧と選択を空にする（ディスクは変更のとおり）",
+                [(StoreLocked, Rename)],
+                h =>
+                {
+                    var id = h.SeedProfile("本番DB");
+                    var vm = h.Create();
+                    h.Select(vm, ItemOf(vm, id));
+                    vm.ProfileName = "本番DB（新）";
+                    h.LockConnectionsFileOnNextRead();
+
+                    // 根拠：DbConnectionDialogViewModel.RenameProfile（変更の後の読み直しが読めなければ、そこで戻る）・ReloadProfiles
+                    h.Rename(vm);
+
+                    vm.StatusMessage.Should().Be(Strings.DbConnection_ProfilesUnavailable);
+                    vm.AreProfilesUnavailable.Should().BeTrue();
+                    vm.Profiles.Should().BeEmpty();
+                    vm.SelectedProfileItem.Should().BeNull();
+
+                    h.ReleaseReadLock();
+                    var stored = h.Store.Read().Profiles.Should().ContainSingle().Subject;
+                    stored.Id.Should().Be(id);
+                    stored.Name.Should().Be("本番DB（新）");
+                }
+            ),
+            Row(
+                "delete-store-locked-right-after-write-reports-unavailable-and-keeps-write",
+                "削除の直後の読み直しで connections.json を掴まれると、削除した文で上書きせずに読めないことを知らせ、一覧と選択を空にする（ディスクは削除のとおり）",
+                [(StoreLocked, Delete)],
+                h =>
+                {
+                    var id = h.SeedProfile("本番DB");
+                    var stagingId = h.SeedProfile(
+                        "検証DB",
+                        "staging.example.com",
+                        "staging-secret"
+                    );
+                    var vm = h.Create();
+                    h.Select(vm, ItemOf(vm, id));
+                    h.LockConnectionsFileOnNextRead();
+
+                    // 根拠：DbConnectionDialogViewModel.DeleteProfile（削除の後の読み直しが読めなければ、そこで戻る）・ReloadProfiles
+                    h.Delete(vm);
+
+                    vm.StatusMessage.Should().Be(Strings.DbConnection_ProfilesUnavailable);
+                    vm.AreProfilesUnavailable.Should().BeTrue();
+                    vm.Profiles.Should().BeEmpty();
+                    vm.SelectedProfileItem.Should().BeNull();
+
+                    h.ReleaseReadLock();
+                    h.Store.Read().Profiles.Select(profile => profile.Id).Should().Equal(stagingId);
+                }
+            ),
+            Row(
+                "save-write-fails-then-store-locked-at-reload-reports-unavailable",
+                "暗号ファイルを書けない保存の後の読み直しで connections.json も掴まれると、「一覧を読み直した」とは言わずに読めないことを知らせ、一覧を空にする（JSON は書けている）",
+                [(WriteFails, Save)],
+                h =>
+                {
+                    h.BlockSecretsFolder();
+                    var vm = h.Create();
+                    vm.Host = "srv";
+                    vm.Database = "db";
+                    vm.SavePassword = true;
+                    vm.Password = "secret";
+                    vm.ProfileName = "新しい接続";
+                    h.LockConnectionsFileOnNextRead();
+
+                    // 根拠：DbConnectionDialogViewModel.ReportStoreWriteFailure（読み直しが読めなければ、そこで戻る）
+                    h.Save(vm);
+
+                    vm.StatusMessage.Should().Be(Strings.DbConnection_ProfilesUnavailable);
+                    vm.AreProfilesUnavailable.Should().BeTrue();
+                    vm.Profiles.Should().BeEmpty();
+
+                    h.ReleaseReadLock();
+                    h.Store.Read()
+                        .Profiles.Should()
+                        .ContainSingle("JSON は書けている")
+                        .Which.Name.Should()
+                        .Be("新しい接続");
+                }
+            ),
+            Row(
                 "open-write-fails-restores-last-connection-without-modal",
                 "暗号ファイルを書けない状態でも、開くと一覧と前回接続を復元し、モーダルは出ない（開くのは書かない）",
                 [(WriteFails, Open)],
@@ -284,8 +502,8 @@ internal static partial class ConnectionDialogRows
                     vm.StatusMessage.Should()
                         .Be(Strings.DbConnection_SaveRefusedPasswordUnreadable);
                     File.ReadAllBytes(h.SecretFile(id)).Should().Equal(garbage);
-                    h.Store.LoadAll()
-                        .Should()
+                    h.Store.Read()
+                        .Profiles.Should()
                         .ContainSingle()
                         .Which.Server.Should()
                         .Be("prod.example.com");
@@ -463,7 +681,11 @@ internal static partial class ConnectionDialogRows
                     // 根拠：src/QuickER.Db.UI/DbConnectionDialogViewModel.cs:650-720（保存に IsBusy の門は無い）
                     h.Save(vm);
 
-                    h.Store.LoadAll().Should().ContainSingle().Which.Name.Should().Be("保存中");
+                    h.Store.Read()
+                        .Profiles.Should()
+                        .ContainSingle()
+                        .Which.Name.Should()
+                        .Be("保存中");
                     vm.IsBusy.Should().BeTrue();
                     vm.OkCommand.CanExecute(null).Should().BeFalse();
 
@@ -488,7 +710,7 @@ internal static partial class ConnectionDialogRows
                     // 根拠：src/QuickER.Db.UI/DbConnectionDialogViewModel.cs:744-747・:763（名前の変更に IsBusy の門は無い）
                     h.Rename(vm);
 
-                    h.Store.LoadAll().Should().ContainSingle().Which.Name.Should().Be("新名");
+                    h.Store.Read().Profiles.Should().ContainSingle().Which.Name.Should().Be("新名");
                     vm.IsBusy.Should().BeTrue();
                     vm.OkCommand.CanExecute(null).Should().BeFalse();
 
@@ -510,7 +732,7 @@ internal static partial class ConnectionDialogRows
                     h.Delete(vm);
 
                     h.Dialogs.WarningConfirmMessages.Should().ContainSingle();
-                    h.Store.LoadAll().Should().BeEmpty();
+                    h.Store.Read().Profiles.Should().BeEmpty();
                     vm.IsBusy.Should().BeTrue();
 
                     await running.FinishAsync();

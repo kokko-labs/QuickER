@@ -36,25 +36,23 @@ internal static partial class ProfileStoreRows
                     "",
                     expect: o => o.SecretExists("p").Should().BeFalse()
                 ),
-                LoadAll(o => o.All.Should().ContainSingle().Which.SavePassword.Should().BeFalse()),
+                Read(o => o.All.Should().ContainSingle().Which.SavePassword.Should().BeFalse()),
                 LoadPassword("p", o => o.Password.Value.Should().BeEmpty())
             ),
             Row(
                 "basic-upsert-adds-and-load-all-sorted-by-name",
-                "Upsert で追加され LoadAll が名前順で返す",
+                "Upsert で追加され Read が名前順で返す",
                 Upsert("z", Prof("Zeta", "z", "d")),
                 Upsert("a", Prof("alpha", "a", "d")),
                 Upsert("m", Prof("Mid", "m", "d")),
-                LoadAll(o =>
-                    o.All.Select(p => p.Name).Should().ContainInOrder("alpha", "Mid", "Zeta")
-                )
+                Read(o => o.All.Select(p => p.Name).Should().ContainInOrder("alpha", "Mid", "Zeta"))
             ),
             Row(
                 "basic-upsert-same-id-overwrites",
                 "Upsert で同じ Id は上書きされる",
                 Upsert("p", Prof("P1", "old", "d")),
                 Upsert("p", Edit("p", p => p.Server = "new")),
-                LoadAll(o =>
+                Read(o =>
                 {
                     o.All.Should().HaveCount(1);
                     o.All[0].Server.Should().Be("new");
@@ -66,7 +64,7 @@ internal static partial class ProfileStoreRows
                 Upsert("p", Prof("P", "s", "d", save: true), "secret"),
                 LoadPassword("p", o => o.Password.Value.Should().Be("secret")),
                 Delete("p"),
-                LoadAll(o => o.All.Should().BeEmpty()),
+                Read(o => o.All.Should().BeEmpty()),
                 LoadPassword("p", o => o.Password.Value.Should().BeEmpty())
             ),
             Row(
@@ -89,7 +87,7 @@ internal static partial class ProfileStoreRows
                 "Upsert は前回接続情報を消さない",
                 SaveLast(Prof("Last", "sql01", "db")),
                 Upsert("p", Prof("P", "s", "d")),
-                LoadLast(o =>
+                Read(o =>
                 {
                     o.Last.Should().NotBeNull();
                     o.Last!.Value.Profile.Server.Should().Be("sql01");
@@ -100,7 +98,7 @@ internal static partial class ProfileStoreRows
                 "SaveLastUsed はプロファイル一覧を消さない",
                 Upsert("p", Prof("P", "s", "d")),
                 SaveLast(Prof("Last", "sql01", "db")),
-                LoadAll(o =>
+                Read(o =>
                 {
                     o.All.Should().ContainSingle();
                     o.All[0].Name.Should().Be("P");
@@ -124,7 +122,7 @@ internal static partial class ProfileStoreRows
                         }
                     )
                 ),
-                LoadAll(o =>
+                Read(o =>
                 {
                     o.All.Should().ContainSingle();
                     o.All[0].Dbms.Should().Be("postgresql");
@@ -144,7 +142,7 @@ internal static partial class ProfileStoreRows
                 "既存の connections.json がある保存は内容を置換する",
                 SaveLast(Prof("Old", "old-host", "d")),
                 SaveLast(Prof("New", "new-host", "d")),
-                LoadLast(o =>
+                Read(o =>
                 {
                     o.Last.Should().NotBeNull();
                     o.Last!.Value.Profile.Server.Should().Be("new-host");
@@ -174,7 +172,7 @@ internal static partial class ProfileStoreRows
                     ),
                     "secret"
                 ),
-                LoadLast(o =>
+                Read(o =>
                 {
                     o.Last.Should().NotBeNull();
                     o.Last!.Value.Profile.Server.Should().Be("sql01");
@@ -189,9 +187,9 @@ internal static partial class ProfileStoreRows
                 "basic-missing-file-loads-empty-and-saves",
                 "ファイルが無いだけなら空で読め、保存もできる",
                 Probe(o => o.ConnectionsExist.Should().BeFalse()),
-                LoadAll(o => o.All.Should().BeEmpty()),
+                Read(o => o.All.Should().BeEmpty()),
                 Upsert("p", Prof("初回", "s")),
-                LoadAll(o => o.All.Should().ContainSingle().Which.Name.Should().Be("初回"))
+                Read(o => o.All.Should().ContainSingle().Which.Name.Should().Be("初回"))
             ),
             Row(
                 "basic-rename-replaced-profile-is-removed",
@@ -208,7 +206,7 @@ internal static partial class ProfileStoreRows
                         o.SecretExists("replaced").Should().BeFalse();
                     }
                 ),
-                LoadAll(o =>
+                Read(o =>
                     o.All.Should().ContainSingle().Which.Id.Should().Be(o.Profile("target").Id)
                 ),
                 LoadPassword("target", o => o.Password.Value.Should().Be("secret"))
@@ -255,7 +253,7 @@ internal static partial class ProfileStoreRows
                         .Be(expected, "呼び出し側のインスタンスも保存内容へ揃える");
                 }
             ),
-            LoadAll(o => o.All.Should().ContainSingle().Which.SavePassword.Should().Be(expected))
+            Read(o => o.All.Should().ContainSingle().Which.SavePassword.Should().Be(expected))
         );
 
     /// <summary>SaveLastUsed: SavePassword と暗号ファイルの有無は常に一致する（4 分岐の 1 つ）</summary>
@@ -273,7 +271,7 @@ internal static partial class ProfileStoreRows
                 password,
                 expect: o => o.SecretExists(ProfileContext.LastKey).Should().Be(expected)
             ),
-            LoadLast(o =>
+            Read(o =>
             {
                 o.Last.Should().NotBeNull();
                 o.Last!.Value.Profile.SavePassword.Should().Be(expected);

@@ -98,7 +98,7 @@ internal static partial class ProfileStoreRows
                         "target",
                         expect: o =>
                         {
-                            o.Store.LoadAll().Should().BeEmpty();
+                            o.Store.Read().Profiles.Should().BeEmpty();
                             o.SecretExists("target")
                                 .Should()
                                 .BeFalse("復号できない暗号ファイルもプロファイルと一緒に消える");
@@ -131,7 +131,7 @@ internal static partial class ProfileStoreRows
                         "target",
                         expect: o =>
                         {
-                            o.Store.LoadAll().Should().BeEmpty();
+                            o.Store.Read().Profiles.Should().BeEmpty();
                             o.SecretExists("target").Should().BeFalse();
                             o.BackupText.Should()
                                 .Be(LegacyText, "上書きの前に元の配列形式を退避する");
@@ -201,7 +201,7 @@ internal static partial class ProfileStoreRows
                         "target",
                         expect: o =>
                         {
-                            o.Store.LoadAll().Select(p => p.Id).Should().Equal(ReplacedId);
+                            o.Store.Read().Profiles.Select(p => p.Id).Should().Equal(ReplacedId);
                             o.SecretExists("target").Should().BeFalse();
                             ShouldHaveNoNullElements(o);
                             o.BackupExists.Should().BeFalse("正しい JSON なので退避しない");
@@ -218,8 +218,8 @@ internal static partial class ProfileStoreRows
                         expect: o =>
                         {
                             o.Renamed.Should().BeTrue();
-                            o.Store.LoadAll()
-                                .Select(p => p.Name)
+                            o.Store.Read()
+                                .Profiles.Select(p => p.Name)
                                 .Should()
                                 .Equal("renamed", "replaced");
                             ShouldHaveNoNullElements(o);
@@ -266,7 +266,7 @@ internal static partial class ProfileStoreRows
                         expect: o =>
                         {
                             o.Renamed.Should().BeTrue();
-                            o.Store.LoadAll().Select(p => p.Id).Should().Equal(TargetId);
+                            o.Store.Read().Profiles.Select(p => p.Id).Should().Equal(TargetId);
                             o.SecretExists("replaced").Should().BeFalse();
                             o.SecretExists("target")
                                 .Should()
@@ -282,7 +282,7 @@ internal static partial class ProfileStoreRows
                         "target",
                         expect: o =>
                         {
-                            o.Store.LoadAll().Select(p => p.Id).Should().Equal(ReplacedId);
+                            o.Store.Read().Profiles.Select(p => p.Id).Should().Equal(ReplacedId);
                             o.SecretExists("target")
                                 .Should()
                                 .BeFalse("復号できない暗号ファイルもプロファイルと一緒に消える");
@@ -395,16 +395,17 @@ internal static partial class ProfileStoreRows
             ]
         );
 
-        // 読む入口 × connections.json の状態：どれもファイルを書き換えない・作らない（LoadAll の XmlDoc「表示専用」）
+        // 読む入口 × connections.json の状態：どれもファイルを書き換えない・作らない（Read の XmlDoc「表示用の唯一の読む入口」）
         yield return DpapiRow(
             "legacy-sweep-reads-by-json-state",
-            "読む入口（LoadAll・LoadLastUsed）は、connections.json が壊れていても無くても旧形式でも空として読み、"
+            "読む入口（Read）は、connections.json が壊れていても無くても旧形式でも空の一覧として読んで分類で区別し、"
                 + "復号できない・掴まれた暗号ファイルは読めないと返し、どの場合もファイルを書き換えず退避も作らない",
             [
                 .. SweepDefinitions(),
                 .. Sweep(
-                    LoadAll(o =>
+                    Read(o =>
                     {
+                        o.Status.Should().Be(ConnectionFileStatus.Corrupt);
                         o.All.Should().BeEmpty();
                         ShouldBeUnchanged(o);
                     }),
@@ -414,26 +415,40 @@ internal static partial class ProfileStoreRows
                     snapshot: true
                 ),
                 .. Sweep(
-                    LoadLast(ReadsNothing),
+                    Read(ReadsNothing(ConnectionFileStatus.Corrupt)),
                     SweepJson.Corrupt,
                     ProfileSecretState.Readable,
                     snapshot: true
                 ),
                 .. Sweep(
-                    LoadLast(ReadsNothing),
+                    Read(ReadsNothing(ConnectionFileStatus.Corrupt)),
                     SweepJson.LegacyArray,
                     ProfileSecretState.Readable,
                     snapshot: true
                 ),
                 .. Sweep(
-                    LoadLast(ReadsNothing),
+                    Read(ReadsNothing(ConnectionFileStatus.Missing)),
                     SweepJson.Missing,
                     ProfileSecretState.Readable,
                     snapshot: true
                 ),
                 .. Sweep(
-                    LoadLast(o =>
+                    Read(o =>
                     {
+                        // 読めなかったことを分類で返し、ディスクに残った一覧も前回接続も返さない（無いのと区別できる）
+                        o.Status.Should().Be(ConnectionFileStatus.Unavailable);
+                        o.All.Should().BeEmpty();
+                        o.Last.Should().BeNull();
+                        ShouldBeUnchanged(o);
+                    }),
+                    SweepJson.Locked,
+                    ProfileSecretState.Readable,
+                    snapshot: true
+                ),
+                .. Sweep(
+                    Read(o =>
+                    {
+                        o.Status.Should().Be(ConnectionFileStatus.Loaded);
                         o.Last.Should().NotBeNull();
                         o.Last!.Value.Profile.Name.Should().Be("last");
                         o.Last!.Value.Password.Should()
@@ -446,8 +461,9 @@ internal static partial class ProfileStoreRows
                     snapshot: true
                 ),
                 .. Sweep(
-                    LoadLast(o =>
+                    Read(o =>
                     {
+                        o.Status.Should().Be(ConnectionFileStatus.Loaded);
                         o.Last!.Value.Password.Should().Be(SavedPassword.Unreadable);
                         ShouldBeUnchanged(o);
                     }),
@@ -456,8 +472,9 @@ internal static partial class ProfileStoreRows
                     snapshot: true
                 ),
                 .. Sweep(
-                    LoadLast(o =>
+                    Read(o =>
                     {
+                        o.Status.Should().Be(ConnectionFileStatus.Loaded);
                         o.Last!.Value.Password.Should().Be(SavedPassword.Unreadable);
                         ShouldBeUnchanged(o);
                     }),
@@ -506,7 +523,7 @@ internal static partial class ProfileStoreRows
                         TargetProf(false),
                         expect: o =>
                         {
-                            o.Store.LoadAll().Select(p => p.Id).Should().Equal(TargetId);
+                            o.Store.Read().Profiles.Select(p => p.Id).Should().Equal(TargetId);
                             o.SecretExists("target")
                                 .Should()
                                 .BeFalse(
@@ -525,10 +542,10 @@ internal static partial class ProfileStoreRows
                         "new",
                         expect: o =>
                         {
-                            o.Store.LoadAll().Should().BeEmpty();
+                            o.Store.Read().Profiles.Should().BeEmpty();
                             o.BackupText.Should().Be(CorruptText);
-                            o.Store.LoadLastUsed()!
-                                .Value.Password.Should()
+                            o.Store.Read()
+                                .LastUsed!.Value.Password.Should()
                                 .Be(new SavedPassword(SavedPasswordStatus.Loaded, "new"));
                         }
                     ),
@@ -542,9 +559,9 @@ internal static partial class ProfileStoreRows
                         expect: o =>
                         {
                             o.BackupText.Should().Be(LegacyText);
-                            o.Store.LoadLastUsed()!.Value.Profile.Name.Should().Be("last");
-                            o.Store.LoadLastUsed()!
-                                .Value.Password.Should()
+                            o.Store.Read().LastUsed!.Value.Profile.Name.Should().Be("last");
+                            o.Store.Read()
+                                .LastUsed!.Value.Password.Should()
                                 .Be(new SavedPassword(SavedPasswordStatus.Loaded, "new"));
                         }
                     ),
@@ -558,13 +575,13 @@ internal static partial class ProfileStoreRows
                         "new",
                         expect: o =>
                         {
-                            o.Store.LoadAll()
-                                .Select(p => p.Name)
+                            o.Store.Read()
+                                .Profiles.Select(p => p.Name)
                                 .Should()
                                 .Equal("replaced", "target");
                             ShouldHaveNoNullElements(o);
                             o.BackupExists.Should().BeFalse();
-                            o.Store.LoadLastUsed()!.Value.Profile.Name.Should().Be("last");
+                            o.Store.Read().LastUsed!.Value.Profile.Name.Should().Be("last");
                         }
                     ),
                     SweepJson.NullElements,
@@ -627,12 +644,14 @@ internal static partial class ProfileStoreRows
             snapshot: true
         );
 
-    /// <summary>読む入口の戻り値が「前回接続なし」で、何も書き換えていない</summary>
-    private static void ReadsNothing(ProfileObservation o)
-    {
-        o.Last.Should().BeNull();
-        ShouldBeUnchanged(o);
-    }
+    /// <summary>読む入口の戻り値が指定の分類・「前回接続なし」で、何も書き換えていない</summary>
+    private static Action<ProfileObservation> ReadsNothing(ConnectionFileStatus status) =>
+        o =>
+        {
+            o.Status.Should().Be(status);
+            o.Last.Should().BeNull();
+            ShouldBeUnchanged(o);
+        };
 
     // ---------------- 掃引の手の組み立て ----------------
 
@@ -654,7 +673,7 @@ internal static partial class ProfileStoreRows
     /// </summary>
     /// <param name="op">製品の 1 手</param>
     /// <param name="json">手の前の connections.json</param>
-    /// <param name="secret">手の対象の暗号ファイルの状態（<see cref="ProfileStepKind.LoadAll"/> は対象を持たないので無視する）</param>
+    /// <param name="secret">手の対象の暗号ファイルの状態（<see cref="ProfileStepKind.Read"/> は前回接続の暗号ファイル）</param>
     /// <param name="denied">暗号フォルダへ作成の拒否を掛けるか</param>
     /// <param name="snapshot">手の前の全ファイルの状態を控えるか（<see cref="ShouldBeUnchanged"/> の比べ先）</param>
     /// <param name="lockShare">暗号ファイルを掴むときの共有の指定</param>
@@ -671,8 +690,7 @@ internal static partial class ProfileStoreRows
     {
         var key = op.Kind switch
         {
-            ProfileStepKind.LoadAll => null,
-            ProfileStepKind.LoadLastUsed or ProfileStepKind.SaveLastUsed => ProfileContext.LastKey,
+            ProfileStepKind.Read or ProfileStepKind.SaveLastUsed => ProfileContext.LastKey,
             ProfileStepKind.UpsertReplacing or ProfileStepKind.RenameReplacing => "replaced",
             _ => "target",
         };
@@ -747,7 +765,7 @@ internal static partial class ProfileStoreRows
     private static Action<ProfileObservation> UpsertReplacedSucceeds(string? backup) =>
         o =>
         {
-            o.Store.LoadAll().Select(p => p.Id).Should().Equal(TargetId);
+            o.Store.Read().Profiles.Select(p => p.Id).Should().Equal(TargetId);
             o.SecretExists("target")
                 .Should()
                 .BeFalse("パスワードなしの保存は暗号ファイルを持たない");

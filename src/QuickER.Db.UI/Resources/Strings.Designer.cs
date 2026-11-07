@@ -360,12 +360,6 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
-        public static string DbConnection_ProfileDialectMismatch {
-            get {
-                return ResourceManager.GetString("DbConnection_ProfileDialectMismatch", resourceCulture);
-            }
-        }
-
         public static string DbConnection_ProfileLoaded {
             get {
                 return ResourceManager.GetString("DbConnection_ProfileLoaded", resourceCulture);
@@ -447,6 +441,12 @@ namespace QuickER.Db.UI.Resources {
         public static string DbConnection_ProfileStoreUnavailable {
             get {
                 return ResourceManager.GetString("DbConnection_ProfileStoreUnavailable", resourceCulture);
+            }
+        }
+
+        public static string DbConnection_ProfilesUnavailable {
+            get {
+                return ResourceManager.GetString("DbConnection_ProfilesUnavailable", resourceCulture);
             }
         }
         

@@ -160,6 +160,12 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     /// <summary>選択中のプロファイル（本体）</summary>
     public SqlConnectionProfile? SelectedProfile => SelectedProfileItem?.Profile;
 
+    /// <summary>
+    /// 直近の一覧の読み込みで connections.json を読み取れなかったか（真の間、一覧は空で、ステータス行がそれを知らせている）
+    /// </summary>
+    /// <remarks>真の間に保存すると、保存の前に一覧を読み直す（<see cref="SaveProfile"/>）。</remarks>
+    public bool AreProfilesUnavailable { get; private set; }
+
     /// <summary>プロファイルを一覧表示用に DBMS 名付き表示名でラップした項目</summary>
     /// <param name="Profile">プロファイル本体</param>
     /// <param name="Display">一覧に表示する文字列（例: [SQL Server] 本番DB）</param>
@@ -290,20 +296,54 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         _selectedProvider =
             fixedProvider ?? Providers.FirstOrDefault() ?? _providers.Get("sqlserver");
 
-        // 先頭プロファイルの自動選択は、直後に復元する前回接続情報を上書きするため初期選択は行わない
-        ReloadProfiles();
-        RestoreLastConnection();
+        // 先頭プロファイルの自動選択は、直後に復元する前回接続情報を上書きするため初期選択は行わない。
+        // 一覧と前回接続は同じ 1 回の読み取りから取る。読めなかったときは、読めていない前回接続を復元しない
+        var read = ReloadProfiles();
+
+        if (!AreProfilesUnavailable)
+        {
+            RestoreLastConnection(read.LastUsed);
+        }
     }
 
-    /// <summary>ストアからプロファイル一覧を再読込する（全 DBMS 分）</summary>
-    private void ReloadProfiles()
+    /// <summary>ストアからプロファイル一覧を再読込する（取込モードは全 DBMS 分・同期モードは固定した方言の分だけ）</summary>
+    /// <returns>読み取り結果（前回接続の復元に使う）</returns>
+    /// <remarks>
+    /// <para>
+    /// 同期モードは方言を図に固定し、別方言のプロファイルは当てない。当てないものを一覧に並べると、選んだときに
+    /// 選択だけが残り（入力欄は前のプロファイルのまま）、名前の変更・削除が入力欄に出ていないプロファイルに効く。
+    /// 並べなければ、一覧から選べるものはどれも当てられる。
+    /// </para>
+    /// <para>
+    /// connections.json を読み取れなかったとき（別プロセスのロックなど）は、一覧と選択を空にし、
+    /// <see cref="AreProfilesUnavailable"/> を立ててステータス行で知らせる。読めなかった一覧を「保存されたものが無い」と
+    /// 同じ空として黙って出すと、ディスクに残っているプロファイルが無いように見え、その一覧を前提にした保存が
+    /// 確認なしに同じ名前のプロファイルを作る（保存は読み直してから上書き先を探す＝<see cref="SaveProfile"/>）。
+    /// </para>
+    /// </remarks>
+    private ConnectionProfilesRead ReloadProfiles()
     {
+        var read = _store.Read();
         Profiles.Clear();
+        AreProfilesUnavailable = read.Status == ConnectionFileStatus.Unavailable;
 
-        foreach (var p in _store.LoadAll())
+        foreach (var p in read.Profiles)
         {
+            if (Mode == DbConnectionDialogMode.Sync && !IsSameDbms(p.Dbms))
+            {
+                continue;
+            }
+
             Profiles.Add(new ProfileListItem(p, GetProfileDisplayName(p)));
         }
+
+        if (AreProfilesUnavailable)
+        {
+            SelectProfileWithoutApplying(null);
+            StatusMessage = Strings.DbConnection_ProfilesUnavailable;
+        }
+
+        return read;
     }
 
     partial void OnSelectedProviderChanged(IDatabaseProvider value)
@@ -342,10 +382,11 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     /// （SQLite のファイルパス・Oracle のサービス名・サーバー系の欄）、固定した方言では接続できない値を
     /// 入力欄へ置くことになるため。取込モードは方言ごと復元するのでこの制限は無い。
     /// </remarks>
-    private void RestoreLastConnection()
+    /// <param name="lastUsed">一覧と同じ読み取りで得た前回接続（無ければ null）</param>
+    private void RestoreLastConnection(
+        (SqlConnectionProfile Profile, SavedPassword Password)? lastUsed
+    )
     {
-        var lastUsed = _store.LoadLastUsed();
-
         if (lastUsed is null)
         {
             return;
@@ -475,6 +516,13 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     private void ReportStoreWriteFailure(Exception ex, Guid? reselectId)
     {
         ReloadProfiles();
+
+        // 読み直せなかったときは、一覧を出し直せていないので「読み直した」とは言わず、読めないことを残す
+        if (AreProfilesUnavailable)
+        {
+            return;
+        }
+
         SelectProfileWithoutApplying(reselectId);
         StatusMessage = string.Format(Strings.DbConnection_ProfileWriteFailed, ex.Message);
     }
@@ -545,18 +593,8 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             return;
         }
 
+        // 同期モードの一覧には固定した方言のプロファイルしか並ばない（ReloadProfiles）ので、選んだものはそのまま当てる
         var profile = value.Profile;
-
-        // 同期モードでは異なる方言のプロファイルは適用しない（方言固定を優先）
-        if (Mode == DbConnectionDialogMode.Sync && !IsSameDbms(profile.Dbms))
-        {
-            StatusMessage = string.Format(
-                Strings.DbConnection_ProfileDialectMismatch,
-                profile.Name
-            );
-            return;
-        }
-
         var password = profile.SavePassword
             ? _store.LoadPassword(profile.Id)
             : SavedPassword.Missing;
@@ -663,6 +701,19 @@ public partial class DbConnectionDialogViewModel : ObservableObject
 
         var name = ProfileName.Trim();
 
+        // 一覧を読めていないまま上書き先を探すと、ディスクにある同名のプロファイルを見つけられず、確認なしに
+        // 同じ名前のプロファイルをもう 1 つ作る。先に読み直し、まだ読めなければ何も書かずに中止する
+        if (AreProfilesUnavailable)
+        {
+            ReloadProfiles();
+
+            if (AreProfilesUnavailable)
+            {
+                StatusMessage = Strings.DbConnection_ProfileStoreUnavailable;
+                return;
+            }
+        }
+
         // 同名かつ同一方言のプロファイルのみ上書き対象とする
         var existing = Profiles.FirstOrDefault(p =>
             string.Equals(p.Profile.Name, name, StringComparison.OrdinalIgnoreCase)
@@ -714,6 +765,13 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         // 保存したので、読めなかったパスワードは入力し直した値か「保存しない」で置き換わった
         _unreadablePasswordProfileId = null;
         ReloadProfiles();
+
+        // 保存の直後に読み直せなかった（ほかのプロセスが掴んだ）ときは、読めないことをステータス行に残す
+        if (AreProfilesUnavailable)
+        {
+            return;
+        }
+
         SelectProfileWithoutApplying(profile.Id);
         ProfileName = profile.Name;
         StatusMessage = string.Format(Strings.DbConnection_ProfileSaved, profile.Name);
@@ -805,6 +863,11 @@ public partial class DbConnectionDialogViewModel : ObservableObject
 
         ReloadProfiles();
 
+        if (AreProfilesUnavailable)
+        {
+            return;
+        }
+
         if (!renamed)
         {
             // 別のプログラムが消していた。読み直した一覧には居ないので選択を外して伝える
@@ -864,6 +927,12 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         }
 
         ReloadProfiles();
+
+        if (AreProfilesUnavailable)
+        {
+            return;
+        }
+
         SelectedProfileItem = null;
         StatusMessage = string.Format(Strings.DbConnection_ProfileDeleted, name);
     }

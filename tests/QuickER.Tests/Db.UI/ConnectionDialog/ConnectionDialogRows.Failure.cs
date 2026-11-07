@@ -36,7 +36,11 @@ internal static partial class ConnectionDialogRows
                             .Be("本番DB");
                     }
 
-                    h.Store.LoadAll().Should().ContainSingle().Which.Name.Should().Be("本番DB");
+                    h.Store.Read()
+                        .Profiles.Should()
+                        .ContainSingle()
+                        .Which.Name.Should()
+                        .Be("本番DB");
                 }
             ),
             Row(
@@ -58,7 +62,11 @@ internal static partial class ConnectionDialogRows
                         vm.Profiles.Should().ContainSingle();
                     }
 
-                    h.Store.LoadAll().Should().ContainSingle().Which.Name.Should().Be("本番DB");
+                    h.Store.Read()
+                        .Profiles.Should()
+                        .ContainSingle()
+                        .Which.Name.Should()
+                        .Be("本番DB");
                 }
             ),
             Row(
@@ -84,7 +92,7 @@ internal static partial class ConnectionDialogRows
                         vm.StatusMessage.Should().Be(Strings.DbConnection_ProfileStoreUnavailable);
                     }
 
-                    var stored = h.Store.LoadAll();
+                    var stored = h.Store.Read().Profiles;
                     stored.Should().HaveCount(2, "読めなかったのだから、どちらも消さない");
                     stored.Single(p => p.Id == targetId).Name.Should().Be("本番DB");
                     stored.Single(p => p.Id == conflictId).Name.Should().Be("本番DB（東京）");
@@ -114,7 +122,11 @@ internal static partial class ConnectionDialogRows
                             .Be("本番DB", "保存できていない名前を画面に残さない");
                     }
 
-                    h.Store.LoadAll().Should().ContainSingle().Which.Name.Should().Be("本番DB");
+                    h.Store.Read()
+                        .Profiles.Should()
+                        .ContainSingle()
+                        .Which.Name.Should()
+                        .Be("本番DB");
                 }
             ),
             Row(
@@ -136,8 +148,8 @@ internal static partial class ConnectionDialogRows
                         vm.StatusMessage.Should().Be(Strings.DbConnection_ProfileStoreUnavailable);
                     }
 
-                    h.Store.LoadAll()
-                        .Select(profile => profile.Name)
+                    h.Store.Read()
+                        .Profiles.Select(profile => profile.Name)
                         .Should()
                         .BeEquivalentTo(new[] { "本番DB", "旧本番DB" }, "どちらも消えていない");
                 }
@@ -160,7 +172,11 @@ internal static partial class ConnectionDialogRows
 
                     h.Closes(vm).Should().Equal([true], "記録できないだけで確定は妨げない");
                     vm.Result.Should().NotBeNull();
-                    h.Store.LoadAll().Should().ContainSingle().Which.Name.Should().Be("本番DB");
+                    h.Store.Read()
+                        .Profiles.Should()
+                        .ContainSingle()
+                        .Which.Name.Should()
+                        .Be("本番DB");
                 }
             ),
             Row(
@@ -305,7 +321,7 @@ internal static partial class ConnectionDialogRows
                     vm.StatusMessage.Should()
                         .Be(Strings.DbConnection_SaveRefusedPasswordUnreadable);
                     File.ReadAllBytes(h.SecretFile(id)).Should().Equal(garbage);
-                    var stored = h.Store.LoadAll().Should().ContainSingle().Subject;
+                    var stored = h.Store.Read().Profiles.Should().ContainSingle().Subject;
                     stored.Server.Should().Be("prod.example.com", "断ったので何も書いていない");
                     stored.SavePassword.Should().BeTrue();
                 }
@@ -348,7 +364,7 @@ internal static partial class ConnectionDialogRows
                     h.Rename(vm);
 
                     File.ReadAllBytes(h.SecretFile(id)).Should().Equal(garbage);
-                    var stored = h.Store.LoadAll().Should().ContainSingle().Subject;
+                    var stored = h.Store.Read().Profiles.Should().ContainSingle().Subject;
                     stored.Name.Should().Be("本番DB（新）");
                     stored.SavePassword.Should().BeTrue("パスワードを保存する設定も変えない");
                 }

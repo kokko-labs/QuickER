@@ -134,7 +134,7 @@ internal static partial class ConnectionDialogRows
                     h.Save(vm);
 
                     h.Dialogs.WarningConfirmMessages.Should().BeEmpty();
-                    h.Store.LoadAll().Should().HaveCount(2);
+                    h.Store.Read().Profiles.Should().HaveCount(2);
                 }
             ),
             Row(

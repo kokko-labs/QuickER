@@ -60,8 +60,7 @@ internal static class ProfileStoreDimensions
                         .ToList(),
                     "手の前の暗号フォルダの状態"
                 ),
-            ],
-            isValid: IsValid
+            ]
         );
 
     /// <summary>網羅しない組の一覧（空。次元表のすべての組を行が流す）</summary>
@@ -110,19 +109,4 @@ internal static class ProfileStoreDimensions
             );
         }
     }
-
-    /// <summary>
-    /// 原理的に起こり得ない組：LoadAll は暗号ファイルを対象に持たないので、対象の暗号ファイルがある状態は無い
-    /// </summary>
-    /// <remarks>
-    /// 読む手と暗号フォルダの作成の拒否は、読む手が暗号フォルダへ書かないだけで、拒否が掛かったまま読む状態は起こり得る
-    /// （起こり得ない組ではないので <see cref="Gaps"/> に書く）。
-    /// </remarks>
-    private static bool IsValid(IReadOnlyDictionary<string, string> assignment) =>
-        !(
-            assignment.TryGetValue(Op, out var op)
-            && op == nameof(ProfileStepKind.LoadAll)
-            && assignment.TryGetValue(Secret, out var secret)
-            && secret != nameof(ProfileSecretState.None)
-        );
 }

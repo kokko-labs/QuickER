@@ -62,14 +62,6 @@ internal static class ConnectionDialogDimensions
                     ConnectionDialogOp.Open,
                     "接続テストは開いた後のダイアログでだけ始まる（:604-637）"
                 ),
-                CoverageGap.Tuple(
-                    Scope,
-                    "P3-11b",
-                    "P5",
-                    "製品の候補（P5・ユーザーの判断）：connections.json を掴まれたまま開くと、空の一覧と空の状態の文で黙って開き、掴みが外れても読み直さない（src/QuickER.Db.UI/DbConnectionDialogViewModel.cs:298-307・:345-352。ストアの LoadAll・LoadLastUsed は読めないとき空を返す＝SqlConnectionProfileStore.cs:174-181・:223・:295-316）。Db.UI の CLAUDE.md の『ストアの失敗は…一覧をディスクの実体どおりに保ち、ステータス行で知らせる』と食い違う。特性として固定すると方針を黙って決めるので行にしない",
-                    (State, ConnectionDialogState.StoreLocked.ToString()),
-                    (Op, ConnectionDialogOp.Open.ToString())
-                ),
             ]
         );
 
@@ -106,7 +98,7 @@ internal static class ConnectionDialogDimensions
         new(
             EngineIds.Ai,
             "DbConnectionDialog",
-            "接続ダイアログの操作の列の表（状態 × 手の種類・どの手の後にも不変条件 12 個を見張る）",
+            "接続ダイアログの操作の列の表（状態 × 手の種類・どの手の後にも不変条件 13 個を見張る）",
             Table,
             ConnectionDialogRows.Table.Count,
             [

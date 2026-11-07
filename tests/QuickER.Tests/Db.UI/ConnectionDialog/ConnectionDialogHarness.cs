@@ -54,18 +54,19 @@ internal enum ConnectionDialects
 /// <list type="number">
 /// <item>確定して閉じる（CloseAction(true)）のは Result と ResultProvider が入ったときだけ、取り消して閉じる（CloseAction(false)）のは両方を空にしたときだけ。閉じない手は Result を変えない（:996-998・:1005-1007。検証の失敗 :924-973 は Result を作らず閉じない）。</item>
 /// <item>確定した接続設定のタイムアウトは 0 以上・ポートは空か 1〜65535 で、保存したプロファイルも同じ範囲に入る（:433・:438・:448-461・:408-425。確定・接続テスト・保存が同じ検証を通す :607・:658・:924）。</item>
-/// <item>同期モードは方言を固定する：選択中の方言は作った時の方言から変わらず、DBMS を選べず、確定した方言は固定した方言（:182・:354-364・:380-386・:551-558）。</item>
+/// <item>同期モードは方言を固定する：選択中の方言は作った時の方言から変わらず、DBMS を選べず、確定した方言は固定した方言。一覧と選択中のプロファイルは固定した方言のものだけ（:182・:354-364・:380-386。一覧の絞り込みは ReloadProfiles）。</item>
 /// <item>接続テストの実行中は OK で確定できない（:326・:910。:633-636 で戻す）。行の終わりには接続テストが終わっている。</item>
 /// <item>取り消せない上書き・削除は警告つきの確認（ConfirmWarning）だけで聞き、通常の確認・詳細つきの確認は使わない（:730-740・:835-840）。削除は選択中のプロファイルがあれば必ず確認する。</item>
-/// <item>プロファイルの保存・名前の変更・削除の後と行の終わりに、一覧（DBMS・名前・接続先）はディスクの実体どおり（読めないときは読めるようになってから見る）。失敗は例外を外へ出さない（中止 :701-707・:794-799・:852-857 は何も書かず、書き込みの失敗 :708-712・:800-804・:858-864 は一覧を読み直す :475-480）。</item>
+/// <item>プロファイルの保存・名前の変更・削除の後と行の終わりに、一覧（DBMS・名前・接続先）はディスクの実体どおり（同期モードは固定した方言の分。読めないときは読めるようになってから見る）。ただし VM が一覧を読めなかったと言っている間（AreProfilesUnavailable）は、一覧も選択も空で、ステータス行がそれを知らせている（ProfilesUnavailable か、保存の中止の ProfileStoreUnavailable）。失敗は例外を外へ出さない（中止 :701-707・:794-799・:852-857 は何も書かず、書き込みの失敗 :708-712・:800-804・:858-864 は一覧を読み直す :475-480）。</item>
 /// <item>読めない保存済みパスワードの暗号ファイルを失わない：プロファイルが残る限り、暗号ファイルは元のバイト列のままか、入力し直したパスワードで書き直されている（:679-688・:789-792）。</item>
 /// <item>保存・名前の変更の直後も入力欄（接続先・認証・パスワード・ファイル・タイムアウト・方言）を保存値で塗り直さない（:483-497・:714-718・:816-818）。</item>
-/// <item>一覧のプロファイルは（DBMS, 名前）で大文字小文字を無視して一意（:664-674・:771-777）。</item>
+/// <item>一覧のプロファイルは（DBMS, 名前）で大文字小文字を無視して一意で、行の終わりにはディスクのプロファイルも同じく一意（:664-674・:771-777）。</item>
 /// <item>SQLite の新規作成で選んだファイルは、OK で確定するまで作られない（:896-907・:940-967）。</item>
 /// <item>エラーのモーダルは OK の前回接続の記録の失敗だけで出し、出しても確定は止めない（:982-998）。ほかの失敗はステータス行で知らせる（:703-705）。</item>
 /// <item>SQLite の新規作成で作ったファイルを、作った後に誰も掴んでいない（:952-957 の <c>SqliteDatabaseFile.CreateEmpty</c> はプールしない接続で作る＝src/QuickER.Provider.Sqlite/SqliteFileConnections.cs）。掴んでいると、作った直後に利用者がファイルを移動・削除できない。排他で開けるかで見る。</item>
+/// <item>選択を付け替えた手の後、選択中のプロファイルがあれば、保存名の欄はその名前（選んだプロファイルが入力欄に当たった。:526-578）。同じ項目の選び直し（セッターが何もしない）は対象外。食い違うと、名前の変更・削除が入力欄に出ていないプロファイルに効く。</item>
 /// </list>
-/// 3・4 は VM の変更通知でも見張り、1・2・5・8〜12 は手の後に、6 は保存・名前の変更・削除の後と行の終わりに、7・12 は行の終わりに見る。
+/// 3・4 は VM の変更通知でも見張り、1・2・3・5・8〜12 は手の後に、6 は保存・名前の変更・削除の後と行の終わりに、7・9・12 は行の終わりに、13 は選択の手の後に見る。
 /// </remarks>
 internal sealed class ConnectionDialogHarness : IDisposable
 {
@@ -115,7 +116,20 @@ internal sealed class ConnectionDialogHarness : IDisposable
     public ConnectionDialogFiles Files { get; } = new();
 
     /// <summary>行の一時フォルダの接続プロファイルのストア（最初に触ったときに作る。DPAPI は <see cref="UseDpapi"/> で先に選ぶ）</summary>
-    public SqlConnectionProfileStore Store => _store ??= new(_folder.Path, _dpapi);
+    public SqlConnectionProfileStore Store => TestStore;
+
+    /// <summary>行の一時フォルダのストアの本体（次の読み取りの直前に connections.json を掴む手を持つ）</summary>
+    private ConnectionDialogStore TestStore =>
+        (ConnectionDialogStore)(_store ??= new ConnectionDialogStore(_folder.Path, _dpapi));
+
+    /// <summary>
+    /// 次の一覧の読み直しの直前に connections.json を掴む（書き込みは成功し、直後の読み直しだけが読めない状況を作る）。
+    /// 掴んだファイルは <see cref="ReleaseReadLock"/> か行の終わりで放す
+    /// </summary>
+    public void LockConnectionsFileOnNextRead() => TestStore.LockOnNextRead();
+
+    /// <summary><see cref="LockConnectionsFileOnNextRead"/> で掴んだ connections.json を放す</summary>
+    public void ReleaseReadLock() => TestStore.ReleaseLock();
 
     /// <summary>書き込みの失敗の文言の固定部分（例外の文面より前）</summary>
     public static string WriteFailedPrefix =>
@@ -282,7 +296,20 @@ internal sealed class ConnectionDialogHarness : IDisposable
         DbConnectionDialogViewModel.ProfileListItem? item
     )
     {
+        var before = vm.SelectedProfileItem;
         vm.SelectedProfileItem = item;
+
+        if (
+            !ReferenceEquals(before, vm.SelectedProfileItem)
+            && vm.SelectedProfile is { } selected
+            && vm.ProfileName != selected.Name
+        )
+        {
+            Violate(
+                $"不変条件 13：選んだプロファイル {selected.Name} が入力欄に当たっていない（保存名の欄は {vm.ProfileName}）"
+            );
+        }
+
         After(vm, "選択");
     }
 
@@ -437,6 +464,9 @@ internal sealed class ConnectionDialogHarness : IDisposable
     /// <summary>行の本体の後に、止めた接続テストを終わらせ、見張った不変条件を表明する</summary>
     public async Task FinishAsync()
     {
+        // 読み直しの直前に掴んだ connections.json を放してから、ディスクを読む見張りを掛ける
+        (_store as ConnectionDialogStore)?.ReleaseLock();
+
         foreach (var gate in All.SelectMany(provider => provider.Importer.Gates))
         {
             gate.Release.TrySetResult();
@@ -472,6 +502,7 @@ internal sealed class ConnectionDialogHarness : IDisposable
         }
 
         CheckStoredProfilesInRange();
+        CheckStoredProfilesUnique();
         CheckCorruptedSecretsKept();
         CheckCreatedFilesReleased("行の終わり");
 
@@ -486,7 +517,11 @@ internal sealed class ConnectionDialogHarness : IDisposable
     }
 
     /// <summary>一時フォルダを消す（新規作成で作った SQLite のファイルは製品が掴まない＝不変条件 12）</summary>
-    public void Dispose() => _folder.Dispose();
+    public void Dispose()
+    {
+        (_store as ConnectionDialogStore)?.ReleaseLock();
+        _folder.Dispose();
+    }
 
     /// <summary>方言の組のレジストリ</summary>
     private DatabaseProviderRegistry Registry(ConnectionDialects dialects) =>
@@ -560,7 +595,44 @@ internal sealed class ConnectionDialogHarness : IDisposable
         {
             CheckBusy(vm, "実行中の変更通知");
         }
+
+        if (e.PropertyName == nameof(DbConnectionDialogViewModel.SelectedProfileItem))
+        {
+            CheckFixedDialectProfiles(vm, "選択の変更通知");
+        }
     }
+
+    /// <summary>不変条件 3（同期モードの一覧と選択中のプロファイルは固定した方言のものだけ）</summary>
+    private void CheckFixedDialectProfiles(DbConnectionDialogViewModel vm, string when)
+    {
+        if (!_fixedDialect.TryGetValue(vm, out var fixedDialect))
+        {
+            return;
+        }
+
+        var others = vm
+            .Profiles.Where(item => !IsDialect(item.Profile, fixedDialect))
+            .Select(item => item.Display)
+            .ToList();
+
+        if (others.Count > 0)
+        {
+            Violate(
+                $"不変条件 3：同期モード（{fixedDialect.Name}）の一覧に別の方言のプロファイル {string.Join("・", others)} が並んだ（{when}）"
+            );
+        }
+
+        if (vm.SelectedProfile is { } selected && !IsDialect(selected, fixedDialect))
+        {
+            Violate(
+                $"不変条件 3：同期モード（{fixedDialect.Name}）で別の方言のプロファイル {selected.Name} が選ばれている（{when}）"
+            );
+        }
+    }
+
+    /// <summary>プロファイルが方言のものか（大文字小文字は無視）</summary>
+    private static bool IsDialect(SqlConnectionProfile profile, IDatabaseProvider dialect) =>
+        string.Equals(profile.Dbms, dialect.Name, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>閉じた記録（不変条件 1）</summary>
     private void OnClose(DbConnectionDialogViewModel vm, List<bool> closes, bool result)
@@ -585,6 +657,8 @@ internal sealed class ConnectionDialogHarness : IDisposable
         {
             Violate($"不変条件 3：同期モードで DBMS を選べる（{op}の後）");
         }
+
+        CheckFixedDialectProfiles(vm, $"{op}の後");
 
         CheckBusy(vm, op);
         CheckNoPlainConfirm();
@@ -645,13 +719,40 @@ internal sealed class ConnectionDialogHarness : IDisposable
     /// <summary>不変条件 6（一覧はディスクの実体どおり。ストアが読めないときは行の終わりに見る）</summary>
     private void CheckListMatchesDisk(DbConnectionDialogViewModel vm, string when)
     {
+        // 一覧を読めなかったと VM が言っている間は、ディスクと比べずに「空の一覧で、ステータス行が知らせている」ことを見る
+        if (vm.AreProfilesUnavailable)
+        {
+            if (vm.Profiles.Count > 0 || vm.SelectedProfileItem is not null)
+            {
+                Violate($"不変条件 6：一覧を読めなかったのに一覧か選択が残っている（{when}）");
+            }
+
+            if (
+                vm.StatusMessage != Strings.DbConnection_ProfilesUnavailable
+                && vm.StatusMessage != Strings.DbConnection_ProfileStoreUnavailable
+            )
+            {
+                Violate(
+                    $"不変条件 6：一覧を読めなかったことをステータス行が知らせていない（{when}・{vm.StatusMessage}）"
+                );
+            }
+
+            return;
+        }
+
         // 掴まれて読めない間はストアが空の一覧を返すので、読めるようになってから（行の終わりに）見る
         if (AtomicFile.TryReadAllText(Store.ConnectionsPath, out _) == FileReadStatus.Unavailable)
         {
             return;
         }
 
-        var disk = Store.LoadAll();
+        // 同期モードの一覧は固定した方言の分だけ（不変条件 3）なので、ディスクも同じ方言の分と比べる
+        var disk = Store
+            .Read()
+            .Profiles.Where(profile =>
+                !_fixedDialect.TryGetValue(vm, out var fixedDialect)
+                || IsDialect(profile, fixedDialect)
+            );
 
         // Id を持たない旧形式の要素は読むたびに新しい Id になるので、Id でなく中身（DBMS・名前・接続先）の多重集合で比べる
         var shown = vm.Profiles.Select(item => ProfileKey(item.Profile)).Order().ToList();
@@ -693,7 +794,7 @@ internal sealed class ConnectionDialogHarness : IDisposable
     /// <summary>不変条件 2（保存したプロファイルの範囲）</summary>
     private void CheckStoredProfilesInRange()
     {
-        foreach (var profile in Store.LoadAll())
+        foreach (var profile in Store.Read().Profiles)
         {
             if (profile.CommandTimeoutSeconds < 0 || profile.Port is < 1 or > 65535)
             {
@@ -702,10 +803,34 @@ internal sealed class ConnectionDialogHarness : IDisposable
         }
     }
 
+    /// <summary>不変条件 9（行の終わりのディスクのプロファイルも（DBMS, 名前）で一意）</summary>
+    /// <remarks>
+    /// 一覧だけを見ると、一覧に出ていない別の方言のプロファイルや、読めずに空で開いた一覧の外の同名が見えない。
+    /// 画面に出ていないプロファイルへの名前の変更・保存が同じ名前を 2 つ作ったら、ここで捕まえる。
+    /// </remarks>
+    private void CheckStoredProfilesUnique()
+    {
+        var duplicated = Store
+            .Read()
+            .Profiles.GroupBy(profile =>
+                (profile.Dbms.ToUpperInvariant(), profile.Name.ToUpperInvariant())
+            )
+            .Where(group => group.Count() > 1)
+            .Select(group => $"{group.Key.Item1}/{group.Key.Item2}")
+            .ToList();
+
+        if (duplicated.Count > 0)
+        {
+            Violate(
+                $"不変条件 9：ディスクに同じ（DBMS, 名前）のプロファイルが並んだ（{string.Join("・", duplicated)}）"
+            );
+        }
+    }
+
     /// <summary>不変条件 7（読めない暗号ファイルを失わない）</summary>
     private void CheckCorruptedSecretsKept()
     {
-        var profiles = Store.LoadAll();
+        var profiles = Store.Read().Profiles;
 
         foreach (var (id, bytes) in _corruptedSecrets)
         {

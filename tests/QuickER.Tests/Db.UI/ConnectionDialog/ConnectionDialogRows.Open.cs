@@ -183,33 +183,40 @@ internal static partial class ConnectionDialogRows
                 }
             ),
             Row(
-                "sync-mode-other-dialect-profile-not-applied",
-                "同期モードで別方言のプロファイルを選ぶと、方言も入力欄も変えずに理由を出す",
-                [(Sync, Select)],
+                "sync-mode-lists-only-fixed-dialect-profiles",
+                "同期モードの一覧には固定した方言のプロファイルだけが並び（別方言は選べない）、選んだものは方言を変えずに当たる。取込モードは全方言を並べる",
+                [(Sync, Open), (Sync, Select)],
                 h =>
                 {
-                    h.Store.Upsert(
-                        new SqlConnectionProfile
-                        {
-                            Name = "ローカル",
-                            Dbms = SqliteProvider.ProviderName,
-                            FilePath = @"C:\data\local.db",
-                        },
-                        password: ""
-                    );
+                    var prodId = h.SeedProfile("本番DB");
+                    h.SeedSqliteProfile("ローカル", @"C:\data\local.db");
+
+                    // 根拠：src/QuickER.Db.UI/DbConnectionDialogViewModel.cs の ReloadProfiles（同期モードは固定した方言だけを並べる）
                     var vm = h.Create(
                         ConnectionDialects.WithSqlite,
                         DbConnectionDialogMode.Sync,
                         h.SqlServer
                     );
 
-                    h.Select(vm, vm.Profiles.Single());
+                    vm.Profiles.Select(item => item.Profile.Id).Should().Equal(prodId);
+
+                    h.Select(vm, ItemOf(vm, prodId));
 
                     vm.SelectedProvider.Should().BeSameAs(h.SqlServer);
+                    vm.Host.Should().Be("prod.example.com");
                     vm.FilePath.Should().BeEmpty();
-                    vm.ProfileName.Should().BeEmpty();
+                    vm.ProfileName.Should().Be("本番DB");
                     vm.StatusMessage.Should()
-                        .Be(string.Format(Strings.DbConnection_ProfileDialectMismatch, "ローカル"));
+                        .Be(string.Format(Strings.DbConnection_ProfileLoaded, "本番DB"));
+
+                    var importVm = h.Create(ConnectionDialects.WithSqlite);
+                    importVm
+                        .Profiles.Select(item => item.Profile.Name)
+                        .Should()
+                        .BeEquivalentTo(
+                            ["本番DB", "ローカル"],
+                            "取込モードは方言を移せるので全部並べる"
+                        );
                 }
             ),
             Row(
