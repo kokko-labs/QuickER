@@ -482,7 +482,7 @@ internal static partial class CodegenCases
                         [
                             Service_Entity(
                                 "probes",
-                                Service_Column("probe_id", "int", primaryKey: true, nullable: null)
+                                Service_Column("probe_id", "int", primaryKey: true)
                             ),
                         ],
                     },

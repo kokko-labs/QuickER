@@ -3,7 +3,7 @@ using QuickER.Tests.TestSupport.Engines;
 namespace QuickER.Tests.AI.ChatEngines;
 
 /// <summary>API キー接続のドライバの表の次元表・台帳の行</summary>
-/// <remarks>1 ケース＝（ドライバ, 発話の形）。網羅すべき組はドライバ × 形の全部（網羅しない組は無い）。</remarks>
+/// <remarks>1 ケース＝（ドライバ, 送る形）。網羅すべき組はドライバ × 形の全部（網羅しない組は無い）。</remarks>
 internal static class ChatDriverDimensions
 {
     /// <summary>網羅しない組の照合の範囲</summary>
@@ -12,7 +12,7 @@ internal static class ChatDriverDimensions
     /// <summary>ドライバ</summary>
     public const string Driver = "Driver";
 
-    /// <summary>発話の形</summary>
+    /// <summary>送る形（利用者の発話の添付の組み合わせ・ツールの往復）</summary>
     public const string Shape = "Shape";
 
     /// <summary>次元表</summary>
@@ -30,7 +30,7 @@ internal static class ChatDriverDimensions
                 new Factor(
                     Shape,
                     ChatDriverRows.Table.Select(row => new Level(row.Id)).ToList(),
-                    "利用者の発話の形（添付の組み合わせ）"
+                    "送る形（利用者の発話の添付の組み合わせ・ツールの往復）"
                 ),
             ]
         );
@@ -58,7 +58,7 @@ internal static class ChatDriverDimensions
         new(
             EngineIds.Ai,
             "Drivers",
-            "API キー接続のドライバの表（ドライバ 2 つ × 発話の形）",
+            "API キー接続のドライバの表（ドライバ 2 つ × 送る形〔発話の添付の組み合わせ・ツールの呼び出しの ID の往復〕）",
             Table,
             ChatDriverRows.Table.Count,
             [
@@ -66,6 +66,7 @@ internal static class ChatDriverDimensions
                 "tests/QuickER.Tests/AI/ChatEngines/ChatDriverDimensions.cs",
                 "tests/QuickER.Tests/AI/ChatEngines/ChatDriverRows.cs",
                 "tests/QuickER.Tests/AI/ChatEngines/ChatDriverTests.cs",
+                "tests/QuickER.Tests/AI/ChatEngines/ChatDriverToolRoundTrip.cs",
             ],
             ["src/QuickER.AI/AnthropicChatTurnDriver.cs", "src/QuickER.AI/OpenAiTurnDriver.cs"]
         );

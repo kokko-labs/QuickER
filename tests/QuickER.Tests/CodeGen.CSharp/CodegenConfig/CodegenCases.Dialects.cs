@@ -2322,6 +2322,12 @@ internal static partial class CodegenCases
             foreach (var column in entity.Columns)
             {
                 column.IsPrimaryKey = column.DataType != "rowversion";
+
+                // 主キーにした列は NOT NULL にする（NULL 許容の主キーの読み替えの経路を意図せず通さない。読み替えは図の形 int-nullable の行が見る）
+                if (column.IsPrimaryKey)
+                {
+                    column.IsNullable = false;
+                }
             }
         }
 

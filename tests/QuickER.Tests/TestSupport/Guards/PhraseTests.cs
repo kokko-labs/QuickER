@@ -12,7 +12,7 @@ public sealed class PhraseTests
     /// <summary>必須の文言の行の Id</summary>
     public static TheoryData<string> PhraseIds => [.. PhraseRows.All.Select(row => row.Id)];
 
-    /// <summary>判定の自己検査の行（種類・本文・含む語・違反があるか）</summary>
+    /// <summary>判定の自己検査の行（種類・本文・含む語〔末尾の種類は末尾にあるべき文 1 つ〕・違反があるか）</summary>
     internal static readonly (
         string Kind,
         string Text,
@@ -30,6 +30,19 @@ public sealed class PhraseTests
             false
         ),
         (GuardTextDimensions.Phrase, "Respond in English.", ["language of the user"], true),
+        (
+            GuardTextDimensions.PhraseSuffix,
+            "Use the tools.\n\n# Response language\nDefault to English.",
+            ["# Response language\nDefault to English."],
+            false
+        ),
+        // 含んではいるが末尾ではない（後ろに別の節が続く）
+        (
+            GuardTextDimensions.PhraseSuffix,
+            "# Response language\nDefault to English.\n\nUse the tools.",
+            ["# Response language\nDefault to English."],
+            true
+        ),
     ];
 
     /// <summary>判定の自己検査の行の番号</summary>
@@ -77,7 +90,7 @@ public sealed class PhraseTests
         var row = PhraseRows.ById(id);
         var text = row.Text();
 
-        PhraseProblems(text, row.Contains, row.NotContains)
+        PhraseProblems(text, row.Contains, row.NotContains, row.EndsWith)
             .Should()
             .BeEmpty($"[{row.Id}] {row.Because}");
     }
@@ -87,10 +100,17 @@ public sealed class PhraseTests
     public void Judge_DetectsViolation(int index)
     {
         var (kind, text, contains, violates) = JudgeProbes[index];
-        var violated =
-            kind == GuardTextDimensions.English
-                ? CjkText.Pattern.IsMatch(text)
-                : PhraseProblems(text, contains, []).Count > 0;
+        var violated = kind switch
+        {
+            GuardTextDimensions.English => CjkText.Pattern.IsMatch(text),
+            GuardTextDimensions.PhraseSuffix => PhraseProblems(
+                text,
+                [],
+                [],
+                contains.Single()
+            ).Count > 0,
+            _ => PhraseProblems(text, contains, []).Count > 0,
+        };
 
         violated.Should().Be(violates, $"{kind}: {text}");
     }
@@ -116,12 +136,15 @@ public sealed class PhraseTests
         PhraseRows
             .All.Where(row =>
                 string.IsNullOrWhiteSpace(row.Because)
-                || row.Contains.Count + row.NotContains.Count == 0
+                || row.Contains.Count + row.NotContains.Count == 0 && row.EndsWith is null
                 || row.Contains.Concat(row.NotContains).Any(string.IsNullOrEmpty)
+                || row.EndsWith is { Length: 0 }
             )
             .Select(row => row.Id)
             .Should()
-            .BeEmpty("守ることと、含む語か含まない語を 1 つ以上書く");
+            .BeEmpty(
+                "守ることと、含む語・含まない語・末尾の文のどれかを 1 つ以上書く（空の語・空の末尾は書かない）"
+            );
     }
 
     [Fact(DisplayName = "[網羅] 文言の表の判定の自己検査は、種類 × 結果の組を網羅する")]
@@ -147,11 +170,12 @@ public sealed class PhraseTests
         report.AssertGaps(CoverageGap.Set(EngineIds.Guard, []), GuardTextDimensions.PhraseScope);
     }
 
-    /// <summary>含むべき語が無い・含んではいけない語がある（序数）</summary>
+    /// <summary>含むべき語が無い・含んではいけない語がある・末尾にあるべき文で終わらない（序数）</summary>
     internal static IReadOnlyList<string> PhraseProblems(
         string text,
         IReadOnlyList<string> contains,
-        IReadOnlyList<string> notContains
+        IReadOnlyList<string> notContains,
+        string? endsWith = null
     ) =>
         [
             .. contains
@@ -160,5 +184,8 @@ public sealed class PhraseTests
             .. notContains
                 .Where(phrase => text.Contains(phrase, StringComparison.Ordinal))
                 .Select(phrase => $"含んではいけない：「{phrase}」"),
+            .. endsWith is not null && !text.EndsWith(endsWith, StringComparison.Ordinal)
+                ? [$"末尾にない：「{endsWith}」"]
+                : Array.Empty<string>(),
         ];
 }

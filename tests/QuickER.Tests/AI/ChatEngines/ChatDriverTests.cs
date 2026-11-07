@@ -3,7 +3,7 @@ using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.AI.ChatEngines;
 
-/// <summary>API キー接続のドライバの表（同じ発話を全ドライバへ流し、送る形の射影を照合する）</summary>
+/// <summary>API キー接続のドライバの表（同じ発話とツールの往復を全ドライバへ流し、送る形の射影を照合する）</summary>
 public sealed class ChatDriverTests
 {
     /// <summary>行 × ドライバ</summary>
@@ -21,10 +21,13 @@ public sealed class ChatDriverTests
 
     [Theory(DisplayName = "ドライバの表：同じ発話をドライバごとの送る形へ変える")]
     [MemberData(nameof(Cases))]
-    public void Row_Matches(string id, string driver)
+    public async Task Row_Matches(string id, string driver)
     {
         var row = ChatDriverRows.Table[id];
-        var actual = ChatDriverAxis.Axis.Get(driver).ProjectUserMessage(row.Input.Item);
+        var actual = await row.Input.Project(
+            ChatDriverAxis.Axis.Get(driver),
+            TestContext.Current.CancellationToken
+        );
         var expected = row.Input.Expected[driver];
 
         ChatDriverRows
@@ -48,7 +51,7 @@ public sealed class ChatDriverTests
         }
     }
 
-    [Fact(DisplayName = "網羅：ドライバ × 発話の形")]
+    [Fact(DisplayName = "網羅：ドライバ × 送る形")]
     public void Coverage_IsComplete()
     {
         var counter = new CoverageCounter(ChatDriverDimensions.Table);

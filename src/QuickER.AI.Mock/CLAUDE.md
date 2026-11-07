@@ -89,6 +89,8 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
   - **(c) 隔離引数 3 つ。**
     - `-noAutoResponse`：`Directory.Build.rsp` の `-logger:<DLL>` が採用され、任意アセンブリをビルドプロセスへ読み込ませられるのを塞ぐ（実測で確認）。5 プロパティ自体は rsp から打ち消せない（同じ `-p` は後勝ちでこちらが後ろに来る）。塞いでいるのは加算される switch の経路。
     - `-nodeReuse:false` / `-p:UseSharedCompilation=false`：AI が書いたタスク DLL・アナライザを常駐プロセスへ残さない。
+- **取り消したら、ビルドのプロセスツリー（dotnet と、それが起こした子）ごと止めてから抜ける。** 読み取りは取り消しのトークンで先に終わるので、止めなくても速やかに抜けてしまい、子のプロセスがビルドを続けたまま残る。
+  - ガード：`DotnetBuildRunnerCancellationTests.RunAsync_CanceledWhileRunning_KillsAndThrows`（孫が開いたまま持つ印のファイルを、取り消しの前は排他で開けず・後は開けることで、子も孫も残らないことを見る）。mutation 実証済み（`TryKill` を消す・`entireProcessTree: false` のどちらも赤）。
 - **祖先の `global.json` / `NuGet.Config` は無効化しない。** SDK のピン・社内フィード喪失の副作用が大きい。「置き場所から独立」は (b)(c) の範囲。正本は `docs/ai-chat.md`（.ja）の「注意」節。
 - **最終ビルドは、直前に `obj` / `bin` を削除する。** `obj/{プロジェクト}.csproj.*.targets` / `*.props` は `Microsoft.Common.targets` のワイルドカード import で読み込まれる（実測で確認）ので、生成中に AI が `obj` へ書いたターゲットは検証ビルドで実行される。`nuget.g.targets` だけは復元が作り直すが、同じワイルドカードに当たる別名は残る。
   - 削除は `MockProjectBuildBoundary.ClearBuildOutputs` が行い、**読み取り専用の属性を外してから消す**（Windows の `Directory.Delete(recursive: true)` は外さないので、読み取り専用のファイル 1 つで削除が失敗する）。

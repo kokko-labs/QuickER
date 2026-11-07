@@ -1,8 +1,10 @@
 using System.Diagnostics;
+using System.IO;
 using AwesomeAssertions;
 using QuickER.AI.Mock;
 using QuickER.Platform;
 using QuickER.Tests.AI;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.AI.Mock;
 
@@ -32,33 +34,89 @@ public class DotnetBuildRunnerCancellationTests
     }
 
     /// <summary>
-    /// 実行中に取り消すと、プロセスを止めて速やかに <see cref="OperationCanceledException"/> で抜けることを検証する
-    /// （止めずに待つと、120 秒走る子プロセスの終了まで戻らない）。
+    /// 実行中に取り消すと、プロセスツリー（子の cmd と孫の ping）を止めて速やかに <see cref="OperationCanceledException"/> で抜け、
+    /// 子も孫も残さないことを検証する。
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// 止めたことは、孫の ping が標準出力として開いたままにする印のファイルで見る：取り消しの前は排他で開けず（孫が走っている）、
+    /// 取り消しの後は排他で開ける（印を持つ子も孫も終わった）。「速やかに抜ける」だけでは足りない：読み取りは取り消しのトークンで
+    /// 先に終わるので、プロセスを止めなくても抜けてしまう。止めないと孫が 120 秒残り、子だけを止めると孫が残る。
+    /// </para>
+    /// <para>
     /// 上限 60 秒は「止めた（すぐ戻る）」と「止めずに待った（120 秒）」を分ける境目。
-    /// 全件の実行の負荷で止めるまでが数秒遅れても揺れないよう、子プロセスの走る時間を上限より十分長くして、境目を広く取る。
+    /// 全件の実行の負荷で止めるまでが数秒遅れても揺れないよう、孫の走る時間を上限より十分長くして、境目を広く取る。
+    /// </para>
     /// </remarks>
-    [Fact(DisplayName = "実行中の取り消しはプロセスを止めて速やかに抜ける")]
+    [Fact(DisplayName = "実行中の取り消しはプロセスツリーを止めて速やかに抜け、子も孫も残さない")]
     public async Task RunAsync_CanceledWhileRunning_KillsAndThrows()
     {
+        using var folder = new TestTempFolder();
+        var marker = Path.Combine(folder.Path, "running.txt");
         var startInfo = new ProcessStartInfo
         {
-            // 子プロセスはフルパスで起動する（ExternalLauncher.CreateProcess が名前だけの起動を断る）
+            // 子プロセスはフルパスで起動する（ExternalLauncher.CreateProcess が名前だけの起動を断る）。
+            // 孫の ping の標準出力を印のファイルへ向ける（孫が走っている間、印は開いたまま）
             FileName = BatchShimProcessGuard.CmdExePath,
-            ArgumentList = { "/c", "ping", "-n", "120", "127.0.0.1" },
+            ArgumentList = { "/c", "ping", "-n", "120", "127.0.0.1", ">", marker },
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+        using var cts = new CancellationTokenSource();
+
+        var run = DotnetBuildRunner.RunAsync(startInfo, cts.Token);
+
+        (await WaitUntilAsync(() => File.Exists(marker) && !CanOpenExclusively(marker)))
+            .Should()
+            .BeTrue("取り消しの前に孫の ping が印のファイルを開いている（前提）");
+
+        var stopwatch = Stopwatch.StartNew();
+        await cts.CancelAsync();
+
+        await ((Func<Task>)(() => run)).Should().ThrowAsync<OperationCanceledException>();
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(60));
+        (await WaitUntilAsync(() => CanOpenExclusively(marker)))
+            .Should()
+            .BeTrue("取り消しの後は子も孫も終わり、印のファイルを誰も開いていない");
+    }
+
+    /// <summary>条件が真になるまで待つ（上限 30 秒・孫の 120 秒より十分短い）</summary>
+    private static async Task<bool> WaitUntilAsync(Func<bool> condition)
+    {
         var stopwatch = Stopwatch.StartNew();
 
-        var run = () => DotnetBuildRunner.RunAsync(startInfo, cts.Token);
+        while (stopwatch.Elapsed < TimeSpan.FromSeconds(30))
+        {
+            if (condition())
+            {
+                return true;
+            }
 
-        await run.Should().ThrowAsync<OperationCanceledException>();
-        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(60));
+            await Task.Delay(50);
+        }
+
+        return condition();
+    }
+
+    /// <summary>ファイルを排他で開けるか（どのプロセスも開いていないか）</summary>
+    private static bool CanOpenExclusively(string path)
+    {
+        try
+        {
+            using var stream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.ReadWrite,
+                FileShare.None
+            );
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
     }
 }

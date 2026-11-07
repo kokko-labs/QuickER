@@ -32,7 +32,7 @@ internal sealed record EnglishText(string Where, string Text);
 /// <param name="Reason">理由</param>
 internal sealed record EnglishException(string Where, int Count, string Reason);
 
-/// <summary>必須の文言の表の 1 行：出どころの文字列が、決めた語を含み、決めた語を含まないこと</summary>
+/// <summary>必須の文言の表の 1 行：出どころの文字列が、決めた語を含み、決めた語を含まず、決めた文で終わること</summary>
 /// <param name="Id">行の Id（一意）</param>
 /// <param name="Because">守ること</param>
 /// <param name="Text">出どころの文字列（UI 言語などの条件は関数の中で整える）</param>
@@ -44,7 +44,11 @@ internal sealed record PhraseRow(
     Func<string> Text,
     IReadOnlyList<string> Contains,
     IReadOnlyList<string> NotContains
-);
+)
+{
+    /// <summary>末尾にあるべき文（序数で照合し、前後の空白を除かない。null なら末尾を見ない）</summary>
+    public string? EndsWith { get; init; }
+}
 
 /// <summary>英語の文言の表（領域ごとの行は partial のファイルに置く）</summary>
 internal static partial class EnglishTextRows

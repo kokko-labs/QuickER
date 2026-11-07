@@ -584,6 +584,30 @@ internal static partial class ImportSyncRows
                 }
             ),
             Row(
+                "import-dirty-same-structure-skips-confirmation-and-replaces",
+                "未保存の図でも、構造が同じで壊れるクエリも説明の上書きも無ければ、確認（警告つきも）を出さずに置き換えて完了を知らせる"
+                    + "（確認を省く条件は失うものの有無と構造の一致のどちらか＋失う中身が無いこと。未保存かどうかは構造の一致の枝を止めない）",
+                [(ImportDirty, Apply)],
+                async h =>
+                {
+                    var host = ImportSyncHarness.Host(DiagramWith("Customer"), dirty: true);
+                    var presenter = ImportSyncHarness.Presenter(host);
+                    presenter.Result = Picked(
+                        ImportSyncHarness.ImportProvider(ImportedEntities("Customer"))
+                    );
+
+                    await h.RunImportAsync(host, presenter);
+
+                    h.Dialogs.ConfirmMessages.Should().BeEmpty();
+                    h.Dialogs.WarningConfirmMessages.Should().BeEmpty();
+                    host.Replaced.Should()
+                        .ContainSingle()
+                        .Which.Diagram.Entities.Should()
+                        .ContainSingle(entity => entity.TableName == "Customer");
+                    h.Dialogs.InformationMessages.Should().Equal(DbStrings.Db_ImportCompleted);
+                }
+            ),
+            Row(
                 "import-reimport-confirmed-keeps-surviving-query",
                 "列が増えた再取込は確認し、承認すると参照が保たれるクエリを引き継いで現在の図の Id へ寄せる",
                 [(ImportClean, Confirm), (ImportClean, Apply)],

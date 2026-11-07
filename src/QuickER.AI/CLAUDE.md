@@ -57,3 +57,7 @@ AI チャットエンジンの共通基盤（WPF 非依存）。内蔵チャッ�
 - ターン・ツール・取り消し・失敗・添付・破棄・接続の準備・会話の契約は、4 エンジン（API キー・Codex・Claude Code・Copilot）へ同じ行で流す網が守る（`tests/QuickER.Tests/AI/ChatEngines/`）。エンジンごとの違いは、アダプタの性質の宣言（出典つき）と期待の文の組み方に置き、行の中でエンジンを名指ししない。
 - 宣言で「持たない」とした性質を前提にする行はそのエンジンでは流さず、網羅しない組の一覧（手で書いた静的な一覧）に載せる。宣言を変えて流れる組が増減すると、一覧との照合で赤になる。
 - ガード：`ChatEngineContractTests`（行 × エンジン・`Coverage_MatchesGaps`・`Declarations_CoverEveryCapabilityWithEvidence`・`AttachmentSupport_MatchesEngineAndResolver`）・`ChatDriverTests`（API キー接続のドライバ 2 つへ同じ発話を流す）。mutation 実証済み。
+- ツールの呼び出しの ID の往復はドライバの層の事実なので、契約の行（API キーのアダプタは中立の台本ドライバを使う）ではなくドライバの表が見る。
+  - 行 `tool-call-id-round-trips`：本物の `ChatTurnEngine` に本物のドライバを載せて偽のサーバーへ 1 ターン流し、サーバーが付けた ID が 2 回目の要求のアシスタントのツールの呼び出しとツールの結果の両方へそのまま戻ることを照合する。ID を落とすと、サーバーがツールの結果を呼び出しへ突き合わせられない。
+  - 偽のサーバーは、Anthropic が internal のクライアントの差し込み口へ渡す HttpClient のハンドラ、OpenAI がループバックの Kestrel（接続のエンドポイントの上書きで向ける）。
+  - mutation 実証済み：OpenAI のストリームの `ToolCallId` を写さない・`BuildToolCalls` が ID を捨てる・履歴のツールの呼び出しの ID を変える・ツールの結果の ID を空にする、の 4 か所と Anthropic の対応する 3 か所のどれも赤。ストリームから ID を読む所は、この行だけが捕まえる。
