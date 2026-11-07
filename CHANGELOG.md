@@ -79,6 +79,7 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **The Mermaid export now reports single-column unique constraints on primary key columns and foreign key markers on primary key columns that the import does not infer back** — both disappeared on re-import without a notice
 - **The Mermaid export no longer reports nullability when the only NOT NULL columns are primary key columns** — the import makes primary key columns NOT NULL, so nothing is lost
 - **Importing C# code into a diagram keeps a column type that differs from the current diagram only in letter case** — on a SQLite diagram, `int` came back as `INT` and every import asked to confirm the replacement, because code generation does not record spellings that differ only in case
+- **Importing an Excel definition document or C# code now reads primary key columns as NOT NULL** — a primary key row whose required cell was empty in an Excel definition document, and a primary key property whose type carried `?` in C# code (such as `[Key] int?`), came into the diagram as a nullable primary key. The DDL and the generated code treat primary key columns as NOT NULL, and the DBML, Mermaid and database imports read them as NOT NULL. A merge import into a diagram whose primary key is marked nullable asks to confirm the replacement, because the mark changes
 
 #### DB import & connections
 

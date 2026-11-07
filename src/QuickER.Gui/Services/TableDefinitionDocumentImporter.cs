@@ -310,6 +310,9 @@ public static partial class TableDefinitionDocumentImporter
                 IsForeignKey = keyText.Contains("FK", StringComparison.OrdinalIgnoreCase),
             };
 
+            // 主キーの行は必須の欄が空でも NOT NULL で読む（DDL・C# 生成・ほかの取込と同じ判定）
+            column.IsNullable = ColumnNullability.AllowsNull(column);
+
             if (entity.Columns.Any(existing => SchemaNames.AreSame(existing.Name, column.Name)))
             {
                 throw new InvalidDataException(
