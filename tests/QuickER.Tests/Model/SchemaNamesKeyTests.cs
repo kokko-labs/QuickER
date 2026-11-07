@@ -113,14 +113,45 @@ public sealed class SchemaNamesKeyTests
         (SchemaNames.Key(first) == SchemaNames.Key(second)).Should().Be(same);
     }
 
-    [Fact(DisplayName = "対になっていないサロゲートはキーにそのまま残る")]
-    public void Key_KeepsLoneSurrogates()
+    /// <summary>
+    /// 対になっていないサロゲートの位置（真ん中・末尾・直後に補助面の字）ごとに、サロゲートはそのまま残り、前後の字は畳まれることを検証する
+    /// </summary>
+    /// <param name="position">サロゲートの位置（middle / end / before-supplementary）</param>
+    /// <remarks>
+    /// 対になっていないサロゲートは 1 単位だけ進めて次の字へ移る。末尾で次の字が無くても例外にせず、直後の補助面の字（サロゲート対）は
+    /// 対のまま 1 字として畳む（Deseret の小文字 U+10428 のキーは大文字 U+10400 のキーと同じ）。
+    /// </remarks>
+    [Theory(DisplayName = "対になっていないサロゲートはキーにそのまま残る")]
+    [InlineData("middle")]
+    [InlineData("end")]
+    [InlineData("before-supplementary")]
+    public void Key_KeepsLoneSurrogates(string position)
     {
-        var lone = new StringBuilder().Append('a').Append((char)0xD800).Append('b').ToString();
+        const char Lone = (char)0xD800;
 
-        SchemaNames
-            .Key(lone)
-            .Should()
-            .Be(new StringBuilder().Append('A').Append((char)0xD800).Append('B').ToString());
+        switch (position)
+        {
+            case "middle":
+                SchemaNames
+                    .Key(new StringBuilder().Append('a').Append(Lone).Append('b').ToString())
+                    .Should()
+                    .Be(new StringBuilder().Append('A').Append(Lone).Append('B').ToString());
+                break;
+            case "end":
+                SchemaNames
+                    .Key(new StringBuilder().Append('a').Append(Lone).ToString())
+                    .Should()
+                    .Be(new StringBuilder().Append('A').Append(Lone).ToString());
+                break;
+            case "before-supplementary":
+                SchemaNames
+                    .Key(Lone + char.ConvertFromUtf32(0x10428))
+                    .Should()
+                    .Be(SchemaNames.Key(Lone + char.ConvertFromUtf32(0x10400)))
+                    .And.StartWith(Lone.ToString());
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(position));
+        }
     }
 }

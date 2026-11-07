@@ -223,41 +223,96 @@ public class ForeignKeyColumnResolverTests
         Resolve(columns).Should().Be(1);
     }
 
-    /// <summary>自己参照では ParentId が①の候補として選ばれることを検証する</summary>
-    [Fact(DisplayName = "自己参照では ParentId が選ばれる")]
-    public void SelfReference_ParentId_IsSelected()
+    /// <summary>
+    /// 自己参照の外部キー列の期待名（ParentId・parent_id・Parent+キー列名）の 1 行（表 Employee の主キー列名・列の並びと、選ばれる位置）
+    /// </summary>
+    /// <param name="Id">行の名前</param>
+    /// <param name="KeyName">参照元のキー列名（主キー列。無ければ null）</param>
+    /// <param name="Columns">表の列名（先頭はキー列名の主キー列。キー列名が空なら主キーの Id 列）</param>
+    /// <param name="Expected">選ばれる列の位置（無ければ null）</param>
+    public sealed record SelfReferenceRow(
+        string Id,
+        string? KeyName,
+        string[] Columns,
+        int? Expected
+    )
     {
-        var columns = new[]
+        public override string ToString() => Id;
+    }
+
+    /// <summary>
+    /// 自己参照の期待名の行。期待名どうしが互いを覆わないよう、キー列名は既定の Id でない名前にする
+    /// （キー列名 Id だと Parent+キー列名が ParentId になり、ParentId の期待名を外しても気づかない）
+    /// </summary>
+    public static TheoryData<SelfReferenceRow> SelfReferenceRows =>
+        new()
         {
-            Col("Id", isPk: true),
-            Col("Name", dataType: "nvarchar(50)"),
-            Col("ParentId"),
+            // ParentId は①の候補（キー列名に依らない）
+            new SelfReferenceRow("parent-id", "Code", ["Code", "Name", "ParentId"], 2),
+            // スネークケースの parent_id も①の候補
+            new SelfReferenceRow("parent-id-snake", "Code", ["Code", "parent_id"], 1),
+            // Parent+キー列名（ParentCode）も①の候補で、後方一致（④）の OwnerCode より先に選ばれる
+            new SelfReferenceRow(
+                "parent-plus-key-name",
+                "Code",
+                ["Code", "OwnerCode", "ParentCode"],
+                2
+            ),
+            // Parent+キー列名の形（ParentEmployeeId）
+            new SelfReferenceRow(
+                "parent-plus-key-name-employee-id",
+                "EmployeeId",
+                ["EmployeeId", "ParentEmployeeId"],
+                1
+            ),
+            // キー列名が無い・空白だけなら Parent+キー列名を期待名にしない（列 Parent は選ばれない）
+            new SelfReferenceRow("no-key-name", null, ["Id", "Parent"], null),
+            new SelfReferenceRow("blank-key-name", "  ", ["Id", "Parent"], null),
         };
 
-        Resolve(columns, sourceTable: "Employee", selfRef: true).Should().Be(2);
-    }
-
-    /// <summary>自己参照では Parent+キー列名（ParentEmployeeId）も一致することを検証する</summary>
-    [Fact(DisplayName = "自己参照では Parent+キー列名も一致する")]
-    public void SelfReference_ParentPlusKeyName_Matches()
+    /// <summary>自己参照では ParentId・parent_id・Parent+キー列名が①の候補として選ばれることを検証する</summary>
+    [Theory(DisplayName = "自己参照では ParentId・parent_id・Parent+キー列名が選ばれる")]
+    [MemberData(nameof(SelfReferenceRows))]
+    public void SelfReference_ParentNames_AreSelected(SelfReferenceRow row)
     {
-        var columns = new[] { Col("EmployeeId", isPk: true), Col("ParentEmployeeId") };
+        var columns = row
+            .Columns.Select(
+                (name, index) =>
+                    index == 0
+                        ? Col(name, isPk: true)
+                        : Col(name, dataType: name == "Name" ? "nvarchar(50)" : "int")
+            )
+            .ToArray();
 
-        Resolve(columns, sourceTable: "Employee", pkName: "EmployeeId", selfRef: true)
+        Resolve(columns, sourceTable: "Employee", pkName: row.KeyName, selfRef: true)
             .Should()
-            .Be(1);
+            .Be(row.Expected);
     }
 
-    /// <summary>期待 FK 名の一覧にパスカル・スネーク・単数形化の変体が含まれることを検証する</summary>
-    [Fact(DisplayName = "期待 FK 名にパスカル・スネーク・単数形化の変体が含まれる")]
-    public void BuildExpectedForeignKeyNames_ContainsAllVariants()
+    /// <summary>
+    /// 期待 FK 名の一覧にパスカル・スネーク・単数形化の変体が含まれ、語が 1 つも無い名前では空になることを検証する
+    /// </summary>
+    /// <param name="table">参照元のテーブル名</param>
+    /// <param name="expected">含まれる名前（空なら一覧そのものが空）</param>
+    [Theory(DisplayName = "期待 FK 名にパスカル・スネーク・単数形化の変体が含まれる")]
+    [InlineData(
+        "customer_orders",
+        new[] { "CustomerOrdersId", "customer_orders_id", "CustomerOrderId", "customer_order_id" }
+    )]
+    // 記号だけの名前は語が 1 つも無いので、期待名を作らない
+    [InlineData("__", new string[0])]
+    public void BuildExpectedForeignKeyNames_ContainsAllVariants(string table, string[] expected)
     {
-        var names = ForeignKeyColumnResolver.BuildExpectedForeignKeyNames("customer_orders");
+        var names = ForeignKeyColumnResolver.BuildExpectedForeignKeyNames(table);
 
-        names.Should().Contain("CustomerOrdersId");
-        names.Should().Contain("customer_orders_id");
-        names.Should().Contain("CustomerOrderId");
-        names.Should().Contain("customer_order_id");
+        if (expected.Length == 0)
+        {
+            names.Should().BeEmpty();
+        }
+        else
+        {
+            names.Should().Contain(expected);
+        }
     }
 
     /// <summary>親の複合主キー（列宣言順 TenantId, RegionCode）と、同名の外部キー列を持つ子を組み立てる</summary>

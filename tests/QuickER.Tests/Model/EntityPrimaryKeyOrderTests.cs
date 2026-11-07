@@ -220,26 +220,61 @@ public class EntityPrimaryKeyOrderTests
         return (existing, merged);
     }
 
-    [Fact(DisplayName = "主キーの順序の引き継ぎは、列名で引いた取込側の列 Id で順序を書く")]
-    public void InheritPrimaryKeyOrderFrom_RebindsByName()
-    {
-        var (existing, merged) = BuildMergePair();
-
-        merged.InheritPrimaryKeyOrderFrom(existing).Should().BeTrue();
-
-        merged.PrimaryKeyColumnIds.Should().Equal(merged.Columns[1].Id, merged.Columns[0].Id);
-    }
-
-    [Fact(
-        DisplayName = "主キーの順序の引き継ぎは、大文字小文字だけ違う列名も同じ列として引き継ぐ（SchemaNames の規則）"
+    /// <summary>
+    /// 主キーの順序の引き継ぎの 1 行（取込前 a・b の主キーを順序 b, a で持つ組に加える変更と、引き継ぐか）
+    /// </summary>
+    /// <remarks>
+    /// 引き継ぐ行は取込側の列 Id で順序 b, a を書く。引き継がない行は false を返し、取込側の順序（空）を変えない。
+    /// </remarks>
+    /// <param name="change">組に加える変更（none / case-different / existing-without-order / duplicate-key-name / key-count-differs / key-name-differs）</param>
+    /// <param name="inherits">引き継ぐか</param>
+    [Theory(
+        DisplayName = "主キーの順序の引き継ぎは、列名で引いた取込側の列 Id で順序を書き、主キーの列名の集合が一致しなければ引き継がない"
     )]
-    public void InheritPrimaryKeyOrderFrom_CaseDifferentName_IsCarried()
+    // 列名で引いた取込側の列 Id で順序を書く
+    [InlineData("none", true)]
+    // 大文字小文字だけ違う列名も同じ列として引き継ぐ（SchemaNames の規則）
+    [InlineData("case-different", true)]
+    // 取込前に順序の明示が無ければ引き継がない
+    [InlineData("existing-without-order", false)]
+    // 取込側の主キーに同じ名前が 2 つあると、どれが誰か決まらないので引き継がない
+    [InlineData("duplicate-key-name", false)]
+    // 主キーの列の数が違えば引き継がない
+    [InlineData("key-count-differs", false)]
+    // 数が同じでも列名の集合が違えば引き継がない（1 列だけ違う形）
+    [InlineData("key-name-differs", false)]
+    public void InheritPrimaryKeyOrderFrom_RebindsByNameWhenKeysMatch(string change, bool inherits)
     {
         var (existing, merged) = BuildMergePair();
-        merged.Columns[1].Name = "B";
 
-        merged.InheritPrimaryKeyOrderFrom(existing).Should().BeTrue();
+        switch (change)
+        {
+            case "case-different":
+                merged.Columns[1].Name = "B";
+                break;
+            case "existing-without-order":
+                existing.PrimaryKeyColumnIds = [];
+                break;
+            case "duplicate-key-name":
+                merged.Columns[1].Name = "A";
+                break;
+            case "key-count-differs":
+                merged.Columns[2].IsPrimaryKey = true;
+                break;
+            case "key-name-differs":
+                merged.Columns[1].Name = "c";
+                break;
+        }
 
-        merged.PrimaryKeyColumnIds.Should().Equal(merged.Columns[1].Id, merged.Columns[0].Id);
+        merged.InheritPrimaryKeyOrderFrom(existing).Should().Be(inherits);
+
+        if (inherits)
+        {
+            merged.PrimaryKeyColumnIds.Should().Equal(merged.Columns[1].Id, merged.Columns[0].Id);
+        }
+        else
+        {
+            merged.PrimaryKeyColumnIds.Should().BeEmpty();
+        }
     }
 }
