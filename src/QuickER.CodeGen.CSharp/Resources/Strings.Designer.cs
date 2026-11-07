@@ -603,6 +603,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Query_SkippedWithoutRepository {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_SkippedWithoutRepository", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Query_InvalidName {
             get {
                 return ResourceManager.GetString("CodeGen_Query_InvalidName", resourceCulture);

@@ -711,6 +711,66 @@ internal static partial class CodegenCases
                 ),
                 ColumnsGenerated
             ),
+            // 元のテストを持たない行：修正 R の受け入れ。名前付きクエリは表の Repository に付くので、Repository を作らない表の
+            // クエリは生成されない。網羅の配列（図の形 composite-only / keyless-only × クエリ × 契約）も拾うが、3 因子の組が普段の
+            // 3 因子の集まりに無く種しだいなので、決まった行で持つ。実装方式 3 つを 1 本ずつ置き、主キーが 1 列の表のクエリは警告しない
+            ColumnsRow(
+                "diag-repository-single-key-composite-query-warning",
+                "複合主キーの表の名前付きクエリは、表の警告に続けてクエリを 1 件ずつ警告で名指しし、主キーが 1 列の表のクエリは警告しない（生成物はコンパイルできる）",
+                () =>
+                    Columns_SingleKeyQueryDiagram(
+                        Columns_SingleKeyTable("order_lines", ("order_id", true), ("line_no", true))
+                    ),
+                Columns_RepositoryOnlyOptions(),
+                DiagnosticExpectation.Exact([
+                    ExpectedDiagnostic.Warning(
+                        nameof(Strings.CodeGen_Warning_CompositeKey),
+                        "order_lines"
+                    ),
+                    ExpectedDiagnostic.Warning(
+                        nameof(Strings.CodeGen_Warning_RepositorySingleKeyOnly),
+                        "order_lines"
+                    ),
+                    .. Columns_SkippedQueryWarnings("order_lines"),
+                ]),
+                ColumnsGenerated,
+                compile: true
+            ),
+            ColumnsRow(
+                "diag-repository-single-key-keyless-query-warning",
+                "主キーなしの表の名前付きクエリは、表の警告に続けてクエリを 1 件ずつ警告で名指しし、主キーが 1 列の表のクエリは警告しない（生成物はコンパイルできる）",
+                () =>
+                    Columns_SingleKeyQueryDiagram(
+                        Columns_SingleKeyTable("audit_logs", ("message", false))
+                    ),
+                Columns_RepositoryOnlyOptions(),
+                DiagnosticExpectation.Exact([
+                    ExpectedDiagnostic.Warning(
+                        nameof(Strings.CodeGen_Warning_RepositorySingleKeyOnly),
+                        "audit_logs"
+                    ),
+                    .. Columns_SkippedQueryWarnings("audit_logs"),
+                ]),
+                ColumnsGenerated,
+                compile: true
+            ),
+            ColumnsRow(
+                "diag-repository-single-key-query-without-contract-no-warning",
+                "Repository 契約を生成しない構成（エンティティだけ）では、表の警告と同じくクエリの警告も出さない（どの表にも Repository が無い構成）",
+                () =>
+                    Columns_SingleKeyQueryDiagram(
+                        Columns_SingleKeyTable("order_lines", ("order_id", true), ("line_no", true))
+                    ),
+                new CodeGenerationOptions { RootNamespace = "Sample.Domain" },
+                DiagnosticExpectation.Exact([
+                    ExpectedDiagnostic.Warning(
+                        nameof(Strings.CodeGen_Warning_CompositeKey),
+                        "order_lines"
+                    ),
+                ]),
+                ColumnsGenerated,
+                compile: true
+            ),
             // ===== 同じ列ペアの外部キーの重複 =====
             Columns_DuplicateForeignKeyRow(
                 "diag-duplicate-foreign-key-explicit-names",
@@ -1686,6 +1746,79 @@ internal static partial class CodegenCases
     /// <summary>RepositorySingleKeyWarningTests の図（単一主キーの customers と、複合主キーまたは主キーなしの表）</summary>
     private static ErDiagram Columns_SingleKeyDiagram(Entity table) =>
         new() { Entities = { Columns_SingleKeyTable("customers", ("id", true)), table } };
+
+    /// <summary>Repository を作らない表のクエリの名前（簡易 DSL・生 SQL・手動実装の定義順）</summary>
+    private static readonly string[] Columns_SkippedQueryNames =
+    [
+        "FindFromFirstColumn",
+        "CountRaw",
+        "CountManual",
+    ];
+
+    /// <summary>
+    /// <see cref="Columns_SingleKeyDiagram"/> に名前付きクエリを足した図：主キーが 1 列の <c>customers</c> に簡易 DSL を 1 本、
+    /// もう 1 つの表（複合主キーまたは主キーなし）に簡易 DSL・生 SQL・手動実装を 1 本ずつ（<see cref="Columns_SkippedQueryNames"/> の順）
+    /// </summary>
+    private static ErDiagram Columns_SingleKeyQueryDiagram(Entity table)
+    {
+        var diagram = Columns_SingleKeyDiagram(table);
+        var customers = diagram.Entities[0];
+        var firstColumn = table.Columns[0];
+
+        diagram.Queries.AddRange([
+            new QueryDefinition
+            {
+                EntityId = customers.Id,
+                Name = "CountFromId",
+                Returns = QueryReturnShape.Count,
+                Condition = "id >= @minId",
+                Parameters =
+                {
+                    new QueryParameter { Name = "minId", SourceColumnId = customers.Columns[0].Id },
+                },
+            },
+            new QueryDefinition
+            {
+                EntityId = table.Id,
+                Name = Columns_SkippedQueryNames[0],
+                Returns = QueryReturnShape.List,
+                Condition = $"{firstColumn.Name} >= @min",
+                Parameters =
+                {
+                    new QueryParameter { Name = "min", SourceColumnId = firstColumn.Id },
+                },
+            },
+            new QueryDefinition
+            {
+                EntityId = table.Id,
+                Name = Columns_SkippedQueryNames[1],
+                Returns = QueryReturnShape.Count,
+                Implementation = QueryImplementationKind.Sql,
+                Sql = new Dictionary<string, string>
+                {
+                    [DialectNames.SqlServer] = $"SELECT COUNT(*) FROM {table.TableName}",
+                },
+            },
+            new QueryDefinition
+            {
+                EntityId = table.Id,
+                Name = Columns_SkippedQueryNames[2],
+                Returns = QueryReturnShape.Count,
+                Implementation = QueryImplementationKind.Manual,
+            },
+        ]);
+        return diagram;
+    }
+
+    /// <summary>表 <paramref name="tableName"/> のクエリ（<see cref="Columns_SkippedQueryNames"/>）を名指しする警告の期待</summary>
+    private static IEnumerable<ExpectedDiagnostic> Columns_SkippedQueryWarnings(string tableName) =>
+        Columns_SkippedQueryNames.Select(name =>
+            ExpectedDiagnostic.Warning(
+                nameof(Strings.CodeGen_Query_SkippedWithoutRepository),
+                name,
+                tableName
+            )
+        );
 
     /// <summary>NavigationNameCollisionTests.Tables（表 customers（列 profile_id）と profiles（列 customer_id・backup_customer_id））</summary>
     private static (Entity Customers, Entity Profiles) Columns_NavigationTables() =>

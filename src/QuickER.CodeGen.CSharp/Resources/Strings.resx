@@ -340,6 +340,9 @@
   <data name="CodeGen_Query_DanglingOrderByColumn" xml:space="preserve">
     <value>Named query '{0}' was skipped because an ORDER BY column was not found in the target entity.</value>
   </data>
+  <data name="CodeGen_Query_SkippedWithoutRepository" xml:space="preserve">
+    <value>Named query '{0}' was skipped because the Repository for table '{1}' is not generated (Repositories support single primary keys only).</value>
+  </data>
   <data name="CodeGen_Query_InvalidName" xml:space="preserve">
     <value>Named query name '{0}' cannot be converted to a valid method name.</value>
   </data>

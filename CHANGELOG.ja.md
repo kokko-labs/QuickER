@@ -108,6 +108,7 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 - **主キーが 1 列でない表を持つ図で、`AddGeneratedInMemoryRepositories()` が起動時に例外を投げなくなりました** — 既定の `seedSampleData: true` は全部の表にサンプルデータを入れようとし、複合主キーの表や主キーの無い表で `InvalidOperationException` を投げて登録を止めていました。サンプルデータは主キーが 1 列の表だけに入れ、主キーが 1 列でない表と、それを直接・間接に参照する表には入れません。回避のために `seedSampleData: false` で登録する必要はなくなりました
 - **Repository を作れる表が 1 つも無い図（どの表も主キーが複合か、主キーが無い）の生成コードが、コンパイルできるようになりました** — QuickER 版 Repository・EF Core 版 Repository・インメモリ Repository のどれかを有効にすると、生成コードが Repository の共通契約（`ISqlExecutor`・`IRepositoryCore<TEntity, TKey>`・`ISaveHookRegistry` など）を参照するのに、主キーが 1 列の表が無いと共通契約を出していませんでした。共通の土台はランタイムパッケージを使うときと同じくオプションだけで決まり、こうした図でも、オプションで有効にしたもの（`DbContext`・SQL の実行器・DI の登録）が出ます。Repository は今までどおり主キーが 1 列の表にだけ足します
 - **主キーの列に NULL 許容の印がある図で、`AddGeneratedInMemoryRepositories()` が起動時に例外を投げなくなりました** — 既定の `seedSampleData: true` が 3 行に 1 行その列を null のままにし、インメモリのストアが主キーの値の無い行を断っていました。生成コードは主キーの列を NOT NULL として扱うようになりました（Breaking changes を参照）。このような図は、主キーの行の必須の欄が空の Excel 定義書の取込、NULL 許容の型の `[Key]` プロパティを持つ C# コードの取込、手で書いた図のファイルから生まれます
+- **主キーが 1 列でない表（複合主キー・主キーなし）の名前付きクエリが黙って生成されないことがなくなり、クエリごとに警告で名指しするようになりました** — 名前付きクエリは表の Repository のメソッドなので、Repository を作らない表のクエリは生成されません。これまでは表の Repository を飛ばす警告しか出ず、クエリが消えたことに気づけませんでした。生成は止めません。Repository をまったく生成しない構成では、これまでどおりどちらの警告も出ません
 
 #### コード生成ダイアログ
 
