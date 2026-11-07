@@ -96,6 +96,45 @@ internal static partial class MockOutputsRows
                     }
                 )
             ),
+            .. new[] { ("same", "A.html"), ("case", "a.HTML") }.SelectMany(c =>
+                new[] { "en-US", "ja-JP" }.Select(culture =>
+                    Row(
+                        $"load-duplicate-screen-file-is-refused-{c.Item1}-{culture}",
+                        $"手で書いた mock.json に同じ画面のファイル（A.html と {c.Item2}＝大文字小文字を区別しない）が 2 回あると、Open は破損として UI の言語（{culture}）の文言で断り、2 件目のファイル名を名指しする（保存が先頭だけを更新し、削除が両方を消す形にしない）",
+                        [(MockOutputSut.Load, "load-duplicate-screen-file")],
+                        context =>
+                        {
+                            context.WriteManifest(
+                                $$"""
+                                {
+                                  "version": 1,
+                                  "screens": [
+                                    { "file": "A.html", "name": "A1" },
+                                    { "file": "B.html", "name": "B" },
+                                    { "file": "{{c.Item2}}", "name": "A2" }
+                                  ]
+                                }
+                                """
+                            );
+
+                            var act = () =>
+                                WithUiCulture(culture, () => MockFolderStore.Open(context.Folder));
+                            var expected = WithUiCulture(
+                                culture,
+                                () =>
+                                    string.Format(
+                                        CultureInfo.InvariantCulture,
+                                        Strings.Mock_ManifestDuplicateScreenFileFormat,
+                                        MockManifest.ManifestFileName,
+                                        c.Item2
+                                    )
+                            );
+
+                            act.Should().Throw<InvalidOperationException>().WithMessage(expected);
+                        }
+                    )
+                )
+            ),
             Row(
                 "load-legacy-manifest-without-entities-opens",
                 "entities を持たない旧い形の mock.json を開け、宣言の無い画面は宣言なしのまま読める",

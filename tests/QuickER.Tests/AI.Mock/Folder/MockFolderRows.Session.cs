@@ -489,6 +489,64 @@ internal static partial class MockFolderRows
                     recorded[0].Name.Should().Be("Order");
                 }
             ),
+            Row(
+                "session-tool-save-screen-non-object-entities-warn-and-skip",
+                "オブジェクトでない宣言の要素（文字列・数・null・bool）は要素ごとに警告して読み飛ばし、ほかの宣言は記録する（名前が空の要素と同じ扱い）",
+                MockFolderEntry.SessionTool,
+                MockFolderOutcome.Succeeds,
+                h =>
+                {
+                    Start(h);
+                    var args =
+                        SaveScreenArgs("OrderList.html", "注文一覧", ScreenHtml("<h1>一覧</h1>"))
+                            .TrimEnd('}')
+                        + ",\"entities\":[\"Order\", 1, null, true, {\"name\": \"Customer\", \"operations\": \"r\"}]}";
+
+                    var (result, success) = h.Execute(SaveScreenTool, args);
+
+                    success.Should().BeTrue();
+                    static bool IsNonObjectWarning(string w) =>
+                        w.Contains("entity declaration", StringComparison.Ordinal)
+                        && w.Contains("not a JSON object", StringComparison.Ordinal);
+                    h.ScreenSavedEvents.Single().Warnings.Count(IsNonObjectWarning).Should().Be(4);
+                    result.Split('\n').Count(IsNonObjectWarning).Should().Be(4);
+                    var recorded = RecordedEntities(h);
+                    recorded.Should().ContainSingle();
+                    recorded[0].Name.Should().Be("Customer");
+                    recorded[0].Operations.Should().Be("R");
+                }
+            ),
+            Row(
+                "session-tool-save-screen-non-object-transitions-warn-and-skip",
+                "オブジェクトでない遷移の要素（文字列・数・null）は要素ごとに警告して読み飛ばし、ほかの遷移は記録する",
+                MockFolderEntry.SessionTool,
+                MockFolderOutcome.Succeeds,
+                h =>
+                {
+                    Start(h);
+                    var args =
+                        SaveScreenArgs(
+                                "OrderList.html",
+                                "注文一覧",
+                                ScreenHtml("<a href=\"OrderDetail.html\">詳細</a>")
+                            )
+                            .TrimEnd('}')
+                        + ",\"transitions\":[\"OrderDetail.html\", 1, null, {\"to\": \"OrderDetail.html\", \"trigger\": \"行クリック\"}]}";
+
+                    var (result, success) = h.Execute(SaveScreenTool, args);
+
+                    success.Should().BeTrue();
+                    static bool IsNonObjectWarning(string w) =>
+                        w.Contains("transition declaration", StringComparison.Ordinal)
+                        && w.Contains("not a JSON object", StringComparison.Ordinal);
+                    h.ScreenSavedEvents.Single().Warnings.Count(IsNonObjectWarning).Should().Be(3);
+                    result.Split('\n').Count(IsNonObjectWarning).Should().Be(3);
+                    var transition = h.Reopen().Transitions.Should().ContainSingle().Which;
+                    transition.From.Should().Be("OrderList.html");
+                    transition.To.Should().Be("OrderDetail.html");
+                    transition.Trigger.Should().Be("行クリック");
+                }
+            ),
             .. new[]
             {
                 ("nameless", """[{"name": ""}]"""),

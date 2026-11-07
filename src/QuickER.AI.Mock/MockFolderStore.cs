@@ -139,7 +139,7 @@ public sealed class MockFolderStore
 
     /// <summary>
     /// 既存のモックフォルダを開く。<c>mock.json</c> 不在・JSON 破損・新フォーマット（Version 超過）・
-    /// 画面ファイル名の不正（手編集による <c>".."</c> やパス区切りの混入等）は
+    /// 画面ファイル名の不正（手編集による <c>".."</c> やパス区切りの混入等）・同じ画面ファイルの重複（大文字小文字を無視）は
     /// 呼び出し側でユーザー提示できる明確なメッセージ（UI 言語に追従）の例外を投げる。
     /// 手編集で入り得る <c>null</c> は、文字列なら空文字へ補い、リストの要素そのものが <c>null</c> なら
     /// 黙って捨てる（要素は何の情報も持たないため。図ファイルの読み込みと同じ扱い）。
@@ -212,6 +212,10 @@ public sealed class MockFolderStore
         // 画面ファイル名は保存経路（SaveScreen/RemoveScreen/GetScreenHtml）と同じ規則で読み込み時にも検証し、
         // ".." やパス区切りを含む不正な名前は破損として開いた時点で拒否する
         // （後段のエクスポートが GetScreenHtml 経由の未処理例外で落ちる形にしないため）。
+        // 同じ画面（ファイル名が大文字小文字を無視して一致）が 2 回あるものも破損として拒否する。ストアは画面を
+        // この比較で同定するので、開くと保存は先頭だけを更新し、削除は両方を消す。どちらを残すかは決められない
+        var screenFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var screen in manifest.Screens)
         {
             try
@@ -227,6 +231,17 @@ public sealed class MockFolderStore
                         ex.Message
                     ),
                     ex
+                );
+            }
+
+            if (!screenFiles.Add(screen.File))
+            {
+                throw new InvalidOperationException(
+                    string.Format(
+                        Strings.Mock_ManifestDuplicateScreenFileFormat,
+                        MockManifest.ManifestFileName,
+                        screen.File
+                    )
                 );
             }
         }

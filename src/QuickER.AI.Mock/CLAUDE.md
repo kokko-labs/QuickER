@@ -14,6 +14,9 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
   - 失敗で残る一時の食い違いは 3 つだけ：`SaveScreen` が `mock.json` で失敗して残る「宣言の無い HTML」、`RemoveScreen` が `mock.json` で失敗して残る「HTML の無い宣言」、`SaveStylesheet` が `mock.json` で失敗して残る「新しい CSS」（CSS を先に書き、マニフェストは差し替えない＝上の順と合う）。どれもその画面・CSS への次の保存の成功で解ける。
   - 保存単位の操作の列（`MockFolderTests`）は、組（`MockFolderHarness`）がどの手の後にも見張る：失敗した手は `mock.json` のバイト列もメモリのマニフェストも変えない・メモリは `mock.json` と一緒にしか変わらない・一時ファイルが残らない・宣言と HTML の整合と `style.css` の内容（上の 3 つだけを許す）・`SourceSchema` は初回ターンの成功でだけ変わる・エンジンの完了 1 回につき `TurnCompleted` 1 回・保存の通知は成功したツールのときだけ。
 - 新規作成の `mock.json` は置き換えない書き込み（`AtomicFile.CreateText`）で作る。存在の確認の後に別のプロセスが作った `mock.json` を上書きせず、事前の確認と同じ例外にする。ガード：`MockFolderTests`（行 `create-new-keeps-foreign-manifest-written-after-check`）。
+- **手で書いた `mock.json` の不正な形は、`Open` が破損として断る**（JSON として読めない・型の合わない要素・新しい版・不正な画面のファイル名・同じ画面のファイルの重複）。黙って直すのは、情報を持たない `null`（文字列は空へ、リストの要素の `null` は捨てる）だけ。
+  - 画面の重複は、ファイル名を `OrdinalIgnoreCase` で比べて判定する（ストアの画面の同定と同じ比較。ファイル名の検証の後に見る）。開くと保存（upsert）は先頭だけを更新し、削除は両方を消し、単一 HTML・設計書・ランナーの画面の数にも 2 回入る。どちらを残すかは決められないので、片方を捨てずに断る。文言は `Mock_ManifestDuplicateScreenFileFormat`（UI の言語に従う）で、2 件目のファイル名を名指しする。
+  - ガード：`MockOutputsTests`（行 `load-duplicate-screen-file-is-refused-*`＝同じ綴り・大文字小文字だけの違い × UI の言語 2 つ）。mutation 実証済み。
 - 会話開始時にフォルダを指定する（空フォルダ＝新規 `CreateNew`／既存モックフォルダ＝再開）。以降は 1 ターンごとにライブ保存する。
 - **再開は状態再開。** 会話履歴は保存せず、フォルダの現状（画面一覧・遷移・改訂・共有 CSS・最新スキーマ）をプロンプトへ注入して続きから作る。バックエンド非依存で、API キー / Codex / Claude Code で同じ再開ができる。
 
@@ -30,6 +33,8 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
 
 - ツールは英語正本の 4 つ（`save_screen`＝完全 HTML の upsert・遷移宣言・改訂メモ／`remove_screen`／`save_stylesheet`／`get_screen`）。定義は `MockFolderDesignTools`（`ErDiagramToolCatalog` と同流儀）。
 - **検証は警告のみ。** `MockContentValidator` は外部参照・リンク切れ・style.css 未参照を警告にし、拒否は空と非 HTML（`<html>` 不含）だけ。
+- **`save_screen` の `entities`・`transitions` の壊れた要素は、要素ごとに警告して読み飛ばす**（JSON のオブジェクトでない要素・名前が空のエンティティ）。黙って捨てると、AI は宣言が記録されなかったことを知らずに進む。ER 図のツールのように `ToolArgumentShape` で呼び出しごと断る形にはしない（上の「警告のみ」の流儀。空でない `entities` の要素が 1 つも有効でなければ、既存の宣言を残して総括の警告も出す）。
+  - ガード：`MockFolderTests`（行 `session-tool-save-screen-non-object-entities-warn-and-skip`・`session-tool-save-screen-non-object-transitions-warn-and-skip`・`session-tool-save-screen-nameless-entity-warns-and-skips`・`session-tool-save-screen-all-invalid-entities-keep-declarations-*`）。mutation 実証済み。
 
 ### プレビュー
 

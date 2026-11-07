@@ -70,6 +70,8 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **Lines in the mock generation log no longer run on from the end of the AI's text**
 - **Mock project generation with an API key now passes the text of the additional-instructions field to the AI** — the other backends passed it, but the API key backend silently dropped it. The instructions go once at the end of the system prompt, so every turn sees them: the shared parts, each screen and the fix
 - **With Codex, a request whose message Codex is not reading now ends when you cancel it or when its 30-second timeout passes** — a large message (a long prompt with attachments) can fill the pipe to the Codex app-server, and when the app was busy, cancelling the stuck write had no effect, so the turn or the mock generation waited until Codex itself exited. The connection is now dropped and opened again on the next request
+- **A mock folder whose `mock.json` lists the same screen file twice no longer opens, and the message names the file** — this happens only when `mock.json` is edited by hand. File names that differ only in case count as the same. Saving such a screen updated only the first entry, removing it removed both, and the single HTML file and the design document showed the screen twice
+- **When `save_screen` receives an `entities` or `transitions` element that is not a JSON object, the tool result now warns about each one** — such elements were dropped without a word, while an entity with an empty name was already warned about
 
 #### Import and export
 
