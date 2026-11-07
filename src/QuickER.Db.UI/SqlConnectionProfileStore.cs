@@ -111,6 +111,36 @@ public sealed class ConnectionProfileStoreUnavailableException : InvalidOperatio
     public string ConnectionsPath { get; }
 }
 
+/// <summary>同じ（DBMS, 名前）のプロファイルが別に保存されていたため、保存を断ったことを表す例外</summary>
+/// <remarks>
+/// <para>
+/// 接続ダイアログは開いたときの一覧で上書き先を探すので、その後にほかのプロセス（別の QuickER のウィンドウなど）が
+/// 同じ（DBMS, 名前）のプロファイルを保存していると、上書き先を見つけられずに新しいプロファイルとして書こうとする。
+/// そのまま書くと、名前で上書き先を決める保存がどちらを指すか決まらない同名の 2 つが残る。そのためストアは、
+/// 書き込み用の 1 回の読み取りで同名を見つけたら<b>何も書かずに</b>この例外を投げる（呼び出し側の一覧の古さ・
+/// 確認ダイアログを出している間の書き込みに依らない）。
+/// </para>
+/// <para>
+/// 投げられた側から見た意味は「保存は行われていない・ファイルの中身は操作前のまま」。上書きしてよければ、
+/// <see cref="ConflictingProfile"/> の Id を置き換え先に渡して書き直す。
+/// </para>
+/// </remarks>
+public sealed class ConnectionProfileNameConflictException : InvalidOperationException
+{
+    /// <summary>衝突したプロファイルを指定して例外を生成する</summary>
+    /// <param name="conflictingProfile">ディスクにあった同じ（DBMS, 名前）のプロファイル</param>
+    public ConnectionProfileNameConflictException(SqlConnectionProfile conflictingProfile)
+        : base(
+            $"Another connection profile named '{conflictingProfile.Name}' for '{conflictingProfile.Dbms}' is already saved, so saving was aborted."
+        )
+    {
+        ConflictingProfile = conflictingProfile;
+    }
+
+    /// <summary>ディスクにあった同じ（DBMS, 名前）のプロファイル</summary>
+    public SqlConnectionProfile ConflictingProfile { get; }
+}
+
 /// <summary>SQL 接続プロファイルを JSON ファイルへ保存・読込するストア</summary>
 /// <remarks>
 /// <para>
@@ -392,9 +422,16 @@ public class SqlConnectionProfileStore
     /// 2 回の読み書きになり、2 回目が読めなかったときに<b>置き換え先だけが消えて対象は変わらない</b>
     /// 状態が残る（名前の変更でこれが起きると、一覧には消えたはずのプロファイルが居座る）。
     /// </para>
+    /// <para>
+    /// 対象（<paramref name="profile"/> の Id）でも置き換え先でもない同じ（DBMS, 名前）のプロファイルがあれば、何も書かずに断る
+    /// （<see cref="ThrowIfNameConflicts"/>）。上書きしてよければ、衝突したプロファイルの Id を <paramref name="replacedProfileId"/> に渡す。
+    /// </para>
     /// </remarks>
     /// <exception cref="ConnectionProfileStoreUnavailableException">
     /// 接続情報ファイルを読み取れず保存を中止した（ファイルの中身は操作前のまま）
+    /// </exception>
+    /// <exception cref="ConnectionProfileNameConflictException">
+    /// 同じ（DBMS, 名前）のプロファイルが別にあり保存を断った（ファイルの中身は操作前のまま・渡したインスタンスも書き換えない）
     /// </exception>
     public void Upsert(
         SqlConnectionProfile profile,
@@ -403,6 +440,7 @@ public class SqlConnectionProfileStore
     )
     {
         var data = LoadDataForWrite();
+        ThrowIfNameConflicts(data, profile.Id, profile.Dbms, profile.Name, replacedProfileId);
         var hasPassword = NormalizeSavePassword(profile, password);
 
         if (replacedProfileId is { } replacedId && replacedId != profile.Id)
@@ -437,6 +475,38 @@ public class SqlConnectionProfileStore
         }
     }
 
+    /// <summary>
+    /// 書き込み用に読んだ一覧に、対象でも置き換え先でもない同じ（DBMS, 名前）のプロファイルがあれば、何も書かずに断る
+    /// </summary>
+    /// <param name="data">書き込み用に読んだ接続情報（<see cref="LoadDataForWrite"/>）</param>
+    /// <param name="id">書くプロファイルの Id</param>
+    /// <param name="dbms">書くプロファイルの DBMS</param>
+    /// <param name="name">書くプロファイルの名前</param>
+    /// <param name="replacedProfileId">同時に削除するプロファイルの Id（衝突とみなさない）</param>
+    /// <remarks>
+    /// 判定は書き込みと同じ 1 回の読み取りの上で行う。呼び出し側の一覧が古くても（開いた後にほかのプロセスが同名を保存した）、
+    /// 上書きの確認を出している間に書かれても、ディスクに同名の 2 つを作らない。比べ方は <see cref="SqlConnectionProfile.HasEntryKey"/>。
+    /// 正規化（<see cref="NormalizeSavePassword"/>）より前に呼ぶ（断ったときに渡したインスタンスを書き換えないため）。
+    /// </remarks>
+    /// <exception cref="ConnectionProfileNameConflictException">同じ（DBMS, 名前）のプロファイルが別にある</exception>
+    private static void ThrowIfNameConflicts(
+        SqlConnectionData data,
+        Guid id,
+        string dbms,
+        string name,
+        Guid? replacedProfileId
+    )
+    {
+        var conflict = data.Profiles.Find(p =>
+            p.Id != id && p.Id != replacedProfileId && p.HasEntryKey(dbms, name)
+        );
+
+        if (conflict is not null)
+        {
+            throw new ConnectionProfileNameConflictException(conflict);
+        }
+    }
+
     /// <summary>プロファイルの名前だけを変更する（パスワードの暗号ファイルには触れない）</summary>
     /// <param name="id">名前を変えるプロファイルの Id</param>
     /// <param name="newName">変更後の名前</param>
@@ -452,9 +522,16 @@ public class SqlConnectionProfileStore
     /// 暗号ファイルはそのまま引き継がれる。
     /// </para>
     /// <para>読み取りが 1 回だけである理由は <see cref="Upsert"/> と同じ。置き換え先の暗号ファイルを JSON より先に消す理由はクラスの説明を参照。</para>
+    /// <para>
+    /// 対象が見つかった後、対象でも置き換え先でもない同じ（DBMS, 新しい名前）のプロファイルがあれば、何も書かずに断る
+    /// （<see cref="ThrowIfNameConflicts"/>。対象が無いときは衝突より先に <c>false</c>）。
+    /// </para>
     /// </remarks>
     /// <exception cref="ConnectionProfileStoreUnavailableException">
     /// 接続情報ファイルを読み取れず変更を中止した（ファイルの中身は操作前のまま）
+    /// </exception>
+    /// <exception cref="ConnectionProfileNameConflictException">
+    /// 同じ（DBMS, 名前）のプロファイルが別にあり変更を断った（ファイルの中身は操作前のまま）
     /// </exception>
     public bool Rename(Guid id, string newName, Guid? replacedProfileId = null)
     {
@@ -466,6 +543,7 @@ public class SqlConnectionProfileStore
             return false;
         }
 
+        ThrowIfNameConflicts(data, id, target.Dbms, newName, replacedProfileId);
         target.Name = newName;
 
         if (replacedProfileId is { } replacedId && replacedId != id)

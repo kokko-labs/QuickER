@@ -65,8 +65,9 @@ internal enum ConnectionDialects
 /// <item>エラーのモーダルは OK の前回接続の記録の失敗だけで出し、出しても確定は止めない（:982-998）。ほかの失敗はステータス行で知らせる（:703-705）。</item>
 /// <item>SQLite の新規作成で作ったファイルを、作った後に誰も掴んでいない（:952-957 の <c>SqliteDatabaseFile.CreateEmpty</c> はプールしない接続で作る＝src/QuickER.Provider.Sqlite/SqliteFileConnections.cs）。掴んでいると、作った直後に利用者がファイルを移動・削除できない。排他で開けるかで見る。</item>
 /// <item>選択を付け替えた手の後、選択中のプロファイルがあれば、保存名の欄はその名前（選んだプロファイルが入力欄に当たった。:526-578）。同じ項目の選び直し（セッターが何もしない）は対象外。食い違うと、名前の変更・削除が入力欄に出ていないプロファイルに効く。</item>
+/// <item>開いた直後、connections.json が壊れていれば（ストアの分類 Corrupt＝JSON として読めない・旧配列形式）、一覧も選択も空で、ステータス行が壊れていること・ファイルの場所・最初に壊れていたファイルの写しの場所を知らせている（ProfilesCorrupt。ReloadProfiles）。読めない一覧を「保存されたものが無い」と同じ空として黙って出さない。</item>
 /// </list>
-/// 3・4 は VM の変更通知でも見張り、1・2・3・5・8〜12 は手の後に、6 は保存・名前の変更・削除の後と行の終わりに、7・9・12 は行の終わりに、13 は選択の手の後に見る。
+/// 3・4 は VM の変更通知でも見張り、1・2・3・5・8〜12 は手の後に、6 は保存・名前の変更・削除の後と行の終わりに、7・9・12 は行の終わりに、13 は選択の手の後に、14 は開いた直後に見る。
 /// </remarks>
 internal sealed class ConnectionDialogHarness : IDisposable
 {
@@ -128,6 +129,18 @@ internal sealed class ConnectionDialogHarness : IDisposable
     /// </summary>
     public void LockConnectionsFileOnNextRead() => TestStore.LockOnNextRead();
 
+    /// <summary>
+    /// 同じ保存先を指す別のストア（ダイアログを開いた後に connections.json を書き換える、ほかのプロセス
+    /// ＝別の QuickER のウィンドウの代役。VM のストアの掴む手の影響を受けない）
+    /// </summary>
+    public SqlConnectionProfileStore OtherProcessStore => new(_folder.Path, _dpapi);
+
+    /// <summary>
+    /// 次の一覧の読み直しの直前に connections.json を JSON として読めない内容で書き換える（書き込みは成功し、直後の読み直しだけが
+    /// 壊れたファイルを読む状況＝書いた直後にほかのプロセスが壊した形を作る）
+    /// </summary>
+    public void CorruptConnectionsFileOnNextRead() => TestStore.CorruptOnNextRead();
+
     /// <summary><see cref="LockConnectionsFileOnNextRead"/> で掴んだ connections.json を放す</summary>
     public void ReleaseReadLock() => TestStore.ReleaseLock();
 
@@ -180,6 +193,7 @@ internal sealed class ConnectionDialogHarness : IDisposable
         }
 
         Watch(vm);
+        CheckCorruptFileReportedOnOpen(vm);
         _vms.Add(vm);
         return vm;
     }
@@ -713,6 +727,36 @@ internal sealed class ConnectionDialogHarness : IDisposable
         if (duplicated.Count > 0)
         {
             Violate($"不変条件 9：一覧に同じ（DBMS, 名前）のプロファイルが並んだ（{when}）");
+        }
+    }
+
+    /// <summary>壊れた connections.json を知らせるステータス行の文（行のストアのパスで組み立てる）</summary>
+    public string ProfilesCorruptMessage =>
+        string.Format(
+            Strings.DbConnection_ProfilesCorrupt,
+            Store.ConnectionsPath,
+            Store.CorruptBackupPath
+        );
+
+    /// <summary>不変条件 14（開いた直後、壊れた connections.json を空の一覧として黙って出さない）</summary>
+    /// <remarks>分類はほかのプロセスの代役のストアで読む（行のストアの次の読み取りに掛けた手を消費しない）。</remarks>
+    private void CheckCorruptFileReportedOnOpen(DbConnectionDialogViewModel vm)
+    {
+        if (OtherProcessStore.Read().Status != ConnectionFileStatus.Corrupt)
+        {
+            return;
+        }
+
+        if (vm.Profiles.Count > 0 || vm.SelectedProfileItem is not null)
+        {
+            Violate("不変条件 14：壊れた connections.json で開いたのに一覧か選択がある");
+        }
+
+        if (vm.StatusMessage != ProfilesCorruptMessage)
+        {
+            Violate(
+                $"不変条件 14：壊れた connections.json で開いたのに、ステータス行が壊れていることを知らせていない（{vm.StatusMessage}）"
+            );
         }
     }
 

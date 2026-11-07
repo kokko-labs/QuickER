@@ -140,22 +140,26 @@ internal sealed class ConnectionDialogFiles : IFileDialogService
 }
 
 /// <summary>
-/// 本物のストアのまま、頼まれたときだけ次の読み取りの直前に connections.json を排他で掴むストア
-/// （書き込みは成功し、直後の読み直しだけが読めない状況を作る）
+/// 本物のストアのまま、頼まれたときだけ次の読み取りの直前に connections.json を排他で掴む（または壊す）ストア
+/// （書き込みは成功し、直後の読み直しだけが読めない・壊れたファイルを読む状況を作る）
 /// </summary>
 /// <remarks>
 /// 保存・名前の変更・削除は、書き込みと直後の読み直しの間に呼び出し側へ戻らないので、外から掴む隙が無い。
-/// 掴むのは本物のファイルで、読み取りの結果は本物のストアの分類（Unavailable）のまま返る。
+/// 掴む・壊すのは本物のファイルで、読み取りの結果は本物のストアの分類（Unavailable・Corrupt）のまま返る。
 /// 掴んだハンドルは <see cref="ReleaseLock"/> で放す（組が行の終わりの見張りの前に放す）。
 /// </remarks>
 internal sealed class ConnectionDialogStore(string folder, bool useDpapi)
     : SqlConnectionProfileStore(folder, useDpapi)
 {
     private bool _lockOnNextRead;
+    private bool _corruptOnNextRead;
     private FileStream? _lock;
 
     /// <summary>次の <see cref="Read"/> の直前に connections.json を掴むよう頼む</summary>
     public void LockOnNextRead() => _lockOnNextRead = true;
+
+    /// <summary>次の <see cref="Read"/> の直前に connections.json を JSON として読めない内容で書き換えるよう頼む</summary>
+    public void CorruptOnNextRead() => _corruptOnNextRead = true;
 
     /// <summary>掴んだ connections.json を放す（掴んでいなければ何もしない）</summary>
     public void ReleaseLock()
@@ -171,6 +175,12 @@ internal sealed class ConnectionDialogStore(string folder, bool useDpapi)
         {
             _lockOnNextRead = false;
             _lock = new FileStream(ConnectionsPath, FileMode.Open, FileAccess.Read, FileShare.None);
+        }
+
+        if (_corruptOnNextRead)
+        {
+            _corruptOnNextRead = false;
+            File.WriteAllText(ConnectionsPath, "{ not json");
         }
 
         return base.Read();

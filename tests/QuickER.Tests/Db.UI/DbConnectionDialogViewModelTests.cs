@@ -143,7 +143,9 @@ public class DbConnectionDialogViewModelTests : IDisposable
 
         var body = source[start..end];
 
-        body.Should().Contain("_store.Rename(target.Id, newName, conflict?.Id)");
+        // 置き換え先（一覧で見つけた同名か、ストアが衝突で断った後に確認したもの）は同じ 1 回の呼び出しへ渡す。
+        // 衝突で断られた呼び出しは何も書かないので、書き直しの 2 回目も「置き換えと改名を 1 回で」のまま
+        body.Should().Contain("_store.Rename(target.Id, newName, replacedId)");
         body.Should()
             .NotContain(
                 "LoadPassword",

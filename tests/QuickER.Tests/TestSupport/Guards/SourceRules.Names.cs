@@ -312,19 +312,7 @@ internal static partial class SourceRules
                 ),
                 new(
                     "src/QuickER.Db.UI/DbConnectionDialogViewModel.cs",
-                    "varexisting=Profiles.FirstOrDefault(p=>string.Equals(p.Profile.Name,name,StringComparison.",
-                    1,
-                    "モデルの名前ではない（接続プロファイル名）"
-                ),
-                new(
-                    "src/QuickER.Db.UI/DbConnectionDialogViewModel.cs",
                     "privateboolCanRenameProfile()=>SelectedProfileis{}profile&&!string.IsNullOrWhiteSpace(Prof",
-                    1,
-                    "モデルの名前ではない（接続プロファイル名）"
-                ),
-                new(
-                    "src/QuickER.Db.UI/DbConnectionDialogViewModel.cs",
-                    "varconflict=Profiles.Select(item=>item.Profile).FirstOrDefault(profile=>profile.Id!=target",
                     1,
                     "モデルの名前ではない（接続プロファイル名）"
                 ),

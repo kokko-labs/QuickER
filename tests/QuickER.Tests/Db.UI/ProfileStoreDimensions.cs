@@ -83,6 +83,7 @@ internal static class ProfileStoreDimensions
                 "tests/QuickER.Tests/Db.UI/ProfileStoreDimensions.cs",
                 "tests/QuickER.Tests/Db.UI/ProfileStoreRows.cs",
                 "tests/QuickER.Tests/Db.UI/ProfileStoreRows.Basic.cs",
+                "tests/QuickER.Tests/Db.UI/ProfileStoreRows.Conflict.cs",
                 "tests/QuickER.Tests/Db.UI/ProfileStoreRows.Legacy.cs",
                 "tests/QuickER.Tests/Db.UI/ProfileStoreRows.Tls.cs",
                 "tests/QuickER.Tests/Db.UI/ProfileStoreRows.Unreadable.cs",

@@ -98,7 +98,7 @@ internal static class ConnectionDialogDimensions
         new(
             EngineIds.Ai,
             "DbConnectionDialog",
-            "接続ダイアログの操作の列の表（状態 × 手の種類・どの手の後にも不変条件 13 個を見張る）",
+            "接続ダイアログの操作の列の表（状態 × 手の種類・どの手の後にも不変条件 14 個を見張る）",
             Table,
             ConnectionDialogRows.Table.Count,
             [
@@ -106,11 +106,13 @@ internal static class ConnectionDialogDimensions
                 "tests/QuickER.Tests/Db.UI/ConnectionDialog/ConnectionDialogFakes.cs",
                 "tests/QuickER.Tests/Db.UI/ConnectionDialog/ConnectionDialogHarness.cs",
                 "tests/QuickER.Tests/Db.UI/ConnectionDialog/ConnectionDialogRows.cs",
+                "tests/QuickER.Tests/Db.UI/ConnectionDialog/ConnectionDialogRows.Corrupt.cs",
                 "tests/QuickER.Tests/Db.UI/ConnectionDialog/ConnectionDialogRows.Failure.cs",
                 "tests/QuickER.Tests/Db.UI/ConnectionDialog/ConnectionDialogRows.Ok.cs",
                 "tests/QuickER.Tests/Db.UI/ConnectionDialog/ConnectionDialogRows.Open.cs",
                 "tests/QuickER.Tests/Db.UI/ConnectionDialog/ConnectionDialogRows.Profile.cs",
                 "tests/QuickER.Tests/Db.UI/ConnectionDialog/ConnectionDialogRows.Sqlite.cs",
+                "tests/QuickER.Tests/Db.UI/ConnectionDialog/ConnectionDialogRows.Stale.cs",
                 "tests/QuickER.Tests/Db.UI/ConnectionDialog/ConnectionDialogRows.Sweep.cs",
                 "tests/QuickER.Tests/Db.UI/ConnectionDialog/ConnectionDialogRows.SweepFailure.cs",
                 "tests/QuickER.Tests/Db.UI/ConnectionDialog/ConnectionDialogTests.cs",
