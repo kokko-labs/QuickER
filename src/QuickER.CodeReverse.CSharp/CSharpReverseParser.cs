@@ -28,7 +28,8 @@ namespace QuickER.CodeReverse.CSharp;
 ///     <c>NativeType</c> 名前付き引数（生成側が「トークン経由では綴りが変わる列」にだけ刻む元の型表記）があり、
 ///     それを対象方言で解析した正規型がトークンの正規型と一致するときは、そちらを採って綴りごと復元する</item>
 ///   <item>PK＝<c>[Key]</c>・NULL 許容＝プロパティ型が <c>?</c> 付き（<see cref="NullableTypeSyntax"/>）。
-///     生成コードは <c>#nullable enable</c> のもと NULL 許容列を型の <c>?</c> として必ず表すため、値型・参照型・VO の全ケースで型構文が正</item>
+///     生成コードは <c>#nullable enable</c> のもと NULL 許容列を型の <c>?</c> として必ず表すため、値型・参照型・VO の全ケースで型構文が正。
+///     主キーの列は <c>?</c> が付いていても NOT NULL（<see cref="ColumnNullability.AllowsNull"/>）</item>
 ///   <item>説明＝<c>[DbColumnMeta].Description</c> / <c>[DbTableMeta].Description</c></item>
 ///   <item>UNIQUE 制約＝クラスレベルの <c>[UniqueConstraint("PropA", "PropB", Name = "UQ_…")]</c>
 ///     （プロパティ名 → 同クラスの <c>[Column]</c> → 復元済み列 Id へ逆写像。構成列が解決できない制約は制約ごとスキップ＋警告）</item>
@@ -632,7 +633,7 @@ public sealed class CSharpReverseParser
         // 出ず、VO 無し・値型 NOT NULL 非 PK 列（例 int Amount）を NULL 許容と誤判定するため）。
         var isNullable = property.Type is NullableTypeSyntax;
 
-        return new Column
+        var column = new Column
         {
             Name = columnName,
             DataType = ResolveDataType(
@@ -655,6 +656,12 @@ public sealed class CSharpReverseParser
             // 主キーの採番列はコードから復元できない（コードはその列を普通の列として書き込む）
             IsIdentity = HasAttribute(property.AttributeLists, "IdentityColumn"),
         };
+
+        // 主キーの列は型に ? があっても NOT NULL で読む（DDL・C# 生成・ほかの取込と同じ判定）。
+        // 生成コードは主キーに ? を付けないので、? の付いた主キーは手書きのコードだけが持つ
+        column.IsNullable = ColumnNullability.AllowsNull(column);
+
+        return column;
     }
 
     /// <summary>型トークンを対象方言のネイティブ型へ展開する（展開不能はトークン文字列をそのまま採用し警告）</summary>

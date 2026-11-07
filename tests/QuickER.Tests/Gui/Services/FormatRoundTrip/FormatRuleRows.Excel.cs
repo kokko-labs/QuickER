@@ -224,6 +224,28 @@ internal static partial class FormatRuleRows
                     )
                     .Row()
             ),
+            // 主キーの列は NULL を持てない（DDL・C# 生成・ほかの取込と同じ ColumnNullability.AllowsNull）。
+            // 必須の欄が空の主キーの行を NULL 許容で読むと、図だけが DDL と食い違う
+            ExcelRule(
+                    "excel-rule-primary-key-row-with-empty-required-cell-is-not-null",
+                    "必須の欄が空の行は NULL 許容で読むが、主キーの行は NOT NULL で読む"
+                )
+                .Workbook(
+                    ExcelSampleWorkbook(workbook =>
+                    {
+                        var category = workbook.Worksheet("Category");
+                        var row = TableDefinitionDocumentLayout.DetailColumnDataStartRow;
+
+                        // CategoryId（主キー）と CategoryName（主キーでない）の必須の欄を空にする
+                        category.Cell(row, 5).Value = string.Empty;
+                        category.Cell(row + 1, 5).Value = string.Empty;
+                    })
+                )
+                .Expect(e =>
+                    e.Imported.Single("PrimaryKey Category.CategoryId")
+                        .Single("Nullability Category.CategoryId = notnull")
+                        .Single("Nullability Category.CategoryName = null")
+                ),
         ];
 
     /// <summary>

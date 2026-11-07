@@ -337,6 +337,10 @@ internal sealed class ExcelAdapter : FormatAdapter
             "src/QuickER.Gui/Services/TableDefinitionDocumentImporter.cs（544 行）：リレーション一覧の子の列に外部キーの印を立てる（docs 未記載）"
         ),
         new(
+            Facet.PrimaryKeyNullability,
+            "docs/import-export.ja.md「Excel 定義書（.xlsx）」（インポート）：必須のセルが空の列は NULL 許容で読むが、主キーの列は NOT NULL で読む"
+        ),
+        new(
             Facet.UniqueName,
             "docs/import-export.ja.md「Excel 定義書（.xlsx）」（インポート）：制約名は定義書に載らないため未設定"
         ),
@@ -536,7 +540,7 @@ internal sealed class CSharpReverseAdapter : FormatAdapter
         ),
         new(
             Facet.PrimaryKeyNullability,
-            "src/QuickER.CodeGen.CSharp/CLAUDE.md「主キーの列の NULL 許容」：コード生成は主キーの列を NULL 許容の印に依らず NOT NULL とみなす（プロパティは NULL を許さない型）ので、C# コードから取り込むと主キーの列は NOT NULL になる"
+            "docs/import-export.ja.md「C# コード（.cs）」：主キーの列は型に ? が付いていても NOT NULL で読む（コード生成も主キーの列を NULL 許容の印に依らず NOT NULL とみなし、NULL を許さない型で書く＝src/QuickER.CodeGen.CSharp/CLAUDE.md「主キーの列の NULL 許容」）"
         ),
         new(
             Facet.BrokenColumnPairs,

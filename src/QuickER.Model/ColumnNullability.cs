@@ -5,9 +5,13 @@ namespace QuickER.Model;
 /// </summary>
 /// <remarks>
 /// <para>
-/// DB の主キーは NULL を持てない。図は主キーの列に NULL 許容の印を持てる（Excel 定義書の取込・C# リバース・
-/// 図のファイルの手書きで作れる）が、DDL はその列を NOT NULL で作る。生成コードも同じ規則で読むため、
+/// DB の主キーは NULL を持てない。図は主キーの列に NULL 許容の印を持てる（図のファイルの手書きなどで作れる）が、
+/// DDL はその列を NOT NULL で作る。生成コードも同じ規則で読むため、
 /// 判定をここに 1 つだけ置く（C# 生成の入口 <c>CSharpCodeGenerationService.Generate</c> が使う）。
+/// </para>
+/// <para>
+/// 取込（Excel 定義書の <c>TableDefinitionDocumentImporter</c>・C# リバースの <c>CSharpReverseParser</c>）も、
+/// 列を組んだ直後にこの判定で NULL 許容の印を決め直し、主キーの列を NOT NULL で読む（DBML・Mermaid・DB の取込と同じ結果）。
 /// </para>
 /// <para>
 /// <see cref="Column"/> は JSON で保存する POCO なので、プロパティにせず静的な判定にする

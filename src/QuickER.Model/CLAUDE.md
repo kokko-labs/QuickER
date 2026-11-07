@@ -168,6 +168,7 @@ PK の順序の正本は `Entity.PrimaryKeyColumnIds`（列 Guid・宣言順）�
 - `Column` は JSON で保存する POCO なので、プロパティにせず静的な判定にする（読み取り専用のプロパティも書き出しの対象になり、図のファイルの形が変わる）
 - 使うのは C# 生成の入口（`src/QuickER.CodeGen.CSharp/CLAUDE.md`「主キーの列の NULL 許容」）。Provider の DDL・同期スクリプト・差分には、同じ規則の写しがまだ方言ごとに散っている（`DdlGeneratorBase`・`SyncScriptBuilderHelper`・`SchemaDiffService`・`SyncPlanner`・`ComputedColumnComment`・SQLite の DDL と 3 方言の同期スクリプト。寄せるのは後の区切り）
 - ガード：`CodegenCaseTests` の行 `compile-nullable-primary-key-sync` / `probe-inmemory-seed-nullable-primary-key` / `relation-nullable-primary-key-all-surfaces` ほか（詳細は `src/QuickER.CodeGen.CSharp/CLAUDE.md`「主キーの列の NULL 許容」）
+- 取込：Excel 定義書の取込と C# リバースも、列を組んだ直後にこの判定で NULL 許容の印を決め直す（`src/QuickER.Gui/Services/CLAUDE.md`「取込は主キーの列を NOT NULL で読む（Excel 定義書・C# リバース）」）。ガード：`FormatRoundTripTests` の規則の行 `excel-rule-primary-key-row-with-empty-required-cell-is-not-null`・`csharp-rule-nullable-key-property-is-not-null`
 
 ## リレーションの列ペア
 

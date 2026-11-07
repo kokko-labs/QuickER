@@ -173,6 +173,7 @@ For such a row whose constraint name cell is empty, see [Rules shared by the for
 The import marks the referencing columns of a relationship as foreign keys, as the DBML import does.
 A one-to-one or one-to-many row whose referencing and referenced column cells are both empty is a relationship without a column mapping (the export writes such rows), and a row with only one of the two cells empty is an import error.
 A column whose data type cell is empty is read as a column without a type (the export writes such a column with an empty cell).
+A column whose required cell is empty is read as nullable, except a primary key column, which is read as NOT NULL (the DDL and the generated code treat primary key columns as NOT NULL).
 A detail sheet with no column rows is a table without columns.
 On a detail sheet, the column rows end at the first row whose cells are all empty (the No. column is not counted).
 A row with an empty column name but a value in another cell is an import error that names the table and the row.
@@ -196,7 +197,7 @@ Each part of the diagram comes from a specific attribute.
 | Table description | `[DbTableMeta]` |
 | Primary key | `[Key]` |
 | Composite primary key order | `PrimaryKeyOrder` of `[DbTableMeta]` (written only when it differs from the declaration order) |
-| Nullability | Whether the property type is `?` (`[Required]` is not used at all) |
+| Nullability | Whether the property type is `?` (`[Required]` is not used at all; a primary key column is NOT NULL even when its type is `?`) |
 | UNIQUE constraints | The class-level `[UniqueConstraint]` |
 | Computed column setting | `[ComputedColumn]` |
 | Setting of a column the database numbers | `[IdentityColumn]` |

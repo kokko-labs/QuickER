@@ -300,6 +300,42 @@ internal static partial class FormatRuleRows
                         .Single("Nullability mixed.amount = notnull")
                         .Single("Nullability mixed.quantity = null")
                 ),
+            // 主キーの列は NULL を持てない（DDL・C# 生成・ほかの取込と同じ ColumnNullability.AllowsNull）。
+            // 生成コードは主キーに ? を付けないので、? の付いた主キーは手書きのコードだけが持つ
+            CSharpRule(
+                    "csharp-rule-nullable-key-property-is-not-null",
+                    "? の付いた主キーのプロパティ（値型・参照型）は NOT NULL で読み、主キーでない列は ? のとおり読む"
+                )
+                .Text(
+                    """
+                    namespace Sample;
+
+                    [Table("tenant_codes")]
+                    public partial class TenantCodeEntity
+                    {
+                        [Key]
+                        [Column("tenant_id")]
+                        [DbColumnMeta("int32")]
+                        public int? TenantId { get; set; }
+
+                        [Key]
+                        [Column("code")]
+                        [DbColumnMeta("string(20)")]
+                        public string? Code { get; set; }
+
+                        [Column("quantity")]
+                        [DbColumnMeta("int32")]
+                        public int? Quantity { get; set; }
+                    }
+                    """
+                )
+                .Expect(e =>
+                    e.Imported.Single("PrimaryKey tenant_codes.tenant_id")
+                        .Single("PrimaryKey tenant_codes.code")
+                        .Single("Nullability tenant_codes.tenant_id = notnull")
+                        .Single("Nullability tenant_codes.code = notnull")
+                        .Single("Nullability tenant_codes.quantity = null")
+                ),
             // クラスレベルの [UniqueConstraint] は、構成プロパティ名 → 列 Id の逆写像で復元される
             CSharpRule(
                     "csharp-rule-restores-unique-constraints",

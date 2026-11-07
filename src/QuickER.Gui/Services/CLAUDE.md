@@ -97,6 +97,14 @@
 - 列数の定数は出力の表の列数と同じでなければならない。列を足して定数を直し忘れると、足した列だけの行を見落とす。
 - ガード：`FormatRoundTripTests` の規則の行 `excel-rule-row-without-column-name-but-other-content-*`（3〜8 列目の 6 行）・`excel-rule-middle-row-without-column-name`・`excel-rule-row-with-only-number-ends-table` / `excel-rule-empty-row-ends-table`（No. だけの行とすべて空の行・その下の行は読まない）と、形の行 `excel-exported-workbook` の Excel の出力の期待（出力の見出しの最後の列が定数と一致）。mutation 実証済み。
 
+## 取込は主キーの列を NOT NULL で読む（Excel 定義書・C# リバース）
+- Excel 定義書の取込（`TableDefinitionDocumentImporter.ReadColumns`）と C# リバース（`CSharpReverseParser`）は、列を組んだ直後に `column.IsNullable = ColumnNullability.AllowsNull(column)` で NULL 許容の印を決め直す。必須のセルが空の主キーの行・型に `?` の付いた主キーのプロパティ（`[Key] int?`。生成コードは出さず、手書きのコードだけが持つ）も NOT NULL になる。
+- 判定は `ColumnNullability.AllowsNull`（`src/QuickER.Model/CLAUDE.md`「列の NULL 許容（ColumnNullability）」）の 1 つだけで、取込側に `&& !isPrimaryKey` の写しを書かない。DBML・Mermaid の取込は主キーを読んだ場所で NOT NULL にし、DB の取込は DB の主キーが NOT NULL。
+- 外すと、図だけが NULL 許容の主キーを持ち、DDL と生成コード（NOT NULL で扱う）と食い違う。
+- 出力（Excel・HTML 定義書の必須の欄）は図の印のまま書く（DBML の出力と同じく、正規化は取込の側）。NULL 許容の主キーの図は 1 周の往復で NOT NULL に揃い、以後は不動。
+- 形式の往復のエンジンでは、Excel と C# リバースのアダプタが運ばない面 `PrimaryKeyNullability` を宣言する（DBML・Mermaid と同じ。マージも取り込んだ NOT NULL を採るので `MergeRestores` に入れない）。NULL 許容の主キーの現在図へのマージ取込は、印が変わるので置換の確認が出る（構造署名 `SchemaSignature` が `*NULL` / `*NOTNULL` を見る）。
+- ガード：`FormatRoundTripTests` の規則の行 `excel-rule-primary-key-row-with-empty-required-cell-is-not-null`・`csharp-rule-nullable-key-property-is-not-null`（取込の 1 行を外すと赤）と、形の行 `mermaid-primary-key-order-*`（NULL 許容の主キーの図。Excel の宣言を外すと往復とマージの表明が赤）。mutation 実証済み。
+
 ## 往復する形式は自分の出力を読む（型の無い列・同じ列ペアの 2 本）
 - 往復する形式（DBML・Excel 定義書）は、出力が書いた形を取込で断らない。断ると自分が書いたファイルを読み戻せない（告知する形式の Mermaid は、戻らないものを書き出しで告知する）。
 - 型の無い列：DBML は空の引用の型 `""` で書き（`DbmlExporter.TypeName`）、取込は `""` を空の型として読む。型のトークンそのものが無い行は今どおり断る（`DbmlImporter.SplitNameAndType` が「トークン無し」を null で返して区別する）。Excel は型のセルを空で書き、取込は空の型として読む。Mermaid は占位語 `_`。
