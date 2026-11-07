@@ -10,7 +10,7 @@ public class CopilotSettings
     public const string HistoryProviderKey = "copilot";
 
     /// <summary>
-    /// 使用するモデル ID（例 <c>gpt-5</c>, <c>claude-sonnet-4.5</c>）。
+    /// 使用するモデル ID（例 <c>gpt-6.1-sol</c>, <c>claude-sonnet-5.5</c>）。
     /// 空なら Copilot CLI の既定モデルに任せる（Claude Code 接続と同じ思想）。
     /// </summary>
     public string Model { get; set; } = string.Empty;
