@@ -11,9 +11,10 @@ public static class AiModelCatalog
     public const string DefaultOpenAiModel = "gpt-6.1-sol";
 
     /// <summary>
-    /// OpenAI の候補モデル一覧（2026-10 時点。GPT-6 ファミリーの astra=最上位・6.1-sol=バランス・
-    /// luna=低コスト大量処理向けで、上位から順に並べる。GPT-6 には GPT-5.6 の Terra に当たる段が無いので、
-    /// 中位のバランス型は Sol）。
+    /// OpenAI の候補モデル一覧（2026-11 時点。GPT-6 ファミリーの astra=最上位・6.1-sol=バランス・
+    /// 6.1-terra=視覚・コンピューター操作・文章向けの速く効率的な段・luna=低コスト大量処理向けで、
+    /// 公式の一覧と同じく上位から順に並べる。既定を Sol とするのは、OpenAI のモデル一覧が
+    /// 知能とコストの釣り合いを取るモデルとして Sol を挙げているため＝段の名前ではなく位置づけで選ぶ）。
     /// **並び順は表示順であって既定ではない**＝既定は <see cref="DefaultOpenAiModel"/> が正本で、
     /// プロバイダー切替時もそちらが選ばれる。旧世代は API で引き続き利用可能なので、
     /// 必要なら手入力すれば MRU 履歴として候補に残る。
@@ -22,6 +23,7 @@ public static class AiModelCatalog
     [
         "gpt-6-astra",
         "gpt-6.1-sol", // = DefaultOpenAiModel
+        "gpt-6.1-terra",
         "gpt-6-luna",
     ];
 
@@ -29,7 +31,7 @@ public static class AiModelCatalog
     public const string DefaultClaudeModel = "claude-sonnet-5-5";
 
     /// <summary>
-    /// Anthropic (Claude) の候補モデル一覧（2026-10 時点。fable-5-1=最上位・opus-5-5=長時間のエージェント作業と
+    /// Anthropic (Claude) の候補モデル一覧（2026-11 時点。fable-5-1=最上位・opus-5-5=長時間のエージェント作業と
     /// コーディング向け・sonnet-5-5=速度と知能のバランス・haiku-5-5=最速で、上位から順に並べる）。
     /// 並び順と既定の関係・旧世代の扱いは <see cref="OpenAiModels"/> と同じ。
     /// </summary>

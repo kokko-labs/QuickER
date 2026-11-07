@@ -34,6 +34,7 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 #### AI チャット・MCP
 
 - **Claude（Anthropic）の API キー接続が使う API の版が、2023-06-01 から 2026-10-21 になりました** — Anthropic の SDK を 13.3.0 にしました
+- **OpenAI のモデル候補に `gpt-6.1-terra` が加わりました** — `gpt-6.1-sol` と `gpt-6-luna` の間に並びます。既定は `gpt-6.1-sol` のままです
 
 #### 図ファイル
 
