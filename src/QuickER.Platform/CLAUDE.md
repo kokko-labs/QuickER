@@ -26,6 +26,7 @@ Platform の外はここの入口を通す。通さない出現は各ガード�
 - `Apply` の側をメタ文字の一律拒否にしない。Blazor のシステムプロンプトは `<Routes @rendermode="InteractiveServer" />` を含み、引数で渡る以上、モックプロジェクト生成が `.cmd` 導入環境で丸ごと動かなくなる。
 - 改行だけは引数・パスのどちらでも両入口で拒否する。cmd は `%*` を展開する段階で最初の改行から後ろを捨て、その引数の残りだけでなく後続の引数もすべてエラーなしに消える（実機プローブで確認）。引用しても防げない（`cmd.exe /d /s /v:off /c` へ包み直す前の段階で起きる）のでガード層で拒否するしかない。複数行の内容はファイル経由で渡す（`ClaudeCodeProcessClient.AppendSystemPromptArguments` がシステムプロンプトを `%TEMP%\QuickER\claude-code\{GUID}.txt`〔BOM なし UTF-8〕へ書いて `--append-system-prompt-file` で渡し、ターン終了後の finally でベストエフォート削除する）。
   防御の二重化として、引数の積み順は「`--model` / `--resume` が先・プロンプト系が後」。
+- 引数を持たない `ExternalLauncher.StartExecutable`（自分の exe の再起動だけ）は対象の外。防ぐのは引数が cmd の再解釈で引用の外へ抜けることで、引数の無い起動には当たらない（`ProcessLaunchDimensions.Gaps` の受け入れの項目）。
 - 改行の判定は `BatchShimProcessGuard.ContainsNewline` を Copilot の `EnsureSafeToLaunch` と共有する（写しを持たない）。
 - Copilot は例外。起動が GitHub.Copilot.SDK の内側で QuickER が引数を組み立てないため、掛けられるのは解決パスの検証（引用符・`%`・`!` の拒否）だけ。`EnsureSafeToLaunch` は起動直前に置く。解決側へ置くと `IsAvailable` の検出だけで例外になる。残余は docs/ai-chat.md の注意節。文言 resx はバックエンドごと（どの CLI が止まったかを名指しするため）で、ポリシーだけが共有。
 - 起動する実体はフルパスで渡す（防御の二重化）。包み直しの `cmd.exe` は `BatchShimProcessGuard.CmdExePath`（`Environment.SystemDirectory` 直下）、codex は `CodexCliLocator` が PATH から解決したフルパス（`CodexAppServerClient.ResolveLaunch`）。

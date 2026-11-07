@@ -17,7 +17,7 @@ DB 取込／DB 同期ダイアログ・接続プロファイル（connections.js
 - 名前だけの変更（`Rename`）は接続先を変えないので、対象の暗号ファイルに触れない。
 - プロファイルの一覧を丸ごと差し替える `SaveAll` は暗号ファイルを持ち回れない（接続先を変えた Id の古い暗号ファイルが残る）ので持たない。
 - OK の前回接続の記録の失敗は、確定を止めずに `ShowError`（`DbConnection_LastUsedSaveFailed`）で知らせる。
-- ガード：`ProfileStoreTests`（OS との境界のエンジンの接続プロファイルの保存の表。行 `pairing-failed-*`＝入口 7 つ × 暗号ファイルを掴む・connections.json を掴む・暗号ファイルのフォルダに作成を拒否する、の 16 通りで、残った暗号ファイルがどれも JSON のその位置のプロファイルの接続先のパスワードであること・孤児が無いこと・失敗が返ること。行 `pairing-success-*` の 3 件と `pairing-rename-keeps-password-of-same-server`。全行に共通して、connections.json のフォルダと暗号フォルダに一時ファイルが残らないことも確かめる）・`ConnectionDialogTests` の行 `delete-secret-delete-fails-reports-and-reloads`・`rename-replaced-secret-delete-fails-reports-and-reloads`・`ok-last-used-secret-write-fails-confirms-and-shows-error`。mutation 実証済み。
+- ガード：`ProfileStoreTests`（OS との境界のエンジンの接続プロファイルの保存の表。行 `pairing-failed-*`＝入口 7 つ × 暗号ファイルを掴む・connections.json を掴む・暗号ファイルのフォルダに作成を拒否する、の 17 通り（作成の拒否は新しいパスワードを書く 3 入口＝前回接続・Upsert・置き換えつき Upsert）で、残った暗号ファイルがどれも JSON のその位置のプロファイルの接続先のパスワードであること・孤児が無いこと・失敗が返ること。行 `pairing-success-*` の 3 件と `pairing-rename-keeps-password-of-same-server`。全行に共通して、connections.json のフォルダと暗号フォルダに一時ファイルが残らないことも確かめる）・`ConnectionDialogTests` の行 `delete-secret-delete-fails-reports-and-reloads`・`rename-replaced-secret-delete-fails-reports-and-reloads`・`ok-last-used-secret-write-fails-confirms-and-shows-error`。mutation 実証済み。
 
 ## ダイアログとコマンドの状態の不変条件
 

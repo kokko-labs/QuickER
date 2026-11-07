@@ -38,68 +38,8 @@ internal static class PathEntranceDimensions
         );
 
     /// <summary>網羅しない組の一覧</summary>
-    /// <remarks>
-    /// どれも元の単発のテストが持たず、P3-10 では行を足していない組。足すなら表の行で足し、ここから消す。
-    /// </remarks>
-    public static CoverageGapSet Gaps =>
-        CoverageGap.Set(
-            EngineIds.OsBoundary,
-            [
-                Group(
-                    "Blazor のプロファイルの行は許可拡張子の違い（受理する UI 層ソース・別ターゲットの拡張子・拒否メッセージの列挙）だけを見る。"
-                        + "プロファイルが変えるのは許可拡張子だけで、ほかの検査（絶対パス・保護フォルダ・別名・空）は両プロファイル共通の経路を通るため、"
-                        + "元のテストは WPF の行だけで見ていて、Blazor で同じ入力を流す行は足していない",
-                    (
-                        PathEntrance.EmitPathBlazor,
-                        [
-                            PathShape.Absolute,
-                            PathShape.BackslashRelative,
-                            PathShape.BuildFolder,
-                            PathShape.DotsOnly,
-                            PathShape.DriveRelative,
-                            PathShape.DroppedSegmentsProtected,
-                            PathShape.EmptyOrWhitespace,
-                            PathShape.Extensionless,
-                            PathShape.ParentTraversal,
-                            PathShape.ProtectedAlias,
-                            PathShape.ScaffoldFile,
-                        ]
-                    )
-                ),
-                Group(
-                    "元のテストが持たない：リソースの許可判定の行に #fragment 付きの入力が無い（遷移の行だけが持つ）",
-                    (PathEntrance.PreviewResource, [PathShape.Fragment])
-                ),
-                Group(
-                    "元のテストが持たない：遷移の許可判定の行に ws / wss のスキームと null の対象が無い"
-                        + "（リソースの行だけが持つ。遷移の http / https の行が同じ scheme 判定を見ている）",
-                    (
-                        PathEntrance.PreviewNavigation,
-                        [PathShape.WebSocketScheme, PathShape.NullTarget]
-                    )
-                ),
-            ]
-        );
-
-    /// <summary>入口ごとに形を名指しした組をまとめて 1 つの項目にする（理由が同じ組）</summary>
-    private static CoverageGapEntry Group(
-        string reason,
-        params (PathEntrance Entrance, PathShape[] Shapes)[] pairs
-    )
-    {
-        var set = pairs
-            .SelectMany(p => p.Shapes.Select(s => (p.Entrance.ToString(), s.ToString())))
-            .ToHashSet();
-        return CoverageGap.Matching(
-            Scope,
-            "P3-10",
-            "P4",
-            reason,
-            Entrance,
-            Shape,
-            (entrance, shape) => set.Contains((entrance, shape))
-        );
-    }
+    /// <remarks>空。足りない組が出たら表の行で足し、ここから消す。</remarks>
+    public static CoverageGapSet Gaps => CoverageGap.Set(EngineIds.OsBoundary, []);
 
     /// <summary>台帳の行</summary>
     public static EngineDescriptor Descriptor =>

@@ -141,6 +141,7 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
 - 自動 import 面は MSBuild の版で増えるので名前の列挙では原理的に追随できない。「UI 層のソース拡張子だけを通す」ホワイトリストであることが防御の本体。`obj/` / `bin/` のフォルダ拒否は、拡張子集合をいじるたびの再検証を不要にするための二重化。
 - 守るべき性質は「ユーザーが明示的にアプリを起動する前に、ビルド検証の瞬間に AI のコードが走らないこと」。`.cs` を許可してよいのはビルドでは実行されないから（ソースジェネレータは csproj 経由でしか追加できず、csproj は保護済み）。
 - プロファイルの宣言が中央上限集合の部分集合であることは `MockProjectEmitToolsTests` の全数列挙テストが固定する。
+- 拡張子以外の検査（絶対パス・保護フォルダ・別名・空）は両プロファイル共通の経路で、`PathEntranceTests` の Blazor の行（`emit-blazor-*`）は WPF の行と同じ形の写し。片方の行を直したら、もう片方も直す（3 つめのプロファイルが来たら、プロファイルのループへまとめる）。
 - **保護フォルダ（`Generated/`・`design/`・`obj/`・`bin/`）の照合は綴りの別名に負けない形で行う。** Windows はセグメント末尾の `.` / 空白を落として開く（`Generated./x.cs` は `Generated/` へ書き込まれる）。8.3 短縮名（`GENERA~1`）でも同じフォルダを指せる。
   - 末尾が `.` / 空白のセグメントと `~` を含むセグメントを、共有の `PathSegments.CheckRelativePath` で拒否する（`src/QuickER.Platform/CLAUDE.md`「パスの名前の判定」を参照）。
   - さらに `Path.GetFullPath` で正規化した後の出力フォルダ相対セグメントでも照合する（`FindBlockedFolderInNormalizedPath`）。`GetFullPath` は末尾の `.` を 1 つしか落とさず空白も落とさないため、正規化後の照合だけでは足りない（実測）。二重化。

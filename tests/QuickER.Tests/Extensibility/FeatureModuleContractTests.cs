@@ -37,7 +37,7 @@ public sealed class FeatureModuleContractTests
         );
     }
 
-    /// <summary>軸は、カタログの正本の値ごとにアダプタか理由つきの除外がちょうど 1 つある</summary>
+    /// <summary>軸は、カタログの正本の値ごとにアダプタか理由つきの除外がちょうど 1 つある（いまは除外が無い）</summary>
     [Fact(
         DisplayName = "機能モジュールの軸: 正本の値ごとにアダプタか理由つきの除外がちょうど 1 つ"
     )]

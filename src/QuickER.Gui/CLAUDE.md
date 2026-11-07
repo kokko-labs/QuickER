@@ -75,6 +75,7 @@ Velopack・2 チャンネル。release.yml（手動トリガ）が win-full（se
 - 実装は決して例外を投げない。`ShutdownSteps.Run` は記録側の例外も握り潰す（契約・実装・器の三重）。漏らすと「1 つの失敗が他を止めない」という器の目的が破れる。
 - 書き出し先は `shutdown-*.log` で `crash-*.log` と分ける。本文の形式は `CrashHandlingService.FormatDetails` を共有し接頭辞だけ変える（落ちていないのに crash- が増えると「落ちた」と読み違える）。段の名前は `ShutdownStepFailedException` で包んで本文の 1 行目へ載せる。
 - ガード：`ShutdownChainExhaustiveTests`（4 段の成否 × 記録先の成否の全 32 組で、全段が順に実行され、失敗した段だけがその例外のまま記録され、例外を外へ出さない）・`LifecycleTests`（行 `steps-*`・`modules-*`・`crash-report-*`）・`FeatureModuleContractTests`（行 `module-*-launcher-needs-shutdown-failure-reporter`＝記録先は必須依存）・`SourceRuleTests` の規則 `app-feature-module-shutdown-uses`・`app-feature-module-shutdown-bypasses`（App.xaml.cs の配線）・`AiChatDialogForceCloseTests` の「ForceClose は設定保存が失敗してもエンジン破棄とクローズまで進む」・`MockGenerationDialogTests` の同等 1 件。
+- `LifecycleTests` の行 `crash-report-consecutive-reports-do-not-overwrite-same-second` は弱い行。ログの名前はミリ秒まで持ち（`CrashHandlingService` の `yyyyMMdd-HHmmss-fff`）、時刻を差し込めないので、続けて 2 回書いても名前がぶつかる（同じミリ秒になる）ことはほとんど無い。名前がぶつかったときの経路（`FileMode.CreateNew` が断ったら短縮 GUID 付きの名前でやり直す）を壊しても、この行は捕まえない。その経路を確かめるのは、`CrashHandlingServiceTests` の「WriteCrashLog: 同じ名前を選ぶ同時の書き手でも互いを上書きしない」だけ（記録先も同じ書き出しを共有する）。
 
 ### 終了条件はメインウィンドウへ紐づける
 - `ShutdownMode="OnMainWindowClose"`（App.xaml）と `MainWindow = window;` の明示（App.xaml.cs）は対で保つ。

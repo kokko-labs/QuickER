@@ -72,6 +72,15 @@ internal enum ProfileStepKind
 
     /// <summary>何もせず、いまの状態だけ <see cref="ProfileStep.Expect"/> で確かめる</summary>
     Probe,
+
+    /// <summary>connections.json を指定の文字列で作り直す（文字列が null なら消す）。退避ファイルも消して手の前の状態を揃える</summary>
+    SetJson,
+
+    /// <summary>読める暗号ファイルを置く（暗号フォルダが無ければ作る。内容は <see cref="ProfileStep.Text"/>）</summary>
+    PlantSecret,
+
+    /// <summary>暗号ファイルを消す（無ければ何もしない）</summary>
+    RemoveSecret,
 }
 
 /// <summary>手の前の connections.json の状態（実際のファイルから読む）</summary>
@@ -224,6 +233,7 @@ internal sealed class ProfileContext : IDisposable
     /// <summary>暗号フォルダへファイルの作成の拒否を掛ける</summary>
     public void DenyCreate()
     {
+        Directory.CreateDirectory(Store.SecretsFolder);
         var info = new DirectoryInfo(Store.SecretsFolder);
         var rule = new FileSystemAccessRule(
             WindowsIdentity.GetCurrent().User!,
@@ -441,7 +451,37 @@ internal static class ProfileStoreRunner
                 File.WriteAllText(c.Store.ConnectionsPath, step.Text!);
                 return null;
             case ProfileStepKind.GarbageSecret:
+                Directory.CreateDirectory(c.Store.SecretsFolder);
                 File.WriteAllBytes(c.SecretPath(step.Key!), step.Bytes!);
+                return null;
+            case ProfileStepKind.SetJson:
+                if (step.Text is null)
+                {
+                    File.Delete(c.Store.ConnectionsPath);
+                }
+                else
+                {
+                    File.WriteAllText(c.Store.ConnectionsPath, step.Text);
+                }
+
+                File.Delete(c.Store.CorruptBackupPath);
+                return null;
+            case ProfileStepKind.PlantSecret:
+                Directory.CreateDirectory(c.Store.SecretsFolder);
+                var raw = System.Text.Encoding.UTF8.GetBytes(step.Text!);
+                File.WriteAllBytes(
+                    c.SecretPath(step.Key!),
+                    c.UseDpapi
+                        ? ProtectedData.Protect(raw, null, DataProtectionScope.CurrentUser)
+                        : raw
+                );
+                return null;
+            case ProfileStepKind.RemoveSecret:
+                if (File.Exists(c.SecretPath(step.Key!)))
+                {
+                    File.Delete(c.SecretPath(step.Key!));
+                }
+
                 return null;
             case ProfileStepKind.LockJson:
                 c.Lock(c.Store.ConnectionsPath, step.Share);
@@ -638,7 +678,14 @@ internal static partial class ProfileStoreRows
     public static ScenarioTable<ProfileScenario> Table =>
         new(
             EngineIds.OsBoundary,
-            [.. BasicRows(), .. LegacyRows(), .. TlsRows(), .. UnreadableRows(), .. PairingRows()]
+            [
+                .. BasicRows(),
+                .. LegacyRows(),
+                .. TlsRows(),
+                .. UnreadableRows(),
+                .. PairingRows(),
+                .. SweepRows(),
+            ]
         );
 
     /// <summary>パスワードを接続先から決める規約（印を付けた行の暗号ファイルの中身）</summary>

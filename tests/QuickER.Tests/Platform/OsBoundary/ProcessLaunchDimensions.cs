@@ -37,159 +37,33 @@ internal static class ProcessLaunchDimensions
             isValid: IsValid
         );
 
-    /// <summary>網羅しない組の一覧</summary>
+    /// <summary>網羅しない組の一覧（受け入れ 1 項目だけ）</summary>
     /// <remarks>
-    /// どれも元の単発のテストが持たず、P3-10 では行を足していない組（期待を製品の XmlDoc から導ける組は
-    /// <c>ProcessLaunchRows.Filled.cs</c> で足した）。足すなら表の行で足し、ここから消す。
+    /// 埋められる組はすべて表の行で埋めた（行は <c>ProcessLaunchRows.Filled.cs</c>・<c>ProcessLaunchRows.Gaps.cs</c> ほか）。
+    /// 残るのは、行を足しても意味が出ない組の受け入れだけ。
     /// </remarks>
     public static CoverageGapSet Gaps =>
         CoverageGap.Set(
             EngineIds.OsBoundary,
             [
-                Group(
-                    "配線の入口（Claude・Codex・Copilot）は BatchShimProcessGuard の同じ判定へ委ね、配線の行が固定するのは"
-                        + "文言のキーと起動の形だけ。同じ入力の形は Guard の入口の行が見ている",
-                    (LaunchEntrance.ClaudeApplyBatchShimGuard, ClaudeShapes),
-                    (LaunchEntrance.CodexResolveStartInfo, CodexStartInfoShapes),
-                    (LaunchEntrance.CodexResolveLaunch, CodexLaunchShapes),
-                    (
-                        LaunchEntrance.CopilotEnsureSafeToLaunch,
-                        [LaunchShape.NonWindowsOrNullPath, LaunchShape.ShimSpelling]
-                    )
-                ),
-                Group(
-                    "3 つの入口は同じ PATH の走査（PathExecutableResolver）を通る。PATHEXT と拡張子の形は共有の入口の行、"
-                        + "PATH の要素の形はロケータの行が見ている",
-                    (LaunchEntrance.PathExecutableResolve, SharedResolverShapes),
-                    (LaunchEntrance.CodexLocate, CodexLocateShapes),
-                    (
-                        LaunchEntrance.CopilotLocate,
-                        [
-                            LaunchShape.ExtensionOutsidePathExt,
-                            LaunchShape.ExtensionlessFirst,
-                            LaunchShape.PathExtOrder,
-                            LaunchShape.PerCommandName,
-                            LaunchShape.QuotedEntry,
-                        ]
-                    )
-                ),
-                Group(
-                    "IsBatchShim は拡張子だけを見る（中身の文字は判定に入らない）。中身の文字の形は Wrap・Apply の行が見ている",
-                    (
-                        LaunchEntrance.ShimIsBatchShim,
-                        [
-                            LaunchShape.ExePathWithShimMeta,
-                            LaunchShape.PathExclamation,
-                            LaunchShape.PathNewline,
-                            LaunchShape.PathPercent,
-                            LaunchShape.PathQuote,
-                        ]
-                    )
-                ),
-                Group(
-                    "WrapCommandLine は引数を連結済みの 1 本の文字列のまま包む（トークンごとの引用が無い）。"
-                        + "バックスラッシュ・空の引数を包んだ形は製品の XmlDoc から導けない",
-                    (
-                        LaunchEntrance.ShimWrapCommandLine,
-                        [LaunchShape.ArgBackslash, LaunchShape.ArgEmpty]
-                    )
-                ),
-                Group(
-                    "元のテストが持たず、期待を製品の XmlDoc から導けない（StartExecutable はフルパスかどうかだけを"
-                        + "確かめる入口で、名前だけ・シム・ShellExecute の扱いを書いていない。OpenUrl の起動の失敗の扱いも書いていない）",
-                    (
-                        LaunchEntrance.ExternalStartExecutable,
-                        [
-                            LaunchShape.AllowedBareName,
-                            LaunchShape.BareName,
-                            LaunchShape.ShellExecute,
-                            LaunchShape.UnwrappedShim,
-                            LaunchShape.WrappedShim,
-                        ]
-                    ),
-                    (LaunchEntrance.ExternalOpenUrl, [LaunchShape.LaunchFails])
+                CoverageGap.AcceptedMatching(
+                    Scope,
+                    "P3-10",
+                    "StartExecutable は引数を受け取らない（src/QuickER.Platform/ExternalLauncher.cs の "
+                        + "StartExecutable(string fullPath, ...)。ProcessStartInfo はパスだけから作る）。"
+                        + "BatchShimProcessGuard が防ぐのは、引数が cmd の再解釈で引用の外へ抜けることで、"
+                        + "引数の無い起動には当たらない（src/QuickER.Platform/CLAUDE.md「.cmd / .bat シムの起動」）。"
+                        + "しかも呼び出しは自分自身の exe の再起動だけ（src/QuickER.Gui/Services/WpfApplicationRestartService.cs:44）で、"
+                        + "シムの実パスを渡す呼び出し元が無い。シムの拡張子を断る規則を持たない入口に行を足すと、"
+                        + "方針（再起動の入口はシムを断るべきか）を黙って決めてしまうので、行は足さず受け入れる",
+                    Entrance,
+                    Shape,
+                    (entrance, shape) =>
+                        entrance == nameof(LaunchEntrance.ExternalStartExecutable)
+                        && shape == nameof(LaunchShape.UnwrappedShim)
                 ),
             ]
         );
-
-    private static readonly LaunchShape[] ClaudeShapes =
-    [
-        LaunchShape.ArgBackslash,
-        LaunchShape.ArgCmdMeta,
-        LaunchShape.ArgEmpty,
-        LaunchShape.ArgExclamation,
-        LaunchShape.ArgQuote,
-        LaunchShape.ExePathWithShimMeta,
-        LaunchShape.NonWindowsOrNullPath,
-        LaunchShape.PathExclamation,
-        LaunchShape.PathNewline,
-        LaunchShape.ShimSpelling,
-    ];
-
-    private static readonly LaunchShape[] CodexStartInfoShapes =
-    [
-        LaunchShape.ArgBackslash,
-        LaunchShape.ArgEmpty,
-        LaunchShape.ArgExclamation,
-        LaunchShape.ArgNewline,
-        LaunchShape.NonWindowsOrNullPath,
-        LaunchShape.PathExclamation,
-        LaunchShape.PathNewline,
-        LaunchShape.ShimSpelling,
-    ];
-
-    private static readonly LaunchShape[] CodexLaunchShapes =
-    [
-        LaunchShape.ExePathWithShimMeta,
-        LaunchShape.PathExclamation,
-        LaunchShape.PathNewline,
-        LaunchShape.PathPercent,
-        LaunchShape.PathQuote,
-        LaunchShape.ShimSpelling,
-    ];
-
-    private static readonly LaunchShape[] SharedResolverShapes =
-    [
-        LaunchShape.CmdCandidate,
-        LaunchShape.EmptyEntries,
-        LaunchShape.EmptyPath,
-        LaunchShape.ExeAndCmd,
-        LaunchShape.NotOnPath,
-        LaunchShape.OnPath,
-        LaunchShape.RelativeEntries,
-        LaunchShape.UnvalidatedEntry,
-    ];
-
-    private static readonly LaunchShape[] CodexLocateShapes =
-    [
-        LaunchShape.ExeAndCmd,
-        LaunchShape.ExtensionOutsidePathExt,
-        LaunchShape.ExtensionlessFirst,
-        LaunchShape.PathExtOrder,
-        LaunchShape.PerCommandName,
-        LaunchShape.QuotedEntry,
-        LaunchShape.UnvalidatedEntry,
-    ];
-
-    /// <summary>入口ごとに形を名指しした組をまとめて 1 つの項目にする（理由が同じ組）</summary>
-    private static CoverageGapEntry Group(
-        string reason,
-        params (LaunchEntrance Entrance, LaunchShape[] Shapes)[] pairs
-    )
-    {
-        var set = pairs
-            .SelectMany(p => p.Shapes.Select(s => (p.Entrance.ToString(), s.ToString())))
-            .ToHashSet();
-        return CoverageGap.Matching(
-            Scope,
-            "P3-10",
-            "P4",
-            reason,
-            Entrance,
-            Shape,
-            (entrance, shape) => set.Contains((entrance, shape))
-        );
-    }
 
     /// <summary>台帳の行</summary>
     public static EngineDescriptor Descriptor =>
@@ -206,6 +80,7 @@ internal static class ProcessLaunchDimensions
                 "tests/QuickER.Tests/Platform/OsBoundary/ProcessLaunchRows.Resolve.cs",
                 "tests/QuickER.Tests/Platform/OsBoundary/ProcessLaunchRows.External.cs",
                 "tests/QuickER.Tests/Platform/OsBoundary/ProcessLaunchRows.Filled.cs",
+                "tests/QuickER.Tests/Platform/OsBoundary/ProcessLaunchRows.Gaps.cs",
                 "tests/QuickER.Tests/Platform/OsBoundary/ProcessLaunchTests.cs",
             ],
             [
@@ -318,6 +193,17 @@ internal static class ProcessLaunchDimensions
         )
         {
             return true;
+        }
+
+        // StartExecutable は引数を持てない（ExternalLauncher.StartExecutable(string fullPath, ...) はパス 1 つだけを受ける）ので、
+        // Apply で包み直したシム（FileName が cmd.exe で引数つきの形）は原理的に渡らない。
+        // 入口と形の種類の照合（下）とは別の規則：種類は同じ Executable でも、この入口にはその形を作る相手がいない
+        if (
+            entrance == nameof(LaunchEntrance.ExternalStartExecutable)
+            && shape == nameof(LaunchShape.WrappedShim)
+        )
+        {
+            return false;
         }
 
         var accepted = KindsOf(Enum.Parse<LaunchEntrance>(entrance));

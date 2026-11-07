@@ -201,7 +201,7 @@ internal sealed record LifecycleCase(
 
 /// <summary>アプリの一生の表（入口 × 段の失敗・前提の形 → 振る舞い）</summary>
 /// <remarks>
-/// 行は元の単発のテストと同じ入力・同じ表明を持つ（主題ごとのファイル：<c>LifecycleRows.Shutdown.cs</c>・
+/// 行は元の単発のテストと同じ入力・同じ表明を持つ（主題ごとのファイル：<c>LifecycleRows.Shutdown.cs</c>・<c>LifecycleRows.Faults.cs</c>・
 /// <c>LifecycleRows.Crash.cs</c>・<c>LifecycleRows.Update.cs</c>・<c>LifecycleRows.PostExit.cs</c>・
 /// <c>LifecycleRows.Language.cs</c>）。流す側（<see cref="LifecycleRunner"/>）は全行に「入口が例外を外へ出さない」を掛ける。
 /// </remarks>
@@ -213,6 +213,7 @@ internal static partial class LifecycleRows
             EngineIds.OsBoundary,
             [
                 .. ShutdownRows(),
+                .. FaultRows(),
                 .. CrashRows(),
                 .. UpdateRows(),
                 .. PostExitRows(),
