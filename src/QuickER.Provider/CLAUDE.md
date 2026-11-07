@@ -162,7 +162,7 @@
   - 方言の上限を超える長さ・精度は書き出さない（SQL Server でよく使う `nvarchar(4000)` が Oracle の `NVARCHAR2(4000)` になると ORA-00910）。
 - 長さ無しの副作用 2 つは受け入れる：`CanonicalTypeTokenAttacher` が verbatim 併記を付ける（往復は保たれる）・`CSharpReverseParser` が警告つきでトークン文字列を列の型に採る。
 - 型トークンは `decimal(*,s)` で精度なしを運ぶ（`decimal(*)` は拒否）。スケールを落として `decimal` と刻むと、C# リバースで素の `NUMBER` へ戻り整数の制約が消える。`*` は 38 ではないので、`TryFormat`・型トークン・C# リバース・クエリのパラメータで Decimal(38,s) へ読み替えない。
-- 固定は `DialectTypeTableTests`（5 方言 × 種別の書き出しの行 `matrix-format-*`・`format-token-precisionless-scaled-decimal`・長さ無しの `format-token-lengthless-*`・各方言の上限の対〔網羅の照合が、上限を持つ種類 × 方言ごとに「ちょうど」と「1 つ超え」を必須にする〕）・`LengthlessTypeFormattingTests`（長さ無しの verbatim 併記）・`FormatRoundTripTests`（規則の行 `csharp-rule-lengthless-token-*`・`csharp-rule-precisionless-scaled-token-*`／形の行 `csharp-bare-decimal-*`・`csharp-oracle-precisionless-*`）・`CSharpReverseBareDecimalTests`・`{SqlServer,MySql,PostgreSql,Oracle}DialectTypeRealDbTests`（上限の対を実 DB で適用して取り込み直す。SQLite は上限を持たない）。mutation 実証済み。
+- 固定は `DialectTypeTableTests`（5 方言 × 種別の書き出しの行 `matrix-format-*`・パラメータの型の書き出しの行 `matrix-format-param-*`（上限ちょうどは `matrix-format-param-at-limit-from-*`）・`format-token-precisionless-scaled-decimal`・長さ無しの `format-token-lengthless-*`・各方言の上限の対〔網羅の照合が、上限を持つ種類 × 方言ごとに「ちょうど」と「1 つ超え」を必須にする〕）・`LengthlessTypeFormattingTests`（長さ無しの verbatim 併記）・`FormatRoundTripTests`（規則の行 `csharp-rule-lengthless-token-*`・`csharp-rule-precisionless-scaled-token-*`／形の行 `csharp-bare-decimal-*`・`csharp-oracle-precisionless-*`）・`CSharpReverseBareDecimalTests`・`{SqlServer,MySql,PostgreSql,Oracle}DialectTypeRealDbTests`（上限の対を実 DB で適用して取り込み直す。SQLite は上限を持たない）。mutation 実証済み。
 
 ### クエリのパラメータの型解決
 
@@ -194,7 +194,7 @@
 ### 型マッパーはドライバの CLR 型へ写す
 
 - 型マッパーは、ドライバがその列を返す CLR 型へ写す。違う型で受けると読み取り自体が `InvalidCastException` になり、行の組み立ては全列をまとめて読むので、その列を持つ表が丸ごと使えない。
-- 方言ごとの写し方は各方言の CLAUDE.md「型表記」。固定は `DialectTypeTableTests` のマッパーの行（`map-*`）と、同じ行を実 DB で流す `*DialectTypeRealDbTests`（手順は `DialectTypeRealDbRows`＝ドライバの `GetFieldType` とマッパーの一致）。
+- 方言ごとの写し方は各方言の CLAUDE.md「型表記」。固定は `DialectTypeTableTests` のマッパーの行（`map-*`・宣言のセルの全表記を流す `matrix-map-*`＝5 方言のマッパーが同じ「種類 → C# の型」の表に従う）と、同じ行を実 DB で流す `*DialectTypeRealDbTests`（手順は `DialectTypeRealDbRows`＝ドライバの `GetFieldType` とマッパーの一致）。
 
 ## 差分と同期
 

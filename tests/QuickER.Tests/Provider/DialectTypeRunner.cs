@@ -142,10 +142,7 @@ internal static class DialectTypeRunner
                         new("all-safe", Bit(adapter.Catalog.DataTypes.All(SqlTypeText.IsSafe))),
                     ]
                 ),
-                DialectTypeFacets.Normalize => new TypeOutcome(
-                    "ok",
-                    [new("text", adapter!.Normalize((string)row.Input!))]
-                ),
+                DialectTypeFacets.Normalize => NormalizeOutcome(adapter!, (string)row.Input!),
                 DialectTypeFacets.SameType => SameType(adapter!, (SameTypeInput)row.Input!),
                 DialectTypeFacets.ImportSpelling => ImportSpelling(
                     adapter!,
@@ -418,6 +415,17 @@ internal static class DialectTypeRunner
                 new("back", CanonicalTypeToken.Format(back)),
                 .. CanonicalFields(back),
             ]
+        );
+    }
+
+    /// <summary>正規化の結果（<c>text</c>）と、正規化した表記を解析した種類（<c>kind</c>。解析できなければ <c>unparsed</c>）</summary>
+    private static TypeOutcome NormalizeOutcome(DialectTypeAdapter adapter, string nativeType)
+    {
+        var text = adapter.Normalize(nativeType);
+
+        return new TypeOutcome(
+            "ok",
+            [new("text", text), new("kind", KindOf(adapter.Catalog, text))]
         );
     }
 

@@ -37,9 +37,14 @@ internal static partial class DialectTypeRows
         return data;
     }
 
-    private static IEnumerable<DialectTypeRow> AllRows() =>
+    /// <summary>行（既存の行から導く行は、元の行をすべて作った後に足す）</summary>
+    private static IEnumerable<DialectTypeRow> AllRows()
+    {
+        List<DialectTypeRow> bases =
         [
             .. MatrixRows(),
+            .. MatrixTextRows(),
+            .. MatrixCanonicalRows(),
             .. SqlServerRows(),
             .. PostgreSqlRows(),
             .. MySqlRows(),
@@ -52,4 +57,7 @@ internal static partial class DialectTypeRows
             .. FullWidthRows(),
             .. LengthlessRows(),
         ];
+
+        return [.. bases, .. MatrixDerivedRows(bases)];
+    }
 }

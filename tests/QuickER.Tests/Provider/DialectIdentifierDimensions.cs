@@ -43,8 +43,24 @@ internal static class DialectIdentifierDimensions
             IsValid
         );
 
-    /// <summary>網羅しない組の一覧（すべて「その関数にその形の入力の行がまだ無い」だけで、行を足せば埋まる）</summary>
-    public static CoverageGapSet Gaps { get; } = CoverageGap.Set(EngineIds.Dialect, PendingGaps());
+    /// <summary>
+    /// 網羅しない組の一覧（行がまだ無い組〔<see cref="PendingPairs"/>・いまは空〕と、受け入れ 1 組：生成ランタイムの引用 × null）
+    /// </summary>
+    public static CoverageGapSet Gaps { get; } =
+        CoverageGap.Set(
+            EngineIds.Dialect,
+            [
+                .. PendingGaps(),
+                CoverageGap.AcceptedTuple(
+                    Scope,
+                    "P4-2e",
+                    "生成コードは生成ランタイムの引用（QuoteTableName）を図のテーブル名でしか呼ばない。null を渡すのは呼び出し側の誤りで、"
+                        + "そのときの例外の型は定めていない（利用者のコードから呼べる面なので、例外の型を今の振る舞いで固定しない）",
+                    (Function, F.RuntimeQuote),
+                    (Shape, S.Null)
+                ),
+            ]
+        );
 
     /// <summary>台帳の行</summary>
     public static EngineDescriptor Descriptor { get; } =
@@ -115,55 +131,7 @@ internal static class DialectIdentifierDimensions
 
     /// <summary>2 因子の組の、行がまだ無い組（実行の結果から書いた。行を足したら消す）</summary>
     private static (string FactorA, string LevelA, string FactorB, string LevelsB)[] PendingPairs =>
-        [
-            (Dialect, "sqlserver", Shape, "backslash"),
-            (Dialect, "postgresql", Shape, "empty-part backslash quote-chars-in-parts"),
-            (Dialect, "mysql", Shape, "empty-part quote-chars-in-parts"),
-            (Dialect, "oracle", Shape, "empty-part backslash quote-chars-in-parts"),
-            (Dialect, "sqlite", Shape, "backslash"),
-            (
-                Dialect,
-                "-",
-                Shape,
-                "closing-quote dot-closing-quote single-quote newline non-ascii null backslash quote-chars-in-parts"
-            ),
-            (
-                Function,
-                "quote",
-                Shape,
-                "empty-part opening-quote single-quote newline backslash quote-chars-in-parts"
-            ),
-            (
-                Function,
-                "quote-simple",
-                Shape,
-                "multi-dot empty-part dot-closing-quote opening-quote backslash quote-chars-in-parts"
-            ),
-            (
-                Function,
-                "escape",
-                Shape,
-                "plain dot multi-dot empty-part dot-closing-quote single-quote newline backslash quote-chars-in-parts"
-            ),
-            (
-                Function,
-                "dynamic",
-                Shape,
-                "plain dot multi-dot empty-part dot-closing-quote opening-quote newline non-ascii empty null quote-chars-in-parts"
-            ),
-            (
-                Function,
-                "runtime-quote",
-                Shape,
-                "closing-quote dot-closing-quote opening-quote single-quote newline non-ascii null backslash"
-            ),
-            (
-                Function,
-                "split",
-                Shape,
-                "closing-quote dot-closing-quote single-quote newline non-ascii null backslash quote-chars-in-parts"
-            ),
-        ];
+        [];
 
     /// <summary>原理的に起こり得ない組み合わせのときだけ偽（判断に要る因子が割り当てに無ければ真）</summary>
     private static bool IsValid(IReadOnlyDictionary<string, string> assignment)
@@ -216,6 +184,17 @@ internal static class DialectIdentifierDimensions
             {
                 return false;
             }
+        }
+
+        // 終端クォート文字の形（その方言の終端の文字を含む・分けた両方の部分に含む）は、方言なし（分け方）には無い。
+        // 方言なしはクォートしないので「その方言の終端クォート文字」が定まらない（開始クォート文字の規則と同じ理由。
+        // どの方言のクォート文字かに依らない形は S.QuoteCharsInParts が持つ）
+        if (
+            shape is S.ClosingQuote or S.DotClosingQuote
+            && (function == F.Split || dialect == DialectDdlAxis.None)
+        )
+        {
+            return false;
         }
 
         return true;

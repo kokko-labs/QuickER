@@ -18,7 +18,7 @@ namespace QuickER.Tests.Provider;
 /// （同じ名前の <c>quote-*</c> の行と合わせて、方言の関数との一致を含む）。
 /// </para>
 /// </remarks>
-internal static class DialectIdentifierRows
+internal static partial class DialectIdentifierRows
 {
     private const string Ss = DialectNames.SqlServer;
     private const string Pg = DialectNames.PostgreSql;
@@ -50,7 +50,7 @@ internal static class DialectIdentifierRows
     }
 
     private static IEnumerable<DialectIdentifierRow> AllRows() =>
-        [.. BoundaryRows(), .. SymmetryRows(), .. RuntimeRows(), .. SplitRows()];
+        [.. BoundaryRows(), .. SymmetryRows(), .. RuntimeRows(), .. SplitRows(), .. CoverageRows()];
 
     /// <summary>5 方言の <c>*IdentifierTests</c>（方言ごとの識別子の関数の境界）</summary>
     private static IEnumerable<DialectIdentifierRow> BoundaryRows() =>
