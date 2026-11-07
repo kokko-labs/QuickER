@@ -42,21 +42,6 @@ internal static class MockBuildBoundaryDimensions
         CoverageGap.Set(
             EngineIds.Ai,
             [
-                ProductCandidate(
-                    BoundaryEntryKind.Hidden,
-                    "製品の候補（P5・ユーザーの判断）：上書きの走査は、隠し属性の別ソリューション・別プロジェクト（直下の *.sln・*.slnx・*.csproj）を一覧に出さない"
-                        + "（src/QuickER.AI.Mock/MockProjectOverwriteScanner.cs:45-49・:75-91 の直下の列挙は既定の AttributesToSkip＝Hidden / System を飛ばす。2026-11-07 に実測）。"
-                        + "自分のもの（sln・csproj・README・Generated/・design/mock/）は File.Exists / Directory.Exists なので隠しでも出る非対称で、"
-                        + "XmlDoc は『直下の別ソリューション・別プロジェクト』を確認の対象に挙げる。特性として固定すると、隠しの同居物を確認から外す方針を黙って決めるので行にしない"
-                ),
-                ProductCandidate(
-                    BoundaryEntryKind.UnlistableReparse,
-                    "製品の候補（P5・ユーザーの判断）：出力フォルダ自身が中を列挙できない reparse フォルダのとき、上書きの走査が IOException を投げる"
-                        + "（src/QuickER.AI.Mock/MockProjectOverwriteScanner.cs:75-91 の IgnoreInaccessible はアクセス拒否にしか効かない。2026-11-07 に実測）。"
-                        + "走査は生成コマンドの try の外（src/QuickER.AI.Mock/MockGenerationDialogViewModel.cs:1284）から呼ばれ、"
-                        + "XmlDoc（MockProjectOverwriteScanner.cs:38-44）は『読めないものは確認そのものを妨げる理由にはならない』と書く。"
-                        + "Generated/ が列挙できない形だけの行で組を埋めると不具合が目録から消え、特性として固定すると例外で止まる方針を黙って決めるので行にしない"
-                ),
                 CoverageGap.AcceptedMatching(
                     Scope,
                     "修正 N",
@@ -69,17 +54,6 @@ internal static class MockBuildBoundaryDimensions
                         && k != BoundaryEntryKind.Plain.ToString()
                 ),
             ]
-        );
-
-    /// <summary>上書きの走査で、製品の候補として行にせず残す（入口 D, 種別）の項目（直す区切りは P5）</summary>
-    private static CoverageGapEntry ProductCandidate(BoundaryEntryKind kind, string reason) =>
-        CoverageGap.Tuple(
-            Scope,
-            "P3-11b",
-            "P5",
-            reason,
-            (Entrance, BoundaryEntrance.OverwriteScan.ToString()),
-            (Kind, kind.ToString())
         );
 
     /// <summary>1 行を数える</summary>

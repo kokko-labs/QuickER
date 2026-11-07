@@ -490,6 +490,52 @@ internal static partial class MockFolderRows
                 }
             ),
             Row(
+                "session-tool-save-screen-duplicate-entity-names-are-merged-with-warning",
+                "同じ画面の同じ名前（大文字小文字だけの違いを含む）の宣言は、操作の和で 1 つにまとめ（綴りと位置は初出）、名前ごとに 1 件の英語の警告で知らせる",
+                MockFolderEntry.SessionTool,
+                MockFolderOutcome.Succeeds,
+                h =>
+                {
+                    // 根拠：src/QuickER.AI.Mock/CLAUDE.md「ツールと検証」（同じ名前の宣言は操作の和で 1 つにまとめ、save_screen では警告する）
+                    Start(h);
+
+                    var (result, success) = h.Execute(
+                        SaveScreenTool,
+                        SaveScreenArgs(
+                            "OrderList.html",
+                            "注文一覧",
+                            ScreenHtml("<h1>一覧</h1>"),
+                            entities:
+                            [
+                                new { name = "Order", operations = "r" },
+                                new { name = "Customer", operations = "r" },
+                                new { name = " order ", operations = "cu" },
+                                new { name = "ORDER", operations = "xyz" },
+                                new { name = "customer", operations = "u" },
+                            ]
+                        )
+                    );
+
+                    // Order は 3 回・Customer はちょうど 2 回（まとめる境目）。警告は名前ごとに 1 件
+                    success.Should().BeTrue();
+                    static bool IsMergedWarning(string w) =>
+                        w.Contains("more than once", StringComparison.Ordinal);
+                    var warnings = h.ScreenSavedEvents.Single().Warnings.Where(IsMergedWarning);
+                    warnings.Should().HaveCount(2);
+                    warnings
+                        .Should()
+                        .ContainSingle(w => w.Contains("'Order'", StringComparison.Ordinal));
+                    warnings
+                        .Should()
+                        .ContainSingle(w => w.Contains("'Customer'", StringComparison.Ordinal));
+                    result.Split('\n').Count(IsMergedWarning).Should().Be(2);
+                    RecordedEntities(h)
+                        .Select(e => (e.Name, e.Operations))
+                        .Should()
+                        .Equal(("Order", "CRU"), ("Customer", "RU"));
+                }
+            ),
+            Row(
                 "session-tool-save-screen-non-object-entities-warn-and-skip",
                 "オブジェクトでない宣言の要素（文字列・数・null・bool）は要素ごとに警告して読み飛ばし、ほかの宣言は記録する（名前が空の要素と同じ扱い）",
                 MockFolderEntry.SessionTool,
@@ -510,6 +556,9 @@ internal static partial class MockFolderRows
                         && w.Contains("not a JSON object", StringComparison.Ordinal);
                     h.ScreenSavedEvents.Single().Warnings.Count(IsNonObjectWarning).Should().Be(4);
                     result.Split('\n').Count(IsNonObjectWarning).Should().Be(4);
+
+                    // 警告つきの応答は複数行で、改行は LF だけ（ER 図のツールの「ツールの応答の改行」と同じ。組の不変条件 9 も全行で見る）
+                    result.Should().Contain("\n").And.NotContain("\r");
                     var recorded = RecordedEntities(h);
                     recorded.Should().ContainSingle();
                     recorded[0].Name.Should().Be("Customer");

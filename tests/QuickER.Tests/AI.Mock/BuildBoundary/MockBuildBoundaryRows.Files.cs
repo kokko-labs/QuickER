@@ -353,22 +353,28 @@ internal static partial class MockBuildBoundaryRows
                 }
             ),
             SyncRow(
-                "overwrite-acl-denied-output-folder-does-not-throw",
-                "出力フォルダ自体が列挙を拒否していても走査は例外にならない（走査は生成コマンドの try の外から呼ばれる。素の列挙が実際に投げることも確かめる）",
+                "overwrite-acl-denied-output-folder-is-listed-as-itself",
+                "出力フォルダ自体が一覧の読み取りを拒否していても、走査は例外にならず、中を確かめられない出力フォルダ自身を「.\\」の 1 件として確認に出す"
+                    + "（直下の別プロジェクトを黙って見落として確認なしに進まない。走査は生成コマンドの try の外から呼ばれる。素の列挙が実際に投げることも確かめる）",
                 BoundaryEntrance.OverwriteScan,
                 BoundaryEntryKind.AclDenied,
                 c =>
                 {
+                    // 根拠：src/QuickER.AI.Mock/MockProjectOverwriteScanner.cs の XmlDoc（中を列挙できない出力フォルダは自身を 1 件として出す）
                     var folder = c.Folder;
+                    MockBuildBoundaryContext.Write(Path.Combine(folder, $"{ProjectName}.sln"));
                     MockBuildBoundaryContext.Write(Path.Combine(folder, "Other.csproj"));
                     c.Deny(folder);
 
-                    // 素の列挙は落ちる（＝オプションが解決している問題が実在することの確認）
+                    // 素の列挙は落ちる（＝走査が受け止める問題が実在することの確認）
                     var raw = () => Directory.EnumerateFiles(folder, "*.csproj").ToList();
                     raw.Should().Throw<UnauthorizedAccessException>();
 
-                    var scan = () => MockProjectOverwriteScanner.Scan(folder, ProjectName);
-                    scan.Should().NotThrow();
+                    var scan = MockProjectOverwriteScanner.Scan(folder, ProjectName);
+
+                    scan.RequiresConfirmation.Should().BeTrue();
+                    scan.ExistingPaths.Should()
+                        .Equal($"{ProjectName}.sln", "." + Path.DirectorySeparatorChar);
                 }
             ),
         ];

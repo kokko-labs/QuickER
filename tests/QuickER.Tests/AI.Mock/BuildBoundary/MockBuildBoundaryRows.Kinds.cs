@@ -579,5 +579,68 @@ internal static partial class MockBuildBoundaryRows
                         .Equal("Library.csproj");
                 }
             ),
+            SyncRow(
+                "overwrite-hidden-foreign-solutions-are-listed",
+                "隠し属性（読み取り専用を併せたものも）・システム属性の直下の別ソリューション・別プロジェクトも、隠しの自分の sln・csproj と同じく上書きの確認に出す",
+                BoundaryEntrance.OverwriteScan,
+                BoundaryEntryKind.Hidden,
+                c =>
+                {
+                    // 根拠：src/QuickER.AI.Mock/MockProjectOverwriteScanner.cs の XmlDoc（直下の別ソリューション・別プロジェクトを属性に依らず確認の対象にする）
+                    var folder = c.Folder;
+                    MockBuildBoundaryContext.WriteHidden(
+                        Path.Combine(folder, $"{ProjectName}.sln")
+                    );
+                    MockBuildBoundaryContext.WriteHidden(Path.Combine(folder, "Other.sln"));
+                    MockBuildBoundaryContext.WriteHidden(
+                        Path.Combine(folder, "X.slnx"),
+                        readOnly: true
+                    );
+                    MockBuildBoundaryContext.WriteHidden(Path.Combine(folder, "Lib.csproj"));
+                    var system = Path.Combine(folder, "Sys.csproj");
+                    MockBuildBoundaryContext.Write(system);
+                    File.SetAttributes(system, FileAttributes.System);
+                    MockBuildBoundaryContext.WriteHidden(
+                        Path.Combine(c.ProjectDirectory, $"{ProjectName}.csproj")
+                    );
+
+                    MockProjectOverwriteScanner
+                        .Scan(folder, ProjectName)
+                        .ExistingPaths.Should()
+                        .Equal(
+                            $"{ProjectName}.sln",
+                            "Lib.csproj",
+                            "Other.sln",
+                            "Sys.csproj",
+                            "X.slnx",
+                            ProjectName + Path.DirectorySeparatorChar,
+                            Path.Combine(ProjectName, $"{ProjectName}.csproj")
+                        );
+                }
+            ),
+            SyncRow(
+                "overwrite-unlistable-reparse-output-folder-is-listed-as-itself",
+                "出力フォルダ自身が中を列挙できない reparse フォルダでも、走査は例外にならず、出力フォルダ自身を「.\\」の 1 件として確認に出す"
+                    + "（走査は生成コマンドの try の外から呼ばれる。素の列挙が実際に投げることも確かめる）",
+                BoundaryEntrance.OverwriteScan,
+                BoundaryEntryKind.UnlistableReparse,
+                c =>
+                {
+                    // 根拠：src/QuickER.AI.Mock/MockProjectOverwriteScanner.cs の XmlDoc（中を列挙できない出力フォルダは自身を 1 件として出す）・
+                    // src/QuickER.AI.Mock/CLAUDE.md「最終ビルド前の変更検知」（中を確かめられないフォルダは毎回出す＝フェイルクローズ）
+                    var output = Path.Combine(c.NewFolder(), "out");
+                    Directory.CreateDirectory(output);
+                    ReparsePointTestHelper.MakeUnlistableReparseDirectory(output);
+
+                    // 素の列挙は落ちる（＝走査が受け止める問題が実在することの確認）
+                    var raw = () => Directory.EnumerateFiles(output, "*.csproj").ToList();
+                    raw.Should().Throw<IOException>();
+
+                    var scan = MockProjectOverwriteScanner.Scan(output, ProjectName);
+
+                    scan.RequiresConfirmation.Should().BeTrue();
+                    scan.ExistingPaths.Should().Equal("." + Path.DirectorySeparatorChar);
+                }
+            ),
         ];
 }

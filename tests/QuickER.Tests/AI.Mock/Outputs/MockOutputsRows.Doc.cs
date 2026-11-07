@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO;
 using AwesomeAssertions;
 using QuickER.AI.Mock;
 using QuickER.AI.Mock.Resources;
@@ -149,6 +150,80 @@ internal static partial class MockOutputsRows
 
                     screen.File.Should().Be("A.html");
                     (screen.Entities is null || screen.Entities.Count == 0).Should().BeTrue();
+                }
+            ),
+            Row(
+                "load-hand-written-entities-are-normalized",
+                "手で書いた entities は、開くときに保存の経路と同じ正規化に通す（名前の前後の空白を除く・名前が空と有効な操作の無い宣言を捨てる・"
+                    + "操作を C→R→U→D・同じ名前〔大文字小文字だけの違いを含む〕は操作の和で 1 つにまとめる・空の配列は宣言なし）。"
+                    + "開いた後の設計書の CRUD 表と再開のプロンプトにも正規化した形が出る。開くだけでは mock.json を書き換えない",
+                [
+                    (MockOutputSut.Load, "load-entities-normalized"),
+                    (MockOutputSut.DesignDoc, "doc-crud"),
+                    (MockOutputSut.ResumePrompt, "resume-entities"),
+                ],
+                context =>
+                {
+                    // 根拠：src/QuickER.AI.Mock/CLAUDE.md「保存単位とフォルダ」（entities は保存の経路と同じ正規化に通す）・
+                    // MockManifest.cs の MockScreenEntity の XmlDoc（名前は大文字小文字を無視して照合・操作は C→R→U→D）
+                    var created = context.CreateStore();
+                    created.SaveStylesheet("body{}", "css");
+                    created.SaveScreen(
+                        "A.html",
+                        "A",
+                        "",
+                        Screen("<h1>a</h1>"),
+                        Array.Empty<MockTransition>(),
+                        "v1"
+                    );
+                    created.SaveScreen(
+                        "B.html",
+                        "B",
+                        "",
+                        Screen("<h1>b</h1>"),
+                        Array.Empty<MockTransition>(),
+                        "v2"
+                    );
+                    var manifest = System.Text.Json.Nodes.JsonNode.Parse(
+                        File.ReadAllText(context.ManifestPath)
+                    )!;
+                    manifest["screens"]![0]!["entities"] = System.Text.Json.Nodes.JsonNode.Parse(
+                        """
+                        [
+                          { "name": "  Order ", "operations": "urc" },
+                          { "name": "", "operations": "R" },
+                          { "name": "Customer", "operations": "xyz" },
+                          { "name": "order", "operations": "D" },
+                          { "name": "Ghost", "operations": "CRUDX" }
+                        ]
+                        """
+                    );
+                    manifest["screens"]![1]!["entities"] = new System.Text.Json.Nodes.JsonArray();
+                    context.WriteManifest(manifest.ToJsonString());
+                    var written = File.ReadAllBytes(context.ManifestPath);
+
+                    var store = MockFolderStore.Open(context.Folder);
+
+                    var screens = store.Manifest.Screens;
+                    screens[0]
+                        .Entities!.Select(e => (e.Name, e.Operations))
+                        .Should()
+                        .Equal(("Order", "CRUD"), ("Ghost", "CRUD"));
+                    screens[1].Entities.Should().BeNull();
+                    File.ReadAllBytes(context.ManifestPath).Should().Equal(written);
+
+                    var doc = ExportDoc(store);
+                    doc.Should()
+                        .Contain($"| {Strings.MockDoc_ColScreen} | Order | Ghost |")
+                        .And.Contain("| [A](<A.html>) | CRUD | CRUD |")
+                        .And.Contain("| [B](<B.html>) |  |  |");
+
+                    WithUiCulture(
+                            "ja",
+                            () => MockResumePrompt.Build("# 現在スキーマ", store.Manifest, false)
+                        )
+                        .Should()
+                        .Contain("エンティティ: Order(CRUD), Ghost(CRUD)");
                 }
             ),
             .. new[]

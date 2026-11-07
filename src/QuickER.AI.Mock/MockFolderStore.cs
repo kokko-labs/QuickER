@@ -2,6 +2,7 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using QuickER.AI.Mock.Resources;
+using QuickER.Model;
 using QuickER.Platform;
 
 namespace QuickER.AI.Mock;
@@ -143,6 +144,7 @@ public sealed class MockFolderStore
     /// 呼び出し側でユーザー提示できる明確なメッセージ（UI 言語に追従）の例外を投げる。
     /// 手編集で入り得る <c>null</c> は、文字列なら空文字へ補い、リストの要素そのものが <c>null</c> なら
     /// 黙って捨てる（要素は何の情報も持たないため。図ファイルの読み込みと同じ扱い）。
+    /// 画面の <c>entities</c> は保存の経路と同じ <see cref="NormalizeEntities"/> に通して直す（断らない・警告しない）。
     /// </summary>
     /// <param name="folder">開くフォルダ</param>
     /// <param name="clock">現在時刻の供給元（省略時は <see cref="DateTimeOffset.Now"/>）</param>
@@ -555,25 +557,28 @@ public sealed class MockFolderStore
     }
 
     /// <summary>
-    /// エンティティ宣言一覧を正規化する。各エントリの名前を Trim し、名前が空のものは黙って除外、
-    /// 操作を <see cref="NormalizeOperations"/> で正規化する。正規化後に操作が空になったエントリは
-    /// 破棄し、その名前を <see cref="MockScreenEntityNormalization.DiscardedNames"/> に残す。
+    /// エンティティ宣言一覧を正規化する。各エントリの名前を Trim し、名前が空のものは黙って除外する。
+    /// 同じ名前（<see cref="SchemaNames"/> の規則＝大文字小文字だけの違いを含む）のエントリは、操作の和で 1 つにまとめ
+    /// （綴りと位置は初出）、その名前を <see cref="MockScreenEntityNormalization.MergedNames"/> に残す。
+    /// 操作は <see cref="NormalizeOperations"/> で正規化し、まとめた後に操作が空のエントリは破棄して、
+    /// その名前を <see cref="MockScreenEntityNormalization.DiscardedNames"/> に残す。
     /// </summary>
+    /// <remarks>
+    /// 保存の経路（<see cref="SaveScreen"/>）と、手で書いた <c>mock.json</c> の読み込み（<see cref="Open"/>）が同じ規則を共有する。
+    /// 同じ名前が 2 つあると、設計書の CRUD 表は 1 列にまとめて先頭の操作だけを出し、再開のプロンプトには 2 回出る。
+    /// どちらの操作も利用者の申告なので、片方を捨てずに和を取る。
+    /// </remarks>
     /// <param name="entities">正規化対象の宣言一覧（null は空として扱う）</param>
-    /// <returns>正規化済みの宣言一覧と、操作が空で破棄された名前の一覧</returns>
+    /// <returns>正規化済みの宣言一覧と、操作が空で破棄された名前・まとめた名前の一覧</returns>
     public static MockScreenEntityNormalization NormalizeEntities(
         IReadOnlyList<MockScreenEntity>? entities
     )
     {
-        var normalized = new List<MockScreenEntity>();
-        var discarded = new List<string>();
+        // 初出順の名前ごとに、生の操作を連結して持つ（和は最後に NormalizeOperations でとる）
+        var groups = new List<(string Name, StringBuilder Operations, int Count)>();
+        var indexByName = new Dictionary<string, int>(SchemaNames.Comparer);
 
-        if (entities is null)
-        {
-            return new MockScreenEntityNormalization(normalized, discarded);
-        }
-
-        foreach (var entity in entities)
+        foreach (var entity in entities ?? [])
         {
             var entityName = entity?.Name?.Trim() ?? string.Empty;
 
@@ -583,19 +588,42 @@ public sealed class MockFolderStore
                 continue;
             }
 
-            var operations = NormalizeOperations(entity!.Operations);
+            if (indexByName.TryGetValue(entityName, out var index))
+            {
+                var group = groups[index];
+                group.Operations.Append(entity!.Operations);
+                groups[index] = (group.Name, group.Operations, group.Count + 1);
+                continue;
+            }
+
+            indexByName[entityName] = groups.Count;
+            groups.Add((entityName, new StringBuilder(entity!.Operations), 1));
+        }
+
+        var normalized = new List<MockScreenEntity>();
+        var discarded = new List<string>();
+        var merged = new List<string>();
+
+        foreach (var (name, rawOperations, count) in groups)
+        {
+            if (count > 1)
+            {
+                merged.Add(name);
+            }
+
+            var operations = NormalizeOperations(rawOperations.ToString());
 
             // 有効な CRUD 文字が 1 つも無いエントリは破棄して名前を控える（警告用）
             if (operations.Length == 0)
             {
-                discarded.Add(entityName);
+                discarded.Add(name);
                 continue;
             }
 
-            normalized.Add(new MockScreenEntity { Name = entityName, Operations = operations });
+            normalized.Add(new MockScreenEntity { Name = name, Operations = operations });
         }
 
-        return new MockScreenEntityNormalization(normalized, discarded);
+        return new MockScreenEntityNormalization(normalized, discarded, merged);
     }
 
     /// <summary>改訂履歴へ 1 件追記する</summary>
@@ -653,15 +681,12 @@ public sealed class MockFolderStore
             screen.Name ??= string.Empty;
             screen.Description ??= string.Empty;
 
+            // 宣言は保存の経路と同じ正規化に通す（断らずに直す。宣言の意味は正規化した後の形で決まる）。
+            // 何も残らなければ、保存の経路と同じく宣言なし（null）にする。Open は書かないので、mock.json は次の保存で直る
             if (screen.Entities is not null)
             {
-                screen.Entities = screen.Entities.Where(e => e is not null).ToList();
-
-                foreach (var entity in screen.Entities)
-                {
-                    entity.Name ??= string.Empty;
-                    entity.Operations ??= string.Empty;
-                }
+                var entities = NormalizeEntities(screen.Entities).Entities;
+                screen.Entities = entities.Count == 0 ? null : entities.ToList();
             }
         }
 
@@ -729,11 +754,13 @@ public sealed class MockFolderStore
 
 /// <summary>
 /// <see cref="MockFolderStore.NormalizeEntities"/> の結果。正規化済みの宣言一覧と、
-/// 操作が空で破棄された名前の一覧（警告文言の材料）を持つ。
+/// 操作が空で破棄された名前・同じ名前を 1 つにまとめた名前の一覧（警告文言の材料）を持つ。
 /// </summary>
 /// <param name="Entities">正規化済みのエンティティ宣言一覧</param>
 /// <param name="DiscardedNames">正規化で操作が空になり破棄されたエンティティ名の一覧</param>
+/// <param name="MergedNames">2 回以上宣言され、操作の和で 1 つにまとめたエンティティ名の一覧（綴りは初出）</param>
 public sealed record MockScreenEntityNormalization(
     IReadOnlyList<MockScreenEntity> Entities,
-    IReadOnlyList<string> DiscardedNames
+    IReadOnlyList<string> DiscardedNames,
+    IReadOnlyList<string> MergedNames
 );

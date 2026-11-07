@@ -55,6 +55,10 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
     private const string EntityOperationsInvalidWarningFormat =
         "Entity declaration '{0}' was dropped because it has no valid CRUD operations (only C/R/U/D are allowed).";
 
+    /// <summary>同じ名前のエンティティ宣言を操作の和で 1 つにまとめた旨の警告フォーマット（英語）</summary>
+    private const string EntityDeclaredMoreThanOnceWarningFormat =
+        "Entity '{0}' was declared more than once; its operations were merged into one declaration.";
+
     /// <summary>宣言されたエンティティが現在の ER 図に存在しない旨の警告フォーマット（英語）</summary>
     private const string EntityNotInSchemaWarningFormat =
         "Declared entity '{0}' does not exist in the current ER diagram.";
@@ -552,6 +556,11 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
         // ストアと同一の正規化を適用し、破棄された宣言・図に無い名前を警告する
         var normalization = MockFolderStore.NormalizeEntities(parsed);
 
+        foreach (var merged in normalization.MergedNames)
+        {
+            warnings.Add(string.Format(EntityDeclaredMoreThanOnceWarningFormat, merged));
+        }
+
         foreach (var discarded in normalization.DiscardedNames)
         {
             warnings.Add(string.Format(EntityOperationsInvalidWarningFormat, discarded));
@@ -636,13 +645,14 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
             return baseText;
         }
 
+        // 改行は LF だけで組む（AppendLine は Windows で CRLF になる。ER 図のツールの応答と同じ決まり）
         var builder = new StringBuilder(baseText);
-        builder.AppendLine();
+        builder.Append('\n');
         builder.Append("Warnings:");
 
         foreach (var warning in warnings)
         {
-            builder.AppendLine();
+            builder.Append('\n');
             builder.Append("- ");
             builder.Append(warning);
         }

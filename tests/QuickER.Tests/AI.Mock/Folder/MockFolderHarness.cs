@@ -57,6 +57,10 @@ namespace QuickER.Tests.AI.Mock.Folder;
 /// 保存の通知（<c>ScreenSaved</c>・<c>ScreenRemoved</c>・<c>StylesheetSaved</c>）は、そのツールが成功を返したときだけ、ツールの実行の中で
 /// ちょうど 1 回出る（get_screen・知らないツール・失敗の結果では出ない）（出典：MockFolderDesignSession.cs:399・:428・:441・:387-391・:350-356）。
 /// </item>
+/// <item>
+/// ツールの応答（成功・失敗とも）の改行は LF だけで、CR を含まない。<c>get_screen</c> は画面の HTML をそのまま返すので外す
+/// （出典：src/QuickER.AI.Mock/CLAUDE.md「ツールと検証」・src/QuickER.Mcp/CLAUDE.md「ツールの応答の改行」）。
+/// </item>
 /// </list>
 /// </remarks>
 internal sealed class MockFolderHarness : IDisposable
@@ -518,6 +522,14 @@ internal sealed class MockFolderHarness : IDisposable
             _violations.Add(
                 $"不変条件 8：{toolName}（成功 {outcome.Success}）の通知が {raised}（期待 {expected}）"
             );
+        }
+
+        if (
+            toolName != MockFolderDesignTools.GetScreenToolName
+            && outcome.Result.Contains('\r', StringComparison.Ordinal)
+        )
+        {
+            _violations.Add($"不変条件 9：{toolName} の応答に CR がある");
         }
 
         if (raised.Saved == 1 && ScreenSavedEvents[^1].File != arguments.File)
