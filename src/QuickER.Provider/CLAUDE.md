@@ -395,6 +395,13 @@
 - SQLite の同期スクリプトは独自の順序のまま（一意制約の名前がスキーマの中の名前を取らない）。
 - 固定は期待の行 `plan-sections-are-in-fixed-order` と実 DB の行 `realdb-rename-table-keeping-unique-name-drops-old-table-first`（5 方言）。mutation 実証済み。
 
+### 主キーの列の NULL 許容
+
+- DDL・同期スクリプト・差分・同期計画が列を NOT NULL とみなすかは、Model の `ColumnNullability.AllowsNull`（NULL 許容の印があり、主キーの列でない）だけで決める。方言の DDL・同期スクリプトに `IsPrimaryKey || !IsNullable` の写しを置かない。
+  - 写しが割れると、DDL が NOT NULL で作った列を差分が NULL 許容とみなし、適用した直後に偽の ALTER COLUMN が出る。
+- 規則の本体・例外の 3 か所（主キーでない NOT NULL の列の判定）と読みの限界は `src/QuickER.Model/CLAUDE.md`「列の NULL 許容（ColumnNullability）」。
+- ガード：`SourceRuleTests` の規則 `column-nullability-copies`・振る舞いは `DialectDdlTableTests`・同期計画の期待の行・`SchemaDiffServiceTests`。
+
 ### 説明の空欄と表せない文字
 
 - 説明（テーブル・列）の空欄の判定は `DescriptionText`（`DescriptionText.IsPresent`／`Normalize`＝null・空・空白だけは説明なし）だけが持つ。DDL・差分（新しい表・列と既存の比較）・同期スクリプトがこれを通す。

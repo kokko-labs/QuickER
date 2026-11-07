@@ -2559,7 +2559,8 @@ public sealed class SyncPlanner
             // この同期で NOT NULL になる子の列（live では NULL を許す列）
             var madeNotNull = fk.ColumnPairs.Any(p =>
                 fk.Child.Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, p.ChildColumn))
-                    is { IsNullable: true, IsPrimaryKey: false }
+                    is { } childColumn
+                && ColumnNullability.AllowsNull(childColumn)
                 && !postSyncNullable(fk.Child, childTable, p.ChildColumn)
             );
 
@@ -2667,7 +2668,7 @@ public sealed class SyncPlanner
                     ? liveColumn
                     : entity.Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, column));
 
-            return source is null || source.IsNullable && !source.IsPrimaryKey;
+            return source is null || ColumnNullability.AllowsNull(source);
         };
     }
 

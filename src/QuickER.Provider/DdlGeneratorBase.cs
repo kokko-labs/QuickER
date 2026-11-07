@@ -101,7 +101,7 @@ public abstract class DdlGeneratorBase : IDdlGenerator
                 // PK 列は IsNullable の設定値に関わらず NOT NULL を強制する。
                 // 列定義の末尾には方言固有の句（MySQL のインライン COMMENT 等）を付ける
                 var line =
-                    $"    {QuoteSimpleName(col.Name)} {col.DataType} {(col.IsPrimaryKey || !col.IsNullable ? "NOT NULL" : "NULL")}{BuildColumnDefinitionSuffix(col)}";
+                    $"    {QuoteSimpleName(col.Name)} {col.DataType} {(ColumnNullability.AllowsNull(col) ? "NULL" : "NOT NULL")}{BuildColumnDefinitionSuffix(col)}";
 
                 // 後続のカラム行、または制約行（PRIMARY KEY / UNIQUE）が続く場合は区切りのカンマを付ける
                 if (i < entity.Columns.Count - 1 || constraintLines.Count > 0)

@@ -258,7 +258,7 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
             $"    {SqliteIdentifier.QuoteSimple(col.Name)} {FormatDeclaredType(col.DataType)}";
 
         // PK 列は IsNullable の設定値に関わらず NOT NULL を強制する
-        var nullClause = col.IsPrimaryKey || !col.IsNullable ? "NOT NULL" : "NULL";
+        var nullClause = ColumnNullability.AllowsNull(col) ? "NULL" : "NOT NULL";
         return $"{nameAndType} {nullClause}";
     }
 

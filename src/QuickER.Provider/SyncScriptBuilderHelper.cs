@@ -20,9 +20,9 @@ public static class SyncScriptBuilderHelper
     public static IReadOnlyList<ForeignKeyColumnNamePair> ResolveColumnPairs(SchemaDiffItem item) =>
         item.ForeignKeyColumnPairs;
 
-    /// <summary>NULL 許容句を返す（主キーまたは非 NULL 許容なら NOT NULL）</summary>
+    /// <summary>NULL 許容句を返す（NULL を持てない列＝主キーまたは非 NULL 許容なら NOT NULL。判定は <see cref="ColumnNullability.AllowsNull"/>）</summary>
     public static string GetNullabilityClause(Column column) =>
-        column.IsPrimaryKey || !column.IsNullable ? "NOT NULL" : "NULL";
+        ColumnNullability.AllowsNull(column) ? "NULL" : "NOT NULL";
 
     /// <summary>構成列を解決できない一意制約のスキップコメントを組み立てる（固定文は英語が正本）</summary>
     /// <remarks>

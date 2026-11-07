@@ -761,6 +761,47 @@ internal static partial class SourceRules
                 SourceScope.Files("src", "src/QuickER.Dialects/QuickER.Dialects.csproj"),
                 GuardFinder.File(GuardReader.Xml, FindProjectReferences)
             ),
+            // 列が NULL を持てるか（主キーの列は NULL 許容の印に依らず NOT NULL）の判定は ColumnNullability.AllowsNull だけが持つ。
+            // 写しが DDL・同期スクリプト・差分・計画に散ると、1 か所だけ規則が変わって DDL と差分が食い違う。シンボルで
+            // QuickER.Model.Column の IsPrimaryKey と IsNullable を同じ受け手で 1 つの式に組む最小の節を数える（読みの限界は
+            // ColumnNullabilityCombinations の remarks：文をまたぐ組み合わせは拾わない）。例外は、主キーを NULL 許容と別の理由で
+            // 外す「主キーでない NOT NULL の列」の判定だけ（主キーでない列では印がそのまま実効値で、AllowsNull だけでは値が決まらない）
+            SourceRule.Forbid(
+                "column-nullability-copies",
+                "列が NULL を持てるかは ColumnNullability.AllowsNull で決め、IsPrimaryKey と IsNullable を組んで写さない",
+                ExceptGenerated(Src)
+                    .Except(
+                        "QuickER.Model/ColumnNullability.cs",
+                        "列の NULL 許容の判定の正本（ColumnNullability）そのもの"
+                    ),
+                GuardFinder.Symbols(ColumnNullabilityCombinations.Describe),
+                new GuardKnown(
+                    "src/QuickER.Provider/IdentityColumnComment.cs",
+                    "!column.IsPrimaryKey && !column.IsNullable",
+                    1,
+                    "主キーでない NOT NULL の採番列の判定（主キーの採番列は生成コードの INSERT が送るので外れるのは主キーでない列だけ。主キーでない列では印がそのまま実効値）"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Gui/Services/MermaidExporter.cs",
+                    "!column.IsNullable && !column.IsPrimaryKey",
+                    1,
+                    "Mermaid で落ちる NOT NULL の判定（Mermaid の取込は主キーの標識の列を NOT NULL に戻すので落ちるのは主キーでない列だけ。主キーでない列では印がそのまま実効値）"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/DiagramTypeConverter.cs",
+                    "LosesRowVersion(canonical, newType, to) && !column.IsNullable && !column.IsPrimaryKey",
+                    1,
+                    "方言切替で行バージョンを失う NOT NULL の列を NULL 許容へ倒す判定（主キーの列は倒さない。主キーでない列では印がそのまま実効値）"
+                )
+            ) with
+            {
+                // 空振りの検知：範囲の中の Column.IsNullable の読み取り（規則が調べる素材）が 70 以上見つかる（いまは 77）
+                Floor = new(
+                    GuardFinder.Symbols(ColumnNullabilityCombinations.DescribeNullableRead),
+                    70,
+                    "Column.IsNullable の読み取り"
+                ),
+            },
         ];
 
     /// <summary>範囲から、根の下の生成物（<c>*.g.cs</c>・<c>*.Designer.cs</c>）を 1 つずつ除く（いまあるファイルを列挙して除外にする）</summary>

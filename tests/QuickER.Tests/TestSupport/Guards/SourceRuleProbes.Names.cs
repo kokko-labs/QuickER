@@ -333,5 +333,128 @@ internal static partial class SourceRuleProbes
                     ),
                 ]
             ),
+            // 同じ列の Column.IsPrimaryKey と Column.IsNullable を 1 つの式に組む最小の節を拾う（|| と三項・&& と否定・外側の否定・
+            // 条件式・プロパティパターン・and のパターン・?.・主キーでない NOT NULL・is のパターンとメンバー参照の混ざる形・switch 式・
+            // パターンの switch 式・switch 文）。拾わないのは、受け手が違う 2 列・入力が違う 2 つのパターン・別々のラムダの同じ名前の引数・
+            // AllowsNull を呼ぶ形・同じ名前のプロパティを持つ別の型・片方だけ・文をまたぐ組み合わせ
+            new SourceRuleProbe(
+                "column-nullability-copies-forms",
+                "column-nullability-copies",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System.Linq;
+                        using QuickER.Model;
+
+                        internal sealed class Row
+                        {
+                            public bool IsPrimaryKey { get; set; }
+                            public bool IsNullable { get; set; }
+                        }
+
+                        internal static class Probe
+                        {
+                            public static string Clause(Column col) => col.IsPrimaryKey || !col.IsNullable ? "NOT NULL" : "NULL";
+
+                            public static bool Allows(Column col) => col.IsNullable && !col.IsPrimaryKey;
+
+                            public static bool Negated(Column col) => !(col.IsPrimaryKey || !col.IsNullable);
+
+                            public static bool Ternary(Column model) => model.IsPrimaryKey ? false : model.IsNullable;
+
+                            public static bool Pattern(object value) => value is Column { IsNullable: true, IsPrimaryKey: false };
+
+                            public static bool AndPattern(object value) => value is Column { IsPrimaryKey: false } and Column { IsNullable: true };
+
+                            public static bool Conditional(Column? col) => col?.IsNullable == true && col?.IsPrimaryKey == false;
+
+                            public static bool NotNullNonKey(Entity entity) => entity.Columns.Any(column => !column.IsNullable && !column.IsPrimaryKey);
+
+                            public static bool MixedPattern(Column c) => c is { IsPrimaryKey: false } && c.IsNullable;
+
+                            public static bool SwitchOnKey(Column c) => c.IsPrimaryKey switch { true => false, _ => c.IsNullable };
+
+                            public static bool SwitchPatterns(Column c) => c switch { { IsPrimaryKey: true } => false, { IsNullable: var n } => n };
+
+                            public static bool SwitchStatement(Column c)
+                            {
+                                switch (c)
+                                {
+                                    case { IsPrimaryKey: true }:
+                                        return false;
+                                    default:
+                                        return c.IsNullable;
+                                }
+                            }
+
+                            public static bool TwoColumns(Column a, Column b) => a.IsPrimaryKey || !b.IsNullable;
+
+                            public static bool TwoPatternInputs(Column a, Column b) => a is { IsPrimaryKey: false } && b is { IsNullable: true };
+
+                            public static bool TwoLambdas(Entity entity) =>
+                                entity.Columns.Any(c => c.IsPrimaryKey) && entity.Columns.Any(c => c.IsNullable);
+
+                            public static string Canon(Column col) => ColumnNullability.AllowsNull(col) ? "NULL" : "NOT NULL";
+
+                            public static bool OtherType(Row row) => row.IsNullable && !row.IsPrimaryKey;
+
+                            public static bool OnlyOne(Column col, bool flag) => col.IsNullable && flag;
+
+                            public static bool Statements(Column col)
+                            {
+                                if (col.IsPrimaryKey)
+                                {
+                                    return false;
+                                }
+
+                                return col.IsNullable;
+                            }
+                        }
+                        """,
+                        "col.IsPrimaryKey || !col.IsNullable",
+                        "col.IsNullable && !col.IsPrimaryKey",
+                        "col.IsPrimaryKey || !col.IsNullable",
+                        "model.IsPrimaryKey ? false : model.IsNullable",
+                        "Column { IsNullable: true, IsPrimaryKey: false }",
+                        "Column { IsPrimaryKey: false } and Column { IsNullable: true }",
+                        "col?.IsNullable == true && col?.IsPrimaryKey == false",
+                        "!column.IsNullable && !column.IsPrimaryKey",
+                        "c is { IsPrimaryKey: false } && c.IsNullable",
+                        "c.IsPrimaryKey switch { true => false, _ => c.IsNullable }",
+                        "c switch { { IsPrimaryKey: true } => false, { IsNullable: var n } => n }",
+                        "switch (c) { case { IsPrimaryKey: true }: return false; default: return c.IsNullable; }"
+                    ),
+                ]
+            ),
+            // シンボルの規則は、条件コンパイルの外れる分岐の中も変種のコンパイルで読む
+            new SourceRuleProbe(
+                "column-nullability-copies-inactive-branch",
+                "column-nullability-copies",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using QuickER.Model;
+
+                        internal static class Probe
+                        {
+                            public static bool Allows(Column col)
+                            {
+                        #if QUICKER_PROBE_BRANCH
+                                return col.IsNullable && !col.IsPrimaryKey;
+                        #else
+                                return ColumnNullability.AllowsNull(col);
+                        #endif
+                            }
+                        }
+                        """,
+                        "col.IsNullable && !col.IsPrimaryKey"
+                    ),
+                ]
+            ) with
+            {
+                InactiveBranch = true,
+            },
         ];
 }
