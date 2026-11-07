@@ -143,6 +143,36 @@ internal static partial class PathEntranceRows
             false
         );
 
+        // ws / wss は file 以外のスキームとして拒否（リソース側の同じ形の行と同じ判定）
+        foreach (
+            var (url, label) in new[]
+            {
+                ("ws://example.com/socket", "ws"),
+                ("wss://example.com/socket", "wss"),
+            }
+        )
+        {
+            yield return Nav(
+                $"preview-navigation-rejects-{label}-scheme",
+                "遷移: file 以外のスキームは拒否",
+                WebSocketScheme,
+                new Uri(url),
+                Root,
+                false
+            );
+        }
+
+        // 特性の固定（文書に定めが無い今の振る舞い）：null の遷移先は拒否する。
+        // 根拠は src/QuickER.AI.Mock/MockPreviewPanel.xaml.cs:353 の `target is null` と、引数の nullable 注釈、リソース側の同形の行
+        yield return Nav(
+            "preview-navigation-rejects-null-target",
+            "特性の固定（文書に定めが無い今の振る舞い）：null の遷移先は拒否",
+            NullTarget,
+            null,
+            Root,
+            false
+        );
+
         // サブリソース
         foreach (
             var (name, shape) in new[]
@@ -163,6 +193,16 @@ internal static partial class PathEntranceRows
                 true
             );
         }
+
+        // #fragment は Uri.LocalPath に含まれないので、許可フォルダ直下のファイルなら通る（遷移側の同じ形の行と同じ判定）
+        yield return Res(
+            "preview-resource-accepts-fragment-of-direct-child",
+            "リソース: #fragment 付きでも許可フォルダ直下のファイルは許可",
+            Fragment,
+            new Uri(RootFile("sprite.svg").AbsoluteUri + "#icon"),
+            Root,
+            true
+        );
 
         foreach (
             var (url, shape, label) in new[]

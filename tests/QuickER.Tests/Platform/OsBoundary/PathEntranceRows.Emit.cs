@@ -415,6 +415,193 @@ internal static partial class PathEntranceRows
             false,
             r => r.Error.Should().Contain(".cs").And.Contain(".css").And.Contain(".razor")
         );
+
+        // Blazor のプロファイルでも、拡張子以外の検査は WPF と同じ経路を通る。
+        // 同じ形の WPF の行と同じ入力を、Blazor の入力として自然な拡張子（.razor / .css）に替えて流す（期待は WPF の行と同じ）
+        yield return Emit(
+            EmitPathBlazor,
+            "emit-blazor-accepts-ui-source-path-backslash",
+            "Blazor: 許可拡張子の相対パスは受理される",
+            BackslashRelative,
+            "MockApp\\Components\\Pages\\OrderList.razor",
+            true,
+            r =>
+            {
+                r.RelativePath.Should().NotContain("\\");
+                r.FullPath.Should().StartWith(Work);
+            }
+        );
+
+        foreach (
+            var row in EmitCases(
+                EmitPathBlazor,
+                "emit-blazor-rejects-absolute",
+                "絶対・ドライブ・先頭スラッシュは拒否",
+                Absolute,
+                false,
+                [@"C:\Windows\evil.cs", "/etc/passwd", "/MockApp/Pages/Evil.razor"]
+            )
+        )
+        {
+            yield return row;
+        }
+
+        foreach (
+            var row in EmitCases(
+                EmitPathBlazor,
+                "emit-blazor-rejects-build-folder",
+                "obj/・bin/ 配下は拒否",
+                BuildFolder,
+                false,
+                [
+                    "MockApp/obj/project.assets.json",
+                    "MockApp/obj/Debug/Evil.cs",
+                    "MockApp/bin/x.razor",
+                    "bin/App.razor",
+                ],
+                r => r.Error.Should().Contain("folder")
+            )
+        )
+        {
+            yield return row;
+        }
+
+        foreach (
+            var row in EmitCases(
+                EmitPathBlazor,
+                "emit-blazor-rejects-only-dot-segments-as-empty",
+                "'.' だけ・'./' だけのパスは空として断る",
+                DotsOnly,
+                false,
+                [".", "./", "././", @".\"],
+                r =>
+                    r.Error.Should()
+                        .Contain(
+                            PathSegments.Describe(
+                                PathSegmentViolation.Empty,
+                                CultureInfo.InvariantCulture
+                            )
+                        )
+            )
+        )
+        {
+            yield return row;
+        }
+
+        yield return Emit(
+            EmitPathBlazor,
+            "emit-blazor-rejects-drive-relative",
+            "ドライブ相対は拒否",
+            DriveRelative,
+            "D:relative.razor",
+            false
+        );
+
+        foreach (
+            var row in EmitCases(
+                EmitPathBlazor,
+                "emit-blazor-rejects-protected-folder-after-dropping-dot-segments",
+                "'.' と空の区間を落とした後も、保護フォルダは断る",
+                DroppedSegmentsProtected,
+                false,
+                [
+                    "./Generated/x.cs",
+                    "MockApp/./Generated/Entities.cs",
+                    ".//obj/x.css",
+                    "MockApp//design/mock/x.razor",
+                ],
+                r => r.Error.Should().Contain("folder")
+            )
+        )
+        {
+            yield return row;
+        }
+
+        foreach (
+            var row in EmitCases(
+                EmitPathBlazor,
+                "emit-blazor-rejects-empty-or-whitespace",
+                "空・空白だけのパスは拒否",
+                EmptyOrWhitespace,
+                false,
+                ["", "   "]
+            )
+        )
+        {
+            yield return row;
+        }
+
+        foreach (
+            var row in EmitCases(
+                EmitPathBlazor,
+                "emit-blazor-rejects-extensionless-file",
+                "拡張子なしのファイルは拒否",
+                Extensionless,
+                false,
+                ["MockApp/Dockerfile", "Makefile"]
+            )
+        )
+        {
+            yield return row;
+        }
+
+        yield return Emit(
+            EmitPathBlazor,
+            "emit-blazor-rejects-parent-traversal",
+            "'..' トラバーサルは拒否",
+            ParentTraversal,
+            "MockApp/../../evil.razor",
+            false
+        );
+
+        foreach (
+            var row in EmitCases(
+                EmitPathBlazor,
+                "emit-blazor-rejects-protected-folder-alias",
+                "末尾 . / 空白・8.3 短縮名による保護フォルダのすり抜けは拒否",
+                ProtectedAlias,
+                false,
+                [
+                    "Generated./x.cs",
+                    "Generated /x.cs",
+                    "MockApp/Generated. ./Entities.cs",
+                    "MockApp/obj../Evil.cs",
+                    "MockApp/bin\t/x.cs",
+                    "GENERA~1/x.cs",
+                    "MockApp/OBJ~1/Evil.cs",
+                    "design./mock/x.cs",
+                    "MockApp/Pages./Orders.razor",
+                    "MockApp/Views/Order.razor.",
+                ],
+                r => r.Error.Should().NotBeNullOrWhiteSpace()
+            )
+        )
+        {
+            yield return row;
+        }
+
+        foreach (
+            var row in EmitCases(
+                EmitPathBlazor,
+                "emit-blazor-rejects-scaffold-owned-path",
+                "スキャフォールド成果物への書き込みは拒否",
+                ScaffoldFile,
+                false,
+                [
+                    "MockApp/Generated/Entities.cs",
+                    "MockApp/design/mock/OrderList.html",
+                    "MockApp/README-QuickER.md",
+                    "MockApp/MockApp.csproj",
+                    "MockApp.sln",
+                    "NuGet.Config",
+                    "MockApp/nuget.config",
+                ],
+                r => r.Error.Should().NotBeNullOrWhiteSpace()
+            )
+        )
+        {
+            yield return row;
+        }
     }
 
     /// <summary>受理された WPF の提出パスの表明（区切りの正規化と出力フォルダ配下への解決）</summary>

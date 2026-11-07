@@ -104,5 +104,48 @@ internal static partial class AtomicFileRows
                     .Be("{ \"kept\": true }", "読み取りは中身を変えない");
             }
         );
+
+        // 一時ファイルの名前の上限に収める細工が読み取りには無いので、長い名前でも読めることだけを見る
+        yield return Row(
+            "atomic-try-read-long-file-name-returns-loaded",
+            "TryReadAllText: 255 文字の名前のファイルも読めたら Loaded と内容を返す",
+            TryReadAllText,
+            LongName,
+            None,
+            AtomicOutcome.Read,
+            o =>
+                AtomicFile.WriteAllText(
+                    Path.Combine(o.Folder, new string('x', 250) + ".json"),
+                    JsonText
+                ),
+            o => Read(Path.Combine(o.Folder, new string('x', 250) + ".json")),
+            o =>
+            {
+                ReadResult(o).Status.Should().Be(FileReadStatus.Loaded);
+                ReadResult(o).Contents.Should().Be(JsonText);
+            }
+        );
+
+        // 特性の固定（文書に定めが無い今の振る舞い）：読む先がディレクトリのときの分類は FileReadStatus の XmlDoc が決めていない
+        // （「あるのに読めない」は Unavailable・「無い」は Missing とだけある）。File.ReadAllText はディレクトリに
+        // UnauthorizedAccessException を投げ、ReadWithRetry が粘った後、TryReadAllText の
+        // UnauthorizedAccessException の枝が Unavailable を返す（src/QuickER.Platform/AtomicFile.cs の TryReadAllText と ReadWithRetry）。
+        // 文書に定めができたらその期待へ書き直す
+        yield return Row(
+            "atomic-try-read-path-is-directory-returns-unavailable",
+            "特性の固定（文書に定めが無い今の振る舞い）：TryReadAllText: 読む先がディレクトリなら Unavailable を返す",
+            TryReadAllText,
+            DirectoryAtPath,
+            None,
+            AtomicOutcome.Read,
+            o => Directory.CreateDirectory(Path.Combine(o.Folder, "as-directory")),
+            o => Read(Path.Combine(o.Folder, "as-directory")),
+            o =>
+            {
+                ReadResult(o).Status.Should().Be(FileReadStatus.Unavailable);
+                ReadResult(o).Contents.Should().BeNull();
+                Directory.Exists(Path.Combine(o.Folder, "as-directory")).Should().BeTrue();
+            }
+        );
     }
 }

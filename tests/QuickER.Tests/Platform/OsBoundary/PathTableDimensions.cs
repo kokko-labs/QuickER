@@ -123,27 +123,7 @@ internal static class PathContainmentDimensions
         );
 
     /// <summary>網羅しない組の一覧</summary>
-    public static CoverageGapSet Gaps =>
-        CoverageGap.Set(
-            EngineIds.OsBoundary,
-            [
-                CoverageGap.Matching(
-                    Scope,
-                    "P3-10",
-                    "P4",
-                    "テストが流していないだけ：重なりの判定は UNC を実体を辿る呼び出し（存在しないサーバーの問い合わせで待たされる）として"
-                        + "流さず飛ばしている。UNC の形は直接の表・Copilot・プレビューが見ている",
-                    Caller,
-                    Form,
-                    (caller, form) =>
-                        caller == "PathsOverlap"
-                        && form
-                            is nameof(PathContainmentForm.UncChild)
-                                or nameof(PathContainmentForm.UncGrandchild)
-                                or nameof(PathContainmentForm.UncSiblingPrefix)
-                ),
-            ]
-        );
+    public static CoverageGapSet Gaps => CoverageGap.Set(EngineIds.OsBoundary, []);
 
     /// <summary>台帳の行</summary>
     public static EngineDescriptor Descriptor =>
@@ -327,14 +307,18 @@ internal static class PathSegmentsDimensions
                     "生成物のファイル名は「.g.cs」・画面のファイル名は「.html」が付いた形で検査するので、空・'.'・'..'・末尾の '.' と空白の形は"
                         + "名前として成り立たない。生成物のファイル名はディレクトリ要素（区切り・ドライブ）を Path.GetFileName が先に落とすので"
                         + "区切りにも当たらない（src/QuickER.CodeGen.CSharp/GeneratedFileWriter.cs・src/QuickER.AI.Mock/MockFolderStore.cs の"
-                        + "CheckScreenFileName。入口の宣言はテストの Applies のコメント）",
+                        + "CheckScreenFileName。入口の宣言はテストの Applies のコメント）。"
+                        + "生成物のファイル名の空も当たらない：src/QuickER.CodeGen.CSharp/GeneratedFileWriter.cs は先（107-114 行）に"
+                        + "「.g.cs」「.g.md」で終わるかを検査して断り、CheckSegment（119 行）へ渡る名前は最短でも「.g.cs」なので、"
+                        + "Empty に当たる名前は無い（空のファイル名は NonGeneratedFileOverwrite で先に断られ、Empty の理由に当たらない）",
                     Entrance,
                     Violation,
                     (entrance, violation) =>
                         (
                             entrance == "GeneratedFileName"
                             && violation
-                                is nameof(PathSegmentViolation.DotSegment)
+                                is nameof(PathSegmentViolation.Empty)
+                                    or nameof(PathSegmentViolation.DotSegment)
                                     or nameof(PathSegmentViolation.Separator)
                                     or nameof(PathSegmentViolation.TrailingDotOrWhitespace)
                         )
@@ -345,33 +329,6 @@ internal static class PathSegmentsDimensions
                                     or nameof(PathSegmentViolation.DotSegment)
                                     or nameof(PathSegmentViolation.TrailingDotOrWhitespace)
                         )
-                ),
-                CoverageGap.Matching(
-                    Scope,
-                    "P3-10",
-                    "P4",
-                    "元のテストが持たず、P3-10 では行を足していない：入口へ流す形の一覧に空の値が無い。生成物のファイル名とプロジェクト名は"
-                        + "CheckSegment が空を Empty として断るが、その入力を流していない。提出のパスの空（'.' だけ）は"
-                        + "パスの入口の表（PathEntrances）の行が見ている",
-                    Entrance,
-                    Violation,
-                    (entrance, violation) =>
-                        violation == nameof(PathSegmentViolation.Empty)
-                        && entrance is "GeneratedFileName" or "ProjectName" or "EmitPath"
-                ),
-                CoverageGap.Matching(
-                    Scope,
-                    "P3-10",
-                    "P4",
-                    "元のテストが持たず、P3-10 では行を足していない：CheckRelativePath の形の一覧が区間の内側の使えない文字と上限超過を"
-                        + "持たない（区間ごとの判定は CheckSegment の行が見ている）",
-                    Entrance,
-                    Violation,
-                    (entrance, violation) =>
-                        entrance == "CheckRelativePath"
-                        && violation
-                            is nameof(PathSegmentViolation.InvalidCharacter)
-                                or nameof(PathSegmentViolation.TooLong)
                 ),
             ]
         );

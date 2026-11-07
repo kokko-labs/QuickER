@@ -41,64 +41,12 @@ internal static class LifecycleDimensions
 
     /// <summary>網羅しない組の一覧</summary>
     /// <remarks>
-    /// どれも元の単発のテストが持たず、P3-10 では新しい期待を作って行を足していない組。足すなら表の行で足し、ここから消す。
+    /// 領域の中の網羅すべき組は行ですべて流すので、残るのは配布ビルドで埋められない受け入れの 1 組だけ（<c>#if !DEBUG</c>）。
     /// </remarks>
     public static CoverageGapSet Gaps =>
         CoverageGap.Set(
             EngineIds.OsBoundary,
             [
-                Group(
-                    "終了の連鎖の器（ShutdownSteps・FeatureModuleShutdown）の記録先が投げる形は、元のテストが器の入口でだけ持つ。"
-                        + "モジュールの入口・1 回だけの入口へ記録先の失敗を重ねた期待は元に無い",
-                    (LifecycleEntrance.ModuleCloseAll, [LifecycleFault.ReporterThrows]),
-                    (LifecycleEntrance.ModuleShutdownOnce, [LifecycleFault.ReporterThrows])
-                ),
-                Group(
-                    "モジュールの後始末は、元のテストが失敗なしと 2 つが失敗する形だけを持つ（1 つだけが失敗する形の期待は元に無い）。"
-                        + "1 回だけの入口も、元のテストは 2 回呼ぶ形（Reentry）でだけ見ている",
-                    (LifecycleEntrance.ModuleCloseAll, [LifecycleFault.StepThrows]),
-                    (
-                        LifecycleEntrance.ModuleShutdownOnce,
-                        [LifecycleFault.StepThrows, LifecycleFault.None]
-                    )
-                ),
-                Group(
-                    "DI の破棄から登録された処理までの連鎖は、元のテストが破棄の失敗の 1 形だけを持つ。"
-                        + "記録先が投げる・適用が失敗する形の期待は元に無い",
-                    (
-                        LifecycleEntrance.CompleteExit,
-                        [
-                            LifecycleFault.None,
-                            LifecycleFault.ReporterThrows,
-                            LifecycleFault.ApplyFails,
-                        ]
-                    )
-                ),
-                Group(
-                    "クラッシュ処理の入口は、元のテストが持つ失敗の形だけを行にしている。"
-                        + "ログを書けない保存先での緊急保存・ダイアログの受け渡しや、UI の入口への失敗の重ね合わせの期待は元に無い",
-                    (LifecycleEntrance.HandleCrash, [LifecycleFault.UnwritablePath]),
-                    (
-                        LifecycleEntrance.HandleUiCrash,
-                        [
-                            LifecycleFault.None,
-                            LifecycleFault.StepThrows,
-                            LifecycleFault.EmergencySaveThrows,
-                            LifecycleFault.DialogThrows,
-                            LifecycleFault.HangingCleanup,
-                            LifecycleFault.UnwritablePath,
-                        ]
-                    )
-                ),
-                Group(
-                    "クラッシュログの書き出しの同じ時刻を選ぶ同時の書き手は、元のクラスに別の Fact として残る（このフェーズの外）。"
-                        + "記録先の入口の同じ秒の連続の期待は元に無い",
-                    (LifecycleEntrance.ShutdownFailureReport, [LifecycleFault.SameSecond])
-                ),
-                Group(
-                    "終了の最後の処理の入口は、元のテストが持つ失敗の形だけを行にしている。記録先が投げる形の期待は元に無い",
-                    (LifecycleEntrance.PostExitRun, [LifecycleFault.ReporterThrows])
-                ),
 #if !DEBUG
                 // 配布ビルドでは環境変数による差し替えの分岐ごとコンパイルされない（src/QuickER.Gui/Services/UpdateFeed.cs の #if DEBUG）。
                 // 空白の環境変数を定数のフィードへ戻す扱いは Debug ビルドにしか存在しないので、Release では埋められない
@@ -113,26 +61,6 @@ internal static class LifecycleDimensions
             ]
         );
 
-    /// <summary>入口ごとに形を名指しした組をまとめて 1 つの項目にする（理由が同じ組）</summary>
-    private static CoverageGapEntry Group(
-        string reason,
-        params (LifecycleEntrance Entrance, LifecycleFault[] Faults)[] pairs
-    )
-    {
-        var set = pairs
-            .SelectMany(p => p.Faults.Select(f => (p.Entrance.ToString(), f.ToString())))
-            .ToHashSet();
-        return CoverageGap.Matching(
-            Scope,
-            "P3-10",
-            "P4",
-            reason,
-            Entrance,
-            Fault,
-            (entrance, fault) => set.Contains((entrance, fault))
-        );
-    }
-
     /// <summary>台帳の行</summary>
     public static EngineDescriptor Descriptor =>
         new(
@@ -145,6 +73,7 @@ internal static class LifecycleDimensions
                 "tests/QuickER.Tests/Gui/Services/Lifecycle/LifecycleDimensions.cs",
                 "tests/QuickER.Tests/Gui/Services/Lifecycle/LifecycleRows.cs",
                 "tests/QuickER.Tests/Gui/Services/Lifecycle/LifecycleRows.Shutdown.cs",
+                "tests/QuickER.Tests/Gui/Services/Lifecycle/LifecycleRows.Faults.cs",
                 "tests/QuickER.Tests/Gui/Services/Lifecycle/LifecycleRows.Crash.cs",
                 "tests/QuickER.Tests/Gui/Services/Lifecycle/LifecycleRows.Update.cs",
                 "tests/QuickER.Tests/Gui/Services/Lifecycle/LifecycleRows.PostExit.cs",

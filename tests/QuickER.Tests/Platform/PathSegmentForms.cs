@@ -106,6 +106,9 @@ internal static class PathSegmentForms
         new("a./b", PathSegmentViolation.TrailingDotOrWhitespace),
         new("a/CON/b", PathSegmentViolation.ReservedDeviceName, InEntrance: true),
         new("a/x~1", PathSegmentViolation.Tilde, InEntrance: true),
+        // 区間の内側の使えない文字と上限超過（相対パスの入口へは 1 区間の形の行が同じ理由で流れているので InEntrance は false）
+        new("a/b*c", PathSegmentViolation.InvalidCharacter),
+        new("a/" + new string('a', PathSegments.MaxLength + 1), PathSegmentViolation.TooLong),
         new("MyApp.Domain/Generated", null),
         new("MyApp.Domain\\Generated", null),
         new("Domain/", null),

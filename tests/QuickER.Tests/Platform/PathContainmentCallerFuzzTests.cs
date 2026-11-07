@@ -57,14 +57,10 @@ public sealed class PathContainmentCallerFuzzTests
     [MemberData(nameof(Rows))]
     public void PathsOverlap_FollowsTable(PathContainmentRow row)
     {
-        if (!RunsPathsOverlap(row))
-        {
-            // 実体を辿るので、存在しないサーバーの問い合わせで待たされる
-            return;
-        }
+        var (path, root) = OverlapInput(row);
 
         MockProjectFiles
-            .PathsOverlap(row.Path, row.Root)
+            .PathsOverlap(path, root)
             .Should()
             .Be(row.SameOrUnder || row.Invalid, row.ToString());
     }
@@ -129,8 +125,17 @@ public sealed class PathContainmentCallerFuzzTests
             .Where(root => root.Length > 0)
             .Distinct(StringComparer.Ordinal);
 
-    /// <summary>重なりの判定の行を流すか（UNC は実体を辿るので流さない）</summary>
-    private static bool RunsPathsOverlap(PathContainmentRow row) => !row.IsUnc;
+    /// <summary>重なりの判定へ渡すパスと根（UNC はホストを <c>localhost</c> に替える）</summary>
+    /// <remarks>
+    /// 重なりの判定は実体を辿るので、UNC の子は区間ごとの存在確認が共有への問い合わせになり、存在しないサーバー名だと待たされる。
+    /// 期待は共有名の大文字小文字・前方一致の判定でホスト名に依らないので、表と同じ値のまま使える。
+    /// </remarks>
+    private static (string Path, string Root) OverlapInput(PathContainmentRow row) =>
+        row.IsUnc ? (ReplaceUncHost(row.Path), ReplaceUncHost(row.Root)) : (row.Path, row.Root);
+
+    /// <summary>UNC の先頭のホスト名を <c>localhost</c> に替える</summary>
+    private static string ReplaceUncHost(string path) =>
+        @"\\localhost" + path[path.IndexOf('\\', 2)..];
 
     /// <summary>プレビューへ渡す URI（URI にできない値はプレビューへ届かないので null）</summary>
     private static Uri? PreviewTarget(PathContainmentRow row) =>
@@ -153,10 +158,7 @@ public sealed class PathContainmentCallerFuzzTests
             PathContainmentDimensions.Observe(counter, "Direct", row.Form.ToString());
             PathContainmentDimensions.Observe(counter, "Copilot", row.Form.ToString());
 
-            if (RunsPathsOverlap(row))
-            {
-                PathContainmentDimensions.Observe(counter, "PathsOverlap", row.Form.ToString());
-            }
+            PathContainmentDimensions.Observe(counter, "PathsOverlap", row.Form.ToString());
 
             if (PreviewTarget(row) is not null)
             {

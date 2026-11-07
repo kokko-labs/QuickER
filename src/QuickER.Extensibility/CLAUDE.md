@@ -13,6 +13,7 @@
   - AI：`ErDiagramHostChatAdapter` / `ErDiagramHostMockDiagramSource`
   - コード生成：`CSharpGenerationCommandService`（CurrentProvider は GetDiagram().TargetDbms から解決）/ `QueryDefinitionCommandService` / `QueryConditionRenameFollower`
   - ダイアログ提示は presenter シーム。
+- カタログの 4 モジュールは、同じ契約の表で確かめる（解決できるサービス・Id・ツールバーの並び・終了時の後始末・終了失敗の記録先の要否・ホストのイベントへの追従）。モジュールごとの違いはアダプタの宣言に置き、カタログにモジュールを足すとアダプタが無い限り赤になる。ガード：`FeatureModuleContractTests`（`FeatureModuleContractTests.Axis_CoversCatalog`・行 `module-*`）。
 
 ## FeatureToolbarItem
 - `INotifyPropertyChanged` 実装クラス。**実行中に切り替えて効くのは Tooltip だけ**（対象 DBMS 切替に追従してツールチップを差し替える機構。現在は全方言が DB 同期対応で実質定数だが機構は維持する）。

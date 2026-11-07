@@ -87,6 +87,9 @@ internal enum AtomicFailure
 
     /// <summary>置き換えない書き込みが既存のファイルと衝突する</summary>
     CreateConflict,
+
+    /// <summary>親フォルダが無く、一時ファイルを作れない（フォルダは作らない）</summary>
+    ParentMissing,
 }
 
 /// <summary>結果の種類（行が宣言し、流す側が観測と食い違わないかを確かめる）</summary>
@@ -195,7 +198,7 @@ internal sealed record AtomicCase(
 
 /// <summary>原子的な書き込みの表（操作 × 保存先の形 × 失敗 → 結果）</summary>
 /// <remarks>
-/// 行は元の単発のテストと同じ入力・同じ表明を持つ（主題ごとのファイル：<c>AtomicFileRows.Write.cs</c>・
+/// 行は元の単発のテストと同じ入力・同じ表明を持つ（主題ごとのファイル：<c>AtomicFileRows.Write.cs</c>・<c>AtomicFileRows.Forms.cs</c>・
 /// <c>AtomicFileRows.Read.cs</c>・<c>AtomicFileRows.Names.cs</c>）。
 /// 流す側（<see cref="AtomicFileRunner"/>）は、宣言した結果の種類が観測と食い違わないこと、
 /// 書く操作の行は行の表明の後に一時ファイルの残りが無いことを全行に掛ける。
@@ -204,7 +207,7 @@ internal static partial class AtomicFileRows
 {
     /// <summary>表</summary>
     public static ScenarioTable<AtomicCase> Table =>
-        new(EngineIds.OsBoundary, [.. WriteRows(), .. ReadRows(), .. NameRows()]);
+        new(EngineIds.OsBoundary, [.. WriteRows(), .. FormRows(), .. ReadRows(), .. NameRows()]);
 
     /// <summary>行を作る</summary>
     private static ScenarioRow<AtomicCase> Row(

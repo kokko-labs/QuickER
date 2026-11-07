@@ -43,7 +43,7 @@ internal static class FeatureModuleContractDimensions
         new(
             EngineIds.OsBoundary,
             "FeatureModules",
-            "機能モジュールの契約の表（モジュール × 契約・AI チャットとモック生成）",
+            "機能モジュールの契約の表（モジュール × 契約・AI チャット・モック生成・コード生成・DB ツール）",
             Table,
             FeatureModuleContractRows.Table.Count,
             [
@@ -55,6 +55,8 @@ internal static class FeatureModuleContractDimensions
                 "src/QuickER.Extensibility/IFeatureModule.cs",
                 "src/QuickER.AI.Chat/AiChatFeatureModule.cs",
                 "src/QuickER.AI.Mock/MockGenerationFeatureModule.cs",
+                "src/QuickER.CodeGen.UI/CodeGenerationFeatureModule.cs",
+                "src/QuickER.Db.UI/DbToolsFeatureModule.cs",
             ]
         );
 

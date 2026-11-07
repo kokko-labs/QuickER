@@ -45,151 +45,8 @@ internal static class AtomicFileDimensions
             isValid: IsValid
         );
 
-    /// <summary>網羅しない組の一覧</summary>
-    /// <remarks>
-    /// どれも元の単発のテストが持たず、P3-10 では行を足していない組。足すなら表の行で足し、ここから消す。
-    /// 次元表は 2 因子の組で数えるので、項目も因子の組ごとに書く。
-    /// </remarks>
-    public static CoverageGapSet Gaps =>
-        CoverageGap.Set(
-            EngineIds.OsBoundary,
-            [
-                Pair(
-                    Op,
-                    Target,
-                    "WriteAllBytes は Write への薄い委譲で、WriteAllText も同じ Write を通る（置換・一時ファイルの掃除は同じ経路）。"
-                        + "元のテストは保存先の形ごとの行を 1 つの操作でしか持たず、別の操作で同じ形を流す行は足していない",
-                    (
-                        AtomicOp.WriteAllBytes,
-                        [
-                            AtomicTarget.NoFile,
-                            AtomicTarget.ExistingLarger,
-                            AtomicTarget.DirectoryAtPath,
-                            AtomicTarget.FixedTmpSibling,
-                            AtomicTarget.LockedFile,
-                            AtomicTarget.LongName,
-                            AtomicTarget.SurrogateAtCut,
-                        ]
-                    ),
-                    (
-                        AtomicOp.Write,
-                        [
-                            AtomicTarget.NoFile,
-                            AtomicTarget.ExistingLarger,
-                            AtomicTarget.DirectoryAtPath,
-                            AtomicTarget.FixedTmpSibling,
-                            AtomicTarget.LockedFile,
-                            AtomicTarget.LongName,
-                            AtomicTarget.SurrogateAtCut,
-                        ]
-                    ),
-                    (AtomicOp.WriteAllText, [AtomicTarget.SurrogateAtCut])
-                ),
-                Pair(
-                    Op,
-                    Failure,
-                    "WriteAllBytes は Write への薄い委譲で、WriteAllText も同じ Write を通る。差し替えの失敗・ディレクトリの保存先は"
-                        + "WriteAllText の行が見ていて、別の操作で同じ失敗を起こす行は足していない",
-                    (
-                        AtomicOp.WriteAllBytes,
-                        [AtomicFailure.ReplaceFails, AtomicFailure.TargetIsDirectory]
-                    ),
-                    (AtomicOp.Write, [AtomicFailure.ReplaceFails, AtomicFailure.TargetIsDirectory])
-                ),
-                Pair(
-                    Op,
-                    Target,
-                    "書き込み先の親フォルダが無いときの振る舞い（フォルダを作るのか失敗するのか）を製品の XmlDoc が決めておらず、"
-                        + "元のテストも書く操作では持たない。期待を導けないので行を足していない",
-                    (AtomicOp.WriteAllText, [AtomicTarget.MissingParentFolder]),
-                    (AtomicOp.WriteAllBytes, [AtomicTarget.MissingParentFolder]),
-                    (AtomicOp.Write, [AtomicTarget.MissingParentFolder]),
-                    (AtomicOp.CreateText, [AtomicTarget.MissingParentFolder])
-                ),
-                Pair(
-                    Op,
-                    Target,
-                    "CreateText は置き換えず、衝突で断る別の経路（ReplaceOnce）を通る。元のテストは保存先が無い形と既存の形の 2 つだけで、"
-                        + "長い既存・ディレクトリ・一時ファイルの同居・掴まれた保存先・長い名前の行は持たない",
-                    (
-                        AtomicOp.CreateText,
-                        [
-                            AtomicTarget.ExistingLarger,
-                            AtomicTarget.DirectoryAtPath,
-                            AtomicTarget.FixedTmpSibling,
-                            AtomicTarget.LockedFile,
-                            AtomicTarget.LongName,
-                            AtomicTarget.SurrogateAtCut,
-                        ]
-                    )
-                ),
-                Pair(
-                    Op,
-                    Failure,
-                    "CreateText は置き換えず、衝突で断る別の経路（ReplaceOnce）を通る。保存先がディレクトリのときの失敗の行は元のテストが持たない",
-                    (AtomicOp.CreateText, [AtomicFailure.TargetIsDirectory])
-                ),
-                Pair(
-                    Target,
-                    Failure,
-                    "CreateText は置き換えず、衝突で断る別の経路（ReplaceOnce）を通る。長い既存・掴まれた保存先との衝突の行は元のテストが持たない",
-                    (AtomicTarget.ExistingLarger, [AtomicFailure.CreateConflict]),
-                    (AtomicTarget.LockedFile, [AtomicFailure.CreateConflict])
-                ),
-                Pair(
-                    Op,
-                    Target,
-                    "読み取りの行は、読む先が無い・在る・親が無い・掴まれた 4 つの形だけを元のテストが持つ。"
-                        + "ディレクトリと長い名前の読み取りは持たない",
-                    (AtomicOp.TryReadAllText, [AtomicTarget.DirectoryAtPath, AtomicTarget.LongName])
-                ),
-                Pair(
-                    Target,
-                    Failure,
-                    "読み取りの行は、読む先がディレクトリの形を元のテストが持たない（ディレクトリで失敗しない読み取りの結果を数える）",
-                    (AtomicTarget.DirectoryAtPath, [AtomicFailure.None])
-                ),
-                Pair(
-                    Failure,
-                    Target,
-                    "書き手のコールバックの失敗を流すのは Write の既存のファイルの 1 形だけ。コールバックの失敗は保存先の形に依らず"
-                        + "一時ファイルの掃除と例外の伝播で扱うが、ほかの形で流す行は足していない",
-                    (
-                        AtomicFailure.WriterThrows,
-                        [
-                            AtomicTarget.NoFile,
-                            AtomicTarget.ExistingLarger,
-                            AtomicTarget.FixedTmpSibling,
-                            AtomicTarget.MissingParentFolder,
-                            AtomicTarget.LongName,
-                            AtomicTarget.SurrogateAtCut,
-                        ]
-                    )
-                ),
-            ]
-        );
-
-    /// <summary>因子の組ごとに、値を名指しした組をまとめて 1 つの項目にする（理由が同じ組）</summary>
-    private static CoverageGapEntry Pair(
-        string first,
-        string second,
-        string reason,
-        params (object First, object[] Seconds)[] pairs
-    )
-    {
-        var set = pairs
-            .SelectMany(p => p.Seconds.Select(s => (p.First.ToString()!, s.ToString()!)))
-            .ToHashSet();
-        return CoverageGap.Matching(
-            Scope,
-            "P3-10",
-            "P4",
-            reason,
-            first,
-            second,
-            (a, b) => set.Contains((a, b))
-        );
-    }
+    /// <summary>網羅しない組の一覧（領域の中の網羅すべき組をすべて行で流すので空）</summary>
+    public static CoverageGapSet Gaps { get; } = CoverageGap.Set(EngineIds.OsBoundary, []);
 
     /// <summary>台帳の行</summary>
     public static EngineDescriptor Descriptor =>
@@ -203,6 +60,7 @@ internal static class AtomicFileDimensions
                 "tests/QuickER.Tests/Platform/OsBoundary/AtomicFileDimensions.cs",
                 "tests/QuickER.Tests/Platform/OsBoundary/AtomicFileRows.cs",
                 "tests/QuickER.Tests/Platform/OsBoundary/AtomicFileRows.Write.cs",
+                "tests/QuickER.Tests/Platform/OsBoundary/AtomicFileRows.Forms.cs",
                 "tests/QuickER.Tests/Platform/OsBoundary/AtomicFileRows.Read.cs",
                 "tests/QuickER.Tests/Platform/OsBoundary/AtomicFileRows.Names.cs",
                 "tests/QuickER.Tests/Platform/OsBoundary/AtomicFileTableTests.cs",
@@ -271,7 +129,8 @@ internal static class AtomicFileDimensions
 
     /// <summary>
     /// 保存先の形から必ず決まる失敗（無ければ <see cref="AtomicFailure.None"/>）。
-    /// 保存先がディレクトリ・排他で掴まれている・置き換えない書き込みの先に既存のファイルがあれば、書く操作は必ず失敗する
+    /// 保存先がディレクトリ・排他で掴まれている・親フォルダが無い・置き換えない書き込みの先に既存のファイルがあれば、書く操作は必ず失敗する
+    /// （親フォルダが無いと一時ファイルを作る段で失敗し、書き手のコールバックは呼ばれない＝<see cref="AtomicFailure.WriterThrows"/> は重ならない）
     /// </summary>
     public static AtomicFailure NaturalFailure(AtomicOp op, AtomicTarget target)
     {
@@ -285,6 +144,7 @@ internal static class AtomicFileDimensions
             AtomicTarget.DirectoryAtPath => AtomicFailure.TargetIsDirectory,
             AtomicTarget.LockedFile when op == AtomicOp.CreateText => AtomicFailure.CreateConflict,
             AtomicTarget.LockedFile => AtomicFailure.ReplaceFails,
+            AtomicTarget.MissingParentFolder => AtomicFailure.ParentMissing,
             AtomicTarget.ExistingFile
             or AtomicTarget.ExistingLarger when op == AtomicOp.CreateText =>
                 AtomicFailure.CreateConflict,

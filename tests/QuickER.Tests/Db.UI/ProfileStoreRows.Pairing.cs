@@ -69,6 +69,12 @@ internal static partial class ProfileStoreRows
         {
             yield return FailedRow(entry, PairingFault.LockSecret);
             yield return FailedRow(entry, PairingFault.LockConnections);
+
+            // 置き換えつきの保存も、パスワードを書く段（暗号ファイルの作成）で失敗しても、順序の不変条件は同じ
+            if (entry is PairingEntry.UpsertReplacing)
+            {
+                yield return FailedRow(entry, PairingFault.DenyCreateSecret);
+            }
         }
 
         yield return PairedRow(

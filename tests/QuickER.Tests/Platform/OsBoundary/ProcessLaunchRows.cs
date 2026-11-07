@@ -317,7 +317,7 @@ internal static partial class ProcessLaunchRows
     public static ScenarioTable<LaunchCase> Table =>
         new(
             EngineIds.OsBoundary,
-            [.. ShimRows(), .. ResolveRows(), .. ExternalRows(), .. FilledRows()]
+            [.. ShimRows(), .. ResolveRows(), .. ExternalRows(), .. FilledRows(), .. GapRows()]
         );
 
     /// <summary>行を作る</summary>

@@ -97,6 +97,12 @@ internal static partial class ProcessLaunchRows
             ("exe-trailing-space", @"C:\tools\codex.exe ", false, ShimSpelling),
             ("unix-path", "/usr/local/bin/codex", false, NonWindowsOrNullPath),
             ("null", null, false, NonWindowsOrNullPath),
+            // 拡張子だけを見る（中身の文字は判定に入らない）
+            ("exe-with-meta", @"C:\a & b\100%\codex.exe", false, ExePathWithShimMeta),
+            ("cmd-exclamation", @"C:\!EVIL!\codex.cmd", true, PathExclamation),
+            ("cmd-newline", "C:\\tools\\co\r\ndex.cmd", true, PathNewline),
+            ("cmd-percent", @"C:\%EVIL%\codex.cmd", true, PathPercent),
+            ("cmd-quote", "C:\\tools\\evil\" & calc\\x.cmd", true, PathQuote),
         ];
 
         return cases.Select(c =>

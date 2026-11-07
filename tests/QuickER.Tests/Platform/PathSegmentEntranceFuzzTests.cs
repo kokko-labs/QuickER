@@ -74,6 +74,10 @@ public sealed class PathSegmentEntranceFuzzTests : IDisposable
     /// <summary>入口（名前・入力の組み立て・判定）。判定は「断ったときのメッセージ」を返し、受け付けたら null</summary>
     /// <param name="TrimsWholeValue">値全体の前後の空白を取り除いてから判定する入口（設定の値と提出のパス）</param>
     /// <param name="DropsDotAndEmptySegments">空の区間と <c>.</c> の区間を落としてから判定する入口（提出のパス）</param>
+    /// <param name="ExtraRejects">
+    /// 入口ごとの追加の断る入力。空の名前は、空が未指定や検査なしを意味する入口（層フォルダ・サブフォルダ・出力とリファレンスのファイル名）へ
+    /// 流せないので、空として断る入口だけがここで持つ
+    /// </param>
     private sealed record Entrance(
         string Name,
         bool Relative,
@@ -82,7 +86,8 @@ public sealed class PathSegmentEntranceFuzzTests : IDisposable
         Func<string, string?> Reject,
         CultureInfo MessageCulture,
         bool TrimsWholeValue = false,
-        bool DropsDotAndEmptySegments = false
+        bool DropsDotAndEmptySegments = false,
+        (string Input, string Form, PathSegmentViolation Violation)[]? ExtraRejects = null
     );
 
     /// <summary>入口がこの形を受け付けるはずか（値全体の前後の空白・落とす区間）</summary>
@@ -100,10 +105,15 @@ public sealed class PathSegmentEntranceFuzzTests : IDisposable
         || (
             entrance.DropsDotAndEmptySegments
             && (
-                violation == PathSegmentViolation.Empty
+                // 空の区間は、ほかに残る区間があるときだけ落として受け付ける（'.' だけのように何も残らない値は空として断る）
+                (violation == PathSegmentViolation.Empty && HasRemainingSegment(input))
                 || (violation == PathSegmentViolation.DotSegment && !form.Contains(".."))
             )
         );
+
+    /// <summary>空の区間と <c>.</c> の区間を落としても区間が残るか</summary>
+    private static bool HasRemainingSegment(string input) =>
+        input.Split('/', '\\').Any(segment => segment.Length > 0 && segment != ".");
 
     /// <summary>9 つの入口</summary>
     private IEnumerable<Entrance> Entrances()
@@ -212,7 +222,9 @@ public sealed class PathSegmentEntranceFuzzTests : IDisposable
             Applies: (_, _) => true,
             Build: form => form,
             Reject: value => MockProjectScaffoldService.CheckProjectName(value, ui),
-            ui
+            ui,
+            // 空のプロジェクト名は空として断る（src/QuickER.AI.Mock/MockProjectScaffoldService.cs の CheckProjectName が CheckSegment へ渡す）
+            ExtraRejects: [("", "", PathSegmentViolation.Empty)]
         );
         // 画面のファイル名は「.html」が付くので、末尾の形と '.'・'..' は成り立たない
         yield return new Entrance(
@@ -244,7 +256,9 @@ public sealed class PathSegmentEntranceFuzzTests : IDisposable
                     : null,
             english,
             TrimsWholeValue: true,
-            DropsDotAndEmptySegments: true
+            DropsDotAndEmptySegments: true,
+            // '.' だけのパスは、空の区間と '.' の区間を落とすと区間が残らず、空として断る（"" と空白だけは別の「空のパス」の断り）
+            ExtraRejects: [(".", "", PathSegmentViolation.Empty)]
         );
     }
 
@@ -342,7 +356,7 @@ public sealed class PathSegmentEntranceFuzzTests : IDisposable
             );
         }
 
-        return cases;
+        return cases.Concat(entrance.ExtraRejects ?? []);
     }
 
     /// <summary>入口へ流す、断らない入力（正当な名前と、前処理で受け付ける形）</summary>
