@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using System.Xml;
+using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
@@ -205,7 +207,48 @@ internal static partial class SourceRules
                     "自己検査のプローブの文字列をコンパイルする（CompileProbe）"
                 )
             ),
+            // テストホストはサーバー GC で動かす。並列の全件実行では生成コードのコンパイルと総当たりが大量に割り当て、既定の
+            // ワークステーション GC だと CPU を余したまま GC の待ちで全件の時間が倍になる（消しても赤になるテストは無く、遅くなるだけ）。
+            // csproj を XML として読む（コメントの中の表記・条件つきの設定・true でない値は数えない）
+            SourceRule.Require(
+                "test-host-server-gc",
+                "テストのプロジェクトはサーバー GC を有効にする（外すと全件実行が GC の待ちで倍に伸びる）",
+                SourceScope.Files("tests/QuickER.Tests", TestProjectFile),
+                GuardFinder.File(GuardReader.Xml, FindServerGcSettings),
+                new GuardKnown(
+                    TestProjectFile,
+                    ServerGcSetting,
+                    1,
+                    "テストホストの GC の設定（runtimeconfig へ載る）"
+                )
+            ),
         ];
+
+    /// <summary>QuickER.Tests のプロジェクトファイル</summary>
+    private const string TestProjectFile = "tests/QuickER.Tests/QuickER.Tests.csproj";
+
+    /// <summary>サーバー GC を有効にする設定の表記</summary>
+    private const string ServerGcSetting = "ServerGarbageCollection=true";
+
+    /// <summary>
+    /// 条件の無い PropertyGroup の中で、条件の無い <c>ServerGarbageCollection</c> の値が true のもの
+    /// （MSBuild の真偽値は大文字小文字を区別しないので、前後の空白を除いて大小を無視して比べる）
+    /// </summary>
+    private static IEnumerable<GuardFinding> FindServerGcSettings(GuardFile file) =>
+        XDocument
+            .Parse(file.Text, LoadOptions.SetLineInfo)
+            .Descendants()
+            .Where(element =>
+                element.Name.LocalName == "ServerGarbageCollection"
+                && element.Parent?.Name.LocalName == "PropertyGroup"
+                && element.Attribute("Condition") is null
+                && element.Parent.Attribute("Condition") is null
+                && string.Equals(element.Value.Trim(), "true", StringComparison.OrdinalIgnoreCase)
+            )
+            .Select(element => new GuardFinding(
+                ServerGcSetting,
+                ((IXmlLineInfo)element).LineNumber
+            ));
 
     /// <summary>範囲から、根の下の名前の末尾が同じファイルを 1 つずつ除く（いまあるファイルを列挙して除外にする）</summary>
     private static SourceScope ExceptSuffix(SourceScope scope, string suffix, string reason) =>

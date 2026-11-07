@@ -104,6 +104,7 @@
 同じことを別々に書いていたテストの土台は、共有の部品を通す。置き場所は `tests/QuickER.Tests` の中。Integration は WPF に依存しない部品だけを Compile のリンクで使う。
 
 1. 生成コードのコンパイル：`CodeGen.CSharp/GeneratedCodeCompiler`（`Compile` / `CompileProject` / `CreateCompilation` / `CompileAndLoad` と、依存を絞った参照集合でコンパイルする `Emit`。構文木のパースは中の 1 か所だけ）と `CodeGen.CSharp/RuntimeReferenceSet`。
+   - 構文木はリストへ確定してから `CSharpCompilation.Create` へ渡す（`CreateCompilationCore`）。`Create` は受け取った列挙を中で 3 回なめるので、遅延の `Select` のまま渡すと同じファイルを 3 回パースする（生成の構成のエンジンでパースの時間が約 1.8 倍）。結果は変わらず遅くなるだけなので、ガードは置かない。
    - `RuntimeReferenceSet` は、TPA から ADO・EF Core・DI（指定があれば配布ランタイムの `QuickER.Runtime*`）を外し、許す依存だけを戻す参照集合。許さない ADO・EF Core は、その名前空間（`Microsoft.Data.SqlClient`・`Microsoft.Data.Sqlite`・`Microsoft.EntityFrameworkCore`）に型を宣言するアセンブリをメタデータで見つけて全部外す（`Microsoft.Data.SqlClient.Extensions.Abstractions`・`Npgsql.EntityFrameworkCore.PostgreSQL` などの名前の違う衛星が同じ名前空間に型を置くので、ファイル名だけで外すと許さない依存の `using` が解決されてしまう）。ガード：`RuntimePackageSourceRendererTests` の `Render*_Compiles*`（パッケージ用ソースへ許さない依存の `using` を足すと赤）
    - `Full` は何も外さない集合で、GeneratedCodeCompiler が使う。生成の構成のエンジンのパッケージ参照のコンパイル（`CodegenConfig/Judges/CompileJudge.cs`。`CodegenCaseTests` の行 `compile-package-*`）は 9 つの構成を使う（`QuickER.Runtime*` も外す＝その場でコンパイルした同じ型と CS0433 で衝突させない）。`RuntimePackageSourceRendererTests` は `Create(…, excludeRuntimePackages: false)` を使う。Integration は 2 つともリンクする。
 2. 2 つのツールホスト：`TestSupport/TwoHostToolHarness`（WPF 依存なので Engines/ の外）。
@@ -117,6 +118,11 @@
 5. 生成オプション・設定のキー：`TestSupport/OptionKeys`（`Writable` / `IsWritable`＝公開の setter か init を持つ公開のインスタンスのプロパティ）。設定 JSON の照合・CLI のフラグ表・GUI の設定の照合と、因子の棚卸しの `CodeGenerationOptions` の軸が使う。
 6. テストの一時フォルダ：`TestSupport/TestTempFolder`（TEMP 直下の固定名の親フォルダの下に guid の名前のフォルダを作り、破棄で中身ごと消す。消せないときは黙って残す）。TEMP 直下に同じ前置きの名前を並べると 8.3 の短い名前がぶつかり、フォルダ 1 つの作成に数百 ms かかるので、直下には固定名の親だけを置く。ファイルを掴むもの（テストが開いた SQLite の接続のプールなど）は作ったテストの側で放す（例：`SqliteTempDatabase` の Dispose）。製品が SQLite のファイルを開く接続はプールしない（`src/QuickER.Provider.Sqlite/CLAUDE.md`「ファイルを掴まない接続」）ので、製品の操作の後に放す手当ては要らない。
 7. ソースの走査のガード：`TestSupport/GuardKnownList.AssertMatches`（見つかった出現と理由つきの既知の一覧を件数まで 2 方向で照合する）と `TestSupport/SourceFiles`（ガードが読むファイルの列挙と、bin / obj の判定 `IsBuildOutput` の唯一の場所。パースはしない）。ソースの規則は規則の表（`TestSupport/Guards/`・「ソースを走査するガード」）の行にし、走査・照合・報告は表の 1 か所が持つ。表へ移していないガードは、条件コンパイルの全分岐を読む `ConditionalSourceParse` / `SourceSymbolScan` を自分で呼ぶ。
+
+8. テストホストの GC：`QuickER.Tests` の csproj は `ServerGarbageCollection` を true にする（runtimeconfig の `System.GC.Server` 経由で testhost に効く）。
+   - 理由：並列の全件実行では、生成コードのコンパイル・emit と総当たりが大量に割り当てる。既定のワークステーション GC では CPU の使用率が 3 割前後のまま GC の待ちで止まり、1 行の時間が単独で流したときの 2〜8 倍に伸びる。サーバー GC にすると全件の壁時計がおよそ半分になる（24 論理コアの開発機で 281 秒 → 139 秒）。testhost のメモリの最大は 322 MB から 535 MB に増える。
+   - CPU の数で効き方が変わる（コアの少ない CI では差が小さくなる見込み）。
+   - ガード：`SourceRuleTests`（規則 `test-host-server-gc`）。csproj を XML として読み、コメントの中の表記・条件つきの設定・true でない値は数えない（自己検査の行 `test-host-server-gc-forms`）。設定を消しても false にしても赤になる。
 
 統合の前後で、該当テストのケースの数と合否は同じ（`-list full -preEnumerateTheories` と実行結果の照合）。mutation 実証済み（obj に置いた禁止の呼び出しは bin / obj の判定を外したときだけ赤）。
 
@@ -176,7 +182,7 @@
   - 空振りの検知は 3 つ：範囲に入るファイルの最低数（`MinimumFiles`・既定 1）、同じ見つける形を別の範囲に当てた厳密な期待（`Witness`）、範囲の中の候補（規則が調べる対象）の数の下限（`Floor`＝候補を見つける形・下限・名前。同じ 1 回の走査で数える）。拾えることを別の見つける形で確かめるもの（目印が既知のテストを拾う・正本の所有者が見つかる）は、必須の規則として別の行にする。
   - 走査は `GuardScan` の 1 か所：ファイルで読む規則はすべての規則の範囲に入るファイルを 1 回ずつ読み、そのファイルに当たる規則を全部当てる（構文木はファイルごとに 1 回だけ作り、当て終えたら捨てる）。シンボルの規則は `SourceSymbolScan.SrcProjects` の各プロジェクトを `ScanNodes` で 1 回ずつたどる。
   - 自己検査の行（`SourceRuleProbe`・`SourceRuleProbes.{領域}.cs`）は、合成のソースへ規則の見つける形を当て、拾う「何か」の並びをソースの順まで照合する（拾わない書き方を拾えば並びが崩れて赤）。シンボルの規則は合成のソースを 1 プロジェクトとしてコンパイルし（条件コンパイルの変種のコンパイルも作る）、エラーが無いことも確かめる。
-  - 網羅：読み方 × 照合の形 × 拾うべき出現の置き場（普通の場所・条件コンパイルの外れる分岐＝自己検査の行 `*-inactive-branch`）の組を、自己検査の行で数える（`GuardDimensions`・台帳の Guard/SourceRules）。XML は分岐を持たないので理由つきの isValid で外す。構文の節・トークン・XML の必須の規則はまだ無いので、その 8 組は直す区切り P4 の網羅しない組（Pending）に置く。
+  - 網羅：読み方 × 照合の形 × 拾うべき出現の置き場（普通の場所・条件コンパイルの外れる分岐＝自己検査の行 `*-inactive-branch`）の組を、自己検査の行で数える（`GuardDimensions`・台帳の Guard/SourceRules）。XML は分岐を持たないので理由つきの isValid で外す。構文の節・トークンの必須の規則はまだ無いので、その 6 組は直す区切り P4 の網羅しない組（Pending）に置く。
   - ガード：`SourceRuleTests`（`Rule_Holds`＝1 行 1 規則・`Probe_Holds`・`Table_IsWellFormed`＝Id の重複・理由の空・件数・必須の規則の一覧の空・範囲の除外の理由・`SymbolScan_ResolvesBclCallsInEveryProject`・`Coverage_MatchesGaps`）。
   - 規則の表のファイル自身の文字列が tests を走査する規則に写り込むときは、範囲を狭めずに綴りを割って避ける。
 - 正本の一覧と写しの一致は照合の表（`ParityRow`・`ParityRows.{領域}.cs`）の行にする。行は正本の関数・写しの関数・比べ方（Set／Multiset／Sequence／CopyWithinCanon／CanonWithinCopy。元の比べ方より弱くしない）・正本の最低数（`MinimumCanon`）を持ち、読み取りの失敗は関数が例外を投げて行の赤になる。使わない比べ方は列挙に残さない。ガード：`ParityTests`（`Parity_Holds`・比べ方の自己検査 `Comparer_DetectsDisagreement`＝比べ方 × 一致・食い違いの網羅・`Table_IsWellFormed`）。台帳は Guard/Parity。

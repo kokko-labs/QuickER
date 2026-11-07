@@ -191,6 +191,10 @@ internal static class GeneratedCodeCompiler
     }
 
     /// <summary>ソース群を構文木にしてコンパイルを作る（オプションは全入口で共通）</summary>
+    /// <remarks>
+    /// 構文木は先にリストへ確定してから渡す。<see cref="CSharpCompilation.Create"/> は受け取った列挙を中で 3 回なめるので、
+    /// 遅延の <c>Select</c> のまま渡すと同じファイルを 3 回パースする（結果は同じで、遅くなるだけ）。
+    /// </remarks>
     private static CSharpCompilation CreateCompilationCore(
         IEnumerable<(string FileName, string Content)> sources,
         string assemblyName,
@@ -199,7 +203,9 @@ internal static class GeneratedCodeCompiler
     ) =>
         CSharpCompilation.Create(
             assemblyName,
-            sources.Select(source => Parse(source.Content, source.FileName, documentationMode)),
+            sources
+                .Select(source => Parse(source.Content, source.FileName, documentationMode))
+                .ToList(),
             references,
             new CSharpCompilationOptions(
                 OutputKind.DynamicallyLinkedLibrary,
