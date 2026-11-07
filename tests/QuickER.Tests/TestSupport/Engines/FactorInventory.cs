@@ -102,7 +102,13 @@ public static class FactorInventoryGuard
     private static readonly string[] PlaceholderReasons = ["後で", "TODO", "TBD"];
 
     /// <summary>理由の最短の長さ（これより短い理由は具体的でないとみなす）</summary>
-    private const int MinimumReasonLength = 10;
+    internal const int MinimumReasonLength = 10;
+
+    /// <summary>理由が具体的でないか（仮置きの文か、最短の長さより短い。影響の地図の守りの無い領域の理由も同じ判定を使う）</summary>
+    /// <param name="reason">前後の空白を除いた理由（空でないもの）</param>
+    internal static bool IsVagueReason(string reason) =>
+        PlaceholderReasons.Contains(reason, StringComparer.OrdinalIgnoreCase)
+        || reason.Length < MinimumReasonLength;
 
     /// <summary>棚卸しの問題をすべて並べる（無ければ空）</summary>
     /// <param name="axes">製品の仕様の軸</param>
@@ -271,10 +277,7 @@ public static class FactorInventoryGuard
         {
             yield return "理由が空";
         }
-        else if (
-            PlaceholderReasons.Contains(reason, StringComparer.OrdinalIgnoreCase)
-            || reason.Length < MinimumReasonLength
-        )
+        else if (IsVagueReason(reason))
         {
             yield return $"理由「{reason}」が具体的でない（{MinimumReasonLength} 文字以上で、まだ載っていない事情を書く）";
         }

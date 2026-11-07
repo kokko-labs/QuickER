@@ -1,0 +1,275 @@
+{
+  "engines": [
+    {
+      "id": "SyncModel",
+      "part": "Random",
+      "title": "同期のモデル（乱数の操作の列）",
+      "sourceFiles": [
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelCoverageRows.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelDimensions.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelExpectationOperations.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelFaults.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelGenerator.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelKnownFailures.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelOperations.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelRun.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelRun.Expect.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelRuntimeTests.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelScenarios.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelScenarios.Engine.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelScenarios.Engine.Blobs.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelScenarios.Engine.Conflicts.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelScenarios.Engine.ForeignKeys.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelScenarios.Engine.PropagationLww.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelScenarios.Engine.Refresh.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelServer.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelTransportRuntimeTests.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelTransports.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelWorld.cs"
+      ],
+      "covers": [
+        "src/QuickER.Runtime.Sync",
+        "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_10_Sync.scriban"
+      ]
+    },
+    {
+      "id": "SyncModel",
+      "part": "Outcomes",
+      "title": "同期のモデル（乱数の種で同期が返した競合・自分から変えた行の理由）",
+      "sourceFiles": [
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelOutcomeDimensions.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelRun.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelRuntimeTests.cs"
+      ],
+      "covers": [
+        "src/QuickER.Runtime.Sync"
+      ]
+    },
+    {
+      "id": "SyncModel",
+      "part": "Config",
+      "title": "同期の構成の行列（DI の登録の形・転送経路・キーの型・キーを決めるフック）",
+      "sourceFiles": [
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncConfigDimensions.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncConfigFixtures.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncConfigIntKeyFixture.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncConfigVoKeyFixture.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncConfigMatrixRuntimeTests.cs"
+      ],
+      "covers": [
+        "src/QuickER.Runtime.Sync",
+        "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_10_Sync.scriban"
+      ]
+    },
+    {
+      "id": "SyncPlan",
+      "part": "Fuzz",
+      "title": "同期計画の総当たり（5 方言の実 DB）",
+      "sourceFiles": [
+        "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanCoverageRows.cs",
+        "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanFuzzDialect.cs",
+        "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanFuzzDimensions.cs",
+        "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanFuzzGenerator.cs",
+        "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanFuzzKnownFailures.cs",
+        "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanFuzzRunner.cs",
+        "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanFuzzTestsBase.cs",
+        "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanScenarios.cs"
+      ],
+      "covers": [
+        "src/QuickER.Provider/SchemaDiffService.cs",
+        "src/QuickER.Provider/SyncPlanner.cs",
+        "src/QuickER.Provider/SyncPlan.cs",
+        "src/QuickER.Provider/SyncDialectCapabilities.cs",
+        "src/QuickER.Provider/SyncScriptBuilderBase.cs",
+        "src/QuickER.Provider/SyncScriptBuilderHelper.cs",
+        "src/QuickER.Provider.MySql",
+        "src/QuickER.Provider.Oracle",
+        "src/QuickER.Provider.PostgreSql",
+        "src/QuickER.Provider.SqlServer",
+        "src/QuickER.Provider.Sqlite"
+      ]
+    },
+    {
+      "id": "SyncPlan",
+      "part": "CapabilityNet",
+      "title": "同期計画の能力の組の網（5 方言の能力・DB なし）",
+      "sourceFiles": [
+        "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanCapabilityNet.cs",
+        "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanCoverageRows.cs",
+        "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanStaticRules.cs",
+        "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanFuzzGenerator.cs",
+        "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanScenarios.cs"
+      ],
+      "covers": [
+        "src/QuickER.Provider/SchemaDiffService.cs",
+        "src/QuickER.Provider/SyncPlanner.cs",
+        "src/QuickER.Provider/SyncPlan.cs",
+        "src/QuickER.Provider/SyncDialectCapabilities.cs"
+      ]
+    },
+    {
+      "id": "SyncPlan",
+      "part": "ShapeRows",
+      "title": "同期計画の形の行（D4・網羅の配列から作る決定的な行）",
+      "sourceFiles": [
+        "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanShapeRows.cs",
+        "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanScenarios.cs"
+      ],
+      "covers": [
+        "src/QuickER.Provider/SchemaDiffService.cs",
+        "src/QuickER.Provider/SyncPlanner.cs"
+      ]
+    },
+    {
+      "id": "SyncPlan",
+      "part": "HistoryRows",
+      "title": "同期計画の来歴の行（DB の来歴 × 子の表名の長さ × 2 本目の外部キー）",
+      "sourceFiles": [
+        "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanHistoryRows.cs",
+        "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanHistories.cs"
+      ],
+      "covers": [
+        "src/QuickER.Provider/SchemaDiffService.cs",
+        "src/QuickER.Model/ConstraintNames.cs"
+      ]
+    },
+    {
+      "id": "GeneratedRuntime",
+      "part": "Parity",
+      "title": "実装先どうしの一致（乱数の操作の列）",
+      "sourceFiles": [
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityBackend.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityCoverageRows.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityDimensions.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityGenerator.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityGenerator.Customers.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityKnownDifferences.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityOperations.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityRunner.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityRuntimeTests.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityScenarios.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParitySqlServerRuntimeTests.cs"
+      ],
+      "covers": [
+        "src/QuickER.Runtime",
+        "src/QuickER.Runtime.Sqlite",
+        "src/QuickER.Runtime.EntityFrameworkCore",
+        "src/QuickER.Runtime.InMemory",
+        "src/QuickER.Runtime.AspNetCore",
+        "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime"
+      ]
+    },
+    {
+      "id": "GeneratedRuntime",
+      "part": "ParityOutcomes",
+      "title": "実装先どうしの一致（乱数の操作の列で Save フックが受けた段・操作・規則の振る舞い）",
+      "sourceFiles": [
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityOutcomeDimensions.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityBackend.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityRuntimeTests.cs"
+      ],
+      "covers": [
+        "src/QuickER.Runtime",
+        "src/QuickER.Runtime.Sqlite"
+      ]
+    },
+    {
+      "id": "Dsl",
+      "part": "SqlServer",
+      "title": "簡易 DSL の条件の総当たり（SQL Server の QuickER 版 Repository と EF Core）",
+      "sourceFiles": [
+        "tests/QuickER.Tests/TestSupport/DslFuzz.cs",
+        "tests/QuickER.Tests/TestSupport/DslFuzzDimensions.cs",
+        "tests/QuickER.Tests/TestSupport/DslFuzzGenerator.cs",
+        "tests/QuickER.Tests/TestSupport/DslFuzzKnownFailures.cs",
+        "tests/QuickER.Tests/TestSupport/DslFuzzUnits.cs",
+        "tests/QuickER.Tests/CodeGen.CSharp/DslFuzzExecution.cs",
+        "tests/QuickER.Tests/CodeGen.CSharp/DslFuzzRunner.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/DslConditionFuzzSqlServerRuntimeTests.cs"
+      ],
+      "covers": [
+        "src/QuickER.CodeGen.CSharp/Queries",
+        "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime",
+        "src/QuickER.Runtime",
+        "src/QuickER.Runtime.Sqlite",
+        "src/QuickER.Runtime.SqlServer",
+        "src/QuickER.Runtime.EntityFrameworkCore",
+        "src/QuickER.Runtime.InMemory"
+      ]
+    },
+    {
+      "id": "Name",
+      "part": "DdlRoundTrip",
+      "title": "名前の総当たりの DDL の往復（5 方言の実 DB）",
+      "sourceFiles": [
+        "tests/QuickER.Tests/TestSupport/NameFuzz.cs",
+        "tests/QuickER.Tests/TestSupport/NameFuzzDiagrams.cs",
+        "tests/QuickER.Tests/TestSupport/NameFuzzKnownFailures.cs",
+        "tests/QuickER.Tests.Integration/Dialects/NameFuzzDdlRoundTripDimensions.cs",
+        "tests/QuickER.Tests.Integration/Dialects/NameFuzzDdlRoundTripIntegrationTests.cs"
+      ],
+      "covers": [
+        "src/QuickER.Dialects/IdentifierLengthLimit.cs",
+        "src/QuickER.Provider/SqlNameText.cs",
+        "src/QuickER.Provider/SchemaDiffService.cs",
+        "src/QuickER.Provider/DdlGeneratorBase.cs",
+        "src/QuickER.Provider.MySql",
+        "src/QuickER.Provider.Oracle",
+        "src/QuickER.Provider.PostgreSql",
+        "src/QuickER.Provider.SqlServer",
+        "src/QuickER.Provider.Sqlite"
+      ]
+    },
+    {
+      "id": "Dialect",
+      "part": "TypesRealDb",
+      "title": "方言の型の表の実 DB の段（上限の対の DDL の適用と取り込み直し・マッパーとドライバの CLR 型の一致）",
+      "sourceFiles": [
+        "tests/QuickER.Tests.Integration/Dialects/DialectTypeRealDbRows.cs",
+        "tests/QuickER.Tests.Integration/Dialects/DialectTypeRealDbTests.cs",
+        "tests/QuickER.Tests.Integration/Dialects/DialectTypeRealDbDimensions.cs",
+        "tests/QuickER.Tests.Integration/Dialects/DialectTypeRealDbTableTests.cs",
+        "tests/QuickER.Tests/Provider/DialectTypeRows.cs"
+      ],
+      "covers": [
+        "src/QuickER.Provider.SqlServer",
+        "src/QuickER.Provider.PostgreSql",
+        "src/QuickER.Provider.MySql",
+        "src/QuickER.Provider.Oracle",
+        "src/QuickER.Provider.Sqlite"
+      ]
+    }
+  ],
+  "tables": [
+    {
+      "name": "TranslatorParityPredicates",
+      "title": "式の翻訳の述語の表（SQL Server・SQLite・インメモリの結果を C# の意味論と突き合わせる）",
+      "sourceFiles": [
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityPredicateRows.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityRuntimeTestsBase.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityInMemoryRuntimeTests.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParitySqlServerRuntimeTests.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParitySqliteRuntimeTests.cs"
+      ],
+      "covers": [
+        "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_05_QueryPipeline.scriban",
+        "src/QuickER.Runtime",
+        "src/QuickER.Runtime.InMemory",
+        "src/QuickER.Runtime.SqlServer",
+        "src/QuickER.Runtime.Sqlite"
+      ]
+    },
+    {
+      "name": "SyncPlanExpectations",
+      "title": "同期の差分と計画の期待の行（SyncPlan のエンジン〔SyncPlan/Fuzz・SyncPlan/CapabilityNet〕が流す。方言ごとの期待と実 DB の段の汎用の表明）",
+      "sourceFiles": [
+        "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanExpectationRows.cs"
+      ],
+      "covers": [
+        "src/QuickER.Provider/SchemaDiffService.cs",
+        "src/QuickER.Provider/SyncPlan.cs",
+        "src/QuickER.Provider/SyncPlanner.cs"
+      ]
+    }
+  ]
+}

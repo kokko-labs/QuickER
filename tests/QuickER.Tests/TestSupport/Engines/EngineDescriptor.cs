@@ -185,7 +185,11 @@ public static class EngineRegistryChecks
         }
     }
 
-    private static void CheckPaths(
+    /// <summary>
+    /// パスの一覧の検査（空・重複・区切りが <c>/</c> でない・相対でない・<c>..</c> を含む・存在しない）。単体の表の台帳
+    /// （<see cref="TableRegistryChecks"/>）も同じ検査を使う
+    /// </summary>
+    internal static void CheckPaths(
         string name,
         string what,
         IReadOnlyList<string>? paths,
