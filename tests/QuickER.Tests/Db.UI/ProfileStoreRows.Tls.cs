@@ -27,8 +27,8 @@ internal static partial class ProfileStoreRows
                     )
                 ),
                 SaveLast(context => context.Profiles["p"]),
-                LoadAll(o => o.All[0].SslMode.Should().Be(DbSslMode.VerifyFull)),
-                LoadLast(o =>
+                Read(o => o.All[0].SslMode.Should().Be(DbSslMode.VerifyFull)),
+                Read(o =>
                 {
                     o.Last!.Value.Profile.SslMode.Should().Be(DbSslMode.VerifyFull);
                     o.Profile("p").ToSettings("").SslMode.Should().Be(DbSslMode.VerifyFull);
@@ -70,7 +70,7 @@ internal static partial class ProfileStoreRows
                     }
                     """
                 ),
-                LoadAll(o => o.All[0].SslMode.Should().Be(DbSslMode.VerifyFull))
+                Read(o => o.All[0].SslMode.Should().Be(DbSslMode.VerifyFull))
             ),
             // この 1 点が「既存プロファイルの接続が黙って変わらない」ことの保証にあたる
             Row(
@@ -86,8 +86,8 @@ internal static partial class ProfileStoreRows
                     }
                     """
                 ),
-                LoadAll(o => o.All[0].SslMode.Should().Be(DbSslMode.Unspecified)),
-                LoadLast(o => o.Last!.Value.Profile.SslMode.Should().Be(DbSslMode.Unspecified))
+                Read(o => o.All[0].SslMode.Should().Be(DbSslMode.Unspecified)),
+                Read(o => o.Last!.Value.Profile.SslMode.Should().Be(DbSslMode.Unspecified))
             ),
         ];
 }

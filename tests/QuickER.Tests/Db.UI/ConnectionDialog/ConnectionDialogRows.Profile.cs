@@ -30,7 +30,7 @@ internal static partial class ConnectionDialogRows
                         .ContainSingle()
                         .Which.Should()
                         .Be(string.Format(Strings.DbConnection_OverwriteProfileConfirm, "本番DB"));
-                    var stored = h.Store.LoadAll().Should().ContainSingle().Subject;
+                    var stored = h.Store.Read().Profiles.Should().ContainSingle().Subject;
                     stored.Id.Should().Be(existingId);
                     stored.Server.Should().Be("prod.example.com");
                     h.Store.LoadPassword(existingId).Value.Should().Be("prod-secret");
@@ -49,7 +49,7 @@ internal static partial class ConnectionDialogRows
 
                     h.Save(vm);
 
-                    var stored = h.Store.LoadAll().Should().ContainSingle().Subject;
+                    var stored = h.Store.Read().Profiles.Should().ContainSingle().Subject;
                     stored.Id.Should().Be(existingId);
                     stored.Server.Should().Be("test01");
                 }
@@ -69,8 +69,8 @@ internal static partial class ConnectionDialogRows
                     h.Save(vm);
 
                     h.Dialogs.WarningConfirmMessages.Should().BeEmpty();
-                    h.Store.LoadAll()
-                        .Should()
+                    h.Store.Read()
+                        .Profiles.Should()
                         .ContainSingle()
                         .Which.Server.Should()
                         .Be("prod2.example.com");
@@ -92,8 +92,8 @@ internal static partial class ConnectionDialogRows
                     h.Save(vm);
 
                     h.Dialogs.WarningConfirmMessages.Should().BeEmpty();
-                    h.Store.LoadAll()
-                        .Select(profile => (profile.Name, profile.Server))
+                    h.Store.Read()
+                        .Profiles.Select(profile => (profile.Name, profile.Server))
                         .Should()
                         .BeEquivalentTo([("本番DB", "prod.example.com"), ("検証DB", "staging01")]);
                 }
@@ -122,8 +122,8 @@ internal static partial class ConnectionDialogRows
                         .ContainSingle()
                         .Which.Should()
                         .Be(string.Format(Strings.DbConnection_OverwriteProfileConfirm, "検証DB"));
-                    h.Store.LoadAll()
-                        .Single(profile => profile.Id == stagingId)
+                    h.Store.Read()
+                        .Profiles.Single(profile => profile.Id == stagingId)
                         .Server.Should()
                         .Be("staging.example.com");
                     h.Store.LoadPassword(stagingId).Value.Should().Be("staging-secret");
@@ -145,7 +145,11 @@ internal static partial class ConnectionDialogRows
 
                     h.Dialogs.WarningConfirmMessages.Should()
                         .ContainSingle("選択していない同名プロファイルの上書き確認");
-                    h.Store.LoadAll().Should().ContainSingle().Which.Server.Should().Be("srv");
+                    h.Store.Read()
+                        .Profiles.Should()
+                        .ContainSingle()
+                        .Which.Server.Should()
+                        .Be("srv");
                     vm.ProfileName.Should().Be("本番DB");
                 }
             ),
@@ -211,7 +215,7 @@ internal static partial class ConnectionDialogRows
                     h.Save(vm);
 
                     vm.StatusMessage.Should().Be(Strings.DbConnection_ProfileNameRequired);
-                    h.Store.LoadAll().Should().BeEmpty();
+                    h.Store.Read().Profiles.Should().BeEmpty();
                 }
             ),
             Row(
@@ -227,7 +231,7 @@ internal static partial class ConnectionDialogRows
 
                     h.Rename(vm);
 
-                    var stored = h.Store.LoadAll().Should().ContainSingle().Subject;
+                    var stored = h.Store.Read().Profiles.Should().ContainSingle().Subject;
                     stored.Id.Should().Be(id);
                     stored.Name.Should().Be("本番DB（東京）");
                     stored.Server.Should().Be("prod.example.com");
@@ -248,7 +252,7 @@ internal static partial class ConnectionDialogRows
 
                     h.Rename(vm);
 
-                    h.Store.LoadAll().Single().Server.Should().Be("prod.example.com");
+                    h.Store.Read().Profiles.Single().Server.Should().Be("prod.example.com");
                 }
             ),
             Row(
@@ -268,8 +272,8 @@ internal static partial class ConnectionDialogRows
                     vm.Host.Should().Be("edited.example.com");
                     vm.Password.Should().Be("prod-secret");
                     vm.SelectedProfile!.Name.Should().Be("本番DB（新）");
-                    h.Store.LoadAll()
-                        .Single()
+                    h.Store.Read()
+                        .Profiles.Single()
                         .Server.Should()
                         .Be("prod.example.com", "変えたのは名前だけ");
                 }
@@ -318,7 +322,7 @@ internal static partial class ConnectionDialogRows
                         .ContainSingle()
                         .Which.Should()
                         .Be(string.Format(Strings.DbConnection_OverwriteProfileConfirm, "本番DB"));
-                    var stored = h.Store.LoadAll().Should().ContainSingle().Subject;
+                    var stored = h.Store.Read().Profiles.Should().ContainSingle().Subject;
                     stored.Id.Should().Be(stagingId);
                     stored.Name.Should().Be("本番DB");
                     stored.Server.Should().Be("staging.example.com");
@@ -339,8 +343,8 @@ internal static partial class ConnectionDialogRows
 
                     h.Rename(vm);
 
-                    h.Store.LoadAll()
-                        .Select(profile => profile.Name)
+                    h.Store.Read()
+                        .Profiles.Select(profile => profile.Name)
                         .Should()
                         .BeEquivalentTo(["本番DB", "検証DB"]);
                 }
@@ -363,7 +367,7 @@ internal static partial class ConnectionDialogRows
 
                     h.Rename(vm);
 
-                    var stored = h.Store.LoadAll().Should().ContainSingle().Subject;
+                    var stored = h.Store.Read().Profiles.Should().ContainSingle().Subject;
                     stored.Id.Should().Be(targetId);
                     stored.Name.Should().Be("本番DB（東京）");
                     h.Store.LoadPassword(targetId)
@@ -463,7 +467,7 @@ internal static partial class ConnectionDialogRows
 
                     h.Dialogs.WarningConfirmMessages.Should().BeEmpty();
                     vm.StatusMessage.Should().Be(Strings.DbConnection_SelectProfileToDelete);
-                    h.Store.LoadAll().Should().ContainSingle();
+                    h.Store.Read().Profiles.Should().ContainSingle();
                 }
             ),
         ];
@@ -496,7 +500,7 @@ internal static partial class ConnectionDialogRows
                             ? Strings.DbConnection_PortInvalid
                             : Strings.DbConnection_CommandTimeoutInvalid
                     );
-                h.Store.LoadAll().Should().BeEmpty();
+                h.Store.Read().Profiles.Should().BeEmpty();
             }
         );
 }

@@ -9,15 +9,12 @@ using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Db.UI;
 
-/// <summary>接続プロファイルの操作列の表の手の種類（先頭の 9 つが製品の入口で、表の因子 Op の水準。以降は準備の手）</summary>
+/// <summary>接続プロファイルの操作列の表の手の種類（先頭の 8 つが製品の入口で、表の因子 Op の水準。以降は準備の手）</summary>
 /// <remarks>SUT は QuickER.Db.UI の <see cref="SqlConnectionProfileStore"/>（connections.json と DPAPI の暗号ファイル）。</remarks>
 internal enum ProfileStepKind
 {
-    /// <summary><see cref="SqlConnectionProfileStore.LoadAll"/></summary>
-    LoadAll,
-
-    /// <summary><see cref="SqlConnectionProfileStore.LoadLastUsed"/></summary>
-    LoadLastUsed,
+    /// <summary><see cref="SqlConnectionProfileStore.Read"/>（一覧と前回接続を 1 回で読む。対象の暗号ファイルは前回接続のもの）</summary>
+    Read,
 
     /// <summary><see cref="SqlConnectionProfileStore.LoadPassword"/></summary>
     LoadPassword,
@@ -316,12 +313,15 @@ internal sealed class ProfileObservation(ProfileContext context, object? value, 
     /// <summary>退避ファイルの文字列</summary>
     public string BackupText => File.ReadAllText(context.Store.CorruptBackupPath);
 
-    /// <summary>LoadAll の戻り値</summary>
-    public List<SqlConnectionProfile> All => (List<SqlConnectionProfile>)value!;
+    /// <summary>Read の戻り値の一覧</summary>
+    public IReadOnlyList<SqlConnectionProfile> All => ((ConnectionProfilesRead)value!).Profiles;
 
-    /// <summary>LoadLastUsed の戻り値</summary>
+    /// <summary>Read の戻り値の前回接続</summary>
     public (SqlConnectionProfile Profile, SavedPassword Password)? Last =>
-        ((SqlConnectionProfile Profile, SavedPassword Password)?)value;
+        ((ConnectionProfilesRead)value!).LastUsed;
+
+    /// <summary>Read の戻り値の読み取り結果の分類</summary>
+    public ConnectionFileStatus Status => ((ConnectionProfilesRead)value!).Status;
 
     /// <summary>LoadPassword の戻り値</summary>
     public SavedPassword Password => (SavedPassword)value!;
@@ -415,10 +415,8 @@ internal static class ProfileStoreRunner
     {
         switch (step.Kind)
         {
-            case ProfileStepKind.LoadAll:
-                return c.Store.LoadAll();
-            case ProfileStepKind.LoadLastUsed:
-                return c.Store.LoadLastUsed();
+            case ProfileStepKind.Read:
+                return c.Store.Read();
             case ProfileStepKind.LoadPassword:
                 return c.Store.LoadPassword(c.Profiles[step.Key!].Id);
             case ProfileStepKind.SaveLastUsed:
@@ -565,8 +563,7 @@ internal static class ProfileStoreRunner
     {
         var key = step.Kind switch
         {
-            ProfileStepKind.LoadAll => null,
-            ProfileStepKind.LoadLastUsed or ProfileStepKind.SaveLastUsed => ProfileContext.LastKey,
+            ProfileStepKind.Read or ProfileStepKind.SaveLastUsed => ProfileContext.LastKey,
             ProfileStepKind.UpsertReplacing or ProfileStepKind.RenameReplacing => step.Replaced,
             _ => step.Key,
         };
@@ -632,14 +629,14 @@ internal static class ProfileStoreRunner
     private static void AssertSecretsPairWithTheirProfiles(SqlConnectionProfileStore store)
     {
         var owners = store
-            .LoadAll()
-            .ToDictionary(
+            .Read()
+            .Profiles.ToDictionary(
                 p => p.Id.ToString("N") + ".dat",
                 p => p.Server,
                 StringComparer.OrdinalIgnoreCase
             );
 
-        if (store.LoadLastUsed() is { } lastUsed)
+        if (store.Read().LastUsed is { } lastUsed)
         {
             owners["last-connection.dat"] = lastUsed.Profile.Server;
         }
@@ -807,11 +804,8 @@ internal static partial class ProfileStoreRows
             Expect = expect,
         };
 
-    private static ProfileStep LoadAll(Action<ProfileObservation>? expect = null) =>
-        new(ProfileStepKind.LoadAll) { Expect = expect };
-
-    private static ProfileStep LoadLast(Action<ProfileObservation>? expect = null) =>
-        new(ProfileStepKind.LoadLastUsed) { Expect = expect };
+    private static ProfileStep Read(Action<ProfileObservation>? expect = null) =>
+        new(ProfileStepKind.Read) { Expect = expect };
 
     private static ProfileStep LoadPassword(
         string key,

@@ -217,9 +217,6 @@
   <data name="DbConnection_Restored" xml:space="preserve">
     <value>前回接続情報を復元しました。</value>
   </data>
-  <data name="DbConnection_ProfileDialectMismatch" xml:space="preserve">
-    <value>プロファイル '{0}' は方言が異なるため選択できません。</value>
-  </data>
   <data name="DbConnection_ProfileLoaded" xml:space="preserve">
     <value>プロファイル '{0}' を読み込みました。</value>
   </data>
@@ -255,6 +252,9 @@
   </data>
   <data name="DbConnection_ProfileStoreUnavailable" xml:space="preserve">
     <value>保存済み接続のファイルを読み取れなかったため、何も変更していません。他のプログラムが使用している可能性があります。少し待ってからやり直してください。</value>
+  </data>
+  <data name="DbConnection_ProfilesUnavailable" xml:space="preserve">
+    <value>保存済み接続のファイルを読み取れなかったため、保存済み接続を表示していません。他のプログラムが使用している可能性があります。少し待ってからダイアログを開き直してください。</value>
   </data>
   <data name="DbConnection_ProfileWriteFailed" xml:space="preserve">
     <value>保存済み接続の書き込みに失敗しました。一部だけ反映された可能性があるため、一覧をファイルから読み直しました: {0}</value>

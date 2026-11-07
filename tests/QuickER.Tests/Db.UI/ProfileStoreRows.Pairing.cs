@@ -83,7 +83,7 @@ internal static partial class ProfileStoreRows
             [
                 .. SeedAB(),
                 SaveLast(Pair("last", "serverB", true), Pw("serverB")),
-                LoadLast(o => o.Last!.Value.Password.Value.Should().Be(Pw("serverB"))),
+                Read(o => o.Last!.Value.Password.Value.Should().Be(Pw("serverB"))),
             ]
         );
         yield return PairedRow(

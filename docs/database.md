@@ -107,6 +107,7 @@ Connection settings can be saved under a name and recalled later from the "Saved
 Profiles are stored in `%LOCALAPPDATA%\QuickER\connections.json`, and passwords are stored in separate files, **encrypted with Windows DPAPI (CurrentUser scope)**, only when the "Save" checkbox is on and never in plain text under the shipped configuration.
 The last-used connection is remembered automatically and restored on the next launch.
 The DB Sync dialog fixes the target DB to the diagram's dialect, so a last-used connection recorded for a different dialect is not restored (host, file path, and service name mean different things per dialect, and the restored values would not connect).
+For the same reason, the "Saved Connections" list in the DB Sync dialog shows only the profiles for the diagram's dialect.
 
 #### Saving passwords
 
@@ -129,6 +130,8 @@ Typing a new name and pressing "Save" stores a separate profile instead of renam
 
 Saving, renaming, and deleting all re-read `connections.json` before writing it back.
 When that read fails, for instance because another program is holding the file, the operation is **cancelled without writing anything** and says so in the status line (the saved profiles are left untouched; try again in a moment).
+When the dialog cannot read `connections.json` as it opens, it shows an empty "Saved Connections" list, does not restore the last-used connection, and says in the status line that the saved connections could not be read.
+In that state, saving reads the file again first and looks for a profile to overwrite only after the read succeeds, so it never creates a second profile with the same name.
 When a write fails partway (a full disk, a failure to write or delete an encrypted password file, and so on), the change may have been applied only partly, so the status line says so and the list is reloaded from the file.
 A partly applied change never leaves a profile with the saved password of another connection.
 The old encrypted password file is removed before `connections.json` is written, and the new one is written after it.

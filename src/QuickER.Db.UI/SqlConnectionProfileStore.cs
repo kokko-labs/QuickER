@@ -48,6 +48,39 @@ public readonly record struct SavedPassword(SavedPasswordStatus Status, string V
         new(SavedPasswordStatus.Unreadable, string.Empty);
 }
 
+/// <summary>接続情報ファイル（connections.json）の読み取り結果の分類</summary>
+/// <remarks>
+/// 「ファイルが無い」と「あるのに読めない」を区別するのが要。区別を捨てると、表示側は読めなかった一覧を
+/// 「保存されたものが無い」として黙って空で出し、保存側は読めなかった中身を空データで塗り潰す（＝プロファイルの全消失）。
+/// </remarks>
+public enum ConnectionFileStatus
+{
+    /// <summary>読み取りと解析に成功した</summary>
+    Loaded,
+
+    /// <summary>ファイルが無い＝保存されたものが無い（本当に空）</summary>
+    Missing,
+
+    /// <summary>読めたが JSON として解釈できない（破損・旧配列形式など）。次の保存で <c>.corrupt</c> へ退避してから書き直す</summary>
+    Corrupt,
+
+    /// <summary>ファイルはあるが読み取れなかった（別プロセスのロック・権限不足など。中身は無事）</summary>
+    Unavailable,
+}
+
+/// <summary>接続情報の読み取り結果（分類・名前順のプロファイル一覧・前回接続）</summary>
+/// <param name="Status">読み取り結果の分類</param>
+/// <param name="Profiles">登録済みのプロファイル（名前順。<see cref="ConnectionFileStatus.Loaded"/> 以外は空）</param>
+/// <param name="LastUsed">
+/// 前回使用した接続情報とそのパスワード（無ければ <c>null</c>）。パスワードは
+/// <see cref="SqlConnectionProfile.SavePassword"/> が有効な場合のみ復号し、無効なら <see cref="SavedPassword.Missing"/>
+/// </param>
+public sealed record ConnectionProfilesRead(
+    ConnectionFileStatus Status,
+    IReadOnlyList<SqlConnectionProfile> Profiles,
+    (SqlConnectionProfile Profile, SavedPassword Password)? LastUsed
+);
+
 /// <summary>接続情報ファイルを読み取れず、保存を中止したことを表す例外</summary>
 /// <remarks>
 /// <para>
@@ -133,27 +166,6 @@ public class SqlConnectionProfileStore
         _useDpapi = useDpapi;
     }
 
-    /// <summary>接続情報の読み取り結果の分類</summary>
-    /// <remarks>
-    /// 表示（読み取り専用の公開 API）はどの分類でも空データで続行してよいが、
-    /// 保存（read-modify-write）は <see cref="Unavailable"/> のときだけは中止しなければならない
-    /// （読めなかった中身を空データで上書きすると、登録済みプロファイルが全件消える）。
-    /// </remarks>
-    private enum ConnectionDataStatus
-    {
-        /// <summary>読み取りと解析に成功した</summary>
-        Loaded,
-
-        /// <summary>ファイルが無い＝保存されたものが無い（本当に空）</summary>
-        Missing,
-
-        /// <summary>読めたが JSON として解釈できない（破損・旧配列形式など）</summary>
-        Corrupt,
-
-        /// <summary>ファイルはあるが読み取れなかった（中身は無事）</summary>
-        Unavailable,
-    }
-
     /// <summary>直近の書き込み用読み取りで壊れた JSON を見たか（次の保存で <c>.corrupt</c> へ退避する）</summary>
     private bool _pendingCorruptBackup;
 
@@ -166,23 +178,19 @@ public class SqlConnectionProfileStore
     public string CorruptBackupPath => ConnectionsPath + ".corrupt";
 
     /// <summary>接続情報（プロファイル一覧＋前回接続）を読み込み、失敗の種類まで返す</summary>
-    /// <remarks>
-    /// 分類の意味は <see cref="ConnectionDataStatus"/> を参照。「ファイルが無い」と
-    /// 「あるのに読めない」を区別するのが要で、区別を捨てると保存側が
-    /// 読めなかった中身を空データで塗り潰す（＝プロファイルの全消失）。
-    /// </remarks>
-    private (SqlConnectionData Data, ConnectionDataStatus Status) ReadData()
+    /// <remarks>分類の意味は <see cref="ConnectionFileStatus"/> を参照。</remarks>
+    private (SqlConnectionData Data, ConnectionFileStatus Status) ReadData()
     {
         var status = AtomicFile.TryReadAllText(ConnectionsPath, out var json);
 
         if (status == FileReadStatus.Unavailable)
         {
-            return (new SqlConnectionData(), ConnectionDataStatus.Unavailable);
+            return (new SqlConnectionData(), ConnectionFileStatus.Unavailable);
         }
 
         if (status == FileReadStatus.Missing)
         {
-            return (new SqlConnectionData(), ConnectionDataStatus.Missing);
+            return (new SqlConnectionData(), ConnectionFileStatus.Missing);
         }
 
         try
@@ -190,20 +198,20 @@ public class SqlConnectionProfileStore
             var data = JsonSerializer.Deserialize<SqlConnectionData>(json!, JsonOpts);
 
             return data is null
-                ? (new SqlConnectionData(), ConnectionDataStatus.Corrupt)
-                : (Normalize(data), ConnectionDataStatus.Loaded);
+                ? (new SqlConnectionData(), ConnectionFileStatus.Corrupt)
+                : (Normalize(data), ConnectionFileStatus.Loaded);
         }
         catch (Exception ex) when (ex is JsonException or NotSupportedException)
         {
-            // 破損 JSON・旧配列形式等で UI を妨げないよう空データへフォールバックする
-            return (new SqlConnectionData(), ConnectionDataStatus.Corrupt);
+            // 破損 JSON・旧配列形式等は空データとして返し、分類で壊れていたことを伝える
+            return (new SqlConnectionData(), ConnectionFileStatus.Corrupt);
         }
     }
 
     /// <summary>JSON として正しいが一覧・要素が null の接続情報を、空の一覧・null 要素なしへ揃える</summary>
     /// <remarks>
     /// <c>"profiles": null</c> や <c>[null]</c> は手編集でしか生じないが、逆直列化はそのまま通すため、
-    /// 揃えずに返すと一覧を並べる <see cref="LoadAll"/> が接続ダイアログの構築中に例外を出す。
+    /// 揃えずに返すと一覧を並べる <see cref="Read"/> が接続ダイアログの構築中に例外を出す。
     /// 要素そのものが null のときは、その要素について何も言っていないので黙って除く
     /// （図ファイルの読み込みで null 要素を除くのと同じ扱い）。
     /// </remarks>
@@ -213,14 +221,6 @@ public class SqlConnectionProfileStore
 
         return data;
     }
-
-    /// <summary>接続情報（プロファイル一覧＋前回接続）を読み込む（読み取り失敗時は空データ）</summary>
-    /// <remarks>
-    /// <b>表示専用。</b>読めなかったときも空データで続行して UI を止めない（並べるものが無いだけで
-    /// 何も失われない）。保存の起点にしてはいけない——そのときは
-    /// <see cref="LoadDataForWrite"/> を使う。
-    /// </remarks>
-    private SqlConnectionData LoadData() => ReadData().Data;
 
     /// <summary>保存（read-modify-write）の起点として接続情報を読み込む</summary>
     /// <remarks>
@@ -235,12 +235,12 @@ public class SqlConnectionProfileStore
     {
         var (data, status) = ReadData();
 
-        if (status == ConnectionDataStatus.Unavailable)
+        if (status == ConnectionFileStatus.Unavailable)
         {
             throw new ConnectionProfileStoreUnavailableException(ConnectionsPath);
         }
 
-        _pendingCorruptBackup = status == ConnectionDataStatus.Corrupt;
+        _pendingCorruptBackup = status == ConnectionFileStatus.Corrupt;
 
         return data;
     }
@@ -249,7 +249,7 @@ public class SqlConnectionProfileStore
     /// <remarks>
     /// 書き込みは <see cref="AtomicFile.WriteAllText"/> による原子的書き込み。素の
     /// <c>File.WriteAllText</c> は既存ファイルを切り詰めてから書くため、途中でプロセスが落ちると
-    /// connections.json が破損した JSON になり、読込側（<see cref="LoadData"/>）が空データへ
+    /// connections.json が破損した JSON になり、読込側（<see cref="ReadData"/>）が空データへ
     /// フォールバックした状態のまま次の read-modify-write 保存（<see cref="Upsert"/> /
     /// <see cref="SaveLastUsed"/>）で他のプロファイル・前回接続情報が巻き添えで消失する。
     /// これを防ぐのがここでの原子的書き込みの目的。DPAPI の暗号ファイルは <see cref="SaveSecret(string, string)"/> が
@@ -291,28 +291,42 @@ public class SqlConnectionProfileStore
         }
     }
 
-    /// <summary>すべてのプロファイルを名前順で読み込む（読み取り失敗時は空一覧を返す）</summary>
-    public List<SqlConnectionProfile> LoadAll() =>
-        LoadData().Profiles.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
-
-    /// <summary>前回使用した接続情報を読み込む</summary>
+    /// <summary>接続情報（名前順のプロファイル一覧＋前回接続）を 1 回の読み取りで読み込み、読み取り結果の分類も返す</summary>
     /// <remarks>
-    /// パスワードは <see cref="SqlConnectionProfile.SavePassword"/> が有効な場合のみ復号して返す
-    /// （無効なら <see cref="SavedPassword.Missing"/>）
+    /// <para>
+    /// 表示用の唯一の読む入口。読めなかったとき（<see cref="ConnectionFileStatus.Unavailable"/>）・壊れていたときも
+    /// 例外にせず空の一覧を返すが、分類で区別できる。表示側は分類を見て、読めなかった一覧を
+    /// 「保存されたものが無い」と同じ空として黙って出してはいけない（中身はディスクに残っている）。
+    /// </para>
+    /// <para>
+    /// 一覧と前回接続を同じ 1 回の読み取りから返す（別々に読むと、片方だけが読めた食い違いが生じる）。
+    /// 保存の起点にしてはいけない——保存は <see cref="LoadDataForWrite"/> から始め、読めなければ何も書かずに中止する。
+    /// </para>
+    /// <para>
+    /// 前回接続の保存済みパスワード（暗号ファイル）も、読むたびに復号する（一覧の読み直しでも読む）。
+    /// 読めない暗号ファイルは <see cref="SavedPasswordStatus.Unreadable"/> で返すだけで、何も書かない。
+    /// </para>
+    /// <para>
+    /// virtual にしているのは、書き込みの直後の読み直しだけが読めない状況をテストが作るため
+    /// （書き込みと読み直しの間に呼び出し側へ戻る点が無く、外からファイルを掴む隙が無い）。
+    /// </para>
     /// </remarks>
-    public (SqlConnectionProfile Profile, SavedPassword Password)? LoadLastUsed()
+    public virtual ConnectionProfilesRead Read()
     {
-        var profile = LoadData().LastUsed;
+        var (data, status) = ReadData();
+        var profiles = data
+            .Profiles.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
-        if (profile is null)
+        if (data.LastUsed is not { } last)
         {
-            return null;
+            return new ConnectionProfilesRead(status, profiles, null);
         }
 
-        var password = profile.SavePassword
+        var password = last.SavePassword
             ? LoadSecret(LastConnectionSecretPath())
             : SavedPassword.Missing;
-        return (profile, password);
+        return new ConnectionProfilesRead(status, profiles, (last, password));
     }
 
     /// <summary>前回使用した接続情報を保存する</summary>

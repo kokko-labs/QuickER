@@ -217,9 +217,6 @@
   <data name="DbConnection_Restored" xml:space="preserve">
     <value>Restored the previous connection settings.</value>
   </data>
-  <data name="DbConnection_ProfileDialectMismatch" xml:space="preserve">
-    <value>Profile '{0}' cannot be selected because its dialect differs.</value>
-  </data>
   <data name="DbConnection_ProfileLoaded" xml:space="preserve">
     <value>Loaded profile '{0}'.</value>
   </data>
@@ -255,6 +252,9 @@
   </data>
   <data name="DbConnection_ProfileStoreUnavailable" xml:space="preserve">
     <value>Could not read the saved connections file, so nothing was changed. Another program may be using it. Try again in a moment.</value>
+  </data>
+  <data name="DbConnection_ProfilesUnavailable" xml:space="preserve">
+    <value>Could not read the saved connections file, so the saved connections are not shown. Another program may be using it. Reopen this dialog in a moment.</value>
   </data>
   <data name="DbConnection_ProfileWriteFailed" xml:space="preserve">
     <value>Could not write the saved connections. The change may have been applied only partly, so the list was reloaded from the file: {0}</value>

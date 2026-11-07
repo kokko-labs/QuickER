@@ -56,7 +56,7 @@ internal static partial class ConnectionDialogRows
 
                     h.Dialogs.WarningConfirmMessages.Should().BeEmpty();
                     vm.StatusMessage.Should().Be(Strings.DbConnection_SelectProfileToDelete);
-                    h.Store.LoadAll().Should().BeEmpty();
+                    h.Store.Read().Profiles.Should().BeEmpty();
                     h.Closes(vm).Should().BeEmpty();
                 }
             ),
@@ -165,8 +165,8 @@ internal static partial class ConnectionDialogRows
                     h.Closes(vm).Should().Equal(true);
                     vm.Result!.Host.Should().Be("edited.example.com");
                     vm.ResultProvider!.Name.Should().Be(SqlServerProvider.ProviderName);
-                    h.Store.LoadLastUsed()!.Value.Profile.Server.Should().Be("edited.example.com");
-                    var stored = h.Store.LoadAll().Should().ContainSingle().Subject;
+                    h.Store.Read().LastUsed!.Value.Profile.Server.Should().Be("edited.example.com");
+                    var stored = h.Store.Read().Profiles.Should().ContainSingle().Subject;
                     stored.Id.Should().Be(idA);
                     stored.Server.Should().Be("prod.example.com");
                     h.Dialogs.ErrorMessages.Should().BeEmpty();
@@ -285,7 +285,11 @@ internal static partial class ConnectionDialogRows
 
                     vm.FilePath.Should().Be(picked);
                     vm.SelectedProfile!.Id.Should().Be(id);
-                    h.Store.LoadAll().Should().ContainSingle().Which.FilePath.Should().Be(saved);
+                    h.Store.Read()
+                        .Profiles.Should()
+                        .ContainSingle()
+                        .Which.FilePath.Should()
+                        .Be(saved);
                 }
             ),
             Row(
@@ -303,7 +307,7 @@ internal static partial class ConnectionDialogRows
 
                     h.Closes(vm).Should().Equal(false);
                     vm.Result.Should().BeNull();
-                    h.Store.LoadAll().Should().HaveCount(2);
+                    h.Store.Read().Profiles.Should().HaveCount(2);
                     h.Snapshot().Should().Equal(before);
                 }
             ),
@@ -328,7 +332,7 @@ internal static partial class ConnectionDialogRows
                     h.Save(vm);
 
                     h.Dialogs.WarningConfirmMessages.Should().BeEmpty();
-                    var stored = h.Store.LoadAll();
+                    var stored = h.Store.Read().Profiles;
                     stored.Should().HaveCount(2);
                     stored
                         .Single(p => p.Dbms == SqliteProvider.ProviderName)
@@ -366,7 +370,7 @@ internal static partial class ConnectionDialogRows
                         .Be(string.Format(Strings.DbConnection_ProfileRenamed, "本番DB", "新名"));
                     vm.SelectedProvider.Should().BeSameAs(h.SqlServer);
                     vm.Host.Should().Be("edited.example.com");
-                    h.Store.LoadAll().Should().ContainSingle().Which.Name.Should().Be("新名");
+                    h.Store.Read().Profiles.Should().ContainSingle().Which.Name.Should().Be("新名");
                 }
             ),
             Row(
@@ -388,12 +392,85 @@ internal static partial class ConnectionDialogRows
                     h.Delete(vm);
 
                     h.Dialogs.WarningConfirmMessages.Should().ContainSingle();
-                    h.Store.LoadAll()
-                        .Should()
+                    h.Store.Read()
+                        .Profiles.Should()
                         .ContainSingle()
                         .Which.Dbms.Should()
                         .Be(SqliteProvider.ProviderName);
                     vm.SelectedProvider.Should().BeSameAs(h.SqlServer);
+                }
+            ),
+            Row(
+                "rename-and-delete-sync-with-other-dialect-in-store-touch-only-listed-profile",
+                "同期モード（SQL Server 固定）で、SQLite のプロファイルがあるストアの本番DB を選んで名前を変え、続けて削除しても、画面に出ていない SQLite のプロファイルには触れない（製品の候補 A の再現の店）",
+                [(Sync, Select), (Sync, Rename), (Sync, Delete)],
+                h =>
+                {
+                    var prodId = h.SeedProfile("本番DB");
+                    var localPath = h.PathOf("local.db");
+                    var localId = h.SeedSqliteProfile("ローカル", localPath);
+                    var vm = h.Create(
+                        ConnectionDialects.WithSqlite,
+                        DbConnectionDialogMode.Sync,
+                        h.SqlServer
+                    );
+
+                    // 根拠：src/QuickER.Db.UI/DbConnectionDialogViewModel.cs の ReloadProfiles（一覧は固定した方言だけ）・:744-747・:826-869
+                    h.Select(vm, ItemOf(vm, prodId));
+                    vm.ProfileName = "本番DB（新）";
+                    h.Rename(vm);
+
+                    vm.StatusMessage.Should()
+                        .Be(
+                            string.Format(
+                                Strings.DbConnection_ProfileRenamed,
+                                "本番DB",
+                                "本番DB（新）"
+                            )
+                        );
+
+                    h.Delete(vm);
+
+                    h.Dialogs.WarningConfirmMessages.Should()
+                        .Equal(
+                            string.Format(Strings.DbConnection_DeleteProfileConfirm, "本番DB（新）")
+                        );
+                    var stored = h.Store.Read().Profiles.Should().ContainSingle().Subject;
+                    stored.Id.Should().Be(localId);
+                    stored.Name.Should().Be("ローカル");
+                    stored.FilePath.Should().Be(localPath);
+                }
+            ),
+            Row(
+                "rename-sync-to-name-of-other-dialect-profile-does-not-ask-and-keeps-it",
+                "同期モードで、SQLite のプロファイルと同じ名前へ SQL Server のプロファイルの名前を変えても、衝突の検査は同じ方言だけを見るので確認なしに変わり、SQLite のプロファイルは名前も中身もそのまま",
+                [(Sync, Rename)],
+                h =>
+                {
+                    var prodId = h.SeedProfile("本番DB");
+                    var localPath = h.PathOf("local.db");
+                    var localId = h.SeedSqliteProfile("ローカル", localPath);
+                    var vm = h.Create(
+                        ConnectionDialects.WithSqlite,
+                        DbConnectionDialogMode.Sync,
+                        h.SqlServer
+                    );
+                    h.Select(vm, ItemOf(vm, prodId));
+                    vm.ProfileName = "ローカル";
+
+                    // 根拠：src/QuickER.Db.UI/DbConnectionDialogViewModel.cs:771-777（衝突の検査は同じ方言だけ）
+                    h.Rename(vm);
+
+                    h.Dialogs.WarningConfirmMessages.Should().BeEmpty();
+                    var stored = h.Store.Read().Profiles;
+                    stored.Should().HaveCount(2);
+                    stored.Single(p => p.Id == prodId).Name.Should().Be("ローカル");
+                    stored
+                        .Single(p => p.Id == prodId)
+                        .Dbms.Should()
+                        .Be(SqlServerProvider.ProviderName);
+                    stored.Single(p => p.Id == localId).FilePath.Should().Be(localPath);
+                    vm.Profiles.Select(item => item.Profile.Id).Should().Equal(prodId);
                 }
             ),
             Row(
@@ -473,14 +550,14 @@ internal static partial class ConnectionDialogRows
                 }
             ),
             Row(
-                "select-sqlite-switches-dialect-in-import-and-refuses-in-sync",
-                "SQLite を選んだ状態で SQL Server のプロファイルを選ぶと、取込は方言が SQL Server に移り、同期（SQLite 固定）は当てずに方言の不一致を知らせる",
+                "select-sqlite-switches-dialect-in-import-and-is-not-listed-in-sync",
+                "SQLite を選んだ状態で SQL Server のプロファイルを選ぶと、取込は方言が SQL Server に移る。同期（SQLite 固定）の一覧には SQL Server のプロファイルが並ばず、選べない",
                 [(Sqlite, Select)],
                 h =>
                 {
                     var id = h.SeedProfile("本番DB");
 
-                    // 根拠：src/QuickER.Db.UI/DbConnectionDialogViewModel.cs:380-386（取込は方言を移す）・:551-558（同期は当てない）・:249
+                    // 根拠：src/QuickER.Db.UI/DbConnectionDialogViewModel.cs:380-386（取込は方言を移す）・ReloadProfiles（同期は固定した方言だけを並べる）・:249
                     var importVm = h.CreateSqlite();
                     h.Select(importVm, ItemOf(importVm, id));
 
@@ -488,11 +565,10 @@ internal static partial class ConnectionDialogRows
                     importVm.ShowFilePath.Should().BeFalse();
 
                     var syncVm = h.CreateSqlite(mode: DbConnectionDialogMode.Sync);
-                    h.Select(syncVm, ItemOf(syncVm, id));
 
                     syncVm
-                        .StatusMessage.Should()
-                        .Be(string.Format(Strings.DbConnection_ProfileDialectMismatch, "本番DB"));
+                        .Profiles.Should()
+                        .BeEmpty("SQLite 固定の一覧に SQL Server のプロファイルは並ばない");
                     syncVm.SelectedProvider.Should().BeSameAs(h.Sqlite);
                     syncVm.Host.Should().Be("localhost", "別の方言のプロファイルは欄へ当てない");
                 }
@@ -514,7 +590,7 @@ internal static partial class ConnectionDialogRows
                     h.Rename(vm);
 
                     h.Dialogs.WarningConfirmMessages.Should().BeEmpty();
-                    var stored = h.Store.LoadAll();
+                    var stored = h.Store.Read().Profiles;
                     stored.Should().HaveCount(2);
                     stored.Select(p => p.Name).Should().Equal("X", "X");
                     vm.FilePath.Should().Be(path);

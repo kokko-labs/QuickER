@@ -1,3 +1,5 @@
+using System.IO;
+using QuickER.Db.UI;
 using QuickER.Gui.Abstractions;
 using QuickER.Provider;
 
@@ -135,4 +137,42 @@ internal sealed class ConnectionDialogFiles : IFileDialogService
     ) => SaveResult;
 
     public string? PickFolder(string title, string? initialDirectory = null) => null;
+}
+
+/// <summary>
+/// 本物のストアのまま、頼まれたときだけ次の読み取りの直前に connections.json を排他で掴むストア
+/// （書き込みは成功し、直後の読み直しだけが読めない状況を作る）
+/// </summary>
+/// <remarks>
+/// 保存・名前の変更・削除は、書き込みと直後の読み直しの間に呼び出し側へ戻らないので、外から掴む隙が無い。
+/// 掴むのは本物のファイルで、読み取りの結果は本物のストアの分類（Unavailable）のまま返る。
+/// 掴んだハンドルは <see cref="ReleaseLock"/> で放す（組が行の終わりの見張りの前に放す）。
+/// </remarks>
+internal sealed class ConnectionDialogStore(string folder, bool useDpapi)
+    : SqlConnectionProfileStore(folder, useDpapi)
+{
+    private bool _lockOnNextRead;
+    private FileStream? _lock;
+
+    /// <summary>次の <see cref="Read"/> の直前に connections.json を掴むよう頼む</summary>
+    public void LockOnNextRead() => _lockOnNextRead = true;
+
+    /// <summary>掴んだ connections.json を放す（掴んでいなければ何もしない）</summary>
+    public void ReleaseLock()
+    {
+        _lock?.Dispose();
+        _lock = null;
+    }
+
+    /// <inheritdoc />
+    public override ConnectionProfilesRead Read()
+    {
+        if (_lockOnNextRead)
+        {
+            _lockOnNextRead = false;
+            _lock = new FileStream(ConnectionsPath, FileMode.Open, FileAccess.Read, FileShare.None);
+        }
+
+        return base.Read();
+    }
 }

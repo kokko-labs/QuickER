@@ -18,7 +18,7 @@ internal static partial class ProfileStoreRows
                         + Guid.NewGuid().ToString()
                         + "\",\"name\":\"Legacy\",\"server\":\"srv\",\"database\":\"db\",\"authMode\":0,\"userId\":\"\",\"trustServerCertificate\":true,\"savePassword\":false}]}"
                 ),
-                LoadAll(o =>
+                Read(o =>
                 {
                     o.All.Should().ContainSingle();
                     o.All[0].Dbms.Should().Be("sqlserver");
@@ -34,16 +34,16 @@ internal static partial class ProfileStoreRows
                         + Guid.NewGuid().ToString()
                         + "\",\"name\":\"Legacy\",\"server\":\"srv\",\"database\":\"db\"}]"
                 ),
-                LoadAll(o => o.All.Should().BeEmpty())
+                Read(o => o.All.Should().BeEmpty())
             ),
             // 保存の起点としても同じく読めて、書き戻すと null 要素は消える
             Row(
                 "legacy-null-profiles-and-elements-are-normalized",
                 "一覧や要素が null の connections.json は揃えて読み、保存もできる",
                 WriteJson("{\"profiles\": [null, {\"name\": \"本番DB\"}, null]}"),
-                LoadAll(o => o.All.Should().ContainSingle().Which.Name.Should().Be("本番DB")),
+                Read(o => o.All.Should().ContainSingle().Which.Name.Should().Be("本番DB")),
                 Upsert("dev", Prof("開発")),
-                LoadAll(o =>
+                Read(o =>
                 {
                     o.All.Select(p => p.Name).Should().BeEquivalentTo(new[] { "本番DB", "開発" });
                     using (var written = o.ConnectionsJson())
@@ -61,7 +61,7 @@ internal static partial class ProfileStoreRows
                     o.BackupExists.Should().BeFalse("正しい JSON なので壊れたものとして退避しない");
                 }),
                 WriteJson("{\"profiles\": null}"),
-                LoadAll(o => o.All.Should().BeEmpty())
+                Read(o => o.All.Should().BeEmpty())
             ),
             // 破損時は空データで続行して保存できる（＝正常化できる）が、上書きの前に元の内容を残す。
             // 残すのは最も古い退避＝最後に正しく読めていた状態にいちばん近いもの
@@ -78,7 +78,7 @@ internal static partial class ProfileStoreRows
                         o.BackupText.Should().Be("壊れた 1 回目");
                     }
                 ),
-                LoadAll(o => o.All.Should().ContainSingle()),
+                Read(o => o.All.Should().ContainSingle()),
                 WriteJson("壊れた 2 回目"),
                 Upsert(
                     "r2",

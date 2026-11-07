@@ -330,7 +330,7 @@ internal static partial class SourceRules
                 ),
                 new(
                     "src/QuickER.Db.UI/SqlConnectionProfileStore.cs",
-                    "publicList<SqlConnectionProfile>LoadAll()=>LoadData().Profiles.OrderBy(p=>p.Name,StringCom",
+                    "varprofiles=data.Profiles.OrderBy(p=>p.Name,StringComparer.OrdinalIgnoreCase).ToList();",
                     1,
                     "モデルの名前ではない（接続プロファイル名の並び）"
                 ),
