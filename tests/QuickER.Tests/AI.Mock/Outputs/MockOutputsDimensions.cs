@@ -203,20 +203,7 @@ internal static class MockOutputsDimensions
         );
 
     /// <summary>網羅しない組の一覧（手で書いた静的な一覧）</summary>
-    public static CoverageGapSet Gaps =>
-        CoverageGap.Set(
-            EngineIds.Ai,
-            [
-                CoverageGap.Tuple(
-                    Scope,
-                    "P3-11b",
-                    "P4",
-                    "再開のプロンプトは改訂を直近 5 件に絞る（src/QuickER.AI.Mock/MockResumePrompt.cs:19・:172-174）が、6 件以上の改訂を流す元のテストが無い",
-                    (Sut, nameof(MockOutputSut.ResumePrompt)),
-                    (Aspect, "resume-revision-limit")
-                ),
-            ]
-        );
+    public static CoverageGapSet Gaps => CoverageGap.Set(EngineIds.Ai, []);
 
     /// <summary>1 行を数える</summary>
     public static void Observe(CoverageCounter counter, MockOutputScenario scenario)

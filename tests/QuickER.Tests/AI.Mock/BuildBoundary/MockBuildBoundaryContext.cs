@@ -127,6 +127,7 @@ internal sealed class MockBuildBoundaryContext : IDisposable
     private readonly List<TestTempFolder> _folders = [];
     private readonly List<(string Folder, FileSystemAccessRule Rule)> _denied = [];
     private readonly List<SafeFileHandle> _handles = [];
+    private readonly List<FileStream> _streams = [];
 
     /// <summary>文脈を作る（出力フォルダを 1 つ作る）</summary>
     /// <param name="cancellationToken">テストの取り消し</param>
@@ -184,6 +185,23 @@ internal sealed class MockBuildBoundaryContext : IDisposable
         Write(path, "<Project/>");
         File.SetAttributes(path, FileAttributes.ReadOnly);
     }
+
+    /// <summary>ファイルを書いて隠し属性にする（フォルダも作る）</summary>
+    /// <param name="path">絶対パス</param>
+    /// <param name="readOnly">読み取り専用の属性も付けるか</param>
+    public static void WriteHidden(string path, bool readOnly = false)
+    {
+        Write(path, "<Project/>");
+        File.SetAttributes(
+            path,
+            readOnly ? FileAttributes.Hidden | FileAttributes.ReadOnly : FileAttributes.Hidden
+        );
+    }
+
+    /// <summary>ファイルを共有なし（<see cref="FileShare.None"/>）で開いたままにする（別のプロセスが掴んだ形＝読むことも消すこともできない。破棄で閉じる）</summary>
+    /// <param name="path">絶対パス（在るファイル）</param>
+    public void LockExclusive(string path) =>
+        _streams.Add(new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None));
 
     /// <summary>ファイル・フォルダを、削除の共有を許さないハンドルで開いたままにする（破棄で閉じる）</summary>
     /// <param name="path">絶対パス</param>
@@ -302,6 +320,11 @@ internal sealed class MockBuildBoundaryContext : IDisposable
         foreach (var handle in _handles)
         {
             handle.Dispose();
+        }
+
+        foreach (var stream in _streams)
+        {
+            stream.Dispose();
         }
 
         for (var i = _denied.Count - 1; i >= 0; i--)

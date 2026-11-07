@@ -134,6 +134,11 @@ internal sealed class MockRunnerContext : IDisposable
             cancellationToken ?? CancellationToken
         );
 
+    /// <summary>行のターゲットの成果物（プロジェクトフォルダ配下の csproj と、ターゲットの UI のファイル 1 つ）を書く副作用</summary>
+    /// <remarks>ターゲットに依らない流れの行が使う（WPF は App.xaml・Blazor は Home.razor。どちらも成果物の検索パターンに当たる）</remarks>
+    public Action<string> WriteTargetArtifacts() =>
+        dir => WriteProjectFiles(dir, (Scenario.Target.UiFile, Scenario.Target.UiContent));
+
     /// <summary>WPF の成果物（プロジェクトフォルダ配下の csproj と MainWindow.xaml）を書く副作用</summary>
     public static Action<string> WriteArtifacts() =>
         dir => WriteProjectFiles(dir, ("MainWindow.xaml", "<Window/>"));

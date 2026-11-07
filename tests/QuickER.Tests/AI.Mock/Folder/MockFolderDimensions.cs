@@ -67,26 +67,6 @@ internal static class MockFolderDimensions
                     MockFolderOutcome.IoFailure,
                     "SendFeedbackAsync はエンジンへ送るだけでストアを書かない（src/QuickER.AI.Mock/MockFolderDesignSession.cs:293-302）"
                 ),
-                Pending(
-                    MockFolderEntry.Open,
-                    MockFolderOutcome.Refused,
-                    "読み込みの検証（mock.json が無い・壊れた・新しい版・不正な画面のファイル名・重複した画面）は出力の表（Ai/MockOutputs の Load の行）が持つ。保存単位の操作の列に重ねた期待は元に無い"
-                ),
-                Pending(
-                    MockFolderEntry.Open,
-                    MockFolderOutcome.IoFailure,
-                    "mock.json を読めない（排他で開かれた）Open は元のテストに無い"
-                ),
-                Pending(
-                    MockFolderEntry.Read,
-                    MockFolderOutcome.Refused,
-                    "不正な画面のファイル名の GetScreenHtml（ArgumentException）は元のテストに無い"
-                ),
-                Pending(
-                    MockFolderEntry.Read,
-                    MockFolderOutcome.IoFailure,
-                    "画面の HTML・style.css を読めない読み取りは元のテストに無い"
-                ),
             ]
         );
 
@@ -98,20 +78,6 @@ internal static class MockFolderDimensions
         CoverageGap.AcceptedTuple(
             Scope,
             "P3-11b",
-            reason,
-            (Entry, entry.ToString()),
-            (Outcome, outcome.ToString())
-        );
-
-    private static CoverageGapEntry Pending(
-        MockFolderEntry entry,
-        MockFolderOutcome outcome,
-        string reason
-    ) =>
-        CoverageGap.Tuple(
-            Scope,
-            "P3-11b",
-            "P4",
             reason,
             (Entry, entry.ToString()),
             (Outcome, outcome.ToString())

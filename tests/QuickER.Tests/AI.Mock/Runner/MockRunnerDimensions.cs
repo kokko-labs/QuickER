@@ -48,55 +48,8 @@ internal static class MockRunnerDimensions
                     (Target, MockAgentTarget.Wpf.Name),
                     (Result, nameof(MockRunResult.ScreensMissing))
                 ),
-                Group(
-                    "実行器の未ログインの申告をランナーの結果へ写す期待は、ランナーの元のテストに無い（実行器の網の login-* の行が実行器の側を見る）",
-                    (MockAgentTarget.Wpf, [MockRunResult.NotLoggedIn]),
-                    (MockAgentTarget.Blazor, [MockRunResult.NotLoggedIn])
-                ),
-                Group(
-                    "最終ビルドの前の確認の取り消しは、最終ビルドの境界の表（P3-11b のフェーズ 2 / 6）が持つ。流れの表に重ねた期待は元に無い",
-                    (MockAgentTarget.Wpf, [MockRunResult.BuildDeclined]),
-                    (MockAgentTarget.Blazor, [MockRunResult.BuildDeclined])
-                ),
-                Group(
-                    "ランナーの元のテストは、Blazor では成果物・画面の数・実行ログの形だけを持つ。失敗・タイムアウト・中断・例外・委譲を Blazor に重ねた期待は元に無い",
-                    (
-                        MockAgentTarget.Blazor,
-                        [
-                            MockRunResult.ArtifactsMissing,
-                            MockRunResult.BuildFailed,
-                            MockRunResult.TimedOut,
-                            MockRunResult.BuildTimedOut,
-                            MockRunResult.Canceled,
-                            MockRunResult.Thrown,
-                            MockRunResult.NotRun,
-                        ]
-                    )
-                ),
             ]
         );
-
-    /// <summary>ターゲットごとに分類を名指しした組をまとめて 1 つの項目にする（理由が同じ組）</summary>
-    private static CoverageGapEntry Group(
-        string reason,
-        params (MockAgentTarget Target, MockRunResult[] Results)[] pairs
-    )
-    {
-        var set = pairs
-            .SelectMany(pair =>
-                pair.Results.Select(result => (pair.Target.Name, result.ToString()))
-            )
-            .ToHashSet();
-        return CoverageGap.Matching(
-            Scope,
-            "P3-11b",
-            "P4",
-            reason,
-            Target,
-            Result,
-            (target, result) => set.Contains((target, result))
-        );
-    }
 
     /// <summary>1 行を数える</summary>
     public static void Observe(CoverageCounter counter, MockRunnerScenario scenario) =>

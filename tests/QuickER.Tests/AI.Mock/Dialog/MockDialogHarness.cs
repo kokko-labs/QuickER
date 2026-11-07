@@ -319,6 +319,69 @@ internal sealed class MockDialogHarness : IDisposable
         return run;
     }
 
+    /// <summary>生成の準備（<see cref="PrepareGenerationAsync"/>）から出力フォルダ（out）の作成・生成の実行・完了までを行う（生成の後の状態を作る）</summary>
+    public async Task CompleteGenerationAsync(MockGenerationDialogViewModel vm)
+    {
+        await PrepareGenerationAsync(vm);
+        Directory.CreateDirectory(PathOf("out"));
+        await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+    }
+
+    /// <summary>止めた生成（<see cref="StartHeldGeneration"/>）を進め、その実行の完了までを待つ</summary>
+    public async Task ReleaseHeldGenerationAsync()
+    {
+        Generator.Release();
+
+        foreach (var run in _heldGenerations)
+        {
+            await run.WaitAsync(Patience);
+        }
+    }
+
+    /// <summary>
+    /// モックフォルダに使えないフォルダを作り、VM のモックフォルダへ入れる（4 種は <see cref="BlockedKind"/>）。
+    /// 会話を開始できなくなり、状態の文に理由が出る
+    /// </summary>
+    /// <param name="vm">対象の VM</param>
+    /// <param name="kind">使えないフォルダの種類</param>
+    /// <param name="folder">フォルダのパス（既定は <see cref="MockFolder"/>。VM が既に同じパスを持つと変更として扱われないので、その場合は別のパスを渡す。相対パスの種類は無視する）</param>
+    public void BlockFolder(
+        MockGenerationDialogViewModel vm,
+        BlockedKind kind,
+        string? folder = null
+    )
+    {
+        folder ??= MockFolder;
+
+        switch (kind)
+        {
+            case BlockedKind.Relative:
+                vm.MockFolder = RelativeMockFolder;
+                return;
+            case BlockedKind.NotAMockFolder:
+                Directory.CreateDirectory(folder);
+                File.WriteAllText(Path.Combine(folder, "index.html"), "<html></html>");
+                break;
+            case BlockedKind.CorruptManifest:
+                Directory.CreateDirectory(folder);
+                File.WriteAllText(Path.Combine(folder, MockManifest.ManifestFileName), "{ broken");
+                break;
+            case BlockedKind.InvalidScreenName:
+                SeedMockFolder(folder);
+                var manifestPath = Path.Combine(folder, MockManifest.ManifestFileName);
+                var json = File.ReadAllText(manifestPath);
+                File.WriteAllText(manifestPath, json.Replace("OrderList.html", "../evil.html"));
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(kind), kind, null);
+        }
+
+        vm.MockFolder = folder;
+    }
+
+    /// <summary>フルパスでないモックフォルダの例（<see cref="BlockedKind.Relative"/> が使う）</summary>
+    public const string RelativeMockFolder = "quicker-relative-mock";
+
     /// <summary>エンジンを破棄する（行の終わりの破棄は、ここを通した VM には重ねない）</summary>
     public void ShutdownEngines(MockGenerationDialogViewModel vm, TimeSpan timeout)
     {
@@ -610,4 +673,20 @@ internal sealed class MockDialogHarness : IDisposable
             }
         }
     }
+}
+
+/// <summary>モックフォルダに指定できない（会話を開始できない）フォルダの種類（<see cref="MockDialogHarness.BlockFolder"/>）</summary>
+internal enum BlockedKind
+{
+    /// <summary>フルパスでない相対パス</summary>
+    Relative,
+
+    /// <summary>mock.json の無い、中身のある既存フォルダ</summary>
+    NotAMockFolder,
+
+    /// <summary>壊れた mock.json のフォルダ</summary>
+    CorruptManifest,
+
+    /// <summary>画面のファイル名が不正な（手編集で壊れた）mock.json のフォルダ</summary>
+    InvalidScreenName,
 }

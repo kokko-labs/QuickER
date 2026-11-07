@@ -325,9 +325,7 @@ internal static partial class MockDialogRows
                 {
                     h.Generator.ResultSuccess = false;
                     var vm = h.Create();
-                    await h.PrepareGenerationAsync(vm);
-
-                    await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+                    await h.CompleteGenerationAsync(vm);
 
                     vm.MockGenCompleted.Should().BeTrue();
                     vm.MockGenSucceeded.Should().BeFalse();
@@ -342,9 +340,7 @@ internal static partial class MockDialogRows
                 async h =>
                 {
                     var vm = h.Create();
-                    await h.PrepareGenerationAsync(vm);
-
-                    await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+                    await h.CompleteGenerationAsync(vm);
 
                     h.Dialogs.InformationMessages.Should()
                         .ContainSingle()
@@ -387,9 +383,7 @@ internal static partial class MockDialogRows
                 {
                     h.Generator.ResultSuccess = false;
                     var vm = h.Create();
-                    await h.PrepareGenerationAsync(vm);
-
-                    await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+                    await h.CompleteGenerationAsync(vm);
 
                     h.Dialogs.ErrorMessages.Should()
                         .ContainSingle()
@@ -407,9 +401,7 @@ internal static partial class MockDialogRows
                     h.Generator.ResultSuccess = false;
                     h.Generator.ResultBuildDeclined = true;
                     var vm = h.Create();
-                    await h.PrepareGenerationAsync(vm);
-
-                    await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+                    await h.CompleteGenerationAsync(vm);
 
                     h.Dialogs.ErrorMessages.Should().BeEmpty();
                     h.Dialogs.InformationMessages.Should()
@@ -753,9 +745,7 @@ internal static partial class MockDialogRows
                 async h =>
                 {
                     var vm = h.Create();
-                    await h.PrepareGenerationAsync(vm);
-                    Directory.CreateDirectory(h.PathOf("out"));
-                    await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+                    await h.CompleteGenerationAsync(vm);
                     vm.ShowOpenFolder.Should().BeTrue();
 
                     vm.ClearCommand.Execute(null);

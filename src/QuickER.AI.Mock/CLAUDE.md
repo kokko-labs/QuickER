@@ -13,6 +13,7 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
   - `RemoveScreen` だけは HTML の削除が先。`mock.json` で失敗しても remove のやり直しで自己回復する。
   - 失敗で残る一時の食い違いは 3 つだけ：`SaveScreen` が `mock.json` で失敗して残る「宣言の無い HTML」、`RemoveScreen` が `mock.json` で失敗して残る「HTML の無い宣言」、`SaveStylesheet` が `mock.json` で失敗して残る「新しい CSS」（CSS を先に書き、マニフェストは差し替えない＝上の順と合う）。どれもその画面・CSS への次の保存の成功で解ける。
   - 保存単位の操作の列（`MockFolderTests`）は、組（`MockFolderHarness`）がどの手の後にも見張る：失敗した手は `mock.json` のバイト列もメモリのマニフェストも変えない・メモリは `mock.json` と一緒にしか変わらない・一時ファイルが残らない・宣言と HTML の整合と `style.css` の内容（上の 3 つだけを許す）・`SourceSchema` は初回ターンの成功でだけ変わる・エンジンの完了 1 回につき `TurnCompleted` 1 回・保存の通知は成功したツールのときだけ。
+    開く手（`Open`）と画面を読む手（`GetScreenHtml`）も同じ見張りを通る（失敗した Open は前のストアのまま。行 `open-refused-newer-format-keeps-manifest-and-current-store`・`read-invalid-screen-file-name-is-refused-without-reading`、別のプロセスが掴んだ `mock.json`・画面の HTML の行 `open-manifest-held-by-another-process-throws-io-and-keeps-manifest`・`read-screen-held-by-another-process-throws-io-and-keeps-manifest`）。
 - 新規作成の `mock.json` は置き換えない書き込み（`AtomicFile.CreateText`）で作る。存在の確認の後に別のプロセスが作った `mock.json` を上書きせず、事前の確認と同じ例外にする。ガード：`MockFolderTests`（行 `create-new-keeps-foreign-manifest-written-after-check`）。
 - **手で書いた `mock.json` の不正な形は、`Open` が破損として断る**（JSON として読めない・型の合わない要素・新しい版・不正な画面のファイル名・同じ画面のファイルの重複）。黙って直すのは、情報を持たない `null`（文字列は空へ、リストの要素の `null` は捨てる）だけ。
   - 画面の重複は、ファイル名を `OrdinalIgnoreCase` で比べて判定する（ストアの画面の同定と同じ比較。ファイル名の検証の後に見る）。開くと保存（upsert）は先頭だけを更新し、削除は両方を消し、単一 HTML・設計書・ランナーの画面の数にも 2 回入る。どちらを残すかは決められないので、片方を捨てずに断る。文言は `Mock_ManifestDuplicateScreenFileFormat`（UI の言語に従う）で、2 件目のファイル名を名指しする。
@@ -65,6 +66,7 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
 - `MockProjectAgentRunner` は全体タイムアウト（既定 30 分）・成果物検証・最終ビルド前の変更検知・最終 `dotnet build` の独立検証を行う（実行器の自己申告を信じない）。
 - 最終ビルドには専用タイムアウト `DefaultBuildTimeout`（10 分）を掛け、超過は専用文言でタイムアウト報告する。全体タイムアウトはエージェント実行までで解けており、外部トークンには時間制限が無い。値の根拠は、パッケージ・HTTP 両キャッシュを空にした完全コールドの同形 Blazor ソリューションが 6.8 秒という実測の約 88 倍。
 - 出力フォルダの上書きは `MockProjectOverwriteScanner` が既存物（自分の .sln・直下の別 sln / slnx / csproj・プロジェクトフォルダとその 4 生成物）を列挙し、VM が `ConfirmWarningDetails` で確認する。キャンセルなら出力フォルダ不変。
+  - 製品と XmlDoc が食い違う 2 つの組は行にせず、網羅しない組（P5・製品の候補）として `MockBuildBoundaryDimensions` に残している：隠し属性の別ソリューション・別プロジェクトを一覧に出さない（自分のものは隠しでも出る）・出力フォルダ自身が中を列挙できない reparse フォルダだと走査が `IOException` を投げる（走査は生成コマンドの try の外から呼ばれる）。ほかの種別は入口 D の行 `overwrite-*` が見る。ガード：`MockBuildBoundaryTests.Coverage_MatchesGaps`。
 
 ### 実行器 4 種
 
@@ -84,7 +86,7 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
   - 実行器ごとの違いはアダプタの性質と値（`BackendName`・`FinalBuildEscapesSandbox`・`AdditionalInstructionsPrompt`）の宣言が `src/…:行` の出典つきで持つ。アダプタと行の中で実行器を名指しして分岐しない。
   - 持たない性質の組（Accepted）と、直す区切りの決まった不具合の組（Pending。いまは空）は、宣言から導かず手で書いた一覧に置く。宣言だけを書き換えると網羅の照合が赤になる。
   - 起動の設定（許可・サンドボックス・ツール・作業フォルダ・システムプロンプト）と最終ビルドの境界越えの宣言は、アダプタの期待との一致で固定する。
-- ガード：`MockAgentContractTests`（`MockAgentContractTests.Row_Holds` の行 `launch-options-match-declaration-*`・`declaration-final-build-escapes-sandbox`・`MockAgentContractTests.Coverage_MatchesGaps`・`MockAgentContractTests.Declarations_CoverEveryCapabilityWithEvidence`・`MockAgentContractTests.Axis_CoversAuthoritativeValues`）。ランナーの流れ（成果物・画面の数・最終ビルド・結果の分類）は `MockRunnerTests`（行ごとにランの結果を分類して行の宣言と照合する）。mutation 実証済み。
+- ガード：`MockAgentContractTests`（`MockAgentContractTests.Row_Holds` の行 `launch-options-match-declaration-*`・`declaration-final-build-escapes-sandbox`・`MockAgentContractTests.Coverage_MatchesGaps`・`MockAgentContractTests.Declarations_CoverEveryCapabilityWithEvidence`・`MockAgentContractTests.Axis_CoversAuthoritativeValues`）。ランナーの流れ（成果物・画面の数・最終ビルド・結果の分類）は `MockRunnerTests`（行ごとにランの結果を分類して行の宣言と照合する。ターゲットに依らない流れの行は WPF と Blazor の両方で流す＝Id は幹の末尾に `-wpf` / `-blazor`。幹 `agent-not-logged-in-reports-not-logged-in`・`boundary-declined-confirmation-skips-build-as-not-verified` ほか）。mutation 実証済み。
 
 ### 最終ビルド
 
@@ -102,7 +104,7 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
   - リンクならリンクだけを外す。判定は `MockProjectFiles.IsLink`（`LinkTarget`）。`Directory.Delete(recursive: true)` 自身もリンクを辿らないが、明示チェックで二重化する。
   - **消せずに残ったものは黙って進まず、変更検知と同じ確認一覧へ回す**（フェイルクローズ）。変更検知は obj / bin をフォルダ自身も含めて見ないので、拾えるのはこの残存検査だけ。
     一覧は差分と同じ表記で重複なく 1 つにまとめる。確認手段が null ならビルドしない（`BuildDeclined`）。境界越えを宣言しない実行器ではログへ残すだけ。
-- ガード：`MockBuildBoundaryTests`（最終ビルドの境界の表の入口 E の行：`args-build-targets-own-solution-path`＝パス明示・`args-isolation-arguments-are-passed`＝隔離引数 3 つ・`args-ancestor-imports-are-disabled`＝自動 import 無効化 5 プロパティ）・`MockRunnerTests`（行 `build-targets-own-solution-path`＝自分の sln のパス・`build-timeout-reports-timed-out`＝最終ビルドのタイムアウト・`artifacts-outside-project-folder-not-counted`＝範囲外の csproj では合格しない）・`MockBuildBoundaryTests`（最終ビルドの境界の表の入口 B の行：`clear-obj-and-bin-are-deleted-before-build`＝ビルド直前の obj / bin 削除・`clear-obj-junction-removes-link-and-keeps-target`＝ジャンクションのリンク先温存・`clear-read-only-obj-targets-never-reach-build-unconfirmed-*`＝読み取り専用の obj/*.targets を確認なしにビルドへ渡さない性質・`clear-read-only-obj-targets-are-deleted-before-build`・`clear-read-only-bin-file-is-deleted-before-build`・`clear-undeletable-obj-file-*`＝削除できない obj のファイルは確認一覧・確認手段なしでビルドしない・境界越え非宣言ではログだけ・`clear-undeletable-obj-junction-is-listed-once-without-traversal`。ランナー経由の全行に「境界越え非宣言は確認しない・確認を出したら答えのとおりにビルドする・未検証ならビルドしない」の照合が掛かる）。mutation 実証済み。
+- ガード：`MockBuildBoundaryTests`（最終ビルドの境界の表の入口 E の行：`args-build-targets-own-solution-path`＝パス明示・`args-isolation-arguments-are-passed`＝隔離引数 3 つ・`args-ancestor-imports-are-disabled`＝自動 import 無効化 5 プロパティ）・`MockRunnerTests`（行 `build-targets-own-solution-path`＝自分の sln のパス・`build-timeout-reports-timed-out-*`＝最終ビルドのタイムアウト（ターゲット 2 つ）・`artifacts-outside-project-folder-not-counted`＝範囲外の csproj では合格しない）・`MockBuildBoundaryTests`（最終ビルドの境界の表の入口 B の行：`clear-obj-and-bin-are-deleted-before-build`＝ビルド直前の obj / bin 削除・`clear-obj-junction-removes-link-and-keeps-target`＝ジャンクションのリンク先温存・`clear-read-only-obj-targets-never-reach-build-unconfirmed-*`＝読み取り専用の obj/*.targets を確認なしにビルドへ渡さない性質・`clear-read-only-obj-targets-are-deleted-before-build`・`clear-read-only-bin-file-is-deleted-before-build`・`clear-undeletable-obj-file-*`＝削除できない obj のファイルは確認一覧・確認手段なしでビルドしない・境界越え非宣言ではログだけ・`clear-undeletable-obj-junction-is-listed-once-without-traversal`・`clear-hidden-obj-entries-are-deleted-before-build`＝隠しの obj も消す・`clear-obj-file-symlink-removes-link-and-keeps-target`・`clear-unlistable-reparse-obj-is-deleted-before-build`・`clear-unlistable-reparse-folder-in-obj-is-listed-once`＝消せない reparse フォルダはそのフォルダを 1 件で確認一覧へ・`clear-acl-denied-obj-is-listed-as-folder`＝読めない obj は obj を 1 件で確認一覧へ・`clear-missing-obj-and-bin-asks-nothing`。ランナー経由の全行に「境界越え非宣言は確認しない・確認を出したら答えのとおりにビルドする・未検証ならビルドしない」の照合が掛かる）。mutation 実証済み。
   読み取り専用の解除を外しても `clear-read-only-obj-targets-are-deleted-before-build` の 1 行だけが赤になる（性質の行は残存検査が拾うので緑のまま）。
 
 ### 成果物の探索
@@ -112,7 +114,7 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
 - 範囲を出力フォルダ全体にすると、同居する無関係な `.csproj` / `.xaml` や前回実行の `obj` / `bin` で「AI が生成できた」と誤判定する。範囲は `{出力フォルダ}/{プロジェクト名}/` 配下だけ。
 - 共有ヘルパーは `MockProjectFiles`（`IgnoreInaccessible=true`・`obj` / `bin` 除外）1 つ。ランナー・Codex / Copilot の承認待ち判定（`HasAnyInProject`）・API キーのデータ層要約（`SummarizeGeneratedContracts`）の 4 箇所が共有する。1 箇所でも素の列挙へ戻すとその経路だけが静かに落ちる。
 - 再帰は、リンクと中を列挙できない reparse フォルダ（`MockProjectFiles.IsOpaqueDirectory`＝変更検知と同じ判定）の中へ入らない。辿ると、外を指すジャンクション 1 つで出力フォルダの外を数え、列挙できないフォルダでは `IOException` でランごと落ちる。
-- ガード：`MockBuildBoundaryTests`（最終ビルドの境界の表の入口 C の行 `enumerate-*`＝obj / bin 除外・起点直下だけの除外・範囲・起点が無い・拒否 ACE のフォルダでも落ちない〔素の列挙が実際に投げることも同時に確認〕・列挙できない reparse フォルダでも落ちない・ジャンクションの先を数えない・リンクでない reparse フォルダの中は数える）・`MockRunnerTests`（行 `artifacts-outside-project-folder-not-counted`＝範囲外の csproj では合格しない）。mutation 実証済み。
+- ガード：`MockBuildBoundaryTests`（最終ビルドの境界の表の入口 C の行 `enumerate-*`＝obj / bin 除外・起点直下だけの除外・範囲・起点が無い・拒否 ACE のフォルダでも落ちない〔素の列挙が実際に投げることも同時に確認〕・列挙できない reparse フォルダでも落ちない・ジャンクションの先を数えない・リンクでない reparse フォルダの中は数える・読み取り専用と掴まれたファイルは数える〔探索はファイルを開かない〕・隠し属性のファイルと隠しのフォルダの中は数えない〔特性の固定。数えない向きは成果物の検証を甘くしない〕）・`MockRunnerTests`（行 `artifacts-outside-project-folder-not-counted`＝範囲外の csproj では合格しない）。mutation 実証済み。
 
 ### 最終ビルド前の変更検知
 
@@ -138,7 +140,7 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
   エージェントは出力フォルダの ACL を変えて自分に一覧の読み取りだけを拒否でき、ファイルは名前で開けるので MSBuild は `.csproj.user` を読む。アクセス拒否を無視する走査では差分が空になって確認なしにビルドへ進む（実 dotnet build でターゲットの実行を確認済み）。
 - **削除は確認に出さない**（記録にあって今は無い項目を走査しない）。削除したファイルはビルドが失敗するだけで、ビルドに何かを実行させはしないため。ガード：`MockBuildBoundaryTests`（行 `change-deleted-file-is-not-confirmed`＝意図として行に明記）。
 - ガード：`MockBuildBoundaryTests`（最終ビルドの境界の表の入口 A の行 `change-acl-*`・`change-snapshot-acl-*`＝出力フォルダ・サブフォルダの拒否 × スナップショットとラン・記録の時点から読めないフォルダ・確認の要らない拡張子の名前のフォルダ）。
-- ガード：`MockBuildBoundaryTests`（入口 A の行：`change-junction-is-listed-without-traversal`＝外を指すジャンクションは辿らずリンク自体を出す／`change-file-symlink-csproj-user-is-confirmed`／`change-csproj-user-added-is-confirmed`／`change-global-json-at-output-root-is-confirmed`／`change-ui-source-only-is-not-confirmed-*`＝UI ソース・静的資産のみ〔大文字小文字を無視〕／`change-rewritten-csproj-with-restored-timestamp-is-confirmed`／`change-hidden-csproj-user-is-confirmed`／`change-non-escaping-agent-is-not-confirmed`／`change-declined-confirmation-skips-build-as-not-verified`／`change-unwired-confirmation-skips-build`／`change-under-project-obj-is-not-confirmed`・`change-nested-obj-below-project-root-is-confirmed`＝除外は {プロジェクト}/obj だけ／`change-build-input-extension-is-confirmed-*`＝自動で読まれる拡張子は実ファイルを書くと確認に出る／`change-non-link-reparse-folder-*`〔サードパーティのタグにディレクトリビットを付けて管理者権限なしで再現〕／`change-unlistable-reparse-folder-is-always-listed`。入口 B の行 `clear-obj-non-link-reparse-folder-is-deleted-with-contents`。入口 C の行 `enumerate-is-link-*`＝IsLink はジャンクションとシンボリックリンクだけを真にする）。mutation 実証済み。
+- ガード：`MockBuildBoundaryTests`（入口 A の行：`change-junction-is-listed-without-traversal`＝外を指すジャンクションは辿らずリンク自体を出す／`change-file-symlink-csproj-user-is-confirmed`／`change-csproj-user-added-is-confirmed`／`change-global-json-at-output-root-is-confirmed`／`change-ui-source-only-is-not-confirmed-*`＝UI ソース・静的資産のみ〔大文字小文字を無視〕／`change-rewritten-csproj-with-restored-timestamp-is-confirmed`／`change-hidden-csproj-user-is-confirmed`／`change-non-escaping-agent-is-not-confirmed`／`change-declined-confirmation-skips-build-as-not-verified`／`change-unwired-confirmation-skips-build`／`change-under-project-obj-is-not-confirmed`・`change-nested-obj-below-project-root-is-confirmed`＝除外は {プロジェクト}/obj だけ／`change-build-input-extension-is-confirmed-*`＝自動で読まれる拡張子は実ファイルを書くと確認に出る／`change-non-link-reparse-folder-*`〔サードパーティのタグにディレクトリビットを付けて管理者権限なしで再現〕／`change-unlistable-reparse-folder-is-always-listed`／`change-read-only-csproj-user-is-confirmed`・`change-locked-csproj-user-added-is-confirmed`＝属性・削除を妨げるハンドルで検知を避けられない／`change-unreadable-existing-file-is-always-listed`＝記録の後に読めなくなった既存のファイルは変わっていなくても毎回出す／`change-shared-locked-existing-file-unchanged-is-not-confirmed`／`change-missing-output-folder-records-nothing-then-lists-additions`。入口 B の行 `clear-obj-non-link-reparse-folder-is-deleted-with-contents`。入口 C の行 `enumerate-is-link-*`＝IsLink はジャンクションとシンボリックリンクだけを真にする）。mutation 実証済み。
 
 ### 提出パスの判定
 
@@ -161,6 +163,9 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
   4. 初回ターンの済みは成功で終わったときだけ立つ（「初回ターン」）。
   5. 生成の可否（`CanGenerateMockProject`）と無効の理由の文（`MockGenDisabledReason`）は別のコードで、食い違わない。生成中は会話の開始も送信もできず、止めている理由（`ConversationDisabledReason`）を出す。
 - ガード：`MockDialogTests`（どの行でも組 `MockDialogHarness` が上の 5 つと、拒否の後も保留のターン・止めた生成を進めれば実行中が解けること・画面一覧と選択の整合・添付の範囲・フルパスでないフォルダで開始できないことを見張る。行 `backend-switch-during-turn-is-refused-and-turn-still-completes`・`folder-change-during-turn-is-refused-and-turn-still-completes`・`converse-streaming-ends-when-turn-*`・`generate-reason-is-turn-in-progress-during-turn` ほか）。mutation 実証済み。
+  - 状態 × 手の種類は、原理的に起こり得ない 4 組（受け入れ）と生成中の出力（網羅しない組・P5 の製品の候補＝生成中も設計書がモックフォルダへ README.md を書き、生成中に会話を止める理由と食い違う）を除いて、全部を行が触る。
+  - クリアの本体にはターン中・生成中の防御が無く、画面の経路は `CanClear`（`ClearCommand.CanExecute`）だけが守る（行 `turn-reset-disabled-until-turn-ends`・`generate-run-reset-disabled-until-generation-ends`）。
+  - 生成中のモックフォルダの変更は断らず、生成は開始時のフォルダで進んで完了が届く（特性の固定。行 `generate-run-set-folder-keeps-start-folder-and-completes`）。× で隠しても実行中のターン・生成は止めない（行 `persist-save-and-hide-keeps-running-work-*`）。
 - 表の組は記録するダイアログ・偽のファイルダイアログ・偽の生成器・4 つの接続方式の偽のエンジンを必ず渡す（省くと失敗の経路で実の MessageBox が出て止まり、PATH の claude / dotnet や実の CLI のプロセスへ行く）。行の終わりに実行中を解き、全エンジンを破棄する。
 
 ### ForceClose

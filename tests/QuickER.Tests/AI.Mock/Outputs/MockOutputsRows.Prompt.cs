@@ -1,3 +1,4 @@
+using System.Globalization;
 using AwesomeAssertions;
 using QuickER.AI.Mock;
 using QuickER.Model;
@@ -109,6 +110,58 @@ internal static partial class MockOutputsRows
                             .Contains("スキーマが変更されています", StringComparison.Ordinal)
                             .Should()
                             .Be(changed);
+                    }
+                )
+            ),
+            // 根拠：MockResumePrompt.RecentRevisionCount の XmlDoc「改訂履歴として表示する直近件数」（5 件。
+            // src/QuickER.AI.Mock/MockResumePrompt.cs:18-19・:172-174）。境目の 5 件と 6 件を流す
+            .. new[] { 5, 6 }.Select(count =>
+                Row(
+                    $"resume-revision-limit-{count}-revisions-shows-latest-five-in-order",
+                    $"改訂が {count} 件のとき、再開のプロンプトは直近の 5 件だけを古い順に載せる（それより古い改訂は載せない）",
+                    [(MockOutputSut.ResumePrompt, "resume-revision-limit")],
+                    _ =>
+                    {
+                        var manifest = SampleManifest();
+                        manifest.Revisions.Clear();
+                        var notes = Enumerable
+                            .Range(1, count)
+                            .Select(i =>
+                                string.Create(CultureInfo.InvariantCulture, $"note-{i:00}")
+                            )
+                            .ToList();
+
+                        foreach (var (note, i) in notes.Select((note, i) => (note, i)))
+                        {
+                            manifest.Revisions.Add(
+                                new MockRevision
+                                {
+                                    Timestamp = new DateTimeOffset(
+                                        2026,
+                                        7,
+                                        1 + i,
+                                        9,
+                                        0,
+                                        0,
+                                        TimeSpan.Zero
+                                    ),
+                                    Note = note,
+                                }
+                            );
+                        }
+
+                        var prompt = ResumeJa(manifest, schemaChanged: false);
+                        var shown = notes.TakeLast(5).ToList();
+
+                        notes
+                            .Except(shown)
+                            .Should()
+                            .AllSatisfy(note => prompt.Should().NotContain(note));
+                        shown
+                            .Select(note => prompt.IndexOf(note, StringComparison.Ordinal))
+                            .Should()
+                            .AllSatisfy(index => index.Should().BeGreaterThanOrEqualTo(0))
+                            .And.BeInAscendingOrder();
                     }
                 )
             ),

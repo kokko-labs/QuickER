@@ -88,6 +88,7 @@ internal static partial class MockDialogRows
                 .. GenerateRows(),
                 .. BackendRows(),
                 .. ShutdownRows(),
+                .. StateGapRows(),
             ]
         );
 
