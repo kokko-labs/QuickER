@@ -69,9 +69,13 @@ internal static partial class MockBuildBoundaryRows
                 .. Change(),
                 .. ChangeExtensions(),
                 .. ChangeAcl(),
+                .. ChangeKinds(),
                 .. Clear(),
+                .. ClearKinds(),
                 .. Enumerate(),
+                .. EnumerateKinds(),
                 .. Overwrite(),
+                .. OverwriteKinds(),
                 .. Arguments(),
             ]
         );

@@ -73,10 +73,7 @@ internal static partial class MockDialogRows
                 h =>
                 {
                     var vm = h.CreateApiKeyReady(setMockFolder: false);
-                    Directory.CreateDirectory(h.MockFolder);
-                    File.WriteAllText(Path.Combine(h.MockFolder, "index.html"), "<html></html>");
-
-                    vm.MockFolder = h.MockFolder;
+                    h.BlockFolder(vm, BlockedKind.NotAMockFolder);
 
                     vm.CanStartConversation.Should().BeFalse();
                     vm.StatusMessage.Should().Be(MockStrings.Mock_NotAMockFolder);
@@ -89,13 +86,7 @@ internal static partial class MockDialogRows
                 h =>
                 {
                     var vm = h.CreateApiKeyReady(setMockFolder: false);
-                    Directory.CreateDirectory(h.MockFolder);
-                    File.WriteAllText(
-                        Path.Combine(h.MockFolder, MockManifest.ManifestFileName),
-                        "{ broken"
-                    );
-
-                    vm.MockFolder = h.MockFolder;
+                    h.BlockFolder(vm, BlockedKind.CorruptManifest);
 
                     vm.CanStartConversation.Should().BeFalse();
                     vm.StatusMessage.Should().NotBeEmpty();
@@ -109,12 +100,7 @@ internal static partial class MockDialogRows
                 h =>
                 {
                     var vm = h.CreateApiKeyReady(setMockFolder: false);
-                    h.SeedMockFolder();
-                    var manifestPath = Path.Combine(h.MockFolder, MockManifest.ManifestFileName);
-                    var json = File.ReadAllText(manifestPath);
-                    File.WriteAllText(manifestPath, json.Replace("OrderList.html", "../evil.html"));
-
-                    vm.MockFolder = h.MockFolder;
+                    h.BlockFolder(vm, BlockedKind.InvalidScreenName);
 
                     vm.CanStartConversation.Should().BeFalse();
                     var fixedPart = MockStrings.Mock_MockFolderOpenFailedFormat.Split("{0}")[0];
@@ -374,9 +360,7 @@ internal static partial class MockDialogRows
                 h =>
                 {
                     var vm = h.CreateApiKeyReady(setMockFolder: false);
-                    Directory.CreateDirectory(h.MockFolder);
-                    File.WriteAllText(Path.Combine(h.MockFolder, "index.html"), "<html></html>");
-                    vm.MockFolder = h.MockFolder;
+                    h.BlockFolder(vm, BlockedKind.NotAMockFolder);
                     vm.CanStartConversation.Should().BeFalse();
 
                     h.TryChangeBackend(vm, ErChatBackendKind.ClaudeCode).Should().BeTrue();
@@ -399,7 +383,7 @@ internal static partial class MockDialogRows
                 h =>
                 {
                     var vm = h.CreateApiKeyReady(setMockFolder: false);
-                    vm.MockFolder = "quicker-relative-mock";
+                    h.BlockFolder(vm, BlockedKind.Relative);
                     vm.StatusMessage.Should().Be(MockStrings.Mock_MockFolderNotFullyQualified);
                     vm.CanClear.Should().BeTrue();
 

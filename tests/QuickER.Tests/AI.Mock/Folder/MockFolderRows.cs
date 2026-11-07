@@ -764,6 +764,48 @@ internal static partial class MockFolderRows
                     h.Reopen().Screens.Should().ContainSingle();
                 }
             ),
+            Row(
+                "open-refused-newer-format-keeps-manifest-and-current-store",
+                "開いているストアがあるところで新しい版の mock.json を開き直すと断られ、mock.json のバイト列も今のストアのマニフェストも変わらず、今のストアで保存を続けられる",
+                MockFolderEntry.Open,
+                MockFolderOutcome.Refused,
+                h =>
+                {
+                    // 根拠：MockFolderStore.Open の XmlDoc（新しい版は明確なメッセージの例外）と、
+                    // 組の不変条件 1（失敗した手は mock.json もメモリも変えない）。中身の文言は出力の表（load-newer の行）が見る
+                    h.CreateNew();
+                    h.SaveScreen("A.html", "A", "a", ScreenHtml("<h1>A</h1>"), None, "first");
+                    var current = h.Store;
+                    h.WriteManifestByHand("{ \"version\": 99, \"title\": \"newer\" }");
+
+                    var act = () => h.OpenStore();
+
+                    act.Should().Throw<InvalidOperationException>();
+                    h.Store.Should().BeSameAs(current);
+                    h.Store.Manifest.Screens.Select(s => s.File).Should().Equal("A.html");
+                    h.SaveScreen("B.html", "B", "b", ScreenHtml("<h1>B</h1>"), None, "second");
+                    h.Reopen().Version.Should().Be(MockManifest.CurrentVersion);
+                    h.Reopen().Screens.Select(s => s.File).Should().Equal("A.html", "B.html");
+                }
+            ),
+            Row(
+                "open-manifest-held-by-another-process-throws-io-and-keeps-manifest",
+                "特性の固定（文書に定めが無い今の振る舞い）：mock.json を別のプロセスが共有なしで開いている間の Open は IOException のまま投げる（mock.json のバイト列は変わらず、放した後は開ける）",
+                MockFolderEntry.Open,
+                MockFolderOutcome.IoFailure,
+                h =>
+                {
+                    // 根拠：src/QuickER.AI.Mock/MockFolderStore.cs:170-187（読み込みの JsonException だけを包み、I/O の例外は包まない）。
+                    // Open の XmlDoc は I/O の失敗を挙げない。バイト列が変わらないことは組の不変条件 1 が見る
+                    h.CreateNew();
+                    h.SaveScreen("A.html", "A", "a", ScreenHtml("<h1>A</h1>"), None, "first");
+
+                    var act = () => h.OpenStore(holdExclusively: h.ManifestPath);
+
+                    act.Should().Throw<IOException>();
+                    h.OpenStore().Manifest.Screens.Select(s => s.File).Should().Equal("A.html");
+                }
+            ),
         ];
 
     /// <summary>読み取り</summary>
@@ -793,6 +835,44 @@ internal static partial class MockFolderRows
                     h.CreateNew();
 
                     h.Store.GetScreenHtml("Nope.html").Should().BeNull();
+                }
+            ),
+            Row(
+                "read-invalid-screen-file-name-is-refused-without-reading",
+                "GetScreenHtml はフォルダ直下の .html でない名前（親フォルダ・区切り・拡張子違い）を ArgumentException で断り、フォルダの外の同名のファイルを読まない",
+                MockFolderEntry.Read,
+                MockFolderOutcome.Refused,
+                h =>
+                {
+                    // 根拠：MockFolderStore.ValidateScreenFileName の XmlDoc（CheckScreenFileName が断る名前は ArgumentException）と、
+                    // CheckScreenFileName の remarks（保存・削除・読み取り・読み込みが同じ判定を使う）。src/QuickER.AI.Mock/MockFolderStore.cs:690-712
+                    h.CreateNew();
+                    File.WriteAllText(Path.Combine(h.Folder, "..", "outside.html"), "secret");
+
+                    foreach (var name in new[] { "../outside.html", "sub/A.html", "style.css" })
+                    {
+                        var act = () => h.ReadScreen(name);
+
+                        act.Should().Throw<ArgumentException>(name);
+                    }
+                }
+            ),
+            Row(
+                "read-screen-held-by-another-process-throws-io-and-keeps-manifest",
+                "特性の固定（文書に定めが無い今の振る舞い）：画面の HTML を別のプロセスが共有なしで開いている間の GetScreenHtml は IOException のまま投げる（mock.json は変わらず、放した後は読める）",
+                MockFolderEntry.Read,
+                MockFolderOutcome.IoFailure,
+                h =>
+                {
+                    // 根拠：src/QuickER.AI.Mock/MockFolderStore.cs:441-448（存在すれば File.ReadAllText で読む。XmlDoc は「未存在なら null」だけ）
+                    h.CreateNew();
+                    h.SaveScreen("A.html", "A", "a", ScreenHtml("<h1>A</h1>"), None, "first");
+
+                    var act = () =>
+                        h.ReadScreen("A.html", holdExclusively: Path.Combine(h.Folder, "A.html"));
+
+                    act.Should().Throw<IOException>();
+                    h.ReadScreen("A.html").Should().Contain("<h1>A</h1>");
                 }
             ),
         ];

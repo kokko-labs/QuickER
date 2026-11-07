@@ -236,15 +236,32 @@ internal sealed class MockFolderHarness : IDisposable
         _manifestWrittenByStore = false;
     }
 
-    /// <summary>モックフォルダを開いて、以後の手のストアにする</summary>
-    public MockFolderStore OpenStore()
-    {
-        var store = MockFolderStore.Open(Folder, () => FixedNow);
-        _store = store;
-        _lastSchema = store.Manifest.SourceSchema;
-        CheckAfter("OpenStore", Take(), failed: false);
-        return store;
-    }
+    /// <summary>モックフォルダを開いて、以後の手のストアにする（失敗したら前のストアのまま。例外は投げ直す）</summary>
+    /// <param name="holdExclusively">手の間だけ排他で開いておくファイル（無ければ null）</param>
+    public MockFolderStore OpenStore(string? holdExclusively = null) =>
+        Step(
+            "OpenStore",
+            () => MockFolderStore.Open(Folder, () => FixedNow),
+            store =>
+            {
+                _store = store;
+                _lastSchema = store.Manifest.SourceSchema;
+            },
+            null,
+            holdExclusively: holdExclusively
+        );
+
+    /// <summary>画面の HTML を読む（読み取りの手。失敗しても mock.json もメモリも変わらないことを見張る）</summary>
+    /// <param name="file">画面のファイル名</param>
+    /// <param name="holdExclusively">手の間だけ排他で開いておくファイル（無ければ null）</param>
+    public string? ReadScreen(string file, string? holdExclusively = null) =>
+        Step(
+            "GetScreenHtml",
+            () => Store.GetScreenHtml(file),
+            _ => { },
+            null,
+            holdExclusively: holdExclusively
+        );
 
     /// <summary>モックフォルダを開き直したマニフェスト（ストアは替えない）</summary>
     public MockManifest Reopen() => MockFolderStore.Open(Folder, () => FixedNow).Manifest;
@@ -594,12 +611,17 @@ internal sealed class MockFolderHarness : IDisposable
     /// <param name="before">
     /// 手の前の状態の取り出し（null なら手の直前に取った状態。確認と書き込みの間に差し込む処理が取り直すときに渡す）
     /// </param>
+    /// <param name="holdExclusively">
+    /// 手の間だけ共有なし（<see cref="FileShare.None"/>）で開いておくファイル（別のプロセスが掴んだ形。無ければ null）。
+    /// 手の前の状態を取ってから開き、手が成功しても失敗しても見張りの前に finally で閉じる（見張りは mock.json を読むため）
+    /// </param>
     private T Step<T>(
         string name,
         Func<T> act,
         Action<T> onSuccess,
         Action<Exception>? onFailure,
-        Func<Snapshot>? before = null
+        Func<Snapshot>? before = null,
+        string? holdExclusively = null
     )
     {
         var taken = Take();
@@ -608,6 +630,9 @@ internal sealed class MockFolderHarness : IDisposable
 
         try
         {
+            using var held = holdExclusively is null
+                ? null
+                : new FileStream(holdExclusively, FileMode.Open, FileAccess.Read, FileShare.None);
             result = act();
         }
         catch (Exception ex)

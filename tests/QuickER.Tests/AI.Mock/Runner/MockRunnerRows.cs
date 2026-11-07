@@ -66,10 +66,9 @@ internal static class MockRunnerRows
                     return result;
                 }
             ),
-            Row(
+            .. BothTargets(
                 "artifacts-missing-skips-build",
                 "実行器が成功しても成果物が無ければ、最終ビルドを試みずに失敗する",
-                Wpf,
                 MockRunResult.ArtifactsMissing,
                 async c =>
                 {
@@ -99,14 +98,13 @@ internal static class MockRunnerRows
                     return result;
                 }
             ),
-            Row(
+            .. BothTargets(
                 "build-failure-fails-run",
                 "成果物があっても最終ビルドが失敗すれば全体を失敗にする",
-                Wpf,
                 MockRunResult.BuildFailed,
                 async c =>
                 {
-                    c.Agent.OnRun = MockRunnerContext.WriteArtifacts();
+                    c.Agent.OnRun = c.WriteTargetArtifacts();
                     c.Build.BuildSuccess = false;
                     var result = await c.RunAsync(c.CreateRunner());
 
@@ -132,14 +130,13 @@ internal static class MockRunnerRows
                     return result;
                 }
             ),
-            Row(
+            .. BothTargets(
                 "build-timeout-reports-timed-out",
                 "最終ビルドが専用のタイムアウトで打ち切られたら、タイムアウト（最終ビルドの文言）として報告する",
-                Wpf,
                 MockRunResult.BuildTimedOut,
                 async c =>
                 {
-                    c.Agent.OnRun = MockRunnerContext.WriteArtifacts();
+                    c.Agent.OnRun = c.WriteTargetArtifacts();
                     c.Build.SlowBuild = true;
                     var result = await c.RunAsync(
                         c.CreateRunner(buildTimeout: TimeSpan.FromMilliseconds(50))
@@ -192,6 +189,58 @@ internal static class MockRunnerRows
                     return result;
                 }
             ),
+            .. BothTargets(
+                "agent-not-logged-in-reports-not-logged-in",
+                "実行器が未ログインを申告したら、成果物が無いまま最終ビルドを試みず、結果の文を未ログインの案内にする（申告の失敗の文より優先）",
+                MockRunResult.NotLoggedIn,
+                async c =>
+                {
+                    // 根拠：MockProjectAgentOutcome の XmlDoc（NotLoggedIn＝未ログインが原因の失敗）と、
+                    // 結果の文の組み立ての順（src/QuickER.AI.Mock/MockProjectAgentRunner.cs:750-753 は申告の失敗より先に未ログインを見る）
+                    c.Agent.Outcome = new MockProjectAgentOutcome(false, "login required", true);
+                    var result = await c.RunAsync(c.CreateRunner());
+
+                    result.ClientSucceeded.Should().BeFalse();
+                    result.ArtifactsPresent.Should().BeFalse();
+                    c.Build.BuildCallCount.Should().Be(0);
+                    result.Message.Should().Be(MockStrings.Mock_Result_NotLoggedIn);
+                    return result;
+                }
+            ),
+            .. BothTargets(
+                "boundary-declined-confirmation-skips-build-as-not-verified",
+                "境界越えの実行器がビルドの設定として読み得るファイルを書き、最終ビルドの前の確認を取り消したら、ビルドせずに未検証（成功でない）で完了する",
+                MockRunResult.BuildDeclined,
+                async c =>
+                {
+                    // 根拠：src/QuickER.AI.Mock/CLAUDE.md「最終ビルド前の変更検知」
+                    // （キャンセルはビルドを実行せず BuildDeclined で未検証として完了し、成功扱いにしない）
+                    c.Agent.EscapesSandbox = true;
+                    c.Agent.OnRun = dir =>
+                    {
+                        c.WriteTargetArtifacts()(dir);
+                        File.WriteAllText(
+                            Path.Combine(c.ProjectDirectory, "Directory.Build.props"),
+                            "<Project/>"
+                        );
+                    };
+                    IReadOnlyList<string>? confirmed = null;
+                    var result = await c.RunAsync(
+                        c.CreateRunner(confirmBuild: changed =>
+                        {
+                            confirmed = changed;
+                            return false;
+                        })
+                    );
+
+                    confirmed.Should().NotBeNull().And.ContainMatch("*Directory.Build.props");
+                    result.Success.Should().BeFalse();
+                    result.BuildDeclined.Should().BeTrue();
+                    result.ArtifactsPresent.Should().BeTrue();
+                    c.Build.BuildCallCount.Should().Be(0);
+                    return result;
+                }
+            ),
             Row(
                 "agent-exception-folds-into-failure-and-log",
                 "実行器の想定外の例外は失敗の結果に畳み、原因を結果とログに残す",
@@ -210,10 +259,9 @@ internal static class MockRunnerRows
                     return result;
                 }
             ),
-            Row(
+            .. BothTargets(
                 "agent-cancellation-without-user-is-timeout",
                 "利用者の中断でない取り消しの例外はタイムアウトとして扱い、ビルドせずログを残す",
-                Wpf,
                 MockRunResult.TimedOut,
                 async c =>
                 {
@@ -228,10 +276,9 @@ internal static class MockRunnerRows
                     return result;
                 }
             ),
-            Row(
+            .. BothTargets(
                 "agent-cancellation-by-caller-token-is-canceled",
                 "外部のトークンが立った取り消しは中断として扱い、ビルドしない",
-                Wpf,
                 MockRunResult.Canceled,
                 async c =>
                 {
@@ -246,17 +293,16 @@ internal static class MockRunnerRows
                     return result;
                 }
             ),
-            Row(
+            .. BothTargets(
                 "boundary-confirm-exception-still-writes-log",
                 "結果へ畳めない場所（最終ビルドの前の確認）の例外で抜けても、ビルドせずそこまでのログを書く",
-                Wpf,
                 MockRunResult.Thrown,
                 async c =>
                 {
                     c.Agent.EscapesSandbox = true;
                     c.Agent.OnRun = dir =>
                     {
-                        MockRunnerContext.WriteArtifacts()(dir);
+                        c.WriteTargetArtifacts()(dir);
                         File.WriteAllText(
                             Path.Combine(c.ProjectDirectory, "Directory.Build.props"),
                             "<Project/>"
@@ -372,10 +418,9 @@ internal static class MockRunnerRows
     /// <summary>ランの外の委譲</summary>
     private static IEnumerable<ScenarioRow<MockRunnerScenario>> Delegation() =>
         [
-            Row(
+            .. BothTargets(
                 "delegation-interrupt-forwards-to-agent",
                 "中断の要求は実行器の InterruptAsync へ渡る",
-                Wpf,
                 MockRunResult.NotRun,
                 async c =>
                 {
@@ -634,4 +679,23 @@ internal static class MockRunnerRows
         MockRunResult result,
         Func<MockRunnerContext, Task<MockProjectAgentResult?>> body
     ) => new(id, null, description, new MockRunnerScenario(target, result, body));
+
+    /// <summary>ターゲットに依らない流れの行を、両方のターゲットで作る（Id の末尾に <c>-{ターゲット名}</c>）</summary>
+    /// <remarks>
+    /// ランナーの流れはターゲットに依らず、違いはプロファイルの成果物の検索パターンと画面の数の宣言だけ。
+    /// 本体は成果物を <see cref="MockRunnerContext.WriteTargetArtifacts"/> で書き、ターゲットを名指しして分岐しない
+    /// </remarks>
+    /// <param name="id">行の Id の幹</param>
+    /// <param name="description">説明</param>
+    /// <param name="result">期待する結果の分類</param>
+    /// <param name="body">流して表明する本体</param>
+    private static IEnumerable<ScenarioRow<MockRunnerScenario>> BothTargets(
+        string id,
+        string description,
+        MockRunResult result,
+        Func<MockRunnerContext, Task<MockProjectAgentResult?>> body
+    ) =>
+        MockAgentTarget.All.Select(target =>
+            Row($"{id}-{target.Name}", description, target, result, body)
+        );
 }

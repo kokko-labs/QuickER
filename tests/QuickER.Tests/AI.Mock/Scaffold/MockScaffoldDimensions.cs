@@ -22,14 +22,6 @@ internal static class MockScaffoldDimensions
     /// <summary>方言の水準（QuickER 版 Repository を出す 2 つと、出さない代表の PostgreSQL）</summary>
     private static readonly string[] Dialects = ["sqlserver", "sqlite", "postgresql"];
 
-    /// <summary>作り直しの状態（出力フォルダに前回のものがある水準）</summary>
-    private static readonly string[] Rescaffolds =
-    [
-        nameof(ScaffoldExisting.PreviousOutput),
-        nameof(ScaffoldExisting.GeneratedJunction),
-        nameof(ScaffoldExisting.MockOverlapsOutput),
-    ];
-
     /// <summary>次元表</summary>
     public static DimensionTable Table =>
         new(
@@ -55,33 +47,8 @@ internal static class MockScaffoldDimensions
             ]
         );
 
-    /// <summary>網羅しない組の一覧（手で書いた静的な一覧）</summary>
-    public static CoverageGapSet Gaps =>
-        CoverageGap.Set(
-            EngineIds.Ai,
-            [
-                CoverageGap.Matching(
-                    Scope,
-                    "P3-11b",
-                    "P4",
-                    "元のテストに無い：作り直しの元のテスト（MockProjectScaffoldRegenerationTests）はすべて Blazor のプロファイルで流していた"
-                        + "（Generated/ と design/mock/ を空にする処理と重なりの検査はターゲットに依らない MockProjectScaffoldService.Scaffold の共通部）",
-                    Target,
-                    Existing,
-                    (target, existing) =>
-                        target == MockAgentTarget.Wpf.Name && Rescaffolds.Contains(existing)
-                ),
-                CoverageGap.Matching(
-                    Scope,
-                    "P3-11b",
-                    "P4",
-                    "元のテストに無い：作り直しの元のテストは、最後のスキャフォールドを SQLite の方言で流していた（前回の出力を SQL Server で作る行はある）",
-                    Dialect,
-                    Existing,
-                    (dialect, existing) => dialect != "sqlite" && Rescaffolds.Contains(existing)
-                ),
-            ]
-        );
+    /// <summary>網羅しない組の一覧（手で書いた静的な一覧。作り直しの 3 状態は代表の本体をターゲット × 方言の全部で流すので空）</summary>
+    public static CoverageGapSet Gaps => CoverageGap.Set(EngineIds.Ai, []);
 
     /// <summary>1 行を数える</summary>
     public static void Observe(CoverageCounter counter, MockScaffoldScenario scenario) =>

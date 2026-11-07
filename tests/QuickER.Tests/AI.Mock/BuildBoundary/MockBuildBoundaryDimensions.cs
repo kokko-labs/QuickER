@@ -42,43 +42,20 @@ internal static class MockBuildBoundaryDimensions
         CoverageGap.Set(
             EngineIds.Ai,
             [
-                Group(
-                    "元のテストに無い：変更検知へ読み取り専用・削除を妨げるハンドルのファイルを書いた組と、出力フォルダが無い組"
-                        + "（EnumerateComparedEntries は空を返す）は流していない",
-                    BoundaryEntrance.ChangeDetection,
-                    BoundaryEntryKind.ReadOnly,
-                    BoundaryEntryKind.Locked,
-                    BoundaryEntryKind.Absent
-                ),
-                Group(
-                    "元のテストに無い：obj / bin の削除は、隠し属性・ファイルのシンボリックリンク・列挙できない reparse フォルダ・"
-                        + "一覧の拒否を obj へ置いた組を流していない。obj / bin が無い組（ListResidue は空を返す）を名指しで表明する行も無い",
-                    BoundaryEntrance.ClearOutputs,
+                ProductCandidate(
                     BoundaryEntryKind.Hidden,
-                    BoundaryEntryKind.FileSymlink,
+                    "製品の候補（P5・ユーザーの判断）：上書きの走査は、隠し属性の別ソリューション・別プロジェクト（直下の *.sln・*.slnx・*.csproj）を一覧に出さない"
+                        + "（src/QuickER.AI.Mock/MockProjectOverwriteScanner.cs:45-49・:75-91 の直下の列挙は既定の AttributesToSkip＝Hidden / System を飛ばす。2026-11-07 に実測）。"
+                        + "自分のもの（sln・csproj・README・Generated/・design/mock/）は File.Exists / Directory.Exists なので隠しでも出る非対称で、"
+                        + "XmlDoc は『直下の別ソリューション・別プロジェクト』を確認の対象に挙げる。特性として固定すると、隠しの同居物を確認から外す方針を黙って決めるので行にしない"
+                ),
+                ProductCandidate(
                     BoundaryEntryKind.UnlistableReparse,
-                    BoundaryEntryKind.AclDenied,
-                    BoundaryEntryKind.Absent
-                ),
-                Group(
-                    "元のテストに無い：成果物の探索の再帰の列挙は隠し属性を飛ばす（MockProjectFiles の RecursiveOptions は AttributesToSkip を変えない）が、"
-                        + "その組は流していない。読み取り専用・削除を妨げるハンドルは読むだけの入口で流していない",
-                    BoundaryEntrance.Enumerate,
-                    BoundaryEntryKind.Hidden,
-                    BoundaryEntryKind.ReadOnly,
-                    BoundaryEntryKind.Locked
-                ),
-                Group(
-                    "元のテストに無い：上書きの走査（MockProjectOverwriteScanner）は直下の名前と既定の上書き先の有無だけを見る。"
-                        + "種別を変えた組は流していない",
-                    BoundaryEntrance.OverwriteScan,
-                    BoundaryEntryKind.Hidden,
-                    BoundaryEntryKind.ReadOnly,
-                    BoundaryEntryKind.Locked,
-                    BoundaryEntryKind.FileSymlink,
-                    BoundaryEntryKind.Junction,
-                    BoundaryEntryKind.NonLinkReparse,
-                    BoundaryEntryKind.UnlistableReparse
+                    "製品の候補（P5・ユーザーの判断）：出力フォルダ自身が中を列挙できない reparse フォルダのとき、上書きの走査が IOException を投げる"
+                        + "（src/QuickER.AI.Mock/MockProjectOverwriteScanner.cs:75-91 の IgnoreInaccessible はアクセス拒否にしか効かない。2026-11-07 に実測）。"
+                        + "走査は生成コマンドの try の外（src/QuickER.AI.Mock/MockGenerationDialogViewModel.cs:1284）から呼ばれ、"
+                        + "XmlDoc（MockProjectOverwriteScanner.cs:38-44）は『読めないものは確認そのものを妨げる理由にはならない』と書く。"
+                        + "Generated/ が列挙できない形だけの行で組を埋めると不具合が目録から消え、特性として固定すると例外で止まる方針を黙って決めるので行にしない"
                 ),
                 CoverageGap.AcceptedMatching(
                     Scope,
@@ -94,24 +71,16 @@ internal static class MockBuildBoundaryDimensions
             ]
         );
 
-    /// <summary>入口ごとに、流していない種別をまとめて 1 つの項目にする（理由が同じ組）</summary>
-    private static CoverageGapEntry Group(
-        string reason,
-        BoundaryEntrance entrance,
-        params BoundaryEntryKind[] kinds
-    )
-    {
-        var set = kinds.Select(kind => kind.ToString()).ToHashSet(StringComparer.Ordinal);
-        return CoverageGap.Matching(
+    /// <summary>上書きの走査で、製品の候補として行にせず残す（入口 D, 種別）の項目（直す区切りは P5）</summary>
+    private static CoverageGapEntry ProductCandidate(BoundaryEntryKind kind, string reason) =>
+        CoverageGap.Tuple(
             Scope,
             "P3-11b",
-            "P4",
+            "P5",
             reason,
-            Entrance,
-            Kind,
-            (e, k) => e == entrance.ToString() && set.Contains(k)
+            (Entrance, BoundaryEntrance.OverwriteScan.ToString()),
+            (Kind, kind.ToString())
         );
-    }
 
     /// <summary>1 行を数える</summary>
     public static void Observe(CoverageCounter counter, MockBuildBoundaryScenario scenario) =>
@@ -138,6 +107,7 @@ internal static class MockBuildBoundaryDimensions
                 "tests/QuickER.Tests/AI.Mock/BuildBoundary/MockBuildBoundaryRows.Arguments.cs",
                 "tests/QuickER.Tests/AI.Mock/BuildBoundary/MockBuildBoundaryRows.Clear.cs",
                 "tests/QuickER.Tests/AI.Mock/BuildBoundary/MockBuildBoundaryRows.Files.cs",
+                "tests/QuickER.Tests/AI.Mock/BuildBoundary/MockBuildBoundaryRows.Kinds.cs",
                 "tests/QuickER.Tests/AI.Mock/BuildBoundary/MockBuildBoundaryTests.cs",
             ],
             [

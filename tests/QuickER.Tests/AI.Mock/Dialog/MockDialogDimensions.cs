@@ -62,127 +62,13 @@ internal static class MockDialogDimensions
                     MockDialogOp.Screen,
                     "生成中は送信できず（:235-240）、ターンの実行中は生成を始められない（:389）ので、生成中にツールを実行するターンは無い"
                 ),
-                Pending(
-                    MockDialogState.Idle,
-                    MockDialogOp.Converse,
-                    "フォルダが無いときの開始・送信の可否は、フォルダの行（folder-required-to-start）が開始の可否だけを見る。送信の可否の行は元に無い"
-                ),
-                Pending(
-                    MockDialogState.Idle,
-                    MockDialogOp.Attach,
-                    "フォルダを選ぶ前の添付の追加の行は元に無い"
-                ),
-                Pending(
-                    MockDialogState.Blocked,
-                    MockDialogOp.Converse,
-                    "使えないフォルダのまま開始のコマンドを直接実行する経路（CanExecute の門だけで本体に防御が無い。:936-956）の行は元に無い。画面からは届かない"
-                ),
-                Pending(
-                    MockDialogState.Blocked,
-                    MockDialogOp.Attach,
-                    "使えないフォルダでの添付の行は元に無い"
-                ),
-                Pending(
-                    MockDialogState.Blocked,
-                    MockDialogOp.Export,
-                    "使えないフォルダでの出力の可否の行は元に無い"
-                ),
-                Pending(
-                    MockDialogState.Blocked,
-                    MockDialogOp.Generate,
-                    "使えないフォルダでの生成の可否の行は元に無い"
-                ),
-                Pending(
-                    MockDialogState.Blocked,
-                    MockDialogOp.Persist,
-                    "使えないフォルダでの設定の保存の行は元に無い"
-                ),
-                Pending(
-                    MockDialogState.Blocked,
-                    MockDialogOp.Shutdown,
-                    "使えないフォルダでの終了の経路の行は元に無い"
-                ),
-                Pending(
-                    MockDialogState.Ready,
-                    MockDialogOp.Persist,
-                    "フォルダを選んだ後・会話の前の設定の保存の行は元に無い"
-                ),
-                Pending(
-                    MockDialogState.Conversation,
-                    MockDialogOp.Export,
-                    "会話中の出力の行は元に無い（元の出力の行は会話の前）"
-                ),
-                Pending(
-                    MockDialogState.Turn,
-                    MockDialogOp.Export,
-                    "ターンの実行中の出力の行は元に無い"
-                ),
-                Pending(
-                    MockDialogState.Turn,
-                    MockDialogOp.Persist,
-                    "ターンの実行中に × で閉じる（設定の保存と隠す）行は元に無い"
-                ),
-                Pending(
-                    MockDialogState.Turn,
-                    MockDialogOp.Reset,
-                    "ターンの実行中はクリアできない（CanClear が偽。:1195-1196）。クリアのコマンドを直接実行する経路は本体に防御が無く（:1203-1230）、画面から届かないので行にしていない"
-                ),
-                Pending(
-                    MockDialogState.GenRun,
-                    MockDialogOp.SetFolder,
-                    "生成中もモックフォルダを変えられる（CanEditMockFolder はターンだけを見る。:164）。生成は開始時の値を控えて進むが、仕様の記述が無いので行にしていない"
-                ),
-                Pending(MockDialogState.GenRun, MockDialogOp.Attach, "生成中の添付の行は元に無い"),
-                Pending(MockDialogState.GenRun, MockDialogOp.Export, "生成中の出力の行は元に無い"),
-                Pending(
-                    MockDialogState.GenRun,
-                    MockDialogOp.Persist,
-                    "生成中に × で閉じる行は元に無い（実ウィンドウの ForceClose は MockGenerationDialogTests が見る）"
-                ),
-                Pending(
-                    MockDialogState.GenRun,
-                    MockDialogOp.Reset,
-                    "生成中はクリアできない（CanClear が偽。:1195-1196）行は元に無い"
-                ),
-                Pending(
-                    MockDialogState.GenDone,
-                    MockDialogOp.SetFolder,
-                    "生成の後のフォルダの変更（フォルダを開くの表示は戻さない。:1224-1227 はクリアだけ）の行は元に無い"
-                ),
-                Pending(
-                    MockDialogState.GenDone,
-                    MockDialogOp.Backend,
-                    "生成の後の接続方式の切替の行は元に無い"
-                ),
-                Pending(
-                    MockDialogState.GenDone,
-                    MockDialogOp.Converse,
-                    "生成の後の会話の行は元に無い"
-                ),
-                Pending(
-                    MockDialogState.GenDone,
-                    MockDialogOp.Screen,
-                    "生成の後の画面の保存の行は元に無い"
-                ),
-                Pending(
-                    MockDialogState.GenDone,
-                    MockDialogOp.Attach,
-                    "生成の後の添付の行は元に無い"
-                ),
-                Pending(
-                    MockDialogState.GenDone,
-                    MockDialogOp.Export,
-                    "生成の後の出力の行は元に無い"
-                ),
-                Pending(
-                    MockDialogState.GenDone,
-                    MockDialogOp.Persist,
-                    "生成の後の設定の保存の行は元に無い"
-                ),
-                Pending(
-                    MockDialogState.GenDone,
-                    MockDialogOp.Shutdown,
-                    "生成の後の終了の経路の行は元に無い"
+                CoverageGap.Tuple(
+                    Scope,
+                    "P3-11b",
+                    "P5",
+                    "製品の候補（P5・ユーザーの判断）：生成中も設計書の出力が押せ、モックフォルダへ README.md を書く（ExportDesignDocCommand の CanExecute は CanExportBundle＝画面の有無だけ・src/QuickER.AI.Mock/MockGenerationDialogViewModel.cs:262-267・:1131-1160）。生成中に会話を止める理由（CanSendMessage の remarks『生成はモックフォルダを出力先へ写すので、書き込むと写した内容と食い違い得る』・:231-234）と食い違う。単一 HTML（保存先にだけ書く）の形だけの行で組を埋めると候補が目録から消え、特性として固定すると生成中の書き込みを許す方針を黙って決めるので行にしない",
+                    (State, MockDialogState.GenRun.ToString()),
+                    (Op, MockDialogOp.Export.ToString())
                 ),
             ]
         );
@@ -196,21 +82,6 @@ internal static class MockDialogDimensions
         CoverageGap.AcceptedTuple(
             Scope,
             "P3-11b",
-            reason,
-            (State, state.ToString()),
-            (Op, op.ToString())
-        );
-
-    /// <summary>まだ行の無い（状態, 手の種類）の項目（直す区切りは P4）</summary>
-    private static CoverageGapEntry Pending(
-        MockDialogState state,
-        MockDialogOp op,
-        string reason
-    ) =>
-        CoverageGap.Tuple(
-            Scope,
-            "P3-11b",
-            "P4",
             reason,
             (State, state.ToString()),
             (Op, op.ToString())
@@ -245,6 +116,7 @@ internal static class MockDialogDimensions
                 "tests/QuickER.Tests/AI.Mock/Dialog/MockDialogRows.Generate.cs",
                 "tests/QuickER.Tests/AI.Mock/Dialog/MockDialogRows.Screen.cs",
                 "tests/QuickER.Tests/AI.Mock/Dialog/MockDialogRows.Shutdown.cs",
+                "tests/QuickER.Tests/AI.Mock/Dialog/MockDialogRows.StateGaps.cs",
                 "tests/QuickER.Tests/AI.Mock/Dialog/MockDialogTests.cs",
             ],
             ["src/QuickER.AI.Mock/MockGenerationDialogViewModel.cs"]
