@@ -1,15 +1,21 @@
 using System.IO;
 using AwesomeAssertions;
 using QuickER.Services;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Gui.Services;
 
 /// <summary><see cref="GuiAppSettingsStore"/> の保存・読込を検証するテストクラス</summary>
-public class GuiAppSettingsStoreTests
+public class GuiAppSettingsStoreTests : IDisposable
 {
-    /// <summary>一意の一時フォルダパスを作る</summary>
-    private static string TempFolder() =>
-        Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+    /// <summary>テストごとの一時フォルダ（破棄で中身ごと消す）</summary>
+    private readonly TestTempFolder _temp = new();
+
+    /// <summary>一時フォルダの下に、まだ無い一意のフォルダパスを作る</summary>
+    private string TempFolder() => Path.Combine(_temp.Path, Guid.NewGuid().ToString("N"));
+
+    /// <inheritdoc />
+    public void Dispose() => _temp.Dispose();
 
     /// <summary>保存した言語設定が同じ内容で読み込めることを検証する</summary>
     [Fact(DisplayName = "保存した言語設定を読み込める")]
@@ -17,22 +23,12 @@ public class GuiAppSettingsStoreTests
     {
         var folder = TempFolder();
 
-        try
-        {
-            var store = new GuiAppSettingsStore(folder);
-            store.Save(new GuiAppSettings { Language = "en" });
+        var store = new GuiAppSettingsStore(folder);
+        store.Save(new GuiAppSettings { Language = "en" });
 
-            var loaded = store.Load();
+        var loaded = store.Load();
 
-            loaded.Language.Should().Be("en");
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+        loaded.Language.Should().Be("en");
     }
 
     /// <summary>未保存なら Language は未設定（null）を返すことを検証する</summary>
@@ -52,23 +48,13 @@ public class GuiAppSettingsStoreTests
     {
         var folder = TempFolder();
 
-        try
-        {
-            Directory.CreateDirectory(folder);
-            var store = new GuiAppSettingsStore(folder);
-            File.WriteAllText(store.SettingsPath, "{ this is not valid json");
+        Directory.CreateDirectory(folder);
+        var store = new GuiAppSettingsStore(folder);
+        File.WriteAllText(store.SettingsPath, "{ this is not valid json");
 
-            var loaded = store.Load();
+        var loaded = store.Load();
 
-            loaded.Language.Should().BeNull();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+        loaded.Language.Should().BeNull();
     }
 
     /// <summary>更新チェックのオプトアウトが往復することを検証する</summary>
@@ -77,20 +63,10 @@ public class GuiAppSettingsStoreTests
     {
         var folder = TempFolder();
 
-        try
-        {
-            var store = new GuiAppSettingsStore(folder);
-            store.Save(new GuiAppSettings { CheckForUpdatesOnStartup = false });
+        var store = new GuiAppSettingsStore(folder);
+        store.Save(new GuiAppSettings { CheckForUpdatesOnStartup = false });
 
-            store.Load().CheckForUpdatesOnStartup.Should().BeFalse();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+        store.Load().CheckForUpdatesOnStartup.Should().BeFalse();
     }
 
     /// <summary>
@@ -102,26 +78,16 @@ public class GuiAppSettingsStoreTests
     {
         var folder = TempFolder();
 
-        try
-        {
-            Directory.CreateDirectory(folder);
-            var store = new GuiAppSettingsStore(folder);
+        Directory.CreateDirectory(folder);
+        var store = new GuiAppSettingsStore(folder);
 
-            // 更新チェックのキーを持たない、旧版が書いた形の設定ファイル
-            File.WriteAllText(store.SettingsPath, """{ "language": "ja" }""");
+        // 更新チェックのキーを持たない、旧版が書いた形の設定ファイル
+        File.WriteAllText(store.SettingsPath, """{ "language": "ja" }""");
 
-            var loaded = store.Load();
+        var loaded = store.Load();
 
-            loaded.Language.Should().Be("ja");
-            loaded.CheckForUpdatesOnStartup.Should().BeTrue();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+        loaded.Language.Should().Be("ja");
+        loaded.CheckForUpdatesOnStartup.Should().BeTrue();
     }
 
     /// <summary>保存した表示トグルが同じ内容で読み込めることを検証する</summary>
@@ -130,34 +96,24 @@ public class GuiAppSettingsStoreTests
     {
         var folder = TempFolder();
 
-        try
-        {
-            var store = new GuiAppSettingsStore(folder);
-            store.Save(
-                new GuiAppSettings
-                {
-                    DiagramView = new DiagramViewSettings
-                    {
-                        ShowColumnDescriptions = true,
-                        ShowNullability = false,
-                        IsCompactView = true,
-                    },
-                }
-            );
-
-            var loaded = store.Load();
-
-            loaded.DiagramView.ShowColumnDescriptions.Should().BeTrue();
-            loaded.DiagramView.ShowNullability.Should().BeFalse();
-            loaded.DiagramView.IsCompactView.Should().BeTrue();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
+        var store = new GuiAppSettingsStore(folder);
+        store.Save(
+            new GuiAppSettings
             {
-                Directory.Delete(folder, recursive: true);
+                DiagramView = new DiagramViewSettings
+                {
+                    ShowColumnDescriptions = true,
+                    ShowNullability = false,
+                    IsCompactView = true,
+                },
             }
-        }
+        );
+
+        var loaded = store.Load();
+
+        loaded.DiagramView.ShowColumnDescriptions.Should().BeTrue();
+        loaded.DiagramView.ShowNullability.Should().BeFalse();
+        loaded.DiagramView.IsCompactView.Should().BeTrue();
     }
 
     /// <summary>未保存なら DiagramView は既定値（NULL 許容表示のみ ON）を返すことを検証する</summary>
@@ -179,23 +135,13 @@ public class GuiAppSettingsStoreTests
     {
         var folder = TempFolder();
 
-        try
-        {
-            Directory.CreateDirectory(folder);
-            var store = new GuiAppSettingsStore(folder);
-            File.WriteAllText(store.SettingsPath, "{ this is not valid json");
+        Directory.CreateDirectory(folder);
+        var store = new GuiAppSettingsStore(folder);
+        File.WriteAllText(store.SettingsPath, "{ this is not valid json");
 
-            var loaded = store.Load();
+        var loaded = store.Load();
 
-            loaded.DiagramView.ShowNullability.Should().BeTrue();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+        loaded.DiagramView.ShowNullability.Should().BeTrue();
     }
 
     /// <summary>設定ファイルが無い状態からの Save がファイルを新規作成できることを検証する（原子的保存の新規作成経路）</summary>
@@ -204,24 +150,14 @@ public class GuiAppSettingsStoreTests
     {
         var folder = TempFolder();
 
-        try
-        {
-            var store = new GuiAppSettingsStore(folder);
+        var store = new GuiAppSettingsStore(folder);
 
-            File.Exists(store.SettingsPath).Should().BeFalse();
+        File.Exists(store.SettingsPath).Should().BeFalse();
 
-            store.Save(new GuiAppSettings { Language = "ja" });
+        store.Save(new GuiAppSettings { Language = "ja" });
 
-            File.Exists(store.SettingsPath).Should().BeTrue();
-            store.Load().Language.Should().Be("ja");
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+        File.Exists(store.SettingsPath).Should().BeTrue();
+        store.Load().Language.Should().Be("ja");
     }
 
     /// <summary>既存ファイルがある状態での Save が内容を正しく置換することを検証する（原子的保存の置換経路）</summary>
@@ -230,22 +166,12 @@ public class GuiAppSettingsStoreTests
     {
         var folder = TempFolder();
 
-        try
-        {
-            var store = new GuiAppSettingsStore(folder);
-            store.Save(new GuiAppSettings { Language = "en" });
+        var store = new GuiAppSettingsStore(folder);
+        store.Save(new GuiAppSettings { Language = "en" });
 
-            store.Save(new GuiAppSettings { Language = "ja" });
+        store.Save(new GuiAppSettings { Language = "ja" });
 
-            store.Load().Language.Should().Be("ja");
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+        store.Load().Language.Should().Be("ja");
     }
 
     /// <summary>Save 後に一時ファイル（原子的保存の中間生成物）が残らないことを検証する</summary>
@@ -254,23 +180,13 @@ public class GuiAppSettingsStoreTests
     {
         var folder = TempFolder();
 
-        try
-        {
-            var store = new GuiAppSettingsStore(folder);
+        var store = new GuiAppSettingsStore(folder);
 
-            // 新規作成・上書きの両経路を確認する
-            store.Save(new GuiAppSettings { Language = "en" });
-            store.Save(new GuiAppSettings { Language = "ja" });
+        // 新規作成・上書きの両経路を確認する
+        store.Save(new GuiAppSettings { Language = "en" });
+        store.Save(new GuiAppSettings { Language = "ja" });
 
-            Directory.GetFiles(folder, "*.tmp").Should().BeEmpty();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+        Directory.GetFiles(folder, "*.tmp").Should().BeEmpty();
     }
 
     /// <summary>DiagramView だけを変更する保存が Language を消さないことを検証する（read-modify-write の前提）</summary>
@@ -279,29 +195,19 @@ public class GuiAppSettingsStoreTests
     {
         var folder = TempFolder();
 
-        try
-        {
-            var store = new GuiAppSettingsStore(folder);
+        var store = new GuiAppSettingsStore(folder);
 
-            // 先に言語のみを書く
-            store.Save(new GuiAppSettings { Language = "en" });
+        // 先に言語のみを書く
+        store.Save(new GuiAppSettings { Language = "en" });
 
-            // 後から DiagramView を read-modify-write で書く（言語は温存されるべき）
-            var settings = store.Load();
-            settings.DiagramView = new DiagramViewSettings { ShowColumnDescriptions = true };
-            store.Save(settings);
+        // 後から DiagramView を read-modify-write で書く（言語は温存されるべき）
+        var settings = store.Load();
+        settings.DiagramView = new DiagramViewSettings { ShowColumnDescriptions = true };
+        store.Save(settings);
 
-            var reloaded = store.Load();
-            reloaded.Language.Should().Be("en");
-            reloaded.DiagramView.ShowColumnDescriptions.Should().BeTrue();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+        var reloaded = store.Load();
+        reloaded.Language.Should().Be("en");
+        reloaded.DiagramView.ShowColumnDescriptions.Should().BeTrue();
     }
 
     /// <summary>Language だけを変更する保存が DiagramView を消さないことを検証する（逆方向の read-modify-write）</summary>
@@ -310,33 +216,20 @@ public class GuiAppSettingsStoreTests
     {
         var folder = TempFolder();
 
-        try
-        {
-            var store = new GuiAppSettingsStore(folder);
+        var store = new GuiAppSettingsStore(folder);
 
-            // 先に DiagramView のみを書く
-            store.Save(
-                new GuiAppSettings
-                {
-                    DiagramView = new DiagramViewSettings { IsCompactView = true },
-                }
-            );
+        // 先に DiagramView のみを書く
+        store.Save(
+            new GuiAppSettings { DiagramView = new DiagramViewSettings { IsCompactView = true } }
+        );
 
-            // 後から言語を read-modify-write で書く（DiagramView は温存されるべき）
-            var settings = store.Load();
-            settings.Language = "ja";
-            store.Save(settings);
+        // 後から言語を read-modify-write で書く（DiagramView は温存されるべき）
+        var settings = store.Load();
+        settings.Language = "ja";
+        store.Save(settings);
 
-            var reloaded = store.Load();
-            reloaded.Language.Should().Be("ja");
-            reloaded.DiagramView.IsCompactView.Should().BeTrue();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+        var reloaded = store.Load();
+        reloaded.Language.Should().Be("ja");
+        reloaded.DiagramView.IsCompactView.Should().BeTrue();
     }
 }

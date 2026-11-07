@@ -2,6 +2,7 @@ using System.IO;
 using AwesomeAssertions;
 using QuickER.AI;
 using QuickER.Platform;
+using QuickER.Tests.TestSupport;
 using QuickER.Tests.TestSupport.Engines;
 using static QuickER.Tests.Platform.OsBoundary.LaunchEntrance;
 using static QuickER.Tests.Platform.OsBoundary.LaunchOutcome;
@@ -20,8 +21,7 @@ internal static partial class ProcessLaunchRows
     private static readonly string ToolsFolder = Path.Combine(Path.GetTempPath(), "tools");
 
     /// <summary>走査対象に使う架空のディレクトリ（実在は不要＝存在判定は注入する）</summary>
-    private static string FakeBin(string tool) =>
-        Path.Combine(Path.GetTempPath(), "QuickERTests", $"{tool}-bin");
+    private static string FakeBin(string tool) => Path.Combine(TestTempFolder.Root, $"{tool}-bin");
 
     /// <summary>OS ごとに最初に当たる候補ファイル名</summary>
     private static string Primary(string tool) =>
@@ -108,7 +108,7 @@ internal static partial class ProcessLaunchRows
                         string.Join(
                             Path.PathSeparator,
                             bin,
-                            Path.Combine(Path.GetTempPath(), "QuickERTests", "other-bin")
+                            Path.Combine(TestTempFolder.Root, "other-bin")
                         ),
                         anyPath => false
                     ),
@@ -203,7 +203,7 @@ internal static partial class ProcessLaunchRows
                         string.Join(
                             Path.PathSeparator,
                             bin,
-                            Path.Combine(Path.GetTempPath(), "QuickERTests", "other-bin")
+                            Path.Combine(TestTempFolder.Root, "other-bin")
                         ),
                         anyPath => false
                     ),
@@ -307,11 +307,7 @@ internal static partial class ProcessLaunchRows
                 Resolved,
                 _ =>
                 {
-                    var shScriptDirectory = Path.Combine(
-                        Path.GetTempPath(),
-                        "QuickERTests",
-                        "sh-only"
-                    );
+                    var shScriptDirectory = Path.Combine(TestTempFolder.Root, "sh-only");
                     var shScript = Path.Combine(shScriptDirectory, "copilot");
                     var expected = Path.Combine(bin, "copilot.cmd");
                     var pathValue = string.Join(Path.PathSeparator, shScriptDirectory, bin);

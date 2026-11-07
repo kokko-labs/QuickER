@@ -4,15 +4,21 @@ using System.Text.Json.Nodes;
 using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
 using QuickER.CodeGen.UI;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.CodeGen.UI;
 
 /// <summary><see cref="CSharpGenerationSettingsStore"/> の保存・読込を検証するテストクラス</summary>
-public class CSharpGenerationSettingsStoreTests
+public class CSharpGenerationSettingsStoreTests : IDisposable
 {
-    /// <summary>一意の一時フォルダパスを作る</summary>
-    private static string TempFolder() =>
-        Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+    /// <summary>テストごとの一時フォルダ（破棄で中身ごと消す）</summary>
+    private readonly TestTempFolder _temp = new();
+
+    /// <summary>一時フォルダの下に、まだ無い一意のフォルダパスを作る</summary>
+    private string TempFolder() => Path.Combine(_temp.Path, Guid.NewGuid().ToString("N"));
+
+    /// <inheritdoc />
+    public void Dispose() => _temp.Dispose();
 
     /// <summary>保存した設定が同じ内容で読み込めることを検証する</summary>
     [Fact(DisplayName = "保存した C# 生成設定を読み込める")]
@@ -20,44 +26,34 @@ public class CSharpGenerationSettingsStoreTests
     {
         var folder = TempFolder();
 
-        try
-        {
-            var store = new CSharpGenerationSettingsStore(folder);
-            store.Save(
-                new CSharpGenerationSettings
-                {
-                    SplitFilesByCategory = true,
-                    RootNamespace = "Acme.App",
-                    EntityNamespace = "Acme.App.Domain",
-                    GenerateRepositories = false,
-                    GenerateInMemoryRepositories = true,
-                    GenerateValueObjects = true,
-                    // UI 非表示の属性系も往復で保持されること（既定 true を false へ倒して検証）
-                    IncludeDataAnnotations = false,
-                    IncludeJsonIgnoreOnParentNavigation = false,
-                    OutputPath = @"C:\out",
-                }
-            );
-
-            var loaded = store.Load();
-
-            loaded.SplitFilesByCategory.Should().BeTrue();
-            loaded.RootNamespace.Should().Be("Acme.App");
-            loaded.EntityNamespace.Should().Be("Acme.App.Domain");
-            loaded.GenerateRepositories.Should().BeFalse();
-            loaded.GenerateInMemoryRepositories.Should().BeTrue();
-            loaded.GenerateValueObjects.Should().BeTrue();
-            loaded.IncludeDataAnnotations.Should().BeFalse();
-            loaded.IncludeJsonIgnoreOnParentNavigation.Should().BeFalse();
-            loaded.OutputPath.Should().Be(@"C:\out");
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
+        var store = new CSharpGenerationSettingsStore(folder);
+        store.Save(
+            new CSharpGenerationSettings
             {
-                Directory.Delete(folder, recursive: true);
+                SplitFilesByCategory = true,
+                RootNamespace = "Acme.App",
+                EntityNamespace = "Acme.App.Domain",
+                GenerateRepositories = false,
+                GenerateInMemoryRepositories = true,
+                GenerateValueObjects = true,
+                // UI 非表示の属性系も往復で保持されること（既定 true を false へ倒して検証）
+                IncludeDataAnnotations = false,
+                IncludeJsonIgnoreOnParentNavigation = false,
+                OutputPath = @"C:\out",
             }
-        }
+        );
+
+        var loaded = store.Load();
+
+        loaded.SplitFilesByCategory.Should().BeTrue();
+        loaded.RootNamespace.Should().Be("Acme.App");
+        loaded.EntityNamespace.Should().Be("Acme.App.Domain");
+        loaded.GenerateRepositories.Should().BeFalse();
+        loaded.GenerateInMemoryRepositories.Should().BeTrue();
+        loaded.GenerateValueObjects.Should().BeTrue();
+        loaded.IncludeDataAnnotations.Should().BeFalse();
+        loaded.IncludeJsonIgnoreOnParentNavigation.Should().BeFalse();
+        loaded.OutputPath.Should().Be(@"C:\out");
     }
 
     /// <summary>層別フォルダ出力の 5 設定（有効フラグ＋層フォルダ 4 つ）が保存・読込で往復することを検証する</summary>
@@ -66,36 +62,26 @@ public class CSharpGenerationSettingsStoreTests
     {
         var folder = TempFolder();
 
-        try
-        {
-            var store = new CSharpGenerationSettingsStore(folder);
-            store.Save(
-                new CSharpGenerationSettings
-                {
-                    SplitFilesByCategory = true,
-                    LayeredOutput = true,
-                    DomainLayerDirectory = "Acme.Domain/Generated",
-                    InfrastructureLayerDirectory = "Acme.Infrastructure",
-                    PresentationLayerDirectory = "Acme.App",
-                    ServerLayerDirectory = "Acme.Api",
-                }
-            );
-
-            var loaded = store.Load();
-
-            loaded.LayeredOutput.Should().BeTrue();
-            loaded.DomainLayerDirectory.Should().Be("Acme.Domain/Generated");
-            loaded.InfrastructureLayerDirectory.Should().Be("Acme.Infrastructure");
-            loaded.PresentationLayerDirectory.Should().Be("Acme.App");
-            loaded.ServerLayerDirectory.Should().Be("Acme.Api");
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
+        var store = new CSharpGenerationSettingsStore(folder);
+        store.Save(
+            new CSharpGenerationSettings
             {
-                Directory.Delete(folder, recursive: true);
+                SplitFilesByCategory = true,
+                LayeredOutput = true,
+                DomainLayerDirectory = "Acme.Domain/Generated",
+                InfrastructureLayerDirectory = "Acme.Infrastructure",
+                PresentationLayerDirectory = "Acme.App",
+                ServerLayerDirectory = "Acme.Api",
             }
-        }
+        );
+
+        var loaded = store.Load();
+
+        loaded.LayeredOutput.Should().BeTrue();
+        loaded.DomainLayerDirectory.Should().Be("Acme.Domain/Generated");
+        loaded.InfrastructureLayerDirectory.Should().Be("Acme.Infrastructure");
+        loaded.PresentationLayerDirectory.Should().Be("Acme.App");
+        loaded.ServerLayerDirectory.Should().Be("Acme.Api");
     }
 
     /// <summary>層別フォルダ出力の工場出荷既定（OFF・層フォルダは空＝planner の既定名へフォールバック）を検証する</summary>
@@ -136,23 +122,13 @@ public class CSharpGenerationSettingsStoreTests
     {
         var folder = TempFolder();
 
-        try
-        {
-            Directory.CreateDirectory(folder);
-            var store = new CSharpGenerationSettingsStore(folder);
-            File.WriteAllText(store.SettingsPath, "{ this is not valid json");
+        Directory.CreateDirectory(folder);
+        var store = new CSharpGenerationSettingsStore(folder);
+        File.WriteAllText(store.SettingsPath, "{ this is not valid json");
 
-            var loaded = store.Load();
+        var loaded = store.Load();
 
-            loaded.RootNamespace.Should().Be(CSharpGenerationSettings.DefaultRootNamespace);
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+        loaded.RootNamespace.Should().Be(CSharpGenerationSettings.DefaultRootNamespace);
     }
 
     /// <summary>任意パスへ保存した設定を TryLoadFrom で同じ内容に読み戻せることを検証する（往復）</summary>
@@ -161,42 +137,32 @@ public class CSharpGenerationSettingsStoreTests
     {
         var folder = TempFolder();
 
-        try
-        {
-            var store = new CSharpGenerationSettingsStore(folder);
-            // 親フォルダがまだ無いパスへ保存し、SaveTo がフォルダを作成することも兼ねて検証する
-            var path = Path.Combine(folder, "preset", "codegen-settings.json");
-            store.SaveTo(
-                path,
-                new CSharpGenerationSettings
-                {
-                    SplitFilesByCategory = true,
-                    RootNamespace = "Acme.App",
-                    GenerateEfCoreRepositories = true,
-                    GenerateValueObjects = true,
-                }
-            );
-
-            File.Exists(path).Should().BeTrue();
-
-            var loaded = store.TryLoadFrom(path);
-
-            loaded.Should().NotBeNull();
-            loaded!.SplitFilesByCategory.Should().BeTrue();
-            loaded.RootNamespace.Should().Be("Acme.App");
-            loaded.GenerateEfCoreRepositories.Should().BeTrue();
-            loaded.GenerateValueObjects.Should().BeTrue();
-
-            // 既定保存先（codegen-settings.json）は SaveTo では書かれない
-            File.Exists(store.SettingsPath).Should().BeFalse();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
+        var store = new CSharpGenerationSettingsStore(folder);
+        // 親フォルダがまだ無いパスへ保存し、SaveTo がフォルダを作成することも兼ねて検証する
+        var path = Path.Combine(folder, "preset", "codegen-settings.json");
+        store.SaveTo(
+            path,
+            new CSharpGenerationSettings
             {
-                Directory.Delete(folder, recursive: true);
+                SplitFilesByCategory = true,
+                RootNamespace = "Acme.App",
+                GenerateEfCoreRepositories = true,
+                GenerateValueObjects = true,
             }
-        }
+        );
+
+        File.Exists(path).Should().BeTrue();
+
+        var loaded = store.TryLoadFrom(path);
+
+        loaded.Should().NotBeNull();
+        loaded!.SplitFilesByCategory.Should().BeTrue();
+        loaded.RootNamespace.Should().Be("Acme.App");
+        loaded.GenerateEfCoreRepositories.Should().BeTrue();
+        loaded.GenerateValueObjects.Should().BeTrue();
+
+        // 既定保存先（codegen-settings.json）は SaveTo では書かれない
+        File.Exists(store.SettingsPath).Should().BeFalse();
     }
 
     /// <summary>SaveTo で同一パスへ再保存すると内容が正しく置換されることを検証する（原子的保存の置換経路）</summary>
@@ -205,23 +171,13 @@ public class CSharpGenerationSettingsStoreTests
     {
         var folder = TempFolder();
 
-        try
-        {
-            var store = new CSharpGenerationSettingsStore(folder);
-            var path = Path.Combine(folder, "preset", "codegen-settings.json");
-            store.SaveTo(path, new CSharpGenerationSettings { RootNamespace = "Acme.Old" });
+        var store = new CSharpGenerationSettingsStore(folder);
+        var path = Path.Combine(folder, "preset", "codegen-settings.json");
+        store.SaveTo(path, new CSharpGenerationSettings { RootNamespace = "Acme.Old" });
 
-            store.SaveTo(path, new CSharpGenerationSettings { RootNamespace = "Acme.New" });
+        store.SaveTo(path, new CSharpGenerationSettings { RootNamespace = "Acme.New" });
 
-            store.TryLoadFrom(path)!.RootNamespace.Should().Be("Acme.New");
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+        store.TryLoadFrom(path)!.RootNamespace.Should().Be("Acme.New");
     }
 
     /// <summary>SaveTo 後に一時ファイル（原子的保存の中間生成物）が残らないことを検証する</summary>
@@ -230,24 +186,14 @@ public class CSharpGenerationSettingsStoreTests
     {
         var folder = TempFolder();
 
-        try
-        {
-            var store = new CSharpGenerationSettingsStore(folder);
-            var path = Path.Combine(folder, "preset", "codegen-settings.json");
+        var store = new CSharpGenerationSettingsStore(folder);
+        var path = Path.Combine(folder, "preset", "codegen-settings.json");
 
-            // 新規作成・上書きの両経路を確認する
-            store.SaveTo(path, new CSharpGenerationSettings { RootNamespace = "Acme.Old" });
-            store.SaveTo(path, new CSharpGenerationSettings { RootNamespace = "Acme.New" });
+        // 新規作成・上書きの両経路を確認する
+        store.SaveTo(path, new CSharpGenerationSettings { RootNamespace = "Acme.Old" });
+        store.SaveTo(path, new CSharpGenerationSettings { RootNamespace = "Acme.New" });
 
-            Directory.GetFiles(Path.GetDirectoryName(path)!, "*.tmp").Should().BeEmpty();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+        Directory.GetFiles(Path.GetDirectoryName(path)!, "*.tmp").Should().BeEmpty();
     }
 
     /// <summary>存在しないパスの TryLoadFrom は null を返すことを検証する（既定値へはフォールバックしない）</summary>
@@ -267,23 +213,13 @@ public class CSharpGenerationSettingsStoreTests
     {
         var folder = TempFolder();
 
-        try
-        {
-            Directory.CreateDirectory(folder);
-            var path = Path.Combine(folder, "broken.json");
-            File.WriteAllText(path, "{ this is not valid json");
+        Directory.CreateDirectory(folder);
+        var path = Path.Combine(folder, "broken.json");
+        File.WriteAllText(path, "{ this is not valid json");
 
-            var store = new CSharpGenerationSettingsStore(folder);
+        var store = new CSharpGenerationSettingsStore(folder);
 
-            store.TryLoadFrom(path).Should().BeNull();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
+        store.TryLoadFrom(path).Should().BeNull();
     }
 
     /// <summary>
@@ -297,77 +233,67 @@ public class CSharpGenerationSettingsStoreTests
     {
         var folder = TempFolder();
 
-        try
-        {
-            var store = new CSharpGenerationSettingsStore(folder);
-            var path = Path.Combine(folder, "codegen-settings.json");
-            store.SaveTo(
-                path,
-                new CSharpGenerationSettings
-                {
-                    RootNamespace = "Acme.Contracts",
-                    SplitFilesByCategory = true,
-                    GenerateEfCoreRepositories = true,
-                    GenerateRepositories = true,
-                    RepositoryDialects = new() { "sqlserver", "sqlite" },
-                    GenerateInMemoryRepositories = true,
-                    IncludeDataAnnotations = false,
-                    OutputPath = "Acme.g.cs",
-                    GenerateValueObjects = true,
-                    // 層別フォルダ出力も CLI の --config へそのまま渡せるキー集合であること
-                    LayeredOutput = true,
-                    DomainLayerDirectory = "Acme.Domain",
-                    InfrastructureLayerDirectory = "Acme.Infrastructure",
-                    PresentationLayerDirectory = "Acme.App",
-                    ServerLayerDirectory = "Acme.Api",
-                }
-            );
-
-            // CLI（CliApp.LoadOptions）と同じ読み方: JsonNode で解析し、大文字小文字を無視して
-            // CodeGenerationOptions へデシリアライズする（camelCase の JSON が PascalCase のプロパティへ一致する）。
-            var node = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
-
-            // CLI の LoadOptions と同じく OutputPath（ファイル名）→ OutputFileName を導出する
-            // （GUI 設定は OutputPath のみを持ち、OutputFileName は持たない）。camelCase キーで書かれる点にも留意
-            if (
-                node["outputFileName"] is null
-                && node["outputPath"] is JsonValue outputPathValue
-                && outputPathValue.TryGetValue(out string? outputPath)
-                && !string.IsNullOrWhiteSpace(Path.GetFileName(outputPath))
-            )
+        var store = new CSharpGenerationSettingsStore(folder);
+        var path = Path.Combine(folder, "codegen-settings.json");
+        store.SaveTo(
+            path,
+            new CSharpGenerationSettings
             {
-                node["OutputFileName"] = Path.GetFileName(outputPath);
+                RootNamespace = "Acme.Contracts",
+                SplitFilesByCategory = true,
+                GenerateEfCoreRepositories = true,
+                GenerateRepositories = true,
+                RepositoryDialects = new() { "sqlserver", "sqlite" },
+                GenerateInMemoryRepositories = true,
+                IncludeDataAnnotations = false,
+                OutputPath = "Acme.g.cs",
+                GenerateValueObjects = true,
+                // 層別フォルダ出力も CLI の --config へそのまま渡せるキー集合であること
+                LayeredOutput = true,
+                DomainLayerDirectory = "Acme.Domain",
+                InfrastructureLayerDirectory = "Acme.Infrastructure",
+                PresentationLayerDirectory = "Acme.App",
+                ServerLayerDirectory = "Acme.Api",
             }
+        );
 
-            var options = node.Deserialize<CodeGenerationOptions>(
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-            )!;
+        // CLI（CliApp.LoadOptions）と同じ読み方: JsonNode で解析し、大文字小文字を無視して
+        // CodeGenerationOptions へデシリアライズする（camelCase の JSON が PascalCase のプロパティへ一致する）。
+        var node = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
 
-            options.RootNamespace.Should().Be("Acme.Contracts");
-            options.SplitFilesByCategory.Should().BeTrue();
-            options.GenerateEfCoreRepositories.Should().BeTrue();
-            options.GenerateRepositories.Should().BeTrue();
-            options.RepositoryDialects.Should().Equal("sqlserver", "sqlite");
-            options.GenerateInMemoryRepositories.Should().BeTrue();
-            options.IncludeDataAnnotations.Should().BeFalse();
-            // GUI が保存した OutputPath のファイル名部分が CLI 経路で OutputFileName へ導出される
-            options.OutputFileName.Should().Be("Acme.g.cs");
-            options.GenerateValueObjects.Should().BeTrue();
-            // GUI で選んだ対象 DB が ResolveRepositoryDialects()（リスト優先）でそのまま有効になる
-            options.ResolveRepositoryDialects().Should().Equal("sqlserver", "sqlite");
-            // 層別フォルダ出力（有効フラグ＋層フォルダ 4 つ）も CLI 経路でそのまま解釈される
-            options.LayeredOutput.Should().BeTrue();
-            options.DomainLayerDirectory.Should().Be("Acme.Domain");
-            options.InfrastructureLayerDirectory.Should().Be("Acme.Infrastructure");
-            options.PresentationLayerDirectory.Should().Be("Acme.App");
-            options.ServerLayerDirectory.Should().Be("Acme.Api");
-        }
-        finally
+        // CLI の LoadOptions と同じく OutputPath（ファイル名）→ OutputFileName を導出する
+        // （GUI 設定は OutputPath のみを持ち、OutputFileName は持たない）。camelCase キーで書かれる点にも留意
+        if (
+            node["outputFileName"] is null
+            && node["outputPath"] is JsonValue outputPathValue
+            && outputPathValue.TryGetValue(out string? outputPath)
+            && !string.IsNullOrWhiteSpace(Path.GetFileName(outputPath))
+        )
         {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
+            node["OutputFileName"] = Path.GetFileName(outputPath);
         }
+
+        var options = node.Deserialize<CodeGenerationOptions>(
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+        )!;
+
+        options.RootNamespace.Should().Be("Acme.Contracts");
+        options.SplitFilesByCategory.Should().BeTrue();
+        options.GenerateEfCoreRepositories.Should().BeTrue();
+        options.GenerateRepositories.Should().BeTrue();
+        options.RepositoryDialects.Should().Equal("sqlserver", "sqlite");
+        options.GenerateInMemoryRepositories.Should().BeTrue();
+        options.IncludeDataAnnotations.Should().BeFalse();
+        // GUI が保存した OutputPath のファイル名部分が CLI 経路で OutputFileName へ導出される
+        options.OutputFileName.Should().Be("Acme.g.cs");
+        options.GenerateValueObjects.Should().BeTrue();
+        // GUI で選んだ対象 DB が ResolveRepositoryDialects()（リスト優先）でそのまま有効になる
+        options.ResolveRepositoryDialects().Should().Equal("sqlserver", "sqlite");
+        // 層別フォルダ出力（有効フラグ＋層フォルダ 4 つ）も CLI 経路でそのまま解釈される
+        options.LayeredOutput.Should().BeTrue();
+        options.DomainLayerDirectory.Should().Be("Acme.Domain");
+        options.InfrastructureLayerDirectory.Should().Be("Acme.Infrastructure");
+        options.PresentationLayerDirectory.Should().Be("Acme.App");
+        options.ServerLayerDirectory.Should().Be("Acme.Api");
     }
 }

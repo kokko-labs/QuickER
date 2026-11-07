@@ -49,6 +49,12 @@ internal static partial class SourceRules
     private const string DirectParseComposedSource =
         "テストが組み立てたソースの文字列をコンパイルする（ディスクのソースではない）";
 
+    /// <summary>テストの一時フォルダの親の名前（このファイル自身が写り込まないよう分割して書く）</summary>
+    private const string TestTempRootName = "QuickER" + "Tests";
+
+    /// <summary>TEMP の直下に一時フォルダを作る BCL の呼び出し</summary>
+    private const string CreateTempSubdirectoryName = "CreateTemp" + "Subdirectory";
+
     private static IEnumerable<SourceRule> Tests() =>
         [
             // テストで DbContext のプロバイダを指定する呼び出しの直後には、必ず共通の設定（EfCoreTestOptions）を続ける。
@@ -205,6 +211,23 @@ internal static partial class SourceRules
                     "自己検査のプローブの文字列をコンパイルする（CompileProbe）"
                 )
             ),
+            // テストの一時フォルダは共有の部品 TestTempFolder で作る（%TEMP%\QuickERTests\<guid>・破棄で消す）。親の名前を自分で組むと、
+            // 消し忘れ・失敗の経路での消し損ねを写すことになり、%TEMP% に残りが溜まる。Directory.CreateTempSubdirectory も TEMP の直下に
+            // 前置きの名前を並べ（8.3 の短い名前がぶつかって作成が遅くなる）、消すのは呼び手任せになる。tests の全体（QuickER.Tests と
+            // Integration）の文字列リテラル（補間の文字の部分を含む）と呼び出しを構文木で数える（条件コンパイルのどの分岐も読む）。
+            // 作らない偽のパスは TestTempFolder.Root から組む。空振りの検知：既知の一覧の部品そのものの 1 件（拾えなくなると件数が合わない）
+            SourceRule.Forbid(
+                "test-temp-folder-root-copies",
+                "テストの一時フォルダは TestTempFolder で作り、親の名前のリテラルと Directory.CreateTempSubdirectory を書かない（消し忘れを写さない）",
+                SourceScope.Under("tests"),
+                GuardFinder.Nodes(DescribeTestTempFolderCopy),
+                new GuardKnown(
+                    "tests/QuickER.Tests/TestSupport/TestTempFolder.cs",
+                    $"\"{TestTempRootName}\"",
+                    1,
+                    "テストの一時フォルダの部品そのもの（親の名前の唯一の正本）"
+                )
+            ),
         ];
 
     /// <summary>範囲から、根の下の名前の末尾が同じファイルを 1 つずつ除く（いまあるファイルを列挙して除外にする）</summary>
@@ -329,4 +352,33 @@ internal static partial class SourceRules
 
         return name is "ParseText" or "ParseSyntaxTree" ? name : null;
     }
+
+    /// <summary>
+    /// 節がテストの一時フォルダの写し（親の名前を含む文字列リテラル・補間の文字の部分、CreateTempSubdirectory の呼び出し）なら、その表記
+    /// </summary>
+    /// <remarks>
+    /// 親の名前は「含む」で見る（<c>"QuickERTests_" + guid</c> や <c>$"QuickERTests-blocked-{guid}"</c> のように、前置きにして
+    /// TEMP の直下へ作る写しも拾う）。コメント・XML ドキュメントは構文木の節ではないので数えない。
+    /// </remarks>
+    private static string? DescribeTestTempFolderCopy(SyntaxNode node) =>
+        node switch
+        {
+            LiteralExpressionSyntax literal
+                when literal.Token.Value is string value
+                    && value.Contains(TestTempRootName, StringComparison.Ordinal) =>
+                $"\"{TestTempRootName}\"",
+            InterpolatedStringTextSyntax text
+                when text.TextToken.ValueText.Contains(
+                    TestTempRootName,
+                    StringComparison.Ordinal
+                ) => $"\"{TestTempRootName}\"",
+            InvocationExpressionSyntax invocation
+                when invocation.Expression switch
+                {
+                    MemberAccessExpressionSyntax member => member.Name.Identifier.ValueText,
+                    IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
+                    _ => null,
+                } == CreateTempSubdirectoryName => CreateTempSubdirectoryName,
+            _ => null,
+        };
 }

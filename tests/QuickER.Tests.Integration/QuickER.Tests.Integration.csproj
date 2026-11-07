@@ -97,6 +97,8 @@
       Include="..\QuickER.Tests\TestSupport\TestDialectCapabilities.cs"
       LinkBase="TestSupport"
     />
+    <!-- テストの一時フォルダ（%TEMP%\QuickERTests\<guid>・破棄で消す）。QuickER.Tests と同じ 1 ファイルを使う -->
+    <Compile Include="..\QuickER.Tests\TestSupport\TestTempFolder.cs" LinkBase="TestSupport" />
   </ItemGroup>
 
   <ItemGroup>

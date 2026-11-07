@@ -3,6 +3,7 @@ using System.IO;
 using AwesomeAssertions;
 using QuickER.AI.UI;
 using QuickER.Platform;
+using QuickER.Tests.TestSupport;
 using QuickER.Tests.TestSupport.Engines;
 using static QuickER.Tests.Platform.OsBoundary.LaunchEntrance;
 using static QuickER.Tests.Platform.OsBoundary.LaunchOutcome;
@@ -100,8 +101,7 @@ internal static partial class ProcessLaunchRows
             (
                 "missing",
                 MissingFolder,
-                () =>
-                    Path.Combine(Path.GetTempPath(), "QuickERTests_" + Guid.NewGuid().ToString("N"))
+                () => Path.Combine(TestTempFolder.Root, "missing-" + Guid.NewGuid().ToString("N"))
             ),
         ];
 

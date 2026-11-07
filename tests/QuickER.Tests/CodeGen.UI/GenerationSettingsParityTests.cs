@@ -72,37 +72,28 @@ public sealed class GenerationSettingsParityTests
     public void Dialog_RoundTripsEveryValue(string variant)
     {
         var settings = DialogSettings(variant);
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        using var temp = new TestTempFolder();
+        var folder = Path.Combine(temp.Path, Guid.NewGuid().ToString("N"));
 
-        try
+        var vm = new CSharpGenerationDialogViewModel(new CSharpGenerationSettingsStore(folder));
+        Invoke(vm, "ApplySettings", settings);
+        var written = (CSharpGenerationSettings)Invoke(vm, "ToSettings")!;
+        var failures = new List<string>();
+
+        foreach (var property in OptionKeys.Writable(typeof(CSharpGenerationSettings)))
         {
-            var vm = new CSharpGenerationDialogViewModel(new CSharpGenerationSettingsStore(folder));
-            Invoke(vm, "ApplySettings", settings);
-            var written = (CSharpGenerationSettings)Invoke(vm, "ToSettings")!;
-            var failures = new List<string>();
+            var expected = property.GetValue(settings);
+            var actual = property.GetValue(written);
 
-            foreach (var property in OptionKeys.Writable(typeof(CSharpGenerationSettings)))
+            if (!SameValue(expected, actual))
             {
-                var expected = property.GetValue(settings);
-                var actual = property.GetValue(written);
-
-                if (!SameValue(expected, actual))
-                {
-                    failures.Add(
-                        $"{property.Name}: 読み込んだ値 {Describe(expected)} / 書き戻した値 {Describe(actual)}"
-                    );
-                }
-            }
-
-            failures.Should().BeEmpty();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
+                failures.Add(
+                    $"{property.Name}: 読み込んだ値 {Describe(expected)} / 書き戻した値 {Describe(actual)}"
+                );
             }
         }
+
+        failures.Should().BeEmpty();
     }
 
     [Fact(DisplayName = "ダイアログの往復の構成は、全キーを少なくとも一度は既定と違う値で通す")]

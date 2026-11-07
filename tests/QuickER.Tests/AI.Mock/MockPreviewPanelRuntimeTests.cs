@@ -19,16 +19,13 @@ namespace QuickER.Tests.AI.Mock;
 /// </remarks>
 public sealed class MockPreviewPanelRuntimeTests : IAsyncLifetime
 {
-    private readonly string _folder = Path.Combine(
-        Path.GetTempPath(),
-        "QuickERTests",
-        "preview-runtime-" + Guid.NewGuid().ToString("N")
-    );
+    /// <summary>テストごとの一時フォルダ（ブラウザプロセスの終了を待ってから消すので、後始末は <see cref="DisposeAsync"/> が行う）</summary>
+    private readonly TestTempFolder _temp = new();
+
+    private string _folder => _temp.Path;
 
     /// <summary>このテストが起こした WebView2 のブラウザプロセス（後片付けで終了を待ってからユーザーデータを消す）</summary>
     private readonly List<Process> _browsers = [];
-
-    public MockPreviewPanelRuntimeTests() => Directory.CreateDirectory(_folder);
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
@@ -53,6 +50,13 @@ public sealed class MockPreviewPanelRuntimeTests : IAsyncLifetime
             }
         }
 
+        await DeleteFolderWithRetryAsync();
+        _temp.Dispose();
+    }
+
+    /// <summary>一時フォルダを、掴んでいるプロセスが手放すまで短く何度か試して消す</summary>
+    private async Task DeleteFolderWithRetryAsync()
+    {
         // 描画・GPU の子プロセスがユーザーデータを手放すのは少し遅れることがあるので、短く何度か試す
         var watch = Stopwatch.StartNew();
 

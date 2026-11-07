@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using GitHub.Copilot;
 using QuickER.AI;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.AI;
 
@@ -76,7 +77,7 @@ public class CopilotRuntimeClientSessionTests
     {
         var declared = new HashSet<string>(StringComparer.Ordinal) { "add_entity" };
         var root = CopilotWorkspacePermissionPolicy.NormalizeRoot(
-            System.IO.Path.Combine(System.IO.Path.GetTempPath(), "QuickERTests", "copilot-session")
+            System.IO.Path.Combine(TestTempFolder.Root, "copilot-session")
         );
 
         CopilotRuntimeClient

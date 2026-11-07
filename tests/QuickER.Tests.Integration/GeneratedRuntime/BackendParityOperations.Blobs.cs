@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using QuickER.Tests.GeneratedBackendParityFixture;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -325,43 +326,36 @@ public sealed record BlobFileOp(int OrderId, string Column, bool Write, byte[]? 
 
     public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
     {
-        var directory = Directory.CreateTempSubdirectory("quicker-parity-blob-file");
-        var path = Path.Combine(directory.FullName, "blob.bin");
+        using var temp = new TestTempFolder();
+        var path = Path.Combine(temp.Path, "blob.bin");
         var id = OrderIdValue.Create(OrderId);
 
-        try
+        if (Write)
         {
-            if (Write)
+            await File.WriteAllBytesAsync(path, Data ?? [], ct);
+            var written = Column switch
             {
-                await File.WriteAllBytesAsync(path, Data ?? [], ct);
-                var written = Column switch
-                {
-                    "payload" => await backend.Orders.WritePayloadFromFileAsync(id, path, ct),
-                    "thumb" => await backend.Orders.WriteThumbFromFileAsync(id, path, ct),
-                    _ => throw new ArgumentException(Column),
-                };
-
-                return $"written={written}";
-            }
-
-            // 保存先のファイルを先に置く（読み取りは既にあるファイルを置き換える＝File.Replace の経路。古い中身が残らないことは
-            // 読んだバイト列の期待が見る）
-            await File.WriteAllBytesAsync(path, [0xEE, 0xEE], ct);
-
-            var read = Column switch
-            {
-                "payload" => await backend.Orders.ReadPayloadToFileAsync(id, path, ct),
-                "thumb" => await backend.Orders.ReadThumbToFileAsync(id, path, ct),
+                "payload" => await backend.Orders.WritePayloadFromFileAsync(id, path, ct),
+                "thumb" => await backend.Orders.WriteThumbFromFileAsync(id, path, ct),
                 _ => throw new ArgumentException(Column),
             };
-            var bytes = File.Exists(path) ? await File.ReadAllBytesAsync(path, ct) : [];
 
-            return $"read={read} bytes={Convert.ToHexString(bytes)}";
+            return $"written={written}";
         }
-        finally
+
+        // 保存先のファイルを先に置く（読み取りは既にあるファイルを置き換える＝File.Replace の経路。古い中身が残らないことは
+        // 読んだバイト列の期待が見る）
+        await File.WriteAllBytesAsync(path, [0xEE, 0xEE], ct);
+
+        var read = Column switch
         {
-            directory.Delete(recursive: true);
-        }
+            "payload" => await backend.Orders.ReadPayloadToFileAsync(id, path, ct),
+            "thumb" => await backend.Orders.ReadThumbToFileAsync(id, path, ct),
+            _ => throw new ArgumentException(Column),
+        };
+        var bytes = File.Exists(path) ? await File.ReadAllBytesAsync(path, ct) : [];
+
+        return $"read={read} bytes={Convert.ToHexString(bytes)}";
     }
 }
 

@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using QuickER.Provider.SqlServer;
 using QuickER.Tests.GeneratedSqlServerBinaryFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -332,26 +333,19 @@ public sealed class SqlServerBinaryColumnRuntimeTests(SqlServerContainerFixture 
     {
         var documents = Documents();
 
-        var directory = Directory.CreateTempSubdirectory("quicker-sqlserver-binary-stream");
+        using var temp = new TestTempFolder();
 
-        try
-        {
-            var payload = new byte[128 * 1024];
-            new Random(99).NextBytes(payload);
+        var payload = new byte[128 * 1024];
+        new Random(99).NextBytes(payload);
 
-            var sourcePath = Path.Combine(directory.FullName, "in.bin");
-            var destinationPath = Path.Combine(directory.FullName, "out.bin");
-            await File.WriteAllBytesAsync(sourcePath, payload, Ct);
+        var sourcePath = Path.Combine(temp.Path, "in.bin");
+        var destinationPath = Path.Combine(temp.Path, "out.bin");
+        await File.WriteAllBytesAsync(sourcePath, payload, Ct);
 
-            (await documents.WritePayloadFromFileAsync(1, sourcePath, Ct)).Should().BeTrue();
-            (await documents.ReadPayloadToFileAsync(1, destinationPath, Ct)).Should().BeTrue();
+        (await documents.WritePayloadFromFileAsync(1, sourcePath, Ct)).Should().BeTrue();
+        (await documents.ReadPayloadToFileAsync(1, destinationPath, Ct)).Should().BeTrue();
 
-            (await File.ReadAllBytesAsync(destinationPath, Ct)).Should().Equal(payload);
-        }
-        finally
-        {
-            directory.Delete(recursive: true);
-        }
+        (await File.ReadAllBytesAsync(destinationPath, Ct)).Should().Equal(payload);
     }
 
     /// <summary>8. 名前付きクエリ（Dsl 共有本体）が SQL Server 方言でも動く: 射影は取得・一覧は除外・件数は WHERE 参照</summary>

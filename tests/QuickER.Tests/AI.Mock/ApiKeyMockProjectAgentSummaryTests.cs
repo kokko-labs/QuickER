@@ -5,20 +5,28 @@ using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.AI.Mock;
 
 /// <summary>
 /// API キー方式がモデルへ渡す材料（データ層の契約要約・修正ターンのビルド出力）の組み立てを検証するテストクラス。
 /// </summary>
-public class ApiKeyMockProjectAgentSummaryTests
+public class ApiKeyMockProjectAgentSummaryTests : IDisposable
 {
-    private static string NewTempFolder()
+    /// <summary>テストごとの一時フォルダ（破棄で中身ごと消す）</summary>
+    private readonly TestTempFolder _temp = new();
+
+    /// <summary>テストごとの作業フォルダを作る</summary>
+    private string NewTempFolder()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var folder = Path.Combine(_temp.Path, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(folder);
         return folder;
     }
+
+    /// <inheritdoc />
+    public void Dispose() => _temp.Dispose();
 
     /// <summary>
     /// 共有の基底契約（CRUD を宣言する <c>IRemoteRepositoryCore</c> / <c>IRepositoryCore</c>）の署名が要約へ入り、
@@ -29,60 +37,53 @@ public class ApiKeyMockProjectAgentSummaryTests
     {
         var folder = NewTempFolder();
 
-        try
-        {
-            File.WriteAllText(
-                Path.Combine(folder, "Runtime.g.cs"),
-                """
-                public interface IRemoteRepositoryCore<TEntity, TKey>
-                    where TEntity : class
-                {
-                    /// <summary>Gets one row.</summary>
-                    Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default);
+        File.WriteAllText(
+            Path.Combine(folder, "Runtime.g.cs"),
+            """
+            public interface IRemoteRepositoryCore<TEntity, TKey>
+                where TEntity : class
+            {
+                /// <summary>Gets one row.</summary>
+                Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default);
 
-                    Task<bool> UpdateAsync(
-                        TEntity entity,
-                        CancellationToken cancellationToken = default
-                    );
-
-                    Task<int> CountAsync()
-                    {
-                        return Task.FromResult(0);
-                    }
-                }
-                """
-            );
-            File.WriteAllText(
-                Path.Combine(folder, "Repositories.g.cs"),
-                """
-                public partial interface ICustomerRepository : IRepository<Customer, int>
-                {
-                    Task<Customer?> FindByNameAsync(string name);
-                }
-                """
-            );
-
-            var summary = ApiKeyMockProjectAgent.SummarizeGeneratedContracts(folder);
-
-            summary.Should().Contain("IRemoteRepositoryCore<TEntity, TKey>");
-            summary
-                .Should()
-                .Contain(
-                    "Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default);"
+                Task<bool> UpdateAsync(
+                    TEntity entity,
+                    CancellationToken cancellationToken = default
                 );
-            summary
-                .Should()
-                .Contain(
-                    "Task<bool> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default);"
-                );
-            summary.Should().Contain("Task<Customer?> FindByNameAsync(string name);");
-            summary.Should().NotContain("return Task.FromResult");
-            summary.Should().NotContain("CountAsync");
-        }
-        finally
-        {
-            Directory.Delete(folder, recursive: true);
-        }
+
+                Task<int> CountAsync()
+                {
+                    return Task.FromResult(0);
+                }
+            }
+            """
+        );
+        File.WriteAllText(
+            Path.Combine(folder, "Repositories.g.cs"),
+            """
+            public partial interface ICustomerRepository : IRepository<Customer, int>
+            {
+                Task<Customer?> FindByNameAsync(string name);
+            }
+            """
+        );
+
+        var summary = ApiKeyMockProjectAgent.SummarizeGeneratedContracts(folder);
+
+        summary.Should().Contain("IRemoteRepositoryCore<TEntity, TKey>");
+        summary
+            .Should()
+            .Contain(
+                "Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default);"
+            );
+        summary
+            .Should()
+            .Contain(
+                "Task<bool> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default);"
+            );
+        summary.Should().Contain("Task<Customer?> FindByNameAsync(string name);");
+        summary.Should().NotContain("return Task.FromResult");
+        summary.Should().NotContain("CountAsync");
     }
 
     /// <summary>
@@ -94,42 +95,35 @@ public class ApiKeyMockProjectAgentSummaryTests
     {
         var folder = NewTempFolder();
 
-        try
-        {
-            var perTable = string.Concat(
-                Enumerable
-                    .Range(0, 100)
-                    .Select(i =>
-                        $$"""
-                            public partial interface ITable{{i}}Repository : IRepository<Table{{i}}, int>
-                            {
-                                Task<IReadOnlyList<Table{{i}}>> FindByVeryLongNamedQueryNumber{{i}}Async(string keyword);
-                            }
+        var perTable = string.Concat(
+            Enumerable
+                .Range(0, 100)
+                .Select(i =>
+                    $$"""
+                        public partial interface ITable{{i}}Repository : IRepository<Table{{i}}, int>
+                        {
+                            Task<IReadOnlyList<Table{{i}}>> FindByVeryLongNamedQueryNumber{{i}}Async(string keyword);
+                        }
 
-                            """
-                    )
-            );
-            File.WriteAllText(Path.Combine(folder, "Repositories.g.cs"), perTable);
-            File.WriteAllText(
-                Path.Combine(folder, "Runtime.g.cs"),
-                """
-                public interface IRemoteRepositoryCore<TEntity, TKey>
-                {
-                    Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default);
-                }
-                """
-            );
+                        """
+                )
+        );
+        File.WriteAllText(Path.Combine(folder, "Repositories.g.cs"), perTable);
+        File.WriteAllText(
+            Path.Combine(folder, "Runtime.g.cs"),
+            """
+            public interface IRemoteRepositoryCore<TEntity, TKey>
+            {
+                Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default);
+            }
+            """
+        );
 
-            var summary = ApiKeyMockProjectAgent.SummarizeGeneratedContracts(folder);
+        var summary = ApiKeyMockProjectAgent.SummarizeGeneratedContracts(folder);
 
-            summary.Should().Contain("was truncated");
-            summary.Should().Contain("IRemoteRepositoryCore<TEntity, TKey>");
-            summary.Should().Contain("GetByIdAsync(");
-        }
-        finally
-        {
-            Directory.Delete(folder, recursive: true);
-        }
+        summary.Should().Contain("was truncated");
+        summary.Should().Contain("IRemoteRepositoryCore<TEntity, TKey>");
+        summary.Should().Contain("GetByIdAsync(");
     }
 
     /// <summary>
@@ -140,29 +134,20 @@ public class ApiKeyMockProjectAgentSummaryTests
     {
         var folder = NewTempFolder();
 
-        try
-        {
-            File.WriteAllText(
-                Path.Combine(folder, "Keys.g.cs"),
-                """
-                public readonly record struct OrderKey(int Id);
-                public sealed record class CustomerSnapshot(string Name);
-                """
-            );
+        File.WriteAllText(
+            Path.Combine(folder, "Keys.g.cs"),
+            """
+            public readonly record struct OrderKey(int Id);
+            public sealed record class CustomerSnapshot(string Name);
+            """
+        );
 
-            var summary = ApiKeyMockProjectAgent.SummarizeGeneratedContracts(folder);
-            var publicTypes = summary
-                .Split('\n')
-                .Single(line => line.StartsWith("Public types in ", StringComparison.Ordinal));
+        var summary = ApiKeyMockProjectAgent.SummarizeGeneratedContracts(folder);
+        var publicTypes = summary
+            .Split('\n')
+            .Single(line => line.StartsWith("Public types in ", StringComparison.Ordinal));
 
-            publicTypes
-                .Should()
-                .Be("Public types in (global namespace): OrderKey, CustomerSnapshot");
-        }
-        finally
-        {
-            Directory.Delete(folder, recursive: true);
-        }
+        publicTypes.Should().Be("Public types in (global namespace): OrderKey, CustomerSnapshot");
     }
 
     /// <summary>

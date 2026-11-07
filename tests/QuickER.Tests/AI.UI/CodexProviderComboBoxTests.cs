@@ -37,91 +37,76 @@ public class CodexProviderComboBoxTests
         {
             WpfApplicationTestSupport.EnsureApplicationResources();
 
-            var folder = Path.Combine(
-                Path.GetTempPath(),
-                "QuickERTests",
-                Guid.NewGuid().ToString("N")
+            using var temp = new TestTempFolder();
+            var folder = Path.Combine(temp.Path, Guid.NewGuid().ToString("N"));
+
+            // API キーは実 %LOCALAPPDATA% の ApiKeyStore ではなくメモリ上のストアへ隔離する
+            var keyStore = new InMemoryApiKeyStore();
+            var vm = new AiChatDialogViewModel(
+                host: null,
+                dispatcher: new SyncUiDispatcher(),
+                settingsStore: new AiSettingsStore(folder),
+                codexClient: new FakeCodexAppServerClient(),
+                apiKeyLoader: keyStore.Load,
+                apiKeySaver: keyStore.Save
             );
+
+            // 実ダイアログのプロバイダー ComboBox から本物のテンプレートと入力方式を確認する
+            // （BAML ロードは並列テストと競合しないよう直列化する）
+            var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                new AiChatDialog(vm, new RecordingShutdownFailureReporter())
+            );
+            var sourceCombo = dialog.FindName("CodexProviderBox") as ComboBox;
+            sourceCombo.Should().NotBeNull("実 XAML に Codex プロバイダー ComboBox が存在すること");
+
+            // リスト選択のみ（自由入力不可）
+            sourceCombo!.IsEditable.Should().BeFalse("プロバイダーはリスト選択のみであること");
+
+            var itemTemplate = sourceCombo.ItemTemplate;
+            itemTemplate
+                .Should()
+                .NotBeNull("表示名変換を含む実 XAML の ItemTemplate が取得できること");
+
+            // 本物のテンプレートを、直接ロードされる最小ウィンドウの ComboBox へ適用する
+            var combo = new ComboBox
+            {
+                ItemsSource = new[] { "openai", "custom-provider" },
+                ItemTemplate = itemTemplate,
+            };
+            // 画面外＋非アクティブで Show し、テスト実行中にユーザーの画面を邪魔しない
+            var window = new Window
+            {
+                Content = combo,
+                Width = 400,
+                Height = 200,
+                ShowInTaskbar = false,
+                ShowActivated = false,
+                WindowStyle = WindowStyle.None,
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Left = -4000,
+                Top = -4000,
+            };
+            // テンプレートが参照する StaticResource を実ダイアログと同じキーで供給する
+            window.Resources["CodexProviderDisplayNameConverter"] =
+                new CodexProviderDisplayNameConverter();
+            window.Show();
 
             try
             {
-                // API キーは実 %LOCALAPPDATA% の ApiKeyStore ではなくメモリ上のストアへ隔離する
-                var keyStore = new InMemoryApiKeyStore();
-                var vm = new AiChatDialogViewModel(
-                    host: null,
-                    dispatcher: new SyncUiDispatcher(),
-                    settingsStore: new AiSettingsStore(folder),
-                    codexClient: new FakeCodexAppServerClient(),
-                    apiKeyLoader: keyStore.Load,
-                    apiKeySaver: keyStore.Save
-                );
+                window.UpdateLayout();
+                DoEvents();
 
-                // 実ダイアログのプロバイダー ComboBox から本物のテンプレートと入力方式を確認する
-                // （BAML ロードは並列テストと競合しないよう直列化する）
-                var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
-                    new AiChatDialog(vm, new RecordingShutdownFailureReporter())
-                );
-                var sourceCombo = dialog.FindName("CodexProviderBox") as ComboBox;
-                sourceCombo
-                    .Should()
-                    .NotBeNull("実 XAML に Codex プロバイダー ComboBox が存在すること");
+                combo.IsDropDownOpen = true;
+                combo.UpdateLayout();
+                DoEvents();
 
-                // リスト選択のみ（自由入力不可）
-                sourceCombo!.IsEditable.Should().BeFalse("プロバイダーはリスト選択のみであること");
-
-                var itemTemplate = sourceCombo.ItemTemplate;
-                itemTemplate
-                    .Should()
-                    .NotBeNull("表示名変換を含む実 XAML の ItemTemplate が取得できること");
-
-                // 本物のテンプレートを、直接ロードされる最小ウィンドウの ComboBox へ適用する
-                var combo = new ComboBox
-                {
-                    ItemsSource = new[] { "openai", "custom-provider" },
-                    ItemTemplate = itemTemplate,
-                };
-                // 画面外＋非アクティブで Show し、テスト実行中にユーザーの画面を邪魔しない
-                var window = new Window
-                {
-                    Content = combo,
-                    Width = 400,
-                    Height = 200,
-                    ShowInTaskbar = false,
-                    ShowActivated = false,
-                    WindowStyle = WindowStyle.None,
-                    WindowStartupLocation = WindowStartupLocation.Manual,
-                    Left = -4000,
-                    Top = -4000,
-                };
-                // テンプレートが参照する StaticResource を実ダイアログと同じキーで供給する
-                window.Resources["CodexProviderDisplayNameConverter"] =
-                    new CodexProviderDisplayNameConverter();
-                window.Show();
-
-                try
-                {
-                    window.UpdateLayout();
-                    DoEvents();
-
-                    combo.IsDropDownOpen = true;
-                    combo.UpdateLayout();
-                    DoEvents();
-
-                    // "openai" は表示のみ "OpenAI"・他プロバイダー ID は素通し
-                    FindItemText(combo, index: 0).Should().Be("OpenAI");
-                    FindItemText(combo, index: 1).Should().Be("custom-provider");
-                }
-                finally
-                {
-                    window.Close();
-                }
+                // "openai" は表示のみ "OpenAI"・他プロバイダー ID は素通し
+                FindItemText(combo, index: 0).Should().Be("OpenAI");
+                FindItemText(combo, index: 1).Should().Be("custom-provider");
             }
             finally
             {
-                if (Directory.Exists(folder))
-                {
-                    Directory.Delete(folder, recursive: true);
-                }
+                window.Close();
             }
         });
     }

@@ -24,6 +24,12 @@ internal static partial class SourceRuleProbes
     /// <summary>MainWindow の生成（綴りを割る）</summary>
     private const string MainWindowCreation = "new MainWindow" + "(";
 
+    /// <summary>テストの一時フォルダの親の名前（綴りを割る）</summary>
+    private const string TestTempRoot = "QuickER" + "Tests";
+
+    /// <summary>TEMP の直下に一時フォルダを作る BCL の呼び出し（綴りを割る）</summary>
+    private const string CreateTempSubdirectory = "CreateTemp" + "Subdirectory";
+
     private static IEnumerable<SourceRuleProbe> Tests() =>
         [
             // 閉じ括弧の直後に共通の設定が無い呼び出しを拾う（引数の中の文字列・文字のリテラルの括弧は数えない・コメントを挟むのも
@@ -276,6 +282,85 @@ internal static partial class SourceRuleProbes
                         }
                         """,
                         "ParseText"
+                    ),
+                ]
+            ) with
+            {
+                InactiveBranch = true,
+            },
+            // 親の名前を含む文字列リテラル（そのもの・前置きの連結・逐語的・生の文字列）と補間の文字の部分、CreateTempSubdirectory の
+            // 呼び出し（完全修飾・using static）を拾う。コメント・TestTempFolder の使い方・別の名前・別の呼び出しは拾わない
+            new SourceRuleProbe(
+                "test-temp-folder-root-copies-forms",
+                "test-temp-folder-root-copies",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        $$""""
+                        using System.IO;
+                        using static System.IO.Directory;
+
+                        internal static class Probe
+                        {
+                            public static void Hits(string id)
+                            {
+                                _ = Path.Combine(Path.GetTempPath(), "{{TestTempRoot}}", id);
+                                _ = Path.Combine(Path.GetTempPath(), "{{TestTempRoot}}_" + id);
+                                _ = $"{{TestTempRoot}}-blocked-{id}";
+                                _ = @"C:\{{TestTempRoot}}\x";
+                                _ = """{{TestTempRoot}}""";
+                                Directory.{{CreateTempSubdirectory}}("quicker-");
+                                System.IO.Directory.{{CreateTempSubdirectory}}();
+                                {{CreateTempSubdirectory}}("x");
+                            }
+
+                            public static void Misses(string id)
+                            {
+                                // %TEMP%\{{TestTempRoot}}\<guid> is made by TestTempFolder
+                                using var temp = new TestTempFolder();
+                                _ = Path.Combine(TestTempFolder.Root, "copilot-bin");
+                                _ = Path.Combine(temp.Path, "QuickERTest", id);
+                                Directory.CreateDirectory(temp.Path);
+                                _ = Path.GetTempFileName();
+                            }
+                        }
+                        """",
+                        $"\"{TestTempRoot}\"",
+                        $"\"{TestTempRoot}\"",
+                        $"\"{TestTempRoot}\"",
+                        $"\"{TestTempRoot}\"",
+                        $"\"{TestTempRoot}\"",
+                        CreateTempSubdirectory,
+                        CreateTempSubdirectory,
+                        CreateTempSubdirectory
+                    ),
+                ]
+            ),
+            // 構文の規則は、条件コンパイルの外れる分岐の中のリテラル・呼び出しも拾う
+            new SourceRuleProbe(
+                "test-temp-folder-root-copies-inactive-branch",
+                "test-temp-folder-root-copies",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        $$"""
+                        using System.IO;
+
+                        internal static class Probe
+                        {
+                            public static string Folder()
+                            {
+                        #if QUICKER_PROBE_BRANCH
+                                Directory.{{CreateTempSubdirectory}}("quicker-");
+                                return Path.Combine(Path.GetTempPath(), "{{TestTempRoot}}");
+                        #else
+                                return "";
+                        #endif
+                            }
+                        }
+                        """,
+                        CreateTempSubdirectory,
+                        $"\"{TestTempRoot}\""
                     ),
                 ]
             ) with

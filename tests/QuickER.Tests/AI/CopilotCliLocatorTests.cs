@@ -1,6 +1,7 @@
 using System.IO;
 using AwesomeAssertions;
 using QuickER.Platform;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.AI;
 
@@ -16,8 +17,7 @@ namespace QuickER.Tests.AI;
 public class CopilotCliLocatorTests
 {
     /// <summary>走査対象に使う架空のディレクトリ（実在は不要＝存在判定は注入する）</summary>
-    private static string FakeBinDirectory =>
-        Path.Combine(Path.GetTempPath(), "QuickERTests", "copilot-bin");
+    private static string FakeBinDirectory => Path.Combine(TestTempFolder.Root, "copilot-bin");
 
     /// <summary>指定した実在パス集合に対する存在判定を作る（Windows に合わせて大文字小文字は無視する）</summary>
     private static Func<string, bool> Existing(params string[] paths) =>

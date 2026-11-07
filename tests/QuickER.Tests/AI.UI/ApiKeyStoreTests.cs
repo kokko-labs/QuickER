@@ -1,6 +1,7 @@
 ﻿using System.IO;
 using AwesomeAssertions;
 using QuickER.AI.UI;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.AI.UI;
 
@@ -9,20 +10,16 @@ namespace QuickER.Tests.AI.UI;
 /// 実 %LOCALAPPDATA% を汚さず（並列テストの IO 競合も避けて）検証するため、
 /// 保存先フォルダ指定オーバーロードでテストごとの一時フォルダへ隔離する。
 /// </remarks>
-public class ApiKeyStoreTests
+public class ApiKeyStoreTests : IDisposable
 {
-    /// <summary>テストごとに独立した一時フォルダのパスを組み立てる（作成は Save 側が行う）</summary>
-    private static string NewTempFolder() =>
-        Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+    /// <summary>テストごとの一時フォルダ（破棄で中身ごと消す）</summary>
+    private readonly TestTempFolder _temp = new();
 
-    /// <summary>一時フォルダを丸ごと後始末する</summary>
-    private static void Cleanup(string folder)
-    {
-        if (Directory.Exists(folder))
-        {
-            Directory.Delete(folder, recursive: true);
-        }
-    }
+    /// <summary>テストごとに独立した一時フォルダのパスを組み立てる（作成は Save 側が行う）</summary>
+    private string NewTempFolder() => Path.Combine(_temp.Path, Guid.NewGuid().ToString("N"));
+
+    /// <inheritdoc />
+    public void Dispose() => _temp.Dispose();
 
     /// <summary>Save した API キーを Load で同値復元できることを検証する</summary>
     [Fact(DisplayName = "Save した API キーを Load で復元できる")]
@@ -32,16 +29,9 @@ public class ApiKeyStoreTests
         const string keyName = "ApiKeyStoreTests";
         const string expected = "sk-test-abc123!@#";
 
-        try
-        {
-            ApiKeyStore.Save(keyName, expected, folder);
-            var actual = ApiKeyStore.Load(keyName, folder);
-            actual.Should().Be(new SavedApiKey(SavedApiKeyStatus.Loaded, expected));
-        }
-        finally
-        {
-            Cleanup(folder);
-        }
+        ApiKeyStore.Save(keyName, expected, folder);
+        var actual = ApiKeyStore.Load(keyName, folder);
+        actual.Should().Be(new SavedApiKey(SavedApiKeyStatus.Loaded, expected));
     }
 
     /// <summary>空文字を保存すると鍵が削除され、Load が「保存されていない」を返すことを検証する</summary>
@@ -51,16 +41,9 @@ public class ApiKeyStoreTests
         var folder = NewTempFolder();
         const string keyName = "ApiKeyStoreTests";
 
-        try
-        {
-            ApiKeyStore.Save(keyName, "temp-key", folder);
-            ApiKeyStore.Save(keyName, string.Empty, folder);
-            ApiKeyStore.Load(keyName, folder).Should().Be(SavedApiKey.Missing);
-        }
-        finally
-        {
-            Cleanup(folder);
-        }
+        ApiKeyStore.Save(keyName, "temp-key", folder);
+        ApiKeyStore.Save(keyName, string.Empty, folder);
+        ApiKeyStore.Load(keyName, folder).Should().Be(SavedApiKey.Missing);
     }
 
     /// <remarks>
@@ -75,18 +58,11 @@ public class ApiKeyStoreTests
         var folder = NewTempFolder();
         const string keyName = "ApiKeyStoreTests";
 
-        try
-        {
-            Directory.CreateDirectory(folder);
-            var path = Path.Combine(folder, keyName + ".dat");
-            File.WriteAllBytes(path, [1, 2, 3, 4]);
+        Directory.CreateDirectory(folder);
+        var path = Path.Combine(folder, keyName + ".dat");
+        File.WriteAllBytes(path, [1, 2, 3, 4]);
 
-            ApiKeyStore.Load(keyName, folder).Should().Be(SavedApiKey.Unreadable);
-            File.Exists(path).Should().BeTrue();
-        }
-        finally
-        {
-            Cleanup(folder);
-        }
+        ApiKeyStore.Load(keyName, folder).Should().Be(SavedApiKey.Unreadable);
+        File.Exists(path).Should().BeTrue();
     }
 }
