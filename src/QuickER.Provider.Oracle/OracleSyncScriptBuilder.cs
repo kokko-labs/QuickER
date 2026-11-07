@@ -208,9 +208,9 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
     private static string AppendAlterColumn(SchemaDiffItem item)
     {
         var col = item.Column!;
-        var nullable = col.IsNullable && !col.IsPrimaryKey;
+        var nullable = ColumnNullability.AllowsNull(col);
         var nullabilityChanged =
-            item.OldColumn is not { } old || (old.IsNullable && !old.IsPrimaryKey) != nullable;
+            item.OldColumn is not { } old || ColumnNullability.AllowsNull(old) != nullable;
         var nullClause = nullabilityChanged ? (nullable ? " NULL" : " NOT NULL") : string.Empty;
         return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} "
             + $"MODIFY ({OracleIdentifier.QuoteSimple(col.Name)} {col.DataType}{nullClause});";
@@ -499,5 +499,5 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
     /// <summary>NULL 許容句を返す（主キーまたは非 NULL 許容なら NOT NULL、それ以外は空）</summary>
     /// <remarks>Oracle の ADD 句では NULL は既定のため明示しない</remarks>
     private static string GetNullabilityClauseForAdd(Column column) =>
-        column.IsPrimaryKey || !column.IsNullable ? "NOT NULL" : string.Empty;
+        ColumnNullability.AllowsNull(column) ? string.Empty : "NOT NULL";
 }

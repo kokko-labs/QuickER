@@ -172,7 +172,7 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
             $"'{MySqlIdentifier.EscapeStringLiteral(col.Name)}'",
             includeAutoIncrement: true,
             typeOverride: col.DataType,
-            nullableOverride: !(col.IsPrimaryKey || !col.IsNullable)
+            nullableOverride: ColumnNullability.AllowsNull(col)
         );
         AppendModifyColumnStatement(
             sb,

@@ -166,8 +166,13 @@ PK の順序の正本は `Entity.PrimaryKeyColumnIds`（列 Guid・宣言順）�
 
 - 列が NULL を持てるかは `ColumnNullability.AllowsNull`（NULL 許容の印があり、主キーの列でない）。主キーの列は図の `IsNullable` に依らず NULL を持てない（DB の主キーの制約。DDL も NOT NULL で作る）
 - `Column` は JSON で保存する POCO なので、プロパティにせず静的な判定にする（読み取り専用のプロパティも書き出しの対象になり、図のファイルの形が変わる）
-- 使うのは C# 生成の入口（`src/QuickER.CodeGen.CSharp/CLAUDE.md`「主キーの列の NULL 許容」）。Provider の DDL・同期スクリプト・差分には、同じ規則の写しがまだ方言ごとに散っている（`DdlGeneratorBase`・`SyncScriptBuilderHelper`・`SchemaDiffService`・`SyncPlanner`・`ComputedColumnComment`・SQLite の DDL と 3 方言の同期スクリプト。寄せるのは後の区切り）
-- ガード：`CodegenCaseTests` の行 `compile-nullable-primary-key-sync` / `probe-inmemory-seed-nullable-primary-key` / `relation-nullable-primary-key-all-surfaces` ほか（詳細は `src/QuickER.CodeGen.CSharp/CLAUDE.md`「主キーの列の NULL 許容」）
+- 使う側：Provider の DDL（`DdlGeneratorBase`・SQLite の DDL）・同期スクリプト（`SyncScriptBuilderHelper`・MySQL / Oracle / PostgreSQL）・差分（`SchemaDiffService`）・同期計画（`SyncPlanner`）・計算列の注記（`ComputedColumnComment`）・GUI の列の読込（`ColumnViewModel`）・C# 生成の入口（`src/QuickER.CodeGen.CSharp/CLAUDE.md`「主キーの列の NULL 許容」）。DDL と差分が別々の写しを持つと、1 か所だけ規則が変わって適用した直後に偽の差分が出る
+- 写さない：`ColumnNullability` の外で、同じ列の `IsPrimaryKey` と `IsNullable` を 1 つの式で組まない（NOT NULL が欲しい箇所は `!AllowsNull`、三項は NULL 許容の分岐を先に書く）。否定の別名は持たない
+- 例外は、主キーを NULL 許容と別の理由で外す「主キーでない NOT NULL の列」の判定の 3 か所だけ（主キーでない列では印がそのまま実効値で、`AllowsNull` だけでは値が決まらない）
+  - `IdentityColumnComment`：主キーの採番列は生成コードの INSERT が送るので、外れるのは主キーでない採番列だけ
+  - `MermaidExporter`：Mermaid の取込は主キーの標識の列を NOT NULL に戻すので、落ちるのは主キーでない列の NOT NULL だけ
+  - `DiagramTypeConverter`：方言切替で行バージョンを失う NOT NULL の列を NULL 許容へ倒すとき、主キーの列は倒さない
+- ガード：`SourceRuleTests` の規則 `column-nullability-copies`（src をシンボルで読み、`QuickER.Model.Column` の 2 つのプロパティを同じ受け手で組む最小の節〔`&&` / `||`・条件式・プロパティパターン・`and` / `or` のパターン・switch 式・switch 文〕を数える。例外は上の 3 か所を理由つきの既知の一覧で持つ。読みの限界は文をまたぐ組み合わせと、片方を変数に取ってから組む形。自己検査の行 `column-nullability-copies-forms`・`column-nullability-copies-inactive-branch`）。振る舞いは `DialectDdlTableTests`・同期計画の期待の行・`SchemaDiffServiceTests`、C# 生成は `CodegenCaseTests` の行 `compile-nullable-primary-key-sync` / `probe-inmemory-seed-nullable-primary-key` / `relation-nullable-primary-key-all-surfaces` ほか（詳細は `src/QuickER.CodeGen.CSharp/CLAUDE.md`「主キーの列の NULL 許容」）。mutation 実証済み
 - 取込：Excel 定義書の取込と C# リバースも、列を組んだ直後にこの判定で NULL 許容の印を決め直す（`src/QuickER.Gui/Services/CLAUDE.md`「取込は主キーの列を NOT NULL で読む（Excel 定義書・C# リバース）」）。ガード：`FormatRoundTripTests` の規則の行 `excel-rule-primary-key-row-with-empty-required-cell-is-not-null`・`csharp-rule-nullable-key-property-is-not-null`
 
 ## リレーションの列ペア

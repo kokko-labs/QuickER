@@ -6,8 +6,8 @@ namespace QuickER.Model;
 /// <remarks>
 /// <para>
 /// DB の主キーは NULL を持てない。図は主キーの列に NULL 許容の印を持てる（図のファイルの手書きなどで作れる）が、
-/// DDL はその列を NOT NULL で作る。生成コードも同じ規則で読むため、
-/// 判定をここに 1 つだけ置く（C# 生成の入口 <c>CSharpCodeGenerationService.Generate</c> が使う）。
+/// DDL はその列を NOT NULL で作る。DDL・同期スクリプト・差分・同期計画・C# 生成・
+/// GUI の列の読込が同じ規則で読むため、判定をここに 1 つだけ置く（写しはソースの規則 <c>column-nullability-copies</c> が禁じる）。
 /// </para>
 /// <para>
 /// 取込（Excel 定義書の <c>TableDefinitionDocumentImporter</c>・C# リバースの <c>CSharpReverseParser</c>）も、

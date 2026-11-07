@@ -190,7 +190,7 @@ public partial class ColumnViewModel : ObservableObject
         _dataType = model.DataType;
         _isPrimaryKey = model.IsPrimaryKey;
         _isForeignKey = model.IsForeignKey;
-        _isNullable = model.IsPrimaryKey ? false : model.IsNullable;
+        _isNullable = ColumnNullability.AllowsNull(model);
         _description = model.Description ?? string.Empty;
         IsComputed = model.IsComputed;
         _isIdentity = model.IsIdentity;

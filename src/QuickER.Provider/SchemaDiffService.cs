@@ -246,10 +246,10 @@ public class SchemaDiffService
                     // 「NOT NULL → NULL」の偽 AlterColumn が出る。DB 側だけが計算列の場合も同じ
                     var computed = tcol.IsComputed || lcol.IsComputed;
                     var compareNullability = !computed;
-                    // NULL 許容は実効の値で比べる（主キーの列はモデルの値に依らず NOT NULL）
+                    // NULL 許容は実効の値で比べる（主キーの列はモデルの値に依らず NOT NULL・判定は ColumnNullability）
                     var nullabilityChanged =
                         compareNullability
-                        && IsEffectivelyNullable(lcol) != IsEffectivelyNullable(tcol);
+                        && ColumnNullability.AllowsNull(lcol) != ColumnNullability.AllowsNull(tcol);
 
                     var typeChanged = !dialect.AreSameType(lcol.DataType, tcol.DataType);
 
@@ -275,8 +275,8 @@ public class SchemaDiffService
                             changeParts.Add(
                                 string.Format(
                                     Strings.Diff_NullableChange,
-                                    NullableLabel(IsEffectivelyNullable(lcol)),
-                                    NullableLabel(IsEffectivelyNullable(tcol))
+                                    NullableLabel(ColumnNullability.AllowsNull(lcol)),
+                                    NullableLabel(ColumnNullability.AllowsNull(tcol))
                                 )
                             );
                         }
@@ -1136,10 +1136,6 @@ public class SchemaDiffService
 
     /// <summary>列名を照合用のキー（<see cref="SchemaNames.Key"/>）にする（外部キーの署名と作り直しの対応づけが共有する）</summary>
     private static string ColumnKey(string name) => SchemaNames.Key(name);
-
-    /// <summary>列の実効の NULL 許容（主キーの列はモデルの値に依らず NOT NULL）</summary>
-    private static bool IsEffectivelyNullable(Column column) =>
-        column.IsNullable && !column.IsPrimaryKey;
 
     /// <summary>制約の名前を照合用のキー（<see cref="SchemaNames.Key"/>）にする（外部キーと一意制約の作り直しの対応づけが使う）</summary>
     private static string NameKey(string name) => SchemaNames.Key(name);

@@ -154,7 +154,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         }
 
         // 主キー列または NULL 非許容なら NOT NULL を設定し、それ以外は NOT NULL を外す
-        var nullClause = col.IsPrimaryKey || !col.IsNullable ? "SET NOT NULL" : "DROP NOT NULL";
+        var nullClause = ColumnNullability.AllowsNull(col) ? "DROP NOT NULL" : "SET NOT NULL";
         sb.AppendLine($"ALTER TABLE {table} ALTER COLUMN {column} {nullClause};");
     }
 
