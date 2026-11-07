@@ -53,7 +53,7 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
 - 単一 HTML 出力は `MockBundleExporter`。決定的なハッシュルーター結合で、各画面 body を `<section data-screen>` へ連結し、`href="Foo.html"` → `#Foo`（フラグメントは捨てる）、共有 CSS をインライン化する。相対リンクの抽出と画面 ID の規則は `MockScreenLinks` を検証・設計書と共有する。
 - 設計書出力は `MockDesignDocExporter`（決定的・AI 不使用）。モックフォルダ直下の `README.md` に、画面一覧・Mermaid 遷移図・**画面 × エンティティの CRUD 表**・regex による画面項目抽出を書く。
   - 見出しは UI 言語追従（resx `MockDoc_*`）、改行は LF 固定。
-  - 初回は「設計書出力」ボタンのオプトインで書き出し、以降は README.md が在る限り画面の save / remove に無音で自動追従して再生成する。`save_stylesheet`・スキーマ更新では再生成しない（内容に影響しないため）。
+  - 初回は「設計書出力」ボタンのオプトインで書き出し、以降は README.md が在る限り画面の save / remove に無音で自動追従して再生成する。ボタンはモックプロジェクトの生成中は押せない（「ダイアログの状態の不変条件」）。`save_stylesheet`・スキーマ更新では再生成しない（内容に影響しないため）。
   - CRUD 表は `save_screen` の `entities` 申告（省略＝既存維持・空配列＝消去・正規化は C → R → U → D・図に無い名前は警告のみ）を、遷移図の直後に載せる。
     行は全画面（マニフェスト順・未宣言画面は空セル行）、列は宣言エンティティ名の初出順、セルは正規化済み操作文字列。宣言ゼロならセクションを省略する。
 - ガード：`MockOutputsTests`（リンクの表記の行 `link-*`＝同じリンクを `MockScreenLinks`・検証器・単一 HTML へ流し、検証が解決済みとしたリンクは単一 HTML で `#画面ID` へ書き換わる・画面 ID の行 `id-*`＝画面 ID・設計書のノード ID・単一 HTML の section・行 `doc-*`・`bundle-*`。単一 HTML と設計書を出すどの行にも、決定的であること・外部参照の無い入力から外部参照を出さないこと・設計書に CR と U+2028 が無いことを掛ける）。
@@ -161,10 +161,13 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
   2. ターンの実行中は接続方式もモックフォルダも変えない（`TryChangeBackend`・`MockFolder` のセッターが断り、理由を状態の文へ出す）。変えると会話のリセットでセッションを切り離し、届かなくなったターンの完了を待ってダイアログが固まる。
   3. 作ったエンジンは、切り離しと終了の破棄でちょうど 1 回破棄される（漏れると常駐の子プロセスが残る）。
   4. 初回ターンの済みは成功で終わったときだけ立つ（「初回ターン」）。
-  5. 生成の可否（`CanGenerateMockProject`）と無効の理由の文（`MockGenDisabledReason`）は別のコードで、食い違わない。生成中は会話の開始も送信もできず、止めている理由（`ConversationDisabledReason`）を出す。
-- ガード：`MockDialogTests`（どの行でも組 `MockDialogHarness` が上の 5 つと、拒否の後も保留のターン・止めた生成を進めれば実行中が解けること・画面一覧と選択の整合・添付の範囲・フルパスでないフォルダで開始できないことを見張る。行 `backend-switch-during-turn-is-refused-and-turn-still-completes`・`folder-change-during-turn-is-refused-and-turn-still-completes`・`converse-streaming-ends-when-turn-*`・`generate-reason-is-turn-in-progress-during-turn` ほか）。mutation 実証済み。
-  - 状態 × 手の種類は、原理的に起こり得ない 4 組（受け入れ）と生成中の出力（網羅しない組・P5 の製品の候補＝生成中も設計書がモックフォルダへ README.md を書き、生成中に会話を止める理由と食い違う）を除いて、全部を行が触る。
-  - クリアの本体にはターン中・生成中の防御が無く、画面の経路は `CanClear`（`ClearCommand.CanExecute`）だけが守る（行 `turn-reset-disabled-until-turn-ends`・`generate-run-reset-disabled-until-generation-ends`）。
+  5. 生成の可否（`CanGenerateMockProject`）と無効の理由の文（`MockGenDisabledReason`）は別のコードで、食い違わない。生成中は会話の開始も送信もできず、止めている理由（`ConversationDisabledReason`）を出す。生成中は設計書も出力しない（`CanExportDesignDoc`。生成中はダイアログからモックフォルダへ書かない。単一 HTML は保存先にだけ書くので出せる）。
+  6. 押せない手は、直接実行しても何も変えない。CommunityToolkit のコマンドの `Execute` / `ExecuteAsync` は CanExecute を見ないので、CanExecute を持つコマンドの本体はどれも先頭で同じ判定（`CanStartConversation`・`CanSendMessage`・`CanClear`・`CanExportDesignDoc` など）を見て断る。画面の守りだけだと、ターン中のクリアがセッションを切り離して固まり、開始が使えないフォルダ（相対パスなら作業フォルダ、モックでない既存フォルダ）へ mock.json を作る。
+- 使えないフォルダ（会話を開始できない）は 5 種：相対パス・モックでない既存フォルダ・壊れた mock.json・画面のファイル名が不正な mock.json・一覧を読めない既存フォルダ。一覧を読めないフォルダは壊れた mock.json と同じく `Mock_MockFolderOpenFailedFormat` で知らせて開始を止める（中身を確かめられないフォルダへ mock.json を作りに行かない。列挙の例外を `OnMockFolderChanged` が受ける）。
+- ガード：`MockDialogTests`（どの行でも組 `MockDialogHarness` が上の 6 つと、拒否の後も保留のターン・止めた生成を進めれば実行中が解けること・画面一覧と選択の整合・添付の範囲・フルパスでないフォルダで開始できないことを見張る。行 `backend-switch-during-turn-is-refused-and-turn-still-completes`・`folder-change-during-turn-is-refused-and-turn-still-completes`・`converse-streaming-ends-when-turn-*`・`generate-reason-is-turn-in-progress-during-turn` ほか）。mutation 実証済み。
+  - 6 は、組が行の終わり（保留のターン・止めた生成を進める前）に VM のコマンドのプロパティを全部集め、CanExecute が偽のものを直接実行して、状態の写し（VM の値・メッセージ・エンジン・ダイアログ・ファイルダイアログ・生成器・行の一時フォルダのファイルの内容）が変わらないことを見る。コマンドを足すと自動で対象に入り、集め方は `MockDialogTests.RefusedCommands_CollectEveryCommand` が VM の `[RelayCommand]` のメソッドとの 1 対 1 で照合する。
+  - 本体の判定を直接実行する行：クリア（`turn-reset-disabled-until-turn-ends`・`generate-run-reset-disabled-until-generation-ends`）・使えないフォルダでの開始（`blocked-converse-start-and-send-disabled-*`）・生成中の設計書（`generate-run-export-design-doc-refused-until-generation-ends`）。
+  - 状態 × 手の種類は、原理的に起こり得ない 4 組（受け入れ）を除いて、全部を行が触る。
   - 生成中のモックフォルダの変更は断らず、生成は開始時のフォルダで進んで完了が届く（特性の固定。行 `generate-run-set-folder-keeps-start-folder-and-completes`）。× で隠しても実行中のターン・生成は止めない（行 `persist-save-and-hide-keeps-running-work-*`）。
 - 表の組は記録するダイアログ・偽のファイルダイアログ・偽の生成器・4 つの接続方式の偽のエンジンを必ず渡す（省くと失敗の経路で実の MessageBox が出て止まり、PATH の claude / dotnet や実の CLI のプロセスへ行く）。行の終わりに実行中を解き、全エンジンを破棄する。
 

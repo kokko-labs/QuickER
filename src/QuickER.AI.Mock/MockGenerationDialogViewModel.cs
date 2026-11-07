@@ -230,7 +230,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// </summary>
     /// <remarks>
     /// モックプロジェクトの生成はモックフォルダを出力先へ写すため、その間のターンがモックフォルダへ書き込むと
-    /// 写した内容と食い違い得る。生成の開始がターンの実行中を拒むのと対にして、生成中は会話を止める。
+    /// 写した内容と食い違い得る。生成の開始がターンの実行中を拒むのと対にして、生成中は会話を止める
+    /// （設計書の出力も同じ理由で止める＝<see cref="CanExportDesignDoc"/>）。
     /// </remarks>
     public bool CanSendMessage =>
         _conversationStarted
@@ -264,7 +265,15 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     public bool HasScreens => _store is not null && Screens.Count > 0;
 
     /// <summary>単一 HTML を出力できるか（モックフォルダに画面が 1 つ以上あるか）</summary>
+    /// <remarks>単一 HTML は利用者が選んだ保存先にだけ書くので、ターン中・生成中も出力できる。</remarks>
     public bool CanExportBundle => HasScreens;
+
+    /// <summary>設計書（README.md）を出力できるか（画面が 1 つ以上あり、モックプロジェクトの生成中でない）</summary>
+    /// <remarks>
+    /// 設計書はモックフォルダ直下へ書く。生成中に会話を止める（<see cref="CanSendMessage"/> の remarks）のと同じく、
+    /// 生成中はダイアログからモックフォルダへ書かない。
+    /// </remarks>
+    public bool CanExportDesignDoc => HasScreens && !IsMockGenInProgress;
 
     // ── 第2ステップ: モックプロジェクト生成（Claude Code / Codex / Copilot / API キー） ──
 
@@ -706,6 +715,11 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanEditMockFolder))]
     private void BrowseMockFolder()
     {
+        if (!CanEditMockFolder)
+        {
+            return;
+        }
+
         var picked = _files.PickFolder(Strings.Mock_PickMockFolderTitle, MockFolder);
 
         if (!string.IsNullOrWhiteSpace(picked))
@@ -771,11 +785,31 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 SelectedScreen = Screens[0];
             }
         }
-        else if (Directory.Exists(folder) && Directory.EnumerateFileSystemEntries(folder).Any())
+        else if (Directory.Exists(folder))
         {
-            // HTML 等はあるが mock.json が無い既存フォルダ: モックフォルダではないので開始を抑止する
-            _folderBlocked = true;
-            StatusMessage = Strings.Mock_NotAMockFolder;
+            bool hasEntries;
+
+            try
+            {
+                hasEntries = Directory.EnumerateFileSystemEntries(folder).Any();
+            }
+            catch (Exception ex)
+            {
+                // 一覧を読めない既存フォルダ（ACL で一覧を拒否など）は中身を確かめられない。新規として扱うと
+                // 見えないフォルダへ mock.json を作りに行くので、壊れた mock.json と同じく開けないフォルダとして
+                // 会話の開始を止める。列挙は同期で取り消しのトークンを受けないので、取り消しの例外を飲むことはない
+                _folderBlocked = true;
+                StatusMessage = string.Format(Strings.Mock_MockFolderOpenFailedFormat, ex.Message);
+                NotifyFolderStateChanged();
+                return;
+            }
+
+            if (hasEntries)
+            {
+                // HTML 等はあるが mock.json が無い既存フォルダ: モックフォルダではないので開始を抑止する
+                _folderBlocked = true;
+                StatusMessage = Strings.Mock_NotAMockFolder;
+            }
         }
 
         // 空フォルダ・未存在フォルダは新規として扱う（会話開始時に CreateNew する）
@@ -788,6 +822,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(HasScreens));
         OnPropertyChanged(nameof(CanExportBundle));
+        OnPropertyChanged(nameof(CanExportDesignDoc));
         ExportBundleCommand.NotifyCanExecuteChanged();
         ExportDesignDocCommand.NotifyCanExecuteChanged();
         NotifyReadinessChanged();
@@ -839,6 +874,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
         OnPropertyChanged(nameof(HasScreens));
         OnPropertyChanged(nameof(CanExportBundle));
+        OnPropertyChanged(nameof(CanExportDesignDoc));
         ExportBundleCommand.NotifyCanExecuteChanged();
         ExportDesignDocCommand.NotifyCanExecuteChanged();
         NotifyMockGenChanged();
@@ -931,10 +967,20 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <remarks>
     /// 既存モックフォルダを開いていれば再開フロー、空／未存在フォルダなら新規作成フローで始める。
     /// 画面・サイドバー・プレビューはフォルダのライブ状態に紐づくため、会話をリセットしても維持される。
+    /// <para>
+    /// コマンドの実行は CanExecute を見ないので、本体も <see cref="CanStartConversation"/> で断る（使えないフォルダ・
+    /// ターン中・生成中・未接続では何もしない。通すと相対パスなら作業フォルダへ、モックでない既存フォルダなら
+    /// そこへ mock.json を作る）。ほかのコマンドの本体も、それぞれの CanExecute と同じ判定で断る。
+    /// </para>
     /// </remarks>
     [RelayCommand(CanExecute = nameof(CanStartConversation))]
     private void StartConversation()
     {
+        if (!CanStartConversation)
+        {
+            return;
+        }
+
         // 会話開始時にフォルダをストアとして確定する
         if (_store is null)
         {
@@ -999,7 +1045,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanSendMessage))]
     private async Task SendMessageAsync()
     {
-        if (_session is null || string.IsNullOrWhiteSpace(UserInput))
+        if (!CanSendMessage || _session is null)
         {
             return;
         }
@@ -1065,17 +1111,19 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(IsTurnInProgress))]
     private async Task InterruptAsync()
     {
-        if (_session is not null)
+        if (!IsTurnInProgress || _session is null)
         {
-            await _session.InterruptAsync().ConfigureAwait(true);
+            return;
         }
+
+        await _session.InterruptAsync().ConfigureAwait(true);
     }
 
     /// <summary>モックフォルダの内容を単一 HTML へ結合してファイルへ書き出す</summary>
     [RelayCommand(CanExecute = nameof(CanExportBundle))]
     private void ExportBundle()
     {
-        if (_store is null || Screens.Count == 0)
+        if (!CanExportBundle || _store is null)
         {
             return;
         }
@@ -1127,11 +1175,12 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <remarks>
     /// 生成は <see cref="MockDesignDocExporter"/>（AI 不使用・決定的）。一度書き出せば以降は画面の保存・削除に
     /// <see cref="RegenerateDesignDocIfPresent"/> が自動追従する。BOM なし UTF-8・改行はエクスポータ既定（LF）。
+    /// モックプロジェクトの生成中は書かない（<see cref="CanExportDesignDoc"/>）。
     /// </remarks>
-    [RelayCommand(CanExecute = nameof(CanExportBundle))]
+    [RelayCommand(CanExecute = nameof(CanExportDesignDoc))]
     private void ExportDesignDoc()
     {
-        if (_store is null || Screens.Count == 0)
+        if (!CanExportDesignDoc || _store is null)
         {
             return;
         }
@@ -1199,9 +1248,19 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// 画面全体を初期状態へ戻す（確認後）。会話・入力・添付・モックフォルダの選択・第 2 ステップの入力と
     /// 結果表示をクリアする。ディスク上のモックフォルダには触れない。
     /// </summary>
+    /// <remarks>
+    /// 本体も <see cref="CanClear"/> で断る（確認も出さない）。ターン中に通すと会話のリセットでセッションを切り離し、
+    /// 届かなくなったターンの完了を待ってダイアログが固まる。生成中に通すと進捗ログ・出力フォルダ・完了表示を消した後に
+    /// 生成の完了が届く。
+    /// </remarks>
     [RelayCommand(CanExecute = nameof(CanClear))]
     private void Clear()
     {
+        if (!CanClear)
+        {
+            return;
+        }
+
         if (!_dialogs.Confirm(Strings.Mock_ClearConfirm, Strings.Mock_WindowTitle))
         {
             return;
@@ -1247,7 +1306,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanGenerateMockProject))]
     private async Task GenerateMockProjectAsync()
     {
-        if (_store is null || Screens.Count == 0)
+        if (!CanGenerateMockProject || _store is null)
         {
             return;
         }
@@ -1478,6 +1537,11 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(IsMockGenInProgress))]
     private async Task InterruptMockGenAsync()
     {
+        if (!IsMockGenInProgress)
+        {
+            return;
+        }
+
         _mockGenCts?.Cancel();
         await _mockProjectGenerator.InterruptAsync().ConfigureAwait(true);
     }
@@ -1590,6 +1654,11 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(ShowOpenFolder))]
     private void OpenOutputFolder()
     {
+        if (!ShowOpenFolder)
+        {
+            return;
+        }
+
         var folder = _lastGeneratedOutputDirectory;
 
         if (folder is not null && Directory.Exists(folder))
@@ -2177,6 +2246,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(CanStartConversation));
         OnPropertyChanged(nameof(CanSendMessage));
         OnPropertyChanged(nameof(CanExportBundle));
+        OnPropertyChanged(nameof(CanExportDesignDoc));
         StartConversationCommand.NotifyCanExecuteChanged();
         SendMessageCommand.NotifyCanExecuteChanged();
         ExportBundleCommand.NotifyCanExecuteChanged();

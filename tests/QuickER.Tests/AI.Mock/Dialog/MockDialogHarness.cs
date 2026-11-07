@@ -1,7 +1,10 @@
 using System.ComponentModel;
 using System.IO;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text.Json;
 using AwesomeAssertions;
+using CommunityToolkit.Mvvm.Input;
 using QuickER.AI;
 using QuickER.AI.Mock;
 using QuickER.AI.UI;
@@ -35,9 +38,11 @@ namespace QuickER.Tests.AI.Mock.Dialog;
 /// <item>選択中の画面は null か画面一覧に実在するインスタンスで、画面があること（HasScreens）は画面一覧が空でないことと一致する（:264・:801-845）。</item>
 /// <item>添付の対応範囲は接続方式（API キーならプロバイダー）から決まる範囲と常に一致する（:651-655・:2010-2028）。</item>
 /// <item>フルパスでないモックフォルダでは会話を開始できない（:739-747）。</item>
+/// <item>押せない手（CanExecute が偽のコマンド）は、直接実行しても何も変えない。コマンドは VM のプロパティから
+/// <see cref="MockDialogRefusedCommands.Collect"/> が集める（コマンドを足すと自動で対象に入る）。</item>
 /// </list>
 /// 7・8 は VM のどの変更通知の後にも、11 はモックフォルダの変更通知の後に、2・3・10 は接続・フォルダの変更通知の中で見張り、
-/// 1・4・5・6・9 と 7〜11 の最後の状態は行の終わりに見る。
+/// 1・4・5・6・9 と 7〜11 の最後の状態は行の終わりに見る。12 は行の終わり（保留のターン・止めた生成を進める前）に見る。
 /// </remarks>
 internal sealed class MockDialogHarness : IDisposable
 {
@@ -61,12 +66,22 @@ internal sealed class MockDialogHarness : IDisposable
     private readonly Dictionary<FakeChatEngine, List<(int SentCount, bool Success)>> _completions =
     [];
     private readonly List<Task> _heldGenerations = [];
+    private readonly List<Task> _refusedRuns = [];
+    private readonly List<(string Folder, FileSystemAccessRule Rule)> _denied = [];
 
     /// <summary>組を作る</summary>
     public MockDialogHarness()
     {
         SettingsFolder = Path.Combine(_folder.Path, "settings");
+        _relativeFolderExisted = Directory.Exists(Path.GetFullPath(RelativeMockFolder));
     }
+
+    /// <summary>行の始まりに、相対パスのモックフォルダが作業フォルダに既にあったか</summary>
+    /// <remarks>
+    /// 開始の本体が使えないフォルダを断らないと、相対パスのモックフォルダを作業フォルダ（テストの出力フォルダ）に作り、
+    /// 相対パスを見るほかの行まで赤にする。行が作ったものは <see cref="Dispose"/> で消す。
+    /// </remarks>
+    private readonly bool _relativeFolderExisted;
 
     /// <summary>行の一時フォルダ</summary>
     public string BaseFolder => _folder.Path;
@@ -339,7 +354,7 @@ internal sealed class MockDialogHarness : IDisposable
     }
 
     /// <summary>
-    /// モックフォルダに使えないフォルダを作り、VM のモックフォルダへ入れる（4 種は <see cref="BlockedKind"/>）。
+    /// モックフォルダに使えないフォルダを作り、VM のモックフォルダへ入れる（5 種は <see cref="BlockedKind"/>）。
     /// 会話を開始できなくなり、状態の文に理由が出る
     /// </summary>
     /// <param name="vm">対象の VM</param>
@@ -372,11 +387,33 @@ internal sealed class MockDialogHarness : IDisposable
                 var json = File.ReadAllText(manifestPath);
                 File.WriteAllText(manifestPath, json.Replace("OrderList.html", "../evil.html"));
                 break;
+            case BlockedKind.Unlistable:
+                Directory.CreateDirectory(folder);
+                File.WriteAllText(Path.Combine(folder, "index.html"), "<html></html>");
+                DenyListing(folder);
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(kind), kind, null);
         }
 
         vm.MockFolder = folder;
+    }
+
+    /// <summary>フォルダへ、今のユーザーに対する一覧の読み取りの拒否の ACE を付ける（<see cref="Dispose"/> で外す）</summary>
+    private void DenyListing(string folder)
+    {
+        var rule = new FileSystemAccessRule(
+            WindowsIdentity.GetCurrent().User!,
+            FileSystemRights.ListDirectory,
+            InheritanceFlags.None,
+            PropagationFlags.None,
+            AccessControlType.Deny
+        );
+        var info = new DirectoryInfo(folder);
+        var security = info.GetAccessControl();
+        security.AddAccessRule(rule);
+        info.SetAccessControl(security);
+        _denied.Add((folder, rule));
     }
 
     /// <summary>フルパスでないモックフォルダの例（<see cref="BlockedKind.Relative"/> が使う）</summary>
@@ -404,12 +441,38 @@ internal sealed class MockDialogHarness : IDisposable
             }
         }
 
+        // 不変条件 12：行の終わりの状態（ターン中・生成中・使えないフォルダなど）で、押せない手を直接実行しても何も変えない
+        // 行の中の切り離し（フォルダ・接続方式の変更）が始めた破棄はスレッドプールで走るので、終わるのを待ってから写しを採る
+        // （待たないと、検査の最中に終わった破棄を押せない手の変化と取り違える）
+        foreach (var vm in _vms)
+        {
+            if (vm.DetachedDisposalForTests is { } detached)
+            {
+                await detached.WaitAsync(Patience);
+            }
+
+            ProbeRefusedCommands(vm);
+        }
+
         // 不変条件 4：止めた生成を進め、保留のターンを終えれば、どちらの実行中も解ける
         Generator.Release();
 
         foreach (var run in _heldGenerations)
         {
             await run.WaitAsync(Patience);
+        }
+
+        // 不変条件 12 で本体が終わらなかった手も、止めた生成・保留のターンを進めれば終わる（違反は記録済み）
+        foreach (var run in _refusedRuns)
+        {
+            try
+            {
+                await run.WaitAsync(Patience);
+            }
+            catch (Exception ex)
+            {
+                _violations.Add($"不変条件 12：押せない手の本体が例外で終わった（{ex.Message}）");
+            }
         }
 
         foreach (var engine in Engines.Where(HasPendingTurn).ToList())
@@ -469,10 +532,34 @@ internal sealed class MockDialogHarness : IDisposable
 
         CheckFirstTurnModel();
 
-        _violations.Should().BeEmpty();
+        _violations.Should().BeEmpty("違反の全部：{0}", string.Join(" ／ ", _violations));
     }
 
-    public void Dispose() => _folder.Dispose();
+    /// <summary>付けた拒否の ACE を外してから（外さないと消せない）、行の一時フォルダを消す</summary>
+    public void Dispose()
+    {
+        foreach (var (folder, rule) in _denied)
+        {
+            if (!Directory.Exists(folder))
+            {
+                continue;
+            }
+
+            var info = new DirectoryInfo(folder);
+            var security = info.GetAccessControl();
+            security.RemoveAccessRule(rule);
+            info.SetAccessControl(security);
+        }
+
+        var relativeFolder = Path.GetFullPath(RelativeMockFolder);
+
+        if (!_relativeFolderExisted && Directory.Exists(relativeFolder))
+        {
+            Directory.Delete(relativeFolder, recursive: true);
+        }
+
+        _folder.Dispose();
+    }
 
     /// <summary>偽のエンジンを作り、破棄の回数と完了の記録を見張る</summary>
     private FakeChatEngine NewFakeEngine(IErDiagramToolHost toolHost)
@@ -641,6 +728,192 @@ internal sealed class MockDialogHarness : IDisposable
         }
     }
 
+    /// <summary>入力欄が空のときに不変条件 12 の間だけ入れておく入力</summary>
+    /// <remarks>
+    /// 送信の本体は入力が空なら何もしないので、空のまま流すとターン中・生成中の送信の本体の判定を確かめられない。
+    /// </remarks>
+    private const string ProbeInput = "押せない手の見本の入力";
+
+    /// <summary>
+    /// 不変条件 12：押せない手（CanExecute が偽のコマンド）を 1 つずつ直接実行し、状態の写しが変わらないことを見る
+    /// </summary>
+    /// <remarks>
+    /// CommunityToolkit のコマンドの Execute / ExecuteAsync は CanExecute を見ないので、本体の判定だけが守る。
+    /// 本体が同期で終わらなければ（止めた生成・保留のターンを待つ本体へ入った）違反とし、行の終わりに待つ。
+    /// </remarks>
+    private void ProbeRefusedCommands(MockGenerationDialogViewModel vm)
+    {
+        var filledInput = string.IsNullOrEmpty(vm.UserInput);
+
+        if (filledInput)
+        {
+            vm.UserInput = ProbeInput;
+        }
+
+        try
+        {
+            foreach (var (name, command) in MockDialogRefusedCommands.Collect(vm))
+            {
+                if (command.CanExecute(null))
+                {
+                    continue;
+                }
+
+                var before = Snapshot(vm);
+                var detached = vm.DetachedDisposalForTests;
+                Task run;
+
+                try
+                {
+                    run = command is IAsyncRelayCommand asyncCommand
+                        ? asyncCommand.ExecuteAsync(null)
+                        : ExecuteSync(command);
+                }
+                catch (Exception ex)
+                {
+                    _violations.Add(
+                        $"不変条件 12：押せない {name} を直接実行すると投げた（{ex.Message}）"
+                    );
+                    continue;
+                }
+
+                if (!run.IsCompleted)
+                {
+                    _violations.Add($"不変条件 12：押せない {name} の本体が同期で終わらない");
+                    _refusedRuns.Add(run);
+                }
+
+                var after = Snapshot(vm);
+
+                if (!ReferenceEquals(detached, vm.DetachedDisposalForTests))
+                {
+                    _violations.Add($"不変条件 12：押せない {name} がセッションを切り離した");
+                }
+
+                if (before != after)
+                {
+                    _violations.Add(
+                        $"不変条件 12：押せない {name} を直接実行すると状態が変わった（{FirstDifference(before, after)}）"
+                    );
+                }
+            }
+        }
+        finally
+        {
+            if (filledInput && vm.UserInput == ProbeInput)
+            {
+                vm.UserInput = string.Empty;
+            }
+        }
+    }
+
+    /// <summary>同期のコマンドを実行し、終わった Task を返す</summary>
+    private static Task ExecuteSync(System.Windows.Input.ICommand command)
+    {
+        command.Execute(null);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 不変条件 12 の状態の写し（VM の値・メッセージ・画面一覧・添付・エンジン・ダイアログ・ファイルダイアログ・生成器・
+    /// 開いたフォルダ・行の一時フォルダと相対パスのモックフォルダのファイルの内容）。1 行 1 項目
+    /// </summary>
+    private string Snapshot(MockGenerationDialogViewModel vm)
+    {
+        var lines = new List<string>
+        {
+            $"モックフォルダ={vm.MockFolder}",
+            $"出力フォルダ={vm.OutputFolder}",
+            $"プロジェクト名={vm.ProjectName}",
+            $"追加の指示={vm.MockGenInstructions}",
+            $"入力={vm.UserInput}",
+            $"状態の文={vm.StatusMessage}",
+            $"進捗ログ={vm.MockGenLog}",
+            $"ターン中={vm.IsTurnInProgress}",
+            $"生成中={vm.IsMockGenInProgress}",
+            $"生成の完了={vm.MockGenCompleted}",
+            $"生成の成功={vm.MockGenSucceeded}",
+            $"生成ターゲット={vm.SelectedMockProjectTarget}",
+            $"接続方式={vm.Connection.SelectedBackend}",
+            $"画面一覧={string.Join(",", vm.Screens.Select(screen => screen.File))}",
+            $"選択中の画面={vm.SelectedScreen?.File}",
+            $"添付={vm.Attachments.Items.Count}",
+            $"メッセージ={vm.Messages.Count}",
+        };
+        lines.AddRange(
+            vm.Messages.Select(
+                (message, i) =>
+                    $"メッセージ {i}={message.Role}|{message.IsStreaming}|{message.Content}"
+            )
+        );
+        lines.Add($"エンジン={Engines.Count}");
+        lines.AddRange(
+            Engines.Select(
+                (engine, i) =>
+                    $"エンジン {i}=送信 {engine.SentPrompts.Count}・中断 {engine.InterruptCount}・破棄 {engine.DisposeCount}"
+            )
+        );
+        lines.Add(
+            $"ダイアログ=確認 {Dialogs.ConfirmMessages.Count}・警告の確認 {Dialogs.WarningConfirmMessages.Count}・"
+                + $"内訳つきの確認 {Dialogs.WarningConfirmDetailsMessages.Count}・情報 {Dialogs.InformationMessages.Count}・"
+                + $"エラー {Dialogs.ErrorMessages.Count}・内訳つきの情報 {Dialogs.InformationDetailsMessages.Count}・"
+                + $"内訳つきのエラー {Dialogs.ErrorDetailsMessages.Count}"
+        );
+        lines.Add(
+            $"ファイルダイアログ=保存先 {Files.PickSaveFileCallCount}・フォルダ {Files.PickFolderCallCount}"
+        );
+        lines.Add($"生成器=生成 {Generator.GenerateCallCount}・中断 {Generator.InterruptCount}");
+        lines.Add($"開いたフォルダ={string.Join(",", Opened)}");
+        lines.AddRange(FileLines(BaseFolder, "一時フォルダ"));
+        lines.AddRange(FileLines(Path.GetFullPath(RelativeMockFolder), "相対パスのモックフォルダ"));
+        return string.Join("\n", lines);
+    }
+
+    /// <summary>状態の写しのファイルの列挙（読めないフォルダは飛ばし、隠しのファイルも数える）</summary>
+    private static readonly EnumerationOptions SnapshotEnumeration = new()
+    {
+        RecurseSubdirectories = true,
+        IgnoreInaccessible = true,
+        AttributesToSkip = 0,
+    };
+
+    /// <summary>フォルダの下のファイルの相対パスと内容のハッシュ（フォルダが無ければ「なし」の 1 行）</summary>
+    private static IEnumerable<string> FileLines(string folder, string label)
+    {
+        if (!Directory.Exists(folder))
+        {
+            return [$"{label}=なし"];
+        }
+
+        return Directory
+            .EnumerateFiles(folder, "*", SnapshotEnumeration)
+            .Order(StringComparer.Ordinal)
+            .Select(path =>
+                $"{label}/{Path.GetRelativePath(folder, path)}={Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path)))}"
+            )
+            .Prepend($"{label}=あり");
+    }
+
+    /// <summary>2 つの写しの最初に食い違う行（前 → 後）</summary>
+    private static string FirstDifference(string before, string after)
+    {
+        var beforeLines = before.Split('\n');
+        var afterLines = after.Split('\n');
+
+        for (var i = 0; i < Math.Max(beforeLines.Length, afterLines.Length); i++)
+        {
+            var b = i < beforeLines.Length ? beforeLines[i] : "（なし）";
+            var a = i < afterLines.Length ? afterLines[i] : "（なし）";
+
+            if (b != a)
+            {
+                return $"{b} → {a}";
+            }
+        }
+
+        return "（違いなし）";
+    }
+
     /// <summary>ターンの外で応答中の吹き出しが残っていれば違反を記録する（不変条件 1）</summary>
     private void CheckNoStreaming(MockGenerationDialogViewModel vm, string when)
     {
@@ -675,6 +948,31 @@ internal sealed class MockDialogHarness : IDisposable
     }
 }
 
+/// <summary>不変条件 12 の対象のコマンドを集める（VM のコマンドのプロパティを全部。コマンドを足すと自動で入る）</summary>
+internal static class MockDialogRefusedCommands
+{
+    /// <summary>
+    /// 公開のインスタンスのプロパティのうち、型がコマンド（<see cref="System.Windows.Input.ICommand"/>）のものを名前の順に返す
+    /// </summary>
+    /// <param name="target">VM（自己検査では偽の型）</param>
+    public static IReadOnlyList<(string Name, System.Windows.Input.ICommand Command)> Collect(
+        object target
+    ) =>
+        target
+            .GetType()
+            .GetProperties(
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance
+            )
+            .Where(property =>
+                typeof(System.Windows.Input.ICommand).IsAssignableFrom(property.PropertyType)
+            )
+            .OrderBy(property => property.Name, StringComparer.Ordinal)
+            .Select(property =>
+                (property.Name, (System.Windows.Input.ICommand)property.GetValue(target)!)
+            )
+            .ToList();
+}
+
 /// <summary>モックフォルダに指定できない（会話を開始できない）フォルダの種類（<see cref="MockDialogHarness.BlockFolder"/>）</summary>
 internal enum BlockedKind
 {
@@ -689,4 +987,7 @@ internal enum BlockedKind
 
     /// <summary>画面のファイル名が不正な（手編集で壊れた）mock.json のフォルダ</summary>
     InvalidScreenName,
+
+    /// <summary>中身のある既存フォルダで、一覧の読み取りを拒否されたもの（ACL）</summary>
+    Unlistable,
 }
