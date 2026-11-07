@@ -13,6 +13,27 @@ internal static partial class ConnectionSettingsRows
     private static IEnumerable<ScenarioRow<ConnectionSettingsCase>> CodexRows() =>
         [
             Row(
+                "codex-defaults-openai-provider-and-default-model",
+                "Codex の既定はプロバイダー openai・モデルは既定のモデル（設定ファイルが無いまま読み込んでも同じ）",
+                [(Codex, Defaults)],
+                h =>
+                {
+                    // 既定のモデルの正本は AiModelCatalog.DefaultOpenAiModel（その XmlDoc）。組の config.toml は空なので機械に依らない
+                    var vm = h.Create();
+
+                    vm.CodexModelProvider.Should().Be("openai");
+                    vm.CodexModel.Should().Be(AiModelCatalog.DefaultOpenAiModel);
+
+                    vm.LoadSettings();
+
+                    vm.CodexModelProvider.Should().Be("openai");
+                    vm.CodexModel.Should().Be(AiModelCatalog.DefaultOpenAiModel);
+                    File.Exists(h.SettingsPath)
+                        .Should()
+                        .BeFalse("読み込みは設定ファイルを作らない");
+                }
+            ),
+            Row(
                 "codex-candidates-openai-first-and-deduped",
                 "Codex 候補は openai 先頭固定・config.toml のプロバイダーを dedup 追加",
                 [(Codex, Load)],

@@ -45,9 +45,10 @@ public class AiChatDialogForceCloseTests
         );
 
     /// <summary>
-    /// ForceClose が中断だけで終わらず、常駐プロセスを抱えるエンジンまで破棄することを検証する。
+    /// ターンの実行中の ForceClose が、実行中のターンの中断を要求し、中断だけで終わらず、常駐プロセスを抱えるエンジンまで破棄することを検証する。
     /// </summary>
-    [Fact(DisplayName = "ForceClose はエンジンの破棄まで通す")]
+    /// <remarks>VM の段の順と期待はチャットのダイアログの表（ChatDialogTests の行 shutdown-force-close-steps-*）も見る。ここはウィンドウの配線を見る。</remarks>
+    [Fact(DisplayName = "ターンの実行中の ForceClose は中断を要求し、エンジンの破棄まで通す")]
     public void ForceClose_DisposesEngines()
     {
         WpfApplicationTestSupport.RunSta(() =>
@@ -86,11 +87,15 @@ public class AiChatDialogForceCloseTests
             dialog.Show();
             WpfApplicationTestSupport.DoEvents();
 
+            // ターンを実行中にしてから閉じる（ForceClose の最初の段 RequestInterrupt はターン中だけ中断を要求する）
+            ChatDialogHarness.StartCopilotTurn(vm);
+
             dialog.ForceClose();
 
             AllEnginesDisposed(codex, claudeCode, copilot)
                 .Should()
                 .BeTrue("codex app-server・copilot ランタイムは常駐するため破棄が要る");
+            copilot.AbortCallCount.Should().Be(1, "実行中のターンは打ち切る");
             codex.DisposeCount.Should().Be(1);
             claudeCode.DisposeCount.Should().Be(1);
             copilot.DisposeCount.Should().Be(1);

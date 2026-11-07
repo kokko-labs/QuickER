@@ -166,6 +166,36 @@ internal sealed class ChatDialogHarness : IDisposable
         vm.IsTurnInProgress.Should().BeTrue();
     }
 
+    /// <summary>
+    /// Copilot へ切り替えて会話の開始を門で止める（開始待ちの状態にする）。門を開けて開始を待つのは行
+    /// </summary>
+    public (Task Starting, TaskCompletionSource Gate) BeginCopilotStart(AiChatDialogViewModel vm)
+    {
+        vm.Connection.SelectedBackend = ErChatBackendKind.Copilot;
+        var gate = new TaskCompletionSource();
+        Copilot.StartSessionGate = gate.Task;
+        var starting = vm.StartConversationCommand.ExecuteAsync(null);
+
+        // 開始待ちの印（CanStartConversation と CanChangeBackend が偽）が立っている
+        vm.CanStartConversation.Should().BeFalse();
+        vm.CanChangeBackend.Should().BeFalse();
+        return (starting, gate);
+    }
+
+    /// <summary>
+    /// アプリの終了の経路（<see cref="AiChatDialog.ForceClose"/>）が VM に対して行う段を、同じ順
+    /// （中断の要求 → 設定の保存 → エンジンの破棄）で流す
+    /// </summary>
+    /// <remarks>ウィンドウが段をこの順で呼ぶ配線は AiChatDialogForceCloseTests が実ウィンドウで見る。</remarks>
+    public static void RunForceCloseSteps(AiChatDialogViewModel vm)
+    {
+        vm.RequestInterrupt();
+        vm.SaveSettings();
+
+        // 破棄はスレッドプールで走る。全件の並列実行でプールが詰まっても届くまで待てる上限にする
+        vm.ShutdownEngines(TimeSpan.FromSeconds(60));
+    }
+
     /// <summary>書式文字列の先頭（最初のプレースホルダより前）を返す（文言の照合用）</summary>
     public static string FormatPrefix(string format) => format[..format.IndexOf('{')];
 

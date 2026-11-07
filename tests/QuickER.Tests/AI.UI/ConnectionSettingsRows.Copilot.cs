@@ -28,6 +28,45 @@ internal static partial class ConnectionSettingsRows
                 }
             ),
             Row(
+                "claude-code-defaults-empty-model",
+                "Claude Code のモデルの既定は空（CLI の既定に任せる。設定ファイルが無いまま読み込んでも同じ）",
+                [(ClaudeCode, Defaults)],
+                h =>
+                {
+                    // 既定の正本は AiModelCatalog.DefaultClaudeCodeModel（空＝CLI の既定。その XmlDoc）
+                    var vm = h.Create();
+
+                    vm.ClaudeCodeModel.Should().Be(AiModelCatalog.DefaultClaudeCodeModel);
+                    vm.ClaudeCodeModelCandidates.Should()
+                        .StartWith(AiModelCatalog.DefaultClaudeCodeModel);
+
+                    vm.LoadSettings();
+
+                    vm.ClaudeCodeModel.Should().Be(AiModelCatalog.DefaultClaudeCodeModel);
+                }
+            ),
+            Row(
+                "claude-code-model-change-without-save-is-not-persisted",
+                "Claude Code のモデルを変えるだけでは保存されない（変更通知は出る・設定ファイルを作らない・読み直しは既定のまま）",
+                [(ClaudeCode, Change)],
+                h =>
+                {
+                    var vm = h.Create();
+                    vm.LoadSettings();
+                    var changed = ConnectionSettingsHarness.RecordChanges(vm);
+
+                    vm.ClaudeCodeModel = "opus";
+
+                    changed.Should().Contain(nameof(vm.ClaudeCodeModel));
+                    File.Exists(h.SettingsPath).Should().BeFalse("保存は SaveSettings の手だけ");
+
+                    var reloaded = h.Create();
+                    reloaded.LoadSettings();
+
+                    reloaded.ClaudeCodeModel.Should().Be(AiModelCatalog.DefaultClaudeCodeModel);
+                }
+            ),
+            Row(
                 "copilot-available-models-fill-candidates-as-non-removable",
                 "Copilot 候補は実行時列挙が上段（削除不可）",
                 [(Copilot, Change)],

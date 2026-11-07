@@ -39,6 +39,7 @@ namespace QuickER.Tests.Db.UI.ImportSync;
 /// <item>実行器を呼んだら、結果はモーダル 1 件（失敗・例外は ShowError・コミットは ShowInformation）で知らせ、どの結果でも差分を取り直す。自動で閉じるのはコミットし、取り直しが成功し、差分が 0 件のときだけ。コミットの後の取り直しが失敗したら閉じずに ShowError をもう 1 件出す（成功のモーダルの後に黙って閉じない）。失敗・例外の後の取り直しの失敗はステータス行だけ（失敗のモーダルは出した後で、閉じないので理由が残る）（:403-464）。</item>
 /// <item>取り直しが失敗したら、差分・スクリプトを残さない（差分 0 件・HasDiff 偽・スクリプト空。:255-275）。</item>
 /// <item>閉じるのは実行中でないときだけで、閉じるときは CloseAction(true)（:671-680）。</item>
+/// <item>再計算・実行の最中（IsBusy）に始めた再計算は、取込を呼ばない（再計算中の実行・実行中の再計算を作らない。:143-148）。</item>
 /// </list>
 /// 8・9 は VM の変更通知とモーダルの直前でも見張り、ほかは手の後と行の終わりに見る。
 /// </remarks>
@@ -478,7 +479,18 @@ internal sealed class ImportSyncHarness
 
     private async Task RefreshCoreAsync(SchemaSyncDialogViewModel vm)
     {
+        var importer = _providers[vm].Importer;
+        var wasBusy = vm.IsBusy;
+        var importCalls = importer.Calls;
+
         await vm.RefreshCommand.ExecuteAsync(null);
+
+        // 不変条件 14（最中に始めた再計算は取込を呼ばない）
+        if (wasBusy && importer.Calls != importCalls)
+        {
+            Violate("不変条件 14：再計算・実行の最中に始めた再計算が DB を読み直した");
+        }
+
         CheckClearedAfterFailedRefresh(vm, "再計算");
     }
 

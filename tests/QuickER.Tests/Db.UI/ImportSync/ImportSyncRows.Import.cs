@@ -250,6 +250,55 @@ internal static partial class ImportSyncRows
                 }
             ),
             Row(
+                "import-failure-on-clean-diagram-shows-error-without-confirm",
+                "中身のある未保存でない図への取込が例外で失敗すると、確認を出さずにエラー 1 件だけで知らせ、図を置き換えない",
+                [(ImportClean, Fail)],
+                async h =>
+                {
+                    var host = ImportSyncHarness.Host(DiagramWith("Existing"));
+                    var provider = ImportSyncHarness.ImportProvider([]);
+                    provider.Importer.Fail("boom");
+                    var presenter = ImportSyncHarness.Presenter(host);
+                    presenter.Result = Picked(provider);
+
+                    await h.RunImportAsync(host, presenter);
+
+                    // 失敗は確認より前（取込の段）で起きるので、通常・警告つきのどちらの確認も出さない
+                    // （src/QuickER.Db.UI/DbImportCommandService.cs:117-124。終端の通知はちょうど 1 件）
+                    h.Dialogs.ConfirmMessages.Should().BeEmpty();
+                    h.Dialogs.WarningConfirmMessages.Should().BeEmpty();
+                    host.Replaced.Should().BeEmpty();
+                    h.Dialogs.ErrorMessages.Should()
+                        .Equal(string.Format(DbStrings.Db_ImportFailed, "boom"));
+                    h.Dialogs.InformationMessages.Should().BeEmpty();
+                    h.Dialogs.InformationDetailsMessages.Should().BeEmpty();
+                }
+            ),
+            Row(
+                "import-dirty-picker-cancelled-asks-nothing-and-keeps-diagram",
+                "未保存の図で接続ダイアログを取り消すと、確認も通知も出さず、図を読まず置き換えない",
+                [(ImportDirty, Pick)],
+                async h =>
+                {
+                    var host = ImportSyncHarness.Host(DiagramWith("Existing"), dirty: true);
+                    var presenter = ImportSyncHarness.Presenter(host);
+
+                    await h.RunImportAsync(host, presenter);
+
+                    // 確認の記録が空であることをここで明示する。組の不変条件 5 は「確認が出たときの水準」だけを見るので、
+                    // 「接続の選択より前に確認を出す」退行はこの表明でしか捉えられない
+                    // （src/QuickER.Db.UI/DbImportCommandService.cs:56-59。取り消しは何も出さずに戻る）
+                    host.Replaced.Should().BeEmpty();
+                    host.Reads.Should().BeEmpty();
+                    h.Dialogs.ConfirmMessages.Should().BeEmpty();
+                    h.Dialogs.WarningConfirmMessages.Should().BeEmpty();
+                    h.Dialogs.WarningConfirmDetailsMessages.Should().BeEmpty();
+                    h.Dialogs.ErrorMessages.Should().BeEmpty();
+                    h.Dialogs.InformationMessages.Should().BeEmpty();
+                    h.Dialogs.InformationDetailsMessages.Should().BeEmpty();
+                }
+            ),
+            Row(
                 "import-empty-diagram-replaced-with-target-dbms",
                 "失うものが無い図は確認なしで、取込先の方言を持つ図へ置き換え、完了を単文のモーダルで知らせる（内訳は出さない）",
                 [(ImportEmpty, Apply)],

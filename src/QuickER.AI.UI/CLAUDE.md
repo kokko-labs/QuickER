@@ -56,4 +56,4 @@ AI の回答は外部の入力なので、組み立て（`ChatMarkdownRenderer`�
 - 破棄は必ずスレッドプールで走らせて上限つきで待つ。終了経路は UI スレッドなので、直接待つとデッドロックし得るのと、ハングした破棄でアプリの終了を長く止めないため。上限は既定 3 秒。
 - 個々のエンジンの破棄は独立で、1 つの失敗が他を止めない。この作法の正本は `EngineShutdown.DisposeAll`。
 - 各段の例外の受け止め（`ShutdownSteps.Run`）と終了の連鎖は `src/QuickER.Gui/CLAUDE.md`「終了の連鎖」を参照する。モック生成の追加の段（プローブ用エンジンの破棄）は `src/QuickER.AI.Mock/CLAUDE.md`「ForceClose」を参照する。
-- ガード：`AiChatDialogForceCloseTests`（ForceClose はエンジンの破棄まで通す）・`ChatDialogTests`（行 `shutdown-disposes-all-engines`＝ShutdownEngines は全エンジンを破棄する・`shutdown-hanging-dispose-returns-within-timeout`＝破棄がハングしても上限で戻る）・`EngineShutdownTests`。
+- ガード：`AiChatDialogForceCloseTests`（ターンの実行中の ForceClose は中断を要求し、エンジンの破棄まで通す＝ウィンドウの配線）・`ChatDialogTests`（行 `shutdown-disposes-all-engines`＝ShutdownEngines は全エンジンを破棄する・`shutdown-hanging-dispose-returns-within-timeout`＝破棄がハングしても上限で戻る・`shutdown-force-close-steps-*`＝ForceClose の VM の段をターン中・会話中で流す・`shutdown-while-starting-returns-and-disposes-all-engines`＝会話の開始待ちでも破棄は戻る）・`EngineShutdownTests`。

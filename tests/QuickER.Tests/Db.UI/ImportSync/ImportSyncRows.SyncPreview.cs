@@ -358,6 +358,36 @@ internal static partial class ImportSyncRows
                     h.Closes(vm).Should().Equal(true);
                 }
             ),
+            Row(
+                "sync-dialog-close-after-refresh-closes-without-confirm",
+                "特性の固定（文書に定めが無い今の振る舞い）：差分を再計算した後（未実行のスクリプトがあるとき）も、確認を出さずに閉じる",
+                [(SyncDiff, Close)],
+                async h =>
+                {
+                    var (live, target) = AddColumnScenario();
+                    var provider = ImportSyncHarness.SyncProvider(new SqliteProvider(), live);
+                    var vm = h.CreateSync(
+                        provider,
+                        new DbConnectionSettings { FilePath = "shop.db" },
+                        target
+                    );
+                    await h.RefreshAsync(vm);
+                    vm.ScriptPreview.Should().NotBeEmpty();
+
+                    h.Close(vm);
+
+                    // 未実行のスクリプトを捨てることを確認しない（src/QuickER.Db.UI/SchemaSyncDialogViewModel.cs:672-680 の Close は
+                    // IsExecuting の門と CloseAction(true) だけ）。文書に定めができたら書き直す
+                    h.Closes(vm).Should().Equal(true);
+                    h.Dialogs.ConfirmMessages.Should().BeEmpty();
+                    h.Dialogs.WarningConfirmMessages.Should().BeEmpty();
+                    h.Dialogs.WarningConfirmDetailsMessages.Should().BeEmpty();
+                    h.Dialogs.InformationMessages.Should().BeEmpty();
+                    h.Dialogs.InformationDetailsMessages.Should().BeEmpty();
+                    h.Dialogs.ErrorMessages.Should().BeEmpty();
+                    provider.Executor.Calls.Should().Be(0);
+                }
+            ),
         ];
 
     /// <summary>列順だけを入れ替えた差分の扱いが方言の能力で決まる行</summary>
