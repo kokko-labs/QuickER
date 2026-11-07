@@ -8,6 +8,7 @@ using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.SqlServer;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.GeneratedFixture;
 
@@ -17,7 +18,7 @@ namespace QuickER.Tests.GeneratedFixture;
 /// <remarks>
 /// <para>
 /// 通常はコミット済みファイルと、単一ソース定義から現在のテンプレートで再生成した内容の
-/// 完全一致を検証する。環境変数 <see cref="RegenEnvVar"/> が真のときは検証の代わりに
+/// 完全一致を検証する。環境変数 <see cref="RegenerationRequest.VariableName"/> が真のときは検証の代わりに
 /// コミット済みファイルを上書き（再生成）する。これにより「ドリフト検知の期待値を作る経路」と
 /// 「再生成の経路」が同一になり、両者がずれないことが構造上保証される。
 /// </para>
@@ -33,19 +34,14 @@ namespace QuickER.Tests.GeneratedFixture;
 /// </remarks>
 internal static partial class FixtureDriftHarness
 {
-    /// <summary>真のとき、ドリフト検知の代わりにコミット済みフィクスチャを上書き再生成する環境変数名</summary>
-    public const string RegenEnvVar = "QUICKER_REGEN_FIXTURES";
-
     /// <summary>ドリフト失敗メッセージに埋め込む再生成コマンドの案内</summary>
-    private const string RegenCommandHint =
+    private static readonly string RegenCommandHint =
         "再生成（リポジトリ直下・PowerShell）: "
-        + "$env:QUICKER_REGEN_FIXTURES=1; "
-        + "dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter \"FullyQualifiedName~Drift\"; "
-        + "$env:QUICKER_REGEN_FIXTURES=$null";
+        + RegenerationRequest.Command(("tests/QuickER.Tests/QuickER.Tests.csproj", "Drift"));
 
     /// <summary>
     /// 指定図・オプションから生成したコードを、コミット済みフィクスチャと照合する。
-    /// 再生成モード（<see cref="RegenEnvVar"/> 指定時）では検証せずファイルを上書きする。
+    /// 再生成モード（<see cref="RegenerationRequest.VariableName"/> 指定時）では検証せずファイルを上書きする。
     /// </summary>
     /// <param name="diagram">単一ソース定義が返す決定的な ER 図</param>
     /// <param name="options">フィクスチャ生成に用いる決定的なオプション</param>
@@ -128,7 +124,7 @@ internal static partial class FixtureDriftHarness
 
     /// <summary>
     /// ランタイムパッケージ用のチェックイン済みソース（<see cref="RuntimePackageSourceRenderer"/> 出力）を照合、
-    /// または再生成する。既存フィクスチャと同一経路（<see cref="RegenEnvVar"/>）で上書き再生成される。
+    /// または再生成する。既存フィクスチャと同一経路（<see cref="RegenerationRequest.VariableName"/>）で上書き再生成される。
     /// </summary>
     /// <param name="rendered">レンダラーが生成した現在のソース文字列（CRLF・バイト一致の基準）</param>
     /// <param name="repoRelativePath">リポジトリ直下からの相対パス（例 <c>src/QuickER.Runtime/Runtime.g.cs</c>）</param>
@@ -142,7 +138,7 @@ internal static partial class FixtureDriftHarness
     /// <summary>
     /// リポジトリ直下からの相対パスに置かれたチェックイン済みテキスト（承認ファイル等）を照合、または再生成する。
     /// 生成コードに限らず「決定的に作り直せるチェックイン済みテキスト」全般が対象で、
-    /// 既存フィクスチャと同一経路（<see cref="RegenEnvVar"/>）で上書き再生成される。
+    /// 既存フィクスチャと同一経路（<see cref="RegenerationRequest.VariableName"/>）で上書き再生成される。
     /// </summary>
     /// <param name="rendered">現在の内容から決定的に作り直したテキスト（CRLF・完全一致の基準）</param>
     /// <param name="repoRelativePath">リポジトリ直下からの相対パス（例 <c>tests/QuickER.Tests/PublicApi/QuickER.Runtime.approved.txt</c>）</param>
@@ -155,7 +151,7 @@ internal static partial class FixtureDriftHarness
     {
         var checkedInPath = ResolveRepoRelativePath(repoRelativePath);
 
-        if (IsRegenerationRequested())
+        if (RegenerationRequest.IsRequested())
         {
             // File.WriteAllText は UTF-8（BOM なし）で書き出し、改行はそのまま（レンダラー由来の CRLF を保持）
             WriteIfSubstantivelyChanged(checkedInPath, rendered);
@@ -331,7 +327,7 @@ internal static partial class FixtureDriftHarness
     {
         var fixturePath = ResolveFixturePath(outputFileName);
 
-        if (IsRegenerationRequested())
+        if (RegenerationRequest.IsRequested())
         {
             // File.WriteAllText は UTF-8（BOM なし）で書き出し、改行はそのまま（テンプレート由来の CRLF を保持）
             WriteIfSubstantivelyChanged(fixturePath, regenerated);
@@ -347,15 +343,6 @@ internal static partial class FixtureDriftHarness
                 NormalizeGeneratorVersion(regenerated),
                 $"{driftReason} 再生成先: {fixturePath}。{RegenCommandHint}"
             );
-    }
-
-    /// <summary>再生成モードが要求されているか（<see cref="RegenEnvVar"/> が 1 / true）</summary>
-    internal static bool IsRegenerationRequested()
-    {
-        var value = Environment.GetEnvironmentVariable(RegenEnvVar);
-
-        return string.Equals(value, "1", StringComparison.Ordinal)
-            || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>コミット済みフィクスチャの絶対パスを、テストアセンブリの位置から遡って解決する</summary>

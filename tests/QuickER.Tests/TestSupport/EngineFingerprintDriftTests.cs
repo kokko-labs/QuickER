@@ -54,7 +54,7 @@ public sealed class EngineFingerprintDriftTests
             engineId,
             actual,
             plan,
-            FixtureDriftHarness.IsRegenerationRequested()
+            RegenerationRequest.IsRequested()
         );
     }
 

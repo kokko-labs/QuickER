@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using QuickER.Documents;
 using QuickER.Provider.Sqlite;
 using QuickER.Tests.GeneratedFixture;
+using QuickER.Tests.TestSupport.Engines;
 using Xunit;
 
 namespace QuickER.Tests.Samples;
@@ -103,8 +104,7 @@ public sealed class EcOrderRemoteSampleDriftTests
         var regenerated = new SqliteDdlGenerator().Build(document.Schema);
         var ddlPath = SampleCliRunner.ResolveRepoRelativePath(DdlRepoPath);
 
-        var regenRequested =
-            Environment.GetEnvironmentVariable(FixtureDriftHarness.RegenEnvVar) is "1" or "true";
+        var regenRequested = RegenerationRequest.IsRequested();
 
         if (regenRequested)
         {

@@ -166,6 +166,41 @@
   - `SeedFingerprintTests` の Local の日時と `UnderInvariantCulture` の 2 件。
   - mutation 実証済み。
 
+## 影響の地図
+
+src のどこを、どのテストのエンジン・表・規則が守っているかを引く地図。生成物 `tests/QuickER.Tests/TestSupport/impact-map.md`（手で直さない・eol=lf）として置き、宣言から作り直した内容と照合する。
+
+- 単位：src のプロジェクト（csproj を持つ src の直下のフォルダ）と、その直下のフォルダのうち手で書いたソース（`.cs`〔`*.Designer.cs`・`*.g.cs` を除く〕か `.scriban`）を持つもの（`ImpactUnits.Enumerate`）。
+  - `Resources/`（生成の Designer.cs と resx だけ）・`Themes/`（XAML だけ）は単位にしない。
+  - src にファイルを足しただけでは単位も地図も変わらない。変わるのは、プロジェクト・直下のフォルダ・宣言を足したとき。
+- 守りの名前（P4-4・P4-5 が参照する）：エンジンの部分は `{エンジンの ID}/{部分}`（例 `Dialect/DdlText`）、単体の表は `table:{名前}`、ソースの規則は `rule:{Id}`、照合の表は `parity:{Id}`、英語の文言の表は `english:{Id}`、必須の文言の表は `phrase:{Id}`。
+- 出どころ（手で書いた対応表を正本にしない。集めるのは `ImpactMapSources`）：
+  - エンジンの台帳の `EngineDescriptor.Covers`。
+  - 単体の表の台帳 `TableRegistry`（エンジンの台帳に載らない、決まった形の行の表。`TableDescriptor`）。宣言は台帳の 1 ファイルにまとめ、表のファイルには置かない（表のファイルは行を足す区切りが並行して直すので、同じファイルに置くとぶつかる）。
+  - ソースの規則の範囲（`SourceRule.Scope`）。
+  - Integration の台帳の写し `tests/QuickER.Tests.Integration/protection-registry.json`（QuickER.Tests は Integration を参照できないため。`ProtectionSnapshot`）。
+- 単位の守りに数える範囲は、src のプロジェクトの中（`src/` の下）を指すものだけ。
+  - Guard の部分の Covers（`src`・`tests`・`docs` など）と、`src` 全体か src の外を走査する規則・照合と文言の表の行は、地図の「横断の守り」の節に出し、単位の守りに数えない。数えると全単位が守りありになり、照合が空になる（最初の生成で実際に全単位が「全体」になった）。
+  - 範囲を src の中に絞った規則（範囲の根が `src/` の下か、明示のファイルがすべて `src/` の下）は単位の守りに数える。`src/QuickER.Gui.Common` はエンジン・表を持たず、この規則 3 本だけで「一部」になっている。
+  - 範囲が単位そのものか祖先なら「全体」、単位の中のファイル・フォルダだけなら「一部」。
+- 地図に数を入れない（シナリオの数・ファイルの数・テストの数）。行やファイルを足すたびに地図が変わるのを避ける。守りの無い領域の手書きのテストの数は、照合のテストの出力に書く。
+- 行 Id の接頭辞は地図に載せない。
+  - テストのソースの文字列リテラルから読むと、値のデータ（`alice`・`ffffffff` など）まで拾い、行やデータを足すたびに地図が変わる。
+  - 台帳のソースは partial の本体だけを書き、部分ファイル（`DialectDdlRows.Names.cs` など）を書かないことがある。そのため登録の照合・行 Id の持ち主は、同じフォルダの `{名前}.*.cs` まで広げたソースで読む（`ImpactMapSources.ExpandPartials`）。
+  - 表の行の名前は「守りの名前＋行 Id」（例 `Dialect/DdlText` の行 `ddl-*-trimmed-table`）。行 Id がその守りのものかは `ImpactMapSources.RowIdOwners`（CLAUDE.md の照合と同じ判定 `ClaudeMdReferenceTests.RowIdExists`）で引く。
+- 変異テストの結果を領域ごとにまとめるときは、`ImpactMap.UnitOf`（パスの属するいちばん深い単位）と `ImpactMap.ProtectionsOf`（パスを範囲に含む守り）で引くか、地図の「範囲の表」をパスの最長一致で読む。
+- 守りの無い領域：`ImpactMapDeclarations.Unprotected`（単位・分類・理由）。
+  - 分類は Pending（エンジン・表で埋める候補）と Accepted（エンジン・表で守る対象でないと判断したもの）。理由は因子の棚卸しと同じ判定（`FactorInventoryGuard.IsVagueReason`＝仮置きの文か 10 文字未満を断る）。
+  - プロジェクトを載せたら、その下のフォルダは書かない。
+  - 地図は、ミラーのフォルダ（`src/QuickER.X/Y` → `tests/QuickER.Tests/X/Y`）に、どの守りのソースでもないテストがあれば「単体の手書きのテストだけ」、無ければ「無い」と書く（本当に守りが無いのか、手書きのテストしか無いのかを分ける）。
+- 照合：src のすべての単位が、どれかの守りの範囲にあるか、理由つきの守りの無い領域にあるかのちょうど一方（`ImpactMapGuard`・因子の棚卸しと同じ形）。
+  - 赤にする問題：宣言の無い単位（新しいプロジェクト・直下のフォルダを足すと赤）・守りと守りの無い領域の両方にある単位・存在しないパスや単位でないパスの宣言・宣言の重複・プロジェクトごと載せた単位の下のフォルダの重ね書き・空か具体的でない理由・知らない分類・守りの名前の重複・存在しない範囲・src のプロジェクトの中を指さない範囲。
+  - 決まった形の行の表（`ScenarioTable<T>`）を使うテストのソースは、エンジンの部分のソースか単体の表の台帳に入れる。使うかどうかは総称の型の名前の節で数え（`ImpactMapSources.UsesScenarioTable`・条件コンパイルのどの分岐も読む）、コメント・XmlDoc・文字列の中の綴りは数えない。登録しなくてよいソースは理由つきの一覧（`ImpactMapSources.ScenarioTableExemptions`）で、2 方向で照合する。
+- 書き直し：生成フィクスチャと同じ環境変数 `QUICKER_REGEN_FIXTURES`。変数の名前・読み方・案内のコマンドの正本は `RegenerationRequest`（`TestSupport/Engines/GeneratedTextFile.cs`）。生成物の照合と書き直しは `GeneratedTextFile.Verify`。
+  - Integration の台帳（エンジン・単体の表）を変えたら、先に Integration の写しを、続けて地図を書き直す（ルートの `CLAUDE.md`「生成テンプレートと固定フィクスチャ」の書き直しの段）。写しを書き直し忘れると Integration の `ProtectionSnapshotDriftTests` が赤になる（Integration だけを流す ubuntu のジョブでも捕まる）。
+  - ほかの区切りのマージで台帳・規則が変わると地図も変わる。マージの後に書き直してそろえる。書き直しは承認であって検証ではない（地図の差分で守りの範囲の変化を確かめる）。
+- ガード：`ImpactMapGuardTests.EveryUnit_IsProtectedOrDeclaredUnprotected`・`ImpactMapGuardTests.ScenarioTableSources_AreRegistered`・`ImpactMapDriftTests`・Integration の `ProtectionSnapshotDriftTests`・両アセンブリの `EngineRegistryTests.TableRegistry_IsWellFormed`。自己検査は `ImpactMapTests`（照合の問題の形ごとの行・単位の列挙・表の型の使い方の判定）と `EngineRegistryChecksTests.TableProblems_AreNamed`。
+
 ## GUI テストの土台
 
 - キーボードフォーカス・流したキー入力・ウィンドウの Activated / Deactivated に結果が左右される GUI テストのクラスは `[Collection(TestSupport.WindowActivationTestCollection.Name)]` に入れる（`DisableParallelization`＝並列のテストが全部終わってから単独で走る）。

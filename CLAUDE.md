@@ -118,6 +118,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
   - 再生成後は環境変数なしで同じテストを流し、緑を確かめる
   - 同じコマンドで、ランタイムパッケージ用ソース 7 本（`src/QuickER.Runtime*/Runtime*.g.cs`・RuntimePackageSourceDriftTests）、動くサンプルのチェックイン生成物（ec-order の `EcOrder.g.cs` / `EcOrder.g.md` / `EcOrder.sql`、ec-order-remote の `EcOrderRemote.g.cs` / `EcOrderRemote.RemoteServer.g.cs` / `EcOrderRemote.sql`・EcOrderSampleDriftTests / EcOrderRemoteSampleDriftTests＝実 `quicker generate` と同一経路で照合し、DDL は `-- Generated at:` 行だけを正規化）、公開 API の承認ファイル（`tests/QuickER.Tests/PublicApi/`）も再生成される。いずれも .gitattributes で eol=crlf 固定
   - テストのエンジンの種の指紋の記録 2 本（`tests/QuickER.Tests/TestSupport/engine-fingerprints.json`／`tests/QuickER.Tests.Integration/engine-fingerprints.json`・eol=lf）も同じ変数で書き直される（Integration の分は同じコマンドを `tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj` に向ける。各アセンブリの EngineFingerprintDriftTests が検証）。指紋は生成器の乱数の引き方の変化を検出するもので、実行の列は守らない（→ `tests/QuickER.Tests/TestSupport/CLAUDE.md`）
+  - 影響の地図（`tests/QuickER.Tests/TestSupport/impact-map.md`・eol=lf・ImpactMapDriftTests）も同じ変数で書き直される。Integration の台帳を変えたときは、先に Integration の写し（`tests/QuickER.Tests.Integration/protection-registry.json`・ProtectionSnapshotDriftTests）を書き直す（同じコマンドを `tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj` に向ける）。地図はほかの区切りのマージで台帳・規則が変わると変わるので、マージの後に書き直してそろえる（→ `tests/QuickER.Tests/TestSupport/CLAUDE.md`「影響の地図」）
   - **再生成は承認であって検証ではない**：差分が出たら、先に「利用者を壊す変更か」「乱数の引き方を意図して変えたか」を判断する。テンプレートの変更がパッケージの公開 API 面を変えるときは「regen → 再ビルド → regen」の 2 回が要る（1 回目は旧アセンブリの面で承認してしまう）
 - ランタイムパッケージ 7 csproj の依存集合と公開 API 面の固定は → `src/QuickER.Runtime/CLAUDE.md`
 - 生成テンプレート・固定フィクスチャ・DDL 生成・`PasswordBoxBehavior` に触るときは、対応するテスト（DialectDdlTableTests / PasswordBoxBehaviorTests / CSharpCodeGenerationServiceTests / GeneratedFixtureDriftTests）を必ず実行する
@@ -471,6 +472,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **テストで DbContext のプロバイダを指定する呼び出しの直後には `.IgnoreServiceProviderCacheLimit()` を続ける**：EF Core のサービスプロバイダが 20 を超えると関係の無いテストが全件実行で落ちる。ガード：`EfCoreServiceProviderLimitGuardTests`・`SourceRuleTests`（規則 `ef-core-provider-cache-limit`）。→ 同上「EF Core のテストの構成」
 - **テストが作る同期・実装先の一致の SQLite の DB は `SqliteLightJournal`（MEMORY・synchronous=OFF）で開く。`PERSIST` にしない**：Windows で既定の接続との混在が `disk I/O error` になる。ガード：`SqliteLightJournalTests`。→ 同上「SQLite のテストの DB」
 - **簡易 DSL の条件の意味は総当たり（`DslConditionFuzzTests`）で docs の意味と照合する。オラクル `DslFuzz.Evaluate` は docs の写しで、実装の挙動を写さない**：既知の失敗の一覧は空で保つ。網羅の単位 `DslFuzzUnits.Coverage` を種の前に流す。ガード：`DslConditionFuzzTests`・`DslConditionFuzzSqlServerRuntimeTests`。→ 同上「簡易 DSL の総当たり」
+- **src のすべての単位（プロジェクトと直下のフォルダ）は、宣言（エンジンの台帳・単体の表の台帳 `TableRegistry`・範囲を src の中に絞った規則・Integration の写し）から作る守りの範囲か、理由つきの守りの無い領域（`ImpactMapDeclarations`）のちょうど一方にあり、地図（`impact-map.md`）は宣言と一致する。決まった形の行の表は必ずどちらかの台帳に載せる**：新しいプロジェクト・フォルダ・表が守りの外に黙って増え、変異テストの結果を領域ごとにまとめられなくなる。ガード：`ImpactMapGuardTests.EveryUnit_IsProtectedOrDeclaredUnprotected`・`ImpactMapGuardTests.ScenarioTableSources_AreRegistered`・`ImpactMapDriftTests`・`ProtectionSnapshotDriftTests`・`ImpactMapTests`。→ `tests/QuickER.Tests/TestSupport/CLAUDE.md`「影響の地図」
 
 ### テストの土台（Integration）
 

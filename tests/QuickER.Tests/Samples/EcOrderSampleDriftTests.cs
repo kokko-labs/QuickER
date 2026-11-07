@@ -8,6 +8,7 @@ using QuickER.Cli;
 using QuickER.Documents;
 using QuickER.Provider.Sqlite;
 using QuickER.Tests.GeneratedFixture;
+using QuickER.Tests.TestSupport.Engines;
 using Xunit;
 
 namespace QuickER.Tests.Samples;
@@ -92,7 +93,7 @@ public sealed class EcOrderSampleDriftTests
     /// DDL 先頭の <c>-- Generated at:</c> 行は <see cref="DateTime.Now"/> 由来で毎回変わるため、
     /// <see cref="FixtureDriftHarness.VerifyOrRegeneratePackageSource"/>（厳密文字列一致）はそのまま使えない。
     /// 検証モードでは生成日時行だけを固定文言へ正規化して比較する
-    /// （既存フィクスチャと同じ環境変数 <see cref="FixtureDriftHarness.RegenEnvVar"/> に従う）。
+    /// （既存フィクスチャと同じ環境変数 <see cref="RegenerationRequest.VariableName"/> に従う）。
     /// 再生成モードでは<b>実質差分（生成日時行以外）があるときだけ</b>書き込む。無条件に書き込むと、
     /// テンプレート・スキーマを何も変えていなくても再生成のたびに生成日時行だけが変わり、
     /// 無意味な 1 行差分がコミットへ紛れ込むため（検証側が無視する行で作業ツリーを汚さない）。
@@ -108,8 +109,7 @@ public sealed class EcOrderSampleDriftTests
         var regenerated = new SqliteDdlGenerator().Build(document.Schema);
         var ddlPath = SampleCliRunner.ResolveRepoRelativePath(DdlRepoPath);
 
-        var regenRequested =
-            Environment.GetEnvironmentVariable(FixtureDriftHarness.RegenEnvVar) is "1" or "true";
+        var regenRequested = RegenerationRequest.IsRequested();
 
         if (regenRequested)
         {

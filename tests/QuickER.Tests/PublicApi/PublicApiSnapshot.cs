@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.PublicApi;
 
@@ -49,7 +50,7 @@ internal static class PublicApiSnapshot
         builder.Append("// QuickER 公開 API スナップショット: ").Append(assembly.GetName().Name);
         builder.Append("\r\n");
         builder.Append(
-            "// 手編集しない。更新は QUICKER_REGEN_FIXTURES=1 での再生成（失敗メッセージにコマンドあり）。\r\n"
+            $"// 手編集しない。更新は {RegenerationRequest.VariableName}=1 での再生成（失敗メッセージにコマンドあり）。\r\n"
         );
         builder.Append("\r\n");
 

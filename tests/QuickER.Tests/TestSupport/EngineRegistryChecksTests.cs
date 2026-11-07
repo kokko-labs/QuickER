@@ -119,6 +119,62 @@ public sealed class EngineRegistryChecksTests
             .Contain("対象の範囲");
     }
 
+    /// <summary>単体の表の台帳の行（既定は整った行）</summary>
+    private static TableDescriptor Table(
+        string name = "Sample",
+        string title = "表示の名前",
+        IReadOnlyList<string>? sources = null,
+        IReadOnlyList<string>? covers = null
+    ) => new(name, title, sources ?? [ExistingFile], covers ?? ["src/QuickER.Model"]);
+
+    /// <summary>単体の表の台帳の問題の行（行の名前・台帳・期待する問題の文。空なら問題なし）</summary>
+    public static TheoryData<string> TableProblemRows => [.. TableProblemCases.Keys];
+
+    private static readonly Dictionary<
+        string,
+        (TableDescriptor[] Tables, string Expected)
+    > TableProblemCases = new(StringComparer.Ordinal)
+    {
+        ["valid"] = ([Table(), Table("Other")], ""),
+        ["name-not-alphanumeric"] = (
+            [Table("bad-name")],
+            "table:bad-name: 名前が英字で始まる英数字でない"
+        ),
+        ["name-duplicated"] = ([Table(), Table()], "table:Sample: 名前が重複している"),
+        ["title-empty"] = ([Table(title: " ")], "table:Sample: 表示の名前が空"),
+        ["sources-empty"] = ([Table(sources: [])], "table:Sample: テストのソースが無い"),
+        ["covers-empty"] = ([Table(covers: [])], "table:Sample: 対象の範囲が無い"),
+        ["cover-outside-src"] = (
+            [Table(covers: [ExistingFolder])],
+            $"table:Sample: 対象の範囲の {ExistingFolder} が src/ の下でない"
+        ),
+        ["cover-missing"] = (
+            [Table(covers: ["src/QuickER.NoSuchProject"])],
+            "table:Sample: 対象の範囲の src/QuickER.NoSuchProject が無い"
+        ),
+    };
+
+    [Theory(DisplayName = "単体の表の台帳の問題を名指しし、整った台帳には問題が無い")]
+    [MemberData(nameof(TableProblemRows))]
+    public void TableProblems_AreNamed(string row)
+    {
+        var (tables, expected) = TableProblemCases[row];
+        var problems = TableRegistryChecks.Problems(tables, Root);
+
+        if (expected.Length == 0)
+        {
+            problems.Should().BeEmpty();
+            return;
+        }
+
+        problems.Should().ContainSingle().Which.Should().Be(expected);
+        FluentActions
+            .Invoking(() => TableRegistryChecks.Verify(tables, Root))
+            .Should()
+            .Throw<XunitException>()
+            .WithMessage("*" + expected + "*");
+    }
+
     [Fact(DisplayName = "テストのソースが無い行と、同じパスの重複を名指しする")]
     public void EmptySourcesAndDuplicates_AreNamed()
     {

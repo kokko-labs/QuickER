@@ -332,7 +332,7 @@ public class ClaudeMdReferenceTests
     /// <summary>Id が tests/ のソースに現れるか（組み立てる Id は接頭辞まで照合する）</summary>
     /// <param name="id">Id（<c>*</c> を含んでよい）</param>
     /// <param name="source">tests/ の全ソース</param>
-    private static bool RowIdExists(string id, string source)
+    internal static bool RowIdExists(string id, string source)
     {
         var fragments = id.Split('*');
         var first = fragments[0];

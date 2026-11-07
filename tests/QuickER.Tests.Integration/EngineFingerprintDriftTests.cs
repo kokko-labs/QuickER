@@ -98,7 +98,7 @@ public sealed class EngineFingerprintDriftTests
             engineId,
             actual,
             plan,
-            IsRegenerationRequested()
+            RegenerationRequest.IsRequested()
         );
     }
 
@@ -401,14 +401,6 @@ public sealed class EngineFingerprintDriftTests
     }
 
     // ---------------- 補助 ----------------
-
-    private static bool IsRegenerationRequested()
-    {
-        var value = Environment.GetEnvironmentVariable("QUICKER_REGEN_FIXTURES");
-
-        return string.Equals(value, "1", StringComparison.Ordinal)
-            || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
-    }
 
     private static string RepositoryRoot()
     {

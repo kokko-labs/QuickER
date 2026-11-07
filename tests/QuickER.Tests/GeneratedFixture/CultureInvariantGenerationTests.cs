@@ -41,7 +41,7 @@ public sealed class CultureInvariantGenerationTests
     [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.NotSelected)]
     public async Task DriftTests_PassUnderCulture(string culture)
     {
-        if (FixtureDriftHarness.IsRegenerationRequested())
+        if (RegenerationRequest.IsRequested())
         {
             return;
         }
