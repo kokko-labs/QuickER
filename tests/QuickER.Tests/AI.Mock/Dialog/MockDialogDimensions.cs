@@ -62,14 +62,6 @@ internal static class MockDialogDimensions
                     MockDialogOp.Screen,
                     "生成中は送信できず（:235-240）、ターンの実行中は生成を始められない（:389）ので、生成中にツールを実行するターンは無い"
                 ),
-                CoverageGap.Tuple(
-                    Scope,
-                    "P3-11b",
-                    "P5",
-                    "製品の候補（P5・ユーザーの判断）：生成中も設計書の出力が押せ、モックフォルダへ README.md を書く（ExportDesignDocCommand の CanExecute は CanExportBundle＝画面の有無だけ・src/QuickER.AI.Mock/MockGenerationDialogViewModel.cs:262-267・:1131-1160）。生成中に会話を止める理由（CanSendMessage の remarks『生成はモックフォルダを出力先へ写すので、書き込むと写した内容と食い違い得る』・:231-234）と食い違う。単一 HTML（保存先にだけ書く）の形だけの行で組を埋めると候補が目録から消え、特性として固定すると生成中の書き込みを許す方針を黙って決めるので行にしない",
-                    (State, MockDialogState.GenRun.ToString()),
-                    (Op, MockDialogOp.Export.ToString())
-                ),
             ]
         );
 
@@ -102,7 +94,7 @@ internal static class MockDialogDimensions
         new(
             EngineIds.Ai,
             "MockDialog",
-            "モック生成のダイアログの操作の列の表（状態 × 手の種類・どの手の後にも不変条件 11 個を見張る）",
+            "モック生成のダイアログの操作の列の表（状態 × 手の種類・どの手の後にも不変条件 12 個を見張る）",
             Table,
             MockDialogRows.Table.Count,
             [

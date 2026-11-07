@@ -25,7 +25,7 @@ internal static partial class MockDialogRows
                 [(Idle, Converse)],
                 async h =>
                 {
-                    // 根拠：CanSendMessage の XmlDoc「会話開始済み…入力あり」（VM:228-241）。本体の防御は `_session is null`（VM:1002）
+                    // 根拠：CanSendMessage の XmlDoc「会話開始済み…入力あり」（VM:228-241）。本体も CanSendMessage で断る（不変条件 12）
                     var vm = h.CreateApiKeyReady(setMockFolder: false);
 
                     vm.UserInput = "要望";
@@ -42,21 +42,34 @@ internal static partial class MockDialogRows
             .. BlockedKinds.Select(kind =>
                 Row(
                     $"blocked-converse-start-and-send-disabled-{Slug(kind)}",
-                    $"使えないフォルダ（{kind}）では会話の開始も送信も押せず、エンジンを作らず、状態の文の案内が残る",
+                    $"使えないフォルダ（{kind}）では会話の開始も送信も押せず、開始を直接実行しても mock.json を作らず、エンジンを作らず、状態の文の案内が残る",
                     [(Blocked, Converse)],
                     h =>
                     {
                         // 根拠：CanStartConversation の `_folderBlocked`（VM:215-226）と CanSendMessage の `_conversationStarted`（VM:235）。
-                        // 開始のコマンドの本体に防御が無い（VM:936-956）ので、直接実行はしない
+                        // 開始のコマンドの本体も CanStartConversation で断る（相対パスなら作業フォルダへ、モックでない既存フォルダならそこへ mock.json を作らない）
                         var vm = h.CreateApiKeyReady(setMockFolder: false);
 
                         h.BlockFolder(vm, kind);
                         vm.UserInput = "要望";
+                        var manifestPath = Path.Combine(
+                            Path.GetFullPath(vm.MockFolder.Trim()),
+                            MockManifest.ManifestFileName
+                        );
+                        var manifestBefore = File.Exists(manifestPath)
+                            ? File.ReadAllBytes(manifestPath)
+                            : null;
 
                         vm.CanStartConversation.Should().BeFalse();
                         vm.StartConversationCommand.CanExecute(null).Should().BeFalse();
                         vm.CanSendMessage.Should().BeFalse();
                         vm.SendMessageCommand.CanExecute(null).Should().BeFalse();
+
+                        vm.StartConversationCommand.Execute(null);
+
+                        (File.Exists(manifestPath) ? File.ReadAllBytes(manifestPath) : null)
+                            .Should()
+                            .BeEquivalentTo(manifestBefore);
                         h.Engines.Should().BeEmpty();
                         vm.Messages.Should().BeEmpty();
                         vm.StatusMessage.Should().StartWith(BlockedGuidance(kind));
@@ -187,7 +200,7 @@ internal static partial class MockDialogRows
                     [(Blocked, Export)],
                     h =>
                     {
-                        // 根拠：CanExportBundle＝HasScreens（VM:262-267）。本体の防御は `_store is null`（VM:1078・1134）
+                        // 根拠：CanExportBundle＝HasScreens（VM:262-267）。本体も CanExportBundle・CanExportDesignDoc で断る（不変条件 12）
                         var outPath = h.PathOf("out.html");
                         h.Files.SaveResult = new FileDialogResult(outPath, 1);
                         var vm = h.CreateApiKeyReady(setMockFolder: false);
@@ -239,12 +252,13 @@ internal static partial class MockDialogRows
                 }
             ),
             Row(
-                "turn-export-bundle-does-not-interrupt-turn",
-                "特性の固定（文書に定めが無い今の振る舞い）：画面のあるフォルダのターン中でも単一 HTML を出力でき、ターンは中断されず進めれば終わる",
+                "turn-export-does-not-interrupt-turn",
+                "特性の固定（文書に定めが無い今の振る舞い）：画面のあるフォルダのターン中でも単一 HTML と設計書を出力でき、ターンは中断されず進めれば終わる",
                 [(Turn, Export)],
                 async h =>
                 {
-                    // 根拠：CanExportBundle＝HasScreens はターンを見ない（VM:262-267）。設計書はこの行で出さない（生成中の設計書と同じ論点が P5 に残る）
+                    // 根拠：CanExportBundle＝HasScreens はターンを見ない（VM:262-267）。設計書の可否が止めるのは生成中だけで、
+                    // ターン中はターンの画面の保存も README.md を書き直す（RegenerateDesignDocIfPresent）
                     var outPath = h.PathOf("out.html");
                     h.SeedMockFolder();
                     h.Files.SaveResult = new FileDialogResult(outPath, 1);
@@ -254,14 +268,57 @@ internal static partial class MockDialogRows
                     vm.CanExportBundle.Should().BeTrue();
                     vm.ExportBundleCommand.CanExecute(null).Should().BeTrue();
                     vm.ExportBundleCommand.Execute(null);
+                    vm.ExportDesignDocCommand.CanExecute(null).Should().BeTrue();
+                    vm.ExportDesignDocCommand.Execute(null);
 
                     File.ReadAllText(outPath).Should().Contain("顧客一覧");
+                    File.Exists(Path.Combine(h.MockFolder, MockDesignDocExporter.FileName))
+                        .Should()
+                        .BeTrue();
                     vm.IsTurnInProgress.Should().BeTrue();
                     engine.InterruptCount.Should().Be(0);
 
                     engine.CompleteHeldTurn();
 
                     vm.IsTurnInProgress.Should().BeFalse();
+                }
+            ),
+            Row(
+                "generate-run-export-design-doc-refused-until-generation-ends",
+                "生成中は設計書を出力できず、直接実行してもモックフォルダへ README.md を書かず案内も出さない。単一 HTML は保存先へ出せて生成は止まらず、生成を進めれば設計書を出せる",
+                [(GenRun, Export)],
+                async h =>
+                {
+                    // 根拠：CanExportDesignDoc＝画面あり かつ 生成中でない。生成中に会話を止めるのと同じく、生成中はダイアログがモックフォルダへ書かない
+                    // （CanSendMessage の remarks）。単一 HTML は保存先にだけ書くので CanExportBundle＝HasScreens のまま
+                    var vm = h.Create();
+                    await h.PrepareGenerationAsync(vm);
+                    _ = h.StartHeldGeneration(vm);
+                    var readme = Path.Combine(h.MockFolder, MockDesignDocExporter.FileName);
+                    var outPath = h.PathOf("out.html");
+                    h.Files.SaveResult = new FileDialogResult(outPath, 1);
+
+                    vm.ExportDesignDocCommand.CanExecute(null).Should().BeFalse();
+
+                    vm.ExportDesignDocCommand.Execute(null);
+
+                    File.Exists(readme).Should().BeFalse();
+                    h.Dialogs.InformationMessages.Should().BeEmpty();
+
+                    vm.ExportBundleCommand.CanExecute(null).Should().BeTrue();
+                    vm.ExportBundleCommand.Execute(null);
+
+                    File.ReadAllText(outPath).Should().Contain("顧客一覧");
+                    vm.IsMockGenInProgress.Should().BeTrue();
+                    h.Generator.InterruptCount.Should().Be(0);
+
+                    await h.ReleaseHeldGenerationAsync();
+
+                    vm.IsMockGenInProgress.Should().BeFalse();
+                    vm.ExportDesignDocCommand.CanExecute(null).Should().BeTrue();
+                    vm.ExportDesignDocCommand.Execute(null);
+
+                    File.Exists(readme).Should().BeTrue();
                 }
             ),
             Row(
@@ -295,7 +352,7 @@ internal static partial class MockDialogRows
                     [(Blocked, Generate)],
                     async h =>
                     {
-                        // 根拠：MockGenDisabledReason の画面なし（VM:410-428）。本体の防御は `_store is null`（VM:1250）
+                        // 根拠：MockGenDisabledReason の画面なし（VM:410-428）。本体も CanGenerateMockProject で断る（不変条件 12）
                         var vm = h.Create();
                         await h.PrepareGenerationAsync(vm);
                         vm.CanGenerateMockProject.Should().BeTrue();
@@ -416,20 +473,31 @@ internal static partial class MockDialogRows
             // ── クリア ──
             Row(
                 "turn-reset-disabled-until-turn-ends",
-                "ターンの実行中はクリアできず確認も出さず、終われば押せる",
+                "ターンの実行中はクリアできず、直接実行しても確認を出さず、モックフォルダ・会話・エンジンを保ち、終われば押せる",
                 [(Turn, Reset)],
                 async h =>
                 {
                     // 根拠：CanClear の XmlDoc「ターン／モックプロジェクト生成の実行中は不可」（VM:1194-1196）。
-                    // クリアの本体に防御が無い（VM:1203-1230）ので、直接実行はしない
+                    // クリアの本体も CanClear で断る（通すと会話のリセットでセッションを切り離し、届かなくなった完了を待って固まる）
                     var vm = h.CreateApiKeyReady();
                     var engine = await h.StartHeldTurnAsync(vm);
+                    var messages = vm.Messages.Select(m => m.Content).ToList();
 
                     vm.CanClear.Should().BeFalse();
                     vm.ClearCommand.CanExecute(null).Should().BeFalse();
+
+                    vm.ClearCommand.Execute(null);
+
                     h.Dialogs.ConfirmMessages.Should().BeEmpty();
+                    vm.MockFolder.Should().Be(h.MockFolder);
+                    vm.Messages.Select(m => m.Content).Should().Equal(messages);
+                    vm.DetachedDisposalForTests.Should().BeNull();
+                    engine.DisposeCount.Should().Be(0);
+                    vm.IsTurnInProgress.Should().BeTrue();
 
                     engine.CompleteHeldTurn();
+
+                    vm.IsTurnInProgress.Should().BeFalse();
 
                     vm.CanClear.Should().BeTrue();
                     vm.ClearCommand.CanExecute(null).Should().BeTrue();
@@ -437,21 +505,34 @@ internal static partial class MockDialogRows
             ),
             Row(
                 "generate-run-reset-disabled-until-generation-ends",
-                "生成の実行中はクリアできず確認も出さず、終われば押せる",
+                "生成の実行中はクリアできず、直接実行しても確認を出さず、進捗ログ・出力フォルダ・モックフォルダを保ち、生成を進めれば完了が届いて押せる",
                 [(GenRun, Reset)],
                 async h =>
                 {
                     // 根拠：CanClear の XmlDoc「ターン／モックプロジェクト生成の実行中は不可」（VM:1194-1196）。
-                    // クリアの本体に防御が無い（VM:1203-1230）ので、直接実行はしない
+                    // クリアの本体も CanClear で断る（通すと生成中の進捗ログ・出力フォルダ・完了表示を消し、後から生成の完了が届く）
                     var vm = h.Create();
                     await h.PrepareGenerationAsync(vm);
                     _ = h.StartHeldGeneration(vm);
+                    var log = vm.MockGenLog;
 
                     vm.CanClear.Should().BeFalse();
                     vm.ClearCommand.CanExecute(null).Should().BeFalse();
+
+                    vm.ClearCommand.Execute(null);
+
                     h.Dialogs.ConfirmMessages.Should().BeEmpty();
+                    vm.MockFolder.Should().Be(h.MockFolder);
+                    vm.OutputFolder.Should().Be(h.PathOf("out"));
+                    vm.ProjectName.Should().Be("AcmeMock");
+                    vm.MockGenLog.Should().Be(log);
+                    vm.IsMockGenInProgress.Should().BeTrue();
 
                     await h.ReleaseHeldGenerationAsync();
+
+                    vm.IsMockGenInProgress.Should().BeFalse();
+                    vm.MockGenCompleted.Should().BeTrue();
+                    vm.MockGenLog.Should().Contain("進捗: 生成中");
 
                     vm.CanClear.Should().BeTrue();
                     vm.ClearCommand.CanExecute(null).Should().BeTrue();
