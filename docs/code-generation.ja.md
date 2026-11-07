@@ -443,6 +443,14 @@ EF Core 版は EF Core 自身が翻訳し、インメモリ版は式木を C# �
 
 同じナビゲーションを重ねて指定した `Include` / `ThenInclude` は、1 本のノードへマージされます。
 そのため EF Core と同じ分岐イディオムで、`Orders` の下に複数の枝を書けます（`Include(c => c.Orders).ThenInclude(o => o.OrderLines)` に続けて `Include(c => c.Orders).ThenInclude(o => o.Customer)` と書く形）。
+QuickER 版 Repository とインメモリ版は、読み込んだ行どうしを自動ではつなぎません。
+そのため、各注文の `Customer` のような親への参照は、`Include` したときだけ埋まります。
+上の 2 本目の枝が、その参照を埋めます。
+EF Core 版は追跡しないクエリで問い合わせ、読み込んだ行を EF Core 自身がつなぎます。
+そのため各注文の `Customer` は最初から埋まっていて、この枝は要りません。
+EF Core 版でこの枝を書くと、クエリの実行時に EF Core が循環として `InvalidOperationException`（"results in a cycle"）で断ります。
+直前のナビゲーションの逆向きを辿る枝（ここでは `Orders` → `Customer`）は、QuickER 版 Repository とインメモリ版でだけ使えます。
+自己参照を同じ向きにもう一度辿る形（`Include(c => c.Children).ThenInclude(c => c.Children)` など）は対象外で、EF Core 版 Repository でも使えます。
 
 翻訳できるのは、等値・比較・`&&` と `||`・`Contains` / `StartsWith` / `EndsWith`（LIKE）・リストの `Contains`（IN）・日付部品（`Year` など）・`string.IsNullOrEmpty` と `string.IsNullOrWhiteSpace`・値オブジェクト比較です。
 NULL 許容の列は `.Value` 経由でも読めます（`x.ShippedAt != null && x.ShippedAt.Value.Year == 2024`）。
@@ -637,6 +645,8 @@ var one = await orders.Query().IncludeGraph().GetByIdAsync(1000);   // キー指
   スキップされたナビゲーションは空のまま返るので、再帰構造は必要な深さだけ手動の `Include` で取得してください。
   `IncludeGraph()` の後に追加の `Include` を重ねることもできます（`Query().IncludeGraph().Include(x => x.Customer).GetByIdAsync(id)`）。
   親参照やスキップされたナビを足すのが典型で、閉包が既に含む子方向ナビゲーションを重ねて指定しても同じノードへマージされるため安全です（`ThenInclude` でその下へ枝を足す用途にも使えます）。
+  直前のナビゲーションの逆向きを辿る `ThenInclude` の枝（子コレクションの下の親参照など）は、QuickER 版 Repository とインメモリ版でだけ使えます。
+  EF Core 版 Repository は、同じ `InvalidOperationException`（"results in a cycle"）で断ります。
   保存側はインスタンスグラフ（有限）をたどるため任意の深さを保存できます。
   この取得と保存の非対称は仕様です。
 - カスケード子を 1 つも持たないエンティティにも生成され、その場合はクエリをそのまま返す no-op です。
