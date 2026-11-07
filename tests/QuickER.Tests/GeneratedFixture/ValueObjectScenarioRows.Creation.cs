@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using QuickER.Tests.TestSupport.Engines;
+using NoteBlobValue = QuickER.Tests.GeneratedBinaryVoFixture.NoteBlobValue;
 
 namespace QuickER.Tests.GeneratedFixture;
 
@@ -237,6 +238,24 @@ internal static partial class ValueObjectScenarioRows
                     return ValueObjectOutcome.Try(ok, value, errors);
                 },
                 "fail value=null errors(*)=[*]"
+            ),
+            // バイナリ VO も null を内包しない（必須の検証が null を断る）
+            Like(
+                "trycreate-binary-null-note-blob",
+                "TryCreate(null): バイナリ VO は throw せず false＋必須エラーを返す（NoteBlobValue）",
+                () =>
+                {
+                    var ok = NoteBlobValue.TryCreate(null!, out var value, out var errors);
+
+                    return ValueObjectOutcome.Try(ok, value, errors);
+                },
+                "fail value=null errors(1)=[*]"
+            ),
+            Like(
+                "create-binary-null-note-blob",
+                "Create(null): バイナリ VO は ValueObjectValidationException（TryCreate false と対称）",
+                () => NoteBlobValue.Create(null!),
+                "throws ValueObjectValidationException: *"
             ),
             // ===== Validate(value, errors) は呼び出し側コレクションへ追記する（戻り値は見ない） =====
             Exact(

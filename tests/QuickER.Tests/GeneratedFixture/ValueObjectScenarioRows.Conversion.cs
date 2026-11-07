@@ -58,11 +58,29 @@ internal static partial class ValueObjectScenarioRows
                 () => ReadCellOutcome<DeliveryDateValue>("2026/08/28", Japanese),
                 "value=DeliveryDateValue(2026-08-28T00:00:00.0000000) errors=[]"
             ),
+            // インバリアントでは読めない書式（日が先）で、渡したカルチャが日付の変換まで届くことを確かめる
+            Exact(
+                "readcell-date-culture-day-first-en-gb",
+                "[生値変換] 日付は指定カルチャの書式で解釈される（日が先の en-GB）",
+                () =>
+                    ReadCellOutcome<DeliveryDateValue>(
+                        "28/08/2026",
+                        CultureInfo.GetCultureInfo("en-GB")
+                    ),
+                "value=DeliveryDateValue(2026-08-28T00:00:00.0000000) errors=[]"
+            ),
             Exact(
                 "readcell-date-invariant-without-provider",
                 "[生値変換] カルチャを渡さなければインバリアントで解釈する",
                 () => ReadCellOutcome<DeliveryDateValue>("2026-08-28", null),
                 "value=DeliveryDateValue(2026-08-28T00:00:00.0000000) errors=[]"
+            ),
+            // 数でない文字列は decimal の VO でも 0 などへ倒さず、変換不能のエラーにする
+            Like(
+                "readcell-decimal-not-convertible",
+                "[生値変換] decimal の VO は数でない文字列を変換不能のエラーにする",
+                () => ReadCellOutcome<AmountValue>("abc", null),
+                "value=null errors(1)=[*]"
             ),
             // ===== 空のセル（未入力であって違反ではない＝成功＋null・エラーなし） =====
             Exact(

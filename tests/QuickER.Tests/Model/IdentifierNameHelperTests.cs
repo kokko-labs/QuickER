@@ -142,6 +142,8 @@ public class IdentifierNameHelperTests
     [InlineData("tables", "table")]
     [InlineData("status", "status")]
     [InlineData("class", "class")]
+    // ies ちょうど 3 文字は y 由来の候補を作らない（語幹が無い）
+    [InlineData("ies", "ie")]
     public void SingularizeCandidates_UnambiguousWords(string word, string expected)
     {
         IdentifierNameHelper.SingularizeCandidates(word).Should().Equal(expected);
@@ -157,6 +159,8 @@ public class IdentifierNameHelperTests
     [InlineData("class", "classes")]
     [InlineData("boy", "boys")]
     [InlineData("quiz", "quizes")]
+    // y 1 文字は子音+y の規則（ies）に当てず、s を付ける
+    [InlineData("y", "ys")]
     public void PluralizeWord_ConvertsSingular(string word, string expected)
     {
         IdentifierNameHelper.PluralizeWord(word).Should().Be(expected);

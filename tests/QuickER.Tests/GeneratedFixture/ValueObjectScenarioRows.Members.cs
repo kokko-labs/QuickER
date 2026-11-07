@@ -3,7 +3,8 @@ using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.GeneratedFixture;
 
-// vo-call の行：基底のメンバー（ToString / DisplayValue・bool 基底の True/False・文字列基底の部分一致）。
+// vo-call の行：基底のメンバー（ToString / DisplayValue・bool 基底の True/False・文字列基底の部分一致・順序付き基底の < と >・
+// DateTime 基底の Today / Now）。
 internal static partial class ValueObjectScenarioRows
 {
     private static IEnumerable<ScenarioRow<ValueObjectCallCase>> MemberCallRows() =>
@@ -118,6 +119,37 @@ internal static partial class ValueObjectScenarioRows
                 "文字列 VO の Contains/StartsWith/EndsWith が序数比較で機能する（EndsWith・VO）",
                 () => NameValue.Create("HelloWorld").EndsWith(NameValue.Create("World")),
                 "true"
+            ),
+            // ===== 順序付き基底の < と > は等しい値で false（<= / >= と分かれる） =====
+            Exact(
+                "ordered-int-less-than-same-value",
+                "順序付き VO の < は等しい値どうしで false",
+                () => CustomerIdValue.Create(2) < CustomerIdValue.Create(2),
+                "false"
+            ),
+            Exact(
+                "ordered-int-greater-than-same-value",
+                "順序付き VO の > は等しい値どうしで false",
+                () => CustomerIdValue.Create(2) > CustomerIdValue.Create(2),
+                "false"
+            ),
+            // ===== DateTime 基底の Today / Now（Today は 0 時、どちらも現地時刻） =====
+            Exact(
+                "datetime-factory-today",
+                "DateTime VO の Today は時刻が 0 時の現地時刻",
+                () =>
+                {
+                    var today = DeliveryDateValue.Today.Value;
+
+                    return $"time={today.TimeOfDay} kind={today.Kind}";
+                },
+                "\"time=00:00:00 kind=Local\""
+            ),
+            Exact(
+                "datetime-factory-now",
+                "DateTime VO の Now は現地時刻",
+                () => $"kind={DeliveryDateValue.Now.Value.Kind}",
+                "\"kind=Local\""
             ),
             // 元の表明は BeNegative＝符号が負であること
             Exact(

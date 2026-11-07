@@ -66,17 +66,60 @@ public class NameLimitNotesTests
             .BeEmpty();
     }
 
-    [Fact(DisplayName = "Find: MySQL では BMP の外の文字を含む名前を返し、PostgreSQL では返さない")]
-    public void Find_Unrepresentable_OnlyOnMySql()
+    /// <summary>
+    /// 方言ごとの判定（表せない文字・表の名前だけに掛かるファイル名の上限）が、名前の種類ごとに正しく掛かることを検証する
+    /// </summary>
+    /// <param name="row">
+    /// 行（mysql-emoji-column / postgresql-emoji-column / mysql-file-name-table-only）
+    /// </param>
+    /// <remarks>
+    /// MySQL の表の名前は 64 文字の上限に加えて、ファイル名へ符号化した長さ（251 バイト）にも掛かる。
+    /// 記号 <c>-</c> は 1 字 5 バイトに符号化されるので、51 字は文字数の上限の内でファイル名の上限を超える。
+    /// 同じ名前をカラム名・一意制約名・外部キー名に付けても違反にならない（表の名前だけの上限）。
+    /// </remarks>
+    [Theory(
+        DisplayName = "Find: MySQL では BMP の外の文字を含む名前と、ファイル名の上限を超える表の名前だけを返す"
+    )]
+    [InlineData("mysql-emoji-column")]
+    [InlineData("postgresql-emoji-column")]
+    [InlineData("mysql-file-name-table-only")]
+    public void Find_Unrepresentable_OnlyOnMySql(string row)
     {
-        NameLimitNotes
-            .Find(Diagram("mysql", "orders", Emoji), IdentifierLengthLimits.MySql)
-            .Should()
-            .ContainSingle();
-        NameLimitNotes
-            .Find(Diagram("postgresql", "orders", Emoji), IdentifierLengthLimits.PostgreSql)
-            .Should()
-            .BeEmpty();
+        var dashes = new string('-', 51);
+        var (diagram, limit, expected) = row switch
+        {
+            "mysql-emoji-column" => (
+                Diagram("mysql", "orders", Emoji),
+                IdentifierLengthLimits.MySql,
+                new[] { "column of 'orders':" }
+            ),
+            "postgresql-emoji-column" => (
+                Diagram("postgresql", "orders", Emoji),
+                IdentifierLengthLimits.PostgreSql,
+                Array.Empty<string>()
+            ),
+            "mysql-file-name-table-only" => (
+                Diagram("mysql", dashes, dashes),
+                IdentifierLengthLimits.MySql,
+                new[] { "table '" }
+            ),
+            _ => throw new ArgumentOutOfRangeException(nameof(row)),
+        };
+
+        if (row == "mysql-file-name-table-only")
+        {
+            diagram.Entities[0].UniqueConstraints[0].Name = dashes;
+            diagram.Relationships.Add(new Relationship { ConstraintName = dashes });
+        }
+
+        var found = NameLimitNotes.Find(diagram, limit);
+
+        found.Should().HaveCount(expected.Length);
+
+        foreach (var (line, prefix) in found.Zip(expected))
+        {
+            line.Should().StartWith(prefix);
+        }
     }
 
     /// <remarks>
@@ -88,7 +131,7 @@ public class NameLimitNotesTests
     public void Describe_OnlyNewViolations()
     {
         var before = new[] { "table 'a' is longer" };
-        var after = new[] { "table 'a' is longer", "table 'b' is longer" };
+        var after = new[] { "table 'a' is longer", "table 'b' is longer", "table 'c' is longer" };
 
         var note = NameLimitNotes.Describe(before, after, "postgresql");
 
@@ -96,6 +139,12 @@ public class NameLimitNotesTests
             .StartWith("Note:")
             .And.Contain("table 'b' is longer")
             .And.NotContain("table 'a'");
+        // 文面の全体（前置き・新しい違反を「; 」でつなぐ・末尾の「.」）
+        note.Should()
+            .Be(
+                "Note: postgresql would refuse these names, so DDL generation and sync stop until they are changed: "
+                    + "table 'b' is longer; table 'c' is longer."
+            );
         NameLimitNotes.Describe(after, after, "postgresql").Should().BeNull();
         NameLimitNotes.Describe(after, before, "postgresql").Should().BeNull();
     }

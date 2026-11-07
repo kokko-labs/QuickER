@@ -116,6 +116,13 @@ public class ConstraintNamesTests
                 ["FK_Orders_Customers"],
                 "FK_Orders_Customers_2"
             ),
+            // 安全化で空になる列名は足さない（列が無いのと同じく番号を足す。末尾が _ の名前にしない）
+            new UniqueForeignKeyRow(
+                "blank-column-name-is-skipped",
+                ["  "],
+                ["FK_Orders_Customers"],
+                "FK_Orders_Customers_2"
+            ),
             // 大文字小文字だけ違う名前も衝突とみなす
             new UniqueForeignKeyRow(
                 "ignores-case",
@@ -480,25 +487,67 @@ public class ConstraintNamesTests
 
     // 名前を持つ多対多が外部キーを作らなくても名前を予約することは、方言の DDL の表の行 ddl-fk-named-many-to-many-reserves-name が固定する
 
-    /// <summary>既存の制約名の収集も、外部キーを作らない名前の無い関係の既定名を数えないことを検証する</summary>
-    /// <param name="kind">外部キーを作らない関係の種類</param>
-    [Theory(DisplayName = "既存の制約名は外部キーを作らない名前の無い関係の既定名を数えない")]
-    [InlineData("ManyToMany")]
-    [InlineData("NoPairs")]
-    [InlineData("UnresolvedColumn")]
-    public void CollectExisting_NonForeignKeyRelationship_IsNotCounted(string kind)
+    /// <summary>
+    /// 既存の制約名の収集が、外部キーを作らない名前の無い関係・名前を持つ関係・親か子の表が図に無い関係の既定名を数えないことを検証する
+    /// </summary>
+    /// <param name="kind">
+    /// 関係の種類（外部キーを作らない ManyToMany / NoPairs / UnresolvedColumn、列ペアを解決できる名前つきの Named、
+    /// 列ペアを持つが親・子の表が図に無い ParentMissing / ChildMissing）
+    /// </param>
+    /// <param name="extra">主キーの名前のほかに数える名前（無ければ null）</param>
+    /// <remarks>
+    /// Named は名前だけを数え、既定名 <c>FK_orders_customers</c> を数えない（名前を持つ関係の既定名の計算へ落ちない）。
+    /// ParentMissing / ChildMissing は列ペアを持たせて、表の引き当てを飛ばしたときに既定名の組み立てまで届く形にする。
+    /// </remarks>
+    [Theory(
+        DisplayName = "既存の制約名は、外部キーを作らない関係・名前を持つ関係・表が図に無い関係の既定名を数えない"
+    )]
+    [InlineData("ManyToMany", null)]
+    [InlineData("NoPairs", null)]
+    [InlineData("UnresolvedColumn", null)]
+    [InlineData("Named", "fk_named")]
+    [InlineData("ParentMissing", null)]
+    [InlineData("ChildMissing", null)]
+    public void CollectExisting_NonForeignKeyRelationship_IsNotCounted(string kind, string? extra)
     {
         var (customers, orders) = BuildCustomersAndOrders();
+        var relationship = kind switch
+        {
+            "Named" => Link(customers, orders, "bill_customer_id", "fk_named"),
+            "ParentMissing" => WithEnds(
+                Link(customers, orders, "bill_customer_id"),
+                Guid.NewGuid(),
+                orders.Id
+            ),
+            "ChildMissing" => WithEnds(
+                Link(customers, orders, "bill_customer_id"),
+                customers.Id,
+                Guid.NewGuid()
+            ),
+            _ => NonForeignKeyRelationship(kind, customers, orders),
+        };
         var diagram = new ErDiagram
         {
             Entities = { customers, orders },
-            Relationships = { NonForeignKeyRelationship(kind, customers, orders) },
+            Relationships = { relationship },
         };
+        string[] expected = extra is null
+            ? ["PK_customers", "PK_orders"]
+            : ["PK_customers", "PK_orders", extra];
 
         ConstraintNames
             .CollectExisting(diagram, IdentifierLengthLimits.ForDbms(diagram.TargetDbms))
             .Should()
-            .BeEquivalentTo("PK_customers", "PK_orders");
+            .BeEquivalentTo(expected);
+    }
+
+    /// <summary>リレーションの親・子の表の Id を差し替える（列ペアはそのまま）</summary>
+    private static Relationship WithEnds(Relationship relationship, Guid source, Guid target)
+    {
+        relationship.SourceEntityId = source;
+        relationship.TargetEntityId = target;
+
+        return relationship;
     }
 
     [Fact(DisplayName = "親子を引けないリレーションは飛ばし、既定名も予約しない")]
@@ -653,13 +702,22 @@ public class ConstraintNamesTests
                 0,
                 ["uq_B_X", "UQ_b_x_2"]
             ),
-            // 名前の無い制約どうしの合成名がぶつかる（a_b.c と a.b_c）＝後ろが番号つき
+            // 名前の無い制約どうしの合成名がぶつかる（a_b.c・a.b_c・a.b の c）＝後ろほど番号つき。
+            // 3 つ目は 2 つ目が選んだ番号つきの名前も避ける（番号つきの名前も予約に加える）
             new UniqueNameRow(
-                "two-unnamed",
-                [("a_b", [(null, ["c"])]), ("a", [(null, ["b_c"])])],
+                "three-unnamed",
+                [("a_b", [(null, ["c"])]), ("a", [(null, ["b_c"])]), ("a.b", [(null, ["c"])])],
                 null,
                 0,
-                ["UQ_a_b_c", "UQ_a_b_c_2"]
+                ["UQ_a_b_c", "UQ_a_b_c_2", "UQ_a_b_c_3"]
+            ),
+            // 空白だけの名前は名前の無い制約と同じく合成名になる
+            new UniqueNameRow(
+                "blank-name-is-synthesized",
+                [("t", [("  ", ["x"])])],
+                null,
+                0,
+                ["UQ_t_x"]
             ),
             // 名前を持つ外部キーとぶつかる（MySQL の外部キーの索引・スキーマ単位の制約名）
             new UniqueNameRow(
@@ -742,13 +800,25 @@ public class ConstraintNamesTests
         names.Values.Should().OnlyContain(name => limit.Accepts(name));
 
         // 既存の制約名の集合も同じ名前を数える（ツールの手作成の外部キー名が避ける）
-        var existing = ConstraintNames.CollectExisting(
-            new ErDiagram { Entities = entities, Relationships = relationships },
-            limit
-        );
+        var diagram = new ErDiagram { Entities = entities, Relationships = relationships };
+        var existing = ConstraintNames.CollectExisting(diagram, limit);
         if (names.Count > 0)
         {
             existing.Should().Contain(names.Values);
+        }
+
+        // 一意制約の名前の付け直し（IsTaken）：解決した名前は新しい制約にはふさがり、その制約自身には空いている
+        // （名前を持たない・空白だけの名前の制約は、自分の合成名を予約から外す）
+        foreach (var (constraint, name) in names)
+        {
+            ConstraintNames
+                .IsTaken(diagram, name, null, limit)
+                .Should()
+                .BeTrue($"{name} は新しい制約にはふさがっている");
+            ConstraintNames
+                .IsTaken(diagram, name, constraint.Id, limit)
+                .Should()
+                .BeFalse($"{name} はその制約自身には空いている");
         }
     }
 
