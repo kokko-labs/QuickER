@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using QuickER.Tests.CodeGen.CSharp.CodegenConfig.Judges;
 
 namespace QuickER.Tests.CodeGen.CSharp.CodegenConfig;
 
@@ -74,6 +75,36 @@ public sealed class CodegenCaseTests
 
         ids.Should().OnlyHaveUniqueItems();
         ids.Should().BeEquivalentTo(CodegenCases.Table.Select(row => row.Id));
+    }
+
+    /// <summary>
+    /// 表の不変条件：主キーの列に NULL 許容の印がある図を持つのは、関係 <see cref="CodegenRelation.PrimaryKeyNotNull"/> を掛けた行だけ
+    /// </summary>
+    /// <remarks>
+    /// 理由：<c>Column.IsNullable</c> の既定は true なので、図を組むときに主キーの列へ書き忘れると、NULL 許容の主キーを
+    /// 意図しない行が生成の入口の読み替え（主キーを NOT NULL とみなす）の経路を黙って通る（修正 L で 6 行が紛れていた）。
+    /// 読み替えを見る行は関係 PrimaryKeyNotNull で主キーを NOT NULL にした図との一致まで確かめるので、印のある図はその行に限る。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[生成の構成/決まった行] NULL 許容の印のある主キーの図は、関係 PrimaryKeyNotNull を掛けた行だけが持つ"
+    )]
+    public void NullablePrimaryKeyDiagrams_AreOnlyInPrimaryKeyNotNullRows()
+    {
+        var mismatched = CodegenCases
+            .Table.Where(row =>
+                row.Input.Diagram()
+                    .Entities.SelectMany(entity => entity.Columns)
+                    .Any(column => column is { IsPrimaryKey: true, IsNullable: true })
+                != (row.Input.Relations?.Contains(CodegenRelation.PrimaryKeyNotNull) ?? false)
+            )
+            .Select(row => row.Id)
+            .ToList();
+
+        mismatched
+            .Should()
+            .BeEmpty(
+                "NULL 許容の主キーを意図しない行は主キーの列に IsNullable = false を書き、意図する行は関係 PrimaryKeyNotNull を掛ける"
+            );
     }
 }
 

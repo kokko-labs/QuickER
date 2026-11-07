@@ -1864,18 +1864,21 @@ internal static partial class CodegenCases
             Name = "a",
             DataType = "int",
             IsPrimaryKey = true,
+            IsNullable = false,
         };
         var parentB = new Column
         {
             Name = "b",
             DataType = "int",
             IsPrimaryKey = true,
+            IsNullable = false,
         };
         var childId = new Column
         {
             Name = "id",
             DataType = "int",
             IsPrimaryKey = true,
+            IsNullable = false,
         };
         var childA = new Column { Name = "a_ref", DataType = "int" };
         var childB = new Column { Name = "b_ref", DataType = "int" };

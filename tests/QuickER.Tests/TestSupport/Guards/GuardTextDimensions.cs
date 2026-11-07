@@ -36,6 +36,9 @@ internal static class GuardTextDimensions
     /// <summary>必須の文言</summary>
     public const string Phrase = "Phrase";
 
+    /// <summary>必須の文言の末尾（決めた文で終わる）</summary>
+    public const string PhraseSuffix = "PhraseSuffix";
+
     /// <summary>照合の表の次元表</summary>
     public static DimensionTable ParityTable { get; } =
         new(
@@ -58,7 +61,11 @@ internal static class GuardTextDimensions
         new(
             EngineIds.Guard,
             [
-                new Factor(Kind, [new Level(English), new Level(Phrase)], "判定の種類"),
+                new Factor(
+                    Kind,
+                    [new Level(English), new Level(Phrase), new Level(PhraseSuffix)],
+                    "判定の種類"
+                ),
                 new Factor(Outcome, [new Level(Agrees), new Level(Disagrees)], "結果"),
             ]
         );

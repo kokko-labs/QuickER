@@ -563,7 +563,8 @@ internal static partial class CodegenCases
                             Id = Guid.NewGuid(),
                             Name = "total",
                             DataType = "decimal(21,2)",
-                            IsNullable = true,
+                            // 主キーにするときは NOT NULL（NULL 許容の主キーの読み替えの経路を意図せず通さない）
+                            IsNullable = !computedIsPrimaryKey,
                             IsComputed = true,
                             IsPrimaryKey = computedIsPrimaryKey,
                         },

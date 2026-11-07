@@ -1,4 +1,6 @@
+using System.Globalization;
 using QuickER.AI.Mock;
+using QuickER.AI.Mock.Resources;
 
 namespace QuickER.Tests.TestSupport.Guards;
 
@@ -62,22 +64,33 @@ internal static partial class PhraseRows
             ),
             // 応答言語ルール（UI 言語既定＋明示切替）を含み、鏡映し（ユーザーと同じ言語で）の指示を含まない。鏡映しは CLI 接続の
             // ユーザー環境のメモリに引きずられ不安定なため、ErDesignRules と同方式の決定的な文言へ一本化した。
-            // 含むかだけを見る（末尾にあることまでは見ない）
+            // ルールはプロンプトの末尾に置く（ErDesignRules と同方式・MockFolderDesignPrompts.BuildInstructions）ので、resx の文で終わることまで見る
             new(
                 "mock-folder-design-response-language-en",
-                "モック設計チャットの英語のシステムプロンプトは応答言語ルールを含み、鏡映しの言語指示を含まない",
+                "モック設計チャットの英語のシステムプロンプトは応答言語ルールを含んでその文で終わり、鏡映しの言語指示を含まない",
                 () =>
                     EnglishTextRows.UnderUiCulture("en", MockFolderDesignPrompts.BuildSystemPrompt),
                 ["# Response language", "Default to English"],
                 ["same language as the user's most recent message"]
-            ),
+            )
+            {
+                EndsWith = MockResource("Mock_ResponseLanguageRule", "en"),
+            },
             new(
                 "mock-folder-design-response-language-ja",
-                "モック設計チャットの日本語のシステムプロンプトは応答言語ルールを含み、鏡映しの言語指示を含まない",
+                "モック設計チャットの日本語のシステムプロンプトは応答言語ルールを含んでその文で終わり、鏡映しの言語指示を含まない",
                 () =>
                     EnglishTextRows.UnderUiCulture("ja", MockFolderDesignPrompts.BuildSystemPrompt),
                 ["# 応答言語", "既定で日本語"],
                 ["直近のメッセージと同じ言語"]
-            ),
+            )
+            {
+                EndsWith = MockResource("Mock_ResponseLanguageRule", "ja"),
+            },
         ];
+
+    /// <summary>モック生成の resx の文言を明示カルチャで読む（静的な <c>Strings.Culture</c> を変えない）</summary>
+    private static string MockResource(string key, string culture) =>
+        Strings.ResourceManager.GetString(key, new CultureInfo(culture))
+        ?? throw new InvalidOperationException($"resx のキーが無い: {key}（{culture}）");
 }
