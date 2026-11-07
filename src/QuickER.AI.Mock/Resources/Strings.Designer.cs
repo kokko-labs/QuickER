@@ -1349,6 +1349,12 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
+        public static string Mock_ManifestDuplicateScreenFileFormat {
+            get {
+                return ResourceManager.GetString("Mock_ManifestDuplicateScreenFileFormat", resourceCulture);
+            }
+        }
+
         public static string Mock_ToolFileAccessFailedResult {
             get {
                 return ResourceManager.GetString("Mock_ToolFileAccessFailedResult", resourceCulture);

@@ -138,6 +138,7 @@ internal static class MockOutputsDimensions
                 "load-corrupt",
                 "load-newer",
                 "load-invalid-file-name",
+                "load-duplicate-screen-file",
                 "load-legacy",
                 "load-already-exists",
             ],

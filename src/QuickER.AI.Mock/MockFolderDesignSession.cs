@@ -43,6 +43,14 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
     private const string EntityNameEmptyWarning =
         "An entity declaration was ignored because its 'name' was empty.";
 
+    /// <summary>壊れたエンティティ宣言（オブジェクトでない要素）を読み飛ばした旨の警告（英語・機械検証と同列）</summary>
+    private const string EntityNotObjectWarning =
+        "An entity declaration was ignored because it is not a JSON object (expected {\"name\": ..., \"operations\": ...}).";
+
+    /// <summary>壊れた遷移宣言（オブジェクトでない要素）を読み飛ばした旨の警告（英語・機械検証と同列）</summary>
+    private const string TransitionNotObjectWarning =
+        "A transition declaration was ignored because it is not a JSON object (expected {\"to\": ..., \"trigger\": ...}).";
+
     /// <summary>正規化で有効な CRUD 操作が無くなり宣言を破棄した旨の警告フォーマット（英語）</summary>
     private const string EntityOperationsInvalidWarningFormat =
         "Entity declaration '{0}' was dropped because it has no valid CRUD operations (only C/R/U/D are allowed).";
@@ -364,11 +372,11 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
         var description = ToolArguments.GetString(root, "description") ?? string.Empty;
         var html = ToolArguments.GetString(root, "html") ?? string.Empty;
         var revisionNote = ToolArguments.GetString(root, "revision_note") ?? string.Empty;
-        var transitions = ParseTransitions(root, file);
 
-        // エンティティ宣言をパースし、宣言由来の警告（壊れた要素・正規化破棄・図に無い名前）を先に集める
-        var entityWarnings = new List<string>();
-        var entities = ParseEntities(root, entityWarnings);
+        // 遷移とエンティティの宣言をパースし、宣言由来の警告（壊れた要素・正規化破棄・図に無い名前）を先に集める
+        var declarationWarnings = new List<string>();
+        var transitions = ParseTransitions(root, file, declarationWarnings);
+        var entities = ParseEntities(root, declarationWarnings);
 
         IReadOnlyList<string> validatorWarnings;
 
@@ -392,9 +400,9 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
 
         // 宣言由来の警告と機械検証の警告を 1 つの一覧へまとめる
         var warnings =
-            entityWarnings.Count == 0
+            declarationWarnings.Count == 0
                 ? validatorWarnings
-                : entityWarnings.Concat(validatorWarnings).ToList();
+                : declarationWarnings.Concat(validatorWarnings).ToList();
 
         ScreenSaved?.Invoke(this, new MockScreenSavedEventArgs(file, revisionNote, warnings));
 
@@ -494,7 +502,7 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
     /// <summary>
     /// save_screen 引数の entities 配列を <see cref="MockScreenEntity"/> の一覧へ変換する。
     /// entities 未指定（プロパティ不在）なら <c>null</c>（＝既存宣言を維持）を返す。
-    /// 名前が空の壊れた要素は読み飛ばし、正規化での破棄・図に無い名前は <paramref name="warnings"/> へ積む。
+    /// 壊れた要素（オブジェクトでない・名前が空）は要素ごとに警告して読み飛ばし、正規化での破棄・図に無い名前も <paramref name="warnings"/> へ積む。
     /// 空でない配列の要素が 1 つも有効でなかった（オブジェクトでない・名前が空・操作が全部無効）ときも
     /// <c>null</c> を返して既存宣言を残し、その旨を警告する（消去は明示の空配列だけ）。
     /// </summary>
@@ -516,8 +524,10 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
 
         foreach (var element in entitiesElement.EnumerateArray())
         {
+            // オブジェクトでない壊れた要素（文字列・数・null など）は警告して読み飛ばす
             if (element.ValueKind != JsonValueKind.Object)
             {
+                warnings.Add(EntityNotObjectWarning);
                 continue;
             }
 
@@ -569,8 +579,18 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
         return parsed;
     }
 
-    /// <summary>save_screen 引数の transitions 配列を <see cref="MockTransition"/>（From＝当該画面）へ変換する</summary>
-    private static IReadOnlyList<MockTransition> ParseTransitions(JsonElement root, string file)
+    /// <summary>
+    /// save_screen 引数の transitions 配列を <see cref="MockTransition"/>（From＝当該画面）へ変換する。
+    /// オブジェクトでない要素は警告して読み飛ばす（<paramref name="warnings"/> へ要素ごとに積む）。
+    /// </summary>
+    /// <param name="root">save_screen 引数の JSON ルート</param>
+    /// <param name="file">保存する画面のファイル名（遷移の起点）</param>
+    /// <param name="warnings">宣言由来の警告の集約先（英語）</param>
+    private static IReadOnlyList<MockTransition> ParseTransitions(
+        JsonElement root,
+        string file,
+        List<string> warnings
+    )
     {
         if (
             !root.TryGetProperty("transitions", out var transitionsElement)
@@ -586,6 +606,7 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
         {
             if (element.ValueKind != JsonValueKind.Object)
             {
+                warnings.Add(TransitionNotObjectWarning);
                 continue;
             }
 

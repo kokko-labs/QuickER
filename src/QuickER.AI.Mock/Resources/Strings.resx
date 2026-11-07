@@ -765,6 +765,9 @@ Default to English for all responses (the language of the app UI). Switch only i
   <data name="Mock_ManifestInvalidScreenFileFormat" xml:space="preserve">
     <value>The mock's {0} has an invalid screen file name (it may be corrupted): {1}</value>
   </data>
+  <data name="Mock_ManifestDuplicateScreenFileFormat" xml:space="preserve">
+    <value>The mock's {0} lists the same screen file more than once (it may have been edited by hand): {1}</value>
+  </data>
   <data name="Mock_ToolFileAccessFailedResult" xml:space="preserve">
     <value>Could not read or write the mock folder: {0}</value>
   </data>

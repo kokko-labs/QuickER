@@ -765,6 +765,9 @@ AI が次のファイルを書きました（UI 層のソース・静的資産�
   <data name="Mock_ManifestInvalidScreenFileFormat" xml:space="preserve">
     <value>モックの {0} の画面ファイル名が不正です（破損している可能性があります）: {1}</value>
   </data>
+  <data name="Mock_ManifestDuplicateScreenFileFormat" xml:space="preserve">
+    <value>モックの {0} に同じ画面ファイルが重複しています（手で書き換えた可能性があります）: {1}</value>
+  </data>
   <data name="Mock_ToolFileAccessFailedResult" xml:space="preserve">
     <value>モックフォルダの読み書きに失敗しました: {0}</value>
   </data>

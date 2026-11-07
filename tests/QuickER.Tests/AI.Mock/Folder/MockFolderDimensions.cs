@@ -70,7 +70,7 @@ internal static class MockFolderDimensions
                 Pending(
                     MockFolderEntry.Open,
                     MockFolderOutcome.Refused,
-                    "読み込みの検証（mock.json が無い・壊れた・新しい版・不正な画面のファイル名）は出力の表（Ai/MockOutputs の Load の行）が持つ。保存単位の操作の列に重ねた期待は元に無い"
+                    "読み込みの検証（mock.json が無い・壊れた・新しい版・不正な画面のファイル名・重複した画面）は出力の表（Ai/MockOutputs の Load の行）が持つ。保存単位の操作の列に重ねた期待は元に無い"
                 ),
                 Pending(
                     MockFolderEntry.Open,

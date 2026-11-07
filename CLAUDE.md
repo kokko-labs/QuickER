@@ -434,6 +434,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 ### AI モック生成
 
 - **モックフォルダの書き込みは `AtomicFile` で、ファイル → `mock.json` の順に成功してからマニフェストを差し替える**：書けなかった変更が次の保存へ紛れ込む。ガード：`MockFolderTests`（どの手の後にも「失敗した手は mock.json もメモリも変えない」を見張る・行 `save-screen-manifest-write-failure-does-not-leak-into-later-save`）。→ `src/QuickER.AI.Mock/CLAUDE.md`「保存単位とフォルダ」
+- **手で書いた `mock.json` に同じ画面のファイル（`OrdinalIgnoreCase`）が 2 回あれば、`Open` が破損として断る**：開くと保存が先頭だけを更新し、削除が両方を消し、単一 HTML・設計書に 2 回出る。ガード：`MockOutputsTests`（行 `load-duplicate-screen-file-is-refused-*`）。→ `src/QuickER.AI.Mock/CLAUDE.md`「保存単位とフォルダ」
 - **初回ターンは成功で終わったときだけ済みにする**：失敗を済みにすると開始プロンプトが届かず、次の再開が「変更なし」になる。ガード：`MockFolderTests`（行 `session-start-*`・`session-feedback-*`）・`MockDialogTests`（どの行でも組が見張る・行 `converse-first-turn-*`）。→ `src/QuickER.AI.Mock/CLAUDE.md`「初回ターン」
 - **モック生成のダイアログは、ターン中に接続方式とモックフォルダを変えず、作ったエンジンをちょうど 1 回破棄し、生成の可否と無効の理由を食い違わせない**：変えるとセッションを切り離して完了が届かずダイアログが固まり、破棄が漏れると常駐の子プロセスが残る。ガード：`MockDialogTests`（どの行でも組 `MockDialogHarness` が見張る）。→ `src/QuickER.AI.Mock/CLAUDE.md`「ダイアログの状態の不変条件」
 - **モックのプレビューは遷移をフォルダ直下の html に限り、サブリソースを既定拒否し、ダウンロードを取り消す**：AI の HTML が外部へ通信・ファイルを置く。ガード：`MockPreviewPanelRuntimeTests`。→ `src/QuickER.AI.Mock/CLAUDE.md`「プレビュー」
