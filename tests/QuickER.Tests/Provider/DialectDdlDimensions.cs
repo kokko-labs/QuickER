@@ -54,8 +54,112 @@ internal static class DialectDdlDimensions
             IsValid
         );
 
-    /// <summary>網羅しない組の一覧（すべて「その組の行がまだ無い」だけで、行を足せば埋まる）</summary>
-    public static CoverageGapSet Gaps { get; } = CoverageGap.Set(EngineIds.Dialect, PendingGaps());
+    /// <summary>
+    /// 網羅しない組の一覧：行がまだ無い組（<see cref="PendingPairs"/>）・受け入れ（<see cref="AcceptedGaps"/>＝製品の作り方の事実）・
+    /// 製品の候補（<see cref="ProductCandidateGaps"/>）
+    /// </summary>
+    public static CoverageGapSet Gaps { get; } =
+        CoverageGap.Set(
+            EngineIds.Dialect,
+            [.. PendingGaps(), .. AcceptedGaps(), .. ProductCandidateGaps()]
+        );
+
+    /// <summary>受け入れを見つけた区切り</summary>
+    private const string AcceptedFinding = "P4-2e";
+
+    /// <summary>受け入れ（製品の作り方の事実で、行を足しても埋まらない組）</summary>
+    private static IEnumerable<CoverageGapEntry> AcceptedGaps()
+    {
+        const string sanitize = DialectDdlFacets.CommentSanitize;
+
+        // 説明を -- コメントへ書くのは SQLite の DDL だけ（ほかの 4 方言は説明を文のリテラルに入れる）
+        yield return CoverageGap.AcceptedMatching(
+            Scope,
+            AcceptedFinding,
+            "説明を -- コメントへ書くのは SQLite の DDL だけ（SqliteDdlGenerator.cs:138・205）。ほかの 4 方言は説明を文のリテラルへ入れる"
+                + "（SqlServerDdlGenerator.cs:44-85 の拡張プロパティ・PostgreSqlDdlGenerator.cs:45-54 と OracleDdlGenerator.cs:56-69 の"
+                + " COMMENT ON・MySqlDdlGenerator.cs:57-63 のインラインの COMMENT）ので、コメントの畳みが効く入力が無い",
+            Dialect,
+            Facet,
+            (dialect, facet) =>
+                facet == sanitize
+                && dialect
+                    is DialectNames.SqlServer
+                        or DialectNames.PostgreSql
+                        or DialectNames.MySql
+                        or DialectNames.Oracle
+        );
+
+        // コメントへ埋まる名前・型は、全入口が改行・制御文字を先に断る
+        const string namesReason =
+            "コメントへ埋まる名前・型は、DDL・同期の全入口が改行・制御文字を先に断る（SqlNameText.Validate・SqlTypeText.Validate＝"
+            + "DdlGeneratorBase.cs:35・39・SyncScriptBuilderBase.cs:32・36・SqliteDdlGenerator.cs:58・62・SqliteSyncScriptBuilder.cs:55・59。"
+            + "判定は SqlComment.ContainsControlCharacter と同じ）ので、畳みの対象になる入力が届かない。説明を -- コメントへ書くのは"
+            + " SQLite の DDL の表・列だけ（SqliteDdlGenerator.cs:138・205）で、同期の経路は説明をコメントへ書かない";
+
+        yield return CoverageGap.AcceptedMatching(
+            Scope,
+            AcceptedFinding,
+            namesReason,
+            Element,
+            Facet,
+            (element, facet) =>
+                facet == sanitize
+                && element
+                    is DialectDdlElements.PrimaryKey
+                        or DialectDdlElements.ForeignKey
+                        or DialectDdlElements.Unique
+                        or DialectDdlElements.Computed
+                        or DialectDdlElements.Identity
+                        or DialectDdlElements.SchemaQualified
+                        or DialectDdlElements.ManyToMany
+                        or DialectDdlElements.Type
+        );
+
+        yield return CoverageGap.AcceptedMatching(
+            Scope,
+            AcceptedFinding,
+            namesReason,
+            Facet,
+            Path,
+            (facet, path) => facet == sanitize && path != DialectDdlPaths.Ddl
+        );
+
+        // 多対多は識別子を出さず、同期は多対多を除いて外部キーを組む
+        yield return CoverageGap.AcceptedTuple(
+            Scope,
+            AcceptedFinding,
+            "多対多は識別子を出さず、DDL はフリーテキストのコメントだけを書く（DdlGeneratorBase.cs:144-152・名前は SqlComment.Sanitize で畳む）",
+            (Element, DialectDdlElements.ManyToMany),
+            (Facet, DialectDdlFacets.Quote)
+        );
+
+        yield return CoverageGap.AcceptedMatching(
+            Scope,
+            AcceptedFinding,
+            "同期は差分・計画とも外部キーを ForeignKeyColumnPairResolver.ResolveAll（多対多を除く）で組むので、多対多は同期の出力に現れない"
+                + "（SyncPlanner.cs:3609・SchemaDiffService.cs:432・446）",
+            Element,
+            Path,
+            (element, path) =>
+                element == DialectDdlElements.ManyToMany && path != DialectDdlPaths.Ddl
+        );
+    }
+
+    /// <summary>製品の候補（P5・ユーザーの判断。行にすると今の振る舞いを固定してしまう組）</summary>
+    private static IEnumerable<CoverageGapEntry> ProductCandidateGaps()
+    {
+        yield return CoverageGap.Tuple(
+            Scope,
+            AcceptedFinding,
+            "P5",
+            "製品の候補：SQLite の再構築はスキーマで修飾された表名（a.b）で、一時表の CREATE と最後の RENAME が main の 1 つの識別子"
+                + " \"a.b…\" を指し、移送の INSERT … SELECT と DROP が添付 DB の \"a\".\"b\" を指す（SqliteSyncScriptBuilder.cs:150-190）。"
+                + "src/QuickER.Provider.Sqlite/CLAUDE.md「既知の割り切り」は unknown database になり得ることしか書いていない",
+            (Element, DialectDdlElements.SchemaQualified),
+            (Path, DialectDdlPaths.SyncRebuild)
+        );
+    }
 
     /// <summary>台帳の行</summary>
     public static EngineDescriptor Descriptor { get; } =
@@ -96,12 +200,25 @@ internal static class DialectDdlDimensions
     /// <param name="row">行</param>
     /// <param name="dialect">方言</param>
     public static void Observe(CoverageCounter counter, DialectDdlCase row, string dialect) =>
+        Observe(counter, row, dialect, row.Facet);
+
+    /// <summary>1 ケースを、行の宣言とは別の観点で数える（全行に掛かる自動の照合が実際に走った観点）</summary>
+    /// <param name="counter">計数</param>
+    /// <param name="row">行</param>
+    /// <param name="dialect">方言</param>
+    /// <param name="facet">観点</param>
+    public static void Observe(
+        CoverageCounter counter,
+        DialectDdlCase row,
+        string dialect,
+        string facet
+    ) =>
         counter.Observe(
             new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 [Dialect] = dialect,
                 [Element] = row.Element,
-                [Facet] = row.Facet,
+                [Facet] = facet,
                 [Path] = row.Path,
             }
         );
@@ -126,88 +243,31 @@ internal static class DialectDdlDimensions
 
     /// <summary>2 因子の組の、行がまだ無い組（実行の結果から書いた。行を足したら消す）</summary>
     private static (string FactorA, string LevelA, string FactorB, string LevelsB)[] PendingPairs =>
-        [
-            (Dialect, "sqlserver", Facet, "comment-sanitize"),
-            (Dialect, "postgresql", Facet, "comment-sanitize"),
-            (Dialect, "mysql", Facet, "comment-sanitize"),
-            (Dialect, "oracle", Facet, "comment-sanitize"),
-            (Element, "table", Facet, "constraint-name note order comment-sanitize"),
-            (
-                Element,
-                "column",
-                Facet,
-                "quote constraint-name note omit order culture comment-sanitize"
-            ),
-            (Element, "column", Path, "sync-add-table sync-add-column sync-rebuild"),
-            (Element, "pk", Facet, "quote note omit reject english culture comment-sanitize"),
-            (Element, "pk", Path, "sync-add-column sync-rebuild"),
-            (Element, "fk", Facet, "quote english culture comment-sanitize"),
-            (Element, "fk", Path, "sync-add-column"),
-            (Element, "unique", Facet, "quote note order english culture comment-sanitize"),
-            (Element, "unique", Path, "sync-add-column sync-other"),
-            (
-                Element,
-                "computed",
-                Facet,
-                "statement-shape quote constraint-name omit order reject english culture comment-sanitize"
-            ),
-            (Element, "computed", Path, "sync-other"),
-            (
-                Element,
-                "identity",
-                Facet,
-                "statement-shape quote constraint-name omit reject english culture comment-sanitize"
-            ),
-            (Element, "identity", Path, "sync-other"),
-            (Element, "description", Facet, "constraint-name order reject english culture"),
-            (Element, "description", Path, "sync-add-table sync-rebuild"),
-            (
-                Element,
-                "schema-qualified",
-                Facet,
-                "statement-shape quote omit order reject english culture comment-sanitize"
-            ),
-            (
-                Element,
-                "schema-qualified",
-                Path,
-                "sync-add-table sync-add-column sync-rebuild sync-other"
-            ),
-            (
-                Element,
-                "many-to-many",
-                Facet,
-                "statement-shape quote constraint-name omit order reject english culture comment-sanitize"
-            ),
-            (
-                Element,
-                "many-to-many",
-                Path,
-                "sync-add-table sync-add-column sync-rebuild sync-other"
-            ),
-            (Element, "type", Facet, "quote constraint-name note order english comment-sanitize"),
-            (Element, "type", Path, "sync-add-column sync-rebuild"),
-            (Facet, "statement-shape", Path, "sync-add-table sync-add-column sync-rebuild"),
-            (Facet, "quote", Path, "sync-add-table sync-rebuild sync-other"),
-            (Facet, "constraint-name", Path, "sync-add-column"),
-            (Facet, "note", Path, "sync-other"),
-            (Facet, "order", Path, "sync-add-table sync-rebuild"),
-            (Facet, "reject", Path, "sync-add-column"),
-            (Facet, "english", Path, "sync-add-table sync-add-column"),
-            (Facet, "culture", Path, "sync-add-column sync-rebuild"),
-            (
-                Facet,
-                "comment-sanitize",
-                Path,
-                "sync-add-table sync-add-column sync-rebuild sync-other"
-            ),
-        ];
+        [];
 
     /// <summary>原理的に起こり得ない組み合わせのときだけ偽（判断に要る因子が割り当てに無ければ真）</summary>
     private static bool IsValid(IReadOnlyDictionary<string, string> assignment)
     {
         assignment.TryGetValue(Dialect, out var dialect);
         assignment.TryGetValue(Path, out var path);
+        assignment.TryGetValue(Element, out var element);
+        assignment.TryGetValue(Facet, out var facet);
+
+        // 説明と型の表記は制約でないので、制約名の観点を持たない（説明は COMMENT ON・拡張プロパティ・インラインの COMMENT・
+        // コメント行で書き、制約を作らない。型の表記は列定義へ素通しするスカラで、制約名は型から作られない）
+        if (
+            facet == DialectDdlFacets.ConstraintName
+            && element is DialectDdlElements.Description or DialectDdlElements.Type
+        )
+        {
+            return false;
+        }
+
+        // 型の表記は 1 つのトークンで、並べ替えの対象になる複数の出力を持たない
+        if (facet == DialectDdlFacets.Order && element == DialectDdlElements.Type)
+        {
+            return false;
+        }
 
         // テーブルの再構築は、ALTER COLUMN か外部キーの後付けを持たない方言の同期だけが使う（SyncPlanner と同じ宣言の読み方）
         if (dialect is not null && path == DialectDdlPaths.SyncRebuild)

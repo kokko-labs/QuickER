@@ -25,7 +25,10 @@ internal static class DialectTypeFacets
     /// <summary>型カタログの方言ごとの事実（入力なし）：<c>ok default= all-safe=</c></summary>
     public const string Catalog = "catalog";
 
-    /// <summary>取込の表記への正規化：型の表記 → <c>ok {表記}</c>（冪等と能力の結線は全行で自動に照合する）</summary>
+    /// <summary>
+    /// 取込の表記への正規化：型の表記 → <c>ok text= kind=</c>（<c>kind</c> は正規化した表記を解析した種類。冪等と能力の結線は全行で
+    /// 自動に照合する）
+    /// </summary>
     public const string Normalize = "normalize";
 
     /// <summary>同期の能力の <see cref="SyncDialectCapabilities.AreSameType"/>：表記の組 → <c>same</c> か <c>different</c></summary>

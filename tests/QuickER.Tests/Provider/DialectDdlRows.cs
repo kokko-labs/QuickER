@@ -50,7 +50,13 @@ internal static partial class DialectDdlRows
     }
 
     private static IEnumerable<DialectDdlRow> AllRows() =>
-        [.. UniqueRows(), .. GeneratorRows(), .. CrossCuttingRows(), .. TreatmentRows()];
+        [
+            .. UniqueRows(),
+            .. GeneratorRows(),
+            .. CrossCuttingRows(),
+            .. TreatmentRows(),
+            .. CoverageRows(),
+        ];
 }
 
 /// <summary>DDL の表の行が使う図の部品</summary>

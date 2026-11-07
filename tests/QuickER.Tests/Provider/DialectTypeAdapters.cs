@@ -58,6 +58,41 @@ internal abstract class DialectTypeAdapter : IMatrixAdapter
     public abstract string ImportedSpelling(ImportedType imported);
 
     /// <summary>
+    /// その表記で宣言した列について DB のカタログが返す値（取込の入力）を組む（方言ごとの表記の分解。宣言のセルの表記から
+    /// 取込の表記の行を作るのに使う）
+    /// </summary>
+    /// <param name="nativeType">宣言の型の表記（括弧の引数は数字か <c>max</c>）</param>
+    public abstract ImportedType CatalogValueOf(string nativeType);
+
+    /// <summary>型の表記を名前・括弧の引数・括弧の後ろの語へ分ける（括弧が無ければ引数は空）</summary>
+    /// <param name="nativeType">型の表記</param>
+    internal static (string Name, IReadOnlyList<string> Arguments, string Suffix) SplitType(
+        string nativeType
+    )
+    {
+        var open = nativeType.IndexOf('(', StringComparison.Ordinal);
+
+        if (open < 0)
+        {
+            return (nativeType.Trim(), [], string.Empty);
+        }
+
+        var close = nativeType.IndexOf(')', open);
+        var arguments = nativeType[(open + 1)..close]
+            .Split(',')
+            .Select(argument => argument.Trim())
+            .ToList();
+
+        return (nativeType[..open].Trim(), arguments, nativeType[(close + 1)..].Trim());
+    }
+
+    /// <summary>括弧の引数を数で読む（<c>max</c> は -1）</summary>
+    internal static int Argument(string text) =>
+        text.Equals("max", StringComparison.OrdinalIgnoreCase)
+            ? -1
+            : int.Parse(text, System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
     /// 書き出しに上限（長さ・精度・スケール・小数秒）がある正規型（上限の「ちょうど」と「1 つ超え」の行を必須にする）
     /// </summary>
     /// <remarks>上限の値そのものは表の行が持つ。ここに無い種類は、その方言では上限の境界が原理的に無い。</remarks>
@@ -156,6 +191,36 @@ internal static class DialectTypeAxis
                 imported.DateTimePrecision
             );
 
+        // INFORMATION_SCHEMA.COLUMNS の DATA_TYPE と長さ・精度・小数秒（SqlServerSchemaImporter が読む列）。
+        // rowversion の列は DATA_TYPE が timestamp で返る（docs/database.md の same-type-spellings の表）
+        public override ImportedType CatalogValueOf(string nativeType)
+        {
+            var (name, arguments, _) = SplitType(nativeType);
+            name = name.ToLowerInvariant();
+
+            return name switch
+            {
+                "rowversion" => new ImportedType("timestamp"),
+                "char"
+                or "varchar"
+                or "nchar"
+                or "nvarchar"
+                or "binary"
+                or "varbinary" when arguments.Count == 1 => new ImportedType(
+                    name,
+                    Length: Argument(arguments[0])
+                ),
+                "decimal" or "numeric" when arguments.Count > 0 => new ImportedType(
+                    name,
+                    Precision: Argument(arguments[0]),
+                    Scale: arguments.Count > 1 ? Argument(arguments[1]) : 0
+                ),
+                "datetime2" or "time" or "datetimeoffset" when arguments.Count == 1 =>
+                    new ImportedType(name, DateTimePrecision: Argument(arguments[0])),
+                _ => new ImportedType(name),
+            };
+        }
+
         public override IReadOnlySet<CanonicalTypeKind> WriteLimitedKinds { get; } =
             Limited(
                 [],
@@ -226,6 +291,27 @@ internal static class DialectTypeAxis
         public override string ImportedSpelling(ImportedType imported) =>
             PostgreSqlSchemaImporter.NormalizeFormatType(imported.Name);
 
+        // format_type() の正準表記（長い形。PostgreSqlTypeNotation の XmlDoc の規則の左辺）
+        public override ImportedType CatalogValueOf(string nativeType)
+        {
+            var (name, arguments, suffix) = SplitType(nativeType);
+            var parenthesized = arguments.Count == 0 ? "" : $"({string.Join(",", arguments)})";
+
+            return new ImportedType(
+                suffix.Length > 0
+                    ? nativeType
+                    : name.ToLowerInvariant() switch
+                    {
+                        "varchar" => $"character varying{parenthesized}",
+                        "char" => $"character{parenthesized}",
+                        "timestamp" => $"timestamp{parenthesized} without time zone",
+                        "timestamptz" => $"timestamp{parenthesized} with time zone",
+                        "time" => $"time{parenthesized} without time zone",
+                        _ => nativeType,
+                    }
+            );
+        }
+
         // bytea は長さを持たないので Binary / FixedBinary に上限は無い
         public override IReadOnlySet<CanonicalTypeKind> WriteLimitedKinds { get; } =
             Limited(
@@ -292,6 +378,9 @@ internal static class DialectTypeAxis
         // MySQL の取込は COLUMN_TYPE をそのまま正規化へ通す
         public override string ImportedSpelling(ImportedType imported) =>
             MySqlTypeNotation.Normalize(imported.Name);
+
+        // COLUMN_TYPE は宣言の表記そのもの（引数を含む）
+        public override ImportedType CatalogValueOf(string nativeType) => new(nativeType);
 
         public override IReadOnlySet<CanonicalTypeKind> WriteLimitedKinds { get; } =
             Limited(
@@ -364,6 +453,41 @@ internal static class DialectTypeAxis
                 imported.CharUsed
             );
 
+        // user_tab_cols の data_type と精度・スケール・char_length・data_length・char_used
+        // （OracleSchemaImporter.FormatDataType の XmlDoc：TIMESTAMP 系は data_type が精度・修飾を含む・RAW の char_length は 0）
+        public override ImportedType CatalogValueOf(string nativeType)
+        {
+            var (name, arguments, _) = SplitType(nativeType);
+            name = name.ToUpperInvariant();
+
+            if (name.StartsWith("TIMESTAMP", StringComparison.Ordinal) || arguments.Count == 0)
+            {
+                return new ImportedType(nativeType);
+            }
+
+            return name switch
+            {
+                "NUMBER" => new ImportedType(
+                    name,
+                    Length: 0,
+                    Precision: Argument(arguments[0]),
+                    Scale: arguments.Count > 1 ? Argument(arguments[1]) : 0
+                ),
+                "VARCHAR2" or "CHAR" => new ImportedType(
+                    name,
+                    Length: Argument(arguments[0]),
+                    CharUsed: "B"
+                ),
+                "NVARCHAR2" or "NCHAR" => new ImportedType(
+                    name,
+                    Length: Argument(arguments[0]),
+                    CharUsed: "C"
+                ),
+                "RAW" => new ImportedType(name, Length: 0, DataLength: Argument(arguments[0])),
+                _ => new ImportedType(nativeType),
+            };
+        }
+
         // Time は Oracle が書き出せない（上限の境界ではなく、どの値でも false）
         public override IReadOnlySet<CanonicalTypeKind> WriteLimitedKinds { get; } =
             Limited(
@@ -426,6 +550,9 @@ internal static class DialectTypeAxis
         public override string Normalize(string dataType) => dataType;
 
         public override string ImportedSpelling(ImportedType imported) => imported.Name;
+
+        // PRAGMA table_info の type は宣言の表記そのもの
+        public override ImportedType CatalogValueOf(string nativeType) => new(nativeType);
 
         // 長さ・精度・小数秒の上限を持たない（宣言はアフィニティでしかない）
         public override IReadOnlySet<CanonicalTypeKind> WriteLimitedKinds { get; } =

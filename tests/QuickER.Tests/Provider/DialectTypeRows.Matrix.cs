@@ -30,28 +30,7 @@ internal static partial class DialectTypeRows
 
     private static IEnumerable<DialectTypeRow> MatrixRows()
     {
-        var cells = MatrixCells().ToList();
-        var problems = new List<string>();
-
-        foreach (var kind in Enum.GetValues<CanonicalTypeKind>())
-        {
-            foreach (var dialect in DialectNames.All)
-            {
-                var count = cells.Count(cell => cell.Kind == kind && cell.Dialect == dialect);
-
-                if (count != 1)
-                {
-                    problems.Add($"{dialect} × {kind} のセルが {count} 個");
-                }
-            }
-        }
-
-        if (problems.Count > 0)
-        {
-            throw new InvalidOperationException(
-                "往復の表のセルが整っていない：" + string.Join("、", problems)
-            );
-        }
+        var cells = CheckedMatrixCells();
 
         foreach (var kind in Enum.GetValues<CanonicalTypeKind>())
         {
@@ -87,13 +66,56 @@ internal static partial class DialectTypeRows
         }
     }
 
+    /// <summary>
+    /// 宣言のセル（種類 × 方言ごとにちょうど 1 つあることを確かめた後。抜け・余りは名指しして断る）
+    /// </summary>
+    private static IReadOnlyList<MatrixCell> CheckedMatrixCells()
+    {
+        var cells = MatrixCells().ToList();
+        var problems = new List<string>();
+
+        foreach (var kind in Enum.GetValues<CanonicalTypeKind>())
+        {
+            foreach (var dialect in DialectNames.All)
+            {
+                var count = cells.Count(cell => cell.Kind == kind && cell.Dialect == dialect);
+
+                if (count != 1)
+                {
+                    problems.Add($"{dialect} × {kind} のセルが {count} 個");
+                }
+            }
+        }
+
+        if (problems.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "往復の表のセルが整っていない：" + string.Join("、", problems)
+            );
+        }
+
+        return cells;
+    }
+
     /// <summary>1 セル（書き出しの表記・読み戻した正規型のトークン。書き出せなければ両方 null）</summary>
     private sealed record MatrixCell(
         string Dialect,
         CanonicalTypeKind Kind,
         string? Native,
         string? Reparsed
-    );
+    )
+    {
+        /// <summary>
+        /// 表記を解析して書き出し直した表記（<see cref="Native"/> と違うときだけ宣言する。null なら <see cref="Native"/> に戻る）
+        /// </summary>
+        public string? Rewritten { get; init; }
+
+        /// <summary>
+        /// 取込の表記（方言の <c>TypeNotation.Normalize</c> の結果。<see cref="Native"/> と違うときだけ宣言する。null なら
+        /// <see cref="Native"/> のまま）
+        /// </summary>
+        public string? Imported { get; init; }
+    }
 
     /// <summary>書き出して読み戻せるセル</summary>
     private static MatrixCell C(
@@ -165,7 +187,11 @@ internal static partial class DialectTypeRows
             C(DialectNames.SqlServer, CanonicalTypeKind.Xml, "xml", "xml"),
             // 非可逆（種別）: SqlServerDataTypes に json 型が無く nvarchar(max) を代替に使うため文字列へ落ちる
             C(DialectNames.SqlServer, CanonicalTypeKind.Json, "nvarchar(max)", "string(max)"),
-            C(DialectNames.SqlServer, CanonicalTypeKind.RowVersion, "rowversion", "rowversion"),
+            // 取込の表記は timestamp（docs/database.md の same-type-spellings の表「rowversion = timestamp」）
+            C(DialectNames.SqlServer, CanonicalTypeKind.RowVersion, "rowversion", "rowversion") with
+            {
+                Imported = "timestamp",
+            },
             // ---- PostgreSQL ----
             C(DialectNames.PostgreSql, CanonicalTypeKind.Boolean, "boolean", "boolean"),
             // 非可逆（種別）: PostgreSQL に tinyint が無く smallint で受ける
@@ -269,8 +295,12 @@ internal static partial class DialectTypeRows
             C(DialectNames.Oracle, CanonicalTypeKind.Binary, "RAW(42)", "binary(42)"),
             // 非可逆（種別）: 可変長・固定長ともに RAW(n) 単一型へ落ちる
             C(DialectNames.Oracle, CanonicalTypeKind.FixedBinary, "RAW(42)", "binary(42)"),
-            // 非可逆（種別）: Oracle の DATE は時刻を含むため、日付のみが日時になる（設計上の非対称）
-            C(DialectNames.Oracle, CanonicalTypeKind.Date, "DATE", "datetime"),
+            // 非可逆（種別）: Oracle の DATE は時刻を含むため、日付のみが日時になる（設計上の非対称）。
+            // 書き出し直すと精度なしの日時の TIMESTAMP になる（roundtrip-oracle-date-asymmetric の行と同じ事実）
+            C(DialectNames.Oracle, CanonicalTypeKind.Date, "DATE", "datetime") with
+            {
+                Rewritten = "TIMESTAMP",
+            },
             // 変換不能: Oracle に TIME 型が無い
             U(DialectNames.Oracle, CanonicalTypeKind.Time),
             C(DialectNames.Oracle, CanonicalTypeKind.DateTime, "TIMESTAMP(6)", "datetime(6)"),
@@ -295,7 +325,11 @@ internal static partial class DialectTypeRows
             C(DialectNames.Sqlite, CanonicalTypeKind.Int64, "BIGINT", "int64"),
             C(DialectNames.Sqlite, CanonicalTypeKind.Decimal, "DECIMAL(12,3)", "decimal(12,3)"),
             // SQLite に単精度は無い。REAL（8 バイトの倍精度）へ写し、読み戻すと Float64＝精度を広げる方向の非可逆
-            C(DialectNames.Sqlite, CanonicalTypeKind.Float32, "REAL", "float64"),
+            // 書き出し直すと Float64 の FLOAT になる（src/QuickER.Provider.Sqlite/CLAUDE.md「型表記」：REAL の列は FLOAT へ畳まれる）
+            C(DialectNames.Sqlite, CanonicalTypeKind.Float32, "REAL", "float64") with
+            {
+                Rewritten = "FLOAT",
+            },
             C(DialectNames.Sqlite, CanonicalTypeKind.Float64, "FLOAT", "float64"),
             C(DialectNames.Sqlite, CanonicalTypeKind.Money, "MONEY", "money"),
             C(DialectNames.Sqlite, CanonicalTypeKind.String, "NVARCHAR(42)", "string(42)"),
@@ -323,6 +357,10 @@ internal static partial class DialectTypeRows
             C(DialectNames.Sqlite, CanonicalTypeKind.Json, "JSON", "json"),
             // 非可逆（種別）: SQLite に行バージョンの概念が無く、値だけを写せる BLOB（ミラー列）へ落とす。
             // 読み戻すと上限なしのバイナリになるため、SQL Server へ戻しても varbinary(max) にしかならない
-            C(DialectNames.Sqlite, CanonicalTypeKind.RowVersion, "BLOB", "binary(max)"),
+            // 書き出し直すと上限なしのバイナリの VARBINARY(MAX) になる（convert-sqlite-from-sqlserver-varbinary-max の行と同じ書き出し）
+            C(DialectNames.Sqlite, CanonicalTypeKind.RowVersion, "BLOB", "binary(max)") with
+            {
+                Rewritten = "VARBINARY(MAX)",
+            },
         ];
 }

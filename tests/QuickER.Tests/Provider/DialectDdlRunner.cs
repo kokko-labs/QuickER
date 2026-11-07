@@ -63,7 +63,15 @@ internal static class DialectDdlRunner
     /// <summary>行を 1 方言で流して照合し、問題を返す（無ければ空）</summary>
     /// <param name="row">行</param>
     /// <param name="dialect">方言</param>
-    public static IReadOnlyList<string> Check(DialectDdlCase row, string dialect)
+    /// <param name="autoCheckRan">
+    /// 自動の照合が実際に走ったとき、その観点（<see cref="DialectDdlFacets.Culture"/>・<see cref="DialectDdlFacets.English"/>）を受け取る
+    /// （網羅の計数が、照合の経路で観点を数えるため。英語の照合は入力に CJK が無いときだけ走る）
+    /// </param>
+    public static IReadOnlyList<string> Check(
+        DialectDdlCase row,
+        string dialect,
+        Action<string>? autoCheckRan = null
+    )
     {
         var problems = new List<string>();
         var outcome = Run(row, dialect);
@@ -76,8 +84,8 @@ internal static class DialectDdlRunner
             }
         }
 
-        problems.AddRange(CultureProblems(row, dialect));
-        problems.AddRange(EnglishProblems(row, dialect, outcome));
+        problems.AddRange(CultureProblems(row, dialect, autoCheckRan));
+        problems.AddRange(EnglishProblems(row, dialect, outcome, autoCheckRan));
         problems.AddRange(TreatmentProblems(row, dialect));
 
         if (problems.Count > 0)
@@ -288,7 +296,11 @@ internal static class DialectDdlRunner
     }
 
     /// <summary>自動の照合 (1)：書式のカルチャに依らない・生成日時は西暦</summary>
-    private static IEnumerable<string> CultureProblems(DialectDdlCase row, string dialect)
+    private static IEnumerable<string> CultureProblems(
+        DialectDdlCase row,
+        string dialect,
+        Action<string>? autoCheckRan
+    )
     {
         var adapter = DialectDdlAxis.Get(dialect);
         var problems = new List<string>();
@@ -341,6 +353,8 @@ internal static class DialectDdlRunner
             problems.Add($"[自動・カルチャ] {difference}");
         }
 
+        autoCheckRan?.Invoke(DialectDdlFacets.Culture);
+
         return problems.Distinct();
     }
 
@@ -352,13 +366,16 @@ internal static class DialectDdlRunner
     private static IEnumerable<string> EnglishProblems(
         DialectDdlCase row,
         string dialect,
-        DdlOutcome outcome
+        DdlOutcome outcome,
+        Action<string>? autoCheckRan
     )
     {
         if (InputStrings(row.Build(dialect)).Any(text => CjkText.Pattern.IsMatch(text)))
         {
             return [];
         }
+
+        autoCheckRan?.Invoke(DialectDdlFacets.English);
 
         return outcome
             .Text.Concat(outcome.Exception)
