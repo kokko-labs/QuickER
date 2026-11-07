@@ -509,6 +509,12 @@ The in-memory backend, however, compiles the expression tree and actually evalua
 
 ### Limits of the simple DSL and named queries
 
+A named query becomes a method of its table's repository, so it is generated only for a table that gets a repository.
+A table whose primary key is not a single column (a composite key or no key) gets no repository, and its queries are not generated.
+QuickER warns once per query, naming the query and the table.
+A setup that generates no repository at all (no QuickER Repository, EF Core, or in-memory repository) generates no named query either.
+It warns about neither the tables nor the queries, since the setup has chosen to have no repositories.
+
 In a DSL `LIKE` literal, only a leading or trailing `%` is read as a pattern (a `%` or `_` in the middle is a validation error).
 Character classes such as SQL Server's `[...]` get no special treatment: they match as strings that contain the brackets themselves.
 Write a raw SQL query when you need pattern syntax.

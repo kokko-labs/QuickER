@@ -239,6 +239,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **NOT は原子まで押し下げる（ド・モルガン・NULL 許容列の順序比較の否定に `== null ||`）**：`NOT (UNKNOWN)` で NULL 行が落ちる。ガード：`DslConditionFuzzTests`（次元表の因子 NotNesting と `DslFuzzUnits.Coverage` の決まった形）・`QueryConditionCSharpEmitterTests`。→ 同上「NOT の押し下げ」
 - **型整合検査は整数リテラルの範囲も見る・GuidKey VO への文字列一致は警告で飛ばす**：ガード：`CodegenCaseTests` の行 `diag-query-type-check-rejects-*`・`DslConditionFuzzTests`。→ 同上「型整合検査」
 - **生 SQL は改行を含むときだけ行ごとの逐語リテラル＋エスケープの連結で埋め込み、生成前に静的検証する（未宣言＝該当クエリのみスキップ）**：ガード：`QueryGenerationTests`・`QueryCodegenDiagnosticsTests`・`CodegenCaseTests` の行 `code-query-raw-sql-undeclared-parameter-*`。→ 同上「生 SQL の埋め込みと静的検証」
+- **Repository を作らない表（主キーが 1 列でない）の名前付きクエリは、表の警告の直後にクエリごとの警告で名指しする（契約を生成しない構成では表の警告と同じく出さない）**：外すとクエリが黙って消え、利用者には表の警告しか見えない。ガード：`CodegenCaseTests` の行 `diag-repository-single-key-composite-query-warning` / `diag-repository-single-key-keyless-query-warning` / `diag-repository-single-key-query-without-contract-no-warning`・網羅の配列の診断の規則。→ `src/QuickER.CodeGen.CSharp/Queries/CLAUDE.md`「Repository の無い表のクエリ」
 - **パラメータ名の予約は「外すとコンパイルできない名前だけ」、生成本体が呼ぶメンバーは `this.` で修飾する**：予約が増え続けるか、同名パラメータがメンバーを隠す。ガード：`QueryReservedParameterNameTests`・`QueryParameterNameSafetyTests`・`CodegenCaseTests` の行 `diag-query-reserved-parameter-name-*`。→ 同上「パラメータ名の予約と this 修飾」
 
 ### 生成ダイアログ

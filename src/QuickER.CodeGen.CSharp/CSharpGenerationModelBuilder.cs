@@ -507,6 +507,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                     string.Format(Strings.CodeGen_Warning_RepositorySingleKeyOnly, entity.TableName)
                 )
             );
+            WarnQueriesWithoutRepository(entity, diagnostics);
             return null;
         }
 
@@ -554,6 +555,45 @@ internal sealed partial class CSharpGenerationModelBuilder
             UniquenessConstraintsClassBlock = uniquenessBlocks.ConstraintsClassBlock,
             UniquenessBindingBlock = uniquenessBlocks.BindingBlock,
         };
+    }
+
+    /// <summary>
+    /// Repository を作らない表に定義された名前付きクエリを、1 件ずつ警告で名指しする（クエリは生成しない）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 名前付きクエリは表の Repository のメソッドとして出るので、Repository を作らない表（主キーが 1 列でない）の
+    /// クエリは生成されない。表の警告だけでは利用者がクエリの消えたことに気づけないので、クエリを飛ばすほかの警告
+    /// （参照の切れ・生 SQL の未宣言など）と同じく「クエリ 1 件＝診断 1 件」で名指しする。生成は止めない。
+    /// </para>
+    /// <para>
+    /// 対象は参照の検証を通った有効なクエリだけ（参照の切れたクエリは <c>CollectValidQueries</c> が別の警告で名指し済み）。
+    /// 呼ぶのは Repository 契約を生成する構成で表の警告を出したときだけで、表の警告と条件を揃える
+    /// （契約を生成しない構成ではどの表にも Repository が無く、構成として Repository を作らないことを選んでいる）。
+    /// </para>
+    /// </remarks>
+    private void WarnQueriesWithoutRepository(
+        Entity entity,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        if (!_queriesByEntity.TryGetValue(entity.Id, out var queries))
+        {
+            return;
+        }
+
+        foreach (var query in queries)
+        {
+            diagnostics.Add(
+                GenerationDiagnostic.Warning(
+                    string.Format(
+                        Strings.CodeGen_Query_SkippedWithoutRepository,
+                        query.Name,
+                        entity.TableName
+                    )
+                )
+            );
+        }
     }
 
     /// <summary>

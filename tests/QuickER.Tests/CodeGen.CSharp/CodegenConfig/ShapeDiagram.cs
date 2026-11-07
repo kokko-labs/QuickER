@@ -501,6 +501,16 @@ internal sealed class ShapeDiagram
     /// <summary>子の表</summary>
     public ShapeTable Orders { get; }
 
+    /// <summary>子の表に付く名前付きクエリの名前（水準 none なら null。図はクエリを 1 本だけ持つ）</summary>
+    public string? QueryName =>
+        Levels.Query switch
+        {
+            QueryLevels.Dsl => DslQueryName,
+            QueryLevels.RawSql => RawSqlQueryName,
+            QueryLevels.Manual => ManualQueryName,
+            _ => null,
+        };
+
     /// <summary>行バージョンの水準の列（無ければ null）</summary>
     public ShapeColumn? RowVersionColumn { get; }
 
@@ -601,12 +611,8 @@ internal sealed class ShapeDiagram
     /// <param name="options">実効の生成オプション</param>
     public IReadOnlyList<GeneratedFile> ManualSources(CodeGenerationOptions options)
     {
-        var methodName = Levels.Query switch
-        {
-            QueryLevels.RawSql => RawSqlQueryName,
-            QueryLevels.Manual => ManualQueryName,
-            _ => null,
-        };
+        // 簡易 DSL は全実装先へ共有の本体が出るので、手で書く実装が要るのは生 SQL と手動実装だけ
+        var methodName = Levels.Query == QueryLevels.Dsl ? null : QueryName;
 
         // 名前付きクエリは Repository に付く。子の表の主キーが 1 列でなければ Repository が無いので、手で書く実装も無い
         if (

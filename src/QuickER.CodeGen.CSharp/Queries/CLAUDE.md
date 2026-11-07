@@ -24,6 +24,18 @@ C# リテラルのエスケープの規則（`GeneratedLiteralText`）は `src/Q
 - EF Core の SQLite は decimal のサーバーサイド比較・並び替え非対応。SQLite × EF Core で使う図の DSL 条件・並び順は整数キーなどに限る
   - 実 DB パリティ：`NamedQuery{Ado,EfCore}RuntimeTests`（CI 常時実行）
 
+## Repository の無い表のクエリ
+
+- 名前付きクエリは表の Repository のメソッドとして出るので、Repository を作らない表（主キーが 1 列でない＝複合主キー・主キーなし。判定は `HasSinglePrimaryKey`）のクエリは生成されない
+- その表のクエリは、表の警告 `CodeGen_Warning_RepositorySingleKeyOnly` の直後に、警告 `CodeGen_Query_SkippedWithoutRepository` で 1 件ずつ名指しする（`CSharpGenerationModelBuilder.WarnQueriesWithoutRepository`）。生成は止めない
+  - 形はクエリを飛ばすほかの警告（参照の切れ・生 SQL の未宣言・型整合）と同じ「クエリ 1 件＝診断 1 件」。表の警告だけでは、利用者がクエリの消えたことに気づけない
+  - 対象は参照の検証を通った有効なクエリだけ（参照の切れたクエリは `CollectValidQueries` が別の警告で名指し済みなので重ねない）
+- Repository 契約を生成しない構成（`GeneratesRepositoryContract` が偽）では、表の警告と同じくクエリの警告も出さない
+  - その構成ではどの表にも Repository が無く、Repository の全メンバー（CRUD・`Query()`）が無い。クエリだけが黙って消えるのではなく、構成として Repository を作らないことを選んでいる。表の警告・採番の主キーの警告 `CodeGen_Warning_IdentityPrimaryKeyColumn` と同じ条件に揃える
+  - 出すと、エンティティ・EditModel だけを生成する使い方で、クエリを持つ図は毎回クエリの数だけ警告が並び、本当の欠落が埋もれる
+- 定義の時点（GUI のクエリ定義ダイアログ・MCP の `set_query`）では知らせない。主キーは定義の後でも変わるので、いつも当たるのは生成の時点だけ。生成の 3 つの入口（GUI・CLI・MCP の `generate_csharp`）は `DiagramCodeGenerator.Generate` → `CSharpCodeGenerationService.Generate` に合流するので、3 つとも同じ警告が出る
+- ガード：`CodegenCaseTests` の行 `diag-repository-single-key-composite-query-warning` / `diag-repository-single-key-keyless-query-warning`（簡易 DSL・生 SQL・手動実装のクエリを 1 本ずつ名指しし、主キーが 1 列の表のクエリは警告しない。Exact）・`diag-repository-single-key-query-without-contract-no-warning`（契約なしでは出ない）・網羅の配列の診断の規則（図の形 `composite-only` / `keyless-only` × クエリ × 契約。`Judges/DiagnosticRules.cs` の B 段）。mutation 実証済み（警告を外す・規則を外す・契約なしまで広げる、の各回で赤）
+
 ## NULL 許容列の文字列一致
 
 - NULL 許容列の文字列一致は「列が NULL でないこと」を AND した形へエミットする：`(x.Memo != null && x.Memo!.Contains(p))`。否定 `NOT LIKE` も同じ前提の内側で、NULL 行はどちらの向きでも一致しない

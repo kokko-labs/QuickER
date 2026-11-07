@@ -358,6 +358,7 @@ internal sealed record DiagnosticExpectation(
 ///   <item><term>A SyncSupportRequiresRepositories / RequiresDialects</term><description>CLAUDE.md（ルート）「同期の生成条件と診断」・docs/cli.md の GenerateSyncSupport</description></item>
 ///   <item><term>B RelationshipCompositeSkipped（警告）</term><description>複合外部キーは単一キー前提の生成からナビゲーションを外す（CSharpGenerationModelBuilder.ResolveAllNavigations）</description></item>
 ///   <item><term>B RepositorySingleKeyOnly（警告）</term><description>docs「What gets generated」：Repository は単一主キーが前提。契約を生成するとき、主キーが 1 列でない表（複合主キー・主キーなし）を名指し（CSharpGenerationModelBuilder.BuildRepositoryClass の HasSinglePrimaryKey）</description></item>
+///   <item><term>B QuerySkippedWithoutRepository（警告）</term><description>docs「Limits of the simple DSL and named queries」：名前付きクエリは表の Repository のメソッドなので、契約を生成するとき、Repository を作らない表のクエリを 1 件ずつ名指し（CSharpGenerationModelBuilder.WarnQueriesWithoutRepository。表の警告と同じ条件で、契約を生成しない構成では出さない）</description></item>
 ///   <item><term>B EfCoreKeylessTableExcluded（警告）</term><description>EF Core はマップする全エンティティ型にキーを要求するので、EF Core を生成するとき主キーの無い表を DbContext から外して名指し（CSharpGenerationModelBuilder.BuildEfCoreModel）</description></item>
 ///   <item><term>B ValueObjectForeignKeyUnified（情報）</term><description>CLAUDE.md「FK 列の値オブジェクト型統一」：列名の違う外部キーが寄ったら名指し</description></item>
 ///   <item><term>B IncludeGraphSkippedNavigations（情報）</term><description>自己参照は有限の Include ツリーに写せない辺を名指し（CSharpGenerationModelBuilder.IncludeGraph のコメント。契約があるときだけ）</description></item>
@@ -497,6 +498,18 @@ internal static class DiagnosticRules
                         )
                     )
             );
+
+            // 名前付きクエリは子の表（orders）の Repository に付くので、その表に Repository が無ければクエリも名指しする
+            if (shape.QueryName is { } queryName && !shape.Orders.HasSinglePrimaryKey)
+            {
+                diagnostics.Add(
+                    ExpectedDiagnostic.Warning(
+                        nameof(Strings.CodeGen_Query_SkippedWithoutRepository),
+                        queryName,
+                        shape.Orders.Name
+                    )
+                );
+            }
         }
 
         if (efCore)
