@@ -140,6 +140,7 @@ internal static class MockOutputsDimensions
                 "load-invalid-file-name",
                 "load-duplicate-screen-file",
                 "load-legacy",
+                "load-entities-normalized",
                 "load-already-exists",
             ],
         };

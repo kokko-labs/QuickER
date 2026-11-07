@@ -15,7 +15,10 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
   - 保存単位の操作の列（`MockFolderTests`）は、組（`MockFolderHarness`）がどの手の後にも見張る：失敗した手は `mock.json` のバイト列もメモリのマニフェストも変えない・メモリは `mock.json` と一緒にしか変わらない・一時ファイルが残らない・宣言と HTML の整合と `style.css` の内容（上の 3 つだけを許す）・`SourceSchema` は初回ターンの成功でだけ変わる・エンジンの完了 1 回につき `TurnCompleted` 1 回・保存の通知は成功したツールのときだけ。
     開く手（`Open`）と画面を読む手（`GetScreenHtml`）も同じ見張りを通る（失敗した Open は前のストアのまま。行 `open-refused-newer-format-keeps-manifest-and-current-store`・`read-invalid-screen-file-name-is-refused-without-reading`、別のプロセスが掴んだ `mock.json`・画面の HTML の行 `open-manifest-held-by-another-process-throws-io-and-keeps-manifest`・`read-screen-held-by-another-process-throws-io-and-keeps-manifest`）。
 - 新規作成の `mock.json` は置き換えない書き込み（`AtomicFile.CreateText`）で作る。存在の確認の後に別のプロセスが作った `mock.json` を上書きせず、事前の確認と同じ例外にする。ガード：`MockFolderTests`（行 `create-new-keeps-foreign-manifest-written-after-check`）。
-- **手で書いた `mock.json` の不正な形は、`Open` が破損として断る**（JSON として読めない・型の合わない要素・新しい版・不正な画面のファイル名・同じ画面のファイルの重複）。黙って直すのは、情報を持たない `null`（文字列は空へ、リストの要素の `null` は捨てる）だけ。
+- **手で書いた `mock.json` の不正な形は、`Open` が破損として断る**（JSON として読めない・型の合わない要素・新しい版・不正な画面のファイル名・同じ画面のファイルの重複）。黙って直すのは、情報を持たない `null`（文字列は空へ、リストの要素の `null` は捨てる）と、画面の `entities` だけ。
+  - **画面の `entities` は、断らずに保存の経路と同じ `MockFolderStore.NormalizeEntities` に通して直す**（名前の前後の空白を除く・名前が空の宣言を捨てる・同じ名前は操作の和で 1 つにまとめる・操作を C → R → U → D・有効な操作の無い宣言を捨てる・何も残らなければ宣言なし＝null）。警告は出さない（`Open` に知らせる経路が無い）。`Open` は書かないので、`mock.json` は次の保存で直った形になる。
+    宣言の意味は正規化した後の形で決まる。直さないと、設計書の CRUD 表で綴り違いの列に別の宣言の操作が入り、再開のプロンプトに名前の無い宣言や `urc` のような操作がそのまま AI へ届き、別の画面を保存しても書いたまま残る。CRUD の申告 1 つの書き損じでフォルダごと開けなくするのは重すぎるので、断らない。
+  - ガード：`MockOutputsTests`（行 `load-hand-written-entities-are-normalized`＝開いた後のマニフェスト・設計書の CRUD 表・再開のプロンプト・`Open` の前後で `mock.json` のバイト列が変わらないこと）・`MockFolderTests`（行 `open-hand-edited-nulls-are-normalized-for-later-steps`）。mutation 実証済み（読み込みの正規化を外す・同じ名前のまとめを外す・名前の比較を大文字小文字を区別する形にする、のどれも赤）。
   - 画面の重複は、ファイル名を `OrdinalIgnoreCase` で比べて判定する（ストアの画面の同定と同じ比較。ファイル名の検証の後に見る）。開くと保存（upsert）は先頭だけを更新し、削除は両方を消し、単一 HTML・設計書・ランナーの画面の数にも 2 回入る。どちらを残すかは決められないので、片方を捨てずに断る。文言は `Mock_ManifestDuplicateScreenFileFormat`（UI の言語に従う）で、2 件目のファイル名を名指しする。
   - ガード：`MockOutputsTests`（行 `load-duplicate-screen-file-is-refused-*`＝同じ綴り・大文字小文字だけの違い × UI の言語 2 つ）。mutation 実証済み。
 - 会話開始時にフォルダを指定する（空フォルダ＝新規 `CreateNew`／既存モックフォルダ＝再開）。以降は 1 ターンごとにライブ保存する。
@@ -36,6 +39,11 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
 - **検証は警告のみ。** `MockContentValidator` は外部参照・リンク切れ・style.css 未参照を警告にし、拒否は空と非 HTML（`<html>` 不含）だけ。
 - **`save_screen` の `entities`・`transitions` の壊れた要素は、要素ごとに警告して読み飛ばす**（JSON のオブジェクトでない要素・名前が空のエンティティ）。黙って捨てると、AI は宣言が記録されなかったことを知らずに進む。ER 図のツールのように `ToolArgumentShape` で呼び出しごと断る形にはしない（上の「警告のみ」の流儀。空でない `entities` の要素が 1 つも有効でなければ、既存の宣言を残して総括の警告も出す）。
   - ガード：`MockFolderTests`（行 `session-tool-save-screen-non-object-entities-warn-and-skip`・`session-tool-save-screen-non-object-transitions-warn-and-skip`・`session-tool-save-screen-nameless-entity-warns-and-skips`・`session-tool-save-screen-all-invalid-entities-keep-declarations-*`）。mutation 実証済み。
+- **同じ画面の同じ名前（`SchemaNames` の規則＝大文字小文字だけの違いを含む）の宣言は、操作の和で 1 つにまとめる**（綴りと位置は初出。`MockFolderStore.NormalizeEntities` が持ち、保存の経路と `Open` が共有する）。片方を捨てると利用者の申告が消え、まとめないと設計書の CRUD 表は 1 列に先頭の操作だけを出し、再開のプロンプトには 2 回出る。
+  - `save_screen` では、まとめた名前ごとに英語の警告を 1 件出す（上の「警告のみ」の流儀）。手で書いた `mock.json` を `Open` で直すときは出さない。
+  - ガード：`MockFolderTests`（行 `session-tool-save-screen-duplicate-entity-names-are-merged-with-warning`）・`MockOutputsTests`（行 `load-hand-written-entities-are-normalized`）。mutation 実証済み（まとめを外す・名前の比較を大文字小文字を区別する形にする・警告を外す、のどれも赤）。
+- **ツールの応答の改行は LF だけで組む**（警告の連結 `AppendWarnings` は `AppendLine` を使わない。ER 図のツールの決まり〔`src/QuickER.Mcp/CLAUDE.md`「ツールの応答の改行」〕にそろえる）。`get_screen` は画面の HTML をそのまま返すので、改行に手を付けない。
+  - ガード：`MockFolderTests`（組 `MockFolderHarness` の不変条件 9＝どの行のどのツールの応答にも CR が無い〔`get_screen` を除く〕・行 `session-tool-save-screen-non-object-entities-warn-and-skip` が警告つきの応答が複数行で LF だけであることを表明する）。mutation 実証済み（`AppendLine` へ戻すと警告の出る 10 行が赤）。
 
 ### プレビュー
 
@@ -66,7 +74,11 @@ Copilot のシェル許可の判定は `src/QuickER.AI/CLAUDE.md`「Copilot の�
 - `MockProjectAgentRunner` は全体タイムアウト（既定 30 分）・成果物検証・最終ビルド前の変更検知・最終 `dotnet build` の独立検証を行う（実行器の自己申告を信じない）。
 - 最終ビルドには専用タイムアウト `DefaultBuildTimeout`（10 分）を掛け、超過は専用文言でタイムアウト報告する。全体タイムアウトはエージェント実行までで解けており、外部トークンには時間制限が無い。値の根拠は、パッケージ・HTTP 両キャッシュを空にした完全コールドの同形 Blazor ソリューションが 6.8 秒という実測の約 88 倍。
 - 出力フォルダの上書きは `MockProjectOverwriteScanner` が既存物（自分の .sln・直下の別 sln / slnx / csproj・プロジェクトフォルダとその 4 生成物）を列挙し、VM が `ConfirmWarningDetails` で確認する。キャンセルなら出力フォルダ不変。
-  - 製品と XmlDoc が食い違う 2 つの組は行にせず、網羅しない組（P5・製品の候補）として `MockBuildBoundaryDimensions` に残している：隠し属性の別ソリューション・別プロジェクトを一覧に出さない（自分のものは隠しでも出る）・出力フォルダ自身が中を列挙できない reparse フォルダだと走査が `IOException` を投げる（走査は生成コマンドの try の外から呼ばれる）。ほかの種別は入口 D の行 `overwrite-*` が見る。ガード：`MockBuildBoundaryTests.Coverage_MatchesGaps`。
+  - **直下の別ソリューション・別プロジェクトは、隠し属性・システム属性でも出す**（列挙は `AttributesToSkip = 0`）。属性で確認から外れる同居物を作らない（自分のものは `File.Exists` なので、もともと隠しでも出る）。
+  - **出力フォルダの中を列挙できない（一覧の読み取りを拒否する ACL・中を列挙できない reparse フォルダ）ときは、例外にせず、出力フォルダ自身を `.\` の 1 件として一覧に出す**（読めた分は捨てる）。
+    走査は生成コマンドの try の外から呼ばれるので、投げると未処理例外になる。`IgnoreInaccessible = true` で黙って空にすると、中の別プロジェクトを見落としたまま確認なしに進む（フェイルオープン）。中を確かめられないものは確認に出す（「最終ビルド前の変更検知」が一覧を読めないフォルダを毎回出すのと同じ向き）。
+    続行すると、列挙できない reparse フォルダでは書き込みもできないので、スキャフォールドが try の中で失敗として報告される。
+  - ガード：`MockBuildBoundaryTests`（入口 D の行 `overwrite-hidden-foreign-solutions-are-listed`・`overwrite-acl-denied-output-folder-is-listed-as-itself`・`overwrite-unlistable-reparse-output-folder-is-listed-as-itself`＝素の列挙が実際に投げることも同じ行で確かめる。ほかの種別も入口 D の行 `overwrite-*` が見る）・`MockBuildBoundaryTests.Coverage_MatchesGaps`（入口 D の網羅しない組は無い）。mutation 実証済み（失敗を空として返す・`IgnoreInaccessible` を true へ戻す・`AttributesToSkip` を既定へ戻す、のどれも赤）。
 
 ### 実行器 4 種
 

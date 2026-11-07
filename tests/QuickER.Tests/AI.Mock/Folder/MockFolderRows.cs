@@ -748,7 +748,12 @@ internal static partial class MockFolderRows
                     manifest.Screens.Should().ContainSingle();
                     manifest.Screens[0].Name.Should().BeEmpty();
                     manifest.Screens[0].Description.Should().BeEmpty();
-                    manifest.Screens[0].Entities.Should().HaveCount(2);
+                    // 宣言は保存の経路と同じ正規化に通す：名前が null の宣言は同定できないので捨てる（出力の表の行 load-hand-written-entities-are-normalized）
+                    manifest
+                        .Screens[0]
+                        .Entities!.Select(e => (e.Name, e.Operations))
+                        .Should()
+                        .Equal(("Order", "R"));
                     manifest.Transitions.Should().ContainSingle();
                     manifest.Transitions[0].To.Should().BeEmpty();
                     manifest.Revisions.Should().ContainSingle();
