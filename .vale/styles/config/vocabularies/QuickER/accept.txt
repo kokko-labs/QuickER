@@ -59,6 +59,7 @@ ORs
 PDFs
 POCOs
 SHAs
+UUIDs
 
 # ソフトウェアの語彙。一般英語の辞書には無い。
 accessors?
