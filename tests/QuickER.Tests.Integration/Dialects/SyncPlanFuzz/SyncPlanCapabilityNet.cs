@@ -18,7 +18,7 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 /// ケースは、網の種 1 つ（同期計画の総当たりと同じ生成器・同じ番号の種）と、その種が目標の図へ加えた変更 1 つの組。
 /// <b>網の種 N と実 DB の総当たりの種 N は別のケース</b>：実 DB は取り込んだ図（表・制約の並びが DB の返す順）の並びで変更の乱数を
 /// 引くので、生成器が作った図の並びで引く網とは変更が変わる（種の番号を書くときは「網の種」「実 DB の種」を添える）。因子は総当たりと同じ
-/// 差分の選び方・変更の種類に、方言の能力（<see cref="SyncDialectCapabilities"/> のうち同期計画の形を変える 17 項目）を足したもの。
+/// 差分の選び方・変更の種類に、方言の能力（<see cref="SyncDialectCapabilities"/> のうち同期計画の形を変える 20 項目）を足したもの。
 /// </para>
 /// <para>
 /// 能力は方言ごとに固定の値なので、派生ごとの固定の水準（<c>fixedLevels</c>）として数える。固定の水準はここに書き下ろした表
@@ -50,6 +50,7 @@ internal static class SyncPlanCapabilityNetDimensions
         nameof(SyncDialectCapabilities.SupportsUniqueConstraintOnPrimaryKey),
         nameof(SyncDialectCapabilities.ReferencedKeyRequiresSameColumnOrder),
         nameof(SyncDialectCapabilities.ForeignKeyAllowsStringLengthDifference),
+        nameof(SyncDialectCapabilities.ForeignKeyAllowsIntegerWidthDifference),
         nameof(SyncDialectCapabilities.TransactionalDdl),
         nameof(SyncDialectCapabilities.SupportsOnUpdateAction),
         nameof(SyncDialectCapabilities.SupportsSetDefaultAction),
@@ -77,6 +78,7 @@ internal static class SyncPlanCapabilityNetDimensions
         ("SupportsUniqueConstraintOnPrimaryKey", ["True", "True", "True", "False", "False"]),
         ("ReferencedKeyRequiresSameColumnOrder", ["True", "False", "True", "False", "False"]),
         ("ForeignKeyAllowsStringLengthDifference", ["False", "True", "True", "True", "True"]),
+        ("ForeignKeyAllowsIntegerWidthDifference", ["False", "True", "False", "True", "True"]),
         ("TransactionalDdl", ["True", "True", "False", "False", "True"]),
         ("SupportsOnUpdateAction", ["True", "True", "True", "False", "True"]),
         ("SupportsSetDefaultAction", ["True", "True", "False", "False", "True"]),

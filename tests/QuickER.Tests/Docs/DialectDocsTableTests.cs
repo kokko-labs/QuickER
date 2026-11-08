@@ -360,6 +360,8 @@ public sealed class DialectDocsTableTests
             c.ReferencedKeyRequiresSameColumnOrder,
         ["String types differing only in length are allowed on the two ends"] = c =>
             c.ForeignKeyAllowsStringLengthDifference,
+        ["Integer types differing only in width are allowed on the two ends"] = c =>
+            c.ForeignKeyAllowsIntegerWidthDifference,
         ["A failed re-add can leave the foreign key dropped"] = c => !c.TransactionalDdl,
     };
 

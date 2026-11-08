@@ -63,6 +63,7 @@ public sealed class SqliteProvider : IDatabaseProvider
             SupportsUniqueConstraintOnPrimaryKey = false,
             ReferencedKeyRequiresSameColumnOrder = false,
             ForeignKeyAllowsStringLengthDifference = true,
+            ForeignKeyAllowsIntegerWidthDifference = true,
             TransactionalDdl = true,
             IdentifierLengthLimit = SqliteIdentifier.Limit,
             TruncatesLongIdentifiers = false,

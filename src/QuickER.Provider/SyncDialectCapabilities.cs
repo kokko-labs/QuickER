@@ -224,6 +224,25 @@ public sealed partial record SyncDialectCapabilities
     /// </remarks>
     public required bool ForeignKeyAllowsStringLengthDifference { get; init; }
 
+    /// <summary>
+    /// 外部キーの両端の整数型が、幅だけ違っていてもよいか（PostgreSQL・Oracle・SQLite）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 整数型は <c>smallint</c> / <c>int</c> / <c>integer</c> / <c>bigint</c>（<c>int2</c> / <c>int4</c> / <c>int8</c> を含む）と、小数部の無い
+    /// <c>NUMBER(p)</c> / <c>NUMBER(p,0)</c>（Oracle の桁の違い）。PostgreSQL・Oracle は、どの向きでも幅の違う整数の外部キーを作れ、
+    /// 張ったまま片方の列の幅を変えられる（コンテナで確認）。SQL Server（Msg 1778）・MySQL（エラー 3780）は幅も一致しないと作れない。
+    /// SQLite は外部キーの型を検査しない。<c>true</c> の方言では、同期後の外部キーの両端の型の照合（<see cref="AreForeignKeyCompatibleTypes"/>）が
+    /// 幅だけの違いを食い違いとみなさない。食い違いとみなすと、DB が受け入れる違いを偽の型の食い違いとして名指しし、外部キーを外し直さずに
+    /// 主キーの解除や付け直しを止める。
+    /// </para>
+    /// <para>
+    /// 宣言は「真なら DB が必ず受け入れる」保守側に置く。PostgreSQL・Oracle は小数の精度・浮動小数点・整数と小数の組など、整数の幅の
+    /// 外の数値の違いも受け入れるが（PostgreSQL は向きによる）、宣言には含めない（食い違いとみなすので、名指しはするが同期は通る）。
+    /// </para>
+    /// </remarks>
+    public required bool ForeignKeyAllowsIntegerWidthDifference { get; init; }
+
     /// <summary>同期スクリプトの DDL がトランザクションで巻き戻るか（MySQL・Oracle は DDL を暗黙にコミットする）。</summary>
     /// <remarks>
     /// <c>false</c> の方言では、途中の文が失敗すると前の文が適用されたまま残る（外部キーを外した後の付け直しが失敗すると、
@@ -268,6 +287,8 @@ public sealed partial record SyncDialectCapabilities
     /// 文字集合などの指定は同じであること）も並べられる。対象の型は <c>char</c> / <c>varchar</c> / <c>nchar</c> /
     /// <c>nvarchar</c> / <c>binary</c> / <c>varbinary</c> / <c>varchar2</c> / <c>nvarchar2</c> / <c>raw</c> で、
     /// Oracle の長さの単位語（<c>CHAR</c> / <c>BYTE</c>）は両端で同じであること（単位語の無い表記と、ある表記は別とみなす）。
+    /// <see cref="ForeignKeyAllowsIntegerWidthDifference"/> が <c>true</c> の方言では、幅だけが違う整数型
+    /// （<see cref="DiffersOnlyInIntegerWidth"/>）も並べられる。
     /// </remarks>
     public bool AreForeignKeyCompatibleTypes(string? left, string? right)
     {
@@ -276,12 +297,31 @@ public sealed partial record SyncDialectCapabilities
             return true;
         }
 
+        var normalizedLeft = NormalizeTypeNotation(left ?? string.Empty);
+        var normalizedRight = NormalizeTypeNotation(right ?? string.Empty);
+
         return ForeignKeyAllowsStringLengthDifference
-            && DiffersOnlyInStringLength(
-                NormalizeTypeNotation(left ?? string.Empty),
-                NormalizeTypeNotation(right ?? string.Empty)
-            );
+                && DiffersOnlyInStringLength(normalizedLeft, normalizedRight)
+            || ForeignKeyAllowsIntegerWidthDifference
+                && DiffersOnlyInIntegerWidth(normalizedLeft, normalizedRight);
     }
+
+    /// <summary>2 つの型表記が、どちらも整数型か（幅が同じでも真）</summary>
+    /// <remarks>
+    /// 整数型は <c>smallint</c> / <c>int</c> / <c>integer</c> / <c>bigint</c> / <c>int2</c> / <c>int4</c> / <c>int8</c> と、小数部の無い
+    /// <c>NUMBER(p)</c> / <c>NUMBER(p,0)</c> / <c>NUMBER(*,0)</c>（Oracle が <c>INTEGER</c> を保存する形）。表記の正規化はしないので、
+    /// 方言の正規化が要る比較では呼び出し側が先に通す。
+    /// </remarks>
+    public static bool DiffersOnlyInIntegerWidth(string? left, string? right) =>
+        IntegerTypePattern().IsMatch(left ?? string.Empty)
+        && IntegerTypePattern().IsMatch(right ?? string.Empty);
+
+    /// <summary>整数型の表記（幅の違いだけを許す型）</summary>
+    [GeneratedRegex(
+        @"^\s*(?:smallint|int|integer|bigint|int2|int4|int8|number\s*\(\s*(?:[0-9]+\s*(?:,\s*0\s*)?|\*\s*,\s*0\s*)\))\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex IntegerTypePattern();
 
     /// <summary>2 つの型表記が、同じ文字列型で長さだけが違うか（長さが同じでも真）</summary>
     /// <remarks>

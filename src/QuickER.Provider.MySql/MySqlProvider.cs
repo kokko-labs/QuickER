@@ -61,6 +61,7 @@ public sealed class MySqlProvider : IDatabaseProvider
             SupportsUniqueConstraintOnPrimaryKey = true,
             ReferencedKeyRequiresSameColumnOrder = true,
             ForeignKeyAllowsStringLengthDifference = true,
+            ForeignKeyAllowsIntegerWidthDifference = false,
             TransactionalDdl = false,
             IdentifierLengthLimit = MySqlIdentifier.Limit,
             TruncatesLongIdentifiers = false,

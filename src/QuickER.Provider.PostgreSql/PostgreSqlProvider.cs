@@ -57,6 +57,7 @@ public sealed class PostgreSqlProvider : IDatabaseProvider
             SupportsUniqueConstraintOnPrimaryKey = true,
             ReferencedKeyRequiresSameColumnOrder = false,
             ForeignKeyAllowsStringLengthDifference = true,
+            ForeignKeyAllowsIntegerWidthDifference = true,
             TransactionalDdl = true,
             IdentifierLengthLimit = PgIdentifier.Limit,
             TruncatesLongIdentifiers = true,

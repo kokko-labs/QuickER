@@ -39,6 +39,7 @@ public static class TestDialectCapabilities
             SupportsUniqueConstraintOnPrimaryKey = true,
             ReferencedKeyRequiresSameColumnOrder = true,
             ForeignKeyAllowsStringLengthDifference = false,
+            ForeignKeyAllowsIntegerWidthDifference = false,
             TransactionalDdl = true,
             IdentifierLengthLimit = IdentifierLengthLimit.Unlimited,
             TruncatesLongIdentifiers = false,

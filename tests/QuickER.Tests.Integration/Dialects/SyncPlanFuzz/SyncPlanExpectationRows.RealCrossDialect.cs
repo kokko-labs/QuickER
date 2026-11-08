@@ -19,10 +19,10 @@ internal static partial class SyncPlanExpectationRows
         dialect switch
         {
             DialectNames.SqlServer => 13,
-            DialectNames.PostgreSql => 15,
+            DialectNames.PostgreSql => 16,
             DialectNames.MySql => 13,
-            DialectNames.Oracle => 14,
-            DialectNames.Sqlite => 13,
+            DialectNames.Oracle => 15,
+            DialectNames.Sqlite => 14,
             _ => 0,
         };
 
@@ -35,6 +35,51 @@ internal static partial class SyncPlanExpectationRows
             .. RealCrossDialectNameRows(),
             .. RealCrossDialectDescriptionRows(),
             .. RealCrossDialectLongDefaultNameRows(),
+            .. RealCrossDialectIntegerWidthRows(),
+        ];
+
+    /// <summary>
+    /// 外部キーの両端の整数の幅の違い（宣言 <see cref="SyncDialectCapabilities.ForeignKeyAllowsIntegerWidthDifference"/> が真の方言の固定。
+    /// 偽の方言＝SQL Server・MySQL は、同じ形が警告して失敗する行 <c>realdb-fk-type-mismatch-one-end-warns-and-fails</c>・
+    /// <c>realdb-mysql-fk-type-mismatch-one-end-warns-and-keeps-fk</c> が固定する）
+    /// </summary>
+    /// <remarks>
+    /// 子の列だけを 64 ビット整数へ変えると、両端の幅が違う外部キーになる。宣言が真の方言では食い違いとみなさず、名指しせずに
+    /// 同期し、DB が受け入れる（外部キーを張ったまま列を変える PostgreSQL・Oracle と、表を作り直す SQLite）。宣言が DB の事実と
+    /// 食い違えば、警告のない失敗（表明 1）で赤になる。
+    /// </remarks>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > RealCrossDialectIntegerWidthRows() =>
+        [
+            Row(
+                    "realdb-fk-integer-width-difference-is-accepted-without-warning",
+                    "[Integration] 外部キーの子の列だけを幅の広い整数へ変えると、整数の幅の違いを許す方言では名指しせずに同期でき、DB が受け入れる",
+                    DialectNames.PostgreSql,
+                    DialectNames.Oracle,
+                    DialectNames.Sqlite
+                )
+                .LiveWith(w => RealCrossDialectScenarios.IntegerParentChild(w.Live, w.Capability))
+                .TargetWith(w =>
+                {
+                    RealCrossDialectScenarios.IntegerParentChild(w.Target, w.Capability);
+                    w.Target.Col("iw_child", "parent_id").DataType =
+                        RealCrossDialectScenarios.BigIntType(w.Capability);
+                })
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterColumn))
+                .OnRealDatabase(r =>
+                    r.Setup(
+                            "INSERT INTO \"iw_parent\" (\"id\") VALUES (1);\n"
+                                + "INSERT INTO \"iw_child\" (\"id\", \"parent_id\") VALUES (1, 1);"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Warnings.Absent("ForeignKeyColumnTypeMismatch*");
+                            e.Outcome.Exact("committed");
+                            e.After.Count("fk *", 1);
+                            e.AfterDiff.Empty();
+                        })
+                ),
         ];
 
     /// <summary>NOT NULL の子の列への SET NULL の外部キー（作れる方言で、親の削除が NOT NULL の違反で失敗する）</summary>
@@ -572,6 +617,31 @@ internal static class RealCrossDialectScenarios
     /// <summary>
     /// 方言の整数型の綴り（総当たりの方言の部品 <see cref="SyncPlanFuzzDialect.TypeName"/> の <see cref="FuzzTypeKind.Int"/> と同じ＝取り込み直した綴り）
     /// </summary>
+    /// <summary>方言の 64 ビット整数の型（Oracle は小数部の無い NUMBER の桁）</summary>
+    public static string BigIntType(string dialect) =>
+        dialect switch
+        {
+            DialectNames.SqlServer => "bigint",
+            DialectNames.PostgreSql => "bigint",
+            DialectNames.MySql => "bigint",
+            DialectNames.Oracle => "NUMBER(19)",
+            DialectNames.Sqlite => "BIGINT",
+            _ => throw new ArgumentOutOfRangeException(nameof(dialect), dialect, null),
+        };
+
+    /// <summary>親 iw_parent(id) と、それを参照する子 iw_child(parent_id)（外部キー iw_fk・型は方言の 32 ビット整数）</summary>
+    public static void IntegerParentChild(ExpectationSchema s, string dialect)
+    {
+        var type = IntType(dialect);
+        s.Table("iw_parent", ExpectationSchema.Pk("id", type));
+        s.Table(
+            "iw_child",
+            ExpectationSchema.Pk("id", type),
+            ExpectationSchema.NotNull("parent_id", type)
+        );
+        s.Fk("iw_parent", "iw_child", "iw_fk", ("id", "parent_id"));
+    }
+
     public static string IntType(string dialect) =>
         dialect switch
         {

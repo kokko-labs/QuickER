@@ -5,8 +5,8 @@ internal static partial class SourceRuleProbes
 {
     private static IEnumerable<SourceRuleProbe> Provider() =>
         [
-            // 差分の項目のリレーション（素の・! の）を第 1 引数に渡す ResolveForeignKeyName を拾い、ほかの型のリレーション・ほかの
-            // 名前の呼び出しは拾わない
+            // 差分の項目のリレーション（素の・! の）を第 1 引数に渡す ResolveForeignKeyName と、差分の項目の名前（素の・?? の左辺）を
+            // 第 1 引数に渡す EffectiveForeignKey を拾い、ほかの型のリレーション・リレーションの名前・ほかの名前の呼び出しは拾わない
             new SourceRuleProbe(
                 "sync-selected-foreign-key-names-forms",
                 "sync-selected-foreign-key-names",
@@ -14,6 +14,7 @@ internal static partial class SourceRuleProbes
                     new ProbeFile(
                         "Probe.cs",
                         """
+                        using QuickER.Dialects;
                         using QuickER.Model;
                         using QuickER.Provider;
 
@@ -35,10 +36,21 @@ internal static partial class SourceRuleProbes
                             public static string Live(LiveForeignKey fk) => ResolveForeignKeyName(fk.Relationship, "c");
 
                             public static string OtherName(SchemaDiffItem item) => Other(item.Relationship, "c");
+
+                            public static string Effective(SchemaDiffItem item) =>
+                                ConstraintNames.EffectiveForeignKey(item.ForeignKeyName, "c", "p", IdentifierLengthLimit.Unlimited);
+
+                            public static string EffectiveCoalesce(SchemaDiffItem item) =>
+                                ConstraintNames.EffectiveForeignKey(item.ForeignKeyName ?? "n", "c", "p", IdentifierLengthLimit.Unlimited);
+
+                            public static string EffectiveRelationship(SchemaDiffItem item) =>
+                                ConstraintNames.EffectiveForeignKey(item.Relationship?.ConstraintName, "c", "p", IdentifierLengthLimit.Unlimited);
                         }
                         """,
                         "Plain",
-                        "Suppressed"
+                        "Suppressed",
+                        "Effective",
+                        "EffectiveCoalesce"
                     ),
                 ]
             ),
