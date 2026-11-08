@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using QuickER.CodeGen.CSharp.Queries;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Resources;
@@ -295,6 +296,14 @@ public static class ErDiagramDynamicTools
             return (string.Format(Strings.Tool_ColumnNotFound, columnName), false);
         }
 
+        // 削除した列を参照する名前付きクエリ（クエリは書き換えず、応答で名指しする。MCP のホストと同じ判定と英語の文）
+        var queryReferences = QueryColumnReferences.Find(
+            vm.Queries,
+            entity.Id,
+            column.Id,
+            column.Name
+        );
+
         // 削除カラムを参照する FK リレーションを収集し、Undo 時に参照を復元できるようコマンドへ渡す
         var affected = vm.FindRelationshipsUsingColumn(column);
         vm.UndoRedo.Execute(
@@ -305,7 +314,20 @@ public static class ErDiagramDynamicTools
                 () => vm.ApplyRelationshipColumnRules()
             )
         );
-        return (string.Format(Strings.Tool_ColumnRemoved, tableName, columnName), true);
+
+        var removed = string.Format(Strings.Tool_ColumnRemoved, tableName, columnName);
+
+        return (
+            QueryColumnReferences.DescribeRemovedColumn(
+                entity.TableName,
+                column.Name,
+                queryReferences
+            )
+                is { } queryNote
+                ? $"{removed} {queryNote}"
+                : removed,
+            true
+        );
     }
 
     /// <summary>エンティティのテーブル名・メモ・説明のうち、指定されたものを更新する</summary>

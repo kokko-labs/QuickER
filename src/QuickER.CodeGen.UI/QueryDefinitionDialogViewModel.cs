@@ -178,7 +178,7 @@ public partial class QueryDefinitionDialogViewModel : ObservableObject
 
             if (!query.IsConditionValid)
             {
-                return Strings.QueryDialog_Status_ConditionInvalid;
+                return string.Format(Strings.QueryDialog_Status_ConditionInvalid, query.Name);
             }
 
             // 生 SQL の未宣言パラメータは実行時に必ず失敗するため OK をブロックする

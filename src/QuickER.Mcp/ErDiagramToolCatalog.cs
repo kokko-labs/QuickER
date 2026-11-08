@@ -131,7 +131,7 @@ public static class ErDiagramToolCatalog
             {
                 Name = ErDiagramToolNames.RemoveColumn,
                 Description =
-                    "Removes a column from the specified table. Any UNIQUE constraint that includes the column is removed together with it (a constraint is never silently narrowed to the remaining columns).",
+                    "Removes a column from the specified table. Any UNIQUE constraint that includes the column is removed together with it (a constraint is never silently narrowed to the remaining columns). Named queries that refer to the column are left unchanged, and the result names each of them with what refers to the column.",
                 DeferLoading = false,
                 InputSchema = new
                 {

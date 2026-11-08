@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using QuickER.CodeGen.CSharp.Queries;
 using QuickER.Dialects;
 using QuickER.Documents;
 using QuickER.Model;
@@ -521,7 +522,9 @@ public static partial class DocumentErDiagramToolHost
     /// <summary>指定テーブルからカラムを削除し、そのカラムを参照するリレーションの参照をクリアする</summary>
     /// <remarks>
     /// 削除カラムを構成列に含む一意制約は制約ごと削除する（構成列を 1 つ失った制約を黙って別の意味の制約へ
-    /// 変質させないため。GUI の <c>RemoveColumnCommand</c> と同じ規則）
+    /// 変質させないため。GUI の <c>RemoveColumnCommand</c> と同じ規則）。
+    /// 削除カラムを参照する名前付きクエリは書き換えず、応答に英語の注意文で名指しする
+    /// （<see cref="QueryColumnReferences.DescribeRemovedColumn"/>。GUI のツールと同じ判定と文）
     /// </remarks>
     private static (string, bool) RemoveColumn(DiagramDocument document, JsonElement args)
     {
@@ -547,6 +550,14 @@ public static partial class DocumentErDiagramToolHost
             return (DescribeColumnNotFound(columnName), false);
         }
 
+        // 削除した列を参照する名前付きクエリ（クエリは書き換えず、応答で名指しする。GUI のツールと同じ判定と文）
+        var queryReferences = QueryColumnReferences.Find(
+            document.Schema.Queries,
+            entity.Id,
+            column.Id,
+            column.Name
+        );
+
         entity.Columns.Remove(column);
 
         // 削除カラムを構成列に含む一意制約は制約ごと取り除く（GUI の削除後挙動をミラー）
@@ -566,7 +577,19 @@ public static partial class DocumentErDiagramToolHost
             }
         }
 
-        return ($"Removed column '{columnName}' from table '{tableName}'.", true);
+        var removed = $"Removed column '{columnName}' from table '{tableName}'.";
+
+        return (
+            QueryColumnReferences.DescribeRemovedColumn(
+                entity.TableName,
+                column.Name,
+                queryReferences
+            )
+                is { } queryNote
+                ? $"{removed} {queryNote}"
+                : removed,
+            true
+        );
     }
 
     /// <summary>エンティティのテーブル名・メモ・説明のうち、指定されたものを更新する</summary>
