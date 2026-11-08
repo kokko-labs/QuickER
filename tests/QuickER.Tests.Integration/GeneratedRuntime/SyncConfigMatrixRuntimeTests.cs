@@ -14,7 +14,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
 /// 同期の構成の行列（<see cref="SyncConfigDimensions"/>）の行ごとに、生成された DI の登録で同期を組み、新しい行の上げ下げが
-/// 1 回の同期で届くことを確かめる（サーバー＝実 SQL Server・ローカル＝実ファイル SQLite）。
+/// 1 回の同期で届き、続く洗い替え 1 回で両方の行がローカルにそろうことを確かめる（サーバー＝実 SQL Server・ローカル＝実ファイル SQLite）。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -41,7 +41,7 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
     private const string LocalKey = "local";
 
     [Fact(
-        DisplayName = "[Sync/構成] DI の登録の形・転送経路・キーの型・キーを決めるフックの組ごとに、新しい行が 1 回の同期で上がり・降りる（既知の失敗は除く）"
+        DisplayName = "[Sync/構成] DI の登録の形・転送経路・キーの型・キーを決めるフックの組ごとに、新しい行が 1 回の同期で上がり・降り、洗い替え 1 回でそろう（既知の失敗は除く）"
     )]
     public async Task EveryConfiguration_RoundTripsNewRows()
     {
@@ -222,6 +222,21 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
             (await adapter.ExistsAsync(scope.ServiceProvider, localKey, keys.Server, Ct))
                 .Should()
                 .BeTrue("the server new row reaches the local database in one sync");
+        }
+
+        // 洗い替え 1 回（全消し→流し込み）が、同じ登録の形で例外なく終わり、両方の行がローカルにそろう
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            await adapter.RefreshAsync(scope.ServiceProvider, Ct);
+
+            foreach (var id in new[] { keys.Local, keys.Server })
+            {
+                (await adapter.ExistsAsync(scope.ServiceProvider, localKey, id, Ct))
+                    .Should()
+                    .BeTrue(
+                        "a refresh reloads every server row, the ones this row synchronised included"
+                    );
+            }
         }
     }
 

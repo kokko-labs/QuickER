@@ -23,6 +23,13 @@ SQLite 方言エンジン（QuickER 版 Repository の ADO 実装）の固定コ
 - EF Core 版 Repository も同じ待ちを持つ（公開の `SqliteBusyTimeoutInterceptor`）。詳細は `src/QuickER.Runtime.EntityFrameworkCore/CLAUDE.md`。
 - ガード：`SqliteBusyTimeoutDefaultRuntimeTests`（既定・`Default Timeout=5`・`0`・プールから戻った接続）、`SyncRuntimeTestsBase` の `JournaledWrite_WaitsForReaderOnAnotherConnection` / `RawSqlReturning_WaitsForReaderOnAnotherConnection`（別の接続の読み取りを持ったまま書き込みが待ち、読み取りの後に成功する。直結と HTTP）、`SqliteRepositoryDialectTests`（生成テキスト）。mutation 実証済み。
 
+## 複数の文を 1 つのトランザクションで流す口（ISqlBatchExecutor）
+
+- SQLite の `SqlExecutor` だけが Core の公開の口 `ISqlBatchExecutor.ExecuteSqlBatchAsync` を実装する（`_04_RepositoryContractCore.scriban` の `repository_dialect == "sqlite"` の分岐）。1 つの接続で `BeginTransactionAsync` → 文ごとに `ExecuteNonQueryAsync` → `CommitAsync`。どれかの文かコミットが失敗したら `SqlTransactions.RollbackQuietlyAsync` と `await using` で巻き戻してから接続を返す。
+- 生の `BEGIN … COMMIT` を 1 本の文字列で流すと、失敗したときトランザクションが開いたまま接続がプールへ返る（Microsoft.Data.Sqlite はプールへ返す接続を巻き戻さない）。次にその接続を引いた呼び出しがトランザクションの中で動き、別の接続の書き込みは locked になる。口はこれを避けるためにある。
+- 使うのは同期の洗い替えの、表どうしの循環のある範囲の全消しだけ（→ `src/QuickER.Runtime.Sync/CLAUDE.md`「洗い替え」）。パラメータは持たない。
+- ガード：`refresh-failed-wipe-in-a-foreign-key-cycle-deletes-nothing`（巻き戻しを外す壊し方で赤）・`refresh-empties-tables-in-a-foreign-key-cycle`。公開 API 面は `QuickER.Runtime.approved.txt`・`QuickER.Runtime.Sqlite.approved.txt`。
+
 ## INSERT コマンドの使い回し
 
 - SQLite 版の BulkInsert はコマンドを 1 回だけ用意して、値だけ差し替える（`EntitySaveMetadata.RebindInsertParameters`）。行ごとに `new SqliteCommand` すると毎行 parse / plan になり、洗い替えの速度が落ちる。

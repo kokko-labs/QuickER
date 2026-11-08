@@ -244,7 +244,8 @@
   - AddGeneratedSyncSupport か分けた登録。
   - キーを決める Before フックの有無。
   - 直接の挿入かグラフ保存。
-- 流れは「登録 → 解決 → 登録の形の検査 → 新しい行を同期 1 回で上げる → サーバーの新しい行を 1 回で降ろす」。
+- 流れは「登録 → 解決 → 登録の形の検査 → 新しい行を同期 1 回で上げる → サーバーの新しい行を 1 回で降ろす → 洗い替え 1 回で両方の行がそろう」。
+  - 洗い替えの段は登録の形ごとに全消しと流し込みが通ることを見る（今の 2 つのフィクスチャは木の図。表どうしの循環は同期のモデルの決定的な行 `refresh-*-foreign-key-cycle*` が 3 つの Theory で見る。図の形の軸は足していない）。
   - 登録の形（`SyncConfigFixtures.RegistrationProblems`）：ローカルのリポジトリがジャーナル記録デコレータ／差分ソースが転送経路の型（HTTP は HttpSyncServerSource・直結は DirectSyncSource）／サーバーのリポジトリは素のまま。
   - 2 回目の同期が降ろすのはその 1 行だけ（ミラー版から導いたアンカー）。
 - 既知の失敗は KnownCaseLedger で、今は空。行の由来の指摘は行に残す。
@@ -259,7 +260,12 @@
 - 点はどれも、エンジンがローカルの書き込みロックを持たない時点に置く。割り込みの書き込みはデコレータの書き込みロックを待つので、ロックの中に置くと待ち合って止まる（適用の最中・洗い替えには差し込めない）。上限 30 秒で待つのをやめ、`interrupt/deadlock` の違反にする。
 - 割り込みの書き込みは通常の書き込みと同じ経路（`WriteAsync`）で、書き手の操作として履歴へ積む。
 - 仕掛けたのに点に来なかった割り込みは `interrupt/not-fired:{点}` の違反にする（黙った空振りの守り）。
-- 決定的なシナリオは点 3 × 形 3（未送信の行の更新・未送信の行の削除・作り直した行の再削除）の 9 行＋フォルダーの `d1-folder-recreate-delete` の 1 行。`interrupt-BeforeServerWrite-delete-recreated` もこの形。行の宣言が全積を含むことは `SyncModelRuntimeTests.InterruptScenarios_CoverEveryPointAndShape` が表明する。
+- 決定的なシナリオは点 3 × ポリシー 2（Collect・ServerWins）× 前段 4（更新・削除→作り直し・削除・blob の書き込み）× 割り込みの書き込み 3（更新・削除・作り直し）のうち起こり得る 35 行＋フォルダーの `d1-folder-recreate-delete` の 1 行。
+  - 外す組は原理的に起こり得ないものだけ：行が無いのに更新・削除する組・行があるのに作り直す組（`SyncModelScenarios.IsPossibleInterruptShape`）と、ServerWins × サーバーへの書き込みの直前（Versioned＋ServerWins はサーバーへ書かない＝`IsPossibleInterruptPoint`）。
+  - Collect の行の名前は 4m-D1 からのまま（`interrupt-{点}-{形}`）、ServerWins の行は `-serverwins` を付ける。ServerWins の行はサーバーの他者が別の品目を変え、取得が 1 行以上を返す点にも来るようにする。
+  - `interrupt-BeforeServerWrite-delete-recreated`（4m-D1）・`interrupt-BeforeServerWrite-recreate-deleted`（P5-2 の S1）・`interrupt-*-update-blob-written-serverwins`（S2）・`interrupt-*-recreate-deleted-serverwins`（先行の D5）もこの網の行。
+  - 行の宣言が起こり得る組をすべて含み、行の同期がそのポリシーで流れることは `SyncModelRuntimeTests.InterruptScenarios_CoverEveryPointAndShape` が表明する（外す規則はテストの中で書き下ろす）。
+  - 割り込みは SQLite のサーバー役の包みでしか仕掛けられないので、この網の行は直結と HTTP の 2 つの Theory でだけ流れる（下の「実 SQL Server の転送は…」）。
 - 割り込みは乱数の操作の列に入れない。生成器は毎歩実際の DB を読んで操作を選ぶので、派生の乱数で割り込みを選んでも既存の種の列が変わる。入れるなら別の種の列にする。
 - 実 SQL Server の転送は包みを持たないので、割り込みのシナリオを流さない（`SyncModelScenario.ArmsServerFaults`）。
 - mutation 実証済み。

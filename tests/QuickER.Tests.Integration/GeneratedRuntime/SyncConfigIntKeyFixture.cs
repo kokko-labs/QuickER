@@ -147,6 +147,11 @@ internal sealed class SyncConfigIntKeyFixture : ISyncConfigFixture
         );
     }
 
+    public Task RefreshAsync(IServiceProvider provider, CancellationToken ct) =>
+        provider
+            .GetRequiredService<SyncEngine>()
+            .RefreshAsync(new SyncRefreshOptions { DiscardLocalUnboundedBinaries = true }, ct);
+
     public IReadOnlyList<string> RegistrationProblems(
         IServiceProvider provider,
         object? localKey,

@@ -405,7 +405,7 @@ internal static class SyncModelSqlServerState
 
         await using (
             var command = new SqlCommand(
-                "SELECT folder_id, parent_id, name FROM model_folders",
+                "SELECT folder_id, parent_id, name, pinned_item_id FROM model_folders",
                 connection
             )
         )
@@ -415,7 +415,8 @@ internal static class SyncModelSqlServerState
             {
                 state.Folders[r.GetInt32(0)] = (
                     r.IsDBNull(1) ? null : r.GetInt32(1),
-                    r.GetString(2)
+                    r.GetString(2),
+                    r.IsDBNull(3) ? null : r.GetInt32(3)
                 );
             }
         }

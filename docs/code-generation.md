@@ -2596,6 +2596,8 @@ A table without a version column has no version to know, so a delete recorded fo
 The decision is made when the run plans the table.
 When the application deletes the row again after that, before its update goes, the run sends instead the delete the table gives for a row that is gone, from the entries it planned with.
 The new delete is left for the next run, which finds the row already gone on the server; on its own it could not be sent, because the delete of a recreated row carries no version.
+The other way round, when the application creates the row again under the same key after the run has planned its delete, the delete finds the row there and is not sent.
+Its entries stay, because they hold the version the server has the row at and the recreation's own entry does not, and the next run sends the recreated row as an update guarded by that version.
 
 **A delete records the version the local row has, not only the one on the entity.**
 A graph save may delete a stub that carries nothing but the key, or an object held since before the row's last download, and either carries no version or an older one than the row has.
@@ -2859,6 +2861,7 @@ By then the parents the server's rows point at have come down, including a paren
 The entries being dropped do not stop the table's download.
 A row put back brings in the parents it refers to first, or stays as it is with its entries when it cannot have them.
 An entry recorded while the run is in flight is not one the run was told to drop, so the row it is about keeps its local content.
+The entries the run read for that row stay as well, because its content still holds what they describe, such as a blob written or a delete holding the version the server has the row at, and the next run sends them with the newer edit.
 When `UploadAsync` is called on its own, with no download to follow, the rows are read back there instead.
 
 **A restored row keeps its mirrored version.**
@@ -2988,6 +2991,9 @@ Tables the local database keeps for itself, anything excluded with `excludeFromS
 The generated repositories manage their own connections, so nothing here can enlist in a transaction of its own making.
 What holds instead is that every point at which it commits is a state a later run can start from.
 Deletes go children first and reloads parents first, so no foreign key ever points at a row that is not there, and each table's rows arrive in ascending version order, so a table interrupted part way holds exactly the rows below the version it stopped at, which is the resume point the local maximum yields anyway.
+Tables that refer to each other in a cycle cannot be emptied one at a time, because whichever goes first, the other still refers to it.
+When the tables of a run form such a cycle, every one of them is a generated table, and they share one local executor that implements `ISqlBatchExecutor` (the generated SQLite `SqlExecutor` does), their deletes run as one transaction with the foreign key check deferred to its commit, and a failure leaves every table as it was.
+Tables without a cycle are emptied one at a time as before.
 The state this leaves that a single transaction would not is a partly rebuilt local database: between the first delete and the last row of the last table, a reader sees fewer rows than either side holds.
 Nothing is lost by it, and local writes wait until the refresh is over, but a screen reading the tables meanwhile sees them half empty, so a refresh is not something to run underneath a live screen.
 
@@ -3014,6 +3020,9 @@ Nothing is lost by it, and local writes wait until the refresh is over, but a sc
 - **Rows the server deleted that refer to each other in a cycle stay on the device.**
   Delete propagation removes a row only when nothing local refers to it, and no row of such a cycle qualifies first.
   It takes the server clearing one of the references and that update reaching the device, which is also how the server itself has to delete them.
+- **A refresh empties tables that refer to each other in a cycle only through the generated SQLite executor, and rows that refer to each other in a cycle do not come back.**
+  With a wrapped executor or an `ISyncTable` of your own among the tables, the deletes run one table at a time and the first of them fails on the local foreign key.
+  Rows that refer to each other in a cycle, each holding the key of the other, go with the deletes but cannot be loaded back one at a time, so the reload stops at them, as the download does.
 - **Only a single-column foreign key to a synchronized table's primary key is followed.**
   A foreign key that refers to a unique constraint, or spans several columns, is not: delete propagation does not keep a row a local row refers to through it, nor the parents of a kept row, the download neither brings in a missing parent through it nor stops at a row whose parent's delete is unsent through it, and a write the server refuses through it is thrown rather than reported.
 - **Cannot be combined with the EF Core Repository**, since the sync support requires a multi-target build and that combination is already exclusive.

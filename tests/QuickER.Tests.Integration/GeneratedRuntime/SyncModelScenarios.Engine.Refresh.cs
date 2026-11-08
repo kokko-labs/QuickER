@@ -20,6 +20,18 @@ internal static partial class SyncModelScenarios
         int batchSize = 2000
     ) => new(device, mode, true, false, force, excluded ?? [], batchSize);
 
+    /// <summary>
+    /// 表どうしの循環を使うサーバーの行：フォルダー 710 と品目 711、711 をピン留めするフォルダー 700（行は循環しない。
+    /// 700 を作ってから 711 を作り、700 を更新してピン留めするので、ダウンロードの流れでは 700 が 711 より後ろの版になる）
+    /// </summary>
+    private static ModelWriteOp[] CyclePinned() =>
+        [
+            Folder(SV, 700),
+            Folder(SV, 710),
+            Line(SV, 711, 710, "pinned"),
+            new PinFolderOp(SV, Direct, 700, 711),
+        ];
+
     private static IEnumerable<SyncModelScenario> EngineRefreshScenarios() =>
         [
             MovedAll(
@@ -208,6 +220,66 @@ internal static partial class SyncModelScenarios
                     Expect.Result(D1).Contains("exception SqliteException: *wipe blocked*"),
                     new LocalSqlOp(D1, "DROP TRIGGER block_wipe"),
                     Expect.Acks(D1, F).Contains("key=620 *"),
+                    Rename(D1, 620, "c1"),
+                    PlainOnly(D1, ModelSyncKind.Upload),
+                    Expect.Result(D1).Absent("conflict *"),
+                    Expect.Rows(SV, F).Contains("620 parent=null name=c1"),
+                ]
+            ),
+            // P5-2 の S3：表どうしの外部キーの循環（品目→フォルダー・フォルダーのピン留め→品目）。行は循環しない（フォルダー 700
+            // が別のフォルダー 710 の品目 711 をピン留めする）。1 表ずつの全消しは、どの順でも最初の DELETE がもう一方の表の行に
+            // 参照されて断られた（Force では未送信の記録だけが先に消えた）
+            MovedAll(
+                "refresh-empties-tables-in-a-foreign-key-cycle",
+                [],
+                [
+                    .. CyclePinned(),
+                    Plain(D1),
+                    Expect.Rows(D1, F).Contains("700 parent=null name=f700 pinned=711"),
+                    RefreshAll(D1),
+                    Expect.Result(D1).Absent("exception *").Contains("inserted=6"),
+                    Expect
+                        .Rows(D1, F)
+                        .Exact("700 parent=null name=f700 pinned=711", "710 *", "999 *"),
+                    Expect.Rows(D1, I).Exact("711 folder=710 *", "999 *"),
+                ]
+            ),
+            MovedAll(
+                "refresh-force-in-a-foreign-key-cycle-replaces-pending-changes",
+                [],
+                [
+                    .. CyclePinned(),
+                    Plain(D1),
+                    Rename(D1, 710, "offline-edit"),
+                    RefreshAll(D1, force: true),
+                    Expect.Result(D1).Absent("exception *").Contains("discarded-changes=1"),
+                    Expect.Journal(D1).Empty(),
+                    Expect.Rows(D1, F).Contains("710 parent=null name=f710"),
+                ]
+            ),
+            // 循環の全消しは 1 つのトランザクション：最後の表（親のフォルダー）の DELETE が断られると、先に消した表も含めて
+            // 何も消えず、受理記録も残り、開いたトランザクションも残らない（次の書き込みと同期が普通に通る）
+            MovedAll(
+                "refresh-failed-wipe-in-a-foreign-key-cycle-deletes-nothing",
+                [],
+                [
+                    .. CyclePinned(),
+                    Plain(D1),
+                    Folder(D1, 620, name: "c0"),
+                    PlainOnly(D1, ModelSyncKind.Upload),
+                    Expect.Result(D1).Absent("conflict *"),
+                    new LocalSqlOp(
+                        D1,
+                        $"CREATE TRIGGER block_wipe BEFORE DELETE ON {F} BEGIN SELECT RAISE(ABORT, 'wipe blocked'); END"
+                    ),
+                    new ExpectThrowOp(D1),
+                    RefreshAll(D1),
+                    Expect.Result(D1).Contains("exception SqliteException: *wipe blocked*"),
+                    Expect.Rows(D1, F).Contains("700 parent=null name=f700 pinned=711", "620 *"),
+                    Expect.Rows(D1, I).Exact("711 folder=710 *", "999 *"),
+                    Expect.Rows(D1, ModelTables.Events).Count("*", 1),
+                    Expect.Acks(D1, F).Contains("key=620 *"),
+                    new LocalSqlOp(D1, "DROP TRIGGER block_wipe"),
                     Rename(D1, 620, "c1"),
                     PlainOnly(D1, ModelSyncKind.Upload),
                     Expect.Result(D1).Absent("conflict *"),

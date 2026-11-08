@@ -1620,27 +1620,142 @@ internal static partial class SyncModelScenarios
     /// <summary>割り込みの形：消して作り直した（削除の版を持つ記録がある）品目の再削除（4m-D1 の形）</summary>
     public const string DeleteRecreatedShape = "delete-recreated";
 
-    /// <summary>割り込みの形（点 × 形の行の全積を作る）</summary>
-    /// <remarks>静的な初期化の順（<see cref="All"/> が先に作られる）に依らないよう、毎回作る</remarks>
-    public static IReadOnlyList<string> InterruptShapes =>
-        [UpdatePendingShape, DeletePendingShape, DeleteRecreatedShape];
+    /// <summary>割り込みの形：消して作り直した（削除の版を持つ記録がある）品目の更新</summary>
+    public const string UpdateRecreatedShape = "update-recreated";
 
-    /// <summary>割り込みの点 × 形の行（宣言。網羅のテストが全積を含むことを表明する）</summary>
+    /// <summary>割り込みの形：未送信の削除がある品目の作り直し（P5-2 の S1・先行の D5 の形）</summary>
+    public const string RecreateDeletedShape = "recreate-deleted";
+
+    /// <summary>割り込みの形：未送信の blob の書き込みがある品目の更新（P5-2 の S2 の形）</summary>
+    public const string UpdateBlobWrittenShape = "update-blob-written";
+
+    /// <summary>割り込みの形：未送信の blob の書き込みがある品目の削除</summary>
+    public const string DeleteBlobWrittenShape = "delete-blob-written";
+
+    /// <summary>割り込みの行の前段（割り込む前に、品目 702 へ端末がしておく未送信の書き込み）</summary>
+    public enum InterruptPrelude
+    {
+        /// <summary>更新</summary>
+        Update,
+
+        /// <summary>削除して同じキーで作り直す（削除の版を持つ記録が残る）</summary>
+        DeleteRecreate,
+
+        /// <summary>削除（行が無い）</summary>
+        Delete,
+
+        /// <summary>除外した blob の列の書き込み</summary>
+        WriteBlob,
+    }
+
+    /// <summary>割り込みの行の、割り込んで差し込む書き込み</summary>
+    public enum InterruptWrite
+    {
+        /// <summary>更新</summary>
+        Update,
+
+        /// <summary>削除</summary>
+        Delete,
+
+        /// <summary>同じキーでの作り直し</summary>
+        Recreate,
+    }
+
+    /// <summary>
+    /// 前段と割り込みの書き込みの組が起こり得るか（原理的に起こり得ない組だけを外す：行が無いのに更新・削除する組と、行が
+    /// あるのに作り直す組）
+    /// </summary>
+    public static bool IsPossibleInterruptShape(InterruptPrelude prelude, InterruptWrite write) =>
+        (write == InterruptWrite.Recreate) == (prelude == InterruptPrelude.Delete);
+
+    /// <summary>
+    /// 割り込みの点とポリシーの組が起こり得るか（Versioned＋ServerWins はサーバーへ書かないので、サーバーへの書き込みの
+    /// 直前の点に来ない）
+    /// </summary>
+    public static bool IsPossibleInterruptPoint(
+        ModelInterruptPoint point,
+        SyncConflictPolicy policy
+    ) =>
+        !(
+            policy == SyncConflictPolicy.ServerWins
+            && point == ModelInterruptPoint.BeforeServerWrite
+        );
+
+    /// <summary>割り込みの行のポリシーの軸（Collect と、実行中の書き込みを残す ServerWins）</summary>
+    public static IReadOnlyList<SyncConflictPolicy> InterruptPolicies =>
+        [SyncConflictPolicy.Collect, SyncConflictPolicy.ServerWins];
+
+    /// <summary>形の名前（前段 × 割り込みの書き込み。4m-D1 からの 3 つの名前を保つ）</summary>
+    public static string InterruptShapeName(InterruptPrelude prelude, InterruptWrite write) =>
+        (prelude, write) switch
+        {
+            (InterruptPrelude.Update, InterruptWrite.Update) => UpdatePendingShape,
+            (InterruptPrelude.Update, InterruptWrite.Delete) => DeletePendingShape,
+            (InterruptPrelude.DeleteRecreate, InterruptWrite.Delete) => DeleteRecreatedShape,
+            (InterruptPrelude.DeleteRecreate, InterruptWrite.Update) => UpdateRecreatedShape,
+            (InterruptPrelude.Delete, InterruptWrite.Recreate) => RecreateDeletedShape,
+            (InterruptPrelude.WriteBlob, InterruptWrite.Update) => UpdateBlobWrittenShape,
+            (InterruptPrelude.WriteBlob, InterruptWrite.Delete) => DeleteBlobWrittenShape,
+            _ => throw new ArgumentOutOfRangeException(nameof(write), $"{prelude} x {write}"),
+        };
+
+    /// <summary>割り込みの形（起こり得る前段 × 割り込みの書き込みの組）</summary>
+    /// <remarks>静的な初期化の順（<see cref="All"/> が先に作られる）に依らないよう、毎回作る</remarks>
+    public static IReadOnlyList<(
+        InterruptPrelude Prelude,
+        InterruptWrite Write,
+        string Shape
+    )> InterruptShapes =>
+        [
+            .. Enum.GetValues<InterruptPrelude>()
+                .SelectMany(prelude =>
+                    Enum.GetValues<InterruptWrite>()
+                        .Where(write => IsPossibleInterruptShape(prelude, write))
+                        .Select(write => (prelude, write, InterruptShapeName(prelude, write)))
+                ),
+        ];
+
+    /// <summary>割り込みの点 × ポリシー × 形の行（宣言。網羅のテストが起こり得る組の全積を含むことを表明する）</summary>
     public static IReadOnlyList<(
         ModelInterruptPoint Point,
+        SyncConflictPolicy Policy,
+        InterruptPrelude Prelude,
+        InterruptWrite Write,
         string Shape,
         string Name
     )> InterruptCells =>
         [
             .. Enum.GetValues<ModelInterruptPoint>()
                 .SelectMany(point =>
-                    InterruptShapes.Select(shape => (point, shape, InterruptName(point, shape)))
+                    InterruptPolicies
+                        .Where(policy => IsPossibleInterruptPoint(point, policy))
+                        .SelectMany(policy =>
+                            InterruptShapes.Select(shape =>
+                                (
+                                    point,
+                                    policy,
+                                    shape.Prelude,
+                                    shape.Write,
+                                    shape.Shape,
+                                    InterruptName(point, shape.Shape, policy)
+                                )
+                            )
+                        )
                 ),
         ];
 
-    /// <summary>点 × 形の行の名前（4m-D1 の形は <see cref="ModelSyncScenarioNames.D1Items"/>）</summary>
-    public static string InterruptName(ModelInterruptPoint point, string shape) =>
-        $"interrupt-{point}-{shape}";
+    /// <summary>
+    /// 点 × ポリシー × 形の行の名前（Collect の行は 4m-D1 からの名前のまま。4m-D1 の形は
+    /// <see cref="ModelSyncScenarioNames.D1Items"/>）
+    /// </summary>
+    public static string InterruptName(
+        ModelInterruptPoint point,
+        string shape,
+        SyncConflictPolicy policy = SyncConflictPolicy.Collect
+    ) =>
+        policy == SyncConflictPolicy.Collect
+            ? $"interrupt-{point}-{shape}"
+            : $"interrupt-{point}-{shape}-{policy.ToString().ToLowerInvariant()}";
 
     /// <summary>
     /// 4m-D1 と割り込みの点 × 形の行：同期の実行の名前つきの時点（<see cref="ModelInterruptPoint"/>）で、別の流れから端末の書き込みを
@@ -1649,8 +1764,17 @@ internal static partial class SyncModelScenarios
     /// <remarks>
     /// <para>
     /// 行は同じ形：端末 1 が品目 701 を編集し（再生の順で先頭に来る）、品目 702 に形の書き込み（編集・削除→作り直し）をしてから、
-    /// 702 への割り込みの書き込み（更新か削除）を点に仕掛けて同期する。どの点も当たるように、アップロードの書き込み（701）・取得・
-    /// 1 行以上の差分（アップロードした行の折り返し）がある形にする。
+    /// 702 への割り込みの書き込み（更新・削除・作り直し）を点に仕掛けて同期する。どの点も当たるように、アップロードの書き込み（701）・
+    /// 取得・1 行以上の差分（アップロードした行の折り返し。ServerWins の行はサーバーの他者が変えた 703）がある形にする。
+    /// </para>
+    /// <para>
+    /// 軸は点 × ポリシー（Collect・ServerWins）× 前段（更新・削除→作り直し・削除・blob の書き込み）× 割り込みの書き込み。外す組は
+    /// 原理的に起こり得ないものだけ（<see cref="IsPossibleInterruptShape"/>・<see cref="IsPossibleInterruptPoint"/>）。
+    /// P5-2 の S1＝<c>interrupt-BeforeServerWrite-recreate-deleted</c>（計画した削除を送る前の作り直し）、S2＝
+    /// <c>interrupt-*-update-blob-written-serverwins</c>（ServerWins の実行中の blob を書いた行の更新）、先行の D5＝
+    /// <c>interrupt-*-recreate-deleted-serverwins</c>。S2 の削除の版の枝は <c>interrupt-*-delete-recreated-serverwins</c>・
+    /// <c>interrupt-*-update-recreated-serverwins</c>（どれも、ServerWins が適用しなかった行の記録を捨てて落ちていた）。割り込みは SQLite のサーバー役の包みでしか仕掛けられないので、どの行も実
+    /// SQL Server の転送では流れない（<see cref="SyncModelScenario.ArmsServerFaults"/>）。
     /// </para>
     /// <para>
     /// 4m-D1＝<c>interrupt-BeforeServerWrite-delete-recreated</c>：計画の後・再生の前（701 の書き込みの直前）にアプリが 702 をもう一度
@@ -1661,32 +1785,64 @@ internal static partial class SyncModelScenarios
     /// </remarks>
     private static IEnumerable<SyncModelScenario> InterruptScenarios()
     {
-        foreach (var (point, shape, name) in InterruptCells)
+        foreach (var (point, policy, prelude, write, _, name) in InterruptCells)
         {
+            List<ModelWriteOp> setup =
+            [
+                Folder(SV, 700),
+                Item(SV, 701, folder: 700),
+                Item(SV, 702, folder: 700),
+            ];
             List<ModelOp> ops = [new UpdateItemOp(D1, Direct, 701, 700, null, "c-701", "a-edited")];
 
-            if (shape == DeleteRecreatedShape)
+            switch (prelude)
             {
-                ops.Add(new DeleteItemOp(D1, Direct, 702));
-                ops.Add(new AddItemOp(D1, Direct, 702, 700, null, "c-702", "again", "0A0B0702"));
-            }
-            else
-            {
-                ops.Add(new UpdateItemOp(D1, Direct, 702, 700, null, "c-702", "b-offline"));
+                case InterruptPrelude.Update:
+                    ops.Add(new UpdateItemOp(D1, Direct, 702, 700, null, "c-702", "b-offline"));
+                    break;
+
+                case InterruptPrelude.DeleteRecreate:
+                    ops.Add(new DeleteItemOp(D1, Direct, 702));
+                    ops.Add(
+                        new AddItemOp(D1, Direct, 702, 700, null, "c-702", "again", "0A0B0702")
+                    );
+                    break;
+
+                case InterruptPrelude.Delete:
+                    ops.Add(new DeleteItemOp(D1, Direct, 702));
+                    break;
+
+                default:
+                    ops.Add(new WritePayloadOp(D1, 702, "DEADBEEF"));
+                    break;
             }
 
-            ModelWriteOp write =
-                shape == UpdatePendingShape
-                    ? new UpdateItemOp(D1, Direct, 702, 700, null, "c-702", "b-interrupt")
-                    : new DeleteItemOp(D1, Direct, 702);
-            ops.Add(new ArmInterruptOp(D1, point, write));
-            ops.Add(Sync(D1));
+            if (policy == SyncConflictPolicy.ServerWins)
+            {
+                // ServerWins の実行はサーバーへ書かず、端末の 701 の折り返しも無い。取得が 1 行以上を返す点にも来るよう、
+                // サーバーの他者が別の品目 703 を変えておく
+                setup.Add(Item(SV, 703, folder: 700));
+                ops.Add(new UpdateItemOp(SV, Direct, 703, 700, null, "c-703", "t703-server"));
+            }
 
-            yield return new(
-                name,
-                [Folder(SV, 700), Item(SV, 701, folder: 700), Item(SV, 702, folder: 700)],
-                ops
-            );
+            ModelWriteOp interrupt = write switch
+            {
+                InterruptWrite.Update => new UpdateItemOp(
+                    D1,
+                    Direct,
+                    702,
+                    700,
+                    null,
+                    "c-702",
+                    "b-interrupt"
+                ),
+                InterruptWrite.Delete => new DeleteItemOp(D1, Direct, 702),
+                _ => new AddItemOp(D1, Direct, 702, 700, null, "c-702", "b-recreated", "0A0B0702"),
+            };
+            ops.Add(new ArmInterruptOp(D1, point, interrupt));
+            ops.Add(Sync(D1, policy: policy));
+
+            yield return new(name, setup, ops);
         }
 
         yield return new(

@@ -6940,6 +6940,29 @@ public partial interface ISqlExecutor
     );
 }
 
+/// <summary>A raw SQL executor that can run several statements as one transaction (all of them take effect, or none does).</summary>
+/// <remarks>
+/// <para>
+/// Implemented by the SQLite executor. The statements run in order on one connection inside one transaction, which commits
+/// when every statement has succeeded and is rolled back when any of them fails - the connection is never handed back with
+/// the transaction still open. A wrapper around an executor does not implement it unless it forwards the call itself.
+/// </para>
+/// <para>
+/// The statements take no parameters: the interface is for fixed statements such as the deletes of a synchronisation
+/// refresh. <b>Never build a statement by concatenating values into it.</b>
+/// </para>
+/// </remarks>
+public interface ISqlBatchExecutor
+{
+    /// <summary>Runs the statements in order as one transaction and returns the number of rows each one affected, in the same order.</summary>
+    /// <param name="statements">The statements to run (at least one).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task<IReadOnlyList<int>> ExecuteSqlBatchAsync(
+        IReadOnlyList<string> statements,
+        CancellationToken cancellationToken = default
+    );
+}
+
 /// <summary>The kind of DB operation performed for a single entity during a graph save (Save).</summary>
 public enum SaveOperation
 {
