@@ -400,8 +400,8 @@ internal static class CodegenConfigDimensions
             ]
         );
 
-    /// <summary>エンジンのテストのソース（台帳の行が共有する）</summary>
-    private static readonly IReadOnlyList<string> SourceFiles =
+    /// <summary>エンジンのテストのソースのうち、台帳の 3 行が共有するもの（次元表・実行の部品・判定の部品）</summary>
+    private static readonly IReadOnlyList<string> SharedSourceFiles =
     [
         "tests/QuickER.Tests/CodeGen.CSharp/CodegenConfig/CodegenConfigDimensions.cs",
         "tests/QuickER.Tests/CodeGen.CSharp/CodegenConfig/CodegenRow.cs",
@@ -409,10 +409,22 @@ internal static class CodegenConfigDimensions
         "tests/QuickER.Tests/CodeGen.CSharp/CodegenConfig/ShapeDiagram.cs",
         "tests/QuickER.Tests/CodeGen.CSharp/CodegenConfig/CodegenEntrances.cs",
         "tests/QuickER.Tests/CodeGen.CSharp/CodegenConfig/CodegenRunner.cs",
-        "tests/QuickER.Tests/CodeGen.CSharp/CodegenConfig/CodegenCases.cs",
-        "tests/QuickER.Tests/CodeGen.CSharp/CodegenConfig/CodegenMatrixTests.cs",
-        "tests/QuickER.Tests/CodeGen.CSharp/CodegenConfig/CodegenCaseTests.cs",
         "tests/QuickER.Tests/CodeGen.CSharp/CodegenConfig/Judges",
+    ];
+
+    /// <summary>網羅の配列（Errors・Success）のテストのソース：網羅の配列の行を流すテストのクラスを足したもの</summary>
+    private static readonly IReadOnlyList<string> MatrixSourceFiles =
+    [
+        .. SharedSourceFiles,
+        "tests/QuickER.Tests/CodeGen.CSharp/CodegenConfig/CodegenMatrixTests.cs",
+    ];
+
+    /// <summary>決まった行のテストのソース：決まった行の表と、それを流すテストのクラスを足したもの</summary>
+    private static readonly IReadOnlyList<string> CasesSourceFiles =
+    [
+        .. SharedSourceFiles,
+        "tests/QuickER.Tests/CodeGen.CSharp/CodegenConfig/CodegenCases.cs",
+        "tests/QuickER.Tests/CodeGen.CSharp/CodegenConfig/CodegenCaseTests.cs",
     ];
 
     /// <summary>エンジンが守る src の範囲（実際に通る入口を含む）</summary>
@@ -434,7 +446,7 @@ internal static class CodegenConfigDimensions
             "生成の構成の網羅の配列（全組。生成時エラーの組を含め、診断の予測を照合する）",
             Table,
             0,
-            SourceFiles,
+            MatrixSourceFiles,
             Covers
         );
 
@@ -446,7 +458,7 @@ internal static class CodegenConfigDimensions
             "生成の構成の網羅の配列（生成が通る構成。コンパイル・意味・探針・関係を数える）",
             SuccessTable,
             0,
-            SourceFiles,
+            MatrixSourceFiles,
             Covers
         );
 
@@ -458,7 +470,7 @@ internal static class CodegenConfigDimensions
             "生成の構成の決まった行（元のテストの図・オプション・期待）",
             CasesTable,
             CodegenCases.Table.Count,
-            SourceFiles,
+            CasesSourceFiles,
             Covers
         );
 

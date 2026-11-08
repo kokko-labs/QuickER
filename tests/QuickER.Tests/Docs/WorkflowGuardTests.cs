@@ -363,7 +363,17 @@ public sealed class WorkflowGuardTests
     public void WindowsTestStep_KeepsTestResultsAsArtifacts()
     {
         var job = Jobs(ReadWorkflow("ci.yml"))["build-and-test"];
-        var testStep = NightlyTestStep(job);
+        var testSteps = JobSteps(job)
+            .Where(step => step.Contains("dotnet test QuickER.slnx", StringComparison.Ordinal))
+            .ToList();
+
+        testSteps
+            .Should()
+            .ContainSingle(
+                "全件のテストの手順はちょうど 1 つ（単発のテストの報告の dotnet test は別の手順）"
+            );
+
+        var testStep = testSteps[0];
 
         testStep
             .Should()
@@ -654,6 +664,128 @@ public sealed class WorkflowGuardTests
                 .Should()
                 .BeTrue($"要約の手順は {variable} を {value} にする（欠けると入口が何もしない）");
         }
+    }
+
+    /// <summary>CI は単発のテストの増減を報告し、数では赤にしない</summary>
+    /// <remarks>
+    /// build-and-test が、ビルドの後・テストの前に「基点の数を戻す → 数えて Step Summary に書く → main への push なら残す」を持つ。
+    /// 数えの入口は数で表明しない（<see cref="TestSupport.OneOffTestCensusTests"/> の行 <c>oneoff-report-large-increase-only-reports</c>）ので、
+    /// 段は入口が例外を出さない限り緑になる。段に continue-on-error を付けない（数えられないときは赤にする）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "ci.yml の build-and-test は単発のテストの増減を報告し、数では赤にしない（基点の数を戻し、数え、push なら残す）"
+    )]
+    public void OneOffTests_ReportedWithoutFailingOnCounts()
+    {
+        var steps = JobSteps(Jobs(ReadWorkflow("ci.yml"))["build-and-test"]);
+        var build = steps.FindIndex(step =>
+            step.Contains("run: dotnet build QuickER.slnx", StringComparison.Ordinal)
+        );
+        var restore = steps.FindIndex(step =>
+            step.Contains("uses: actions/cache/restore@", StringComparison.Ordinal)
+        );
+        var census = steps.FindIndex(step =>
+            step.Contains(
+                $"dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --no-build --filter \"FullyQualifiedName~{nameof(TestSupport.OneOffTestCensusTests)}.{nameof(TestSupport.OneOffTestCensusTests.WriteSummary_FromEnvironment)}\"",
+                StringComparison.Ordinal
+            )
+        );
+        var save = steps.FindIndex(step =>
+            step.Contains("uses: actions/cache/save@", StringComparison.Ordinal)
+        );
+        var test = steps.FindIndex(step =>
+            step.Contains("dotnet test QuickER.slnx", StringComparison.Ordinal)
+        );
+
+        new[] { build, restore, census, save, test }
+            .Should()
+            .BeInAscendingOrder("ビルド → 基点の数を戻す → 数えて報告する → 残す → テスト")
+            .And.NotContain(-1, "5 つの手順がそろっている");
+
+        const string directory = "${{ runner.temp }}/oneoff-tests";
+        const string baseCommit =
+            "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}";
+
+        foreach (var (step, name) in new[] { (steps[restore], "戻し"), (steps[save], "保存") })
+        {
+            Regex
+                .IsMatch(step, $@"(?m)^\s+path: {Regex.Escape(directory)}\s*$")
+                .Should()
+                .BeTrue($"{name}は同じパスを使う（キャッシュはパスが違うと当たらない）");
+            Regex
+                .IsMatch(step, @"actions/cache/(restore|save)@[0-9a-f]{40} # v\S+")
+                .Should()
+                .BeTrue($"{name}のアクションは commit SHA で固定する");
+        }
+
+        Regex
+            .IsMatch(steps[restore], $@"(?m)^\s+key: oneoff-tests-{Regex.Escape(baseCommit)}\s*$")
+            .Should()
+            .BeTrue("戻しは基点（PR は向き先の先端・push は直前のコミット）の鍵で探す");
+        Regex
+            .IsMatch(steps[restore], @"(?m)^\s+restore-keys: oneoff-tests-\s*$")
+            .Should()
+            .BeTrue("基点の数が無ければ、前置きの鍵でいちばん新しい数を戻す（報告は近似と書く）");
+        Regex
+            .IsMatch(steps[save], @"(?m)^\s+key: oneoff-tests-\$\{\{ github\.sha \}\}\s*$")
+            .Should()
+            .BeTrue("保存はこのコミットの鍵");
+        Regex
+            .IsMatch(steps[save], @"(?m)^\s+if: github\.event_name == 'push'\s*$")
+            .Should()
+            .BeTrue("PR の数は main から読めないので、push のときだけ残す");
+        Regex
+            .Match(steps[restore], @"actions/cache/restore@(?<pin>\S+ # \S+)")
+            .Groups["pin"]
+            .Value.Should()
+            .Be(
+                Regex
+                    .Match(steps[save], @"actions/cache/save@(?<pin>\S+ # \S+)")
+                    .Groups["pin"]
+                    .Value,
+                "戻しと保存は同じ版の actions/cache を使う"
+            );
+
+        foreach (
+            var (variable, value) in new[]
+            {
+                (TestSupport.OneOffTestCensusTests.DirectoryVariable, directory),
+                (TestSupport.OneOffTestCensusTests.CommitVariable, "${{ github.sha }}"),
+                (TestSupport.OneOffTestCensusTests.BaseCommitVariable, baseCommit),
+            }
+        )
+        {
+            Regex
+                .IsMatch(steps[census], $@"(?m)^\s+{variable}: {Regex.Escape(value)}\s*$")
+                .Should()
+                .BeTrue(
+                    $"数えの手順は {variable} を {value} にする（欠けると入口が何もしないか、基点を名指しできない）"
+                );
+        }
+
+        foreach (
+            var (step, name) in new[]
+            {
+                (steps[restore], "戻し"),
+                (steps[census], "数え"),
+                (steps[save], "保存"),
+            }
+        )
+        {
+            Regex
+                .IsMatch(step, @"(?m)^\s+continue-on-error:")
+                .Should()
+                .BeFalse(
+                    $"{name}の手順は continue-on-error に頼らない（数えられないときは赤にし、数では入口が赤にしない）"
+                );
+        }
+
+        steps[census]
+            .Should()
+            .NotContain(
+                "--ignore-exit-code",
+                "数えの入口の失敗（道具が動かない）を緑に化けさせない"
+            );
     }
 
     /// <summary>毎晩の変異テストの cron</summary>

@@ -56,7 +56,7 @@ public static class TableRegistryChecks
                 continue;
             }
 
-            var name = $"table:{table.Name}";
+            var name = ProtectionNames.Of(ProtectionKind.Table, table.Name ?? "");
 
             if (table.Name is null || !NamePattern.IsMatch(table.Name))
             {

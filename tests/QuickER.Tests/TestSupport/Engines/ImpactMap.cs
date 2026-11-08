@@ -47,6 +47,51 @@ public sealed record Protection(
     string Scope
 );
 
+/// <summary>守りの名前の組み立て（種類ごとの名前の形の唯一の場所）</summary>
+/// <remarks>
+/// 地図を作る側（<c>ImpactMapSources</c>・台帳の検査）と、CLAUDE.md が書いた地図の名前を拾う側（<c>ClaudeMdReferenceTests</c>）が
+/// 同じ形を使う。
+/// </remarks>
+public static class ProtectionNames
+{
+    /// <summary>前置きで名前を作る種類（エンジンの部分は <c>{エンジンの ID}/{部分}</c> で、前置きを持たない）</summary>
+    public static IReadOnlyList<ProtectionKind> PrefixedKinds { get; } =
+    [
+        ProtectionKind.Table,
+        ProtectionKind.Rule,
+        ProtectionKind.Parity,
+        ProtectionKind.English,
+        ProtectionKind.Phrase,
+    ];
+
+    /// <summary>種類の前置き（<c>table:</c> など）</summary>
+    /// <param name="kind">前置きで名前を作る種類（<see cref="PrefixedKinds"/>）</param>
+    public static string Prefix(ProtectionKind kind) =>
+        kind switch
+        {
+            ProtectionKind.Table => "table:",
+            ProtectionKind.Rule => "rule:",
+            ProtectionKind.Parity => "parity:",
+            ProtectionKind.English => "english:",
+            ProtectionKind.Phrase => "phrase:",
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(kind),
+                kind,
+                "エンジンの部分は前置きを持たない（EnginePart で作る）"
+            ),
+        };
+
+    /// <summary>前置きで作る守りの名前（<c>rule:{Id}</c> など）</summary>
+    /// <param name="kind">前置きで名前を作る種類</param>
+    /// <param name="id">表の名前か行の Id</param>
+    public static string Of(ProtectionKind kind, string id) => Prefix(kind) + id;
+
+    /// <summary>エンジンの部分の名前（<c>{エンジンの ID}/{部分}</c>。台帳の検査が null の値の行も名指しできるよう null を受ける）</summary>
+    /// <param name="engineId">エンジンの ID</param>
+    /// <param name="part">部分</param>
+    public static string EnginePart(string? engineId, string? part) => $"{engineId}/{part}";
+}
+
 /// <summary>守りの無い領域の分類</summary>
 public enum UnprotectedKind
 {
@@ -304,11 +349,11 @@ public sealed class ImpactMap
         line("| 名前の形 | 守りの種類 |");
         line("|---|---|");
         line("| `{エンジンの ID}/{部分}` | エンジンの部分 |");
-        line("| `table:{名前}` | 単体の表 |");
-        line("| `rule:{Id}` | ソースの規則 |");
-        line("| `parity:{Id}` | 照合の表の行 |");
-        line("| `english:{Id}` | 英語の文言の表の行 |");
-        line("| `phrase:{Id}` | 必須の文言の表の行 |");
+        line($"| `{ProtectionNames.Of(ProtectionKind.Table, "{名前}")}` | 単体の表 |");
+        line($"| `{ProtectionNames.Of(ProtectionKind.Rule, "{Id}")}` | ソースの規則 |");
+        line($"| `{ProtectionNames.Of(ProtectionKind.Parity, "{Id}")}` | 照合の表の行 |");
+        line($"| `{ProtectionNames.Of(ProtectionKind.English, "{Id}")}` | 英語の文言の表の行 |");
+        line($"| `{ProtectionNames.Of(ProtectionKind.Phrase, "{Id}")}` | 必須の文言の表の行 |");
         line("");
 
         line("## 単位の表");

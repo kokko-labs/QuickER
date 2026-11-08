@@ -110,7 +110,7 @@ public static class EngineRegistryChecks
                 continue;
             }
 
-            var name = $"{descriptor.Id}/{descriptor.Part}";
+            var name = ProtectionNames.EnginePart(descriptor.Id, descriptor.Part);
 
             if (!EngineIds.All.Contains(descriptor.Id, StringComparer.Ordinal))
             {

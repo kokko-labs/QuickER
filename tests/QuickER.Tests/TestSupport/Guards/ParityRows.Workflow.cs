@@ -212,7 +212,7 @@ internal static partial class ParityRows
                                     WorkflowGuardTests.ReadWorkflow("release.yml")
                                 )
                             )
-                            .Where(line => PinnedAction.IsMatch(line)),
+                            .Where(line => PinnedActionWithPath.IsMatch(line)),
                     ],
                 () =>
                     NonEmpty(
