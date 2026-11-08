@@ -589,6 +589,7 @@ internal static class DialectTypeRunner
             new("fixed", Bit(info.IsFixedLengthString)),
             new("textin", Bit(info.IsTextInputUnsupported)),
             new("excluded", Bit(info.IsExcludedFromEditModel)),
+            new("efcol", info.EfCoreColumnType ?? "-"),
         ];
 
     private static string KindOf(ITypeCatalog catalog, string nativeType) =>

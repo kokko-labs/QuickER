@@ -66,6 +66,7 @@ internal abstract record EfCoreModelFact
     /// <param name="valueGenerated">値の生成</param>
     /// <param name="concurrencyToken">並行トークンか</param>
     /// <param name="providerClrType">値の変換器のプロバイダ側の CLR 型（変換器が無いことを期待するなら <see cref="NoConverter"/>）</param>
+    /// <param name="columnType">構成した列の型（HasColumnType の値。列の型を構成していないことを期待するなら <see cref="NoColumnType"/>）</param>
     public static EfCoreModelFact Property(
         string entityClass,
         string property,
@@ -78,7 +79,8 @@ internal abstract record EfCoreModelFact
         ValueGenerated? valueGenerated = null,
         bool? concurrencyToken = null,
         Type? providerClrType = null,
-        bool unicodeUnspecified = false
+        bool unicodeUnspecified = false,
+        string? columnType = null
     ) =>
         new PropertyFact(
             entityClass,
@@ -92,11 +94,15 @@ internal abstract record EfCoreModelFact
             valueGenerated,
             concurrencyToken,
             providerClrType,
-            unicodeUnspecified
+            unicodeUnspecified,
+            columnType
         );
 
     /// <summary><see cref="Property"/> の <c>providerClrType</c> で「値の変換器が無い」を期待する印</summary>
     public static Type NoConverter { get; } = typeof(NoConverterMarker);
+
+    /// <summary><see cref="Property"/> の <c>columnType</c> で「列の型を構成していない（HasColumnType が無い）」を期待する印</summary>
+    public const string NoColumnType = "(構成なし)";
 
     /// <summary>エンティティ型にそのプロパティが無い（基底のメンバーを無視する構成など）</summary>
     /// <param name="entityClass">エンティティの型名</param>
@@ -284,7 +290,8 @@ internal abstract record EfCoreModelFact
         ValueGenerated? Generated,
         bool? ConcurrencyToken,
         Type? ProviderClrType,
-        bool UnicodeUnspecified
+        bool UnicodeUnspecified,
+        string? ColumnType
     ) : EfCoreModelFact
     {
         public override IEnumerable<string> Check(IModel model)
@@ -341,6 +348,20 @@ internal abstract record EfCoreModelFact
             if (ConcurrencyToken is { } token && property.IsConcurrencyToken != token)
             {
                 yield return $"探針（EF Core のモデル）: {where} の IsConcurrencyToken が {property.IsConcurrencyToken}（期待 {token}）";
+            }
+
+            if (ColumnType is { } columnType)
+            {
+                // 構成した列の型（HasColumnType）の注釈。構成していない列はプロバイダの既定の対応の型になるので、
+                // GetColumnType() でなく注釈の有無で見る
+                var configured =
+                    property.FindAnnotation(RelationalAnnotationNames.ColumnType)?.Value as string;
+                var expected = columnType == NoColumnType ? null : columnType;
+
+                if (configured != expected)
+                {
+                    yield return $"探針（EF Core のモデル）: {where} の構成した列の型が {configured ?? NoColumnType}（期待 {columnType}）";
+                }
             }
 
             if (ProviderClrType is { } provider)

@@ -165,9 +165,6 @@ public static class DslFuzzDimensions
         DslClr.UInt64,
     ];
 
-    /// <summary>MySQL の型の対応に無い列の種類（MySQL に UUID の型が無く、Guid へ写す列の型が無い）</summary>
-    private static readonly DslClr[] UnmappedInMySql = [DslClr.Guid];
-
     /// <summary>網羅しない組の一覧（範囲は「方言:実装先」）</summary>
     /// <remarks>
     /// 残るのは受け入れた組（方言が列の型として持てない種類・EF Core の SQLite プロバイダが翻訳できない比較）だけ。
@@ -192,11 +189,6 @@ public static class DslFuzzDimensions
                         UnmappedInSqliteAndSqlServer,
                         "SQL Server には符号つきの tinyint と、符号なしの smallint・int・bigint の型が無い（src/QuickER.Provider.SqlServer/SqlServerCSharpTypeMapper.cs の Map は tinyint→byte・smallint→short・int→int・bigint→long だけを持つ）ので、sbyte・ushort・uint・ulong の列を作れない"
                     )
-                ),
-                .. UnmappedClrGaps(
-                    "mysql:inmemory",
-                    UnmappedInMySql,
-                    "MySQL に UUID の型は無く、src/QuickER.Provider.MySql/MySqlTypeCatalog.cs は Guid を char(36) で書き、src/QuickER.Provider.MySql/MySqlCSharpTypeMapper.cs の Map は char を string へ写す（Guid へ写す型が無い）ので、Guid の列を作れない"
                 ),
                 CoverageGap.AcceptedMatching(
                     "sqlite:efcore",

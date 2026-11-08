@@ -199,14 +199,53 @@ internal static partial class DialectTypeRows
         };
 
     /// <summary>
-    /// 表記をマッパーへ通した結果の期待（解析した正規型から決まる。SqlDbType の列挙名と宣言長は SQL Server だけが持つ）
+    /// 宣言のセルの表記のうち、マッパーが正規型の種類の C# 型（<see cref="ClrTypeOf"/>）と違う型へ写すもの
+    /// （（方言, 表記）→ C# の型）
+    /// </summary>
+    /// <remarks>
+    /// どれも docs/code-generation.md の csharp-types の表に同じ行がある（型の名前だけでは分からない写し方）。docs の表は
+    /// DialectDocsTableTests.CSharpTypesTable_MatchesTypeMappers がマッパーと独立に照合するので、ここは docs から読まずに別に持つ
+    /// （読むと宣言どうしの同語反復になる）。理由はどちらも、読み取る経路（生成 EF Core のコードとそのプロバイダ）が受け取れる型。
+    /// 静的フィールドにしないのは、partial の別ファイルの静的な表（Table）の初期化がこれより先に走るため（未初期化の null を読む）。
+    /// </remarks>
+    private static Dictionary<(string Dialect, string Native), string> MapTypeExceptions =>
+        new()
+        {
+            // MySQL の timestamp は時間帯を持たず、両ドライバとも DateTime で返す（MySql.Data の
+            // GetFieldValue<DateTimeOffset> は小数秒を落とす）。正規型は DateTimeOffset のまま（方言切替・トークンは変えない）
+            [(DialectNames.MySql, "timestamp(6)")] = "DateTime",
+            // MySQL の char(36) は Guid の書き出しの表記。両ドライバとも既定でこの列を Guid として返す（解析すると fixedstring(36)）
+            [(DialectNames.MySql, "char(36)")] = "Guid",
+        };
+
+    /// <summary>
+    /// 宣言のセルの表記のうち、生成 EF Core の DbContext が列の型（HasColumnType）を教えるもの（（方言, 表記）→ 列の型）
+    /// </summary>
+    /// <remarks>
+    /// 正規型の種類からは導けない（PostgreSQL の timestamptz と timetz はどちらも DateTimeOffset で、前者は教えず後者は教える。
+    /// json と jsonb はどちらも Json で、教える型が違う）。宣言のセルに無い表記（json・timetz・精度なしの timestamp など）は
+    /// PostgreSQL のマッパーの手書きの行が見る。書けることは実 DB の表の EF Core の手順が確かめる。
+    /// </remarks>
+    private static Dictionary<(string Dialect, string Native), string> EfCoreColumnTypes =>
+        new()
+        {
+            [(DialectNames.PostgreSql, "date")] = "date",
+            [(DialectNames.PostgreSql, "timestamp(6)")] = "timestamp without time zone",
+            [(DialectNames.PostgreSql, "xml")] = "xml",
+            [(DialectNames.PostgreSql, "jsonb")] = "jsonb",
+        };
+
+    /// <summary>
+    /// 表記をマッパーへ通した結果の期待（解析した正規型から決まる。SqlDbType の列挙名と宣言長は SQL Server だけが持つ。
+    /// C# の型の例外と EF Core に教える列の型は（方言, 表記）ごとの宣言から決まる）
     /// </summary>
     /// <param name="dialect">方言</param>
     /// <param name="native">表記</param>
     /// <param name="parsed">表記を解析した正規型</param>
     private static string MapSpec(string dialect, string native, CanonicalType parsed)
     {
-        var type = ClrTypeOf(parsed.Kind);
+        var type = MapTypeExceptions.GetValueOrDefault((dialect, native)) ?? ClrTypeOf(parsed.Kind);
+        var efCoreColumnType = EfCoreColumnTypes.GetValueOrDefault((dialect, native));
         var isString = type == "string";
         var isDecimal = parsed.Kind == CanonicalTypeKind.Decimal;
         var sqlServer = dialect == DialectNames.SqlServer;
@@ -226,6 +265,7 @@ internal static partial class DialectTypeRows
             $" unbounded={Bit(parsed.Kind == CanonicalTypeKind.Binary && parsed.Length == -1)}"
         );
         builder.Append(" fallback=0");
+        builder.Append(efCoreColumnType is null ? " efcol=-" : $" efcol=\"{efCoreColumnType}\"");
 
         return builder.ToString();
     }

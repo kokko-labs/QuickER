@@ -98,9 +98,10 @@ public static class DslFuzzUnits
                 SqlServerColumns().Skip(1),
                 new[] { "parent" }
             ),
+            // MySQL の GuidKey は可変長の varchar(36)（固定長の char(36) は型マッパーが Guid へ写す＝下の g の列）
             DialectNames.MySql => (
-                "char(36)",
-                "char(36)",
+                "varchar(36)",
+                "varchar(36)",
                 MySqlColumns()
                     .Skip(1)
                     .Concat([
@@ -110,8 +111,9 @@ public static class DslFuzzUnits
                         new("i16", "smallint", DslClr.Int16, Nullable: true),
                         new("d", "decimal(10,2)", DslClr.Decimal, Nullable: true),
                         new("dt", "datetime", DslClr.DateTime, Nullable: true),
+                        new("g", "char(36)", DslClr.Guid, Nullable: true),
                     ]),
-                new[] { "id", "parent", "f", "i64", "i32", "i16", "d", "dt" }
+                new[] { "id", "parent", "f", "i64", "i32", "i16", "d", "dt", "g" }
             ),
             _ => throw new ArgumentOutOfRangeException(nameof(dbms), dbms, null),
         };

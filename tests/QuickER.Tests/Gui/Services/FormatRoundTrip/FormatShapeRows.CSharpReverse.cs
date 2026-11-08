@@ -304,6 +304,48 @@ internal static partial class FormatShapeRows
                     )
                     .Row()
             ),
+            // プロパティの型がトークンの種類の C# 型と違う列（MySQL の timestamp・char(36)）と、生成 EF Core の DbContext が
+            // 列の型を教える列（PostgreSQL）：リバースは型表記をトークンと NativeType だけから戻し、プロパティの型を読まないので、
+            // 型表記は警告なしに元の綴りへ戻る
+            .. new (string Dialect, string DataType, string ClrType)[]
+            {
+                (DialectNames.MySql, "timestamp", "DateTime"),
+                (DialectNames.MySql, "timestamp(6)", "DateTime"),
+                (DialectNames.MySql, "char(36)", "Guid"),
+                (DialectNames.PostgreSql, "date", "DateTime"),
+                (DialectNames.PostgreSql, "timestamp(6)", "DateTime"),
+                (DialectNames.PostgreSql, "time with time zone", "DateTimeOffset"),
+                (DialectNames.PostgreSql, "json", "string"),
+                (DialectNames.PostgreSql, "jsonb", "string"),
+                (DialectNames.PostgreSql, "xml", "string"),
+            }.Select(item =>
+                Shape(
+                        $"csharp-type-spelling-{item.Dialect}-{Slug(item.DataType)}",
+                        $"プロパティの型・EF Core に教える列の型に依らず、型表記は往復で元の綴りのまま戻る（{item.Dialect} の {item.DataType}）"
+                    )
+                    .Build(() => CSharpVerbatimDiagram(item.DataType))
+                    .Settings(
+                        new FormatSettings(
+                            CSharpOptions: new CodeGenerationOptions
+                            {
+                                RootNamespace = "QuickER.Tests.ReverseTypeSpelling",
+                                GenerateValueObjects = false,
+                                SplitFilesByCategory = false,
+                            },
+                            CSharpDialect: item.Dialect
+                        )
+                    )
+                    .Expect(
+                        e =>
+                        {
+                            e.Output.Contains($"public {item.ClrType}? Probe {{");
+                            e.Imported.Single($"Type samples.probe = {item.DataType}");
+                            e.Warnings.Empty();
+                        },
+                        CSharpReverseAdapter.Value
+                    )
+                    .Row()
+            ),
             // CSharpReversePrecisionlessDecimalTests.RoundTrip_PrecisionlessScaledNumber_IsPreserved：
             // NUMBER(*,s) は decimal(*,s) のトークンで刻まれ（同じ方言へ書き戻すと綴りが揃うので verbatim 併記は不要）、Oracle へ戻る
             .. new (string DataType, string Token)[]

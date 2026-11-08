@@ -864,6 +864,36 @@ internal static partial class DialectTypeRows
                 .Expect(DialectNames.MySql, "ok fallback=1");
         }
 
+        // timestamp は精度に依らず DateTime（宣言のセルの timestamp(6) は matrix-map-* が見る）
+        foreach (var native in new[] { "timestamp", "timestamp(3)", "TIMESTAMP" })
+        {
+            yield return Map(
+                    $"map-mysql-timestamp-datetime-{MySqlSlug(native)}",
+                    "timestamp は DateTime へマップされる（両ドライバの型。DateTimeOffset で読むと MySql.Data が小数秒を落とす）",
+                    native
+                )
+                .Expect(DialectNames.MySql, "ok type=DateTime ref=0 fallback=0");
+        }
+
+        // Guid へ写すのは固定長でちょうど 36 文字の char だけ（宣言のセルの char(36) は matrix-map-* が見る）
+        (string Native, string Spec)[] guidBoundary =
+        [
+            ("CHAR(36)", "ok type=Guid ref=0 maxlen=- fallback=0"),
+            ("char(35)", "ok type=string ref=1 maxlen=35 fallback=0"),
+            ("char(37)", "ok type=string ref=1 maxlen=37 fallback=0"),
+            ("varchar(36)", "ok type=string ref=1 maxlen=36 fallback=0"),
+        ];
+
+        foreach (var (native, spec) in guidBoundary)
+        {
+            yield return Map(
+                    $"map-mysql-char-36-guid-boundary-{MySqlSlug(native)}",
+                    "固定長の char(36) だけが Guid へマップされる（両ドライバが既定で Guid として返す列）",
+                    native
+                )
+                .Expect(DialectNames.MySql, spec);
+        }
+
         yield return Map(
                 "map-mysql-tinytext-string-without-fallback",
                 "tinytext は string へマップされる（フォールバックに落ちない）",

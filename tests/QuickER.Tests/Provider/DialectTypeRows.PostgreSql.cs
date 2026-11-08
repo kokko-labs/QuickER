@@ -35,6 +35,8 @@ internal static partial class DialectTypeRows
     private const string PgKnownMap = "解決できる型は IsFallbackType が false になる";
     private const string PgNotUnbounded = "非バイナリ型は IsUnboundedBinary=false になる";
     private const string PgDriverType = "interval・cidr は Npgsql が返す CLR 型へ写す";
+    private const string PgEfCoreColumnType =
+        "Npgsql の EF Core の既定の対応で書けない列（date・timestamp・timetz・json・jsonb・xml）だけが EF Core に教える列の型を持つ";
     private const string PgConvertFromSql = "sqlserver → postgresql の代表変換";
     private const string PgConvertToSql = "postgresql → sqlserver の代表変換";
 
@@ -698,60 +700,70 @@ internal static partial class DialectTypeRows
                 "timetz-words",
                 PgTimetz,
                 "time with time zone",
-                "ok type=DateTimeOffset ref=0 fallback=0"
+                "ok type=DateTimeOffset ref=0 fallback=0 efcol=\"time with time zone\""
             ),
-            PgMap("timetz-short", PgTimetz, "timetz", "ok type=DateTimeOffset ref=0 fallback=0"),
+            PgMap(
+                "timetz-short",
+                PgTimetz,
+                "timetz",
+                "ok type=DateTimeOffset ref=0 fallback=0 efcol=\"time with time zone\""
+            ),
             PgMap(
                 "timetz-upper",
                 PgTimetz,
                 "TIME WITH TIME ZONE",
-                "ok type=DateTimeOffset ref=0 fallback=0"
+                "ok type=DateTimeOffset ref=0 fallback=0 efcol=\"time with time zone\""
             ),
             PgMap(
                 "timetz-precision-words",
                 PgTimetz,
                 "time(3) with time zone",
-                "ok type=DateTimeOffset ref=0 fallback=0"
+                "ok type=DateTimeOffset ref=0 fallback=0 efcol=\"time with time zone\""
             ),
             PgMap(
                 "timetz-precision-short",
                 PgTimetz,
                 "timetz(3)",
-                "ok type=DateTimeOffset ref=0 fallback=0"
+                "ok type=DateTimeOffset ref=0 fallback=0 efcol=\"time with time zone\""
             ),
-            PgMap("time-plain", PgTimeNoTz, "time", "ok type=TimeSpan"),
-            PgMap("time-precision", PgTimeNoTz, "time(6)", "ok type=TimeSpan"),
+            PgMap("time-plain", PgTimeNoTz, "time", "ok type=TimeSpan efcol=-"),
+            PgMap("time-precision", PgTimeNoTz, "time(6)", "ok type=TimeSpan efcol=-"),
             PgMap(
                 "time-without-time-zone",
                 PgTimeNoTz,
                 "time without time zone",
-                "ok type=TimeSpan"
+                "ok type=TimeSpan efcol=-"
             ),
             PgMap(
                 "time-precision-without-time-zone",
                 PgTimeNoTz,
                 "time(6) without time zone",
-                "ok type=TimeSpan"
+                "ok type=TimeSpan efcol=-"
             ),
             PgMap(
                 "timestamp-precision-with-time-zone",
                 PgTsPrecision,
                 "timestamp(6) with time zone",
-                "ok type=DateTimeOffset"
+                "ok type=DateTimeOffset efcol=-"
             ),
             PgMap(
                 "timestamptz-precision",
                 PgTsPrecision,
                 "timestamptz(6)",
-                "ok type=DateTimeOffset"
+                "ok type=DateTimeOffset efcol=-"
             ),
             PgMap(
                 "timestamp-precision-without-time-zone",
                 PgTsPrecision,
                 "timestamp(6) without time zone",
-                "ok type=DateTime"
+                "ok type=DateTime efcol=\"timestamp without time zone\""
             ),
-            PgMap("timestamp-precision-plain", PgTsPrecision, "timestamp(6)", "ok type=DateTime"),
+            PgMap(
+                "timestamp-precision-plain",
+                PgTsPrecision,
+                "timestamp(6)",
+                "ok type=DateTime efcol=\"timestamp without time zone\""
+            ),
             PgMap("geometry-fallback", PgUnknownMap, "geometry", "ok fallback=1"),
             PgMap("point-fallback", PgUnknownMap, "point", "ok fallback=1"),
             PgMap("integer-resolved", PgKnownMap, "integer", "ok fallback=0"),
@@ -776,6 +788,65 @@ internal static partial class DialectTypeRows
                 "ok type=TimeSpan ref=0 fallback=0"
             ),
             PgMap("cidr", PgDriverType, "cidr", "ok type=System.Net.IPNetwork ref=0 fallback=0"),
+            // ---- 生成 EF Core の DbContext が列の型を教える列（宣言のセルに無い表記。セルの表記は matrix-map-* が見る）----
+            PgMap(
+                "json-efcore-column-type",
+                PgEfCoreColumnType,
+                "json",
+                "ok type=string efcol=json"
+            ),
+            PgMap(
+                "timestamp-plain-efcore-column-type",
+                PgEfCoreColumnType,
+                "timestamp",
+                "ok type=DateTime efcol=\"timestamp without time zone\""
+            ),
+            PgMap(
+                "timestamp-words-efcore-column-type",
+                PgEfCoreColumnType,
+                "timestamp without time zone",
+                "ok type=DateTime efcol=\"timestamp without time zone\""
+            ),
+            PgMap(
+                "text-no-efcore-column-type",
+                PgEfCoreColumnType,
+                "text",
+                "ok type=string efcol=-"
+            ),
+            // 配列は要素の列の型に [] を付けて引き継ぐ（要素が教えない型なら配列も教えない）
+            .. new (string Slug, string Native, string Spec)[]
+            {
+                ("date", "date[]", "ok type=DateTime[] array=1 efcol=\"date[]\""),
+                (
+                    "timestamp-6",
+                    "timestamp(6)[]",
+                    "ok type=DateTime[] array=1 efcol=\"timestamp without time zone[]\""
+                ),
+                (
+                    "timetz-words",
+                    "time with time zone[]",
+                    "ok type=DateTimeOffset[] array=1 efcol=\"time with time zone[]\""
+                ),
+                ("json", "json[]", "ok type=string[] array=1 efcol=\"json[]\""),
+                ("jsonb", "jsonb[]", "ok type=string[] array=1 efcol=\"jsonb[]\""),
+                ("xml", "xml[]", "ok type=string[] array=1 efcol=\"xml[]\""),
+                ("integer", "integer[]", "ok type=int[] array=1 efcol=-"),
+                ("text", "text[]", "ok type=string[] array=1 efcol=-"),
+                ("timestamptz", "timestamptz[]", "ok type=DateTimeOffset[] array=1 efcol=-"),
+            }.Select(item =>
+                PgMap(
+                    $"array-{item.Slug}-efcore-column-type",
+                    PgEfCoreColumnType,
+                    item.Native,
+                    item.Spec
+                )
+            ),
+            PgMap(
+                "timestamptz-no-efcore-column-type",
+                PgEfCoreColumnType,
+                "timestamptz",
+                "ok type=DateTimeOffset efcol=-"
+            ),
             // ---- 方言切替：SQL Server → PostgreSQL ----
             PgConvertFromSqlServer("nvarchar-50", "nvarchar(50)", "varchar(50)"),
             PgConvertFromSqlServer("nvarchar-max", "nvarchar(max)", "text"),

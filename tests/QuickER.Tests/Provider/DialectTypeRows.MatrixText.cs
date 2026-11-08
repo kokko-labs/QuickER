@@ -12,6 +12,21 @@ internal static partial class DialectTypeRows
     {
         var natives = MatrixNatives();
 
+        // マッパーの期待の宣言（C# の型の例外・EF Core に教える列の型）は宣言のセルの表記だけを指す。セルから外れた宣言は
+        // どの行にも効かずに黙って残るので、表を作る時点で名指しして断る
+        var declared = natives.Select(native => (native.Dialect, native.Native)).ToHashSet();
+        var stale = MapTypeExceptions
+            .Keys.Concat(EfCoreColumnTypes.Keys)
+            .Where(key => !declared.Contains(key))
+            .ToList();
+
+        if (stale.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"マッパーの期待の宣言が宣言のセルの表記を指していない：{string.Join("・", stale)}"
+            );
+        }
+
         foreach (var native in natives)
         {
             var dialect = native.Dialect;

@@ -139,6 +139,8 @@ EditModel は JSON で読み書きしないので、メンバー名は大文字�
 | MySQL | `tinyint(1)`・`bit(1)`・`boolean` | `bool` | 通常どおり |
 | MySQL | `bit(8)` など、1 より大きい幅 | `ulong` | 通常どおり |
 | MySQL | `year` | `int` | 通常どおり |
+| MySQL | `timestamp` | `DateTime` | 通常どおり |
+| MySQL | `char(36)` | `Guid` | 通常どおり |
 | Oracle | `NUMBER(1)` / `NUMBER(3)` / `NUMBER(5)` / `NUMBER(10)` / `NUMBER(19)` | `bool` / `byte` / `short` / `int` / `long` | 通常どおり |
 | Oracle | `INTEGER`・`SMALLINT`・`NUMBER(*,0)` | `decimal` | 通常どおり |
 | Oracle | `TIMESTAMP WITH LOCAL TIME ZONE` | `DateTime` | 通常どおり |
@@ -151,6 +153,14 @@ EditModel は JSON で読み書きしないので、メンバー名は大文字�
 
 MySQL の符号なし整数を符号なしの C# 型へ写すのは、ドライバと EF Core プロバイダーが返す CLR 型に合わせるためで、符号付きの範囲を超える値も読み出せます。
 真偽値の慣習（`tinyint(1)`＝`bool`）は符号付きの列だけに効きます。
+
+MySQL の `timestamp` は、MySQL のドライバがどちらも返す型の `DateTime` へ写します。
+MySQL は値に時差を持たず、値はセッションの時間帯の時刻です。
+`char(36)` は `Guid` へ写します（QuickER が MySQL へ `Guid` の列を書き出す表記で、ドライバはどちらも既定でこの列を `Guid` として返すため）。
+**UUID でない値を持つ `char(36)` の列は読めません**。
+MySqlConnector はその値を断り、MySql.Data は文字列で返すので、`Guid` のプロパティでは受けられません。
+そうした列は、図の型を `varchar(36)` などへ変えてください。
+`Guid` は小文字の 36 文字で書くので、列の大文字の UUID は、行を保存すると小文字になります。
 
 PostgreSQL の配列列は **EditModel と値オブジェクトには載りません**。
 EditModel は 1 列＝1 テキスト入力の投影で配列を表す記法が無く、値オブジェクトにすると等値が参照比較になって同じ内容の配列が等しくならないためです。
@@ -169,10 +179,7 @@ PostgreSQL の `interval`・`cidr`・`inet` の C# 型は、ドライバ（Npgsq
 **`inet` の列は EditModel と値オブジェクトには載りません**（EditModel は 1 列＝1 テキスト入力の投影で、`IPAddress` を入力から組み立てる経路を持たないため）。
 配列列と同じく、該当する列は生成時の Info 診断で名指しし、その列を含む UNIQUE 制約は EditModel の重複検証から外れます。
 
-**`timetz` の列へ UTC 以外のオフセットで書き込むには、列型の明示が必要です**。
-QuickER は EF Core の `HasColumnType` を生成しないため（EF Core は既存スキーマへの接続専用）、既定では EF Core が `DateTimeOffset` を `timestamp with time zone` と推論し、Npgsql が UTC 以外のオフセットを拒否します。
-必要な場合は、生成される `QuickErDbContext` の `OnModelCreatingPartial` で列型を明示してください。
-読み取りと、UTC オフセットでの書き込みは、そのままで通ります。
+PostgreSQL の `date`・`timestamp`・`time with time zone`・`json`・`jsonb`・`xml` の列とその配列の列は、EF Core モードで列の型を宣言するので、EF Core で書けます（[EF Core モード](#ef-core-モードgenerateefcorerepositories)を参照）。
 
 **主キーの列は、図の NULL 許容の印に依らず NOT NULL として生成します**（生成する DDL も NOT NULL で作ります）。
 プロパティはほかの主キーと同じく NULL を許さない型になり、そう読んだ列は生成時の Info 診断で名指しします。
@@ -1101,7 +1108,8 @@ var referenced = await orders.Query().Where(o => o.CustomerId == customerId).Any
 
 ## EF Core モード（GenerateEfCoreRepositories）
 
-既存 Entity をそのまま EF Core に載せる方言非依存の `QuickErDbContext` と、同一 Repository インターフェイスの EF Core 版実装を生成します。
+既存 Entity をそのまま EF Core に載せる `QuickErDbContext` と、同一 Repository インターフェイスの EF Core 版実装を生成します。
+方言は構成の `Use*` で選び、コンテキストが列の型を宣言するのは、プロバイダの既定の対応では書けない列だけです（下の「列と型の構成」を参照）。
 マイグレーションは範囲外で、スキーマ作成は DDL 生成の責務です（EF Core は既存スキーマへの接続専用）。
 
 ```csharp
@@ -1146,6 +1154,12 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 - Unicode でない文字列の列（SQL Server の `varchar`・`char`・`text`、Oracle の `VARCHAR2`・`CHAR`・`CLOB`）は、`IsUnicode(false)` で構成します。
   パラメータと定数は Unicode でない文字列で送られ、DB は列を変換せずに比べられます。
   この構成は図の方言の型で決まるので、複数の DB で使う図は、文字列の列を Unicode（`nvarchar` など）にそろえてください
+- EF Core の Npgsql のプロバイダが、プロパティの型の既定の対応では書けない PostgreSQL の列は、`HasColumnType` で構成します（`date`・`timestamp`・`time with time zone`・`json`・`jsonb`・`xml` と、その配列の `date[]` など）。
+  構成しないと、プロバイダは `DateTime` を `timestamp with time zone` として送って `DateTimeKind.Unspecified` の値を断り、`DateTimeOffset` も同じく送って UTC 以外のオフセットを断り、文字列を `text` として送って JSON・XML の列で PostgreSQL に断られます。
+  `DateTimeKind.Utc` の `DateTime` は `timestamp` の列へ書けず、`timestamptz` の列は UTC のオフセットだけを受け付けます（どちらも Npgsql の規則）。
+  ほかの列には列の型を構成しないので、どの方言でも同じ C# 型へ写る型だけの図は、方言に依らず同じコードを生成します。
+- MySQL の写し方（`timestamp` を `DateTime`、`char(36)` を `Guid`。[DB 型と C# 型の対応](#db-型と-c-型の対応)を参照）は、ドライバが MySql.Data の MySql.EntityFrameworkCore で確かめました。
+  Pomelo では確かめていません。
 - 単一列の整数の主キー（ほかに EF Core が値を作れない単一列の主キー）は `ValueGeneratedNever()` で構成します。
   EF Core も、アプリが決めたキーを、`0` を含めて、QuickER 版 Repository と同じくそのまま送ります。
   構成しないと、EF Core は整数のキーを DB が値を作る列とみなし、`0` のキーを送りません。

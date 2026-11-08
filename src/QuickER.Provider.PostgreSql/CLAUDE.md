@@ -47,8 +47,10 @@
 - 基本型名の取り出し（`PostgreSqlCSharpTypeMapper.GetBaseType`）は括弧の部分だけを除去する。括弧より後ろを切り捨てると、PostgreSQL が括弧の後ろへ置く時間帯の語ごと落ち、`timestamp(6) with time zone`／`time(3) with time zone` の列が黙って `DateTime`／`TimeSpan` に化ける。長さ・精度は元の表記から読む。
 - ドライバ（Npgsql）が返す CLR 型へ写す：`timetz` は `DateTimeOffset`（`TimeSpan` では読み取り自体が `InvalidCastException`）・`interval`（範囲の修飾つきも）は `TimeSpan`・`cidr` は `System.Net.IPNetwork`・`inet` は `System.Net.IPAddress`（ネットマスクは落ちる＝Npgsql の既定）。文字列へ落とすと Npgsql が読めず表ごと使えない。
 - 時間帯なしの `time` は `TimeSpan`・`timestamptz` は `DateTimeOffset`（Npgsql の `GetFieldType` は `TimeOnly`／`DateTime`）。PostgreSQL の列を読むのは生成 EF Core のコードだけで、EF Core はこの型のまま読み書きできる（`timestamptz` の +00:00 以外の値は Npgsql が断る＝`PostgreSqlColumnClrTypeIntegrationTests`）。
-  - 読み書きできないと分かっている組（製品の候補）：`date`・`timestamp`→`DateTime`（生成 DbContext が列の型を書かないので timestamptz で送り、Kind=Unspecified の書き込みを断られる）・`json`・`jsonb`・`xml`→`string`（text で送り断られる）。正本は `DialectTypeRealDbRows` の EF Core の手順の `GapReason`。
-- 固定は `DialectTypeTableTests` のマッパーの行（`map-postgresql-timestamp-precision-*`＝精度つきでも時間帯の語を落とさない・`map-postgresql-timetz-*`＝time with time zone は DateTimeOffset）・`PostgreSqlDialectTypeRealDbTests`（ドライバの実測 CLR 型との一致・EF Core の手順）・`PostgreSqlColumnClrTypeIntegrationTests`（UTC 書き込み・EF Core の読み書き）。mutation 実証済み。
+- EF Core に教える列の型（`CSharpTypeInfo.EfCoreColumnType`）：`date`→`date`・`timestamp`（精度つき・`without time zone` も）→`timestamp without time zone`・`timetz`→`time with time zone`・`json`／`jsonb`／`xml`→同じ名前。配列は要素の値に `[]` を付けて引き継ぐ（`Array`）。
+  - 教えないと Npgsql の EF Core のプロバイダが `DateTime` を timestamptz で送って Kind=Unspecified を断り、`DateTimeOffset` を timestamptz で送って UTC 以外のオフセットを断り、`string` を text で送って PostgreSQL が 42804 で断る（配列も同じ）。
+  - `timestamptz`・`text`・`integer` などの既定の対応で書ける列には入れない（可搬図の出力を変えない）。値は図の綴りでなくマッパーの固定の綴り。
+- 固定は `DialectTypeTableTests` のマッパーの行（`map-postgresql-timestamp-precision-*`＝精度つきでも時間帯の語を落とさない・`map-postgresql-timetz-*`＝time with time zone は DateTimeOffset・`map-postgresql-*-efcore-column-type` と `map-postgresql-array-*-efcore-column-type`＝教える列の型・宣言のセルの `matrix-map-postgresql-*`）・`PostgreSqlDialectTypeRealDbTests`（ドライバの実測 CLR 型との一致・EF Core の手順＝教える列の型を当てて読み書きする）・`PostgreSqlColumnClrTypeIntegrationTests`（UTC 書き込み・EF Core の読み書き）・`CodegenCaseTests` の行 `model-efcore-column-type-postgresql`。mutation 実証済み。
 
 ## 同期スクリプト
 

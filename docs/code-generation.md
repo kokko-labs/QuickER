@@ -136,6 +136,8 @@ Some DB types map to a C# type that the type name alone does not suggest.
 | MySQL | `tinyint(1)`, `bit(1)`, `boolean` | `bool` | As usual |
 | MySQL | `bit(8)` and any other width above 1 | `ulong` | As usual |
 | MySQL | `year` | `int` | As usual |
+| MySQL | `timestamp` | `DateTime` | As usual |
+| MySQL | `char(36)` | `Guid` | As usual |
 | Oracle | `NUMBER(1)` / `NUMBER(3)` / `NUMBER(5)` / `NUMBER(10)` / `NUMBER(19)` | `bool` / `byte` / `short` / `int` / `long` | As usual |
 | Oracle | `INTEGER`, `SMALLINT`, `NUMBER(*,0)` | `decimal` | As usual |
 | Oracle | `TIMESTAMP WITH LOCAL TIME ZONE` | `DateTime` | As usual |
@@ -148,6 +150,14 @@ Change the column's type in the diagram if `string` is not what you meant.
 
 MySQL's unsigned integers map to unsigned C# types because those are the CLR types the driver and the EF Core provider return, so values beyond the signed range can be read.
 The boolean convention (`tinyint(1)` as `bool`) applies to signed columns only.
+
+MySQL's `timestamp` maps to `DateTime`, the type both MySQL drivers return.
+MySQL keeps no offset with the value, which is the time in the session's time zone.
+`char(36)` maps to `Guid`: it is how QuickER writes a `Guid` column for MySQL, and both drivers return such a column as `Guid` by default.
+**A `char(36)` column that holds values other than UUIDs cannot be read.**
+MySqlConnector refuses those values, and MySql.Data returns them as strings, which a `Guid` property cannot take.
+Give such a column another type in the diagram, such as `varchar(36)`.
+A `Guid` is written as 36 lowercase characters, so an uppercase UUID in the column comes back lowercase once the row is saved.
 
 PostgreSQL array columns are **left out of edit models and value objects**.
 An edit model is one text input per column and has no notation for an array, and a value object would compare arrays by reference, so two arrays with the same contents would not be equal.
@@ -166,10 +176,7 @@ It cannot read them as strings.
 **`inet` columns are left out of edit models and value objects** (an edit model is one text input per column and has no way to build an `IPAddress` from the input).
 As with array columns, generation names those columns, and a UNIQUE constraint that contains one is left out of the edit model's duplicate check.
 
-**Writing a `timetz` value whose offset is not UTC needs the column type spelled out.**
-QuickER does not generate EF Core's `HasColumnType` (EF Core is for connecting to an existing schema), so by default EF Core infers `timestamp with time zone` for a `DateTimeOffset` and Npgsql refuses any offset other than UTC.
-Spell the column type out in the generated `QuickErDbContext`'s `OnModelCreatingPartial` if you need it.
-Reading, and writing with a UTC offset, work as they are.
+PostgreSQL's `date`, `timestamp`, `time with time zone`, `json`, `jsonb` and `xml` columns, and arrays of them, get their column type declared in EF Core mode, so EF Core can write them (see [EF Core mode](#ef-core-mode-generateefcorerepositories)).
 
 **A primary key column is generated as NOT NULL whatever its nullable mark in the diagram**, as the generated DDL already declares it.
 Its property gets a non-nullable type like any other primary key, and generation names the columns it read this way in an information diagnostic.
@@ -1048,7 +1055,8 @@ Like the uniqueness check these are advisory: the database's own constraints rem
 
 ## EF Core mode (GenerateEfCoreRepositories)
 
-Generates a dialect-independent `QuickErDbContext` that puts the existing Entity onto EF Core as-is, plus an EF Core implementation of the same repository interfaces.
+Generates a `QuickErDbContext` that puts the existing Entity onto EF Core as-is, plus an EF Core implementation of the same repository interfaces.
+The dialect is the one your `Use*` call chooses; the context declares a column type only where the provider's default mapping cannot write the column (see Column and type configuration below).
 Migrations are out of scope, and schema creation remains the responsibility of DDL generation (EF Core connects only to an existing schema).
 
 ```csharp
@@ -1084,6 +1092,12 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 - A value-object column carries its length and precision (`HasMaxLength` / `HasPrecision`) like any other column, so its parameters and a condition on `.Value` use the column's own type rather than EF Core's defaults (`nvarchar(max)`, `decimal(18,2)`).
 - A non-Unicode string column (`varchar`, `char` or `text` on SQL Server, `VARCHAR2`, `CHAR` or `CLOB` on Oracle) is configured with `IsUnicode(false)`, so its parameters and literals are sent as non-Unicode text and the database can compare the column without converting it.
   The configuration follows the diagram's dialect, so a diagram meant to run on several databases keeps its string columns Unicode (`nvarchar` and the like).
+- A PostgreSQL column that EF Core's Npgsql provider cannot write with its default mapping for the property type is configured with `HasColumnType`: `date`, `timestamp`, `time with time zone`, `json`, `jsonb` and `xml`, and arrays of them (`date[]` and the like).
+  Without it, the provider sends a `DateTime` as `timestamp with time zone` and refuses a value of `DateTimeKind.Unspecified`, sends a `DateTimeOffset` the same way and refuses an offset other than UTC, and sends a string as `text`, which PostgreSQL refuses for a JSON or XML column.
+  A `DateTime` of `DateTimeKind.Utc` cannot be written to a `timestamp` column, and a `timestamptz` column takes a UTC offset only (both are Npgsql's rules).
+  No other column gets a column type, so a diagram of types every dialect maps to the same C# type generates the same code whatever its dialect.
+- The MySQL mappings (`timestamp` as `DateTime`, `char(36)` as `Guid`, see [Database types and C# types](#database-types-and-c-types)) were checked with MySql.EntityFrameworkCore, whose driver is MySql.Data.
+  Pomelo was not checked.
 - A single-column integer primary key, or another single-column key EF Core cannot generate a value for, is configured with `ValueGeneratedNever()`, so EF Core sends the key the application set, `0` included, as the QuickER Repository does.
   Without it, EF Core treats an integer key as one the database generates, and leaves out a key of `0`.
   A primary key marked as an identity column keeps EF Core's convention, so the database assigns it.

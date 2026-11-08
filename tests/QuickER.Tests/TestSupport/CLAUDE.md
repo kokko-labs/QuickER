@@ -275,7 +275,7 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
 - 黙って空振りしないよう、実装先・単位ごとに照合したクエリが 100 未満なら赤（`DslFuzzRunner.MinimumCheckedQueries`）。
 - 網羅の単位：`DslFuzzUnits.Coverage(方言)`（SQLite・SQL Server・MySQL に 1 つずつ・種に依らない＝種の指紋の要約の外。名前は `coverage-{方言}`）を、両テストが種の前に流す（単独の種では流さない）。
   - 単位は主キーを GuidKey にし（値オブジェクトあり）、主キーを参照する NULL 許容の自己参照の外部キー列 `parent` を持つ（`DslFuzzUnit.SelfReference`＝BuildDiagram が自己参照のリレーションを足し、外部キーの値オブジェクトの統一で GuidKey になる。行の parent はその行より前の行のキーか NULL）。
-  - 列は種の単位と同じ。MySQL は種の単位に無い固定長の文字列・符号つき整数・decimal・日時も持つ。
+  - 列は種の単位と同じ。MySQL は種の単位に無い固定長の文字列・符号つき整数・decimal・日時・Guid（`char(36)`）も持つ。MySQL の主キーと `parent` は `varchar(36)`（固定長の `char(36)` は型マッパーが Guid へ写すので、string の主キーの GuidKey にならない）。
   - クエリは `DslFuzzGenerator.CoverageQueries`（乱数はこの中だけで引き、`Queries` の引き方に触れない）。網羅の単位で初めて現れる列の種類の列の原子のクエリと、戻り形 4 つと射影の非 NULL 指定のそれぞれで、原子の形・自身の否定・列の種類のまだ出ていない水準を足す原子を貪欲に選んで 6 つずつ OR でまとめ、1 つおきに NOT で包んだ合成のクエリ。型の検査が断る原子と EF Core（SQLite）が流さない decimal の順序比較は使わない。射影の非 NULL 指定は、射影する列の IS NOT NULL と AND でつなぐ。
   - 単位のクエリは、型の検査が断ると決まっている原子のものを除き、構成のどの実装先でも照合したクエリにならなければ、`DslFuzzCoverage.UncheckedProblems` が単位・範囲・クエリを名指しして赤にする。そのため網羅の単位には `MinimumCheckedQueries` を掛けない（`DslFuzzRunner.RunAsync` の `minimumChecked`）。
   - NOT の入れ子：次元表の因子 NotNesting（none・single・double・triple・group-and・group-or＝原子の直上の NOT の連鎖の段数か、直上に NOT が無ければ最も近い NOT が包む AND / OR）を `DslFuzzDimensions.Observe` が構文木から数える。`isValid` は「NOT が無ければ NOT の数は偶数」「原子だけのクエリ（原子 1 つかその NOT 1 つ）は 2 段以上・合成を包む NOT を持たない」の 2 つだけ。網羅の単位は、形・否定・列の種類の全水準を足す原子を 6 水準ごとにその形で包んだ一覧のクエリ（1 つおきに外側をもう 1 つの NOT で包む）と、一覧以外の戻り形・射影の非 NULL 指定ごとに 6 水準を 1 つずつ持つクエリで、種に依らず全組を埋める。

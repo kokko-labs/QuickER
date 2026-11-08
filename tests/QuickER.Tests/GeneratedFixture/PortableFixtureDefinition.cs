@@ -37,6 +37,8 @@ public enum PortableDialect
 ///   <item>固定小数: <c>decimal(10,2)</c>（PG <c>numeric(10,2)</c> / Oracle <c>NUMBER(10,2)</c>）→ すべて <c>decimal(10,2)</c>（正規型 <c>decimal(10,2)</c>）</item>
 /// </list>
 /// bool は Oracle が <c>NUMBER(1)</c> 事情を持ち方言差が大きいため<b>意図的に除外</b>する。
+/// 生成 DbContext が列の型（<c>HasColumnType</c>）を出す型（PostgreSQL の <c>date</c>・<c>timestamp</c>・<c>jsonb</c> など）も
+/// 使わない（PostgreSQL の生成物にだけ列の型が出て、方言どうしの一致が崩れる）。
 /// </para>
 /// <para>
 /// オプションは「Entity/EditModel/Mapper・VO 有効・<b>EF Core 単独出力（QuickER の SQL Server 実装なし）</b>・単一ファイル・専用 namespace」。

@@ -40,8 +40,11 @@
 - パラメータの型解決では上限の判定だけを外す（`TryFormatParameterType`）。
 - 型マッパーは `tinytext` を `string` へ写す（フォールバックの型にしない）。
 - MySQL の列を読むのは生成 EF Core のコードだけ。`year`（MySql.Data は Int16）・`bit(1)`（ドライバは UInt64）はドライバの型と違うが、MySql.EntityFrameworkCore はマッパーの型（`int`・`bool`）のまま読み書きできる。
-  - 読み書きできないと分かっている組（製品の候補）：`timestamp(n)`→`DateTimeOffset`（MySql.Data が小数秒を落とす）・`char(36)`→`string`（UUID の値を Guid で返す）。確かめたのは MySql.EntityFrameworkCore だけ（Pomelo は確かめていない）。正本は `DialectTypeRealDbRows` の EF Core の手順の `GapReason`。
-- 固定は `DialectTypeTableTests`（上限の対・`format-param-mysql-*`・`map-mysql-tinytext-string-without-fallback`）・`MySqlDialectTypeRealDbTests`（上限の対の DDL・tinytext / tinyblob のドライバの型・EF Core の手順）。mutation 実証済み。
+- `timestamp` は `DateTime`（両ドライバの型。`DateTimeOffset` で読むと MySql.Data が小数秒を落とし、その行を保存すると落ちた値を書き戻す）。正規型は DateTimeOffset のまま（方言切替・トークン・DDL は変えない）。
+- `char(36)`（固定長でちょうど 36）は `Guid`（QuickER が Guid を書き出す表記で、MySqlConnector・MySql.Data とも既定でこの列を Guid として返す）。`varchar(36)`・`char(35)` などは `string`。
+  - UUID でない値を持つ `char(36)` の列は読めない（MySqlConnector は FormatException、MySql.Data は値ごとに string で返す）。docs が `varchar(36)` などへの変更を案内する。正規型は fixedstring(36) のまま。
+  - 確かめたのは MySql.EntityFrameworkCore だけ（Pomelo は確かめていない）。
+- 固定は `DialectTypeTableTests`（上限の対・`format-param-mysql-*`・`map-mysql-tinytext-string-without-fallback`・`map-mysql-timestamp-datetime-*`・`map-mysql-char-36-guid-boundary-*`・`matrix-map-mysql-timestamp-6`・`matrix-map-mysql-char-36`）・`MySqlDialectTypeRealDbTests`（上限の対の DDL・tinytext / tinyblob のドライバの型・EF Core の手順）。mutation 実証済み。
 
 ## 識別子と説明の文字
 
