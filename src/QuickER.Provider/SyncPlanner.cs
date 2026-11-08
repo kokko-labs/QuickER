@@ -1360,6 +1360,8 @@ public sealed class SyncPlanner
     /// <list type="bullet">
     /// <item>主キーの解除（Drop の段）：旧主キーに支えられた外部キーが残る（SQL Server 3725・PostgreSQL 2BP01・Oracle ORA-02273・
     /// MySQL 1553）。</item>
+    /// <item>一意制約の削除（主キーが置き換える一意制約の暗黙の削除を含む）：残す外部キーがその一意制約と同じ列の集合を参照し、
+    /// 同じ列の集合を持つほかのキー（live の主キー・ほかの一意制約）が無い（Oracle ORA-02273・MySQL 1553 など）。</item>
     /// <item>列の型の変更（<see cref="SyncDialectCapabilities.AlterColumnRequiresForeignKeyRebuild"/> の方言）：その列を両端のどちらかに
     /// 持つ外部キーが残り、同期後に両端の型が食い違う（MySQL 3780）。</item>
     /// <item>子の列の NOT NULL 化（<see cref="SyncDialectCapabilities.SetNullRequiresNullableChildColumn"/> の方言）：その列を子の列に持つ
@@ -1405,17 +1407,11 @@ public sealed class SyncPlanner
         }
 
         var liveByName = IndexLiveTables(context);
-        var alteredColumnTypes = new Dictionary<string, string>();
-
-        foreach (
-            var alter in sectionItems.Where(i =>
-                i.Kind == SchemaDiffKind.AlterColumn && i.ColumnName is not null
-            )
-        )
-        {
-            alteredColumnTypes[ColumnKey(alter.TableName, alter.ColumnName!)] =
-                alter.Column?.DataType ?? string.Empty;
-        }
+        var typeDecidingColumns = CollectTypeDecidingColumns(
+            sectionItems,
+            liveByName,
+            capabilities
+        );
 
         for (var index = 0; index < sections.Count; index++)
         {
@@ -1478,6 +1474,14 @@ public sealed class SyncPlanner
                     );
             }
 
+            // 一意制約の削除：残す外部キーがその一意制約と同じ列の集合を参照し、ほかに同じ列の集合のキー（live の主キー・
+            // ほかの一意制約）が無ければ、外部キーに阻まれる（主キーが置き換える一意制約の暗黙の削除・明示の削除のどちらも）
+            if (section.Kind == SchemaDiffKind.DropUniqueConstraint)
+            {
+                return liveByName.TryGet(table, out var liveOwner)
+                    && IsReferencedByRetainedForeignKey(liveOwner, item);
+            }
+
             if (
                 section.Kind != SchemaDiffKind.AlterColumn
                 || item.ColumnName is null
@@ -1497,7 +1501,7 @@ public sealed class SyncPlanner
             // 残す外部キーの列の型を変え、同期後に両端の型が食い違う
             if (
                 capabilities.AlterColumnRequiresForeignKeyRebuild
-                && !capabilities.AreSameType(liveColumn.DataType, item.Column.DataType)
+                && typeDecidingColumns.ContainsKey(column)
                 && retained.Any(fk =>
                     fk.Fk.ColumnPairs.Any(p =>
                         ColumnKey(fk.Child, p.ChildColumn) == column
@@ -1507,7 +1511,7 @@ public sealed class SyncPlanner
                         fk.Fk,
                         fk.Child,
                         fk.Parent,
-                        alteredColumnTypes,
+                        typeDecidingColumns,
                         capabilities
                     )
                 )
@@ -1524,6 +1528,43 @@ public sealed class SyncPlanner
                     UsesSetNull(fk.Fk.Relationship, capabilities)
                     && fk.Fk.ColumnPairs.Any(p => ColumnKey(fk.Child, p.ChildColumn) == column)
                 );
+        }
+
+        // 外す一意制約の列の集合を参照する残す外部キーがあり、同じ列の集合を持つほかのキー（live の主キー・外さないほかの
+        // 一意制約）が無いか（あれば DB はその外部キーをそちらのキーで支えうるので、断られると決まらない）
+        bool IsReferencedByRetainedForeignKey(Entity liveOwner, SchemaDiffItem drop)
+        {
+            var columns = drop.UniqueConstraintColumns;
+            var table = SchemaDiffService.NormalizeTable(liveOwner);
+            var droppedKey = UniqueConstraintKey(table, drop.UniqueConstraintName, columns);
+
+            if (
+                columns.Count == 0
+                || IsSameColumnSet(
+                    liveOwner.GetPrimaryKeyColumnsInOrder().Select(c => c.Name),
+                    columns
+                )
+                || liveOwner.UniqueConstraints.Any(other =>
+                    UniqueConstraintNaming.TryResolveColumnNames(
+                        liveOwner,
+                        other,
+                        out var otherColumns
+                    )
+                    && IsSameColumnSet(otherColumns, columns)
+                    && UniqueConstraintKey(table, other.Name, otherColumns) != droppedKey
+                )
+            )
+            {
+                return false;
+            }
+
+            return retained.Any(fk =>
+                SchemaNames.AreSame(fk.Parent, table)
+                && IsSameColumnSet(
+                    ForeignKeyColumnPairResolver.ParentColumns(fk.Fk.ColumnPairs),
+                    columns
+                )
+            );
         }
     }
 
@@ -1606,31 +1647,36 @@ public sealed class SyncPlanner
         // （そのテーブルを参照する FK は方言を問わず一旦外す必要がある。列集合は候補キー喪失の判定に使う）
         var pkChangedTables = CollectPrimaryKeyChanges(selected);
 
-        // 定義が変わる列 → 新しい型（同期後の両端の型の照合は方言に依らず使う）
-        var allAlteredColumnTypes = new Dictionary<string, string>();
+        // (b) 外し直しの理由になる、定義が変わる列（FK 参加列の型変更が依存エラーになる方言のみ対象。NULL 許容だけの変更も含む）
+        var alteredColumns = new HashSet<string>();
 
-        foreach (
-            var alter in selected.Where(i =>
-                i.Kind == SchemaDiffKind.AlterColumn && i.ColumnName is not null
-            )
-        )
+        if (capabilities.AlterColumnRequiresForeignKeyRebuild)
         {
-            allAlteredColumnTypes[ColumnKey(alter.TableName, alter.ColumnName!)] =
-                alter.Column?.DataType ?? string.Empty;
+            foreach (
+                var alter in selected.Where(i =>
+                    i.Kind == SchemaDiffKind.AlterColumn && i.ColumnName is not null
+                )
+            )
+            {
+                alteredColumns.Add(ColumnKey(alter.TableName, alter.ColumnName!));
+            }
         }
 
-        // (b) 外し直しの理由になる列の変更（FK 参加列の型変更が依存エラーになる方言のみ対象）
-        var alteredColumnTypes = capabilities.AlterColumnRequiresForeignKeyRebuild
-            ? allAlteredColumnTypes
-            : new Dictionary<string, string>();
         var liveByName = IndexLiveTables(context);
+
+        // この同期で型が決まる列（同期後の両端の型の照合は方言に依らずこれだけを使う。NULL 許容だけの変更は型を決めない）と、
+        // そのうち (b) の外し直しの理由になる列（失敗が決まった列の判定に使う）
+        var typeDecidingColumns = CollectTypeDecidingColumns(selected, liveByName, capabilities);
+        var rebuildTypeDecidingColumns = capabilities.AlterColumnRequiresForeignKeyRebuild
+            ? typeDecidingColumns
+            : new Dictionary<string, string>();
 
         // (c) 外部キーを支える索引が消える表 → 消える索引の列（旧主キー・削除する一意制約。MySQL のみ対象）
         var lostIndexes = capabilities.ForeignKeyRequiresLeadingIndex
             ? CollectLostIndexes(selected, pkChangedTables.Keys, context)
             : new Dictionary<string, List<List<string>>>(SchemaNames.Comparer);
 
-        if (pkChangedTables.Count == 0 && alteredColumnTypes.Count == 0 && lostIndexes.Count == 0)
+        if (pkChangedTables.Count == 0 && alteredColumns.Count == 0 && lostIndexes.Count == 0)
         {
             return selected;
         }
@@ -1668,7 +1714,7 @@ public sealed class SyncPlanner
                     fk,
                     childTable,
                     parentTable,
-                    alteredColumnTypes,
+                    rebuildTypeDecidingColumns,
                     capabilities
                 )
             )
@@ -1696,7 +1742,7 @@ public sealed class SyncPlanner
             }
         }
 
-        doomedColumns.IntersectWith(alteredColumnTypes.Keys);
+        doomedColumns.IntersectWith(alteredColumns);
 
         var autoDrops = new List<SchemaDiffItem>();
         var autoAdds = new List<SchemaDiffItem>();
@@ -1730,8 +1776,8 @@ public sealed class SyncPlanner
                     )
                 );
             var columnAltered = fk.ColumnPairs.Any(p =>
-                alteredColumnTypes.ContainsKey(ColumnKey(childTable, p.ChildColumn))
-                || alteredColumnTypes.ContainsKey(ColumnKey(parentTable, p.ParentColumn))
+                alteredColumns.Contains(ColumnKey(childTable, p.ChildColumn))
+                || alteredColumns.Contains(ColumnKey(parentTable, p.ParentColumn))
             );
             var ownIndexLost =
                 lostIndexes.TryGetValue(childTable, out var indexes)
@@ -1791,7 +1837,7 @@ public sealed class SyncPlanner
                         fk,
                         childTable,
                         parentTable,
-                        alteredColumnTypes,
+                        rebuildTypeDecidingColumns,
                         capabilities
                     )
                 )
@@ -1808,18 +1854,15 @@ public sealed class SyncPlanner
             }
 
             // 主キーの変更での付け直しも、構成列の型を変えて同期後に両端の型が食い違うなら必ず失敗する（列の変更で外し直しを
-            // 要しない方言でも）。外さずに主キーの解除の時点で失敗させ、食い違う外部キーを名指しする
+            // 要しない方言でも）。外さずに主キーの解除の時点で失敗させ、食い違う外部キーを名指しする（構成列の NULL 許容だけを
+            // 変える外部キーは型を変えないので、DB が受け入れている型のまま付け直す）
             if (
                 parentPkChanged
-                && fk.ColumnPairs.Any(p =>
-                    allAlteredColumnTypes.ContainsKey(ColumnKey(childTable, p.ChildColumn))
-                    || allAlteredColumnTypes.ContainsKey(ColumnKey(parentTable, p.ParentColumn))
-                )
                 && HasPostSyncTypeMismatch(
                     fk,
                     childTable,
                     parentTable,
-                    allAlteredColumnTypes,
+                    typeDecidingColumns,
                     capabilities
                 )
             )
@@ -2005,21 +2048,86 @@ public sealed class SyncPlanner
         }
     }
 
-    /// <summary>同期後（選択済みの列定義変更を適用した後）に、外部キーの両端の列の型が食い違うか</summary>
+    /// <summary>
+    /// この同期で型が決まる列（列の照合キー → 同期後の型）を集める：列の変更の項目のうち、live に無い列か、live の型と
+    /// <see cref="SyncDialectCapabilities.AreSameType"/> で同じでない型へ変える列
+    /// </summary>
+    /// <param name="items">項目（列の変更以外は読まない）</param>
+    /// <param name="liveByName">live の表の索引</param>
+    /// <param name="capabilities">型の比較に使う方言のケーパビリティ</param>
+    /// <remarks>
+    /// 外部キーの両端の型の照合（<see cref="HasPostSyncTypeMismatch"/>・<see cref="ExcludeForeignKeysWithPostSyncTypeMismatch"/>）は、
+    /// この関数が返す列だけを「この同期で型が決まる」とみなす。NULL 許容だけを変える列の変更は型を決めない：DB はその外部キーを
+    /// 今の両端の型のまま受け入れているので、型を変えずに外して付け直せば同じ組の型で通る。数えると、DB が受け入れている型の違う
+    /// 外部キー（PostgreSQL の integer → bigint など）を「付け直せない」と名指しして外し直さず、その外部キーに阻まれる主キーの
+    /// 解除が必ず失敗した。
+    /// </remarks>
+    private static Dictionary<string, string> CollectTypeDecidingColumns(
+        IEnumerable<SchemaDiffItem> items,
+        NameLookup<Entity> liveByName,
+        SyncDialectCapabilities capabilities
+    )
+    {
+        var decided = new Dictionary<string, string>();
+
+        foreach (
+            var alter in items.Where(i =>
+                i.Kind == SchemaDiffKind.AlterColumn && i.ColumnName is not null
+            )
+        )
+        {
+            var newType = alter.Column?.DataType ?? string.Empty;
+            var table = SchemaNames.ToStoredForm(alter.TableName);
+
+            if (
+                liveByName.TryGet(table, out var live)
+                && live.Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, alter.ColumnName))
+                    is { } liveColumn
+                && capabilities.AreSameType(liveColumn.DataType, newType)
+            )
+            {
+                continue;
+            }
+
+            decided[ColumnKey(alter.TableName, alter.ColumnName!)] = newType;
+        }
+
+        return decided;
+    }
+
+    /// <summary>
+    /// 構成列のどれかの型がこの同期で決まり、同期後（その型を当てた後）に外部キーの両端の列の型が食い違うか
+    /// </summary>
+    /// <param name="fk">live の外部キー</param>
+    /// <param name="childTable">子表</param>
+    /// <param name="parentTable">親表</param>
+    /// <param name="typeDecidingColumns">この同期で型が決まる列（<see cref="CollectTypeDecidingColumns"/>）</param>
+    /// <param name="capabilities">型の比較に使う方言のケーパビリティ</param>
     /// <remarks>
     /// 型の比較は差分の型比較と同じ規則（<see cref="SyncDialectCapabilities.AreSameType"/>＝方言の取込表記へ寄せ、
     /// 前後空白・大文字小文字を無視）。live の表記と図の表記が混ざって比べられるため、正規化を通さないと
     /// 綴りだけ違う同じ型を「食い違う」と判定し、外し直しを止めてしまう。
-    /// 変更しない側は live の型で比べる。
+    /// 型の決まらない側は live の型で比べる。構成列のどれの型も決まらない外部キーは食い違わない（DB が今の両端の型のまま
+    /// 受け入れている）。
     /// </remarks>
     private static bool HasPostSyncTypeMismatch(
         ResolvedForeignKeyRelationship fk,
         string childTable,
         string parentTable,
-        Dictionary<string, string> alteredColumnTypes,
+        Dictionary<string, string> typeDecidingColumns,
         SyncDialectCapabilities capabilities
     )
     {
+        if (
+            !fk.ColumnPairs.Any(p =>
+                typeDecidingColumns.ContainsKey(ColumnKey(childTable, p.ChildColumn))
+                || typeDecidingColumns.ContainsKey(ColumnKey(parentTable, p.ParentColumn))
+            )
+        )
+        {
+            return false;
+        }
+
         foreach (var pair in fk.ColumnPairs)
         {
             var childType = PostSyncType(fk.Child, childTable, pair.ChildColumn);
@@ -2034,8 +2142,8 @@ public sealed class SyncPlanner
         return false;
 
         string PostSyncType(Entity entity, string table, string column) =>
-            alteredColumnTypes.TryGetValue(ColumnKey(table, column), out var altered)
-                ? altered
+            typeDecidingColumns.TryGetValue(ColumnKey(table, column), out var decided)
+                ? decided
                 : entity.Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, column))?.DataType
                     ?? string.Empty;
     }
@@ -2303,12 +2411,7 @@ public sealed class SyncPlanner
                 new SyncPlanWarning(
                     SyncPlanWarningKind.ForeignKeyNotOnCandidateKey,
                     childTable,
-                    ResolveForeignKeyName(
-                        add.Relationship,
-                        childTable,
-                        parentTable,
-                        capabilities.IdentifierLengthLimit
-                    )
+                    SelectedForeignKeyName(add, capabilities.IdentifierLengthLimit)
                 )
             );
         }
@@ -2325,8 +2428,9 @@ public sealed class SyncPlanner
     /// <returns>残す項目</returns>
     /// <remarks>
     /// <para>
-    /// 同期後の型は、列の変更を選んだ列はその新しい型、live に在る列は live の型、live に無い列（追加する表・列）は図の型。
-    /// 判定は、構成列のどれかの型がこの同期で決まるときだけ（live の時点で綴りだけ違う既存の外部キーの作り直しは止めない）。
+    /// 同期後の型は、型を変える列の変更を選んだ列はその新しい型、live に在る列は live の型、live に無い列（追加する表・列）は図の型。
+    /// 判定は、構成列のどれかの型がこの同期で決まるときだけ（<see cref="CollectTypeDecidingColumns"/>＝NULL 許容だけの変更は型を
+    /// 決めない。live の時点で綴りだけ違う・DB が受け入れている型の違う既存の外部キーの作り直しは止めない）。
     /// 型の比較は暗黙の付け直しと同じ <see cref="SyncDialectCapabilities.AreForeignKeyCompatibleTypes"/>。
     /// </para>
     /// <para>
@@ -2350,18 +2454,7 @@ public sealed class SyncPlanner
         }
 
         var liveByName = IndexLiveTables(context);
-        var alteredColumnTypes = new Dictionary<string, string>();
-
-        foreach (
-            var alter in selected.Where(i =>
-                i.Kind == SchemaDiffKind.AlterColumn && i.ColumnName is not null
-            )
-        )
-        {
-            alteredColumnTypes[ColumnKey(alter.TableName, alter.ColumnName!)] =
-                alter.Column?.DataType ?? string.Empty;
-        }
-
+        var typeDecidingColumns = CollectTypeDecidingColumns(selected, liveByName, capabilities);
         var kept = new List<SchemaDiffItem>(selected.Count);
 
         foreach (var item in selected)
@@ -2396,12 +2489,7 @@ public sealed class SyncPlanner
                         new SyncPlanWarning(
                             SyncPlanWarningKind.ForeignKeyColumnTypeMismatch,
                             childTable,
-                            ResolveForeignKeyName(
-                                item.Relationship,
-                                childTable,
-                                parentTable,
-                                capabilities.IdentifierLengthLimit
-                            )
+                            SelectedForeignKeyName(item, capabilities.IdentifierLengthLimit)
                         ),
                         warnings,
                         excluded
@@ -2412,10 +2500,10 @@ public sealed class SyncPlanner
                 // 構成列の同期後の型（この同期で決まる型なら decidedBySync を立てる）
                 string PostSyncType(Entity diagramEntity, string table, string column)
                 {
-                    if (alteredColumnTypes.TryGetValue(ColumnKey(table, column), out var altered))
+                    if (typeDecidingColumns.TryGetValue(ColumnKey(table, column), out var decided))
                     {
                         decidedBySync = true;
-                        return altered;
+                        return decided;
                     }
 
                     if (
@@ -2487,10 +2575,8 @@ public sealed class SyncPlanner
 
                 if (notNull.Count > 0)
                 {
-                    var constraintName = ResolveForeignKeyName(
-                        relationship,
-                        childTable,
-                        SchemaDiffService.NormalizeTable(parent),
+                    var constraintName = SelectedForeignKeyName(
+                        item,
                         capabilities.IdentifierLengthLimit
                     );
 
@@ -2767,12 +2853,7 @@ public sealed class SyncPlanner
             }
 
             var childTable = SchemaDiffService.NormalizeTable(child);
-            var name = ResolveForeignKeyName(
-                add.Relationship,
-                childTable,
-                SchemaDiffService.NormalizeTable(add.ParentEntity!),
-                capabilities.IdentifierLengthLimit
-            );
+            var name = SelectedForeignKeyName(add, capabilities.IdentifierLengthLimit);
 
             warnings.Add(
                 new SyncPlanWarning(
@@ -3561,6 +3642,19 @@ public sealed class SyncPlanner
         + $"|{SchemaNames.Key(ResolveForeignKeyName(relationship, childTable, parentTable, limit))}"
         + $"|{relationship?.OnDelete ?? ForeignKeyReferentialAction.NoAction}"
         + $"|{relationship?.OnUpdate ?? ForeignKeyReferentialAction.NoAction}";
+
+    /// <summary>
+    /// 選んだ外部キーの追加・作り直しの項目を警告で名指しする名前（スクリプトが付ける名前＝
+    /// <see cref="SyncScriptBuilderHelper.ForeignKeyNameToAdd"/>）
+    /// </summary>
+    /// <remarks>
+    /// 差分は名前の無い外部キーの名前を図全体から求めて項目に載せる（同じ組の 2 本目は子の列名が付く）。リレーションの名前から
+    /// 規約名を作り直すと 2 本目は 1 本目と同じ名前になり、DB にある無関係な外部キーを名指しした。
+    /// </remarks>
+    private static string SelectedForeignKeyName(
+        SchemaDiffItem item,
+        IdentifierLengthLimit limit
+    ) => SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, limit);
 
     /// <summary>FK 制約名を解決する（未設定なら <c>FK_{子}_{親}</c> の規約名）</summary>
     /// <param name="relationship">外部キーのリレーション</param>

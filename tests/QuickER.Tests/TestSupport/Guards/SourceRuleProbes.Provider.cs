@@ -5,6 +5,86 @@ internal static partial class SourceRuleProbes
 {
     private static IEnumerable<SourceRuleProbe> Provider() =>
         [
+            // 差分の項目のリレーション（素の・! の）を第 1 引数に渡す ResolveForeignKeyName を拾い、ほかの型のリレーション・ほかの
+            // 名前の呼び出しは拾わない
+            new SourceRuleProbe(
+                "sync-selected-foreign-key-names-forms",
+                "sync-selected-foreign-key-names",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using QuickER.Model;
+                        using QuickER.Provider;
+
+                        internal sealed class LiveForeignKey
+                        {
+                            public Relationship Relationship { get; set; } = new();
+                        }
+
+                        internal static class Probe
+                        {
+                            private static string ResolveForeignKeyName(Relationship? relationship, string child) => child;
+
+                            private static string Other(Relationship? relationship, string child) => child;
+
+                            public static string Plain(SchemaDiffItem item) => ResolveForeignKeyName(item.Relationship, "c");
+
+                            public static string Suppressed(SchemaDiffItem item) => ResolveForeignKeyName(item.Relationship!, "c");
+
+                            public static string Live(LiveForeignKey fk) => ResolveForeignKeyName(fk.Relationship, "c");
+
+                            public static string OtherName(SchemaDiffItem item) => Other(item.Relationship, "c");
+                        }
+                        """,
+                        "Plain",
+                        "Suppressed"
+                    ),
+                ]
+            ),
+            // 差分の項目の Column の DataType を、素の・! の・?. の読み取りで拾い（ラムダの中は外側のメソッドの名前）、OldColumn・
+            // live の列・別の変数へ取った列は拾わない
+            new SourceRuleProbe(
+                "sync-type-deciding-column-copies-forms",
+                "sync-type-deciding-column-copies",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System.Collections.Generic;
+                        using System.Linq;
+                        using QuickER.Model;
+                        using QuickER.Provider;
+
+                        internal static class Probe
+                        {
+                            public static string Plain(SchemaDiffItem item) => item.Column.DataType;
+
+                            public static string? Conditional(SchemaDiffItem item) => item.Column?.DataType;
+
+                            public static string Suppressed(SchemaDiffItem item) => item.Column!.DataType;
+
+                            public static Dictionary<string, string> InLambda(IEnumerable<SchemaDiffItem> items) =>
+                                items.ToDictionary(i => i.TableName, i => i.Column!.DataType);
+
+                            public static string Old(SchemaDiffItem item) => item.OldColumn!.DataType;
+
+                            public static string Live(Column column) => column.DataType;
+
+                            public static string Copied(SchemaDiffItem item)
+                            {
+                                var column = item.Column!;
+                                return column.DataType;
+                            }
+                        }
+                        """,
+                        "Plain",
+                        "Conditional",
+                        "Suppressed",
+                        "InLambda"
+                    ),
+                ]
+            ),
             // 補間の穴と文字列の連結の数値・日時を型で拾い、InvariantCulture の string.Create と文字列は拾わない
             new SourceRuleProbe(
                 "numeric-interpolation-culture-forms",

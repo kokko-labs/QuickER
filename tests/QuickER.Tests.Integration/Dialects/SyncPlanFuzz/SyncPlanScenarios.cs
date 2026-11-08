@@ -1175,6 +1175,17 @@ internal sealed class ScenarioLive(FuzzLiveSchema live, SyncPlanFuzzDialect dial
         return column;
     }
 
+    /// <summary>
+    /// 列の型の種類を変える（外部キーを張った後に親の列だけを変え、DB が受け入れる型の違う外部キーを作る。値は行の値のまま）
+    /// </summary>
+    public void SetKind(Entity table, Column column, FuzzTypeKind kind, int length = 0)
+    {
+        column.DataType = dialect.TypeName(kind, length);
+        var info = live.Find(table.TableName, column.Name)!;
+        info.Kind = kind;
+        info.Length = length;
+    }
+
     /// <summary>一意制約を張る（名前が null なら名前なし）</summary>
     public void Unique(Entity table, string? name, params Column[] columns) =>
         table.UniqueConstraints.Add(

@@ -9,18 +9,24 @@ using QuickER.Tests.TestSupport.Engines;
 namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 
 /// <summary>
-/// 同期計画の形の行（D4）：主キーの変更・参照する外部キーの数・型の変更・明示の削除・一意制約の数の 5 因子の網羅の配列から、
-/// 方言ごとに決定的な行を作る（網は全行、実 DB の総当たりは普段は 2 因子の網羅に要る行だけ・夜間は全行）
+/// 同期計画の形の行（D4）：主キーの変更・参照する外部キーの数・型の変更・明示の削除・一意制約の数・参照先のキー・外部キーの両端の型の
+/// 7 因子の網羅の配列から、方言ごとに決定的な行を作る（網は全行、実 DB の総当たりは普段は 2 因子の網羅に要る行と必ず含む行だけ・
+/// 夜間は全行）
 /// </summary>
 /// <remarks>
 /// <para>
-/// 行の図は親の表 <c>p</c>（複合主キー <c>(id, k)</c>・整数の列 <c>u</c> と <c>w</c>）と、親の主キーを参照する子の表
-/// <c>c1</c>・<c>c2</c>（参照する外部キーの数の水準だけ）。<c>p.u</c> に名前付きの一意制約を一意制約の数の水準だけ張る。
+/// 行の図は親の表 <c>p</c>（複合主キー <c>(id, k)</c>・整数の列 <c>u</c> と <c>w</c>）と、親を参照する子の表
+/// <c>c1</c>・<c>c2</c>（参照する外部キーの数の水準だけ）。子の外部キーは、参照先のキーの水準で親の主キー（子の列
+/// <c>p_ref_0</c>・<c>p_ref_1</c>）か <c>p.u</c> の一意制約（子の列 <c>p_ref</c>）を参照する。<c>p.u</c> に名前付きの一意制約を
+/// 一意制約の数の水準だけ張る。外部キーの両端の型が Wider の行は、外部キーを張った後に参照される親の列を bigint にする（子の列は int の
+/// まま＝DB が受け入れる型の違う外部キー）。
 /// 差分は全部選ぶ。網羅の配列は 2 因子の組の全部と、P1（主キーの並べ替え × 参照 2 本 × 子だけの型の変更）・Q6（一意制約 2 つ ×
 /// 一意制約の削除 × 一意制約の列の型の変更）を含む 3 因子の集まりの組を含む（<see cref="MissingTriples"/> が表明する）。
+/// 網羅の配列の後ろに、指摘の形の完全な行（<see cref="RequiredRows"/>＝L1・L4）を、配列に含まれていなければ足す。
 /// </para>
 /// <para>
 /// Oracle は同じ列の並びに一意制約を 2 つ張れない（ORA-02261・DB の事実）ので、一意制約 2 つの行を作らない。
+/// SQL Server（Msg 1778）・MySQL（エラー 3780）は両端の型の違う外部キーを作れない（DB の事実）ので、外部キーの両端の型が Wider の行を作らない。
 /// </para>
 /// </remarks>
 internal static class SyncPlanShapeRows
@@ -28,11 +34,17 @@ internal static class SyncPlanShapeRows
     /// <summary>主キーの変更</summary>
     public const string PkChange = "PkChange";
 
-    /// <summary>親の主キーを参照する外部キーの数</summary>
+    /// <summary>親を参照する外部キーの数</summary>
     public const string ReferencingFks = "ReferencingFks";
 
-    /// <summary>型の変更（子の列だけ・親の列だけ・親と最初の子だけ・親と全部の子・一意制約の列）</summary>
+    /// <summary>型の変更（子の列だけ・親の列だけ・親と最初の子だけ・親と全部の子・一意制約の列）と、最初の子の NULL 許容だけの変更</summary>
     public const string TypeChange = "TypeChange";
+
+    /// <summary>子の外部キーが参照する親のキー（主キー・p.u の一意制約）</summary>
+    public const string ReferencedKey = "ReferencedKey";
+
+    /// <summary>外部キーの両端の型（同じ・参照される親の列だけが bigint）</summary>
+    public const string ForeignKeyTypes = "ForeignKeyTypes";
 
     /// <summary>明示の削除（外部キー・一意制約）</summary>
     public const string ExplicitOp = "ExplicitOp";
@@ -59,32 +71,79 @@ internal static class SyncPlanShapeRows
                     "Extend",
                     "Shrink",
                     "Move",
+                    "MoveToUniqueColumn",
                     "Remove"
                 ),
-                Levels(ReferencingFks, "親の主キーを参照する外部キーの数", "0", "1", "2"),
+                Levels(ReferencingFks, "親を参照する外部キーの数", "0", "1", "2"),
                 Levels(
                     TypeChange,
-                    "型の変更（子の列だけ・親の列だけ・親と最初の子だけ・親と全部の子・一意制約の列）",
+                    "型の変更（子の列だけ・親の列だけ・親と最初の子だけ・親と全部の子・一意制約の列）と最初の子の NULL 許容だけの変更",
                     "None",
                     "ChildOnly",
                     "ParentOnly",
                     "PartialBothEnds",
                     "BothEnds",
-                    "UniqueColumn"
+                    "UniqueColumn",
+                    "ChildNullability"
                 ),
                 Levels(ExplicitOp, "明示の削除", "None", "DropForeignKey", "DropUnique"),
                 Levels(UniqueMultiplicity, "親の列 u に張る一意制約の数", "0", "1", "2"),
+                Levels(ReferencedKey, "子の外部キーが参照する親のキー", "PrimaryKey", "Unique"),
+                Levels(
+                    ForeignKeyTypes,
+                    "外部キーの両端の型（同じ・参照される親の列だけが bigint）",
+                    "Same",
+                    "Wider"
+                ),
             ],
             [
                 new FactorGroup(PkChange, ReferencingFks, TypeChange),
                 new FactorGroup(UniqueMultiplicity, ExplicitOp, TypeChange),
+                new FactorGroup(PkChange, ReferencedKey, TypeChange),
+                new FactorGroup(PkChange, ForeignKeyTypes, TypeChange),
             ],
             IsValid
         );
 
-    /// <summary>網羅の配列（全行）</summary>
+    /// <summary>
+    /// 網羅の配列に必ず含める完全な行（指摘の形。配列に同じ割り当ての行が無ければ後ろへ足し、実 DB の普段の実行にも入れる）
+    /// </summary>
+    public static IReadOnlyList<IReadOnlyDictionary<string, string>> RequiredRows { get; } =
+    [
+        // L1（P5-2 の試運転・Oracle）：外部キー 2 本が参照する一意制約の列へ主キーを付け替え、片方の子の列の型を変える。型の
+        // 食い違う外部キーは残り、主キーが置き換える一意制約の暗黙の削除がそれに阻まれる。兄弟の外部キーを外した後に断られると、
+        // 暗黙コミットで兄弟の外部キーが消えたまま残った
+        new Dictionary<string, string>
+        {
+            [PkChange] = "MoveToUniqueColumn",
+            [ReferencingFks] = "2",
+            [TypeChange] = "ChildOnly",
+            [ExplicitOp] = "None",
+            [UniqueMultiplicity] = "1",
+            [ReferencedKey] = "Unique",
+            [ForeignKeyTypes] = "Same",
+        },
+        // L4（P5-2 の試運転・PostgreSQL）：DB が受け入れている型の違う外部キー（int → bigint）の親の主キーを並べ替え、子の列の
+        // NULL 許容だけを変える。型を変えないのに型の食い違いと名指しして外部キーを外し直さず、主キーの解除が断られた
+        new Dictionary<string, string>
+        {
+            [PkChange] = "Reorder",
+            [ReferencingFks] = "1",
+            [TypeChange] = "ChildNullability",
+            [ExplicitOp] = "None",
+            [UniqueMultiplicity] = "0",
+            [ReferencedKey] = "PrimaryKey",
+            [ForeignKeyTypes] = "Wider",
+        },
+    ];
+
+    /// <summary>網羅の配列（全行）。配列に含まれない必ず含む行は後ろへ足す</summary>
     public static IReadOnlyList<IReadOnlyDictionary<string, string>> AllRows { get; } =
-        CoveringArray.Generate(Table, ArraySeed);
+        WithRequiredRows(CoveringArray.Generate(Table, ArraySeed));
+
+    /// <summary>必ず含む行の、全行の中の番号</summary>
+    private static IReadOnlySet<int> RequiredRowIndexes { get; } =
+        RequiredRows.Select(required => IndexOf(AllRows, required)).ToHashSet();
 
     /// <summary>2 因子の組の全部を含む、全行の部分（貪欲に選ぶ・並びは全行の順）</summary>
     public static IReadOnlySet<int> PairwiseRowIndexes { get; } = SelectPairwise();
@@ -148,6 +207,15 @@ internal static class SyncPlanShapeRows
                 continue;
             }
 
+            // SQL Server（Msg 1778）・MySQL（エラー 3780）は両端の型の違う外部キーを作れない（DB の事実）
+            if (
+                row[ForeignKeyTypes] == "Wider"
+                && dialect is DialectNames.SqlServer or DialectNames.MySql
+            )
+            {
+                continue;
+            }
+
             yield return new ScenarioRow<SyncPlanScenarioInput>(
                 IdOf(dialect, index),
                 null,
@@ -160,7 +228,7 @@ internal static class SyncPlanShapeRows
                         target => Mutate(target, row),
                         null
                     ),
-                    PairwiseRowIndexes.Contains(index)
+                    PairwiseRowIndexes.Contains(index) || RequiredRowIndexes.Contains(index)
                 )
             );
         }
@@ -170,8 +238,8 @@ internal static class SyncPlanShapeRows
     private static void Build(ScenarioLive live, IReadOnlyDictionary<string, string> row)
     {
         var p = live.Table("p");
-        live.Int(p, "id", pk: true);
-        live.Int(p, "k", pk: true);
+        var id = live.Int(p, "id", pk: true);
+        var k = live.Int(p, "k", pk: true);
         var u = live.Int(p, "u", value: r => (r * 10).ToString(CultureInfo.InvariantCulture));
         live.Int(p, "w", value: r => (r * 100).ToString(CultureInfo.InvariantCulture));
 
@@ -180,11 +248,22 @@ internal static class SyncPlanShapeRows
             live.Unique(p, name, u);
         }
 
+        var referencesUnique = row[ReferencedKey] == "Unique";
+
         for (var i = 1; i <= Count(row[ReferencingFks]); i++)
         {
             var child = live.Table($"c{i}");
             live.Int(child, "id", pk: true);
-            live.Ref(child, p, "p_ref", $"fk_c{i}_p");
+            live.Ref(child, p, "p_ref", $"fk_c{i}_p", referenced: referencesUnique ? [u] : null);
+        }
+
+        // 外部キーを張った後に参照される親の列だけを bigint にする（子の列は int のまま＝DB が受け入れる型の違う外部キー）
+        if (row[ForeignKeyTypes] == "Wider")
+        {
+            foreach (var column in referencesUnique ? new[] { u } : [id, k])
+            {
+                live.SetKind(p, column, FuzzTypeKind.BigInt);
+            }
         }
     }
 
@@ -193,29 +272,35 @@ internal static class SyncPlanShapeRows
     {
         var refs = Count(row[ReferencingFks]);
 
+        // 子の外部キーの最初の列（主キーを参照すれば p_ref_0・一意制約を参照すれば p_ref）
+        var childColumn = row[ReferencedKey] == "Unique" ? "p_ref" : "p_ref_0";
+
         switch (row[TypeChange])
         {
             case "ChildOnly":
-                target.SetType("c1", "p_ref_0", FuzzTypeKind.BigInt);
+                target.SetType("c1", childColumn, FuzzTypeKind.BigInt);
                 break;
             case "ParentOnly":
                 target.SetType("p", "id", FuzzTypeKind.BigInt);
                 break;
             case "PartialBothEnds":
                 target.SetType("p", "id", FuzzTypeKind.BigInt);
-                target.SetType("c1", "p_ref_0", FuzzTypeKind.BigInt);
+                target.SetType("c1", childColumn, FuzzTypeKind.BigInt);
                 break;
             case "BothEnds":
                 target.SetType("p", "id", FuzzTypeKind.BigInt);
 
                 for (var i = 1; i <= refs; i++)
                 {
-                    target.SetType($"c{i}", "p_ref_0", FuzzTypeKind.BigInt);
+                    target.SetType($"c{i}", childColumn, FuzzTypeKind.BigInt);
                 }
 
                 break;
             case "UniqueColumn":
                 target.SetType("p", "u", FuzzTypeKind.BigInt);
+                break;
+            case "ChildNullability":
+                target.SetNullable("c1", childColumn, true);
                 break;
         }
 
@@ -233,6 +318,9 @@ internal static class SyncPlanShapeRows
             case "Move":
                 target.SetPrimaryKey("p", "w");
                 break;
+            case "MoveToUniqueColumn":
+                target.SetPrimaryKey("p", "u");
+                break;
             case "Remove":
                 target.RemovePrimaryKey("p");
                 break;
@@ -241,7 +329,7 @@ internal static class SyncPlanShapeRows
         switch (row[ExplicitOp])
         {
             case "DropForeignKey":
-                target.DropForeignKey(target.ForeignKey("c1", "p_ref_0"));
+                target.DropForeignKey(target.ForeignKey("c1", childColumn));
                 break;
             case "DropUnique":
                 target.DropUnique("p", UniqueNames(row)[0]);
@@ -249,18 +337,19 @@ internal static class SyncPlanShapeRows
         }
     }
 
-    /// <summary>原理的に起こり得ない組（型の変更・明示の削除の相手が無い）</summary>
+    /// <summary>原理的に起こり得ない組（型の変更・明示の削除・参照の相手が無い）</summary>
     private static bool IsValid(IReadOnlyDictionary<string, string> assignment)
     {
         bool Has(string factor, params string[] levels) =>
             assignment.TryGetValue(factor, out var level) && levels.Contains(level);
 
-        // 子の列の型の変更と外部キーの削除は、親の主キーを参照する外部キーが要る
+        // 子の列の変更・外部キーの削除・外部キーの両端の型の違いは、親を参照する外部キーが要る
         if (
             Has(ReferencingFks, "0")
             && (
-                Has(TypeChange, "ChildOnly", "PartialBothEnds", "BothEnds")
+                Has(TypeChange, "ChildOnly", "PartialBothEnds", "BothEnds", "ChildNullability")
                 || Has(ExplicitOp, "DropForeignKey")
+                || Has(ForeignKeyTypes, "Wider")
             )
         )
         {
@@ -273,11 +362,77 @@ internal static class SyncPlanShapeRows
             return false;
         }
 
-        // 一意制約の列の型の変更と一意制約の削除は、一意制約が要る
-        return !(
+        // 一意制約の列の型の変更・一意制約の削除・一意制約を参照する外部キーは、一意制約が要る
+        if (
             Has(UniqueMultiplicity, "0")
-            && (Has(TypeChange, "UniqueColumn") || Has(ExplicitOp, "DropUnique"))
+            && (
+                Has(TypeChange, "UniqueColumn")
+                || Has(ExplicitOp, "DropUnique")
+                || Has(ReferencedKey, "Unique")
+            )
+        )
+        {
+            return false;
+        }
+
+        // 型の変更の水準は「int の列を bigint にする」。Wider は参照される親の列を bigint で作るので、その列を bigint にする変更が
+        // 無い（子の列が無い表で子の列を変える組と同じく、変更の相手が無い）。主キーを参照するなら p.id を変える水準
+        // （ParentOnly・PartialBothEnds・BothEnds）、一意制約を参照するなら p.u を変える水準（UniqueColumn）がそれに当たる
+        return !(
+            Has(ForeignKeyTypes, "Wider")
+            && (
+                (
+                    Has(ReferencedKey, "PrimaryKey")
+                    && Has(TypeChange, "ParentOnly", "PartialBothEnds", "BothEnds")
+                ) || (Has(ReferencedKey, "Unique") && Has(TypeChange, "UniqueColumn"))
+            )
         );
+    }
+
+    /// <summary>網羅の配列に、含まれていない必ず含む行を後ろへ足す（足す行が起こり得ない割り当てなら宣言の誤り）</summary>
+    private static IReadOnlyList<IReadOnlyDictionary<string, string>> WithRequiredRows(
+        IReadOnlyList<IReadOnlyDictionary<string, string>> generated
+    )
+    {
+        var rows = generated.ToList();
+
+        foreach (var required in RequiredRows)
+        {
+            if (
+                required.Count != Table.Factors.Count
+                || Table.Factors.Any(f => !required.ContainsKey(f.Name))
+                || !Table.IsValid(required)
+            )
+            {
+                throw new InvalidOperationException(
+                    $"必ず含む行は全因子の起こり得る割り当て: {string.Join(", ", required.Select(p => $"{p.Key}={p.Value}"))}"
+                );
+            }
+
+            if (IndexOf(rows, required) < 0)
+            {
+                rows.Add(Table.Factors.ToDictionary(f => f.Name, f => required[f.Name]));
+            }
+        }
+
+        return rows;
+    }
+
+    /// <summary>割り当てがちょうど一致する行の番号（無ければ -1）</summary>
+    private static int IndexOf(
+        IReadOnlyList<IReadOnlyDictionary<string, string>> rows,
+        IReadOnlyDictionary<string, string> assignment
+    )
+    {
+        for (var i = 0; i < rows.Count; i++)
+        {
+            if (assignment.All(pair => rows[i][pair.Key] == pair.Value))
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     /// <summary>2 因子の組の全部を含むように、全行から貪欲に選ぶ</summary>

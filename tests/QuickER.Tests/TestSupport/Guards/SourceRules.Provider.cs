@@ -300,6 +300,55 @@ internal static partial class SourceRules
             {
                 MinimumFiles = 4,
             },
+            // 同期の計画で「この同期で型が決まる列」は CollectTypeDecidingColumns の 1 か所が決める（NULL 許容だけの列の変更は型を
+            // 決めない）。外部キーの型の照合の 3 か所がそれぞれ列の変更の新しい型を辞書へ写していたため、NULL 許容だけの変更まで
+            // 「型が決まる」と数える誤りが 3 か所に写った（P5-2 の試運転の L4）。差分の項目の列の新しい型を直接読む箇所をメソッドで
+            // 数え、理由つきの一覧と照合する
+            SourceRule.Forbid(
+                "sync-type-deciding-column-copies",
+                "同期の計画で差分の項目の列の新しい型を読むのは、型が決まる列の正本（CollectTypeDecidingColumns）と理由つきの一覧だけ",
+                SourceScope.Files("src", "src/QuickER.Provider/SyncPlanner.cs"),
+                GuardFinder.Symbols(DiffItemNewTypeReads.Describe),
+                new(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "CollectTypeDecidingColumns",
+                    1,
+                    "この同期で型が決まる列の正本そのもの"
+                ),
+                new(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "ExcludeItemsRequiringUnselected",
+                    1,
+                    "前提の欠けで NULL 許容化だけを外すとき、項目自身の旧と新の型（OldColumn と Column）を比べて型の変更が残るかを決める（live を引かない入口の段で、外部キーの照合ではない）"
+                ),
+                new(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "WarnDefaultsOnColumnTypeKindChange",
+                    1,
+                    "既定値のある列の型の種類（括弧より前の名前）の変更を名指しする（型が同じかでなく型の種類を比べる別の判定）"
+                ),
+                new(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "ApplySelectedColumnChanges",
+                    1,
+                    "再構築の合成で、選んだ列の変更の型を live の列へ写す（照合ではなく合成）"
+                )
+            ),
+            // 選んだ外部キーの追加・作り直しを警告で名指しする名前は、スクリプトが付ける名前（SelectedForeignKeyName＝
+            // ForeignKeyNameToAdd）の 1 か所で作る。差分の項目のリレーションから規約名を作り直すと、名前の無い同じ組の 2 本目が
+            // 1 本目と同じ名前になり、警告が DB にある無関係な外部キーを名指しした（4 つの警告に写っていた）
+            SourceRule.Forbid(
+                "sync-selected-foreign-key-names",
+                "同期の計画で差分の項目のリレーションから外部キーの名前を作り直さず、選んだ外部キーの名前は SelectedForeignKeyName を通す",
+                SourceScope.Files("src", "src/QuickER.Provider/SyncPlanner.cs"),
+                GuardFinder.Symbols(DiffItemForeignKeyNameRebuilds.Describe),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "SynthesizeForeignKeys",
+                    1,
+                    "再構築の合成で、外す外部キーの項目（削除の項目のリレーションは live のもの）を live の外部キーと名前で突き合わせる（警告の名指しではない）"
+                )
+            ),
             // 取込警告の文言は SchemaImportWarningText.Describe（QuickER.Provider）が持ち、表示側は種別で分岐しない。種別で分岐する形
             // （switch のアームの定数パターン・is のパターン・case ラベル・== / != の比較）のうち SchemaImportWarningKind. を含むものを
             // 数える（種別を作る式＝方言のインポータの「"view" => ViewExcluded」の右辺は分岐ではない）
