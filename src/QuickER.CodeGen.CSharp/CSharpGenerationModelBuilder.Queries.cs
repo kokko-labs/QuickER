@@ -591,12 +591,16 @@ internal sealed partial class CSharpGenerationModelBuilder
                 query.Parameters
             );
 
+            // 条件の検証の失敗（構文・未知の列やパラメータ・IN とリスト・NULL 非許容の列への IS NULL）は、
+            // どれもこのクエリの中で完結するので Warning にしてこのクエリだけ飛ばす（型整合の違反・生 SQL の
+            // 未宣言パラメータ・Id の参照の切れと同じ流儀）。Error にすると、列 1 本の削除や NOT NULL への変更で
+            // 生成全体が止まる。飛ばさずに続けると条件なしのメソッド（全件取得）が出るので、hasError は必ず立てる
             if (!parsed.Success)
             {
                 foreach (var diagnostic in parsed.Diagnostics)
                 {
                     diagnostics.Add(
-                        GenerationDiagnostic.Error(
+                        GenerationDiagnostic.Warning(
                             string.Format(
                                 Strings.CodeGen_Query_ConditionInvalid,
                                 query.Name,

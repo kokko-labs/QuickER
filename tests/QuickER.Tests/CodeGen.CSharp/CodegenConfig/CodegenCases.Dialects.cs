@@ -318,18 +318,12 @@ internal static partial class CodegenCases
             // ===== 名前付きクエリ：診断 =====
             DialectRow(
                 "diag-query-invalid-queries-are-errors",
-                "検証エラー（未知の列・スカラー×DSL・重複メソッド名）は診断になりファイルを出さない（QueryGenerationTests.Generate_InvalidQueries_ProduceDiagnostics）",
+                "規則の検証エラー（スカラー×DSL・重複メソッド名）は Error の診断になりファイルを出さない（QueryGenerationTests.Generate_InvalidQueries_ProduceDiagnostics。条件の検証の失敗はそのクエリだけ飛ばす警告で、行 diag-query-condition-invalid-warns-and-skips-only-that-query が見る）",
                 () =>
                     Dialects_QueryDiagram(
                         Dialects_QueryOrder(),
                         order =>
                             [
-                                new QueryDefinition
-                                {
-                                    Name = "BadColumn",
-                                    Returns = QueryReturnShape.List,
-                                    Condition = "Nope = 1",
-                                },
                                 new QueryDefinition
                                 {
                                     Name = "BadScalar",
@@ -351,11 +345,6 @@ internal static partial class CodegenCases
                     ),
                 Dialects_QueryOptions(),
                 DiagnosticExpectation.Contains(
-                    ExpectedDiagnostic.ErrorMentioning(
-                        nameof(Strings.CodeGen_Query_ConditionInvalid),
-                        "BadColumn",
-                        "Nope"
-                    ),
                     ExpectedDiagnostic.ErrorMentioning(
                         nameof(Strings.CodeGen_Query_ScalarDslUnsupported),
                         "BadScalar"
@@ -1527,8 +1516,8 @@ internal static partial class CodegenCases
             ),
             // ===== エミッタ：NULL 非許容列の IS NULL・持ち上げ変数とラムダ変数の名前の衝突 =====
             DialectRow(
-                "diag-query-null-check-on-non-nullable-column-is-error",
-                "QueryConditionCSharpEmitterTests.Validate_NullCheckOnNonNullableColumn_Fails（NULL 非許容の列 CustomerId への IS NULL は、列を名指しする診断 1 件）",
+                "diag-query-null-check-on-non-nullable-column-warns-and-skips",
+                "QueryConditionCSharpEmitterTests.Validate_NullCheckOnNonNullableColumn_Fails（NULL 非許容の列 CustomerId への IS NULL は、クエリと列を名指しする警告 1 件でそのクエリだけ飛ばす。列を後から NOT NULL にした図で起きる。対照のクエリは生成されてコンパイルできる）",
                 () =>
                     Dialects_QueryDiagram(
                         Dialects_QueryOrder(),
@@ -1540,15 +1529,112 @@ internal static partial class CodegenCases
                                     Returns = QueryReturnShape.List,
                                     Condition = "CustomerId IS NULL",
                                 },
+                                // 対照：正当なクエリは巻き添えにしない
+                                Dialects_ListQuery(
+                                    "GetByCustomer",
+                                    "CustomerId = @customerId",
+                                    [new QueryParameter { Name = "customerId", Type = "int32" }]
+                                ),
                             ]
                     ),
-                Dialects_QueryOptions(),
+                Dialects_QueryRepositoryOnlyOptions(),
                 DiagnosticExpectation.Exact([
-                    ExpectedDiagnostic.ErrorMentioning(
+                    ExpectedDiagnostic.WarningMentioning(
                         nameof(Strings.CodeGen_Query_ConditionInvalid),
+                        "NullCustomer",
                         "CustomerId"
                     ),
-                ])
+                ]),
+                compile: true,
+                code:
+                [
+                    Text_NoTypeDeclaring("NullCustomerAsync"),
+                    Member(implementation, "GetByCustomerAsync"),
+                ]
+            ),
+            // ===== 条件の検証の失敗：生成全体を止めず、そのクエリだけ警告して飛ばす（未知の列・構文・未宣言のパラメータ・射影） =====
+            DialectRow(
+                "diag-query-condition-invalid-warns-and-skips-only-that-query",
+                "条件の検証に失敗したクエリ（削除した列の名前・構文エラー・未宣言のパラメータ・条件の壊れた射影）は、それぞれを名指しする警告でそのクエリだけ飛ばし、Error は出さず、ほかのクエリは生成されてコンパイルできる。飛ばした射影の DTO の型名 QtyRow は後の正当な射影 ValidRows が使える（型名を返さないと DTO 名の重複の Error で全体が止まる）。飛ばしたクエリが条件なしの全件取得へ化けないことは、メソッドが無いことで見る",
+                () =>
+                    Dialects_TypeCheckDiagram(order =>
+                        [
+                            Dialects_ListQuery("ByRemovedColumn", "Nope = 1", []),
+                            Dialects_ListQuery("BySyntaxError", "Qty = ", []),
+                            Dialects_ListQuery("ByUndeclaredParameter", "Qty = @missing", []),
+                            new QueryDefinition
+                            {
+                                Name = "BrokenRows",
+                                Returns = QueryReturnShape.Projection,
+                                ResultTypeName = "QtyRow",
+                                Condition = "Nope > 1",
+                                Fields =
+                                {
+                                    new ProjectionField
+                                    {
+                                        Name = "Qty",
+                                        SourceColumnId = order
+                                            .Columns.Single(column => column.Name == "Qty")
+                                            .Id,
+                                    },
+                                },
+                            },
+                            // 対照：正当なクエリは巻き添えにしない
+                            Dialects_ListQuery(
+                                "GetByQty",
+                                "Qty = @qty",
+                                [new QueryParameter { Name = "qty", Type = "int32" }]
+                            ),
+                            // 飛ばした射影の型名 QtyRow を後の正当な射影が使える（返さないと DTO 名の重複の Error で全体が止まる）
+                            new QueryDefinition
+                            {
+                                Name = "ValidRows",
+                                Returns = QueryReturnShape.Projection,
+                                ResultTypeName = "QtyRow",
+                                Fields =
+                                {
+                                    new ProjectionField
+                                    {
+                                        Name = "Qty",
+                                        SourceColumnId = order
+                                            .Columns.Single(column => column.Name == "Qty")
+                                            .Id,
+                                    },
+                                },
+                            },
+                        ]
+                    ),
+                Dialects_QueryRepositoryOnlyOptions(),
+                DiagnosticExpectation.Contains(
+                    ExpectedDiagnostic.WarningMentioning(
+                        nameof(Strings.CodeGen_Query_ConditionInvalid),
+                        "ByRemovedColumn",
+                        "Nope"
+                    ),
+                    ExpectedDiagnostic.WarningMentioning(
+                        nameof(Strings.CodeGen_Query_ConditionInvalid),
+                        "BySyntaxError"
+                    ),
+                    ExpectedDiagnostic.WarningMentioning(
+                        nameof(Strings.CodeGen_Query_ConditionInvalid),
+                        "ByUndeclaredParameter",
+                        "missing"
+                    ),
+                    ExpectedDiagnostic.WarningMentioning(
+                        nameof(Strings.CodeGen_Query_ConditionInvalid),
+                        "BrokenRows"
+                    )
+                ),
+                compile: true,
+                code:
+                [
+                    Text_NoTypeDeclaring("ByRemovedColumnAsync"),
+                    Text_NoTypeDeclaring("BySyntaxErrorAsync"),
+                    Text_NoTypeDeclaring("ByUndeclaredParameterAsync"),
+                    Text_NoTypeDeclaring("BrokenRowsAsync"),
+                    Member(implementation, "GetByQtyAsync"),
+                    Member(implementation, "ValidRowsAsync"),
+                ]
             ),
             DialectRow(
                 "compile-query-in-lift-variable-renamed-value-object",
