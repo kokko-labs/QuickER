@@ -82,6 +82,13 @@ public sealed class SyncPlanFuzzOracleTests
         "fk_c_p"
     );
 
+    /// <summary>主キーが一意制約 uq_p（code）を置き換えると計画が名指しした警告（製品の文の形＝「名前 (列, …)」）</summary>
+    private static readonly SyncPlanWarning ReplacedByPrimaryKey = new(
+        SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey,
+        "p",
+        "uq_p (code)"
+    );
+
     public static TheoryData<Case> Cases() =>
         new(
             // 規則 1：その制約の削除を選んだ制約は、消えていてよい
@@ -154,6 +161,72 @@ public sealed class SyncPlanFuzzOracleTests
                     UniquePresent = false,
                 },
                 [2],
+                []
+            ),
+            // 規則 2（主キーが置き換える一意制約）：計画の警告が名指しした一意制約は、同じ列集合の主キーが残っていれば消えてよい
+            new Case(
+                "rule2-unique-replaced-by-primary-key-in-new-form",
+                Live with
+                {
+                    PrimaryKey = ["code"],
+                },
+                [SchemaDiffKind.AlterPrimaryKey],
+                Live with
+                {
+                    PrimaryKey = ["code"],
+                    UniquePresent = false,
+                },
+                [],
+                [],
+                ReplacedByPrimaryKey
+            ),
+            // 主キーを付ける前（旧の主キーのまま）に失敗して、一意制約だけが消えた
+            new Case(
+                "rule2-unique-replaced-by-primary-key-lost-before-primary-key",
+                Live with
+                {
+                    PrimaryKey = ["code"],
+                },
+                [SchemaDiffKind.AlterPrimaryKey],
+                Live with
+                {
+                    UniquePresent = false,
+                },
+                [2],
+                [],
+                ReplacedByPrimaryKey
+            ),
+            // 列集合の違う主キーは、置き換えた形とみなさない
+            new Case(
+                "rule2-unique-replaced-by-primary-key-on-other-columns",
+                Live with
+                {
+                    PrimaryKey = ["id", "code"],
+                },
+                [SchemaDiffKind.AlterPrimaryKey],
+                Live with
+                {
+                    PrimaryKey = ["id", "code"],
+                    UniquePresent = false,
+                },
+                [2],
+                [],
+                ReplacedByPrimaryKey
+            ),
+            // 警告が名指ししていない一意制約は、同じ列集合の主キーが残っていても消えてはいけない（規則 5）
+            new Case(
+                "rule5-unique-without-replacement-warning-lost",
+                Live with
+                {
+                    PrimaryKey = ["code"],
+                },
+                [SchemaDiffKind.AlterPrimaryKey],
+                Live with
+                {
+                    PrimaryKey = ["code"],
+                    UniquePresent = false,
+                },
+                [5],
                 []
             ),
             // 規則 3：主キーの変更を選んだ表の主キーは、旧か新の形で残る（主キーを外す変更なら、無いのも新の形）

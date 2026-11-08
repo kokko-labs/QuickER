@@ -344,9 +344,16 @@
   - 判定は構成列を変える選択があるときだけ。型の比較は `SyncDialectCapabilities.AreForeignKeyCompatibleTypes`（`AreSameType` に加え、`ForeignKeyAllowsStringLengthDifference` の方言では同じ文字列型の長さだけの違いを許す＝`SyncDialectCapabilities.DiffersOnlyInStringLength`。Oracle の単位語 CHAR／BYTE は両端で同じこと）。
   - 主キーの変更で付け直す外部キーも、構成列の型を変えて両端が食い違うなら外さずに名指しする。
   - SQL Server（長さも一致が要る）の DDL は長さだけ違う外部キーの前に注記を出す（`ForeignKeyStatementNotes`）。
+  - 「この同期で型が決まる列」は `SyncPlanner.CollectTypeDecidingColumns` の 1 か所が決める（live に無い列か、live の型と `AreSameType` で同じでない型へ変える列の変更）。NULL 許容だけの列の変更は型を決めない。外部キーの型の照合（`HasPostSyncTypeMismatch`・`ExcludeForeignKeysWithPostSyncTypeMismatch` の `decidedBySync`・前寄せの型の判定）はどれもこの関数を通し、構成列のどれの型も決まらない外部キーは食い違わないとみなす（DB が今の両端の型のまま受け入れている）。
+    - 数えると、DB が受け入れている型の違う外部キー（PostgreSQL の integer → bigint など）を NULL 許容の変更だけで「付け直せない」と名指しして外し直さず、その外部キーに阻まれる主キーの解除が必ず失敗した（PostgreSQL 2BP01・Oracle ORA-02273）。3 か所がそれぞれ列の変更の新しい型を辞書へ写していたので、誤りも 3 か所に写っていた。
+    - ガード：形の行（`SyncPlanShapeRows` の因子 `ForeignKeyTypes`=Wider × `TypeChange`=ChildNullability と必ず含む行 L4）・静的な規則 W1（`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`「静的な規則」）・`SourceRuleTests`（規則 `sync-type-deciding-column-copies`＝差分の項目の列の新しい型を直接読む箇所をメソッドで数え、理由つきの一覧と照合する）。
+- 選んだ外部キーの追加・作り直しを警告で名指しする名前は、スクリプトが付ける名前（`SyncPlanner.SelectedForeignKeyName`＝`SyncScriptBuilderHelper.ForeignKeyNameToAdd`）の 1 か所で作る（型の食い違いの除外・`ForeignKeyNotOnCandidateKey`・SET NULL の除外・SET DEFAULT の 4 つの警告）。
+  - リレーションの名前から規約名を作り直すと、名前の無い同じ組の 2 本目が 1 本目と同じ `FK_{子}_{親}` になり、警告が DB にある無関係な外部キーを名指しした。
+  - ガード：期待の行 `plan-warning-names-added-fk-type-mismatch`・`plan-warning-names-added-fk-not-on-candidate-key`・`plan-warning-names-added-fk-set-null`・`plan-warning-names-added-fk-set-default`・`SourceRuleTests`（規則 `sync-selected-foreign-key-names`＝差分の項目のリレーションから `ResolveForeignKeyName` で名前を作り直す呼び出しを、理由つきの一覧と照合する）。
 - 食い違う外部キーが 1 本でもあれば、ほかの外部キーも 1 本も外し直さない（`doomedColumns`）。列の変更の段で必ず失敗し、付け直しはその後にしか来ないので、外すと暗黙コミットの方言で消えたまま残る。同じ列の外部キーだけを残すのでは足りない。
 - DDL が暗黙コミットされる方言（`TransactionalDdl` が偽）では、計画が残す外部キーに阻まれて必ず断られる文のうち計画の順で最初の 1 文を、計画の先頭の独立したセクションへ移す（`SyncPlanner.MoveCertainFailureFirst`＝何も変えずに失敗させる。主キーの変更は Drop の段だけを移す）。トランザクションの方言は並びを変えない。
-  - 対象は、旧主キーに支えられた外部キーが残る主キーの解除・残す外部キーの両端の型を食い違わせる列の型の変更・`SetNullRequiresNullableChildColumn` の方言で残す SET NULL の外部キーの子の列の NOT NULL 化。
+  - 対象は、旧主キーに支えられた外部キーが残る主キーの解除・残す外部キーが同じ列の集合で参照する一意制約の削除（同じ列の集合を持つほかのキー＝live の主キー・ほかの一意制約が無いとき。主キーが置き換える一意制約の暗黙の削除を含む）・残す外部キーの両端の型を食い違わせる列の型の変更・`SetNullRequiresNullableChildColumn` の方言で残す SET NULL の外部キーの子の列の NOT NULL 化。
+  - 一意制約の削除を対象に入れていなかったため、Oracle で外部キー 2 本が参照する一意制約の列へ主キーを付け替え、片方の子の列の型を変える同期が、兄弟の外部キーを外した後に ORA-02273 で断られ、兄弟の外部キーが消えたまま残った。ガード：形の行の必ず含む行 L1（`SyncPlanShapeRows` の `PkChange`=MoveToUniqueColumn × `ReferencedKey`=Unique × 参照 2 本 × 子だけの型の変更。網の静的な規則の D9 と実 DB の表明 1b）。
 - 子表・親表・構成列が同じ計画で削除される外部キーは、外すだけで付け直さない。この「外すだけ」は端が消える live の外部キーすべてに掛ける（`SyncPlanner.InjectVanishingForeignKeyDrops`＝計画の入口で暗黙の DropForeignKey を足す）。
   - 外部キーの削除は既定で未選択なので、足さないと逐次 DDL では参照されている表・列の削除が拒否され、SQLite では存在しない表・列を指す外部キーが残る。
 - `ForeignKeyRequiresLeadingIndex` の方言では、削除する一意制約の索引の先頭に子列が乗る外部キーも外して付け直す（`CollectLostIndexes`）。
@@ -436,7 +443,7 @@
 - 主キーと同じ列集合の一意制約を持てない方言（`SupportsUniqueConstraintOnPrimaryKey` が false）では、図の主キーと同じ列集合の一意制約を差分の比較から外す（主キーが一意性を保証する。図側の署名には残すので DB 側の同じ列集合の一意制約の削除も出さない）。
   - DDL と同期の `CREATE TABLE` はその一意制約を省いて注記する（`UniqueConstraintOnPrimaryKeyNote.Split`＝扱いの表のマスで判定。`TableConstraintLineBuilder`・SQLite の DDL・SQLite の同期の表の本体の 3 か所が通る）。注記の行は `TableConstraintLines.Notes` として制約行の直前に置き、末尾カンマの判定には数えない。
   - 選んでいない主キーの変更で live の主キーが残る形はプランナーが外して名指しする。
-  - DB にある一意制約と同じ列へ主キーを付け替える同期は、その一意制約を暗黙に外して `SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey` で名指しする（`SyncPlanner.InjectUniqueConstraintsReplacedByPrimaryKey`＝持てない逐次 DDL の方言だけ・付け直さない）。その一意制約を参照する外部キーは主キーの変更の外し直しが新しい主キーへ付け直す。
+  - DB にある一意制約と同じ列へ主キーを付け替える同期は、その一意制約を暗黙に外して `SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey` で名指しする（`SyncPlanner.InjectUniqueConstraintsReplacedByPrimaryKey`＝持てない逐次 DDL の方言だけ・付け直さない）。その一意制約を参照する外部キーは主キーの変更の外し直しが新しい主キーへ付け直す。型の食い違いで残す外部キーがその一意制約を参照するなら、一意制約の削除が必ず断られるので計画の先頭へ移す（「外部キーの暗黙の外し直し」）。
 - 固定は期待の行 `diff-computed-column-*`・`diff-live-only-computed-column-*`・`diff-non-computed-column-nullability-is-alter-column`・`diff-uq-on-primary-key-*`・`plan-dependency-unique-on-staying-pk-*`・`DialectDdlTableTests`（行 `ddl-unique-on-primary-key-columns-omitted-where-unsupported`・`sync-add-table-unique-on-primary-key-columns-omitted-where-unsupported`・`sync-rebuild-unique-that-becomes-primary-key-omitted`）・`OracleDdlRoundTripIntegrationTests.UniqueConstraintOnPrimaryKey_IsOmittedAndApplies`・実 DB の行（PG・MySQL の計算列）・`SchemaSyncWarningTextTests`。mutation 実証済み。
 
 ### 列の変更が保つ属性

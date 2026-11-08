@@ -338,6 +338,14 @@ internal static class SyncPlanFuzzRunner
             capabilities
         );
 
+        // 静的な規則のうち DB に依らない警告の正しさ（W1）の違反は、実 DB の結果にも加える（DB の断る文の並びの違反は実 DB の
+        // 表明 1・1b が見るので加えない）
+        outcome.Violations.AddRange(
+            staticVerdict.Violations.Where(v =>
+                v.StartsWith(SyncPlanStaticRules.W1Prefix, StringComparison.Ordinal)
+            )
+        );
+
         var result = await provider
             .SyncExecutor.ExecuteAsync(dialect.Settings, outcome.Script, ct)
             .ConfigureAwait(false);
@@ -712,7 +720,9 @@ internal static class SyncPlanFuzzRunner
     /// <para>制約ごとの規則（番号は違反の文に書く）：</para>
     /// <list type="number">
     ///   <item>その制約の削除（DropForeignKey・DropUniqueConstraint）を選んだ制約は、消えていてよい。</item>
-    ///   <item>作り直し（AlterForeignKey・AlterUniqueConstraint）を選んだ制約は、旧か新の形のどちらかで残っている。</item>
+    ///   <item>作り直し（AlterForeignKey・AlterUniqueConstraint）を選んだ制約は、旧か新の形のどちらかで残っている。主キーが置き換える一意制約（計画の警告
+    ///   <see cref="SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey"/> が名指しした表・列集合）も作り直しとみなし、新しい形＝同じ列集合の
+    ///   主キーが残っていればよい（警告の無い一意制約・列集合の違う主キーは数えない）。</item>
     ///   <item>主キーの変更を選んだ表の主キーは、旧か新の形のどちらかで残っている（目標が主キーなしなら、無いのも新の形）。</item>
     ///   <item>表・列の削除（DropTable・DropColumn）でしか消えてよい理由の無い制約は、その表・列が失敗の後の DB から
     ///   実際に消えているときだけ、消えていてよい。</item>
@@ -771,6 +781,24 @@ internal static class SyncPlanFuzzRunner
             .ToHashSet(StringComparer.Ordinal);
         var succeededSql = result.Batches.TakeWhile(b => b.Success).Select(b => b.Sql).ToList();
 
+        // 主キーが置き換えると計画が名指しした一意制約（警告 UniqueConstraintReplacedByPrimaryKey の表と「名前 (列, …)」の列集合）
+        var replacedUniques = plan
+            .Warnings.Where(w => w.Kind == SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey)
+            .Select(w =>
+            {
+                var open = w.Detail.LastIndexOf('(');
+                var columns = w.Detail[(open + 1)..]
+                    .TrimEnd(')')
+                    .Split(
+                        ',',
+                        StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries
+                    )
+                    .Select(c => c.ToLowerInvariant())
+                    .Order(StringComparer.Ordinal);
+                return $"UQ|{w.TableName.Trim().ToLowerInvariant()}|{string.Join(",", columns)}";
+            })
+            .ToHashSet(StringComparer.Ordinal);
+
         foreach (var key in ConstraintKeys(before, capabilities))
         {
             // 残っていれば、どの規則でも違反にならない（同じキーの 2 本は 1 本ずつ消費する）
@@ -780,9 +808,22 @@ internal static class SyncPlanFuzzRunner
             }
 
             var rule = RuleFor(key, selected, capabilities, out var newForm);
+
+            // 主キーが置き換える一意制約（計画の警告が名指しした表・列集合）は、作り直しと同じく新しい形＝同じ列集合の主キーで
+            // 残っていればよい（規則 2）
+            var replacedByPrimaryKey = rule == 5 && replacedUniques.Contains(key);
+
+            if (replacedByPrimaryKey)
+            {
+                rule = 2;
+            }
+
             var allowed = rule switch
             {
                 1 => true,
+                2 when replacedByPrimaryKey => remainingSet.Any(k =>
+                    IsPrimaryKeyOnSameColumns(k, key)
+                ),
                 2 => newForm is not null && remainingSet.Contains(newForm),
                 3 => newForm is not null
                     ? remainingSet.Contains(newForm)
@@ -837,6 +878,16 @@ internal static class SyncPlanFuzzRunner
             var parts = key.Split('|');
             return parts[0] == "FK" && warnedForeignKeys.Contains($"{parts[1]}|{parts[4]}");
         }
+    }
+
+    /// <summary>主キーのキー（PK|表|列の並び）が、一意制約のキー（UQ|表|並べ替えた列）と同じ表・同じ列集合か</summary>
+    private static bool IsPrimaryKeyOnSameColumns(string primaryKey, string uniqueKey)
+    {
+        var pk = primaryKey.Split('|');
+        var uq = uniqueKey.Split('|');
+        return pk[0] == "PK"
+            && pk[1] == uq[1]
+            && string.Join(",", pk[2].Split(',').Order(StringComparer.Ordinal)) == uq[2];
     }
 
     /// <summary>主キーのキー（PK|表|列）の、表までの頭</summary>

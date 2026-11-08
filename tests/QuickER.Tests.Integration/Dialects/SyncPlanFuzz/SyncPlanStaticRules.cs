@@ -55,6 +55,12 @@ internal sealed record SyncPlanStaticVerdict(
 /// （実 DB の表明 1 と同じ粒度）。
 /// </para>
 /// <para>
+/// 警告の正しさの規則 W1（<see cref="SpuriousTypeMismatchWarnings"/>）は、予言の有無に依らず掛ける：
+/// <see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/> が DB にある外部キーを名指しするなら、計画がその外部キーの構成列の
+/// どれかの型を変える。予告の警告があれば合格にする上の判定は、警告そのものが正しいかを見ないので、偽の警告が「予言された失敗」として
+/// 通っていた（P5-2 の試運転の L4）。
+/// </para>
+/// <para>
 /// 状態の初期値は渡された DB 側の図（実 DB なら取込の結果、能力の網なら生成器が作った図）。名前の無い制約は DDL と同じ実効名
 /// （<see cref="ConstraintNames"/>・<see cref="UniqueConstraintNaming"/>）で置く。再構築の方言（SQLite）は計画が文の並びを持たないので、
 /// 何も判定しない。
@@ -99,6 +105,14 @@ internal static class SyncPlanStaticRules
             return SyncPlanStaticVerdict.None;
         }
 
+        // W1（警告の正しさ）は、DB が断る文の予言の有無に依らず掛ける
+        var warningViolations = SpuriousTypeMismatchWarnings(
+                liveEntities,
+                liveRelationships,
+                plan,
+                capabilities
+            )
+            .ToList();
         var steps = plan
             .Sections.SelectMany(section => section.Items.Select(item => new Step(section, item)))
             .ToList();
@@ -122,11 +136,13 @@ internal static class SyncPlanStaticRules
 
         if (reason is null)
         {
-            return SyncPlanStaticVerdict.None;
+            return warningViolations.Count == 0
+                ? SyncPlanStaticVerdict.None
+                : new SyncPlanStaticVerdict(null, warningViolations);
         }
 
         var predicted = $"{steps[doomedAt].Describe()}: {reason}";
-        var violations = new List<string>();
+        var violations = new List<string>(warningViolations);
         var warned = plan.Warnings.Any(w => !NonPredictingWarnings.Contains(w.Kind));
 
         if (!warned)
@@ -142,6 +158,91 @@ internal static class SyncPlanStaticRules
         }
 
         return new SyncPlanStaticVerdict(predicted, violations);
+    }
+
+    /// <summary>W1 の違反の文の頭（実 DB の総当たりも、DB に依らないこの規則の違反だけを結果へ加える）</summary>
+    public const string W1Prefix = "static W1:";
+
+    /// <summary>
+    /// W1：<see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/> が DB にある外部キーを名指しするなら、計画がその外部キーの
+    /// 構成列のどれかの型を変える（<see cref="SyncDialectCapabilities.AreSameType"/> で比べる）
+    /// </summary>
+    /// <remarks>
+    /// DB は今その外部キーを両端の型のまま受け入れているので、計画が構成列の型を変えないなら、外して付け直しても同じ組の型で通る。
+    /// それを「同期後に両端の型が食い違う（付け直せない）」と名指しするのは偽の警告で、計画は外部キーを外し直さずに残し、その
+    /// 外部キーに阻まれる文（主キーの解除など）で失敗する。方言の互換の宣言（<see cref="SyncDialectCapabilities.AreForeignKeyCompatibleTypes"/>）
+    /// に依らない表明。DB に無い外部キー（図で足す外部キー）は判定しない。
+    /// </remarks>
+    private static IEnumerable<string> SpuriousTypeMismatchWarnings(
+        IReadOnlyList<Entity> liveEntities,
+        IReadOnlyList<Relationship> liveRelationships,
+        SyncPlan plan,
+        SyncDialectCapabilities capabilities
+    )
+    {
+        var warnings = plan
+            .Warnings.Where(w => w.Kind == SyncPlanWarningKind.ForeignKeyColumnTypeMismatch)
+            .ToList();
+
+        if (warnings.Count == 0)
+        {
+            yield break;
+        }
+
+        var names = ConstraintNames.ResolveForeignKeyNames(
+            liveEntities,
+            liveRelationships,
+            capabilities.IdentifierLengthLimit
+        );
+
+        // 計画が書く列の型（列の変更の項目の新しい型）
+        var alteredTypes = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (
+            var item in plan
+                .Sections.Where(s => s.Kind == SchemaDiffKind.AlterColumn)
+                .SelectMany(s => s.Items)
+                .Where(i => i.ColumnName is not null && i.Column is not null)
+        )
+        {
+            alteredTypes[ColumnKey(Lower(item.TableName), item.ColumnName!)] =
+                item.Column!.DataType;
+        }
+
+        foreach (var warning in warnings)
+        {
+            foreach (var relationship in liveRelationships)
+            {
+                var parent = liveEntities.FirstOrDefault(e => e.Id == relationship.SourceEntityId);
+                var child = liveEntities.FirstOrDefault(e => e.Id == relationship.TargetEntityId);
+
+                if (
+                    parent is null
+                    || child is null
+                    || Lower(child.TableName) != Lower(warning.TableName)
+                    || Lower(names[relationship]) != Lower(warning.Detail)
+                    || ForeignKeyColumnPairResolver.Resolve(relationship, parent, child)
+                        is not { } pairs
+                )
+                {
+                    continue;
+                }
+
+                if (
+                    !pairs.Any(p =>
+                        TypeChanges(child, p.ChildColumn) || TypeChanges(parent, p.ParentColumn)
+                    )
+                )
+                {
+                    yield return $"{W1Prefix} {warning.Kind}({warning.TableName}: {warning.Detail}) names a foreign key whose column types the plan does not change";
+                }
+            }
+        }
+
+        bool TypeChanges(Entity entity, string column) =>
+            alteredTypes.TryGetValue(ColumnKey(Lower(entity.TableName), column), out var altered)
+            && entity.Columns.FirstOrDefault(c => Lower(c.Name) == Lower(column)) is { } live
+            && !capabilities.AreSameType(live.DataType, altered);
     }
 
     /// <summary>

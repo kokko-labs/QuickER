@@ -87,7 +87,114 @@ internal static partial class SyncPlanExpectationRows
                     e.Diff.Absent("AddForeignKey *", "DropForeignKey *", "AlterForeignKey *")
                 ),
             .. LongDefaultForeignKeyNameRows(),
+            .. AddedSecondForeignKeyWarningRows(),
         ];
+
+    /// <summary>
+    /// 計画の期待の行（名前の無い同じ組の 2 本目の外部キーを図で足し、計画が警告する形：警告は足す外部キーの名前＝スクリプトが使う名前
+    /// <see cref="UnnamedShipName"/> を名指しする。DB にある 1 本目の名前 <see cref="UnnamedBillName"/> を名指ししない）
+    /// </summary>
+    /// <remarks>
+    /// 警告が名前を規約名（FK_{子}_{親}）から作り直すと、2 本目は 1 本目と同じ名前になり、DB にある無関係な外部キーを名指しした
+    /// （P5-2 の試運転の後に静的な規則 W1 が見つけた。型の食い違い・候補キーでない参照・SET NULL・SET DEFAULT の 4 つの警告）
+    /// </remarks>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > AddedSecondForeignKeyWarningRows() =>
+        [
+            Row(
+                    "plan-warning-names-added-fk-type-mismatch",
+                    "型の食い違いで外す名前の無い 2 本目の外部キーの追加は、足す外部キーの名前で名指しする（名前を保存する 4 方言）",
+                    PersistedForeignKeyNameDialects
+                )
+                .Live(s => AddedSecondForeignKeySchema(s, UnnamedBillName, "int", null))
+                .Target(s => AddedSecondForeignKeySchema(s, null, "bigint", ship => { }))
+                .Select(SelectAll)
+                .Expect(e =>
+                    e.Warnings.Single($"ForeignKeyColumnTypeMismatch(orders): {UnnamedShipName}")
+                        .Excluded.Single("AddForeignKey *")
+                ),
+            Row(
+                    "plan-warning-names-added-fk-not-on-candidate-key",
+                    "候補キーでない列を参照する名前の無い 2 本目の外部キーの追加は、足す外部キーの名前で名指しする（名前を保存する 4 方言）",
+                    PersistedForeignKeyNameDialects
+                )
+                .Live(s => AddedSecondForeignKeySchema(s, UnnamedBillName, "int", null))
+                .Target(s =>
+                    AddedSecondForeignKeySchema(s, null, "int", ship => { }, parentColumn: "code")
+                )
+                .Select(SelectAll)
+                .Expect(e =>
+                    e.Warnings.Single($"ForeignKeyNotOnCandidateKey(orders): {UnnamedShipName}")
+                ),
+            Row(
+                    "plan-warning-names-added-fk-set-null",
+                    "NOT NULL の子の列への SET NULL の名前の無い 2 本目の外部キーの追加は、足す外部キーの名前で名指しする（名前を保存する 4 方言）",
+                    PersistedForeignKeyNameDialects
+                )
+                .Live(s => AddedSecondForeignKeySchema(s, UnnamedBillName, "int", null))
+                .Target(s =>
+                    AddedSecondForeignKeySchema(
+                        s,
+                        null,
+                        "int",
+                        ship => ship.OnDelete = ForeignKeyReferentialAction.SetNull
+                    )
+                )
+                .Select(SelectAll)
+                .Expect(e =>
+                    e.Warnings.Single(
+                        $"SetNullOnNotNullColumn(orders): {UnnamedShipName} (ship_customer_id)"
+                    )
+                ),
+            Row(
+                    "plan-warning-names-added-fk-set-default",
+                    "NOT NULL の子の列への SET DEFAULT の名前の無い 2 本目の外部キーの追加は、足す外部キーの名前で名指しする（SQL Server）",
+                    DialectNames.SqlServer
+                )
+                .Live(s => AddedSecondForeignKeySchema(s, UnnamedBillName, "int", null))
+                .Target(s =>
+                    AddedSecondForeignKeySchema(
+                        s,
+                        null,
+                        "int",
+                        ship => ship.OnDelete = ForeignKeyReferentialAction.SetDefault
+                    )
+                )
+                .Select(SelectAll)
+                .Expect(e =>
+                    e.Warnings.Single(
+                        $"SetDefaultOnNotNullColumn(orders): {UnnamedShipName} (ship_customer_id)"
+                    )
+                ),
+        ];
+
+    /// <summary>
+    /// 1 本目（bill）の外部キーを持ち、2 本目（ship）の外部キーを <paramref name="ship"/> があれば張る図（親の列は既定で主キー
+    /// <c>id</c>。<paramref name="parentColumn"/> で候補キーでない列 <c>code</c> を参照させる）
+    /// </summary>
+    private static void AddedSecondForeignKeySchema(
+        S s,
+        string? billName,
+        string shipType,
+        System.Action<Relationship>? ship,
+        string parentColumn = "id"
+    )
+    {
+        s.Table("customers", S.Pk("id", "int"), S.NotNull("code", "int"));
+        s.Table(
+            "orders",
+            S.Pk("id", "int"),
+            S.NotNull("bill_customer_id", "int"),
+            S.NotNull("ship_customer_id", shipType)
+        );
+        s.Fk("customers", "orders", billName, ("id", "bill_customer_id"));
+
+        if (ship is not null)
+        {
+            ship(s.Fk("customers", "orders", null, (parentColumn, "ship_customer_id")));
+        }
+    }
 
     /// <summary>方言の上限（行の能力の宣言）</summary>
     private static IdentifierLengthLimit LimitOf(string capability) =>
