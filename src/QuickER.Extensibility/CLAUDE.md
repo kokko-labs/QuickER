@@ -37,6 +37,7 @@
 - `QueryConditionRenameFollower` が列リネーム時の DSL 条件を追従させる。Initialize で購読し、条件を実際に書き換えたときだけ `ReplaceQueries` を呼ぶ。購読者はこのフォロワーだけ。
 - 列名の Undo / Redo でも `ColumnRenamed` が戻る・進む向きで発火し、条件が列名と一緒に戻る（`DiagramChangeTracker.CreateAfterPropertyApplyAction`。向きは適用後の現在の名前で決める）。クエリ自体は Undo 履歴の外のまま。
 - 新名が条件式で読めない名前（空白・記号・数字始まり・キーワード）なら書き換えない（`QueryConditionParser.IsReadableColumnName`）。差し込むと構文エラーになり、元に戻しても直らない。
+- 条件の中の列名の読み方は、列の削除でクエリを名指しする判定と共有する（`QueryColumnReferences.FindInCondition`。`src/QuickER.CodeGen.CSharp/Queries/CLAUDE.md`「列の削除とクエリの参照」）。列の削除はクエリを書き換えず知らせるだけで、追従と違いホスト（GUI・MCP）側にあるのでモジュールを抜いた構成でも止まらない。
 - ガード：`MainViewModelErDiagramHostTests` の Undo / Redo の 1 件・`QueryConditionRenameFollowerTests`・`QueryConditionRenamerTests`。
 - モジュールを抜いた構成では列リネームのクエリ条件追従も止まる。生成前の Guid 参照検証・DSL パースが壊れを警告するので許容する。
 

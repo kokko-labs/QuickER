@@ -229,6 +229,9 @@ public class QueryDefinitionDialogViewModelTests
         query.ConditionDiagnostics.Should().NotBeEmpty();
         vm.OkCommand.CanExecute(null).Should().BeFalse();
 
+        // 状態の文はどのクエリの条件かを名指しする（条件の診断は選んでいるクエリのパネルにしか出ないため）
+        vm.StatusMessage.Should().Contain("GetByCustomer");
+
         // 正しい列へ修正 → 診断が消えて有効・OK 可
         query.Condition = "CustomerId = @customerId";
         query.IsConditionValid.Should().BeTrue();

@@ -62,6 +62,7 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **GitHub Copilot no longer loses the conversation when the runtime returns an ordinary error** — only a lost connection ends the conversation, and then the message says the connection was lost and the next message starts a new conversation
 - **With an API key, a response cut off at the output limit no longer runs its unfinished tool call, and a response that ends without any text or tool call now says why** — the tool call ran with incomplete arguments, and the empty response looked like a success
 - **With an API key, Claude's output limit is now the model's own limit, up to 64,000 tokens, instead of 8,192** — Claude 5 models think before they answer and the thinking counts toward the limit, so a long answer such as a mock project page could stop before any text. If the model's limit cannot be read, 8,192 is used as before
+- **`remove_column` now names the named queries that still refer to the removed column, in MCP and in the built-in chat** — the response lists each query with what refers to the column (a parameter, the sort order, a projection field or the simple DSL condition) and points to `set_query` and `remove_query`. The queries are not rewritten. Before, the response did not mention them, and the broken references surfaced only later, in the query definition dialog or in code generation
 
 #### AI chat & mock generation
 
@@ -135,6 +136,7 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 #### Code generation dialog
 
 - **With layered output, the server layer folder box no longer appears when the HTTP implementation check is hidden** — choosing no DB access hides the remote options, and the generated files already left the remote services out, but the box stayed on screen while the hidden check was still on
+- **Removing a column that a named query refers to now names the query in the status bar, and the query definition dialog names the query whose condition has errors** — removing a column, or undoing the addition of one, left the queries referring to a column that no longer exists without a word, and the dialog then refused OK for every query until they were fixed; for a condition it said only to fix the condition errors, without saying which query. The queries are not rewritten, so undoing the removal brings the references back
 
 #### Bidirectional sync
 

@@ -42,22 +42,15 @@ public static class QueryConditionRenamer
             return conditionText;
         }
 
-        var parsed = QueryConditionParser.Parse(conditionText);
-
-        // 構文エラーの条件は列参照の位置が信用できないため、書き換えず原文を返す
-        if (parsed.Root is null)
+        // 旧名に一致する列参照だけを対象にする（読み方は列の削除の名指しと共有＝QueryColumnReferences.FindInCondition）。
+        // 構文エラーの条件は列参照の位置が信用できないため（null）、書き換えず原文を返す
+        if (QueryColumnReferences.FindInCondition(conditionText, oldColumnName) is not { } found)
         {
             return conditionText;
         }
 
-        // 旧名に一致する列参照だけを対象にする（大文字小文字は区別しない）
-        var targets = parsed
-            .ColumnReferences.Where(reference =>
-                string.Equals(reference.Text, oldColumnName, StringComparison.OrdinalIgnoreCase)
-            )
-            // 後ろのスパンから置換して、前方の Position がずれないようにする
-            .OrderByDescending(reference => reference.Position)
-            .ToList();
+        // 後ろのスパンから置換して、前方の Position がずれないようにする
+        var targets = found.OrderByDescending(reference => reference.Position).ToList();
 
         if (targets.Count == 0)
         {

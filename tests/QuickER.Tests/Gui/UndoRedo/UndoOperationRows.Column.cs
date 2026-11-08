@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using QuickER.Documents;
 using QuickER.Model;
 using QuickER.UndoRedo;
 using QuickER.ViewModels;
@@ -289,5 +290,322 @@ internal static partial class UndoOperationRows
                     vm.SelectedEntity.Columns[1].IsNullable.Should().BeFalse();
                 }
             );
+
+        // 列が外れても名前付きクエリは書き換えず、外れた列を参照するクエリをステータスバーで名指しする
+        // （削除・列の追加の Undo のどちらの経路でも。参照は書き換えないので、列が戻れば参照も生き返る）
+
+        yield return Row(
+                "column-remove-referenced-by-query-warns-and-undo-revives-references",
+                "列を削除すると、その列を参照するクエリをステータスバーで名指しし、クエリは書き換えず、Undo で参照が生き返る"
+            )
+            .Diagram(QueryReferencesDiagram)
+            .Prepare("Order を選ぶ", vm => vm.SelectedEntity = TableNamed(vm, "Order"))
+            .Operate(
+                UndoEntry.Screen,
+                "RemoveColumnCommand（Order.CustomerId）",
+                vm => vm.RemoveColumnCommand.Execute(SelectedColumnNamed(vm, "CustomerId"))
+            )
+            .Commands(typeof(RemoveColumnCommand))
+            .Check(
+                UndoStage.Operated,
+                "ステータスが参照するクエリ 4 本と列を名指しし、参照しないクエリは名指ししない",
+                vm =>
+                {
+                    vm.StatusMessage.Should()
+                        .ContainAll(
+                            "CustomerId",
+                            "ByCustomerParameter",
+                            "ByCustomerSort",
+                            "CustomerProjection",
+                            "ByCustomerCondition"
+                        );
+                    vm.StatusMessage.Should().NotContainAny("ByOrderId", "CustomerById");
+                }
+            )
+            .Check(
+                UndoStage.Undone,
+                "クエリの列の参照がすべて Order の列へ解決する",
+                vm =>
+                {
+                    var columnIds = TableNamed(vm, "Order")
+                        .Columns.Select(column => column.Id)
+                        .ToHashSet();
+                    vm.Queries.SelectMany(QueryColumnIds)
+                        .Should()
+                        .OnlyContain(id => columnIds.Contains(id));
+                }
+            );
+
+        yield return Row(
+                "column-add-undo-referenced-by-query-warns",
+                "列の追加を Undo して列が外れると、その列を参照するクエリをステータスバーで名指しする"
+            )
+            .Diagram(MemoQueryDiagram)
+            .Operate(
+                UndoEntry.Screen,
+                "UndoRedo.Execute(AddColumnCommand(Order, Id を決めた列 Memo))（クエリが先に Memo を参照している）",
+                vm =>
+                    vm.UndoRedo.Execute(
+                        new AddColumnCommand(
+                            TableNamed(vm, "Order").Columns,
+                            new ColumnViewModel(
+                                new Column
+                                {
+                                    Id = MemoColumnId,
+                                    Name = "Memo",
+                                    DataType = "nvarchar(50)",
+                                    IsNullable = true,
+                                }
+                            )
+                        )
+                    )
+            )
+            .Commands(typeof(AddColumnCommand))
+            .Check(
+                UndoStage.Operated,
+                "列を足しただけではクエリを名指ししない",
+                vm => vm.StatusMessage.Should().NotContainAny("ByMemoParameter", "ByMemoCondition")
+            )
+            .Check(
+                UndoStage.Undone,
+                "Undo で列が外れると、参照するクエリ 2 本を名指しする",
+                vm =>
+                    vm.StatusMessage.Should()
+                        .ContainAll("Memo", "ByMemoParameter", "ByMemoCondition")
+            );
+
+        yield return Row(
+                "column-remove-not-referenced-does-not-warn",
+                "参照の切れたクエリを持つ図へ一括置換しても、どのクエリも参照しない列を削除しても、ステータスを変えない"
+            )
+            .Diagram(QueryReferencesDiagram)
+            .Prepare(
+                "ステータスを控え、Order.CustomerId の無い（4 本の参照が切れた）図に前から切れているクエリ Stale を足して一括置換し、Order を選ぶ",
+                vm =>
+                {
+                    Remember(vm, "status", vm.StatusMessage);
+                    var model = vm.ToDiagramModel();
+                    var order = model.Entities.Single(entity => entity.TableName == "Order");
+                    order.Columns.RemoveAll(column => column.Name == "CustomerId");
+                    model.Queries.Add(
+                        new QueryDefinition
+                        {
+                            EntityId = order.Id,
+                            Name = "Stale",
+                            Condition = "Missing = 1",
+                            OrderBy = { new QueryOrdering { ColumnId = Guid.NewGuid() } },
+                        }
+                    );
+                    vm.ReplaceDiagramFromModule(model);
+                    vm.SelectedEntity = TableNamed(vm, "Order");
+                }
+            )
+            .Operate(
+                UndoEntry.Screen,
+                "RemoveColumnCommand（Order.Note）",
+                vm => vm.RemoveColumnCommand.Execute(SelectedColumnNamed(vm, "Note"))
+            )
+            .Commands(typeof(RemoveColumnCommand))
+            .Check(
+                UndoStage.Operated,
+                "ステータスは一括置換の前のまま",
+                vm => vm.StatusMessage.Should().Be(Recall<string>(vm, "status"))
+            );
+
+        yield return Row(
+                "column-query-references-table-removal-does-not-warn",
+                "列を参照するクエリを持つテーブルを削除しても（Undo / Redo も）、ステータスを変えない"
+            )
+            .Diagram(QueryReferencesDiagram)
+            .Prepare(
+                "Order を選び、ステータスを控える",
+                vm =>
+                {
+                    vm.SelectedEntity = TableNamed(vm, "Order");
+                    Remember(vm, "status", vm.StatusMessage);
+                }
+            )
+            .Operate(
+                UndoEntry.Screen,
+                "RemoveSelectedEntityCommand（Order。クエリはテーブルと一緒に取り除かれる）",
+                vm => vm.RemoveSelectedEntityCommand.Execute(null)
+            )
+            .Commands(typeof(RemoveEntityCommand))
+            .Check(
+                UndoStage.Operated,
+                "ステータスは操作の前のまま",
+                vm => vm.StatusMessage.Should().Be(Recall<string>(vm, "status"))
+            )
+            .Check(
+                UndoStage.Undone,
+                "ステータスは操作の前のまま",
+                vm => vm.StatusMessage.Should().Be(Recall<string>(vm, "status"))
+            )
+            .Check(
+                UndoStage.Redone,
+                "ステータスは操作の前のまま",
+                vm => vm.StatusMessage.Should().Be(Recall<string>(vm, "status"))
+            );
     }
+
+    /// <summary>
+    /// Order(OrderId PK, CustomerId, Note) と Customer(CustomerId PK) に、Order.CustomerId を 4 種
+    /// （パラメータ・並び順・射影フィールド・条件）で参照するクエリと、参照しないクエリ 2 本（Order の OrderId だけ・
+    /// Customer の同じ名前の列）を置いた図
+    /// </summary>
+    private static MainViewModel QueryReferencesDiagram()
+    {
+        var vm = new MainViewModel();
+        var orderId = new Column
+        {
+            Name = "OrderId",
+            DataType = "int",
+            IsPrimaryKey = true,
+        };
+        var customerId = new Column { Name = "CustomerId", DataType = "int" };
+        var note = new Column
+        {
+            Name = "Note",
+            DataType = "nvarchar(50)",
+            IsNullable = true,
+        };
+        var order = new EntityViewModel(
+            new Entity { TableName = "Order", Columns = { orderId, customerId, note } },
+            new EntityLayout()
+        );
+        var customer = new EntityViewModel(
+            new Entity
+            {
+                TableName = "Customer",
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "CustomerId",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                    },
+                },
+            },
+            new EntityLayout()
+        );
+        vm.Entities.Add(order);
+        vm.Entities.Add(customer);
+        vm.Queries.Add(
+            new QueryDefinition
+            {
+                EntityId = order.Id,
+                Name = "ByCustomerParameter",
+                Parameters =
+                {
+                    new QueryParameter { Name = "customerId", SourceColumnId = customerId.Id },
+                },
+            }
+        );
+        vm.Queries.Add(
+            new QueryDefinition
+            {
+                EntityId = order.Id,
+                Name = "ByCustomerSort",
+                OrderBy = { new QueryOrdering { ColumnId = customerId.Id } },
+            }
+        );
+        vm.Queries.Add(
+            new QueryDefinition
+            {
+                EntityId = order.Id,
+                Name = "CustomerProjection",
+                Returns = QueryReturnShape.Projection,
+                ResultTypeName = "CustomerRow",
+                Fields =
+                {
+                    new ProjectionField { Name = "Customer", SourceColumnId = customerId.Id },
+                },
+            }
+        );
+        vm.Queries.Add(
+            new QueryDefinition
+            {
+                EntityId = order.Id,
+                Name = "ByCustomerCondition",
+                Condition = "CustomerId = 1",
+            }
+        );
+        vm.Queries.Add(
+            new QueryDefinition
+            {
+                EntityId = order.Id,
+                Name = "ByOrderId",
+                Condition = "OrderId = 1",
+            }
+        );
+        vm.Queries.Add(
+            new QueryDefinition
+            {
+                EntityId = customer.Id,
+                Name = "CustomerById",
+                Condition = "CustomerId = 1",
+            }
+        );
+
+        return vm;
+    }
+
+    /// <summary><see cref="MemoQueryDiagram"/> のクエリが参照する、まだ図に無い列 Memo の Id</summary>
+    private static readonly Guid MemoColumnId = new("6d1f3c2a-8b4e-4f7a-9c11-2e5d7a9b0c31");
+
+    /// <summary>
+    /// Order(OrderId PK) に、まだ図に無い列 Memo（<see cref="MemoColumnId"/>）をパラメータと条件で参照するクエリ 2 本を置いた図
+    /// （列を後から足し、その追加を Undo する経路を作る）
+    /// </summary>
+    private static MainViewModel MemoQueryDiagram()
+    {
+        var vm = new MainViewModel();
+        var order = new EntityViewModel(
+            new Entity
+            {
+                TableName = "Order",
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "OrderId",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                    },
+                },
+            },
+            new EntityLayout()
+        );
+        vm.Entities.Add(order);
+        vm.Queries.Add(
+            new QueryDefinition
+            {
+                EntityId = order.Id,
+                Name = "ByMemoParameter",
+                Parameters =
+                {
+                    new QueryParameter { Name = "memo", SourceColumnId = MemoColumnId },
+                },
+            }
+        );
+        vm.Queries.Add(
+            new QueryDefinition
+            {
+                EntityId = order.Id,
+                Name = "ByMemoCondition",
+                Condition = "Memo = 'x'",
+            }
+        );
+
+        return vm;
+    }
+
+    /// <summary>クエリが Id で参照する列（パラメータ・並び順・射影フィールド）</summary>
+    private static IEnumerable<Guid> QueryColumnIds(QueryDefinition query) =>
+        query
+            .Parameters.Select(parameter => parameter.SourceColumnId)
+            .Concat(query.Fields.Select(field => field.SourceColumnId))
+            .OfType<Guid>()
+            .Concat(query.OrderBy.Select(ordering => ordering.ColumnId));
 }

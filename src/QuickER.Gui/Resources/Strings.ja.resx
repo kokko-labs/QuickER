@@ -330,6 +330,9 @@
   <data name="Status_NameNotRepresentable" xml:space="preserve">
     <value>'{0}' には基本多言語面の外の文字（絵文字など）が含まれており、{1} は保存できません。その文字を除くまで、DDL の生成と同期はこの名前を断ります。</value>
   </data>
+  <data name="Status_RemovedColumnStillReferencedByQueries" xml:space="preserve">
+    <value>列 '{0}' が無くなりましたが、名前付きクエリがまだ参照しています：{1}。クエリの定義で直してください。</value>
+  </data>
   <data name="IdentifierLimit_Utf16CodeUnits" xml:space="preserve">
     <value>UTF-16 コード単位で {0}</value>
   </data>

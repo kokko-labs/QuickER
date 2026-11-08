@@ -1,3 +1,6 @@
+using QuickER.Model;
+using QuickER.Tests.TestSupport;
+
 namespace QuickER.Tests.Mcp.Tools;
 
 internal static partial class ToolScenarioRows
@@ -231,5 +234,262 @@ internal static partial class ToolScenarioRows
                 new { table_name = "Order", column_name = "Note" },
                 e => e.Fails().Unchanged()
             );
+
+        // ---------------- remove_column と名前付きクエリの列参照 ----------------
+        // 削除はクエリを書き換えず、削除した列を参照するクエリを応答で名指しする（両ホストで同じ英語の注意文）
+
+        yield return Row(
+                "column-remove-referenced-by-queries-names-each-query",
+                "remove_column はクエリを書き換えず、削除した列を参照するクエリを参照の種類つきで名指しする"
+            )
+            .Base(CustomerOrder)
+            .Seed(
+                "Order のクエリ 4 本が CustomerId を参照する（パラメータ・並び順・射影フィールド・条件）",
+                session =>
+                {
+                    SeedQueryOn(
+                        session,
+                        "Order",
+                        "ByCustomerParameter",
+                        (query, order) =>
+                            query.Parameters.Add(
+                                new QueryParameter
+                                {
+                                    Name = "customerId",
+                                    SourceColumnId = ColumnIdOf(order, "CustomerId"),
+                                }
+                            )
+                    );
+                    SeedQueryOn(
+                        session,
+                        "Order",
+                        "ByCustomerSort",
+                        (query, order) =>
+                            query.OrderBy.Add(
+                                new QueryOrdering
+                                {
+                                    ColumnId = ColumnIdOf(order, "CustomerId"),
+                                    Descending = true,
+                                }
+                            )
+                    );
+                    SeedQueryOn(
+                        session,
+                        "Order",
+                        "CustomerProjection",
+                        (query, order) =>
+                        {
+                            query.Returns = QueryReturnShape.Projection;
+                            query.ResultTypeName = "CustomerRow";
+                            query.Fields.Add(
+                                new ProjectionField
+                                {
+                                    Name = "Customer",
+                                    SourceColumnId = ColumnIdOf(order, "CustomerId"),
+                                }
+                            );
+                        }
+                    );
+                    SeedQueryOn(
+                        session,
+                        "Order",
+                        "ByCustomerCondition",
+                        (query, _) => query.Condition = "CustomerId = 1"
+                    );
+                }
+            )
+            .Seed(
+                "参照しないクエリ（Order の OrderId だけ・Customer の同じ名前の列 CustomerId）",
+                session =>
+                {
+                    SeedQueryOn(
+                        session,
+                        "Order",
+                        "ByOrderId",
+                        (query, _) => query.Condition = "OrderId = 1"
+                    );
+                    SeedQueryOn(
+                        session,
+                        "Customer",
+                        "CustomerById",
+                        (query, _) => query.Condition = "CustomerId = 1"
+                    );
+                }
+            )
+            .Call(
+                "remove_column",
+                new { table_name = "Order", column_name = "CustomerId" },
+                e =>
+                    e.Ok()
+                        .Result.Contains(
+                            "ByCustomerParameter (parameter 'customerId')",
+                            "ByCustomerSort (sort order)",
+                            "CustomerProjection (field 'Customer')",
+                            "ByCustomerCondition (condition)",
+                            "set_query",
+                            "remove_query"
+                        )
+                        .Result.Absent("ByOrderId", "CustomerById")
+                        .Schema.Absent("col Order.CustomerId *")
+                        .Schema.Contains(
+                            "qdef Order.ByCustomerParameter * params=(customerId:-@?) *",
+                            "qdef Order.ByCustomerSort * order=(@? desc) *",
+                            "qdef Order.CustomerProjection * fields=(Customer:-@?) *",
+                            "qdef Order.ByCustomerCondition * cond=\"CustomerId = 1\" *"
+                        )
+            );
+
+        yield return Row(
+                "column-remove-condition-reference-is-case-insensitive",
+                "remove_column の名指しは条件の列名を大文字小文字を無視して読み、パラメータ名・文字列リテラルの同じ綴りと、生 SQL・手動実装のクエリに残った条件は数えない"
+            )
+            .Base(CustomerOrder)
+            .Seed(
+                "生 SQL・手動実装のクエリが、使わない条件に列名を残している（条件は簡易 DSL のときだけ使うので、切れても検証も生成も止まらない）",
+                session =>
+                {
+                    SeedQueryOn(
+                        session,
+                        "Order",
+                        "RawSqlWithLeftoverCondition",
+                        (query, _) =>
+                        {
+                            query.Implementation = QueryImplementationKind.Sql;
+                            query.Condition = "CustomerId = 1";
+                            query.Sql["sqlserver"] = "SELECT * FROM [Order] WHERE OrderId = 1";
+                        }
+                    );
+                    SeedQueryOn(
+                        session,
+                        "Order",
+                        "ManualWithLeftoverCondition",
+                        (query, _) =>
+                        {
+                            query.Implementation = QueryImplementationKind.Manual;
+                            query.Condition = "CustomerId = 1";
+                        }
+                    );
+                }
+            )
+            .Seed(
+                "条件の列名だけが大小違いのクエリ・パラメータ名と文字列リテラルにだけ同じ綴りがあるクエリ・3 種で参照するクエリ",
+                session =>
+                {
+                    SeedQueryOn(
+                        session,
+                        "Order",
+                        "LowerCaseCondition",
+                        (query, _) => query.Condition = "customerid = 1"
+                    );
+                    SeedQueryOn(
+                        session,
+                        "Order",
+                        "SameSpellingElsewhere",
+                        (query, _) =>
+                        {
+                            query.Condition =
+                                "OrderId = @CustomerId AND ShipToCustomerId <> 'CustomerId'";
+                            query.Parameters.Add(
+                                new QueryParameter { Name = "CustomerId", Type = "int32" }
+                            );
+                        }
+                    );
+                    SeedQueryOn(
+                        session,
+                        "Order",
+                        "Mixed",
+                        (query, order) =>
+                        {
+                            query.Condition = "CUSTOMERID = @c";
+                            query.Parameters.Add(
+                                new QueryParameter
+                                {
+                                    Name = "c",
+                                    SourceColumnId = ColumnIdOf(order, "CustomerId"),
+                                }
+                            );
+                            query.OrderBy.Add(
+                                new QueryOrdering { ColumnId = ColumnIdOf(order, "CustomerId") }
+                            );
+                        }
+                    );
+                }
+            )
+            .Call(
+                "remove_column",
+                new { table_name = "Order", column_name = "CustomerId" },
+                e =>
+                    e.Ok()
+                        .Result.Contains(
+                            "LowerCaseCondition (condition)",
+                            "Mixed (parameter 'c', sort order, condition)"
+                        )
+                        .Result.Absent(
+                            "SameSpellingElsewhere",
+                            "RawSqlWithLeftoverCondition",
+                            "ManualWithLeftoverCondition"
+                        )
+            );
+
+        yield return Row(
+                "column-remove-not-referenced-keeps-previous-message",
+                "remove_column は削除した列を参照するクエリが無ければ従来の応答のままで、前から切れているクエリも名指ししない"
+            )
+            .Base(CustomerOrder)
+            .Seed(
+                "前から切れているクエリ（どこも指さない並び順・無い列名の条件）と、ほかの列だけを参照するクエリ",
+                session =>
+                {
+                    SeedQueryOn(
+                        session,
+                        "Order",
+                        "Stale",
+                        (query, _) =>
+                        {
+                            query.Condition = "Missing = 1";
+                            query.OrderBy.Add(new QueryOrdering { ColumnId = Guid.NewGuid() });
+                        }
+                    );
+                    SeedQueryOn(
+                        session,
+                        "Order",
+                        "ByCustomerCondition",
+                        (query, _) => query.Condition = "CustomerId = 1"
+                    );
+                }
+            )
+            .Call(
+                "remove_column",
+                new { table_name = "Order", column_name = "ShipToCustomerId" },
+                e =>
+                    e.Ok()
+                        .Result.Absent("Stale", "ByCustomerCondition", "set_query")
+                        .ForHost(
+                            ToolHostKind.File,
+                            "GUI の応答は resx（UI の言語）・MCP は英語の固定文",
+                            file =>
+                                file.Result.Exact(
+                                    "Removed column 'ShipToCustomerId' from table 'Order'."
+                                )
+                        )
+            );
     }
+
+    /// <summary>図のテーブルへ名前付きクエリを直接足す（列の参照は表の列を引いて組む）</summary>
+    private static void SeedQueryOn(
+        ToolHostSession session,
+        string tableName,
+        string queryName,
+        Action<QueryDefinition, Entity> configure
+    )
+    {
+        var entity = session.Schema.Entities.Single(candidate => candidate.TableName == tableName);
+        var query = new QueryDefinition { EntityId = entity.Id, Name = queryName };
+        configure(query, entity);
+        session.AddQuery(query);
+    }
+
+    /// <summary>表の列の Id</summary>
+    private static Guid ColumnIdOf(Entity entity, string columnName) =>
+        entity.Columns.Single(column => column.Name == columnName).Id;
 }

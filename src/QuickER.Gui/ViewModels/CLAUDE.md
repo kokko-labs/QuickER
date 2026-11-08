@@ -155,6 +155,14 @@ MainViewModel と図の ViewModel の規則：文書の保存・外部変更検�
 - 図から外れた要素（`Detach` 後のリレーション・`IsDetachedFromOwner` の一意制約・`IsDetachedFromDiagram` のテーブルの一意制約）の行の書き込みは、正本を変えず表示を正本へ戻す（Undo で戻る要素を欠けさせない）。図に居る間は、受け手がいなくても正本へ反映する（単独の VM の経路）。
 - ガード：`CandidateRowReconcileTests`（選択と候補の順序を観測点 `SelectionCandidateProbe` で数える 13 件）・`CandidateSelectionOrderWindowTests` の実ウィンドウ 2 件。mutation 実証済み。
 
+## 列の削除とクエリの参照の通知
+- 列がテーブルから外れたら、その列を参照する名前付きクエリを `NotifyStatus` で名指しする（`OnEntityColumnsChangedForQueryReferences`。クエリは書き換えない。判定は `QueryColumnReferences.Find`＝`src/QuickER.CodeGen.CSharp/Queries/CLAUDE.md`「列の削除とクエリの参照」）。
+- 購読は列のコレクションの変更 1 か所（付け外しは `OnEntityColumnsChangedForSelection` と同じ場所）。知らせるのは Remove だけ。
+  - 列が外れる操作は `RemoveColumnCommand`（画面の削除・内蔵チャットの `remove_column`・削除の Redo）と `AddColumnCommand.Undo` だけで、全部ここを通る。
+  - 並べ替えは Move、図の一括置換（開く・取込・外部変更の自動再読込・`ClearDiagramCollections`）はテーブルの VM ごと作り直すので列の Remove を起こさず、テーブルの削除は列のコレクションを変えない（クエリはテーブルと一緒に取り除かれる）。どれも知らせない。
+  - Undo / Redo も一括更新（`RunBulkDiagramUpdate`）の中を通るので、一括更新中に黙る形にはしない（列の追加の Undo を取りこぼす）。
+- ガード：`UndoOperationTests`（行 `column-remove-referenced-by-query-warns-and-undo-revives-references`・`column-add-undo-referenced-by-query-warns`・`column-remove-not-referenced-does-not-warn`＝一括置換を通る・`column-query-references-table-removal-does-not-warn`）。mutation 実証済み。
+
 ## 名前の上限の通知と方言切替の確認
 受け付けない名前は、DDL・同期の入口と同じ `IdentifierLengthLimit.DescribeViolation` で知らせる（判定の写しを作らない）。置き場所は 3 つ。
 

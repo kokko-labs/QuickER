@@ -3,6 +3,7 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using QuickER.CodeGen.CSharp.Queries;
 using QuickER.Dialects;
 using QuickER.Documents;
 using QuickER.Extensibility;
@@ -2455,6 +2456,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     OnUniqueConstraintMemberSelectionEdited;
                 entity.IsDetachedFromDiagram = false;
                 entity.Columns.CollectionChanged += OnEntityColumnsChangedForSelection;
+                entity.Columns.CollectionChanged += OnEntityColumnsChangedForQueryReferences;
                 _changeTracker.AttachEntity(entity);
             }
         }
@@ -2498,6 +2500,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         entity.UniqueConstraintMemberSelectionEdited -= OnUniqueConstraintMemberSelectionEdited;
         entity.IsDetachedFromDiagram = true;
         entity.Columns.CollectionChanged -= OnEntityColumnsChangedForSelection;
+        entity.Columns.CollectionChanged -= OnEntityColumnsChangedForQueryReferences;
         _changeTracker.DetachEntity(entity);
 
         // 選択・検索結果は、図に居る要素だけを指す（削除・Undo・図の一括置換の全経路）。
@@ -2542,6 +2545,59 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (removed)
         {
             SelectedColumn = null;
+        }
+    }
+
+    /// <summary>
+    /// 列がテーブルから外れたとき、その列を参照する名前付きクエリをステータスバーの一時通知で名指しする
+    /// （列の削除・列の追加の Undo・削除の Redo・内蔵チャットのツールの全経路を 1 か所で拾う）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// クエリは書き換えない（パラメータ・射影フィールドを消すと契約が変わり、条件から列を外すと意味が変わる）。
+    /// 列が Undo で戻れば Id も名前も同じなので参照はそのまま生き返る。判定は MCP のツールと同じ
+    /// <see cref="QueryColumnReferences.Find"/>（条件の読み方は名前の変更の追従と共有）。
+    /// </para>
+    /// <para>
+    /// 知らせるのは <see cref="NotifyCollectionChangedAction.Remove"/> だけ。並べ替え（Move）は列が外れず、図の一括置換
+    /// （開く・取込・外部変更の自動再読込）はテーブルの VM ごと作り直すので列の Remove を起こさない。テーブルの削除は
+    /// 列のコレクションを変えず、クエリもテーブルと一緒に取り除かれる。Undo / Redo も一括更新の中を通るので、
+    /// 一括更新中に黙る形にはしない。
+    /// </para>
+    /// </remarks>
+    private void OnEntityColumnsChangedForQueryReferences(
+        object? sender,
+        NotifyCollectionChangedEventArgs e
+    )
+    {
+        if (e.Action != NotifyCollectionChangedAction.Remove || e.OldItems is null)
+        {
+            return;
+        }
+
+        var entity = Entities.FirstOrDefault(candidate =>
+            ReferenceEquals(candidate.Columns, sender)
+        );
+
+        if (entity is null)
+        {
+            return;
+        }
+
+        foreach (var column in e.OldItems.OfType<ColumnViewModel>())
+        {
+            var references = QueryColumnReferences.Find(Queries, entity.Id, column.Id, column.Name);
+
+            if (references.Count > 0)
+            {
+                NotifyStatus(
+                    string.Format(
+                        Strings.Status_RemovedColumnStillReferencedByQueries,
+                        column.Name,
+                        string.Join(", ", references.Select(reference => reference.Query.Name))
+                    )
+                );
+            }
         }
     }
 

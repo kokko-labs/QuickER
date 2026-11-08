@@ -102,6 +102,19 @@ C# リテラルのエスケープの規則（`GeneratedLiteralText`）は `src/Q
 - 予約は「外すとコンパイルできない名前だけ」にする
 - ガード：`QueryReservedParameterNameTests`（`QueryReservedParameterNameTests.ReservedName_IsActuallyUncompilable`＝予約から外すとコンパイルできない／`QueryReservedParameterNameTests.SelectorFieldName_IsActuallyUncompilable`＝選択式のフィールド名も同じ／`await` と選択式のフィールド名を保存前の規則がちょうど 1 件の違反で断る）・`QueryParameterNameSafetyTests`（record・object のメンバー名と生成本体が `this.` で呼ぶ名前と Roslyn の文脈キーワードの全数を、生 SQL・簡易 DSL の全戻り形と NULL 許容列への IN のリスト・値オブジェクトのあり／なし・リモート＋同期つきで生成器と保存前の規則の両方へ通し、断られる名前の集合がちょうど `await` と record のメンバーの 9 名〔先頭の大小の両方〕であることと、それ以外の名前が全部の形でコンパイルできることを見る）・`CodegenCaseTests` の行 `diag-query-reserved-parameter-name-*`（生成器の診断。選択式のフィールド名・生 SQL の単一戻りの `await` を含む）
 
+## 列の削除とクエリの参照
+
+- 列を削除しても（列の追加の Undo で列が外れても）、名前付きクエリは書き換えない。削除した列を参照するクエリを名指しして知らせる
+  - 消さない理由：きれいに消せるのは並び順だけ。パラメータを消すとメソッドの引数が変わって条件・生 SQL の `@名前` が宙に浮き、射影フィールドを消すと DTO の形が変わり、条件から列を外すと意味が変わる（AND の片側を消すと結果が広がる）。どれも利用者の契約を黙って変える。名前の変更の追従が「条件式で読める新名のときだけ書き換える」のと同じ考え方
+  - 書き換えないので、削除を Undo すれば列が同じ Id・同じ名前で戻り、参照もそのまま生き返る
+  - 切れた参照は、クエリ定義ダイアログが名指しして OK を止め（条件のエラーの文もクエリ名を出す）、生成は Id の参照なら警告してそのクエリだけ飛ばし、条件の列名ならエラーにする
+- 判定の正本は `QueryColumnReferences`（このフォルダ）
+  - `Find`：そのテーブルのクエリの、列を参照する箇所（パラメータ・並び順・射影フィールドは列の Id、条件は列名）。ほかのテーブルのクエリは同じ名前の列があっても数えない。条件は実装方式が簡易 DSL のときだけ数える（生 SQL・手動実装では条件を使わず、切れても検証も生成も止まらないので、数えると知らせすぎになる）
+  - `FindInCondition`：条件の中の列名の読み方（`QueryConditionParser.Parse` の列参照を `SchemaNames.AreSame` で照合。パラメータ・文字列リテラルの同じ綴りは数えない。パース不能は null）。**名前の変更の追従 `QueryConditionRenamer` も同じ関数を呼ぶ**（写しを作ると、追従が書き換える参照と削除で名指しする参照が食い違う）
+  - `DescribeRemovedColumn`：ツールの応答に足す英語の注意文。MCP の `DocumentErDiagramToolHost` と内蔵チャットの `ErDiagramDynamicTools` が同じ文を返す
+- GUI の画面は `MainViewModel.OnEntityColumnsChangedForQueryReferences`（列のコレクションの購読）がステータスバーで名指しする（→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「列の削除とクエリの参照の通知」）
+- ガード：`ToolScenarioTests`（行 `column-remove-referenced-by-queries-names-each-query`・`column-remove-condition-reference-is-case-insensitive`・`column-remove-not-referenced-keeps-previous-message`。両ホスト）・`UndoOperationTests`（行 `column-remove-referenced-by-query-warns-and-undo-revives-references`・`column-add-undo-referenced-by-query-warns`・`column-remove-not-referenced-does-not-warn`・`column-query-references-table-removal-does-not-warn`）・`QueryDefinitionDialogViewModelTests.Condition_ValidatesImmediately`（条件のエラーの文のクエリ名）・`QueryConditionRenamerTests`（追従の大小無視。共有の照合を大小を区別する形へ壊すと追従のテストも赤）。mutation 実証済み（条件の照合・大小無視・簡易 DSL の分岐・MCP 側の注意文だけ・GUI の購読・参照が無くても知らせる・ダイアログのクエリ名、の各回で赤）
+
 ## 検証
 
 - 文字列一致（Contains / StartsWith / EndsWith）の null 引数は、全バックエンドで `ArgumentNullException`（`SqlQuery.Where` の共有ガードで fail-fast に統一）

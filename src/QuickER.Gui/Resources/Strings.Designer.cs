@@ -622,6 +622,12 @@ namespace QuickER.Resources {
             }
         }
         
+        public static string Status_RemovedColumnStillReferencedByQueries {
+            get {
+                return ResourceManager.GetString("Status_RemovedColumnStillReferencedByQueries", resourceCulture);
+            }
+        }
+        
         public static string IdentifierLimit_Utf16CodeUnits {
             get {
                 return ResourceManager.GetString("IdentifierLimit_Utf16CodeUnits", resourceCulture);

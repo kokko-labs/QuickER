@@ -305,6 +305,9 @@
   <data name="Status_NameNotRepresentable" xml:space="preserve">
     <value>'{0}' contains a character outside the Basic Multilingual Plane (such as an emoji), which {1} cannot store. DDL generation and sync will refuse this name until the character is removed.</value>
   </data>
+  <data name="Status_RemovedColumnStillReferencedByQueries" xml:space="preserve">
+    <value>Column '{0}' is gone, and named queries still refer to it: {1}. Fix them in the query definitions.</value>
+  </data>
   <data name="IdentifierLimit_Utf16CodeUnits" xml:space="preserve">
     <value>{0} UTF-16 code units</value>
   </data>

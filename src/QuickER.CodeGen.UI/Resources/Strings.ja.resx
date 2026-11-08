@@ -435,7 +435,7 @@
     <value>射影クエリには DTO 型名と 1 件以上のフィールドが必要です。</value>
   </data>
   <data name="QueryDialog_Status_ConditionInvalid" xml:space="preserve">
-    <value>条件のエラーを解消してください。</value>
+    <value>クエリ '{0}': 条件のエラーを解消してください。</value>
   </data>
   <data name="QueryDialog_Status_DuplicateName" xml:space="preserve">
     <value>メソッド名 '{0}' が同一エンティティ内で重複しています。</value>

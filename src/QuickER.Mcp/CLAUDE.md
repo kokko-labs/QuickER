@@ -29,6 +29,7 @@ docs 不在の外部エージェントが config を自己発見的に書ける�
   - **検証はどの変更よりも前に置く**。GUI 側は変更をその場で VM へ反映するので、途中で弾くと一部だけ反映されて MCP と食い違う。
   - ガード：`ToolScenarioTests`（`ToolScenarioRows` の行＝入力の検証 `validation-*`・注意文 `note-*` ほか。1 行を両ホストのセッションで流し、拒否した呼び出しが図を変えないことも見る）。
 - `remove_entity` はそのテーブルの名前付きクエリも消す。GUI は `RemoveEntityCommand` / `GroupRemoveEntitiesCommand` が共有の `EntityQueryRemoval` で退避し Undo で戻す（MCP は戻らない）。
+- `remove_column` は名前付きクエリを書き換えず、削除した列を参照するクエリを応答の英語の注意文で名指しする。両ホストが削除の前に `QueryColumnReferences.Find` で求め、文は `QueryColumnReferences.DescribeRemovedColumn`（`src/QuickER.CodeGen.CSharp/Queries/CLAUDE.md`「列の削除とクエリの参照」）。ガード：`ToolScenarioTests`（行 `column-remove-referenced-by-queries-names-each-query`・`column-remove-condition-reference-is-case-insensitive`・`column-remove-not-referenced-keeps-previous-message`）。
 
 ## 個別ツールの規則
 

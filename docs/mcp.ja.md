@@ -72,7 +72,7 @@ stdio トランスポートに対応した MCP クライアントであれば利
 | `add_entity` | `table_name` ✅, `description` | 新しいテーブルを追加する（カラムは作成しない）。空のテーブル名と、既存のテーブルと大文字小文字を区別せずに同じ名前はエラー |
 | `remove_entity` | `table_name` ✅ | テーブルを、接続するリレーションとそのテーブルの名前付きクエリごと削除する。結果には削除したクエリの名前が出る。削除したクエリを戻すツールは無く、同じ名前のテーブルを足し直しても戻らない（GUI では元に戻す操作でテーブルとクエリが一緒に戻る） |
 | `add_column` | `table_name` ✅, `column_name` ✅, `data_type` ✅, `is_primary_key`, `is_nullable`, `description` | テーブルへカラムを追加する。[詳細](#add_column) |
-| `remove_column` | `table_name` ✅, `column_name` ✅ | テーブルからカラムを削除する。削除カラムを構成列に含む一意制約は制約ごと削除される（残りの列だけの制約へ黙って変質させない） |
+| `remove_column` | `table_name` ✅, `column_name` ✅ | テーブルからカラムを削除する。削除カラムを構成列に含む一意制約は制約ごと削除される（残りの列だけの制約へ黙って変質させない）。削除カラムを参照する名前付きクエリは書き換えず、応答がクエリごとに何がその列を参照しているかを名指しする（`set_query` で直すか `remove_query` で消す） |
 | `set_entity_property` | `table_name` ✅, `new_table_name`, `memo`, `description` | テーブルの名前・メモ・説明を変更する（いずれか 1 つ以上を指定）。空の `new_table_name` と、ほかのテーブルと大文字小文字を区別せずに同じ名前はエラー。自分の名前の大文字小文字だけを変えるのはよい。失敗した呼び出しは、指定したどのプロパティも変えない |
 | `set_column_property` | `table_name` ✅, `column_name` ✅, `description`, `data_type`, `is_nullable` | カラムの説明・データ型・NULL 許容を変更する（いずれか 1 つ以上を指定）。[詳細](#set_column_property) |
 | `add_relationship` | `source_table` ✅, `target_table` ✅, `relationship_type` ✅（`OneToOne` / `OneToMany` / `ManyToMany`）, `source_columns`, `target_columns`, `constraint_name` | 2 テーブル間に外部キーを追加する。[詳細](#add_relationship) |

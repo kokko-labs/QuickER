@@ -40,6 +40,11 @@ Columns are edited inline in the "Columns" grid of the properties panel.
 - **Reordering**: drag rows to change the order
 - **Copy / paste**: Ctrl+C / Ctrl+V work per column on the grid
 
+Deleting a column does not change the named queries that refer to it, and the status bar names those queries.
+The queries keep their references to the column (parameters, sort order, projection fields, and the column name in a simple DSL condition), so undoing the delete brings the references back.
+Until you fix them, the query definition dialog names the broken reference and does not accept OK.
+Code generation warns and skips a query whose parameter, sort order, or projection field refers to a deleted column, and reports an error for a simple DSL condition that names one.
+
 ### Primary key order
 
 Express a composite primary key by checking PK on several columns.
