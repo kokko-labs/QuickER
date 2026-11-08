@@ -161,7 +161,11 @@ internal static partial class SyncModelScenarios
                     ),
                     Plain(D1, policy: SyncConflictPolicy.ServerWins),
                     Expect.Rows(D1, F).Contains("1 parent=null name=alice-during"),
-                    Expect.Journal(D1).Count("*", 1).Single("* age=new"),
+                    // 内容を戻さなかった行は、実行が読んだ記録（old）も新しい記録（new）と一緒に残る（P5-2 の S2）
+                    Expect.Journal(D1).Count("*", 2).Single("* age=new").Single("* age=old"),
+                    Plain(D1),
+                    Expect.Journal(D1).Empty(),
+                    Expect.Rows(SV, F).Contains("1 parent=null name=alice-during"),
                 ]
             ),
             Moved(

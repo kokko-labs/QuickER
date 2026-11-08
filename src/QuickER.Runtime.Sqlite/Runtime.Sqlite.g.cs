@@ -175,7 +175,7 @@ public static class SqliteSchemaBootstrap
 
 /// <summary>The default implementation of the entity-agnostic raw SQL executor (the single implementation of binding, scalar conversion, and projection mapping).</summary>
 /// <remarks>Stateless (holds only the connection factory), so it can be registered as a Singleton in DI. The repository's raw SQL methods delegate to this implementation.</remarks>
-public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory) : ISqlExecutor
+public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory) : ISqlExecutor, ISqlBatchExecutor
 {
     /// <summary>The source of SQL connections.</summary>
     private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
@@ -269,6 +269,50 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
 
         var scalar = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
         return RawSqlMapper.ConvertSingleValue<TResult>(scalar is DBNull ? null : scalar);
+    }
+
+    /// <summary>Runs the statements in order as one transaction and returns the number of rows each one affected, in the same order.</summary>
+    /// <remarks>
+    /// A failed statement - or a failed commit, such as a deferred foreign key check - rolls the transaction back before the
+    /// connection goes back to the pool. Statements run as raw SQL text in one transaction would leave it open there instead:
+    /// the provider does not roll a pooled connection back, so the next caller would run inside it.
+    /// </remarks>
+    public async Task<IReadOnlyList<int>> ExecuteSqlBatchAsync(
+        IReadOnlyList<string> statements,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(statements);
+
+        if (statements.Count == 0)
+        {
+            throw new ArgumentException("At least one statement is required.", nameof(statements));
+        }
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)
+            await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        var affected = new int[statements.Count];
+
+        try
+        {
+            for (var index = 0; index < statements.Count; index++)
+            {
+                ArgumentNullException.ThrowIfNull(statements[index], nameof(statements));
+                await using var command = new SqliteCommand(statements[index], connection, transaction);
+                affected[index] = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await SqlTransactions.RollbackQuietlyAsync(transaction).ConfigureAwait(false);
+            throw;
+        }
+
+        return affected;
     }
 
     /// <summary>

@@ -182,6 +182,21 @@ internal sealed record UpdateFolderOp(
         $"{Who(Actor)} UpdateFolder id={Id} parent={Show(ParentId)} name={Name}{ViaText}";
 }
 
+/// <summary>
+/// フォルダーのピン留め（表どうしの循環の列 <c>pinned_item_id</c>）だけを変える。乱数の生成器は使わない（決定的なシナリオだけ）。
+/// 名前・親を変える <see cref="UpdateFolderOp"/> はこの列に触れない
+/// </summary>
+internal sealed record PinFolderOp(ModelActor Actor, ModelWriteVia Via, int Id, int? ItemId)
+    : ModelWriteOp(Actor, Via)
+{
+    public override string Table => ModelTables.Folders;
+
+    public override string KeyText => Id.ToString(CultureInfo.InvariantCulture);
+
+    public override string Describe() =>
+        $"{Who(Actor)} PinFolder id={Id} item={Show(ItemId)}{ViaText}";
+}
+
 internal sealed record DeleteFolderOp(ModelActor Actor, ModelWriteVia Via, int Id)
     : ModelWriteOp(Actor, Via)
 {

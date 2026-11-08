@@ -18,8 +18,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </remarks>
 internal sealed class ModelDbState
 {
-    /// <summary>フォルダー（キー→親・名前）</summary>
-    public Dictionary<int, (int? ParentId, string Name)> Folders { get; } = [];
+    /// <summary>フォルダー（キー→親・名前・ピン留めした品目＝表どうしの循環の列）</summary>
+    public Dictionary<int, (int? ParentId, string Name, int? PinnedItemId)> Folders { get; } = [];
 
     /// <summary>ラベル（キー→フォルダー・見出し）</summary>
     public Dictionary<string, (int FolderId, string Caption)> Labels { get; } =
@@ -41,7 +41,8 @@ internal sealed class ModelDbState
         {
             ModelTables.Folders => Folders.ToDictionary(
                 p => Key(p.Key),
-                p => $"parent={Show(p.Value.ParentId)} name={p.Value.Name}",
+                p =>
+                    $"parent={Show(p.Value.ParentId)} name={p.Value.Name}{Pinned(p.Value.PinnedItemId)}",
                 StringComparer.Ordinal
             ),
             ModelTables.Labels => Labels.ToDictionary(
@@ -77,6 +78,9 @@ internal sealed class ModelDbState
 
     private static string Show(int? value) => value is { } v ? Key(v) : "null";
 
+    /// <summary>ピン留めの列（NULL のときは何も書かない＝この列を書かない行の文字列は列を足す前と同じ）</summary>
+    internal static string Pinned(int? value) => value is { } v ? $" pinned={Key(v)}" : "";
+
     /// <summary>SQLite の DB ファイルから内容を読む</summary>
     public static async Task<ModelDbState> ReadAsync(string connectionString, CancellationToken ct)
     {
@@ -102,12 +106,16 @@ internal sealed class ModelDbState
         await foreach (
             var r in QueryAsync(
                 connection,
-                "SELECT folder_id, parent_id, name FROM model_folders",
+                "SELECT folder_id, parent_id, name, pinned_item_id FROM model_folders",
                 ct
             )
         )
         {
-            state.Folders[r.GetInt32(0)] = (r.IsDBNull(1) ? null : r.GetInt32(1), r.GetString(2));
+            state.Folders[r.GetInt32(0)] = (
+                r.IsDBNull(1) ? null : r.GetInt32(1),
+                r.GetString(2),
+                r.IsDBNull(3) ? null : r.GetInt32(3)
+            );
         }
 
         await foreach (
@@ -735,6 +743,14 @@ internal sealed class SyncModelWorld : IAsyncDisposable
                 break;
             }
 
+            case PinFolderOp pin:
+            {
+                var entity = await Load(device.Folders.GetByIdAsync(pin.Id, ct), op);
+                entity.PinnedItemId = pin.ItemId;
+                await UpdateAsync(device.Folders, entity, op.Via, ct);
+                break;
+            }
+
             case DeleteFolderOp delete:
                 await DeleteAsync(device.Folders, delete.Id, op, ct);
                 break;
@@ -1063,6 +1079,14 @@ internal sealed class SyncModelWorld : IAsyncDisposable
                 var entity = await Load(Server.Folders.GetByIdAsync(update.Id, ct), op);
                 entity.ParentId = update.ParentId;
                 entity.Name = update.Name;
+                await Server.Folders.UpdateAsync(entity, ConcurrencyMode.Optimistic, ct);
+                break;
+            }
+
+            case PinFolderOp pin:
+            {
+                var entity = await Load(Server.Folders.GetByIdAsync(pin.Id, ct), op);
+                entity.PinnedItemId = pin.ItemId;
                 await Server.Folders.UpdateAsync(entity, ConcurrencyMode.Optimistic, ct);
                 break;
             }

@@ -171,6 +171,52 @@ internal static partial class SyncModelScenarios
                     Expect.Journal(D1).Empty(),
                 ]
             ),
+            // 同じ形を外部の ISyncTable の代役で：最新の記録で計画する表でも、着地しなかった削除の記録は 1 回で捨てる
+            // （行が残り、計画の後に書かれた記録も無い削除の記録を残すと、毎回同じ削除を計画して行を見つけ続ける）
+            Moved(
+                "replay-unlanded-delete-entry-is-discarded-external-table",
+                [.. Seed(1, "alice", 11, "widget")],
+                [
+                    new DeleteFolderOp(D1, Direct, 1) { ExpectFailure = true },
+                    new RecordJournalOp(D1, F, "1", SyncJournalOperation.Delete),
+                    Expect.Journal(D1).Exact($"{F} key=1 op=Delete *"),
+                    Plain(D1),
+                    Expect.Result(D1).Contains("uploaded=0", "discarded=1").Absent("conflict *"),
+                    Expect.Rows(SV, F).Contains("1 *"),
+                    Expect.Journal(D1).Empty(),
+                ]
+            ) with
+            {
+                ExternalTables = [D1],
+            },
+            // P5-2 の S1 を外部の ISyncTable の代役で：計画した削除を送る前に同じキーで作り直すと、削除の記録（版つき）は
+            // 作り直しの記録と一緒に残り、次の回が版つきの更新として送る（捨てると挿入として送って偽の DuplicateOnServer）
+            Moved(
+                "replay-recreated-pending-delete-is-sent-as-update-external-table",
+                [Folder(SV, 700), Item(SV, 701, folder: 700), Item(SV, 702, folder: 700)],
+                [
+                    new UpdateItemOp(D1, Direct, 701, 700, null, "c-701", "a-edited"),
+                    new DeleteItemOp(D1, Direct, 702),
+                    new ArmInterruptOp(
+                        D1,
+                        ModelInterruptPoint.BeforeServerWrite,
+                        new AddItemOp(D1, Direct, 702, 700, null, "c-702", "b-recreated", "0A0B0702")
+                    ),
+                    Plain(D1),
+                    Expect
+                        .Journal(D1)
+                        .Count("*", 2)
+                        .Single($"{I} key=702 op=Delete ver=set * age=old")
+                        .Single($"{I} key=702 op=Upsert * age=new"),
+                    Plain(D1),
+                    Expect.Result(D1).Absent("conflict *"),
+                    Expect.Journal(D1).Empty(),
+                    Expect.Rows(SV, I).Contains("702 folder=700 label=null code=c-702 title=b-recreated"),
+                ]
+            ) with
+            {
+                ExternalTables = [D1],
+            },
             Moved(
                 "ul-settles-more-journal-entries-than-one-in-clause",
                 [],

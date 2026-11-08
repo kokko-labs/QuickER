@@ -139,8 +139,9 @@
 - 行の有無は internal `ISyncTableRunSupport.FindLocalKeyTextsAsync` でテーブルごとにまとめて引く。持たない `ISyncTable` は従来の最新記録で決める。
 - 再生の中の読み直し（upsert で行が無ければ破棄・delete で行が残っていれば破棄）は同期中の書き込みへの二重化として残す。
   - ただし upsert で行が無く、計画した記録から削除になる行なら、破棄せずにその削除を送る（`PlanReplayAsync` が `TableReplayPlan.DeletesIfGone` に控え、`ReplayPassAsync` が送り直す）。計画の後にアプリが作り直した行をもう一度消すと、作り直しの記録は捨てられ新しい削除の記録は版を持たないので、サーバーに行が残るため。
+  - 逆に delete で行が戻っていて、そのキーに実行が読んでいない記録（計画の後に書かれた作り直しの記録）があれば、記録を消さずに残す（`ReplayPassAsync` の `HasEntriesRecordedSinceAsync`）。残した削除の記録の版で、次の実行が作り直した行を版つきの更新として送る（消すと作り直しの記録だけが残り、挿入として送って偽の DuplicateOnServer が毎回出る）。新しい記録が無いとき（業務の削除が着地しなかった記録）は今までどおり消す（残すと、最新の記録で計画する外部の `ISyncTable` が毎回同じ削除を計画して行を見つけ続ける）。判定は表の種類に依らない。
 - 削除再生は冒頭でローカル行を probe する（`LocalRowSurvivedDeleteAsync`＝行がまだ在れば業務削除は着地しなかったとして Discarded・版あり／LWW の両経路）。無いと、FK 違反などで失敗したローカル削除を次の同期がサーバーで完遂し、削除伝搬が生き残ったローカル行まで消す。
-- ガード：シナリオ `replay-edit-then-refused-delete-still-uploads-the-edit`・`replay-delete-then-refused-reinsert-deletes-on-server`・`replay-offline-insert-then-delete-is-discarded`・`replay-versionless-delete-then-refused-reinsert-deletes-on-server`・`replay-unlanded-delete-entry-is-discarded`・`interrupt-BeforeServerWrite-delete-recreated`・`d1-folder-recreate-delete`。
+- ガード：シナリオ `replay-edit-then-refused-delete-still-uploads-the-edit`・`replay-delete-then-refused-reinsert-deletes-on-server`・`replay-offline-insert-then-delete-is-discarded`・`replay-versionless-delete-then-refused-reinsert-deletes-on-server`・`replay-unlanded-delete-entry-is-discarded`・`interrupt-BeforeServerWrite-delete-recreated`・`interrupt-BeforeServerWrite-recreate-deleted`・`replay-recreated-pending-delete-is-sent-as-update-external-table`・`replay-unlanded-delete-entry-is-discarded-external-table`・`d1-folder-recreate-delete`。
 
 ### 版ありの送り方
 
@@ -171,7 +172,8 @@
 - ServerWins の適用の位置：`SyncAsync` では**そのテーブルのダウンロードの直後・親→子**。アップロード段で適用すると、まだ降りていない親を参照する行をローカルへ書いて外部キーで毎回止まる。打ち切ったテーブルも含めて必ず適用する（`DownloadCoreAsync` の `SettleServerWinsAsync`）。単独の `UploadAsync` はアップロード段で適用する。
 - Versioned＋ServerWins が捨てる予定の id は、そのテーブルのダウンロードで未送信に数えない。ランの範囲の表の行だけに絞る（範囲外の表の未送信の削除は親の削除として数え続ける）。
 - ServerWins の最中に別の記録を持ったキーは適用しない（ジャーナルを読み直し、ランの冒頭に読んだ id 以外の記録を持つキー）。
-- ガード：シナリオ `lw-overwrites-duplicate-key-on-server`・`lw-resurrects-row-missing-on-server`・`sw-leaves-row-edited-during-the-run`・`sw-does-not-stop-download-at-rows-it-drops`・`fk-serverwins-restores-row-moved-to-new-parent-on-server`、`SyncVoRuntimeTests`。
+  - 適用しなかったキーは、ランの冒頭に読んだ記録も捨てない（`ApplyServerWinsToTableAsync` の `dropRows` から外す・`DiscardedByServerWins` にも載せない）。行の内容は実行前の編集（書いた blob・サーバーが持つ行の版つきの削除）を持ったままなので、記録だけ捨てると内容と記録が食い違ったまま残る（blob が永久に届かない・作り直した行が挿入として送られ毎回重複で断られる）。次の実行が新しい記録と一緒に送る。
+- ガード：シナリオ `lw-overwrites-duplicate-key-on-server`・`lw-resurrects-row-missing-on-server`・`sw-leaves-row-edited-during-the-run`・`interrupt-*-update-blob-written-serverwins`・`interrupt-*-recreate-deleted-serverwins`・`interrupt-*-delete-recreated-serverwins`・`sw-does-not-stop-download-at-rows-it-drops`・`fk-serverwins-restores-row-moved-to-new-parent-on-server`、`SyncVoRuntimeTests`。
 
 ### 後勝ち（LWW）の再生
 
@@ -337,7 +339,7 @@
 
 - `RefreshAsync` は同期対象テーブルを全消し（子→親）→サーバー全行の流し込み（親→子）。
 - 適用子は新設せず中立面だけで構成する（削除は `ISqlExecutor.ExecuteSqlAsync`・書き込みは `IRepositoryCore.BulkInsertAsync`）。カーソルは差分ソースの `GetChangesAsync` をバッチ末尾行の版で回すため追加エンドポイントなしで両経路が動く。
-- クラッシュ安全は per-table / per-batch トランザクション：生成 Repository は外部トランザクションに乗れないので単一トランザクション化は不可（ADO 型を Sync へ持ち込むことになる）。「削除は子→親・書き戻しは親→子・版の昇順」でどのコミット境界も有効な再開点になる。
+- クラッシュ安全は per-table / per-batch トランザクション（表どうしの循環のある範囲の全消しだけは 1 つのトランザクション＝下の項目）：生成 Repository は外部トランザクションに乗れないので単一トランザクション化は不可（ADO 型を Sync へ持ち込むことになる）。「削除は子→親・書き戻しは親→子・版の昇順」でどのコミット境界も有効な再開点になる。
 - `BatchSize` の既定は 2000（差分同期の 500 と別＝1 バッチ＝1 コミットが速さの源）。
 - `SyncRefreshOptions.Mode` の既定は `LastWriteWins`（全テーブル）。版なし子が版あり親を FK 参照する図では `Versioned` 既定だと親の全消しが FK に阻まれ構造的に失敗する。
 - 拒否の順：範囲外の行が範囲内の行を参照していれば、何も読み書きする前に `SyncRefreshScopeException`／除外列があり `IncludeUnboundedBinary` も `DiscardLocalUnboundedBinaries` も立っていなければ `SyncUnboundedBinaryLossException`／未送信ジャーナルが残っていれば `SyncPendingChangesException`（`Force` のときだけ破棄）。`Force` で抜けられない拒否を先に出す。
@@ -346,8 +348,12 @@
   - 範囲内の各表について記述子の `LocalReferences` のうち範囲外の表からの参照を、その表のローカルの全キーで 500 件ずつ照会する（`ISyncTableRunSupport.FindReferencesFromOutsideAsync`）。ローカルに無い表は照会から外す。
   - `LocalReferences` に載らない外部キー（一意制約参照・複数列＝記述子の `UnlistedReferencingTableNames`）の表は、ローカルに在れば行を見ずに断る。外部の `ISyncTable` 実装は判定しない。
   - 拒否は両方のロックの中・`PrepareJournalAsync` より前。構築時除外の表のリポジトリはロックを取らないので、その表への同時の書き込みは防げない。
+- 表どうしの外部キーの循環：1 表ずつではどの順でも最初の DELETE が断られる。範囲の表がすべて内部の面を持ち、同じローカルの実行器を使い、それが `ISqlBatchExecutor`（Core の公開の口・生成の SQLite の `SqlExecutor` だけが実装）で、範囲の表どうしに循環がある（`ReferencingTableNames` を範囲の表に絞る・自己参照は除く）ときだけ、`PRAGMA defer_foreign_keys = ON`＋子→親の DELETE を 1 つのトランザクションで流す（`SyncEngine.EmptyLocalTablesAsync`・`CycleBatchExecutor`）。失敗は口の実装が巻き戻し、どの表も元のまま残る。
+  - 生の `BEGIN … COMMIT` を `ExecuteSqlAsync` に渡す形は採らない：失敗するとトランザクションが開いたまま接続がプールへ返り（Microsoft.Data.Sqlite は巻き戻さない）、次の書き込みがその中に入るか別の接続の書き込みが locked になる。外部キーの検査を切る形（`PRAGMA foreign_keys = OFF`）も採らない：接続文字列に `Foreign Keys` の指定の無い自前のファクトリでは、途中の失敗で検査の切れた接続がプールに残る。
+  - 循環の判定は結果では見分けられない（木の図でも口の経路で消して成功の結果は同じ）。木の図を今の 1 表ずつの経路に保つのは変更の範囲を絞るための条件で、テストの無い分岐ではない（判定を外す壊し方はどの行も赤にしない＝表明していないのは意図どおり）。
+  - 包んだ実行器・外部の `ISyncTable`・実行器の違う表が範囲にあるときは今の経路に戻り、循環は今までどおり断られる（docs の既知の割り切り）。行どうしの循環のデータは全消しでは消えるが、読み込みが 1 行ずつ戻せずに止まる（直さない・docs の既知の割り切り）。
 - 受理記録は全部の表の全消しが成功してから消す（全消しの前に消すと、全消しの失敗で行とミラーが残ったまま受理記録だけが消え、再編集が偽の競合になる）。全消しの後・受理記録の削除の前に落ちる窓は、サーバーにも行が無いときだけ後の同じキーの作成が偽の MissingOnServer になり得る（受け入れてコメントに書いた）。
-- ガード：シナリオ `refresh-refuses-when-rows-outside-refer-inside`・`refresh-excluding-referencing-child-refuses-under-cascade`・`refresh-skips-referring-tables-missing-locally`・`refresh-failed-wipe-keeps-acks`・`42-refresh-refused-by-rows-outside`、`SyncRuntimeTestsBase` の「[Sync/洗い替え] 一覧に載らない外部キーで参照する範囲外の表は…」、`SyncConstructionExclusionTests.ExcludeFromSync_ReferringLocalRows_RefuseRefresh`、`SyncSupportGenerationTests`、`SyncRefreshBenchmarkRuntimeTests`（時間は表明せず出力し、表明は 3 経路の内容ダイジェスト一致のみ）（mutation 実証済み）。
+- ガード：シナリオ `refresh-refuses-when-rows-outside-refer-inside`・`refresh-excluding-referencing-child-refuses-under-cascade`・`refresh-skips-referring-tables-missing-locally`・`refresh-failed-wipe-keeps-acks`・`refresh-empties-tables-in-a-foreign-key-cycle`・`refresh-force-in-a-foreign-key-cycle-replaces-pending-changes`・`refresh-failed-wipe-in-a-foreign-key-cycle-deletes-nothing`・`42-refresh-refused-by-rows-outside`、`SyncRuntimeTestsBase` の「[Sync/洗い替え] 一覧に載らない外部キーで参照する範囲外の表は…」、`SyncConstructionExclusionTests.ExcludeFromSync_ReferringLocalRows_RefuseRefresh`、`SyncSupportGenerationTests`、`SyncRefreshBenchmarkRuntimeTests`（時間は表明せず出力し、表明は 3 経路の内容ダイジェスト一致のみ）（mutation 実証済み）。
 
 ## 版なしテーブルと後勝ちモード
 

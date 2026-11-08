@@ -66,6 +66,7 @@ public static class GeneratedFixedTypeNames
             "ISaveHookContext",
             "ISaveHookInvoker",
             "ISaveHookRegistry",
+            "ISqlBatchExecutor",
             "ISqlConnectionFactory",
             "ISqlExecutor",
             "ISqlQueryExecutor",

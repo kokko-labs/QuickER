@@ -1858,6 +1858,17 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                 )
         ),
         (
+            ModelTables.Folders,
+            ModelTables.Items,
+            s =>
+                s.Folders.Select(p =>
+                    (
+                        ModelDbState.Key(p.Key),
+                        p.Value.PinnedItemId is { } v ? ModelDbState.Key(v) : null
+                    )
+                )
+        ),
+        (
             ModelTables.Labels,
             ModelTables.Folders,
             s => s.Labels.Select(p => (p.Key, (string?)ModelDbState.Key(p.Value.FolderId)))

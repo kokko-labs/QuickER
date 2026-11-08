@@ -150,7 +150,7 @@ public sealed class EngineFingerprintDriftTests
             switch (op)
             {
                 case AddFolderOp folder:
-                    state.Folders[folder.Id] = (folder.ParentId, folder.Name);
+                    state.Folders[folder.Id] = (folder.ParentId, folder.Name, null);
                     break;
                 case AddLabelOp label:
                     state.Labels[label.Code] = (label.FolderId, label.Caption);

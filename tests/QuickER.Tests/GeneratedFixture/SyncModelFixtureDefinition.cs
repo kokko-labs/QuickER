@@ -15,10 +15,10 @@ namespace QuickER.Tests.GeneratedSyncModelFixture;
 /// <para>
 /// 端末 2 台＋サーバーへ乱数の操作の列を流し、収束と消失なしを表明するための図。既存の <c>SyncFixture</c> が
 /// 持たない形（同じ表の中の親子・版なしの表を参照する後ろの表・一意制約・NOT NULL の除外 blob・日時の主キー・
-/// 文字列の主キー）を 1 つの図へ集める。表は FK の順（親→子）に次の 4 つ:
+/// 文字列の主キー・表どうしの循環）を 1 つの図へ集める。表は FK の順（親→子。循環に属する表は宣言順で 1 つ先に出す）に次の 4 つ:
 /// </para>
 /// <list type="bullet">
-///   <item><c>model_folders</c>: <c>folder_id</c>（int・PK）／<c>parent_id</c>（int・NULL 許容・<b>自己参照</b>の FK）／<c>name</c>（nvarchar(40)・<b>UNIQUE</b>）／<c>row_ver</c>（rowversion・NULL 許容）</item>
+///   <item><c>model_folders</c>: <c>folder_id</c>（int・PK）／<c>parent_id</c>（int・NULL 許容・<b>自己参照</b>の FK）／<c>name</c>（nvarchar(40)・<b>UNIQUE</b>）／<c>pinned_item_id</c>（int・NULL 許容・<c>model_items</c> への FK＝<b>表どうしの循環</b>。乱数の生成器は書かない）／<c>row_ver</c>（rowversion・NULL 許容）</item>
 ///   <item><c>model_labels</c>: <c>label_code</c>（<b>varchar(20)</b>・PK）／<c>folder_id</c>（int・FK）／<c>caption</c>（nvarchar(40)）＝<b>rowversion なし</b>（後勝ち専用・キー順ページング）</item>
 ///   <item><c>model_items</c>: <c>item_id</c>（int・PK）／<c>folder_id</c>（int・FK）／<c>label_code</c>（varchar(20)・NULL 許容・版なしの表への FK）／<c>code</c>（nvarchar(20)・<b>UNIQUE</b>）／<c>title</c>（nvarchar(40)）／<c>payload</c>（varbinary(max)・<b>NOT NULL の除外列</b>）／<c>row_ver</c>（rowversion・NULL 許容）</item>
 ///   <item><c>model_events</c>: <c>event_at</c>（<b>datetime2</b>・PK）／<c>item_id</c>（int・FK）／<c>memo</c>（nvarchar(40)）／<c>row_ver</c>（rowversion・NULL 許容）</item>
@@ -72,6 +72,7 @@ public static class SyncModelFixtureDefinition
     private static readonly Guid FolderNameColId = new("c2000000-0000-0000-0000-000000000004");
     private static readonly Guid FolderRowVerColId = new("c2000000-0000-0000-0000-000000000005");
     private static readonly Guid FolderNameUniqueId = new("c2000000-0000-0000-0000-000000000006");
+    private static readonly Guid FolderPinnedColId = new("c2000000-0000-0000-0000-000000000007");
     private static readonly Guid LabelEntityId = new("c2000000-0000-0000-0000-000000000011");
     private static readonly Guid LabelPkColId = new("c2000000-0000-0000-0000-000000000012");
     private static readonly Guid LabelFolderColId = new("c2000000-0000-0000-0000-000000000013");
@@ -105,6 +106,9 @@ public static class SyncModelFixtureDefinition
     private static readonly Guid ItemEventRelationshipId = new(
         "c2000000-0000-0000-0000-000000000045"
     );
+    private static readonly Guid ItemFolderPinRelationshipId = new(
+        "c2000000-0000-0000-0000-000000000046"
+    );
 
     /// <summary>モデルベーステスト用の ER 図を決定的に構築する（型は SQL Server 表記）</summary>
     public static ErDiagram Build()
@@ -125,6 +129,16 @@ public static class SyncModelFixtureDefinition
                     IsNullable = true,
                 },
                 Text(FolderNameColId, "name", "nvarchar(40)"),
+                // 表どうしの循環（model_items が model_folders を参照し、model_folders がこの列で model_items を参照する）。
+                // 乱数の生成器はこの列に触れない（常に NULL）。決定的なシナリオだけが書く
+                new Column
+                {
+                    Id = FolderPinnedColId,
+                    Name = "pinned_item_id",
+                    DataType = "int",
+                    IsForeignKey = true,
+                    IsNullable = true,
+                },
                 RowVersion(FolderRowVerColId),
             },
 
@@ -264,6 +278,14 @@ public static class SyncModelFixtureDefinition
                     ItemPkColId,
                     EventItemColId,
                     "FK_model_events_model_items"
+                ),
+                Relation(
+                    ItemFolderPinRelationshipId,
+                    ItemEntityId,
+                    FolderEntityId,
+                    ItemPkColId,
+                    FolderPinnedColId,
+                    "FK_model_folders_model_items"
                 ),
             },
         };

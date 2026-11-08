@@ -87,10 +87,11 @@ public sealed class QuickER.Runtime.Sqlite.SqlConnectionFactory : QuickER.Runtim
     public .ctor(string connectionString)
     public Microsoft.Data.Sqlite.SqliteConnection CreateConnection()
 
-public sealed class QuickER.Runtime.Sqlite.SqlExecutor : QuickER.Runtime.ISqlExecutor
+public sealed class QuickER.Runtime.Sqlite.SqlExecutor : QuickER.Runtime.ISqlBatchExecutor, QuickER.Runtime.ISqlExecutor
     public .ctor(QuickER.Runtime.Sqlite.ISqlConnectionFactory connectionFactory)
     public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> QueryBySqlAsync<TEntity>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<int>> ExecuteSqlBatchAsync(System.Collections.Generic.IReadOnlyList<string> statements, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<TResult> ExecuteScalarSqlAsync<TResult>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<int> ExecuteSqlAsync(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
 

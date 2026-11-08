@@ -286,6 +286,9 @@ public interface QuickER.Runtime.ISaveHookInvoker
 public interface QuickER.Runtime.ISaveHookRegistry
     public virtual QuickER.Runtime.ISaveHookInvoker GetInvoker(System.Type entityType)
 
+public interface QuickER.Runtime.ISqlBatchExecutor
+    public virtual System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<int>> ExecuteSqlBatchAsync(System.Collections.Generic.IReadOnlyList<string> statements, System.Threading.CancellationToken cancellationToken = default)
+
 public interface QuickER.Runtime.ISqlExecutor
     public virtual System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TEntity>> QueryBySqlAsync<TEntity>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
     public virtual System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)

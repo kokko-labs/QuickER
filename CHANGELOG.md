@@ -27,6 +27,10 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 ### Added
 
+#### Generated code
+
+- **`ISqlBatchExecutor` runs several raw SQL statements as one transaction** — `ExecuteSqlBatchAsync` runs the statements in order on one connection, commits when every one succeeds and rolls back when one fails, and returns the number of rows each one affected. The generated SQLite `SqlExecutor` implements it, and a sync refresh uses it to empty tables that refer to each other in a cycle. An executor you wrap does not implement it unless it forwards the call
+
 #### Bidirectional sync
 
 - **`SyncTableDescriptor.CopyUniqueValues` writes the values of a table's unique constraints from one copy of a row into another** — the generated descriptors set it over the same constraints as `LocalUniqueLookups`, and a download uses it to settle rows whose unique values collide. A descriptor you build yourself copies nothing unless you set it; set it together with `LocalUniqueLookups`
@@ -150,6 +154,9 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **A graph save of a new row whose value-object key a Before hook sets no longer fails when the repository is wrapped for sync** — recording the row read its key before the hook had set it
 - **A new row whose key a Before hook sets while a sync is uploading is no longer dropped from the journal** — the upload decided the row by the key the entry held before the save moved it to the row's key, found no row, and removed the moved entry; the row then never reached the server
 - **Generated code with bidirectional sync now compiles when the diagram marks a primary key column as nullable** — the sync descriptor read the nullable property as the non-nullable key type of the repository, so the output failed with CS0266 for an `int` key, or with the warning CS8603 for a string or value-object key, while the generation reported no error. The generated code now treats a primary key column as NOT NULL (see Breaking changes)
+- **A row whose planned delete is recreated under the same key before the upload sends it now goes up as an update** — the upload found the row back and dropped the delete's entries along with the version the server held the row at, so the next run sent the recreated row as an insert and got a spurious `DuplicateOnServer` on every run (a `ServerWins` run overwrote the recreation instead)
+- **A `ServerWins` run no longer drops the earlier entries of a row the application edits while the run is in flight** — the run leaves such a row's content as it is, but it dropped the entries it had read, so a blob written before the run never reached the server, and a row deleted and recreated before the run went up as an insert refused as a duplicate on every run. Those entries now stay with the newer ones, and the next run sends them
+- **A refresh no longer fails on every run when the synchronised tables refer to each other in a foreign key cycle** — the local tables were emptied one at a time, and in a cycle the first delete was always refused, after `Force` had already dropped the unsent changes. With the generated SQLite executor, the tables of a cycle are now emptied in one transaction with the foreign key check deferred to its commit, and a failure leaves them as they were (see Added). A cycle among tables that use a wrapped executor or an `ISyncTable` of your own still fails as before
 
 ## [0.3.0] - 2026-10-25
 

@@ -747,7 +747,7 @@ internal static class ModelEntityRows
         {
             null => "null",
             ModelFolderEntity f =>
-                $"parent={(f.ParentId is { } p ? ModelDbState.Key(p) : "null")} name={f.Name}",
+                $"parent={(f.ParentId is { } p ? ModelDbState.Key(p) : "null")} name={f.Name}{ModelDbState.Pinned(f.PinnedItemId)}",
             ModelLabelEntity l => $"folder={ModelDbState.Key(l.FolderId)} caption={l.Caption}",
             ModelItemEntity i =>
                 $"folder={ModelDbState.Key(i.FolderId)} label={i.LabelCode ?? "null"} code={i.Code} title={i.Title}",

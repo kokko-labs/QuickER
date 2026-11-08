@@ -90,6 +90,12 @@ internal interface ISyncConfigFixture : IMatrixAdapter
     );
 
     /// <summary>
+    /// 洗い替えを 1 回流す（既定のモード＝後勝ち・ローカルの除外 blob は捨てる）。ローカルの全消しとサーバーの全行の流し込みが
+    /// 例外なく終わることを確かめる
+    /// </summary>
+    Task RefreshAsync(IServiceProvider provider, CancellationToken ct);
+
+    /// <summary>
     /// 登録の形の食い違い（<see cref="SyncConfigFixtures.RegistrationProblems"/>）。ローカルのリポジトリ・差分ソース・
     /// サーバーのリポジトリ（HTTP の行では null）を解決して渡す
     /// </summary>
