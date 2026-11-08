@@ -41,7 +41,9 @@ public static class DiagramLoadErrors
             DocumentLoadError.DuplicateId =>
                 $"Diagram file '{file}' uses the same identifier for more than one table, column or relationship, so it cannot be loaded: {exception!.Message}",
             DocumentLoadError.MissingRequiredText =>
-                $"Diagram file '{file}' is missing a required name or type (the key is absent or null), so it cannot be loaded: {exception!.Message}",
+                $"Diagram file '{file}' is missing a required name, type or identifier (the key is absent or null), so it cannot be loaded: {exception!.Message}",
+            DocumentLoadError.BrokenReference =>
+                $"Diagram file '{file}' has a relationship, column pair or unique constraint that refers to a table or column not in the diagram, so it cannot be loaded: {exception!.Message}",
             _ => throw new ArgumentOutOfRangeException(nameof(error), error, null),
         };
 

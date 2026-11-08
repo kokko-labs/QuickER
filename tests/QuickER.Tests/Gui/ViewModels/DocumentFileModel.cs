@@ -31,6 +31,7 @@ internal sealed record DocVersion(DocContentKind Content, IReadOnlyList<string> 
         {
             DocContentKind.DuplicateId => Strings.Open_DuplicateId,
             DocContentKind.MissingRequiredText => Strings.Open_MissingRequiredText,
+            DocContentKind.BrokenReference => Strings.Open_BrokenReference,
             _ => Strings.Open_Failed,
         };
 }

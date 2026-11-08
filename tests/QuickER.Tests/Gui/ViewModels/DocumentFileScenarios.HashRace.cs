@@ -258,6 +258,21 @@ internal static partial class DocumentFileScenarios
                         message.Should().Contain("TableName", "手で直すには場所が要る");
                     })
             ),
+            // 図に無い表を指すリレーション。開いて保存すると GUI がリレーションを黙って読み飛ばして消すので、断る
+            Row(
+                "openfail-broken-reference-dedicated-message",
+                "開く: 図に無い表を指すリレーションを持つ図は、参照を直すよう案内する専用の文言で断る",
+                Doc.WriteKind(A, DocContentKind.BrokenReference, "broken-relationship-source"),
+                Doc.Open(A)
+                    .Expect(o =>
+                    {
+                        var message = o.Errors.Should().ContainSingle().Subject;
+                        message
+                            .Should()
+                            .StartWith(string.Format(Strings.Open_BrokenReference, o.PathOf(A)));
+                        message.Should().Contain("SourceEntityId", "手で直すには場所が要る");
+                    })
+            ),
             Row(
                 "openfail-not-diagram-generic-message",
                 "開く: 無関係な JSON は一般の失敗として断る",

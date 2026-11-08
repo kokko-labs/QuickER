@@ -572,6 +572,14 @@ internal sealed class DocumentFileHarness : IDisposable
         Disk[write.File] = write.Label;
     }
 
+    /// <summary>
+    /// 既定の文字列で重複させる表の Id（空の Guid にしない＝空は Id の欠落として先に断られ、Id の重複に届かない）
+    /// </summary>
+    private static readonly Guid DuplicatedEntityId = new("6d3b1c0a-2f4e-4a8b-9c5d-7e1f2a3b4c5d");
+
+    /// <summary>既定の文字列で、どこも指さない参照に使う表の Id（図の中のどの表の Id とも違う）</summary>
+    private static readonly Guid MissingEntityId = new("8a2e4f6b-1c3d-4e5f-8a9b-0c1d2e3f4a5b");
+
     /// <summary>種類ごとの既定の文字列（図でないもの）</summary>
     public static string DefaultText(DocContentKind content) =>
         content switch
@@ -585,8 +593,22 @@ internal sealed class DocumentFileHarness : IDisposable
                   "Schema": {
                     "TargetDbms": "sqlserver",
                     "Entities": [
-                      { "Id": "{{Guid.Empty}}", "TableName": "Orders", "Columns": [] },
-                      { "Id": "{{Guid.Empty}}", "TableName": "OrderLines", "Columns": [] }
+                      { "Id": "{{DuplicatedEntityId}}", "TableName": "Orders", "Columns": [] },
+                      { "Id": "{{DuplicatedEntityId}}", "TableName": "OrderLines", "Columns": [] }
+                    ]
+                  }
+                }
+                """,
+            DocContentKind.BrokenReference => $$"""
+                {
+                  "Version": 1,
+                  "Schema": {
+                    "TargetDbms": "sqlserver",
+                    "Entities": [
+                      { "Id": "{{DuplicatedEntityId}}", "TableName": "Orders", "Columns": [] }
+                    ],
+                    "Relationships": [
+                      { "SourceEntityId": "{{MissingEntityId}}", "TargetEntityId": "{{DuplicatedEntityId}}" }
                     ]
                   }
                 }

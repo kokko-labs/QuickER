@@ -39,14 +39,27 @@ public enum DocumentLoadError
     DuplicateId,
 
     /// <summary>
-    /// 保存形式としては妥当だが、名前・型のような<b>推測で埋められない必須の文字列</b>のキーが無いか、
-    /// 明示的な <c>null</c> が書かれており図として扱えなかった
+    /// 保存形式としては妥当だが、名前・型のような<b>推測で埋められない必須の文字列</b>と、ほかから引かれる
+    /// 表・列の Id のどれかで、キーが無いか、明示的な <c>null</c>（Id は空の Guid）が書かれており図として扱えなかった
     /// </summary>
     /// <remarks>
     /// 該当箇所（テーブル名・列名・プロパティ名）は <c>exception</c> のメッセージが名指しする。
     /// <see cref="DuplicateId"/> と同じく手で直す以外に復旧手段が無いため、表示側は必ずその内容まで見せること。
+    /// 名前は歴史的な経緯で「Text」だが、表・列の Id の欠落も同じ種類で返す（どちらも「どの版も必ず書く必須の値」）。
     /// </remarks>
     MissingRequiredText,
+
+    /// <summary>
+    /// 保存形式としては妥当だが、リレーションの両端・列ペア・一意制約の構成列のどれかが、図に無い表・列を指している
+    /// （参照の Guid のキーが無い＝空の Guid も含む）ため図として扱えなかった
+    /// </summary>
+    /// <remarks>
+    /// 該当箇所（リレーション・列ペア・一意制約と、指していた Id）は <c>exception</c> のメッセージが名指しする。
+    /// 普通の操作ではこれらの参照は切れない（表の削除はリレーションを、列の削除は列ペアと一意制約を一緒に消す）ので、
+    /// 起こるのは JSON の手編集だけ。そのまま開くと GUI がリレーション・列ペアを黙って読み飛ばし、上書き保存で消える。
+    /// 表示側は必ずその内容まで見せること。
+    /// </remarks>
+    BrokenReference,
 }
 
 /// <summary>ER 図を JSON ファイルへ保存・読み込みするトップレベルサービス</summary>
@@ -57,29 +70,41 @@ public enum DocumentLoadError
 public static class JsonStorageService
 {
     /// <summary>
-    /// 逆直列化で、推測で埋められない必須の文字列を <c>null</c> にしたインスタンスを作る型ごとの作り方
+    /// 逆直列化で、推測で埋められない必須の値を空（文字列は <c>null</c>・Id は空の Guid）にしたインスタンスを作る型ごとの作り方
     /// </summary>
     /// <remarks>
     /// <para>
-    /// 対象は <see cref="FindMissingRequiredText"/> が見る 6 つ＝テーブル名・列名・列の型・クエリ名・
-    /// パラメータ名・射影フィールド名で、型は 5 つ。モデルの初期値（<c>NewTable</c>・<c>int</c> など）は
-    /// GUI・ツールの新規作成のための値なので、キーの無い図ファイルにそれを当てると、壊れた図が
-    /// それらしい名前・型のまま読めてしまい、上書き保存で元の内容が戻らなくなる。
-    /// ここで <c>null</c> から始めれば、キーが無いときも明示の <c>null</c> と同じ値が残り、
-    /// <see cref="TryLoad"/> の <see cref="FindMissingRequiredText"/> が同じ分岐で場所を名指しして断る
+    /// 対象は <see cref="FindMissingRequiredValue"/> が見る 8 つ＝テーブル名・列名・列の型・クエリ名・
+    /// パラメータ名・射影フィールド名の 6 つの文字列と、表・列の Id で、型は 5 つ。モデルの初期値（<c>NewTable</c>・<c>int</c>・
+    /// 新しい Guid など）は GUI・ツールの新規作成のための値なので、キーの無い図ファイルにそれを当てると、壊れた図が
+    /// それらしい名前・型のまま読めてしまい、上書き保存で元の内容が戻らなくなる。表・列の Id はレイアウト・リレーション・
+    /// 列ペア・一意制約・主キーの順序・クエリから引かれるので、新しい Guid で読むとそれらが黙って切れる。
+    /// ここで空から始めれば、キーが無いときも明示の <c>null</c>（空の Guid）と同じ値が残り、
+    /// <see cref="TryLoad"/> の <see cref="FindMissingRequiredValue"/> が同じ分岐で場所を名指しして断る
     /// （検査の置き場は 1 箇所のまま・修復しない）。
     /// </para>
     /// <para>
-    /// 差し替えるのは作り方だけで、ほかのプロパティの初期値（Id・コレクション・説明など）は
+    /// 差し替えるのは作り方だけで、ほかのプロパティの初期値（コレクション・説明など）は
     /// コンストラクタのとおり。直列化はこの作り方を使わないので、書き出す内容は変わらない。
-    /// 0.1.0 以降の版はこれらのキーを常に書く（初期値が非 null で、<see cref="JsonIgnoreCondition.WhenWritingNull"/>
+    /// 0.1.0 以降の版はこれらのキーを常に書く（初期値が非 null・Id は値型で、<see cref="JsonIgnoreCondition.WhenWritingNull"/>
     /// で消えるのはメモリ上が <c>null</c> のときだけ）ので、キーが無いのは手編集の図だけ。
     /// </para>
+    /// <para>
+    /// リレーション・一意制約・クエリの Id は対象にしない（図の中で誰も引かないので、キーが無ければ新しい Guid で読んでも
+    /// 失うものが無い。手書きの図を不要に断らない）。参照の Guid（リレーションの両端・列ペア・クエリの参照先）は
+    /// 初期化子が無いので、キーが無ければ元から空の Guid になる（扱いは <see cref="FindBrokenReference"/>）。
+    /// </para>
     /// </remarks>
-    private static readonly Dictionary<Type, Func<object>> CreateWithRequiredTextUnset = new()
+    private static readonly Dictionary<Type, Func<object>> CreateWithRequiredValuesUnset = new()
     {
-        [typeof(Entity)] = () => new Entity { TableName = null! },
-        [typeof(Column)] = () => new Column { Name = null!, DataType = null! },
+        [typeof(Entity)] = () => new Entity { Id = Guid.Empty, TableName = null! },
+        [typeof(Column)] = () =>
+            new Column
+            {
+                Id = Guid.Empty,
+                Name = null!,
+                DataType = null!,
+            },
         [typeof(QueryDefinition)] = () => new QueryDefinition { Name = null! },
         [typeof(QueryParameter)] = () => new QueryParameter { Name = null! },
         [typeof(ProjectionField)] = () => new ProjectionField { Name = null! },
@@ -88,10 +113,10 @@ public static class JsonStorageService
     /// <summary>可読性重視のシリアライズ設定（インデント付与・列挙体は名前で出力・null プロパティは省略）</summary>
     /// <remarks>
     /// null の省略（<see cref="JsonIgnoreCondition.WhenWritingNull"/>）は「値なし」をキーごと出さない
-    /// 図ファイルの正準形。読み込み側は、<b>推測で埋められない必須の文字列を除き</b>、キー欠落を
+    /// 図ファイルの正準形。読み込み側は、<b>推測で埋められない必須の値を除き</b>、キー欠落を
     /// プロパティ既定値で吸収するため相互に可換で、古い形式（null を明記した図ファイル）もそのまま読める
     /// （<see cref="Normalize"/> が非 null 契約のプロパティに書かれた null を既定値へ修復する）。
-    /// 必須の文字列はキーが無ければ <c>null</c> のまま残し（<see cref="CreateWithRequiredTextUnset"/>）、
+    /// 必須の値はキーが無ければ空のまま残し（<see cref="CreateWithRequiredValuesUnset"/>）、
     /// 明示の <c>null</c> と同じく <see cref="TryLoad"/> が断る。
     /// </remarks>
     private static readonly JsonSerializerOptions Options = new()
@@ -101,17 +126,17 @@ public static class JsonStorageService
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         TypeInfoResolver = new DefaultJsonTypeInfoResolver
         {
-            Modifiers = { LeaveRequiredTextUnset },
+            Modifiers = { LeaveRequiredValuesUnset },
         },
     };
 
     /// <summary>
-    /// 必須の文字列を持つ型の作り方を <see cref="CreateWithRequiredTextUnset"/> へ差し替える
+    /// 必須の値を持つ型の作り方を <see cref="CreateWithRequiredValuesUnset"/> へ差し替える
     /// （<see cref="Options"/> の型情報の修飾子）
     /// </summary>
-    private static void LeaveRequiredTextUnset(JsonTypeInfo typeInfo)
+    private static void LeaveRequiredValuesUnset(JsonTypeInfo typeInfo)
     {
-        if (CreateWithRequiredTextUnset.TryGetValue(typeInfo.Type, out var create))
+        if (CreateWithRequiredValuesUnset.TryGetValue(typeInfo.Type, out var create))
         {
             typeInfo.CreateObject = create;
         }
@@ -178,8 +203,8 @@ public static class JsonStorageService
     /// 用途（テストのフィクスチャ）に用いる。
     /// </para>
     /// <para>
-    /// 検査はしないので、必須の文字列（<see cref="FindMissingRequiredText"/> の 6 つ）は、キーが無くても
-    /// 明示の <c>null</c> でも <c>null</c> のまま返す（<see cref="TryLoad"/> と同じ <see cref="Options"/> で読む＝
+    /// 検査はしないので、必須の値（<see cref="FindMissingRequiredValue"/> の 6 つの文字列と表・列の Id）は、キーが無くても
+    /// 明示の <c>null</c>（空の Guid）でも空のまま返す。図に無い表・列を指す参照もそのまま返す（<see cref="TryLoad"/> と同じ <see cref="Options"/> で読む＝
     /// 読込結果は一致し、断るかどうかだけが違う）。
     /// </para>
     /// </remarks>
@@ -190,7 +215,8 @@ public static class JsonStorageService
     /// <summary>ER 図の保存形式として妥当か検証したうえでファイルから保存文書を読み込む</summary>
     /// <remarks>
     /// 検証は「読み取り → JSON 解析 → ルートが JSON オブジェクトか → ルートのキー重複 →
-    /// <c>Version</c>・<c>Schema</c> を持つか → 逆直列化 → 版番号 → 必須文字列の欠落（キーが無いか明示の <c>null</c>） → Id の重複」の順で、
+    /// <c>Version</c>・<c>Schema</c> を持つか → 逆直列化 → 版番号 → 必須の値の欠落（キーが無いか明示の <c>null</c>・空の Guid） →
+    /// Id の重複 → 図に無い表・列を指す参照」の順で、
     /// <see cref="JsonStorageService"/> の読込仕様に合わせ
     /// キー名の大文字小文字は区別する。無関係な JSON（例 <c>package.json</c>）を「空図」として読み込み、
     /// 誤解釈・上書きするのを防ぐ。
@@ -211,7 +237,7 @@ public static class JsonStorageService
     /// <param name="exception">
     /// 失敗の原因となった例外。<see cref="DocumentLoadError.ReadFailed"/>・
     /// <see cref="DocumentLoadError.InvalidJson"/>・<see cref="DocumentLoadError.DuplicateId"/>・
-    /// <see cref="DocumentLoadError.MissingRequiredText"/> のときだけ非 null で、
+    /// <see cref="DocumentLoadError.MissingRequiredText"/>・<see cref="DocumentLoadError.BrokenReference"/> のときだけ非 null で、
     /// 形式検証で弾いた場合と成功時は null。
     /// </param>
     /// <returns>読み込めた場合は <c>true</c></returns>
@@ -325,10 +351,10 @@ public static class JsonStorageService
             return false;
         }
 
-        // 名前・型の欠落（キーが無いか明示の null。どちらも逆直列化の後は null）は修復せず拒否する
-        // （理由は FindMissingRequiredText）。Id の重複より先に見るのは、名前が null のままでは
-        // 重複の説明が場所を名指しできないため
-        if (FindMissingRequiredText(loaded.Schema) is { } missing)
+        // 名前・型・表と列の Id の欠落（キーが無いか明示の null・空の Guid。どちらも逆直列化の後は空）は
+        // 修復せず拒否する（理由は FindMissingRequiredValue）。Id の重複より先に見るのは、名前が null のままでは
+        // 重複の説明が場所を名指しできないため（空の Id が 2 つあれば重複にも見えるが、欠落として先に名指しする）
+        if (FindMissingRequiredValue(loaded.Schema) is { } missing)
         {
             error = DocumentLoadError.MissingRequiredText;
             exception = new InvalidDataException(missing);
@@ -343,32 +369,44 @@ public static class JsonStorageService
             return false;
         }
 
+        // 図に無い表・列を指す参照は修復せず拒否する（理由は FindBrokenReference）。
+        // Id の重複より後に見るのは、表・列を Id で一意に引ける前提で参照を解くため
+        if (FindBrokenReference(loaded.Schema) is { } broken)
+        {
+            error = DocumentLoadError.BrokenReference;
+            exception = new InvalidDataException(broken);
+            return false;
+        }
+
         document = loaded;
         return true;
     }
 
     /// <summary>
-    /// 名前・型のような「推測で埋められない必須の文字列」が欠けていないか（キーが無いか明示的な <c>null</c>）調べ、
-    /// 最初に見つかった箇所の説明を返す（無ければ null）
+    /// 名前・型のような「推測で埋められない必須の文字列」と、ほかから引かれる表・列の Id が欠けていないか
+    /// （キーが無いか明示的な <c>null</c>・空の Guid）調べ、最初に見つかった箇所の説明を返す（無ければ null）
     /// </summary>
     /// <remarks>
     /// <para>
     /// <b>修復はしない。</b>これらのプロパティはモデル側が非 NULL 許容で宣言しており、アプリ側に
     /// <c>null</c> を書く経路も、キーを書かない経路も無い（GUI・MCP ツール・各種取込・C# リバースはいずれも
-    /// 文字列を組み立てて渡し、NULL 許容の綻びはビルドが警告＝エラーとして止める）。起こるのは JSON の手編集だけなので、
+    /// 文字列を組み立てて渡し、NULL 許容の綻びはビルドが警告＝エラーとして止める。Id は値型でいつも書かれ、
+    /// <see cref="Guid.NewGuid"/> は空の Guid を作らない）。起こるのは JSON の手編集だけなので、
     /// 既定値で埋めて意味を推測するより、どこが欠けているかを名指しして読込を断るほうが直せる。
     /// </para>
     /// <para>
-    /// キーの欠落と明示の <c>null</c> は、逆直列化の後はどちらも <c>null</c> になる
-    /// （<see cref="CreateWithRequiredTextUnset"/> が <c>null</c> から始めるため）。ここは 1 つの分岐で両方を見て、
-    /// 文言も区別しない（<c>missing or null</c>）。
+    /// キーの欠落と明示の <c>null</c>（Id は空の Guid）は、逆直列化の後はどちらも空になる
+    /// （<see cref="CreateWithRequiredValuesUnset"/> が空から始めるため）。ここは 1 つの分岐で両方を見て、
+    /// 文言も区別しない（<c>missing or null</c>・<c>missing or empty</c>）。
     /// </para>
     /// <para>
     /// 対象は<b>推測で埋めると図の意味が変わるもの</b>だけ＝テーブル名・列名・<b>列の型</b>・
-    /// クエリ名・パラメータ名・射影フィールド名の 6 つ。列の型を既定値（<c>int</c>）で埋めるのは、
-    /// 名前を勝手に付け直すのと同じ性質の書き換えになる。
+    /// クエリ名・パラメータ名・射影フィールド名の 6 つと、<b>表・列の Id</b>。列の型を既定値（<c>int</c>）で埋めるのは、
+    /// 名前を勝手に付け直すのと同じ性質の書き換えになる。表・列の Id を新しい Guid で埋めると、レイアウト・リレーション・
+    /// 列ペア・一意制約・主キーの順序・クエリからの参照が黙って切れる。
     /// 説明・メモのような任意の文字列は空文字へ修復する（<see cref="Normalize"/>）＝埋めても意味が変わらない。
     /// 対象 DBMS も従来どおり既定値へ修復する（方言は図の意味でなく出力先の指定で、既定が定まっている）。
+    /// リレーション・一意制約・クエリの Id は誰も引かないので見ない（<see cref="CreateWithRequiredValuesUnset"/>）。
     /// </para>
     /// <para>
     /// 名前が <c>null</c> のものは名指しできないため、現れた順の番号（1 始まり）で位置を示す。
@@ -376,7 +414,7 @@ public static class JsonStorageService
     /// （<see cref="FindDuplicateId"/> と同じ規約）。
     /// </para>
     /// </remarks>
-    private static string? FindMissingRequiredText(ErDiagram schema)
+    private static string? FindMissingRequiredValue(ErDiagram schema)
     {
         for (var entityIndex = 0; entityIndex < schema.Entities.Count; entityIndex++)
         {
@@ -385,6 +423,11 @@ public static class JsonStorageService
             if (entity.TableName is null)
             {
                 return $"\"TableName\" is missing or null for entity #{entityIndex + 1}.";
+            }
+
+            if (entity.Id == Guid.Empty)
+            {
+                return $"\"Id\" is missing or empty for table '{entity.TableName}'.";
             }
 
             for (var columnIndex = 0; columnIndex < entity.Columns.Count; columnIndex++)
@@ -399,6 +442,11 @@ public static class JsonStorageService
                 if (column.DataType is null)
                 {
                     return $"\"DataType\" is missing or null for column '{column.Name}' of table '{entity.TableName}'.";
+                }
+
+                if (column.Id == Guid.Empty)
+                {
+                    return $"\"Id\" is missing or empty for column '{column.Name}' of table '{entity.TableName}'.";
                 }
             }
         }
@@ -504,6 +552,187 @@ public static class JsonStorageService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 図に無い表・列を指す参照（リレーションの両端・列ペアの列・一意制約の構成列）を探し、
+    /// 最初に見つかった箇所の説明を返す（無ければ null）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>修復はしない。</b>普通の操作ではこれらの参照は切れない（表の削除は接するリレーションを、列の削除は
+    /// その列を使う列ペアを全部空にし、その列を含む一意制約を消す。GUI・MCP・内蔵チャットとも v0.1.0 から。
+    /// 取込は列を引けないペアを空にして警告する）。起こるのは JSON の手編集だけ。そのまま開くと GUI は両端を
+    /// 解けないリレーションと列を解けない列ペアを黙って読み飛ばし、上書き保存で消える。一意制約は保持されるが、
+    /// DDL・生成が警告なしでその制約を出さない。どれも推測で直せないので、場所を名指しして断る。
+    /// 参照の Guid のキーが無いときは空の Guid になる（初期化子が無い）ので、図に無い Id と同じに扱い、
+    /// 文言だけ「missing」と言い分ける。
+    /// </para>
+    /// <para>
+    /// 列ペアの列は端の表の列でなければならない（親の列は <see cref="Relationship.SourceEntityId"/> の表、
+    /// 子の列は <see cref="Relationship.TargetEntityId"/> の表）。GUI の整合処理（<c>RelationshipViewModel</c>）と同じ判定で、
+    /// 別の表の列を指すペアもここで断る。
+    /// </para>
+    /// <para>
+    /// <b>次の参照は断らない</b>（見ないことが仕様）。
+    /// 主キーの順序 <see cref="Entity.PrimaryKeyColumnIds"/> の解けない Id は、列の削除・主キーの切り替えが掃除しない
+    /// 設計で、普通に保存した図に残る（読み手 <see cref="Entity.GetPrimaryKeyColumnsInOrder"/> が無視する）。
+    /// クエリの <see cref="QueryDefinition.EntityId"/> は、表の削除がクエリを消すようになる前の版（v0.2.0 まで）で
+    /// 保存した図に残りうる。クエリの列参照（パラメータ・並び順・射影）は、列の削除がクエリを掃除しないので
+    /// 普通の操作で切れる。どちらも見えて直せる（定義ダイアログが OK を止め、生成が警告してそのクエリを飛ばし、
+    /// MCP の <c>list_queries</c> が孤児として出して <c>remove_query</c> で消せる）。レイアウトの、表を指さないキーは
+    /// 図の意味を持たず、GUI の保存で消えるだけ。断ると、どれも普通に保存した図・公開版の図を開けなくする。
+    /// </para>
+    /// <para>
+    /// 表・列を Id で一意に引けることが前提なので、<see cref="FindDuplicateId"/> の後に呼ぶ。
+    /// 説明文は英語固定で、利用者向けの見出しは表示側が付ける（<see cref="FindDuplicateId"/> と同じ規約）。
+    /// </para>
+    /// </remarks>
+    private static string? FindBrokenReference(ErDiagram schema)
+    {
+        var entityById = schema.Entities.ToDictionary(entity => entity.Id);
+
+        for (var index = 0; index < schema.Relationships.Count; index++)
+        {
+            var relationship = schema.Relationships[index];
+            var named = string.IsNullOrEmpty(relationship.ConstraintName)
+                ? $"relationship #{index + 1}"
+                : $"relationship '{relationship.ConstraintName}'";
+
+            if (
+                DescribeBrokenEntityReference(
+                    nameof(Relationship.SourceEntityId),
+                    relationship.SourceEntityId,
+                    named,
+                    entityById
+                ) is
+                { } brokenSource
+            )
+            {
+                return brokenSource;
+            }
+
+            if (
+                DescribeBrokenEntityReference(
+                    nameof(Relationship.TargetEntityId),
+                    relationship.TargetEntityId,
+                    named,
+                    entityById
+                ) is
+                { } brokenTarget
+            )
+            {
+                return brokenTarget;
+            }
+
+            var source = entityById[relationship.SourceEntityId];
+            var target = entityById[relationship.TargetEntityId];
+
+            for (var pairIndex = 0; pairIndex < relationship.ColumnPairs.Count; pairIndex++)
+            {
+                var pair = relationship.ColumnPairs[pairIndex];
+                var place = $"column pair #{pairIndex + 1} of {named}";
+
+                if (
+                    DescribeBrokenColumnReference(
+                        nameof(RelationshipColumnPair.SourceColumnId),
+                        pair.SourceColumnId,
+                        place,
+                        source
+                    ) is
+                    { } brokenParentColumn
+                )
+                {
+                    return brokenParentColumn;
+                }
+
+                if (
+                    DescribeBrokenColumnReference(
+                        nameof(RelationshipColumnPair.TargetColumnId),
+                        pair.TargetColumnId,
+                        place,
+                        target
+                    ) is
+                    { } brokenChildColumn
+                )
+                {
+                    return brokenChildColumn;
+                }
+            }
+        }
+
+        foreach (var entity in schema.Entities)
+        {
+            for (var index = 0; index < entity.UniqueConstraints.Count; index++)
+            {
+                var constraint = entity.UniqueConstraints[index];
+                var place = string.IsNullOrEmpty(constraint.Name)
+                    ? $"unique constraint #{index + 1} of table '{entity.TableName}'"
+                    : $"unique constraint '{constraint.Name}' of table '{entity.TableName}'";
+
+                foreach (var columnId in constraint.ColumnIds)
+                {
+                    if (
+                        DescribeBrokenColumnReference(
+                            nameof(UniqueConstraint.ColumnIds),
+                            columnId,
+                            place,
+                            entity
+                        ) is
+                        { } brokenMember
+                    )
+                    {
+                        return brokenMember;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>表を指す参照が図に無い表を指していれば説明を返す（解ければ null）</summary>
+    /// <param name="property">参照のプロパティ名（文言に出す）</param>
+    /// <param name="entityId">参照している表の Id（空の Guid はキーの欠落）</param>
+    /// <param name="place">参照の持ち主の呼び名（文言に出す）</param>
+    /// <param name="entityById">図の表の Id からの引き当て</param>
+    private static string? DescribeBrokenEntityReference(
+        string property,
+        Guid entityId,
+        string place,
+        Dictionary<Guid, Entity> entityById
+    )
+    {
+        if (entityById.ContainsKey(entityId))
+        {
+            return null;
+        }
+
+        return entityId == Guid.Empty
+            ? $"\"{property}\" is missing for {place}."
+            : $"\"{property}\" of {place} refers to table Id '{entityId}', which is not in the diagram.";
+    }
+
+    /// <summary>列を指す参照が、指すべき表の列でなければ説明を返す（その表の列なら null）</summary>
+    /// <param name="property">参照のプロパティ名（文言に出す）</param>
+    /// <param name="columnId">参照している列の Id（空の Guid はキーの欠落）</param>
+    /// <param name="place">参照の持ち主の呼び名（文言に出す）</param>
+    /// <param name="owner">列を持っているべき表</param>
+    private static string? DescribeBrokenColumnReference(
+        string property,
+        Guid columnId,
+        string place,
+        Entity owner
+    )
+    {
+        if (owner.Columns.Any(column => column.Id == columnId))
+        {
+            return null;
+        }
+
+        return columnId == Guid.Empty
+            ? $"\"{property}\" is missing for {place}."
+            : $"\"{property}\" of {place} refers to column Id '{columnId}', which is not a column of table '{owner.TableName}'.";
     }
 
     /// <summary>重複の説明に使うリレーションの呼び名（制約名があれば制約名、無ければ親と子のテーブル名）</summary>
@@ -644,9 +873,9 @@ public static class JsonStorageService
     /// </para>
     /// <para>
     /// <b>ここで修復するのは「埋めても図の意味が変わらないもの」だけ</b>＝コレクション（空へ）・
-    /// 説明とメモ（空文字へ）・対象 DBMS（既定の方言へ）。名前・型のような<b>推測で埋めると
-    /// 図の意味が変わるもの</b>（キーが無いときも <c>null</c> のまま届く）には触れず、<see cref="TryLoad"/> の
-    /// <see cref="FindMissingRequiredText"/> が場所を名指しして拒否する。
+    /// 説明とメモ（空文字へ）・対象 DBMS（既定の方言へ）。名前・型・表と列の Id のような<b>推測で埋めると
+    /// 図の意味が変わるもの</b>（キーが無いときも空のまま届く）と参照の Guid には触れず、<see cref="TryLoad"/> の
+    /// <see cref="FindMissingRequiredValue"/>・<see cref="FindBrokenReference"/> が場所を名指しして拒否する。
     /// 図として妥当かどうか（無関係な JSON でないか）の判定も <see cref="TryLoad"/> が担う。
     /// </para>
     /// </remarks>

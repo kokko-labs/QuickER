@@ -251,7 +251,10 @@
     <value>The schema file uses the same identifier for more than one table, column or relationship: {0} ({1}). Edit the JSON by hand to give each one its own identifier.</value>
   </data>
   <data name="Cli_SchemaMissingRequiredText" xml:space="preserve">
-    <value>A required name or type is missing or null in the schema file: {0} ({1}). Edit the JSON by hand to fill it in.</value>
+    <value>A required name, type or identifier is missing or null in the schema file: {0} ({1}). Edit the JSON by hand to fill it in.</value>
+  </data>
+  <data name="Cli_SchemaBrokenReference" xml:space="preserve">
+    <value>A relationship, a column pair or a unique constraint in the schema file refers to a table or column that is not in the diagram: {0} ({1}). Edit the JSON by hand to correct or remove the reference.</value>
   </data>
   <data name="Cli_GenerationAborted" xml:space="preserve">
     <value>Aborted due to a generation error.</value>

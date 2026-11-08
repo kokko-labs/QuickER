@@ -293,6 +293,11 @@ public static class CliApp
                         schemaFile.FullName,
                         exception!.Message
                     ),
+                    DocumentLoadError.BrokenReference => string.Format(
+                        Strings.Cli_SchemaBrokenReference,
+                        schemaFile.FullName,
+                        exception!.Message
+                    ),
                     _ => throw new ArgumentOutOfRangeException(nameof(error), error, null),
                 }
             );

@@ -1581,6 +1581,11 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("Open_MissingRequiredText", resourceCulture);
             }
         }
+        public static string Open_BrokenReference {
+            get {
+                return ResourceManager.GetString("Open_BrokenReference", resourceCulture);
+            }
+        }
         public static string Confirm_OverwriteExternalChange {
             get {
                 return ResourceManager.GetString("Confirm_OverwriteExternalChange", resourceCulture);

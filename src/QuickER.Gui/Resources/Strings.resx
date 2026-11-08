@@ -762,7 +762,10 @@
     <value>Failed to open '{0}'. The file uses the same identifier for more than one table, column or relationship, so the diagram cannot be used as it is. Edit the JSON by hand to give each one its own identifier. The current diagram was kept.</value>
   </data>
   <data name="Open_MissingRequiredText" xml:space="preserve">
-    <value>Failed to open '{0}'. A required name or type is missing or null, so the diagram cannot be loaded. Edit the JSON by hand to fill it in. The current diagram was kept.</value>
+    <value>Failed to open '{0}'. A required name, type or identifier is missing or null, so the diagram cannot be loaded. Edit the JSON by hand to fill it in. The current diagram was kept.</value>
+  </data>
+  <data name="Open_BrokenReference" xml:space="preserve">
+    <value>Failed to open '{0}'. A relationship, a column pair or a unique constraint refers to a table or column that is not in the diagram, so the diagram cannot be loaded without losing it. Edit the JSON by hand to correct or remove the reference. The current diagram was kept.</value>
   </data>
   <data name="Save_Failed" xml:space="preserve">
     <value>Failed to save. Your changes were kept as unsaved; try saving again or save to another location.</value>

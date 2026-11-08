@@ -63,6 +63,10 @@ internal static class DocumentFormatDimensions
                 result.ToString(),
                 AxisMember.Of(DocumentLoadError.MissingRequiredText)
             ),
+            FormatResult.BrokenReference => new Level(
+                result.ToString(),
+                AxisMember.Of(DocumentLoadError.BrokenReference)
+            ),
             _ => new Level(result.ToString()),
         };
 
@@ -91,7 +95,8 @@ internal static class DocumentFormatDimensions
                     or FormatResult.InvalidJson
                     or FormatResult.NotDiagramDocument
                     or FormatResult.DuplicateId
-                    or FormatResult.MissingRequiredText,
+                    or FormatResult.MissingRequiredText
+                    or FormatResult.BrokenReference,
             // 往復は書いて読み戻す（書けないか読めなければ例外）
             FormatStage.RoundTrip => result is FormatResult.Loaded or FormatResult.Threw,
             // 書き込みは書けたか例外

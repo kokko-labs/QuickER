@@ -1137,7 +1137,7 @@ public partial class MainViewModel : IDiagramTransferHost
             return;
         }
 
-        // 破損 JSON・非 DiagramDocument JSON・Id 重複・必須の名前や型の null・IO 失敗は現状維持のうえ通知する
+        // 破損 JSON・非 DiagramDocument JSON・Id 重複・必須の値の欠落・図に無い表や列を指す参照・IO 失敗は現状維持のうえ通知する
         if (
             !TryLoadDiagramDocument(
                 picked.Path,
@@ -1148,9 +1148,9 @@ public partial class MainViewModel : IDiagramTransferHost
             )
         )
         {
-            // 原因を持つ失敗（IO エラー・不正 JSON・Id 重複・必須の名前や型の null）は他の失敗通知と
+            // 原因を持つ失敗（IO エラー・不正 JSON・Id 重複・必須の値の欠落・図に無い表や列を指す参照）は他の失敗通知と
             // 同じ流儀で例外メッセージを連結する。形式検証で弾いた場合は例外が無いため、本文が挙げる
-            // 原因候補だけを示す。Id 重複と必須文字列の欠落は復旧手段が JSON の手編集しかないため、
+            // 原因候補だけを示す。Id 重複・必須の値の欠落・切れた参照は復旧手段が JSON の手編集しかないため、
             // そう案内する専用の文言を使う
             var message = kind switch
             {
@@ -1160,6 +1160,10 @@ public partial class MainViewModel : IDiagramTransferHost
                 ),
                 DocumentLoadError.MissingRequiredText => string.Format(
                     Strings.Open_MissingRequiredText,
+                    picked.Path
+                ),
+                DocumentLoadError.BrokenReference => string.Format(
+                    Strings.Open_BrokenReference,
                     picked.Path
                 ),
                 _ => string.Format(Strings.Open_Failed, picked.Path),

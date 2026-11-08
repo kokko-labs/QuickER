@@ -48,6 +48,9 @@ internal enum DocContentKind
 
     /// <summary>Schema が明示 null の図（図でないとして断られる）</summary>
     NullSchema,
+
+    /// <summary>リレーションの親の表が図に無い Id を指す図（参照で断られる。乱数の手の列は作らず、決まった形の行だけが使う）</summary>
+    BrokenReference,
 }
 
 /// <summary>割り込みの書き込みを差し込む製品の口</summary>
