@@ -302,16 +302,16 @@ public sealed class WorkflowGuardTests
             testStep
                 .Should()
                 .Contain(
-                    $"--logger \"trx;LogFileName={job}.trx\"",
-                    $"{job} はテストの結果を TRX で書く"
+                    $"--report-trx --report-trx-filename {job}.trx",
+                    $"{job} はテストの結果を TRX で書く（MTP の TrxReport 拡張。テストの出力が StdOut に入る）"
                 )
                 .And.Contain(
                     $"--results-directory \"{NightlyResultsDirectory}\"",
                     $"{job} は TRX をランナーの一時領域へ書く"
                 )
                 .And.Contain(
-                    "--logger \"console;verbosity=normal\"",
-                    $"{job} はコンソールのログも残す"
+                    "--output detailed",
+                    $"{job} はコンソールのログにも各テストの結果を残す"
                 );
 
             var uploads = JobSteps(jobs[job])
@@ -350,6 +350,366 @@ public sealed class WorkflowGuardTests
         }
 
         artifactNames.Should().OnlyHaveUniqueItems("ジョブごとに別の成果物の名前にする");
+    }
+
+    /// <summary>CI の Windows のテストは TRX を書き、失敗した実行にも成果物として残す</summary>
+    /// <remarks>
+    /// MTP のコンソールは表示名だけを出すので、テストのクラスごとの時間（P5 の時間の比較）は TRX の完全修飾名で読む。
+    /// <c>QuickER.slnx</c> は 2 つのプロジェクトを流すので、TRX のファイル名は指定しない（指定するとプロジェクトどうしで同じ名前に上書きする）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "ci.yml の Windows のテストは TRX を書き、if: always() の upload-artifact で保存する"
+    )]
+    public void WindowsTestStep_KeepsTestResultsAsArtifacts()
+    {
+        var job = Jobs(ReadWorkflow("ci.yml"))["build-and-test"];
+        var testStep = NightlyTestStep(job);
+
+        testStep
+            .Should()
+            .Contain(
+                $"--report-trx --results-directory \"{CiResultsDirectory}\"",
+                "TRX をランナーの一時領域へ書く"
+            )
+            .And.NotContain("--report-trx-filename", "2 つのプロジェクトが同じ名前に上書きしない");
+        AssertKeptArtifact(job, $"{CiResultsDirectory}/*.trx", "build-and-test");
+    }
+
+    /// <summary>変異テストのワークフローは定時と手動でだけ動き、毎晩と週 1 回の 2 つの定時を持つ</summary>
+    [Fact(
+        DisplayName = "mutation.yml のトリガーは schedule の 2 つ（毎晩・週 1 回）と workflow_dispatch だけ"
+    )]
+    public void Mutation_RunsOnlyOnScheduleAndDispatch()
+    {
+        var workflow = ReadWorkflow("mutation.yml");
+
+        TopLevelBlockKeys(workflow, "on")
+            .Should()
+            .BeEquivalentTo(
+                ["schedule", "workflow_dispatch"],
+                "push・pull_request で数時間の変異テストを流さない"
+            );
+        Regex
+            .Matches(workflow, @"(?m)^\s+- cron: ""(?<cron>[^""]+)""\s*$")
+            .Select(match => match.Groups["cron"].Value)
+            .Should()
+            .Equal(
+                [MutationNightlyCron, MutationWeeklyCron],
+                "毎晩の Model と週 1 回の Provider・CodeGen"
+            );
+    }
+
+    /// <summary>変異テストのワークフローの GITHUB_TOKEN は読み取り専用で、同時実行の組は夜間のワークフローと別・取り消さない</summary>
+    [Fact(
+        DisplayName = "mutation.yml の permissions は contents: read だけで、concurrency は mutation- の組・取り消さない"
+    )]
+    public void Mutation_IsReadOnlyAndNotCancelled()
+    {
+        var workflow = ReadWorkflow("mutation.yml");
+
+        TopLevelBlock(workflow, "permissions")
+            .Select(line => line.Trim())
+            .Where(line => line.Length > 0 && !line.StartsWith('#'))
+            .Should()
+            .Equal("contents: read");
+
+        var concurrency = TopLevelBlock(workflow, "concurrency")
+            .Select(line => line.Trim())
+            .Where(line => line.Length > 0 && !line.StartsWith('#'))
+            .ToList();
+
+        concurrency
+            .Should()
+            .Equal(
+                [
+                    "group: mutation-${{ github.event.schedule || inputs.scope }}",
+                    "cancel-in-progress: false",
+                ],
+                "毎晩と週 1 回を別の組にし（長い週 1 回が毎晩を待たせない）、走っている夜の結果を取り消さない"
+            );
+    }
+
+    /// <summary>変異テストのワークフローの各ジョブは、時間の上限を既定（360 分）に任せず明示する</summary>
+    [Fact(DisplayName = "mutation.yml の各ジョブは timeout-minutes を 360 未満で明示する")]
+    public void Mutation_JobsTimeOutExplicitly()
+    {
+        var jobs = Jobs(ReadWorkflow("mutation.yml"));
+
+        jobs.Keys.Should().BeEquivalentTo(["plan", "mutation"]);
+
+        foreach (var (job, body) in jobs)
+        {
+            var match = Regex.Match(body, @"(?m)^    timeout-minutes: (?<minutes>\d+)\s*$");
+
+            match.Success.Should().BeTrue($"{job} に timeout-minutes がある");
+            int.Parse(match.Groups["minutes"].Value, CultureInfo.InvariantCulture)
+                .Should()
+                .BeInRange(1, 359, $"{job} はジョブの上限（6 時間）の手前で止める");
+        }
+    }
+
+    /// <summary>
+    /// 変異テストは、ツールのマニフェストの版の Stryker を起動スクリプト（scripts/run-mutation.ps1）越しに範囲の設定と並列度 4 で呼び、
+    /// 結果を if: always() の成果物に残す。点数で赤にする引数をコマンドに足さない
+    /// </summary>
+    /// <remarks>
+    /// ワークフローが dotnet stryker を直に呼ぶと、テストだけのソリューションの写しを作る手順（Stryker が ../ のパスでテストを
+    /// 0 件と数えるのを避ける）を通らない。版を書いた <c>dotnet tool install</c> はマニフェストと別の版を入れ得る。
+    /// 並列度を書かないと Stryker の既定（コアの半分＝4 vCPU で 2）になり、Model でも時間の上限に届く見込み。
+    /// <c>--break-at</c>・<c>-b</c>・<c>--threshold-*</c> は設定の thresholds を上書きする。
+    /// </remarks>
+    [Fact(
+        DisplayName = "mutation.yml は tool restore の Stryker を起動スクリプトから範囲の設定と並列度 4 で呼び、点数で赤にせず、結果を成果物に残す"
+    )]
+    public void Mutation_RunsStrykerFromToolManifestAndKeepsReports()
+    {
+        var workflow = ReadWorkflow("mutation.yml");
+        var job = Jobs(workflow)["mutation"];
+        var steps = JobSteps(job);
+
+        workflow
+            .Should()
+            .NotContain("dotnet tool install", "Stryker の版の正本は .config/dotnet-tools.json");
+        workflow
+            .Should()
+            .NotContain(
+                "dotnet stryker",
+                "Stryker は起動スクリプトから呼ぶ（直に呼ぶとソリューションの写しを作る手順を通らない）"
+            );
+        steps
+            .Where(step => Regex.IsMatch(step, @"(?m)^\s+run: dotnet tool restore\s*$"))
+            .Should()
+            .ContainSingle("Stryker はマニフェストから入れる");
+
+        var strykerSteps = steps
+            .Where(step => step.Contains(MutationScriptCall, StringComparison.Ordinal))
+            .ToList();
+
+        strykerSteps.Should().ContainSingle("変異テストの手順はちょうど 1 つ");
+
+        var stryker = strykerSteps[0];
+
+        Regex
+            .IsMatch(stryker, @"(?m)^\s+working-directory:")
+            .Should()
+            .BeFalse("起動スクリプトが自分でリポジトリのルートへ移る");
+        stryker
+            .Should()
+            .Contain(
+                $"{MutationScriptCall} -Target ${{{{ matrix.target }}}} -OutputDirectory \"{MutationResultsDirectory}\" -Concurrency 4",
+                "範囲の設定を選び、結果をランナーの一時領域へ書き、並列度を 4 vCPU に合わせる"
+            );
+        Regex
+            .IsMatch(stryker, @"\s(?:--break-at|-b|--threshold-high|--threshold-low)\b")
+            .Should()
+            .BeFalse("点数で赤にする引数を足さない（設定の thresholds.break 0 が正本）");
+        AssertTempOnRunnerTemp(stryker);
+        AssertKeptArtifact(job, MutationResultsDirectory, "mutation");
+    }
+
+    /// <summary>
+    /// 起動スクリプトは、テストだけのソリューションの ../ を外した写しをルートに作ってから、ルートで Stryker を範囲の設定・写し・
+    /// 並列度・ログつきで呼び、成功でも失敗でも写しを消し、Stryker の失敗を終了コードで伝える。写しの名前は .gitignore にある
+    /// </summary>
+    /// <remarks>
+    /// Stryker 5 は ../ で始まるパスのソリューションではテストを 0 件と数えて止まる。写しが残るとルートで引数なしの
+    /// dotnet build / dotnet test がソリューションが 2 つで止まる。GitHub Actions の pwsh はネイティブコマンドの非 0 で止まらない。
+    /// 偽の dotnet は呼ばれたときの作業フォルダ・引数・写しの中身を記録し、指定の終了コードで終わる。
+    /// </remarks>
+    [Theory(
+        DisplayName = "run-mutation.ps1 は写しを作ってからルートで Stryker を呼び、成否に依らず写しを消し、失敗を伝える"
+    )]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void MutationScript_RunsStrykerOnRootCopyAndRemovesIt(int strykerExitCode)
+    {
+        var run = RunMutationScript("model", strykerExitCode);
+
+        if (strykerExitCode == 0)
+        {
+            run.ExitCode.Should().Be(0, run.Output);
+        }
+        else
+        {
+            run.ExitCode.Should().NotBe(0, "Stryker の失敗を終了コードで伝える\n" + run.Output);
+        }
+
+        run.WorkingDirectory.Should()
+            .Be(run.RepositoryRoot, "Stryker はルートを作業フォルダにして呼ぶ\n" + run.Output);
+        run.Arguments.Should()
+            .Be(
+                $"stryker -f stryker/model.json -s {MutationSolutionCopy} -O {run.OutputDirectory} -c 3 --skip-version-check -L",
+                "範囲の設定・ルートの写し・結果のフォルダ（絶対パス）・並列度・ログのファイルを渡す"
+            );
+        run.CopiedProjects.Should()
+            .Equal(
+                StrykerSolutionProjects().Select(path => path[3..]),
+                "写しは正本の各パスから先頭の ../ を外したもの（ルートから同じプロジェクトを指す）"
+            );
+        run.CopiedProjects.Should()
+            .OnlyContain(
+                path => File.Exists(Path.Combine(Root, path)),
+                "写しのパスはリポジトリのルートから実在のプロジェクトを指す"
+            );
+        run.CopyLeftBehind.Should().BeFalse("成否に依らず実行の後に写しを消す");
+        File.ReadAllLines(Path.Combine(Root, ".gitignore"))
+            .Should()
+            .Contain($"/{MutationSolutionCopy}", "写しは誤ってコミットされない");
+    }
+
+    /// <summary>起動スクリプトは、無い範囲を Stryker を呼ぶ前に断り、写しも作らない</summary>
+    [Fact(DisplayName = "run-mutation.ps1 は無い範囲を Stryker を呼ぶ前に断る")]
+    public void MutationScript_RefusesUnknownTarget()
+    {
+        var run = RunMutationScript("no-such-target", strykerExitCode: 0);
+
+        run.ExitCode.Should().NotBe(0, run.Output);
+        run.Arguments.Should().BeEmpty("無い範囲では Stryker を呼ばない");
+        run.CopyLeftBehind.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 変異テストのジョブは Stryker の後に、前回の要約をキャッシュから戻し、地図の単位ごとに要約し（QuickER.Tests の入口を環境変数で呼ぶ）、
+    /// 要約を次の実行へ渡す
+    /// </summary>
+    /// <remarks>
+    /// 入口の絞り込みが外れると 0 件で終了コード 8（要約の手順が赤）、環境変数が欠けると入口は何もしないで緑になり要約が黙って消える。
+    /// キャッシュの戻しと保存は同じ path と鍵の形（範囲ごと）でないと、前回の要約が見つからず増減が毎回「前回なし」になる。
+    /// </remarks>
+    [Fact(
+        DisplayName = "mutation.yml は Stryker の後に前回の要約を戻し、地図の単位ごとに要約し、要約を次の実行へ渡す"
+    )]
+    public void Mutation_SummarizesByImpactMapUnit()
+    {
+        var steps = JobSteps(Jobs(ReadWorkflow("mutation.yml"))["mutation"]);
+        var stryker = steps.FindIndex(step =>
+            step.Contains(MutationScriptCall, StringComparison.Ordinal)
+        );
+        var restore = steps.FindIndex(step =>
+            step.Contains("uses: actions/cache/restore@", StringComparison.Ordinal)
+        );
+        var summary = steps.FindIndex(step =>
+            step.Contains(
+                $"dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter \"FullyQualifiedName~{nameof(TestSupport.MutationSummaryTests)}.{nameof(TestSupport.MutationSummaryTests.WriteSummary_FromEnvironment)}\"",
+                StringComparison.Ordinal
+            )
+        );
+        var save = steps.FindIndex(step =>
+            step.Contains("uses: actions/cache/save@", StringComparison.Ordinal)
+        );
+
+        new[] { stryker, restore, summary, save }
+            .Should()
+            .BeInAscendingOrder("Stryker → 前回の要約を戻す → 要約する → 次の実行へ渡す")
+            .And.NotContain(-1, "4 つの手順がそろっている");
+
+        const string summaryDirectory = "${{ runner.temp }}/stryker/${{ matrix.target }}/summary";
+        const string key = "mutation-summary-${{ matrix.target }}-${{ github.run_id }}";
+
+        foreach (var (step, name) in new[] { (steps[restore], "戻し"), (steps[save], "保存") })
+        {
+            Regex
+                .IsMatch(step, $@"(?m)^\s+path: {Regex.Escape(summaryDirectory)}\s*$")
+                .Should()
+                .BeTrue($"{name}は要約のフォルダを指す");
+            Regex
+                .IsMatch(step, $@"(?m)^\s+key: {Regex.Escape(key)}\s*$")
+                .Should()
+                .BeTrue($"{name}は範囲ごとの鍵を使う");
+        }
+
+        Regex
+            .IsMatch(
+                steps[restore],
+                @"(?m)^\s+restore-keys: mutation-summary-\$\{\{ matrix\.target \}\}-\s*$"
+            )
+            .Should()
+            .BeTrue("戻しは同じ範囲のいちばん新しい要約を前置きの鍵で探す");
+        Regex
+            .Match(steps[restore], @"actions/cache/restore@(?<pin>\S+ # \S+)")
+            .Groups["pin"]
+            .Value.Should()
+            .Be(
+                Regex
+                    .Match(steps[save], @"actions/cache/save@(?<pin>\S+ # \S+)")
+                    .Groups["pin"]
+                    .Value,
+                "戻しと保存は同じ版の actions/cache を使う"
+            );
+
+        foreach (
+            var (variable, value) in new[]
+            {
+                (
+                    TestSupport.MutationSummaryTests.ReportDirectoryVariable,
+                    MutationResultsDirectory
+                ),
+                (TestSupport.MutationSummaryTests.TargetVariable, "${{ matrix.target }}"),
+                (TestSupport.MutationSummaryTests.SummaryDirectoryVariable, summaryDirectory),
+            }
+        )
+        {
+            Regex
+                .IsMatch(steps[summary], $@"(?m)^\s+{variable}: {Regex.Escape(value)}\s*$")
+                .Should()
+                .BeTrue($"要約の手順は {variable} を {value} にする（欠けると入口が何もしない）");
+        }
+    }
+
+    /// <summary>毎晩の変異テストの cron</summary>
+    internal const string MutationNightlyCron = "30 18 * * *";
+
+    /// <summary>週 1 回の変異テストの cron</summary>
+    internal const string MutationWeeklyCron = "0 20 * * 6";
+
+    /// <summary>CI の Windows のテストが TRX を書くフォルダ（テストの手順と保存の手順で同じ値）</summary>
+    private const string CiResultsDirectory = "${{ runner.temp }}/test-results";
+
+    /// <summary>変異テストが結果を書くフォルダ（Stryker の手順と保存の手順で同じ値）</summary>
+    private const string MutationResultsDirectory =
+        "${{ runner.temp }}/stryker/${{ matrix.target }}";
+
+    /// <summary>変異テストの起動スクリプトの呼び方（mutation.yml の手順と手元の実行が呼ぶ）</summary>
+    private const string MutationScriptCall = "./scripts/run-mutation.ps1";
+
+    /// <summary>起動スクリプトが実行の間だけルートに作るテストだけのソリューションの写しの名前</summary>
+    private const string MutationSolutionCopy = "QuickER.TestsOnly.stryker.slnx";
+
+    /// <summary>Stryker のテストだけのソリューション（正本）のプロジェクトのパスの並び</summary>
+    private static IReadOnlyList<string> StrykerSolutionProjects() =>
+        ProjectPathsOf(Path.Combine(Root, "stryker", "QuickER.TestsOnly.slnx"));
+
+    /// <summary>.slnx のプロジェクトのパスの並び（書かれた順）</summary>
+    private static IReadOnlyList<string> ProjectPathsOf(string solutionPath) =>
+        [
+            .. System
+                .Xml.Linq.XDocument.Load(solutionPath)
+                .Descendants("Project")
+                .Select(project => (string?)project.Attribute("Path") ?? ""),
+        ];
+
+    /// <summary>ジョブが path の結果を、if: always() と保持日数つきの upload-artifact（ちょうど 1 つ）で残すことを表明する</summary>
+    private static void AssertKeptArtifact(string jobBody, string path, string job)
+    {
+        var uploads = JobSteps(jobBody)
+            .Where(step =>
+                step.Contains("uses: actions/upload-artifact@", StringComparison.Ordinal)
+            )
+            .ToList();
+
+        uploads.Should().ContainSingle($"{job} に結果を保存する手順がちょうど 1 つある");
+        Regex
+            .IsMatch(uploads[0], @"(?m)^\s+if: always\(\)\s*$")
+            .Should()
+            .BeTrue($"{job} は失敗した実行にも結果を残す");
+        Regex
+            .IsMatch(uploads[0], $@"(?m)^\s+path: {Regex.Escape(path)}\s*$")
+            .Should()
+            .BeTrue($"{job} は手順が書いた結果を保存する");
+        Regex
+            .IsMatch(uploads[0], @"(?m)^\s+retention-days: [1-9][0-9]*\s*$")
+            .Should()
+            .BeTrue($"{job} は保持日数を持つ");
     }
 
     /// <summary>リリースのタグはビルドしたコミットに付ける</summary>
@@ -500,7 +860,7 @@ public sealed class WorkflowGuardTests
             .ToList();
 
     /// <summary>最上位のキーの本文の行（次の最上位のキーの手前まで）</summary>
-    private static List<string> TopLevelBlock(string workflow, string key)
+    internal static List<string> TopLevelBlock(string workflow, string key)
     {
         var lines = workflow.ReplaceLineEndings("\n").Split('\n');
         var start = Array.FindIndex(lines, line => line == key + ":");
@@ -633,6 +993,90 @@ public sealed class WorkflowGuardTests
             .Replace("\u0000", ".*");
 
         return new Regex($"^{body}$");
+    }
+
+    /// <summary>変異テストの起動スクリプトを偽の dotnet で動かした結果</summary>
+    /// <param name="ExitCode">スクリプトの終了コード</param>
+    /// <param name="Output">スクリプトの出力</param>
+    /// <param name="RepositoryRoot">偽のリポジトリのルート</param>
+    /// <param name="OutputDirectory">結果のフォルダとして解かれるはずの絶対パス</param>
+    /// <param name="WorkingDirectory">偽の dotnet が呼ばれたときの作業フォルダ（呼ばれなければ空）</param>
+    /// <param name="Arguments">偽の dotnet が受けた引数（空白でつなぐ・呼ばれなければ空）</param>
+    /// <param name="CopiedProjects">偽の dotnet が呼ばれたときにルートにあった写しのプロジェクトのパス</param>
+    /// <param name="CopyLeftBehind">スクリプトの後に写しがルートに残っているか</param>
+    private sealed record MutationScriptRun(
+        int ExitCode,
+        string Output,
+        string RepositoryRoot,
+        string OutputDirectory,
+        string WorkingDirectory,
+        string Arguments,
+        IReadOnlyList<string> CopiedProjects,
+        bool CopyLeftBehind
+    );
+
+    /// <summary>
+    /// 一時フォルダに偽のリポジトリ（起動スクリプト・テストだけのソリューションの正本・範囲 model の設定）を作り、
+    /// その外の作業フォルダから相対パスの結果のフォルダと並列度 3 で起動スクリプトを動かす。
+    /// 偽の dotnet は作業フォルダ・引数（1 つずつ）・その時点の写しを記録し、<paramref name="strykerExitCode"/> で終わる。
+    /// </summary>
+    private static MutationScriptRun RunMutationScript(string target, int strykerExitCode)
+    {
+        using var temp = new TestSupport.TestTempFolder();
+        var repository = Path.Combine(temp.Path, "repo");
+        var fakeBinDirectory = Path.Combine(temp.Path, "bin");
+        var workingLog = Path.Combine(temp.Path, "wd.txt");
+        var argumentsLog = Path.Combine(temp.Path, "args.txt");
+        var copySnapshot = Path.Combine(temp.Path, "copy.slnx");
+
+        Directory.CreateDirectory(Path.Combine(repository, "scripts"));
+        Directory.CreateDirectory(Path.Combine(repository, "stryker"));
+        Directory.CreateDirectory(fakeBinDirectory);
+        File.Copy(
+            Path.Combine(Root, "scripts", "run-mutation.ps1"),
+            Path.Combine(repository, "scripts", "run-mutation.ps1")
+        );
+        File.Copy(
+            Path.Combine(Root, "stryker", "QuickER.TestsOnly.slnx"),
+            Path.Combine(repository, "stryker", "QuickER.TestsOnly.slnx")
+        );
+        File.WriteAllText(Path.Combine(repository, "stryker", "model.json"), "{}");
+
+        // 引数は 1 行に 1 つ（引用の付け方に依らず値を比べる）。写しは呼ばれた時点のものを取っておく
+        File.WriteAllText(
+            Path.Combine(fakeBinDirectory, "dotnet.cmd"),
+            "@echo off\r\n"
+                + $">\"{workingLog}\" cd\r\n"
+                + $"if exist \"{MutationSolutionCopy}\" copy /Y \"{MutationSolutionCopy}\" \"{copySnapshot}\" >nul\r\n"
+                + ":next\r\n"
+                + "if \"%~1\"==\"\" goto done\r\n"
+                + $">>\"{argumentsLog}\" echo %~1\r\n"
+                + "shift\r\n"
+                + "goto next\r\n"
+                + ":done\r\n"
+                + $"exit /b {strykerExitCode}\r\n"
+        );
+
+        // 後ろで LASTEXITCODE を 0 に戻し、偽の dotnet の終了コードの持ち越しでなく、スクリプト自身が失敗を伝えることを見る
+        // （pwsh -File で手元から呼ぶと、ネイティブコマンドの非 0 は終了コードにならない）
+        var step = RunStep(
+            temp.Path,
+            $"./repo/scripts/run-mutation.ps1 -Target {target} -OutputDirectory out -Concurrency 3; $global:LASTEXITCODE = 0",
+            fakeBinDirectory
+        );
+
+        return new MutationScriptRun(
+            step.ExitCode,
+            step.Output,
+            repository,
+            Path.Combine(temp.Path, "out"),
+            File.Exists(workingLog) ? File.ReadAllText(workingLog).Trim() : "",
+            File.Exists(argumentsLog)
+                ? string.Join(' ', File.ReadAllLines(argumentsLog).Select(line => line.Trim()))
+                : "",
+            File.Exists(copySnapshot) ? ProjectPathsOf(copySnapshot) : [],
+            File.Exists(Path.Combine(repository, MutationSolutionCopy))
+        );
     }
 
     /// <summary>パック用スクリプトを、偽の dotnet と偽の検証スクリプトで動かした結果</summary>

@@ -1,0 +1,127 @@
+# QuickER Mutation: 変異テスト（Stryker.NET）を夜間に流し、結果を報告する（点数では赤にしない）
+#
+# - 毎晩: QuickER.Model 全体（stryker/model.json）
+# - 週 1 回（土曜）: QuickER.Provider を割った 3 本と、QuickER.CodeGen.CSharp の判断の重い 3 部分（診断・クエリ・エスケープ）
+# - 範囲・除外・点数で赤にしない設定（thresholds.break 0）・初回のテストの失敗で止める設定は stryker/*.json が持つ。
+#   Stryker は設定の solution を読まず、ソリューションの中の ../ のパスではテストを見つけないので、起動は scripts/run-mutation.ps1 に任せる
+#   （正本 stryker/QuickER.TestsOnly.slnx の ../ を外した写しをルートに作り、-s で渡し、終わったら消す）
+# - 赤になるのは Stryker が動かなかったとき（設定の誤り・ビルドの失敗・初回のテストの失敗）だけ。結果の HTML・JSON・ログは
+#   成果物として 14 日残す（失敗した夜にも残す）
+# - schedule はリポジトリの既定のブランチ（main）にあるこのファイルでだけ動く（nightly.yml と同じ）。workflow_dispatch で手でも流せる
+# - 決まり（トリガー・権限・同時実行の組・時間の上限・Stryker の呼び方・結果の保存）は WorkflowGuardTests が、アクションの SHA 固定と
+#   範囲の一覧と設定のファイルの一致は ParityTests（照合の表の mutation-* と stryker-* の行）が固定する
+name: Mutation
+
+on:
+  schedule:
+    # 毎晩 18:30 UTC（日本時間 3:30）：Model
+    - cron: "30 18 * * *"
+    # 土曜 20:00 UTC（日本時間 日曜 5:00）：Provider の 3 本と CodeGen の 3 部分
+    - cron: "0 20 * * 6"
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "流す範囲（nightly＝Model・weekly＝Provider と CodeGen・all＝両方）"
+        type: choice
+        options: [nightly, weekly, all]
+        default: nightly
+
+permissions:
+  contents: read
+
+# 毎晩と週 1 回は別の組にする（週 1 回の長い実行が毎晩の実行を待たせない）。前の実行は取り消さずに待つ
+concurrency:
+  group: mutation-${{ github.event.schedule || inputs.scope }}
+  cancel-in-progress: false
+
+# Stryker が流すテストは Microsoft.Testing.Platform で動く。その利用状況の送信を止める
+env:
+  TESTINGPLATFORM_TELEMETRY_OPTOUT: "1"
+
+jobs:
+  # 流す範囲を決める（範囲の名前は stryker/ の設定のファイル名。一覧は stryker/*.json と ParityTests が照合する）
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      targets: ${{ steps.pick.outputs.targets }}
+    steps:
+      - name: 範囲を決める
+        id: pick
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+          SCOPE: ${{ inputs.scope }}
+        run: |
+          nightly='"model"'
+          weekly='"provider-sync-planner","provider-diff","provider-rest","codegen-diagnostics","codegen-queries","codegen-escapes"'
+          case "$SCHEDULE|$SCOPE" in
+            "30 18 * * *|"|"|nightly") targets="[$nightly]" ;;
+            "0 20 * * 6|"|"|weekly") targets="[$weekly]" ;;
+            "|all") targets="[$nightly,$weekly]" ;;
+            *) echo "知らないスケジュールか範囲: schedule='$SCHEDULE' scope='$SCOPE'" >&2; exit 1 ;;
+          esac
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
+
+  mutation:
+    needs: plan
+    runs-on: windows-latest
+    # 手元（24 論理コア・並列度 8）で Model 74 分。ホストのランナー（4 vCPU・並列度 4）は 145〜215 分の見込みで、6 時間の上限の手前で止める
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.plan.outputs.targets) }}
+    steps:
+      - name: リポジトリを取得
+        # アクションはほかのワークフロー（ci.yml か release.yml）と同じ commit SHA で固定する（更新は Dependabot がまとめて持ってくる）
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: .NET SDK をセットアップ
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Stryker を入れる
+        # 版の正本は .config/dotnet-tools.json（ここで版を書かない）
+        run: dotnet tool restore
+
+      - name: 変異テスト
+        # 起動は scripts/run-mutation.ps1 の 1 か所（テストだけのソリューションの写しをルートに作って Stryker を呼び、後で消す。手元の実行も同じスクリプト）。
+        # 並列度は 4 vCPU に合わせて 4（Stryker の既定はコアの半分＝2 で、Model でも上限に届く見込み）。
+        # 一時ファイルはランナーの一時領域（D: ドライブ）へ置く（理由は ci.yml のテストの手順と同じ）
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: ./scripts/run-mutation.ps1 -Target ${{ matrix.target }} -OutputDirectory "${{ runner.temp }}/stryker/${{ matrix.target }}" -Concurrency 4
+
+      - name: 前回の要約を戻す
+        # 範囲ごとの前回の要約（summary.json）。無ければ（初回・7 日使われずにキャッシュが消えた）要約は「前回なし」と書く
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/stryker/${{ matrix.target }}/summary
+          key: mutation-summary-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: mutation-summary-${{ matrix.target }}-
+
+      - name: 影響の地図の単位ごとに要約する
+        # 単位ごとの数・Safe Mode で外れたメソッド・Dubious・前回からの増減を Step Summary と summary.md / summary.json に書く
+        # （本体は QuickER.Tests の MutationSummaryTests。環境変数が無い普段の実行では何もしない）
+        env:
+          QUICKER_MUTATION_REPORT_DIR: ${{ runner.temp }}/stryker/${{ matrix.target }}
+          QUICKER_MUTATION_TARGET: ${{ matrix.target }}
+          QUICKER_MUTATION_SUMMARY_DIR: ${{ runner.temp }}/stryker/${{ matrix.target }}/summary
+        run: dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "FullyQualifiedName~MutationSummaryTests.WriteSummary_FromEnvironment" --output detailed
+
+      - name: 要約を次の実行へ渡す
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/stryker/${{ matrix.target }}/summary
+          key: mutation-summary-${{ matrix.target }}-${{ github.run_id }}
+
+      - name: 結果を保存
+        # 失敗した夜にも残す（ログで止まった理由を読む）
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mutation-${{ matrix.target }}
+          path: ${{ runner.temp }}/stryker/${{ matrix.target }}
+          retention-days: 14

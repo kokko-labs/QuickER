@@ -139,6 +139,17 @@
 
 統合の前後で、該当テストのケースの数と合否は同じ（`-list full -preEnumerateTheories` と実行結果の照合）。mutation 実証済み（obj に置いた禁止の呼び出しは bin / obj の判定を外したときだけ赤）。
 
+## MTP の実行器
+
+- テストは Microsoft.Testing.Platform（MTP）で動かす。`global.json` の `test.runner` が `Microsoft.Testing.Platform`、2 つのテストのプロジェクトが `xunit.v3.mtp-v2` と `UseMicrosoftTestingPlatformRunner`（xunit の入口をこの値で MTP にする）と `OutputType` Exe と `IsTestProject`（以前は Microsoft.NET.Test.Sdk が付けていた印。Stryker.NET はこれでテストのプロジェクトを見分け、無いと初回のテスト実行が 0 件で止まる）を持つ。Microsoft.NET.Test.Sdk・xunit.runner.visualstudio・coverlet.collector（VSTest の部品）は持たない。
+  - 混在させない：`dotnet test` を MTP にすると、VSTest のままのプロジェクトは `dotnet test QuickER.slnx` から黙って外れ、件数にも出ない（切り替えのときに実際に Integration が消えた）。
+  - Stryker.NET の MTP の実行器もこの形を前提にする（VSTest の実行器は、xunit v3 がテストを別のプロセスで走らせるので変異が効かない）。
+- 書き方：絞り込みは VSTest の書式の `--filter` のまま（xunit v3 が MTP でも受ける。`RegenerationRequest.Command` が組む再生成のコマンドも同じ）。VSTest だけのオプション（`--logger`・`--settings`・`--collect`）は MTP の `dotnet test` が受けず、終了コード 5 でテストを 1 件も流さずに止まる。コンソールの詳細は `--output detailed`、TRX は `--report-trx --report-trx-filename <名前>`（Microsoft.Testing.Extensions.TrxReport）、カバレッジは coverlet.MTP の `--coverlet --coverlet-output-format cobertura`。
+- 流れたテストが 0 件なら MTP は終了コード 8 で失敗にする（スキップは流れた数に入る）。ワークフロー・スクリプトの `dotnet test` はどれも 0 件にならない絞り込みだけを使い、0 件を許す `--ignore-exit-code 8` は付けない（0 件は絞り込みの誤り）。
+- ワークフローは最上位の env に `TESTINGPLATFORM_TELEMETRY_OPTOUT: "1"` を持つ（MTP は既定で利用状況を送る。`dotnet stryker` も中で MTP のテストを流すので同じ）。
+- CI の Windows のテストは TRX も書き（`--report-trx --results-directory "${{ runner.temp }}/test-results"`）、`if: always()` の成果物（名前は build-and-test-trx）に 14 日残す。MTP のコンソールは表示名だけなので、テストのクラスごとの時間は TRX の完全修飾名で読む。`QuickER.slnx` は 2 つのプロジェクトを流すので、TRX のファイル名は指定しない（指定するとプロジェクトどうしで同じ名前に上書きする。指定しなければアセンブリ名_TFM_アーキテクチャ.trx）。ガード：`WorkflowGuardTests.WindowsTestStep_KeepsTestResultsAsArtifacts`。
+- ガード：`ParityTests`（行 `test-projects-run-on-mtp`・`workflow-test-commands-use-mtp-options`・`workflow-test-telemetry-opt-out`）。3 行とも一時的に壊して赤になることを確かめた（Integration の `UseMicrosoftTestingPlatformRunner` を false・ci.yml に `--logger`・env の消去）。
+
 ## 夜間の深い実行
 
 - `.github/workflows/nightly.yml`：トリガーは schedule の `0 18 * * *`（日本時間 3:00）と workflow_dispatch だけ。`permissions: contents: read`。前の実行は取り消さずに待つ。
@@ -146,9 +157,9 @@
   - アクションは ci.yml か release.yml と同じ commit SHA で固定する。
   - schedule は既定のブランチでだけ動き、リポジトリに 60 日間活動が無いと GitHub が止める。
   - 普段の CI（ci.yml）は変えない。
-- テストの結果は TRX で残す：両ジョブのテストの手順が、console の logger に加えて `--logger "trx;LogFileName=<ジョブ名>.trx"` と `--results-directory "${{ runner.temp }}/nightly-results"` を持つ。続く `if: always()` の `actions/upload-artifact` が、ジョブごとに別の名前（`integration-nightly-trx` / `unit-nightly-trx`）で `retention-days: 14` の成果物として保存する（失敗した夜にも残す）。
+- テストの結果は TRX で残す：両ジョブのテストの手順が、コンソールの詳細（`--output detailed`）に加えて `--report-trx --report-trx-filename <ジョブ名>.trx`（MTP の TrxReport 拡張。テストの出力は各結果の StdOut に入り、VSTest の logger の TRX と同じ形。xunit の `--report-xunit-trx` は出力を TextMessages に分けて書くので使わない）と `--results-directory "${{ runner.temp }}/nightly-results"` を持つ。続く `if: always()` の `actions/upload-artifact` が、ジョブごとに別の名前（`integration-nightly-trx` / `unit-nightly-trx`）で `retention-days: 14` の成果物として保存する（失敗した夜にも残す）。
   - コンソールのログに出ないテストの出力（`ITestOutputHelper` に書く網羅の要約・夜間なら埋まる組・種の数の警告）と、方言の派生ごとの時間（同期計画の総当たり・名前の DDL の往復の派生は同じ表示名なので、TRX のクラス名で見分ける）はこれで読む。
-  - ガード：`WorkflowGuardTests.Nightly_JobsKeepTestResultsAsArtifacts`（logger・結果のフォルダ・保存の手順が 1 つ・`if: always()`・path・保持日数・名前の重複なし）と `ParityTests`（行 `nightly-actions-pinned-like-other-workflows`）。
+  - ガード：`WorkflowGuardTests.Nightly_JobsKeepTestResultsAsArtifacts`（TRX とコンソールの引数・結果のフォルダ・保存の手順が 1 つ・`if: always()`・path・保持日数・名前の重複なし）と `ParityTests`（行 `nightly-actions-pinned-like-other-workflows`）。
 - 夜間の種の数は各エンジンの `SeedSettings` の第 3 引数（`NightlyCount`＝普段の数以上・普段の種を先頭に含む）に置く。ここに表は持たない。
 - 選び漏れを防ぐ：`SeedSource.Resolve` は、プロセスの環境変数で種を決めるとき、いま走っているテストが `[Trait("NightlyEngine", "true")]`（夜間に流す）か `"false"`（種を使うが夜間に流さない・理由のコメントを添える）の**ちょうど一方**を宣言していなければ、テストの名前と直し方を書いた `XunitException` で赤にする（`NightlyEngineTrait`。テストの外と、環境の読み取りを差し替えた呼び出しでは検査しない）。
   - どのテストが種を使うかを人が一覧で持たないので、補助を経由する使い方も拾える。種の指紋のドリフトテストを別のカルチャで流し直す `CultureInvariantGenerationTests.DriftTests_PassUnderCulture` の付け忘れも、これで見つかった（`"false"` と理由を付けた）。
@@ -159,6 +170,33 @@
   1 種の処理の予期しない例外を `seed threw:` として記録して次の種へ進める `SyncPlanFuzzRunner.RunGuardedAsync`（例外でテストごと止まると、それより前の種の違反が隠れる。取り消しは止める）も `tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`「1 種の例外」を参照する。
 - 同期計画の総当たりは、必須の形の表明と網羅しない組の照合を、普段の既定の種の数が 50 以上の方言だけで行う（夜間に種が増えた PostgreSQL・Oracle では行わない）。既知の失敗の照合と必須の形の表明は両方を集めて 1 つの失敗にする（どちらかの赤がもう一方を隠さない）。失敗した種の警告の内訳と「失敗を予告しない種類の警告しか無いのに失敗した種」は出力する（測るだけ）。
 - ガード：`SeedSourceTests`（目印の判定と `Resolve` の検査）・`KnownFailureSetTests.NightlyOnlyRandomEntry_NotObservedOnlyAtNightlyDefaultCount`・`CoverageCounterTests` の夜間の 4 件・`SyncPlanFuzzRunnerGuardTests`（Integration・Docker 不要）・`WorkflowGuardTests` の `Nightly_*` 6 件・`ParityTests`（行 `nightly-actions-pinned-like-other-workflows`・`nightly-jobs`・`nightly-job-test-commands`・`nightly-job-engine-profile`）。`SchemaNamesTests` の目印の付け忘れも `SeedSource` が拾う。mutation 実証済み。
+
+## 変異テスト（Stryker.NET）
+
+- 道具は dotnet-stryker（版は `.config/dotnet-tools.json`。`dotnet tool restore` で入れる）。設定は `stryker/` の範囲ごとの JSON（`model.json`・`provider-sync-planner.json`・`provider-diff.json`・`provider-rest.json`・`codegen-diagnostics.json`・`codegen-queries.json`・`codegen-escapes.json`）。
+  - 起動は `scripts/run-mutation.ps1` の 1 か所だけ（mutation.yml も手元の実行も呼ぶ。例：`./scripts/run-mutation.ps1 -Target model -OutputDirectory <結果のフォルダ> -Concurrency 8`）。Stryker は設定の `solution` を読まず、渡したソリューションの中のパスが `../` で始まるとテストを 0 件と数えて止まる（絶対パスやルートからの相対パスなら 14,559 件を見つける。2026-11 に 1 つずつ戻して切り分けた）。そこでスクリプトが正本 `stryker/QuickER.TestsOnly.slnx` の先頭の `../` を外した写し `QuickER.TestsOnly.stryker.slnx` をルートに作り、ルートで `dotnet stryker -f stryker/<範囲>.json -s <写し> -O <結果> -c <並列度> --skip-version-check -L` を呼び、成否に依らず写しを消し、Stryker の失敗を終了コードで伝える（`pwsh -File` はネイティブコマンドの非 0 を終了コードにしない）。
+    - 写しをルートに残すと、ルートで引数なしの `dotnet build` / `dotnet test` が MSB1011（ソリューションが 2 つ）で止まる。だから写しを正本にせず、`.gitignore` にも入れる。並列度は既定値を持たせない（ホストのランナーと手元で適した値が違う）。
+  - テストだけのソリューション `stryker/QuickER.TestsOnly.slnx` は src の全プロジェクトと QuickER.Tests・偽の app-server を持つ（Stryker は変異させるプロジェクトをソリューションから探す。QuickER.Tests は Model などを推移的にしか参照しない。Integration を入れると test-projects の指定が効かない）。実行器は MTP（「MTP の実行器」）。
+  - 結果は報告するだけ：どの設定も `thresholds.break` が 0（点数では赤にしない）で、`break-on-initial-test-failure` が true（初回のテストの失敗では止める＝Stryker が動かなかったときだけ赤）。
+  - 除外は `ArgumentNullException.ThrowIfNull` と例外のコンストラクターの引数（`ignore-methods` の `*.ThrowIfNull`・`*Exception.ctor`）だけ。
+  - `mutate` はファイル単位（`**/` で始まる後ろの一致と、`!` を付けたファイル単位の除外）だけで書く。文字の範囲（`{a..b}`）は使わない：Stryker 5 は全部の変異をまとめてコンパイルしてから範囲で印を付けるので、範囲ではコンパイルの失敗（Safe Mode）を避けられず、位置はソースが動くと黙ってずれる。
+- Safe Mode：変異が CS0165（`out var` を `||` でつないだ条件の変異や、その if の `continue` の削除で、後ろの変数が確実に代入されなくなる）になると、Stryker はそのメソッドの変異を全部 CompileError にして外す。Model の `ConstraintNames.ResolveForeignKeyNamesCore`（41 件）・Provider の 8 か所・CodeGen の 14 か所・方言の各 1 か所が当たる。設定では外せない（上の理由）ので受け入れ、外れたメソッドと数を夜間の出力に毎回出す。直すなら製品のコードを CS0165 にならない形へ書き直す修正の区切りになる。
+- 範囲の大きさ（Stryker が検査する数・2026-11）：Model 425・Provider 2,134（SyncPlanner 910／差分 489／残り 735 の 3 本）・CodeGen の診断 250・クエリの型の検査とエミッタ 404・エスケープ 56（`GeneratedLiteralText` だけ。XmlDoc の名前のエスケープはビルダーの中のメソッドなので、ファイル単位では入れていない）。方言のプロバイダ 5 本は 4,407 で、当面は入れない（1 本 739〜1,026 件で、下の固定の費用が方言ごとにかかる）。入れるなら 1 週に 1 方言ずつ回す。
+- 時間（2026-11・手元の 24 論理コア・並列度 8）：Model は 74 分（ビルドと初回のテスト実行 4.4 分・テスト 1 件ずつのカバレッジの取得 29.7 分・変異の検査 39.8 分＝1 件 5.7 秒）、エスケープは 53 分（変異の検査 1 件 17.6 秒）。カバレッジの取得はテストの数で決まり、範囲の大きさに依らない固定の費用（範囲を 1 つ割るたびに 1 回増える）。
+  - ホストのランナー（4 vCPU）では Stryker の並列度の既定がコアの半分（2）になり、Model でも上限に届く見込みなので、mutation.yml は並列度 4 を明示する（Model は 145〜215 分の見込み）。週 1 回の範囲は最初の workflow_dispatch の `all` で実測し、6 時間を超えた範囲だけ割り直す（目安は 1 範囲 300〜400 件）。
+  - Timeout は Stryker が殺したと数える。1,000 件以上のテストが通る行の Timeout は「落ちるのに時間がかかった」か「生き残り」かが分からないので、要約の Timeout の列は Killed と分けて読む。
+  - GUI のテスト（108 件）だけが殺した変異は、Model・エスケープとも 0 件だった（2026-11）。
+- 夜間の実行は `.github/workflows/mutation.yml`（nightly.yml と別のファイル。nightly.yml のガードは「ジョブ＝テストのプロジェクトごとの 2 つ・60 分以内」で、数時間の Stryker と合わないため）。
+  - トリガーは schedule の 2 つ（毎晩 `30 18 * * *`＝Model・土曜 `0 20 * * 6`＝Provider の 3 本と CodeGen の 3 部分）と workflow_dispatch（`scope`：nightly / weekly / all）だけ。`permissions: contents: read`。同時実行の組は `mutation-` に定時か範囲を続けたもので、取り消さない（週 1 回の長い実行が毎晩の実行を待たせない）。
+  - 小さなジョブ `plan` が範囲の一覧（stryker の設定のファイル名）から行列を決め、`mutation` ジョブ（windows-latest・`timeout-minutes: 330`）が `dotnet tool restore` → `./scripts/run-mutation.ps1 -Target <範囲> -OutputDirectory <ランナーの一時領域> -Concurrency 4` を流し（ワークフローは `dotnet stryker` を直に呼ばない）、結果（HTML・JSON・ログ）を `if: always()` の成果物に 14 日残す。点数で赤にする引数（`--break-at` など）をコマンドに足さない。
+  - GUI のテストも Stryker の初回のテスト実行に入る（MTP の実行器は Stryker の test-case-filter を持たない。ホストのランナーでは CI の全件が緑）。GUI のテストが 1 件でも落ちると Stryker 全体が止まる（`break-on-initial-test-failure`）ので、夜間の実行で GUI のテストの一時的な失敗が出たら、外す仕掛けを入れるかを見直す。
+- 要約：Stryker の後、`mutation` ジョブは前回の要約をキャッシュ（`actions/cache/restore`・鍵は範囲ごとの前置き）から戻し、QuickER.Tests の入口 `MutationSummaryTests.WriteSummary_FromEnvironment` を環境変数（`QUICKER_MUTATION_REPORT_DIR`＝Stryker の `-O`・`QUICKER_MUTATION_TARGET`＝範囲・`QUICKER_MUTATION_SUMMARY_DIR`）つきの `dotnet test` で呼び、要約を `actions/cache/save` で次の実行へ渡す。要約は Step Summary と `summary.md`・`summary.json`（成果物にも入る）。
+  - 中身（本体は `TestSupport/MutationSummary.cs` の `MutationSummaries`）：影響の地図の単位ごとの変異の数・Killed・Survived・NoCoverage・Timeout・Dubious（Dubious のテストが通る流した変異）・スコアと前回からの増減、合計の CompileError・Ignored、Safe Mode で外れたメソッドとその中の CompileError の数、Dubious のテストの数（多ければ取り直しを検討する）、どの単位にも入らないファイル。
+  - 単位は地図と同じ宣言から作った `ImpactMap.UnitOf`（写しを作らない）。範囲は設定の `mutate`（`StrykerMutateScope`＝照合の行 `stryker-mutate-globs-match-files` と同じ読み方）で決め、範囲の外のファイルは数えない（Stryker 5 は全部の変異をコンパイルしてから範囲で印を付けるので、範囲の外のファイルにも CompileError・除外の Ignored が残る）。
+  - Safe Mode と Dubious は JSON に書かれないので、ログ（`-L` のファイル）から読む（Safe Mode は「An unidentified mutation in {ファイル}」の直後の「Safe Mode! … in {メソッド}」の組・Dubious は「marking as Dubious」の行のテストの ID）。
+  - 入口は環境変数が無ければ何もしない（普段の実行では 1 件の合格。xunit の Explicit は普段の実行でスキップに数えられ、`dotnet test` 越しに `--explicit only` が効かないので使わない）。前回の要約はキャッシュが 7 日使われないと消えるので、週 1 回の範囲は「前回なし」になり得る。
+- 変異の数だけを数えるときは、テスト 1 件だけの小さなテストのプロジェクトを参照させると、初回のテスト実行がほぼ 0 秒になり、全件の負荷なしで 1 本 30〜50 秒で数えられる（変異の数・CompileError・Safe Mode はテストに依らない）。
+- ガード：`ParityTests`（行 `stryker-tests-only-solution-projects`・`stryker-mutate-globs-match-files`・`stryker-configs-report-only`・`mutation-targets-match-stryker-configs`・`mutation-actions-pinned-like-other-workflows`・`mutation-actions-pinned-by-sha`・`workflow-test-telemetry-opt-out`）と `WorkflowGuardTests` の `Mutation_*` 5 件（トリガーと 2 つの cron・読み取り専用と取り消さない組・明示の時間の上限・tool restore の Stryker を起動スクリプトから範囲の設定と並列度 4 で呼び点数で赤にせず結果を残す・前回の要約を戻し要約して次へ渡す）と `MutationScript_*`（起動スクリプトを偽の dotnet で動かす：写しを作ってからルートで呼ぶ・引数・写しのパスが実在のプロジェクトを指す・成否に依らず写しを消す・失敗を伝える・写しの名前が .gitignore にある・無い範囲は呼ぶ前に断る）。要約の数え方は `MutationSummaryTests` の決まった形の行（単位ごとの数とスコア・いちばん深い単位・ランナーのチェックアウトのパス・Safe Mode・範囲の外・範囲の除外・Dubious・前回からの増減・前回なし）。どれも一時的に壊して赤になることを確かめた（.slnx からプロジェクトを 1 つ消す・mutate のファイル名を変える・break を 50 にする・範囲の一覧から 1 つ消す・cron を変える・取り消す・時間の上限を消す・env を消す・`--break-at` を足す・`dotnet tool install` に替える・ワークフローから `dotnet stryker` を直に呼ぶ・並列度 4 を外す・スクリプトの写しの後片付け／`../` の書き換え／終了コードの確認／ルートへの移動／並列度・ログ・写しの引数を外す・.gitignore の行を消す）。
 
 ## 種の指紋
 
@@ -191,7 +229,7 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
   - テストのソースの文字列リテラルから読むと、値のデータ（`alice`・`ffffffff` など）まで拾い、行やデータを足すたびに地図が変わる。
   - 台帳のソースは partial の本体だけを書き、部分ファイル（`DialectDdlRows.Names.cs` など）を書かないことがある。そのため登録の照合・行 Id の持ち主は、同じフォルダの `{名前}.*.cs` まで広げたソースで読む（`ImpactMapSources.ExpandPartials`）。
   - 表の行の名前は「守りの名前＋行 Id」（例 `Dialect/DdlText` の行 `ddl-*-trimmed-table`）。行 Id がその守りのものかは `ImpactMapSources.RowIdOwners`（CLAUDE.md の照合と同じ判定 `ClaudeMdReferenceTests.RowIdExists`）で引く。
-- 変異テストの結果を領域ごとにまとめるときは、`ImpactMap.UnitOf`（パスの属するいちばん深い単位）と `ImpactMap.ProtectionsOf`（パスを範囲に含む守り）で引くか、地図の「範囲の表」をパスの最長一致で読む。
+- 変異テストの結果を領域ごとにまとめるときは、`ImpactMap.UnitOf`（パスの属するいちばん深い単位）と `ImpactMap.ProtectionsOf`（パスを範囲に含む守り）で引くか、地図の「範囲の表」をパスの最長一致で読む。夜間の変異テストの要約（`MutationSummaries`）は `ImpactMapSources.Build` の地図の `UnitOf` を使う（「変異テスト（Stryker.NET）」）。
 - 守りの無い領域：`ImpactMapDeclarations.Unprotected`（単位・分類・理由）。
   - 分類は Pending（エンジン・表で埋める候補）と Accepted（エンジン・表で守る対象でないと判断したもの）。理由は因子の棚卸しと同じ判定（`FactorInventoryGuard.IsVagueReason`＝仮置きの文か 10 文字未満を断る）。
   - プロジェクトを載せたら、その下のフォルダは書かない。

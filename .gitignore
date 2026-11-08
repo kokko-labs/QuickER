@@ -382,3 +382,7 @@ ec-order.db
 # 語彙 .vale/styles/config/ だけをリポジトリで管理する。
 /.vale/styles/*
 !/.vale/styles/config/
+
+# 変異テストの起動スクリプト（scripts/run-mutation.ps1）が実行の間だけルートに作るテストだけのソリューションの写し。
+# 実行の後に消す（残るとルートで引数なしの dotnet build / dotnet test がソリューションが 2 つで止まる）
+/QuickER.TestsOnly.stryker.slnx

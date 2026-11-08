@@ -763,6 +763,15 @@ src 全体か src の外を読む守り。単位の守りには数えない（�
 | `parity:release-vpk-version` | 正本と写しの照合 |
 | `parity:release-vpk-pack-runtime` | 正本と写しの照合 |
 | `parity:pack-velopack-vpk-pack-runtime` | 正本と写しの照合 |
+| `parity:test-projects-run-on-mtp` | 正本と写しの照合 |
+| `parity:workflow-test-commands-use-mtp-options` | 正本と写しの照合 |
+| `parity:workflow-test-telemetry-opt-out` | 正本と写しの照合 |
+| `parity:mutation-actions-pinned-like-other-workflows` | 正本と写しの照合 |
+| `parity:mutation-actions-pinned-by-sha` | 正本と写しの照合 |
+| `parity:mutation-targets-match-stryker-configs` | 正本と写しの照合 |
+| `parity:stryker-tests-only-solution-projects` | 正本と写しの照合 |
+| `parity:stryker-mutate-globs-match-files` | 正本と写しの照合 |
+| `parity:stryker-configs-report-only` | 正本と写しの照合 |
 | `parity:resx-ja-key-sets` | 正本と写しの照合 |
 | `parity:resx-ja-satellites` | 正本と写しの照合 |
 | `parity:resx-accessor-properties` | 正本と写しの照合 |

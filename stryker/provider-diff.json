@@ -1,0 +1,24 @@
+{
+  "stryker-config": {
+    "project": "QuickER.Provider.csproj",
+    "test-runner": "mtp",
+    "coverage-analysis": "perTest",
+    "additional-timeout": 120000,
+    "break-on-initial-test-failure": true,
+    "thresholds": {
+      "high": 80,
+      "low": 60,
+      "break": 0
+    },
+    "reporters": ["json", "html", "progress", "cleartext"],
+    "ignore-methods": ["*.ThrowIfNull", "*Exception.ctor"],
+    "mutate": [
+      "**/SchemaDiffService.cs",
+      "**/TableRebuildAttributeDetector.cs",
+      "**/SchemaSignature.cs",
+      "**/DiagramMergeReconciler.cs",
+      "**/SchemaDiff.cs",
+      "**/NameMatching.cs"
+    ]
+  }
+}

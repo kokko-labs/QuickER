@@ -137,6 +137,10 @@ internal static class ImpactMapSources
             "tests/QuickER.Tests/TestSupport/ScenarioTableTests.cs",
             "表の型そのものの自己検査（架空の行で表の構築の検査を確かめる。src を守る表ではない）"
         ),
+        (
+            "tests/QuickER.Tests/TestSupport/MutationSummaryTests.cs",
+            "テストの土台（変異テストの結果を地図の単位ごとに要約する関数）の自己検査（架空の Stryker の結果で数え方を確かめる。src を守る表ではない）"
+        ),
     ];
 
     /// <summary>

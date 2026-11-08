@@ -25,6 +25,10 @@ permissions:
   contents: read
   id-token: write # Trusted Publishing（NuGet/login の OIDC トークン要求）に必要
 
+# dotnet test は Microsoft.Testing.Platform（global.json の test.runner）で動く。その利用状況の送信を止める
+env:
+  TESTINGPLATFORM_TELEMETRY_OPTOUT: "1"
+
 jobs:
   publish:
     runs-on: windows-latest
@@ -47,7 +51,7 @@ jobs:
         run: dotnet build QuickER.slnx
 
       - name: テスト
-        run: dotnet test QuickER.slnx --no-build --logger "console;verbosity=normal"
+        run: dotnet test QuickER.slnx --no-build --output detailed
 
       - name: パッケージ生成と検証（ランタイム7種+CLI）
         # 一覧・pack・検証の本体は scripts/pack-packages.ps1（ci.yml と共有。一覧をここへ写さない）。

@@ -11,6 +11,15 @@
       ソースの規則 test-host-server-gc が、この設定が残っていることを確かめる。
     -->
     <ServerGarbageCollection>true</ServerGarbageCollection>
+    <!--
+      テストを Microsoft.Testing.Platform（MTP）の実行ファイルとして作る（xunit.v3.mtp-v2 の入口はこの値で MTP になる）。
+      dotnet test を MTP で動かす指定は global.json の test.runner。Integration も同じ形にする（混在すると dotnet test
+      QuickER.slnx が VSTest のプロジェクトを黙って飛ばす）。Stryker.NET の MTP の実行器もこの形を前提にする。
+    -->
+    <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+    <OutputType>Exe</OutputType>
+    <!-- テストのプロジェクトの印（以前は Microsoft.NET.Test.Sdk が付けていた。Stryker.NET はこの値でテストのプロジェクトを見分ける） -->
+    <IsTestProject>true</IsTestProject>
   </PropertyGroup>
 
   <ItemGroup>
@@ -43,10 +52,7 @@
 
   <ItemGroup>
     <PackageReference Include="AwesomeAssertions" />
-    <PackageReference Include="coverlet.collector">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
+    <PackageReference Include="coverlet.MTP" />
     <PackageReference Include="Markdig" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
@@ -58,17 +64,13 @@
     <PackageReference Include="Oracle.EntityFrameworkCore" />
     <!-- SQLite 方言ランタイムテスト用の EF Core プロバイダ（インプロセス・Docker 不要） -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" />
     <PackageReference Include="Moq" />
     <PackageReference Include="Testcontainers.MsSql" />
     <PackageReference Include="Testcontainers.MySql" />
     <PackageReference Include="Testcontainers.Oracle" />
     <PackageReference Include="Testcontainers.PostgreSql" />
-    <PackageReference Include="xunit.runner.visualstudio">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-    <PackageReference Include="xunit.v3.mtp-off" />
+    <PackageReference Include="xunit.v3.mtp-v2" />
   </ItemGroup>
 
   <ItemGroup>
