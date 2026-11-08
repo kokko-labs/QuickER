@@ -200,7 +200,16 @@ internal static partial class SyncModelScenarios
                     new ArmInterruptOp(
                         D1,
                         ModelInterruptPoint.BeforeServerWrite,
-                        new AddItemOp(D1, Direct, 702, 700, null, "c-702", "b-recreated", "0A0B0702")
+                        new AddItemOp(
+                            D1,
+                            Direct,
+                            702,
+                            700,
+                            null,
+                            "c-702",
+                            "b-recreated",
+                            "0A0B0702"
+                        )
                     ),
                     Plain(D1),
                     Expect
@@ -211,7 +220,9 @@ internal static partial class SyncModelScenarios
                     Plain(D1),
                     Expect.Result(D1).Absent("conflict *"),
                     Expect.Journal(D1).Empty(),
-                    Expect.Rows(SV, I).Contains("702 folder=700 label=null code=c-702 title=b-recreated"),
+                    Expect
+                        .Rows(SV, I)
+                        .Contains("702 folder=700 label=null code=c-702 title=b-recreated"),
                 ]
             ) with
             {
