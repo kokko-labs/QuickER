@@ -12,135 +12,86 @@ internal static partial class DocumentFormatRows
     /// <remarks>
     /// <para>
     /// テーブル名・列名・列の型のような「推測で埋めると図の意味が変わるもの」は修復せず、
-    /// 場所を名指しして読込を断る。既定値（空文字・<c>int</c>）で埋めると、名前を勝手に付け直すのと
+    /// 場所を名指しして読込を断る。既定値（<c>NewTable</c>・<c>int</c> など）で埋めると、名前を勝手に付け直すのと
     /// 同じ書き換えになるうえ、そのまま上書き保存すれば手編集した JSON の元の内容が失われる。
     /// </para>
     /// <para>
+    /// 断る形は 2 つ＝明示の <c>null</c>（行 <c>tryload-null-*</c>）とキーの欠落（行 <c>tryload-missing-*</c>）。
+    /// 6 つの必須の文字列ごとに、同じ場所・同じ名指しの期待で 2 行を対にして作る（<see cref="RequiredTextPair"/>）。
+    /// </para>
+    /// <para>
     /// 説明・メモのような任意の文字列は空文字へ修復する（埋めても図の意味が変わらない）。
-    /// 図ファイルは手編集でしか明示 <c>null</c> を持ち得ないので、どちらの側も入口は JSON の直書き。
+    /// 図ファイルは手編集でしか明示 <c>null</c> もキーの欠落も持ち得ないので、どちらの側も入口は JSON の直書き。
     /// </para>
     /// </remarks>
     private static IEnumerable<ScenarioRow<FormatCase>> RequiredTextRows() =>
         [
-            Row(
-                "tryload-null-table-name-rejected",
-                "TryLoad: テーブル名の明示 null を拒否する",
-                new FormatCase
-                {
-                    Stage = FormatStage.TryLoad,
-                    Result = FormatResult.MissingRequiredText,
-                    Json = MinimalDiagramJson(tableName: "null"),
-                    Expect = o =>
-                    {
-                        o.Loaded.Should().BeNull();
-                        o.Error.Should().Be(DocumentLoadError.MissingRequiredText);
-                        o.Exception!.Message.Should().Contain("TableName").And.Contain("#1");
-                    },
-                }
+            .. RequiredTextPair(
+                "table-name",
+                "テーブル名",
+                value => MinimalDiagramJson(tableName: value),
+                message => message.Should().Contain("TableName").And.Contain("#1")
             ),
-            Row(
-                "tryload-null-column-name-rejected",
-                "TryLoad: 列名の明示 null をテーブル名つきで拒否する",
-                new FormatCase
-                {
-                    Stage = FormatStage.TryLoad,
-                    Result = FormatResult.MissingRequiredText,
-                    Json = MinimalDiagramJson(columnName: "null"),
-                    Expect = o =>
-                    {
-                        o.Loaded.Should().BeNull();
-                        o.Error.Should().Be(DocumentLoadError.MissingRequiredText);
-                        o.Exception!.Message.Should()
-                            .Contain("Name")
-                            .And.Contain("Orders")
-                            .And.Contain("#1");
-                    },
-                }
+            .. RequiredTextPair(
+                "column-name",
+                "列名（テーブル名つき）",
+                value => MinimalDiagramJson(columnName: value),
+                message => message.Should().Contain("Name").And.Contain("Orders").And.Contain("#1")
             ),
             // 型を int で埋めると、その図から出る DDL・生成コードが手編集した JSON と別物になる。
             // 名前を勝手に付け直すのと同じ性質の書き換えなので、名前と同じ扱いで断る。
-            Row(
-                "tryload-null-column-data-type-rejected",
-                "TryLoad: 列の型の明示 null を列名つきで拒否する",
-                new FormatCase
-                {
-                    Stage = FormatStage.TryLoad,
-                    Result = FormatResult.MissingRequiredText,
-                    Json = MinimalDiagramJson(dataType: "null"),
-                    Expect = o =>
-                    {
-                        o.Loaded.Should().BeNull();
-                        o.Error.Should().Be(DocumentLoadError.MissingRequiredText);
-                        o.Exception!.Message.Should()
-                            .Contain("DataType")
-                            .And.Contain("OrderId")
-                            .And.Contain("Orders");
-                    },
-                }
+            .. RequiredTextPair(
+                "column-data-type",
+                "列の型（列名つき）",
+                value => MinimalDiagramJson(dataType: value),
+                message =>
+                    message
+                        .Should()
+                        .Contain("DataType")
+                        .And.Contain("OrderId")
+                        .And.Contain("Orders")
             ),
-            Row(
-                "tryload-null-query-name-rejected",
-                "TryLoad: 名前付きクエリの名前・パラメータ名・射影名の明示 null を拒否する（クエリ名）",
-                new FormatCase
-                {
-                    Stage = FormatStage.TryLoad,
-                    Result = FormatResult.MissingRequiredText,
-                    Json = MinimalDiagramJson(
-                        extraSchemaMembers: """
+            .. RequiredTextPair(
+                "query-name",
+                "名前付きクエリの名前",
+                value =>
+                    MinimalDiagramJson(
+                        extraSchemaMembers: $$"""
                         ,
-                            "Queries": [ { "Name": null } ]
+                            "Queries": [ { {{Member("Name", value)}} } ]
                         """
                     ),
-                    Expect = o =>
-                    {
-                        o.Error.Should().Be(DocumentLoadError.MissingRequiredText);
-                        o.Exception!.Message.Should().Contain("query #1");
-                    },
-                }
+                message => message.Should().Contain("query #1")
             ),
-            Row(
-                "tryload-null-query-parameter-name-rejected",
-                "TryLoad: 名前付きクエリの名前・パラメータ名・射影名の明示 null を拒否する（パラメータ名）",
-                new FormatCase
-                {
-                    Stage = FormatStage.TryLoad,
-                    Result = FormatResult.MissingRequiredText,
-                    Json = MinimalDiagramJson(
-                        extraSchemaMembers: """
+            .. RequiredTextPair(
+                "query-parameter-name",
+                "名前付きクエリのパラメータ名",
+                value =>
+                    MinimalDiagramJson(
+                        extraSchemaMembers: $$"""
                         ,
-                            "Queries": [ { "Name": "FindById", "Parameters": [ { "Name": null } ] } ]
+                            "Queries": [ { "Name": "FindById", "Parameters": [ { {{Member(
+                            "Name",
+                            value
+                        )}} } ] } ]
                         """
                     ),
-                    Expect = o =>
-                    {
-                        o.Error.Should().Be(DocumentLoadError.MissingRequiredText);
-                        o.Exception!.Message.Should()
-                            .Contain("parameter #1")
-                            .And.Contain("FindById");
-                    },
-                }
+                message => message.Should().Contain("parameter #1").And.Contain("FindById")
             ),
-            Row(
-                "tryload-null-query-projection-field-name-rejected",
-                "TryLoad: 名前付きクエリの名前・パラメータ名・射影名の明示 null を拒否する（射影名）",
-                new FormatCase
-                {
-                    Stage = FormatStage.TryLoad,
-                    Result = FormatResult.MissingRequiredText,
-                    Json = MinimalDiagramJson(
-                        extraSchemaMembers: """
+            .. RequiredTextPair(
+                "query-projection-field-name",
+                "名前付きクエリの射影名",
+                value =>
+                    MinimalDiagramJson(
+                        extraSchemaMembers: $$"""
                         ,
-                            "Queries": [ { "Name": "FindById", "Fields": [ { "Name": null } ] } ]
+                            "Queries": [ { "Name": "FindById", "Fields": [ { {{Member(
+                            "Name",
+                            value
+                        )}} } ] } ]
                         """
                     ),
-                    Expect = o =>
-                    {
-                        o.Error.Should().Be(DocumentLoadError.MissingRequiredText);
-                        o.Exception!.Message.Should()
-                            .Contain("projection field #1")
-                            .And.Contain("FindById");
-                    },
-                }
+                message => message.Should().Contain("projection field #1").And.Contain("FindById")
             ),
             Row(
                 "tryload-null-optional-text-repaired-to-empty",
@@ -210,11 +161,70 @@ internal static partial class DocumentFormatRows
             ),
         ];
 
+    /// <summary>
+    /// 必須の文字列 1 つについて、明示の <c>null</c> の行（<c>tryload-null-{field}-rejected</c>）と
+    /// キーの欠落の行（<c>tryload-missing-{field}-rejected</c>）を、同じ名指しの期待で対にして作る
+    /// </summary>
+    /// <param name="field">行 Id の中ほどに入る名前</param>
+    /// <param name="subject">説明に入る対象の呼び名</param>
+    /// <param name="json">対象の値（JSON の値の文字列。<c>null</c> ならキーごと書かない）から図の JSON を作る</param>
+    /// <param name="expectMessage">断った理由の文言（場所の名指し）の表明</param>
+    private static IEnumerable<ScenarioRow<FormatCase>> RequiredTextPair(
+        string field,
+        string subject,
+        Func<string?, string> json,
+        Action<string> expectMessage
+    ) =>
+        [
+            RequiredTextRow(
+                $"tryload-null-{field}-rejected",
+                $"TryLoad: {subject}の明示 null を拒否する",
+                json("null"),
+                expectMessage
+            ),
+            RequiredTextRow(
+                $"tryload-missing-{field}-rejected",
+                $"TryLoad: {subject}のキーの欠落を拒否する（既定値で埋めない）",
+                json(null),
+                expectMessage
+            ),
+        ];
+
+    private static ScenarioRow<FormatCase> RequiredTextRow(
+        string id,
+        string description,
+        string json,
+        Action<string> expectMessage
+    ) =>
+        Row(
+            id,
+            description,
+            new FormatCase
+            {
+                Stage = FormatStage.TryLoad,
+                Result = FormatResult.MissingRequiredText,
+                Json = json,
+                Expect = o =>
+                {
+                    o.Loaded.Should().BeNull();
+                    o.Error.Should().Be(DocumentLoadError.MissingRequiredText);
+                    expectMessage(o.Exception!.Message);
+                },
+            }
+        );
+
+    /// <summary>JSON のメンバー 1 つ（値が <c>null</c> ならキーごと書かない＝空文字列）</summary>
+    /// <param name="name">キー</param>
+    /// <param name="value">JSON の値の文字列（<c>"\"Orders\""</c>・<c>"null"</c> など）。<c>null</c> ならキーを書かない</param>
+    private static string Member(string name, string? value) =>
+        value is null ? string.Empty : $"\"{name}\": {value}";
+
     /// <summary>1 テーブル・1 列の最小の図を、指定の差し替えを施した JSON として組み立てる</summary>
+    /// <remarks>テーブル名・列名・列の型は JSON の値の文字列で渡し、<c>null</c> を渡すとキーごと書かない</remarks>
     private static string MinimalDiagramJson(
-        string tableName = "\"Orders\"",
-        string columnName = "\"OrderId\"",
-        string dataType = "\"int\"",
+        string? tableName = "\"Orders\"",
+        string? columnName = "\"OrderId\"",
+        string? dataType = "\"int\"",
         string extraSchemaMembers = ""
     ) =>
         $$"""
@@ -224,13 +234,19 @@ internal static partial class DocumentFormatRows
                 "TargetDbms": "sqlserver",
                 "Entities": [
                   {
-                    "TableName": {{tableName}},
-                    "Columns": [
-                      { "Name": {{columnName}}, "DataType": {{dataType}} }
-                    ]
+                    {{Members(
+                Member("TableName", tableName),
+                "\"Columns\": [ { "
+                    + Members(Member("Name", columnName), Member("DataType", dataType))
+                    + " } ]"
+            )}}
                   }
                 ]{{extraSchemaMembers}}
               }
             }
             """;
+
+    /// <summary>空でないメンバーをカンマでつなぐ</summary>
+    private static string Members(params string[] members) =>
+        string.Join(", ", members.Where(member => member.Length > 0));
 }

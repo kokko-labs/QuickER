@@ -251,7 +251,7 @@
     <value>スキーマファイルで複数のテーブル・列・リレーションが同じ識別子を使っています: {0}（{1}）。JSON を手で編集して、それぞれに別の識別子を与えてください。</value>
   </data>
   <data name="Cli_SchemaMissingRequiredText" xml:space="preserve">
-    <value>スキーマファイルで必須の名前または型が空（null）になっています: {0}（{1}）。JSON を手で編集して値を入れてください。</value>
+    <value>スキーマファイルに必須の名前または型がありません（キーが無いか null です）: {0}（{1}）。JSON を手で編集して値を入れてください。</value>
   </data>
   <data name="Cli_GenerationAborted" xml:space="preserve">
     <value>生成エラーのため中止しました。</value>
