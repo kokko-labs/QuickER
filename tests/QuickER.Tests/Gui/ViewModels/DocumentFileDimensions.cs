@@ -303,6 +303,8 @@ internal static class DocumentFileDimensions
             ),
             DocContentKind.DuplicateId => nameof(DocumentLoadError.DuplicateId),
             DocContentKind.MissingRequiredText => nameof(DocumentLoadError.MissingRequiredText),
+            // BrokenReference は乱数の手の列が作らず、決まった形の開くの行（現在のファイルにならない）だけが使うので、
+            // ここ（現在のファイルの中身）には来ない。来たら水準の宣言の漏れなので投げる
             _ => throw new ArgumentOutOfRangeException(nameof(model), label, null),
         };
     }

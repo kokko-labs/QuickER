@@ -152,7 +152,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 
 ### 図ファイル
 - **Version 1 のまま足すフィールドは、読み手が欠落を無害に扱える形に限り、無害でなければ Version を上げる**：古い版で保存すると新しいフィールドが消える。ガードなし（設計判断）。→ `src/QuickER.Document/CLAUDE.md`「図ファイル形式の前方互換」
-- **Id 重複と必須の文字列の欠落（キーが無いか明示の null）の検査は `JsonStorageService.TryLoad` の 1 箇所で拒否だけを行い、修復しない**：呼び出し側に散らすと起動時の復元が検証の外に残り、最悪経路でクラッシュする。キーの欠落を既定値（`NewTable`・`int`）で埋めると、上書き保存で元の内容が失われる。ガード：`DocumentFormatTests`（行 `tryload-duplicate-*`・`tryload-null-*`・`tryload-missing-*`）・`DocumentFileTests`（乱数の手の列・不変条件 (5)）。→ `src/QuickER.Document/CLAUDE.md`「図ファイルの読込検査」
+- **Id 重複・必須の値の欠落（名前・型・表と列の Id のキーが無いか明示の null）・図に無い表や列を指す参照（リレーションの両端・列ペア・一意制約の構成列）の検査は `JsonStorageService.TryLoad` の 1 箇所で拒否だけを行い、修復しない。主キーの順序の古い Id・クエリの参照・レイアウトの余分なキーは断らない**：呼び出し側に散らすと起動時の復元が検証の外に残り、最悪経路でクラッシュする。キーの欠落を既定値（`NewTable`・`int`・新しい Guid）で埋めると上書き保存で元の内容が失われ、切れた参照は GUI がリレーション・列ペアを黙って読み飛ばして保存で消える。断らない参照は普通の操作・公開版の図で生じる。ガード：`DocumentFormatTests`（行 `tryload-duplicate-*`・`tryload-null-*`・`tryload-missing-*`・`tryload-empty-*`・`tryload-dangling-*`・`tryload-*-is-kept`）・`DocumentFileTests`（乱数の手の列・不変条件 (5)・行 `openfail-broken-reference-dedicated-message`）。→ `src/QuickER.Document/CLAUDE.md`「図ファイルの読込検査」
 
 ### 取込
 

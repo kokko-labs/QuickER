@@ -48,6 +48,9 @@ internal enum FormatResult
     /// <summary>TryLoad が必須の文字列の欠落で断った</summary>
     MissingRequiredText,
 
+    /// <summary>TryLoad が図に無い表・列を指す参照で断った</summary>
+    BrokenReference,
+
     /// <summary>書けた（SaveAtomic・SaveNew が例外なしで戻った）</summary>
     Written,
 
@@ -247,6 +250,7 @@ internal static class DocumentFormatRunner
                 DocumentLoadError.NotDiagramDocument => FormatResult.NotDiagramDocument,
                 DocumentLoadError.DuplicateId => FormatResult.DuplicateId,
                 DocumentLoadError.MissingRequiredText => FormatResult.MissingRequiredText,
+                DocumentLoadError.BrokenReference => FormatResult.BrokenReference,
                 _ => throw new InvalidOperationException($"TryLoad が偽で種類が {outcome.Error}"),
             },
             FormatStage.SaveAtomic or FormatStage.SaveNew => FormatResult.Written,
@@ -280,6 +284,7 @@ internal static partial class DocumentFormatRows
             .. IdIntegrityRows(),
             .. TryLoadClassificationRows(),
             .. RequiredTextRows(),
+            .. ReferenceRows(),
             .. ColumnFlagRows(),
             .. KeyOrderAndUniqueRows(),
         ];

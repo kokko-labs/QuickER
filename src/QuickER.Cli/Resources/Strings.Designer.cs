@@ -531,6 +531,11 @@ namespace QuickER.Cli.Resources {
                 return ResourceManager.GetString("Cli_SchemaMissingRequiredText", resourceCulture);
             }
         }
+        public static string Cli_SchemaBrokenReference {
+            get {
+                return ResourceManager.GetString("Cli_SchemaBrokenReference", resourceCulture);
+            }
+        }
 
         public static string Cli_ImportWarningLine {
             get {

@@ -18,6 +18,8 @@ internal static partial class DocumentFormatRows
     /// <para>
     /// 断る形は 2 つ＝明示の <c>null</c>（行 <c>tryload-null-*</c>）とキーの欠落（行 <c>tryload-missing-*</c>）。
     /// 6 つの必須の文字列ごとに、同じ場所・同じ名指しの期待で 2 行を対にして作る（<see cref="RequiredTextPair"/>）。
+    /// 表・列の Id も同じ検査で断る。Id の明示の <c>null</c> は型の不一致（InvalidJson）なので、対は
+    /// キーの欠落と空の Guid（行 <c>tryload-empty-*</c>）にする（<see cref="RequiredValuePair"/>）。
     /// </para>
     /// <para>
     /// 説明・メモのような任意の文字列は空文字へ修復する（埋めても図の意味が変わらない）。
@@ -50,6 +52,27 @@ internal static partial class DocumentFormatRows
                         .Contain("DataType")
                         .And.Contain("OrderId")
                         .And.Contain("Orders")
+            ),
+            // 表・列の Id はレイアウト・リレーション・列ペア・一意制約・主キーの順序・クエリから引かれる。
+            // 新しい Guid で埋めると、それらが黙って切れる（位置が既定へ戻り、GUI の保存でリレーションが消える）。
+            .. RequiredValuePair(
+                "entity-id",
+                "表の Id（テーブル名つき）",
+                EmptyGuidJson,
+                value => MinimalDiagramJson(entityId: value),
+                message => message.Should().Contain("\"Id\"").And.Contain("table 'Orders'")
+            ),
+            .. RequiredValuePair(
+                "column-id",
+                "列の Id（列名とテーブル名つき）",
+                EmptyGuidJson,
+                value => MinimalDiagramJson(columnId: value),
+                message =>
+                    message
+                        .Should()
+                        .Contain("\"Id\"")
+                        .And.Contain("column 'OrderId'")
+                        .And.Contain("table 'Orders'")
             ),
             .. RequiredTextPair(
                 "query-name",
@@ -107,11 +130,12 @@ internal static partial class DocumentFormatRows
                         "TargetDbms": "sqlserver",
                         "Entities": [
                           {
+                            "Id": "44444444-0000-0000-0000-000000000001",
                             "TableName": "Orders",
                             "Description": null,
                             "Memo": null,
                             "Columns": [
-                              { "Name": "OrderId", "DataType": "int", "Description": null }
+                              { "Id": "44444444-0000-0000-0000-000000000002", "Name": "OrderId", "DataType": "int", "Description": null }
                             ]
                           }
                         ],
@@ -174,12 +198,32 @@ internal static partial class DocumentFormatRows
         string subject,
         Func<string?, string> json,
         Action<string> expectMessage
+    ) => RequiredValuePair(field, subject, "null", json, expectMessage);
+
+    /// <summary>
+    /// 必須の値 1 つについて、明示の空の値の行（<paramref name="explicitEmpty"/> が <c>null</c> なら
+    /// <c>tryload-null-{field}-rejected</c>、ほかは <c>tryload-empty-{field}-rejected</c>）と、
+    /// キーの欠落の行（<c>tryload-missing-{field}-rejected</c>）を、同じ名指しの期待で対にして作る
+    /// </summary>
+    /// <param name="field">行 Id の中ほどに入る名前</param>
+    /// <param name="subject">説明に入る対象の呼び名</param>
+    /// <param name="explicitEmpty">明示の空の値（JSON の値の文字列。文字列は <c>null</c>・Id は空の Guid）</param>
+    /// <param name="json">対象の値（JSON の値の文字列。<c>null</c> ならキーごと書かない）から図の JSON を作る</param>
+    /// <param name="expectMessage">断った理由の文言（場所の名指し）の表明</param>
+    private static IEnumerable<ScenarioRow<FormatCase>> RequiredValuePair(
+        string field,
+        string subject,
+        string explicitEmpty,
+        Func<string?, string> json,
+        Action<string> expectMessage
     ) =>
         [
             RequiredTextRow(
-                $"tryload-null-{field}-rejected",
-                $"TryLoad: {subject}の明示 null を拒否する",
-                json("null"),
+                explicitEmpty == "null"
+                    ? $"tryload-null-{field}-rejected"
+                    : $"tryload-empty-{field}-rejected",
+                $"TryLoad: {subject}の明示の空の値（{explicitEmpty}）を拒否する",
+                json(explicitEmpty),
                 expectMessage
             ),
             RequiredTextRow(
@@ -189,6 +233,9 @@ internal static partial class DocumentFormatRows
                 expectMessage
             ),
         ];
+
+    /// <summary>空の Guid（JSON の値の文字列）</summary>
+    private const string EmptyGuidJson = "\"00000000-0000-0000-0000-000000000000\"";
 
     private static ScenarioRow<FormatCase> RequiredTextRow(
         string id,
@@ -220,12 +267,17 @@ internal static partial class DocumentFormatRows
         value is null ? string.Empty : $"\"{name}\": {value}";
 
     /// <summary>1 テーブル・1 列の最小の図を、指定の差し替えを施した JSON として組み立てる</summary>
-    /// <remarks>テーブル名・列名・列の型は JSON の値の文字列で渡し、<c>null</c> を渡すとキーごと書かない</remarks>
+    /// <remarks>
+    /// 表と列の Id・テーブル名・列名・列の型は JSON の値の文字列で渡し、<c>null</c> を渡すとキーごと書かない。
+    /// 表の Id は <c>IdOf(1)</c>、列の Id は <c>IdOf(2)</c>（クエリの参照先・参照の行が指すため固定）
+    /// </remarks>
     private static string MinimalDiagramJson(
         string? tableName = "\"Orders\"",
         string? columnName = "\"OrderId\"",
         string? dataType = "\"int\"",
-        string extraSchemaMembers = ""
+        string extraSchemaMembers = "",
+        string? entityId = "\"44444444-0000-0000-0000-000000000001\"",
+        string? columnId = "\"44444444-0000-0000-0000-000000000002\""
     ) =>
         $$"""
             {
@@ -235,9 +287,14 @@ internal static partial class DocumentFormatRows
                 "Entities": [
                   {
                     {{Members(
+                Member("Id", entityId),
                 Member("TableName", tableName),
                 "\"Columns\": [ { "
-                    + Members(Member("Name", columnName), Member("DataType", dataType))
+                    + Members(
+                        Member("Id", columnId),
+                        Member("Name", columnName),
+                        Member("DataType", dataType)
+                    )
                     + " } ]"
             )}}
                   }
