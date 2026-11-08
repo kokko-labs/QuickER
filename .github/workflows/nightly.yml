@@ -28,6 +28,10 @@ concurrency:
   group: nightly
   cancel-in-progress: false
 
+# dotnet test は Microsoft.Testing.Platform（global.json の test.runner）で動く。その利用状況の送信を止める
+env:
+  TESTINGPLATFORM_TELEMETRY_OPTOUT: "1"
+
 jobs:
   # 実 DB の夜間のエンジン（同期計画の総当たり・同期のモデル・実装先の一致・名前の DDL の往復・簡易 DSL の SQL Server）
   integration-nightly:
@@ -48,7 +52,7 @@ jobs:
         env:
           QUICKER_ENGINE_PROFILE: nightly
           QUICKER_REQUIRE_DOCKER: "1"
-        run: dotnet test tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj --filter "NightlyEngine=true" --logger "console;verbosity=normal" --logger "trx;LogFileName=integration-nightly.trx" --results-directory "${{ runner.temp }}/nightly-results"
+        run: dotnet test tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj --filter "NightlyEngine=true" --output detailed --report-trx --report-trx-filename integration-nightly.trx --results-directory "${{ runner.temp }}/nightly-results"
 
       - name: テストの結果を保存
         # 失敗した夜にも残す（確かめたいのは失敗の夜の結果）
@@ -78,7 +82,7 @@ jobs:
           QUICKER_ENGINE_PROFILE: nightly
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
-        run: dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "NightlyEngine=true" --logger "console;verbosity=normal" --logger "trx;LogFileName=unit-nightly.trx" --results-directory "${{ runner.temp }}/nightly-results"
+        run: dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "NightlyEngine=true" --output detailed --report-trx --report-trx-filename unit-nightly.trx --results-directory "${{ runner.temp }}/nightly-results"
 
       - name: テストの結果を保存
         if: always()

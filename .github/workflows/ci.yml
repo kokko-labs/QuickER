@@ -39,6 +39,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# dotnet test は Microsoft.Testing.Platform（global.json の test.runner）で動く。その利用状況の送信を止める
+env:
+  TESTINGPLATFORM_TELEMETRY_OPTOUT: "1"
+
 jobs:
   # 実 DB 統合テスト（ubuntu＝Linux コンテナが使える唯一の GitHub ホストランナー）。
   # イメージ pull（SQL Server / PostgreSQL / MySQL / Oracle）を毎回行うため 10〜15 分程度かかるが、
@@ -63,7 +67,7 @@ jobs:
         # スキップへ変換せず失敗させる（詳細はテスト側 DockerRequirement のコメントを参照）
         env:
           QUICKER_REQUIRE_DOCKER: "1"
-        run: dotnet test tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj --logger "console;verbosity=normal"
+        run: dotnet test tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj --output detailed
 
   build-and-test:
     runs-on: windows-latest
@@ -97,11 +101,22 @@ jobs:
       - name: テスト
         # テストが作る一時ファイル（SQLite の実ファイル DB・偽の app-server の一時フォルダなど）を、ランナーの
         # 一時領域（D: ドライブ）へ置く。既定の TEMP は C: のユーザープロファイルの下で、ファイルの作成と削除が遅い
-        # （SQLite のジャーナルはトランザクションごとにファイルを作って消す）
+        # （SQLite のジャーナルはトランザクションごとにファイルを作って消す）。
+        # 結果は TRX でも書く（コンソールは表示名だけなので、テストのクラスごとの時間は TRX の完全修飾名で読む）。
+        # ファイル名を指定しないと、プロジェクトごとに別の名前（アセンブリ名_TFM_アーキテクチャ.trx）で書かれる
         env:
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
-        run: dotnet test QuickER.slnx --no-build --logger "console;verbosity=normal"
+        run: dotnet test QuickER.slnx --no-build --output detailed --report-trx --results-directory "${{ runner.temp }}/test-results"
+
+      - name: テストの結果を保存
+        # 失敗した実行にも残す（確かめたいのは失敗の結果）
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: build-and-test-trx
+          path: ${{ runner.temp }}/test-results/*.trx
+          retention-days: 14
 
       - name: サンプルの実行（samples/ec-order）
         # 利用者のプロジェクトを模した動くサンプル。QuickER 本体へは参照せず NuGet パッケージのみで、
