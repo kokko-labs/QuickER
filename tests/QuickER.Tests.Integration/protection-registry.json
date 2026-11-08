@@ -223,7 +223,7 @@
     {
       "id": "Dialect",
       "part": "TypesRealDb",
-      "title": "方言の型の表の実 DB の段（上限の対の DDL の適用と取り込み直し・マッパーとドライバの CLR 型の一致）",
+      "title": "方言の型の表の実 DB の段（上限の対の DDL の適用と取り込み直し・マッパーとドライバの CLR 型の一致・EF Core の読み書き）",
       "sourceFiles": [
         "tests/QuickER.Tests.Integration/Dialects/DialectTypeRealDbRows.cs",
         "tests/QuickER.Tests.Integration/Dialects/DialectTypeRealDbTests.cs",

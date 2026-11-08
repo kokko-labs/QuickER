@@ -45,6 +45,9 @@ public sealed class DialectTypeRealDbTableTests(ITestOutputHelper output)
         );
     }
 
+    /// <summary>読み書きできない組の理由の書き出し（製品の候補＝直す区切りが手順を通る形へ書き換える）</summary>
+    private const string ProductCandidate = "製品の候補（P5）：";
+
     /// <summary>手順の宣言の食い違い（無ければ空）</summary>
     private static IEnumerable<string> Problems(DialectTypeRealDbProbe probe)
     {
@@ -59,6 +62,25 @@ public sealed class DialectTypeRealDbTableTests(ITestOutputHelper output)
         if (!row.Expected.ContainsKey(probe.Dialect))
         {
             yield return $"行が {probe.Dialect} の期待を持たない";
+        }
+
+        if (probe.Kind != DialectTypeRealDbProbeKinds.EfCore && probe.Write is not null)
+        {
+            yield return "書く値は EF Core の手順だけが持つ";
+        }
+
+        // 読み書きできない組は、理由と今の症状の両方を持つ（片方だけだと、直ったことを知らせられないか、理由が残らない）
+        if ((probe.GapReason is null) != (probe.GapSymptom is null))
+        {
+            yield return "読み書きできない組は、理由（GapReason）と症状（GapSymptom）の両方を持つ";
+        }
+
+        if (
+            probe.GapReason is { } reason
+            && !reason.StartsWith(ProductCandidate, StringComparison.Ordinal)
+        )
+        {
+            yield return $"読み書きできない組の理由は「{ProductCandidate}」で始める（直す区切りが埋める組と分かるように）";
         }
 
         switch (probe.Kind)
@@ -114,6 +136,54 @@ public sealed class DialectTypeRealDbTableTests(ITestOutputHelper output)
                 if (probe.Spelling is not null)
                 {
                     yield return "マッパーの手順は行の入力を DDL に流す（表記を書かない）";
+                }
+
+                break;
+            }
+
+            case DialectTypeRealDbProbeKinds.EfCore:
+            {
+                if (row.Facet != DialectTypeFacets.Map)
+                {
+                    yield return $"行の観点が {row.Facet}（マッパーの行を指す）";
+                    break;
+                }
+
+                if (probe.Value is null || probe.ReadBack is null || probe.Write is null)
+                {
+                    yield return "EF Core の手順は、入れる値・読んだ値の期待・書く値を持つ";
+                    break;
+                }
+
+                if (
+                    probe.Spelling is not null
+                    || probe.Driver is not null
+                    || probe.MapperType is not null
+                    || probe.NarrowingLoses
+                )
+                {
+                    yield return "EF Core の手順は行の入力を DDL に流し、ドライバの型・マッパーの型・精度の確認を持たない";
+                }
+
+                // 読んだ値・書く値の型は、マッパーが行の入力を写す C# の型（違うと Equals が型の違いで食い違う・書けない）
+                var mapped = DialectTypeAxis.Get(probe.Dialect).Map((string)row.Input!).TypeName;
+
+                foreach (
+                    var (what, value) in new[]
+                    {
+                        ("読んだ値", probe.ReadBack),
+                        ("書く値", probe.Write),
+                    }
+                )
+                {
+                    var name = DialectTypeRealDbTestsBase.CSharpNames.GetValueOrDefault(
+                        value.GetType()
+                    );
+
+                    if (name != mapped)
+                    {
+                        yield return $"{what}の型 {name ?? value.GetType().Name} がマッパーの型 {mapped} と違う";
+                    }
                 }
 
                 break;

@@ -55,14 +55,10 @@ internal static class DialectDdlDimensions
         );
 
     /// <summary>
-    /// 網羅しない組の一覧：行がまだ無い組（<see cref="PendingPairs"/>）・受け入れ（<see cref="AcceptedGaps"/>＝製品の作り方の事実）・
-    /// 製品の候補（<see cref="ProductCandidateGaps"/>）
+    /// 網羅しない組の一覧：行がまだ無い組（<see cref="PendingPairs"/>）・受け入れ（<see cref="AcceptedGaps"/>＝製品の作り方の事実）
     /// </summary>
     public static CoverageGapSet Gaps { get; } =
-        CoverageGap.Set(
-            EngineIds.Dialect,
-            [.. PendingGaps(), .. AcceptedGaps(), .. ProductCandidateGaps()]
-        );
+        CoverageGap.Set(EngineIds.Dialect, [.. PendingGaps(), .. AcceptedGaps()]);
 
     /// <summary>受け入れを見つけた区切り</summary>
     private const string AcceptedFinding = "P4-2e";
@@ -143,21 +139,6 @@ internal static class DialectDdlDimensions
             Path,
             (element, path) =>
                 element == DialectDdlElements.ManyToMany && path != DialectDdlPaths.Ddl
-        );
-    }
-
-    /// <summary>製品の候補（P5・ユーザーの判断。行にすると今の振る舞いを固定してしまう組）</summary>
-    private static IEnumerable<CoverageGapEntry> ProductCandidateGaps()
-    {
-        yield return CoverageGap.Tuple(
-            Scope,
-            AcceptedFinding,
-            "P5",
-            "製品の候補：SQLite の再構築はスキーマで修飾された表名（a.b）で、一時表の CREATE と最後の RENAME が main の 1 つの識別子"
-                + " \"a.b…\" を指し、移送の INSERT … SELECT と DROP が添付 DB の \"a\".\"b\" を指す（SqliteSyncScriptBuilder.cs:150-190）。"
-                + "src/QuickER.Provider.Sqlite/CLAUDE.md「既知の割り切り」は unknown database になり得ることしか書いていない",
-            (Element, DialectDdlElements.SchemaQualified),
-            (Path, DialectDdlPaths.SyncRebuild)
         );
     }
 

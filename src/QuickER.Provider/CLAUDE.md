@@ -191,10 +191,15 @@
   - GUI の切替は印の列を確認ダイアログの「注意つきで変換した列」の節（`TypeConversion_PrecisionCappedHeader`・変換できない列の節の次）で名指しし、この節だけでも確認を出す（Undo は型の変換と同じ 1 履歴）。
 - 固定は `DialectTypeTableTests` の方言切替の行（`convert-x-oracle-*`＝精度の上限なしの整数と NUMBER の桁）・`DiagramTypeConverterTests.CreatePlan_PrecisionCap_OnlyForPrecisionlessIntegerDecimal`・`MainViewModelTargetDbmsTests` の `ChangeDbms_OracleUnlimitedInteger_ConfirmsCappedColumnAndUndoes`／`ChangeDbms_PrecisionCappedSection_FollowsUnconvertedSection`／`ChangeDbms_OracleUnlimitedInteger_CancelKeepsType`・docs の `unconvertible-types` の表の照合・`{SqlServer,MySql,PostgreSql}TypeNotationIntegrationTests`（変換の出力 `TypeNotationClosure.ConvertedOracleInteger` で同期→再取込→差分 0）。mutation 実証済み。
 
-### 型マッパーはドライバの CLR 型へ写す
+### 型マッパーは読み取る経路が読み書きできる型へ写す
 
-- 型マッパーは、ドライバがその列を返す CLR 型へ写す。違う型で受けると読み取り自体が `InvalidCastException` になり、行の組み立ては全列をまとめて読むので、その列を持つ表が丸ごと使えない。
-- 方言ごとの写し方は各方言の CLAUDE.md「型表記」。固定は `DialectTypeTableTests` のマッパーの行（`map-*`・宣言のセルの全表記を流す `matrix-map-*`＝5 方言のマッパーが同じ「種類 → C# の型」の表に従う）と、同じ行を実 DB で流す `*DialectTypeRealDbTests`（手順は `DialectTypeRealDbRows`＝ドライバの `GetFieldType` とマッパーの一致）。
+- 型マッパーは、その列を読み取る経路が読み書きできる CLR 型へ写す。違う型で受けると読み取り自体が `InvalidCastException` になり、行の組み立ては全列をまとめて読むので、その列を持つ表が丸ごと使えない。
+- 読み取る経路は方言で違う。
+  - SQL Server・SQLite：QuickER 版 Repository（ADO）がドライバから読むので、ドライバがその列を返す CLR 型（`GetFieldType`）へ写す。SQLite はストレージクラスで返るが、Microsoft.Data.Sqlite がマッパーの型へ変換して読む（REAL アフィニティだけは倍精度の `double` に限る）。
+  - PostgreSQL・MySQL・Oracle：QuickER 版 Repository を持たず、生成した EF Core のコードとそのプロバイダが読む。生成 DbContext は列の型（`HasColumnType`）を書かないので、プロバイダがマッパーの型から選ぶ既定の対応で読み書きできる型へ写す。ドライバの型と違ってよい（Oracle の整数の `NUMBER(p)`・PostgreSQL の `time`・`timestamptz` など）。
+- 確かめた EF Core のプロバイダは、Integration が持つ `UseOracle`（Oracle.EntityFrameworkCore）・`UseMySQL`（MySql.EntityFrameworkCore＝ドライバは MySql.Data）・`UseNpgsql`・`UseSqlServer`・`UseSqlite`。MySQL の Pomelo（ドライバは MySqlConnector）は確かめていない。
+- **今この規則を満たしていない組がある**：MySQL の `timestamp(n)`（MySql.Data が DateTimeOffset の小数秒を落とす）と `char(36)`（UUID の値を Guid で返し string で読めない）、PostgreSQL の `date`・`timestamp`（DateTime を timestamptz で送り Kind=Unspecified の書き込みを断られる）と `json`・`jsonb`・`xml`（text で送り書き込みを断られる）。一覧の正本は `DialectTypeRealDbRows` の EF Core の手順のうち `GapReason` を持つもの（製品の候補＝直す区切りが手順を通る形へ書き換える）。
+- 方言ごとの写し方は各方言の CLAUDE.md「型表記」。固定は `DialectTypeTableTests` のマッパーの行（`map-*`・宣言のセルの全表記を流す `matrix-map-*`＝5 方言のマッパーが同じ「種類 → C# の型」の表に従う）と、同じ行を実 DB で流す `*DialectTypeRealDbTests`（手順は `DialectTypeRealDbRows`。ドライバの手順＝`GetFieldType` とマッパーの一致、EF Core の手順＝生成 DbContext と同じ構成のモデルでマッパーの型として読み、書いて読み戻す。読み書きできない組は今の症状が出なくなると赤になる）。DB に触れない宣言の照合は `DialectTypeRealDbTableTests`。
 
 ## 差分と同期
 

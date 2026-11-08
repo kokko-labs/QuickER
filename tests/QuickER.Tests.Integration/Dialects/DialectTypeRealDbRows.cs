@@ -15,8 +15,14 @@ internal static class DialectTypeRealDbProbeKinds
     /// <summary>型マッパーの型：ドライバの <c>GetFieldType</c> と一致し、その型で読める</summary>
     public const string Driver = "driver";
 
+    /// <summary>
+    /// 型マッパーの型：生成 EF Core のコードと同じ構成（列名だけを指定し、列の型・精度・Unicode を指定しない）のモデルで、
+    /// マッパーの型として入れた行を読み、同じ型の値を書いて読み戻せる
+    /// </summary>
+    public const string EfCore = "efcore";
+
     /// <summary>すべての種類（次元表の水準の並び）</summary>
-    public static IReadOnlyList<string> All { get; } = [AtLimit, OverLimit, Driver];
+    public static IReadOnlyList<string> All { get; } = [AtLimit, OverLimit, Driver, EfCore];
 }
 
 /// <summary>
@@ -41,8 +47,17 @@ internal static class DialectTypeRealDbProbeKinds
 /// <param name="MapperType">
 /// マッパーの <c>TypeName</c> がドライバの型の C# の名前と違うことを意図しているときの、マッパーの型（null なら同じ）
 /// </param>
-/// <param name="ReadBack">ドライバの型で読んだ値の期待（null なら値は見ない）</param>
+/// <param name="ReadBack">
+/// ドライバの型で読んだ値の期待（null なら値は見ない）。EF Core の手順では、マッパーの型として EF Core で読んだ値の期待（必須）
+/// </param>
 /// <param name="NarrowingLoses">読んだ <c>double</c> を <c>float</c> へ落とすと値が変わるか（入れた値が倍精度を要することの確認）</param>
+/// <param name="Write">EF Core の手順で、マッパーの型として書いて読み戻す値</param>
+/// <param name="GapReason">
+/// 読み書きできないと分かっている組の理由（製品の候補＝P5。直す区切りがこの手順を通る形へ書き換える）。null なら通るべき手順
+/// </param>
+/// <param name="GapSymptom">
+/// 読み書きできない組で、今出ている食い違いの文に含まれる文字列（出なくなったら手順が赤になり、直ったことを知らせる）
+/// </param>
 internal sealed record DialectTypeRealDbProbe(
     string RowId,
     string Dialect,
@@ -53,7 +68,10 @@ internal sealed record DialectTypeRealDbProbe(
     Type? Driver = null,
     string? MapperType = null,
     object? ReadBack = null,
-    bool NarrowingLoses = false
+    bool NarrowingLoses = false,
+    object? Write = null,
+    string? GapReason = null,
+    string? GapSymptom = null
 )
 {
     /// <summary>NULL を入れる手順か（列を NULL 許容で作り、型で読む確認は飛ばす）</summary>
@@ -74,8 +92,17 @@ internal sealed record DialectTypeRealDbProbe(
 /// 断る（だから書き出さない）。PostgreSQL の小数秒だけは DB が断らずに 6 へ丸める。
 /// </para>
 /// <para>
-/// マッパーの行は、ドライバの実測の CLR 型が正（生成コードはマッパーの型で読む）。行の入力の表記と取り込み直した表記の
+/// マッパーの行は、読み取る経路が読み書きできる型が正（生成コードはマッパーの型で読む）。QuickER 版 Repository（ADO）が
+/// 読む SQL Server・SQLite は、ドライバの実測の CLR 型と比べる（ドライバの手順）。行の入力の表記と取り込み直した表記の
 /// どちらもマッパーが同じ型（代替の型でない）へ写し、ドライバの型で読めることを確かめる。
+/// </para>
+/// <para>
+/// PostgreSQL・MySQL・Oracle の列を読むのは生成 EF Core のコードとそのプロバイダだけなので、マッパーの型とドライバの型が
+/// 違う組は、EF Core の手順（生成 DbContext と同じく列の型を指定しないモデル）で読み書きできることを確かめる。
+/// 確かめたプロバイダは、Integration が持つ <c>UseOracle</c>（Oracle.EntityFrameworkCore）・<c>UseMySQL</c>
+/// （MySql.EntityFrameworkCore＝ドライバは MySql.Data。Pomelo は確かめていない）・<c>UseNpgsql</c>・<c>UseSqlServer</c>・
+/// <c>UseSqlite</c>。読み書きできないと分かっている組は、理由（<see cref="DialectTypeRealDbProbe.GapReason"/>）と今の症状
+/// （<see cref="DialectTypeRealDbProbe.GapSymptom"/>）つきで残す（製品の候補＝P5。直す区切りが通る形へ書き換える）。
 /// </para>
 /// </remarks>
 internal static class DialectTypeRealDbRows
@@ -95,6 +122,11 @@ internal static class DialectTypeRealDbRows
         .. OracleDrivers(),
         .. PostgreSqlDrivers(),
         .. SqliteDrivers(),
+        .. OracleEfCore(),
+        .. MySqlEfCore(),
+        .. PostgreSqlEfCore(),
+        .. SqlServerEfCore(),
+        .. SqliteEfCore(),
     ];
 
     /// <summary>方言の手順</summary>
@@ -482,8 +514,9 @@ internal static class DialectTypeRealDbRows
     /// <summary>
     /// PostgreSQL の <c>time with time zone</c>（Npgsql は <see cref="DateTimeOffset"/> で返す。<see cref="TimeSpan"/> へ
     /// 写すと読み取り自体が失敗し、行の組み立ては全列をまとめて読むので、その列が 1 本あるだけで表が丸ごと使えない）と、
-    /// 時間帯なしの <c>time</c>（取り込み直した表記もマッパーが <see cref="TimeSpan"/> へ写す。EF Core が <see cref="TimeSpan"/>
-    /// で読み書きできる。Npgsql の <c>GetFieldType</c> は <see cref="TimeOnly"/> を返すので、ドライバの型とは比べない）
+    /// 時間帯なしの <c>time</c>（取り込み直した表記もマッパーが <see cref="TimeSpan"/> へ写す。Npgsql の <c>GetFieldType</c> は
+    /// <see cref="TimeOnly"/> を返すので、ドライバの型とは比べない。EF Core が <see cref="TimeSpan"/> で読み書きできることは
+    /// <see cref="PostgreSqlEfCore"/> の手順が確かめる）
     /// </summary>
     private static IEnumerable<DialectTypeRealDbProbe> PostgreSqlDrivers() =>
         [
@@ -517,6 +550,203 @@ internal static class DialectTypeRealDbRows
                 readBack: 0.1234567890123,
                 narrowingLoses: true
             )
+        );
+
+    /// <summary>
+    /// Oracle の整数の <c>NUMBER(p)</c>（ODP.NET の <c>GetFieldType</c> はマッパーの型と違う。読むのは生成 EF Core のコードだけで、
+    /// Oracle.EntityFrameworkCore はマッパーの型のまま境界の値を読み書きできる）
+    /// </summary>
+    private static IEnumerable<DialectTypeRealDbProbe> OracleEfCore() =>
+        [
+            EfCore("matrix-map-oracle-number-1-upper", DialectNames.Oracle, "1", true, false),
+            EfCore(
+                "matrix-map-oracle-number-3-upper",
+                DialectNames.Oracle,
+                "255",
+                (byte)255,
+                (byte)0
+            ),
+            EfCore(
+                "matrix-map-oracle-number-5-upper",
+                DialectNames.Oracle,
+                "-32768",
+                short.MinValue,
+                short.MaxValue
+            ),
+            EfCore(
+                "matrix-map-oracle-number-10-upper",
+                DialectNames.Oracle,
+                "2147483647",
+                int.MaxValue,
+                int.MinValue
+            ),
+            EfCore(
+                "matrix-map-oracle-number-19-upper",
+                DialectNames.Oracle,
+                "9223372036854775807",
+                long.MaxValue,
+                long.MinValue
+            ),
+        ];
+
+    /// <summary>
+    /// MySQL の、マッパーの型とドライバの型が違う列（読むのは生成 EF Core のコードだけ。確かめたのは MySql.EntityFrameworkCore）。
+    /// <c>timestamp(n)</c> と <c>char(36)</c> は読み書きできないと分かっている組として残す
+    /// </summary>
+    private static IEnumerable<DialectTypeRealDbProbe> MySqlEfCore() =>
+        [
+            // MySql.Data は year を Int16 で返す（MySqlConnector は Int32）が、EF Core は int のまま読み書きできる
+            EfCore("map-mysql-bit-year-driver-clr-year", MySql, "2026", 2026, 2155),
+            // ドライバは bit(1) を UInt64 で返すが、EF Core は bool のまま読み書きできる
+            EfCore("map-mysql-single-bit-bool-bit-1", MySql, "b'1'", true, false),
+            EfCore(
+                "matrix-map-mysql-timestamp-6",
+                MySql,
+                "'2026-01-02 03:04:05.123456'",
+                new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero).AddTicks(1234560),
+                new DateTimeOffset(2026, 5, 6, 7, 8, 9, TimeSpan.Zero).AddTicks(1234560),
+                gapReason: "製品の候補（P5）：MySql.Data の GetFieldValue<DateTimeOffset> が小数秒を落とすので、DateTimeOffset で読む"
+                    + " 生成 EF Core のコードは小数秒を失い、その行を更新すると落ちた値を書き戻す（DateTime で読めば残る）",
+                gapSymptom: "EF Core で読んだ値"
+            ),
+            EfCore(
+                "matrix-map-mysql-char-36",
+                MySql,
+                "'0f8fad5b-d9cb-469f-a165-70867728950e'",
+                "0f8fad5b-d9cb-469f-a165-70867728950e",
+                "1b4e28ba-2fa1-11d2-883f-0016d3cca427",
+                gapReason: "製品の候補（P5）：MySql.Data は既定で char(36) を Guid として返すので、UUID の値の行を string で読む"
+                    + " 生成 EF Core のコードは InvalidCastException になる（char(36) は Guid の書き出しの表記）",
+                gapSymptom: "InvalidCastException"
+            ),
+        ];
+
+    /// <summary>
+    /// PostgreSQL の、マッパーの型とドライバの型が違う列と、生成 DbContext が列の型を書かないことで書けない列（読むのは生成
+    /// EF Core のコードだけ）。<c>date</c>・<c>timestamp(6)</c>・<c>jsonb</c>・<c>xml</c> は書けないと分かっている組として残す
+    /// </summary>
+    private static IEnumerable<DialectTypeRealDbProbe> PostgreSqlEfCore() =>
+        [
+            // Npgsql は time を TimeOnly で返すが、EF Core は TimeSpan のまま読み書きできる
+            EfCore(
+                "map-postgresql-time-without-time-zone",
+                PostgreSql,
+                "'10:30:00.123456'",
+                new TimeSpan(0, 10, 30, 0).Add(TimeSpan.FromTicks(1234560)),
+                new TimeSpan(0, 23, 59, 59).Add(TimeSpan.FromTicks(9999990))
+            ),
+            EfCore(
+                "matrix-map-postgresql-time-6",
+                PostgreSql,
+                "'10:30:00.123456'",
+                new TimeSpan(0, 10, 30, 0).Add(TimeSpan.FromTicks(1234560)),
+                new TimeSpan(0, 1, 2, 3, 456)
+            ),
+            // Npgsql は timestamptz を DateTime で返すが、EF Core は DateTimeOffset のまま読み書きできる（+00:00 以外の値は
+            // Npgsql が書き込みを断る＝Npgsql の仕様）
+            EfCore(
+                "matrix-map-postgresql-timestamptz-6",
+                PostgreSql,
+                "'2026-01-02 03:04:05.123456+00'",
+                new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero).AddTicks(1234560),
+                new DateTimeOffset(2026, 5, 6, 7, 8, 9, TimeSpan.Zero).AddTicks(1234560)
+            ),
+            EfCore(
+                "matrix-map-postgresql-date",
+                PostgreSql,
+                "'2026-01-02'",
+                new DateTime(2026, 1, 2),
+                new DateTime(2026, 5, 6),
+                gapReason: PostgreSqlUntypedDateTimeGap,
+                gapSymptom: "Kind=Unspecified"
+            ),
+            EfCore(
+                "matrix-map-postgresql-timestamp-6",
+                PostgreSql,
+                "'2026-01-02 03:04:05.123456'",
+                new DateTime(2026, 1, 2, 3, 4, 5).AddTicks(1234560),
+                new DateTime(2026, 5, 6, 7, 8, 9).AddTicks(1234560),
+                gapReason: PostgreSqlUntypedDateTimeGap,
+                gapSymptom: "Kind=Unspecified"
+            ),
+            EfCore(
+                "matrix-map-postgresql-jsonb",
+                PostgreSql,
+                "'{\"a\": 1}'",
+                "{\"a\": 1}",
+                "{\"b\": 2}",
+                gapReason: PostgreSqlUntypedTextGap,
+                gapSymptom: "42804"
+            ),
+            EfCore(
+                "matrix-map-postgresql-xml",
+                PostgreSql,
+                "'<a>1</a>'",
+                "<a>1</a>",
+                "<b>2</b>",
+                gapReason: PostgreSqlUntypedTextGap,
+                gapSymptom: "42804"
+            ),
+        ];
+
+    private const string PostgreSqlUntypedDateTimeGap =
+        "製品の候補（P5）：生成 DbContext が列の型を書かないので、Npgsql の EF Core のプロバイダは DateTime を timestamptz の"
+        + "パラメータで送り、Kind=Unspecified の値の書き込みを断る（読むことはできる）";
+
+    private const string PostgreSqlUntypedTextGap =
+        "製品の候補（P5）：生成 DbContext が列の型を書かないので、string を text のパラメータで送り、PostgreSQL が jsonb・xml の"
+        + "列への書き込みを断る（json も同じ。読むことはできる）";
+
+    /// <summary>SQL Server の EF Core の経路（マッパーの型はドライバの型と同じ。EF Core 単独の生成でも同じ型で読み書きできる）</summary>
+    private static IEnumerable<DialectTypeRealDbProbe> SqlServerEfCore() =>
+        [
+            EfCore(
+                "map-sqlserver-float-mantissa-float-24",
+                DialectNames.SqlServer,
+                "2.5",
+                2.5f,
+                1.5f
+            ),
+            EfCore(
+                "matrix-map-sqlserver-datetimeoffset-6",
+                DialectNames.SqlServer,
+                "'2026-01-02 03:04:05.123456 +09:00'",
+                new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.FromHours(9)).AddTicks(1234560),
+                new DateTimeOffset(2026, 5, 6, 7, 8, 9, TimeSpan.FromHours(-5)).AddTicks(1234560)
+            ),
+        ];
+
+    /// <summary>SQLite の EF Core の経路（REAL アフィニティの倍精度・BIT の真偽値）</summary>
+    private static IEnumerable<DialectTypeRealDbProbe> SqliteEfCore() =>
+        [
+            EfCore(
+                "map-sqlite-real-affinity-real-double",
+                DialectNames.Sqlite,
+                "0.1234567890123",
+                0.1234567890123,
+                1.25
+            ),
+            EfCore("matrix-map-sqlite-bit-upper", DialectNames.Sqlite, "1", true, false),
+        ];
+
+    private static DialectTypeRealDbProbe EfCore(
+        string rowId,
+        string dialect,
+        string value,
+        object readBack,
+        object write,
+        string? gapReason = null,
+        string? gapSymptom = null
+    ) =>
+        new(
+            rowId,
+            dialect,
+            DialectTypeRealDbProbeKinds.EfCore,
+            Value: value,
+            ReadBack: readBack,
+            Write: write,
+            GapReason: gapReason,
+            GapSymptom: gapSymptom
         );
 
     private static DialectTypeRealDbProbe Driver(

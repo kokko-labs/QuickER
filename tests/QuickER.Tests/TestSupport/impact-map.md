@@ -582,7 +582,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 
 ### `Dialect/TypesRealDb`
 
-- 名前：方言の型の表の実 DB の段（上限の対の DDL の適用と取り込み直し・マッパーとドライバの CLR 型の一致）
+- 名前：方言の型の表の実 DB の段（上限の対の DDL の適用と取り込み直し・マッパーとドライバの CLR 型の一致・EF Core の読み書き）
 - テストのソース：`tests/QuickER.Tests.Integration/Dialects/DialectTypeRealDbRows.cs`・`tests/QuickER.Tests.Integration/Dialects/DialectTypeRealDbTests.cs`・`tests/QuickER.Tests.Integration/Dialects/DialectTypeRealDbDimensions.cs`・`tests/QuickER.Tests.Integration/Dialects/DialectTypeRealDbTableTests.cs`・`tests/QuickER.Tests/Provider/DialectTypeRows.cs`
 - 範囲：`src/QuickER.Provider.SqlServer`・`src/QuickER.Provider.PostgreSql`・`src/QuickER.Provider.MySql`・`src/QuickER.Provider.Oracle`・`src/QuickER.Provider.Sqlite`
 

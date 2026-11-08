@@ -39,7 +39,9 @@
 - 精度なしの Decimal は書き出さない。素の `decimal`／`numeric` は (10,0) と読む。
 - パラメータの型解決では上限の判定だけを外す（`TryFormatParameterType`）。
 - 型マッパーは `tinytext` を `string` へ写す（フォールバックの型にしない）。
-- 固定は `DialectTypeTableTests`（上限の対・`format-param-mysql-*`・`map-mysql-tinytext-string-without-fallback`）・`MySqlDialectTypeRealDbTests`（上限の対の DDL・tinytext / tinyblob のドライバの型）。mutation 実証済み。
+- MySQL の列を読むのは生成 EF Core のコードだけ。`year`（MySql.Data は Int16）・`bit(1)`（ドライバは UInt64）はドライバの型と違うが、MySql.EntityFrameworkCore はマッパーの型（`int`・`bool`）のまま読み書きできる。
+  - 読み書きできないと分かっている組（製品の候補）：`timestamp(n)`→`DateTimeOffset`（MySql.Data が小数秒を落とす）・`char(36)`→`string`（UUID の値を Guid で返す）。確かめたのは MySql.EntityFrameworkCore だけ（Pomelo は確かめていない）。正本は `DialectTypeRealDbRows` の EF Core の手順の `GapReason`。
+- 固定は `DialectTypeTableTests`（上限の対・`format-param-mysql-*`・`map-mysql-tinytext-string-without-fallback`）・`MySqlDialectTypeRealDbTests`（上限の対の DDL・tinytext / tinyblob のドライバの型・EF Core の手順）。mutation 実証済み。
 
 ## 識別子と説明の文字
 
