@@ -46,7 +46,9 @@
 
 - 基本型名の取り出し（`PostgreSqlCSharpTypeMapper.GetBaseType`）は括弧の部分だけを除去する。括弧より後ろを切り捨てると、PostgreSQL が括弧の後ろへ置く時間帯の語ごと落ち、`timestamp(6) with time zone`／`time(3) with time zone` の列が黙って `DateTime`／`TimeSpan` に化ける。長さ・精度は元の表記から読む。
 - ドライバ（Npgsql）が返す CLR 型へ写す：`timetz` は `DateTimeOffset`（`TimeSpan` では読み取り自体が `InvalidCastException`）・`interval`（範囲の修飾つきも）は `TimeSpan`・`cidr` は `System.Net.IPNetwork`・`inet` は `System.Net.IPAddress`（ネットマスクは落ちる＝Npgsql の既定）。文字列へ落とすと Npgsql が読めず表ごと使えない。
-- 固定は `DialectTypeTableTests` のマッパーの行（`map-postgresql-timestamp-precision-*`＝精度つきでも時間帯の語を落とさない・`map-postgresql-timetz-*`＝time with time zone は DateTimeOffset）・`PostgreSqlDialectTypeRealDbTests`（ドライバの実測 CLR 型との一致）・`PostgreSqlColumnClrTypeIntegrationTests`（UTC 書き込み・EF Core の読み書き）。mutation 実証済み。
+- 時間帯なしの `time` は `TimeSpan`・`timestamptz` は `DateTimeOffset`（Npgsql の `GetFieldType` は `TimeOnly`／`DateTime`）。PostgreSQL の列を読むのは生成 EF Core のコードだけで、EF Core はこの型のまま読み書きできる（`timestamptz` の +00:00 以外の値は Npgsql が断る＝`PostgreSqlColumnClrTypeIntegrationTests`）。
+  - 読み書きできないと分かっている組（製品の候補）：`date`・`timestamp`→`DateTime`（生成 DbContext が列の型を書かないので timestamptz で送り、Kind=Unspecified の書き込みを断られる）・`json`・`jsonb`・`xml`→`string`（text で送り断られる）。正本は `DialectTypeRealDbRows` の EF Core の手順の `GapReason`。
+- 固定は `DialectTypeTableTests` のマッパーの行（`map-postgresql-timestamp-precision-*`＝精度つきでも時間帯の語を落とさない・`map-postgresql-timetz-*`＝time with time zone は DateTimeOffset）・`PostgreSqlDialectTypeRealDbTests`（ドライバの実測 CLR 型との一致・EF Core の手順）・`PostgreSqlColumnClrTypeIntegrationTests`（UTC 書き込み・EF Core の読み書き）。mutation 実証済み。
 
 ## 同期スクリプト
 

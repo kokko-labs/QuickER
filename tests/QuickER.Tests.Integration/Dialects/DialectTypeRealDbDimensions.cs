@@ -42,8 +42,9 @@ internal static class DialectTypeRealDbDimensions
                         ),
                         new Level(DialectTypeRealDbProbeKinds.OverLimit),
                         new Level(DialectTypeRealDbProbeKinds.Driver),
+                        new Level(DialectTypeRealDbProbeKinds.EfCore),
                     ],
-                    "手順の種類（上限ちょうどは取り込み直した表記を同期の能力の型の表記の正規化と比べる）"
+                    "手順の種類（上限ちょうどは取り込み直した表記を同期の能力の型の表記の正規化と比べる。EF Core は生成 DbContext と同じ構成のモデルで読み書きする）"
                 ),
             ],
             isValid: IsValid
@@ -57,7 +58,7 @@ internal static class DialectTypeRealDbDimensions
         new(
             EngineIds.Dialect,
             "TypesRealDb",
-            "方言の型の表の実 DB の段（上限の対の DDL の適用と取り込み直し・マッパーとドライバの CLR 型の一致）",
+            "方言の型の表の実 DB の段（上限の対の DDL の適用と取り込み直し・マッパーとドライバの CLR 型の一致・EF Core の読み書き）",
             Table,
             0,
             [
@@ -90,13 +91,14 @@ internal static class DialectTypeRealDbDimensions
 
     /// <summary>
     /// 原理的に起こり得ない組を外す：SQLite は型の表記の長さ・精度に上限を持たず（宣言の型をそのまま覚える）、DB が断る
-    /// 上限が無いので、上限の対の手順を持てない
+    /// 上限が無いので、上限の対の手順を持てない（マッパーの手順＝ドライバと EF Core だけを持つ）
     /// </summary>
     private static bool IsValid(IReadOnlyDictionary<string, string> assignment) =>
         !(
             assignment.TryGetValue(Dialect, out var dialect)
             && dialect == DialectNames.Sqlite
             && assignment.TryGetValue(Probe, out var probe)
-            && probe != DialectTypeRealDbProbeKinds.Driver
+            && probe
+                is not (DialectTypeRealDbProbeKinds.Driver or DialectTypeRealDbProbeKinds.EfCore)
         );
 }

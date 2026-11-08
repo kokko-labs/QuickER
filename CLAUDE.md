@@ -148,7 +148,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 
 ### 方言の宣言
 - **方言の違いは方言の宣言だけが持ち、宣言は既定値を持たない**：既定値を足すと能力を足したとき書き忘れた方言が旧来の値で黙って動く。ガード：`SyncDialectCapabilitiesNoDefaultsTests`・`SourceRuleTests`（規則 `sync-capabilities-initializers`・`dialect-name-literals`）・`UnsupportedCoverageTests`。→ `src/QuickER.Dialects/CLAUDE.md`「宣言は既定値を持たない」
-- **図のテーブル名を最初の `.` でスキーマと表に分ける規則は `SchemaQualifiedName` だけが持つ**：別々の規則で分けると `a.b.c` のような名前で DDL と CRUD が別の表を指す。ガード：`SourceRuleTests`（規則 `schema-qualified-name-dot-splits`）・`DialectIdentifierTableTests`（行 `split-*`・`runtime-quote-*`）。→ `src/QuickER.Dialects/CLAUDE.md`「スキーマ修飾名の分け方（SchemaQualifiedName）」
+- **図のテーブル名を最初の `.` でスキーマと表に分ける規則は `SchemaQualifiedName` だけが持つ**：別々の規則で分けると `a.b.c` のような名前で DDL と CRUD が別の表を指す。ガード：`SourceRuleTests`（規則 `schema-qualified-name-dot-splits`）・`DialectIdentifierTableTests`（行 `split-*`・`runtime-quote-*`）・`DialectDdlTableTests`（行 `sync-rebuild-schema-qualified-table-stays-in-its-schema`＝SQLite の再構築の全部の文が同じ表を指す）。→ `src/QuickER.Dialects/CLAUDE.md`「スキーマ修飾名の分け方（SchemaQualifiedName）」
 
 ### 図ファイル
 - **Version 1 のまま足すフィールドは、読み手が欠落を無害に扱える形に限り、無害でなければ Version を上げる**：古い版で保存すると新しいフィールドが消える。ガードなし（設計判断）。→ `src/QuickER.Document/CLAUDE.md`「図ファイル形式の前方互換」
@@ -174,7 +174,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **クエリのパラメータには列の制約を当てない（可変長の長さ無しは無制限・固定長は入れない）**：巻き込むと動いているクエリが生成時エラーへ落ちる。ガード：`LengthlessTypeTokenQueryGenerationTests`・`DialectTypeTableTests`（パラメータの型解決の行）・`FormatRoundTripTests`（規則の行 `csharp-rule-lengthless-token-*`・`csharp-rule-token-with-length-*`）。→ `src/QuickER.Provider/CLAUDE.md`「クエリのパラメータの型解決」
 - **スケールの符号は 3 箇所同時に許し、型マッパーは負のスケールを読まない**：片肺だと取り込んだ列のトークンが読み戻せない。ガード：`DialectTypeTableTests`（負のスケールの行）・`CodegenCaseTests` の行 `code-negative-scale-column-is-decimal-property`。→ `src/QuickER.Provider/CLAUDE.md`「スケールの符号」
 - **精度なしの Decimal を 38 桁へ読み替えるのは方言切替（`DiagramTypeConverter`）だけ**：`TryFormat` へ移すとトークン・リバース・パラメータまで黙って 38 桁へ化ける。ガード：`DialectTypeTableTests`（方言切替の行）・`DiagramTypeConverterTests`・`MainViewModelTargetDbmsTests`・`CSharpReverseBareDecimalTests`・`FormatRoundTripTests`（形の行 `csharp-oracle-precisionless-*`・`csharp-bare-decimal-*`／規則の行 `csharp-rule-precisionless-scaled-token-*`）。→ `src/QuickER.Provider/CLAUDE.md`「方言切替の精度の読み替え」
-- **型マッパーはドライバが返す CLR 型へ写す（PG の時間帯の語・timetz・inet、Oracle の LOCAL TIME ZONE と単位語、SQLite の REAL、MySQL の tinytext、SQL Server の float(n)）**：違う型だと読み取りが `InvalidCastException` で表ごと使えない。ガード：`DialectTypeTableTests`（マッパーの行）・各方言の `*DialectTypeRealDbTests`（同じ行を実 DB で流し、ドライバの `GetFieldType` と比べる）・`CodegenCaseTests` の行 `code-fallback-type-column-is-string-property`。→ `src/QuickER.Provider/CLAUDE.md`「型マッパーはドライバの CLR 型へ写す」
+- **型マッパーは読み取る経路が読み書きできる型へ写す（ADO の SQL Server・SQLite はドライバが返す CLR 型、ほかの 3 方言は生成 EF Core のコードとそのプロバイダが読み書きできる型。PG の時間帯の語・timetz・inet、Oracle の LOCAL TIME ZONE と単位語、SQLite の REAL、MySQL の tinytext、SQL Server の float(n)）。今満たしていない組（MySQL の timestamp(n)・char(36)、PG の date・timestamp・json・jsonb・xml）は実 DB の表に理由つきで残す**：違う型だと読み取りが `InvalidCastException` で表ごと使えない。ガード：`DialectTypeTableTests`（マッパーの行）・各方言の `*DialectTypeRealDbTests`（同じ行を実 DB で流し、ドライバの `GetFieldType` と比べるか EF Core で読み書きする）・`DialectTypeRealDbTableTests`・`CodegenCaseTests` の行 `code-fallback-type-column-is-string-property`。→ `src/QuickER.Provider/CLAUDE.md`「型マッパーは読み取る経路が読み書きできる型へ写す」
 - **方言の型の上限と取込の表記**：上限の値・正規化の規則は方言の宣言。ガード：`DialectTypeTableTests`（上限の対・網羅の照合）・`{SqlServer,MySql,PostgreSql,Oracle}DialectTypeRealDbTests`（上限の対を実 DB で適用して取り込み直す）。→ 各方言の CLAUDE.md「型表記」
 
 ### 差分と同期

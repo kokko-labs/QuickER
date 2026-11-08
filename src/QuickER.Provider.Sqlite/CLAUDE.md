@@ -83,4 +83,7 @@
 - 各方言の Identifier はドット付きテーブル名を 5 方言対称に `"a"."b"` へ分割クォートする（`DialectIdentifierTableTests` の行 `quote-dot-*` が固定）。SQLite では `"a"."b"` が「アタッチ済み DB a のテーブル b」を意味するので、dbo 以外のスキーマを含む図を sqlite へ切り替えて DDL・同期を実行すると `unknown database` エラーになり得る。対称性を優先して直さない。
 - その代わり `SyncDialectCapabilities.SupportsSchemaQualifiedTableNames` が false で、計画は `SyncPlanWarningKind.SchemaQualifiedTableName`（選んだ項目が触れる表・外部キーの親を表ごとに 1 件）を出し、DDL は `SchemaQualifiedTableNameNote` が注記する（扱いの表のマスで判定）。
   - 固定は `DialectDdlTableTests` の行 `ddl-schema-qualified-dotted-table-name-note`（5 方言の DDL）・期待の行 `plan-dotted-table-name-warns-only-where-declared`（5 方言の計画）・実 SQLite の行 `realdb-dotted-table-name-warns-and-fails`。mutation 実証済み。
+- 再構築もほかの文と同じ規則で `a.b` を添付 DB `a` の表 `b` として扱う。一時表は同じスキーマに作り（`"a"."b_quicker_rebuild"`）、移送・DROP も `"a"."b"` を指し、`RENAME TO` は表の部分だけ（`"b"`。SQLite の `RENAME TO` はスキーマを書けず、同じ DB の中で名前を変える）を書く。分け方は `SchemaQualifiedName.Split`。
+  - 一時表を main の 1 つの識別子にすると、CREATE と RENAME が main を、移送と DROP が添付 DB を指し、添付した DB へ手で流すと添付 DB の表を消して main へ移す。製品の経路では、取込がドット付きの表を持ち帰らず実行器は ATTACH しないので、既存の表の再構築にドット付きの名前は届かない（届いても実行器が最初の文の `unknown database` で巻き戻す）。
+  - 固定は `DialectDdlTableTests` の行 `sync-rebuild-schema-qualified-table-stays-in-its-schema`。実ファイルの段の行は持たない（live を製品の取込で作るので、ドット付きの既存の表を置けない）。mutation 実証済み。
 - 主キーと同じ列集合の一意制約は取込に現れず差分が永久に消えないので作らない（`SupportsUniqueConstraintOnPrimaryKey` が偽＝`src/QuickER.Provider/CLAUDE.md`「計算列と主キーと同じ列集合の一意制約」）。

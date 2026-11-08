@@ -185,6 +185,43 @@ internal static partial class DialectDdlRows
                             "ALTER TABLE \"t_quicker_rebuild\" RENAME TO \"t\";"
                         )
                 ),
+            // 実ファイルの段の行は持たない：期待の行の実 DB の段も SqliteSchemaSyncIntegrationTests も live を製品の取込で作り、
+            // 取込はドット付きの表を持ち帰らない（Import_DottedTableName_*）。実行器は ATTACH しないので添付 DB の表も流せない。
+            // 実行器で流したときの失敗の形（巻き戻り・DB は元のまま）は表の追加の実 SQLite の行 realdb-dotted-table-name-warns-and-fails が固定する
+            DialectDdlRow
+                .SyncItems(
+                    "sync-rebuild-schema-qualified-table-stays-in-its-schema",
+                    "SQLite の再構築は、スキーマ修飾名の表（a.b＝添付 DB a の表 b）の一時表を同じスキーマに作り、移送・DROP も同じ表を指し、RENAME TO は表の部分だけを書く。計画は警告する（src/QuickER.Provider.Sqlite/CLAUDE.md「既知の割り切り」・src/QuickER.Dialects/CLAUDE.md「スキーマ修飾名の分け方（SchemaQualifiedName）」）",
+                    P.SyncRebuild,
+                    E.SchemaQualified,
+                    F.StatementShape,
+                    _ =>
+                    {
+                        var live = Table(
+                            "a.b",
+                            Pk("id", "INTEGER"),
+                            Col("x", "INTEGER", nullable: false)
+                        );
+                        return CvLiveItems(
+                            [live],
+                            [],
+                            CvAlterColumn("a.b", Col("x", "INTEGER", nullable: true))
+                        );
+                    }
+                )
+                .Expect(
+                    Sl,
+                    e =>
+                        e.Order(
+                                O.Text,
+                                "CREATE TABLE \"a\".\"b_quicker_rebuild\" (",
+                                "INSERT INTO \"a\".\"b_quicker_rebuild\" (\"id\", \"x\") SELECT \"id\", \"x\" FROM \"a\".\"b\";",
+                                "DROP TABLE \"a\".\"b\";",
+                                "ALTER TABLE \"a\".\"b_quicker_rebuild\" RENAME TO \"b\";"
+                            )
+                            .NoText("*\"a.b*")
+                            .Contains(O.Warnings, "SchemaQualifiedTableName*")
+                ),
             // 行 43
             DialectDdlRow
                 .Ddl(

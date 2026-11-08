@@ -146,8 +146,16 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
     private void AppendRebuildBlock(StringBuilder sb, TableRebuildPlan rebuild)
     {
         var table = rebuild.TableName;
-        var tempName = table + RebuildSuffix;
-        var quotedTemp = SqliteIdentifier.QuoteSimple(tempName);
+
+        // ドット付きの表名（a.b）は、ほかの文と同じく添付 DB a の表 b として扱う（SchemaQualifiedName の分け方）。一時表は
+        // 元の表と同じスキーマに作り（"a"."b_quicker_rebuild"）、RENAME TO は表の部分だけを書く（SQLite の RENAME TO は
+        // スキーマを書けず、同じ DB の中で名前を変える）。一時表を main の 1 つの識別子にすると、移送と DROP が添付 DB の表を、
+        // CREATE と RENAME が main を指し、添付 DB の表を消して main へ移すことになる
+        var (schema, tablePart) = SchemaQualifiedName.Split(table);
+        var quotedTempTable = SqliteIdentifier.QuoteSimple(tablePart + RebuildSuffix);
+        var quotedTemp = schema is null
+            ? quotedTempTable
+            : $"{SqliteIdentifier.QuoteSimple(schema)}.{quotedTempTable}";
 
         // 見出し（固定文は英語が正本）。テーブル名は自由入力なので改行・制御文字を畳んでから載せる
         // （SQLite の実行器はスクリプト全文を 1 コマンドで送るため、改行が残ると 2 行目が独立した文になる）
@@ -176,7 +184,9 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
         }
 
         sb.AppendLine($"DROP TABLE {SqliteIdentifier.Quote(table)};");
-        sb.AppendLine($"ALTER TABLE {quotedTemp} RENAME TO {SqliteIdentifier.QuoteSimple(table)};");
+        sb.AppendLine(
+            $"ALTER TABLE {quotedTemp} RENAME TO {SqliteIdentifier.QuoteSimple(tablePart)};"
+        );
 
         // 補助オブジェクト（インデックス・トリガー）を元の CREATE SQL 全文で再作成する。
         // 削除された列を参照する索引の再作成は実行時に失敗する（＝トランザクションがロールバックされ安全）。

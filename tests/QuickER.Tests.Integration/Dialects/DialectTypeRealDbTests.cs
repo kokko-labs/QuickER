@@ -4,6 +4,7 @@ using System.Reflection;
 using AwesomeAssertions;
 using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using MySqlConnector;
 using Npgsql;
 using Oracle.ManagedDataAccess.Client;
@@ -15,6 +16,7 @@ using QuickER.Provider.PostgreSql;
 using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
 using QuickER.Tests.Provider;
+using QuickER.Tests.TestSupport;
 using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Integration.Dialects;
@@ -41,7 +43,7 @@ public abstract class DialectTypeRealDbTestsBase
     private const string ProbeTable = "type_probe";
 
     /// <summary>ドライバの CLR 型を C# の名前へ直す（マッパーの <c>TypeName</c> と突き合わせる）</summary>
-    private static readonly IReadOnlyDictionary<Type, string> CSharpNames = new Dictionary<
+    internal static readonly IReadOnlyDictionary<Type, string> CSharpNames = new Dictionary<
         Type,
         string
     >
@@ -95,6 +97,15 @@ public abstract class DialectTypeRealDbTestsBase
 
     /// <summary>開いた接続</summary>
     protected abstract Task<DbConnection> OpenAsync(CancellationToken ct);
+
+    /// <summary>EF Core の手順のプロバイダ（生成 EF Core のコードの利用者が <c>AddGeneratedEfCoreRepositories</c> へ渡すもの）</summary>
+    protected abstract void ConfigureEfCore(DbContextOptionsBuilder options);
+
+    /// <summary>EF Core の手順の表のキーの列の型</summary>
+    protected virtual string KeyColumnType => "int";
+
+    /// <summary>引用せずに作った表・列の DB 上の名前（EF Core は引用して名前を書くので、DB が畳んだ綴りで指す）</summary>
+    protected virtual string StoreName(string name) => name;
 
     [Fact(
         DisplayName = "[Integration] 方言の型の表: 上限の対は DB の上限と一致し、マッパーの型はドライバの実測の CLR 型と一致する"
@@ -187,12 +198,169 @@ public abstract class DialectTypeRealDbTestsBase
                 break;
             }
 
+            case DialectTypeRealDbProbeKinds.EfCore:
+            {
+                problems.AddRange(await EfCoreProblemsAsync(probe, adapter, spelling, ct));
+                break;
+            }
+
             default:
                 throw new InvalidOperationException($"知らない手順の種類 {probe.Kind}");
         }
 
+        return KnownGapProblems(probe, problems);
+    }
+
+    /// <summary>
+    /// 読み書きできないと分かっている組（<see cref="DialectTypeRealDbProbe.GapSymptom"/>）は、今の症状が出ていれば食い違いに
+    /// しない。症状が出なくなったら（直った・別の壊れ方になった）食い違いにして、手順の書き換えを促す
+    /// </summary>
+    private static IReadOnlyList<string> KnownGapProblems(
+        DialectTypeRealDbProbe probe,
+        IReadOnlyList<string> problems
+    )
+    {
+        if (probe.GapSymptom is not { } symptom)
+        {
+            return problems;
+        }
+
+        if (problems.Any(problem => problem.Contains(symptom, StringComparison.Ordinal)))
+        {
+            return [];
+        }
+
+        var actual = problems.Count == 0 ? "食い違いなし" : string.Join(" / ", problems);
+
+        return
+        [
+            $"読み書きできない組として残した手順の症状「{symptom}」が出ない（直ったなら GapReason と GapSymptom を外す。実際：{actual}）",
+        ];
+    }
+
+    /// <summary>
+    /// EF Core の手順：表記の列に値を入れ、生成 DbContext と同じ構成のモデル（<see cref="EfCoreProbeContext{T}"/>）で
+    /// マッパーの型として読み、同じ型の値を書いて読み戻す
+    /// </summary>
+    private async Task<IReadOnlyList<string>> EfCoreProblemsAsync(
+        DialectTypeRealDbProbe probe,
+        DialectTypeAdapter adapter,
+        string spelling,
+        CancellationToken ct
+    )
+    {
+        var mapped = adapter.Map(spelling);
+        var type = CSharpNames.SingleOrDefault(pair => pair.Value == mapped.TypeName).Key;
+
+        if (type is null || mapped.IsFallbackType)
+        {
+            return
+            [
+                $"Map({spelling}) の C# 型 {mapped.TypeName} を EF Core の手順で読めない（代替の型か、表に無い型）",
+            ];
+        }
+
+        await ExecuteAsync(
+            $"CREATE TABLE {ProbeTable} (id {KeyColumnType} NOT NULL PRIMARY KEY, c {spelling} NOT NULL)",
+            ct
+        );
+        await ExecuteAsync($"INSERT INTO {ProbeTable} (id, c) VALUES (1, {probe.Value})", ct);
+
+        var run = typeof(DialectTypeRealDbTestsBase)
+            .GetMethod(
+                nameof(EfCoreReadWriteAsync),
+                BindingFlags.NonPublic | BindingFlags.Instance
+            )!
+            .MakeGenericMethod(type);
+
+        return await (Task<IReadOnlyList<string>>)run.Invoke(this, [probe, ct])!;
+    }
+
+    /// <summary>EF Core で入れた行を読み、書いて読み戻す（例外は食い違いの文にする）</summary>
+    private async Task<IReadOnlyList<string>> EfCoreReadWriteAsync<T>(
+        DialectTypeRealDbProbe probe,
+        CancellationToken ct
+    )
+    {
+        var problems = new List<string>();
+        var builder = new DbContextOptionsBuilder();
+        ConfigureEfCore(builder);
+        var options = builder.Options;
+
+        try
+        {
+            await using var context = new EfCoreProbeContext<T>(options, StoreName);
+            var read = (await context.Rows.AsNoTracking().SingleAsync(ct)).Value;
+            ExpectValue(problems, "EF Core で読んだ値", probe.ReadBack, read);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            problems.Add($"EF Core で読めない（{Describe(ex)}）");
+        }
+
+        try
+        {
+            await using (var context = new EfCoreProbeContext<T>(options, StoreName))
+            {
+                context.Rows.Add(new EfCoreProbeRow<T> { Id = 2, Value = (T)probe.Write! });
+                await context.SaveChangesAsync(ct);
+            }
+
+            await using (var context = new EfCoreProbeContext<T>(options, StoreName))
+            {
+                var back = (
+                    await context.Rows.AsNoTracking().SingleAsync(row => row.Id == 2, ct)
+                ).Value;
+                ExpectValue(problems, "EF Core で書いて読み戻した値", probe.Write, back);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            problems.Add($"EF Core で書けない（{Describe(ex)}）");
+        }
+
         return problems;
     }
+
+    /// <summary>例外の型と 1 行目の文言（内側の例外があれば添える）</summary>
+    private static string Describe(Exception ex)
+    {
+        var text = $"{ex.GetType().Name}: {FirstLine(ex.Message)}";
+
+        return ex.InnerException is { } inner
+            ? $"{text} ← {inner.GetType().Name}: {FirstLine(inner.Message)}"
+            : text;
+    }
+
+    private static string FirstLine(string message) => message.Split('\n', 2)[0].TrimEnd('\r');
+
+    private static void ExpectValue(
+        List<string> problems,
+        string what,
+        object? expected,
+        object? actual
+    )
+    {
+        if (!Equals(expected, actual))
+        {
+            problems.Add(
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{what}: 期待 {Show(expected)}・実際 {Show(actual)}"
+                )
+            );
+        }
+    }
+
+    private static string Show(object? value) =>
+        value switch
+        {
+            null => "(null)",
+            DateTimeOffset d => d.ToString("O", CultureInfo.InvariantCulture),
+            DateTime d => d.ToString("O", CultureInfo.InvariantCulture),
+            IFormattable f => f.ToString(null, CultureInfo.InvariantCulture),
+            _ => value.ToString() ?? string.Empty,
+        };
 
     /// <summary>マッパーの行の手順：表記の列に値を入れ、取込の表記・ドライバの型・読める値・マッパーの型を突き合わせる</summary>
     private async Task<IReadOnlyList<string>> DriverProblemsAsync(
@@ -365,6 +533,35 @@ public abstract class DialectTypeRealDbTestsBase
     }
 }
 
+/// <summary>EF Core の手順の行（キーとマッパーの型の値 1 つ）</summary>
+internal sealed class EfCoreProbeRow<T>
+{
+    public int Id { get; set; }
+
+    public T Value { get; set; } = default!;
+}
+
+/// <summary>
+/// EF Core の手順のモデル。生成 DbContext（<c>_08_EfCore.scriban</c>）と同じく、列名だけを指定し、列の型
+/// （<c>HasColumnType</c>）・精度・Unicode を指定しない（だからプロバイダがマッパーの型から選ぶ既定の対応で読み書きする）
+/// </summary>
+internal sealed class EfCoreProbeContext<T>(
+    DbContextOptions options,
+    Func<string, string> storeName
+) : DbContext(options)
+{
+    public DbSet<EfCoreProbeRow<T>> Rows => Set<EfCoreProbeRow<T>>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        var row = modelBuilder.Entity<EfCoreProbeRow<T>>();
+        row.ToTable(storeName("type_probe"));
+        row.HasKey(r => r.Id);
+        row.Property(r => r.Id).HasColumnName(storeName("id")).ValueGeneratedNever();
+        row.Property(r => r.Value).HasColumnName(storeName("c"));
+    }
+}
+
 /// <summary>SQLite（実ファイル・Docker 不要）の方言の型の表の実 DB の段</summary>
 [Trait("Category", "Integration")]
 [MatrixAxisValue(DialectTypeRealDbTestsBase.DialectAxis, DialectNames.Sqlite)]
@@ -373,6 +570,11 @@ public sealed class SqliteDialectTypeRealDbTests : DialectTypeRealDbTestsBase, I
     private readonly SqliteTempDatabase _db = SqliteTempDatabase.Create();
 
     protected override IDatabaseProvider Provider { get; } = new SqliteProvider();
+
+    protected override string KeyColumnType => "INTEGER";
+
+    protected override void ConfigureEfCore(DbContextOptionsBuilder options) =>
+        options.UseSqlite(_db.ReadWriteConnectionString).IgnoreServiceProviderCacheLimit();
 
     protected override bool IsAvailable => true;
 
@@ -405,6 +607,9 @@ public sealed class SqlServerDialectTypeRealDbTests(SqlServerContainerFixture fi
 {
     protected override IDatabaseProvider Provider { get; } = new SqlServerProvider();
 
+    protected override void ConfigureEfCore(DbContextOptionsBuilder options) =>
+        options.UseSqlServer(fixture.ConnectionString).IgnoreServiceProviderCacheLimit();
+
     protected override bool IsAvailable => fixture.IsAvailable;
 
     protected override string UnavailableReason => fixture.UnavailableReason;
@@ -431,6 +636,9 @@ public sealed class PostgreSqlDialectTypeRealDbTests(PostgreSqlContainerFixture 
     : DialectTypeRealDbTestsBase
 {
     protected override IDatabaseProvider Provider { get; } = new PostgreSqlProvider();
+
+    protected override void ConfigureEfCore(DbContextOptionsBuilder options) =>
+        options.UseNpgsql(fixture.ConnectionString).IgnoreServiceProviderCacheLimit();
 
     protected override bool IsAvailable => fixture.IsAvailable;
 
@@ -459,6 +667,10 @@ public sealed class MySqlDialectTypeRealDbTests(MySqlContainerFixture fixture)
 {
     protected override IDatabaseProvider Provider { get; } = new MySqlProvider();
 
+    /// <summary>MySql.EntityFrameworkCore（ドライバは MySql.Data）。Integration はこのプロバイダだけを持つ（Pomelo は確かめていない）</summary>
+    protected override void ConfigureEfCore(DbContextOptionsBuilder options) =>
+        options.UseMySQL(fixture.ConnectionString).IgnoreServiceProviderCacheLimit();
+
     protected override bool IsAvailable => fixture.IsAvailable;
 
     protected override string UnavailableReason => fixture.UnavailableReason;
@@ -485,6 +697,14 @@ public sealed class OracleDialectTypeRealDbTests(OracleContainerFixture fixture)
     : DialectTypeRealDbTestsBase
 {
     protected override IDatabaseProvider Provider { get; } = new OracleProvider();
+
+    protected override string KeyColumnType => "NUMBER(10)";
+
+    /// <summary>引用しない名前は大文字へ畳まれる</summary>
+    protected override string StoreName(string name) => name.ToUpperInvariant();
+
+    protected override void ConfigureEfCore(DbContextOptionsBuilder options) =>
+        options.UseOracle(fixture.ConnectionString).IgnoreServiceProviderCacheLimit();
 
     protected override bool IsAvailable => fixture.IsAvailable;
 

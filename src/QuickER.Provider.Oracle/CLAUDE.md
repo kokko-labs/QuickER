@@ -50,6 +50,7 @@
 - `INTEGER`／`SMALLINT` は `NUMBER(*,0)` と同じ `decimal`（ODP.NET は decimal で返す）。
 - `MapNumber` は `scale is > 0` で判定している。今は `PrecisionScaleRegex` が負のスケールに一致しないので害は無いが、正規表現に符号を足すと `NUMBER(10,-2)` が `int` へ落ちるので同時に直す。
 - 既知の残件：`NUMBER(*,s)` の `*` を読まず、値オブジェクトの小数の検証は付かない（直すにはテンプレートとランタイムの規則まで要る）。
+- 整数の `NUMBER(1)`／`(3)`／`(5)`／`(10)`／`(19)` は `bool`／`byte`／`short`／`int`／`long`。ODP.NET の `GetFieldType` はこれと違う型を返すが、Oracle の列を読むのは生成 EF Core のコードだけで、Oracle.EntityFrameworkCore はこの型のまま境界の値を読み書きできる（`src/QuickER.Provider/CLAUDE.md`「型マッパーは読み取る経路が読み書きできる型へ写す」）。固定は `OracleDialectTypeRealDbTests` の EF Core の手順（`DialectTypeRealDbRows` の `matrix-map-oracle-number-*`）。
 - 固定は `DialectTypeTableTests` のマッパーの行（`map-oracle-ansi-integer-*`）・`OracleDialectTypeRealDbTests`（ドライバの型と取込の `NUMBER(*,0)`）。mutation 実証済み。
 
 ## 同期スクリプト
