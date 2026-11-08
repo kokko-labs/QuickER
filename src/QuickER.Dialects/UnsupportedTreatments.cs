@@ -1241,7 +1241,7 @@ public static class UnsupportedTreatments
             import: Same(None), // なし
             diff: new TreatmentCell(
                 SqlServer: None,
-                PostgreSql: Fold, // 比較で畳む（長さだけの違いを食い違いとみなさない・J9）
+                PostgreSql: Fold, // 比較で畳む（文字列の長さ・整数の幅だけの違いを食い違いとみなさない・J9）
                 MySql: Fold,
                 Oracle: Fold,
                 Sqlite: Fold

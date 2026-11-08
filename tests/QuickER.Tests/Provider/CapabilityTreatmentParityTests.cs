@@ -194,6 +194,17 @@ public sealed class CapabilityTreatmentParityTests
                 : c.ColumnReorder == ColumnReorderMode.Rebuild ? [UnsupportedTreatment.Warning]
                 : [UnsupportedTreatment.None]
         ),
+        (
+            // 外部キーの両端の型の照合で畳むマスは、文字列の長さの宣言（Rules）と整数の幅の宣言の 2 つが決める。整数の幅を許す
+            // 方言は必ず畳む（長さだけを許す方言＝MySQL も畳むので、偽のときは 2 つのどちらか）
+            nameof(SyncDialectCapabilities.ForeignKeyAllowsIntegerWidthDifference),
+            UnsupportedDefinitionKind.ForeignKeyTypeMismatch,
+            UnsupportedFeature.Diff,
+            c =>
+                c.ForeignKeyAllowsIntegerWidthDifference
+                    ? [UnsupportedTreatment.Fold]
+                    : [UnsupportedTreatment.Fold, UnsupportedTreatment.None]
+        ),
     ];
 
     /// <summary>表が終わりの姿を書き、フラグがまだ今の姿のマス（方言・フラグ・直すフェーズ）</summary>

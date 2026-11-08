@@ -576,7 +576,7 @@ SQLite rebuilds tables and uses its own order.
 
 - On SQL Server, PostgreSQL, and SQLite the script runs in a transaction and rolls back on failure.
   On MySQL / Oracle, DDL is implicitly committed by design, so a warning explains that a mid-script failure can leave changes partially applied.
-  On these dialects the script is ordered so that a failure does not leave constraints dropped: a statement that the sync knows will be refused (a column change, a primary key drop, or a unique constraint drop that a foreign key kept by the sync blocks) runs first, so the database stays unchanged, and among the foreign key additions, those whose referenced columns are not proven to be a key run last
+  On these dialects the script is ordered so that a failure does not leave constraints dropped: a statement that the sync knows will be refused (a column change, a primary key drop, or a unique constraint drop that a foreign key kept by the sync blocks; when the sync drops every key that can support such a foreign key, those drops) runs first, so the database stays unchanged, and among the foreign key additions, those whose referenced columns are not proven to be a key run last
 - The Oracle script and DDL can also be run by hand in SQL*Plus.
   Ordinary statements end with `;`, and a `/` line follows only a PL/SQL block, so each statement runs exactly once (SQL*Plus runs the previous statement again on a `/` line)
 
@@ -611,15 +611,18 @@ Foreign keys that rely on the changed primary key (they refer to the same column
 | A foreign key resting on the index of a dropped primary key or unique constraint is re-added | — | — | ✅ | — | — |
 | Referencing columns must follow the order of the referenced key | ✅ | — | ✅ | — | — |
 | String types differing only in length are allowed on the two ends | — (error 1753) | ✅ | ✅ | ✅ (same length unit) | ✅ |
+| Integer types differing only in width are allowed on the two ends | — (error 1778) | ✅ | — (error 3780) | ✅ (`NUMBER` without decimals) | ✅ |
 | A failed re-add can leave the foreign key dropped | — | — | ✅ | ✅ | — |
 
 A primary key dropped and re-added by a key column change (see the table above) is named `PK_{table}`.
 On MySQL, a foreign key of the table whose primary key changes is also dropped and re-created when its columns lead the old primary key, because the primary key cannot be dropped while it is the only index supporting that foreign key.
 The same applies when dropping a unique constraint whose index is the only one supporting a foreign key (MySQL refuses with error 1553 otherwise).
 When a change leaves the two ends of a foreign key with different types after the sync (altering the type of only one side, for example), the foreign key is not dropped and re-added, and the column change fails as it is (the database stays unchanged).
+The confirmation names such a foreign key on every dialect, also on PostgreSQL and Oracle, which change the column with the foreign key in place.
 QuickER treats such a type difference as one that can make re-adding the foreign key fail, and on MySQL / Oracle a failed re-add leaves the foreign key missing.
-PostgreSQL and Oracle accept some of these combinations, such as integer types of different widths (Oracle also accepts `NUMBER` columns of different precisions).
-Only a change of type counts: a foreign key whose two ends already have different types that the database accepts is dropped and re-added with the same types when the sync changes only the nullability of its columns or the primary key it refers to.
+Integer types that differ only in width are not a mismatch where the table above allows them on the two ends.
+The databases accept some other combinations as well (decimal precisions on PostgreSQL, MySQL and Oracle, and integers referring to decimals on PostgreSQL), but QuickER still treats them as a mismatch: the confirmation names the foreign key, and the sync goes through when the database accepts it.
+Only a change of type counts, pair by pair: a column pair whose two ends already have different types that the database accepts is not counted when the sync changes only the nullability of its columns, the primary key it refers to, or the types of another pair of the same foreign key.
 An addition or a recreate of a foreign key that you selected is left out of the script for the same reason, and the confirmation names it.
 A recreate is left out together with its drop, so the foreign key keeps its current definition.
 SQLite rebuilds the table and does not check the types of a foreign key, so it applies the addition or the recreate as selected.

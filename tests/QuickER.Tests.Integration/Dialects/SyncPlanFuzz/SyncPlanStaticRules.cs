@@ -44,6 +44,10 @@ internal sealed record SyncPlanStaticVerdict(
 ///   <item>R5：外部キーを足すとき、参照する列の集合が親の主キーか一意制約と一致する（候補キーの無い付け直しは DB が断る）。</item>
 ///   <item>R6：表の最後の列を消さない（SQL Server 4923・MySQL 1090・Oracle ORA-12983。PostgreSQL は列の無い表を許すので判定しない。
 ///   製品は同期後に列の残らない表の列の削除を計画から外す＝<see cref="SyncPlanWarningKind.TableLeftWithoutColumns"/>）。</item>
+///   <item>R7：列の型の変更の後、残す外部キーのその列を含む組の両端が、方言の宣言
+///   （<see cref="SyncDialectCapabilities.AreForeignKeyCompatibleTypes"/>）で並べられる（PostgreSQL 42804・Oracle ORA-02267。外し直しの方言は
+///   R2 が先に当たる）。宣言は「真なら DB が必ず受け入れる」側に置くので、偽の組を DB が受け入れる形（PostgreSQL の integer と numeric など）は
+///   予言が外れうる。生成器と形の行の外部キーの列は整数か文字列で、その範囲の宣言は実 DB の期待の行が固定する。</item>
 /// </list>
 /// <para>
 /// 違反になるのは、断られる文があるのに次のどちらでもないとき：(a) 失敗を予告する警告がある（<see cref="NonPredictingWarnings"/> 以外）
@@ -56,9 +60,9 @@ internal sealed record SyncPlanStaticVerdict(
 /// </para>
 /// <para>
 /// 警告の正しさの規則 W1（<see cref="SpuriousTypeMismatchWarnings"/>）は、予言の有無に依らず掛ける：
-/// <see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/> が DB にある外部キーを名指しするなら、計画がその外部キーの構成列の
-/// どれかの型を変える。予告の警告があれば合格にする上の判定は、警告そのものが正しいかを見ないので、偽の警告が「予言された失敗」として
-/// 通っていた（P5-2 の試運転の L4）。
+/// <see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/> が DB にある外部キーを名指しするなら、その外部キーに「端の型を計画が
+/// 変え、同期後に両端が合わない組」がある。予告の警告があれば合格にする上の判定は、警告そのものが正しいかを見ないので、偽の警告が
+/// 「予言された失敗」として通っていた（P5-2 の試運転の L4・2 回目の V1）。
 /// </para>
 /// <para>
 /// 状態の初期値は渡された DB 側の図（実 DB なら取込の結果、能力の網なら生成器が作った図）。名前の無い制約は DDL と同じ実効名
@@ -164,14 +168,17 @@ internal static class SyncPlanStaticRules
     public const string W1Prefix = "static W1:";
 
     /// <summary>
-    /// W1：<see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/> が DB にある外部キーを名指しするなら、計画がその外部キーの
-    /// 構成列のどれかの型を変える（<see cref="SyncDialectCapabilities.AreSameType"/> で比べる）
+    /// W1：<see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/> が DB にある外部キーを名指しするなら、その外部キーに
+    /// 「端の型を計画が変え（<see cref="SyncDialectCapabilities.AreSameType"/> で比べる）、同期後にその組の両端が
+    /// <see cref="SyncDialectCapabilities.AreForeignKeyCompatibleTypes"/> で合わない」組がある
     /// </summary>
     /// <remarks>
-    /// DB は今その外部キーを両端の型のまま受け入れているので、計画が構成列の型を変えないなら、外して付け直しても同じ組の型で通る。
-    /// それを「同期後に両端の型が食い違う（付け直せない）」と名指しするのは偽の警告で、計画は外部キーを外し直さずに残し、その
-    /// 外部キーに阻まれる文（主キーの解除など）で失敗する。方言の互換の宣言（<see cref="SyncDialectCapabilities.AreForeignKeyCompatibleTypes"/>）
-    /// に依らない表明。DB に無い外部キー（図で足す外部キー）は判定しない。
+    /// DB は今その外部キーを両端の型のまま受け入れているので、計画が型を変えない組は、外して付け直しても同じ型で通る。型の決まらない
+    /// 組の違い（DB が受け入れている型の違い）を数えて「同期後に両端の型が食い違う（付け直せない）」と名指しするのは偽の警告で、
+    /// 計画は外部キーを外し直さずに残し、その外部キーに阻まれる文（主キーの解除など）で失敗する。組単位で見るのは、複合外部キーの
+    /// ほかの組の型を変えたときに、DB が受け入れている組まで数えた偽の警告が予言された失敗として通っていたため（P5-2 の試運転の
+    /// 2 回目の V1）。型を変えた組の互換は製品と同じ方言の宣言で判定する（宣言の値は実 DB の形の行が確かめる）。
+    /// DB に無い外部キー（図で足す外部キー）は判定しない。
     /// </remarks>
     private static IEnumerable<string> SpuriousTypeMismatchWarnings(
         IReadOnlyList<Entity> liveEntities,
@@ -230,11 +237,15 @@ internal static class SyncPlanStaticRules
 
                 if (
                     !pairs.Any(p =>
-                        TypeChanges(child, p.ChildColumn) || TypeChanges(parent, p.ParentColumn)
+                        (TypeChanges(child, p.ChildColumn) || TypeChanges(parent, p.ParentColumn))
+                        && !capabilities.AreForeignKeyCompatibleTypes(
+                            PostSyncType(child, p.ChildColumn),
+                            PostSyncType(parent, p.ParentColumn)
+                        )
                     )
                 )
                 {
-                    yield return $"{W1Prefix} {warning.Kind}({warning.TableName}: {warning.Detail}) names a foreign key whose column types the plan does not change";
+                    yield return $"{W1Prefix} {warning.Kind}({warning.TableName}: {warning.Detail}) names a foreign key without a column pair whose type the plan changes and whose ends then do not match";
                 }
             }
         }
@@ -243,6 +254,13 @@ internal static class SyncPlanStaticRules
             alteredTypes.TryGetValue(ColumnKey(Lower(entity.TableName), column), out var altered)
             && entity.Columns.FirstOrDefault(c => Lower(c.Name) == Lower(column)) is { } live
             && !capabilities.AreSameType(live.DataType, altered);
+
+        // 組の端の同期後の型（計画が書く型か、live の型）
+        string PostSyncType(Entity entity, string column) =>
+            alteredTypes.TryGetValue(ColumnKey(Lower(entity.TableName), column), out var altered)
+                ? altered
+                : entity.Columns.FirstOrDefault(c => Lower(c.Name) == Lower(column))?.DataType
+                    ?? string.Empty;
     }
 
     /// <summary>
@@ -677,7 +695,7 @@ internal static class SyncPlanStaticRules
                 : $"R6: dropping {dropped.Replace('|', '.')} leaves table {step.Table} without columns";
         }
 
-        /// <summary>R2：型の変更の前に、列を含む一意制約・主キー・外部キーが外れている</summary>
+        /// <summary>R2：型の変更の前に、列を含む一意制約・主キー・外部キーが外れている。R7：残す外部キーの組の両端が変更の後も並べられる</summary>
         private string? CheckAlterColumn(Step step)
         {
             var column = Lower(step.Item.ColumnName!);
@@ -713,7 +731,38 @@ internal static class SyncPlanStaticRules
                 return $"R2: {step.Table}.{column} is altered while {fk.Name} uses it";
             }
 
+            // R7：残す外部キーのこの列を含む組の両端が、列の変更の後に方言の宣言で並べられない
+            foreach (var kept in _foreignKeys)
+            {
+                for (var i = 0; i < kept.ChildColumns.Count; i++)
+                {
+                    var childKey = ColumnKey(kept.Child, kept.ChildColumns[i]);
+                    var parentKey = ColumnKey(kept.Parent, kept.ParentColumns[i]);
+                    var altered = ColumnKey(step.Table, column);
+
+                    if (childKey != altered && parentKey != altered)
+                    {
+                        continue;
+                    }
+
+                    var childType = childKey == altered ? newType : TypeOf(childKey);
+                    var parentType = parentKey == altered ? newType : TypeOf(parentKey);
+
+                    if (
+                        childType.Length > 0
+                        && parentType.Length > 0
+                        && !capabilities.AreForeignKeyCompatibleTypes(childType, parentType)
+                    )
+                    {
+                        return $"R7: {step.Table}.{column} is altered to {newType} while {kept.Name} pairs it with {(childKey == altered ? parentType : childType)}";
+                    }
+                }
+            }
+
             return null;
+
+            string TypeOf(string key) =>
+                _types.TryGetValue(key, out var type) ? type : string.Empty;
         }
 
         /// <summary>R4・R5：足す外部キーの名前と、参照する列の集合が親の候補キーか</summary>

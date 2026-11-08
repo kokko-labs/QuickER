@@ -360,7 +360,9 @@ internal static partial class SyncPlanExpectationRows
                     ]
                 )
                 .Expect(e =>
-                    e.Sections.Exact("AlterColumn: #0 AlterColumn child.parent_id").Warnings.Empty()
+                    e.Sections.Exact("AlterColumn: #0 AlterColumn child.parent_id")
+                        // 片側だけの型の変更で同期後に両端が食い違うので、外し直さない方言でも名指しする
+                        .Warnings.Count("ForeignKeyColumnTypeMismatch*", 1)
                 ),
         ];
 

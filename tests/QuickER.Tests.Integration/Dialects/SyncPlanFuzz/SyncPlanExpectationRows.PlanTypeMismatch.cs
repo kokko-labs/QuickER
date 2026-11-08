@@ -185,21 +185,24 @@ internal static partial class SyncPlanExpectationRows
                             "型の食い違い: 選んだ外部キーの作り直しも、同期後に両端の型が食い違うなら削除ごと外して警告する",
                             AllDialects
                         )
-                        // 別の表の外部キー FK_invoice_customer（子の列も BIGINT へ変えるので同期後に型が揃う）。列の変更で
+                        // 別の表の外部キー FK_invoice_customer（子の列も同じ型へ変えるので同期後に型が揃う）。列の変更で
                         // 外部キーを外し直す方言（SQL Server・MySQL）ではふだん暗黙に外して付け直すが、食い違う外部キーがあれば
-                        // 列の変更が必ず失敗するので外さない
+                        // 列の変更が必ず失敗するので外さない。食い違わせる行は整数と小数（整数の幅の違いは、宣言で許す方言では
+                        // 食い違いでない）、子の列も変える行は整数の幅（列の変更で外し直さない方言は外部キーを張ったまま両端を
+                        // 1 列ずつ変えるので、途中の両端も並べられる型にする）
                         .Live(CustomerOrdersAndInvoice)
                         .TargetWith(w =>
                         {
+                            var newType = childChangedToo ? "BIGINT" : "DECIMAL(12,2)";
                             w.Target.Entities.AddRange(
                                 w.Live.Entities.Select(e => e.Clone(preserveId: true))
                             );
-                            w.Target["customer"].Columns[0].DataType = "BIGINT";
-                            w.Target["invoice"].Columns[1].DataType = "BIGINT";
+                            w.Target["customer"].Columns[0].DataType = newType;
+                            w.Target["invoice"].Columns[1].DataType = newType;
 
                             if (childChangedToo)
                             {
-                                w.Target.Col("orders", "customer_id").DataType = "BIGINT";
+                                w.Target.Col("orders", "customer_id").DataType = newType;
                             }
 
                             var rel = w.Live.Relationships[0];
@@ -233,7 +236,7 @@ internal static partial class SyncPlanExpectationRows
                     w.Target.Entities.AddRange(
                         w.Live.Entities.Select(e => e.Clone(preserveId: true))
                     );
-                    w.Target["customer"].Columns[0].DataType = "BIGINT";
+                    w.Target["customer"].Columns[0].DataType = "DECIMAL(12,2)";
                     w.Target.Fk("customer", "orders", "FK_orders_customer", ("id", "customer_id"));
                 })
                 .Select(SelectAll)
@@ -365,6 +368,60 @@ internal static partial class SyncPlanExpectationRows
                         .Warnings.Count("ForeignKeyColumnTypeMismatch*", 1)
                         .Warnings.Single("ForeignKeyColumnTypeMismatch(*): FK_b")
                 ),
+            // 複合外部キーの 1 組が DB の受け入れている型の違い（子 INT → 親 DECIMAL(12,2)）を持ち、別の組の両端を同じ型へ変える。
+            // 型の決まらない組は数えない（DB が今受け入れている）ので、外し直して警告しない（P5-2 の試運転の 2 回目の V1。
+            // 外部キー単位で数えると偽の型の食い違いになり、外し直さずに列の変更・主キーの解除で失敗した）。
+            // 列の変更で外し直す方言の形（MySQL に近い宣言＝実 DB はこの外部キーを作れないので網だけ）
+            Row(
+                    "plan-type-mismatch-composite-undecided-pair-is-not-counted-alter-column",
+                    "型の食い違い: 複合外部キーの型の決まらない組の違いは数えず、ほかの組の両端を同じ型へ変えれば外し直す",
+                    C.MySqlLike
+                )
+                .Live(CompositeForeignKeyWithAcceptedMismatch)
+                .Items(_ =>
+                    [
+                        new SchemaDiffItem
+                        {
+                            Kind = SchemaDiffKind.AlterColumn,
+                            TableName = "parent",
+                            ColumnName = "id",
+                            Column = S.Pk("id", "BIGINT"),
+                            IsSelected = true,
+                        },
+                        AlterToBigint("child", "parent_id"),
+                    ]
+                )
+                .Expect(e =>
+                    e.Warnings.Absent("ForeignKeyColumnTypeMismatch*")
+                        .Sections.Exact(
+                            "DropForeignKey: *",
+                            "AlterColumn: #0 AlterColumn parent.id; #1 AlterColumn child.parent_id",
+                            "AddForeignKey: *"
+                        )
+                ),
+            // 同じ形で親の主キーを並べ替える（主キーの変更で付け直す経路・PostgreSQL と Oracle は子 INT → 親の小数の外部キーを作れる）
+            Row(
+                    "plan-type-mismatch-composite-undecided-pair-is-not-counted-pk-change",
+                    "型の食い違い: 主キーの変更で付け直す複合外部キーも、型の決まらない組の違いを数えずに外し直す",
+                    DialectNames.PostgreSql,
+                    DialectNames.Oracle
+                )
+                .Live(CompositeForeignKeyWithAcceptedMismatch)
+                .TargetWith(w =>
+                {
+                    w.Target.Entities.AddRange(
+                        w.Live.Entities.Select(e => e.Clone(preserveId: true))
+                    );
+                    w.Target.Col("parent", "id").DataType = "BIGINT";
+                    w.Target.Col("child", "parent_id").DataType = "BIGINT";
+                    w.Target.PrimaryKeyOrder("parent", "code", "id");
+                    w.Target.Relationships.AddRange(w.Live.Relationships);
+                })
+                .Select(SelectAll)
+                .Expect(e =>
+                    e.Warnings.Absent("ForeignKeyColumnTypeMismatch*")
+                        .Sections.Contains("DropForeignKey: *", "AddForeignKey: *")
+                ),
             .. new[] { false, true }.Select(sibling =>
                 (ScenarioRow<SyncPlanExpectationInput>)
                     Row(
@@ -429,6 +486,22 @@ internal static partial class SyncPlanExpectationRows
     /// <summary>
     /// customer(id) ← orders(customer_id) に、customer を参照する別の表 invoice(id, customer_id) と外部キー FK_invoice_customer を足す
     /// </summary>
+    /// <summary>
+    /// 複合外部キー parent(id, code) ← child(parent_id, order_no)。組 (code, order_no) は親 DECIMAL(12,2)・子 INT の型の違い
+    /// （PostgreSQL・Oracle が受け入れる）
+    /// </summary>
+    private static void CompositeForeignKeyWithAcceptedMismatch(ExpectationSchema s)
+    {
+        s.Tbl("parent", ("id", "INT", true), ("code", "DECIMAL(12,2)", true));
+        s.Tbl(
+            "child",
+            ("id", "INT", true),
+            ("parent_id", "INT", false),
+            ("order_no", "INT", false)
+        );
+        s.Fk("parent", "child", "FK_child_parent", ("id", "parent_id"), ("code", "order_no"));
+    }
+
     private static void CustomerOrdersAndInvoice(ExpectationSchema s)
     {
         ExpectationScenarios.CustomerOrders(s);
@@ -495,12 +568,10 @@ internal static partial class SyncPlanExpectationRows
                         .Sections.Absent("DropForeignKey: *", "AddForeignKey: *")
                         .Items.Contains("AlterColumn > AlterColumn customer.id *");
 
-                    // DDL が暗黙コミットされ、外部キーを張ったまま両端の型を変えられない方言（MySQL）では、食い違う外部キーに
-                    // 阻まれて必ず断られる列の変更を計画の先頭へ移し、何も変えずに失敗させる。ほかの方言は並びを変えない
-                    if (
-                        !capabilities.TransactionalDdl
-                        && capabilities.AlterColumnRequiresForeignKeyRebuild
-                    )
+                    // DDL が暗黙コミットされる方言（MySQL・Oracle）では、食い違う外部キーに阻まれて必ず断られる列の変更を
+                    // 計画の先頭へ移し、何も変えずに失敗させる（Oracle は外部キーを外し直さず、張ったまま列を変える）。
+                    // トランザクションの方言は並びを変えない
+                    if (!capabilities.TransactionalDdl)
                     {
                         x.Sections.Exact("AlterColumn: AlterColumn customer.id", "*");
                     }

@@ -59,6 +59,7 @@ public sealed class OracleProvider : IDatabaseProvider
             SupportsUniqueConstraintOnPrimaryKey = false,
             ReferencedKeyRequiresSameColumnOrder = false,
             ForeignKeyAllowsStringLengthDifference = true,
+            ForeignKeyAllowsIntegerWidthDifference = true,
             TransactionalDdl = false,
             IdentifierLengthLimit = OracleIdentifier.Limit,
             TruncatesLongIdentifiers = false,

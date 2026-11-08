@@ -60,6 +60,7 @@ public sealed class SqlServerProvider : IDatabaseProvider
             SupportsUniqueConstraintOnPrimaryKey = true,
             ReferencedKeyRequiresSameColumnOrder = true,
             ForeignKeyAllowsStringLengthDifference = false,
+            ForeignKeyAllowsIntegerWidthDifference = false,
             TransactionalDdl = true,
             IdentifierLengthLimit = SqlIdentifier.Limit,
             TruncatesLongIdentifiers = false,

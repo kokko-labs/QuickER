@@ -108,7 +108,7 @@ internal static partial class SyncPlanExpectationRows
                     PersistedForeignKeyNameDialects
                 )
                 .Live(s => AddedSecondForeignKeySchema(s, UnnamedBillName, "int", null))
-                .Target(s => AddedSecondForeignKeySchema(s, null, "bigint", ship => { }))
+                .Target(s => AddedSecondForeignKeySchema(s, null, "decimal(12,2)", ship => { }))
                 .Select(SelectAll)
                 .Expect(e =>
                     e.Warnings.Single($"ForeignKeyColumnTypeMismatch(orders): {UnnamedShipName}")

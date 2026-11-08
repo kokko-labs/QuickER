@@ -330,6 +330,39 @@ public class SyncPlannerTests
             .Be(left.Equals(right, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>外部キーの両端に並べられる型の判定（幅だけの違いを許すのは整数型どうしで、Oracle は小数部の無い NUMBER）</summary>
+    [Theory(DisplayName = "外部キーの両端の型: 幅の違いを許すのは整数型どうしだけ")]
+    [InlineData("int", "bigint", true)]
+    [InlineData("SMALLINT", "integer", true)]
+    [InlineData("int4", "int8", true)]
+    [InlineData("NUMBER(10)", "NUMBER(19)", true)]
+    [InlineData("NUMBER(10,0)", "NUMBER(19)", true)]
+    [InlineData("NUMBER(*,0)", "NUMBER(10)", true)]
+    [InlineData("NUMBER(10)", "NUMBER(12,2)", false)]
+    [InlineData("NUMBER", "NUMBER(10)", false)]
+    [InlineData("NUMBER(*)", "NUMBER(10)", false)]
+    [InlineData("int", "decimal(10,0)", false)]
+    [InlineData("real", "double precision", false)]
+    [InlineData("int", "varchar(10)", false)]
+    [InlineData("bigint unsigned", "bigint", false)]
+    public void AreForeignKeyCompatibleTypes_AllowsIntegerWidthOnly(
+        string left,
+        string right,
+        bool expected
+    )
+    {
+        var lenient = TestDialectCapabilities.Neutral with
+        {
+            ForeignKeyAllowsIntegerWidthDifference = true,
+        };
+
+        lenient.AreForeignKeyCompatibleTypes(left, right).Should().Be(expected);
+        TestDialectCapabilities
+            .Neutral.AreForeignKeyCompatibleTypes(left, right)
+            .Should()
+            .Be(left.Equals(right, StringComparison.OrdinalIgnoreCase));
+    }
+
     /// <summary>
     /// 参照先に主キーと同じ列の集合で並びの違う一意制約があるとき、DDL の <see cref="ForeignKeyColumnOrder.ArrangeToReferencedKey"/>
     /// が外部キーの列ペアを主キーの並びへ並べ替える（主キーを先に試す）ことを検証する

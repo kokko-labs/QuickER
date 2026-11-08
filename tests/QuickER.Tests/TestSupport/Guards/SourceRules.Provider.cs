@@ -336,10 +336,11 @@ internal static partial class SourceRules
             ),
             // 選んだ外部キーの追加・作り直しを警告で名指しする名前は、スクリプトが付ける名前（SelectedForeignKeyName＝
             // ForeignKeyNameToAdd）の 1 か所で作る。差分の項目のリレーションから規約名を作り直すと、名前の無い同じ組の 2 本目が
-            // 1 本目と同じ名前になり、警告が DB にある無関係な外部キーを名指しした（4 つの警告に写っていた）
+            // 1 本目と同じ名前になり、警告が DB にある無関係な外部キーを名指しした（4 つの警告に写っていた）。差分の項目の名前から
+            // EffectiveForeignKey で組む写しも拾う（名前が無いときの落とし先が食い違いうる。依存の除外の警告に残っていた）
             SourceRule.Forbid(
                 "sync-selected-foreign-key-names",
-                "同期の計画で差分の項目のリレーションから外部キーの名前を作り直さず、選んだ外部キーの名前は SelectedForeignKeyName を通す",
+                "同期の計画で差分の項目のリレーション・名前から外部キーの名前を作り直さず、選んだ外部キーの名前は SelectedForeignKeyName を通す",
                 SourceScope.Files("src", "src/QuickER.Provider/SyncPlanner.cs"),
                 GuardFinder.Symbols(DiffItemForeignKeyNameRebuilds.Describe),
                 new GuardKnown(
