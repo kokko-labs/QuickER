@@ -164,6 +164,11 @@ internal sealed partial class CSharpGenerationModelBuilder
             PropertyName = _nameConverter.ToPropertyName(column.Name),
             // Fluent の HasColumnName("...") へ C# リテラルとして埋め込むためエスケープする（[Column] と同じ規則）
             ColumnName = EscapeNameForCSharpString(column.Name),
+            // 方言の既定の対応では書き込めない列だけ、型マッパーが決めた列の型を HasColumnType で教える（値はマッパーの
+            // 固定の綴りだが、リテラルへ埋め込む規則は HasColumnName と同じにする）
+            ColumnType = typeInfo.EfCoreColumnType is { } columnType
+                ? EscapeNameForCSharpString(columnType)
+                : null,
             IsRequired = !column.IsNullable,
             // 最大長・桁数は VO の列にも出す。Fluent の HasMaxLength / HasPrecision は検証ではなく列のストア型の宣言で、
             // 変換（HasConversion）の先の型にも効く。出さないと VO の列は既定のマッピング（decimal(18,2)・nvarchar(max)）になり、

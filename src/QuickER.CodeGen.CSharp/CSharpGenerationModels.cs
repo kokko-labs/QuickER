@@ -285,6 +285,11 @@ internal sealed class CSharpEfCorePropertyConfigModel
     /// <summary>マッピング先カラム名（HasColumnName 用）</summary>
     public required string ColumnName { get; init; }
 
+    /// <summary>
+    /// EF Core のプロバイダへ教える列の型（HasColumnType 用。C# リテラルとしてエスケープ済み）。既定の対応で書ける列は null
+    /// </summary>
+    public string? ColumnType { get; init; }
+
     /// <summary>必須（非 NULL）かどうか（IsRequired 用）</summary>
     public required bool IsRequired { get; init; }
 

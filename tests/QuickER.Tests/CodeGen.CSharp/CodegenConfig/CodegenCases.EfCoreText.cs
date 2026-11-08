@@ -97,6 +97,141 @@ internal static partial class CodegenCases
             typeDialect: dialect
         );
 
+    // ===== EF Core に教える列の型（HasColumnType） =====
+
+    /// <summary>
+    /// 列の型を教える型と教えない型を並べた図（PostgreSQL の date・timestamp・timetz・json・jsonb・xml と、既定の対応で書ける
+    /// text・timestamptz・integer[]。配列は要素の列の型に [] を付ける。MySQL では timestamp・char(36)・json）
+    /// </summary>
+    private static ErDiagram EfCoreText_ColumnTypeDiagram(string targetDbms) =>
+        new()
+        {
+            TargetDbms = targetDbms,
+            Entities =
+            [
+                Service_Entity(
+                    "items",
+                    targetDbms == DialectNames.PostgreSql
+                        ?
+                        [
+                            Service_Column("item_id", "integer", primaryKey: true),
+                            Service_Column("d", "date"),
+                            Service_Column("ts", "timestamp(6)"),
+                            Service_Column("tz", "time with time zone"),
+                            Service_Column("j", "json"),
+                            Service_Column("jb", "jsonb"),
+                            Service_Column("x", "xml"),
+                            Service_Column("txt", "text"),
+                            Service_Column("tstz", "timestamptz"),
+                            Service_Column("da", "date[]"),
+                            Service_Column("jba", "jsonb[]"),
+                            Service_Column("ia", "integer[]"),
+                        ]
+                        :
+                        [
+                            Service_Column("item_id", "int", primaryKey: true),
+                            Service_Column("ts", "timestamp(6)"),
+                            Service_Column("g", "char(36)"),
+                            Service_Column("j", "json"),
+                        ]
+                ),
+            ],
+        };
+
+    /// <summary>
+    /// 型マッパーが EF Core に教える列の型を持つ列だけに HasColumnType が出て、モデルの列の型になる（値オブジェクトの変換と並ぶ）。
+    /// ほかの列とほかの方言では列の型を構成しない（可搬図の出力が方言に依らず同じことは code-portable-fixture-* の行が見る）
+    /// </summary>
+    private static IEnumerable<ScenarioRow<CodegenCase>> EfCoreText_ColumnTypeRows() =>
+        [
+            .. new[] { false, true }.Select(valueObjects =>
+                EfCoreTextRow(
+                    valueObjects
+                        ? "model-efcore-column-type-postgresql-vo"
+                        : "model-efcore-column-type-postgresql",
+                    "EfCoreColumnType",
+                    $"PostgreSQL の既定の対応で書けない列にだけ列の型を構成する（値オブジェクト{(valueObjects ? "あり" : "なし")}）",
+                    () => EfCoreText_ColumnTypeDiagram(DialectNames.PostgreSql),
+                    new CodeGenerationOptions
+                    {
+                        RootNamespace = "Test.EfCoreColumnType",
+                        GenerateEfCoreRepositories = true,
+                        GenerateValueObjects = valueObjects,
+                    },
+                    model:
+                    [
+                        EfCoreModelFact.Property("ItemEntity", "D", columnType: "date"),
+                        EfCoreModelFact.Property(
+                            "ItemEntity",
+                            "Ts",
+                            columnType: "timestamp without time zone"
+                        ),
+                        EfCoreModelFact.Property(
+                            "ItemEntity",
+                            "Tz",
+                            columnType: "time with time zone"
+                        ),
+                        EfCoreModelFact.Property("ItemEntity", "J", columnType: "json"),
+                        EfCoreModelFact.Property("ItemEntity", "Jb", columnType: "jsonb"),
+                        EfCoreModelFact.Property("ItemEntity", "X", columnType: "xml"),
+                        EfCoreModelFact.Property(
+                            "ItemEntity",
+                            "Txt",
+                            columnType: EfCoreModelFact.NoColumnType
+                        ),
+                        EfCoreModelFact.Property(
+                            "ItemEntity",
+                            "Tstz",
+                            columnType: EfCoreModelFact.NoColumnType
+                        ),
+                        EfCoreModelFact.Property(
+                            "ItemEntity",
+                            "ItemId",
+                            columnType: EfCoreModelFact.NoColumnType
+                        ),
+                        EfCoreModelFact.Property("ItemEntity", "Da", columnType: "date[]"),
+                        EfCoreModelFact.Property("ItemEntity", "Jba", columnType: "jsonb[]"),
+                        EfCoreModelFact.Property(
+                            "ItemEntity",
+                            "Ia",
+                            columnType: EfCoreModelFact.NoColumnType
+                        ),
+                    ],
+                    typeDialect: DialectNames.PostgreSql
+                )
+            ),
+            EfCoreTextRow(
+                "model-efcore-column-type-mysql-none",
+                "EfCoreColumnType",
+                "MySQL の列には列の型を構成しない（timestamp・char(36) はプロパティの型をドライバの型へそろえて読む）",
+                () => EfCoreText_ColumnTypeDiagram(DialectNames.MySql),
+                new CodeGenerationOptions
+                {
+                    RootNamespace = "Test.EfCoreColumnType",
+                    GenerateEfCoreRepositories = true,
+                },
+                model:
+                [
+                    EfCoreModelFact.Property(
+                        "ItemEntity",
+                        "Ts",
+                        columnType: EfCoreModelFact.NoColumnType
+                    ),
+                    EfCoreModelFact.Property(
+                        "ItemEntity",
+                        "G",
+                        columnType: EfCoreModelFact.NoColumnType
+                    ),
+                    EfCoreModelFact.Property(
+                        "ItemEntity",
+                        "J",
+                        columnType: EfCoreModelFact.NoColumnType
+                    ),
+                ],
+                typeDialect: DialectNames.MySql
+            ),
+        ];
+
     // ===== EfCoreUniqueIndexGenerationTests =====
 
     /// <summary>EfCoreUniqueIndexGenerationTests.BuildDiagram の図（一意制約を 2 つ持つ表と、一意制約の無い表）</summary>
@@ -293,6 +428,7 @@ internal static partial class CodegenCases
 
     private static IEnumerable<ScenarioRow<CodegenCase>> EfCoreTextRows() =>
         [
+            .. EfCoreText_ColumnTypeRows(),
             // --- EfCoreNonUnicodeColumnTests ---
             EfCoreText_NonUnicodeRow(
                 "model-efcore-non-unicode-varchar-sqlserver",

@@ -5,10 +5,11 @@ EF Core モード（`GenerateEfCoreRepositories`）の固定ランタイムと�
 
 ## EF Core モードの前提
 
-- 既存 Entity をそのまま EF Core に乗せる方言非依存の `QuickErDbContext` と EF Core 版 Repository を生成する。
+- 既存 Entity をそのまま EF Core に乗せる `QuickErDbContext` と EF Core 版 Repository を生成する。方言は利用者の `Use*` が選ぶ。
 - DI 登録の差し替え（`AddGenerated{方言}Repositories` と `AddGeneratedEfCoreRepositories`）だけで QuickER 版 Repository と交換できる。
 - `GenerateEfCoreRepositories=false` のとき、生成物に EF Core への依存は一切出ない（using を含む）。
-- スキーマ作成は DDL 生成の責務で、EF Core は既存スキーマへの接続専用とする（Migrations と `HasColumnType` は範囲外）。
+- スキーマ作成は DDL 生成の責務で、EF Core は既存スキーマへの接続専用とする（Migrations は範囲外）。
+  - 列の型（`HasColumnType`）は、プロバイダの既定の対応では書けない列（PostgreSQL の `date`・`timestamp`・`timetz`・`json`・`jsonb`・`xml` とその配列）にだけ出す。DB には何も作らず、パラメータの型を決めるためだけに使う。判定は型マッパー（`src/QuickER.CodeGen.CSharp/CLAUDE.md`「EF Core に教える列の型」）。
 - EF Core 単独のスコープ（EF Core のランタイムパッケージを含む）は、行の組み立て器を出さない。
   - 対象は `SelectMaterializer`・`MapEntity`・型ごとの読み取り・値オブジェクトの速い経路。QuickER 版 Repository のあるスコープだけに出す。
   - EF Core は自分で行を組み立て、生 SQL のエンティティ取得は列ごとの写し `SetColumnValue` で行うので使われない。生 SQL の列の解決の `SelectOrdinals` は残る。

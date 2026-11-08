@@ -196,10 +196,11 @@
 - 型マッパーは、その列を読み取る経路が読み書きできる CLR 型へ写す。違う型で受けると読み取り自体が `InvalidCastException` になり、行の組み立ては全列をまとめて読むので、その列を持つ表が丸ごと使えない。
 - 読み取る経路は方言で違う。
   - SQL Server・SQLite：QuickER 版 Repository（ADO）がドライバから読むので、ドライバがその列を返す CLR 型（`GetFieldType`）へ写す。SQLite はストレージクラスで返るが、Microsoft.Data.Sqlite がマッパーの型へ変換して読む（REAL アフィニティだけは倍精度の `double` に限る）。
-  - PostgreSQL・MySQL・Oracle：QuickER 版 Repository を持たず、生成した EF Core のコードとそのプロバイダが読む。生成 DbContext は列の型（`HasColumnType`）を書かないので、プロバイダがマッパーの型から選ぶ既定の対応で読み書きできる型へ写す。ドライバの型と違ってよい（Oracle の整数の `NUMBER(p)`・PostgreSQL の `time`・`timestamptz` など）。
+  - PostgreSQL・MySQL・Oracle：QuickER 版 Repository を持たず、生成した EF Core のコードとそのプロバイダが読む。プロバイダがマッパーの型から選ぶ既定の対応で読み書きできる型へ写す。ドライバの型と違ってよい（Oracle の整数の `NUMBER(p)`・PostgreSQL の `time`・`timestamptz` など）。
+  - 既定の対応では書けない列（PostgreSQL の `date`・`timestamp`・`timetz`・`json`・`jsonb`・`xml` とその配列）は、マッパーが EF Core に教える列の型（`CSharpTypeInfo.EfCoreColumnType`）を入れ、生成 DbContext がその列にだけ `HasColumnType` を出す（`src/QuickER.CodeGen.CSharp/CLAUDE.md`「EF Core に教える列の型」）。
 - 確かめた EF Core のプロバイダは、Integration が持つ `UseOracle`（Oracle.EntityFrameworkCore）・`UseMySQL`（MySql.EntityFrameworkCore＝ドライバは MySql.Data）・`UseNpgsql`・`UseSqlServer`・`UseSqlite`。MySQL の Pomelo（ドライバは MySqlConnector）は確かめていない。
-- **今この規則を満たしていない組がある**：MySQL の `timestamp(n)`（MySql.Data が DateTimeOffset の小数秒を落とす）と `char(36)`（UUID の値を Guid で返し string で読めない）、PostgreSQL の `date`・`timestamp`（DateTime を timestamptz で送り Kind=Unspecified の書き込みを断られる）と `json`・`jsonb`・`xml`（text で送り書き込みを断られる）。一覧の正本は `DialectTypeRealDbRows` の EF Core の手順のうち `GapReason` を持つもの（製品の候補＝直す区切りが手順を通る形へ書き換える）。
-- 方言ごとの写し方は各方言の CLAUDE.md「型表記」。固定は `DialectTypeTableTests` のマッパーの行（`map-*`・宣言のセルの全表記を流す `matrix-map-*`＝5 方言のマッパーが同じ「種類 → C# の型」の表に従う）と、同じ行を実 DB で流す `*DialectTypeRealDbTests`（手順は `DialectTypeRealDbRows`。ドライバの手順＝`GetFieldType` とマッパーの一致、EF Core の手順＝生成 DbContext と同じ構成のモデルでマッパーの型として読み、書いて読み戻す。読み書きできない組は今の症状が出なくなると赤になる）。DB に触れない宣言の照合は `DialectTypeRealDbTableTests`。
+- MySQL の `timestamp` は `DateTime`、`char(36)` は `Guid` へ写す（両ドライバの型。`DateTimeOffset` で読むと MySql.Data が小数秒を落とし、`char(36)` を `string` で読むと UUID の値の行が読めない）。どちらも正規型（DateTimeOffset・fixedstring(36)）と違う C# 型なので、型の表の宣言のセルの例外として宣言する（`DialectTypeRows.MatrixShared.cs` の `MapTypeExceptions`。docs の csharp-types の表と同じ行）。
+- 方言ごとの写し方は各方言の CLAUDE.md「型表記」。固定は `DialectTypeTableTests` のマッパーの行（`map-*`・宣言のセルの全表記を流す `matrix-map-*`＝5 方言のマッパーが同じ「種類 → C# の型」の表に従う）と、同じ行を実 DB で流す `*DialectTypeRealDbTests`（手順は `DialectTypeRealDbRows`。ドライバの手順＝`GetFieldType` とマッパーの一致、EF Core の手順＝生成 DbContext と同じ構成のモデルでマッパーの型として読み、書いて読み戻す。列の型を教える列は同じ値を `HasColumnType` で当てる。読み書きできない組を残すときは `GapReason` と今の症状を書き、症状が出なくなると赤になる。今は残っていない）。DB に触れない宣言の照合は `DialectTypeRealDbTableTests`。
 
 ## 差分と同期
 

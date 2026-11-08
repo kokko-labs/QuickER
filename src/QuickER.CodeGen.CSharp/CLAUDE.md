@@ -11,6 +11,16 @@ C# コード生成の生成器の側（オプション・モデルビルダー�
 - `CSharpTypeInfo` を中立アセンブリへ分離して参照を切る案は検討のうえ見送り
   - 実利が「`IncludeCodeGenModules=false` 構成から Scriban.dll が 1 本消える」だけで、契約 1 型のためのアセンブリ新設は投機的な間接層
 
+## EF Core に教える列の型
+
+- 生成 DbContext は、EF Core のプロバイダがプロパティの型の既定の対応では書けない列にだけ `HasColumnType` を出す。値は `CSharpTypeInfo.EfCoreColumnType` で、方言の型マッパーが固定の綴りで決める（生成器は方言を知らず、値を `EscapeNameForCSharpString` に通して出すだけ）
+  - 今入れるのは PostgreSQL のマッパーだけ：`date`・`timestamp`（→ `timestamp without time zone`）・`timetz`（→ `time with time zone`）・`json`・`jsonb`・`xml` と、その配列（要素の値＋`[]`）。教えないと Npgsql の EF Core のプロバイダが `DateTime` を timestamptz・`string` を text で送り、書き込みを断られる（`src/QuickER.Provider.PostgreSql/CLAUDE.md`「型マッパー」）
+  - 既定の対応で書ける列には入れない。全列に図の型表記を出すと、可搬図の出力が方言ごとに割れ、代替の string の列（geometry など）はプロバイダに対応が無くモデルの組み立てで落ちる
+  - 図の型表記をそのまま出さない（生成コードへ利用者の文字列を流さない）
+- テンプレートは Fluent の鎖の `HasColumnName` の直後に出す（`_08_EfCore.scriban`）。DbContext の XmlDoc も「既定の対応で書けない列にだけ宣言する」と書く
+- 実 DB の EF Core の手順（`DialectTypeRealDbRows`）は、マッパーの同じ値を `HasColumnType` で当てたモデルで読み書きする。テンプレートが同じ値を出すことは生成の行が見る（手順と生成物の間を繋ぐ）
+- ガード：`CodegenCaseTests` の行 `model-efcore-column-type-postgresql` / `model-efcore-column-type-postgresql-vo`（PostgreSQL の図の列ごとの構成した列の型と、教えない列は構成なし）/ `model-efcore-column-type-mysql-none`・`DialectTypeTableTests`（マッパーの行の `efcol`）・`PostgreSqlDialectTypeRealDbTests`（EF Core の手順）・`CodegenCaseTests` の行 `code-portable-fixture-identical-across-postgresql-mysql-oracle`（可搬図は方言に依らず同じ）。mutation 実証済み（マッパーの値を外すと型の表・生成の行・実 DB が赤、テンプレートの出力を消すと生成の行が赤）
+
 ## 生成の単発オプションのケース
 
 - 単発オプションのケース（`CodegenCaseTests` の行 `compile-single-option-*`）は、行ごとに「そのオプションを既定へ戻した比較用のオプション」と図を持つ
@@ -148,6 +158,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
   - マッパ実装は変えない。解析不能な自由記述型はトークン null（属性省略）
 - 可搬図では方言に依らず同一トークンになる（`CodegenCaseTests` の行 `code-portable-fixture-identical-across-postgresql-mysql-oracle`・`CodegenCaseTests` の行 `code-portable-fixture-sqlserver-adds-sql-column-type`）
   - 可搬フィクスチャの文字列は Unicode で統一する（Ansi / Unicode の差でトークンが割れるため）
+  - 可搬図は、EF Core に教える列の型（このファイルの「EF Core に教える列の型」）を持つ型を含まない（含めると PostgreSQL の生成物にだけ `HasColumnType` が出る）
 - 実行時型付けの `[SqlColumnType]`（SQL Server 専用・Size ガード）とは責務分離で無関係
 
 ### Column 属性は常時付与

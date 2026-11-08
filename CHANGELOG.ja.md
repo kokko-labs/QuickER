@@ -18,6 +18,8 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 - **EF Core 版 Repository が、変わった代替キー（外部キーが参照する、主キーでない列）を書くようになりました** — これまで `UpdateAsync` とグラフ保存は新しい値を捨てて成功を返し、Save フックの Before が入れた値は保存を失敗させていました。参照されていない値は、QuickER 版 Repository と同じく書かれ、行バージョンが進みます
 - **ほかの行がまだ参照している代替キーを変えると、EF Core 版 Repository で失敗するようになりました** — DB が断り（`NO ACTION`）、保存は何も書かずにその例外を投げます（QuickER 版 Repository と同じ）。これまでは古い値を残したまま成功を返していました。代替キーを持つ表の更新する行ごとに問い合わせが 1 つ増え、そうした表の `UpdateAsync` はトランザクションの中で走ります
 - **図で NULL 許容の印がある主キーの列も、どの生成の構成でも NULL を許さない型で生成するようになりました** — そのような列のエンティティのプロパティは `int?`（参照型なら NULL 許容の注釈つき）でしたが、ほかの主キーと同じく、また生成する DDL がすでにそう宣言しているとおり、`int`（参照型なら注釈なし）になります。キーへ null を代入する、`.Value` や `HasValue` で読む手書きのコードは、再生成するとコンパイルできなくなります。そう読んだ列は Info の診断で名指しします。図と生成コードを合わせるには、それらの列の NULL 許容の印を外してください。生成した C# コードを取り込み直すと、これらの列は NOT NULL として戻ります
+- **MySQL の図から生成するコードは、`timestamp` の列を `DateTimeOffset` でなく `DateTime` で型付けするようになりました** — MySql.EntityFrameworkCore は、この列を `DateTimeOffset` で読むと小数秒を落とし、行を保存すると落ちた値を書き戻していました。MySQL のドライバはどちらもこの列を `DateTime` で返し、その型なら小数秒が残ります。`timestamp` の列のプロパティと、型トークンが `datetimeoffset` の名前付きクエリのパラメータは、再生成すると `DateTime` になるので、`DateTimeOffset` として使うコードはコンパイルできなくなります。MySQL は値に時差を持たず、値はセッションの時間帯の時刻です
+- **MySQL の図から生成するコードは、`char(36)` の列を `string` でなく `Guid` で型付けするようになりました** — `char(36)` は QuickER が MySQL へ `Guid` の列を書き出す表記で、MySql.Data・MySqlConnector とも既定でこの列を `Guid` として返すので、EF Core のコードは UUID を持つ行ごとに `InvalidCastException` で失敗していました。プロパティと、型トークンが `guid` の名前付きクエリのパラメータは、再生成すると `Guid` になります。MySql.EntityFrameworkCore（MySql.Data）では、UUID でない値を持つ `char(36)` の列は読めなくなります（ドライバがその値を文字列で返すため）。そうした列は、図の型を `varchar(36)` などへ変えてください。`Guid` は小文字の 36 文字で書くので、列の大文字の UUID は、行を保存すると小文字になります
 
 #### 双方向同期
 
@@ -128,6 +130,7 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 - **Repository を作れる表が 1 つも無い図（どの表も主キーが複合か、主キーが無い）の生成コードが、コンパイルできるようになりました** — QuickER 版 Repository・EF Core 版 Repository・インメモリ Repository のどれかを有効にすると、生成コードが Repository の共通契約（`ISqlExecutor`・`IRepositoryCore<TEntity, TKey>`・`ISaveHookRegistry` など）を参照するのに、主キーが 1 列の表が無いと共通契約を出していませんでした。共通の土台はランタイムパッケージを使うときと同じくオプションだけで決まり、こうした図でも、オプションで有効にしたもの（`DbContext`・SQL の実行器・DI の登録）が出ます。Repository は今までどおり主キーが 1 列の表にだけ足します
 - **主キーの列に NULL 許容の印がある図で、`AddGeneratedInMemoryRepositories()` が起動時に例外を投げなくなりました** — 既定の `seedSampleData: true` が 3 行に 1 行その列を null のままにし、インメモリのストアが主キーの値の無い行を断っていました。生成コードは主キーの列を NOT NULL として扱うようになりました（Breaking changes を参照）。このような図は、主キーの行の必須の欄が空の Excel 定義書の取込、NULL 許容の型の `[Key]` プロパティを持つ C# コードの取込、手で書いた図のファイルから生まれます
 - **主キーが 1 列でない表（複合主キー・主キーなし）の名前付きクエリが黙って生成されないことがなくなり、クエリごとに警告で名指しするようになりました** — 名前付きクエリは表の Repository のメソッドなので、Repository を作らない表のクエリは生成されません。これまでは表の Repository を飛ばす警告しか出ず、クエリが消えたことに気づけませんでした。生成は止めません。Repository をまったく生成しない構成では、これまでどおりどちらの警告も出ません
+- **PostgreSQL の図から生成する EF Core のコードが、`date`・`timestamp`・`time with time zone`・`json`・`jsonb`・`xml` の列と、その配列の列へ書けるようになりました** — 列の型が無いと、Npgsql のプロバイダは `DateTime` を `timestamp with time zone` として送って `DateTimeKind.Unspecified` の値を断り、`DateTimeOffset` も同じく送って UTC 以外のオフセットを断り、文字列を `text` として送って JSON と XML の列で PostgreSQL に断られていました。生成する `DbContext` は、これらの列（配列なら `date[]` など）にだけ `HasColumnType` で列の型を宣言するので、ほかの列の出力は変わりません。`DateTimeKind.Utc` の `DateTime` は、Npgsql が断るので、`timestamp` の列へは書けません
 
 #### コード生成ダイアログ
 

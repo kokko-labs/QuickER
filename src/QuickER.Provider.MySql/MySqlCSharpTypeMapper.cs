@@ -21,7 +21,10 @@ namespace QuickER.Provider.MySql;
 /// <item><description>bit(n)（n&gt;1）→ ulong、year → int（いずれも MySqlConnector が返す CLR 型に合わせる。実 mysql:8.4 で実測）</description></item>
 /// <item><description>float → float、double → double</description></item>
 /// <item><description>decimal / numeric → decimal</description></item>
-/// <item><description>date / datetime → DateTime、time → TimeSpan、timestamp → DateTimeOffset</description></item>
+/// <item><description>date / datetime / timestamp → DateTime、time → TimeSpan（timestamp は時間帯を持たず、両ドライバとも
+/// DateTime で返す。MySql.Data の <c>GetFieldValue&lt;DateTimeOffset&gt;</c> は小数秒を落とすので DateTimeOffset へは写さない）</description></item>
+/// <item><description>char(36) → Guid（QuickER が Guid を書き出す表記で、MySqlConnector・MySql.Data とも既定でこの列を Guid として返す。
+/// string で受けると UUID の値の行が InvalidCastException になる）</description></item>
 /// <item><description>varbinary / binary / tinyblob / blob / mediumblob / longblob → byte[]（参照型）。blob/mediumblob/longblob は無制限バイナリ、tinyblob(255B)/binary(n)/varbinary(n) は有界</description></item>
 /// <item><description>varchar / char / text 系 / json → string（長さ指定があれば MaxLength として保持）</description></item>
 /// <item><description>未知の型 → string（生成失敗を避けるための安全側フォールバック。<c>CSharpTypeInfo.IsFallbackType</c> に true を刻む）</description></item>
@@ -96,8 +99,9 @@ public sealed partial class MySqlCSharpTypeMapper : IColumnTypeMapper
             "float" => Value("float"),
             "double" => Value("double"),
             "decimal" => Decimal(precision, scale),
-            "date" or "datetime" => Value("DateTime"),
-            "timestamp" => Value("DateTimeOffset"),
+            // timestamp は UTC で格納しセッションの時間帯で返す（値に時間帯を持たない）。両ドライバとも DateTime で返し、
+            // MySql.Data の GetFieldValue<DateTimeOffset> は小数秒を落とす（生成 EF Core のコードが読んで書き戻すとデータが変わる）
+            "date" or "datetime" or "timestamp" => Value("DateTime"),
             "time" => Value("TimeSpan"),
             // tinyblob(255B) も byte[]。blob/mediumblob/longblob は上限不明の無制限バイナリ、tinyblob/binary(n)/varbinary(n) は有界
             "varbinary" or "binary" or "tinyblob" or "blob" or "mediumblob" or "longblob" =>
@@ -105,6 +109,10 @@ public sealed partial class MySqlCSharpTypeMapper : IColumnTypeMapper
                     "byte[]",
                     isUnboundedBinary: baseType is "blob" or "mediumblob" or "longblob"
                 ),
+            // char(36) は Guid の書き出しの表記（MySQL に UUID 型は無い）。MySqlConnector（GuidFormat の既定）・MySql.Data
+            // （OldGuids=false の既定）とも、この列を Guid として返す。UUID でない値は MySqlConnector では読めず、
+            // MySql.Data は値ごとに string で返す（Guid で受けると読めない＝docs に明記）
+            "char" when maxLength == 36 => Value("Guid"),
             // 文字列系のみ MaxLength を保持し、[MaxLength] 属性の生成に使う
             "varchar" or "char" or "tinytext" or "text" or "mediumtext" or "longtext" or "json" =>
                 Reference("string", maxLength),

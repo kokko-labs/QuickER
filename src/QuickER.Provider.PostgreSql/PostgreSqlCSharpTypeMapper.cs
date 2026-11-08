@@ -19,6 +19,8 @@ namespace QuickER.Provider.PostgreSql;
 /// <item><description>uuid → Guid</description></item>
 /// <item><description>bytea → byte[]（参照型）。長さ宣言を持たないため常に無制限バイナリ</description></item>
 /// <item><description>varchar / char / text / xml / json / jsonb → string（長さ指定があれば MaxLength として保持）</description></item>
+/// <item><description>date / timestamp / timetz / xml / json / jsonb は、生成 EF Core の DbContext が列の型を教える
+/// （<see cref="CSharpTypeInfo.EfCoreColumnType"/>。Npgsql の EF Core のプロバイダの既定の対応では書き込めないため）</description></item>
 /// <item><description>未知の型 → string（生成失敗を避けるための安全側フォールバック。<c>CSharpTypeInfo.IsFallbackType</c> に true を刻む）</description></item>
 /// </list>
 /// 型名は大文字小文字を区別せず、"varchar(50)" のような長さ指定付き表記や "double precision" 等の複数語型名を受け付ける
@@ -83,13 +85,19 @@ public sealed partial class PostgreSqlCSharpTypeMapper : IColumnTypeMapper
             "double precision" => Value("double"),
             "numeric" => Decimal(precision, scale),
             "money" => Value("decimal"),
-            "date" or "timestamp" or "timestamptz" => baseType == "timestamptz"
-                ? Value("DateTimeOffset")
-                : Value("DateTime"),
+            // Npgsql の EF Core のプロバイダは、列の型を教えない DateTime を timestamp with time zone として送り、
+            // Kind=Unspecified の値を断る。date・timestamp の列にだけ列の型を教える（timestamptz は既定の対応のまま）
+            "date" => Value("DateTime") with { EfCoreColumnType = "date" },
+            "timestamp" => Value("DateTime") with
+            {
+                EfCoreColumnType = "timestamp without time zone",
+            },
+            "timestamptz" => Value("DateTimeOffset"),
             "time" => Value("TimeSpan"),
             // timetz は「時刻＋オフセット」。Npgsql が返す CLR 型は DateTimeOffset で、
-            // TimeSpan で受けると読み取り自体が InvalidCastException になる（実 PG で実測）
-            "timetz" => Value("DateTimeOffset"),
+            // TimeSpan で受けると読み取り自体が InvalidCastException になる（実 PG で実測）。
+            // DateTimeOffset の既定の対応は timestamp with time zone で、UTC 以外のオフセットを断るので列の型を教える
+            "timetz" => Value("DateTimeOffset") with { EfCoreColumnType = "time with time zone" },
             "uuid" => Value("Guid"),
             // interval / inet / cidr は Npgsql が文字列として読めない（GetFieldValue<string> が InvalidCastException＝
             // その列を持つ表の行の組み立てが丸ごと失敗する）。Npgsql 10 が返す CLR 型へ写す（実 PostgreSQL 16 で実測。
@@ -106,10 +114,12 @@ public sealed partial class PostgreSqlCSharpTypeMapper : IColumnTypeMapper
             // bytea は長さ宣言を持たず上限が分からないため無制限バイナリ
             "bytea" => Reference("byte[]", isUnboundedBinary: true),
             // 文字列系のみ MaxLength を保持し、[MaxLength] 属性の生成に使う
-            "varchar" or "char" or "text" or "xml" or "json" or "jsonb" => Reference(
-                "string",
-                maxLength
-            ),
+            "varchar" or "char" or "text" => Reference("string", maxLength),
+            // 列の型を教えない string は text のパラメータで送られ、PostgreSQL が json・jsonb・xml の列への書き込みを断る（42804）
+            "xml" or "json" or "jsonb" => Reference("string", maxLength) with
+            {
+                EfCoreColumnType = baseType,
+            },
             // 未知の型は string として扱い、生成自体は継続させる
             _ => Reference("string", isFallbackType: true),
         };
@@ -127,6 +137,11 @@ public sealed partial class PostgreSqlCSharpTypeMapper : IColumnTypeMapper
     /// 要素型が解決できなかった場合（<c>geometry[]</c> 等）は要素側の <c>IsFallbackType</c> を引き継ぎ、
     /// 生成時 Info で名指しされる。
     /// </para>
+    /// <para>
+    /// EF Core に教える列の型（<see cref="CSharpTypeInfo.EfCoreColumnType"/>）は要素の型に <c>[]</c> を付けて引き継ぐ
+    /// （<c>date[]</c>・<c>jsonb[]</c> など）。要素と同じく、教えないと Npgsql の EF Core のプロバイダが <c>DateTime[]</c> を
+    /// <c>timestamp with time zone[]</c>、<c>string[]</c> を <c>text[]</c> で送り、書き込みを断られる（実 PostgreSQL で実測）。
+    /// </para>
     /// </remarks>
     private static CSharpTypeInfo Array(CSharpTypeInfo element) =>
         new()
@@ -135,6 +150,9 @@ public sealed partial class PostgreSqlCSharpTypeMapper : IColumnTypeMapper
             IsReferenceType = true,
             IsFallbackType = element.IsFallbackType,
             IsArray = true,
+            EfCoreColumnType = element.EfCoreColumnType is { } columnType
+                ? columnType + "[]"
+                : null,
         };
 
     /// <summary>値型の型情報を作成する</summary>

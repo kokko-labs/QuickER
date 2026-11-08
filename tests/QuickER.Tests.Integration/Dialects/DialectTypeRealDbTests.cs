@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Data.Common;
 using System.Globalization;
 using System.Reflection;
@@ -5,6 +6,7 @@ using AwesomeAssertions;
 using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using MySqlConnector;
 using Npgsql;
 using Oracle.ManagedDataAccess.Client;
@@ -65,6 +67,10 @@ public abstract class DialectTypeRealDbTestsBase
         [typeof(DateTime)] = "DateTime",
         [typeof(DateTimeOffset)] = "DateTimeOffset",
         [typeof(TimeSpan)] = "TimeSpan",
+        [typeof(Guid)] = "Guid",
+        [typeof(DateTime[])] = "DateTime[]",
+        [typeof(DateTimeOffset[])] = "DateTimeOffset[]",
+        [typeof(string[])] = "string[]",
     };
 
     private static readonly MethodInfo GetFieldValue = typeof(DbDataReader).GetMethod(
@@ -273,23 +279,27 @@ public abstract class DialectTypeRealDbTestsBase
             )!
             .MakeGenericMethod(type);
 
-        return await (Task<IReadOnlyList<string>>)run.Invoke(this, [probe, ct])!;
+        return await (Task<IReadOnlyList<string>>)
+            run.Invoke(this, [probe, mapped.EfCoreColumnType, ct])!;
     }
 
     /// <summary>EF Core で入れた行を読み、書いて読み戻す（例外は食い違いの文にする）</summary>
     private async Task<IReadOnlyList<string>> EfCoreReadWriteAsync<T>(
         DialectTypeRealDbProbe probe,
+        string? columnType,
         CancellationToken ct
     )
     {
         var problems = new List<string>();
         var builder = new DbContextOptionsBuilder();
         ConfigureEfCore(builder);
+        // 同じ型のプロパティでも列の型が違えば別のモデル（既定のモデルのキャッシュは DbContext の型だけで引く）
+        builder.ReplaceService<IModelCacheKeyFactory, EfCoreProbeModelCacheKeyFactory>();
         var options = builder.Options;
 
         try
         {
-            await using var context = new EfCoreProbeContext<T>(options, StoreName);
+            await using var context = new EfCoreProbeContext<T>(options, StoreName, columnType);
             var read = (await context.Rows.AsNoTracking().SingleAsync(ct)).Value;
             ExpectValue(problems, "EF Core で読んだ値", probe.ReadBack, read);
         }
@@ -300,13 +310,13 @@ public abstract class DialectTypeRealDbTestsBase
 
         try
         {
-            await using (var context = new EfCoreProbeContext<T>(options, StoreName))
+            await using (var context = new EfCoreProbeContext<T>(options, StoreName, columnType))
             {
                 context.Rows.Add(new EfCoreProbeRow<T> { Id = 2, Value = (T)probe.Write! });
                 await context.SaveChangesAsync(ct);
             }
 
-            await using (var context = new EfCoreProbeContext<T>(options, StoreName))
+            await using (var context = new EfCoreProbeContext<T>(options, StoreName, columnType))
             {
                 var back = (
                     await context.Rows.AsNoTracking().SingleAsync(row => row.Id == 2, ct)
@@ -341,7 +351,8 @@ public abstract class DialectTypeRealDbTestsBase
         object? actual
     )
     {
-        if (!Equals(expected, actual))
+        // 配列（PostgreSQL の配列の列）は要素で比べる
+        if (!StructuralComparisons.StructuralEqualityComparer.Equals(expected, actual))
         {
             problems.Add(
                 string.Create(
@@ -358,6 +369,7 @@ public abstract class DialectTypeRealDbTestsBase
             null => "(null)",
             DateTimeOffset d => d.ToString("O", CultureInfo.InvariantCulture),
             DateTime d => d.ToString("O", CultureInfo.InvariantCulture),
+            Array items => "[" + string.Join(", ", items.Cast<object?>().Select(Show)) + "]",
             IFormattable f => f.ToString(null, CultureInfo.InvariantCulture),
             _ => value.ToString() ?? string.Empty,
         };
@@ -542,15 +554,21 @@ internal sealed class EfCoreProbeRow<T>
 }
 
 /// <summary>
-/// EF Core の手順のモデル。生成 DbContext（<c>_08_EfCore.scriban</c>）と同じく、列名だけを指定し、列の型
-/// （<c>HasColumnType</c>）・精度・Unicode を指定しない（だからプロバイダがマッパーの型から選ぶ既定の対応で読み書きする）
+/// EF Core の手順のモデル。生成 DbContext（<c>_08_EfCore.scriban</c>）と同じく、列名を指定し、列の型（<c>HasColumnType</c>）は
+/// 型マッパーが EF Core に教える列の型（<c>CSharpTypeInfo.EfCoreColumnType</c>）を持つときだけ指定する。精度・Unicode は
+/// 指定しない（だからそれ以外はプロバイダがマッパーの型から選ぶ既定の対応で読み書きする）。生成 DbContext が同じ値を出すことは
+/// <c>CodegenCaseTests</c> の EF Core のモデルの行（<c>model-efcore-column-type-*</c>）が確かめる
 /// </summary>
 internal sealed class EfCoreProbeContext<T>(
     DbContextOptions options,
-    Func<string, string> storeName
+    Func<string, string> storeName,
+    string? columnType
 ) : DbContext(options)
 {
     public DbSet<EfCoreProbeRow<T>> Rows => Set<EfCoreProbeRow<T>>();
+
+    /// <summary>EF Core に教える列の型（モデルのキャッシュのキーに含める）</summary>
+    public string? ColumnType => columnType;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -558,8 +576,27 @@ internal sealed class EfCoreProbeContext<T>(
         row.ToTable(storeName("type_probe"));
         row.HasKey(r => r.Id);
         row.Property(r => r.Id).HasColumnName(storeName("id")).ValueGeneratedNever();
-        row.Property(r => r.Value).HasColumnName(storeName("c"));
+        var value = row.Property(r => r.Value).HasColumnName(storeName("c"));
+
+        if (columnType is not null)
+        {
+            value.HasColumnType(columnType);
+        }
     }
+}
+
+/// <summary>
+/// EF Core の手順のモデルのキャッシュのキー（DbContext の型に、EF Core に教える列の型を足す）。既定は DbContext の型だけで
+/// モデルを引くので、同じ C# 型で列の型の違う手順（PostgreSQL の jsonb と xml など）が先に作ったモデルを使い回してしまう
+/// </summary>
+internal sealed class EfCoreProbeModelCacheKeyFactory : IModelCacheKeyFactory
+{
+    public object Create(DbContext context, bool designTime) =>
+        (
+            context.GetType(),
+            context.GetType().GetProperty("ColumnType")?.GetValue(context) as string,
+            designTime
+        );
 }
 
 /// <summary>SQLite（実ファイル・Docker 不要）の方言の型の表の実 DB の段</summary>

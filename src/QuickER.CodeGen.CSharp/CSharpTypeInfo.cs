@@ -166,6 +166,24 @@ public sealed record CSharpTypeInfo
     /// </remarks>
     public bool IsTextInputUnsupported { get; init; }
 
+    /// <summary>
+    /// 生成 EF Core の DbContext が Fluent の <c>HasColumnType</c> で EF Core のプロバイダへ教える列の型（例 <c>"jsonb"</c>）。
+    /// プロバイダがプロパティの CLR 型から選ぶ既定の対応では書き込めない列にだけ値が入り、それ以外は <c>null</c>（出さない）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 例：PostgreSQL の <c>date</c>・<c>timestamp</c> の <c>DateTime</c> の列は、列の型を教えないと Npgsql の EF Core の
+    /// プロバイダが <c>timestamp with time zone</c> のパラメータで送り、Kind=Unspecified の値を断る。<c>json</c>・<c>jsonb</c>・
+    /// <c>xml</c> の <c>string</c> の列は text で送り、PostgreSQL が断る。
+    /// </para>
+    /// <para>
+    /// 値は方言の型マッパー（プロバイダ層）が決めた固定の綴りで、図の型表記をそのまま渡さない（生成コードへ利用者の文字列を
+    /// 流さない）。生成器は値をそのまま出すだけで、方言を知らない（DB 非依存の契約）。方言の既定の対応で読み書きできる型の
+    /// 列には値を入れないので、どの方言でも同じ C# 型へ写る型だけの図（可搬図）の出力は方言に依らず同じまま。
+    /// </para>
+    /// </remarks>
+    public string? EfCoreColumnType { get; init; }
+
     /// <summary>EditModel・Mapper・値オブジェクトへ載せない列か（配列列と、テキスト入力で扱えない型の列）</summary>
     /// <remarks>
     /// 除外の判定はこの 1 つの述語に寄せる（EditModel の列・Mapper・値オブジェクト・EditModel の重複検証・

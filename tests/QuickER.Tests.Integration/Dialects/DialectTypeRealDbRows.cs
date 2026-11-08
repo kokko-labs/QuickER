@@ -16,7 +16,7 @@ internal static class DialectTypeRealDbProbeKinds
     public const string Driver = "driver";
 
     /// <summary>
-    /// 型マッパーの型：生成 EF Core のコードと同じ構成（列名だけを指定し、列の型・精度・Unicode を指定しない）のモデルで、
+    /// 型マッパーの型：生成 EF Core のコードと同じ構成（列名と、マッパーが EF Core に教える列の型だけを指定し、精度・Unicode を指定しない）のモデルで、
     /// マッパーの型として入れた行を読み、同じ型の値を書いて読み戻せる
     /// </summary>
     public const string EfCore = "efcore";
@@ -98,7 +98,7 @@ internal sealed record DialectTypeRealDbProbe(
 /// </para>
 /// <para>
 /// PostgreSQL・MySQL・Oracle の列を読むのは生成 EF Core のコードとそのプロバイダだけなので、マッパーの型とドライバの型が
-/// 違う組は、EF Core の手順（生成 DbContext と同じく列の型を指定しないモデル）で読み書きできることを確かめる。
+/// 違う組は、EF Core の手順（生成 DbContext と同じ構成のモデル）で読み書きできることを確かめる。
 /// 確かめたプロバイダは、Integration が持つ <c>UseOracle</c>（Oracle.EntityFrameworkCore）・<c>UseMySQL</c>
 /// （MySql.EntityFrameworkCore＝ドライバは MySql.Data。Pomelo は確かめていない）・<c>UseNpgsql</c>・<c>UseSqlServer</c>・
 /// <c>UseSqlite</c>。読み書きできないと分かっている組は、理由（<see cref="DialectTypeRealDbProbe.GapReason"/>）と今の症状
@@ -590,8 +590,8 @@ internal static class DialectTypeRealDbRows
         ];
 
     /// <summary>
-    /// MySQL の、マッパーの型とドライバの型が違う列（読むのは生成 EF Core のコードだけ。確かめたのは MySql.EntityFrameworkCore）。
-    /// <c>timestamp(n)</c> と <c>char(36)</c> は読み書きできないと分かっている組として残す
+    /// MySQL の、マッパーの型とドライバの型が違う列と、マッパーをドライバの型へそろえた列（読むのは生成 EF Core のコードだけ。
+    /// 確かめたのは MySql.EntityFrameworkCore）
     /// </summary>
     private static IEnumerable<DialectTypeRealDbProbe> MySqlEfCore() =>
         [
@@ -599,31 +599,36 @@ internal static class DialectTypeRealDbRows
             EfCore("map-mysql-bit-year-driver-clr-year", MySql, "2026", 2026, 2155),
             // ドライバは bit(1) を UInt64 で返すが、EF Core は bool のまま読み書きできる
             EfCore("map-mysql-single-bit-bool-bit-1", MySql, "b'1'", true, false),
+            // timestamp は DateTime で読み書きする（両ドライバの型。DateTimeOffset で読むと MySql.Data が小数秒を落とす）。
+            // 小数秒 6 桁が読んでも書いて読み戻しても残る
             EfCore(
                 "matrix-map-mysql-timestamp-6",
                 MySql,
                 "'2026-01-02 03:04:05.123456'",
-                new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero).AddTicks(1234560),
-                new DateTimeOffset(2026, 5, 6, 7, 8, 9, TimeSpan.Zero).AddTicks(1234560),
-                gapReason: "製品の候補（P5）：MySql.Data の GetFieldValue<DateTimeOffset> が小数秒を落とすので、DateTimeOffset で読む"
-                    + " 生成 EF Core のコードは小数秒を失い、その行を更新すると落ちた値を書き戻す（DateTime で読めば残る）",
-                gapSymptom: "EF Core で読んだ値"
+                new DateTime(2026, 1, 2, 3, 4, 5).AddTicks(1234560),
+                new DateTime(2026, 5, 6, 7, 8, 9).AddTicks(1234560)
             ),
+            EfCore(
+                "map-mysql-timestamp-datetime-timestamp-3",
+                MySql,
+                "'2026-01-02 03:04:05.123'",
+                new DateTime(2026, 1, 2, 3, 4, 5, 123),
+                new DateTime(2026, 5, 6, 7, 8, 9, 456)
+            ),
+            // char(36) は Guid で読み書きする（両ドライバが既定で Guid として返す）。大文字の UUID も Guid として読める
             EfCore(
                 "matrix-map-mysql-char-36",
                 MySql,
-                "'0f8fad5b-d9cb-469f-a165-70867728950e'",
-                "0f8fad5b-d9cb-469f-a165-70867728950e",
-                "1b4e28ba-2fa1-11d2-883f-0016d3cca427",
-                gapReason: "製品の候補（P5）：MySql.Data は既定で char(36) を Guid として返すので、UUID の値の行を string で読む"
-                    + " 生成 EF Core のコードは InvalidCastException になる（char(36) は Guid の書き出しの表記）",
-                gapSymptom: "InvalidCastException"
+                "'0F8FAD5B-D9CB-469F-A165-70867728950E'",
+                Guid.Parse("0f8fad5b-d9cb-469f-a165-70867728950e"),
+                Guid.Parse("1b4e28ba-2fa1-11d2-883f-0016d3cca427")
             ),
         ];
 
     /// <summary>
-    /// PostgreSQL の、マッパーの型とドライバの型が違う列と、生成 DbContext が列の型を書かないことで書けない列（読むのは生成
-    /// EF Core のコードだけ）。<c>date</c>・<c>timestamp(6)</c>・<c>jsonb</c>・<c>xml</c> は書けないと分かっている組として残す
+    /// PostgreSQL の、マッパーの型とドライバの型が違う列と、生成 DbContext が列の型（HasColumnType）を教える列（読むのは生成
+    /// EF Core のコードだけ）。<c>date</c>・<c>timestamp</c>・<c>timetz</c>・<c>json</c>・<c>jsonb</c>・<c>xml</c> は、列の型を
+    /// 教えないと Npgsql の EF Core のプロバイダの既定の対応で送られて書き込みを断られる
     /// </summary>
     private static IEnumerable<DialectTypeRealDbProbe> PostgreSqlEfCore() =>
         [
@@ -656,46 +661,83 @@ internal static class DialectTypeRealDbRows
                 PostgreSql,
                 "'2026-01-02'",
                 new DateTime(2026, 1, 2),
-                new DateTime(2026, 5, 6),
-                gapReason: PostgreSqlUntypedDateTimeGap,
-                gapSymptom: "Kind=Unspecified"
+                new DateTime(2026, 5, 6)
             ),
             EfCore(
                 "matrix-map-postgresql-timestamp-6",
                 PostgreSql,
                 "'2026-01-02 03:04:05.123456'",
                 new DateTime(2026, 1, 2, 3, 4, 5).AddTicks(1234560),
-                new DateTime(2026, 5, 6, 7, 8, 9).AddTicks(1234560),
-                gapReason: PostgreSqlUntypedDateTimeGap,
-                gapSymptom: "Kind=Unspecified"
+                new DateTime(2026, 5, 6, 7, 8, 9).AddTicks(1234560)
             ),
             EfCore(
                 "matrix-map-postgresql-jsonb",
                 PostgreSql,
                 "'{\"a\": 1}'",
                 "{\"a\": 1}",
-                "{\"b\": 2}",
-                gapReason: PostgreSqlUntypedTextGap,
-                gapSymptom: "42804"
+                "{\"b\": 2}"
+            ),
+            EfCore("matrix-map-postgresql-xml", PostgreSql, "'<a>1</a>'", "<a>1</a>", "<b>2</b>"),
+            EfCore(
+                "map-postgresql-json-efcore-column-type",
+                PostgreSql,
+                "'{\"a\": 1}'",
+                "{\"a\": 1}",
+                "{\"b\": 2}"
+            ),
+            // 配列は要素の列の型に [] を付けて教える（教えないと DateTime[] は timestamptz[]・string[] は text[] で送られ断られる）
+            EfCore(
+                "map-postgresql-array-date-efcore-column-type",
+                PostgreSql,
+                "'{2026-01-02,2026-03-04}'",
+                new[] { new DateTime(2026, 1, 2), new DateTime(2026, 3, 4) },
+                new[] { new DateTime(2026, 5, 6) }
             ),
             EfCore(
-                "matrix-map-postgresql-xml",
+                "map-postgresql-array-timestamp-6-efcore-column-type",
                 PostgreSql,
-                "'<a>1</a>'",
-                "<a>1</a>",
-                "<b>2</b>",
-                gapReason: PostgreSqlUntypedTextGap,
-                gapSymptom: "42804"
+                "'{\"2026-01-02 03:04:05.123456\"}'",
+                new[] { new DateTime(2026, 1, 2, 3, 4, 5).AddTicks(1234560) },
+                new[] { new DateTime(2026, 5, 6, 7, 8, 9).AddTicks(1234560) }
+            ),
+            EfCore(
+                "map-postgresql-array-timetz-words-efcore-column-type",
+                PostgreSql,
+                "'{\"10:30:00+07\"}'",
+                new[] { new DateTimeOffset(1, 1, 2, 10, 30, 0, TimeSpan.FromHours(7)) },
+                new[] { new DateTimeOffset(1, 1, 2, 23, 4, 5, TimeSpan.FromHours(-5)) }
+            ),
+            EfCore(
+                "map-postgresql-array-json-efcore-column-type",
+                PostgreSql,
+                "ARRAY['{\"a\": 1}']::json[]",
+                new[] { "{\"a\": 1}" },
+                new[] { "{\"b\": 2}" }
+            ),
+            EfCore(
+                "map-postgresql-array-jsonb-efcore-column-type",
+                PostgreSql,
+                "ARRAY['{\"a\": 1}']::jsonb[]",
+                new[] { "{\"a\": 1}" },
+                new[] { "{\"b\": 2}" }
+            ),
+            EfCore(
+                "map-postgresql-array-xml-efcore-column-type",
+                PostgreSql,
+                "ARRAY['<a>1</a>']::xml[]",
+                new[] { "<a>1</a>" },
+                new[] { "<b>2</b>" }
+            ),
+            // timetz は列の型を教えると UTC 以外のオフセットも書ける（教えないと timestamptz として送られ Npgsql が断る）。
+            // Npgsql は日付を持たない timetz を 0001-01-02 の DateTimeOffset で返す
+            EfCore(
+                "map-postgresql-timetz-words",
+                PostgreSql,
+                "'10:30:00.123456+07'",
+                new DateTimeOffset(1, 1, 2, 10, 30, 0, TimeSpan.FromHours(7)).AddTicks(1234560),
+                new DateTimeOffset(1, 1, 2, 23, 4, 5, TimeSpan.FromHours(-5)).AddTicks(1234560)
             ),
         ];
-
-    private const string PostgreSqlUntypedDateTimeGap =
-        "製品の候補（P5）：生成 DbContext が列の型を書かないので、Npgsql の EF Core のプロバイダは DateTime を timestamptz の"
-        + "パラメータで送り、Kind=Unspecified の値の書き込みを断る（読むことはできる）";
-
-    private const string PostgreSqlUntypedTextGap =
-        "製品の候補（P5）：生成 DbContext が列の型を書かないので、string を text のパラメータで送り、PostgreSQL が jsonb・xml の"
-        + "列への書き込みを断る（json も同じ。読むことはできる）";
 
     /// <summary>SQL Server の EF Core の経路（マッパーの型はドライバの型と同じ。EF Core 単独の生成でも同じ型で読み書きできる）</summary>
     private static IEnumerable<DialectTypeRealDbProbe> SqlServerEfCore() =>
