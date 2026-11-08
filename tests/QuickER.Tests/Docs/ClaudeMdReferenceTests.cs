@@ -5,6 +5,8 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using QuickER.Tests.Resources;
+using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Docs;
 
@@ -115,6 +117,32 @@ public class ClaudeMdReferenceTests
     /// <summary>CLAUDE.md への参照（見出しは任意）</summary>
     private static readonly Regex ClaudeMdLink = new(
         @"`([^`\s]+/CLAUDE\.md)`(?:「([^」]+)」)?",
+        RegexOptions.CultureInvariant
+    );
+
+    /// <summary>
+    /// 影響の地図の名前の候補：バッククォートの中身の全体が、エンジンの部分（ID は <see cref="EngineIds.All"/>・部分は大文字で始まる英数字）か、
+    /// 前置き（<see cref="ProtectionNames"/>）＋表の名前（英字で始まる英数字）か規則・行の Id（小文字・数字・ハイフン）の形のもの
+    /// </summary>
+    private static readonly Regex MapNameCandidate = new(
+        "`((?:"
+            + string.Join("|", EngineIds.All.Select(Regex.Escape))
+            + ")/[A-Z][A-Za-z0-9]*|"
+            + Regex.Escape(ProtectionNames.Prefix(ProtectionKind.Table))
+            + "[A-Za-z][A-Za-z0-9]*|(?:"
+            + string.Join(
+                "|",
+                ProtectionNames
+                    .PrefixedKinds.Where(kind => kind != ProtectionKind.Table)
+                    .Select(kind => Regex.Escape(ProtectionNames.Prefix(kind)))
+            )
+            + ")[a-z0-9][a-z0-9-]*)`",
+        RegexOptions.CultureInvariant
+    );
+
+    /// <summary>地図の名前に続く「の行 `a` / `b`」（区切りは <c>/</c> か <c>・</c>）</summary>
+    private static readonly Regex FollowingRowList = new(
+        @"\G\s*の行\s*`[^`]+`(?:\s*(?:/|・)\s*`[^`]+`)*",
         RegexOptions.CultureInvariant
     );
 
@@ -440,6 +468,96 @@ public class ClaudeMdReferenceTests
         return [.. broken];
     }
 
+    /// <summary>本文が書いた影響の地図の名前のうち、地図の守りの名前に無いものを返す</summary>
+    /// <param name="text">CLAUDE.md の本文</param>
+    /// <param name="names">地図の守りの名前（<see cref="ImpactMapSources.Protections"/> の名前）</param>
+    internal static IReadOnlyList<string> FindMissingMapNames(
+        string text,
+        IReadOnlySet<string> names
+    ) =>
+        [
+            .. MapNameCandidate
+                .Matches(text)
+                .Select(match => match.Groups[1].Value)
+                .Where(name => !names.Contains(name))
+                .ToHashSet(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal),
+        ];
+
+    /// <summary>
+    /// 本文が地図の名前に続けて書いた行 Id（直後の（…）の中と「の行 `a` / `b`」）のうち、その守りのテストのソースに現れないもの
+    /// （<c>名前: Id</c> の形）を返す
+    /// </summary>
+    /// <remarks>
+    /// 行 Id の拾い方は <see cref="FindMissingRowIds"/> と同じ（バッククォートの語で、最初のハイフンまでが行 Id の接頭辞の集合にあるもの）。
+    /// 持ち主かどうかは渡した関数が決める（本番は <see cref="ImpactMapSources.OwnsRowId"/>＝その守りのソースの本文だけに
+    /// <see cref="RowIdExists"/> を当てる。組み立てる Id は守りのソースの中で組み立てていればよい）。関数が null を返す守り
+    /// （テストのソースを持たない規則・照合・文言の行・知らない名前）に続く行 Id は照合しない。
+    /// </remarks>
+    /// <param name="text">CLAUDE.md の本文</param>
+    /// <param name="ownsRowId">（守りの名前, 行 Id）→ その守りの行か（照合しない守りは null）</param>
+    /// <param name="rowIdPrefixes">行 Id の接頭辞の集合（<see cref="RowIdPrefixesOf"/>）</param>
+    internal static IReadOnlyList<string> FindForeignRowIds(
+        string text,
+        Func<string, string, bool?> ownsRowId,
+        IReadOnlySet<string> rowIdPrefixes
+    )
+    {
+        var foreign = new SortedSet<string>(StringComparer.Ordinal);
+
+        foreach (Match match in MapNameCandidate.Matches(text))
+        {
+            var name = match.Groups[1].Value;
+
+            foreach (
+                Match id in RowIdCandidate.Matches(FollowingRows(text, match.Index + match.Length))
+            )
+            {
+                var rowId = id.Groups[1].Value;
+
+                if (
+                    rowIdPrefixes.Contains(LeadingSegment.Match(rowId).Value)
+                    && ownsRowId(name, rowId) == false
+                )
+                {
+                    foreign.Add($"{name}: {rowId}");
+                }
+            }
+        }
+
+        return [.. foreign];
+    }
+
+    /// <summary>地図の名前の直後の（…）の中身（入れ子の全角の括弧を数える）か「の行 `a` / `b`」。どちらも無ければ空</summary>
+    private static string FollowingRows(string text, int start)
+    {
+        if (start < text.Length && text[start] == '（')
+        {
+            var depth = 0;
+
+            for (var index = start; index < text.Length; index++)
+            {
+                depth += text[index] switch
+                {
+                    '（' => 1,
+                    '）' => -1,
+                    _ => 0,
+                };
+
+                if (depth == 0)
+                {
+                    return text[(start + 1)..index];
+                }
+            }
+
+            return text[(start + 1)..];
+        }
+
+        var list = FollowingRowList.Match(text, start);
+
+        return list.Success ? list.Value : "";
+    }
+
     /// <summary>全 CLAUDE.md が名指すテストの名前が tests/ に実在すること</summary>
     [Fact(DisplayName = "CLAUDE.md 群が名指すテストの名前は、tests/ に実在する")]
     public void TestNames_ExistInTests()
@@ -508,6 +626,53 @@ public class ClaudeMdReferenceTests
             );
     }
 
+    /// <summary>全 CLAUDE.md が書いた影響の地図の名前が地図に実在し、続けて書いた行 Id がその守りのテストのソースにあること</summary>
+    [Fact(
+        DisplayName = "CLAUDE.md 群が書いた影響の地図の名前は地図に実在し、続けて書いた行 Id はその守りのテストのソースにある"
+    )]
+    public void MapNames_ExistInImpactMap()
+    {
+        var files = ClaudeMdFiles();
+        var protections = ImpactMapSources.Protections(Root);
+        var names = protections
+            .Select(protection => protection.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        var withSources = protections
+            .Where(protection => protection.SourceFiles.Count > 0)
+            .ToDictionary(protection => protection.Name, StringComparer.Ordinal);
+        var sourceTexts = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        bool? OwnsRowId(string name, string rowId) =>
+            withSources.TryGetValue(name, out var protection)
+                ? ImpactMapSources.OwnsRowId(protection, Root, rowId, sourceTexts)
+                : null;
+
+        files
+            .Values.SelectMany(text => MapNameCandidate.Matches(text))
+            .Should()
+            .NotBeEmpty("CLAUDE.md 群が地図の名前を書いていて、拾う形が空振りしていないこと");
+
+        var problems = files
+            .SelectMany(file =>
+                FindMissingMapNames(file.Value, names)
+                    .Select(name => $"{file.Key}: 地図に無い名前 {name}")
+                    .Concat(
+                        FindForeignRowIds(file.Value, OwnsRowId, Sources.Value.RowIdPrefixes)
+                            .Select(entry => $"{file.Key}: 守りのソースに無い行 {entry}")
+                    )
+            )
+            .ToList();
+
+        problems
+            .Should()
+            .BeEmpty(
+                "CLAUDE.md に書いた地図の名前が地図に無いか、続けて書いた行 Id がその守りのテストのソースに無い"
+                    + "（地図の名前は tests/QuickER.Tests/TestSupport/impact-map.md で引く。改名に追従するか、行の持ち主の守りへ書き直すこと）:"
+                    + Environment.NewLine
+                    + string.Join(Environment.NewLine, problems)
+            );
+    }
+
     /// <summary>照合の読み方そのものの自己検査（架空の名前・Id・パス・見出しを拾うこと）</summary>
     [Fact(DisplayName = "CLAUDE.md の照合は、架空のテストの名前・Id・パス・見出しを名指しする")]
     public void Checker_ReportsFictitiousNamesIdsAndLinks()
@@ -569,5 +734,54 @@ public class ClaudeMdReferenceTests
             )
             .Should()
             .BeEquivalentTo("a/CLAUDE.md「無い見出し」", "b/CLAUDE.md");
+
+        var mapNames = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Dialect/DdlText",
+            "Dialect/Types",
+            "rule:real-rule",
+            "table:RealTable",
+        };
+
+        FindMissingMapNames(
+                "`Dialect/DdlText`・`Dialect/NoSuchPart`・`rule:real-rule`・`rule:no-such-rule`・"
+                    + "`table:RealTable`・`table:NoSuchTable`・`english:no-such-row`・Dialect/NotQuoted・"
+                    + "`CodegenConfig/Judges/`・`CodegenConfig/Judges/CompileJudge.cs`・`GeneratedRuntime/`・"
+                    + "`rule:{Id}`・`table:{名前}`・`Gui/Services`・`Dialect/DdlText の文`",
+                mapNames
+            )
+            .Should()
+            .BeEquivalentTo(
+                [
+                    "Dialect/NoSuchPart",
+                    "english:no-such-row",
+                    "rule:no-such-rule",
+                    "table:NoSuchTable",
+                ],
+                "地図の名前の形（バッククォートの全体・エンジンの ID・前置き）だけを拾い、地図に無い名前を名指しする"
+            );
+
+        var mapSources = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["Dialect/DdlText"] = "\"ddl-real-row\" $\"ddl-built-row-{x}\"",
+            ["Dialect/Types"] = "\"type-own-row\"",
+        };
+
+        FindForeignRowIds(
+                "`Dialect/DdlText`（行 `ddl-real-row`・`ddl-built-row-with-default`・`type-own-row`）・"
+                    + "`Dialect/Types` の行 `type-own-row` / `ddl-real-row`・"
+                    + "`Dialect/DdlText`（全行に掛かる照合（行の説明））・`Dialect/Types`・`ddl-real-row`・"
+                    + "`rule:real-rule`（行 `ddl-real-row`）",
+                (name, rowId) =>
+                    mapSources.TryGetValue(name, out var source)
+                        ? RowIdExists(rowId, source)
+                        : null,
+                new HashSet<string>(StringComparer.Ordinal) { "ddl", "type" }
+            )
+            .Should()
+            .BeEquivalentTo(
+                ["Dialect/DdlText: type-own-row", "Dialect/Types: ddl-real-row"],
+                "別の守りの行を書いたら名指しし、組み立てる Id・続けて書いていない行・ソースを持たない守りは名指ししない"
+            );
     }
 }

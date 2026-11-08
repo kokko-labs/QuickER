@@ -98,6 +98,34 @@ jobs:
       - name: ビルド
         run: dotnet build QuickER.slnx
 
+      - name: 単発のテストの基点の数を戻す
+        # 基点（PR は向き先の先端＝チェックアウトしたマージのコミットの第 1 親・main への push は直前のコミット）の数。
+        # 無ければ（初回・7 日使われずにキャッシュが消えた・そのコミットで CI が走らなかった）前置きの鍵でいちばん新しい数を戻し、
+        # 報告は「近似」と比べたコミットを書く。それも無ければ合計だけを書く。キャッシュは戻しと保存で同じパスを使う
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/oneoff-tests
+          key: oneoff-tests-${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          restore-keys: oneoff-tests-
+
+      - name: 単発のテストを数えて報告する
+        # 影響の地図の守りのテストのソースの外の [Fact] / [Theory] を数え、基点との増減を Step Summary に書く（本体は
+        # QuickER.Tests の OneOffTestCensusTests。環境変数が無い普段の実行では何もしない）。数では赤にしない。
+        # continue-on-error は付けない（数えられないときは赤にする）
+        env:
+          QUICKER_ONEOFF_DIR: ${{ runner.temp }}/oneoff-tests
+          QUICKER_ONEOFF_COMMIT: ${{ github.sha }}
+          QUICKER_ONEOFF_BASE_COMMIT: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --no-build --filter "FullyQualifiedName~OneOffTestCensusTests.WriteSummary_FromEnvironment" --output detailed
+
+      - name: 単発のテストの数を次の実行へ渡す
+        # 鍵はこのコミット。PR の数は main から読めないので、main への push のときだけ残す
+        if: github.event_name == 'push'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/oneoff-tests
+          key: oneoff-tests-${{ github.sha }}
+
       - name: テスト
         # テストが作る一時ファイル（SQLite の実ファイル DB・偽の app-server の一時フォルダなど）を、ランナーの
         # 一時領域（D: ドライブ）へ置く。既定の TEMP は C: のユーザープロファイルの下で、ファイルの作成と削除が遅い

@@ -73,7 +73,7 @@ internal static class ImpactMapSources
                     )
                 )
                 .Select(engine => new Protection(
-                    $"{engine.Id}/{engine.Part}",
+                    ProtectionNames.EnginePart(engine.Id, engine.Part),
                     ProtectionKind.Engine,
                     engine.Title,
                     engine.SourceFiles,
@@ -85,7 +85,7 @@ internal static class ImpactMapSources
             TableRegistry
                 .All.Concat(integration.Tables)
                 .Select(table => new Protection(
-                    $"table:{table.Name}",
+                    ProtectionNames.Of(ProtectionKind.Table, table.Name),
                     ProtectionKind.Table,
                     table.Title,
                     table.SourceFiles,
@@ -96,17 +96,17 @@ internal static class ImpactMapSources
         protections.AddRange(SourceRules.All.Select(RuleProtection));
         protections.AddRange(
             ParityRows.All.Select(row =>
-                CrossCutting($"parity:{row.Id}", ProtectionKind.Parity, "正本と写しの照合")
+                CrossCutting(row.Id, ProtectionKind.Parity, "正本と写しの照合")
             )
         );
         protections.AddRange(
             EnglishTextRows.All.Select(row =>
-                CrossCutting($"english:{row.Id}", ProtectionKind.English, "英語の文言の照合")
+                CrossCutting(row.Id, ProtectionKind.English, "英語の文言の照合")
             )
         );
         protections.AddRange(
             PhraseRows.All.Select(row =>
-                CrossCutting($"phrase:{row.Id}", ProtectionKind.Phrase, "必須の文言の照合")
+                CrossCutting(row.Id, ProtectionKind.Phrase, "必須の文言の照合")
             )
         );
 
@@ -131,6 +131,9 @@ internal static class ImpactMapSources
     /// <summary>
     /// 決まった形の行の表を使うのに、エンジンの部分にも単体の表にも登録しなくてよいテストのソース（パスと理由）
     /// </summary>
+    /// <remarks>
+    /// どれも src を守らないテストの土台の自己検査なので、単発のテストの報告（<see cref="OneOffTestCensus"/>）でも数えない。
+    /// </remarks>
     public static IReadOnlyList<(string Path, string Reason)> ScenarioTableExemptions { get; } =
     [
         (
@@ -140,6 +143,10 @@ internal static class ImpactMapSources
         (
             "tests/QuickER.Tests/TestSupport/MutationSummaryTests.cs",
             "テストの土台（変異テストの結果を地図の単位ごとに要約する関数）の自己検査（架空の Stryker の結果で数え方を確かめる。src を守る表ではない）"
+        ),
+        (
+            "tests/QuickER.Tests/TestSupport/OneOffTestCensusTests.cs",
+            "テストの土台（単発のテストを地図の守りで数えて報告する関数）の自己検査と CI の入口（架空のテストのソースの木で数え方を確かめる。src を守る表ではない）"
         ),
     ];
 
@@ -251,7 +258,7 @@ internal static class ImpactMapSources
                     : [];
 
         return new Protection(
-            $"rule:{rule.Id}",
+            ProtectionNames.Of(ProtectionKind.Rule, rule.Id),
             ProtectionKind.Rule,
             "",
             [],
@@ -284,45 +291,59 @@ internal static class ImpactMapSources
                         : ""
                 );
 
-    private static Protection CrossCutting(string name, ProtectionKind kind, string scope) =>
-        new(name, kind, "", [], [], scope);
+    private static Protection CrossCutting(string id, ProtectionKind kind, string scope) =>
+        new(ProtectionNames.Of(kind, id), kind, "", [], [], scope);
 
     /// <summary>
-    /// 行 Id（<c>*</c> の省略を含む。CLAUDE.md の照合と同じ判定 <see cref="ClaudeMdReferenceTests.RowIdExists"/>）を、テストのソース
-    /// （部分ファイルを含む）に持つ守りの名前（渡した順）
+    /// 行 Id（<c>*</c> の省略を含む）が、その守りのテストのソース（<see cref="ExpandPartials"/> で広げたもの）に現れるか（CLAUDE.md の
+    /// 照合と同じ判定 <see cref="ClaudeMdReferenceTests.RowIdExists"/> を、守りのソースの本文だけに当てる）
     /// </summary>
     /// <remarks>
-    /// 表の行の名前は「守りの名前＋行 Id」（例：<c>Dialect/DdlText</c> の行 <c>ddl-*-trimmed-table</c>）。CLAUDE.md の名指しを地図の名前へ
-    /// 寄せるとき（P4-5）、行 Id がその守りのものかをこれで確かめる。地図の Markdown には行 Id の接頭辞を載せない（テストのソースの
-    /// 文字列リテラルから読むと値のデータまで拾い、行やデータを足すたびに地図が変わる）。
+    /// <para>
+    /// 表の行の名前は「守りの名前＋行 Id」（例：<c>Dialect/DdlText</c> の行 <c>ddl-*-trimmed-table</c>）。CLAUDE.md が地図の名前に続けて
+    /// 書いた行 Id がその守りの行であることを、<see cref="ClaudeMdReferenceTests.MapNames_ExistInImpactMap"/> がこれで確かめる。
+    /// 組み立てる Id（接頭辞と残りを別のリテラルに置く形）は、守りのソースの中で組み立てていれば現れたとみなす。
+    /// </para>
+    /// <para>
+    /// 地図の Markdown には行 Id の接頭辞を載せない（テストのソースの文字列リテラルから読むと値のデータまで拾い、行やデータを足すたびに
+    /// 地図が変わる）。
+    /// </para>
     /// </remarks>
-    /// <param name="protections">守り</param>
+    /// <param name="protection">守り</param>
     /// <param name="repositoryRoot">リポジトリの根</param>
     /// <param name="rowId">行 Id</param>
-    public static IReadOnlyList<string> RowIdOwners(
-        IReadOnlyList<Protection> protections,
+    /// <param name="sourceTexts">守りの名前 → ソースの本文の置き場（同じ守りを何度も引くとき、本文を 1 回だけ読む。無ければ毎回読む）</param>
+    public static bool OwnsRowId(
+        Protection protection,
         string repositoryRoot,
-        string rowId
-    ) =>
-        protections
-            .Where(protection =>
-                ExpandPartials(repositoryRoot, protection.SourceFiles)
-                    .Any(path =>
-                        ClaudeMdReferenceTests.RowIdExists(
-                            rowId,
-                            File.ReadAllText(Path.Combine(repositoryRoot, path))
-                        )
-                    )
-            )
-            .Select(protection => protection.Name)
-            .ToList();
+        string rowId,
+        IDictionary<string, string>? sourceTexts = null
+    )
+    {
+        if (sourceTexts is null || !sourceTexts.TryGetValue(protection.Name, out var text))
+        {
+            text = SourceText(protection, repositoryRoot);
+            sourceTexts?.Add(protection.Name, text);
+        }
+
+        return ClaudeMdReferenceTests.RowIdExists(rowId, text);
+    }
+
+    /// <summary>守りのテストのソース（<see cref="ExpandPartials"/> で広げたもの）の本文を改行でつないだもの（ソースが無ければ空）</summary>
+    private static string SourceText(Protection protection, string repositoryRoot) =>
+        string.Join(
+            '\n',
+            ExpandPartials(repositoryRoot, protection.SourceFiles)
+                .Select(path => File.ReadAllText(Path.Combine(repositoryRoot, path)))
+        );
 
     /// <summary>
-    /// テストのソースに、その部分ファイル（同じフォルダの <c>{名前}.*.cs</c>）を足したもの（実在するものだけ・宣言の順のあとに部分ファイルを序数の順）
+    /// テストのソースに、その部分ファイル（同じフォルダの <c>{名前}.*.cs</c>）を足し、フォルダの宣言をその下の C# のソースへ広げたもの
+    /// （実在するものだけ・宣言の順。ファイルのあとに部分ファイル、フォルダは中のファイルを、それぞれ序数の順・<c>bin</c> / <c>obj</c> は読まない）
     /// </summary>
     /// <remarks>
-    /// 台帳のソースは partial の本体だけを書き、部分ファイル（<c>DialectDdlRows.Names.cs</c> など）を書かないことがあるので、
-    /// 行 Id の持ち主・登録の照合はこの広げたソースで読む。
+    /// 台帳のソースは partial の本体だけを書き、部分ファイル（<c>DialectDdlRows.Names.cs</c> など）を書かないことがあり、判定の部品を
+    /// フォルダで書くこともある（<c>CodegenConfig/Judges</c>）。行 Id の持ち主・登録の照合はこの広げたソースで読む。
     /// </remarks>
     /// <param name="repositoryRoot">リポジトリの根</param>
     /// <param name="sourceFiles">台帳のテストのソース</param>
@@ -337,6 +358,22 @@ internal static class ImpactMapSources
         foreach (var path in sourceFiles)
         {
             var full = Path.Combine(repositoryRoot, path);
+
+            if (Directory.Exists(full))
+            {
+                var inFolder = Directory
+                    .EnumerateFiles(full, "*.cs", SearchOption.AllDirectories)
+                    .Where(file => !SourceFiles.IsBuildOutput(Path.GetRelativePath(full, file)))
+                    .Select(file => Path.GetRelativePath(repositoryRoot, file).Replace('\\', '/'))
+                    .Order(StringComparer.Ordinal);
+
+                foreach (var file in inFolder.Where(seen.Add))
+                {
+                    result.Add(file);
+                }
+
+                continue;
+            }
 
             if (!File.Exists(full))
             {

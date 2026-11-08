@@ -214,7 +214,7 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
 - 単位：src のプロジェクト（csproj を持つ src の直下のフォルダ）と、その直下のフォルダのうち手で書いたソース（`.cs`〔`*.Designer.cs`・`*.g.cs` を除く〕か `.scriban`）を持つもの（`ImpactUnits.Enumerate`）。
   - `Resources/`（生成の Designer.cs と resx だけ）・`Themes/`（XAML だけ）は単位にしない。
   - src にファイルを足しただけでは単位も地図も変わらない。変わるのは、プロジェクト・直下のフォルダ・宣言を足したとき。
-- 守りの名前（P4-4・P4-5 が参照する）：エンジンの部分は `{エンジンの ID}/{部分}`（例 `Dialect/DdlText`）、単体の表は `table:{名前}`、ソースの規則は `rule:{Id}`、照合の表は `parity:{Id}`、英語の文言の表は `english:{Id}`、必須の文言の表は `phrase:{Id}`。
+- 守りの名前（P4-4・P4-5 が参照する）：エンジンの部分は `{エンジンの ID}/{部分}`（例 `Dialect/DdlText`）、単体の表は `table:{名前}`、ソースの規則は `rule:{Id}`、照合の表は `parity:{Id}`、英語の文言の表は `english:{Id}`、必須の文言の表は `phrase:{Id}`。形の正本は `ProtectionNames`（`Engines/ImpactMap.cs`）の 1 か所で、地図・台帳の検査・CLAUDE.md の照合が同じものを使う。規則・照合・文言の表の行は、範囲を src の中に絞った規則が「守りの一覧」に、ほかは「横断の守り」に、どれも同じ名前の形で全部載る。
 - 出どころ（手で書いた対応表を正本にしない。集めるのは `ImpactMapSources`）：
   - エンジンの台帳の `EngineDescriptor.Covers`。
   - 単体の表の台帳 `TableRegistry`（エンジンの台帳に載らない、決まった形の行の表。`TableDescriptor`）。宣言は台帳の 1 ファイルにまとめ、表のファイルには置かない（表のファイルは行を足す区切りが並行して直すので、同じファイルに置くとぶつかる）。
@@ -227,8 +227,9 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
 - 地図に数を入れない（シナリオの数・ファイルの数・テストの数）。行やファイルを足すたびに地図が変わるのを避ける。守りの無い領域の手書きのテストの数は、照合のテストの出力に書く。
 - 行 Id の接頭辞は地図に載せない。
   - テストのソースの文字列リテラルから読むと、値のデータ（`alice`・`ffffffff` など）まで拾い、行やデータを足すたびに地図が変わる。
-  - 台帳のソースは partial の本体だけを書き、部分ファイル（`DialectDdlRows.Names.cs` など）を書かないことがある。そのため登録の照合・行 Id の持ち主は、同じフォルダの `{名前}.*.cs` まで広げたソースで読む（`ImpactMapSources.ExpandPartials`）。
-  - 表の行の名前は「守りの名前＋行 Id」（例 `Dialect/DdlText` の行 `ddl-*-trimmed-table`）。行 Id がその守りのものかは `ImpactMapSources.RowIdOwners`（CLAUDE.md の照合と同じ判定 `ClaudeMdReferenceTests.RowIdExists`）で引く。
+  - 台帳のソースは partial の本体だけを書き、部分ファイル（`DialectDdlRows.Names.cs` など）を書かないことがあり、判定の部品をフォルダで書くこともある（`CodeGen.CSharp/CodegenConfig/Judges`）。そのため登録の照合・行 Id の持ち主は、同じフォルダの `{名前}.*.cs` とフォルダの下の C# のソースまで広げたソースで読む（`ImpactMapSources.ExpandPartials`）。
+  - 表の行の名前は「守りの名前＋行 Id」（例 `Dialect/DdlText` の行 `ddl-*-trimmed-table`）。行 Id がその守りのものかは `ImpactMapSources.OwnsRowId`（守りの広げたソースの本文だけに CLAUDE.md の照合と同じ判定 `ClaudeMdReferenceTests.RowIdExists` を当てる）の 1 か所が決める。CLAUDE.md 群が地図の名前に続けて書いた行 Id は、`ClaudeMdReferenceTests.MapNames_ExistInImpactMap` がこれを呼んで照合する（`tests/QuickER.Tests/Docs/CLAUDE.md`「CLAUDE.md の照合」）。
+- エンジンの部分のテストのソースには、その部分の行を流すテストのクラスのファイルだけを書く（同じエンジンの部分どうしで共有するのは次元表・実行と判定の部品）。例：生成の構成のエンジンは、網羅の配列（Errors・Success）に `CodegenMatrixTests.cs`、決まった行（Cases）に `CodegenCases.cs`（行の表）と `CodegenCaseTests.cs` を書く。テストのクラスがどの守りのものかを地図で引けるようにするため（ルートの CLAUDE.md の索引の「ガード：」が地図の名前で書けるのは、そのクラスが 1 つの守りにだけ属するとき）。
 - 変異テストの結果を領域ごとにまとめるときは、`ImpactMap.UnitOf`（パスの属するいちばん深い単位）と `ImpactMap.ProtectionsOf`（パスを範囲に含む守り）で引くか、地図の「範囲の表」をパスの最長一致で読む。夜間の変異テストの要約（`MutationSummaries`）は `ImpactMapSources.Build` の地図の `UnitOf` を使う（「変異テスト（Stryker.NET）」）。
 - 守りの無い領域：`ImpactMapDeclarations.Unprotected`（単位・分類・理由）。
   - 分類は Pending（エンジン・表で埋める候補）と Accepted（エンジン・表で守る対象でないと判断したもの）。理由は因子の棚卸しと同じ判定（`FactorInventoryGuard.IsVagueReason`＝仮置きの文か 10 文字未満を断る）。
@@ -241,6 +242,26 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
   - Integration の台帳（エンジン・単体の表）を変えたら、先に Integration の写しを、続けて地図を書き直す（ルートの `CLAUDE.md`「生成テンプレートと固定フィクスチャ」の書き直しの段）。写しを書き直し忘れると Integration の `ProtectionSnapshotDriftTests` が赤になる（Integration だけを流す ubuntu のジョブでも捕まる）。
   - ほかの区切りのマージで台帳・規則が変わると地図も変わる。マージの後に書き直してそろえる。書き直しは承認であって検証ではない（地図の差分で守りの範囲の変化を確かめる）。
 - ガード：`ImpactMapGuardTests.EveryUnit_IsProtectedOrDeclaredUnprotected`・`ImpactMapGuardTests.ScenarioTableSources_AreRegistered`・`ImpactMapDriftTests`・Integration の `ProtectionSnapshotDriftTests`・両アセンブリの `EngineRegistryTests.TableRegistry_IsWellFormed`。自己検査は `ImpactMapTests`（照合の問題の形ごとの行・単位の列挙・表の型の使い方の判定）と `EngineRegistryChecksTests.TableProblems_AreNamed`。
+
+## 単発のテストの報告
+
+単発のテストの増え方を CI で見える化する（P4-5）。赤にしない。
+
+- 単発のテスト：`tests/QuickER.Tests` と `tests/QuickER.Tests.Integration` の C# のソース（`bin` / `obj` を除く）のうち、影響の地図のどの守りのテストのソースにも入らないファイルの `[Fact]` / `[Theory]` のメソッド（数えるのは `OneOffTestCensus`）。
+  - 守りのテストのソースは地図と同じ関数で決める：`ImpactMapSources.Protections` の各守り（Integration の守りは写し `protection-registry.json`）を `ImpactMapSources.ExpandPartials` で広げたもの。写しを作らない。
+  - テストの土台の自己検査（`ImpactMapSources.ScenarioTableExemptions`＝表の型・変異テストの要約・この報告の自己検査と入口）は数えない。
+  - メソッドで数える（Theory のケースは数えない＝ビルドだけで決まる数）。属性の名前の最後の部分が Fact・FactAttribute・Theory・TheoryAttribute のメソッドを、条件コンパイルのどの分岐も読んで数える（コメント・文字列の中の綴りは数えない）。
+  - 数の大半は単発になる（2026-11 で単発 3,380・守りのソースのメソッド 268）。エンジンは少ないメソッドに多くの行を載せるため。見るのは合計でなく増減。
+  - 漏れる例：エンジンのソースのファイルへ足した手書きの `[Fact]` は、ファイルごと守りのソースなので数えない。入りすぎる例：テストの土台の自己検査（TestSupport 直下）・生成フィクスチャのドリフトテスト・Integration の「共通基底＋派生」のランタイムテスト・Docs のガードは数える（地図の守りの外なので、地図へ載せれば減る）。
+- CI：ci.yml の build-and-test が、ビルドの後・テストの前に 3 つの手順を持つ。
+  - 基点の数を `actions/cache/restore` で戻す（パス `${{ runner.temp }}/oneoff-tests`・鍵 `oneoff-tests-<基点>`）。基点は PR が向き先の先端（`github.event.pull_request.base.sha`＝チェックアウトしたマージのコミットの第 1 親なので、比べると PR の変更だけになる）、main への push が直前のコミット（`github.event.before`）。
+  - 入口 `OneOffTestCensusTests.WriteSummary_FromEnvironment` を `dotnet test --no-build --filter` で呼ぶ（環境変数 `QUICKER_ONEOFF_DIR`・`QUICKER_ONEOFF_COMMIT`・`QUICKER_ONEOFF_BASE_COMMIT`。無ければ何もしない＝普段の実行では 1 件の合格）。基点の `census.json` と比べた報告を Step Summary と `summary.md` に書き、今回の数で `census.json` を置き換える。
+  - main への push のときだけ `actions/cache/save`（鍵 `oneoff-tests-<このコミット>`）。PR の数は main から読めないので残さない。
+- 報告の順：比べた基点 → 増えたファイル（基点・今回・増減。上限 20 で残りは件数）と増えたフォルダ（`tests/{プロジェクト}/{直下のフォルダ}`）→ 減ったファイルとフォルダ → 合計（Fact / Theory・守りのソースのメソッド・増減）。
+- 基点の数が無いとき：キャッシュは 7 日使われないと消え、そのコミットで CI が走らないこともある（paths-ignore）。戻しは前置きの鍵 `oneoff-tests-` でいちばん新しい数を戻し、報告は「近似（比べたコミット）」と書く。それも無ければ「なし」と書いて合計だけを出す。
+- 赤にしない：入口は数で表明しない（大きく増えても報告するだけ）。赤になるのは数えられないとき（地図を作れない・ソースを読めない・基点の JSON が壊れている）だけで、手順に `continue-on-error` を付けない。
+- 時間：手元（24 論理コア）で手順 1 つ 24 秒前後（`dotnet test` の起動と探索が 12 秒・数えが 12 秒）。
+- ガード：`WorkflowGuardTests.OneOffTests_ReportedWithoutFailingOnCounts`（手順の順・入口の絞り込み・環境変数・戻しと保存のパスと鍵・保存は push だけ・同じ版の SHA 固定・`continue-on-error` と `--ignore-exit-code` が無い）と `OneOffTestCensusTests` の決まった形の行（Fact / Theory の数え方・両プロジェクト・部分ファイルとフォルダの宣言・条件コンパイル・bin / obj と数えないファイル・増えたものを合計より先に書く・近似の基点・基点なし・大きく増えても報告だけ＝行 `oneoff-report-large-increase-only-reports`）。数え方を壊すと赤になることを確かめた（`TheoryAttribute` を読まない・守りのソースを単発に数える・壊れた基点の JSON で入口が赤）。
 
 ## GUI テストの土台
 
