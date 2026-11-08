@@ -1,68 +1,53 @@
-﻿using System.IO;
-using AwesomeAssertions;
-using QuickER.AI.UI;
-using QuickER.Tests.TestSupport;
+﻿using AwesomeAssertions;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.AI.UI;
 
-/// <summary><see cref="ApiKeyStore"/> の保存・復元動作を検証するテストクラス</summary>
+/// <summary>保存した API キーの表（入口 × 暗号ファイルの状態。QuickER.AI.UI の ApiKeyStore と接続設定の VM の保存のオン／オフ）</summary>
 /// <remarks>
-/// 実 %LOCALAPPDATA% を汚さず（並列テストの IO 競合も避けて）検証するため、
-/// 保存先フォルダ指定オーバーロードでテストごとの一時フォルダへ隔離する。
+/// 実 %LOCALAPPDATA% を汚さず（並列テストの IO 競合も避けて）検証するため、保存先フォルダ指定の版でテストごとの一時フォルダへ隔離する。
 /// </remarks>
-public class ApiKeyStoreTests : IDisposable
+public sealed class ApiKeyStoreTests
 {
-    /// <summary>テストごとの一時フォルダ（破棄で中身ごと消す）</summary>
-    private readonly TestTempFolder _temp = new();
+    /// <summary>行の Id</summary>
+    public static TheoryData<string> Ids() => ApiKeyStoreRows.Table.Ids();
 
-    /// <summary>テストごとに独立した一時フォルダのパスを組み立てる（作成は Save 側が行う）</summary>
-    private string NewTempFolder() => Path.Combine(_temp.Path, Guid.NewGuid().ToString("N"));
-
-    /// <inheritdoc />
-    public void Dispose() => _temp.Dispose();
-
-    /// <summary>Save した API キーを Load で同値復元できることを検証する</summary>
-    [Fact(DisplayName = "Save した API キーを Load で復元できる")]
-    public void SaveThenLoad_RoundTrip()
-    {
-        var folder = NewTempFolder();
-        const string keyName = "ApiKeyStoreTests";
-        const string expected = "sk-test-abc123!@#";
-
-        ApiKeyStore.Save(keyName, expected, folder);
-        var actual = ApiKeyStore.Load(keyName, folder);
-        actual.Should().Be(new SavedApiKey(SavedApiKeyStatus.Loaded, expected));
-    }
-
-    /// <summary>空文字を保存すると鍵が削除され、Load が「保存されていない」を返すことを検証する</summary>
-    [Fact(DisplayName = "空文字を Save すると削除され、Load は保存されていないを返す")]
-    public void SaveEmpty_Deletes()
-    {
-        var folder = NewTempFolder();
-        const string keyName = "ApiKeyStoreTests";
-
-        ApiKeyStore.Save(keyName, "temp-key", folder);
-        ApiKeyStore.Save(keyName, string.Empty, folder);
-        ApiKeyStore.Load(keyName, folder).Should().Be(SavedApiKey.Missing);
-    }
-
-    /// <remarks>
-    /// 別のユーザー・別の PC で暗号化したファイルや壊れたファイルは復号できない。空のキーとして返すと、
-    /// 呼び出し側が空の値を保存したとき（保存をやめたとき）に暗号ファイルを消してしまう。
-    /// </remarks>
-    [Fact(
-        DisplayName = "復号できない暗号ファイルは、保存されていないではなく読めないとして返し、ファイルは残す"
+    [Theory(
+        DisplayName = "保存した API キーの表：無い・読めた・読めないを分け、読めないキーを入口が上書きも削除もしない"
     )]
-    public void Load_UndecryptableFile_IsUnreadable()
+    [MemberData(nameof(Ids))]
+    public void Row_Holds(string id)
     {
-        var folder = NewTempFolder();
-        const string keyName = "ApiKeyStoreTests";
+        var row = ApiKeyStoreRows.Table[id];
+        using var harness = new ApiKeyStoreHarness();
+        harness.Prepare(row.Input.State, row.Input.Corrupt);
 
-        Directory.CreateDirectory(folder);
-        var path = Path.Combine(folder, keyName + ".dat");
-        File.WriteAllBytes(path, [1, 2, 3, 4]);
+        var outcome = harness.Run(row.Input.Entrance);
 
-        ApiKeyStore.Load(keyName, folder).Should().Be(SavedApiKey.Unreadable);
-        File.Exists(path).Should().BeTrue();
+        harness
+            .Observed.Single()
+            .State.Should()
+            .Be(row.Input.State, "行が作った状態が入口の前の実際の状態と同じ");
+        row.Input.Expect(outcome, harness);
+    }
+
+    [Fact(DisplayName = "網羅：入口 × 暗号ファイルの状態")]
+    public void Coverage_MatchesDeclaredGaps()
+    {
+        var counter = new CoverageCounter(ApiKeyStoreDimensions.Table);
+
+        foreach (var row in ApiKeyStoreRows.Table)
+        {
+            using var harness = new ApiKeyStoreHarness();
+            harness.Prepare(row.Input.State, row.Input.Corrupt);
+            harness.Run(row.Input.Entrance);
+
+            foreach (var (entrance, state) in harness.Observed)
+            {
+                ApiKeyStoreDimensions.Observe(counter, entrance, state);
+            }
+        }
+
+        counter.Report().AssertGaps(ApiKeyStoreDimensions.Gaps, ApiKeyStoreDimensions.Scope);
     }
 }

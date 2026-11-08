@@ -29,7 +29,7 @@ csharpier format .                                       # 整形（グローバ
   - Windows のジョブのテストは TEMP / TMP をランナーの一時領域へ向ける（既定の C: の一時領域はファイルの作成・削除が遅い。`WorkflowGuardTests.WindowsTestStep_PutsTempFilesOnRunnerTemp` が固定）
   - 補助の console exe `tests/QuickER.Tests.FakeCodexAppServer`（CodexAppServerClient のテストの偽の app-server・テストは持たない）を QuickER.Tests が参照して出力へコピーする
 - **テストのフォルダ構成は src のプロジェクト構成をミラー**する（`tests/QuickER.Tests/{Dialects|Model|Document|Provider|Provider.SqlServer|Provider.PostgreSql|Provider.MySql|Provider.Oracle|Provider.Sqlite|CodeGen.CSharp|CodeGen.UI|CodeReverse.CSharp|Db.UI|AI|AI.UI|AI.Chat|AI.Mock|Extensibility|Platform|Settings|Gui|Gui.Common|Cli|Mcp|Mcp.Tools}/`＝SUT の所在プロジェクトに対応・namespace はフォルダ追従で `QuickER.Tests.{フォルダ}`）
-  - Gui/ 配下はさらに Behaviors/Services/ViewModels/Views/UndoRedo をミラーする
+  - Gui/ 配下はさらに Behaviors/Converters/Services/ViewModels/Views/UndoRedo をミラーする
   - `QuickER.Tests/Dialects/` は QuickER.Dialects を SUT とする単体テストで、`QuickER.Tests.Integration/Dialects/` はアプリの DB 面の実 DB 検証（名前が近いだけで別物）
   - 横断フォルダは `Docs/`（CLAUDE.md の照合・docs 索引とライセンス文書のパリティ・docs の方言の表と宣言の照合）・`GeneratedFixture/`（ドリフト検知＝パス不動・regen スクリプトが参照）・`PublicApi/`（ランタイムパッケージ公開 API 面の承認ファイル）・`Resources/`（resx パリティ）・`Samples/`・`TestDoubles/`（共有テストダブル）・`TestSupport/`（WPF/STA 起動ヘルパとテストのエンジンの枠組み）
 - `tests/QuickER.Tests.Integration/` は 3 サブフォルダ：`Dialects/`（アプリ自身の DB 面サービスの実 DB 検証・`*IntegrationTests`）・`GeneratedRuntime/`（生成コードの実行時挙動・原則 `*RuntimeTests` だが `*ParityTests` なども同居する。`RuntimeTestMatrixTests` はこのフォルダを名前空間で全数走査するので接尾辞は問わない）・`GeneratedFixture/`（インメモリ系ランタイムテスト）。共有フィクスチャ（*ContainerFixture / SqliteTempDatabase）はプロジェクト直下
@@ -427,10 +427,10 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **チャットエンジン 4 種のツール実行と活動通知は `ChatToolInvocation` を通す**：通知を保護しないと購読側の例外で実行済みの呼び出しに「未実行」の結果が積まれ、AI が二重に操作する。引数は `Func<string>` で try の内側で取り出す。ガード：`ChatToolInvocationTests`・`SourceRuleTests`（規則 `chat-engine-tool-invocation-uses`・`chat-engine-tool-invocation-copies`）・`ChatEngineContractTests`。→ `src/QuickER.AI/CLAUDE.md`「ツール実行と活動通知」
 - **チャットエンジン 4 種の共通の契約は 4 エンジンへ同じ行で流し、違いはアダプタの出典つきの宣言に置く（持たない組は手で書いた一覧）**：エンジンごとに別々に書くと 1 エンジンだけの退行を見逃し、宣言を書き換えると行が黙って外れる。ガード：`ChatEngineContractTests`・`ChatDriverTests`。→ `src/QuickER.AI/CLAUDE.md`「チャットエンジンの共通の契約」
 - **チャットのダイアログは、ターンの外に応答中の吹き出しを残さず、ターン中に接続方式を変えず、切り替えられない状態の切替を確認なしで断る**：外すと吹き出しが Markdown へ戻らない・実行中のエンジンを置き去りにする・開始待ちに会話を消す確認が出る。ガード：`ChatDialogTests`。→ `src/QuickER.AI.Chat/CLAUDE.md`「ダイアログの状態の不変条件」
-- **回答の Markdown 表示は、リンクを http / https に限り、画像を読み込まず、HTML を解釈しない**：AI の回答は外部入力で、他のリンクは UNC などで外部へ接続する。ガード：`ChatMarkdownRendererTests`・`ProcessLaunchTests`（行 `external-chat-link-*`）。→ `src/QuickER.AI.UI/CLAUDE.md`「回答の Markdown 表示」
-- **回答の組み立てに失敗したら、その吹き出しだけテキスト表示へ落とす（深さは再帰なしで測り上限 32）**：インラインの深い入れ子はスタックを使い切ってプロセスごと落ちる。ガード：`AssistantMessageViewTests`・`ChatMarkdownRendererTests`。→ `src/QuickER.AI.UI/CLAUDE.md`「組み立ての失敗はテキスト表示へ」
+- **回答の Markdown 表示は、リンクを http / https に限り、画像を読み込まず、HTML を解釈しない**：AI の回答は外部入力で、他のリンクは UNC などで外部へ接続する。ガード：`ChatMarkdownRendererTests`（行 `inline-*`・`angle-*`・`bare-*`・`image-*`・`policy-*`・`html-*`）・`ProcessLaunchTests`（行 `external-chat-link-*`）。→ `src/QuickER.AI.UI/CLAUDE.md`「回答の Markdown 表示」
+- **回答の組み立てに失敗したら、その吹き出しだけテキスト表示へ落とす（深さは再帰なしで測り上限 32）**：インラインの深い入れ子はスタックを使い切ってプロセスごと落ちる。ガード：`ChatMarkdownRendererTests`（行 `depth-*`）。→ `src/QuickER.AI.UI/CLAUDE.md`「組み立ての失敗はテキスト表示へ」
 - **吹き出しを内容の幅へ縮めるときは先に部品を測り、内側の余白は覚えずに毎回読む**：`PagePadding` が最初のレイアウト中に置き換わり、先に幅を決めると最後の文字が次の行へ落ちる。ガード：`AssistantMessageViewTests`。→ `src/QuickER.AI.UI/CLAUDE.md`「吹き出しの幅」
-- **保存済みの API キーは「無い／読めた／読めない」を分け、読めないキーを空で上書きも削除もしない**：保存のオフで暗号ファイルが消える。ガード：`ApiKeyStoreTests`・`ConnectionSettingsTests`（行 `failure-unreadable-api-key-is-neither-overwritten-nor-deleted` と不変条件 1）。→ `src/QuickER.AI.UI/CLAUDE.md`「保存済みの API キー」
+- **保存済みの API キーは「無い／読めた／読めない」を分け、読めないキーを空で上書きも削除もしない**：保存のオフで暗号ファイルが消える。ガード：`ApiKeyStoreTests`（行 `load-*-is-unreadable-and-keeps-file`・`toggle-off-*-keeps-unreadable-file`）・`ConnectionSettingsTests`（行 `failure-unreadable-api-key-is-neither-overwritten-nor-deleted` と不変条件 1）。→ `src/QuickER.AI.UI/CLAUDE.md`「保存済みの API キー」
 - **`ForceClose` は中断 → エンジンの破棄をスレッドプールで上限つきに通す**：常駐プロセスが孤児になる。ガード：`AiChatDialogForceCloseTests`・`EngineShutdownTests`。→ `src/QuickER.AI.UI/CLAUDE.md`「エンジンの破棄の作法」
 
 ### AI モック生成

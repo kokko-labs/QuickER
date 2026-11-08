@@ -43,6 +43,8 @@ internal static class EngineRegistry
         AI.ChatEngines.ChatDriverDimensions.Descriptor,
         AI.UI.AttachmentListDimensions.Descriptor,
         AI.UI.ConnectionSettingsDimensions.Descriptor,
+        AI.UI.ApiKeyStoreDimensions.Descriptor,
+        AI.UI.ChatMarkdownDimensions.Descriptor,
         AI.Chat.ChatDialogDimensions.Descriptor,
         Platform.OsBoundary.ProcessLaunchDimensions.Descriptor,
         Platform.OsBoundary.ShellPermissionDimensions.Descriptor,

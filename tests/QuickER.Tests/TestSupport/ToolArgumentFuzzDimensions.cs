@@ -121,6 +121,7 @@ internal static class ToolArgumentFuzzDimensions
                 "src/QuickER.Mcp/ToolArgumentShape.cs",
                 "src/QuickER.Mcp/ToolArguments.cs",
                 "src/QuickER.Mcp/McpToolSet.cs",
+                "src/QuickER.Mcp/ErDiagramToolCatalog.cs",
                 "src/QuickER.Mcp.Tools",
                 "src/QuickER.AI.Chat/ErDiagramHostChatAdapter.cs",
                 "src/QuickER.Cli/CodeGenToolSet.cs",

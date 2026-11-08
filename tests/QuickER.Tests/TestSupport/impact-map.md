@@ -21,7 +21,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.AI` | 全体 | `Ai/Attachments`・`Ai/ChatEngines`・`Ai/Drivers`・`OsBoundary/Containment`・`OsBoundary/ProcessLaunch`・`OsBoundary/ShellPermission`・`rule:chat-engine-tool-invocation-copies`・`rule:chat-engine-tool-invocation-uses` |
 | `src/QuickER.AI.Chat` | 一部 | `Ai/ChatDialog`・`DiagramEdit/ToolArgument`・`DiagramEdit/Tools`・`OsBoundary/FeatureModules` |
 | `src/QuickER.AI.Mock` | 一部 | `Ai/MockAgents`・`Ai/MockBuildBoundary`・`Ai/MockDialog`・`Ai/MockFolder`・`Ai/MockOutputs`・`Ai/MockRunner`・`Ai/MockScaffold`・`OsBoundary/Containment`・`OsBoundary/FeatureModules`・`OsBoundary/PathEntrances`・`OsBoundary/Segments` |
-| `src/QuickER.AI.UI` | 一部 | `Ai/Attachments`・`Ai/ConnectionSettings`・`OsBoundary/ProcessLaunch` |
+| `src/QuickER.AI.UI` | 一部 | `Ai/ApiKeyStore`・`Ai/Attachments`・`Ai/ConnectionSettings`・`Ai/MarkdownRender`・`OsBoundary/ProcessLaunch`・`table:Converters` |
 | `src/QuickER.Cli` | 一部 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`DiagramEdit/ToolArgument` |
 | `src/QuickER.CodeGen.CSharp` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`Name/Entrances`・`OsBoundary/Segments`・`SyncModel/Config`・`SyncModel/Random`・`table:EditModelScenarios`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
 | `src/QuickER.CodeGen.CSharp/Queries` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`Name/Entrances` |
@@ -32,19 +32,19 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Dialects` | 全体 | `Dialect/Identifiers`・`Name/DdlRoundTrip`・`rule:dialects-project-references` |
 | `src/QuickER.Document` | 全体 | `DocumentFile/Format`・`DocumentFile/Random`・`DocumentFile/Scenarios` |
 | `src/QuickER.Extensibility` | 一部 | `OsBoundary/FeatureModules` |
-| `src/QuickER.Gui` | 一部 | `DiagramEdit/Layout`・`DiagramEdit/Selection`・`DiagramEdit/Tools`・`DiagramEdit/Undo`・`DiagramEdit/UndoOps`・`DocumentFile/Random`・`DocumentFile/Scenarios`・`FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules`・`Name/Entrances`・`OsBoundary/Lifecycle`・`OsBoundary/PostExitExhaustive`・`rule:app-feature-module-shutdown-bypasses`・`rule:app-feature-module-shutdown-uses`・`rule:app-main-window-assignment`・`rule:app-shutdown-mode-declaration`・`rule:app-shutdown-mode-overrides`・`rule:app-ui-crash-handler-bypasses`・`rule:app-ui-crash-handler-uses`・`rule:program-single-instance-bypasses`・`rule:program-single-instance-uses` |
+| `src/QuickER.Gui` | 一部 | `DiagramEdit/Layout`・`DiagramEdit/Selection`・`DiagramEdit/Tools`・`DiagramEdit/Undo`・`DiagramEdit/UndoOps`・`DocumentFile/Random`・`DocumentFile/Scenarios`・`FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules`・`Name/Entrances`・`OsBoundary/Lifecycle`・`OsBoundary/PostExitExhaustive`・`rule:app-feature-module-shutdown-bypasses`・`rule:app-feature-module-shutdown-uses`・`rule:app-main-window-assignment`・`rule:app-shutdown-mode-declaration`・`rule:app-shutdown-mode-overrides`・`rule:app-ui-crash-handler-bypasses`・`rule:app-ui-crash-handler-uses`・`rule:program-single-instance-bypasses`・`rule:program-single-instance-uses`・`table:Converters` |
 | `src/QuickER.Gui.Abstractions` | 一部 | `OsBoundary/Lifecycle`・`OsBoundary/ShutdownChainExhaustive` |
 | `src/QuickER.Gui.Common` | 一部 | `rule:dialog-owner-resolve-uses`・`rule:file-dialog-ownerless-shows`・`rule:message-box-owner-resolver-copies` |
 | `src/QuickER.Gui/Behaviors` | 守りの無い領域（Pending） | （なし） |
-| `src/QuickER.Gui/Converters` | 守りの無い領域（Accepted） | （なし） |
+| `src/QuickER.Gui/Converters` | 一部 | `table:Converters` |
 | `src/QuickER.Gui/Services` | 全体 | `DiagramEdit/Layout`・`DiagramEdit/Tools`・`DocumentFile/Random`・`DocumentFile/Scenarios`・`FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules`・`Name/Entrances`・`OsBoundary/Lifecycle`・`OsBoundary/PostExitExhaustive` |
 | `src/QuickER.Gui/UndoRedo` | 全体 | `DiagramEdit/Undo`・`DiagramEdit/UndoOps` |
 | `src/QuickER.Gui/ViewModels` | 全体 | `DiagramEdit/Selection`・`DiagramEdit/Undo`・`DiagramEdit/UndoOps`・`DocumentFile/Random`・`DocumentFile/Scenarios`・`Name/Entrances`・`OsBoundary/Lifecycle` |
 | `src/QuickER.Gui/Views` | 守りの無い領域（Accepted） | （なし） |
-| `src/QuickER.Mcp` | 一部 | `DiagramEdit/ToolArgument`・`rule:tool-argument-parsing-owners` |
+| `src/QuickER.Mcp` | 一部 | `DiagramEdit/ToolArgument`・`DiagramEdit/Tools`・`rule:tool-argument-parsing-owners` |
 | `src/QuickER.Mcp.Tools` | 全体 | `DiagramEdit/ToolArgument`・`DiagramEdit/Tools`・`Name/Entrances` |
-| `src/QuickER.Model` | 全体 | `Dialect/DdlText`・`Name/Entrances`・`SyncPlan/HistoryRows`・`rule:model-dialect-lookups`・`rule:tool-argument-parsing-owners` |
-| `src/QuickER.Platform` | 一部 | `OsBoundary/AtomicFile`・`OsBoundary/Containment`・`OsBoundary/PathEntrances`・`OsBoundary/ProcessLaunch`・`OsBoundary/Segments` |
+| `src/QuickER.Model` | 全体 | `Dialect/DdlText`・`Name/Entrances`・`SyncPlan/HistoryRows`・`rule:model-dialect-lookups`・`rule:tool-argument-parsing-owners`・`table:ForeignKeyReferentialActions` |
+| `src/QuickER.Platform` | 一部 | `Ai/MarkdownRender`・`OsBoundary/AtomicFile`・`OsBoundary/Containment`・`OsBoundary/PathEntrances`・`OsBoundary/ProcessLaunch`・`OsBoundary/Segments` |
 | `src/QuickER.Provider` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dialect/DdlText`・`Dialect/ImportWarnings`・`Dialect/Types`・`FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules`・`Name/DdlRoundTrip`・`SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/HistoryRows`・`SyncPlan/ShapeRows`・`rule:sync-capabilities-initializers`・`rule:sync-name-comparison-tokens`・`table:SyncPlanExpectations` |
 | `src/QuickER.Provider.MySql` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks` |
 | `src/QuickER.Provider.Oracle` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks` |
@@ -93,10 +93,15 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.AI.Mock/MockResumePrompt.cs` | `Ai/MockOutputs` |
 | `src/QuickER.AI.Mock/MockSchemaMismatch.cs` | `Ai/MockOutputs` |
 | `src/QuickER.AI.Mock/MockScreenLinks.cs` | `Ai/MockOutputs` |
+| `src/QuickER.AI.UI/ApiKeyStore.cs` | `Ai/ApiKeyStore` |
+| `src/QuickER.AI.UI/AssistantMessageView.cs` | `Ai/MarkdownRender` |
 | `src/QuickER.AI.UI/AttachmentListViewModel.cs` | `Ai/Attachments` |
 | `src/QuickER.AI.UI/BackendConnectionChecks.cs` | `Ai/ConnectionSettings` |
 | `src/QuickER.AI.UI/BackendTabSelection.cs` | `Ai/ConnectionSettings` |
-| `src/QuickER.AI.UI/ChatConnectionSettingsViewModel.cs` | `Ai/ConnectionSettings` |
+| `src/QuickER.AI.UI/BoolToVisibilityConverter.cs` | `table:Converters` |
+| `src/QuickER.AI.UI/ChatConnectionSettingsViewModel.cs` | `Ai/ApiKeyStore`・`Ai/ConnectionSettings` |
+| `src/QuickER.AI.UI/ChatMarkdownRenderer.cs` | `Ai/MarkdownRender` |
+| `src/QuickER.AI.UI/SavedApiKey.cs` | `Ai/ApiKeyStore` |
 | `src/QuickER.AI.UI/ShellChatLinkOpener.cs` | `OsBoundary/ProcessLaunch` |
 | `src/QuickER.AI/AnthropicChatTurnDriver.cs` | `Ai/Drivers` |
 | `src/QuickER.AI/ChatAttachment.cs` | `Ai/Attachments` |
@@ -142,6 +147,9 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Gui.Common/WpfFileDialogService.cs` | `rule:dialog-owner-resolve-uses`・`rule:file-dialog-ownerless-shows` |
 | `src/QuickER.Gui/App.xaml` | `rule:app-shutdown-mode-declaration` |
 | `src/QuickER.Gui/App.xaml.cs` | `rule:app-feature-module-shutdown-bypasses`・`rule:app-feature-module-shutdown-uses`・`rule:app-main-window-assignment`・`rule:app-shutdown-mode-overrides`・`rule:app-ui-crash-handler-bypasses`・`rule:app-ui-crash-handler-uses` |
+| `src/QuickER.Gui/Converters/CountToVisibilityConverter.cs` | `table:Converters` |
+| `src/QuickER.Gui/Converters/NullToBooleanConverter.cs` | `table:Converters` |
+| `src/QuickER.Gui/Converters/NullToVisibilityConverter.cs` | `table:Converters` |
 | `src/QuickER.Gui/Program.cs` | `rule:program-single-instance-bypasses`・`rule:program-single-instance-uses` |
 | `src/QuickER.Gui/Services` | `Name/Entrances` |
 | `src/QuickER.Gui/Services/AutoLayoutService.cs` | `DiagramEdit/Layout` |
@@ -170,11 +178,13 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Gui/ViewModels/MainViewModel.ImportExport.cs` | `DocumentFile/Random`・`DocumentFile/Scenarios` |
 | `src/QuickER.Gui/ViewModels/RelationshipViewModel.cs` | `DiagramEdit/Undo` |
 | `src/QuickER.Mcp.Tools` | `DiagramEdit/ToolArgument`・`DiagramEdit/Tools`・`Name/Entrances` |
+| `src/QuickER.Mcp/ErDiagramToolCatalog.cs` | `DiagramEdit/ToolArgument`・`DiagramEdit/Tools` |
 | `src/QuickER.Mcp/McpToolSet.cs` | `DiagramEdit/ToolArgument` |
 | `src/QuickER.Mcp/ToolArgumentShape.cs` | `DiagramEdit/ToolArgument` |
 | `src/QuickER.Mcp/ToolArguments.cs` | `DiagramEdit/ToolArgument`・`rule:tool-argument-parsing-owners` |
 | `src/QuickER.Model` | `Dialect/DdlText`・`rule:model-dialect-lookups` |
 | `src/QuickER.Model/ConstraintNames.cs` | `SyncPlan/HistoryRows` |
+| `src/QuickER.Model/ForeignKeyReferentialAction.cs` | `table:ForeignKeyReferentialActions` |
 | `src/QuickER.Model/RelationshipType.cs` | `rule:tool-argument-parsing-owners` |
 | `src/QuickER.Model/SchemaNames.cs` | `Name/Entrances` |
 | `src/QuickER.Platform/AtomicFile.cs` | `OsBoundary/AtomicFile` |
@@ -183,7 +193,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Platform/PathContainment.cs` | `OsBoundary/Containment`・`OsBoundary/PathEntrances` |
 | `src/QuickER.Platform/PathExecutableResolver.cs` | `OsBoundary/ProcessLaunch` |
 | `src/QuickER.Platform/PathSegments.cs` | `OsBoundary/PathEntrances`・`OsBoundary/Segments` |
-| `src/QuickER.Platform/UrlPolicy.cs` | `OsBoundary/ProcessLaunch` |
+| `src/QuickER.Platform/UrlPolicy.cs` | `Ai/MarkdownRender`・`OsBoundary/ProcessLaunch` |
 | `src/QuickER.Provider` | `Dialect/DdlText`・`Dialect/ImportWarnings`・`Dialect/Types` |
 | `src/QuickER.Provider.MySql` | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz` |
 | `src/QuickER.Provider.MySql/MySqlSchemaImporter.cs` | `rule:schema-command-bypasses`・`rule:schema-command-helper-uses` |
@@ -242,7 +252,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 
 - 名前：ツールの引数の形の総当たり（MCP・内蔵チャット・コード生成）
 - テストのソース：`tests/QuickER.Tests/TestSupport/ToolArgumentFuzz.cs`・`tests/QuickER.Tests/TestSupport/ToolArgumentFuzzDimensions.cs`・`tests/QuickER.Tests/TestSupport/ToolArgumentFuzzSeed.cs`・`tests/QuickER.Tests/TestSupport/ToolArgumentShapeFuzzKnownFailures.cs`・`tests/QuickER.Tests/TestSupport/ToolArgumentShapeFuzzRunner.cs`・`tests/QuickER.Tests/Mcp.Tools/ToolArgumentShapeFuzzTests.cs`・`tests/QuickER.Tests/AI.Chat/ChatToolArgumentShapeFuzzTests.cs`・`tests/QuickER.Tests/Cli/CodeGenToolArgumentShapeFuzzTests.cs`
-- 範囲：`src/QuickER.Mcp/ToolArgumentShape.cs`・`src/QuickER.Mcp/ToolArguments.cs`・`src/QuickER.Mcp/McpToolSet.cs`・`src/QuickER.Mcp.Tools`・`src/QuickER.AI.Chat/ErDiagramHostChatAdapter.cs`・`src/QuickER.Cli/CodeGenToolSet.cs`
+- 範囲：`src/QuickER.Mcp/ToolArgumentShape.cs`・`src/QuickER.Mcp/ToolArguments.cs`・`src/QuickER.Mcp/McpToolSet.cs`・`src/QuickER.Mcp/ErDiagramToolCatalog.cs`・`src/QuickER.Mcp.Tools`・`src/QuickER.AI.Chat/ErDiagramHostChatAdapter.cs`・`src/QuickER.Cli/CodeGenToolSet.cs`
 
 ### `DiagramEdit/Undo`
 
@@ -296,7 +306,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 
 - 名前：ER 図のツールの決定的な行（両ホスト）
 - テストのソース：`tests/QuickER.Tests/Mcp.Tools/ToolScenario.cs`・`tests/QuickER.Tests/Mcp.Tools/ToolScenarioDimensions.cs`・`tests/QuickER.Tests/Mcp.Tools/ToolScenarioRows.cs`・`tests/QuickER.Tests/Mcp.Tools/ToolScenarioTests.cs`・`tests/QuickER.Tests/Mcp.Tools/ToolSchemaProjection.cs`・`tests/QuickER.Tests/TestSupport/TwoHostToolHarness.cs`
-- 範囲：`src/QuickER.Gui/Services/ErDiagramDynamicTools.cs`・`src/QuickER.Mcp.Tools`・`src/QuickER.AI.Chat/ErDiagramHostChatAdapter.cs`
+- 範囲：`src/QuickER.Gui/Services/ErDiagramDynamicTools.cs`・`src/QuickER.Mcp/ErDiagramToolCatalog.cs`・`src/QuickER.Mcp.Tools`・`src/QuickER.AI.Chat/ErDiagramHostChatAdapter.cs`
 
 ### `DiagramEdit/UndoOps`
 
@@ -387,6 +397,18 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 - 名前：接続設定の操作の列の表（面 × 手の種類・不変条件 4 つ）
 - テストのソース：`tests/QuickER.Tests/AI.UI/ConnectionSettingsDimensions.cs`・`tests/QuickER.Tests/AI.UI/ConnectionSettingsHarness.cs`・`tests/QuickER.Tests/AI.UI/ConnectionSettingsRows.cs`・`tests/QuickER.Tests/AI.UI/ConnectionSettingsRows.ApiKey.cs`・`tests/QuickER.Tests/AI.UI/ConnectionSettingsRows.Codex.cs`・`tests/QuickER.Tests/AI.UI/ConnectionSettingsRows.Copilot.cs`・`tests/QuickER.Tests/AI.UI/ConnectionSettingsRows.Failure.cs`・`tests/QuickER.Tests/AI.UI/ConnectionSettingsRows.Persistence.cs`・`tests/QuickER.Tests/AI.UI/ConnectionSettingsRows.Tabs.cs`・`tests/QuickER.Tests/AI.UI/ConnectionSettingsTests.cs`
 - 範囲：`src/QuickER.AI.UI/ChatConnectionSettingsViewModel.cs`・`src/QuickER.AI.UI/BackendTabSelection.cs`・`src/QuickER.AI.UI/BackendConnectionChecks.cs`
+
+### `Ai/ApiKeyStore`
+
+- 名前：保存した API キーの表（入口 × 暗号ファイルの状態。QuickER.AI.UI の ApiKeyStore と接続設定の VM の保存のオン／オフ）
+- テストのソース：`tests/QuickER.Tests/AI.UI/ApiKeyStoreDimensions.cs`・`tests/QuickER.Tests/AI.UI/ApiKeyStoreRows.cs`・`tests/QuickER.Tests/AI.UI/ApiKeyStoreTests.cs`
+- 範囲：`src/QuickER.AI.UI/ApiKeyStore.cs`・`src/QuickER.AI.UI/SavedApiKey.cs`・`src/QuickER.AI.UI/ChatConnectionSettingsViewModel.cs`
+
+### `Ai/MarkdownRender`
+
+- 名前：AI の回答の Markdown 表示の表（要素 × 入力の形。リンクは http / https だけ・画像を読み込まない・HTML を解釈しない・入れ子の上限でテキスト表示へ）
+- テストのソース：`tests/QuickER.Tests/AI.UI/ChatMarkdownDimensions.cs`・`tests/QuickER.Tests/AI.UI/ChatMarkdownRows.cs`・`tests/QuickER.Tests/AI.UI/ChatMarkdownRows.Blocks.cs`・`tests/QuickER.Tests/AI.UI/ChatMarkdownRendererTests.cs`
+- 範囲：`src/QuickER.AI.UI/ChatMarkdownRenderer.cs`・`src/QuickER.AI.UI/AssistantMessageView.cs`・`src/QuickER.Platform/UrlPolicy.cs`
 
 ### `Ai/ChatDialog`
 
@@ -597,6 +619,18 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 - 名前：値オブジェクトの決まった形のシナリオ（呼び出し・参照の同一性・等値・初回使用）
 - テストのソース：`tests/QuickER.Tests/GeneratedFixture/ValueObjectScenarioRows.cs`・`tests/QuickER.Tests/GeneratedFixture/ValueObjectScenarioRows.Conversion.cs`・`tests/QuickER.Tests/GeneratedFixture/ValueObjectScenarioRows.Creation.cs`・`tests/QuickER.Tests/GeneratedFixture/ValueObjectScenarioRows.Declared.cs`・`tests/QuickER.Tests/GeneratedFixture/ValueObjectScenarioRows.Defined.cs`・`tests/QuickER.Tests/GeneratedFixture/ValueObjectScenarioRows.Equality.cs`・`tests/QuickER.Tests/GeneratedFixture/ValueObjectScenarioRows.Formatting.cs`・`tests/QuickER.Tests/GeneratedFixture/ValueObjectScenarioRows.Members.cs`・`tests/QuickER.Tests/GeneratedFixture/ValueObjectScenarios.cs`
 - 範囲：`src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_01_ValueObjects.scriban`・`src/QuickER.Runtime`
+
+### `table:ForeignKeyReferentialActions`
+
+- 名前：参照アクションと文字列表現の相互変換の表（SQL 表記の往復・表記ゆれの読み取り）
+- テストのソース：`tests/QuickER.Tests/Model/ForeignKeyReferentialActionTests.cs`
+- 範囲：`src/QuickER.Model/ForeignKeyReferentialAction.cs`
+
+### `table:Converters`
+
+- 名前：XAML の表示の値のコンバーターの表（反転のパラメーター・件数のしきい値・null の扱い。使われていないアプリ本体の BoolToVisibilityConverter は入れない）
+- テストのソース：`tests/QuickER.Tests/Gui/Converters/ConverterRows.cs`・`tests/QuickER.Tests/Gui/Converters/ConverterTests.cs`
+- 範囲：`src/QuickER.Gui/Converters/CountToVisibilityConverter.cs`・`src/QuickER.Gui/Converters/NullToBooleanConverter.cs`・`src/QuickER.Gui/Converters/NullToVisibilityConverter.cs`・`src/QuickER.AI.UI/BoolToVisibilityConverter.cs`
 
 ### `table:TranslatorParityPredicates`
 
@@ -813,5 +847,4 @@ src 全体か src の外を読む守り。単位の守りには数えない（�
 | 単位 | 分類 | エンジン・表の外のテスト | 理由 |
 |---|---|---|---|
 | `src/QuickER.Gui/Behaviors` | Pending | 単体の手書きのテストだけ（`tests/QuickER.Tests/Gui/Behaviors`） | キャンバスの操作（パン・ドラッグ・範囲選択・列の折り畳みと並べ替え）のビヘイビア。進行中の操作の状態と後始末は手書きのテストだけが守る。入力の列を手にした状態機械のエンジンで守れる候補 |
-| `src/QuickER.Gui/Converters` | Accepted | 無い | XAML の表示だけの値の変換（真偽・数・null を Visibility か真偽へ）。分岐が 1〜2 つで仕様の軸を持たないので、エンジン・表で守る対象にしない |
 | `src/QuickER.Gui/Views` | Accepted | 単体の手書きのテストだけ（`tests/QuickER.Tests/Gui/Views`） | ダイアログ（バージョン情報・印刷の設定）の code-behind とカードの枠の描画。仕様の軸を持つ状態は ViewModel にあり、エンジンはそちらを守る。画面の振る舞いは手書きの画面のテストが守る |
