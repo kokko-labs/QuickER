@@ -8,8 +8,8 @@ using QuickER.Tests.TestSupport;
 namespace QuickER.Tests.AI.UI;
 
 /// <summary>
-/// <see cref="AssistantMessageView"/> がテキスト表示と Markdown 表示を正しく選び、
-/// 組み立てに失敗する回答（入れ子が深すぎる等）でも落ちずにテキスト表示へ落とすことを検証するテストクラス。
+/// <see cref="AssistantMessageView"/> がテキスト表示と Markdown 表示を正しく選び、吹き出しの幅を内容に合わせることを検証するテストクラス。
+/// 組み立てに失敗する回答（入れ子が深すぎる）のテキスト表示への落とし方は、Markdown 表示の表（<see cref="ChatMarkdownRendererTests"/> の行 <c>depth-*</c>）が見る。
 /// </summary>
 public class AssistantMessageViewTests
 {
@@ -152,64 +152,6 @@ public class AssistantMessageViewTests
                 opener.Opened.Should().Equal(new Uri("https://example.com/"));
             }
         );
-    }
-
-    /// <summary>
-    /// 入れ子が深すぎて組み立てられない回答でも、例外を漏らさずその吹き出しだけテキスト表示に落とすことを検証する
-    /// （強調の入れ子は組み立て側の上限で、引用・リストの入れ子は Markdig 自身の上限で断られる）。
-    /// </summary>
-    [Theory(DisplayName = "入れ子が深すぎる回答は落ちずにテキスト表示になる")]
-    [InlineData("emphasis")]
-    [InlineData("quote")]
-    [InlineData("list")]
-    public void TooDeeplyNested_FallsBackToText(string kind)
-    {
-        var depth = 200;
-        var text = kind switch
-        {
-            "emphasis" => new string('*', depth) + "x" + new string('*', depth),
-            "quote" => new string('>', depth) + " x",
-            _ => string.Concat(
-                Enumerable.Range(0, depth).Select(i => new string(' ', i * 2) + "- x\n")
-            ),
-        };
-
-        WithView(
-            text,
-            (view, _) =>
-            {
-                view.IsShowingMarkdown.Should().BeFalse();
-                view.Content.Should().BeOfType<TextBox>().Which.Text.Should().Be(text);
-
-                // トグルを切り替えても同じ本文で組み立てを繰り返さず、テキスト表示のまま
-                view.ShowMarkdown = false;
-                view.ShowMarkdown = true;
-                view.IsShowingMarkdown.Should().BeFalse();
-            }
-        );
-    }
-
-    /// <summary>
-    /// 組み立て側の入れ子の上限は、強調の入れ子で Markdig より先に効くことを検証する
-    /// （上限が無いと、数千段の強調で組み立ての再帰がスタックを使い切ってプロセスごと落ちる）。
-    /// </summary>
-    [Fact(DisplayName = "強調の入れ子が上限を超える回答は組み立てずに断る")]
-    public void Renderer_RejectsDeepEmphasis()
-    {
-        WpfApplicationTestSupport.RunSta(() =>
-        {
-            var depth = 200;
-            var deep = new string('*', depth) + "x" + new string('*', depth);
-            var render = () => ChatMarkdownRenderer.Render(deep, new RecordingOpener());
-            render.Should().Throw<InvalidOperationException>();
-
-            // 実際の回答で使う程度の入れ子（リストの中の引用の中の太字とコード）は組み立てられる
-            var ordinary = "- item\n  > quote with **bold `code`** and *em*";
-            ChatMarkdownRenderer
-                .Render(ordinary, new RecordingOpener())
-                .Blocks.Should()
-                .NotBeEmpty();
-        });
     }
 
     /// <summary>吹き出しの最大幅（AI チャットのダイアログと同じ）</summary>

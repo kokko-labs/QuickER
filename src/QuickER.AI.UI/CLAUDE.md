@@ -16,7 +16,7 @@ AI の回答は外部の入力なので、組み立て（`ChatMarkdownRenderer`�
 - **画像（`LinkInline.IsImage`）は代替テキストだけを出す。** Image も Hyperlink も作らず、外部 URL への通信を起こさない。
 - **HTML は解釈しない。** パイプラインの `DisableHtml()` で HTML として扱わせないうえ、`HtmlBlock` / `HtmlInline` が来ても文字として出す（二重化）。
 - パイプラインは `UsePipeTables` / `UseAutoLinks` / `DisableHtml` の 3 つだけを明示する。`UseAdvancedExtensions` のような一括有効化は、属性の付与・数式・図など審査していない構文まで一度に開くので使わない。
-- ガード：`ChatMarkdownRendererTests`（http / https 以外のリンクは押せない普通の文字になる・開いてよいリンク先は絶対 URL でホストを持つものだけ・リンクは押せて NavigateUri が null でツールチップに実際の URL を出す・画像は代替テキストだけ・インラインとブロックの HTML は文字として出す）・`ProcessLaunchTests`（OS との境界のエンジンの起動の表の行 `external-chat-link-*`：http / https 以外の URL・ユーザー情報を持つ URL は渡されてもシェルへ渡さない・開けなかったときは URL と原因を添えてエラーで知らせる）。mutation 実証済み。
+- ガード：`ChatMarkdownRendererTests`（Markdown 表示の表＝要素〔インライン・参照・山括弧・拡張の自動リンク・画像・リンクの中の画像・HTML 2 種・入れ子・URL の規則の直接の呼び出し〕× 入力の形〔許す・断るスキーム〔data・vbscript・ftp・tel などを含む〕・大文字小文字・空白と制御文字・エスケープ・空・相対と UNC・ユーザー情報・国際化ドメイン名／HTML の形／深さの形〕。どの行でも、組み立てただけでは開かない・Hyperlink の NavigateUri は null・ツールチップと押して opener へ渡る URL が http / https でホストを持ちユーザー情報が無い・画像と UI の入れ物を作らないことを組が見張る。行 `inline-*`・`angle-*`・`bare-*`・`image-*`・`policy-*`・`html-*`）・`ProcessLaunchTests`（OS との境界のエンジンの起動の表の行 `external-chat-link-*`：http / https 以外の URL・ユーザー情報を持つ URL は渡されてもシェルへ渡さない・開けなかったときは URL と原因を添えてエラーで知らせる）。mutation 実証済み。
 - 外部のプロセス・URL を開く入口の規則は `src/QuickER.Platform/CLAUDE.md`「外部の起動」を参照する。
 
 ## 組み立ての失敗はテキスト表示へ
@@ -27,7 +27,7 @@ AI の回答は外部の入力なので、組み立て（`ChatMarkdownRenderer`�
 - 表示部品 `AssistantMessageView` は `Render` の例外をすべて受け止めてテキスト表示へ落とし、失敗した本文を覚えて同じ本文で組み立てを繰り返さない。依存関係プロパティの変更コールバックから例外を漏らすと、アプリの未処理例外になる。
 - 隣り合う飾りの無い Run は `MergePlainRuns` で 1 つにまとめる。対にならない記号は Markdig が 1 文字ずつ別の節点にし、リンクの中に短い Run が数千並ぶと WPF のレイアウトが数十秒から数分かかる（`[` の 10,000 段で 200 秒超が 2.3 秒に）。レイアウトの遅さは例外にならないので、表示部品の捕捉では救えない。
 - 帰結：連続した対にならない `[` が 30 個前後を超える回答は、Markdig が節点を入れ子にするため深さの上限に掛かり、テキスト表示になる。
-- ガード：`AssistantMessageViewTests`（入れ子が深すぎる回答は落ちずにテキスト表示になる＝強調・引用・リストの 3 通り。強調の入れ子が上限を超える回答は組み立てずに断る）・`ChatMarkdownRendererTests`（対にならない記号が続く回答は飾りの無い文字を 1 つの Run にまとめる）。mutation 実証済み。
+- ガード：`ChatMarkdownRendererTests`（行 `depth-*`＝強調・引用・リストの 3 通りで、深さちょうど 32 は組み立てて Markdown 表示・33 は組み立てずに断り〔`InvalidOperationException`〕その吹き出しだけ本文そのままのテキスト表示・200 段も落ちずにテキスト表示・トグルを往復しても組み立てを繰り返さない。行の本文が宣言した深さを持つことも確かめる。行 `display-unmatched-brackets-*`＝対にならない記号が続く回答は飾りの無い文字を 1 つの Run にまとめる）。mutation 実証済み。
 
 ## 吹き出しの幅
 
@@ -45,7 +45,8 @@ AI の回答は外部の入力なので、組み立て（`ChatMarkdownRenderer`�
 - `ApiKeyStore.Load` は「無い／読めた／読めない」を分けて返し（`SavedApiKey`・`SavedApiKeyStatus`。接続パスワードの `SavedPassword` と同じ形）、読めないキーを空の値で上書きも削除もしない。
 - 読めないもの（別のユーザー・別の PC で暗号化したもの・壊れたファイル・一時的なロック）を空として返すと、保存のオフや接続設定の保存が暗号ファイルを消す。
 - 接続設定の VM（`ChatConnectionSettingsViewModel`）は、読めないときキー欄の下に注記を出し（`IsSavedApiKeyUnreadable`）、新しいキーが入力されるまで保存の呼び出しをしない。
-- ガード：`ApiKeyStoreTests.Load_UndecryptableFile_IsUnreadable`・`ConnectionSettingsTests`（行 `failure-unreadable-api-key-is-neither-overwritten-nor-deleted`。どの行でも、読めない API キーを新しいキーの入力が無いまま保存の関数へ渡さないことを組が見張る＝不変条件 1）。mutation 実証済み。
+- ストアの `Save` に空文字を渡すと、読めるかに依らずファイルを消す（ストアの契約は「空なら消す」）。読めないキーを守るのは VM の入口。
+- ガード：`ApiKeyStoreTests`（保存した API キーの表＝入口〔読む・書く・消す・VM の保存のオフ・オフからオン〕× 暗号ファイルの状態〔無い・フォルダが無い・正常・壊れている・別の鍵の暗号・ロック〕の全組。VM の入口は実のストアへつなぐ。どの行でも、読めない状態のファイルを読む入口と保存のオン／オフが変えないことを組が見張る。行 `load-*-is-unreadable-and-keeps-file`・`toggle-off-*-keeps-unreadable-file`）・`ConnectionSettingsTests`（行 `failure-unreadable-api-key-is-neither-overwritten-nor-deleted`。どの行でも、読めない API キーを新しいキーの入力が無いまま保存の関数へ渡さないことを組が見張る＝不変条件 1）。mutation 実証済み。
 
 ## エンジンの破棄の作法
 

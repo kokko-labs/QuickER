@@ -54,5 +54,25 @@ internal static class TableRegistry
             ],
             [Templates + "_01_ValueObjects.scriban", "src/QuickER.Runtime"]
         ),
+        new(
+            "ForeignKeyReferentialActions",
+            "参照アクションと文字列表現の相互変換の表（SQL 表記の往復・表記ゆれの読み取り）",
+            ["tests/QuickER.Tests/Model/ForeignKeyReferentialActionTests.cs"],
+            ["src/QuickER.Model/ForeignKeyReferentialAction.cs"]
+        ),
+        new(
+            "Converters",
+            "XAML の表示の値のコンバーターの表（反転のパラメーター・件数のしきい値・null の扱い。使われていないアプリ本体の BoolToVisibilityConverter は入れない）",
+            [
+                "tests/QuickER.Tests/Gui/Converters/ConverterRows.cs",
+                "tests/QuickER.Tests/Gui/Converters/ConverterTests.cs",
+            ],
+            [
+                "src/QuickER.Gui/Converters/CountToVisibilityConverter.cs",
+                "src/QuickER.Gui/Converters/NullToBooleanConverter.cs",
+                "src/QuickER.Gui/Converters/NullToVisibilityConverter.cs",
+                "src/QuickER.AI.UI/BoolToVisibilityConverter.cs",
+            ]
+        ),
     ];
 }

@@ -79,6 +79,7 @@ internal static class ToolScenarioDimensions
             ],
             [
                 "src/QuickER.Gui/Services/ErDiagramDynamicTools.cs",
+                "src/QuickER.Mcp/ErDiagramToolCatalog.cs",
                 "src/QuickER.Mcp.Tools",
                 "src/QuickER.AI.Chat/ErDiagramHostChatAdapter.cs",
             ]
