@@ -107,13 +107,23 @@ C# リテラルのエスケープの規則（`GeneratedLiteralText`）は `src/Q
 - 列を削除しても（列の追加の Undo で列が外れても）、名前付きクエリは書き換えない。削除した列を参照するクエリを名指しして知らせる
   - 消さない理由：きれいに消せるのは並び順だけ。パラメータを消すとメソッドの引数が変わって条件・生 SQL の `@名前` が宙に浮き、射影フィールドを消すと DTO の形が変わり、条件から列を外すと意味が変わる（AND の片側を消すと結果が広がる）。どれも利用者の契約を黙って変える。名前の変更の追従が「条件式で読める新名のときだけ書き換える」のと同じ考え方
   - 書き換えないので、削除を Undo すれば列が同じ Id・同じ名前で戻り、参照もそのまま生き返る
-  - 切れた参照は、クエリ定義ダイアログが名指しして OK を止め（条件のエラーの文もクエリ名を出す）、生成は Id の参照なら警告してそのクエリだけ飛ばし、条件の列名ならエラーにする
+  - 切れた参照は、クエリ定義ダイアログが名指しして OK を止め（条件のエラーの文もクエリ名を出す）、生成は Id の参照でも条件の列名でも警告してそのクエリだけ飛ばす（条件は下の「条件の検証の失敗はそのクエリだけ飛ばす」）
 - 判定の正本は `QueryColumnReferences`（このフォルダ）
   - `Find`：そのテーブルのクエリの、列を参照する箇所（パラメータ・並び順・射影フィールドは列の Id、条件は列名）。ほかのテーブルのクエリは同じ名前の列があっても数えない。条件は実装方式が簡易 DSL のときだけ数える（生 SQL・手動実装では条件を使わず、切れても検証も生成も止まらないので、数えると知らせすぎになる）
   - `FindInCondition`：条件の中の列名の読み方（`QueryConditionParser.Parse` の列参照を `SchemaNames.AreSame` で照合。パラメータ・文字列リテラルの同じ綴りは数えない。パース不能は null）。**名前の変更の追従 `QueryConditionRenamer` も同じ関数を呼ぶ**（写しを作ると、追従が書き換える参照と削除で名指しする参照が食い違う）
   - `DescribeRemovedColumn`：ツールの応答に足す英語の注意文。MCP の `DocumentErDiagramToolHost` と内蔵チャットの `ErDiagramDynamicTools` が同じ文を返す
 - GUI の画面は `MainViewModel.OnEntityColumnsChangedForQueryReferences`（列のコレクションの購読）がステータスバーで名指しする（→ `src/QuickER.Gui/ViewModels/CLAUDE.md`「列の削除とクエリの参照の通知」）
 - ガード：`ToolScenarioTests`（行 `column-remove-referenced-by-queries-names-each-query`・`column-remove-condition-reference-is-case-insensitive`・`column-remove-not-referenced-keeps-previous-message`。両ホスト）・`UndoOperationTests`（行 `column-remove-referenced-by-query-warns-and-undo-revives-references`・`column-add-undo-referenced-by-query-warns`・`column-remove-not-referenced-does-not-warn`・`column-query-references-table-removal-does-not-warn`）・`QueryDefinitionDialogViewModelTests.Condition_ValidatesImmediately`（条件のエラーの文のクエリ名）・`QueryConditionRenamerTests`（追従の大小無視。共有の照合を大小を区別する形へ壊すと追従のテストも赤）。mutation 実証済み（条件の照合・大小無視・簡易 DSL の分岐・MCP 側の注意文だけ・GUI の購読・参照が無くても知らせる・ダイアログのクエリ名、の各回で赤）
+
+## 条件の検証の失敗はそのクエリだけ飛ばす
+
+- 簡易 DSL の条件が `QueryConditionParser.ParseAndValidate` に失敗したら、診断ごとに Warning（`CodeGen_Query_ConditionInvalid`。クエリ名とパーサの診断の文）を出し、そのクエリだけ飛ばす（`PlanQueryMethod` の `hasError`。射影の DTO の型名も返す）。ほかのクエリと生成全体は止めない
+  - 対象はパーサの診断すべて（構文・未知の列とパラメータ・IN とリストの整合・NULL 非許容の列への IS NULL）。どれもそのクエリの中で完結する。線引きは型整合の違反（`QueryConditionTypeChecker`）・生 SQL の未宣言パラメータ・Id の参照の切れ（`CollectValidQueries`）と同じ「そのクエリの中だけで完結する問題はそのクエリだけ飛ばす」
+  - Error のまま残すのは `QueryDefinitionRules` の違反（メソッド名・戻り形・パラメータ名・射影の型名）と型トークンの解決の失敗。ほかのクエリ・メンバーとの名前の重なりや出力の形に関わる
+  - Error にすると、列 1 本の削除や列を NOT NULL にしただけで生成全体が止まる（CLI は終了コード 1 で何も書かず、GUI はエラーダイアログ）。診断の種類で Warning と Error を振り分ける一覧は作らない（パーサに診断を足すと黙って片側へ倒れる）
+  - **`hasError` は必ず立てる**。立てずに続けると条件の無いメソッド（全件取得）が出て、壊れた条件が黙って広いデータを返す
+- 影響：CLI の `generate` / `scaffold` は警告を標準エラーへ出して終了コード 0、GUI の生成ダイアログは書き出して完了の詳細に警告を並べる、MCP の `generate_csharp` は警告つきで成功する
+- ガード：`CodegenCaseTests` の行 `diag-query-condition-invalid-warns-and-skips-only-that-query`（削除した列の名前・構文エラー・未宣言のパラメータ・条件の壊れた射影を名指しする Warning・メソッドが無い・対照のクエリと、飛ばした射影と同じ DTO 名の正当な射影はコンパイルできる）・`diag-query-null-check-on-non-nullable-column-warns-and-skips`（Warning がちょうど 1 件・飛ばしたメソッドが無い）・`diag-query-invalid-queries-are-errors`（規則の違反は Error のまま）。mutation 実証済み（Error に戻す・`hasError` を立てない＝全件取得のメソッドが出る・警告からクエリ名を外す・DTO の型名を返さない、の各回で赤）
 
 ## 検証
 

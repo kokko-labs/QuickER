@@ -528,6 +528,10 @@ QuickER warns once per query, naming the query and the table.
 A setup that generates no repository at all (no QuickER Repository, EF Core, or in-memory repository) generates no named query either.
 It warns about neither the tables nor the queries, since the setup has chosen to have no repositories.
 
+A query whose simple DSL condition is invalid is skipped with a warning that names it, and the rest of the code is generated.
+That covers a syntax error, a column or parameter that does not exist (such as a column deleted after the query was written), and an `IS NULL` on a column that does not allow NULL.
+The query definition dialog and `set_query` check the condition before saving, so this happens when the diagram changes later or the file is edited by hand.
+
 In a DSL `LIKE` literal, only a leading or trailing `%` is read as a pattern (a `%` or `_` in the middle is a validation error).
 Character classes such as SQL Server's `[...]` get no special treatment: they match as strings that contain the brackets themselves.
 Write a raw SQL query when you need pattern syntax.
