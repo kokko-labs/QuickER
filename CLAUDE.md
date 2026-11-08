@@ -152,7 +152,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 
 ### 図ファイル
 - **Version 1 のまま足すフィールドは、読み手が欠落を無害に扱える形に限り、無害でなければ Version を上げる**：古い版で保存すると新しいフィールドが消える。ガードなし（設計判断）。→ `src/QuickER.Document/CLAUDE.md`「図ファイル形式の前方互換」
-- **Id 重複と必須の文字列の欠落の検査は `JsonStorageService.TryLoad` の 1 箇所で拒否だけを行い、修復しない**：呼び出し側に散らすと起動時の復元が検証の外に残り、最悪経路でクラッシュする。ガード：`DocumentFormatTests`（行 `tryload-duplicate-*`・`tryload-null-*`）・`DocumentFileTests`（乱数の手の列・不変条件 (5)）。→ `src/QuickER.Document/CLAUDE.md`「図ファイルの読込検査」
+- **Id 重複と必須の文字列の欠落（キーが無いか明示の null）の検査は `JsonStorageService.TryLoad` の 1 箇所で拒否だけを行い、修復しない**：呼び出し側に散らすと起動時の復元が検証の外に残り、最悪経路でクラッシュする。キーの欠落を既定値（`NewTable`・`int`）で埋めると、上書き保存で元の内容が失われる。ガード：`DocumentFormatTests`（行 `tryload-duplicate-*`・`tryload-null-*`・`tryload-missing-*`）・`DocumentFileTests`（乱数の手の列・不変条件 (5)）。→ `src/QuickER.Document/CLAUDE.md`「図ファイルの読込検査」
 
 ### 取込
 

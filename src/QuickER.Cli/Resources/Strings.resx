@@ -251,7 +251,7 @@
     <value>The schema file uses the same identifier for more than one table, column or relationship: {0} ({1}). Edit the JSON by hand to give each one its own identifier.</value>
   </data>
   <data name="Cli_SchemaMissingRequiredText" xml:space="preserve">
-    <value>The schema file leaves a required name or type empty (null): {0} ({1}). Edit the JSON by hand to fill it in.</value>
+    <value>A required name or type is missing or null in the schema file: {0} ({1}). Edit the JSON by hand to fill it in.</value>
   </data>
   <data name="Cli_GenerationAborted" xml:space="preserve">
     <value>Aborted due to a generation error.</value>

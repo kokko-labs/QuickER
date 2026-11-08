@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using QuickER.Model;
 using QuickER.Platform;
 
@@ -38,7 +39,7 @@ public enum DocumentLoadError
     DuplicateId,
 
     /// <summary>
-    /// 保存形式としては妥当だが、名前・型のような<b>推測で埋められない必須の文字列</b>に
+    /// 保存形式としては妥当だが、名前・型のような<b>推測で埋められない必須の文字列</b>のキーが無いか、
     /// 明示的な <c>null</c> が書かれており図として扱えなかった
     /// </summary>
     /// <remarks>
@@ -55,19 +56,66 @@ public enum DocumentLoadError
 /// </remarks>
 public static class JsonStorageService
 {
+    /// <summary>
+    /// 逆直列化で、推測で埋められない必須の文字列を <c>null</c> にしたインスタンスを作る型ごとの作り方
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 対象は <see cref="FindMissingRequiredText"/> が見る 6 つ＝テーブル名・列名・列の型・クエリ名・
+    /// パラメータ名・射影フィールド名で、型は 5 つ。モデルの初期値（<c>NewTable</c>・<c>int</c> など）は
+    /// GUI・ツールの新規作成のための値なので、キーの無い図ファイルにそれを当てると、壊れた図が
+    /// それらしい名前・型のまま読めてしまい、上書き保存で元の内容が戻らなくなる。
+    /// ここで <c>null</c> から始めれば、キーが無いときも明示の <c>null</c> と同じ値が残り、
+    /// <see cref="TryLoad"/> の <see cref="FindMissingRequiredText"/> が同じ分岐で場所を名指しして断る
+    /// （検査の置き場は 1 箇所のまま・修復しない）。
+    /// </para>
+    /// <para>
+    /// 差し替えるのは作り方だけで、ほかのプロパティの初期値（Id・コレクション・説明など）は
+    /// コンストラクタのとおり。直列化はこの作り方を使わないので、書き出す内容は変わらない。
+    /// 0.1.0 以降の版はこれらのキーを常に書く（初期値が非 null で、<see cref="JsonIgnoreCondition.WhenWritingNull"/>
+    /// で消えるのはメモリ上が <c>null</c> のときだけ）ので、キーが無いのは手編集の図だけ。
+    /// </para>
+    /// </remarks>
+    private static readonly Dictionary<Type, Func<object>> CreateWithRequiredTextUnset = new()
+    {
+        [typeof(Entity)] = () => new Entity { TableName = null! },
+        [typeof(Column)] = () => new Column { Name = null!, DataType = null! },
+        [typeof(QueryDefinition)] = () => new QueryDefinition { Name = null! },
+        [typeof(QueryParameter)] = () => new QueryParameter { Name = null! },
+        [typeof(ProjectionField)] = () => new ProjectionField { Name = null! },
+    };
+
     /// <summary>可読性重視のシリアライズ設定（インデント付与・列挙体は名前で出力・null プロパティは省略）</summary>
     /// <remarks>
     /// null の省略（<see cref="JsonIgnoreCondition.WhenWritingNull"/>）は「値なし」をキーごと出さない
-    /// 図ファイルの正準形。読み込み側はキー欠落をプロパティ既定値で吸収するため相互に可換で、
-    /// 古い形式（null を明記した図ファイル）もそのまま読める（<see cref="Normalize"/> が
-    /// 非 null 契約のプロパティに書かれた null を既定値へ修復する）。
+    /// 図ファイルの正準形。読み込み側は、<b>推測で埋められない必須の文字列を除き</b>、キー欠落を
+    /// プロパティ既定値で吸収するため相互に可換で、古い形式（null を明記した図ファイル）もそのまま読める
+    /// （<see cref="Normalize"/> が非 null 契約のプロパティに書かれた null を既定値へ修復する）。
+    /// 必須の文字列はキーが無ければ <c>null</c> のまま残し（<see cref="CreateWithRequiredTextUnset"/>）、
+    /// 明示の <c>null</c> と同じく <see cref="TryLoad"/> が断る。
     /// </remarks>
     private static readonly JsonSerializerOptions Options = new()
     {
         WriteIndented = true,
         Converters = { new JsonStringEnumConverter() },
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver
+        {
+            Modifiers = { LeaveRequiredTextUnset },
+        },
     };
+
+    /// <summary>
+    /// 必須の文字列を持つ型の作り方を <see cref="CreateWithRequiredTextUnset"/> へ差し替える
+    /// （<see cref="Options"/> の型情報の修飾子）
+    /// </summary>
+    private static void LeaveRequiredTextUnset(JsonTypeInfo typeInfo)
+    {
+        if (CreateWithRequiredTextUnset.TryGetValue(typeInfo.Type, out var create))
+        {
+            typeInfo.CreateObject = create;
+        }
+    }
 
     /// <summary>保存文書をアトミックに（書き込み途中の中断で既存ファイルを壊さずに）保存する</summary>
     /// <remarks>
@@ -127,7 +175,12 @@ public static class JsonStorageService
     /// 本メソッドは欠落キーを既定値で補うため、ER 図と無関係な JSON も「空図」として読める。
     /// ユーザーが指すファイルを読む経路（＝無関係な JSON を渡され得る経路）は、形式検証込みの
     /// <see cref="TryLoad"/> を使うこと。素の <see cref="Load"/> は「自分が書いたファイルを読み戻す」
-    /// 用途（自動保存の復元・テストのフィクスチャ）に用いる。
+    /// 用途（テストのフィクスチャ）に用いる。
+    /// </para>
+    /// <para>
+    /// 検査はしないので、必須の文字列（<see cref="FindMissingRequiredText"/> の 6 つ）は、キーが無くても
+    /// 明示の <c>null</c> でも <c>null</c> のまま返す（<see cref="TryLoad"/> と同じ <see cref="Options"/> で読む＝
+    /// 読込結果は一致し、断るかどうかだけが違う）。
     /// </para>
     /// </remarks>
     /// <param name="path">読み込むファイルパス</param>
@@ -137,7 +190,7 @@ public static class JsonStorageService
     /// <summary>ER 図の保存形式として妥当か検証したうえでファイルから保存文書を読み込む</summary>
     /// <remarks>
     /// 検証は「読み取り → JSON 解析 → ルートが JSON オブジェクトか → ルートのキー重複 →
-    /// <c>Version</c>・<c>Schema</c> を持つか → 逆直列化 → 版番号 → 必須文字列の明示 <c>null</c> → Id の重複」の順で、
+    /// <c>Version</c>・<c>Schema</c> を持つか → 逆直列化 → 版番号 → 必須文字列の欠落（キーが無いか明示の <c>null</c>） → Id の重複」の順で、
     /// <see cref="JsonStorageService"/> の読込仕様に合わせ
     /// キー名の大文字小文字は区別する。無関係な JSON（例 <c>package.json</c>）を「空図」として読み込み、
     /// 誤解釈・上書きするのを防ぐ。
@@ -272,8 +325,9 @@ public static class JsonStorageService
             return false;
         }
 
-        // 名前・型の明示 null は修復せず拒否する（理由は FindMissingRequiredText）。
-        // Id の重複より先に見るのは、名前が null のままでは重複の説明が場所を名指しできないため
+        // 名前・型の欠落（キーが無いか明示の null。どちらも逆直列化の後は null）は修復せず拒否する
+        // （理由は FindMissingRequiredText）。Id の重複より先に見るのは、名前が null のままでは
+        // 重複の説明が場所を名指しできないため
         if (FindMissingRequiredText(loaded.Schema) is { } missing)
         {
             error = DocumentLoadError.MissingRequiredText;
@@ -294,15 +348,20 @@ public static class JsonStorageService
     }
 
     /// <summary>
-    /// 名前・型のような「推測で埋められない必須の文字列」に明示的な <c>null</c> が書かれていないか調べ、
+    /// 名前・型のような「推測で埋められない必須の文字列」が欠けていないか（キーが無いか明示的な <c>null</c>）調べ、
     /// 最初に見つかった箇所の説明を返す（無ければ null）
     /// </summary>
     /// <remarks>
     /// <para>
     /// <b>修復はしない。</b>これらのプロパティはモデル側が非 NULL 許容で宣言しており、アプリ側に
-    /// <c>null</c> を書く経路は無い（GUI・MCP ツール・各種取込・C# リバースはいずれも文字列を組み立てて
-    /// 渡し、NULL 許容の綻びはビルドが警告＝エラーとして止める）。起こるのは JSON の手編集だけなので、
-    /// 既定値で埋めて意味を推測するより、どこが <c>null</c> かを名指しして読込を断るほうが直せる。
+    /// <c>null</c> を書く経路も、キーを書かない経路も無い（GUI・MCP ツール・各種取込・C# リバースはいずれも
+    /// 文字列を組み立てて渡し、NULL 許容の綻びはビルドが警告＝エラーとして止める）。起こるのは JSON の手編集だけなので、
+    /// 既定値で埋めて意味を推測するより、どこが欠けているかを名指しして読込を断るほうが直せる。
+    /// </para>
+    /// <para>
+    /// キーの欠落と明示の <c>null</c> は、逆直列化の後はどちらも <c>null</c> になる
+    /// （<see cref="CreateWithRequiredTextUnset"/> が <c>null</c> から始めるため）。ここは 1 つの分岐で両方を見て、
+    /// 文言も区別しない（<c>missing or null</c>）。
     /// </para>
     /// <para>
     /// 対象は<b>推測で埋めると図の意味が変わるもの</b>だけ＝テーブル名・列名・<b>列の型</b>・
@@ -325,7 +384,7 @@ public static class JsonStorageService
 
             if (entity.TableName is null)
             {
-                return $"\"TableName\" is null for entity #{entityIndex + 1}.";
+                return $"\"TableName\" is missing or null for entity #{entityIndex + 1}.";
             }
 
             for (var columnIndex = 0; columnIndex < entity.Columns.Count; columnIndex++)
@@ -334,12 +393,12 @@ public static class JsonStorageService
 
                 if (column.Name is null)
                 {
-                    return $"\"Name\" is null for column #{columnIndex + 1} of table '{entity.TableName}'.";
+                    return $"\"Name\" is missing or null for column #{columnIndex + 1} of table '{entity.TableName}'.";
                 }
 
                 if (column.DataType is null)
                 {
-                    return $"\"DataType\" is null for column '{column.Name}' of table '{entity.TableName}'.";
+                    return $"\"DataType\" is missing or null for column '{column.Name}' of table '{entity.TableName}'.";
                 }
             }
         }
@@ -350,14 +409,14 @@ public static class JsonStorageService
 
             if (query.Name is null)
             {
-                return $"\"Name\" is null for query #{queryIndex + 1}.";
+                return $"\"Name\" is missing or null for query #{queryIndex + 1}.";
             }
 
             for (var index = 0; index < query.Parameters.Count; index++)
             {
                 if (query.Parameters[index].Name is null)
                 {
-                    return $"\"Name\" is null for parameter #{index + 1} of query '{query.Name}'.";
+                    return $"\"Name\" is missing or null for parameter #{index + 1} of query '{query.Name}'.";
                 }
             }
 
@@ -365,7 +424,7 @@ public static class JsonStorageService
             {
                 if (query.Fields[index].Name is null)
                 {
-                    return $"\"Name\" is null for projection field #{index + 1} of query '{query.Name}'.";
+                    return $"\"Name\" is missing or null for projection field #{index + 1} of query '{query.Name}'.";
                 }
             }
         }
@@ -586,7 +645,7 @@ public static class JsonStorageService
     /// <para>
     /// <b>ここで修復するのは「埋めても図の意味が変わらないもの」だけ</b>＝コレクション（空へ）・
     /// 説明とメモ（空文字へ）・対象 DBMS（既定の方言へ）。名前・型のような<b>推測で埋めると
-    /// 図の意味が変わるもの</b>は修復せず、<see cref="TryLoad"/> の
+    /// 図の意味が変わるもの</b>（キーが無いときも <c>null</c> のまま届く）には触れず、<see cref="TryLoad"/> の
     /// <see cref="FindMissingRequiredText"/> が場所を名指しして拒否する。
     /// 図として妥当かどうか（無関係な JSON でないか）の判定も <see cref="TryLoad"/> が担う。
     /// </para>
