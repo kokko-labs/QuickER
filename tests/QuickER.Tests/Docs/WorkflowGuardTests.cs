@@ -403,10 +403,7 @@ public sealed class WorkflowGuardTests
             .Matches(workflow, @"(?m)^\s+- cron: ""(?<cron>[^""]+)""\s*$")
             .Select(match => match.Groups["cron"].Value)
             .Should()
-            .Equal(
-                [MutationNightlyCron, MutationWeeklyCron],
-                "毎晩の Model と週 1 回の Provider・CodeGen"
-            );
+            .Equal([MutationNightlyCron, MutationWeeklyCron], "毎晩の Model と週 1 回の Provider");
     }
 
     /// <summary>変異テストのワークフローの GITHUB_TOKEN は読み取り専用で、同時実行の組は夜間のワークフローと別・取り消さない</summary>
@@ -480,6 +477,23 @@ public sealed class WorkflowGuardTests
         workflow
             .Should()
             .NotContain("dotnet tool install", "Stryker の版の正本は .config/dotnet-tools.json");
+
+        // 起動スクリプトの範囲ごとの表の変数は、どのワークフローにも書かない（普段の CI・夜間で Docker を飛ばしたり種を減らしたりしない。
+        // 厳格モードの QUICKER_REQUIRE_DOCKER は CI・夜間の ubuntu のジョブが立てるので、ここでは見ない）
+        foreach (
+            var file in Directory.EnumerateFiles(
+                Path.Combine(Root, ".github", "workflows"),
+                "*.yml"
+            )
+        )
+        {
+            File.ReadAllText(file)
+                .Should()
+                .NotContainAny(
+                    MutationScriptVariables.Where(name => name != "QUICKER_REQUIRE_DOCKER"),
+                    $"{Path.GetFileName(file)} は変異テストの起動スクリプトだけが立てる変数を書かない"
+                );
+        }
         workflow
             .Should()
             .NotContain(
@@ -518,22 +532,39 @@ public sealed class WorkflowGuardTests
     }
 
     /// <summary>
-    /// 起動スクリプトは、テストだけのソリューションの ../ を外した写しをルートに作ってから、ルートで Stryker を範囲の設定・写し・
-    /// 並列度・ログつきで呼び、成功でも失敗でも写しを消し、Stryker の失敗を終了コードで伝える。写しの名前は .gitignore にある
+    /// 起動スクリプトは、範囲のテストだけのソリューションの ../ を外した写しをルートに作ってから、ルートで Stryker を範囲の設定・写し・
+    /// 並列度・ログつきで呼び、成功でも失敗でも写しを消し、Stryker の失敗を終了コードで伝える。写しの名前は .gitignore にある。
+    /// 範囲ごとの表の環境変数は Stryker を呼ぶ間だけ立て（外し）、終わったら元へ戻し、実行の環境を結果のフォルダに書く
     /// </summary>
     /// <remarks>
     /// Stryker 5 は ../ で始まるパスのソリューションではテストを 0 件と数えて止まる。写しが残るとルートで引数なしの
     /// dotnet build / dotnet test がソリューションが 2 つで止まる。GitHub Actions の pwsh はネイティブコマンドの非 0 で止まらない。
-    /// 偽の dotnet は呼ばれたときの作業フォルダ・引数・写しの中身を記録し、指定の終了コードで終わる。
+    /// 偽の dotnet は呼ばれたときの作業フォルダ・引数・写しの中身・環境変数を記録し、指定の終了コードで終わる。
+    /// 呼び出し元は厳格モード（QUICKER_REQUIRE_DOCKER=1）と同期計画の種の数（7）を立てておき、provider-sync-planner の行では
+    /// Stryker から厳格モードが見えず（QUICKER_SKIP_DOCKER と両立しない）、種の数が表の値で上書きされ、終わった後は元の値に戻ることを見る。
+    /// 期待の値はスクリプトの表から読まずにここへ書く（表の値を写すと、表を壊しても緑のまま）。
     /// </remarks>
     [Theory(
-        DisplayName = "run-mutation.ps1 は写しを作ってからルートで Stryker を呼び、成否に依らず写しを消し、失敗を伝える"
+        DisplayName = "run-mutation.ps1 は範囲のソリューションの写しを作ってからルートで Stryker を呼び、範囲の環境変数をその間だけ立て、成否に依らず写しを消して環境を戻し、失敗を伝える"
     )]
-    [InlineData(0)]
-    [InlineData(1)]
-    public void MutationScript_RunsStrykerOnRootCopyAndRemovesIt(int strykerExitCode)
+    [InlineData("model", 0)]
+    [InlineData("model", 1)]
+    [InlineData("provider-sync-planner", 0)]
+    [InlineData("provider-sync-planner", 1)]
+    public void MutationScript_RunsStrykerOnRootCopyAndRemovesIt(string target, int strykerExitCode)
     {
-        var run = RunMutationScript("model", strykerExitCode);
+        var (solution, environmentAtStryker) = target switch
+        {
+            "provider-sync-planner" => (
+                "QuickER.TestsWithIntegration.slnx",
+                "QUICKER_REQUIRE_DOCKER= QUICKER_SKIP_DOCKER=1 QUICKER_SYNC_FUZZ_SEEDS=100 QUICKER_SYNC_CAPNET_SEEDS=500"
+            ),
+            _ => (
+                "QuickER.TestsOnly.slnx",
+                "QUICKER_REQUIRE_DOCKER=1 QUICKER_SKIP_DOCKER= QUICKER_SYNC_FUZZ_SEEDS=7 QUICKER_SYNC_CAPNET_SEEDS="
+            ),
+        };
+        var run = RunMutationScript(target, strykerExitCode);
 
         if (strykerExitCode == 0)
         {
@@ -548,13 +579,13 @@ public sealed class WorkflowGuardTests
             .Be(run.RepositoryRoot, "Stryker はルートを作業フォルダにして呼ぶ\n" + run.Output);
         run.Arguments.Should()
             .Be(
-                $"stryker -f stryker/model.json -s {MutationSolutionCopy} -O {run.OutputDirectory} -c 3 --skip-version-check -L",
+                $"stryker -f stryker/{target}.json -s {MutationSolutionCopy} -O {run.OutputDirectory} -c 3 --skip-version-check -L",
                 "範囲の設定・ルートの写し・結果のフォルダ（絶対パス）・並列度・ログのファイルを渡す"
             );
         run.CopiedProjects.Should()
             .Equal(
-                StrykerSolutionProjects().Select(path => path[3..]),
-                "写しは正本の各パスから先頭の ../ を外したもの（ルートから同じプロジェクトを指す）"
+                StrykerSolutionProjects(solution).Select(path => path[3..]),
+                $"写しは範囲のソリューション（{solution}）の各パスから先頭の ../ を外したもの（ルートから同じプロジェクトを指す）"
             );
         run.CopiedProjects.Should()
             .OnlyContain(
@@ -565,6 +596,43 @@ public sealed class WorkflowGuardTests
         File.ReadAllLines(Path.Combine(Root, ".gitignore"))
             .Should()
             .Contain($"/{MutationSolutionCopy}", "写しは誤ってコミットされない");
+        run.EnvironmentAtStryker.Should()
+            .Be(
+                environmentAtStryker,
+                "範囲の表の変数を Stryker を呼ぶ間だけ立て、外す\n" + run.Output
+            );
+        run.EnvironmentAfter.Should()
+            .Be(MutationScriptParentEnvironment, "成否に依らず、呼び出し元の環境を元に戻す");
+
+        using var record = System.Text.Json.JsonDocument.Parse(
+            run.RunEnvironmentJson
+                ?? throw new Xunit.Sdk.XunitException("run-environment.json が無い")
+        );
+        var root = record.RootElement;
+
+        root.GetProperty("target").GetString().Should().Be(target);
+        root.GetProperty("solution").GetString().Should().Be($"stryker/{solution}");
+        string.Join(
+                ' ',
+                root.GetProperty("set")
+                    .EnumerateObject()
+                    .Select(variable => $"{variable.Name}={variable.Value.GetString()}")
+            )
+            .Should()
+            .Be(
+                target == "provider-sync-planner"
+                    ? "QUICKER_SKIP_DOCKER=1 QUICKER_SYNC_FUZZ_SEEDS=100 QUICKER_SYNC_CAPNET_SEEDS=500"
+                    : "",
+                "実行の環境に立てた変数を書く"
+            );
+        root.GetProperty("removed")
+            .EnumerateArray()
+            .Select(variable => variable.GetString())
+            .Should()
+            .Equal(
+                target == "provider-sync-planner" ? ["QUICKER_REQUIRE_DOCKER"] : [],
+                "実行の環境に外した変数を書く"
+            );
     }
 
     /// <summary>起動スクリプトは、無い範囲を Stryker を呼ぶ前に断り、写しも作らない</summary>
@@ -576,6 +644,7 @@ public sealed class WorkflowGuardTests
         run.ExitCode.Should().NotBe(0, run.Output);
         run.Arguments.Should().BeEmpty("無い範囲では Stryker を呼ばない");
         run.CopyLeftBehind.Should().BeFalse();
+        run.EnvironmentAfter.Should().Be(MutationScriptParentEnvironment, "環境を変えない");
     }
 
     /// <summary>
@@ -808,8 +877,21 @@ public sealed class WorkflowGuardTests
     private const string MutationSolutionCopy = "QuickER.TestsOnly.stryker.slnx";
 
     /// <summary>Stryker のテストだけのソリューション（正本）のプロジェクトのパスの並び</summary>
-    private static IReadOnlyList<string> StrykerSolutionProjects() =>
-        ProjectPathsOf(Path.Combine(Root, "stryker", "QuickER.TestsOnly.slnx"));
+    private static IReadOnlyList<string> StrykerSolutionProjects(string solution) =>
+        ProjectPathsOf(Path.Combine(Root, "stryker", solution));
+
+    /// <summary>起動スクリプトの範囲ごとの表が立てる・外す環境変数（偽の dotnet と呼び出し元が記録する順）</summary>
+    private static readonly string[] MutationScriptVariables =
+    [
+        "QUICKER_REQUIRE_DOCKER",
+        "QUICKER_SKIP_DOCKER",
+        "QUICKER_SYNC_FUZZ_SEEDS",
+        "QUICKER_SYNC_CAPNET_SEEDS",
+    ];
+
+    /// <summary>起動スクリプトを呼ぶ前に呼び出し元が立てておく環境（厳格モードと種の数。ほかは立てない）</summary>
+    private const string MutationScriptParentEnvironment =
+        "QUICKER_REQUIRE_DOCKER=1 QUICKER_SKIP_DOCKER= QUICKER_SYNC_FUZZ_SEEDS=7 QUICKER_SYNC_CAPNET_SEEDS=";
 
     /// <summary>.slnx のプロジェクトのパスの並び（書かれた順）</summary>
     private static IReadOnlyList<string> ProjectPathsOf(string solutionPath) =>
@@ -1136,6 +1218,9 @@ public sealed class WorkflowGuardTests
     /// <param name="Arguments">偽の dotnet が受けた引数（空白でつなぐ・呼ばれなければ空）</param>
     /// <param name="CopiedProjects">偽の dotnet が呼ばれたときにルートにあった写しのプロジェクトのパス</param>
     /// <param name="CopyLeftBehind">スクリプトの後に写しがルートに残っているか</param>
+    /// <param name="EnvironmentAtStryker">偽の dotnet が見た表の変数（「名前=値」を空白でつなぐ・呼ばれなければ空）</param>
+    /// <param name="EnvironmentAfter">スクリプトの後の呼び出し元の表の変数（同じ形）</param>
+    /// <param name="RunEnvironmentJson">結果のフォルダの run-environment.json の本文（無ければ null）</param>
     private sealed record MutationScriptRun(
         int ExitCode,
         string Output,
@@ -1144,13 +1229,17 @@ public sealed class WorkflowGuardTests
         string WorkingDirectory,
         string Arguments,
         IReadOnlyList<string> CopiedProjects,
-        bool CopyLeftBehind
+        bool CopyLeftBehind,
+        string EnvironmentAtStryker,
+        string EnvironmentAfter,
+        string? RunEnvironmentJson
     );
 
     /// <summary>
-    /// 一時フォルダに偽のリポジトリ（起動スクリプト・テストだけのソリューションの正本・範囲 model の設定）を作り、
+    /// 一時フォルダに偽のリポジトリ（起動スクリプト・テストだけのソリューションの正本 2 本・範囲 model と provider-sync-planner の設定）を作り、
     /// その外の作業フォルダから相対パスの結果のフォルダと並列度 3 で起動スクリプトを動かす。
-    /// 偽の dotnet は作業フォルダ・引数（1 つずつ）・その時点の写しを記録し、<paramref name="strykerExitCode"/> で終わる。
+    /// 呼び出し元は <see cref="MutationScriptParentEnvironment"/> の環境を立てて呼び、スクリプトの後の環境を記録する（失敗しても）。
+    /// 偽の dotnet は作業フォルダ・引数（1 つずつ）・その時点の写し・表の変数を記録し、<paramref name="strykerExitCode"/> で終わる。
     /// </summary>
     private static MutationScriptRun RunMutationScript(string target, int strykerExitCode)
     {
@@ -1159,6 +1248,8 @@ public sealed class WorkflowGuardTests
         var fakeBinDirectory = Path.Combine(temp.Path, "bin");
         var workingLog = Path.Combine(temp.Path, "wd.txt");
         var argumentsLog = Path.Combine(temp.Path, "args.txt");
+        var environmentLog = Path.Combine(temp.Path, "env.txt");
+        var environmentAfterLog = Path.Combine(temp.Path, "env-after.txt");
         var copySnapshot = Path.Combine(temp.Path, "copy.slnx");
 
         Directory.CreateDirectory(Path.Combine(repository, "scripts"));
@@ -1168,18 +1259,32 @@ public sealed class WorkflowGuardTests
             Path.Combine(Root, "scripts", "run-mutation.ps1"),
             Path.Combine(repository, "scripts", "run-mutation.ps1")
         );
-        File.Copy(
-            Path.Combine(Root, "stryker", "QuickER.TestsOnly.slnx"),
-            Path.Combine(repository, "stryker", "QuickER.TestsOnly.slnx")
-        );
-        File.WriteAllText(Path.Combine(repository, "stryker", "model.json"), "{}");
 
-        // 引数は 1 行に 1 つ（引用の付け方に依らず値を比べる）。写しは呼ばれた時点のものを取っておく
+        foreach (
+            var solution in new[] { "QuickER.TestsOnly.slnx", "QuickER.TestsWithIntegration.slnx" }
+        )
+        {
+            File.Copy(
+                Path.Combine(Root, "stryker", solution),
+                Path.Combine(repository, "stryker", solution)
+            );
+        }
+
+        File.WriteAllText(Path.Combine(repository, "stryker", "model.json"), "{}");
+        File.WriteAllText(Path.Combine(repository, "stryker", "provider-sync-planner.json"), "{}");
+
+        // 引数は 1 行に 1 つ（引用の付け方に依らず値を比べる）。写しは呼ばれた時点のものを取っておく。
+        // 表の変数は「名前=値」で 1 行に 1 つ（立っていない変数はバッチファイルの中で空に展開される）
         File.WriteAllText(
             Path.Combine(fakeBinDirectory, "dotnet.cmd"),
             "@echo off\r\n"
                 + $">\"{workingLog}\" cd\r\n"
                 + $"if exist \"{MutationSolutionCopy}\" copy /Y \"{MutationSolutionCopy}\" \"{copySnapshot}\" >nul\r\n"
+                + string.Concat(
+                    MutationScriptVariables.Select(name =>
+                        $">>\"{environmentLog}\" echo {name}=%{name}%\r\n"
+                    )
+                )
                 + ":next\r\n"
                 + "if \"%~1\"==\"\" goto done\r\n"
                 + $">>\"{argumentsLog}\" echo %~1\r\n"
@@ -1189,13 +1294,31 @@ public sealed class WorkflowGuardTests
                 + $"exit /b {strykerExitCode}\r\n"
         );
 
+        // 呼び出し元の環境を立て、スクリプトの後（失敗しても）の環境を記録する。
         // 後ろで LASTEXITCODE を 0 に戻し、偽の dotnet の終了コードの持ち越しでなく、スクリプト自身が失敗を伝えることを見る
         // （pwsh -File で手元から呼ぶと、ネイティブコマンドの非 0 は終了コードにならない）
+        var parent = string.Concat(
+            MutationScriptParentEnvironment
+                .Split(' ')
+                .Select(pair => pair.Split('=', 2))
+                .Select(pair =>
+                    pair[1].Length == 0
+                        ? $"Remove-Item -LiteralPath env:{pair[0]} -ErrorAction SilentlyContinue; "
+                        : $"$env:{pair[0]} = '{pair[1]}'; "
+                )
+        );
+        var record = string.Join(
+            "; ",
+            MutationScriptVariables.Select(name =>
+                $"Add-Content -LiteralPath '{environmentAfterLog}' -Value \"{name}=$env:{name}\""
+            )
+        );
         var step = RunStep(
             temp.Path,
-            $"./repo/scripts/run-mutation.ps1 -Target {target} -OutputDirectory out -Concurrency 3; $global:LASTEXITCODE = 0",
+            $"{parent}try {{ ./repo/scripts/run-mutation.ps1 -Target {target} -OutputDirectory out -Concurrency 3 }} finally {{ {record} }}; $global:LASTEXITCODE = 0",
             fakeBinDirectory
         );
+        var runEnvironment = Path.Combine(temp.Path, "out", "run-environment.json");
 
         return new MutationScriptRun(
             step.ExitCode,
@@ -1207,8 +1330,16 @@ public sealed class WorkflowGuardTests
                 ? string.Join(' ', File.ReadAllLines(argumentsLog).Select(line => line.Trim()))
                 : "",
             File.Exists(copySnapshot) ? ProjectPathsOf(copySnapshot) : [],
-            File.Exists(Path.Combine(repository, MutationSolutionCopy))
+            File.Exists(Path.Combine(repository, MutationSolutionCopy)),
+            JoinedLines(environmentLog),
+            JoinedLines(environmentAfterLog),
+            File.Exists(runEnvironment) ? File.ReadAllText(runEnvironment) : null
         );
+
+        static string JoinedLines(string path) =>
+            File.Exists(path)
+                ? string.Join(' ', File.ReadAllLines(path).Select(line => line.Trim()))
+                : "";
     }
 
     /// <summary>パック用スクリプトを、偽の dotnet と偽の検証スクリプトで動かした結果</summary>

@@ -3,7 +3,7 @@
     "project": "QuickER.Provider.csproj",
     "test-runner": "mtp",
     "coverage-analysis": "perTest",
-    "additional-timeout": 120000,
+    "additional-timeout": 300000,
     "break-on-initial-test-failure": true,
     "thresholds": {
       "high": 80,
@@ -20,7 +20,11 @@
       "!**/SchemaSignature.cs",
       "!**/DiagramMergeReconciler.cs",
       "!**/SchemaDiff.cs",
-      "!**/NameMatching.cs"
+      "!**/NameMatching.cs",
+      "!**/CanonicalTypeToken.cs",
+      "!**/SqlTypeText.cs",
+      "!**/SchemaTableEntry.cs",
+      "!**/QueryParameterTypeResolver.cs"
     ]
   }
 }

@@ -247,17 +247,23 @@ internal static partial class ParityRows
             ),
             new(
                 "mutation-targets-match-stryker-configs",
-                "mutation.yml の範囲を決める手順の一覧（毎晩と週 1 回の和）は、stryker の設定のファイル（拡張子を除いた名前）と"
-                    + "ちょうど 1 回ずつ一致する（設定を足して一覧に載せ忘れると、その範囲は夜間に一度も流れない。一覧にあって設定が無いと、"
-                    + "その行列の行だけが設定の誤りで毎回赤になる）",
+                "mutation.yml の範囲を決める手順の一覧（毎晩と週 1 回の和）は、stryker の設定のファイル（拡張子を除いた名前）のうち"
+                    + "休止中でないものとちょうど 1 回ずつ一致する（設定を足して一覧に載せ忘れると、その範囲は夜間に一度も流れない。一覧にあって"
+                    + "設定が無いと、その行列の行だけが設定の誤りで毎回赤になる）。休止中の範囲（PausedStrykerTargets・理由つき）は、設定のファイルが"
+                    + "実在し、一覧には無い（「休止: 名前」の形で両方の側に入れて比べる。一覧へ戻したのに休止の一覧に残した名前・存在しない名前・"
+                    + "具体的でない理由は食い違いになる）",
                 ParityCompare.Multiset,
                 () =>
                     [
                         .. StrykerConfigFiles()
-                            .Select(file => Path.GetFileNameWithoutExtension(file)),
+                            .Select(file => Path.GetFileNameWithoutExtension(file))
+                            .Select(name =>
+                                PausedStrykerTargets.ContainsKey(name) ? $"休止: {name}" : name
+                            ),
                     ],
                 () =>
-                    NonEmpty(
+                {
+                    var listed = NonEmpty(
                         [
                             .. Regex
                                 .Matches(
@@ -271,16 +277,31 @@ internal static partial class ParityRows
                                 ),
                         ],
                         "mutation.yml の範囲の一覧（nightly='…'・weekly='…'）を読み取れなかった"
-                    )
+                    );
+
+                    return
+                    [
+                        .. listed,
+                        .. PausedStrykerTargets
+                            .Where(pair =>
+                                !listed.Contains(pair.Key)
+                                && !FactorInventoryGuard.IsVagueReason(pair.Value.Trim())
+                            )
+                            .Select(pair => $"休止: {pair.Key}"),
+                    ];
+                }
             ),
             new(
                 "stryker-tests-only-solution-projects",
                 $"Stryker のテストだけのソリューション（{StrykerSolution}）は src の全プロジェクトと QuickER.Tests・偽の app-server の"
                     + "ちょうど 1 回ずつを持つ（Stryker は変異させるプロジェクトをソリューションから探すので、src に足したプロジェクトを"
-                    + "載せ忘れると、そのプロジェクトの夜間の変異テストが設定の誤りで止まる。Integration を入れると test-projects の指定が効かない）。"
+                    + "載せ忘れると、そのプロジェクトの夜間の変異テストが設定の誤りで止まる）。"
+                    + $"2 本目（{StrykerSolutionWithIntegration}・起動スクリプトの表が provider-sync-planner に使う）は、それに Integration を足したもの。"
                     + "パスはどれも ../ で始める（起動スクリプトが先頭の ../ を外した写しをルートに作って Stryker へ渡す）",
                 ParityCompare.Multiset,
                 () =>
+                {
+                    string[] projects =
                     [
                         .. Directory
                             .EnumerateFiles(
@@ -292,22 +313,38 @@ internal static partial class ParityRows
                             .Select(path => "../" + RelativeToRoot(path)),
                         "../tests/QuickER.Tests/QuickER.Tests.csproj",
                         "../tests/QuickER.Tests.FakeCodexAppServer/QuickER.Tests.FakeCodexAppServer.csproj",
-                    ],
+                    ];
+
+                    return
+                    [
+                        .. projects.Select(path => $"{StrykerSolution}: {path}"),
+                        .. projects
+                            .Append(
+                                "../tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj"
+                            )
+                            .Select(path => $"{StrykerSolutionWithIntegration}: {path}"),
+                    ];
+                },
                 () =>
                     NonEmpty(
                         [
-                            .. System
-                                .Xml.Linq.XDocument.Load(
-                                    Path.Combine(WorkflowGuardTests.Root, StrykerSolution)
-                                )
-                                .Descendants("Project")
-                                .Select(project => (string?)project.Attribute("Path") ?? ""),
+                            .. new[] { StrykerSolution, StrykerSolutionWithIntegration }.SelectMany(
+                                solution =>
+                                    System
+                                        .Xml.Linq.XDocument.Load(
+                                            Path.Combine(WorkflowGuardTests.Root, solution)
+                                        )
+                                        .Descendants("Project")
+                                        .Select(project =>
+                                            $"{solution}: {(string?)project.Attribute("Path") ?? ""}"
+                                        )
+                            ),
                         ],
                         $"{StrykerSolution} からプロジェクトを読み取れなかった"
                     )
             )
             {
-                MinimumCanon = 30,
+                MinimumCanon = 60,
             },
             new(
                 "stryker-mutate-globs-match-files",
@@ -360,7 +397,145 @@ internal static partial class ParityRows
                             }),
                     ]
             ),
+            new(
+                "stryker-docker-fixtures-honor-skip",
+                "Integration の Testcontainers のコンテナを作るフィクスチャ（Testcontainers を using し IAsyncLifetime を実装するクラス）は、"
+                    + "どれもコンテナを起動する前に DockerRequirement.SkipReason(nameof(自分のクラス)) を呼ぶ（変異テストの起動スクリプトが"
+                    + "QUICKER_SKIP_DOCKER=1 を立てた範囲で、Docker の要らないテストだけを決まって流すため。呼ばないフィクスチャがあると、"
+                    + "Docker の動く手元では実 DB の総当たりが変異ごとに流れて範囲が何時間も延びる）",
+                ParityCompare.Set,
+                () =>
+                    NonEmpty(
+                        [.. DockerFixtures().Select(fixture => fixture.Name)],
+                        "Integration に Testcontainers のフィクスチャが無い"
+                    ),
+                () =>
+                    [
+                        .. DockerFixtures()
+                            .Where(fixture =>
+                            {
+                                var skip = fixture.Source.IndexOf(
+                                    $"DockerRequirement.SkipReason(nameof({fixture.Name}))",
+                                    StringComparison.Ordinal
+                                );
+                                var start = fixture.Source.IndexOf(
+                                    ".StartAsync(",
+                                    StringComparison.Ordinal
+                                );
+
+                                return skip >= 0 && (start < 0 || skip < start);
+                            })
+                            .Select(fixture => fixture.Name),
+                    ]
+            )
+            {
+                // いまのフィクスチャは 5 つ（MySql・Oracle・PostGis・PostgreSql・SqlServer）。拾い方が外れて正本が減ったら赤にする
+                MinimumCanon = 5,
+            },
+            new(
+                "mutation-script-variables-match-test-constants",
+                "変異テストの起動スクリプト（scripts/run-mutation.ps1）が範囲ごとの表で立てる・外す QUICKER_ の環境変数の名前は、"
+                    + "Integration のテストが読む定数（DockerRequirement の SkipVariableName・VariableName、同期計画の総当たりと能力の組の網の"
+                    + "SeedCountVariable）と一致する（綴りが食い違うと、変数は立つが誰も読まず、Docker の総当たりや既定の数の種が黙って流れる）",
+                ParityCompare.Set,
+                () =>
+                    [
+                        IntegrationConstant("DockerRequirement.cs", "SkipVariableName"),
+                        IntegrationConstant("DockerRequirement.cs", "VariableName"),
+                        IntegrationConstant(
+                            "Dialects/SyncPlanFuzz/SyncPlanFuzzTestsBase.cs",
+                            "SeedCountVariable"
+                        ),
+                        IntegrationConstant(
+                            "Dialects/SyncPlanFuzz/SyncPlanCapabilityNet.cs",
+                            "SeedCountVariable"
+                        ),
+                    ],
+                () =>
+                    NonEmpty(
+                        [
+                            .. Regex
+                                .Matches(
+                                    File.ReadAllText(
+                                        Path.Combine(
+                                            WorkflowGuardTests.Root,
+                                            "scripts",
+                                            "run-mutation.ps1"
+                                        )
+                                    ),
+                                    @"\bQUICKER_[A-Z_]+\b"
+                                )
+                                .Select(match => match.Value),
+                        ],
+                        "run-mutation.ps1 から QUICKER_ の環境変数を読み取れなかった"
+                    )
+            ),
         ];
+
+    /// <summary>
+    /// 週 1 回・毎晩の一覧から外して休止中の範囲（stryker の設定のファイル名から拡張子を除いた名前 → 理由）。
+    /// 設定のファイルは残し、照合の行 stryker-mutate-globs-match-files・stryker-configs-report-only には掛け続ける（再開のときにそのまま使える）。
+    /// 再開の合図は tests/QuickER.Tests/TestSupport/CLAUDE.md の「変異テスト（Stryker.NET）」
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> PausedStrykerTargets =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["codegen-diagnostics"] = CodeGenPauseReason,
+            ["codegen-queries"] = CodeGenPauseReason,
+            ["codegen-escapes"] = CodeGenPauseReason,
+        };
+
+    /// <summary>CodeGen の 3 範囲を休止する理由</summary>
+    private const string CodeGenPauseReason =
+        "Stryker.NET 5.0.0 の MTP の実行器の不具合（#3915：変異の有無の判定が呼ばれるたびに共有の写像を読み合って競合する）で、"
+        + "CodeGen の生成を回すテストが変異の下で上限に当たり、変異の検査が成り立たない（2026-11 の手元の実測で、変異 1 回が約 10 分・"
+        + "1 範囲が CI で 14 時間以上の見込み）";
+
+    /// <summary>Stryker の 2 本目のテストだけのソリューション（Integration を足したもの・リポジトリの根からの相対パス）</summary>
+    private const string StrykerSolutionWithIntegration =
+        "stryker/QuickER.TestsWithIntegration.slnx";
+
+    /// <summary>
+    /// Integration の Testcontainers のフィクスチャ（Testcontainers を using するファイルの、IAsyncLifetime を実装するクラス）と、そのファイルの本文
+    /// （基底の一覧のどこに IAsyncLifetime を書いても拾う。主コンストラクタの引数も受ける）
+    /// </summary>
+    private static IReadOnlyList<(string Name, string Source)> DockerFixtures() =>
+        [
+            .. Directory
+                .EnumerateFiles(
+                    Path.Combine(WorkflowGuardTests.Root, "tests", "QuickER.Tests.Integration"),
+                    "*.cs",
+                    SearchOption.AllDirectories
+                )
+                .Where(path => !SourceFiles.IsBuildOutput(path))
+                .Select(path => File.ReadAllText(path))
+                .Where(source => Regex.IsMatch(source, @"(?m)^using (?:DotNet\.)?Testcontainers\b"))
+                .SelectMany(source =>
+                    Regex
+                        .Matches(source, @"\bclass (?<name>\w+)\b[^{;]*?:[^{;]*?\bIAsyncLifetime\b")
+                        .Select(match => (match.Groups["name"].Value, source))
+                )
+                .OrderBy(fixture => fixture.Item1, StringComparer.Ordinal),
+        ];
+
+    /// <summary>Integration のソースの文字列の定数の値（public const string {名前} = "…"）。見つからなければ例外</summary>
+    private static string IntegrationConstant(string relativePath, string name)
+    {
+        var path = Path.Combine(
+            WorkflowGuardTests.Root,
+            "tests",
+            "QuickER.Tests.Integration",
+            relativePath.Replace('/', Path.DirectorySeparatorChar)
+        );
+        var match = Regex.Match(
+            File.ReadAllText(path),
+            $@"\bconst string {Regex.Escape(name)} = ""(?<value>[^""]+)"""
+        );
+
+        return match.Success
+            ? match.Groups["value"].Value
+            : throw new InvalidOperationException($"{relativePath} に定数 {name} が無い");
+    }
 
     /// <summary>40 桁の commit SHA とバージョンコメントで固定した uses の値（actions/cache/restore のような下のパスも受ける）</summary>
     private static readonly Regex PinnedActionWithPath = new(

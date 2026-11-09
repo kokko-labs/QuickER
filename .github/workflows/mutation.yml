@@ -1,10 +1,13 @@
 # QuickER Mutation: 変異テスト（Stryker.NET）を夜間に流し、結果を報告する（点数では赤にしない）
 #
 # - 毎晩: QuickER.Model 全体（stryker/model.json）
-# - 週 1 回（土曜）: QuickER.Provider を割った 3 本と、QuickER.CodeGen.CSharp の判断の重い 3 部分（診断・クエリ・エスケープ）
+# - 週 1 回（土曜）: QuickER.Provider を割った 5 本（同期の計画・差分・残り・型のトークン・型の表記）。
+#   QuickER.CodeGen.CSharp の 3 部分（診断・クエリ・エスケープ）は休止中（設定は stryker/ に残す。理由と再開の合図は
+#   tests/QuickER.Tests/TestSupport/CLAUDE.md の「変異テスト（Stryker.NET）」）
 # - 範囲・除外・点数で赤にしない設定（thresholds.break 0）・初回のテストの失敗で止める設定は stryker/*.json が持つ。
 #   Stryker は設定の solution を読まず、ソリューションの中の ../ のパスではテストを見つけないので、起動は scripts/run-mutation.ps1 に任せる
-#   （正本 stryker/QuickER.TestsOnly.slnx の ../ を外した写しをルートに作り、-s で渡し、終わったら消す）
+#   （範囲のソリューションの ../ を外した写しをルートに作り、-s で渡し、終わったら消す）。範囲ごとのソリューションと環境変数は
+#   スクリプトの表だけが持ち、このファイルには書かない
 # - 赤になるのは Stryker が動かなかったとき（設定の誤り・ビルドの失敗・初回のテストの失敗）だけ。結果の HTML・JSON・ログは
 #   成果物として 14 日残す（失敗した夜にも残す）
 # - schedule はリポジトリの既定のブランチ（main）にあるこのファイルでだけ動く（nightly.yml と同じ）。workflow_dispatch で手でも流せる
@@ -16,12 +19,12 @@ on:
   schedule:
     # 毎晩 18:30 UTC（日本時間 3:30）：Model
     - cron: "30 18 * * *"
-    # 土曜 20:00 UTC（日本時間 日曜 5:00）：Provider の 3 本と CodeGen の 3 部分
+    # 土曜 20:00 UTC（日本時間 日曜 5:00）：Provider の 5 本
     - cron: "0 20 * * 6"
   workflow_dispatch:
     inputs:
       scope:
-        description: "流す範囲（nightly＝Model・weekly＝Provider と CodeGen・all＝両方）"
+        description: "流す範囲（nightly＝Model・weekly＝Provider の 5 本・all＝両方）"
         type: choice
         options: [nightly, weekly, all]
         default: nightly
@@ -53,7 +56,7 @@ jobs:
           SCOPE: ${{ inputs.scope }}
         run: |
           nightly='"model"'
-          weekly='"provider-sync-planner","provider-diff","provider-rest","codegen-diagnostics","codegen-queries","codegen-escapes"'
+          weekly='"provider-sync-planner","provider-diff","provider-rest","provider-type-token","provider-type-text"'
           case "$SCHEDULE|$SCOPE" in
             "30 18 * * *|"|"|nightly") targets="[$nightly]" ;;
             "0 20 * * 6|"|"|weekly") targets="[$weekly]" ;;

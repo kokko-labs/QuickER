@@ -40,6 +40,9 @@ public sealed class MutationSummaryTests
     {
         /// <summary>設定の mutate の範囲（既定は全部）</summary>
         public Func<string, bool> Scope { get; init; } = _ => true;
+
+        /// <summary>起動スクリプトが書いた run-environment.json の本文（既定は無し）</summary>
+        public string? RunEnvironment { get; init; }
     }
 
     private static readonly IReadOnlyDictionary<string, string> NoSources = new Dictionary<
@@ -342,6 +345,142 @@ public sealed class MutationSummaryTests
                                 .And.Contain($"| `{Model}` | 1 | 1 | 0 | 0 | 0 | 0 | 100.0% |")
                     )
                 ),
+                new(
+                    "mutation-summary-static-mutants",
+                    null,
+                    "範囲の中の流した変異のうち static のもの（CompileError・Ignored と範囲の外は数えない）と、そのうちの Timeout を数えて書く",
+                    new(
+                        Report(
+                            (
+                                $"{Root}/{Model}/Column.cs",
+                                [
+                                    M("Timeout", isStatic: true),
+                                    M("Killed", isStatic: true),
+                                    M("Survived", isStatic: true),
+                                    M("CompileError", isStatic: true),
+                                    M("Ignored", isStatic: true),
+                                    M("Timeout"),
+                                ]
+                            ),
+                            ($"{Root}/{Model}/Entity.cs", [M("Timeout", isStatic: true)])
+                        ),
+                        "",
+                        NoSources,
+                        null,
+                        (summary, markdown) =>
+                        {
+                            summary.StaticMutants.Should().Be(3);
+                            summary.StaticTimeouts.Should().Be(1);
+                            markdown.Should().Contain("- static の変異 3 件（うち Timeout 1 件。");
+                        }
+                    )
+                    {
+                        Scope = StrykerMutateScope.FromConfig(Model, ["**/Column.cs"]),
+                    }
+                ),
+                new(
+                    "mutation-summary-coverage-capture-timeouts",
+                    null,
+                    "カバレッジの取得で時間切れになったテストを結果の JSON の名前に引いて重ねずに書き（名前が無ければ ID）、続いて受け渡しを待ちきれなかったテストを重ねずに数える",
+                    new(
+                        ReportWithTests(
+                            [("aaaaaaaaaaaaaaaa", "QuickER.Tests.Probe.Slow")],
+                            ($"{Root}/{Model}/Column.cs", [M("Killed")])
+                        ),
+                        string.Join(
+                            "\n",
+                            "[08:17:22 WRN] \"MtpRunner-1\": Test run timed out while capturing per-test coverage for \"aaaaaaaaaaaaaaaa\"; marking as Dubious",
+                            "[08:17:23 WRN] \"MtpRunner-2\": Test run timed out while capturing per-test coverage for \"dddddddddddddddd\"; marking as Dubious",
+                            "[08:17:24 WRN] \"MtpRunner-2\": Test run timed out while capturing per-test coverage for \"dddddddddddddddd\"; marking as Dubious",
+                            "[08:18:15 WRN] \"MtpRunner-1\": Timed out waiting for coverage relay ack for test \"bbbbbbbbbbbbbbbb\"; marking as Dubious",
+                            "[08:18:27 WRN] \"MtpRunner-1\": Timed out waiting for coverage relay ack for test \"cccccccccccccccc\"; marking as Dubious",
+                            "[08:18:28 WRN] \"MtpRunner-3\": Timed out waiting for coverage relay ack for test \"cccccccccccccccc\"; marking as Dubious"
+                        ),
+                        NoSources,
+                        null,
+                        (summary, markdown) =>
+                        {
+                            summary
+                                .CoverageCaptureTimeouts.Should()
+                                .Equal("QuickER.Tests.Probe.Slow", "dddddddddddddddd");
+                            summary.RelayAckTimeouts.Should().Be(2);
+                            markdown
+                                .Should()
+                                .Contain(
+                                    "- カバレッジの取得の時間切れ 2 件（続いて受け渡しを待ちきれなかったテスト 2 件）：QuickER.Tests.Probe.Slow・dddddddddddddddd"
+                                );
+                        }
+                    )
+                ),
+                new(
+                    "mutation-summary-run-environment",
+                    null,
+                    "起動スクリプトが書いた実行の環境（ソリューション・立てた変数・外した変数）を書き、Docker を飛ばす変数と種の数の変数には意味を添える",
+                    new(
+                        Report(($"{Root}/{Model}/Column.cs", [M("Killed")])),
+                        "",
+                        NoSources,
+                        null,
+                        (summary, markdown) =>
+                        {
+                            summary
+                                .RunEnvironment.Should()
+                                .BeEquivalentTo(
+                                    new MutationRunEnvironment(
+                                        "stryker/QuickER.TestsWithIntegration.slnx",
+                                        ["QUICKER_SKIP_DOCKER=1", "QUICKER_SYNC_FUZZ_SEEDS=100"],
+                                        ["QUICKER_REQUIRE_DOCKER"]
+                                    ),
+                                    options => options.WithStrictOrdering()
+                                );
+                            markdown
+                                .Should()
+                                .Contain(
+                                    "- 実行の環境：ソリューション `stryker/QuickER.TestsWithIntegration.slnx`・立てた変数 `QUICKER_SKIP_DOCKER=1`・`QUICKER_SYNC_FUZZ_SEEDS=100`・外した変数 `QUICKER_REQUIRE_DOCKER`"
+                                )
+                                .And.Contain(
+                                    "Docker の要るテスト（目印 RequiresDocker=true）は流さない"
+                                )
+                                .And.Contain("種の数を明示した");
+                        }
+                    )
+                    {
+                        RunEnvironment = """
+                        {
+                          "target": "provider-sync-planner",
+                          "solution": "stryker/QuickER.TestsWithIntegration.slnx",
+                          "set": { "QUICKER_SKIP_DOCKER": "1", "QUICKER_SYNC_FUZZ_SEEDS": "100" },
+                          "removed": [ "QUICKER_REQUIRE_DOCKER" ]
+                        }
+                        """,
+                    }
+                ),
+                new(
+                    "mutation-summary-no-run-environment",
+                    null,
+                    "実行の環境の記録が無いか読めなければ「記録なし」と書き、変数を立てない範囲は意味の注を添えない",
+                    new(
+                        Report(($"{Root}/{Model}/Column.cs", [M("Killed")])),
+                        "",
+                        NoSources,
+                        null,
+                        (summary, markdown) =>
+                        {
+                            summary.RunEnvironment.Should().BeNull();
+                            markdown
+                                .Should()
+                                .Contain("- 実行の環境：記録なし")
+                                .And.Contain(
+                                    "- カバレッジの取得の時間切れ 0 件（続いて受け渡しを待ちきれなかったテスト 0 件）\n"
+                                )
+                                .And.NotContain("static の変異")
+                                .And.NotContain("種の数を明示した");
+                        }
+                    )
+                    {
+                        RunEnvironment = "{ not json",
+                    }
+                ),
             ]
         );
 
@@ -360,7 +499,8 @@ public sealed class MutationSummaryTests
             Root,
             Map.UnitOf,
             path => input.Sources.TryGetValue(path, out var source) ? source : null,
-            input.Scope
+            input.Scope,
+            input.RunEnvironment
         );
         var markdown = MutationSummaries.Render(
             summary,
@@ -411,6 +551,7 @@ public sealed class MutationSummaryTests
                     .Select(File.ReadAllText)
             )
             : "";
+        var runEnvironmentPath = Path.Combine(reportDirectory, "run-environment.json");
         var root = WorkflowGuardRoot();
         var map = ImpactMapSources.Build(root);
         var summary = MutationSummaries.Summarize(
@@ -424,7 +565,8 @@ public sealed class MutationSummaryTests
                 var full = Path.Combine(root, path);
                 return File.Exists(full) ? File.ReadAllText(full) : null;
             },
-            StrykerMutateScope.FromConfigFile(Path.Combine(root, "stryker", target + ".json"))
+            StrykerMutateScope.FromConfigFile(Path.Combine(root, "stryker", target + ".json")),
+            File.Exists(runEnvironmentPath) ? File.ReadAllText(runEnvironmentPath) : null
         );
 
         Directory.CreateDirectory(summaryDirectory!);
@@ -456,10 +598,24 @@ public sealed class MutationSummaryTests
 
     /// <summary>架空の結果の JSON（ファイルごとの変異）</summary>
     private static string Report(params (string File, MutantSpec[] Mutants)[] files) =>
+        ReportWithTests([], files);
+
+    /// <summary>架空の結果の JSON（テストの ID と名前・ファイルごとの変異）</summary>
+    private static string ReportWithTests(
+        (string Id, string Name)[] tests,
+        params (string File, MutantSpec[] Mutants)[] files
+    ) =>
         JsonSerializer.Serialize(
             new
             {
                 schemaVersion = "2",
+                testFiles = new Dictionary<string, object>
+                {
+                    [$"{Root}/tests/QuickER.Tests/Probe.cs"] = new
+                    {
+                        tests = tests.Select(test => new { id = test.Id, name = test.Name }),
+                    },
+                },
                 files = files.ToDictionary(
                     file => file.File,
                     file => new
@@ -485,6 +641,7 @@ public sealed class MutationSummaryTests
                                     },
                                     coveredBy = mutant.CoveredBy,
                                     statusReason = mutant.Reason,
+                                    @static = mutant.Static,
                                 }
                         ),
                     }
@@ -498,7 +655,8 @@ public sealed class MutationSummaryTests
         int Line,
         int Column,
         string[] CoveredBy,
-        string? Reason
+        string? Reason,
+        bool Static
     );
 
     private static MutantSpec M(
@@ -506,6 +664,7 @@ public sealed class MutationSummaryTests
         int line = 1,
         int column = 1,
         string[]? coveredBy = null,
-        string? reason = null
-    ) => new(status, line, column, coveredBy ?? [], reason);
+        string? reason = null,
+        bool isStatic = false
+    ) => new(status, line, column, coveredBy ?? [], reason, isStatic);
 }

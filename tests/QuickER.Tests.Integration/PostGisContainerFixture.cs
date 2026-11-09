@@ -36,6 +36,13 @@ public sealed class PostGisContainerFixture : IAsyncLifetime
     /// <summary>コンテナを起動する。Docker 不在・起動失敗は握りつぶし <see cref="IsAvailable"/> を <c>false</c> にする</summary>
     public async ValueTask InitializeAsync()
     {
+        if (DockerRequirement.SkipReason(nameof(PostGisContainerFixture)) is { } skip)
+        {
+            IsAvailable = false;
+            UnavailableReason = skip;
+            return;
+        }
+
         try
         {
             _container = new PostgreSqlBuilder("postgis/postgis:16-3.4-alpine").Build();

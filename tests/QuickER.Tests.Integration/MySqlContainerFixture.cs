@@ -54,6 +54,13 @@ public sealed class MySqlContainerFixture : IAsyncLifetime
     /// <summary>コンテナを起動する。Docker 不在・起動失敗は握りつぶし <see cref="IsAvailable"/> を <c>false</c> にする</summary>
     public async ValueTask InitializeAsync()
     {
+        if (DockerRequirement.SkipReason(nameof(MySqlContainerFixture)) is { } skip)
+        {
+            IsAvailable = false;
+            UnavailableReason = skip;
+            return;
+        }
+
         try
         {
             _container = new MySqlBuilder("mysql:8.4").Build();
