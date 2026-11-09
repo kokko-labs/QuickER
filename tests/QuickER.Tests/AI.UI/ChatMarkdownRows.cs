@@ -495,7 +495,7 @@ internal static partial class ChatMarkdownRows
             ) + (entry.Note is null ? string.Empty : "。" + entry.Note);
 
         return Row(
-            $"{Kebab(element)}-{entry.Id}",
+            $"{IdPrefix(element)}{entry.Id}",
             description,
             element,
             entry.Form,
@@ -606,15 +606,19 @@ internal static partial class ChatMarkdownRows
         );
     }
 
-    private static string Kebab(MarkdownElement element) =>
+    /// <summary>
+    /// 要素ごとの行 Id の接頭辞（末尾のハイフンまでを文字列に書く。CLAUDE.md が名指す <c>angle-*</c> のような行 Id を、
+    /// CLAUDE.md の照合がこの表のソースの中で読めるようにするため）
+    /// </summary>
+    private static string IdPrefix(MarkdownElement element) =>
         element switch
         {
-            MarkdownElement.InlineLink => "inline",
-            MarkdownElement.ReferenceLink => "reference",
-            MarkdownElement.AngleAutolink => "angle",
-            MarkdownElement.BareAutolink => "bare",
-            MarkdownElement.LinkedImage => "linked-image",
-            _ => element.ToString().ToLowerInvariant(),
+            MarkdownElement.InlineLink => "inline-",
+            MarkdownElement.ReferenceLink => "reference-",
+            MarkdownElement.AngleAutolink => "angle-",
+            MarkdownElement.BareAutolink => "bare-",
+            MarkdownElement.LinkedImage => "linked-image-",
+            _ => element.ToString().ToLowerInvariant() + "-",
         };
 
     private static ScenarioRow<ChatMarkdownCase> Row(

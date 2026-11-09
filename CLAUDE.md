@@ -504,7 +504,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **docs の方言の表は宣言と一致する（目印 `<!-- dialect-table: 名前 -->`）**：登録の無い表は照合されず静かに嘘になる。ガード：`DialectDocsTableTests`。→ `tests/QuickER.Tests/Docs/CLAUDE.md`「docs の方言の表」
 - **ルートの `CLAUDE.md` の機械照合できる一覧（依存矢印・プロジェクト網羅・フォルダ一覧・固定フィクスチャ一覧）は書式が契約**：書式を変えるときはテストも更新する。ガード：`ClaudeMdParityTests`。→ `tests/QuickER.Tests/Docs/CLAUDE.md`「CLAUDE.md の照合」
 - **src のコメント・ワークフロー・スクリプト・生成テンプレートが名指すテストの名前と行 Id は実在する（読み方は CLAUDE.md の照合と同じ関数）**：テストの改名・表の行への移し替えで名指しが古いまま残る。ガード：`rule:comment-test-names-src`・`rule:comment-test-names-templates`・`rule:comment-test-names-workflows`・`rule:comment-test-names-scripts`。→ `tests/QuickER.Tests/Docs/CLAUDE.md`「src・ワークフロー・スクリプト・生成テンプレートの名指し」
-- **CLAUDE.md 群が書いた影響の地図の名前は地図に実在し、続けて書いた行 Id はその守りのテストのソースにある（名前の集合は地図と同じ関数から作る）**：台帳の部分の改名・行の移し替えで、地図の名前で書いたガードが黙って古くなる。ガード：`ClaudeMdReferenceTests.MapNames_ExistInImpactMap`・`ClaudeMdReferenceTests.Checker_ReportsFictitiousNamesIdsAndLinks`。→ `tests/QuickER.Tests/Docs/CLAUDE.md`「CLAUDE.md の照合」
+- **CLAUDE.md 群が書いた影響の地図の名前は地図に実在し、地図の名前とテストのクラスの名前に続けて書いた行 Id はその持ち主のテストのソースにある（地図の名前はその守り・クラスはそれを宣言するファイルを含む守りのどれか〔守りに属さなければ宣言するファイル〕。名前の集合は地図と同じ関数から作る）**：台帳の部分の改名・行の移し替えで、地図の名前で書いたガードが黙って古くなる。tests/ の全体だけで照合すると、組み立てる行 Id が別の表の文字列で偶然通り、行が消えても赤にならない。ガード：`ClaudeMdReferenceTests.MapNames_ExistInImpactMap`・`ClaudeMdReferenceTests.Checker_ReportsFictitiousNamesIdsAndLinks`。→ `tests/QuickER.Tests/Docs/CLAUDE.md`「CLAUDE.md の照合」
 
 ## コーディング規約
 

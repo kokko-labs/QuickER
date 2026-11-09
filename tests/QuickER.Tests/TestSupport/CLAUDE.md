@@ -246,7 +246,7 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
 - 行 Id の接頭辞は地図に載せない。
   - テストのソースの文字列リテラルから読むと、値のデータ（`alice`・`ffffffff` など）まで拾い、行やデータを足すたびに地図が変わる。
   - 台帳のソースは partial の本体だけを書き、部分ファイル（`DialectDdlRows.Names.cs` など）を書かないことがあり、判定の部品をフォルダで書くこともある（`CodeGen.CSharp/CodegenConfig/Judges`）。そのため登録の照合・行 Id の持ち主は、同じフォルダの `{名前}.*.cs` とフォルダの下の C# のソースまで広げたソースで読む（`ImpactMapSources.ExpandPartials`）。
-  - 表の行の名前は「守りの名前＋行 Id」（例 `Dialect/DdlText` の行 `ddl-*-trimmed-table`）。行 Id がその守りのものかは `ImpactMapSources.OwnsRowId`（守りの広げたソースの本文だけに CLAUDE.md の照合と同じ判定 `ClaudeMdReferenceTests.RowIdExists` を当てる）の 1 か所が決める。CLAUDE.md 群が地図の名前に続けて書いた行 Id は、`ClaudeMdReferenceTests.MapNames_ExistInImpactMap` がこれを呼んで照合する（`tests/QuickER.Tests/Docs/CLAUDE.md`「CLAUDE.md の照合」）。
+  - 表の行の名前は「守りの名前＋行 Id」（例 `Dialect/DdlText` の行 `ddl-*-trimmed-table`）。行 Id がその守りのものかは `ImpactMapSources.OwnsRowId`（守りの広げたソースの本文だけに CLAUDE.md の照合と同じ判定 `ClaudeMdReferenceTests.RowIdExists` を当てる）の 1 か所が決める。CLAUDE.md 群が地図の名前に続けて書いた行 Id は、`ClaudeMdReferenceTests.MapNames_ExistInImpactMap` がこれを呼んで照合する。テストのクラスの名前に続けて書いた行 Id も、そのクラスを宣言するファイルを含む守りごとにこれを呼ぶ（どれかの守りが持てば合格・守りに属さないクラスは宣言するファイルだけ。`tests/QuickER.Tests/Docs/CLAUDE.md`「CLAUDE.md の照合」）。
 - エンジンの部分のテストのソースには、その部分の行を流すテストのクラスのファイルだけを書く（同じエンジンの部分どうしで共有するのは次元表・実行と判定の部品）。例：生成の構成のエンジンは、網羅の配列（Errors・Success）に `CodegenMatrixTests.cs`、決まった行（Cases）に `CodegenCases.cs`（行の表）と `CodegenCaseTests.cs` を書く。テストのクラスがどの守りのものかを地図で引けるようにするため（ルートの CLAUDE.md の索引の「ガード：」が地図の名前で書けるのは、そのクラスが 1 つの守りにだけ属するとき）。
 - 変異テストの結果を領域ごとにまとめるときは、`ImpactMap.UnitOf`（パスの属するいちばん深い単位）と `ImpactMap.ProtectionsOf`（パスを範囲に含む守り）で引くか、地図の「範囲の表」をパスの最長一致で読む。夜間の変異テストの要約（`MutationSummaries`）は `ImpactMapSources.Build` の地図の `UnitOf` を使う（「変異テスト（Stryker.NET）」）。
 - 守りの無い領域：`ImpactMapDeclarations.Unprotected`（単位・分類・理由）。
