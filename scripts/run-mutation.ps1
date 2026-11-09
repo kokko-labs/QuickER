@@ -22,6 +22,11 @@
 
     ネイティブコマンドの失敗は pwsh を止めないので、Stryker の終了コードを見て、0 でなければ失敗にする。
 
+    -TestsOnly を付けると、Stryker を呼ぶ代わりに、同じ手順で表の変数を立てて（外して）、表の TestProject を TestFilter の絞り込みで
+    dotnet test --no-build で流す（ソリューションの写しは作らない）。Stryker の最初のテストの実行と同じ環境でだけ落ちるテスト
+    （種を減らすと外れるはずの表明が外れていない、など）を、週 1 回の変異テストより前に普段の CI（ci.yml）で捕まえるため。
+    表に TestProject の無い範囲は、何もせずに断る（CI の範囲の取り違えを「何もしないで緑」にしない）。
+
 .PARAMETER Target
     範囲の名前（stryker/<Target>.json の拡張子を除いた名前。例：model）。
 
@@ -31,14 +36,21 @@
 .PARAMETER Concurrency
     Stryker の並列度（テストを流す実行器の数）。既定値を持たせない（ホストのランナーと手元で適した値が違う）。
 
+.PARAMETER TestsOnly
+    Stryker を呼ばず、範囲の表の環境で表のテストだけを流す。
+
 .EXAMPLE
     ./scripts/run-mutation.ps1 -Target model -OutputDirectory ./artifacts/stryker/model -Concurrency 8
+
+.EXAMPLE
+    ./scripts/run-mutation.ps1 -Target provider-sync-planner -TestsOnly -OutputDirectory ./artifacts/mutation-env
 #>
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'Stryker')]
 param(
     [Parameter(Mandatory = $true)][string]$Target,
     [Parameter(Mandatory = $true)][string]$OutputDirectory,
-    [Parameter(Mandatory = $true)][int]$Concurrency
+    [Parameter(Mandatory = $true, ParameterSetName = 'Stryker')][int]$Concurrency,
+    [Parameter(Mandatory = $true, ParameterSetName = 'TestsOnly')][switch]$TestsOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -47,10 +59,13 @@ $ErrorActionPreference = 'Stop'
 # 変数の名前は Integration のテストの定数と同じ（ParityTests の行 mutation-script-variables-match-test-constants が照合する）。
 # - provider-sync-planner：SyncPlanner の変異を殺すテストの多くは Integration の Docker の要らないテスト（同期計画の総当たり・期待の行）にあるので、
 #   Integration を足したソリューションで流す。コンテナのフィクスチャは起動しない（QUICKER_SKIP_DOCKER。厳格モードの宣言 QUICKER_REQUIRE_DOCKER は
-#   両立しないので外す）。同期計画の総当たりの種を減らす（既定の数のままだと、総当たりがほぼ全部の変異を通り、変異 1 回の検査が約 100 秒かかる）
+#   両立しないので外す）。同期計画の総当たりの種を減らす（既定の数のままだと、総当たりがほぼ全部の変異を通り、変異 1 回の検査が約 100 秒かかる）。
+#   -TestsOnly では、表の変数が効く Integration の同期計画のテスト（総当たり・能力の組の網・期待の行）を流す
 $targetSettings = @{
     'provider-sync-planner' = @{
         Solution = 'stryker/QuickER.TestsWithIntegration.slnx'
+        TestProject = 'tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj'
+        TestFilter = 'FullyQualifiedName~QuickER.Tests.Integration.Dialects.SyncPlanFuzz'
         Set = [ordered]@{
             QUICKER_SKIP_DOCKER = '1'
             QUICKER_SYNC_FUZZ_SEEDS = '100'
@@ -80,6 +95,10 @@ if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot $configRelative) -Pa
     throw "範囲の設定が無い: $configRelative"
 }
 
+if ($TestsOnly -and -not ($settings -and $settings.TestProject)) {
+    throw "範囲 $Target は、-TestsOnly で流すテスト（表の TestProject）を持たない"
+}
+
 # 相対パスは呼び出し元の作業フォルダから解く（下でルートへ移るので、その前に絶対パスにする）
 $outputFullPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
 
@@ -102,8 +121,6 @@ foreach ($name in @($variablesToSet.Keys) + $variablesToRemove) {
 Push-Location $repositoryRoot
 
 try {
-    [System.IO.File]::WriteAllText($solutionCopy, $rewritten)
-
     foreach ($name in $variablesToRemove) {
         [System.Environment]::SetEnvironmentVariable($name, $null)
     }
@@ -112,10 +129,21 @@ try {
         [System.Environment]::SetEnvironmentVariable($name, $variablesToSet[$name])
     }
 
-    dotnet stryker -f $configRelative -s $solutionCopyName -O $outputFullPath -c $Concurrency --skip-version-check -L
+    if ($TestsOnly) {
+        dotnet test $settings.TestProject --no-build --filter $settings.TestFilter --output detailed
 
-    if ($LASTEXITCODE -ne 0) {
-        throw "Stryker が失敗した（終了コード $LASTEXITCODE）"
+        if ($LASTEXITCODE -ne 0) {
+            throw "範囲 $Target の環境のテストが失敗した（終了コード $LASTEXITCODE）"
+        }
+    }
+    else {
+        [System.IO.File]::WriteAllText($solutionCopy, $rewritten)
+
+        dotnet stryker -f $configRelative -s $solutionCopyName -O $outputFullPath -c $Concurrency --skip-version-check -L
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Stryker が失敗した（終了コード $LASTEXITCODE）"
+        }
     }
 }
 finally {

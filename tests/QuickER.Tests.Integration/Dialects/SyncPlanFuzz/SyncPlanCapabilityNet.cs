@@ -797,8 +797,19 @@ public abstract class SyncPlanCapabilityNetTestsBase
             SyncPlanShapeRows.MissingTriples().Select(t => $"shape rows miss the triple {t}")
         );
 
-        // 必須の形（方言が作れない形を除く）は、網の種の集合全体で全部出る（網は 5 方言とも既定の 5000 種で表明する）
-        if (!plan.IsSingle)
+        // 必須の形（方言が作れない形を除く）は、網の種の集合全体で全部出る。表明するのは、流す種が普段の既定の種を全部含む
+        // とき（種は開始番号からの連番なので、数が既定以上のとき）だけ。既定で全部出る形は、それより多い種でも必ず出る。
+        // 既定より少ない種を明示した実行（変異テストの 500 種）では、確率でしか出ない形が欠けるので表明しない
+        var assertsRequiredShapes = !plan.IsSingle && outcomes.Count >= plan.Settings.RegularCount;
+
+        if (!plan.IsSingle && !assertsRequiredShapes)
+        {
+            output?.WriteLine(
+                $"{dialect.Name}: required shapes not asserted (seeds {outcomes.Count} < regular default {plan.Settings.RegularCount})"
+            );
+        }
+
+        if (assertsRequiredShapes)
         {
             try
             {
