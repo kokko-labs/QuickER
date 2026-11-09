@@ -96,7 +96,7 @@ internal static class SyncPlanShapeRows
                 Levels(ReferencingFks, "親を参照する外部キーの数", "0", "1", "2"),
                 Levels(
                     TypeChange,
-                    "型の変更（子の列だけ・親の列だけ・親と最初の子だけ・親と全部の子・一意制約の列）と最初の子の NULL 許容だけの変更・最初の子の型の種類の変更・参照される親の列と全部の子の型の種類の変更",
+                    "型の変更（子の列だけ・親の列だけ・親と最初の子だけ・親と全部の子・一意制約の列）と最初の子の NULL 許容だけの変更・最初の子の型の種類の変更・参照される親の列と全部の子の型の種類の変更・両端を別々の型へ（最初の子は互換の範囲で広げ、参照される親の列は互換でない型へ）",
                     "None",
                     "ChildOnly",
                     "ParentOnly",
@@ -105,15 +105,17 @@ internal static class SyncPlanShapeRows
                     "UniqueColumn",
                     "ChildNullability",
                     "ChildKindChange",
-                    "BothEndsKindChange"
+                    "BothEndsKindChange",
+                    "DivergentEnds"
                 ),
                 Levels(
                     ExplicitOp,
-                    "明示の削除（外部キー・一意制約 1 つ・一意制約を全部）",
+                    "明示の削除（外部キー・一意制約 1 つ・一意制約を全部）と、名前を保って一意制約の列を変え元の列へ名前の無い一意制約を足す変更",
                     "None",
                     "DropForeignKey",
                     "DropUnique",
-                    "DropAllUniques"
+                    "DropAllUniques",
+                    "RenameKeepAndAddUnnamedOnOld"
                 ),
                 Levels(UniqueMultiplicity, "親の列 u に張る一意制約の数", "0", "1", "2"),
                 Levels(ReferencedKey, "子の外部キーが参照する親のキー", "PrimaryKey", "Unique"),
@@ -133,11 +135,12 @@ internal static class SyncPlanShapeRows
                 Levels(PrimaryKeyTwin, "主キーと同じ列の一意制約", "0", "1"),
                 Levels(
                     AddedForeignKey,
-                    "目標の図で足す外部キー（live の表 e の列から親の主キーへ。両端の型が同じ・子の最初の列が bigint・文字列）",
+                    "目標の図で足す外部キー（live の表 e の列から親の主キーへ。両端の型が同じ・子の最初の列が bigint・文字列・両端の型が同じで e の行が親に無い値を持つ）",
                     "None",
                     "IntChild",
                     "BigIntChild",
-                    "VarCharChild"
+                    "VarCharChild",
+                    "OrphanChild"
                 ),
             ],
             [
@@ -282,7 +285,39 @@ internal static class SyncPlanShapeRows
             [PrimaryKeyTwin] = "0",
             [AddedForeignKey] = "BigIntChild",
         },
-        // 同（4 方言）：live の列どうし（親 int・子 varchar）に外部キーを足す
+        // 前寄せの型の判定（P5-2 の本番 PA1・Oracle）：外部キーの両端を別々の型へ変え（子は互換の範囲で広げ、親は互換でない型へ）、
+        // 表 d の外部キーを作り直す。同期後の両端で「必ず断られる」と判定して、先頭の位置では通る子の変更を前寄せし、断られる親の
+        // 変更は元の位置に残って、先に外した d の外部キーが消えたまま残った
+        new Dictionary<string, string>
+        {
+            [PkChange] = "None",
+            [ReferencingFks] = "1",
+            [TypeChange] = "DivergentEnds",
+            [ExplicitOp] = "None",
+            [UniqueMultiplicity] = "0",
+            [ReferencedKey] = "PrimaryKey",
+            [ForeignKeyTypes] = "Same",
+            [CollateralFk] = "AlterOtherForeignKey",
+            [PrimaryKeyTwin] = "0",
+            [AddedForeignKey] = "None",
+        },
+        // 付け直しの並び（P5-2 の本番 PB1・MySQL・Oracle）：親の主キーを並べ替え（子の外部キーを外して付け直す）、親の無い値を持つ
+        // 列へ外部キーを足す。付け直しを利用者の追加の後ろに置いたので、追加が既存の行で断られると付け直しが走らず、外した外部キーが
+        // 消えたまま残った
+        new Dictionary<string, string>
+        {
+            [PkChange] = "Reorder",
+            [ReferencingFks] = "1",
+            [TypeChange] = "None",
+            [ExplicitOp] = "None",
+            [UniqueMultiplicity] = "0",
+            [ReferencedKey] = "PrimaryKey",
+            [ForeignKeyTypes] = "Same",
+            [CollateralFk] = "None",
+            [PrimaryKeyTwin] = "0",
+            [AddedForeignKey] = "OrphanChild",
+        },
+        // 型の違う外部キーの追加（修正 AC2・4 方言）：live の列どうし（親 int・子 varchar）に外部キーを足す
         new Dictionary<string, string>
         {
             [PkChange] = "None",
@@ -427,7 +462,7 @@ internal static class SyncPlanShapeRows
     {
         // 参照される親の列と全部の子の型の種類を変える行は、親・子・d を行 0 で作る（Oracle は行のある列の型の種類を変えられない＝
         // ORA-01439）
-        var kindChangesBothEnds = row[TypeChange] == "BothEndsKindChange";
+        var kindChangesBothEnds = row[TypeChange] is "BothEndsKindChange" or "DivergentEnds";
         var p = kindChangesBothEnds ? live.Table("p", 0) : live.Table("p");
         var id = live.Int(p, "id", pk: true);
         var k = live.Int(p, "k", pk: true);
@@ -485,8 +520,19 @@ internal static class SyncPlanShapeRows
         // （外部キーの両端の型の水準が作る k の型の違いを、足す外部キーへ持ち込まない）
         if (row[AddedForeignKey] != "None")
         {
-            var e = live.Table("e", 0);
+            // 親の無い値を持つ行（OrphanChild）：足す外部キーは既存の行で断られる（計画は列の値を見ないので警告しない。宣言して
+            // 実 DB の表明 1 だけを外し、外した付け直しが消えないこと＝表明 1b は掛ける）
+            var orphanRows = row[AddedForeignKey] == "OrphanChild";
+            var e = orphanRows ? live.Table("e") : live.Table("e", 0);
+            Func<int, string?>? orphan = orphanRows
+                ? r => (900 + r).ToString(CultureInfo.InvariantCulture)
+                : null;
             live.Int(e, "id", pk: true);
+
+            if (orphanRows)
+            {
+                live.ExpectDataFailure(FuzzDataFailureKind.AddForeignKey, "e", "fk_e_p");
+            }
 
             switch (row[AddedForeignKey])
             {
@@ -497,11 +543,11 @@ internal static class SyncPlanShapeRows
                     live.VarChar(e, "p_ref_0", 10, nullable: true);
                     break;
                 default:
-                    live.Int(e, "p_ref_0", nullable: true);
+                    live.Int(e, "p_ref_0", nullable: true, value: orphan);
                     break;
             }
 
-            var secondColumn = live.Int(e, "p_ref_1", nullable: true);
+            var secondColumn = live.Int(e, "p_ref_1", nullable: true, value: orphan);
 
             if (row[ForeignKeyTypes] == "DecimalOtherKeyColumn")
             {
@@ -573,6 +619,19 @@ internal static class SyncPlanShapeRows
                 }
 
                 break;
+            case "DivergentEnds":
+                // 外部キーの両端を別々の型へ：最初の子は互換の範囲で広げ（int → bigint）、参照される親の列は互換でない型へ（int →
+                // varchar）。子の変更は先頭へ移しても通り、断られるのは親の変更。子の表を先頭へ移して子の変更を計画の順で先に並べる
+                // （実 DB は取り込んだ表の名前の順で c1 が p より先。網の図は p が先なので、移さないと子が先の形が出ない）
+                target.MoveTableFirst("c1");
+                target.SetType("c1", childColumn, FuzzTypeKind.BigInt);
+                target.SetType(
+                    "p",
+                    row[ReferencedKey] == "Unique" ? "u" : "id",
+                    FuzzTypeKind.VarChar,
+                    10
+                );
+                break;
         }
 
         switch (row[PkChange])
@@ -603,14 +662,21 @@ internal static class SyncPlanShapeRows
                 target.DropForeignKey(target.ForeignKey("c1", childColumn));
                 break;
             case "DropUnique":
-                target.DropUnique("p", UniqueNames(row)[0]);
+                target.DropUniqueOn("p", UniqueNames(row)[0], ["u"]);
                 break;
             case "DropAllUniques":
-                foreach (var name in UniqueNames(row))
+                // 最初の 1 つは必ず外す。2 つ目以降は、同じ列集合の一意制約を 1 つの索引にまとめる DB（SQLite）では外す物が残っていない
+                foreach (var (name, index) in UniqueNames(row).Select((n, i) => (n, i)))
                 {
-                    target.DropUnique("p", name);
+                    target.DropUniqueOn("p", name, ["u"], absentAllowed: index > 0);
                 }
 
+                break;
+            case "RenameKeepAndAddUnnamedOnOld":
+                // 名前を保って最初の一意制約の列を u から w へ変え（作り直し）、元の列 u へ名前の無い一意制約を足す（取込が一意制約の
+                // 名前を持たない方言＝SQLite では、u の一意制約を列で引いて変える）
+                target.ChangeUniqueOn("p", UniqueNames(row)[0], ["u"], "w");
+                target.AddUnique("p", null, "u");
                 break;
         }
 
@@ -646,7 +712,8 @@ internal static class SyncPlanShapeRows
                     "BothEnds",
                     "ChildNullability",
                     "ChildKindChange",
-                    "BothEndsKindChange"
+                    "BothEndsKindChange",
+                    "DivergentEnds"
                 )
                 || Has(ExplicitOp, "DropForeignKey")
                 || Has(ForeignKeyTypes, "Wider", "DecimalOtherKeyColumn")
@@ -670,6 +737,13 @@ internal static class SyncPlanShapeRows
 
         // 親と最初の子だけの型の変更は、変えない兄弟の外部キーが要る（参照 1 本なら両端の変更と同じ）
         if (Has(ReferencingFks, "0", "1") && Has(TypeChange, "PartialBothEnds"))
+        {
+            return false;
+        }
+
+        // 名前を保って列を変え元の列へ名前の無い一意制約を足すのは一意制約 1 つの行だけ（2 つなら元の列のもう 1 つが名前の無い
+        // 制約を満たして、追加が出ない）
+        if (Has(ExplicitOp, "RenameKeepAndAddUnnamedOnOld") && !Has(UniqueMultiplicity, "1"))
         {
             return false;
         }

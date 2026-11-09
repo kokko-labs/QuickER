@@ -49,6 +49,16 @@ public sealed class SyncPlanSection
 
     /// <summary>このセクションに含まれる差分項目（入力の出現順を保持する）。</summary>
     public IReadOnlyList<SchemaDiffItem> Items { get; init; } = [];
+
+    /// <summary>
+    /// 必ず断られる文として計画の先頭へ移したセクションか（DDL が暗黙コミットされる方言の前寄せ＝
+    /// <see cref="SyncPlanner"/> の <c>MoveCertainFailureFirst</c>）。
+    /// </summary>
+    /// <remarks>
+    /// レンダラーは見ない（文の並びはセクションの順のまま）。前寄せした文がその位置で断られることを、同期計画の総当たりの
+    /// 静的な規則が確かめるための印。
+    /// </remarks>
+    internal bool IsMovedFirst { get; init; }
 }
 
 /// <summary>
@@ -175,13 +185,15 @@ public enum SyncPlanWarningKind
     /// </remarks>
     DefaultOnColumnTypeKindChange,
 
-    /// <summary>外して付け直す外部キーの構成列の型の種類を変える（列が空でないと型の種類を変えられない方言＝Oracle）。</summary>
+    /// <summary>
+    /// 列が空でないと通らない列の変更（<see cref="SyncDialectCapabilities.RequiresEmptyColumn"/>＝Oracle の型の種類の変更・精度の縮小）より
+    /// 前で外し、その後ろで付け直す制約（暗黙に外して付け直す外部キー・一意制約・主キー、主キーの変更の解除、選んだ作り直しの削除）。
+    /// </summary>
     /// <remarks>
-    /// 列に値があると DB が型の種類の変更を断り（ORA-01439）、DDL が暗黙コミットされるので、先に外した外部キーは付け直されずに残る
-    /// （<see cref="SyncDialectCapabilities.TypeKindChangeRequiresEmptyColumn"/>）。値があるかは図からは分からないので、実行は止めずに
-    /// 警告に留める。外部キーごとに 1 件。
+    /// 列に値があると DB がその変更を断り（ORA-01439・ORA-01440・ORA-30082）、DDL が暗黙コミットされるので、先に外した制約は
+    /// 付け直されずに残る。値があるかは図からは分からないので、実行は止めずに警告に留める。制約ごとに 1 件。
     /// </remarks>
-    ForeignKeyRebuildAroundTypeKindChange,
+    ConstraintRebuildAroundEmptyColumnChange,
 
     /// <summary>選んだ列の削除で構成列が消える一意制約を、削除を選んでいなくても外した。</summary>
     /// <remarks>
@@ -229,6 +241,17 @@ public enum SyncPlanWarningKind
     /// 表ごとに 1 件。
     /// </remarks>
     TableWithoutColumns,
+
+    /// <summary>
+    /// 取込が図へ入れずに捨てた表の中の物（大文字小文字・前後の空白だけ違う列名の後着の列・範囲の外や取り込まなかった表への外部キーなど）が
+    /// ある表を作り直す項目を、計画から外した（テーブル再構築の方言＝SQLite）。
+    /// </summary>
+    /// <remarks>
+    /// 再構築は live の図から表を作り直すので、捨てた物は新しい表に無く、データごと黙って消える。捨てた物は取込警告が名指しする
+    /// （<see cref="SchemaImportWarningKinds.RebuildLosesTableContent"/>）。その表を作り直す選んだ項目（列・制約・列順の変更）と、その表の
+    /// 外部キーの端を消す表・列の削除を外す。表ごとに 1 件。
+    /// </remarks>
+    TableRebuildLosesImportDiscardedContent,
 }
 
 /// <summary>
@@ -243,12 +266,13 @@ public enum SyncPlanWarningKind
 /// 計画から外した項目のテーブル、<see cref="SyncPlanWarningKind.ForeignKeyNotOnCandidateKey"/> と
 /// <see cref="SyncPlanWarningKind.SetDefaultOnNotNullColumn"/> と <see cref="SyncPlanWarningKind.SetNullOnNotNullColumn"/> では外部キーを保有する子テーブル、<see cref="SyncPlanWarningKind.SchemaQualifiedTableName"/> ではドットを含む表名（Detail は空）、
 /// <see cref="SyncPlanWarningKind.DefaultOnColumnTypeKindChange"/> では列のテーブル（Detail は「列名 (旧の型 → 新しい型)」）、
-/// <see cref="SyncPlanWarningKind.ForeignKeyRebuildAroundTypeKindChange"/> では外部キーを保有する子テーブル（Detail は
-/// 「制約名 (表.列: 旧の型 → 新しい型, …)」）、
+/// <see cref="SyncPlanWarningKind.ConstraintRebuildAroundEmptyColumnChange"/> では制約を持つテーブル（外部キーは子テーブル。Detail は
+/// 「制約名 (表.列: 旧の型 → 新しい型, …)」で、主キーの制約名は <c>PRIMARY KEY</c>）、
 /// <see cref="SyncPlanWarningKind.UniqueConstraintDroppedWithColumn"/> と <see cref="SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey"/> では一意制約のテーブル（Detail は「制約名 (構成列, …)」）、
 /// <see cref="SyncPlanWarningKind.DescriptionCharactersReplaced"/> では説明のテーブル（Detail は「表」または「表.列」）、
 /// <see cref="SyncPlanWarningKind.TableLeftWithoutColumns"/> では列を消す表（Detail は計画から外した列の削除の列名をカンマ区切りで並べたもの）、
-/// <see cref="SyncPlanWarningKind.TableWithoutColumns"/> では追加を外した列の無い表（Detail は空）。
+/// <see cref="SyncPlanWarningKind.TableWithoutColumns"/> では追加を外した列の無い表（Detail は空）、
+/// <see cref="SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent"/> では作り直しを外した表（Detail は取込警告が名指しした捨てた物をカンマ区切りで並べたもの）。
 /// </param>
 /// <param name="Detail">
 /// 補足（外部キー制約名など。無ければ空文字）。

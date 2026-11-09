@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Tests.TestSupport.Engines;
@@ -193,6 +194,59 @@ internal static partial class SyncPlanExpectationRows
                     s.Unique("Customer", "UQ_y", "Code");
                 })
                 .Expect(e => e.Diff.Empty()),
+            // 名前を保って列を変え（作り直し＝既定で未選択）、元の列へ名前の無い一意制約を足す（追加＝既定で選択）。既定の選択のまま
+            // 流すと、作り直しを選ばないので元の制約が残り、同じ列に一意制約が重なる（Oracle は ORA-02261）。計画は残る live の一意制約と
+            // 同じ列集合の追加を、その制約の作り直しを前提にする項目として外して名指しする（5 方言）
+            Row(
+                    "diff-uq-name-step-unnamed-add-on-old-columns-default-selection-is-excluded-with-warning",
+                    "一意制約の名前の段: 既定の選択では、残る live の一意制約と同じ列集合の追加を外して名指しする",
+                    AllDialects
+                )
+                .Live(s =>
+                {
+                    UniqueCustomer(s);
+                    s.Unique("Customer", "UQ_x", "Code");
+                })
+                .Target(s =>
+                {
+                    UniqueCustomer(s);
+                    s.Unique("Customer", "UQ_x", "Kind");
+                    s.Unique("Customer", null, "Code");
+                })
+                .Expect(e =>
+                    e.Diff.Unordered(
+                            "AlterUniqueConstraint * sel=0 *",
+                            "AddUniqueConstraint * sel=1 *"
+                        )
+                        .Excluded.Unordered("AddUniqueConstraint *")
+                        .Warnings.Single("SelectedItemRequiresUnselectedItem(Customer): * (UQ_x)")
+                ),
+            Row(
+                    "diff-uq-name-step-unnamed-add-on-old-columns-all-selected-applies-both",
+                    "一意制約の名前の段: 作り直しも選べば、同じ列集合の追加は外さない",
+                    AllDialects
+                )
+                .Live(s =>
+                {
+                    UniqueCustomer(s);
+                    s.Unique("Customer", "UQ_x", "Code");
+                })
+                .Target(s =>
+                {
+                    UniqueCustomer(s);
+                    s.Unique("Customer", "UQ_x", "Kind");
+                    s.Unique("Customer", null, "Code");
+                })
+                .Select(items =>
+                {
+                    foreach (var item in items.Where(i => i.IsSelectable))
+                    {
+                        item.IsSelected = true;
+                    }
+                })
+                .Expect(e =>
+                    e.Excluded.Empty().Warnings.Absent("SelectedItemRequiresUnselectedItem*")
+                ),
             Row(
                     "diff-uq-name-step-skips-unnamed-live",
                     "一意制約の名前の段: 図の名前を先に DB の同じ名前と組み、残りを列集合で組む",

@@ -365,6 +365,9 @@ public sealed class DialectDocsTableTests
         ["A failed re-add can leave the foreign key dropped"] = c => !c.TransactionalDdl,
         ["Changing the type kind of a column needs the column to be empty"] = c =>
             c.TypeKindChangeRequiresEmptyColumn,
+        [
+            "Lowering the precision, scale or fractional seconds of a column needs the column to be empty"
+        ] = c => c.PrecisionDecreaseRequiresEmptyColumn,
     };
 
     /// <summary>T-Q の「数える単位」の語（英語・日本語）</summary>

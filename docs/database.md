@@ -509,8 +509,9 @@ On the other dialects it is shown for information only and is not synced.
 
 #### Computed columns and unique constraints on the primary key columns
 
-A computed column's nullability is never compared, because the database derives it from the expression and the diagram does not hold the expression.
-A computed column's type change can be selected where the table at the top of this section shows it, and selecting it never changes the column's nullability.
+The nullability of a computed column in the database is never compared, because the database derives it from the expression and the diagram does not hold the expression.
+The type change of a computed column in the database can be selected where the table at the top of this section shows it, and selecting it never changes the column's nullability.
+A column that is computed only in the diagram (an ordinary column in the database) is compared as an ordinary column for both type and nullability, and those changes can be selected, because DDL creates a computed column as an ordinary column.
 PostgreSQL's `ALTER COLUMN ... TYPE` keeps the expression, and MySQL's `MODIFY` writes the expression and the `VIRTUAL` or `STORED` kind back from the live catalog.
 On the other dialects it is shown for information only, because the type cannot be changed without the expression (SQL Server rejects the change and a SQLite rebuild would drop the expression).
 Where the table at the top of this section shows that a unique constraint on exactly the primary key's columns is not kept, such a constraint is not compared and does not become a diff item.
@@ -563,6 +564,7 @@ SQLite rebuilds tables and uses its own order.
 - A selected change that needs a change you did not select (a new table or column, or a primary key change) is left out of the script, and the confirmation names it together with what it needs.
   Dropping a column of the primary key needs the primary key change that removes the column.
   A foreign key you add or change needs the primary key change when it refers to the parent's new primary key, and that key is neither the primary key nor a unique constraint without the change.
+  A unique constraint you add or change needs the change of a unique constraint in the database when both have the same columns and you selected neither dropping nor changing the one in the database (for example, you move a named unique constraint to other columns, add an unnamed one on its old columns, and select only the addition).
   QuickER does not select the needed change for you
 - When the selected column drops would leave a table without any column, those column drops are left out of the script, and the confirmation names the table and the columns.
   A database table needs at least one column (SQL Server, MySQL and Oracle refuse to drop the last one, and a PostgreSQL table without columns cannot be imported back), so delete the table from the diagram and select dropping the table instead.
@@ -576,7 +578,8 @@ SQLite rebuilds tables and uses its own order.
 
 - On SQL Server, PostgreSQL, and SQLite the script runs in a transaction and rolls back on failure.
   On MySQL / Oracle, DDL is implicitly committed by design, so a warning explains that a mid-script failure can leave changes partially applied.
-  On these dialects the script is ordered so that a failure does not leave constraints dropped: a statement that the sync knows will be refused (a column change, a primary key drop, or a unique constraint drop that a foreign key kept by the sync blocks; when the sync drops every key that can support such a foreign key, those drops) runs first, so the database stays unchanged, and among the foreign key additions, those whose referenced columns are not proven to be a key run last
+  On these dialects the script is ordered so that a failure does not leave constraints dropped: a statement that the sync knows will be refused (a column change, a primary key drop, or a unique constraint drop that a foreign key kept by the sync blocks; when the sync drops every key that can support such a foreign key, those drops) runs first, so the database stays unchanged.
+  Foreign key additions run in this order: foreign keys re-added as they were dropped, foreign keys re-created with a changed definition, new foreign keys, and those whose referenced columns are not proven to be a key, so a new foreign key that existing rows refuse does not stop the re-adds before it
 - The Oracle script and DDL can also be run by hand in SQL*Plus.
   Ordinary statements end with `;`, and a `/` line follows only a PL/SQL block, so each statement runs exactly once (SQL*Plus runs the previous statement again on a `/` line)
 
@@ -614,6 +617,7 @@ Foreign keys that rely on the changed primary key (they refer to the same column
 | Integer types differing only in width are allowed on the two ends | — (error 1778) | ✅ | — (error 3780) | ✅ (`NUMBER` without decimals) | ✅ |
 | A failed re-add can leave the foreign key dropped | — | — | ✅ | ✅ | — |
 | Changing the type kind of a column needs the column to be empty | — | — | — | ✅ (ORA-01439) | — |
+| Lowering the precision, scale or fractional seconds of a column needs the column to be empty | — | — | — | ✅ (ORA-01440, ORA-30082) | — |
 
 A primary key dropped and re-added by a key column change (see the table above) is named `PK_{table}`.
 On MySQL, a foreign key of the table whose primary key changes is also dropped and re-created when its columns lead the old primary key, because the primary key cannot be dropped while it is the only index supporting that foreign key.
@@ -621,7 +625,8 @@ The same applies when dropping a unique constraint whose index is the only one s
 When a change leaves the two ends of a foreign key with different types after the sync (altering the type of only one side, for example), the foreign key is not dropped and re-added, and the column change fails as it is (the database stays unchanged).
 The confirmation names such a foreign key on every dialect, also on PostgreSQL and Oracle, which change the column with the foreign key in place.
 When the sync changes both ends to types that match, PostgreSQL and Oracle still drop the foreign key and re-add it after the column changes if the ends do not match while only one of them has changed, because the database refuses the first column change otherwise.
-Where the table above says changing the type kind of a column needs the column to be empty, the confirmation names a foreign key re-created around a change of its column's type kind (the base type name, such as `NUMBER` to `NVARCHAR2`): if the column has data, the change fails and the dropped foreign key stays dropped.
+Where the table above says a column change needs the column to be empty (a change of the type kind, that is the base type name such as `NUMBER` to `NVARCHAR2`, and lowering the precision, scale or fractional seconds), the confirmation names every constraint (foreign key, primary key or unique constraint) that the script drops before such a change and adds back after it.
+If the column has data, the change fails and the dropped constraints stay dropped.
 QuickER treats such a type difference as one that can make re-adding the foreign key fail, and on MySQL / Oracle a failed re-add leaves the foreign key missing.
 Integer types that differ only in width are not a mismatch where the table above allows them on the two ends.
 The databases accept some other combinations as well (decimal precisions on PostgreSQL, MySQL and Oracle, and integers referring to decimals on PostgreSQL), but QuickER still treats them as a mismatch: the confirmation names the foreign key, and the sync goes through when the database accepts it.
@@ -738,6 +743,12 @@ To make the loss visible, QuickER reads the live `CREATE TABLE` statement of eve
 If the table needs those attributes, re-apply them yourself after the sync, or run the change as hand-written SQL.
 A table that depends on `WITHOUT ROWID` or `STRICT` comes back as an ordinary rowid, non-strict table, so do not sync it through a rebuild; apply the change as hand-written SQL instead.
 `NOT DEFERRABLE` and `DEFERRABLE INITIALLY IMMEDIATE` check immediately, the same as the default, so losing them changes nothing and they are not listed.
+
+A table that holds something the import left out of the diagram (the second of two columns whose names differ only in case or surrounding spaces, a foreign key to a table that is not in the diagram or does not exist, a disabled constraint, and so on, each named by an import warning) is not rebuilt.
+A rebuild would silently drop what the import left out, together with its data.
+The changes that would rebuild that table (altering or dropping columns, changing primary keys, unique constraints or foreign keys, and reordering columns) are left out of the script, together with drops of the tables and columns its foreign keys refer to, and the confirmation names the table and what the import left out.
+Adding columns and dropping the table still run.
+To sync the table, fix what the import warning names in the database (rename the column, drop the foreign key, and so on) and import it again.
 
 The sync-target SQLite file can also be created fresh with the "Create new" button in the connection dialog.
 Apply the whole diagram to an empty database to set it up from scratch.

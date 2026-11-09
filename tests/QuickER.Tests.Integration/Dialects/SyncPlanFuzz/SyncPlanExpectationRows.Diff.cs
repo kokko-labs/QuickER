@@ -107,6 +107,56 @@ internal static partial class SyncPlanExpectationRows
                         .IsNullable = true
                 )
                 .Expect(e => e.Diff.Single("AlterColumn *", "AlterColumn * able=0 *")),
+            // 図だけが計算列（DDL は計算列を普通の列として作る＝docs/code-generation.md）：DB の列は普通の列なので、型も NULL 許容も
+            // 普通の列として比べて変えられる（DB が計算列かで決める）
+            Row(
+                    "diff-diagram-only-computed-column-type-change-is-selectable",
+                    "計算列の型差: 図だけが計算列（DB は普通の列）なら、型の変更は選べる普通の列の変更（5 方言）",
+                    AllDialects
+                )
+                .Live(s =>
+                    s.Tbl("Item", ("Id", "int", true), ("Total", "decimal(18,2)", false))
+                        .Columns[1]
+                        .IsNullable = false
+                )
+                .Target(s => ComputedTotal(s, "decimal(21,2)", nullable: false))
+                .Expect(e =>
+                    e.Diff.Single(
+                        "AlterColumn *",
+                        "AlterColumn * able=1 *",
+                        "*"
+                            + string.Format(
+                                ProviderStrings.Diff_TypeChange,
+                                "decimal(18,2)",
+                                "decimal(21,2)"
+                            )
+                            + "*"
+                    )
+                ),
+            Row(
+                    "diff-diagram-only-computed-column-nullability-is-alter-column",
+                    "計算列の NULL 許容差: 図だけが計算列（DB は普通の列）なら、NULL 許容は普通の列として比べる（5 方言）",
+                    AllDialects
+                )
+                .Live(s =>
+                    s.Tbl("Item", ("Id", "int", true), ("Total", "decimal(21,2)", false))
+                        .Columns[1]
+                        .IsNullable = false
+                )
+                .Target(s => ComputedTotal(s, "decimal(21,2)", nullable: true))
+                .Expect(e =>
+                    e.Diff.Single(
+                        "AlterColumn *",
+                        "AlterColumn * able=1 *",
+                        "*"
+                            + string.Format(
+                                ProviderStrings.Diff_NullableChange,
+                                ProviderStrings.Diff_Nullable_Deny,
+                                ProviderStrings.Diff_Nullable_Allow
+                            )
+                            + "*"
+                    )
+                ),
             Row(
                     "diff-non-computed-column-nullability-is-alter-column",
                     "計算列でなければ NULL 許容差は従来どおり AlterColumn になる",

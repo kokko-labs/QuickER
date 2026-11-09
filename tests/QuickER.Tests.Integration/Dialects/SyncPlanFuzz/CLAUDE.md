@@ -8,7 +8,7 @@
 ## 静的な規則
 
 - `SyncPlanStaticRules.Evaluate` は、逐次 DDL の 4 方言だけを対象に、実際の計画の文を順に DB 側の図へ当てて DB が断る最初の文を予言する。再構築の方言は判定しない。
-- 規則は 8 つ。
+- 規則は 9 つ。
   - R1：参照されているキー・表を、外部キーが残ったまま外す（MySQL は先頭の列の索引も）。
   - R2：SQL Server で、一意制約・主キー・外部キーが使う列の型を変える。
   - R3：MySQL で、外部キーの先頭の列を支える索引を外す。
@@ -17,6 +17,8 @@
   - R6：SQL Server・MySQL・Oracle で表の最後の列を消す。
   - R7：列の型を変えた後、残す外部キーのその列を含む組の両端が、方言の宣言（`AreForeignKeyCompatibleTypes`）で並べられない（PostgreSQL 42804・Oracle ORA-02267。外し直しの方言は R2 が先に当たる）。宣言は「真なら DB が必ず受け入れる」側なので、偽の組を DB が受け入れる形では予言が外れうる。生成器と形の行の外部キーの列は整数か文字列で、その範囲の宣言（整数の幅・文字列の長さ）は実 DB の期待の行と形の行が固定する。R2 が外し直しの方言しか見ないため、PostgreSQL・Oracle の互換でない型への変更を予言できなかった（P5-2 の試運転の 2 回目の V4）。文を順に当てた途中の状態の型で比べるので、外部キーの両端を同じ別の型へ 1 列ずつ変える途中の状態も予言する（修正 AC2 の V8）。
   - R8：外部キーを足す文で、組の両端のその時点の型が方言の宣言で並べられない（MySQL 3780・SQL Server 1778 / 1753・PostgreSQL 42804・Oracle ORA-02267）。DB 側の図の外部キーが同じ型のまま持っていた組（外して付け直す文）は、DB が受け入れたので数えない（状態の読み込みで組と両端の型を記録する）。宣言の扱いは R7 と同じ（足す外部キーの列は、生成器・形の行とも整数か文字列）。選んだ外部キーの追加の両端の型を見る規則が無かったため、live の列どうしの型の違う外部キーの追加が警告なしに断られるのを予言できなかった（修正 AC2）。
+  - R9：同じ列の並びに一意制約を 2 つ張れない方言（`SupportsUniqueConstraintOnPrimaryKey` が偽の逐次 DDL の方言＝Oracle の ORA-02261）で、足す一意制約の列集合が、その時点で残る主キーか一意制約と同じ。
+- 前寄せの規則 M1（`SyncPlanStaticRules.MovedFirstNotFailing`・違反の頭 `static M1:`）：計画が前寄せしたセクション（印 `SyncPlanSection.IsMovedFirst`）の最後の文が、計画の順のその位置で断られると予言される文でなければならない（前寄せの最後がキーの削除か型を変える列の変更のときだけ判定）。前寄せした後ろへ予言された失敗が進むなら、前寄せが通る文を移し、断られる文が元の位置に残っている。実 DB の総当たりの結果にも加える（W1 と同じ）。
 - 予言したのに予告の警告が無ければ違反にする。`NonPredictingWarnings` 以外の警告を予告とみなし、断られる文と警告は結び付けない（実 DB の表明 1 と同じ粒度）。
 - 警告の正しさの規則 W1（`SyncPlanStaticRules.SpuriousTypeMismatchWarnings`）は、予言の有無に依らず掛ける：`ForeignKeyColumnTypeMismatch` が DB にある外部キーを名指しするなら、その外部キーに「端の型を計画が変え（`AreSameType` で比べる）、同期後にその組の両端が `AreForeignKeyCompatibleTypes` で並べられない」組がある。
   - DB は今その外部キーを両端の型のまま受け入れているので、計画が型を変えない組の違いを数えて「付け直せない」と言うのは偽の警告。
@@ -29,6 +31,7 @@
   - 断られる文そのものが、同じ計画の前の方で外した外部キーの付け直しであるとき、その外部キー（付け直しが断られて消えたまま残る）。前の 2 つの形だけでは、参照先の唯一の一意制約を同じ計画で外しながら列の変更で外部キーを付け直す同期（最後の付け直しが断られる）を、予告の警告があるので合格にしていた（修正 AC2 の d4-mysql-26・d4-oracle-26。実 DB の表明 1b の規則 5 だけが捕まえていた）。
   - 断られる文より後ろの表・列の削除のために先に外す制約。
   - 候補キーの警告を出した外部キー自身は除く（表明 1b と同じ）。
+- 同じ方言で、外部キーの追加の並びも D9 の違反にする（違反の頭 `static D9 (order):`・`SyncPlanStaticRules.ReAddsAfterNewAdds`）：前で外した外部キーの付け直しが、新しい外部キーの追加より後ろにある（候補キーの警告の外部キーは除く）。新しい外部キーは既存の行で断られうるので、後ろの付け直しが走らずに消えたまま残る（`src/QuickER.Provider/CLAUDE.md`「外部キーの追加の並び」）。実 DB の結果にも加える。
 
 ## 能力の組の網
 
@@ -41,9 +44,13 @@
     - 選び方は元のケースのものを差分の位置で写す（生成器の選び方は乱数を引くので、2 回呼ぶと種の列が変わる＝種の指紋は変わらない）。
     - DB 側の図には立てない。取込が主キーの列の印を false にそろえ、その印は主キーから外れる列の SQLite の再構築の NOT NULL として意味を持つ（立てると製品の契約の外の入力になる）。
     - 網の時間は差分と計画をもう 1 回作る分だけ伸びる（2026-11-09 の手元で、5 方言のテストの時間の合計が 23.6 秒から 29.6 秒）。
-    - 種を減らすと見逃しうる：N1 で捕まえる形のうち、同期後の NULL 許容（`PostSyncNullability`）は既定の 5000 種のうち Oracle の網の種 2269 だけ、SQLite の再構築の列の追加の写しは SQLite の網の種 6 つ（632・825・3749・4276・4277・4665）だけが捕まえる（2026-11-09 の測定。どちらも種を 500 に減らす変異テストの環境では捕まえない）。こうした形は期待の行（`plan-set-null-post-sync-nullability-alter-to-key-column-flagged-nullable`・`plan-rebuild-column-changes-of-key-columns-flagged-nullable-stay-not-null`）が受け持つ。N1 だけに守りを任せる形は、網の既定の種で何種が捕まえるかを確かめて、少なければ行を足す。
+  - 関係 N2（`SyncPlanCapabilityNetRunner.CaseFoldedLiveProblems`・違反の頭 `relation N2:`）：DB 側の図の名前の無い制約に実効名を付けてから、表名・列名を ASCII の小文字へ畳んでも（`FoldLiveNames`）、差分・計画の警告・外した項目が大文字小文字を無視して元と同じことを表明する。差分の名前を図の綴りから求める規則（`src/QuickER.Provider/CLAUDE.md`「差分の名前の綴り」）の一般の回帰の網。
+    - 掛けるのは決定的な行・網羅の行の全部と、乱数の種は普段 4 つに 1 つ（種の番号が 4 の倍数）・夜間は全部（`CaseFoldRelationApplies`）。出力に「relation N2 on X of Y seeds」を書く。
+    - 同期スクリプトは比べない（名前の無い外部キーを実行時に逆引きして外す文と、名前で外す文が違う）。
+    - 縮めた既定名の食い違いは、生成器の長い名前の水準（下の「生成器と方言の宣言」）が作る形で捕まえる。
+  - N1 について、種を減らすと見逃しうる：N1 で捕まえる形のうち、同期後の NULL 許容（`PostSyncNullability`）は既定の 5000 種のうち Oracle の網の種 2269 だけ、SQLite の再構築の列の追加の写しは SQLite の網の種 6 つ（632・825・3749・4276・4277・4665）だけが捕まえる（2026-11-09 の測定。どちらも種を 500 に減らす変異テストの環境では捕まえない）。こうした形は期待の行（`plan-set-null-post-sync-nullability-alter-to-key-column-flagged-nullable`・`plan-rebuild-column-changes-of-key-columns-flagged-nullable-stay-not-null`）が受け持つ。N1 だけに守りを任せる形は、網の既定の種で何種が捕まえるかを確かめて、少なければ行を足す。
 - 次元表 `SyncPlanCapabilityNetDimensions` の中身は次のとおり。
-  - 選び方・変更の種類・同期計画の形を変える `SyncDialectCapabilities` の 21 項目。派生ごとの固定の水準で、書き下ろしの表とプロバイダの値の食い違いは宣言の誤り。能力どうしの組は数えない。
+  - 選び方・変更の種類・同期計画の形を変える `SyncDialectCapabilities` の 22 項目。派生ごとの固定の水準で、書き下ろしの表とプロバイダの値の食い違いは宣言の誤り。能力どうしの組は数えない。
   - 変更 1 つにだけ値を持つ 3 因子。生成器が変更の文に `{type=…}` `{refs=…}` の札を書く。
     - `AlteredType`：型の変更の行き先。方言の上限ちょうどは `AtLimit`。
     - `ReferencingFks`：主キーの変更で参照する外部キーの数。
@@ -66,15 +73,19 @@
 
 ## 形の行
 
-- `SyncPlanShapeRows`（登録簿の部分 `ShapeRows`）は、主キーの変更 7 × 参照する外部キーの数 3 × 型の変更 9 × 明示の削除 4 × 一意制約の数 3 × 参照先のキー 2 × 外部キーの両端の型 3 × 巻き添えの外部キーの変更 2 × 主キーと同じ列の一意制約 2 × 足す外部キー 4 の網羅の配列 261 行。P1 と Q6 の 3 つ組を含むことを網が表明する。
+- `SyncPlanShapeRows`（登録簿の部分 `ShapeRows`）は、主キーの変更 7 × 参照する外部キーの数 3 × 型の変更 10 × 明示の操作 5 × 一意制約の数 3 × 参照先のキー 2 × 外部キーの両端の型 3 × 巻き添えの外部キーの変更 2 × 主キーと同じ列の一意制約 2 × 足す外部キー 5 の網羅の配列（必ず含む行を足して 363 行）。P1 と Q6 の 3 つ組を含むことを網が表明する。
+  - 型の変更の `DivergentEnds` は両端を別々の型へ変える：最初の子 c1 を int → bigint（宣言の範囲で互換）、参照される親の列を int → varchar(10)（互換でない）にし、c1 の表を目標の図の先頭へ移す（実 DB の取込の並びと同じく子の変更が先＝網の図では親の表が先に並ぶので、移さないと形が出ない）。前寄せが先頭で断られる文を選ぶこと（静的な規則 M1）を見る。
+  - 足す外部キーの `OrphanChild` は、表 e に親に無い値（900 番台）の行を入れて外部キーを足す（既存の行で断られる文として `FuzzLiveSchema.DataFailures` に宣言する）。外部キーの追加の並び（静的な規則の D9 の並び・表明 1b）を見る。
+  - 明示の操作の `RenameKeepAndAddUnnamedOnOld` は、名前を保って一意制約の列を u から w へ変え、元の列 u に名前の無い一意制約を足す（一意制約 1 つの行だけ）。一意制約の差分の名前の段と列集合の段が重なる形（`src/QuickER.Provider/CLAUDE.md`「一意制約の差分」）。
+  - 一意制約を外す・変える操作（`DropUnique`・`DropAllUniques`・`RenameKeepAndAddUnnamedOnOld`）は名前で引き、その名前が無ければ同じ列集合の名前の無い一意制約を引く（`ScenarioTarget.DropUniqueOn` / `ChangeUniqueOn`）。SQLite は取込が一意制約の名前を持たないので、名前で引くと何も外さなかった（SQLite の 177 行のうち一意制約を外す 58 行。普段の実 DB で流す 22 行を含む）。同じ列集合の一意制約を 1 つの索引にまとめる DB では、`DropAllUniques` の 2 つ目は何も外さない。
   - 型の変更の `BothEndsKindChange` は、参照される親の列（主キーを参照すれば `p.id`、一意制約なら `p.u`）と、それを参照する子の列すべて（c1..cN と、主キーを参照するなら `d`）を varchar(10) へ変える（親・子・d は行 0）。子を 1 つでも残すとその外部キーが同期後に食い違って名指しされ、予告の警告が途中の状態の失敗を隠すので全部を変える。
   - 足す外部キー（`AddedForeignKey`）は、外部キーの無い表 `e`（行 0）を置き、目標の図で `e(p_ref_0, p_ref_1)` から `p(id, k)` への外部キーを足す。水準は最初の列の型（`IntChild`・`BigIntChild`・`VarCharChild`）で、2 列目は `p.k` と同じ型（外部キーの両端の型の水準が作る k の型の違いを持ち込まない＝宣言の外で DB が受け入れる組を R8 に予言させない）。
   - 参照先のキー（`ReferencedKey`）：子の外部キーが親の主キーか `p.u` の一意制約を参照する。外部キーの両端の型（`ForeignKeyTypes`）：Wider は外部キーを張った後に参照される親の列を bigint にする（子の列は int のまま＝DB が受け入れる型の違う外部キー）。主キーの変更の `MoveToUniqueColumn` は主キーを `p.u` へ移し、型の変更の `ChildNullability` は最初の子の外部キーの列の NULL 許容だけを変える。
   - 外部キーの両端の型の `DecimalOtherKeyColumn` は親の主キーの 2 列目 `k` だけを小数にする（子の `p_ref_1` は int のまま。型の変更の水準は `k` を変えないので、複合外部キーの型の決まらない組が DB の受け入れている違いを持つ。bigint にしないのは、整数の幅の宣言で互換になり形が消えるため）。型の変更の `ChildKindChange` は最初の子の外部キーの列を int → varchar(10) にする（`c1` は行 0。Oracle は行のある列の型の種類を変えられない＝ORA-01439）。明示の削除の `DropAllUniques` は `p.u` の一意制約を全部外す（一意制約 2 つの行だけ）。
   - 巻き添えの外部キーの変更（`CollateralFk`）の `AlterOtherForeignKey` は親の主キーを参照する表 `d` を足し、その外部キーの ON DELETE を CASCADE へ変える（作り直しの外部キーが計画の前の方で外れる）。主キーと同じ列の一意制約（`PrimaryKeyTwin`）は `uq_p_pk(id, k)` を張る。
-  - 網羅の配列の後ろに、指摘の形の完全な行（`SyncPlanShapeRows.RequiredRows`＝P5-2 の試運転の L1・L4・2 回目の V1・V3・V4・V6、修正 AC2 の V8〔両端の種類の変更 × d の作り直し〕・型の違う外部キーの追加 2 つ〔BigIntChild・VarCharChild〕）を、含まれていなければ足す（全因子の起こり得る割り当てでなければ例外）。この行は普段の実 DB にも入れる。
-  - Oracle は一意制約 2 つの行を、SQL Server・MySQL は両端の型の違う外部キーを作れない（Msg 1778・エラー 3780＝DB の事実）ので両端の型が Same でない行を、`SupportsUniqueConstraintOnPrimaryKey` が偽の方言（Oracle・SQLite）は主キーと同じ列の一意制約の行を作らない。行の数は PostgreSQL 261・SQLite 137・Oracle 75・SQL Server・MySQL 94。
-- 網と夜間の実 DB は全行を流す。普段の実 DB は 2 因子の網羅に要る行と必ず含む行だけを流す（PostgreSQL 74 行・SQLite 72 行・Oracle 63 行・SQL Server・MySQL 74 行）。
+  - 網羅の配列の後ろに、指摘の形の完全な行（`SyncPlanShapeRows.RequiredRows`＝P5-2 の試運転の L1・L4・2 回目の V1・V3・V4・V6、修正 AC2 の V8〔両端の種類の変更 × d の作り直し〕・型の違う外部キーの追加 2 つ〔BigIntChild・VarCharChild〕、修正 AH の前寄せ〔DivergentEnds × 参照 1 × d の作り直し〕・外部キーの追加の並び〔主キーの並べ替え × 参照 1 × OrphanChild〕の 11 行）を、含まれていなければ足す（全因子の起こり得る割り当てでなければ例外）。この行は普段の実 DB にも入れる。
+  - Oracle は一意制約 2 つの行を、SQL Server・MySQL は両端の型の違う外部キーを作れない（Msg 1778・エラー 3780＝DB の事実）ので両端の型が Same でない行を、`SupportsUniqueConstraintOnPrimaryKey` が偽の方言（Oracle・SQLite）は主キーと同じ列の一意制約の行を作らない。行の数は PostgreSQL 363・SQLite 177・Oracle 112・SQL Server・MySQL 150。
+- 網と夜間の実 DB は全行を流す。普段の実 DB は 2 因子の網羅に要る行（PostgreSQL 73 行・SQLite 81 行・Oracle 78 行・SQL Server・MySQL 76 行）と必ず含む行だけを流す。
   - 2 因子の網羅に要る行は方言ごとに、その方言が作る行で作れる組を、その方言の行から選ぶ（`SyncPlanShapeRows.PairwiseRowIndexesFor`）。全方言で 1 つの部分を選ぶと、方言が作らない行の分だけその方言の組が普段の実行から抜ける。
 - 夜間だけの行の項目は範囲 `方言/scenarios/nightly`。実 DB の総当たりは夜間の実行でだけ受け持ち、網は常に受け持つ。
 
@@ -84,7 +95,6 @@
   - `AllowDuplicateForeignKeys`：ORA-02275。
   - `AllowDuplicateUniqueConstraints`：ORA-02261。
   - `DistinguishesSameSetConstraints`：SQLite は同じ列の並びの制約を名前で見分けないので、目標の図の変更で重ねない。
-  - `AllowsDateTimePrecisionDecreaseWithData`：ORA-30082。
   - `LimitType`：方言の上限ちょうどの型。
   - `RespelledTypeName`：同じ型の別の綴り。
   - `SymbolCharacter`：識別子の引用の中で特別な文字。
@@ -93,6 +103,13 @@
   - 水準は 4 つ：外部キーを親の一意制約の列へ付け替える（子の値を写し直す）・主キーと同じ列の一意制約（持てる方言だけ）・整数の列の型の種類を文字列へ変える（変える列と揃える相手の値が全部 NULL か行 0 のときだけ＝Oracle の ORA-01439。親が行 0 なら外部キーの両端をそろえて変える形が出る）・行 0 の子の型の違う live の文字列の列へ外部キーを足す。
   - 別の列にしたのは、本流の乱数の引き方・回数を変えないため。水準が出なかった種は足す前と同じケースで、種の指紋は水準が出た種だけ変わる（`ForSeed(seed, dialect, levels: false)` で足す前のケースを作れる）。別の列の種は決定的な式で作る（`HashCode.Combine` はプロセスごとに値が変わるので使わない）。
   - 生成器の穴（その形の入力を作らない）が 3 回続いた（修正 AA・AC・AC2）ので足した。
+- 既存の行で断られる文と、名前・計算列の形の水準は、さらに別の乱数の列（`DataLevelSeed`）で引く（先に足した水準の引き方も変えない）。水準は 4 つ：
+  - 親の無い値の列への外部キーの追加（行のある子の、親に無い値を持つ live の整数の列へ外部キーを張る。必須の形 `orphan-fk-add`）。
+  - 精度の縮小（小数の精度を 2 つ・bigint を int へ下げる。必須の形 `precision-decrease`）。日時の小数秒の縮小は、製品の宣言 `PrecisionDecreaseRequiresEmptyColumn` の方言（Oracle）の行のある表でもこの水準のときだけ作る。
+  - 図でだけ計算列にする（DB の普通の整数の列を目標の図だけで計算列にし、型か NULL 許容を変える。必須の形 `diagram-only-computed`。変更の文は既存の `computed type` / `computed nullable` の頭で、次元表は変えない）。
+  - 長い名前（表名を識別子の上限の半分を超える長さへ伸ばして大文字を混ぜる＝名前の無い外部キーの既定名が上限で縮められる。上限のある方言だけ・種の 6 つに 1 つ。必須の形 `long-default-name`）。生成器が明示の制約名に埋める表名・列名は先頭の 16 文字だけにする（明示の名前は利用者が付けた名前なので製品は縮めずに上限で断る。既定名だけを縮める形にする）。
+  - 既存の行で断られると決まっている文（親の無い値の外部キーの追加・列が空でないと通らない変更を行のある列へ当てる文）は `FuzzLiveSchema.DataFailures` に宣言する。実 DB の表明 1 は、宣言した文そのものが断られた失敗だけを外す（`SyncPlanFuzzRunner.IsDeclaredDataFailure`＝失敗したバッチの文か、無ければエラー文が宣言の名前を含む。SQLite は外部キー違反の表がすべて宣言の子の表）。表明 1b は掛ける。
+  - 4 つの形は網でだけ必須（実 DB の普段の種で出ない種の集合がありうる）。2026-11 の種の指紋の書き直しで変わった種は、どれもこの 4 つの水準が出た種だけ（SQLite 188／2000・MySQL 37／150・SQL Server 25／100・PostgreSQL 2／15・Oracle 0／4）。
 - 必須の形は方言ごとに決める（`FuzzShape.RequiredFor`）。実 DB では「同じ列の並びの一意制約 2 つの片方の削除と型の変更」を求めない。
   - 後から足した水準の形（`fk-on-unique`・`pk-twin-unique`・`kind-change`・`both-ends-kind-change`・`mismatched-fk-add`）は網では全部求める（`pk-twin-unique` は持てる方言だけ）。実 DB では DB 側の図で出る `fk-on-unique`・`pk-twin-unique` だけを求める。目標の図の変更で出る 3 つは網の 5000 種で 0.4〜3% しか出ず、普段の実 DB の種で出ない種の集合がありうるので、実 DB は形の行が受け持つ。
   - SQLite は DB が同じ列の並びの UNIQUE を 1 つの索引にまとめる。
@@ -157,7 +174,7 @@
   - 表明 1b：失敗で消えてよい制約だけが消える。
   - 表明 2 / 2b / 3：選んだ項目が消え、新しい差分が出ず、選ばなかった項目が残る。
   - 表明 4：選んだ変更の外の列属性が変わらない。
-  - 表明 5：行数と取込の警告。
+  - 表明 5：行数と取込の警告。新しく出た取込警告に加え、同期の前の取込警告が同期の後に消えたら、選んだ項目で説明できない限り違反にする（`SyncPlanFuzzRunner.LostImportWarnings`・違反の頭 `import warning lost:`）。取込が表の中の物を捨てた種別（`SchemaImportWarningKinds.RebuildLosesTableContent`）は、その表の削除か名指しした列の削除を選んだときだけ説明でき、ほかの種別はその表に触れる選んだ項目か、計画の `TableRebuildDropsColumnAttribute` の警告で説明できる。外部キーの警告は Subject が列でないので、その外部キーの子の列の削除では説明できない（今は生成器・期待の行がその形を作らない。限界は関数の remarks）。
 - 実 DB の段だけの汎用の表明 6：行の後に、製品の取込・実行器が DB のファイルを掴んでいない（`SyncPlanFuzzDialect.HeldFileProblem`。ファイルの DB の SQLite だけが実装し、DB のファイルを排他で開けるかで見る）。
   - SQLite の方言の自分の接続（行数・探針・問い合わせ・空のファイルの作成）はプールしない。製品と同じ組み方の接続文字列でプールすると、製品の掴みとテストの接続を区別できない。取込の接続文字列は画面と同じ `SqliteConnectionStringFactory.Build`。
   - Linux の排他は SQLite のロックと関係しないので、Windows のジョブでだけ効く（→ `src/QuickER.Provider.Sqlite/CLAUDE.md`「ファイルを掴まない接続」）。総当たりの種には掛けない。
@@ -208,6 +225,7 @@
   4. 表と列の削除で消えてよいのは、その表・列が実際に消えたときだけ。
   5. ほかは残る。
 - 候補キーを証明できないと警告した外部キー自身の消失だけは受け入れる。作り直しに重なったものは注 `warned-alter-foreign-key-exempt:{own-failure|collateral}` として数える。
+- 列が空でないと通らない変更の前後で外すと警告した制約（`ConstraintRebuildAroundEmptyColumnChange` が名指しした外部キー＝子の表と名前・主キー＝表・一意制約＝計画の削除の項目の名前から照合キー）の消失も受け入れ、注 `warned-empty-column-change-exempt` として数える（docs の約束どおりの部分適用）。名指しの無い制約・別の表の主キーは違反のまま。
 - 違反の文に `(rule n; warned=…; dropped-before-failure=…)` を添える。
 - 規則は `SyncPlanFuzzOracleTests`（DB なし・1 規則 1 行の表）が固定する。mutation 実証済み。
 - 失敗した種の警告の内訳と、「失敗を予告しない種類の警告しか無いのに失敗した種」を出力する（測るだけ）。

@@ -174,13 +174,21 @@ public sealed partial record SyncDialectCapabilities
     /// 列の型の種類（方言の正規化を通した、括弧より前の基本の名前）の変更を、列の値が全部 NULL か行 0 のときだけ受け付けるか（Oracle）。
     /// </summary>
     /// <remarks>
-    /// Oracle は行のある列の型の種類を変えられない（ORA-01439）。<c>true</c> の方言では <see cref="SyncPlanner"/> が、外して付け直す
-    /// 外部キーの構成列の型の種類を変える同期を <see cref="SyncPlanWarningKind.ForeignKeyRebuildAroundTypeKindChange"/> で名指しする。
-    /// 計画は列の値を見ないので止めず、判断の材料を渡す（DDL が暗黙コミットされるので、列の変更が断られると先に外した外部キーは
-    /// 付け直されずに残る）。種類の判定は基本の名前で行うので、Oracle が値のあるまま受け付ける種類の変更（<c>CHAR</c> と
-    /// <c>VARCHAR2</c> など）も名指ししうる（警告のため多い側に倒す）。
+    /// Oracle は行のある列の型の種類を変えられない（ORA-01439）。判定は <see cref="RequiresEmptyColumn"/>。種類の判定は基本の名前で
+    /// 行うので、Oracle が値のあるまま受け付ける種類の変更（<c>CHAR</c> と <c>VARCHAR2</c> など）も名指ししうる（警告のため多い側に倒す）。
     /// </remarks>
     public required bool TypeKindChangeRequiresEmptyColumn { get; init; }
+
+    /// <summary>
+    /// 数値の精度・スケール（整数部の桁を含む）と日時の秒の小数部の精度を下げる列の変更を、列の値が全部 NULL か行 0 のときだけ受け付けるか
+    /// （Oracle）。
+    /// </summary>
+    /// <remarks>
+    /// Oracle は行のある列の数値の精度・スケールを下げられず（ORA-01440）、日時の秒の小数部の精度も下げられない（ORA-30082）。
+    /// 値が新しい型に収まるかを問わない。ほかの方言は値が収まれば通す（収まらない値はデータの都合の失敗）ので <c>false</c>。
+    /// 判定は <see cref="RequiresEmptyColumn"/>。
+    /// </remarks>
+    public required bool PrecisionDecreaseRequiresEmptyColumn { get; init; }
 
     /// <summary>計算列・生成列の型を、式を保ったまま変えられるか（PostgreSQL と MySQL）。</summary>
     /// <remarks>
@@ -371,6 +379,107 @@ public sealed partial record SyncDialectCapabilities
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Singleline
     )]
     private static partial Regex StringTypePattern();
+
+    /// <summary>列の変更が、列の型の種類（方言の正規化を通した、括弧より前の基本の名前）を変えるか</summary>
+    /// <remarks>
+    /// 既定値のある列の型の種類の変更の警告（<see cref="SyncPlanWarningKind.DefaultOnColumnTypeKindChange"/>）と、列が空でないと通らない
+    /// 変更の判定（<see cref="RequiresEmptyColumn"/>）が共有する。基本の名前どうしは <see cref="AreSameType"/> で比べる。
+    /// </remarks>
+    public bool ChangesTypeKind(string? oldType, string? newType) =>
+        !AreSameType(BaseTypeName(oldType), BaseTypeName(newType));
+
+    /// <summary>列の変更が、この方言では列の値が全部 NULL か行 0 のときだけ通るか（Oracle）</summary>
+    /// <remarks>
+    /// <see cref="TypeKindChangeRequiresEmptyColumn"/> の方言の型の種類の変更（<see cref="ChangesTypeKind"/>）と、
+    /// <see cref="PrecisionDecreaseRequiresEmptyColumn"/> の方言の精度の縮小（<see cref="DecreasesPrecision"/>）。計画は列の値を見ないので、
+    /// 真の変更の前後で外して付け直す制約を名指しする（<see cref="SyncPlanWarningKind.ConstraintRebuildAroundEmptyColumnChange"/>）。
+    /// </remarks>
+    public bool RequiresEmptyColumn(string? oldType, string? newType) =>
+        TypeKindChangeRequiresEmptyColumn && ChangesTypeKind(oldType, newType)
+        || PrecisionDecreaseRequiresEmptyColumn && DecreasesPrecision(oldType, newType);
+
+    /// <summary>
+    /// 列の変更が、同じ基本の名前の数値・日時の型の精度を下げるか（方言の正規化を通して比べる）
+    /// </summary>
+    /// <remarks>
+    /// 対象は数値（<c>number</c> / <c>numeric</c> / <c>decimal</c> / <c>dec</c>）と日時（<c>timestamp</c> / <c>time</c> /
+    /// <c>datetime</c> / <c>datetime2</c> / <c>datetimeoffset</c>）で、括弧の後ろの指定（<c>WITH TIME ZONE</c> など）が同じこと。
+    /// 下げるとみなすのは、精度・スケール・整数部の桁（精度 − スケール）のどれかが減るとき（精度を持たない <c>NUMBER</c> や
+    /// <c>NUMBER(*,0)</c> から精度のある型へ移るときを含む）。警告のため多い側に倒す。
+    /// </remarks>
+    public bool DecreasesPrecision(string? oldType, string? newType)
+    {
+        var o = PrecisionTypePattern().Match(NormalizeTypeNotation(oldType ?? string.Empty));
+        var n = PrecisionTypePattern().Match(NormalizeTypeNotation(newType ?? string.Empty));
+
+        if (
+            !o.Success
+            || !n.Success
+            || !string.Equals(
+                o.Groups["base"].Value,
+                n.Groups["base"].Value,
+                StringComparison.OrdinalIgnoreCase
+            )
+            || !string.Equals(
+                o.Groups["rest"].Value.Trim(),
+                n.Groups["rest"].Value.Trim(),
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
+        {
+            return false;
+        }
+
+        var (oldPrecision, oldScale) = PrecisionOf(o);
+        var (newPrecision, newScale) = PrecisionOf(n);
+
+        if (newPrecision is null)
+        {
+            return false;
+        }
+
+        return oldPrecision is null
+            || newPrecision < oldPrecision
+            || newScale < oldScale
+            || newPrecision - newScale < oldPrecision - oldScale;
+
+        // 精度（無いか * なら null＝上限なし）とスケール（無ければ 0）
+        static (int? Precision, int Scale) PrecisionOf(Match match)
+        {
+            var precision =
+                match.Groups["p"].Success
+                && int.TryParse(
+                    match.Groups["p"].Value,
+                    System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var p
+                )
+                    ? p
+                    : (int?)null;
+            var scale =
+                match.Groups["s"].Success
+                && int.TryParse(
+                    match.Groups["s"].Value,
+                    System.Globalization.NumberStyles.AllowLeadingSign,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var s
+                )
+                    ? s
+                    : 0;
+            return (precision, scale);
+        }
+    }
+
+    /// <summary>精度を持つ数値・日時の型の表記（基本の型・精度・スケール・括弧の後ろの指定）</summary>
+    [GeneratedRegex(
+        @"^\s*(?<base>number|numeric|decimal|dec|timestamp|time|datetimeoffset|datetime2|datetime)\s*(?:\(\s*(?:(?<p>[0-9]+)|\*)\s*(?:,\s*(?<s>-?[0-9]+)\s*)?\))?(?<rest>.*)$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Singleline
+    )]
+    private static partial Regex PrecisionTypePattern();
+
+    /// <summary>型表記の、方言の正規化を通した括弧より前の基本の名前</summary>
+    private string BaseTypeName(string? type) =>
+        NormalizeTypeNotation(type ?? string.Empty).Split('(')[0];
 
     /// <summary>この方言の DB で実際に効く <c>ON DELETE</c> の参照アクション</summary>
     public ForeignKeyReferentialAction EffectiveOnDelete(ForeignKeyReferentialAction action) =>

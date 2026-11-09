@@ -18,7 +18,7 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 /// ケースは、網の種 1 つ（同期計画の総当たりと同じ生成器・同じ番号の種）と、その種が目標の図へ加えた変更 1 つの組。
 /// <b>網の種 N と実 DB の総当たりの種 N は別のケース</b>：実 DB は取り込んだ図（表・制約の並びが DB の返す順）の並びで変更の乱数を
 /// 引くので、生成器が作った図の並びで引く網とは変更が変わる（種の番号を書くときは「網の種」「実 DB の種」を添える）。因子は総当たりと同じ
-/// 差分の選び方・変更の種類に、方言の能力（<see cref="SyncDialectCapabilities"/> のうち同期計画の形を変える 21 項目）を足したもの。
+/// 差分の選び方・変更の種類に、方言の能力（<see cref="SyncDialectCapabilities"/> のうち同期計画の形を変える 22 項目）を足したもの。
 /// </para>
 /// <para>
 /// 能力は方言ごとに固定の値なので、派生ごとの固定の水準（<c>fixedLevels</c>）として数える。固定の水準はここに書き下ろした表
@@ -47,6 +47,7 @@ internal static class SyncPlanCapabilityNetDimensions
         nameof(SyncDialectCapabilities.SupportsSchemaQualifiedTableNames),
         nameof(SyncDialectCapabilities.ChecksDefaultOnColumnTypeChange),
         nameof(SyncDialectCapabilities.TypeKindChangeRequiresEmptyColumn),
+        nameof(SyncDialectCapabilities.PrecisionDecreaseRequiresEmptyColumn),
         nameof(SyncDialectCapabilities.SupportsComputedColumnTypeChange),
         nameof(SyncDialectCapabilities.SupportsUniqueConstraintOnPrimaryKey),
         nameof(SyncDialectCapabilities.ReferencedKeyRequiresSameColumnOrder),
@@ -76,6 +77,7 @@ internal static class SyncPlanCapabilityNetDimensions
         ("SupportsSchemaQualifiedTableNames", ["True", "True", "True", "True", "False"]),
         ("ChecksDefaultOnColumnTypeChange", ["True", "True", "True", "True", "False"]),
         ("TypeKindChangeRequiresEmptyColumn", ["False", "False", "False", "True", "False"]),
+        ("PrecisionDecreaseRequiresEmptyColumn", ["False", "False", "False", "True", "False"]),
         ("SupportsComputedColumnTypeChange", ["False", "True", "True", "False", "False"]),
         ("SupportsUniqueConstraintOnPrimaryKey", ["True", "True", "True", "False", "False"]),
         ("ReferencedKeyRequiresSameColumnOrder", ["True", "False", "True", "False", "False"]),
@@ -435,7 +437,8 @@ internal static class SyncPlanCapabilityNetRunner
     public static FuzzSeedOutcome Run(
         SyncPlanFuzzDialect dialect,
         ISyncPlanFuzzCase generator,
-        FuzzSeedOutcome outcome
+        FuzzSeedOutcome outcome,
+        bool caseFoldRelation = true
     )
     {
         var provider = dialect.Provider;
@@ -511,6 +514,20 @@ internal static class SyncPlanCapabilityNetRunner
                 outcome.Script
             )
         );
+
+        if (caseFoldRelation)
+        {
+            outcome.Violations.AddRange(
+                CaseFoldedLiveProblems(
+                    provider,
+                    before,
+                    targetEntities,
+                    targetRelationships,
+                    diff.Items,
+                    plan
+                )
+            );
+        }
 
         if (verdict.PredictedFailure is not null)
         {
@@ -660,6 +677,214 @@ internal static class SyncPlanCapabilityNetRunner
             $"{warning.Kind}({warning.TableName}): {warning.Detail}";
     }
 
+    /// <summary>関係 N2 の違反の頭</summary>
+    public const string CaseFoldRelationPrefix = "relation N2: ";
+
+    /// <summary>
+    /// 関係 N2：DB 側の図の表名・列名を大文字小文字だけ変えても（DB が畳む形＝ASCII の小文字。制約の名前は変えない）、差分・計画の
+    /// 警告・外した項目は大文字小文字を無視して変わらない（破れた面ごとに違反の文を返す）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 大文字小文字を畳む DB（MySQL の lower_case_table_names=1 など）は、図の綴りで DDL が作った表を小文字で返し、制約の名前は
+    /// DDL が付けたまま返す。差分は図の名前の無い制約の既定名を DDL と同じ入力（図の綴り）から求めるので、live の綴りに依らない。
+    /// live の綴りへ揃えた図から求め直すと、識別子の上限で縮めた既定名のハッシュが変わり、偽の外部キーの追加と消えない削除が出る。
+    /// </para>
+    /// <para>
+    /// 畳んだ DB 側の図は、名前の無い制約に元の図での実効名（DDL が付ける名前）を付けてから綴りを変える（取込の結果は必ず名前を持つ。
+    /// 名前の無いまま畳むと、live の既定名そのものが変わって入力が製品の契約の外になる）。同期スクリプトは比べない（名前の分からない
+    /// 外部キーを実行時に逆引きする文と、名前で外す文の違いが出る）。選び方は元のケースのものを差分の位置で写す。種は普段 4 つに 1 つ・
+    /// 夜間は全部（<see cref="SyncPlanCapabilityNetTestsBase"/>）、決定的な行・網羅の行は全部に掛ける。
+    /// </para>
+    /// </remarks>
+    internal static IEnumerable<string> CaseFoldedLiveProblems(
+        IDatabaseProvider provider,
+        SchemaImportResult before,
+        IReadOnlyList<Entity> targetEntities,
+        IReadOnlyList<Relationship> targetRelationships,
+        IReadOnlyList<SchemaDiffItem> items,
+        SyncPlan plan
+    )
+    {
+        var capabilities = provider.SyncCapabilities;
+        var (foldedEntities, foldedRelationships) = FoldLiveNames(before, capabilities);
+        var foldedItems = new SchemaDiffService()
+            .Compute(
+                foldedEntities,
+                foldedRelationships,
+                targetEntities,
+                targetRelationships,
+                capabilities
+            )
+            .Items;
+        var expected = items.Select(Describe).ToList();
+        var actual = foldedItems.Select(Describe).ToList();
+
+        if (!actual.SequenceEqual(expected, StringComparer.Ordinal))
+        {
+            return
+            [
+                CaseFoldRelationPrefix
+                    + "the diff differs: "
+                    + string.Join(" / ", actual.Except(expected))
+                    + " <> "
+                    + string.Join(" / ", expected.Except(actual)),
+            ];
+        }
+
+        for (var i = 0; i < items.Count; i++)
+        {
+            foldedItems[i].IsSelected = items[i].IsSelected;
+        }
+
+        SyncPlan foldedPlan;
+
+        try
+        {
+            foldedPlan = new SyncPlanner().BuildPlan(
+                foldedItems,
+                capabilities,
+                new SyncPlanContext
+                {
+                    LiveEntities = foldedEntities,
+                    LiveRelationships = foldedRelationships,
+                }
+            );
+        }
+        catch (Exception ex)
+        {
+            return [$"{CaseFoldRelationPrefix}planning threw: {ex.GetType().Name}: {ex.Message}"];
+        }
+
+        var problems = new List<string>();
+        Compare(
+            "warnings",
+            plan.Warnings.Select(w => Fold($"{w.Kind}({w.TableName}): {w.Detail}")),
+            foldedPlan.Warnings.Select(w => Fold($"{w.Kind}({w.TableName}): {w.Detail}"))
+        );
+        Compare(
+            "excluded",
+            plan.ExcludedItems.Select(Describe),
+            foldedPlan.ExcludedItems.Select(Describe)
+        );
+        return problems;
+
+        void Compare(
+            string facet,
+            IEnumerable<string> expectedFacet,
+            IEnumerable<string> actualFacet
+        )
+        {
+            var expectedList = expectedFacet.ToList();
+            var actualList = actualFacet.ToList();
+
+            if (!expectedList.SequenceEqual(actualList, StringComparer.Ordinal))
+            {
+                problems.Add(
+                    $"{CaseFoldRelationPrefix}the {facet} differ: [{string.Join(" / ", actualList)}] <> [{string.Join(" / ", expectedList)}]"
+                );
+            }
+        }
+
+        static string Describe(SchemaDiffItem item) => Fold($"{item.Kind}: {item.Description}");
+    }
+
+    /// <summary>
+    /// DB 側の図を Id を保って複製し、名前の無い外部キー・一意制約に実効名を付けてから、表名・列名を ASCII の小文字へ畳む
+    /// （関係 N2 の入力）
+    /// </summary>
+    private static (List<Entity> Entities, List<Relationship> Relationships) FoldLiveNames(
+        SchemaImportResult before,
+        SyncDialectCapabilities capabilities
+    )
+    {
+        var limit = capabilities.IdentifierLengthLimit;
+        var foreignKeyNames = ConstraintNames.ResolveForeignKeyNames(
+            before.Entities,
+            before.Relationships,
+            limit
+        );
+        var uniqueNames = ConstraintNames.ResolveUniqueConstraintNames(
+            before.Entities,
+            before.Relationships,
+            limit
+        );
+        var uniqueNamesById = new Dictionary<Guid, string>();
+
+        foreach (var (constraint, name) in uniqueNames)
+        {
+            uniqueNamesById[constraint.Id] = name;
+        }
+
+        var entities = before
+            .Entities.Select(entity =>
+            {
+                var clone = entity.Clone(preserveId: true);
+
+                foreach (var constraint in clone.UniqueConstraints)
+                {
+                    if (
+                        constraint.Name is null
+                        && uniqueNamesById.TryGetValue(constraint.Id, out var name)
+                    )
+                    {
+                        constraint.Name = name;
+                    }
+                }
+
+                clone.TableName = Fold(clone.TableName);
+
+                foreach (var column in clone.Columns)
+                {
+                    column.Name = Fold(column.Name);
+                }
+
+                return clone;
+            })
+            .ToList();
+        var relationships = before
+            .Relationships.Select(relationship =>
+            {
+                var clone = new Relationship
+                {
+                    Id = relationship.Id,
+                    SourceEntityId = relationship.SourceEntityId,
+                    TargetEntityId = relationship.TargetEntityId,
+                    Type = relationship.Type,
+                    ColumnPairs = [.. relationship.ColumnPairs],
+                    ConstraintName = relationship.ConstraintName,
+                    OnDelete = relationship.OnDelete,
+                    OnUpdate = relationship.OnUpdate,
+                };
+
+                if (
+                    clone.ConstraintName is null
+                    && foreignKeyNames.TryGetValue(relationship, out var name)
+                )
+                {
+                    clone.ConstraintName = name;
+                }
+
+                return clone;
+            })
+            .ToList();
+        return (entities, relationships);
+    }
+
+    /// <summary>ASCII の英大文字だけを小文字へ畳む（大文字小文字を畳む DB の形。ASCII の外の文字は変えない）</summary>
+    private static string Fold(string text) =>
+        string.Create(
+            text.Length,
+            text,
+            (span, source) =>
+            {
+                for (var i = 0; i < source.Length; i++)
+                {
+                    span[i] = source[i] is >= 'A' and <= 'Z' ? (char)(source[i] + 32) : source[i];
+                }
+            }
+        );
+
     /// <summary>エンティティを Id を保って複製し、主キーの列に NULL 許容の印を立てる</summary>
     private static List<Entity> FlagPrimaryKeyColumnsNullable(IEnumerable<Entity> entities) =>
         [
@@ -788,6 +1013,7 @@ public abstract class SyncPlanCapabilityNetTestsBase
         var outcomes = new List<FuzzSeedOutcome>();
         var scenarioOutcomes = new List<FuzzSeedOutcome>();
         var coverageOutcomes = new List<FuzzSeedOutcome>();
+        var caseFoldSeeds = 0;
 
         try
         {
@@ -829,10 +1055,14 @@ public abstract class SyncPlanCapabilityNetTestsBase
 
             foreach (var seed in plan.Seeds)
             {
+                // 関係 N2 は普段は種 4 つに 1 つ（種の番号で決める）、夜間は全部に掛ける（決定的な行・網羅の行は全部）
+                var caseFold = CaseFoldRelationApplies(plan, seed);
+                caseFoldSeeds += caseFold ? 1 : 0;
                 var outcome = RunGuarded(
                     dialect,
                     SyncPlanFuzzGenerator.ForSeed(seed, dialect),
-                    new FuzzSeedOutcome { Seed = seed, Dialect = dialect.Name }
+                    new FuzzSeedOutcome { Seed = seed, Dialect = dialect.Name },
+                    caseFold
                 );
                 outcomes.Add(outcome);
                 SyncPlanCapabilityNetDimensions.Observe(coverage, outcome, capabilities);
@@ -848,6 +1078,14 @@ public abstract class SyncPlanCapabilityNetTestsBase
             $"{dialect.Name}: seeds {outcomes.Count}, predicted failures "
                 + $"{outcomes.Count(o => o.Notes.Contains(SyncPlanFuzzRunner.StaticRulePredictedNote))}, "
                 + $"violations {outcomes.Count(o => o.Violations.Count > 0)}"
+        );
+        output?.WriteLine(
+            $"{dialect.Name}: relation N2 on {caseFoldSeeds} of {outcomes.Count} seeds"
+                + (
+                    caseFoldSeeds < outcomes.Count
+                        ? " (regular runs check every 4th seed; nightly checks all)"
+                        : ""
+                )
         );
 
         foreach (var scenario in scenarioOutcomes)
@@ -1004,15 +1242,23 @@ public abstract class SyncPlanCapabilityNetTestsBase
     }
 
     /// <summary>1 ケースを流し、予期しない例外はそのケースの違反にする</summary>
+    /// <summary>
+    /// 関係 N2（<see cref="SyncPlanCapabilityNetRunner.CaseFoldedLiveProblems"/>）をこの種に掛けるか（夜間は全部、普段は種の番号が
+    /// 4 の倍数のものだけ。差分と計画をもう 1 回作るので、普段の網の時間を抑える）
+    /// </summary>
+    private static bool CaseFoldRelationApplies(SeedPlan plan, int seed) =>
+        plan.Profile == EngineProfile.Nightly || seed % 4 == 0;
+
     private static FuzzSeedOutcome RunGuarded(
         SyncPlanFuzzDialect dialect,
         ISyncPlanFuzzCase generator,
-        FuzzSeedOutcome outcome
+        FuzzSeedOutcome outcome,
+        bool caseFoldRelation = true
     )
     {
         try
         {
-            return SyncPlanCapabilityNetRunner.Run(dialect, generator, outcome);
+            return SyncPlanCapabilityNetRunner.Run(dialect, generator, outcome, caseFoldRelation);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

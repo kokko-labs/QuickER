@@ -118,23 +118,9 @@ internal static partial class SourceRules
                 ),
                 GuardFinder.Symbols(CultureDependentText.Describe),
                 // 型の表記を解決するための仮の列の名前（T0, T1, …）
-                new(
+                new GuardKnown(
                     "src/QuickER.Provider/QueryParameterTypeResolver.cs",
                     "{columnIdByToken.Count}",
-                    1,
-                    NonNegativeKey
-                ),
-                // 外部キーの署名の 1 部分（長さ:値）
-                new(
-                    "src/QuickER.Provider/SchemaDiffService.cs",
-                    "{value.Length}",
-                    1,
-                    NonNegativeKey
-                ),
-                // 一意制約の列の集合の署名（長さ:名前）
-                new(
-                    "src/QuickER.Provider/UniqueConstraintNaming.cs",
-                    "{name.Length}",
                     1,
                     NonNegativeKey
                 )

@@ -383,8 +383,276 @@ public sealed class SyncPlanFuzzOracleTests
                 [$"{SyncPlanFuzzRunner.WarnedAlterForeignKeyNote}:collateral"],
                 OwnWarning,
                 "Missing unique key for constraint 'fk_other'"
+            ),
+            // 例外：列が空でないと通らない変更の前後で外して付け直すと名指しした制約の消失は受け入れる（注として数える）。名指しして
+            // いない制約の消失は今どおり違反
+            new Case(
+                "empty-column-warned-foreign-key-is-a-note",
+                Live with
+                {
+                    UniqueColumns = ["id", "code"],
+                },
+                [SchemaDiffKind.AlterUniqueConstraint],
+                Live with
+                {
+                    UniqueColumns = ["id", "code"],
+                    CpPresent = false,
+                },
+                [],
+                [SyncPlanFuzzRunner.WarnedEmptyColumnChangeNote],
+                EmptyColumnWarning("c", "fk_c_p")
+            ),
+            new Case(
+                "empty-column-warning-on-other-foreign-key-is-a-violation",
+                Live with
+                {
+                    UniqueColumns = ["id", "code"],
+                },
+                [SchemaDiffKind.AlterUniqueConstraint],
+                Live with
+                {
+                    UniqueColumns = ["id", "code"],
+                    CpPresent = false,
+                },
+                [5],
+                [],
+                EmptyColumnWarning("c", "fk_other")
+            ),
+            new Case(
+                "empty-column-warned-primary-key-is-a-note",
+                Live with
+                {
+                    PrimaryKey = ["code"],
+                },
+                [SchemaDiffKind.AlterPrimaryKey],
+                Live with
+                {
+                    PrimaryKey = [],
+                },
+                [],
+                [SyncPlanFuzzRunner.WarnedEmptyColumnChangeNote],
+                EmptyColumnWarning("p", "PRIMARY KEY")
+            ),
+            new Case(
+                "empty-column-warning-on-other-table-primary-key-is-a-violation",
+                Live with
+                {
+                    PrimaryKey = ["code"],
+                },
+                [SchemaDiffKind.AlterPrimaryKey],
+                Live with
+                {
+                    PrimaryKey = [],
+                },
+                [3],
+                [],
+                EmptyColumnWarning("c", "PRIMARY KEY")
             )
         );
+
+    /// <summary>列が空でないと通らない変更の前後で外して付け直す制約の警告（製品の文の形＝「制約名 (表.列: 旧 → 新)」）</summary>
+    private static SyncPlanWarning EmptyColumnWarning(string table, string constraint) =>
+        new(
+            SyncPlanWarningKind.ConstraintRebuildAroundEmptyColumnChange,
+            table,
+            $"{constraint} (p.id: NUMBER(19) → NUMBER(10))"
+        );
+
+    /// <summary>既存の行で断られる文の見分けの 1 行（断られた文・エラー文・宣言・期待）</summary>
+    public sealed record DataFailureCase(
+        string Name,
+        string FailedStatement,
+        string Error,
+        string[] Declared,
+        bool Expected,
+        bool Committed = false
+    )
+    {
+        public override string ToString() => Name;
+    }
+
+    /// <summary>宣言（「種類|表|名前」。<see cref="FuzzDataFailure"/> は内部の型なので、行は文字列で書く）</summary>
+    private const string OrphanAdd = "AddForeignKey|e|fk_e_p";
+
+    private const string PrecisionDecrease = "AlterColumn|p|id";
+
+    public static TheoryData<DataFailureCase> DataFailureCases() =>
+        new(
+            // 文ごとに流す方言（MySQL・Oracle）：失敗したバッチの文で見る
+            new DataFailureCase(
+                "declared-foreign-key-add-statement-matches",
+                "ALTER TABLE `e` ADD CONSTRAINT `fk_e_p` FOREIGN KEY (`x`) REFERENCES `p` (`id`);",
+                "Cannot add or update a child row",
+                [OrphanAdd],
+                true
+            ),
+            new DataFailureCase(
+                "other-foreign-key-re-add-does-not-match",
+                "ALTER TABLE `c` ADD CONSTRAINT `fk_c_p` FOREIGN KEY (`p_id`) REFERENCES `p` (`id`);",
+                "Missing unique key for constraint 'fk_c_p'",
+                [OrphanAdd],
+                false
+            ),
+            new DataFailureCase(
+                "longer-name-containing-declared-name-does-not-match",
+                "ALTER TABLE `e` ADD CONSTRAINT `fk_e_p2` FOREIGN KEY (`x`) REFERENCES `p` (`id`);",
+                "Cannot add or update a child row",
+                [OrphanAdd],
+                false
+            ),
+            new DataFailureCase(
+                "primary-key-drop-does-not-match-declared-foreign-key",
+                "ALTER TABLE `p` DROP PRIMARY KEY;",
+                "Cannot drop index 'PRIMARY': needed in a foreign key constraint 'fk_e_p'",
+                [OrphanAdd],
+                false
+            ),
+            // スクリプトを 1 回で流す方言（PostgreSQL・SQL Server）：エラー文で見る
+            new DataFailureCase(
+                "declared-foreign-key-name-in-error-matches",
+                "",
+                "23503: insert or update on table \"e\" violates foreign key constraint \"fk_e_p\"",
+                [OrphanAdd],
+                true
+            ),
+            new DataFailureCase(
+                "other-name-in-error-does-not-match",
+                "",
+                "2BP01: cannot drop constraint pk_p on table p because other objects depend on it",
+                [OrphanAdd],
+                false
+            ),
+            // SQLite：再構築の後の外部キー違反の表がすべて宣言した追加の子の表
+            new DataFailureCase(
+                "sqlite-violation-only-in-declared-child-matches",
+                "",
+                "Foreign key constraint violations were detected after the table rebuild, so the transaction was rolled back. Affected table(s): e",
+                [OrphanAdd],
+                true
+            ),
+            new DataFailureCase(
+                "sqlite-violation-also-in-other-table-does-not-match",
+                "",
+                "Foreign key constraint violations were detected after the table rebuild, so the transaction was rolled back. Affected table(s): e, c",
+                [OrphanAdd],
+                false
+            ),
+            // 列の変更は文の中でだけ見分ける（Oracle の ORA-01440 は列を名指ししない）
+            new DataFailureCase(
+                "declared-column-change-statement-matches",
+                "ALTER TABLE \"P\" MODIFY (\"ID\" NUMBER(10))",
+                "ORA-01440: column to be modified must be empty to decrease precision or scale",
+                [PrecisionDecrease],
+                true
+            ),
+            new DataFailureCase(
+                "other-column-change-does-not-match",
+                "ALTER TABLE \"P\" MODIFY (\"CODE\" NVARCHAR2(10))",
+                "ORA-01439: column to be modified must be empty to change datatype",
+                [PrecisionDecrease],
+                false
+            ),
+            new DataFailureCase(
+                "foreign-key-statement-naming-the-column-does-not-match",
+                "ALTER TABLE \"P\" ADD CONSTRAINT \"FK_P_Q\" FOREIGN KEY (\"ID\") REFERENCES \"Q\" (\"ID\")",
+                "ORA-02298: cannot validate (APP.FK_P_Q) - parent keys not found",
+                [PrecisionDecrease],
+                false
+            ),
+            new DataFailureCase(
+                "column-change-without-statement-does-not-match",
+                "",
+                "ORA-01440: column to be modified must be empty to decrease precision or scale",
+                [PrecisionDecrease],
+                false
+            ),
+            new DataFailureCase(
+                "nothing-declared-does-not-match",
+                "ALTER TABLE `e` ADD CONSTRAINT `fk_e_p` FOREIGN KEY (`x`) REFERENCES `p` (`id`);",
+                "Cannot add or update a child row",
+                [],
+                false
+            ),
+            new DataFailureCase(
+                "committed-does-not-match",
+                "ALTER TABLE `e` ADD CONSTRAINT `fk_e_p` FOREIGN KEY (`x`) REFERENCES `p` (`id`);",
+                "",
+                [OrphanAdd],
+                false,
+                Committed: true
+            )
+        );
+
+    [Theory(
+        DisplayName = "[Integration] 同期計画の総当たりの表明 1: 宣言した既存の行で断られる文そのものの失敗だけを見分ける"
+    )]
+    [MemberData(nameof(DataFailureCases))]
+    public void IsDeclaredDataFailure_MatchesOnlyTheDeclaredStatement(DataFailureCase c)
+    {
+        var result = new SchemaSyncResult
+        {
+            Committed = c.Committed,
+            Error = c.Committed ? null : c.Error,
+        };
+        result.Batches.Add(
+            new SchemaSyncBatchResult(0, "ALTER TABLE `x` ADD `y` int;", true, null)
+        );
+
+        if (!c.Committed)
+        {
+            result.Batches.Add(new SchemaSyncBatchResult(1, c.FailedStatement, false, c.Error));
+        }
+
+        var declared = c
+            .Declared.Select(d => d.Split('|'))
+            .Select(p => new FuzzDataFailure(Enum.Parse<FuzzDataFailureKind>(p[0]), p[1], p[2]))
+            .ToList();
+        SyncPlanFuzzRunner.IsDeclaredDataFailure(result, declared).Should().Be(c.Expected, c.Name);
+    }
+
+    [Theory(
+        DisplayName = "[Integration] 同期計画の総当たりの表明 5: 取込が捨てた物の警告は、その表か名指しした列の削除を選んだときだけ消えてよい"
+    )]
+    [InlineData("collided-column-lost-by-unrelated-change", "AlterColumn", "note", true)]
+    [InlineData("collided-column-lost-with-its-own-drop", "DropColumn", "name ", false)]
+    [InlineData("collided-column-lost-with-table-drop", "DropTable", null, false)]
+    [InlineData(
+        "attribute-lost-by-change-on-the-table",
+        "AlterColumn",
+        "note",
+        false,
+        "ColumnDefaultLost"
+    )]
+    public void LostImportWarnings_AreExplainedOnlyBySelectedRemovals(
+        string name,
+        string kind,
+        string? column,
+        bool violation,
+        string warningKind = "ColumnNameCollision"
+    )
+    {
+        var warning = new SchemaImportWarning(
+            Enum.Parse<SchemaImportWarningKind>(warningKind),
+            "t",
+            warningKind == "ColumnNameCollision" ? "name " : "note"
+        );
+        var before = new SchemaImportResult { Warnings = [warning] };
+        var after = new SchemaImportResult();
+        var selected = new List<SchemaDiffItem>
+        {
+            new()
+            {
+                Kind = Enum.Parse<SchemaDiffKind>(kind),
+                TableName = "t",
+                ColumnName = column,
+            },
+        };
+
+        SyncPlanFuzzRunner
+            .LostImportWarnings(before, after, selected, [])
+            .Should()
+            .HaveCount(violation ? 1 : 0, name);
+    }
 
     [Theory(
         DisplayName = "[Integration] 同期計画の総当たりの表明 1b: 規則ごとに、許される形は違反にならず、違反の形は規則の番号で名指しされる"

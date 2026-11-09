@@ -671,9 +671,9 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
-        public static string SchemaSync_ExecuteConfirmForeignKeyRebuildAroundTypeKindChange {
+        public static string SchemaSync_ExecuteConfirmConstraintRebuildAroundEmptyColumnChange {
             get {
-                return ResourceManager.GetString("SchemaSync_ExecuteConfirmForeignKeyRebuildAroundTypeKindChange", resourceCulture);
+                return ResourceManager.GetString("SchemaSync_ExecuteConfirmConstraintRebuildAroundEmptyColumnChange", resourceCulture);
             }
         }
 
@@ -704,6 +704,12 @@ namespace QuickER.Db.UI.Resources {
         public static string SchemaSync_ExecuteConfirmTableWithoutColumns {
             get {
                 return ResourceManager.GetString("SchemaSync_ExecuteConfirmTableWithoutColumns", resourceCulture);
+            }
+        }
+
+        public static string SchemaSync_ExecuteConfirmTableRebuildLosesImportDiscardedContent {
+            get {
+                return ResourceManager.GetString("SchemaSync_ExecuteConfirmTableRebuildLosesImportDiscardedContent", resourceCulture);
             }
         }
 

@@ -359,7 +359,7 @@ internal static partial class SyncPlanExpectationRows
 
                                 if (capabilities.ColumnReorder == ColumnReorderMode.Rebuild)
                                 {
-                                    x.Warnings.Absent("ForeignKeyRebuildAroundTypeKindChange*")
+                                    x.Warnings.Absent("ConstraintRebuildAroundEmptyColumnChange*")
                                         .Rebuilds.Contains("*");
                                     return;
                                 }
@@ -373,12 +373,12 @@ internal static partial class SyncPlanExpectationRows
                                 if (capabilities.TypeKindChangeRequiresEmptyColumn)
                                 {
                                     x.Warnings.Single(
-                                        "ForeignKeyRebuildAroundTypeKindChange(orders): FK_orders_customer (*"
+                                        "ConstraintRebuildAroundEmptyColumnChange(orders): FK_orders_customer (*"
                                     );
                                 }
                                 else
                                 {
-                                    x.Warnings.Absent("ForeignKeyRebuildAroundTypeKindChange*");
+                                    x.Warnings.Absent("ConstraintRebuildAroundEmptyColumnChange*");
                                 }
                             }
                         );

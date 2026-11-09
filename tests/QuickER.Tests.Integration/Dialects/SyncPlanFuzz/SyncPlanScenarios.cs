@@ -1192,6 +1192,10 @@ internal sealed class ScenarioLive(FuzzLiveSchema live, SyncPlanFuzzDialect dial
             new UniqueConstraint { Name = name, ColumnIds = [.. columns.Select(c => c.Id)] }
         );
 
+    /// <summary>既存の行で DB が断ると分かっている文を宣言する（<see cref="FuzzLiveSchema.DataFailures"/>）</summary>
+    public void ExpectDataFailure(FuzzDataFailureKind kind, string table, string name) =>
+        live.DataFailures.Add(new FuzzDataFailure(kind, table, name));
+
     private Column Add(
         Entity table,
         string name,
@@ -1259,6 +1263,16 @@ internal sealed class ScenarioTarget(
         var target = Column(table, column);
         target.DataType = dialect.TypeName(kind, length);
         mutations.Add($"alter type {table}.{column} -> {target.DataType}");
+    }
+
+    /// <summary>
+    /// 表を目標の図の先頭へ移す（差分の項目と計画の文は目標の図の表の並びで出るので、その表の変更が先に並ぶ。表の並びは差分にならない）
+    /// </summary>
+    public void MoveTableFirst(string table)
+    {
+        var entity = Table(table);
+        entities.Remove(entity);
+        entities.Insert(0, entity);
     }
 
     /// <summary>列の型の表記を書き換える（同じ型の別の綴りを含む）</summary>
@@ -1431,12 +1445,90 @@ internal sealed class ScenarioTarget(
     }
 
     /// <summary>名前付きの一意制約を消す</summary>
+    /// <summary>
+    /// 一意制約の列を変える（名前で引き、その名前が無ければ＝取込が一意制約の名前を持たない方言では、元の列 <paramref name="from"/> と
+    /// 同じ列集合の一意制約を引く）
+    /// </summary>
+    public void ChangeUniqueOn(string table, string name, string[] from, params string[] columns)
+    {
+        var entity = Table(table);
+        var fromIds = from.Select(c => Column(table, c).Id).ToHashSet();
+        var unique =
+            entity.UniqueConstraints.FirstOrDefault(u =>
+                string.Equals(u.Name, name, StringComparison.OrdinalIgnoreCase)
+            ) ?? entity.UniqueConstraints.First(u => u.ColumnIds.ToHashSet().SetEquals(fromIds));
+        unique.ColumnIds = [.. columns.Select(c => Column(table, c).Id)];
+        mutations.Add(
+            $"change unique {table} {unique.Name ?? "(unnamed)"} -> ({string.Join(",", columns)})"
+        );
+    }
+
+    /// <summary>
+    /// 一意制約を外す（名前で引き、その名前が無ければ＝取込が一意制約の名前を持たない方言では、列 <paramref name="columns"/> と同じ列集合の
+    /// 名前の無い一意制約を 1 つ外す）
+    /// </summary>
+    /// <param name="table">表</param>
+    /// <param name="name">一意制約の名前</param>
+    /// <param name="columns">一意制約の列（名前で引けないときに使う）</param>
+    /// <param name="absentAllowed">
+    /// 同じ列集合の一意制約がもう 1 つも無いときに、何も外さずに戻ってよいか（同じ列集合の一意制約を 1 つの索引にまとめる DB＝SQLite で、
+    /// 全部を外す操作の 2 つ目以降の呼び出し）
+    /// </param>
+    /// <remarks>
+    /// 引けなければ例外にする（形の行・シナリオが黙って何も外さない空振りを止める）。同じ列集合の一意制約が残っているのに引けないのは、
+    /// <paramref name="absentAllowed"/> に依らず引き方の誤り。
+    /// </remarks>
+    public void DropUniqueOn(
+        string table,
+        string name,
+        string[] columns,
+        bool absentAllowed = false
+    )
+    {
+        var entity = Table(table);
+        var ids = columns.Select(c => Column(table, c).Id).ToHashSet();
+        var unique =
+            entity.UniqueConstraints.FirstOrDefault(u =>
+                string.Equals(u.Name, name, StringComparison.OrdinalIgnoreCase)
+            )
+            ?? entity.UniqueConstraints.FirstOrDefault(u =>
+                u.Name is null && u.ColumnIds.ToHashSet().SetEquals(ids)
+            );
+
+        if (unique is null)
+        {
+            if (
+                !absentAllowed
+                || entity.UniqueConstraints.Any(u => u.ColumnIds.ToHashSet().SetEquals(ids))
+            )
+            {
+                throw new InvalidOperationException(
+                    $"unique constraint {name} on {table} ({string.Join(",", columns)}) was not found by name or by its unnamed column set"
+                );
+            }
+
+            return;
+        }
+
+        entity.UniqueConstraints.Remove(unique);
+        mutations.Add($"drop unique {table} {unique.Name ?? "(unnamed)"}");
+    }
+
+    /// <summary>名前付きの一意制約を外す（その名前が無ければ例外＝黙って何も外さない空振りを止める）</summary>
     public void DropUnique(string table, string name)
     {
-        Table(table)
+        var removed = Table(table)
             .UniqueConstraints.RemoveAll(u =>
                 string.Equals(u.Name, name, StringComparison.OrdinalIgnoreCase)
             );
+
+        if (removed == 0)
+        {
+            throw new InvalidOperationException(
+                $"unique constraint {name} on {table} was not found"
+            );
+        }
+
         mutations.Add($"drop unique {table} {name}");
     }
 
