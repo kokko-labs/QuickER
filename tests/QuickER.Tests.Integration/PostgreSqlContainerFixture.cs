@@ -40,6 +40,13 @@ public sealed class PostgreSqlContainerFixture : IAsyncLifetime
     /// <summary>コンテナを起動する。Docker 不在・起動失敗は握りつぶし <see cref="IsAvailable"/> を <c>false</c> にする</summary>
     public async ValueTask InitializeAsync()
     {
+        if (DockerRequirement.SkipReason(nameof(PostgreSqlContainerFixture)) is { } skip)
+        {
+            IsAvailable = false;
+            UnavailableReason = skip;
+            return;
+        }
+
         try
         {
             _container = new PostgreSqlBuilder("postgres:16-alpine").Build();

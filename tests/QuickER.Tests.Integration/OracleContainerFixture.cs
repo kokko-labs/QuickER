@@ -70,6 +70,13 @@ public sealed class OracleContainerFixture : IAsyncLifetime
     /// <remarks>初回はイメージ pull が GB 級のため数分かかることがある</remarks>
     public async ValueTask InitializeAsync()
     {
+        if (DockerRequirement.SkipReason(nameof(OracleContainerFixture)) is { } skip)
+        {
+            IsAvailable = false;
+            UnavailableReason = skip;
+            return;
+        }
+
         try
         {
             _container = new OracleBuilder("gvenzl/oracle-free:23-slim-faststart")
