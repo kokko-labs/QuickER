@@ -412,5 +412,130 @@ internal static partial class UndoOperationRows
                         .Should()
                         .NotEqual([(600d, 500d), (100d, 150d)])
             );
+
+        foreach (var row in CopyConstraintNameRows())
+        {
+            yield return row;
+        }
+    }
+
+    /// <summary>
+    /// 表の複製・貼り付けと制約名：写した一意制約の名前が図の制約名とぶつかるときは名前を外し（合成名は DDL と同じ解決で決まる）、
+    /// 外部キーは写さない（図は <see cref="NamedConstraintsDiagram"/>。DDL の制約名がすべて違うことは共通の表明が見る）
+    /// </summary>
+    private static IEnumerable<UndoRow> CopyConstraintNameRows()
+    {
+        yield return Row(
+                "entity-duplicate-twice-drops-colliding-unique-constraint-name",
+                "同じ表を 2 回複製すると、どちらの複製の一意制約も名前を外し、合成名がそれぞれの表名で決まる"
+            )
+            .Diagram(() => NamedConstraintsDiagram())
+            .Operate(
+                UndoEntry.Screen,
+                "Order を選んで DuplicateSelectedEntityCommand を 2 回（2 回目の前にも Order を選び直す）",
+                vm =>
+                {
+                    var order = TableNamed(vm, "Order");
+                    vm.SelectedEntity = order;
+                    vm.DuplicateSelectedEntityCommand.Execute(null);
+                    vm.SelectedEntity = order;
+                    vm.DuplicateSelectedEntityCommand.Execute(null);
+                }
+            )
+            .Commands(typeof(DuplicateEntityCommand), typeof(DuplicateEntityCommand))
+            .Check(UndoStage.Operated, "複製の一意制約は名前を外す", CopiesDropName)
+            .Check(UndoStage.Redone, "Redo の後も複製の一意制約は名前を持たない", CopiesDropName);
+
+        yield return Row(
+                "entity-paste-twice-drops-colliding-unique-constraint-name",
+                "同じ表を 2 回貼り付けると、どちらの貼り付けの一意制約も名前を外し、合成名がそれぞれの表名で決まる"
+            )
+            .Diagram(() => NamedConstraintsDiagram())
+            .Prepare("Order をコピーする", vm => vm.CopySelectedEntityCommand.Execute(null))
+            .Operate(
+                UndoEntry.Screen,
+                "PasteCopiedEntityCommand を 2 回",
+                vm =>
+                {
+                    vm.PasteCopiedEntityCommand.Execute(null);
+                    vm.PasteCopiedEntityCommand.Execute(null);
+                }
+            )
+            .Commands(typeof(AddEntityCommand), typeof(AddEntityCommand))
+            .Check(UndoStage.Operated, "貼り付けた一意制約は名前を外す", CopiesDropName)
+            .Check(
+                UndoStage.Redone,
+                "Redo の後も貼り付けた一意制約は名前を持たない",
+                CopiesDropName
+            );
+
+        yield return Row(
+                "entity-duplicate-synthesized-name-taken-gets-number",
+                "複製の合成名がほかの表の明示の名前とぶつかると、番号つきの名前になる"
+            )
+            .Diagram(() => NamedConstraintsDiagram(copyNameTaken: true))
+            .Operate(
+                UndoEntry.Screen,
+                "DuplicateSelectedEntityCommand（Order を選んだ状態）",
+                vm => vm.DuplicateSelectedEntityCommand.Execute(null)
+            )
+            .Commands(typeof(DuplicateEntityCommand))
+            .Check(
+                UndoStage.Operated,
+                "複製の一意制約は名前を持たず、解決された名前は UQ_Order_Copy_Code_2",
+                vm =>
+                {
+                    var constraint = TableNamed(vm, "Order_Copy").UniqueConstraints.Single();
+                    constraint.Name.Should().BeEmpty();
+                    constraint.ResolvedName.Should().Be("UQ_Order_Copy_Code_2");
+                    vm.Relationships.Should().ContainSingle();
+                }
+            );
+
+        yield return Row(
+                "entity-duplicate-long-table-synthesized-name-fits-limit",
+                "表名が長く合成名が SQL Server の上限（128）を超える表を複製しても、解決された名前は上限に収まる"
+            )
+            .Diagram(() => NamedConstraintsDiagram(LongOrderTableName))
+            .Operate(
+                UndoEntry.Screen,
+                "DuplicateSelectedEntityCommand（長い名前の表を選んだ状態）",
+                vm => vm.DuplicateSelectedEntityCommand.Execute(null)
+            )
+            .Commands(typeof(DuplicateEntityCommand))
+            .Check(
+                UndoStage.Operated,
+                "複製の一意制約は名前を持たず、解決された名前は 128 文字以内で元の名前と違う",
+                vm =>
+                {
+                    var constraint = TableNamed(vm, LongOrderTableName + "_Copy")
+                        .UniqueConstraints.Single();
+                    constraint.Name.Should().BeEmpty();
+                    constraint.ResolvedName.Length.Should().BeLessThanOrEqualTo(128);
+                    constraint.ResolvedName.Should().NotBe("UQ_Order_Code");
+                    vm.Relationships.Should().ContainSingle();
+                }
+            );
+    }
+
+    /// <summary>
+    /// 元の Order は名前 UQ_Order_Code を保ち、複製（Order_Copy・Order_Copy2）の一意制約は名前を持たず、解決された名前は
+    /// それぞれの表名の合成名。外部キーは元の 1 本だけ
+    /// </summary>
+    private static void CopiesDropName(MainViewModel vm)
+    {
+        TableNamed(vm, "Order").UniqueConstraints.Single().Name.Should().Be("UQ_Order_Code");
+
+        foreach (var copy in new[] { "Order_Copy", "Order_Copy2" })
+        {
+            var constraint = TableNamed(vm, copy).UniqueConstraints.Single();
+            constraint.Name.Should().BeEmpty(copy + " の一意制約は名前を外す");
+            constraint.ResolvedName.Should().Be($"UQ_{copy}_Code");
+        }
+
+        vm.Relationships.Should()
+            .ContainSingle()
+            .Which.Target.Should()
+            .BeSameAs(TableNamed(vm, "Order"), "外部キーは複製しない");
     }
 }

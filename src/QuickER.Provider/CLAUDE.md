@@ -252,6 +252,8 @@
 - `SqlNameText.Validate(diagram / plan, limit)`（5 つの入口）が、制御文字の検査の後に、テーブル名は `IdentifierLengthLimit.AcceptsTableName`（最初の `.` で分けて部分ごと）、列名・制約名は `Accepts` で判定し、場所と理由（`DescribeViolation`＝英語）を並べて `InvalidOperationException` にする。上限は方言の `Limit`。
 - 表せない文字の正本も QuickER.Dialects の宣言（`IdentifierLengthLimit.RepresentsSupplementaryCharacters`）。MySQL の帰結は `src/QuickER.Provider.MySql/CLAUDE.md`「識別子と説明の文字」。
 - 名前を拾う場所は `SqlNameText` の `DiagramNames`／`PlanNames` の 2 つだけ。1 つ拾い忘れると、その種類の名前だけが黙って DB に届く。
+  - 拾う 1 か所（`names.Add` の 1 本）ごとに、方言の DDL の表の名前の出どころの宣言（`DialectDdlRows.NameSources`）が行を作る。その出どころだけへ改行入りの名前を入れた計画・図を 5 方言が名指しで断ること（行 `sync-plan-name-source-*-newline`・`ddl-name-source-*-newline`）と、表の位置の印（MySQL で文字数は上限内・ファイル名では上限を超える名前を、表の位置は断り列・制約の位置は断らない。行 `sync-plan-name-source-*-table-file-name`・`ddl-name-source-*-table-file-name`）を見る。
+  - 宣言と製品の `names.Add`（所属のメソッド・出どころの式・表の位置か・置き場所）の食い違いは、`SourceRuleTests` の規則 `sql-name-text-name-sources` が両方向で赤にする（足したのに宣言へ載せ忘れる・消したのに宣言に残る）。あるべき出現は宣言から作る（写しを持たない）。見つける形は自己検査の行 `sql-name-text-name-sources-forms`（形の違う `names.Add` を拾い、`names` 以外の受け手を拾わない）・`sql-name-text-name-sources-inactive-branch` が確かめる。mutation 実証済み（文の削除・真偽値の反転・規則の 3 方向）。
 - ガードは 2 つ。
   - `OutputIdentifierLimitGuardTests`：上限ちょうどの名前と上限を超える既定名の図から DDL と同期を作り、方言の区切りで囲まれた識別子を全文（動的 SQL のリテラルの中も）から取り出して、すべて `Accepts` を通ることと種類ごとの期待する識別子が現れることを 5 方言で表明する。
   - `IdentifierLimitEntryTests`：名前の種類 × 5 方言の表で、DDL と同期の両方の入口が断る／受け付けるを書き下した期待値で表明する。

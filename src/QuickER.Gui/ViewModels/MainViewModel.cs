@@ -864,7 +864,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 new Column
                 {
                     Name = "ID",
-                    DataType = "int",
+                    // 列の追加と同じく、図の対象 DBMS の既定の型（Oracle は NUMBER(10)）
+                    DataType = CurrentProvider.TypeCatalog.DefaultDataType,
                     IsPrimaryKey = true,
                     IsNullable = false,
                 },
@@ -1942,6 +1943,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     /// <summary>コピー元の意味モデルとレイアウトから位置をずらした複製 ViewModel を生成する。テーブル名は重複しない名前へ変更する</summary>
     /// <param name="offsetMultiplier">位置オフセット（30px）の倍率。1 未満は 1 に丸める</param>
+    /// <remarks>
+    /// 表の複製（<see cref="DuplicateEntityCommand"/>）と貼り付けの共通の入口。写した一意制約の名前が図の既存の制約名
+    /// （<see cref="ConstraintNames.CollectExisting"/>＝外部キー・主キー・一意制約の DDL が付ける名前。種類をまたいで
+    /// <see cref="SchemaNames"/> の規則で比べる）とぶつかるときだけ名前を外す。外した制約の名前は、DDL・生成・要約が
+    /// <see cref="ConstraintNames.ResolveUniqueConstraintNames"/> で新しい表名から合成する（ぶつかれば番号つき・上限に収める）。
+    /// 写したまま残すと DDL に同じ制約名が 2 回出て、制約名がスキーマ単位の方言（SQL Server・PostgreSQL・Oracle）で断られる。
+    /// ぶつからない名前（元の表を消した後の貼り付けなど）は保つ
+    /// </remarks>
     internal EntityViewModel CreateEntityCopy(
         Entity source,
         EntityLayout sourceLayout,
@@ -1953,6 +1962,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var offset = 30 * normalizedOffsetMultiplier;
 
         copy.TableName = GenerateCopyTableName(source.TableName);
+
+        var existingConstraintNames = ConstraintNames.CollectExisting(
+            ToDiagramModel(),
+            CurrentIdentifierLimit()
+        );
+
+        foreach (var constraint in copy.UniqueConstraints)
+        {
+            if (
+                !string.IsNullOrWhiteSpace(constraint.Name)
+                && existingConstraintNames.Contains(constraint.Name)
+            )
+            {
+                constraint.Name = null;
+            }
+        }
 
         var layout = new EntityLayout
         {
@@ -2449,6 +2474,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 entity.NameScope = Entities;
                 entity.IdentifierLimitSource = CurrentIdentifierLimit;
                 entity.UniqueConstraintNameSource = ResolveUniqueConstraintName;
+                entity.UniqueConstraintNameTaken = IsUniqueConstraintNameTaken;
                 entity.NameChangeRejected += OnEntityNameChangeRejected;
 
                 // 一意制約カードのコンボボックス操作は VM 経由で届くため、ここで履歴化の入口へ結ぶ
@@ -2497,6 +2523,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         entity.NameScope = null;
         entity.IdentifierLimitSource = null;
         entity.UniqueConstraintNameSource = null;
+        entity.UniqueConstraintNameTaken = null;
         entity.UniqueConstraintMemberSelectionEdited -= OnUniqueConstraintMemberSelectionEdited;
         entity.IsDetachedFromDiagram = true;
         entity.Columns.CollectionChanged -= OnEntityColumnsChangedForSelection;
@@ -2654,12 +2681,35 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _ => limit.Describe(),
         };
 
-    /// <summary>プロパティパネルの名前の書き換えを重複のため受け付けなかったことを、ステータスバーの一時通知で知らせる</summary>
+    /// <summary>
+    /// プロパティパネルの名前（テーブル名・列名・一意制約の名前・外部キーの制約名）の書き換えを重複のため受け付けなかったことを、
+    /// ステータスバーの一時通知で知らせる
+    /// </summary>
     private void OnEntityNameChangeRejected(object? sender, NameChangeRejectedEventArgs e) =>
         NotifyStatus(
-            e.TableName is null
-                ? string.Format(Strings.Status_TableNameRejected, e.ExistingName)
-                : string.Format(Strings.Status_ColumnNameRejected, e.TableName, e.ExistingName)
+            e.IsConstraintName
+                ? string.Format(Strings.Status_ConstraintNameRejected, e.RequestedName)
+            : e.TableName is null ? string.Format(Strings.Status_TableNameRejected, e.ExistingName)
+            : string.Format(Strings.Status_ColumnNameRejected, e.TableName, e.ExistingName)
+        );
+
+    /// <summary>
+    /// 一意制約へ付けようとする名前が、図の中のほかの制約名（外部キー・主キー・一意制約）とぶつかるか
+    /// （ツールの <c>set_unique_constraint</c> と同じ <see cref="ConstraintNames.IsTaken"/>。プロパティパネルの名前の欄が使う）
+    /// </summary>
+    private bool IsUniqueConstraintNameTaken(string name, Guid constraintId) =>
+        ConstraintNames.IsTaken(ToDiagramModel(), name, constraintId, CurrentIdentifierLimit());
+
+    /// <summary>
+    /// 外部キーへ付けようとする名前が、図の中のほかの制約名（主キー・一意制約・ほかの外部キー）とぶつかるか
+    /// （<see cref="ConstraintNames.IsForeignKeyNameTaken"/>。プロパティパネルの制約名の欄が使う）
+    /// </summary>
+    private bool IsForeignKeyNameTaken(string name, Guid relationshipId) =>
+        ConstraintNames.IsForeignKeyNameTaken(
+            ToDiagramModel(),
+            name,
+            relationshipId,
+            CurrentIdentifierLimit()
         );
 
     /// <summary>リレーション 1 件の購読解除と変更追跡の終了を行う</summary>
@@ -2672,6 +2722,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         relationship.Detach();
         relationship.ColumnPairSelectionEdited -= OnRelationshipColumnPairSelectionEdited;
+        relationship.ConstraintNameTaken = null;
+        relationship.NameChangeRejected -= OnEntityNameChangeRejected;
         _changeTracker.DetachRelationship(relationship);
 
         // 選択は図に居る要素だけを指す（理由は DetachEntityViewModel と同じ）
@@ -2890,6 +2942,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 relationship.Attach();
 
                 // 列ペア行のコンボボックス操作は VM 経由で届くため、ここで履歴化の入口へ結ぶ
+                // 制約名の書き換えは、図の中のほかの制約名とぶつかれば受け付けずに戻す。戻したことをステータスバーで知らせる
+                relationship.ConstraintNameTaken = IsForeignKeyNameTaken;
+                relationship.NameChangeRejected += OnEntityNameChangeRejected;
                 relationship.ColumnPairSelectionEdited += OnRelationshipColumnPairSelectionEdited;
                 _changeTracker.AttachRelationship(relationship);
             }

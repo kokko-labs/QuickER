@@ -42,10 +42,10 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Gui/ViewModels` | 全体 | `DiagramEdit/Selection`・`DiagramEdit/Undo`・`DiagramEdit/UndoOps`・`DocumentFile/Random`・`DocumentFile/Scenarios`・`Name/Entrances`・`OsBoundary/Lifecycle` |
 | `src/QuickER.Gui/Views` | 守りの無い領域（Accepted） | （なし） |
 | `src/QuickER.Mcp` | 一部 | `DiagramEdit/ToolArgument`・`DiagramEdit/Tools`・`rule:tool-argument-parsing-owners` |
-| `src/QuickER.Mcp.Tools` | 全体 | `DiagramEdit/ToolArgument`・`DiagramEdit/Tools`・`Name/Entrances`・`table:QueryToolFormatter` |
+| `src/QuickER.Mcp.Tools` | 全体 | `DiagramEdit/ToolArgument`・`DiagramEdit/Tools`・`Name/Entrances`・`rule:mcp-tools-column-nullability-raw-reads`・`table:QueryToolFormatter` |
 | `src/QuickER.Model` | 全体 | `Dialect/DdlText`・`Name/Entrances`・`SyncPlan/HistoryRows`・`rule:model-dialect-lookups`・`rule:tool-argument-parsing-owners`・`table:ForeignKeyReferentialActions` |
 | `src/QuickER.Platform` | 一部 | `Ai/MarkdownRender`・`OsBoundary/AtomicFile`・`OsBoundary/Containment`・`OsBoundary/PathEntrances`・`OsBoundary/ProcessLaunch`・`OsBoundary/Segments` |
-| `src/QuickER.Provider` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dialect/DdlText`・`Dialect/ImportWarnings`・`Dialect/Types`・`FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules`・`Name/DdlRoundTrip`・`SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/HistoryRows`・`SyncPlan/ShapeRows`・`rule:provider-column-nullability-raw-reads`・`rule:sync-capabilities-initializers`・`rule:sync-name-comparison-tokens`・`rule:sync-selected-foreign-key-names`・`rule:sync-type-deciding-column-copies`・`table:SyncPlanExpectations` |
+| `src/QuickER.Provider` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dialect/DdlText`・`Dialect/ImportWarnings`・`Dialect/Types`・`FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules`・`Name/DdlRoundTrip`・`SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/HistoryRows`・`SyncPlan/ShapeRows`・`rule:provider-column-nullability-raw-reads`・`rule:sql-name-text-name-sources`・`rule:sync-capabilities-initializers`・`rule:sync-name-comparison-tokens`・`rule:sync-selected-foreign-key-names`・`rule:sync-type-deciding-column-copies`・`table:SyncPlanExpectations` |
 | `src/QuickER.Provider.MySql` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks` |
 | `src/QuickER.Provider.Oracle` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks` |
 | `src/QuickER.Provider.PostgreSql` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses` |
@@ -178,7 +178,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Gui/ViewModels/LanguageSwitchViewModel.cs` | `OsBoundary/Lifecycle` |
 | `src/QuickER.Gui/ViewModels/MainViewModel.ImportExport.cs` | `DocumentFile/Random`・`DocumentFile/Scenarios` |
 | `src/QuickER.Gui/ViewModels/RelationshipViewModel.cs` | `DiagramEdit/Undo` |
-| `src/QuickER.Mcp.Tools` | `DiagramEdit/ToolArgument`・`DiagramEdit/Tools`・`Name/Entrances` |
+| `src/QuickER.Mcp.Tools` | `DiagramEdit/ToolArgument`・`DiagramEdit/Tools`・`Name/Entrances`・`rule:mcp-tools-column-nullability-raw-reads` |
 | `src/QuickER.Mcp.Tools/QueryToolEnglishFormatter.cs` | `table:QueryToolFormatter` |
 | `src/QuickER.Mcp/ErDiagramToolCatalog.cs` | `DiagramEdit/ToolArgument`・`DiagramEdit/Tools` |
 | `src/QuickER.Mcp/McpToolSet.cs` | `DiagramEdit/ToolArgument` |
@@ -218,7 +218,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Provider/DiagramMergeReconciler.cs` | `FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules` |
 | `src/QuickER.Provider/NameMatching.cs` | `rule:sync-name-comparison-tokens` |
 | `src/QuickER.Provider/SchemaDiffService.cs` | `Name/DdlRoundTrip`・`SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/HistoryRows`・`SyncPlan/ShapeRows`・`rule:sync-name-comparison-tokens`・`table:SyncPlanExpectations` |
-| `src/QuickER.Provider/SqlNameText.cs` | `Name/DdlRoundTrip` |
+| `src/QuickER.Provider/SqlNameText.cs` | `Name/DdlRoundTrip`・`rule:sql-name-text-name-sources` |
 | `src/QuickER.Provider/SyncDialectCapabilities.cs` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`rule:sync-capabilities-initializers` |
 | `src/QuickER.Provider/SyncPlan.cs` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`table:SyncPlanExpectations` |
 | `src/QuickER.Provider/SyncPlanner.cs` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/ShapeRows`・`rule:sync-name-comparison-tokens`・`rule:sync-selected-foreign-key-names`・`rule:sync-type-deciding-column-copies`・`table:SyncPlanExpectations` |
@@ -700,6 +700,10 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 
 - 範囲：`src/QuickER.Provider.Sqlite/SqliteFileConnections.cs`
 
+### `rule:sql-name-text-name-sources`
+
+- 範囲：`src/QuickER.Provider/SqlNameText.cs`
+
 ### `rule:dialog-owner-resolve-uses`
 
 - 範囲：`src/QuickER.Gui.Common/WpfFileDialogService.cs`・`src/QuickER.Gui.Common/MessageBoxDialogService.cs`
@@ -751,6 +755,10 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 ### `rule:tool-argument-parsing-owners`
 
 - 範囲：`src/QuickER.Mcp/ToolArguments.cs`・`src/QuickER.Model/RelationshipType.cs`
+
+### `rule:mcp-tools-column-nullability-raw-reads`
+
+- 範囲：`src/QuickER.Mcp.Tools`
 
 ### `rule:chat-engine-tool-invocation-uses`
 

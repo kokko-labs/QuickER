@@ -67,7 +67,7 @@ public sealed class DiagramChangeTracker
         new TrackedProperty<RelationshipViewModel>(
             nameof(RelationshipViewModel.ConstraintName),
             x => x.ConstraintName,
-            (x, v) => x.ConstraintName = (string?)v
+            (x, v) => x.ApplyConstraintName((string?)v)
         ),
         new TrackedProperty<RelationshipViewModel>(
             nameof(RelationshipViewModel.OnDelete),
@@ -126,7 +126,7 @@ public sealed class DiagramChangeTracker
         new TrackedProperty<UniqueConstraintViewModel>(
             nameof(UniqueConstraintViewModel.Name),
             x => x.Name,
-            (x, v) => x.Name = (string)v!
+            (x, v) => x.ApplyName((string)v!)
         ),
     ];
 

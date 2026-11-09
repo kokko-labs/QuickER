@@ -118,8 +118,26 @@ public partial class EntityViewModel : ObservableObject
     /// <summary>図が変わったとき・対象 DBMS が変わったとき、一意制約の名前のプレビューを更新する</summary>
     internal void NotifyUniqueConstraintNamesChanged() => NotifyUniqueConstraintNames();
 
-    /// <summary>テーブル名・列名の書き換えを、重複のため受け付けなかったときに発火する（所有者がステータスバーで利用者へ知らせる）</summary>
+    /// <summary>
+    /// 一意制約へ付けようとする名前（第 1 引数）が、図の中のほかの制約名とぶつかるかを返す関数（第 2 引数は名前を付け替える
+    /// 一意制約の Id。<see cref="MainViewModel"/> が図へ載せるときに渡す。図に載っていなければ <c>null</c>＝検査しない）
+    /// </summary>
+    internal Func<string, Guid, bool>? UniqueConstraintNameTaken { get; set; }
+
+    /// <summary>一意制約へ付けようとする名前が、図の中のほかの制約名とぶつかるか（図に載っていなければ偽）</summary>
+    internal bool IsUniqueConstraintNameTaken(string name, Guid constraintId) =>
+        UniqueConstraintNameTaken?.Invoke(name, constraintId) ?? false;
+
+    /// <summary>
+    /// テーブル名・列名・一意制約の名前の書き換えを、重複のため受け付けなかったときに発火する（所有者がステータスバーで利用者へ知らせる）
+    /// </summary>
     internal event EventHandler<NameChangeRejectedEventArgs>? NameChangeRejected;
+
+    /// <summary>一意制約の名前の書き換えが拒否されたことを、そのまま転送する</summary>
+    private void OnUniqueConstraintNameChangeRejected(
+        object? sender,
+        NameChangeRejectedEventArgs e
+    ) => NameChangeRejected?.Invoke(this, e);
 
     /// <summary>列の名前の書き換えが拒否されたことを、このテーブル名を添えて転送する</summary>
     private void OnColumnNameChangeRejected(object? sender, NameChangeRejectedEventArgs e) =>
@@ -548,6 +566,7 @@ public partial class EntityViewModel : ObservableObject
         constraint.IsDetachedFromOwner = false;
         constraint.ColumnIdsChanged += OnUniqueConstraintColumnIdsChanged;
         constraint.MemberSelectionEdited += OnUniqueConstraintMemberSelectionEdited;
+        constraint.NameChangeRejected += OnUniqueConstraintNameChangeRejected;
     }
 
     /// <summary>一意制約からの通知の購読を解除する</summary>
@@ -556,6 +575,7 @@ public partial class EntityViewModel : ObservableObject
         constraint.IsDetachedFromOwner = true;
         constraint.ColumnIdsChanged -= OnUniqueConstraintColumnIdsChanged;
         constraint.MemberSelectionEdited -= OnUniqueConstraintMemberSelectionEdited;
+        constraint.NameChangeRejected -= OnUniqueConstraintNameChangeRejected;
     }
 
     /// <summary>いずれかの一意制約の構成列が変わったときに、カラム側の標識フラグを再計算する</summary>

@@ -604,4 +604,110 @@ internal static partial class UndoOperationRows
 
         return vm;
     }
+
+    /// <summary>
+    /// 複製の合成名（<c>UQ_{表}_Copy_Code</c>）が SQL Server の上限 128 を超える長さの表名（118 文字。複製の表名・主キーの既定名は上限に収まる）
+    /// </summary>
+    private static string LongOrderTableName => "Order" + new string('x', 113);
+
+    /// <summary>
+    /// Customer(Id) と、一意制約 UQ_Order_Code（Code）と外部キー FK_Order_Customer（Customer.Id → CustomerId）を持つ表を選択した図
+    /// </summary>
+    /// <param name="orderTable">一意制約と外部キーを持つ表の名前（制約名は表名に依らず固定）</param>
+    /// <param name="copyNameTaken">true なら、表 Other が複製の合成名 UQ_Order_Copy_Code を明示の名前で持つ</param>
+    private static MainViewModel NamedConstraintsDiagram(
+        string orderTable = "Order",
+        bool copyNameTaken = false
+    )
+    {
+        var vm = new MainViewModel(new StubDialogService());
+        vm.DisableFileWatchingForTests();
+
+        var customer = new EntityViewModel(
+            new Entity
+            {
+                TableName = "Customer",
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "Id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                    },
+                },
+            }
+        );
+        var code = new Column { Name = "Code", DataType = "nvarchar(20)" };
+        var customerId = new Column { Name = "CustomerId", DataType = "int" };
+        var order = new EntityViewModel(
+            new Entity
+            {
+                TableName = orderTable,
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "Id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                    },
+                    code,
+                    customerId,
+                },
+                UniqueConstraints =
+                {
+                    new UniqueConstraint { Name = "UQ_Order_Code", ColumnIds = { code.Id } },
+                },
+            },
+            new EntityLayout { X = 300 }
+        );
+        vm.Entities.Add(customer);
+        vm.Entities.Add(order);
+
+        if (copyNameTaken)
+        {
+            var otherCode = new Column { Name = "Code", DataType = "nvarchar(20)" };
+            vm.Entities.Add(
+                new EntityViewModel(
+                    new Entity
+                    {
+                        TableName = "Other",
+                        Columns = { otherCode },
+                        UniqueConstraints =
+                        {
+                            new UniqueConstraint
+                            {
+                                Name = "UQ_Order_Copy_Code",
+                                ColumnIds = { otherCode.Id },
+                            },
+                        },
+                    },
+                    new EntityLayout { X = 600 }
+                )
+            );
+        }
+
+        vm.Relationships.Add(
+            new RelationshipViewModel(
+                new Relationship
+                {
+                    SourceEntityId = customer.Id,
+                    TargetEntityId = order.Id,
+                    Type = RelationshipType.OneToMany,
+                    ColumnPairs =
+                    {
+                        new RelationshipColumnPair(customer.Columns[0].Id, customerId.Id),
+                    },
+                    ConstraintName = "FK_Order_Customer",
+                },
+                customer,
+                order
+            )
+        );
+        vm.SelectedEntity = order;
+        vm.UndoRedo.Clear();
+
+        return vm;
+    }
 }

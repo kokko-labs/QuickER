@@ -40,7 +40,7 @@ namespace QuickER.Model;
 /// 図へ保存する既定名（ツールと GUI がリレーションに付ける外部キー名・取込と C# リバースの <see cref="NameUnnamedForeignKeys"/>）と、
 /// 図の名前として見せる合成名（C# 生成の <c>[UniqueConstraint(Name = …)]</c>・ツールの要約・プロパティパネル）:
 /// <b>図の対象 DBMS の上限</b>（呼び出し側が <see cref="IdentifierLengthLimits.ForDiagramTarget"/> に <see cref="ErDiagram.TargetDbms"/> を渡して引く）。
-/// 図を受け取る <see cref="CollectExisting"/> / <see cref="IsTaken"/> / <see cref="ResolveForeignKeyNamesById"/> も上限を引数で受ける
+/// 図を受け取る <see cref="CollectExisting"/> / <see cref="IsTaken"/> / <see cref="IsForeignKeyNameTaken"/> / <see cref="ResolveForeignKeyNamesById"/> も上限を引数で受ける
 /// （Model は方言名から上限を引かない＝<c>SourceRuleTests</c>（規則 <c>model-dialect-lookups</c>））。
 /// </item>
 /// </list>
@@ -124,10 +124,25 @@ public static class ConstraintNames
     public static IReadOnlySet<string> CollectExisting(
         ErDiagram diagram,
         IdentifierLengthLimit limit
+    ) => CollectExistingExcept(diagram, limit, exceptUniqueConstraintId: null);
+
+    /// <summary>
+    /// <see cref="CollectExisting"/> と同じ名前を、指定の一意制約の名前を数えずに集める
+    /// （自分以外から集める＝同じ名前を持つ別の制約の名前まで取り除かない）
+    /// </summary>
+    private static HashSet<string> CollectExistingExcept(
+        ErDiagram diagram,
+        IdentifierLengthLimit limit,
+        Guid? exceptUniqueConstraintId
     )
     {
         var entities = diagram.Entities;
-        var names = CollectTableConstraints(entities, diagram.Relationships, limit);
+        var names = CollectTableConstraintsExcept(
+            entities,
+            diagram.Relationships,
+            limit,
+            exceptUniqueConstraintId
+        );
 
         foreach (var relationship in diagram.Relationships)
         {
@@ -167,43 +182,50 @@ public static class ConstraintNames
     /// <remarks>
     /// 外部キーの名前を付けるツール（<c>add_relationship</c>）と同じ規則を、一意制約の名前にも使う
     /// （制約名は SQL Server と Oracle では種類をまたいでスキーマ単位で共有される）。
+    /// 名前は自分以外の制約から集める（自分の名前を集合から取り除く形だと、同じ名前を持つ別の制約の名前まで消える）。
+    /// ツール（両ホストの <c>set_unique_constraint</c>）と GUI の一意制約の名前の欄が使う。
     /// </remarks>
     public static bool IsTaken(
         ErDiagram diagram,
         string name,
         Guid? replacingUniqueConstraintId,
         IdentifierLengthLimit limit
+    ) => CollectExistingExcept(diagram, limit, replacingUniqueConstraintId).Contains(name);
+
+    /// <summary>
+    /// 外部キーへ付けようとする名前が、図の中のほかの制約名（主キー・一意制約・ほかの外部キー）と衝突するか
+    /// </summary>
+    /// <param name="diagram">図</param>
+    /// <param name="name">付けようとする名前（比較は <see cref="SchemaNames.AreSame"/> の規則）</param>
+    /// <param name="renamingRelationshipId">
+    /// 名前を付け替える既存のリレーションの Id（そのリレーションの今の実効名とは衝突させない）。新規なら <c>null</c>
+    /// </param>
+    /// <param name="limit">既定名に使う識別子の長さの上限（図の対象 DBMS の上限。経路は型の XmlDoc）</param>
+    /// <remarks>
+    /// ほかの外部キーの名前は DDL が付ける名前（<see cref="ResolveForeignKeyNames"/>＝保存された名前、名前の無いリレーションは
+    /// 既定名か一意化した名前）で数える。主キー・一意制約は <see cref="CollectTableConstraints"/> の名前。
+    /// 名前は自分以外の制約から集める（<see cref="IsTaken"/> と同じ理由）。GUI のリレーションの制約名の欄が使う。
+    /// </remarks>
+    public static bool IsForeignKeyNameTaken(
+        ErDiagram diagram,
+        string name,
+        Guid? renamingRelationshipId,
+        IdentifierLengthLimit limit
     )
     {
-        var names = new HashSet<string>(CollectExisting(diagram, limit), SchemaNames.Comparer);
+        var names = CollectTableConstraints(diagram.Entities, diagram.Relationships, limit);
 
-        if (replacingUniqueConstraintId is { } id)
-        {
-            var resolved = ResolveUniqueConstraintNames(
+        foreach (
+            var (relationship, foreignKeyName) in ResolveForeignKeyNames(
                 diagram.Entities,
                 diagram.Relationships,
                 limit
-            );
-
-            foreach (var entity in diagram.Entities)
+            )
+        )
+        {
+            if (relationship.Id != renamingRelationshipId)
             {
-                var own = entity.UniqueConstraints.FirstOrDefault(constraint =>
-                    constraint.Id == id
-                );
-
-                if (own is null)
-                {
-                    continue;
-                }
-
-                if (!string.IsNullOrWhiteSpace(own.Name))
-                {
-                    names.Remove(own.Name);
-                }
-                else if (resolved.TryGetValue(own, out var ownName))
-                {
-                    names.Remove(ownName);
-                }
+                names.Add(foreignKeyName);
             }
         }
 
@@ -227,6 +249,20 @@ public static class ConstraintNames
         IEnumerable<Entity> entities,
         IEnumerable<Relationship> relationships,
         IdentifierLengthLimit limit
+    ) =>
+        CollectTableConstraintsExcept(
+            entities,
+            relationships,
+            limit,
+            exceptUniqueConstraintId: null
+        );
+
+    /// <summary><see cref="CollectTableConstraints"/> と同じ名前を、指定の一意制約の名前を数えずに集める</summary>
+    private static HashSet<string> CollectTableConstraintsExcept(
+        IEnumerable<Entity> entities,
+        IEnumerable<Relationship> relationships,
+        IdentifierLengthLimit limit,
+        Guid? exceptUniqueConstraintId
     )
     {
         var tables = entities.ToList();
@@ -242,6 +278,11 @@ public static class ConstraintNames
 
             foreach (var constraint in entity.UniqueConstraints)
             {
+                if (constraint.Id == exceptUniqueConstraintId)
+                {
+                    continue;
+                }
+
                 if (!string.IsNullOrWhiteSpace(constraint.Name))
                 {
                     names.Add(constraint.Name);

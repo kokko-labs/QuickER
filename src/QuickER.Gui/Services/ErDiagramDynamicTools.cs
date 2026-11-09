@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using QuickER.CodeGen.CSharp.Queries;
 using QuickER.Dialects;
+using QuickER.Mcp;
 using QuickER.Model;
 using QuickER.Resources;
 using QuickER.ViewModels;
@@ -96,8 +97,9 @@ public static class ErDiagramDynamicTools
 
             if (!string.IsNullOrWhiteSpace(entity.Description))
             {
+                // 説明の改行は空白へ畳む（「1 行が 1 件の記録」の要約に偽の見出し・列の行を作らない。MCP のツールと同じ）
                 sb.Append(
-                        $"  {string.Format(Strings.Tool_Summary_EntityDescription, entity.Description)}"
+                        $"  {string.Format(Strings.Tool_Summary_EntityDescription, ToolResponseText.ToSingleLine(entity.Description))}"
                     )
                     .Append('\n');
             }
@@ -123,7 +125,7 @@ public static class ErDiagramDynamicTools
 
                 var flagsText = flags.Count > 0 ? $" ({string.Join(", ", flags)})" : string.Empty;
                 var colDesc = !string.IsNullOrWhiteSpace(col.Description)
-                    ? $" // {col.Description}"
+                    ? $" // {ToolResponseText.ToSingleLine(col.Description)}"
                     : string.Empty;
                 sb.Append($"  - {col.Name}: {col.DataType}{flagsText}{colDesc}").Append('\n');
             }
@@ -249,12 +251,8 @@ public static class ErDiagramDynamicTools
             );
         }
 
-        var isPk =
-            args.TryGetProperty("is_primary_key", out var isPkEl)
-            && isPkEl.ValueKind == JsonValueKind.True;
-        var isNullable =
-            !args.TryGetProperty("is_nullable", out var isNullEl)
-            || isNullEl.ValueKind != JsonValueKind.False;
+        var isPk = GetBool(args, "is_primary_key") == true;
+        var isNullable = GetBool(args, "is_nullable") != false;
         var desc = GetString(args, "description") ?? string.Empty;
 
         var column = new ColumnViewModel(
@@ -349,13 +347,8 @@ public static class ErDiagramDynamicTools
 
         var changed = new List<string>();
 
-        if (
-            args.TryGetProperty("new_table_name", out var newNameEl)
-            && newNameEl.ValueKind == JsonValueKind.String
-        )
+        if (GetString(args, "new_table_name") is { } newTableName)
         {
-            var newTableName = newNameEl.GetString()!;
-
             if (string.IsNullOrWhiteSpace(newTableName))
             {
                 return (Strings.Tool_NewTableNameEmpty, false);
@@ -376,18 +369,15 @@ public static class ErDiagramDynamicTools
             changed.Add(Strings.Tool_Field_TableName);
         }
 
-        if (args.TryGetProperty("memo", out var memoEl) && memoEl.ValueKind == JsonValueKind.String)
+        if (GetString(args, "memo") is { } memo)
         {
-            entity.Memo = memoEl.GetString()!;
+            entity.Memo = memo;
             changed.Add(Strings.Tool_Field_Memo);
         }
 
-        if (
-            args.TryGetProperty("description", out var descEl)
-            && descEl.ValueKind == JsonValueKind.String
-        )
+        if (GetString(args, "description") is { } description)
         {
-            entity.Description = descEl.GetString()!;
+            entity.Description = description;
             changed.Add(Strings.Tool_Field_Description);
         }
 
@@ -442,39 +432,30 @@ public static class ErDiagramDynamicTools
 
         var changed = new List<string>();
 
-        if (
-            args.TryGetProperty("description", out var descEl)
-            && descEl.ValueKind == JsonValueKind.String
-        )
+        if (GetString(args, "description") is { } description)
         {
-            column.Description = descEl.GetString()!;
+            column.Description = description;
             changed.Add(Strings.Tool_Field_Description);
         }
 
-        if (
-            args.TryGetProperty("data_type", out var dataTypeEl)
-            && dataTypeEl.ValueKind == JsonValueKind.String
-        )
+        if (GetString(args, "data_type") is { } dataType)
         {
-            column.DataType = dataTypeEl.GetString()!;
+            column.DataType = dataType;
             changed.Add(Strings.Tool_Field_DataType);
         }
 
         // 主キー列は NULL 不可（ColumnViewModel が握り潰す）。NULL 許容への変更は無視し、応答でそう告げる（MCP のツールと同じ）
         var nullableIgnored = false;
 
-        if (
-            args.TryGetProperty("is_nullable", out var isNullEl)
-            && isNullEl.ValueKind is JsonValueKind.True or JsonValueKind.False
-        )
+        if (GetBool(args, "is_nullable") is { } isNullable)
         {
-            if (column.IsPrimaryKey && isNullEl.GetBoolean())
+            if (column.IsPrimaryKey && isNullable)
             {
                 nullableIgnored = true;
             }
             else
             {
-                column.IsNullable = isNullEl.GetBoolean();
+                column.IsNullable = isNullable;
                 changed.Add(Strings.Tool_Field_Nullable);
             }
         }

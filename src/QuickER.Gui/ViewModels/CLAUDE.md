@@ -184,6 +184,15 @@ MainViewModel と図の ViewModel の規則：文書の保存・外部変更検�
 - 列削除はその列を含む制約ごと削除する（縮めて別の意味の制約に変質させない）。GUI は `RemoveColumnCommand` の 1 Undo 単位で、MCP の `remove_column` も同じカスケード。
 - 合成名の解決（`ConstraintNames.ResolveUniqueConstraintNames` の結果）は、`MainViewModel` が図の世代と方言の切替で捨てるキャッシュで 1 回の実行につき 1 回だけ解決する。ガード：`UniqueConstraintResolvedNameLimitTests`（方言の切替で表示し直す）。
 
+### 制約名の重複
+- 名前の欄（`UniqueConstraintViewModel.Name`）は `EntityViewModel.TableName` と同じ形で、図の中のほかの制約名とぶつかる書き換えを受け付けない。
+  - 判定はツールの `set_unique_constraint` と同じ `ConstraintNames.IsTaken`（外部キー・主キー・一意制約の DDL が付ける名前・自分以外から集める）。図は `MainViewModel` が図へ載せるときに渡す関数（`EntityViewModel.UniqueConstraintNameTaken`）で引き、図から外れている間（エンティティが図に無い・制約が所有エンティティの一覧に無い）は検査しない。
+  - 断ったら入力欄を元へ戻し、`NameChangeRejected`（`NameChangeRejectedEventArgs.ForConstraintName`）を `MainViewModel` がステータスバーに出す（`Status_ConstraintNameRejected`）。空（未設定＝合成名）への書き換えは検査しない。
+  - Undo / Redo の適用は `ApplyName` で検査を通さない（`ApplyTableName` と同じ理由＝履歴の往復を壊さない）。`DiagramChangeTracker.NameEdited` の振る舞いは変わらない（拒否した書き換えは履歴に積まれない）。
+- 表の複製（`DuplicateEntityCommand`）と貼り付けは共通の入口 `MainViewModel.CreateEntityCopy` を通る。写した一意制約の名前が図の既存の制約名（`ConstraintNames.CollectExisting`）とぶつかるときだけ名前を外す（null）。外した名前は DDL・生成・要約が新しい表名から合成する（ぶつかれば番号つき・上限に収める）。ぶつからない名前（元の表を消した後の貼り付けなど）は保つ。番号つきの明示名のような新しい名前の規則は作らない。Redo は初回のインスタンスを使い回す。
+  - 写したまま残すと DDL に同じ制約名が 2 回出て、制約名がスキーマ単位の方言（SQL Server・PostgreSQL・Oracle）で断られる。
+- ガード：`NameIdentityViewModelFuzzTests`（入口 `gui-vm:UniqueConstraintViewModel.Name`・`gui-vm:CreateEntityCopy`＝貼り付けた後の DDL の制約名がすべて違うことも違反として見る）・`UndoOperationTests`（行 `entity-duplicate-twice-drops-colliding-unique-constraint-name`・`entity-paste-twice-drops-colliding-unique-constraint-name`・`entity-duplicate-synthesized-name-taken-gets-number`・`entity-duplicate-long-table-synthesized-name-fits-limit`。どの行でも、操作の前の図の DDL の制約名がすべて違えば、操作・Undo・Redo の後の図もすべて違うことを共通の表明が見る＝補助は `tests/QuickER.Tests/TestSupport/DdlConstraintNames.cs`）。mutation 実証済み。
+
 ## 主キーの順序の GUI
 モデルの規則（実効順・膜の正本）は `src/QuickER.Model/CLAUDE.md`「主キーの実効順」。ここでは GUI の部分だけを置く。
 
@@ -218,5 +227,9 @@ MainViewModel と図の ViewModel の規則：文書の保存・外部変更検�
   - 複合主キーの親の同名前段でも、名前が単独の `id` の子の主キー列は外す。`id` はそれぞれの表自身の代理キーなので、`Projects(TenantId, Id)`→`Tasks(TenantId, Id, ProjectId)` の `Id` は①の `ProjectId` で解く。
   - ガード：`ForeignKeyColumnResolverTests`。
 - 制約名は AI ツールと同じ `ConstraintNames.UniqueForeignKey`（衝突しなければ既定名のまま）。
+- 制約名の欄（`RelationshipViewModel.ConstraintName`）は、図の中のほかの制約名とぶつかる書き換えを受け付けない（一意制約の名前の欄と同じ形＝「一意制約の GUI」の「制約名の重複」）。
+  - 判定は `ConstraintNames.IsForeignKeyNameTaken`（主キー・一意制約の名前と、ほかの外部キーの DDL が付ける名前＝名前の無いリレーションは既定名か一意化した名前。自分以外から集める）。ツールの `add_relationship` が `ResolveRequestedForeignKey` で断るのと同じ重複の規則。
+  - 図は `MainViewModel` がリレーションを図へ載せるときに渡す関数（`ConstraintNameTaken`）で引き、図から外れている間は検査しない。空への書き換えは検査しない。Undo / Redo の適用は `ApplyConstraintName` で検査を通さない。
+  - ガード：`NameIdentityViewModelFuzzTests`（入口 `gui-vm:RelationshipViewModel.ConstraintName`）。mutation 実証済み。
 - 列削除は当該リレーションの全ペアをクリアする（線・種別・制約名は残す・1 Undo 単位）。MCP の `remove_column` とパリティ。
 - 手作成の外部キー名が縮めた既定名を避けることは `MainViewModelRelationshipConstraintNameTests`、GUI と MCP の作成経路の一致は `ConstraintNameCreationPathTests` が固定する（`src/QuickER.Mcp/CLAUDE.md`「add_relationship と remove_relationship」を参照）。

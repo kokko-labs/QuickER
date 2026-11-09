@@ -178,20 +178,14 @@ public static class CodeGenToolSet
             return ($"Invalid tool arguments (not valid JSON): {ex.Message}", false);
         }
 
-        if (
-            args.ValueKind != JsonValueKind.Object
-            || !args.TryGetProperty(FileParameterName, out var fileEl)
-            || fileEl.ValueKind != JsonValueKind.String
-            || string.IsNullOrWhiteSpace(fileEl.GetString())
-        )
+        // 引数がオブジェクトでない・file が文字列でない・空なら断る（値の読み取りは ToolArguments の 1 か所）
+        if (GetString(args, FileParameterName) is not { } file || string.IsNullOrWhiteSpace(file))
         {
             return (
                 $"The '{FileParameterName}' argument (path to the diagram JSON file) is required.",
                 false
             );
         }
-
-        var file = fileEl.GetString()!;
 
         try
         {

@@ -111,9 +111,11 @@ docs 不在の外部エージェントが config を自己発見的に書ける�
     - 第 1 引数が `JsonElement` / `JsonObject` / `JsonNode` の `GetString` / `GetBool` の宣言
     - `RelationshipType` を列挙型にする `Enum.Parse` / `TryParse` / `GetValues`（`GetNames` は拾わない）
     - `ParseRelationshipType` / `HasSameColumnPairs` の宣言
-  - 自己検査の行 `tool-argument-parsing-copies-forms`・`tool-argument-parsing-copies-inactive-branch` と、正本自身が拾えること（規則 `tool-argument-parsing-owners`）も確かめる。
+    - `JsonElement.TryGetProperty` の out で受けた値の `ValueKind` を、同じ式の中で `JsonValueKind.String` / `True` / `False` と比べる形（`==` / `!=` / `is` のパターン。単発の値の読み取りの写し）。Array / Object / Null との比較（配列・オブジェクトの読み取りと形の検査）と、`TryGetProperty` と別の文の比較は拾わない。ツールの引数でない JSON（AI の API のエラー本文・claude CLI と codex app-server の出力）を読む QuickER.AI の箇所は理由つきの一覧に載せる
+  - 自己検査の行 `tool-argument-parsing-copies-forms`・`tool-argument-parsing-copies-inactive-branch`・`tool-argument-parsing-copies-out-value-kind-forms`・`tool-argument-parsing-copies-out-value-kind-inactive-branch` と、正本自身が拾えること（規則 `tool-argument-parsing-owners`）も確かめる。
 
 ## ツールの応答の改行
 
 - ツールの複数行の応答は、改行を LF だけで組む。`AppendLine`（Windows で CRLF）を使わず `.Append('\n')` で組み、1 つの応答で改行を混ぜず、同じツールの応答の改行がホスト間で食い違わないようにする。
-- ガード：`ToolScenarioTests`（行 `line-ending-summary-uses-lf-only`＝両ホストの `get_diagram_summary`）・`QueryToolFormatterTests`（全行に共通の「`\r` を含まない」と行 `formatter-line-ending-*`＝英語の整形とチャットの整形〔en・ja〕）。
+- 要約（`get_diagram_summary`）は「1 行が 1 件の記録」の形で、表の説明は見出しの下の 1 行、列の説明は列の行の末尾に置く。説明の改行（CR LF の組は 1 つ・CR・LF・U+0085・U+2028・U+2029）は空白 1 つへ畳む。畳まないと説明の続きが行頭に出て、偽の `[表]` 見出しや偽の列の行に読める。畳む関数は `ToolResponseText.ToSingleLine`（QuickER.Mcp）の 1 つで、両ホストの表・列の説明の 4 か所が通す。
+- ガード：`ToolScenarioTests`（行 `line-ending-summary-uses-lf-only`＝両ホストの `get_diagram_summary`・`line-ending-summary-folds-description-line-breaks`＝説明の改行を畳み、偽の見出し・列の行と `\r` を含まない）・`QueryToolFormatterTests`（全行に共通の「`\r` を含まない」と行 `formatter-line-ending-*`＝英語の整形とチャットの整形〔en・ja〕）。

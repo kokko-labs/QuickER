@@ -118,10 +118,10 @@ public static class QueryToolCore
         {
             var declared = parameters.Select(parameter => parameter.Name).ToList();
 
+            // ページングのパラメータ名は生成器と同じ正本から足す
             if (paging)
             {
-                declared.Add("take");
-                declared.Add("skip");
+                declared.AddRange(QueryDefinitionRules.PagingParameterNames);
             }
 
             foreach (var (dialect, sqlText) in sql)

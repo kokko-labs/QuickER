@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace QuickER.Tests.TestSupport.Guards;
@@ -77,8 +78,11 @@ internal static partial class SourceRules
             // using static・別名・目的型の書き方に依らない。拾う形：(a) 第 1 引数が JsonElement（NULL 許容を含む）・JsonObject・
             // JsonNode の GetString / GetBool の宣言（メソッドとローカル関数）、(b) RelationshipType を列挙型とする Enum.Parse /
             // TryParse / GetValues の呼び出し（型引数の形と typeof を渡す形。Enum.GetNames は断るときの候補の並びに使うので拾わない。
-            // メソッドを解決できない呼び出しは「未解決」として数える）、(c) ParseRelationshipType / HasSameColumnPairs の宣言。
-            // 正本のファイルの中の正本自身の書き方（ToolArguments.cs の Get… の宣言・RelationshipType.cs の Enum.…）は拾わない
+            // メソッドを解決できない呼び出しは「未解決」として数える）、(c) ParseRelationshipType / HasSameColumnPairs の宣言、
+            // (d) JsonElement.TryGetProperty の out で受けた値の ValueKind を、同じ式の中で JsonValueKind.String / True / False と
+            // 比べる形（== / != / is のパターン。単発の値の読み取りの写し＝GetString / GetBool を通す。Array / Object / Null との
+            // 比較と、TryGetProperty と別の文の比較は拾わない）。
+            // 正本のファイルの中の正本自身の書き方（ToolArguments.cs の Get… の宣言と (d)・RelationshipType.cs の Enum.…）は拾わない
             SourceRule.Forbid(
                 "tool-argument-parsing-copies",
                 "JSON の引数は ToolArguments・種別の名前は RelationshipTypeNames.TryParse を通し、例外は理由つきで一覧に載せる",
@@ -101,6 +105,30 @@ internal static partial class SourceRules
                     "ParseRelationshipType の宣言",
                     1,
                     "Excel 定義書の関係の表記（1:1 / N:1 / N:N）から種別を読む＝列挙子の名前を読むツール引数とは別の書式"
+                ),
+                new(
+                    "src/QuickER.AI/AiErrorMessageLocalizer.cs",
+                    "TryGetProperty の out の値の ValueKind と String の比較",
+                    2,
+                    "AI の API が返したエラー本文の JSON（error.code / error.message）を読む＝ツールの引数ではない"
+                ),
+                new(
+                    "src/QuickER.AI/ClaudeCodeClient.cs",
+                    "TryGetProperty の out の値の ValueKind と String の比較",
+                    2,
+                    "claude CLI の stream-json の出力（session_id・result）を読む＝ツールの引数ではない"
+                ),
+                new(
+                    "src/QuickER.AI/ClaudeCodeClient.cs",
+                    "TryGetProperty の out の値の ValueKind と True の比較",
+                    1,
+                    "claude CLI の stream-json の出力（is_error）を読む＝ツールの引数ではない"
+                ),
+                new(
+                    "src/QuickER.AI/CodexAppServerClient.cs",
+                    "TryGetProperty の out の値の ValueKind と True の比較",
+                    3,
+                    "codex app-server の JSON-RPC の応答・通知（requiresOpenaiAuth・ephemeral・success）を読む＝ツールの引数ではない"
                 )
             ),
             // 正本自身の宣言と呼び出しは拾える（上の規則の走査が空振りしていない・所有の判定が正本を見失っていない）
@@ -122,6 +150,18 @@ internal static partial class SourceRules
                     "JSON の引数の真偽値の読み取りの正本"
                 ),
                 new(
+                    ToolArgumentsCode,
+                    "TryGetProperty の out の値の ValueKind と String の比較",
+                    1,
+                    "GetString の本体（形 (d) の正本）"
+                ),
+                new(
+                    ToolArgumentsCode,
+                    "TryGetProperty の out の値の ValueKind と True / False の比較",
+                    1,
+                    "GetBool の本体（形 (d) の正本）"
+                ),
+                new(
                     RelationshipTypeCode,
                     "Enum.GetValues<RelationshipType>",
                     1,
@@ -130,6 +170,20 @@ internal static partial class SourceRules
             ) with
             {
                 MinimumFiles = 2,
+            },
+            // MCP のツールホスト（QuickER.Mcp.Tools）は、列が NULL を持てるかを ColumnNullability.AllowsNull で読み、NULL 許容の印
+            // （Column.IsNullable）を直接読まない。図は主キーの列に印を持てる（図のファイルの手書き）ので、印をそのまま読むと、読込で
+            // 実効値へそろえる GUI（ColumnViewModel）と要約の NOT NULL が食い違う。判定は規則 provider-column-nullability-raw-reads と
+            // 同じ見つける形で、書き込み（代入・初期化子の左辺）は数えない
+            SourceRule.Forbid(
+                "mcp-tools-column-nullability-raw-reads",
+                "QuickER.Mcp.Tools は列の NULL 許容の印を直接読まず、ColumnNullability.AllowsNull を通す",
+                SourceScope.Under("src/QuickER.Mcp.Tools"),
+                GuardFinder.Symbols(ColumnNullableRawReads.Describe)
+            ) with
+            {
+                // 範囲が QuickER.Mcp.Tools を読んでいること（いまは 10 ファイル）
+                MinimumFiles = 10,
             },
             // 図を読むツールの「新しい版で保存された」の警告文は、src に 1 か所だけ書く（文言を直すとき 1 か所で済み、ツールどうしで
             // 食い違わない）。文字列で読むので、コメント・条件コンパイルの外れる分岐の中の表記も数える
@@ -205,8 +259,12 @@ internal static partial class SourceRules
 
         return (
                 In(ToolArgumentsCode)
-                && what.EndsWith(" の宣言", StringComparison.Ordinal)
-                && what.StartsWith("Get", StringComparison.Ordinal)
+                && (
+                    (
+                        what.EndsWith(" の宣言", StringComparison.Ordinal)
+                        && what.StartsWith("Get", StringComparison.Ordinal)
+                    ) || what.StartsWith("TryGetProperty ", StringComparison.Ordinal)
+                )
             ) || (In(RelationshipTypeCode) && what.StartsWith("Enum.", StringComparison.Ordinal));
     }
 
@@ -220,8 +278,117 @@ internal static partial class SourceRules
                 model,
                 invocation
             ),
+            BinaryExpressionSyntax binary
+                when binary.IsKind(SyntaxKind.EqualsExpression)
+                    || binary.IsKind(SyntaxKind.NotEqualsExpression) =>
+                DescribeOutValueKindComparison(model, binary, binary.Left, binary.Right)
+                    ?? DescribeOutValueKindComparison(model, binary, binary.Right, binary.Left),
+            IsPatternExpressionSyntax pattern => DescribeOutValueKindComparison(
+                model,
+                pattern,
+                pattern.Expression,
+                pattern.Pattern
+            ),
             _ => null,
         };
+
+    /// <summary>JSON の値の種類のうち、単発の値の読み取り（ToolArguments の GetString / GetBool）が受け持つもの</summary>
+    private static readonly string[] ScalarJsonValueKinds = ["String", "True", "False"];
+
+    /// <summary>
+    /// 形 (d)：比較（<c>==</c> / <c>!=</c> / <c>is</c> のパターン）の主語が <c>JsonElement.TryGetProperty</c> の out で受けた
+    /// ローカル変数の <c>ValueKind</c> で、相手が <c>JsonValueKind.String</c> / <c>True</c> / <c>False</c> を含み、
+    /// TryGetProperty の呼び出しと比較が同じ式の中にあるならその説明（拾わなければ null）
+    /// </summary>
+    /// <remarks>
+    /// Array / Object / Null との比較（配列・オブジェクトの読み取りと形の検査）は拾わない。TryGetProperty と別の文の比較も
+    /// 拾わない（同じ式の中＝両方を含む最も近い節が式・引数・引数の並び）。
+    /// </remarks>
+    private static string? DescribeOutValueKindComparison(
+        SemanticModel model,
+        SyntaxNode comparison,
+        ExpressionSyntax subject,
+        SyntaxNode kinds
+    )
+    {
+        if (
+            subject
+                is not MemberAccessExpressionSyntax
+                {
+                    Name.Identifier.ValueText: "ValueKind",
+                    Expression: var receiver
+                }
+            || model.GetSymbolInfo(subject).Symbol is not IPropertySymbol valueKind
+            || !IsJsonElement(valueKind.ContainingType)
+            || model.GetSymbolInfo(receiver).Symbol is not ILocalSymbol local
+        )
+        {
+            return null;
+        }
+
+        var tryGetProperty = local
+            .DeclaringSyntaxReferences.Select(reference => reference.GetSyntax())
+            .Select(declaration =>
+                declaration
+                    is SingleVariableDesignationSyntax
+                    {
+                        Parent: DeclarationExpressionSyntax
+                        {
+                            Parent: ArgumentSyntax
+                            {
+                                RefKindKeyword.ValueText: "out",
+                                Parent: ArgumentListSyntax
+                                {
+                                    Parent: InvocationExpressionSyntax call
+                                },
+                            },
+                        },
+                    }
+                    ? call
+                    : null
+            )
+            .FirstOrDefault(call =>
+                call is not null
+                && call.SyntaxTree == comparison.SyntaxTree
+                && SourceSymbolScan.ResolveMethod(model, call) is { Name: "TryGetProperty" } method
+                && IsJsonElement(method.ContainingType)
+            );
+
+        if (tryGetProperty is null)
+        {
+            return null;
+        }
+
+        var common = comparison
+            .Ancestors()
+            .FirstOrDefault(ancestor => ancestor.Span.Contains(tryGetProperty.Span));
+
+        if (common is not (ExpressionSyntax or ArgumentSyntax or ArgumentListSyntax))
+        {
+            return null;
+        }
+
+        var compared = kinds
+            .DescendantNodesAndSelf()
+            .OfType<MemberAccessExpressionSyntax>()
+            .Select(access => model.GetSymbolInfo(access).Symbol)
+            .OfType<IFieldSymbol>()
+            .Where(field =>
+                field.ContainingType?.ToDisplayString() == "System.Text.Json.JsonValueKind"
+                && ScalarJsonValueKinds.Contains(field.Name)
+            )
+            .Select(field => field.Name)
+            .Distinct()
+            .ToList();
+
+        return compared.Count == 0
+            ? null
+            : $"TryGetProperty の out の値の ValueKind と {string.Join(" / ", compared)} の比較";
+    }
+
+    /// <summary>型が <c>System.Text.Json.JsonElement</c> か</summary>
+    private static bool IsJsonElement(ITypeSymbol? type) =>
+        type?.ToDisplayString() == "System.Text.Json.JsonElement";
 
     private static string? DescribeToolHelperDeclaration(IMethodSymbol? method)
     {
