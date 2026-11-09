@@ -55,6 +55,7 @@ public sealed class OracleProvider : IDatabaseProvider
             SetNullRequiresNullableChildColumn = false,
             SupportsSchemaQualifiedTableNames = true,
             ChecksDefaultOnColumnTypeChange = true,
+            TypeKindChangeRequiresEmptyColumn = true,
             SupportsComputedColumnTypeChange = false,
             SupportsUniqueConstraintOnPrimaryKey = false,
             ReferencedKeyRequiresSameColumnOrder = false,

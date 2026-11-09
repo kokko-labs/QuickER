@@ -629,6 +629,11 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 Strings.SchemaSync_ExecuteConfirmDefaultOnColumnTypeKindChange,
                 BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
             ),
+            // 列が空でないと型の種類を変えられない方言では、外して付け直す外部キーが列の変更の失敗で外れたまま残りうる
+            SyncPlanWarningKind.ForeignKeyRebuildAroundTypeKindChange => string.Format(
+                Strings.SchemaSync_ExecuteConfirmForeignKeyRebuildAroundTypeKindChange,
+                BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
+            ),
             // ドットを含む表名は、SQLite では添付したデータベースの表と読まれる
             SyncPlanWarningKind.SchemaQualifiedTableName => string.Format(
                 Strings.SchemaSync_ExecuteConfirmSchemaQualifiedTableName,

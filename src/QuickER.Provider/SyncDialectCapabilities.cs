@@ -170,6 +170,18 @@ public sealed partial record SyncDialectCapabilities
     /// </remarks>
     public required bool ChecksDefaultOnColumnTypeChange { get; init; }
 
+    /// <summary>
+    /// 列の型の種類（方言の正規化を通した、括弧より前の基本の名前）の変更を、列の値が全部 NULL か行 0 のときだけ受け付けるか（Oracle）。
+    /// </summary>
+    /// <remarks>
+    /// Oracle は行のある列の型の種類を変えられない（ORA-01439）。<c>true</c> の方言では <see cref="SyncPlanner"/> が、外して付け直す
+    /// 外部キーの構成列の型の種類を変える同期を <see cref="SyncPlanWarningKind.ForeignKeyRebuildAroundTypeKindChange"/> で名指しする。
+    /// 計画は列の値を見ないので止めず、判断の材料を渡す（DDL が暗黙コミットされるので、列の変更が断られると先に外した外部キーは
+    /// 付け直されずに残る）。種類の判定は基本の名前で行うので、Oracle が値のあるまま受け付ける種類の変更（<c>CHAR</c> と
+    /// <c>VARCHAR2</c> など）も名指ししうる（警告のため多い側に倒す）。
+    /// </remarks>
+    public required bool TypeKindChangeRequiresEmptyColumn { get; init; }
+
     /// <summary>計算列・生成列の型を、式を保ったまま変えられるか（PostgreSQL と MySQL）。</summary>
     /// <remarks>
     /// <para>

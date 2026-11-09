@@ -330,6 +330,61 @@ internal static partial class SyncPlanExpectationRows
                         .Warnings.Empty()
                 ),
             Row(
+                    "plan-type-mismatch-both-sides-kind-change-rebuilds-and-warns-where-declared",
+                    "型の食い違い: 両端を同じ別の種類へ変える外部キーは、どの逐次 DDL の方言でも外して付け直し、列が空でないと型の種類を変えられない方言だけ警告する",
+                    AllDialects
+                )
+                // 外部キーを張ったまま片側だけ変えた途中の状態（int と varchar）は、どの方言でも並べられない
+                .Live(s => ExpectationScenarios.CustomerOrders(s))
+                .TargetWith(w =>
+                {
+                    w.Target.Entities.AddRange(
+                        w.Live.Entities.Select(e => e.Clone(preserveId: true))
+                    );
+                    w.Target.Col("customer", "id").DataType = "VARCHAR(10)";
+                    w.Target.Col("orders", "customer_id").DataType = "VARCHAR(10)";
+                    w.Target.Relationships.Add(w.Live.Relationships[0]);
+                })
+                .Select(SelectAll)
+                .Expect(e =>
+                {
+                    foreach (var dialect in AllDialects)
+                    {
+                        var capabilities = C.Get(dialect);
+                        e.For(
+                            dialect,
+                            x =>
+                            {
+                                x.Warnings.Absent("ForeignKeyColumnTypeMismatch*");
+
+                                if (capabilities.ColumnReorder == ColumnReorderMode.Rebuild)
+                                {
+                                    x.Warnings.Absent("ForeignKeyRebuildAroundTypeKindChange*")
+                                        .Rebuilds.Contains("*");
+                                    return;
+                                }
+
+                                // SQL Server は主キーの列の変更で主キーも外して付け直す（Contains で外部キーの文だけを見る）
+                                x.Sections.Contains(
+                                    "DropForeignKey: DropForeignKey orders fk=FK_orders_customer",
+                                    "AddForeignKey: AddForeignKey orders.customer_id fk=FK_orders_customer"
+                                );
+
+                                if (capabilities.TypeKindChangeRequiresEmptyColumn)
+                                {
+                                    x.Warnings.Single(
+                                        "ForeignKeyRebuildAroundTypeKindChange(orders): FK_orders_customer (*"
+                                    );
+                                }
+                                else
+                                {
+                                    x.Warnings.Absent("ForeignKeyRebuildAroundTypeKindChange*");
+                                }
+                            }
+                        );
+                    }
+                }),
+            Row(
                     "plan-type-mismatch-same-column-mismatched-sibling-drops-neither",
                     "型の食い違い: 同じ列の別の外部キーが食い違うなら、食い違わない外部キーも外さない",
                     C.MySqlLike
@@ -565,15 +620,39 @@ internal static partial class SyncPlanExpectationRows
 
                     x.Warnings.Count("ForeignKeyColumnTypeMismatch*", 1)
                         .Warnings.Single("ForeignKeyColumnTypeMismatch(orders): FK_orders_customer")
-                        .Sections.Absent("DropForeignKey: *", "AddForeignKey: *")
-                        .Items.Contains("AlterColumn > AlterColumn customer.id *");
+                        .Items.Contains("AlterColumn > AlterColumn customer.id *")
+                        .Items.Absent("* fk=FK_orders_customer *");
+
+                    if (capabilities.AlterColumnRequiresForeignKeyRebuild)
+                    {
+                        // 列の変更で外し直す方言は、食い違う外部キーがあればどの外部キーも外し直さない（doomed）
+                        x.Sections.Absent("DropForeignKey: *", "AddForeignKey: *");
+                    }
+                    else
+                    {
+                        // 外し直さない方言は、両端を同じ型へ変える FK_invoice_customer を、片側だけ変えた途中の状態（整数と小数）が
+                        // 宣言で並べられないので外して付け直す（宣言は保守側＝DB が受け入れる組でも付け直す）
+                        x.Sections.Contains(
+                            "DropForeignKey: DropForeignKey invoice fk=FK_invoice_customer",
+                            "AddForeignKey: AddForeignKey invoice.customer_id fk=FK_invoice_customer"
+                        );
+                    }
 
                     // DDL が暗黙コミットされる方言（MySQL・Oracle）では、食い違う外部キーに阻まれて必ず断られる列の変更を
-                    // 計画の先頭へ移し、何も変えずに失敗させる（Oracle は外部キーを外し直さず、張ったまま列を変える）。
-                    // トランザクションの方言は並びを変えない
+                    // 計画の先頭へ移し、何も変えずに失敗させる（外部キーを外す文より前）。トランザクションの方言は並びを変えない
                     if (!capabilities.TransactionalDdl)
                     {
-                        x.Sections.Exact("AlterColumn: AlterColumn customer.id", "*");
+                        x.Sections.Exact(
+                            capabilities.AlterColumnRequiresForeignKeyRebuild
+                                ? ["AlterColumn: AlterColumn customer.id", "*"]
+                                :
+                                [
+                                    "AlterColumn: AlterColumn customer.id",
+                                    "DropForeignKey: *",
+                                    "AlterColumn: *",
+                                    "AddForeignKey: *",
+                                ]
+                        );
                     }
                     else
                     {

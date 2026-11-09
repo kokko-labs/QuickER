@@ -606,24 +606,28 @@ Foreign keys that rely on the changed primary key (they refer to the same column
 
 | | SQL Server | PostgreSQL | MySQL | Oracle | SQLite |
 | --- | :-: | :-: | :-: | :-: | :-: |
-| Altering a column drops and re-adds its foreign keys | ✅ | — | ✅ | — | — (the table is rebuilt) |
+| Altering a column drops and re-adds its foreign keys | ✅ | — (only when both ends change and the ends in between do not match) | ✅ | — (only when both ends change and the ends in between do not match) | — (the table is rebuilt) |
 | Altering a key column drops and re-adds the primary key and unique constraints | ✅ | — | — | — | — (the table is rebuilt) |
 | A foreign key resting on the index of a dropped primary key or unique constraint is re-added | — | — | ✅ | — | — |
 | Referencing columns must follow the order of the referenced key | ✅ | — | ✅ | — | — |
 | String types differing only in length are allowed on the two ends | — (error 1753) | ✅ | ✅ | ✅ (same length unit) | ✅ |
 | Integer types differing only in width are allowed on the two ends | — (error 1778) | ✅ | — (error 3780) | ✅ (`NUMBER` without decimals) | ✅ |
 | A failed re-add can leave the foreign key dropped | — | — | ✅ | ✅ | — |
+| Changing the type kind of a column needs the column to be empty | — | — | — | ✅ (ORA-01439) | — |
 
 A primary key dropped and re-added by a key column change (see the table above) is named `PK_{table}`.
 On MySQL, a foreign key of the table whose primary key changes is also dropped and re-created when its columns lead the old primary key, because the primary key cannot be dropped while it is the only index supporting that foreign key.
 The same applies when dropping a unique constraint whose index is the only one supporting a foreign key (MySQL refuses with error 1553 otherwise).
 When a change leaves the two ends of a foreign key with different types after the sync (altering the type of only one side, for example), the foreign key is not dropped and re-added, and the column change fails as it is (the database stays unchanged).
 The confirmation names such a foreign key on every dialect, also on PostgreSQL and Oracle, which change the column with the foreign key in place.
+When the sync changes both ends to types that match, PostgreSQL and Oracle still drop the foreign key and re-add it after the column changes if the ends do not match while only one of them has changed, because the database refuses the first column change otherwise.
+Where the table above says changing the type kind of a column needs the column to be empty, the confirmation names a foreign key re-created around a change of its column's type kind (the base type name, such as `NUMBER` to `NVARCHAR2`): if the column has data, the change fails and the dropped foreign key stays dropped.
 QuickER treats such a type difference as one that can make re-adding the foreign key fail, and on MySQL / Oracle a failed re-add leaves the foreign key missing.
 Integer types that differ only in width are not a mismatch where the table above allows them on the two ends.
 The databases accept some other combinations as well (decimal precisions on PostgreSQL, MySQL and Oracle, and integers referring to decimals on PostgreSQL), but QuickER still treats them as a mismatch: the confirmation names the foreign key, and the sync goes through when the database accepts it.
 Only a change of type counts, pair by pair: a column pair whose two ends already have different types that the database accepts is not counted when the sync changes only the nullability of its columns, the primary key it refers to, or the types of another pair of the same foreign key.
 An addition or a recreate of a foreign key that you selected is left out of the script for the same reason, and the confirmation names it.
+For such a foreign key, a column pair that no foreign key in the database has yet counts even when the sync changes neither column, because the database has never accepted its types.
 A recreate is left out together with its drop, so the foreign key keeps its current definition.
 SQLite rebuilds the table and does not check the types of a foreign key, so it applies the addition or the recreate as selected.
 String types that differ only in length (`varchar(50)` and `varchar(100)`, for example) are not a mismatch where the table above allows them on the two ends; on Oracle the length unit (`CHAR` / `BYTE`) must be the same on both ends.
@@ -631,7 +635,7 @@ Changing the length of one end drops and re-adds the foreign key as usual.
 SQL Server cannot create a foreign key whose ends differ in length (error 1753), so the DDL adds a comment before such a foreign key.
 The confirmation dialog lists those foreign keys so that you can change both ends to the same type.
 In that case no other foreign key is dropped and re-added either, because the column change fails anyway and the re-adding would never run.
-If a referenced column is no longer part of the new key, the confirmation dialog warns that re-creating those foreign keys may fail.
+If the referenced columns of a foreign key that the sync re-creates (around a primary key change, a column change or a dropped index) are not exactly the primary key or a unique constraint after the sync, the confirmation dialog warns that re-creating those foreign keys may fail.
 Such a failure rolls the whole script back, or, where the table above says so, leaves the warned foreign key dropped (partially applied); those re-creations run after every other foreign key addition, so no other foreign key is left dropped.
 The same warning appears when a foreign key you add or change refers to columns that are not exactly a primary key or a unique constraint after the sync.
 Such a foreign key is written in the diagram's order, because there is no key to follow.

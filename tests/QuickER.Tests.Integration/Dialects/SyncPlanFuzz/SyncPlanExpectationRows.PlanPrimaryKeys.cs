@@ -439,6 +439,8 @@ internal static partial class SyncPlanExpectationRows
             ("vendor_id", "INT", false),
             ("memo", "TEXT", false)
         );
+        // 複合外部キーの参照先 (id, code) の候補キー（無いと DB は外部キーを作れず、計画は付け直しを候補キーの喪失として名指しする）
+        s.Unique("parent", "UQ_parent_id_code", "id", "code");
         s.Fk("parent", "child", "FK_child_parent", ("id", "parent_id"), ("code", "order_no"));
         s.Fk("vendor", "child", "FK_child_vendor", ("id", "vendor_id"));
     }

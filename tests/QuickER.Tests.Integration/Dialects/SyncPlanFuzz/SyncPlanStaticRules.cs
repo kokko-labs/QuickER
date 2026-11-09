@@ -48,6 +48,9 @@ internal sealed record SyncPlanStaticVerdict(
 ///   （<see cref="SyncDialectCapabilities.AreForeignKeyCompatibleTypes"/>）で並べられる（PostgreSQL 42804・Oracle ORA-02267。外し直しの方言は
 ///   R2 が先に当たる）。宣言は「真なら DB が必ず受け入れる」側に置くので、偽の組を DB が受け入れる形（PostgreSQL の integer と numeric など）は
 ///   予言が外れうる。生成器と形の行の外部キーの列は整数か文字列で、その範囲の宣言は実 DB の期待の行が固定する。</item>
+///   <item>R8：外部キーを足すとき、組の両端のその時点の型が方言の宣言で並べられる（MySQL 3780・SQL Server 1778 / 1753・PostgreSQL 42804・
+///   Oracle ORA-02267）。DB 側の図の外部キーが同じ型のまま持っていた組（外して付け直す文）は、DB が受け入れたので数えない。宣言の扱いは R7 と同じ。
+///   この規則が無いと、live の列どうしの型の違う外部キーの追加が警告なしに断られるのを予言できない。</item>
 /// </list>
 /// <para>
 /// 違反になるのは、断られる文があるのに次のどちらでもないとき：(a) 失敗を予告する警告がある（<see cref="NonPredictingWarnings"/> 以外）
@@ -61,7 +64,8 @@ internal sealed record SyncPlanStaticVerdict(
 /// <para>
 /// 警告の正しさの規則 W1（<see cref="SpuriousTypeMismatchWarnings"/>）は、予言の有無に依らず掛ける：
 /// <see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/> が DB にある外部キーを名指しするなら、その外部キーに「端の型を計画が
-/// 変え、同期後に両端が合わない組」がある。予告の警告があれば合格にする上の判定は、警告そのものが正しいかを見ないので、偽の警告が
+/// 変え、同期後に両端が合わない組」がある。DB に無い外部キー（選んだ追加・作り直しの名指し）なら、その項目に「DB が受け入れた組でなく、
+/// 同期後に両端が合わない組」がある。予告の警告があれば合格にする上の判定は、警告そのものが正しいかを見ないので、偽の警告が
 /// 「予言された失敗」として通っていた（P5-2 の試運転の L4・2 回目の V1）。
 /// </para>
 /// <para>
@@ -113,6 +117,7 @@ internal static class SyncPlanStaticRules
         var warningViolations = SpuriousTypeMismatchWarnings(
                 liveEntities,
                 liveRelationships,
+                selected,
                 plan,
                 capabilities
             )
@@ -178,11 +183,15 @@ internal static class SyncPlanStaticRules
     /// 計画は外部キーを外し直さずに残し、その外部キーに阻まれる文（主キーの解除など）で失敗する。組単位で見るのは、複合外部キーの
     /// ほかの組の型を変えたときに、DB が受け入れている組まで数えた偽の警告が予言された失敗として通っていたため（P5-2 の試運転の
     /// 2 回目の V1）。型を変えた組の互換は製品と同じ方言の宣言で判定する（宣言の値は実 DB の形の行が確かめる）。
-    /// DB に無い外部キー（図で足す外部キー）は判定しない。
+    /// 警告が選んだ外部キーの追加・作り直し（スクリプトが付ける名前）を名指しするなら、その項目の組で判定する：「DB が受け入れた組」
+    /// （両端とも計画が型を変えず、DB 側の図の外部キーが同じ組を持つ）でなく、同期後に両端が合わない組がある。DB にまだ無い組は
+    /// 型を変えない列どうしでも DB が受け入れたことが無いので数える。作り直しは DB にある外部キーと同じ名前を持つので、項目を先に見る
+    /// （列ペアを変える作り直しの新しい組は、DB にある外部キーの組では判定できない）。
     /// </remarks>
     private static IEnumerable<string> SpuriousTypeMismatchWarnings(
         IReadOnlyList<Entity> liveEntities,
         IReadOnlyList<Relationship> liveRelationships,
+        IReadOnlyCollection<SchemaDiffItem> selected,
         SyncPlan plan,
         SyncDialectCapabilities capabilities
     )
@@ -216,8 +225,60 @@ internal static class SyncPlanStaticRules
                 item.Column!.DataType;
         }
 
+        // DB 側の図の外部キーが持つ組（子の列・親の列）
+        var livePairs = new HashSet<(string Child, string Parent)>();
+
+        foreach (var relationship in liveRelationships)
+        {
+            var parent = liveEntities.FirstOrDefault(e => e.Id == relationship.SourceEntityId);
+            var child = liveEntities.FirstOrDefault(e => e.Id == relationship.TargetEntityId);
+
+            if (
+                parent is not null
+                && child is not null
+                && ForeignKeyColumnPairResolver.Resolve(relationship, parent, child) is { } pairs
+            )
+            {
+                foreach (var pair in pairs)
+                {
+                    livePairs.Add(
+                        (
+                            ColumnKey(Lower(child.TableName), pair.ChildColumn),
+                            ColumnKey(Lower(parent.TableName), pair.ParentColumn)
+                        )
+                    );
+                }
+            }
+        }
+
         foreach (var warning in warnings)
         {
+            // 選んだ外部キーの追加・作り直しの名指し（スクリプトが付ける名前）
+            var named = selected
+                .Where(i =>
+                    i.Kind is SchemaDiffKind.AddForeignKey or SchemaDiffKind.AlterForeignKey
+                    && i.ChildEntity is not null
+                    && i.ParentEntity is not null
+                    && Lower(i.ChildEntity.TableName) == Lower(warning.TableName)
+                    && Lower(
+                        SyncScriptBuilderHelper.ForeignKeyNameToAdd(
+                            i,
+                            capabilities.IdentifierLengthLimit
+                        )
+                    ) == Lower(warning.Detail)
+                )
+                .ToList();
+
+            if (named.Count > 0)
+            {
+                if (!named.Any(HasUnacceptedMismatch))
+                {
+                    yield return $"{W1Prefix} {warning.Kind}({warning.TableName}: {warning.Detail}) names a selected foreign key without a column pair that the database has not accepted and whose ends then do not match";
+                }
+
+                continue;
+            }
+
             foreach (var relationship in liveRelationships)
             {
                 var parent = liveEntities.FirstOrDefault(e => e.Id == relationship.SourceEntityId);
@@ -261,11 +322,55 @@ internal static class SyncPlanStaticRules
                 ? altered
                 : entity.Columns.FirstOrDefault(c => Lower(c.Name) == Lower(column))?.DataType
                     ?? string.Empty;
+
+        // 選んだ外部キーの項目に、DB が受け入れた組でなく同期後に両端が合わない組がある
+        bool HasUnacceptedMismatch(SchemaDiffItem item) =>
+            item.ForeignKeyColumnPairs.Any(pair =>
+            {
+                var (childType, childDecided) = EndType(item.ChildEntity!, pair.ChildColumn);
+                var (parentType, parentDecided) = EndType(item.ParentEntity!, pair.ParentColumn);
+                var accepted =
+                    !childDecided
+                    && !parentDecided
+                    && livePairs.Contains(
+                        (
+                            ColumnKey(Lower(item.ChildEntity!.TableName), pair.ChildColumn),
+                            ColumnKey(Lower(item.ParentEntity!.TableName), pair.ParentColumn)
+                        )
+                    );
+
+                return !accepted
+                    && !capabilities.AreForeignKeyCompatibleTypes(childType, parentType);
+            });
+
+        // 項目の端の同期後の型と、計画がその型を決めるか（計画が書く型・live の型・live に無い列は図の型＝決める）
+        (string Type, bool Decided) EndType(Entity diagramEntity, string column)
+        {
+            var live = liveEntities
+                .FirstOrDefault(e => Lower(e.TableName) == Lower(diagramEntity.TableName))
+                ?.Columns.FirstOrDefault(c => Lower(c.Name) == Lower(column));
+            var key = ColumnKey(Lower(diagramEntity.TableName), column);
+
+            if (alteredTypes.TryGetValue(key, out var altered))
+            {
+                return (altered, live is null || !capabilities.AreSameType(live.DataType, altered));
+            }
+
+            return live is not null
+                ? (live.DataType, false)
+                : (
+                    diagramEntity
+                        .Columns.FirstOrDefault(c => Lower(c.Name) == Lower(column))
+                        ?.DataType
+                        ?? string.Empty,
+                    true
+                );
+        }
     }
 
     /// <summary>
-    /// D9：断られる文より前に外し、その後ろで付け直す制約（作り直し・主キーの変更・暗黙の外し直し）と、
-    /// 断られる文より後ろの表・列の削除のために先に外した制約
+    /// D9：断られる文より前に外し、その後ろで付け直す制約（作り直し・主キーの変更・暗黙の外し直し）と、断られる文そのものが付け直す
+    /// 外部キー（前の方で外したもの）と、断られる文より後ろの表・列の削除のために先に外した制約
     /// </summary>
     private static IEnumerable<string> DroppedBeforeFailure(
         List<Step> steps,
@@ -295,6 +400,28 @@ internal static class SyncPlanStaticRules
             )
             .Select(w => $"{Lower(w.TableName)}|{Lower(w.Detail)}")
             .ToHashSet(StringComparer.Ordinal);
+
+        // 断られる文が、同じ計画の前の方で外した外部キーの付け直しそのものなら、その外部キーは消えたまま残る（付け直しが候補キーを
+        // 証明できないと警告した外部キーを除く）。この形を数えないと、参照先の唯一の一意制約を同じ計画で外しながら列の変更で外部キーを
+        // 付け直す同期（最後の付け直しが断られて外部キーが消える）が、予告の警告があるので予言された失敗として通る
+        var failing = steps[doomedAt];
+
+        if (
+            failing.Kind == SchemaDiffKind.AddForeignKey
+            && failing.AddIdentity(capabilities) is { } failingIdentity
+            && steps
+                .Take(doomedAt)
+                .Any(s =>
+                    s.Kind == SchemaDiffKind.DropForeignKey
+                    && s.DropIdentity(capabilities) == failingIdentity
+                )
+            && !warnedForeignKeys.Contains(
+                $"{Lower(failing.Item.ChildEntity!.TableName)}|{Lower(failing.ForeignKeyName(limit))}"
+            )
+        )
+        {
+            yield return $"static D9: {failingIdentity} is dropped before the failing statement, which is its own re-add ({predicted})";
+        }
 
         foreach (var step in steps.Take(doomedAt))
         {
@@ -449,6 +576,16 @@ internal static class SyncPlanStaticRules
         [];
         private readonly Dictionary<string, string> _types = new(StringComparer.Ordinal);
 
+        /// <summary>
+        /// DB 側の図の外部キーが持っていた組と、その時の両端の型（子の列・親の列・子の型・親の型。R8 で DB が受け入れた組を見分ける）
+        /// </summary>
+        private readonly HashSet<(
+            string Child,
+            string Parent,
+            string ChildType,
+            string ParentType
+        )> _acceptedPairs = [];
+
         private IdentifierLengthLimit Limit => capabilities.IdentifierLengthLimit;
 
         private bool IsMySql => dialect == DialectNames.MySql;
@@ -492,8 +629,19 @@ internal static class SyncPlanStaticRules
                         names[relationship]
                     )
                 );
+
+                foreach (var pair in pairs)
+                {
+                    var childKey = ColumnKey(Lower(child.TableName), pair.ChildColumn);
+                    var parentKey = ColumnKey(Lower(parent.TableName), pair.ParentColumn);
+                    _acceptedPairs.Add((childKey, parentKey, TypeOf(childKey), TypeOf(parentKey)));
+                }
             }
         }
+
+        /// <summary>列の今の型（無ければ空）</summary>
+        private string TypeOf(string key) =>
+            _types.TryGetValue(key, out var type) ? type : string.Empty;
 
         /// <summary>項目を当てる直前の状態で、DB がその文を断るか（断るなら理由・断らないなら null）</summary>
         public string? Check(Step step) =>
@@ -760,16 +908,16 @@ internal static class SyncPlanStaticRules
             }
 
             return null;
-
-            string TypeOf(string key) =>
-                _types.TryGetValue(key, out var type) ? type : string.Empty;
         }
 
-        /// <summary>R4・R5：足す外部キーの名前と、参照する列の集合が親の候補キーか</summary>
+        /// <summary>
+        /// R4・R5・R8：足す外部キーの名前と、参照する列の集合が親の候補キーか、組の両端の今の型が並べられるか
+        /// </summary>
         private string? CheckForeignKeyAdd(Step step)
         {
             var item = step.Item;
             var parent = Lower(item.ParentEntity!.TableName);
+            var child = Lower(item.ChildEntity!.TableName);
             var parentColumns = item
                 .ForeignKeyColumnPairs.Select(p => Lower(p.ParentColumn))
                 .ToList();
@@ -777,6 +925,26 @@ internal static class SyncPlanStaticRules
             if (!_keys.Any(k => k.Table == parent && SameSet(k.Columns, parentColumns)))
             {
                 return $"R5: {SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, Limit)} references {parent}({string.Join(",", parentColumns)}), which is not a key";
+            }
+
+            // R8：組の両端の今の型が方言の宣言で並べられない（MySQL 3780・SQL Server 1778 / 1753・PostgreSQL 42804・Oracle ORA-02267）。
+            // DB 側の図の外部キーが同じ型のまま持っていた組（外して付け直す文）は、DB が受け入れたので数えない
+            foreach (var pair in item.ForeignKeyColumnPairs)
+            {
+                var childKey = ColumnKey(child, pair.ChildColumn);
+                var parentKey = ColumnKey(parent, pair.ParentColumn);
+                var childType = TypeOf(childKey);
+                var parentType = TypeOf(parentKey);
+
+                if (
+                    childType.Length > 0
+                    && parentType.Length > 0
+                    && !_acceptedPairs.Contains((childKey, parentKey, childType, parentType))
+                    && !capabilities.AreForeignKeyCompatibleTypes(childType, parentType)
+                )
+                {
+                    return $"R8: {SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, Limit)} pairs {childKey.Replace('|', '.')} ({childType}) with {parentKey.Replace('|', '.')} ({parentType})";
+                }
             }
 
             return CheckName(

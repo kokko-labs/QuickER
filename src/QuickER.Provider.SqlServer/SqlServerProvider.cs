@@ -56,6 +56,7 @@ public sealed class SqlServerProvider : IDatabaseProvider
             SetNullRequiresNullableChildColumn = true,
             SupportsSchemaQualifiedTableNames = true,
             ChecksDefaultOnColumnTypeChange = true,
+            TypeKindChangeRequiresEmptyColumn = false,
             SupportsComputedColumnTypeChange = false,
             SupportsUniqueConstraintOnPrimaryKey = true,
             ReferencedKeyRequiresSameColumnOrder = true,

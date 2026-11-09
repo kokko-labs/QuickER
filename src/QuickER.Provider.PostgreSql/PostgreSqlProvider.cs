@@ -53,6 +53,7 @@ public sealed class PostgreSqlProvider : IDatabaseProvider
             SetNullRequiresNullableChildColumn = false,
             SupportsSchemaQualifiedTableNames = true,
             ChecksDefaultOnColumnTypeChange = true,
+            TypeKindChangeRequiresEmptyColumn = false,
             SupportsComputedColumnTypeChange = true,
             SupportsUniqueConstraintOnPrimaryKey = true,
             ReferencedKeyRequiresSameColumnOrder = false,

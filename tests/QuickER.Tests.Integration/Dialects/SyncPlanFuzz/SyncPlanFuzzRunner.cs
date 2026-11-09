@@ -192,7 +192,7 @@ internal static class SyncPlanFuzzRunner
     ) =>
         RunCaseAsync(
             dialect,
-            new SyncPlanFuzzGenerator(new Random(seed), dialect),
+            SyncPlanFuzzGenerator.ForSeed(seed, dialect),
             new FuzzSeedOutcome { Seed = seed, Dialect = dialect.Name },
             ct
         );

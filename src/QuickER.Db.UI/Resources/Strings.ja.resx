@@ -387,6 +387,10 @@
     <value>注意: 以下の外部キーは、同期後の参照先の列が主キーにも一意制約にもちょうど一致しません。追加は失敗する可能性が高く、既存の外部キーの作り直しでは、MySQL / Oracle で外部キーが外れたまま残り得ます:
 {0}</value>
   </data>
+  <data name="SchemaSync_ExecuteConfirmForeignKeyRebuildAroundTypeKindChange" xml:space="preserve">
+    <value>注意: 以下の外部キーは、構成列の型の種類を変える前後で外して付け直します（旧の型 → 新しい型）。このデータベースは列に値が無いときだけ型の種類を変えられるため、列にデータがあると列の変更が失敗し、DDL が巻き戻らないので、外した外部キーは付け直されずに残ります:
+{0}</value>
+  </data>
   <data name="SchemaSync_ExecuteConfirmDefaultOnColumnTypeKindChange" xml:space="preserve">
     <value>注意: 以下の列はデータベースに既定値があり、型の種類が変わります（旧の型 → 新しい型）。同期はデータベースの既定値を保つため、既定値が新しい型に合わなければ、同期か、既定値を使う行の追加が失敗します（MySQL と Oracle の同期の失敗では DDL が巻き戻らず、それより前の文は適用されたまま残ります）:
 {0}</value>
