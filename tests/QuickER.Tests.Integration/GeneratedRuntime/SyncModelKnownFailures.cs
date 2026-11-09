@@ -55,7 +55,36 @@ internal static class SyncModelKnownFailures
             "swap-folder-names-without-refresh-does-not-settle",
             "1/no-quiesce:unique-swap:model_folders"
         ),
+        // 洗い替えの取得の後にサーバーの他者が親を消すと、バッチの古い写しの子が消えた親を指したまま入る
+        Entry(
+            "AG-R1",
+            RefreshStaleParentFixedIn,
+            "interrupt-server-AfterServerFetchBeforeApply-parent-after-child-selfref-delete-next-sync-refresh",
+            RefreshStaleParentSignature,
+            RefreshStaleParentReason
+        ),
+        Entry(
+            "AG-R1",
+            RefreshStaleParentFixedIn,
+            "interrupt-server-AfterServerFetchBeforeApply-parent-after-child-selfref-delete-next-sync-serverwins-refresh",
+            RefreshStaleParentSignature,
+            RefreshStaleParentReason
+        ),
     ];
+
+    /// <summary>洗い替えの取得の後にサーバーで消えた親の項目の直す区切り</summary>
+    private const string RefreshStaleParentFixedIn = "きっかけ待ち（台帳 本番 AG-R1）";
+
+    /// <summary>洗い替えの取得の後にサーバーで消えた親の項目の理由</summary>
+    private const string RefreshStaleParentReason =
+        "洗い替えのバッチの古い写しの子が、取得の後にサーバーで消えた親を指し、ローカルの外部キーで例外になる（洗い替えは失敗として止まり、次の洗い替えで取り直せる）";
+
+    /// <summary>
+    /// 洗い替えの取得の後にサーバーで消えた親の項目の署名（洗い替えの取得の後に割り込む書き込みは乱数の種の列に無いので、種には
+    /// 正規形の項目を作らない＝<see cref="SeedOnlySignatures"/>）
+    /// </summary>
+    private const string RefreshStaleParentSignature =
+        "1/throw:RefreshAsync~SyncTableBase.WriteRowsAndBlobsAsync>SqliteRepositoryCore.BulkInsertAsync:SQLite19:FOREIGN KEY constraint failed[apply:cross:in-scope]";
 
     /// <summary>
     /// 乱数の種の項目の再現の扱い（正規形ごと。載っていない正規形は NotGuaranteed）。夜間の種で見つけた形は NightlySeeds
@@ -73,7 +102,7 @@ internal static class SyncModelKnownFailures
     /// 正規形が広すぎて、種を限らずに数えるとほかの不具合を隠す署名（決定的な項目の正規形から乱数の項目を作らず、種を名指しした
     /// 項目 <see cref="SeedNamedRandomEntries"/> だけで数える）
     /// </summary>
-    private static readonly HashSet<string> SeedOnlySignatures = [];
+    private static readonly HashSet<string> SeedOnlySignatures = [RefreshStaleParentSignature];
 
     /// <summary>
     /// 種を名指しした乱数の項目（分類できない静止化の失敗のように、正規形が広くて種を限らないとほかの不具合を隠す署名を、種で絞って
@@ -94,20 +123,22 @@ internal static class SyncModelKnownFailures
 
     /// <summary>決定的なシナリオの項目を作る</summary>
     /// <param name="finding">指摘の番号（三巡目レビューのまとめの番号。新しく見つけたものはその番号の案）</param>
-    /// <param name="fixedIn">直す区切り（<c>区切り 30</c> または <c>区切り 31</c>）</param>
+    /// <param name="fixedIn">直す区切り（区切りの名前か、きっかけを待つ台帳の項目）</param>
     /// <param name="scenario">その失敗を必ず起こす決定的なシナリオの名前</param>
     /// <param name="signature">失敗の署名（<see cref="ModelFailure.Signature"/>）</param>
+    /// <param name="reason">失敗の理由（製品の事実。省略できる）</param>
     public static KnownEntry Entry(
         string finding,
         string fixedIn,
         string scenario,
-        string signature
+        string signature,
+        string? reason = null
     ) =>
         new(
             finding,
             KnownKind.Pending,
             fixedIn,
-            null,
+            reason,
             scenario,
             KnownMatch.ExactSignature,
             signature

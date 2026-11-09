@@ -297,20 +297,6 @@ internal static class ModelIdRanges
     }
 }
 
-/// <summary>
-/// 割り込みを仕掛ける（サーバーの他者の書き込み版）：端末の次の同期がその点に来たときに 1 回だけ、サーバーへ書く。
-/// サーバー役の口を使う（実 SQL Server では流さない）
-/// </summary>
-internal sealed record ArmServerInterruptOp(
-    ModelActor Device,
-    ModelInterruptPoint Point,
-    ModelWriteOp Write
-) : ModelOp
-{
-    public override string Describe() =>
-        $"{Who(Device)} ArmServerInterrupt {Point}: {Write.Describe()}";
-}
-
 /// <summary>端末の次の同期で、その表の最初の差分の取得を空（続きなし）で返す（サーバー役の口を使う）</summary>
 internal sealed record ArmEmptyFetchOp(ModelActor Device, string Table) : ModelOp
 {

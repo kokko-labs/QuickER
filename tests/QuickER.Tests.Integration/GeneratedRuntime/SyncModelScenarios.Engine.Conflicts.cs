@@ -350,7 +350,7 @@ internal static partial class SyncModelScenarios
                 [.. Seed(1, "alice", 11, "widget")],
                 [
                     Rename(D1, 1, "alice-local"),
-                    new ArmServerInterruptOp(
+                    new ArmInterruptOp(
                         D1,
                         ModelInterruptPoint.BeforeServerFetch,
                         Rename(SV, 1, "alice-server-later")

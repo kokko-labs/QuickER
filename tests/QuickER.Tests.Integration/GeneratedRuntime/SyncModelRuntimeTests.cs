@@ -528,17 +528,29 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
     }
 
     [Fact(
-        DisplayName = "[Sync/モデル] 割り込みの行は、点 × ポリシー × 前段 × 割り込みの書き込みの起こり得る組をそろえ、どの行も割り込みを 1 つだけ仕掛けてそのポリシーで同期する"
+        DisplayName = "[Sync/モデル] 割り込みの行は、書き手ごとに点 × ポリシー × 前段 × 割り込みの書き込み（サーバーの書き手は × 実行の種類 × 後段 × その後の失敗）の起こり得る組をそろえ、どの行も割り込みを 1 つだけ仕掛けてそのポリシーで同期する"
     )]
     public void InterruptScenarios_CoverEveryPointAndShape()
     {
-        // 宣言の網（行の点と形）。点が実際に当たったかは、各行の実行が not-fired の違反で見る
+        // 宣言の網（行の点と書き手）。点が実際に当たったかは、各行の実行が not-fired の違反で見る
         var declared = SyncModelScenarios
-            .All.SelectMany(s => s.Ops.OfType<ArmInterruptOp>().Select(arm => (s.Name, arm.Point)))
+            .All.SelectMany(s =>
+                s.Ops.OfType<ArmInterruptOp>()
+                    .Select(arm =>
+                        (
+                            s.Name,
+                            arm.Point,
+                            Writer: arm.Writer == ModelActor.Server
+                                ? SyncModelScenarios.InterruptWriter.Server
+                                : SyncModelScenarios.InterruptWriter.Device
+                        )
+                    )
+            )
             .ToList();
-        // 期待する組は軸の全積から、起こり得ない組（行が無いのに更新・削除／行があるのに作り直し／ServerWins はサーバーへ
-        // 書かない）だけを外したもの。外す規則をここで書き下ろし、宣言の規則が広く外しすぎたら赤にする
-        var expected = Enum.GetValues<ModelInterruptPoint>()
+        // 期待する組は書き手ごとの軸の全積から、起こり得ない組だけを外したもの。外す規則をここで書き下ろし、宣言の規則が
+        // 広く外しすぎたら赤にする。
+        // 端末の書き手：行が無いのに更新・削除／行があるのに作り直し／ServerWins はサーバーへ書かない
+        var expectedDevice = Enum.GetValues<ModelInterruptPoint>()
             .SelectMany(point =>
                 new[] { SyncConflictPolicy.Collect, SyncConflictPolicy.ServerWins }.SelectMany(
                     policy =>
@@ -560,14 +572,87 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                         : cell.write != SyncModelScenarios.InterruptWrite.Recreate
                 )
             )
-            .Select(cell => $"{cell.point}/{cell.policy}/{cell.prelude}/{cell.write}")
+            .Select(cell => $"Device/{cell.point}/{cell.policy}/{cell.prelude}/{cell.write}")
             .ToList();
-        expected.Should().HaveCount(35);
+        expectedDevice.Should().HaveCount(35);
+        // サーバーの書き手：サーバーへの書き込みの直前の点は来ない（端末が送るものの無い形）／消した行は端末で編集できない
+        var expectedServer = Enum.GetValues<ModelInterruptPoint>()
+            .SelectMany(point =>
+                new[] { SyncConflictPolicy.Collect, SyncConflictPolicy.ServerWins }.SelectMany(
+                    policy =>
+                        Enum.GetValues<SyncModelScenarios.ServerInterruptPrelude>()
+                            .SelectMany(prelude =>
+                                Enum.GetValues<SyncModelScenarios.ServerInterruptWrite>()
+                                    .SelectMany(write =>
+                                        Enum.GetValues<SyncModelScenarios.InterruptRun>()
+                                            .SelectMany(run =>
+                                                Enum.GetValues<SyncModelScenarios.InterruptFollowUp>()
+                                                    .SelectMany(followUp =>
+                                                        Enum.GetValues<SyncModelScenarios.ServerInterruptFault>()
+                                                            .Select(fault =>
+                                                                (
+                                                                    point,
+                                                                    policy,
+                                                                    prelude,
+                                                                    write,
+                                                                    run,
+                                                                    followUp,
+                                                                    fault
+                                                                )
+                                                            )
+                                                    )
+                                            )
+                                    )
+                            )
+                )
+            )
+            // 次の取得の失敗は、割り込まれた同期が取得の後の点のバッチ（古い写し）を書いてから同じ表のダウンロードを例外で
+            // 終える窓の水準なので、取得の後の点・更新・同期の組にだけある
+            .Where(cell =>
+                cell.point != ModelInterruptPoint.BeforeServerWrite
+                && !(
+                    cell.write == SyncModelScenarios.ServerInterruptWrite.Delete
+                    && cell.followUp == SyncModelScenarios.InterruptFollowUp.EditThenSync
+                )
+                && (
+                    cell.fault == SyncModelScenarios.ServerInterruptFault.None
+                    || cell.point == ModelInterruptPoint.AfterServerFetchBeforeApply
+                        && cell.write == SyncModelScenarios.ServerInterruptWrite.Update
+                        && cell.run == SyncModelScenarios.InterruptRun.Sync
+                )
+            )
+            .Select(cell =>
+                $"Server/{cell.point}/{cell.policy}/{cell.prelude}/{cell.write}/{cell.run}/{cell.followUp}/{cell.fault}"
+            )
+            .ToList();
+        expectedServer.Should().HaveCount(84);
+        var expected = Enum.GetValues<SyncModelScenarios.InterruptWriter>()
+            .SelectMany(writer =>
+                writer == SyncModelScenarios.InterruptWriter.Device
+                    ? expectedDevice
+                    : expectedServer
+            )
+            .ToList();
         CoverageGuard.ContainsAll(
-            "interrupt rows (point x policy x prelude x write)",
+            "interrupt rows (writer x point x policy x prelude x write [x run x follow-up x fault])",
             SyncModelScenarios
-                .InterruptCells.Where(cell => declared.Contains((cell.Name, cell.Point)))
-                .Select(cell => $"{cell.Point}/{cell.Policy}/{cell.Prelude}/{cell.Write}"),
+                .InterruptCells.Where(cell =>
+                    declared.Contains(
+                        (cell.Name, cell.Point, SyncModelScenarios.InterruptWriter.Device)
+                    )
+                )
+                .Select(cell => $"Device/{cell.Point}/{cell.Policy}/{cell.Prelude}/{cell.Write}")
+                .Concat(
+                    SyncModelScenarios
+                        .ServerInterruptCells.Where(cell =>
+                            declared.Contains(
+                                (cell.Name, cell.Point, SyncModelScenarios.InterruptWriter.Server)
+                            )
+                        )
+                        .Select(cell =>
+                            $"Server/{cell.Point}/{cell.Policy}/{cell.Prelude}/{cell.Write}/{cell.Run}/{cell.FollowUp}/{cell.Fault}"
+                        )
+                ),
             expected
         );
 
@@ -597,6 +682,34 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                 .Ops.OfType<ModelSyncOp>()
                 .Should()
                 .OnlyContain(sync => sync.Policy == cell.Policy, cell.Name);
+        }
+
+        // サーバーの書き手の行は、書き手・ポリシー・実行の種類が宣言どおりに流れることまで見る（割り込まれる実行は割り込みの
+        // 後の最初の同期か洗い替え。洗い替えの行は後段の同期だけがポリシーを持つ）
+        foreach (var cell in SyncModelScenarios.ServerInterruptCells)
+        {
+            var ops = SyncModelScenarios.Get(cell.Name).Ops;
+            var arm = ops.OfType<ArmInterruptOp>().Single();
+            arm.Writes.Should().OnlyContain(write => write.Actor == ModelActor.Server, cell.Name);
+            arm.ThenArm.Should()
+                .Be(
+                    cell.Fault == SyncModelScenarios.ServerInterruptFault.NextFetchFails
+                        ? ModelFaultKind.ServerFetch
+                        : null,
+                    cell.Name
+                );
+            ops.OfType<ModelSyncOp>()
+                .Should()
+                .NotBeEmpty(cell.Name)
+                .And.OnlyContain(sync => sync.Policy == cell.Policy, cell.Name);
+            var interrupted = ops.Skip(ops.ToList().IndexOf(arm) + 1)
+                .First(op => op is ModelSyncOp or ModelRefreshOp);
+            (interrupted is ModelRefreshOp)
+                .Should()
+                .Be(cell.Run == SyncModelScenarios.InterruptRun.Refresh, cell.Name);
+            (interrupted is ModelSyncOp)
+                .Should()
+                .Be(cell.Run == SyncModelScenarios.InterruptRun.Sync, cell.Name);
         }
     }
 
@@ -754,7 +867,16 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
 
             if (known.Kind == KnownKind.Pending)
             {
-                known.FixedIn.Should().BeOneOf("区切り 30", "区切り 31", "修正 C");
+                // 直す区切りの名前か、きっかけを待つ台帳の項目（「きっかけ待ち（台帳 {項目}）」）
+                known
+                    .FixedIn.Should()
+                    .Match(fixedIn =>
+                        fixedIn == "区切り 30"
+                        || fixedIn == "区切り 31"
+                        || fixedIn == "修正 C"
+                        || fixedIn.StartsWith("きっかけ待ち（台帳 ", StringComparison.Ordinal)
+                            && fixedIn.EndsWith('）')
+                    );
             }
         }
     }

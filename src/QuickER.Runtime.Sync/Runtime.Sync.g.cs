@@ -187,8 +187,9 @@ public sealed class SyncOptions
     /// <summary>Whether to delete local rows whose key no longer exists on the server (default true).</summary>
     /// <remarks>
     /// <para>
-    /// The check compares the full key set of each table, which costs one key-only pass over the server table. Turn it
-    /// off (and run it on a slower schedule) when the tables are large enough for that pass to matter.
+    /// The check compares the full key set of each table, which costs a key-only pass over the server table each time it
+    /// runs - and a run runs it twice, before the download and again after it, reading the keys afresh. Turn it off (and
+    /// run it on a slower schedule) when the tables are large enough for those passes to matter.
     /// </para>
     /// <para>
     /// A key the journal still holds an unsent entry for is spared, so a local edit awaiting upload - including one this
@@ -995,11 +996,14 @@ public sealed class SyncAckRow
 /// <b>Recording happens before the business write ("journal-first").</b> The generated repositories manage their own
 /// connection, so a decorator cannot enlist its INSERT in the transaction of the write it wraps; something has to go
 /// first. Recording the <i>intent</i> first is the safe order: if the business write then fails or is rolled back, the
-/// journal holds an entry for a row that was never written, and the upload discards it - it re-reads the current local
-/// row and finds nothing (an upsert entry), or sends a delete for a key the server does not have (a no-op). The
-/// opposite order would lose changes outright: a write that succeeded and a journal entry that never landed is an edit
-/// no later run can find. The entry also carries only the key, never a snapshot, so a stale intent still uploads the
-/// row's current content.
+/// journal holds an entry for a write that never landed, and the upload settles it from the local row as it is: an
+/// upsert entry whose insert never landed finds no row and is discarded, and a delete entry whose delete never landed
+/// finds the row still there and is discarded too - the replay looks for the local row before it deletes anything on
+/// the server, so a failed local delete is not finished there. (The decorator removes the entries of a write that fails
+/// while it is still waiting on it; what is left over is what a process stopped in between leaves.) The opposite order
+/// would lose changes outright: a write that succeeded and a journal entry that never landed is an edit no later run
+/// can find. The entry also carries only the key, never a snapshot, so a stale intent still uploads the row's current
+/// content.
 /// </para>
 /// </remarks>
 public sealed class SyncJournal
@@ -1050,6 +1054,14 @@ public sealed class SyncJournal
     /// </para>
     /// </remarks>
     internal const string UnsetKeyText = "\u0001quicker:unset-key";
+
+    /// <summary>
+    /// The unbounded binary columns an entry's <see cref="SyncJournalRow.UnboundedBinaryColumns"/> names (the column
+    /// names, comma-separated, as the entry was recorded; none when it is null or empty).
+    /// </summary>
+    /// <param name="columns">The entry's column list.</param>
+    internal static string[] SplitUnboundedBinaryColumns(string? columns) =>
+        string.IsNullOrEmpty(columns) ? [] : columns.Split(',');
 
     /// <summary>Reads every pending entry in replay order, aliasing the columns onto the DTO's property names.</summary>
     private const string SelectAllSql =
@@ -2140,11 +2152,12 @@ public sealed class SyncTableDescriptor<TEntity, TKey>
     /// </summary>
     /// <remarks>
     /// What a row staged for a unique value takes from the other copy: a row moved off a holder keeps its local unique
-    /// values, and a holder giving its values up takes the server's (see <see cref="SyncParentResolver"/>). The default
-    /// copies nothing, so a descriptor built by hand that leaves it unset never stages such a row; set it together with
-    /// <see cref="LocalUniqueLookups"/>, over the same constraints, so that what is looked up and what is copied agree.
+    /// values, and a holder giving its values up takes the server's (see <see cref="SyncParentResolver"/>). Null (the
+    /// default) means unset: a descriptor built by hand that leaves it unset never stages such a row, and its collisions
+    /// stay as they are; set it together with <see cref="LocalUniqueLookups"/>, over the same constraints, so that what is
+    /// looked up and what is copied agree.
     /// </remarks>
-    public Action<TEntity, TEntity> CopyUniqueValues { get; init; } = static (_, _) => { };
+    public Action<TEntity, TEntity>? CopyUniqueValues { get; init; }
 
     /// <inheritdoc />
     /// <remarks>
@@ -2755,6 +2768,28 @@ internal static class SyncKeptRows
 /// edit made to the row before a download reaches it would find no version to guard with.
 /// </para>
 /// <para>
+/// The receipt speaks for the content read back, so it goes when the same run then writes an older copy over that
+/// content: a download batch or a refresh batch fetched before the row was read back still holds the row as it was, and
+/// writes it in its turn - the stream's order is what keeps the derived resume point honest, so the row is not skipped.
+/// Left behind, the receipt would carry a version newer than the content, the next run would take the row's newer
+/// version for an echo of its own and write only the version, and a later edit would be guarded with that version and
+/// overwrite the server's newer content without a conflict. Each unit of writes reports the rows it wrote
+/// (<see cref="EndWriteUnit"/>); a receipt recorded before a unit wrote its row goes right after that unit has
+/// committed - a download's flush and a refresh batch alike, not with the table's download, which an exception can still
+/// end before it clears anything - and that leaves the row as it would be had nothing been read back: the older content,
+/// its mirrored version, and no receipt, so the next run brings the newer version down as content. A row read back
+/// again after the unit that wrote it keeps its receipt, since the content is then the newer one again (see
+/// <see cref="ReconcileSettledReceipts"/>). The same holds for a row brought up to date for a unique value
+/// (<see cref="BringHoldersUpToDateAsync"/>).
+/// </para>
+/// <para>
+/// The rows <see cref="SyncConflictPolicy.ServerWins"/> puts back never have their receipts outlive their content this
+/// way: a parent listed among them counts as present rather than being read back, a row brought up to date for a unique
+/// value that is listed among them as well is written from the list afterwards and its receipt is then recorded again
+/// from the list's copy, and the table's download - the one stream that could still hold an older copy - has finished
+/// before they are applied.
+/// </para>
+/// <para>
 /// One resolver serves one download batch, one table of a <see cref="SyncConflictPolicy.ServerWins"/> application, or
 /// one refresh, and remembers the parents it has looked at, so a parent several rows share is read once.
 /// </para>
@@ -2792,6 +2827,98 @@ internal sealed class SyncParentResolver(
 
     /// <summary>The rows brought in, by table.</summary>
     private readonly Dictionary<string, HashSet<string>> _broughtIn = new(StringComparer.Ordinal);
+
+    /// <summary>The rows this resolver has recorded a receipt for, by table.</summary>
+    private readonly Dictionary<string, HashSet<string>> _acknowledged = new(StringComparer.Ordinal);
+
+    /// <summary>The rows given a receipt since the last unit of writes of their table ended, by table.</summary>
+    private readonly Dictionary<string, HashSet<string>> _acknowledgedSinceUnit = new(StringComparer.Ordinal);
+
+    /// <summary>The rows whose receipt a unit of writes has since written an older copy over, by table.</summary>
+    private readonly Dictionary<string, HashSet<string>> _overwritten = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Ends one unit of writes of the table - a download's flush, a refresh batch - and returns the rows it wrote whose
+    /// receipt this resolver recorded before the unit wrote them: the unit put the batch's own, older copy over the
+    /// content read back, so the caller removes their receipts as soon as the unit has committed (see the class
+    /// remarks).
+    /// </summary>
+    /// <remarks>
+    /// Every receipt of a unit is recorded before the unit's last write of the rows: the parents are brought in before
+    /// the rows are written, and a collision resolved on the way is followed by the whole unit being written again. A row
+    /// given a receipt since the previous unit ended that this unit did not write was read back after any earlier write
+    /// of it, so it is no longer counted as overwritten.
+    /// </remarks>
+    /// <param name="tableName">The table.</param>
+    /// <param name="writtenKeyTexts">The keys of the rows the unit wrote as content.</param>
+    internal IReadOnlyList<string> EndWriteUnit(
+        string tableName,
+        IEnumerable<string> writtenKeyTexts
+    )
+    {
+        var written = writtenKeyTexts.ToHashSet(StringComparer.Ordinal);
+        var overwritten = Rows(_overwritten, tableName);
+
+        if (_acknowledgedSinceUnit.Remove(tableName, out var since))
+        {
+            overwritten.ExceptWith(since.Where(keyText => !written.Contains(keyText)));
+        }
+
+        var acknowledged = Rows(_acknowledged, tableName);
+        var settled = written.Where(acknowledged.Contains).ToList();
+        overwritten.UnionWith(settled);
+
+        return settled;
+    }
+
+    /// <summary>
+    /// Takes off a download's list of receipts to clear every row this resolver read back after the row's last write:
+    /// the receipt it would clear is now the one recorded here, which speaks for the content read back - whatever put
+    /// the row on the list (a receipt held when the table's download began, say). A receipt a unit overwrote has gone
+    /// already, as that unit committed.
+    /// </summary>
+    /// <param name="tableName">The table.</param>
+    /// <param name="settled">The keys whose receipts go once the download has committed.</param>
+    internal void ReconcileSettledReceipts(string tableName, List<string> settled)
+    {
+        EndWriteUnit(tableName, []);
+        var overwritten = Rows(_overwritten, tableName);
+
+        foreach (var keyText in Rows(_acknowledged, tableName))
+        {
+            if (!overwritten.Contains(keyText))
+            {
+                settled.RemoveAll(key => string.Equals(key, keyText, StringComparison.Ordinal));
+            }
+        }
+    }
+
+    /// <summary>Records the receipt of a row this resolver read back from the server.</summary>
+    private async Task RecordAckAsync(
+        string tableName,
+        string keyText,
+        byte[] serverRowVersion,
+        CancellationToken cancellationToken
+    )
+    {
+        await journal
+            .RecordAckAsync(tableName, keyText, serverRowVersion, cancellationToken)
+            .ConfigureAwait(false);
+        Rows(_acknowledged, tableName).Add(keyText);
+        Rows(_acknowledgedSinceUnit, tableName).Add(keyText);
+    }
+
+    /// <summary>The set of one table's keys in a by-table map (added when the table has none yet).</summary>
+    private static HashSet<string> Rows(Dictionary<string, HashSet<string>> byTable, string tableName)
+    {
+        if (!byTable.TryGetValue(tableName, out var keyTexts))
+        {
+            keyTexts = new HashSet<string>(StringComparer.Ordinal);
+            byTable.Add(tableName, keyTexts);
+        }
+
+        return keyTexts;
+    }
 
     /// <summary>Makes the given parents present where it may, and returns the ones that are not.</summary>
     /// <param name="parents">The parents, by table name and key text.</param>
@@ -2903,8 +3030,7 @@ internal sealed class SyncParentResolver(
             {
                 if (row.ServerRowVersion is { Length: > 0 } serverRowVersion)
                 {
-                    await journal
-                        .RecordAckAsync(tableName, row.KeyText, serverRowVersion, cancellationToken)
+                    await RecordAckAsync(tableName, row.KeyText, serverRowVersion, cancellationToken)
                         .ConfigureAwait(false);
                 }
             }
@@ -3053,8 +3179,7 @@ internal sealed class SyncParentResolver(
             // A table with no version has nothing to acknowledge.
             if (row.ServerRowVersion is { Length: > 0 } serverRowVersion)
             {
-                await journal
-                    .RecordAckAsync(tableName, row.KeyText, serverRowVersion, cancellationToken)
+                await RecordAckAsync(tableName, row.KeyText, serverRowVersion, cancellationToken)
                     .ConfigureAwait(false);
             }
         }
@@ -3668,10 +3793,18 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable, ISyncTableRunSu
 
     /// <summary>Inserts one batch of a refresh into the emptied table, with its blobs when the run carries them.</summary>
     /// <remarks>
+    /// <para>
     /// With a resolver, the parents the rows refer to and the reload has not reached are brought in first - a parent of
     /// the same table changed after its child comes later in version order, possibly in a later batch. A row brought in
     /// that way is already there when its own batch arrives, so it is saved over rather than inserted a second time.
     /// A row whose parent cannot be had is inserted all the same and fails on the local foreign key, as it always did.
+    /// </para>
+    /// <para>
+    /// Saving it over writes the batch's copy, which is older than the row read back when the server changed the row
+    /// after the batch was fetched. The receipt the resolver recorded for the row read back then goes once the save has
+    /// committed (see <see cref="SyncParentResolver"/>): the row is left with the batch's content, its mirrored version,
+    /// and no receipt, and the next run brings the newer version down as content.
+    /// </para>
     /// </remarks>
     private protected async Task<int> InsertRefreshedRowsAsync(
         IReadOnlyList<TEntity> rows,
@@ -3681,6 +3814,7 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable, ISyncTableRunSu
     )
     {
         var inserted = 0;
+        var batch = rows;
         IReadOnlyList<TEntity> again = [];
 
         if (resolver is not null)
@@ -3724,6 +3858,23 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable, ISyncTableRunSu
             await ApplyBatchAsync(again, includeUnboundedBinary, cancellationToken)
                 .ConfigureAwait(false);
             inserted += again.Count;
+        }
+
+        if (resolver is not null)
+        {
+            // The batch has committed: a receipt for a row read back before the batch wrote it over has gone stale.
+            // Not the caller's token: a cancellation arriving after the commit must not leave the stale receipt behind.
+            var overwritten = resolver.EndWriteUnit(
+                TableName,
+                batch.Select(row => FormatKey(ReadKey(row)))
+            );
+
+            if (overwritten.Count > 0)
+            {
+                await _localJournal
+                    .RemoveAcksAsync(TableName, overwritten, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
         }
 
         return inserted;
@@ -3879,7 +4030,7 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable, ISyncTableRunSu
     /// </remarks>
     /// <param name="rows">The rows of the batch.</param>
     /// <param name="includeUnboundedBinary">Whether the run carries the unbounded binary columns.</param>
-    /// <param name="writeRows">Writes the rows themselves, returning false when they did not go in (a local save hook skipped them): no blob is copied then, and the records of the copies go.</param>
+    /// <param name="writeRows">Writes the rows themselves, returning false when they did not go in (a local save hook skipped them): no blob is copied then, and the records of the copies go - as they do, before the exception goes on, when it throws.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     private protected async Task WriteRowsAndBlobsAsync(
         IReadOnlyList<TEntity> rows,
@@ -3905,9 +4056,34 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable, ISyncTableRunSu
             .RecordBlobCopiesAsync(TableName, keyTexts, local.UnboundedBinaryColumnNames, cancellationToken)
             .ConfigureAwait(false);
 
+        bool written;
+
+        try
+        {
+            written = await writeRows().ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // The rows did not go in, so the copies recorded for them go, as when a save hook skips them: left behind,
+            // a later run would copy the server's blob into a local row that still holds its older content. Best
+            // effort - not the caller's token, and a failure here does not hide the write's own.
+            try
+            {
+                await _localJournal
+                    .RemoveBlobCopiesAsync(TableName, keyTexts, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // The records stay, as a process stopped at this point would leave them.
+            }
+
+            throw;
+        }
+
         // After the rows, not with them: an excluded column is not part of the row, and the copy needs the row to be
         // there to write into.
-        if (await writeRows().ConfigureAwait(false))
+        if (written)
         {
             await CopyBinaryColumnsDownAsync(rows, cancellationToken).ConfigureAwait(false);
         }
@@ -4107,12 +4283,10 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable, ISyncTableRunSu
     /// the columns, and edited here since - would otherwise send its empty column over the server's blob.
     /// </remarks>
     private protected IReadOnlyList<string> UnboundedBinaryColumnsOf(SyncJournalRow entry) =>
-        string.IsNullOrEmpty(entry.UnboundedBinaryColumns)
-            ? []
-            : entry
-                .UnboundedBinaryColumns.Split(',')
-                .Where(column => UnboundedBinaryColumnNames.Contains(column, StringComparer.Ordinal))
-                .ToList();
+        SyncJournal
+            .SplitUnboundedBinaryColumns(entry.UnboundedBinaryColumns)
+            .Where(column => UnboundedBinaryColumnNames.Contains(column, StringComparer.Ordinal))
+            .ToList();
 
     /// <summary>Copies the given unbounded binary columns of one row from the local database up to the server.</summary>
     protected async Task CopyBinaryColumnsUpAsync(
@@ -4859,7 +5033,7 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable, ISyncTableRunSu
                 && _descriptor.LocalUniqueLookups.Any(lookup =>
                     lookup.ReadValues(row) is var wanted
                     && wanted.All(value => value is not null)
-                    && lookup.ReadValues(server).SequenceEqual(wanted)
+                    && SameUniqueValues(lookup.ReadValues(server), wanted)
                 )
             )
             {
@@ -4914,8 +5088,10 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable, ISyncTableRunSu
     /// <remarks>
     /// What the server rows bring besides their unique values - a new parent above all - goes in, and the rows no
     /// longer keep the holder. The mirrored versions are the local rows' own, so the rows are still due for the
-    /// server's versions, which the batch applies once the holder is gone. A row that does not go in puts the ones
-    /// written before it back.
+    /// server's versions, which the batch applies once the holder is gone. Whenever it answers null - a row that does
+    /// not go in, or the waiting row turning out not to be such a row once rows before it are in - the rows written
+    /// before are put back first. With <see cref="SyncTableDescriptor{TEntity, TKey}.CopyUniqueValues"/> unset, it
+    /// writes nothing and answers null.
     /// </remarks>
     /// <param name="rows">The batch.</param>
     /// <param name="index">The index of the row waiting for a unique value a holder has.</param>
@@ -4928,7 +5104,10 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable, ISyncTableRunSu
         CancellationToken cancellationToken
     )
     {
-        if (_descriptor.LocalUniqueLookups.Count == 0)
+        if (
+            _descriptor.LocalUniqueLookups.Count == 0
+            || _descriptor.CopyUniqueValues is not { } copyUniqueValues
+        )
         {
             return null;
         }
@@ -4943,6 +5122,8 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable, ISyncTableRunSu
             {
                 if (position == index)
                 {
+                    await PutBackAsync(originals, cancellationToken).ConfigureAwait(false);
+
                     return null;
                 }
 
@@ -4964,7 +5145,7 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable, ISyncTableRunSu
             }
 
             var staged = (TEntity)row.Clone();
-            _descriptor.CopyUniqueValues(local, staged);
+            copyUniqueValues(local, staged);
             _descriptor.WriteRowVersion(staged, _descriptor.ReadRowVersion(local));
 
             if (!await StageAsync(staged, null, cancellationToken).ConfigureAwait(false))
@@ -4987,12 +5168,39 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable, ISyncTableRunSu
                 );
     }
 
+    /// <summary>
+    /// Whether two reads of one unique constraint's values (<see cref="SyncUniqueLookup{TEntity}.ReadValues"/>) are the
+    /// same values: compared element by element, and a binary value by its bytes, as the database compares them.
+    /// </summary>
+    private static bool SameUniqueValues(object?[] left, object?[] right) =>
+        System.Collections.StructuralComparisons.StructuralEqualityComparer.Equals(left, right);
+
     /// <summary>Writes staged rows back as they were, the last one first.</summary>
+    /// <remarks>
+    /// A row that does not go back would keep the mixture of its server copy and its local unique values, and a later
+    /// upload would send that mixture as the device's own change. The run is stopped instead, once every row that can go
+    /// back has, naming the rows that could not.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">A row could not be written back as it was.</exception>
     private async Task PutBackAsync(List<TEntity> originals, CancellationToken cancellationToken)
     {
+        var notPutBack = new List<string>();
+
         for (var position = originals.Count - 1; position >= 0; position--)
         {
-            await StageAsync(originals[position], null, cancellationToken).ConfigureAwait(false);
+            if (!await StageAsync(originals[position], null, cancellationToken).ConfigureAwait(false))
+            {
+                notPutBack.Add(FormatKey(ReadKey(originals[position])));
+            }
+        }
+
+        if (notPutBack.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"The local rows of '{TableName}' with the keys {string.Join(", ", notPutBack)} could not be written "
+                    + "back as they were after being staged for a unique value, and hold their server copies with "
+                    + "their local unique values. The sync stopped so that this mixture is not uploaded."
+            );
         }
     }
 
@@ -5003,7 +5211,10 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable, ISyncTableRunSu
         CancellationToken cancellationToken
     )
     {
-        if (_descriptor.LocalUniqueLookups.Count == 0)
+        if (
+            _descriptor.LocalUniqueLookups.Count == 0
+            || _descriptor.CopyUniqueValues is not { } copyUniqueValues
+        )
         {
             return false;
         }
@@ -5035,17 +5246,14 @@ public abstract class SyncTableBase<TEntity, TKey> : ISyncTable, ISyncTableRunSu
         if (
             local is null
             || _descriptor.LocalUniqueLookups.All(lookup =>
-                System.Collections.StructuralComparisons.StructuralEqualityComparer.Equals(
-                    lookup.ReadValues(server),
-                    lookup.ReadValues(local)
-                )
+                SameUniqueValues(lookup.ReadValues(server), lookup.ReadValues(local))
             )
         )
         {
             return false;
         }
 
-        _descriptor.CopyUniqueValues(server, local);
+        copyUniqueValues(server, local);
 
         return await StageAsync(local, resolver, cancellationToken).ConfigureAwait(false);
     }
@@ -5811,6 +6019,8 @@ public sealed class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
 
                         if (rows.Count == 0)
                         {
+                            resolver?.ReconcileSettledReceipts(TableName, settledAcks);
+
                             return (stop, parentTable, 0, false, false);
                         }
 
@@ -5823,6 +6033,11 @@ public sealed class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
                                 cancellationToken
                             )
                             .ConfigureAwait(false);
+
+                        // A row the resolver read back and the batch then wrote over lost its receipt as that flush
+                        // committed; one read back after its last write keeps the receipt recorded for it, whatever the
+                        // row's own receipt said (see SyncParentResolver).
+                        resolver?.ReconcileSettledReceipts(TableName, settledAcks);
 
                         if (stoppedAt >= 0)
                         {
@@ -5892,10 +6107,18 @@ public sealed class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
     /// the version is worth taking, and it is taken on its own.
     /// </para>
     /// <para>
-    /// Every row that gets this far has its mirrored version written, one way or the other, so a row whose key holds a
-    /// receipt leaves that receipt with nothing left to say: the mirror now carries at least what the receipt did. Both
-    /// paths therefore add to <paramref name="settledAcks"/> - including a row someone else changed after this device
-    /// uploaded it, whose receipt is not merely redundant but stale.
+    /// Every row that gets this far has its mirrored version written, one way or the other, so a row whose key held a
+    /// receipt when the table's download began leaves that receipt with nothing left to say: the mirror now carries at
+    /// least what the receipt did. Both paths therefore add to <paramref name="settledAcks"/> - including a row someone
+    /// else changed after this device uploaded it, whose receipt is not merely redundant but stale.
+    /// </para>
+    /// <para>
+    /// A row the resolver read back during the batch - a parent further down the batch, a row holding a unique value a
+    /// row needs - has a receipt for the version it read, which can be newer than the batch's copy written over it
+    /// afterwards. Each flush tells the resolver which rows it wrote and removes, once it has committed, the receipts the
+    /// batch's copy overwrote (see <see cref="SyncParentResolver"/>), so the next run brings the newer version down as
+    /// content rather than taking it for an echo - even when a later batch of the table's download then fails. The caller
+    /// then takes off <paramref name="settledAcks"/> the rows the resolver read back after their last write.
     /// </para>
     /// </remarks>
     /// <param name="rows">The batch's rows, in ascending version order.</param>
@@ -6017,6 +6240,26 @@ public sealed class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
 
         var applied = stop >= 0 ? stop : content.Count;
         var stoppedAt = stop >= 0 ? content[stop].Index : -1;
+
+        // One unit of writes ends here, committed: a row read back before it and written now holds the batch's copy
+        // again, so its receipt goes now rather than with the table's download - an exception later in the table's
+        // download would otherwise leave it behind. Not the caller's token, for the same reason: a cancellation arriving
+        // after the commit must not leave it behind either.
+        if (resolver is not null)
+        {
+            var overwritten = resolver.EndWriteUnit(
+                TableName,
+                content.Take(applied).Select(item => FormatKey(ReadKey(item.Row)))
+            );
+
+            if (overwritten.Count > 0)
+            {
+                await _localJournal
+                    .RemoveAcksAsync(TableName, overwritten, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+        }
+
         content.Clear();
 
         return (applied, stoppedAt, skipped);
@@ -6334,25 +6577,27 @@ public sealed class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
             // The guard reads the version off the entity, so the one that is actually going to be guarded against is
             // written onto it first - which matters exactly when the receipt is the later of the two.
             WriteRowVersion(local, mirror);
-            local.MarkUpdated();
 
-            try
+            if (policy == SyncConflictPolicy.LocalWins)
             {
-                var updated = await _server
-                    .Writer.UpdateAsync(
-                        local,
-                        policy == SyncConflictPolicy.LocalWins
-                            ? ConcurrencyMode.ForceOverwrite
-                            : ConcurrencyMode.Optimistic,
-                        cancellationToken
-                    )
+                // LocalWins: the local edit overwrites the server's row, and puts it back when the server no longer
+                // has it - the same resurrection last-write-wins performs, here as the resolution of a collected
+                // conflict.
+                inserted = await ForceOverwriteOrInsertAsync(local, cancellationToken)
                     .ConfigureAwait(false);
+                forced = !inserted;
+            }
+            else
+            {
+                local.MarkUpdated();
 
-                forced = updated && policy == SyncConflictPolicy.LocalWins;
-
-                if (!updated)
+                try
                 {
-                    if (policy != SyncConflictPolicy.LocalWins)
+                    var updated = await _server
+                        .Writer.UpdateAsync(local, ConcurrencyMode.Optimistic, cancellationToken)
+                        .ConfigureAwait(false);
+
+                    if (!updated)
                     {
                         return SyncUploadOutcome.Conflicted(
                             new SyncConflict(
@@ -6365,30 +6610,24 @@ public sealed class SyncTable<TEntity, TKey> : SyncTableBase<TEntity, TKey>
                             )
                         );
                     }
-
-                    // LocalWins: the server no longer has the row, so the local edit puts it back - the same
-                    // resurrection last-write-wins performs, here as the resolution of a collected conflict.
-                    local.MarkAdded();
-                    await _server.Writer.InsertAsync(local, cancellationToken).ConfigureAwait(false);
-                    inserted = true;
                 }
-            }
-            catch (SaveConflictException)
-            {
-                var current = await _server
-                    .Writer.GetByIdAsync(key, cancellationToken)
-                    .ConfigureAwait(false);
+                catch (SaveConflictException)
+                {
+                    var current = await _server
+                        .Writer.GetByIdAsync(key, cancellationToken)
+                        .ConfigureAwait(false);
 
-                return SyncUploadOutcome.Conflicted(
-                    new SyncConflict(
-                        TableName,
-                        entry.KeyText,
-                        SyncJournalOperation.Upsert,
-                        SyncConflictReason.ModifiedOnServer,
-                        local,
-                        current
-                    )
-                );
+                    return SyncUploadOutcome.Conflicted(
+                        new SyncConflict(
+                            TableName,
+                            entry.KeyText,
+                            SyncJournalOperation.Upsert,
+                            SyncConflictReason.ModifiedOnServer,
+                            local,
+                            current
+                        )
+                    );
+                }
             }
         }
 
@@ -8002,9 +8241,15 @@ public sealed class SyncEngine
     /// run may (see <see cref="SyncParentResolver"/>); a row whose parent it may not bring in - the parent's table is
     /// outside the run, or the parent has an unsent delete the run is not discarding - is left as it is, and its entries
     /// stay for a run that can settle it.
+    /// <para>
+    /// The run read the entries before taking the lock. The ones it read are grouped here by the key each holds now: a
+    /// new row whose key a save hook set had its entry moved to that key by the write in progress, and the row is put
+    /// back, its entries dropped and the drop reported under the key it has. An entry the run itself has dropped on the
+    /// way keeps the key it was read under.
+    /// </para>
     /// </remarks>
     /// <param name="table">The table.</param>
-    /// <param name="rows">The table's rows the run settles, with the entries of each.</param>
+    /// <param name="rows">The table's rows the run settles, with the entries of each, as the run read them.</param>
     /// <param name="includeUnboundedBinary">Whether the run carries the unbounded binary columns.</param>
     /// <param name="propagateDeletes">Whether a delete propagation follows in the run: a row the server does not have is then removed before the server's rows are put back rather than after (see <see cref="ISyncTableRunSupport.ApplyServerRowsAsync"/>).</param>
     /// <param name="droppedIds">Every entry the run is settling this way (they hold no parent back).</param>
@@ -8021,13 +8266,35 @@ public sealed class SyncEngine
         CancellationToken cancellationToken
     )
     {
-        // The keys that picked up an entry the run did not read: their newer local edit stands.
+        // The entries are read again here, under the lock, and the ones the run read are grouped by the key they hold
+        // now (as PlanReplayAsync does): a write in progress when the run read them may have moved one to the key its
+        // save hook gave the row since, and the row is put back and reported under that key, not the one read first. An
+        // entry the run has already dropped on the way (the delete propagation before the download) keeps the key read.
         var readIds = rows.SelectMany(pair => pair.Value).ToHashSet();
-        var editedSince = (await _journal.ReadAllAsync(cancellationToken).ConfigureAwait(false))
-            .Where(entry =>
-                string.Equals(entry.TableName, table.TableName, StringComparison.Ordinal)
-                && !readIds.Contains(entry.Id)
-            )
+        var entries = await _journal
+            .ReadTableAsync(table.TableName, cancellationToken)
+            .ConfigureAwait(false);
+        var keyNow = entries
+            .Where(entry => readIds.Contains(entry.Id))
+            .ToDictionary(entry => entry.Id, entry => entry.KeyText);
+        rows =
+        [
+            .. rows.SelectMany(pair =>
+                    pair.Value.Select(id =>
+                        (KeyText: keyNow.TryGetValue(id, out var keyText) ? keyText : pair.Key.KeyText, Id: id)
+                    )
+                )
+                .GroupBy(entry => entry.KeyText, StringComparer.Ordinal)
+                .Select(group => new KeyValuePair<(string TableName, string KeyText), List<long>>(
+                    (table.TableName, group.Key),
+                    group.Select(entry => entry.Id).Order().ToList()
+                ))
+                .OrderBy(pair => pair.Value[0]),
+        ];
+
+        // The keys that picked up an entry the run did not read: their newer local edit stands.
+        var editedSince = entries
+            .Where(entry => !readIds.Contains(entry.Id))
             .Select(entry => entry.KeyText)
             .ToHashSet(StringComparer.Ordinal);
         var keyTexts = rows.Select(pair => pair.Key.KeyText)
@@ -8640,10 +8907,9 @@ public sealed class SyncEngine
             Ids.Add(entry.Id);
             LatestRowVersion = entry.OriginalRowVersion;
 
-            if (!string.IsNullOrEmpty(entry.UnboundedBinaryColumns))
-            {
-                UnboundedBinaryColumns.UnionWith(entry.UnboundedBinaryColumns.Split(','));
-            }
+            UnboundedBinaryColumns.UnionWith(
+                SyncJournal.SplitUnboundedBinaryColumns(entry.UnboundedBinaryColumns)
+            );
 
             if (
                 string.Equals(
@@ -9122,7 +9388,9 @@ public sealed class SyncEngine
                         binaryColumns.Add(entry.KeyText, columns);
                     }
 
-                    columns.UnionWith(entry.UnboundedBinaryColumns.Split(','));
+                    columns.UnionWith(
+                        SyncJournal.SplitUnboundedBinaryColumns(entry.UnboundedBinaryColumns)
+                    );
                 }
             }
 
@@ -9194,16 +9462,27 @@ public sealed class SyncEngine
 /// <remarks>
 /// <para>
 /// The traversal mirrors the decision procedure of the graph saver: a removed node has its cascade subtree recorded as
-/// deletes (children first, each regardless of its own state) followed by the node itself, an added or updated node is
-/// recorded as an upsert, and an unchanged node contributes nothing of its own - but its children are still visited
-/// while the save cascades, because a changed child under an unchanged root is written all the same.
+/// deletes (children first) followed by the node itself, an added or updated node is recorded as an upsert, and an
+/// unchanged node contributes nothing of its own - but its children are still visited while the save cascades, because a
+/// changed child under an unchanged root is written all the same.
+/// </para>
+/// <para>
+/// A delete is recorded only for a node the saver's DELETE can find. The saver removes a removed node's subtree whatever
+/// the state of each node in it, so a saved child moved there from under another parent is recorded; but an added node
+/// in that subtree has never been written, and a node whose key is not set yet (it formats as
+/// <see cref="SyncJournal.UnsetKeyText"/>) matches no row, so neither records a delete of its own - the walk still goes
+/// on into their children. One case is given up for it: an added node carrying the key of a row that already exists
+/// (a misuse, since inserting it would fail) has that row removed by the saver without a delete being recorded. Telling
+/// it apart would take a read of the local row for every added node, and a table without a version column has no such
+/// read; recording it instead would replay an unguarded delete of whatever row another device created under that key.
 /// </para>
 /// <para>
 /// It is one traversal rather than one per entity type: the children come from
 /// <see cref="EntityBaseCore.EnumerateCascadeChildren"/>, which yields the same cascade navigations the saver's own walk
 /// enumerates (the saver reads them from its EntitySaveMetadata.CascadeNavigations rather than calling this method), and
-/// a node is recorded only when its CLR type has a descriptor. A table on the path that is not synchronised is therefore
-/// walked through without an entry of its own, and a subtree holding no synchronised table records nothing.
+/// a node is recorded only when its CLR type has a descriptor. A table on the path that is not synchronised - or that
+/// the engine was built without - is therefore walked through without an entry of its own, and a subtree holding no
+/// synchronised table records nothing.
 /// </para>
 /// <para>
 /// Recording the whole graph first keeps the journal-first safety order for every row the save is going to touch: an
@@ -9215,12 +9494,14 @@ public sealed class SyncGraphRecorder
     private readonly Dictionary<Type, ISyncTableDescriptor> _descriptors;
     private readonly Dictionary<string, ISyncTableDescriptor> _descriptorsByTable;
 
-    /// <summary>Creates the recorder over the descriptors of every synchronised table.</summary>
+    /// <summary>Creates the recorder over the descriptors of the tables whose rows are recorded.</summary>
     /// <remarks>
-    /// Every table the diagram synchronises belongs here, including one a particular engine was built without: the
-    /// journal is shared, and a graph save reaching such a table records it exactly as it did before the exclusion.
+    /// The tables an engine synchronises belong here and no others: a table the engine was built without
+    /// (<c>excludeFromSync</c>) is left out, so a graph save records none of its rows - whichever repository the save
+    /// goes through - while the synchronised rows the same save cascades into are still recorded. The journal is the one
+    /// the engine replays, and an entry of a table it never replays would stay unsent for good.
     /// </remarks>
-    /// <param name="descriptors">The descriptors, one per synchronised table.</param>
+    /// <param name="descriptors">The descriptors, one per table whose rows are recorded.</param>
     public SyncGraphRecorder(IEnumerable<ISyncTableDescriptor> descriptors)
     {
         ArgumentNullException.ThrowIfNull(descriptors);
@@ -9364,7 +9645,12 @@ public sealed class SyncGraphRecorder
         }
     }
 
-    /// <summary>Collects the whole subtree as deletes, children first (the saver removes them regardless of their own state).</summary>
+    /// <summary>Collects the subtree as deletes, children first (see the remarks on the class for the nodes that record none).</summary>
+    /// <remarks>
+    /// The saver removes the subtree whatever the state of each node, so every node is visited; an added node records no
+    /// delete of its own, since it has never been written, but its children are still collected - a saved child moved
+    /// under it is removed all the same.
+    /// </remarks>
     private void CollectDeleteGraph(EntityBaseCore entity, List<SyncJournalRecord> records)
     {
         foreach (var child in entity.EnumerateCascadeChildren())
@@ -9372,18 +9658,28 @@ public sealed class SyncGraphRecorder
             CollectDeleteGraph(child, records);
         }
 
-        CollectDelete(entity, records);
+        if (entity.RowState != RowState.Added)
+        {
+            CollectDelete(entity, records);
+        }
     }
 
-    /// <summary>Collects the delete of one node, carrying the mirrored version the row holds (nothing for an unsynchronised table).</summary>
+    /// <summary>
+    /// Collects the delete of one node, carrying the mirrored version the row holds (nothing for an unsynchronised table,
+    /// and nothing for a node whose key is not set yet, whose delete matches no row).
+    /// </summary>
     private void CollectDelete(EntityBaseCore entity, List<SyncJournalRecord> records)
     {
-        if (Find(entity) is { } descriptor)
+        if (
+            Find(entity) is { } descriptor
+            && descriptor.FormatEntityKey(entity) is var keyText
+            && !string.Equals(keyText, SyncJournal.UnsetKeyText, StringComparison.Ordinal)
+        )
         {
             records.Add(
                 new SyncJournalRecord(
                     descriptor.TableName,
-                    descriptor.FormatEntityKey(entity),
+                    keyText,
                     SyncJournalOperation.Delete,
                     descriptor.ReadEntityRowVersion(entity)
                 )
@@ -9418,6 +9714,13 @@ public sealed class SyncGraphRecorder
 /// <c>Query().ExecuteDeleteAsync</c>, whose rows are chosen by a predicate the decorator never sees. Rows changed
 /// either way reach the server only if something else records them.
 /// </para>
+/// <para>
+/// A table the engine was built without (<c>excludeFromSync</c>) is wrapped as well, in the form that does not record its
+/// own rows (<see cref="RecordsOwnRows"/> false): its direct writes go straight to the repository it wraps, with no lock
+/// and no entry, while its graph saves still go through the recording step, because a save rooted at it cascades into
+/// synchronised tables whose rows have to be recorded. The graph recorder of such an engine leaves the excluded tables
+/// out, so the save records none of their rows.
+/// </para>
 /// </remarks>
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
@@ -9425,11 +9728,33 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepositoryCore<
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>Creates the decorator over the repository it wraps, the journal, the table's descriptor, and the graph recorder.</summary>
+    /// <remarks>The decorator records the rows of its own table (see <see cref="RecordsOwnRows"/>).</remarks>
     protected JournalingRepositoryBase(
         IRepositoryCore<TEntity, TKey> inner,
         SyncJournal journal,
         SyncTableDescriptor<TEntity, TKey> descriptor,
         SyncGraphRecorder graphRecorder
+    )
+        : this(inner, journal, descriptor, graphRecorder, recordsOwnRows: true) { }
+
+    /// <summary>
+    /// Creates the decorator over the repository it wraps, the journal, the table's descriptor, and the graph recorder,
+    /// saying whether it records the rows of its own table.
+    /// </summary>
+    /// <param name="inner">The repository every call is forwarded to.</param>
+    /// <param name="journal">The journal the write intents are recorded to.</param>
+    /// <param name="descriptor">The table's descriptor.</param>
+    /// <param name="graphRecorder">The recorder a graph save is journaled through.</param>
+    /// <param name="recordsOwnRows">
+    /// False for a table the engine was built without: its direct writes are forwarded unrecorded, and only its graph
+    /// saves go through the recording step (see <see cref="RecordsOwnRows"/>).
+    /// </param>
+    protected JournalingRepositoryBase(
+        IRepositoryCore<TEntity, TKey> inner,
+        SyncJournal journal,
+        SyncTableDescriptor<TEntity, TKey> descriptor,
+        SyncGraphRecorder graphRecorder,
+        bool recordsOwnRows
     )
     {
         ArgumentNullException.ThrowIfNull(descriptor);
@@ -9438,7 +9763,19 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepositoryCore<
         Journal = journal;
         Descriptor = descriptor;
         GraphRecorder = graphRecorder;
+        RecordsOwnRows = recordsOwnRows;
     }
+
+    /// <summary>Gets whether the decorator records the rows of its own table.</summary>
+    /// <remarks>
+    /// False for a table the engine was built without (<c>excludeFromSync</c>). Its direct writes - Insert, Update,
+    /// Delete, BulkInsert, and the generated unbounded binary column writes - are then forwarded as they are, without
+    /// taking the local write lock, recording, or creating the journal table. Its graph saves still go through
+    /// <see cref="RecordAndWriteAsync"/>, so the synchronised rows a save cascades into are recorded under the lock and
+    /// settled against what the save did; the graph recorder of the engine leaves the excluded tables out, so none of
+    /// their rows are recorded.
+    /// </remarks>
+    protected bool RecordsOwnRows { get; }
 
     /// <summary>Gets the wrapped repository every call is forwarded to.</summary>
     protected IRepositoryCore<TEntity, TKey> Inner { get; }
@@ -9485,10 +9822,15 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepositoryCore<
         );
 
     /// <summary>Records the intent to write the given row, unless the sync engine is the one writing.</summary>
+    /// <remarks>
+    /// The key text comes from <see cref="SyncTableDescriptor{TEntity, TKey}.FormatEntityKey"/>, as an insert's does: a
+    /// row whose key is not set is recorded under <see cref="SyncJournal.UnsetKeyText"/>, which names no row, and the write
+    /// itself decides what happens to the row (an entry left under that text goes when an upload plans the table).
+    /// </remarks>
     protected Task RecordUpsertAsync(TEntity entity, CancellationToken cancellationToken) =>
         Journal.RecordAsync(
             TableName,
-            FormatKey(ReadKey(entity)),
+            Descriptor.FormatEntityKey(entity),
             SyncJournalOperation.Upsert,
             null,
             cancellationToken
@@ -9731,7 +10073,10 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepositoryCore<
     }
 
     /// <summary>Records a write of one unbounded binary column and performs it, as one step under the local write lock.</summary>
-    /// <remarks>What a generated accessor that writes one column of a row on its own goes through.</remarks>
+    /// <remarks>
+    /// What a generated accessor that writes one column of a row on its own goes through. A decorator that does not
+    /// record its own rows (<see cref="RecordsOwnRows"/>) performs the write and nothing else.
+    /// </remarks>
     /// <param name="id">The key of the row being written.</param>
     /// <param name="columnName">The column the write stores a value in.</param>
     /// <param name="write">Performs the business write.</param>
@@ -9744,6 +10089,13 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepositoryCore<
         CancellationToken cancellationToken
     )
     {
+        ArgumentNullException.ThrowIfNull(write);
+
+        if (!RecordsOwnRows)
+        {
+            return write();
+        }
+
         if (id is null)
         {
             throw new ArgumentNullException(nameof(id));
@@ -9786,8 +10138,16 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepositoryCore<
     ) => Inner.CheckUniquenessAsync(entity, cancellationToken);
 
     /// <inheritdoc />
+    /// <remarks>A decorator that does not record its own rows forwards the call as it is (see <see cref="RecordsOwnRows"/>).</remarks>
     public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
+        if (!RecordsOwnRows)
+        {
+            await Inner.InsertAsync(entity, cancellationToken).ConfigureAwait(false);
+
+            return;
+        }
+
         ArgumentNullException.ThrowIfNull(entity);
         await RecordAndWriteAsync(
                 () => RecordInsertAsync(entity, cancellationToken),
@@ -9803,12 +10163,18 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepositoryCore<
     }
 
     /// <inheritdoc />
+    /// <remarks>A decorator that does not record its own rows forwards the call as it is (see <see cref="RecordsOwnRows"/>).</remarks>
     public Task<bool> UpdateAsync(
         TEntity entity,
         ConcurrencyMode mode = ConcurrencyMode.Optimistic,
         CancellationToken cancellationToken = default
     )
     {
+        if (!RecordsOwnRows)
+        {
+            return Inner.UpdateAsync(entity, mode, cancellationToken);
+        }
+
         ArgumentNullException.ThrowIfNull(entity);
 
         return RecordAndWriteAsync(
@@ -9819,9 +10185,17 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepositoryCore<
     }
 
     /// <inheritdoc />
-    /// <remarks>A null key is refused before anything is recorded, as the repository it wraps refuses it.</remarks>
+    /// <remarks>
+    /// A null key is refused before anything is recorded, as the repository it wraps refuses it. A decorator that does not
+    /// record its own rows forwards the call as it is (see <see cref="RecordsOwnRows"/>).
+    /// </remarks>
     public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
     {
+        if (!RecordsOwnRows)
+        {
+            return Inner.DeleteAsync(id, cancellationToken);
+        }
+
         if (id is null)
         {
             throw new ArgumentNullException(nameof(id));
@@ -9835,14 +10209,29 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepositoryCore<
     }
 
     /// <inheritdoc />
-    /// <remarks>Every row is recorded in one call to <see cref="SyncJournal.RecordManyAsync"/>, not one statement per row.</remarks>
+    /// <remarks>
+    /// Every row is recorded in one call to <see cref="SyncJournal.RecordManyAsync"/>, not one statement per row. A
+    /// decorator that does not record its own rows forwards the call as it is (see <see cref="RecordsOwnRows"/>), and so
+    /// does a call with no row to insert (an empty sequence, or only null elements, which the insert skips): there is
+    /// nothing to record, so it takes neither the write lock nor the journal's tables.
+    /// </remarks>
     public Task<int> BulkInsertAsync(
         IEnumerable<TEntity> entities,
         CancellationToken cancellationToken = default
     )
     {
+        if (!RecordsOwnRows)
+        {
+            return Inner.BulkInsertAsync(entities, cancellationToken);
+        }
+
         ArgumentNullException.ThrowIfNull(entities);
         var materialized = entities.ToList();
+
+        if (!materialized.Any(entity => entity is not null))
+        {
+            return Inner.BulkInsertAsync(materialized, cancellationToken);
+        }
 
         return RecordAndWriteAsync(
             () =>
@@ -9976,6 +10365,19 @@ public abstract class JournalingRepository<TEntity, TKey> : JournalingRepository
     )
         : base(inner, journal, descriptor, graphRecorder) { }
 
+    /// <summary>
+    /// Creates the decorator over the repository it wraps, the journal, the table's descriptor, and the graph recorder,
+    /// saying whether it records the rows of its own table (see <see cref="JournalingRepositoryBase{TEntity, TKey}.RecordsOwnRows"/>).
+    /// </summary>
+    protected JournalingRepository(
+        IRepositoryCore<TEntity, TKey> inner,
+        SyncJournal journal,
+        SyncTableDescriptor<TEntity, TKey> descriptor,
+        SyncGraphRecorder graphRecorder,
+        bool recordsOwnRows
+    )
+        : base(inner, journal, descriptor, graphRecorder, recordsOwnRows) { }
+
     /// <summary>Reads the mirrored row version of the given entity.</summary>
     private byte[]? ReadRowVersion(TEntity entity) => Descriptor.ReadRowVersion(entity);
 
@@ -10017,6 +10419,19 @@ public abstract class VersionlessJournalingRepository<TEntity, TKey>
         SyncGraphRecorder graphRecorder
     )
         : base(inner, journal, descriptor, graphRecorder) { }
+
+    /// <summary>
+    /// Creates the decorator over the repository it wraps, the journal, the table's descriptor, and the graph recorder,
+    /// saying whether it records the rows of its own table (see <see cref="JournalingRepositoryBase{TEntity, TKey}.RecordsOwnRows"/>).
+    /// </summary>
+    protected VersionlessJournalingRepository(
+        IRepositoryCore<TEntity, TKey> inner,
+        SyncJournal journal,
+        SyncTableDescriptor<TEntity, TKey> descriptor,
+        SyncGraphRecorder graphRecorder,
+        bool recordsOwnRows
+    )
+        : base(inner, journal, descriptor, graphRecorder, recordsOwnRows) { }
 
     /// <inheritdoc />
     protected sealed override Task RecordDeleteAsync(TKey id, CancellationToken cancellationToken) =>

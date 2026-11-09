@@ -49,9 +49,10 @@ internal enum ModelFaultKind
 /// この時点に来たときに 1 回だけ、実行と別の流れからローカルの書き込みを差し込む。
 /// </summary>
 /// <remarks>
-/// どの点も、エンジンがローカルの書き込みロックを持っていない時点に置く。割り込みの書き込みはジャーナル記録のデコレータの
+/// どの点も、エンジンがローカルの書き込みロックを持っていない時点に置く。端末の割り込みの書き込みはジャーナル記録のデコレータの
 /// 書き込みロックを待つので、ロックの中に差し込むと互いに待ち合って止まる（エンジンが行の適用・未送信の読み直しをする区間には
-/// 差し込めない）。洗い替えはロックを持ったまま全体を流すので、割り込みは起きない。
+/// 差し込めない）。洗い替えはロックを持ったまま全体を流すので、端末の割り込みは起きない。サーバーの他者の書き込みはローカルの
+/// ロックを待たないので、洗い替えの取得の前後にも差し込む。
 /// </remarks>
 internal enum ModelInterruptPoint
 {
@@ -280,9 +281,16 @@ internal sealed class SyncModelFaults
     public static readonly TimeSpan InterruptTimeout = TimeSpan.FromSeconds(30);
 
     private readonly object _interruptLock = new();
-    private (ModelActor Device, ModelInterruptPoint Point, Func<Task> Write)? _interrupt;
+    private (
+        ModelActor Device,
+        ModelInterruptPoint Point,
+        ModelActor Writer,
+        Func<Task> Write
+    )? _interrupt;
 
-    /// <summary>いま洗い替えを流しているか（洗い替えはロックを持ったまま流すので、割り込みを起こさない）</summary>
+    /// <summary>
+    /// いま洗い替えを流しているか（洗い替えはロックを持ったまま流すので、端末の割り込みを起こさない。サーバーの他者の割り込みは起こす）
+    /// </summary>
     public bool Refreshing { get; set; }
 
     /// <summary>仕掛けたまま、まだ起きていない割り込みの点（無ければ null）</summary>
@@ -301,10 +309,15 @@ internal sealed class SyncModelFaults
     public ModelInterruptPoint? InterruptTimedOut { get; private set; }
 
     /// <summary>
-    /// 割り込みを仕掛ける（端末の次の同期がその点に来たときに 1 回だけ、<paramref name="write"/> を実行と別の流れで流す。
-    /// 同時に仕掛けられるのは 1 つだけ）
+    /// 割り込みを仕掛ける（端末の次の同期か洗い替えがその点に来たときに 1 回だけ、<paramref name="write"/> を実行と別の流れで流す。
+    /// 同時に仕掛けられるのは 1 つだけ。<paramref name="writer"/> がその端末なら洗い替えの間は起こさない）
     /// </summary>
-    public void ArmInterrupt(ModelActor device, ModelInterruptPoint point, Func<Task> write)
+    public void ArmInterrupt(
+        ModelActor device,
+        ModelInterruptPoint point,
+        ModelActor writer,
+        Func<Task> write
+    )
     {
         lock (_interruptLock)
         {
@@ -313,7 +326,7 @@ internal sealed class SyncModelFaults
                 throw new InvalidOperationException("An interrupt is already armed.");
             }
 
-            _interrupt = (device, point, write);
+            _interrupt = (device, point, writer, write);
         }
     }
 
@@ -329,11 +342,11 @@ internal sealed class SyncModelFaults
         lock (_interruptLock)
         {
             if (
-                Refreshing
-                || Syncing is not { } device
+                Syncing is not { } device
                 || _interrupt is not { } armed
                 || armed.Device != device
                 || armed.Point != point
+                || Refreshing && armed.Writer != ModelActor.Server
             )
             {
                 return;

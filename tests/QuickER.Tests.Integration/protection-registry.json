@@ -48,7 +48,7 @@
     {
       "id": "SyncModel",
       "part": "Config",
-      "title": "同期の構成の行列（DI の登録の形・転送経路・キーの型・キーを決めるフック）",
+      "title": "同期の構成の行列（DI の登録の形・転送経路・キーの型・キーを決めるフック・書き込みの経路）",
       "sourceFiles": [
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncConfigDimensions.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncConfigFixtures.cs",

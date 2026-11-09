@@ -154,26 +154,6 @@ internal sealed partial class SyncModelRun
                 );
                 return true;
 
-            case ArmServerInterruptOp interrupt:
-                if (interrupt.Write.Actor != ModelActor.Server)
-                {
-                    throw new ArgumentException(
-                        "A server interrupt writes as the server.",
-                        nameof(op)
-                    );
-                }
-
-                _world.Faults.ArmInterrupt(
-                    interrupt.Device,
-                    interrupt.Point,
-                    async () =>
-                    {
-                        _log.Add($"  -> interrupt {interrupt.Point}: {interrupt.Write.Describe()}");
-                        await WriteAsync(interrupt.Write);
-                    }
-                );
-                return true;
-
             case ArmEmptyFetchOp empty:
                 _world.Faults.ArmEmptyFetch(empty.Device, empty.Table);
                 return true;

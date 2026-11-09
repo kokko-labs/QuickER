@@ -69,10 +69,12 @@ public interface QuickER.Runtime.Sync.ISyncTableDescriptor
 
 public abstract class QuickER.Runtime.Sync.JournalingRepository<TEntity, TKey> : QuickER.Runtime.Sync.JournalingRepositoryBase<TEntity, TKey>, QuickER.Runtime.IRemoteRepositoryCore<TEntity, TKey>, QuickER.Runtime.IRepositoryCore<TEntity, TKey>
     protected .ctor(QuickER.Runtime.IRepositoryCore<TEntity, TKey> inner, QuickER.Runtime.Sync.SyncJournal journal, QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> descriptor, QuickER.Runtime.Sync.SyncGraphRecorder graphRecorder)
+    protected .ctor(QuickER.Runtime.IRepositoryCore<TEntity, TKey> inner, QuickER.Runtime.Sync.SyncJournal journal, QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> descriptor, QuickER.Runtime.Sync.SyncGraphRecorder graphRecorder, bool recordsOwnRows)
     protected System.Threading.Tasks.Task RecordDeleteAsync(TKey id, System.Threading.CancellationToken cancellationToken)
 
 public abstract class QuickER.Runtime.Sync.JournalingRepositoryBase<TEntity, TKey> : QuickER.Runtime.IRemoteRepositoryCore<TEntity, TKey>, QuickER.Runtime.IRepositoryCore<TEntity, TKey>
     protected .ctor(QuickER.Runtime.IRepositoryCore<TEntity, TKey> inner, QuickER.Runtime.Sync.SyncJournal journal, QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> descriptor, QuickER.Runtime.Sync.SyncGraphRecorder graphRecorder)
+    protected .ctor(QuickER.Runtime.IRepositoryCore<TEntity, TKey> inner, QuickER.Runtime.Sync.SyncJournal journal, QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> descriptor, QuickER.Runtime.Sync.SyncGraphRecorder graphRecorder, bool recordsOwnRows)
     protected QuickER.Runtime.IRepositoryCore<TEntity, TKey> Inner { get; }
     protected QuickER.Runtime.Sync.SyncGraphRecorder GraphRecorder { get; }
     protected QuickER.Runtime.Sync.SyncJournal Journal { get; }
@@ -83,6 +85,7 @@ public abstract class QuickER.Runtime.Sync.JournalingRepositoryBase<TEntity, TKe
     protected System.Threading.Tasks.Task<TResult> RecordUnboundedBinaryWriteAsync<TResult>(TKey id, string columnName, System.Func<System.Threading.Tasks.Task<TResult>> write, System.Threading.CancellationToken cancellationToken)
     protected TKey ReadKey(TEntity entity)
     protected abstract System.Threading.Tasks.Task RecordDeleteAsync(TKey id, System.Threading.CancellationToken cancellationToken)
+    protected bool RecordsOwnRows { get; }
     protected string FormatKey(TKey key)
     protected string TableName { get; }
     public QuickER.Runtime.SqlQuery<TEntity> Query()
@@ -452,6 +455,7 @@ public sealed class QuickER.Runtime.Sync.VersionlessDirectSyncSource<TEntity, TK
 
 public abstract class QuickER.Runtime.Sync.VersionlessJournalingRepository<TEntity, TKey> : QuickER.Runtime.Sync.JournalingRepositoryBase<TEntity, TKey>, QuickER.Runtime.IRemoteRepositoryCore<TEntity, TKey>, QuickER.Runtime.IRepositoryCore<TEntity, TKey>
     protected .ctor(QuickER.Runtime.IRepositoryCore<TEntity, TKey> inner, QuickER.Runtime.Sync.SyncJournal journal, QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> descriptor, QuickER.Runtime.Sync.SyncGraphRecorder graphRecorder)
+    protected .ctor(QuickER.Runtime.IRepositoryCore<TEntity, TKey> inner, QuickER.Runtime.Sync.SyncJournal journal, QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> descriptor, QuickER.Runtime.Sync.SyncGraphRecorder graphRecorder, bool recordsOwnRows)
     protected System.Threading.Tasks.Task RecordDeleteAsync(TKey id, System.Threading.CancellationToken cancellationToken)
 
 public sealed class QuickER.Runtime.Sync.VersionlessSyncTable<TEntity, TKey> : QuickER.Runtime.Sync.SyncTableBase<TEntity, TKey>, QuickER.Runtime.Sync.ISyncTable

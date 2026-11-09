@@ -507,6 +507,7 @@ public static class GeneratedFixedTypeNames
             "SeekOrigin",
             "SemaphoreSlim",
             "ServiceDescriptor",
+            "ServiceLifetime",
             "SocketsHttpHandler",
             "SortedSet",
             "Span",
