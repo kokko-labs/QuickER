@@ -209,7 +209,7 @@ public sealed class EngineFingerprintDriftTests
     /// </summary>
     internal static string SyncPlanSummary(SyncPlanFuzzDialect dialect, int seed)
     {
-        var generator = new SyncPlanFuzzGenerator(new Random(seed), dialect);
+        var generator = SyncPlanFuzzGenerator.ForSeed(seed, dialect);
         var live = generator.BuildLive();
         live.Diagram.TargetDbms = dialect.Provider.Name;
 

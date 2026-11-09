@@ -35,6 +35,7 @@ public static class TestDialectCapabilities
             SetNullRequiresNullableChildColumn = false,
             SupportsSchemaQualifiedTableNames = true,
             ChecksDefaultOnColumnTypeChange = false,
+            TypeKindChangeRequiresEmptyColumn = false,
             SupportsComputedColumnTypeChange = false,
             SupportsUniqueConstraintOnPrimaryKey = true,
             ReferencedKeyRequiresSameColumnOrder = true,

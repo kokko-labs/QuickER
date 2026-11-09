@@ -363,6 +363,8 @@ public sealed class DialectDocsTableTests
         ["Integer types differing only in width are allowed on the two ends"] = c =>
             c.ForeignKeyAllowsIntegerWidthDifference,
         ["A failed re-add can leave the foreign key dropped"] = c => !c.TransactionalDdl,
+        ["Changing the type kind of a column needs the column to be empty"] = c =>
+            c.TypeKindChangeRequiresEmptyColumn,
     };
 
     /// <summary>T-Q の「数える単位」の語（英語・日本語）</summary>

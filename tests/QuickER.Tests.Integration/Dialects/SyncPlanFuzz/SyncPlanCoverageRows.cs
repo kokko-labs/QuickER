@@ -194,6 +194,15 @@ internal static class SyncPlanCoverageRows
                 ),
                 SeedRow(DialectNames.SqlServer, 212, FuzzSelection.Default, ["shrink pk"]),
                 SeedRow(DialectNames.SqlServer, 212, FuzzSelection.Single, ["shrink pk"]),
+                // 生成器に後から足した水準（別の乱数の列）で普段の種のケースが変わり、普段の 100 種から欠けた 3 組を埋める（2026-11-09・
+                // 水準を足した後の普段の種の記録から、変更の種類を両方持つ種 56 を選んだ）
+                SeedRow(
+                    DialectNames.SqlServer,
+                    56,
+                    FuzzSelection.Random,
+                    ["add unique", "drop table"]
+                ),
+                SeedRow(DialectNames.SqlServer, 56, FuzzSelection.Default, ["add unique"]),
                 // ---- MySQL の変更の種類と選び方の組（SamplingGaps に書いていた 31 組）。種は実 DB の総当たりを夜間の 1500 種で流した
                 // 記録から貪欲に選んだ（2026-11-02・並びは埋める組の多い順） ----
                 SeedRow(
@@ -256,6 +265,9 @@ internal static class SyncPlanCoverageRows
                     ["replace pk", "respell type"]
                 ),
                 SeedRow(DialectNames.MySql, 5, FuzzSelection.Random, ["drop tables"]),
+                // 生成器に後から足した水準（別の乱数の列）で普段の種のケースが変わり、普段の 150 種から欠けた 1 組を埋める（2026-11-09・
+                // 水準を足した後の普段の種の記録から、変更の種類を持つ種 16 を選んだ）
+                SeedRow(DialectNames.MySql, 16, FuzzSelection.Random, ["add unique"]),
                 SeedRow(DialectNames.MySql, 21, FuzzSelection.All, ["computed type"]),
                 SeedRow(DialectNames.MySql, 21, FuzzSelection.ByKinds, ["computed type"]),
                 SeedRow(DialectNames.MySql, 23, FuzzSelection.ByKinds, ["extend pk"]),
@@ -336,7 +348,7 @@ internal static class SyncPlanCoverageRows
             $"実 DB の種 {seed} の変更（{string.Join("・", kinds)}）を選び方 {selection} で流す",
             new SyncPlanCoverageInput(
                 dialect,
-                fuzzDialect => new SyncPlanFuzzGenerator(new Random(seed), fuzzDialect),
+                fuzzDialect => SyncPlanFuzzGenerator.ForSeed(seed, fuzzDialect),
                 selection,
                 kinds,
                 RealDatabase: true,

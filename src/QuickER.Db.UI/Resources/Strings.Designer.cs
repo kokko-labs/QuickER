@@ -671,6 +671,12 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string SchemaSync_ExecuteConfirmForeignKeyRebuildAroundTypeKindChange {
+            get {
+                return ResourceManager.GetString("SchemaSync_ExecuteConfirmForeignKeyRebuildAroundTypeKindChange", resourceCulture);
+            }
+        }
+
         public static string SchemaSync_ExecuteConfirmSchemaQualifiedTableName {
             get {
                 return ResourceManager.GetString("SchemaSync_ExecuteConfirmSchemaQualifiedTableName", resourceCulture);

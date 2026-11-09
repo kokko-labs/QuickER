@@ -59,6 +59,7 @@ public sealed class SqliteProvider : IDatabaseProvider
             SetNullRequiresNullableChildColumn = false,
             SupportsSchemaQualifiedTableNames = false,
             ChecksDefaultOnColumnTypeChange = false,
+            TypeKindChangeRequiresEmptyColumn = false,
             SupportsComputedColumnTypeChange = false,
             SupportsUniqueConstraintOnPrimaryKey = false,
             ReferencedKeyRequiresSameColumnOrder = false,

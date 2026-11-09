@@ -175,6 +175,14 @@ public enum SyncPlanWarningKind
     /// </remarks>
     DefaultOnColumnTypeKindChange,
 
+    /// <summary>外して付け直す外部キーの構成列の型の種類を変える（列が空でないと型の種類を変えられない方言＝Oracle）。</summary>
+    /// <remarks>
+    /// 列に値があると DB が型の種類の変更を断り（ORA-01439）、DDL が暗黙コミットされるので、先に外した外部キーは付け直されずに残る
+    /// （<see cref="SyncDialectCapabilities.TypeKindChangeRequiresEmptyColumn"/>）。値があるかは図からは分からないので、実行は止めずに
+    /// 警告に留める。外部キーごとに 1 件。
+    /// </remarks>
+    ForeignKeyRebuildAroundTypeKindChange,
+
     /// <summary>選んだ列の削除で構成列が消える一意制約を、削除を選んでいなくても外した。</summary>
     /// <remarks>
     /// 構成列が消える一意制約は同期後に残れない。外さないと、方言によって列の削除が断られるか、一意制約が黙って消える・
@@ -235,6 +243,8 @@ public enum SyncPlanWarningKind
 /// 計画から外した項目のテーブル、<see cref="SyncPlanWarningKind.ForeignKeyNotOnCandidateKey"/> と
 /// <see cref="SyncPlanWarningKind.SetDefaultOnNotNullColumn"/> と <see cref="SyncPlanWarningKind.SetNullOnNotNullColumn"/> では外部キーを保有する子テーブル、<see cref="SyncPlanWarningKind.SchemaQualifiedTableName"/> ではドットを含む表名（Detail は空）、
 /// <see cref="SyncPlanWarningKind.DefaultOnColumnTypeKindChange"/> では列のテーブル（Detail は「列名 (旧の型 → 新しい型)」）、
+/// <see cref="SyncPlanWarningKind.ForeignKeyRebuildAroundTypeKindChange"/> では外部キーを保有する子テーブル（Detail は
+/// 「制約名 (表.列: 旧の型 → 新しい型, …)」）、
 /// <see cref="SyncPlanWarningKind.UniqueConstraintDroppedWithColumn"/> と <see cref="SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey"/> では一意制約のテーブル（Detail は「制約名 (構成列, …)」）、
 /// <see cref="SyncPlanWarningKind.DescriptionCharactersReplaced"/> では説明のテーブル（Detail は「表」または「表.列」）、
 /// <see cref="SyncPlanWarningKind.TableLeftWithoutColumns"/> では列を消す表（Detail は計画から外した列の削除の列名をカンマ区切りで並べたもの）、

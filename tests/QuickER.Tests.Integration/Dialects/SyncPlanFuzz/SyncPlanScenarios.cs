@@ -1390,6 +1390,39 @@ internal sealed class ScenarioTarget(
         mutations.Add($"add fk {childTable}.{childColumn} -> {parentTable}");
     }
 
+    /// <summary>既にある子の列から、親の列（名前で並べた組）へ外部キーを足す（複合外部キー・主キーでない列も可）</summary>
+    public void AddForeignKey(
+        string childTable,
+        IReadOnlyList<string> childColumns,
+        string parentTable,
+        IReadOnlyList<string> parentColumns,
+        string? name
+    )
+    {
+        relationships.Add(
+            new Relationship
+            {
+                SourceEntityId = Table(parentTable).Id,
+                TargetEntityId = Table(childTable).Id,
+                Type = RelationshipType.OneToMany,
+                ColumnPairs =
+                [
+                    .. parentColumns.Select(
+                        (parentColumn, i) =>
+                            new RelationshipColumnPair(
+                                Column(parentTable, parentColumn).Id,
+                                Column(childTable, childColumns[i]).Id
+                            )
+                    ),
+                ],
+                ConstraintName = name,
+            }
+        );
+        mutations.Add(
+            $"add fk {childTable}({string.Join(",", childColumns)}) -> {parentTable}({string.Join(",", parentColumns)})"
+        );
+    }
+
     /// <summary>外部キーを消す</summary>
     public void DropForeignKey(Relationship relationship)
     {

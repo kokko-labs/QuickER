@@ -61,6 +61,21 @@ internal static class FuzzShape
     /// <summary>既定と別のスキーマにある、同じ名前の表（<see cref="SyncPlanFuzzDialect.OtherSchema"/>）</summary>
     public const string OtherSchemaSameName = "other-schema-same-name";
 
+    /// <summary>主キーでなく一意制約を参照する外部キー（後から足した水準）</summary>
+    public const string ForeignKeyOnUnique = "fk-on-unique";
+
+    /// <summary>主キーと同じ列の一意制約（後から足した水準）</summary>
+    public const string PrimaryKeyTwinUnique = "pk-twin-unique";
+
+    /// <summary>列の型の種類を変える変更（整数 → 文字列。後から足した水準）</summary>
+    public const string KindChange = "kind-change";
+
+    /// <summary>外部キーの両端の型の種類をそろえて変える変更（<see cref="KindChange"/> のうち両端のもの）</summary>
+    public const string BothEndsKindChange = "both-ends-kind-change";
+
+    /// <summary>型の違う live の列どうしに外部キーを足す変更（後から足した水準）</summary>
+    public const string MismatchedForeignKeyAdd = "mismatched-fk-add";
+
     /// <summary>種の集合全体で必ず出ていなければならない形（方言が作れない形は除く＝<see cref="RequiredFor"/>）</summary>
     public static readonly IReadOnlyList<string> Required =
     [
@@ -80,6 +95,11 @@ internal static class FuzzShape
         SiblingForeignKeys,
         SymbolName,
         OtherSchemaSameName,
+        ForeignKeyOnUnique,
+        PrimaryKeyTwinUnique,
+        KindChange,
+        BothEndsKindChange,
+        MismatchedForeignKeyAdd,
     ];
 
     /// <summary>
@@ -92,7 +112,12 @@ internal static class FuzzShape
     /// (1) SQLite は取込が一意制約の名前を持たない（sqlite_autoindex）ので、同じ列の並びの一意制約 2 つの片方だけを名前で
     /// 選ぶ形が原理的に出ない (2) SQL Server は普段の 100 種で出ない（形・変更・選び方の 3 つが重なる確率が低い）
     /// (3) 実 DB では形の行（D4・<see cref="SyncPlanShapeRows"/>）の Q6 の 3 つ組（一意制約 2 つ × 一意制約の削除 × 一意制約の列の
-    /// 型の変更）が決定的に担う。網は 5 方言とも 5000 種で出るので網で表明する
+    /// 型の変更）が決定的に担う。網は 5 方言とも 5000 種で出るので網で表明する。
+    /// 後から足した水準のうち目標の図の変更で出る形（<see cref="KindChange"/>・<see cref="BothEndsKindChange"/>・
+    /// <see cref="MismatchedForeignKeyAdd"/>）も実 DB では求めない：網の 5000 種でそれぞれ 0.4〜3% しか出ず、普段の実 DB の種
+    /// （SQL Server 100・MySQL 150）では出ない種の集合がありうる。実 DB では形の行（<see cref="SyncPlanShapeRows"/> の
+    /// BothEndsKindChange・AddedForeignKey）が決定的に担う。DB 側の図で出る形（<see cref="ForeignKeyOnUnique"/>・
+    /// <see cref="PrimaryKeyTwinUnique"/>）は実 DB でも求める
     /// </param>
     public static IReadOnlyList<string> RequiredFor(
         SyncPlanFuzzDialect dialect,
@@ -107,6 +132,11 @@ internal static class FuzzShape
                     DropDuplicatedUniqueWithTypeChange => dialect.AllowDuplicateUniqueConstraints
                         && !realDatabase,
                     OtherSchemaSameName => dialect.OtherSchema is not null,
+                    PrimaryKeyTwinUnique => dialect
+                        .Provider
+                        .SyncCapabilities
+                        .SupportsUniqueConstraintOnPrimaryKey,
+                    KindChange or BothEndsKindChange or MismatchedForeignKeyAdd => !realDatabase,
                     _ => true,
                 }
             )
@@ -252,10 +282,41 @@ internal interface ISyncPlanFuzzCase
 /// データより短い長さへ縮める・計算列の式が参照する列を変える）は作らない。そうした失敗は同期計画の欠陥ではなく、
 /// 総当たりの赤を信用できなくするだけなので、生成器の側で避ける。
 /// </para>
+/// <para>
+/// 後から足した水準（外部キーが一意制約を参照・主キーと同じ列の一意制約・整数の列の型の種類を文字列へ変える・型の違う live の文字列の列へ
+/// 外部キーを足す）は、本流と別の乱数の列（<see cref="ForSeed"/>）で引く。本流の乱数の引き方・回数は変えないので、水準が出なかった種は
+/// 足す前と同じケースのまま残る。型の種類を変える変更と型の違う外部キーの追加は、値の都合で断られないよう、値が全部 NULL か行 0 の列だけに作る。
+/// </para>
 /// </remarks>
-internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dialect)
-    : ISyncPlanFuzzCase
+internal sealed class SyncPlanFuzzGenerator(
+    Random rng,
+    Random? levelRng,
+    SyncPlanFuzzDialect dialect
+) : ISyncPlanFuzzCase
 {
+    /// <summary>
+    /// 種から生成器を作る（乱数の種を使う所はすべてここを通す）。本流の乱数は <c>new Random(seed)</c> のまま、後から足した水準
+    /// （外部キーが一意制約を参照・型の種類を変える・主キーと同じ列の一意制約・型の違う live の列への外部キーの追加）は種から
+    /// 決定的に作る別の乱数の列で引く。
+    /// </summary>
+    /// <param name="seed">種</param>
+    /// <param name="dialect">方言</param>
+    /// <param name="levels">後から足した水準を引くか（偽なら水準を足す前と同じケース）</param>
+    /// <remarks>
+    /// 別の列にしたのは、本流の乱数の引き方・回数を変えないため。水準が出なかった種は足す前と同じケースのまま残り、種の指紋は
+    /// 水準が出た種だけ変わる。別の列の種は <see cref="HashCode.Combine{T1, T2}(T1, T2)"/> で作らない（プロセスごとに値が変わり、
+    /// 種の指紋も網の種も再現しなくなる）。
+    /// </remarks>
+    public static SyncPlanFuzzGenerator ForSeed(
+        int seed,
+        SyncPlanFuzzDialect dialect,
+        bool levels = true
+    ) => new(new Random(seed), levels ? new Random(LevelSeed(seed)) : null, dialect);
+
+    /// <summary>後から足した水準の乱数の列の種（種から決定的に作る）</summary>
+    private static int LevelSeed(int seed) =>
+        (int)(unchecked((uint)seed * 2654435761u) ^ 0x5EEDAC2u) & int.MaxValue;
+
     /// <summary>表の名前の部品</summary>
     private static readonly string[] TableWords =
     [
@@ -298,6 +359,8 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
         AddSameColumnTwoForeignKeys(live);
         AddSamePairTwoForeignKeys(live);
         AddUniqueConstraints(live);
+        RetargetForeignKeyToUnique(live);
+        AddPrimaryKeyTwinUnique(live);
         BuildInserts(live, dialect);
         AddComputedColumn(live);
 
@@ -712,6 +775,151 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
                 );
             }
         }
+    }
+
+    /// <summary>
+    /// 後から足した水準（別の乱数の列）：外部キーを、親の主キーから親の一意制約の列へ付け替え、子の列の値を親の一意な列の値へ
+    /// 写し直す（主キーでなく一意制約を参照する外部キーの形）
+    /// </summary>
+    /// <remarks>
+    /// 対象は 1 列の外部キーで、自己参照でなく、子の列をほかの外部キーが使わない（同じ列の外部キー 2 本・同じ列ペアの 2 本の値を
+    /// 壊さない）もの。付け替え先は親の 1 列の一意制約のうち、主キーでなく、子の列と同じ型で、値が NULL を含まず重ならない（親が行 0 なら
+    /// 問わない）列。
+    /// </remarks>
+    private void RetargetForeignKeyToUnique(FuzzLiveSchema live)
+    {
+        if (levelRng is null)
+        {
+            return;
+        }
+
+        var candidates = new List<(Relationship Relationship, Entity Parent, Column Target)>();
+
+        foreach (var relationship in live.Diagram.Relationships)
+        {
+            if (
+                relationship.SourceEntityId == relationship.TargetEntityId
+                || relationship.ColumnPairs.Count != 1
+            )
+            {
+                continue;
+            }
+
+            var parent = EntityOf(live, relationship.SourceEntityId);
+            var child = EntityOf(live, relationship.TargetEntityId);
+            var childColumnId = relationship.ColumnPairs[0].TargetColumnId;
+
+            if (
+                live.Diagram.Relationships.Any(other =>
+                    !ReferenceEquals(other, relationship)
+                    && other.ColumnPairs.Any(p => p.TargetColumnId == childColumnId)
+                )
+            )
+            {
+                continue;
+            }
+
+            var childColumn = child.Columns.Single(c => c.Id == childColumnId);
+            var childInfo = live.Find(child.TableName, childColumn.Name)!;
+
+            foreach (var unique in parent.UniqueConstraints.Where(u => u.ColumnIds.Count == 1))
+            {
+                var target = parent.Columns.Single(c => c.Id == unique.ColumnIds[0]);
+
+                if (
+                    !target.IsPrimaryKey
+                    && live.Find(parent.TableName, target.Name) is { } info
+                    && info.Kind == childInfo.Kind
+                    && info.Length == childInfo.Length
+                    && (live.RowCounts[parent.TableName] == 0 || info.IsDistinct)
+                )
+                {
+                    candidates.Add((relationship, parent, target));
+                }
+            }
+        }
+
+        if (candidates.Count == 0 || levelRng.Next(2) != 0)
+        {
+            return;
+        }
+
+        var (chosen, chosenParent, targetColumn) = candidates[levelRng.Next(candidates.Count)];
+        var keyColumn = chosenParent.Columns.Single(c =>
+            c.Id == chosen.ColumnPairs[0].SourceColumnId
+        );
+        var keyValues = live.Find(chosenParent.TableName, keyColumn.Name)!.Values;
+        var uniqueValues = live.Find(chosenParent.TableName, targetColumn.Name)!.Values;
+        var chosenChild = EntityOf(live, chosen.TargetEntityId);
+        var childValues = live.Find(
+            chosenChild.TableName,
+            chosenChild.Columns.Single(c => c.Id == chosen.ColumnPairs[0].TargetColumnId).Name
+        )!.Values;
+
+        // 子の値は親の主キーの値を指している。同じ行の一意な列の値へ写し直す（NULL は NULL のまま）
+        for (var i = 0; i < childValues.Count; i++)
+        {
+            if (childValues[i] is { } value)
+            {
+                childValues[i] = uniqueValues[keyValues.IndexOf(value)];
+            }
+        }
+
+        chosen.ColumnPairs =
+        [
+            new RelationshipColumnPair(targetColumn.Id, chosen.ColumnPairs[0].TargetColumnId),
+        ];
+        live.Shapes.Add(FuzzShape.ForeignKeyOnUnique);
+    }
+
+    /// <summary>
+    /// 後から足した水準（別の乱数の列）：主キーと同じ列の一意制約を張る（持てる宣言の方言だけ＝
+    /// <see cref="SyncDialectCapabilities.SupportsUniqueConstraintOnPrimaryKey"/>）。参照されている親の表を優先する
+    /// （主キーを外しても外部キーを支えうる形）
+    /// </summary>
+    private void AddPrimaryKeyTwinUnique(FuzzLiveSchema live)
+    {
+        if (
+            levelRng is null
+            || !dialect.Provider.SyncCapabilities.SupportsUniqueConstraintOnPrimaryKey
+        )
+        {
+            return;
+        }
+
+        var tables = live
+            .Diagram.Entities.Where(e =>
+                e.PrimaryKeyColumnIds.Count > 0
+                && !e.TableName.Contains('.', StringComparison.Ordinal)
+                && !e.UniqueConstraints.Any(u =>
+                    u.ColumnIds.Count == e.PrimaryKeyColumnIds.Count
+                    && u.ColumnIds.All(e.PrimaryKeyColumnIds.Contains)
+                )
+            )
+            .ToList();
+
+        if (tables.Count == 0 || levelRng.Next(4) != 0)
+        {
+            return;
+        }
+
+        var referenced = tables
+            .Where(e =>
+                live.Diagram.Relationships.Any(r =>
+                    r.SourceEntityId == e.Id && r.TargetEntityId != e.Id
+                )
+            )
+            .ToList();
+        var pool = referenced.Count > 0 && levelRng.Next(3) != 0 ? referenced : tables;
+        var table = pool[levelRng.Next(pool.Count)];
+        table.UniqueConstraints.Add(
+            new UniqueConstraint
+            {
+                Name = levelRng.Next(2) == 0 ? $"UQ_{NamePart(table.TableName)}_pk_twin" : null,
+                ColumnIds = [.. table.GetPrimaryKeyColumnsInOrder().Select(c => c.Id)],
+            }
+        );
+        live.Shapes.Add(FuzzShape.PrimaryKeyTwinUnique);
     }
 
     /// <summary>
@@ -1136,6 +1344,28 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
             }
         }
 
+        // 後から足した水準（別の乱数の列）：整数の列を bigint でなく文字列へ（型の種類を変える）。変える列と揃える相手の値が全部 NULL か
+        // 行 0 のときだけ（Oracle は行のある列の型の種類を変えられない＝ORA-01439。親が行 0 なら子の参照列は NULL だけなので、外部キーの
+        // 両端をそろえて変える形はここで出る）
+        if (
+            levelRng is not null
+            && info.Kind == FuzzTypeKind.Int
+            && kind == FuzzTypeKind.BigInt
+            && partners.All(p =>
+                Info(live, p.Entity, p.Column) is { } pi && pi.Values.All(v => v is null)
+            )
+            && levelRng.Next(2) == 0
+        )
+        {
+            (kind, length) = (FuzzTypeKind.VarChar, 10);
+            live.Shapes.Add(FuzzShape.KindChange);
+
+            if (partners.Count >= 2)
+            {
+                live.Shapes.Add(FuzzShape.BothEndsKindChange);
+            }
+        }
+
         foreach (var (owner, partner) in partners)
         {
             partner.DataType = dialect.TypeName(kind, length);
@@ -1464,6 +1694,40 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
         {
             column = new Column { Name = $"fk_{rng.Next(1000)}", DataType = parentKey.DataType };
             child.Columns.Add(column);
+        }
+
+        // 後から足した水準（別の乱数の列）：行 0 の子の、型の違う live の文字列の列へ張る（どちらの端の型もこの同期で決まらない
+        // 外部キーの追加。整数の主キーと文字列の列は 4 方言とも外部キーを作れない＝MySQL 3780・SQL Server 1778・PostgreSQL 42804・
+        // Oracle ORA-02267。行 0 にするのは値の都合で断られないため。本流の乱数の引き方は変えない＝上の選び方の後で差し替える）
+        if (levelRng is not null && RowCount(live, child) == 0)
+        {
+            var mismatched = child
+                .Columns.Where(c =>
+                    !c.IsComputed
+                    && !c.IsPrimaryKey
+                    && Info(live, child, c)
+                        is { Kind: FuzzTypeKind.VarChar or FuzzTypeKind.FixedChar } info
+                    && !info.Computed
+                    && !string.Equals(
+                        c.DataType,
+                        parentKey.DataType,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                    && CanAddForeignKey(
+                        relationships,
+                        parent,
+                        c,
+                        ForeignKeyReferentialAction.NoAction,
+                        ForeignKeyReferentialAction.NoAction
+                    )
+                )
+                .ToList();
+
+            if (mismatched.Count > 0 && levelRng.Next(3) == 0)
+            {
+                column = mismatched[levelRng.Next(mismatched.Count)];
+                live.Shapes.Add(FuzzShape.MismatchedForeignKeyAdd);
+            }
         }
 
         relationships.Add(

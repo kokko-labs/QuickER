@@ -10,7 +10,7 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 
 /// <summary>
 /// 同期計画の形の行（D4）：主キーの変更・参照する外部キーの数・型の変更・明示の削除・一意制約の数・参照先のキー・外部キーの両端の型・
-/// 巻き添えの外部キーの変更・主キーと同じ列の一意制約の 9 因子の網羅の配列から、方言ごとに決定的な行を作る（網は全行、実 DB の総当たりは
+/// 巻き添えの外部キーの変更・主キーと同じ列の一意制約・足す外部キーの 10 因子の網羅の配列から、方言ごとに決定的な行を作る（網は全行、実 DB の総当たりは
 /// 普段は 2 因子の網羅に要る行と必ず含む行だけ・夜間は全行）
 /// </summary>
 /// <remarks>
@@ -23,10 +23,13 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 /// <c>p_ref_1</c> は int のまま。型の変更の水準は <c>k</c> を変えないので、複合外部キーの「型の決まらない組」が DB の受け入れている違いを持つ）。
 /// 巻き添えの外部キーの変更の行は、親の主キーを参照する表 <c>d</c> を足し、その外部キーの ON DELETE を変える（作り直しの外部キーが
 /// 計画の前の方で外れる）。主キーと同じ列の一意制約の行は、<c>p</c> に一意制約 <c>uq_p_pk(id, k)</c> を張る（主キーを外しても外部キーを支えうる）。
-/// 型の種類を変える水準（ChildKindChange）の行は、<c>c1</c> を行 0 で作る。
+/// 型の種類を変える水準（ChildKindChange）の行は、<c>c1</c> を行 0 で作る。参照される親の列と全部の子の型の種類を変える水準
+/// （BothEndsKindChange）の行は、親・子・<c>d</c> を行 0 で作る。足す外部キーの行は、外部キーの無い表 <c>e</c>（行 0）を置き、
+/// 目標の図で <c>e(p_ref_0, p_ref_1)</c> から <c>p(id, k)</c> への外部キーを足す（最初の列の型が水準。2 列目は <c>p.k</c> と同じ型）。
 /// 差分は全部選ぶ。網羅の配列は 2 因子の組の全部と、P1（主キーの並べ替え × 参照 2 本 × 子だけの型の変更）・Q6（一意制約 2 つ ×
 /// 一意制約の削除 × 一意制約の列の型の変更）を含む 3 因子の集まりの組を含む（<see cref="MissingTriples"/> が表明する）。
-/// 網羅の配列の後ろに、指摘の形の完全な行（<see cref="RequiredRows"/>＝P5-2 の試運転の L1・L4・2 回目の V1・V3・V4・V6）を、
+/// 網羅の配列の後ろに、指摘の形の完全な行（<see cref="RequiredRows"/>＝P5-2 の試運転の L1・L4・2 回目の V1・V3・V4・V6、修正 AC の実 DB の確かめの
+/// V8・型の違う外部キーの追加 2 つ）を、
 /// 配列に含まれていなければ足す。
 /// </para>
 /// <para>
@@ -65,6 +68,9 @@ internal static class SyncPlanShapeRows
     /// <summary>主キーと同じ列の一意制約</summary>
     public const string PrimaryKeyTwin = "PrimaryKeyTwin";
 
+    /// <summary>目標の図で足す外部キー（live の表 e の列から親の主キーへ。両端の型が同じ・子が bigint・子が文字列）</summary>
+    public const string AddedForeignKey = "AddedForeignKey";
+
     /// <summary>行の Id の頭</summary>
     public const string IdPrefix = "d4-";
 
@@ -90,7 +96,7 @@ internal static class SyncPlanShapeRows
                 Levels(ReferencingFks, "親を参照する外部キーの数", "0", "1", "2"),
                 Levels(
                     TypeChange,
-                    "型の変更（子の列だけ・親の列だけ・親と最初の子だけ・親と全部の子・一意制約の列）と最初の子の NULL 許容だけの変更・最初の子の型の種類の変更",
+                    "型の変更（子の列だけ・親の列だけ・親と最初の子だけ・親と全部の子・一意制約の列）と最初の子の NULL 許容だけの変更・最初の子の型の種類の変更・参照される親の列と全部の子の型の種類の変更",
                     "None",
                     "ChildOnly",
                     "ParentOnly",
@@ -98,7 +104,8 @@ internal static class SyncPlanShapeRows
                     "BothEnds",
                     "UniqueColumn",
                     "ChildNullability",
-                    "ChildKindChange"
+                    "ChildKindChange",
+                    "BothEndsKindChange"
                 ),
                 Levels(
                     ExplicitOp,
@@ -124,6 +131,14 @@ internal static class SyncPlanShapeRows
                     "AlterOtherForeignKey"
                 ),
                 Levels(PrimaryKeyTwin, "主キーと同じ列の一意制約", "0", "1"),
+                Levels(
+                    AddedForeignKey,
+                    "目標の図で足す外部キー（live の表 e の列から親の主キーへ。両端の型が同じ・子の最初の列が bigint・文字列）",
+                    "None",
+                    "IntChild",
+                    "BigIntChild",
+                    "VarCharChild"
+                ),
             ],
             [
                 new FactorGroup(PkChange, ReferencingFks, TypeChange),
@@ -133,6 +148,8 @@ internal static class SyncPlanShapeRows
                 new FactorGroup(PkChange, PrimaryKeyTwin, TypeChange),
                 new FactorGroup(UniqueMultiplicity, ExplicitOp, CollateralFk),
                 new FactorGroup(TypeChange, CollateralFk, ForeignKeyTypes),
+                new FactorGroup(TypeChange, AddedForeignKey, ForeignKeyTypes),
+                new FactorGroup(PkChange, AddedForeignKey, TypeChange),
             ],
             IsValid
         );
@@ -156,6 +173,7 @@ internal static class SyncPlanShapeRows
             [ForeignKeyTypes] = "Same",
             [CollateralFk] = "None",
             [PrimaryKeyTwin] = "0",
+            [AddedForeignKey] = "None",
         },
         // L4（P5-2 の試運転・PostgreSQL）：DB が受け入れている型の違う外部キー（int → bigint）の親の主キーを並べ替え、子の列の
         // NULL 許容だけを変える。型を変えないのに型の食い違いと名指しして外部キーを外し直さず、主キーの解除が断られた
@@ -170,6 +188,7 @@ internal static class SyncPlanShapeRows
             [ForeignKeyTypes] = "Wider",
             [CollateralFk] = "None",
             [PrimaryKeyTwin] = "0",
+            [AddedForeignKey] = "None",
         },
         // V1（P5-2 の試運転の 2 回目・PostgreSQL）：複合外部キーの組 (k, p_ref_1) が DB の受け入れている型の違いを持ち、別の組
         // (id, p_ref_0) の両端を bigint にして、親の主キーを並べ替える。外部キー単位で数えると型の決まらない組まで偽の食い違いにして
@@ -185,6 +204,7 @@ internal static class SyncPlanShapeRows
             [ForeignKeyTypes] = "DecimalOtherKeyColumn",
             [CollateralFk] = "None",
             [PrimaryKeyTwin] = "0",
+            [AddedForeignKey] = "None",
         },
         // V3（同・MySQL）：子の外部キーが参照する列の一意制約の双子を両方外し、表 d の外部キーを作り直す。互いを「外部キーを支える
         // ほかのキー」と数えて先頭へ移さず、2 つ目の削除が断られたとき先に外した d の外部キーが消えたまま残った
@@ -199,6 +219,7 @@ internal static class SyncPlanShapeRows
             [ForeignKeyTypes] = "Same",
             [CollateralFk] = "AlterOtherForeignKey",
             [PrimaryKeyTwin] = "0",
+            [AddedForeignKey] = "None",
         },
         // V4（同・Oracle・PostgreSQL）：残す外部キーの子の列を互換でない型（int → varchar）へ変え、表 d の外部キーを作り直す。
         // 列の変更で外部キーを外し直さない方言で名指しも先頭への移動もせず、Oracle は先に外した d の外部キーが消えたまま残った
@@ -213,6 +234,7 @@ internal static class SyncPlanShapeRows
             [ForeignKeyTypes] = "Same",
             [CollateralFk] = "AlterOtherForeignKey",
             [PrimaryKeyTwin] = "0",
+            [AddedForeignKey] = "None",
         },
         // V6（同・MySQL）：主キーと同じ列の一意制約がある親の主キーを広げ、子の列を両端が食い違う型へ変える。主キーの解除を誤って
         // 「必ず断られる」と先頭へ移し、実際は一意制約が外部キーを支えて通り、続く列の変更の失敗で主キーが消えたまま残った
@@ -227,6 +249,52 @@ internal static class SyncPlanShapeRows
             [ForeignKeyTypes] = "Same",
             [CollateralFk] = "None",
             [PrimaryKeyTwin] = "1",
+            [AddedForeignKey] = "None",
+        },
+        // V8（修正 AC の実 DB の確かめ・PostgreSQL・Oracle）：外部キーの両端を同じ別の種類（int → varchar）へ変え、表 d の外部キーを
+        // 作り直す。同期後の型は合うので名指しも外し直しもせず、外部キーを張ったまま片側だけ変えた途中の状態で断られた（42804・
+        // ORA-02267。Oracle は先に外した d の外部キーが消えたまま残る形）
+        new Dictionary<string, string>
+        {
+            [PkChange] = "None",
+            [ReferencingFks] = "1",
+            [TypeChange] = "BothEndsKindChange",
+            [ExplicitOp] = "None",
+            [UniqueMultiplicity] = "0",
+            [ReferencedKey] = "PrimaryKey",
+            [ForeignKeyTypes] = "Same",
+            [CollateralFk] = "AlterOtherForeignKey",
+            [PrimaryKeyTwin] = "0",
+            [AddedForeignKey] = "None",
+        },
+        // 型の違う外部キーの追加（同・MySQL・SQL Server）：live の列どうし（親 int・子 bigint）に外部キーを足す。どちらの端の型も
+        // この同期で決まらないので「DB が受け入れている」とみなして数えず、警告なしに断られた（エラー 3780・Msg 1778）
+        new Dictionary<string, string>
+        {
+            [PkChange] = "None",
+            [ReferencingFks] = "0",
+            [TypeChange] = "None",
+            [ExplicitOp] = "None",
+            [UniqueMultiplicity] = "0",
+            [ReferencedKey] = "PrimaryKey",
+            [ForeignKeyTypes] = "Same",
+            [CollateralFk] = "None",
+            [PrimaryKeyTwin] = "0",
+            [AddedForeignKey] = "BigIntChild",
+        },
+        // 同（4 方言）：live の列どうし（親 int・子 varchar）に外部キーを足す
+        new Dictionary<string, string>
+        {
+            [PkChange] = "None",
+            [ReferencingFks] = "0",
+            [TypeChange] = "None",
+            [ExplicitOp] = "None",
+            [UniqueMultiplicity] = "0",
+            [ReferencedKey] = "PrimaryKey",
+            [ForeignKeyTypes] = "Same",
+            [CollateralFk] = "None",
+            [PrimaryKeyTwin] = "0",
+            [AddedForeignKey] = "VarCharChild",
         },
     ];
 
@@ -357,7 +425,10 @@ internal static class SyncPlanShapeRows
     /// <summary>DB 側の図</summary>
     private static void Build(ScenarioLive live, IReadOnlyDictionary<string, string> row)
     {
-        var p = live.Table("p");
+        // 参照される親の列と全部の子の型の種類を変える行は、親・子・d を行 0 で作る（Oracle は行のある列の型の種類を変えられない＝
+        // ORA-01439）
+        var kindChangesBothEnds = row[TypeChange] == "BothEndsKindChange";
+        var p = kindChangesBothEnds ? live.Table("p", 0) : live.Table("p");
         var id = live.Int(p, "id", pk: true);
         var k = live.Int(p, "k", pk: true);
         var u = live.Int(p, "u", value: r => (r * 10).ToString(CultureInfo.InvariantCulture));
@@ -380,7 +451,7 @@ internal static class SyncPlanShapeRows
         {
             // 型の種類を変える子の表は行 0（Oracle は行のある列の型の種類を変えられない＝ORA-01439）
             var child =
-                i == 1 && row[TypeChange] == "ChildKindChange"
+                (i == 1 && row[TypeChange] == "ChildKindChange") || kindChangesBothEnds
                     ? live.Table($"c{i}", 0)
                     : live.Table($"c{i}");
             live.Int(child, "id", pk: true);
@@ -390,7 +461,7 @@ internal static class SyncPlanShapeRows
         // 巻き添えで作り直す外部キー（親の主キーを参照する表 d）
         if (row[CollateralFk] == "AlterOtherForeignKey")
         {
-            var d = live.Table("d");
+            var d = kindChangesBothEnds ? live.Table("d", 0) : live.Table("d");
             live.Int(d, "id", pk: true);
             live.Ref(d, p, "p_ref", "fk_d_p");
         }
@@ -408,6 +479,38 @@ internal static class SyncPlanShapeRows
         if (row[ForeignKeyTypes] == "DecimalOtherKeyColumn")
         {
             live.SetKind(p, k, FuzzTypeKind.Decimal, 12);
+        }
+
+        // 目標の図で外部キーを足す表 e（行 0・外部キーなし）。最初の列は水準の型（int・bigint・文字列）で、2 列目は p.k と同じ型
+        // （外部キーの両端の型の水準が作る k の型の違いを、足す外部キーへ持ち込まない）
+        if (row[AddedForeignKey] != "None")
+        {
+            var e = live.Table("e", 0);
+            live.Int(e, "id", pk: true);
+
+            switch (row[AddedForeignKey])
+            {
+                case "BigIntChild":
+                    live.SetKind(e, live.Int(e, "p_ref_0", nullable: true), FuzzTypeKind.BigInt);
+                    break;
+                case "VarCharChild":
+                    live.VarChar(e, "p_ref_0", 10, nullable: true);
+                    break;
+                default:
+                    live.Int(e, "p_ref_0", nullable: true);
+                    break;
+            }
+
+            var secondColumn = live.Int(e, "p_ref_1", nullable: true);
+
+            if (row[ForeignKeyTypes] == "DecimalOtherKeyColumn")
+            {
+                live.SetKind(e, secondColumn, FuzzTypeKind.Decimal, 12);
+            }
+            else if (row[ForeignKeyTypes] == "Wider" && !referencesUnique)
+            {
+                live.SetKind(e, secondColumn, FuzzTypeKind.BigInt);
+            }
         }
     }
 
@@ -448,6 +551,27 @@ internal static class SyncPlanShapeRows
                 break;
             case "ChildKindChange":
                 target.SetType("c1", childColumn, FuzzTypeKind.VarChar, 10);
+                break;
+            case "BothEndsKindChange":
+                // 参照される親の列と、それを参照する子の列すべて（c1..cN と、主キーを参照するなら d）を同じ別の種類へ。子を 1 つでも
+                // 残すとその外部キーが同期後に食い違って名指しされ、予告の警告が途中の状態の失敗を隠す
+                target.SetType(
+                    "p",
+                    row[ReferencedKey] == "Unique" ? "u" : "id",
+                    FuzzTypeKind.VarChar,
+                    10
+                );
+
+                for (var i = 1; i <= refs; i++)
+                {
+                    target.SetType($"c{i}", childColumn, FuzzTypeKind.VarChar, 10);
+                }
+
+                if (row[CollateralFk] == "AlterOtherForeignKey" && row[ReferencedKey] != "Unique")
+                {
+                    target.SetType("d", "p_ref_0", FuzzTypeKind.VarChar, 10);
+                }
+
                 break;
         }
 
@@ -497,6 +621,12 @@ internal static class SyncPlanShapeRows
                 ForeignKeyReferentialAction.Cascade
             );
         }
+
+        // live の表 e の列から親の (id, k) へ外部キーを足す（主キーの変更の水準で (id, k) がキーでなくなる組も残す）
+        if (row[AddedForeignKey] != "None")
+        {
+            target.AddForeignKey("e", ["p_ref_0", "p_ref_1"], "p", ["id", "k"], "fk_e_p");
+        }
     }
 
     /// <summary>原理的に起こり得ない組（型の変更・明示の削除・参照の相手が無い）</summary>
@@ -515,7 +645,8 @@ internal static class SyncPlanShapeRows
                     "PartialBothEnds",
                     "BothEnds",
                     "ChildNullability",
-                    "ChildKindChange"
+                    "ChildKindChange",
+                    "BothEndsKindChange"
                 )
                 || Has(ExplicitOp, "DropForeignKey")
                 || Has(ForeignKeyTypes, "Wider", "DecimalOtherKeyColumn")
