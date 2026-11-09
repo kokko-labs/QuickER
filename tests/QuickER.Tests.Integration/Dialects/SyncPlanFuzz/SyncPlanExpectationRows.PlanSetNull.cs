@@ -38,6 +38,7 @@ internal static partial class SyncPlanExpectationRows
             ("unselected-alter-to-not-null", false),
             ("new-not-null-column", true),
             ("primary-key-change", true),
+            ("alter-to-key-column-flagged-nullable", true),
         ];
 
     private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> PlanSetNullRows() =>
@@ -160,7 +161,9 @@ internal static partial class SyncPlanExpectationRows
                                     is "unselected-alter-to-not-null"
                                         or "primary-key-change"
                                     ? i => i.Kind != SchemaDiffKind.AlterColumn
-                                    : _ => true
+                                : shape.Shape == "alter-to-key-column-flagged-nullable"
+                                    ? i => i.Kind != SchemaDiffKind.AlterPrimaryKey
+                                : _ => true
                             )
                         )
                         .Expect(e =>
@@ -254,6 +257,38 @@ internal static partial class SyncPlanExpectationRows
                         );
                     }
                 }),
+            // 主キーの変更と列の変更で子の列を NOT NULL にする同期は、MySQL が断る列の変更（1830）を先頭へ移す。図で子の列に
+            // NULL 許容の印が残っていても（主キーの列は印に依らず NOT NULL）、印の無い図と同じ計画になる
+            .. new[] { false, true }.Select(flagged =>
+                (ScenarioRow<SyncPlanExpectationInput>)
+                    Row(
+                            $"plan-set-null-pk-change-and-alter-making-child-not-null-moves-alter-first-{(flagged ? "key-flagged-nullable" : "key-not-null")}",
+                            "前寄せ: 主キーの変更で SET NULL の子の列を NOT NULL にする列の変更は、図の NULL 許容の印に依らず MySQL で先頭へ移す",
+                            DialectNames.MySql
+                        )
+                        .Live(s => SetNullSchema(s, new SetNullShape(ChildNullable: true)))
+                        .Target(s =>
+                        {
+                            SetNullSchema(
+                                s,
+                                new SetNullShape(
+                                    ParentIdInChildKey: true,
+                                    ParentIdFlaggedNullable: flagged
+                                )
+                            );
+                        })
+                        .Select(SelectSelectable(_ => true))
+                        .Expect(e =>
+                            e.Warnings.Count("SetNullOnNotNullColumn*", 1)
+                                .Warnings.Single(SetNullParentWarning)
+                                // 固定順は主キーの解除 → 列の変更 → 主キーの付与。断られる列の変更を先頭へ移す
+                                .Sections.Exact(
+                                    "AlterColumn: *",
+                                    "AlterPrimaryKey/Drop: *",
+                                    "AlterPrimaryKey/Add: *"
+                                )
+                        )
+            ),
             Row(
                     "plan-set-null-not-applicable-non-set-null-fk-is-not-named",
                     "対象外: SET NULL でない外部キーと、NULL を許したままの子の列は名指ししない",
@@ -347,8 +382,13 @@ internal static partial class SyncPlanExpectationRows
     private static SetNullShape SetNullPostSyncLiveShape(string shape) =>
         shape switch
         {
-            "alter-to-not-null" or "unselected-alter-to-not-null" or "primary-key-change" =>
-                new SetNullShape(ChildNullable: true, HasParentForeignKey: false),
+            "alter-to-not-null"
+            or "unselected-alter-to-not-null"
+            or "primary-key-change"
+            or "alter-to-key-column-flagged-nullable" => new SetNullShape(
+                ChildNullable: true,
+                HasParentForeignKey: false
+            ),
             "alter-to-nullable" => new SetNullShape(
                 ChildNullable: false,
                 HasParentForeignKey: false
@@ -368,6 +408,11 @@ internal static partial class SyncPlanExpectationRows
                 new SetNullShape(ChildNullable: false),
             "alter-to-nullable" => new SetNullShape(ChildNullable: true),
             "primary-key-change" => new SetNullShape(ParentIdInChildKey: true),
+            // 図で parent_id を主キーへ加え NULL 許容の印を残す（主キーの変更は選ばず、列の変更だけで NOT NULL になる）
+            "alter-to-key-column-flagged-nullable" => new SetNullShape(
+                ParentIdInChildKey: true,
+                ParentIdFlaggedNullable: true
+            ),
             _ => throw new ArgumentOutOfRangeException(nameof(shape)),
         };
 
@@ -396,7 +441,7 @@ internal static partial class SyncPlanExpectationRows
         if (shape.HasParentColumn)
         {
             child.Columns.Add(
-                shape.ParentIdInChildKey ? S.Pk("parent_id", "int")
+                shape.ParentIdInChildKey ? KeyColumn(shape.ParentIdFlaggedNullable)
                 : shape.ChildNullable ? S.Nullable("parent_id", "int")
                 : S.NotNull("parent_id", "int")
             );
@@ -418,6 +463,15 @@ internal static partial class SyncPlanExpectationRows
         }
     }
 
+    /// <summary>子の主キーへ加える parent_id（<paramref name="flaggedNullable"/> なら NULL 許容の印を残す。主キーの列は印に依らず NOT NULL）</summary>
+    private static Column KeyColumn(bool flaggedNullable)
+    {
+        var column = S.Pk("parent_id", "int");
+        column.IsNullable = flaggedNullable;
+
+        return column;
+    }
+
     /// <summary>SET NULL の図の形</summary>
     /// <param name="ChildNullable">子の列 parent_id が NULL を許すか</param>
     /// <param name="OnDelete">FK_child_parent の ON DELETE</param>
@@ -425,6 +479,7 @@ internal static partial class SyncPlanExpectationRows
     /// <param name="HasParentForeignKey">FK_child_parent を持つか</param>
     /// <param name="HasParentColumn">子の列 parent_id を持つか</param>
     /// <param name="ParentIdInChildKey">parent_id を子の主キーへ加えるか（主キーの列は NOT NULL）</param>
+    /// <param name="ParentIdFlaggedNullable">主キーへ加えた parent_id に NULL 許容の印を残すか（図のファイルの手書きでだけ作れる形）</param>
     /// <param name="OtherKeyType">other.id と child.other_id の型</param>
     private sealed record SetNullShape(
         bool ChildNullable = true,
@@ -433,6 +488,7 @@ internal static partial class SyncPlanExpectationRows
         bool HasParentForeignKey = true,
         bool HasParentColumn = true,
         bool ParentIdInChildKey = false,
+        bool ParentIdFlaggedNullable = false,
         string OtherKeyType = "int"
     );
 }

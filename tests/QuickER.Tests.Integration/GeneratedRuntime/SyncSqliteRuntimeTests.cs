@@ -102,39 +102,66 @@ public sealed class SyncSqliteRuntimeTests : SyncRuntimeTestsBase
     }
 
     /// <summary>
-    /// ジャーナルを記録する Repository の Save フックの中から同じローカル DB の同期を呼ぶと、その場で
-    /// InvalidOperationException になり、保存もロールバックされる。
+    /// 同じローカル DB の書き込みの Save フックの中から同期を呼ぶと、その場で InvalidOperationException になり、
+    /// 書き込みもロールバックされる（ジャーナルを記録する Repository の書き込みと、同期の実行が適用で呼ぶ書き込みの 2 つの形）。
     /// </summary>
     /// <remarks>
-    /// 書き込みはローカルの書き込みロックを持ったまま Save フックを呼ぶ。そこから同期を始めると、同期は実行用
-    /// ロックを取ってから書き込みロックを待つことになり、別の同期が走っていれば相手は実行用ロックを持ったまま
-    /// 同じ書き込みロックを待つ＝互いに待ち合って、どの待ち時間にも届かず止まる。別の同期が走っているかどうかに
-    /// 関係なく同じ例外で断るため、この配置は 1 本でも 2 本でも必ず即座に失敗する（ここでは 1 本の形で固定する）。
+    /// <para>
+    /// journaled-write：書き込みはローカルの書き込みロックを持ったまま Save フックを呼ぶ。そこから同期を始めると、同期は
+    /// 実行用ロックを取ってから書き込みロックを待つことになり、別の同期が走っていれば相手は実行用ロックを持ったまま同じ
+    /// 書き込みロックを待つ＝互いに待ち合って、どの待ち時間にも届かず止まる。別の同期が走っているかどうかに関係なく同じ
+    /// 例外で断るため、この配置は 1 本でも 2 本でも必ず即座に失敗する（ここでは 1 本の形で固定する）。
+    /// </para>
+    /// <para>
+    /// engine-apply：同期の実行がダウンロードの適用で呼ぶローカルの Save フックは、実行用ロックと書き込みロックの両方を
+    /// 持つ流れにいる。通すと 1 つめの実行の中で 2 つめの実行が始まり、1 つめの実行が変えた行の一覧を差し替え、適用中の
+    /// バッチとロックを取り合う。実行用ロックを持つ流れからの同期も断るので、1 つめの実行が例外で止まり、適用した行は残らない。
+    /// </para>
     /// </remarks>
-    [Fact(
-        DisplayName = "[Sync/並行] Save フックの中から呼んだ同期は即座に InvalidOperationException で断られ保存も戻る"
+    [Theory(
+        DisplayName = "[Sync/並行] Save フックの中から呼んだ同期は即座に InvalidOperationException で断られ書き込みも戻る"
     )]
-    public async Task SyncFromInsideSaveHook_IsRefusedAndRollsBack()
+    [InlineData("journaled-write")]
+    [InlineData("engine-apply")]
+    public async Task SyncFromInsideSaveHook_IsRefusedAndRollsBack(string writer)
     {
         await SeedServerAsync(1, "alice", 11, "widget");
 
-        var hook = new SyncInsideHook(() => Engine);
-        var orders = new JournalingSyncOrderRepository(
-            new SyncOrderRepository(
-                new LightJournalSyncConnectionFactory(LocalConnectionString),
-                new SaveHookRegistry().Add<SyncOrderEntity>(hook)
-            ),
-            Journal
+        if (writer == "journaled-write")
+        {
+            var hook = new SyncInsideHook(() => Engine);
+            var orders = new JournalingSyncOrderRepository(
+                new SyncOrderRepository(
+                    new LightJournalSyncConnectionFactory(LocalConnectionString),
+                    new SaveHookRegistry().Add<SyncOrderEntity>(hook)
+                ),
+                Journal
+            );
+
+            var order = new SyncOrderEntity { OrderId = 50, CustomerName = "hooked" };
+            order.MarkAdded();
+            var act = async () => await orders.SaveAsync(order, cancellationToken: Ct);
+
+            (await act.Should().ThrowAsync<InvalidOperationException>())
+                .Which.Message.Should()
+                .Contain("cannot be started from inside a write");
+            (await LocalOrdersRaw.GetByIdAsync(50, Ct)).Should().BeNull("保存はロールバックされる");
+            return;
+        }
+
+        SyncEngine? engine = null;
+        engine = CreateEngineWithLocalHooks(
+            new SaveHookRegistry().Add<SyncOrderEntity>(new SyncInsideHook(() => engine!))
         );
 
-        var order = new SyncOrderEntity { OrderId = 50, CustomerName = "hooked" };
-        order.MarkAdded();
-        var act = async () => await orders.SaveAsync(order, cancellationToken: Ct);
+        var sync = async () => await engine.SyncAsync(cancellationToken: Ct);
 
-        (await act.Should().ThrowAsync<InvalidOperationException>())
+        (await sync.Should().ThrowAsync<InvalidOperationException>())
             .Which.Message.Should()
-            .Contain("cannot be started from inside a write");
-        (await LocalOrdersRaw.GetByIdAsync(50, Ct)).Should().BeNull("保存はロールバックされる");
+            .Contain("cannot be started from inside another run");
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct))
+            .Should()
+            .BeNull("適用のバッチはロールバックされる");
     }
 
     /// <summary>保存の直後（コミット前）に同期を呼ぶ Save フック</summary>

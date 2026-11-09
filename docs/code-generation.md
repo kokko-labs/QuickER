@@ -2674,6 +2674,8 @@ Two things fall outside this.
 - **A sync cannot be started from inside a save hook.**
   A write through a journaling repository holds the lock while its save hooks run, and a run started there would wait for that very lock (and, while another run is in flight, the two would wait for each other for good).
   `SyncAsync`, `RefreshAsync`, `UploadAsync`, and `DownloadAsync` called there throw `InvalidOperationException` at once, and the save is rolled back.
+  The same holds for a local save hook that a run fires while it applies the server's rows.
+  The sync started there throws `InvalidOperationException`, the run that fired the hook stops with it, and the batch it was applying is rolled back.
   Start the sync after the save returns.
 
 A write that read its row before a batch and saves it after is a write based on what the server's change replaced.

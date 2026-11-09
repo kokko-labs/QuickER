@@ -93,7 +93,7 @@ internal static class ImpactMapSources
                     ""
                 ))
         );
-        protections.AddRange(SourceRules.All.Select(RuleProtection));
+        protections.AddRange(SourceRules.All.Select(rule => RuleProtection(rule, repositoryRoot)));
         protections.AddRange(
             ParityRows.All.Select(row =>
                 CrossCutting(row.Id, ProtectionKind.Parity, "正本と写しの照合")
@@ -245,7 +245,11 @@ internal static class ImpactMapSources
         $"{TestsRoot}/{unit["src/QuickER.".Length..]}";
 
     /// <summary>規則の守り（範囲が src の中に絞られていれば単位の守り、そうでなければ横断）</summary>
-    private static Protection RuleProtection(SourceRule rule)
+    /// <remarks>
+    /// src の直下を根にして読む領域（<see cref="SourceScope.Areas"/>）を限った範囲は、領域の接頭辞で始まる src のプロジェクトの
+    /// フォルダを守る（除外のファイルがあっても、プロジェクトの単位の守りに数える＝明示のファイルの範囲と同じ粒度）
+    /// </remarks>
+    private static Protection RuleProtection(SourceRule rule, string repositoryRoot)
     {
         var scope = rule.Scope;
         IReadOnlyList<string> covers =
@@ -255,7 +259,9 @@ internal static class ImpactMapSources
                     : []
                 : scope.Root.StartsWith("src/", StringComparison.Ordinal)
                     ? [scope.Root]
-                    : [];
+                    : scope.Root == ImpactUnits.SourceRoot && scope.Areas.Count > 0
+                        ? AreaProjects(repositoryRoot, scope.Areas)
+                        : [];
 
         return new Protection(
             ProtectionNames.Of(ProtectionKind.Rule, rule.Id),
@@ -266,6 +272,22 @@ internal static class ImpactMapSources
             covers.Count == 0 ? ScopeLabel(scope) : ""
         );
     }
+
+    /// <summary>src の直下のプロジェクトのフォルダのうち、名前が領域の接頭辞のどれかで始まるもの（序数の順）</summary>
+    private static IReadOnlyList<string> AreaProjects(
+        string repositoryRoot,
+        IReadOnlyList<string> areas
+    ) =>
+        ImpactUnits
+            .Enumerate(repositoryRoot)
+            .Where(unit => unit.Count(c => c == '/') == 1)
+            .Where(unit =>
+                areas.Any(prefix =>
+                    unit[(ImpactUnits.SourceRoot.Length + 1)..]
+                        .StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                )
+            )
+            .ToList();
 
     /// <summary>単位の守りに数える範囲（src のプロジェクトの中を指すもの）</summary>
     private static IReadOnlyList<string> UnitCovers(IReadOnlyList<string> covers) =>

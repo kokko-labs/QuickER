@@ -577,6 +577,20 @@ public class SchemaDiffService
         return diff;
     }
 
+    /// <summary>型だけを変える列の変更の説明（「列 表.列: 旧 → 新」）</summary>
+    /// <remarks>
+    /// 型だけを運ぶ列の変更の項目（計算列の型の変更・同期の計画が NULL 許容化を外して型の変更だけを残した複製）が通す。
+    /// 項目が NULL 許容を変えないのに、元の説明の「NULL → NOT NULL」を写すと、計画とプレビューに起きない変更が出る。
+    /// </remarks>
+    internal static string DescribeColumnTypeChange(
+        string tableName,
+        string columnName,
+        string oldType,
+        string newType
+    ) =>
+        string.Format(Strings.Diff_ColumnChangePrefix, tableName, columnName)
+        + string.Format(Strings.Diff_TypeChange, oldType, newType);
+
     /// <summary>計算列の型の差分の項目を作る（NULL 許容は運ばない・方言が式を保って変えられなければ選択できない案内項目）</summary>
     /// <remarks>
     /// 項目の <see cref="SchemaDiffItem.Column"/> は図の列の複製で、NULL 許容だけを DB の値に戻す＝選んでも計画は
@@ -593,7 +607,7 @@ public class SchemaDiffService
     )
     {
         var column = targetColumn.Clone(preserveId: true);
-        column.IsNullable = liveColumn.IsNullable;
+        column.IsNullable = ColumnNullability.AllowsNull(liveColumn);
         var selectable = dialect.SupportsComputedColumnTypeChange;
 
         return new SchemaDiffItem
@@ -607,12 +621,12 @@ public class SchemaDiffService
             IsSelected = false,
             IsSelectable = selectable,
             Description = selectable
-                ? string.Format(Strings.Diff_ColumnChangePrefix, tableName, targetColumn.Name)
-                    + string.Format(
-                        Strings.Diff_TypeChange,
-                        liveColumn.DataType,
-                        targetColumn.DataType
-                    )
+                ? DescribeColumnTypeChange(
+                    tableName,
+                    targetColumn.Name,
+                    liveColumn.DataType,
+                    targetColumn.DataType
+                )
                 : string.Format(
                     Strings.Diff_ComputedColumnTypeNotSynced,
                     tableName,

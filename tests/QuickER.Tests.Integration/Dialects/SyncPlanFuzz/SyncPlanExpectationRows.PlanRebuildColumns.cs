@@ -203,6 +203,48 @@ internal static partial class SyncPlanExpectationRows
                     e.Rebuilds.Count("* cols *", 1)
                         .Rebuilds.Single("items pk (id)", "items cols *, k2:TEXT notnull*")
                 ),
+            // 同じ形で、図の主キーの列に NULL 許容の印を残した版（図のファイルの手書きでだけ作れる）。主キーの列は印に依らず
+            // NOT NULL なので、主キーを変えずに写す列の変更・列の追加も NOT NULL のまま（印のまま写すと、再構築の表だけ NULL 許容になる）
+            Row(
+                    "plan-rebuild-column-changes-of-key-columns-flagged-nullable-stay-not-null",
+                    "再構築: AlterPrimaryKey 未選択の AlterColumn・AddColumn は、図の主キーの列の NULL 許容の印に依らず NOT NULL で写す",
+                    DialectNames.Sqlite
+                )
+                .Live(s => s.Tbl("items", ("id", "INT", true), ("code", "TEXT", false)))
+                .Items(_ =>
+                {
+                    var code = S.Pk("code", "VARCHAR(20)");
+                    code.IsNullable = true;
+                    var k2 = S.Pk("k2", "TEXT");
+                    k2.IsNullable = true;
+
+                    return
+                    [
+                        new SchemaDiffItem
+                        {
+                            Kind = SchemaDiffKind.AlterColumn,
+                            TableName = "items",
+                            ColumnName = "code",
+                            Column = code,
+                            IsSelected = true,
+                        },
+                        new SchemaDiffItem
+                        {
+                            Kind = SchemaDiffKind.AddColumn,
+                            TableName = "items",
+                            ColumnName = "k2",
+                            Column = k2,
+                            IsSelected = true,
+                        },
+                    ];
+                })
+                .Expect(e =>
+                    e.Rebuilds.Count("* cols *", 1)
+                        .Rebuilds.Single(
+                            "items pk (id)",
+                            "items cols *code:VARCHAR(20) notnull*, k2:TEXT notnull*"
+                        )
+                ),
             Row(
                     "plan-rebuild-add-column-with-alter-pk-joins-pk",
                     "再構築: AlterPrimaryKey を選べば追加列も主キーになる",

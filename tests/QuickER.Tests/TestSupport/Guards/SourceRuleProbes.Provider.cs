@@ -54,6 +54,56 @@ internal static partial class SourceRuleProbes
                     ),
                 ]
             ),
+            // 列の NULL 許容の印の読み取り（素の・否定・?. ・プロパティパターン・代入の右辺・ラムダの中）を拾い、書き込み（代入の左辺・
+            // 初期化子）・nameof・ほかの型の IsNullable は拾わない
+            new SourceRuleProbe(
+                "provider-column-nullability-raw-reads-forms",
+                "provider-column-nullability-raw-reads",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System.Collections.Generic;
+                        using System.Linq;
+                        using QuickER.Model;
+
+                        internal sealed class OtherShape
+                        {
+                            public bool IsNullable { get; set; }
+                        }
+
+                        internal static class Probe
+                        {
+                            public static bool Plain(Column column) => column.IsNullable;
+
+                            public static bool Negated(Column column) => !column.IsNullable;
+
+                            public static bool? Conditional(Column? column) => column?.IsNullable;
+
+                            public static bool Pattern(Column column) => column is { IsNullable: true };
+
+                            public static void CopiedFrom(Column target, Column source) => target.IsNullable = source.IsNullable;
+
+                            public static bool InLambda(IEnumerable<Column> columns) => columns.Any(c => c.IsNullable);
+
+                            public static void Written(Column column) => column.IsNullable = false;
+
+                            public static Column Initialized() => new Column { IsNullable = false };
+
+                            public static string Named() => nameof(Column.IsNullable);
+
+                            public static bool Other(OtherShape shape) => shape.IsNullable;
+                        }
+                        """,
+                        "Plain",
+                        "Negated",
+                        "Conditional",
+                        "Pattern",
+                        "CopiedFrom",
+                        "InLambda"
+                    ),
+                ]
+            ),
             // 差分の項目の Column の DataType を、素の・! の・?. の読み取りで拾い（ラムダの中は外側のメソッドの名前）、OldColumn・
             // live の列・別の変数へ取った列は拾わない
             new SourceRuleProbe(

@@ -783,10 +783,11 @@ internal static partial class SourceRules
                 )
             ) with
             {
-                // 空振りの検知：範囲の中の Column.IsNullable の読み取り（規則が調べる素材）が 70 以上見つかる（いまは 77）
+                // 空振りの検知：範囲の中の Column.IsNullable の読み取り（規則が調べる素材）が 60 以上見つかる（いまは 68。QuickER.Provider* は
+                // 印を読まない＝規則 provider-column-nullability-raw-reads）
                 Floor = new(
                     GuardFinder.Symbols(ColumnNullabilityCombinations.DescribeNullableRead),
-                    70,
+                    60,
                     "Column.IsNullable の読み取り"
                 ),
             },

@@ -309,7 +309,7 @@
   - 列の削除に伴う暗黙の削除・同期後のキーの集合（候補キーの証明）・SQLite の再構築の削除が同じキーを共有する。
   - 名前を外して表＋列集合だけにすると、同じ列集合の一意制約 2 つの片方を外したときに、もう片方まで「外した」ことになる。
 - `AlterColumnRequiresKeyConstraintRebuild` の方言（SQL Server）は、列の変更が触る一意制約・主キーの構成列を暗黙に外して付け直す（`src/QuickER.Provider.SqlServer/CLAUDE.md`「同期スクリプト」）。明示の削除とは `UniqueConstraintKey` で重複を除く。
-- 明示の一意制約の削除が被参照 FK を支えていれば `UniqueConstraintDropMayBreakForeignKey` で警告する（方言中立）。
+- 明示の一意制約の削除が被参照 FK を支えうれば `UniqueConstraintDropMayBreakForeignKey` で警告する（方言中立。支えの判定は「外部キーを支えうるキー」）。
 - SQLite は再構築へ畳む。`SchemaAuxiliaryObject` に一意制約の種類は無く（インデックス・トリガーのみ）、再構築の CREATE TABLE は合成後定義から名前付き UNIQUE 句を出す。
 - 固定は期待の行 `plan-uq-explicit-drop-is-neither-duplicated-nor-readded-*`・`plan-uq-rebuild-drops-only-same-named-twin`・`plan-candidate-key-add-fk-to-twin-unique-*`・同期計画の総当たり。mutation 実証済み。
 
@@ -337,6 +337,18 @@
 - 参照先が図の主キーとだけ一致し、同期後の主キー・一意制約と一致しない外部キーの追加・作り直しは、主キーの変更を前提にする項目として `ExcludeItemsRequiringUnselected` が外す。
 - DDL が暗黙コミットされる方言では、証明できない追加を外部キーの追加の最後へ回す（`SyncPlanner.ArrangeUnprovenForeignKeyAddsLast`）。外部キーの追加は互いに依存せず後ろに制約の文が無いので、断られてもほかの付け直しは済んでいる。並べないと、警告していない外部キーまで巻き添えで消えたまま残る。
 - 固定は期待の行 `plan-candidate-key-*`・`plan-arrange-*`・同期計画の総当たり。mutation 実証済み。
+
+### 外部キーを支えうるキー
+
+- 親のキー（主キー・一意制約）がその列を参照する外部キーを支えうるか（DB がそのキーの削除を外部キーで断るか）は `SyncPlanner.CanSupportForeignKey` の 1 か所で決める。
+  - 参照する列と同じ列の集合を持つキーは、どの方言でも支える。
+  - `ForeignKeyRequiresLeadingIndex` の方言（MySQL）では、参照する列を先頭に並べるもっと長いキーも支えうる（8.0 系や `restrict_fk_on_non_standard_key`=OFF で作れる非標準キーの外部キー。ほかに支える索引が無いとキーの削除が 1553 になる）。
+- 通すのは 4 か所：前寄せ（`MoveCertainFailureFirst` の `BlockedKeyDrops`）・一意制約の削除の警告（`WarnUniqueConstraintDropsBreakingForeignKeys`）・主キーの変更の外し直しの 2 枝（旧主キーに支えられた外部キー＝`DependsOnOldPrimaryKey`、新しい主キーと同じ列を参照し、この計画で外す一意制約に支えられた外部キー）。
+  - 警告は「新しい主キーが参照する列とちょうど同じ外部キー」を、主キーの変更の外し直しが付け直すとみなして飛ばす。だから外し直しの一意制約の枝と警告は同じ判定でなければならない。
+  - 写しが割れると、MySQL で一意制約 UQ(a, b) の先頭の列 a だけを参照する外部キーがあるとき、その一意制約の削除は前寄せされるのに警告が出ずに 1553 で断られる。警告と外し直しの枝の片方だけが先頭の列を数えると、主キーを (a) へ移しながらその一意制約を外す同期が、警告も外し直しも無いまま断られる。
+- 付け直せるか（候補キーの証明＝`StaysCandidateKey`）は別の判定で、列の集合の完全一致のまま（非標準キーへの付け直しは証明しない＝「候補キーの証明」）。
+- MySQL 8.4 の既定（`restrict_fk_on_non_standard_key`=ON）では非標準キーの外部キーを作れないので、実 DB の段は持たない。網の静的な規則 R1（MySQL は先頭の列の索引も見る）はこの形の失敗を予言できるが、生成器・形の行は一意制約の全列を参照する外部キーしか作らないので、形は期待の行が受け持つ。
+- ガード：期待の行 `plan-implicit-unique-drop-warns-for-fk-on-its-leading-columns-mysql-like`（警告だけを列の集合の完全一致に戻すと赤）・`plan-implicit-fk-pk-change-onto-referenced-prefix-of-dropped-unique-rebuilds-fk-mysql-like`（外し直しの一意制約の枝だけを戻すと赤）。どちらも SQL Server（先頭の列で支えない）と比べる。mutation 実証済み。
 
 ### 外部キーの暗黙の外し直し
 
@@ -423,7 +435,12 @@
 - DDL・同期スクリプト・差分・同期計画が列を NOT NULL とみなすかは、Model の `ColumnNullability.AllowsNull`（NULL 許容の印があり、主キーの列でない）だけで決める。方言の DDL・同期スクリプトに `IsPrimaryKey || !IsNullable` の写しを置かない。
   - 写しが割れると、DDL が NOT NULL で作った列を差分が NULL 許容とみなし、適用した直後に偽の ALTER COLUMN が出る。
 - 規則の本体・例外の 3 か所（主キーでない NOT NULL の列の判定）と読みの限界は `src/QuickER.Model/CLAUDE.md`「列の NULL 許容（ColumnNullability）」。
-- ガード：`SourceRuleTests` の規則 `column-nullability-copies`・振る舞いは `DialectDdlTableTests`・同期計画の期待の行・`SchemaDiffServiceTests`。
+- QuickER.Provider*（取込を除く）は、NULL 許容の印 `Column.IsNullable` を直接読まない（写しの式だけでなく、印 1 つの読みも禁じる）。
+  - 差分の項目の列（`SchemaDiffItem.Column`）と、外部キーの項目の子の表（`ChildEntity`）は図の列で、主キーの列に印が立ちうる。印を読むと、主キーの列に印を持つ図で、型だけの変更が「主キーに残る列の NULL 許容化」として外され、SET NULL の子の列の NOT NULL 化が前寄せされず、同期後の NULL 許容・SET DEFAULT の警告・DDL の注記が図の印のままになる。
+  - live の列は取込が主キーの列の印を false にそろえる（5 方言の SchemaImporter）ので、`AllowsNull` と印が同じ値になる。図の列と見分けずに「読まない」と書けるのはこのため。
+  - 書き込み（複製の列へ値を写す）の右辺も `AllowsNull` で読む。SQLite の再構築で列の追加の列を主キーから外すときは、外す前に実効の NULL 許容を写す（印のまま外すと、図の主キーの列が再構築の表だけ NULL 許容になる。逐次 DDL の方言の列の追加は NOT NULL で作る）。
+  - 例外は理由つきの既知の一覧の 3 か所（図の構造の指紋が印そのものを記録する `SchemaSignature`・主キーでない列の判定の 2 か所）。取込のファイルには読み取りが無い（印を書くだけ）ので除外していない。
+- ガード：`SourceRuleTests` の規則 `column-nullability-copies`（写しの式）と `provider-column-nullability-raw-reads`（印の読み取り。範囲は `src` の `QuickER.Provider` で始まる 6 プロジェクト・自己検査の行 `provider-column-nullability-raw-reads-forms`）。振る舞いは能力の組の網の関係 N1（目標の図の主キーの列に印を立てても、差分・計画の文・警告・外した項目が変わらない。`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`「能力の組の網」）と、網の入力が届かない読みの行（期待の行 `plan-set-null-pk-change-and-alter-making-child-not-null-moves-alter-first-key-flagged-nullable`・`plan-set-null-post-sync-nullability-alter-to-key-column-flagged-nullable`〔同期後の NULL 許容。網では Oracle の網の種 2269 だけが捕まえ、種を 500 に減らす変異テストの環境では捕まえない〕・`plan-rebuild-column-changes-of-key-columns-flagged-nullable-stay-not-null`〔SQLite の再構築の列の変更と列の追加の写し。列の追加は網の種 6 つ〔632〜4665〕だけが捕まえる〕・`plan-set-default-on-primary-key-child-flagged-nullable-warns-like-not-null`、`DialectDdlTableTests` の行 `ddl-fk-set-default-on-primary-key-child-flagged-nullable-note`・`ddl-fk-set-null-on-delete-primary-key-child-flagged-nullable-note`）・`DialectDdlTableTests`・同期計画の期待の行・`SchemaDiffServiceTests`。図の列の読みを 1 か所ずつ戻すと、N1 かこれらの行のどれかが赤になる（live の列の読みは値が変わらないので規則だけが捕まえる）。mutation 実証済み。
 
 ### 説明の空欄と表せない文字
 

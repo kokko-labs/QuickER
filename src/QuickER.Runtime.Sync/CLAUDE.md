@@ -297,10 +297,12 @@
 - 再生の中の読み直しによる破棄はロックなしで安全（捨てるのは判定がロック内で見た記録だけ）。
 - 取り方はコールバック形 `WriteExclusiveAsync(body)`：async メソッドの中で立てた AsyncLocal は呼び出し元へ戻らないため、印は本体の内側で立てて流す。再入は「同じゲート＋未解放のリース」のときだけ素通り（解放済みフラグ＝放置された fire-and-forget が印を使い回せない）。`SyncSession.Suppress` 中はロックも記録もしない。
 - 実行用ロック（`RunExclusiveAsync`）は `SyncAsync` / `RefreshAsync` / `UploadAsync` / `DownloadAsync` の呼び出し全体で、重なりは後着が待つ。
-- 実行用ロックの入口は「書き込みリースを持ち実行用リースを持たない流れ」を即座に `InvalidOperationException` で断る（ジャーナル記録の書き込みの Save フックから同期を呼ぶ形は、別の同期と互いに待ち合いどの待ち時間にも届かない。重なりの有無で挙動を変えないため常に断る）。
+- 実行用ロックの入口は、実行用リースか書き込みリースを持つ流れを即座に `InvalidOperationException` で断る（実行用ロックは再入しない）。
+  - 書き込みリースだけを持つ流れ（ジャーナル記録の書き込みの Save フックから同期を呼ぶ形）は、別の同期と互いに待ち合いどの待ち時間にも届かない。重なりの有無で挙動を変えないため常に断る。
+  - 実行用リースを持つ流れ（同期の実行が適用で呼ぶローカルの Save フックから同期を呼ぶ形）は、通すと 1 つめの実行の中で 2 つめの実行が始まり、`LocalRowChanges` の記録を差し替え、適用中のバッチの開いたトランザクションとロックを取り合って busy_timeout の後に「database is locked」で落ちる。エンジン自身は公開の口を中から呼ばない（中は `*CoreAsync`）ので、断っても正当な経路は無い。
 - `DownloadAsync(context)` を外から呼んだときは渡されたキーで動きロックを取らない（`SyncDownloadContext` の internal な読み直し口が null）。
 - 外部の `ISyncTable`（内部の面を持たない実装）には、ダウンロード開始時点の未送信キーを `SyncDownloadContext.PendingKeyTexts` に入れて渡す（写しであることを XmlDoc と docs に書いた）。
-- ガード：シナリオ `conc-local-insert-during-download-is-not-deleted-by-propagation`・`conc-local-edit-during-download-is-not-overwritten-by-batch`・`n10-*`・`28-hook-assigns-key`・`26-external-table-overwrites-pending-edit`・`hook-skip-changes-nothing`・`e2-leftover-unset-key-entry`、`SyncRuntimeTestsBase` の「[Sync/並行]」「[Sync/記録]」の各テスト（`LocalWriteFromAnotherFlow_WaitsForTheBatch` は時間でなく順序で判定する＝編集する行を同期の前に読み、着地の時点でエンジンのバッチの Save フックの印が立っているかで見る）、`SyncSqliteRuntimeTests` の `SyncFromInsideSaveHook_IsRefusedAndRollsBack`（mutation 実証済み）。
+- ガード：シナリオ `conc-local-insert-during-download-is-not-deleted-by-propagation`・`conc-local-edit-during-download-is-not-overwritten-by-batch`・`n10-*`・`28-hook-assigns-key`・`26-external-table-overwrites-pending-edit`・`hook-skip-changes-nothing`・`e2-leftover-unset-key-entry`、`SyncRuntimeTestsBase` の「[Sync/並行]」「[Sync/記録]」の各テスト（`LocalWriteFromAnotherFlow_WaitsForTheBatch` は時間でなく順序で判定する＝編集する行を同期の前に読み、着地の時点でエンジンのバッチの Save フックの印が立っているかで見る）、`SyncSqliteRuntimeTests` の `SyncFromInsideSaveHook_IsRefusedAndRollsBack`（行 journaled-write・engine-apply。mutation 実証済み）。
 
 ## 外部キー
 
@@ -342,7 +344,7 @@
 - クラッシュ安全は per-table / per-batch トランザクション（表どうしの循環のある範囲の全消しだけは 1 つのトランザクション＝下の項目）：生成 Repository は外部トランザクションに乗れないので単一トランザクション化は不可（ADO 型を Sync へ持ち込むことになる）。「削除は子→親・書き戻しは親→子・版の昇順」でどのコミット境界も有効な再開点になる。
 - `BatchSize` の既定は 2000（差分同期の 500 と別＝1 バッチ＝1 コミットが速さの源）。
 - `SyncRefreshOptions.Mode` の既定は `LastWriteWins`（全テーブル）。版なし子が版あり親を FK 参照する図では `Versioned` 既定だと親の全消しが FK に阻まれ構造的に失敗する。
-- 拒否の順：範囲外の行が範囲内の行を参照していれば、何も読み書きする前に `SyncRefreshScopeException`／除外列があり `IncludeUnboundedBinary` も `DiscardLocalUnboundedBinaries` も立っていなければ `SyncUnboundedBinaryLossException`／未送信ジャーナルが残っていれば `SyncPendingChangesException`（`Force` のときだけ破棄）。`Force` で抜けられない拒否を先に出す。
+- 拒否の順：引数（`BatchSize`）の検査の後、除外列があり `IncludeUnboundedBinary` も `DiscardLocalUnboundedBinaries` も立っていなければ `SyncUnboundedBinaryLossException`（ロックを取る前・記述子だけを見て DB を読まない）／範囲外の行が範囲内の行を参照していれば `SyncRefreshScopeException`（両方のロックの中・何も読み書きする前）／未送信ジャーナルが残っていれば `SyncPendingChangesException`（`Force` のときだけ破棄）。`Force` で抜けられない拒否（前の 2 つ）を先に出す。docs は範囲外の拒否を「何も読み書きする前」、ほかの 2 つを「何も消す前」と約束し、互いの順は約束しない。
 - 範囲外の参照の判定は行で行う（表どうしの参照で断ると、子の行が無い Versioned の洗い替えまで断る）。
   - 範囲外は `Mode`（Versioned は版なしを外す）・`ExcludedEntityTypes`・構築時除外・エンジンが同期しない表。
   - 範囲内の各表について記述子の `LocalReferences` のうち範囲外の表からの参照を、その表のローカルの全キーで 500 件ずつ照会する（`ISyncTableRunSupport.FindReferencesFromOutsideAsync`）。ローカルに無い表は照会から外す。

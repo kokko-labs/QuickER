@@ -84,6 +84,19 @@ internal static partial class DialectDdlRows
         );
     }
 
+    /// <summary>
+    /// 子の列 parent_id を子の主キーへ加え、NULL 許容の印を立てたままにした図（図のファイルの手書きでだけ作れる形。主キーの列は
+    /// 印に依らず NOT NULL なので、注記は NOT NULL の子の列と同じに出る）
+    /// </summary>
+    private static ErDiagram TrFlagChildKeyNullable(ErDiagram diagram)
+    {
+        var parentId = diagram.Entities[1].Columns[1];
+        parentId.IsPrimaryKey = true;
+        parentId.IsNullable = true;
+
+        return diagram;
+    }
+
     /// <summary>SET NULL の向きと子の列の NULL 許容を指定した図</summary>
     private static ErDiagram TrSetNullDiagram(bool childNullable, bool onDelete, bool onUpdate)
     {
@@ -217,6 +230,31 @@ internal static partial class DialectDdlRows
                 )
                 .Expect(Ss, e => e.NoText("*SET DEFAULT needs a DEFAULT constraint*"))
                 .TreatsGroups(K.SetDefaultReferentialAction, Ft.Ddl, (Tm.Annotation, [Ss])),
+            DialectDdlRow
+                .Ddl(
+                    "ddl-fk-set-default-on-primary-key-child-flagged-nullable-note",
+                    "DDL: 主キーの子の列への SET DEFAULT は、NULL 許容の印があっても NOT NULL の列と同じく SQL Server が注記する",
+                    E.ForeignKey,
+                    F.Note,
+                    _ =>
+                        TrFlagChildKeyNullable(
+                            TrFkDiagram(
+                                "int",
+                                "int",
+                                childNullable: true,
+                                onUpdateSetDefault: true
+                            ).Diagram
+                        )
+                )
+                .Expect(
+                    Ss,
+                    e =>
+                        e.Lines(
+                            "note set-default-not-null | -- Note: SET DEFAULT needs a DEFAULT constraint on the NOT NULL referencing column(s) parent_id;*"
+                        )
+                )
+                .Expect([Pg, My, Or, Sl], e => e.NoText("*SET DEFAULT needs a DEFAULT constraint*"))
+                .TreatsGroups(K.SetDefaultReferentialAction, Ft.Ddl, (Tm.Annotation, [Ss])),
             // ---- 長さだけが違う型の外部キー（SQL Server）----
             DialectDdlRow
                 .Ddl(
@@ -297,6 +335,19 @@ internal static partial class DialectDdlRows
                     E.ForeignKey,
                     F.Note,
                     _ => TrSetNullDiagram(childNullable: false, onDelete: true, onUpdate: false)
+                )
+                .TrSetNullExpect(creatable: [Pg, Or, Sl], uncreatable: [Ss, My])
+                .TreatsAll(K.SetNullOnNotNullColumn, Ft.Ddl, Tm.Annotation),
+            DialectDdlRow
+                .Ddl(
+                    "ddl-fk-set-null-on-delete-primary-key-child-flagged-nullable-note",
+                    "DDL: 主キーの子の列への ON DELETE SET NULL は、NULL 許容の印があっても NOT NULL の列と同じく 5 方言とも注記する",
+                    E.ForeignKey,
+                    F.Note,
+                    _ =>
+                        TrFlagChildKeyNullable(
+                            TrSetNullDiagram(childNullable: true, onDelete: true, onUpdate: false)
+                        )
                 )
                 .TrSetNullExpect(creatable: [Pg, Or, Sl], uncreatable: [Ss, My])
                 .TreatsAll(K.SetNullOnNotNullColumn, Ft.Ddl, Tm.Annotation),
