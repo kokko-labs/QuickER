@@ -130,17 +130,6 @@ public static class CanvasViewportBehavior
     [ThreadStatic]
     private static Window? _hostWindow;
 
-    /// <summary>呼び出しスレッドが所有している場合に限り対象 ScrollViewer を返す</summary>
-    /// <remarks>
-    /// 製品では UI スレッド 1 本・対象ビュー 1 つの前提だが、テストは複数の STA スレッドが
-    /// それぞれウィンドウを並行表示するため、ウィンドウ単位のイベント（Deactivated / PreviewKey*）が
-    /// 別スレッド所有の ScrollViewer を指す static 参照へ届くことがある。所有スレッド以外から
-    /// DependencyObject を触ると InvalidOperationException（テストランナーの Catastrophic failure）に
-    /// なるため、他スレッド所有の参照は「自分の対象ではない」ものとして触らない。
-    /// </remarks>
-    private static ScrollViewer? OwnedScrollViewer =>
-        _scrollViewer is not null && _scrollViewer.CheckAccess() ? _scrollViewer : null;
-
     // ---------- 添付プロパティ ----------
 
     /// <summary>ズーム・パン機能の有効・無効を表す添付プロパティ</summary>
@@ -320,7 +309,7 @@ public static class CanvasViewportBehavior
         {
             IsPanActive = false;
 
-            if (OwnedScrollViewer is { } sv)
+            if (_scrollViewer is { } sv)
             {
                 sv.Cursor = null;
             }
@@ -337,7 +326,7 @@ public static class CanvasViewportBehavior
             return;
         }
 
-        var modifiers = Keyboard.Modifiers;
+        var modifiers = BehaviorInput.Modifiers;
 
         // Ctrl 押下時: マウス位置を中心にズームする
         if ((modifiers & ModifierKeys.Control) == ModifierKeys.Control)
@@ -355,7 +344,7 @@ public static class CanvasViewportBehavior
                     ? ViewportCalculator.ZoomInStep(oldZoom)
                     : ViewportCalculator.ZoomOutStep(oldZoom);
 
-            ApplyZoomAtMouse(sv, vm, oldZoom, newZoom, e.GetPosition(sv));
+            ApplyZoomAtMouse(sv, vm, oldZoom, newZoom, BehaviorInput.GetPosition(e, sv));
             e.Handled = true;
             return;
         }
@@ -426,8 +415,8 @@ public static class CanvasViewportBehavior
             sv.Focus();
         }
 
-        var isMiddle = e.MiddleButton == MouseButtonState.Pressed;
-        var isSpaceLeft = _isSpaceDown && e.LeftButton == MouseButtonState.Pressed;
+        var isMiddle = BehaviorInput.MiddleButton(e) == MouseButtonState.Pressed;
+        var isSpaceLeft = _isSpaceDown && BehaviorInput.LeftButton(e) == MouseButtonState.Pressed;
 
         if (!isMiddle && !isSpaceLeft)
         {
@@ -436,7 +425,7 @@ public static class CanvasViewportBehavior
 
         _isPanning = true;
         IsPanActive = true;
-        _panStartMouse = e.GetPosition(sv);
+        _panStartMouse = BehaviorInput.GetPosition(e, sv);
         _panStartHorizontal = sv.HorizontalOffset;
         _panStartVertical = sv.VerticalOffset;
 
@@ -453,7 +442,7 @@ public static class CanvasViewportBehavior
             return;
         }
 
-        var current = e.GetPosition(sv);
+        var current = BehaviorInput.GetPosition(e, sv);
 
         // マウスを右へ動かすと内容が右へ動く（＝オフセットは減る）ため符号を反転する
         sv.ScrollToHorizontalOffset(_panStartHorizontal - (current.X - _panStartMouse.X));
@@ -500,14 +489,27 @@ public static class CanvasViewportBehavior
     // ---------- Space キー監視 ----------
 
     /// <summary>Space 押下でパン待機状態へ入る（テキスト入力と、キーボードで移ったボタン類は横取りしない）</summary>
-    /// <remarks>直前の入力の種類も、Space の判定より前にすべてのキーで記録する</remarks>
+    /// <remarks>
+    /// <para>直前の入力の種類も、Space の判定より前にすべてのキーで記録する。</para>
+    /// <para>
+    /// パンが持つ Space の押しっぱなしの自動リピートも処理済みにする。届けると、フォーカスのあるボタン類がリピートで
+    /// 押下に入り（解放で押される・チェックが切り替わる・マウスのキャプチャを奪ってパンが切れる）、グリッドのセルは
+    /// 文字の入力として編集に入る。
+    /// </para>
+    /// </remarks>
     private static void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
     {
         _lastInputWasKeyboard = true;
         _focusOriginUnknown = false;
 
-        if (e.Key != Key.Space || _isSpaceDown)
+        if (e.Key != Key.Space)
         {
+            return;
+        }
+
+        if (_isSpaceDown)
+        {
+            e.Handled = true;
             return;
         }
 
@@ -526,7 +528,8 @@ public static class CanvasViewportBehavior
         _isSpaceDown = true;
         IsPanActive = true;
 
-        if (OwnedScrollViewer is { } sv)
+        // 中ボタンのパンの実行中はパンのカーソル（全方向）のまま。パン待機の手へは、中ボタンを離したときに戻る
+        if (!_isPanning && _scrollViewer is { } sv)
         {
             sv.Cursor = Cursors.Hand;
         }
@@ -550,7 +553,7 @@ public static class CanvasViewportBehavior
         {
             IsPanActive = false;
 
-            if (OwnedScrollViewer is { } sv)
+            if (_scrollViewer is { } sv)
             {
                 sv.Cursor = null;
             }

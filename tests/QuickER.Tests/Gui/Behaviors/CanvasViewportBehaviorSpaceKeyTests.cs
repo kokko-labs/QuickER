@@ -8,10 +8,17 @@ using static QuickER.Tests.TestSupport.WpfApplicationTestSupport;
 namespace QuickER.Tests.Gui.Behaviors;
 
 /// <summary>
-/// <see cref="CanvasViewportBehavior"/> の Space の横取りの線引き（キーボードで移ったボタン類は押せる・
-/// マウスでクリックした直後と別のウィンドウから戻った直後はパン）を検証するテストクラス。
+/// <see cref="CanvasViewportBehavior"/> の Space の横取りのうち、入力の列のエンジン（<see cref="CanvasInputTests"/>）が
+/// 流さない形を、読み口を差し替えない実際の入力で検証するテストクラス。
 /// </summary>
 /// <remarks>
+/// <para>
+/// 残す理由：(1) 読み口（<c>BehaviorInput</c>）を差し替えずに流すパンの実際の入力の経路の守り（エンジンは差し替えて流す）。
+/// (2) キーボードで来たキャンバス（MainWindow のタブ順にキャンバスが入らないので、エンジンの窓では作れない）。
+/// (3) 無効化（IsEnabled=false）したウィンドウの購読の後始末（製品は無効化しないので、エンジンの手に無い）。
+/// Space の横取りの線引きのほかの形（キーボードで移ったボタン類は押せる・マウスで来た・戻った直後はパン・列一覧の
+/// PK のチェックボックス）はエンジンの決まった形の行と網羅の行が流す。
+/// </para>
 /// <para>
 /// キーは <see cref="InputManager.ProcessInput"/> で流す（ウィンドウのトンネル → フォーカス要素の処理 →
 /// Tab のフォーカス移動まで、製品と同じ経路を通る）。マウスの押下は要素へ PreviewMouseDown を発火させてから
@@ -124,116 +131,6 @@ public class CanvasViewportBehaviorSpaceKeyTests
         element.Focus();
     }
 
-    [Fact(DisplayName = "Tab で移ったボタンとチェックボックスは Space で押せる")]
-    public void SpaceOnKeyboardFocusedButtons_ActivatesThem()
-    {
-        RunSta(() =>
-        {
-            var w = ShowWindow();
-
-            try
-            {
-                // キャンバスをクリックしてから Tab でボタンへ移る
-                ClickToFocus(w.Canvas);
-                PressTab(w.Window);
-                Keyboard.FocusedElement.Should().BeSameAs(w.Button);
-
-                SendKey(w.Window, Key.Space, down: true);
-                CanvasViewportBehavior.IsPanActive.Should().BeFalse("ボタンの押下に使わせる");
-                w.Button.IsPressed.Should().BeTrue();
-                SendKey(w.Window, Key.Space, down: false);
-                w.Clicks.Should().Be(1);
-
-                // さらに Tab でチェックボックスへ移る
-                PressTab(w.Window);
-                Keyboard.FocusedElement.Should().BeSameAs(w.CheckBox);
-                SendKey(w.Window, Key.Space, down: true);
-                SendKey(w.Window, Key.Space, down: false);
-                w.CheckBox.IsChecked.Should().BeTrue();
-                CanvasViewportBehavior.IsPanActive.Should().BeFalse();
-            }
-            finally
-            {
-                w.Window.Close();
-                DoEvents();
-            }
-        });
-    }
-
-    [Fact(
-        DisplayName = "マウスでクリックした直後のボタン・チェックボックス上の Space はパンになり、押されない"
-    )]
-    public void SpaceOnMouseFocusedButtons_Pans()
-    {
-        RunSta(() =>
-        {
-            var w = ShowWindow();
-
-            try
-            {
-                ClickToFocus(w.Button);
-                Keyboard.FocusedElement.Should().BeSameAs(w.Button);
-
-                SendKey(w.Window, Key.Space, down: true);
-                CanvasViewportBehavior
-                    .IsPanActive.Should()
-                    .BeTrue("ボタンを押したあとの Space+ドラッグは見回す操作");
-                w.Button.IsPressed.Should().BeFalse();
-                SendKey(w.Window, Key.Space, down: false);
-                w.Clicks.Should().Be(0);
-                CanvasViewportBehavior.IsPanActive.Should().BeFalse("Space を離せば待機が解ける");
-
-                ClickToFocus(w.CheckBox);
-                SendKey(w.Window, Key.Space, down: true);
-                SendKey(w.Window, Key.Space, down: false);
-                w.CheckBox.IsChecked.Should().BeFalse();
-            }
-            finally
-            {
-                w.Window.Close();
-                DoEvents();
-            }
-        });
-    }
-
-    /// <summary>Tab で移ったボタンを続けてマウスでクリックした後は、フォーカスが移らなくてもパンになることを検証する</summary>
-    /// <remarks>
-    /// 既にフォーカスのあるボタンをクリックしてもフォーカス移動は起きないため、マウスの押下そのもので
-    /// 「キーボードで来た」記録を落とさないと、Tab のときの記録が残ってボタンがもう一度押される
-    /// </remarks>
-    [Fact(
-        DisplayName = "Tab で移ったボタンをマウスでクリックした後の Space はパンになり、押されない"
-    )]
-    public void SpaceAfterMouseClickOnKeyboardFocusedButton_Pans()
-    {
-        RunSta(() =>
-        {
-            var w = ShowWindow();
-
-            try
-            {
-                ClickToFocus(w.Canvas);
-                PressTab(w.Window);
-                Keyboard.FocusedElement.Should().BeSameAs(w.Button);
-
-                // 同じボタンをマウスで押す（フォーカスは移らない）
-                ClickToFocus(w.Button);
-                Keyboard.FocusedElement.Should().BeSameAs(w.Button);
-
-                SendKey(w.Window, Key.Space, down: true);
-                CanvasViewportBehavior.IsPanActive.Should().BeTrue();
-                w.Button.IsPressed.Should().BeFalse();
-                SendKey(w.Window, Key.Space, down: false);
-                w.Clicks.Should().Be(0);
-            }
-            finally
-            {
-                w.Window.Close();
-                DoEvents();
-            }
-        });
-    }
-
     [Fact(
         DisplayName = "キャンバスにフォーカスがあるときは、キーボードで来ていても Space はパンになる"
     )]
@@ -257,142 +154,6 @@ public class CanvasViewportBehaviorSpaceKeyTests
             }
             finally
             {
-                w.Window.Close();
-                DoEvents();
-            }
-        });
-    }
-
-    /// <summary>本物のメインウィンドウで、列一覧の PK のチェックボックスへ Tab で移ると Space で切り替えられることを検証する</summary>
-    /// <remarks>
-    /// キャンバスのビヘイビアはメインウィンドウ全体の Space を監視するので、プロパティパネルの
-    /// チェックボックスもその判断を通る（修正前は Space を横取りされ、キーボードだけでは主キーを付けられなかった）
-    /// </remarks>
-    [Fact(
-        DisplayName = "メインウィンドウの列一覧で、Tab で移った PK のチェックボックスは Space で切り替わる"
-    )]
-    public void SpaceOnPrimaryKeyCheckBoxInMainWindow_TogglesIt()
-    {
-        RunInIsolatedWindow(
-            (vm, window) =>
-            {
-                vm.ReplaceDiagramFromModule(
-                    new QuickER.Model.ErDiagram
-                    {
-                        Entities =
-                        {
-                            new QuickER.Model.Entity
-                            {
-                                TableName = "Item",
-                                Columns =
-                                {
-                                    new QuickER.Model.Column { Name = "Code", DataType = "int" },
-                                },
-                            },
-                        },
-                    }
-                );
-                vm.SelectedEntity = vm.Entities[0];
-                window.UpdateLayout();
-                DoEvents();
-
-                var grid = (DataGrid)window.FindName("ColumnsDataGrid")!;
-                grid.UpdateLayout();
-                var firstCell = FindVisualChildren<DataGridCell>(grid).First();
-
-                // 先頭のセル（PK 列）から Tab でセルの中のチェックボックスへ移る
-                SendKey(window, Key.Tab, down: true);
-                SendKey(window, Key.Tab, down: false);
-                firstCell.Focus();
-                PressTab(window);
-                Keyboard.FocusedElement.Should().BeOfType<CheckBox>();
-
-                SendKey(window, Key.Space, down: true);
-                CanvasViewportBehavior.IsPanActive.Should().BeFalse();
-                SendKey(window, Key.Space, down: false);
-                DoEvents();
-
-                vm.Entities[0].Columns[0].IsPrimaryKey.Should().BeTrue();
-            }
-        );
-    }
-
-    /// <summary>ビジュアルツリーを深さ優先で辿り、指定型の子要素を列挙する</summary>
-    private static IEnumerable<T> FindVisualChildren<T>(DependencyObject root)
-        where T : DependencyObject
-    {
-        var count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
-
-        for (var i = 0; i < count; i++)
-        {
-            var child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
-
-            if (child is T typed)
-            {
-                yield return typed;
-            }
-
-            foreach (var descendant in FindVisualChildren<T>(child))
-            {
-                yield return descendant;
-            }
-        }
-    }
-
-    /// <summary>別のウィンドウから戻った直後は、どちらの操作で来たか分からないためパン側へ倒すことを検証する</summary>
-    /// <remarks>戻ったときに WPF が復元するフォーカスは、その前にキーボードで移っていたボタンでも押下に使わせない</remarks>
-    [Fact(
-        DisplayName = "別のウィンドウから戻った直後は、キーボードで移っていたボタンでも Space はパンになる"
-    )]
-    public void SpaceAfterReturningFromAnotherWindow_Pans()
-    {
-        RunSta(() =>
-        {
-            var w = ShowWindow();
-            var other = new Window
-            {
-                Width = 100,
-                Height = 100,
-                ShowInTaskbar = false,
-                WindowStartupLocation = WindowStartupLocation.Manual,
-                Left = -10000,
-                Top = -10000,
-            };
-
-            try
-            {
-                ClickToFocus(w.Canvas);
-                PressTab(w.Window);
-                Keyboard.FocusedElement.Should().BeSameAs(w.Button);
-
-                other.Show();
-                other.Activate();
-                DoEvents();
-                w.Window.Activate();
-                DoEvents();
-
-                Keyboard
-                    .FocusedElement.Should()
-                    .BeSameAs(w.Button, "戻るとボタンへフォーカスが復元される");
-                SendKey(w.Window, Key.Space, down: true);
-                CanvasViewportBehavior.IsPanActive.Should().BeTrue();
-                SendKey(w.Window, Key.Space, down: false);
-                w.Clicks.Should().Be(0);
-
-                // 一度キーボードで移れば、また横取りしない（Tab の巡回はボタンとチェックボックスの 2 つ）。
-                // 見るのは横取りの判断だけにする＝別のウィンドウとの間でアクティブを行き来した直後は、
-                // ボタン自身の押下処理がまれに Click まで届かない（12 回中 1 回・原因は未特定。押せることは
-                // 上の「Tab で移ったボタンとチェックボックスは Space で押せる」が見る）
-                PressTab(w.Window);
-                PressTab(w.Window);
-                Keyboard.FocusedElement.Should().BeSameAs(w.Button);
-                SendKey(w.Window, Key.Space, down: true);
-                CanvasViewportBehavior.IsPanActive.Should().BeFalse();
-                SendKey(w.Window, Key.Space, down: false);
-            }
-            finally
-            {
-                other.Close();
                 w.Window.Close();
                 DoEvents();
             }

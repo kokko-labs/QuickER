@@ -5,7 +5,7 @@ WPF アプリ本体（合成ルート）の規則：完了通知の提示先・�
 
 ## 下位の CLAUDE.md
 - `src/QuickER.Gui/ViewModels/CLAUDE.md`：文書の保存・外部変更検知、図の一括置換、Undo の追跡、選択候補の同期、一意制約・主キー・リレーションの GUI
-- `src/QuickER.Gui/Behaviors/CLAUDE.md`：キャンバスの進行中操作の静的状態、Space のパン
+- `src/QuickER.Gui/Behaviors/CLAUDE.md`：キャンバスの入力の読み口、進行中操作の静的状態、Space のパン、押下の間の手、列一覧の並べ替え
 - `src/QuickER.Gui/Views/CLAUDE.md`：全画面表示、パネルを畳むときのフォーカス、DataGrid の行の追加・削除
 - `src/QuickER.Gui/Services/CLAUDE.md`：エクスポートの欠落告知、DBML / Excel 定義書の取込
 - 機能モジュールの契約は `src/QuickER.Extensibility/CLAUDE.md`、汎用 WPF 部品は `src/QuickER.Gui.Common/CLAUDE.md`

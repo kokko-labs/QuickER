@@ -14,11 +14,6 @@ internal static class ImpactMapDeclarations
     public static IReadOnlyList<UnprotectedArea> Unprotected { get; } =
     [
         new(
-            "src/QuickER.Gui/Behaviors",
-            UnprotectedKind.Pending,
-            "キャンバスの操作（パン・ドラッグ・範囲選択・列の折り畳みと並べ替え）のビヘイビア。進行中の操作の状態と後始末は手書きのテストだけが守る。入力の列を手にした状態機械のエンジンで守れる候補"
-        ),
-        new(
             "src/QuickER.Gui/Views",
             UnprotectedKind.Accepted,
             "ダイアログ（バージョン情報・印刷の設定）の code-behind とカードの枠の描画。仕様の軸を持つ状態は ViewModel にあり、エンジンはそちらを守る。画面の振る舞いは手書きの画面のテストが守る"

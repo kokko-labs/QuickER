@@ -153,43 +153,6 @@ public class CanvasViewportBehaviorDetachTests
         });
     }
 
-    /// <summary>視覚ツリーから外して戻したあとも、パンが効き続けることを検証する</summary>
-    /// <remarks>
-    /// <c>Unloaded</c> はウィンドウを閉じるときだけでなく、親の付け替えやテンプレートの再適用でも起きる。
-    /// 後始末で捨てた対象を <c>Loaded</c> で戻さないと、添付プロパティは有効なのに対象が null になり、
-    /// Space パンがエラーも出さずに効かなくなる（「効かない」ことにしか現れない壊れ方）。
-    /// </remarks>
-    [Fact(DisplayName = "外して戻したあともパンは効き続ける")]
-    public void Reloading_RestoresTheTarget()
-    {
-        RunSta(() =>
-        {
-            var (window, scrollViewer) = ShowCanvasWindow();
-
-            try
-            {
-                window.Content = null;
-                DoEvents();
-                window.Content = scrollViewer;
-                DoEvents();
-
-                SendSpaceDown(window);
-
-                // IsPanActive はウィンドウ側の購読だけで立つため、対象が戻ったかは
-                // 「対象にだけ効く」カーソルの変化で見る
-                CanvasViewportBehavior.IsPanActive.Should().BeTrue();
-                scrollViewer
-                    .Cursor.Should()
-                    .Be(Cursors.Hand, "外して戻したあとも対象として扱われる");
-            }
-            finally
-            {
-                window.Close();
-                DoEvents();
-            }
-        });
-    }
-
     /// <summary>書き換わる静的フィールドがすべて <c>[ThreadStatic]</c> であることを検証する</summary>
     /// <remarks>
     /// 下の隔離テストが見るのは 1 つの値だけなので、状態を足したときに属性を付け忘れても気づけない。

@@ -75,6 +75,8 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 - **A table added with the toolbar now gets an ID column of the target DBMS's default type** — the column was always `int`, which Oracle's type catalog does not read (Oracle now gets `NUMBER(10)`, the same type a new column gets)
 
+- **Holding Space to pan the canvas no longer presses a button that gets the focus during the pan** — the key's auto-repeat could reach a button, check box or grid cell that the focus moved to while you held Space (with Tab, or one you had clicked before the pan), and pressed or toggled it while the pan went on. The repeat now stays with the pan until you release Space
+
 #### AI chat & MCP
 
 - **GitHub Copilot no longer loses the conversation when the runtime returns an ordinary error** — only a lost connection ends the conversation, and then the message says the connection was lost and the next message starts a new conversation
