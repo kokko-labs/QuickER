@@ -86,10 +86,6 @@ public static class DataGridRowReorderBehavior
     private static ColumnViewModel? GetDragSourceColumn(DependencyObject d) =>
         (ColumnViewModel?)d.GetValue(DragSourceColumnProperty);
 
-    /// <summary>テスト専用: 直前の押下で記録したドラッグ元のカラム（行ヘッダー以外の押下では null）</summary>
-    internal static ColumnViewModel? GetDragSourceColumnForTests(DataGrid dataGrid) =>
-        GetDragSourceColumn(dataGrid);
-
     /// <summary><see cref="IsEnabledProperty"/> 変更時にイベントハンドラと <see cref="UIElement.AllowDrop"/> を登録・解除する</summary>
     private static void OnIsEnabledChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
@@ -102,6 +98,11 @@ public static class DataGridRowReorderBehavior
         {
             dataGrid.AllowDrop = true;
             dataGrid.PreviewMouseLeftButtonDown += OnPreviewMouseLeftButtonDown;
+            dataGrid.AddHandler(
+                UIElement.PreviewMouseLeftButtonUpEvent,
+                (MouseButtonEventHandler)OnPreviewMouseLeftButtonUp,
+                handledEventsToo: true
+            );
             dataGrid.MouseMove += OnMouseMove;
             dataGrid.DragOver += OnDragOver;
             dataGrid.Drop += OnDrop;
@@ -109,9 +110,27 @@ public static class DataGridRowReorderBehavior
         else
         {
             dataGrid.PreviewMouseLeftButtonDown -= OnPreviewMouseLeftButtonDown;
+            dataGrid.RemoveHandler(
+                UIElement.PreviewMouseLeftButtonUpEvent,
+                (MouseButtonEventHandler)OnPreviewMouseLeftButtonUp
+            );
             dataGrid.MouseMove -= OnMouseMove;
             dataGrid.DragOver -= OnDragOver;
             dataGrid.Drop -= OnDrop;
+        }
+    }
+
+    /// <summary>左ボタンの解放で、その押下のドラッグ元を捨てる（ドラッグ元は押下 1 回のもの）</summary>
+    /// <remarks>
+    /// 捨てないと、行ヘッダーをクリックしただけ（動かさずに離した）のドラッグ元が残り、後で列一覧の外で押して行の上へ
+    /// 入るドラッグが、その古いカラムで並べ替えを始める。行ヘッダーで押して列一覧の外で離すには、閾値を超えて動く
+    /// （その移動でドラッグが始まり、ドラッグ元は捨てられる）ので、列一覧の上の解放で足りる。
+    /// </remarks>
+    private static void OnPreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is DataGrid dataGrid)
+        {
+            SetDragSourceColumn(dataGrid, null);
         }
     }
 
@@ -127,7 +146,7 @@ public static class DataGridRowReorderBehavior
             return;
         }
 
-        SetDragStartPoint(dataGrid, e.GetPosition(null));
+        SetDragStartPoint(dataGrid, BehaviorInput.GetPosition(e, null));
 
         // セル編集と競合しないよう、起点が行ヘッダー上の場合のみドラッグ元を記録する
         var origin = e.OriginalSource as DependencyObject;
@@ -145,7 +164,7 @@ public static class DataGridRowReorderBehavior
             return;
         }
 
-        if (e.LeftButton != MouseButtonState.Pressed)
+        if (BehaviorInput.LeftButton(e) != MouseButtonState.Pressed)
         {
             return;
         }
@@ -156,7 +175,7 @@ public static class DataGridRowReorderBehavior
         }
 
         var start = GetDragStartPoint(dataGrid);
-        var current = e.GetPosition(null);
+        var current = BehaviorInput.GetPosition(e, null);
 
         // 微小な手ぶれを誤ってドラッグ開始としないよう、OS 既定のドラッグ開始閾値で判定する
         if (
@@ -169,7 +188,7 @@ public static class DataGridRowReorderBehavior
 
         // 1 回の押下で開始するドラッグは 1 回だけ（ドロップ後に同じ押下のまま動かしても再開しない）
         SetDragSourceColumn(dataGrid, null);
-        DragDrop.DoDragDrop(dataGrid, sourceColumn, DragDropEffects.Move);
+        BehaviorInput.DoDragDrop(dataGrid, sourceColumn, DragDropEffects.Move);
     }
 
     /// <summary>カラムのドラッグ中のみ移動カーソル効果を表示する</summary>
@@ -241,18 +260,5 @@ public static class DataGridRowReorderBehavior
 
     /// <summary>指定要素から視覚ツリーを上方向にたどり、最初に見つかった <typeparamref name="T"/> を返す</summary>
     private static T? FindVisualParent<T>(DependencyObject? child)
-        where T : DependencyObject
-    {
-        while (child is not null)
-        {
-            if (child is T typed)
-            {
-                return typed;
-            }
-
-            child = VisualTreeHelper.GetParent(child);
-        }
-
-        return null;
-    }
+        where T : DependencyObject => VisualAncestors.FirstOrSelf<T>(child);
 }

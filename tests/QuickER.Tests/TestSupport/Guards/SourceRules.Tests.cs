@@ -106,6 +106,10 @@ internal static partial class SourceRules
                     .Except(
                         "TestSupport/GuiFailureDiagnostics.cs",
                         "失敗した瞬間の状態の記録（アクティブ・フォーカスのイベントを受け身で購読して記録するだけで、テストを持たず結果も変えない）"
+                    )
+                    .Except(
+                        "Gui/Behaviors/CanvasInputHarness.cs",
+                        "入力の列のエンジンのハーネス（テストを持たない。ハーネスを使うテストのクラス CanvasInputTests は WindowActivation のコレクションに入れてある）"
                     ),
                 GuardFinder.File(GuardReader.Text, FindWindowActivationOffenders)
             ),

@@ -32,10 +32,10 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Dialects` | 全体 | `Dialect/Identifiers`・`Name/DdlRoundTrip`・`rule:dialects-project-references` |
 | `src/QuickER.Document` | 全体 | `DocumentFile/Format`・`DocumentFile/Random`・`DocumentFile/Scenarios` |
 | `src/QuickER.Extensibility` | 一部 | `OsBoundary/FeatureModules` |
-| `src/QuickER.Gui` | 一部 | `DiagramEdit/Layout`・`DiagramEdit/Selection`・`DiagramEdit/Tools`・`DiagramEdit/Undo`・`DiagramEdit/UndoOps`・`DocumentFile/Random`・`DocumentFile/Scenarios`・`FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules`・`Name/Entrances`・`OsBoundary/Lifecycle`・`OsBoundary/PostExitExhaustive`・`rule:app-feature-module-shutdown-bypasses`・`rule:app-feature-module-shutdown-uses`・`rule:app-main-window-assignment`・`rule:app-shutdown-mode-declaration`・`rule:app-shutdown-mode-overrides`・`rule:app-ui-crash-handler-bypasses`・`rule:app-ui-crash-handler-uses`・`rule:program-single-instance-bypasses`・`rule:program-single-instance-uses`・`table:Converters` |
+| `src/QuickER.Gui` | 一部 | `DiagramEdit/CanvasInput`・`DiagramEdit/Layout`・`DiagramEdit/Selection`・`DiagramEdit/Tools`・`DiagramEdit/Undo`・`DiagramEdit/UndoOps`・`DocumentFile/Random`・`DocumentFile/Scenarios`・`FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules`・`Name/Entrances`・`OsBoundary/Lifecycle`・`OsBoundary/PostExitExhaustive`・`rule:app-feature-module-shutdown-bypasses`・`rule:app-feature-module-shutdown-uses`・`rule:app-main-window-assignment`・`rule:app-shutdown-mode-declaration`・`rule:app-shutdown-mode-overrides`・`rule:app-ui-crash-handler-bypasses`・`rule:app-ui-crash-handler-uses`・`rule:program-single-instance-bypasses`・`rule:program-single-instance-uses`・`table:Converters` |
 | `src/QuickER.Gui.Abstractions` | 一部 | `OsBoundary/Lifecycle`・`OsBoundary/ShutdownChainExhaustive` |
 | `src/QuickER.Gui.Common` | 一部 | `rule:dialog-owner-resolve-uses`・`rule:file-dialog-ownerless-shows`・`rule:message-box-owner-resolver-copies` |
-| `src/QuickER.Gui/Behaviors` | 守りの無い領域（Pending） | （なし） |
+| `src/QuickER.Gui/Behaviors` | 一部 | `DiagramEdit/CanvasInput` |
 | `src/QuickER.Gui/Converters` | 一部 | `table:Converters` |
 | `src/QuickER.Gui/Services` | 全体 | `DiagramEdit/Layout`・`DiagramEdit/Tools`・`DocumentFile/Random`・`DocumentFile/Scenarios`・`FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules`・`Name/Entrances`・`OsBoundary/Lifecycle`・`OsBoundary/PostExitExhaustive` |
 | `src/QuickER.Gui/UndoRedo` | 全体 | `DiagramEdit/Undo`・`DiagramEdit/UndoOps` |
@@ -148,6 +148,12 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Gui.Common/WpfFileDialogService.cs` | `rule:dialog-owner-resolve-uses`・`rule:file-dialog-ownerless-shows` |
 | `src/QuickER.Gui/App.xaml` | `rule:app-shutdown-mode-declaration` |
 | `src/QuickER.Gui/App.xaml.cs` | `rule:app-feature-module-shutdown-bypasses`・`rule:app-feature-module-shutdown-uses`・`rule:app-main-window-assignment`・`rule:app-shutdown-mode-overrides`・`rule:app-ui-crash-handler-bypasses`・`rule:app-ui-crash-handler-uses` |
+| `src/QuickER.Gui/Behaviors/BehaviorInput.cs` | `DiagramEdit/CanvasInput` |
+| `src/QuickER.Gui/Behaviors/CanvasViewportBehavior.cs` | `DiagramEdit/CanvasInput` |
+| `src/QuickER.Gui/Behaviors/DataGridRowReorderBehavior.cs` | `DiagramEdit/CanvasInput` |
+| `src/QuickER.Gui/Behaviors/DragBehavior.cs` | `DiagramEdit/CanvasInput` |
+| `src/QuickER.Gui/Behaviors/RubberBandBehavior.cs` | `DiagramEdit/CanvasInput` |
+| `src/QuickER.Gui/Behaviors/VisualAncestors.cs` | `DiagramEdit/CanvasInput` |
 | `src/QuickER.Gui/Converters/CountToVisibilityConverter.cs` | `table:Converters` |
 | `src/QuickER.Gui/Converters/NullToBooleanConverter.cs` | `table:Converters` |
 | `src/QuickER.Gui/Converters/NullToVisibilityConverter.cs` | `table:Converters` |
@@ -327,6 +333,12 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 - 名前：自動整列の全組の共通の性質と行の指標（図の形 × 整列の種類）
 - テストのソース：`tests/QuickER.Tests/Gui/Services/AutoLayoutScenario.cs`・`tests/QuickER.Tests/Gui/Services/AutoLayoutScenarioRows.cs`・`tests/QuickER.Tests/Gui/Services/AutoLayoutScenarioTests.cs`・`tests/QuickER.Tests/Gui/Services/AutoLayoutDimensions.cs`
 - 範囲：`src/QuickER.Gui/Services/AutoLayoutService.cs`・`src/QuickER.Gui/Services/LayoutGeometry.cs`
+
+### `DiagramEdit/CanvasInput`
+
+- 名前：キャンバスの入力の列の状態機械（本物の MainWindow へキー・マウスの手の列を流し、各手の後に不変条件を表明する。Space の押下の次元表と左ボタンの押下の次元表）
+- テストのソース：`tests/QuickER.Tests/Gui/Behaviors/CanvasInputDimensions.cs`・`tests/QuickER.Tests/Gui/Behaviors/CanvasInputGenerator.cs`・`tests/QuickER.Tests/Gui/Behaviors/CanvasInputHarness.cs`・`tests/QuickER.Tests/Gui/Behaviors/CanvasInputKnownFailures.cs`・`tests/QuickER.Tests/Gui/Behaviors/CanvasInputRows.cs`・`tests/QuickER.Tests/Gui/Behaviors/CanvasInputSteps.cs`・`tests/QuickER.Tests/Gui/Behaviors/CanvasInputTests.cs`
+- 範囲：`src/QuickER.Gui/Behaviors/BehaviorInput.cs`・`src/QuickER.Gui/Behaviors/CanvasViewportBehavior.cs`・`src/QuickER.Gui/Behaviors/DataGridRowReorderBehavior.cs`・`src/QuickER.Gui/Behaviors/DragBehavior.cs`・`src/QuickER.Gui/Behaviors/RubberBandBehavior.cs`・`src/QuickER.Gui/Behaviors/VisualAncestors.cs`
 
 ### `DocumentFile/Scenarios`
 
@@ -793,13 +805,15 @@ src 全体か src の外を読む守り。単位の守りには数えない（�
 | `rule:regex-ignore-case-culture` | src/**/*.cs |
 | `rule:regex-digit-classes` | src/**/*.cs |
 | `rule:ef-core-provider-cache-limit` | tests/**/*.cs（除外 32 件） |
-| `rule:window-activation-collection` | tests/QuickER.Tests/**/*.cs（除外 2 件） |
+| `rule:window-activation-collection` | tests/QuickER.Tests/**/*.cs（除外 3 件） |
 | `rule:window-activation-markers` | tests/QuickER.Tests/AI.Chat/AiChatDialogApiKeyBoxTests.cs・tests/QuickER.Tests/Gui/Behaviors/CanvasViewportBehaviorSpaceKeyTests.cs・tests/QuickER.Tests/Gui/Views/PropertyPanelMemoEditTests.cs |
 | `rule:wpf-main-window-creations` | tests/QuickER.Tests/**/*.cs |
 | `rule:direct-roslyn-parses` | tests/**/*.cs |
 | `rule:test-host-server-gc` | tests/QuickER.Tests/QuickER.Tests.csproj |
 | `rule:test-temp-folder-root-copies` | tests/**/*.cs |
 | `rule:datagrid-row-edits` | src/**/*.xaml |
+| `rule:behavior-input-reads` | src/**/*.cs（除外 1 件） |
+| `rule:behavior-visual-ancestor-copies` | src/**/*.cs（除外 1 件） |
 | `rule:tool-argument-parsing-copies` | src/**/*.cs |
 | `rule:newer-format-warning-text` | src/**/*.cs |
 | `rule:comment-test-names-src` | src/**/*.cs |
@@ -877,5 +891,4 @@ src 全体か src の外を読む守り。単位の守りには数えない（�
 
 | 単位 | 分類 | エンジン・表の外のテスト | 理由 |
 |---|---|---|---|
-| `src/QuickER.Gui/Behaviors` | Pending | 単体の手書きのテストだけ（`tests/QuickER.Tests/Gui/Behaviors`） | キャンバスの操作（パン・ドラッグ・範囲選択・列の折り畳みと並べ替え）のビヘイビア。進行中の操作の状態と後始末は手書きのテストだけが守る。入力の列を手にした状態機械のエンジンで守れる候補 |
 | `src/QuickER.Gui/Views` | Accepted | 単体の手書きのテストだけ（`tests/QuickER.Tests/Gui/Views`） | ダイアログ（バージョン情報・印刷の設定）の code-behind とカードの枠の描画。仕様の軸を持つ状態は ViewModel にあり、エンジンはそちらを守る。画面の振る舞いは手書きの画面のテストが守る |

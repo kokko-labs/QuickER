@@ -26,6 +26,17 @@ internal static partial class SourceRules
     private const string MessageBoxDialogServiceCode =
         "src/QuickER.Gui.Common/MessageBoxDialogService.cs";
 
+    private const string BehaviorInputArea = "QuickER.Gui/Behaviors/BehaviorInput.cs";
+
+    private const string BehaviorInputCode = "src/" + BehaviorInputArea;
+
+    private const string VisualAncestorsArea = "QuickER.Gui/Behaviors/VisualAncestors.cs";
+
+    private const string VisualAncestorsCode = "src/" + VisualAncestorsArea;
+
+    private const string BehaviorInputDefault =
+        "読み口の既定（差し替えが無いときの WPF の値そのもの。走査が空振りしていないことの確認）";
+
     private static readonly (string What, Regex Pattern)[] DialogOwnerResolveForms =
     [
         FixedText("DialogOwner.Resolve()"),
@@ -115,6 +126,69 @@ internal static partial class SourceRules
                     ),
                     1,
                     "DataGrid"
+                ),
+            },
+            // キャンバスのビヘイビアは、マウスのボタン・位置・修飾キーとドラッグ＆ドロップの開始を BehaviorInput から読む
+            // （入力の列のエンジンは読み口を差し替えて流すので、迂回して WPF から直に読むと、エンジンが見る値と製品が読む値が
+            // 食い違ったまま緑になる）。拾う形は BehaviorInputReads。空振りの検知：読み口そのものの 5 つの読み方を拾える
+            SourceRule.Forbid(
+                "behavior-input-reads",
+                "キャンバスのビヘイビアはマウスのボタン・位置・修飾キーとドラッグ＆ドロップの開始を BehaviorInput から読む",
+                Src.Within("QuickER.Gui/Behaviors/")
+                    .Except(
+                        BehaviorInputArea,
+                        "読み口そのもの（差し替えが無いときに WPF の値をそのまま返す）"
+                    ),
+                GuardFinder.Symbols(BehaviorInputReads.Describe)
+            ) with
+            {
+                Witness = new(
+                    SourceScope.Files("src", BehaviorInputCode),
+                    [
+                        new(
+                            BehaviorInputCode,
+                            "MouseEventArgs.LeftButton",
+                            1,
+                            BehaviorInputDefault
+                        ),
+                        new(
+                            BehaviorInputCode,
+                            "MouseEventArgs.MiddleButton",
+                            1,
+                            BehaviorInputDefault
+                        ),
+                        new(
+                            BehaviorInputCode,
+                            "MouseEventArgs.GetPosition",
+                            1,
+                            BehaviorInputDefault
+                        ),
+                        new(BehaviorInputCode, "Keyboard.Modifiers", 1, BehaviorInputDefault),
+                        new(BehaviorInputCode, "DragDrop.DoDragDrop", 1, BehaviorInputDefault),
+                    ]
+                ),
+            },
+            // キャンバスのビヘイビアは、視覚ツリーを上へたどる処理を VisualAncestors の 1 か所に置き、自前でたどる写しを
+            // 持たない（写しごとに止まり方・ContentElement の扱いが食い違う）。拾う形は VisualAncestorWalks。
+            // 空振りの検知：VisualAncestors そのものの 1 つを拾える
+            SourceRule.Forbid(
+                "behavior-visual-ancestor-copies",
+                "キャンバスのビヘイビアは視覚ツリーを上へたどる処理を VisualAncestors に置き、自前でたどらない",
+                Src.Within("QuickER.Gui/Behaviors/")
+                    .Except(VisualAncestorsArea, "たどる処理の正本そのもの"),
+                GuardFinder.Symbols(VisualAncestorWalks.Describe)
+            ) with
+            {
+                Witness = new(
+                    SourceScope.Files("src", VisualAncestorsCode),
+                    [
+                        new(
+                            VisualAncestorsCode,
+                            "VisualTreeHelper.GetParent",
+                            1,
+                            "たどる処理の正本（走査が空振りしていないことの確認）"
+                        ),
+                    ]
                 ),
             },
             // モーダルの親ウィンドウの解決は、2 つのダイアログサービスが DialogOwner.Resolve() を共有する（オーナーの無いモーダルは

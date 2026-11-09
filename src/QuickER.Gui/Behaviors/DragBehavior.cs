@@ -172,15 +172,8 @@ public static class DragBehavior
     }
 
     /// <summary>指定要素から視覚ツリーを上方向にたどり最初に見つかった <see cref="Canvas"/> を返す</summary>
-    private static Canvas? FindCanvas(DependencyObject? d)
-    {
-        while (d is not null and not Canvas)
-        {
-            d = VisualTreeHelper.GetParent(d);
-        }
-
-        return d as Canvas;
-    }
+    private static Canvas? FindCanvas(DependencyObject? d) =>
+        VisualAncestors.FirstOrSelf<Canvas>(d);
 
     /// <summary>マウス押下時にドラッグ開始位置を記録し、移動・リサイズの判定とマウスキャプチャを行う</summary>
     private static void OnMouseDown(object sender, MouseButtonEventArgs e)
@@ -211,14 +204,14 @@ public static class DragBehavior
         _draggedElement = fe;
         _draggedVm = vm;
         _owner = Window.GetWindow(fe)?.DataContext as MainViewModel;
-        _startMouse = e.GetPosition(canvas);
+        _startMouse = BehaviorInput.GetPosition(e, canvas);
         _startX = vm.X;
         _startY = vm.Y;
         _isGroupDragging = false;
         GroupMembers = new List<(EntityViewModel, double, double)>();
 
         // 右端グリップ範囲の押下はリサイズ、それ以外は移動として扱う
-        var local = e.GetPosition(fe);
+        var local = BehaviorInput.GetPosition(e, fe);
 
         if (local.X >= fe.ActualWidth - GripWidth && fe.ActualWidth > 0)
         {
@@ -233,7 +226,8 @@ public static class DragBehavior
 
             // 選択済みメンバーを Ctrl なしで押下した場合はグループ移動へ入る
             // （Ctrl 押下時はトグル操作の意図なのでグループ移動しない）
-            var isCtrlDown = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+            var isCtrlDown =
+                (BehaviorInput.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
 
             if (
                 !isCtrlDown
@@ -251,41 +245,35 @@ public static class DragBehavior
         e.Handled = true;
     }
 
-    /// <summary>マウス移動時の処理を、マウス位置の求め方とボタンの状態を添えて <see cref="HandleMouseMove"/> へ渡す</summary>
-    private static void OnMouseMove(object sender, MouseEventArgs e) =>
-        HandleMouseMove(sender as FrameworkElement, e.GetPosition, e.LeftButton);
-
     /// <summary>
     /// マウス移動時に、押下前なら右端グリップ上のカーソル形状を切り替え、リサイズなら幅を、移動なら座標を
     /// ViewModel へ反映する
     /// </summary>
-    /// <param name="sender">イベントを受けた要素（カード）</param>
-    /// <param name="getPosition">指定要素を基準にしたマウス位置を返す関数</param>
-    /// <param name="leftButton">左ボタンの状態</param>
     /// <remarks>
-    /// マウス位置を引数で受けるのは、テストから実際のカーソル位置に依らずに呼ぶため
-    /// （擬似のマウスイベントの位置は実際のカーソル位置になる）。
+    /// パンの待機中・パン中（<see cref="CanvasViewportBehavior.IsPanActive"/>）は、押下中の移動・リサイズを当てない
+    /// （押した後に Space を押しても、見回しの間にカードが動かない）。Space を離せば、その後の移動から続きを当てる。
     /// </remarks>
-    internal static void HandleMouseMove(
-        FrameworkElement? sender,
-        Func<IInputElement, Point> getPosition,
-        MouseButtonState leftButton
-    )
+    private static void OnMouseMove(object sender, MouseEventArgs e)
     {
         // 押下前（ドラッグ・リサイズの対象が無い）は、右端グリップ上でカーソル形状だけを切り替える
         if (_draggedElement is null || _draggedVm is null)
         {
-            if (sender is not null)
+            if (sender is FrameworkElement hovered)
             {
-                sender.Cursor = ResolveHoverCursor(sender, getPosition(sender));
+                hovered.Cursor = ResolveHoverCursor(hovered, BehaviorInput.GetPosition(e, hovered));
             }
 
             return;
         }
 
-        if (leftButton != MouseButtonState.Pressed)
+        if (BehaviorInput.LeftButton(e) != MouseButtonState.Pressed)
         {
             EndDrag(treatAsClick: false);
+            return;
+        }
+
+        if (CanvasViewportBehavior.IsPanActive)
+        {
             return;
         }
 
@@ -296,7 +284,7 @@ public static class DragBehavior
             return;
         }
 
-        ApplyMove(getPosition(canvas));
+        ApplyMove(BehaviorInput.GetPosition(e, canvas));
     }
 
     /// <summary>進行中のドラッグ・リサイズへ、キャンバス上のマウス位置を反映する</summary>
@@ -405,7 +393,7 @@ public static class DragBehavior
 
         if (canvas is not null)
         {
-            var pos = e.GetPosition(canvas);
+            var pos = BehaviorInput.GetPosition(e, canvas);
             movedPx = (pos - _startMouse).Length;
         }
 
@@ -425,23 +413,18 @@ public static class DragBehavior
     /// <param name="treatAsClick">true の場合は移動を取り消して ViewModel のクリックハンドラを呼ぶ</param>
     private static void EndDrag(bool treatAsClick)
     {
-        var element = _draggedElement;
-        var vm = _draggedVm;
-        var owner = _owner;
-        var oldX = _startX;
-        var oldY = _startY;
-        var oldWidth = _startWidth;
-        var wasResizing = _isResizing;
-        var wasGroupDragging = _isGroupDragging;
-        var groupMembers = GroupMembers;
-
-        _isDragging = false;
-        _isResizing = false;
-        _isGroupDragging = false;
-        GroupMembers = new List<(EntityViewModel, double, double)>();
-        _draggedElement = null;
-        _draggedVm = null;
-        _owner = null;
+        var (
+            element,
+            vm,
+            owner,
+            oldX,
+            oldY,
+            oldWidth,
+            wasResizing,
+            wasGroupDragging,
+            groupMembers,
+            _
+        ) = TakeInteraction();
 
         if (element is null || vm is null)
         {
@@ -462,7 +445,7 @@ public static class DragBehavior
             return;
         }
 
-        var isCtrlDown = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+        var isCtrlDown = (BehaviorInput.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
 
         if (treatAsClick)
         {
@@ -544,26 +527,20 @@ public static class DragBehavior
     /// </remarks>
     internal static void CancelActiveDrag()
     {
-        var element = _draggedElement;
-        var vm = _draggedVm;
-        var owner = _owner;
-        var startX = _startX;
-        var startY = _startY;
-        var startWidth = _startWidth;
-        var wasResizing = _isResizing;
-        var wasGroupDragging = _isGroupDragging;
-        var groupMembers = GroupMembers;
-        var wasActive = _isDragging || _isResizing;
-
         // 後続の MouseUp / MouseMove / LostMouseCapture を素通りさせるため、
         // キャプチャ解放より先に静的状態を落とす（EndDrag と同じ順序）
-        _isDragging = false;
-        _isResizing = false;
-        _isGroupDragging = false;
-        GroupMembers = new List<(EntityViewModel, double, double)>();
-        _draggedElement = null;
-        _draggedVm = null;
-        _owner = null;
+        var (
+            element,
+            vm,
+            owner,
+            startX,
+            startY,
+            startWidth,
+            wasResizing,
+            wasGroupDragging,
+            groupMembers,
+            wasActive
+        ) = TakeInteraction();
 
         if (wasActive && vm is not null)
         {
@@ -594,6 +571,57 @@ public static class DragBehavior
 
         element.Cursor = null;
     }
+
+    /// <summary>進行中の操作を写し取ってから、静的状態を落とす（<see cref="EndDrag"/> と <see cref="CancelActiveDrag"/> が共有する）</summary>
+    /// <remarks>写し取りより先に落とすと、後始末が読む開始時点の値を失う</remarks>
+    private static Interaction TakeInteraction()
+    {
+        var taken = new Interaction(
+            _draggedElement,
+            _draggedVm,
+            _owner,
+            _startX,
+            _startY,
+            _startWidth,
+            _isResizing,
+            _isGroupDragging,
+            GroupMembers,
+            _isDragging || _isResizing
+        );
+
+        _isDragging = false;
+        _isResizing = false;
+        _isGroupDragging = false;
+        GroupMembers = new List<(EntityViewModel, double, double)>();
+        _draggedElement = null;
+        _draggedVm = null;
+        _owner = null;
+        return taken;
+    }
+
+    /// <summary>写し取った進行中の操作</summary>
+    /// <param name="Element">ドラッグ中の要素</param>
+    /// <param name="Vm">ドラッグ中のエンティティ</param>
+    /// <param name="Owner">ドラッグ中の要素を表示しているウィンドウの ViewModel</param>
+    /// <param name="StartX">開始時点の X 座標</param>
+    /// <param name="StartY">開始時点の Y 座標</param>
+    /// <param name="StartWidth">開始時点の幅</param>
+    /// <param name="WasResizing">リサイズだったか</param>
+    /// <param name="WasGroupDragging">グループ移動だったか</param>
+    /// <param name="GroupMembers">グループ移動のメンバーと開始時点の座標</param>
+    /// <param name="WasActive">移動かリサイズが進行中だったか</param>
+    private readonly record struct Interaction(
+        FrameworkElement? Element,
+        EntityViewModel? Vm,
+        MainViewModel? Owner,
+        double StartX,
+        double StartY,
+        double StartWidth,
+        bool WasResizing,
+        bool WasGroupDragging,
+        List<(EntityViewModel Entity, double StartX, double StartY)> GroupMembers,
+        bool WasActive
+    );
 
     /// <summary>テスト専用: 移動・リサイズが進行中として残っているか（後続 MouseUp のガード条件そのもの）</summary>
     internal static bool IsInteractionActiveForTests => _isDragging || _isResizing;

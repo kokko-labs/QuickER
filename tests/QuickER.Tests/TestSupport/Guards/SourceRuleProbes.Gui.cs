@@ -384,5 +384,158 @@ internal static partial class SourceRuleProbes
                     ),
                 ]
             ),
+            // WPF のマウスのボタン・位置・修飾キー・ドラッグ＆ドロップの開始を、受け手の書き方（引数・静的な型・デバイス）と
+            // メソッドグループに依らず拾う。同じ名前の自前の読み口・列挙値・イベント名は拾わない
+            new SourceRuleProbe(
+                "behavior-input-reads-forms",
+                "behavior-input-reads",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System;
+                        using System.Windows;
+                        using System.Windows.Input;
+
+                        internal static class Reader
+                        {
+                            public static MouseButtonState LeftButton(MouseEventArgs e) => MouseButtonState.Released;
+                            public static ModifierKeys Modifiers => ModifierKeys.None;
+                            public static Point GetPosition(MouseEventArgs e, IInputElement? to) => default;
+                        }
+
+                        internal static class Probe
+                        {
+                            public static void Hits(MouseEventArgs e, MouseButtonEventArgs b, DependencyObject d, KeyboardDevice k)
+                            {
+                                _ = e.LeftButton;
+                                _ = e.MiddleButton;
+                                _ = b.ButtonState;
+                                _ = e.GetPosition(null);
+                                Func<IInputElement, Point> get = e.GetPosition;
+                                _ = Mouse.LeftButton;
+                                _ = e.MouseDevice.LeftButton;
+                                _ = Keyboard.Modifiers;
+                                _ = k.Modifiers;
+                                DragDrop.DoDragDrop(d, "x", DragDropEffects.Move);
+                            }
+
+                            public static void Misses(MouseEventArgs e, MouseButtonEventArgs b)
+                            {
+                                _ = Reader.LeftButton(e);
+                                _ = Reader.Modifiers;
+                                _ = Reader.GetPosition(e, null);
+                                _ = MouseButtonState.Pressed;
+                                _ = b.ChangedButton == MouseButton.Left;
+                                _ = UIElement.MouseLeftButtonDownEvent;
+                                _ = ModifierKeys.Control;
+                            }
+                        }
+                        """,
+                        "MouseEventArgs.LeftButton",
+                        "MouseEventArgs.MiddleButton",
+                        "MouseButtonEventArgs.ButtonState",
+                        "MouseEventArgs.GetPosition",
+                        "MouseEventArgs.GetPosition",
+                        "Mouse.LeftButton",
+                        "MouseDevice.LeftButton",
+                        "Keyboard.Modifiers",
+                        "KeyboardDevice.Modifiers",
+                        "DragDrop.DoDragDrop"
+                    ),
+                ]
+            ),
+            // 視覚・論理ツリーの親をたどる呼び出しを、受け手の書き方（型名・using static）に依らず拾い、同名の自前のメソッドは拾わない
+            new SourceRuleProbe(
+                "behavior-visual-ancestor-copies-forms",
+                "behavior-visual-ancestor-copies",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System.Windows;
+                        using System.Windows.Media;
+                        using VTH = System.Windows.Media.VisualTreeHelper;
+
+                        internal static class Tree
+                        {
+                            public static DependencyObject? GetParent(DependencyObject node) => null;
+                        }
+
+                        internal static class Probe
+                        {
+                            public static void Walk(DependencyObject node)
+                            {
+                                _ = VisualTreeHelper.GetParent(node);
+                                _ = VTH.GetParent(node);
+                                _ = LogicalTreeHelper.GetParent(node);
+                                _ = Tree.GetParent(node);
+                            }
+                        }
+                        """,
+                        "VisualTreeHelper.GetParent",
+                        "VisualTreeHelper.GetParent",
+                        "LogicalTreeHelper.GetParent"
+                    ),
+                ]
+            ),
+            new SourceRuleProbe(
+                "behavior-visual-ancestor-copies-inactive-branch",
+                "behavior-visual-ancestor-copies",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System.Windows;
+                        using System.Windows.Media;
+
+                        internal static class Probe
+                        {
+                            public static DependencyObject? Up(DependencyObject node)
+                            {
+                        #if QUICKER_PROBE_BRANCH
+                                return VisualTreeHelper.GetParent(node);
+                        #else
+                                return null;
+                        #endif
+                            }
+                        }
+                        """,
+                        "VisualTreeHelper.GetParent"
+                    ),
+                ]
+            ) with
+            {
+                InactiveBranch = true,
+            },
+            // シンボルの走査は条件コンパイルの変種も読むので、外れる分岐の中の読み方も拾う
+            new SourceRuleProbe(
+                "behavior-input-reads-inactive-branch",
+                "behavior-input-reads",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System.Windows.Input;
+
+                        internal static class Probe
+                        {
+                            public static bool Pressed(MouseEventArgs e)
+                            {
+                        #if QUICKER_PROBE_BRANCH
+                                return e.LeftButton == MouseButtonState.Pressed;
+                        #else
+                                return false;
+                        #endif
+                            }
+                        }
+                        """,
+                        "MouseEventArgs.LeftButton"
+                    ),
+                ]
+            ) with
+            {
+                InactiveBranch = true,
+            },
         ];
 }

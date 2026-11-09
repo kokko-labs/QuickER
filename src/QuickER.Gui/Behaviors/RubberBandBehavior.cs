@@ -1,6 +1,6 @@
+using System.Linq;
 using System.Windows;
 using System.Windows.Input;
-using System.Windows.Media;
 using QuickER.ViewModels;
 
 namespace QuickER.Behaviors;
@@ -25,9 +25,15 @@ namespace QuickER.Behaviors;
 ///   <item>ドラッグ中は VM の矩形状態（<see cref="MainViewModel.IsRubberBandVisible"/> ほか）を更新する。
 ///     矩形は DiagramCanvas 内に描画されるため LayoutTransform（ズーム）に透過的に追従する</item>
 ///   <item>解放時、ラバーバンドが成立していれば <see cref="MainViewModel.ApplyRubberBandSelection"/> で
-///     交差選択を確定し、イベントを Handled にして <c>CanvasClickCommand</c> の解除を抑止する</item>
+///     交差選択を確定する。CanvasClickCommand の全解除は押下の MouseBinding で既に済んでいるので、確定した選択が
+///     そのまま残る</item>
 /// </list>
-/// <para>パン中（<see cref="CanvasViewportBehavior.IsPanActive"/>）はラバーバンドを開始しない。</para>
+/// <para>パン中（<see cref="CanvasViewportBehavior.IsPanActive"/>）はラバーバンドを開始しない（押した後に Space を押した待機の間も）。</para>
+/// <para>
+/// 保留（押下から閾値判定までの起点）はその押下 1 回のもの。ウィンドウのどこで離しても、別の所で押しても捨てる。
+/// 保留の間はキャプチャしないので、キャンバスの外で離すと選択面へ解放が届かない。ウィンドウで見張らないと保留が残り、
+/// 次にキャンバスの外で押してキャンバスへ入るドラッグで、古い起点からラバーバンドが始まる。
+/// </para>
 /// </remarks>
 public static class RubberBandBehavior
 {
@@ -56,6 +62,10 @@ public static class RubberBandBehavior
     /// <summary>Ctrl 押下（既存選択への追加）でドラッグを開始したかどうか</summary>
     [ThreadStatic]
     private static bool _additive;
+
+    /// <summary>保留の間、解放と別の押下を見張っているウィンドウ（見張っていなければ null）</summary>
+    [ThreadStatic]
+    private static Window? _watchedWindow;
 
     // ---------- 添付プロパティ ----------
 
@@ -109,27 +119,14 @@ public static class RubberBandBehavior
     /// リレーションは線・ラベルのクリック選択へ委ねる（線を押して少し動かしただけで、選んだリレーションが
     /// ラバーバンドの確定で選択から外れないようにする。帰結として、線の当たり判定の上からは矩形選択を始められない）。
     /// </remarks>
-    private static bool IsInsideDiagramElement(object? originalSource, FrameworkElement surface)
-    {
-        var current = originalSource as DependencyObject;
-
-        while (current is not null && !ReferenceEquals(current, surface))
-        {
-            if (
-                current is FrameworkElement
-                {
-                    DataContext: EntityViewModel or RelationshipViewModel
-                }
-            )
-            {
-                return true;
-            }
-
-            current = VisualTreeHelper.GetParent(current);
-        }
-
-        return false;
-    }
+    private static bool IsInsideDiagramElement(object? originalSource, FrameworkElement surface) =>
+        VisualAncestors
+            .SelfAndAncestors(originalSource as DependencyObject)
+            .TakeWhile(current => !ReferenceEquals(current, surface))
+            .Any(current =>
+                current
+                    is FrameworkElement { DataContext: EntityViewModel or RelationshipViewModel }
+            );
 
     /// <summary>空白部押下でラバーバンドの起点を記録する（この時点では矩形もキャプチャも出さない）</summary>
     private static void OnMouseDown(object sender, MouseButtonEventArgs e)
@@ -141,6 +138,7 @@ public static class RubberBandBehavior
         {
             _pending = false;
             _surface = null;
+            UnwatchWindow();
         }
 
         // パン中はラバーバンドを開始しない
@@ -161,10 +159,11 @@ public static class RubberBandBehavior
         }
 
         _surface = fe;
-        _origin = e.GetPosition(fe);
+        _origin = BehaviorInput.GetPosition(e, fe);
         _pending = true;
         _active = false;
-        _additive = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+        _additive = (BehaviorInput.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+        WatchWindow(Window.GetWindow(fe));
 
         // 通常はここで Handled にしない（閾値未満のクリックは CanvasClickCommand の全解除へ委ねる）。
         // Ctrl 押下＝既存選択への追加意図のときだけ Handled にし、押下時点の全解除から選択を保護する
@@ -177,7 +176,7 @@ public static class RubberBandBehavior
     /// <summary>閾値を超えたらラバーバンドを開始し、矩形の位置・サイズを更新する</summary>
     private static void OnMouseMove(object sender, MouseEventArgs e)
     {
-        if (_surface is null || e.LeftButton != MouseButtonState.Pressed)
+        if (_surface is null || BehaviorInput.LeftButton(e) != MouseButtonState.Pressed)
         {
             return;
         }
@@ -187,12 +186,13 @@ public static class RubberBandBehavior
             return;
         }
 
-        var current = e.GetPosition(_surface);
+        var current = BehaviorInput.GetPosition(e, _surface);
 
-        // 未成立時は閾値超えでラバーバンドを開始する（キャプチャして矩形を表示）
+        // 未成立時は閾値超えでラバーバンドを開始する（キャプチャして矩形を表示）。
+        // パンの待機中・パン中は開始しない（押した後に Space を押した見回しの間も）
         if (_pending && !_active)
         {
-            if ((current - _origin).Length < DragThreshold)
+            if ((current - _origin).Length < DragThreshold || CanvasViewportBehavior.IsPanActive)
             {
                 return;
             }
@@ -222,6 +222,7 @@ public static class RubberBandBehavior
         _pending = false;
         _active = false;
         _surface = null;
+        UnwatchWindow();
 
         if (surface is null)
         {
@@ -242,7 +243,7 @@ public static class RubberBandBehavior
 
         if (!active)
         {
-            // 閾値未満のクリックはラバーバンド不成立。CanvasClickCommand へ委ね全選択解除させる
+            // 閾値未満のクリックはラバーバンド不成立（全選択解除は押下の CanvasClickCommand が済ませている）
             return;
         }
 
@@ -255,8 +256,74 @@ public static class RubberBandBehavior
 
         vm.ApplyRubberBandSelection(area, additive);
 
-        // ラバーバンド成立時は Handled にして CanvasClickCommand の解除を抑止する
+        // 成立したラバーバンドの解放はここで処理済みにする（CanvasClickCommand の MouseBinding は押下で発火するので、
+        // 解放を処理済みにしても全解除は抑止しない。全解除の後に、この交差選択が確定する）
         e.Handled = true;
+    }
+
+    /// <summary>保留の間、ウィンドウのどこでの解放と別の押下も見張る（保留をその押下 1 回のものにする）</summary>
+    private static void WatchWindow(Window? window)
+    {
+        UnwatchWindow();
+
+        if (window is null)
+        {
+            return;
+        }
+
+        window.AddHandler(
+            UIElement.PreviewMouseUpEvent,
+            (MouseButtonEventHandler)OnWindowMouseEvent,
+            true
+        );
+        window.AddHandler(
+            UIElement.PreviewMouseDownEvent,
+            (MouseButtonEventHandler)OnWindowMouseEvent,
+            true
+        );
+        _watchedWindow = window;
+    }
+
+    /// <summary>ウィンドウの見張りを外す</summary>
+    private static void UnwatchWindow()
+    {
+        if (_watchedWindow is not { } window)
+        {
+            return;
+        }
+
+        window.RemoveHandler(
+            UIElement.PreviewMouseUpEvent,
+            (MouseButtonEventHandler)OnWindowMouseEvent
+        );
+        window.RemoveHandler(
+            UIElement.PreviewMouseDownEvent,
+            (MouseButtonEventHandler)OnWindowMouseEvent
+        );
+        _watchedWindow = null;
+    }
+
+    /// <summary>
+    /// ウィンドウでの左の解放か別の押下で、成立していない保留を捨てる（成立したラバーバンドはキャプチャで選択面へ解放が届く）
+    /// </summary>
+    /// <remarks>
+    /// 選択面の上の解放でも、トンネルの順でここが先に走る。保留を捨てるのは <see cref="OnMouseUp"/> の未成立の扱いと同じ
+    /// （矩形は出ておらず、選択も確定しない）。
+    /// </remarks>
+    private static void OnWindowMouseEvent(object sender, MouseButtonEventArgs e)
+    {
+        if (e.RoutedEvent == UIElement.PreviewMouseUpEvent && e.ChangedButton != MouseButton.Left)
+        {
+            return;
+        }
+
+        if (!_active)
+        {
+            _pending = false;
+            _surface = null;
+        }
+
+        UnwatchWindow();
     }
 
     /// <summary>外部要因でキャプチャを失った場合に矩形状態を後始末する</summary>
@@ -270,6 +337,7 @@ public static class RubberBandBehavior
         _pending = false;
         _active = false;
         _surface = null;
+        UnwatchWindow();
     }
 
     /// <summary>進行中のラバーバンド選択を打ち切る（矩形を消し、交差選択は確定しない）</summary>
@@ -285,6 +353,7 @@ public static class RubberBandBehavior
         _pending = false;
         _active = false;
         _surface = null;
+        UnwatchWindow();
 
         if (surface is null)
         {

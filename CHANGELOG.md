@@ -90,6 +90,10 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **The overwrite confirmation of mock project generation now lists hidden solutions and projects in the output folder** — another `.sln`, `.slnx` or `.csproj` with the hidden or system attribute was left out, while QuickER's own files were listed even when hidden
 - **A hand-edited `mock.json` now has the entity declarations of its screens normalized when it is opened, and declarations of the same entity on one screen are merged** — as when the AI saves a screen, names are trimmed, operations are put in C, R, U, D order, and declarations without a name or a valid operation are dropped. Before, the CRUD table of the design document could put the operations of one declaration in another column, and the resume prompt passed the broken declarations to the AI. When the AI declares the same entity twice in `save_screen`, the operations are merged and the tool result warns
 
+#### Diagram editing
+
+- **Holding Space to pan the canvas no longer presses a button that gets the focus during the pan** — the key's auto-repeat could reach a button, check box or grid cell that the focus moved to while you held Space (with Tab, or one you had clicked before the pan), and pressed or toggled it while the pan went on. The repeat now stays with the pan until you release Space
+
 #### Diagram files
 
 - **A diagram file that leaves out the key of a table name, column name, column type, query name, parameter name or projection field name is no longer loaded, and the message names where the key is missing** — the file opened with `NewTable`, `NewColumn`, `int` and similar defaults in its place, and saving it (or an MCP tool changing it) wrote those defaults back, so the original contents were lost. This happens only when the file is edited by hand; QuickER always writes these keys. An explicit `null` in these places was already refused, and the message for both now says the value is missing or null

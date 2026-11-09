@@ -44,6 +44,14 @@ public sealed class EngineFingerprintDriftTests
             Gui.ViewModels.DocumentFileGenerator.Summary
         );
 
+    [Fact(DisplayName = "[指紋] キャンバスの入力の列の生成器は、記録と同じ手の列を作る")]
+    public void CanvasInput_GeneratesRecordedInputs() =>
+        Verify(
+            "CanvasInput",
+            Gui.Behaviors.CanvasInputGenerator.Seeds,
+            Gui.Behaviors.CanvasInputGenerator.Summary
+        );
+
     /// <summary>種ごとの要約の指紋を記録と照合する（書き直しの指定があれば記録を書き直す）</summary>
     private static void Verify(string engineId, SeedSettings settings, Func<int, string> summary)
     {

@@ -13,7 +13,7 @@ namespace QuickER.Tests.TestSupport;
 public sealed class EngineSummaryEnvironmentTests
 {
     /// <summary>エンジンの名前</summary>
-    public static TheoryData<string> Engines() => new("Dsl", "Name", "DocumentFile");
+    public static TheoryData<string> Engines() => new("Dsl", "Name", "DocumentFile", "CanvasInput");
 
     [Theory(DisplayName = "[指紋] 要約は外側のカルチャ（ja-JP・en-US）に依らない")]
     [MemberData(nameof(Engines))]
@@ -42,12 +42,16 @@ public sealed class EngineSummaryEnvironmentTests
             "Dsl" => EngineFingerprintDriftTests.DslSummary,
             "Name" => EngineFingerprintDriftTests.NameSummary,
             "DocumentFile" => Gui.ViewModels.DocumentFileGenerator.Summary,
+            "CanvasInput" => Gui.Behaviors.CanvasInputGenerator.Summary,
             _ => throw new ArgumentOutOfRangeException(nameof(engineId), engineId, null),
         };
 
     /// <summary>エンジンの種の決め方（簡易 DSL と名前は同じ決め方を共有する）</summary>
     private static SeedSettings SeedsOf(string engineId) =>
-        engineId == "DocumentFile"
-            ? Gui.ViewModels.DocumentFileGenerator.Seeds
-            : NameFuzz.SeedSettings;
+        engineId switch
+        {
+            "DocumentFile" => Gui.ViewModels.DocumentFileGenerator.Seeds,
+            "CanvasInput" => Gui.Behaviors.CanvasInputGenerator.Seeds,
+            _ => NameFuzz.SeedSettings,
+        };
 }
