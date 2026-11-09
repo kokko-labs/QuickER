@@ -1332,7 +1332,10 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
     /// ローカルの 3 つの表のリポジトリへ同じ Save フックの登録簿を渡して、ジャーナルを共有するエンジンを組む
     /// （<paramref name="passToTables"/> が false なら、表へは登録簿を渡さない）。
     /// </summary>
-    private SyncEngine CreateEngineWithLocalHooks(SaveHookRegistry hooks, bool passToTables = true)
+    private protected SyncEngine CreateEngineWithLocalHooks(
+        SaveHookRegistry hooks,
+        bool passToTables = true
+    )
     {
         var factory = new LightJournalSyncConnectionFactory(LocalConnectionString);
         var registry = passToTables ? hooks : null;

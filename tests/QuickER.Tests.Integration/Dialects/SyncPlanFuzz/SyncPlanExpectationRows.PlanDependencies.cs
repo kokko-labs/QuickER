@@ -6,6 +6,7 @@ using QuickER.Provider;
 using QuickER.Tests.TestSupport.Engines;
 using C = QuickER.Tests.Integration.Dialects.SyncPlanFuzz.SyncPlanExpectationCapabilities;
 using I = QuickER.Tests.Integration.Dialects.SyncPlanFuzz.ExpectationItems;
+using ProviderStrings = QuickER.Provider.Resources.Strings;
 using S = QuickER.Tests.Integration.Dialects.SyncPlanFuzz.ExpectationSchema;
 
 namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
@@ -333,6 +334,14 @@ internal static partial class SyncPlanExpectationRows
                                     Entity = w.Live["customer"],
                                     Column = S.Nullable("id", newType),
                                     OldColumn = w.Live.Col("customer", "id"),
+                                    // 差分が付ける説明（型の変更と NULL 許容化の両方）
+                                    Description =
+                                        ColumnChangePrefix("customer", "id")
+                                        + string.Join(
+                                            " / ",
+                                            TypeChange("INT", newType),
+                                            NullableChangeToAllow
+                                        ),
                                     IsSelected = true,
                                 },
                             ]
@@ -348,7 +357,13 @@ internal static partial class SyncPlanExpectationRows
                             {
                                 e.Sections.Count("AlterColumn: *", 1)
                                     .Items.Count("AlterColumn > *", 1)
-                                    .Items.Single("AlterColumn > * col=BIGINT notnull*");
+                                    // 残す複製の説明は型の変更だけ（外した NULL 許容化を書かない）
+                                    .Items.Single(
+                                        "AlterColumn > * col=BIGINT notnull* desc=\""
+                                            + ColumnChangePrefix("customer", "id")
+                                            + TypeChange("INT", "BIGINT")
+                                            + "\""
+                                    );
                             }
                             else
                             {
@@ -356,7 +371,60 @@ internal static partial class SyncPlanExpectationRows
                             }
                         });
             }),
+            Row(
+                    "plan-dependency-self-referencing-fk-on-unselected-new-table-names-table-once",
+                    "依存: 選んでいない新しい表の自己参照の外部キーの追加は、足りない表を 1 回だけ名指しする",
+                    DialectNames.SqlServer
+                )
+                .Live(s => ExpectationScenarios.CustomerOrders(s))
+                .Items(_ => [SelfReferencingForeignKeyOnNewTable()])
+                .Expect(e =>
+                    e.Sections.Empty()
+                        .Warnings.Exact(
+                            "SelectedItemRequiresUnselectedItem(node): FK_node_node (node)"
+                        )
+                ),
         ];
+
+    /// <summary>列の変更の説明の頭（「列 表.列: 」）</summary>
+    private static string ColumnChangePrefix(string table, string column) =>
+        string.Format(ProviderStrings.Diff_ColumnChangePrefix, table, column);
+
+    /// <summary>型の変更の説明（「旧 → 新」）</summary>
+    private static string TypeChange(string oldType, string newType) =>
+        string.Format(ProviderStrings.Diff_TypeChange, oldType, newType);
+
+    /// <summary>NOT NULL から NULL 許容への変更の説明</summary>
+    private static string NullableChangeToAllow =>
+        string.Format(
+            ProviderStrings.Diff_NullableChange,
+            ProviderStrings.Diff_Nullable_Deny,
+            ProviderStrings.Diff_Nullable_Allow
+        );
+
+    /// <summary>
+    /// DB に無い表 node（主キー id・parent_id）の自己参照の外部キー FK_node_node の追加項目（表の追加は選ばない）
+    /// </summary>
+    private static SchemaDiffItem SelfReferencingForeignKeyOnNewTable()
+    {
+        var node = new Entity { TableName = "node" };
+        node.Columns.Add(S.Pk("id", "INT"));
+        node.Columns.Add(S.Nullable("parent_id", "INT"));
+
+        return new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AddForeignKey,
+            TableName = "node",
+            ColumnName = "parent_id",
+            Entity = node,
+            ParentEntity = node,
+            ChildEntity = node,
+            Relationship = new Relationship(),
+            ForeignKeyName = "FK_node_node",
+            ForeignKeyColumnPairs = [new("id", "parent_id")],
+            IsSelected = true,
+        };
+    }
 
     /// <summary>
     /// DB 側の orders へ足す（差分では AddColumn になる）列 customer_ref の外部キー FK_orders_customer_ref の追加項目を作る

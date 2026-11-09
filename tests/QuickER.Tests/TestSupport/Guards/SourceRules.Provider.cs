@@ -350,6 +350,39 @@ internal static partial class SourceRules
                     "再構築の合成で、外す外部キーの項目（削除の項目のリレーションは live のもの）を live の外部キーと名前で突き合わせる（警告の名指しではない）"
                 )
             ),
+            // DB の取込・DDL・差分・同期の計画は、列が NULL を持てるかを ColumnNullability.AllowsNull で読み、NULL 許容の印
+            // （Column.IsNullable）を直接読まない。図は主キーの列に印を持てる（図のファイルの手書き）ので、印をそのまま読むと
+            // DDL が NOT NULL で作る列を NULL 許容とみなし、同じ実効の図から違う計画・注記を作る。
+            // 取込は主キーの列の印を false にそろえるので、live の列でも AllowsNull と印は同じ値になり、図の列と見分けずに禁じられる。
+            // 書き込み（代入・初期化子の左辺）は数えない。取込のファイルに読み取りは無い（印を DB のカタログから書くだけ）ので除外しない
+            SourceRule.Forbid(
+                "provider-column-nullability-raw-reads",
+                "QuickER.Provider* は列の NULL 許容の印を直接読まず、ColumnNullability.AllowsNull を通す",
+                Src.Within("QuickER.Provider"),
+                GuardFinder.Symbols(ColumnNullableRawReads.Describe),
+                new GuardKnown(
+                    "src/QuickER.Provider/SchemaSignature.cs",
+                    "Compute",
+                    1,
+                    "図の構造の指紋に保存の形の印そのものを記録する（印が変われば置き換えの確認を出す。実効値の判定ではない）"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/IdentityColumnComment.cs",
+                    "Build",
+                    1,
+                    "主キーでない NOT NULL の採番列の判定（主キーでない列では印がそのまま実効値。規則 column-nullability-copies の既知と同じ）"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/DiagramTypeConverter.cs",
+                    "CreatePlan",
+                    1,
+                    "方言切替で行バージョンを失う主キーでない NOT NULL の列の判定（主キーでない列では印がそのまま実効値。規則 column-nullability-copies の既知と同じ）"
+                )
+            ) with
+            {
+                // 範囲が 6 つのプロジェクトを読んでいること（いまは 118 ファイル。本体の QuickER.Provider だけなら 54）
+                MinimumFiles = 100,
+            },
             // 取込警告の文言は SchemaImportWarningText.Describe（QuickER.Provider）が持ち、表示側は種別で分岐しない。種別で分岐する形
             // （switch のアームの定数パターン・is のパターン・case ラベル・== / != の比較）のうち SchemaImportWarningKind. を含むものを
             // 数える（種別を作る式＝方言のインポータの「"view" => ViewExcluded」の右辺は分岐ではない）

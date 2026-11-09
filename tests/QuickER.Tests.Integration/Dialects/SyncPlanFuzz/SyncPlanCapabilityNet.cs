@@ -500,6 +500,17 @@ internal static class SyncPlanCapabilityNetRunner
             capabilities
         );
         outcome.Violations.AddRange(verdict.Violations);
+        outcome.Violations.AddRange(
+            PrimaryKeyNullableFlagProblems(
+                provider,
+                before,
+                targetEntities,
+                targetRelationships,
+                diff.Items,
+                plan,
+                outcome.Script
+            )
+        );
 
         if (verdict.PredictedFailure is not null)
         {
@@ -508,6 +519,162 @@ internal static class SyncPlanCapabilityNetRunner
 
         return outcome;
     }
+
+    /// <summary>関係 N1 の違反の頭</summary>
+    public const string NullableFlagRelationPrefix = "relation N1: ";
+
+    /// <summary>
+    /// 関係 N1：目標の図の主キーの列に NULL 許容の印を立てても、差分・計画の文・警告・外した項目は変わらない
+    /// （破れた面ごとに違反の文を返す）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 主キーの列は印に依らず NOT NULL（<see cref="ColumnNullability.AllowsNull"/>）。図は主キーの列に印を持てる（図のファイルの
+    /// 手書き。GUI・MCP・取込は落とす）ので、差分・計画・同期スクリプトが印をそのまま読むと、同じ実効の図から別の計画を作る。
+    /// </para>
+    /// <para>
+    /// DB 側の図には立てない。DB 側の図は取込が作り、取込は主キーの列の印を false にそろえる（5 方言の SchemaImporter）。その印は、
+    /// 主キーの変更で列が主キーから外れたとき、SQLite の再構築が写す live の列の NOT NULL として意味を持つ（立てると再構築の
+    /// 新しい表の列が NULL 許容になる＝入力が製品の契約の外）。
+    /// </para>
+    /// <para>
+    /// 選び方は元のケースのものを差分の位置で写す（生成器の選び方は乱数を引くので、2 回呼ぶと種の列が変わる）。差分の項目の
+    /// 並び・種類・説明が元と食い違えば、計画を比べずに差分の違反だけを返す。
+    /// </para>
+    /// </remarks>
+    internal static IEnumerable<string> PrimaryKeyNullableFlagProblems(
+        IDatabaseProvider provider,
+        SchemaImportResult before,
+        IReadOnlyList<Entity> targetEntities,
+        IReadOnlyList<Relationship> targetRelationships,
+        IReadOnlyList<SchemaDiffItem> items,
+        SyncPlan plan,
+        string script
+    )
+    {
+        var capabilities = provider.SyncCapabilities;
+        var flaggedTarget = FlagPrimaryKeyColumnsNullable(targetEntities);
+        var flaggedItems = new SchemaDiffService()
+            .Compute(
+                before.Entities,
+                before.Relationships,
+                flaggedTarget,
+                [.. targetRelationships],
+                capabilities
+            )
+            .Items;
+
+        if (
+            !flaggedItems
+                .Select(Describe)
+                .SequenceEqual(items.Select(Describe), StringComparer.Ordinal)
+        )
+        {
+            return
+            [
+                NullableFlagRelationPrefix
+                    + "the diff differs: "
+                    + string.Join(
+                        " / ",
+                        flaggedItems.Select(Describe).Except(items.Select(Describe))
+                    )
+                    + " <> "
+                    + string.Join(
+                        " / ",
+                        items.Select(Describe).Except(flaggedItems.Select(Describe))
+                    ),
+            ];
+        }
+
+        for (var i = 0; i < items.Count; i++)
+        {
+            flaggedItems[i].IsSelected = items[i].IsSelected;
+        }
+
+        SyncPlan flaggedPlan;
+        string flaggedScript;
+
+        try
+        {
+            flaggedPlan = new SyncPlanner().BuildPlan(
+                flaggedItems,
+                capabilities,
+                new SyncPlanContext
+                {
+                    LiveEntities = before.Entities,
+                    LiveRelationships = before.Relationships,
+                }
+            );
+            flaggedScript = provider.SyncScriptBuilder.Build(flaggedPlan);
+        }
+        catch (Exception ex)
+        {
+            return
+            [
+                $"{NullableFlagRelationPrefix}planning threw: {ex.GetType().Name}: {ex.Message}",
+            ];
+        }
+
+        var problems = new List<string>();
+        Compare(
+            "warnings",
+            plan.Warnings.Select(DescribeWarning),
+            flaggedPlan.Warnings.Select(DescribeWarning)
+        );
+        Compare(
+            "excluded",
+            plan.ExcludedItems.Select(Describe),
+            flaggedPlan.ExcludedItems.Select(Describe)
+        );
+
+        if (!string.Equals(script, flaggedScript, StringComparison.Ordinal))
+        {
+            var lines = script.Split('\n');
+            var flaggedLines = flaggedScript.Split('\n');
+            problems.Add(
+                $"{NullableFlagRelationPrefix}the script differs: "
+                    + string.Join(" / ", flaggedLines.Except(lines).Select(l => l.Trim()))
+                    + " <> "
+                    + string.Join(" / ", lines.Except(flaggedLines).Select(l => l.Trim()))
+            );
+        }
+
+        return problems;
+
+        void Compare(string facet, IEnumerable<string> expected, IEnumerable<string> actual)
+        {
+            var expectedList = expected.ToList();
+            var actualList = actual.ToList();
+
+            if (!expectedList.SequenceEqual(actualList, StringComparer.Ordinal))
+            {
+                problems.Add(
+                    $"{NullableFlagRelationPrefix}the {facet} differ: [{string.Join(" / ", actualList)}] <> [{string.Join(" / ", expectedList)}]"
+                );
+            }
+        }
+
+        static string Describe(SchemaDiffItem item) => $"{item.Kind}: {item.Description}";
+
+        static string DescribeWarning(SyncPlanWarning warning) =>
+            $"{warning.Kind}({warning.TableName}): {warning.Detail}";
+    }
+
+    /// <summary>エンティティを Id を保って複製し、主キーの列に NULL 許容の印を立てる</summary>
+    private static List<Entity> FlagPrimaryKeyColumnsNullable(IEnumerable<Entity> entities) =>
+        [
+            .. entities.Select(entity =>
+            {
+                var clone = entity.Clone(preserveId: true);
+
+                foreach (var column in clone.Columns.Where(c => c.IsPrimaryKey))
+                {
+                    column.IsNullable = true;
+                }
+
+                return clone;
+            }),
+        ];
 
     /// <summary>
     /// 実 DB では DDL の後に SQL で足す計算列（<see cref="FuzzLiveSchema.ComputedColumnStatements"/>）を、取込の結果と同じく

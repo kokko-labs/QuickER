@@ -334,6 +334,67 @@ internal static partial class SyncPlanExpectationRows
                     ]
                 )
                 .Expect(e => e.Warnings.Absent("UniqueConstraintDropMayBreakForeignKey*")),
+            // 非標準キーの外部キー（MySQL 8.0 系や restrict_fk_on_non_standard_key=OFF で作れる・8.4 の既定では作れないので実 DB の段は
+            // 持たない）：一意制約 UQ_p_ab(a, b) の先頭の列 a だけを参照する外部キーは、その一意制約に支えられる。前寄せと警告と
+            // 主キーの変更の外し直しが同じ判定（CanSupportForeignKey）を通すことを、SQL Server（先頭の列で支えない）と比べて固定する
+            Row(
+                    "plan-implicit-unique-drop-warns-for-fk-on-its-leading-columns-mysql-like",
+                    "一意制約: 削除の警告は、先頭の列を要する方言では、一意制約の先頭の列だけを参照する外部キーにも出す（前寄せと同じ判定）",
+                    DialectNames.MySql,
+                    DialectNames.SqlServer
+                )
+                .Live(PrefixReferencedUniqueSchema)
+                .Items(_ =>
+                    [I.Unique(SchemaDiffKind.DropUniqueConstraint, "p", "UQ_p_ab", ["a", "b"])]
+                )
+                .Expect(e =>
+                    e.For(
+                            DialectNames.MySql,
+                            d =>
+                                d.Warnings.Count("UniqueConstraintDropMayBreakForeignKey*", 1)
+                                    .Warnings.Single(
+                                        "UniqueConstraintDropMayBreakForeignKey(p): FK_c_p"
+                                    )
+                                    .Items.Absent("DropForeignKey > *")
+                        )
+                        .For(
+                            DialectNames.SqlServer,
+                            d => d.Warnings.Absent("UniqueConstraintDropMayBreakForeignKey*")
+                        )
+                ),
+            Row(
+                    "plan-implicit-fk-pk-change-onto-referenced-prefix-of-dropped-unique-rebuilds-fk-mysql-like",
+                    "主キー変更: 外した一意制約の先頭の列を参照する外部キーは、先頭の列を要する方言では新しい主キーへ付け直す（警告を飛ばす条件と同じ判定）",
+                    DialectNames.MySql,
+                    DialectNames.SqlServer
+                )
+                .Live(PrefixReferencedUniqueSchema)
+                .Items(w =>
+                {
+                    var onA = w.Live["p"].Clone(preserveId: true);
+                    onA.Columns[0].IsPrimaryKey = false;
+                    onA.Columns[1].IsPrimaryKey = true;
+                    return
+                    [
+                        I.AlterPk("p", onA),
+                        I.Unique(SchemaDiffKind.DropUniqueConstraint, "p", "UQ_p_ab", ["a", "b"]),
+                    ];
+                })
+                .Expect(e =>
+                    e.Warnings.Absent("UniqueConstraintDropMayBreakForeignKey*")
+                        .For(
+                            DialectNames.MySql,
+                            d =>
+                                d.Items.Count("DropForeignKey > *", 1)
+                                    .Items.Single("DropForeignKey > * fk=FK_c_p sel=*")
+                                    .Items.Count("AddForeignKey > *", 1)
+                                    .Items.Single("AddForeignKey > * fk=FK_c_p sel=*")
+                        )
+                        .For(
+                            DialectNames.SqlServer,
+                            d => d.Items.Absent("DropForeignKey > *", "AddForeignKey > *")
+                        )
+                ),
             Row(
                     "plan-implicit-fk-unnamed-same-pair-fks-use-ddl-names",
                     "暗黙の付け直し: 名前の無い同じ組の外部キー 2 本は、DDL と同じ別々の名前で付け直す",
@@ -382,6 +443,17 @@ internal static partial class SyncPlanExpectationRows
     {
         ExpectationScenarios.CustomerOrders(s);
         s.Unique("customer", "UQ_customer_id", "id");
+    }
+
+    /// <summary>
+    /// 親 p(id 主キー, a, b) と一意制約 UQ_p_ab(a, b)、その先頭の列 a だけを参照する子 c.x の外部キー FK_c_p（非標準キー）
+    /// </summary>
+    private static void PrefixReferencedUniqueSchema(ExpectationSchema s)
+    {
+        s.Table("p", S.Pk("id", "INT"), S.NotNull("a", "INT"), S.NotNull("b", "INT"));
+        s.Unique("p", "UQ_p_ab", "a", "b");
+        s.Table("c", S.Pk("id", "INT"), S.Nullable("x", "INT"));
+        s.Fk("p", "c", "FK_c_p", ("a", "x"));
     }
 
     /// <summary>customer の一意制約 UQ_customer_id(id) の削除の項目</summary>

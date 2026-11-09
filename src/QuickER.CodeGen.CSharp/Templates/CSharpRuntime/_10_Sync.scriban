@@ -757,11 +757,12 @@ internal static class SyncRowVersions
 /// is not something these locks can see.
 /// </para>
 /// <para>
-/// Both locks are re-entrant along one async flow. A write the engine makes on its own behalf runs suppressed and takes
-/// no lock at all; a write made while the same flow already holds the lock - a save hook writing to another synchronised
-/// table, say - goes straight through rather than waiting for itself. The mark that says "this flow holds the lock" is
-/// a lease that is spent when the lock is released, so work a flow started and left running cannot ride on a lock that
-/// has since been given back.
+/// The write lock is re-entrant along one async flow. A write the engine makes on its own behalf runs suppressed and
+/// takes no lock at all; a write made while the same flow already holds the lock - a save hook writing to another
+/// synchronised table, say - goes straight through rather than waiting for itself. The run lock is not: a run started
+/// from a flow that already holds either lock is refused at once (see <see cref="RunExclusiveAsync{T}"/>). The mark
+/// that says "this flow holds the lock" is a lease that is spent when the lock is released, so work a flow started and
+/// left running cannot ride on a lock that has since been given back.
 /// </para>
 /// </remarks>
 internal sealed class SyncLocalGate
@@ -790,17 +791,35 @@ internal sealed class SyncLocalGate
     internal Task<T> WriteExclusiveAsync<T>(Func<Task<T>> body, CancellationToken cancellationToken) =>
         EnterAsync(_write, WriteLease, body, cancellationToken);
 
-    /// <summary>Runs the body while holding the run lock (straight through when this flow already holds it).</summary>
+    /// <summary>Runs the body while holding the run lock.</summary>
     /// <remarks>
+    /// <para>
     /// A run started from a flow that holds the write lock but not the run lock - a save hook inside a journaled
     /// write - is refused at once. The run would take the run lock and then wait for the write lock its own caller
     /// holds, and while another run is in flight that one holds the run lock and waits for the same write lock: two
     /// flows each waiting on the other, which no timeout ever ends. Refusing it whether or not another run happens to
     /// be in flight makes the mistake show the same way every time.
+    /// </para>
+    /// <para>
+    /// A run started from a flow that already holds the run lock - a save hook that the run's own apply fires - is
+    /// refused as well. The engine never starts a run from inside one of its own, so such a call can only come from
+    /// code the run called back into; letting it through would start a second run inside the first, replacing the
+    /// first run's record of the local rows it changed and contending with the batch it is applying.
+    /// </para>
     /// </remarks>
     internal Task<T> RunExclusiveAsync<T>(Func<Task<T>> body, CancellationToken cancellationToken)
     {
-        if (Holds(WriteLease) && !Holds(RunLease))
+        if (Holds(RunLease))
+        {
+            return Task.FromException<T>(
+                new InvalidOperationException(
+                    "A sync run cannot be started from inside another run on the same local database - a save hook "
+                    + "that the run's own apply fires, for example. Start the run after the running one has returned."
+                )
+            );
+        }
+
+        if (Holds(WriteLease))
         {
             return Task.FromException<T>(
                 new InvalidOperationException(
@@ -6823,14 +6842,17 @@ public sealed class VersionlessSyncTable<TEntity, TKey> : SyncTableBase<TEntity,
 /// <para>
 /// A run uploads first and downloads second. Uploading first means a local change reaches the server before the server's
 /// rows come back down, so a change accepted by the server is not immediately overwritten by its own pre-upload state.
-/// It is also where <see cref="SyncConflictPolicy.ServerWins"/> settles the rows it discards: each one takes the
-/// server's content in place of the local change, and a row the server does not have is left to the delete propagation
-/// that follows the download.
+/// The upload is also where <see cref="SyncConflictPolicy.ServerWins"/> decides which local changes give way. Each such
+/// row takes the server's content right after its table's download, parents first (a call to
+/// <see cref="UploadAsync"/> on its own does it during the upload), and a row the server does not have is left to the
+/// delete propagation that follows the download.
 /// </para>
 /// <para>
-/// Tables are visited in foreign-key order - parents before children when rows are written, children before parents when
-/// rows are deleted - and each table is drained completely before the next one starts, so a child row is never applied
-/// before the parent it points at.
+/// Rows go in foreign-key order - parents before children when rows are written, children before parents when rows are
+/// deleted. The upload runs in rounds: a round sends the upserts parents first, then the deletes children first, then
+/// the upserts it held back, and a write the server refused over a foreign key or a unique value goes into the next round
+/// as long as the round got anything through. The download visits the tables parents first and reads one table's
+/// changes before it moves to the next, so a child row is never applied before the parent it points at.
 /// </para>
 /// <para>
 /// Nothing here resolves a conflict silently. Under the default policy a local change that collides with the server stays

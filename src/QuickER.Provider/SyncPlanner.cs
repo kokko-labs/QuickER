@@ -152,8 +152,10 @@ public sealed class SyncPlanner
     /// <param name="items">全差分項目（未選択・情報表示専用の項目を含んでよい）</param>
     /// <param name="capabilities">対象方言の同期ケーパビリティ（rebuild への振り分けに用いる）</param>
     /// <param name="context">
-    /// rebuild 方言で合成に用いる live スキーマ。逐次 DDL 方言では不要（<c>null</c> 可）。
-    /// rebuild 方言で <c>null</c> を渡すと <see cref="InvalidOperationException"/> を投げる（呼び出し側のバグ）。
+    /// live スキーマ。rebuild 方言は合成に、列順を同期する逐次 DDL の方言（<see cref="SyncDialectCapabilities.ColumnReorder"/> が
+    /// <see cref="ColumnReorderMode.Native"/>＝MySQL）は列順の項目の移動の組み立てに用いる。ほかの逐次 DDL 方言では省いてよい
+    /// （<c>null</c> 可）。rebuild 方言で <c>null</c> を渡すか、Native の方言で
+    /// 列順の項目を選んで <c>null</c> を渡すと <see cref="InvalidOperationException"/> を投げる（呼び出し側のバグ）。
     /// </param>
     /// <returns>選択済み項目のみを固定順序でセクション化した計画（空セクションは含まない）</returns>
     public SyncPlan BuildPlan(
@@ -248,12 +250,7 @@ public sealed class SyncPlanner
         WarnSetNullOnNotNullLiveForeignKeys(selected, capabilities, context, warnings);
 
         // 一意制約の削除が既存 FK の被参照列を候補キーでなくしうる場合は警告する（方言に依らず同じ危険）
-        WarnUniqueConstraintDropsBreakingForeignKeys(
-            selected,
-            context,
-            warnings,
-            capabilities.IdentifierLengthLimit
-        );
+        WarnUniqueConstraintDropsBreakingForeignKeys(selected, context, warnings, capabilities);
 
         // 選んだ外部キーの追加・作り直しの参照先が、同期後に候補キーでない場合も警告する（暗黙の付け直しと同じ証明）
         WarnAddedForeignKeysNotOnCandidateKey(selected, capabilities, context, warnings);
@@ -518,7 +515,12 @@ public sealed class SyncPlanner
                 )
             )
             .GroupBy(i => SchemaNames.ToStoredForm(i.TableName), SchemaNames.Comparer)
-            .ToDictionary(g => g.Key, g => g.First().Entity!, SchemaNames.Comparer);
+            .ToDictionary(
+                g => g.Key,
+                g => g.First().Entity!.GetPrimaryKeyColumnsInOrder().Select(c => c.Name).ToList(),
+                SchemaNames.Comparer
+            );
+        var addedEntities = CollectAddedTables(selected);
         var postSyncUniques = BuildPostSyncUniqueConstraints(ExpandAlters(selected), context);
 
         var kept = new List<SchemaDiffItem>(selected.Count);
@@ -553,7 +555,7 @@ public sealed class SyncPlanner
             )
             {
                 var column = item.Column.Clone(preserveId: true);
-                column.IsNullable = item.OldColumn.IsNullable;
+                column.IsNullable = ColumnNullability.AllowsNull(item.OldColumn);
                 kept.Add(
                     new SchemaDiffItem
                     {
@@ -563,7 +565,13 @@ public sealed class SyncPlanner
                         Entity = item.Entity,
                         Column = column,
                         OldColumn = item.OldColumn,
-                        Description = item.Description,
+                        // 説明も型の変更だけにする（元の説明は外した NULL 許容化を含む）
+                        Description = SchemaDiffService.DescribeColumnTypeChange(
+                            item.TableName,
+                            item.ColumnName!,
+                            item.OldColumn.DataType,
+                            column.DataType
+                        ),
                     }
                 );
             }
@@ -661,8 +669,10 @@ public sealed class SyncPlanner
 
                 case SchemaDiffKind.AlterColumn
                     when item.ColumnName is not null
-                        && item.Column is { IsNullable: true }
-                        && item.OldColumn is { IsNullable: false }
+                        && item.Column is not null
+                        && ColumnNullability.AllowsNull(item.Column)
+                        && item.OldColumn is not null
+                        && !ColumnNullability.AllowsNull(item.OldColumn)
                         && StaysInPrimaryKey(table, item.ColumnName):
                     missing.Add("PRIMARY KEY");
                     return (item.ColumnName, missing);
@@ -687,7 +697,8 @@ public sealed class SyncPlanner
             return missing.Count == 0;
         }
 
-        // 表と列が同期後に在るか（無いものを missing へ「表」「表.列」で足す）
+        // 表と列が同期後に在るか（無いものを missing へ「表」「表.列」で足す。自己参照の外部キーは子と親で同じ表を 2 回
+        // 調べるので、すでに足したものは重ねない）
         void RequireColumns(string table, IEnumerable<string> columns, List<string> missing)
         {
             if (addedTables.Contains(table))
@@ -697,7 +708,7 @@ public sealed class SyncPlanner
 
             if (!liveByName.TryGet(table, out var live))
             {
-                missing.Add(table);
+                AddOnce(table);
                 return;
             }
 
@@ -708,7 +719,15 @@ public sealed class SyncPlanner
                     && !live.Columns.Any(c => SchemaNames.AreSame(c.Name, column))
                 )
                 {
-                    missing.Add($"{table}.{column}");
+                    AddOnce($"{table}.{column}");
+                }
+            }
+
+            void AddOnce(string name)
+            {
+                if (!missing.Contains(name, StringComparer.Ordinal))
+                {
+                    missing.Add(name);
                 }
             }
         }
@@ -717,7 +736,8 @@ public sealed class SyncPlanner
         bool StaysInPrimaryKey(string table, string column) =>
             PostSyncPrimaryKey(table).Any(c => SchemaNames.AreSame(c, column));
 
-        // 同期後の主キーの列名（主キーの変更を選んでいればその構成、無ければ live の構成）
+        // 外部キーの参照先の列が図の主キーとだけ一致し、同期後の主キーにも一意制約にも一致しないか（選んでいない主キーの変更を
+        // 前提にしているか。比べるのは列の集合）
         bool RequiresPrimaryKeyChange(
             string parentTable,
             Entity targetParent,
@@ -740,15 +760,9 @@ public sealed class SyncPlanner
                 );
         }
 
-        List<string> PostSyncPrimaryKey(string table)
-        {
-            var key =
-                primaryKeyChanges.TryGetValue(table, out var target)
-                    ? target.GetPrimaryKeyColumnsInOrder()
-                : liveByName.TryGet(table, out var live) ? live.GetPrimaryKeyColumnsInOrder()
-                : [];
-            return [.. key.Select(c => c.Name)];
-        }
+        // 同期後の主キーの列名（この段で外さない主キーの変更を選んでいればその構成、追加する表は図の構成、無ければ live の構成）
+        IReadOnlyList<string> PostSyncPrimaryKey(string table) =>
+            PostSyncPrimaryKeyOf(table, primaryKeyChanges, addedEntities, liveByName) ?? [];
     }
 
     /// <summary>
@@ -929,7 +943,8 @@ public sealed class SyncPlanner
                 );
 
                 if (
-                    liveColumn is not { IsNullable: true }
+                    liveColumn is null
+                    || !ColumnNullability.AllowsNull(liveColumn)
                     || selected.Any(i =>
                         i.Kind == SchemaDiffKind.AlterColumn
                         && SchemaNames.AreSame(SchemaNames.ToStoredForm(i.TableName), table)
@@ -1520,8 +1535,8 @@ public sealed class SyncPlanner
             // 残す SET NULL の外部キーの子の列を NOT NULL にする
             return
                 capabilities.SetNullRequiresNullableChildColumn
-                && liveColumn.IsNullable
-                && !item.Column.IsNullable
+                && ColumnNullability.AllowsNull(liveColumn)
+                && !ColumnNullability.AllowsNull(item.Column)
                 && retained.Any(fk =>
                     UsesSetNull(fk.Fk.Relationship, capabilities)
                     && fk.Fk.ColumnPairs.Any(p => ColumnKey(fk.Child, p.ChildColumn) == column)
@@ -1563,7 +1578,10 @@ public sealed class SyncPlanner
                 var referenced = ForeignKeyColumnPairResolver
                     .ParentColumns(fk.Fk.ColumnPairs)
                     .ToList();
-                var supporters = keys.Where(k => Supports(k.Columns, referenced)).ToList();
+                var supporters = keys.Where(k =>
+                        CanSupportForeignKey(capabilities, k.Columns, referenced)
+                    )
+                    .ToList();
 
                 if (
                     !supporters.Contains(droppedKey)
@@ -1635,13 +1653,6 @@ public sealed class SyncPlanner
 
             return keys;
         }
-
-        // キーが外部キーを支えうるか（参照する列と同じ列の集合。先頭の列を要する方言では、参照する列を先頭に並べるキーも）
-        bool Supports(IReadOnlyList<string> keyColumns, IReadOnlyList<string> referenced) =>
-            IsSameColumnSet(keyColumns, referenced)
-            || capabilities.ForeignKeyRequiresLeadingIndex
-                && keyColumns.Count > referenced.Count
-                && IsSameColumnSet(keyColumns.Take(referenced.Count), referenced);
 
         // 組を計画の順のまま先頭へ移す（セクションごとに移した項目の独立したセクションを作る）
         List<SyncPlanSection> MoveFirst(
@@ -1942,7 +1953,11 @@ public sealed class SyncPlanner
                                 SchemaNames.ToStoredForm(i.TableName),
                                 parentTable
                             )
-                            && IsSameColumnSet(i.UniqueConstraintColumns, referencedColumns)
+                            && CanSupportForeignKey(
+                                capabilities,
+                                i.UniqueConstraintColumns,
+                                referencedColumns
+                            )
                         )
                     )
                 );
@@ -2111,9 +2126,7 @@ public sealed class SyncPlanner
                 )
             )
             {
-                var oldType = entity
-                    .Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, column))
-                    ?.DataType;
+                var oldType = ColumnTypeOf(entity, column);
                 var text = $"{table}.{column}: {oldType} → ";
 
                 if (
@@ -2160,10 +2173,8 @@ public sealed class SyncPlanner
     /// 外部キーが参照先の旧主キー（live の主キー）に支えられているか（主キーを外すと巻き込まれるか）。
     /// </summary>
     /// <remarks>
-    /// 参照する列が旧主キーと同じ列集合ならどの方言でも支えられている。外部キーが参照先の索引の先頭の列を要する方言（MySQL）では、
-    /// 旧主キーの先頭の列だけを参照する外部キーも支えられうる（8.0 系や restrict_fk_on_non_standard_key=OFF で作れる非標準キーの
-    /// 外部キー。ほかに支える索引が無いと主キーの解除がエラー 1553 になる）。一意制約を参照する外部キーは巻き込まれない。
-    /// 参照先が live に無ければ支えられているとみなす。
+    /// 判定は <see cref="CanSupportForeignKey"/>（同じ列集合か、MySQL では旧主キーの先頭の列だけを参照する非標準キーの外部キーも）。
+    /// 一意制約を参照する外部キーは巻き込まれない。参照先が live に無ければ支えられているとみなす。
     /// </remarks>
     private static bool DependsOnOldPrimaryKey(
         NameLookup<Entity> liveByName,
@@ -2177,16 +2188,11 @@ public sealed class SyncPlanner
             return true;
         }
 
-        var oldKey = liveParent.GetPrimaryKeyColumnsInOrder().Select(c => c.Name).ToList();
-
-        if (IsSameColumnSet(oldKey, referencedColumns))
-        {
-            return true;
-        }
-
-        return capabilities.ForeignKeyRequiresLeadingIndex
-            && oldKey.Count > referencedColumns.Count
-            && IsSameColumnSet(oldKey.Take(referencedColumns.Count), referencedColumns);
+        return CanSupportForeignKey(
+            capabilities,
+            [.. liveParent.GetPrimaryKeyColumnsInOrder().Select(c => c.Name)],
+            referencedColumns
+        );
     }
 
     /// <summary>live の外部キーを外す暗黙の DropForeignKey 項目を作る（差分計算の FK 差分と同じフィールド規則）</summary>
@@ -2363,11 +2369,7 @@ public sealed class SyncPlanner
         (string Type, bool Decided) PostSyncType(Entity entity, string table, string name) =>
             typeDecidingColumns.TryGetValue(ColumnKey(table, name), out var decided)
                 ? (decided, true)
-                : (
-                    entity.Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, name))?.DataType
-                        ?? string.Empty,
-                    false
-                );
+                : (ColumnTypeOf(entity, name), false);
     }
 
     /// <summary>
@@ -2437,10 +2439,10 @@ public sealed class SyncPlanner
                     && (
                         !capabilities.AreForeignKeyCompatibleTypes(
                             newChild,
-                            LiveType(fk.Parent, pair.ParentColumn)
+                            ColumnTypeOf(fk.Parent, pair.ParentColumn)
                         )
                         || !capabilities.AreForeignKeyCompatibleTypes(
-                            LiveType(fk.Child, pair.ChildColumn),
+                            ColumnTypeOf(fk.Child, pair.ChildColumn),
                             newParent
                         )
                     )
@@ -2453,10 +2455,6 @@ public sealed class SyncPlanner
         }
 
         return blocked;
-
-        static string LiveType(Entity entity, string column) =>
-            entity.Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, column))?.DataType
-            ?? string.Empty;
     }
 
     /// <summary>
@@ -2887,13 +2885,7 @@ public sealed class SyncPlanner
                         return (liveColumn.DataType, false);
                     }
 
-                    return (
-                        diagramEntity
-                            .Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, column))
-                            ?.DataType
-                            ?? string.Empty,
-                        true
-                    );
+                    return (ColumnTypeOf(diagramEntity, column), true);
                 }
             }
 
@@ -3093,7 +3085,9 @@ public sealed class SyncPlanner
                 && item.Column is not null
             )
             {
-                altered[ColumnKey(item.TableName, item.ColumnName)] = item.Column.IsNullable;
+                altered[ColumnKey(item.TableName, item.ColumnName)] = ColumnNullability.AllowsNull(
+                    item.Column
+                );
             }
             else if (item.Kind == SchemaDiffKind.AlterPrimaryKey && item.Entity is not null)
             {
@@ -3217,7 +3211,8 @@ public sealed class SyncPlanner
                 .ChildColumns(SyncScriptBuilderHelper.ResolveColumnPairs(add))
                 .Where(name =>
                     child.Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, name))
-                        is { IsNullable: false }
+                        is { } column
+                    && !ColumnNullability.AllowsNull(column)
                 )
                 .ToList();
 
@@ -3694,6 +3689,44 @@ public sealed class SyncPlanner
             StringComparison.Ordinal
         );
 
+    /// <summary>エンティティの列の型（列名は <see cref="SchemaNames"/> の規則で引く。列が無ければ空文字列）</summary>
+    /// <remarks>
+    /// live の列の型（DB が今受け入れている型）・図の列の型を読む箇所が通す。この同期で型が決まる列の新しい型は
+    /// <see cref="CollectTypeDecidingColumns"/> が決め、ここでは読まない。
+    /// </remarks>
+    private static string ColumnTypeOf(Entity entity, string column) =>
+        entity.Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, column))?.DataType
+        ?? string.Empty;
+
+    /// <summary>親のキー（主キー・一意制約）が、その列を参照する外部キーを支えうるか（DB がそのキーの削除を外部キーで断るか）</summary>
+    /// <param name="capabilities">方言のケーパビリティ</param>
+    /// <param name="keyColumns">キーの構成列（主キーは実効順・一意制約は宣言順）</param>
+    /// <param name="referencedColumns">外部キーが参照する親の列</param>
+    /// <remarks>
+    /// <para>
+    /// 参照する列と同じ列の集合を持つキーは、どの方言でも支える。外部キーが参照先の索引の先頭の列を要する方言
+    /// （<see cref="SyncDialectCapabilities.ForeignKeyRequiresLeadingIndex"/>＝MySQL）では、参照する列を先頭に並べるもっと長いキーも
+    /// 支えうる（8.0 系や restrict_fk_on_non_standard_key=OFF で作れる非標準キーの外部キー。ほかに支える索引が無いと、そのキーの
+    /// 削除がエラー 1553 になる）。
+    /// </para>
+    /// <para>
+    /// 判定はここの 1 か所で、前寄せ（<see cref="MoveCertainFailureFirst"/>）・一意制約の削除の警告
+    /// （<see cref="WarnUniqueConstraintDropsBreakingForeignKeys"/>）・主キーの変更の外し直し（<see cref="DependsOnOldPrimaryKey"/> と、
+    /// 新しい主キーへ付け直す一意制約の枝）が通す。写しが割れると、前寄せした削除を警告が名指しせず、警告を飛ばした外部キーを
+    /// 外し直しも付け直さない。付け直せるか（候補キーの証明＝<see cref="StaysCandidateKey"/>）は
+    /// 別の判定で、列の集合の完全一致のまま（非標準キーへの付け直しは証明しない）。
+    /// </para>
+    /// </remarks>
+    private static bool CanSupportForeignKey(
+        SyncDialectCapabilities capabilities,
+        IReadOnlyList<string> keyColumns,
+        IReadOnlyList<string> referencedColumns
+    ) =>
+        IsSameColumnSet(keyColumns, referencedColumns)
+        || capabilities.ForeignKeyRequiresLeadingIndex
+            && keyColumns.Count > referencedColumns.Count
+            && IsSameColumnSet(keyColumns.Take(referencedColumns.Count), referencedColumns);
+
     /// <summary>
     /// 選択された列定義変更に巻き込まれる live の一意制約を、暗黙の DROP（先頭側）と再 ADD（末尾側）として注入する。
     /// </summary>
@@ -3818,16 +3851,19 @@ public sealed class SyncPlanner
     /// 選択された一意制約の削除が既存 FK の被参照列を候補キーでなくしうる場合に警告を積む。
     /// </summary>
     /// <remarks>
-    /// 主キーが同じ列を覆っていれば実際には壊れないが、その判定には同期後の主キー構成が要る。誤警告を許容して
-    /// 単純な「被参照列と完全一致するか」で判定し、実行はブロックしない（レンダラーは DROP を出す）。
+    /// 削除する一意制約がその外部キーを支えうるか（<see cref="CanSupportForeignKey"/>＝前寄せと同じ判定。MySQL は参照する列を先頭に
+    /// 並べる一意制約も）で判定する。ほかのキーが同じ列を覆っていれば実際には壊れないが、誤警告を許容してほかのキーは数えず、
+    /// 実行はブロックしない（レンダラーは DROP を出す）。
     /// </remarks>
     private static void WarnUniqueConstraintDropsBreakingForeignKeys(
         IReadOnlyList<SchemaDiffItem> selected,
         SyncPlanContext? context,
         List<SyncPlanWarning> warnings,
-        IdentifierLengthLimit limit
+        SyncDialectCapabilities capabilities
     )
     {
+        var limit = capabilities.IdentifierLengthLimit;
+
         if (context is null)
         {
             return;
@@ -3868,9 +3904,7 @@ public sealed class SyncPlanner
                 continue;
             }
 
-            var referencedSignature = UniqueConstraintNaming.ColumnSetSignature(
-                ForeignKeyColumnPairResolver.ParentColumns(fk.ColumnPairs)
-            );
+            var referenced = ForeignKeyColumnPairResolver.ParentColumns(fk.ColumnPairs).ToList();
 
             foreach (var drop in drops)
             {
@@ -3879,13 +3913,7 @@ public sealed class SyncPlanner
                     continue;
                 }
 
-                if (
-                    !string.Equals(
-                        UniqueConstraintNaming.ColumnSetSignature(drop.UniqueConstraintColumns),
-                        referencedSignature,
-                        StringComparison.Ordinal
-                    )
-                )
+                if (!CanSupportForeignKey(capabilities, drop.UniqueConstraintColumns, referenced))
                 {
                     continue;
                 }
@@ -4454,7 +4482,7 @@ public sealed class SyncPlanner
             if (column is not null && alter.Column is not null)
             {
                 column.DataType = alter.Column.DataType;
-                column.IsNullable = alter.Column.IsNullable;
+                column.IsNullable = ColumnNullability.AllowsNull(alter.Column);
                 column.IsComputed = alter.Column.IsComputed;
             }
         }
@@ -4472,6 +4500,10 @@ public sealed class SyncPlanner
             if (add.Column is not null)
             {
                 var added = add.Column.Clone(preserveId: true);
+
+                // 主キーを外す前に実効の NULL 許容を写す（図の主キーの列は印に依らず NOT NULL で、逐次 DDL の方言の
+                // 列の追加も NOT NULL で作る。印のまま主キーを外すと、再構築の表だけが NULL 許容の列になる）
+                added.IsNullable = ColumnNullability.AllowsNull(add.Column);
                 added.IsPrimaryKey = false;
                 newDef.Columns.Add(added);
             }

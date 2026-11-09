@@ -72,6 +72,19 @@ internal static partial class SyncPlanExpectationRows
                     childNullable: true
                 )
                 .Expect(e => e.Warnings.Absent("SetDefaultOnNotNullColumn*")),
+            SetDefaultAddRow(
+                    Row(
+                        "plan-set-default-on-primary-key-child-flagged-nullable-warns-like-not-null",
+                        "同期: 図で主キーの子の列への SET DEFAULT の追加は、NULL 許容の印があっても NOT NULL の列と同じく SQL Server が警告する",
+                        DialectNames.SqlServer
+                    ),
+                    childNullable: true,
+                    childKeyFlaggedNullable: true
+                )
+                .Expect(e =>
+                    e.Warnings.Count("SetDefaultOnNotNullColumn*", 1)
+                        .Warnings.Single(SetDefaultWarning)
+                ),
             Row(
                     "plan-alter-foreign-key-to-set-default-on-not-null-child-warns-only-where-declared",
                     "同期: 外部キーを NOT NULL の子の列への SET DEFAULT へ作り直す変更も SQL Server の計画だけが警告する",
@@ -274,7 +287,11 @@ internal static partial class SyncPlanExpectationRows
     /// 行に、親 parent(id)・子 child(id, parent_id) の DB 側の図と、親 id を参照する外部キー FK_child_parent（ON UPDATE は SET DEFAULT）の
     /// 追加の項目（選んだ・手で組む）を書く
     /// </summary>
-    private static ExpectationRow SetDefaultAddRow(ExpectationRow row, bool childNullable) =>
+    private static ExpectationRow SetDefaultAddRow(
+        ExpectationRow row,
+        bool childNullable,
+        bool childKeyFlaggedNullable = false
+    ) =>
         row.Live(s =>
             {
                 s.Table("parent", S.Pk("id", "int"));
@@ -288,6 +305,15 @@ internal static partial class SyncPlanExpectationRows
             {
                 var parent = w.Live["parent"];
                 var child = w.Live["child"];
+
+                // 図の子の表では parent_id を主キーへ加え、NULL 許容の印を立てたままにする（図のファイルの手書きでだけ作れる形）
+                if (childKeyFlaggedNullable)
+                {
+                    child = child.Clone(preserveId: true);
+                    child.Columns[1].IsPrimaryKey = true;
+                    child.Columns[1].IsNullable = true;
+                }
+
                 return
                 [
                     new SchemaDiffItem

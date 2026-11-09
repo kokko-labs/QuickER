@@ -6,7 +6,9 @@ namespace QuickER.Tests.TestSupport.Guards;
 /// <remarks>
 /// 列挙は <see cref="SourceFiles.Enumerate"/> と同じ（<c>bin</c> / <c>obj</c> を除く）。除外は根からの相対パスの接頭辞
 /// （大文字小文字を区別しない）で、除外ごとに理由を持つ（「QuickER.Platform の外」のような範囲の形を決めるもの。範囲の中の
-/// 正当な出現は規則の既知の一覧に置く）。<see cref="Only"/> を持つ範囲は、そのファイルだけを読む。
+/// 正当な出現は規則の既知の一覧に置く）。<see cref="Only"/> を持つ範囲は、そのファイルだけを読む。<see cref="Areas"/> を持つ範囲は、
+/// 根からの相対パスがどれかの接頭辞で始まるファイルだけを読む（同じ名前の前置きを持つ複数のプロジェクト＝<c>QuickER.Provider</c> と
+/// <c>QuickER.Provider.*</c> を 1 つの範囲にする）。
 /// </remarks>
 /// <param name="Root">リポジトリのルートからのフォルダ（区切りは <c>/</c>。例 <c>src</c>・<c>tests/QuickER.Tests</c>）</param>
 /// <param name="Extension">読むファイルの拡張子（例 <c>.cs</c>・<c>.xaml</c>）</param>
@@ -47,6 +49,17 @@ internal sealed record SourceScope(
         return new(root, extension, paths, []);
     }
 
+    /// <summary>読む領域（根からの相対パスの接頭辞・大文字小文字を区別しない。空なら根の下の全部）</summary>
+    public IReadOnlyList<string> Areas { get; init; } = [];
+
+    /// <summary>根からの相対パスの接頭辞で読む領域を限った範囲（重ねて呼ぶと、どれかの領域に入るファイルを読む）</summary>
+    /// <param name="areaPrefix">根からの相対パスの接頭辞（例 <c>QuickER.Provider</c>）</param>
+    public SourceScope Within(string areaPrefix)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(areaPrefix);
+        return this with { Areas = [.. Areas, areaPrefix] };
+    }
+
     /// <summary>根からの相対パスの接頭辞で除外した範囲</summary>
     /// <param name="areaPrefix">根からの相対パスの接頭辞（例 <c>QuickER.Platform/</c>）</param>
     /// <param name="reason">除外する理由</param>
@@ -80,6 +93,14 @@ internal sealed record SourceScope(
             return false;
         }
 
+        if (
+            Areas.Count > 0
+            && !Areas.Any(prefix => area.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        )
+        {
+            return false;
+        }
+
         return !Exclusions.Any(exclusion =>
             area.StartsWith(exclusion.AreaPrefix, StringComparison.OrdinalIgnoreCase)
         );
@@ -90,6 +111,7 @@ internal sealed record SourceScope(
         Only.Count > 0
             ? string.Join(", ", Only)
             : $"{Root}/**/*{Extension}"
+                + (Areas.Count > 0 ? $" (within {string.Join(", ", Areas)})" : "")
                 + string.Concat(Exclusions.Select(exclusion => $" - {exclusion.AreaPrefix}"));
 }
 

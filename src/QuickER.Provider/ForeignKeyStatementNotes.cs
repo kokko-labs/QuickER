@@ -77,7 +77,10 @@ public static class ForeignKeyStatementNotes
             && UsesSetDefault(relationship)
         )
         {
-            var notNull = pairs.Where(p => !p.Child.IsNullable).Select(p => p.Child.Name).ToList();
+            var notNull = pairs
+                .Where(p => !ColumnNullability.AllowsNull(p.Child))
+                .Select(p => p.Child.Name)
+                .ToList();
 
             if (notNull.Count > 0)
             {
@@ -98,7 +101,10 @@ public static class ForeignKeyStatementNotes
             && UsesSetNull(relationship, dialect)
         )
         {
-            var notNull = pairs.Where(p => !p.Child.IsNullable).Select(p => p.Child.Name).ToList();
+            var notNull = pairs
+                .Where(p => !ColumnNullability.AllowsNull(p.Child))
+                .Select(p => p.Child.Name)
+                .ToList();
 
             if (notNull.Count > 0)
             {
