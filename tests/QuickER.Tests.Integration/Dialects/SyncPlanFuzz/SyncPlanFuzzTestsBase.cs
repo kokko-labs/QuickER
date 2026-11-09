@@ -307,12 +307,26 @@ public abstract class SyncPlanFuzzTestsBase
         var problems = new List<string>();
 
         // 必須の形の表明は、普段の既定の種の数が十分に多い方言だけ（少ない種では確率的に出ない形がある。夜間に種が増えた
-        // 方言でも表明しない＝普段の CI で確かめていない形の欠けで夜間だけ赤にしない）
+        // 方言でも表明しない＝普段の CI で確かめていない形の欠けで夜間だけ赤にしない）。そのうえで、流す種が普段の既定の種を
+        // 全部含む（数が既定以上の）ときだけ表明する。既定より少ない種を明示した実行（変異テストの SQLite の 100 種）で、
+        // 確率でしか出ない形の欠けを赤にしない
+        var assertsRequiredShapes =
+            !plan.IsSingle
+            && plan.Settings.RegularCount >= ShapeCoverageMinimumSeeds
+            && seeds.Count >= plan.Settings.RegularCount;
+
         if (
             !plan.IsSingle
-            && seeds.Count >= ShapeCoverageMinimumSeeds
             && plan.Settings.RegularCount >= ShapeCoverageMinimumSeeds
+            && seeds.Count < plan.Settings.RegularCount
         )
+        {
+            output?.WriteLine(
+                $"{dialect.Name}: required shapes not asserted (seeds {seeds.Count} < regular default {plan.Settings.RegularCount})"
+            );
+        }
+
+        if (assertsRequiredShapes)
         {
             try
             {

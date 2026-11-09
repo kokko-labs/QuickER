@@ -464,9 +464,12 @@ public sealed class WorkflowGuardTests
     /// 0 件と数えるのを避ける）を通らない。版を書いた <c>dotnet tool install</c> はマニフェストと別の版を入れ得る。
     /// 並列度を書かないと Stryker の既定（コアの半分＝4 vCPU で 2）になり、Model でも時間の上限に届く見込み。
     /// <c>--break-at</c>・<c>-b</c>・<c>--threshold-*</c> は設定の thresholds を上書きする。
+    /// ci.yml の build-and-test は、全件のテストの後に、起動スクリプトの <c>-TestsOnly</c> で provider-sync-planner の環境のテストを
+    /// 流す（Stryker の最初のテストの実行と同じ環境でだけ落ちるテストを、週 1 回の実行より前に PR で捕まえる）。
+    /// 手順が無い・スイッチが無い・<c>continue-on-error</c> があると、その環境の失敗が週 1 回まで隠れる。
     /// </remarks>
     [Fact(
-        DisplayName = "mutation.yml は tool restore の Stryker を起動スクリプトから範囲の設定と並列度 4 で呼び、点数で赤にせず、結果を成果物に残す"
+        DisplayName = "mutation.yml は tool restore の Stryker を起動スクリプトから範囲の設定と並列度 4 で呼び、点数で赤にせず、結果を成果物に残す。ci.yml は同じ起動スクリプトの -TestsOnly で同期の計画の範囲の環境のテストを全件の後に流す"
     )]
     public void Mutation_RunsStrykerFromToolManifestAndKeepsReports()
     {
@@ -529,6 +532,40 @@ public sealed class WorkflowGuardTests
             .BeFalse("点数で赤にする引数を足さない（設定の thresholds.break 0 が正本）");
         AssertTempOnRunnerTemp(stryker);
         AssertKeptArtifact(job, MutationResultsDirectory, "mutation");
+
+        // ci.yml：変異テストの環境のテストは、起動スクリプトのスイッチで呼ぶ手順がちょうど 1 つ（全件のテストの後・失敗で赤）
+        var ciSteps = JobSteps(Jobs(ReadWorkflow("ci.yml"))["build-and-test"]);
+        var environmentSteps = ciSteps
+            .Select((step, index) => (step, index))
+            .Where(pair => pair.step.Contains(MutationScriptCall, StringComparison.Ordinal))
+            .ToList();
+
+        environmentSteps
+            .Should()
+            .ContainSingle("ci.yml の変異テストの環境のテストの手順はちょうど 1 つ");
+
+        var (environmentStep, environmentIndex) = environmentSteps[0];
+
+        environmentStep
+            .Should()
+            .Contain(
+                $"{MutationScriptCall} -Target provider-sync-planner -TestsOnly -OutputDirectory \"${{{{ runner.temp }}}}/mutation-env\"",
+                "Stryker を呼ばず、同期の計画の範囲の表の環境で表のテストだけを流す"
+            )
+            .And.NotContain("continue-on-error", "その環境の失敗で CI を赤にする");
+        Regex
+            .IsMatch(environmentStep, @"(?m)^\s+shell: pwsh\s*$")
+            .Should()
+            .BeTrue("起動スクリプトは pwsh で動かす");
+        environmentIndex
+            .Should()
+            .BeGreaterThan(
+                ciSteps.FindIndex(step =>
+                    step.Contains("dotnet test QuickER.slnx", StringComparison.Ordinal)
+                ),
+                "全件のテストの後に流す（ビルドを使い回す）"
+            );
+        AssertTempOnRunnerTemp(environmentStep);
     }
 
     /// <summary>
@@ -543,15 +580,23 @@ public sealed class WorkflowGuardTests
     /// 呼び出し元は厳格モード（QUICKER_REQUIRE_DOCKER=1）と同期計画の種の数（7）を立てておき、provider-sync-planner の行では
     /// Stryker から厳格モードが見えず（QUICKER_SKIP_DOCKER と両立しない）、種の数が表の値で上書きされ、終わった後は元の値に戻ることを見る。
     /// 期待の値はスクリプトの表から読まずにここへ書く（表の値を写すと、表を壊しても緑のまま）。
+    /// <c>-TestsOnly</c> の行は、Stryker の代わりに表のテストのプロジェクトを表の絞り込みで <c>dotnet test --no-build</c> で呼び、
+    /// 写しを作らず、変数の立て外し・戻し・実行の環境の記録は Stryker の行と同じであることを見る（ci.yml が PR でこの経路を呼ぶ）。
     /// </remarks>
     [Theory(
-        DisplayName = "run-mutation.ps1 は範囲のソリューションの写しを作ってからルートで Stryker を呼び、範囲の環境変数をその間だけ立て、成否に依らず写しを消して環境を戻し、失敗を伝える"
+        DisplayName = "run-mutation.ps1 は範囲のソリューションの写しを作ってからルートで Stryker を呼び（-TestsOnly なら写しを作らずに表のテストを流し）、範囲の環境変数をその間だけ立て、成否に依らず写しを消して環境を戻し、失敗を伝える"
     )]
-    [InlineData("model", 0)]
-    [InlineData("model", 1)]
-    [InlineData("provider-sync-planner", 0)]
-    [InlineData("provider-sync-planner", 1)]
-    public void MutationScript_RunsStrykerOnRootCopyAndRemovesIt(string target, int strykerExitCode)
+    [InlineData("model", 0, false)]
+    [InlineData("model", 1, false)]
+    [InlineData("provider-sync-planner", 0, false)]
+    [InlineData("provider-sync-planner", 1, false)]
+    [InlineData("provider-sync-planner", 0, true)]
+    [InlineData("provider-sync-planner", 1, true)]
+    public void MutationScript_RunsStrykerOnRootCopyAndRemovesIt(
+        string target,
+        int strykerExitCode,
+        bool testsOnly
+    )
     {
         var (solution, environmentAtStryker) = target switch
         {
@@ -564,7 +609,7 @@ public sealed class WorkflowGuardTests
                 "QUICKER_REQUIRE_DOCKER=1 QUICKER_SKIP_DOCKER= QUICKER_SYNC_FUZZ_SEEDS=7 QUICKER_SYNC_CAPNET_SEEDS="
             ),
         };
-        var run = RunMutationScript(target, strykerExitCode);
+        var run = RunMutationScript(target, strykerExitCode, testsOnly);
 
         if (strykerExitCode == 0)
         {
@@ -572,26 +617,65 @@ public sealed class WorkflowGuardTests
         }
         else
         {
-            run.ExitCode.Should().NotBe(0, "Stryker の失敗を終了コードで伝える\n" + run.Output);
+            run.ExitCode.Should()
+                .NotBe(
+                    0,
+                    "Stryker（-TestsOnly ならテスト）の失敗を終了コードで伝える\n" + run.Output
+                );
         }
 
         run.WorkingDirectory.Should()
-            .Be(run.RepositoryRoot, "Stryker はルートを作業フォルダにして呼ぶ\n" + run.Output);
-        run.Arguments.Should()
-            .Be(
-                $"stryker -f stryker/{target}.json -s {MutationSolutionCopy} -O {run.OutputDirectory} -c 3 --skip-version-check -L",
-                "範囲の設定・ルートの写し・結果のフォルダ（絶対パス）・並列度・ログのファイルを渡す"
-            );
-        run.CopiedProjects.Should()
-            .Equal(
-                StrykerSolutionProjects(solution).Select(path => path[3..]),
-                $"写しは範囲のソリューション（{solution}）の各パスから先頭の ../ を外したもの（ルートから同じプロジェクトを指す）"
-            );
-        run.CopiedProjects.Should()
-            .OnlyContain(
-                path => File.Exists(Path.Combine(Root, path)),
-                "写しのパスはリポジトリのルートから実在のプロジェクトを指す"
-            );
+            .Be(run.RepositoryRoot, "dotnet はルートを作業フォルダにして呼ぶ\n" + run.Output);
+
+        if (testsOnly)
+        {
+            run.Arguments.Should()
+                .Be(
+                    "test tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj --no-build --filter FullyQualifiedName~QuickER.Tests.Integration.Dialects.SyncPlanFuzz --output detailed",
+                    "範囲の表のテストのプロジェクトを、表の絞り込みでビルドを使い回して流す"
+                );
+            run.CopiedProjects.Should().BeEmpty("-TestsOnly ではソリューションの写しを作らない");
+            File.Exists(
+                    Path.Combine(
+                        Root,
+                        "tests",
+                        "QuickER.Tests.Integration",
+                        "QuickER.Tests.Integration.csproj"
+                    )
+                )
+                .Should()
+                .BeTrue("表のテストのプロジェクトは実在する");
+            Directory
+                .Exists(
+                    Path.Combine(
+                        Root,
+                        "tests",
+                        "QuickER.Tests.Integration",
+                        "Dialects",
+                        "SyncPlanFuzz"
+                    )
+                )
+                .Should()
+                .BeTrue("絞り込みの名前空間（フォルダに追従）のテストが実在する");
+        }
+        else
+        {
+            run.Arguments.Should()
+                .Be(
+                    $"stryker -f stryker/{target}.json -s {MutationSolutionCopy} -O {run.OutputDirectory} -c 3 --skip-version-check -L",
+                    "範囲の設定・ルートの写し・結果のフォルダ（絶対パス）・並列度・ログのファイルを渡す"
+                );
+            run.CopiedProjects.Should()
+                .Equal(
+                    StrykerSolutionProjects(solution).Select(path => path[3..]),
+                    $"写しは範囲のソリューション（{solution}）の各パスから先頭の ../ を外したもの（ルートから同じプロジェクトを指す）"
+                );
+            run.CopiedProjects.Should()
+                .OnlyContain(
+                    path => File.Exists(Path.Combine(Root, path)),
+                    "写しのパスはリポジトリのルートから実在のプロジェクトを指す"
+                );
+        }
         run.CopyLeftBehind.Should().BeFalse("成否に依らず実行の後に写しを消す");
         File.ReadAllLines(Path.Combine(Root, ".gitignore"))
             .Should()
@@ -635,14 +719,21 @@ public sealed class WorkflowGuardTests
             );
     }
 
-    /// <summary>起動スクリプトは、無い範囲を Stryker を呼ぶ前に断り、写しも作らない</summary>
-    [Fact(DisplayName = "run-mutation.ps1 は無い範囲を Stryker を呼ぶ前に断る")]
-    public void MutationScript_RefusesUnknownTarget()
+    /// <summary>
+    /// 起動スクリプトは、無い範囲を Stryker を呼ぶ前に断り、写しも作らない。表に流すテストの無い範囲を <c>-TestsOnly</c> で呼んでも、
+    /// 何もせずに断る（CI の範囲の取り違えを「何もしないで緑」にしない）
+    /// </summary>
+    [Theory(
+        DisplayName = "run-mutation.ps1 は無い範囲と、-TestsOnly で流すテストを表に持たない範囲を、dotnet を呼ぶ前に断る"
+    )]
+    [InlineData("no-such-target", false)]
+    [InlineData("model", true)]
+    public void MutationScript_RefusesUnknownTarget(string target, bool testsOnly)
     {
-        var run = RunMutationScript("no-such-target", strykerExitCode: 0);
+        var run = RunMutationScript(target, strykerExitCode: 0, testsOnly);
 
         run.ExitCode.Should().NotBe(0, run.Output);
-        run.Arguments.Should().BeEmpty("無い範囲では Stryker を呼ばない");
+        run.Arguments.Should().BeEmpty("断る範囲では dotnet を呼ばない");
         run.CopyLeftBehind.Should().BeFalse();
         run.EnvironmentAfter.Should().Be(MutationScriptParentEnvironment, "環境を変えない");
     }
@@ -1240,8 +1331,13 @@ public sealed class WorkflowGuardTests
     /// その外の作業フォルダから相対パスの結果のフォルダと並列度 3 で起動スクリプトを動かす。
     /// 呼び出し元は <see cref="MutationScriptParentEnvironment"/> の環境を立てて呼び、スクリプトの後の環境を記録する（失敗しても）。
     /// 偽の dotnet は作業フォルダ・引数（1 つずつ）・その時点の写し・表の変数を記録し、<paramref name="strykerExitCode"/> で終わる。
+    /// <paramref name="testsOnly"/> なら並列度の代わりに <c>-TestsOnly</c> を渡す。
     /// </summary>
-    private static MutationScriptRun RunMutationScript(string target, int strykerExitCode)
+    private static MutationScriptRun RunMutationScript(
+        string target,
+        int strykerExitCode,
+        bool testsOnly
+    )
     {
         using var temp = new TestSupport.TestTempFolder();
         var repository = Path.Combine(temp.Path, "repo");
@@ -1315,7 +1411,7 @@ public sealed class WorkflowGuardTests
         );
         var step = RunStep(
             temp.Path,
-            $"{parent}try {{ ./repo/scripts/run-mutation.ps1 -Target {target} -OutputDirectory out -Concurrency 3 }} finally {{ {record} }}; $global:LASTEXITCODE = 0",
+            $"{parent}try {{ ./repo/scripts/run-mutation.ps1 -Target {target} -OutputDirectory out {(testsOnly ? "-TestsOnly" : "-Concurrency 3")} }} finally {{ {record} }}; $global:LASTEXITCODE = 0",
             fakeBinDirectory
         );
         var runEnvironment = Path.Combine(temp.Path, "out", "run-environment.json");
