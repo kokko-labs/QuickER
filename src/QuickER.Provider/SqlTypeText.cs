@@ -173,9 +173,9 @@ public static partial class SqlTypeText
     /// <summary>実行計画が書き出す列の型文字列を検証し、安全でない表記があれば名指しで例外を投げる（同期生成の入口）</summary>
     /// <remarks>
     /// 列定義を書き出す経路をすべて拾う＝表の追加（<see cref="SchemaDiffItem.Entity"/> の全列）、列の追加・変更
-    /// （<see cref="SchemaDiffItem.Column"/>）、テーブル再構築の合成後定義、ネイティブ列順変更の移動列。
-    /// 型を書き出さない項目（表・列・制約の削除など、live の定義を運ぶだけの項目）は見ない。見ると、取込が持ち帰った
-    /// 安全でない型の表・列を、同期で消すこともできなくなる。
+    /// （<see cref="SchemaDiffItem.Column"/>）、テーブル再構築の合成後定義。
+    /// 型を書き出さない項目（表・列・制約の削除など、live の定義を運ぶだけの項目と、実行時に DB から列定義を読み直して並べ替える
+    /// ネイティブ列順変更の移動列）は見ない。見ると、取込が持ち帰った安全でない型の表・列を、同期で消すことも並べ替えることもできなくなる。
     /// </remarks>
     /// <exception cref="InvalidOperationException">安全でない型文字列を含む列がある場合</exception>
     public static void Validate(SyncPlan plan)
@@ -204,13 +204,6 @@ public static partial class SqlTypeText
         {
             columns.AddRange(
                 rebuild.NewDefinition.Columns.Select(column => (rebuild.TableName, Column: column))
-            );
-        }
-
-        foreach (var reorder in plan.Reorders)
-        {
-            columns.AddRange(
-                reorder.Moves.Select(move => (reorder.TableName, Column: move.Column))
             );
         }
 

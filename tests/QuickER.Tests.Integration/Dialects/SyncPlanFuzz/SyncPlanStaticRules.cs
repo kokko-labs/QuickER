@@ -51,6 +51,8 @@ internal sealed record SyncPlanStaticVerdict(
 ///   <item>R8：外部キーを足すとき、組の両端のその時点の型が方言の宣言で並べられる（MySQL 3780・SQL Server 1778 / 1753・PostgreSQL 42804・
 ///   Oracle ORA-02267）。DB 側の図の外部キーが同じ型のまま持っていた組（外して付け直す文）は、DB が受け入れたので数えない。宣言の扱いは R7 と同じ。
 ///   この規則が無いと、live の列どうしの型の違う外部キーの追加が警告なしに断られるのを予言できない。</item>
+///   <item>R9：同じ列の並びに一意制約を 2 つ張れない方言（Oracle＝<see cref="SyncDialectCapabilities.SupportsUniqueConstraintOnPrimaryKey"/>
+///   が偽の逐次 DDL の方言）で、一意制約を足すとき、その時点で残る主キー・一意制約と列集合が同じでない（ORA-02261）。</item>
 /// </list>
 /// <para>
 /// 違反になるのは、断られる文があるのに次のどちらでもないとき：(a) 失敗を予告する警告がある（<see cref="NonPredictingWarnings"/> 以外）
@@ -90,6 +92,7 @@ internal static class SyncPlanStaticRules
             SyncPlanWarningKind.DescriptionCharactersReplaced,
             SyncPlanWarningKind.TableLeftWithoutColumns,
             SyncPlanWarningKind.TableWithoutColumns,
+            SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent,
         };
 
     /// <summary>計画を規則で判定する</summary>
@@ -143,6 +146,16 @@ internal static class SyncPlanStaticRules
             state.Apply(steps[k]);
         }
 
+        // M1・D9 の並び（失敗の予言の有無に依らない、暗黙コミットの方言の並びの規則）
+        warningViolations.AddRange(
+            MovedFirstNotFailing(steps, doomedAt, liveEntities, capabilities)
+        );
+
+        if (!capabilities.TransactionalDdl)
+        {
+            warningViolations.AddRange(ReAddsAfterNewAdds(steps, plan, capabilities));
+        }
+
         if (reason is null)
         {
             return warningViolations.Count == 0
@@ -171,6 +184,120 @@ internal static class SyncPlanStaticRules
 
     /// <summary>W1 の違反の文の頭（実 DB の総当たりも、DB に依らないこの規則の違反だけを結果へ加える）</summary>
     public const string W1Prefix = "static W1:";
+
+    /// <summary>M1 の違反の文の頭</summary>
+    public const string M1Prefix = "static M1:";
+
+    /// <summary>D9 の並び（付け直しの後ろへ回す新しい外部キーの追加）の違反の文の頭</summary>
+    public const string D9OrderPrefix = "static D9 (order):";
+
+    /// <summary>
+    /// M1：前寄せしたセクション（<see cref="SyncPlanSection.IsMovedFirst"/>）のどれかの文が、計画の順のその位置で断られると予言される（前寄せの後ろへ進まない）。
+    /// </summary>
+    /// <remarks>
+    /// 前寄せは「残す外部キーに阻まれて必ず断られる文」を、何も外さないうちに失敗させるために先頭へ移す。移した文が先頭の位置では通る
+    /// （両端を別々の型へ変える外部キーの、互換の範囲で広げる子の列の変更など）と、断られる文は元の位置に残り、その前で外した制約が
+    /// 暗黙コミットで消えたまま残る。規則が判定できる文（キーの削除＝R1・R3、型を変える列の変更＝R2・R7）を最後に持つ前寄せだけを
+    /// 見る（子の列の NOT NULL 化＝SET NULL の外部キーは規則が予言しないので見ない）。
+    /// </remarks>
+    private static IEnumerable<string> MovedFirstNotFailing(
+        List<Step> steps,
+        int doomedAt,
+        IReadOnlyList<Entity> liveEntities,
+        SyncDialectCapabilities capabilities
+    )
+    {
+        var movedCount = steps.TakeWhile(s => s.Section.IsMovedFirst).Count();
+
+        if (movedCount == 0)
+        {
+            yield break;
+        }
+
+        var last = steps[movedCount - 1];
+        var judged =
+            last.Kind == SchemaDiffKind.DropUniqueConstraint
+            || last.Kind == SchemaDiffKind.AlterPrimaryKey
+                && last.Section.PrimaryKeyPhase == PrimaryKeyPhase.Drop
+            || last.Kind == SchemaDiffKind.AlterColumn
+                && last.Item.Column is { } column
+                && liveEntities
+                    .FirstOrDefault(e => Lower(e.TableName) == last.Table)
+                    ?.Columns.FirstOrDefault(c => Lower(c.Name) == Lower(column.Name))
+                    is { } liveColumn
+                && !capabilities.AreSameType(liveColumn.DataType, column.DataType);
+
+        if (judged && (doomedAt < 0 || doomedAt >= movedCount))
+        {
+            yield return doomedAt < 0
+                ? $"{M1Prefix} {last.Describe()} is moved first but is not predicted to fail"
+                : $"{M1Prefix} {last.Describe()} is moved first but {steps[doomedAt].Describe()} is the statement predicted to fail";
+        }
+    }
+
+    /// <summary>
+    /// D9 の並び：DDL を暗黙コミットする方言で、同じ計画の前の方で外した外部キーの付け直しが、新しい外部キー（DB に無い外部キー）の
+    /// 追加より後ろにある。
+    /// </summary>
+    /// <remarks>
+    /// 計画は列の値を見ないので、新しい外部キーの追加は既存の行（親の無い値）で断られうる。その後ろに置いた付け直しは走らず、外した
+    /// 外部キーが消えたまま残る。付け直しはもともと DB にあった制約なので、データでは断られない。候補キーの警告を出した外部キー
+    /// （付け直しが断られうるので最後へ回す）は除く。
+    /// </remarks>
+    private static IEnumerable<string> ReAddsAfterNewAdds(
+        List<Step> steps,
+        SyncPlan plan,
+        SyncDialectCapabilities capabilities
+    )
+    {
+        var limit = capabilities.IdentifierLengthLimit;
+        var warnedForeignKeys = plan
+            .Warnings.Where(w =>
+                w.Kind
+                    is SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey
+                        or SyncPlanWarningKind.ForeignKeyNotOnCandidateKey
+            )
+            .Select(w => $"{Lower(w.TableName)}|{Lower(w.Detail)}")
+            .ToHashSet(StringComparer.Ordinal);
+        var dropped = new HashSet<string>(StringComparer.Ordinal);
+        string? newAdd = null;
+
+        foreach (var step in steps)
+        {
+            if (
+                step.Kind == SchemaDiffKind.DropForeignKey
+                && step.DropIdentity(capabilities) is { } d
+            )
+            {
+                dropped.Add(d);
+                continue;
+            }
+
+            if (
+                step.Kind != SchemaDiffKind.AddForeignKey
+                || step.AddIdentity(capabilities) is not { } identity
+            )
+            {
+                continue;
+            }
+
+            if (!dropped.Contains(identity))
+            {
+                newAdd ??= identity;
+                continue;
+            }
+
+            if (
+                newAdd is not null
+                && !warnedForeignKeys.Contains(
+                    $"{Lower(step.Item.ChildEntity!.TableName)}|{Lower(step.ForeignKeyName(limit))}"
+                )
+            )
+            {
+                yield return $"{D9OrderPrefix} {identity} is re-added after the new foreign key {newAdd}, whose add can fail on existing rows";
+            }
+        }
+    }
 
     /// <summary>
     /// W1：<see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/> が DB にある外部キーを名指しするなら、その外部キーに
@@ -664,7 +791,7 @@ internal static class SyncPlanStaticRules
                     step.Table,
                     UniqueName(step),
                     isForeignKey: false
-                ),
+                ) ?? CheckSameColumnSetKey(step),
                 SchemaDiffKind.AlterPrimaryKey
                     when step.Section.PrimaryKeyPhase == PrimaryKeyPhase.Add => IsMySql
                     ? null
@@ -768,6 +895,31 @@ internal static class SyncPlanStaticRules
         }
 
         // ---- 判定 ----
+
+        /// <summary>
+        /// R9：Oracle（同じ列の並びに一意制約を 2 つ張れない＝<see cref="SyncDialectCapabilities.SupportsUniqueConstraintOnPrimaryKey"/> が偽の
+        /// 逐次 DDL の方言）で、足す一意制約の列集合が、その時点で残る主キー・一意制約の列集合と同じ（ORA-02261）
+        /// </summary>
+        private string? CheckSameColumnSetKey(Step step)
+        {
+            if (capabilities.SupportsUniqueConstraintOnPrimaryKey)
+            {
+                return null;
+            }
+
+            var columns = step
+                .Item.UniqueConstraintColumns.Select(Lower)
+                .Order(StringComparer.Ordinal)
+                .ToList();
+            var same = _keys.FirstOrDefault(k =>
+                k.Table == step.Table
+                && k.Columns.Order(StringComparer.Ordinal).SequenceEqual(columns)
+            );
+
+            return same is null
+                ? null
+                : $"R9: unique constraint on ({string.Join(", ", columns)}) duplicates {(same.Primary ? "the primary key" : same.Name)}";
+        }
 
         /// <summary>R1・R3：主キー・一意制約を消す前に、それに支えられた外部キーが外れている</summary>
         private string? CheckKeyDrop(Key? key)

@@ -411,7 +411,7 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
 - Excel 定義書の `UQ{n}` は、後ろに Unicode の数字が続けば一致させない（`UQ1２` を `UQ1` と読まない）。
 - 名前の並びで決める値（`SchemaSignature` のテーブルとリレーション）は序数で並べる。カルチャが等しいとみなす合成済みの文字と分解形・ソフトハイフンの有無だけが違う名前は、既定の比較では入力の順が残って置き換えの確認が余計に出る。
 - 数値の補間のガード（`SourceRuleTests` の規則 `numeric-interpolation-culture`・見つける形は `Guards/Finders/CultureDependentText`）：`QuickER.Provider*` と `QuickER.Dialects` を `SourceSymbolScan` で組み、`ScanNodes` で条件コンパイルのどの分岐も読む。補間の穴と文字列の連結の被演算子のうち、型が数値（整数・decimal・double・float）か日時（DateTime・DateTimeOffset・DateOnly・TimeOnly・TimeSpan。Nullable も）のものをシンボルで数え、第 1 引数が `CultureInfo.InvariantCulture` の `string.Create` の中は数えない。ファイルと件数で理由つきの既知の一覧と厳密に照合する。
-  - 理由の分類は「利用者向けの文言」「例外のメッセージ」「負にならない値」。いまは「負にならない値」の 3 件だけ（プロセスの外へ出ない照合のキー＝`SchemaDiffService` の外部キーの署名・`UniqueConstraintNaming` の列の集合の署名・`QueryParameterTypeResolver` の仮の列名）。
+  - 理由の分類は「利用者向けの文言」「例外のメッセージ」「負にならない値」。いまは「負にならない値」の 1 件だけ（プロセスの外へ出ない `QueryParameterTypeResolver` の仮の列名）。照合のキーの部分の長さは `SignatureText.Part` が `InvariantCulture` で書く。
   - 書き出す型の表記（取込の `FormatDataType` と 5 方言の型カタログ・SQL Server の型の表記の正規化）・同期スクリプトの見出し・接続文字列のポート・SQLite の取込の外部キー名・Oracle の説明の `CHR(n)`・識別子の上限の英語の表記（例外文と MCP の注意文）は、一覧に載せず `string.Create` へ直した。
   - 整数の書式がカルチャで変わるのは負号だけ（.NET は数字を置き換えず、既定の書式は桁区切りを入れない）。直した箇所はどれも負の値でだけ食い違う。カタログは負の長さを返さない。
 - その他のガード：

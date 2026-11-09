@@ -10,11 +10,12 @@ namespace QuickER.Provider;
 /// <remarks>
 /// <para>リネームは扱わず「同名 = 同一」を前提とする 名称が変われば削除＋追加として検出する</para>
 /// <para>
-/// 計算列（<see cref="Column.IsComputed"/>）だけは <b>NULL 許容の差を見ない</b>。実 DB の計算列の NULL 許容は
+/// DB の列が計算列（<see cref="Column.IsComputed"/>）なら <b>NULL 許容の差を見ない</b>。実 DB の計算列の NULL 許容は
 /// 式から決まる性質で、図がそれを DB へ強制することはできない（意味モデルは式を持たない）。しかも
 /// 「NOT NULL の計算列はミラー側の DB へ書けない」問題の逃げ道が<b>図で NULL 許容にする</b>ことなので、
 /// 比較すると逃げ道を採った瞬間に取込元の DB へ偽の <c>ALTER COLUMN</c>（NOT NULL → NULL）が出る。
-/// 図・DB のどちらか一方だけが計算列の場合も同じ。型の差は検出するが、意味モデルは式を持たないので、式を保ったまま型を
+/// 計算列かは DB の列で決める（図が普通の列でも DB が計算列なら同じ）。図だけが計算列の列は、DDL が普通の列として作る（意味モデルは
+/// 式を持たない）ので DB では普通の列で、型も NULL 許容も普通の列として比べる。DB の計算列の型の差は検出するが、意味モデルは式を持たないので、式を保ったまま型を
 /// 変えられる方言（<see cref="SyncDialectCapabilities.SupportsComputedColumnTypeChange"/>）でだけ選べる項目にし、
 /// ほかの方言では選択できない案内項目にする（項目は NULL 許容を運ばない）。
 /// </para>
@@ -74,18 +75,25 @@ public class SchemaDiffService
         // 表と列の組を 1 回だけ求める（規則は NameLookup＝同じ名前かは SchemaNames が決め、同じとみなす相手が片側に
         // 複数あるときは綴りまで一致する 1 件を選ぶ。選べなければ組まず、図側は追加・DB 側は削除の候補になる）。
         // 組になる live と大文字小文字だけ違う図側の表・列は、live の綴りへ揃えた複製で差分を組む
+        // 名前の無い制約の既定名（外部キーの既定名・一意制約の合成名）は、揃える前の図（DDL が名前を付けるのと同じ入力＝図の綴り）
+        // から求める。live の綴りへ揃えた複製から求めると、識別子の上限で縮めた既定名のハッシュが DDL の付けた名前と変わる
+        // （大文字小文字を畳む DB＝MySQL の lower_case_table_names=1 などで、偽の外部キーの追加と消えない削除が出る）
+        var namingEntities = targetEntities;
         var matching = MatchSchemas(targetEntities, liveEntities);
         targetEntities = matching.Targets;
         var livePartnerOf = matching.LivePartnerOf;
         var matchedLive = livePartnerOf.Values.ToHashSet();
 
         // 図の一意制約の名前を図全体で 1 回だけ解決する（名前の無い制約の合成名が、ほかの表の制約名・外部キー名と
-        // ぶつかるときは番号つき）。組にした複製の表で求める（複製は一意制約も別のオブジェクトになる）。
+        // ぶつかるときは番号つき）。揃える前の図で求め、組にした複製の表の一意制約（Id を保った別のオブジェクト）へ写す。
         // 名前の段の照合には使わない（名前の段は図で名前を付けた制約だけを組む）
-        var uniqueConstraintNames = ConstraintNames.ResolveUniqueConstraintNames(
-            targetEntities,
-            targetRelationships,
-            capabilities.IdentifierLengthLimit
+        var uniqueConstraintNames = OntoMatchedTargets(
+            ConstraintNames.ResolveUniqueConstraintNames(
+                namingEntities,
+                targetRelationships,
+                capabilities.IdentifierLengthLimit
+            ),
+            targetEntities
         );
 
         // ---------- テーブル/カラムの差分 ----------
@@ -181,7 +189,10 @@ public class SchemaDiffService
                         TableName = name,
                         Entity = target,
                         NewDescription = targetTableDesc,
-                        OldDescription = liveTableDesc,
+                        // DB に説明が無ければ null（比較は空文字へそろえた形で行う）
+                        OldDescription = DescriptionText.IsPresent(liveTableDesc)
+                            ? liveTableDesc
+                            : null,
                         Description = !DescriptionText.IsPresent(targetTableDesc)
                             ? string.Format(Strings.Diff_RemoveTableDescription, name)
                             : string.Format(
@@ -243,8 +254,10 @@ public class SchemaDiffService
                 {
                     // 計算列の NULL 許容は図が DB へ強制できる性質ではない（実 DB の NULL 許容は式が決める）。
                     // 比較すると、NOT NULL の計算列を図側で NULL 許容へ逃がした瞬間に取込元の DB へ
-                    // 「NOT NULL → NULL」の偽 AlterColumn が出る。DB 側だけが計算列の場合も同じ
-                    var computed = tcol.IsComputed || lcol.IsComputed;
+                    // 「NOT NULL → NULL」の偽 AlterColumn が出る。計算列かは DB の列で決める（DB 側だけが計算列の場合も
+                    // 同じ）。図だけが計算列なら DB の列は普通の列（DDL は計算列を普通の列として作る）なので、型も NULL 許容も
+                    // 普通の列として比べて変える
+                    var computed = lcol.IsComputed;
                     var compareNullability = !computed;
                     // NULL 許容は実効の値で比べる（主キーの列はモデルの値に依らず NOT NULL・判定は ColumnNullability）
                     var nullabilityChanged =
@@ -312,7 +325,9 @@ public class SchemaDiffService
                                 Entity = target,
                                 Column = tcol,
                                 NewDescription = newColDesc,
-                                OldDescription = oldColDesc,
+                                OldDescription = DescriptionText.IsPresent(oldColDesc)
+                                    ? oldColDesc
+                                    : null,
                                 Description = !DescriptionText.IsPresent(newColDesc)
                                     ? string.Format(
                                         Strings.Diff_RemoveColumnDescription,
@@ -420,6 +435,7 @@ public class SchemaDiffService
             dialect.IdentifierLengthLimit
         );
         var targetFkNames = ResolveTargetForeignKeyNames(
+            namingEntities,
             targetEntities,
             targetRelationships,
             liveEntities,
@@ -1146,7 +1162,7 @@ public class SchemaDiffService
         );
 
     /// <summary>署名の 1 部分を長さつきで表す（<see cref="UniqueConstraintNaming.ColumnSetSignature"/> と同じ形）</summary>
-    private static string SignaturePart(string value) => $"{value.Length}:{value}";
+    private static string SignaturePart(string value) => SignatureText.Part(value);
 
     /// <summary>列名を照合用のキー（<see cref="SchemaNames.Key"/>）にする（外部キーの署名と作り直しの対応づけが共有する）</summary>
     private static string ColumnKey(string name) => SchemaNames.Key(name);
@@ -1154,10 +1170,40 @@ public class SchemaDiffService
     /// <summary>制約の名前を照合用のキー（<see cref="SchemaNames.Key"/>）にする（外部キーと一意制約の作り直しの対応づけが使う）</summary>
     private static string NameKey(string name) => SchemaNames.Key(name);
 
+    /// <summary>
+    /// 揃える前の図の一意制約の名前を、組にした複製の表の一意制約（Id を保った別のオブジェクト）へ写す（組にしなかった表は同じ
+    /// オブジェクトなのでそのまま）
+    /// </summary>
+    private static IReadOnlyDictionary<UniqueConstraint, string> OntoMatchedTargets(
+        IReadOnlyDictionary<UniqueConstraint, string> names,
+        IReadOnlyList<Entity> targetEntities
+    )
+    {
+        var byId = new Dictionary<Guid, string>();
+
+        foreach (var (constraint, name) in names)
+        {
+            byId[constraint.Id] = name;
+        }
+
+        var mapped = new Dictionary<UniqueConstraint, string>();
+
+        foreach (var constraint in targetEntities.SelectMany(e => e.UniqueConstraints))
+        {
+            if (byId.TryGetValue(constraint.Id, out var name))
+            {
+                mapped[constraint] = name;
+            }
+        }
+
+        return mapped;
+    }
+
     /// <summary>図の外部キーの名前を求める（旧版の PostgreSQL が切り詰めた既定名を吸収する）</summary>
     /// <remarks>
     /// <para>
-    /// 名前は DDL と同じ規則（<see cref="ConstraintNames.ResolveForeignKeyNameDetails"/>・同期の方言の上限で既定名を縮める）。
+    /// 名前は DDL と同じ規則（<see cref="ConstraintNames.ResolveForeignKeyNameDetails"/>・同期の方言の上限で既定名を縮める）。名前は
+    /// 揃える前の図（<paramref name="namingEntities"/>＝DDL と同じ図の綴り）から求め、吸収の照合は live の綴りへ揃えた表で行う。
     /// </para>
     /// <para>
     /// 上限を超える識別子を黙って切り詰める方言（<see cref="SyncDialectCapabilities.TruncatesLongIdentifiers"/>＝PostgreSQL）
@@ -1175,6 +1221,7 @@ public class SchemaDiffService
     /// </para>
     /// </remarks>
     private static IReadOnlyDictionary<Relationship, string> ResolveTargetForeignKeyNames(
+        IReadOnlyList<Entity> namingEntities,
         IReadOnlyList<Entity> targetEntities,
         IReadOnlyList<Relationship> targetRelationships,
         IReadOnlyList<Entity> liveEntities,
@@ -1185,7 +1232,7 @@ public class SchemaDiffService
     {
         var limit = dialect.IdentifierLengthLimit;
         var details = ConstraintNames.ResolveForeignKeyNameDetails(
-            targetEntities,
+            namingEntities,
             targetRelationships,
             limit
         );

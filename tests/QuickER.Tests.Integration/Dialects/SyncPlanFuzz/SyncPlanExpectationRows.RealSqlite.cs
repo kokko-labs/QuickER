@@ -12,7 +12,7 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 internal static partial class SyncPlanExpectationRows
 {
     /// <summary>SQLite の実 DB の段の行の数の下限（行を足したら・消したら合わせる）</summary>
-    private const int RealSqliteRowCount = 39;
+    private const int RealSqliteRowCount = 48;
 
     /// <summary>実 DB の段：SQLite の同期（テーブル再構築・外部キー・主キー・一意制約・ビュー）</summary>
     private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealSqliteRows() =>
@@ -21,7 +21,91 @@ internal static partial class SyncPlanExpectationRows
             .. RealSqliteKeyRows(),
             .. RealSqliteViewRows(),
             .. RealSqliteScriptRows(),
+            .. RealSqliteImportDiscardedRows(),
         ];
+
+    /// <summary>
+    /// 取込が捨てる表の中の物（前後の空白だけ違う列名の後着の列・ドット付きの表への外部キー・参照先の無い外部キー）× 表を作り直す項目
+    /// （無関係な列の型の変更・外部キーの追加・列の削除）
+    /// </summary>
+    /// <remarks>
+    /// 再構築は live の図から表を作り直すので、捨てた物は新しい表に無く、データごと黙って消える。計画はその表を作り直す項目を外して
+    /// 名指しし、DB は変わらない（捨てた物も残る）。
+    /// </remarks>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > RealSqliteImportDiscardedRows()
+    {
+        // 捨てる物：表 t の追加の列の定義（行の値つき）・探針・探針の期待
+        (string Id, string Columns, string Values, string Probe, string[] Expected)[] discards =
+        [
+            (
+                "collided-column",
+                "\"name\" TEXT NULL, \"name \" TEXT NULL",
+                "'kept', 'precious'",
+                "SELECT '[' || \"name\" || ']' AS c FROM pragma_table_info('t') ORDER BY cid;",
+                ["[id]", "[note]", "[legacy]", "[pid]", "[name]", "[name ]"]
+            ),
+            (
+                "fk-to-dotted-table",
+                "\"bid\" INTEGER NULL, CONSTRAINT \"FK_t_ab\" FOREIGN KEY (\"bid\") REFERENCES \"a.b\" (\"id\")",
+                "1",
+                "SELECT \"table\" AS c FROM pragma_foreign_key_list('t');",
+                ["a.b"]
+            ),
+            (
+                "fk-to-missing-table",
+                "\"zid\" INTEGER NULL, CONSTRAINT \"FK_t_zz\" FOREIGN KEY (\"zid\") REFERENCES \"zz\" (\"id\")",
+                "NULL",
+                "SELECT \"table\" AS c FROM pragma_foreign_key_list('t');",
+                ["zz"]
+            ),
+        ];
+
+        // 表 t を作り直す項目
+        (string Id, System.Action<ExpectationSchema> Target)[] triggers =
+        [
+            ("type-change", s => s.Col("t", "note").DataType = "VARCHAR(200)"),
+            ("add-fk", s => s.Fk("p", "t", null, ("id", "pid"))),
+            ("drop-column", s => s["t"].Columns.RemoveAll(c => c.Name == "legacy")),
+        ];
+
+        foreach (var discard in discards)
+        {
+            foreach (var trigger in triggers)
+            {
+                yield return Row(
+                        $"realdb-rebuild-skipped-when-import-discarded-{discard.Id}-{trigger.Id}",
+                        $"[Integration] SQLite 同期: 取込が捨てた物（{discard.Id}）のある表は、作り直す項目（{trigger.Id}）を外して名指しし、捨てた物をデータごと消さない",
+                        DialectNames.Sqlite
+                    )
+                    .TargetFromLive(trigger.Target)
+                    .Select(RealScenarios.SelectAll)
+                    .OnRealDatabase(r =>
+                        r.LiveSql(
+                                "CREATE TABLE \"p\" (\"id\" INTEGER NOT NULL, CONSTRAINT \"PK_p\" PRIMARY KEY (\"id\"));"
+                                    + "CREATE TABLE \"a.b\" (\"id\" INTEGER NOT NULL PRIMARY KEY);"
+                                    + "INSERT INTO \"p\" (\"id\") VALUES (1);"
+                                    + "INSERT INTO \"a.b\" (\"id\") VALUES (1);"
+                                    + "CREATE TABLE \"t\" (\"id\" INTEGER NOT NULL, \"note\" TEXT NULL, \"legacy\" INTEGER NULL, \"pid\" INTEGER NULL, "
+                                    + discard.Columns
+                                    + ", CONSTRAINT \"PK_t\" PRIMARY KEY (\"id\"));"
+                                    + "INSERT INTO \"t\" VALUES (1, 'x', 9, 1, "
+                                    + discard.Values
+                                    + ");"
+                            )
+                            .Query("kept", discard.Probe)
+                            .Expect(e =>
+                            {
+                                e.Outcome.Exact("committed");
+                                e.Warnings.Single("TableRebuildLosesImportDiscardedContent(t): *");
+                                e.Unchanged();
+                                e.Probe("kept").Unordered(discard.Expected);
+                            })
+                    );
+            }
+        }
+    }
 
     /// <summary>再構築で温存するもの・失うもの（行・補助オブジェクト・外部キー・列順・属性）</summary>
     private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealSqliteRebuildRows() =>

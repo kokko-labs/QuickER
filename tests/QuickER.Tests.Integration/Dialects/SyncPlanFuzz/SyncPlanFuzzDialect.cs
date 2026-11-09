@@ -87,12 +87,6 @@ internal abstract class SyncPlanFuzzDialect
     /// </summary>
     public virtual bool DistinguishesSameSetConstraints => true;
 
-    /// <summary>
-    /// データのある日時の列の小数秒の精度を下げられるか。Oracle は ORA-30082（列を空にしないと精度を下げられない・DB の事実）で
-    /// 断るので、生成器は行のある表の日時の精度を下げない
-    /// </summary>
-    public virtual bool AllowsDateTimePrecisionDecreaseWithData => true;
-
     /// <summary>日時の型の既定の精度（<see cref="TypeName"/> は、この精度なら精度を書かない綴りを返す）</summary>
     public abstract int DefaultDateTimePrecision { get; }
 
@@ -491,8 +485,6 @@ internal sealed class OracleSyncPlanFuzzDialect(OracleContainerFixture fixture)
     public override bool AllowDuplicateForeignKeys => false;
 
     public override bool AllowDuplicateUniqueConstraints => false;
-
-    public override bool AllowsDateTimePrecisionDecreaseWithData => false;
 
     public override IDatabaseProvider Provider { get; } = new OracleProvider();
 

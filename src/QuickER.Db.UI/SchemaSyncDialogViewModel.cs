@@ -50,6 +50,9 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     /// <summary>直近の取込で得た列の既定値（既定値のある列の型の種類の変更の警告に用いる）</summary>
     private IReadOnlyList<SchemaColumnDefault> _liveColumnDefaults = [];
 
+    /// <summary>直近の取込の警告（取込が捨てた物のある表を作り直さないために用いる）</summary>
+    private IReadOnlyList<SchemaImportWarning> _liveImportWarnings = [];
+
     /// <summary>直近の <see cref="UpdatePreview"/> で組み立てた実行計画（実行確認の文言分岐に用いる）</summary>
     private SyncPlan _currentPlan = new();
 
@@ -186,6 +189,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             _liveAuxiliaryObjects = live.AuxiliaryObjects;
             _liveTableCreateSql = live.TableCreateSql;
             _liveColumnDefaults = live.ColumnDefaults;
+            _liveImportWarnings = live.Warnings;
 
             // 対象方言のケーパビリティを渡す（SQLite は説明差分を抑止し FK 制約名を比較から除外する）
             var diff = new SchemaDiffService().Compute(
@@ -270,6 +274,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
         _liveAuxiliaryObjects = [];
         _liveTableCreateSql = new Dictionary<string, string>();
         _liveColumnDefaults = [];
+        _liveImportWarnings = [];
         _currentPlan = new SyncPlan();
         ScriptPreview = string.Empty;
     }
@@ -283,6 +288,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             AuxiliaryObjects = _liveAuxiliaryObjects,
             TableCreateSql = _liveTableCreateSql,
             ColumnDefaults = _liveColumnDefaults,
+            ImportWarnings = _liveImportWarnings,
         };
 
     /// <summary>選択中の差分から実行計画を組み立て、スクリプトプレビューを再生成する（選択変更時に呼ぶ）</summary>
@@ -629,9 +635,9 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 Strings.SchemaSync_ExecuteConfirmDefaultOnColumnTypeKindChange,
                 BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
             ),
-            // 列が空でないと型の種類を変えられない方言では、外して付け直す外部キーが列の変更の失敗で外れたまま残りうる
-            SyncPlanWarningKind.ForeignKeyRebuildAroundTypeKindChange => string.Format(
-                Strings.SchemaSync_ExecuteConfirmForeignKeyRebuildAroundTypeKindChange,
+            // 列が空でないと通らない列の変更（型の種類・精度の縮小）の前後で外して付け直す制約は、列の変更の失敗で外れたまま残りうる
+            SyncPlanWarningKind.ConstraintRebuildAroundEmptyColumnChange => string.Format(
+                Strings.SchemaSync_ExecuteConfirmConstraintRebuildAroundEmptyColumnChange,
                 BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
             ),
             // ドットを含む表名は、SQLite では添付したデータベースの表と読まれる
@@ -663,6 +669,11 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             SyncPlanWarningKind.TableWithoutColumns => string.Format(
                 Strings.SchemaSync_ExecuteConfirmTableWithoutColumns,
                 BulletList(warnings.Select(w => w.TableName))
+            ),
+            // 取込が捨てた物（図に無い列・外部キー）がある表は、作り直すと黙って消えるので、作り直す項目を計画から外した（SQLite）
+            SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent => string.Format(
+                Strings.SchemaSync_ExecuteConfirmTableRebuildLosesImportDiscardedContent,
+                BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
             ),
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };

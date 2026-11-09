@@ -118,7 +118,7 @@ public static class UniqueConstraintNaming
             columnNames
                 .Select(SchemaNames.Key)
                 .OrderBy(name => name, StringComparer.Ordinal)
-                .Select(name => $"{name.Length}:{name}")
+                .Select(SignatureText.Part)
         );
 }
 

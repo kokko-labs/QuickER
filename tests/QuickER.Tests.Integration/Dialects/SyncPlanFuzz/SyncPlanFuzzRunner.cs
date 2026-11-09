@@ -297,6 +297,7 @@ internal static class SyncPlanFuzzRunner
                     AuxiliaryObjects = before.AuxiliaryObjects,
                     TableCreateSql = before.TableCreateSql,
                     ColumnDefaults = before.ColumnDefaults,
+                    ImportWarnings = before.Warnings,
                 }
             );
             outcome.Script = provider.SyncScriptBuilder.Build(plan);
@@ -338,11 +339,13 @@ internal static class SyncPlanFuzzRunner
             capabilities
         );
 
-        // 静的な規則のうち DB に依らない警告の正しさ（W1）の違反は、実 DB の結果にも加える（DB の断る文の並びの違反は実 DB の
-        // 表明 1・1b が見るので加えない）
+        // 静的な規則のうち DB に依らない規則（警告の正しさ W1・前寄せ M1・新しい外部キーの追加と付け直しの並び）の違反は、実 DB の
+        // 結果にも加える（DB の断る文の並びの違反は実 DB の表明 1・1b が見るので加えない）
         outcome.Violations.AddRange(
             staticVerdict.Violations.Where(v =>
                 v.StartsWith(SyncPlanStaticRules.W1Prefix, StringComparison.Ordinal)
+                || v.StartsWith(SyncPlanStaticRules.M1Prefix, StringComparison.Ordinal)
+                || v.StartsWith(SyncPlanStaticRules.D9OrderPrefix, StringComparison.Ordinal)
             )
         );
 
@@ -375,10 +378,10 @@ internal static class SyncPlanFuzzRunner
             outcome.Notes.Add(StaticRuleMissedNote);
         }
 
-        // 表明 1: 失敗するなら事前に警告が出ている
+        // 表明 1: 失敗するなら事前に警告が出ている（ケースが宣言した、既存の行で断られる文そのものの失敗は除く）
         if (!result.Committed)
         {
-            if (plan.Warnings.Count == 0)
+            if (plan.Warnings.Count == 0 && !IsDeclaredDataFailure(result, liveSchema.DataFailures))
             {
                 outcome.Violations.Add($"failed without a warning: {FirstLine(result.Error)}");
             }
@@ -457,9 +460,39 @@ internal static class SyncPlanFuzzRunner
             .Select(s => $"{SchemaDiffKind.ReorderColumns}|{s.TableName.Trim().ToLowerInvariant()}")
             .ToHashSet();
 
+        // 例外: 再構築が式を落として普通の列にした計算列（計画が TableRebuildDropsColumnAttribute で警告した表＝表明 4 の「計算列の
+        // 印」と同じ扱い）の列の変更。差分は計算列かを DB の列で決めるので、図の計算列は普通の列として比べられる
+        var rebuildWarnedTables = plan
+            .Warnings.Where(w => w.Kind == SyncPlanWarningKind.TableRebuildDropsColumnAttribute)
+            .Select(w => w.TableName.Trim().ToLowerInvariant())
+            .ToHashSet(StringComparer.Ordinal);
+        var computedLost = before
+            .Entities.SelectMany(e =>
+                e.Columns.Where(c => c.IsComputed)
+                    .Select(c =>
+                        (
+                            Table: e.TableName.Trim().ToLowerInvariant(),
+                            Column: c.Name.ToLowerInvariant()
+                        )
+                    )
+            )
+            .Where(c =>
+                rebuildWarnedTables.Contains(c.Table)
+                && after.Entities.Any(e =>
+                    e.TableName.Trim().ToLowerInvariant() == c.Table
+                    && e.Columns.Any(a => a.Name.ToLowerInvariant() == c.Column && !a.IsComputed)
+                )
+            )
+            .Select(c => $"{SchemaDiffKind.AlterColumn}|{c.Table}|{c.Column}")
+            .ToHashSet(StringComparer.Ordinal);
+
         foreach (var (key, count) in afterCounts)
         {
-            if (count > CountOf(beforeCounts, key) && !addedColumnTables.Contains(key))
+            if (
+                count > CountOf(beforeCounts, key)
+                && !addedColumnTables.Contains(key)
+                && !computedLost.Contains(key)
+            )
             {
                 outcome.Violations.Add($"new difference after sync: {key}");
             }
@@ -507,7 +540,150 @@ internal static class SyncPlanFuzzRunner
             outcome.Violations.Add($"new import warning: {warning}");
         }
 
+        outcome.Violations.AddRange(LostImportWarnings(before, after, selected, plan.Warnings));
         return outcome;
+    }
+
+    /// <summary>違反の文の頭（表明 5 の消えた取込警告）</summary>
+    public const string LostImportWarningPrefix = "import warning lost:";
+
+    /// <summary>
+    /// 表明 5（消えた取込警告）：同期の前の取込警告のうち、選んだ項目で説明できないものが同期の後に消えていたら違反の文にする
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 取込が捨てた表の中の物（<see cref="SchemaImportWarningKinds.RebuildLosesTableContent"/> が真の種別＝図に無い列・外部キー）は、
+    /// 同期の後の取込でも警告が残るはず。消えたなら、捨てた物そのものが DB から消えている（テーブル再構築が live の図から表を作り直して
+    /// データごと消した形）。説明できるのは、その表の削除か、警告が名指しした列（Subject）の削除を選んだときだけ。
+    /// </para>
+    /// <para>
+    /// ほかの種別（列の属性・取込で補正した物など）は、その表に触れる選んだ項目があるか、作り直しで列の属性を落とすと計画が警告した
+    /// （<see cref="SyncPlanWarningKind.TableRebuildDropsColumnAttribute"/>。暗黙の外し直しで作り直す表を含む）なら説明できるとみなす。
+    /// </para>
+    /// <para>
+    /// 限界：外部キーの警告（範囲外・除外した表への外部キー）の Subject は外部キーの名前で列ではないので、その外部キーの子の列の削除を
+    /// 選んで外部キーが正当に消えた形は説明できず、違反の文になる。生成器・期待の行はこの形（取込が捨てた外部キーの子の列の削除）を
+    /// 作らないので今は起きない。作るときは、警告の外部キーの子の列を取込の結果から引いて説明に足す。
+    /// </para>
+    /// </remarks>
+    internal static IEnumerable<string> LostImportWarnings(
+        SchemaImportResult before,
+        SchemaImportResult after,
+        IReadOnlyCollection<SchemaDiffItem> selected,
+        IReadOnlyCollection<SyncPlanWarning> planWarnings
+    )
+    {
+        // 再構築で列の属性を落とすと計画が警告した表
+        var attributeDroppedTables = planWarnings
+            .Where(w => w.Kind == SyncPlanWarningKind.TableRebuildDropsColumnAttribute)
+            .Select(w => w.TableName.Trim().ToLowerInvariant())
+            .ToHashSet(StringComparer.Ordinal);
+
+        var remaining = after
+            .Warnings.Select(w =>
+                $"{w.Kind}|{w.TableName.Trim().ToLowerInvariant()}|{w.Subject.Trim().ToLowerInvariant()}"
+            )
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (var warning in before.Warnings)
+        {
+            var table = warning.TableName.Trim().ToLowerInvariant();
+            var subject = warning.Subject.Trim().ToLowerInvariant();
+
+            if (remaining.Contains($"{warning.Kind}|{table}|{subject}"))
+            {
+                continue;
+            }
+
+            var tableItems = selected
+                .Where(i => i.TableName.Trim().ToLowerInvariant() == table)
+                .ToList();
+            var explained = SchemaImportWarningKinds.RebuildLosesTableContent(warning.Kind)
+                ? tableItems.Any(i =>
+                    i.Kind == SchemaDiffKind.DropTable
+                    || i.Kind == SchemaDiffKind.DropColumn
+                        && i.ColumnName?.Trim().ToLowerInvariant() == subject
+                )
+                : tableItems.Count > 0 || attributeDroppedTables.Contains(table);
+
+            if (!explained)
+            {
+                yield return $"{LostImportWarningPrefix} {warning.Kind}({warning.TableName}: {warning.Subject}) disappeared without a selected item that removes it";
+            }
+        }
+    }
+
+    /// <summary>
+    /// 失敗した実行の断られた文が、ケースが宣言した「既存の行で断られる文」（<see cref="FuzzLiveSchema.DataFailures"/>）のどれかか
+    /// </summary>
+    /// <remarks>
+    /// 断られた文は、失敗したバッチの文（文ごとに流す方言＝MySQL・Oracle）か、それが無ければエラー文（スクリプトを 1 回で流す
+    /// 方言）で見る。外部キーの追加はその名前を（SQLite は再構築の後の外部キー違反の表を）、列の変更は表と列の名前を、文かエラー文が
+    /// 含むこと（大文字小文字を無視）。列の変更は文の中でしか見分けられないので、文の無い方言では一致させない。ほかの文の失敗まで
+    /// 表明 1 の外へ出さないため、名前の一致だけで決める（規則表 <see cref="SyncPlanFuzzOracleTests"/> の自己検査の行が固定する）。
+    /// </remarks>
+    internal static bool IsDeclaredDataFailure(
+        SchemaSyncResult result,
+        IReadOnlyCollection<FuzzDataFailure> declared
+    )
+    {
+        if (result.Committed || declared.Count == 0)
+        {
+            return false;
+        }
+
+        var failed = result.Batches.FirstOrDefault(b => !b.Success);
+        var statement = failed?.Sql ?? string.Empty;
+        var error = result.Error ?? failed?.Error ?? string.Empty;
+
+        // SQLite の実行器は再構築の後の外部キー違反を、違反した子の表の一覧で知らせる
+        const string violationTables = "Affected table(s):";
+        if (error.Contains(violationTables, StringComparison.Ordinal))
+        {
+            var violated = error[
+                (
+                    error.IndexOf(violationTables, StringComparison.Ordinal)
+                    + violationTables.Length
+                )..
+            ]
+                .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+            return violated.Length > 0
+                && violated.All(t =>
+                    declared.Any(d =>
+                        d.Kind == FuzzDataFailureKind.AddForeignKey
+                        && string.Equals(t, d.Table, StringComparison.OrdinalIgnoreCase)
+                    )
+                );
+        }
+
+        return declared.Any(d =>
+            d.Kind switch
+            {
+                FuzzDataFailureKind.AddForeignKey => statement.Length > 0
+                    ? Mentions(statement, d.Name)
+                        && statement.Contains("FOREIGN KEY", StringComparison.OrdinalIgnoreCase)
+                    : Mentions(error, d.Name),
+                FuzzDataFailureKind.AlterColumn => statement.Length > 0
+                    && !statement.Contains("FOREIGN KEY", StringComparison.OrdinalIgnoreCase)
+                    && (
+                        statement.Contains("MODIFY", StringComparison.OrdinalIgnoreCase)
+                        || statement.Contains("ALTER COLUMN", StringComparison.OrdinalIgnoreCase)
+                    )
+                    && Mentions(statement, d.Table)
+                    && Mentions(statement, d.Name),
+                _ => false,
+            }
+        );
+
+        // 識別子として名前を含む（引用符・括弧・空白・ドットで区切られた語として現れる）
+        static bool Mentions(string text, string name) =>
+            System.Text.RegularExpressions.Regex.IsMatch(
+                text,
+                $@"(?<![\p{{L}}\p{{Nd}}_]){System.Text.RegularExpressions.Regex.Escape(name)}(?![\p{{L}}\p{{Nd}}_])",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                    | System.Text.RegularExpressions.RegexOptions.CultureInvariant
+            );
     }
 
     /// <summary>項目の照合キーを件数で数える</summary>
@@ -712,6 +888,9 @@ internal static class SyncPlanFuzzRunner
     /// <summary>作り直しを選んだ外部キーに、候補キーの警告の例外が重なった注</summary>
     public const string WarnedAlterForeignKeyNote = "warned-alter-foreign-key-exempt";
 
+    /// <summary>列が空でないと通らない変更の警告が名指しした制約の消失を受け入れた注</summary>
+    public const string WarnedEmptyColumnChangeNote = "warned-empty-column-change-exempt";
+
     /// <summary>
     /// 表明 1b：失敗した実行の後で取り込み直した DB について、同期の前にあった制約（外部キー・一意制約・主キー）のうち、
     /// 消えてよい理由の無いまま消えたものを違反の文にする。
@@ -799,6 +978,31 @@ internal static class SyncPlanFuzzRunner
             })
             .ToHashSet(StringComparer.Ordinal);
 
+        // 列が空でないと通らない変更の前後で外して付け直すと名指しした制約（「表|制約名」。主キーの制約名は PRIMARY KEY）と、
+        // そのうち一意制約の照合キー（計画が外す一意制約の項目の名前で引く）
+        var emptyColumnWarnedNames = plan
+            .Warnings.Where(w =>
+                w.Kind == SyncPlanWarningKind.ConstraintRebuildAroundEmptyColumnChange
+            )
+            .Select(w =>
+            {
+                var open = w.Detail.IndexOf(" (", StringComparison.Ordinal);
+                var name = open < 0 ? w.Detail : w.Detail[..open];
+                return $"{w.TableName.Trim().ToLowerInvariant()}|{name.Trim().ToLowerInvariant()}";
+            })
+            .ToHashSet(StringComparer.Ordinal);
+        var emptyColumnWarned = plan
+            .Sections.Where(s => s.Kind == SchemaDiffKind.DropUniqueConstraint)
+            .SelectMany(s => s.Items)
+            .Where(i =>
+                emptyColumnWarnedNames.Contains(
+                    $"{i.TableName.Trim().ToLowerInvariant()}|{UniqueConstraintNaming.Resolve(i.UniqueConstraintName, i.TableName, i.UniqueConstraintColumns, capabilities.IdentifierLengthLimit).Trim().ToLowerInvariant()}"
+                )
+            )
+            .SelectMany(i => Keys(i, capabilities))
+            .Select(k => "UQ|" + string.Join('|', k.Split('|').Skip(1)))
+            .ToHashSet(StringComparer.Ordinal);
+
         foreach (var key in ConstraintKeys(before, capabilities))
         {
             // 残っていれば、どの規則でも違反にならない（同じキーの 2 本は 1 本ずつ消費する）
@@ -839,6 +1043,14 @@ internal static class SyncPlanFuzzRunner
                 continue;
             }
 
+            // 列が空でないと通らない変更の前後で外して付け直すと名指しした制約（警告 ConstraintRebuildAroundEmptyColumnChange）は、
+            // データの都合で列の変更が断られると外れたまま残る（docs の約束どおりの部分適用）。名指しした制約だけを受け入れる
+            if (emptyColumnWarned.Contains(key) || IsEmptyColumnWarned(key))
+            {
+                notes.Add(WarnedEmptyColumnChangeNote);
+                continue;
+            }
+
             if (IsWarnedForeignKey(key))
             {
                 if (rule == 2)
@@ -871,6 +1083,18 @@ internal static class SyncPlanFuzzRunner
         }
 
         return (violations, notes);
+
+        // 外部キー（FK|子|親|列ペア|名前|参照アクション）・主キー（PK|表|列）が、列が空でないと通らない変更の警告で名指しされたか
+        bool IsEmptyColumnWarned(string key)
+        {
+            var parts = key.Split('|');
+            return parts[0] switch
+            {
+                "FK" => emptyColumnWarnedNames.Contains($"{parts[1]}|{parts[4]}"),
+                "PK" => emptyColumnWarnedNames.Contains($"{parts[1]}|primary key"),
+                _ => false,
+            };
+        }
 
         // 外部キーのキー（FK|子|親|列ペア|名前|参照アクション）が、事前に警告した外部キーか
         bool IsWarnedForeignKey(string key)
@@ -1334,8 +1558,9 @@ internal static class SyncPlanFuzzRunner
                 {
                     var declaredByAlter =
                         alter is not null
-                        && !alter.Column!.IsComputed
-                        && alter.OldColumn!.IsNullable != alter.Column.IsNullable;
+                        // DB の列が計算列なら NULL 許容は運ばない（図だけが計算列なら普通の列の変更＝製品の差分と同じく DB の列で決める）
+                        && !alter.OldColumn!.IsComputed
+                        && alter.OldColumn.IsNullable != alter.Column!.IsNullable;
                     var declaredByKey =
                         pkChange?.Entity!.Columns.Any(c =>
                             c.IsPrimaryKey

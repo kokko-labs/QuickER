@@ -76,6 +76,18 @@ internal static class FuzzShape
     /// <summary>型の違う live の列どうしに外部キーを足す変更（後から足した水準）</summary>
     public const string MismatchedForeignKeyAdd = "mismatched-fk-add";
 
+    /// <summary>行のある子の、親の無い値を持つ列へ外部キーを足す変更（既存の行で断られる文の水準）</summary>
+    public const string OrphanForeignKeyAdd = "orphan-fk-add";
+
+    /// <summary>行のある列の精度（数値の精度・整数の幅・日時の秒の小数部）を下げる変更（既存の行で断られうる文の水準）</summary>
+    public const string PrecisionDecrease = "precision-decrease";
+
+    /// <summary>DB では普通の列を、目標の図だけで計算列にして型か NULL 許容を変える（後から足した水準）</summary>
+    public const string DiagramOnlyComputed = "diagram-only-computed";
+
+    /// <summary>識別子の上限で縮める既定名になる長い表名（大文字を混ぜる。後から足した水準・上限のある方言だけ）</summary>
+    public const string LongDefaultName = "long-default-name";
+
     /// <summary>種の集合全体で必ず出ていなければならない形（方言が作れない形は除く＝<see cref="RequiredFor"/>）</summary>
     public static readonly IReadOnlyList<string> Required =
     [
@@ -100,6 +112,10 @@ internal static class FuzzShape
         KindChange,
         BothEndsKindChange,
         MismatchedForeignKeyAdd,
+        OrphanForeignKeyAdd,
+        PrecisionDecrease,
+        DiagramOnlyComputed,
+        LongDefaultName,
     ];
 
     /// <summary>
@@ -116,7 +132,8 @@ internal static class FuzzShape
     /// 後から足した水準のうち目標の図の変更で出る形（<see cref="KindChange"/>・<see cref="BothEndsKindChange"/>・
     /// <see cref="MismatchedForeignKeyAdd"/>）も実 DB では求めない：網の 5000 種でそれぞれ 0.4〜3% しか出ず、普段の実 DB の種
     /// （SQL Server 100・MySQL 150）では出ない種の集合がありうる。実 DB では形の行（<see cref="SyncPlanShapeRows"/> の
-    /// BothEndsKindChange・AddedForeignKey）が決定的に担う。DB 側の図で出る形（<see cref="ForeignKeyOnUnique"/>・
+    /// BothEndsKindChange・AddedForeignKey）が決定的に担う。既存の行で断られる文の水準（<see cref="OrphanForeignKeyAdd"/>・
+    /// <see cref="PrecisionDecrease"/>）も同じく網でだけ求める（実 DB は形の行の OrphanChild と精度の縮小の期待の行）。DB 側の図で出る形（<see cref="ForeignKeyOnUnique"/>・
     /// <see cref="PrimaryKeyTwinUnique"/>）は実 DB でも求める
     /// </param>
     public static IReadOnlyList<string> RequiredFor(
@@ -136,7 +153,14 @@ internal static class FuzzShape
                         .Provider
                         .SyncCapabilities
                         .SupportsUniqueConstraintOnPrimaryKey,
-                    KindChange or BothEndsKindChange or MismatchedForeignKeyAdd => !realDatabase,
+                    KindChange
+                    or BothEndsKindChange
+                    or MismatchedForeignKeyAdd
+                    or OrphanForeignKeyAdd
+                    or PrecisionDecrease
+                    or DiagramOnlyComputed => !realDatabase,
+                    LongDefaultName => !realDatabase
+                        && !dialect.Provider.SyncCapabilities.IdentifierLengthLimit.IsUnlimited,
                     _ => true,
                 }
             )
@@ -190,6 +214,22 @@ internal sealed class FuzzColumnInfo
     public bool IsDistinct => HasNoNull && Values.Distinct().Count() == Values.Count;
 }
 
+/// <summary>既存の行で DB が断ると分かっている文の種類</summary>
+internal enum FuzzDataFailureKind
+{
+    /// <summary>親の無い値を持つ列への外部キーの追加（名前は外部キーの名前）</summary>
+    AddForeignKey,
+
+    /// <summary>列が空でないと通らない列の変更（名前は列の名前）</summary>
+    AlterColumn,
+}
+
+/// <summary>既存の行で DB が断ると分かっている文（<see cref="FuzzLiveSchema.DataFailures"/>）</summary>
+/// <param name="Kind">文の種類</param>
+/// <param name="Table">表（外部キーは子の表）</param>
+/// <param name="Name">外部キーの名前か列の名前</param>
+internal sealed record FuzzDataFailure(FuzzDataFailureKind Kind, string Table, string Name);
+
 /// <summary>1 つの種で作った DB 側の図と、その DB へ流すセットアップの文</summary>
 internal sealed class FuzzLiveSchema
 {
@@ -226,6 +266,12 @@ internal sealed class FuzzLiveSchema
 
     /// <summary>この種に出た図の形（<see cref="FuzzShape"/>）</summary>
     public HashSet<string> Shapes { get; } = [];
+
+    /// <summary>
+    /// 既存の行で DB が断ると分かっている文（親の無い値を持つ列への外部キーの追加・列が空でないと通らない列の変更）。計画は列の値を
+    /// 見ないので警告しない。実 DB の総当たりは、断られた文がこのどれかのときだけ表明 1（失敗は警告が予告する）を外す（表明 1b は掛ける）
+    /// </summary>
+    public List<FuzzDataFailure> DataFailures { get; } = [];
 
     /// <summary>列情報のキー</summary>
     public static string Key(string table, string column) => table + "\u0001" + column;
@@ -291,6 +337,7 @@ internal interface ISyncPlanFuzzCase
 internal sealed class SyncPlanFuzzGenerator(
     Random rng,
     Random? levelRng,
+    Random? dataLevelRng,
     SyncPlanFuzzDialect dialect
 ) : ISyncPlanFuzzCase
 {
@@ -311,11 +358,24 @@ internal sealed class SyncPlanFuzzGenerator(
         int seed,
         SyncPlanFuzzDialect dialect,
         bool levels = true
-    ) => new(new Random(seed), levels ? new Random(LevelSeed(seed)) : null, dialect);
+    ) =>
+        new(
+            new Random(seed),
+            levels ? new Random(LevelSeed(seed)) : null,
+            levels ? new Random(DataLevelSeed(seed)) : null,
+            dialect
+        );
 
     /// <summary>後から足した水準の乱数の列の種（種から決定的に作る）</summary>
     private static int LevelSeed(int seed) =>
         (int)(unchecked((uint)seed * 2654435761u) ^ 0x5EEDAC2u) & int.MaxValue;
+
+    /// <summary>
+    /// 既存の行で断られる文を作る水準（親の無い値を持つ列への外部キーの追加・精度の縮小）の乱数の列の種（種から決定的に作る。
+    /// <see cref="LevelSeed"/> の列と分けて、先に足した水準の引き方を変えない）
+    /// </summary>
+    private static int DataLevelSeed(int seed) =>
+        (int)(unchecked((uint)seed * 2246822519u) ^ 0xDA7A1EEu) & int.MaxValue;
 
     /// <summary>表の名前の部品</summary>
     private static readonly string[] TableWords =
@@ -342,6 +402,17 @@ internal sealed class SyncPlanFuzzGenerator(
         var tableCount = rng.Next(3, 6);
         var words = TableWords.OrderBy(_ => rng.Next()).Take(tableCount).ToList();
 
+        // 後から足した水準（既存の行で断られる文の乱数の列。本流の乱数は引かない）：表名を識別子の上限の半分を超える長さへ伸ばし、
+        // 大文字を混ぜる。名前の無い外部キーの既定名（FK_{子}_{親}）が上限を超えて縮められ（末尾に縮める前の名前のハッシュ）、大文字
+        // 小文字を畳む DB の綴り（関係 N2）で既定名を求め直すとハッシュが変わる形を作る。上限の無い方言（SQLite）では伸ばさない
+        var limit = dialect.Provider.SyncCapabilities.IdentifierLengthLimit;
+        var longNames = dataLevelRng is not null && !limit.IsUnlimited && dataLevelRng.Next(6) == 0;
+
+        if (longNames)
+        {
+            live.Shapes.Add(FuzzShape.LongDefaultName);
+        }
+
         for (var i = 0; i < tableCount; i++)
         {
             var name = $"t{i}_{words[i]}";
@@ -350,6 +421,11 @@ internal sealed class SyncPlanFuzzGenerator(
             if (rng.Next(4) == 0)
             {
                 name = char.ToUpperInvariant(name[0]) + name[1..];
+            }
+
+            if (longNames)
+            {
+                name = LongName(name, limit.Max / 2 + 2);
             }
 
             BuildTable(live, name, i);
@@ -370,6 +446,19 @@ internal sealed class SyncPlanFuzzGenerator(
         }
 
         return live;
+    }
+
+    /// <summary>名前を、大文字を混ぜた語（<c>_Long</c>）で <paramref name="length"/> 文字まで伸ばす</summary>
+    private static string LongName(string name, int length)
+    {
+        var builder = new System.Text.StringBuilder(name);
+
+        while (builder.Length < length)
+        {
+            builder.Append("_Long");
+        }
+
+        return builder.ToString(0, length);
     }
 
     /// <summary>
@@ -623,7 +712,7 @@ internal sealed class SyncPlanFuzzGenerator(
             parent,
             child,
             pairs,
-            name: rng.Next(2) == 0 ? $"FK_{NamePart(child.TableName)}_{baseName}" : null
+            name: rng.Next(2) == 0 ? $"FK_{NamePart(child.TableName)}_{NamePart(baseName)}" : null
         );
         relationship.OnDelete = PickAction(nullable);
         relationship.OnUpdate =
@@ -676,7 +765,7 @@ internal sealed class SyncPlanFuzzGenerator(
                     other,
                     child,
                     [(otherKey, childColumn)],
-                    name: $"FK_{NamePart(child.TableName)}_{BaseName(other)}_also"
+                    name: $"FK_{NamePart(child.TableName)}_{NamePart(BaseName(other))}_also"
                 )
             );
             return;
@@ -757,7 +846,9 @@ internal sealed class SyncPlanFuzzGenerator(
             entity.UniqueConstraints.Add(
                 new UniqueConstraint
                 {
-                    Name = named ? $"UQ_{NamePart(entity.TableName)}_{column.Name}_named" : null,
+                    Name = named
+                        ? $"UQ_{NamePart(entity.TableName)}_{NamePart(column.Name)}_named"
+                        : null,
                     ColumnIds = [column.Id],
                 }
             );
@@ -769,7 +860,7 @@ internal sealed class SyncPlanFuzzGenerator(
                 entity.UniqueConstraints.Add(
                     new UniqueConstraint
                     {
-                        Name = $"UQ_{NamePart(entity.TableName)}_{column.Name}_twin",
+                        Name = $"UQ_{NamePart(entity.TableName)}_{NamePart(column.Name)}_twin",
                         ColumnIds = [column.Id],
                     }
                 );
@@ -1039,6 +1130,65 @@ internal sealed class SyncPlanFuzzGenerator(
                 roll -= weight;
             }
         }
+
+        // 後から足した水準（既存の行で断られる文の乱数の列。本流の乱数は引かない）：DB では普通の列を、目標の図だけで計算列にして
+        // 型か NULL 許容を変える（DDL は計算列を普通の列として作るので、DB で普通の列の図の計算列は、普通の列として変えられる）
+        if (dataLevelRng is not null && dataLevelRng.Next(8) == 0)
+        {
+            MarkComputedInDiagramOnly(entities, relationships, live);
+        }
+    }
+
+    /// <summary>DB の普通の整数の列を、目標の図だけで計算列にして型か NULL 許容を変える</summary>
+    private void MarkComputedInDiagramOnly(
+        List<Entity> entities,
+        List<Relationship> relationships,
+        FuzzLiveSchema live
+    )
+    {
+        var keyColumns = relationships
+            .SelectMany(r =>
+                r.ColumnPairs.SelectMany(p => new[] { p.SourceColumnId, p.TargetColumnId })
+            )
+            .ToHashSet();
+        var candidates = entities
+            .SelectMany(e =>
+                e.Columns.Where(c =>
+                        !c.IsComputed
+                        && !c.IsPrimaryKey
+                        && !keyColumns.Contains(c.Id)
+                        && !e.UniqueConstraints.Any(u => u.ColumnIds.Contains(c.Id))
+                        && Info(live, e, c)
+                            is { Kind: FuzzTypeKind.Int, Pinned: false, Computed: false }
+                    )
+                    .Select(c => (Entity: e, Column: c))
+            )
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return;
+        }
+
+        var (entity, column) = candidates[dataLevelRng!.Next(candidates.Count)];
+        column.IsComputed = true;
+
+        if (!column.IsNullable && dataLevelRng.Next(2) == 0)
+        {
+            column.IsNullable = true;
+            Mutations.Add(
+                $"computed nullable {entity.TableName}.{column.Name} -> True (diagram only)"
+            );
+        }
+        else
+        {
+            column.DataType = dialect.TypeName(FuzzTypeKind.BigInt, 0);
+            Mutations.Add(
+                $"computed type {entity.TableName}.{column.Name} -> {column.DataType} (diagram only)"
+            );
+        }
+
+        live.Shapes.Add(FuzzShape.DiagramOnlyComputed);
     }
 
     private bool RenameCase(List<Entity> entities, FuzzLiveSchema live)
@@ -1318,13 +1468,18 @@ internal sealed class SyncPlanFuzzGenerator(
         var info = Info(live, entity, column)!;
         var (kind, length) = NextType(info);
 
-        // データのある日時の列の精度を下げる変更を DB が断る方言（Oracle の ORA-30082）では作らない
+        // データのある日時の列の精度を下げる変更を DB が断る方言（Oracle の ORA-30082＝方言の宣言
+        // PrecisionDecreaseRequiresEmptyColumn）では、既存の行で断られる文の水準のときだけ作る（断られる文として宣言する＝下）。
+        // ほかは作らない
+        var capabilities = dialect.Provider.SyncCapabilities;
+
         if (
             kind == FuzzTypeKind.DateTime
             && info.Kind == FuzzTypeKind.DateTime
             && length < info.Length
             && RowCount(live, entity) > 0
-            && !dialect.AllowsDateTimePrecisionDecreaseWithData
+            && capabilities.PrecisionDecreaseRequiresEmptyColumn
+            && (dataLevelRng is null || dataLevelRng.Next(2) != 0)
         )
         {
             return false;
@@ -1365,10 +1520,52 @@ internal sealed class SyncPlanFuzzGenerator(
                 live.Shapes.Add(FuzzShape.BothEndsKindChange);
             }
         }
+        // 後から足した水準（既存の行で断られる文の乱数の列）：数値の精度・整数の幅を下げる（小数は精度を 2 つ・bigint は int へ）。
+        // 値は新しい型に収まるので、値が収まれば通す方言では通り、列が空でないと下げられない方言（Oracle の ORA-01440）では行のある
+        // 列で断られる（断られる文として宣言する＝下）
+        else if (
+            dataLevelRng is not null
+            && info.Kind is FuzzTypeKind.Decimal or FuzzTypeKind.BigInt
+            && dataLevelRng.Next(3) == 0
+        )
+        {
+            (kind, length) =
+                info.Kind == FuzzTypeKind.Decimal
+                    ? (FuzzTypeKind.Decimal, info.Length - 2)
+                    : (FuzzTypeKind.Int, 0);
+            live.Shapes.Add(FuzzShape.PrecisionDecrease);
+        }
+
+        if (
+            kind == FuzzTypeKind.DateTime
+            && info.Kind == FuzzTypeKind.DateTime
+            && length < info.Length
+        )
+        {
+            live.Shapes.Add(FuzzShape.PrecisionDecrease);
+        }
 
         foreach (var (owner, partner) in partners)
         {
+            var oldType = partner.DataType;
             partner.DataType = dialect.TypeName(kind, length);
+
+            // 列が空でないと通らない変更を行のある列へ当てるなら、既存の行で断られる文として宣言する（計画は列の値を見ない）
+            if (
+                Info(live, owner, partner) is { } values
+                && values.Values.Any(v => v is not null)
+                && capabilities.RequiresEmptyColumn(oldType, partner.DataType)
+            )
+            {
+                live.DataFailures.Add(
+                    new FuzzDataFailure(
+                        FuzzDataFailureKind.AlterColumn,
+                        owner.TableName,
+                        partner.Name
+                    )
+                );
+            }
+
             Mutations.Add(
                 $"alter type {owner.TableName}.{partner.Name} -> {partner.DataType}{TypeTag(kind, length)}"
             );
@@ -1730,16 +1927,57 @@ internal sealed class SyncPlanFuzzGenerator(
             }
         }
 
-        relationships.Add(
-            NewRelationship(
-                parent,
-                child,
-                [(parentKey, column)],
-                name: rng.Next(2) == 0
-                    ? UnusedConstraintName($"FK_added_{rng.Next(1000)}", entities, relationships)
-                    : null
-            )
-        );
+        // 後から足した水準（既存の行で断られる文の乱数の列）：行のある子の、親の無い値を持つ live の整数の列へ張る（計画は列の値を
+        // 見ないので警告せず、DB は既存の行で断る＝MySQL 1452・SQL Server 547・PostgreSQL 23503・Oracle ORA-02298・SQLite の外部キー
+        // 違反。宣言して実 DB の表明 1 だけを外し、同じ計画で外した付け直しが消えないこと＝表明 1b を見る）
+        var orphan = false;
+
+        if (dataLevelRng is not null && RowCount(live, child) > 0 && dataLevelRng.Next(3) == 0)
+        {
+            var orphans = child
+                .Columns.Where(c =>
+                    !c.IsComputed
+                    && c != parentKey
+                    && string.Equals(
+                        c.DataType,
+                        parentKey.DataType,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                    && Info(live, child, c) is { Kind: FuzzTypeKind.Int, Computed: false } info
+                    && info.Values.Any(v => v is not null && !parentIds.Contains(v))
+                    && CanAddForeignKey(
+                        relationships,
+                        parent,
+                        c,
+                        ForeignKeyReferentialAction.NoAction,
+                        ForeignKeyReferentialAction.NoAction
+                    )
+                )
+                .ToList();
+
+            if (orphans.Count > 0)
+            {
+                column = orphans[dataLevelRng.Next(orphans.Count)];
+                orphan = true;
+                live.Shapes.Add(FuzzShape.OrphanForeignKeyAdd);
+            }
+        }
+
+        var name =
+            rng.Next(2) == 0
+                ? UnusedConstraintName($"FK_added_{rng.Next(1000)}", entities, relationships)
+                : null;
+
+        // 断られる文を名前で見分けるので、名前の無い追加には名前を付ける（本流の乱数は引かない）
+        if (orphan)
+        {
+            name ??= UnusedConstraintName("FK_orphan", entities, relationships);
+            live.DataFailures.Add(
+                new FuzzDataFailure(FuzzDataFailureKind.AddForeignKey, child.TableName, name)
+            );
+        }
+
+        relationships.Add(NewRelationship(parent, child, [(parentKey, column)], name: name));
         Mutations.Add($"add fk {child.TableName}.{column.Name} -> {parent.TableName}");
         return true;
     }
@@ -2429,10 +2667,15 @@ internal sealed class SyncPlanFuzzGenerator(
     }
 
     /// <summary>
-    /// 制約名に使う表の名前（別のスキーマの表の <c>.</c> を <c>_</c> にする＝製品の既定名と同じく、制約名をスキーマで修飾した
-    /// 名前に見せない）
+    /// 生成器が明示の制約名に埋める表名の部分（別のスキーマの表の <c>.</c> は <c>_</c>＝製品の既定名と同じく、制約名をスキーマで修飾した
+    /// 名前に見せない。長い名前の水準の表名は先頭の 16 文字だけ＝明示の名前は利用者が付けた名前なので製品は縮めずに上限で断る。既定名
+    /// だけを上限で縮める形にする）
     /// </summary>
-    private static string NamePart(string table) => table.Replace('.', '_');
+    private static string NamePart(string table)
+    {
+        var part = table.Replace('.', '_');
+        return part.Length > 16 ? part[..16] : part;
+    }
 
     private static string Int(int value) => value.ToString(CultureInfo.InvariantCulture);
 }

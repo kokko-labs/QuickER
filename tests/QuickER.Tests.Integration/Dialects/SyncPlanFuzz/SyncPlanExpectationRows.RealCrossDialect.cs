@@ -18,11 +18,11 @@ internal static partial class SyncPlanExpectationRows
     private static int RealCrossDialectRowCount(string dialect) =>
         dialect switch
         {
-            DialectNames.SqlServer => 13,
-            DialectNames.PostgreSql => 16,
-            DialectNames.MySql => 13,
-            DialectNames.Oracle => 15,
-            DialectNames.Sqlite => 14,
+            DialectNames.SqlServer => 16,
+            DialectNames.PostgreSql => 19,
+            DialectNames.MySql => 16,
+            DialectNames.Oracle => 18,
+            DialectNames.Sqlite => 17,
             _ => 0,
         };
 
@@ -36,7 +36,170 @@ internal static partial class SyncPlanExpectationRows
             .. RealCrossDialectDescriptionRows(),
             .. RealCrossDialectLongDefaultNameRows(),
             .. RealCrossDialectIntegerWidthRows(),
+            .. RealCrossDialectEmptyColumnChangeRows(),
         ];
+
+    /// <summary>
+    /// 列が空でないと通らない列の変更（宣言 <see cref="SyncDialectCapabilities.PrecisionDecreaseRequiresEmptyColumn"/>＝Oracle の ORA-01440）の
+    /// 前後で外して付け直す制約の名指し（途中の状態の外し直しの経路・主キーの変更の経路）
+    /// </summary>
+    /// <remarks>
+    /// 行のある列の精度を下げる。値は新しい型に収まるので、宣言が偽の方言は名指しせずに通る。宣言が真の方言（Oracle）は、外して付け直す
+    /// 外部キーと主キーの変更の解除を名指しし、列の変更が断られて名指しした制約だけが外れたまま残る（実 DB の表明 1b の受け入れは、警告が
+    /// 名指しした制約だけ）。
+    /// </remarks>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > RealCrossDialectEmptyColumnChangeRows() =>
+        [
+            Row(
+                    "plan-empty-column-change-intermediate-rebuild-names-fk",
+                    "[Integration] 外部キーの両端の小数の精度を下げる：列が空でないと精度を下げられない方言だけ、外して付け直す外部キーを名指しする",
+                    AllDialects
+                )
+                .LiveWith(w =>
+                    RealCrossDialectScenarios.DecimalParentChild(w.Live, w.Capability, 12)
+                )
+                .TargetWith(w =>
+                    RealCrossDialectScenarios.DecimalParentChild(w.Target, w.Capability, 10)
+                )
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterColumn))
+                .Expect(e => ExpectEmptyColumnChangeWarnings(e, "ec_child", "ec_fk"))
+                .OnRealDatabase(r =>
+                    RealCrossDialectScenarios
+                        .SetupPerDialect(
+                            r,
+                            d =>
+                                RealCrossDialectScenarios.Insert(d, "ec_parent", ["id"], "1.50")
+                                + "\n"
+                                + RealCrossDialectScenarios.Insert(
+                                    d,
+                                    "ec_child",
+                                    ["id", "parent_id"],
+                                    "1, 1.50"
+                                )
+                        )
+                        .Expect(e => ExpectEmptyColumnChangeOutcome(e))
+                ),
+            Row(
+                    "plan-empty-column-change-pk-change-names-primary-key-and-fk",
+                    "[Integration] 親の主キーを並べ替え、外部キーの両端の整数の幅を下げる：列が空でないと精度を下げられない方言だけ、主キーと外して付け直す外部キーを名指しする",
+                    AllDialects
+                )
+                .LiveWith(w =>
+                    RealCrossDialectScenarios.CompositeParentChild(
+                        w.Live,
+                        w.Capability,
+                        wideA: true,
+                        reordered: false
+                    )
+                )
+                .TargetWith(w =>
+                    RealCrossDialectScenarios.CompositeParentChild(
+                        w.Target,
+                        w.Capability,
+                        wideA: false,
+                        reordered: true
+                    )
+                )
+                .Select(items =>
+                    RealScenarios.SelectKinds(
+                        items,
+                        SchemaDiffKind.AlterColumn,
+                        SchemaDiffKind.AlterPrimaryKey
+                    )
+                )
+                .Expect(e =>
+                    ExpectEmptyColumnChangeWarnings(
+                        e,
+                        "ep_child",
+                        "ep_fk",
+                        primaryKeyTable: "ep_parent"
+                    )
+                )
+                .OnRealDatabase(r =>
+                    RealCrossDialectScenarios
+                        .SetupPerDialect(
+                            r,
+                            d =>
+                                RealCrossDialectScenarios.Insert(d, "ep_parent", ["a", "b"], "1, 1")
+                                + "\n"
+                                + RealCrossDialectScenarios.Insert(
+                                    d,
+                                    "ep_child",
+                                    ["id", "pa", "pb"],
+                                    "1, 1, 1"
+                                )
+                        )
+                        .Expect(e => ExpectEmptyColumnChangeOutcome(e))
+                ),
+        ];
+
+    /// <summary>
+    /// 宣言が真の方言（Oracle）だけ、外して付け直す外部キー（と主キー）を列が空でないと通らない変更の警告で名指しする（再構築の方言は
+    /// 文を逐次に流さないので名指ししない）
+    /// </summary>
+    private static void ExpectEmptyColumnChangeWarnings(
+        ExpectationBuilder e,
+        string childTable,
+        string foreignKey,
+        string? primaryKeyTable = null
+    )
+    {
+        foreach (var dialect in AllDialects)
+        {
+            var declared = SyncPlanExpectationCapabilities
+                .Get(dialect)
+                .PrecisionDecreaseRequiresEmptyColumn;
+            e.For(
+                dialect,
+                x =>
+                {
+                    if (!declared)
+                    {
+                        x.Warnings.Absent("ConstraintRebuildAroundEmptyColumnChange*");
+                        return;
+                    }
+
+                    x.Warnings.Contains(
+                        $"ConstraintRebuildAroundEmptyColumnChange({childTable}): {foreignKey} (*"
+                    );
+
+                    if (primaryKeyTable is not null)
+                    {
+                        x.Warnings.Contains(
+                            $"ConstraintRebuildAroundEmptyColumnChange({primaryKeyTable}): PRIMARY KEY (*"
+                        );
+                    }
+                }
+            );
+        }
+    }
+
+    /// <summary>宣言が真の方言（Oracle）は行のある列の精度を下げられずに失敗し、ほかの方言は値が収まるので通って差分が消える</summary>
+    private static void ExpectEmptyColumnChangeOutcome(ExpectationBuilder e)
+    {
+        foreach (var dialect in AllDialects)
+        {
+            var declared = SyncPlanExpectationCapabilities
+                .Get(dialect)
+                .PrecisionDecreaseRequiresEmptyColumn;
+            e.For(
+                dialect,
+                x =>
+                {
+                    if (declared)
+                    {
+                        x.Outcome.Exact("failed: *ORA-01440*");
+                        return;
+                    }
+
+                    x.Outcome.Exact("committed");
+                    x.AfterDiff.Empty();
+                }
+            );
+        }
+    }
 
     /// <summary>
     /// 外部キーの両端の整数の幅の違い（宣言 <see cref="SyncDialectCapabilities.ForeignKeyAllowsIntegerWidthDifference"/> が真の方言の固定。
@@ -329,6 +492,65 @@ internal static partial class SyncPlanExpectationRows
                             e.After.Count("uq *", 2);
                             e.After.Single("uq t * (a)", "uq t * (b)");
                             e.AfterDiff.Absent("* able=1 *");
+                        })
+                ),
+            Row(
+                    "realdb-uq-name-step-change-named-and-add-unnamed-on-old-columns-default-selection",
+                    "[Integration] 同期: 名前を保って一意制約の列を変え、元の列に名前の無い一意制約を足した図を既定の選択のまま流しても、同じ列に一意制約が重ならない",
+                    AllDialects
+                )
+                .LiveWith(w =>
+                    RealCrossDialectScenarios.UniqueStep(w.Live, w.Capability, ("UQ_x", "a"))
+                )
+                .TargetWith(w =>
+                    RealCrossDialectScenarios.UniqueStep(
+                        w.Target,
+                        w.Capability,
+                        ("UQ_x", "b"),
+                        (null, "a")
+                    )
+                )
+                .OnRealDatabase(r =>
+                    RealCrossDialectScenarios
+                        .SetupPerDialect(
+                            r,
+                            d =>
+                                RealCrossDialectScenarios.Insert(
+                                    d,
+                                    "t",
+                                    ["id", "a", "b"],
+                                    "1, 1, 1"
+                                )
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+
+                            foreach (var dialect in AllDialects)
+                            {
+                                // SQLite は取込が一意制約の名前を持たない（sqlite_autoindex）ので名前の段で組まず、元の列 (a) の
+                                // 制約は列集合の段で満たされ、(b) の追加だけが既定で選ばれて通る
+                                e.For(
+                                    dialect,
+                                    x =>
+                                    {
+                                        if (dialect == DialectNames.Sqlite)
+                                        {
+                                            x.Warnings.Absent(
+                                                "SelectedItemRequiresUnselectedItem*"
+                                            );
+                                            x.After.Single("uq t * (a)", "uq t * (b)");
+                                            return;
+                                        }
+
+                                        x.Warnings.Single(
+                                            "SelectedItemRequiresUnselectedItem(t): * (UQ_x)"
+                                        );
+                                        x.After.Count("uq *", 1);
+                                        x.After.Single("uq t * (a)");
+                                    }
+                                );
+                            }
                         })
                 ),
         ];
@@ -628,6 +850,58 @@ internal static class RealCrossDialectScenarios
             DialectNames.Sqlite => "BIGINT",
             _ => throw new ArgumentOutOfRangeException(nameof(dialect), dialect, null),
         };
+
+    /// <summary>方言の固定小数点数の型（スケール 2）</summary>
+    public static string DecimalType(string dialect, int precision) =>
+        dialect switch
+        {
+            DialectNames.SqlServer or DialectNames.MySql => $"decimal({precision},2)",
+            DialectNames.PostgreSql => $"numeric({precision},2)",
+            DialectNames.Oracle => $"NUMBER({precision},2)",
+            DialectNames.Sqlite => $"DECIMAL({precision},2)",
+            _ => throw new ArgumentOutOfRangeException(nameof(dialect), dialect, null),
+        };
+
+    /// <summary>親 ec_parent(id) と、それを参照する子 ec_child(parent_id)（外部キー ec_fk・型は方言の固定小数点数）</summary>
+    public static void DecimalParentChild(ExpectationSchema s, string dialect, int precision)
+    {
+        var type = DecimalType(dialect, precision);
+        s.Table("ec_parent", ExpectationSchema.Pk("id", type));
+        s.Table(
+            "ec_child",
+            ExpectationSchema.Pk("id", IntType(dialect)),
+            ExpectationSchema.NotNull("parent_id", type)
+        );
+        s.Fk("ec_parent", "ec_child", "ec_fk", ("id", "parent_id"));
+    }
+
+    /// <summary>
+    /// 複合主キー ep_parent(a, b) と、それを参照する子 ep_child(pa, pb)（外部キー ep_fk）。<paramref name="wideA"/> なら a と pa を
+    /// 64 ビット整数、偽なら 32 ビット整数にする（b と pb は 32 ビット整数）。<paramref name="reordered"/> なら主キーを (b, a) の順にする
+    /// </summary>
+    public static void CompositeParentChild(
+        ExpectationSchema s,
+        string dialect,
+        bool wideA,
+        bool reordered
+    )
+    {
+        var a = wideA ? BigIntType(dialect) : IntType(dialect);
+        var b = IntType(dialect);
+        s.Table("ep_parent", ExpectationSchema.Pk("a", a), ExpectationSchema.Pk("b", b));
+        s.Table(
+            "ep_child",
+            ExpectationSchema.Pk("id", b),
+            ExpectationSchema.NotNull("pa", a),
+            ExpectationSchema.NotNull("pb", b)
+        );
+        s.Fk("ep_parent", "ep_child", "ep_fk", ("a", "pa"), ("b", "pb"));
+
+        if (reordered)
+        {
+            s.PrimaryKeyOrder("ep_parent", "b", "a");
+        }
+    }
 
     /// <summary>親 iw_parent(id) と、それを参照する子 iw_child(parent_id)（外部キー iw_fk・型は方言の 32 ビット整数）</summary>
     public static void IntegerParentChild(ExpectationSchema s, string dialect)

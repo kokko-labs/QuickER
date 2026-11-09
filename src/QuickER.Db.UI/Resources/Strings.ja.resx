@@ -383,12 +383,16 @@
     <value>注意: 以下の表は、図で列を 1 本も持たないため作成しません。DB の表は列を少なくとも 1 本持つ必要があります。図で列を足してから、もう一度同期してください:
 {0}</value>
   </data>
+  <data name="SchemaSync_ExecuteConfirmTableRebuildLosesImportDiscardedContent" xml:space="preserve">
+    <value>注意: 以下の表への変更は実行しません。このデータベースは表を作り直して変更するため、取込が図へ入れられなかった物（表ごとに後ろへ示します）が、データごと黙って消えます。これらの表を同期するには、取込が捨てた物を先に DB 側で直してから（大文字小文字・前後の空白だけ違う列名の列の名前を変える、取込の範囲の外の表への外部キーを外す、など）、もう一度取り込んでください:
+{0}</value>
+  </data>
   <data name="SchemaSync_ExecuteConfirmForeignKeyNotOnCandidateKey" xml:space="preserve">
     <value>注意: 以下の外部キーは、同期後の参照先の列が主キーにも一意制約にもちょうど一致しません。追加は失敗する可能性が高く、既存の外部キーの作り直しでは、MySQL / Oracle で外部キーが外れたまま残り得ます:
 {0}</value>
   </data>
-  <data name="SchemaSync_ExecuteConfirmForeignKeyRebuildAroundTypeKindChange" xml:space="preserve">
-    <value>注意: 以下の外部キーは、構成列の型の種類を変える前後で外して付け直します（旧の型 → 新しい型）。このデータベースは列に値が無いときだけ型の種類を変えられるため、列にデータがあると列の変更が失敗し、DDL が巻き戻らないので、外した外部キーは付け直されずに残ります:
+  <data name="SchemaSync_ExecuteConfirmConstraintRebuildAroundEmptyColumnChange" xml:space="preserve">
+    <value>注意: 以下の制約は、列に値が無いときだけこのデータベースが受け付ける列の変更（型の種類の変更・精度やスケールを下げる変更。旧の型 → 新しい型）の前後で外して付け直します。列にデータがあると列の変更が失敗し、DDL が巻き戻らないので、外した制約は付け直されずに残ります:
 {0}</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmDefaultOnColumnTypeKindChange" xml:space="preserve">

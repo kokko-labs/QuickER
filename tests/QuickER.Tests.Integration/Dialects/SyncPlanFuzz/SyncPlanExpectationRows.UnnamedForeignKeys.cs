@@ -197,6 +197,27 @@ internal static partial class SyncPlanExpectationRows
     }
 
     /// <summary>方言の上限（行の能力の宣言）</summary>
+    /// <summary>
+    /// 長い名前の図（<see cref="LongNameDiagrams.Build"/>）の表名・列名の先頭を大文字にしたもの（図の綴りと、小文字で返す DB の
+    /// 綴りが違う形）
+    /// </summary>
+    private static ErDiagram MixedCaseLongNames(string capability)
+    {
+        var diagram = LongNameDiagrams.Build(LimitOf(capability), capability);
+
+        foreach (var entity in diagram.Entities)
+        {
+            entity.TableName = char.ToUpperInvariant(entity.TableName[0]) + entity.TableName[1..];
+
+            foreach (var column in entity.Columns)
+            {
+                column.Name = char.ToUpperInvariant(column.Name[0]) + column.Name[1..];
+            }
+        }
+
+        return diagram;
+    }
+
     private static IdentifierLengthLimit LimitOf(string capability) =>
         SyncPlanExpectationCapabilities.Get(capability).IdentifierLengthLimit;
 
@@ -239,6 +260,37 @@ internal static partial class SyncPlanExpectationRows
                     );
                 })
                 .TargetWith(w => RealCrossDialectScenarios.LongNames(w.Target, w.Capability))
+                .Expect(e => e.Diff.Empty()),
+            // 大文字小文字を畳む DB（MySQL の lower_case_table_names=1 など）は、図の綴りで DDL が作った表・列を小文字で返し、制約の
+            // 名前は DDL が付けたまま返す。差分は名前の無い制約の既定名を図の綴りから求める（live の綴りへ揃えた複製から求め直すと、
+            // 縮めた既定名のハッシュが変わり、偽の外部キーの追加と消えない削除が出る）
+            Row(
+                    "diff-long-default-fk-name-with-case-folded-live-matches-ddl",
+                    "表名・列名を小文字で返す DB の、図の綴りで DDL が縮めた既定名を付けた外部キー・一意制約の live と、名前の無い大文字小文字混じりの図の差分は空（5 方言）",
+                    AllDialects
+                )
+                .LiveWith(w =>
+                {
+                    var diagram = MixedCaseLongNames(w.Capability);
+                    ExpectationScenarios.AsImported(
+                        w.Live,
+                        diagram,
+                        rel => ForeignKeyNameOf(diagram, rel, LimitOf(w.Capability)).Name
+                    );
+
+                    foreach (var entity in w.Live.Entities)
+                    {
+                        entity.TableName = entity.TableName.ToLowerInvariant();
+
+                        foreach (var column in entity.Columns)
+                        {
+                            column.Name = column.Name.ToLowerInvariant();
+                        }
+                    }
+                })
+                .TargetWith(w =>
+                    RealCrossDialectScenarios.Adopt(w.Target, MixedCaseLongNames(w.Capability))
+                )
                 .Expect(e => e.Diff.Empty()),
             Row(
                     "diff-long-default-pg-legacy-truncated-fk-name-is-absorbed",

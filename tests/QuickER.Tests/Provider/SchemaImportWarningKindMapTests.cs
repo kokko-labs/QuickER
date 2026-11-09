@@ -40,6 +40,30 @@ public sealed class SchemaImportWarningKindMapTests
         outside.Should().BeEquivalentTo(OutsideKinds);
     }
 
+    /// <summary>作り直すと、警告が告げる物（取込が捨てた表の中の物）が消える種別</summary>
+    private static readonly SchemaImportWarningKind[] RebuildLosingKinds =
+    [
+        SchemaImportWarningKind.ColumnNameCollision,
+        SchemaImportWarningKind.ForeignKeyOutsideScope,
+        SchemaImportWarningKind.ForeignKeyToExcludedTable,
+        SchemaImportWarningKind.TableColumnsUnavailable,
+        SchemaImportWarningKind.NameTrimmed,
+        SchemaImportWarningKind.DisabledConstraintExcluded,
+    ];
+
+    [Fact(
+        DisplayName = "すべての取込警告の種別が、表を作り直すと告げる物が消えるかを決めている（既定の腕を持たない）"
+    )]
+    public void EveryWarningKind_DeclaresWhetherRebuildLosesTableContent()
+    {
+        // 決め忘れた種別は ArgumentOutOfRangeException で赤になる
+        var losing = Enum.GetValues<SchemaImportWarningKind>()
+            .Where(SchemaImportWarningKinds.RebuildLosesTableContent)
+            .ToList();
+
+        losing.Should().BeEquivalentTo(RebuildLosingKinds);
+    }
+
     [Fact(DisplayName = "種別が告げる種類は、取込で告知する方言を持つ")]
     public void MappedKinds_AreNoticedOnImport()
     {
