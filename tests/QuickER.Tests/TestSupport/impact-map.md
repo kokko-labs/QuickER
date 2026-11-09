@@ -19,7 +19,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | 単位 | 状態 | 守り |
 |---|---|---|
 | `src/QuickER.AI` | 全体 | `Ai/Attachments`・`Ai/ChatEngines`・`Ai/Drivers`・`OsBoundary/Containment`・`OsBoundary/ProcessLaunch`・`OsBoundary/ShellPermission`・`rule:chat-engine-tool-invocation-copies`・`rule:chat-engine-tool-invocation-uses` |
-| `src/QuickER.AI.Chat` | 一部 | `Ai/ChatDialog`・`DiagramEdit/ToolArgument`・`DiagramEdit/Tools`・`OsBoundary/FeatureModules` |
+| `src/QuickER.AI.Chat` | 一部 | `Ai/ChatDialog`・`DiagramEdit/ToolArgument`・`DiagramEdit/Tools`・`OsBoundary/FeatureModules`・`table:QueryToolFormatter` |
 | `src/QuickER.AI.Mock` | 一部 | `Ai/MockAgents`・`Ai/MockBuildBoundary`・`Ai/MockDialog`・`Ai/MockFolder`・`Ai/MockOutputs`・`Ai/MockRunner`・`Ai/MockScaffold`・`OsBoundary/Containment`・`OsBoundary/FeatureModules`・`OsBoundary/PathEntrances`・`OsBoundary/Segments` |
 | `src/QuickER.AI.UI` | 一部 | `Ai/ApiKeyStore`・`Ai/Attachments`・`Ai/ConnectionSettings`・`Ai/MarkdownRender`・`OsBoundary/ProcessLaunch`・`table:Converters` |
 | `src/QuickER.Cli` | 一部 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`DiagramEdit/ToolArgument` |
@@ -42,7 +42,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Gui/ViewModels` | 全体 | `DiagramEdit/Selection`・`DiagramEdit/Undo`・`DiagramEdit/UndoOps`・`DocumentFile/Random`・`DocumentFile/Scenarios`・`Name/Entrances`・`OsBoundary/Lifecycle` |
 | `src/QuickER.Gui/Views` | 守りの無い領域（Accepted） | （なし） |
 | `src/QuickER.Mcp` | 一部 | `DiagramEdit/ToolArgument`・`DiagramEdit/Tools`・`rule:tool-argument-parsing-owners` |
-| `src/QuickER.Mcp.Tools` | 全体 | `DiagramEdit/ToolArgument`・`DiagramEdit/Tools`・`Name/Entrances` |
+| `src/QuickER.Mcp.Tools` | 全体 | `DiagramEdit/ToolArgument`・`DiagramEdit/Tools`・`Name/Entrances`・`table:QueryToolFormatter` |
 | `src/QuickER.Model` | 全体 | `Dialect/DdlText`・`Name/Entrances`・`SyncPlan/HistoryRows`・`rule:model-dialect-lookups`・`rule:tool-argument-parsing-owners`・`table:ForeignKeyReferentialActions` |
 | `src/QuickER.Platform` | 一部 | `Ai/MarkdownRender`・`OsBoundary/AtomicFile`・`OsBoundary/Containment`・`OsBoundary/PathEntrances`・`OsBoundary/ProcessLaunch`・`OsBoundary/Segments` |
 | `src/QuickER.Provider` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dialect/DdlText`・`Dialect/ImportWarnings`・`Dialect/Types`・`FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules`・`Name/DdlRoundTrip`・`SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/HistoryRows`・`SyncPlan/ShapeRows`・`rule:sync-capabilities-initializers`・`rule:sync-name-comparison-tokens`・`rule:sync-selected-foreign-key-names`・`rule:sync-type-deciding-column-copies`・`table:SyncPlanExpectations` |
@@ -70,6 +70,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.AI.Chat/AiChatDialogViewModel.cs` | `Ai/ChatDialog` |
 | `src/QuickER.AI.Chat/AiChatFeatureModule.cs` | `OsBoundary/FeatureModules` |
 | `src/QuickER.AI.Chat/ErDiagramHostChatAdapter.cs` | `DiagramEdit/ToolArgument`・`DiagramEdit/Tools` |
+| `src/QuickER.AI.Chat/QueryToolLocalizedFormatter.cs` | `table:QueryToolFormatter` |
 | `src/QuickER.AI.Mock/ApiKeyMockProjectAgent.cs` | `Ai/MockAgents`・`Ai/MockScaffold`・`OsBoundary/PathEntrances` |
 | `src/QuickER.AI.Mock/ClaudeCodeMockProjectAgent.cs` | `Ai/MockAgents` |
 | `src/QuickER.AI.Mock/CodexMockProjectAgent.cs` | `Ai/MockAgents` |
@@ -178,6 +179,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Gui/ViewModels/MainViewModel.ImportExport.cs` | `DocumentFile/Random`・`DocumentFile/Scenarios` |
 | `src/QuickER.Gui/ViewModels/RelationshipViewModel.cs` | `DiagramEdit/Undo` |
 | `src/QuickER.Mcp.Tools` | `DiagramEdit/ToolArgument`・`DiagramEdit/Tools`・`Name/Entrances` |
+| `src/QuickER.Mcp.Tools/QueryToolEnglishFormatter.cs` | `table:QueryToolFormatter` |
 | `src/QuickER.Mcp/ErDiagramToolCatalog.cs` | `DiagramEdit/ToolArgument`・`DiagramEdit/Tools` |
 | `src/QuickER.Mcp/McpToolSet.cs` | `DiagramEdit/ToolArgument` |
 | `src/QuickER.Mcp/ToolArgumentShape.cs` | `DiagramEdit/ToolArgument` |
@@ -631,6 +633,12 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 - 名前：XAML の表示の値のコンバーターの表（反転のパラメーター・件数のしきい値・null の扱い。使われていないアプリ本体の BoolToVisibilityConverter は入れない）
 - テストのソース：`tests/QuickER.Tests/Gui/Converters/ConverterRows.cs`・`tests/QuickER.Tests/Gui/Converters/ConverterTests.cs`
 - 範囲：`src/QuickER.Gui/Converters/CountToVisibilityConverter.cs`・`src/QuickER.Gui/Converters/NullToBooleanConverter.cs`・`src/QuickER.Gui/Converters/NullToVisibilityConverter.cs`・`src/QuickER.AI.UI/BoolToVisibilityConverter.cs`
+
+### `table:QueryToolFormatter`
+
+- 名前：名前付きクエリのツールの結果の整形の表（MCP 面の英語の整形と、内蔵チャット面の UI の言語〔en・ja〕に追従する整形・改行は LF だけ）
+- テストのソース：`tests/QuickER.Tests/Mcp.Tools/QueryToolFormatterRows.cs`・`tests/QuickER.Tests/Mcp.Tools/QueryToolFormatterTests.cs`
+- 範囲：`src/QuickER.Mcp.Tools/QueryToolEnglishFormatter.cs`・`src/QuickER.AI.Chat/QueryToolLocalizedFormatter.cs`
 
 ### `table:TranslatorParityPredicates`
 

@@ -74,5 +74,17 @@ internal static class TableRegistry
                 "src/QuickER.AI.UI/BoolToVisibilityConverter.cs",
             ]
         ),
+        new(
+            "QueryToolFormatter",
+            "名前付きクエリのツールの結果の整形の表（MCP 面の英語の整形と、内蔵チャット面の UI の言語〔en・ja〕に追従する整形・改行は LF だけ）",
+            [
+                "tests/QuickER.Tests/Mcp.Tools/QueryToolFormatterRows.cs",
+                "tests/QuickER.Tests/Mcp.Tools/QueryToolFormatterTests.cs",
+            ],
+            [
+                "src/QuickER.Mcp.Tools/QueryToolEnglishFormatter.cs",
+                "src/QuickER.AI.Chat/QueryToolLocalizedFormatter.cs",
+            ]
+        ),
     ];
 }
