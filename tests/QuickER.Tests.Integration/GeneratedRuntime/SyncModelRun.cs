@@ -211,10 +211,14 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                 break;
 
             case ArmInterruptOp interrupt:
-                if (interrupt.Write.Actor != interrupt.Device)
+                if (
+                    interrupt.Writes.Count == 0
+                    || interrupt.Writer != interrupt.Device && interrupt.Writer != ModelActor.Server
+                    || interrupt.Writes.Any(write => write.Actor != interrupt.Writer)
+                )
                 {
                     throw new ArgumentException(
-                        "An interrupt writes on the device whose sync it interrupts.",
+                        "An interrupt writes either on the device whose sync it interrupts or as the server, one writer per interrupt.",
                         nameof(op)
                     );
                 }
@@ -222,6 +226,7 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                 _world.Faults.ArmInterrupt(
                     interrupt.Device,
                     interrupt.Point,
+                    interrupt.Writer,
                     () => InterruptWriteAsync(interrupt)
                 );
                 break;
@@ -482,8 +487,17 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
     /// </summary>
     private async Task InterruptWriteAsync(ArmInterruptOp interrupt)
     {
-        _log.Add($"  -> interrupt {interrupt.Point}: {interrupt.Write.Describe()}");
-        await WriteAsync(interrupt.Write);
+        foreach (var write in interrupt.Writes)
+        {
+            _log.Add($"  -> interrupt {interrupt.Point}: {write.Describe()}");
+            await WriteAsync(write);
+        }
+
+        if (interrupt.ThenArm is { } kind)
+        {
+            _log.Add($"  -> interrupt {interrupt.Point}: arm {kind}");
+            _world.Faults.Arm(kind, interrupt.Device);
+        }
     }
 
     /// <summary>書き込みを 1 つ流す（期待どおりに効いたら true）</summary>

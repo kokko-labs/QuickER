@@ -46,6 +46,72 @@ public sealed class SyncNullKeyRuntimeTests : IDisposable
     }
 
     /// <summary>
+    /// ジャーナル記録デコレータの Update も、キーが null の行をキーの書式で落とさず（NullReferenceException にしない）、
+    /// 内側のリポジトリの結果のまま終え、記録を残さない（キーの決まらない記録は書き込みの後の突き合わせかアップロードの判定が消す）
+    /// </summary>
+    [Fact(
+        DisplayName = "[Sync/キー] ジャーナル記録デコレータの Update はキーが null の行をキーの書式で落とさず、記録を残さない"
+    )]
+    public async Task NullKey_UpdateIsNotBrokenByTheKeyText()
+    {
+        await _db.ApplyDdlAsync(SyncModelFixtureDefinition.BuildSqliteMirror(), Ct);
+        var factory = new LightJournalSyncModelConnectionFactory(
+            _db.ReadWriteCreateConnectionString
+        );
+        var sql = new SqlExecutor(factory);
+        var journal = new SyncJournal(sql);
+        await journal.EnsureCreatedAsync(Ct);
+        var labels = new JournalingModelLabelRepository(new ModelLabelRepository(factory), journal);
+        var plain = new ModelLabelRepository(factory);
+
+        var thrown = await Record(() =>
+            labels.UpdateAsync(new ModelLabelEntity { LabelCode = null! }, cancellationToken: Ct)
+        );
+        var plainThrown = await Record(() =>
+            plain.UpdateAsync(new ModelLabelEntity { LabelCode = null! }, cancellationToken: Ct)
+        );
+
+        // 値オブジェクトのキー（SyncVoFixture）も同じ
+        using var voDb = SqliteTempDatabase.Create();
+        await voDb.ApplyDdlAsync(SV.SyncVoFixtureDefinition.BuildSqliteMirror(), Ct);
+        var voFactory = new SVR.SqlConnectionFactory(voDb.ReadWriteCreateConnectionString);
+        var voJournal = new SV.SyncJournal(new SVR.SqlExecutor(voFactory));
+        await voJournal.EnsureCreatedAsync(Ct);
+        var orders = new SV.JournalingSyncvoOrderRepository(
+            new SVR.SyncvoOrderRepository(voFactory),
+            voJournal
+        );
+        var plainOrders = new SVR.SyncvoOrderRepository(voFactory);
+
+        var voThrown = await Record(() =>
+            orders.UpdateAsync(new SV.SyncvoOrderEntity(), cancellationToken: Ct)
+        );
+        var voPlainThrown = await Record(() =>
+            plainOrders.UpdateAsync(new SV.SyncvoOrderEntity(), cancellationToken: Ct)
+        );
+        // 例外の型は内側のリポジトリだけのときと同じ（デコレータのキーの書式が先に投げない）
+        new[] { thrown?.GetType().Name, voThrown?.GetType().Name }
+            .Should()
+            .Equal(plainThrown?.GetType().Name, voPlainThrown?.GetType().Name);
+        (await journal.ReadAllAsync(Ct)).Should().BeEmpty();
+        (await voJournal.ReadAllAsync(Ct)).Should().BeEmpty();
+
+        static async Task<Exception?> Record(Func<Task<bool>> action)
+        {
+            try
+            {
+                await action();
+
+                return null;
+            }
+            catch (Exception exception)
+            {
+                return exception;
+            }
+        }
+    }
+
+    /// <summary>
     /// 除外 blob の Stream アクセサの Write も、記録する前に null のキーを断る（SyncVoFixture の値オブジェクトのキー
     /// ＝ジャーナルのキーの書式で NullReferenceException になっていた）。Read は内側へ素通しで、内側が断る
     /// </summary>

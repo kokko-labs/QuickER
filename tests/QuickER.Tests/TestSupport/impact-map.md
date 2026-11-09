@@ -564,7 +564,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 
 ### `SyncModel/Config`
 
-- 名前：同期の構成の行列（DI の登録の形・転送経路・キーの型・キーを決めるフック）
+- 名前：同期の構成の行列（DI の登録の形・転送経路・キーの型・キーを決めるフック・書き込みの経路）
 - テストのソース：`tests/QuickER.Tests.Integration/GeneratedRuntime/SyncConfigDimensions.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/SyncConfigFixtures.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/SyncConfigIntKeyFixture.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/SyncConfigVoKeyFixture.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/SyncConfigMatrixRuntimeTests.cs`
 - 範囲：`src/QuickER.Runtime.Sync`・`src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_10_Sync.scriban`
 

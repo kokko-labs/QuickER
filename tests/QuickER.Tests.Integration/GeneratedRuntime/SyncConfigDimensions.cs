@@ -11,7 +11,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <param name="Server">サーバーの差分ソースの形</param>
 /// <param name="Registration">同期の登録の呼び方</param>
 /// <param name="Hook">ローカルの Save フック</param>
-/// <param name="Via">ローカルの新しい行の書き込みの経路</param>
+/// <param name="Via">ローカルの書き込みの経路</param>
 internal sealed record SyncConfigCase(
     string Fixture,
     string LocalKey,
@@ -39,6 +39,9 @@ internal sealed record SyncConfigCase(
     /// <summary>ローカルのリポジトリを keyed で登録するか</summary>
     public bool LocalKeyed => LocalKey == SyncConfigDimensions.Keyed;
 
+    /// <summary>ローカルの同期する表のリポジトリをインスタンスの登録（シングルトン）にするか</summary>
+    public bool LocalAsInstances => LocalKey == SyncConfigDimensions.UnkeyedInstance;
+
     /// <summary>サーバーが HTTP の向こうにいるか</summary>
     public bool OverHttp =>
         Server is SyncConfigDimensions.HttpAddress or SyncConfigDimensions.HttpClientFactory;
@@ -46,8 +49,15 @@ internal sealed record SyncConfigCase(
     /// <summary>フックが新しい行のキーを決めるか</summary>
     public bool HookAssignsKey => Hook == SyncConfigDimensions.AssignsKey;
 
-    /// <summary>新しい行をグラフ保存で書くか</summary>
-    public bool ViaGraph => Via == SyncConfigDimensions.Graph;
+    /// <summary>新しい親の行をグラフ保存で書くか（直接の InsertAsync でない水準はどれもグラフ保存で書く）</summary>
+    public bool ViaGraph => Via != SyncConfigDimensions.Direct;
+
+    /// <summary>保存済みの親をキーの無い新しい子ごと消すグラフ保存の段を流すか</summary>
+    public bool RemovesParentWithNewChild =>
+        Via == SyncConfigDimensions.GraphRemoveParentWithNewChild;
+
+    /// <summary>親の表を構築時に除外して登録し、除外した親のグラフ保存で同期する子を書くか</summary>
+    public bool ExcludesParent => Via == SyncConfigDimensions.GraphViaExcludedParent;
 }
 
 /// <summary>
@@ -59,7 +69,8 @@ internal sealed record SyncConfigCase(
 /// 同期のモデル（<see cref="SyncModelRuntimeTests"/>）は DI を使わずに表とエンジンを手で組むので、生成された DI の登録の形
 /// （keyed／非 keyed・<c>AddGeneratedSyncSupport</c> か分けた登録・直結か HTTP か）と値オブジェクトのキーに届かない。
 /// この行列は、有効な組の全積の行ごとに「登録→解決→ローカルの新しい行を同期 1 回で上げる→サーバーの新しい行を同期 1 回で
-/// 降ろす」を流す（<see cref="SyncConfigMatrixRuntimeTests"/>）。
+/// 降ろす→洗い替え」を流す（<see cref="SyncConfigMatrixRuntimeTests"/>）。書き込みの経路の水準のうち、保存済みの親をキーの
+/// 無い新しい子ごと消すグラフ保存は流れの後ろにその段を足し、構築時に除外した親のグラフ保存は同期する子の表で同じ流れを流す。
 /// </para>
 /// <para>
 /// 行はフィクスチャのアダプタが作れる組だけ（値オブジェクトのキーのフィクスチャはリモートサービスを持たないので HTTP の行が
@@ -101,6 +112,9 @@ internal static class SyncConfigDimensions
     /// <summary>キーなしの登録</summary>
     public const string Unkeyed = "Unkeyed";
 
+    /// <summary>キーなしの登録の、同期する表のリポジトリをインスタンスの登録（シングルトン）に置き換えたもの</summary>
+    public const string UnkeyedInstance = "UnkeyedInstance";
+
     /// <summary>直結・サーバーのリポジトリはキーつき</summary>
     public const string DirectKeyed = "DirectKeyed";
 
@@ -131,6 +145,15 @@ internal static class SyncConfigDimensions
     /// <summary>グラフ保存（RowState=Added の SaveAsync）</summary>
     public const string Graph = "Graph";
 
+    /// <summary>
+    /// グラフ保存で新しい親を書いて上げ下げした後、保存済みの親にキーの無い新しい子を足して親を消すグラフ保存（単数と複数の
+    /// SaveAsync）と、新しい子だけを MarkRemoved したグラフ保存
+    /// </summary>
+    public const string GraphRemoveParentWithNewChild = "GraphRemoveParentWithNewChild";
+
+    /// <summary>親の表を構築時に除外して登録し、除外した親のリポジトリのグラフ保存で同期する子を新しく足す</summary>
+    public const string GraphViaExcludedParent = "GraphViaExcludedParent";
+
     /// <summary>次元表</summary>
     public static DimensionTable Table { get; } =
         new(
@@ -143,8 +166,8 @@ internal static class SyncConfigDimensions
                 ),
                 new Factor(
                     LocalKey,
-                    [new Level(Keyed), new Level(Unkeyed)],
-                    "ローカルのリポジトリと同期エンジンの登録のキー（AddGeneratedSqliteRepositories と AddGeneratedSyncEngine の localServiceKey）"
+                    [new Level(Keyed), new Level(Unkeyed), new Level(UnkeyedInstance)],
+                    "ローカルのリポジトリと同期エンジンの登録のキー（AddGeneratedSqliteRepositories と AddGeneratedSyncEngine の localServiceKey）と、キーなしの登録の同期する表のリポジトリをインスタンスの登録にした形"
                 ),
                 new Factor(
                     Server,
@@ -168,8 +191,13 @@ internal static class SyncConfigDimensions
                 ),
                 new Factor(
                     Via,
-                    [new Level(Direct), new Level(Graph)],
-                    "ローカルの新しい行の書き込みの経路（直接の InsertAsync・RowState=Added のグラフ保存）"
+                    [
+                        new Level(Direct),
+                        new Level(Graph),
+                        new Level(GraphRemoveParentWithNewChild),
+                        new Level(GraphViaExcludedParent),
+                    ],
+                    "ローカルの書き込みの経路（直接の InsertAsync・RowState=Added のグラフ保存・保存済みの親をキーの無い新しい子ごと消すグラフ保存・構築時に除外した親のグラフ保存で同期する子を足す）"
                 ),
             ],
             [new FactorGroup(Fixture, Hook, Via), new FactorGroup(LocalKey, Server, Registration)],
@@ -185,12 +213,7 @@ internal static class SyncConfigDimensions
             EngineIds.SyncModel,
             AllCases()
                 .Where(c => SyncConfigFixtures.Axis.Get(c.Fixture).HasRemoteServices || !c.OverHttp)
-                .Select(c => new ScenarioRow<SyncConfigCase>(
-                    c.Id,
-                    Finding(c),
-                    "登録→解決→ローカルの新しい行を同期 1 回で上げる→サーバーの新しい行を同期 1 回で降ろす",
-                    c
-                ))
+                .Select(c => new ScenarioRow<SyncConfigCase>(c.Id, Finding(c), Description(c), c))
         );
 
     /// <summary>
@@ -204,7 +227,7 @@ internal static class SyncConfigDimensions
         new(
             EngineIds.SyncModel,
             "Config",
-            "同期の構成の行列（DI の登録の形・転送経路・キーの型・キーを決めるフック）",
+            "同期の構成の行列（DI の登録の形・転送経路・キーの型・キーを決めるフック・書き込みの経路）",
             Table,
             Rows.Count,
             [
@@ -220,11 +243,25 @@ internal static class SyncConfigDimensions
             ]
         );
 
-    /// <summary>行の由来の指摘（修正 E で直した 4m-E1・4m-E2 の行）</summary>
+    /// <summary>行の由来の指摘</summary>
     private static string? Finding(SyncConfigCase c) =>
-        !c.LocalKeyed ? "4m-E1"
+        c.RemovesParentWithNewChild ? "本番E1"
+        : c.ExcludesParent ? "本番E2"
+        : c.LocalAsInstances ? "本番E4"
+        : !c.LocalKeyed ? "4m-E1"
         : c.Fixture == VoKey && c.HookAssignsKey ? "4m-E2"
         : null;
+
+    /// <summary>行の流れの説明</summary>
+    private static string Description(SyncConfigCase c) =>
+        c.ExcludesParent
+            ? "親の表を除外して登録→解決→除外した親の直接の書き込みは記録しない→除外した親のグラフ保存で足した子を同期 1 回で上げる→サーバーの新しい子を同期 1 回で降ろす→洗い替え"
+            : "登録→解決→ローカルの新しい行を同期 1 回で上げる→サーバーの新しい行を同期 1 回で降ろす→洗い替え"
+                + (
+                    c.RemovesParentWithNewChild
+                        ? "→保存済みの親をキーの無い新しい子ごと消すグラフ保存を同期 1 回でサーバーへ届ける"
+                        : ""
+                );
 
     /// <summary>全因子の水準の全積のうち、原理的に組める組</summary>
     private static IEnumerable<SyncConfigCase> AllCases()
@@ -271,7 +308,7 @@ internal static class SyncConfigDimensions
 
         // ローカルもサーバーも同じコンテナにキーなしで登録すると、同じ I{E}Repository の登録が 2 つになり後の登録が勝つ
         // （同じ DB を指すことになり、ローカルとサーバーを分けられない）
-        if (local == Unkeyed && server == DirectUnkeyed)
+        if (local is Unkeyed or UnkeyedInstance && server == DirectUnkeyed)
         {
             return false;
         }
@@ -279,6 +316,12 @@ internal static class SyncConfigDimensions
         // Save フックはグラフ保存（SaveAsync）でだけ走り、直接の CRUD（InsertAsync）は素通りする＝キーを決めるフックは
         // 直接の書き込みでは走らない
         if (hook == AssignsKey && via == Direct)
+        {
+            return false;
+        }
+
+        // インスタンスの登録はコンテナを組む前に作るので、コンテナに登録した Save フック（AddSaveHook）を受け取れない
+        if (local == UnkeyedInstance && hook == AssignsKey)
         {
             return false;
         }

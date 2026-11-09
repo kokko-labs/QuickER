@@ -57,11 +57,12 @@
 
 ### ack の掃除
 
-- 主に 4 点：
+- 主に 5 点：
   - (i) テーブルのダウンロード完了後に、版を書いたキーのうち ack を持つもの（`SyncDownloadOutcome.SettledAckKeyTexts`＝エコー・通常適用の両方）を**コミット後に**消す。コミット前に消してコミットが失敗すると「ack なし・ミラー旧」の窓が戻る。逆窓（コミット後・削除前に落ちる）は ack が残るだけで次ランが自己回復する。
   - (ii) 削除エントリの settle 成功時。
   - (iii) 削除伝搬が消したキー（`PropagateDeletesAsync` が件数でなく `IReadOnlyList<string>` を返し engine が `RemoveAcksAsync`）。放置すると「サーバー削除→同キー再作成」が死んだ版を original に採って偽 `MissingOnServer` になる。
   - (iv) `RefreshAsync` がスコープ内テーブルの ack を全削除（全部の表の全消しが成功してから＝「洗い替え」）。
+- (v) 親の解決役・一意な値の持ち主の読み直しが書いた受理記録は、同じ実行がその行へバッチの古い写しを内容として書いたら、その書き込みの単位のコミットの直後にその場で消す（ダウンロードの flush も洗い替えのバッチも、`SyncParentResolver.EndWriteUnit` が返した行を `RemoveAcksAsync`）。表のダウンロードの終わりへ積まない（同じ表の後のバッチの取得の失敗・取り消しで捨てられ、受理記録の版がミラー版より新しいまま残る）。書き込みの後にもう一度読み直した行の受理記録は残す（バッチの終わりの `ReconcileSettledReceipts` が `SettledAckKeyTexts` から外す）。下の「親をそろえる解決役」。
 - ほかに ServerWins の先消しとキーのテキストの書き直しでも消える。
 - `SyncJournal.RemoveTableAsync` / `RemoveAllAsync` は ack に触れない（未送信のローカル変更を捨てることは、サーバーが受理した内容について何も言っていない）。実行中に呼ばない。
 
@@ -76,6 +77,8 @@
 
 - ローカル変更はデコレータ（`Journaling{Entity}Repository`）で追跡する。`ISaveHook` はグラフ保存でしか発火せず直接 CRUD を素通しするため、フックでは穴が開く。
 - 全書き込み入口（Insert / Update / Delete / BulkInsert / SaveAsync×2、除外列がある図では `Write{列}Async`）が記録する。
+  - 入れる行の無い BulkInsert（空・null の要素だけ）は記録する行が無いので、ロックも `EnsureCreatedAsync` も通らずに内側へ渡す（ジャーナルの表をまだ持たない DB に表を作らない）。ガード：`SyncRuntimeTestsBase.EveryWriteEntryPoint_IsJournaled`（mutation 実証済み）。
+- 構築時に除外した表（`excludeFromSync`）のリポジトリも、自分の行を記録しない形（`JournalingRepositoryBase.RecordsOwnRows`＝false）で包む。直接の書き込み（Insert / Update / Delete / BulkInsert / `Write{列}Async`）はロックも記録も `EnsureCreatedAsync` もせずに内側へ渡し、グラフ保存（SaveAsync×2）は記録の段（`RecordAndWriteAsync`＝ロック・観測・突き合わせ）を通す。除外した親のグラフ保存がカスケードで書く同期対象の子を記録するため（包まないと記録が無く、次の同期の削除伝搬がサーバーへ送らずにローカルから消す）。除外した表の行は記録器が外すので記録しない（「グラフ保存はカスケード全体を記録する」）。ガード：構成の行列（`SyncConfigMatrixRuntimeTests`）の水準 `GraphViaExcludedParent`（登録の形の検査・直接の書き込みが記録しないこと・子だけが記録され上がること）。
 - 記録は journal-first：生成 Repository は接続を内部管理し業務書き込みと同一トランザクションに乗れないため、意図を先に記録する。
 - 記録の後でプロセスごと落ちて残ったエントリは、アップロードが「ローカルの現在行を読み直して送る」ため無害化される（行が無ければ `Discarded`・競合ではない）。
 - 生 SQL（`ExecuteSqlAsync`）と `Query().ExecuteDeleteAsync` は記録しない（変更行が文・述語から読めない＝docs 明記の割り切り）。
@@ -85,7 +88,14 @@
 
 - 固定の汎用走査 `SyncGraphRecorder` が子孫も記録する。保存側と同じ `EntityBaseCore.EnumerateCascadeChildren`（この用途で public）を歩く＝同じ走査の 2 実装を作らない。
 - 規則：Removed は cascadeDelete なら部分木を子から順に Delete／Added・Updated は Upsert／Unchanged は記録なしで cascadeSave なら子へ再帰。
-- レジストリは全記述子（構築時除外に依らない）。未登録の中間型も降下は続け、記録は登録型のみ。
+- 削除を記録するのは、保存の DELETE が見つける節点だけ（`CollectDeleteGraph` / `CollectDelete`）。
+  - 保存側（`DeleteGraphAsync`）は消す部分木を状態に依らず消すので、別の親の下から移してきた保存済みの子は記録する。
+  - 部分木の中の Added の節点は、書かれたことが無いので自分の削除を記録しない（子へは降りる）。
+  - キーの無い節点（`FormatEntityKey` が `SyncJournal.UnsetKeyText`）は `WHERE key = NULL` が何も消さないので記録しない。MarkRemoved した新しい子・ルートもここで外れる。読み取り側（`RecordCollectedAsync`）に番兵の特例は置かない。
+  - 記録すると、キーの無い記録が版の読み取り（`ParseKey`）で `FormatException` になりデコレータ越しのグラフ保存だけが必ず失敗する。版なしの表では、別の端末が同じキーでサーバーに作った行を版を見ない削除の再生が消す。
+  - 割り切り：Added のまま既存の行と同じキーを持つ節点（挿入なら失敗する誤用）は、保存側がその行を消しても記録しない（Added の節点ごとにローカルの存否を読む必要があり、版なしの表には読み口が無い）。docs に明記。
+  - ガード：構成の行列の水準 `GraphRemoveParentWithNewChild`（VoKey＝キーの無い子・IntKey＝版なしの子がサーバーの同じキーの行を消さない）。mutation 実証済み。
+- レジストリはそのエンジンが同期する表の記述子だけ。`AddGeneratedSyncEngine` が除外した表を外した記録器を 1 つ作り、その登録のすべてのデコレータへ渡す（除外が無ければ `GeneratedSyncTables.GraphRecorder`。デコレータの `(inner, journal)` のコンストラクタも全表の静的な記録器を使う）。構築時に除外した表の行は、どのリポジトリのグラフ保存からも記録しない（記録するとどのランも送らない未送信として数え続け、洗い替えを断り続ける）。未登録の中間型も降下は続け、記録は登録型のみ。ガード：水準 `GraphViaExcludedParent`（除外した親を書き換えるグラフ保存が子だけを記録する。mutation 実証済み）。
 - ルートの RowState しか見ない実装は 3 形の実バグになる：カスケード子が上がらない／同じランの削除伝搬が未記録のローカル子行を消す（同期 1 回で子データが両側から喪失）／カスケード削除の再生がサーバー FK に阻まれ恒久ハード失敗。ガード：シナリオ `graph-cascade-save-uploads-parent-and-child`・`graph-child-edit-under-unchanged-root-uploads`・`graph-cascade-delete-replays-child-first`（mutation 実証済み）。
 - 一括記録は `SyncJournal.RecordManyAsync`（1 文 100 行の複数行 `VALUES`）。BulkInsert とグラフ保存（`SyncGraphRecorder.CollectSave` で集めて 1 回）が使う。
   - 行ごとの値は列ごとのコレクション引数として渡し、本文に `@tableName0` … を直接書く＝バインダーの「要素 i は `@name`i で束縛・本文の置換は素の `@name` だけ」に乗る。
@@ -113,6 +123,7 @@
 - グラフ保存の記録で、保存後も `Unchanged` にならなかった行（Before フックが飛ばした行＝`AcceptChanges` が飛ばす）は記録を取り消す。削除の飛ばしは対象外（行が残るので再生の probe が捨てる）。直接の書き込みはフックが走らないので飛ばしの判定をしない。
 - 記録のキーとエンティティの今のキーが違えば記録を新しいキーへ書き換える（`SyncJournal.RewriteKeyTextsAsync`＝挿入の記録とグラフ保存の Added の行。受理記録もコピー待ちもまだ無いので記録だけで足りる）。
 - キーがまだ無い行（null を取り得るキーで、Before フックがキーを決める新しい行）は、記述子の `FormatEntityKey` が固定の文字列 `SyncJournal.UnsetKeyText`（internal）で記録し、同じ書き換えで行のキーへ移す。
+  - 直接の Update の記録（`RecordUpsertAsync`）も、キーを挿入と同じ `FormatEntityKey` で組む（キーが null の行をキーの書式で落とさない＝文字列のキーは key_text の NOT NULL、値オブジェクトのキーは `NullReferenceException`）。書き込みの結果は内側のリポジトリが決める。ガード：`SyncNullKeyRuntimeTests.NullKey_UpdateIsNotBrokenByTheKeyText`（mutation 実証済み）。
   - この文字列の記録は書き込みのロックの中にしか無いので、エンジンの読み取り（`ReadAllAsync`・`CountPendingAsync`・`ReadTableAsync`）は返さない。
   - 落ちて残ったものはアップロードがその表を判定するとき（ロックの中）に消す（`RemoveUnsetKeyEntriesAsync`）。
 - 突き合わせは最善努力（書き込みは着地済みで、失敗を例外にすると着地していないと伝えてしまう）。失敗と落ちは記録を残す＝docs の既知の制限。
@@ -171,6 +182,7 @@
   - `ISyncTable.ApplyServerRowsAsync` の既定実装は空リストを返す（外部実装の互換）。
 - ServerWins の適用の位置：`SyncAsync` では**そのテーブルのダウンロードの直後・親→子**。アップロード段で適用すると、まだ降りていない親を参照する行をローカルへ書いて外部キーで毎回止まる。打ち切ったテーブルも含めて必ず適用する（`DownloadCoreAsync` の `SettleServerWinsAsync`）。単独の `UploadAsync` はアップロード段で適用する。
 - Versioned＋ServerWins が捨てる予定の id は、そのテーブルのダウンロードで未送信に数えない。ランの範囲の表の行だけに絞る（範囲外の表の未送信の削除は親の削除として数え続ける）。
+- ServerWins の適用はロックの中でその表の記録を読み直し（`SyncJournal.ReadTableAsync`）、ロックの外で読んだ id を今のキーで組み直す（`PlanReplayAsync` と同じ形。実行が途中で捨てた id は読んだキーのまま）。読んだときに書き込みの途中だった、Before フックがキーを決める新しい行の記録は、決まったキーへ書き換わっている。古いキーのまま適用すると、その行を戻さずに記録を捨て、実在しないキーを `DiscardedByServerWins` として報告する。ガード：`SyncRuntimeTestsBase.InFlightInsertRekeyedByHook_IsNotDiscardedByTheUpload`（ServerWins の行。mutation 実証済み）。
 - ServerWins の最中に別の記録を持ったキーは適用しない（ジャーナルを読み直し、ランの冒頭に読んだ id 以外の記録を持つキー）。
   - 適用しなかったキーは、ランの冒頭に読んだ記録も捨てない（`ApplyServerWinsToTableAsync` の `dropRows` から外す・`DiscardedByServerWins` にも載せない）。行の内容は実行前の編集（書いた blob・サーバーが持つ行の版つきの削除）を持ったままなので、記録だけ捨てると内容と記録が食い違ったまま残る（blob が永久に届かない・作り直した行が挿入として送られ毎回重複で断られる）。次の実行が新しい記録と一緒に送る。
 - ガード：シナリオ `lw-overwrites-duplicate-key-on-server`・`lw-resurrects-row-missing-on-server`・`sw-leaves-row-edited-during-the-run`・`interrupt-*-update-blob-written-serverwins`・`interrupt-*-recreate-deleted-serverwins`・`interrupt-*-delete-recreated-serverwins`・`sw-does-not-stop-download-at-rows-it-drops`・`fk-serverwins-restores-row-moved-to-new-parent-on-server`、`SyncVoRuntimeTests`。
@@ -224,7 +236,12 @@
 - `ApplyBatchOrFindCollisionsAsync` は失敗経路だけで `TryResolveCollisionAsync` を呼び、記述子の `LocalUniqueLookups`（一意制約ごとの値の読み出しと、その値を持つローカルの行のキーを返す SELECT＝`SyncUniqueLookup<TEntity>`）で持ち主を引き当て、`SyncParentResolver.BringHoldersUpToDateAsync` がサーバーから読み直して先に適用する（ミラー版は書かず受理記録・サーバーに無ければ参照されていない限り消す＝削除伝搬を切ったランでは消さない）。
 - やり直しはバッチの行数まで。やり直すたびに追加か更新かをローカルの今の行から決め直す（`ApplyBatchCoreAsync` は `MarkUnchanged` してから `MarkUpdated`＝`MarkUpdated` は追加の印を残すので、失敗した試行で追加と決めた行をもう一度挿入してしまう）。
 - 読み直さない条件：持ち主に未送信の変更がある（ServerWins が捨てる記録なら読み直す＝`SyncPendingSnapshot.KeyTextsByTable`）／読み直す途中で同じ行に戻る（入れ替え）／持ち主のサーバーの行がまだ同じ値を持つ（二重の守り）。
-- 持ち主を参照する行を先に入れる：サーバーに無い持ち主がローカルの行に参照されて消せず、参照する行が同じバッチでサーバーが別の親へ移した行なら、`MoveOffHoldersAsync` がその行をすべてサーバーの行の内容とローカルの一意な値（記述子の `CopyUniqueValues`・既定は何もしない）で先に入れ、持ち主を消してからやり直す。消せなければ入れた行を元に戻す（`PutBackAsync`＝混ざった内容を上げない）。
+- 持ち主を参照する行を先に入れる：サーバーに無い持ち主がローカルの行に参照されて消せず、参照する行が同じバッチでサーバーが別の親へ移した行なら、`MoveOffHoldersAsync` がその行をすべてサーバーの行の内容とローカルの一意な値（記述子の `CopyUniqueValues`）で先に入れ、持ち主を消してからやり直す。消せなければ入れた行を元に戻す（`PutBackAsync`＝混ざった内容を上げない）。
+  - null を返すときは、どの枝（入らない行・途中で待つ行がその形でないと判った）でも先に入れた行を戻してから返す。
+  - 戻す書き込みが断られたら、戻せなかった行のキーを名指しした `InvalidOperationException` で実行を止める（戻せる行はすべて戻してから）。混ざった行を黙って残すと、後のアップロードが端末の変更として上げる。
+  - `CopyUniqueValues` は null（未設定）を取り、未設定なら `MoveOffHoldersAsync` も `ReleaseUniqueValuesAsync` も行を入れない（何もしない既定のデリゲートだと、一意な値を写さないまま入れる）。生成の記述子は一意制約のある表で必ず設定する。
+  - 一意な値の比べ方は `SameUniqueValues`（`StructuralComparisons.StructuralEqualityComparer`＝バイナリはバイトで比べる）の 1 つ。
+  - ガードなし：戻す前に返す枝は、先に入れた行が同じバッチの行で、流れの順の経路はぶつかった行の手前を、まとめて適用する経路はぶつからない行をその後でサーバーの写しで書くので、どの決定的な形でも観測できない。戻す書き込みの失敗・手で組んだ記述子・バイナリの一意な列は、作る口が無いか図に無い。
 - 一意な値を手放す：持ち主のサーバーの行を入れられない理由が、新しい親が読み直しの途中の行（`SyncParentResolver.IsInProgress`）であることだけのとき、`ISyncTableRunSupport.ReleaseUniqueValuesAsync` がローカルの持ち主にサーバーの一意な値だけを書く（親とほかの内容・ミラー版は残す）。
 - ガード：シナリオ `n8-unique-value-moved-then-updated`・`n8-holder-with-unsent-change-stops`・`n8-serverwins-holder-is-read-back`・`n8-chain`・`n8-true-swap-stops`・`n14-holder-moved-under-new-parent-in-batch`・`n13-holder-referenced-by-taker`・`serverwins-holder-moves-under-taker`・`serverwins-holder-chain-moves-under-taker`・`holder-held-for-another-reason-keeps-its-values`。
 
@@ -266,10 +283,12 @@
 
 - ダウンロード・ServerWins の読み直し・洗い替えで、適用する行の親（記述子の `ParentReferences`）がローカルに無いとき、内部クラス `SyncParentResolver`（バッチ・ServerWins の 1 表・洗い替え全体ごとに 1 つ＝同じ親を 2 回読まない）がサーバーから親を読み直して先に適用し、親の親も連鎖する（`ISyncTableRunSupport.ApplyServerRowsAsync` の resolver つきの内部の口）。
 - 読み直した行はミラー版を書かず受理記録を残す（書くとアンカーが流れを追い越す・記録しないと後の編集が偽の DuplicateOnServer）。
+- 読み直した後に同じ実行がその行へバッチの古い写し（読み直しより前に取得したもの）を内容として書いたら、その受理記録を書き込みの単位（ダウンロードの flush・洗い替えのバッチ）のコミットの直後に消す（解決役が読まなかったときと同じ＝古い内容・ミラー版・受理記録なし。次の実行が新しい版を内容ごと降ろす）。表のダウンロードの終わりまで積むと、同じ表の後のバッチの取得の失敗で捨てられて残る。残すと次の実行が新しい版を折り返しとみなして版だけを写し、端末は古い内容のまま残り、その後の編集はサーバーの新しい内容を競合なしに上書きする。流れの順の適用と接頭辞性には触らない（行を飛ばさない）。一意な値の持ち主の読み直しも同じ。ServerWins の適用は、並びにある親を読み直さず、並びにある持ち主は適用の後で並びの写しの版を受理記録へ書き直し、表のダウンロードの後に流すので、この形にならない。ガード：割り込みの網のサーバーの書き手の行 `interrupt-server-AfterServerFetchBeforeApply-parent-after-child-selfref-update-*`・`interrupt-server-AfterServerFetchBeforeApply-unique-holder-after-taker-update-*`（そのうち `*-fetch-fails*` は、上書きしたバッチの後の同じ表の次の取得が失敗する形。mutation 実証済み）。
 - そろえない条件 3 つ：親の表がランの範囲外／親がローカルで未送信の削除で、そのランがその削除を捨てない（戻すと利用者の削除を黙って取り消す。Versioned＋ServerWins が捨てる削除の親は戻す）／サーバーにも親が無い。
 - そろえられない行は、ダウンロードではその行で打ち切り `SyncDownloadTruncation.MissingParentTableName`（init のみ・既定 null・`SyncDownloadOutcome` にも同名）に親の表を入れる。ServerWins の読み直しでは、その行を戻さずに記録を残す。
 - 流れの順に適用する経路（ダウンロード・洗い替え）は「同じ表の前の行」だけを親とみなし、後ろの行の親は読み直す（並べ替えるとコミット境界で接頭辞性が崩れる）。まとめて適用する経路（ServerWins・読み直し）は並びのどこにある親も可とし、`ParentsFirst` で親を先にしてから適用する。
-- 洗い替えは同じ解決役を全体で 1 つ使い、先に読み直した行がそのバッチに来たら上書きする（`InsertRefreshedRowsAsync` の `again`）。
+- 洗い替えは同じ解決役を全体で 1 つ使い、先に読み直した行がそのバッチに来たら上書きする（`InsertRefreshedRowsAsync` の `again`）。上書きしたバッチのコミットの後に、その行の受理記録を消す（上の規則）。
+  - 洗い替えの取得の後にサーバーの他者が親を消すと、バッチの古い写しの子が消えた親を指したまま入り、ローカルの外部キーで例外になる（洗い替えは失敗として止まり、次の洗い替えで取り直せる）。直していない（同期のモデルの既知の失敗の一覧に Pending で載せ、きっかけを待つ）。
 - まとめて適用する経路でぶつかって外した行がローカルに無いとき、同じ表でその下にある行（推移的）も一緒に外す（`TryApplyBatchAsync` の `WithRowsBelowAbsentAsync`）。外した行がローカルにあれば下の行は適用する。子だけを戻すとローカルの外部キーで毎回止まる。
 - ガード：シナリオ `17-serverwins-deleted-parent`・`parent-readback-collect-keeps-delete`・`parent-readback-collect-keeps-grandparent-delete`・`parent-readback-selfref-chain`・`parent-readback-refresh-across-batches`・`parent-readback-ack-guards-later-edit`・`13-propagation-pending-label-parent`・`18-serverwins-restore-subtree`・`20-*`・`21-*`・`n3-*`・`n4-*`・`c2-*`・`fk-child-of-excluded-parent-table-stops-and-names-parent-table`・`fk-versionless-download-reports-held-back-row-after-scan`・`repro-b3`・`repro-b3-grandchild`・`repro-b3-grandchild-under-present-child`。
 
@@ -330,6 +349,7 @@
 ### ダウンロードのコピーと取り直し
 
 - 順は「コピー待ちの記録→行の書き込み→コピー→記録を消す」（`WriteRowsAndBlobsAsync`・ローカル表 `quicker_sync_blob_pending`・自分のローカル実行器から作った `SyncJournal` で同じ DB に読み書き）。
+  - 行の書き込みが例外で終わったら、記録を消してから投げ直す（フックが行を飛ばしたときと同じ・最善努力）。残すと、バッチが断られて古い内容のまま残った行へ、次の実行がサーバーの blob を写す。ガード：シナリオ `n8-true-swap-stops`（入れ替えで断られたバッチの後にコピー待ちが空。mutation 実証済み）。
 - 残りは列を運ぶ次のランのそのテーブルの最初に `CopyOwedBlobsAsync` がロック内で**行と列ごとに**決める：ローカルに行が無い→記録だけ捨てる／その列を書いた未送信の記録がある（`SyncPendingSnapshot.BinaryColumnsByKeyText`）→コピーせず記録だけ捨てる／それ以外→コピーして捨てる。キー単位で一律に飛ばさない（名前だけ編集した行の blob が二度と降りない）。
 - 元の行がサーバーに無いコピー待ちは記録を捨てる（`CopyOwedBlobsCoreAsync` が行ごとに 1 回 `Writer.GetByIdAsync`。読み出しの「無い」と「NULL」は区別できず、NOT NULL の除外列へ NULL を書いて毎回止まるため。行は削除伝搬に任せる）。
 - 洗い替えはテーブルの記録を捨てる。
@@ -363,7 +383,7 @@
 - 版なしダウンロードは毎回キー昇順の全量スキャン（`SELECT TOP … WHERE key > @afterKey ORDER BY key`）。版ありは後勝ちランでも増分ダウンロードを維持する。
 - ceiling はスコープ内の版ありテーブルにだけ問う（全版なしなら null）。
 - 固定基底はサブクラス階層：`SyncTableBase`（共有＝バッチ適用・削除伝搬・blob コピー・LWW 再生 `UploadLastWriteWinsAsync`・サーバー版の読み出し `ReadServerRowVersionAsync`）← `SyncTable`（版あり）／`VersionlessSyncTable`（版なし）。
-- 除外は 2 層：ラン単位 `SyncOptions.ExcludedEntityTypes`（記録は継続・未知型は ArgumentException で黙殺しない）と、構築時 `AddGeneratedSyncEngine(…, excludeFromSync:)`（ローカル専用宣言＝デコレータで包まず記述子も登録しない＝記録ゼロ・全ラン対象外）。ローカル専用は版列なしテーブルへ、という旧イディオムでなく構築時除外が正。
+- 除外は 2 層：ラン単位 `SyncOptions.ExcludedEntityTypes`（記録は継続・未知型は ArgumentException で黙殺しない）と、構築時 `AddGeneratedSyncEngine(…, excludeFromSync:)`（ローカル専用宣言＝記述子を登録しない＝全ラン対象外。その表の行はどのリポジトリから書いても記録しない。デコレータは自分の行を記録しない形で包み、直接の書き込みは素通し・グラフ保存は同期対象の子だけを記録する＝「デコレータ方式と journal-first」）。ローカル専用は版列なしテーブルへ、という旧イディオムでなく構築時除外が正。
 - 未送信拒否・Force 破棄・blob 損失ガード・ServerWins の全破棄はいずれもランのスコープ内のみ集計する。
 - ガード：シナリオ `lww-downloads-versionless-table-every-run`・`lww-cascade-save-with-versionless-child-uploads`、`SyncConstructionExclusionTests`（構築時除外・登録時 fail-fast）。
 
@@ -401,6 +421,7 @@
 - DI は「ローカル半分」と「サーバー半分」に分かれ、転送経路の選択は 1 行の差：`AddGeneratedSyncEngine(localKey)`＋`AddGeneratedDirectSyncSources(serverKey)` または `AddGeneratedHttpSyncSources(baseAddress ｜ HttpClient ファクトリ)`（`AddGeneratedSyncSupport` は全直結構成のための合成）。キー引数の `null` は非 keyed 登録。
 - per-entity の DI は型引数付きヘルパー `AddSyncTable` / `AddDirectSource` / `AddHttpSource` の 1 行／エンティティ。生成される `AddSyncTable` は `GetService<ISaveHookRegistry>()` をローカルの表へ渡す（「Save フックが行を飛ばしたら止める」）。
 - デコレータの差し替えは keyed / 非 keyed とも元の登録の作り方を保つ（`InnerFactory`）：factory 登録はその factory／型の登録（非 keyed の生成の登録＝`AddScoped<I契約, 実装>()`）は登録時に 1 回作る `ActivatorUtilities.CreateFactory`／インスタンスの登録はそのインスタンスで内側を作る。factory 登録だけを受けると `AddGeneratedSyncEngine(null)` が必ず投げる。
+- 元の登録がシングルトン（インスタンスの登録を含む）なら、デコレータはスコープで登録し、内側はすべてのスコープで 1 つを共有する（内側は専用のキーのシングルトンとして登録し直し、コンテナがルートから 1 回だけ作って元どおりに持つ。インスタンスならそのインスタンス）。デコレータはスコープの `SyncJournal` に記録するので、シングルトンのままだとスコープを検査するプロバイダがルートからの解決を断り、検査しないプロバイダはすべてのスコープで 1 つのジャーナルを掴む。ガード：構成の行列の因子 `LocalKey` の水準 `UnkeyedInstance`（ローカルの同期する表のリポジトリをインスタンスの登録にした行。行列は `ValidateScopes` つきのプロバイダで解決する。mutation 実証済み）。
 - ガード：`SyncConfigMatrixRuntimeTests`（非 keyed の行を含む同期の構成の行列）・`SyncLocalSaveHookRegistrationTests`・`SyncConstructionExclusionTests`。
 
 ## ガードテストの一覧

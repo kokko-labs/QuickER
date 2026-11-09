@@ -63,7 +63,6 @@ internal sealed record SyncModelScenario(
     /// </summary>
     public bool ArmsServerFaults =>
         Ops.OfType<ArmInterruptOp>().Any()
-        || Ops.OfType<ArmServerInterruptOp>().Any()
         || Ops.OfType<ArmEmptyFetchOp>().Any()
         || Ops.OfType<ArmFaultOp>()
             .Any(a =>
@@ -530,7 +529,8 @@ internal static partial class SyncModelScenarios
                 ]
             ),
             // N8: サーバーで値を入れ替えた 2 行（本当の入れ替え）は打ち切る（読み直しても解けない＝既知の割り切り）。
-            // docs が案内する抜け道（洗い替え）で両端末とも解消する
+            // docs が案内する抜け道（洗い替え）で両端末とも解消する。断られたバッチの書き込みは blob のコピー待ちを
+            // 残さない（残すと次の実行が、古い内容のままの行へサーバーの blob を写す）
             new(
                 "n8-true-swap-stops",
                 [
@@ -543,6 +543,7 @@ internal static partial class SyncModelScenarios
                     new UpdateItemOp(SV, Direct, 448, 446, null, "s1", "t448"),
                     new UpdateItemOp(SV, Direct, 447, 446, null, "s2", "t447"),
                     Sync(D1),
+                    Expect.BlobPending(D1, ModelTables.Items).Empty(),
                     new ExpectLocalOp(
                         D1,
                         ModelTables.Items,
@@ -1601,6 +1602,7 @@ internal static partial class SyncModelScenarios
         list.AddRange(TransientFaultScenarios());
         list.AddRange(UniqueValueReassignScenarios());
         list.AddRange(InterruptScenarios());
+        list.AddRange(ServerInterruptScenarios());
         list.AddRange(EngineBasicScenarios());
         list.AddRange(EngineForeignKeysScenarios());
         list.AddRange(EnginePropagationLwwScenarios());
@@ -1756,6 +1758,372 @@ internal static partial class SyncModelScenarios
         policy == SyncConflictPolicy.Collect
             ? $"interrupt-{point}-{shape}"
             : $"interrupt-{point}-{shape}-{policy.ToString().ToLowerInvariant()}";
+
+    /// <summary>割り込みの書き手（網羅のテストが書き手ごとの軸の全積を表明する）</summary>
+    public enum InterruptWriter
+    {
+        /// <summary>同期する端末自身（ローカルの書き込み。<see cref="InterruptCells"/>）</summary>
+        Device,
+
+        /// <summary>サーバーの他者（サーバーへの書き込み。<see cref="ServerInterruptCells"/>）</summary>
+        Server,
+    }
+
+    /// <summary>サーバーの書き手の行の前段（端末の同期の前にサーバーの他者がしておく形。対象の行は端末に無いか古い）</summary>
+    public enum ServerInterruptPrelude
+    {
+        /// <summary>
+        /// フォルダー p（800）と p の子フォルダー c（801）を作り、p を更新する。端末のバッチでは c が p より前に来て、端末に無い p を
+        /// 親の解決役がサーバーから先に読み直す
+        /// </summary>
+        ParentAfterChildSelfRef,
+
+        /// <summary>
+        /// フォルダー p（800）と p の下の品目（811）を作り、p を更新する（対照：親の表が先に降りるので解決役は動かない）
+        /// </summary>
+        ParentAfterChildCrossTable,
+
+        /// <summary>
+        /// 端末が持つフォルダー h（820・名前 hx）が名前を手放し、別のフォルダー t（821）がその名前を取り、h をもう一度更新する。
+        /// 端末のバッチでは t が h より前に来て、名前を持つ端末の h を一意な値の持ち主の読み直しがサーバーから先に読み直す
+        /// </summary>
+        UniqueHolderAfterTaker,
+    }
+
+    /// <summary>サーバーの書き手の行の、割り込んで差し込むサーバーへの書き込み（対象の行 p・h へ）</summary>
+    public enum ServerInterruptWrite
+    {
+        /// <summary>対象の行の更新（名前を p-interrupt に）</summary>
+        Update,
+
+        /// <summary>
+        /// 対象の行の削除。サーバーの外部キー（NO ACTION）が受け付けるよう、参照する行（子フォルダー c・品目）を先に別の親へ
+        /// 移してから消す
+        /// </summary>
+        Delete,
+    }
+
+    /// <summary>サーバーの書き手の行の、割り込まれる実行の種類</summary>
+    public enum InterruptRun
+    {
+        /// <summary>同期</summary>
+        Sync,
+
+        /// <summary>洗い替え（端末の書き手は差し込めない。サーバーの書き手は差し込める）</summary>
+        Refresh,
+    }
+
+    /// <summary>サーバーの書き手の行の後段（割り込まれた実行の後に端末がすること）</summary>
+    public enum InterruptFollowUp
+    {
+        /// <summary>もう一度同期する（サーバーの最新の内容が内容ごと降りる）</summary>
+        NextSync,
+
+        /// <summary>対象の行を端末で編集してから同期する（ミラー版が original になる＝割り込みの更新を偽の上書きで消さない）</summary>
+        EditThenSync,
+    }
+
+    /// <summary>サーバーの書き手の行の、割り込まれた同期のその後の失敗</summary>
+    public enum ServerInterruptFault
+    {
+        /// <summary>失敗しない</summary>
+        None,
+
+        /// <summary>
+        /// 割り込みの後のサーバーからの次の取得が失敗する（割り込まれた同期は、割り込みの点の取得が返したバッチを書いてから、
+        /// 同じ表の次のバッチの取得で例外になる。バッチの大きさは 2）
+        /// </summary>
+        NextFetchFails,
+    }
+
+    /// <summary>サーバーの書き手の行の対象の行（前段が古いまま端末へ書く行）のキー</summary>
+    public static int ServerInterruptTargetId(ServerInterruptPrelude prelude) =>
+        prelude == ServerInterruptPrelude.UniqueHolderAfterTaker ? 820 : 800;
+
+    /// <summary>
+    /// サーバーの書き手の行の組が起こり得るか（原理的に起こり得ない組だけを外す：サーバーへの書き込みの直前の点は、端末が送るものの
+    /// 無い形なので来ない／消した行は端末で編集できない）。次の取得の失敗は、割り込まれた実行が取得の後の点のバッチ（割り込みより
+    /// 古い写し）を書いてから同じ表のダウンロードを例外で終える窓の水準なので、その窓がある組（取得の後の点・更新・同期）にだけ
+    /// ある。取得の前の点は割り込みの後に取得したバッチが新しい写しを持ち、削除は解決役が読み直す行が無く、洗い替えは受理記録を
+    /// バッチのコミットごとに消すので、どれも窓が無い
+    /// </summary>
+    public static bool IsPossibleServerInterrupt(
+        ModelInterruptPoint point,
+        ServerInterruptWrite write,
+        InterruptRun run,
+        InterruptFollowUp followUp,
+        ServerInterruptFault fault
+    ) =>
+        point != ModelInterruptPoint.BeforeServerWrite
+        && (write == ServerInterruptWrite.Update || followUp == InterruptFollowUp.NextSync)
+        && (
+            fault == ServerInterruptFault.None
+            || point == ModelInterruptPoint.AfterServerFetchBeforeApply
+                && write == ServerInterruptWrite.Update
+                && run == InterruptRun.Sync
+        );
+
+    /// <summary>サーバーの書き手の行の前段の名前</summary>
+    public static string ServerInterruptPreludeName(ServerInterruptPrelude prelude) =>
+        prelude switch
+        {
+            ServerInterruptPrelude.ParentAfterChildSelfRef => "parent-after-child-selfref",
+            ServerInterruptPrelude.ParentAfterChildCrossTable => "parent-after-child-cross-table",
+            _ => "unique-holder-after-taker",
+        };
+
+    /// <summary>
+    /// サーバーの書き手の行の名前（<c>interrupt-server-{点}-{前段}-{書き込み}-{後段}[-fetch-fails][-{ポリシー}][-refresh]</c>。
+    /// 端末の書き手の行の <c>interrupt-{点}-{形}</c> とぶつからない）
+    /// </summary>
+    public static string ServerInterruptName(
+        ModelInterruptPoint point,
+        ServerInterruptPrelude prelude,
+        ServerInterruptWrite write,
+        InterruptFollowUp followUp,
+        SyncConflictPolicy policy,
+        InterruptRun run,
+        ServerInterruptFault fault = ServerInterruptFault.None
+    ) =>
+        $"interrupt-server-{point}-{ServerInterruptPreludeName(prelude)}-{write.ToString().ToLowerInvariant()}-"
+        + (followUp == InterruptFollowUp.NextSync ? "next-sync" : "edit-sync")
+        + (fault == ServerInterruptFault.NextFetchFails ? "-fetch-fails" : "")
+        + (policy == SyncConflictPolicy.Collect ? "" : $"-{policy.ToString().ToLowerInvariant()}")
+        + (run == InterruptRun.Refresh ? "-refresh" : "");
+
+    /// <summary>
+    /// サーバーの書き手の行（宣言。網羅のテストが起こり得る組の全積を含むことを表明する）：点 × ポリシー × 前段 × 書き込み ×
+    /// 実行の種類 × 後段 × その後の失敗
+    /// </summary>
+    public static IReadOnlyList<(
+        ModelInterruptPoint Point,
+        SyncConflictPolicy Policy,
+        ServerInterruptPrelude Prelude,
+        ServerInterruptWrite Write,
+        InterruptRun Run,
+        InterruptFollowUp FollowUp,
+        ServerInterruptFault Fault,
+        string Name
+    )> ServerInterruptCells =>
+        [
+            .. Enum.GetValues<ModelInterruptPoint>()
+                .SelectMany(point =>
+                    InterruptPolicies.SelectMany(policy =>
+                        Enum.GetValues<ServerInterruptPrelude>()
+                            .SelectMany(prelude =>
+                                Enum.GetValues<ServerInterruptWrite>()
+                                    .SelectMany(write =>
+                                        Enum.GetValues<InterruptRun>()
+                                            .SelectMany(run =>
+                                                Enum.GetValues<InterruptFollowUp>()
+                                                    .SelectMany(followUp =>
+                                                        Enum.GetValues<ServerInterruptFault>()
+                                                            .Where(fault =>
+                                                                IsPossibleServerInterrupt(
+                                                                    point,
+                                                                    write,
+                                                                    run,
+                                                                    followUp,
+                                                                    fault
+                                                                )
+                                                            )
+                                                            .Select(fault =>
+                                                                (
+                                                                    point,
+                                                                    policy,
+                                                                    prelude,
+                                                                    write,
+                                                                    run,
+                                                                    followUp,
+                                                                    fault,
+                                                                    ServerInterruptName(
+                                                                        point,
+                                                                        prelude,
+                                                                        write,
+                                                                        followUp,
+                                                                        policy,
+                                                                        run,
+                                                                        fault
+                                                                    )
+                                                                )
+                                                            )
+                                                    )
+                                            )
+                                    )
+                            )
+                    )
+                ),
+        ];
+
+    /// <summary>
+    /// サーバーの書き手の行：端末の同期か洗い替えが、サーバーから取得した行を適用する前（またはその取得の前）に、サーバーの他者が
+    /// 対象の行を書き換える。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 欠陥の形は前段 <see cref="ServerInterruptPrelude.ParentAfterChildSelfRef"/>（親の解決役）と
+    /// <see cref="ServerInterruptPrelude.UniqueHolderAfterTaker"/>（一意な値の持ち主の読み直し）× 取得の後の点：解決役が対象の行を
+    /// サーバーから読み直して受理記録（割り込みの後の版）を書き、続けて同じ実行がバッチの古い写しで内容を上書きする。受理記録が
+    /// 残ると、次の実行は新しい版を自分の折り返しとみなして版だけを写し、端末は古い内容のまま残る（収束しない）。その後の端末の
+    /// 編集は受理記録の版を original にしてサーバーの新しい内容を競合なしに上書きする（汎用の「消失なし」は拾えないので、後段の
+    /// 期待の操作で表明する）。
+    /// </para>
+    /// <para>
+    /// 後段の期待（更新の行）：取得の後の点では、次の同期がサーバーの版を内容ごと降ろし（downloaded=1）、編集してから同期すると
+    /// Collect は ModifiedOnServer の競合になる。取得の前の点では、割り込まれた実行が新しい版を降ろしているので、次の同期は何も
+    /// 降ろさず、Collect の編集はそのまま上がる。ServerWins は点に依らず端末の編集を捨ててサーバーの内容に戻す（Versioned＋
+    /// ServerWins は範囲の未送信をすべて捨てる）。削除の行は、子フォルダーを null の親へ・
+    /// 品目を別のフォルダー（812）へ移してから対象の行を消す（解決役が親を見つけられない分岐・持ち主がサーバーに無い分岐を踏む）。
+    /// </para>
+    /// <para>
+    /// 洗い替えでは、親の解決役が読み直した行がそのバッチに来ると上書きする（<c>again</c>）。同期と同じ後段の期待を持つ。
+    /// 洗い替えは一意な値のぶつかりを読み直さない（表を空にしてから入れる）ので、持ち主の前段は対照になる。洗い替え ×
+    /// 自己参照 × 削除 × 取得の後の点の 2 行は、既知の失敗の一覧（<see cref="SyncModelKnownFailures"/>）に載っている。
+    /// </para>
+    /// <para>
+    /// 次の取得の失敗の行（<see cref="ServerInterruptFault.NextFetchFails"/>）は、割り込まれた同期のバッチの大きさを 2 にし、
+    /// 取得の後の点のバッチ（解決役が読み直した対象の行を古い写しで上書きする）を書いた後の、同じ表の次のバッチの取得を失敗させる。
+    /// 表のダウンロードが例外で終わっても、上書きされた受理記録が残らないことを、同期の行と同じ後段の期待で見る（降ろした数は
+    /// 前段で違うので見ない）。
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<SyncModelScenario> ServerInterruptScenarios()
+    {
+        foreach (
+            var (point, policy, prelude, write, run, followUp, fault, name) in ServerInterruptCells
+        )
+        {
+            var target = ServerInterruptTargetId(prelude);
+            List<ModelWriteOp> setup = [Folder(SV, 812)];
+            List<ModelOp> ops = [];
+            List<ModelWriteOp> interrupt = [];
+
+            switch (prelude)
+            {
+                case ServerInterruptPrelude.ParentAfterChildSelfRef:
+                    ops.Add(Folder(SV, 800));
+                    ops.Add(Folder(SV, 801, parent: 800));
+                    ops.Add(new UpdateFolderOp(SV, Direct, 800, null, "p-server"));
+
+                    if (write == ServerInterruptWrite.Delete)
+                    {
+                        interrupt.Add(new UpdateFolderOp(SV, Direct, 801, null, "f801"));
+                    }
+
+                    break;
+
+                case ServerInterruptPrelude.ParentAfterChildCrossTable:
+                    ops.Add(Folder(SV, 800));
+                    ops.Add(Item(SV, 811, folder: 800));
+                    ops.Add(new UpdateFolderOp(SV, Direct, 800, null, "p-server"));
+
+                    if (write == ServerInterruptWrite.Delete)
+                    {
+                        interrupt.Add(
+                            new UpdateItemOp(SV, Direct, 811, 812, null, "c-811", "t811")
+                        );
+                    }
+
+                    break;
+
+                default:
+                    setup.Add(Folder(SV, 820, name: "hx"));
+                    setup.Add(Folder(SV, 821, name: "t0"));
+                    ops.Add(new UpdateFolderOp(SV, Direct, 820, null, "hy"));
+                    ops.Add(new UpdateFolderOp(SV, Direct, 821, null, "hx"));
+                    ops.Add(new UpdateFolderOp(SV, Direct, 820, null, "hy2"));
+                    break;
+            }
+
+            interrupt.Add(
+                write == ServerInterruptWrite.Update
+                    ? new UpdateFolderOp(SV, Direct, target, null, "p-interrupt")
+                    : new DeleteFolderOp(SV, Direct, target)
+            );
+            var fetchFails = fault == ServerInterruptFault.NextFetchFails;
+            ops.Add(
+                new ArmInterruptOp(
+                    D1,
+                    point,
+                    interrupt,
+                    fetchFails ? ModelFaultKind.ServerFetch : null
+                )
+            );
+
+            if (fetchFails)
+            {
+                // 割り込まれた同期は、取得の後の点のバッチ（2 行）を書いてから、同じ表の次のバッチの取得で例外になる
+                ops.Add(new ExpectThrowOp(D1));
+                ops.Add(Sync(D1, policy: policy, batch: 2));
+            }
+            else
+            {
+                ops.Add(
+                    run == InterruptRun.Sync
+                        ? Sync(D1, policy: policy)
+                        : new ModelRefreshOp(D1, SyncMode.LastWriteWins, IncludeBlobs: true)
+                );
+            }
+
+            // 割り込まれた実行が対象の行のバッチの古い写しを書いたか（取得の後の点）
+            var stale = point == ModelInterruptPoint.AfterServerFetchBeforeApply;
+            var row = $"{target} parent=null name=p-interrupt";
+
+            if (write == ServerInterruptWrite.Delete)
+            {
+                ops.Add(Sync(D1, policy: policy));
+                ops.Add(Expect.Rows(D1, ModelTables.Folders).Absent($"{target} *"));
+            }
+            else if (followUp == InterruptFollowUp.NextSync)
+            {
+                ops.Add(Sync(D1, policy: policy));
+                // 次の取得が失敗した行は、降ろしそこねた行の数が前段で違うので、降ろした数を見ずに内容で見る
+                ops.Add(
+                    fetchFails
+                        ? Expect.Result(D1).Absent("conflict *")
+                        : Expect
+                            .Result(D1)
+                            .Contains(stale ? "downloaded=1" : "downloaded=0")
+                            .Absent("conflict *")
+                );
+                ops.Add(Expect.Rows(D1, ModelTables.Folders).Contains(row));
+            }
+            else
+            {
+                ops.Add(new UpdateFolderOp(D1, Direct, target, null, "p-local"));
+                ops.Add(Sync(D1, policy: policy));
+                ops.AddRange(
+                    (stale, policy) switch
+                    {
+                        (false, SyncConflictPolicy.Collect) =>
+                        [
+                            Expect.Result(D1).Contains("uploaded=1").Absent("conflict *"),
+                            Expect
+                                .Rows(SV, ModelTables.Folders)
+                                .Contains($"{target} parent=null name=p-local"),
+                        ],
+                        (true, SyncConflictPolicy.Collect) =>
+                        [
+                            Expect
+                                .Result(D1)
+                                .Single(
+                                    $"conflict {ModelTables.Folders} key={target} op=Upsert reason=ModifiedOnServer *"
+                                ),
+                            Expect.Rows(SV, ModelTables.Folders).Contains(row),
+                        ],
+                        _ =>
+                        [
+                            Expect.Result(D1).Contains("discarded=1").Absent("conflict *"),
+                            Expect.Rows(D1, ModelTables.Folders).Contains(row),
+                            Expect.Rows(SV, ModelTables.Folders).Contains(row),
+                        ],
+                    }
+                );
+            }
+
+            yield return new(name, setup, ops);
+        }
+    }
 
     /// <summary>
     /// 4m-D1 と割り込みの点 × 形の行：同期の実行の名前つきの時点（<see cref="ModelInterruptPoint"/>）で、別の流れから端末の書き込みを

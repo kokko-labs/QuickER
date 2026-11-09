@@ -2565,7 +2565,9 @@ A save hook would not do, because it only fires for a graph save and a direct in
 A graph save records the whole cascade.
 `SyncGraphRecorder` walks the same cascade navigations the graph saver walks, literally the same enumeration (`EntityBaseCore.EnumerateCascadeChildren`), under the same rules.
 The descendant rows the save writes or deletes are therefore journaled exactly like the root: a save that edits only a child under an unchanged root is not missed, and neither are the children a cascade delete takes along.
-A table on the path that is not synchronized is walked through without an entry of its own.
+A table on the path that is not synchronized, or that was excluded with `excludeFromSync`, is walked through without an entry of its own.
+A new row in a removed subtree, and a row whose key is not set yet, records no delete, because the save's DELETE finds no row for it.
+A new row that carries the key of a row already there (a misuse, since inserting it would fail) is the one case this misses: the save removes that row without a delete being recorded.
 The whole graph is recorded before the save runs, and a save that fails takes its entries back, just as a single write does.
 
 The record is written **before** the business write.
@@ -2924,7 +2926,9 @@ A table that should never sync, holding local-only data, is declared where the e
 services.AddGeneratedSyncSupport("server", "local", excludeFromSync: [typeof(LocalCacheEntity)]);
 ```
 
-A construction-excluded table gets no journaling decorator, so nothing is recorded and writes cost nothing extra, and no descriptor, so no run downloads it, propagates deletes into it, or wipes it in a refresh.
+A construction-excluded table gets no descriptor, so no run downloads it, propagates deletes into it, or wipes it in a refresh, and none of its rows are recorded, whichever repository writes them.
+Its repository is still wrapped by the journaling decorator, in a form that forwards its direct writes as they are, with no lock, no entry, and no extra cost.
+A graph save through it goes through the recording step, so the synchronized rows the save cascades into, such as a child added under an excluded parent, are recorded like any other local write.
 A type that is not a synchronized entity type, or an exclusion that leaves no table at all, is rejected at registration with `ArgumentException` rather than discovered at the first run.
 `SyncOptions.ExcludedEntityTypes` sits at a different altitude: it takes a table out of one run, while recording continues and the next covering run replays the backlog.
 

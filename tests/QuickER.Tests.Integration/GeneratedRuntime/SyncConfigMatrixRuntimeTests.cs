@@ -76,7 +76,11 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
             {
                 var c = row.Input;
                 coverage.Observe(c.Assignment);
-                var keys = (Local: 1000 + (index * 2), Server: 1001 + (index * 2));
+                var keys = (
+                    Local: 1000 + (index * 3),
+                    Server: 1001 + (index * 3),
+                    Extra: 1002 + (index * 3)
+                );
                 index++;
                 Exception? failure = null;
 
@@ -117,9 +121,15 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
     }
 
     /// <summary>1 行を流す（届かなければ例外）</summary>
+    /// <param name="c">行</param>
+    /// <param name="keys">
+    /// 行のキー（Local＝ローカルの新しい行・Server＝サーバーの新しい行・Extra＝サーバーだけに置く補助の親。サーバーの DB は全部の行で
+    /// 共有するので行ごとに別の値）
+    /// </param>
+    /// <param name="servers">フィクスチャごとの HTTP のサーバー</param>
     private async Task RunAsync(
         SyncConfigCase c,
-        (int Local, int Server) keys,
+        (int Local, int Server, int Extra) keys,
         IReadOnlyDictionary<string, InProcessRemoteServer> servers
     )
     {
@@ -131,7 +141,12 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
         object? localKey = c.LocalKeyed ? LocalKey : null;
         object? serverKey = c.Server == SyncConfigDimensions.DirectKeyed ? ServerKey : null;
         var services = new ServiceCollection();
-        adapter.AddLocalRepositories(services, localKey, local.ReadWriteCreateConnectionString);
+        adapter.AddLocalRepositories(
+            services,
+            localKey,
+            local.ReadWriteCreateConnectionString,
+            c.LocalAsInstances
+        );
 
         if (!c.OverHttp)
         {
@@ -145,7 +160,7 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
 
         if (c.Registration == SyncConfigDimensions.Support)
         {
-            adapter.AddSyncSupport(services, serverKey, localKey);
+            adapter.AddSyncSupport(services, serverKey, localKey, c.ExcludesParent);
         }
         else
         {
@@ -169,10 +184,16 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
                     break;
             }
 
-            adapter.AddSyncEngine(services, localKey);
+            adapter.AddSyncEngine(services, localKey, c.ExcludesParent);
         }
 
-        await using var provider = services.BuildServiceProvider();
+        // スコープの検査つき（シングルトンがスコープのサービスを掴む登録の形は、解決で断られる）。行の確かめはスコープの中で
+        // 解決する（同期はそのつど別のスコープを作る）
+        await using var root = services.BuildServiceProvider(
+            new ServiceProviderOptions { ValidateScopes = true }
+        );
+        await using var rowScope = root.CreateAsyncScope();
+        var provider = rowScope.ServiceProvider;
 
         // サーバーの他者の書き込みと確かめは、同期と別のコンテナ（キーなしの SQL Server のリポジトリ）で行う
         var serverSide = new ServiceCollection();
@@ -180,11 +201,18 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
         await using var serverProvider = serverSide.BuildServiceProvider();
 
         adapter
-            .RegistrationProblems(provider, localKey, serverKey, c.OverHttp)
+            .RegistrationProblems(provider, localKey, serverKey, c.OverHttp, c.ExcludesParent)
             .Should()
             .BeEmpty(
                 "the registration builds the decorated local repositories and the source of the transport"
             );
+
+        if (c.ExcludesParent)
+        {
+            await RunExcludedParentAsync(adapter, keys, localKey, provider, serverProvider);
+
+            return;
+        }
 
         await using (var scope = provider.CreateAsyncScope())
         {
@@ -237,6 +265,243 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
                         "a refresh reloads every server row, the ones this row synchronised included"
                     );
             }
+        }
+
+        if (c.RemovesParentWithNewChild)
+        {
+            await RemoveParentsWithNewChildrenAsync(
+                adapter,
+                keys,
+                localKey,
+                provider,
+                serverProvider
+            );
+        }
+    }
+
+    /// <summary>
+    /// 水準 GraphRemoveParentWithNewChild の段：上げ下げした 2 つの親（ローカルとサーバーの両方にある行）に、キーの無い新しい子
+    /// （Added）を足して親を消すグラフ保存（単数と複数の SaveAsync）と、新しい子だけを MarkRemoved したグラフ保存が、記録の段で
+    /// 投げずに保存され、同期 1 回でサーバーから親が消え、ジャーナルに何も残らない
+    /// </summary>
+    /// <remarks>
+    /// 版なしの子を持つフィクスチャは、消す親の下に、サーバーに同じキーの行がある新しい版なしの子も入れる（サーバーの行は消さない
+    /// 補助の親の下に置く）。新しい行は保存側の削除で何も消さないので記録されず、後勝ちの同期の無条件の削除がサーバーの同じキーの
+    /// 行を消さない。同期は版なしの表も流す後勝ちのモードで流す。
+    /// </remarks>
+    private static async Task RemoveParentsWithNewChildrenAsync(
+        ISyncConfigFixture adapter,
+        (int Local, int Server, int Extra) keys,
+        object? localKey,
+        IServiceProvider provider,
+        IServiceProvider serverProvider
+    )
+    {
+        int? noteId = adapter.HasVersionlessChild ? keys.Local : null;
+
+        try
+        {
+            if (noteId is { } serverNote)
+            {
+                await adapter.InsertAsync(serverProvider, null, keys.Extra, Ct);
+                await adapter.InsertVersionlessChildAsync(
+                    serverProvider,
+                    null,
+                    keys.Extra,
+                    serverNote,
+                    Ct
+                );
+            }
+
+            await using (var scope = provider.CreateAsyncScope())
+            {
+                var local = scope.ServiceProvider;
+                await adapter.SaveNewChildRemovedAsync(local, localKey, keys.Local, Ct);
+                (await adapter.ExistsAsync(local, localKey, keys.Local, Ct))
+                    .Should()
+                    .BeTrue("removing only the new child leaves its saved parent in place");
+                await adapter.SaveParentRemovedWithNewChildAsync(
+                    local,
+                    localKey,
+                    keys.Local,
+                    noteId,
+                    asList: false,
+                    Ct
+                );
+                await adapter.SaveParentRemovedWithNewChildAsync(
+                    local,
+                    localKey,
+                    keys.Server,
+                    null,
+                    asList: true,
+                    Ct
+                );
+
+                foreach (var parent in new[] { keys.Local, keys.Server })
+                {
+                    (await adapter.ExistsAsync(local, localKey, parent, Ct))
+                        .Should()
+                        .BeFalse("the graph save removed the parent locally");
+                    (await adapter.ChildCountAsync(local, localKey, parent, Ct))
+                        .Should()
+                        .Be(0, "the new child of a removed parent is never written");
+                }
+            }
+
+            await using (var scope = provider.CreateAsyncScope())
+            {
+                (await adapter.SyncAsync(scope.ServiceProvider, Ct, lastWriteWins: true))
+                    .Problem.Should()
+                    .BeNull("the deletes of the removed parents have nothing to conflict with");
+            }
+
+            foreach (var parent in new[] { keys.Local, keys.Server })
+            {
+                (await adapter.ExistsAsync(serverProvider, null, parent, Ct))
+                    .Should()
+                    .BeFalse("one sync deletes the removed parent on the server");
+            }
+
+            if (noteId is { } note)
+            {
+                (await adapter.VersionlessChildExistsAsync(serverProvider, null, note, Ct))
+                    .Should()
+                    .BeTrue(
+                        "a new versionless child of a removed parent is not recorded, so no unguarded delete reaches the server row with its key"
+                    );
+            }
+
+            var journal = await adapter.JournalAsync(provider, localKey, Ct);
+            journal.Tables.Should().BeEmpty("the sync sent every recorded delete");
+            journal
+                .UnsetKeyEntries.Should()
+                .Be(0, "a node without a key deletes nothing and is not recorded");
+        }
+        finally
+        {
+            await adapter.DeleteServerRowsAsync(
+                serverProvider,
+                [],
+                noteId is { } leftNote ? [leftNote] : [],
+                noteId is null ? [] : [keys.Extra],
+                CancellationToken.None
+            );
+        }
+    }
+
+    /// <summary>
+    /// 水準 GraphViaExcludedParent の流れ：親の表を構築時に除外した登録で、除外した親の直接の書き込みはジャーナルに何も残さず、
+    /// 除外した親のリポジトリのグラフ保存で足した同期する子は記録され（同じ保存が書き換える除外した親の行は記録しない）、同期 1 回で
+    /// サーバーへ上がりローカルに残る。続けてサーバーの
+    /// 新しい子を同期 1 回で降ろし、洗い替え 1 回で両方の子がローカルにそろう
+    /// </summary>
+    /// <remarks>
+    /// エンジンは親の表を降ろさないので、親はテストがサーバーとローカルの両方へ直接入れる。サーバーの DB は全部の行で共有するので、
+    /// 行が足したサーバーの子と親は最後に消す（後の行の最初の同期と洗い替えが、親の無い子を降ろさないようにする）。
+    /// </remarks>
+    private static async Task RunExcludedParentAsync(
+        ISyncConfigFixture adapter,
+        (int Local, int Server, int Extra) keys,
+        object? localKey,
+        IServiceProvider provider,
+        IServiceProvider serverProvider
+    )
+    {
+        var parent = keys.Local;
+
+        try
+        {
+            await adapter.InsertAsync(serverProvider, null, parent, Ct);
+
+            await using (var scope = provider.CreateAsyncScope())
+            {
+                await adapter.InsertAsync(scope.ServiceProvider, localKey, parent, Ct);
+                await adapter.UpdateAsync(scope.ServiceProvider, localKey, parent, Ct);
+            }
+
+            var direct = await adapter.JournalAsync(provider, localKey, Ct);
+            direct
+                .Tables.Should()
+                .BeEmpty("a direct write of a table excluded at construction is not recorded");
+            direct.UnsetKeyEntries.Should().Be(0);
+
+            await using (var scope = provider.CreateAsyncScope())
+            {
+                await adapter.SaveNewChildAsync(
+                    scope.ServiceProvider,
+                    localKey,
+                    parent,
+                    keys.Local,
+                    Ct
+                );
+            }
+
+            var pending = await adapter.JournalAsync(provider, localKey, Ct);
+            pending
+                .Tables.Should()
+                .NotBeEmpty(
+                    "the graph save through the excluded parent records the synchronised child it adds"
+                )
+                .And.OnlyContain(
+                    table => table == adapter.ChildTableName,
+                    "the rows of the excluded table are not recorded, whichever repository writes them"
+                );
+            pending.UnsetKeyEntries.Should().Be(0);
+
+            await using (var scope = provider.CreateAsyncScope())
+            {
+                (await adapter.SyncAsync(scope.ServiceProvider, Ct))
+                    .Problem.Should()
+                    .BeNull("the upload of a new child has nothing to conflict with");
+            }
+
+            (await adapter.ChildExistsAsync(serverProvider, null, keys.Local, Ct))
+                .Should()
+                .BeTrue("the child added under the excluded parent reaches the server in one sync");
+            (await adapter.ChildExistsAsync(provider, localKey, keys.Local, Ct))
+                .Should()
+                .BeTrue("the sync keeps the recorded child locally");
+            (await adapter.JournalAsync(provider, localKey, Ct))
+                .Tables.Should()
+                .BeEmpty("the sync sent the recorded child and nothing of the excluded table");
+
+            await adapter.InsertChildAsync(serverProvider, null, parent, keys.Server, Ct);
+
+            await using (var scope = provider.CreateAsyncScope())
+            {
+                var second = await adapter.SyncAsync(scope.ServiceProvider, Ct);
+                second
+                    .Problem.Should()
+                    .BeNull("the download of a new child has nothing to conflict with");
+                second
+                    .Downloaded.Should()
+                    .Be(1, "only the new server child is newer than the mirrored versions");
+                (await adapter.ChildExistsAsync(scope.ServiceProvider, localKey, keys.Server, Ct))
+                    .Should()
+                    .BeTrue("the server new child reaches the local database in one sync");
+            }
+
+            await using (var scope = provider.CreateAsyncScope())
+            {
+                await adapter.RefreshAsync(scope.ServiceProvider, Ct);
+
+                foreach (var id in new[] { keys.Local, keys.Server })
+                {
+                    (await adapter.ChildExistsAsync(scope.ServiceProvider, localKey, id, Ct))
+                        .Should()
+                        .BeTrue("a refresh reloads every server row of the synchronised tables");
+                }
+            }
+        }
+        finally
+        {
+            await adapter.DeleteServerRowsAsync(
+                serverProvider,
+                [keys.Local, keys.Server],
+                [],
+                [parent],
+                CancellationToken.None
+            );
         }
     }
 

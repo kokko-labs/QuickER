@@ -441,28 +441,58 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
     /// <remarks>
     /// 記録はキーが決まる前（キー 0）に作り、書き込みの後の突き合わせが決まったキーへ書き換える（同じロックの中）。
     /// アップロードはジャーナルをロックの外で読むので、読んだのは書き換える前の記録になり得る。その古いキーで行の有無を
-    /// 見ると「行が無い」と判定し、id で記録を消すので、書き換え済みの記録まで消える。
+    /// 見ると「行が無い」と判定し、id で記録を消すので、書き換え済みの記録まで消える。ServerWins の適用も同じ記録を
+    /// ロックの外で読むので、古いキーのまま適用すると、書き換えた行を戻さずに記録を捨て、捨てた行として実在しないキーを報告する。
     /// </remarks>
-    [Fact(
-        DisplayName = "[Sync/並行] 記録の後で Before フックがキーを決める書き込みの記録はアップロードの判定で捨てられない"
+    [Theory(
+        DisplayName = "[Sync/並行] 記録の後で Before フックがキーを決める書き込みの記録は、アップロードの判定でも ServerWins の適用でも今のキーで扱う"
     )]
-    public async Task InFlightInsertRekeyedByHook_IsNotDiscardedByTheUpload()
+    [InlineData(SyncConflictPolicy.Collect)]
+    [InlineData(SyncConflictPolicy.ServerWins)]
+    public async Task InFlightInsertRekeyedByHook_IsNotDiscardedByTheUpload(
+        SyncConflictPolicy policy
+    )
     {
         var hook = new PausingSaveHook(entity => entity.OrderId = 61);
         var orders = CreateHookedOrders(hook);
         var order = new SyncOrderEntity { CustomerName = "rekeyed" };
         order.MarkAdded();
+        var options = new SyncOptions { ConflictPolicy = policy };
 
-        await RunSyncWhileSaveIsPausedAsync(
+        var paused = await RunSyncWhileSaveIsPausedAsync(
             hook,
-            () => orders.SaveAsync(order, cancellationToken: Ct)
+            () => orders.SaveAsync(order, cancellationToken: Ct),
+            options
         );
-        await Engine.SyncAsync(cancellationToken: Ct);
+        await Engine.SyncAsync(options, Ct);
 
-        var server = await ServerOrders.GetByIdAsync(61, Ct);
-        server.Should().NotBeNull("書き換えた記録は捨てられず、着地した行が送られる");
-        server!.CustomerName.Should().Be("rekeyed");
-        (await LocalOrdersRaw.GetByIdAsync(61, Ct)).Should().NotBeNull();
+        if (policy == SyncConflictPolicy.ServerWins)
+        {
+            // ServerWins はサーバーに一度も届いていない行の記録を捨て、その行はサーバーに無いのでローカルからも消える。
+            // 捨てた行として報告するのは書き換えた今のキーで、読んだときの古いキーではない
+            (await ServerOrders.GetByIdAsync(61, Ct))
+                .Should()
+                .BeNull();
+            (await LocalOrdersRaw.GetByIdAsync(61, Ct)).Should().BeNull();
+            paused
+                .LocalRowChanges.Should()
+                .Contain(
+                    new SyncLocalRowChange(
+                        "sync_orders",
+                        "61",
+                        SyncLocalRowChangeReason.DiscardedByServerWins
+                    )
+                )
+                .And.OnlyContain(change => change.KeyText == "61");
+        }
+        else
+        {
+            var server = await ServerOrders.GetByIdAsync(61, Ct);
+            server.Should().NotBeNull("書き換えた記録は捨てられず、着地した行が送られる");
+            server!.CustomerName.Should().Be("rekeyed");
+            (await LocalOrdersRaw.GetByIdAsync(61, Ct)).Should().NotBeNull();
+        }
+
         (await Journal.CountPendingAsync(Ct)).Should().Be(0);
     }
 
@@ -510,8 +540,13 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
 
     /// <summary>
     /// 保存を Save フックで止めている間（記録は済み・業務の書き込みはまだ）に同期を始め、少し待ってから保存を進める。
+    /// 同期の結果を返す。
     /// </summary>
-    private async Task RunSyncWhileSaveIsPausedAsync(PausingSaveHook hook, Func<Task<int>> save)
+    private async Task<SyncResult> RunSyncWhileSaveIsPausedAsync(
+        PausingSaveHook hook,
+        Func<Task<int>> save,
+        SyncOptions? options = null
+    )
     {
         Task<int> saving;
         Task<SyncResult> syncing;
@@ -525,14 +560,15 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
 
         using (ExecutionContext.SuppressFlow())
         {
-            syncing = Task.Run(() => Engine.SyncAsync(cancellationToken: Ct), Ct);
+            syncing = Task.Run(() => Engine.SyncAsync(options, Ct), Ct);
         }
 
         // 同期がジャーナルを読み、判定へ進む時間を与える（ロックがあれば判定は保存の後まで待つ）
         await Task.Delay(500, Ct);
         hook.Release();
         await saving;
-        await syncing;
+
+        return await syncing;
     }
 
     /// <summary>エンジンが注文の行を書いたら印を立てる Save フック（エンジンの書き込みでもフックは走る）。</summary>
@@ -1407,7 +1443,10 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         loaded!.CustomerName = "b";
         await LocalOrders.UpdateAsync(loaded, cancellationToken: Ct);
 
-        // BulkInsert
+        // BulkInsert（空の一括追加は何も記録しない）
+        (await LocalOrders.BulkInsertAsync([], Ct))
+            .Should()
+            .Be(0);
         await LocalOrders.BulkInsertAsync(
             [new SyncOrderEntity { OrderId = 2, CustomerName = "c" }],
             Ct
@@ -1435,6 +1474,29 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         entries
             .Should()
             .ContainSingle(entry => entry.Operation == nameof(SyncJournalOperation.Delete));
+
+        // 空の一括追加は、まだジャーナルの表が無い DB でも表を作らずに内側へ渡す（書くものが無いので記録の段を通らない）
+        using var fresh = SqliteTempDatabase.Create();
+        await fresh.ApplyDdlAsync(SyncFixtureDefinition.BuildSqliteMirror(), Ct);
+        var freshSql = new SqlExecutor(
+            new LightJournalSyncConnectionFactory(fresh.ReadWriteCreateConnectionString)
+        );
+        var freshOrders = new JournalingSyncOrderRepository(
+            new SyncOrderRepository(
+                new LightJournalSyncConnectionFactory(fresh.ReadWriteCreateConnectionString)
+            ),
+            new SyncJournal(freshSql)
+        );
+        (await freshOrders.BulkInsertAsync([], Ct)).Should().Be(0);
+        (
+            await freshSql.ExecuteScalarSqlAsync<long>(
+                "SELECT count(*) FROM sqlite_master WHERE name LIKE 'quicker_sync_%'",
+                null,
+                Ct
+            )
+        )
+            .Should()
+            .Be(0, "空の一括追加はジャーナルの表を作らない");
     }
 
     /// <summary>生 SQL は記録対象外（デコレータからは「どの行が変わったか」が読めないため）</summary>

@@ -445,18 +445,31 @@ internal sealed record ArmFaultOp(ModelActor Device, ModelFaultKind Kind) : Mode
 }
 
 /// <summary>
-/// 割り込みを仕掛ける：端末の次の同期（洗い替えでない）がその点に来たときに 1 回だけ、実行と別の流れ（同期の抑止も書き込みロックの
-/// リースも引き継がない）から、その端末のローカルの書き込みを 1 つ流す（<see cref="SyncModelFaults.InterruptAsync"/>）。
+/// 割り込みを仕掛ける：端末の次の同期か洗い替えがその点に来たときに 1 回だけ、実行と別の流れ（同期の抑止も書き込みロックの
+/// リースも引き継がない）から書き込みを流す（<see cref="SyncModelFaults.InterruptAsync"/>）。書き手はその端末（ローカルの
+/// 書き込み）かサーバーの他者（サーバーへの書き込み）のどちらか 1 つで、書き込みは並べた順に流す。端末の書き込みはローカルの
+/// 書き込みロックを待つので、ロックを持ったまま流す洗い替えには差し込まない（サーバーの他者は差し込む）。
 /// 割り込みの書き込みは書き手の操作として数える（収束・消失なしの期待に入る）。点に来ないまま静止化に入ったら違反
-/// （<c>interrupt/not-fired:{点}</c>）
+/// （<c>interrupt/not-fired:{点}</c>）。<paramref name="ThenArm"/> を渡すと、書き込みの後でその端末にその失敗を仕掛ける（割り込まれた
+/// 実行のその後の動作で起きる）
 /// </summary>
 internal sealed record ArmInterruptOp(
     ModelActor Device,
     ModelInterruptPoint Point,
-    ModelWriteOp Write
+    IReadOnlyList<ModelWriteOp> Writes,
+    ModelFaultKind? ThenArm = null
 ) : ModelOp
 {
-    public override string Describe() => $"{Who(Device)} ArmInterrupt {Point}: {Write.Describe()}";
+    /// <summary>書き込み 1 つの割り込み</summary>
+    public ArmInterruptOp(ModelActor device, ModelInterruptPoint point, ModelWriteOp write)
+        : this(device, point, [write]) { }
+
+    /// <summary>割り込みの書き手（その端末かサーバーの他者）</summary>
+    public ModelActor Writer => Writes[0].Actor;
+
+    public override string Describe() =>
+        $"{Who(Device)} ArmInterrupt {Point}: {string.Join(" then ", Writes.Select(write => write.Describe()))}"
+        + (ThenArm is { } kind ? $" then arm {kind}" : "");
 }
 
 /// <summary>
