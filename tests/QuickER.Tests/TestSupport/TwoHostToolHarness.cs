@@ -211,6 +211,17 @@ internal abstract class ToolHostSession : IDisposable
     /// <param name="isForeignKey">付けるなら真</param>
     public abstract void SetForeignKeyMark(string tableName, string columnName, bool isForeignKey);
 
+    /// <summary>
+    /// 図の意味モデルを直接書き換える（手で編集した図のファイルにだけ現れる形＝主キーの列の NULL 許容の印・
+    /// 同じ名前の一意制約 2 つなど、ツールでも画面でも作れない形を作る）
+    /// </summary>
+    /// <param name="edit">いまの図の写しへ当てる書き換え</param>
+    /// <remarks>
+    /// GUI は書き換えた図を機能モジュールと同じ入口（<see cref="MainViewModel.ReplaceDiagramFromModule"/>）で読み込むので、
+    /// 読込が実効値へそろえる面（主キーの列の NULL 許容）は GUI の図に残らない。File は図のファイルへそのまま書く。
+    /// </remarks>
+    public abstract void EditSchema(Action<ErDiagram> edit);
+
     /// <summary>後始末（既定は何もしない）</summary>
     public virtual void Dispose() { }
 }
@@ -268,6 +279,13 @@ internal sealed class GuiToolHostSession(MainViewModel viewModel) : ToolHostSess
             .Entities.Single(entity => entity.TableName == tableName)
             .Columns.Single(column => column.Name == columnName)
             .IsForeignKey = isForeignKey;
+
+    public override void EditSchema(Action<ErDiagram> edit)
+    {
+        var diagram = ViewModel.ToDiagramModel();
+        edit(diagram);
+        ViewModel.ReplaceDiagramFromModule(diagram);
+    }
 }
 
 /// <summary>MCP 側のセッション（<see cref="DocumentErDiagramToolHost"/>＋一時ディレクトリの図ファイル）</summary>
@@ -327,6 +345,13 @@ internal sealed class FileToolHostSession(string directory, string filePath) : T
             .Schema.Entities.Single(entity => entity.TableName == tableName)
             .Columns.Single(column => column.Name == columnName)
             .IsForeignKey = isForeignKey;
+        JsonStorageService.SaveAtomic(FilePath, document);
+    }
+
+    public override void EditSchema(Action<ErDiagram> edit)
+    {
+        var document = JsonStorageService.Load(FilePath);
+        edit(document.Schema);
         JsonStorageService.SaveAtomic(FilePath, document);
     }
 

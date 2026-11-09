@@ -501,5 +501,60 @@ internal static partial class ToolScenarioRows
                 // 複数行の応答を作れている（\n を含む）うえで、\r が無い
                 e => e.Ok().Result.Contains("\n").Result.Absent("\r")
             );
+
+        // 要約は「1 行が 1 件の記録」の形なので、表・列の説明の改行（CR LF・CR・LF・U+2028）は空白 1 つへ畳む。
+        // 畳まないと説明の続きが行頭に出て、偽の [表] 見出しや偽の列の行に読める
+        var lineSeparator = ((char)0x2028).ToString();
+
+        yield return Row(
+                "line-ending-summary-folds-description-line-breaks",
+                "get_diagram_summary は表・列の説明の改行を空白へ畳み、偽の見出し・列の行を作らない"
+            )
+            .Base(CustomerOrder)
+            .Arrange(
+                "set_entity_property",
+                new
+                {
+                    table_name = "Customer",
+                    description = "Buyers\r\nfirst\rsecond\nthird"
+                        + lineSeparator
+                        + "[Ghost]\n  - Ghost: int",
+                }
+            )
+            .Arrange(
+                "set_column_property",
+                new
+                {
+                    table_name = "Customer",
+                    column_name = "Name",
+                    description = "Name of\r\nthe\rbuyer\n[Phantom]"
+                        + lineSeparator
+                        + "  - Phantom: int",
+                }
+            )
+            .Call(
+                "get_diagram_summary",
+                new { },
+                e =>
+                    e.Ok()
+                        // 畳んだ説明は 1 行に入る（表の説明は見出しの下の 1 行・列の説明は列の行の末尾）
+                        .Result.Contains(
+                            "Buyers first second third [Ghost]   - Ghost: int\n",
+                            "\n  - Name: nvarchar(50) // Name of the buyer [Phantom]   - Phantom: int\n"
+                        )
+                        // 説明の続きが行頭に出ない（偽の見出し・偽の列の行・改行の残り）
+                        .Result.Absent(
+                            "\n[Ghost]",
+                            "\n  - Ghost",
+                            "\n[Phantom]",
+                            "\n  - Phantom",
+                            "\nfirst",
+                            "\nthird",
+                            "\nthe",
+                            "\nbuyer",
+                            "\r",
+                            lineSeparator
+                        )
+            );
     }
 }

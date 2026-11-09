@@ -413,6 +413,8 @@ internal static partial class DialectDdlRows
             .. CcShapeRows(),
             // ---- 名前の入口（改行・制御文字を含む名前を断る・クォートで扱える名前は通す） ----
             .. NameEntranceRows(),
+            // ---- 名前の出どころ（SqlNameText が名前を集める 1 か所ごとに、その出どころだけの表せない名前を入口が断る） ----
+            .. NameSourceRows(),
             // ---- 表の形の入口（列の無い表は DDL が断り、同期は表の追加を外して名指しする） ----
             .. TableWithoutColumnsRows(),
             // ---- 外部キー・主キーの既定名（安全化・一意化・予約） ----

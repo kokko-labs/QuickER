@@ -95,8 +95,9 @@ public class UniqueConstraintResolvedNameLimitTests
     }
 
     /// <summary>
-    /// ほかの表に、合成名と同じ名前の一意制約を足すと番号つきの名前になり、元に戻すと戻ることを検証する
-    /// （名前は図全体で決める＝<see cref="ConstraintNames.ResolveUniqueConstraintNames"/>。表示し直すきっかけは図の世代）
+    /// 表の名前を変えて、合成名がほかの表の一意制約の名前と同じになると番号つきの名前になり、元に戻すと戻ることを検証する
+    /// （名前は図全体で決める＝<see cref="ConstraintNames.ResolveUniqueConstraintNames"/>。表示し直すきっかけは図の世代）。
+    /// 明示の名前をほかの制約名へ重ねる書き換えは入口（ツール・名前の欄）が断るので、表の名前を変えて合成名の側を重ねて確かめる
     /// </summary>
     [Fact(
         DisplayName = "一意制約の合成名のプレビューは、ほかの表の制約名とぶつかると番号つきになり、元に戻すと戻る"
@@ -135,23 +136,30 @@ public class UniqueConstraintResolvedNameLimitTests
         ((INotifyPropertyChanged)constraint).PropertyChanged += (_, e) =>
             changed.Add(e.PropertyName);
 
-        // ツールは既存の制約名（合成名を含む）と同じ名前を断るので、名前の無い制約を足してからプロパティパネルで名前を付ける
-        // （取込・手で編集した図でも起きる形）
+        // ツールとプロパティパネルの名前の欄は既存の制約名（合成名を含む）と同じ名前を断るので、ほかの表の一意制約に
+        // まだぶつからない名前を付けてから、表の名前を変えて合成名をその名前へ重ねる（取込・手で編集した図でも起きる形）
+        const string renamed = "renamed";
+        var renamedSynthesized = $"UQ_{renamed}_code";
         ErDiagramDynamicTools
             .Execute(
                 "set_unique_constraint",
                 JsonSerializer.SerializeToElement(
-                    new { table_name = "other", columns = new[] { "y" } }
+                    new
+                    {
+                        table_name = "other",
+                        columns = new[] { "y" },
+                        name = renamedSynthesized,
+                    }
                 ),
                 vm
             )
             .Success.Should()
             .BeTrue();
         changed.Clear();
-        vm.Entities[1].UniqueConstraints[0].Name = synthesized;
+        vm.Entities[0].TableName = renamed;
 
         changed.Should().Contain(nameof(UniqueConstraintViewModel.ResolvedName));
-        constraint.ResolvedName.Should().Be(synthesized + "_2", "ほかの表の制約名を避ける");
+        constraint.ResolvedName.Should().Be(renamedSynthesized + "_2", "ほかの表の制約名を避ける");
 
         vm.UndoCommand.Execute(null);
 

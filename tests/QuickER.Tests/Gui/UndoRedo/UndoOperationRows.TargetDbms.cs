@@ -2,6 +2,9 @@ using AwesomeAssertions;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.MySql;
+using QuickER.Provider.Oracle;
+using QuickER.Provider.PostgreSql;
 using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
 using QuickER.Tests.TestDoubles;
@@ -59,6 +62,102 @@ internal static partial class UndoOperationRows
                     ColumnNamed(vm, "T", "RowVer").DataType.Should().NotBe("rowversion");
                 }
             );
+
+        // テーブルの追加の ID 列と列の追加は、図の対象 DBMS の型カタログの既定の型で列を作る（方言の型でない表記を入れると、
+        // その方言で正しくない型の列が図に残る）
+        foreach (var dialect in DialectNames.All)
+        {
+            yield return Row(
+                    $"target-dbms-add-entity-id-column-uses-default-type-{dialect}",
+                    "テーブルの追加の ID 列は、図の対象 DBMS の型カタログの既定の型で、その型カタログが解析できる"
+                )
+                .Diagram(() => AllDialectsDiagram(dialect, withTable: false))
+                .Operate(
+                    UndoEntry.Screen,
+                    "AddEntityCommand",
+                    vm => vm.AddEntityCommand.Execute(null)
+                )
+                .Commands(typeof(AddEntityCommand))
+                .Check(
+                    UndoStage.Operated,
+                    "足したテーブルの ID 列の型が方言の既定の型",
+                    vm => ShouldUseDefaultType(vm, dialect, vm.Entities.Single().Columns.Single())
+                );
+
+            yield return Row(
+                    $"target-dbms-add-column-uses-default-type-{dialect}",
+                    "列の追加は、図の対象 DBMS の型カタログの既定の型で、その型カタログが解析できる"
+                )
+                .Diagram(() => AllDialectsDiagram(dialect, withTable: true))
+                .Prepare("テーブル T を選ぶ", vm => vm.SelectedEntity = vm.Entities[0])
+                .Operate(
+                    UndoEntry.Screen,
+                    "AddColumnCommand",
+                    vm => vm.AddColumnCommand.Execute(null)
+                )
+                .Commands(typeof(AddColumnCommand))
+                .Check(
+                    UndoStage.Operated,
+                    "足した列の型が方言の既定の型",
+                    vm => ShouldUseDefaultType(vm, dialect, vm.Entities[0].Columns.Last())
+                );
+        }
+    }
+
+    /// <summary>列の型が図の対象 DBMS の型カタログの既定の型で、その型カタログが解析できる</summary>
+    private static void ShouldUseDefaultType(
+        MainViewModel vm,
+        string dialect,
+        ColumnViewModel column
+    )
+    {
+        var catalog = vm.CurrentProvider.TypeCatalog;
+        vm.CurrentProvider.Name.Should().Be(dialect);
+        column.DataType.Should().Be(catalog.DefaultDataType);
+        catalog.TryParse(column.DataType, out _).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 5 方言の実プロバイダを登録し、対象 DBMS を <paramref name="dialect"/> にした図（<paramref name="withTable"/> が真なら
+    /// 主キーの列 Id だけの表 T を持つ）
+    /// </summary>
+    private static MainViewModel AllDialectsDiagram(string dialect, bool withTable)
+    {
+        var vm = new MainViewModel(
+            new StubDialogService(),
+            providers: new DatabaseProviderRegistry([
+                new SqlServerProvider(),
+                new SqliteProvider(),
+                new PostgreSqlProvider(),
+                new MySqlProvider(),
+                new OracleProvider(),
+            ])
+        );
+        var diagram = new ErDiagram { TargetDbms = dialect };
+
+        if (withTable)
+        {
+            diagram.Entities.Add(
+                new Entity
+                {
+                    TableName = "T",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    },
+                }
+            );
+        }
+
+        vm.ReplaceDiagramFromModule(diagram);
+
+        return vm;
     }
 
     /// <summary>

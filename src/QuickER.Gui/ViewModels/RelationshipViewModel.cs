@@ -46,9 +46,65 @@ public partial class RelationshipViewModel : ObservableObject
     /// <summary>末尾に未確定の空スロット行を出しているかどうか（ビュー状態・モデル未反映）</summary>
     private bool _hasPendingSlot;
 
-    /// <summary>外部キー制約名</summary>
-    [ObservableProperty]
+    /// <summary>外部キー制約名の実体フィールド</summary>
     private string? _constraintName;
+
+    /// <summary>外部キー制約名（前後の空白を除いた形で保持する。<c>null</c>・空＝名前なし＝DDL が既定名を付ける）</summary>
+    /// <remarks>
+    /// 図に載っている間（<see cref="ConstraintNameTaken"/> が設定されている間）は、図の中のほかの制約名（主キー・一意制約・
+    /// ほかの外部キー。<see cref="ConstraintNames.IsForeignKeyNameTaken"/>）とぶつかる名前への書き換えを受け付けず、
+    /// 入力欄へ元の名前を戻し、<see cref="NameChangeRejected"/> で知らせる（変更履歴にも残らない）。空への書き換えは検査しない。
+    /// 元に戻す・やり直すは <see cref="ApplyConstraintName"/> を使い、検査を通さない（履歴の往復は検査の対象外）
+    /// </remarks>
+    public string? ConstraintName
+    {
+        get => _constraintName;
+        set
+        {
+            var stored = value is null ? null : SchemaNames.ToStoredForm(value);
+
+            if (
+                !string.IsNullOrEmpty(stored)
+                && stored != _constraintName
+                && ConstraintNameTaken?.Invoke(stored, Id) == true
+            )
+            {
+                NameChangeRejected?.Invoke(
+                    this,
+                    NameChangeRejectedEventArgs.ForConstraintName(stored)
+                );
+                OnPropertyChanged();
+
+                return;
+            }
+
+            // 前後の空白を除いたときは、値が変わらなくても入力欄を保存する形へ戻す
+            ApplyConstraintName(
+                stored,
+                notifyAlways: (stored?.Length ?? 0) != (value?.Length ?? 0)
+            );
+        }
+    }
+
+    /// <summary>外部キー制約名を重複の検査なしで書き換える（元に戻す・やり直すの適用用）</summary>
+    /// <param name="name">前後の空白を除いた制約名（<c>null</c>・空＝名前なし）</param>
+    /// <param name="notifyAlways">値が変わらなくても入力欄へ通知する（入力された空白を取り除いた形へ戻すため）</param>
+    internal void ApplyConstraintName(string? name, bool notifyAlways = false)
+    {
+        if (!SetProperty(ref _constraintName, name, nameof(ConstraintName)) && notifyAlways)
+        {
+            OnPropertyChanged(nameof(ConstraintName));
+        }
+    }
+
+    /// <summary>
+    /// 外部キーへ付けようとする名前（第 1 引数）が、図の中のほかの制約名とぶつかるかを返す関数（第 2 引数はこのリレーションの Id。
+    /// <see cref="MainViewModel"/> が図へ載せるときに渡す。図に載っていなければ <c>null</c>＝検査しない）
+    /// </summary>
+    internal Func<string, Guid, bool>? ConstraintNameTaken { get; set; }
+
+    /// <summary>外部キー制約名の書き換えを、図の中のほかの制約名とぶつかるため受け付けなかったときに発火する</summary>
+    internal event EventHandler<NameChangeRejectedEventArgs>? NameChangeRejected;
 
     /// <summary>親行削除時の参照アクション</summary>
     [ObservableProperty]

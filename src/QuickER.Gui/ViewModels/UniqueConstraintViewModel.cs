@@ -41,9 +41,69 @@ public partial class UniqueConstraintViewModel : ObservableObject
     /// <remarks>所有エンティティが購読を外すとき（<c>EntityViewModel.DetachUniqueConstraint</c>）に立て、張り直すときに下ろす</remarks>
     internal bool IsDetachedFromOwner { get; set; }
 
-    /// <summary>制約名（空文字＝未設定＝DDL 生成時に列構成から合成する）</summary>
-    [ObservableProperty]
+    /// <summary>制約名の実体フィールド</summary>
     private string _name;
+
+    /// <summary>制約名（空文字＝未設定＝DDL 生成時に列構成から合成する。前後の空白を除いた形で保持する）</summary>
+    /// <remarks>
+    /// 図に載っている間（所有エンティティが図に載っていて、この制約が所有エンティティの一覧にある間）は、図の中のほかの制約名
+    /// （外部キー・主キー・一意制約。<see cref="ConstraintNames.IsTaken"/>＝ツールの <c>set_unique_constraint</c> と同じ判定）と
+    /// ぶつかる名前への書き換えを受け付けず、入力欄へ元の名前を戻し、<see cref="NameChangeRejected"/> で知らせる（変更履歴にも残らない）。
+    /// 空（未設定＝合成名）への書き換えは検査しない。
+    /// 元に戻す・やり直すは <see cref="ApplyName"/> を使い、検査を通さない（履歴の往復は検査の対象外）
+    /// </remarks>
+    public string Name
+    {
+        get => _name;
+        set
+        {
+            var stored = SchemaNames.ToStoredForm(value);
+
+            if (
+                stored.Length > 0
+                && stored != _name
+                && !IsDetachedFromOwner
+                && _owner.IsUniqueConstraintNameTaken(stored, Id)
+            )
+            {
+                NameChangeRejected?.Invoke(
+                    this,
+                    NameChangeRejectedEventArgs.ForConstraintName(stored)
+                );
+                OnPropertyChanged();
+
+                return;
+            }
+
+            // 前後の空白を除いたときは、値が変わらなくても入力欄を保存する形へ戻す
+            ApplyName(stored, notifyAlways: stored.Length != (value?.Length ?? 0));
+        }
+    }
+
+    /// <summary>制約名を重複の検査なしで書き換える（元に戻す・やり直すの適用用）</summary>
+    /// <param name="name">前後の空白を除いた制約名（空文字＝未設定）</param>
+    /// <param name="notifyAlways">値が変わらなくても入力欄へ通知する（入力された空白を取り除いた形へ戻すため）</param>
+    internal void ApplyName(string name, bool notifyAlways = false)
+    {
+        if (_name == name)
+        {
+            if (notifyAlways)
+            {
+                OnPropertyChanged(nameof(Name));
+            }
+
+            return;
+        }
+
+        _name = name;
+
+        // DDL 上の名前のプレビューも更新する
+        OnPropertyChanged(nameof(ResolvedName));
+        OnPropertyChanged(nameof(Name));
+    }
+
+    /// <summary>制約名の書き換えを、図の中のほかの制約名とぶつかるため受け付けなかったときに発火する</summary>
+    internal event EventHandler<NameChangeRejectedEventArgs>? NameChangeRejected;
 
     /// <summary>構成列の編集行（宣言順。末尾に空スロットを 1 行だけ持てる）</summary>
     public ObservableCollection<UniqueConstraintMemberViewModel> Members { get; } = new();
@@ -73,9 +133,6 @@ public partial class UniqueConstraintViewModel : ObservableObject
 
         SyncMembers();
     }
-
-    /// <summary>制約名の変更時に、DDL 上の名前プレビューを更新する</summary>
-    partial void OnNameChanged(string value) => OnPropertyChanged(nameof(ResolvedName));
 
     /// <summary>DDL へ出力される制約名（未設定なら列構成から合成した名前）</summary>
     /// <remarks>構成列を解決できない制約は DDL が出さないので、解決できた列だけで名前を作って見せる</remarks>

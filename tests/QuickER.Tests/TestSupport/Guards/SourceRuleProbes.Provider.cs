@@ -522,6 +522,61 @@ internal static partial class SourceRuleProbes
             {
                 InactiveBranch = true,
             },
+            // 受け手が names の Add を 1 本ずつ拾い、所属のメソッド・出どころの式・表の位置か・置き場所の表記にする（置き場所の関数は
+            // ラムダの中でも名前で読む）。引数の形が違う names.Add（素の値・引数の数の違う生成）は「形の違う」として拾い、names 以外の
+            // 受け手の Add・名前の違う変数の Add は拾わない
+            new SourceRuleProbe(
+                "sql-name-text-name-sources-forms",
+                "sql-name-text-name-sources",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        internal static class SqlNameText
+                        {
+                            private static void Collect(string table, Item item, List<NameSource> names, List<NameSource> others, List<NameSource> nameList)
+                            {
+                                names.Add(new(table, true, TableLocation));
+                                names.Add(new NameSource(item.ColumnName, false, name => ColumnLocation(table, name)));
+                                others.Add(new(table, true, TableLocation));
+                                nameList.Add(new(table, true, TableLocation));
+                                names.Add(table);
+                                names.Add(new(table, true, TableLocation, item));
+                            }
+                        }
+                        """,
+                        "Collect: names.Add(table, true, TABLE)",
+                        "Collect: names.Add(item.ColumnName, false, COLUMN)",
+                        "Collect: 形の違う names.Add names.Add(table)",
+                        "Collect: 形の違う names.Add names.Add(new(table, true, TableLocation, item))"
+                    ),
+                ]
+            ),
+            // 構文の節で読む規則は、条件コンパイルの外れる分岐の中の names.Add も拾う
+            new SourceRuleProbe(
+                "sql-name-text-name-sources-inactive-branch",
+                "sql-name-text-name-sources",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        internal static class SqlNameText
+                        {
+                            private static void Collect(string constraint, List<NameSource> names)
+                            {
+                        #if QUICKER_PROBE_BRANCH
+                                names.Add(new(constraint, false, UniqueLocation));
+                        #endif
+                            }
+                        }
+                        """,
+                        "Collect: names.Add(constraint, false, UNIQUE)"
+                    ),
+                ]
+            ) with
+            {
+                InactiveBranch = true,
+            },
             // Pooling への定数 false の代入だけを拾う（初期化子・後からの代入）。拾わないのは、true・定数でない値・
             // 接続文字列のビルダーでない型の同じ名前のプロパティ
             new SourceRuleProbe(

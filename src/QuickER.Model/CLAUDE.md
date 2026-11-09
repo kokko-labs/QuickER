@@ -30,7 +30,8 @@
 ### 入口の挙動
 
 - ツール（両ホスト）・DBML / Mermaid / Excel の取込・C# 生成は重複を断り、DB 取込は後着を捨てて警告する。
-- プロパティパネルの VM（`EntityViewModel.TableName` / `ColumnViewModel.Name`）は重複する書き換えを受け付けず、元の名前へ戻して `NameChangeRejected` で知らせる。Undo / Redo の適用は `ApplyTableName` / `ApplyName` で検査を通さない（履歴の往復を壊さない）。
+- プロパティパネルの VM（`EntityViewModel.TableName` / `ColumnViewModel.Name` / `UniqueConstraintViewModel.Name` / `RelationshipViewModel.ConstraintName`）は重複する書き換えを受け付けず、元の名前へ戻して `NameChangeRejected` で知らせる。制約名の 2 つは図の中のほかの制約名（種類をまたぐ）と比べ、判定はツールと同じ Model の関数（一意制約は `ConstraintNames.IsTaken`・外部キーは `ConstraintNames.IsForeignKeyNameTaken`）。Undo / Redo の適用は `ApplyTableName` / `ApplyName` / `ApplyConstraintName` で検査を通さない（履歴の往復を壊さない）。
+- 表の複製・貼り付け（`MainViewModel.CreateEntityCopy`）は、写した一意制約の名前が図の制約名（`ConstraintNames.CollectExisting`）とぶつかるときだけ名前を外す（`src/QuickER.Gui/ViewModels/CLAUDE.md`「一意制約の GUI」）。
 - 図のファイルの読込は `SchemaNames` で衝突する名前を断らない。手で編集したファイルは重複を断る入口を通らない。そうした図との同期は、綴りまで一致する相手を優先して組み、組めない名前を追加・削除として出す。読込で断る案は、開けなくなる仕様変更になるため見送り。
 
 ### ガード
@@ -65,6 +66,7 @@
 - 外部キーを作らない名前の無い関係（多対多・列ペア 0 件・列を解決できない＝`ConstraintNames.DefinesForeignKey` が偽）は既定名を取らない。DDL はその関係に外部キーを作らないので、取らせると同じ組の本物の外部キーが `FK_{子}_{親}_{列}` へずれ、既定名で作った DB との同期で外部キーの追加と削除が出る。`CollectExisting` も同じ判定で、名前を持つ関係は外部キーを作らなくても予約する。判定は Provider の `ForeignKeyColumnPairResolver` と同じ規則の写しで、一致は `ForeignKeyDefinitionParityTests` が固定する。
 - DDL 2 か所（基底・SQLite）と差分のシグネチャがこの関数を通す。差分は求めた名前を AddForeignKey / AlterForeignKey の `ForeignKeyName` に載せ、同期スクリプト 4 方言と SQLite の再構築は `SyncScriptBuilderHelper.ForeignKeyNameToAdd` でそれを優先する。どれか 1 つでもリレーションの名前から求め直すと、2 本目だけが DDL と違う名前になる（DDL だけ直すと差分が既定名で探して偽の追加・削除を出し続ける）。
 - GUI の手作成・内蔵チャット・MCP のツールもこれを呼ぶので、`dbo.Orders` のようなスキーマ付きの名前でも作成経路で制約名が割れない。
+- 既存の制約名の付け替えがぶつかるかの判定は 2 つ：一意制約は `IsTaken`（`CollectExisting` と同じ名前）、外部キーは `IsForeignKeyNameTaken`（主キー・一意制約の名前と、ほかのリレーションの `ResolveForeignKeyNames` の名前＝名前の無いリレーションも DDL と同じ名前で数える）。どちらも付け替える自分の名前を集合から取り除かず、自分以外から集める（取り除く形だと、同じ名前を持つ別の制約の名前まで消える）。上限は引数で受ける。ガード：`NameIdentityViewModelFuzzTests`（入口 `gui-vm:UniqueConstraintViewModel.Name`・`gui-vm:RelationshipViewModel.ConstraintName`）・`NameIdentityToolFuzzTests`（`set_unique_constraint`）・`ToolScenarioTests`（行 `unique-constraint-set-name-shared-with-another-constraint-fails-sqlserver`＝同じ名前の一意制約が既に 2 つある手書きの図で、片方を同じ名前のまま付け直すと両ホストが断り、空いた名前へは付け直せる）。
 
 ガード：
 
@@ -172,7 +174,7 @@ PK の順序の正本は `Entity.PrimaryKeyColumnIds`（列 Guid・宣言順）�
   - `IdentityColumnComment`：主キーの採番列は生成コードの INSERT が送るので、外れるのは主キーでない採番列だけ
   - `MermaidExporter`：Mermaid の取込は主キーの標識の列を NOT NULL に戻すので、落ちるのは主キーでない列の NOT NULL だけ
   - `DiagramTypeConverter`：方言切替で行バージョンを失う NOT NULL の列を NULL 許容へ倒すとき、主キーの列は倒さない
-- ガード：`SourceRuleTests` の規則 `column-nullability-copies`（src をシンボルで読み、`QuickER.Model.Column` の 2 つのプロパティを同じ受け手で組む最小の節〔`&&` / `||`・条件式・プロパティパターン・`and` / `or` のパターン・switch 式・switch 文〕を数える。例外は上の 3 か所を理由つきの既知の一覧で持つ。読みの限界は文をまたぐ組み合わせと、片方を変数に取ってから組む形。自己検査の行 `column-nullability-copies-forms`・`column-nullability-copies-inactive-branch`）。振る舞いは `DialectDdlTableTests`・同期計画の期待の行・`SchemaDiffServiceTests`、C# 生成は `CodegenCaseTests` の行 `compile-nullable-primary-key-sync` / `probe-inmemory-seed-nullable-primary-key` / `relation-nullable-primary-key-all-surfaces` ほか（詳細は `src/QuickER.CodeGen.CSharp/CLAUDE.md`「主キーの列の NULL 許容」）。QuickER.Provider* は印の読み取りそのものも禁じる（規則 `provider-column-nullability-raw-reads`・→ `src/QuickER.Provider/CLAUDE.md`「主キーの列の NULL 許容」）。mutation 実証済み
+- ガード：`SourceRuleTests` の規則 `column-nullability-copies`（src をシンボルで読み、`QuickER.Model.Column` の 2 つのプロパティを同じ受け手で組む最小の節〔`&&` / `||`・条件式・プロパティパターン・`and` / `or` のパターン・switch 式・switch 文〕を数える。例外は上の 3 か所を理由つきの既知の一覧で持つ。読みの限界は文をまたぐ組み合わせと、片方を変数に取ってから組む形。自己検査の行 `column-nullability-copies-forms`・`column-nullability-copies-inactive-branch`）。振る舞いは `DialectDdlTableTests`・同期計画の期待の行・`SchemaDiffServiceTests`、C# 生成は `CodegenCaseTests` の行 `compile-nullable-primary-key-sync` / `probe-inmemory-seed-nullable-primary-key` / `relation-nullable-primary-key-all-surfaces` ほか（詳細は `src/QuickER.CodeGen.CSharp/CLAUDE.md`「主キーの列の NULL 許容」）。QuickER.Provider* は印の読み取りそのものも禁じる（規則 `provider-column-nullability-raw-reads`・→ `src/QuickER.Provider/CLAUDE.md`「主キーの列の NULL 許容」）。MCP のツールホスト（QuickER.Mcp.Tools）も同じ（規則 `mcp-tools-column-nullability-raw-reads`・→ `src/QuickER.Mcp.Tools/CLAUDE.md`「列の NULL 許容の印を直接読まない」）。mutation 実証済み
 - 取込：Excel 定義書の取込と C# リバースも、列を組んだ直後にこの判定で NULL 許容の印を決め直す（`src/QuickER.Gui/Services/CLAUDE.md`「取込は主キーの列を NOT NULL で読む（Excel 定義書・C# リバース）」）。ガード：`FormatRoundTripTests` の規則の行 `excel-rule-primary-key-row-with-empty-required-cell-is-not-null`・`csharp-rule-nullable-key-property-is-not-null`
 
 ## リレーションの列ペア

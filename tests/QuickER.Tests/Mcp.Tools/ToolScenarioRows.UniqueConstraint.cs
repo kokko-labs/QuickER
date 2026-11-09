@@ -1,3 +1,4 @@
+using QuickER.Model;
 using QuickER.Tests.TestSupport;
 using GuiStrings = QuickER.Resources.Strings;
 
@@ -262,6 +263,89 @@ internal static partial class ToolScenarioRows
                 "set_unique_constraint",
                 new { table_name = "Customer", columns = new[] { "Email" } },
                 e => e.Ok().Schema.Kind("uq", "uq Customer.- (Email)")
+            );
+
+        // 付け替える名前の重複は自分以外の制約から集めて判定する（ConstraintNames.IsTaken）。同じ名前の一意制約が既に 2 つある
+        // 手書きの図で、片方を同じ名前のまま付け直すと、もう片方がその名前を持つので断る。空いた名前へなら付け直せる（直す道がある）
+        yield return CustomerUq(
+                Row(
+                    "unique-constraint-set-name-shared-with-another-constraint-fails-sqlserver",
+                    "set_unique_constraint は同じ名前の一意制約がほかにもある図で、その名前のまま付け直すのを断り、空いた名前へは付け直せる"
+                ),
+                "sqlserver"
+            )
+            .Seed(
+                "Customer に同じ名前 UQ_Dup の一意制約を 2 つ作る（Email と Code。ツールでも画面でも作れない手書きの図）",
+                session =>
+                    session.EditSchema(diagram =>
+                    {
+                        var customer = diagram.Entities.Single(entity =>
+                            entity.TableName == "Customer"
+                        );
+
+                        foreach (var columnName in new[] { "Email", "Code" })
+                        {
+                            customer.UniqueConstraints.Add(
+                                new UniqueConstraint
+                                {
+                                    Name = "UQ_Dup",
+                                    ColumnIds =
+                                    [
+                                        customer
+                                            .Columns.Single(column => column.Name == columnName)
+                                            .Id,
+                                    ],
+                                }
+                            );
+                        }
+                    })
+            )
+            .Call(
+                "set_unique_constraint",
+                new
+                {
+                    table_name = "Customer",
+                    columns = new[] { "Email" },
+                    name = "UQ_Dup",
+                },
+                e =>
+                    e.Fails()
+                        .Unchanged()
+                        .ForHost(
+                            ToolHostKind.Gui,
+                            "GUI の応答は resx（UI の言語）・MCP は英語の固定文",
+                            gui =>
+                                gui.Result.Exact(
+                                    string.Format(
+                                        GuiStrings.Tool_UniqueConstraintNameTaken,
+                                        "UQ_Dup"
+                                    )
+                                )
+                        )
+                        .ForHost(
+                            ToolHostKind.File,
+                            "GUI の応答は resx（UI の言語）・MCP は英語の固定文",
+                            file =>
+                                file.Result.Exact(
+                                    "The constraint name 'UQ_Dup' is already used in this diagram (constraint names must be unique across foreign keys, primary keys and unique constraints, ignoring case). Choose another name, or omit name to get a unique one automatically."
+                                )
+                        )
+            )
+            .Call(
+                "set_unique_constraint",
+                new
+                {
+                    table_name = "Customer",
+                    columns = new[] { "Email" },
+                    name = "UQ_Free",
+                },
+                e =>
+                    e.Ok()
+                        .Schema.Kind(
+                            "uq",
+                            "uq Customer.UQ_Free (Email)",
+                            "uq Customer.UQ_Dup (Code)"
+                        )
             );
 
         yield return CustomerUq(

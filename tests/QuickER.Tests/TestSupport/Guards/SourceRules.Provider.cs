@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using QuickER.Tests.Provider;
 
 namespace QuickER.Tests.TestSupport.Guards;
 
@@ -449,7 +450,93 @@ internal static partial class SourceRules
                     "閉じた接続がファイルを閉じる（プールに残らない）"
                 )
             ),
+            // DDL・同期の名前の入口（SqlNameText）が名前を集める names.Add の 1 本ずつは、方言の DDL の表の名前の出どころの宣言
+            // （DialectDdlRows.NameSources）と 1 対 1 に対応する。宣言が正本で、あるべき出現はそこから作る（写しを持たない）。
+            // 足したのに宣言へ載せ忘れる（その出どころの行が無い）・消したのに宣言に残る（行が空振りする）の両方向を赤にする
+            SourceRule.Require(
+                "sql-name-text-name-sources",
+                "SqlNameText の names.Add の 1 本ずつ（所属のメソッド・出どころの式・表の位置か・置き場所）が、方言の DDL の表の名前の出どころの宣言と一致する",
+                SourceScope.Files("src", DialectDdlRows.NameSourceFile),
+                GuardFinder.Nodes(DescribeNameSourceAdd),
+                [
+                    .. DialectDdlRows
+                        .NameSources.GroupBy(source => source.What, StringComparer.Ordinal)
+                        .Select(group => new GuardKnown(
+                            DialectDdlRows.NameSourceFile,
+                            group.Key,
+                            group.Count(),
+                            "方言の DDL の表が、この出どころだけへ表せない名前を差し込んだ行で入口が断ることを確かめる（経路 "
+                                + string.Join(
+                                    "・",
+                                    group
+                                        .SelectMany(source => source.Routes)
+                                        .Select(route => route.Id)
+                                )
+                                + "）"
+                        )),
+                ]
+            ),
         ];
+
+    /// <summary>名前の入口の置き場所の関数と、例外文の置き場所の表記</summary>
+    private static readonly IReadOnlyDictionary<string, string> NameSourceLocations =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["TableLocation"] = "TABLE",
+            ["ColumnLocation"] = "COLUMN",
+            ["UniqueLocation"] = "UNIQUE",
+            ["ForeignKeyLocation"] = "FOREIGN KEY",
+        };
+
+    /// <summary>
+    /// 節が <c>names.Add(...)</c> の呼び出しなら <c>{メソッド}: names.Add({式}, {表の位置か}, {置き場所})</c>
+    /// （<see cref="DdlNameSource.What"/> と同じ表記。形が違えば節のテキストを添えて、宣言に無い出現にする）
+    /// </summary>
+    private static string? DescribeNameSourceAdd(SyntaxNode node)
+    {
+        if (
+            node
+            is not InvocationExpressionSyntax
+            {
+                Expression: MemberAccessExpressionSyntax
+                {
+                    Name.Identifier.Text: "Add",
+                    Expression: IdentifierNameSyntax { Identifier.Text: "names" },
+                },
+            } invocation
+        )
+        {
+            return null;
+        }
+
+        var method =
+            invocation
+                .Ancestors()
+                .OfType<MethodDeclarationSyntax>()
+                .FirstOrDefault()
+                ?.Identifier.Text
+            ?? "?";
+
+        if (
+            invocation.ArgumentList.Arguments
+                is not [{ Expression: BaseObjectCreationExpressionSyntax creation }]
+            || creation.ArgumentList?.Arguments is not [var name, var isTable, var locate]
+        )
+        {
+            return $"{method}: 形の違う names.Add {invocation}";
+        }
+
+        var locateFunction = locate
+            .Expression.DescendantNodesAndSelf()
+            .OfType<IdentifierNameSyntax>()
+            .Select(identifier => identifier.Identifier.Text)
+            .FirstOrDefault(NameSourceLocations.ContainsKey);
+        var location = locateFunction is null
+            ? locate.Expression.ToString()
+            : NameSourceLocations[locateFunction];
+
+        return $"{method}: names.Add({name.Expression}, {isTable.Expression}, {location})";
+    }
 
     /// <summary>SQLite のファイルを開く接続の唯一の作り手</summary>
     private const string SqliteFileConnectionsFile =

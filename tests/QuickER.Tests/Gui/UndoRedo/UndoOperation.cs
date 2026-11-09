@@ -2,6 +2,7 @@ using System.Collections;
 using System.Reflection;
 using System.Text;
 using QuickER.Documents;
+using QuickER.Tests.TestSupport;
 using QuickER.Tests.TestSupport.Engines;
 using QuickER.UndoRedo;
 using QuickER.ViewModels;
@@ -184,7 +185,7 @@ internal static class UndoHistory
 /// <remarks>
 /// 順：準備 → 前の写し → 操作（積んだ履歴の型と件数・未保存・図が変わる）→ 後の写し → Undo を件数ぶん（前の写しと一致）→
 /// Redo を件数ぶん（後の写しと一致）→ もう一度 Undo（前の写しと一致）。各段で選択の不変条件
-/// （<see cref="SelectionInvariant.Assert"/>）と行の追加の表明を当てる。写しは保存文書（<see cref="MainViewModel.ToDocument"/>）の
+/// （<see cref="SelectionInvariant.Assert"/>）と、操作の前の図の DDL の制約名がすべて違えばその段の図もすべて違うこと（<see cref="DdlConstraintNames"/>）と、行の追加の表明を当てる。写しは保存文書（<see cref="MainViewModel.ToDocument"/>）の
 /// JSON（表・列・リレーション・一意制約・クエリの並びとレイアウトを保つ）。
 /// </remarks>
 internal static class UndoOperationRunner
@@ -201,6 +202,7 @@ internal static class UndoOperationRunner
         }
 
         var before = Snapshot(vm);
+        var distinctConstraintNames = HasDistinctDdlConstraintNames(vm);
         var historyBefore = UndoHistory.Types(vm.UndoRedo).Count;
         var dirtyBefore = vm.IsDirty;
         var generationBefore = vm.UndoRedo.ChangeGeneration;
@@ -230,7 +232,7 @@ internal static class UndoOperationRunner
                 Fail(row, "操作の直後", "履歴を積まない操作が図を変えた");
             }
 
-            Stage(row, vm, UndoStage.Operated, "操作の直後");
+            Stage(row, vm, distinctConstraintNames, UndoStage.Operated, "操作の直後");
             return;
         }
 
@@ -246,15 +248,15 @@ internal static class UndoOperationRunner
             Fail(row, "操作の直後", "履歴を積んだのに図（保存文書の写し）が変わっていない");
         }
 
-        Stage(row, vm, UndoStage.Operated, "操作の直後");
+        Stage(row, vm, distinctConstraintNames, UndoStage.Operated, "操作の直後");
 
         Repeat(scenario.Commands.Count, vm.UndoRedo.Undo);
         Expect(row, "Undo の直後", before, Snapshot(vm));
-        Stage(row, vm, UndoStage.Undone, "Undo の直後");
+        Stage(row, vm, distinctConstraintNames, UndoStage.Undone, "Undo の直後");
 
         Repeat(scenario.Commands.Count, vm.UndoRedo.Redo);
         Expect(row, "Redo の直後", after, Snapshot(vm));
-        Stage(row, vm, UndoStage.Redone, "Redo の直後");
+        Stage(row, vm, distinctConstraintNames, UndoStage.Redone, "Redo の直後");
 
         Repeat(scenario.Commands.Count, vm.UndoRedo.Undo);
         Expect(row, "2 回目の Undo の直後", before, Snapshot(vm));
@@ -264,14 +266,36 @@ internal static class UndoOperationRunner
     /// <summary>保存文書の JSON（並びを保つ図の写し）</summary>
     public static string Snapshot(MainViewModel vm) => JsonStorageService.ToJson(vm.ToDocument());
 
+    /// <summary>図の SQL Server の DDL の制約名がすべて違うか（DDL を作れない図は偽＝段の表明の対象外）</summary>
+    private static bool HasDistinctDdlConstraintNames(MainViewModel vm) =>
+        DdlConstraintNames.TryFindDuplicates(vm.ToDiagramModel(), out var duplicates)
+        && duplicates.Count == 0;
+
+    /// <summary>段の表明（選択の不変条件・DDL の制約名・行の追加の表明）を当てる</summary>
+    /// <param name="distinctConstraintNames">
+    /// 操作の前の図の DDL の制約名がすべて違ったか（真なら、この段の図の DDL の制約名もすべて違うことを表明する）
+    /// </param>
     private static void Stage(
         ScenarioRow<UndoOperationScenario> row,
         MainViewModel vm,
+        bool distinctConstraintNames,
         UndoStage stage,
         string label
     )
     {
         SelectionInvariant.Assert(vm, $"{row.Id}（{label}）");
+
+        // 操作・Undo・Redo は、制約名がすべて違う図から同じ名前の制約を 2 つ持つ図を作らない
+        // （複製・貼り付けが一意制約の名前を写す・名前の欄が重複を受け付けると、DDL が同じ制約名を 2 回出して断られる）
+        // （段の図が DDL を作れないとき＝列の無い表を足した直後などは、制約名を数えられないので見ない）
+        if (
+            distinctConstraintNames
+            && DdlConstraintNames.TryFindDuplicates(vm.ToDiagramModel(), out var duplicates)
+            && duplicates.Count > 0
+        )
+        {
+            Fail(row, label, $"DDL の制約名が重複している: {string.Join(", ", duplicates)}");
+        }
 
         foreach (var check in row.Input.Checks.Where(check => check.Stage == stage))
         {

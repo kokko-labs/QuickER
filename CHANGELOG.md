@@ -65,12 +65,24 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 ### Fixed
 
+#### Names in a diagram
+
+- **Duplicating or pasting a table no longer copies the name of a named unique constraint when another constraint in the diagram already has that name** — the copy kept the name, so the DDL created the same constraint name twice, which SQL Server, PostgreSQL and Oracle refused. The copied constraint now loses only a name that collides, and its name is made from the new table name like any unnamed unique constraint (numbered if that collides too, and kept within the identifier length limit). A name that collides with nothing, such as when the original table was deleted before pasting, is kept
+- **The property panel now refuses a unique constraint name or a relationship's constraint name that another constraint in the diagram already uses** — the same check as the tools (`set_unique_constraint` and `add_relationship`), across foreign keys, primary keys and unique constraints, ignoring case. The field goes back to the previous name and the status bar says why. An empty name (let QuickER name the constraint) is always accepted
+- **`set_unique_constraint` now refuses to keep a name that another unique constraint in a hand-edited diagram also has, in MCP and in the built-in chat** — giving a constraint its own current name again passed even when a second constraint had the same name, which left the duplicate in the DDL. Give one of them a free name instead
+
+#### Diagram editing
+
+- **A table added with the toolbar now gets an ID column of the target DBMS's default type** — the column was always `int`, which Oracle's type catalog does not read (Oracle now gets `NUMBER(10)`, the same type a new column gets)
+
 #### AI chat & MCP
 
 - **GitHub Copilot no longer loses the conversation when the runtime returns an ordinary error** — only a lost connection ends the conversation, and then the message says the connection was lost and the next message starts a new conversation
 - **With an API key, a response cut off at the output limit no longer runs its unfinished tool call, and a response that ends without any text or tool call now says why** — the tool call ran with incomplete arguments, and the empty response looked like a success
 - **With an API key, Claude's output limit is now the model's own limit, up to 64,000 tokens, instead of 8,192** — Claude 5 models think before they answer and the thinking counts toward the limit, so a long answer such as a mock project page could stop before any text. If the model's limit cannot be read, 8,192 is used as before
 - **`remove_column` now names the named queries that still refer to the removed column, in MCP and in the built-in chat** — the response lists each query with what refers to the column (a parameter, the sort order, a projection field or the simple DSL condition) and points to `set_query` and `remove_query`. The queries are not rewritten. Before, the response did not mention them, and the broken references surfaced only later, in the query definition dialog or in code generation
+- **The MCP `get_diagram_summary` now marks a primary key column as `NOT NULL` even when the diagram marks it as nullable** — the DDL creates such a column as NOT NULL and the built-in chat's summary already showed it that way
+- **`get_diagram_summary` now writes a table's or a column's description on one line, in MCP and in the built-in chat** — a line break in the description is written as a space. A description with line breaks used to start new lines in the summary that read like other columns or tables, and a carriage return broke the rule that the response uses LF only
 
 #### AI chat & mock generation
 

@@ -5,7 +5,7 @@ namespace QuickER.Tests.TestSupport.Guards;
 
 /// <summary>
 /// 列の NULL 許容の印（<c>QuickER.Model.Column.IsNullable</c>）の読み取りの判定
-/// （規則 <c>provider-column-nullability-raw-reads</c> の見つける形）
+/// （規則 <c>provider-column-nullability-raw-reads</c>・<c>mcp-tools-column-nullability-raw-reads</c> の見つける形）
 /// </summary>
 /// <remarks>
 /// <para>

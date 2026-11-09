@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -327,7 +328,9 @@ public static partial class DocumentErDiagramToolHost
 
             if (!string.IsNullOrWhiteSpace(entity.Description))
             {
-                sb.Append($"  Description: {entity.Description}").Append('\n');
+                // 説明の改行は空白へ畳む（「1 行が 1 件の記録」の要約に偽の見出し・列の行を作らない）
+                sb.Append($"  Description: {ToolResponseText.ToSingleLine(entity.Description)}")
+                    .Append('\n');
             }
 
             foreach (var col in entity.Columns)
@@ -344,14 +347,15 @@ public static partial class DocumentErDiagramToolHost
                     flags.Add("FK");
                 }
 
-                if (!col.IsNullable)
+                // 主キーの列は NULL 許容の印に依らず NOT NULL（GUI の読込・DDL と同じ実効値で示す）
+                if (!ColumnNullability.AllowsNull(col))
                 {
                     flags.Add("NOT NULL");
                 }
 
                 var flagsText = flags.Count > 0 ? $" ({string.Join(", ", flags)})" : string.Empty;
                 var colDesc = !string.IsNullOrWhiteSpace(col.Description)
-                    ? $" // {col.Description}"
+                    ? $" // {ToolResponseText.ToSingleLine(col.Description)}"
                     : string.Empty;
                 sb.Append($"  - {col.Name}: {col.DataType}{flagsText}{colDesc}").Append('\n');
             }
@@ -493,12 +497,8 @@ public static partial class DocumentErDiagramToolHost
         }
 
         // is_primary_key は明示 true のときのみ真、is_nullable は明示 false のときのみ偽（GUI と同一）
-        var isPk =
-            args.TryGetProperty("is_primary_key", out var isPkEl)
-            && isPkEl.ValueKind == JsonValueKind.True;
-        var isNullable =
-            !args.TryGetProperty("is_nullable", out var isNullEl)
-            || isNullEl.ValueKind != JsonValueKind.False;
+        var isPk = GetBool(args, "is_primary_key") == true;
+        var isNullable = GetBool(args, "is_nullable") != false;
 
         // 主キー列は NULL 不可（GUI 側の ColumnViewModel も同じ強制を行う）
         isNullable = isPk ? false : isNullable;
@@ -611,13 +611,8 @@ public static partial class DocumentErDiagramToolHost
 
         var changed = new List<string>();
 
-        if (
-            args.TryGetProperty("new_table_name", out var newNameEl)
-            && newNameEl.ValueKind == JsonValueKind.String
-        )
+        if (GetString(args, "new_table_name") is { } newTableName)
         {
-            var newTableName = newNameEl.GetString()!;
-
             if (string.IsNullOrWhiteSpace(newTableName))
             {
                 return ("new_table_name must not be empty.", false);
@@ -638,18 +633,15 @@ public static partial class DocumentErDiagramToolHost
             changed.Add("table name");
         }
 
-        if (args.TryGetProperty("memo", out var memoEl) && memoEl.ValueKind == JsonValueKind.String)
+        if (GetString(args, "memo") is { } memo)
         {
-            entity.Memo = memoEl.GetString()!;
+            entity.Memo = memo;
             changed.Add("memo");
         }
 
-        if (
-            args.TryGetProperty("description", out var descEl)
-            && descEl.ValueKind == JsonValueKind.String
-        )
+        if (GetString(args, "description") is { } description)
         {
-            entity.Description = descEl.GetString()!;
+            entity.Description = description;
             changed.Add("description");
         }
 
@@ -697,39 +689,30 @@ public static partial class DocumentErDiagramToolHost
 
         var changed = new List<string>();
 
-        if (
-            args.TryGetProperty("description", out var descEl)
-            && descEl.ValueKind == JsonValueKind.String
-        )
+        if (GetString(args, "description") is { } description)
         {
-            column.Description = descEl.GetString()!;
+            column.Description = description;
             changed.Add("description");
         }
 
-        if (
-            args.TryGetProperty("data_type", out var dataTypeEl)
-            && dataTypeEl.ValueKind == JsonValueKind.String
-        )
+        if (GetString(args, "data_type") is { } dataType)
         {
-            column.DataType = dataTypeEl.GetString()!;
+            column.DataType = dataType;
             changed.Add("data type");
         }
 
         // 主キー列は NULL 不可（GUI 側の ColumnViewModel も同じ強制を行う）。NULL 許容への変更は無視し、応答でそう告げる
         var nullableIgnored = false;
 
-        if (
-            args.TryGetProperty("is_nullable", out var isNullEl)
-            && isNullEl.ValueKind is JsonValueKind.True or JsonValueKind.False
-        )
+        if (GetBool(args, "is_nullable") is { } isNullable)
         {
-            if (column.IsPrimaryKey && isNullEl.GetBoolean())
+            if (column.IsPrimaryKey && isNullable)
             {
                 nullableIgnored = true;
             }
             else
             {
-                column.IsNullable = isNullEl.GetBoolean();
+                column.IsNullable = isNullable;
                 changed.Add("nullability");
             }
         }
@@ -980,6 +963,10 @@ public static partial class DocumentErDiagramToolHost
     private const string SourceAndTargetTableRequiredMessage =
         "source_table and target_table are required.";
 
+    /// <summary>制約名が図の中のほかの制約名とぶつかるときの文言（{0}＝名前・{1}＝省略すれば自動で決まる引数の名前）</summary>
+    private const string ConstraintNameTakenMessageFormat =
+        "The constraint name '{0}' is already used in this diagram (constraint names must be unique across foreign keys, primary keys and unique constraints, ignoring case). Choose another name, or omit {1} to get a unique one automatically.";
+
     /// <summary>テーブルが見つからないときの文言</summary>
     private static string DescribeTableNotFound(string tableName) =>
         $"Table '{tableName}' not found.";
@@ -1017,7 +1004,12 @@ public static partial class DocumentErDiagramToolHost
         return taken
             ? (
                 name,
-                $"The constraint name '{name}' is already used in this diagram (constraint names must be unique across foreign keys, primary keys and unique constraints, ignoring case). Choose another name, or omit constraint_name to get a unique one automatically."
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    ConstraintNameTakenMessageFormat,
+                    name,
+                    "constraint_name"
+                )
             )
             : (name, null);
     }
@@ -1361,7 +1353,12 @@ public static partial class DocumentErDiagramToolHost
         )
         {
             return (
-                $"The constraint name '{normalizedName}' is already used in this diagram (constraint names must be unique across foreign keys, primary keys and unique constraints, ignoring case). Choose another name, or omit name to get a unique one automatically.",
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    ConstraintNameTakenMessageFormat,
+                    normalizedName,
+                    "name"
+                ),
                 false
             );
         }
@@ -1529,19 +1526,7 @@ public static partial class DocumentErDiagramToolHost
 
         foreach (var constraint in entity.UniqueConstraints)
         {
-            var columnNames = new List<string>();
-
-            foreach (var columnId in constraint.ColumnIds)
-            {
-                var column = entity.Columns.FirstOrDefault(c => c.Id == columnId);
-
-                if (column is not null)
-                {
-                    columnNames.Add(column.Name);
-                }
-            }
-
-            if (columnNames.Count == 0 || columnNames.Count != constraint.ColumnIds.Count)
+            if (!constraint.TryResolveColumnNames(entity, out var columnNames))
             {
                 continue;
             }

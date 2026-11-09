@@ -610,6 +610,12 @@ namespace QuickER.Resources {
             }
         }
         
+        public static string Status_ConstraintNameRejected {
+            get {
+                return ResourceManager.GetString("Status_ConstraintNameRejected", resourceCulture);
+            }
+        }
+        
         public static string Status_NameTooLong {
             get {
                 return ResourceManager.GetString("Status_NameTooLong", resourceCulture);

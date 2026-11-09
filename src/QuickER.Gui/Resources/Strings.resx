@@ -299,6 +299,9 @@
   <data name="Status_ColumnNameRejected" xml:space="preserve">
     <value>Table '{0}' already has a column named '{1}' (compared ignoring case and surrounding spaces). The column name was not changed.</value>
   </data>
+  <data name="Status_ConstraintNameRejected" xml:space="preserve">
+    <value>The constraint name '{0}' is already used by a primary key, unique constraint, or foreign key in the diagram (compared ignoring case and surrounding spaces). The constraint name was not changed.</value>
+  </data>
   <data name="Status_NameTooLong" xml:space="preserve">
     <value>'{0}' is longer than the limit of {1} for {2}. DDL generation and sync will refuse this name until it is shortened.</value>
   </data>

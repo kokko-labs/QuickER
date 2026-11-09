@@ -324,6 +324,9 @@
   <data name="Status_ColumnNameRejected" xml:space="preserve">
     <value>テーブル '{0}' には既に列 '{1}' があります（大文字小文字と前後の空白を区別せずに比較します）。列名は変更しませんでした。</value>
   </data>
+  <data name="Status_ConstraintNameRejected" xml:space="preserve">
+    <value>制約名 '{0}' は図の中の主キー・一意制約・外部キーで既に使われています（大文字小文字と前後の空白を区別せずに比較します）。制約名は変更しませんでした。</value>
+  </data>
   <data name="Status_NameTooLong" xml:space="preserve">
     <value>'{0}' は {2} の識別子の上限（{1}）を超えています。短くするまで、DDL の生成と同期はこの名前を断ります。</value>
   </data>

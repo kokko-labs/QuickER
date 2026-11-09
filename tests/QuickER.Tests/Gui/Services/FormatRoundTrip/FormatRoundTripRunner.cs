@@ -1,6 +1,4 @@
-using System.Text.RegularExpressions;
 using QuickER.Model;
-using QuickER.Provider.SqlServer;
 using QuickER.Services;
 using QuickER.Tests.TestSupport;
 
@@ -638,17 +636,10 @@ internal static class FormatRoundTripRunner
         }
     }
 
-    /// <summary>取り込んだ図の SQL Server の DDL の制約名がすべて違う（大文字小文字を無視）</summary>
+    /// <summary>取り込んだ図の SQL Server の DDL の制約名がすべて違う（名前の同一性の規則で比べる）</summary>
     private static void CheckDistinctDdlConstraintNames(ErDiagram diagram, List<string> problems)
     {
-        var ddl = new SqlServerDdlGenerator().Build(diagram);
-        var duplicated = Regex
-            .Matches(ddl, @"CONSTRAINT \[([^\]]+)\]")
-            .Select(match => match.Groups[1].Value.ToUpperInvariant())
-            .GroupBy(name => name, StringComparer.Ordinal)
-            .Where(group => group.Count() > 1)
-            .Select(group => group.Key)
-            .ToList();
+        var duplicated = DdlConstraintNames.Duplicates(diagram);
 
         if (duplicated.Count > 0)
         {

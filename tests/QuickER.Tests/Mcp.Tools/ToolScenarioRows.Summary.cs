@@ -41,6 +41,29 @@ internal static partial class ToolScenarioRows
                 e => e.Ok().Result.Contains("FK: (CustomerId → CustomerId)", "[FK_Order_Customer]")
             );
 
+        // 列の NOT NULL は実効値（ColumnNullability.AllowsNull）で示す。主キーの列に NULL 許容の印を手で付けた図でも NOT NULL
+        // （GUI は読込で実効値へそろえるので、MCP が印をそのまま読むと 2 つのホストの要約が食い違う）
+        yield return Row(
+                "summary-primary-key-column-flagged-nullable-shows-not-null",
+                "get_diagram_summary は主キーの列に NULL 許容の印があっても NOT NULL と示す"
+            )
+            .Base(CustomerOrder)
+            .Seed(
+                "主キーの列 Customer.CustomerId に NULL 許容の印を付ける（手で編集した図）",
+                session =>
+                    session.EditSchema(diagram =>
+                        diagram
+                            .Entities.Single(entity => entity.TableName == "Customer")
+                            .Columns.Single(column => column.Name == "CustomerId")
+                            .IsNullable = true
+                    )
+            )
+            .Call(
+                "get_diagram_summary",
+                new { },
+                e => e.Ok().Result.Contains("\n  - CustomerId: int (PK, NOT NULL)\n")
+            );
+
         // 主キーの順序の注記は、列宣言順と食い違うときだけ出る（GUI の文言は resx・MCP は英語の固定文）
         foreach (var reversed in new[] { true, false })
         {
