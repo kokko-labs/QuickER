@@ -121,9 +121,7 @@ public sealed record SqlServerSaveScenario(
 /// 普段の 8 種が引数とフックの全組を 1 回ずつ流す。
 /// </para>
 /// <para>
-/// 次の形は作らない：他者が消した行の削除（行なし削除の非対称＝実装先で結果が割れることを受け入れた差）・部品に参照された
-/// code の変更と部品を持つ行の他者による削除（外部キーで全体が断られ、ほかの行を比べなくなる。参照された代替キーの更新は決まった
-/// 形のケース <c>alternate-key-referenced-*</c> が持つ）。
+/// 作らない形は <see cref="BackendParitySqlServerSaveNotGenerated"/> に宣言する。
 /// </para>
 /// </remarks>
 public static class BackendParitySqlServerSaveGenerator

@@ -395,6 +395,26 @@ public sealed class KnownFailureSet
         entry.ReasonContains is null
         || failure.Detail.Contains(entry.ReasonContains, StringComparison.Ordinal);
 
+    /// <summary>
+    /// 種類と直す区切り・理由の組の問題（無ければ null）：Pending は直す区切りが必須・Accepted は理由が必須で直す区切りを持たない。
+    /// 既知の失敗の一覧と作らない形の宣言（<see cref="NotGeneratedGuard"/>）が同じ規則を使う
+    /// </summary>
+    /// <param name="kind">種類</param>
+    /// <param name="fixedIn">直す区切り</param>
+    /// <param name="reason">受け入れた理由</param>
+    internal static string? KindProblem(KnownKind kind, string? fixedIn, string? reason) =>
+        kind switch
+        {
+            KnownKind.Pending when string.IsNullOrWhiteSpace(fixedIn) =>
+                "Pending の項目に直す区切り（FixedIn）が無い",
+            KnownKind.Accepted when string.IsNullOrWhiteSpace(reason) =>
+                "Accepted の項目に受け入れた理由（Reason）が無い",
+            KnownKind.Accepted when fixedIn is not null =>
+                "Accepted の項目は直す区切り（FixedIn）を持たない",
+            KnownKind.Pending or KnownKind.Accepted => null,
+            _ => $"知らない種類 {kind}",
+        };
+
     private static List<string> Validate(IReadOnlyList<KnownEntry> entries, bool hasFamily)
     {
         var problems = new List<string>();
@@ -420,23 +440,9 @@ public sealed class KnownFailureSet
                 problems.Add($"{name}: 範囲が空");
             }
 
-            switch (entry.Kind)
+            if (KindProblem(entry.Kind, entry.FixedIn, entry.Reason) is { } kindProblem)
             {
-                case KnownKind.Pending when string.IsNullOrWhiteSpace(entry.FixedIn):
-                    problems.Add($"{name}: Pending の項目に直す区切り（FixedIn）が無い");
-                    break;
-                case KnownKind.Accepted when string.IsNullOrWhiteSpace(entry.Reason):
-                    problems.Add($"{name}: Accepted の項目に受け入れた理由（Reason）が無い");
-                    break;
-                case KnownKind.Accepted when entry.FixedIn is not null:
-                    problems.Add($"{name}: Accepted の項目は直す区切り（FixedIn）を持たない");
-                    break;
-                case KnownKind.Pending:
-                case KnownKind.Accepted:
-                    break;
-                default:
-                    problems.Add($"{name}: 知らない種類 {entry.Kind}");
-                    break;
+                problems.Add($"{name}: {kindProblem}");
             }
 
             switch (entry.Match)

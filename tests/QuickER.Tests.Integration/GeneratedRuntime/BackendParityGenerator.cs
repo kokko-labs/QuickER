@@ -25,18 +25,10 @@ public enum ParityGeneratorMode
 /// </summary>
 /// <remarks>
 /// <para>
-/// 次の手は作らない（docs に書いてある違い・決定で受容した差・決まった形のシナリオが受け持つ指摘）：
+/// 作らない手は <see cref="BackendParityNotGenerated"/> に宣言する。子を持つ親の <c>DeleteAsync(id)</c> と親の無い行の挿入は列の末尾に
+/// だけ置く（<see cref="AppendAcceptedDeviationTail"/>）。グラフの根を消すのは、その子をすべてグラフに持っているときだけ。
+/// スロットの行が消されたら、そのスロットは読み直すまで使わない。
 /// </para>
-/// <list type="bullet">
-///   <item>既存の行を組み立て直した UPDATE（EF Core は全列を書くので除外 blob を上書きする＝docs）。UPDATE は読み込んだ行だけ</item>
-///   <item>insertWhenUpdateMissing・生 SQL・ナビゲーションの条件（#33・#36・#37 は決まった形のシナリオが受け持つ）</item>
-///   <item>列の途中の、子を持つ親の <c>DeleteAsync(id)</c>・親の無い行の挿入（P1・P2＝インメモリは外部キーを検査せず、参照動作も
-///   再現しない。受容した差で、docs に書く）。この 2 つは列の末尾にだけ置く（<see cref="AppendAcceptedDeviationTail"/>）。
-///   グラフの根を消すのは、その子をすべてグラフに持っているときだけ</item>
-///   <item>他者が消した行・まだ挿入していない（Added の）行への削除（行なし削除の非対称＝受容した差）。
-///   スロットの行が消されたら、そのスロットは読み直すまで使わない</item>
-///   <item>NOT NULL の除外 blob への NULL の書き込み（インメモリが NOT NULL を検査するかは測っていない。外部キーと同じく実 DB と食い違う見込みなので作らない）</item>
-/// </list>
 /// <para>
 /// 制約違反（主キー・一意な名前の重複）はわざと混ぜる。どの実装先も断り、何も書かないことを比べる。
 /// </para>

@@ -29,7 +29,8 @@ namespace QuickER.Tests.Docs;
 /// 現れることで照合する（メソッド名が <c>_</c> で終わるか直後が <c>*</c> なら前方一致）。
 /// (3) 期待の行・シナリオの Id は、ハイフンを含みハイフンで終わらないバッククォートの小文字の語のうち、
 /// 最初のハイフンまでの語が行 Id の接頭辞の集合（<see cref="RowIdPrefixesOf"/>）にあるものを拾い、tests/ の
-/// C# ソースに現れることで照合する。接頭辞の集合は手で持たず、tests/ の C# ソースの文字列リテラル
+/// C# ソースに現れることで照合する（このファイルと、作らない形の宣言のファイル <c>*NotGenerated.cs</c> は照合の本文に入れない＝
+/// 書いた Id がそのファイル自身に当たって実在に見えるため）。接頭辞の集合は手で持たず、tests/ の C# ソースの文字列リテラル
 /// （補間・連結の先頭を含む）の先頭の、最初のハイフンまでの語から作る（表に新しい接頭辞の行を足せば、
 /// そのまま照合の対象に入る）。接頭辞が当たる行 Id でない語は、理由つきの既知の一覧
 /// （<see cref="NotRowIds"/>）に置く。Id の多くは
@@ -117,6 +118,9 @@ public class ClaudeMdReferenceTests
         @"(?<![A-Za-z0-9_*.])([A-Z][A-Za-z0-9_]*(?<!For)Tests(?:Base)?)(\.cs\b|\.([^\W\d]\w*)(\*)?)?(?![A-Za-z0-9_])",
         RegexOptions.CultureInvariant
     );
+
+    /// <summary>バッククォートで囲んだ語（<see cref="ReferencesIn"/> が読めない語を探す）</summary>
+    private static readonly Regex BacktickWord = new("`([^`]+)`", RegexOptions.CultureInvariant);
 
     /// <summary>CLAUDE.md への参照（見出しは任意）</summary>
     private static readonly Regex ClaudeMdLink = new(
@@ -282,8 +286,12 @@ public class ClaudeMdReferenceTests
             var source = File.ReadAllText(path);
 
             // このファイル自身は Id の照合の本文に入れない（行 Id でない語の一覧と自己検査の架空の Id が写り込み、
-            // 一覧の語や架空の Id が tests/ に実在するように見えてしまう）。宣言とファイル名の照合には入れる
-            if (Path.GetFileName(path) != nameof(ClaudeMdReferenceTests) + ".cs")
+            // 一覧の語や架空の Id が tests/ に実在するように見えてしまう）。作らない形の宣言のファイルも同じ理由で入れない
+            // （受け持つ守りに書いた行 Id が宣言そのものに当たり、架空の Id が実在に見える）。宣言とファイル名の照合には入れる
+            if (
+                Path.GetFileName(path) != nameof(ClaudeMdReferenceTests) + ".cs"
+                && !NotGeneratedGuard.IsDeclarationFileName(Path.GetFileName(path))
+            )
             {
                 all.Add(source);
             }
@@ -501,6 +509,65 @@ public class ClaudeMdReferenceTests
         return [.. broken];
     }
 
+    /// <summary>
+    /// 本文が書いた名前（地図の名前・テストの名前）と行 Id（行 Id の接頭辞が当たるもの）と、そのどれとしても読めないバッククォートの語を返す
+    /// （作らない形の宣言の受け持つ守り〔<see cref="NotGeneratedShape.Guard"/>〕が、照合できる書き方だけで書かれていることを確かめるのに使う）
+    /// </summary>
+    /// <remarks>
+    /// 拾い方はこのクラスの照合と同じ正規表現（<see cref="MapNameCandidate"/>・<see cref="TestName"/>〔中括弧の省略は展開する〕・
+    /// <see cref="RowIdCandidate"/>）。バッククォートの語は、中身の全体がそのどれかに当たるときだけ読めるとみなす。
+    /// </remarks>
+    /// <param name="text">本文</param>
+    /// <param name="rowIdPrefixes">行 Id の接頭辞の集合（<see cref="RowIdPrefixesOf"/>）</param>
+    internal static (
+        IReadOnlyList<string> Names,
+        IReadOnlyList<string> RowIds,
+        IReadOnlyList<string> Unreadable
+    ) ReferencesIn(string text, IReadOnlySet<string> rowIdPrefixes)
+    {
+        bool IsRowId(string id) => rowIdPrefixes.Contains(LeadingSegment.Match(id).Value);
+
+        bool IsWholeTestName(string word) =>
+            ExpandBraces(word)
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .All(name =>
+                    TestName.Match(name) is { Success: true } match
+                    && match.Index == 0
+                    && match.Length == name.Length
+                );
+
+        bool IsWhole(Regex pattern, string quoted) =>
+            pattern.Match(quoted) is { Success: true } match
+            && match.Index == 0
+            && match.Length == quoted.Length;
+
+        var names = MapNameCandidate
+            .Matches(text)
+            .Select(match => match.Groups[1].Value)
+            .Concat(
+                TestName
+                    .Matches(ExpandBraces(text))
+                    .Select(match => match.Groups[1].Value + match.Groups[2].Value)
+            )
+            .ToList();
+        var rowIds = RowIdCandidate
+            .Matches(text)
+            .Select(match => match.Groups[1].Value)
+            .Where(IsRowId)
+            .ToList();
+        var unreadable = BacktickWord
+            .Matches(text)
+            .Select(match => match.Groups[1].Value)
+            .Where(word =>
+                !IsWhole(MapNameCandidate, "`" + word + "`")
+                && !IsWholeTestName(word)
+                && !(IsWhole(RowIdCandidate, "`" + word + "`") && IsRowId(word))
+            )
+            .ToList();
+
+        return (names, rowIds, unreadable);
+    }
+
     /// <summary>本文が書いた影響の地図の名前のうち、地図の守りの名前に無いものを返す</summary>
     /// <param name="text">CLAUDE.md の本文</param>
     /// <param name="names">地図の守りの名前（<see cref="ImpactMapSources.Protections"/> の名前）</param>
@@ -612,7 +679,7 @@ public class ClaudeMdReferenceTests
     /// </remarks>
     /// <param name="protections">影響の地図の守り（<see cref="ImpactMapSources.Protections"/>）</param>
     /// <param name="sources">tests/ のソース</param>
-    private static Func<string, string, bool?> FollowingRowOwner(
+    internal static Func<string, string, bool?> FollowingRowOwner(
         IReadOnlyList<Protection> protections,
         TestSources sources
     )

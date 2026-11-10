@@ -116,10 +116,9 @@ public sealed record DslFuzzUnit(
 
 /// <summary>簡易 DSL の条件の総当たりの生成器</summary>
 /// <remarks>
-/// docs と型の検査が「書ける」とする組み合わせだけを作る（文字列・Guid の順序比較・日時のリテラル・LIKE のリテラルの途中の
-/// <c>%</c> / <c>_</c> は作らない）。型の検査が断る整数のリテラル（列の型〔値オブジェクトなら内包型〕の範囲の外と
+/// docs と型の検査が「書ける」とする組み合わせだけを作る。型の検査が断る整数のリテラル（列の型〔値オブジェクトなら内包型〕の範囲の外と
 /// <c>ulong</c> を超える値）は、値オブジェクトの有無に依らず原子のクエリでだけ作り（<see cref="AllAtoms"/>）、警告で飛ばされる
-/// ことを表明する（合成の条件には混ぜない＝CLAUDE.md の名前付きクエリの節）。
+/// ことを表明する。作らない形は <see cref="DslFuzzNotGenerated"/> に宣言する。
 /// </remarks>
 public sealed class DslFuzzGenerator(int seed, bool valueObjects)
 {
