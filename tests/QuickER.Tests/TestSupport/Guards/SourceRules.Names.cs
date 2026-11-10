@@ -719,6 +719,12 @@ internal static partial class SourceRules
                     "Contains",
                     1,
                     "簡易 DSL の数値のリテラルに小数点があるか（テーブル名ではない）"
+                ),
+                new(
+                    "src/QuickER.CodeGen.CSharp/Queries/QueryConditionCSharpEmitter.cs",
+                    "Contains",
+                    1,
+                    "簡易 DSL の数値のリテラルに小数点があるか（long の列のサフィックスを付けるか。テーブル名ではない）"
                 )
             ),
             // 方言の能力の宣言（SyncDialectCapabilities）のプロパティは初期化子（既定値）を持たない。required と初期化子は両立し、

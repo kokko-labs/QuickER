@@ -25,7 +25,8 @@ namespace QuickER.Tests.GeneratedTranslatorParityFixture;
 ///   <item>
 ///     <c>probes</c>: 翻訳器の検証用。NULL 許容の可変長文字列・固定長文字列（<c>nchar(10)</c>）・日時・
 ///     オフセットつき日時・bool・NULL 許容の数値（<c>amount</c>＝<c>decimal(10,2)</c>）と、予約語の列名 <c>group</c>・
-///     閉じ角括弧を含む列名 <c>x]y</c> を持つ
+///     閉じ角括弧を含む列名 <c>x]y</c>、列の型より細かい値と比べる列（<c>day</c>＝<c>date</c>・<c>at2</c>＝<c>datetime2(2)</c>・
+///     <c>clock</c>＝<c>time(2)</c>・<c>ansi</c>＝Unicode でない <c>varchar(20)</c>）を持つ
 ///   </item>
 ///   <item>
 ///     <c>order</c> / <c>order_line</c>: 予約語の表名とナビゲーション名（<c>Order</c>）で、
@@ -79,6 +80,10 @@ public static class TranslatorParityFixtureDefinition
     private static readonly Guid ProbeGroupColId = new("7a000000-0000-0000-0000-000000000008");
     private static readonly Guid ProbeBracketColId = new("7a000000-0000-0000-0000-000000000009");
     private static readonly Guid ProbeAmountColId = new("7a000000-0000-0000-0000-00000000000a");
+    private static readonly Guid ProbeDayColId = new("7a000000-0000-0000-0000-00000000000b");
+    private static readonly Guid ProbeAt2ColId = new("7a000000-0000-0000-0000-00000000000c");
+    private static readonly Guid ProbeClockColId = new("7a000000-0000-0000-0000-00000000000d");
+    private static readonly Guid ProbeAnsiColId = new("7a000000-0000-0000-0000-00000000000e");
 
     private static readonly Guid OrderId = new("7a000000-0000-0000-0000-000000000011");
     private static readonly Guid OrderPkColId = new("7a000000-0000-0000-0000-000000000012");
@@ -128,6 +133,10 @@ public static class TranslatorParityFixtureDefinition
                 Nullable(ProbeGroupColId, "group", "nvarchar(20)"),
                 Nullable(ProbeBracketColId, "x]y", "nvarchar(20)"),
                 Nullable(ProbeAmountColId, "amount", "decimal(10,2)"),
+                Nullable(ProbeDayColId, "day", "date"),
+                Nullable(ProbeAt2ColId, "at2", "datetime2(2)"),
+                Nullable(ProbeClockColId, "clock", "time(2)"),
+                Nullable(ProbeAnsiColId, "ansi", "varchar(20)"),
             },
         };
 

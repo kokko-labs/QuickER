@@ -161,7 +161,7 @@ internal static class DslFuzzExecution
                 {
                     ledger.Record(
                         new(entrance, "mismatch", key),
-                        $"seed={unit.Seed} {query.Name}: {DslFuzz.Render(query.Condition)}{Describe(query)} → {problem}"
+                        $"seed={unit.Seed} {query.Name}: {query.Text}{Describe(query)} → {problem}"
                     );
                 }
             }
@@ -180,7 +180,7 @@ internal static class DslFuzzExecution
 
                 ledger.Record(
                     new(entrance, "exception", $"{key}:{Unwrap(ex).GetType().Name}"),
-                    $"seed={unit.Seed} {query.Name}: {DslFuzz.Render(query.Condition)}{Describe(query)} → {Unwrap(ex).Message}"
+                    $"seed={unit.Seed} {query.Name}: {query.Text}{Describe(query)} → {Unwrap(ex).Message}"
                 );
             }
         }

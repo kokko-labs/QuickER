@@ -64,11 +64,14 @@ C# リテラルのエスケープの規則（`GeneratedLiteralText`）は `src/Q
 ## 型整合検査
 
 - `QueryConditionTypeChecker` は整数リテラルの範囲も見る。ulong 超と、列の型（VO なら内包型）の範囲外は警告で飛ばす
-  - 判定は `IntegerRange` の 1 本で、VO と素の列が共通。素の列の範囲外を通すと、C# は常に偽（CS0652）になり、型付きで束縛する SQL Server は変換・算術オーバーフローの例外になる
+  - 判定は `IntegerRange` の 1 本で、VO と素の列が共通。素の列の範囲外を通すと、C# は常に偽（CS0652）になる
   - 手書き LINQ の同形は検査しない（既知の割り切り）
+- 整数の列と小数のリテラルは、素の列なら幅に依らず受理して数として比べ（C# が列を double へ拡大する）、整数を包む VO の列は警告で飛ばす（`Create` が整数しか受け取らず CS1503）
+  - エミッタは小数のリテラルにサフィックスを付けない（long の列に `L` を付けると `1.5L` の字句エラー）
+  - SQL Server の QuickER 版 Repository は、列の型に入らない値を値の型で束縛する（`src/QuickER.Runtime.SqlServer/CLAUDE.md`「SqlParameter の明示型」）。列の型で束縛すると値が切り捨てられて誤った行を返す
 - GuidKey の VO 列（FK 列が親の GuidKey VO を共有する場合を含む）への文字列一致は、完全一致の LIKE と `=` 以外を同じく警告で飛ばす
   - `ValueObjectGuidKeyBase` は `IStringMatchValueObject` を持たず、そのまま生成すると生成ファイル全体が CS1929 になる
-- ガード：`CodegenCaseTests` の行 `diag-query-type-check-rejects-*`（断る組み合わせ 1 行 1 入力：警告の種類とクエリ名・そのクエリのメソッドだけが無い・ほかのクエリは生成してコンパイルできる）・`CodegenCaseTests` の行 `compile-query-type-check-accepts-widening-forms`・`DslConditionFuzzTests`（受理する形は警告 0 のコンパイルと実行、断るリテラルは警告で飛ばされること）
+- ガード：`CodegenCaseTests` の行 `diag-query-type-check-rejects-*`（断る組み合わせ 1 行 1 入力：警告の種類とクエリ名・そのクエリのメソッドだけが無い・ほかのクエリは生成してコンパイルできる）・`CodegenCaseTests` の行 `compile-query-type-check-accepts-widening-forms`（int・long の列×小数リテラルを含む）・`DslConditionFuzzTests`（受理する形は警告 0 のコンパイルと実行、断るリテラルは警告で飛ばされること。整数の列×小数リテラルは次元表の形 `compare-*-literal-fractional`）・`Dsl/SqlServer`（同じ形を実 SQL Server で）
 
 ## 射影 DTO の型名
 

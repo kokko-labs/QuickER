@@ -139,9 +139,18 @@ public class DslConditionFuzzTests
             coverageUnits.Add(
                 (DslFuzzUnits.Coverage(DialectNames.Sqlite), SqliteTarget, InvariantCultureName)
             );
-            coverageUnits.Add((DslFuzzUnits.PlainCoverage(), SqliteTarget, InvariantCultureName));
+            coverageUnits.Add(
+                (
+                    DslFuzzUnits.PlainCoverage(DialectNames.Sqlite),
+                    SqliteTarget,
+                    InvariantCultureName
+                )
+            );
             coverageUnits.Add(
                 (DslFuzzUnits.Coverage(DialectNames.MySql), MySqlTarget, InvariantCultureName)
+            );
+            coverageUnits.Add(
+                (DslFuzzUnits.PlainCoverage(DialectNames.MySql), MySqlTarget, InvariantCultureName)
             );
 
             foreach (var culture in InMemoryCultures)
@@ -155,7 +164,7 @@ public class DslConditionFuzzTests
                 );
                 coverageUnits.Add(
                     (
-                        OrdinalOnly(DslFuzzUnits.PlainCoverage(), culture),
+                        OrdinalOnly(DslFuzzUnits.PlainCoverage(DialectNames.Sqlite), culture),
                         SqliteInMemoryTarget,
                         culture
                     )

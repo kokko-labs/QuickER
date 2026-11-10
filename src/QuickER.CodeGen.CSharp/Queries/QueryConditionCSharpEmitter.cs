@@ -413,13 +413,17 @@ public static class QueryConditionCSharpEmitter
     }
 
     /// <summary>数値リテラルへ列の C# 型に応じたサフィックスを付ける</summary>
+    /// <remarks>
+    /// 整数の列へ書いた小数のリテラル（型整合検査が素の整数の列にだけ通す）はサフィックスを付けない＝double のリテラルとして
+    /// 列を double へ暗黙拡大して比べる（long の列に <c>L</c> を付けると <c>1.5L</c> の字句エラーになる）。
+    /// </remarks>
     private static string RenderNumberLiteral(string literal, string underlyingTypeName) =>
         underlyingTypeName switch
         {
             "decimal" => literal + "m",
             "double" => literal + "d",
             "float" => literal + "f",
-            "long" => literal + "L",
+            "long" when !literal.Contains('.') => literal + "L",
             _ => literal,
         };
 

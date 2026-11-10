@@ -71,7 +71,7 @@ public sealed record DslFuzzUnit(
             EntityId = entity.Id,
             Name = query.Name,
             Returns = query.Returns,
-            Condition = DslFuzz.Render(query.Condition),
+            Condition = query.Text,
         };
 
         foreach (var parameter in query.Parameters)
@@ -174,12 +174,13 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
         var filterable = columns
             .Where(column => !column.PrimaryKey || column.Clr == DslClr.GuidKey)
             .ToList();
-        var atoms = filterable.SelectMany(AllAtoms).ToList();
+        var atoms = filterable.SelectMany(column => AllAtoms(column)).ToList();
 
+        // 原子のクエリの綴りは番号で回す（乱数を引かずに、どの綴りも原子のクエリに出す）
         for (var i = 0; i < atoms.Count; i++)
         {
-            queries.Add(AtomQuery($"A{i}", atoms[i]));
-            queries.Add(AtomQuery($"A{i}n", new DslNot(Rename(atoms[i]))));
+            queries.Add(AtomQuery($"A{i}", atoms[i], SpellingAt(i)));
+            queries.Add(AtomQuery($"A{i}n", new DslNot(Rename(atoms[i])), SpellingAt(i + 1)));
         }
 
         // 射影のフィールドを非 NULL と指定する形（NULL 許容の参照型・値オブジェクトの列）
@@ -244,17 +245,18 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
             .ToList();
         var atoms = filterable
             .Where(column => atomColumns.Contains(column.Name))
-            .SelectMany(AllAtoms)
+            .SelectMany(column => AllAtoms(column))
             .ToList();
 
         for (var i = 0; i < atoms.Count; i++)
         {
-            queries.Add(AtomQuery($"KA{i}", atoms[i]));
-            queries.Add(AtomQuery($"KA{i}n", new DslNot(Rename(atoms[i]))));
+            queries.Add(AtomQuery($"KA{i}", atoms[i], SpellingAt(i)));
+            queries.Add(AtomQuery($"KA{i}n", new DslNot(Rename(atoms[i])), SpellingAt(i + 1)));
         }
 
+        // 文字列のリテラルは ' を含む値と含まない値の両方の原子を並べる（網羅の単位で両方の水準を埋める）
         var forms = filterable
-            .SelectMany(AllAtoms)
+            .SelectMany(column => AllAtoms(column, bothQuotes: true))
             .Where(atom =>
                 !atom.IsRejectedByTypeCheck
                 && !(
@@ -324,8 +326,44 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
 
         queries.AddRange(NestingQueries(forms, shapes, projectable, pinned));
 
-        return queries;
+        // 合成のクエリを、優先順位で決まる括弧を省いた描画でもう 1 本ずつ流す（構文木は同じ＝オラクルの答えも同じ。
+        // 描画が変わらないクエリは流し直さない）
+        var compounds = queries
+            .Where(query =>
+                !query.IsAtomQuery
+                && DslFuzz.Render(query.Condition, DslGrouping.Minimal) != query.Text
+            )
+            .ToList();
+        queries.AddRange(
+            compounds.Select(query =>
+                query.WithRendering(
+                    query.Name + "g",
+                    DslGrouping.Minimal,
+                    query.Spelling,
+                    RenameTree(query.Condition)
+                )
+            )
+        );
+
+        // 合成のクエリの綴りは番号で回す（乱数を引かずに、どの綴りもどの形の原子と一緒に出す）
+        return queries
+            .Select(
+                (query, index) =>
+                    query.IsAtomQuery
+                        ? query
+                        : query.WithRendering(
+                            query.Name,
+                            query.Grouping,
+                            SpellingAt(index),
+                            query.Condition
+                        )
+            )
+            .ToList();
     }
+
+    /// <summary>番号で回す綴り（大文字・小文字・先頭だけ大文字の順）</summary>
+    private static DslSpelling SpellingAt(int index) =>
+        (DslSpelling)(index % Enum.GetValues<DslSpelling>().Length);
 
     /// <summary>網羅の単位の NOT の入れ子のクエリの原子の数の上限</summary>
     private const int NestingAtomsPerQuery = 12;
@@ -567,7 +605,7 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
                         Name = $"{OrdinalQueryPrefix}{i}",
                         Condition = new DslLike(
                             false,
-                            new DslLiteral(patterns[i], "'" + patterns[i] + "'")
+                            new DslLiteral(patterns[i], DslFuzz.QuoteText(patterns[i]))
                         )
                         {
                             Column = s,
@@ -654,7 +692,10 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
             .ToList();
     }
 
-    /// <summary>形・自身の否定・列の種類のまだ出していない水準を足す原子を、並びの先頭から貪欲に選ぶ（名前は付け直さない）</summary>
+    /// <summary>
+    /// 形・自身の否定・列の種類・文字列のリテラルの水準のまだ出していない組を足す原子を、並びの先頭から貪欲に選ぶ
+    /// （名前は付け直さない。文字列のリテラルの水準は形・否定・列の種類のそれぞれと組で数える）
+    /// </summary>
     private static List<DslAtom> CoveringForms(IReadOnlyList<DslAtom> forms)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -662,11 +703,12 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
 
         foreach (var atom in forms)
         {
+            var quote = DslFuzz.QuoteOf(atom);
             string[] keys =
             [
-                $"shape:{DslFuzzDimensions.ShapeOf(atom)}",
-                $"negated:{atom.InherentNegation}",
-                $"clr:{atom.Column.Clr}",
+                $"shape:{DslFuzzDimensions.ShapeOf(atom)}:{quote}",
+                $"negated:{atom.InherentNegation}:{quote}",
+                $"clr:{atom.Column.Clr}:{quote}",
             ];
 
             // Count は短絡しない（3 つの水準をすべて記録する）
@@ -680,8 +722,16 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
     }
 
     /// <summary>列に使える全ての形の原子（値は乱数）</summary>
-    private IEnumerable<DslAtom> AllAtoms(DslColumn column)
+    /// <param name="column">列</param>
+    /// <param name="bothQuotes">
+    /// 文字列のリテラルの原子を、<c>'</c> を含む値と含まない値の 2 つずつ作るか（網羅の単位だけ。種の単位は値の池から
+    /// 乱数で選ぶ）
+    /// </param>
+    private IEnumerable<DslAtom> AllAtoms(DslColumn column, bool bothQuotes = false)
     {
+        // 文字列のリテラルの値の選び方（null は値の池全体から選ぶ）
+        bool?[] quotes = bothQuotes && column.IsString ? [false, true] : [null];
+
         foreach (var negated in new[] { false, true })
         {
             // IS [NOT] NULL は NULL を許す列だけ（NOT NULL の列は生成時に断られる）
@@ -690,7 +740,10 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
                 yield return new DslNullCheck(negated) { Column = column };
             }
 
-            yield return new DslIn(negated, ListParam(column)) { Column = column };
+            foreach (var shape in DslIn.ListShapes.Where(shape => CanHoldList(column, shape)))
+            {
+                yield return new DslIn(negated, ListParam(column, shape)) { Column = column };
+            }
         }
 
         var ops = column.IsOrdered ? Enum.GetValues<DslOp>() : [DslOp.Eq, DslOp.Ne];
@@ -702,7 +755,25 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
 
             if (literalAllowed)
             {
-                yield return new DslCompare(op, Literal(column)) { Column = column };
+                foreach (var quote in quotes)
+                {
+                    yield return new DslCompare(op, Literal(column, quote)) { Column = column };
+                }
+            }
+
+            // 整数の列と小数のリテラル（docs：素の整数の列は数として比べ、整数の値オブジェクトの列は断る。断る形は
+            // 原子のクエリでだけ作り、等値の 1 つで足りる。受け付ける形は x.5 の値と整数で結果の違う 3 つ＝
+            // < と <=・> と >= は同じ結果になり、<> は = の NOT のクエリが作る）
+            if (
+                column.IsInteger
+                && (valueObjects ? op == DslOp.Eq : DslFuzzDimensions.FractionalOps.Contains(op))
+            )
+            {
+                yield return new DslCompare(op, FractionalLiteral())
+                {
+                    Column = column,
+                    RejectedByTypeCheck = valueObjects,
+                };
             }
         }
 
@@ -724,28 +795,44 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
         {
             foreach (var shape in new[] { "exact", "prefix", "suffix", "contains" })
             {
-                yield return new DslLike(negated, LikeLiteral(column, shape)) { Column = column };
+                foreach (var quote in quotes)
+                {
+                    yield return new DslLike(negated, LikeLiteral(column, shape, quote))
+                    {
+                        Column = column,
+                    };
+                }
             }
 
             yield return new DslLike(negated, Param(column)) { Column = column };
 
             foreach (var match in Enum.GetValues<DslMatchKind>())
             {
-                yield return new DslMatch(match, negated, StringLiteral(column, likeSafe: false))
+                foreach (var quote in quotes)
                 {
-                    Column = column,
-                };
+                    yield return new DslMatch(
+                        match,
+                        negated,
+                        StringLiteral(column, likeSafe: false, quote)
+                    )
+                    {
+                        Column = column,
+                    };
+                }
+
                 yield return new DslMatch(match, negated, Param(column)) { Column = column };
             }
         }
     }
 
     /// <summary>列の型の範囲内のリテラル</summary>
-    private DslOperand Literal(DslColumn column)
+    /// <param name="column">列</param>
+    /// <param name="quote">文字列のリテラルの値に <c>'</c> を含めるか（null は値の池全体から選ぶ）</param>
+    private DslOperand Literal(DslColumn column, bool? quote = null)
     {
         if (column.IsString)
         {
-            return StringLiteral(column, likeSafe: false);
+            return StringLiteral(column, likeSafe: false, quote);
         }
 
         var value = Pick(DslFuzz.ValuePool(column.Clr));
@@ -753,10 +840,33 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
         return new DslLiteral(value, DslFuzz.NumberText(value));
     }
 
-    /// <summary>LIKE のリテラル（% は先頭・末尾だけ）</summary>
-    private DslLiteral LikeLiteral(DslColumn column, string shape)
+    /// <summary>
+    /// 整数の列と比べる小数のリテラル（2 進で正確に表せる値＝double で比べても decimal のオラクルと食い違わない）
+    /// </summary>
+    private DslLiteral FractionalLiteral()
     {
-        var core = ((DslLiteral)StringLiteral(column, likeSafe: true)).Value.ToString()!;
+        var value = Pick(FractionalPool);
+
+        return new DslLiteral(value, DslFuzz.NumberText(value));
+    }
+
+    /// <summary>小数のリテラルの値（0.5 刻み・±2^53 の中）</summary>
+    private static readonly decimal[] FractionalPool =
+    [
+        -1.5m,
+        -0.5m,
+        0.5m,
+        1.5m,
+        4.5m,
+        127.5m,
+        255.5m,
+        32767.5m,
+    ];
+
+    /// <summary>LIKE のリテラル（% は先頭・末尾だけ）</summary>
+    private DslLiteral LikeLiteral(DslColumn column, string shape, bool? quote = null)
+    {
+        var core = ((DslLiteral)StringLiteral(column, likeSafe: true, quote)).Value.ToString()!;
         var pattern = shape switch
         {
             "exact" => core,
@@ -765,14 +875,15 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
             _ => "%" + core + "%",
         };
 
-        return new DslLiteral(pattern, "'" + pattern + "'");
+        return new DslLiteral(pattern, DslFuzz.QuoteText(pattern));
     }
 
-    private static DslQuery AtomQuery(string name, DslNode condition) =>
+    private static DslQuery AtomQuery(string name, DslNode condition, DslSpelling spelling) =>
         new()
         {
             Name = name,
             Condition = condition,
+            Spelling = spelling,
             Returns = QueryReturnShape.List,
             IsAtomQuery = true,
         };
@@ -799,8 +910,21 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
             OrderDescending = _random.Next(2) == 0,
             ProjectedColumn = projected,
             ResultTypeName = shape == QueryReturnShape.Projection ? name + "Row" : null,
+            Grouping = _random.Next(2) == 0 ? DslGrouping.Minimal : DslGrouping.Explicit,
+            Spelling = (DslSpelling)_random.Next(Enum.GetValues<DslSpelling>().Length),
         };
     }
+
+    /// <summary>条件の原子のパラメータ名をすべて付け直す（構文木の形は同じ）</summary>
+    private DslNode RenameTree(DslNode node) =>
+        node switch
+        {
+            DslAtom atom => Rename(atom),
+            DslNot not => new DslNot(RenameTree(not.Inner)),
+            DslAnd and => new DslAnd(and.Items.Select(RenameTree).ToList()),
+            DslOr or => new DslOr(or.Items.Select(RenameTree).ToList()),
+            _ => throw new ArgumentOutOfRangeException(nameof(node)),
+        };
 
     private DslNode Tree(List<DslColumn> columns, int depth)
     {
@@ -845,7 +969,11 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
     {
         var choices = new List<Func<DslAtom>>
         {
-            () => new DslIn(_random.Next(2) == 0, ListParam(column)) { Column = column },
+            () =>
+                new DslIn(_random.Next(2) == 0, ListParam(column, PickListShape(column)))
+                {
+                    Column = column,
+                },
         };
 
         // IS [NOT] NULL は NULL を許す列だけ（NOT NULL の列は生成時に断られる）
@@ -901,7 +1029,18 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
                 };
             }
 
-            // 範囲外のリテラルは原子のクエリだけで作る（合成の条件に混ぜると、失敗のキーがシードで揺れる）
+            // 範囲外のリテラルは原子のクエリだけで作る（合成の条件に混ぜると、失敗のキーがシードで揺れる）。
+            // 整数の列への小数のリテラルは、断られない素の列でだけ混ぜる
+            if (
+                column.IsInteger
+                && !valueObjects
+                && DslFuzzDimensions.FractionalOps.Contains(op)
+                && _random.Next(4) == 0
+            )
+            {
+                return new DslCompare(op, FractionalLiteral()) { Column = column };
+            }
+
             var value = Pick(DslFuzz.ValuePool(column.Clr));
 
             return new DslCompare(op, new DslLiteral(value, DslFuzz.NumberText(value)))
@@ -962,11 +1101,14 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
             _ => "%" + core + "%",
         };
 
-        return new DslLiteral(pattern, "'" + pattern + "'");
+        return new DslLiteral(pattern, DslFuzz.QuoteText(pattern));
     }
 
     /// <summary>文字列のリテラル（LIKE のパターンの芯なら % と _ を含まず空でないもの）</summary>
-    private DslOperand StringLiteral(DslColumn column, bool likeSafe)
+    /// <param name="column">列</param>
+    /// <param name="likeSafe">LIKE のパターンの芯か</param>
+    /// <param name="quote">値に ' を含めるか（null は値の池全体から選ぶ）</param>
+    private DslOperand StringLiteral(DslColumn column, bool likeSafe, bool? quote = null)
     {
         var pool = DslFuzz
             .ValuePool(column.Clr)
@@ -974,10 +1116,11 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
             .Where(value =>
                 !likeSafe || (value.Length > 0 && !value.Contains('%') && !value.Contains('_'))
             )
+            .Where(value => quote is null || value.Contains('\'') == quote)
             .ToList();
         var value = Pick(pool);
 
-        return new DslLiteral(value, "'" + value + "'");
+        return new DslLiteral(value, DslFuzz.QuoteText(value));
     }
 
     private DslParam Param(DslColumn column) =>
@@ -989,20 +1132,64 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
             column
         );
 
-    private DslParam ListParam(DslColumn column)
+    /// <summary>
+    /// リストに null を入れられるか（要素が参照型のリストだけ）：値オブジェクトなしの文字列の列のリスト（<c>IReadOnlyList&lt;string&gt;</c>）と、
+    /// 値オブジェクトありで列で型付けしたリスト（<c>IReadOnlyList&lt;値オブジェクト&gt;</c>）
+    /// </summary>
+    /// <remarks>
+    /// 値型のリスト（<c>IReadOnlyList&lt;int&gt;</c> など）は null を持てない。値オブジェクトの列へ型トークンで型付けしたリストは
+    /// メソッドの冒頭で <c>Create</c> へ渡して持ち上げ、値オブジェクトは null を包まず null の入力を検証エラーにする
+    /// （docs の値オブジェクトの節）ので、null を入れない。
+    /// </remarks>
+    private bool CanHoldNull(DslColumn column) => valueObjects || column.IsString;
+
+    /// <summary>リストの形を作れる列か（null を含む形は <see cref="CanHoldNull"/> の列だけ）</summary>
+    private bool CanHoldList(DslColumn column, string shape) =>
+        shape is DslIn.ListValues or DslIn.ListEmpty || CanHoldNull(column);
+
+    /// <summary>合成の条件の IN のリストの形（値の並ぶリストを多めに選ぶ）</summary>
+    private string PickListShape(DslColumn column)
+    {
+        var shape = _random.Next(8) switch
+        {
+            0 => DslIn.ListEmpty,
+            1 => DslIn.ListWithNull,
+            2 => DslIn.ListAllNull,
+            _ => DslIn.ListValues,
+        };
+
+        return CanHoldList(column, shape) ? shape : DslIn.ListValues;
+    }
+
+    /// <summary>IN のリストのパラメータ（null を含む形は、値オブジェクトありなら列で型付けする）</summary>
+    private DslParam ListParam(DslColumn column, string shape)
     {
         var pool = DslFuzz.ValuePool(column.Clr);
-        var values = Enumerable
-            .Range(0, 1 + _random.Next(3))
-            .Select(_ => Pick(pool))
-            .Distinct()
-            .ToList();
+        List<object?> values = shape switch
+        {
+            DslIn.ListEmpty => [],
+            DslIn.ListAllNull => [null],
+            _ => Enumerable
+                .Range(0, 1 + _random.Next(3))
+                .Select(_ => Pick(pool))
+                .Distinct()
+                .ToList<object?>(),
+        };
+
+        if (shape == DslIn.ListWithNull)
+        {
+            values.Insert(_random.Next(values.Count + 1), null);
+        }
+
+        var nullable = shape is DslIn.ListWithNull or DslIn.ListAllNull;
 
         return new DslParam(
             "p" + _parameterIndex++,
             values,
             IsList: true,
-            ByColumn: !DslFuzz.HasTypeToken(column.Clr) || _random.Next(2) == 0,
+            ByColumn: (nullable && valueObjects)
+                || !DslFuzz.HasTypeToken(column.Clr)
+                || _random.Next(2) == 0,
             column
         );
     }

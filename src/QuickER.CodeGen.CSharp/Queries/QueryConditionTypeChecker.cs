@@ -386,12 +386,10 @@ internal static class QueryConditionTypeChecker
                 return IntegerLiteralFits(column, literal);
 
             case TypeFamily.Integer:
-                // 小数リテラル × 整数列: VO は Create(1.5)（double → 整数の暗黙変換なし）で CS1503。
-                // 素の long 列はサフィックス L が付いて "1.5L"＝字句エラー。それ以外の素の整数列は
-                // サフィックスなし＝double 比較へ暗黙拡大されてコンパイル・翻訳とも通るため許容する
-                return column.ValueObjectClassName is null
-                    && column.UnderlyingTypeName != "long"
-                    && FitsDouble(literal);
+                // 小数リテラル × 整数列: 素の整数列は幅に依らず double 比較へ暗黙拡大されて数として比べる
+                // （エミッタは小数のリテラルにサフィックスを付けない）。VO は Create(1.5)（double → 整数の暗黙変換なし）で
+                // CS1503 になるので断る
+                return column.ValueObjectClassName is null && FitsDouble(literal);
 
             case TypeFamily.Decimal:
                 // サフィックス m の decimal リテラル（範囲外は CS0594）
