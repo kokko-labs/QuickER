@@ -675,6 +675,12 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 Strings.SchemaSync_ExecuteConfirmTableRebuildLosesImportDiscardedContent,
                 BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
             ),
+            // 外部キーを支えうるキーを全部外し 2 つ以上を作り直す計画で、一意制約の作り直し 1 つを外して古い形のまま残した
+            // （Detail は「制約名 (支える外部キーの名前)」）
+            SyncPlanWarningKind.UniqueConstraintRebuildKeptForForeignKey => string.Format(
+                Strings.SchemaSync_ExecuteConfirmUniqueConstraintRebuildKeptForForeignKey,
+                BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
+            ),
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
 

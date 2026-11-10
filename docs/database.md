@@ -579,6 +579,8 @@ SQLite rebuilds tables and uses its own order.
 - On SQL Server, PostgreSQL, and SQLite the script runs in a transaction and rolls back on failure.
   On MySQL / Oracle, DDL is implicitly committed by design, so a warning explains that a mid-script failure can leave changes partially applied.
   On these dialects the script is ordered so that a failure does not leave constraints dropped: a statement that the sync knows will be refused (a column change, a primary key drop, or a unique constraint drop that a foreign key kept by the sync blocks; when the sync drops every key that can support such a foreign key, those drops) runs first, so the database stays unchanged.
+  Among the drops run together, the drops of a unique constraint that is re-created (a named constraint whose columns change) and of a primary key that is replaced run last, so a refused sync leaves that key in its old form.
+  When two or more of those keys are re-created, one of them would be lost whatever the order, so one unique constraint re-creation is left out of the script and named in the confirmation; the unique constraint left in place keeps supporting the foreign key, and the other changes still run.
   Foreign key additions run in this order: foreign keys re-added as they were dropped, foreign keys re-created with a changed definition, new foreign keys, and those whose referenced columns are not proven to be a key, so a new foreign key that existing rows refuse does not stop the re-adds before it
 - The Oracle script and DDL can also be run by hand in SQL*Plus.
   Ordinary statements end with `;`, and a `/` line follows only a PL/SQL block, so each statement runs exactly once (SQL*Plus runs the previous statement again on a `/` line)

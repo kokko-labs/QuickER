@@ -713,6 +713,12 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string SchemaSync_ExecuteConfirmUniqueConstraintRebuildKeptForForeignKey {
+            get {
+                return ResourceManager.GetString("SchemaSync_ExecuteConfirmUniqueConstraintRebuildKeptForForeignKey", resourceCulture);
+            }
+        }
+
         public static string SchemaSync_ExecuteConfirmDescriptionCharactersReplaced {
             get {
                 return ResourceManager.GetString("SchemaSync_ExecuteConfirmDescriptionCharactersReplaced", resourceCulture);

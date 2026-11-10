@@ -219,23 +219,22 @@ public sealed class SyncPlanner
         // 失敗する）。再構築の方言は外部キーの型を確かめない。続けて、子の列が同期後に NOT NULL になる SET NULL の外部キーの
         // 追加・作り直しを名指しし、作れない方言（SQL Server・MySQL）では外す。どちらも展開の前に判定し、作り直しは
         // 削除と追加をまとめて外す
-        var selected = ExpandAlters(
-            ExcludeSetNullForeignKeysOnNotNullColumns(
-                isRebuildDialect
-                    ? dependable
-                    : ExcludeForeignKeysWithPostSyncTypeMismatch(
-                        dependable,
-                        capabilities,
-                        context,
-                        warnings,
-                        excluded
-                    ),
-                capabilities,
-                context,
-                warnings,
-                excluded
-            )
+        var beforeExpansion = ExcludeSetNullForeignKeysOnNotNullColumns(
+            isRebuildDialect
+                ? dependable
+                : ExcludeForeignKeysWithPostSyncTypeMismatch(
+                    dependable,
+                    capabilities,
+                    context,
+                    warnings,
+                    excluded
+                ),
+            capabilities,
+            context,
+            warnings,
+            excluded
         );
+        var selected = ExpandAlters(beforeExpansion);
 
         // 主キーの変更で新しく主キーに加わる NULL 許容の列は、NOT NULL 化を選んでいなくても暗黙に NOT NULL にする
         selected = InjectPrimaryKeyNotNullChanges(selected, context);
@@ -348,8 +347,11 @@ public sealed class SyncPlanner
                         capabilities.IdentifierLengthLimit
                     ),
                     sectionItems,
+                    [.. beforeExpansion.Where(i => i.Kind == SchemaDiffKind.AlterUniqueConstraint)],
                     capabilities,
-                    context
+                    context,
+                    warnings,
+                    excluded
                 );
 
                 // 列が空でないと通らない列の変更（Oracle の型の種類の変更・精度の縮小）の前で外し、後ろで付け直す制約を名指しする
@@ -1523,11 +1525,17 @@ public sealed class SyncPlanner
     /// </list>
     /// <para>
     /// 支えうるキーを全部外す計画（同じ列の一意制約の双子・主キーと同じ列の一意制約）は、最後のキーの削除だけが断られ、それより前の
-    /// 削除は通る。最後の 1 文だけを先頭へ移しても、残りのキーが支えて通ってしまうので、外す文の組を計画の順のまま先頭へ移す。組の
-    /// 前の方の文は利用者が選んだ一意制約の削除で（消えてよい）、主キーの解除は固定順（一意制約の削除の後）で必ず組の最後になる。
-    /// 数えると、双子の片方を「ほかのキー」と数えて前寄せせず、2 つ目の削除が断られたとき先に外した作り直しの外部キーが消えたまま
-    /// 残り（MySQL 1553）、主キーと同じ列の一意制約が外部キーを支えるのに主キーの解除を「必ず断られる」と先頭へ移して、続く列の
-    /// 変更の失敗で主キーが消えたまま残った（MySQL 3780）。
+    /// 削除は通る。最後の 1 文だけを先頭へ移しても、残りのキーが支えて通ってしまうので、外す文の組を先頭へ移す。組の中は、後ろで
+    /// 付け直すキーの削除（一意制約の作り直しを展開した削除・付与の段を持つ主キーの解除）を最後へ回し、前にはただの削除（消えてよい）を
+    /// 置く（<c>ReaddedDropsLast</c>）。付け直すキーの削除を前に置くと、それが通った後に組の最後が断られ、付け直しが走らずにそのキーが
+    /// 消えたまま残る。組の中に付け直すキーの削除が 2 つ以上あると、どう並べても前の方の付け直すキーが消えるので、一意制約の作り直し
+    /// 1 つを計画から外して <see cref="SyncPlanWarningKind.UniqueConstraintRebuildKeptForForeignKey"/> で名指しし（<c>KeepOneReaddedUnique</c>）、
+    /// 残りの計画で前寄せをやり直す。外した一意制約が古い形で外部キーを支え続けるので、ほかの削除は通る。
+    /// </para>
+    /// <para>
+    /// 支えうるキーの数え方：双子の片方を「ほかのキー」と数えると前寄せせず、2 つ目の削除が断られたとき先に外した作り直しの外部キーが
+    /// 消えたまま残り（MySQL 1553）、主キーと同じ列の一意制約が外部キーを支えるのに主キーの解除を「必ず断られる」と先頭へ移すと、
+    /// 続く列の変更の失敗で主キーが消えたまま残る（MySQL 3780）。
     /// </para>
     /// <para>
     /// 主キーの変更を移すときは Drop の段だけを移す（付与は元の位置のまま）。移した文が予言に反して通っても、ほかの文は元の並びで
@@ -1537,10 +1545,15 @@ public sealed class SyncPlanner
     private static List<SyncPlanSection> MoveCertainFailureFirst(
         List<SyncPlanSection> sections,
         IReadOnlyList<SchemaDiffItem> sectionItems,
+        IReadOnlyList<SchemaDiffItem> uniqueAlters,
         SyncDialectCapabilities capabilities,
-        SyncPlanContext? context
+        SyncPlanContext? context,
+        List<SyncPlanWarning> warnings,
+        List<SchemaDiffItem> excluded
     )
     {
+        (ResolvedForeignKeyRelationship Fk, string Child, string Parent)? blockingForeignKey = null;
+
         if (context is null)
         {
             return sections;
@@ -1603,10 +1616,30 @@ public sealed class SyncPlanner
             {
                 var moved = CertainFailure(section, item);
 
-                if (moved is not null)
+                if (moved is null)
                 {
-                    return MoveFirst(moved);
+                    continue;
                 }
+
+                // 支えうるキーの削除の組に、後ろで付け直すキーが 2 つ以上あると、どう並べても前の方の付け直すキーが消える。一意制約の
+                // 作り直しを 1 つ外して古い形のまま残し（外部キーを支え続ける）、残りの計画で前寄せをやり直す
+                if (
+                    moved.Count(x => IsReadded(x.Section, x.Item)) >= 2
+                    && KeepOneReaddedUnique(moved) is { } kept
+                )
+                {
+                    return MoveCertainFailureFirst(
+                        kept.Sections,
+                        kept.SectionItems,
+                        uniqueAlters,
+                        capabilities,
+                        context,
+                        warnings,
+                        excluded
+                    );
+                }
+
+                return MoveFirst(moved);
             }
         }
 
@@ -1714,8 +1747,10 @@ public sealed class SyncPlanner
                 )
             )
             {
-                return liveByName.TryGet(table, out var liveOwner)
-                    ? BlockedKeyDrops(liveOwner, section.Kind, item)
+                return
+                    liveByName.TryGet(table, out var liveOwner)
+                    && BlockedKeyDrops(liveOwner, section.Kind, item) is { } group
+                    ? ReaddedDropsLast(group)
                     : null;
             }
 
@@ -1831,6 +1866,8 @@ public sealed class SyncPlanner
                     continue;
                 }
 
+                blockingForeignKey = fk;
+
                 // 組：計画の項目のうち、支えうるキーを外す項目（一意制約の削除と主キーの解除の段）
                 return
                 [
@@ -1860,6 +1897,104 @@ public sealed class SyncPlanner
             }
 
             return null;
+        }
+
+        // キーの削除の組を、後ろで付け直すキーの削除が最後に来るように安定に並べ替える。組の最後の削除だけが断られ、前の削除は通る
+        // ので、前に置くのはただの削除（消えてよい）にする。付け直すキーの削除を前に置くと、それが通った後に組の最後が断られ、
+        // 付け直しが走らずにそのキーが消えたまま残る（一意制約の作り直しを展開した削除・付与の段を持つ主キーの解除）
+        List<(SyncPlanSection Section, SchemaDiffItem Item)> ReaddedDropsLast(
+            List<(SyncPlanSection Section, SchemaDiffItem Item)> group
+        ) => [.. group.OrderBy(x => IsReadded(x.Section, x.Item) ? 1 : 0)];
+
+        // 付け直すキーが 2 つ以上ある組から、一意制約の作り直し 1 つ（組の最初の付け直す一意制約の削除と、その追加）を計画から外す。
+        // 外した作り直しは警告とともに外した項目へ積み、残りのセクションと項目を返す（元の作り直しの項目が見つからなければ外さない）
+        (List<SyncPlanSection> Sections, List<SchemaDiffItem> SectionItems)? KeepOneReaddedUnique(
+            List<(SyncPlanSection Section, SchemaDiffItem Item)> group
+        )
+        {
+            var drop = group
+                .Where(x =>
+                    x.Section.Kind == SchemaDiffKind.DropUniqueConstraint
+                    && IsReadded(x.Section, x.Item)
+                )
+                .Select(x => x.Item)
+                .FirstOrDefault();
+
+            if (drop?.UniqueConstraintName is not { } name || blockingForeignKey is not { } fk)
+            {
+                return null;
+            }
+
+            var table = SchemaNames.ToStoredForm(drop.TableName);
+            var alter = uniqueAlters.FirstOrDefault(a =>
+                SchemaNames.AreSame(SchemaNames.ToStoredForm(a.TableName), table)
+                && a.ReplacedUniqueConstraint?.UniqueConstraintName is { } replaced
+                && SchemaNames.AreSame(replaced, name)
+            );
+
+            if (alter is null)
+            {
+                return null;
+            }
+
+            var removed = sectionItems
+                .Where(i =>
+                    ReferenceEquals(i, drop)
+                    || i.Kind == SchemaDiffKind.AddUniqueConstraint
+                        && SchemaNames.AreSame(SchemaNames.ToStoredForm(i.TableName), table)
+                        && i.UniqueConstraintName is { } added
+                        && SchemaNames.AreSame(added, name)
+                )
+                .ToHashSet(ReferenceEqualityComparer.Instance);
+
+            ExcludeSelected(
+                alter,
+                new SyncPlanWarning(
+                    SyncPlanWarningKind.UniqueConstraintRebuildKeptForForeignKey,
+                    drop.TableName,
+                    $"{name} ({ResolveForeignKeyName(fk.Fk.Relationship, fk.Child, fk.Parent, capabilities.IdentifierLengthLimit, context)})"
+                ),
+                warnings,
+                excluded
+            );
+
+            return (
+                [
+                    .. sections
+                        .Select(s => new SyncPlanSection
+                        {
+                            Kind = s.Kind,
+                            PrimaryKeyPhase = s.PrimaryKeyPhase,
+                            Items = [.. s.Items.Where(i => !removed.Contains(i))],
+                        })
+                        .Where(s => s.Items.Count > 0),
+                ],
+                [.. sectionItems.Where(i => !removed.Contains(i))]
+            );
+        }
+
+        // このキーの削除の後ろで同じキーを付け直すか（同じ表・同じ実効名の一意制約の追加か、同じ表の主キーの付与の段）
+        bool IsReadded(SyncPlanSection section, SchemaDiffItem drop)
+        {
+            var table = SchemaNames.ToStoredForm(drop.TableName);
+
+            return section.Kind == SchemaDiffKind.AlterPrimaryKey
+                ? sections.Any(s =>
+                    s.Kind == SchemaDiffKind.AlterPrimaryKey
+                    && s.PrimaryKeyPhase == PrimaryKeyPhase.Add
+                    && s.Items.Any(i =>
+                        SchemaNames.AreSame(SchemaNames.ToStoredForm(i.TableName), table)
+                    )
+                )
+                : drop.UniqueConstraintName is { } name
+                    && sections.Any(s =>
+                        s.Kind == SchemaDiffKind.AddUniqueConstraint
+                        && s.Items.Any(i =>
+                            SchemaNames.AreSame(SchemaNames.ToStoredForm(i.TableName), table)
+                            && i.UniqueConstraintName is { } added
+                            && SchemaNames.AreSame(added, name)
+                        )
+                    );
         }
 
         // 外部キーを支えうる親のキーの候補（live の主キーと一意制約）
@@ -1895,26 +2030,26 @@ public sealed class SyncPlanner
             List<(SyncPlanSection Section, SchemaDiffItem Item)> movedItems
         )
         {
+            // 先頭のセクションは移す文の並びのまま作る（同じセクションの文が続く間は 1 つのセクションにまとめる）。移す文の並びは計画の
+            // 順か、キーの削除の組なら付け直す削除を最後へ回した順（ReaddedDropsLast）
             var front = new List<SyncPlanSection>();
             var rest = new List<SyncPlanSection>();
 
+            foreach (var run in ConsecutiveBySection(movedItems))
+            {
+                front.Add(
+                    new SyncPlanSection
+                    {
+                        Kind = run.Section.Kind,
+                        PrimaryKeyPhase = run.Section.PrimaryKeyPhase,
+                        Items = run.Items,
+                        IsMovedFirst = true,
+                    }
+                );
+            }
+
             foreach (var section in sections)
             {
-                var moved = section.Items.Where(i => IsMoved(section, i)).ToList();
-
-                if (moved.Count > 0)
-                {
-                    front.Add(
-                        new SyncPlanSection
-                        {
-                            Kind = section.Kind,
-                            PrimaryKeyPhase = section.PrimaryKeyPhase,
-                            Items = moved,
-                            IsMovedFirst = true,
-                        }
-                    );
-                }
-
                 var kept = section.Items.Where(i => !IsMoved(section, i)).ToList();
 
                 if (kept.Count > 0)
@@ -1936,6 +2071,27 @@ public sealed class SyncPlanner
                 movedItems.Any(m =>
                     ReferenceEquals(m.Section, section) && ReferenceEquals(m.Item, item)
                 );
+
+            static List<(SyncPlanSection Section, List<SchemaDiffItem> Items)> ConsecutiveBySection(
+                List<(SyncPlanSection Section, SchemaDiffItem Item)> items
+            )
+            {
+                var runs = new List<(SyncPlanSection Section, List<SchemaDiffItem> Items)>();
+
+                foreach (var (section, item) in items)
+                {
+                    if (runs.Count > 0 && ReferenceEquals(runs[^1].Section, section))
+                    {
+                        runs[^1].Items.Add(item);
+                    }
+                    else
+                    {
+                        runs.Add((section, [item]));
+                    }
+                }
+
+                return runs;
+            }
         }
     }
 
