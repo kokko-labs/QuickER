@@ -23,9 +23,8 @@ namespace QuickER.Tests.Integration.Dialects;
 /// 結果は既知の失敗の一覧（<see cref="NameFuzzKnownFailures"/>）と厳密に照合する。
 /// </para>
 /// <para>
-/// 設計上の制約として流さない組（理由つき）:
-/// (1) ドットを含むテーブル名＝5 方言とも DDL が最初のドットでスキーマ修飾として分割して引用する（CLAUDE.md のプロバイダの対称性の
-/// 「既知の割り切り」）。(2) Oracle の識別子は二重引用符を含められない（引用識別子の規則）。
+/// 設計上の制約として流さない組（ドットを含むテーブル名・Oracle の二重引用符）は <see cref="NameFuzzDdlRoundTripNotGenerated"/> に
+/// 理由つきで宣言する（判定は <see cref="IsOutOfDesign"/>）。
 /// </para>
 /// <para>
 /// 方言の識別子の長さの上限を超える名前と、方言が表せない文字を含む名前（MySQL の BMP の外の文字＝MySQL は断らずに黙って
@@ -70,7 +69,7 @@ public abstract class NameFuzzDdlRoundTripTestsBase
     /// <summary>取込の接続文字列</summary>
     protected abstract string ConnectionString { get; }
 
-    /// <summary>その方言では設計上置けない名前か（理由は型の remarks）</summary>
+    /// <summary>その方言では設計上置けない名前か（理由は <see cref="NameFuzzDdlRoundTripNotGenerated"/>）</summary>
     protected virtual bool IsOutOfDesign(string name, NameRole role) =>
         role == NameRole.Table && name.Contains('.');
 

@@ -87,7 +87,7 @@
 
 - `BackendParitySqlServerRuntimeTests.RandomSaves_MatchBaseline`（夜間の目印・登録簿の部分 GeneratedRuntime/ParitySqlServerSaves）：生成器 `BackendParitySqlServerSaveGenerator` が種ごとに kits 3〜6 行の役（Rename / ChangeCode / TakeDeletedCode / Delete / New）・他者の変更・Before のフックの飛ばし・渡す順を乱数で引き、グラフ保存 1 回と保存し直しを QuickER 版・EF Core・リモート（EF Core のサーバー）へ流す。保存の引数（4 通り）とフックの有無は種の番号から決める（普段の 8 種で全組）。
 - 種は `QUICKER_PARITY_SQLSERVER_SAVE_SEEDS`（普段 8・夜間 200）／1 種だけは `QUICKER_PARITY_SQLSERVER_SAVE_SEED`。既知の失敗の一覧は空。
-- 作らない形：他者が消した行の削除（行なし削除の非対称）・部品に参照された code の変更（決まった形の `alternate-key-referenced-*` が持つ）。
+- 作らない形は `BackendParitySqlServerSaveNotGenerated.cs` に宣言する（`tests/QuickER.Tests/TestSupport/CLAUDE.md`「作らない形の宣言」）。
 - 次元表 `BackendParitySqlServerSaveDimensions`：行ごとに 役 × 他者の変更 × 飛ばし × 同じ保存のほかの行が消えたか × 保存の引数、3 因子の組（役 × ほかの行が消えたか × 保存の引数）。網羅しない組は Accepted の Delete × Gone の 1 つ（生成器が作らない受け入れた差）。照合は夜間の既定の種の数でだけ行う（普段の 8 種は数えて書くだけで、K1 の組は決まった形のケースが普段の網で持つ）。
 - K1 の修正を外すと夜間の種で赤になる（mutation 実証済み）。
 

@@ -77,6 +77,19 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!--
+      Integration の生成器の作らない形の宣言（実体は Integration の生成器の隣）。受け持つ守りの照合（影響の地図の名前・テストの名前・
+      行 Id）はこのプロジェクトにしか無いので、宣言のファイルを逆向きにリンクして両方の宣言を照合する。宣言は Engines の型と BCL だけを
+      参照する純粋なデータにする（Integration の型を参照するとこのプロジェクトのビルドが止まる）
+    -->
+    <Compile
+      Include="..\QuickER.Tests.Integration\**\*NotGenerated.cs"
+      Exclude="..\QuickER.Tests.Integration\bin\**;..\QuickER.Tests.Integration\obj\**"
+      LinkBase="IntegrationDeclarations"
+    />
+  </ItemGroup>
+
   <!--
     生成コードへ掛けるカルチャのアナライザ（GeneratedCodeCultureAnalyzerTests）の場所を、テストアセンブリの
     AssemblyMetadata として渡す。src のビルドが使うのと同じ SDK 同梱の DLL を使う（パッケージを足すと、テストだけ版が変わる）。

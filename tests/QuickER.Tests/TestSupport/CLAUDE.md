@@ -2,6 +2,7 @@
 
 テストの土台（エンジンの共通の枠組み・共有の部品・横断のガード）の規則を置く。
 `QuickER.Tests` と `QuickER.Tests.Integration` の両方が使う部品は、WPF に依存しないものだけを Compile のリンクで共有する。
+共有の向きは、生成フィクスチャと同じく QuickER.Tests の実体を Integration がリンクする向き。逆向き（Integration の実体を QuickER.Tests がリンクする）は、生成器の作らない形の宣言だけ（「作らない形の宣言」）。
 同期計画の総当たりの規則（表明 1b・1 種の例外の記録など）は `tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`「総当たりの表明と運用」を、名前の総当たり（NameFuzz）は `src/QuickER.Model/CLAUDE.md`「名前の総当たり」を参照する。
 
 ## エンジンの核（Engines/）
@@ -103,6 +104,34 @@
     - 簡易 DSL の条件の訳し方は P3-6 で総当たりへ寄せた：意味は `DslConditionFuzzTests`、エミッタの綴りは `QueryConditionCSharpEmitterTests` の表（エミッタの直接の出力）、動作に出ない形の表明だけを元のメソッドに「残す理由（P3-6）：…」で残す。
     - 構造で言えない表明（式本体・SQL Server の SQL の断片・例外の文言・生成器の固定の英文・書式・簡易 DSL の条件の訳し方）は、元のテストのメソッドに文のまま残し、メソッドの前に「残す理由（P3-4b）：…」のコメントで理由と移した先の行を書く。重なる先へ任せて消すのは、同じ入力・同じか強い期待で見ている先だけ（チェックイン済みのフィクスチャで動く Integration のテストは、テンプレートを壊しても再生成するまで赤にならないので重なる先にしない）。
 - ガード：TestSupport 直下の `DimensionTableTests` / `CoveringArrayTests` / `CoverageCounterTests` / `ScenarioTableTests` / `MatrixAxisTests` / `EngineRegistryChecksTests` / `FactorInventoryTests`、両アセンブリの `EngineRegistryTests` / `FactorInventoryGuardTests` / `MatrixAxisGuardTests`。mutation 実証済み（理由つきで外した値は緑のまま）。
+
+### 作らない形の宣言
+
+乱数・総当たりの生成器が、製品は分岐するのに作らない形を、理由つきで宣言して機械で守る。
+
+- 使い分け：
+  - `isValid`：原理的に起こり得ない因子の組。
+  - 網羅しない組の一覧（`CoverageGap`）：因子で表せる組のうち、観測しなかったもの。
+  - 作らない形の宣言：因子より細かい形（値の幅・手の組み合わせ・図の形など）で、生成器が作らないもの。生成器の XmlDoc に「作らない」の散文の一覧を書かず、宣言を指す 1 文にする。
+- 型は `Engines/NotGenerated.cs`。
+  - `NotGeneratedDeclaration`：生成器 1 つの宣言（生成器の名前・入力を受け取るエンジンの部分・作らない形・作らない形が無いときの理由）。
+  - `NotGeneratedShape`：1 行（Id・形・種類・直す区切り・理由・受け持つ守り）。作る入口は `NotGenerated.Accepted` / `NotGenerated.Pending`。
+  - 種類は既知の失敗と同じ `KnownKind`。Accepted は製品・DB・docs の事実で作らない形、Pending は水準を足す区切りがある形。Pending は直す区切りを持ち、Accepted は持たない（判定は `KnownFailureSet.KindProblem` を共有）。理由は因子の棚卸しと同じ `FactorInventoryGuard.IsVagueReason` で断る。
+  - 受け持つ守りは CLAUDE.md の「ガード：」と同じ書き方（地図の名前・テストのクラスとメソッド・名前に続けた行 Id）。どこでも見ていない形は印 `NotGenerated.Unguarded` を書く。印の無い空は赤。
+- 置き場所：生成器の隣の `{生成器}NotGenerated.cs` の `internal static class {生成器}NotGenerated` に、静的なプロパティ `Declaration` で置く。既存の `*Dimensions.cs` には置かない。
+  - 今の宣言：Integration の `SyncPlanFuzzNotGenerated`（同期計画の総当たりと能力の組の網）・`SyncModelNotGenerated`・`BackendParityNotGenerated`・`BackendParitySqlServerSaveNotGenerated`・`NameFuzzDdlRoundTripNotGenerated`、QuickER.Tests の `DslFuzzNotGenerated`（SQLite・MySQL と SQL Server）・`NameFuzzNotGenerated`・`CanvasInputNotGenerated`・`DocumentFileNotGenerated`・`ToolArgumentShapeFuzzNotGenerated`（網羅型）・`CodegenConfigNotGenerated`（網羅の配列の行の番号を種にするだけなので空の宣言）。
+  - Pending の直す区切りは、決まっている区切りの名前か「（未起動）」を添えた区切りの仮の名前を書く。区切りの一覧では照合しない（区切りは増えるので）。
+  - **宣言のファイルは Engines の型と BCL だけを参照する純粋なデータにする。** Integration の宣言は QuickER.Tests へ逆向きに Compile のリンクで入る（QuickER.Tests の csproj の `..\QuickER.Tests.Integration\**\*NotGenerated.cs`）。Integration の型を参照すると QuickER.Tests のビルドが止まる。リンクの向きはほかの共有（QuickER.Tests の実体を Integration がリンクする）と逆で、受け持つ守りの照合の関数と影響の地図が QuickER.Tests にしか無いため。
+  - QuickER.Tests の宣言のうち Integration も使う生成器のもの（`DslFuzzNotGenerated.cs`・`NameFuzzNotGenerated.cs`）は、既存の `DslFuzz*.cs`・`NameFuzz*.cs` のリンクで Integration にも入る。
+  - 宣言のファイルは CLAUDE.md の照合の行 Id の本文から名前で外す（`tests/QuickER.Tests/Docs/CLAUDE.md`「CLAUDE.md の照合」）。宣言に書いた行 Id が宣言そのものに当たって実在に見えないようにするため。
+- 照合：
+  - 宣言はアセンブリから反射で集める（`NotGeneratedGuard.InAssembly`）。一覧を手で持たない。
+  - 種を使うエンジンの部分（台帳のテストのソースの本文に `SeedSource.Resolve(` があるもの）は、どれかの宣言の部分に載る。網羅型の生成器（種を使わない）も宣言を置いてよく、置いた宣言は同じ規則で照合する。
+  - 宣言のエンジンの部分は影響の地図の守り（両アセンブリの台帳）に実在する。宣言を持つ型は `{生成器}NotGenerated.cs` にだけある。
+  - tests/ のすべての宣言のファイルの宣言が QuickER.Tests に入っている（逆向きのリンクが外れると、Integration の宣言が黙って照合の外に出るため）。宣言のファイルは CLAUDE.md の照合の行 Id の本文に入っていない。
+  - 受け持つ守りは、CLAUDE.md の照合と同じ関数（`ClaudeMdReferenceTests` の `ReferencesIn`・`FindMissingTestNames`・`FindMissingMapNames`・`FindForeignRowIds`・`FindMissingRowIds`）で読む。地図の名前かテストの名前を 1 つ以上持ち、バッククォートの語はどれも名前か行 Id として読め、名前に続けた行 Id はその持ち主のソースにある。
+- 運用：水準を足して作るようになった形は、宣言の行を消す。宣言に無い「作らない」を見つけたら行を足す。
+- ガード：QuickER.Tests の `NotGeneratedGuardTests`（構造・網羅・部分の実在・宣言のファイル・受け持つ守り）と Integration の `NotGeneratedGuardTests`（構造・網羅）。自己検査は `NotGeneratedTests`（壊した宣言・架空の名前と行 Id・宣言の無い種を使う部分・印の無い空の守りを名指しし、整った宣言と印つきの空を通す）。
 
 ## 共有の土台
 

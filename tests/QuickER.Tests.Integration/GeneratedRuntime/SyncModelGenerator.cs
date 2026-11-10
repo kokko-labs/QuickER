@@ -11,8 +11,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 書き込みは、書き手の DB の現在の内容を見て、その DB で成功する操作だけを選ぶ（親の無い行・子の残る親の削除・
-/// 一意制約の重複は作らない）。失敗する書き込みは「失敗した操作の記録」の別の段（失敗の注入）で扱う。
+/// 書き込みは、書き手の DB の現在の内容を見て、その DB で成功する操作だけを選ぶ。作らない形（失敗する書き込み・同じキーの挿入など）は
+/// <see cref="SyncModelNotGenerated"/> に宣言する。
 /// </para>
 /// <para>
 /// キーは書き手ごとに別の範囲から採る（端末 1＝1000 台・端末 2＝2000 台・サーバーの他者＝3000 台・初期データ＝1 桁）。
@@ -47,8 +47,6 @@ internal sealed class SyncModelGenerator
     /// <summary>
     /// 種の組（種を 4 で割った余り）。0＝失敗の注入なし（区切り 29-1 の操作だけ）・1＝キーだけのスタブなどの操作を足す・
     /// 2＝失敗の注入を足す・3＝両方。組ごとに乱数の引き方を分けるので、組 0 の種の操作の列は、操作を足しても変わらない。
-    /// 外部の ISyncTable 実装の代役は乱数の種では使わない（エンジンの内部の面を持たない実装は、外部キーで断られた書き込みの
-    /// 報告などを持たず、公開の面どおりに例外を投げる＝その差は不具合ではない）。代役は決定的なシナリオだけが使う。
     /// </summary>
     /// <remarks>
     /// モードとポリシーは種の中で固定し、乱数でなく種の番号から決める（種を 4 で割った商を、モード×ポリシーの 6 組へ順に
@@ -629,7 +627,7 @@ internal sealed class SyncModelGenerator
     /// <summary>形：更新で一意な値を空け、別の行がその値を更新で取る（4m-D3）</summary>
     public const string ReleaseTakeShape = "release-take";
 
-    /// <summary>形：空けた値を取った行の値を、さらに別の行が取る（3 行の連鎖。循環＝入れ替えは作らない）</summary>
+    /// <summary>形：空けた値を取った行の値を、さらに別の行が取る（3 行の連鎖。入れ替えは作らない＝<see cref="SyncModelNotGenerated"/>）</summary>
     public const string ReleaseTakeChainShape = "release-take-chain";
 
     /// <summary>形：行を消して一意な値を空け、別の行がその値を更新で取る（4m-B3 の材料）</summary>
@@ -640,7 +638,7 @@ internal sealed class SyncModelGenerator
 
     /// <summary>
     /// 一意な値の付け替えの形（品目の code かフォルダーの name）を 1 つ作る。どれも書き手の DB で各手が成り立つ順に並べ、
-    /// 値を取る手は、それより前の手が値を空けた後に置く（2 行の入れ替えは作らない＝同じバッチの入れ替えは docs の既知の割り切り）。
+    /// 値を取る手は、それより前の手が値を空けた後に置く（入れ替えは作らない＝<see cref="SyncModelNotGenerated"/>）。
     /// </summary>
     private ModelShapeStep? TryUniqueShape(ModelActor actor, ModelWriteVia via, ModelDbState state)
     {

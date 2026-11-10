@@ -12,14 +12,13 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <remarks>
 /// <para>
 /// 顧客のスロット（<see cref="CustomerSlotNames"/>）のグラフは、顧客の根と、根を指す外部キーで持つ連絡先・紹介先だけを持つ。
-/// どの行も、同じ保存の中で持っている行を指す外部キーは、持っている関係の 1 本だけにする（<see cref="Consistent"/>）。外部キーと
-/// ナビゲーションが食い違うグラフは、どの実装先も保存の前に断る（GraphConsistency）ので、乱数の列では作らず、決まった形の
-/// シナリオだけが持つ（作ると、保存の手が断られるだけで、その後の列が何も比べなくなる）。
+/// どの行も、同じ保存の中で持っている行を指す外部キーは、持っている関係の 1 本だけにする（<see cref="Consistent"/>）。
+/// 外部キーとナビゲーションが食い違うグラフは作らない（<see cref="BackendParityNotGenerated"/>）。
 /// </para>
 /// <para>
-/// 列の途中では、実装先の手の差を宣言する手（<see cref="ParityDeviation"/>）を作らない。参照されている顧客の削除・代替キーの
-/// 更新・Save フックの規則は列の末尾（<see cref="AppendTail"/>）にだけ置き、<see cref="DeviatingOp"/> の印で、受け入れた差
-/// （インメモリ）と直す区切りのある差（EF Core・リモート）の実装先をその手から後の比較から外す。
+/// 実装先の手の差を宣言する手（<see cref="ParityDeviation"/>＝参照されている顧客の削除・代替キーの更新・Save フックの規則）は
+/// 列の末尾（<see cref="AppendTail"/>）にだけ置き、<see cref="DeviatingOp"/> の印で、受け入れた差（インメモリ）と直す区切りのある差
+/// （EF Core・リモート）の実装先をその手から後の比較から外す。
 /// </para>
 /// </remarks>
 public sealed partial class BackendParityGenerator
