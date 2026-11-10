@@ -343,6 +343,7 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
         var zoomBefore = _vm.ZoomLevel;
         var focusedBefore = Keyboard.FocusedElement as ButtonBase;
         var pressedBefore = focusedBefore?.IsPressed;
+        var checkedBefore = (focusedBefore as ToggleButton)?.IsChecked;
         var activationCountBefore = _activations.Count;
         var geometryBefore = Geometry();
         var rubberBefore = _vm.IsRubberBandVisible;
@@ -426,10 +427,19 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
                 );
             }
 
+            // キーボードで移ったボタン自身の押下が Space 以外のキーで取り消され、IsPressed が戻るだけの変化は例外にする
             if (
                 focusedBefore is not null
                 && ReferenceEquals(focusedBefore, Keyboard.FocusedElement)
                 && focusedBefore.IsPressed != pressedBefore
+                && !IsCancelledControlPress(
+                    controlHeldBefore && pressOnControlBefore,
+                    step.IsSpaceKey,
+                    controlHeldBefore && !model.ControlHoldsCapture,
+                    pressedBefore == true && !focusedBefore.IsPressed,
+                    newActivations.Count,
+                    (focusedBefore as ToggleButton)?.IsChecked != checkedBefore
+                )
             )
             {
                 return Violation(
@@ -1044,7 +1054,17 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
 
                 return null;
             case CanvasOp.MoveTo:
-                if (SpotPoint(step.Spot!.Value, bringIntoView: false) is not { } target)
+                // ボタンを押していない移動（ホバー）は、押下の手と同じく見えない場所をスクロールで見せる。
+                // 押している間（ドラッグ・パン・ドラッグ＆ドロップ）はスクロールさせない
+                if (
+                    SpotPoint(
+                        step.Spot!.Value,
+                        bringIntoView: _left == MouseButtonState.Released
+                            && _middle == MouseButtonState.Released
+                            && _oleDrag is null
+                    )
+                    is not { } target
+                )
                 {
                     return $"{step.Spot} の場所が見つからない";
                 }
@@ -1633,6 +1653,35 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
     }
 
     /// <summary>点の当たり判定がその要素の中に落ちるか</summary>
+    /// <summary>
+    /// I1 の例外：パンの間のフォーカス要素の IsPressed の変化が、キーボードで移ったボタン自身の押下の取り消しか
+    /// </summary>
+    /// <remarks>
+    /// WPF の <see cref="ButtonBase"/> は、Space の押下の間に Space 以外のキー（Tab・Ctrl・Delete）を受けると押下を取り消し、
+    /// IsPressed を false へ戻す。これはボタン自身の押下の後始末で、パンがボタンを押したのではない。例外にするのは
+    /// 次がすべて揃うときだけ（Click・切り替えを伴う変化は今どおり I1 の違反）。
+    /// </remarks>
+    /// <param name="pressOwnedByControl">押下が、キーボードで移ったボタンの押下として始まり、ボタンがキャプチャを持っていた</param>
+    /// <param name="spaceKey">手が Space のキーか（Space の手による変化は例外にしない）</param>
+    /// <param name="cancelledByModel">仕様のモデルが、この手でボタンの押下が取り消されたと言う</param>
+    /// <param name="released">IsPressed が true から false へ戻った</param>
+    /// <param name="activations">この手のコントロールの反応（Click・切り替え・入力）の数</param>
+    /// <param name="checkedChanged">トグルの IsChecked が変わった</param>
+    internal static bool IsCancelledControlPress(
+        bool pressOwnedByControl,
+        bool spaceKey,
+        bool cancelledByModel,
+        bool released,
+        int activations,
+        bool checkedChanged
+    ) =>
+        pressOwnedByControl
+        && !spaceKey
+        && cancelledByModel
+        && released
+        && activations == 0
+        && !checkedChanged;
+
     private bool HitsWithin(Point point, DependencyObject element) =>
         _window.InputHitTest(point) is DependencyObject hit && IsSelfOrDescendant(hit, element);
 

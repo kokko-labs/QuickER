@@ -312,7 +312,9 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
 
 - `src/QuickER.Gui/Behaviors` のビヘイビア（`CanvasViewportBehavior`・`DragBehavior`・`RubberBandBehavior`・`DataGridRowReorderBehavior`）の振る舞いは、入力の列のエンジン `CanvasInputTests`（地図の名前 `DiagramEdit/CanvasInput`）が確かめる。本物の `MainWindow` へキーとマウスの手の列を流し、各手の後に不変条件 I1〜I9 を表明する。
   - I1 パンの間はボタン類が押されず切り替わらず入力されない・I2 パンの実行中は ScrollViewer がキャプチャを持ち続ける・I3 Space の持ち主とパン待機と実行中のカーソル・I4 操作の終わりに状態とキャプチャとカーソルが残らない・I5 パンの間の移動でカードが動かずラバーバンドが始まらない・I6 履歴の積み方と外部の取り消し・I7 ラバーバンドと並べ替えのドラッグは今の押下からだけ始まる・I8 ズーム・I9 押していないときのカードの上のカーソル。
-  - I1 の例外は 1 つだけ：キーボードで移ったボタンがキャプチャを持ったまま始まった押下（WPF の `ButtonBase` は Space の押下でキャプチャを取り、解放で Click する。詳細は `src/QuickER.Gui/Behaviors/CLAUDE.md`「Space のパンは、キーボードで移ったボタン類の Space を横取りしない」）。
+  - I1 の例外は 2 つだけ。
+    - キーボードで移ったボタンがキャプチャを持ったまま始まった押下（WPF の `ButtonBase` は Space の押下でキャプチャを取り、解放で Click する。詳細は `src/QuickER.Gui/Behaviors/CLAUDE.md`「Space のパンは、キーボードで移ったボタン類の Space を横取りしない」）。
+    - その押下が Space 以外のキー（Tab・Ctrl・Delete）で取り消され、IsPressed が戻るだけの変化（`CanvasInputHarness.IsCancelledControlPress`）。ボタン自身の押下で、モデルが取り消しを言い、Click も切り替えも起きていないときだけ。自己検査は `CanvasInputTests.CancelledControlPressException_IsNarrow`。
 - ファイル：手と仕様のモデル `CanvasInputSteps.cs`（`CanvasInputModel`＝Space の持ち主・フォーカス・押下の状態を窓なしで決める）、乱数の手の列 `CanvasInputGenerator.cs`、手を流して表明するハーネス `CanvasInputHarness.cs`、決まった形の行と網羅の行 `CanvasInputRows.cs`、次元表と一覧 `CanvasInputDimensions.cs`、既知の失敗 `CanvasInputKnownFailures.cs`（いずれも `tests/QuickER.Tests/Gui/Behaviors/`）。
 - 本物で流すもの：
   - キーは `InputManager.ProcessInput` で流す（ウィンドウのトンネル・フォーカス要素・バブル・クラスハンドラ・KeyBinding・Tab のフォーカス移動まで製品と同じ経路）。自動リピートは `KeyEventArgs` の internal の `SetRepeat` を反射で立てる。
@@ -320,14 +322,16 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
   - マウスは仮想のカーソルを持ち、キャプチャの要素か当たり判定の要素を発生元にしてプレビューを流し、処理済みでなければバブルを続けて流す（作った `MouseButtonEventArgs` を流しても WPF はバブルへ昇格させない）。
   - ビヘイビアが読むボタン・位置・修飾キーは `BehaviorInput.OverrideForTests` の差し替えで仮想の値を返す。ドラッグ＆ドロップは差し替えの `DoDragDrop` が OLE のループの代わりに落とし先へ `Drop` を流す。
   - アクティブの行き来は本物（別のウィンドウの `Activate` と戻り）。
+  - 見えない場所への手は、ボタンを押していないとき（押下と、押していない移動）だけスクロールで見せる。押している間（ドラッグ・パン・ドラッグ＆ドロップ）の移動はスクロールさせない。
 - 流さないもの：
   - `Mouse.DirectlyOver`・`IsMouseOver` の追跡、WPF のコントロールが自分で読む実際のボタンの状態（ボタンをマウスで押す手はフォーカスが移るところまで）、OLE のドラッグ＆ドロップのループ。
   - パンの実行中に子孫の要素がキャプチャを奪う手（台帳の G6）。奪うのは WPF のコントロールの内部の処理で、流すには手の語彙をコントロールごとに広げる必要がある。G6 は台帳のきっかけ待ちのまま語彙に入れていない。
 - 窓は 1 つを全部の行と種で使い回す。種の始めに図を差し替え、ズームとスクロールとミニマップを戻し、前の種の状態（進行中の状態・キャプチャ・フォーカス・選択・Undo の履歴・ズーム・スクロール）が残っていないことを表明する。
-- 次元表は 2 つ。
+- 次元表は 3 つ。
   - Space の押下（押下から解放までを 1 ケース）：フォーカスの対象 × 来方 × 押し方（リピートの回数）を 3 因子の組まで網羅し、押下の間の最初の手と Ctrl を数える。網羅しない組は受け入れの 1 つだけ（キャンバスはタブ順に入らないので、キーボードでキャンバスへ来る経路が製品に無い）。
   - 左ボタンの押下：場所 × 押下の時のパン待機 × 押下の間の最初の手を全組網羅する（網羅しない組の一覧は空）。
-  - どちらも数え方は仕様のモデルだけで手の列をなぞり、乱数を引かない。網羅の行（`CanvasInputRows.Coverage`・`PressCoverage`）が種に依らず全組を流す。
+  - Space の持ち主の判定（新しい押下と、パンが持っていない押下のリピートを 1 回ずつ）：判定の時の対象 × 判定の種類 × パンの実行中かを全組網羅する（網羅しない組の一覧は空）。Space の押下の表は押下の後に重なった手しか数えないので、パンが先に始まり、その最中に Tab で移った対象で持ち主を決める順序をここで数える（夜間の種でだけ出た形）。
+  - どれも数え方は仕様のモデルだけで手の列をなぞり、乱数を引かない。網羅の行（`CanvasInputRows.Coverage`・`PressCoverage`・`DecisionCoverage`）が種に依らず全組を流す。
 - 空振りの検出：ハーネスは表明の分岐が実際に通ったことを記録し（`Exercised`）、決まった形の行の後に `CoverageGuard.ContainsAll` で必須の一覧（`CanvasInputHarness.RequiredExercises`）と照合する。表明の条件を誤って狭めると、ここが名指しして赤にする。
 - 種：普段 40・夜間 400（変数 `QUICKER_CANVAS_INPUT_SEEDS`・1 種だけは `QUICKER_CANVAS_INPUT_SEED`）、1 種につき 3 つの手の列。普段の実行の所要はおよそ 14 秒。
 - 既知の失敗は台帳の G3（ドラッグ中の Delete で取り除いたテーブルの移動を履歴に積む）と G5（Space の押下中に外して戻すとパン待機のカーソルが戻らない）だけで、どちらも Pending（きっかけ待ち）。

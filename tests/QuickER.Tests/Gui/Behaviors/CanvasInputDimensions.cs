@@ -173,6 +173,86 @@ internal static class CanvasInputDimensions
         }
     }
 
+    // ---------- Space の持ち主の判定の次元表 ----------
+
+    /// <summary>判定の時のフォーカスの対象</summary>
+    public const string DecisionTarget = "DecisionTarget";
+
+    /// <summary>判定の種類（新しい押下・判定し直すリピート）</summary>
+    public const string DecisionKind = "DecisionKind";
+
+    /// <summary>判定の時にパンの実行中だったか</summary>
+    public const string PanningAtDecision = "PanningAtDecision";
+
+    /// <summary>Space の持ち主の判定の次元表（判定 1 回を 1 ケース）</summary>
+    /// <remarks>
+    /// <para>
+    /// ビヘイビアが Space の持ち主を決めるのは、新しい押下と、パンが持っていない押下のリピート（判定し直す）。
+    /// Space の押下の次元表は押下の時の対象と押下の後に重なった手を数えるので、「パンが先に始まり、その最中に Tab で
+    /// 移った対象で持ち主を決める」順序を数えない（夜間の種でだけ出た形）。この表は判定ごとに、その時の対象・種類・
+    /// パンの実行中かを数え、3 因子の組まで網羅する。
+    /// </para>
+    /// <para>
+    /// 組はすべて作れる（パンの実行中の対象はキャンバスなら中ボタンの押下で、ほかは Tab で移る。判定し直すリピートは
+    /// テキストボックスで押した Space で作る）ので、網羅しない組の一覧は空。
+    /// </para>
+    /// </remarks>
+    public static DimensionTable DecisionTable { get; } =
+        new(
+            EngineIds.DiagramEdit,
+            [
+                new Factor(
+                    DecisionTarget,
+                    Enum.GetValues<CanvasTarget>().Select(t => new Level(t.ToString())).ToList(),
+                    "Space の持ち主を決めた時のフォーカスの対象"
+                ),
+                new Factor(
+                    DecisionKind,
+                    [new Level("press"), new Level("repeat")],
+                    "判定の種類（新しい押下・パンが持っていない押下のリピート）"
+                ),
+                new Factor(
+                    PanningAtDecision,
+                    [new Level("none"), new Level("panning")],
+                    "判定の時にパンの実行中（マウスでドラッグしている最中）だったか"
+                ),
+            ],
+            [new FactorGroup(DecisionTarget, DecisionKind, PanningAtDecision)]
+        );
+
+    /// <summary>判定の網羅しない組の一覧（網羅の行が全組を流す）</summary>
+    public static CoverageGapSet DecisionGaps => CoverageGap.Set(EngineIds.DiagramEdit, []);
+
+    /// <summary>手の列を仕様のモデルでなぞり、Space の持ち主の判定ごとに数える（対象の言えないフォーカスは数えない）</summary>
+    public static void ObserveDecisions(CoverageCounter counter, IReadOnlyList<CanvasStep> steps)
+    {
+        var model = new CanvasInputModel();
+
+        foreach (var step in steps)
+        {
+            var kind = step.Op switch
+            {
+                CanvasOp.SpaceDown => "press",
+                CanvasOp.SpaceRepeat when model.Owner != SpaceOwner.Pan => "repeat",
+                _ => null,
+            };
+
+            if (kind is not null && model.Focus is { } target)
+            {
+                counter.Observe(
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        [DecisionTarget] = target.ToString(),
+                        [DecisionKind] = kind,
+                        [PanningAtDecision] = model.Panning ? "panning" : "none",
+                    }
+                );
+            }
+
+            model.Apply(step);
+        }
+    }
+
     // ---------- 左ボタンの押下の次元表 ----------
 
     /// <summary>押下の場所</summary>
@@ -299,7 +379,8 @@ internal static class CanvasInputDimensions
             Table,
             CanvasInputRows.Table.Count
                 + CanvasInputRows.Coverage.Count
-                + CanvasInputRows.PressCoverage.Count,
+                + CanvasInputRows.PressCoverage.Count
+                + CanvasInputRows.DecisionCoverage.Count,
             [
                 "tests/QuickER.Tests/Gui/Behaviors/CanvasInputDimensions.cs",
                 "tests/QuickER.Tests/Gui/Behaviors/CanvasInputGenerator.cs",

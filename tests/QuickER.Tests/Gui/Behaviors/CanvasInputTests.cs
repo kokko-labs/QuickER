@@ -85,9 +85,9 @@ public sealed class CanvasInputTests(ITestOutputHelper output)
                 if (!plan.IsSingle)
                 {
                     foreach (
-                        var (id, rowSteps) in CanvasInputRows.Coverage.Concat(
-                            CanvasInputRows.PressCoverage
-                        )
+                        var (id, rowSteps) in CanvasInputRows
+                            .Coverage.Concat(CanvasInputRows.PressCoverage)
+                            .Concat(CanvasInputRows.DecisionCoverage)
                     )
                     {
                         steps += rowSteps.Count;
@@ -193,6 +193,85 @@ public sealed class CanvasInputTests(ITestOutputHelper output)
         report.WriteSummary();
         report.WriteGapUsage(CanvasInputDimensions.PressGaps, CanvasInputDimensions.RandomScope);
         report.AssertGaps(CanvasInputDimensions.PressGaps, CanvasInputDimensions.RandomScope, plan);
+    }
+
+    /// <summary>Space の持ち主の判定の網羅の行と乱数の手の列の判定を数え、網羅しない組の一覧と照合する（窓で流さない）</summary>
+    [Fact(DisplayName = "入力の列: Space の持ち主の判定の網羅は一覧と一致する")]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
+    public void DecisionCoverage_MatchesGaps()
+    {
+        var plan = SeedSource.Resolve(CanvasInputGenerator.Seeds);
+        var counter = new CoverageCounter(CanvasInputDimensions.DecisionTable);
+
+        foreach (
+            var (_, steps) in CanvasInputRows.Coverage.Concat(CanvasInputRows.DecisionCoverage)
+        )
+        {
+            CanvasInputDimensions.ObserveDecisions(counter, steps);
+        }
+
+        foreach (var seed in plan.Seeds)
+        {
+            CanvasInputDimensions.ObserveDecisions(counter, CanvasInputGenerator.Generate(seed));
+        }
+
+        var report = counter.Report();
+        report.WriteSummary();
+        report.WriteGapUsage(CanvasInputDimensions.DecisionGaps, CanvasInputDimensions.RandomScope);
+        report.AssertGaps(
+            CanvasInputDimensions.DecisionGaps,
+            CanvasInputDimensions.RandomScope,
+            plan
+        );
+    }
+
+    /// <summary>
+    /// I1 の例外（キーボードで移ったボタン自身の押下の取り消し）は、例外の形だけを通し、Click・切り替え・Space の手・
+    /// 押下の持ち主の違いを伴う形を通さない（例外の自己検査）
+    /// </summary>
+    [Fact(
+        DisplayName = "入力の列: I1 の例外は取り消しだけを通し、Click や切り替えを伴う形を通さない"
+    )]
+    public void CancelledControlPressException_IsNarrow()
+    {
+        // 例外の形：ボタン自身の押下・Space 以外のキー・モデルが取り消しを言う・IsPressed が戻った・反応 0・切り替えなし
+        CanvasInputHarness
+            .IsCancelledControlPress(true, false, true, true, 0, false)
+            .Should()
+            .BeTrue();
+
+        var notAllowed = new (
+            string Name,
+            bool Owned,
+            bool Space,
+            bool Cancelled,
+            bool Released,
+            int Activations,
+            bool CheckedChanged
+        )[]
+        {
+            ("Click を伴う", true, false, true, true, 1, false),
+            ("切り替えを伴う", true, false, true, true, 0, true),
+            ("Space の手", true, true, true, true, 0, false),
+            ("ボタンの押下でない", false, false, true, true, 0, false),
+            ("モデルが取り消しを言わない", true, false, false, true, 0, false),
+            ("押された（戻ったのでない）", true, false, true, false, 0, false),
+        };
+
+        foreach (var c in notAllowed)
+        {
+            CanvasInputHarness
+                .IsCancelledControlPress(
+                    c.Owned,
+                    c.Space,
+                    c.Cancelled,
+                    c.Released,
+                    c.Activations,
+                    c.CheckedChanged
+                )
+                .Should()
+                .BeFalse(c.Name);
+        }
     }
 
     /// <summary>読み口の差し替えは、差し替えたスレッドだけに効き、スコープの破棄で前の値へ戻る（二重の破棄では何もしない）</summary>

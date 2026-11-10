@@ -37,7 +37,9 @@
 ## Space のパンは、キーボードで移ったボタン類の Space を横取りしない
 - `CanvasViewportBehavior` はウィンドウ全体の Space を監視する（キャンバスにフォーカスが無くてもパンを効かせるため）。横取りしないのは次の 2 つだけ。
   - テキスト入力（`TextBoxBase` / `PasswordBox`）。
-  - Space を押下に使うコントロール（`ButtonBase`・`ComboBox`・`ListBoxItem`・`TreeViewItem`・`DataGridCell`）に、**キーボード操作で**フォーカスが移ってきたとき。
+  - Space を押下に使うコントロール（`ButtonBase`・`ComboBox`・`ListBoxItem`・`TreeViewItem`・`DataGridCell`）に、**キーボード操作で**フォーカスが移ってきたとき。ただしパンの実行中（中ボタンか Space＋左ボタンでドラッグしている最中）は除く。
+    - 理由：パンの実行中の Space はパンに使っている最中で、ボタン類へ回すと、ボタンが Space の押下で ScrollViewer からキャプチャを奪ってパンが切れ、Space の解放でボタンが押される（見回してもボタンを押さない、という約束と食い違う）。新しい押下も、パンが持っていない押下のリピートの判定し直しも同じ。
+    - テキスト入力はパンの実行中でも横取りしない（テキストボックスはキャプチャを奪わず、パンは続く）。列一覧のセルの編集中はフォーカスが編集の TextBox にあるので、同じくテキスト入力として扱う。
 - キーボードで来たかは、ウィンドウの `PreviewKeyDown`（直前＝キーボード）/ `PreviewMouseDown`（直前＝マウス）/ `PreviewGotKeyboardFocus`（その時点の直前の入力を記録）で自前に覚える。
   - `InputManager.MostRecentInputDevice` を使ってはいけない。`ProcessInput` で流す擬似入力では値が入らず（null のまま）、判定をテストで駆動できない。
 - マウス押下は「キーボードで来た」記録も落とす。既にフォーカスのあるボタンのクリックや余白のクリックではフォーカス移動が起きないので、落とさないと Tab のときの記録が残り、マウスでクリックした直後のボタンの上の Space がそのボタンの押下になる。
@@ -46,7 +48,7 @@
 - キーボードで移ったボタンが Space を持ったまま（ボタンがキャプチャを持つ）マウスを押すと、その後のリピートがパン待機の判定になっても、Space の解放はボタンを押す（WPF の `ButtonBase` が Space の押下でキャプチャを取り、解放で Click する仕様）。エンジンはこの押下をパンの間の「押されない」の例外として扱う。
 - 中ボタンのパンの実行中に Space を押しても、カーソルはパンの実行中（`Cursors.ScrollAll`）のままにする（パン待機の手へ替えない）。中ボタンを離した時点で Space を押していれば、パン待機の手へ戻る。
 - 新しい状態 3 つも `[ThreadStatic]`。
-- ガード：`DiagramEdit/CanvasInput`（行 `keyboard-button-space-clicks-once`・`keyboard-button-space-repeat-clicks-once`・`keyboard-toggle-space-repeat-toggles-once`・`keyboard-pk-checkbox-space-toggles`・`mouse-after-keyboard-button-pans`・`restored-keyboard-button-pans`・`textbox-space-is-text`・`keyboard-button-mouse-press-then-repeat-clicks-on-release`・`g1-repeat-*`・`g24-*`）、`CanvasViewportBehaviorSpaceKeyTests`（キーボードでフォーカスしたキャンバスはパン／無効化したウィンドウのマウス押下・フォーカス移動の購読は外れる）。mutation 実証済み。
+- ガード：`DiagramEdit/CanvasInput`（行 `keyboard-button-space-clicks-once`・`keyboard-button-space-repeat-clicks-once`・`keyboard-toggle-space-repeat-toggles-once`・`keyboard-pk-checkbox-space-toggles`・`mouse-after-keyboard-button-pans`・`restored-keyboard-button-pans`・`textbox-space-is-text`・`keyboard-button-mouse-press-then-repeat-clicks-on-release`・`keyboard-button-press-cancelled-by-tab-after-pan-repeat`・`g1-repeat-*`・`g1-middle-pan-*`・`middle-pan-tab-to-textbox-space-is-text`・`g24-*`）、Space の持ち主の判定の網羅の行（`CanvasInputRows.DecisionCoverage`）、`CanvasViewportBehaviorSpaceKeyTests`（キーボードでフォーカスしたキャンバスはパン／無効化したウィンドウのマウス押下・フォーカス移動の購読は外れる）。mutation 実証済み。
 - `CanvasViewportBehaviorSpaceKeyTests` は判断が `Deactivated` に左右されるので、ほかのテストのウィンドウにアクティブを奪われないよう `WindowActivationTestCollection`（`DisableParallelization`）に入れてある。
 
 ## 押下の間の手（パン待機・押下の外での解放・列一覧の行ヘッダー）

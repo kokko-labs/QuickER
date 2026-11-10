@@ -272,6 +272,72 @@ internal static class CanvasInputRows
                     S.SpaceUp
                 ),
                 Row(
+                    "g1-middle-pan-tab-to-button-repeat-goes-to-pan",
+                    "G1",
+                    "テキストボックスで押した Space のまま中ボタンでパンし、パンの最中に Tab でボタンへ移っても、リピートはパンのもので、ボタンはキャプチャを奪わず押されない",
+                    S.TabTo(T.TextBox),
+                    S.SpaceDown,
+                    S.MiddleDown(CanvasSpot.Blank),
+                    S.TabTo(T.Button),
+                    S.Move(10, 5),
+                    S.Repeat(1),
+                    S.Move(10, 5),
+                    S.MiddleUp,
+                    S.SpaceUp
+                ),
+                Row(
+                    "g1-middle-pan-tab-to-button-space-goes-to-pan",
+                    "G1",
+                    "中ボタンのパンの最中に Tab でボタンへ移って Space を押しても、Space はパンのもので、ボタンはキャプチャを奪わず押されない",
+                    S.ClickFocus(T.Canvas),
+                    S.MiddleDown(CanvasSpot.Blank),
+                    S.Move(10, 5),
+                    S.TabTo(T.Button),
+                    S.SpaceDown,
+                    S.Move(10, 5),
+                    S.SpaceUp,
+                    S.MiddleUp
+                ),
+                Row(
+                    "middle-pan-tab-to-textbox-space-is-text",
+                    null,
+                    "中ボタンのパンの最中に Tab でテキストボックスへ移って押した Space は、文字入力のまま（横取りしない）。パンは続く",
+                    S.ClickFocus(T.Canvas),
+                    S.MiddleDown(CanvasSpot.Blank),
+                    S.Move(10, 5),
+                    S.TabTo(T.TextBox),
+                    S.SpaceDown,
+                    S.Move(10, 5),
+                    S.SpaceUp,
+                    S.MiddleUp
+                ),
+                Row(
+                    "keyboard-button-press-cancelled-by-tab-after-pan-repeat",
+                    null,
+                    "キーボードで移ったトグルが Space を持ったままマウスを押し、リピートでパン待機になった後に Tab を押すと、トグル自身の押下が取り消される（押されない・切り替わらない）",
+                    S.TabTo(T.Toggle),
+                    S.SpaceDown,
+                    S.MiddleDown(CanvasSpot.Blank),
+                    S.Repeat(1),
+                    S.TabTo(T.Toggle),
+                    S.MiddleUp,
+                    S.SpaceUp
+                ),
+                Row(
+                    "card-spot-after-wide-resize-scrolls-into-view",
+                    null,
+                    "カードのつかみをキャンバスの外まで引いて幅を大きく広げた後も、つかみの左・つかみの場所をスクロールで見せて押せる",
+                    S.ClickFocus(T.Canvas),
+                    S.LeftDown(CanvasSpot.CardGrip),
+                    S.MoveTo(CanvasSpot.Outside),
+                    S.LeftUp,
+                    S.MoveTo(CanvasSpot.Card),
+                    S.LeftDown(CanvasSpot.Card),
+                    S.Move(5, 5),
+                    S.LeftUp,
+                    S.MoveTo(CanvasSpot.CardGrip)
+                ),
+                Row(
                     "g3-delete-during-drag-pushes-no-removed-move",
                     "G3",
                     "カードのドラッグ中に Delete でそのテーブルを消すと、解放で消したテーブルの移動を履歴に積まない",
@@ -599,6 +665,93 @@ internal static class CanvasInputRows
                     rows.Add(
                         (
                             $"{CoveragePrefix}{target}-{arrival}-{CanvasInputDimensions.PatternLevel(repeats)}".ToLowerInvariant(),
+                            steps
+                        )
+                    );
+                }
+            }
+        }
+
+        return rows;
+    }
+
+    /// <summary>
+    /// Space の持ち主の判定の網羅の行（判定の時の対象 × 判定の種類 × パンの実行中かの全組）
+    /// </summary>
+    /// <remarks>
+    /// パンの実行中の対象は、キャンバスなら中ボタンの押下（キャンバスへフォーカスが移る）で、ほかは Tab で移る。
+    /// 判定し直すリピートは、テキストボックスで押した Space（持ち主はテキスト）のまま対象へ移って作る。
+    /// </remarks>
+    public static IReadOnlyList<(
+        string Id,
+        IReadOnlyList<CanvasStep> Steps
+    )> DecisionCoverage { get; } = BuildDecisionCoverage();
+
+    private static List<(string, IReadOnlyList<CanvasStep>)> BuildDecisionCoverage()
+    {
+        var rows = new List<(string, IReadOnlyList<CanvasStep>)>();
+
+        foreach (var target in Enum.GetValues<CanvasTarget>())
+        {
+            foreach (var repeat in new[] { false, true })
+            {
+                foreach (var panning in new[] { false, true })
+                {
+                    var steps = new List<CanvasStep>();
+
+                    // 対象へ移る（キャンバスはタブ順に入らないので、パンの外ではクリックで、パンの最中は中ボタンの押下で来る）
+                    void MoveToTarget()
+                    {
+                        if (target != T.Canvas)
+                        {
+                            steps.Add(S.TabTo(target));
+                        }
+                        else if (!panning)
+                        {
+                            steps.Add(S.ClickFocus(T.Canvas));
+                        }
+                    }
+
+                    if (repeat)
+                    {
+                        steps.Add(S.TabTo(T.TextBox));
+                        steps.Add(S.SpaceDown);
+                    }
+
+                    if (panning)
+                    {
+                        if (!repeat)
+                        {
+                            steps.Add(S.ClickFocus(T.Canvas));
+                        }
+
+                        steps.Add(S.MiddleDown(CanvasSpot.Blank));
+                        steps.Add(S.Move(10, 5));
+                    }
+
+                    MoveToTarget();
+                    steps.Add(repeat ? S.Repeat(1) : S.SpaceDown);
+
+                    if (panning)
+                    {
+                        steps.Add(S.Move(10, 5));
+
+                        if (!repeat)
+                        {
+                            steps.Add(S.SpaceUp);
+                        }
+
+                        steps.Add(S.MiddleUp);
+                    }
+
+                    if (repeat || !panning)
+                    {
+                        steps.Add(S.SpaceUp);
+                    }
+
+                    rows.Add(
+                        (
+                            $"{CoveragePrefix}decision-{target}-{(repeat ? "repeat" : "press")}-{(panning ? "panning" : "none")}".ToLowerInvariant(),
                             steps
                         )
                     );
