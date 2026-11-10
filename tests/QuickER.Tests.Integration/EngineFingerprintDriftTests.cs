@@ -88,6 +88,18 @@ public sealed class EngineFingerprintDriftTests
     public void BackendParity_GeneratesRecordedInputs() =>
         Verify("BackendParity", BackendParityRuntimeTests.Seeds, ParitySummary);
 
+    [Fact(DisplayName = "[指紋] SQL Server の系統の乱数の保存の生成器は、記録と同じ保存を作る")]
+    public void BackendParitySqlServerSaves_GeneratesRecordedInputs() =>
+        Verify(
+            "BackendParitySqlServerSaves",
+            BackendParitySqlServerRuntimeTests.RandomSaveSeeds,
+            ParitySqlServerSaveSummary
+        );
+
+    /// <summary>SQL Server の系統の乱数の保存：保存の引数・フック・行（record の中の一覧も展開する）</summary>
+    internal static string ParitySqlServerSaveSummary(int seed) =>
+        SeedSummary.Object(BackendParitySqlServerSaveGenerator.Create(seed));
+
     /// <summary>種ごとの要約の指紋を記録と照合する（書き直しの指定があれば記録を書き直す）</summary>
     private static void Verify(string engineId, SeedSettings settings, Func<int, string> summary)
     {

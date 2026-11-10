@@ -826,7 +826,8 @@ public abstract class SqliteRepositoryCore<TEntity, TKey>(
     /// <summary>Executes raw SQL (UPDATE/DELETE/any DML) and returns the number of affected rows.</summary>
     /// <remarks>
     /// The connection is opened and closed per call (no transaction argument). To execute multiple statements atomically,
-    /// write <c>BEGIN; ... COMMIT;</c> in the SQL within a single call.
+    /// use <see cref="ISqlBatchExecutor"/>, which the <see cref="SqlExecutor"/> behind this method implements: when a statement
+    /// of a <c>BEGIN; ... COMMIT;</c> in one call fails, the transaction stays open on a connection that goes back to the pool.
     /// Parameter binding is the same as <see cref="QueryBySqlAsync"/>
     /// (<b>always pass values as parameters; string concatenation risks injection</b>).
     /// The implementation delegates to <see cref="ISqlExecutor"/>.

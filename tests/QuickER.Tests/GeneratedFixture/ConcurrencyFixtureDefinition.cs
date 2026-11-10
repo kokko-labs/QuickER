@@ -39,6 +39,16 @@ namespace QuickER.Tests.GeneratedConcurrencyFixture;
 ///   <item><c>kit_parts</c>: <c>part_id</c>（int・PK）／<c>kit_code</c>（nvarchar(20)・NULL 許容・<c>kits.code</c> への FK・NO ACTION）</item>
 /// </list>
 /// <para>
+/// あわせて、EF Core の SaveChanges が書く列を持たない表（キーの列と DB が値を作る列だけ）の更新を SQL Server で確かめる
+/// 4 表を置く（<c>BackendParitySqlServerRuntimeTests</c> のケース。上の表とは独立）:
+/// </para>
+/// <list type="bullet">
+///   <item><c>tags</c>: <c>tag_id</c>（int・PK）／<c>code</c>（nvarchar(20)・NOT NULL・一意制約＝<c>tag_links.tag_code</c> が参照する代替キー）／<c>row_ver</c>（rowversion・NOT NULL）</item>
+///   <item><c>tag_links</c>: <c>link_id</c>（int・PK）／<c>tag_code</c>（nvarchar(20)・NULL 許容・<c>tags.code</c> への FK・NO ACTION）</item>
+///   <item><c>stamps</c>: <c>stamp_id</c>（int・PK）／<c>row_ver</c>（rowversion・NOT NULL）</item>
+///   <item><c>markers</c>: <c>marker_id</c>（int・PK）だけ</item>
+/// </list>
+/// <para>
 /// あわせて「DB 採番列は EditModel の入力必須にしない」も本図で固定する。VO 有無に依らず rowversion 列は
 /// <c>IsRequired=false</c>／Mapper は「入力があるときだけ代入」になり、新規行の EditModel 保存が成立する。
 /// </para>
@@ -104,6 +114,25 @@ public static class ConcurrencyFixtureDefinition
     private static readonly Guid PartKitCodeColId = new("a5000000-0000-0000-0000-000000000003");
 
     private static readonly Guid RelKitParts = new("a6000000-0000-0000-0000-000000000001");
+
+    private static readonly Guid TagId = new("a7000000-0000-0000-0000-000000000001");
+    private static readonly Guid TagPkColId = new("a7000000-0000-0000-0000-000000000002");
+    private static readonly Guid TagCodeColId = new("a7000000-0000-0000-0000-000000000003");
+    private static readonly Guid TagRowVerColId = new("a7000000-0000-0000-0000-000000000004");
+    private static readonly Guid TagCodeUniqueId = new("a7000000-0000-0000-0000-000000000005");
+
+    private static readonly Guid TagLinkId = new("a8000000-0000-0000-0000-000000000001");
+    private static readonly Guid TagLinkPkColId = new("a8000000-0000-0000-0000-000000000002");
+    private static readonly Guid TagLinkCodeColId = new("a8000000-0000-0000-0000-000000000003");
+
+    private static readonly Guid RelTagLinks = new("a8000000-0000-0000-0000-000000000004");
+
+    private static readonly Guid StampId = new("a9000000-0000-0000-0000-000000000001");
+    private static readonly Guid StampPkColId = new("a9000000-0000-0000-0000-000000000002");
+    private static readonly Guid StampRowVerColId = new("a9000000-0000-0000-0000-000000000003");
+
+    private static readonly Guid MarkerId = new("aa000000-0000-0000-0000-000000000001");
+    private static readonly Guid MarkerPkColId = new("aa000000-0000-0000-0000-000000000002");
 
     /// <summary>
     /// rowversion × VO の検証用 ER 図を決定的に構築する（要素 ID は固定 GUID・型は SQL Server 表記）。
@@ -264,9 +293,118 @@ public static class ConcurrencyFixtureDefinition
             },
         };
 
+        // 書ける列が代替キーと版だけ（EF Core は代替キーを書かず、版は DB が作るので、SaveChanges が UPDATE を送らない）
+        var tag = new Entity
+        {
+            Id = TagId,
+            TableName = "tags",
+            Columns =
+            {
+                new Column
+                {
+                    Id = TagPkColId,
+                    Name = "tag_id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = TagCodeColId,
+                    Name = "code",
+                    DataType = "nvarchar(20)",
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = TagRowVerColId,
+                    Name = "row_ver",
+                    DataType = "rowversion",
+                    IsNullable = false,
+                },
+            },
+            UniqueConstraints =
+            {
+                new UniqueConstraint
+                {
+                    Id = TagCodeUniqueId,
+                    Name = "UQ_tags_code",
+                    ColumnIds = [TagCodeColId],
+                },
+            },
+        };
+
+        var tagLink = new Entity
+        {
+            Id = TagLinkId,
+            TableName = "tag_links",
+            Columns =
+            {
+                new Column
+                {
+                    Id = TagLinkPkColId,
+                    Name = "link_id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = TagLinkCodeColId,
+                    Name = "tag_code",
+                    DataType = "nvarchar(20)",
+                    IsForeignKey = true,
+                    IsNullable = true,
+                },
+            },
+        };
+
+        // キーと版だけ（SaveChanges が UPDATE を送らない）
+        var stamp = new Entity
+        {
+            Id = StampId,
+            TableName = "stamps",
+            Columns =
+            {
+                new Column
+                {
+                    Id = StampPkColId,
+                    Name = "stamp_id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = StampRowVerColId,
+                    Name = "row_ver",
+                    DataType = "rowversion",
+                    IsNullable = false,
+                },
+            },
+        };
+
+        // キーだけ（SaveChanges が UPDATE を送らない・版も無い）
+        var marker = new Entity
+        {
+            Id = MarkerId,
+            TableName = "markers",
+            Columns =
+            {
+                new Column
+                {
+                    Id = MarkerPkColId,
+                    Name = "marker_id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+            },
+        };
+
         return new ErDiagram
         {
-            Entities = { gadget, note, kit, part },
+            Entities = { gadget, note, kit, part, tag, tagLink, stamp, marker },
             Relationships =
             {
                 // 1対多: gadgets -> gadget_notes（ON DELETE CASCADE）
@@ -291,6 +429,18 @@ public static class ConcurrencyFixtureDefinition
                     TargetEntityId = PartId,
                     ColumnPairs = [new(KitCodeColId, PartKitCodeColId)],
                     ConstraintName = "FK_kit_parts_kits_code",
+                    OnDelete = ForeignKeyReferentialAction.NoAction,
+                    OnUpdate = ForeignKeyReferentialAction.NoAction,
+                },
+                // 1対多: tags.code -> tag_links.tag_code（tags.code を EF Core の代替キーにする）
+                new Relationship
+                {
+                    Id = RelTagLinks,
+                    Type = RelationshipType.OneToMany,
+                    SourceEntityId = TagId,
+                    TargetEntityId = TagLinkId,
+                    ColumnPairs = [new(TagCodeColId, TagLinkCodeColId)],
+                    ConstraintName = "FK_tag_links_tags_code",
                     OnDelete = ForeignKeyReferentialAction.NoAction,
                     OnUpdate = ForeignKeyReferentialAction.NoAction,
                 },

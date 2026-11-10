@@ -447,6 +447,11 @@ var result = await customers.Query()
 `Query()` は Repository 共通契約にあり、QuickER 版・EF Core・インメモリのどの Repository でも使えます（リモートの面にはありません）。
 この節の翻訳の規則は QuickER 版 Repository の翻訳器のものです。
 EF Core 版は EF Core 自身が翻訳し、インメモリ版は式木を C# として評価します。
+列を絞れる射影（`ToProjectionListAsync` と、射影を返す名前付きクエリ）も同じように分かれます。
+EF Core はセレクタ全体を SQL へ翻訳するので、セレクタの中の計算は DB の規則に従います。
+SQL Server では `x.Code.Length` が末尾の空白を数えない `LEN` になり、`x.Name.ToUpper()` は照合順序に従い、`ToString()` は DB の文字列の書式になります。
+QuickER 版とインメモリ版は、セレクタが参照する列を取得してから、セレクタを C# で評価します。
+どの実装先でも同じ結果が要るときは、こうした計算をセレクタに書かず、取得した値の側で行ってください。
 
 同じナビゲーションを重ねて指定した `Include` / `ThenInclude` は、1 本のノードへマージされます。
 そのため EF Core と同じ分岐イディオムで、`Orders` の下に複数の枝を書けます（`Include(c => c.Orders).ThenInclude(o => o.OrderLines)` に続けて `Include(c => c.Orders).ThenInclude(o => o.Customer)` と書く形）。
@@ -481,6 +486,8 @@ EF Core はこの述語を独自の結合へ翻訳するので、この制限は
 **`ExecuteDeleteAsync` は、条件に合う行を消します。**
 `cascadeDelete: true` では、カスケードに沿って子孫を先に消し、戻り値は消した行の数（条件に合う行と、その子孫を合わせた数）です。
 循環するカスケードは文を 1 つも流す前に `NotSupportedException` で断ります。
+カスケードで辿る表は、どれも 1 列の主キーを持つ必要があります。
+複合主キーの子の表や主キーの無い子の表があると、カスケードの削除はどの実装先でも `InvalidOperationException` で失敗します（`cascadeDelete` のグラフ保存は、こうした子も扱えます）。
 条件にナビゲーションを書ける EF Core では、条件に合う行のキーを先に読み、そのキーで消すので、`o => o.OrderLines.Any()` のような条件でも、条件に合う行が子孫と一緒に消えます（子孫が消えた後で条件を評価し直しません）。
 
 ### NULL の補償
@@ -1137,7 +1144,14 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   EF Core は消す親の追跡中の子に触れず、親の `DELETE` だけを送るので、結果は QuickER 版 Repository と同じく DB の参照アクションが決めます。
   `NO ACTION` は削除を断り、`SET NULL` と `SET DEFAULT` は DB の中で子を変えます
 - 楽観排他もパリティです。
-  `ConcurrencyMode` でポリシーを選び、EF Core の `DbUpdateConcurrencyException` を `SaveConflictException` へ変換し、更新後の並行性トークンをエンティティへ残します（[rowversion による楽観排他](#rowversion-による楽観排他)）
+  `ConcurrencyMode` でポリシーを選び、EF Core の `DbUpdateConcurrencyException` を `SaveConflictException` へ変換し、更新後の並行性トークンをエンティティへ残します（[rowversion による楽観排他](#rowversion-による楽観排他)）。
+  1 回の保存に、単独でも競合になる行が複数あるとき（他者が削除した行と、版が進んだ行など）、`SaveConflictException` がどの行を名指しするかは文を流す順で決まります。
+  QuickER 版 Repository はグラフ保存の順に流し、EF Core は 1 回の `SaveChanges` の文の順を自分で決めるので、名指しする行が違うことがあります。
+  どちらでも保存は全体が巻き戻ります
+- キー以外の列がすべて DB の作る列（行バージョン・計算列・採番列）の表の行には、EF Core は `UPDATE` を送りません（キーだけの表や、キーと行バージョンだけの表）。
+  リポジトリはこうした行を、QuickER 版 Repository と同じく自分で書きます（主キーを自分自身へ代入するか、変わった代替キーを書きます）。
+  書くのは `SaveChanges` の前で、保存と同じトランザクションの中です。
+  そのため、消えた行と古い行バージョンはほかの行と同じく報告され、DB が作った版はコミットの後にエンティティへ届き、その行はグラフ保存が返す行の数に入ります
 - rowversion 列の無い表で、更新が 1 行も当たらないとき（トリガーや行レベルセキュリティが文を捨てたとき）は、QuickER 版 Repository と同じく行が無いものとして報告します。
   `UpdateAsync` は `false` を返し、グラフ保存は `SaveConflictException`（`NotFound`）で失敗します。
   保存先の値を取り込んで（`ForceOverwrite`）もまだ当たらない行は、最大 10 回まで試み、それでも当たらなければ `SaveConflictException` で失敗します。
@@ -1170,7 +1184,11 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   採番の列（IDENTITY）である主キーは EF Core の規約のままにし、DB が値を決めます。
   `Guid` の主キーも EF Core の規約のままです。
   EF Core はキーが `Guid.Empty` のとき値を作り、QuickER 版 Repository は `Guid.Empty` をそのまま書きます
-- 参照先（親側）列が主キーでないリレーション（UNIQUE 列参照・複合主キーの一部参照）は `HasPrincipalKey` を明示して構成され、外部キーは QuickER 版 Repository と同じくその親列へ結合します（EF Core の既定のままだと主キーへ黙って結合されます）
+- 参照先（親側）列が主キーでないリレーション（UNIQUE 列参照・複合主キーの一部参照）は `HasPrincipalKey` を明示して構成され、外部キーは QuickER 版 Repository と同じくその親列へ結合します（EF Core の既定のままだと主キーへ黙って結合されます）。
+  EF Core は一意でない列を参照する外部キーを表せません（それ自体の一意制約を持たない複合主キーの 1 列など。MySQL だけが受け付けます）。
+  `HasPrincipalKey` によって EF Core はその列を一意とみなし、同じ値の行を 2 つ追跡すると失敗します。
+  生成はこうした外部キーを Warning で名指しします。
+  参照先の列に一意制約を付けるか、主キーを参照してください
 - EF Core はこうした参照先の列を代替キーとして扱い、自分の `UPDATE` では書かないので、変わった値はリポジトリが自分で書きます（QuickER 版 Repository と同じ）。
   代替キーを持つ表の更新する行ごとに、`UpdateAsync` とグラフ保存は、まず保存先のキーと行バージョンを読み（行ごとに問い合わせが 1 つ増えます）、変わった値を `SaveChanges` の前に、保存と同じトランザクションの中の文 1 つで書きます。
   書き方は行のほかの列と同じ規則に従います。
@@ -1180,7 +1198,10 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   こうした表の `UpdateAsync` は、グラフ保存と同じく実行戦略の中のトランザクションで走ります。
   同じ保存で削除する行の代替キーの値を取る行は、QuickER 版 Repository と同じく削除の後に書きます。
   後回しの行（とその下の行）は、接続とトランザクションを共有する 2 つめの文脈が、キーを書いた後の 2 回目の `SaveChanges` で保存します。
-  利用者が渡した接続（`UseSqlServer(connection)`）で構成した文脈には、その接続を利用者の持ち物のまま戻します。
+  2 つめの文脈は、保存の後に自分の接続を戻すので、プールの文脈は元のまま次の保存へ貸し出されます。
+  接続文字列で構成した文脈には、接続文字列を戻します（EF Core は別の接続を付けた時点で自分が作った接続を破棄し、次に使うときに作り直します）。
+  オプションで渡した接続（`UseSqlServer(connection)`）はオプションのとおりの持ち主で戻し、ファクトリが実行時に `SetDbConnection` で付けた接続は持ち主でないものとして戻すので、文脈がその接続を破棄することはありません。
+  `contextOwnsConnection: true` で渡した接続は、2 つめの文脈が接続を切り替えた時点で EF Core が破棄するので、そうした文脈はプールや使い回しをしないでください。
 
 **生 SQL**
 

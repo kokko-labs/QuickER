@@ -83,7 +83,9 @@ public sealed record BulkInsertOp(
 
 /// <summary>
 /// 親の顧客の紹介先のコレクションに子の顧客を置き（子の外部キーは <paramref name="Child"/> のまま・親への参照は置かない）、親・子・
-/// <paramref name="Extra"/> の順に 1 回の全機能面の BulkInsert で入れる（リモートには無い）。スロット <c>b0</c>＝親・<c>b1</c>＝子
+/// <paramref name="Extra"/> の順に 1 回の全機能面の BulkInsert で入れる（リモートには無い）。スロット <c>b0</c>＝親・<c>b1</c>＝子。
+/// <paramref name="ParentCollectionAsHashSet"/> なら、親の紹介先のコレクションを <c>HashSet</c> に差し替えて置く
+/// （ナビゲーションの型は <c>ICollection&lt;T&gt;</c> なので、<c>IList</c> でないコレクションも代入できる）
 /// </summary>
 /// <remarks>
 /// 外部キーとナビゲーションが食い違う行を一括挿入へ渡したとき、どの実装先も外部キーのとおりに書き、呼び出し側のナビゲーションと
@@ -92,7 +94,8 @@ public sealed record BulkInsertOp(
 public sealed record BulkInsertWithNavigationOp(
     CustomerRow Parent,
     CustomerRow Child,
-    IReadOnlyList<CustomerRow>? Extra = null
+    IReadOnlyList<CustomerRow>? Extra = null,
+    bool ParentCollectionAsHashSet = false
 ) : ParityOp
 {
     public override string Name => "BulkInsertWithNavigation";
@@ -103,6 +106,12 @@ public sealed record BulkInsertWithNavigationOp(
     {
         var parent = (CustomerEntity)Parent.Build();
         var child = (CustomerEntity)Child.Build();
+
+        if (ParentCollectionAsHashSet)
+        {
+            parent.Customers = new HashSet<CustomerEntity>();
+        }
+
         parent.Customers.Add(child);
         List<CustomerEntity> rows =
         [

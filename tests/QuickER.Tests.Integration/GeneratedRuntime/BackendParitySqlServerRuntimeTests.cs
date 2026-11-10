@@ -31,7 +31,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </remarks>
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
-public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture fixture)
+public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture fixture)
     : IAsyncLifetime
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
@@ -57,8 +57,31 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    /// <summary>ケースの名前（xunit の MemberData）</summary>
-    public static TheoryData<string> Cases() =>
+    /// <summary>ケースの名前（xunit の MemberData）。代替キーの行と同じ保存のほかの行の組は軸から組み立てる</summary>
+    public static TheoryData<string> Cases()
+    {
+        var cases = FixedCases();
+
+        foreach (var companionCase in AlternateKeyCompanionCase.All)
+        {
+            cases.Add(companionCase.Name);
+        }
+
+        foreach (var ownWriteCase in OwnWriteCase.All)
+        {
+            cases.Add(ownWriteCase.Name);
+        }
+
+        foreach (var heldBackFactoryCase in HeldBackFactoryCaseNames)
+        {
+            cases.Add(heldBackFactoryCase);
+        }
+
+        return cases;
+    }
+
+    /// <summary>決まった形のケースの名前</summary>
+    private static TheoryData<string> FixedCases() =>
         new(
             "force-overwrite-9-rows",
             "force-overwrite-10-rows",
@@ -169,6 +192,17 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
             "again rows=1",
             "kits/2 code=K1 name=again",
         ],
+        // 代替キーを書いた後に、同じ保存の消えた行を insertWhenUpdateMissing で挿入へ切り替えてやり直しても、代替キーと
+        // 名前が入り、消えた行が挿入され、手元の版は保存先と同じ（もう一度 Optimistic で保存しても競合にならない）
+        ["alternate-key-plain-with-gone-insert-when-missing-optimistic"] =
+            AlternateKeyGoneCompanionPlain,
+        ["alternate-key-plain-with-gone-insert-when-missing-hooks-optimistic"] =
+            AlternateKeyGoneCompanionPlain,
+        // 同じく、後回しの 2 本目（消えた kit 3）が 2 つめの文脈の SaveChanges で当たらずにやり直す形
+        ["alternate-key-taken-from-deleted-with-gone-insert-when-missing-optimistic"] =
+            AlternateKeyGoneCompanionTakenFromDeleted,
+        ["alternate-key-taken-from-deleted-with-gone-insert-when-missing-hooks-optimistic"] =
+            AlternateKeyGoneCompanionTakenFromDeleted,
         // 新しい親の挿入を Before が飛ばし、新しい子を保存すると、外部キーに断られて全体が巻き戻る
         ["hook-skip-parent-child-fk"] =
         [
@@ -199,8 +233,21 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
     {
         var baseline = await RunAsync(name, efCore: false);
         var efCore = await RunAsync(name, efCore: true);
+
+        // 代替キーの行と同じ保存のほかの行の組は、サーバーが EF Core 版 Repository のリモートでも流す
+        var remoteEfCore =
+            AlternateKeyCompanionCase.Find(name) is { } companionCase
+                ? await RunOnRemoteEfCoreAsync(companionCase)
+            : OwnWriteCase.Find(name) is { } ownWriteCase
+                ? await OwnWriteAsync(efCore: true, ownWriteCase, remoteEfCore: true)
+            : null;
         var report =
-            $"QuickER:\n  {string.Join("\n  ", baseline)}\nEF Core:\n  {string.Join("\n  ", efCore)}";
+            $"QuickER:\n  {string.Join("\n  ", baseline)}\nEF Core:\n  {string.Join("\n  ", efCore)}"
+            + (
+                remoteEfCore is null
+                    ? ""
+                    : $"\nRemote (EF Core server):\n  {string.Join("\n  ", remoteEfCore)}"
+            );
 
         // 値を固定したケースは、基準の行がその値になる（EF Core は下で基準と比べる）
         if (ExpectedLines.TryGetValue(name, out var expected))
@@ -208,10 +255,22 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
             baseline.Should().Equal(expected, report);
         }
 
-        // 一致しなければ失敗 1 件（載っていれば既知・載っているのに一致すれば「起きなかった」で赤）
-        EngineFailure[] observed = efCore.SequenceEqual(baseline, StringComparer.Ordinal)
-            ? []
-            : [new EngineFailure(name, "differs", report)];
+        // 一致しなければ実装先ごとに失敗 1 件（載っていれば既知・載っているのに一致すれば「起きなかった」で赤）
+        List<EngineFailure> observed = [];
+
+        if (!efCore.SequenceEqual(baseline, StringComparer.Ordinal))
+        {
+            observed.Add(new EngineFailure(name, "differs", report));
+        }
+
+        if (
+            remoteEfCore is not null
+            && !remoteEfCore.SequenceEqual(baseline, StringComparer.Ordinal)
+        )
+        {
+            observed.Add(new EngineFailure(name, "remote-efcore-differs", report));
+        }
+
         KnownSet
             .Classify(observed, scope => scope == name)
             .AssertClean($"[Parity/SqlServer] ケース {name}");
@@ -225,6 +284,27 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
         var cases = Cases().Select(row => (string)row.Data).ToHashSet();
         KnownSet.Entries.Select(entry => entry.Scope).Should().BeSubsetOf(cases);
         ExpectedLines.Keys.Should().BeSubsetOf(cases);
+
+        // 代替キーの行の形 × 同じ保存のほかの行 × 並行性の扱いの組は、どれもケースとして流れる
+        CoverageGuard.ContainsAll(
+            "[Parity/SqlServer] 代替キーの行と同じ保存のほかの行の組",
+            cases,
+            AlternateKeyCompanionCase.All.Select(companionCase => companionCase.Name)
+        );
+
+        // 書く列を持たない表の形 × 他者の変更 × 保存の経路の組も、どれもケースとして流れる
+        CoverageGuard.ContainsAll(
+            "[Parity/SqlServer] 書く列を持たない表の更新の組",
+            cases,
+            OwnWriteCase.All.Select(ownWriteCase => ownWriteCase.Name)
+        );
+
+        // DbContext のファクトリの作り方の各値も、どれもケースとして流れる
+        CoverageGuard.ContainsAll(
+            "[Parity/SqlServer] 2 つめの文脈とファクトリの作り方",
+            cases,
+            HeldBackFactoryCaseNames
+        );
     }
 
     /// <summary>
@@ -591,6 +671,16 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
                 ]
             ),
             "any-without-condition" => await AnyWithoutConditionAsync(efCore),
+            _ when AlternateKeyCompanionCase.Find(name) is { } companionCase =>
+                await AlternateKeyWithCompanionAsync(efCore, companionCase),
+            _ when FindHeldBackFactory(name) is { } heldBackFactory => await HeldBackTwiceAsync(
+                efCore,
+                heldBackFactory
+            ),
+            _ when OwnWriteCase.Find(name) is { } ownWriteCase => await OwnWriteAsync(
+                efCore,
+                ownWriteCase
+            ),
             _ => throw new ArgumentOutOfRangeException(nameof(name)),
         };
     }
@@ -1330,9 +1420,15 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
         {
             return $"throws SaveConflictException reason={ex.Reason}";
         }
-        catch (Exception ex) when (ex is DbException or DbUpdateException)
+        catch (Exception ex)
+            when (ex
+                    is DbException
+                        or DbUpdateException
+                        or RemoteRepositoryException { StatusCode: 500 }
+            )
         {
-            // DB が断った（QuickER 版は SqlException・EF Core は DbUpdateException か SqlException）
+            // DB が断った（QuickER 版は SqlException・EF Core は DbUpdateException か SqlException・リモートはサーバーの
+            // 断りが 500 で届く＝SQLite の系統の ParityFormat と同じ扱い）
             return "throws store-rejected";
         }
         catch (Exception ex)

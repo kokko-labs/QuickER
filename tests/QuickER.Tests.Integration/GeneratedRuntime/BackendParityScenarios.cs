@@ -981,6 +981,21 @@ public static partial class BackendParityScenarios
             viaSave: false
         ),
         AlternateKeyUpdate("h1-alternate-key-unreferenced-save", referenced: false, viaSave: true),
+        // H1 × 同じ保存のほかの行：代替キーを変える顧客 3 と、同じグラフ保存の紹介先の顧客 4（読んだ後に他者が消した・
+        // insertWhenUpdateMissing あり／なし、Before のフックが更新を飛ばす）。版の無い代替キーなので、代替キーを書いた後の
+        // 試行のやり直しで手元の版を持ち越す経路は無い（版のある形は SQL Server の系統の alternate-key-*-with-*）
+        AlternateKeyUpdateWithChild(
+            "h1-alternate-key-save-with-gone-child-insert-when-missing",
+            AlternateKeyChild.GoneInsertWhenMissing
+        ),
+        AlternateKeyUpdateWithChild(
+            "h1-alternate-key-save-with-gone-child",
+            AlternateKeyChild.Gone
+        ),
+        AlternateKeyUpdateWithChild(
+            "h1-alternate-key-save-with-skipped-child",
+            AlternateKeyChild.HookSkipped
+        ),
         // H1: 古いコードを参照する依存行を同じグラフ保存に持ったまま、代替キーを変える（保存の前に変える・Before のフックが
         // 追跡の後で変える）。古いコードは参照されているので全実装先が断り、メモリの依存行の外部キーとナビゲーションは元のまま
         AlternateKeyUpdateWithDependents(
@@ -1193,6 +1208,96 @@ public static partial class BackendParityScenarios
     /// 顧客 3 のコード（連絡先の customer_code が参照する代替キー）を変える。<paramref name="referenced"/> のときは連絡先 500 が
     /// そのコードを参照している（外部キーは ON UPDATE NO ACTION＝DB は断る）
     /// </summary>
+    /// <summary>代替キーを変える顧客と同じグラフ保存に入れる紹介先の顧客の状態</summary>
+    private enum AlternateKeyChild
+    {
+        /// <summary>読んだ後に他者が消した（insertWhenUpdateMissing なし）</summary>
+        Gone,
+
+        /// <summary>読んだ後に他者が消した行を insertWhenUpdateMissing で保存する</summary>
+        GoneInsertWhenMissing,
+
+        /// <summary>Before のフックが更新を飛ばす</summary>
+        HookSkipped,
+    }
+
+    /// <summary>
+    /// 顧客 3 のコードを変え、紹介先の顧客 4（顧客 3 を紹介者に持つ）の備考を変えて、顧客 3 を根にグラフ保存 1 回で保存する。
+    /// 顧客 4 は <paramref name="child"/> の状態にする
+    /// </summary>
+    private static ParityScenario AlternateKeyUpdateWithChild(
+        string name,
+        AlternateKeyChild child
+    ) =>
+        new(
+            name,
+            [
+                .. Basic,
+                new SeedOp(new CustomerRow(3, "Cy")),
+                new SeedOp(new CustomerRow(4, "Di", Referrer: 3)),
+            ],
+            [
+                new LoadOp("A", "customers", 3),
+                new AttachChildCustomerOp("A", 4),
+                .. child == AlternateKeyChild.HookSkipped
+                    ? Array.Empty<ParityOp>()
+                    : [new OutsideDeleteOp("customers", 4)],
+                new EditCustomerOp("A", 3, Note: "n", Code: "NEW3"),
+                new EditCustomerOp("A", 4, Note: "m"),
+                new SaveOp(
+                    "A",
+                    new(InsertWhenUpdateMissing: child == AlternateKeyChild.GoneInsertWhenMissing)
+                ),
+                .. child switch
+                {
+                    // 消えた顧客 4 は挿入に切り替わり、顧客 3 の新しいコードと一緒に入る
+                    AlternateKeyChild.GoneInsertWhenMissing => (ParityOp[])
+                        [
+                            ParityExpect.Succeeds("gone-child-inserted-succeeds"),
+                            ParityExpect.StateRow(
+                                "gone-child-writer",
+                                "customers/3",
+                                "code='NEW3'"
+                            ),
+                            ParityExpect.StateRow(
+                                "gone-child-inserted",
+                                "customers/4",
+                                "note='m'",
+                                "referrer=3"
+                            ),
+                        ],
+                    // insertWhenUpdateMissing なしでは NotFound で全体が巻き戻り、顧客 3 のコードは元のまま
+                    AlternateKeyChild.Gone =>
+                    [
+                        ParityExpect.Throws("gone-child-refused", "SaveConflictException"),
+                        ParityExpect.StateRow(
+                            "gone-child-writer-unchanged",
+                            "customers/3",
+                            "code='K3'"
+                        ),
+                    ],
+                    // 飛ばした顧客 4 は書かず、顧客 3 の新しいコードだけが入る
+                    _ =>
+                    [
+                        ParityExpect.Succeeds("skipped-child-succeeds"),
+                        ParityExpect.StateRow("skipped-child-writer", "customers/3", "code='NEW3'"),
+                        ParityExpect.StateRow(
+                            "skipped-child-unchanged",
+                            "customers/4",
+                            "note=null"
+                        ),
+                    ],
+                },
+                new LoadOp("C", "customers", 3),
+                new LoadOp("D", "customers", 4),
+            ],
+            child == AlternateKeyChild.HookSkipped
+                ? new ParityBackendOptions(
+                    HookRules: [new ParityHookRule("Update:customers/4", ParityHookBehavior.Skip)]
+                )
+                : null
+        );
+
     private static ParityScenario AlternateKeyUpdate(string name, bool referenced, bool viaSave) =>
         new(
             name,

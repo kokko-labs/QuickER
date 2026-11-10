@@ -791,7 +791,7 @@ public abstract class SqlServerRepositoryCore<TEntity, TKey>(
     /// <summary>Executes raw SQL (UPDATE/DELETE/any DML) and returns the number of affected rows.</summary>
     /// <remarks>
     /// The connection is opened and closed per call (no transaction argument). To execute multiple statements atomically,
-    /// write <c>BEGIN TRAN ... COMMIT</c> in the SQL within a single call.
+    /// write <c>SET XACT_ABORT ON; BEGIN TRAN ... COMMIT</c> in the SQL within a single call.
     /// Parameter binding is the same as <see cref="QueryBySqlAsync"/>
     /// (<b>always pass values as parameters; string concatenation risks injection</b>).
     /// The implementation delegates to <see cref="ISqlExecutor"/>.

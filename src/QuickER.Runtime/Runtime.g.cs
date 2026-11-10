@@ -6813,9 +6813,11 @@ public interface IRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity,
     /// <b>Always pass values as parameters (string concatenation risks injection).</b>
     /// </para>
     /// <para>
-    /// The connection is opened and closed per call (no transaction argument). To execute multiple statements atomically,
-    /// write the transaction into the SQL of a single <see cref="ExecuteSqlAsync"/> call, in the database's own syntax
-    /// (<c>BEGIN TRAN ... COMMIT</c> on SQL Server, <c>BEGIN; ... COMMIT;</c> on SQLite).
+    /// The connection is opened and closed per call (no transaction argument). To execute multiple statements atomically on
+    /// SQL Server, write the transaction into the SQL of a single <see cref="ExecuteSqlAsync"/> call
+    /// (<c>SET XACT_ABORT ON; BEGIN TRAN ... COMMIT</c>). On SQLite use <see cref="ISqlBatchExecutor"/> instead (the SQLite
+    /// executor implements it): when a statement of a <c>BEGIN; ... COMMIT;</c> in one call fails, the transaction stays open
+    /// on a connection that goes back to the pool, and the next caller of that connection runs inside it.
     /// </para>
     /// </remarks>
     /// <param name="sql">The DML statement to execute.</param>
@@ -6910,9 +6912,10 @@ public partial interface ISqlExecutor
 
     /// <summary>Executes raw SQL (UPDATE/DELETE/any DML) and returns the number of affected rows.</summary>
     /// <remarks>
-    /// The connection is opened and closed per call (no transaction argument). To execute multiple statements atomically,
-    /// write the transaction into the SQL of a single call, in the database's own syntax (<c>BEGIN TRAN ... COMMIT</c> on
-    /// SQL Server, <c>BEGIN; ... COMMIT;</c> on SQLite).
+    /// The connection is opened and closed per call (no transaction argument). To execute multiple statements atomically on
+    /// SQL Server, write the transaction into the SQL of a single call (<c>SET XACT_ABORT ON; BEGIN TRAN ... COMMIT</c>). On
+    /// SQLite use <see cref="ISqlBatchExecutor"/> instead (the SQLite executor implements it): when a statement of a
+    /// <c>BEGIN; ... COMMIT;</c> in one call fails, the transaction stays open on a connection that goes back to the pool.
     /// </remarks>
     /// <param name="sql">The DML statement to execute.</param>
     /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>

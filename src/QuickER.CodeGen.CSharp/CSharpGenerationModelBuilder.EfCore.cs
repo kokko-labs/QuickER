@@ -72,7 +72,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             .ToList();
 
         // principal（親）エンティティ ID → その親が持つリレーション構成の対応を先に組み立てる
-        var relationshipsByPrincipal = BuildEfCoreRelationships(diagram);
+        var relationshipsByPrincipal = BuildEfCoreRelationships(diagram, diagnostics);
 
         var entities = mappedEntities
             .Select(entity => new CSharpEfCoreEntityConfigModel
@@ -205,7 +205,8 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// （そこで警告は既に追加済みのため、ここでは診断を重複させない）。1 対多・1 対 1 のみを構成する
     /// </remarks>
     private Dictionary<Guid, List<CSharpEfCoreRelationshipConfigModel>> BuildEfCoreRelationships(
-        ErDiagram diagram
+        ErDiagram diagram,
+        ICollection<GenerationDiagnostic> diagnostics
     )
     {
         var result = new Dictionary<Guid, List<CSharpEfCoreRelationshipConfigModel>>();
@@ -266,6 +267,29 @@ internal sealed partial class CSharpGenerationModelBuilder
             var principalKeyColumns = source.GetPrimaryKeyColumnsInOrder();
             var referencesPrimaryKey =
                 principalKeyColumns.Count == 1 && principalKeyColumns[0].Id == principalColumn.Id;
+
+            // 親の列が 1 列の主キーでも 1 列の一意制約でもない（複合主キーの 1 列・一意でない列＝MySQL だけが許す形）は、
+            // EF Core では表せない：HasPrincipalKey が参照先の列を一意（代替キー）とみなし、同じ値の行を 2 つ追跡すると
+            // 失敗する。生成物は変えず（ナビゲーションを外すと QuickER 版の出力まで変わる）、名指しする
+            if (
+                !referencesPrimaryKey
+                && !source.UniqueConstraints.Any(unique =>
+                    unique.ColumnIds.Count == 1 && unique.ColumnIds[0] == principalColumn.Id
+                )
+            )
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Warning(
+                        string.Format(
+                            Strings.CodeGen_Warning_EfCoreNonUniquePrincipalColumn,
+                            target.TableName,
+                            dependentColumn.Name,
+                            source.TableName,
+                            principalColumn.Name
+                        )
+                    )
+                );
+            }
 
             var config = new CSharpEfCoreRelationshipConfigModel
             {
