@@ -13,7 +13,7 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 internal static partial class SyncPlanExpectationRows
 {
     /// <summary>MySQL の実 DB の段の行の数の下限（行を足したら・消したら合わせる）</summary>
-    private const int RealMySqlRowCount = 75;
+    private const int RealMySqlRowCount = 77;
 
     /// <summary>実 DB の段：MySQL の同期（外部キー・主キー・一意制約・列の属性・説明・列順・参照アクション）</summary>
     private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealMySqlRows() =>
@@ -595,6 +595,86 @@ internal static partial class SyncPlanExpectationRows
                             e.After.Absent("uq md_child *");
                             e.After.Count("fk *", 1);
                             e.After.Single("fk md_child fk_md *");
+                        })
+                ),
+            // 外部キーが参照する列の一意制約の双子の片方の列を変え（作り直し＝後ろで付け直す削除）、もう片方を外す。支えうるキーが全部
+            // 外れるので削除の組を前寄せし、組の最後の削除が断られる（1553）。後ろで付け直す削除を組の最後へ回すので、ただの削除だけが
+            // 通り、作り直す一意制約は古い形で残る（付け直す削除が先だと、それが通った後にただの削除が断られ、作り直す一意制約が消えた
+            // まま残った）
+            Row(
+                    "plan-move-first-key-drop-group-readded-drop-last-mysql-like",
+                    "[Integration] MySQL 同期: 前寄せした一意制約の削除の組は、後ろで付け直す削除を最後に置き、断られても作り直す一意制約を残す",
+                    DialectNames.MySql
+                )
+                .TargetFromLive(s =>
+                {
+                    var table = s["md_p"];
+                    table.UniqueConstraints.Single(u => u.Name == "uq_a").ColumnIds =
+                    [
+                        s.Col("md_p", "w").Id,
+                    ];
+                    table.UniqueConstraints.RemoveAll(u => u.Name == "uq_b");
+                })
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE `md_p` (`id` int NOT NULL, `u` int NOT NULL, `w` int NOT NULL, PRIMARY KEY (`id`), "
+                                + "UNIQUE KEY `uq_a` (`u`), UNIQUE KEY `uq_b` (`u`));"
+                                + "CREATE TABLE `md_c` (`id` int NOT NULL, `p_u` int NOT NULL, PRIMARY KEY (`id`), "
+                                + "CONSTRAINT `fk_md_c` FOREIGN KEY (`p_u`) REFERENCES `md_p` (`u`));"
+                        )
+                        .Expect(e =>
+                        {
+                            // 並びは残る一意制約で見る（付け直す uq_a の削除を先に置くと、uq_a が消えて uq_b が残る）
+                            e.Script.Contains("*DROP INDEX `uq_b`*", "*DROP INDEX `uq_a`*");
+                            e.Warnings.Contains(
+                                "UniqueConstraintDropMayBreakForeignKey(md_p): fk_md_c"
+                            );
+                            e.Outcome.Exact("failed: *");
+                            e.After.Count("uq md_p *", 1);
+                            e.After.Single("uq md_p uq_a (u)");
+                            e.After.Count("fk *", 1);
+                            e.After.Single("fk md_c fk_md_c *");
+                        })
+                ),
+            // 同じ双子の両方の列を変える（どちらも後ろで付け直す）。どう並べても前の作り直しが消えるので、最初の作り直しを外して名指しし、
+            // 残した一意制約が外部キーを支えて、もう片方の作り直しはコミットする
+            Row(
+                    "plan-move-first-key-drop-group-two-readded-keeps-one-rebuild-mysql-like",
+                    "[Integration] MySQL 同期: 外部キーを支える一意制約の双子を両方作り直す同期は、片方の作り直しを外して名指しし、もう片方を作り直してコミットする",
+                    DialectNames.MySql
+                )
+                .TargetFromLive(s =>
+                {
+                    var table = s["md_p"];
+                    table.UniqueConstraints.Single(u => u.Name == "uq_a").ColumnIds =
+                    [
+                        s.Col("md_p", "w").Id,
+                    ];
+                    table.UniqueConstraints.Single(u => u.Name == "uq_b").ColumnIds =
+                    [
+                        s.Col("md_p", "u").Id,
+                        s.Col("md_p", "w").Id,
+                    ];
+                })
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE `md_p` (`id` int NOT NULL, `u` int NOT NULL, `w` int NOT NULL, PRIMARY KEY (`id`), "
+                                + "UNIQUE KEY `uq_a` (`u`), UNIQUE KEY `uq_b` (`u`));"
+                                + "CREATE TABLE `md_c` (`id` int NOT NULL, `p_u` int NOT NULL, PRIMARY KEY (`id`), "
+                                + "CONSTRAINT `fk_md_c` FOREIGN KEY (`p_u`) REFERENCES `md_p` (`u`));"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Warnings.Contains(
+                                "UniqueConstraintRebuildKeptForForeignKey(md_p): uq_a (fk_md_c)"
+                            );
+                            e.Outcome.Exact("committed");
+                            e.After.Count("uq md_p *", 2);
+                            e.After.Single("uq md_p uq_a (u)", "uq md_p uq_b (u,w)");
+                            e.After.Count("fk *", 1);
+                            e.After.Single("fk md_c fk_md_c *");
                         })
                 ),
         ];

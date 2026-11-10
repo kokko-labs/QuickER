@@ -110,12 +110,15 @@ internal static class SyncPlanShapeRows
                 ),
                 Levels(
                     ExplicitOp,
-                    "明示の削除（外部キー・一意制約 1 つ・一意制約を全部）と、名前を保って一意制約の列を変え元の列へ名前の無い一意制約を足す変更",
+                    "明示の削除（外部キー・一意制約 1 つ・一意制約を全部）と、名前を保って一意制約の列を変え元の列へ名前の無い一意制約を足す変更・名前を保って一意制約の列を変え移した先の列へ名前の無い一意制約を足す変更・最初の一意制約の列を変えほかを外す変更",
                     "None",
                     "DropForeignKey",
                     "DropUnique",
                     "DropAllUniques",
-                    "RenameKeepAndAddUnnamedOnOld"
+                    "RenameKeepAndAddUnnamedOnOld",
+                    "MoveOntoAddedUnique",
+                    "ChangeFirstDropOthers",
+                    "ChangeAllUniques"
                 ),
                 Levels(UniqueMultiplicity, "親の列 u に張る一意制約の数", "0", "1", "2"),
                 Levels(ReferencedKey, "子の外部キーが参照する親のキー", "PrimaryKey", "Unique"),
@@ -331,6 +334,38 @@ internal static class SyncPlanShapeRows
             [PrimaryKeyTwin] = "0",
             [AddedForeignKey] = "VarCharChild",
         },
+        // 前寄せの組の並び（夜間 CI の網の MySQL の種 8169）：外部キーが参照する列の一意制約の双子のうち、片方の列を変え（作り直し）、
+        // もう片方を外す。支えうるキーが全部外れるので削除の組を前寄せするが、組の並びが作り直しの削除 → ただの削除だったので、
+        // 作り直しの削除が通った後にただの削除が断られ（1553）、作り直す一意制約が消えたまま残った
+        new Dictionary<string, string>
+        {
+            [PkChange] = "None",
+            [ReferencingFks] = "1",
+            [TypeChange] = "None",
+            [ExplicitOp] = "ChangeFirstDropOthers",
+            [UniqueMultiplicity] = "2",
+            [ReferencedKey] = "Unique",
+            [ForeignKeyTypes] = "Same",
+            [CollateralFk] = "None",
+            [PrimaryKeyTwin] = "0",
+            [AddedForeignKey] = "None",
+        },
+        // 前寄せの組に付け直すキーが 2 つ（修正 AH2 の残り）：外部キーが参照する列の一意制約の双子を両方作り直す。組をどう並べても
+        // 前の作り直しの削除が通った後に次の削除が断られ（1553）、前の一意制約が消えたまま残る。作り直し 1 つを計画から外して名指しし、
+        // 残した一意制約が外部キーを支える
+        new Dictionary<string, string>
+        {
+            [PkChange] = "None",
+            [ReferencingFks] = "1",
+            [TypeChange] = "None",
+            [ExplicitOp] = "ChangeAllUniques",
+            [UniqueMultiplicity] = "2",
+            [ReferencedKey] = "Unique",
+            [ForeignKeyTypes] = "Same",
+            [CollateralFk] = "None",
+            [PrimaryKeyTwin] = "0",
+            [AddedForeignKey] = "None",
+        },
     ];
 
     /// <summary>網羅の配列（全行）。配列に含まれない必ず含む行は後ろへ足す</summary>
@@ -407,6 +442,27 @@ internal static class SyncPlanShapeRows
     {
         // Oracle は同じ列の並びに一意制約を 2 つ張れない（ORA-02261・DB の事実）
         if (dialect == DialectNames.Oracle && row[UniqueMultiplicity] == "2")
+        {
+            return false;
+        }
+
+        // 移した先の列へもう 1 つ一意制約を足す変更は、目標の図に同じ列集合の一意制約を 2 つ持つ。Oracle は持てず（ORA-02261）、
+        // SQLite は同じ列の並びの制約を名前で見分けない（生成器の宣言 DistinguishesSameSetConstraints と同じ）
+        if (
+            row[ExplicitOp] == "MoveOntoAddedUnique"
+            && dialect is DialectNames.Oracle or DialectNames.Sqlite
+        )
+        {
+            return false;
+        }
+
+        // 全部の一意制約の列を変える変更は、同じ列の一意制約 2 つを名前で見分けて別々に作り直す。SQLite は同じ列の並びの UNIQUE を
+        // 1 つの索引にまとめ、PostgreSQL は同じ CREATE TABLE の中の同じ列の UNIQUE を 1 つにまとめる（どちらも取り込むと 1 つ）ので、
+        // 実 DB には作り直す 2 つ目が無い
+        if (
+            row[ExplicitOp] == "ChangeAllUniques"
+            && dialect is DialectNames.Sqlite or DialectNames.PostgreSql
+        )
         {
             return false;
         }
@@ -678,6 +734,30 @@ internal static class SyncPlanShapeRows
                 target.ChangeUniqueOn("p", UniqueNames(row)[0], ["u"], "w");
                 target.AddUnique("p", null, "u");
                 break;
+            case "MoveOntoAddedUnique":
+                // 名前を保って一意制約の列を u から w へ変え（作り直し）、移した先の列 w へ名前の無い一意制約を足す（目標の図は w に一意制約を
+                // 2 つ持つ。持てる方言では両方を選ぶとどちらも作る）
+                target.ChangeUniqueOn("p", UniqueNames(row)[0], ["u"], "w");
+                target.AddUnique("p", null, "w");
+                break;
+            case "ChangeFirstDropOthers":
+                // 最初の一意制約の列を u から w へ変え（作り直し＝後ろで付け直す削除）、ほかの u の一意制約を外す（ただの削除）。u を参照する
+                // 外部キーがあれば、支えうるキーが全部外れて削除の組が前寄せされる。SQLite は u の一意制約を 1 つにまとめるので、変えた後に
+                // 外す物は残っていない
+                target.ChangeUniqueOn("p", UniqueNames(row)[0], ["u"], "w");
+
+                foreach (var name in UniqueNames(row).Skip(1))
+                {
+                    target.DropUniqueOn("p", name, ["u"], absentAllowed: true);
+                }
+
+                break;
+            case "ChangeAllUniques":
+                // u の一意制約を両方とも別の列集合へ作り直す（最初を (w)・2 つ目を (u, w)）。u を参照する外部キーがあれば、支えうるキーが
+                // 全部外れ、組の中に後ろで付け直す削除が 2 つ並ぶ（どう並べても前の 1 つが通った後に次が断られる形）
+                target.ChangeUniqueOn("p", UniqueNames(row)[0], ["u"], "w");
+                target.ChangeUnique("p", UniqueNames(row)[1], "u", "w");
+                break;
         }
 
         if (row[CollateralFk] == "AlterOtherForeignKey")
@@ -743,7 +823,20 @@ internal static class SyncPlanShapeRows
 
         // 名前を保って列を変え元の列へ名前の無い一意制約を足すのは一意制約 1 つの行だけ（2 つなら元の列のもう 1 つが名前の無い
         // 制約を満たして、追加が出ない）
-        if (Has(ExplicitOp, "RenameKeepAndAddUnnamedOnOld") && !Has(UniqueMultiplicity, "1"))
+        if (
+            Has(ExplicitOp, "RenameKeepAndAddUnnamedOnOld", "MoveOntoAddedUnique")
+            && !Has(UniqueMultiplicity, "1")
+        )
+        {
+            return false;
+        }
+
+        // 最初の一意制約の列を変えてほかを外す・全部の一意制約の列を変えるのは一意制約 2 つの行だけ（1 つならほかが無く、
+        // 列を変える変更 1 つは名前の段の作り直しの水準で足りる）
+        if (
+            Has(ExplicitOp, "ChangeFirstDropOthers", "ChangeAllUniques")
+            && !Has(UniqueMultiplicity, "2")
+        )
         {
             return false;
         }

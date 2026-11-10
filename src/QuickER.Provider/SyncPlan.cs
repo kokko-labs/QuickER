@@ -252,6 +252,17 @@ public enum SyncPlanWarningKind
     /// 外部キーの端を消す表・列の削除を外す。表ごとに 1 件。
     /// </remarks>
     TableRebuildLosesImportDiscardedContent,
+
+    /// <summary>
+    /// 外部キーを支えうるキーを全部外す計画で、後ろで付け直すキー（一意制約の作り直し・主キーの付け替え）が 2 つ以上あるので、
+    /// 一意制約の作り直し 1 つを計画から外し、その一意制約を古い形のまま残した（DDL が暗黙コミットされる方言）。
+    /// </summary>
+    /// <remarks>
+    /// 支えうるキーの削除の組は最後の 1 文だけが断られ、前の文は通る。付け直すキーが 2 つ以上あると、どう並べても前の方の付け直すキーが
+    /// 外れた後に断られ、付け直されずに消える。作り直しを 1 つ外せば、残した一意制約が外部キーを支え続け、ほかの削除は通る。
+    /// 外した作り直しごとに 1 件。
+    /// </remarks>
+    UniqueConstraintRebuildKeptForForeignKey,
 }
 
 /// <summary>
@@ -272,7 +283,8 @@ public enum SyncPlanWarningKind
 /// <see cref="SyncPlanWarningKind.DescriptionCharactersReplaced"/> では説明のテーブル（Detail は「表」または「表.列」）、
 /// <see cref="SyncPlanWarningKind.TableLeftWithoutColumns"/> では列を消す表（Detail は計画から外した列の削除の列名をカンマ区切りで並べたもの）、
 /// <see cref="SyncPlanWarningKind.TableWithoutColumns"/> では追加を外した列の無い表（Detail は空）、
-/// <see cref="SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent"/> では作り直しを外した表（Detail は取込警告が名指しした捨てた物をカンマ区切りで並べたもの）。
+/// <see cref="SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent"/> では作り直しを外した表（Detail は取込警告が名指しした捨てた物をカンマ区切りで並べたもの）、
+/// <see cref="SyncPlanWarningKind.UniqueConstraintRebuildKeptForForeignKey"/> では一意制約の表（Detail は「残した一意制約の名前 (支える外部キーの名前)」）。
 /// </param>
 /// <param name="Detail">
 /// 補足（外部キー制約名など。無ければ空文字）。

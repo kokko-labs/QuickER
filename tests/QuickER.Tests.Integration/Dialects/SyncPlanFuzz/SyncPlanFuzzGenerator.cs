@@ -1137,6 +1137,37 @@ internal sealed class SyncPlanFuzzGenerator(
         {
             MarkComputedInDiagramOnly(entities, relationships, live);
         }
+
+        CheckDeclaredTargetShapes(entities);
+    }
+
+    /// <summary>
+    /// 目標の図が方言の宣言を守っているか（宣言の誤りは例外＝その種の失敗）。同じ列の並びに一意制約を 2 つ張れない方言
+    /// （<see cref="SyncPlanFuzzDialect.AllowDuplicateUniqueConstraints"/> が偽＝Oracle の ORA-02261）では、同じ列集合の一意制約を
+    /// 2 つ以上持つ表を作らない（その図は DDL も同期も DB が断る。計画の誤りでなく生成器の誤りとして名指しする）
+    /// </summary>
+    private void CheckDeclaredTargetShapes(List<Entity> entities)
+    {
+        if (dialect.AllowDuplicateUniqueConstraints)
+        {
+            return;
+        }
+
+        foreach (var entity in entities)
+        {
+            var duplicated = entity
+                .UniqueConstraints.GroupBy(u =>
+                    string.Join(",", u.ColumnIds.Order().Select(id => id.ToString()))
+                )
+                .FirstOrDefault(g => g.Count() > 1);
+
+            if (duplicated is not null)
+            {
+                throw new InvalidOperationException(
+                    $"generator declaration: {entity.TableName} has {duplicated.Count()} unique constraints on the same columns ({string.Join(", ", duplicated.Select(u => u.Name ?? "(unnamed)"))}), which {dialect.Name} cannot hold"
+                );
+            }
+        }
     }
 
     /// <summary>DB の普通の整数の列を、目標の図だけで計算列にして型か NULL 許容を変える</summary>
@@ -2130,6 +2161,9 @@ internal sealed class SyncPlanFuzzGenerator(
         }
 
         var unique = entity.UniqueConstraints.First(u => u.Name is not null);
+
+        // 同じ列の並びに一意制約を 2 つ張れない方言（Oracle＝ORA-02261）では、ほかの一意制約が乗る列へ移さない（目標の図を DB が
+        // 持てない形にしない。AddUnique と同じ宣言。目標の図の自己検査 CheckDeclaredTargetShapes が守る）
         var column = entity
             .Columns.Where(c =>
                 !c.IsComputed
@@ -2138,6 +2172,12 @@ internal sealed class SyncPlanFuzzGenerator(
                 && info.Kind != FuzzTypeKind.Decimal
                 && IsUniqueKind(info.Kind)
                 && (RowCount(live, entity) == 0 || info.IsDistinct)
+                && (
+                    dialect.AllowDuplicateUniqueConstraints
+                    || !entity.UniqueConstraints.Any(u =>
+                        u != unique && u.ColumnIds.SequenceEqual([c.Id])
+                    )
+                )
             )
             .OrderBy(_ => rng.Next())
             .FirstOrDefault();

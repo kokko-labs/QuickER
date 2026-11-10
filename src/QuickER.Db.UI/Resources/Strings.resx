@@ -387,6 +387,10 @@ Do you want to run this against {0}?</value>
     <value>Note: the changes to the tables below are skipped. This database applies them by rebuilding the table, and the rebuilt table would silently lose what the import could not bring into the diagram (listed after each table), together with its data. To sync these tables, first fix in the database what the import dropped (for example, rename a column whose name differs from another only in case or surrounding spaces, or drop a foreign key to a table outside the import), then import again:
 {0}</value>
   </data>
+  <data name="SchemaSync_ExecuteConfirmUniqueConstraintRebuildKeptForForeignKey" xml:space="preserve">
+    <value>Note: the column changes of the unique constraints below are skipped, and each stays in its old form. The sync drops every key that the foreign key shown after the constraint relies on, and re-creates two or more of them, so whatever the order, the database would refuse the last drop after the earlier re-created key was gone, leaving that key dropped. The unique constraint kept in its old form keeps supporting the foreign key, so the other changes still run. To change its columns, run the sync again after this one (table / constraint (foreign key)):
+{0}</value>
+  </data>
   <data name="SchemaSync_ExecuteConfirmForeignKeyNotOnCandidateKey" xml:space="preserve">
     <value>Note: the referenced columns of the foreign keys below are not exactly a primary key or a unique constraint after the sync. Adding them is likely to fail; on MySQL / Oracle, recreating an existing one can leave it dropped:
 {0}</value>

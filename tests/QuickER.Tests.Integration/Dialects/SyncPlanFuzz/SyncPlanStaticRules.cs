@@ -93,6 +93,7 @@ internal static class SyncPlanStaticRules
             SyncPlanWarningKind.TableLeftWithoutColumns,
             SyncPlanWarningKind.TableWithoutColumns,
             SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent,
+            SyncPlanWarningKind.UniqueConstraintRebuildKeptForForeignKey,
         };
 
     /// <summary>計画を規則で判定する</summary>

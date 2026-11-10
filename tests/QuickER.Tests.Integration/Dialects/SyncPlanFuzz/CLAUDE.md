@@ -73,19 +73,21 @@
 
 ## 形の行
 
-- `SyncPlanShapeRows`（登録簿の部分 `ShapeRows`）は、主キーの変更 7 × 参照する外部キーの数 3 × 型の変更 10 × 明示の操作 5 × 一意制約の数 3 × 参照先のキー 2 × 外部キーの両端の型 3 × 巻き添えの外部キーの変更 2 × 主キーと同じ列の一意制約 2 × 足す外部キー 5 の網羅の配列（必ず含む行を足して 363 行）。P1 と Q6 の 3 つ組を含むことを網が表明する。
+- `SyncPlanShapeRows`（登録簿の部分 `ShapeRows`）は、主キーの変更 7 × 参照する外部キーの数 3 × 型の変更 10 × 明示の操作 8 × 一意制約の数 3 × 参照先のキー 2 × 外部キーの両端の型 3 × 巻き添えの外部キーの変更 2 × 主キーと同じ列の一意制約 2 × 足す外部キー 5 の網羅の配列（必ず含む行を足して 365 行）。P1 と Q6 の 3 つ組を含むことを網が表明する。
   - 型の変更の `DivergentEnds` は両端を別々の型へ変える：最初の子 c1 を int → bigint（宣言の範囲で互換）、参照される親の列を int → varchar(10)（互換でない）にし、c1 の表を目標の図の先頭へ移す（実 DB の取込の並びと同じく子の変更が先＝網の図では親の表が先に並ぶので、移さないと形が出ない）。前寄せが先頭で断られる文を選ぶこと（静的な規則 M1）を見る。
   - 足す外部キーの `OrphanChild` は、表 e に親に無い値（900 番台）の行を入れて外部キーを足す（既存の行で断られる文として `FuzzLiveSchema.DataFailures` に宣言する）。外部キーの追加の並び（静的な規則の D9 の並び・表明 1b）を見る。
   - 明示の操作の `RenameKeepAndAddUnnamedOnOld` は、名前を保って一意制約の列を u から w へ変え、元の列 u に名前の無い一意制約を足す（一意制約 1 つの行だけ）。一意制約の差分の名前の段と列集合の段が重なる形（`src/QuickER.Provider/CLAUDE.md`「一意制約の差分」）。
-  - 一意制約を外す・変える操作（`DropUnique`・`DropAllUniques`・`RenameKeepAndAddUnnamedOnOld`）は名前で引き、その名前が無ければ同じ列集合の名前の無い一意制約を引く（`ScenarioTarget.DropUniqueOn` / `ChangeUniqueOn`）。SQLite は取込が一意制約の名前を持たないので、名前で引くと何も外さなかった（SQLite の 177 行のうち一意制約を外す 58 行。普段の実 DB で流す 22 行を含む）。同じ列集合の一意制約を 1 つの索引にまとめる DB では、`DropAllUniques` の 2 つ目は何も外さない。
+  - 明示の操作の `MoveOntoAddedUnique` は、名前を保った一意制約を u から w へ移し、w に名前の無い一意制約を足す（目標の図は w に一意制約を 2 つ持つ。一意制約 1 つの行だけ・Oracle と SQLite は作らない）。両方を選んで計画がどちらも作り、`src/QuickER.Provider/CLAUDE.md`「一意制約の差分」の残る一意制約の前提の除外が外さないことを見る。
+  - 明示の操作の `ChangeFirstDropOthers` は、最初の一意制約の列を u から w へ変え（作り直し）、ほかの u の一意制約を外す。`ChangeAllUniques` は u の一意制約を両方とも作り直す（(w) と (u, w)。SQLite と PostgreSQL は作らない＝同じ列の UNIQUE を 1 つにまとめて取り込む）。どちらも一意制約 2 つの行だけで、u を参照する外部キーがあれば支えうるキーが全部外れて削除の組が前寄せされる。組の並べ替え（付け直す削除を最後へ）と、付け直すキーが 2 つのときの作り直しの除外（`src/QuickER.Provider/CLAUDE.md`「外部キーの暗黙の外し直し」）を、網の D9 と実 DB の表明 1b の規則 2 で見る。
+  - 一意制約を外す・変える操作（`DropUnique`・`DropAllUniques`・`RenameKeepAndAddUnnamedOnOld`・`ChangeFirstDropOthers`・`ChangeAllUniques`）は名前で引き、その名前が無ければ同じ列集合の名前の無い一意制約を引く（`ScenarioTarget.DropUniqueOn` / `ChangeUniqueOn`）。SQLite は取込が一意制約の名前を持たないので、名前で引くと何も外さなかった（SQLite の 177 行のうち一意制約を外す 58 行。普段の実 DB で流す 22 行を含む）。同じ列集合の一意制約を 1 つの索引にまとめる DB では、`DropAllUniques` の 2 つ目は何も外さない。
   - 型の変更の `BothEndsKindChange` は、参照される親の列（主キーを参照すれば `p.id`、一意制約なら `p.u`）と、それを参照する子の列すべて（c1..cN と、主キーを参照するなら `d`）を varchar(10) へ変える（親・子・d は行 0）。子を 1 つでも残すとその外部キーが同期後に食い違って名指しされ、予告の警告が途中の状態の失敗を隠すので全部を変える。
   - 足す外部キー（`AddedForeignKey`）は、外部キーの無い表 `e`（行 0）を置き、目標の図で `e(p_ref_0, p_ref_1)` から `p(id, k)` への外部キーを足す。水準は最初の列の型（`IntChild`・`BigIntChild`・`VarCharChild`）で、2 列目は `p.k` と同じ型（外部キーの両端の型の水準が作る k の型の違いを持ち込まない＝宣言の外で DB が受け入れる組を R8 に予言させない）。
   - 参照先のキー（`ReferencedKey`）：子の外部キーが親の主キーか `p.u` の一意制約を参照する。外部キーの両端の型（`ForeignKeyTypes`）：Wider は外部キーを張った後に参照される親の列を bigint にする（子の列は int のまま＝DB が受け入れる型の違う外部キー）。主キーの変更の `MoveToUniqueColumn` は主キーを `p.u` へ移し、型の変更の `ChildNullability` は最初の子の外部キーの列の NULL 許容だけを変える。
   - 外部キーの両端の型の `DecimalOtherKeyColumn` は親の主キーの 2 列目 `k` だけを小数にする（子の `p_ref_1` は int のまま。型の変更の水準は `k` を変えないので、複合外部キーの型の決まらない組が DB の受け入れている違いを持つ。bigint にしないのは、整数の幅の宣言で互換になり形が消えるため）。型の変更の `ChildKindChange` は最初の子の外部キーの列を int → varchar(10) にする（`c1` は行 0。Oracle は行のある列の型の種類を変えられない＝ORA-01439）。明示の削除の `DropAllUniques` は `p.u` の一意制約を全部外す（一意制約 2 つの行だけ）。
   - 巻き添えの外部キーの変更（`CollateralFk`）の `AlterOtherForeignKey` は親の主キーを参照する表 `d` を足し、その外部キーの ON DELETE を CASCADE へ変える（作り直しの外部キーが計画の前の方で外れる）。主キーと同じ列の一意制約（`PrimaryKeyTwin`）は `uq_p_pk(id, k)` を張る。
-  - 網羅の配列の後ろに、指摘の形の完全な行（`SyncPlanShapeRows.RequiredRows`＝P5-2 の試運転の L1・L4・2 回目の V1・V3・V4・V6、修正 AC2 の V8〔両端の種類の変更 × d の作り直し〕・型の違う外部キーの追加 2 つ〔BigIntChild・VarCharChild〕、修正 AH の前寄せ〔DivergentEnds × 参照 1 × d の作り直し〕・外部キーの追加の並び〔主キーの並べ替え × 参照 1 × OrphanChild〕の 11 行）を、含まれていなければ足す（全因子の起こり得る割り当てでなければ例外）。この行は普段の実 DB にも入れる。
-  - Oracle は一意制約 2 つの行を、SQL Server・MySQL は両端の型の違う外部キーを作れない（Msg 1778・エラー 3780＝DB の事実）ので両端の型が Same でない行を、`SupportsUniqueConstraintOnPrimaryKey` が偽の方言（Oracle・SQLite）は主キーと同じ列の一意制約の行を作らない。行の数は PostgreSQL 363・SQLite 177・Oracle 112・SQL Server・MySQL 150。
-- 網と夜間の実 DB は全行を流す。普段の実 DB は 2 因子の網羅に要る行（PostgreSQL 73 行・SQLite 81 行・Oracle 78 行・SQL Server・MySQL 76 行）と必ず含む行だけを流す。
+  - 網羅の配列の後ろに、指摘の形の完全な行（`SyncPlanShapeRows.RequiredRows`＝P5-2 の試運転の L1・L4・2 回目の V1・V3・V4・V6、修正 AC2 の V8〔両端の種類の変更 × d の作り直し〕・型の違う外部キーの追加 2 つ〔BigIntChild・VarCharChild〕、修正 AH の前寄せ〔DivergentEnds × 参照 1 × d の作り直し〕・外部キーの追加の並び〔主キーの並べ替え × 参照 1 × OrphanChild〕、修正 AH2 の前寄せの組の並び〔一意制約 2 つ × 参照先 Unique × 参照 1 × ChangeFirstDropOthers〕と付け直すキーが 2 つの組〔同じく ChangeAllUniques〕の 13 行）を、含まれていなければ足す（全因子の起こり得る割り当てでなければ例外）。この行は普段の実 DB にも入れる。
+  - Oracle は一意制約 2 つの行を、SQL Server・MySQL は両端の型の違う外部キーを作れない（Msg 1778・エラー 3780＝DB の事実）ので両端の型が Same でない行を、`SupportsUniqueConstraintOnPrimaryKey` が偽の方言（Oracle・SQLite）は主キーと同じ列の一意制約の行を作らない。行の数は PostgreSQL 348・SQLite 174・Oracle 107・SQL Server・MySQL 139。
+- 網と夜間の実 DB は全行を流す。普段の実 DB は 2 因子の網羅に要る行（PostgreSQL 76 行・SQLite 76 行・Oracle 71 行・SQL Server・MySQL 77 行）と必ず含む行だけを流す。
   - 2 因子の網羅に要る行は方言ごとに、その方言が作る行で作れる組を、その方言の行から選ぶ（`SyncPlanShapeRows.PairwiseRowIndexesFor`）。全方言で 1 つの部分を選ぶと、方言が作らない行の分だけその方言の組が普段の実行から抜ける。
 - 夜間だけの行の項目は範囲 `方言/scenarios/nightly`。実 DB の総当たりは夜間の実行でだけ受け持ち、網は常に受け持つ。
 
@@ -103,6 +105,9 @@
   - 水準は 4 つ：外部キーを親の一意制約の列へ付け替える（子の値を写し直す）・主キーと同じ列の一意制約（持てる方言だけ）・整数の列の型の種類を文字列へ変える（変える列と揃える相手の値が全部 NULL か行 0 のときだけ＝Oracle の ORA-01439。親が行 0 なら外部キーの両端をそろえて変える形が出る）・行 0 の子の型の違う live の文字列の列へ外部キーを足す。
   - 別の列にしたのは、本流の乱数の引き方・回数を変えないため。水準が出なかった種は足す前と同じケースで、種の指紋は水準が出た種だけ変わる（`ForSeed(seed, dialect, levels: false)` で足す前のケースを作れる）。別の列の種は決定的な式で作る（`HashCode.Combine` はプロセスごとに値が変わるので使わない）。
   - 生成器の穴（その形の入力を作らない）が 3 回続いた（修正 AA・AC・AC2）ので足した。
+- 生成器は目標の図を方言の宣言に照らして自己検査する（`CheckDeclaredTargetShapes`・`Mutate` の最後）。同じ列の並びに一意制約を 2 つ張れない方言（`AllowDuplicateUniqueConstraints` が偽＝Oracle の ORA-02261）で同じ列集合の一意制約を 2 つ以上持つ表を作ったら、その種の失敗（`seed threw: … generator declaration: …`）にする。
+  - 一意制約の列を変える変更（`ChangeUniqueColumns`）が、足す変更（`AddUnique`）と違ってほかの一意制約が乗る列へ移せたので、Oracle の目標の図が DB の持てない形になり、夜間の網の R9 だけが捕まえていた（普段の種では重複した一意制約を両方は選ばないので予言しない）。自己検査は普段の網の種でもこの形を捕まえる。
+  - 宣言は Oracle の事実だけに合わせる（SQLite は同じ列集合の一意制約を持て、壊れる形も無い。`AddUnique` の `DistinguishesSameSetConstraints` まで掛けると、SQLite の総当たりの網羅の組が消える）。
 - 既存の行で断られる文と、名前・計算列の形の水準は、さらに別の乱数の列（`DataLevelSeed`）で引く（先に足した水準の引き方も変えない）。水準は 4 つ：
   - 親の無い値の列への外部キーの追加（行のある子の、親に無い値を持つ live の整数の列へ外部キーを張る。必須の形 `orphan-fk-add`）。
   - 精度の縮小（小数の精度を 2 つ・bigint を int へ下げる。必須の形 `precision-decrease`）。日時の小数秒の縮小は、製品の宣言 `PrecisionDecreaseRequiresEmptyColumn` の方言（Oracle）の行のある表でもこの水準のときだけ作る。
