@@ -30,7 +30,9 @@ namespace QuickER.Behaviors;
 ///   <item>テキスト入力（TextBox / PasswordBox 等）にフォーカスがあるとき（文字の入力を壊さない）</item>
 ///   <item>
 ///     Space を押下に使うコントロール（ボタン・チェックボックス・コンボボックス・一覧の項目・グリッドのセル）に、
-///     <b>Tab などキーボード操作で</b>フォーカスが移ってきたとき（キーボードだけで操作する利用者が押せるように）
+///     <b>Tab などキーボード操作で</b>フォーカスが移ってきたとき（キーボードだけで操作する利用者が押せるように）。
+///     ただしパンの実行中（中ボタンまたは Space＋左ボタンでドラッグしている最中）は除く。その間の Space はパンのもので、
+///     ボタン類へ回すとボタンが ScrollViewer からキャプチャを奪ってパンが切れ、Space の解放でボタンが押される
 ///   </item>
 /// </list>
 /// <para>
@@ -519,8 +521,9 @@ public static class CanvasViewportBehavior
             return;
         }
 
-        // Tab などで移ったボタン・チェックボックス等では、Space はその押下に使わせる
-        if (_focusArrivedByKeyboard && IsSpaceActivatedControlFocused())
+        // Tab などで移ったボタン・チェックボックス等では、Space はその押下に使わせる。
+        // パンの実行中は除く（ボタンがキャプチャを奪ってパンが切れ、解放で押される。リピートの判定し直しも同じ）
+        if (!_isPanning && _focusArrivedByKeyboard && IsSpaceActivatedControlFocused())
         {
             return;
         }

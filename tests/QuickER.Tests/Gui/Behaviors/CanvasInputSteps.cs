@@ -467,7 +467,8 @@ internal sealed class CanvasInputModel
             return;
         }
 
-        if (IsSpaceActivated(Focus) && Arrival == FocusArrival.Keyboard)
+        // パンの実行中（マウスでドラッグしている最中）の Space はパンのもの（キーボードで移ったボタン類へも回さない）
+        if (IsSpaceActivated(Focus) && Arrival == FocusArrival.Keyboard && !Panning)
         {
             if (Owner != SpaceOwner.Control)
             {
