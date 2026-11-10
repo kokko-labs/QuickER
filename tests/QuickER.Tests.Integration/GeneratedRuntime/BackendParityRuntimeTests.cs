@@ -26,7 +26,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
-public sealed class BackendParityRuntimeTests
+public sealed partial class BackendParityRuntimeTests
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 

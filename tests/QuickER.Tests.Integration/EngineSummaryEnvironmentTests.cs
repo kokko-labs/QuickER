@@ -17,7 +17,8 @@ public sealed class EngineSummaryEnvironmentTests
             "SyncPlan.sqlserver",
             "SyncPlan.postgresql",
             "SyncPlan.oracle",
-            "BackendParity"
+            "BackendParity",
+            "BackendParitySqlServerSaves"
         );
 
     [Theory(DisplayName = "[指紋] 要約は外側のカルチャ（ja-JP・en-US）に依らない")]
@@ -64,6 +65,12 @@ public sealed class EngineSummaryEnvironmentTests
                 use(
                     GeneratedRuntime.BackendParityRuntimeTests.Seeds,
                     EngineFingerprintDriftTests.ParitySummary
+                );
+                return;
+            case "BackendParitySqlServerSaves":
+                use(
+                    GeneratedRuntime.BackendParitySqlServerRuntimeTests.RandomSaveSeeds,
+                    EngineFingerprintDriftTests.ParitySqlServerSaveSummary
                 );
                 return;
         }

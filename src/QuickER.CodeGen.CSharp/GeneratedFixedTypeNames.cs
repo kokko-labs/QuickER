@@ -489,6 +489,7 @@ public static class GeneratedFixedTypeNames
             "PropertyChangedEventHandler",
             "PropertyEntry",
             "PropertyInfo",
+            "PropertySaveBehavior",
             "PropertyValues",
             "Query",
             "Queryable",

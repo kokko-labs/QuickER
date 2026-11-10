@@ -432,6 +432,10 @@ var result = await customers.Query()
 `Query()` is part of the Repository shared contracts, so every repository has it: the QuickER Repository, EF Core and in-memory (the remote surface does not).
 The translation rules in this section are those of the QuickER Repository's translator.
 The EF Core Repository leaves translation to EF Core itself, and the in-memory repository evaluates the expression tree as C#.
+The same split applies to a projection (`ToProjectionListAsync`, and a named query that returns a projection) whose columns can be pruned.
+EF Core translates the whole selector into SQL, so a computation inside it follows the database's rules: `x.Code.Length` becomes `LEN` on SQL Server, which ignores trailing blanks, `x.Name.ToUpper()` follows the collation, and `ToString()` uses the database's text format.
+The QuickER and in-memory repositories fetch the columns the selector references and run the selector in C#.
+Keep such computations out of the selector, or run them on the fetched values, when the result has to be the same on every backend.
 
 `Include` / `ThenInclude` calls naming the same navigation are merged into one node.
 The same branching idiom as EF Core therefore writes multiple branches under `Orders`: `Include(c => c.Orders).ThenInclude(o => o.OrderLines)` followed by `Include(c => c.Orders).ThenInclude(o => o.Customer)`.
@@ -463,6 +467,7 @@ The remote surface has no `Query()`, and a named query's count takes no paging, 
 **`ExecuteDeleteAsync` deletes the rows the conditions match.**
 With `cascadeDelete: true` it deletes their descendants along the cascade first, and the number it returns counts every row it deleted, the matching rows and their descendants together.
 A cyclic cascade is refused with `NotSupportedException` before any statement runs.
+Every table the cascade reaches needs a single-column primary key: a child table with a composite primary key, or with none, makes the cascading delete fail with `InvalidOperationException` on every backend (a graph save with `cascadeDelete` handles such children).
 On EF Core, where a condition may read a navigation, the keys of the matching rows are read first and the deletes go by those keys, so a condition such as `o => o.OrderLines.Any()` deletes the matching rows together with their descendants (the conditions are not evaluated again once the descendants are gone).
 
 ### Null compensation
@@ -1081,6 +1086,11 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 - The generated `DbContext` gives every relationship except `ON DELETE CASCADE` the delete behavior `ClientNoAction`.
   EF Core then leaves the tracked children of a deleted parent alone and sends the parent's `DELETE` only, so the database's referential action decides the result, as with the QuickER repositories: `NO ACTION` refuses the deletion, and `SET NULL` and `SET DEFAULT` change the children in the database.
 - Optimistic concurrency is at parity: `ConcurrencyMode` selects the policy, EF Core's `DbUpdateConcurrencyException` is converted to `SaveConflictException`, and the refreshed concurrency token is left on the entity (see [Optimistic concurrency (rowversion)](#optimistic-concurrency-rowversion)).
+  When one save has several rows that each conflict on their own (one another writer deleted, another whose version moved on), which of them the `SaveConflictException` names depends on the order the statements run.
+  The QuickER repositories run them in graph-save order, while EF Core orders the statements of one `SaveChanges` itself, so the two can name different rows; the save is rolled back as a whole either way.
+- EF Core sends no `UPDATE` for a row of a table whose columns other than the keys are all produced by the database (a row version, a computed or an identity column), such as a key-only table or one with a key and a row version.
+  The repository writes such a row itself, as the QuickER Repository does (its primary key set to itself, or its changed alternate key), in the save's transaction before `SaveChanges`.
+  A row that is gone and a stale row version are therefore reported as for any other row, the version the database produced reaches the entity after the commit, and the row counts among the rows a graph save returns.
 - An update of a table without a rowversion column that matches no row (a trigger or row-level security discarded it) is reported as a missing row, as the QuickER Repository does: `UpdateAsync` returns `false` and a graph save fails with `SaveConflictException` (`NotFound`).
   A row whose statement keeps matching no row although the stored values were taken over (`ForceOverwrite`) is attempted at most 10 times and then fails with `SaveConflictException`.
   The limit is per row and applies after the row is found to be still there: a save of many rows that each need resolving runs to the end, and a row found gone is reported as gone however many attempts the save has made.
@@ -1108,6 +1118,8 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   A `Guid` primary key keeps EF Core's convention too: EF Core generates a value when the key is `Guid.Empty`, where the QuickER Repository writes `Guid.Empty` as it is.
 - A relationship whose referenced (principal) column is not the primary key, such as a UNIQUE column or one column of a composite primary key, is configured with an explicit `HasPrincipalKey`.
   The foreign key then joins to that column just as the QuickER Repository does, where EF Core's default would silently join it to the primary key.
+  EF Core cannot express a foreign key to a column that is not unique (one column of a composite primary key without a unique constraint of its own, which only MySQL accepts): `HasPrincipalKey` makes EF Core treat the column as unique, and tracking two rows with the same value fails.
+  Generation names such a foreign key with a Warning; give the referenced column a unique constraint, or refer to the primary key.
 - EF Core treats such a referenced column as an alternate key and never writes it in its own `UPDATE`, so the repository writes a changed value itself, as the QuickER Repository does.
   For each updated row of a table that has an alternate key, `UpdateAsync` and a graph save first read the row's stored key and row version (one extra query per row), then write a changed value with one more statement in the save's transaction, before `SaveChanges`.
   The write follows the same rules as the rest of the row: under `Optimistic` a stale row version leaves it unwritten and the save fails with `SaveConflictException`, and `ForceOverwrite` writes it anyway.
@@ -1115,7 +1127,10 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   A value a save hook's Before sets is written the same way.
   An `UpdateAsync` of such a table runs in a transaction inside the execution strategy, like a graph save.
   A row that takes the alternate key of a row the same save deletes is written after the deletion, as in the QuickER repositories: the held-back rows (and the rows below them) are saved by a second `SaveChanges` on a second context that shares the connection and the transaction, after their keys are written.
-  A context the factory builds from a connection the application passed (`UseSqlServer(connection)`) is given back its connection as the application owns it.
+  The second context gives its own connection back afterwards, so a pooled context leases the next save as it was.
+  A context built from a connection string gets the connection string back (EF Core disposes the connection it created as soon as another connection is set, and creates a new one when the context is next used).
+  A connection passed in the options (`UseSqlServer(connection)`) is given back owned as the options say, and a connection the factory attached at run time with `SetDbConnection` is given back as not owned, so the context never disposes it.
+  A connection passed with `contextOwnsConnection: true` is disposed by EF Core when the second context switches connections, so do not pool or reuse such a context.
 
 **Raw SQL**
 

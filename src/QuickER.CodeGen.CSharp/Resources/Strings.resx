@@ -187,6 +187,9 @@
   <data name="CodeGen_Warning_EfCoreKeylessTableExcluded" xml:space="preserve">
     <value>Table '{0}' has no primary key, so it was excluded from the EF Core DbContext (EF Core requires a key on every mapped entity type; no DbSet is generated and navigations to this table are ignored).</value>
   </data>
+  <data name="CodeGen_Warning_EfCoreNonUniquePrincipalColumn" xml:space="preserve">
+    <value>The foreign key {0}.{1} → {2}.{3} refers to a column that is neither the primary key of '{2}' nor the only column of a unique constraint. EF Core treats the referenced column as unique (an alternate key), so tracking two rows of '{2}' with the same value fails. Give '{2}.{3}' a unique constraint, or refer to the primary key.</value>
+  </data>
   <data name="CodeGen_Info_ExcludedUnboundedBinaryColumns" xml:space="preserve">
     <value>Excluded unbounded binary columns from SELECT / UPDATE:{0}</value>
   </data>

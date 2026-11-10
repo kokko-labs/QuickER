@@ -17,13 +17,14 @@ public class SqliteRepositoryDialectTests
 {
     /// <summary>
     /// ExecuteSqlAsync の説明は、SQLite の利用者に T-SQL の <c>BEGIN TRAN ... COMMIT</c> を勧めない
-    /// （SQLite では <c>near "TRAN": syntax error</c>）。方言中立の契約は両方の書き方を併記し、SQLite の実装は SQLite の書き方だけを書く
+    /// （SQLite では <c>near "TRAN": syntax error</c>）。1 回の呼び出しの <c>BEGIN; ... COMMIT;</c> も勧めず（文が失敗すると、開いた
+    /// トランザクションのまま接続がプールへ戻る）、SQLite の実行器が実装する <c>ISqlBatchExecutor</c> を勧める
     /// </summary>
     // 残す理由（P3-4b）：XmlDoc の固定の英文（生成器の固定の英文）
     [Fact(
-        DisplayName = "SQLite の ExecuteSqlAsync の説明はトランザクションを SQLite の構文で勧める"
+        DisplayName = "SQLite の ExecuteSqlAsync の説明は複数の文の原子的な実行に ISqlBatchExecutor を勧める"
     )]
-    public void SqliteDialect_ExecuteSqlDoc_RecommendsSqliteTransactionSyntax()
+    public void SqliteDialect_ExecuteSqlDoc_RecommendsBatchExecutor()
     {
         var result = new CSharpCodeGenerationService().Generate(
             SampleDiagram(),
@@ -38,7 +39,12 @@ public class SqliteRepositoryDialectTests
         var code = string.Join("\n", result.Files.Select(file => file.Content));
 
         code.Should().NotContain("write <c>BEGIN TRAN ... COMMIT</c>");
-        code.Should().Contain("write <c>BEGIN; ... COMMIT;</c> in the SQL within a single call.");
+        code.Should()
+            .NotContain("write <c>BEGIN; ... COMMIT;</c> in the SQL within a single call.");
+        code.Should()
+            .Contain(
+                "use <see cref=\"ISqlBatchExecutor\"/>, which the <see cref=\"SqlExecutor\"/> behind this method implements"
+            );
     }
 
     /// <summary>

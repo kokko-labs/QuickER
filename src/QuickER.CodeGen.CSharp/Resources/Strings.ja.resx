@@ -187,6 +187,9 @@
   <data name="CodeGen_Warning_EfCoreKeylessTableExcluded" xml:space="preserve">
     <value>テーブル '{0}' には主キーがないため、EF Core の DbContext から除外しました（EF Core はマップされる全エンティティ型にキーを要求します。DbSet は生成されず、このテーブルへのナビゲーションは無視されます）。</value>
   </data>
+  <data name="CodeGen_Warning_EfCoreNonUniquePrincipalColumn" xml:space="preserve">
+    <value>外部キー {0}.{1} → {2}.{3} の参照先の列は、'{2}' の主キーでも 1 列の一意制約でもありません。EF Core は参照先の列を一意（代替キー）とみなすので、同じ値を持つ '{2}' の行を 2 つ追跡すると失敗します。'{2}.{3}' に一意制約を付けるか、主キーを参照してください。</value>
+  </data>
   <data name="CodeGen_Info_ExcludedUnboundedBinaryColumns" xml:space="preserve">
     <value>無制限バイナリ列を SELECT / UPDATE 対象から除外しました:{0}</value>
   </data>

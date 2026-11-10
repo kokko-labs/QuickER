@@ -318,6 +318,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Warning_EfCoreNonUniquePrincipalColumn {
+            get {
+                return ResourceManager.GetString("CodeGen_Warning_EfCoreNonUniquePrincipalColumn", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Info_ExcludedUnboundedBinaryColumns {
             get {
                 return ResourceManager.GetString("CodeGen_Info_ExcludedUnboundedBinaryColumns", resourceCulture);

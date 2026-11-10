@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore.Metadata;
 using QuickER.CodeGen.CSharp;
+using QuickER.CodeGen.CSharp.Resources;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Tests.CodeGen.CSharp.CodegenConfig.Judges;
@@ -840,5 +841,126 @@ internal static partial class CodegenCases
                 true,
                 true
             ),
+            EfCoreText_PrincipalColumnRow(
+                "diag-efcore-non-unique-principal-column-warning",
+                uniquePrincipal: false
+            ),
+            EfCoreText_PrincipalColumnRow(
+                "diag-efcore-unique-principal-column-no-warning",
+                uniquePrincipal: true
+            ),
         ];
+
+    // ===== 外部キーの参照先の列 =====
+
+    /// <summary>
+    /// 外部キーの参照先の列の図：<paramref name="uniquePrincipal"/> なら items.code（1 列の一意制約）を、そうでなければ
+    /// order_lines の複合主キー（order_id, line_no）の 1 列 order_id を参照する。どちらの図も主キーを参照する外部キーを 1 本持つ
+    /// </summary>
+    private static ErDiagram EfCoreText_PrincipalColumnDiagram(bool uniquePrincipal)
+    {
+        var parentKey = Service_Column(
+            uniquePrincipal ? "item_id" : "order_id",
+            "int",
+            primaryKey: true
+        );
+        var parentSecond = uniquePrincipal
+            ? Service_Column("code", "nvarchar(20)")
+            : Service_Column("line_no", "int", primaryKey: true);
+        var parent = Service_Entity(
+            uniquePrincipal ? "items" : "order_lines",
+            parentKey,
+            parentSecond
+        );
+
+        if (uniquePrincipal)
+        {
+            parent.UniqueConstraints.Add(new UniqueConstraint { ColumnIds = [parentSecond.Id] });
+        }
+
+        var referenced = uniquePrincipal ? parentSecond : parentKey;
+        var childReference = Service_Column(
+            uniquePrincipal ? "item_code" : "order_id",
+            referenced.DataType,
+            nullable: true,
+            foreignKey: true
+        );
+        var child = Service_Entity(
+            uniquePrincipal ? "item_tags" : "line_notes",
+            Service_Column("child_id", "int", primaryKey: true),
+            childReference
+        );
+        var keyReference = Service_Column("team_id", "int", nullable: true, foreignKey: true);
+        var owners = Service_Entity("teams", Service_Column("team_id", "int", primaryKey: true));
+        child.Columns.Add(keyReference);
+
+        return new ErDiagram
+        {
+            TargetDbms = DialectNames.SqlServer,
+            Entities = [parent, child, owners],
+            Relationships =
+            [
+                new Relationship
+                {
+                    Id = Guid.NewGuid(),
+                    Type = RelationshipType.OneToMany,
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                    ColumnPairs = [new(referenced.Id, childReference.Id)],
+                },
+                // 主キーを参照する外部キーは名指ししない
+                new Relationship
+                {
+                    Id = Guid.NewGuid(),
+                    Type = RelationshipType.OneToMany,
+                    SourceEntityId = owners.Id,
+                    TargetEntityId = child.Id,
+                    ColumnPairs = [new(owners.Columns[0].Id, keyReference.Id)],
+                },
+            ],
+        };
+    }
+
+    /// <summary>
+    /// EF Core は一意でない列を参照先に持つ外部キーを表せない（HasPrincipalKey が一意とみなす）ので、参照先の列が 1 列の主キーでも
+    /// 1 列の一意制約でもない外部キーを警告で名指しする（生成物は変えない）。1 列の一意制約と主キーを参照する外部キーは名指ししない
+    /// </summary>
+    private static ScenarioRow<CodegenCase> EfCoreText_PrincipalColumnRow(
+        string id,
+        bool uniquePrincipal
+    ) =>
+        new(
+            id,
+            null,
+            uniquePrincipal
+                ? "外部キーの参照先が 1 列の一意制約か主キーなら、参照先の列の警告を出さない"
+                : "外部キーの参照先が複合主キーの 1 列（一意でない列）なら、EF Core の参照先の列の警告で名指しする",
+            new CodegenCase(
+                () => EfCoreText_PrincipalColumnDiagram(uniquePrincipal),
+                new CodeGenerationOptions
+                {
+                    RootNamespace = "Test.PrincipalColumn",
+                    GenerateEfCoreRepositories = true,
+                },
+                DialectNames.SqlServer,
+                uniquePrincipal
+                    ? DiagnosticExpectation
+                        .Contains()
+                        .Without(
+                            ExpectedDiagnostic.WarningAnyItems(
+                                nameof(Strings.CodeGen_Warning_EfCoreNonUniquePrincipalColumn)
+                            )
+                        )
+                    : DiagnosticExpectation.CountOf(
+                        ExpectedDiagnostic.WarningMentioning(
+                            nameof(Strings.CodeGen_Warning_EfCoreNonUniquePrincipalColumn),
+                            "line_notes",
+                            "order_lines"
+                        ),
+                        1
+                    ),
+                FileRules: [new FileRule(".g.cs", NonEmpty: true)],
+                Compile: true
+            )
+        );
 }

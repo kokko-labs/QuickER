@@ -179,6 +179,26 @@ public static partial class BackendParityScenarios
             ]
         );
 
+        // 同じ形で、親の紹介先のコレクションを HashSet に差し替えておく（IList でないコレクションのナビゲーションも空にして
+        // 外部キーのとおりに書き、保存の後に戻す）
+        yield return new(
+            "bulk-insert-navigation-other-foreign-key-hash-set",
+            Basic,
+            [
+                new BulkInsertWithNavigationOp(
+                    new CustomerRow(30, "P"),
+                    new CustomerRow(31, "C", Referrer: 1),
+                    ParentCollectionAsHashSet: true
+                ),
+                ParityExpect.Outcome("bulk-navigation-hash-set-counts-rows", "inserted=2"),
+                ParityExpect.StateRow(
+                    "bulk-navigation-hash-set-keeps-key",
+                    "customers/31",
+                    "referrer=1"
+                ),
+            ]
+        );
+
         // 同じ形のバッチに保存先の主キーと重なる行を混ぜると、全体が断られ、呼び出し側のナビゲーションと外部キーは保存の前のまま
         // 残る（失敗の後もナビゲーションを戻す）
         yield return new(

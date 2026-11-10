@@ -66,22 +66,40 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
 ## 変わった代替キーを自分で書く
 
 - 代替キー（主キーでない一意制約を外部キーが参照する列＝`HasPrincipalKey`）は、EF Core が自分の `UPDATE` で書かず、追跡中に値が変わると変更検出が「part of a key」で例外にする（Save フックの Before が書き換えた場合）。
-- そのため `WriteAlternateKeysAsync`（`_08_EfCore.scriban`）が、代替キーを持つ表の更新する行ごとに `SaveChanges` の前で次を行う。
+- そのため `WriteOwnColumnsAsync`（`_08_EfCore.scriban`）が、代替キーを持つ表の更新する行ごとに `SaveChanges` の前で次を行う。
   - 保存先のキーと行バージョンを読む。行が無い・Optimistic で版が古い・値が同じ、のどれかなら書かない（失敗の報告は `SaveChanges` に任せる）。
-  - 変わった列だけを `ExecuteUpdate` で保存と同じトランザクションの中で書く（Optimistic は版も条件にする）。
+  - 変わった列だけを `ExecuteUpdate` で保存と同じトランザクションの中で書く（Optimistic は版も条件にする）。値はホルダー経由のパラメータで送り、リテラルを埋め込まない。
   - 書いたら版を読み直して並行性トークンの元の値に入れ、代替キーの元の値を今の値にする（変更検出がキーの変更と見ない）。
+- 読み直した版は、その試行のトランザクションの中にしか無い。そのため書き換える前の版を試行の記録（`OwnWriteAttempt`）に積み、試行が 0 行でロールバックしたら、分類（`IsRowGoneAsync`・`ResolveConcurrencyFailureAsync`）の前に逆順で元の版へ戻す（グラフ保存の while と `UpdateWritingOwnColumnsAsync` の while。1 つめと 2 つめの文脈で 1 つの記録を共有する）。コミットしたら記録を捨てる。
+  - 戻さないと、同じ保存のほかの行の理由（消えた行の insertWhenUpdateMissing の挿入への切り替えなど）でやり直した試行が、DB に無い版を元の値として「版が進んだ」と判断して代替キーを書かず、`WHERE version = 読み直した版` が 0 行になって偽の競合（Modified）になる。
+  - 分類の前に戻すのは、ForceOverwrite の保存先の値の採用（`OriginalValues.SetValues`）を後勝ちにするため。記録に入るのは、その試行で代替キーの UPDATE が通った（行のロックを持つ）行だけなので、同じ試行でその行が採用に回る組は作れず、順序の違いは観測できない（設計の理由で、守りは置かない）。
+  - 代替キーの元の値（今の値にした印）は戻さない。次の試行の書き込みは、書くかどうかを保存先の値（ロールバックで戻った値）と今の値で決めて書き直し、変更検出の前に印を今の値にし直すので、戻しても上書きされて意味が無い。
+  - 実行戦略の再試行は `ChangeTracker.Clear()` から登録し直すので、記録の外で元に戻る。
 - 呼ぶ位置：グラフ保存では Before のフックの後・明示のトランザクションの試行ごとの最初（`KeepStoredUnboundedBinaries` と `AdoptStoredForeignKeysAsync` は変更検出を走らせるので、その前）。`UpdateAsync` では代替キーを持つ表のときだけ、実行戦略の中の試行ごとのトランザクション（`UpdateWithAlternateKeysAsync`）。
 - 同じ保存で消す行がまだ持つ値を代替キーで取る更新は、削除の後に書く（`HeldBackContextAsync`）。
   - SaveChanges の前に書くと、消す前の行とぶつかって一意制約に断られる。1 回の SaveChanges の中では文の間に何も挟めず、一意インデックスの並べ替えはキーの列に効かない。
   - そのため、3 段目（`GraphSaveOrder.HeldBack` から歩く行）を、接続とトランザクションを共有する 2 つめの文脈（`SetDbConnection`＋試行のトランザクションごとの `UseTransaction`）で追跡し、1 つめの SaveChanges の後に、代替キー → SaveChanges の順で書く。3 段目の新しい子が新しい値を参照しても通る。
-  - 2 つめの文脈（`HeldBackContext`）は、破棄の前にトランザクションから外し、自分の接続を元の所有のまま戻す。所有はオプションの `RelationalOptionsExtension` から読む（接続文字列で構成＝文脈が持ち主、利用者が渡した接続＝`IsConnectionOwned` のとおり）。ファクトリが両方の文脈に同じ接続を渡すなら差し替えない。
-    - 持ち主として戻すと、文脈の破棄が利用者の接続を破棄し、その接続を渡された次の文脈が開けない。戻さないと、プールの文脈が前の保存の接続を持ったまま次に貸し出される（生成の `QuickErDbContext` は値オブジェクトありで `OnConfiguring` を持つので EF Core がプールを断るが、値オブジェクトなしの構成ではプールできる）。
-    - ガード：`BackendParityRuntimeTests` の `graph-updated-row-takes-alternate-key-of-deleted-row-user-connections`（`ParityScenario.EfCoreUserConnections`＝利用者が持つ 2 本の接続を交互に渡すファクトリ。破棄した後に開くと断る接続で、SQLite でも SQL Server と同じに破棄が見える）。mutation 実証済み。
+  - 2 つめの文脈（`HeldBackContext`）は、破棄の前にトランザクションから外し、自分の接続を戻す。戻し方は接続の出どころ（オプションの `RelationalOptionsExtension`）で 3 つに分ける。ファクトリが両方の文脈に同じ接続を渡すなら差し替えない。
+    - 接続文字列で構成した文脈（`Connection` が null で `ConnectionString` がある）：`SetDbConnection(null, true)` を挟んでから `SetConnectionString` で接続文字列を戻す。EF Core は別の接続を付けた時点で自分が作った接続を破棄し接続文字列も消すので（SQL Server の `SqlConnection` は破棄で接続文字列を失う。EF Core 10 で実測）、自分の接続を付け直すとプールの文脈が次の貸し出しで開けない。`SetConnectionString` だけを呼ぶと、その時点の接続＝共有の接続の文字列を書き換えようとする（開いていれば例外、閉じていれば利用者の接続を書き換える）。
+    - オプションで渡した接続（`Connection` がある）：`IsConnectionOwned` のとおりの所有で戻す。`contextOwnsConnection: true` で渡した接続は差し替えた時点で EF Core が破棄するので戻す側では救えない（この保存の後に文脈ごと破棄されるので、使い回さない限り観測できない。XmlDoc に書く）。
+    - どちらも無い（ファクトリが実行時に `SetDbConnection` で付けた接続）：持ち主でないとして戻す。持ち主かは公開の API で読めないので、利用者の接続を破棄しない側に倒す（`contextOwnsConnection: true` で付けた接続は、付けた側が破棄する）。持ち主として戻すと、文脈の破棄が利用者の接続を破棄し、その接続を渡された次の文脈が開けない。
+    - 作った文脈をコンストラクタが投げたら、破棄して投げ直す（プールへ戻らなくなる）。
+    - ガード：`BackendParityRuntimeTests` の `graph-updated-row-takes-alternate-key-of-deleted-row-user-connections`（`ParityScenario.EfCoreUserConnections`＝利用者が持つ 2 本の接続を交互に渡すファクトリ）と、`BackendParitySqlServerRuntimeTests` の `alternate-key-taken-from-deleted-twice-*`（接続文字列の文脈を使い回すファクトリ＝プールの形・実行時に付けた接続・オプションで渡した接続の対照。値オブジェクトありの生成コードは本物のプールを断るので、破棄を飛ばして同じインスタンスを貸し出し直す派生で作る）。mutation 実証済み（接続文字列の文脈を今の戻し方へ戻すと接続文字列の値だけが、実行時に付けた接続を持ち主として戻すと実行時に付けた接続の値だけが赤）。
   - 分けるかの判定は `GraphSaveOrder.TakesDeletedValue`（後回しの判定と同じ本体を、モデルの代替キーの列だけに絞る）。代替キーでない一意な値の後回しは分けず、1 回の SaveChanges の中で `HasIndex` が並べる（分けると下の `HasIndex` のガードが効かなくなる）。
   - 両方の文脈のエントリはコミットまで保留のまま（`acceptAllChangesOnSuccess: false`）。そのため、0 行の文の分類とやり直し（`IsRowGoneAsync`）・実行戦略の試行の組み直し・採番値のコミット後の反映は、1 つの文脈のときと同じに効く。競合のロールバックの後は、2 つめの文脈をトランザクションから外してから保存先を読む。
 - ほかの行が参照している値は DB が断る（`NO ACTION`。QuickER 版と同じ）。
 - 値が同じなら書かない判定は、外しても緑のまま（同じ値の書き込みは DB が断らず、版を読み直すので観測できない）。
-- ガード：`BackendParityRuntimeTests` の `h1-*` の 7 シナリオ（参照あり・なし × `UpdateAsync`・グラフ保存・Before のフックの書き換え〔`ParityHookBehavior.EditKeyThenContinue`＝決まった形のシナリオだけが使う〕・同じ保存に古いコードを参照する依存行を持つ形）、`BackendParitySqlServerRuntimeTests` の `alternate-key-*`（ConcurrencyFixture の kits / kit_parts、実 SQL Server）。mutation 実証済み。
+- ガード：`BackendParityRuntimeTests` の `h1-*` の 10 シナリオ（参照あり・なし × `UpdateAsync`・グラフ保存・Before のフックの書き換え〔`ParityHookBehavior.EditKeyThenContinue`＝決まった形のシナリオだけが使う〕・同じ保存に古いコードを参照する依存行を持つ形・同じ保存の紹介先の顧客〔消えた・消えた＋insertWhenUpdateMissing・Before が飛ばす〕）、`BackendParitySqlServerRuntimeTests` の `alternate-key-*`（ConcurrencyFixture の kits / kit_parts、実 SQL Server）と `alternate-key-*-with-*`（代替キーの行の形 × 同じ保存のほかの行 × 並行性の扱いの全積。リモートの EF Core のサーバーでも流す）、夜間の `GeneratedRuntime/ParitySqlServerSaves`（乱数の保存）。mutation 実証済み（試行の記録の復元を外すと、Optimistic × insertWhenUpdateMissing の 4 ケースが EF Core とリモートで赤。2 つめの文脈の記録を捨てると taken-from-deleted の 2 ケースだけが赤）。
+
+## SaveChanges が書く列を持たない行
+
+- EF Core は、書ける列（キーでなく `AfterSaveBehavior` が `Save` の列。リモートの要求の中では除外した無制限バイナリ列も除く＝`SaveChangesWritesColumn`）を持たない Modified のエントリに `UPDATE` を送らない。キーだけの表・キーと版だけの表・代替キーと版だけの表が当たる。
+- そうした行も `WriteOwnColumnsAsync` が書く（`WritesOwnColumns`＝代替キーがあるか書ける列が無い）。変わった代替キーが無ければ主キーを自分自身へ代入する（QuickER 版の `SET k = k` と同じ。版のある表では版が進む）。
+  - 保存先の行が無い・Optimistic で版が古い・文が 0 行のときは、`OwnWriteMissedException` で知らせ、呼び出し側は `SaveChanges` の `DbUpdateConcurrencyException` と同じに扱う（ロールバック → 試行の記録を戻す → 分類。`UpdateAsync` は false か競合、グラフ保存は NotFound・挿入への切り替え・競合・ForceOverwrite の採用）。`DbUpdateConcurrencyException` を自分で作るには EF Core の内部 API（`IUpdateEntry`）が要るので、専用の例外にした。
+  - 読み直した版は試行の記録に「エンティティへ渡す」印つきで積み、コミットの後（`AcceptAllChanges` の前）にエンティティへ書く（`SaveChanges` が書く行の版は `AcceptAllChanges` が渡す）。
+  - 自分で書いた行はグラフ保存の戻り値に数える（`SaveChanges` は数えない）。
+- 書かないと、消えた行の `UpdateAsync` が `true` を返し、古い版を見逃し、グラフ保存が NotFound も挿入への切り替えもせず、代替キーを書いた版がエンティティへ届かず次の保存が偽の競合になる。
+- ガード：`BackendParitySqlServerRuntimeTests` の `own-write-*`（tags・stamps・markers × fresh／stale／gone × UpdateAsync／グラフ保存／insertWhenUpdateMissing のグラフ保存。リモートの EF Core のサーバーでも流す）。mutation 実証済み（書ける列の無い行を自分で書かないと stamps・markers の 13 ケースだけが、版をエンティティへ渡さないと、版を持つ tags・stamps の行を書く 8 ケース〔fresh の 3 経路と gone の insertWhenUpdateMissing〕だけが赤）。
 - 削除の後に書くガード：`BackendParityRuntimeTests` の `graph-updated-row-takes-alternate-key-of-deleted-row`・`-with-new-dependent`（後から書くと新しい子の挿入が先に走る）・`ef-retry-updated-row-takes-alternate-key-of-deleted-row`（実行戦略の試行の組み直し）、`BackendParitySqlServerRuntimeTests` の `alternate-key-taken-from-deleted-kit-*`（部品を持つ kit の削除・2 つめの文脈の 0 行の競合の Optimistic と ForceOverwrite）。mutation 実証済み。
 
 ## 保存のやり直しと実行戦略

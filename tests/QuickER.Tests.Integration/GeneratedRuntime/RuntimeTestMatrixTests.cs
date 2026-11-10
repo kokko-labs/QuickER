@@ -550,6 +550,7 @@ public class RuntimeTestMatrixTests
         // --- 実装先どうしの一致 ---
         new("BackendParitySqlServerRuntimeTests", "BackendParity", Backend.AdoSqlServer),
         new("BackendParitySqlServerRuntimeTests", "BackendParity", Backend.EfCore),
+        new("BackendParitySqlServerRuntimeTests", "BackendParity", Backend.Remote),
         new("BackendParityRuntimeTests", "BackendParity", Backend.AdoSqlite),
         new("BackendParityRuntimeTests", "BackendParity", Backend.EfCore),
         new("BackendParityRuntimeTests", "BackendParity", Backend.InMemory),
