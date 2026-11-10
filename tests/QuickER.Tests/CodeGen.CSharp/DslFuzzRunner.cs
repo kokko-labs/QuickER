@@ -386,7 +386,7 @@ internal static class DslFuzzRunner
                     $"query-{diagnostic.Severity.ToString().ToLowerInvariant()}",
                     query is null ? "unattributed" : FirstKind(query)
                 ),
-                $"seed={unit.Seed} {query?.Name}: {(query is null ? "" : DslFuzz.Render(query.Condition))} → {diagnostic.Message}"
+                $"seed={unit.Seed} {query?.Name}: {(query is null ? "" : query.Text)} → {diagnostic.Message}"
             );
         }
 
@@ -401,7 +401,7 @@ internal static class DslFuzzRunner
                     "expected-rejection-missing",
                     FirstKind(query)
                 ),
-                $"seed={unit.Seed} {query.Name}: {DslFuzz.Render(query.Condition)}"
+                $"seed={unit.Seed} {query.Name}: {query.Text}"
             );
             rejected.Add(query.Name);
         }
@@ -445,7 +445,7 @@ internal static class DslFuzzRunner
                     isError ? "compile-error" : "compile-warning",
                     difference
                 ),
-                $"seed={unit.Seed} {query?.Name}: {(query is null ? "" : DslFuzz.Render(query.Condition))} → [{diagnostic.Id}] {diagnostic.GetMessage()}"
+                $"seed={unit.Seed} {query?.Name}: {(query is null ? "" : query.Text)} → [{diagnostic.Id}] {diagnostic.GetMessage()}"
             );
         }
 

@@ -537,6 +537,12 @@ A query whose simple DSL condition is invalid is skipped with a warning that nam
 That covers a syntax error, a column or parameter that does not exist (such as a column deleted after the query was written), and an `IS NULL` on a column that does not allow NULL.
 The query definition dialog and `set_query` check the condition before saving, so this happens when the diagram changes later or the file is edited by hand.
 
+As in SQL, `NOT` binds more tightly than `AND` in a DSL condition, and `AND` more tightly than `OR`.
+`a = 1 OR b = 2 AND NOT c = 3` reads as `a = 1 OR (b = 2 AND (NOT c = 3))`.
+Use parentheses to group the condition another way.
+Keywords (`AND`, `OR`, `NOT`, `IS`, `NULL`, `LIKE`, `IN`, `CONTAINS`, `STARTSWITH`, `ENDSWITH`) are not case-sensitive, and `!=` means the same as `<>`.
+A single quote inside a string literal is written twice (`name = 'O''Brien'` compares with `O'Brien`).
+
 In a DSL `LIKE` literal, only a leading or trailing `%` is read as a pattern (a `%` or `_` in the middle is a validation error).
 Character classes such as SQL Server's `[...]` get no special treatment: they match as strings that contain the brackets themselves.
 Write a raw SQL query when you need pattern syntax.
@@ -546,10 +552,13 @@ Limit the SQL yourself when it can return many rows: `TOP 1` on SQL Server, `LIM
 
 An integer literal in a DSL condition has to fit the type of the column it is compared with (for a value object column, the type the object wraps).
 `tinyint_col = 256`, `smallint_col = 32768`, `unsigned_col = -1`, and an integer larger than `ulong` are not accepted: QuickER warns and skips that query instead of generating it.
-Generated as written, such a comparison is always false (or always true) and the C# compiler reports CS0652, and a store that binds the literal with the column's type (SQL Server) raises an overflow error when the query runs.
+Generated as written, such a comparison is always false (or always true) and the C# compiler reports CS0652.
+
+A literal with a decimal point compared with an integer column is compared as a number, as C# compares an integer with a `double`: `qty < 1.5` holds for 1 and below, and `qty = 1.5` holds for no row.
+A value object column that wraps an integer does not accept such a literal, because the object's `Create` takes an integer: QuickER warns and skips that query.
 
 > **Known limitation**: hand-written LINQ is not checked.
-> `Query().Where(x => x.Tiny == 256)` compiles with the CS0652 warning and raises the same overflow error on SQL Server.
+> `Query().Where(x => x.Tiny == 256)` compiles with the CS0652 warning and, as in C#, matches no row.
 
 > **Known limitation**: a literal compared with a value object column is passed to the object's `Create`, which applies the object's own rules (maximum length, digits and scale).
 > The generator checks only the range of an integer literal, not these rules, so a literal that breaks one throws `ValueObjectValidationException` each time the generated method runs.
@@ -599,6 +608,10 @@ Date parts (`Year`, `Month`, …) are translated only when the member is read fr
 A property of the same name on any other type is not a date part, such as one added to a value object through a partial declaration.
 It fails with `NotSupportedException` instead of silently becoming `YEAR([col])`.
 The date parts of a `DateTimeOffset` column are taken in the offset the value carries, as C# does (`2024-01-01 05:00 +09:00` is year 2024, hour 5).
+
+On SQL Server, the QuickER Repository binds a compared value with the column's type only when the value fits that type.
+A value that does not fit is bound with its own type, so the comparison answers as C# does: a fraction or an integer out of range against an integer column (`x.Qty < 1.5`, `x.Tiny < 300`), a decimal with more digits than the column's precision and scale, a time of day against a `date` column, and a character outside ASCII against a non-Unicode column (`varchar`, `char`).
+The server then converts the column for that comparison, so an index on the column may not be used for it.
 
 `Contains` on a list expands to one bind variable per element and is not chunked.
 A very large list therefore runs into the dialect's bind-variable or IN-list limit and fails at runtime (SQL Server's 2100 parameters, SQLite's historical 999).

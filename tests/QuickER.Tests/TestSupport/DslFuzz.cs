@@ -122,13 +122,13 @@ public sealed record DslLiteral(object Value, string Text) : DslOperand;
 
 /// <summary>パラメータ</summary>
 /// <param name="Name">パラメータ名</param>
-/// <param name="Values">値（リストでなければ 1 つ）</param>
+/// <param name="Values">値（リストでなければ 1 つ。リストは空・null を含むこともある）</param>
 /// <param name="IsList">リストか</param>
 /// <param name="ByColumn">source_column で型を決めるか（false は型トークン）</param>
 /// <param name="Column">型を決める列</param>
 public sealed record DslParam(
     string Name,
-    IReadOnlyList<object> Values,
+    IReadOnlyList<object?> Values,
     bool IsList,
     bool ByColumn,
     DslColumn Column
@@ -168,8 +168,15 @@ public sealed record DslCompare(DslOp Op, DslOperand Operand) : DslAtom
 
     private string OperandKind =>
         Operand is DslParam ? "param"
+        : Fractional
+            ? RejectedByTypeCheck ? "literal-fractional-rejected"
+                : "literal-fractional"
         : RejectedByTypeCheck ? "literal-rejected"
         : "literal";
+
+    /// <summary>整数の列と小数のリテラルの比較か（docs：素の整数の列は数として比べ、整数の値オブジェクトの列は断る）</summary>
+    public bool Fractional =>
+        Column.IsInteger && Operand is DslLiteral literal && literal.Text.Contains('.');
 
     /// <summary>
     /// 型の検査が断るリテラルか（C# の整数リテラルにならない値と、列の型〔値オブジェクトなら内包型〕の範囲外。
@@ -209,7 +216,7 @@ public sealed record DslLike(bool Negated, DslOperand Operand) : DslAtom
     /// <summary>リテラルのパターンの形（exact・prefix・suffix・contains）</summary>
     public static string LikeShape(string quoted)
     {
-        var pattern = quoted[1..^1];
+        var pattern = DslFuzz.Unquote(quoted);
         var starts = pattern.StartsWith('%');
         var ends = pattern.EndsWith('%') && pattern.Length > 1;
 
@@ -226,7 +233,33 @@ public sealed record DslLike(bool Negated, DslOperand Operand) : DslAtom
 /// <summary>[NOT] IN</summary>
 public sealed record DslIn(bool Negated, DslParam List) : DslAtom
 {
-    public override string Kind => $"in:{Column.Clr.ToString().ToLowerInvariant()}";
+    /// <summary>値の並ぶリスト（空でなく null を含まない）</summary>
+    public const string ListValues = "values";
+
+    /// <summary>空のリスト</summary>
+    public const string ListEmpty = "empty";
+
+    /// <summary>値と null を含むリスト</summary>
+    public const string ListWithNull = "with-null";
+
+    /// <summary>null だけのリスト</summary>
+    public const string ListAllNull = "all-null";
+
+    /// <summary>リストの形の水準（docs の Null compensation 節の IN の箇条が意味を決める 4 つ）</summary>
+    public static IReadOnlyList<string> ListShapes { get; } =
+    [ListValues, ListEmpty, ListWithNull, ListAllNull];
+
+    /// <summary>リストの形</summary>
+    public string ListShape =>
+        List.Values.Count == 0 ? ListEmpty
+        : List.Values.All(value => value is null) ? ListAllNull
+        : List.Values.Any(value => value is null) ? ListWithNull
+        : ListValues;
+
+    /// <summary>原子の形の名前（値の並ぶリストは <c>in</c>、ほかは <c>in-{リストの形}</c>）</summary>
+    public string ShapeName => ListShape == ListValues ? "in" : $"in-{ListShape}";
+
+    public override string Kind => $"{ShapeName}:{Column.Clr.ToString().ToLowerInvariant()}";
 
     public override bool InherentNegation => Negated;
 
@@ -255,12 +288,76 @@ public sealed record DslAnd(IReadOnlyList<DslNode> Items) : DslNode;
 /// <summary>OR</summary>
 public sealed record DslOr(IReadOnlyList<DslNode> Items) : DslNode;
 
+/// <summary>条件の括弧の書き方</summary>
+public enum DslGrouping
+{
+    /// <summary>原子でない項目（NOT・AND・OR）を、AND / OR の項目と NOT の対象になるたびに括弧で包む</summary>
+    Explicit,
+
+    /// <summary>
+    /// 優先順位（docs：<c>NOT</c> が <c>AND</c> より、<c>AND</c> が <c>OR</c> より強く結び付く）で決まる括弧を省く。
+    /// 括弧を残すのは、AND の項目の OR と、NOT の対象の AND / OR だけ
+    /// </summary>
+    Minimal,
+}
+
+/// <summary>キーワードと不等号の綴り（docs：キーワードは大文字小文字を区別せず、<c>!=</c> は <c>&lt;&gt;</c> と同じ）</summary>
+public enum DslSpelling
+{
+    /// <summary>大文字のキーワードと <c>&lt;&gt;</c></summary>
+    Upper,
+
+    /// <summary>小文字のキーワードと <c>!=</c></summary>
+    Lower,
+
+    /// <summary>先頭だけ大文字のキーワード（<c>And</c>・<c>Startswith</c>）と <c>&lt;&gt;</c></summary>
+    Mixed,
+}
+
 /// <summary>総当たりの 1 クエリ</summary>
 public sealed class DslQuery
 {
     public required string Name { get; init; }
 
     public required DslNode Condition { get; init; }
+
+    /// <summary>条件の括弧の書き方（構文木は同じで、DSL の文字列だけが変わる）</summary>
+    public DslGrouping Grouping { get; init; }
+
+    /// <summary>キーワードと不等号の綴り（構文木は同じで、DSL の文字列だけが変わる）</summary>
+    public DslSpelling Spelling { get; init; }
+
+    /// <summary>条件の DSL の文字列</summary>
+    public string Text => DslFuzz.Render(Condition, Grouping, Spelling);
+
+    /// <summary>描画の書き方を変えたクエリ（構文木の形は同じ。名前は <paramref name="name"/>）</summary>
+    /// <param name="name">新しいクエリの名前</param>
+    /// <param name="grouping">括弧の書き方</param>
+    /// <param name="spelling">キーワードと不等号の綴り</param>
+    /// <param name="condition">条件（同じものか、パラメータ名を付け直したもの）</param>
+    public DslQuery WithRendering(
+        string name,
+        DslGrouping grouping,
+        DslSpelling spelling,
+        DslNode condition
+    ) =>
+        new()
+        {
+            Name = name,
+            Condition = condition,
+            Grouping = grouping,
+            Spelling = spelling,
+            Returns = Returns,
+            IsAtomQuery = IsAtomQuery,
+            OrderDescending = OrderDescending,
+            ProjectedColumn = ProjectedColumn,
+            ProjectedNonNull = ProjectedNonNull,
+            ResultTypeName =
+                ResultTypeName is null ? null
+                : name == Name ? ResultTypeName
+                : name + "Row",
+            TypeNameCollision = TypeNameCollision,
+        };
 
     public required QueryReturnShape Returns { get; init; }
 
@@ -371,34 +468,95 @@ public static class DslFuzz
     // ---------------- 描画 ----------------
 
     /// <summary>条件を DSL の文字列にする</summary>
-    public static string Render(DslNode node) =>
+    /// <param name="node">条件</param>
+    /// <param name="grouping">括弧の書き方</param>
+    /// <param name="spelling">キーワードと不等号の綴り</param>
+    public static string Render(
+        DslNode node,
+        DslGrouping grouping = DslGrouping.Explicit,
+        DslSpelling spelling = DslSpelling.Upper
+    ) =>
         node switch
         {
-            DslAtom atom => RenderAtom(atom),
-            DslNot not => "NOT " + Wrap(not.Inner),
-            DslAnd and => string.Join(" AND ", and.Items.Select(Wrap)),
-            DslOr or => string.Join(" OR ", or.Items.Select(Wrap)),
+            DslAtom atom => RenderAtom(atom, spelling),
+            DslNot not => Keyword("NOT", spelling) + " " + Wrap(not, not.Inner, grouping, spelling),
+            DslAnd and => string.Join(
+                " " + Keyword("AND", spelling) + " ",
+                and.Items.Select(item => Wrap(and, item, grouping, spelling))
+            ),
+            DslOr or => string.Join(
+                " " + Keyword("OR", spelling) + " ",
+                or.Items.Select(item => Wrap(or, item, grouping, spelling))
+            ),
             _ => throw new ArgumentOutOfRangeException(nameof(node)),
         };
 
-    private static string Wrap(DslNode node) =>
-        node is DslAtom ? Render(node) : "(" + Render(node) + ")";
+    /// <summary>項目を、親の中で括弧が要るときだけ括弧で包む</summary>
+    private static string Wrap(
+        DslNode parent,
+        DslNode child,
+        DslGrouping grouping,
+        DslSpelling spelling
+    ) =>
+        NeedsParentheses(parent, child, grouping)
+            ? "(" + Render(child, grouping, spelling) + ")"
+            : Render(child, grouping, spelling);
 
-    private static string RenderAtom(DslAtom atom)
+    /// <summary>
+    /// 括弧が要るか（Explicit は原子以外を必ず包む。Minimal は docs の優先順位で決まらない組だけ＝NOT の対象の AND / OR と、
+    /// AND の項目の OR。同じ演算子の入れ子は結合の向きで意味が変わらない）
+    /// </summary>
+    private static bool NeedsParentheses(DslNode parent, DslNode child, DslGrouping grouping) =>
+        child is not DslAtom
+        && (
+            grouping == DslGrouping.Explicit
+            || (parent, child) switch
+            {
+                (DslNot, DslAnd or DslOr) => true,
+                (DslAnd, DslOr) => true,
+                _ => false,
+            }
+        );
+
+    /// <summary>
+    /// 親と項目の組が、優先順位が括弧の代わりをし得る組か（OR の項目の AND・AND / OR の項目の NOT。Minimal の描画は
+    /// この組の括弧を省き、Explicit の描画は括弧で書く）
+    /// </summary>
+    public static bool IsPrecedenceEdge(DslNode parent, DslNode child) =>
+        (parent, child) switch
+        {
+            (DslOr, DslAnd or DslNot) => true,
+            (DslAnd, DslNot) => true,
+            _ => false,
+        };
+
+    private static string RenderAtom(DslAtom atom, DslSpelling spelling)
     {
         var column = atom.Column.Name;
+        string K(string word) => Keyword(word, spelling);
+        string Not(bool negated) => negated ? K("NOT") + " " : "";
 
         return atom switch
         {
-            DslCompare c => $"{column} {OpText(c.Op)} {RenderOperand(c.Operand)}",
-            DslNullCheck n => $"{column} IS {(n.IsNot ? "NOT " : "")}NULL",
-            DslLike l => $"{column} {(l.Negated ? "NOT " : "")}LIKE {RenderOperand(l.Operand)}",
-            DslIn i => $"{column} {(i.Negated ? "NOT " : "")}IN @{i.List.Name}",
+            DslCompare c => $"{column} {OpText(c.Op, spelling)} {RenderOperand(c.Operand)}",
+            DslNullCheck n => $"{column} {K("IS")} {Not(n.IsNot)}{K("NULL")}",
+            DslLike l => $"{column} {Not(l.Negated)}{K("LIKE")} {RenderOperand(l.Operand)}",
+            DslIn i => $"{column} {Not(i.Negated)}{K("IN")} @{i.List.Name}",
             DslMatch m =>
-                $"{column} {(m.Negated ? "NOT " : "")}{m.Match.ToString().ToUpperInvariant()} {RenderOperand(m.Operand)}",
+                $"{column} {Not(m.Negated)}{K(m.Match.ToString().ToUpperInvariant())} {RenderOperand(m.Operand)}",
             _ => throw new ArgumentOutOfRangeException(nameof(atom)),
         };
     }
+
+    /// <summary>キーワードを綴りの水準で書く（大文字・小文字・先頭だけ大文字）</summary>
+    private static string Keyword(string upper, DslSpelling spelling) =>
+        spelling switch
+        {
+            DslSpelling.Upper => upper,
+            DslSpelling.Lower => upper.ToLowerInvariant(),
+            DslSpelling.Mixed => upper[..1] + upper[1..].ToLowerInvariant(),
+            _ => throw new ArgumentOutOfRangeException(nameof(spelling)),
+        };
 
     private static string RenderOperand(DslOperand operand) =>
         operand switch
@@ -408,17 +566,41 @@ public static class DslFuzz
             _ => throw new ArgumentOutOfRangeException(nameof(operand)),
         };
 
-    private static string OpText(DslOp op) =>
+    private static string OpText(DslOp op, DslSpelling spelling) =>
         op switch
         {
             DslOp.Eq => "=",
-            DslOp.Ne => "<>",
+            DslOp.Ne => spelling == DslSpelling.Lower ? "!=" : "<>",
             DslOp.Lt => "<",
             DslOp.Le => "<=",
             DslOp.Gt => ">",
             DslOp.Ge => ">=",
             _ => throw new ArgumentOutOfRangeException(nameof(op)),
         };
+
+    /// <summary>文字列のリテラルの綴り（docs：リテラルの中の <c>'</c> は <c>''</c> と 2 つ重ねて書く）</summary>
+    public static string QuoteText(string value) =>
+        "'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";
+
+    /// <summary>文字列のリテラルの綴りから値を読む（<see cref="QuoteText"/> の逆）</summary>
+    public static string Unquote(string quoted) =>
+        quoted[1..^1].Replace("''", "'", StringComparison.Ordinal);
+
+    /// <summary>原子の文字列のリテラルの水準（none＝文字列のリテラルを持たない・plain・escaped＝<c>'</c> を含む）</summary>
+    public static string QuoteOf(DslAtom atom)
+    {
+        var literal = atom switch
+        {
+            DslCompare { Operand: DslLiteral l } when atom.Column.IsString => l,
+            DslLike { Operand: DslLiteral l } => l,
+            DslMatch { Operand: DslLiteral l } => l,
+            _ => null,
+        };
+
+        return literal is null ? "none"
+            : literal.Value is string text && text.Contains('\'') ? "escaped"
+            : "plain";
+    }
 
     // ---------------- オラクル ----------------
 
@@ -501,7 +683,8 @@ public static class DslFuzz
             case DslNullCheck check:
                 return (value is null) ^ check.IsNot ^ negate;
 
-            // IN は C# の List.Contains（NULL の列はリストに無い＝NOT IN は真）
+            // IN は C# の List.Contains（docs の Null compensation 節の IN の箇条：NULL の列は null を含むリストにだけ
+            // 一致する・空のリストは IN が偽で NOT IN が真）
             case DslIn @in:
                 return Xor(InUnder(value, @in.List.Values, caseRule), @in.Negated ^ negate);
 
@@ -516,7 +699,7 @@ public static class DslFuzz
                 var (kind, pattern) = like.Operand switch
                 {
                     DslLiteral literal => LikePattern(literal.Text),
-                    DslParam param => ("contains", (string)param.Values[0]),
+                    DslParam param => ("contains", (string)param.Values[0]!),
                     _ => throw new ArgumentOutOfRangeException(nameof(atom)),
                 };
 
@@ -560,14 +743,14 @@ public static class DslFuzz
         operand switch
         {
             DslLiteral literal => literal.Value,
-            DslParam param => param.Values[0],
+            DslParam param => param.Values[0]!,
             _ => throw new ArgumentOutOfRangeException(nameof(operand)),
         };
 
     private static (string Kind, string Pattern) LikePattern(string quoted)
     {
         var shape = DslLike.LikeShape(quoted);
-        var pattern = quoted[1..^1];
+        var pattern = Unquote(quoted);
 
         return shape switch
         {
@@ -635,14 +818,18 @@ public static class DslFuzz
     }
 
     /// <summary>IN（照合順序の実装先の文字列は、序数で一致しないが照合順序で一致する値があれば判定しない）</summary>
-    private static bool? InUnder(object? value, IReadOnlyList<object> values, DslCaseRule rule)
+    /// <remarks>
+    /// docs の Null compensation 節の IN の箇条の写し：リストの null は列の NULL にだけ一致し（C# の <c>Contains</c> と同じく
+    /// null を含むリストは NULL の行に一致する）、null だけのリストは NULL の行だけ・空のリストはどの行にも一致しない。
+    /// </remarks>
+    private static bool? InUnder(object? value, IReadOnlyList<object?> values, DslCaseRule rule)
     {
         if (value is null)
         {
-            return false;
+            return values.Any(v => v is null);
         }
 
-        if (values.Any(v => SameValue(value, v)))
+        if (values.Any(v => v is not null && SameValue(value, v)))
         {
             return true;
         }
@@ -736,8 +923,24 @@ public static class DslFuzz
                 "a b",
                 "abc ",
                 "ab",
+                "a'b",
+                "'",
+                "''",
             ],
-            DslClr.FixedString => ["", "a", "A", "abc", "ABC", "a%b", "a_b", "x", "abcdefghij"],
+            DslClr.FixedString =>
+            [
+                "",
+                "a",
+                "A",
+                "abc",
+                "ABC",
+                "a%b",
+                "a_b",
+                "x",
+                "abcdefghij",
+                "a'b",
+                "'",
+            ],
             DslClr.Int64 => [long.MinValue, -1L, 0L, 1L, 2L, 10L, 100L, long.MaxValue],
             DslClr.Int32 => [int.MinValue, -1, 0, 1, 5, int.MaxValue],
             DslClr.Int16 => [short.MinValue, (short)-1, (short)0, (short)1, short.MaxValue],
@@ -766,6 +969,7 @@ public static class DslFuzz
                 "6f9619ff-8b86-d011-b42d-00c04fc964ff",
                 "6F9619FF-8B86-D011-B42D-00C04FC964FF",
                 "ffffffff-ffff-ffff-ffff-ffffffffffff",
+                "6f9619ff-8b86-d011-b42d-00c04fc964f'",
             ],
             _ => throw new ArgumentOutOfRangeException(nameof(clr)),
         };

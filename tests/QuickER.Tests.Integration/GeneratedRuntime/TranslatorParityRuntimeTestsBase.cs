@@ -64,6 +64,8 @@ public abstract class TranslatorParityRuntimeTestsBase
     /// 全角空白・空文字・改行を含む値を持つ（IsNullOrEmpty / IsNullOrWhiteSpace の境界）。固定長の code は空白だけ（id 5）と空文字（id 9）を持つ。
     /// name と group は NULL の 4 つの組を持つ（id 1＝両方非 NULL の異値・id 10＝name だけ NULL・id 11＝両方非 NULL の同値・
     /// ほか＝group が NULL）。NULL 許容の decimal の amount は 100・200・300 と、境界の 250・重複の 100・NULL を散らす。
+    /// 列の型より細かい値と比べる列は id 1・2 が値を持つ（day は日付だけ・at2 と clock は 1/100 秒まで）。Unicode でない ansi は、
+    /// 列が表せない文字が化けた形の '??'（id 2）と '?'（id 4）を持つ。
     /// </remarks>
     protected static IReadOnlyList<ProbeEntity> SeedProbes() =>
         [
@@ -76,7 +78,11 @@ public abstract class TranslatorParityRuntimeTestsBase
                 true,
                 group: "g1",
                 xy: "a]b",
-                amount: 100m
+                amount: 100m,
+                day: new DateTime(2024, 1, 1),
+                at2: new DateTime(2024, 1, 1, 10, 0, 0).AddMilliseconds(120),
+                clock: new TimeSpan(0, 10, 0, 0, 120),
+                ansi: "abc"
             ),
             Probe(
                 2,
@@ -85,7 +91,11 @@ public abstract class TranslatorParityRuntimeTestsBase
                 new DateTime(2024, 1, 16, 0, 0, 0),
                 new DateTimeOffset(2023, 12, 31, 22, 0, 0, TimeSpan.FromHours(-3)),
                 false,
-                amount: 200m
+                amount: 200m,
+                day: new DateTime(2024, 1, 2),
+                at2: new DateTime(2024, 1, 1, 10, 0, 0).AddMilliseconds(130),
+                clock: new TimeSpan(0, 10, 0, 0, 130),
+                ansi: "??"
             ),
             Probe(
                 3,
@@ -96,7 +106,7 @@ public abstract class TranslatorParityRuntimeTestsBase
                 true,
                 amount: 300m
             ),
-            Probe(4, "\t", null, null, null, false),
+            Probe(4, "\t", null, null, null, false, ansi: "?"),
             Probe(
                 5,
                 "　",
@@ -123,7 +133,11 @@ public abstract class TranslatorParityRuntimeTestsBase
         bool isActive,
         string? group = null,
         string? xy = null,
-        decimal? amount = null
+        decimal? amount = null,
+        DateTime? day = null,
+        DateTime? at2 = null,
+        TimeSpan? clock = null,
+        string? ansi = null
     ) =>
         new()
         {
@@ -136,6 +150,10 @@ public abstract class TranslatorParityRuntimeTestsBase
             Group = group,
             XY = xy,
             Amount = amount,
+            Day = day,
+            At2 = at2,
+            Clock = clock,
+            Ansi = ansi,
         };
 
     /// <summary>

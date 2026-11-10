@@ -410,13 +410,18 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
 - 簡易 DSL の条件の意味は、総当たりで docs の意味と照合する。`DslConditionFuzzTests`（QuickER 版 Repository・EF Core〔いずれも SQLite〕とインメモリ。MySQL の符号なし整数の図はインメモリだけ）と、Integration の `DslConditionFuzzSqlServerRuntimeTests`（実コンテナの QuickER 版 Repository・EF Core〔SQL Server〕・既定はシード 1 つ）が流す。
   - 列ごとに書ける全ての形の原子（演算子・リテラルかパラメータか・否定の有無。値だけ乱数）とその NOT、乱数で組んだ合成の条件を、生成 → 実コンパイル（エラー 0・警告 0）→ NULL を含むデータで実行し、同じ実装先から読み戻した全行へオラクル `DslFuzz.Evaluate` を当てた結果と照合する。
   - 本体は `DslFuzzRunner`、実行部は `DslFuzzExecution`（QuickER.Tests の CodeGen.CSharp。Integration は TestSupport の `DslFuzz*.cs` と一緒に Compile リンクする）。
-- **オラクルは docs の写しで、実装の挙動を写さない**：「クエリ（式木 → SQL 変換）」節の NULL の規則（NOT と `<>` は C# の否定と同じ・文字列一致は NULL の行がどちら向きでも一致しない）と、「大文字小文字・空白・日付部品」の表（`DslCaseRule`）。
+- **オラクルは docs の写しで、実装の挙動を写さない**：「クエリ（式木 → SQL 変換）」節の NULL の規則（NOT と `<>` は C# の否定と同じ・文字列一致は NULL の行がどちら向きでも一致しない・IN の箇条＝null を含むリストは NULL の行に一致し、null だけのリストは NULL の行だけ、空のリストは IN が偽で NOT IN が真）と、「大文字小文字・空白・日付部品」の表（`DslCaseRule`）。条件の読み方（優先順位）は「簡易 DSL と名前付きクエリの制約」節の写しで、描画だけが使う（構文木は生成器が作る）。
   - 大文字小文字の扱い：インメモリは序数、SQLite の QuickER 版 Repository は ASCII の英字だけを畳む、EF Core（SQLite）は格納先次第、SQL Server は照合順序。
   - 大文字小文字か末尾の空白だけで結果が変わる行は判定しない。NULL の行と、照合順序に依らず決まる行は判定する。
 - 型の検査が断ると決まっているリテラル（ulong を超える値・素の ulong の列に負の値・符号付きの列に long を超える値・値オブジェクトの内包型の範囲外）は、「警告で飛ばされること」を表明する。
 - EF Core（SQLite）の decimal の順序比較だけは、プロバイダの制限として `ExcludedOnEfCoreSqlite` の 1 か所で流さない。
 - 結果は既知の失敗の一覧 `DslFuzzKnownFailures` と厳密に照合する（一覧に無い失敗も、載っているのに起きない失敗も赤）。一覧は空で保つ。直せない失敗を受け入れるときだけ足す。名前の総当たりの一覧 `NameFuzzKnownFailures` も空。
 - キーがシードで揺れないよう、原子の形は列ごとに全て作り、範囲外のリテラルは合成の条件へ混ぜない。
+- IN のリストの形（`DslIn.ListShapes`）：値の並ぶリスト・空・値と null・null だけの 4 つを、原子の形（次元表の因子 Shape の `in`・`in-empty`・`in-with-null`・`in-all-null`）として列ごとに作り、合成の条件では乱数で選ぶ。null を入れるのは要素が参照型のリストだけ（値オブジェクトなしの文字列の列と、値オブジェクトありで列で型付けしたリスト）。型トークンで型付けして値オブジェクトへ持ち上げるリストは `Create(null)` が検証エラーになる（docs の値オブジェクトの節）ので入れず、値型のリストは null を持てない。
+- 括弧の書き方（`DslGrouping`）：構文木は同じまま、Explicit（原子以外を必ず括弧で包む）と Minimal（docs の優先順位で決まる括弧を省く＝括弧を残すのは NOT の対象の AND / OR と AND の項目の OR だけ）で描画する。合成のクエリは種の乱数で選び、網羅の単位は描画の変わる合成のクエリを Minimal でもう 1 本ずつ流す（名前の末尾 `g`）。次元表の因子 Grouping（none・parenthesized・precedence）は、原子の祖先に優先順位が括弧の代わりをし得る組（`DslFuzz.IsPrecedenceEdge`＝OR の項目の AND・AND / OR の項目の NOT）があるかと、その組をどちらで書いたかを数える（原子だけのクエリは none だけ＝`isValid`）。
+- 文字列のリテラルの `'`（docs：`''` と 2 つ重ねて書く）：値の池（String・FixedString・GuidKey）に `'` を含む値を持ち、描画は `DslFuzz.QuoteText`、LIKE の形とオラクルの値は `DslFuzz.Unquote` で読む。次元表の因子 Quote（none・plain・escaped＝`DslFuzz.QuoteOf`）。種の単位は値の池から乱数で選び、網羅の単位は文字列のリテラルの原子を両方の値で作る（`AllAtoms` の `bothQuotes`）。`isValid` は形と列の種類で決まる組（パラメータ・IN・NULL 判定・小数のリテラル・順序比較は文字列のリテラルを持たず、LIKE と文字列一致のリテラルは必ず持ち、文字列の列でない原子は持たない）だけ。
+- キーワードと不等号の綴り（`DslSpelling`＝大文字と `<>`・小文字と `!=`・先頭だけ大文字と `<>`。docs：キーワードは大文字小文字を区別せず `!=` は `<>` と同じ）：構文木は同じで描画だけが変わる。原子のクエリと網羅の単位の合成のクエリは番号で回し、種の合成のクエリは乱数で選ぶ。次元表の因子 Spelling。
+- 整数の列と小数のリテラル（docs：素の整数の列は数として比べ、整数の値オブジェクトの列は断る）：形 `compare-{eq,lt,ge}-literal-fractional`（`DslFuzzDimensions.FractionalOps`＝x.5 の値と整数で結果の違う 3 つ）。値は 2 進で正確な x.5 の値だけ（オラクルの decimal の比較と C# の double の比較が食い違わない）。値オブジェクトありの単位は等値の 1 つを断られる原子としてだけ作る（`RejectedByTypeCheck`）。
 - 黙って空振りしないよう、実装先・単位ごとに照合したクエリが 100 未満なら赤（`DslFuzzRunner.MinimumCheckedQueries`）。
 - 網羅の単位：`DslFuzzUnits.Coverage(方言)`（SQLite・SQL Server・MySQL に 1 つずつ・種に依らない＝種の指紋の要約の外。名前は `coverage-{方言}`）を、両テストが種の前に流す（単独の種では流さない）。
   - 単位は主キーを GuidKey にし（値オブジェクトあり）、主キーを参照する NULL 許容の自己参照の外部キー列 `parent` を持つ（`DslFuzzUnit.SelfReference`＝BuildDiagram が自己参照のリレーションを足し、外部キーの値オブジェクトの統一で GuidKey になる。行の parent はその行より前の行のキーか NULL）。
@@ -424,7 +429,8 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
   - クエリは `DslFuzzGenerator.CoverageQueries`（乱数はこの中だけで引き、`Queries` の引き方に触れない）。網羅の単位で初めて現れる列の種類の列の原子のクエリと、戻り形 4 つと射影の非 NULL 指定のそれぞれで、原子の形・自身の否定・列の種類のまだ出ていない水準を足す原子を貪欲に選んで 6 つずつ OR でまとめ、1 つおきに NOT で包んだ合成のクエリ。型の検査が断る原子と EF Core（SQLite）が流さない decimal の順序比較は使わない。射影の非 NULL 指定は、射影する列の IS NOT NULL と AND でつなぐ。
   - 単位のクエリは、型の検査が断ると決まっている原子のものを除き、構成のどの実装先でも照合したクエリにならなければ、`DslFuzzCoverage.UncheckedProblems` が単位・範囲・クエリを名指しして赤にする。そのため網羅の単位には `MinimumCheckedQueries` を掛けない（`DslFuzzRunner.RunAsync` の `minimumChecked`）。
   - NOT の入れ子：次元表の因子 NotNesting（none・single・double・triple・group-and・group-or＝原子の直上の NOT の連鎖の段数か、直上に NOT が無ければ最も近い NOT が包む AND / OR）を `DslFuzzDimensions.Observe` が構文木から数える。`isValid` は「NOT が無ければ NOT の数は偶数」「原子だけのクエリ（原子 1 つかその NOT 1 つ）は 2 段以上・合成を包む NOT を持たない」の 2 つだけ。網羅の単位は、形・否定・列の種類の全水準を足す原子を 6 水準ごとにその形で包んだ一覧のクエリ（1 つおきに外側をもう 1 つの NOT で包む）と、一覧以外の戻り形・射影の非 NULL 指定ごとに 6 水準を 1 つずつ持つクエリで、種に依らず全組を埋める。
-  - 決まった形のクエリ（`DslFuzzGenerator.FixedQueries`）：NOT NOT 原子・NOT NOT NOT 原子・NOT (AND (比較, IS NULL))・NOT (LIKE OR 比較)・肯定の LIKE と同じ LIKE と IS NULL の OR の NOT・前置 NOT と NOT LIKE の重ね・整数の列の範囲の両端のリテラル。値オブジェクトなしの経路は SQLite の `DslFuzzUnits.PlainCoverage`（種の単位と同じ列・決まった形のクエリだけ）が流す。
+  - 決まった形のクエリ（`DslFuzzGenerator.FixedQueries`）：NOT NOT 原子・NOT NOT NOT 原子・NOT (AND (比較, IS NULL))・NOT (LIKE OR 比較)・肯定の LIKE と同じ LIKE と IS NULL の OR の NOT・前置 NOT と NOT LIKE の重ね・整数の列の範囲の両端のリテラル。値オブジェクトなしの経路は SQLite の `DslFuzzUnits.PlainCoverage(sqlite)` が流す。
+  - 値オブジェクトなしの網羅の単位 `DslFuzzUnits.PlainCoverage(方言)`（SQLite・SQL Server・MySQL に 1 つずつ・名前は `coverage-{方言}-plain`）：種の単位と同じ列（MySQL は網羅の単位と同じく固定長の文字列・符号つき整数・decimal・日時・Guid も持ち、その列の原子のクエリを作る）で `CoverageQueries` を流す。値オブジェクトなしでだけ書ける形（整数の列と小数のリテラル＝値オブジェクトの列は型の検査が断る）の組を種に依らず埋める。SQLite の単位だけ決まった形のクエリも流す。
   - 特殊な文字列とカルチャ：SQLite の 2 単位（`Coverage`・`PlainCoverage`）だけ、列 `s` に合成済みの「が」・分解形の「か＋濁点」・ソフトハイフンを無視すると a で始まる値を入れ、前方・後方・部分一致とソフトハイフンの LIKE を足す（SQL Server は照合順序で合成済みと分解形が等しくなるので足さない）。網羅の単位は書式のカルチャをインバリアントにして流し、SQLite の 2 単位の序数のクエリ（`DslFuzzGenerator.OrdinalQueryPrefix`＝KO0〜KO3）だけをインメモリの範囲で ja-JP・tr-TR でも流し直す（インメモリは序数＝オラクルは `DslCaseRule.Ordinal` のまま。カルチャで結果が変わり得るのはインメモリの文字列一致の比べ方だけなので、ほかのクエリは周回しない）。
   - 網羅しない組の一覧は、受け入れ（方言が列の型として持てない種類・EF Core の SQLite プロバイダの decimal の順序比較）だけ。
 - mutation 実証済み。

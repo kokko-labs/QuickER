@@ -1750,11 +1750,12 @@ internal static partial class CodegenCases
                 ),
             DialectRow(
                 "compile-query-type-check-accepts-widening-forms",
-                "QueryConditionTypeCheckTests.Generate_CompatibleConditions_AreAcceptedAndCompile（総当たりが作らない受理の 3 形：整数列×小数リテラル・bool の列×boolean の引数・NOT NULL の int 列×int64 のリストの IN。残りの 7 形は総当たりが警告 0 のコンパイルと実行で見る）",
+                "QueryConditionTypeCheckTests.Generate_CompatibleConditions_AreAcceptedAndCompile（受理の 3 形：整数列×小数リテラル〔int・long〕・bool の列×boolean の引数・NOT NULL の int 列×int64 のリストの IN。整数列×小数リテラルは総当たりも実行の結果まで見る。残りの 7 形は総当たりが警告 0 のコンパイルと実行で見る）",
                 () =>
                     Dialects_TypeCheckDiagram(order =>
                         [
                             Dialects_ListQuery("FracOnInt", "Qty > 1.5", []),
+                            Dialects_ListQuery("FracOnLong", "Big > 1.5", []),
                             Dialects_ListQuery(
                                 "FlagParam",
                                 "Flag = @flag",
@@ -1780,6 +1781,7 @@ internal static partial class CodegenCases
                 code:
                 [
                     Member(implementation, "FracOnIntAsync"),
+                    Member(implementation, "FracOnLongAsync"),
                     Member(implementation, "FlagParamAsync"),
                     Member(implementation, "WideInAsync"),
                 ]
@@ -1904,8 +1906,6 @@ internal static partial class CodegenCases
             new("bad-date", "BadDate", "SeenAt > '2026-01-01'", None, false, mismatch),
             // bool 列への数値リテラル比較（bool == int は CS0019）
             new("bad-flag", "BadFlag", "Flag = 1", None, false, mismatch),
-            // long 列への小数リテラル（サフィックス L が付いて "1.5L"＝字句エラー）
-            new("bad-long", "BadLong", "Big > 1.5", None, false, mismatch),
             // string 列の CONTAINS へ int トークン引数（string.Contains(int) は CS1503）
             new("bad-match-param", "BadMatchParam", "Name CONTAINS @num", Int32, false, mismatch),
             // string 列の IN へ int リスト（Contains の型推論が一致しない）

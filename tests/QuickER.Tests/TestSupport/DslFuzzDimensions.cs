@@ -61,6 +61,24 @@ public static class DslFuzzDimensions
     public static IReadOnlyList<string> NestingLevels { get; } =
     [NestingNone, NestingSingle, NestingDouble, NestingTriple, NestingGroupAnd, NestingGroupOr];
 
+    /// <summary>優先順位が括弧の代わりをし得る組の描き方</summary>
+    public const string Grouping = "Grouping";
+
+    /// <summary>祖先に優先順位が括弧の代わりをし得る組（OR の項目の AND・AND / OR の項目の NOT）が無い原子</summary>
+    public const string GroupingNone = "none";
+
+    /// <summary>その組を括弧で書いた原子（<see cref="DslGrouping.Explicit"/>）</summary>
+    public const string GroupingParenthesized = "parenthesized";
+
+    /// <summary>その組の括弧を省き、優先順位で読ませた原子（<see cref="DslGrouping.Minimal"/>）</summary>
+    public const string GroupingPrecedence = "precedence";
+
+    /// <summary>原子の文字列のリテラルの水準（none・plain・escaped）</summary>
+    public const string Quote = "Quote";
+
+    /// <summary>キーワードと不等号の綴り（<see cref="DslSpelling"/> の小文字）</summary>
+    public const string Spelling = "Spelling";
+
     /// <summary>原子を含むクエリの種類</summary>
     public const string Query = "Query";
 
@@ -81,6 +99,9 @@ public static class DslFuzzDimensions
     /// <summary>比較の演算子（DslOp の小文字）</summary>
     private static readonly string[] CompareOps = ["eq", "ne", "lt", "le", "gt", "ge"];
 
+    /// <summary>整数の列と小数のリテラルの比較で作る演算子（x.5 の値と整数で結果の違う 3 つ）</summary>
+    public static IReadOnlyList<DslOp> FractionalOps { get; } = [DslOp.Eq, DslOp.Lt, DslOp.Ge];
+
     /// <summary>順序比較の演算子</summary>
     private static readonly string[] OrderedOps = ["lt", "le", "gt", "ge"];
 
@@ -91,10 +112,13 @@ public static class DslFuzzDimensions
     private static IReadOnlyList<string> ShapeLevels { get; } =
     [
         .. CompareOps.SelectMany(op => new[] { $"compare-{op}-param", $"compare-{op}-literal" }),
+        .. FractionalOps.Select(op =>
+            $"compare-{op.ToString().ToLowerInvariant()}-literal-fractional"
+        ),
         "null-check",
         .. LikeLiteralShapes.Select(shape => $"like-{shape}"),
         "like-param",
-        "in",
+        .. DslIn.ListShapes.Select(list => list == DslIn.ListValues ? "in" : $"in-{list}"),
         .. Enum.GetValues<DslMatchKind>()
             .SelectMany(match =>
                 new[]
@@ -118,7 +142,7 @@ public static class DslFuzzDimensions
                 new Factor(
                     Shape,
                     ShapeLevels.Select(shape => new Level(shape)).ToList(),
-                    "原子の形（比較は演算子×パラメータかリテラル・LIKE はパターンの形・文字列一致はメソッド×リテラルかパラメータ）"
+                    "原子の形（比較は演算子×パラメータかリテラル・LIKE はパターンの形・IN はリストの形〔値・空・null を含む・null だけ〕・文字列一致はメソッド×リテラルかパラメータ）"
                 ),
                 new Factor(
                     Negated,
@@ -134,6 +158,27 @@ public static class DslFuzzDimensions
                     NotNesting,
                     NestingLevels.Select(level => new Level(level)).ToList(),
                     "原子を囲む NOT の段数と NOT が包む合成の種類（直上の NOT の連鎖が 1・2・3 段以上か、直上に NOT が無ければ最も近い NOT が包む AND / OR。NOT が無ければ none）"
+                ),
+                new Factor(
+                    Grouping,
+                    [
+                        new Level(GroupingNone),
+                        new Level(GroupingParenthesized),
+                        new Level(GroupingPrecedence),
+                    ],
+                    "原子の祖先の、優先順位が括弧の代わりをし得る組（OR の項目の AND・AND / OR の項目の NOT）の描き方（組が無い・括弧で書いた・括弧を省いて優先順位で読ませた）"
+                ),
+                new Factor(
+                    Quote,
+                    [new Level("none"), new Level("plain"), new Level("escaped")],
+                    "原子の文字列のリテラル（持たない・' を含まない・' を含む＝DSL では '' と書く）"
+                ),
+                new Factor(
+                    Spelling,
+                    Enum.GetValues<DslSpelling>()
+                        .Select(value => new Level(value.ToString().ToLowerInvariant()))
+                        .ToList(),
+                    "キーワードと不等号の綴り（大文字と <>・小文字と !=・先頭だけ大文字と <>）"
                 ),
                 new Factor(
                     Query,
@@ -240,9 +285,17 @@ public static class DslFuzzDimensions
     )
     {
         var names = kinds.Select(clr => clr.ToString()).ToHashSet(StringComparer.Ordinal);
-        return new[] { Shape, Negated, UnderNot, NotNesting, Query }.Select(other =>
-            (other, (Func<string, string, bool>)((clr, _) => names.Contains(clr)))
-        );
+        return new[]
+        {
+            Shape,
+            Negated,
+            UnderNot,
+            NotNesting,
+            Grouping,
+            Quote,
+            Spelling,
+            Query,
+        }.Select(other => (other, (Func<string, string, bool>)((clr, _) => names.Contains(clr))));
     }
 
     /// <summary>範囲の名前（「方言:実装先」）</summary>
@@ -261,11 +314,12 @@ public static class DslFuzzDimensions
             : $"compound-{query.Returns}";
 
         foreach (
-            var (atom, underNot, nesting) in AtomsWithPolarity(
+            var (atom, underNot, nesting, precedenceEdge) in AtomsWithPolarity(
                 query.Condition,
                 underNot: false,
                 chain: 0,
-                group: null
+                group: null,
+                precedenceEdge: false
             )
         )
         {
@@ -277,6 +331,12 @@ public static class DslFuzzDimensions
                     [Negated] = atom.InherentNegation ? "Yes" : "No",
                     [UnderNot] = underNot ? "Yes" : "No",
                     [NotNesting] = nesting,
+                    [Grouping] =
+                        !precedenceEdge ? GroupingNone
+                        : query.Grouping == DslGrouping.Minimal ? GroupingPrecedence
+                        : GroupingParenthesized,
+                    [Quote] = DslFuzz.QuoteOf(atom),
+                    [Spelling] = query.Spelling.ToString().ToLowerInvariant(),
                     [Query] = queryKind,
                 }
             );
@@ -288,11 +348,11 @@ public static class DslFuzzDimensions
         atom switch
         {
             DslCompare compare =>
-                $"compare-{compare.Op.ToString().ToLowerInvariant()}-{(compare.Operand is DslParam ? "param" : compare.RejectedByTypeCheck ? "literal-rejected" : "literal")}",
+                $"compare-{compare.Op.ToString().ToLowerInvariant()}-{(compare.Operand is DslParam ? "param" : compare.RejectedByTypeCheck ? "literal-rejected" : compare.Fractional ? "literal-fractional" : "literal")}",
             DslNullCheck => "null-check",
             DslLike { Operand: DslLiteral literal } => $"like-{DslLike.LikeShape(literal.Text)}",
             DslLike => "like-param",
-            DslIn => "in",
+            DslIn @in => @in.ShapeName,
             DslMatch match =>
                 $"{match.Match.ToString().ToLowerInvariant()}-{(match.Operand is DslLiteral ? "literal" : "param")}",
             _ => atom.GetType().Name,
@@ -305,11 +365,18 @@ public static class DslFuzzDimensions
     /// <param name="underNot">ここまでの NOT の数が奇数か</param>
     /// <param name="chain">この節の直上に続く NOT の段数</param>
     /// <param name="group">最も近い NOT が包む合成の水準（NOT の直下の AND / OR を通ったとき。無ければ null）</param>
-    private static IEnumerable<(DslAtom Atom, bool UnderNot, string Nesting)> AtomsWithPolarity(
+    /// <param name="precedenceEdge">ここまでの祖先に、優先順位が括弧の代わりをし得る組（<see cref="DslFuzz.IsPrecedenceEdge"/>）があるか</param>
+    private static IEnumerable<(
+        DslAtom Atom,
+        bool UnderNot,
+        string Nesting,
+        bool PrecedenceEdge
+    )> AtomsWithPolarity(
         DslNode node,
         bool underNot,
         int chain,
-        string? group
+        string? group,
+        bool precedenceEdge
     ) =>
         node switch
         {
@@ -324,15 +391,28 @@ public static class DslFuzzDimensions
                         1 => NestingSingle,
                         2 => NestingDouble,
                         _ => NestingTriple,
-                    }
+                    },
+                    precedenceEdge
                 ),
             ],
-            DslNot not => AtomsWithPolarity(not.Inner, !underNot, chain + 1, group),
+            DslNot not => AtomsWithPolarity(not.Inner, !underNot, chain + 1, group, precedenceEdge),
             DslAnd and => and.Items.SelectMany(item =>
-                AtomsWithPolarity(item, underNot, 0, chain > 0 ? NestingGroupAnd : group)
+                AtomsWithPolarity(
+                    item,
+                    underNot,
+                    0,
+                    chain > 0 ? NestingGroupAnd : group,
+                    precedenceEdge || DslFuzz.IsPrecedenceEdge(and, item)
+                )
             ),
             DslOr or => or.Items.SelectMany(item =>
-                AtomsWithPolarity(item, underNot, 0, chain > 0 ? NestingGroupOr : group)
+                AtomsWithPolarity(
+                    item,
+                    underNot,
+                    0,
+                    chain > 0 ? NestingGroupOr : group,
+                    precedenceEdge || DslFuzz.IsPrecedenceEdge(or, item)
+                )
             ),
             _ => throw new ArgumentOutOfRangeException(nameof(node), node.GetType().Name, null),
         };
@@ -380,6 +460,13 @@ public static class DslFuzzDimensions
         assignment.TryGetValue(NotNesting, out var nesting);
         assignment.TryGetValue(UnderNot, out var underNot);
         assignment.TryGetValue(Query, out var queryKind);
+        assignment.TryGetValue(Grouping, out var grouping);
+
+        // 原子だけのクエリ（原子 1 つかその NOT 1 つ）は AND / OR を持たないので、優先順位が括弧の代わりをし得る組を持たない
+        if (queryKind == AtomQuery && grouping is not (null or GroupingNone))
+        {
+            return false;
+        }
 
         // NOT に囲まれない原子を囲む NOT の数は 0（偶数）
         if (nesting == NestingNone && underNot == "Yes")
@@ -402,6 +489,50 @@ public static class DslFuzzDimensions
             }
         }
 
+        assignment.TryGetValue(Quote, out var quote);
+        var hasQuote = quote is not (null or "none");
+
+        if (shape is not null)
+        {
+            var stringLiteralOnly =
+                shape is "like-exact" or "like-prefix" or "like-suffix" or "like-contains"
+                || (
+                    !shape.StartsWith("compare-", StringComparison.Ordinal)
+                    && shape.EndsWith("-literal", StringComparison.Ordinal)
+                );
+            var mayCarryStringLiteral =
+                stringLiteralOnly || shape.EndsWith("-literal", StringComparison.Ordinal);
+
+            // 文字列のリテラルの水準は形の定義で決まる：パラメータ・IN・NULL 判定・小数のリテラルは持たず、
+            // LIKE のリテラルと文字列一致のリテラルは必ず持つ
+            if ((hasQuote && !mayCarryStringLiteral) || (quote == "none" && stringLiteralOnly))
+            {
+                return false;
+            }
+
+            // 順序比較は文字列の列に書けない（型の検査が断る）ので、文字列のリテラルを持たない
+            if (
+                hasQuote
+                && OrderedOps.Any(op =>
+                    shape.StartsWith($"compare-{op}-", StringComparison.Ordinal)
+                )
+            )
+            {
+                return false;
+            }
+        }
+
+        if (clr is not null)
+        {
+            var clrKind = Enum.Parse<DslClr>(clr);
+
+            // 文字列のリテラルを書けるのは文字列の列だけ（型の検査が数値・日時・Guid の列への文字列リテラルを断る）
+            if (hasQuote && clrKind is not (DslClr.String or DslClr.FixedString or DslClr.GuidKey))
+            {
+                return false;
+            }
+        }
+
         if (shape is null || clr is null)
         {
             return true;
@@ -409,6 +540,36 @@ public static class DslFuzzDimensions
 
         var kind = Enum.Parse<DslClr>(clr);
         var isString = kind is DslClr.String or DslClr.FixedString or DslClr.GuidKey;
+
+        // 文字列の列の比較のリテラルは文字列のリテラル
+        if (
+            isString
+            && quote == "none"
+            && shape.StartsWith("compare-", StringComparison.Ordinal)
+            && shape.EndsWith("-literal", StringComparison.Ordinal)
+        )
+        {
+            return false;
+        }
+
+        // 小数のリテラルの形は「整数の列と小数のリテラルの比較」の定義なので、整数の列だけ
+        if (
+            shape.EndsWith("-literal-fractional", StringComparison.Ordinal)
+            && kind
+                is not (
+                    DslClr.Int64
+                    or DslClr.Int32
+                    or DslClr.Int16
+                    or DslClr.Byte
+                    or DslClr.SByte
+                    or DslClr.UInt16
+                    or DslClr.UInt32
+                    or DslClr.UInt64
+                )
+        )
+        {
+            return false;
+        }
         var isOrdered =
             kind
             is DslClr.Int64

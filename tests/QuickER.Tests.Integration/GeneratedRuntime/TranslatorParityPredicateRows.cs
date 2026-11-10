@@ -101,6 +101,11 @@ public static class TranslatorParityPredicateRows
         var ids = new[] { 2, 4 };
         var noIds = Array.Empty<int>();
         var numbersWithNull = new List<int?> { 1, null, 3 };
+        var longsBeyondInt = new List<long?> { 1, 3000000000L };
+        var uintsBeyondInt = new List<uint> { 10u, 3000000000u };
+        var noonOfFirstDay = new DateTime(2024, 1, 1, 12, 0, 0);
+        var finerThanCentisecond = new DateTime(2024, 1, 1, 10, 0, 0).AddTicks(1_200_001);
+        var finerClock = new TimeSpan(0, 10, 0, 0, 120).Add(TimeSpan.FromTicks(1));
 
         List<ScenarioRow<TranslatorParityPredicate>> rows =
         [
@@ -328,6 +333,112 @@ public static class TranslatorParityPredicateRows
                 "in-nullable-int-list-with-null",
                 "null 許容の値型（int?）のリストでも null の要素が IS NULL へ畳まれる",
                 c => numbersWithNull.Contains(c.BigParentId)
+            ),
+            // ---- 列の型に入らない値との比較（整数の列と小数・int の範囲の外・decimal の桁の外）は、C# と同じく数として比べる ----
+            SmallChild(
+                "int-column-equals-fraction",
+                "int の列と小数の == はどの行にも一致しない（値を列の型へ切り捨てない）",
+                c => c.BigParentId == 1.5
+            ),
+            SmallChild(
+                "int-column-not-equals-fraction",
+                "int の列と小数の != は NULL の行を含む全行に一致する",
+                c => c.BigParentId != 1.5
+            ),
+            SmallChild(
+                "int-column-less-fraction",
+                "int の列と小数の < は数として比べる",
+                c => c.BigParentId < 1.5
+            ),
+            SmallChild(
+                "int-column-greater-or-equal-negative-fraction",
+                "int の列と負の小数の >= は数として比べる",
+                c => c.BigParentId >= -0.5
+            ),
+            SmallChild(
+                "int-key-negated-less-fraction",
+                "NOT NULL の int の列と小数の順序比較の否定",
+                c => !(c.Id < 10.5)
+            ),
+            SmallChild(
+                "int-column-less-long-beyond-int",
+                "int の列と int の範囲の外の long の < は数として比べる（例外にしない）",
+                c => c.BigParentId < 3000000000L
+            ),
+            SmallChild(
+                "int-column-equals-long-beyond-int",
+                "int の列と int の範囲の外の long の == はどの行にも一致しない",
+                c => c.BigParentId == 3000000000L
+            ),
+            SmallChild(
+                "in-long-list-beyond-int",
+                "int の列と long のリストの IN は、int の範囲の外の要素があっても数として比べる",
+                c => longsBeyondInt.Contains(c.BigParentId)
+            ),
+            SmallChild(
+                "in-uint-list-beyond-int",
+                "int の列と uint のリストの IN は、int の範囲の外の要素があっても数として比べる（符号なしの値も束縛できる）",
+                c => uintsBeyondInt.Contains((uint)c.Id)
+            ),
+            SmallChild(
+                "int-key-equals-method-long-beyond-int",
+                "int の列の Equals(object) と int の範囲の外の long はどの行にも一致しない（型の違う値は等しくない）",
+                c => c.Id.Equals(3000000000L)
+            ),
+            Probe(
+                "decimal-equals-beyond-scale",
+                "decimal(10,2) の列と桁の多い decimal の == は値を列の桁へ丸めない",
+                x => x.Amount == 100.004m
+            ),
+            Probe(
+                "decimal-greater-or-equal-beyond-scale",
+                "decimal(10,2) の列と桁の多い decimal の >= は値を列の桁へ丸めない",
+                x => x.Amount != null && x.Amount.Value >= 100.004m
+            ),
+            Probe(
+                "date-less-time-of-day",
+                "date の列と時刻つきの DateTime の < は時刻を落とさずに比べる",
+                x => x.Day < noonOfFirstDay
+            ),
+            Probe(
+                "date-equals-time-of-day",
+                "date の列と時刻つきの DateTime の == はどの行にも一致しない",
+                x => x.Day == noonOfFirstDay
+            ),
+            Probe(
+                "datetime2-scaled-equals-finer",
+                "datetime2(2) の列と 1/100 秒より細かい DateTime の == はどの行にも一致しない",
+                x => x.At2 == finerThanCentisecond
+            ),
+            Probe(
+                "datetime2-scaled-less-finer",
+                "datetime2(2) の列と 1/100 秒より細かい DateTime の < は端数を落とさずに比べる",
+                x => x.At2 < finerThanCentisecond
+            ),
+            Probe(
+                "time-scaled-equals-finer",
+                "time(2) の列と 1/100 秒より細かい TimeSpan の == はどの行にも一致しない",
+                x => x.Clock == finerClock
+            ),
+            Probe(
+                "time-scaled-less-finer",
+                "time(2) の列と 1/100 秒より細かい TimeSpan の < は端数を落とさずに比べる",
+                x => x.Clock < finerClock
+            ),
+            Probe(
+                "varchar-equals-non-ascii",
+                "Unicode でない列と ASCII の外の文字の == は、化けた '??' の行に一致しない",
+                x => x.Ansi == "日本"
+            ),
+            Probe(
+                "varchar-not-equals-non-ascii",
+                "Unicode でない列と ASCII の外の文字の != は NULL の行を含む全行に一致する",
+                x => x.Ansi != "日本"
+            ),
+            Probe(
+                "varchar-equals-ascii",
+                "Unicode でない列と ASCII の値の == は列の型のまま比べる",
+                x => x.Ansi == "??"
             ),
             // ---- bool 列の短縮形と否定の深さ ----
             Probe("bool-column", "bool 列（col = 1）", x => x.IsActive),

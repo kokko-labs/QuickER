@@ -21,46 +21,11 @@ internal static class DslFuzzNotGenerated
             ],
             [
                 NotGenerated.Pending(
-                    "unparenthesized-logic-mix",
-                    "括弧なしの AND / OR / NOT の混在（優先順位の解釈）",
-                    "G2",
-                    "条件の描画が入れ子を必ず括弧で包むので、パーサの優先順位の解釈を総当たりが通らない",
-                    "`QueryConditionParserTests.Parse_AndBindsTighterThanOr`・`QueryConditionParserTests.Parse_NotBindsTighterThanAnd`"
-                ),
-                NotGenerated.Pending(
-                    "empty-or-null-in-list",
-                    "空の IN・null を含む IN",
-                    "G2",
-                    "IN のリストはいつも 1〜3 件で null を含まない。生成コードの問い合わせは空と null を 1 = 0・1 = 1・IS NULL へ畳む分岐を持つ",
-                    "`SqlExpressionTranslatorInClauseTests.In_WithNullElement_FoldsNullIntoIsNull`・`SqlExpressionTranslatorInClauseTests.In_WithOnlyNullElements_EmitsIsNull`"
-                ),
-                NotGenerated.Pending(
-                    "quote-in-string-literal",
-                    "引用符を含む文字列リテラル（引用符 2 つのエスケープ）",
-                    "G2",
-                    "文字列の値の池に引用符を含む値が無い。パーサは引用符 2 つを 1 つへ戻す分岐を持つ",
-                    "`QueryConditionParserTests.Parse_Literals`"
-                ),
-                NotGenerated.Pending(
-                    "decimal-literal-on-integer-column",
-                    "小数のリテラルと整数の列の比較（素の整数の列と整数の値オブジェクトの列）",
-                    "G2",
-                    "整数の列へ小数のリテラルを当てない。型の整合検査は、素の整数の列（long を含む）と整数の値オブジェクトの列で扱いを分ける",
-                    "`CodegenConfig/Cases`（行 `diag-query-type-check-rejects-*`）"
-                ),
-                NotGenerated.Pending(
                     "column-type-families",
                     "列の型の族（float・bool・DateOnly・TimeOnly・DateTimeOffset・TimeSpan・Binary）",
                     "型の族の区切り（未起動・bool から）",
                     "生成器の列の型（DslClr）にこれらの族が無い。族ごとの実装先の意味が docs に無く、足すと族ごとに仕様の判断が要る",
                     "`CodegenConfig/Cases`（行 `diag-query-type-check-rejects-*`）"
-                ),
-                NotGenerated.Pending(
-                    "keyword-spelling",
-                    "小文字・大文字小文字の混在のキーワードと != の演算子",
-                    "G2",
-                    "描画はキーワードを大文字、不等号を <> だけで書く。パーサはキーワードの大文字小文字を区別せず、!= も受ける",
-                    "`QueryConditionParserTests.Parse_CaseInsensitiveKeywordsAndJapaneseColumns`・`QueryConditionParserTests.Parse_AllComparisonOperators`"
                 ),
                 NotGenerated.Accepted(
                     "docs-unwritable-forms",

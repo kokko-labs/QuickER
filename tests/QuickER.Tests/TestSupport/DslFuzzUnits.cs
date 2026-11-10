@@ -102,17 +102,7 @@ public static class DslFuzzUnits
             DialectNames.MySql => (
                 "varchar(36)",
                 "varchar(36)",
-                MySqlColumns()
-                    .Skip(1)
-                    .Concat([
-                        new("f", "char(10)", DslClr.FixedString, Nullable: true),
-                        new("i64", "bigint", DslClr.Int64, Nullable: true),
-                        new("i32", "int", DslClr.Int32, Nullable: true),
-                        new("i16", "smallint", DslClr.Int16, Nullable: true),
-                        new("d", "decimal(10,2)", DslClr.Decimal, Nullable: true),
-                        new("dt", "datetime", DslClr.DateTime, Nullable: true),
-                        new("g", "char(36)", DslClr.Guid, Nullable: true),
-                    ]),
+                MySqlColumns().Skip(1).Concat(MySqlCoverageExtraColumns()),
                 new[] { "id", "parent", "f", "i64", "i32", "i16", "d", "dt", "g" }
             ),
             _ => throw new ArgumentOutOfRangeException(nameof(dbms), dbms, null),
@@ -157,27 +147,62 @@ public static class DslFuzzUnits
     }
 
     /// <summary>
-    /// 値オブジェクトなしの SQLite の網羅の単位（種の単位と同じ列・種に依らない）。網羅の単位（<see cref="Coverage"/>）は
-    /// 値オブジェクトありだけなので、素の string の列・素の値型の列の経路（インメモリの文字列一致の序数への書き換え・
-    /// NOT の押し下げ）を決まった形のクエリ（<see cref="DslFuzzGenerator.FixedQueries"/>）で流す
+    /// 値オブジェクトなしの網羅の単位（方言ごとに 1 つ・種に依らない）。網羅の単位（<see cref="Coverage"/>）は値オブジェクトありだけ
+    /// なので、値オブジェクトなしでだけ書ける形（整数の列と小数のリテラルの比較＝値オブジェクトの列は型の検査が断る）の
+    /// 組を <see cref="DslFuzzGenerator.CoverageQueries"/> で埋める。SQLite の単位は、素の string の列・素の値型の列の経路
+    /// （インメモリの文字列一致の序数への書き換え・NOT の押し下げ）の決まった形のクエリ（<see cref="DslFuzzGenerator.FixedQueries"/>）も流す
     /// </summary>
-    public static DslFuzzUnit PlainCoverage()
+    /// <remarks>
+    /// 列は種の単位と同じ。MySQL は網羅の単位と同じく、種の単位に無い固定長の文字列・符号つき整数・decimal・日時・Guid も持ち、
+    /// その列の原子のクエリを作る（主キーは種の単位と同じ bigint）。
+    /// </remarks>
+    /// <param name="dbms">方言（<see cref="DialectNames"/> の SQLite・SQL Server・MySQL）</param>
+    public static DslFuzzUnit PlainCoverage(string dbms)
     {
-        var columns = SqliteColumns();
+        var (columns, atomColumns) = dbms switch
+        {
+            DialectNames.Sqlite => (SqliteColumns(), Array.Empty<string>()),
+            DialectNames.SqlServer => (SqlServerColumns(), Array.Empty<string>()),
+            DialectNames.MySql => (
+                [.. MySqlColumns(), .. MySqlCoverageExtraColumns()],
+                MySqlCoverageExtraColumns().Select(column => column.Name).ToArray()
+            ),
+            _ => throw new ArgumentOutOfRangeException(nameof(dbms), dbms, null),
+        };
         var generator = new DslFuzzGenerator(CoverageSeed, valueObjects: false);
         var rows = generator.Rows(columns, RowCount);
-        PutOrdinalValues(rows);
+        var ordinal = dbms == DialectNames.Sqlite;
+
+        if (ordinal)
+        {
+            PutOrdinalValues(rows);
+        }
 
         return new DslFuzzUnit(
-            $"{CoveragePrefix}{DialectNames.Sqlite}-plain",
+            $"{CoveragePrefix}{dbms}-plain",
             TableName,
             columns,
             rows,
-            generator.FixedQueries(columns, ordinalStrings: true),
+            [
+                .. generator.CoverageQueries(columns, atomColumns),
+                .. ordinal ? generator.FixedQueries(columns, ordinalStrings: true) : [],
+            ],
             ValueObjects: false,
             CoverageSeed
         );
     }
+
+    /// <summary>MySQL の網羅の単位が種の単位に足す列（種の単位に無い列の種類）</summary>
+    private static DslColumn[] MySqlCoverageExtraColumns() =>
+        [
+            new("f", "char(10)", DslClr.FixedString, Nullable: true),
+            new("i64", "bigint", DslClr.Int64, Nullable: true),
+            new("i32", "int", DslClr.Int32, Nullable: true),
+            new("i16", "smallint", DslClr.Int16, Nullable: true),
+            new("d", "decimal(10,2)", DslClr.Decimal, Nullable: true),
+            new("dt", "datetime", DslClr.DateTime, Nullable: true),
+            new("g", "char(36)", DslClr.Guid, Nullable: true),
+        ];
 
     /// <summary>
     /// 列 <c>s</c> の 3〜7 行目に、カルチャで比べると序数と結果が変わる値を入れる：合成済みの「が」で始まる・分解形で始まる・

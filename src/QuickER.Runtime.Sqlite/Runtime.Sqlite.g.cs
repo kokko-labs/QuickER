@@ -3876,6 +3876,15 @@ public sealed class EntitySaveMetadata
         bool variableLength = false
     ) => command.Parameters.AddWithValue(name, rawValue ?? DBNull.Value);
 
+    /// <summary>Binds a query WHERE-clause value against a column (without [SqlColumnType] every value goes through AddWithValue).</summary>
+    private static void AddQueryColumnParameter(
+        SqliteCommand command,
+        string name,
+        PropertyInfo property,
+        object? rawValue,
+        bool variableLength
+    ) => AddColumnParameter(command, name, property, rawValue, variableLength);
+
     /// <summary>
     /// Binds a query WHERE-clause parameter. When the column name is known and its column property is found, the
     /// parameter is explicitly constructed with the column type; otherwise falls back to AddWithValue.
@@ -3910,7 +3919,7 @@ public sealed class EntitySaveMetadata
     {
         if (columnName is not null && PropertyByColumn.TryGetValue(columnName, out var property))
         {
-            AddColumnParameter(command, name, property, rawValue, variableLength);
+            AddQueryColumnParameter(command, name, property, rawValue, variableLength);
             return;
         }
 

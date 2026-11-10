@@ -85,7 +85,11 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
         // どの実装先でも照合したクエリにならなければ名指しで赤にする
         DslFuzzUnit[] coverageUnits = plan.IsSingle
             ? []
-            : [DslFuzzUnits.Coverage(DialectNames.SqlServer)];
+            :
+            [
+                DslFuzzUnits.Coverage(DialectNames.SqlServer),
+                DslFuzzUnits.PlainCoverage(DialectNames.SqlServer),
+            ];
 
         foreach (var unit in coverageUnits)
         {
