@@ -59,6 +59,8 @@ public sealed class MySqlProvider : IDatabaseProvider
             ChecksDefaultOnColumnTypeChange = true,
             TypeKindChangeRequiresEmptyColumn = false,
             PrecisionDecreaseRequiresEmptyColumn = false,
+            AddNotNullColumnRequiresEmptyTable = false,
+            AlterColumnBlockedByComputedColumn = false,
             SupportsComputedColumnTypeChange = true,
             SupportsUniqueConstraintOnPrimaryKey = true,
             ReferencedKeyRequiresSameColumnOrder = true,

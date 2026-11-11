@@ -18,11 +18,11 @@ internal static partial class SyncPlanExpectationRows
     private static int RealCrossDialectRowCount(string dialect) =>
         dialect switch
         {
-            DialectNames.SqlServer => 16,
-            DialectNames.PostgreSql => 19,
-            DialectNames.MySql => 16,
-            DialectNames.Oracle => 18,
-            DialectNames.Sqlite => 17,
+            DialectNames.SqlServer => 23,
+            DialectNames.PostgreSql => 26,
+            DialectNames.MySql => 23,
+            DialectNames.Oracle => 25,
+            DialectNames.Sqlite => 24,
             _ => 0,
         };
 
@@ -37,7 +37,636 @@ internal static partial class SyncPlanExpectationRows
             .. RealCrossDialectLongDefaultNameRows(),
             .. RealCrossDialectIntegerWidthRows(),
             .. RealCrossDialectEmptyColumnChangeRows(),
+            .. RealCrossDialectRowDependentChangeRows(),
         ];
+
+    /// <summary>
+    /// 既存の行（とモデルの外の依存）で断られうる文の前で外し、その文か後ろで付け直す制約の名指し（暗黙コミットの方言だけ）と、断られた
+    /// ときの部分適用（名指しした制約だけが外れたまま残る）・トランザクションの方言の巻き戻り
+    /// </summary>
+    /// <remarks>
+    /// どの行も、DB は断られうる文を実際に断るデータ（重複・NULL・行のある表・計算列）を持つ。計画は値を見ないので、トランザクションの方言は
+    /// 警告せずに失敗して巻き戻る（データの都合の失敗）。暗黙コミットの方言は名指しした制約が外れたまま残り、実 DB の表明 1b はその消失だけを
+    /// 受け入れる。
+    /// </remarks>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > RealCrossDialectRowDependentChangeRows() =>
+        [
+            Row(
+                    "plan-row-dependent-change-pk-onto-duplicates-names-primary-key",
+                    "[Integration] 主キーを重複のある列へ移す：暗黙コミットの方言だけ、付与が断られて外れたまま残りうる主キーを名指しする",
+                    AllDialects
+                )
+                .LiveWith(w =>
+                    w.Live.Table(
+                        "rd_pk",
+                        ExpectationSchema.Pk("id", RealCrossDialectScenarios.IntType(w.Capability)),
+                        ExpectationSchema.NotNull(
+                            "k",
+                            RealCrossDialectScenarios.IntType(w.Capability)
+                        )
+                    )
+                )
+                .TargetWith(w =>
+                    w.Target.Table(
+                        "rd_pk",
+                        ExpectationSchema.NotNull(
+                            "id",
+                            RealCrossDialectScenarios.IntType(w.Capability)
+                        ),
+                        ExpectationSchema.Pk("k", RealCrossDialectScenarios.IntType(w.Capability))
+                    )
+                )
+                .Select(RealScenarios.SelectAll)
+                .Expect(e =>
+                    ExpectRowDependentWarnings(
+                        e,
+                        [
+                            "ConstraintRebuildAroundRowDependentChange(rd_pk): PRIMARY KEY (PRIMARY KEY rd_pk (k))",
+                        ]
+                    )
+                )
+                .OnRealDatabase(r =>
+                    RowDependentFailure(
+                        RealCrossDialectScenarios.SetupPerDialect(
+                            r,
+                            d =>
+                                RealCrossDialectScenarios.Insert(d, "rd_pk", ["id", "k"], "1, 5")
+                                + "\n"
+                                + RealCrossDialectScenarios.Insert(d, "rd_pk", ["id", "k"], "2, 5")
+                        ),
+                        "データの都合：k は重複する値（5）を持つので主キーにできない（計画は列の値を見ない）",
+                        DuplicateKeyErrors("ORA-02437")
+                    )
+                ),
+            Row(
+                    "plan-row-dependent-change-unique-rebuild-onto-duplicates-names-unique",
+                    "[Integration] 名前つきの一意制約を重複のある列へ作り直す：暗黙コミットの方言だけ、作り直しが断られて外れたまま残りうる一意制約を名指しする",
+                    AllDialects
+                )
+                .LiveWith(w => RowDependentUniqueTable(w.Live, w.Capability, "u"))
+                .TargetWith(w => RowDependentUniqueTable(w.Target, w.Capability, "w"))
+                .Select(RealScenarios.SelectAll)
+                .Expect(e =>
+                    ExpectRowDependentWarnings(
+                        e,
+                        [
+                            "ConstraintRebuildAroundRowDependentChange(rd_uq): uq_rd_uq (UNIQUE rd_uq (w))",
+                        ]
+                    )
+                )
+                .OnRealDatabase(r =>
+                    RowDependentFailure(
+                        RealCrossDialectScenarios.SetupPerDialect(
+                            r,
+                            d =>
+                                RealCrossDialectScenarios.Insert(
+                                    d,
+                                    "rd_uq",
+                                    ["id", "u", "w"],
+                                    "1, 1, 7"
+                                )
+                                + "\n"
+                                + RealCrossDialectScenarios.Insert(
+                                    d,
+                                    "rd_uq",
+                                    ["id", "u", "w"],
+                                    "2, 2, 7"
+                                )
+                        ),
+                        "データの都合：w は重複する値（7）を持つので一意制約を張れない（計画は列の値を見ない）",
+                        DuplicateKeyErrors("ORA-02299")
+                    )
+                ),
+            Row(
+                    "plan-row-dependent-change-not-null-on-fk-column-names-fk",
+                    "[Integration] 外部キーの子の列を NULL のまま NOT NULL にする：列の変更で外部キーを外し直す暗黙コミットの方言だけ、外部キーを名指しする",
+                    AllDialects
+                )
+                .LiveWith(w =>
+                    RowDependentParentChild(w.Live, w.Capability, "rd_nn", nullable: true)
+                )
+                .TargetWith(w =>
+                    RowDependentParentChild(w.Target, w.Capability, "rd_nn", nullable: false)
+                )
+                .Select(RealScenarios.SelectAll)
+                .Expect(e =>
+                {
+                    foreach (var dialect in AllDialects)
+                    {
+                        var c = SyncPlanExpectationCapabilities.Get(dialect);
+                        e.For(
+                            dialect,
+                            x =>
+                            {
+                                if (!c.TransactionalDdl && c.AlterColumnRequiresForeignKeyRebuild)
+                                {
+                                    x.Warnings.Exact(
+                                        "ConstraintRebuildAroundRowDependentChange(rd_nn_child): fk_rd_nn (rd_nn_child.pid: NOT NULL)"
+                                    );
+                                    return;
+                                }
+
+                                x.Warnings.Absent("ConstraintRebuild*");
+                            }
+                        );
+                    }
+                })
+                .OnRealDatabase(r =>
+                {
+                    RealCrossDialectScenarios
+                        .SetupPerDialect(
+                            r,
+                            d =>
+                                RealCrossDialectScenarios.Insert(d, "rd_nn_parent", ["id"], "1")
+                                + "\n"
+                                + RealCrossDialectScenarios.Insert(
+                                    d,
+                                    "rd_nn_child",
+                                    ["id", "pid"],
+                                    "1, NULL"
+                                )
+                        )
+                        .ExpectsUnwarnedFailure(
+                            "データの都合：pid は NULL を持つので NOT NULL にできない（計画は列の値を見ない）"
+                        )
+                        .Expect(e =>
+                        {
+                            var errors = ErrorFragments(
+                                sqlServer: "Cannot insert the value NULL",
+                                postgreSql: "contains null values",
+                                mySql: "Invalid use of NULL value",
+                                oracle: "ORA-02296",
+                                sqlite: "NOT NULL constraint failed"
+                            );
+
+                            foreach (var dialect in AllDialects)
+                            {
+                                var c = SyncPlanExpectationCapabilities.Get(dialect);
+                                e.For(
+                                    dialect,
+                                    x => x.Outcome.Exact($"failed: *{errors[dialect]}*")
+                                );
+
+                                // 外部キーを外し直す暗黙コミットの方言（MySQL）だけ、名指しした外部キーが外れたまま残る
+                                if (c.TransactionalDdl || !c.AlterColumnRequiresForeignKeyRebuild)
+                                {
+                                    e.For(dialect, x => x.Unchanged());
+                                }
+                                else
+                                {
+                                    e.For(dialect, x => x.After.Absent("fk rd_nn_child *"));
+                                }
+                            }
+                        });
+                }),
+            Row(
+                    "plan-row-dependent-change-add-unique-names-collateral-fk",
+                    "[Integration] 重複のある列へ一意制約を足し、別の外部キーを作り直す：暗黙コミットの方言だけ、追加の前で外す作り直しの外部キーを名指しする",
+                    AllDialects
+                )
+                .LiveWith(w =>
+                    RowDependentParentChild(
+                        w.Live,
+                        w.Capability,
+                        "rd_au",
+                        nullable: false,
+                        withValue: true
+                    )
+                )
+                .TargetWith(w =>
+                {
+                    RowDependentParentChild(
+                        w.Target,
+                        w.Capability,
+                        "rd_au",
+                        nullable: false,
+                        withValue: true,
+                        onDelete: ForeignKeyReferentialAction.Cascade
+                    );
+                    w.Target.Unique("rd_au_child", "uq_rd_au_v", "v");
+                })
+                .Select(RealScenarios.SelectAll)
+                .Expect(e =>
+                    ExpectRowDependentWarnings(
+                        e,
+                        [
+                            "ConstraintRebuildAroundRowDependentChange(rd_au_child): fk_rd_au (UNIQUE rd_au_child (v))",
+                        ]
+                    )
+                )
+                .OnRealDatabase(r =>
+                    RowDependentFailure(
+                        RealCrossDialectScenarios.SetupPerDialect(
+                            r,
+                            d =>
+                                RealCrossDialectScenarios.Insert(d, "rd_au_parent", ["id"], "1")
+                                + "\n"
+                                + RealCrossDialectScenarios.Insert(
+                                    d,
+                                    "rd_au_child",
+                                    ["id", "pid", "v"],
+                                    "1, 1, 9"
+                                )
+                                + "\n"
+                                + RealCrossDialectScenarios.Insert(
+                                    d,
+                                    "rd_au_child",
+                                    ["id", "pid", "v"],
+                                    "2, 1, 9"
+                                )
+                        ),
+                        "データの都合：v は重複する値（9）を持つので一意制約を張れない（計画は列の値を見ない）",
+                        DuplicateKeyErrors("ORA-02299")
+                    )
+                ),
+            Row(
+                    "plan-row-dependent-change-add-not-null-column-names-collateral-fk",
+                    "[Integration] 行のある表へ NOT NULL の列を足し、別の外部キーを作り直す：表が空でないと足せない暗黙コミットの方言だけ、作り直しの外部キーを名指しする",
+                    AllDialects
+                )
+                .LiveWith(w =>
+                    RowDependentParentChild(w.Live, w.Capability, "rd_ac", nullable: false)
+                )
+                .TargetWith(w =>
+                {
+                    RowDependentParentChild(
+                        w.Target,
+                        w.Capability,
+                        "rd_ac",
+                        nullable: false,
+                        onDelete: ForeignKeyReferentialAction.Cascade
+                    );
+                    w.Target["rd_ac_child"]
+                        .Columns.Add(
+                            ExpectationSchema.NotNull(
+                                "extra",
+                                RealCrossDialectScenarios.IntType(w.Capability)
+                            )
+                        );
+                })
+                .Select(RealScenarios.SelectAll)
+                .Expect(e =>
+                {
+                    foreach (var dialect in AllDialects)
+                    {
+                        var c = SyncPlanExpectationCapabilities.Get(dialect);
+                        e.For(
+                            dialect,
+                            x =>
+                            {
+                                if (!c.TransactionalDdl && c.AddNotNullColumnRequiresEmptyTable)
+                                {
+                                    x.Warnings.Exact(
+                                        "ConstraintRebuildAroundRowDependentChange(rd_ac_child): fk_rd_ac (rd_ac_child.extra: ADD NOT NULL)"
+                                    );
+                                    return;
+                                }
+
+                                x.Warnings.Absent("ConstraintRebuild*");
+                            }
+                        );
+                    }
+                })
+                .OnRealDatabase(r =>
+                {
+                    RealCrossDialectScenarios
+                        .SetupPerDialect(
+                            r,
+                            d =>
+                                RealCrossDialectScenarios.Insert(d, "rd_ac_parent", ["id"], "1")
+                                + "\n"
+                                + RealCrossDialectScenarios.Insert(
+                                    d,
+                                    "rd_ac_child",
+                                    ["id", "pid"],
+                                    "1, 1"
+                                )
+                        )
+                        .ExpectsUnwarnedFailure(
+                            "データの都合：rd_ac_child は行を持つので、既定値の無い NOT NULL の列を足せない（計画は表の行の有無を見ない）"
+                        )
+                        .Expect(e =>
+                        {
+                            foreach (var dialect in AllDialects)
+                            {
+                                var c = SyncPlanExpectationCapabilities.Get(dialect);
+                                e.For(
+                                    dialect,
+                                    x =>
+                                    {
+                                        // MySQL は型の暗黙の既定値で埋めて通す
+                                        if (!c.AddNotNullColumnRequiresEmptyTable)
+                                        {
+                                            x.Outcome.Exact("committed");
+                                            x.AfterDiff.Empty();
+                                            return;
+                                        }
+
+                                        x.Outcome.Exact(
+                                            "failed: *"
+                                                + ErrorFragments(
+                                                    sqlServer: "cannot be added to non-empty table",
+                                                    postgreSql: "contains null values",
+                                                    mySql: "",
+                                                    oracle: "ORA-01758",
+                                                    sqlite: "NOT NULL constraint failed"
+                                                )[dialect]
+                                                + "*"
+                                        );
+
+                                        if (c.TransactionalDdl)
+                                        {
+                                            x.Unchanged();
+                                        }
+                                        else
+                                        {
+                                            x.After.Absent("fk rd_ac_child *");
+                                        }
+                                    }
+                                );
+                            }
+                        });
+                }),
+            Row(
+                    "plan-row-dependent-change-pk-reorder-is-not-named",
+                    "[Integration] 主キーの列を並べ替える（参照する外部キーあり・行あり）：live の主キーと同じ列集合は一意と証明できるので、どの方言も名指しせずに通る",
+                    AllDialects
+                )
+                .LiveWith(w =>
+                    RealCrossDialectScenarios.CompositeParentChild(
+                        w.Live,
+                        w.Capability,
+                        wideA: false,
+                        reordered: false
+                    )
+                )
+                .TargetWith(w =>
+                    RealCrossDialectScenarios.CompositeParentChild(
+                        w.Target,
+                        w.Capability,
+                        wideA: false,
+                        reordered: true
+                    )
+                )
+                .Select(RealScenarios.SelectAll)
+                .Expect(e => e.Warnings.Absent("ConstraintRebuild*"))
+                .OnRealDatabase(r =>
+                    RealCrossDialectScenarios
+                        .SetupPerDialect(
+                            r,
+                            d =>
+                                RealCrossDialectScenarios.Insert(d, "ep_parent", ["a", "b"], "1, 1")
+                                + "\n"
+                                + RealCrossDialectScenarios.Insert(
+                                    d,
+                                    "ep_child",
+                                    ["id", "pa", "pb"],
+                                    "1, 1, 1"
+                                )
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.AfterDiff.Empty();
+                        })
+                ),
+            Row(
+                    "plan-row-dependent-change-computed-source-names-collateral-fk",
+                    "[Integration] 計算列のある表の列の型を広げ、別の外部キーを作り直す：計算列が使う列の変更を断る暗黙コミットの方言だけ、作り直しの外部キーを名指しする",
+                    AllDialects
+                )
+                .LiveWith(w =>
+                {
+                    w.Live.Table(
+                        "rd_cs",
+                        ExpectationSchema.Pk("id", RealCrossDialectScenarios.IntType(w.Capability)),
+                        ExpectationSchema.Nullable(
+                            "x",
+                            RealCrossDialectScenarios.IntType(w.Capability)
+                        )
+                    );
+                    RowDependentParentChild(w.Live, w.Capability, "rd_cs", nullable: false);
+                })
+                .TargetWith(w =>
+                {
+                    w.Target.CopyFrom(w.Live, preserveIds: false);
+                    w.Target.Col("rd_cs", "x").DataType = RealCrossDialectScenarios.BigIntType(
+                        w.Capability
+                    );
+                    w.Target.Relationships.Single().OnDelete = ForeignKeyReferentialAction.Cascade;
+                })
+                .Select(items =>
+                    RealScenarios.SelectKinds(
+                        items,
+                        SchemaDiffKind.AlterColumn,
+                        SchemaDiffKind.AlterForeignKey
+                    )
+                )
+                .Expect(e =>
+                {
+                    foreach (var dialect in AllDialects)
+                    {
+                        var c = SyncPlanExpectationCapabilities.Get(dialect);
+                        e.For(
+                            dialect,
+                            x =>
+                            {
+                                // 網の図は計算列を持たない（実 DB の段で足す）ので、網では名指ししない
+                                x.Warnings.Absent("ConstraintRebuild*");
+                            }
+                        );
+                    }
+                })
+                .OnRealDatabase(r =>
+                {
+                    foreach (var dialect in AllDialects)
+                    {
+                        r.Setup(RowDependentComputedColumnSql(dialect), dialect);
+                    }
+
+                    r.ExpectsUnwarnedFailure(
+                            "モデルの外の物：計算列 calc の式が x を参照するので、x の型の変更を DB が断る（図は式の依存を持たない）"
+                        )
+                        .Expect(e =>
+                        {
+                            foreach (var dialect in AllDialects)
+                            {
+                                var c = SyncPlanExpectationCapabilities.Get(dialect);
+                                e.For(
+                                    dialect,
+                                    x =>
+                                    {
+                                        if (!c.AlterColumnBlockedByComputedColumn)
+                                        {
+                                            x.Outcome.Exact("committed");
+                                            return;
+                                        }
+
+                                        x.Outcome.Exact(
+                                            "failed: *"
+                                                + ErrorFragments(
+                                                    sqlServer: "is dependent on column",
+                                                    postgreSql: "generated column",
+                                                    mySql: "",
+                                                    oracle: "ORA-54031",
+                                                    sqlite: ""
+                                                )[dialect]
+                                                + "*"
+                                        );
+
+                                        if (c.TransactionalDdl)
+                                        {
+                                            x.Unchanged();
+                                            return;
+                                        }
+
+                                        // 取り込んだ DB には計算列があるので、実 DB の段の計画は作り直しの外部キーを名指しする
+                                        x.Warnings.Exact(
+                                            "ConstraintRebuildAroundRowDependentChange(rd_cs_child): fk_rd_cs (rd_cs.x: *)"
+                                        );
+                                        x.After.Absent("fk rd_cs_child *");
+                                    }
+                                );
+                            }
+                        });
+                }),
+        ];
+
+    /// <summary>
+    /// 暗黙コミットの方言だけ断られうる文の警告を <paramref name="expected"/> のとおりに出し、トランザクションの方言は名指ししない
+    /// </summary>
+    private static void ExpectRowDependentWarnings(ExpectationBuilder e, string[] expected)
+    {
+        foreach (var dialect in AllDialects)
+        {
+            var transactional = SyncPlanExpectationCapabilities.Get(dialect).TransactionalDdl;
+            e.For(
+                dialect,
+                x =>
+                {
+                    if (transactional)
+                    {
+                        x.Warnings.Absent("ConstraintRebuild*");
+                        return;
+                    }
+
+                    x.Warnings.Exact(expected);
+                }
+            );
+        }
+    }
+
+    /// <summary>
+    /// データの都合で全方言が断る行の実 DB の期待：トランザクションの方言は巻き戻って DB が変わらず、暗黙コミットの方言は名指しした制約
+    /// だけが外れたまま残る（実 DB の表明 1b が名指しの外の消失を断る）
+    /// </summary>
+    private static RealStage RowDependentFailure(
+        RealStage stage,
+        string reason,
+        IReadOnlyDictionary<string, string> errors
+    ) =>
+        stage
+            .ExpectsUnwarnedFailure(reason)
+            .Expect(e =>
+            {
+                foreach (var dialect in AllDialects)
+                {
+                    e.For(dialect, x => x.Outcome.Exact($"failed: *{errors[dialect]}*"));
+
+                    if (SyncPlanExpectationCapabilities.Get(dialect).TransactionalDdl)
+                    {
+                        e.For(dialect, x => x.Unchanged());
+                    }
+                }
+            });
+
+    /// <summary>方言ごとのエラー文の断片（失敗した実行の結果の行に添える）</summary>
+    private static IReadOnlyDictionary<string, string> ErrorFragments(
+        string sqlServer,
+        string postgreSql,
+        string mySql,
+        string oracle,
+        string sqlite
+    ) =>
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [DialectNames.SqlServer] = sqlServer,
+            [DialectNames.PostgreSql] = postgreSql,
+            [DialectNames.MySql] = mySql,
+            [DialectNames.Oracle] = oracle,
+            [DialectNames.Sqlite] = sqlite,
+        };
+
+    /// <summary>重複で主キー・一意制約を張れないときのエラー文の断片（Oracle は主キーと一意制約で番号が違う）</summary>
+    private static IReadOnlyDictionary<string, string> DuplicateKeyErrors(string oracle) =>
+        ErrorFragments(
+            sqlServer: "duplicate key",
+            postgreSql: "could not create unique index",
+            mySql: "Duplicate entry",
+            oracle: oracle,
+            sqlite: "UNIQUE constraint failed"
+        );
+
+    /// <summary>表 rd_uq (id PK, u NOT NULL, w NOT NULL) と、列 <paramref name="column"/> の名前つきの一意制約 uq_rd_uq</summary>
+    private static void RowDependentUniqueTable(ExpectationSchema s, string dialect, string column)
+    {
+        var type = RealCrossDialectScenarios.IntType(dialect);
+        s.Table(
+            "rd_uq",
+            ExpectationSchema.Pk("id", type),
+            ExpectationSchema.NotNull("u", type),
+            ExpectationSchema.NotNull("w", type)
+        );
+        s.Unique("rd_uq", "uq_rd_uq", column);
+    }
+
+    /// <summary>
+    /// 親 {prefix}_parent(id) と子 {prefix}_child(id, pid〔, v〕) の外部キー fk_{prefix}（型は方言の整数型）
+    /// </summary>
+    private static void RowDependentParentChild(
+        ExpectationSchema s,
+        string dialect,
+        string prefix,
+        bool nullable,
+        bool withValue = false,
+        ForeignKeyReferentialAction onDelete = ForeignKeyReferentialAction.NoAction
+    )
+    {
+        var type = RealCrossDialectScenarios.IntType(dialect);
+        s.Table($"{prefix}_parent", ExpectationSchema.Pk("id", type));
+        var child = s.Table(
+            $"{prefix}_child",
+            ExpectationSchema.Pk("id", type),
+            nullable
+                ? ExpectationSchema.Nullable("pid", type)
+                : ExpectationSchema.NotNull("pid", type)
+        );
+
+        if (withValue)
+        {
+            child.Columns.Add(ExpectationSchema.NotNull("v", type));
+        }
+
+        s.Fk($"{prefix}_parent", $"{prefix}_child", $"fk_{prefix}", onDelete, ("id", "pid"));
+    }
+
+    /// <summary>表 rd_cs の列 x を参照する計算列 calc を足す文（総当たりの方言の部品と同じ形）</summary>
+    private static string RowDependentComputedColumnSql(string dialect) =>
+        dialect switch
+        {
+            DialectNames.SqlServer => "ALTER TABLE [rd_cs] ADD [calc] AS ([x] + 1);",
+            DialectNames.PostgreSql =>
+                "ALTER TABLE \"rd_cs\" ADD COLUMN \"calc\" integer GENERATED ALWAYS AS (\"x\" + 1) STORED;",
+            DialectNames.MySql =>
+                "ALTER TABLE `rd_cs` ADD COLUMN `calc` int GENERATED ALWAYS AS (`x` + 1) VIRTUAL;",
+            DialectNames.Oracle =>
+                "ALTER TABLE \"rd_cs\" ADD (\"calc\" NUMBER(10) GENERATED ALWAYS AS (\"x\" + 1) VIRTUAL);",
+            DialectNames.Sqlite =>
+                "ALTER TABLE \"rd_cs\" ADD COLUMN \"calc\" INTEGER GENERATED ALWAYS AS (\"x\" + 1) VIRTUAL;",
+            _ => throw new ArgumentOutOfRangeException(nameof(dialect), dialect, null),
+        };
 
     /// <summary>
     /// 列が空でないと通らない列の変更（宣言 <see cref="SyncDialectCapabilities.PrecisionDecreaseRequiresEmptyColumn"/>＝Oracle の ORA-01440）の
@@ -148,9 +777,8 @@ internal static partial class SyncPlanExpectationRows
     {
         foreach (var dialect in AllDialects)
         {
-            var declared = SyncPlanExpectationCapabilities
-                .Get(dialect)
-                .PrecisionDecreaseRequiresEmptyColumn;
+            var capabilities = SyncPlanExpectationCapabilities.Get(dialect);
+            var declared = capabilities.PrecisionDecreaseRequiresEmptyColumn;
             e.For(
                 dialect,
                 x =>
@@ -158,9 +786,25 @@ internal static partial class SyncPlanExpectationRows
                     if (!declared)
                     {
                         x.Warnings.Absent("ConstraintRebuildAroundEmptyColumnChange*");
+
+                        // 精度を下げる変更は値が入らないと断られうる文でもあるので、ほかの暗黙コミットの方言は既存の行の警告で名指しする
+                        if (capabilities.TransactionalDdl)
+                        {
+                            x.Warnings.Absent("ConstraintRebuildAroundRowDependentChange*");
+                        }
+                        else
+                        {
+                            x.Warnings.Contains(
+                                $"ConstraintRebuildAroundRowDependentChange({childTable}): {foreignKey} (*"
+                            );
+                        }
+
                         return;
                     }
 
+                    // 同じ文が列が空でないと通らない変更にも当たるときは、その警告だけで名指しする（精度を下げる列の変更＝「旧 → 新」
+                    // の文を、既存の行の警告に重ねない。主キーの付与のような別の文は既存の行の警告に出てよい）
+                    x.Warnings.Absent("ConstraintRebuildAroundRowDependentChange*→*");
                     x.Warnings.Contains(
                         $"ConstraintRebuildAroundEmptyColumnChange({childTable}): {foreignKey} (*"
                     );
@@ -370,7 +1014,27 @@ internal static partial class SyncPlanExpectationRows
                         .Expect(e =>
                         {
                             e.Outcome.Exact("committed");
-                            e.Warnings.Empty();
+
+                            // 新しい主キー (a) は live のキー (a, b) の列集合を含まないので、暗黙コミットの方言は行の重複で付与が
+                            // 断られうる主キーを名指しする
+                            foreach (var dialect in AllDialects)
+                            {
+                                if (SyncPlanExpectationCapabilities.Get(dialect).TransactionalDdl)
+                                {
+                                    e.For(dialect, x => x.Warnings.Empty());
+                                }
+                                else
+                                {
+                                    e.For(
+                                        dialect,
+                                        x =>
+                                            x.Warnings.Exact(
+                                                "ConstraintRebuildAroundRowDependentChange(t): PRIMARY KEY (PRIMARY KEY t (a))"
+                                            )
+                                    );
+                                }
+                            }
+
                             e.After.Exact(
                                 "table t",
                                 "col t.a *",

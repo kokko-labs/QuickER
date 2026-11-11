@@ -57,6 +57,8 @@ public sealed class OracleProvider : IDatabaseProvider
             ChecksDefaultOnColumnTypeChange = true,
             TypeKindChangeRequiresEmptyColumn = true,
             PrecisionDecreaseRequiresEmptyColumn = true,
+            AddNotNullColumnRequiresEmptyTable = true,
+            AlterColumnBlockedByComputedColumn = true,
             SupportsComputedColumnTypeChange = false,
             SupportsUniqueConstraintOnPrimaryKey = false,
             ReferencedKeyRequiresSameColumnOrder = false,

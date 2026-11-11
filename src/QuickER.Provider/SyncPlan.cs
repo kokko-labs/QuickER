@@ -187,13 +187,27 @@ public enum SyncPlanWarningKind
 
     /// <summary>
     /// 列が空でないと通らない列の変更（<see cref="SyncDialectCapabilities.RequiresEmptyColumn"/>＝Oracle の型の種類の変更・精度の縮小）より
-    /// 前で外し、その後ろで付け直す制約（暗黙に外して付け直す外部キー・一意制約・主キー、主キーの変更の解除、選んだ作り直しの削除）。
+    /// 前で外し、その後ろで付け直す制約（暗黙に外して付け直す外部キー・一意制約・主キー、主キーの変更の解除、選んだ作り直しの削除）と、
+    /// その前で外して付け直さない暗黙の削除（端が消える外部キー・構成列が消える一意制約・主キーが置き換える一意制約）。
     /// </summary>
     /// <remarks>
     /// 列に値があると DB がその変更を断り（ORA-01439・ORA-01440・ORA-30082）、DDL が暗黙コミットされるので、先に外した制約は
     /// 付け直されずに残る。値があるかは図からは分からないので、実行は止めずに警告に留める。制約ごとに 1 件。
     /// </remarks>
     ConstraintRebuildAroundEmptyColumnChange,
+
+    /// <summary>
+    /// 既存の行（とモデルの外の依存）で断られうる文（主キーの付与・一意制約の追加と作り直し・NOT NULL 化・型の縮小・既定値の無い NOT NULL の
+    /// 列の追加・計算列の参照しうる列の変更）より前で外し、その文か後ろで付け直す制約（暗黙に外して付け直す外部キー・一意制約・主キー、
+    /// 主キーの変更の解除、選んだ作り直しの削除。断られうる文そのものが付け直す一意制約・主キーを含む）と、その文より前で外して付け直さない
+    /// 暗黙の削除（端が消える外部キー・構成列が消える一意制約・主キーが置き換える一意制約）。
+    /// </summary>
+    /// <remarks>
+    /// 計画は列の値を見ないので、重複・NULL・長すぎる値・行のある表で DB がその文を断ることを止められない。DDL が暗黙コミットされる方言
+    /// （MySQL・Oracle）では、先に外した制約は付け直されずに残る。実行は止めずに警告に留める。制約ごとに 1 件。同じ文が列が空でないと
+    /// 通らない変更にも当たるときは <see cref="ConstraintRebuildAroundEmptyColumnChange"/> だけで名指しする。
+    /// </remarks>
+    ConstraintRebuildAroundRowDependentChange,
 
     /// <summary>選んだ列の削除で構成列が消える一意制約を、削除を選んでいなくても外した。</summary>
     /// <remarks>
@@ -279,6 +293,9 @@ public enum SyncPlanWarningKind
 /// <see cref="SyncPlanWarningKind.DefaultOnColumnTypeKindChange"/> では列のテーブル（Detail は「列名 (旧の型 → 新しい型)」）、
 /// <see cref="SyncPlanWarningKind.ConstraintRebuildAroundEmptyColumnChange"/> では制約を持つテーブル（外部キーは子テーブル。Detail は
 /// 「制約名 (表.列: 旧の型 → 新しい型, …)」で、主キーの制約名は <c>PRIMARY KEY</c>）、
+/// <see cref="SyncPlanWarningKind.ConstraintRebuildAroundRowDependentChange"/> では制約を持つテーブル（外部キーは子テーブル。Detail は
+/// 「制約名 (断られうる文, …)」で、文は <c>表.列: NOT NULL</c>・<c>表.列: 旧の型 → 新しい型</c>・<c>表.列: ADD NOT NULL</c>・
+/// <c>PRIMARY KEY 表 (列, …)</c>・<c>UNIQUE 表 (列, …)</c>、主キーの制約名は <c>PRIMARY KEY</c>）、
 /// <see cref="SyncPlanWarningKind.UniqueConstraintDroppedWithColumn"/> と <see cref="SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey"/> では一意制約のテーブル（Detail は「制約名 (構成列, …)」）、
 /// <see cref="SyncPlanWarningKind.DescriptionCharactersReplaced"/> では説明のテーブル（Detail は「表」または「表.列」）、
 /// <see cref="SyncPlanWarningKind.TableLeftWithoutColumns"/> では列を消す表（Detail は計画から外した列の削除の列名をカンマ区切りで並べたもの）、

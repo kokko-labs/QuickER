@@ -396,7 +396,11 @@ Do you want to run this against {0}?</value>
 {0}</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmConstraintRebuildAroundEmptyColumnChange" xml:space="preserve">
-    <value>Note: the constraints below are dropped and re-added around a column change that this database accepts only while the column has no values (a change of the type kind, or a lower precision or scale; old type → new type). If the column has data, the change fails, and because DDL is not rolled back, the dropped constraints stay dropped:
+    <value>Note: the constraints below are dropped before a column change that this database accepts only while the column has no values (a change of the type kind, or a lower precision or scale; old type → new type), and re-added after it unless the sync removes them. If the column has data, the change fails, and because DDL is not rolled back, the dropped constraints stay dropped:
+{0}</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirmConstraintRebuildAroundRowDependentChange" xml:space="preserve">
+    <value>Note: the constraints below are dropped before a statement that the rows already in the database can refuse (a new primary key or unique constraint on columns with duplicate or empty values, NOT NULL on a column that holds NULL, a shorter type than the values, a NOT NULL column added to a table that has rows, or a change to a column a computed column may use), and re-added after it unless the sync removes them. If the database refuses that statement, the sync stops there, and because DDL is not rolled back, the dropped constraints stay dropped:
 {0}</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmDefaultOnColumnTypeKindChange" xml:space="preserve">

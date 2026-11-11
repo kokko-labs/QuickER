@@ -396,7 +396,11 @@
 {0}</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmConstraintRebuildAroundEmptyColumnChange" xml:space="preserve">
-    <value>注意: 以下の制約は、列に値が無いときだけこのデータベースが受け付ける列の変更（型の種類の変更・精度やスケールを下げる変更。旧の型 → 新しい型）の前後で外して付け直します。列にデータがあると列の変更が失敗し、DDL が巻き戻らないので、外した制約は付け直されずに残ります:
+    <value>注意: 以下の制約は、列に値が無いときだけこのデータベースが受け付ける列の変更（型の種類の変更・精度やスケールを下げる変更。旧の型 → 新しい型）より前で外し、同期が消す制約でなければその後ろで付け直します。列にデータがあると列の変更が失敗し、DDL が巻き戻らないので、外した制約は外れたまま残ります:
+{0}</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirmConstraintRebuildAroundRowDependentChange" xml:space="preserve">
+    <value>注意: 以下の制約は、データベースにある行が断りうる文（重複や NULL のある列への主キー・一意制約、NULL のある列の NOT NULL 化、値より短い型への変更、行のある表への NOT NULL の列の追加、計算列が使いうる列の変更）より前で外し、同期が消す制約でなければその後ろで付け直します。データベースがその文を断ると同期はそこで止まり、DDL が巻き戻らないので、外した制約は外れたまま残ります:
 {0}</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmDefaultOnColumnTypeKindChange" xml:space="preserve">

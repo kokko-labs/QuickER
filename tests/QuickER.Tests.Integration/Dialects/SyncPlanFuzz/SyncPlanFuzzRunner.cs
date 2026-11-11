@@ -336,7 +336,8 @@ internal static class SyncPlanFuzzRunner
             before.Relationships,
             selected,
             plan,
-            capabilities
+            capabilities,
+            liveSchema.DataFailures
         );
 
         // 静的な規則のうち DB に依らない規則（警告の正しさ W1・前寄せ M1・新しい外部キーの追加と付け直しの並び）の違反は、実 DB の
@@ -381,7 +382,14 @@ internal static class SyncPlanFuzzRunner
         // 表明 1: 失敗するなら事前に警告が出ている（ケースが宣言した、既存の行で断られる文そのものの失敗は除く）
         if (!result.Committed)
         {
-            if (plan.Warnings.Count == 0 && !IsDeclaredDataFailure(result, liveSchema.DataFailures))
+            if (
+                plan.Warnings.Count == 0
+                && !IsDeclaredDataFailure(
+                    result,
+                    liveSchema.DataFailures,
+                    statementwise: !capabilities.TransactionalDdl
+                )
+            )
             {
                 outcome.Violations.Add($"failed without a warning: {FirstLine(result.Error)}");
             }
@@ -616,15 +624,32 @@ internal static class SyncPlanFuzzRunner
     /// <summary>
     /// 失敗した実行の断られた文が、ケースが宣言した「既存の行で断られる文」（<see cref="FuzzLiveSchema.DataFailures"/>）のどれかか
     /// </summary>
+    /// <param name="result">実行の結果</param>
+    /// <param name="declared">ケースが宣言した文</param>
+    /// <param name="statementwise">
+    /// 文ごとに流す方言か（DDL を暗黙コミットする MySQL・Oracle）。真なら失敗したバッチの文で、偽ならエラー文で見る（SQL Server・
+    /// PostgreSQL は失敗したバッチの文を持たず、SQLite は失敗したバッチがスクリプト全体なので、文では見分けられない）
+    /// </param>
     /// <remarks>
-    /// 断られた文は、失敗したバッチの文（文ごとに流す方言＝MySQL・Oracle）か、それが無ければエラー文（スクリプトを 1 回で流す
-    /// 方言）で見る。外部キーの追加はその名前を（SQLite は再構築の後の外部キー違反の表を）、列の変更は表と列の名前を、文かエラー文が
-    /// 含むこと（大文字小文字を無視）。列の変更は文の中でしか見分けられないので、文の無い方言では一致させない。ほかの文の失敗まで
-    /// 表明 1 の外へ出さないため、名前の一致だけで決める（規則表 <see cref="SyncPlanFuzzOracleTests"/> の自己検査の行が固定する）。
+    /// <para>
+    /// 文で見るとき：文の形（外部キー・一意制約・主キーの追加、列の変更、列の追加）と、宣言の名前（外部キー・一意制約の名前、表と列の
+    /// 名前）を含むこと（大文字小文字を無視・識別子として区切られた語）。MySQL の列の変更は動的 SQL（<c>SET @sql = …</c> →
+    /// <c>PREPARE</c> → <c>EXECUTE</c>）で、断られるのは名前を持たない <c>EXECUTE</c> なので、その前の最後の <c>SET @sql</c> の文で見る。
+    /// </para>
+    /// <para>
+    /// エラー文で見るとき：断られた理由の語（重複・NULL・長さ・式の依存）と、宣言の名前（一意制約・主キー・外部キーの名前、表と列の
+    /// 名前）か、SQLite の再構築の表の列（<c>{表}_quicker_rebuild.{列}</c>）を含むこと。PostgreSQL の式の依存のエラー文は名前を
+    /// 持たないので、理由の語だけで見る。SQLite の外部キー違反は、違反した子の表がすべて宣言した追加の子の表であること。
+    /// </para>
+    /// <para>
+    /// ほかの文の失敗まで表明 1 の外へ出さないため、文の形・理由の語と名前の両方で決める（規則表 <see cref="SyncPlanFuzzOracleTests"/>
+    /// の自己検査の行が、名前だけが偶然一致する別の文の失敗を一致させないことも固定する）。
+    /// </para>
     /// </remarks>
     internal static bool IsDeclaredDataFailure(
         SchemaSyncResult result,
-        IReadOnlyCollection<FuzzDataFailure> declared
+        IReadOnlyCollection<FuzzDataFailure> declared,
+        bool statementwise
     )
     {
         if (result.Committed || declared.Count == 0)
@@ -632,12 +657,33 @@ internal static class SyncPlanFuzzRunner
             return false;
         }
 
-        var failed = result.Batches.FirstOrDefault(b => !b.Success);
-        var statement = failed?.Sql ?? string.Empty;
+        var failedIndex = result.Batches.FindIndex(b => !b.Success);
+        var failed = failedIndex < 0 ? null : result.Batches[failedIndex];
+        var statement = statementwise && failed is not null ? failed.Sql : string.Empty;
         var error = result.Error ?? failed?.Error ?? string.Empty;
 
-        // SQLite の実行器は再構築の後の外部キー違反を、違反した子の表の一覧で知らせる
-        const string violationTables = "Affected table(s):";
+        // MySQL の動的 SQL：名前を持つのは EXECUTE の前の最後の SET @sql の文
+        if (
+            statement.TrimStart().StartsWith("EXECUTE", StringComparison.OrdinalIgnoreCase)
+            || statement.TrimStart().StartsWith("PREPARE", StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            statement =
+                result
+                    .Batches.Take(failedIndex)
+                    .LastOrDefault(b =>
+                        b.Sql.TrimStart().StartsWith("SET @sql", StringComparison.OrdinalIgnoreCase)
+                    )
+                    ?.Sql
+                ?? statement;
+        }
+
+        // SQLite の実行器は再構築の後の外部キー違反を、違反した子の表の一覧で知らせる（文言は実行の UI カルチャの resx。表の一覧の
+        // 前までを書式から取る＝英語の固定文だと ja-JP の実行で一致しない）
+        var violationTables = QuickER
+            .Provider.Resources.Strings.Sync_Error_SqliteForeignKeyViolation.Split("{0}")[0]
+            .TrimEnd();
+
         if (error.Contains(violationTables, StringComparison.Ordinal))
         {
             var violated = error[
@@ -658,23 +704,88 @@ internal static class SyncPlanFuzzRunner
         }
 
         return declared.Any(d =>
+            statement.Length > 0 ? MatchesStatement(d, statement) : MatchesError(d, error)
+        );
+
+        // 文の形と宣言の名前
+        static bool MatchesStatement(FuzzDataFailure d, string statement) =>
             d.Kind switch
             {
-                FuzzDataFailureKind.AddForeignKey => statement.Length > 0
-                    ? Mentions(statement, d.Name)
-                        && statement.Contains("FOREIGN KEY", StringComparison.OrdinalIgnoreCase)
-                    : Mentions(error, d.Name),
-                FuzzDataFailureKind.AlterColumn => statement.Length > 0
-                    && !statement.Contains("FOREIGN KEY", StringComparison.OrdinalIgnoreCase)
-                    && (
-                        statement.Contains("MODIFY", StringComparison.OrdinalIgnoreCase)
-                        || statement.Contains("ALTER COLUMN", StringComparison.OrdinalIgnoreCase)
-                    )
+                FuzzDataFailureKind.AddForeignKey => Mentions(statement, d.Name)
+                    && Has(statement, "FOREIGN KEY"),
+                FuzzDataFailureKind.AlterColumn or FuzzDataFailureKind.AlterComputedSource => !Has(
+                    statement,
+                    "FOREIGN KEY"
+                )
+                    && (Has(statement, "MODIFY") || Has(statement, "ALTER COLUMN"))
+                    && Mentions(statement, d.Table)
+                    && Mentions(statement, d.Name),
+                FuzzDataFailureKind.AddUniqueConstraint => Has(statement, "UNIQUE")
+                    && !Has(statement, "DROP")
+                    && Mentions(statement, d.Name),
+                FuzzDataFailureKind.AddPrimaryKey => System.Text.RegularExpressions.Regex.IsMatch(
+                    statement,
+                    @"\bADD\s+(CONSTRAINT\s+\S+\s+)?PRIMARY\s+KEY\b",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                        | System.Text.RegularExpressions.RegexOptions.CultureInvariant
+                )
+                    && !Has(statement, "DROP")
+                    && Mentions(statement, d.Table),
+                FuzzDataFailureKind.AddColumn => Has(statement, "ADD")
+                    && !Has(statement, "CONSTRAINT")
+                    && !Has(statement, "MODIFY")
                     && Mentions(statement, d.Table)
                     && Mentions(statement, d.Name),
                 _ => false,
-            }
-        );
+            };
+
+        // 断られた理由の語と宣言の名前（SQLite は再構築の表の列）
+        static bool MatchesError(FuzzDataFailure d, string error) =>
+            d.Kind switch
+            {
+                FuzzDataFailureKind.AddForeignKey => Mentions(error, d.Name),
+                FuzzDataFailureKind.AddUniqueConstraint or FuzzDataFailureKind.AddPrimaryKey =>
+                    IsDuplicate(error)
+                        && (
+                            Mentions(error, d.Name)
+                            || d.Column is not null && Rebuilt(error, d.Table, d.Column)
+                        ),
+                FuzzDataFailureKind.AlterColumn or FuzzDataFailureKind.AddColumn => IsNullOrLength(
+                    error
+                )
+                    && (
+                        Mentions(error, d.Table) && Mentions(error, d.Name)
+                        || Rebuilt(error, d.Table, d.Name)
+                    )
+                    // 名前を持たないエラー文（PostgreSQL の長さ・SQLite の ADD COLUMN）は、その文の種類だけが出す文言で見る
+                    || d.Kind == FuzzDataFailureKind.AlterColumn
+                        && Has(error, "value too long for type")
+                    || d.Kind == FuzzDataFailureKind.AddColumn
+                        && Has(error, "Cannot add a NOT NULL column"),
+                FuzzDataFailureKind.AlterComputedSource => Has(error, "used by a generated column")
+                    || Has(error, "is dependent on column") && Mentions(error, d.Name),
+                _ => false,
+            };
+
+        static bool Has(string text, string word) =>
+            text.Contains(word, StringComparison.OrdinalIgnoreCase);
+
+        // 重複で断られた（SQL Server・PostgreSQL・SQLite の文言）
+        static bool IsDuplicate(string error) =>
+            Has(error, "duplicate")
+            || Has(error, "could not create unique index")
+            || Has(error, "UNIQUE constraint failed");
+
+        // NULL を含む・値が長すぎる・行のある表で断られた（SQL Server・PostgreSQL・SQLite の文言）
+        static bool IsNullOrLength(string error) =>
+            Has(error, "null")
+            || Has(error, "truncated")
+            || Has(error, "too long")
+            || Has(error, "non-empty");
+
+        // SQLite の再構築の表の列（エラー文は「{表}_quicker_rebuild.{列}」で名指しする）
+        static bool Rebuilt(string error, string table, string column) =>
+            Has(error, $"{table}_quicker_rebuild.{column}");
 
         // 識別子として名前を含む（引用符・括弧・空白・ドットで区切られた語として現れる）
         static bool Mentions(string text, string name) =>
@@ -891,6 +1002,9 @@ internal static class SyncPlanFuzzRunner
     /// <summary>列が空でないと通らない変更の警告が名指しした制約の消失を受け入れた注</summary>
     public const string WarnedEmptyColumnChangeNote = "warned-empty-column-change-exempt";
 
+    /// <summary>既存の行で断られうる文の警告が名指しした制約の消失を受け入れた注</summary>
+    public const string WarnedRowDependentChangeNote = "warned-row-dependent-change-exempt";
+
     /// <summary>
     /// 表明 1b：失敗した実行の後で取り込み直した DB について、同期の前にあった制約（外部キー・一意制約・主キー）のうち、
     /// 消えてよい理由の無いまま消えたものを違反の文にする。
@@ -978,30 +1092,14 @@ internal static class SyncPlanFuzzRunner
             })
             .ToHashSet(StringComparer.Ordinal);
 
-        // 列が空でないと通らない変更の前後で外して付け直すと名指しした制約（「表|制約名」。主キーの制約名は PRIMARY KEY）と、
-        // そのうち一意制約の照合キー（計画が外す一意制約の項目の名前で引く）
-        var emptyColumnWarnedNames = plan
-            .Warnings.Where(w =>
-                w.Kind == SyncPlanWarningKind.ConstraintRebuildAroundEmptyColumnChange
-            )
-            .Select(w =>
-            {
-                var open = w.Detail.IndexOf(" (", StringComparison.Ordinal);
-                var name = open < 0 ? w.Detail : w.Detail[..open];
-                return $"{w.TableName.Trim().ToLowerInvariant()}|{name.Trim().ToLowerInvariant()}";
-            })
-            .ToHashSet(StringComparer.Ordinal);
-        var emptyColumnWarned = plan
-            .Sections.Where(s => s.Kind == SchemaDiffKind.DropUniqueConstraint)
-            .SelectMany(s => s.Items)
-            .Where(i =>
-                emptyColumnWarnedNames.Contains(
-                    $"{i.TableName.Trim().ToLowerInvariant()}|{UniqueConstraintNaming.Resolve(i.UniqueConstraintName, i.TableName, i.UniqueConstraintColumns, capabilities.IdentifierLengthLimit).Trim().ToLowerInvariant()}"
-                )
-            )
-            .SelectMany(i => Keys(i, capabilities))
-            .Select(k => "UQ|" + string.Join('|', k.Split('|').Skip(1)))
-            .ToHashSet(StringComparer.Ordinal);
+        // 列が空でないと通らない変更・既存の行で断られうる文の前後で外して付け直すと名指しした制約（「表|制約名」。主キーの制約名は
+        // PRIMARY KEY）と、そのうち一意制約の照合キー（計画が外す一意制約の項目の名前で引く）
+        var (emptyColumnWarnedNames, emptyColumnWarned) = WarnedConstraints(
+            SyncPlanWarningKind.ConstraintRebuildAroundEmptyColumnChange
+        );
+        var (rowDependentWarnedNames, rowDependentWarned) = WarnedConstraints(
+            SyncPlanWarningKind.ConstraintRebuildAroundRowDependentChange
+        );
 
         foreach (var key in ConstraintKeys(before, capabilities))
         {
@@ -1045,9 +1143,17 @@ internal static class SyncPlanFuzzRunner
 
             // 列が空でないと通らない変更の前後で外して付け直すと名指しした制約（警告 ConstraintRebuildAroundEmptyColumnChange）は、
             // データの都合で列の変更が断られると外れたまま残る（docs の約束どおりの部分適用）。名指しした制約だけを受け入れる
-            if (emptyColumnWarned.Contains(key) || IsEmptyColumnWarned(key))
+            if (emptyColumnWarned.Contains(key) || IsNamed(key, emptyColumnWarnedNames))
             {
                 notes.Add(WarnedEmptyColumnChangeNote);
+                continue;
+            }
+
+            // 既存の行で断られうる文の前後で外して付け直すと名指しした制約（警告 ConstraintRebuildAroundRowDependentChange）も、
+            // データの都合でその文が断られると外れたまま残る（docs の約束どおりの部分適用）
+            if (rowDependentWarned.Contains(key) || IsNamed(key, rowDependentWarnedNames))
+            {
+                notes.Add(WarnedRowDependentChangeNote);
                 continue;
             }
 
@@ -1084,14 +1190,42 @@ internal static class SyncPlanFuzzRunner
 
         return (violations, notes);
 
-        // 外部キー（FK|子|親|列ペア|名前|参照アクション）・主キー（PK|表|列）が、列が空でないと通らない変更の警告で名指しされたか
-        bool IsEmptyColumnWarned(string key)
+        // 警告の種類が名指しした制約（「表|制約名」）と、そのうち計画が外す一意制約の照合キー
+        (HashSet<string> Names, HashSet<string> UniqueKeys) WarnedConstraints(
+            SyncPlanWarningKind kind
+        )
+        {
+            var names = plan
+                .Warnings.Where(w => w.Kind == kind)
+                .Select(w =>
+                {
+                    var open = w.Detail.IndexOf(" (", StringComparison.Ordinal);
+                    var name = open < 0 ? w.Detail : w.Detail[..open];
+                    return $"{w.TableName.Trim().ToLowerInvariant()}|{name.Trim().ToLowerInvariant()}";
+                })
+                .ToHashSet(StringComparer.Ordinal);
+            var uniqueKeys = plan
+                .Sections.Where(s => s.Kind == SchemaDiffKind.DropUniqueConstraint)
+                .SelectMany(s => s.Items)
+                .Where(i =>
+                    names.Contains(
+                        $"{i.TableName.Trim().ToLowerInvariant()}|{UniqueConstraintNaming.Resolve(i.UniqueConstraintName, i.TableName, i.UniqueConstraintColumns, capabilities.IdentifierLengthLimit).Trim().ToLowerInvariant()}"
+                    )
+                )
+                .SelectMany(i => Keys(i, capabilities))
+                .Select(k => "UQ|" + string.Join('|', k.Split('|').Skip(1)))
+                .ToHashSet(StringComparer.Ordinal);
+            return (names, uniqueKeys);
+        }
+
+        // 外部キー（FK|子|親|列ペア|名前|参照アクション）・主キー（PK|表|列）が、名指しの集合（「表|制約名」）に入るか
+        static bool IsNamed(string key, HashSet<string> names)
         {
             var parts = key.Split('|');
             return parts[0] switch
             {
-                "FK" => emptyColumnWarnedNames.Contains($"{parts[1]}|{parts[4]}"),
-                "PK" => emptyColumnWarnedNames.Contains($"{parts[1]}|primary key"),
+                "FK" => names.Contains($"{parts[1]}|{parts[4]}"),
+                "PK" => names.Contains($"{parts[1]}|primary key"),
                 _ => false,
             };
         }

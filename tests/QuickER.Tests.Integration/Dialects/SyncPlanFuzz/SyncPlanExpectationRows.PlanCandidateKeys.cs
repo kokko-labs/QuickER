@@ -244,7 +244,12 @@ internal static partial class SyncPlanExpectationRows
                 .Expect(e =>
                     AddedForeignKeyPairs(
                         e.Sections.Contains("AlterPrimaryKey*: *")
-                            .Warnings.Exact("ForeignKeyRebuildMayLoseCandidateKey*"),
+                            .Warnings.Exact(
+                                "ForeignKeyRebuildMayLoseCandidateKey*",
+                                // (a) は live のキー (a, b) を含まないので、行の重複で主キーの付与が断られうる
+                                "ConstraintRebuildAroundRowDependentChange(ref): FK_ref (PRIMARY KEY pair (a))",
+                                "ConstraintRebuildAroundRowDependentChange(pair): PRIMARY KEY (PRIMARY KEY pair (a))"
+                            ),
                         "FK_ref",
                         "a>ra,b>rb"
                     )

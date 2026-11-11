@@ -245,7 +245,7 @@ internal static partial class SyncPlanExpectationRows
                 ),
             Row(
                     "plan-alter-pk-new-pk-exactly-referenced-column-no-warning",
-                    "主キー変更: 新主キーが被参照列 1 列ちょうどなら警告は積まれない",
+                    "主キー変更: 新主キーが被参照列 1 列ちょうどなら候補キーの警告は積まれない（行で断られうる主キーの付与の名指しだけ）",
                     DialectNames.MySql
                 )
                 // live は複合主キー (id, code)・外部キーは customer.id を参照する（旧主キーの先頭の列だけを参照する
@@ -265,7 +265,14 @@ internal static partial class SyncPlanExpectationRows
                         ),
                     ]
                 )
-                .Expect(e => e.Warnings.Empty().Sections.Contains("AddForeignKey: *")),
+                // (id) は live のキー (id, code) を含まないので、行の重複で付与が断られうる（MySQL は DDL を暗黙コミットする）
+                .Expect(e =>
+                    e.Warnings.Exact(
+                            "ConstraintRebuildAroundRowDependentChange(orders): FK_orders_customer (PRIMARY KEY customer (id))",
+                            "ConstraintRebuildAroundRowDependentChange(customer): PRIMARY KEY (PRIMARY KEY customer (id))"
+                        )
+                        .Sections.Contains("AddForeignKey: *")
+                ),
             Row(
                     "plan-composite-fk-parent-pk-change-rebuilds-all-pairs",
                     "複合外部キー: 参照先テーブルの主キー変更は全構成列のまま計画へ入る",

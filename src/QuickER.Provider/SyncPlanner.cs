@@ -354,8 +354,14 @@ public sealed class SyncPlanner
                     excluded
                 );
 
-                // 列が空でないと通らない列の変更（Oracle の型の種類の変更・精度の縮小）の前で外し、後ろで付け直す制約を名指しする
-                WarnConstraintsAroundEmptyColumnChanges(sections, capabilities, context, warnings);
+                // 既存の行で断られうる文（列が空でないと通らない列の変更を含む）の前で外し、その文か後ろで付け直す制約を名指しする
+                WarnConstraintsAroundRefusableChanges(
+                    sections,
+                    beforeExpansion,
+                    capabilities,
+                    context,
+                    warnings
+                );
             }
 
             return new SyncPlan
@@ -2096,38 +2102,47 @@ public sealed class SyncPlanner
     }
 
     /// <summary>
-    /// 列が空でないと通らない列の変更（<see cref="SyncDialectCapabilities.RequiresEmptyColumn"/>）より前で外し、その後ろで付け直す制約を
-    /// <see cref="SyncPlanWarningKind.ConstraintRebuildAroundEmptyColumnChange"/> で名指しする（DDL が暗黙コミットされる方言）。
+    /// 既存の行で断られうる文より前で外し、その文か後ろで付け直す制約を名指しする（DDL が暗黙コミットされる方言）。列が空でないと通らない
+    /// 列の変更（<see cref="SyncDialectCapabilities.RequiresEmptyColumn"/>）は
+    /// <see cref="SyncPlanWarningKind.ConstraintRebuildAroundEmptyColumnChange"/>、ほかの断られうる文は
+    /// <see cref="SyncPlanWarningKind.ConstraintRebuildAroundRowDependentChange"/> で名指しする。
     /// </summary>
     /// <param name="sections">並べ終えたセクション（前寄せの後）</param>
     /// <param name="capabilities">方言のケーパビリティ</param>
-    /// <param name="context">live スキーマ（列の変更の前の型。無ければ名指ししない）</param>
+    /// <param name="context">live スキーマ（列の変更の前の型・キー。無ければ名指ししない）</param>
     /// <param name="warnings">警告の積み先</param>
     /// <remarks>
     /// <para>
-    /// 計画は列の値を見ないので、列に値があるとその変更が断られる（Oracle の ORA-01439・ORA-01440・ORA-30082）ことを止められない。
-    /// DDL が暗黙コミットされるので、それより前で外した制約は付け直されずに残る。外す理由（暗黙に外して付け直す外部キー・一意制約・主キー、
-    /// 主キーの変更の解除、選んだ作り直し）に依らず、文の並びで「列が空でないと通らない変更を挟んで外して付け直す」制約を全部名指しする。
-    /// 断られた時点で外れているのは、変更する列に関わる制約に限らない（主キーの変更の解除は主キー自体を、主キーの変更の外し直しは別の表の
-    /// 外部キーを外す）ので、どの制約がその変更を挟むかを文の並びで決める。
+    /// 計画は列の値を見ないので、値があると DB が文を断ることを止められない。DDL が暗黙コミットされるので、それより前で外した制約は
+    /// 付け直されずに残る。外す理由（暗黙に外して付け直す外部キー・一意制約・主キー、主キーの変更の解除、選んだ作り直し）に依らず、
+    /// 文の並びで「断られうる文を挟んで外して付け直す」制約を全部名指しする。断られた時点で外れているのは、変更する列に関わる制約に限らない
+    /// （主キーの変更の解除は主キー自体を、主キーの変更の外し直しは別の表の外部キーを外す）ので、どの制約がその文を挟むかを文の並びで決める。
+    /// 断られうる文そのものが付け直す制約（作り直す一意制約・主キーの変更の主キー）も、その文が断られると外れたまま残るので名指しする
+    /// （列が空でないと通らない変更は列の変更なので、付け直しの文にはならない）。
     /// </para>
     /// <para>
-    /// 外して付け直さない制約（利用者が選んだ削除）は数えない。付け直しの対応は外部キーが子の表と名前、一意制約が表と名前、主キーが表で取る。
-    /// Detail は「制約名 (表.列: 旧の型 → 新しい型, …)」で、挟む列の変更を並べる（主キーの制約名は <c>PRIMARY KEY</c>）。
+    /// 断られうる文（<see cref="RowDependentChanges"/>）は、主キーの付与・一意制約の追加（作り直しの追加を含む）・NULL を許す列の NOT NULL 化
+    /// （主キーの変更が足す NOT NULL 化を含む）・型を狭める列の変更（<see cref="NarrowsType"/>）・既定値の無い NOT NULL の列の追加
+    /// （<see cref="SyncDialectCapabilities.AddNotNullColumnRequiresEmptyTable"/>）・DB に計算列のある表の普通の列の変更
+    /// （<see cref="SyncDialectCapabilities.AlterColumnBlockedByComputedColumn"/>）。同じ文が列が空でないと通らない変更にも当たるときは、
+    /// 列が空でないと通らない変更だけに数える。
+    /// </para>
+    /// <para>
+    /// 計画が付け直さずに外す暗黙の削除（端が消える外部キー・構成列が消える一意制約・主キーが置き換える一意制約）も、後ろの断られうる文で
+    /// 止まると、消すはずの表・列や置き換える主キーが来ないまま外れて残るので名指しする。利用者が選んだ削除は消えてよいので数えない。
+    /// 付け直しの対応は外部キーが子の表と名前、一意制約が表と名前、主キーが表で取る。
+    /// Detail は「制約名 (挟む文, …)」（主キーの制約名は <c>PRIMARY KEY</c>）。
     /// </para>
     /// </remarks>
-    private static void WarnConstraintsAroundEmptyColumnChanges(
+    private static void WarnConstraintsAroundRefusableChanges(
         List<SyncPlanSection> sections,
+        IReadOnlyCollection<SchemaDiffItem> userSelected,
         SyncDialectCapabilities capabilities,
         SyncPlanContext? context,
         List<SyncPlanWarning> warnings
     )
     {
-        if (
-            context is null
-            || !capabilities.TypeKindChangeRequiresEmptyColumn
-                && !capabilities.PrecisionDecreaseRequiresEmptyColumn
-        )
+        if (context is null)
         {
             return;
         }
@@ -2170,7 +2185,17 @@ public sealed class SyncPlanner
             }
         }
 
-        if (emptyColumnChanges.Count == 0)
+        var emptyIndexes = emptyColumnChanges.Select(c => c.Index).ToHashSet();
+        var rowDependentChanges = RowDependentChanges(
+                steps,
+                liveByName,
+                typeDecidingColumns,
+                capabilities
+            )
+            .Where(c => !emptyIndexes.Contains(c.Index))
+            .ToList();
+
+        if (emptyColumnChanges.Count == 0 && rowDependentChanges.Count == 0)
         {
             return;
         }
@@ -2189,24 +2214,55 @@ public sealed class SyncPlanner
 
             if (readd < 0)
             {
+                // 付け直さない暗黙の削除（消える端の外部キー・消える構成列の一意制約・主キーが置き換える一意制約）は、後ろの表・列の
+                // 削除や主キーの付与が来る前に断られうる文で止まると、外したまま残る。利用者が選んだ削除は消えてよいので数えない
+                if (!userSelected.Contains(steps[drop].Item, ReferenceEqualityComparer.Instance))
+                {
+                    Add(
+                        SyncPlanWarningKind.ConstraintRebuildAroundEmptyColumnChange,
+                        identity,
+                        emptyColumnChanges.Where(c => c.Index > drop)
+                    );
+                    Add(
+                        SyncPlanWarningKind.ConstraintRebuildAroundRowDependentChange,
+                        identity,
+                        rowDependentChanges.Where(c => c.Index > drop)
+                    );
+                }
+
                 continue;
             }
 
-            var between = emptyColumnChanges
-                .Where(c => c.Index > drop && c.Index < readd)
-                .Select(c => c.Text)
-                .Distinct(StringComparer.Ordinal)
-                .ToList();
+            Add(
+                SyncPlanWarningKind.ConstraintRebuildAroundEmptyColumnChange,
+                identity,
+                emptyColumnChanges.Where(c => c.Index > drop && c.Index < readd)
+            );
+            Add(
+                SyncPlanWarningKind.ConstraintRebuildAroundRowDependentChange,
+                identity,
+                rowDependentChanges.Where(c => c.Index > drop && c.Index <= readd)
+            );
+        }
 
-            if (between.Count == 0)
+        // 挟む文があれば、制約ごとに 1 件の警告を積む
+        void Add(
+            SyncPlanWarningKind kind,
+            (string Key, string Table, string Name) identity,
+            IEnumerable<(int Index, string Text)> between
+        )
+        {
+            var texts = between.Select(c => c.Text).Distinct(StringComparer.Ordinal).ToList();
+
+            if (texts.Count == 0)
             {
-                continue;
+                return;
             }
 
             var warning = new SyncPlanWarning(
-                SyncPlanWarningKind.ConstraintRebuildAroundEmptyColumnChange,
+                kind,
                 identity.Table,
-                $"{identity.Name} ({string.Join(", ", between)})"
+                $"{identity.Name} ({string.Join(", ", texts)})"
             );
 
             if (!warnings.Contains(warning))
@@ -2268,6 +2324,158 @@ public sealed class SyncPlanner
                 default:
                     return null;
             }
+        }
+    }
+
+    /// <summary>既存の行（とモデルの外の依存）で断られうる文の位置と文面（列が空でないと通らない変更を含めて数える）</summary>
+    /// <param name="steps">並べ終えた計画の文</param>
+    /// <param name="liveByName">live の表</param>
+    /// <param name="typeDecidingColumns">この同期で型が決まる列（<see cref="CollectTypeDecidingColumns"/>）</param>
+    /// <param name="capabilities">方言のケーパビリティ</param>
+    /// <remarks>
+    /// <para>
+    /// 主キーの付与と一意制約の追加は、新しい列集合が live の主キーか一意制約の列集合を含み、その列がどれも live にあって型を変えないと
+    /// きだけ断られないと証明できる（含む列集合の値の組は、含まれる側が一意なので一意。NULL を含む組は一意制約が通し、主キーは列を NOT NULL に
+    /// する文が先に来る＝主キーの変更が新しい主キーの列を NOT NULL にする）。主キーの並べ替えはこの形で名指ししない。
+    /// 同じ計画でその live のキーを外していても証明に使う：計画は表の値を変えないので、同期を始めた時点で一意だった値の組は、キーを外した後も
+    /// 一意のまま（型を変える列は値が変わりうるので除く）。証明できないものは断られうる文とみなす（保守側）。
+    /// </para>
+    /// <para>
+    /// 列の変更は、NULL を許す列の NOT NULL 化・型を狭める変更（<see cref="SyncDialectCapabilities.NarrowsType"/>）・
+    /// <see cref="SyncDialectCapabilities.AlterColumnBlockedByComputedColumn"/> の方言で DB に計算列のある表の普通の列の変更（式がどの列を
+    /// 参照するかは図に無いので表の単位で数える）。列の追加は、<see cref="SyncDialectCapabilities.AddNotNullColumnRequiresEmptyTable"/> の方言の
+    /// NOT NULL の列（図は既定値を持たない）。
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<(int Index, string Text)> RowDependentChanges(
+        List<(SyncPlanSection Section, SchemaDiffItem Item)> steps,
+        NameLookup<Entity> liveByName,
+        Dictionary<string, string> typeDecidingColumns,
+        SyncDialectCapabilities capabilities
+    )
+    {
+        for (var index = 0; index < steps.Count; index++)
+        {
+            var (section, item) = steps[index];
+            var table = SchemaNames.ToStoredForm(item.TableName);
+            var liveTable = liveByName.TryGet(table, out var found) ? found : null;
+
+            switch (section.Kind)
+            {
+                case SchemaDiffKind.AlterPrimaryKey
+                    when section.PrimaryKeyPhase == PrimaryKeyPhase.Add:
+                {
+                    var key =
+                        item.Entity?.GetPrimaryKeyColumnsInOrder().Select(c => c.Name).ToList()
+                        ?? [];
+
+                    if (
+                        key.Count > 0
+                        && !HoldsInLiveRows(liveTable, table, key, typeDecidingColumns)
+                    )
+                    {
+                        yield return (index, $"PRIMARY KEY {table} ({string.Join(", ", key)})");
+                    }
+
+                    break;
+                }
+                case SchemaDiffKind.AddUniqueConstraint:
+                {
+                    var columns = item.UniqueConstraintColumns;
+
+                    if (
+                        columns.Count > 0
+                        && !HoldsInLiveRows(liveTable, table, columns, typeDecidingColumns)
+                    )
+                    {
+                        yield return (index, $"UNIQUE {table} ({string.Join(", ", columns)})");
+                    }
+
+                    break;
+                }
+                case SchemaDiffKind.AddColumn
+                    when capabilities.AddNotNullColumnRequiresEmptyTable
+                        && item.Column is { } added
+                        && !ColumnNullability.AllowsNull(added):
+                    yield return (index, $"{table}.{added.Name}: ADD NOT NULL");
+                    break;
+                case SchemaDiffKind.AlterColumn
+                    when item.Column is { } target
+                        && item.ColumnName is { } columnName
+                        && liveTable?.Columns.FirstOrDefault(c =>
+                            SchemaNames.AreSame(c.Name, columnName)
+                        )
+                            is { } liveColumn:
+                {
+                    var typeDecided = typeDecidingColumns.TryGetValue(
+                        ColumnKey(table, columnName),
+                        out var newType
+                    );
+                    var typeText = typeDecided
+                        ? $"{table}.{columnName}: {liveColumn.DataType} → {newType}"
+                        : null;
+
+                    if (
+                        ColumnNullability.AllowsNull(liveColumn)
+                        && !ColumnNullability.AllowsNull(target)
+                    )
+                    {
+                        yield return (index, $"{table}.{columnName}: NOT NULL");
+                    }
+                    else if (typeDecided && capabilities.NarrowsType(liveColumn.DataType, newType))
+                    {
+                        yield return (index, typeText!);
+                    }
+                    else if (
+                        capabilities.AlterColumnBlockedByComputedColumn
+                        && !liveColumn.IsComputed
+                        && liveTable.Columns.Any(c => c.IsComputed)
+                    )
+                    {
+                        yield return (
+                            index,
+                            typeText
+                                ?? $"{table}.{columnName}: {(ColumnNullability.AllowsNull(target) ? "NULL" : "NOT NULL")}"
+                        );
+                    }
+
+                    break;
+                }
+            }
+        }
+
+        // 列集合が live のキー（主キー・一意制約）の列集合を含み、その列がどれも live にあって型を変えないか
+        static bool HoldsInLiveRows(
+            Entity? liveTable,
+            string table,
+            IReadOnlyList<string> columns,
+            Dictionary<string, string> typeDecidingColumns
+        )
+        {
+            if (
+                liveTable is null
+                || columns.Any(c =>
+                    !liveTable.Columns.Any(l => SchemaNames.AreSame(l.Name, c))
+                    || typeDecidingColumns.ContainsKey(ColumnKey(table, c))
+                )
+            )
+            {
+                return false;
+            }
+
+            var set = columns.Select(SchemaNames.Key).ToHashSet(StringComparer.Ordinal);
+            var namesById = liveTable.Columns.ToDictionary(c => c.Id, c => SchemaNames.Key(c.Name));
+            IEnumerable<IReadOnlyList<string>> keys =
+            [
+                [.. liveTable.GetPrimaryKeyColumnsInOrder().Select(c => SchemaNames.Key(c.Name))],
+                .. liveTable
+                    .UniqueConstraints.Where(u => u.ColumnIds.All(namesById.ContainsKey))
+                    .Select(u =>
+                        (IReadOnlyList<string>)[.. u.ColumnIds.Select(id => namesById[id])]
+                    ),
+            ];
+
+            return keys.Any(key => key.Count > 0 && key.All(set.Contains));
         }
     }
 

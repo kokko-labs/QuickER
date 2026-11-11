@@ -44,40 +44,11 @@ internal static class SyncPlanFuzzNotGenerated
                     "差分（SchemaDiffService）と計画（SyncPlanner）は採番列で分岐しない。採番列で分岐するのは DDL・同期スクリプトの注記で、方言の DDL の表が受け持つ",
                     "`Dialect/DdlText`（行 `sync-*-identity-column-*`）"
                 ),
-                NotGenerated.Pending(
-                    "set-null-child-not-null",
-                    "SET NULL の外部キーの子の列を NOT NULL にする（列の変更・主キーへの追加）",
-                    "G1a",
-                    "生成器は SET NULL の外部キーの子の列を NOT NULL の対象から外す（DB が断るため）。製品はこの形を警告・除外するように作ってあり、DB が断ることは作らない理由にならない",
-                    Expectations + " の行 `plan-set-null-*`"
-                ),
-                NotGenerated.Pending(
-                    "set-default-not-null-child",
-                    "SET DEFAULT の外部キーで子の列が NOT NULL の組（SQL Server を含む）",
-                    "G1a",
-                    "SET DEFAULT は NULL を許す子の列にだけ作る（SQL Server は手で書いた網羅の行だけ）。計画は子が NOT NULL の SET DEFAULT を警告で分岐する",
-                    "`SyncPlan/Fuzz`・" + Expectations + " の行 `plan-set-default-*`"
-                ),
                 NotGenerated.Accepted(
                     "sqlserver-referential-actions",
                     "SQL Server の CASCADE・SET NULL・SET DEFAULT の外部キーと参照アクションの変更",
                     "SQL Server は循環・複数経路の連鎖を CREATE で断り、生成器は連鎖を避ける作り方を持たないので NO ACTION だけを使う（SyncPlanFuzzDialect.AllowCascade）。参照アクションの変更は、独立した親子に手で書いた網羅の行が選び方 5 通りで受け持つ",
                     "`SyncPlan/Fuzz`（手で書いた SQL Server の参照アクションの網羅の行）"
-                ),
-                NotGenerated.Pending(
-                    "db-rejected-by-existing-rows",
-                    "既存の行で DB が断る文（重複のある列への一意制約・主キー、NULL のある列の NOT NULL 化、データより短い長さ、行のある表への NOT NULL の列の追加、計算列の式が参照する列の変更）",
-                    "G1a",
-                    "生成器は失敗が DB の都合だけの変更を作らない。断られる文の後ろで外した制約の付け直しが走らない形（外部キーの追加で実際に起きた欠陥と同じ形）が、主キーの付与・一意制約の追加の段に残る疑いがある（未確認）",
-                    Expectations
-                        + " の行 `realdb-rebuild-not-null-with-existing-null-rolls-back` / `realdb-pg-column-shorten-never-truncates` / `realdb-oracle-column-alter-non-empty-to-number-fails`"
-                ),
-                NotGenerated.Pending(
-                    "null-data-in-plain-columns",
-                    "NULL を含む普通の列のデータ",
-                    "G1a",
-                    "データの値はいつも NULL でない（NULL は親が 0 行の外部キーと自己参照の 1 行目だけ）。NULL のある列の NOT NULL 化（db-rejected-by-existing-rows）の入力になる",
-                    NotGenerated.Unguarded
                 ),
                 NotGenerated.Pending(
                     "table-without-primary-key",

@@ -611,5 +611,70 @@ internal static partial class SourceRuleProbes
                     ),
                 ]
             ),
+            // ADO.NET のコマンドの ExecuteNonQuery / ExecuteNonQueryAsync をシンボルで拾う（SqliteCommand・DbCommand・IDbCommand の
+            // どの静的な型の受け手でも）。拾わないのは、結果を読み切る ExecuteReader(Async)・ExecuteScalar・コマンドでない型の同じ名前の
+            // メソッド
+            new SourceRuleProbe(
+                "sqlite-script-executions-forms",
+                "sqlite-script-executions",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System.Data;
+                        using System.Data.Common;
+                        using System.Threading.Tasks;
+                        using Microsoft.Data.Sqlite;
+
+                        internal sealed class Runner
+                        {
+                            public int ExecuteNonQuery() => 0;
+                        }
+
+                        internal static class Probe
+                        {
+                            public static async Task Run(SqliteCommand a, DbCommand b, IDbCommand c, Runner r)
+                            {
+                                a.ExecuteNonQuery();
+                                await b.ExecuteNonQueryAsync();
+                                c.ExecuteNonQuery();
+                                await using var reader = await b.ExecuteReaderAsync();
+                                a.ExecuteScalar();
+                                r.ExecuteNonQuery();
+                            }
+                        }
+                        """,
+                        "ExecuteNonQuery",
+                        "ExecuteNonQuery",
+                        "ExecuteNonQuery"
+                    ),
+                ]
+            ),
+            // シンボルの規則は、条件コンパイルの外れる分岐の中も変種のコンパイルで読む
+            new SourceRuleProbe(
+                "sqlite-script-executions-inactive-branch",
+                "sqlite-script-executions",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using Microsoft.Data.Sqlite;
+
+                        internal static class Probe
+                        {
+                            public static void Run(SqliteCommand command)
+                            {
+                        #if QUICKER_PROBE_BRANCH
+                                command.ExecuteNonQuery();
+                        #else
+                                command.ExecuteReader().Dispose();
+                        #endif
+                            }
+                        }
+                        """,
+                        "ExecuteNonQuery"
+                    ),
+                ]
+            ),
         ];
 }

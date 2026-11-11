@@ -63,6 +63,10 @@
 - 外部キー違反とビューの破損を同期の前後で比べ、増えたときだけ失敗にする。DB 全体の結果で判定すると、既存の孤児行や壊れたビュー（CREATE VIEW は参照先を検証しない）で無関係な同期まで失敗する。
   - 比べる単位は、外部キー違反が（子表, 親表）ごとの件数、ビューが名前。外部キーの検査は `foreign_key_check` を実行側で行い、PRAGMA はトランザクションの外で流す。
 - 実行器はトランザクションの前に `foreign_keys=OFF` と `legacy_alter_table=ON` を流し、元へ戻さない。接続はプールしない（「ファイルを掴まない接続」）ので、切り替えた PRAGMA は接続を閉じると一緒に消え、後から開いた接続へ残らない。
+- 実行器はスクリプトを 1 回のコマンドで流し、結果を最後まで読み切る（`SqliteScripts.RunToEndAsync`＝`ExecuteReaderAsync` の後に `NextResultAsync` を最後まで）。QuickER 自身が SQLite で結果を読まない文（DDL・PRAGMA）を実行するのは、この 1 か所だけ（取込などの問い合わせは `ExecuteReader` で読む）。
+  - Microsoft.Data.Sqlite の `ExecuteNonQuery` は、行の無い表への `ADD COLUMN … NOT NULL`（SQLite は行があれば断る検査の問い合わせを文の中に持つ）の後ろの文が断られると、例外を出さずにその文から後ろを実行しない。実行器はトランザクションの中で、断られた文の前までをコミットし、後ろの文（外部キーの検査を含む）を黙って飛ばしていた。読み切ると、断られた文の例外が届いてスクリプト全体を巻き戻す。
+  - スクリプトが複数の文かは静的に見分けられないので、1 文でも部品を通す。
+  - ガード：`SourceRuleTests` の規則 `sqlite-script-executions`（QuickER.Provider.Sqlite・Db.UI・Cli・Gui の `ExecuteNonQuery(Async)` の呼び出しを断る。自己検査の行 `sqlite-script-executions-forms`・`sqlite-script-executions-inactive-branch`）・実 SQLite の期待の行 `realdb-sqlite-script-refused-statement-after-not-null-add-rolls-back`・同期計画の総当たりの行の水準（行のある表への NOT NULL の列の追加。本流の生成器が行の無い表へ NOT NULL の列を足す）。mutation 実証済み（読み切りを `ExecuteNonQueryAsync` へ戻すと、期待の行と総当たりの種が赤）。
 - 固定は実 SQLite の期待の行（ビューの `realdb-rebuild-with-dependent-view-succeeds`／`realdb-rebuild-breaking-view-rolls-back`・既存の違反の `realdb-existing-fk-violations-unrelated-add-column-succeeds`・`realdb-existing-fk-violations-child-rebuild-succeeds`・`realdb-existing-fk-violations-new-violation-fails`）。PRAGMA が残らないことは、接続をプールしないことの規則（`SourceRuleTests` の規則 `sqlite-file-connection-creations`・`sqlite-file-connection-pooling-off`）が守る。mutation 実証済み。
 
 ## ファイルを掴まない接続

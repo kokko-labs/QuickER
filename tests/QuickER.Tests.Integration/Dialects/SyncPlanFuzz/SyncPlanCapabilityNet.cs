@@ -48,6 +48,8 @@ internal static class SyncPlanCapabilityNetDimensions
         nameof(SyncDialectCapabilities.ChecksDefaultOnColumnTypeChange),
         nameof(SyncDialectCapabilities.TypeKindChangeRequiresEmptyColumn),
         nameof(SyncDialectCapabilities.PrecisionDecreaseRequiresEmptyColumn),
+        nameof(SyncDialectCapabilities.AddNotNullColumnRequiresEmptyTable),
+        nameof(SyncDialectCapabilities.AlterColumnBlockedByComputedColumn),
         nameof(SyncDialectCapabilities.SupportsComputedColumnTypeChange),
         nameof(SyncDialectCapabilities.SupportsUniqueConstraintOnPrimaryKey),
         nameof(SyncDialectCapabilities.ReferencedKeyRequiresSameColumnOrder),
@@ -78,6 +80,8 @@ internal static class SyncPlanCapabilityNetDimensions
         ("ChecksDefaultOnColumnTypeChange", ["True", "True", "True", "True", "False"]),
         ("TypeKindChangeRequiresEmptyColumn", ["False", "False", "False", "True", "False"]),
         ("PrecisionDecreaseRequiresEmptyColumn", ["False", "False", "False", "True", "False"]),
+        ("AddNotNullColumnRequiresEmptyTable", ["True", "True", "False", "True", "True"]),
+        ("AlterColumnBlockedByComputedColumn", ["True", "True", "False", "True", "False"]),
         ("SupportsComputedColumnTypeChange", ["False", "True", "True", "False", "False"]),
         ("SupportsUniqueConstraintOnPrimaryKey", ["True", "True", "True", "False", "False"]),
         ("ReferencedKeyRequiresSameColumnOrder", ["True", "False", "True", "False", "False"]),
@@ -500,7 +504,8 @@ internal static class SyncPlanCapabilityNetRunner
             before.Relationships,
             selected,
             plan,
-            capabilities
+            capabilities,
+            live.DataFailures
         );
         outcome.Violations.AddRange(verdict.Violations);
         outcome.Violations.AddRange(
