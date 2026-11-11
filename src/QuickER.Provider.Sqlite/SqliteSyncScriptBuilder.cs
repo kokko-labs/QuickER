@@ -167,6 +167,11 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
         // データ移送（live と合成後の両方に存在する列のみ・型変更は SQLite の型親和性で変換される）
         if (rebuild.CopyColumns.Count > 0)
         {
+            if (rebuild.RowidAliasNullGuardColumn is { } guarded)
+            {
+                AppendRowidAliasNullGuard(sb, table, guarded);
+            }
+
             var cols = string.Join(", ", rebuild.CopyColumns.Select(SqliteIdentifier.QuoteSimple));
             sb.AppendLine(
                 $"INSERT INTO {quotedTemp} ({cols}) SELECT {cols} FROM {SqliteIdentifier.Quote(table)};"
@@ -204,6 +209,43 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
         }
 
         sb.AppendLine();
+    }
+
+    /// <summary>移送の前に NULL を断るガードの一時表の名前（固定）</summary>
+    public const string RowidAliasNullGuardTable = "quicker_rowid_null_guard";
+
+    /// <summary>
+    /// rowid の別名になる写す列（<see cref="TableRebuildPlan.RowidAliasNullGuardColumn"/>）の NULL を、移送の前に断る文を書き出す
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 別名の列は NOT NULL を宣言しても NULL を断らず採番の値へ置き換えるので、新しい表の制約・CHECK では止められない（BEFORE INSERT
+    /// のトリガーの <c>NEW</c> も別名の列では -1 になり、SQLite の文書は未定義とする）。代わりに、一時表の NOT NULL の列へ NULL の行を
+    /// 1 件だけ入れて断らせる。SQLite のエラー文は「NOT NULL constraint failed: quicker_rowid_null_guard.{表}.{列}」になり、どの表の
+    /// どの列かが読める（列の名前は {表}.{列} を 1 つの識別子として引用する）。INSERT と DROP は <c>temp.</c> で修飾し、同じ名前の利用者の表を指さない。
+    /// </para>
+    /// <para>
+    /// 成功の経路は DROP で一時表を消す。失敗の経路は、実行器のトランザクションの巻き戻しが一時表の作成も取り消す（手で流すときも、
+    /// 断られた後に巻き戻せば残らない）。元の表は移送の文の <c>FROM</c> と同じくスキーマ修飾の分け方で引用する。
+    /// </para>
+    /// </remarks>
+    private static void AppendRowidAliasNullGuard(StringBuilder sb, string table, string column)
+    {
+        var guardColumn = SqliteIdentifier.QuoteSimple(table + "." + column);
+        var source = SqliteIdentifier.QuoteSimple(column);
+
+        // 見出し（固定文は英語が正本）。名前は自由入力なので改行・制御文字を畳んでから載せる
+        sb.AppendLine(
+            $"-- Check: \"{SqlComment.Sanitize(table)}\".\"{SqlComment.Sanitize(column)}\" becomes a rowid alias (a single-column INTEGER primary key), "
+                + "which would replace NULL with a new row number; the sync fails if any row holds NULL"
+        );
+        sb.AppendLine(
+            $"CREATE TEMP TABLE {SqliteIdentifier.QuoteSimple(RowidAliasNullGuardTable)} ({guardColumn} NOT NULL);"
+        );
+        sb.AppendLine(
+            $"INSERT INTO temp.{SqliteIdentifier.QuoteSimple(RowidAliasNullGuardTable)} SELECT {source} FROM {SqliteIdentifier.Quote(table)} WHERE {source} IS NULL LIMIT 1;"
+        );
+        sb.AppendLine($"DROP TABLE temp.{SqliteIdentifier.QuoteSimple(RowidAliasNullGuardTable)};");
     }
 
     /// <summary>

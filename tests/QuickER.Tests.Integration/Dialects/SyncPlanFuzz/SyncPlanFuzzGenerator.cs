@@ -94,6 +94,12 @@ internal static class FuzzShape
     /// <summary>NULL を含む列の NOT NULL 化か主キーへの追加（後から足した行の水準）</summary>
     public const string NullData = "null-data";
 
+    /// <summary>
+    /// NULL を含む列 1 つへの主キーの移動（後から足した行の水準 <see cref="NullData"/> の 3 つ目の選択肢。SQLite の整数の列では
+    /// 新しい主キーが rowid の別名になる）
+    /// </summary>
+    public const string NullDataKeyMove = "null-data-key-move";
+
     /// <summary>データより短い長さへの文字列の列の縮小（後から足した行の水準）</summary>
     public const string ShortenBelowData = "shorten-below-data";
 
@@ -139,6 +145,7 @@ internal static class FuzzShape
         LongDefaultName,
         DuplicateData,
         NullData,
+        NullDataKeyMove,
         ShortenBelowData,
         NotNullAddOnRows,
         ComputedSourceChange,
@@ -191,6 +198,7 @@ internal static class FuzzShape
                     or DiagramOnlyComputed
                     or DuplicateData
                     or NullData
+                    or NullDataKeyMove
                     or ShortenBelowData
                     or NotNullAddOnRows
                     or ComputedSourceChange => !realDatabase,
@@ -402,6 +410,7 @@ internal sealed class SyncPlanFuzzGenerator(
     Random? levelRng,
     Random? dataLevelRng,
     Random? rowLevelRng,
+    Random? nullKeyMoveRng,
     SyncPlanFuzzDialect dialect
 ) : ISyncPlanFuzzCase
 {
@@ -428,6 +437,7 @@ internal sealed class SyncPlanFuzzGenerator(
             levels ? new Random(LevelSeed(seed)) : null,
             levels ? new Random(DataLevelSeed(seed)) : null,
             levels ? new Random(RowLevelSeed(seed)) : null,
+            levels ? new Random(NullKeyMoveSeed(seed)) : null,
             dialect
         );
 
@@ -453,6 +463,16 @@ internal sealed class SyncPlanFuzzGenerator(
     /// </remarks>
     private static int RowLevelSeed(int seed) =>
         (int)(unchecked((uint)DataLevelSeed(seed) * 3266489917u) ^ 0x0A0B1EEu) & int.MaxValue;
+
+    /// <summary>
+    /// NULL の行の水準で、主キーをその列 1 つへ移すかを引く乱数の列の種（<see cref="RowLevelSeed"/> から決定的に作る）
+    /// </summary>
+    /// <remarks>
+    /// NULL の行の水準を引いた種でだけ 1 回引く。別の列にして、<see cref="RowLevelSeed"/> の列の引き方を変えない（移さない種は
+    /// 足す前と同じケースのまま残り、種の指紋は移した種だけ変わる）。
+    /// </remarks>
+    private static int NullKeyMoveSeed(int seed) =>
+        (int)(unchecked((uint)RowLevelSeed(seed) * 2654435769u) ^ 0x4E11C3Eu) & int.MaxValue;
 
     /// <summary>行の水準（<see cref="RowLevelSeed"/> の列で 1 回だけ引く）</summary>
     private enum RowLevel
@@ -1507,7 +1527,7 @@ internal sealed class SyncPlanFuzzGenerator(
         live.Shapes.Add(FuzzShape.DuplicateData);
     }
 
-    /// <summary>NULL を含む列を NOT NULL にする・主キーへ足す（<see cref="ApplyRowLevel"/>）</summary>
+    /// <summary>NULL を含む列を NOT NULL にする・主キーへ足す・主キーをその列へ移す（<see cref="ApplyRowLevel"/>）</summary>
     private void ApplyNullData(
         Entity entity,
         Column column,
@@ -1528,7 +1548,19 @@ internal sealed class SyncPlanFuzzGenerator(
         var table = entity.TableName;
         var key = entity.GetPrimaryKeyColumnsInOrder();
 
-        if (key.Count > 0 && rowLevelRng!.Next(2) == 0)
+        var extend = key.Count > 0 && rowLevelRng!.Next(2) == 0;
+
+        // 3 つ目の選択肢は別の乱数の列で引く（NullKeyMoveSeed）：主キーをその列 1 つへ移す。SQLite で整数の列なら新しい主キーが
+        // rowid の別名（宣言の型 INTEGER の単一列）になる形で、ほかの方言・型では主キーへ足す形と同じく NOT NULL 化が断られる
+        if (nullKeyMoveRng is not null && nullKeyMoveRng.Next(3) == 0)
+        {
+            SetPrimaryKey(entity, [column]);
+            Mutations.Add(
+                $"move pk {table} -> {column.Name}{ReferencingTag(entity, relationships)}"
+            );
+            live.Shapes.Add(FuzzShape.NullDataKeyMove);
+        }
+        else if (extend)
         {
             SetPrimaryKey(entity, [.. key, column]);
             Mutations.Add(

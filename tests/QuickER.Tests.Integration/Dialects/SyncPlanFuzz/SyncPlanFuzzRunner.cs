@@ -128,7 +128,8 @@ internal sealed class FuzzSeedOutcome
 /// <item>DB 側の列の属性（型・NULL 許容・計算列か・主キーの構成と順序）は、選んだ項目が述べた変更以外は変わらない
 /// （型＝選んだ AlterColumn が型の変更を述べている・NULL 許容＝選んだ AlterColumn が NULL 許容の変更を述べているか、
 /// 選んだ主キーの変更の新しい主キー列・計算列か＝再構築の喪失の警告がその表に出ている・主キー＝選んだ主キーの変更）。</item>
-/// <item>残った表の行数は変わらない。取込の警告の種類（種別と表）は増えない。</item>
+/// <item>残った表の行数は変わらない。取込の警告の種類（種別と表）は増えない。残った列の NULL の行の数は変わらない
+/// （表明 5b・<see cref="NullCountChanges"/>）。</item>
 /// </list>
 /// </remarks>
 internal static class SyncPlanFuzzRunner
@@ -260,7 +261,7 @@ internal static class SyncPlanFuzzRunner
         var before = await ImportAsync(dialect, ct).ConfigureAwait(false);
         outcome.Before = before;
         await generator.OnImportedAsync(dialect, before, ct).ConfigureAwait(false);
-        var beforeRows = await CountRowsAsync(dialect, before, ct).ConfigureAwait(false);
+        var beforeRows = await ProfileRowsAsync(dialect, before, ct).ConfigureAwait(false);
 
         // 目標の図＝DB の図を新しい Guid 空間へ写したものに変更を加える（GUI と同じく live と別の ID）
         var (targetEntities, targetRelationships) = CloneWithFreshIds(before);
@@ -427,7 +428,7 @@ internal static class SyncPlanFuzzRunner
 
         var after = await ImportAsync(dialect, ct).ConfigureAwait(false);
         outcome.After = after;
-        var afterRows = await CountRowsAsync(dialect, after, ct).ConfigureAwait(false);
+        var afterRows = await ProfileRowsAsync(dialect, after, ct).ConfigureAwait(false);
         var afterDiff = new SchemaDiffService().Compute(
             after.Entities,
             after.Relationships,
@@ -528,11 +529,18 @@ internal static class SyncPlanFuzzRunner
         // 表明 5: 行数と取込の警告
         foreach (var (table, rows) in beforeRows)
         {
-            if (afterRows.TryGetValue(table, out var rowsAfter) && rowsAfter != rows)
+            if (afterRows.TryGetValue(table, out var rowsAfter) && rowsAfter.Rows != rows.Rows)
             {
-                outcome.Violations.Add($"row count changed: {table} {rows} -> {rowsAfter}");
+                outcome.Violations.Add(
+                    $"row count changed: {table} {rows.Rows} -> {rowsAfter.Rows}"
+                );
             }
         }
+
+        // 表明 5b: 残った列の NULL の数は変わらない
+        outcome.Violations.AddRange(
+            NullCountChanges(before, after, beforeRows, afterRows, selected)
+        );
 
         var beforeWarnings = before
             .Warnings.Select(w => $"{w.Kind}|{w.TableName.ToLowerInvariant()}")
@@ -754,8 +762,13 @@ internal static class SyncPlanFuzzRunner
                     error
                 )
                     && (
-                        Mentions(error, d.Table) && Mentions(error, d.Name)
-                        || Rebuilt(error, d.Table, d.Name)
+                        // ガードの失敗は NOT NULL の文言とガードの列の名前だけで見る（表と列の名前の語の照合は「.」を含む名前で別の列に
+                        // 当たり、理由の語「null」はガードの一時表の名前にも含まれる）
+                        IsGuard(error)
+                            ? Has(error, "NOT NULL constraint failed")
+                                && Guarded(error, d.Table, d.Name)
+                            : Mentions(error, d.Table) && Mentions(error, d.Name)
+                                || Rebuilt(error, d.Table, d.Name)
                     )
                     // 名前を持たないエラー文（PostgreSQL の長さ・SQLite の ADD COLUMN）は、その文の種類だけが出す文言で見る
                     || d.Kind == FuzzDataFailureKind.AlterColumn
@@ -786,6 +799,24 @@ internal static class SyncPlanFuzzRunner
         // SQLite の再構築の表の列（エラー文は「{表}_quicker_rebuild.{列}」で名指しする）
         static bool Rebuilt(string error, string table, string column) =>
             Has(error, $"{table}_quicker_rebuild.{column}");
+
+        // SQLite の rowid の別名へ写す列の NULL のガード（エラー文は「quicker_rowid_null_guard.{表}.{列}」で名指しする）
+        static bool IsGuard(string error) =>
+            Has(
+                error,
+                QuickER.Provider.Sqlite.SqliteSyncScriptBuilder.RowidAliasNullGuardTable + "."
+            );
+
+        // 名前に「.」を含んでも前から全体で照合し、後ろに名前の続き（英数字・下線・ドット）が来る形は別の列として断る
+        static bool Guarded(string error, string table, string column) =>
+            System.Text.RegularExpressions.Regex.IsMatch(
+                error,
+                System.Text.RegularExpressions.Regex.Escape(
+                    $"{QuickER.Provider.Sqlite.SqliteSyncScriptBuilder.RowidAliasNullGuardTable}.{table}.{column}"
+                ) + @"(?![\p{L}\p{Nd}_.])",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                    | System.Text.RegularExpressions.RegexOptions.CultureInvariant
+            );
 
         // 識別子として名前を含む（引用符・括弧・空白・ドットで区切られた語として現れる）
         static bool Mentions(string text, string name) =>
@@ -1735,25 +1766,139 @@ internal static class SyncPlanFuzzRunner
             )
             .ConfigureAwait(false);
 
-    private static async Task<Dictionary<string, long>> CountRowsAsync(
+    /// <summary>違反の文の頭（表明 5b の列の NULL の数）</summary>
+    public const string NullCountChangedPrefix = "null count changed:";
+
+    /// <summary>
+    /// 表明 5b（残った列の NULL の数は変わらない）：コミットした同期の前後で、両方にある表の両方にある列（計算列を除く）の NULL の
+    /// 行の数が違えば違反の文にする
+    /// </summary>
+    /// <remarks>
+    /// 同期はどの方言でも値を書き換えない。型の変更も NULL を NULL のまま写し、NOT NULL 化は NULL があれば DB が断る。NULL の数が
+    /// 変わるのは、値が黙って書き換わったとき（SQLite の再構築で rowid の別名になった列へ写した NULL が採番の値に変わる形）だけ。
+    /// 型を変えた列も比べる（型の変更と同時に別名にする形を拾うため）。比べないのは、選んだ表の追加・削除の表（同じ名前で作り直すと
+    /// 中身が別物になる）、選んだ列の追加・削除の列（同じ名前で足し直すと NULL で埋まる）、前後どちらかで計算列の列（値は式が決める）。
+    /// </remarks>
+    internal static IEnumerable<string> NullCountChanges(
+        SchemaImportResult before,
+        SchemaImportResult after,
+        IReadOnlyDictionary<string, RowProfile> beforeRows,
+        IReadOnlyDictionary<string, RowProfile> afterRows,
+        IReadOnlyList<SchemaDiffItem> selected
+    )
+    {
+        var rebuiltTables = selected
+            .Where(i => i.Kind is SchemaDiffKind.AddTable or SchemaDiffKind.DropTable)
+            .Select(i => i.TableName.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var replacedColumns = selected
+            .Where(i =>
+                i.Kind is SchemaDiffKind.AddColumn or SchemaDiffKind.DropColumn
+                && i.ColumnName is not null
+            )
+            .Select(i => (i.TableName.Trim(), i.ColumnName!.Trim()))
+            .ToHashSet(TableColumnComparer.Instance);
+
+        foreach (var entity in before.Entities)
+        {
+            var table = entity.TableName.Trim();
+            var afterEntity = after.Entities.FirstOrDefault(e =>
+                string.Equals(e.TableName.Trim(), table, StringComparison.OrdinalIgnoreCase)
+            );
+
+            if (
+                afterEntity is null
+                || rebuiltTables.Contains(table)
+                || !beforeRows.TryGetValue(table, out var rowsBefore)
+                || !afterRows.TryGetValue(table, out var rowsAfter)
+            )
+            {
+                continue;
+            }
+
+            foreach (var column in entity.Columns.Where(c => !c.IsComputed))
+            {
+                var name = column.Name.Trim();
+                var afterColumn = afterEntity.Columns.FirstOrDefault(c =>
+                    string.Equals(c.Name.Trim(), name, StringComparison.OrdinalIgnoreCase)
+                );
+
+                if (
+                    afterColumn is null
+                    || afterColumn.IsComputed
+                    || replacedColumns.Contains((table, name))
+                    || !rowsBefore.Nulls.TryGetValue(name, out var nullsBefore)
+                    || !rowsAfter.Nulls.TryGetValue(name, out var nullsAfter)
+                    || nullsBefore == nullsAfter
+                )
+                {
+                    continue;
+                }
+
+                yield return $"{NullCountChangedPrefix} {table}.{name} {nullsBefore} -> {nullsAfter}";
+            }
+        }
+    }
+
+    /// <summary>表 1 つの行の数と、列ごとの NULL の行の数（表明 5・5b）</summary>
+    internal sealed record RowProfile(long Rows, IReadOnlyDictionary<string, long> Nulls);
+
+    /// <summary>（表, 列）の組を名前の大文字小文字に依らず比べる</summary>
+    private sealed class TableColumnComparer : IEqualityComparer<(string Table, string Column)>
+    {
+        public static readonly TableColumnComparer Instance = new();
+
+        public bool Equals((string Table, string Column) x, (string Table, string Column) y) =>
+            StringComparer.OrdinalIgnoreCase.Equals(x.Table, y.Table)
+            && StringComparer.OrdinalIgnoreCase.Equals(x.Column, y.Column);
+
+        public int GetHashCode((string Table, string Column) obj) =>
+            HashCode.Combine(
+                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Table),
+                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Column)
+            );
+    }
+
+    /// <summary>表ごとに行の数と列ごとの NULL の行の数を 1 つの問い合わせで数える（計算列も数えるが、表明 5b は比べない）</summary>
+    private static async Task<Dictionary<string, RowProfile>> ProfileRowsAsync(
         SyncPlanFuzzDialect dialect,
         SchemaImportResult schema,
         CancellationToken ct
     )
     {
-        var counts = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        var profiles = new Dictionary<string, RowProfile>(StringComparer.OrdinalIgnoreCase);
         await using var connection = dialect.CreateConnection();
         await connection.OpenAsync(ct).ConfigureAwait(false);
 
         foreach (var entity in schema.Entities)
         {
+            var columns = entity.Columns.Select(c => c.Name).ToList();
             await using var command = connection.CreateCommand();
-            command.CommandText = $"SELECT COUNT(*) FROM {dialect.QuoteTable(entity.TableName)}";
-            var value = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
-            counts[entity.TableName.Trim()] = Convert.ToInt64(value, CultureInfo.InvariantCulture);
+            // NULL は IS NULL で数える（SQL Server の COUNT(列) は text・ntext・image を受けない）。行が 0 なら SUM は NULL
+            command.CommandText =
+                "SELECT COUNT(*)"
+                + string.Concat(
+                    columns.Select(c =>
+                        $", SUM(CASE WHEN {dialect.Quote(c)} IS NULL THEN 1 ELSE 0 END)"
+                    )
+                )
+                + $" FROM {dialect.QuoteTable(entity.TableName)}";
+            await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            await reader.ReadAsync(ct).ConfigureAwait(false);
+            var rows = Convert.ToInt64(reader.GetValue(0), CultureInfo.InvariantCulture);
+            var nulls = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+
+            for (var i = 0; i < columns.Count; i++)
+            {
+                nulls[columns[i].Trim()] = reader.IsDBNull(i + 1)
+                    ? 0
+                    : Convert.ToInt64(reader.GetValue(i + 1), CultureInfo.InvariantCulture);
+            }
+
+            profiles[entity.TableName.Trim()] = new RowProfile(rows, nulls);
         }
 
-        return counts;
+        return profiles;
     }
 
     /// <summary>取り込んだ図を新しい Guid 空間へ写す（リレーションの列ペアも張り替える）</summary>

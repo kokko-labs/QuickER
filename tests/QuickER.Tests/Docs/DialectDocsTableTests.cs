@@ -341,6 +341,8 @@ public sealed class DialectDocsTableTests
         ["A failed script rolls back"] = c => c.TransactionalDdl,
         ["Changes to an existing table run as statements"] = c =>
             c.SupportsAlterColumn && c.SupportsForeignKeyAlter,
+        ["A single-column `INTEGER` primary key turns NULL into a row number"] = c =>
+            c.SingleColumnPrimaryKeyReplacesNull("INTEGER"),
     };
 
     /// <summary>T-M：外部キーの外し直しと付け直し（英語の行見出し → 宣言）</summary>

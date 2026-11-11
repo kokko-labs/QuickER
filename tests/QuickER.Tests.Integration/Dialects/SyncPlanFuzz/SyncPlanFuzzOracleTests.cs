@@ -552,6 +552,8 @@ public sealed class SyncPlanFuzzOracleTests
 
     private const string NullDataNotNull = "AlterColumn|c3|pid";
 
+    private const string RowidAliasGuard = "AlterColumn|t3|k";
+
     private const string DuplicateUnique = "AddUniqueConstraint|t2|uq_t2|w";
 
     private const string DuplicatePrimaryKey = "AddPrimaryKey|t1|PK_t1|k";
@@ -784,6 +786,47 @@ public sealed class SyncPlanFuzzOracleTests
                 "SQLite Error 19: 'NOT NULL constraint failed: c5_quicker_rebuild.extra'.",
                 [NotNullColumnAdd],
                 true,
+                Statementwise: false
+            ),
+            // SQLite の rowid の別名へ写す列の NULL のガード：ガードの列（quicker_rowid_null_guard.{表}.{列}）の全体で見る
+            new DataFailureCase(
+                "sqlite-rowid-alias-guard-error-matches-by-guard-column",
+                "",
+                "SQLite Error 19: 'NOT NULL constraint failed: quicker_rowid_null_guard.t3.k'.",
+                [RowidAliasGuard],
+                true,
+                Statementwise: false
+            ),
+            new DataFailureCase(
+                "sqlite-rowid-alias-guard-error-with-dotted-names-matches",
+                "",
+                "SQLite Error 19: 'NOT NULL constraint failed: quicker_rowid_null_guard.a.b.c.d'.",
+                ["AlterColumn|a.b|c.d"],
+                true,
+                Statementwise: false
+            ),
+            new DataFailureCase(
+                "sqlite-rowid-alias-guard-error-on-dotted-longer-column-does-not-match",
+                "",
+                "SQLite Error 19: 'NOT NULL constraint failed: quicker_rowid_null_guard.t3.k.x'.",
+                [RowidAliasGuard],
+                false,
+                Statementwise: false
+            ),
+            new DataFailureCase(
+                "sqlite-rowid-alias-guard-error-on-other-column-does-not-match",
+                "",
+                "SQLite Error 19: 'NOT NULL constraint failed: quicker_rowid_null_guard.t3.kk'.",
+                [RowidAliasGuard],
+                false,
+                Statementwise: false
+            ),
+            new DataFailureCase(
+                "sqlite-rowid-alias-guard-name-with-other-reason-does-not-match",
+                "",
+                "SQLite Error 19: 'UNIQUE constraint failed: quicker_rowid_null_guard.t3.k'.",
+                [RowidAliasGuard],
+                false,
                 Statementwise: false
             ),
             new DataFailureCase(

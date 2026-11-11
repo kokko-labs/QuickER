@@ -47,5 +47,6 @@ public static class TestDialectCapabilities
             TransactionalDdl = true,
             IdentifierLengthLimit = IdentifierLengthLimit.Unlimited,
             TruncatesLongIdentifiers = false,
+            SingleColumnPrimaryKeyReplacesNull = static _ => false,
         };
 }

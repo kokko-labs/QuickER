@@ -311,6 +311,23 @@ public sealed partial record SyncDialectCapabilities
     /// </remarks>
     public required bool TruncatesLongIdentifiers { get; init; }
 
+    /// <summary>
+    /// 宣言の型（引数）の単一列の主キーへ入れた NULL を、DB が断らずに採番の値へ置き換えるか（SQLite の rowid の別名＝宣言の型が
+    /// 大文字小文字を問わずちょうど <c>INTEGER</c>。ほかの方言は常に偽）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 真になる列は NOT NULL を宣言しても NULL を断らないので、再構築でこの列へ別の列の値を写すと、NULL が黙って採番の値に変わる。
+    /// 計画は列の値を見ないので、再構築の合成がその列を印し（<see cref="TableRebuildPlan.RowidAliasNullGuardColumn"/>）、
+    /// 同期スクリプトが移送の前に NULL を断る（ほかの方言の NOT NULL 化と同じく失敗して巻き戻る）。
+    /// </para>
+    /// <para>
+    /// 取込が主キーの列を NOT NULL へ補正して告げるか（<see cref="SchemaImportWarningKind.PrimaryKeyNullabilityAdjusted"/>）も
+    /// 同じ規則で決める（真になる列は NULL を持てないので告げない）。
+    /// </para>
+    /// </remarks>
+    public required Func<string, bool> SingleColumnPrimaryKeyReplacesNull { get; init; }
+
     /// <summary>2 つの型表記が、この方言の DB で同じ宣言として保存されるか</summary>
     /// <remarks>
     /// 両側を <see cref="NormalizeTypeNotation"/> に通したうえで <see cref="DbTypeText.AreEquivalent"/>
