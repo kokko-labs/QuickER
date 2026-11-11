@@ -15,13 +15,6 @@ internal static class ToolArgumentShapeFuzzNotGenerated
             [ProtectionNames.EnginePart(EngineIds.DiagramEdit, "ToolArgument")],
             [
                 NotGenerated.Pending(
-                    "non-object-arguments",
-                    "引数の全体がオブジェクトでない（配列・文字列・数値・null）",
-                    "G5",
-                    "崩し方は引数のオブジェクトの中のプロパティだけを変える。入口の形の検査（ToolArgumentShape）は引数の全体がオブジェクトでない形で分岐する",
-                    NotGenerated.Unguarded
-                ),
-                NotGenerated.Pending(
                     "nested-objects-and-later-elements",
                     "配列を介さないオブジェクトの入れ子・配列の 2 番目以降の要素の中",
                     "ツールの引数の残りの区切り（未起動）",

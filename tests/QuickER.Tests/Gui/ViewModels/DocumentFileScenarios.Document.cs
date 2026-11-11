@@ -713,6 +713,65 @@ internal static partial class DocumentFileScenarios
             ),
         ];
 
+    /// <summary>
+    /// 配置つきの外部の図の読込（開く・自動再読込・起動時の照合の再読込）。配置を持つ表は保存した位置・幅のまま、
+    /// 配置の欠けた表は重ならないことを不変条件 (6) が毎回見る
+    /// </summary>
+    private static IEnumerable<ScenarioRow<DocScenario>> LayoutRows() =>
+        [
+            Row(
+                "layout-open-full-layout-keeps-saved-positions",
+                "Open: 全部の表が配置を持つ図は、保存した位置・幅のまま開く（自動整列しない）",
+                Doc.Write(A, "Laid", content: DocContentKind.DiagramWithLayout),
+                Doc.Open(A)
+                    .Expect(o =>
+                    {
+                        o.Tables.Should().Equal("Laida", "Laidb", "Laidc");
+                        o.Loads.Should().ContainSingle();
+                    })
+            ),
+            Row(
+                "layout-open-partial-layout-appends-missing-tables",
+                "Open: 一部の表だけ配置を持つ図は、配置を持つ表を動かさず、欠けた表を重ならないよう追記配置する",
+                Doc.Write(A, "Part", content: DocContentKind.DiagramPartialLayout),
+                Doc.Open(A)
+                    .Expect(o =>
+                    {
+                        o.Tables.Should().Equal("Parta", "Partb", "Partc", "Partd");
+                        o.Loads.Should().ContainSingle();
+                    })
+            ),
+            Row(
+                "layout-auto-reload-partial-layout",
+                "クリーン: 外部が一部の表だけ配置を持つ図に変えた自動再読込も、同じ規則で配置する",
+                Doc.Write(A, "Original"),
+                OpenClean(),
+                Doc.Write(A, "Part", content: DocContentKind.DiagramPartialLayout),
+                Doc.Modified()
+                    .Expect(o =>
+                    {
+                        o.Status.Should().Be(Strings.Status_ExternalReloaded);
+                        o.Tables.Should().HaveCount(4);
+                        o.Loads.Should().ContainSingle();
+                    })
+            ),
+            Row(
+                "layout-dirty-confirm-reload-full-layout",
+                "ダーティ: 確認で再読込を選ぶと、全部の表が配置を持つ図を保存した位置のまま読み込む",
+                Doc.Write(A, "Original"),
+                OpenClean(),
+                Doc.Add(),
+                Doc.Write(A, "Laid", content: DocContentKind.DiagramWithLayout),
+                Doc.Modified()
+                    .Expect(o =>
+                    {
+                        o.WarningConfirms.Should().ContainSingle();
+                        o.Tables.Should().HaveCount(3);
+                        o.Loads.Should().ContainSingle();
+                    })
+            ),
+        ];
+
     /// <summary>名前付きクエリの往復のシナリオの表の Id（元のテストは実行ごとの新しい Guid）</summary>
     private static Guid OrderEntityId => new("9f6d2c1a-4b7e-4e0a-8a55-2c3d4e5f6a70");
 

@@ -27,13 +27,6 @@ internal static class NameFuzzDdlRoundTripNotGenerated
                     "Oracle の引用識別子は二重引用符を含められない（DB の事実）",
                     NotGenerated.Unguarded
                 ),
-                NotGenerated.Pending(
-                    "multibyte-long-name-shortening",
-                    "多バイトの長い名前の既定名の切り詰め位置・縮めた後の番号の衝突",
-                    "G5",
-                    "総当たりの名前は上限に近い多バイトの長い名前を作らない。既定の制約名を上限へ縮める位置と、縮めた名前の番号の付け方はこの形で分岐する",
-                    "`LongDefaultConstraintNameTests`"
-                ),
             ]
         );
 }

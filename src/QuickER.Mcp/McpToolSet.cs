@@ -50,7 +50,7 @@ public sealed class McpToolSet
     {
         if (
             _schemas.TryGetValue(toolName, out var schema)
-            && TryParseObject(argumentsJson, out var arguments)
+            && TryParse(argumentsJson, out var arguments)
             && ToolArgumentShape.Check(schema, arguments) is { } problem
         )
         {
@@ -60,18 +60,14 @@ public sealed class McpToolSet
         return _dispatch(toolName, argumentsJson);
     }
 
-    /// <summary>引数 JSON をオブジェクトとして読む（読めない・オブジェクトでないときは false）</summary>
-    private static bool TryParseObject(string argumentsJson, out JsonElement arguments)
+    /// <summary>引数 JSON を読む（読めないときだけ false。オブジェクトでない全体は形の検査が断る）</summary>
+    private static bool TryParse(string argumentsJson, out JsonElement arguments)
     {
         try
         {
             using var document = JsonDocument.Parse(argumentsJson);
-
-            if (document.RootElement.ValueKind == JsonValueKind.Object)
-            {
-                arguments = document.RootElement.Clone();
-                return true;
-            }
+            arguments = document.RootElement.Clone();
+            return true;
         }
         catch (JsonException)
         {

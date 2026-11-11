@@ -14,6 +14,8 @@ internal sealed record DocVersion(DocContentKind Content, IReadOnlyList<string> 
     public bool Loads =>
         Content
             is DocContentKind.Diagram
+                or DocContentKind.DiagramWithLayout
+                or DocContentKind.DiagramPartialLayout
                 or DocContentKind.DiagramWithBom
                 or DocContentKind.Newer
                 or DocContentKind.NullCollections;
@@ -164,6 +166,9 @@ internal sealed class DocumentFileModel
     /// <summary>この手で VM が書いた版（順に）</summary>
     public List<(DocFile File, string Label)> Writes { get; } = [];
 
+    /// <summary>この手で掛かったアクセスの条件（手の前にファイルが無ければ掛からないので null）</summary>
+    public DocAccess? AppliedAccess { get; private set; }
+
     // ---------------- 1 手の文脈 ----------------
 
     private int _step;
@@ -191,7 +196,11 @@ internal sealed class DocumentFileModel
             );
         }
 
-        return new(write.Content, write.Table is null ? [] : [write.Table], 0);
+        return new(
+            write.Content,
+            write.Table is null ? [] : DocumentFileHarness.LayoutTables(write.Content, write.Table),
+            0
+        );
     }
 
     /// <summary>1 手を流す（出力は Confirms などに残る）</summary>
@@ -213,8 +222,19 @@ internal sealed class DocumentFileModel
         SaveDialogs = 0;
         CanvasInteractionsCancelled = false;
 
+        // ハーネスは手の前にファイルがあるときだけ条件を掛ける
+        AppliedAccess = step.Access is { } access && Disk[access.File] is not null ? access : null;
+
         ApplyOp(step.Op);
     }
+
+    /// <summary>この手の間、ファイルを読めないか（FileShare.None の条件。ハッシュ・読込・版の読み取りがどれも失敗する）</summary>
+    private bool Unreadable(DocFile file) =>
+        AppliedAccess is { Readable: false } access && access.File == file;
+
+    /// <summary>この手の間、ファイルへ書けないか（親フォルダの無い保存先と、アクセスの条件を掛けたファイル）</summary>
+    private bool Unwritable(DocFile file) =>
+        file == DocFile.Unwritable || AppliedAccess?.File == file;
 
     private void ApplyOp(DocOp op)
     {
@@ -460,9 +480,12 @@ internal sealed class DocumentFileModel
         var label = Disk[file];
         var version = label is null ? null : Versions[label];
 
-        if (version is null || !version.Loads)
+        // 読めないファイルは TryLoad が ReadFailed で断り、開くは汎用の文言で知らせる（MainViewModel.Open の種類ごとの文言）
+        if (Unreadable(file) || version is null || !version.Loads)
         {
-            var format = version?.OpenFailureFormat ?? Strings.Open_Failed;
+            var format = Unreadable(file)
+                ? Strings.Open_Failed
+                : version?.OpenFailureFormat ?? Strings.Open_Failed;
             Errors.Add(string.Format(format, _pathOf(file)));
             return;
         }
@@ -512,7 +535,8 @@ internal sealed class DocumentFileModel
             return;
         }
 
-        if (target == DocFile.Unwritable)
+        // 書けない保存先は、ダーティ・パス・最終既知を変えずに失敗を知らせる（SaveToPath の XmlDoc）
+        if (Unwritable(target))
         {
             Errors.Add(Strings.Save_Failed);
             return;
@@ -531,6 +555,13 @@ internal sealed class DocumentFileModel
     private bool ConfirmOverwrite(DocFile target)
     {
         if (Disk[target] is not { } onDisk)
+        {
+            return true;
+        }
+
+        // 読めない保存先は確認しない：版を読めないことは保存を妨げず（JsonStorageService.TryReadFormatVersion の catch）、
+        // ハッシュの算出不能も乖離としない（MainViewModel.HasDiskDivergedFromLastKnown・ViewModels/CLAUDE.md「上書き保存の確認」）
+        if (Unreadable(target))
         {
             return true;
         }
@@ -572,7 +603,8 @@ internal sealed class DocumentFileModel
             case DocumentFileChangeKind.Modified:
                 var hash = deliver.Hash switch
                 {
-                    DocEventHash.CurrentDisk => Disk[Path.Value],
+                    // 監視器と同じく配送の時点のハッシュ（読めなければ null）
+                    DocEventHash.CurrentDisk => Unreadable(Path.Value) ? null : Disk[Path.Value],
                     DocEventHash.Unknown => DocumentFileHarness.UnknownHashLabel,
                     _ => null,
                 };
@@ -652,7 +684,8 @@ internal sealed class DocumentFileModel
         var label = Disk[path];
         var version = label is null ? null : Versions[label];
 
-        if (version is null || !version.Loads || version.IsNewerFormat)
+        // 読めない（IO エラー）も破損・将来版と同じく現状維持で通知だけ（ReloadFromDisk）
+        if (Unreadable(path) || version is null || !version.Loads || version.IsNewerFormat)
         {
             Notify(Strings.Status_ExternalReloadFailed);
             return false;
@@ -666,7 +699,13 @@ internal sealed class DocumentFileModel
 
     private void CheckAgainstDisk()
     {
-        if (Path is not { } path || Disk[path] is not { } onDisk || _same(onDisk, LastKnown))
+        // 算出不能（IO エラー）は何もしない（CheckExternalChangeAgainstDisk）
+        if (
+            Path is not { } path
+            || Disk[path] is not { } onDisk
+            || Unreadable(path)
+            || _same(onDisk, LastKnown)
+        )
         {
             return;
         }

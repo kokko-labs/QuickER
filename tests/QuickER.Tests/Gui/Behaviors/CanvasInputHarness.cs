@@ -211,6 +211,13 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
         "I9:つかみのホバー",
         "I9:内側のホバー",
         "I9:パン待機のホバー",
+        "I10:ラバーバンドの置き換え",
+        "I10:ラバーバンドの追加",
+        "I10:余白のクリックの解除",
+        "I10:余白の Ctrl クリック",
+        "I10:カードのクリック",
+        "I10:カードの Ctrl クリック",
+        "I10:カードのドラッグ",
     ];
 
     /// <summary>手ごとの状態の記録（調べるときだけ入れる。null なら記録しない）</summary>
@@ -352,7 +359,20 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
         var oleBefore = _oleDrag;
         var dropIndexes =
             step.Op == CanvasOp.LeftUp && _oleDrag is { } drag ? DropIndexes(drag.Data) : null;
+        var ctrlBefore = (_modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+        var bandBefore = (
+            _vm.RubberBandX,
+            _vm.RubberBandY,
+            _vm.RubberBandWidth,
+            _vm.RubberBandHeight
+        );
         _pending.Clear();
+
+        // I10：押下の間に、選択の期待をモデルで言えない手が重なったら、その押下では選択を表明しない
+        if (_press is { } held && step.Op != CanvasOp.LeftDown && !KeepsSelectionPredictable(step))
+        {
+            held.Disturbed = true;
+        }
 
         if (Perform(step) is { } shape)
         {
@@ -360,6 +380,28 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
         }
 
         model.Apply(step);
+
+        if (step.Op == CanvasOp.LeftDown && _press is { } pressed)
+        {
+            pressed.CtrlAtPress = ctrlBefore;
+            pressed.SelectionBefore = selectionBefore;
+            pressed.Disturbed =
+                panBefore || controlHeldBefore || model.MiddleDown || _vm.IsRelationshipMode;
+        }
+
+        // I10：余白の押下の間の移動が選択面へ届いたら、押下の位置からの距離を控える（ラバーバンドの成立の期待）
+        if (
+            step.Op is CanvasOp.Move or CanvasOp.MoveTo
+            && _press is { Spot: CanvasSpot.Blank } blank
+            && HitTarget() is DependencyObject reached
+            && IsSelfOrDescendant(reached, _surface)
+        )
+        {
+            blank.SurfaceReach = Math.Max(
+                blank.SurfaceReach,
+                (_window.TranslatePoint(_pointer, _surface) - blank.SurfaceStart).Length
+            );
+        }
 
         Trace?.Add(
             string.Create(
@@ -391,6 +433,14 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
         )
         {
             return Violation(pointer.Invariant, pointer.Detail);
+        }
+
+        if (
+            step.Op == CanvasOp.LeftUp
+            && CheckSelection(rubberBefore, bandBefore, ctrlBefore) is { } selection
+        )
+        {
+            return Violation("I10", selection);
         }
 
         var newActivations = _activations.Skip(activationCountBefore).ToList();
@@ -870,6 +920,137 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
         return null;
     }
 
+    // ---------- 選択の不変条件（I10） ----------
+
+    /// <summary>
+    /// 押下の間に重なっても、選択の期待をモデルで言える手か（移動・キャンバスの上の場所への移動・Ctrl・解放）
+    /// </summary>
+    private static bool KeepsSelectionPredictable(CanvasStep step) =>
+        step.Op is CanvasOp.Move or CanvasOp.CtrlDown or CanvasOp.CtrlUp or CanvasOp.LeftUp
+        || (step.Op == CanvasOp.MoveTo && CanvasSpots.OnCanvas(step.Spot!.Value));
+
+    /// <summary>
+    /// I10：左ボタンの解放の後の選択が、押下の前の選択・押下の時と解放の時の Ctrl・閾値から決まる期待と一致する（破れなければ null）
+    /// </summary>
+    /// <remarks>
+    /// <para>期待は製品の文書から書く（選択の処理を写さない）：</para>
+    /// <list type="bullet">
+    ///   <item>余白の押下で閾値を超えて動いた（ラバーバンドが成立した）：押下の時に Ctrl なら押下の前の選択 ∪ 矩形に触れたテーブル、
+    ///     Ctrl でなければ矩形に触れたテーブルだけ（<c>RubberBandBehavior</c> の remarks「Ctrl 押下の追加選択時のみ Handled に
+    ///     し、CanvasClickCommand の全解除から既存選択を保護する」・解放で <c>ApplyRubberBandSelection</c> が交差選択を確定する。
+    ///     <c>MainViewModel.ApplyRubberBandSelection</c> の XmlDoc「additive なら既存選択へ追加、false なら置換」
+    ///     「外接矩形（X / Y / Width / DisplayHeight）との交差＝触れたら選択。完全包含は要求しない」）</item>
+    ///   <item>余白の押下で閾値以内に離した（クリック）：押下の時に Ctrl なら選択は変わらず、Ctrl でなければすべて解除
+    ///     （同じ remarks「閾値未満のクリックは CanvasClickCommand の全選択解除に委ねる」・Ctrl のときは全解除から保護する）</item>
+    ///   <item>カードの押下で閾値以内に離した（クリック）：解放の時に Ctrl ならそのテーブルの選択を切り替え、Ctrl でなければそのテーブル
+    ///     だけを選ぶ（<c>DragBehavior.EndDrag</c> の「Ctrl 押下時はトグル追加／除外、それ以外は単一選択へ委譲する（グループのメンバーを
+    ///     Ctrl なしでクリックしたらその 1 個へ絞る）」・<c>MainViewModel.OnEntityClicked</c> の「通常時は単一選択」）</item>
+    ///   <item>カードの押下で閾値を超えて動いた（移動）：選択は変わらない（<c>DragBehavior</c> の remarks「移動量が閾値未満ならクリック
+    ///     とみなし…選択状態へ切り替える」の裏。移動は履歴を積むだけ）</item>
+    /// </list>
+    /// <para>
+    /// ラバーバンドの成立の期待は、押下の間に選択面へ届いた移動の押下の位置からの距離が閾値（3 px）以上か（<c>RubberBandBehavior</c>
+    /// の remarks「閾値を超えて動いた時のみラバーバンドを開始する」）。矩形は解放の直前の VM の矩形を読む。
+    /// </para>
+    /// <para>
+    /// 表明しない押下：<see cref="PressState.Disturbed"/>（パン待機・押下の間の Space・Delete・外部の取り消し・付け外し・
+    /// キャンバスの外への移動など）・余白とカード（先頭・2 番目）以外の場所・リサイズ・取り除かれたテーブル。
+    /// </para>
+    /// </remarks>
+    private string? CheckSelection(
+        bool rubberBefore,
+        (double X, double Y, double Width, double Height) band,
+        bool ctrlAtRelease
+    )
+    {
+        if (_lastPress is not { Disturbed: false } press)
+        {
+            return null;
+        }
+
+        var before = press.SelectionBefore;
+        IReadOnlyList<EntityViewModel> expected;
+        string branch;
+
+        if (press.Spot == CanvasSpot.Blank)
+        {
+            var expectActive = press.SurfaceReach >= 3;
+
+            if (rubberBefore != expectActive)
+            {
+                return string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"余白の押下の解放の前にラバーバンドが成立していたか {rubberBefore}（期待 {expectActive}・押下の位置からの最大の距離 {press.SurfaceReach:F2}）"
+                );
+            }
+
+            if (expectActive)
+            {
+                // 「触れたら選択」：外接矩形と矩形が辺で接するだけでも触れたとみなす
+                var hit = _vm
+                    .Entities.Where(entity =>
+                        band.X <= entity.X + entity.Width
+                        && band.X + band.Width >= entity.X
+                        && band.Y <= entity.Y + entity.DisplayHeight
+                        && band.Y + band.Height >= entity.Y
+                    )
+                    .ToList();
+                expected = press.CtrlAtPress ? [.. before.Union(hit)] : hit;
+                branch = press.CtrlAtPress
+                    ? "I10:ラバーバンドの追加"
+                    : "I10:ラバーバンドの置き換え";
+            }
+            else
+            {
+                expected = press.CtrlAtPress ? before : [];
+                branch = press.CtrlAtPress
+                    ? "I10:余白の Ctrl クリック"
+                    : "I10:余白のクリックの解除";
+            }
+        }
+        else if (
+            press.Spot is CanvasSpot.Card or CanvasSpot.Card2
+            && press is { DragBegan: true, Canceled: false, Entity: { } clicked }
+            && _vm.Entities.Contains(clicked)
+        )
+        {
+            if (press.Distance(this) <= 3)
+            {
+                expected = ctrlAtRelease
+                    ? before.Contains(clicked)
+                        ? [.. before.Where(other => !ReferenceEquals(other, clicked))]
+                        : [.. before, clicked]
+                    : [clicked];
+                branch = ctrlAtRelease ? "I10:カードの Ctrl クリック" : "I10:カードのクリック";
+            }
+            else
+            {
+                expected = before;
+                branch = "I10:カードのドラッグ";
+            }
+        }
+        else
+        {
+            return null;
+        }
+
+        Exercised.Add(branch);
+        var actual = _vm.SelectedEntities;
+
+        if (actual.Count == expected.Count && expected.All(actual.Contains))
+        {
+            return null;
+        }
+
+        static string Names(IEnumerable<EntityViewModel> entities) =>
+            "{" + string.Join(",", entities.Select(e => e.TableName)) + "}";
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"{branch[4..]}（押下 {press.Spot}・押下の時の Ctrl {press.CtrlAtPress}・解放の時の Ctrl {ctrlAtRelease}）の後の選択が {Names(actual)}（期待 {Names(expected)}・押下の前 {Names(before)}）"
+        );
+    }
+
     /// <summary>落とし込みの元と先の行の番号（先が行でなければ -1。列一覧が無ければ null）</summary>
     private (int Source, int Target)? DropIndexes(object data)
     {
@@ -956,6 +1137,24 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
         public bool Group { get; init; }
 
         public int DragDropCalls { get; set; }
+
+        /// <summary>押下の時に Ctrl を押していたか（I10）</summary>
+        public bool CtrlAtPress { get; set; }
+
+        /// <summary>押下の直前の選択（I10）</summary>
+        public IReadOnlyList<EntityViewModel> SelectionBefore { get; set; } = [];
+
+        /// <summary>
+        /// 選択の期待をモデルで言えない手が重なった押下か（I10 を表明しない：パン待機・パンの実行中・ボタン類のキャプチャ・
+        /// リレーションの作成中の押下と、押下の間の Space・Delete・外部の取り消し・付け外し・キャンバスの外への移動など）
+        /// </summary>
+        public bool Disturbed { get; set; }
+
+        /// <summary>押下の位置の選択面（DiagramCanvas）の座標（余白の押下の I10）</summary>
+        public Point SurfaceStart { get; init; }
+
+        /// <summary>押下の間に選択面へ届いた移動の、押下の位置からの最大の距離（選択面の座標・余白の押下の I10）</summary>
+        public double SurfaceReach { get; set; }
 
         /// <summary>押下から今のマウスの位置までの、カードのキャンバスの座標での距離</summary>
         public double Distance(CanvasInputHarness harness) =>
@@ -1148,6 +1347,7 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
                 : null,
             Start = Geometry(),
             PointerStart = point,
+            SurfaceStart = _window.TranslatePoint(point, _surface),
             CardCanvas = card is null ? null : Ancestor<Canvas>(card),
         };
         _left = MouseButtonState.Pressed;
@@ -1936,7 +2136,7 @@ internal static class CanvasInputDiagram
 }
 
 /// <summary>破れた不変条件</summary>
-/// <param name="Invariant">不変条件の Id（I1〜I8・手が組めなかった Shape）</param>
+/// <param name="Invariant">不変条件の Id（I1〜I10・手が組めなかった Shape）</param>
 /// <param name="Index">手の番号（種の始めは -1）</param>
 /// <param name="Step">手（種の始めは null）</param>
 /// <param name="Focus">モデルのフォーカスの対象</param>

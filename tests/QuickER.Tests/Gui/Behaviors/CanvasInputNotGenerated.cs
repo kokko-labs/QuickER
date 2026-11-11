@@ -13,13 +13,6 @@ internal static class CanvasInputNotGenerated
             [ProtectionNames.EnginePart(EngineIds.DiagramEdit, "CanvasInput")],
             [
                 NotGenerated.Pending(
-                    "ctrl-at-press",
-                    "押下の時点の Ctrl（空白の押下で加算の矩形選択・カードの Ctrl クリックで選択の切り替え）",
-                    "G5",
-                    "Ctrl は Space の押下の間のパンとグループの移動の 2 番目のクリックにだけ混ぜる。矩形選択とカードのドラッグは押下の時点の Ctrl で分岐する",
-                    NotGenerated.Unguarded
-                ),
-                NotGenerated.Pending(
                     "wheel-and-reorder-edges",
                     "Shift とホイール・幅の下限とズームの端・列一覧の 3 行目以降の並べ替え",
                     "入力の列の残りの区切り（未起動）",

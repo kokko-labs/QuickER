@@ -33,6 +33,8 @@ internal static partial class DocumentFileScenarios
             .. UntrackedChangeRows(),
             .. DragCancelRows(),
             .. QueriesRows(),
+            .. AccessRows(),
+            .. LayoutRows(),
         ];
 
     /// <summary>行を作る</summary>

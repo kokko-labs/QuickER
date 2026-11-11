@@ -49,6 +49,7 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 #### DB sync & DDL
 
 - **DDL generation now refuses a diagram that has a table without columns, naming the table, and a sync leaves out adding such a table and names it in the confirmation** — the DDL wrote `CREATE TABLE t ( );`, which SQL Server, MySQL, Oracle and SQLite refused with a syntax error. PostgreSQL accepted it and created a table without columns that cannot be imported back; on PostgreSQL that DDL is now refused as well, so add at least one column to the table in the diagram before generating DDL. The other changes of a sync still run
+- **DDL generation and diff sync now refuse a diagram that has two tables with the same name, or two columns with the same name in one table, naming them** — names that differ only in letter case or in leading and trailing spaces count as the same name. Only a hand-edited diagram file can hold such names, because the editor, the tools and the importers refuse them (C# reverse import accepts two tables with the same name and warns). The DDL created the same table or column twice and the database refused it partway through, and the diff could not pair either table with the database and offered to add both. Rename one of them in the diagram before generating DDL or syncing
 
 #### Import and export
 
@@ -83,6 +84,7 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 #### AI chat & MCP
 
+- **A tool call whose arguments are not a JSON object (an array, a string, a number, a boolean or `null`) is now refused before the tool runs, in MCP and in the built-in chat** — the check of the arguments let such a call through, so `get_diagram_summary` and `list_queries` answered as if called without arguments and the other tools failed with a message of their own (MCP asked for the `file` argument). The call now fails with the same message as any other argument of the wrong type, naming `(arguments)`. MCP clients send arguments as an object, so this matters mostly for a model in the built-in chat that sends something else
 - **GitHub Copilot no longer loses the conversation when the runtime returns an ordinary error** — only a lost connection ends the conversation, and then the message says the connection was lost and the next message starts a new conversation
 - **With an API key, a response cut off at the output limit no longer runs its unfinished tool call, and a response that ends without any text or tool call now says why** — the tool call ran with incomplete arguments, and the empty response looked like a success
 - **With an API key, Claude's output limit is now the model's own limit, up to 64,000 tokens, instead of 8,192** — Claude 5 models think before they answer and the thinking counts toward the limit, so a long answer such as a mock project page could stop before any text. If the model's limit cannot be read, 8,192 is used as before

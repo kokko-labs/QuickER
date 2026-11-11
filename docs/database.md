@@ -925,6 +925,19 @@ QuickER therefore treats such a table the same way on all five dialects.
 A diagram can hold such a table for a while: the MCP tool `add_entity` creates a table without columns, and a table can lose its last column in the editor or come from an import that restored none of its columns.
 Add at least one column to it before generating DDL or syncing it.
 
+### Tables and columns with the same name
+
+Two tables with the same name, or two columns with the same name in one table, would be created twice by the DDL, and the database would refuse the second one partway through.
+A diff could not tell which of the two tables matches the database table and would offer to add both.
+QuickER therefore refuses such a diagram the same way on all five dialects.
+
+- DDL generation refuses the whole diagram, names the tables or columns (`TABLE 'x' and TABLE 'X'`, `COLUMN 'x'.'y' and COLUMN 'x'.'Y'`), and produces nothing
+- Diff sync refuses to compute the diff and shows the same message in the status line of the sync dialog
+
+Names that differ only in letter case or in leading and trailing spaces count as the same name, as everywhere else in a diagram.
+The editor, the tools and the importers refuse such names, so only a hand-edited diagram file can hold them (C# reverse import accepts two tables with the same name and warns).
+Rename one of them in the diagram before generating DDL or syncing.
+
 ### Identifier length limits
 
 Each dialect caps how long a table, column or constraint name may be, and the unit it counts in differs.

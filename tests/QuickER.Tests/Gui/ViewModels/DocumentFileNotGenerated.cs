@@ -18,20 +18,6 @@ internal static class DocumentFileNotGenerated
                 ProtectionNames.EnginePart(EngineIds.DocumentFile, "Scenarios"),
             ],
             [
-                NotGenerated.Pending(
-                    "unreadable-or-unwritable-file",
-                    "読めない・書けないファイル（ロック・権限・読み取り専用）",
-                    "G5",
-                    "書けないファイルは親フォルダが無い形だけを作る。保存と外部変更の検知は、内容のハッシュが取れない（TryCompute が null）形で分岐する",
-                    NotGenerated.Unguarded
-                ),
-                NotGenerated.Pending(
-                    "external-diagram-with-layout",
-                    "配置つきの外部の図・一部の表だけ配置の欠けた外部の図",
-                    "G5",
-                    "外部の図は配置を持たず表が 1 つ。取込は配置の有無と欠けで分岐する",
-                    NotGenerated.Unguarded
-                ),
                 NotGenerated.Accepted(
                     "real-file-watcher",
                     "実物の FileSystemWatcher とデバウンスの時間",

@@ -84,6 +84,9 @@ internal static class DocumentFileRunner
         {
             delivered = deliver.Hash switch
             {
+                // 読めない条件を掛けた手では、ハーネスが配送するハッシュも null になる
+                DocEventHash.CurrentDisk
+                    when harness.UnreadableDuring(step, harness.FileOf(vm.CurrentFilePath)) => null,
                 DocEventHash.CurrentDisk => vm.CurrentFilePath is { } current
                     ? DocumentContentHash.TryCompute(current)
                     : null,
@@ -114,6 +117,11 @@ internal static class DocumentFileRunner
     )
     {
         string? HashOf(string? label) => label is null ? null : harness.HashOf(label);
+
+        if (after.AppliedAccess != model.AppliedAccess)
+        {
+            yield return $"掛かったアクセスの条件 {after.AppliedAccess?.ToString() ?? "(none)"} ≠ {model.AppliedAccess?.ToString() ?? "(none)"}";
+        }
 
         if (after.PathFile != model.Path)
         {

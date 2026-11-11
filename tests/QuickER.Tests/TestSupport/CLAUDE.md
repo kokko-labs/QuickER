@@ -339,8 +339,9 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
 
 ## 入力の列のエンジン
 
-- `src/QuickER.Gui/Behaviors` のビヘイビア（`CanvasViewportBehavior`・`DragBehavior`・`RubberBandBehavior`・`DataGridRowReorderBehavior`）の振る舞いは、入力の列のエンジン `CanvasInputTests`（地図の名前 `DiagramEdit/CanvasInput`）が確かめる。本物の `MainWindow` へキーとマウスの手の列を流し、各手の後に不変条件 I1〜I9 を表明する。
-  - I1 パンの間はボタン類が押されず切り替わらず入力されない・I2 パンの実行中は ScrollViewer がキャプチャを持ち続ける・I3 Space の持ち主とパン待機と実行中のカーソル・I4 操作の終わりに状態とキャプチャとカーソルが残らない・I5 パンの間の移動でカードが動かずラバーバンドが始まらない・I6 履歴の積み方と外部の取り消し・I7 ラバーバンドと並べ替えのドラッグは今の押下からだけ始まる・I8 ズーム・I9 押していないときのカードの上のカーソル。
+- `src/QuickER.Gui/Behaviors` のビヘイビア（`CanvasViewportBehavior`・`DragBehavior`・`RubberBandBehavior`・`DataGridRowReorderBehavior`）の振る舞いは、入力の列のエンジン `CanvasInputTests`（地図の名前 `DiagramEdit/CanvasInput`）が確かめる。本物の `MainWindow` へキーとマウスの手の列を流し、各手の後に不変条件 I1〜I10 を表明する。
+  - I1 パンの間はボタン類が押されず切り替わらず入力されない・I2 パンの実行中は ScrollViewer がキャプチャを持ち続ける・I3 Space の持ち主とパン待機と実行中のカーソル・I4 操作の終わりに状態とキャプチャとカーソルが残らない・I5 パンの間の移動でカードが動かずラバーバンドが始まらない・I6 履歴の積み方と外部の取り消し・I7 ラバーバンドと並べ替えのドラッグは今の押下からだけ始まる・I8 ズーム・I9 押していないときのカードの上のカーソル・I10 押下の後の選択。
+  - I10 は押下の前の選択と、押下の時・解放の時の Ctrl から期待を組む（`CanvasInputHarness.CheckSelection`。選択の処理は写さない）。余白の押下でラバーバンドが成立したら、押下の時に Ctrl があれば「前の選択 ∪ 触れた表」、無ければ「触れた表」（触れた表は解放の直前の VM の矩形とカードの外接矩形の重なりで決め、辺の接触も含める）。余白のクリックは押下の時に Ctrl があれば選択を変えず、無ければ全部外す。カードのクリックは解放の時に Ctrl があればその表の選択を切り替え、無ければその表だけ。カードのドラッグは選択を変えない。パン待機・押下の間の Space・Delete・外部の取り消し・キャンバスの外への移動などが重なった押下では表明しない。表明した枝は `RequiredExercises` が照合する。
   - I1 の例外は 2 つだけ。
     - キーボードで移ったボタンがキャプチャを持ったまま始まった押下（WPF の `ButtonBase` は Space の押下でキャプチャを取り、解放で Click する。詳細は `src/QuickER.Gui/Behaviors/CLAUDE.md`「Space のパンは、キーボードで移ったボタン類の Space を横取りしない」）。
     - その押下が Space 以外のキー（Tab・Ctrl・Delete）で取り消され、IsPressed が戻るだけの変化（`CanvasInputHarness.IsCancelledControlPress`）。ボタン自身の押下で、モデルが取り消しを言い、Click も切り替えも起きていないときだけ。自己検査は `CanvasInputTests.CancelledControlPressException_IsNarrow`。
@@ -358,14 +359,15 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
 - 窓は 1 つを全部の行と種で使い回す。種の始めに図を差し替え、ズームとスクロールとミニマップを戻し、前の種の状態（進行中の状態・キャプチャ・フォーカス・選択・Undo の履歴・ズーム・スクロール）が残っていないことを表明する。
 - 次元表は 3 つ。
   - Space の押下（押下から解放までを 1 ケース）：フォーカスの対象 × 来方 × 押し方（リピートの回数）を 3 因子の組まで網羅し、押下の間の最初の手と Ctrl を数える。網羅しない組は受け入れの 1 つだけ（キャンバスはタブ順に入らないので、キーボードでキャンバスへ来る経路が製品に無い）。
-  - 左ボタンの押下：場所 × 押下の時のパン待機 × 押下の間の最初の手を全組網羅する（網羅しない組の一覧は空）。
+  - 左ボタンの押下：場所 × 押下の時のパン待機 × 押下の間の最初の手 × Ctrl（`PressCtrl`＝押下の時と解放の時の Ctrl の組。none・blip〔押下の間だけ押す〕・held・released〔押下の時だけ〕・late〔解放の時だけ〕）の 2 因子の組を全部網羅する（網羅しない組の一覧は空）。製品は Ctrl を押下の時〔`RubberBandBehavior` の追加選択・`DragBehavior` のグループ移動の抑止〕と解放の時〔`DragBehavior` のクリックの切り替え〕に読むので、2 つの時点の組を水準にする。Ctrl の押下・解放は押下の間の最初の手に数えない。
   - Space の持ち主の判定（新しい押下と、パンが持っていない押下のリピートを 1 回ずつ）：判定の時の対象 × 判定の種類 × パンの実行中かを全組網羅する（網羅しない組の一覧は空）。Space の押下の表は押下の後に重なった手しか数えないので、パンが先に始まり、その最中に Tab で移った対象で持ち主を決める順序をここで数える（夜間の種でだけ出た形）。
   - どれも数え方は仕様のモデルだけで手の列をなぞり、乱数を引かない。網羅の行（`CanvasInputRows.Coverage`・`PressCoverage`・`DecisionCoverage`）が種に依らず全組を流す。
 - 空振りの検出：ハーネスは表明の分岐が実際に通ったことを記録し（`Exercised`）、決まった形の行の後に `CoverageGuard.ContainsAll` で必須の一覧（`CanvasInputHarness.RequiredExercises`）と照合する。表明の条件を誤って狭めると、ここが名指しして赤にする。
 - 種：普段 40・夜間 400（変数 `QUICKER_CANVAS_INPUT_SEEDS`・1 種だけは `QUICKER_CANVAS_INPUT_SEED`）、1 種につき 3 つの手の列。普段の実行の所要はおよそ 14 秒。
+  - Space を押さない余白・カードの押下（押下の間に Ctrl を押さないもの）は、別の乱数の列（`CanvasInputGenerator.SideSeed`）で、包める押下ごとに 90% の割合で Ctrl の held・released・late のどれかで包む。本流の乱数の引き方は変えない（包まない種の手の列は本流だけで決まる）。既定の 40 種には包める押下が数個しかないので、割合を高くして 3 つの水準を既定の種で出す（引き換えに、包める押下を包まずに流す形〔Ctrl の無いグループ移動など〕は乱数の列がまれにしか作らない。その形は網羅の行 `CanvasInputRows.PressCoverage`〔Ctrl の水準 none の行〕と決まった形の行 `group-drag-pushes-one-group-move`・`group-click-restores-members`・`external-cancel-restores-group`・`rubber-band-replaces-selection`・`blank-click-clears-selection` が流す）。
 - 既知の失敗は台帳の G3（ドラッグ中の Delete で取り除いたテーブルの移動を履歴に積む）と G5（Space の押下中に外して戻すとパン待機のカーソルが戻らない）だけで、どちらも Pending（きっかけ待ち）。
 - `WindowActivationTestCollection` に入れる。ハーネスは目印の API を使うがテストを持たないので、`SourceRuleTests` の規則 `window-activation-collection` の範囲の除外に理由つきで載せる。
-- mutation 実証済み（Space の横取りの判定・外して戻した対象の復元・取り消しの復元・履歴の世代・ホバーのカーソル・並べ替えのドラッグ元の記録）。
+- mutation 実証済み（Space の横取りの判定・外して戻した対象の復元・取り消しの復元・履歴の世代・ホバーのカーソル・並べ替えのドラッグ元の記録・押下の時の Ctrl の追加選択・追加選択の押下を処理済みにする・解放の時の Ctrl の読み直し・クリックの切り替え）。
 
 ## ソースを走査するガード
 

@@ -261,8 +261,11 @@ internal static class CanvasInputDimensions
     /// <summary>押下の時のパン待機（Space をパンが持って押しているか）</summary>
     public const string PanAtPress = "PanAtPress";
 
-    /// <summary>押下の間に挟んだ最初の手</summary>
+    /// <summary>押下の間に挟んだ最初の手（Ctrl の押下・解放は数えない。Ctrl は <see cref="PressCtrl"/> で数える）</summary>
     public const string During = "During";
+
+    /// <summary>押下の時と解放の時の Ctrl（押下の間に Ctrl を押したか）</summary>
+    public const string PressCtrl = "PressCtrl";
 
     /// <summary>左ボタンの押下の場所</summary>
     public static IReadOnlyList<CanvasSpot> PressSpots { get; } =
@@ -279,9 +282,38 @@ internal static class CanvasInputDimensions
 
     /// <summary>押下の間に挟む手の水準</summary>
     public static IReadOnlyList<string> DuringLevels { get; } =
-    ["none", "space", "ctrl", "delete", "cancel", "move-out"];
+    ["none", "space", "delete", "cancel", "move-out"];
+
+    /// <summary>押下の Ctrl の水準</summary>
+    /// <remarks>
+    /// <list type="bullet">
+    ///   <item>none：押下の時も解放の時も離していて、押下の間にも押さない</item>
+    ///   <item>blip：押下の時も解放の時も離していて、押下の間に押して離す</item>
+    ///   <item>held：押下の時も解放の時も押している（余白なら追加のラバーバンド、カードなら Ctrl のクリック）</item>
+    ///   <item>released：押下の時は押していて、解放の時は離している</item>
+    ///   <item>late：押下の時は離していて、解放の時は押している</item>
+    /// </list>
+    /// ビヘイビアは Ctrl を押下の時（<c>RubberBandBehavior</c> の追加選択・<c>DragBehavior</c> のグループ移動）と
+    /// 解放の時（<c>DragBehavior</c> のクリックの切り替え）に読むので、2 つの時点の組を水準にする。
+    /// </remarks>
+    public static IReadOnlyList<string> CtrlLevels { get; } =
+    ["none", "blip", "held", "released", "late"];
+
+    /// <summary>押下の Ctrl の水準（押下の時・解放の時・押下の間に押したか）</summary>
+    public static string CtrlLevel(bool atPress, bool atRelease, bool pressedDuring) =>
+        (atPress, atRelease) switch
+        {
+            (true, true) => "held",
+            (true, false) => "released",
+            (false, true) => "late",
+            _ => pressedDuring ? "blip" : "none",
+        };
 
     /// <summary>左ボタンの押下の次元表（押下 1 回を 1 ケース）</summary>
+    /// <remarks>
+    /// 4 因子の 2 因子の組を網羅する。組はパン待機の押下の間の Space の押下を除いてすべて作れる
+    /// （Ctrl の水準はどの場所・パン待機・押下の間の手とも重ねられる）。
+    /// </remarks>
     public static DimensionTable PressTable { get; } =
         new(
             EngineIds.DiagramEdit,
@@ -300,6 +332,11 @@ internal static class CanvasInputDimensions
                     During,
                     DuringLevels.Select(d => new Level(d)).ToList(),
                     "押下の間に挟んだ最初の手"
+                ),
+                new Factor(
+                    PressCtrl,
+                    CtrlLevels.Select(c => new Level(c)).ToList(),
+                    "押下の時と解放の時の Ctrl（押下の間に Ctrl を押したか）"
                 ),
             ],
             isValid: assignment =>
@@ -322,6 +359,8 @@ internal static class CanvasInputDimensions
         CanvasSpot? spot = null;
         var pan = "none";
         string? during = null;
+        var ctrlAtPress = false;
+        var ctrlDuring = false;
 
         foreach (var step in steps)
         {
@@ -330,6 +369,8 @@ internal static class CanvasInputDimensions
                 spot = step.Spot;
                 pan = model.SpaceDown && model.Owner == SpaceOwner.Pan ? "wait" : "none";
                 during = null;
+                ctrlAtPress = model.CtrlDown;
+                ctrlDuring = false;
             }
 
             model.Apply(step);
@@ -339,10 +380,14 @@ internal static class CanvasInputDimensions
                 continue;
             }
 
+            if (step.Op == CanvasOp.CtrlDown)
+            {
+                ctrlDuring = true;
+            }
+
             during ??= step.Op switch
             {
                 CanvasOp.SpaceDown => "space",
-                CanvasOp.CtrlDown => "ctrl",
                 CanvasOp.Delete => "delete",
                 CanvasOp.ExternalCancel => "cancel",
                 CanvasOp.MoveTo
@@ -359,6 +404,7 @@ internal static class CanvasInputDimensions
                         [PressSpot] = pressed.ToString(),
                         [PanAtPress] = pan,
                         [During] = during ?? "none",
+                        [PressCtrl] = CtrlLevel(ctrlAtPress, model.CtrlDown, ctrlDuring),
                     }
                 );
                 spot = null;

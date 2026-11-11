@@ -98,6 +98,7 @@ docs 不在の外部エージェントが config を自己発見的に書ける�
   - 省略できる引数の `null` は省略と同じ
   - JSON の種類違い（配列の要素・辞書の値を含む）は断る
   - `enum` の値とスキーマに無い引数は見ない
+  - 引数の全体がオブジェクトでない（配列・文字列・数・真偽値・`null`）呼び出しは、`ToolArgumentShape.Check` の WrongType（`(arguments)`）で断る。2 つの入口は JSON として読めた引数をすべて `Check` へ渡し、読めない引数（と内蔵チャットの空・空白＝`{}`）だけをツールの処理に任せる。外すと、引数を読まないツール（`get_diagram_summary`・`list_queries`）が成功で答え、ほかのツールはツールごとの文言で失敗して、2 つのホストの答えが割れる
 - 外すと、ホストが既定値で黙って進め（`table_name` → `NewTable`）、型違いを読み捨て、`set_query` の配列のオブジェクトでない要素が生の例外になる。
   直接呼ぶ経路のために、ホストの黙った既定値も消してある（`relationship_type` の省略も 2 つのホストが断る）。
 - 固定は入力スキーマから崩したケースを自動で作る総当たり（共有部品 `ToolArgumentFuzz`、流れと表明は `ToolArgumentShapeFuzzRunner`）の 3 クラス。
@@ -105,6 +106,7 @@ docs 不在の外部エージェントが config を自己発見的に書ける�
   - `ChatToolArgumentShapeFuzzTests`（内蔵チャット）
   - `CodeGenToolArgumentShapeFuzzTests`（MCP のコード生成）
   - ホストの `relationship_type` の必須は `ToolScenarioTests` の行 `validation-relationship-type-missing-is-reported-as-required` が見る。
+  - 引数の全体は、ツールごとに根を 5 種（配列・文字列・数・真偽値・`null`）へ置き換えたケース（`ToolArgumentFuzz.RootCases`・崩し方 `non-object-root`）で、入口ごとの形の検査の文（`Entrance.RootRefusal`）との一致まで見る（ツールの処理が別の理由で失敗しても合格にしない）。mutation 実証済み（2 つの入口）。
 - 引数の値の読み取りは `ToolArguments`（`GetString` / `GetBool`）、`relationship_type` の名前の解釈は `RelationshipTypeNames.TryParse`（Model）、列ペアの比較は `RelationshipColumnPair.HaveSamePairs` の 1 か所だけで、ほかに写さない。
 - ガード：`SourceRuleTests` の規則 `tool-argument-parsing-copies`（正本自身が拾えることは規則 `tool-argument-parsing-owners`）。
   - `SourceSymbolScan` で src の `#if` のどの分岐もシンボルで読み、次を正本の外では理由つきの一覧（別の書式を読む Mermaid と Excel 定義書の取込の `ParseRelationshipType`）とファイル・件数で厳密に照合する。

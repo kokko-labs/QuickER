@@ -19,8 +19,16 @@ internal enum DocFile
 /// <summary>外部が書くファイルの中身の種類（モデルが読めるか・将来版かを決める）</summary>
 internal enum DocContentKind
 {
-    /// <summary>現行の版の図（表 1 つ）</summary>
+    /// <summary>現行の版の図（表 1 つ・配置なし）</summary>
     Diagram,
+
+    /// <summary>現行の版の図（表 3 つ・全部の表が配置を持つ。<see cref="DocumentFileHarness.LayoutDocument"/>）</summary>
+    DiagramWithLayout,
+
+    /// <summary>
+    /// 現行の版の図（表 4 つ・前の 2 つだけが配置を持ち、後の 2 つは配置が欠ける。<see cref="DocumentFileHarness.LayoutDocument"/>）
+    /// </summary>
+    DiagramPartialLayout,
 
     /// <summary>BOM 付きの現行の版の図（表 1 つ）</summary>
     DiagramWithBom,
@@ -61,6 +69,42 @@ internal enum DocHook
 
     /// <summary>開く・再読込の読み取りの直後（<c>AfterLoadReadForTests</c>）</summary>
     AfterLoadRead,
+}
+
+/// <summary>1 手の間だけ文書のファイルに掛けるアクセスの条件の種類</summary>
+internal enum DocAccessKind
+{
+    /// <summary>ハーネスが FileShare.None で開いたまま（読めない・書けない）</summary>
+    ShareNone,
+
+    /// <summary>ハーネスが FileShare.Read で開いたまま（読める・書けない）</summary>
+    ShareRead,
+
+    /// <summary>読み取り専用の属性（読める・書けない）</summary>
+    ReadOnly,
+}
+
+/// <summary>
+/// 1 手の間だけ文書のファイルに掛けるアクセスの条件（ハーネスが手の前に掛け、観測の前に外す。手の前にファイルが無ければ掛けない）
+/// </summary>
+/// <param name="File">条件を掛けるファイル</param>
+/// <param name="Kind">条件の種類</param>
+internal sealed record DocAccess(DocFile File, DocAccessKind Kind)
+{
+    /// <summary>条件の下でファイルを読めるか（どの条件でも書けない）</summary>
+    public bool Readable => Kind != DocAccessKind.ShareNone;
+
+    /// <summary>報告と次元表の水準の名前</summary>
+    public string KindName =>
+        Kind switch
+        {
+            DocAccessKind.ShareNone => "ShareNone",
+            DocAccessKind.ShareRead => "ShareRead",
+            _ => "ReadOnly",
+        };
+
+    /// <summary>報告用の 1 語</summary>
+    public override string ToString() => $"{KindName}:{File}";
 }
 
 /// <summary>監視イベントに載せる内容ハッシュの決め方</summary>
@@ -278,6 +322,12 @@ internal sealed record DocStep(DocOp Op)
     /// <summary>この手の最初の警告の確認の最中に流す手（外部の書き込み・監視イベント。1 回だけ）</summary>
     public IReadOnlyList<DocOp> DuringConfirm { get; init; } = [];
 
+    /// <summary>
+    /// この手の間だけ文書のファイルに掛けるアクセスの条件（無ければ null）。割り込みの書き込み・確認の最中の手とは併せない
+    /// （ハーネスの外部の書き込みが条件に断られるため）
+    /// </summary>
+    public DocAccess? Access { get; init; }
+
     /// <summary>元のテストの表明（モデルとの照合と不変条件に加えて当てる）</summary>
     public IReadOnlyList<Action<DocObservation>> Expectations { get; init; } = [];
 
@@ -299,6 +349,11 @@ internal sealed record DocStep(DocOp Op)
         if (DuringConfirm.Count > 0)
         {
             text += $" during-confirm=[{string.Join(", ", DuringConfirm)}]";
+        }
+
+        if (Access is not null)
+        {
+            text += $" access={Access}";
         }
 
         return text;
@@ -403,6 +458,13 @@ internal static class Doc
         step with
         {
             Race = new DocRace(hook, write),
+        };
+
+    /// <summary>この手の間だけファイルにアクセスの条件を掛ける</summary>
+    public static DocStep WithAccess(this DocStep step, DocFile file, DocAccessKind kind) =>
+        step with
+        {
+            Access = new DocAccess(file, kind),
         };
 
     /// <summary>この手の最初の警告の確認の最中に流す手を足す</summary>

@@ -19,13 +19,6 @@ internal static class NameFuzzNotGenerated
                 ProtectionNames.EnginePart(EngineIds.Name, "DdlRoundTrip"),
             ],
             [
-                NotGenerated.Pending(
-                    "duplicate-names-in-diagram",
-                    "同じ名前が 2 つ以上ある図（図のファイルの手編集）の取込と差分",
-                    "G5",
-                    "生成器は名前の組（2 つ）だけを作り、同じ名前を 3 つ目として持つ図を作らない。名前の照合（NameMatching）は 2 件以上の一致を見つからない扱いに分岐する",
-                    NotGenerated.Unguarded
-                ),
                 NotGenerated.Accepted(
                     "empty-control-and-normalization-forms",
                     "空の名前・制御文字と行区切りを含む名前・上限を大きく超える長い名前・NFC と NFD だけが違う名前",

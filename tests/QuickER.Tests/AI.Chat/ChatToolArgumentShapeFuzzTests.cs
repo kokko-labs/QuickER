@@ -80,7 +80,7 @@ public sealed class ChatToolArgumentShapeFuzzTests
 
         public override ToolArgumentShapeFuzzRunner.CaseOutcome RunCase(
             string toolName,
-            JsonObject args
+            JsonNode? args
         )
         {
             var host = NewHost(out var viewModel);
@@ -99,6 +99,14 @@ public sealed class ChatToolArgumentShapeFuzzTests
                 string.Format(GuiStrings.Tool_Error, string.Empty),
                 StringComparison.Ordinal
             );
+
+        /// <remarks>表示言語の文なので、ケースを流す時点のカルチャで組む</remarks>
+        public override string RootRefusal =>
+            string.Format(
+                QuickER.AI.Chat.Resources.Strings.Tool_ArgumentWrongType,
+                ToolArgumentFuzz.RootType,
+                "object"
+            );
     }
 
     /// <summary>種の図を読み込んだ GUI の図と、それを操作するチャットのツール実行口を作る</summary>
@@ -114,12 +122,12 @@ public sealed class ChatToolArgumentShapeFuzzTests
     private static (string Result, bool Success) Run(
         QuickER.AI.IErDiagramToolHost host,
         string toolName,
-        JsonObject arguments
+        JsonNode? arguments
     )
     {
         try
         {
-            return host.Execute(toolName, arguments.ToJsonString());
+            return host.Execute(toolName, ToolArgumentFuzz.JsonText(arguments));
         }
         catch (Exception ex)
         {

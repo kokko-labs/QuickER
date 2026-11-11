@@ -505,6 +505,83 @@ internal static class CanvasInputRows
                     S.Move(20, 15),
                     S.LeftUp
                 ),
+                Row(
+                    "rubber-band-replaces-selection",
+                    null,
+                    "余白から 2 番目のカードの上まで引いたラバーバンドは、矩形に触れたテーブルだけを選ぶ（押下の前の選択を外す）",
+                    S.ClickFocus(T.Canvas),
+                    S.LeftDown(CanvasSpot.Blank),
+                    S.Move(10, 5),
+                    S.MoveTo(CanvasSpot.Card2),
+                    S.LeftUp
+                ),
+                Row(
+                    "ctrl-rubber-band-adds-to-selection",
+                    null,
+                    "Ctrl を押して余白から引いたラバーバンドは、押下の前の選択に矩形に触れたテーブルを足す（押下で全解除しない）",
+                    S.ClickFocus(T.Canvas),
+                    S.CtrlDown,
+                    S.LeftDown(CanvasSpot.Blank),
+                    S.Move(10, 5),
+                    S.MoveTo(CanvasSpot.Card2),
+                    S.LeftUp,
+                    S.CtrlUp
+                ),
+                Row(
+                    "blank-click-clears-selection",
+                    null,
+                    "余白を閾値以内で離すと（クリック）、選択をすべて解除する",
+                    S.ClickFocus(T.Canvas),
+                    S.LeftDown(CanvasSpot.Blank),
+                    S.Move(1, 1),
+                    S.LeftUp
+                ),
+                Row(
+                    "ctrl-blank-click-keeps-selection",
+                    null,
+                    "Ctrl を押して余白を閾値以内で離しても（クリック）、選択は変わらない",
+                    S.ClickFocus(T.Canvas),
+                    S.CtrlDown,
+                    S.LeftDown(CanvasSpot.Blank),
+                    S.Move(1, 1),
+                    S.LeftUp,
+                    S.CtrlUp
+                ),
+                Row(
+                    "card-ctrl-at-release-toggles",
+                    null,
+                    "Ctrl を押さずにカードを押し、離す前に Ctrl を押すと、解放の Ctrl でそのテーブルの選択を切り替える（足す）",
+                    S.ClickFocus(T.Canvas),
+                    S.LeftDown(CanvasSpot.Card2),
+                    S.Move(1, 1),
+                    S.CtrlDown,
+                    S.LeftUp,
+                    S.CtrlUp
+                ),
+                Row(
+                    "card-ctrl-released-before-release-selects-only-card",
+                    null,
+                    "Ctrl を押してカードを押し、離す前に Ctrl を離すと、そのテーブルだけを選ぶ（解放の時の Ctrl で決まる）",
+                    S.ClickFocus(T.Canvas),
+                    S.CtrlDown,
+                    S.LeftDown(CanvasSpot.Card2),
+                    S.Move(1, 1),
+                    S.CtrlUp,
+                    S.LeftUp
+                ),
+                Row(
+                    "ctrl-press-on-group-member-toggles-instead-of-group-drag",
+                    null,
+                    "2 つ選んでから選択中のカードを Ctrl を押したまま閾値以内で離すと、グループ移動でなく、そのテーブルを選択から外す",
+                    S.ClickFocus(T.Canvas),
+                    S.CtrlDown,
+                    S.LeftDown(CanvasSpot.Card2),
+                    S.LeftUp,
+                    S.LeftDown(CanvasSpot.Card),
+                    S.Move(1, 1),
+                    S.LeftUp,
+                    S.CtrlUp
+                ),
             ]
         );
 
@@ -513,11 +590,19 @@ internal static class CanvasInputRows
         BuildCoverage();
 
     /// <summary>
-    /// 押下の網羅の行（押下の場所 × 押下の間の手の全組。パン待機は順に割り当てる）
+    /// 押下の網羅の行（押下の場所 × 押下の間の手の全組。Ctrl とパン待機は番号から割り当てて、残りの 2 因子の組も埋める）
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// 場所の番号 s と押下の間の手の番号 d から、Ctrl は (s + d) mod 5 の水準（場所ごとにも押下の間の手ごとにも 5 水準が一巡する）、
+    /// パン待機は s + d が奇数のとき（パン待機の押下の間に Space は挟めないので、Space の行は待機しない）。
+    /// これで場所 × Ctrl・押下の間の手 × Ctrl・パン待機 × Ctrl・場所 × パン待機・パン待機 × 押下の間の手の組がすべて出る。
+    /// </para>
+    /// <para>
     /// カードの押下の間の Delete だけは作らない：押したカードのテーブルを消すと、解放で消したテーブルの移動を積む（G3・きっかけ待ち）
-    /// ので網羅の行が常に赤になる。その組は乱数の手の列（ドラッグ中の Delete）が数える。
+    /// ので網羅の行が常に赤になる。その組は乱数の手の列（ドラッグ中の Delete）が数える。外した行の Ctrl の水準（released）は、
+    /// カードの押下の間に何も挟まない行を 1 つ足して埋める。
+    /// </para>
     /// </remarks>
     public static IReadOnlyList<(
         string Id,
@@ -527,60 +612,100 @@ internal static class CanvasInputRows
     private static List<(string, IReadOnlyList<CanvasStep>)> BuildPressCoverage()
     {
         var rows = new List<(string, IReadOnlyList<CanvasStep>)>();
-        var index = 0;
+        var spots = CanvasInputDimensions.PressSpots;
+        var durings = CanvasInputDimensions.DuringLevels;
+        var ctrls = CanvasInputDimensions.CtrlLevels;
 
-        foreach (var spot in CanvasInputDimensions.PressSpots)
+        for (var s = 0; s < spots.Count; s++)
         {
-            foreach (var during in CanvasInputDimensions.DuringLevels)
+            for (var d = 0; d < durings.Count; d++)
             {
-                if (spot == CanvasSpot.Card && during == "delete")
+                if (spots[s] == CanvasSpot.Card && durings[d] == "delete")
                 {
                     continue;
                 }
 
                 // パン待機の押下の間に Space は挟めない（もう押している）
-                var pan = index++ % 2 == 1 && during != "space";
-                var steps = new List<CanvasStep> { S.ClickFocus(T.Canvas) };
-
-                if (pan)
-                {
-                    steps.Add(S.SpaceDown);
-                }
-
-                steps.Add(S.LeftDown(spot));
-                steps.AddRange(
-                    during switch
-                    {
-                        "space" => [S.SpaceDown, S.Move(15, 10), S.SpaceUp],
-                        "ctrl" => [S.CtrlDown, S.Move(15, 10), S.CtrlUp],
-                        "delete" => [S.Move(5, 5), S.Delete, S.Move(15, 10)],
-                        "cancel" => [S.Move(15, 10), S.ExternalCancel, S.Move(5, 5)],
-                        "move-out" =>
-                        [
-                            S.MoveTo(
-                                CanvasSpots.OnCanvas(spot) ? CanvasSpot.Outside : CanvasSpot.Blank
-                            ),
-                        ],
-                        _ => [S.Move(15, 10)],
-                    }
-                );
-                steps.Add(S.LeftUp);
-
-                if (pan)
-                {
-                    steps.Add(S.SpaceUp);
-                }
-
-                rows.Add(
-                    (
-                        $"{CoveragePrefix}press-{spot}-{during}-{(pan ? "wait" : "none")}".ToLowerInvariant(),
-                        steps
-                    )
-                );
+                var pan = (s + d) % 2 == 1 && durings[d] != "space";
+                rows.Add(PressRow(spots[s], durings[d], ctrls[(s + d) % ctrls.Count], pan));
             }
         }
 
+        // カードの押下の間の Delete を外した分の Ctrl の水準
+        rows.Add(PressRow(CanvasSpot.Card, "none", "released", pan: false));
         return rows;
+    }
+
+    /// <summary>押下の網羅の行を 1 つ作る（場所・押下の間の手・Ctrl の水準・パン待機）</summary>
+    private static (string, IReadOnlyList<CanvasStep>) PressRow(
+        CanvasSpot spot,
+        string during,
+        string ctrl,
+        bool pan
+    )
+    {
+        var steps = new List<CanvasStep> { S.ClickFocus(T.Canvas) };
+
+        if (pan)
+        {
+            steps.Add(S.SpaceDown);
+        }
+
+        // 押下の時に Ctrl を押している水準
+        if (ctrl is "held" or "released")
+        {
+            steps.Add(S.CtrlDown);
+        }
+
+        steps.Add(S.LeftDown(spot));
+
+        // 押下の間に押して離す水準（押下の間の最初の手には数えない）
+        if (ctrl == "blip")
+        {
+            steps.Add(S.CtrlDown);
+            steps.Add(S.CtrlUp);
+        }
+
+        steps.AddRange(
+            during switch
+            {
+                "space" => [S.SpaceDown, S.Move(15, 10), S.SpaceUp],
+                "delete" => [S.Move(5, 5), S.Delete, S.Move(15, 10)],
+                "cancel" => [S.Move(15, 10), S.ExternalCancel, S.Move(5, 5)],
+                "move-out" =>
+                [
+                    S.MoveTo(CanvasSpots.OnCanvas(spot) ? CanvasSpot.Outside : CanvasSpot.Blank),
+                ],
+                _ => [S.Move(15, 10)],
+            }
+        );
+
+        // 解放の時の Ctrl（released は解放の前に離し、late は解放の前に押す）
+        if (ctrl == "released")
+        {
+            steps.Add(S.CtrlUp);
+        }
+        else if (ctrl == "late")
+        {
+            steps.Add(S.CtrlDown);
+        }
+
+        steps.Add(S.LeftUp);
+
+        if (ctrl is "held" or "late")
+        {
+            steps.Add(S.CtrlUp);
+        }
+
+        if (pan)
+        {
+            steps.Add(S.SpaceUp);
+        }
+
+        return (
+            $"{CoveragePrefix}press-{spot}-{during}-{ctrl}-{(pan ? "wait" : "none")}".ToLowerInvariant(),
+            steps
+        );
     }
 
     private static ScenarioRow<IReadOnlyList<CanvasStep>> Row(

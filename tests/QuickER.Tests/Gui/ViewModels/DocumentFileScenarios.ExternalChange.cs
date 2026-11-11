@@ -297,5 +297,19 @@ internal static partial class DocumentFileScenarios
                             .Be("Original", "図には触れない");
                     })
             ),
+            Row(
+                "ext-deleted-event-with-not-diagram-on-disk",
+                "削除の通知は、ディスクが図でない内容に変わっていても通知だけで図に触れない（乱数の手の列に出にくい組の網羅）",
+                Doc.Write(A, "Original"),
+                OpenClean(),
+                Doc.WriteKind(A, DocContentKind.NotDiagram, "Junk"),
+                Doc.Event(DocumentFileChangeKind.Deleted)
+                    .Expect(o =>
+                    {
+                        o.Status.Should().Be(Strings.Status_ExternalFileDeleted);
+                        o.Tables.Should().ContainSingle().Which.Should().Be("Original");
+                        o.IsDirty.Should().BeFalse();
+                    })
+            ),
         ];
 }

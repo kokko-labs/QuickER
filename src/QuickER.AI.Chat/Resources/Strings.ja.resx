@@ -411,9 +411,6 @@ ER 図の作成・変更は必ず提供されたツール（{0}）で行って�
   <data name="QueryTool_InvalidArgumentsJson" xml:space="preserve">
     <value>ツール '{0}' の引数 JSON を解釈できませんでした。</value>
   </data>
-  <data name="QueryTool_ArgumentsNotObject" xml:space="preserve">
-    <value>ツール '{0}' の引数は JSON オブジェクトで渡してください。</value>
-  </data>
   <data name="Tool_ArgumentMissing" xml:space="preserve">
     <value>引数 '{0}' は必須です。</value>
   </data>

@@ -88,9 +88,9 @@ internal static partial class SyncPlanExpectationRows
             ),
             (
                 "case-only-duplicates-match-exactly",
-                "大文字小文字だけ違う名前が共存しても例外にならず、序数一致の組で列順を比べる",
+                "DB の側に大文字小文字だけ違う名前が共存しても例外にならず、序数一致の組で列順を比べる（図の側の同じ名前は差分の入口が断る）",
                 [("Customer", ["Id", "Dup", "dup"]), ("customer", ["Id", "Name"])],
-                [("Customer", ["Id", "dup", "Dup"])],
+                [("Customer", ["dup", "Id"])],
                 "Customer"
             ),
         ];

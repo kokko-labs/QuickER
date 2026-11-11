@@ -77,7 +77,7 @@ public static class NameFuzzDimensions
         new(
             EngineIds.Name,
             "Entrances",
-            "名前の総当たり（GUI・ツール・取込・クエリ定義・C# 生成の入口）",
+            "名前の総当たり（GUI・ツール・取込・クエリ定義・C# 生成・DDL と差分の入口）",
             Table,
             0,
             [
@@ -90,9 +90,12 @@ public static class NameFuzzDimensions
                 "tests/QuickER.Tests/Gui/ViewModels/NameIdentityViewModelFuzzTests.cs",
                 "tests/QuickER.Tests/Mcp.Tools/NameIdentityToolFuzzTests.cs",
                 "tests/QuickER.Tests/Provider.Sqlite/NameIdentitySqliteImportFuzzTests.cs",
+                "tests/QuickER.Tests/Provider/NameIdentityDdlFuzzTests.cs",
             ],
             [
                 "src/QuickER.Model/SchemaNames.cs",
+                "src/QuickER.Model/DiagramNameDuplicates.cs",
+                "src/QuickER.Provider/SqlNameDuplicates.cs",
                 "src/QuickER.Mcp.Tools",
                 "src/QuickER.Gui/ViewModels",
                 "src/QuickER.Gui/Services",
