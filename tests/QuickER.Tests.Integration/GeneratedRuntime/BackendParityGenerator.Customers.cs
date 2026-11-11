@@ -216,7 +216,7 @@ public sealed partial class BackendParityGenerator
             slot.Referrals[target] = RowState.Updated;
         }
 
-        _ops.Add(new EditCustomerOp(name, target, Note: $"n{_step}"));
+        _ops.Add(new EditCustomerOp(name, target, Note: WidenText($"n{_step}")));
     }
 
     /// <summary>根の紹介者を、ほかの顧客へ付け替えるか外す（グラフに持っている顧客と自分は指さない）</summary>
@@ -266,7 +266,7 @@ public sealed partial class BackendParityGenerator
 
         if (_random.Next(3) == 0)
         {
-            _ops.Add(new EditContactOp(name, id, $"e{_step}"));
+            _ops.Add(new EditContactOp(name, id, WidenText($"e{_step}")));
         }
         else
         {

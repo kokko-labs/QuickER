@@ -19,6 +19,7 @@ internal static class BackendParityNotGenerated
             [
                 ProtectionNames.EnginePart(EngineIds.GeneratedRuntime, "Parity"),
                 ProtectionNames.EnginePart(EngineIds.GeneratedRuntime, "ParityOutcomes"),
+                ProtectionNames.EnginePart(EngineIds.GeneratedRuntime, "ParityValues"),
             ],
             [
                 NotGenerated.Accepted(
@@ -73,16 +74,9 @@ internal static class BackendParityNotGenerated
                     NotGenerated.Unguarded
                 ),
                 NotGenerated.Pending(
-                    "value-breadth",
-                    "値の幅（日時の Kind と端数・空の blob・非 ASCII の文字列・decimal の幅）",
-                    "G3",
-                    "日時は 1 つの値、blob は 1〜2 バイト、文字列は ASCII で作る。実装先の型変換と往復はこれらの値で分岐する",
-                    NotGenerated.Unguarded
-                ),
-                NotGenerated.Pending(
                     "other-dialects",
                     "SQLite 以外の方言の乱数の列",
-                    "G3",
+                    "実装先の一致の SQL Server の乱数の列（未起動）",
                     "乱数の列は SQLite の BackendParityFixture だけで流す。QuickER 版と EF Core の SQL は方言で分岐する（SQL Server の系統は乱数の保存だけを持つ）",
                     "`GeneratedRuntime/ParitySqlServerSaves`"
                 ),

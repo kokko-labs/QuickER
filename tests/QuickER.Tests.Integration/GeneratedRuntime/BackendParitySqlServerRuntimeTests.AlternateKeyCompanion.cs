@@ -56,6 +56,13 @@ public sealed partial class BackendParitySqlServerRuntimeTests
         /// kit 4 の code を取る kit 3 に置き、2 つめの文脈の中で書く
         /// </summary>
         TakenFromDeleted,
+
+        /// <summary>
+        /// kit 1 が code を誰も持たない値（K9）へ変えて手放し、その code（K1）を kit 2 の更新が取る（kit 1 を先に渡す）。ほかの行は
+        /// 手放す kit 1 に置く（読んだ後に消える・版が進む・Before のフックが更新を飛ばすと、K1 を手放さないか、手放したまま保存が
+        /// 断られる）
+        /// </summary>
+        TakenFromReleased,
     }
 
     /// <summary>同じ保存のほかの行（代替キーを書く行と一緒に渡す更新の行）</summary>
@@ -112,6 +119,7 @@ public sealed partial class BackendParitySqlServerRuntimeTests
             {
                 AlternateKeyRowShape.Plain => "plain",
                 AlternateKeyRowShape.TakenFromDeleted => "taken-from-deleted",
+                AlternateKeyRowShape.TakenFromReleased => "taken-from-released",
                 _ => throw new ArgumentOutOfRangeException(nameof(shape)),
             };
 
@@ -158,8 +166,12 @@ public sealed partial class BackendParitySqlServerRuntimeTests
     )
     {
         var takenFromDeleted = companionCase.Shape == AlternateKeyRowShape.TakenFromDeleted;
-        var writerId = takenFromDeleted ? 2 : 1;
-        var companionId = takenFromDeleted ? 3 : 2;
+        var takenFromReleased = companionCase.Shape == AlternateKeyRowShape.TakenFromReleased;
+        var writerId = takenFromDeleted || takenFromReleased ? 2 : 1;
+        var companionId =
+            takenFromDeleted ? 3
+            : takenFromReleased ? 1
+            : 2;
         List<object> hooks = companionCase.Companion switch
         {
             AlternateKeyCompanion.GoneInsertWhenMissingHooks => [new NoOpKitHook()],
@@ -218,7 +230,7 @@ public sealed partial class BackendParitySqlServerRuntimeTests
             row.MarkRemoved();
         }
 
-        writer.Code = CodeValue.Create(takenFromDeleted ? "K1" : "K9");
+        writer.Code = CodeValue.Create(takenFromDeleted || takenFromReleased ? "K1" : "K9");
         writer.MarkUpdated();
 
         if (takenFromDeleted)
@@ -226,13 +238,21 @@ public sealed partial class BackendParitySqlServerRuntimeTests
             companion.Code = CodeValue.Create("K4");
         }
 
+        if (takenFromReleased)
+        {
+            companion.Code = CodeValue.Create("K9");
+        }
+
         companion.Name = NameValue.Create("companion");
         companion.MarkUpdated();
 
         var mode = companionCase.Mode;
+        KitEntity[] roots = takenFromReleased
+            ? [companion, writer, .. deleted]
+            : [writer, companion, .. deleted];
         var outcome = await OutcomeAsync(() =>
             kits.SaveAsync(
-                [writer, companion, .. deleted],
+                roots,
                 insertWhenUpdateMissing: companionCase.InsertWhenUpdateMissing,
                 mode: mode,
                 cancellationToken: Ct

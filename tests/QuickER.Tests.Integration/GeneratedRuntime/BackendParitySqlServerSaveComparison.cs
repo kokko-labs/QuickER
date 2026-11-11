@@ -35,7 +35,7 @@ internal static partial class BackendParitySqlServerSaveComparison
     ) =>
         [
             .. scenario
-                .Rows.Where(row => !row.Skipped && row.Role != SaveRowRole.New)
+                .Rows.Where(row => !row.Skipped && !row.IsNew())
                 .Select(row =>
                     (
                         Row: row,

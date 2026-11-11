@@ -108,6 +108,7 @@ public sealed partial class BackendParityRuntimeTests
         var tolerated = new Dictionary<string, int>(StringComparer.Ordinal);
         var coverage = new CoverageCounter(BackendParityDimensions.Table);
         var outcomes = new CoverageCounter(BackendParityOutcomeDimensions.Table);
+        var values = new CoverageCounter(BackendParityValueDimensions.Table);
         var ranAllSeeds = true;
 
         // 手の差で比べなかった手（実装先ごと。黙って比較が減らないよう、件数を出力して下限を表明する）
@@ -162,6 +163,7 @@ public sealed partial class BackendParityRuntimeTests
                 var scenario = row.Input.Create();
                 rowProblems.AddRange(BackendParityCoverageRows.MissingTupleProblems(row, scenario));
                 BackendParityDimensions.Observe(coverage, scenario);
+                BackendParityValueDimensions.Observe(values, scenario);
                 var result = await scenario.RunAsync(Ct);
                 BackendParityOutcomeDimensions.Observe(
                     outcomes,
@@ -189,6 +191,7 @@ public sealed partial class BackendParityRuntimeTests
         {
             var scenario = BackendParityGenerator.Create(seed);
             BackendParityDimensions.Observe(coverage, scenario);
+            BackendParityValueDimensions.Observe(values, scenario);
             var result = await scenario.RunAsync(Ct);
             BackendParityOutcomeDimensions.Observe(
                 outcomes,
@@ -270,6 +273,8 @@ public sealed partial class BackendParityRuntimeTests
         );
         var outcomeReport = outcomes.Report();
         outcomeReport.WriteSummary();
+        var valueReport = values.Report();
+        valueReport.WriteSummary();
         report.Failures.Should().BeEmpty(report.Render());
 
         // 手の差で外した比較が、実装先ごとに全体の 1 割を超えない（列の末尾にだけ置く前提が崩れていない）。直す区切りのある
@@ -311,6 +316,11 @@ public sealed partial class BackendParityRuntimeTests
             );
             outcomeReport.AssertGaps(
                 BackendParityOutcomeDimensions.Gaps,
+                BackendParityDimensions.RandomScope,
+                plan
+            );
+            valueReport.AssertGaps(
+                BackendParityValueDimensions.Gaps,
                 BackendParityDimensions.RandomScope,
                 plan
             );

@@ -51,12 +51,12 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Provider.PostgreSql` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses` |
 | `src/QuickER.Provider.SqlServer` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses` |
 | `src/QuickER.Provider.Sqlite` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`Name/Entrances`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses`・`rule:sqlite-file-connection-pooling-off` |
-| `src/QuickER.Runtime` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParitySqlServerSaves`・`table:EditModelScenarios`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
-| `src/QuickER.Runtime.AspNetCore` | 全体 | `GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves` |
-| `src/QuickER.Runtime.EntityFrameworkCore` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves` |
-| `src/QuickER.Runtime.InMemory` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`table:TranslatorParityPredicates` |
+| `src/QuickER.Runtime` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`table:EditModelScenarios`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
+| `src/QuickER.Runtime.AspNetCore` | 全体 | `GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues` |
+| `src/QuickER.Runtime.EntityFrameworkCore` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues` |
+| `src/QuickER.Runtime.InMemory` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityValues`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.SqlServer` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/ParitySqlServerSaves`・`table:TranslatorParityPredicates` |
-| `src/QuickER.Runtime.Sqlite` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`table:TranslatorParityPredicates` |
+| `src/QuickER.Runtime.Sqlite` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParityValues`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.Sync` | 全体 | `SyncModel/Config`・`SyncModel/Outcomes`・`SyncModel/Random` |
 | `src/QuickER.Settings` | 全体 | `DocumentFile/Settings` |
 
@@ -231,12 +231,12 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Provider/SyncScriptBuilderBase.cs` | `SyncPlan/Fuzz` |
 | `src/QuickER.Provider/SyncScriptBuilderHelper.cs` | `SyncPlan/Fuzz` |
 | `src/QuickER.Provider/UniqueConstraintNaming.cs` | `rule:sync-name-comparison-tokens` |
-| `src/QuickER.Runtime` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParitySqlServerSaves`・`table:EditModelScenarios`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
-| `src/QuickER.Runtime.AspNetCore` | `GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves` |
-| `src/QuickER.Runtime.EntityFrameworkCore` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves` |
-| `src/QuickER.Runtime.InMemory` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`table:TranslatorParityPredicates` |
+| `src/QuickER.Runtime` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`table:EditModelScenarios`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
+| `src/QuickER.Runtime.AspNetCore` | `GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues` |
+| `src/QuickER.Runtime.EntityFrameworkCore` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues` |
+| `src/QuickER.Runtime.InMemory` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityValues`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.SqlServer` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/ParitySqlServerSaves`・`table:TranslatorParityPredicates` |
-| `src/QuickER.Runtime.Sqlite` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`table:TranslatorParityPredicates` |
+| `src/QuickER.Runtime.Sqlite` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParityValues`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.Sync` | `SyncModel/Config`・`SyncModel/Outcomes`・`SyncModel/Random` |
 | `src/QuickER.Settings` | `DocumentFile/Settings` |
 
@@ -595,7 +595,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 ### `GeneratedRuntime/Parity`
 
 - 名前：実装先どうしの一致（乱数の操作の列）
-- テストのソース：`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityBackend.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityCoverageRows.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityDimensions.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityGenerator.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityGenerator.Customers.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityKnownDifferences.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityOperations.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityRunner.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityRuntimeTests.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityScenarios.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParitySqlServerRuntimeTests.cs`
+- テストのソース：`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityBackend.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityCoverageRows.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityDimensions.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityGenerator.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityGenerator.Customers.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityGenerator.Values.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityKnownDifferences.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityOperations.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityRunner.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityRuntimeTests.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityScenarios.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParitySqlServerRuntimeTests.cs`
 - 範囲：`src/QuickER.Runtime`・`src/QuickER.Runtime.Sqlite`・`src/QuickER.Runtime.EntityFrameworkCore`・`src/QuickER.Runtime.InMemory`・`src/QuickER.Runtime.AspNetCore`・`src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime`
 
 ### `GeneratedRuntime/ParityOutcomes`
@@ -603,6 +603,12 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 - 名前：実装先どうしの一致（乱数の操作の列で Save フックが受けた段・操作・規則の振る舞い）
 - テストのソース：`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityOutcomeDimensions.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityBackend.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityRuntimeTests.cs`
 - 範囲：`src/QuickER.Runtime`・`src/QuickER.Runtime.Sqlite`
+
+### `GeneratedRuntime/ParityValues`
+
+- 名前：実装先どうしの一致（乱数の操作の列が書く値の幅：日時の Kind と端数・decimal の端・blob の長さ・文字列の文字）
+- テストのソース：`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityValueDimensions.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityGenerator.Values.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityRuntimeTests.cs`
+- 範囲：`src/QuickER.Runtime`・`src/QuickER.Runtime.Sqlite`・`src/QuickER.Runtime.EntityFrameworkCore`・`src/QuickER.Runtime.InMemory`・`src/QuickER.Runtime.AspNetCore`
 
 ### `GeneratedRuntime/ParitySqlServerSaves`
 

@@ -251,6 +251,7 @@ internal static class BackendParityDimensions
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityDimensions.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityGenerator.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityGenerator.Customers.cs",
+                "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityGenerator.Values.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityKnownDifferences.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityOperations.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityRunner.cs",

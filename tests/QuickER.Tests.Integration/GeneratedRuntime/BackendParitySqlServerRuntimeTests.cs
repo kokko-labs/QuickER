@@ -41,7 +41,48 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
     /// #33・#34・F7 は区切り 25 で直した（やり直しの上限は行ごと・分類の後、フックありの経路は試行ごとに
     /// トランザクションを張り直す）。
     /// </remarks>
-    private static readonly IReadOnlyList<KnownEntry> Known = [];
+    private static readonly IReadOnlyList<KnownEntry> Known =
+    [
+        .. new[]
+        {
+            "alternate-key-new-takes-released-taker-first",
+            "alternate-key-gone-insert-takes-released-taker-first",
+        }.SelectMany(scope =>
+            new[] { "differs", "remote-efcore-differs" }.Select(signature => new KnownEntry(
+                "G3-B",
+                KnownKind.Accepted,
+                null,
+                "挿入する行が、同じ保存で後ろに渡した更新する行の手放す代替キーを取る保存は、QuickER 版がグラフの順に書いて挿入が断られ、EF Core 版が代替キーを先に書いて通す（docs のグラフ保存の書く順と EF Core の代替キーの節。値は ExpectedLines と ExpectedEfCoreLines が固定する）",
+                scope,
+                KnownMatch.ExactSignature,
+                signature
+            ))
+        ),
+    ];
+
+    /// <summary>
+    /// EF Core とリモート（EF Core のサーバー）の行の値を固定するケース（基準と違うことを受け入れた差のケースだけ。基準の値は
+    /// <see cref="ExpectedLines"/>）
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string[]> ExpectedEfCoreLines =
+        new Dictionary<string, string[]>(StringComparer.Ordinal)
+        {
+            // 新しい行の挿入より先に、後ろの行が手放す代替キーを書くので通る
+            ["alternate-key-new-takes-released-taker-first"] =
+            [
+                "rows=2",
+                "kits/1 code=K9 name=k1",
+                "kits/2 code=K2 name=k2",
+                "kits/100 code=K1 name=new100",
+            ],
+            // 消えた行の挿入より先に、後ろの行が手放す代替キーを書くので通る
+            ["alternate-key-gone-insert-takes-released-taker-first"] =
+            [
+                "rows=2",
+                "kits/1 code=K9 name=k1",
+                "kits/2 code=K1 name=k2",
+            ],
+        };
 
     /// <summary>今わかっている違いの一覧（照合の規則は <see cref="KnownFailureSet"/> が持つ）</summary>
     private static readonly KnownFailureSet KnownSet = new("BackendParity.sqlserver", Known);
@@ -70,6 +111,11 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
         foreach (var ownWriteCase in OwnWriteCase.All)
         {
             cases.Add(ownWriteCase.Name);
+        }
+
+        foreach (var handoffCase in HandoffCase.All)
+        {
+            cases.Add(handoffCase.Name);
         }
 
         foreach (var heldBackFactoryCase in HeldBackFactoryCaseNames)
@@ -203,6 +249,48 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
             AlternateKeyGoneCompanionTakenFromDeleted,
         ["alternate-key-taken-from-deleted-with-gone-insert-when-missing-hooks-optimistic"] =
             AlternateKeyGoneCompanionTakenFromDeleted,
+        // 2 行の代替キーの入れ替えは、DB が最初の更新で断って全体が巻き戻る（docs のグラフ保存の書く順）
+        ["alternate-key-swap-optimistic"] = AlternateKeySwapRejected,
+        ["alternate-key-swap-force-overwrite"] = AlternateKeySwapRejected,
+        // 更新する行が手放す code を、その後に渡した新しい行が取る保存は通る
+        ["alternate-key-new-takes-released-releaser-first"] =
+        [
+            "rows=2",
+            "kits/1 code=K9 name=k1",
+            "kits/2 code=K2 name=k2",
+            "kits/100 code=K1 name=new100",
+        ],
+        // 新しい行を、code を手放す更新する行より前に渡すと、QuickER 版はグラフの順に書くので挿入が一意制約に断られる
+        // （EF Core の値は ExpectedEfCoreLines。受け入れた差）
+        ["alternate-key-new-takes-released-taker-first"] =
+        [
+            "throws store-rejected",
+            "kits/1 code=K1 name=k1",
+            "kits/2 code=K2 name=k2",
+        ],
+        // 消えた行の挿入（insertWhenUpdateMissing）を前に渡しても同じ
+        ["alternate-key-gone-insert-takes-released-taker-first"] =
+        [
+            "throws store-rejected",
+            "kits/1 code=K1 name=k1",
+        ],
+        // 同じく、その後に渡した消えた行の挿入（insertWhenUpdateMissing）が取る保存も通る
+        ["alternate-key-gone-insert-takes-released-releaser-first"] =
+        [
+            "rows=2",
+            "kits/1 code=K9 name=k1",
+            "kits/2 code=K1 name=k2",
+        ],
+        // 書く列を持たない表で、消えた 11 行を insertWhenUpdateMissing で保存すると、EF Core 版も 1 試行 1 行ずつ挿入へ切り替えて
+        // やり直しの上限（行ごとに数える）に掛からず、全行が挿入される
+        ["own-write-alternate-key-and-version-gone-graph-save-insert-when-missing-11-rows"] =
+            ManyGoneRowsSaved("True", id => $"tags/{id} code={(id == 1 ? "T9" : $"T9-{id}")}"),
+        ["own-write-key-and-version-gone-graph-save-insert-when-missing-11-rows"] =
+            ManyGoneRowsSaved("True", id => $"stamps/{id}"),
+        ["own-write-key-only-gone-graph-save-insert-when-missing-11-rows"] = ManyGoneRowsSaved(
+            "n/a",
+            id => $"markers/{id}"
+        ),
         // 新しい親の挿入を Before が飛ばし、新しい子を保存すると、外部キーに断られて全体が巻き戻る
         ["hook-skip-parent-child-fk"] =
         [
@@ -240,6 +328,8 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
                 ? await RunOnRemoteEfCoreAsync(companionCase)
             : OwnWriteCase.Find(name) is { } ownWriteCase
                 ? await OwnWriteAsync(efCore: true, ownWriteCase, remoteEfCore: true)
+            : HandoffCase.Find(name) is { } handoffCase
+                ? await HandoffAsync(efCore: true, handoffCase, remoteEfCore: true)
             : null;
         var report =
             $"QuickER:\n  {string.Join("\n  ", baseline)}\nEF Core:\n  {string.Join("\n  ", efCore)}"
@@ -253,6 +343,13 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
         if (ExpectedLines.TryGetValue(name, out var expected))
         {
             baseline.Should().Equal(expected, report);
+        }
+
+        // 受け入れた差のケースは、EF Core とリモート（EF Core のサーバー）の値も固定する
+        if (ExpectedEfCoreLines.TryGetValue(name, out var expectedEfCore))
+        {
+            efCore.Should().Equal(expectedEfCore, report);
+            remoteEfCore?.Should().Equal(expectedEfCore, report);
         }
 
         // 一致しなければ実装先ごとに失敗 1 件（載っていれば既知・載っているのに一致すれば「起きなかった」で赤）
@@ -284,6 +381,7 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
         var cases = Cases().Select(row => (string)row.Data).ToHashSet();
         KnownSet.Entries.Select(entry => entry.Scope).Should().BeSubsetOf(cases);
         ExpectedLines.Keys.Should().BeSubsetOf(cases);
+        ExpectedEfCoreLines.Keys.Should().BeSubsetOf(ExpectedLines.Keys);
 
         // 代替キーの行の形 × 同じ保存のほかの行 × 並行性の扱いの組は、どれもケースとして流れる
         CoverageGuard.ContainsAll(
@@ -297,6 +395,13 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
             "[Parity/SqlServer] 書く列を持たない表の更新の組",
             cases,
             OwnWriteCase.All.Select(ownWriteCase => ownWriteCase.Name)
+        );
+
+        // 代替キーの手放しと取りの形 × 渡す順の組も、どれもケースとして流れる
+        CoverageGuard.ContainsAll(
+            "[Parity/SqlServer] 代替キーの手放しと取りの組",
+            cases,
+            HandoffCase.All.Select(handoffCase => handoffCase.Name)
         );
 
         // DbContext のファクトリの作り方の各値も、どれもケースとして流れる
@@ -680,6 +785,10 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
             _ when OwnWriteCase.Find(name) is { } ownWriteCase => await OwnWriteAsync(
                 efCore,
                 ownWriteCase
+            ),
+            _ when HandoffCase.Find(name) is { } handoffCase => await HandoffAsync(
+                efCore,
+                handoffCase
             ),
             _ => throw new ArgumentOutOfRangeException(nameof(name)),
         };

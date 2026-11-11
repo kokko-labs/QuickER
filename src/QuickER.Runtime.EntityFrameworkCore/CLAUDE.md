@@ -67,9 +67,14 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
 
 - 代替キー（主キーでない一意制約を外部キーが参照する列＝`HasPrincipalKey`）は、EF Core が自分の `UPDATE` で書かず、追跡中に値が変わると変更検出が「part of a key」で例外にする（Save フックの Before が書き換えた場合）。
 - そのため `WriteOwnColumnsAsync`（`_08_EfCore.scriban`）が、代替キーを持つ表の更新する行ごとに `SaveChanges` の前で次を行う。
-  - 保存先のキーと行バージョンを読む。行が無い・Optimistic で版が古い・値が同じ、のどれかなら書かない（失敗の報告は `SaveChanges` に任せる）。
+  - 保存先のキーと行バージョンを読む。値が同じなら書かない。行が無い・Optimistic で版が古いなら書かず、下の「最初の当たらなかった行で止める」に従って知らせる。
   - 変わった列だけを `ExecuteUpdate` で保存と同じトランザクションの中で書く（Optimistic は版も条件にする）。値はホルダー経由のパラメータで送り、リテラルを埋め込まない。
   - 書いたら版を読み直して並行性トークンの元の値に入れ、代替キーの元の値を今の値にする（変更検出がキーの変更と見ない）。
+- 最初の当たらなかった行で止める：行を保存の順（記録の順＝`GraphSaveOrder` の順）に書き、行が無い・Optimistic で版が古い行が最初に出たところで、その 1 行の `OwnWriteMissedException` を投げて後ろの行の代替キーを書かない（`SaveChanges` が書く行かに依らない）。呼び出し側は `SaveChanges` の `DbUpdateConcurrencyException` と同じに扱う（ロールバック → 試行の記録を戻す → 分類）。投げる前に、その行と書いていない後ろの行の代替キーの元の値を今の値にする（分類が走らせる変更検出がキーの変更と見ない）。
+  - 理由：代替キーの書き込みは `SaveChanges` のどの文よりも先に走る。当たらなかった行を飛ばして続けると、その行がまだ持つ代替キーを後ろの行が取る書き込みが先に一意制約に断られ、同じ順に書く QuickER 版なら前の行の `SaveConflictException`（NotFound / Modified）を報告する保存が DB の例外になる（docs の EF Core モードの「版が古ければ書かずに SaveConflictException」に反する）。
+  - 消えた行を insertWhenUpdateMissing で挿入へ切り替える行が 2 行以上あると、1 回の試行で 1 行ずつ切り替える。やり直しの上限は行ごとに数えるので掛からない（`SaveChanges` も当たらなかった文を 1 つずつ報告する）。
+  - 代替キーを持たない表の行は、この書き込みを通らないので、`SaveChanges` の順で報告される。そうした行が前にあって後ろの代替キーの書き込みが断られる形は、今の実装先の一致の入力（kits だけの乱数の保存）では作らない。
+  - ガード：`BackendParitySqlServerRuntimeTests` の `alternate-key-taken-from-released-with-stale-optimistic`（手放す行の版が古いと、取る行より先に競合を報告する）と、`own-write-*-gone-graph-save-insert-when-missing-11-rows`（書く列の無い 3 つの表の形で、消えた 11 行を 1 試行 1 行ずつ挿入へ切り替え、全行が挿入される）、夜間の `GeneratedRuntime/ParitySqlServerSaves`（手放しと取りの役）。mutation 実証済み（`SaveChanges` が書く行の当たらなかった行を黙らせる・最後まで回してから投げる、のどちらでも、そのケースと夜間の 6 種が赤）。
 - 読み直した版は、その試行のトランザクションの中にしか無い。そのため書き換える前の版を試行の記録（`OwnWriteAttempt`）に積み、試行が 0 行でロールバックしたら、分類（`IsRowGoneAsync`・`ResolveConcurrencyFailureAsync`）の前に逆順で元の版へ戻す（グラフ保存の while と `UpdateWritingOwnColumnsAsync` の while。1 つめと 2 つめの文脈で 1 つの記録を共有する）。コミットしたら記録を捨てる。
   - 戻さないと、同じ保存のほかの行の理由（消えた行の insertWhenUpdateMissing の挿入への切り替えなど）でやり直した試行が、DB に無い版を元の値として「版が進んだ」と判断して代替キーを書かず、`WHERE version = 読み直した版` が 0 行になって偽の競合（Modified）になる。
   - 分類の前に戻すのは、ForceOverwrite の保存先の値の採用（`OriginalValues.SetValues`）を後勝ちにするため。記録に入るのは、その試行で代替キーの UPDATE が通った（行のロックを持つ）行だけなので、同じ試行でその行が採用に回る組は作れず、順序の違いは観測できない（設計の理由で、守りは置かない）。
@@ -87,6 +92,7 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
     - ガード：`BackendParityRuntimeTests` の `graph-updated-row-takes-alternate-key-of-deleted-row-user-connections`（`ParityScenario.EfCoreUserConnections`＝利用者が持つ 2 本の接続を交互に渡すファクトリ）と、`BackendParitySqlServerRuntimeTests` の `alternate-key-taken-from-deleted-twice-*`（接続文字列の文脈を使い回すファクトリ＝プールの形・実行時に付けた接続・オプションで渡した接続の対照。値オブジェクトありの生成コードは本物のプールを断るので、破棄を飛ばして同じインスタンスを貸し出し直す派生で作る）。mutation 実証済み（接続文字列の文脈を今の戻し方へ戻すと接続文字列の値だけが、実行時に付けた接続を持ち主として戻すと実行時に付けた接続の値だけが赤）。
   - 分けるかの判定は `GraphSaveOrder.TakesDeletedValue`（後回しの判定と同じ本体を、モデルの代替キーの列だけに絞る）。代替キーでない一意な値の後回しは分けず、1 回の SaveChanges の中で `HasIndex` が並べる（分けると下の `HasIndex` のガードが効かなくなる）。
   - 両方の文脈のエントリはコミットまで保留のまま（`acceptAllChangesOnSuccess: false`）。そのため、0 行の文の分類とやり直し（`IsRowGoneAsync`）・実行戦略の試行の組み直し・採番値のコミット後の反映は、1 つの文脈のときと同じに効く。競合のロールバックの後は、2 つめの文脈をトランザクションから外してから保存先を読む。
+- 代替キーを `SaveChanges` の前に書くので、保存が挿入する行（新しい行・insertWhenUpdateMissing の挿入）は、後ろに渡した更新する行が手放す代替キーを取れる。グラフの順に書く QuickER 版は断る。docs に受け入れた差として書き、実装先の一致の乱数の保存はこの順を作らず、決まった形のケース `alternate-key-new-takes-released-taker-first`・`alternate-key-gone-insert-takes-released-taker-first` が両方の値を固定する（既知の違いの一覧の Accepted・G3-B）。
 - ほかの行が参照している値は DB が断る（`NO ACTION`。QuickER 版と同じ）。
 - 値が同じなら書かない判定は、外しても緑のまま（同じ値の書き込みは DB が断らず、版を読み直すので観測できない）。
 - ガード：`BackendParityRuntimeTests` の `h1-*` の 10 シナリオ（参照あり・なし × `UpdateAsync`・グラフ保存・Before のフックの書き換え〔`ParityHookBehavior.EditKeyThenContinue`＝決まった形のシナリオだけが使う〕・同じ保存に古いコードを参照する依存行を持つ形・同じ保存の紹介先の顧客〔消えた・消えた＋insertWhenUpdateMissing・Before が飛ばす〕）、`BackendParitySqlServerRuntimeTests` の `alternate-key-*`（ConcurrencyFixture の kits / kit_parts、実 SQL Server）と `alternate-key-*-with-*`（代替キーの行の形 × 同じ保存のほかの行 × 並行性の扱いの全積。リモートの EF Core のサーバーでも流す）、夜間の `GeneratedRuntime/ParitySqlServerSaves`（乱数の保存）。mutation 実証済み（試行の記録の復元を外すと、Optimistic × insertWhenUpdateMissing の 4 ケースが EF Core とリモートで赤。2 つめの文脈の記録を捨てると taken-from-deleted の 2 ケースだけが赤）。

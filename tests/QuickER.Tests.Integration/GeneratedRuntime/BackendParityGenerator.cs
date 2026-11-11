@@ -41,6 +41,7 @@ public sealed partial class BackendParityGenerator
     private static readonly decimal[] Amounts = [5m, 99.99m, 100m, 250.5m];
 
     private readonly Random _random;
+    private readonly Random _values;
     private readonly ParityGeneratorMode _mode;
     private readonly Dictionary<int, string> _customers = new();
     private readonly Dictionary<int, (int Customer, decimal Amount)> _orders = new();
@@ -53,6 +54,7 @@ public sealed partial class BackendParityGenerator
     private BackendParityGenerator(int seed)
     {
         _random = new Random(seed);
+        _values = new Random(ValueSeed(seed));
         _mode = (ParityGeneratorMode)(seed % 3);
     }
 
@@ -275,7 +277,9 @@ public sealed partial class BackendParityGenerator
         _customers[id.Value] = name;
         _codes[id.Value] = CustomerRow.DefaultCode(id.Value);
         _referrers[id.Value] = referrer;
-        _ops.Add(new InsertOp(new CustomerRow(id.Value, name, Pick(null, "n"), referrer)));
+        _ops.Add(
+            new InsertOp(new CustomerRow(id.Value, name, WidenText(Pick(null, "n")), referrer))
+        );
     }
 
     private void InsertOrder()
@@ -289,7 +293,7 @@ public sealed partial class BackendParityGenerator
         }
 
         var customer = PickFrom(live);
-        var amount = Pick(Amounts);
+        var amount = WidenDecimal(Pick(Amounts), AmountEdges)!.Value;
         _orders[id.Value] = (customer, amount);
         _ops.Add(
             new InsertOp(
@@ -297,10 +301,10 @@ public sealed partial class BackendParityGenerator
                     id.Value,
                     customer,
                     amount,
-                    Pick(null, $"m{_step}"),
-                    Payload: Pick<byte[]?>(null, [(byte)_step]),
-                    Thumb: [(byte)(_step + 1)],
-                    At: Pick<DateTime?>(null, new DateTime(2026, 1, 2, 3, 4, 5)),
+                    WidenText(Pick(null, $"m{_step}")),
+                    Payload: WidenBlob(Pick<byte[]?>(null, [(byte)_step])),
+                    Thumb: WidenBlob([(byte)(_step + 1)]),
+                    At: WidenDate(Pick<DateTime?>(null, new DateTime(2026, 1, 2, 3, 4, 5))),
                     Paid: _random.Next(2) == 0
                 )
             )
@@ -331,9 +335,9 @@ public sealed partial class BackendParityGenerator
                 new LineRow(
                     id.Value,
                     order,
-                    $"i{_step}",
+                    WidenText($"i{_step}")!,
                     _random.Next(1, 9),
-                    Pick<decimal?>(null, 1.25m)
+                    WidenDecimal(Pick<decimal?>(null, 1.25m), DiscountEdges)
                 )
             )
         );
@@ -458,7 +462,7 @@ public sealed partial class BackendParityGenerator
         }
 
         slot.Root = RowState.Updated;
-        _ops.Add(new EditMemoOp(name, slot.OrderId, Pick(null, $"e{_step}")));
+        _ops.Add(new EditMemoOp(name, slot.OrderId, WidenText(Pick(null, $"e{_step}"))));
     }
 
     private void EditQuantity()
@@ -670,7 +674,7 @@ public sealed partial class BackendParityGenerator
             return;
         }
 
-        _ops.Add(new OutsideEditMemoOp(PickFrom([.. _orders.Keys]), $"o{_step}"));
+        _ops.Add(new OutsideEditMemoOp(PickFrom([.. _orders.Keys]), WidenText($"o{_step}")!));
     }
 
     private void ExecuteDeleteByAmount()
@@ -702,8 +706,12 @@ public sealed partial class BackendParityGenerator
         // NOT NULL の thumb へ NULL は書かない（インメモリが NOT NULL を検査するかは測っていない）
         _ops.Add(
             _random.Next(2) == 0
-                ? new WriteBlobOp(order, "payload", Pick<byte[]?>(null, [(byte)_step, 0xAA]))
-                : new WriteBlobOp(order, "thumb", [(byte)_step, 0xBB])
+                ? new WriteBlobOp(
+                    order,
+                    "payload",
+                    WidenBlob(Pick<byte[]?>(null, [(byte)_step, 0xAA]))
+                )
+                : new WriteBlobOp(order, "thumb", WidenBlob([(byte)_step, 0xBB]))
         );
     }
 

@@ -30,12 +30,12 @@ internal static class BackendParitySqlServerSaveNotGenerated
                     Cases
                         + " の行 `alternate-key-referenced-update` / `alternate-key-referenced-graph-save`"
                 ),
-                NotGenerated.Pending(
-                    "alternate-key-handoff",
-                    "同じ保存で一方の行が代替キーを手放し、もう一方の行が取る（入れ替えを含む）",
-                    "G3",
-                    "代替キーを取る役は、消した行の code を取る形と誰も持たない値へ変える形だけ。EF Core 版の 2 つめの文脈の書き込みと文の順はこの形で分岐する",
-                    Cases + " の行 `alternate-key-taken-from-deleted-kit-*`"
+                NotGenerated.Accepted(
+                    "inserted-taker-before-releaser",
+                    "挿入する行（新しい kit・insertWhenUpdateMissing で挿入へ切り替わる消えた kit）を、まだ code を持つ手放す行より前に渡し、その code を取る保存",
+                    "実装先で結果が割れることを受け入れている（docs のグラフ保存の書く順と EF Core モードの代替キーの段落：QuickER 版はグラフの順に書いて挿入が一意制約に断られ、EF Core 版は変わった代替キーを先に書いて通す）。生成器は挿入する取る行を手放す行の直後へ移す",
+                    Cases
+                        + " の行 `alternate-key-new-takes-released-taker-first` / `alternate-key-gone-insert-takes-released-taker-first`"
                 ),
                 NotGenerated.Pending(
                     "kit-parts-writes",
