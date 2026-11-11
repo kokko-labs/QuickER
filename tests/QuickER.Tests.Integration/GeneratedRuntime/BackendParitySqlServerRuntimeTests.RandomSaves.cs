@@ -12,7 +12,7 @@ using Xunit;
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
-/// SQL Server の系統の乱数の保存：種ごとに kits 3〜6 行の役・他者の変更・Before のフックの飛ばし・渡す順を引いて、グラフ保存 1 回と
+/// SQL Server の系統の乱数の保存：種ごとに kits 3〜6 行の役・他者の変更・Before のフックの飛ばし・渡す順と code の手放しと取りを引いて、グラフ保存 1 回と
 /// 保存し直しを QuickER 版・EF Core・リモート（EF Core のサーバー）へ流し、基準の QuickER 版と比べる。
 /// </summary>
 public sealed partial class BackendParitySqlServerRuntimeTests
@@ -180,7 +180,7 @@ public sealed partial class BackendParitySqlServerRuntimeTests
         };
         var kits = host.Client.GetRequiredService<IKitRemoteRepository>();
         var parts = host.Client.GetRequiredService<IKitPartRemoteRepository>();
-        var existing = scenario.Rows.Where(row => row.Role != SaveRowRole.New).ToList();
+        var existing = scenario.Rows.Where(row => !row.IsNew()).ToList();
         var nextPart = 1;
 
         // 初めの行は、実装先に依らず QuickER 版（Save フックなし）で入れる（比べるのは保存の手だけ）
@@ -266,7 +266,7 @@ public sealed partial class BackendParitySqlServerRuntimeTests
         {
             KitEntity kit;
 
-            if (row.Role == SaveRowRole.New)
+            if (row.IsNew())
             {
                 kit = new KitEntity
                 {

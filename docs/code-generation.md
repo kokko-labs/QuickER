@@ -742,6 +742,11 @@ Within a stage, rows keep graph order, so a row that refers to a new row is writ
 Every backend uses this order, and the save hooks fire in it.
 EF Core orders the statements of its single `SaveChanges` itself; how it follows the same rules is described in [EF Core mode](#ef-core-mode-generateefcorerepositories).
 Swapping unique values between two rows in one save is refused by the database at the first update; the in-memory repository accepts it.
+A row the save inserts (a new row, or a row `insertWhenUpdateMissing` inserts in place of one another writer deleted) can take the alternate key (a unique column a foreign key references) that an updated row of the same save gives up, and here the backends differ when the inserted row comes first.
+The QuickER repositories write in graph order, so the insert reaches the database while the updated row still holds the value, and the database refuses it.
+The EF Core repositories write the changed alternate keys before the other statements of the save (see [EF Core mode](#ef-core-mode-generateefcorerepositories)), so the same save succeeds, and the in-memory repository accepts it as well.
+The remote services follow the repository behind them.
+Pass the row that gives the value up before the row that takes it, and the save succeeds on every backend.
 
 One shape cannot be saved in a single call: deleting a row, adding a new row that takes its unique value, and pointing the rows that referred to the deleted row at the new one, such as moving the children of a parent under its replacement.
 With a `NO ACTION` foreign key, writing the new row first is refused by the unique constraint, and deleting the old row first is refused by the foreign key of the rows that still point to it.
@@ -1140,6 +1145,7 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   A value a save hook's Before sets is written the same way.
   An `UpdateAsync` of such a table runs in a transaction inside the execution strategy, like a graph save.
   A row that takes the alternate key of a row the same save deletes is written after the deletion, as in the QuickER repositories: the held-back rows (and the rows below them) are saved by a second `SaveChanges` on a second context that shares the connection and the transaction, after their keys are written.
+  Because the changed alternate keys are written first, a row the save inserts can take the alternate key that an updated row passed after it gives up, which the QuickER repositories refuse (see [Graph save](#graph-save-save-parent-and-children-in-one-call)).
   The second context gives its own connection back afterwards, so a pooled context leases the next save as it was.
   A context built from a connection string gets the connection string back (EF Core disposes the connection it created as soon as another connection is set, and creates a new one when the context is next used).
   A connection passed in the options (`UseSqlServer(connection)`) is given back owned as the options say, and a connection the factory attached at run time with `SetDbConnection` is given back as not owned, so the context never disposes it.
@@ -1220,6 +1226,13 @@ They are worth knowing when a test passes in memory and fails against the real t
   The choice between an UPDATE and the fallback INSERT is made during the save phase, while the store lock is held.
   If another writer deletes the row after that, the save is left holding a staged update, and the publish verification reports `SaveConflictException` (`SaveConflictReason.NotFound`) instead of turning the write into an insert.
   A real database has no such window, since its statement sees the row's absence at the moment it writes, so a test that relies on `insertWhenUpdateMissing` surviving a concurrent delete is testing this backend only.
+- **A `DateTime` keeps its kind and a `decimal` keeps its scale, where a database returns them in its own form.**
+  The in-memory store returns the values as they were written: the `DateTimeKind` of a `DateTime`, and the scale of a `decimal` (the digits after the point, trailing zeros included).
+  The database repositories (the QuickER Repository, EF Core, and the remote services in front of them) read a `DateTime` back as `DateTimeKind.Unspecified`, on SQL Server and on SQLite alike.
+  The ticks stay as written in a `datetime2` column and in SQLite, which keeps seven fractional digits.
+  A `decimal` comes back at the scale the column declares on SQL Server (`1.1` in a `decimal(10,2)` column reads back as `1.10`) and without trailing zeros on SQLite (`1.10` reads back as `1.1`).
+  The values compare equal across the backends, since `DateTime` equality ignores the kind and `decimal` equality ignores the scale, so a test that compares them with `==` holds on every backend.
+  A test that reads `Kind`, formats the value, or compares its text is testing this backend only.
 
 ## Comparing columns whose values the database produces
 

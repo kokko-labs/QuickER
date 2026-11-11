@@ -19,6 +19,7 @@ internal static class BackendParityNotGenerated
             [
                 ProtectionNames.EnginePart(EngineIds.GeneratedRuntime, "Parity"),
                 ProtectionNames.EnginePart(EngineIds.GeneratedRuntime, "ParityOutcomes"),
+                ProtectionNames.EnginePart(EngineIds.GeneratedRuntime, "ParityValues"),
             ],
             [
                 NotGenerated.Accepted(

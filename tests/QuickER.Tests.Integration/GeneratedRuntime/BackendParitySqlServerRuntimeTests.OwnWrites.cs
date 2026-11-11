@@ -57,14 +57,45 @@ public sealed partial class BackendParitySqlServerRuntimeTests
         GraphSaveInsertWhenMissing,
     }
 
+    /// <summary>
+    /// 消えた行を insertWhenUpdateMissing で挿入へ切り替えるグラフ保存の行の数（やり直しの上限 10 回を超える）。EF Core 版は
+    /// 当たらなかった行を 1 回の試行で 1 行ずつ報告するので、上限を保存全体で数えると必ず失敗する
+    /// </summary>
+    private const int ManyGoneRows = 11;
+
+    /// <summary>
+    /// 消えた <see cref="ManyGoneRows"/> 行を insertWhenUpdateMissing で保存した行（全行が挿入され、もう一度の保存も全行に当たる）
+    /// </summary>
+    /// <param name="versionMatches">手元の版が保存先と同じかの行の値（版の無い表は <c>n/a</c>）</param>
+    /// <param name="row">保存先の行の書き方（キー → 行）</param>
+    private static string[] ManyGoneRowsSaved(string versionMatches, Func<int, string> row)
+    {
+        var rows = Enumerable.Range(1, ManyGoneRows).Select(row).ToList();
+
+        return
+        [
+            $"rows={ManyGoneRows}",
+            $"version-matches-store={versionMatches}",
+            .. rows,
+            $"again rows={ManyGoneRows}",
+            $"version-matches-store={versionMatches}",
+            .. rows,
+        ];
+    }
+
     /// <summary>書く列を持たない表の更新の 1 ケース</summary>
+    /// <param name="Rows">保存する行の数（1 か <see cref="ManyGoneRows"/>）</param>
     private sealed record OwnWriteCase(
         OwnWriteShape Shape,
         OwnWriteCondition Condition,
-        OwnWritePath Path
+        OwnWritePath Path,
+        int Rows = 1
     )
     {
-        /// <summary>軸の組（キーだけの表の版を進める変更は起こり得ないので外す）</summary>
+        /// <summary>
+        /// 軸の組（キーだけの表の版を進める変更は起こり得ないので外す）と、表の形ごとに消えた行を
+        /// <see cref="ManyGoneRows"/> 行まとめて insertWhenUpdateMissing で保存する組
+        /// </summary>
         public static IReadOnlyList<OwnWriteCase> All { get; } =
         [
             .. from shape in Enum.GetValues<OwnWriteShape>()
@@ -72,11 +103,19 @@ public sealed partial class BackendParitySqlServerRuntimeTests
             from path in Enum.GetValues<OwnWritePath>()
             where !(shape == OwnWriteShape.KeyOnly && condition == OwnWriteCondition.Stale)
             select new OwnWriteCase(shape, condition, path),
+            .. from shape in Enum.GetValues<OwnWriteShape>()
+            select new OwnWriteCase(
+                shape,
+                OwnWriteCondition.Gone,
+                OwnWritePath.GraphSaveInsertWhenMissing,
+                ManyGoneRows
+            ),
         ];
 
         /// <summary>ケースの名前</summary>
         public string Name =>
-            $"own-write-{Kebab(Shape.ToString())}-{Kebab(Condition.ToString())}-{Kebab(Path.ToString())}";
+            $"own-write-{Kebab(Shape.ToString())}-{Kebab(Condition.ToString())}-{Kebab(Path.ToString())}"
+            + (Rows == 1 ? "" : $"-{Rows}-rows");
 
         /// <summary>名前のケース（無ければ null）</summary>
         public static OwnWriteCase? Find(string name) =>
@@ -114,44 +153,53 @@ public sealed partial class BackendParitySqlServerRuntimeTests
         {
             OwnWriteShape.AlternateKeyAndVersion => await OwnWriteRowAsync(
                 host.Client.GetRequiredService<ITagRemoteRepository>(),
-                new TagEntity { TagId = TagIdValue.Create(1), Code = CodeValue.Create("T1") },
+                id => new TagEntity
+                {
+                    TagId = TagIdValue.Create(id),
+                    Code = CodeValue.Create($"T{id}"),
+                },
                 id => TagIdValue.Create(id),
-                tag => tag.Code = CodeValue.Create("T9"),
+                tag =>
+                    tag.Code = CodeValue.Create(
+                        tag.TagId.Value == 1 ? "T9" : $"T9-{tag.TagId.Value}"
+                    ),
                 tag => tag.RowVer?.Value,
                 "UPDATE tags SET code = code WHERE tag_id = 1",
-                "DELETE FROM tags WHERE tag_id = 1",
+                "DELETE FROM tags",
                 ownWriteCase
             ),
             OwnWriteShape.KeyAndVersion => await OwnWriteRowAsync(
                 host.Client.GetRequiredService<IStampRemoteRepository>(),
-                new StampEntity { StampId = StampIdValue.Create(1) },
+                id => new StampEntity { StampId = StampIdValue.Create(id) },
                 id => StampIdValue.Create(id),
                 _ => { },
                 stamp => stamp.RowVer?.Value,
                 "UPDATE stamps SET stamp_id = stamp_id WHERE stamp_id = 1",
-                "DELETE FROM stamps WHERE stamp_id = 1",
+                "DELETE FROM stamps",
                 ownWriteCase
             ),
             _ => await OwnWriteRowAsync(
                 host.Client.GetRequiredService<IMarkerRemoteRepository>(),
-                new MarkerEntity { MarkerId = MarkerIdValue.Create(1) },
+                id => new MarkerEntity { MarkerId = MarkerIdValue.Create(id) },
                 id => MarkerIdValue.Create(id),
                 _ => { },
                 _ => null,
                 null,
-                "DELETE FROM markers WHERE marker_id = 1",
+                "DELETE FROM markers",
                 ownWriteCase
             ),
         };
     }
 
     /// <summary>
-    /// 行 1 を入れて読み、他者の変更の後で <paramref name="edit"/> を当てて保存する。結果・手元の版が保存先と同じか・保存先を並べ、
-    /// 保存できたらもう一度同じ経路（insertWhenUpdateMissing なし）で保存した結果と保存先も並べる
+    /// 行 1（<see cref="OwnWriteCase.Rows"/> 行のときは行 1 から順に）を入れて読み、他者の変更の後で <paramref name="edit"/> を
+    /// 当てて保存する。結果・行 1 の手元の版が保存先と同じか・保存先を並べ、保存できたらもう一度同じ経路
+    /// （insertWhenUpdateMissing なし）で保存した結果と保存先も並べる
     /// </summary>
+    /// <remarks>他者の変更の SQL は、版を進める SQL が行 1 だけ、消す SQL が表の全行に当たる。</remarks>
     private async Task<IReadOnlyList<string>> OwnWriteRowAsync<TEntity, TKey>(
         IRemoteRepository<TEntity, TKey> repository,
-        TEntity seed,
+        Func<int, TEntity> seed,
         Func<int, TKey> key,
         Action<TEntity> edit,
         Func<TEntity, byte[]?> version,
@@ -161,8 +209,21 @@ public sealed partial class BackendParitySqlServerRuntimeTests
     )
         where TEntity : EntityBaseCore, new()
     {
-        await repository.InsertAsync(seed, Ct);
-        var entity = (await repository.GetByIdAsync(key(1), Ct))!;
+        var ids = Enumerable.Range(1, ownWriteCase.Rows).ToList();
+
+        foreach (var id in ids)
+        {
+            await repository.InsertAsync(seed(id), Ct);
+        }
+
+        List<TEntity> entities = [];
+
+        foreach (var id in ids)
+        {
+            entities.Add((await repository.GetByIdAsync(key(id), Ct))!);
+        }
+
+        var entity = entities[0];
 
         switch (ownWriteCase.Condition)
         {
@@ -175,26 +236,40 @@ public sealed partial class BackendParitySqlServerRuntimeTests
                 break;
         }
 
-        edit(entity);
-        entity.MarkUpdated();
+        foreach (var row in entities)
+        {
+            edit(row);
+            row.MarkUpdated();
+        }
 
+        // 1 行は単数のグラフ保存、複数行は複数形のグラフ保存
         Task<int> Save(bool insertWhenUpdateMissing) =>
             ownWriteCase.Path == OwnWritePath.Update
                 ? UpdateAsInt(repository.UpdateAsync(entity, ConcurrencyMode.Optimistic, Ct))
-                : repository.SaveAsync(
+            : entities.Count == 1
+                ? repository.SaveAsync(
                     entity,
                     insertWhenUpdateMissing: insertWhenUpdateMissing,
                     cancellationToken: Ct
-                );
+                )
+            : repository.SaveAsync(
+                entities,
+                insertWhenUpdateMissing: insertWhenUpdateMissing,
+                cancellationToken: Ct
+            );
 
         var outcome = await OutcomeAsync(() =>
             Save(ownWriteCase.Path == OwnWritePath.GraphSaveInsertWhenMissing)
         );
         List<string> lines = [outcome, .. await OwnWriteStateAsync(version(entity))];
 
-        if (outcome == "rows=1")
+        if (outcome == $"rows={entities.Count}")
         {
-            entity.MarkUpdated();
+            foreach (var row in entities)
+            {
+                row.MarkUpdated();
+            }
+
             lines.Add($"again {await OutcomeAsync(() => Save(insertWhenUpdateMissing: false))}");
             lines.AddRange(await OwnWriteStateAsync(version(entity)));
         }

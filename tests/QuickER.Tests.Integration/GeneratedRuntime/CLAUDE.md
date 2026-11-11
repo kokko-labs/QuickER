@@ -42,6 +42,7 @@
   - 代替キー（customers.code）の更新（参照あり `ReferencedKeyUpdate`・なし `AlternateKeyUpdate`）。
   - Save フックの規則：新しい顧客の更新・削除・挿入に Skip / EditThenSkip / EditThenContinue / ThrowBefore / ThrowAfter を当てる（`HookEditsSkippedRow` / `HookEditsDeletedRow`）。
 - 決定的な用途だけの手とフックの振る舞い（`AfterWriteBlob`・`AfterExecuteSql`・`EditBlobsThenContinue`）は乱数の生成器に混ぜず、次元表の水準から外す（`AssignKey` と同じ）。
+- 値の幅（`BackendParityGenerator.Values.cs`）：本流の乱数の列が引いた値を、別の乱数の列（`ValueSeed`）で低い確率で端の値に置き換える（操作の列は変えない）。日時の Kind（Unspecified・Utc・Local）と端数（7 桁の tick）・decimal の精度の上下限と最小の正の値と 0・blob の空と 4 KB・文字列の非 ASCII とサロゲートペア。一意な列（顧客の名前・code）は置き換えない。比べ方は今のまま（日時は tick・decimal は値）で、Kind と decimal のスケールは比べない（実装先ごとの返し方は docs のインメモリの節「実 DB との既知の乖離」）。
 
 ### 直す区切りのある手の差
 
@@ -78,23 +79,29 @@
 
 `BackendParitySqlServerRuntimeTests` のケースのうち、次の 3 つは軸から組み立てる（`Cases()` に流す名前を手で並べない。全組が流れることは `Known_NamesExistingCases` の `CoverageGuard.ContainsAll` が表明する）。
 
-- `alternate-key-{形}-with-{ほかの行}-{扱い}`：代替キーの行の形（plain／taken-from-deleted＝2 つめの文脈）× 同じ保存のほかの行（gone／gone-insert-when-missing／gone-insert-when-missing-hooks／stale／hook-skipped）× Optimistic／ForceOverwrite の全積。代替キーを書いた後に、同じ保存のほかの行の理由で試行をやり直す経路（K1）の入力。
-- `own-write-{形}-{他者の変更}-{経路}`：SaveChanges が書く列を持たない表の形（tags＝代替キーと版・stamps＝キーと版・markers＝キーだけ）× 読んだ後の他者の変更（fresh／stale／gone）× 保存の経路（UpdateAsync／グラフ保存／insertWhenUpdateMissing のグラフ保存）。キーだけの表の stale は原理的に起こり得ないので外す。
+- `alternate-key-{形}-with-{ほかの行}-{扱い}`：代替キーの行の形（plain／taken-from-deleted＝2 つめの文脈／taken-from-released＝同じ保存の更新する行が手放す code を取る。ほかの行は手放す行に置く）× 同じ保存のほかの行（gone／gone-insert-when-missing／gone-insert-when-missing-hooks／stale／hook-skipped）× Optimistic／ForceOverwrite の全積。代替キーを書いた後に、同じ保存のほかの行の理由で試行をやり直す経路（K1）の入力。
+- `own-write-{形}-{他者の変更}-{経路}`：SaveChanges が書く列を持たない表の形（tags＝代替キーと版・stamps＝キーと版・markers＝キーだけ）× 読んだ後の他者の変更（fresh／stale／gone）× 保存の経路（UpdateAsync／グラフ保存／insertWhenUpdateMissing のグラフ保存）。キーだけの表の stale は原理的に起こり得ないので外す。表の形ごとに、消えた 11 行を insertWhenUpdateMissing でまとめて保存する `own-write-{形}-gone-graph-save-insert-when-missing-11-rows` も持つ（EF Core 版は 1 試行 1 行ずつ挿入へ切り替え、やり直しの上限に掛からない）。
 - `alternate-key-taken-from-deleted-twice-{作り方}`：DbContext のファクトリの作り方（接続文字列で構成した文脈を使い回す＝プールの形／実行時に付けた接続／オプションで渡した接続＝対照）で、2 つめの文脈の保存を 2 回続け、その間に読む。値オブジェクトありの生成コードは EF Core の本物のプールを断るので、破棄を飛ばして同じインスタンスを貸し出し直す派生（`ReusedDbContext`）でプールの観測できる振る舞いを作る。
+- `alternate-key-swap-{扱い}`・`alternate-key-new-takes-released-{順}`・`alternate-key-gone-insert-takes-released-{順}`（`HandoffCase`）：2 行の code の入れ替え（docs のとおりどの実装先も最初の更新で断る）と、更新する行が手放す code を挿入する行（新しい行・insertWhenUpdateMissing の挿入）が取る形を、渡す順（releaser-first／taker-first）で流す。リモートの EF Core のサーバーでも流す。taker-first の 2 つは受け入れた差（G3-B）で、基準の値を `ExpectedLines`、EF Core とリモートの値を `ExpectedEfCoreLines` で固定し、既知の違いの一覧 `Known` に docs を出典にした Accepted として載せる（載っていて一致すれば赤）。
 - 前の 2 つは、サーバーが EF Core 版 Repository のリモート（ConcurrencyFixture の RemoteServer）でも流し、QuickER 版と比べる（失敗の署名 `remote-efcore-differs`）。リモートでサーバーの DB が断った保存は `RemoteRepositoryException`（500）で届くので、`OutcomeAsync` が `throws store-rejected` にまとめる（`ParityFormat` と同じ扱い）。
 
 ### SQL Server の系統の乱数の保存
 
-- `BackendParitySqlServerRuntimeTests.RandomSaves_MatchBaseline`（夜間の目印・登録簿の部分 GeneratedRuntime/ParitySqlServerSaves）：生成器 `BackendParitySqlServerSaveGenerator` が種ごとに kits 3〜6 行の役（Rename / ChangeCode / TakeDeletedCode / Delete / New）・他者の変更・Before のフックの飛ばし・渡す順を乱数で引き、グラフ保存 1 回と保存し直しを QuickER 版・EF Core・リモート（EF Core のサーバー）へ流す。保存の引数（4 通り）とフックの有無は種の番号から決める（普段の 8 種で全組）。
+- `BackendParitySqlServerRuntimeTests.RandomSaves_MatchBaseline`（夜間の目印・登録簿の部分 GeneratedRuntime/ParitySqlServerSaves）：生成器 `BackendParitySqlServerSaveGenerator` が種ごとに kits 3〜6 行の役（Rename / ChangeCode / TakeDeletedCode / Delete / New）・他者の変更・Before のフックの飛ばし・渡す順を乱数で引き、その後に別の乱数の列（`HandoffSeed`）で code の手放しと取り（TakeReleasedCode＝連鎖 / SwapCode / NewTakesReleasedCode＝新しい kit が無ければ 1 行足す）を重ねて、挿入する取る行（新しい kit・insertWhenUpdateMissing の消えた kit）がまだ code を持つ手放す行より前に来たら手放す行の直後へ移し（受け入れた差 G3-B の順を作らない）、グラフ保存 1 回と保存し直しを QuickER 版・EF Core・リモート（EF Core のサーバー）へ流す。保存の引数（4 通り）とフックの有無は種の番号から決める（普段の 8 種で全組）。
 - 種は `QUICKER_PARITY_SQLSERVER_SAVE_SEEDS`（普段 8・夜間 200）／1 種だけは `QUICKER_PARITY_SQLSERVER_SAVE_SEED`。既知の失敗の一覧は空。
 - 作らない形は `BackendParitySqlServerSaveNotGenerated.cs` に宣言する（`tests/QuickER.Tests/TestSupport/CLAUDE.md`「作らない形の宣言」）。
-- 次元表 `BackendParitySqlServerSaveDimensions`：行ごとに 役 × 他者の変更 × 飛ばし × 同じ保存のほかの行が消えたか × 保存の引数、3 因子の組（役 × ほかの行が消えたか × 保存の引数）。網羅しない組は Accepted の Delete × Gone の 1 つ（生成器が作らない受け入れた差）。照合は夜間の既定の種の数でだけ行う（普段の 8 種は数えて書くだけで、K1 の組は決まった形のケースが普段の網で持つ）。
+- 次元表 `BackendParitySqlServerSaveDimensions`：行ごとに 役 × 他者の変更 × 飛ばし × 同じ保存のほかの行が消えたか × 保存の引数、手放す code を取る役の行の渡す順（手放す行の前か後か）× 手放す行の他者の変更、3 因子の組（役 × ほかの行が消えたか × 保存の引数・役 × 手放す行の他者の変更 × 渡す順）。網羅しない組は Accepted の Delete × Gone（F4）と、NewTakesReleasedCode × TakerFirst × 手放す行が Fresh / Stale（G3-B）の 3 つ（どれも生成器が作らない受け入れた差）。照合は夜間の既定の種の数でだけ行う（普段の 8 種は数えて書くだけで、K1 の組は決まった形のケースが普段の網で持つ）。
 - K1 の修正を外すと夜間の種で赤になる（mutation 実証済み）。
 
 ### 結果の表
 
 - `BackendParityOutcomeDimensions`（登録簿の部分 GeneratedRuntime/ParityOutcomes）は、基準の記録で Save フックが受けた段（Before / After）× 操作（`SaveOperation` の 3 値。因子の棚卸しの Source）× 当たった規則の振る舞い（After × 飛ばす系）を持つ。Before で投げるのは原理的に起きない組。
 - mutation 実証済み（紹介者の付け替え・代替キーの更新・連絡先の customer_code・Save フックの規則の末尾の手・EF Core 単独のサーバーのフック登録・比べ方の条件）。
+
+### 値の表
+
+- `BackendParityValueDimensions`（登録簿の部分 GeneratedRuntime/ParityValues）は、乱数の列の操作が書く値 1 つを 1 ケースとし、範囲 × 日時の Kind × 日時の端数 × decimal の端 × blob の長さ × 文字列の文字を持つ。1 ケースは値の系統を 1 つだけ持つ（ほかは None）。網羅しない組は無く、既定の種の数（200）で全組が出る。
+- mutation 実証済み（QuickER 版の SQLite の束縛で、Utc の日時をローカルへ換算する・端数をミリ秒へ切る・decimal を float 経由にする・非 ASCII を ? にする・空の blob を NULL にする、のどれも値の幅があると赤、値の幅を外すと違いが出ない）。
 
 ### 網羅の行
 

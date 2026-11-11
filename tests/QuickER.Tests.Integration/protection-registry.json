@@ -143,6 +143,7 @@
         "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityDimensions.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityGenerator.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityGenerator.Customers.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityGenerator.Values.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityKnownDifferences.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityOperations.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityRunner.cs",
@@ -171,6 +172,23 @@
       "covers": [
         "src/QuickER.Runtime",
         "src/QuickER.Runtime.Sqlite"
+      ]
+    },
+    {
+      "id": "GeneratedRuntime",
+      "part": "ParityValues",
+      "title": "実装先どうしの一致（乱数の操作の列が書く値の幅：日時の Kind と端数・decimal の端・blob の長さ・文字列の文字）",
+      "sourceFiles": [
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityValueDimensions.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityGenerator.Values.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityRuntimeTests.cs"
+      ],
+      "covers": [
+        "src/QuickER.Runtime",
+        "src/QuickER.Runtime.Sqlite",
+        "src/QuickER.Runtime.EntityFrameworkCore",
+        "src/QuickER.Runtime.InMemory",
+        "src/QuickER.Runtime.AspNetCore"
       ]
     },
     {
