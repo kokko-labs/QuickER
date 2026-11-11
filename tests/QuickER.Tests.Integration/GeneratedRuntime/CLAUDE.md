@@ -214,16 +214,31 @@
     - release-take-chain：3 行。
     - delete-take：消した行の値を取る。
     - delete-take-reparent：消した行の値を取って別の親へ付け替え、元の親を消す。
+- 2 本目の乱数（`SyncModelGenerator.SideSeed`）：本流が選んだ手のキー・一意な値・blob の大きさ・除外する表を、低い確率で置き換える（本流の乱数の引き方は変えない。置き換えた種は実行の結果が変わるので、後の手も変わる）。
+  - 同じキー（`StolenKeyRate`）：フォルダー・品目・イベントの挿入で、ほかの書き手の範囲のキーのうち、ほかの書き手の DB にあって自分の DB に無いものを選ぶ（持ち主の採番はもう越えているので、持ち主の後の挿入は自分の DB で失敗しない）。サーバーで DuplicateOnServer になる。
+  - 一意な値の別表記（`SpellingRate`・`UniqueSpelling`）：端末がフォルダーの name・品目の code を新しく書く手で、Exact（ほかの書き手の値そのもの）・AsciiCase・NonAscii（非 ASCII で始まる新しい値）・NonAsciiCase・TrailingSpace・Empty へ置き換える。自分の DB に序数で同じ値が無いものだけ。サーバーの他者は NonAscii だけ（ほかはサーバー役の照合順序で成否が割れる＝網羅しない組の Accepted）。非 ASCII の大文字小文字の土台として、初期データの 2 番目のフォルダーの name と品目の code は非 ASCII で始める。
+  - 大きな blob（`LargePayloadRate`・`LargePayloadBytes`＝ストリームのコピーの区切りの 2 つ分を越える 163,847 バイト）。
+  - 2〜3 表の除外（`MultipleExclusionRate`）：本流が何も除外しなかった同期の一部（本流の 1 表の除外は変えない）。
+  - 印（`ModelWriteOp.StolenKey`・`Spelling`）は internal で、種の指紋の要約（公開のプロパティ）に載らない。
+- 一意な値の同じさはサーバー役が持つ（`ISyncModelServerRole.UniqueValues`）：SQLite の代役は序数、実 SQL Server は末尾の空白を除いて大文字小文字を無視する写し（`SyncModelSqlServerUniqueValues`）。
+  - 根拠の判定（`CheckRefusalBasisAsync` の持ち主と値の手放し）と静止化の分類（`IsPendingCycle`）がこれを使う。序数のままだと、SQL Server が別表記を正しく断った競合を根拠なし（`3/spurious:*:UniqueValueTakenOnServer:no-basis`）にする。
+  - 写しが実際の照合順序とずれないよう、SQL Server の世界を作るたびに `VerifyAsync` が一意な列 2 本の照合順序で、生成器の別表記の関数から作った値の組を実 DB の `=` と突き合わせ、食い違えば例外にする。
+  - 決まった形の行 `n7s-{ascii-case|non-ascii-case|trailing-space}-{collect|localwins|lww-serverwins}`（全転送）は、期待をサーバー役の同じさで選ぶ手 `WhenServerSameUniqueOp` で書く：同じ値なら UniqueValueTakenOnServer で断られ、Collect と LocalWins は次の同期でも報告し続け、その後の ServerWins の同期で揃う。後勝ち＋ServerWins はその同期で捨てる。別の値なら上がる。
+  - 実 SQL Server の乱数の種は、AsciiCase・NonAsciiCase・TrailingSpace の別表記がそれぞれ 1 回以上サーバーに断られたことを `CoverageGuard` で表明する（`SyncModelRun.SpellingRefusals`。同じ値の Exact・Empty はどのサーバー役でも断られ、直結の種の網羅が受け持つ）。
+- DuplicateOnServer の決着の中身は決まった形の行が持つ：Collect＝`conflict-duplicate-key-on-server-is-reported`・LocalWins＝`lw-overwrites-duplicate-key-on-server`・ServerWins＝`sw-duplicate-key-on-server-reloads-server-row`（同期＝同じ実行のダウンロードが揃える）と `sw-duplicate-key-on-server-upload-only-reloads-server-row`（単独の UploadAsync＝ServerWins が自分で読み直す）・後勝ち＝`lww-duplicate-key-on-server-overwrites`。モデルは書き手が 2 人のキーの決着を表明しない（報告せずに上書きする壊し方は、乱数の種では結果の表の網羅だけが捕まえる）。
+- 表どうしの循環の列（`pinned_item_id`）は乱数の列が書かない（並行の書き手が行の循環を作るのを生成器は防げず、サーバーで消えた循環の行は端末に残る＝docs の既知の割り切り）。洗い替え以外の経路は決まった形の行が持つ：`cycle-pin-to-new-item-uploads-in-rounds`（新しい品目へのピン留めが最初の巡で断られ次の巡で通る）・`cycle-pinned-item-is-read-back-before-folder`（ダウンロードで解決役がピン留めの先を読み直す）・`cycle-serverwins-restores-folder-pinned-to-new-item`（ServerWins の読み直しで同じ）。解決役がフォルダー→品目の辺を辿らない壊し方で 3 行とも赤になる（mutation 実証済み）。
 - 次元表 `SyncModelDimensions`：
-  - OpFamily に 4 つの形、因子 UniqueTable・PropagateDeletes・Excluded・Batch・Blobs（後ろ 4 つは SyncOptions の Source）・FaultKind。
+  - OpFamily に 4 つの形、因子 UniqueTable・PropagateDeletes・Excluded（2 表・3 表の水準 two・three を含む）・Batch・Blobs（後ろ 4 つは SyncOptions の Source）・FaultKind・KeyOrigin（own・stolen・not-insert）・Spelling（UniqueSpelling の値と none）・PayloadSize（small・large・none）。
   - 3 因子の組 (Policy, OpFamily, PropagateDeletes)・(Actor, OpFamily, UniqueTable)。
   - Blobs=False は受け入れの組（乱数は常に blob を運ぶ。docs の「運ぶかは端末ごとに一貫させる」）。
+  - サーバーの他者（Actor=Server・Via=None）× 衝突し得る別表記は受け入れの組。
 - 実行の結果の表 `SyncModelOutcomeDimensions`（登録簿 SyncModel/Outcomes）：SyncConflictReason と SyncLocalRowChangeReason の全値×Mode×Policy。実行の後の結果だけを数え、乱数を引かない。
-- 網羅の行 `SyncModelCoverageRows`（Id は `coverage-`・10 行）：
-  - 乱数の種で作れない組を持つ。サーバーの他者の Extras の操作 4 つ（作り直し・失敗する書き込み・キーだけのスタブ・持っていた実体での削除）・グラフ保存の失敗する書き込み・DuplicateOnServer。
+- 網羅の行 `SyncModelCoverageRows`（Id は `coverage-`・9 行）：
+  - 乱数の種で作れない組を持つ。サーバーの他者の Extras の操作 4 つ（作り直し・失敗する書き込み・キーだけのスタブ・持っていた実体での削除）・グラフ保存の失敗する書き込み。
+  - DuplicateOnServer は乱数の種が同じキーの挿入で作る（行を持たない）。
   - 既定の 60 種でたまたま欠ける組も持つ。表を除外したダウンロード・後勝ちの RemovedBeforeDownload・Collect と LocalWins の ReloadedForUniqueValue。
   - 直結の乱数のテスト `RandomSeeds_ConvergeWithoutLoss` が種の前に並列に流す（単独の種では流さない）。操作を 1 歩ずつ次元表で、同期の結果を結果の表で数える。
-  - 行は生成器の代わりにモード・ポリシー・種の組を宣言する（例：`coverage-server-delete-stub`・`coverage-duplicate-on-server`）（`SyncModelDimensions.Observe` の多重定義）。行の同期が宣言と違えば構築で断る。
+  - 行は生成器の代わりにモード・ポリシー・種の組を宣言する（例：`coverage-server-delete-stub`）（`SyncModelDimensions.Observe` の多重定義）。行の同期が宣言と違えば構築で断る。
   - 決定的なシナリオ（`SyncModelScenarios`）は別の Theory で流れて網羅の計数に入らないが、網羅の行は数える。行は期待の操作を持たず、次元表に無い操作の型は宣言の誤り。
   - 行の違反は既知の失敗の一覧で外さず、すべて新しい失敗として赤にする。
   - 残る網羅しない組は Blobs=False の受け入れだけ。

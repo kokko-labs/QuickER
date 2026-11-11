@@ -33,41 +33,31 @@ internal static class SyncModelNotGenerated
                     Random
                         + "（外部の表の決まった形のシナリオ 26-external-table-overwrites-pending-edit）"
                 ),
-                NotGenerated.Pending(
-                    "same-key-by-two-writers",
-                    "書き手どうしが同じキーを作る",
-                    "G4",
-                    "キーは書き手ごとに別の範囲から採る（端末 1＝1000 台・端末 2＝2000 台・サーバーの他者＝3000 台）。エンジンは同じキーの挿入を DuplicateOnServer で分岐する",
-                    Random + " の行 `coverage-duplicate-on-server`"
+                NotGenerated.Accepted(
+                    "null-unique-values",
+                    "一意な値の null",
+                    "同期のモデルの図の一意な列（model_folders.name・model_items.code）は NOT NULL で、null を作るには図を変える必要がある。docs の「SQL Server なら NULL も値として数える」の約束は SyncFixture の実 SQL Server のテストが持つ",
+                    "`SyncSqlServerRuntimeTests.NullUniqueValueTakenOnServer_IsReportedOrSettled`・`SyncSqlServerRuntimeTests.ServerCheckUniqueness_ComparesNullsAsValues`・`SyncSqlServerHttpRuntimeTests.NullUniqueValueTakenOnServer_IsReportedOverHttp`"
                 ),
-                NotGenerated.Pending(
-                    "unique-value-spellings",
-                    "一意な値の別表記（大文字小文字・末尾の空白・非 ASCII）・空・null・大きな blob",
-                    "G4",
-                    "値は種の中で一意な ASCII の連番。一意な値の検索と、SQL Server と SQLite の照合順序の差はこれらの値で分岐する",
-                    NotGenerated.Unguarded
+                NotGenerated.Accepted(
+                    "empty-blobs",
+                    "書き手が書く空の blob",
+                    "同期は除外した NOT NULL の blob を、コピーしていない行で空のバイト列で埋める（FillUnsetUnboundedBinaries）。書き手が書いた空の blob と区別できず、空の blob の期待（N12）が成り立たない",
+                    Random
+                        + " の行 `n12-*`・`SyncModelRuntimeTests.EmptyBlobWithoutConflict_IsStillAViolation`"
                 ),
-                NotGenerated.Pending(
-                    "multiple-excluded-tables",
-                    "同期の実行で 2 表以上を除外する",
-                    "G4",
-                    "除外はいつも 1 表。エンジンは実行ごとの除外の範囲で分岐する",
-                    NotGenerated.Unguarded
-                ),
-                NotGenerated.Pending(
+                NotGenerated.Accepted(
                     "mode-policy-switch-within-seed",
                     "1 つの種の中でモード・ポリシーを切り替える",
-                    "G4",
-                    "モードとポリシーは種の番号から決めて種の中で固定する（全組を出すため）。エンジンは実行ごとのモード・ポリシーで分岐する",
-                    NotGenerated.Unguarded
+                    "モードとポリシーは種の番号から決めて種の中で固定する（24 種ごとに全積）。前の実行の設定が残る壊し方は今の種の列で赤になる（後勝ちの実行が受理記録を残さない・ポリシーやモードを最初の実行のまま使い回す）。種の中の切り替えは、静止化が毎周 Collect → ServerWins → 後勝ちへ切り替えることが受け持つ",
+                    Random + "・`SyncModel/Outcomes`"
                 ),
-                NotGenerated.Pending(
+                NotGenerated.Accepted(
                     "cross-table-cycle-writes",
                     "表どうしの循環（フォルダーが品目を指す列）を書く手",
-                    "G4",
-                    "乱数の列は循環の列を書かない。循環のある範囲の洗い替えは決まった形の行だけが受け持つ",
+                    "並行の書き手が行の循環を作るのを生成器は防げず（端末 1 がフォルダーを品目にピン留めし、端末 2 がその品目をそのフォルダーの下へ移す）、サーバーで消えた循環の行は端末に残る（docs の既知の割り切り）ので、静止化が終わらない種が出て、受け入れの署名で外すとその種の後ろの不具合を隠す。表の循環の経路は決まった形の行が持つ",
                     Random
-                        + " の行 `refresh-empties-tables-in-a-foreign-key-cycle` / `refresh-force-in-a-foreign-key-cycle` / `refresh-failed-wipe-in-a-foreign-key-cycle`"
+                        + " の行 `cycle-pin-to-new-item-uploads-in-rounds` / `cycle-pinned-item-is-read-back-before-folder` / `cycle-serverwins-restores-folder-pinned-to-new-item` / `refresh-empties-tables-in-a-foreign-key-cycle` / `refresh-force-in-a-foreign-key-cycle` / `refresh-failed-wipe-in-a-foreign-key-cycle`"
                 ),
                 NotGenerated.Accepted(
                     "refresh-interrupt-apply-skip",

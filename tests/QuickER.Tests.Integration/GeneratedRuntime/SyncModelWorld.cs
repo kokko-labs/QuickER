@@ -393,6 +393,9 @@ internal sealed class SyncModelServer : ISyncModelServerRole
 
     public string? SqliteConnectionString => ConnectionString;
 
+    /// <summary>SQLite の一意制約は既定の照合順序（BINARY）＝序数で比べる（図の DDL は列に COLLATE を付けない）</summary>
+    public IEqualityComparer<string> UniqueValues => StringComparer.Ordinal;
+
     public Task<ModelDbState> ReadStateAsync(CancellationToken ct) =>
         ModelDbState.ReadAsync(ConnectionString, ct);
 

@@ -92,7 +92,8 @@ internal static class SyncModelSignatures
         KnownFailureSet known,
         int parallelism,
         CancellationToken ct,
-        CoverageCounter? coverage = null
+        CoverageCounter? coverage = null,
+        ConcurrentDictionary<UniqueSpelling, int>? spellingTally = null
     )
     {
         var results =
@@ -111,7 +112,8 @@ internal static class SyncModelSignatures
                         seed,
                         token,
                         options,
-                        coverage
+                        coverage,
+                        spellingTally: spellingTally
                     )
             );
 
@@ -351,6 +353,7 @@ public sealed class SyncModelSqlServerRuntimeTests(
             .Where(seed => seed % 4 is 0 or 1)
             .Take(plan.Seeds.Count);
         var coverage = new CoverageCounter(SyncModelDimensions.Table);
+        var spellingTally = new ConcurrentDictionary<UniqueSpelling, int>();
         var report = await SyncModelSignatures.RunSeedsAsync(
             plan,
             seeds,
@@ -358,12 +361,41 @@ public sealed class SyncModelSqlServerRuntimeTests(
             SyncModelSignatures.Known(SqlServerOnly),
             2,
             Ct,
-            coverage
+            coverage,
+            spellingTally
         );
 
         // 網羅は観測と要約だけ（失敗の注入の組を流さず、網羅しない組は直結の乱数の種で照合する）
         coverage.Report().WriteSummary(output);
         output.WriteLine(report);
+
+        foreach (var (spelling, count) in spellingTally.OrderBy(p => p.Key))
+        {
+            output.WriteLine($"refused spelled upserts {spelling}: {count}");
+        }
+
         report.Should().BeEmpty();
+
+        // 照合順序が同じとみなす別表記（大文字小文字・末尾の空白だけの違い）が、既定の種の数で実際に断られている
+        // （網羅の計数は直結の種でしか照合しないので、実 SQL Server でだけ現れる断りはここで空振りを止める。同じ値〔Exact・
+        // Empty〕はどのサーバー役でも断られるので、直結の種の網羅が受け持つ）
+        if (plan.IsDefaultCount)
+        {
+            foreach (
+                var spelling in new[]
+                {
+                    UniqueSpelling.AsciiCase,
+                    UniqueSpelling.NonAsciiCase,
+                    UniqueSpelling.TrailingSpace,
+                }
+            )
+            {
+                CoverageGuard.AtLeast(
+                    $"spelled upserts refused by SQL Server ({spelling})",
+                    spellingTally.GetValueOrDefault(spelling),
+                    1
+                );
+            }
+        }
     }
 }

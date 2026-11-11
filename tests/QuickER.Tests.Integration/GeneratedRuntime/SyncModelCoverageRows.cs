@@ -228,23 +228,6 @@ internal static class SyncModelCoverageRows
         );
 
         // ---- 同期の結果の理由（SyncModelOutcomeDimensions） ----
-        // DuplicateOnServer（起こり得るのは Versioned × Collect だけ）：端末 1 がオフラインで挿入したキーを、サーバーの他者も挿入する
-        // （生成器はキーを書き手ごとに別の範囲から採るので、この形を作らない）
-        yield return Row(
-            "duplicate-on-server",
-            "端末がオフラインで挿入したキーの行をサーバーの他者も挿入している（DuplicateOnServer）",
-            SyncMode.Versioned,
-            SyncConflictPolicy.Collect,
-            extras: false,
-            faults: false,
-            [Folder(SV, 560)],
-            [
-                [Item(D1, 561, 560, "cd1")],
-                [Item(SV, 561, 560, "cd2")],
-                [Sync(D1, SyncMode.Versioned, SyncConflictPolicy.Collect)],
-            ]
-        );
-
         // RemovedBeforeDownload × LastWriteWins：端末 2 の親が端末 1 の同期で消え、端末 2 の後勝ち＋ServerWins の同期が
         // 親の無い品目の記録を決着させ、ダウンロードの前の削除伝搬でローカルから消す（n786 の形から失敗の注入を外したもの）
         yield return Row(

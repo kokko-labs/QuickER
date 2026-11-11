@@ -365,4 +365,57 @@ internal static partial class SyncModelScenarios
     /// </summary>
     private static ModelWriteOp[] LocallyDeletedFolderWithItemAddedOnServer() =>
         [new DeleteFolderOp(D1, Direct, 1), Line(SV, 21, 1, "added elsewhere")];
+
+    /// <summary>
+    /// 表どうしの循環（フォルダーが品目を指す列 pinned_item_id）を、洗い替え以外の経路で通る行。表の順ではフォルダーが品目より
+    /// 先（循環に属する表は宣言順で 1 つ先に出す）なので、フォルダーが新しい品目を指すと、その辺は表の順と逆向きになる。
+    /// 行どうしは循環させない（品目はピン留めするフォルダーの下にあっても、品目がフォルダーを指すだけ）
+    /// </summary>
+    private static IEnumerable<SyncModelScenario> CrossTableCycleScenarios() =>
+        [
+            // アップロード：フォルダーの更新（新しい品目へのピン留め）は表の順で品目より先に送られ、品目がまだ無いサーバーの
+            // 外部キーに断られる。品目が通った次の巡で送り直されて通る（競合にしない）
+            MovedAll(
+                "cycle-pin-to-new-item-uploads-in-rounds",
+                [Folder(SV, 760)],
+                [
+                    Line(D1, 761, 760, "pinned"),
+                    new PinFolderOp(D1, Direct, 760, 761),
+                    Plain(D1),
+                    Expect.Result(D1).Contains("uploaded=2").Absent("conflict *"),
+                    Expect.Rows(SV, F).Contains("760 parent=null name=f760 pinned=761"),
+                    Expect.Journal(D1).Empty(),
+                ]
+            ),
+            // ダウンロード：フォルダーの表を先に降ろすとき、ピン留めの先の品目がまだローカルに無いので、親をそろえる解決役が
+            // その品目をサーバーから読み直して先に入れる（打ち切らない）
+            MovedAll(
+                "cycle-pinned-item-is-read-back-before-folder",
+                [Folder(SV, 770)],
+                [
+                    Line(SV, 771, 770, "pinned"),
+                    new PinFolderOp(SV, Direct, 770, 771),
+                    Plain(D1),
+                    Expect.Result(D1).Absent("truncation *", "conflict *"),
+                    Expect.Rows(D1, F).Contains("770 parent=null name=f770 pinned=771"),
+                    Expect.Rows(D1, I).Contains("771 *"),
+                ]
+            ),
+            // ServerWins の読み直し（単独の UploadAsync＝後にダウンロードが続かないので、捨てる行を自分で読み直す）：読み直した
+            // フォルダーが指す品目がまだローカルに無いので、解決役が先に入れる
+            MovedAll(
+                "cycle-serverwins-restores-folder-pinned-to-new-item",
+                [Folder(SV, 780)],
+                [
+                    Line(SV, 782, 780, "pinned"),
+                    new PinFolderOp(SV, Direct, 780, 782),
+                    Rename(D1, 780, "local"),
+                    PlainOnly(D1, ModelSyncKind.Upload, policy: SyncConflictPolicy.ServerWins),
+                    Expect.Result(D1).Absent("conflict *"),
+                    Expect.Rows(D1, F).Contains("780 parent=null name=f780 pinned=782"),
+                    Expect.Rows(D1, I).Contains("782 *"),
+                    Expect.Journal(D1).Empty(),
+                ]
+            ),
+        ];
 }

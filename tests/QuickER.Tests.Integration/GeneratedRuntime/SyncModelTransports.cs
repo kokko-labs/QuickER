@@ -42,6 +42,12 @@ internal interface ISyncModelServerRole : ISyncModelSources, IAsyncDisposable
     /// <summary>SQLite の代役なら接続文字列（外部キーの検査に使う）。実 SQL Server は null（外部キーは DB が強制する）</summary>
     string? SqliteConnectionString { get; }
 
+    /// <summary>
+    /// サーバーの一意制約が 2 つの値を同じとみなすか（一意な列の照合順序。SQLite の代役は序数、実 SQL Server は大文字小文字と
+    /// 末尾の空白を区別しない）。モデルがサーバーの断りの根拠を探すときに使う
+    /// </summary>
+    IEqualityComparer<string> UniqueValues { get; }
+
     /// <summary>内容を読む</summary>
     Task<ModelDbState> ReadStateAsync(CancellationToken ct);
 }
@@ -283,6 +289,8 @@ internal sealed class SyncModelSqlServerServer : ISyncModelServerRole
 
     public string? SqliteConnectionString => null;
 
+    public IEqualityComparer<string> UniqueValues => SyncModelSqlServerUniqueValues.Instance;
+
     public ISyncServerSource<ModelFolderEntity, int> FolderSource { get; private set; } = null!;
 
     public ISyncServerSource<ModelLabelEntity, string> LabelSource { get; private set; } = null!;
@@ -306,6 +314,7 @@ internal sealed class SyncModelSqlServerServer : ISyncModelServerRole
             new SqlServerDdlGenerator().Build(SyncModelFixtureDefinition.Build()),
             ct
         );
+        await SyncModelSqlServerUniqueValues.VerifyAsync(server._connectionString, ct);
 
         var factory =
             new QuickER.Tests.GeneratedSyncModelFixture.Repositories.SqlServer.SqlConnectionFactory(
@@ -471,5 +480,126 @@ internal static class SyncModelSqlServerState
         }
 
         return state;
+    }
+}
+
+/// <summary>
+/// 実 SQL Server の一意な列の同じさ（末尾の空白を除き、大文字小文字を区別しない。アクセントは区別する）の写し。
+/// 写しが実際の照合順序とずれないことは、世界を作るたびに <see cref="VerifyAsync"/> が実 DB の <c>=</c> と突き合わせる
+/// </summary>
+internal sealed class SyncModelSqlServerUniqueValues : IEqualityComparer<string>
+{
+    /// <summary>唯一のインスタンス</summary>
+    public static SyncModelSqlServerUniqueValues Instance { get; } = new();
+
+    private SyncModelSqlServerUniqueValues() { }
+
+    public bool Equals(string? x, string? y) =>
+        x is null || y is null
+            ? x is null && y is null
+            : string.Equals(x.TrimEnd(' '), y.TrimEnd(' '), StringComparison.OrdinalIgnoreCase);
+
+    public int GetHashCode(string obj) =>
+        StringComparer.OrdinalIgnoreCase.GetHashCode(obj.TrimEnd(' '));
+
+    /// <summary>
+    /// 突き合わせる値の組（生成器が作る別表記の形ごとに、同じになる組と、違うままの組）。値は生成器の別表記の関数から作る
+    /// </summary>
+    internal static IReadOnlyList<(string A, string B)> ProbePairs()
+    {
+        var bases = new List<string> { "f12", "c1-2005", "" };
+
+        foreach (var prefix in SyncModelGenerator.NonAsciiPrefixes)
+        {
+            bases.Add(prefix + "f12");
+        }
+
+        var pairs = new List<(string A, string B)>();
+
+        foreach (var value in bases)
+        {
+            if (SyncModelGenerator.FlipAsciiCase(value) is { } ascii)
+            {
+                pairs.Add((value, ascii));
+            }
+
+            if (SyncModelGenerator.FlipNonAsciiCase(value) is { } nonAscii)
+            {
+                pairs.Add((value, nonAscii));
+            }
+
+            pairs.Add((value, value + " "));
+            pairs.Add((value, " " + value));
+            pairs.Add((value, value + "x"));
+        }
+
+        // アクセントの有無は別の値（照合順序がアクセントを区別すること）
+        pairs.Add(("ef12", "éf12"));
+
+        return pairs;
+    }
+
+    /// <summary>
+    /// 一意な列（フォルダーの name・品目の code）の照合順序で、<see cref="ProbePairs"/> の各組を実 DB の <c>=</c> で比べ、
+    /// この写しの答えと食い違えば例外にする（世界を作れない＝そのテストが赤になる）
+    /// </summary>
+    public static async Task VerifyAsync(string connectionString, CancellationToken ct)
+    {
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(ct);
+        var problems = new List<string>();
+
+        foreach (
+            var (table, column) in new[] { ("model_folders", "name"), ("model_items", "code") }
+        )
+        {
+            string collation;
+
+            await using (
+                var read = new SqlCommand(
+                    "SELECT collation_name FROM sys.columns WHERE object_id = OBJECT_ID(@table) AND name = @column",
+                    connection
+                )
+            )
+            {
+                read.Parameters.AddWithValue("@table", table);
+                read.Parameters.AddWithValue("@column", column);
+                collation =
+                    await read.ExecuteScalarAsync(ct) as string
+                    ?? throw new InvalidOperationException($"{table}.{column} has no collation");
+            }
+
+            if (!System.Text.RegularExpressions.Regex.IsMatch(collation, "^[A-Za-z0-9_]+$"))
+            {
+                throw new InvalidOperationException($"unexpected collation name {collation}");
+            }
+
+            foreach (var (a, b) in ProbePairs())
+            {
+                await using var compare = new SqlCommand(
+                    $"SELECT CASE WHEN @a COLLATE {collation} = @b COLLATE {collation} THEN 1 ELSE 0 END",
+                    connection
+                );
+                compare.Parameters.Add("@a", System.Data.SqlDbType.NVarChar, 40).Value = a;
+                compare.Parameters.Add("@b", System.Data.SqlDbType.NVarChar, 40).Value = b;
+                var database = (int)(await compare.ExecuteScalarAsync(ct) ?? 0) == 1;
+
+                if (database != Instance.Equals(a, b))
+                {
+                    problems.Add(
+                        $"{table}.{column} ({collation}): '{a}' = '{b}' is {database} on the server, {!database} in the copy"
+                    );
+                }
+            }
+        }
+
+        if (problems.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "the copy of the server's unique-value comparison disagrees with SQL Server:"
+                    + Environment.NewLine
+                    + string.Join(Environment.NewLine, problems)
+            );
+        }
     }
 }

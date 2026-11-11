@@ -20,6 +20,15 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 日時のキーは固定の基準時刻からの通し番号＋種から作る端数で、Kind（Utc / Local / Unspecified）も種から選ぶ。
 /// 端数の最後の桁は 0 にしない（格納の文字列の末尾の 0 の省き方に照合を依存させない）。
 /// </para>
+/// <para>
+/// 本流の乱数（操作の種類・対象・値）と別に、種から決まる 2 本目の乱数（<see cref="SideSeed"/>）で、本流が選んだ手の
+/// キー・一意な値・blob の大きさ・除外する表を低い確率で置き換える（本流の乱数の引き方は変えない）。置き換える形は、
+/// ほかの書き手の DB にあって自分の DB に無いキー（<see cref="StolenKeyRate"/>）、一意な値の別表記（<see cref="SpellingRate"/>・
+/// <see cref="UniqueSpelling"/>）、大きな blob（<see cref="LargePayloadRate"/>）、2 表以上の除外（<see cref="MultipleExclusionRate"/>）。
+/// 置き換えた手は書き手の DB で成功する手のまま（自分の DB に同じキー・同じ値〔序数〕が無いものだけを選ぶ）。
+/// 初期データの 2 番目のフォルダーの名前と 2 番目の品目の code は非 ASCII の文字で始める（非 ASCII の大文字小文字の別表記の
+/// 土台を種の初めから置く）。
+/// </para>
 /// </remarks>
 internal sealed class SyncModelGenerator
 {
@@ -28,7 +37,50 @@ internal sealed class SyncModelGenerator
     // ラベルのキーの頭（大文字小文字・'-'・'_' を混ぜる＝照合順序でキー順が変わり得る文字）
     private static readonly string[] LabelPrefixes = ["a-", "A_", "b", "B-", "_c", "-d", "z"];
 
+    /// <summary>
+    /// 非 ASCII の一意な値の頭（大文字小文字が 1 文字ずつ対応する BMP の文字だけ。SQL Server の照合順序でサロゲートペアの
+    /// 比べ方は版で変わるので入れない）
+    /// </summary>
+    public static readonly string[] NonAsciiPrefixes = ["é", "Ж", "ñ", "Ω"];
+
+    /// <summary>大きな blob のバイト数（ストリームのコピーの区切り 81,920 バイトの 2 つ分を越え、区切りの倍数にしない）</summary>
+    public const int LargePayloadBytes = 81_920 * 2 + 7;
+
+    /// <summary>挿入の手で、ほかの書き手の DB にあって自分の DB に無いキーを選ぶ割合（2 本目の乱数）</summary>
+    public const double StolenKeyRate = 0.2;
+
+    /// <summary>一意な値を新しく書く手で、値を別表記へ置き換える割合（2 本目の乱数）</summary>
+    public const double SpellingRate = 0.3;
+
+    /// <summary>
+    /// 別表記の形の選び方（2 本目の乱数で 1 つ選ぶ。非 ASCII の新しい値と、その大文字小文字の別表記を厚くする＝別表記は
+    /// どこかの DB にある非 ASCII の値を必要とする）
+    /// </summary>
+    private static readonly UniqueSpelling[] SpellingKinds =
+    [
+        UniqueSpelling.Exact,
+        UniqueSpelling.AsciiCase,
+        UniqueSpelling.NonAscii,
+        UniqueSpelling.NonAsciiCase,
+        UniqueSpelling.NonAsciiCase,
+        UniqueSpelling.TrailingSpace,
+        UniqueSpelling.Empty,
+    ];
+
+    /// <summary>blob を書く手で、大きな blob にする割合（2 本目の乱数）</summary>
+    public const double LargePayloadRate = 0.25;
+
+    /// <summary>本流が何も除外しなかった同期を、2〜3 表の除外にする割合（2 本目の乱数）</summary>
+    public const double MultipleExclusionRate = 0.1;
+
+    /// <summary>2 本目の乱数の種（本流の種から決定的に作る）</summary>
+    /// <param name="seed">本流の種</param>
+    public static int SideSeed(int seed) => unchecked(seed * 7919 + 104729);
+
     private readonly Random _random;
+    private readonly Random _side;
+    private IReadOnlyDictionary<ModelActor, ModelDbState> _states =
+        new Dictionary<ModelActor, ModelDbState>();
     private readonly Dictionary<ModelActor, int> _nextId = new()
     {
         [ModelActor.Device1] = 1000,
@@ -56,6 +108,7 @@ internal sealed class SyncModelGenerator
     public SyncModelGenerator(int seed)
     {
         _random = new Random(seed);
+        _side = new Random(SideSeed(seed));
         var modes = Enum.GetValues<SyncMode>();
         var policies = Enum.GetValues<SyncConflictPolicy>();
         var settings = seed / 4 % (modes.Length * policies.Length);
@@ -89,9 +142,8 @@ internal sealed class SyncModelGenerator
         for (var id = 1; id <= 4; id++)
         {
             int? parent = folders.Count == 0 || _random.Next(2) == 0 ? null : Pick(folders);
-            ops.Add(
-                new AddFolderOp(ModelActor.Server, ModelWriteVia.Direct, id, parent, Value("f"))
-            );
+            var name = id == 2 ? NonAsciiPrefixes[0] + Value("f") : Value("f");
+            ops.Add(new AddFolderOp(ModelActor.Server, ModelWriteVia.Direct, id, parent, name));
             folders.Add(id);
         }
 
@@ -123,7 +175,7 @@ internal sealed class SyncModelGenerator
                     id,
                     Pick(folders),
                     _random.Next(2) == 0 ? null : Pick(labels),
-                    $"c0-{id}",
+                    id == 2 ? $"{NonAsciiPrefixes[1]}c0-{id}" : $"c0-{id}",
                     Value("t"),
                     Payload()
                 )
@@ -153,6 +205,8 @@ internal sealed class SyncModelGenerator
     /// <param name="states">書き手ごとの DB の現在の内容</param>
     public IReadOnlyList<ModelOp> Next(IReadOnlyDictionary<ModelActor, ModelDbState> states)
     {
+        _states = states;
+
         if (Faults && _random.NextDouble() < 0.12)
         {
             var device = _random.Next(2) == 0 ? ModelActor.Device1 : ModelActor.Device2;
@@ -204,6 +258,24 @@ internal sealed class SyncModelGenerator
             : ModelSyncKind.Download;
         IReadOnlyList<string> excluded =
             _random.NextDouble() < 0.15 ? [Pick(ModelTables.All.ToList())] : [];
+
+        // 2 本目の乱数で、本流が何も除外しなかった同期の一部を 2〜3 表の除外にする（本流の 1 表の除外は変えない。全部は
+        // 外さない＝最低 1 表は範囲に残す）
+        if (excluded.Count == 0 && _side.NextDouble() < MultipleExclusionRate)
+        {
+            var rest = ModelTables.All.ToList();
+            var widened = new List<string>();
+
+            for (var count = _side.Next(2, 4); widened.Count < count; )
+            {
+                var table = rest[_side.Next(rest.Count)];
+                rest.Remove(table);
+                widened.Add(table);
+            }
+
+            excluded = widened;
+        }
+
         var batch = Batches[_random.Next(Batches.Length)];
         var propagateDeletes = _random.NextDouble() >= PropagateDeletesOffRate;
 
@@ -277,7 +349,13 @@ internal sealed class SyncModelGenerator
 
                 return items.Count == 0
                     ? null
-                    : [new WritePayloadOp(actor, Pick(items), Payload()) { ExpectFailure = true }];
+                    :
+                    [
+                        new WritePayloadOp(actor, Pick(items), Payload(mayBeLarge: true))
+                        {
+                            ExpectFailure = true,
+                        },
+                    ];
             }
 
             default:
@@ -302,7 +380,7 @@ internal sealed class SyncModelGenerator
                         null,
                         existing.Code,
                         Value("t"),
-                        Payload()
+                        Payload(mayBeLarge: true)
                     )
                     {
                         ExpectFailure = true,
@@ -401,7 +479,7 @@ internal sealed class SyncModelGenerator
                         row.LabelCode,
                         row.Code,
                         Value("t"),
-                        Payload()
+                        Payload(mayBeLarge: true)
                     ),
                 ];
             }
@@ -437,8 +515,17 @@ internal sealed class SyncModelGenerator
             or 1:
             {
                 int? parent = folders.Count == 0 || _random.Next(3) == 0 ? null : Pick(folders);
+                var (id, stolen) = KeyFor(actor, ModelTables.Folders, NewId(actor));
+                var (name, spelling) = UniqueFor(actor, items: false, Value("f"));
 
-                return [new AddFolderOp(actor, via, NewId(actor), parent, Value("f"))];
+                return
+                [
+                    new AddFolderOp(actor, via, id, parent, name)
+                    {
+                        StolenKey = stolen,
+                        Spelling = spelling,
+                    },
+                ];
             }
 
             case 2:
@@ -458,7 +545,9 @@ internal sealed class SyncModelGenerator
                         candidates.Count == 0 || _random.Next(4) == 0 ? null : Pick(candidates);
                 }
 
-                return [new UpdateFolderOp(actor, via, id, parent, Value("f"))];
+                var (name, spelling) = UniqueFor(actor, items: false, Value("f"));
+
+                return [new UpdateFolderOp(actor, via, id, parent, name) { Spelling = spelling }];
             }
 
             case 3:
@@ -512,7 +601,10 @@ internal sealed class SyncModelGenerator
                     return null;
                 }
 
-                var id = NewId(actor);
+                var (id, stolen) = KeyFor(actor, ModelTables.Items, NewId(actor));
+                var folder = Pick(folders);
+                var label = labels.Count == 0 || _random.Next(2) == 0 ? null : Pick(labels);
+                var (code, spelling) = UniqueFor(actor, items: true, ItemCode(actor, id));
 
                 return
                 [
@@ -520,12 +612,16 @@ internal sealed class SyncModelGenerator
                         actor,
                         via,
                         id,
-                        Pick(folders),
-                        labels.Count == 0 || _random.Next(2) == 0 ? null : Pick(labels),
-                        ItemCode(actor, id),
+                        folder,
+                        label,
+                        code,
                         Value("t"),
-                        Payload()
-                    ),
+                        Payload(mayBeLarge: true)
+                    )
+                    {
+                        StolenKey = stolen,
+                        Spelling = spelling,
+                    },
                 ];
             }
 
@@ -560,7 +656,7 @@ internal sealed class SyncModelGenerator
             case 11:
                 return items.Count == 0
                     ? null
-                    : [new WritePayloadOp(actor, Pick(items), Payload())];
+                    : [new WritePayloadOp(actor, Pick(items), Payload(mayBeLarge: true))];
 
             case 12:
             {
@@ -592,15 +688,24 @@ internal sealed class SyncModelGenerator
                         row.LabelCode,
                         row.Code,
                         Value("t"),
-                        Payload()
+                        Payload(mayBeLarge: true)
                     ),
                 ];
             }
 
             case 13:
-                return items.Count == 0
-                    ? null
-                    : [new AddEventOp(actor, via, EventTime(), Pick(items), Value("m"))];
+            {
+                if (items.Count == 0)
+                {
+                    return null;
+                }
+
+                var at = EventTime();
+                var item = Pick(items);
+                var (key, stolen) = EventKeyFor(actor, at);
+
+                return [new AddEventOp(actor, via, key, item, Value("m")) { StolenKey = stolen }];
+            }
 
             default:
             {
@@ -942,14 +1047,208 @@ internal sealed class SyncModelGenerator
     private static string ItemCode(ModelActor actor, int id) =>
         $"c{(int)actor}-{id.ToString(CultureInfo.InvariantCulture)}";
 
-    private string Payload()
+    /// <summary>
+    /// blob の値（先頭の 4 バイトが種の中の通し番号＝種の中で一意）。<paramref name="mayBeLarge"/> なら 2 本目の乱数で
+    /// <see cref="LargePayloadBytes"/> バイトへ伸ばす（先頭の 6 バイトは同じ。本流の乱数の引き方は変えない）
+    /// </summary>
+    private string Payload(bool mayBeLarge = false)
     {
         var bytes = new byte[6];
         BitConverter.TryWriteBytes(bytes.AsSpan(0, 4), ++_counter);
         bytes[4] = (byte)_random.Next(256);
         bytes[5] = (byte)_random.Next(1, 256);
 
+        if (mayBeLarge && _side.NextDouble() < LargePayloadRate)
+        {
+            var large = new byte[LargePayloadBytes];
+            bytes.CopyTo(large, 0);
+
+            for (var i = bytes.Length; i < large.Length; i++)
+            {
+                large[i] = unchecked((byte)(bytes[4] + i * 31));
+            }
+
+            bytes = large;
+        }
+
         return Convert.ToHexString(bytes);
+    }
+
+    /// <summary>キーの範囲の持ち主（端末 1＝1000 台・端末 2＝2000 台・サーバーの他者＝3000 台。初期データの 1 桁は null）</summary>
+    private static ModelActor? RangeOwner(int id) =>
+        id switch
+        {
+            > 3000 => ModelActor.Server,
+            > 2000 => ModelActor.Device2,
+            > 1000 => ModelActor.Device1,
+            _ => null,
+        };
+
+    /// <summary>
+    /// 挿入の手のキー。2 本目の乱数で、ほかの書き手の範囲のキーのうち、ほかの書き手の DB にあって自分の DB に無いもの
+    /// （持ち主の採番がもう越えたキー＝持ち主の後の挿入が自分の DB で失敗しない）を選ぶ。無ければ自分の新しいキー
+    /// </summary>
+    private (int Id, bool Stolen) KeyFor(ModelActor actor, string table, int own)
+    {
+        if (_side.NextDouble() >= StolenKeyRate)
+        {
+            return (own, false);
+        }
+
+        var mine = IntKeys(_states[actor], table);
+        var candidates = _states
+            .Where(pair => pair.Key != actor)
+            .SelectMany(pair => IntKeys(pair.Value, table))
+            .Where(key => RangeOwner(key) is { } owner && owner != actor && !mine.Contains(key))
+            .Distinct()
+            .Order()
+            .ToList();
+
+        return candidates.Count == 0
+            ? (own, false)
+            : (candidates[_side.Next(candidates.Count)], true);
+    }
+
+    private static HashSet<int> IntKeys(ModelDbState state, string table) =>
+        table == ModelTables.Folders ? [.. state.Folders.Keys] : [.. state.Items.Keys];
+
+    /// <summary>
+    /// イベントの挿入の手のキー。2 本目の乱数で、ほかの書き手の DB にあって自分の DB に無いイベントの日時を選ぶ（日時の
+    /// キーに範囲は無い）。無ければ本流が作った日時
+    /// </summary>
+    private (DateTime At, bool Stolen) EventKeyFor(ModelActor actor, DateTime own)
+    {
+        if (_side.NextDouble() >= StolenKeyRate)
+        {
+            return (own, false);
+        }
+
+        var mine = _states[actor].Events;
+        var candidates = _states
+            .Where(pair => pair.Key != actor)
+            .SelectMany(pair => pair.Value.Events)
+            .Where(pair => !mine.ContainsKey(pair.Key))
+            .GroupBy(pair => pair.Key, StringComparer.Ordinal)
+            .OrderBy(group => group.Key, StringComparer.Ordinal)
+            .Select(group => group.First().Value.At)
+            .ToList();
+
+        return candidates.Count == 0
+            ? (own, false)
+            : (candidates[_side.Next(candidates.Count)], true);
+    }
+
+    /// <summary>
+    /// 一意な値（フォルダーの name・品目の code）を新しく書く手の値。2 本目の乱数で別表記へ置き換える（自分の DB に序数で
+    /// 同じ値が無いものだけ。サーバーの他者は、どの照合順序でもぶつからない非 ASCII の新しい値だけ）。置き換えられなければ
+    /// <paramref name="fresh"/>
+    /// </summary>
+    private (string Value, UniqueSpelling Spelling) UniqueFor(
+        ModelActor actor,
+        bool items,
+        string fresh
+    )
+    {
+        if (_side.NextDouble() >= SpellingRate)
+        {
+            return (fresh, UniqueSpelling.Fresh);
+        }
+
+        var kind =
+            actor == ModelActor.Server
+                ? UniqueSpelling.NonAscii
+                : SpellingKinds[_side.Next(SpellingKinds.Length)];
+        var limit = items ? 20 : 40;
+        var own = UniqueValues(_states[actor], items).ToHashSet(StringComparer.Ordinal);
+        var all = _states
+            .Values.SelectMany(state => UniqueValues(state, items))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+        var known = all.ToHashSet(StringComparer.Ordinal);
+
+        // 自分の DB に無く、どこにも無い（別表記として新しい）値だけ
+        List<string> Variants(Func<string, string?> make) =>
+            all.Select(make)
+                .OfType<string>()
+                .Where(value => value.Length <= limit && !known.Contains(value))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+        string? PickSide(IReadOnlyList<string> values) =>
+            values.Count == 0 ? null : values[_side.Next(values.Count)];
+
+        string NonAsciiFresh() => NonAsciiPrefixes[_side.Next(NonAsciiPrefixes.Length)] + fresh;
+
+        var value = kind switch
+        {
+            UniqueSpelling.Exact => PickSide(all.Where(value => !own.Contains(value)).ToList()),
+            UniqueSpelling.AsciiCase => PickSide(Variants(FlipAsciiCase)),
+            UniqueSpelling.NonAscii => NonAsciiFresh(),
+            UniqueSpelling.NonAsciiCase => PickSide(Variants(FlipNonAsciiCase)),
+            UniqueSpelling.TrailingSpace => PickSide(Variants(v => v + " ")),
+            _ => own.Contains("") ? null : "",
+        };
+
+        if (value is null && kind == UniqueSpelling.NonAsciiCase)
+        {
+            // 大文字小文字を持つ非 ASCII の値がまだどこにも無い：先に新しい非 ASCII の値を作る（後の手がその別表記を書く）
+            (value, kind) = (NonAsciiFresh(), UniqueSpelling.NonAscii);
+        }
+
+        return value is null || value.Length > limit
+            ? (fresh, UniqueSpelling.Fresh)
+            : (value, kind);
+    }
+
+    private static IEnumerable<string> UniqueValues(ModelDbState state, bool items) =>
+        items
+            ? state.Items.Values.Select(row => row.Code)
+            : state.Folders.Values.Select(row => row.Name);
+
+    /// <summary>ASCII の英字の大文字小文字を入れ替える（ASCII の英字が無ければ null）</summary>
+    public static string? FlipAsciiCase(string value)
+    {
+        var chars = value.ToCharArray();
+        var changed = false;
+
+        for (var i = 0; i < chars.Length; i++)
+        {
+            if (chars[i] is >= 'a' and <= 'z' or >= 'A' and <= 'Z')
+            {
+                chars[i] = (char)(chars[i] ^ 0x20);
+                changed = true;
+            }
+        }
+
+        return changed ? new string(chars) : null;
+    }
+
+    /// <summary>非 ASCII の文字の大文字小文字を入れ替える（入れ替わる非 ASCII の文字が無ければ null）</summary>
+    public static string? FlipNonAsciiCase(string value)
+    {
+        var chars = value.ToCharArray();
+        var changed = false;
+
+        for (var i = 0; i < chars.Length; i++)
+        {
+            if (chars[i] <= '\u007F')
+            {
+                continue;
+            }
+
+            var flipped = char.IsUpper(chars[i])
+                ? char.ToLowerInvariant(chars[i])
+                : char.ToUpperInvariant(chars[i]);
+
+            if (flipped != chars[i])
+            {
+                chars[i] = flipped;
+                changed = true;
+            }
+        }
+
+        return changed ? new string(chars) : null;
     }
 
     private DateTime EventTime()
@@ -960,6 +1259,31 @@ internal sealed class SyncModelGenerator
 
         return DateTime.SpecifyKind(value, kind);
     }
+}
+
+/// <summary>一意な値を新しく書く手の値の形（<see cref="SyncModelGenerator.SpellingRate"/> の割合で Fresh 以外へ置き換える）</summary>
+internal enum UniqueSpelling
+{
+    /// <summary>種の中で一意な ASCII の新しい値（置き換えなし）</summary>
+    Fresh,
+
+    /// <summary>ほかの書き手の DB にある値そのもの（2 人が独立に同じ値を作る）</summary>
+    Exact,
+
+    /// <summary>どこかの DB にある値の ASCII の英字の大文字小文字だけを入れ替えた値</summary>
+    AsciiCase,
+
+    /// <summary>非 ASCII の文字で始まる新しい値（<see cref="SyncModelGenerator.NonAsciiPrefixes"/>）</summary>
+    NonAscii,
+
+    /// <summary>どこかの DB にある値の非 ASCII の文字の大文字小文字だけを入れ替えた値</summary>
+    NonAsciiCase,
+
+    /// <summary>どこかの DB にある値の末尾に空白を 1 つ足した値</summary>
+    TrailingSpace,
+
+    /// <summary>空の文字列</summary>
+    Empty,
 }
 
 /// <summary>

@@ -145,9 +145,30 @@ internal abstract record ModelWriteOp(ModelActor Actor, ModelWriteVia Via) : Mod
     /// </summary>
     public bool ExpectFailure { get; init; }
 
-    /// <summary>経路と失敗の表記（サーバーの他者は経路を持たない）</summary>
+    /// <summary>
+    /// 挿入の手のキーを、生成器がほかの書き手の DB から選んだか（<see cref="SyncModelGenerator.StolenKeyRate"/>）。
+    /// 次元表の観測が読む印で、種の指紋の要約（公開のプロパティ）には載せない
+    /// </summary>
+    internal bool StolenKey { get; init; }
+
+    /// <summary>
+    /// 一意な値を新しく書く手の値の形（生成器が値を選んだ手だけ。それ以外は null）。次元表の観測が読む印で、種の指紋の要約
+    /// （公開のプロパティ）には載せない
+    /// </summary>
+    internal UniqueSpelling? Spelling { get; init; }
+
+    /// <summary>経路と失敗と生成器の印の表記（サーバーの他者は経路を持たない）</summary>
     protected string ViaText =>
-        (Actor == ModelActor.Server ? "" : $" via={Via}") + (ExpectFailure ? " expect-fail" : "");
+        (Actor == ModelActor.Server ? "" : $" via={Via}")
+        + (ExpectFailure ? " expect-fail" : "")
+        + (StolenKey ? " stolen-key" : "")
+        + (Spelling is { } spelling and not UniqueSpelling.Fresh ? $" spelling={spelling}" : "");
+
+    /// <summary>blob の表記（長い値は先頭と長さだけ）</summary>
+    protected static string ShowPayload(string hex) =>
+        hex.Length <= 64
+            ? hex
+            : $"{hex[..24]}...({(hex.Length / 2).ToString(CultureInfo.InvariantCulture)} bytes)";
 }
 
 internal sealed record AddFolderOp(
@@ -266,7 +287,7 @@ internal sealed record AddItemOp(
 
     public override string Describe() =>
         $"{Who(Actor)} AddItem id={Id} folder={FolderId} label={Show(LabelCode)} code={Code} "
-        + $"title={Title} payload={PayloadHex}{ViaText}";
+        + $"title={Title} payload={ShowPayload(PayloadHex)}{ViaText}";
 }
 
 internal sealed record UpdateItemOp(
@@ -307,7 +328,7 @@ internal sealed record WritePayloadOp(ModelActor Actor, int Id, string PayloadHe
     public override string KeyText => Id.ToString(CultureInfo.InvariantCulture);
 
     public override string Describe() =>
-        $"{Who(Actor)} WritePayload id={Id} payload={PayloadHex}{(ExpectFailure ? " expect-fail" : "")}";
+        $"{Who(Actor)} WritePayload id={Id} payload={ShowPayload(PayloadHex)}{(ExpectFailure ? " expect-fail" : "")}";
 }
 
 internal sealed record AddEventOp(

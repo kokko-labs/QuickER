@@ -510,6 +510,11 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         {
             await _world.ApplyAsync(op, _ct);
 
+            if (op.Spelling is { } spelling)
+            {
+                _spelled[(op.Actor, op.Table, op.KeyText)] = spelling;
+            }
+
             if (op.ExpectFailure)
             {
                 _failures.Add(
@@ -1017,6 +1022,20 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         StringComparer.Ordinal
     );
 
+    /// <summary>
+    /// 一意な値の形ごとの、その形で書いた行の upsert をサーバーが同じ値の持ち主を根拠に断った件数（UniqueValueTakenOnServer と、
+    /// 後勝ち＋ServerWins の決着）。実 SQL Server の転送で、照合順序が同じとみなす別表記が実際に断られたかを数える
+    /// </summary>
+    public IReadOnlyDictionary<UniqueSpelling, int> SpellingRefusals => _spellingRefusals;
+
+    private readonly Dictionary<UniqueSpelling, int> _spellingRefusals = [];
+
+    // 書き手・表・キーごとの、最後に生成器が値を選んだ書き込みの値の形
+    private readonly Dictionary<
+        (ModelActor Actor, string Table, string Key),
+        UniqueSpelling
+    > _spelled = [];
+
     // 根拠の無い競合・決着の違反（静止化の成否に依らず最後に足す＝静止化の中で見つけても静止化を打ち切らない）
     private readonly List<ModelFailure> _basisFailures = [];
 
@@ -1035,7 +1054,9 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
     ///   （ローカルの行がもうそのキーを参照しない）で、その表がこの実行の範囲にあり、この実行で断られていないなら数えない
     ///   （その付け替えは同じ実行で届くはずなので、削除を先に断るのは順序の誤り）。</item>
     ///   <item>UniqueValueTakenOnServer：サーバーに、送った行と同じ一意な値を持つ別の行がある。ただし、その持ち主が
-    ///   この端末で未送信で値を手放し（ローカルの行がもうその値を持たない）、この実行で断られていないなら数えない。</item>
+    ///   この端末で未送信で値を手放し（ローカルの行がもうその値を持たない）、この実行で断られていないなら数えない。
+    ///   同じ値かどうかはサーバーの一意制約の比べ方（<see cref="ISyncModelServerRole.UniqueValues"/>＝実 SQL Server は
+    ///   大文字小文字と末尾の空白を区別しない）で決める。</item>
     ///   <item>ParentMissingOnServer：送った行が参照する親のどれかがサーバーに無い。</item>
     ///   <item>後勝ち＋ServerWins の決着（理由は返らない）：削除なら DeleteRefusedOnServer、upsert なら
     ///   ParentMissingOnServer か UniqueValueTakenOnServer の根拠のどちらか。</item>
@@ -1100,6 +1121,15 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             var (count, withBasis) = _basisChecks.GetValueOrDefault(kind);
             _basisChecks[kind] = (count + 1, withBasis + (basis ? 1 : 0));
 
+            if (
+                !deleting
+                && _spelled.TryGetValue((op.Device, table, key), out var spelling)
+                && HasHolder(server)
+            )
+            {
+                _spellingRefusals[spelling] = _spellingRefusals.GetValueOrDefault(spelling) + 1;
+            }
+
             if (basis)
             {
                 continue;
@@ -1154,10 +1184,9 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                         .Rows(table)
                         .Keys.Where(k =>
                             k != key
-                            && string.Equals(
+                            && _world.Server.UniqueValues.Equals(
                                 UniqueValue(state, table, k),
-                                value,
-                                StringComparison.Ordinal
+                                value
                             )
                         )
                     : [];
@@ -1168,10 +1197,9 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                 && pending.Contains((table, holder))
                 && !refused.Contains((table, holder))
                 && before.Local.Row(table, holder) is not null
-                && !string.Equals(
+                && !_world.Server.UniqueValues.Equals(
                     UniqueValue(before.Local, table, holder),
-                    UniqueValue(before.Local, table, key),
-                    StringComparison.Ordinal
+                    UniqueValue(before.Local, table, key)
                 );
 
             // 参照する行 r がこの端末の未送信で付け替わった（ローカルの行がまだあり、もうこのキーを参照しない）
@@ -1451,9 +1479,9 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
 
     /// <summary>
     /// 行の集まりが端末側の一意な値の循環か：どの行もローカルの値を持ち、その値を集まりの別の行がサーバーで持つ（値はどれも
-    /// 別々）
+    /// 別々。サーバーが持つかはサーバーの一意制約の比べ方＝<see cref="ISyncModelServerRole.UniqueValues"/> で見る）
     /// </summary>
-    private static bool IsPendingCycle(
+    private bool IsPendingCycle(
         ModelDbState server,
         ModelDbState local,
         string table,
@@ -1473,10 +1501,9 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         return rows.All(row =>
             rows.Any(other =>
                 other != row
-                && string.Equals(
+                && _world.Server.UniqueValues.Equals(
                     UniqueValue(server, table, other),
-                    UniqueValue(local, table, row),
-                    StringComparison.Ordinal
+                    UniqueValue(local, table, row)
                 )
             )
         );
