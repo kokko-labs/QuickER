@@ -813,6 +813,7 @@ src 全体か src の外を読む守り。単位の守りには数えない（�
 | `rule:sql-comment-unsanitized-holes` | src/**/*.cs（除外 27 件） |
 | `rule:schema-import-warning-kind-branches` | src/**/*.cs（除外 1 件） |
 | `rule:sqlite-file-connection-creations` | src/**/*.cs（除外 1 件） |
+| `rule:sqlite-script-executions` | src/**/*.cs（除外 29 件） |
 | `rule:source-invisible-characters-src` | src/**/*.cs |
 | `rule:source-invisible-characters-tests` | tests/**/*.cs |
 | `rule:cjk-range-copies` | tests/**/*.cs |

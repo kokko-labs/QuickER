@@ -88,6 +88,27 @@ internal static class FuzzShape
     /// <summary>識別子の上限で縮める既定名になる長い表名（大文字を混ぜる。後から足した水準・上限のある方言だけ）</summary>
     public const string LongDefaultName = "long-default-name";
 
+    /// <summary>重複のある列への一意制約の追加・作り直しか主キーの付与（後から足した行の水準）</summary>
+    public const string DuplicateData = "duplicate-data";
+
+    /// <summary>NULL を含む列の NOT NULL 化か主キーへの追加（後から足した行の水準）</summary>
+    public const string NullData = "null-data";
+
+    /// <summary>データより短い長さへの文字列の列の縮小（後から足した行の水準）</summary>
+    public const string ShortenBelowData = "shorten-below-data";
+
+    /// <summary>行のある表への NOT NULL の列の追加（後から足した行の水準）</summary>
+    public const string NotNullAddOnRows = "not-null-add-on-rows";
+
+    /// <summary>計算列の式が参照する列の型の変更（後から足した行の水準）</summary>
+    public const string ComputedSourceChange = "computed-source-change";
+
+    /// <summary>SET NULL の外部キーの子の列の NOT NULL 化か主キーへの追加（後から足した行の水準。参照アクションを変える方言だけ）</summary>
+    public const string SetNullChildNotNull = "set-null-child-not-null";
+
+    /// <summary>子の列が NOT NULL の外部キーを SET DEFAULT へ変える（後から足した行の水準。参照アクションを変える方言だけ）</summary>
+    public const string SetDefaultNotNullChild = "set-default-not-null-child";
+
     /// <summary>種の集合全体で必ず出ていなければならない形（方言が作れない形は除く＝<see cref="RequiredFor"/>）</summary>
     public static readonly IReadOnlyList<string> Required =
     [
@@ -116,6 +137,13 @@ internal static class FuzzShape
         PrecisionDecrease,
         DiagramOnlyComputed,
         LongDefaultName,
+        DuplicateData,
+        NullData,
+        ShortenBelowData,
+        NotNullAddOnRows,
+        ComputedSourceChange,
+        SetNullChildNotNull,
+        SetDefaultNotNullChild,
     ];
 
     /// <summary>
@@ -133,7 +161,9 @@ internal static class FuzzShape
     /// <see cref="MismatchedForeignKeyAdd"/>）も実 DB では求めない：網の 5000 種でそれぞれ 0.4〜3% しか出ず、普段の実 DB の種
     /// （SQL Server 100・MySQL 150）では出ない種の集合がありうる。実 DB では形の行（<see cref="SyncPlanShapeRows"/> の
     /// BothEndsKindChange・AddedForeignKey）が決定的に担う。既存の行で断られる文の水準（<see cref="OrphanForeignKeyAdd"/>・
-    /// <see cref="PrecisionDecrease"/>）も同じく網でだけ求める（実 DB は形の行の OrphanChild と精度の縮小の期待の行）。DB 側の図で出る形（<see cref="ForeignKeyOnUnique"/>・
+    /// <see cref="PrecisionDecrease"/>・行の水準の <see cref="DuplicateData"/>・<see cref="NullData"/>・<see cref="ShortenBelowData"/>・
+    /// <see cref="NotNullAddOnRows"/>・<see cref="ComputedSourceChange"/>）も同じく網でだけ求める（実 DB は形の行の OrphanChild と
+    /// 期待の行）。DB 側の図で出る形（<see cref="ForeignKeyOnUnique"/>・
     /// <see cref="PrimaryKeyTwinUnique"/>）は実 DB でも求める
     /// </param>
     public static IReadOnlyList<string> RequiredFor(
@@ -158,7 +188,14 @@ internal static class FuzzShape
                     or MismatchedForeignKeyAdd
                     or OrphanForeignKeyAdd
                     or PrecisionDecrease
-                    or DiagramOnlyComputed => !realDatabase,
+                    or DiagramOnlyComputed
+                    or DuplicateData
+                    or NullData
+                    or ShortenBelowData
+                    or NotNullAddOnRows
+                    or ComputedSourceChange => !realDatabase,
+                    SetNullChildNotNull or SetDefaultNotNullChild => !realDatabase
+                        && dialect.AllowCascade,
                     LongDefaultName => !realDatabase
                         && !dialect.Provider.SyncCapabilities.IdentifierLengthLimit.IsUnlimited,
                     _ => true,
@@ -220,15 +257,38 @@ internal enum FuzzDataFailureKind
     /// <summary>親の無い値を持つ列への外部キーの追加（名前は外部キーの名前）</summary>
     AddForeignKey,
 
-    /// <summary>列が空でないと通らない列の変更（名前は列の名前）</summary>
+    /// <summary>
+    /// 既存の行で断られる列の変更（名前は列の名前）：列が空でないと通らない変更・NULL を含む列の NOT NULL 化（主キーへ足す変更が足す
+    /// NOT NULL 化を含む）・データより短い長さへの縮小
+    /// </summary>
     AlterColumn,
+
+    /// <summary>重複のある列への一意制約の追加・作り直し（名前は一意制約の名前・列は重複のある列）</summary>
+    AddUniqueConstraint,
+
+    /// <summary>重複のある列への主キーの付与（名前は主キーの制約名 <c>PK_{表}</c>・列は重複のある列）</summary>
+    AddPrimaryKey,
+
+    /// <summary>行のある表への NOT NULL の列の追加（名前は列の名前。暗黙の既定値で埋める方言では断られない）</summary>
+    AddColumn,
+
+    /// <summary>
+    /// 計算列の式が参照する列の型の変更（名前は列の名前。データでなくモデルの外の依存で断られる。断らない方言もある）
+    /// </summary>
+    AlterComputedSource,
 }
 
 /// <summary>既存の行で DB が断ると分かっている文（<see cref="FuzzLiveSchema.DataFailures"/>）</summary>
 /// <param name="Kind">文の種類</param>
 /// <param name="Table">表（外部キーは子の表）</param>
-/// <param name="Name">外部キーの名前か列の名前</param>
-internal sealed record FuzzDataFailure(FuzzDataFailureKind Kind, string Table, string Name);
+/// <param name="Name">外部キー・一意制約・主キーの名前か列の名前</param>
+/// <param name="Column">一意制約・主キーの重複のある列（SQLite の再構築のエラー文で見分ける。ほかの種類は null）</param>
+internal sealed record FuzzDataFailure(
+    FuzzDataFailureKind Kind,
+    string Table,
+    string Name,
+    string? Column = null
+);
 
 /// <summary>1 つの種で作った DB 側の図と、その DB へ流すセットアップの文</summary>
 internal sealed class FuzzLiveSchema
@@ -331,11 +391,17 @@ internal interface ISyncPlanFuzzCase
 /// 外部キーを足す）は、本流と別の乱数の列（<see cref="ForSeed"/>）で引く。本流の乱数の引き方・回数は変えないので、水準が出なかった種は
 /// 足す前と同じケースのまま残る。型の種類を変える変更と型の違う外部キーの追加は、値の都合で断られないよう、値が全部 NULL か行 0 の列だけに作る。
 /// </para>
+/// <para>
+/// 既存の行で断られる文は、さらに別の乱数の列で引く水準だけが作る（親の無い値・精度の縮小は <see cref="DataLevelSeed"/> の列、
+/// 重複・NULL・データより短い長さ・行のある表への NOT NULL の列・計算列の参照する列の変更は <see cref="RowLevelSeed"/> の列）。
+/// どれも <see cref="FuzzLiveSchema.DataFailures"/> に宣言する。
+/// </para>
 /// </remarks>
 internal sealed class SyncPlanFuzzGenerator(
     Random rng,
     Random? levelRng,
     Random? dataLevelRng,
+    Random? rowLevelRng,
     SyncPlanFuzzDialect dialect
 ) : ISyncPlanFuzzCase
 {
@@ -361,6 +427,7 @@ internal sealed class SyncPlanFuzzGenerator(
             new Random(seed),
             levels ? new Random(LevelSeed(seed)) : null,
             levels ? new Random(DataLevelSeed(seed)) : null,
+            levels ? new Random(RowLevelSeed(seed)) : null,
             dialect
         );
 
@@ -374,6 +441,37 @@ internal sealed class SyncPlanFuzzGenerator(
     /// </summary>
     private static int DataLevelSeed(int seed) =>
         (int)(unchecked((uint)seed * 2246822519u) ^ 0xDA7A1EEu) & int.MaxValue;
+
+    /// <summary>
+    /// 行の水準（重複・NULL・データより短い長さ・行のある表への NOT NULL の列・計算列の参照する列の変更）の乱数の列の種
+    /// （<see cref="DataLevelSeed"/> から決定的に作る）
+    /// </summary>
+    /// <remarks>
+    /// 行の水準はデータの値を DB 側の図を作る段（<see cref="BuildLive"/>）で変えるので、<see cref="DataLevelSeed"/> の列で引くと、
+    /// その列が後の <see cref="Mutate"/> で引く既存の水準（親の無い値・精度の縮小・図でだけ計算列）の引き方が全部の種で変わる。
+    /// 別の列にして、既存の 3 本の列の引き方を変えない（種の指紋は行の水準が出た種だけ変わる）。
+    /// </remarks>
+    private static int RowLevelSeed(int seed) =>
+        (int)(unchecked((uint)DataLevelSeed(seed) * 3266489917u) ^ 0x0A0B1EEu) & int.MaxValue;
+
+    /// <summary>行の水準（<see cref="RowLevelSeed"/> の列で 1 回だけ引く）</summary>
+    private enum RowLevel
+    {
+        None,
+        DuplicateData,
+        NullData,
+        ShortenBelowData,
+        NotNullAddOnRows,
+        ComputedSourceChange,
+        SetNullChildNotNull,
+        SetDefaultNotNullChild,
+    }
+
+    /// <summary>この種で引いた行の水準</summary>
+    private RowLevel _rowLevel;
+
+    /// <summary>行の水準でデータを変えた表と列（データを変えない水準は null）</summary>
+    private (string Table, string Column)? _rowLevelTarget;
 
     /// <summary>表の名前の部品</summary>
     private static readonly string[] TableWords =
@@ -435,6 +533,7 @@ internal sealed class SyncPlanFuzzGenerator(
         AddUniqueConstraints(live);
         RetargetForeignKeyToUnique(live);
         AddPrimaryKeyTwinUnique(live);
+        PickRowLevel(live);
         BuildInserts(live, dialect);
         AddComputedColumn(live);
 
@@ -1136,7 +1235,377 @@ internal sealed class SyncPlanFuzzGenerator(
             MarkComputedInDiagramOnly(entities, relationships, live);
         }
 
+        ApplyRowLevel(entities, relationships, live);
         CheckDeclaredTargetShapes(entities);
+    }
+
+    /// <summary>
+    /// 行の水準を引き、データを変える水準なら DB 側の図の値を変える（行のある表の普通の列。構造は変えない＝本流の乱数の引き方は
+    /// 変えないが、値を変えた列は以後の本流の変更の候補（一意な値の列・NULL を含まない列）から外れうる）
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    ///   <item>重複：外部キー・一意制約・主キーに入らない整数か文字列の列の 2 行目を 1 行目と同じ値にする（目標の図で一意制約・主キーを
+    ///   張る相手）。</item>
+    ///   <item>NULL：主キーでも参照される列でもない、NULL を許す整数か文字列の列の 1 行目を NULL にする（外部キーの子の列も選ぶ＝
+    ///   NULL の子は外部キーを満たす。SET NULL の外部キーの子の列は選ばない）。</item>
+    ///   <item>データより短い長さ：外部キー・一意制約・主キーに入らない長さ 20 以上の文字列の列の 1 行目を 12 文字にする（目標の図で
+    ///   長さ 5 へ縮める）。</item>
+    /// </list>
+    /// 行のある表への NOT NULL の列の追加と、計算列の参照する列の変更は値を変えない（<see cref="ApplyRowLevel"/> で目標の図だけを変える）。
+    /// </remarks>
+    private void PickRowLevel(FuzzLiveSchema live)
+    {
+        if (rowLevelRng is null)
+        {
+            return;
+        }
+
+        _rowLevel = rowLevelRng.Next(20) switch
+        {
+            0 => RowLevel.DuplicateData,
+            1 => RowLevel.NullData,
+            2 => RowLevel.ShortenBelowData,
+            3 => RowLevel.NotNullAddOnRows,
+            4 => RowLevel.ComputedSourceChange,
+            5 => RowLevel.SetNullChildNotNull,
+            6 => RowLevel.SetDefaultNotNullChild,
+            _ => RowLevel.None,
+        };
+
+        if (
+            _rowLevel
+            is not (RowLevel.DuplicateData or RowLevel.NullData or RowLevel.ShortenBelowData)
+        )
+        {
+            return;
+        }
+
+        var pairColumns = live
+            .Diagram.Relationships.SelectMany(r =>
+                r.ColumnPairs.SelectMany(p => new[] { p.SourceColumnId, p.TargetColumnId })
+            )
+            .ToHashSet();
+        var referencedColumns = live
+            .Diagram.Relationships.SelectMany(r => r.ColumnPairs.Select(p => p.SourceColumnId))
+            .ToHashSet();
+        var setNullChildren = SetNullChildColumnIds(live.Diagram.Relationships);
+        var candidates = live
+            .Diagram.Entities.Where(e => RowCount(live, e) >= 2)
+            .SelectMany(e =>
+                e.Columns.Where(c => !c.IsPrimaryKey && Info(live, e, c) is { Computed: false })
+                    .Where(c =>
+                        _rowLevel switch
+                        {
+                            RowLevel.DuplicateData => !pairColumns.Contains(c.Id)
+                                && !e.UniqueConstraints.Any(u => u.ColumnIds.Contains(c.Id))
+                                && Info(live, e, c)
+                                    is {
+                                        Kind: FuzzTypeKind.Int or FuzzTypeKind.VarChar,
+                                        IsDistinct: true,
+                                    },
+                            RowLevel.NullData => c.IsNullable
+                                && !referencedColumns.Contains(c.Id)
+                                && !setNullChildren.Contains(c.Id)
+                                && Info(live, e, c)
+                                    is { Kind: FuzzTypeKind.Int or FuzzTypeKind.VarChar },
+                            _ => !pairColumns.Contains(c.Id)
+                                && !e.UniqueConstraints.Any(u => u.ColumnIds.Contains(c.Id))
+                                && Info(live, e, c)
+                                    is { Kind: FuzzTypeKind.VarChar, Length: >= 20 },
+                        }
+                    )
+                    .Select(c => (Entity: e, Column: c))
+            )
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            _rowLevel = RowLevel.None;
+            return;
+        }
+
+        var (entity, column) = candidates[rowLevelRng.Next(candidates.Count)];
+        var values = Info(live, entity, column)!.Values;
+
+        switch (_rowLevel)
+        {
+            case RowLevel.DuplicateData:
+                values[1] = values[0];
+                break;
+            case RowLevel.NullData:
+                values[0] = null;
+                break;
+            default:
+                values[0] = dialect.StringLiteral("xxxxxxxxxxxx");
+                break;
+        }
+
+        _rowLevelTarget = (entity.TableName, column.Name);
+    }
+
+    /// <summary>
+    /// 行の水準の変更を目標の図へ加え、既存の行（とモデルの外の依存）で DB が断ると決まっている文を宣言する。本流の変更が表・列を
+    /// 消したか、変えてはいけない列（計算列の式が参照する列・計算列）に変えたときは何もしない
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    ///   <item>重複：その列へ名前つきの一意制約を足す／主キーをその列へ移す（表名が 16 文字以下＝主キーの制約名 <c>PK_{表}</c> を縮めない）
+    ///   ／名前つきの一意制約をその列へ移す（作り直し）。</item>
+    ///   <item>NULL：その列を NOT NULL にする／主キーへ足す（主キーの変更が NOT NULL 化を足す）。</item>
+    ///   <item>データより短い長さ：長さ 5 へ縮める。</item>
+    ///   <item>行のある表への NOT NULL の列の追加：整数の NOT NULL の列を足す（暗黙の既定値で埋める方言では断られない）。</item>
+    ///   <item>計算列の参照する列の変更：整数を 64 ビット整数へ広げる（データに依らず、式の依存で断る方言がある）。</item>
+    /// </list>
+    /// 変更の文は本流と同じ頭で書く（網羅の計数の変更の種類を増やさない）。
+    /// </remarks>
+    private void ApplyRowLevel(
+        List<Entity> entities,
+        List<Relationship> relationships,
+        FuzzLiveSchema live
+    )
+    {
+        if (rowLevelRng is null || _rowLevel == RowLevel.None)
+        {
+            return;
+        }
+
+        switch (_rowLevel)
+        {
+            case RowLevel.NotNullAddOnRows:
+                AddNotNullColumnOnRows(entities, live);
+                return;
+            case RowLevel.ComputedSourceChange:
+                ChangeComputedSource(entities, live);
+                return;
+            case RowLevel.SetNullChildNotNull:
+                TightenSetNullChild(entities, relationships, live);
+                return;
+            case RowLevel.SetDefaultNotNullChild:
+                SetDefaultOnNotNullChild(entities, relationships, live);
+                return;
+        }
+
+        var (table, columnName) = _rowLevelTarget!.Value;
+        var entity = entities.FirstOrDefault(e => e.TableName == table);
+        var column = entity?.Columns.FirstOrDefault(c => c.Name == columnName);
+
+        if (
+            entity is null
+            || column is null
+            || column.IsComputed
+            || Info(live, entity, column) is not { Pinned: false }
+        )
+        {
+            return;
+        }
+
+        switch (_rowLevel)
+        {
+            case RowLevel.DuplicateData:
+                ApplyDuplicateData(entities, entity, column, relationships, live);
+                break;
+            case RowLevel.NullData:
+                ApplyNullData(entity, column, relationships, live);
+                break;
+            default:
+                column.DataType = dialect.TypeName(FuzzTypeKind.VarChar, 5);
+                live.DataFailures.Add(
+                    new FuzzDataFailure(FuzzDataFailureKind.AlterColumn, table, columnName)
+                );
+                live.Shapes.Add(FuzzShape.ShortenBelowData);
+                Mutations.Add(
+                    $"alter type {table}.{columnName} -> {column.DataType}{TypeTag(FuzzTypeKind.VarChar, 5)}"
+                );
+                break;
+        }
+    }
+
+    /// <summary>重複のある列へ一意制約を足す・主キーを移す・名前つきの一意制約を移す（<see cref="ApplyRowLevel"/>）</summary>
+    private void ApplyDuplicateData(
+        List<Entity> entities,
+        Entity entity,
+        Column column,
+        List<Relationship> relationships,
+        FuzzLiveSchema live
+    )
+    {
+        var table = entity.TableName;
+
+        // 本流の変更が同じ列に一意制約・主キーを張っていたら何もしない（重複の値の列には張らないはずの本流と重ねない）
+        if (
+            column.IsPrimaryKey
+            || entity.UniqueConstraints.Any(u => u.ColumnIds.Contains(column.Id))
+        )
+        {
+            return;
+        }
+
+        var named = entity.UniqueConstraints.Where(u => u.Name is not null).ToList();
+        var options = new List<Action>
+        {
+            () =>
+            {
+                var name = UnusedConstraintName(
+                    $"UQ_{NamePart(table)}_dup",
+                    entities,
+                    relationships
+                );
+                entity.UniqueConstraints.Add(
+                    new UniqueConstraint { Name = name, ColumnIds = [column.Id] }
+                );
+                live.DataFailures.Add(
+                    new FuzzDataFailure(
+                        FuzzDataFailureKind.AddUniqueConstraint,
+                        table,
+                        name,
+                        column.Name
+                    )
+                );
+                Mutations.Add($"add unique {table}({column.Name}) named");
+            },
+        };
+
+        if (table.Length <= 16)
+        {
+            options.Add(() =>
+            {
+                SetPrimaryKey(entity, [column]);
+                live.DataFailures.Add(
+                    new FuzzDataFailure(
+                        FuzzDataFailureKind.AddPrimaryKey,
+                        table,
+                        $"PK_{table}",
+                        column.Name
+                    )
+                );
+                Mutations.Add(
+                    $"move pk {table} -> {column.Name}{ReferencingTag(entity, relationships)}"
+                );
+            });
+        }
+
+        if (named.Count > 0)
+        {
+            options.Add(() =>
+            {
+                var unique = named[rowLevelRng!.Next(named.Count)];
+                unique.ColumnIds = [column.Id];
+                live.DataFailures.Add(
+                    new FuzzDataFailure(
+                        FuzzDataFailureKind.AddUniqueConstraint,
+                        table,
+                        unique.Name!,
+                        column.Name
+                    )
+                );
+                Mutations.Add($"change unique {table} {unique.Name} -> ({column.Name})");
+            });
+        }
+
+        options[rowLevelRng!.Next(options.Count)]();
+        live.Shapes.Add(FuzzShape.DuplicateData);
+    }
+
+    /// <summary>NULL を含む列を NOT NULL にする・主キーへ足す（<see cref="ApplyRowLevel"/>）</summary>
+    private void ApplyNullData(
+        Entity entity,
+        Column column,
+        List<Relationship> relationships,
+        FuzzLiveSchema live
+    )
+    {
+        // 本流の変更が NOT NULL にしていた・SET NULL の外部キーの子にしていたら何もしない
+        if (
+            !column.IsNullable
+            || column.IsPrimaryKey
+            || SetNullChildColumnIds(relationships).Contains(column.Id)
+        )
+        {
+            return;
+        }
+
+        var table = entity.TableName;
+        var key = entity.GetPrimaryKeyColumnsInOrder();
+
+        if (key.Count > 0 && rowLevelRng!.Next(2) == 0)
+        {
+            SetPrimaryKey(entity, [.. key, column]);
+            Mutations.Add(
+                $"extend pk {table} + {column.Name}{ReferencingTag(entity, relationships)}"
+            );
+        }
+        else
+        {
+            column.IsNullable = false;
+            Mutations.Add($"nullable {table}.{column.Name} -> not null");
+        }
+
+        live.DataFailures.Add(
+            new FuzzDataFailure(FuzzDataFailureKind.AlterColumn, table, column.Name)
+        );
+        live.Shapes.Add(FuzzShape.NullData);
+    }
+
+    /// <summary>行のある表へ整数の NOT NULL の列を足す（<see cref="ApplyRowLevel"/>）</summary>
+    private void AddNotNullColumnOnRows(List<Entity> entities, FuzzLiveSchema live)
+    {
+        var tables = entities.Where(e => RowCount(live, e) > 0).ToList();
+
+        if (tables.Count == 0)
+        {
+            return;
+        }
+
+        var entity = tables[rowLevelRng!.Next(tables.Count)];
+        var name = $"added_nn_{rowLevelRng.Next(1000)}";
+        entity.Columns.Add(
+            new Column
+            {
+                Name = name,
+                DataType = dialect.TypeName(FuzzTypeKind.Int, 0),
+                IsNullable = false,
+            }
+        );
+        live.DataFailures.Add(
+            new FuzzDataFailure(FuzzDataFailureKind.AddColumn, entity.TableName, name)
+        );
+        live.Shapes.Add(FuzzShape.NotNullAddOnRows);
+        Mutations.Add($"add column {entity.TableName}.{name} Int not null");
+    }
+
+    /// <summary>計算列の式が参照する整数の列を 64 ビット整数へ広げる（<see cref="ApplyRowLevel"/>）</summary>
+    private void ChangeComputedSource(List<Entity> entities, FuzzLiveSchema live)
+    {
+        var candidates = entities
+            .SelectMany(e =>
+                e.Columns.Where(c =>
+                        !c.IsComputed
+                        && Info(live, e, c) is { Pinned: true, Kind: FuzzTypeKind.Int }
+                        && c.DataType == dialect.TypeName(FuzzTypeKind.Int, 0)
+                    )
+                    .Select(c => (Entity: e, Column: c))
+            )
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return;
+        }
+
+        var (entity, column) = candidates[rowLevelRng!.Next(candidates.Count)];
+        column.DataType = dialect.TypeName(FuzzTypeKind.BigInt, 0);
+        live.DataFailures.Add(
+            new FuzzDataFailure(
+                FuzzDataFailureKind.AlterComputedSource,
+                entity.TableName,
+                column.Name
+            )
+        );
+        live.Shapes.Add(FuzzShape.ComputedSourceChange);
+        Mutations.Add(
+            $"alter type {entity.TableName}.{column.Name} -> {column.DataType}{TypeTag(FuzzTypeKind.BigInt, 0)}"
+        );
     }
 
     /// <summary>
@@ -1166,6 +1635,128 @@ internal sealed class SyncPlanFuzzGenerator(
                 );
             }
         }
+    }
+
+    /// <summary>
+    /// SET NULL の外部キーの子の列を NOT NULL にするか主キーへ足す（<see cref="ApplyRowLevel"/>）。値は NULL を含まない列か行 0 の表だけ
+    /// （NOT NULL 化をデータで断らせない＝SET NULL の宣言の分岐だけを見る）
+    /// </summary>
+    /// <remarks>
+    /// SET NULL の子の列の NOT NULL 化を断る方言（<see cref="SyncDialectCapabilities.SetNullRequiresNullableChildColumn"/>＝MySQL）では計画が
+    /// その変更を先頭へ移して警告し、ほかの方言は通して警告する（親の行の削除・更新が後で断られる）。
+    /// </remarks>
+    private void TightenSetNullChild(
+        List<Entity> entities,
+        List<Relationship> relationships,
+        FuzzLiveSchema live
+    )
+    {
+        var candidates = relationships
+            .Where(r =>
+                r.OnDelete == ForeignKeyReferentialAction.SetNull
+                || r.OnUpdate == ForeignKeyReferentialAction.SetNull
+            )
+            .Select(r =>
+            {
+                var child = entities.FirstOrDefault(e => e.Id == r.TargetEntityId);
+                var column = child?.Columns.FirstOrDefault(c =>
+                    c.Id == r.ColumnPairs.FirstOrDefault()?.TargetColumnId
+                );
+                return (Child: child, Column: column);
+            })
+            .Where(x =>
+                x.Child is not null
+                && x.Column is { IsNullable: true, IsPrimaryKey: false, IsComputed: false }
+                && Info(live, x.Child, x.Column) is { Pinned: false } info
+                && (info.HasNoNull || RowCount(live, x.Child) == 0)
+            )
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return;
+        }
+
+        var (entity, column) = candidates[rowLevelRng!.Next(candidates.Count)];
+        var key = entity!.GetPrimaryKeyColumnsInOrder();
+
+        if (key.Count > 0 && rowLevelRng.Next(2) == 0)
+        {
+            SetPrimaryKey(entity, [.. key, column!]);
+            Mutations.Add(
+                $"extend pk {entity.TableName} + {column!.Name}{ReferencingTag(entity, relationships)}"
+            );
+        }
+        else
+        {
+            column!.IsNullable = false;
+            Mutations.Add($"nullable {entity.TableName}.{column.Name} -> not null");
+        }
+
+        live.Shapes.Add(FuzzShape.SetNullChildNotNull);
+    }
+
+    /// <summary>
+    /// 子の列がどれも NOT NULL の外部キーの ON DELETE か ON UPDATE を SET DEFAULT へ変える（<see cref="ApplyRowLevel"/>。参照アクションを
+    /// 変える方言だけ）
+    /// </summary>
+    /// <remarks>
+    /// 図は既定値を持たないので、SET DEFAULT の子の列は既定値が無い。計画は列の DEFAULT 制約を要る方言
+    /// （<see cref="SyncDialectCapabilities.SetDefaultRequiresColumnDefault"/>＝SQL Server）で警告し、SET DEFAULT を持たない方言は
+    /// 実効値（NO ACTION）へ畳む。SQL Server は参照アクションを変えない方言なので、網羅の行（手で書いた行）が受け持つ。
+    /// </remarks>
+    private void SetDefaultOnNotNullChild(
+        List<Entity> entities,
+        List<Relationship> relationships,
+        FuzzLiveSchema live
+    )
+    {
+        if (!dialect.AllowCascade)
+        {
+            return;
+        }
+
+        var candidates = relationships
+            .Where(r =>
+                r.ColumnPairs.Count > 0
+                && r.ColumnPairs.All(p =>
+                    entities
+                        .SelectMany(e => e.Columns)
+                        .FirstOrDefault(c => c.Id == p.TargetColumnId)
+                        is { IsNullable: false }
+                )
+            )
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return;
+        }
+
+        var relationship = candidates[rowLevelRng!.Next(candidates.Count)];
+        var onUpdate = rowLevelRng.Next(3) == 0;
+
+        if (
+            (onUpdate ? relationship.OnUpdate : relationship.OnDelete)
+            == ForeignKeyReferentialAction.SetDefault
+        )
+        {
+            return;
+        }
+
+        if (onUpdate)
+        {
+            relationship.OnUpdate = ForeignKeyReferentialAction.SetDefault;
+        }
+        else
+        {
+            relationship.OnDelete = ForeignKeyReferentialAction.SetDefault;
+        }
+
+        Mutations.Add(
+            $"fk action {Name(entities, relationship.TargetEntityId)} -> {Name(entities, relationship.SourceEntityId)} {(onUpdate ? "ON UPDATE" : "ON DELETE")} {ForeignKeyReferentialAction.SetDefault}"
+        );
+        live.Shapes.Add(FuzzShape.SetDefaultNotNullChild);
     }
 
     /// <summary>DB の普通の整数の列を、目標の図だけで計算列にして型か NULL 許容を変える</summary>

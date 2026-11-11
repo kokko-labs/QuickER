@@ -58,6 +58,8 @@ public sealed class SqlServerProvider : IDatabaseProvider
             ChecksDefaultOnColumnTypeChange = true,
             TypeKindChangeRequiresEmptyColumn = false,
             PrecisionDecreaseRequiresEmptyColumn = false,
+            AddNotNullColumnRequiresEmptyTable = true,
+            AlterColumnBlockedByComputedColumn = true,
             SupportsComputedColumnTypeChange = false,
             SupportsUniqueConstraintOnPrimaryKey = true,
             ReferencedKeyRequiresSameColumnOrder = true,

@@ -53,6 +53,14 @@ internal sealed record SyncPlanStaticVerdict(
 ///   この規則が無いと、live の列どうしの型の違う外部キーの追加が警告なしに断られるのを予言できない。</item>
 ///   <item>R9：同じ列の並びに一意制約を 2 つ張れない方言（Oracle＝<see cref="SyncDialectCapabilities.SupportsUniqueConstraintOnPrimaryKey"/>
 ///   が偽の逐次 DDL の方言）で、一意制約を足すとき、その時点で残る主キー・一意制約と列集合が同じでない（ORA-02261）。</item>
+///   <item>R10：ケースが宣言した既存の行（とモデルの外の依存）で断られる文（<see cref="FuzzLiveSchema.DataFailures"/>）でない
+///   （<see cref="DeclaredDataFailure"/>）。計画は値を見ないので予告の警告は求めず、D9 だけを掛ける（断られうる文の名指しの警告が名指しした
+///   制約は D9 の外）。</item>
+///   <item>R11：MySQL で、残す SET NULL の外部キー（方言が書く参照アクション）の子の列を NOT NULL にしない（1830）。SQL Server も
+///   <see cref="SyncDialectCapabilities.SetNullRequiresNullableChildColumn"/> を宣言するが、検査は外部キーを作るときだけで、NULL 許容だけの
+///   列の変更は外部キーを張ったまま通る（期待の行 realdb-fk-set-null-child-not-null-keeps-that-fk）。製品はこの文を計画の先頭へ移す
+///   （<see cref="SyncPlanSection.IsMovedFirst"/>）。規則が無いと、先頭の文が実際には断られるのに、後ろの別の予言の失敗の前で外した
+///   制約を D9 が数える。</item>
 /// </list>
 /// <para>
 /// 違反になるのは、断られる文があるのに次のどちらでもないとき：(a) 失敗を予告する警告がある（<see cref="NonPredictingWarnings"/> 以外）
@@ -103,13 +111,18 @@ internal static class SyncPlanStaticRules
     /// <param name="selected">利用者が選んだ差分項目（計画が足した項目と見分ける）</param>
     /// <param name="plan">計画</param>
     /// <param name="capabilities">方言の能力</param>
+    /// <param name="dataFailures">
+    /// ケースが宣言した、既存の行（とモデルの外の依存）で断られる文（<see cref="FuzzLiveSchema.DataFailures"/>）。規則 R10 がその文を
+    /// 断られる文として予言する（無ければ予言しない）
+    /// </param>
     public static SyncPlanStaticVerdict Evaluate(
         string dialect,
         IReadOnlyList<Entity> liveEntities,
         IReadOnlyList<Relationship> liveRelationships,
         IReadOnlyCollection<SchemaDiffItem> selected,
         SyncPlan plan,
-        SyncDialectCapabilities capabilities
+        SyncDialectCapabilities capabilities,
+        IReadOnlyCollection<FuzzDataFailure>? dataFailures = null
     )
     {
         if (!capabilities.SupportsAlterColumn || !capabilities.SupportsForeignKeyAlter)
@@ -134,9 +147,21 @@ internal static class SyncPlanStaticRules
         var doomedAt = -1;
         string? reason = null;
 
+        var declaredFailure = false;
+
         for (var k = 0; k < steps.Count; k++)
         {
             reason = state.Check(steps[k]);
+
+            // R10：ケースが宣言した既存の行で断られる文（計画は値を見ないので、予告の警告を求めない＝表明 1 と同じ）
+            if (
+                reason is null
+                && DeclaredDataFailure(steps[k], dataFailures, capabilities) is { } declared
+            )
+            {
+                reason = declared;
+                declaredFailure = true;
+            }
 
             if (reason is not null)
             {
@@ -168,7 +193,7 @@ internal static class SyncPlanStaticRules
         var violations = new List<string>(warningViolations);
         var warned = plan.Warnings.Any(w => !NonPredictingWarnings.Contains(w.Kind));
 
-        if (!warned)
+        if (!warned && !declaredFailure)
         {
             violations.Add($"static rule: {predicted} (no warning predicts the failure)");
         }
@@ -176,7 +201,15 @@ internal static class SyncPlanStaticRules
         if (!capabilities.TransactionalDdl)
         {
             violations.AddRange(
-                DroppedBeforeFailure(steps, doomedAt, selected, plan, capabilities, predicted)
+                DroppedBeforeFailure(
+                    steps,
+                    doomedAt,
+                    selected,
+                    plan,
+                    capabilities,
+                    predicted,
+                    declaredFailure
+                )
             );
         }
 
@@ -198,8 +231,9 @@ internal static class SyncPlanStaticRules
     /// <remarks>
     /// 前寄せは「残す外部キーに阻まれて必ず断られる文」を、何も外さないうちに失敗させるために先頭へ移す。移した文が先頭の位置では通る
     /// （両端を別々の型へ変える外部キーの、互換の範囲で広げる子の列の変更など）と、断られる文は元の位置に残り、その前で外した制約が
-    /// 暗黙コミットで消えたまま残る。規則が判定できる文（キーの削除＝R1・R3、型を変える列の変更＝R2・R7）を最後に持つ前寄せだけを
-    /// 見る（子の列の NOT NULL 化＝SET NULL の外部キーは規則が予言しないので見ない）。
+    /// 暗黙コミットで消えたまま残る。規則が判定できる文（キーの削除＝R1・R3、型を変える列の変更＝R2・R7、
+    /// <see cref="SyncDialectCapabilities.SetNullRequiresNullableChildColumn"/> の方言の NOT NULL 化＝R11。前寄せは暗黙コミットの方言だけなので
+    /// この宣言の方言では MySQL だけ）を最後に持つ前寄せだけを見る。
     /// </remarks>
     private static IEnumerable<string> MovedFirstNotFailing(
         List<Step> steps,
@@ -226,7 +260,12 @@ internal static class SyncPlanStaticRules
                     .FirstOrDefault(e => Lower(e.TableName) == last.Table)
                     ?.Columns.FirstOrDefault(c => Lower(c.Name) == Lower(column.Name))
                     is { } liveColumn
-                && !capabilities.AreSameType(liveColumn.DataType, column.DataType);
+                && (
+                    !capabilities.AreSameType(liveColumn.DataType, column.DataType)
+                    || capabilities.SetNullRequiresNullableChildColumn
+                        && ColumnNullability.AllowsNull(liveColumn)
+                        && !ColumnNullability.AllowsNull(column)
+                );
 
         if (judged && (doomedAt < 0 || doomedAt >= movedCount))
         {
@@ -506,7 +545,8 @@ internal static class SyncPlanStaticRules
         IReadOnlyCollection<SchemaDiffItem> selected,
         SyncPlan plan,
         SyncDialectCapabilities capabilities,
-        string predicted
+        string predicted,
+        bool dataFailure
     )
     {
         var limit = capabilities.IdentifierLengthLimit;
@@ -529,22 +569,43 @@ internal static class SyncPlanStaticRules
             .Select(w => $"{Lower(w.TableName)}|{Lower(w.Detail)}")
             .ToHashSet(StringComparer.Ordinal);
 
-        // 断られる文が、同じ計画の前の方で外した外部キーの付け直しそのものなら、その外部キーは消えたまま残る（付け直しが候補キーを
-        // 証明できないと警告した外部キーを除く）。この形を数えないと、参照先の唯一の一意制約を同じ計画で外しながら列の変更で外部キーを
-        // 付け直す同期（最後の付け直しが断られて外部キーが消える）が、予告の警告があるので予言された失敗として通る
+        // 既存の行で断られうる文・列が空でないと通らない変更の前後で外して付け直すと計画が名指しした制約（製品の契約＝名指しして
+        // 部分適用を受け入れる。実 DB の表明 1b の例外と同じ）。警告は表と名前だけを持つので、外部キーと一意制約の両方の身元を作る。
+        // 受け入れるのは、予言した失敗がデータで断られる文（R10）のときだけ。構造の規則（R1〜R9・R11）が予言した失敗はデータに依らず
+        // 必ず断られるので、計画はその文を先頭へ移すか外し直さないで済ませるべきで、名指しでは足りない
+        var namedAroundRefusable = plan
+            .Warnings.Where(w =>
+                dataFailure
+                && w.Kind
+                    is SyncPlanWarningKind.ConstraintRebuildAroundEmptyColumnChange
+                        or SyncPlanWarningKind.ConstraintRebuildAroundRowDependentChange
+            )
+            .SelectMany(w =>
+            {
+                var open = w.Detail.IndexOf(" (", StringComparison.Ordinal);
+                var name = Lower(open < 0 ? w.Detail : w.Detail[..open]);
+                var table = Lower(w.TableName);
+                return name == "primary key"
+                    ? new[] { $"PK {table}" }
+                    : [$"FK {table}.{name}", $"UQ {table}.{name}"];
+            })
+            .ToHashSet(StringComparer.Ordinal);
+
+        // 断られる文が、同じ計画の前の方で外した制約の付け直しそのもの（外部キー・作り直す一意制約・主キーの変更の付与）なら、
+        // その制約は消えたまま残る（付け直しが候補キーを証明できないと警告した外部キーと、断られうる文として名指しした制約を除く）。
+        // この形を数えないと、参照先の唯一の一意制約を同じ計画で外しながら列の変更で外部キーを付け直す同期（最後の付け直しが断られて
+        // 外部キーが消える）が、予告の警告があるので予言された失敗として通る
         var failing = steps[doomedAt];
 
         if (
-            failing.Kind == SchemaDiffKind.AddForeignKey
-            && failing.AddIdentity(capabilities) is { } failingIdentity
-            && steps
-                .Take(doomedAt)
-                .Any(s =>
-                    s.Kind == SchemaDiffKind.DropForeignKey
-                    && s.DropIdentity(capabilities) == failingIdentity
+            failing.AddIdentity(capabilities) is { } failingIdentity
+            && steps.Take(doomedAt).Any(s => s.DropIdentity(capabilities) == failingIdentity)
+            && !namedAroundRefusable.Contains(failingIdentity)
+            && !(
+                failing.Kind == SchemaDiffKind.AddForeignKey
+                && warnedForeignKeys.Contains(
+                    $"{Lower(failing.Item.ChildEntity!.TableName)}|{Lower(failing.ForeignKeyName(limit))}"
                 )
-            && !warnedForeignKeys.Contains(
-                $"{Lower(failing.Item.ChildEntity!.TableName)}|{Lower(failing.ForeignKeyName(limit))}"
             )
         )
         {
@@ -554,6 +615,11 @@ internal static class SyncPlanStaticRules
         foreach (var step in steps.Take(doomedAt))
         {
             if (step.DropIdentity(capabilities) is not { } identity)
+            {
+                continue;
+            }
+
+            if (namedAroundRefusable.Contains(identity))
             {
                 continue;
             }
@@ -585,6 +651,65 @@ internal static class SyncPlanStaticRules
                 yield return $"static D9 (rule 4): {identity} is dropped for {removal.Describe()}, which runs after the failing statement ({predicted})";
             }
         }
+    }
+
+    /// <summary>
+    /// R10：計画の文が、ケースが宣言した既存の行（とモデルの外の依存）で断られる文（<see cref="FuzzLiveSchema.DataFailures"/>）なら、その理由
+    /// </summary>
+    /// <remarks>
+    /// 照合は宣言の種類ごとに、外部キーの追加は子の表と実効名、列の変更は表と列（計算列の参照する列の変更は
+    /// <see cref="SyncDialectCapabilities.AlterColumnBlockedByComputedColumn"/> の方言だけ）、一意制約の追加は表と実効名、主キーの付与は表、
+    /// 列の追加は表と列（<see cref="SyncDialectCapabilities.AddNotNullColumnRequiresEmptyTable"/> の方言だけ）で取る（大文字小文字を無視）。
+    /// 宣言した方言の事実で断られない文（暗黙の既定値で埋める MySQL の NOT NULL の列の追加など）は予言しない。
+    /// </remarks>
+    private static string? DeclaredDataFailure(
+        Step step,
+        IReadOnlyCollection<FuzzDataFailure>? declared,
+        SyncDialectCapabilities capabilities
+    )
+    {
+        if (declared is null || declared.Count == 0)
+        {
+            return null;
+        }
+
+        var limit = capabilities.IdentifierLengthLimit;
+        var table =
+            step.Kind == SchemaDiffKind.AddForeignKey && step.Item.ChildEntity is { } child
+                ? Lower(child.TableName)
+                : step.Table;
+        var match = declared.FirstOrDefault(d =>
+            Lower(d.Table) == table
+            && d.Kind switch
+            {
+                FuzzDataFailureKind.AddForeignKey => step.Kind == SchemaDiffKind.AddForeignKey
+                    && Lower(step.ForeignKeyName(limit)) == Lower(d.Name),
+                FuzzDataFailureKind.AlterColumn => step.Kind == SchemaDiffKind.AlterColumn
+                    && Lower(step.Item.ColumnName ?? "") == Lower(d.Name),
+                FuzzDataFailureKind.AlterComputedSource =>
+                    capabilities.AlterColumnBlockedByComputedColumn
+                        && step.Kind == SchemaDiffKind.AlterColumn
+                        && Lower(step.Item.ColumnName ?? "") == Lower(d.Name),
+                FuzzDataFailureKind.AddUniqueConstraint => step.Kind
+                    == SchemaDiffKind.AddUniqueConstraint
+                    && Lower(
+                        UniqueConstraintNaming.Resolve(
+                            step.Item.UniqueConstraintName,
+                            step.Item.TableName,
+                            step.Item.UniqueConstraintColumns,
+                            limit
+                        )
+                    ) == Lower(d.Name),
+                FuzzDataFailureKind.AddPrimaryKey => step.Kind == SchemaDiffKind.AlterPrimaryKey
+                    && step.Section.PrimaryKeyPhase == PrimaryKeyPhase.Add,
+                FuzzDataFailureKind.AddColumn => capabilities.AddNotNullColumnRequiresEmptyTable
+                    && step.Kind == SchemaDiffKind.AddColumn
+                    && Lower(step.Item.ColumnName ?? "") == Lower(d.Name),
+                _ => false,
+            }
+        );
+
+        return match is null ? null : $"R10: declared {match.Kind} refused by existing rows";
     }
 
     /// <summary>計画の 1 項目（セクションと項目）</summary>
@@ -676,13 +801,14 @@ internal static class SyncPlanStaticRules
             $"UQ {Table}.{Lower(UniqueConstraintNaming.Resolve(Item.UniqueConstraintName, Item.TableName, Item.UniqueConstraintColumns, capabilities.IdentifierLengthLimit))}";
     }
 
-    /// <summary>外部キーの状態</summary>
+    /// <summary>外部キーの状態（<paramref name="SetNull"/>＝方言が書く参照アクションの ON DELETE か ON UPDATE が SET NULL）</summary>
     private sealed record ForeignKey(
         string Child,
         IReadOnlyList<string> ChildColumns,
         string Parent,
         IReadOnlyList<string> ParentColumns,
-        string Name
+        string Name,
+        bool SetNull
     );
 
     /// <summary>主キー・一意制約の状態（索引になる）</summary>
@@ -703,6 +829,9 @@ internal static class SyncPlanStaticRules
         private readonly List<(string Table, IReadOnlyList<string> Columns)> _foreignKeyIndexes =
         [];
         private readonly Dictionary<string, string> _types = new(StringComparer.Ordinal);
+
+        /// <summary>今 NULL を許す列（R11）</summary>
+        private readonly HashSet<string> _nullable = new(StringComparer.Ordinal);
 
         /// <summary>
         /// DB 側の図の外部キーが持っていた組と、その時の両端の型（子の列・親の列・子の型・親の型。R8 で DB が受け入れた組を見分ける）
@@ -754,7 +883,8 @@ internal static class SyncPlanStaticRules
                         [.. pairs.Select(p => Lower(p.ChildColumn))],
                         Lower(parent.TableName),
                         [.. pairs.Select(p => Lower(p.ParentColumn))],
-                        names[relationship]
+                        names[relationship],
+                        UsesSetNull(relationship)
                     )
                 );
 
@@ -770,6 +900,26 @@ internal static class SyncPlanStaticRules
         /// <summary>列の今の型（無ければ空）</summary>
         private string TypeOf(string key) =>
             _types.TryGetValue(key, out var type) ? type : string.Empty;
+
+        /// <summary>列の今の NULL 許容を記録する（<see cref="ColumnNullability.AllowsNull"/>）</summary>
+        private void SetNullable(string key, Column column)
+        {
+            if (ColumnNullability.AllowsNull(column))
+            {
+                _nullable.Add(key);
+            }
+            else
+            {
+                _nullable.Remove(key);
+            }
+        }
+
+        /// <summary>方言が書く参照アクション（ON DELETE か ON UPDATE）が SET NULL か（製品の SyncPlanner と同じ読み方）</summary>
+        private bool UsesSetNull(Relationship relationship) =>
+            capabilities.EffectiveOnDelete(relationship.OnDelete)
+                == ForeignKeyReferentialAction.SetNull
+            || capabilities.EffectiveOnUpdate(relationship.OnUpdate)
+                == ForeignKeyReferentialAction.SetNull;
 
         /// <summary>項目を当てる直前の状態で、DB がその文を断るか（断るなら理由・断らないなら null）</summary>
         public string? Check(Step step) =>
@@ -836,6 +986,7 @@ internal static class SyncPlanStaticRules
                     break;
                 case SchemaDiffKind.AddColumn when item.Column is { } column:
                     _types[ColumnKey(step.Table, column.Name)] = column.DataType;
+                    SetNullable(ColumnKey(step.Table, column.Name), column);
                     break;
                 case SchemaDiffKind.AlterPrimaryKey
                     when step.Section.PrimaryKeyPhase == PrimaryKeyPhase.Drop:
@@ -861,6 +1012,7 @@ internal static class SyncPlanStaticRules
                     break;
                 case SchemaDiffKind.AlterColumn when item.Column is { } altered:
                     _types[ColumnKey(step.Table, item.ColumnName!)] = altered.DataType;
+                    SetNullable(ColumnKey(step.Table, item.ColumnName!), altered);
                     break;
                 case SchemaDiffKind.DropColumn:
                     var dropped = Lower(item.ColumnName!);
@@ -888,7 +1040,8 @@ internal static class SyncPlanStaticRules
                             [.. item.ForeignKeyColumnPairs.Select(p => Lower(p.ChildColumn))],
                             Lower(item.ParentEntity!.TableName),
                             [.. item.ForeignKeyColumnPairs.Select(p => Lower(p.ParentColumn))],
-                            SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, Limit)
+                            SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, Limit),
+                            item.Relationship is { } added && UsesSetNull(added)
                         )
                     );
                     break;
@@ -1001,6 +1154,22 @@ internal static class SyncPlanStaticRules
         {
             var column = Lower(step.Item.ColumnName!);
             var newType = step.Item.Column?.DataType;
+
+            // R11：MySQL で、残す SET NULL の外部キーの子の列を NOT NULL にする（1830。SQL Server は外部キーを作るときだけ検査する）
+            if (
+                IsMySql
+                && capabilities.SetNullRequiresNullableChildColumn
+                && step.Item.Column is { } target
+                && !ColumnNullability.AllowsNull(target)
+                && _nullable.Contains(ColumnKey(step.Table, column))
+                && _foreignKeys.FirstOrDefault(f =>
+                    f.SetNull && f.Child == step.Table && f.ChildColumns.Contains(column)
+                )
+                    is { } setNull
+            )
+            {
+                return $"R11: {step.Table}.{column} is made NOT NULL while {setNull.Name} sets it to NULL";
+            }
 
             if (
                 newType is null
@@ -1182,6 +1351,7 @@ internal static class SyncPlanStaticRules
             foreach (var column in entity.Columns)
             {
                 _types[ColumnKey(table, column.Name)] = column.DataType;
+                SetNullable(ColumnKey(table, column.Name), column);
             }
 
             var key = entity.GetPrimaryKeyColumnsInOrder();

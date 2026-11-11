@@ -640,6 +640,12 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 Strings.SchemaSync_ExecuteConfirmConstraintRebuildAroundEmptyColumnChange,
                 BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
             ),
+            // 既存の行で断られうる文（主キーの付与・一意制約の追加・NOT NULL 化・型の縮小・NOT NULL の列の追加・計算列の参照しうる列の変更）
+            // の前後で外して付け直す制約は、その文の失敗で外れたまま残りうる
+            SyncPlanWarningKind.ConstraintRebuildAroundRowDependentChange => string.Format(
+                Strings.SchemaSync_ExecuteConfirmConstraintRebuildAroundRowDependentChange,
+                BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
+            ),
             // ドットを含む表名は、SQLite では添付したデータベースの表と読まれる
             SyncPlanWarningKind.SchemaQualifiedTableName => string.Format(
                 Strings.SchemaSync_ExecuteConfirmSchemaQualifiedTableName,

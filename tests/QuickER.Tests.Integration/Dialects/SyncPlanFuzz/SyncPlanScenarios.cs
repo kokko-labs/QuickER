@@ -562,17 +562,25 @@ internal static class SyncPlanScenarios
                 DropAllColumnsRow("mysql-drop-all-columns", DialectNames.MySql),
                 DropAllColumnsRow("oracle-drop-all-columns", DialectNames.Oracle),
                 DropAllColumnsRow("postgresql-drop-all-columns", DialectNames.PostgreSql),
-                // 旧い実 DB の種 12503・18316：主キーへ列を足してから元の主キーの列を消す（残る主キーの列の値が一意でない）
+                // 旧い実 DB の種 12503・18316：主キーへ列を足してから元の主キーの列を消す（残る主キーの列の値が一意でない）。
+                // 計画は列の値を知らないので警告できない（DB の事実）。既存の行で断られる文として宣言し（FuzzLiveSchema.DataFailures）、
+                // 表明 1 はその失敗だけを外し、表明 1b（巻き戻して何も消えない）は掛ける。区切り G1a で既知の失敗の一覧から宣言へ移した
                 Row(
                     "sqlite-pk-nonunique",
                     "nightly-sqlite-pk-nonunique",
-                    "値が一意でない列だけが残る主キーの付け替えが、再構築のデータの移送で UNIQUE 違反になり、巻き戻して何も変えない（旧い実 DB の種 12503・18316。DB がデータで断る受け入れの形）",
+                    "値が一意でない列だけが残る主キーの付け替えが、再構築のデータの移送で UNIQUE 違反になり、巻き戻して何も変えない（旧い実 DB の種 12503・18316。既存の行で断られる文の宣言）",
                     DialectNames.Sqlite,
                     live =>
                     {
                         var t = live.Table("t_nodes");
                         live.Int(t, "id", pk: true);
                         live.Int(t, "r", value: _ => "1");
+                        live.ExpectDataFailure(
+                            FuzzDataFailureKind.AddPrimaryKey,
+                            "t_nodes",
+                            "PK_t_nodes",
+                            "r"
+                        );
                     },
                     target =>
                     {
@@ -1193,8 +1201,12 @@ internal sealed class ScenarioLive(FuzzLiveSchema live, SyncPlanFuzzDialect dial
         );
 
     /// <summary>既存の行で DB が断ると分かっている文を宣言する（<see cref="FuzzLiveSchema.DataFailures"/>）</summary>
-    public void ExpectDataFailure(FuzzDataFailureKind kind, string table, string name) =>
-        live.DataFailures.Add(new FuzzDataFailure(kind, table, name));
+    public void ExpectDataFailure(
+        FuzzDataFailureKind kind,
+        string table,
+        string name,
+        string? column = null
+    ) => live.DataFailures.Add(new FuzzDataFailure(kind, table, name, column));
 
     private Column Add(
         Entity table,

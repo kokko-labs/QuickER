@@ -368,6 +368,10 @@ public sealed class DialectDocsTableTests
         [
             "Lowering the precision, scale or fractional seconds of a column needs the column to be empty"
         ] = c => c.PrecisionDecreaseRequiresEmptyColumn,
+        ["Adding a `NOT NULL` column needs the table to be empty"] = c =>
+            c.AddNotNullColumnRequiresEmptyTable,
+        ["Changing a column that a computed column uses is refused"] = c =>
+            c.AlterColumnBlockedByComputedColumn,
     };
 
     /// <summary>T-Q の「数える単位」の語（英語・日本語）</summary>

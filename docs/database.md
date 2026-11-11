@@ -578,7 +578,11 @@ SQLite rebuilds tables and uses its own order.
 
 - On SQL Server, PostgreSQL, and SQLite the script runs in a transaction and rolls back on failure.
   On MySQL / Oracle, DDL is implicitly committed by design, so a warning explains that a mid-script failure can leave changes partially applied.
-  On these dialects the script is ordered so that a failure does not leave constraints dropped: a statement that the sync knows will be refused (a column change, a primary key drop, or a unique constraint drop that a foreign key kept by the sync blocks; when the sync drops every key that can support such a foreign key, those drops) runs first, so the database stays unchanged.
+  On these dialects a statement that the sync knows will be refused (a column change, a primary key drop, or a unique constraint drop that a foreign key kept by the sync blocks; when the sync drops every key that can support such a foreign key, those drops) runs first, so the database stays unchanged.
+  The sync does not read the rows, so it cannot tell beforehand whether the rows refuse a statement: a new primary key or unique constraint on columns with duplicate values, `NOT NULL` on a column that holds NULL, a type shorter or narrower than the values, a `NOT NULL` column added to a table that has rows (where the table below says so), or a change to a column of a table with computed columns (where the table below says so).
+  For such a statement, the confirmation names every constraint that the script drops before it and adds back after it, or drops for a later change (a foreign key or unique constraint whose column or table the sync removes, a unique constraint the new primary key replaces).
+  If the rows refuse the statement, the named constraints stay dropped (partially applied).
+  A new primary key or unique constraint is not counted when its columns include the columns of a primary key or unique constraint the database already has, so reordering the primary key is never named.
   Among the drops run together, the drops of a unique constraint that is re-created (a named constraint whose columns change) and of a primary key that is replaced run last, so a refused sync leaves that key in its old form.
   When two or more of those keys are re-created, one of them would be lost whatever the order, so one unique constraint re-creation is left out of the script and named in the confirmation; the unique constraint left in place keeps supporting the foreign key, and the other changes still run.
   Foreign key additions run in this order: foreign keys re-added as they were dropped, foreign keys re-created with a changed definition, new foreign keys, and those whose referenced columns are not proven to be a key, so a new foreign key that existing rows refuse does not stop the re-adds before it
@@ -620,6 +624,8 @@ Foreign keys that rely on the changed primary key (they refer to the same column
 | A failed re-add can leave the foreign key dropped | — | — | ✅ | ✅ | — |
 | Changing the type kind of a column needs the column to be empty | — | — | — | ✅ (ORA-01439) | — |
 | Lowering the precision, scale or fractional seconds of a column needs the column to be empty | — | — | — | ✅ (ORA-01440, ORA-30082) | — |
+| Adding a `NOT NULL` column needs the table to be empty | ✅ | ✅ | — (filled with the type's implicit default) | ✅ (ORA-01758) | ✅ |
+| Changing a column that a computed column uses is refused | ✅ | ✅ (type changes) | — | ✅ (ORA-54031) | — (the table is rebuilt) |
 
 A primary key dropped and re-added by a key column change (see the table above) is named `PK_{table}`.
 On MySQL, a foreign key of the table whose primary key changes is also dropped and re-created when its columns lead the old primary key, because the primary key cannot be dropped while it is the only index supporting that foreign key.
@@ -627,7 +633,7 @@ The same applies when dropping a unique constraint whose index is the only one s
 When a change leaves the two ends of a foreign key with different types after the sync (altering the type of only one side, for example), the foreign key is not dropped and re-added, and the column change fails as it is (the database stays unchanged).
 The confirmation names such a foreign key on every dialect, also on PostgreSQL and Oracle, which change the column with the foreign key in place.
 When the sync changes both ends to types that match, PostgreSQL and Oracle still drop the foreign key and re-add it after the column changes if the ends do not match while only one of them has changed, because the database refuses the first column change otherwise.
-Where the table above says a column change needs the column to be empty (a change of the type kind, that is the base type name such as `NUMBER` to `NVARCHAR2`, and lowering the precision, scale or fractional seconds), the confirmation names every constraint (foreign key, primary key or unique constraint) that the script drops before such a change and adds back after it.
+Where the table above says a column change needs the column to be empty (a change of the type kind, that is the base type name such as `NUMBER` to `NVARCHAR2`, and lowering the precision, scale or fractional seconds), the confirmation names every constraint (foreign key, primary key or unique constraint) that the script drops before such a change and adds back after it, or drops for a later change.
 If the column has data, the change fails and the dropped constraints stay dropped.
 QuickER treats such a type difference as one that can make re-adding the foreign key fail, and on MySQL / Oracle a failed re-add leaves the foreign key missing.
 Integer types that differ only in width are not a mismatch where the table above allows them on the two ends.

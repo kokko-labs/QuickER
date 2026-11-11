@@ -190,6 +190,28 @@ public sealed partial record SyncDialectCapabilities
     /// </remarks>
     public required bool PrecisionDecreaseRequiresEmptyColumn { get; init; }
 
+    /// <summary>
+    /// 既定値の無い NOT NULL の列の追加を、表に行が無いときだけ受け付けるか（SQL Server・PostgreSQL・Oracle・SQLite）。
+    /// </summary>
+    /// <remarks>
+    /// 図は既定値を持たないので、同期が足す NOT NULL の列はどれも既定値が無い。行のある表への追加を SQL Server（4901）・PostgreSQL（23502）・
+    /// Oracle（ORA-01758）・SQLite（Cannot add a NOT NULL column with default value NULL）は断り、MySQL は型の暗黙の既定値（0・空文字列など）で
+    /// 埋めて通す。計画は表の行の有無を見ないので、暗黙コミットの方言では、この追加を挟んで外して付け直す制約を名指しする
+    /// （<see cref="SyncPlanWarningKind.ConstraintRebuildAroundRowDependentChange"/>）。
+    /// </remarks>
+    public required bool AddNotNullColumnRequiresEmptyTable { get; init; }
+
+    /// <summary>
+    /// 計算列・生成列の式が参照する列の変更を、データに依らず断るか（SQL Server・PostgreSQL・Oracle）。
+    /// </summary>
+    /// <remarks>
+    /// SQL Server は式が参照する列の ALTER COLUMN を断り（列が依存している）、PostgreSQL は型の変更を（0A000）、Oracle は MODIFY を
+    /// （ORA-54031）断る。MySQL は式を保って通し、SQLite は表を作り直すので断らない。図は式がどの列を参照するかを持たないので、計画は
+    /// DB に計算列のある表の普通の列の変更を、表の単位で保守側に断られうる文として数え、暗黙コミットの方言では挟んで外して付け直す制約を
+    /// 名指しする（<see cref="SyncPlanWarningKind.ConstraintRebuildAroundRowDependentChange"/>）。
+    /// </remarks>
+    public required bool AlterColumnBlockedByComputedColumn { get; init; }
+
     /// <summary>計算列・生成列の型を、式を保ったまま変えられるか（PostgreSQL と MySQL）。</summary>
     /// <remarks>
     /// <para>
@@ -469,6 +491,103 @@ public sealed partial record SyncDialectCapabilities
             return (precision, scale);
         }
     }
+
+    /// <summary>
+    /// 列の変更が型を狭めうるか（既存の値が新しい型に入らず DB が断りうる変更）。広げるか同じと証明できる変更だけを偽にする（保守側）
+    /// </summary>
+    /// <remarks>
+    /// 偽にするのは、同じ型（<see cref="AreSameType"/>）・同じ文字列型で長さを下げない（<c>max</c> へ広げるのを含む）・整数型どうしで幅を
+    /// 下げない（<c>NUMBER(p)</c> は桁で比べる）・同じ基本の名前の数値・日時の型で精度を下げない（<see cref="DecreasesPrecision"/> が偽）変更。
+    /// ほかの型の種類の変更（文字列から数値など）は、値の変換が断られうるので真。両側とも方言の正規化を通して比べる。
+    /// 既存の行で断られうる文の判定（<see cref="SyncPlanWarningKind.ConstraintRebuildAroundRowDependentChange"/>）が使う。
+    /// </remarks>
+    public bool NarrowsType(string? oldType, string? newType)
+    {
+        if (AreSameType(oldType, newType))
+        {
+            return false;
+        }
+
+        var o = NormalizeTypeNotation(oldType ?? string.Empty);
+        var n = NormalizeTypeNotation(newType ?? string.Empty);
+        var oldString = StringLengthPattern().Match(o);
+        var newString = StringLengthPattern().Match(n);
+
+        if (
+            oldString.Success
+            && newString.Success
+            && string.Equals(
+                oldString.Groups["base"].Value,
+                newString.Groups["base"].Value,
+                StringComparison.OrdinalIgnoreCase
+            )
+            && string.Equals(
+                oldString.Groups["unit"].Value,
+                newString.Groups["unit"].Value,
+                StringComparison.OrdinalIgnoreCase
+            )
+            && string.Equals(
+                oldString.Groups["rest"].Value.Trim(),
+                newString.Groups["rest"].Value.Trim(),
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
+        {
+            return LengthOf(newString) < LengthOf(oldString);
+        }
+
+        if (IntegerTypePattern().IsMatch(o) && IntegerTypePattern().IsMatch(n))
+        {
+            return IntegerDigits(n) < IntegerDigits(o);
+        }
+
+        return ChangesTypeKind(o, n) || DecreasesPrecision(o, n);
+
+        // 文字列型の長さ（max は上限なし）
+        static long LengthOf(Match match) =>
+            string.Equals(match.Groups["len"].Value, "max", StringComparison.OrdinalIgnoreCase)
+                ? long.MaxValue
+                : long.Parse(
+                    match.Groups["len"].Value,
+                    System.Globalization.CultureInfo.InvariantCulture
+                );
+
+        // 整数型の 10 進の桁（smallint 5・int 10・bigint 19、NUMBER(p) は p、NUMBER(*,0) は上限なし）
+        static int IntegerDigits(string type)
+        {
+            var match = IntegerDigitsPattern().Match(type);
+
+            if (match.Groups["p"].Success)
+            {
+                return int.Parse(
+                    match.Groups["p"].Value,
+                    System.Globalization.CultureInfo.InvariantCulture
+                );
+            }
+
+            return match.Groups["word"].Value.ToUpperInvariant() switch
+            {
+                "SMALLINT" or "INT2" => 5,
+                "INT" or "INTEGER" or "INT4" => 10,
+                "BIGINT" or "INT8" => 19,
+                _ => int.MaxValue,
+            };
+        }
+    }
+
+    /// <summary>長さ（数か <c>max</c>）を持つ文字列型の表記（基本の型・長さ・Oracle の単位語・括弧の後ろの指定）</summary>
+    [GeneratedRegex(
+        @"^\s*(?<base>char|varchar|nchar|nvarchar|binary|varbinary|varchar2|nvarchar2|raw)\s*\(\s*(?<len>[0-9]+|max)\s*(?<unit>char|byte)?\s*\)(?<rest>.*)$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Singleline
+    )]
+    private static partial Regex StringLengthPattern();
+
+    /// <summary>整数型の語か <c>NUMBER(p)</c> の桁（<see cref="IntegerTypePattern"/> に一致した表記を読む）</summary>
+    [GeneratedRegex(
+        @"^\s*(?:(?<word>smallint|int|integer|bigint|int2|int4|int8)|number\s*\(\s*(?:(?<p>[0-9]+)\s*(?:,\s*0\s*)?|\*\s*,\s*0\s*)\))\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex IntegerDigitsPattern();
 
     /// <summary>精度を持つ数値・日時の型の表記（基本の型・精度・スケール・括弧の後ろの指定）</summary>
     [GeneratedRegex(

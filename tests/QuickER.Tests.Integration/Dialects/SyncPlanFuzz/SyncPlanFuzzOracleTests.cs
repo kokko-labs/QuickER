@@ -447,7 +447,79 @@ public sealed class SyncPlanFuzzOracleTests
                 [3],
                 [],
                 EmptyColumnWarning("c", "PRIMARY KEY")
+            ),
+            // 例外：既存の行で断られうる文の前後で外して付け直すと名指しした制約の消失も受け入れる（別の注として数える）。名指しして
+            // いない制約の消失は今どおり違反
+            new Case(
+                "row-dependent-warned-foreign-key-is-a-note",
+                Live with
+                {
+                    UniqueColumns = ["id", "code"],
+                },
+                [SchemaDiffKind.AlterUniqueConstraint],
+                Live with
+                {
+                    UniqueColumns = ["id", "code"],
+                    CpPresent = false,
+                },
+                [],
+                [SyncPlanFuzzRunner.WarnedRowDependentChangeNote],
+                RowDependentWarning("c", "fk_c_p")
+            ),
+            new Case(
+                "row-dependent-warning-on-other-foreign-key-is-a-violation",
+                Live with
+                {
+                    UniqueColumns = ["id", "code"],
+                },
+                [SchemaDiffKind.AlterUniqueConstraint],
+                Live with
+                {
+                    UniqueColumns = ["id", "code"],
+                    CpPresent = false,
+                },
+                [5],
+                [],
+                RowDependentWarning("c", "fk_other")
+            ),
+            new Case(
+                "row-dependent-warned-primary-key-is-a-note",
+                Live with
+                {
+                    PrimaryKey = ["code"],
+                },
+                [SchemaDiffKind.AlterPrimaryKey],
+                Live with
+                {
+                    PrimaryKey = [],
+                },
+                [],
+                [SyncPlanFuzzRunner.WarnedRowDependentChangeNote],
+                RowDependentWarning("p", "PRIMARY KEY")
+            ),
+            new Case(
+                "row-dependent-warning-on-other-table-primary-key-is-a-violation",
+                Live with
+                {
+                    PrimaryKey = ["code"],
+                },
+                [SchemaDiffKind.AlterPrimaryKey],
+                Live with
+                {
+                    PrimaryKey = [],
+                },
+                [3],
+                [],
+                RowDependentWarning("c", "PRIMARY KEY")
             )
+        );
+
+    /// <summary>既存の行で断られうる文の前後で外して付け直す制約の警告（製品の文の形＝「制約名 (断られうる文)」）</summary>
+    private static SyncPlanWarning RowDependentWarning(string table, string constraint) =>
+        new(
+            SyncPlanWarningKind.ConstraintRebuildAroundRowDependentChange,
+            table,
+            $"{constraint} (PRIMARY KEY p (code))"
         );
 
     /// <summary>列が空でないと通らない変更の前後で外して付け直す制約の警告（製品の文の形＝「制約名 (表.列: 旧 → 新)」）</summary>
@@ -465,16 +537,31 @@ public sealed class SyncPlanFuzzOracleTests
         string Error,
         string[] Declared,
         bool Expected,
-        bool Committed = false
+        bool Committed = false,
+        bool? Statementwise = null,
+        string? Preceding = null
     )
     {
         public override string ToString() => Name;
     }
 
-    /// <summary>宣言（「種類|表|名前」。<see cref="FuzzDataFailure"/> は内部の型なので、行は文字列で書く）</summary>
+    /// <summary>宣言（「種類|表|名前」か「種類|表|名前|列」。<see cref="FuzzDataFailure"/> は内部の型なので、行は文字列で書く）</summary>
     private const string OrphanAdd = "AddForeignKey|e|fk_e_p";
 
     private const string PrecisionDecrease = "AlterColumn|p|id";
+
+    private const string NullDataNotNull = "AlterColumn|c3|pid";
+
+    private const string DuplicateUnique = "AddUniqueConstraint|t2|uq_t2|w";
+
+    private const string DuplicatePrimaryKey = "AddPrimaryKey|t1|PK_t1|k";
+
+    private const string NotNullColumnAdd = "AddColumn|c5|extra";
+
+    private const string ComputedSource = "AlterComputedSource|t9|x";
+
+    /// <summary>SQLite の再構築の後の外部キー違反の文言（実行の UI カルチャの resx）を表の一覧から組む行の印</summary>
+    private const string SqliteViolationPrefix = "sqlite-fk-violation:";
 
     public static TheoryData<DataFailureCase> DataFailureCases() =>
         new(
@@ -526,14 +613,14 @@ public sealed class SyncPlanFuzzOracleTests
             new DataFailureCase(
                 "sqlite-violation-only-in-declared-child-matches",
                 "",
-                "Foreign key constraint violations were detected after the table rebuild, so the transaction was rolled back. Affected table(s): e",
+                SqliteViolationPrefix + "e",
                 [OrphanAdd],
                 true
             ),
             new DataFailureCase(
                 "sqlite-violation-also-in-other-table-does-not-match",
                 "",
-                "Foreign key constraint violations were detected after the table rebuild, so the transaction was rolled back. Affected table(s): e, c",
+                SqliteViolationPrefix + "e, c",
                 [OrphanAdd],
                 false
             ),
@@ -566,6 +653,190 @@ public sealed class SyncPlanFuzzOracleTests
                 [PrecisionDecrease],
                 false
             ),
+            // 行の水準（文ごとに流す方言）：一意制約・主キー・列の追加・計算列の参照する列の変更の文の形と名前
+            new DataFailureCase(
+                "mysql-dynamic-not-null-change-matches-by-set-statement",
+                "EXECUTE stmt;",
+                "Invalid use of NULL value",
+                [NullDataNotNull],
+                true,
+                Preceding: "SET @sql = IF(@def IS NOT NULL, CONCAT('ALTER TABLE `c3` MODIFY COLUMN `pid` ', @def), 'x');"
+            ),
+            new DataFailureCase(
+                "mysql-dynamic-change-of-other-column-does-not-match",
+                "EXECUTE stmt;",
+                "Invalid use of NULL value",
+                [NullDataNotNull],
+                false,
+                Preceding: "SET @sql = IF(@def IS NOT NULL, CONCAT('ALTER TABLE `c3` MODIFY COLUMN `note` ', @def), 'x');"
+            ),
+            new DataFailureCase(
+                "unique-add-statement-matches",
+                "ALTER TABLE `t2` ADD CONSTRAINT `uq_t2` UNIQUE (`w`);",
+                "Duplicate entry '7' for key 't2.uq_t2'",
+                [DuplicateUnique],
+                true
+            ),
+            new DataFailureCase(
+                "unique-drop-statement-does-not-match",
+                "ALTER TABLE `t2` DROP INDEX `uq_t2`;",
+                "Cannot drop index 'uq_t2': needed in a foreign key constraint",
+                [DuplicateUnique],
+                false
+            ),
+            new DataFailureCase(
+                "mysql-primary-key-add-statement-matches",
+                "ALTER TABLE `t1` ADD PRIMARY KEY (`k`);",
+                "Duplicate entry '5' for key 't1.PRIMARY'",
+                [DuplicatePrimaryKey],
+                true
+            ),
+            new DataFailureCase(
+                "oracle-primary-key-add-statement-matches",
+                "ALTER TABLE \"t1\" ADD CONSTRAINT \"PK_t1\" PRIMARY KEY (\"k\")",
+                "ORA-02437: cannot validate (APP.PK_t1) - primary key violated",
+                [DuplicatePrimaryKey],
+                true
+            ),
+            new DataFailureCase(
+                "primary-key-add-on-other-table-does-not-match",
+                "ALTER TABLE `t9` ADD PRIMARY KEY (`k`);",
+                "Duplicate entry '5' for key 't9.PRIMARY'",
+                [DuplicatePrimaryKey],
+                false
+            ),
+            new DataFailureCase(
+                "oracle-not-null-column-add-statement-matches",
+                "ALTER TABLE \"c5\" ADD (\"extra\" NUMBER(10) NOT NULL)",
+                "ORA-01758: table must be empty to add mandatory (NOT NULL) column",
+                [NotNullColumnAdd],
+                true
+            ),
+            new DataFailureCase(
+                "foreign-key-add-on-the-table-does-not-match-column-add",
+                "ALTER TABLE \"c5\" ADD CONSTRAINT \"fk_c5\" FOREIGN KEY (\"extra\") REFERENCES \"p5\" (\"id\")",
+                "ORA-02298: cannot validate (APP.fk_c5) - parent keys not found",
+                [NotNullColumnAdd],
+                false
+            ),
+            new DataFailureCase(
+                "oracle-computed-source-change-statement-matches",
+                "ALTER TABLE \"t9\" MODIFY (\"x\" NUMBER(19))",
+                "ORA-54031: column to be dropped or modified is used in a virtual column expression",
+                [ComputedSource],
+                true
+            ),
+            // 行の水準（エラー文で見る方言）：理由の語と名前・SQLite の再構築の表の列
+            new DataFailureCase(
+                "postgresql-unique-duplicate-error-matches",
+                "",
+                "23505: could not create unique index \"uq_t2\"",
+                [DuplicateUnique],
+                true
+            ),
+            new DataFailureCase(
+                "sqlserver-primary-key-duplicate-error-matches",
+                "",
+                "The CREATE UNIQUE INDEX statement terminated because a duplicate key was found for the object name 'dbo.t1' and the index name 'PK_t1'. The duplicate key value is (5).",
+                [DuplicatePrimaryKey],
+                true
+            ),
+            new DataFailureCase(
+                "sqlite-rebuild-unique-error-matches-by-rebuilt-column",
+                "CREATE TABLE \"t2_quicker_rebuild\" (\"w\" INTEGER, CONSTRAINT \"uq_t2\" UNIQUE (\"w\"));",
+                "SQLite Error 19: 'UNIQUE constraint failed: t2_quicker_rebuild.w'.",
+                [DuplicateUnique],
+                true,
+                Statementwise: false
+            ),
+            new DataFailureCase(
+                "sqlite-rebuild-unique-error-on-other-column-does-not-match",
+                "CREATE TABLE \"t2_quicker_rebuild\" (\"w\" INTEGER, CONSTRAINT \"uq_t2\" UNIQUE (\"w\"));",
+                "SQLite Error 19: 'UNIQUE constraint failed: t2_quicker_rebuild.u'.",
+                [DuplicateUnique],
+                false,
+                Statementwise: false
+            ),
+            new DataFailureCase(
+                "postgresql-not-null-error-matches",
+                "",
+                "23502: column \"pid\" of relation \"c3\" contains null values",
+                [NullDataNotNull],
+                true
+            ),
+            new DataFailureCase(
+                "sqlserver-truncation-error-matches",
+                "",
+                "String or binary data would be truncated in table 'master.dbo.c3', column 'pid'. Truncated value: ''.",
+                [NullDataNotNull],
+                true
+            ),
+            new DataFailureCase(
+                "sqlserver-not-null-column-add-error-matches",
+                "",
+                "ALTER TABLE only allows columns to be added that can contain nulls, or have a DEFAULT definition specified. Column 'extra' cannot be added to non-empty table 'c5' because it does not satisfy these conditions.",
+                [NotNullColumnAdd],
+                true
+            ),
+            new DataFailureCase(
+                "sqlite-rebuild-not-null-column-add-error-matches",
+                "CREATE TABLE \"c5_quicker_rebuild\" (\"extra\" INTEGER NOT NULL);",
+                "SQLite Error 19: 'NOT NULL constraint failed: c5_quicker_rebuild.extra'.",
+                [NotNullColumnAdd],
+                true,
+                Statementwise: false
+            ),
+            new DataFailureCase(
+                "postgresql-length-error-without-names-matches-by-reason",
+                "",
+                "22001: value too long for type character varying(5)",
+                [NullDataNotNull],
+                true
+            ),
+            new DataFailureCase(
+                "sqlite-not-null-column-add-error-without-names-matches-by-reason",
+                "ALTER TABLE \"c5\" ADD COLUMN \"extra\" INTEGER NOT NULL;",
+                "SQLite Error 1: 'Cannot add a NOT NULL column with default value NULL'.",
+                [NotNullColumnAdd],
+                true,
+                Statementwise: false
+            ),
+            new DataFailureCase(
+                "length-reason-does-not-match-declared-column-add",
+                "",
+                "22001: value too long for type character varying(5)",
+                [NotNullColumnAdd],
+                false
+            ),
+            new DataFailureCase(
+                "postgresql-computed-source-error-matches-by-reason",
+                "",
+                "0A000: cannot alter type of a column used by a generated column",
+                [ComputedSource],
+                true
+            ),
+            new DataFailureCase(
+                "sqlserver-computed-source-error-matches",
+                "",
+                "The column 'calc' is dependent on column 'x'.",
+                [ComputedSource],
+                true
+            ),
+            // 名前だけが偶然一致する別の理由の失敗は一致させない（理由の語で分ける）
+            new DataFailureCase(
+                "error-naming-declared-column-for-duplicates-does-not-match-not-null-change",
+                "",
+                "The CREATE UNIQUE INDEX statement terminated because a duplicate key was found for the object name 'dbo.c3' and the index name 'UQ_c3_pid'. The duplicate key value is (1).",
+                [NullDataNotNull],
+                false
+            ),
+            new DataFailureCase(
+                "error-naming-declared-unique-for-dependency-does-not-match",
+                "",
+                "2BP01: cannot drop constraint uq_t2 on table t2 because other objects depend on it",
+                [DuplicateUnique],
+                false
+            ),
             new DataFailureCase(
                 "nothing-declared-does-not-match",
                 "ALTER TABLE `e` ADD CONSTRAINT `fk_e_p` FOREIGN KEY (`x`) REFERENCES `p` (`id`);",
@@ -589,25 +860,45 @@ public sealed class SyncPlanFuzzOracleTests
     [MemberData(nameof(DataFailureCases))]
     public void IsDeclaredDataFailure_MatchesOnlyTheDeclaredStatement(DataFailureCase c)
     {
+        // SQLite の外部キー違反の文言は実行の UI カルチャの resx（行は表の一覧の前の印で書く）
+        var error = c.Error.StartsWith(SqliteViolationPrefix, StringComparison.Ordinal)
+            ? string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                QuickER.Provider.Resources.Strings.Sync_Error_SqliteForeignKeyViolation,
+                c.Error[SqliteViolationPrefix.Length..]
+            )
+            : c.Error;
         var result = new SchemaSyncResult
         {
             Committed = c.Committed,
-            Error = c.Committed ? null : c.Error,
+            Error = c.Committed ? null : error,
         };
         result.Batches.Add(
-            new SchemaSyncBatchResult(0, "ALTER TABLE `x` ADD `y` int;", true, null)
+            new SchemaSyncBatchResult(0, c.Preceding ?? "ALTER TABLE `x` ADD `y` int;", true, null)
         );
 
         if (!c.Committed)
         {
-            result.Batches.Add(new SchemaSyncBatchResult(1, c.FailedStatement, false, c.Error));
+            result.Batches.Add(new SchemaSyncBatchResult(1, c.FailedStatement, false, error));
         }
 
         var declared = c
             .Declared.Select(d => d.Split('|'))
-            .Select(p => new FuzzDataFailure(Enum.Parse<FuzzDataFailureKind>(p[0]), p[1], p[2]))
+            .Select(p => new FuzzDataFailure(
+                Enum.Parse<FuzzDataFailureKind>(p[0]),
+                p[1],
+                p[2],
+                p.Length > 3 ? p[3] : null
+            ))
             .ToList();
-        SyncPlanFuzzRunner.IsDeclaredDataFailure(result, declared).Should().Be(c.Expected, c.Name);
+        SyncPlanFuzzRunner
+            .IsDeclaredDataFailure(
+                result,
+                declared,
+                c.Statementwise ?? c.FailedStatement.Length > 0
+            )
+            .Should()
+            .Be(c.Expected, c.Name);
     }
 
     [Theory(

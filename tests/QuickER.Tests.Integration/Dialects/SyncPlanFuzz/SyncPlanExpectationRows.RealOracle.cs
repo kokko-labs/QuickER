@@ -316,8 +316,11 @@ internal static partial class SyncPlanExpectationRows
                         )
                         .Expect(e =>
                         {
-                            // 被参照列 (a, b) は同期後も一意制約として残るため、候補キー喪失の警告は出ない
-                            e.Warnings.Empty();
+                            // 被参照列 (a, b) は同期後も一意制約として残るため、候補キー喪失の警告は出ない。新しい主キー (id) は
+                            // live のキーの列集合を含まないので、行の重複で付与が断られうる主キーだけを名指しする
+                            e.Warnings.Exact(
+                                "ConstraintRebuildAroundRowDependentChange(cfk_parent): PRIMARY KEY (PRIMARY KEY cfk_parent (id))"
+                            );
                             e.Outcome.Exact("committed");
                             // 主キーは縮み、複合外部キーは構成列を保ったまま残る
                             e.After.Single("pk cfk_parent (id)");
@@ -439,7 +442,12 @@ internal static partial class SyncPlanExpectationRows
                         )
                         .Expect(e =>
                         {
-                            e.Warnings.Empty();
+                            // 長さだけ違う外部キーは食い違いとしない。新しい主キー (id) は live のキーの列集合を含まないので、
+                            // 付与の前で外す外部キーと主キーを、行の重複で断られうる文の警告で名指しする
+                            e.Warnings.Exact(
+                                "ConstraintRebuildAroundRowDependentChange(lp_child): FK_lp_child (PRIMARY KEY lp_parent (id))",
+                                "ConstraintRebuildAroundRowDependentChange(lp_parent): PRIMARY KEY (PRIMARY KEY lp_parent (id))"
+                            );
                             e.Outcome.Exact("committed");
                             e.After.Single(
                                 "col lp_child.parent_code VARCHAR2(20) *",

@@ -275,6 +275,9 @@ internal static class SyncPlanCoverageRows
                 SeedRow(DialectNames.MySql, 55, FuzzSelection.Single, ["retarget fk"]),
                 SeedRow(DialectNames.MySql, 98, FuzzSelection.Random, ["computed nullable"]),
                 SeedRow(DialectNames.MySql, 156, FuzzSelection.All, ["replace pk"]),
+                // 行の水準（4 本目の乱数の列）で普段の種のケースが変わり、普段の 150 種から欠けた 1 組を埋める（変更の種類を持つ
+                // 既存の種の行の種 38 を、選び方だけ変えて使う）
+                SeedRow(DialectNames.MySql, 38, FuzzSelection.Random, ["shrink pk"]),
             ]
         );
 
@@ -361,7 +364,10 @@ internal static class SyncPlanCoverageRows
     /// SQL Server の参照アクションの変更（項目 fk action と ReferentialAction の欠け）。生成器は SQL Server で参照アクションを
     /// 変えない（<see cref="SyncPlanFuzzDialect.AllowCascade"/> が偽＝連鎖の経路の重なりを CREATE で断る DB の制約を避ける）ので、
     /// 互いに独立した親子の組 8 つ（どの子も親を 1 つだけ参照する＝連鎖の経路が重ならない。子の列は NULL を許す＝SET NULL と
-    /// SET DEFAULT の前提）の外部キーを、ON DELETE / ON UPDATE の 4 つの行き先へそれぞれ変え、5 つの選び方で流す
+    /// SET DEFAULT の前提）の外部キーを、ON DELETE / ON UPDATE の 4 つの行き先へそれぞれ変え、5 つの選び方で流す。別の行で、子の列が
+    /// NOT NULL の組 2 つずつを SET NULL・SET DEFAULT へ変える（行も SET NULL と SET DEFAULT で分ける。SET NULL は計画が外して警告し、SET DEFAULT は列の DEFAULT 制約が要ると計画が
+    /// 警告して DB が断る＝宣言 <see cref="SyncDialectCapabilities.SetNullRequiresNullableChildColumn"/>・
+    /// <see cref="SyncDialectCapabilities.SetDefaultRequiresColumnDefault"/> の分岐）
     /// </summary>
     private static IEnumerable<ScenarioRow<SyncPlanCoverageInput>> SqlServerReferentialActionRows()
     {
@@ -382,21 +388,67 @@ internal static class SyncPlanCoverageRows
             (true, ForeignKeyReferentialAction.NoAction, ForeignKeyReferentialAction.SetDefault),
         ];
 
+        // 子の列が NOT NULL の組（SET NULL は作れない方言なので計画が外して警告し、SET DEFAULT は列の DEFAULT 制約が要るので計画が警告して
+        // DB が断る）。NULL を許す組と同じ行に入れると、断られる SET DEFAULT が巻き戻しでほかの組の適用まで消すので、行を分ける。
+        // SET NULL と SET DEFAULT も行を分ける（同じ行だと SET NULL の警告が SET DEFAULT の失敗の予告に数えられ、SET DEFAULT の警告が
+        // 抜けても表明 1 が赤にならない）
+        (
+            bool OnUpdate,
+            ForeignKeyReferentialAction From,
+            ForeignKeyReferentialAction To
+        )[] notNullChildSetNullChanges =
+        [
+            (false, ForeignKeyReferentialAction.NoAction, ForeignKeyReferentialAction.SetNull),
+            (true, ForeignKeyReferentialAction.NoAction, ForeignKeyReferentialAction.SetNull),
+        ];
+        (
+            bool OnUpdate,
+            ForeignKeyReferentialAction From,
+            ForeignKeyReferentialAction To
+        )[] notNullChildSetDefaultChanges =
+        [
+            (false, ForeignKeyReferentialAction.NoAction, ForeignKeyReferentialAction.SetDefault),
+            (true, ForeignKeyReferentialAction.NoAction, ForeignKeyReferentialAction.SetDefault),
+        ];
+
+        foreach (
+            var (suffix, rowChanges, nullableChild, what) in new[]
+            {
+                (
+                    "fk-actions",
+                    changes,
+                    true,
+                    "8 つ（ON DELETE / ON UPDATE × NO ACTION・CASCADE・SET NULL・SET DEFAULT）"
+                ),
+                (
+                    "fk-actions-not-null-child-set-null",
+                    notNullChildSetNullChanges,
+                    false,
+                    "2 つ（子の列が NOT NULL・ON DELETE / ON UPDATE × SET NULL）"
+                ),
+                (
+                    "fk-actions-not-null-child-set-default",
+                    notNullChildSetDefaultChanges,
+                    false,
+                    "2 つ（子の列が NOT NULL・ON DELETE / ON UPDATE × SET DEFAULT）"
+                ),
+            }
+        )
         foreach (var selection in Enum.GetValues<FuzzSelection>())
         {
             yield return new(
-                $"{IdPrefix}{DialectNames.SqlServer}-fk-actions-{selection}",
+                $"{IdPrefix}{DialectNames.SqlServer}-{suffix}-{selection}",
                 null,
-                $"SQL Server の参照アクションの変更 8 つ（ON DELETE / ON UPDATE × NO ACTION・CASCADE・SET NULL・SET DEFAULT）を選び方 {selection} で流す",
+                $"SQL Server の参照アクションの変更 {what}を選び方 {selection} で流す",
                 new SyncPlanCoverageInput(
                     DialectNames.SqlServer,
                     dialect => new SyncPlanScenarioCase(
                         dialect,
                         live =>
                         {
-                            for (var i = 0; i < changes.Length; i++)
+                            for (var i = 0; i < rowChanges.Length; i++)
                             {
-                                var (onUpdate, from, _) = changes[i];
+                                var (onUpdate, from, _) = rowChanges[i];
                                 var parent = live.Table($"p{i}_parents");
                                 live.Int(parent, "id", pk: true);
                                 var child = live.Table($"c{i}_children");
@@ -409,16 +461,16 @@ internal static class SyncPlanCoverageRows
                                     onDelete: onUpdate
                                         ? ForeignKeyReferentialAction.NoAction
                                         : from,
-                                    nullable: true,
+                                    nullable: nullableChild,
                                     onUpdate: onUpdate ? from : ForeignKeyReferentialAction.NoAction
                                 );
                             }
                         },
                         target =>
                         {
-                            for (var i = 0; i < changes.Length; i++)
+                            for (var i = 0; i < rowChanges.Length; i++)
                             {
-                                var (onUpdate, _, to) = changes[i];
+                                var (onUpdate, _, to) = rowChanges[i];
                                 var relationship = target.ForeignKey($"c{i}_children", "parent_id");
 
                                 if (onUpdate)

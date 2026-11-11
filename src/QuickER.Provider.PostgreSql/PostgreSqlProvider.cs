@@ -55,6 +55,8 @@ public sealed class PostgreSqlProvider : IDatabaseProvider
             ChecksDefaultOnColumnTypeChange = true,
             TypeKindChangeRequiresEmptyColumn = false,
             PrecisionDecreaseRequiresEmptyColumn = false,
+            AddNotNullColumnRequiresEmptyTable = true,
+            AlterColumnBlockedByComputedColumn = true,
             SupportsComputedColumnTypeChange = true,
             SupportsUniqueConstraintOnPrimaryKey = true,
             ReferencedKeyRequiresSameColumnOrder = false,

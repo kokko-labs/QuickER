@@ -37,6 +37,8 @@ public static class TestDialectCapabilities
             ChecksDefaultOnColumnTypeChange = false,
             TypeKindChangeRequiresEmptyColumn = false,
             PrecisionDecreaseRequiresEmptyColumn = false,
+            AddNotNullColumnRequiresEmptyTable = false,
+            AlterColumnBlockedByComputedColumn = false,
             SupportsComputedColumnTypeChange = false,
             SupportsUniqueConstraintOnPrimaryKey = true,
             ReferencedKeyRequiresSameColumnOrder = true,

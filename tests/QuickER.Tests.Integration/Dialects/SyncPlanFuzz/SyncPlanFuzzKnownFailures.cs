@@ -22,25 +22,9 @@ internal static class SyncPlanFuzzKnownFailures
     /// <summary>項目（<see cref="Entry"/> で作る）</summary>
     public static readonly IReadOnlyList<KnownEntry> Entries =
     [
-        // nightly-sqlite-pk-nonunique（受け入れ・P2-4 で切り分けた）：値が一意でない列への主キーの付け替えは、DB がデータで断る
-        // （SQLite は再構築のデータの移送で UNIQUE constraint failed になり、トランザクションを巻き戻して何も変えない）。計画は列の値を
-        // 知らないので警告できない（DB の事実）。乱数の種で出ていた形（旧い実 DB の種 12503・18316、P2-4 の夜間の SQLite の種 5631・
-        // 8979・18819、MySQL の種 861）は、主キーを外した・縮めた・列を消した後で一意でない列を主キーへ足す生成器の穴だったので、
-        // 生成器を直して乱数の項目を消した。行 sqlite-pk-nonunique は、巻き戻して何も変えない振る舞いを残すために受け入れで持つ
-        .. Scenario(
-            "nightly-sqlite-pk-nonunique",
-            DialectNames.Sqlite,
-            "P2",
-            ["sqlite-pk-nonunique"],
-            IsNonUniquePrimaryKey,
-            acceptedReason: "値が一意でない列への主キーは DB がデータで断る（SQLite は再構築を巻き戻して何も変えない）。計画は列の値を知らないので警告できない（DB の事実）"
-        ),
+        // 空。受け入れの項目 nightly-sqlite-pk-nonunique（値が一意でない列への主キーの付け替えを DB がデータで断る）は、
+        // 行 sqlite-pk-nonunique の既存の行で断られる文の宣言（FuzzLiveSchema.DataFailures の AddPrimaryKey）へ移した
     ];
-
-    /// <summary>nightly-sqlite-pk-nonunique：一意でない列への主キーの付け替えが UNIQUE 違反</summary>
-    private static bool IsNonUniquePrimaryKey(FuzzSeedOutcome o) =>
-        OnlyViolations(o, "failed without a warning: SQLite Error 19: 'UNIQUE constraint failed:")
-        && o.Selected.Any(s => s.StartsWith("AlterPrimaryKey", StringComparison.Ordinal));
 
     /// <summary>一覧</summary>
     public static KnownFailureSet Set { get; } = new("SyncPlan", Entries);

@@ -12,7 +12,7 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 internal static partial class SyncPlanExpectationRows
 {
     /// <summary>SQLite の実 DB の段の行の数の下限（行を足したら・消したら合わせる）</summary>
-    private const int RealSqliteRowCount = 48;
+    private const int RealSqliteRowCount = 49;
 
     /// <summary>実 DB の段：SQLite の同期（テーブル再構築・外部キー・主キー・一意制約・ビュー）</summary>
     private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealSqliteRows() =>
@@ -1037,6 +1037,40 @@ internal static partial class SyncPlanExpectationRows
     /// <summary>同期スクリプトの文の形（新しい表・写す列の無い再構築・逐次の文・型の引用・主キーの順序）</summary>
     private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealSqliteScriptRows() =>
         [
+            Row(
+                    "realdb-sqlite-script-refused-statement-after-not-null-add-rolls-back",
+                    "[Integration] SQLite 同期: 行の無い表への NOT NULL の列の追加の後に、行のある表への NOT NULL の列の追加が断られても、後ろを飛ばしてコミットせずにロールバックする",
+                    DialectNames.Sqlite
+                )
+                .Live(s =>
+                {
+                    s.Table("empty_t", ExpectationSchema.Pk("id", "INTEGER"));
+                    s.Table("rows_t", ExpectationSchema.Pk("id", "INTEGER"));
+                })
+                .TargetFromLive(s =>
+                {
+                    s["empty_t"].Columns.Add(ExpectationSchema.NotNull("a", "INTEGER"));
+                    s["rows_t"].Columns.Add(ExpectationSchema.NotNull("b", "INTEGER"));
+                    s.Table("marker_t", ExpectationSchema.Pk("id", "INTEGER"));
+                })
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.Setup("INSERT INTO \"rows_t\" (\"id\") VALUES (1), (2);")
+                        .ExpectsUnwarnedFailure(
+                            "データの都合：rows_t は行を持つので、既定値の無い NOT NULL の列を足せない（計画は列の値を見ない）"
+                        )
+                        .Expect(e =>
+                        {
+                            // 行の無い表への NOT NULL の列の追加が先に来る並び（この後ろの文の失敗を、結果を読み切らない実行は黙って飛ばす）
+                            e.Script.Contains(
+                                "ALTER TABLE \"empty_t\" ADD COLUMN \"a\" INTEGER NOT NULL;",
+                                "ALTER TABLE \"rows_t\" ADD COLUMN \"b\" INTEGER NOT NULL;"
+                            );
+                            e.Outcome.Exact("failed: *Cannot add a NOT NULL column*");
+                            e.Unchanged();
+                            e.After.Absent("table marker_t");
+                        })
+                ),
             Row(
                     "realdb-sqlite-script-create-only-inline-fk",
                     "CreateOnly は FK 句インラインの CREATE のみ",

@@ -118,12 +118,12 @@ public sealed class SqliteSchemaSyncExecutor : ISchemaSyncExecutor
                 )
                 .ConfigureAwait(false);
 
-            // スクリプト本文（複数文）を 1 コマンドで実行する
+            // スクリプト本文（複数文）を 1 コマンドで実行し、結果を最後まで読み切る（断られた文の後ろを黙って飛ばさない＝SqliteScripts）
             await using (
                 var cmd = DbCommands.Create(conn, script, settings.CommandTimeoutSeconds, tran)
             )
             {
-                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                await SqliteScripts.RunToEndAsync(cmd, ct).ConfigureAwait(false);
             }
 
             // FK 整合性を実検査する（同期で違反が増えた (子表, 親表) があれば安全側にロールバックする）
@@ -201,7 +201,7 @@ public sealed class SqliteSchemaSyncExecutor : ISchemaSyncExecutor
     )
     {
         await using var cmd = DbCommands.Create(conn, pragma, commandTimeoutSeconds);
-        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        await SqliteScripts.RunToEndAsync(cmd, ct).ConfigureAwait(false);
     }
 
     /// <summary>読み込めない（壊れた）ビューの名前を集める</summary>

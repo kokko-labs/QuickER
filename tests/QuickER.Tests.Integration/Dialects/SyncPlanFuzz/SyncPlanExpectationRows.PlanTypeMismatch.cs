@@ -576,9 +576,19 @@ internal static partial class SyncPlanExpectationRows
             // テーブル再構築の方言（SQLite）は、外部キーを子表の作り直しで外して付け直す
             e.Warnings.Empty().Rebuilds.Contains("*");
         }
-        else if (rebuilds)
+        else if (rebuilds && C.Get(dialect).TransactionalDdl)
         {
             e.Warnings.Empty().Sections.Contains("DropForeignKey: *", "AddForeignKey: *");
+        }
+        else if (rebuilds)
+        {
+            // 暗黙コミットの方言は、主キーを live のキーで一意と証明できない列（code）へ移す付与が行で断られうるので、その前で外す
+            // 外部キーと主キーを名指しする（長さだけの違いは食い違いとしない）
+            e.Warnings.Exact(
+                    "ConstraintRebuildAroundRowDependentChange(orders): FK_orders_customer (PRIMARY KEY customer (code))",
+                    "ConstraintRebuildAroundRowDependentChange(customer): PRIMARY KEY (PRIMARY KEY customer (code))"
+                )
+                .Sections.Contains("DropForeignKey: *", "AddForeignKey: *");
         }
         else
         {

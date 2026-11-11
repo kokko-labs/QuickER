@@ -436,6 +436,33 @@ internal static partial class SourceRules
                     "閉じた接続がファイルを閉じる（プールに残らない）"
                 )
             ),
+            // QuickER 自身が SQLite で結果を読まない文（DDL・PRAGMA）を実行するのは SqliteScripts.RunToEndAsync だけ（結果を最後まで読み切る）。Microsoft.Data.Sqlite の
+            // ExecuteNonQuery は、行の無い表への ADD COLUMN … NOT NULL の後ろの文が断られると例外を出さずに後ろを飛ばし、同期の実行器が
+            // 部分適用をコミットする。スクリプトが複数の文かは静的に見分けられないので、SQLite の接続を作り・使うプロジェクトでは
+            // ExecuteNonQuery(Async) の呼び出しそのものを断る（1 文でも部品を通す）。拾う形は DbCommand・IDbCommand の
+            // ExecuteNonQuery / ExecuteNonQueryAsync の呼び出しをシンボルで数える
+            SourceRule.Forbid(
+                "sqlite-script-executions",
+                "SQLite で結果を読まない文（DDL・PRAGMA）を実行するのは SqliteScripts.RunToEndAsync（ExecuteNonQuery は断られた文の後ろを黙って飛ばすことがある）",
+                SrcProjectsNamed(
+                    "QuickER 自身の SQLite の接続は QuickER.Provider.Sqlite が作り（規則 sqlite-file-connection-creations）、Db.UI・Cli・Gui が使う。ほかの方言のプロジェクトの ExecuteNonQuery は範囲の外",
+                    ["QuickER.Provider.Sqlite", "QuickER.Db.UI", "QuickER.Cli", "QuickER.Gui"]
+                ),
+                GuardFinder.Symbols(DescribeExecuteNonQuery)
+            ) with
+            {
+                Witness = new(
+                    SourceScope.Under("src/QuickER.Provider.MySql"),
+                    [
+                        new(
+                            "src/QuickER.Provider.MySql/MySqlSchemaSyncExecutor.cs",
+                            "ExecuteNonQuery",
+                            2,
+                            "MySQL の同期の実行器（範囲の外の実在の呼び出しを拾えること）"
+                        ),
+                    ]
+                ),
+            },
             // DDL・同期の名前の入口（SqlNameText）が名前を集める names.Add の 1 本ずつは、方言の DDL の表の名前の出どころの宣言
             // （DialectDdlRows.NameSources）と 1 対 1 に対応する。宣言が正本で、あるべき出現はそこから作る（写しを持たない）。
             // 足したのに宣言へ載せ忘れる（その出どころの行が無い）・消したのに宣言に残る（行が空振りする）の両方向を赤にする
@@ -535,6 +562,38 @@ internal static partial class SourceRules
             == "Microsoft.Data.Sqlite.SqliteConnection"
             ? "new SqliteConnection"
             : null;
+
+    /// <summary>
+    /// 節が ADO.NET のコマンド（<c>System.Data.Common.DbCommand</c> の派生か <c>System.Data.IDbCommand</c>）の
+    /// <c>ExecuteNonQuery</c> / <c>ExecuteNonQueryAsync</c> の呼び出しなら <c>ExecuteNonQuery</c>
+    /// </summary>
+    private static string? DescribeExecuteNonQuery(SemanticModel model, SyntaxNode node)
+    {
+        if (
+            node is not InvocationExpressionSyntax invocation
+            || model.GetSymbolInfo(invocation).Symbol
+                is not IMethodSymbol { Name: "ExecuteNonQuery" or "ExecuteNonQueryAsync" } method
+        )
+        {
+            return null;
+        }
+
+        for (var type = method.ContainingType; type is not null; type = type.BaseType)
+        {
+            if (
+                type.ToDisplayString() is "System.Data.Common.DbCommand" or "System.Data.IDbCommand"
+            )
+            {
+                return "ExecuteNonQuery";
+            }
+        }
+
+        return method.ContainingType.AllInterfaces.Any(i =>
+            i.ToDisplayString() == "System.Data.IDbCommand"
+        )
+            ? "ExecuteNonQuery"
+            : null;
+    }
 
     /// <summary>
     /// 節が <c>SqliteConnectionStringBuilder.Pooling</c> へ定数の <see langword="false"/> を代入する式なら <c>Pooling = false</c>
