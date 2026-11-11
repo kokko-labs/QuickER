@@ -35,13 +35,22 @@ public static class TableConstraintLineBuilder
     /// <param name="limit">既定名（主キー・一意制約の合成名）に使う識別子の長さの上限（DDL・同期の方言の上限）</param>
     /// <param name="dialect">出力の方言（<see cref="DialectNames"/>。持てない一意制約を省くかを扱いの表で引く）</param>
     /// <param name="feature">DDL か同期か</param>
+    /// <param name="quotedTableName">表を作る文の後ろで一意制約を足す文に書く、方言のクォート方式で引用したテーブル名</param>
     /// <returns>
     /// 行頭インデント付きの制約行（区切りカンマは付かない）と、省いた一意制約の注記の行
-    /// （<see cref="UniqueConstraintOnPrimaryKeyNote"/>）。制約行が無ければ <see cref="TableConstraintLines.Count"/> は 0
+    /// （<see cref="UniqueConstraintOnPrimaryKeyNote"/>）と、表を作る文の後ろで足す一意制約の文。制約行が無ければ
+    /// <see cref="TableConstraintLines.Count"/> は 0
     /// </returns>
+    /// <remarks>
+    /// 表を作る文の中で、主キーか先に書いた一意制約と同じ列の並びの一意制約を DB が黙って捨てる方言
+    /// （<see cref="CreateTableUniqueConstraints.DropsDuplicateColumnLists"/>＝PostgreSQL）では、その一意制約を制約行に書かず、
+    /// 表を作る文の後ろの <c>ALTER TABLE … ADD CONSTRAINT … UNIQUE</c> で足す（<see cref="AppendAfterCreate"/>）。列の並びは
+    /// 名前の同一性（<see cref="SchemaNames"/>）で順に比べる（並びの違う一意制約は DB も別の索引として持つ）。
+    /// </remarks>
     public static TableConstraintLines Build(
         Entity entity,
         string tableName,
+        string quotedTableName,
         Func<string, string> quoteSimpleName,
         Func<string, string> quoteConstraintName,
         IReadOnlyDictionary<UniqueConstraint, string>? uniqueConstraintNames,
@@ -71,13 +80,37 @@ public static class TableConstraintLineBuilder
             feature
         );
 
+        // 表を作る文が黙って捨てる一意制約（主キーか先に書いた一意制約と同じ列の並び）は、表を作る文の後ろで足す
+        var dropsDuplicates = CreateTableUniqueConstraints.DropsDuplicateColumnLists(dialect);
+        var written = new List<IReadOnlyList<string>>();
+
+        if (pks.Count > 0)
+        {
+            written.Add([.. pks.Select(p => p.Name)]);
+        }
+
+        var afterCreate = new List<string>();
+
         foreach (var unique in uniques)
         {
             var uniqueCols = string.Join(", ", unique.ColumnNames.Select(quoteSimpleName));
+
+            if (
+                dropsDuplicates
+                && written.Any(w => w.SequenceEqual(unique.ColumnNames, SchemaNames.Comparer))
+            )
+            {
+                afterCreate.Add(
+                    $"ALTER TABLE {quotedTableName} ADD CONSTRAINT {quoteConstraintName(unique.Name)} UNIQUE ({uniqueCols});"
+                );
+                continue;
+            }
+
+            written.Add(unique.ColumnNames);
             lines.Add($"    CONSTRAINT {quoteConstraintName(unique.Name)} UNIQUE ({uniqueCols})");
         }
 
-        return new TableConstraintLines(lines, notes);
+        return new TableConstraintLines(lines, notes, afterCreate);
     }
 
     /// <summary>注記の行を書き、続けて制約行を書き出す（最後の行を除いて区切りカンマを付ける）</summary>
@@ -101,12 +134,33 @@ public static class TableConstraintLineBuilder
             sb.AppendLine(lines[i] + (isLast ? string.Empty : ","));
         }
     }
+
+    /// <summary>表を作る文の後ろで足す一意制約の文を書き出す（表を作る文を閉じた直後に呼ぶ）</summary>
+    /// <remarks>
+    /// 足す文があり得るのは <see cref="CreateTableUniqueConstraints.DropsDuplicateColumnLists"/> が真の逐次 DDL の方言
+    /// （PostgreSQL）だけなので、呼ぶのは DDL 生成と PostgreSQL の同期の表の作成。ほかの方言の同期は足す文を持たない
+    /// （宣言を変えたら呼び出しを足す。食い違いは実 DB の期待の行 <c>realdb-create-table-*</c> が赤にする）。
+    /// </remarks>
+    public static void AppendAfterCreate(StringBuilder sb, TableConstraintLines constraints)
+    {
+        foreach (var statement in constraints.AfterCreate)
+        {
+            sb.AppendLine(statement);
+        }
+    }
 }
 
-/// <summary><see cref="TableConstraintLineBuilder.Build"/> の結果（制約行と、省いた一意制約の注記の行）</summary>
+/// <summary>
+/// <see cref="TableConstraintLineBuilder.Build"/> の結果（制約行と、省いた一意制約の注記の行と、表を作る文の後ろで足す一意制約の文）
+/// </summary>
 /// <param name="Lines">行頭インデント付きの制約行（区切りカンマは付かない）</param>
 /// <param name="Notes">省いた一意制約の注記の行（行頭インデント付きのコメント）</param>
-public sealed record TableConstraintLines(IReadOnlyList<string> Lines, IReadOnlyList<string> Notes)
+/// <param name="AfterCreate">表を作る文の後ろで足す一意制約の文（文末のセミコロン付き）</param>
+public sealed record TableConstraintLines(
+    IReadOnlyList<string> Lines,
+    IReadOnlyList<string> Notes,
+    IReadOnlyList<string> AfterCreate
+)
 {
     /// <summary>制約行の数（列定義の末尾カンマの判定に使う。注記の行は数えない）</summary>
     public int Count => Lines.Count;

@@ -63,6 +63,30 @@ internal static partial class SyncPlanExpectationRows
                         .Items.Single($"AddForeignKey > * fk={UnnamedShipName} sel=*")
                 ),
             Row(
+                    "diff-unnamed-fk-second-referential-action-change-with-unnamed-live-replaces-under-same-name",
+                    "DB 側も名前の無い同じ組の外部キー 2 本で、2 本目の参照アクションを変えると、DDL の名前で外して付け直す外部キー変更になる（名前を保存する 4 方言）",
+                    PersistedForeignKeyNameDialects
+                )
+                // 取込は外部キーに必ず名前を付けるので利用者の経路には無い DB 側の図。差分の照合が、名前の無い DB の外部キーにも
+                // DDL と同じ名前（名前の無い同じ組の 2 本目は一意化した名前）を使うことを見る
+                .Live(s => UnnamedPairSchema(s, null, null))
+                .Target(s =>
+                    UnnamedPairSchema(s, null, null).OnDelete = ForeignKeyReferentialAction.Cascade
+                )
+                .Select(items =>
+                {
+                    foreach (var item in items)
+                    {
+                        item.IsSelected = true;
+                    }
+                })
+                .Expect(e =>
+                    e.Diff.Exact("AlterForeignKey *")
+                        .Items.Count("DropForeignKey > *", 1)
+                        .Items.Count("AddForeignKey > *", 1)
+                        .Items.Single($"AddForeignKey > * fk={UnnamedShipName} sel=*")
+                ),
+            Row(
                     "diff-unnamed-fk-many-to-many-first-matches-live-with-default-name",
                     "名前の無い多対多が先に並ぶ図は、既定名で外部キーを作った live と外部キーの差分を出さない（名前を保存する 4 方言）",
                     PersistedForeignKeyNameDialects

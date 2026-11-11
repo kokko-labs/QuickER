@@ -404,14 +404,27 @@ internal static partial class DialectDdlRows
         return entity;
     }
 
-    /// <summary>主キーと同じ列集合の一意制約の省略（持てない方言は省いて注記し、持てる方言はそのまま出す）</summary>
+    /// <summary>
+    /// 主キーと同じ列集合の一意制約の省略（持てない方言は省いて注記し、持てる方言は出す。表を作る文がその一意制約を黙って捨てる方言
+    /// ＝PostgreSQL は、表を作る文を閉じた直後の ALTER TABLE で足す）
+    /// </summary>
     private static DialectDdlRow TrOmissionExpect(this DialectDdlRow row) =>
         row.ExpectAll(e => e.Lines("uq item UQ_item_code (code)*"))
             .Expect(
                 [Ss, Pg, My],
+                e => e.NoText("*cannot have a unique constraint on the primary key columns*")
+            )
+            .Expect([Ss, My], e => e.Lines("uq item UQ_item_id (id)*").NoLines("* alter"))
+            .Expect(
+                [Pg],
                 e =>
-                    e.Lines("uq item UQ_item_id (id)*")
-                        .NoText("*cannot have a unique constraint on the primary key columns*")
+                    e.Sequence(
+                            DialectDdlOutputs.Lines,
+                            "uq item UQ_item_code (code)",
+                            "end-table",
+                            "uq item UQ_item_id (id) alter"
+                        )
+                        .NoLines("uq item UQ_item_id (id)", "uq item UQ_item_id (id),")
             )
             .Expect(
                 [Or, Sl],
@@ -539,7 +552,103 @@ internal static partial class DialectDdlRows
                     Ft.Sync,
                     (Tm.OmitWithAnnotation, [Sl])
                 ),
+            DialectDdlRow
+                .Ddl(
+                    "ddl-unique-on-same-columns-as-earlier-unique-added-after-create-table",
+                    "DDL: 先に書いた一意制約と同じ列の並びの一意制約は、表を作る文が黙って捨てる方言（PostgreSQL）だけ表の後ろの ALTER TABLE で足す",
+                    E.Unique,
+                    F.StatementShape,
+                    _ => Diagram(TrDuplicateUniques())
+                )
+                .TrDuplicateUniquesExpect(),
+            DialectDdlRow
+                .SyncItems(
+                    "sync-add-table-unique-on-same-columns-as-earlier-unique-added-after-create-table",
+                    "同期: 表の追加は、先に書いた一意制約と同じ列の並びの一意制約を、表を作る文が黙って捨てる方言（PostgreSQL）だけ表の後ろの ALTER TABLE で足す",
+                    P.SyncAddTable,
+                    E.Unique,
+                    F.StatementShape,
+                    _ =>
+                    {
+                        var entity = TrDuplicateUniques();
+
+                        return new DdlSyncItems(
+                            [
+                                new SchemaDiffItem
+                                {
+                                    Kind = SchemaDiffKind.AddTable,
+                                    TableName = entity.TableName,
+                                    Entity = entity,
+                                    IsSelected = true,
+                                },
+                            ],
+                            null,
+                            new SyncPlanContext()
+                        );
+                    }
+                )
+                .TrDuplicateUniquesExpect(),
         ];
+
+    /// <summary>
+    /// 表 dup（id〔主キー〕・code・kind）と、一意制約 UQ_dup_a(code, kind)・同じ並びの UQ_dup_b(code, kind)・並びの違う UQ_dup_c(kind, code)
+    /// </summary>
+    private static Entity TrDuplicateUniques()
+    {
+        var entity = new Entity { TableName = "dup" };
+
+        foreach (var name in new[] { "id", "code", "kind" })
+        {
+            entity.Columns.Add(
+                new Column
+                {
+                    Name = name,
+                    DataType = "INTEGER",
+                    IsPrimaryKey = name == "id",
+                    IsNullable = false,
+                }
+            );
+        }
+
+        var code = entity.Columns[1].Id;
+        var kind = entity.Columns[2].Id;
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint { Name = "UQ_dup_a", ColumnIds = [code, kind] }
+        );
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint { Name = "UQ_dup_b", ColumnIds = [code, kind] }
+        );
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint { Name = "UQ_dup_c", ColumnIds = [kind, code] }
+        );
+
+        return entity;
+    }
+
+    /// <summary>
+    /// 同じ列の並びの 2 つ目の一意制約（表を作る文が黙って捨てる方言＝PostgreSQL だけ、表を作る文を閉じた直後の ALTER TABLE で足す。
+    /// 並びの違う一意制約は DB も別の索引として持つので表の中に書く。ほかの方言の出力は表の中に 3 つとも書く）
+    /// </summary>
+    private static DialectDdlRow TrDuplicateUniquesExpect(this DialectDdlRow row) =>
+        row.ExpectAll(e =>
+                e.Lines("uq dup UQ_dup_a (code, kind)*", "uq dup UQ_dup_c (kind, code)*")
+                    .NoLines("uq dup UQ_dup_a * alter", "uq dup UQ_dup_c * alter")
+            )
+            .Expect(
+                [Ss, My, Or, Sl],
+                e => e.Lines("uq dup UQ_dup_b (code, kind)*").NoLines("* alter")
+            )
+            .Expect(
+                [Pg],
+                e =>
+                    e.Sequence(
+                            O.Lines,
+                            "uq dup UQ_dup_c (kind, code)",
+                            "end-table",
+                            "uq dup UQ_dup_b (code, kind) alter"
+                        )
+                        .NoLines("uq dup UQ_dup_b (code, kind)", "uq dup UQ_dup_b (code, kind),")
+            );
 
     // ======================================================================
     // スキーマ修飾名・多対多・型の表記の拒否

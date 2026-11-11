@@ -12,7 +12,10 @@ namespace QuickER.Tests.Provider;
 /// <item><description><c>header</c>・<c>generated-at</c>（DDL の先頭のコメント）</description></item>
 /// <item><description><c>table {表}</c>・<c>end-table[ {後続句}]</c>（CREATE TABLE の始まりと閉じ括弧）</description></item>
 /// <item><description><c>column {表}.{列} {型} {NULL|NOT NULL}[ {後続句}]</c>（表の中の行は、末尾の区切りの <c>,</c> をそのまま残す）</description></item>
-/// <item><description><c>pk {表} {制約名|-} ({列}, …)</c>・<c>uq {表} {制約名|-} ({列}, …)</c></description></item>
+/// <item><description>
+/// <c>pk {表} {制約名|-} ({列}, …)</c>・<c>uq {表} {制約名|-} ({列}, …)</c>（表を作る文の中）・<c>uq {表} {制約名} ({列}, …) alter</c>
+/// （<c>ALTER TABLE … ADD CONSTRAINT … UNIQUE</c> の 1 行の文）
+/// </description></item>
 /// <item><description>
 /// <c>fk {子} {制約名|-} ({列}, …) -&gt; {親} ({列}, …)[ on-delete={句}][ on-update={句}] {inline|alter}</c>
 /// </description></item>
@@ -111,6 +114,23 @@ internal static class DialectDdlReader
                 )
                 {
                     lines.Add(fk);
+                    continue;
+                }
+
+                reader.Reset();
+
+                if (
+                    reader.Keyword("ALTER TABLE ")
+                    && reader.TableName() is { } owner
+                    && reader.Keyword(" ADD CONSTRAINT ")
+                    && reader.Identifier() is { } uniqueName
+                    && reader.Keyword(" UNIQUE ")
+                    && reader.List() is { } uniqueColumns
+                    && reader.Keyword(";")
+                    && reader.AtEnd
+                )
+                {
+                    lines.Add($"uq {owner} {uniqueName} ({uniqueColumns}) alter");
                     continue;
                 }
 

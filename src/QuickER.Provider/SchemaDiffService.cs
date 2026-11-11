@@ -544,7 +544,7 @@ public class SchemaDiffService
         }
 
         diff.Items.AddRange(
-            PairForeignKeyAlters(fkAdds, fkDrops, includeFkConstraintName, dialect)
+            PairForeignKeyAlters(fkAdds, fkDrops, liveFkNames, includeFkConstraintName, dialect)
         );
 
         static Dictionary<string, int> CountSignatures(IEnumerable<string> signatures) =>
@@ -1322,6 +1322,10 @@ public class SchemaDiffService
     /// </summary>
     /// <param name="adds">図にだけ在る外部キー（AddForeignKey 候補・差分へ並べる順）</param>
     /// <param name="drops">DB にだけ在る外部キー（DropForeignKey 候補）</param>
+    /// <param name="liveForeignKeyNames">
+    /// DB 側の図の外部キー名（<see cref="ConstraintNames.ResolveForeignKeyNames"/>。追加候補の名前と同じ規則で、名前の無い同じ組の
+    /// 2 本目は一意化した名前）
+    /// </param>
     /// <param name="includeConstraintName">外部キー名を DB に保存する方言か</param>
     /// <param name="dialect">変更内容の文言で参照アクションを方言の実効値へ畳むためのケーパビリティ</param>
     /// <returns>差分へ並べる順の外部キー項目（畳んだ項目は追加候補の位置に入る）</returns>
@@ -1343,6 +1347,7 @@ public class SchemaDiffService
     private static List<SchemaDiffItem> PairForeignKeyAlters(
         List<SchemaDiffItem> adds,
         List<SchemaDiffItem> drops,
+        IReadOnlyDictionary<Relationship, string> liveForeignKeyNames,
         bool includeConstraintName,
         SyncDialectCapabilities dialect
     )
@@ -1354,6 +1359,9 @@ public class SchemaDiffService
         {
             var key = ForeignKeyPairingKey(
                 drop,
+                liveForeignKeyNames.TryGetValue(drop.Relationship!, out var liveName)
+                    ? liveName
+                    : drop.ForeignKeyName,
                 includeConstraintName,
                 dialect.IdentifierLengthLimit
             );
@@ -1374,7 +1382,12 @@ public class SchemaDiffService
         {
             if (
                 !dropsByKey.TryGetValue(
-                    ForeignKeyPairingKey(add, includeConstraintName, dialect.IdentifierLengthLimit),
+                    ForeignKeyPairingKey(
+                        add,
+                        add.ForeignKeyName,
+                        includeConstraintName,
+                        dialect.IdentifierLengthLimit
+                    ),
                     out var candidates
                 ) || !candidates.TryDequeue(out var drop)
             )
@@ -1392,8 +1405,15 @@ public class SchemaDiffService
     }
 
     /// <summary>削除候補と追加候補を対応づけるキー（<see cref="PairForeignKeyAlters"/> の規則）</summary>
+    /// <param name="item">候補</param>
+    /// <param name="name">
+    /// 照合に使う外部キー名（追加候補は差分が求めた名前、削除候補は DB 側の図の名前を DDL と同じ規則で求めたもの）
+    /// </param>
+    /// <param name="includeConstraintName">外部キー名を DB に保存する方言か</param>
+    /// <param name="limit">既定名を縮める識別子の長さの上限</param>
     private static string ForeignKeyPairingKey(
         SchemaDiffItem item,
+        string? name,
         bool includeConstraintName,
         IdentifierLengthLimit limit
     )
@@ -1402,15 +1422,16 @@ public class SchemaDiffService
 
         if (includeConstraintName)
         {
-            // 追加候補は差分が求めた名前、削除候補は DB の名前（無ければ既定名）
-            var name = ConstraintNames.EffectiveForeignKey(
-                item.ForeignKeyName,
+            // 追加候補も削除候補も DDL と同じ規則の名前で照合する（名前の無い同じ組の 2 本目は一意化した名前。削除の文が書く名前
+            // ＝候補の ForeignKeyName は DB の名前のままで、名前の無い外部キーは実行時に逆引きする）
+            var effective = ConstraintNames.EffectiveForeignKey(
+                name,
                 NormalizeTable(item.ChildEntity!),
                 NormalizeTable(item.ParentEntity!),
                 limit
             );
 
-            return SignaturePart(child) + SignaturePart(NameKey(name));
+            return SignaturePart(child) + SignaturePart(NameKey(effective));
         }
 
         var childColumns = string.Concat(

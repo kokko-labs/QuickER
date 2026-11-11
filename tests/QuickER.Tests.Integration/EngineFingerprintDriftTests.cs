@@ -247,7 +247,11 @@ public sealed class EngineFingerprintDriftTests
                 .Append('\n');
         }
 
-        foreach (var statement in live.InsertStatements.Concat(live.ComputedColumnStatements))
+        foreach (
+            var statement in live
+                .InsertStatements.Concat(live.ComputedColumnStatements)
+                .Concat(live.ColumnDefaultStatements)
+        )
         {
             text.Append("sql ").Append(SeedSummary.Quote(statement)).Append('\n');
         }

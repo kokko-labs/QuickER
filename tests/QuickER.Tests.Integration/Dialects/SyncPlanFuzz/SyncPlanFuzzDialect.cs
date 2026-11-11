@@ -113,6 +113,32 @@ internal abstract class SyncPlanFuzzDialect
     /// </summary>
     public virtual string? OtherSchema => null;
 
+    /// <summary>
+    /// 精度を書かない小数の型名（DB が精度なしのまま覚える方言だけ。SQL Server・MySQL の素の decimal は (18,0)・(10,0) に正規化されるので
+    /// null＝生成器はこの方言で精度なしの列を作らない）
+    /// </summary>
+    public virtual string? PrecisionlessDecimalTypeName => null;
+
+    /// <summary>
+    /// 一意制約が NULL を何行でも許すか（SQL Server は NULL どうしを重なりとみなして 2 行目の NULL で断る）。偽の方言では、行のある表に足した
+    /// NULL 許容の列への一意制約を、既存の行で断られる文として宣言する
+    /// </summary>
+    public virtual bool UniqueAllowsRepeatedNull => true;
+
+    /// <summary>精度とスケールを指定した小数の型名（<see cref="TypeName"/> の小数はスケール 2）</summary>
+    public string DecimalTypeName(int precision, int scale) =>
+        TypeName(FuzzTypeKind.Decimal, precision)
+            .Replace(",2)", $",{scale})", StringComparison.Ordinal);
+
+    /// <summary>
+    /// 同じ系統の固定長と可変長を入れ替えた文字列の型名（<paramref name="kind"/> が可変長なら固定長、固定長なら可変長。長さは同じ）
+    /// </summary>
+    public virtual string SwappedLengthTypeName(FuzzTypeKind kind, int length) =>
+        TypeName(
+            kind == FuzzTypeKind.FixedChar ? FuzzTypeKind.VarChar : FuzzTypeKind.FixedChar,
+            length
+        );
+
     /// <summary>表の名前を引用する（スキーマで修飾した名前は方言の規則で分けて引用する）</summary>
     public virtual string QuoteTable(string table) => Quote(table);
 
@@ -166,6 +192,11 @@ internal abstract class SyncPlanFuzzDialect
     /// QuickER の DDL は式を持たないので、計算列は DB を作った後でこの文で足す。
     /// </summary>
     public abstract string AddComputedColumnSql(string table, string column, string source);
+
+    /// <summary>
+    /// 既存の列に既定値を足す文（<paramref name="literal"/> はその列の型のリテラル）。ALTER で既定値を足せない方言は null
+    /// </summary>
+    public abstract string? AddColumnDefaultSql(string table, string column, string literal);
 
     /// <summary>文字列のリテラル</summary>
     public virtual string StringLiteral(string value) => $"'{value.Replace("'", "''")}'";
@@ -282,6 +313,9 @@ internal sealed class SqliteSyncPlanFuzzDialect : SyncPlanFuzzDialect, IDisposab
 
     public override bool DistinguishesSameSetConstraints => false;
 
+    /// <inheritdoc/>
+    public override string? PrecisionlessDecimalTypeName => "NUMERIC";
+
     /// <summary>SQLite は宣言の型をそのまま覚え、精度を持たない（既定の精度の別の綴りも無い）</summary>
     public override int DefaultDateTimePrecision => 0;
 
@@ -294,6 +328,10 @@ internal sealed class SqliteSyncPlanFuzzDialect : SyncPlanFuzzDialect, IDisposab
 
     public override string AddComputedColumnSql(string table, string column, string source) =>
         $"ALTER TABLE {Quote(table)} ADD COLUMN {Quote(column)} INTEGER GENERATED ALWAYS AS ({Quote(source)} + 1) VIRTUAL;";
+
+    /// <summary>SQLite は ALTER で既定値を足せない（表を作り直すしかない）</summary>
+    public override string? AddColumnDefaultSql(string table, string column, string literal) =>
+        null;
 
     public void Dispose() => _db.Dispose();
 }
@@ -353,6 +391,9 @@ internal sealed class MySqlSyncPlanFuzzDialect(MySqlContainerFixture fixture) : 
 
     public override string AddComputedColumnSql(string table, string column, string source) =>
         $"ALTER TABLE {Quote(table)} ADD COLUMN {Quote(column)} int GENERATED ALWAYS AS ({Quote(source)} + 1) VIRTUAL;";
+
+    public override string? AddColumnDefaultSql(string table, string column, string literal) =>
+        $"ALTER TABLE {Quote(table)} ALTER COLUMN {Quote(column)} SET DEFAULT {literal};";
 }
 
 /// <summary>SQL Server 2022（Testcontainers）</summary>
@@ -368,6 +409,9 @@ internal sealed class SqlServerSyncPlanFuzzDialect(SqlServerContainerFixture fix
     public override DbConnectionSettings Settings => fixture.ToDbConnectionSettings();
 
     public override bool AllowCascade => false;
+
+    /// <inheritdoc/>
+    public override bool UniqueAllowsRepeatedNull => false;
 
     public override DbConnection CreateConnection() => new SqlConnection(fixture.ConnectionString);
 
@@ -425,6 +469,9 @@ internal sealed class SqlServerSyncPlanFuzzDialect(SqlServerContainerFixture fix
 
     public override string AddComputedColumnSql(string table, string column, string source) =>
         $"ALTER TABLE {QuoteTable(table)} ADD {Quote(column)} AS ({Quote(source)} + 1);";
+
+    public override string? AddColumnDefaultSql(string table, string column, string literal) =>
+        $"ALTER TABLE {QuoteTable(table)} ADD CONSTRAINT {Quote($"DF_{table}_{column}")} DEFAULT ({literal}) FOR {Quote(column)};";
 }
 
 /// <summary>PostgreSQL（Testcontainers）</summary>
@@ -437,6 +484,9 @@ internal sealed class PostgreSqlSyncPlanFuzzDialect(PostgreSqlContainerFixture f
 
     public override DbConnection CreateConnection() =>
         new NpgsqlConnection(fixture.ConnectionString);
+
+    /// <inheritdoc/>
+    public override string? PrecisionlessDecimalTypeName => "numeric";
 
     public override string ImportConnectionString => fixture.ConnectionString;
 
@@ -474,6 +524,9 @@ internal sealed class PostgreSqlSyncPlanFuzzDialect(PostgreSqlContainerFixture f
 
     public override string AddComputedColumnSql(string table, string column, string source) =>
         $"ALTER TABLE {Quote(table)} ADD COLUMN {Quote(column)} integer GENERATED ALWAYS AS ({Quote(source)} + 1) STORED;";
+
+    public override string? AddColumnDefaultSql(string table, string column, string literal) =>
+        $"ALTER TABLE {Quote(table)} ALTER COLUMN {Quote(column)} SET DEFAULT {literal};";
 }
 
 /// <summary>Oracle（Testcontainers・既定では流さない＝<see cref="OracleSyncPlanFuzzTests"/> を参照）</summary>
@@ -485,6 +538,14 @@ internal sealed class OracleSyncPlanFuzzDialect(OracleContainerFixture fixture)
     public override bool AllowDuplicateForeignKeys => false;
 
     public override bool AllowDuplicateUniqueConstraints => false;
+
+    /// <inheritdoc/>
+    public override string? PrecisionlessDecimalTypeName => "NUMBER";
+
+    /// <inheritdoc/>
+    /// <remarks>固定長は <c>CHAR(n CHAR)</c>・可変長は <c>NVARCHAR2(n)</c> で系統が違うので、同じ系統の相手（<c>VARCHAR2(n CHAR)</c>・<c>NCHAR(n)</c>）を返す</remarks>
+    public override string SwappedLengthTypeName(FuzzTypeKind kind, int length) =>
+        kind == FuzzTypeKind.FixedChar ? $"VARCHAR2({length} CHAR)" : $"NCHAR({length})";
 
     public override IDatabaseProvider Provider { get; } = new OracleProvider();
 
@@ -536,4 +597,7 @@ internal sealed class OracleSyncPlanFuzzDialect(OracleContainerFixture fixture)
 
     public override string AddComputedColumnSql(string table, string column, string source) =>
         $"ALTER TABLE {Quote(table)} ADD ({Quote(column)} NUMBER(10) GENERATED ALWAYS AS ({Quote(source)} + 1) VIRTUAL);";
+
+    public override string? AddColumnDefaultSql(string table, string column, string literal) =>
+        $"ALTER TABLE {Quote(table)} MODIFY ({Quote(column)} DEFAULT {literal});";
 }

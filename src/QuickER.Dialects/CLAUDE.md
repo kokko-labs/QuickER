@@ -1,6 +1,6 @@
 # QuickER.Dialects
 
-方言の宣言（`DialectNames`・`IdentifierLengthLimits`・MySQL のファイル名の符号化・`UnsupportedDefinitionKind` と `DialectDeclarations` と `UnsupportedTreatments`・`SchemaQualifiedName`）。依存ゼロ・net10.0。Model と Mcp が参照し、他は推移的に見る。
+方言の宣言（`DialectNames`・`IdentifierLengthLimits`・MySQL のファイル名の符号化・`UnsupportedDefinitionKind` と `DialectDeclarations` と `UnsupportedTreatments`・`SchemaQualifiedName`・`CreateTableUniqueConstraints`）。依存ゼロ・net10.0。Model と Mcp が参照し、他は推移的に見る。
 方言ごとの違いはここと各プロバイダの能力宣言だけが持ち、宣言は既定値を持たない。
 
 ## 宣言は既定値を持たない
@@ -14,6 +14,7 @@
 - `IdentifierLengthLimits.ForDbms` は知らない方言名を `ArgumentException` で断る。
 - 図から取った方言名（手で編集した図は知らない名前を持ち得る）は `ForDiagramTarget`（知らない名前なら上限を検査しない）を通す。GUI は図を開くとき方言をプロバイダへ解決し直すので、プロバイダ名で `ForDbms` を引く。
 - ガード：`IdentifierLengthLimitTests`・`DocumentErDiagramUnknownTargetDbmsTests`・`UnknownTargetDbmsTests`。
+- `CreateTableUniqueConstraints.DropsDuplicateColumnLists`（表を作る文が、主キーか先に書いた一意制約と同じ列の並びの一意制約を黙って捨てるか）も 5 方言を明示し、知らない方言名を `ArgumentException` で断る。値は docs の方言の表 `sync-capabilities` の行と `DialectDocsTableTests.SyncCapabilitiesTable_MatchesDeclarations` が照合し、使い方は `src/QuickER.Provider/CLAUDE.md`「一意制約の照合キーと付け直し」。
 
 ## 方言名の文字列リテラル
 

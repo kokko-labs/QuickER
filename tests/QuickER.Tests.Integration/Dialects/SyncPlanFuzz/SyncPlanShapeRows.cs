@@ -457,12 +457,8 @@ internal static class SyncPlanShapeRows
         }
 
         // 全部の一意制約の列を変える変更は、同じ列の一意制約 2 つを名前で見分けて別々に作り直す。SQLite は同じ列の並びの UNIQUE を
-        // 1 つの索引にまとめ、PostgreSQL は同じ CREATE TABLE の中の同じ列の UNIQUE を 1 つにまとめる（どちらも取り込むと 1 つ）ので、
-        // 実 DB には作り直す 2 つ目が無い
-        if (
-            row[ExplicitOp] == "ChangeAllUniques"
-            && dialect is DialectNames.Sqlite or DialectNames.PostgreSql
-        )
+        // 1 つの索引にまとめる（取り込むと 1 つ）ので、実 DB には作り直す 2 つ目が無い
+        if (row[ExplicitOp] == "ChangeAllUniques" && dialect == DialectNames.Sqlite)
         {
             return false;
         }

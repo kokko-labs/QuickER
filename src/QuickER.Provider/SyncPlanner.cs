@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using QuickER.Dialects;
 using QuickER.Model;
@@ -177,13 +178,12 @@ public sealed class SyncPlanner
         // 利用者が選んだのに計画から外した項目（外す箇所は警告と一緒に ExcludeSelected で積む）
         var excluded = new List<SchemaDiffItem>();
 
-        // 選択済みの項目のみを対象にする（未選択は完全に除外）。最初に、列の無い表の追加を外して名指しする（CREATE TABLE を
-        // 出せない＝方言に依らない）。外した表の追加は選ばなかった項目と同じに扱うので、続く依存の除外が、それを前提にする項目を外す。
-        // 次に選んでいない変更（表・列の追加・主キーの変更）を前提にする項目を外して名指しする。外部キー・一意制約の作り直しは
-        // その後で DROP と ADD の 2 項目へ展開し、以降は通常の差分として扱う（展開の前に判定する＝作り直しを外すときは
-        // 削除と追加をまとめて外し、削除だけが走って制約が消えたまま残らない）
-        var dependable = ExcludeItemsRequiringUnselected(
-            ExcludeTablesWithoutColumns([.. items.Where(i => i.IsSelected)], warnings, excluded),
+        // 選択済みの項目のみを対象にする（未選択は完全に除外）。列の無い表の追加・名前の重なる表の追加・選んでいない変更を前提にする
+        // 項目を外して名指しする（ExcludeUntilStable）。外部キー・一意制約の作り直しはその後で DROP と ADD の 2 項目へ展開し、
+        // 以降は通常の差分として扱う（展開の前に判定する＝作り直しを外すときは削除と追加をまとめて外し、削除だけが走って制約が
+        // 消えたまま残らない）
+        var dependable = ExcludeUntilStable(
+            [.. items.Where(i => i.IsSelected)],
             capabilities,
             context,
             warnings,
@@ -565,6 +565,13 @@ public sealed class SyncPlanner
         var postSyncUniques = BuildPostSyncUniqueConstraints(ExpandAlters(selected), context);
         // 選んだ削除・作り直しで外す DB の一意制約（照合キー）
         var droppedUniques = ExplicitlyDroppedUniqueConstraints(ExpandAlters(selected));
+        // 同期後も残る DB の外部キー・一意制約（選んだ削除・作り直しで外れず、表・構成列も消えないもの）。名前・定義の重なりの判定に使う
+        var remaining = RemainingLiveConstraints.From(
+            selected,
+            droppedUniques,
+            capabilities.IdentifierLengthLimit,
+            context
+        );
 
         var kept = new List<SchemaDiffItem>(selected.Count);
 
@@ -663,10 +670,21 @@ public sealed class SyncPlanner
                     }
 
                     // 名指しの名前はスクリプトが付ける名前（警告の名前の正本を 1 か所にする）
-                    return (
-                        SelectedForeignKeyName(item, capabilities.IdentifierLengthLimit),
-                        missing
-                    );
+                    var name = SelectedForeignKeyName(item, capabilities.IdentifierLengthLimit);
+
+                    // 同期後も残る DB の制約と名前が重なる追加・同じ定義の外部キーを 2 本持てない方言での同じ定義の追加は、その制約の
+                    // 削除を前提にする（外さずに足すと、名前の重なり・定義の重なりで断られる）
+                    if (missing.Count == 0)
+                    {
+                        missing.AddRange(
+                            remaining.NamedLike(name, child, isForeignKey: true, capabilities)
+                        );
+                        missing.AddRange(
+                            remaining.SameDefinitionAs(child, parent, pairs, capabilities)
+                        );
+                    }
+
+                    return (name, missing);
                 }
 
                 case SchemaDiffKind.AlterPrimaryKey when item.Entity is not null:
@@ -701,15 +719,27 @@ public sealed class SyncPlanner
                         );
                     }
 
-                    return (
-                        UniqueConstraintNaming.Resolve(
-                            item.UniqueConstraintName,
-                            table,
-                            item.UniqueConstraintColumns,
-                            capabilities.IdentifierLengthLimit
-                        ),
-                        missing
+                    var uniqueName = UniqueConstraintNaming.Resolve(
+                        item.UniqueConstraintName,
+                        table,
+                        item.UniqueConstraintColumns,
+                        capabilities.IdentifierLengthLimit
                     );
+
+                    // 同期後も残る DB の制約と、方言の名前の範囲で名前が重なるなら、その制約の削除を前提にする
+                    if (missing.Count == 0)
+                    {
+                        missing.AddRange(
+                            remaining.NamedLike(
+                                uniqueName,
+                                table,
+                                isForeignKey: false,
+                                capabilities
+                            )
+                        );
+                    }
+
+                    return (uniqueName, missing);
 
                 case SchemaDiffKind.SetTableDescription:
                     RequireColumns(table, [], missing);
@@ -880,6 +910,149 @@ public sealed class SyncPlanner
         }
 
         return [.. selected.Where(i => !SqlTableShape.IsAddTableWithoutColumns(i))];
+    }
+
+    /// <summary>
+    /// 選んだ項目のうち、計画に載せられない項目を外して名指しする：列の無い表の追加（<see cref="ExcludeTablesWithoutColumns"/>）・
+    /// 名前の重なる表の追加（<see cref="ExcludeTablesWithCollidingConstraintNames"/>）・選んでいない変更を前提にする項目
+    /// （<see cref="ExcludeItemsRequiringUnselected"/>）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 列の無い表の追加は項目そのものだけで決まるので 1 回だけ外す。外した表の追加は選ばなかった項目と同じに扱い、続く段がそれを
+    /// 前提にする項目を外す。
+    /// </para>
+    /// <para>
+    /// 名前の重なる表の追加と依存の除外は、何も外れなくなるまで繰り返す。名前の重なりの判定（<see cref="RemainingLiveConstraints"/>）は
+    /// 選んだ表・列の削除で消える制約を「残らない」と数えるが、その削除自身が同じ段で外されることがある（主キーの変更を選ばない
+    /// 主キーの列の削除）。1 回で止めると、外された削除の表・列の制約が残るのに、その名前と重なる追加が外されずに断られる。
+    /// 繰り返しは必ず止まる：周ごとに少なくとも 1 つの選んだ項目を外したときだけ次の周へ進み、外すほど残る制約は増えるだけ
+    /// （外した項目が戻ることはない）で、選んだ項目の数は有限。NULL 許容化だけを外して型の変更を残す列の変更は、残した項目が
+    /// 次の周で外れない（NULL 許容化を含まない）。周の数が選んだ項目の数を超えたら、止まる理由が崩れたので例外にする（途中の計画を
+    /// 返さない）。どの周も、その周で外した項目だけを名指しするので、警告は重ならず、並びは周の順で決まる。
+    /// </para>
+    /// </remarks>
+    private static List<SchemaDiffItem> ExcludeUntilStable(
+        List<SchemaDiffItem> selected,
+        SyncDialectCapabilities capabilities,
+        SyncPlanContext? context,
+        List<SyncPlanWarning> warnings,
+        List<SchemaDiffItem> excluded
+    )
+    {
+        var current = ExcludeTablesWithoutColumns(selected, warnings, excluded);
+
+        for (var round = 0; round <= selected.Count; round++)
+        {
+            var excludedBefore = excluded.Count;
+            current = ExcludeItemsRequiringUnselected(
+                ExcludeTablesWithCollidingConstraintNames(
+                    current,
+                    capabilities,
+                    context,
+                    warnings,
+                    excluded
+                ),
+                capabilities,
+                context,
+                warnings,
+                excluded
+            );
+
+            if (excluded.Count == excludedBefore)
+            {
+                return current;
+            }
+        }
+
+        throw new InvalidOperationException(
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"Excluding the selected items did not settle within {selected.Count + 1} rounds."
+            )
+        );
+    }
+
+    /// <summary>
+    /// 一意制約の名前が、同期後も残る DB の制約と方言の名前の範囲で重なる表の追加（<see cref="SchemaDiffKind.AddTable"/>）を、その制約の削除を
+    /// 前提にする項目として計画から外し、<see cref="SyncPlanWarningKind.SelectedItemRequiresUnselectedItem"/> で名指しする
+    /// </summary>
+    /// <remarks>
+    /// 判定は外部キー・一意制約の追加と同じ（<see cref="RemainingLiveConstraints"/>・<see cref="SyncDialectCapabilities.ConstraintNamesCollide"/>）。
+    /// 表の名前を変えて古い表の一意制約の名前を新しい表が引き継ぐ図を、既定の選び方（表の追加を選び、古い表の削除を選ばない）で流すと、
+    /// 新しい表の作成が名前の重なりで断られる。主キーと同じ列の一意制約を持てない方言で、表の作成が省く一意制約は数えない。主キーの名前は
+    /// 取り込まないので数えない。依存の除外（<see cref="ExcludeItemsRequiringUnselected"/>）より前に置き、外した表の追加を前提にする項目
+    /// （その表の外部キー・説明）はそこで外す（列の無い表の追加の除外と同じ位置）。Detail は「一意制約の名前 (残る制約の表.名前)」。
+    /// </remarks>
+    private static List<SchemaDiffItem> ExcludeTablesWithCollidingConstraintNames(
+        List<SchemaDiffItem> selected,
+        SyncDialectCapabilities capabilities,
+        SyncPlanContext? context,
+        List<SyncPlanWarning> warnings,
+        List<SchemaDiffItem> excluded
+    )
+    {
+        if (context is null || capabilities.ConstraintNameScope == ConstraintNameScope.None)
+        {
+            return selected;
+        }
+
+        var limit = capabilities.IdentifierLengthLimit;
+        var remaining = RemainingLiveConstraints.From(
+            selected,
+            ExplicitlyDroppedUniqueConstraints(ExpandAlters(selected)),
+            limit,
+            context
+        );
+        var dropped = new HashSet<SchemaDiffItem>(ReferenceEqualityComparer.Instance);
+
+        foreach (
+            var add in selected.Where(i =>
+                i.Kind == SchemaDiffKind.AddTable && i.Entity is not null
+            )
+        )
+        {
+            var table = SchemaNames.ToStoredForm(add.TableName);
+            var primaryKey = add.Entity!.GetPrimaryKeyColumnsInOrder().Select(c => c.Name).ToList();
+            var collisions = UniqueConstraintNaming
+                .ResolveAll(add.Entity, add.UniqueConstraintNames, limit)
+                .Where(u =>
+                    capabilities.SupportsUniqueConstraintOnPrimaryKey
+                    || !IsSameColumnSet(primaryKey, u.ColumnNames)
+                )
+                .Select(u =>
+                    (
+                        u.Name,
+                        Remaining: remaining
+                            .NamedLike(u.Name, table, isForeignKey: false, capabilities)
+                            .ToList()
+                    )
+                )
+                .Where(c => c.Remaining.Count > 0)
+                .ToList();
+
+            if (collisions.Count == 0)
+            {
+                continue;
+            }
+
+            dropped.Add(add);
+            ExcludeSelected(
+                add,
+                new SyncPlanWarning(
+                    SyncPlanWarningKind.SelectedItemRequiresUnselectedItem,
+                    table,
+                    string.Join(
+                        ", ",
+                        collisions.Select(c => $"{c.Name} ({string.Join(", ", c.Remaining)})")
+                    )
+                ),
+                warnings,
+                excluded
+            );
+        }
+
+        return dropped.Count == 0 ? selected : [.. selected.Where(i => !dropped.Contains(i))];
     }
 
     /// <summary>
@@ -4378,6 +4551,172 @@ public sealed class SyncPlanner
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// 同期後も残る DB の外部キー・一意制約（選んだ削除・作り直しで外れず、表・構成列も選んだ削除で消えないもの）。足す制約の名前・定義が
+    /// 重なるかを、方言の宣言（<see cref="SyncDialectCapabilities.ConstraintNameScope"/>・
+    /// <see cref="SyncDialectCapabilities.AllowsDuplicateForeignKeyDefinitions"/>）で判定する
+    /// </summary>
+    /// <remarks>
+    /// 主キーの名前は取り込まない（同期は実行時に逆引きする）ので数えない。端が消える外部キー・構成列が消える一意制約は、同期が追加より前の
+    /// 段で暗黙に外すので残る側に数えない（<see cref="InjectVanishingForeignKeyDrops"/>・<see cref="InjectVanishingUniqueConstraintDrops"/>）。
+    /// 名前は図全体から求めた実効名で、比べ方は <see cref="SchemaNames"/> の規則。
+    /// </remarks>
+    private sealed class RemainingLiveConstraints
+    {
+        private readonly List<(
+            string Child,
+            string Parent,
+            string Name,
+            string PairSet
+        )> _foreignKeys = [];
+
+        private readonly List<(string Table, string Name)> _uniques = [];
+
+        /// <summary>選んだ項目と DB の図から集める</summary>
+        public static RemainingLiveConstraints From(
+            IReadOnlyList<SchemaDiffItem> selected,
+            HashSet<string> droppedUniques,
+            IdentifierLengthLimit limit,
+            SyncPlanContext context
+        )
+        {
+            var remaining = new RemainingLiveConstraints();
+            var droppedForeignKeys = CollectExplicitlyDroppedForeignKeys(
+                ExpandAlters(selected),
+                limit
+            );
+            var droppedObjects = DroppedObjects.From(selected);
+            var liveNames = context.LiveForeignKeyNames(limit);
+
+            foreach (
+                var fk in ForeignKeyColumnPairResolver.ResolveAll(
+                    context.LiveRelationships,
+                    context.LiveEntities
+                )
+            )
+            {
+                var child = SchemaDiffService.NormalizeTable(fk.Child);
+                var parent = SchemaDiffService.NormalizeTable(fk.Parent);
+
+                if (
+                    droppedObjects.Touches(fk, child, parent)
+                    || droppedForeignKeys.Contains(
+                        ForeignKeyKey(child, parent, fk.ColumnPairs, fk.Relationship, limit)
+                    )
+                    || !liveNames.TryGetValue(fk.Relationship, out var name)
+                )
+                {
+                    continue;
+                }
+
+                remaining._foreignKeys.Add((child, parent, name, PairSet(fk.ColumnPairs)));
+            }
+
+            foreach (var entity in context.LiveEntities)
+            {
+                var table = SchemaDiffService.NormalizeTable(entity);
+
+                if (droppedObjects.Tables.Contains(table))
+                {
+                    continue;
+                }
+
+                foreach (var constraint in entity.UniqueConstraints)
+                {
+                    if (
+                        UniqueConstraintNaming.TryResolveColumnNames(
+                            entity,
+                            constraint,
+                            out var columns
+                        )
+                        && !droppedObjects.TouchesColumns(table, columns)
+                        && !droppedUniques.Contains(
+                            UniqueConstraintKey(table, constraint.Name, columns)
+                        )
+                    )
+                    {
+                        remaining._uniques.Add(
+                            (
+                                table,
+                                UniqueConstraintNaming.Resolve(
+                                    constraint.Name,
+                                    table,
+                                    columns,
+                                    limit
+                                )
+                            )
+                        );
+                    }
+                }
+            }
+
+            return remaining;
+        }
+
+        /// <summary>足す制約と、方言の名前の範囲で名前が重なる残る制約（「表.名前」）</summary>
+        public IEnumerable<string> NamedLike(
+            string name,
+            string table,
+            bool isForeignKey,
+            SyncDialectCapabilities capabilities
+        ) =>
+            _foreignKeys
+                .Where(f =>
+                    SchemaNames.AreSame(f.Name, name)
+                    && capabilities.ConstraintNamesCollide(isForeignKey, table, true, f.Child)
+                )
+                .Select(f => $"{f.Child}.{f.Name}")
+                .Concat(
+                    _uniques
+                        .Where(u =>
+                            SchemaNames.AreSame(u.Name, name)
+                            && capabilities.ConstraintNamesCollide(
+                                isForeignKey,
+                                table,
+                                false,
+                                u.Table
+                            )
+                        )
+                        .Select(u => $"{u.Table}.{u.Name}")
+                );
+
+        /// <summary>
+        /// 同じ定義の外部キーを 2 本持てない方言で、足す外部キーと定義（子の表・親の表・列の組の集合）が同じ残る外部キー（「表.名前」）
+        /// </summary>
+        public IEnumerable<string> SameDefinitionAs(
+            string child,
+            string parent,
+            IReadOnlyList<ForeignKeyColumnNamePair> pairs,
+            SyncDialectCapabilities capabilities
+        )
+        {
+            if (capabilities.AllowsDuplicateForeignKeyDefinitions)
+            {
+                return [];
+            }
+
+            var pairSet = PairSet(pairs);
+            return _foreignKeys
+                .Where(f =>
+                    SchemaNames.AreSame(f.Child, child)
+                    && SchemaNames.AreSame(f.Parent, parent)
+                    && f.PairSet == pairSet
+                )
+                .Select(f => $"{f.Child}.{f.Name}");
+        }
+
+        /// <summary>列の組の集合のキー（並びを見ない。名前は <see cref="SchemaNames.Key"/> で畳む）</summary>
+        private static string PairSet(IEnumerable<ForeignKeyColumnNamePair> pairs) =>
+            string.Concat(
+                pairs
+                    .Select(p =>
+                        SignatureText.Part(SchemaNames.Key(p.ParentColumn))
+                        + SignatureText.Part(SchemaNames.Key(p.ChildColumn))
+                    )
+                    .Order(StringComparer.Ordinal)
+            );
     }
 
     /// <summary>明示的に削除が選ばれた外部キー（選択済み DropForeignKey）の照合キーを集める</summary>

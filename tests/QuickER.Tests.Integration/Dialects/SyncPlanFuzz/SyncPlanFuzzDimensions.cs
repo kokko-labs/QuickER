@@ -66,6 +66,7 @@ internal static class SyncPlanFuzzDimensions
         "alter type duplicated unique",
         "drop one of duplicated uniques",
         "respell type",
+        "set description",
     ];
 
     /// <summary>次元表</summary>
@@ -122,6 +123,11 @@ internal static class SyncPlanFuzzDimensions
                     "sqlite",
                     "respell type",
                     "SQLite は宣言の型をそのまま覚え、型の正規化を持たない（製品の事実＝NormalizeTypeNotation が恒等）ので、同じ型の別の綴りが無い"
+                ),
+                MissingMutationGap(
+                    "sqlite",
+                    "set description",
+                    "SQLite は表と列の説明を保存しない（製品の事実＝SupportsDescriptions が偽）ので、生成器は説明を作らない"
                 ),
                 // SQLite の DB は同じ列の並びの UNIQUE 制約を 1 つの索引にまとめ（取り込むと 1 つ）、目標の図の変更でも重ねない
                 // （SyncPlanFuzzDialect.DistinguishesSameSetConstraints）ので、同じ列の並びの一意制約 2 つを前提にする変更は作れない

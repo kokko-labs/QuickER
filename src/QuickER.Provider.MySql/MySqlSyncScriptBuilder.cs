@@ -93,6 +93,7 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         var constraintLines = TableConstraintLineBuilder.Build(
             e,
             item.TableName,
+            MySqlIdentifier.Quote(item.TableName),
             MySqlIdentifier.QuoteSimple,
             name => $"`{MySqlIdentifier.Escape(name)}`",
             item.UniqueConstraintNames,

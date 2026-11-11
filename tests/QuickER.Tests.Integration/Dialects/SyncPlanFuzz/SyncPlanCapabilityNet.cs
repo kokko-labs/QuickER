@@ -56,6 +56,8 @@ internal static class SyncPlanCapabilityNetDimensions
         nameof(SyncDialectCapabilities.ForeignKeyAllowsStringLengthDifference),
         nameof(SyncDialectCapabilities.ForeignKeyAllowsIntegerWidthDifference),
         nameof(SyncDialectCapabilities.TransactionalDdl),
+        nameof(SyncDialectCapabilities.ConstraintNameScope),
+        nameof(SyncDialectCapabilities.AllowsDuplicateForeignKeyDefinitions),
         nameof(SyncDialectCapabilities.SupportsOnUpdateAction),
         nameof(SyncDialectCapabilities.SupportsSetDefaultAction),
     ];
@@ -88,6 +90,17 @@ internal static class SyncPlanCapabilityNetDimensions
         ("ForeignKeyAllowsStringLengthDifference", ["False", "True", "True", "True", "True"]),
         ("ForeignKeyAllowsIntegerWidthDifference", ["False", "True", "False", "True", "True"]),
         ("TransactionalDdl", ["True", "True", "False", "False", "True"]),
+        (
+            "ConstraintNameScope",
+            [
+                "Schema",
+                "KeysInSchemaForeignKeysInTable",
+                "ForeignKeysInSchemaAnyInTable",
+                "Schema",
+                "None",
+            ]
+        ),
+        ("AllowsDuplicateForeignKeyDefinitions", ["True", "True", "True", "False", "True"]),
         ("SupportsOnUpdateAction", ["True", "True", "True", "False", "True"]),
         ("SupportsSetDefaultAction", ["True", "True", "False", "False", "True"]),
     ];
@@ -161,6 +174,7 @@ internal static class SyncPlanCapabilityNetDimensions
                         new Level(NotApplicable),
                         .. new[]
                         {
+                            "Int",
                             "BigInt",
                             "VarChar",
                             "Decimal",
@@ -190,11 +204,18 @@ internal static class SyncPlanCapabilityNetDimensions
                 ),
                 .. CapabilityMembers.Select(member => new Factor(
                     member,
-                    member == nameof(SyncDialectCapabilities.ColumnReorder)
-                        ? Enum.GetValues<ColumnReorderMode>()
-                            .Select(value => new Level(value.ToString()))
-                            .ToList()
-                        : [new Level("True"), new Level("False")],
+                    member switch
+                    {
+                        nameof(SyncDialectCapabilities.ColumnReorder) =>
+                            Enum.GetValues<ColumnReorderMode>()
+                                .Select(value => new Level(value.ToString()))
+                                .ToList(),
+                        nameof(SyncDialectCapabilities.ConstraintNameScope) =>
+                            Enum.GetValues<ConstraintNameScope>()
+                                .Select(value => new Level(value.ToString()))
+                                .ToList(),
+                        _ => [new Level("True"), new Level("False")],
+                    },
                     $"方言の能力 {member}（派生ごとに固定の水準）",
                     AxisMember.Property(typeof(SyncDialectCapabilities), member)
                 )),
@@ -266,6 +287,11 @@ internal static class SyncPlanCapabilityNetDimensions
                     DialectNames.Sqlite,
                     "respell type",
                     "SQLite は宣言の型をそのまま覚え、型の正規化を持たない（製品の事実＝NormalizeTypeNotation が恒等）ので、同じ型の別の綴りが無い"
+                ),
+                .. MutationGaps(
+                    DialectNames.Sqlite,
+                    "set description",
+                    "SQLite は表と列の説明を保存しない（製品の事実＝SupportsDescriptions が偽）ので、生成器は説明を作らない"
                 ),
                 .. LevelGaps(
                     DialectNames.Sqlite,
@@ -454,6 +480,7 @@ internal static class SyncPlanCapabilityNetRunner
         {
             Entities = [.. live.Diagram.Entities],
             Relationships = [.. live.Diagram.Relationships],
+            ColumnDefaults = [.. live.ColumnDefaults],
         };
         var (targetEntities, targetRelationships) = SyncPlanFuzzRunner.CloneWithFreshIds(before);
         generator.Mutate(targetEntities, targetRelationships, live);
@@ -486,6 +513,7 @@ internal static class SyncPlanCapabilityNetRunner
                 {
                     LiveEntities = before.Entities,
                     LiveRelationships = before.Relationships,
+                    ColumnDefaults = before.ColumnDefaults,
                 }
             );
             outcome.Script = provider.SyncScriptBuilder.Build(plan);
@@ -625,6 +653,7 @@ internal static class SyncPlanCapabilityNetRunner
                 {
                     LiveEntities = before.Entities,
                     LiveRelationships = before.Relationships,
+                    ColumnDefaults = before.ColumnDefaults,
                 }
             );
             flaggedScript = provider.SyncScriptBuilder.Build(flaggedPlan);
@@ -753,6 +782,14 @@ internal static class SyncPlanCapabilityNetRunner
                 {
                     LiveEntities = foldedEntities,
                     LiveRelationships = foldedRelationships,
+                    ColumnDefaults =
+                    [
+                        .. before.ColumnDefaults.Select(d => new SchemaColumnDefault(
+                            Fold(d.TableName),
+                            Fold(d.ColumnName),
+                            d.Expression
+                        )),
+                    ],
                 }
             );
         }

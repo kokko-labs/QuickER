@@ -49,6 +49,7 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
         var constraintLines = TableConstraintLineBuilder.Build(
             e,
             item.TableName,
+            SqlIdentifier.Bracket(item.TableName),
             SqlIdentifier.BracketSimple,
             name => $"[{SqlIdentifier.Escape(name)}]",
             item.UniqueConstraintNames,

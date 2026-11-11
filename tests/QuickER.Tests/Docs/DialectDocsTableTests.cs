@@ -334,6 +334,9 @@ public sealed class DialectDocsTableTests
             c.SupportsComputedColumnTypeChange,
         ["A unique constraint on exactly the primary key's columns is kept"] = c =>
             c.SupportsUniqueConstraintOnPrimaryKey,
+        [
+            "`CREATE TABLE` drops a unique constraint on the same column list as the primary key or an earlier unique constraint"
+        ] = c => CreateTableUniqueConstraints.DropsDuplicateColumnLists(DialectOf(c)),
         ["A table name with a dot is a schema-qualified name"] = c =>
             c.SupportsSchemaQualifiedTableNames,
         ["Foreign key names are stored"] = c => c.PersistsForeignKeyConstraintNames,
@@ -343,6 +346,14 @@ public sealed class DialectDocsTableTests
             c.SupportsAlterColumn && c.SupportsForeignKeyAlter,
         ["A single-column `INTEGER` primary key turns NULL into a row number"] = c =>
             c.SingleColumnPrimaryKeyReplacesNull("INTEGER"),
+        ["Foreign key names are unique across the schema"] = c =>
+            c.ConstraintNamesCollide(true, "a", true, "b"),
+        ["Primary key and unique constraint names are unique across the schema"] = c =>
+            c.ConstraintNamesCollide(false, "a", false, "b"),
+        ["A foreign key and a unique constraint of the same table cannot share a name"] = c =>
+            c.ConstraintNamesCollide(true, "a", false, "a"),
+        ["Two foreign keys with the same columns and referenced table can be kept"] = c =>
+            c.AllowsDuplicateForeignKeyDefinitions,
     };
 
     /// <summary>T-M：外部キーの外し直しと付け直し（英語の行見出し → 宣言）</summary>
@@ -2276,6 +2287,10 @@ public sealed class DialectDocsTableTests
             }
         }
     }
+
+    /// <summary>能力の宣言のインスタンスを持つ方言の名前（方言名で引く宣言を、能力の表と同じ対応表に並べるため）</summary>
+    private static string DialectOf(SyncDialectCapabilities capabilities) =>
+        Providers.Single(p => ReferenceEquals(p.SyncCapabilities, capabilities)).Name;
 
     /// <summary>セルの記号（✅ / — で始まればその記号、空なら空、それ以外は語）</summary>
     private static string Symbol(string cell) =>

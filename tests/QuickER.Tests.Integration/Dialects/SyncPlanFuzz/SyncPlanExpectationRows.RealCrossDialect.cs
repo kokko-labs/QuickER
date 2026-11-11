@@ -18,11 +18,11 @@ internal static partial class SyncPlanExpectationRows
     private static int RealCrossDialectRowCount(string dialect) =>
         dialect switch
         {
-            DialectNames.SqlServer => 24,
-            DialectNames.PostgreSql => 27,
-            DialectNames.MySql => 24,
-            DialectNames.Oracle => 26,
-            DialectNames.Sqlite => 25,
+            DialectNames.SqlServer => 38,
+            DialectNames.PostgreSql => 41,
+            DialectNames.MySql => 38,
+            DialectNames.Oracle => 38,
+            DialectNames.Sqlite => 37,
             _ => 0,
         };
 
@@ -38,6 +38,8 @@ internal static partial class SyncPlanExpectationRows
             .. RealCrossDialectIntegerWidthRows(),
             .. RealCrossDialectEmptyColumnChangeRows(),
             .. RealCrossDialectRowDependentChangeRows(),
+            .. RealCrossDialectNameCollisionRows(),
+            .. RealCreateTableUniqueRows(),
         ];
 
     /// <summary>
@@ -784,6 +786,40 @@ internal static partial class SyncPlanExpectationRows
                         .Expect(e => ExpectEmptyColumnChangeOutcome(e))
                 ),
             Row(
+                    "plan-empty-column-change-scale-decrease-names-fk",
+                    "[Integration] 外部キーの両端の小数のスケールだけを下げる（精度は保つ）：列が空でないとスケールを下げられない方言だけ、外して付け直す外部キーを名指しする",
+                    AllDialects
+                )
+                .LiveWith(w =>
+                    RealCrossDialectScenarios.DecimalParentChild(w.Live, w.Capability, 12, scale: 3)
+                )
+                .TargetWith(w =>
+                    RealCrossDialectScenarios.DecimalParentChild(
+                        w.Target,
+                        w.Capability,
+                        12,
+                        scale: 2
+                    )
+                )
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterColumn))
+                .Expect(e => ExpectEmptyColumnChangeWarnings(e, "ec_child", "ec_fk"))
+                .OnRealDatabase(r =>
+                    RealCrossDialectScenarios
+                        .SetupPerDialect(
+                            r,
+                            d =>
+                                RealCrossDialectScenarios.Insert(d, "ec_parent", ["id"], "1.50")
+                                + "\n"
+                                + RealCrossDialectScenarios.Insert(
+                                    d,
+                                    "ec_child",
+                                    ["id", "parent_id"],
+                                    "1, 1.50"
+                                )
+                        )
+                        .Expect(e => ExpectEmptyColumnChangeOutcome(e))
+                ),
+            Row(
                     "plan-empty-column-change-pk-change-names-primary-key-and-fk",
                     "[Integration] 親の主キーを並べ替え、外部キーの両端の整数の幅を下げる：列が空でないと精度を下げられない方言だけ、主キーと外して付け直す外部キーを名指しする",
                     AllDialects
@@ -835,7 +871,82 @@ internal static partial class SyncPlanExpectationRows
                         )
                         .Expect(e => ExpectEmptyColumnChangeOutcome(e))
                 ),
+            Row(
+                    "plan-empty-column-change-string-swap-keeping-length-is-not-named",
+                    "[Integration] 外部キーの両端を固定長から同じ長さの可変長の文字列へ変える：どの方言も値のあるまま通すので、外して付け直す外部キーを名指ししない",
+                    AllDialects
+                )
+                .LiveWith(w => StringSwapParentChild(w.Live, w.Capability, fixedLength: true))
+                .TargetWith(w => StringSwapParentChild(w.Target, w.Capability, fixedLength: false))
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterColumn))
+                .Expect(e =>
+                    e.Warnings.Absent(
+                        "ConstraintRebuildAroundEmptyColumnChange*",
+                        "ConstraintRebuildAroundRowDependentChange*"
+                    )
+                )
+                .OnRealDatabase(r =>
+                    RealCrossDialectScenarios
+                        .SetupPerDialect(
+                            r,
+                            d =>
+                                RealCrossDialectScenarios.Insert(d, "ss_parent", ["code"], "'ab'")
+                                + "\n"
+                                + RealCrossDialectScenarios.Insert(
+                                    d,
+                                    "ss_child",
+                                    ["id", "code"],
+                                    "1, 'ab'"
+                                )
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.After.Count("fk *", 1);
+                            e.AfterDiff.Absent("* able=1 *");
+                        })
+                ),
+            Row(
+                    "plan-empty-column-change-string-swap-shortening-names-fk-where-declared",
+                    "外部キーの両端を固定長から短い可変長の文字列へ変える：列が空でないと型の種類を変えられない方言では、外して付け直す外部キーを名指しする",
+                    DialectNames.Oracle
+                )
+                .LiveWith(w => StringSwapParentChild(w.Live, w.Capability, fixedLength: true))
+                .TargetWith(w =>
+                    StringSwapParentChild(w.Target, w.Capability, fixedLength: false, length: 5)
+                )
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterColumn))
+                .Expect(e =>
+                    e.Warnings.Contains(
+                        "ConstraintRebuildAroundEmptyColumnChange(ss_child): ss_fk *"
+                    )
+                ),
         ];
+
+    /// <summary>
+    /// 親 ss_parent(code) ← 子 ss_child(id, code) の外部キー ss_fk（文字列は固定長か可変長・長さは既定 10）
+    /// </summary>
+    private static void StringSwapParentChild(
+        ExpectationSchema s,
+        string dialect,
+        bool fixedLength,
+        int length = 10
+    )
+    {
+        var type = (fixedLength, dialect) switch
+        {
+            (true, _) => $"CHAR({length})",
+            (false, DialectNames.Oracle) => $"VARCHAR2({length})",
+            (false, _) => $"VARCHAR({length})",
+        };
+        s.Table("ss_parent", ExpectationSchema.Pk("code", type));
+        s.Table(
+            "ss_child",
+            ExpectationSchema.Pk("id", RealCrossDialectScenarios.IntType(dialect)),
+            ExpectationSchema.NotNull("code", type)
+        );
+        s.Fk("ss_parent", "ss_child", "ss_fk", ("code", "code"));
+    }
 
     /// <summary>
     /// 宣言が真の方言（Oracle）だけ、外して付け直す外部キー（と主キー）を列が空でないと通らない変更の警告で名指しする（再構築の方言は
@@ -1589,20 +1700,25 @@ internal static class RealCrossDialectScenarios
         };
 
     /// <summary>方言の固定小数点数の型（スケール 2）</summary>
-    public static string DecimalType(string dialect, int precision) =>
+    public static string DecimalType(string dialect, int precision, int scale = 2) =>
         dialect switch
         {
-            DialectNames.SqlServer or DialectNames.MySql => $"decimal({precision},2)",
-            DialectNames.PostgreSql => $"numeric({precision},2)",
-            DialectNames.Oracle => $"NUMBER({precision},2)",
-            DialectNames.Sqlite => $"DECIMAL({precision},2)",
+            DialectNames.SqlServer or DialectNames.MySql => $"decimal({precision},{scale})",
+            DialectNames.PostgreSql => $"numeric({precision},{scale})",
+            DialectNames.Oracle => $"NUMBER({precision},{scale})",
+            DialectNames.Sqlite => $"DECIMAL({precision},{scale})",
             _ => throw new ArgumentOutOfRangeException(nameof(dialect), dialect, null),
         };
 
     /// <summary>親 ec_parent(id) と、それを参照する子 ec_child(parent_id)（外部キー ec_fk・型は方言の固定小数点数）</summary>
-    public static void DecimalParentChild(ExpectationSchema s, string dialect, int precision)
+    public static void DecimalParentChild(
+        ExpectationSchema s,
+        string dialect,
+        int precision,
+        int scale = 2
+    )
     {
-        var type = DecimalType(dialect, precision);
+        var type = DecimalType(dialect, precision, scale);
         s.Table("ec_parent", ExpectationSchema.Pk("id", type));
         s.Table(
             "ec_child",

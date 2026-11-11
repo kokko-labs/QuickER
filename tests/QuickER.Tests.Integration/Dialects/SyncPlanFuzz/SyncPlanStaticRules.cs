@@ -61,6 +61,8 @@ internal sealed record SyncPlanStaticVerdict(
 ///   列の変更は外部キーを張ったまま通る（期待の行 realdb-fk-set-null-child-not-null-keeps-that-fk）。製品はこの文を計画の先頭へ移す
 ///   （<see cref="SyncPlanSection.IsMovedFirst"/>）。規則が無いと、先頭の文が実際には断られるのに、後ろの別の予言の失敗の前で外した
 ///   制約を D9 が数える。</item>
+///   <item>R12：同じ定義の外部キー（子の表・親の表・列の組の集合）を 2 本持てない Oracle（ORA-02275）で、外部キーを足すとき、その時点で残る
+///   外部キーと定義が同じでない。名前だけを変えた外部キーの追加を、元の外部キーの削除を選ばずに流す形。</item>
 /// </list>
 /// <para>
 /// 違反になるのは、断られる文があるのに次のどちらでもないとき：(a) 失敗を予告する警告がある（<see cref="NonPredictingWarnings"/> 以外）
@@ -420,8 +422,11 @@ internal static class SyncPlanStaticRules
 
         foreach (var warning in warnings)
         {
-            // 選んだ外部キーの追加・作り直しの名指し（スクリプトが付ける名前）
+            // 選んだ外部キーの追加・作り直しの名指し（スクリプトが付ける名前。計画が型の食い違いで外した項目＝ExcludedItems も見る：
+            // 外した項目は呼び出し側の選んだ項目から除かれているが、警告はその項目の新しい組を名指しする＝親の表を変える作り直しは、DB に
+            // ある同じ名前の外部キーの組では判定できない）
             var named = selected
+                .Concat(plan.ExcludedItems)
                 .Where(i =>
                     i.Kind is SchemaDiffKind.AddForeignKey or SchemaDiffKind.AlterForeignKey
                     && i.ChildEntity is not null
@@ -571,7 +576,7 @@ internal static class SyncPlanStaticRules
 
         // 既存の行で断られうる文・列が空でないと通らない変更の前後で外して付け直すと計画が名指しした制約（製品の契約＝名指しして
         // 部分適用を受け入れる。実 DB の表明 1b の例外と同じ）。警告は表と名前だけを持つので、外部キーと一意制約の両方の身元を作る。
-        // 受け入れるのは、予言した失敗がデータで断られる文（R10）のときだけ。構造の規則（R1〜R9・R11）が予言した失敗はデータに依らず
+        // 受け入れるのは、予言した失敗がデータで断られる文（R10）のときだけ。構造の規則（R1〜R9・R11・R12）が予言した失敗はデータに依らず
         // 必ず断られるので、計画はその文を先頭へ移すか外し直さないで済ませるべきで、名指しでは足りない
         var namedAroundRefusable = plan
             .Warnings.Where(w =>
@@ -1269,11 +1274,41 @@ internal static class SyncPlanStaticRules
                 }
             }
 
+            // R12：同じ定義の外部キー（子の表・親の表・列の組の集合）を 2 本持てない方言（Oracle の ORA-02275）で、残っている外部キーと同じ
+            // 定義を足す
+            if (dialect == DialectNames.Oracle)
+            {
+                var pairs = PairSet(
+                    item.ForeignKeyColumnPairs.Select(p =>
+                        (Lower(p.ChildColumn), Lower(p.ParentColumn))
+                    )
+                );
+
+                if (
+                    _foreignKeys.FirstOrDefault(f =>
+                        f.Child == child
+                        && f.Parent == parent
+                        && PairSet(f.ChildColumns.Zip(f.ParentColumns)) == pairs
+                    ) is
+                    { } duplicate
+                )
+                {
+                    return $"R12: {SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, Limit)} has the same definition as {duplicate.Name}";
+                }
+            }
+
             return CheckName(
                 Lower(item.ChildEntity!.TableName),
                 SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, Limit),
                 isForeignKey: true
             );
+
+            // 列の組の集合（並びを見ない）
+            static string PairSet(IEnumerable<(string Child, string Parent)> pairs) =>
+                string.Join(
+                    ",",
+                    pairs.Select(p => $"{p.Parent}>{p.Child}").Order(StringComparer.Ordinal)
+                );
         }
 
         /// <summary>R4：作る表の主キー・一意制約の名前</summary>

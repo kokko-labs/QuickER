@@ -516,6 +516,41 @@ internal static partial class SyncPlanExpectationRows
                         .Select(SelectAll)
                         .Expect(e => MismatchedRebuiltForeignKeyExpectation(e, sibling))
             ),
+            // 外部キーの親の表だけを変え、新しい親の列の型だけを変える（子の列の型の変更は選ばない）。同期後の組が並べられないので、計画は
+            // 作り直しを外して名指しする。警告はその項目の新しい組（新しい親）を名指しするので、静的な規則 W1 も外した項目の組で判定する
+            // （DB にある同じ名前の外部キーの組＝古い親では、型を変える列が無く偽の警告に見える）
+            Row(
+                    "plan-type-mismatch-parent-retargeted-alter-is-excluded-and-named",
+                    "型の食い違い: 親の表だけを変える外部キーの作り直しで、新しい親の列だけ型を変えると、作り直しを外して名指しする",
+                    DialectNames.SqlServer,
+                    DialectNames.MySql
+                )
+                .Live(s =>
+                {
+                    s.Tbl("p_old", ("id", "int", true));
+                    s.Tbl("p_new", ("id", "int", true));
+                    s.Tbl("c", ("id", "int", true), ("pid", "int", false));
+                    s.Fk("p_old", "c", "fk_x", ("id", "pid"));
+                })
+                .Target(s =>
+                {
+                    s.Tbl("p_old", ("id", "int", true));
+                    s.Tbl("p_new", ("id", "bigint", true));
+                    s.Tbl("c", ("id", "int", true), ("pid", "int", false));
+                    s.Fk("p_new", "c", "fk_x", ("id", "pid"));
+                })
+                .Select(SelectAll)
+                .Expect(e =>
+                    e.Excluded.Contains("AlterForeignKey *")
+                        .Warnings.Contains("ForeignKeyColumnTypeMismatch(c): fk_x")
+                )
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Outcome.Exact("committed");
+                        e.After.Single("fk c fk_x *");
+                    })
+                ),
         ];
 
     /// <summary>差分の項目をすべて選ぶ</summary>

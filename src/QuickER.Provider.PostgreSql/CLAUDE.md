@@ -61,6 +61,12 @@
 - DO ブロックのドルタグは本文から決定的に選ぶ（`PgIdentifier.DollarQuoteTag(body)`＝本文に現れない限り `$$`、現れるなら `$q$` → `$qq$` …）。ドルクォートはタグ文字列そのもので終端するので、`$$` 固定だと `$$` を含む名前がブロックを閉じる。乱数にしない（出力の決定性）。
 - 固定は `PostgreSqlSyncScriptBuilderTests.RuntimeConstraintName_IsAlwaysQuoteIdented`・`PostgreSqlSyncScriptBuilderTests.RuntimeLookup_DottedTableName_UsesRegclassOfQualifiedName`・同クラスのドルタグのケースと `PostgreSqlRuntimeConstraintNameIntegrationTests`（`AlterPrimaryKey_DottedTableName_SucceedsAndKeepsSameNamedTable`・`DropForeignKey_WithoutName_DottedTables_KeepsSameNamedTables`・`DynamicDrop_MissingSchema_IsNoOp`）。mutation 実証済み。
 
+### 表の作成の一意制約
+
+- `CREATE TABLE` は、主キーか先に書いた一意制約と同じ列の並びの一意制約をエラーなしに捨てる（同じ定義の索引を作らない）。`ALTER TABLE … ADD CONSTRAINT … UNIQUE` で足せば別の制約として持つ。
+- DDL と同期の表の作成は、その一意制約を表を作る文の直後の `ALTER TABLE` で足す。分け方は方言横断の `TableConstraintLineBuilder`（`src/QuickER.Provider/CLAUDE.md`「一意制約の照合キーと付け直し」）で、この方言は宣言 `CreateTableUniqueConstraints.DropsDuplicateColumnLists` を真にするだけ。
+- 固定は期待の行 `realdb-create-table-*` と `DialectDdlTableTests` の行 `*-unique-on-same-columns-as-earlier-unique-added-after-create-table`。
+
 ### 列の変更
 
 - 新しい型が文字列型なら DO ブロックで `pg_attribute.attcollation` を読み、型の既定（`typcollation`）と違うときだけ `COLLATE "schema"."name"` を書く（`ALTER COLUMN … TYPE` は COLLATE を省くと新しい型の既定へ戻す）。表は `to_regclass` で絞る。
