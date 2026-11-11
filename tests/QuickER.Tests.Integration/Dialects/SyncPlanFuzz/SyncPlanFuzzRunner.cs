@@ -129,7 +129,7 @@ internal sealed class FuzzSeedOutcome
 /// （型＝選んだ AlterColumn が型の変更を述べている・NULL 許容＝選んだ AlterColumn が NULL 許容の変更を述べているか、
 /// 選んだ主キーの変更の新しい主キー列・計算列か＝再構築の喪失の警告がその表に出ている・主キー＝選んだ主キーの変更）。</item>
 /// <item>残った表の行数は変わらない。取込の警告の種類（種別と表）は増えない。残った列の NULL の行の数は変わらない
-/// （表明 5b・<see cref="NullCountChanges"/>）。</item>
+/// （表明 5b・<see cref="NullCountChanges"/>）。残った列の既定値の式は変わらない（表明 5c・<see cref="ColumnDefaultChanges"/>）。</item>
 /// </list>
 /// </remarks>
 internal static class SyncPlanFuzzRunner
@@ -244,6 +244,7 @@ internal static class SyncPlanFuzzRunner
 
         var setup = liveSchema
             .InsertStatements.Concat(liveSchema.ComputedColumnStatements)
+            .Concat(liveSchema.ColumnDefaultStatements)
             .ToList();
 
         if (setup.Count > 0)
@@ -541,6 +542,9 @@ internal static class SyncPlanFuzzRunner
         outcome.Violations.AddRange(
             NullCountChanges(before, after, beforeRows, afterRows, selected)
         );
+
+        // 表明 5c: 残った列の既定値の式は変わらない
+        outcome.Violations.AddRange(ColumnDefaultChanges(before, after, selected, plan.Warnings));
 
         var beforeWarnings = before
             .Warnings.Select(w => $"{w.Kind}|{w.TableName.ToLowerInvariant()}")
@@ -1837,6 +1841,93 @@ internal static class SyncPlanFuzzRunner
 
                 yield return $"{NullCountChangedPrefix} {table}.{name} {nullsBefore} -> {nullsAfter}";
             }
+        }
+    }
+
+    /// <summary>違反の文の頭（表明 5c の列の既定値）</summary>
+    public const string ColumnDefaultChangedPrefix = "column default changed:";
+
+    /// <summary>
+    /// 表明 5c（残った列の既定値の式は変わらない）：コミットした同期の前後で、両方にある表の両方にある列の、取込の既定値の式
+    /// （<see cref="SchemaImportResult.ColumnDefaults"/>）が違えば違反の文にする（消えたか現れたかも含む）
+    /// </summary>
+    /// <remarks>
+    /// 同期の列の変更は、図に無い既定値を実行時のカタログから読み直して保つ（<c>src/QuickER.Provider/CLAUDE.md</c>「列の変更が保つ属性」）。
+    /// 型を変えた列も比べる。比べないのは、選んだ表の追加・削除の表と、選んだ列の追加・削除の列（表明 5b と同じ）と、計画が
+    /// <see cref="SyncPlanWarningKind.TableRebuildDropsColumnAttribute"/> で名指しした表（SQLite の再構築は既定値を落とすと告げて進める）。
+    /// </remarks>
+    internal static IEnumerable<string> ColumnDefaultChanges(
+        SchemaImportResult before,
+        SchemaImportResult after,
+        IReadOnlyList<SchemaDiffItem> selected,
+        IReadOnlyList<SyncPlanWarning> warnings
+    )
+    {
+        var skippedTables = selected
+            .Where(i => i.Kind is SchemaDiffKind.AddTable or SchemaDiffKind.DropTable)
+            .Select(i => i.TableName.Trim())
+            .Concat(
+                warnings
+                    .Where(w => w.Kind == SyncPlanWarningKind.TableRebuildDropsColumnAttribute)
+                    .Select(w => w.TableName.Trim())
+            )
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var replacedColumns = selected
+            .Where(i =>
+                i.Kind is SchemaDiffKind.AddColumn or SchemaDiffKind.DropColumn
+                && i.ColumnName is not null
+            )
+            .Select(i => (i.TableName.Trim(), i.ColumnName!.Trim()))
+            .ToHashSet(TableColumnComparer.Instance);
+        var beforeDefaults = Defaults(before);
+        var afterDefaults = Defaults(after);
+
+        foreach (var entity in before.Entities)
+        {
+            var table = entity.TableName.Trim();
+            var afterEntity = after.Entities.FirstOrDefault(e =>
+                string.Equals(e.TableName.Trim(), table, StringComparison.OrdinalIgnoreCase)
+            );
+
+            if (afterEntity is null || skippedTables.Contains(table))
+            {
+                continue;
+            }
+
+            foreach (var column in entity.Columns)
+            {
+                var name = column.Name.Trim();
+
+                if (
+                    replacedColumns.Contains((table, name))
+                    || !afterEntity.Columns.Any(c =>
+                        string.Equals(c.Name.Trim(), name, StringComparison.OrdinalIgnoreCase)
+                    )
+                )
+                {
+                    continue;
+                }
+
+                var expressionBefore = beforeDefaults.GetValueOrDefault((table, name));
+                var expressionAfter = afterDefaults.GetValueOrDefault((table, name));
+
+                if (!string.Equals(expressionBefore, expressionAfter, StringComparison.Ordinal))
+                {
+                    yield return $"{ColumnDefaultChangedPrefix} {table}.{name} {expressionBefore ?? "(none)"} -> {expressionAfter ?? "(none)"}";
+                }
+            }
+        }
+
+        static Dictionary<(string, string), string> Defaults(SchemaImportResult schema)
+        {
+            var defaults = new Dictionary<(string, string), string>(TableColumnComparer.Instance);
+
+            foreach (var d in schema.ColumnDefaults)
+            {
+                defaults[(d.TableName.Trim(), d.ColumnName.Trim())] = d.Expression;
+            }
+
+            return defaults;
         }
     }
 

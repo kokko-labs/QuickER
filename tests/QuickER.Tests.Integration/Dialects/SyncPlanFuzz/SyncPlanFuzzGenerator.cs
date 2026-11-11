@@ -115,6 +115,114 @@ internal static class FuzzShape
     /// <summary>子の列が NOT NULL の外部キーを SET DEFAULT へ変える（後から足した行の水準。参照アクションを変える方言だけ）</summary>
     public const string SetDefaultNotNullChild = "set-default-not-null-child";
 
+    /// <summary>DB 側の図の 2 列の一意制約（制約の形の水準）</summary>
+    public const string MultiColumnUnique = "multi-column-unique";
+
+    /// <summary>DB 側の図の 2 列の一意制約を参照する 2 列の外部キー（制約の形の水準）</summary>
+    public const string ForeignKeyOnMultiColumnUnique = "fk-on-multi-column-unique";
+
+    /// <summary>目標の図で 2 列の一意制約を足す（制約の形の水準）</summary>
+    public const string MultiColumnUniqueAdd = "multi-column-unique-add";
+
+    /// <summary>
+    /// 外部キーが参照する一意制約に名前つきの双子を置き、目標の図で両方の列を変える（付け直すキーが 2 つの組。制約の形の水準・同じ列の並びの
+    /// 一意制約を 2 つ持てて名前で見分ける方言だけ）
+    /// </summary>
+    public const string ReaddedUniqueTwins = "readded-unique-twins";
+
+    /// <summary>DB 側の図で、外部キーが参照する名前つきの一意制約に名前つきの双子を置く（<see cref="ReaddedUniqueTwins"/> の前提）</summary>
+    public const string UniqueTwinOnReferencedKey = "unique-twin-on-referenced-key";
+
+    /// <summary>外部キーの親の表だけを変える（制約の形の水準）</summary>
+    public const string ForeignKeyParentRetarget = "fk-parent-retarget";
+
+    /// <summary>外部キーの参照先を主キーと一意制約の間で入れ替える（制約の形の水準）</summary>
+    public const string ForeignKeyKeyKindSwap = "fk-key-kind-swap";
+
+    /// <summary>名前つきの外部キーを同じ名前のまま別の子の表へ移す（制約の形の水準）</summary>
+    public const string ForeignKeyMovedToOtherChild = "fk-moved-to-other-child";
+
+    /// <summary>外部キーの名前だけを変える（制約の形の水準）</summary>
+    public const string ForeignKeyRename = "fk-rename";
+
+    /// <summary>一意制約の名前だけを変える（制約の形の水準）</summary>
+    public const string UniqueRename = "unique-rename";
+
+    /// <summary>名前つきの一意制約を同じ名前のまま別の表へ移す（制約の形の水準）</summary>
+    public const string UniqueMovedToOtherTable = "unique-moved-to-other-table";
+
+    /// <summary>新しい表を複合主キーにする（表と列の形の水準）</summary>
+    public const string NewTableCompositePrimaryKey = "new-table-composite-pk";
+
+    /// <summary>新しい表に一意制約を張る（表と列の形の水準）</summary>
+    public const string NewTableUnique = "new-table-unique";
+
+    /// <summary>新しい表に主キーと同じ列の一意制約を張る（表と列の形の水準。持てない方言では DDL が省いて注記する）</summary>
+    public const string NewTablePrimaryKeyTwinUnique = "new-table-pk-twin-unique";
+
+    /// <summary>新しい表に自己参照の外部キーを張る（表と列の形の水準）</summary>
+    public const string NewTableSelfReference = "new-table-self-reference";
+
+    /// <summary>新しい表を 2 つ足し、新しい表どうしに外部キーを張る（表と列の形の水準）</summary>
+    public const string NewTablesWithForeignKey = "new-tables-with-fk";
+
+    /// <summary>新しい表の一意制約に、目標の図で外した DB の制約の名前を付ける（表と列の形の水準）</summary>
+    public const string NewTableTakesReleasedName = "new-table-takes-released-name";
+
+    /// <summary>新しく足した列に一意制約を張る（表と列の形の水準）</summary>
+    public const string UniqueOnNewColumn = "unique-on-new-column";
+
+    /// <summary>DB 側の図の小数の列を精度なしにする（表と列の形の水準。精度なしを覚える方言だけ）</summary>
+    public const string PrecisionlessDecimal = "precisionless-decimal";
+
+    /// <summary>精度なしの小数の列を精度ありへ変える（表と列の形の水準。精度なしを覚える方言だけ）</summary>
+    public const string PrecisionlessToPrecision = "type-precisionless-to-precision";
+
+    /// <summary>文字列の列を整数へ変える（値が全部 NULL か行 0。表と列の形の水準）</summary>
+    public const string StringToNumber = "type-string-to-number";
+
+    /// <summary>整数の列を小数へ変える（表と列の形の水準）</summary>
+    public const string IntegerToDecimal = "type-int-to-decimal";
+
+    /// <summary>小数の列のスケールを変える（表と列の形の水準）</summary>
+    public const string DecimalScaleChange = "type-decimal-scale-change";
+
+    /// <summary>同じ系統の固定長と可変長の文字列を入れ替える（長さは同じ。表と列の形の水準）</summary>
+    public const string FixedVariableSwap = "type-fixed-variable-swap";
+
+    /// <summary>DB 側の主キーの無い表（属性の形の水準）</summary>
+    public const string KeylessTable = "keyless-table";
+
+    /// <summary>目標の図で、DB 側の主キーの無い表に主キーを足す（属性の形の水準）</summary>
+    public const string KeylessTableGetsPrimaryKey = "keyless-table-gets-pk";
+
+    /// <summary>DB 側の表と列の説明（属性の形の水準）</summary>
+    public const string LiveDescription = "live-description";
+
+    /// <summary>目標の図で説明の無い表か列に説明を足す（属性の形の水準）</summary>
+    public const string DescriptionAdd = "description-add";
+
+    /// <summary>目標の図で説明を変える（属性の形の水準）</summary>
+    public const string DescriptionChange = "description-change";
+
+    /// <summary>目標の図で説明を消す（属性の形の水準）</summary>
+    public const string DescriptionRemove = "description-remove";
+
+    /// <summary>目標の図で説明を空白だけにする（属性の形の水準）</summary>
+    public const string DescriptionBlank = "description-blank";
+
+    /// <summary>目標の図で説明に BMP の外の文字を入れる（属性の形の水準）</summary>
+    public const string DescriptionSupplementary = "description-supplementary";
+
+    /// <summary>目標の図で新しい表か列に説明を付ける（属性の形の水準）</summary>
+    public const string DescriptionNewElement = "description-new-element";
+
+    /// <summary>DB 側の既定値のある列（属性の形の水準）</summary>
+    public const string ColumnDefault = "column-default";
+
+    /// <summary>目標の図で既定値のある列の型を広げる（属性の形の水準）</summary>
+    public const string ColumnDefaultTypeChange = "column-default-type-change";
+
     /// <summary>種の集合全体で必ず出ていなければならない形（方言が作れない形は除く＝<see cref="RequiredFor"/>）</summary>
     public static readonly IReadOnlyList<string> Required =
     [
@@ -151,6 +259,41 @@ internal static class FuzzShape
         ComputedSourceChange,
         SetNullChildNotNull,
         SetDefaultNotNullChild,
+        MultiColumnUnique,
+        ForeignKeyOnMultiColumnUnique,
+        MultiColumnUniqueAdd,
+        ReaddedUniqueTwins,
+        UniqueTwinOnReferencedKey,
+        ForeignKeyParentRetarget,
+        ForeignKeyKeyKindSwap,
+        ForeignKeyMovedToOtherChild,
+        ForeignKeyRename,
+        UniqueRename,
+        UniqueMovedToOtherTable,
+        NewTableCompositePrimaryKey,
+        NewTableUnique,
+        NewTablePrimaryKeyTwinUnique,
+        NewTableSelfReference,
+        NewTablesWithForeignKey,
+        NewTableTakesReleasedName,
+        UniqueOnNewColumn,
+        PrecisionlessDecimal,
+        PrecisionlessToPrecision,
+        StringToNumber,
+        IntegerToDecimal,
+        DecimalScaleChange,
+        FixedVariableSwap,
+        KeylessTable,
+        KeylessTableGetsPrimaryKey,
+        LiveDescription,
+        DescriptionAdd,
+        DescriptionChange,
+        DescriptionRemove,
+        DescriptionBlank,
+        DescriptionSupplementary,
+        DescriptionNewElement,
+        ColumnDefault,
+        ColumnDefaultTypeChange,
     ];
 
     /// <summary>
@@ -204,6 +347,42 @@ internal static class FuzzShape
                     or ComputedSourceChange => !realDatabase,
                     SetNullChildNotNull or SetDefaultNotNullChild => !realDatabase
                         && dialect.AllowCascade,
+                    ReaddedUniqueTwins or UniqueTwinOnReferencedKey => !realDatabase
+                        && dialect.AllowDuplicateUniqueConstraints
+                        && dialect.DistinguishesSameSetConstraints,
+                    MultiColumnUnique
+                    or ForeignKeyOnMultiColumnUnique
+                    or MultiColumnUniqueAdd
+                    or ForeignKeyParentRetarget
+                    or ForeignKeyKeyKindSwap
+                    or ForeignKeyMovedToOtherChild
+                    or ForeignKeyRename
+                    or UniqueRename
+                    or UniqueMovedToOtherTable
+                    or NewTableCompositePrimaryKey
+                    or NewTableUnique
+                    or NewTablePrimaryKeyTwinUnique
+                    or NewTableSelfReference
+                    or NewTablesWithForeignKey
+                    or NewTableTakesReleasedName
+                    or UniqueOnNewColumn
+                    or StringToNumber
+                    or IntegerToDecimal
+                    or DecimalScaleChange
+                    or FixedVariableSwap => !realDatabase,
+                    PrecisionlessDecimal or PrecisionlessToPrecision => !realDatabase
+                        && dialect.PrecisionlessDecimalTypeName is not null,
+                    KeylessTable or KeylessTableGetsPrimaryKey => !realDatabase,
+                    LiveDescription
+                    or DescriptionAdd
+                    or DescriptionChange
+                    or DescriptionRemove
+                    or DescriptionBlank
+                    or DescriptionSupplementary
+                    or DescriptionNewElement => !realDatabase
+                        && dialect.Provider.SyncCapabilities.SupportsDescriptions,
+                    ColumnDefault or ColumnDefaultTypeChange => !realDatabase
+                        && dialect.AddColumnDefaultSql("t", "c", "0") is not null,
                     LongDefaultName => !realDatabase
                         && !dialect.Provider.SyncCapabilities.IdentifierLengthLimit.IsUnlimited,
                     _ => true,
@@ -326,6 +505,14 @@ internal sealed class FuzzLiveSchema
     /// <summary>計算列を足す文（データを入れた後に流す）</summary>
     public List<string> ComputedColumnStatements { get; } = [];
 
+    /// <summary>既定値を足す文（計算列の文の後に流す。図は既定値を持たない）</summary>
+    public List<string> ColumnDefaultStatements { get; } = [];
+
+    /// <summary>
+    /// 既定値の事実（<see cref="ColumnDefaultStatements"/> が足すもの。網は取込の代わりにこれを計画の文脈へ渡す。式は文に書いたリテラル）
+    /// </summary>
+    public List<SchemaColumnDefault> ColumnDefaults { get; } = [];
+
     /// <summary>
     /// 同期の実行器を通さずに DB へ直接流す文（データ・計算列の文の後。実行器が増加を断る前提＝最初から壊れたビュー・既存の外部キー違反を
     /// 作るため。生成器は使わない＝期待の行の実 DB の段が使う）
@@ -405,12 +592,15 @@ internal interface ISyncPlanFuzzCase
 /// どれも <see cref="FuzzLiveSchema.DataFailures"/> に宣言する。
 /// </para>
 /// </remarks>
-internal sealed class SyncPlanFuzzGenerator(
+internal sealed partial class SyncPlanFuzzGenerator(
     Random rng,
     Random? levelRng,
     Random? dataLevelRng,
     Random? rowLevelRng,
     Random? nullKeyMoveRng,
+    Random? constraintShapeRng,
+    Random? tableShapeRng,
+    Random? attributeShapeRng,
     SyncPlanFuzzDialect dialect
 ) : ISyncPlanFuzzCase
 {
@@ -438,6 +628,9 @@ internal sealed class SyncPlanFuzzGenerator(
             levels ? new Random(DataLevelSeed(seed)) : null,
             levels ? new Random(RowLevelSeed(seed)) : null,
             levels ? new Random(NullKeyMoveSeed(seed)) : null,
+            levels ? new Random(ConstraintShapeSeed(seed)) : null,
+            levels ? new Random(TableShapeSeed(seed)) : null,
+            levels ? new Random(AttributeShapeSeed(seed)) : null,
             dialect
         );
 
@@ -473,6 +666,31 @@ internal sealed class SyncPlanFuzzGenerator(
     /// </remarks>
     private static int NullKeyMoveSeed(int seed) =>
         (int)(unchecked((uint)RowLevelSeed(seed) * 2654435769u) ^ 0x4E11C3Eu) & int.MaxValue;
+
+    /// <summary>
+    /// 制約の形の水準（複数列の一意制約・それを参照する外部キー・外部キーの参照先の変更・制約名だけの変更・付け直すキー 2 つの組）の
+    /// 乱数の列の種（<see cref="NullKeyMoveSeed"/> から決定的に作る）
+    /// </summary>
+    /// <remarks>
+    /// 既存の 5 本の列と分けて、それらの引き方を変えない（種の指紋は、この列の水準が DB 側の図か目標の図を変えた種だけ変わる）。
+    /// </remarks>
+    private static int ConstraintShapeSeed(int seed) =>
+        (int)(unchecked((uint)NullKeyMoveSeed(seed) * 2246822507u) ^ 0x51A9E5Eu) & int.MaxValue;
+
+    /// <summary>
+    /// 表と列の形の水準（新しい表の形の幅・新しく足した列への一意制約・型の変更の幅・DB 側の精度なしの小数の列）の乱数の列の種
+    /// （<see cref="ConstraintShapeSeed"/> から決定的に作る）
+    /// </summary>
+    /// <remarks>既存の 6 本の列と分けて、それらの引き方を変えない（種の指紋は、この列の水準が図を変えた種だけ変わる）。</remarks>
+    private static int TableShapeSeed(int seed) =>
+        (int)(unchecked((uint)ConstraintShapeSeed(seed) * 3266489909u) ^ 0x7AB1E5u) & int.MaxValue;
+
+    /// <summary>
+    /// 属性の形の水準（主キーの無い表・表と列の説明・既定値のある列）の乱数の列の種（<see cref="TableShapeSeed"/> から決定的に作る）
+    /// </summary>
+    /// <remarks>既存の 7 本の列と分けて、それらの引き方を変えない（種の指紋は、この列の水準が図を変えた種だけ変わる）。</remarks>
+    private static int AttributeShapeSeed(int seed) =>
+        (int)(unchecked((uint)TableShapeSeed(seed) * 2654435761u) ^ 0xA77E5u) & int.MaxValue;
 
     /// <summary>行の水準（<see cref="RowLevelSeed"/> の列で 1 回だけ引く）</summary>
     private enum RowLevel
@@ -553,7 +771,13 @@ internal sealed class SyncPlanFuzzGenerator(
         AddUniqueConstraints(live);
         RetargetForeignKeyToUnique(live);
         AddPrimaryKeyTwinUnique(live);
+        AddMultiColumnUnique(live);
+        AddReferencedUniqueTwin(live);
+        AddPrecisionlessDecimal(live);
         PickRowLevel(live);
+        RemoveLivePrimaryKey(live);
+        AddLiveDescriptions(live);
+        AddColumnDefaults(live);
         BuildInserts(live, dialect);
         AddComputedColumn(live);
 
@@ -1256,6 +1480,8 @@ internal sealed class SyncPlanFuzzGenerator(
         }
 
         ApplyRowLevel(entities, relationships, live);
+        ApplyConstraintShapeLevel(entities, relationships, live);
+        ApplyAttributeShapeLevel(entities, relationships, live);
         CheckDeclaredTargetShapes(entities);
     }
 
@@ -1877,7 +2103,7 @@ internal sealed class SyncPlanFuzzGenerator(
         FuzzLiveSchema live
     )
     {
-        var name = $"new_{entities.Count}_{rng.Next(100)}";
+        var name = UnusedTableName(entities, $"new_{entities.Count}_{rng.Next(100)}");
         var entity = new Entity { TableName = name };
         var id = new Column
         {
@@ -1920,9 +2146,11 @@ internal sealed class SyncPlanFuzzGenerator(
 
         // 新しい表を参照する外部キーを既存の表に足す（新しい表を選ばない選び方の形）
         var child = Pick(entities);
+        var referenced = false;
 
         if (child is not null && rng.Next(3) == 0)
         {
+            referenced = true;
             var column = new Column
             {
                 Name = $"{name}_ref",
@@ -1934,9 +2162,12 @@ internal sealed class SyncPlanFuzzGenerator(
             mutation += $" (referenced by {child.TableName}.{column.Name})";
         }
 
+        var shape = DecorateNewTable(entities, relationships, live, entity, id, referenced);
+        mutation += shape.Suffix;
         entities.Add(entity);
         live.RowCounts[name] = 0;
         Mutations.Add(mutation);
+        shape.AddSecondTable?.Invoke();
         return true;
     }
 
@@ -1996,20 +2227,20 @@ internal sealed class SyncPlanFuzzGenerator(
 
         // データのある表へは NULL を許す列だけを足す（NOT NULL を足すと DB の都合で失敗する）
         var empty = RowCount(live, entity) == 0;
-        var name = $"added_{rng.Next(1000)}";
+        var name = UnusedColumnName(entity, $"added_{rng.Next(1000)}");
         var kind = rng.Next(2) == 0 ? FuzzTypeKind.Int : FuzzTypeKind.VarChar;
         var nullable = !empty || rng.Next(2) == 0;
-        entity.Columns.Add(
-            new Column
-            {
-                Name = name,
-                DataType = dialect.TypeName(kind, 30),
-                IsNullable = nullable,
-            }
-        );
+        var column = new Column
+        {
+            Name = name,
+            DataType = dialect.TypeName(kind, 30),
+            IsNullable = nullable,
+        };
+        entity.Columns.Add(column);
         Mutations.Add(
             $"add column {entity.TableName}.{name} {kind}{(nullable ? " null" : " not null")}"
         );
+        AddUniqueOnNewColumn(entities, live, entity, column);
         return true;
     }
 
@@ -2137,6 +2368,9 @@ internal sealed class SyncPlanFuzzGenerator(
             return false;
         }
 
+        // 本流の行き先（後から足した水準が差し替えたかを見る）
+        var baseType = (kind, length);
+
         // 外部キーの両端は半々の確率でそろえて変える（そろえない形は型の食い違いの警告の相手）
         var partners = new List<(Entity Entity, Column Column)> { (entity, column) };
 
@@ -2177,7 +2411,11 @@ internal sealed class SyncPlanFuzzGenerator(
         // 列で断られる（断られる文として宣言する＝下）
         else if (
             dataLevelRng is not null
-            && info.Kind is FuzzTypeKind.Decimal or FuzzTypeKind.BigInt
+            // 精度なしの小数の列（精度 0 として覚える＝表と列の形の水準）は下げない
+            && (
+                info.Kind is FuzzTypeKind.BigInt
+                || info.Kind is FuzzTypeKind.Decimal && info.Length > 2
+            )
             && dataLevelRng.Next(3) == 0
         )
         {
@@ -2197,10 +2435,23 @@ internal sealed class SyncPlanFuzzGenerator(
             live.Shapes.Add(FuzzShape.PrecisionDecrease);
         }
 
+        // 後から足した水準（表と列の形の乱数の列）：型の変更の幅。上の水準が行き先を変えなかったときだけ差し替える
+        var breadthType = (kind, length) == baseType ? TypeBreadth(info, partners, live) : null;
+
+        if (breadthType is not null)
+        {
+            (kind, length) = (breadthType.Value.Kind, breadthType.Value.Length);
+        }
+
+        if (info.Kind == FuzzTypeKind.Decimal && info.Length == 0)
+        {
+            live.Shapes.Add(FuzzShape.PrecisionlessToPrecision);
+        }
+
         foreach (var (owner, partner) in partners)
         {
             var oldType = partner.DataType;
-            partner.DataType = dialect.TypeName(kind, length);
+            partner.DataType = breadthType?.TypeName ?? dialect.TypeName(kind, length);
 
             // 列が空でないと通らない変更を行のある列へ当てるなら、既存の行で断られる文として宣言する（計画は列の値を見ない）
             if (
@@ -2463,7 +2714,7 @@ internal sealed class SyncPlanFuzzGenerator(
             {
                 var column = new Column
                 {
-                    Name = $"pk_new_{rng.Next(1000)}",
+                    Name = UnusedColumnName(entity, $"pk_new_{rng.Next(1000)}"),
                     DataType = dialect.TypeName(FuzzTypeKind.Int, 0),
                     IsNullable = false,
                 };
@@ -2541,7 +2792,11 @@ internal sealed class SyncPlanFuzzGenerator(
 
         if (column is null)
         {
-            column = new Column { Name = $"fk_{rng.Next(1000)}", DataType = parentKey.DataType };
+            column = new Column
+            {
+                Name = UnusedColumnName(child, $"fk_{rng.Next(1000)}"),
+                DataType = parentKey.DataType,
+            };
             child.Columns.Add(column);
         }
 

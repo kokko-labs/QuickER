@@ -135,6 +135,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         var constraintLines = TableConstraintLineBuilder.Build(
             e,
             item.TableName,
+            OracleIdentifier.Quote(item.TableName),
             OracleIdentifier.QuoteSimple,
             name => $"\"{OracleIdentifier.Escape(name)}\"",
             item.UniqueConstraintNames,

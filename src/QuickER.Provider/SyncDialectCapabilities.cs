@@ -20,6 +20,38 @@ public enum ColumnReorderMode
 }
 
 /// <summary>
+/// 制約名（外部キー・主キー・一意制約）が DB のどの範囲で重なってはいけないかの区分。
+/// </summary>
+/// <remarks>
+/// 判定は <see cref="SyncDialectCapabilities.ConstraintNamesCollide"/>。主キーの名前は取り込まない（同期は実行時に逆引きする）ので、
+/// 判定は外部キーと一意制約だけに掛ける。
+/// </remarks>
+public enum ConstraintNameScope
+{
+    /// <summary>制約名を保存しないので重ならない（SQLite）。</summary>
+    None,
+
+    /// <summary>外部キー・主キー・一意制約の名前がスキーマで 1 つの範囲を持つ（SQL Server・Oracle）。</summary>
+    Schema,
+
+    /// <summary>
+    /// 主キー・一意制約の名前はスキーマで（索引の名前になる）、外部キーの名前は表で一意。同じ表の制約は種類をまたいで重ならない
+    /// （PostgreSQL）。
+    /// </summary>
+    KeysInSchemaForeignKeysInTable,
+
+    /// <summary>
+    /// 外部キーの名前はスキーマで一意。同じ表の中では、外部キーと一意制約の名前も種類をまたいで重ならない（外部キーの列に索引が
+    /// 無ければ、DB が外部キーと同じ名前の索引を作り、一意制約の索引の名前とぶつかる）。別の表の一意制約どうしは重なってよい（MySQL）。
+    /// </summary>
+    /// <remarks>
+    /// 外部キーの列を先頭に持つ索引が既にあれば DB は索引を作らず、同じ表の一意制約と名前を共有できる。取込は一意でない索引を
+    /// 持たないので判定できず、重なるとみなす（保守側）。
+    /// </remarks>
+    ForeignKeysInSchemaAnyInTable,
+}
+
+/// <summary>
 /// DB 方言がスキーマ同期でどこまで表現できるかを宣言するケーパビリティ。
 /// </summary>
 /// <remarks>
@@ -174,8 +206,9 @@ public sealed partial record SyncDialectCapabilities
     /// 列の型の種類（方言の正規化を通した、括弧より前の基本の名前）の変更を、列の値が全部 NULL か行 0 のときだけ受け付けるか（Oracle）。
     /// </summary>
     /// <remarks>
-    /// Oracle は行のある列の型の種類を変えられない（ORA-01439）。判定は <see cref="RequiresEmptyColumn"/>。種類の判定は基本の名前で
-    /// 行うので、Oracle が値のあるまま受け付ける種類の変更（<c>CHAR</c> と <c>VARCHAR2</c> など）も名指ししうる（警告のため多い側に倒す）。
+    /// Oracle は行のある列の型の種類を変えられない（ORA-01439）。判定は <see cref="RequiresEmptyColumn"/>。種類の判定は基本の名前で行うが、
+    /// 同じ系統の固定長と可変長の文字列の入れ替え（<c>CHAR</c> と <c>VARCHAR2</c>・<c>NCHAR</c> と <c>NVARCHAR2</c>）で長さを下げないものは、
+    /// Oracle が値のあるまま受け付ける（コンテナで確認）ので数えない。
     /// </remarks>
     public required bool TypeKindChangeRequiresEmptyColumn { get; init; }
 
@@ -284,6 +317,26 @@ public sealed partial record SyncDialectCapabilities
     /// </para>
     /// </remarks>
     public required bool ForeignKeyAllowsIntegerWidthDifference { get; init; }
+
+    /// <summary>制約名（外部キー・一意制約）が DB のどの範囲で重なってはいけないか。</summary>
+    /// <remarks>
+    /// SQL Server（2714）・Oracle（ORA-02264）はスキーマの全制約で、PostgreSQL は主キー・一意制約をスキーマ（42P07）・外部キーを表で、MySQL は
+    /// 外部キーをスキーマ（1826）・一意制約を表で名前を重ねられない。SQLite は制約名を保存しない（いずれもコンテナ・実ファイルで確認）。
+    /// <see cref="SyncPlanner"/> は、選んだ外部キー・一意制約の追加のうち、同期後も残る DB の制約とこの範囲で同じ名前（<see cref="SchemaNames"/> の規則）
+    /// になるものを、その制約の削除を前提にする項目として外し、<see cref="SyncPlanWarningKind.SelectedItemRequiresUnselectedItem"/> で名指しする
+    /// （差分の既定の選び方は追加を選び、削除を選ばない。名前を保って制約を別の表へ移した図をそのまま流すと、追加が名前の重なりで断られる）。
+    /// </remarks>
+    public required ConstraintNameScope ConstraintNameScope { get; init; }
+
+    /// <summary>
+    /// 同じ定義（子の表・親の表・列の組の集合）の外部キーを、名前を変えて 2 本持てるか（Oracle は持てない＝ORA-02275）。
+    /// </summary>
+    /// <remarks>
+    /// <c>false</c> の方言では <see cref="SyncPlanner"/> が、選んだ外部キーの追加のうち、同期後も残る DB の外部キーと定義が同じものを、その外部キーの
+    /// 削除を前提にする項目として外し、<see cref="SyncPlanWarningKind.SelectedItemRequiresUnselectedItem"/> で名指しする（外部キーの名前だけを変えた図を
+    /// 既定の選び方で流すと、新しい名前の追加だけが選ばれて断られる）。参照アクションは定義に数えない。
+    /// </remarks>
+    public required bool AllowsDuplicateForeignKeyDefinitions { get; init; }
 
     /// <summary>同期スクリプトの DDL がトランザクションで巻き戻るか（MySQL・Oracle は DDL を暗黙にコミットする）。</summary>
     /// <remarks>
@@ -434,7 +487,9 @@ public sealed partial record SyncDialectCapabilities
     /// 真の変更の前後で外して付け直す制約を名指しする（<see cref="SyncPlanWarningKind.ConstraintRebuildAroundEmptyColumnChange"/>）。
     /// </remarks>
     public bool RequiresEmptyColumn(string? oldType, string? newType) =>
-        TypeKindChangeRequiresEmptyColumn && ChangesTypeKind(oldType, newType)
+        TypeKindChangeRequiresEmptyColumn
+            && ChangesTypeKind(oldType, newType)
+            && StringLengthChange(oldType, newType) is not false
         || PrecisionDecreaseRequiresEmptyColumn && DecreasesPrecision(oldType, newType);
 
     /// <summary>
@@ -513,7 +568,8 @@ public sealed partial record SyncDialectCapabilities
     /// 列の変更が型を狭めうるか（既存の値が新しい型に入らず DB が断りうる変更）。広げるか同じと証明できる変更だけを偽にする（保守側）
     /// </summary>
     /// <remarks>
-    /// 偽にするのは、同じ型（<see cref="AreSameType"/>）・同じ文字列型で長さを下げない（<c>max</c> へ広げるのを含む）・整数型どうしで幅を
+    /// 偽にするのは、同じ型（<see cref="AreSameType"/>）・同じ系統の文字列型（固定長と可変長の入れ替えを含む＝<see cref="StringLengthChange"/>）で
+    /// 長さを下げない（<c>max</c> へ広げるのを含む）・整数型どうしで幅を
     /// 下げない（<c>NUMBER(p)</c> は桁で比べる）・同じ基本の名前の数値・日時の型で精度を下げない（<see cref="DecreasesPrecision"/> が偽）変更。
     /// ほかの型の種類の変更（文字列から数値など）は、値の変換が断られうるので真。両側とも方言の正規化を通して比べる。
     /// 既存の行で断られうる文の判定（<see cref="SyncPlanWarningKind.ConstraintRebuildAroundRowDependentChange"/>）が使う。
@@ -525,33 +581,13 @@ public sealed partial record SyncDialectCapabilities
             return false;
         }
 
+        if (StringLengthChange(oldType, newType) is { } shortens)
+        {
+            return shortens;
+        }
+
         var o = NormalizeTypeNotation(oldType ?? string.Empty);
         var n = NormalizeTypeNotation(newType ?? string.Empty);
-        var oldString = StringLengthPattern().Match(o);
-        var newString = StringLengthPattern().Match(n);
-
-        if (
-            oldString.Success
-            && newString.Success
-            && string.Equals(
-                oldString.Groups["base"].Value,
-                newString.Groups["base"].Value,
-                StringComparison.OrdinalIgnoreCase
-            )
-            && string.Equals(
-                oldString.Groups["unit"].Value,
-                newString.Groups["unit"].Value,
-                StringComparison.OrdinalIgnoreCase
-            )
-            && string.Equals(
-                oldString.Groups["rest"].Value.Trim(),
-                newString.Groups["rest"].Value.Trim(),
-                StringComparison.OrdinalIgnoreCase
-            )
-        )
-        {
-            return LengthOf(newString) < LengthOf(oldString);
-        }
 
         if (IntegerTypePattern().IsMatch(o) && IntegerTypePattern().IsMatch(n))
         {
@@ -559,15 +595,6 @@ public sealed partial record SyncDialectCapabilities
         }
 
         return ChangesTypeKind(o, n) || DecreasesPrecision(o, n);
-
-        // 文字列型の長さ（max は上限なし）
-        static long LengthOf(Match match) =>
-            string.Equals(match.Groups["len"].Value, "max", StringComparison.OrdinalIgnoreCase)
-                ? long.MaxValue
-                : long.Parse(
-                    match.Groups["len"].Value,
-                    System.Globalization.CultureInfo.InvariantCulture
-                );
 
         // 整数型の 10 進の桁（smallint 5・int 10・bigint 19、NUMBER(p) は p、NUMBER(*,0) は上限なし）
         static int IntegerDigits(string type)
@@ -590,6 +617,60 @@ public sealed partial record SyncDialectCapabilities
                 _ => int.MaxValue,
             };
         }
+    }
+
+    /// <summary>
+    /// 同じ系統の文字列型どうしの変更なら長さを下げるか（系統が違うか文字列型でなければ null）
+    /// </summary>
+    /// <remarks>
+    /// 系統は、固定長と可変長の文字列（<c>char</c> / <c>varchar</c> / <c>varchar2</c>）・各国語文字列（<c>nchar</c> / <c>nvarchar</c> /
+    /// <c>nvarchar2</c>）・バイト列（<c>binary</c> / <c>varbinary</c> / <c>raw</c>）の 3 つ。Oracle の長さの単位語と括弧の後ろの指定が同じであること。
+    /// 両側とも方言の正規化を通して比べる。型を狭めうるかの判定（<see cref="NarrowsType"/>）と、列が空でないと通らない型の種類の変更から
+    /// 固定長と可変長の入れ替えを除く判定（<see cref="RequiresEmptyColumn"/>）が共有する。
+    /// </remarks>
+    private bool? StringLengthChange(string? oldType, string? newType)
+    {
+        var o = StringLengthPattern().Match(NormalizeTypeNotation(oldType ?? string.Empty));
+        var n = StringLengthPattern().Match(NormalizeTypeNotation(newType ?? string.Empty));
+
+        if (
+            !o.Success
+            || !n.Success
+            || StringFamily(o.Groups["base"].Value) != StringFamily(n.Groups["base"].Value)
+            || !string.Equals(
+                o.Groups["unit"].Value,
+                n.Groups["unit"].Value,
+                StringComparison.OrdinalIgnoreCase
+            )
+            || !string.Equals(
+                o.Groups["rest"].Value.Trim(),
+                n.Groups["rest"].Value.Trim(),
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
+        {
+            return null;
+        }
+
+        return LengthOf(n) < LengthOf(o);
+
+        // 文字列型の系統（固定長と可変長を同じ系統にまとめる）
+        static string StringFamily(string baseName) =>
+            baseName.ToUpperInvariant() switch
+            {
+                "CHAR" or "VARCHAR" or "VARCHAR2" => "char",
+                "NCHAR" or "NVARCHAR" or "NVARCHAR2" => "nchar",
+                _ => "binary",
+            };
+
+        // 文字列型の長さ（max は上限なし）
+        static long LengthOf(Match match) =>
+            string.Equals(match.Groups["len"].Value, "max", StringComparison.OrdinalIgnoreCase)
+                ? long.MaxValue
+                : long.Parse(
+                    match.Groups["len"].Value,
+                    System.Globalization.CultureInfo.InvariantCulture
+                );
     }
 
     /// <summary>長さ（数か <c>max</c>）を持つ文字列型の表記（基本の型・長さ・Oracle の単位語・括弧の後ろの指定）</summary>
@@ -616,6 +697,33 @@ public sealed partial record SyncDialectCapabilities
     /// <summary>型表記の、方言の正規化を通した括弧より前の基本の名前</summary>
     private string BaseTypeName(string? type) =>
         NormalizeTypeNotation(type ?? string.Empty).Split('(')[0];
+
+    /// <summary>
+    /// 足す制約の名前と DB の制約の名前が同じとき、この方言の名前の範囲（<see cref="ConstraintNameScope"/>）で重なるか
+    /// </summary>
+    /// <param name="addedIsForeignKey">足す制約が外部キーか（偽なら一意制約）</param>
+    /// <param name="addedTable">足す制約の表（外部キーは子の表）</param>
+    /// <param name="liveIsForeignKey">DB の制約が外部キーか（偽なら一意制約）</param>
+    /// <param name="liveTable">DB の制約の表（外部キーは子の表）</param>
+    public bool ConstraintNamesCollide(
+        bool addedIsForeignKey,
+        string addedTable,
+        bool liveIsForeignKey,
+        string liveTable
+    )
+    {
+        var sameTable = SchemaNames.AreSame(addedTable, liveTable);
+
+        return ConstraintNameScope switch
+        {
+            ConstraintNameScope.Schema => true,
+            ConstraintNameScope.KeysInSchemaForeignKeysInTable => sameTable
+                || !addedIsForeignKey && !liveIsForeignKey,
+            ConstraintNameScope.ForeignKeysInSchemaAnyInTable => sameTable
+                || addedIsForeignKey && liveIsForeignKey,
+            _ => false,
+        };
+    }
 
     /// <summary>この方言の DB で実際に効く <c>ON DELETE</c> の参照アクション</summary>
     public ForeignKeyReferentialAction EffectiveOnDelete(ForeignKeyReferentialAction action) =>

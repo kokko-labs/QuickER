@@ -399,12 +399,17 @@ The following table summarizes how the dialects differ, and the subsections belo
 | Column order can be synced | — | — | ✅ (`MODIFY … AFTER`) | — | ✅ (rebuild) |
 | A computed column's type change can be selected | — | ✅ | ✅ | — | — |
 | A unique constraint on exactly the primary key's columns is kept | ✅ | ✅ | ✅ | — (left out with a note) | — (left out with a note) |
+| `CREATE TABLE` drops a unique constraint on the same column list as the primary key or an earlier unique constraint | — | ✅ (added with `ALTER TABLE` after the table) | — | — (ORA-02261) | ✅ (one index) |
 | A table name with a dot is a schema-qualified name | ✅ | ✅ | ✅ | ✅ | — (an attached database) |
 | Foreign key names are stored | ✅ | ✅ | ✅ | ✅ | — (synthesized on import) |
 | Descriptions are synced | ✅ | ✅ | ✅ | ✅ | — |
 | A failed script rolls back | ✅ | ✅ | — | — | ✅ |
 | Changes to an existing table run as statements | ✅ | ✅ | ✅ | ✅ | — (the table is rebuilt) |
 | A single-column `INTEGER` primary key turns NULL into a row number | — | — | — | — | ✅ (rowid alias; the sync refuses NULL first) |
+| Foreign key names are unique across the schema | ✅ | — (within the table) | ✅ | ✅ | — (names are not stored) |
+| Primary key and unique constraint names are unique across the schema | ✅ | ✅ | — (within the table) | ✅ | — (names are not stored) |
+| A foreign key and a unique constraint of the same table cannot share a name | ✅ | ✅ | ✅ (the foreign key's index takes the name) | ✅ | — |
+| Two foreign keys with the same columns and referenced table can be kept | ✅ | ✅ | ✅ | — (ORA-02275) | ✅ |
 
 #### Comparing names and types
 
@@ -523,6 +528,8 @@ On the other dialects it is shown for information only, because the type cannot 
 Where the table at the top of this section shows that a unique constraint on exactly the primary key's columns is not kept, such a constraint is not compared and does not become a diff item.
 SQLite does not keep such a constraint, and Oracle rejects it; the primary key already guarantees uniqueness.
 The DDL and the tables the sync creates leave that unique constraint out and add a comment saying so.
+PostgreSQL keeps such a constraint, and a second unique constraint on the same columns in the same order, only when it is added to an existing table, because `CREATE TABLE` drops it without an error.
+The DDL and the tables the sync creates on PostgreSQL therefore add it with `ALTER TABLE` right after `CREATE TABLE`.
 On Oracle, a sync that moves the primary key onto the columns of a unique constraint the database already has drops that unique constraint first, even when dropping it is not selected, because Oracle cannot keep both (ORA-02261); the confirmation names it, and the new primary key keeps the values unique.
 A foreign key that refers to that unique constraint is dropped and re-created on the new primary key.
 
@@ -555,7 +562,8 @@ flowchart LR
   c3 --> d1
 ```
 
-Tables are dropped before tables are added, so a table you rename in the diagram can keep the unique constraint names of the old table.
+Tables are dropped before tables are added, so a table you rename in the diagram can keep the unique constraint names of the old table when you select dropping the old table too.
+If you select only the addition, the old table keeps the names; where such names are unique (see [Detected differences](#detected-differences)), the addition of the new table is left out of the script and named in the confirmation together with the old constraint.
 On MySQL and Oracle, where DDL is committed implicitly, the old table stays dropped if adding the new one fails.
 Running the sync again adds it.
 SQLite rebuilds tables and uses its own order.
@@ -571,6 +579,9 @@ SQLite rebuilds tables and uses its own order.
   Dropping a column of the primary key needs the primary key change that removes the column.
   A foreign key you add or change needs the primary key change when it refers to the parent's new primary key, and that key is neither the primary key nor a unique constraint without the change.
   A unique constraint you add or change needs the change of a unique constraint in the database when both have the same columns and you selected neither dropping nor changing the one in the database (for example, you move a named unique constraint to other columns, add an unnamed one on its old columns, and select only the addition).
+  A foreign key or unique constraint you add, including a unique constraint of a table you add, needs dropping a foreign key or unique constraint in the database that keeps the same name, where the table in [Detected differences](#detected-differences) says such names are unique (for example, you move a named constraint to another table, or rename a table that keeps the names of its unique constraints, and select only the addition).
+  On Oracle, a foreign key you add also needs dropping a foreign key in the database with the same columns and referenced table (for example, you only rename a foreign key and select only the addition).
+  Primary key names are not compared, because QuickER does not import them.
   QuickER does not select the needed change for you
 - When the selected column drops would leave a table without any column, those column drops are left out of the script, and the confirmation names the table and the columns.
   A database table needs at least one column (SQL Server, MySQL and Oracle refuse to drop the last one, and a PostgreSQL table without columns cannot be imported back), so delete the table from the diagram and select dropping the table instead.
@@ -640,6 +651,7 @@ When a change leaves the two ends of a foreign key with different types after th
 The confirmation names such a foreign key on every dialect, also on PostgreSQL and Oracle, which change the column with the foreign key in place.
 When the sync changes both ends to types that match, PostgreSQL and Oracle still drop the foreign key and re-add it after the column changes if the ends do not match while only one of them has changed, because the database refuses the first column change otherwise.
 Where the table above says a column change needs the column to be empty (a change of the type kind, that is the base type name such as `NUMBER` to `NVARCHAR2`, and lowering the precision, scale or fractional seconds), the confirmation names every constraint (foreign key, primary key or unique constraint) that the script drops before such a change and adds back after it, or drops for a later change.
+Swapping a fixed-length and a variable-length string of the same family (`CHAR` and `VARCHAR2`, `NCHAR` and `NVARCHAR2`) without making it shorter is not counted as a change of the type kind there, because Oracle accepts it on a column that holds values.
 If the column has data, the change fails and the dropped constraints stay dropped.
 QuickER treats such a type difference as one that can make re-adding the foreign key fail, and on MySQL / Oracle a failed re-add leaves the foreign key missing.
 Integer types that differ only in width are not a mismatch where the table above allows them on the two ends.

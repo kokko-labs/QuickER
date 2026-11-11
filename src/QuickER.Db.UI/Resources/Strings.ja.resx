@@ -372,7 +372,7 @@
 {0}</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmSelectedItemRequiresUnselected" xml:space="preserve">
-    <value>注意: 以下の選んだ変更は、選んでいない変更（表・列の追加か主キーの変更。括弧内）を前提にするため実行しません。適用するには、その変更も選んでください:
+    <value>注意: 以下の選んだ変更は、選んでいない変更（表・列の追加、主キーの変更、またはデータベースの制約の削除。括弧内）を前提にするため実行しません。適用するには、その変更も選んでください:
 {0}</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmTableLeftWithoutColumns" xml:space="preserve">

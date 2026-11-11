@@ -80,6 +80,7 @@ public abstract class DdlGeneratorBase : IDdlGenerator
             var constraintLines = TableConstraintLineBuilder.Build(
                 entity,
                 table,
+                QuoteQualifiedName(table),
                 QuoteSimpleName,
                 QuoteConstraintName,
                 uniqueConstraintNames,
@@ -119,6 +120,7 @@ public abstract class DdlGeneratorBase : IDdlGenerator
 
             // 閉じ括弧の直後・文末セミコロンの前に方言固有のテーブルオプション（MySQL の COMMENT= 句等）を付ける
             sb.AppendLine($"){BuildTableOptionsSuffix(entity)};");
+            TableConstraintLineBuilder.AppendAfterCreate(sb, constraintLines);
             sb.AppendLine();
         }
 

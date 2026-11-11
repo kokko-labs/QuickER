@@ -379,6 +379,7 @@ internal static partial class SyncPlanExpectationRows
             .. UnnamedForeignKeyRows(),
             .. CompositeForeignKeyRows(),
             .. PlanDefaultRows(),
+            .. PlanNameCollisionRows(),
             .. TreatmentRows(),
             .. RealSqlServerRows(),
             .. RealSqliteRows(),

@@ -49,6 +49,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         var constraintLines = TableConstraintLineBuilder.Build(
             e,
             item.TableName,
+            PgIdentifier.Quote(item.TableName),
             PgIdentifier.QuoteSimple,
             name => $"\"{PgIdentifier.Escape(name)}\"",
             item.UniqueConstraintNames,
@@ -81,6 +82,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         TableConstraintLineBuilder.Append(sb, constraintLines);
 
         sb.AppendLine(");");
+        TableConstraintLineBuilder.AppendAfterCreate(sb, constraintLines);
     }
 
     /// <summary>ALTER TABLE ... ADD COLUMN（列追加）文を生成する</summary>

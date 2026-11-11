@@ -22,21 +22,19 @@ internal static class SyncPlanFuzzNotGenerated
                 ProtectionNames.EnginePart(EngineIds.SyncPlan, "CapabilityNet"),
             ],
             [
-                NotGenerated.Pending(
-                    "descriptions",
-                    "表・列の説明（空欄・保存する形・BMP の外の文字・選んでいない表の説明）",
-                    "G1b",
-                    "説明を一度も作らない。差分と計画は説明の空欄・保存する形・表せない文字で分岐する（SchemaDiffService・SyncPlanner の説明の扱い）",
-                    Expectations
-                        + " の行 `diff-blank-description-*` / `diff-description-stored-form-*` / `plan-description-characters-replaced-*`"
+                NotGenerated.Accepted(
+                    "sqlite-descriptions",
+                    "SQLite の表と列の説明",
+                    "SQLite は説明を保存しない（製品の事実＝SupportsDescriptions が偽）。説明の扱いは方言の DDL の表が受け持つ",
+                    "`Dialect/DdlText`（行 `ddl-description-*`）"
                 ),
-                NotGenerated.Pending(
-                    "column-defaults",
-                    "既定値のある列（型の種類の変更の警告）",
-                    "G1b",
-                    "既定値を一度も作らない。計画は既定値のある列の型の種類の変更を警告する（ChecksDefaultOnColumnTypeChange の宣言）",
-                    Expectations
-                        + " の行 `plan-default-*` / `realdb-column-type-kind-change-with-default-warns` / `realdb-pg-column-type-kind-change-with-default-warns` / `realdb-oracle-column-type-kind-change-with-default-warns`"
+                NotGenerated.Accepted(
+                    "sqlite-column-defaults",
+                    "SQLite の既定値のある列",
+                    "SQLite は ALTER で既定値を足せず、図は既定値を持たない（生成器は DDL の後に生の SQL で既定値を足すので、SQLite では作れない）。再構築が既定値を落とすことは警告で告げる",
+                    "`TableRebuildAttributeDetectorTests`・"
+                        + Expectations
+                        + " の行 `realdb-rebuild-*`"
                 ),
                 NotGenerated.Accepted(
                     "identity-columns",
@@ -50,75 +48,18 @@ internal static class SyncPlanFuzzNotGenerated
                     "SQL Server は循環・複数経路の連鎖を CREATE で断り、生成器は連鎖を避ける作り方を持たないので NO ACTION だけを使う（SyncPlanFuzzDialect.AllowCascade）。参照アクションの変更は、独立した親子に手で書いた網羅の行が選び方 5 通りで受け持つ",
                     "`SyncPlan/Fuzz`（手で書いた SQL Server の参照アクションの網羅の行）"
                 ),
-                NotGenerated.Pending(
-                    "table-without-primary-key",
-                    "主キーの無い DB の表",
-                    "G1b",
-                    "DB の表は必ず主キーを持つ。計画と差分は主キーの無い表で分岐する（主キーの同期の段・差分の主キーの比較）",
-                    Expectations + " の行 `plan-without-pk-change-has-no-phase`"
-                ),
-                NotGenerated.Pending(
-                    "multi-column-unique-constraints",
-                    "複数列の一意制約・それを参照する外部キー・MySQL の先頭の列だけを参照する外部キー",
-                    "G1b",
-                    "DB 側の一意制約はいつも 1 列。計画は複数列の一意制約と、それを支えにする外部キー（MySQL は参照する列を先頭に並べるキー）で分岐する",
-                    "`SyncPlan/ShapeRows`・"
-                        + Expectations
-                        + " の行 `plan-implicit-unique-drop-warns-for-fk-on-its-leading-columns-mysql-like`"
-                ),
-                NotGenerated.Pending(
-                    "foreign-key-retarget",
-                    "外部キーの参照先だけを変える（親の表・親の列・主キー参照と一意制約参照の入れ替え）・同じ名前で別の子表へ",
-                    "G1b",
-                    "外部キーの変更は子の列を変えるだけ。差分は参照先の変更で作り直しに分岐する",
+                NotGenerated.Accepted(
+                    "mysql-non-standard-key-foreign-key",
+                    "MySQL の先頭の列だけを参照する外部キー（非標準キー）",
+                    "MySQL 8.4 の既定（restrict_fk_on_non_standard_key=ON）は非標準キーへの外部キーを作らせない（DB の事実）。計画の分岐（CanSupportForeignKey の先頭の列）は mysql の能力で流す期待の行が受け持つ",
                     Expectations
-                        + " の行 `diff-fk-retargeted-without-persisted-names-is-alter` / `realdb-mysql-fk-alter-to-other-column`"
-                ),
-                NotGenerated.Pending(
-                    "constraint-rename-only",
-                    "制約名だけの変更（外部キー・一意制約）",
-                    "G1b",
-                    "制約名だけを変える手が無い。差分は名前の段と列集合の段で分岐する",
-                    Expectations
-                        + " の行 `diff-fk-different-names-stay-drop-and-add` / `diff-uq-different-names-are-not-paired`"
-                ),
-                NotGenerated.Pending(
-                    "new-table-shapes",
-                    "新しい表の形の幅（複合主キー・一意制約・主キーと同じ列の一意制約・自己参照・新しい表どうしの外部キー）",
-                    "G1b",
-                    "新しい表の形は固定。CREATE TABLE の制約行（TableConstraintLineBuilder）と新しい表の並びはこれらの形で分岐する",
-                    "`Dialect/DdlText`（行 `sync-add-table-unique-on-primary-key-columns-omitted-where-unsupported`）・"
-                        + Expectations
-                        + " の行 `plan-rebuild-fk-to-unselected-new-table-*`"
-                ),
-                NotGenerated.Pending(
-                    "unique-on-new-column",
-                    "新しく足した列への一意制約",
-                    "G1b",
-                    "一意制約を足す列は DB 側の列から選ぶので、新しく足した列には張らない。計画は新しい列の一意制約を列の追加の後に並べる",
-                    NotGenerated.Unguarded
-                ),
-                NotGenerated.Pending(
-                    "type-change-breadth",
-                    "型の変更の幅（文字列から数値・整数から小数・スケールの変更・精度なしから精度あり・固定長と可変長の入れ替え）",
-                    "G1b",
-                    "型の変更の手は一部の組だけ。同じ型の判定と型の互換（SyncDialectCapabilities）はこれらの組で分岐する",
-                    Expectations + " の行 `plan-type-mismatch-*`"
+                        + " の行 `plan-implicit-unique-drop-warns-for-fk-on-its-leading-columns-mysql-like` / `plan-implicit-fk-pk-change-onto-referenced-prefix-of-dropped-unique-rebuilds-fk-mysql-like`"
                 ),
                 NotGenerated.Accepted(
                     "oracle-kind-change-with-rows",
                     "Oracle の行のある列の型の種類の変更",
                     "Oracle は行のある列の型の種類を変えられない（ORA-01439）。生成器は変える列と揃える相手の値が全部 NULL か行 0 のときだけ種類を変える",
                     Expectations + " の行 `realdb-oracle-column-alter-non-empty-to-number-fails`"
-                ),
-                NotGenerated.Pending(
-                    "two-readded-keys-in-unique-rebuild",
-                    "一意制約の作り直しの組で付け直すキーが 2 つ以上",
-                    "G1b",
-                    "作り直す一意制約は最初の名前つきの 1 つだけ。前寄せの組は付け直すキーの数で分岐する（KeepOneReaddedUnique）",
-                    "`SyncPlan/ShapeRows`・"
-                        + Expectations
-                        + " の行 `plan-move-first-key-drop-group-two-readded-keeps-one-rebuild-mysql-like`"
                 ),
                 NotGenerated.Accepted(
                     "name-forms",
@@ -130,10 +71,10 @@ internal static class SyncPlanFuzzNotGenerated
                 ),
                 NotGenerated.Accepted(
                     "rename-table-keeping-unique-name",
-                    "表の改名（大小以外）で古い表の一意制約の名前を引き継ぐ",
-                    "セクションの順（表の削除を追加より前）だけが受け持つ 1 つの形で、決まった形の行で足りる",
+                    "表の改名（大小以外）で古い表の一意制約の名前を引き継ぎ、古い表の削除と新しい表の追加を両方選ぶ",
+                    "成否はセクションの順（表の削除を追加より前）だけで決まり、決まった形の行が 5 方言の実 DB で受け持つ。古い表の削除を選ばない形は計画が表の追加を外して名指しする分岐で、生成器の水準 new-table-takes-released-name と期待の行が受け持つ",
                     Expectations
-                        + " の行 `realdb-rename-table-keeping-unique-name-drops-old-table-first`"
+                        + " の行 `realdb-rename-table-keeping-unique-name-drops-old-table-first` / `realdb-name-collision-new-table-keeps-unique-name-of-old-table-default-selection`"
                 ),
                 NotGenerated.Accepted(
                     "import-discarded-content",
