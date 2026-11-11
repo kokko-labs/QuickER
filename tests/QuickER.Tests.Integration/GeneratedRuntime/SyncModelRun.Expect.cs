@@ -61,6 +61,24 @@ internal sealed partial class SyncModelRun
                 _expectThrow.Add(expectThrow.Device);
                 return true;
 
+            case WhenServerSameUniqueOp choice:
+            {
+                var same = _world.Server.UniqueValues.Equals(choice.A, choice.B);
+                _log.Add(
+                    $"  -> the server treats them as {(same ? "the same" : "different")} values"
+                );
+
+                foreach (var inner in same ? choice.IfSame : choice.IfDifferent)
+                {
+                    if (!await ExecuteAsync(inner))
+                    {
+                        break;
+                    }
+                }
+
+                return true;
+            }
+
             case BulkAddFoldersOp folders:
                 await BulkWriteAsync(
                     folders.Actor,

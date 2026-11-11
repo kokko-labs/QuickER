@@ -98,6 +98,27 @@ internal sealed record ExpectFacetOp(
         + string.Join("; ", Checks.Select(c => c.Describe()));
 }
 
+/// <summary>
+/// サーバーの一意制約が 2 つの値を同じとみなすか（<see cref="ISyncModelServerRole.UniqueValues"/>＝転送のサーバー役の照合順序。
+/// 実 SQL Server の写しは世界を作るたびに実 DB と突き合わせる）で、続ける手を選ぶ。同じ決まった形の行を、照合順序の違う
+/// サーバー役（SQLite は序数・SQL Server は大文字小文字と末尾の空白を区別しない）で流し、それぞれの期待を表明する
+/// </summary>
+/// <param name="A">比べる値</param>
+/// <param name="B">比べる値</param>
+/// <param name="IfSame">サーバーが同じ値とみなすときの手</param>
+/// <param name="IfDifferent">サーバーが別の値とみなすときの手</param>
+internal sealed record WhenServerSameUniqueOp(
+    string A,
+    string B,
+    IReadOnlyList<ModelOp> IfSame,
+    IReadOnlyList<ModelOp> IfDifferent
+) : ModelOp
+{
+    public override string Describe() =>
+        $"WhenServerSameUnique '{A}' '{B}': same [{string.Join("; ", IfSame.Select(op => op.Describe()))}] "
+        + $"different [{string.Join("; ", IfDifferent.Select(op => op.Describe()))}]";
+}
+
 /// <summary>期待の手を組み立てる（<c>Expect.Result(D1).Exact(...)</c>）</summary>
 internal static class Expect
 {

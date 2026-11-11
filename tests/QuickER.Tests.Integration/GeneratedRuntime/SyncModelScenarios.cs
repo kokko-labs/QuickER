@@ -1599,12 +1599,14 @@ internal static partial class SyncModelScenarios
 
         list.AddRange(PolicyScenarios());
         list.AddRange(UniqueValueTakenScenarios());
+        list.AddRange(UniqueSpellingScenarios());
         list.AddRange(TransientFaultScenarios());
         list.AddRange(UniqueValueReassignScenarios());
         list.AddRange(InterruptScenarios());
         list.AddRange(ServerInterruptScenarios());
         list.AddRange(EngineBasicScenarios());
         list.AddRange(EngineForeignKeysScenarios());
+        list.AddRange(CrossTableCycleScenarios());
         list.AddRange(EnginePropagationLwwScenarios());
         list.AddRange(EngineConflictsScenarios());
         list.AddRange(EngineRefreshScenarios());
@@ -2882,6 +2884,92 @@ internal static partial class SyncModelScenarios
                     new ExpectLocalOp(SV, ModelTables.Items, ModelDbState.Key(mine), null),
                 ]
             );
+        }
+    }
+
+    /// <summary>
+    /// 一意な値の別表記（大文字小文字だけの違い〔ASCII・非 ASCII〕・末尾の空白だけの違い）：端末 2 が上げた品目の code の別表記で、
+    /// 端末 1 が別の品目を作って同期する（n7-* の値を別表記にした形）。サーバーが同じ値とみなすか（SQLite は序数・SQL Server
+    /// は大文字小文字と末尾の空白を区別しない）で期待が分かれる：同じなら UniqueValueTakenOnServer で断られ、Collect と
+    /// LocalWins は報告し続け（記録とローカルの行が残る）、その後の ServerWins の同期が変更を捨てて揃える。後勝ち＋ServerWins は
+    /// その同期で捨てる。別なら普通に上がる。Versioned＋ServerWins はサーバーへ書かずに捨てるので、照合順序に依らない（行に
+    /// しない）。
+    /// </summary>
+    private static IEnumerable<SyncModelScenario> UniqueSpellingScenarios()
+    {
+        var spellings = new (string Name, string Held, string Spelled)[]
+        {
+            ("ascii-case", "abc", "ABC"),
+            ("non-ascii-case", "éж", "ÉЖ"),
+            ("trailing-space", "tsp", "tsp "),
+        };
+        var cases = new (string Name, SyncMode Mode, SyncConflictPolicy Policy)[]
+        {
+            ("collect", SyncMode.Versioned, SyncConflictPolicy.Collect),
+            ("localwins", SyncMode.Versioned, SyncConflictPolicy.LocalWins),
+            ("lww-serverwins", SyncMode.LastWriteWins, SyncConflictPolicy.ServerWins),
+        };
+        var index = 0;
+
+        foreach (var (spelling, held, spelled) in spellings)
+        {
+            foreach (var (name, mode, policy) in cases)
+            {
+                var folder = 4000 + (10 * index);
+                var taken = folder + 1;
+                var mine = folder + 2;
+                var heldCode = $"{held}{index}";
+                var spelledCode = $"{spelled[..held.Length]}{index}{spelled[held.Length..]}";
+                var serverWins = policy == SyncConflictPolicy.ServerWins;
+                var mineRow = $"folder={folder} label=null code={spelledCode} title=t{mine}";
+                var takenRow = $"folder={folder} label=null code={heldCode} title=t{taken}";
+                var conflict =
+                    $"conflict {ModelTables.Items} key={ModelDbState.Key(mine)} op=Upsert reason=UniqueValueTakenOnServer *";
+                index++;
+
+                // ServerWins が変更を捨てた後：取った品目だけが残り、サーバーにも自分の品目は無い
+                ModelOp[] settled =
+                [
+                    new ExpectLocalOp(D1, ModelTables.Items, ModelDbState.Key(mine), null),
+                    new ExpectLocalOp(D1, ModelTables.Items, ModelDbState.Key(taken), takenRow),
+                    new ExpectLocalOp(SV, ModelTables.Items, ModelDbState.Key(mine), null),
+                ];
+
+                // サーバーが同じ値とみなす：断られる。後勝ち＋ServerWins はその同期で捨て、ほかは報告し続けてから ServerWins で揃える
+                IReadOnlyList<ModelOp> same = serverWins
+                    ? [Expect.Result(D1).Absent("conflict *"), .. settled]
+                    :
+                    [
+                        Expect.Result(D1).Single(conflict),
+                        new ExpectLocalOp(D1, ModelTables.Items, ModelDbState.Key(mine), mineRow),
+                        new ExpectLocalOp(SV, ModelTables.Items, ModelDbState.Key(mine), null),
+                        // 報告し続ける（次の同期でも同じ競合で、行は残る）
+                        Sync(D1, mode, policy),
+                        Expect.Result(D1).Single(conflict),
+                        new ExpectLocalOp(D1, ModelTables.Items, ModelDbState.Key(mine), mineRow),
+                        Sync(D1, SyncMode.Versioned, SyncConflictPolicy.ServerWins),
+                        .. settled,
+                    ];
+
+                // サーバーが別の値とみなす：普通に上がる
+                IReadOnlyList<ModelOp> different =
+                [
+                    Expect.Result(D1).Absent("conflict *"),
+                    new ExpectLocalOp(SV, ModelTables.Items, ModelDbState.Key(mine), mineRow),
+                ];
+
+                yield return new(
+                    $"n7s-{spelling}-{name}",
+                    [Folder(SV, folder)],
+                    [
+                        Item(D2, taken, folder: folder, code: heldCode),
+                        Sync(D2),
+                        Item(D1, mine, folder: folder, code: spelledCode),
+                        Sync(D1, mode, policy),
+                        new WhenServerSameUniqueOp(heldCode, spelledCode, same, different),
+                    ]
+                );
+            }
         }
     }
 

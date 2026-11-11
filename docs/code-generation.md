@@ -3107,6 +3107,10 @@ Nothing is lost by it, and local writes wait until the refresh is over, but a sc
   The server, by contrast, looks its rows up with ordinary SQL equality on the key column, under that column's collation.
   On a case-insensitive column, then, `ABC` and `abc` are one row to the server and two separate journal and receipt entries locally.
   Keep the case of a text key stable, the same way [GUID keys](#guid-keys-for-string-primary-keys-useguidkeyforstringprimarykey) have to be.
+- **Whether two unique values are the same is decided by the server's collation.**
+  The local SQLite database compares a text unique value exactly, while SQL Server's default collation ignores letter case and trailing spaces.
+  A device can therefore hold `ABC`, or `abc` followed by a space, next to another row's `abc`, and the server refuses that row with `UniqueValueTakenOnServer`, just as it refuses the identical value.
+  It is settled the same way too: `Collect` and `LocalWins` report it again on every run, and a `ServerWins` run drops the change.
 - **A fixed-length string primary key (`nchar(n)` / `char(n)`) does not keep its local spelling.**
   SQL Server pads such a value with spaces to the declared length, so a row created locally under `cd` comes back as `cd` followed by eight spaces after a sync, and the local row is replaced by the padded one.
   A local child row that refers to the unpadded key keeps the old row in place, so the device holds both rows and they do not converge.

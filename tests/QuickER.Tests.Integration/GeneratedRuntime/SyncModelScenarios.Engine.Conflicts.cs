@@ -259,6 +259,50 @@ internal static partial class SyncModelScenarios
                     Expect.Rows(SV, I).Contains("11 *"),
                 ]
             ),
+            // ローカルで作った行のキーがサーバーに既にある（DuplicateOnServer）× ServerWins：サーバーへ書かずに記録を捨て、
+            // その行をサーバーから読み直して上書きする（docs のポリシー×競合の種類の表）
+            MovedAll(
+                "sw-duplicate-key-on-server-reloads-server-row",
+                [],
+                [
+                    Folder(SV, 8, name: "server-side"),
+                    Folder(D1, 8, name: "local-side"),
+                    Plain(D1, policy: SyncConflictPolicy.ServerWins),
+                    Expect.Result(D1).Contains("discarded=*").Absent("conflict *", "discarded=0"),
+                    Expect.Rows(D1, F).Contains("8 parent=null name=server-side"),
+                    Expect.Rows(SV, F).Contains("8 parent=null name=server-side"),
+                    Expect.Journal(D1).Empty(),
+                ]
+            ),
+            // 同じ形を単独の UploadAsync で：後にダウンロードが続かないので、ServerWins が自分でサーバーの行を読み直して上書き
+            // する（SyncAsync の形は同じ実行のダウンロードがサーバーの行を降ろすので、読み直しが無くても揃う）
+            MovedAll(
+                "sw-duplicate-key-on-server-upload-only-reloads-server-row",
+                [],
+                [
+                    Folder(SV, 6, name: "server-side"),
+                    Folder(D1, 6, name: "local-side"),
+                    PlainOnly(D1, ModelSyncKind.Upload, policy: SyncConflictPolicy.ServerWins),
+                    Expect.Result(D1).Absent("conflict *"),
+                    Expect.Rows(D1, F).Contains("6 parent=null name=server-side"),
+                    Expect.Rows(SV, F).Contains("6 parent=null name=server-side"),
+                    Expect.Journal(D1).Empty(),
+                ]
+            ),
+            // 同じ形 × 後勝ち：競合にならず、ForceOverwrite でサーバーの行をローカルの内容へ更新する（docs の同じ表）
+            MovedAll(
+                "lww-duplicate-key-on-server-overwrites",
+                [],
+                [
+                    Folder(SV, 9, name: "server-side"),
+                    Folder(D1, 9, name: "local-side"),
+                    Plain(D1, mode: SyncMode.LastWriteWins),
+                    Expect.Result(D1).Contains("uploaded=1").Absent("conflict *"),
+                    Expect.Rows(SV, F).Contains("9 parent=null name=local-side"),
+                    Expect.Rows(D1, F).Contains("9 parent=null name=local-side"),
+                    Expect.Journal(D1).Empty(),
+                ]
+            ),
             Moved(
                 "conflict-duplicate-key-on-server-is-reported",
                 [],

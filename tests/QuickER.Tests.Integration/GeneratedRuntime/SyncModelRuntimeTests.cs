@@ -77,6 +77,10 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
     /// <param name="basisTally">
     /// 理由ごとの、根拠を確かめた件数と根拠のあった件数を足し込む先（null なら数えない。空振りしていないかを出力で確かめる）
     /// </param>
+    /// <param name="spellingTally">
+    /// 一意な値の形ごとの、サーバーが同じ値の持ち主を根拠に断った件数を足し込む先（<see cref="SyncModelRun.SpellingRefusals"/>。
+    /// null なら数えない）
+    /// </param>
     internal static async Task<(
         IReadOnlyList<ModelFailure> Failures,
         IReadOnlyList<string> Log
@@ -86,7 +90,8 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         SyncModelWorldOptions? options = null,
         CoverageCounter? coverage = null,
         ConcurrentDictionary<string, (int Checked, int WithBasis)>? basisTally = null,
-        CoverageCounter? outcomes = null
+        CoverageCounter? outcomes = null,
+        ConcurrentDictionary<UniqueSpelling, int>? spellingTally = null
     )
     {
         var generator = new SyncModelGenerator(seed);
@@ -123,6 +128,14 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         if (outcomes is not null)
         {
             SyncModelOutcomeDimensions.Observe(outcomes, run.Outcomes);
+        }
+
+        if (spellingTally is not null)
+        {
+            foreach (var (spelling, count) in run.SpellingRefusals)
+            {
+                spellingTally.AddOrUpdate(spelling, count, (_, sum) => sum + count);
+            }
         }
 
         if (basisTally is not null)

@@ -62,6 +62,32 @@ internal static class SyncModelDimensions
     /// <summary>仕掛けた失敗の種類</summary>
     public const string FaultKind = "FaultKind";
 
+    /// <summary>挿入の手のキーの出どころ（自分の新しいキーか、ほかの書き手の DB から選んだキーか）</summary>
+    public const string KeyOrigin = "KeyOrigin";
+
+    /// <summary>一意な値を新しく書く手の値の形</summary>
+    public const string Spelling = "Spelling";
+
+    /// <summary>blob を書く手の blob の大きさ</summary>
+    public const string PayloadSize = "PayloadSize";
+
+    // 挿入でない操作の、キーの出どころの水準
+    private const string NotInsert = "not-insert";
+    private const string OwnKey = "own";
+    private const string StolenKey = "stolen";
+
+    // 一意な値を新しく書かない操作の、値の形の水準
+    private const string NoSpelling = "none";
+
+    // blob を書かない操作の、大きさの水準
+    private const string NoPayload = "none";
+    private const string SmallPayload = "small";
+    private const string LargePayload = "large";
+
+    // 同期の操作で 2 表・3 表を除外した水準
+    private const string TwoExcluded = "two";
+    private const string ThreeExcluded = "three";
+
     // 失敗の仕掛けでない操作の、失敗の種類の水準
     private const string NotFault = "not-fault";
 
@@ -212,9 +238,11 @@ internal static class SyncModelDimensions
                     [
                         new Level(NoExclusion),
                         .. ModelTables.All.Select(table => new Level(table)),
+                        new Level(TwoExcluded),
+                        new Level(ThreeExcluded),
                         new Level(NotSync),
                     ],
-                    "同期の操作で実行の範囲から外した表（同期の 15% で 1 つ。同期でない操作は not-sync）",
+                    "同期の操作で実行の範囲から外した表（同期の 15% で 1 つ。その半分は 2 本目の乱数で 1〜2 表を重ね、2 表・3 表の水準は表を問わない。同期でない操作は not-sync）",
                     AxisMember.Property(
                         typeof(SyncOptions),
                         nameof(SyncOptions.ExcludedEntityTypes)
@@ -250,6 +278,25 @@ internal static class SyncModelDimensions
                     ],
                     "仕掛けた失敗の種類（ApplySkip は乱数に混ぜない＝決定的なシナリオだけが使うので水準にしない。失敗の仕掛けでない操作は not-fault）"
                 ),
+                new Factor(
+                    KeyOrigin,
+                    [new Level(OwnKey), new Level(StolenKey), new Level(NotInsert)],
+                    "挿入の手のキーの出どころ（own＝自分の新しいキーか、その手の形が決めるキー／stolen＝2 本目の乱数で、ほかの書き手の DB にあって自分の DB に無いキーを選んだ＝サーバーで同じキーの挿入がぶつかる／挿入でない操作は not-insert）"
+                ),
+                new Factor(
+                    Spelling,
+                    [
+                        .. Enum.GetValues<UniqueSpelling>()
+                            .Select(value => new Level(value.ToString())),
+                        new Level(NoSpelling),
+                    ],
+                    "一意な値（フォルダーの name・品目の code）を新しく書く手の値の形（Fresh＝種の中で一意な ASCII の値／ほかは 2 本目の乱数で置き換えた別表記＝UniqueSpelling。一意な値を新しく書かない操作は none）"
+                ),
+                new Factor(
+                    PayloadSize,
+                    [new Level(SmallPayload), new Level(LargePayload), new Level(NoPayload)],
+                    "blob を書く手（品目の挿入・blob の書き込み）の blob の大きさ（small＝6 バイト／large＝2 本目の乱数で SyncModelGenerator.LargePayloadBytes へ伸ばした値／blob を書かない操作は none）"
+                ),
             ],
             [
                 new FactorGroup(Mode, Policy, OpFamily),
@@ -278,8 +325,38 @@ internal static class SyncModelDimensions
                             (_, blobs) => blobs == "False"
                         )
                     ),
+                // サーバーの他者（経路を持たない書き込み＝Via=None も同じ書き手）は、ぶつかり得る別表記を書かない
+                CoverageGap.AcceptedMatching(
+                    DirectScope,
+                    "G4",
+                    ServerSpellingReason,
+                    Actor,
+                    Spelling,
+                    (actor, spelling) =>
+                        actor == nameof(ModelActor.Server) && IsCollidingSpelling(spelling)
+                ),
+                CoverageGap.AcceptedMatching(
+                    DirectScope,
+                    "G4",
+                    ServerSpellingReason,
+                    Via,
+                    Spelling,
+                    (via, spelling) => via == NoVia && IsCollidingSpelling(spelling)
+                ),
             ]
         );
+
+    private const string ServerSpellingReason =
+        "サーバーの他者はサーバーの DB へ直接書き、生成器は書き手の DB で成功する手だけを選ぶ。ほかの行と同じ値（Exact・Empty の 2 人目）はどの DB でも断られ、大文字小文字・末尾の空白だけの違い（AsciiCase・NonAsciiCase・TrailingSpace）は SQL Server の既定の照合順序が同じ値として断る（docs/code-generation.md の「Known limitations」の一意な値の照合順序の項）。サーバー役が SQLite か SQL Server かで手の成否が変わるので、サーバーの他者には書かせない（端末が書いた別表記をサーバーが断る形は端末の手が持つ）";
+
+    /// <summary>サーバーでほかの行とぶつかり得る値の形（サーバーの他者が書かない形）</summary>
+    private static bool IsCollidingSpelling(string spelling) =>
+        spelling
+            is nameof(UniqueSpelling.Exact)
+                or nameof(UniqueSpelling.AsciiCase)
+                or nameof(UniqueSpelling.NonAsciiCase)
+                or nameof(UniqueSpelling.TrailingSpace)
+                or nameof(UniqueSpelling.Empty);
 
     /// <summary>台帳の行</summary>
     public static EngineDescriptor Descriptor { get; } =
@@ -375,8 +452,25 @@ internal static class SyncModelDimensions
                     {
                         ModelSyncOp { Excluded.Count: 0 } => NoExclusion,
                         ModelSyncOp { Excluded: [var table] } => table,
+                        ModelSyncOp { Excluded.Count: 2 } => TwoExcluded,
+                        ModelSyncOp { Excluded.Count: 3 } => ThreeExcluded,
                         ModelSyncOp other => string.Join(",", other.Excluded),
                         _ => NotSync,
+                    },
+                    [KeyOrigin] = ops[i] switch
+                    {
+                        ModelWriteOp { StolenKey: true } => StolenKey,
+                        ModelWriteOp write when IsAdd(write) => OwnKey,
+                        _ => NotInsert,
+                    },
+                    [Spelling] = ops[i] is ModelWriteOp { Spelling: { } spelling }
+                        ? spelling.ToString()
+                        : NoSpelling,
+                    [PayloadSize] = ops[i] switch
+                    {
+                        AddItemOp { PayloadHex: var hex } => SizeOf(hex),
+                        WritePayloadOp { PayloadHex: var hex } => SizeOf(hex),
+                        _ => NoPayload,
                     },
                     [Batch] = ops[i] is ModelSyncOp batched
                         ? batched.BatchSize.ToString(
@@ -391,6 +485,10 @@ internal static class SyncModelDimensions
             );
         }
     }
+
+    /// <summary>blob の 16 進の長さから大きさの水準を決める</summary>
+    private static string SizeOf(string hex) =>
+        hex.Length / 2 >= SyncModelGenerator.LargePayloadBytes ? LargePayload : SmallPayload;
 
     /// <summary>一意な値の形の操作が付け替える表（形でない操作は none。unique-reuse は品目の code を使う）</summary>
     private static string UniqueTableOf(IReadOnlyList<ModelOp> ops, string family) =>
@@ -617,6 +715,90 @@ internal static class SyncModelDimensions
             }
         }
 
+        assignment.TryGetValue(UniqueTable, out var table2);
+
+        // 同期の設定・失敗の種類を持つ割り当ては同期の操作か失敗の仕掛けで、書き込みの印（キーの出どころ・値の形・blob の
+        // 大きさ）を持たない
+        var notWrite = settings is [false] || (faultKind is not null && faultKind != NotFault);
+
+        // キーの出どころは挿入の手だけが持つ。挿入を含む操作の種類は write・unique-reuse・reinsert・failing-write だけで
+        // （同期・失敗の仕掛け・blob の書き込み・削除のスタブ・一意な値の付け替えの形は挿入を含まない）、unique-reuse の
+        // 挿入は品目の code を使う。stolen は単独の挿入（write）だけ：unique-reuse と failing-write の挿入は新しい自分の
+        // キー、reinsert は消したキーと、その手の形がキーを決めると定義した
+        if (assignment.TryGetValue(KeyOrigin, out var origin) && origin != NotInsert)
+        {
+            if (
+                notWrite
+                || (family is not null && !InsertFamilies.Contains(family))
+                || (table2 is not null && table2 != NoUniqueTable && table2 != ModelTables.Items)
+            )
+            {
+                return false;
+            }
+
+            if (
+                origin == StolenKey
+                && (
+                    (family is not null && family != Write)
+                    || (table2 is not null && table2 != NoUniqueTable)
+                )
+            )
+            {
+                return false;
+            }
+        }
+
+        // 一意な値の形は、一意な値を新しく書く単独の書き込み（フォルダー・品目の挿入とフォルダーの名前の更新＝write）だけが持つ
+        if (assignment.TryGetValue(Spelling, out var spelling2) && spelling2 != NoSpelling)
+        {
+            if (
+                notWrite
+                || (family is not null && family != Write)
+                || (table2 is not null && table2 != NoUniqueTable)
+            )
+            {
+                return false;
+            }
+        }
+
+        // blob の大きさは blob を書く手（品目の挿入・blob の書き込み）だけが持ち、blob の書き込みは必ず blob を書く
+        if (assignment.TryGetValue(PayloadSize, out var size))
+        {
+            if (
+                size != NoPayload
+                && (
+                    notWrite
+                    || (family is not null && !PayloadFamilies.Contains(family))
+                    || (
+                        table2 is not null && table2 != NoUniqueTable && table2 != ModelTables.Items
+                    )
+                )
+            )
+            {
+                return false;
+            }
+
+            // blob の書き込みと失敗する書き込み（途中で失敗するストリームの blob の書き込みか、code の重複する品目の挿入）は
+            // 必ず blob を書く
+            if (size == NoPayload && family is Payload or FailingWrite)
+            {
+                return false;
+            }
+        }
+
         return true;
     }
+
+    /// <summary>挿入を含む操作の種類</summary>
+    private static readonly string[] InsertFamilies = [Write, UniqueReuse, Reinsert, FailingWrite];
+
+    /// <summary>blob を書く手（品目の挿入・blob の書き込み）を含む操作の種類</summary>
+    private static readonly string[] PayloadFamilies =
+    [
+        Write,
+        Payload,
+        FailingWrite,
+        Reinsert,
+        UniqueReuse,
+    ];
 }
