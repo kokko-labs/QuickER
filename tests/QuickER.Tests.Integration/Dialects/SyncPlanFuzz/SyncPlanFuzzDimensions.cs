@@ -82,7 +82,26 @@ internal static class SyncPlanFuzzDimensions
                 ),
                 new Factor(
                     Mutation,
-                    MutationKinds.Select(kind => new Level(kind)).ToList(),
+                    MutationKinds
+                        .Select(kind =>
+                            kind == "move pk"
+                                // 主キーの移動は、SQLite の rowid の別名（入れた NULL を採番の値へ置き換える主キー）へ写す列を作る
+                                // （行の水準 null-data の主キーの移動は NULL を含む列へ移す＝移送の前のガードを通る）
+                                ? new Level(
+                                    kind,
+                                    AxisMember.Property(
+                                        typeof(QuickER.Provider.SyncDialectCapabilities),
+                                        nameof(
+                                            QuickER
+                                                .Provider
+                                                .SyncDialectCapabilities
+                                                .SingleColumnPrimaryKeyReplacesNull
+                                        )
+                                    )
+                                )
+                                : new Level(kind)
+                        )
+                        .ToList(),
                     "目標の図へ加えた変更の種類（種ごとに 1〜5 個）"
                 ),
             ]

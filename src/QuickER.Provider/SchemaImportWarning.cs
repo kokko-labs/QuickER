@@ -176,7 +176,8 @@ public enum SchemaImportWarningKind
     /// 主キー以外、互換性のため主キー列へ NULL を許す（<c>PRIMARY KEY</c> は ANSI SQL と違い
     /// <c>NOT NULL</c> を含意しない）。意味モデル・GUI は主キーを常に NOT NULL として扱うため、
     /// 取込はこの列を NOT NULL へ補正する（補正自体は変えない・この警告は告知のみ）。
-    /// 既存行に NULL の主キーがあると、この図からの同期（テーブル再構築）でデータ移送が失敗し得る。
+    /// 既存行に NULL の主キーがあると、この図からの同期（テーブル再構築）のデータ移送は NOT NULL か、rowid の別名へ写す列の
+    /// NULL のガード（<see cref="TableRebuildPlan.RowidAliasNullGuardColumn"/>）で断られて巻き戻る。
     /// <c>Subject</c> = 列名 / <c>Detail</c> は空。
     /// </remarks>
     PrimaryKeyNullabilityAdjusted,

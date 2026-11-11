@@ -18,7 +18,7 @@ docs の方言ごとの違いの表は宣言と一致する。表の直前の HT
 
 ### docs/database(.ja).md
 
-- `sync-capabilities`（検出される差分の節）：`SyncDialectCapabilities` の 8 行。「既存の表の変更を文で実行する」は `SupportsAlterColumn && SupportsForeignKeyAlter`（`SyncPlanner` が再構築の方言を決める式の否定）。`SyncCapabilitiesTable_MatchesDeclarations`。
+- `sync-capabilities`（検出される差分の節）：`SyncDialectCapabilities` の 9 行。「既存の表の変更を文で実行する」は `SupportsAlterColumn && SupportsForeignKeyAlter`（`SyncPlanner` が再構築の方言を決める式の否定）。単一列の `INTEGER` の主キーが NULL を採番の値に変える行は `SingleColumnPrimaryKeyReplacesNull("INTEGER")`。`SyncCapabilitiesTable_MatchesDeclarations`。
 - `foreign-key-rebuilds`（主キーの同期の節）：11 行。付け直しの失敗で外れたまま残り得る＝`!TransactionalDdl`。列が空のときだけ通る変更の 2 行は `TypeKindChangeRequiresEmptyColumn` と `PrecisionDecreaseRequiresEmptyColumn`。表が空のときだけ通る NOT NULL の列の追加は `AddNotNullColumnRequiresEmptyTable`、計算列が使う列の変更は `AlterColumnBlockedByComputedColumn`。`ForeignKeyRebuildTable_MatchesDeclarations`。
 - `identifier-length-limits`（識別子の長さの上限の節）：行は方言。`IdentifierLengthLimit` の Unit / Max / TableFileNameMax / RepresentsSupplementaryCharacters と `TruncatesLongIdentifiers`。数・単位の語・長すぎる名前の語も英日で比べる。`IdentifierLengthLimitTable_MatchesDeclarations`。
 - `import-warnings`（取込の警告の節）：行は警告の種別の集まり。種別を `SchemaImportWarningKinds.DefinitionKind` で種類へ写し、`UnsupportedTreatments` の取込の扱いが None でない方言に ✅。種類を持たない種別（範囲外の外部キー・表名と列名の衝突・ドットを含む表名）は、取込のコードが警告を出す方言をテストの定数で持つ。最後の列は、まとめて告げる種別（`IsAggregated`）だけが「取り込まず名前を並べる」。対応表が `SchemaImportWarningKind` の全種別を 1 回ずつ受け持つこと（網羅）も確かめる。`ImportWarningTable_MatchesDeclarations`。

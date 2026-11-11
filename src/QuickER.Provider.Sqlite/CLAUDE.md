@@ -30,7 +30,8 @@
 
 ### NULL を許す主キーの補正
 
-- rowid 表は INTEGER でない主キー列に NULL を許す。取込は NOT NULL へ補正したうえで `PrimaryKeyNullabilityAdjusted` で列ごとに告げる（補正を外すとモデル・GUI が表せない図になる。既存行に NULL の主キーがあると再構築のデータ移送が失敗し得る）。
+- rowid 表は INTEGER でない主キー列に NULL を許す。取込は NOT NULL へ補正したうえで `PrimaryKeyNullabilityAdjusted` で列ごとに告げる（補正を外すとモデル・GUI が表せない図になる。既存行に NULL の主キーがあると、再構築のデータ移送は NOT NULL か、rowid の別名になる列の NULL のガード〔「rowid の別名へ写す列の NULL」〕で断られて巻き戻る）。
+- rowid の別名かの判定（単一列・宣言の型が大文字小文字を問わずちょうど `INTEGER`）は `SqliteRowidAlias.IsAliasType` の 1 か所で、同期の宣言 `SyncDialectCapabilities.SingleColumnPrimaryKeyReplacesNull` と共有する。
 - 告げない条件は 3 つ。
   - `WITHOUT ROWID` 表（判定は `PRAGMA table_list` の `wr` 列。`CREATE TABLE` の文字列走査を新設しない）。
   - 単一列の `INTEGER`（rowid 別名。完全一致で、`INT`／`BIGINT`／`INTEGER(10)` は別名にならないので告げる側）。`INTEGER PRIMARY KEY DESC` は SQL 文を見ないと区別できないので別名側へ倒す。
@@ -57,6 +58,15 @@
 - 再構築は `PRAGMA legacy_alter_table` を ON にして RENAME のスキーマ再検証を避ける（作り直す表を参照するビューで失敗しないため）。
 - スクリプトの順序は独自（新しい表を作る再構築が先・表の削除が最後）。一意制約の名前はスキーマの中の名前を取らないので、表の名前を変える同期でもぶつからない。
 - 固定は `SqliteSyncScriptBuilderTests`（legacy の 1 件ほか）。
+
+### rowid の別名へ写す列の NULL
+
+- rowid の別名（宣言の型 `INTEGER` の単一列の主キー）の列は NULL を持てず、NOT NULL を宣言しても、入れた NULL を断らずに採番の値へ置き換える。再構築で別名でなかった列の値をこの列へ写すと、NULL が黙って採番の値に変わってコミットする（主キーの移動・宣言の型の `INTEGER` への変更・複合の主キーの縮小・主キーの付与）。
+  - 計画は列の値を見ないので、再構築の合成が `TableRebuildPlan.RowidAliasNullGuardColumn` で「合成後に別名になり、live では別名でなかった写す列」を印す（判定は宣言 `SyncDialectCapabilities.SingleColumnPrimaryKeyReplacesNull`。live で別名の列は NULL を持てないので印さない＝SQLite から取り込んだ INTEGER の主キーの表のスクリプトは変わらない）。
+  - `SqliteSyncScriptBuilder` は移送の直前に、英語の注釈の行と、一時表 `quicker_rowid_null_guard` の NOT NULL の列（名前は `{表}.{列}` の 1 つの識別子）へ NULL の行を 1 件入れて断らせる文を出す（CREATE TEMP TABLE → `INSERT INTO temp.… SELECT … WHERE 列 IS NULL LIMIT 1` → DROP）。エラー文は「NOT NULL constraint failed: quicker_rowid_null_guard.{表}.{列}」。失敗の経路は実行器のトランザクションの巻き戻しが一時表も消す。
+  - 新しい表の CHECK や BEFORE INSERT のトリガーでは止められない（別名の列は制約の検査の前に採番の値へ置き換わり、トリガーの `NEW` は -1 で SQLite の文書は未定義とする）。
+- 壊すと：NULL が採番の値に変わってコミットし、その列の外部キーが無関係な親を指す（実行器の外部キーの前後の比べ方は、採番の値が既存の親に当たると気づかない）。ほかの方言は NOT NULL で断る。
+- ガード：期待の行 `plan-row-dependent-change-pk-onto-null-names-primary-key`（5 方言）・`realdb-sqlite-rowid-alias-type-change-of-key-with-null-fails`・`realdb-sqlite-rowid-alias-composite-key-shrink-onto-null-fails`・`realdb-sqlite-rowid-alias-fk-child-onto-null-fails`・`realdb-sqlite-rowid-alias-key-move-without-null-commits`・`realdb-rebuild-keeps-data-and-auxiliary-objects`（live で別名の表はガードを出さない）・同期計画の総当たりの表明 5b と行の水準 `null-data` の主キーの移動（形 `null-data-key-move`）・`SyncPlanFuzzOracleTests`（行 `sqlite-rowid-alias-guard-*`）・`DialectDocsTableTests.SyncCapabilitiesTable_MatchesDeclarations`。
 
 ### 同期実行器
 

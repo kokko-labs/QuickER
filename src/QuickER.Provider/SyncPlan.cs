@@ -407,6 +407,24 @@ public sealed class TableRebuildPlan
     /// </remarks>
     public IReadOnlyList<string> CopyColumns { get; init; } = [];
 
+    /// <summary>
+    /// 移送の前に NULL を断る写す列（再構築の後に rowid の別名＝NULL を採番の値へ置き換える主キーになり、live では別名でなかった列。
+    /// 無ければ null）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 別名の列は NOT NULL を宣言しても NULL を断らないので、そのまま写すと NULL が黙って採番の値に変わる。同期スクリプトは移送の前に
+    /// この列の NULL を断り、ほかの方言の NOT NULL 化と同じく失敗して巻き戻る（計画は列の値を見ないので、値の検査はスクリプトの文が
+    /// 行う）。
+    /// </para>
+    /// <para>
+    /// live で既に別名の列は NULL を持てないので印さない（SQLite から取り込んだ INTEGER の主キーの表の再構築のスクリプトは変わらない）。
+    /// 別名になるのは単一列の主キーだけなので、1 つの再構築に多くても 1 列。判定は
+    /// <see cref="SyncDialectCapabilities.SingleColumnPrimaryKeyReplacesNull"/>。
+    /// </para>
+    /// </remarks>
+    public string? RowidAliasNullGuardColumn { get; init; }
+
     /// <summary>再構築後に再現する補助オブジェクト（インデックス・トリガー）。</summary>
     /// <remarks>
     /// 一意制約は意味モデル（<see cref="Entity.UniqueConstraints"/>）が正本のため、

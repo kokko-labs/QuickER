@@ -68,6 +68,7 @@ public sealed class SqlServerProvider : IDatabaseProvider
             TransactionalDdl = true,
             IdentifierLengthLimit = SqlIdentifier.Limit,
             TruncatesLongIdentifiers = false,
+            SingleColumnPrimaryKeyReplacesNull = static _ => false,
         };
 
     /// <inheritdoc />

@@ -65,6 +65,7 @@ public sealed class PostgreSqlProvider : IDatabaseProvider
             TransactionalDdl = true,
             IdentifierLengthLimit = PgIdentifier.Limit,
             TruncatesLongIdentifiers = true,
+            SingleColumnPrimaryKeyReplacesNull = static _ => false,
         };
 
     /// <inheritdoc />

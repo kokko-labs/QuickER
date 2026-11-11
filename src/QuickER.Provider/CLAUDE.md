@@ -535,6 +535,7 @@ SQLite の同期は `SyncPlan.Rebuilds`／`TableRebuildPlan` で表を作り直�
   - 検出は文字列レベル（最外括弧の中と後ろを分ける・引用／リテラル／コメントを除去し跡に空白を置く〔隣の語がつながって `DEFAULT'a'COLLATE` を見落とさない〕・語境界・大文字小文字非依存）で、警告のため過剰検出側に倒す。
   - 既定と同じ即時検査（`NOT DEFERRABLE`・`DEFERRABLE INITIALLY IMMEDIATE`）と、再構築で保たれる `NOT DEFERRABLE INITIALLY DEFERRED`・外部キーの `SET DEFAULT` は数えない（数えると本当の喪失が埋もれる）。
 - 削除を選んだ表は再構築しない。
+- 合成後の主キーが単一列で、宣言 `SyncDialectCapabilities.SingleColumnPrimaryKeyReplacesNull`（入れた NULL を DB が採番の値へ置き換える型＝SQLite の rowid の別名）に当たり、live ではその列が同じ主キーでなかった写す列を `TableRebuildPlan.RowidAliasNullGuardColumn` に印す（`SyncPlanner.RowidAliasNullGuardColumn`）。スクリプトが移送の前にその列の NULL を断る（`src/QuickER.Provider.Sqlite/CLAUDE.md`「rowid の別名へ写す列の NULL」）。宣言は既定値を持たず、SQLite 以外は常に偽。
 - 取込が表の中の物を捨てた表（`SyncPlanContext.ImportWarnings` のうち `SchemaImportWarningKinds.RebuildLosesTableContent` が真の種別＝大文字小文字・前後の空白だけ違う列名の後着の列・範囲外や除外した表への外部キー・列を読めない表・名前を縮めた物・無効化した制約）は再構築しない（`SyncPlanner.ExcludeRebuildsLosingImportDiscardedContent`。再構築の方言だけ・`ExcludeDropsLeavingNoColumns` の後・暗黙の削除の注入の前）。
   - 合成の正本は live の図で、捨てた物は図に無いので、作り直した表からデータごと黙って消える。
   - 外すのは、その表を作り直す選んだ項目（列・主キー・外部キー・一意制約・列順の変更と作り直し）と、その表の外部キーの端（親の表・列）を消す表・列の削除。列の追加（作り直さずに足せる）とその表自身の削除は外さない。外した項目は `ExcludedItems` へ積み、`SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent`（表ごと・Detail は取込警告が名指しした物）で名指しする。文言は DB 側で直してから取り込み直すことを案内する。

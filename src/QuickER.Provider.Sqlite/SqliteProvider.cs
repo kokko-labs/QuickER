@@ -71,6 +71,8 @@ public sealed class SqliteProvider : IDatabaseProvider
             TransactionalDdl = true,
             IdentifierLengthLimit = SqliteIdentifier.Limit,
             TruncatesLongIdentifiers = false,
+            // 宣言の型 INTEGER の単一列の主キーは rowid の別名で、入れた NULL を採番の値へ置き換える
+            SingleColumnPrimaryKeyReplacesNull = SqliteRowidAlias.IsAliasType,
         };
 
     /// <inheritdoc />

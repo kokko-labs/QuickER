@@ -118,12 +118,12 @@
   - 長い名前（表名を識別子の上限の半分を超える長さへ伸ばして大文字を混ぜる＝名前の無い外部キーの既定名が上限で縮められる。上限のある方言だけ・種の 6 つに 1 つ。必須の形 `long-default-name`）。生成器が明示の制約名に埋める表名・列名は先頭の 16 文字だけにする（明示の名前は利用者が付けた名前なので製品は縮めずに上限で断る。既定名だけを縮める形にする）。
   - 既存の行で断られると決まっている文（親の無い値の外部キーの追加・列が空でないと通らない変更を行のある列へ当てる文と、下の行の水準の文）は `FuzzLiveSchema.DataFailures` に宣言する。実 DB の表明 1 は、宣言した文そのものが断られた失敗だけを外す。表明 1b は掛ける。
     - 見分け方は `SyncPlanFuzzRunner.IsDeclaredDataFailure` の 1 か所。文ごとに流す方言（DDL を暗黙コミットする MySQL・Oracle）は失敗したバッチの文の形と宣言の名前で見る（MySQL の列の変更は動的 SQL なので、断られた `EXECUTE` の前の最後の `SET @sql` の文で見る）。
-    - ほかの方言はエラー文の理由の語（重複・NULL・長さ・式の依存）と宣言の名前で見る（SQLite は再構築の表の列 `{表}_quicker_rebuild.{列}`・外部キー違反の表がすべて宣言の子の表。PostgreSQL の式の依存のエラー文は名前を持たないので理由の語だけ）。
+    - ほかの方言はエラー文の理由の語（重複・NULL・長さ・式の依存）と宣言の名前で見る（SQLite は再構築の表の列 `{表}_quicker_rebuild.{列}` か、rowid の別名へ写す列の NULL のガードの列 `quicker_rowid_null_guard.{表}.{列}`〔ガードの失敗は「NOT NULL constraint failed」とガードの列の全体だけで見る＝理由の語「null」は一時表の名前にも含まれ、表と列の名前の語の照合は「.」を含む名前で別の列に当たる〕・外部キー違反の表がすべて宣言の子の表。PostgreSQL の式の依存のエラー文は名前を持たないので理由の語だけ）。
     - 名前だけが偶然一致する別の理由の失敗を一致させないことを、規則表 `SyncPlanFuzzOracleTests` の自己検査の行が固定する。
   - 4 つの形は網でだけ必須（実 DB の普段の種で出ない種の集合がありうる）。2026-11 の種の指紋の書き直しで変わった種は、どれもこの 4 つの水準が出た種だけ（SQLite 188／2000・MySQL 37／150・SQL Server 25／100・PostgreSQL 2／15・Oracle 0／4）。
 - 既存の行（とモデルの外の依存）で断られる文の残りと、参照アクションと子の列の NULL 許容の組は、4 本目の乱数の列（`RowLevelSeed`＝`DataLevelSeed` から決定的に作る）で 1 種に 1 回だけ引く。データの値を DB 側の図を作る段で変えるので、`DataLevelSeed` の列で引くと後の `Mutate` で引く既存の水準の引き方が全部の種で変わる。水準は 7 つ（どれも 20 分の 1・網でだけ必須の形）。最初の 5 つは行のある表だけ：
   - 重複（`duplicate-data`）：鍵でない整数か文字列の列の 2 行目を 1 行目と同じ値にし、目標の図でその列へ名前つきの一意制約を足す・主キーを移す・名前つきの一意制約を移す。
-  - NULL（`null-data`）：参照されない NULL 許容の整数か文字列の列（外部キーの子の列を含む・SET NULL の子は除く）の 1 行目を NULL にし、NOT NULL にするか主キーへ足す。
+  - NULL（`null-data`）：参照されない NULL 許容の整数か文字列の列（外部キーの子の列を含む・SET NULL の子は除く）の 1 行目を NULL にし、NOT NULL にするか主キーへ足す。 3 分の 1 の種は、代わりに主キーをその列 1 つへ移す（5 本目の乱数の列 `NullKeyMoveSeed` で引く＝移さない種のケースは変わらない。形 `null-data-key-move`・網でだけ必須）。SQLite の整数の列では新しい主キーが rowid の別名になり、写す NULL を移送の前のガードが断る（`src/QuickER.Provider.Sqlite/CLAUDE.md`「rowid の別名へ写す列の NULL」）。
   - データより短い長さ（`shorten-below-data`）：鍵でない文字列の列の値を 12 文字にし、長さ 5 へ縮める。
   - 行のある表への NOT NULL の列（`not-null-add-on-rows`）。
   - 計算列の参照する列の変更（`computed-source-change`）：計算列の式が参照する整数の列を 64 ビット整数へ広げる（データに依らず、式の依存で断る方言がある）。
@@ -190,12 +190,13 @@
 - `.OnRealDatabase(r => …)` で実 DB の段を持つ行は、方言ごとの `SyncPlanFuzzTestsBase.ExpectationRows_MatchOnRealDatabase`（5 方言の派生・`SyncPlanRealStage.cs`）が実 DB でも流す。
   - 流れは「DB 側の図を作る → 取込 → 目標の図との差分 → 選び方 → 計画 → 実行 → 取り込み直し」。
   - 目標の図は既定で別の Guid 空間。`PreserveIds(理由)` は例外で、今は使う行が無い。
-- 総当たりと同じランナー（`SyncPlanFuzzRunner.RunCaseAsync`）の汎用の表明 1〜5 を照合する。
+- 総当たりと同じランナー（`SyncPlanFuzzRunner.RunCaseAsync`）の汎用の表明 1〜5（5b を含む）を照合する。
   - 表明 1：失敗は計画の警告が予告する。
   - 表明 1b：失敗で消えてよい制約だけが消える。
   - 表明 2 / 2b / 3：選んだ項目が消え、新しい差分が出ず、選ばなかった項目が残る。
   - 表明 4：選んだ変更の外の列属性が変わらない。
   - 表明 5：行数と取込の警告。新しく出た取込警告に加え、同期の前の取込警告が同期の後に消えたら、選んだ項目で説明できない限り違反にする（`SyncPlanFuzzRunner.LostImportWarnings`・違反の頭 `import warning lost:`）。取込が表の中の物を捨てた種別（`SchemaImportWarningKinds.RebuildLosesTableContent`）は、その表の削除か名指しした列の削除を選んだときだけ説明でき、ほかの種別はその表に触れる選んだ項目か、計画の `TableRebuildDropsColumnAttribute` の警告で説明できる。外部キーの警告は Subject が列でないので、その外部キーの子の列の削除では説明できない（今は生成器・期待の行がその形を作らない。限界は関数の remarks）。
+  - 表明 5b：コミットした同期の前後で、両方にある表の両方にある列（計算列を除く）の NULL の行の数が同じ（`SyncPlanFuzzRunner.NullCountChanges`・違反の頭 `null count changed:`）。型を変えた列も比べる。比べないのは選んだ表の追加・削除の表と、選んだ列の追加・削除の列。数え方は `SUM(CASE WHEN 列 IS NULL THEN 1 ELSE 0 END)`（SQL Server の `COUNT(列)` は text・ntext・image を受けない）。同期は値を書き換えないので、NULL の数が変わるのは値が黙って書き換わったとき（SQLite の rowid の別名へ写した NULL が採番の値に変わる形）だけ。番号は、期待の行の実 DB の段だけの汎用の表明 6 と重ねない。
 - 実 DB の段だけの汎用の表明 6：行の後に、製品の取込・実行器が DB のファイルを掴んでいない（`SyncPlanFuzzDialect.HeldFileProblem`。ファイルの DB の SQLite だけが実装し、DB のファイルを排他で開けるかで見る）。
   - SQLite の方言の自分の接続（行数・探針・問い合わせ・空のファイルの作成）はプールしない。製品と同じ組み方の接続文字列でプールすると、製品の掴みとテストの接続を区別できない。取込の接続文字列は画面と同じ `SqliteConnectionStringFactory.Build`。
   - Linux の排他は SQLite のロックと関係しないので、Windows のジョブでだけ効く（→ `src/QuickER.Provider.Sqlite/CLAUDE.md`「ファイルを掴まない接続」）。総当たりの種には掛けない。

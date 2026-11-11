@@ -67,6 +67,7 @@ public sealed class OracleProvider : IDatabaseProvider
             TransactionalDdl = false,
             IdentifierLengthLimit = OracleIdentifier.Limit,
             TruncatesLongIdentifiers = false,
+            SingleColumnPrimaryKeyReplacesNull = static _ => false,
         };
 
     /// <inheritdoc />

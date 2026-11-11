@@ -507,34 +507,18 @@ ORDER BY name;";
     }
 
     /// <summary>
-    /// 主キーが SQLite の rowid 別名（暗黙の自動採番）になっているかを判定する。
+    /// 主キーが SQLite の rowid 別名（暗黙の自動採番）になっているかを判定する（規則は <see cref="SqliteRowidAlias"/> を同期の宣言と共有する）。
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// rowid 別名になるのは、宣言型がちょうど <c>INTEGER</c>（大文字小文字は問わない・前後空白は許容）の
-    /// <b>単一列</b>主キーだけ（SQLite の仕様）。<c>INT</c> / <c>BIGINT</c> / <c>INTEGER(10)</c> のような
-    /// 表記はどれも別名にならず、互換性のため NULL を許す普通の主キーのまま。複合主キーも同様に別名にならない
-    /// （別名になり得るのはテーブルの主キーがちょうど 1 列のときだけ）。
-    /// </para>
-    /// <para>
-    /// <b>既知の割り切り</b>: <c>INTEGER PRIMARY KEY DESC</c> は SQLite の仕様上 rowid 別名にならないが、
-    /// この判定は <c>PRAGMA table_xinfo</c> の宣言型としか突き合わせられず、<c>DESC</c> の有無は
-    /// <c>CREATE TABLE</c> の SQL 文そのものを見ないと分からない。区別せず別名側へ倒す
-    /// （＝<c>DESC</c> の場合は実際には NULL を許すのに告げない）。稀なケースであり、
-    /// 見逃しは「NULL の主キーがあると同期のデータ移送で失敗し得る」という助言が 1 件出ないだけなのに対し、
-    /// 逆側（<c>DESC</c> でない普通の <c>INTEGER PRIMARY KEY</c> にまで警告を出す）は、
-    /// SQLite が NULL を拒否する最も普通の表で毎回鳴ることになり、警告そのものを形骸化させるため。
-    /// </para>
+    /// <c>INTEGER PRIMARY KEY DESC</c> を別名の側へ倒す割り切りの、取込の側の帰結：<c>DESC</c> の列は実際には NULL を許すのに告げない。
+    /// 稀なケースで、逆側（普通の <c>INTEGER PRIMARY KEY</c> にまで告げる）は SQLite が NULL を持てない最も普通の表で毎回鳴り、
+    /// 警告そのものを形骸化させる。
     /// </remarks>
     private static bool IsIntegerRowidAlias(
         IReadOnlyList<(long Ordinal, Column Column, bool DeclaredNotNull)> primaryKeyColumns
     ) =>
         primaryKeyColumns.Count == 1
-        && string.Equals(
-            primaryKeyColumns[0].Column.DataType.Trim(),
-            "INTEGER",
-            StringComparison.OrdinalIgnoreCase
-        );
+        && SqliteRowidAlias.IsAliasType(primaryKeyColumns[0].Column.DataType);
 
     /// <summary>テーブルレベルの UNIQUE 制約を PRAGMA index_list / index_info から読み込み、モデルへ載せる</summary>
     /// <remarks>

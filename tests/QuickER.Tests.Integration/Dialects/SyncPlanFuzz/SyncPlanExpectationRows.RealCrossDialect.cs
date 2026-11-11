@@ -18,11 +18,11 @@ internal static partial class SyncPlanExpectationRows
     private static int RealCrossDialectRowCount(string dialect) =>
         dialect switch
         {
-            DialectNames.SqlServer => 23,
-            DialectNames.PostgreSql => 26,
-            DialectNames.MySql => 23,
-            DialectNames.Oracle => 25,
-            DialectNames.Sqlite => 24,
+            DialectNames.SqlServer => 24,
+            DialectNames.PostgreSql => 27,
+            DialectNames.MySql => 24,
+            DialectNames.Oracle => 26,
+            DialectNames.Sqlite => 25,
             _ => 0,
         };
 
@@ -100,6 +100,69 @@ internal static partial class SyncPlanExpectationRows
                         DuplicateKeyErrors("ORA-02437")
                     )
                 ),
+            Row(
+                    "plan-row-dependent-change-pk-onto-null-names-primary-key",
+                    "[Integration] 主キーを NULL のある整数の列へ移す：どの方言も断って値を変えない（SQLite の rowid の別名でも NULL を採番の値に変えない）。暗黙コミットの方言だけ主キーを名指しする",
+                    AllDialects
+                )
+                .LiveWith(w =>
+                    w.Live.Table(
+                        "rd_pkn",
+                        ExpectationSchema.Pk("id", RealCrossDialectScenarios.IntType(w.Capability)),
+                        ExpectationSchema.Nullable(
+                            "k",
+                            RealCrossDialectScenarios.IntType(w.Capability)
+                        )
+                    )
+                )
+                .TargetWith(w =>
+                    w.Target.Table(
+                        "rd_pkn",
+                        ExpectationSchema.NotNull(
+                            "id",
+                            RealCrossDialectScenarios.IntType(w.Capability)
+                        ),
+                        ExpectationSchema.Pk("k", RealCrossDialectScenarios.IntType(w.Capability))
+                    )
+                )
+                .Select(RealScenarios.SelectAll)
+                .Expect(e =>
+                    ExpectRowDependentWarnings(
+                        e,
+                        [
+                            "ConstraintRebuildAroundRowDependentChange(rd_pkn): PRIMARY KEY (rd_pkn.k: NOT NULL, PRIMARY KEY rd_pkn (k))",
+                        ]
+                    )
+                )
+                .OnRealDatabase(r =>
+                {
+                    RowDependentFailure(
+                        RealCrossDialectScenarios.SetupPerDialect(
+                            r,
+                            d =>
+                                RealCrossDialectScenarios.Insert(
+                                    d,
+                                    "rd_pkn",
+                                    ["id", "k"],
+                                    "1, NULL"
+                                )
+                                + "\n"
+                                + RealCrossDialectScenarios.Insert(d, "rd_pkn", ["id", "k"], "2, 7")
+                        ),
+                        "データの都合：k は NULL を持つので主キーにできない（計画は列の値を見ない）",
+                        NullKeyErrors
+                    );
+                    RealCrossDialectScenarios.QueryPerDialect(
+                        r,
+                        "values",
+                        d =>
+                            $"SELECT {RealCrossDialectScenarios.Quote(d, "id")}, {RealCrossDialectScenarios.Quote(d, "k")}"
+                            + $" FROM {RealCrossDialectScenarios.Quote(d, "rd_pkn")} ORDER BY {RealCrossDialectScenarios.Quote(d, "id")}"
+                    );
+
+                    // 値は同期の前のまま（NULL が採番の値に変わらない）
+                    r.Expect(e => e.Probe("values").Exact("1 k=-", "2 k=7"));
+                }),
             Row(
                     "plan-row-dependent-change-unique-rebuild-onto-duplicates-names-unique",
                     "[Integration] 名前つきの一意制約を重複のある列へ作り直す：暗黙コミットの方言だけ、作り直しが断られて外れたまま残りうる一意制約を名指しする",
@@ -598,6 +661,16 @@ internal static partial class SyncPlanExpectationRows
             [DialectNames.Oracle] = oracle,
             [DialectNames.Sqlite] = sqlite,
         };
+
+    /// <summary>NULL のある列を主キーにできないときのエラー文の断片</summary>
+    private static IReadOnlyDictionary<string, string> NullKeyErrors =>
+        ErrorFragments(
+            sqlServer: "Cannot insert the value NULL",
+            postgreSql: "contains null values",
+            mySql: "Invalid use of NULL value",
+            oracle: "ORA-02296",
+            sqlite: "NOT NULL constraint failed"
+        );
 
     /// <summary>重複で主キー・一意制約を張れないときのエラー文の断片（Oracle は主キーと一意制約で番号が違う）</summary>
     private static IReadOnlyDictionary<string, string> DuplicateKeyErrors(string oracle) =>
@@ -1603,6 +1676,17 @@ internal static class RealCrossDialectScenarios
     /// <summary>識別子を方言で引用した 1 行の INSERT</summary>
     public static string Insert(string dialect, string table, string[] columns, string values) =>
         $"INSERT INTO {Quote(dialect, table)} ({string.Join(", ", columns.Select(c => Quote(dialect, c)))}) VALUES ({values});";
+
+    /// <summary>方言ごとに同じ名前の問い合わせを足す（5 方言・面は <c>probe:{名前}</c>）</summary>
+    public static RealStage QueryPerDialect(RealStage stage, string name, Func<string, string> sql)
+    {
+        foreach (var dialect in SyncPlanExpectationCapabilities.AllDialects)
+        {
+            stage.Query(name, sql(dialect), dialect);
+        }
+
+        return stage;
+    }
 
     /// <summary>方言ごとに同じ形の DDL の後の文を足す（5 方言）</summary>
     public static RealStage SetupPerDialect(RealStage stage, Func<string, string> sql)

@@ -370,6 +370,11 @@ A diagram imported from SQLite carries the declared types it came with, so the g
 A diagram created in QuickER, or one whose dialect was switched away from SQLite and back, emits `INT` for a 32-bit integer and `BIGINT` for a 64-bit one.
 A key declared that way is an ordinary column: it has no implicit auto-numbering to preserve, and an insert without a key value stores NULL (QuickER's generated repositories assign keys in the application, so this changes nothing for them).
 
+A rowid alias cannot hold NULL, and SQLite does not refuse one either: it replaces a NULL written to the alias with a new row number, even when the column is declared `NOT NULL`.
+A sync can turn a column that is not an alias into one, by making it the primary key (or moving the primary key onto it), by changing its declared type to `INTEGER`, or by shrinking a composite key to it.
+The rebuild script then checks that column for NULL before it copies the rows, and if any row holds NULL the sync fails and rolls back, as making a column `NOT NULL` fails in every dialect.
+The error names the column as `quicker_rowid_null_guard.<table>.<column>`; fill in or delete the rows that hold NULL and sync again.
+
 ## Diff sync (diagram → DB)
 
 The "DB Sync" button on the toolbar opens the "DB Schema Sync (Apply Diff)" dialog.
@@ -399,6 +404,7 @@ The following table summarizes how the dialects differ, and the subsections belo
 | Descriptions are synced | ✅ | ✅ | ✅ | ✅ | — |
 | A failed script rolls back | ✅ | ✅ | — | — | ✅ |
 | Changes to an existing table run as statements | ✅ | ✅ | ✅ | ✅ | — (the table is rebuilt) |
+| A single-column `INTEGER` primary key turns NULL into a row number | — | — | — | — | ✅ (rowid alias; the sync refuses NULL first) |
 
 #### Comparing names and types
 
@@ -746,6 +752,7 @@ flowchart TD
 The rebuilt table is created from the diagram's definition, so anything outside [what the diagram models](#modeling-fidelity) is **not** reproduced and is silently lost.
 That covers every element the table there marks as lost in a rebuild, which is exactly why the `DEFAULT` values you set outside QuickER disappear after a rebuild.
 Implicit auto-numbering is also safe as long as the diagram's declared type is `INTEGER`, because such a primary key stays a rowid alias in the rebuilt table (a key declared `INT`, which is what a diagram created in QuickER or converted through another dialect holds, was never an alias to begin with; see [the SQLite rowid alias](#the-sqlite-rowid-alias)).
+A column that the sync turns into the rowid alias must not hold NULL; if it does, the sync fails and rolls back instead of numbering those rows (see the same section).
 
 To make the loss visible, QuickER reads the live `CREATE TABLE` statement of every table it is about to rebuild and lists the attributes it found in the execution-confirmation dialog.
 If the table needs those attributes, re-apply them yourself after the sync, or run the change as hand-written SQL.

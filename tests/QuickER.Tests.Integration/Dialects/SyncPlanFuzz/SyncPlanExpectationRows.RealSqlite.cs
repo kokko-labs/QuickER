@@ -12,7 +12,7 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 internal static partial class SyncPlanExpectationRows
 {
     /// <summary>SQLite の実 DB の段の行の数の下限（行を足したら・消したら合わせる）</summary>
-    private const int RealSqliteRowCount = 49;
+    private const int RealSqliteRowCount = 53;
 
     /// <summary>実 DB の段：SQLite の同期（テーブル再構築・外部キー・主キー・一意制約・ビュー）</summary>
     private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealSqliteRows() =>
@@ -22,7 +22,137 @@ internal static partial class SyncPlanExpectationRows
             .. RealSqliteViewRows(),
             .. RealSqliteScriptRows(),
             .. RealSqliteImportDiscardedRows(),
+            .. RealSqliteRowidAliasNullRows(),
         ];
+
+    /// <summary>
+    /// 再構築で rowid の別名（宣言の型 INTEGER の単一列の主キー）になる列へ、別名でなかった列の値を写す形（主キーの型の変更・複合の
+    /// 主キーの縮小・外部キーの子の列への主キーの移動・NULL の無い列への移動）
+    /// </summary>
+    /// <remarks>
+    /// SQLite は別名の列へ入れた NULL を採番の値に置き換えるので、移送の前のガードが NULL を断って巻き戻す（ほかの方言の NOT NULL と同じ）。
+    /// 主キーを NULL のある列へ移す最小の形は方言をまたぐ行 <c>plan-row-dependent-change-pk-onto-null-names-primary-key</c>。
+    /// 取込は INT の主キーの列を NOT NULL へ補正して告げる（DB には NULL がある）ので、型だけを INTEGER へ変える差分は NULL 許容の変更を
+    /// 持たない。
+    /// </remarks>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > RealSqliteRowidAliasNullRows() =>
+        [
+            Row(
+                    "realdb-sqlite-rowid-alias-type-change-of-key-with-null-fails",
+                    "[Integration] SQLite 同期: NULL の行がある INT の主キーを INTEGER（rowid の別名）へ変えると、ガードが NULL を断って巻き戻す",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s.Col("t", "k").DataType = "INTEGER")
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    RowidAliasNullFailure(
+                        r.LiveSql(
+                                "CREATE TABLE \"t\" (\"k\" INT NULL, \"v\" INTEGER NULL, CONSTRAINT \"PK_t\" PRIMARY KEY (\"k\"));"
+                                    + "INSERT INTO \"t\" (\"k\", \"v\") VALUES (NULL, 1);"
+                                    + "INSERT INTO \"t\" (\"k\", \"v\") VALUES (NULL, 2);"
+                                    + "INSERT INTO \"t\" (\"k\", \"v\") VALUES (7, 3);"
+                            )
+                            .Query("values", "SELECT \"v\", \"k\" FROM \"t\" ORDER BY \"v\";"),
+                        "t.k",
+                        ["1 k=-", "2 k=-", "3 k=7"]
+                    )
+                ),
+            Row(
+                    "realdb-sqlite-rowid-alias-composite-key-shrink-onto-null-fails",
+                    "[Integration] SQLite 同期: 複合の主キーを NULL のある INTEGER の列 1 つへ縮めると、ガードが NULL を断って巻き戻す",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => SyncPlanFuzzGenerator.SetPrimaryKey(s["t"], [s.Col("t", "a")]))
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    RowidAliasNullFailure(
+                        r.LiveSql(
+                                "CREATE TABLE \"t\" (\"a\" INTEGER NULL, \"b\" INTEGER NULL, CONSTRAINT \"PK_t\" PRIMARY KEY (\"a\", \"b\"));"
+                                    + "INSERT INTO \"t\" (\"a\", \"b\") VALUES (NULL, 1);"
+                                    + "INSERT INTO \"t\" (\"a\", \"b\") VALUES (7, 2);"
+                            )
+                            .Query("values", "SELECT \"b\", \"a\" FROM \"t\" ORDER BY \"b\";"),
+                        "t.a",
+                        ["1 a=-", "2 a=7"]
+                    )
+                ),
+            Row(
+                    "realdb-sqlite-rowid-alias-fk-child-onto-null-fails",
+                    "[Integration] SQLite 同期: 外部キーの子の列（NULL あり）へ主キーを移すと、採番の値が既存の親に当たる形でもガードが断って巻き戻す",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => SyncPlanFuzzGenerator.SetPrimaryKey(s["t"], [s.Col("t", "k")]))
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    RowidAliasNullFailure(
+                        r.LiveSql(
+                                "CREATE TABLE \"p\" (\"id\" INTEGER NOT NULL, CONSTRAINT \"PK_p\" PRIMARY KEY (\"id\"));"
+                                    + "CREATE TABLE \"t\" (\"id\" INTEGER NOT NULL, \"k\" INTEGER NULL, CONSTRAINT \"PK_t\" PRIMARY KEY (\"id\"), "
+                                    + "CONSTRAINT \"FK_t_p\" FOREIGN KEY (\"k\") REFERENCES \"p\" (\"id\"));"
+                                    + "INSERT INTO \"p\" (\"id\") VALUES (1);"
+                                    + "INSERT INTO \"p\" (\"id\") VALUES (2);"
+                                    + "INSERT INTO \"p\" (\"id\") VALUES (3);"
+                                    + "INSERT INTO \"t\" (\"id\", \"k\") VALUES (10, NULL);"
+                                    + "INSERT INTO \"t\" (\"id\", \"k\") VALUES (11, NULL);"
+                                    + "INSERT INTO \"t\" (\"id\", \"k\") VALUES (12, 3);"
+                            )
+                            .Query("values", "SELECT \"id\", \"k\" FROM \"t\" ORDER BY \"id\";"),
+                        "t.k",
+                        ["10 k=-", "11 k=-", "12 k=3"]
+                    )
+                ),
+            Row(
+                    "realdb-sqlite-rowid-alias-key-move-without-null-commits",
+                    "[Integration] SQLite 同期: NULL の無い INTEGER の列へ主キーを移すと、ガードを通って値を保ったままコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => SyncPlanFuzzGenerator.SetPrimaryKey(s["t"], [s.Col("t", "k")]))
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE \"t\" (\"id\" INTEGER NOT NULL, \"k\" INTEGER NULL, CONSTRAINT \"PK_t\" PRIMARY KEY (\"id\"));"
+                                + "INSERT INTO \"t\" (\"id\", \"k\") VALUES (10, 5);"
+                                + "INSERT INTO \"t\" (\"id\", \"k\") VALUES (12, 7);"
+                        )
+                        .Query("values", "SELECT \"id\", \"k\" FROM \"t\" ORDER BY \"id\";")
+                        .Expect(e =>
+                        {
+                            e.Script.Contains(
+                                "CREATE TEMP TABLE \"quicker_rowid_null_guard\" (\"t.k\" NOT NULL);"
+                            );
+                            e.Outcome.Exact("committed");
+                            e.After.Contains("pk t (k)");
+                            e.Probe("values").Exact("10 k=5", "12 k=7");
+                        })
+                ),
+        ];
+
+    /// <summary>
+    /// 別名へ写す列の NULL をガードが断る行の実 DB の期待：ガードの列（<paramref name="guardColumn"/>＝{表}.{列}）の NOT NULL で失敗し、
+    /// 巻き戻って DB も値も変わらない
+    /// </summary>
+    private static RealStage RowidAliasNullFailure(
+        RealStage stage,
+        string guardColumn,
+        string[] values
+    ) =>
+        stage
+            .ExpectsUnwarnedFailure(
+                "データの都合：rowid の別名になる列が NULL を持つので、移送の前のガードが断る（計画は列の値を見ない）"
+            )
+            .Expect(e =>
+            {
+                e.Script.Contains(
+                    $"CREATE TEMP TABLE \"quicker_rowid_null_guard\" (\"{guardColumn}\" NOT NULL);"
+                );
+                e.Outcome.Exact(
+                    $"failed: *NOT NULL constraint failed: quicker_rowid_null_guard.{guardColumn}*"
+                );
+                e.Unchanged();
+                e.Probe("values").Exact(values);
+            });
 
     /// <summary>
     /// 取込が捨てる表の中の物（前後の空白だけ違う列名の後着の列・ドット付きの表への外部キー・参照先の無い外部キー）× 表を作り直す項目
@@ -158,6 +288,9 @@ internal static partial class SyncPlanExpectationRows
                                 "ALTER TABLE \"product_quicker_rebuild\" RENAME TO \"product\";",
                                 "CREATE INDEX \"idx_product_note\" ON \"product\" (\"note\");"
                             );
+
+                            // live でも rowid の別名の主キー（id INTEGER）は NULL を持てないので、移送の前のガードを出さない
+                            e.Script.Absent("*quicker_rowid_null_guard*");
                             e.Outcome.Exact("committed");
                             e.After.Absent("col product.legacy_col *");
                             e.After.Single("col product.note VARCHAR(200) *");
