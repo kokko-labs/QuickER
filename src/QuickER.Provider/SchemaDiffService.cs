@@ -51,6 +51,10 @@ public class SchemaDiffService
         SyncDialectCapabilities capabilities
     )
     {
+        // 図の側の同じ名前の表・列は名前で DB の表と組めず、同じ表の追加を 2 つ出す（名指しして差分ごと止める）。
+        // DB の側の同じ名前（引用識別子で共存する Dup と dup）は NameLookup が綴りまで一致する 1 件を選ぶ
+        SqlNameDuplicates.Validate(targetEntities);
+
         var diff = new SchemaDiff();
 
         // 説明差分を出すか（SQLite などコメント機構が無い方言では出さない）

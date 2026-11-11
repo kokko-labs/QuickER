@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using QuickER.Dialects;
 using QuickER.Documents;
 using QuickER.Mcp.Tools;
 using QuickER.Model;
@@ -231,6 +232,159 @@ public static class NameFuzzDiagrams
             "MultibyteTableName"
         ),
     ];
+
+    /// <summary>
+    /// 既定名・合成名を識別子の上限で縮めさせる形（方言ごとに決まった長い名前・乱数なし）。名前の無い主キー・一意制約・外部キーの
+    /// 既定名と、同じ親子の 2 本目の外部キーの既定名と、合成名がほかの制約の名前とぶつかって縮めた後に番号が付く名前を、上限で
+    /// 縮めさせる
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 表の名前は上限の内に収め、既定名だけが上限を超える長さにする。上限の単位ごとに、縮めた名前の切れ目に端数が出る長さを選ぶ
+    /// （PostgreSQL・Oracle は UTF-8 で 3 バイトの文字が予算に収まり切らない・SQL Server は UTF-16 で 2 単位のサロゲートペアが
+    /// 予算に収まり切らない＝文字の途中で切ると上限を超えるか対にならないサロゲートになる）。MySQL は文字数で数え、表の名前は
+    /// 表のファイル名の上限の内に収め、一意制約の合成名は長い列名で上限を超えさせる（主キーの名前は MySQL では常に PRIMARY）。
+    /// SQLite は上限が無く、何も縮めない（DDL を適用できることだけを見る）。
+    /// </para>
+    /// <para>
+    /// <c>Shortened</c> は縮めるはずの「縮める前の名前」で、DDL の往復のテストが上限を超えていることを確かめる（空振りを止める）。
+    /// </para>
+    /// </remarks>
+    /// <param name="dialect">方言の名前</param>
+    /// <returns>形の名前・図（ツールが断れば null）・縮めるはずの縮める前の名前</returns>
+    public static IReadOnlyList<(
+        string Shape,
+        ErDiagram? Diagram,
+        IReadOnlyList<string> Shortened
+    )> DerivedNameCases(string dialect)
+    {
+        var (intType, textType) = TypesFor(dialect);
+        var (child, parent, column, numbered) = DerivedNames(dialect);
+        var uniqueName = $"UQ_{child}_{column}";
+        var numberedName = $"UQ_{numbered}_{column}";
+        var foreignKeyName = $"FK_{child}_{parent}";
+
+        return
+        [
+            (
+                "DerivedPrimaryAndUnique",
+                WithTools(
+                    dialect,
+                    exec =>
+                        exec("add_entity", new { table_name = child })
+                        && exec("add_column", Column(child, "Id", intType, primaryKey: true))
+                        && exec("add_column", Column(child, column, textType))
+                        && exec(
+                            "set_unique_constraint",
+                            new { table_name = child, columns = new[] { column } }
+                        )
+                ),
+                dialect == "mysql" ? [uniqueName] : [$"PK_{child}", uniqueName]
+            ),
+            (
+                "DerivedForeignKeysOnSamePair",
+                WithTools(
+                    dialect,
+                    exec =>
+                        exec("add_entity", new { table_name = parent })
+                        && exec("add_column", Column(parent, "Id", intType, primaryKey: true))
+                        && exec("add_entity", new { table_name = child })
+                        && exec("add_column", Column(child, "Id", intType, primaryKey: true))
+                        && exec("add_column", Column(child, "A", intType))
+                        && exec("add_column", Column(child, "B", intType))
+                        && exec("add_relationship", Reference(parent, child, "A"))
+                        && exec("add_relationship", Reference(parent, child, "B"))
+                ),
+                [foreignKeyName, $"{foreignKeyName}_B"]
+            ),
+            (
+                "DerivedUniqueNumberedAfterShortening",
+                WithTools(
+                    dialect,
+                    exec =>
+                        exec("add_entity", new { table_name = numbered })
+                        && exec("add_column", Column(numbered, "Id", intType, primaryKey: true))
+                        && exec("add_column", Column(numbered, column, textType))
+                        && exec("add_column", Column(numbered, "V", textType))
+                        // 先に V の一意制約へ、U の一意制約の合成名（縮めた名前）を付けておく＝合成名がぶつかって番号が付く
+                        && exec(
+                            "set_unique_constraint",
+                            new
+                            {
+                                table_name = numbered,
+                                columns = new[] { "V" },
+                                name = IdentifierLengthLimits.ForDbms(dialect).Fit(numberedName),
+                            }
+                        )
+                        && exec(
+                            "set_unique_constraint",
+                            new { table_name = numbered, columns = new[] { column } }
+                        )
+                ),
+                [numberedName, $"{numberedName}_2"]
+            ),
+        ];
+    }
+
+    /// <summary>既定名を縮めさせる形の表・列の名前（子の表・親の表・一意制約の列・番号の形の表）</summary>
+    /// <remarks>
+    /// 番号の形の表は、一意制約の合成名を縮めた名前がちょうど上限まで埋まる長さにする（端数が残ると、縮めた名前の後ろに番号を
+    /// 足す誤りでも上限に収まって見逃す）。
+    /// </remarks>
+    private static (string Child, string Parent, string Column, string Numbered) DerivedNames(
+        string dialect
+    )
+    {
+        var multibyte = NameFuzz.BaseNames[15][0];
+        var surrogate = char.ConvertFromUtf32(0x1F600);
+
+        return dialect switch
+        {
+            // 63 バイト：表は "a"＋3 バイト × 20＝61 バイト。PK_ で 64 バイト＝予算 54 に "PK_a"＋16 文字＝52 バイト（端数 2）。
+            // 番号の形の表は "abc"＋20 文字＝63 バイトで、UQ_ の合成名は予算 54 に "UQ_abc"＋16 文字＝54 バイト（端数なし）
+            "postgresql" or "sqlite" => (
+                "a" + new string(multibyte, 20),
+                "b" + new string(multibyte, 20),
+                "U",
+                "abc" + new string(multibyte, 20)
+            ),
+            // 128 バイト：表は 3 バイト × 42＝126 バイト。PK_ で 129 バイト＝予算 119 に "PK_"＋38 文字＝117 バイト（端数 2）。
+            // 番号の形の表は "ab"＋42 文字＝128 バイトで、UQ_ の合成名は予算 119 に "UQ_ab"＋38 文字＝119 バイト（端数なし）
+            "oracle" => (
+                new string(multibyte, 42),
+                "b" + new string(multibyte, 41),
+                "U",
+                "ab" + new string(multibyte, 42)
+            ),
+            // 128 単位：表は "a"＋サロゲートペア × 63＝127 単位。PK_ で 130 単位＝予算 119 に "PK_a"＋57 対＝118 単位（端数 1）。
+            // 番号の形の表は子の表と同じ（縮めた合成名は 127 単位で、後ろに番号を足すと上限を超える）
+            "sqlserver" => (
+                "a" + string.Concat(Enumerable.Repeat(surrogate, 63)),
+                "b" + string.Concat(Enumerable.Repeat(surrogate, 63)),
+                "U",
+                "a" + string.Concat(Enumerable.Repeat(surrogate, 63))
+            ),
+            // 64 文字（表のファイル名は 251 まで）：表は 31 文字・30 文字、一意制約の列は 40 文字。文字数では端数が出ない
+            "mysql" => (
+                new string(multibyte, 31),
+                "b" + new string(multibyte, 30),
+                new string(multibyte, 40),
+                new string(multibyte, 31)
+            ),
+            _ => throw new ArgumentOutOfRangeException(nameof(dialect), dialect, null),
+        };
+    }
+
+    /// <summary>親の Id を子の列で参照する名前の無いリレーション</summary>
+    private static object Reference(string parent, string child, string childColumn) =>
+        new
+        {
+            source_table = parent,
+            target_table = child,
+            source_columns = new[] { "Id" },
+            target_columns = new[] { childColumn },
+            relationship_type = "OneToMany",
+        };
 
     /// <summary>名前ごとに主キー Id だけを持つテーブルの図を作る（ツールが断れば null）</summary>
     public static ErDiagram? BuildTables(string dialect, params string[] names)

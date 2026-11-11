@@ -17,7 +17,8 @@ MainViewModel と図の ViewModel の規則：文書の保存・外部変更検�
   - ガード：`DocumentFileTests`（行 `guard-ignored-forgotten-after-save-external` / `guard-ignored-forgotten-after-save-overwrite`）。
 - 破損/新フォーマット文書は取り込まず現状維持＋通知する。起動時の復元後も同じ規則で外部変更をチェックする。
 - 文書の保存・読込・外部変更・自動保存は、状態機械のエンジン `DocumentFileTests` がまとめて確かめる。
-  - 手の列を VM と参照モデル `DocumentFileModel` で流して毎手で突き合わせ、モデルと独立の不変条件 5 つ（`DocumentFileInvariants`：見ていない版・将来版を黙って書き潰さない／最終既知ハッシュは読み書きした内容／クリーンは自動再読込・ダーティは確認／メタが食い違えば前のパスで復元しない／読込の検査は拒否だけ）を当てる。
+  - 手の列を VM と参照モデル `DocumentFileModel` で流して毎手で突き合わせ、モデルと独立の不変条件 6 つ（`DocumentFileInvariants`：見ていない版・将来版を黙って書き潰さない／最終既知ハッシュは読み書きした内容／クリーンは自動再読込・ダーティは確認／メタが食い違えば前のパスで復元しない／読込の検査は拒否だけ／読み込んだ図の配置を持つ表は保存した位置と幅のまま・配置の欠けた表はどの表とも重ならない）を当てる。
+  - 読めない・書けないファイルは、手の属性 `DocStep.Access`（`ShareNone`＝読めず書けない・`ShareRead`＝読めるが書けない・`ReadOnly`＝読み取り専用の属性）で、その手の間だけ実物のロックか属性を掛けて作り、観測の前に外す（製品に差し込み口を足さない）。掛ける手は開く・上書き保存・名前を付けて保存・内容の変更の配送・再起動。モデルは、書けない保存先を `Save_Failed`（未保存のまま）、読めない保存先を乖離なし（確認なし）、読めないファイルを開くのを `Open_Failed`、ハッシュの無い配送をクリーンなら再読込の失敗（ステータス）・ダーティなら確認として持つ。配置つき・一部の表だけ配置の欠けた外部の図は、外部の書き込みの中身（`DocContentKind.DiagramWithLayout`・`DiagramPartialLayout`）で作る。どちらも本流の乱数を変えない 2 本目の乱数（`DocumentFileGenerator.SideSeed`）で引く（`Side` が本流の手を包むだけで、本流の引き方は変えない。割合を 0 にすると種 1〜2000 の手の列の要約が 2 本目を足す前の生成器と一致する）。割合は、条件を掛けられる手の 30%（3 種を等分）と図の外部の書き込みの 40%（2 種を等分）で、どの水準も普段の 150 種に出る大きさにしてある。生成器はモデルの状態を読んで手を選ぶので、2 本目が手を変えた種はその後の手の列も変わる（足したときに 150 種のうち 144 種の指紋が変わった）。網羅の行・既知の失敗の一覧・網羅しない組の一覧は種の番号に頼らない（後の 2 つは空）。
   - 決まった形のシナリオ（`DocumentFileScenarios`＝元の単発のテストの入力と期待）と、種を使う乱数の手の列（`DocumentFileGenerator`・普段 150 種・夜間 1500 種・`QUICKER_DOCFILE_SEEDS` / `QUICKER_DOCFILE_SEED`）。最終既知ハッシュと無視したハッシュは反射で読む（`DocumentFileProbe`。読み方は `DocumentFileTests.Probe_ReadsTheRecordedHashes` が固定）。
   - 監視器そのもの（実 FileSystemWatcher・デバウンス・張り直し）は時計の差し込み点が無いのでモデルの外に置き、`DocumentFileWatcherTests` と `MainViewModelLoadHashRaceTests` が受け持つ。
 

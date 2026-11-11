@@ -701,12 +701,6 @@ namespace QuickER.AI.Chat.Resources {
             }
         }
 
-        public static string QueryTool_ArgumentsNotObject {
-            get {
-                return ResourceManager.GetString("QueryTool_ArgumentsNotObject", resourceCulture);
-            }
-        }
-
         public static string Tool_ArgumentMissing {
             get {
                 return ResourceManager.GetString("Tool_ArgumentMissing", resourceCulture);

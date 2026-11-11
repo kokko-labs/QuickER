@@ -11,9 +11,11 @@ namespace QuickER.Tests.TestSupport;
 /// 起点は「成功する引数」（ベースライン）で、そこから次を 1 つずつ崩す：必須の引数の欠落、各引数の <c>null</c>、
 /// スキーマの型と違う種類の値（文字列・数・真偽・配列・オブジェクト）、配列の要素の種類、オブジェクトの配列の要素の
 /// 中の引数（欠落・<c>null</c>・型違い）、文字列を値に持つ辞書（<c>additionalProperties</c>）の値の種類。
+/// これとは別に、引数の全体をオブジェクトでない値（配列・文字列・数・真偽・<c>null</c>）に置き換えたケースを、ツールごとに
+/// 1 回作る（<see cref="RootCases"/>）。
 /// </para>
 /// <para>
-/// 断るべきケース（<see cref="Case.MustFail"/>）は、必須の欠落と <c>null</c>・型違い・要素や値の種類違い。
+/// 断るべきケース（<see cref="Case.MustFail"/>）は、必須の欠落と <c>null</c>・型違い・要素や値の種類違い・オブジェクトでない引数の全体。
 /// 省略できる引数の <c>null</c> は「指定しなかった」と同じに扱ってよいので、断ることを求めない。
 /// どのケースにも「生の例外にならない」「失敗したら状態が変わらない」を表明するのは呼び出し側の役目。
 /// </para>
@@ -27,10 +29,10 @@ internal static class ToolArgumentFuzz
     /// <param name="Breakage">崩し方（<see cref="Breakages"/> のどれか。網羅の数え上げに使う）</param>
     /// <param name="ArgumentType">崩した引数のスキーマの型（<c>type</c> が無ければ空）</param>
     /// <param name="Required">崩した引数が必須か</param>
-    /// <param name="Depth">崩した引数の深さ（0＝ツールの引数・1＝オブジェクトの配列の要素の中の引数）</param>
+    /// <param name="Depth">崩した引数の深さ（-1＝引数の全体・0＝ツールの引数・1＝オブジェクトの配列の要素の中の引数）</param>
     internal sealed record Case(
         string Id,
-        JsonObject Arguments,
+        JsonNode? Arguments,
         bool MustFail,
         string Breakage,
         string ArgumentType,
@@ -58,6 +60,9 @@ internal static class ToolArgumentFuzz
 
         /// <summary>文字列を値に持つ辞書の値の種類違い（<c>null</c> を含む）</summary>
         public const string DictionaryValue = "dictionary-value";
+
+        /// <summary>引数の全体をオブジェクトでない値（配列・文字列・数・真偽・<c>null</c>）に置き換える</summary>
+        public const string NonObjectRoot = "non-object-root";
     }
 
     /// <summary>型違いとして試す値（スキーマの型と同じ種類のものは除いて使う）</summary>
@@ -69,6 +74,31 @@ internal static class ToolArgumentFuzz
         ("array", () => new JsonArray()),
         ("object", () => new JsonObject()),
     ];
+
+    /// <summary>引数の全体に当てたケースの型の印（<see cref="Case.ArgumentType"/>。スキーマの引数の型と区別する）</summary>
+    public const string RootType = "(arguments)";
+
+    /// <summary>
+    /// 引数の全体をオブジェクトでない値に置き換えたケースを列挙する（ツールごとに 1 回。どのツールも断らなければならない）
+    /// </summary>
+    /// <param name="prefix">ケース ID の接頭辞（<c>ツール#(arguments)</c>）</param>
+    public static IEnumerable<Case> RootCases(string prefix) =>
+        Kinds
+            .Where(candidate => candidate.Kind != "object")
+            .Append(("null", () => (JsonNode?)null))
+            .Select(candidate => new Case(
+                $"{prefix}.{candidate.Kind}",
+                candidate.Value(),
+                true,
+                Breakages.NonObjectRoot,
+                RootType,
+                true,
+                Depth: -1
+            ));
+
+    /// <summary>入口へ渡す引数の JSON の文字列（<c>null</c> は JSON の <c>null</c>）</summary>
+    /// <param name="arguments">ケースの引数</param>
+    public static string JsonText(JsonNode? arguments) => arguments?.ToJsonString() ?? "null";
 
     /// <summary>ツール定義の入力スキーマを JSON オブジェクトとして取り出す</summary>
     /// <param name="inputSchema">ツール定義の <c>InputSchema</c>（匿名型または JsonNode）</param>

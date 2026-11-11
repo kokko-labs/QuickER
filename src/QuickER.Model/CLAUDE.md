@@ -32,7 +32,9 @@
 - ツール（両ホスト）・DBML / Mermaid / Excel の取込・C# 生成は重複を断り、DB 取込は後着を捨てて警告する。
 - プロパティパネルの VM（`EntityViewModel.TableName` / `ColumnViewModel.Name` / `UniqueConstraintViewModel.Name` / `RelationshipViewModel.ConstraintName`）は重複する書き換えを受け付けず、元の名前へ戻して `NameChangeRejected` で知らせる。制約名の 2 つは図の中のほかの制約名（種類をまたぐ）と比べ、判定はツールと同じ Model の関数（一意制約は `ConstraintNames.IsTaken`・外部キーは `ConstraintNames.IsForeignKeyNameTaken`）。Undo / Redo の適用は `ApplyTableName` / `ApplyName` / `ApplyConstraintName` で検査を通さない（履歴の往復を壊さない）。
 - 表の複製・貼り付け（`MainViewModel.CreateEntityCopy`）は、写した一意制約の名前が図の制約名（`ConstraintNames.CollectExisting`）とぶつかるときだけ名前を外す（`src/QuickER.Gui/ViewModels/CLAUDE.md`「一意制約の GUI」）。
-- 図のファイルの読込は `SchemaNames` で衝突する名前を断らない。手で編集したファイルは重複を断る入口を通らない。そうした図との同期は、綴りまで一致する相手を優先して組み、組めない名前を追加・削除として出す。読込で断る案は、開けなくなる仕様変更になるため見送り。
+- 図のファイルの読込は `SchemaNames` で衝突する名前を断らない。手で編集したファイルは重複を断る入口を通らない。読込で断る案は、開けなくなる仕様変更になるため見送り。
+  - そうした図の DDL 生成と差分同期は、同じ名前の表・表の中で同じ名前の列を名指しして図全体を断る。判定は `DiagramNameDuplicates`（`src/QuickER.Provider/CLAUDE.md`「同じ名前の表と列」）。
+  - マージ取込（`DiagramMergeReconciler`）は、現在の図の同じ名前の候補から綴りまで一致する相手を優先して組み、組めない名前を新しい要素として扱う。
 
 ### ガード
 
@@ -43,7 +45,7 @@
 
 ### 名前の総当たり
 
-- `NameIdentity*FuzzTests`：ツール両ホスト・VM・取込 3 形式・クエリ定義ダイアログ・SQLite の DB 取込・C# 生成へ名前の組を流して、重複の判定と保存形を表明する。
+- `NameIdentity*FuzzTests`：ツール両ホスト・VM・取込 3 形式・クエリ定義ダイアログ・SQLite の DB 取込・C# 生成・5 方言の DDL 生成と差分（`NameIdentityDdlFuzzTests`＝ツールを通さずに組んだ図）へ名前の組を流して、重複の判定と保存形を表明する。
 - `NameFuzzCompilationTests`：生成→実コンパイルでエラー 0・警告 0。
 - Integration の `NameFuzzDdlRoundTripIntegrationTests.cs`（方言ごとの派生と共通の基底）：5 方言で DDL を適用して取り込み直した差分が空。
 - 期待値の正本は `NameIdentityRule`。既知の失敗は `NameFuzzKnownFailures` に指摘の番号と直す区切りつきで載せる。一覧に無い失敗も、載っているのに起きない失敗も赤。`QUICKER_FUZZ_SEEDS` でシードを増やせる。
@@ -101,6 +103,7 @@ QuickER が付ける既定の制約名は識別子の長さの上限に収め、
 - `PostgreSqlLongDefaultConstraintNameIntegrationTests`（能力を差し替えて吸収しない対照）。実 DB の期待の行 `realdb-long-default-names-apply-and-round-trip-no-diff` / `realdb-long-default-pg-legacy-truncated-fk-name-is-absorbed`（`SyncPlanExpectationRows.RealCrossDialect.cs`）。同期計画の来歴の行 `SyncPlanHistoryRows`。
 - `ToolScenarioTests`（行 `long-default-name-*`＝両ホストの保存名と要約・縮めた既定名との衝突・名前の無い外部キーの要約と削除と重複の名指し）・`MainViewModelRelationshipConstraintNameTests`（GUI の手作成）・`FormatRoundTripTests`（DBML・Mermaid の取込＝規則の行 `dbml-rule-long-default-name-*`・`mermaid-rule-carries-target-dbms`、形の行 `dbml-long-default-name-*`）。
 - `CodegenCaseTests` の行 `code-unique-constraint-name-*`・`UniqueConstraintResolvedNameLimitTests`（方言の切替で表示し直す。`ResolvedName_FollowsCollisionsAcrossTables`）・`IdentifierLengthLimitTests`（`Fit` / `Truncate`）。
+- 多バイトの長い名前の既定名：名前の DDL の往復（`Name/DdlRoundTrip`）が、方言ごとに決まった長い名前（`NameFuzzDiagrams.DerivedNameCases`＝乱数なし）で、名前の無い主キー・一意制約・外部キーの既定名、同じ親子の 2 本目の外部キーの既定名、合成名がぶつかって縮めた後に番号が付く名前を上限で縮めさせ、5 方言の実 DB に適用して取り込み直した差分が空であることを確かめる。名前の長さは上限の単位ごとに、縮めた名前の切れ目に端数が出る長さ（PostgreSQL・Oracle は 3 バイトの文字・SQL Server はサロゲートペア）と、番号の形だけはちょうど上限まで埋まる長さ（後ろに番号を足す誤りが上限を超える）を選ぶ。縮めるはずの名前が上限の内なら空振りとして赤。mutation 実証済み（切り詰めの単位を無視する・縮めた後ろに番号を足す）。
 - mutation 実証済み。
 
 ## 名前の上限の通知（NameLimitNotes）

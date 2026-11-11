@@ -1,3 +1,4 @@
+using System.IO;
 using QuickER.Resources;
 using QuickER.Services;
 
@@ -19,9 +20,10 @@ internal sealed record DocBefore(
 /// 文書の状態機械の不変条件（参照モデルと独立に、製品の約束だけから判定する）
 /// </summary>
 /// <remarks>
-/// 5 つ：(1) 利用者が見ていない外部の版・将来版を黙って書き潰さない、(2) 最終既知ハッシュは書いた／読んだ内容そのもの、
+/// 6 つ：(1) 利用者が見ていない外部の版・将来版を黙って書き潰さない、(2) 最終既知ハッシュは書いた／読んだ内容そのもの、
 /// (3) クリーンなら自動再読込・ダーティなら確認、(4) 自動保存のメタが食い違えば前のパスで復元しない、
-/// (5) 読込の検査は拒否だけで修復しない。違反は文で返す（空なら守られた）。
+/// (5) 読込の検査は拒否だけで修復しない、(6) 読み込んだ図の配置を持つ表は保存した位置のまま・配置の欠けた表は重ならない。
+/// 違反は文で返す（空なら守られた）。
 /// </remarks>
 internal static class DocumentFileInvariants
 {
@@ -167,6 +169,70 @@ internal static class DocumentFileInvariants
         )
         {
             yield return "(5) 再読込に失敗したのに図・パスが変わった";
+        }
+
+        // (6) 開く・再読込が図へ読み込んだ直後の配置：配置を持つ表は保存した位置・幅のまま動かず、配置の欠けた表
+        //     （配置を持たない図ではすべての表）はほかのどの表とも重ならない（LoadDocumentIntoDiagram の XmlDoc）。
+        //     欠けた表の座標そのものは見ない（配置の質は自動整列のエンジンが受け持つ）
+        foreach (var load in after.Loads)
+        {
+            if (load.Label is null)
+            {
+                continue;
+            }
+
+            var saved = harness.SavedLayoutOf(load.Label);
+            var placements = load.Placements;
+
+            for (var i = 0; i < placements.Count; i++)
+            {
+                var placement = placements[i];
+
+                if (saved.TryGetValue(placement.Id, out var layout))
+                {
+                    if (
+                        placement.X != layout.X
+                        || placement.Y != layout.Y
+                        || placement.Width != layout.Width
+                    )
+                    {
+                        yield return FormattableString.Invariant(
+                            $"(6) {load.Label} の表 {placement.Table} が保存した配置 ({layout.X}, {layout.Y}, 幅 {layout.Width}) から ({placement.X}, {placement.Y}, 幅 {placement.Width}) へ動いた"
+                        );
+                    }
+
+                    continue;
+                }
+
+                for (var j = 0; j < placements.Count; j++)
+                {
+                    var other = placements[j];
+
+                    // 欠けた表どうしの組は 1 回だけ数える
+                    if (j == i || (j < i && !saved.ContainsKey(other.Id)))
+                    {
+                        continue;
+                    }
+
+                    if (placement.Overlaps(other))
+                    {
+                        yield return FormattableString.Invariant(
+                            $"(6) {load.Label} の配置の欠けた表 {placement.Table} ({placement.X}, {placement.Y}, {placement.Width}×{placement.Height}) が表 {other.Table} ({other.X}, {other.Y}, {other.Width}×{other.Height}) と重なる"
+                        );
+                    }
+                }
+            }
+        }
+
+        // ハーネスの後始末：アクセスの条件は手の間だけで、観測の時点で読み取り専用の属性が残っていない
+        foreach (var file in new[] { DocFile.A, DocFile.B })
+        {
+            var path = harness.PathOf(file);
+
+            if (File.Exists(path) && File.GetAttributes(path).HasFlag(FileAttributes.ReadOnly))
+            {
+                yield return $"ハーネスが {file} の読み取り専用の属性を外し忘れた";
+            }
         }
     }
 }

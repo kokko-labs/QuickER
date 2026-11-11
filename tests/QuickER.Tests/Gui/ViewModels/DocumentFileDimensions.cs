@@ -8,7 +8,7 @@ namespace QuickER.Tests.Gui.ViewModels;
 /// <remarks>
 /// <para>
 /// 1 手を 1 ケースとして、手の前の文書の状態（無題か・未保存か）・現在のファイルのディスクの状態（最終既知の版と比べて）・
-/// 手の種類・確認の応答（聞かれなかったかも含む）の 4 因子を数える。
+/// 手の種類・確認の応答（聞かれなかったかも含む）・手の間だけ文書のファイルに掛かったアクセスの条件の 5 因子を数える。
 /// </para>
 /// <para>
 /// 数え方は参照モデルだけで手の列をなぞる（VM もディスクも使わない）。手の前の状態はモデルの状態、応答は「その手で確認が
@@ -29,6 +29,22 @@ internal static class DocumentFileDimensions
 
     /// <summary>確認への応答（聞かれなかった手は NotAsked）</summary>
     public const string Answer = "Answer";
+
+    /// <summary>手が読み書きする文書のファイルに、手の間だけ掛かったアクセスの条件（掛からなければ None）</summary>
+    public const string Access = "Access";
+
+    /// <summary>
+    /// 文書のファイル（開く・保存先・現在のファイル）を読み書きし得る手。ほかの手はアクセスの条件を持たない
+    /// （条件は手が読み書きするファイルに掛けるもので、読み書きしない手には掛ける先が無い）
+    /// </summary>
+    private static readonly HashSet<string> TouchesDocumentFile = new(StringComparer.Ordinal)
+    {
+        "Open",
+        "Save",
+        "SaveAs",
+        $"Deliver{DocumentFileChangeKind.Modified}",
+        "Restart",
+    };
 
     /// <summary>確認を出さない手（応答の因子が NotAsked しか取り得ない）</summary>
     private static readonly HashSet<string> NeverAsks = new(StringComparer.Ordinal)
@@ -128,6 +144,16 @@ internal static class DocumentFileDimensions
                     [new Level("Yes"), new Level("No"), new Level("NotAsked")],
                     "確認への応答（その手で確認が出なければ NotAsked）"
                 ),
+                new Factor(
+                    Access,
+                    [
+                        new Level("None"),
+                        new Level(nameof(DocAccessKind.ShareNone)),
+                        new Level(nameof(DocAccessKind.ShareRead)),
+                        new Level(nameof(DocAccessKind.ReadOnly)),
+                    ],
+                    "手の間だけ文書のファイルに掛かったアクセスの条件（読めない・書けない。掛からなければ None）"
+                ),
             ],
             null,
             IsValid
@@ -162,6 +188,17 @@ internal static class DocumentFileDimensions
             && assignment.TryGetValue(Answer, out var answer)
             && NeverAsks.Contains(op)
             && answer != "NotAsked"
+        )
+        {
+            return false;
+        }
+
+        // 文書のファイルを読み書きしない手は、アクセスの条件が None しか取り得ない
+        if (
+            assignment.TryGetValue(Op, out var touching)
+            && assignment.TryGetValue(Access, out var access)
+            && !TouchesDocumentFile.Contains(touching)
+            && access != "None"
         )
         {
             return false;
@@ -263,6 +300,7 @@ internal static class DocumentFileDimensions
                     [Document] = document,
                     [Disk] = disk,
                     [Answer] = answer,
+                    [Access] = model.AppliedAccess?.KindName ?? "None",
                 }
             );
         }
@@ -293,6 +331,8 @@ internal static class DocumentFileDimensions
         return model.Versions[label].Content switch
         {
             DocContentKind.Diagram
+            or DocContentKind.DiagramWithLayout
+            or DocContentKind.DiagramPartialLayout
             or DocContentKind.DiagramWithBom
             or DocContentKind.NullCollections => "Diagram",
             DocContentKind.Newer => "Newer",

@@ -83,7 +83,7 @@ public sealed class ErDiagramHostChatAdapter : IErDiagramChatHost
             };
         }
 
-        /// <summary>引数の形の問題を表示言語の 1 文にする（カタログに無いツール・読めない引数は null＝各処理に任せる）</summary>
+        /// <summary>引数の形の問題を表示言語の 1 文にする（カタログに無いツール・JSON として読めない引数は null＝各処理に任せる）</summary>
         private static string? DescribeShapeProblem(string toolName, string argumentsJson)
         {
             if (!CatalogSchemas.TryGetValue(toolName, out var schema))
@@ -95,15 +95,10 @@ public sealed class ErDiagramHostChatAdapter : IErDiagramChatHost
 
             try
             {
+                // オブジェクトでない全体（配列・文字列・数・真偽・null）は形の検査が断る（ツールへ届けない）
                 using var document = JsonDocument.Parse(
                     string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson
                 );
-
-                if (document.RootElement.ValueKind != JsonValueKind.Object)
-                {
-                    return null;
-                }
-
                 arguments = document.RootElement.Clone();
             }
             catch (JsonException)
@@ -189,13 +184,10 @@ public sealed class ErDiagramHostChatAdapter : IErDiagramChatHost
         }
 
         /// <summary>
-        /// 引数 JSON を <see cref="JsonElement"/> へ解釈する（空は空オブジェクト扱い・解釈不能と
-        /// オブジェクト以外の根〔<c>[]</c>・<c>null</c>・数値など〕はローカライズ済みエラー）
+        /// 引数 JSON を <see cref="JsonElement"/> へ解釈する（空は空オブジェクト扱い・解釈不能はローカライズ済みエラー）
         /// </summary>
         /// <remarks>
-        /// 根がオブジェクトでないまま渡すと、<see cref="QueryToolCore"/> の <c>TryGetProperty</c> が
-        /// <see cref="InvalidOperationException"/>（英語の生メッセージ）で落ちる。MCP 側の
-        /// <c>DocumentErDiagramToolSet</c> と同じく入口で断る。
+        /// 根がオブジェクトでない引数は、ここへ届く前に入口の形の検査（<see cref="DescribeShapeProblem"/>）が断る。
         /// </remarks>
         private static bool TryParseArguments(
             string toolName,
@@ -209,13 +201,6 @@ public sealed class ErDiagramHostChatAdapter : IErDiagramChatHost
                 using var document = JsonDocument.Parse(
                     string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson
                 );
-
-                if (document.RootElement.ValueKind != JsonValueKind.Object)
-                {
-                    arguments = default;
-                    error = (string.Format(Strings.QueryTool_ArgumentsNotObject, toolName), false);
-                    return false;
-                }
 
                 arguments = document.RootElement.Clone();
                 error = default;

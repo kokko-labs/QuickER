@@ -56,8 +56,9 @@ internal static class ToolArgumentFuzzDimensions
                         new Level(ToolArgumentFuzz.Breakages.Element),
                         new Level(ToolArgumentFuzz.Breakages.ElementAfterOk),
                         new Level(ToolArgumentFuzz.Breakages.DictionaryValue),
+                        new Level(ToolArgumentFuzz.Breakages.NonObjectRoot),
                     ],
-                    "引数の崩し方（必須の欠落・null・型違い・配列の要素・正しい要素の後ろの要素・辞書の値）"
+                    "引数の崩し方（必須の欠落・null・型違い・配列の要素・正しい要素の後ろの要素・辞書の値・オブジェクトでない引数の全体）"
                 ),
                 new Factor(
                     ArgumentType,
@@ -69,8 +70,9 @@ internal static class ToolArgumentFuzzDimensions
                         new Level("array"),
                         new Level("object"),
                         new Level(Untyped),
+                        new Level(ToolArgumentFuzz.RootType),
                     ],
-                    "崩した引数の入力スキーマの型（ToolArgumentShape が見分ける 6 つと、型を宣言しない引数）"
+                    "崩した引数の入力スキーマの型（ToolArgumentShape が見分ける 6 つと、型を宣言しない引数と、引数の全体）"
                 ),
                 new Factor(
                     Required,
@@ -79,8 +81,8 @@ internal static class ToolArgumentFuzzDimensions
                 ),
                 new Factor(
                     Nesting,
-                    [new Level("Top"), new Level("InArrayElement")],
-                    "崩した引数の深さ（ツールの引数か、オブジェクトの配列の要素の中の引数か）"
+                    [new Level("Root"), new Level("Top"), new Level("InArrayElement")],
+                    "崩した引数の深さ（引数の全体か、ツールの引数か、オブジェクトの配列の要素の中の引数か）"
                 ),
             ],
             isValid: IsValid
@@ -142,6 +144,7 @@ internal static class ToolArgumentFuzzDimensions
                 // 2 段以上の入れ子は宣言していない水準＝作るようになったら観測が宣言の誤りとして断る
                 [Nesting] = fuzzCase.Depth switch
                 {
+                    -1 => "Root",
                     0 => "Top",
                     1 => "InArrayElement",
                     _ => $"Depth{fuzzCase.Depth}",
@@ -304,6 +307,26 @@ internal static class ToolArgumentFuzzDimensions
         assignment.TryGetValue(Breakage, out var breakage);
         assignment.TryGetValue(ArgumentType, out var type);
         assignment.TryGetValue(Required, out var required);
+        assignment.TryGetValue(Nesting, out var nesting);
+
+        // 引数の全体は 1 つしかなく、ツールの引数でも配列の要素の中でもない。全体を崩すのは全体の置き換えだけで、全体は
+        // 省略できない（どのツールも引数のオブジェクトを受け取る）。3 つの因子の「全体」の水準は互いにだけ組む
+        var rootFlags = new[]
+        {
+            breakage is null ? (bool?)null : breakage == ToolArgumentFuzz.Breakages.NonObjectRoot,
+            type is null ? null : type == ToolArgumentFuzz.RootType,
+            nesting is null ? null : nesting == "Root",
+        };
+
+        if (rootFlags.OfType<bool>().Distinct().Count() > 1)
+        {
+            return false;
+        }
+
+        if (rootFlags.Contains(true) && required == "No")
+        {
+            return false;
+        }
 
         // 省略できる引数を省くのは「指定しなかった」という正しい入力で、崩し方にならない（欠落は必須の引数だけの崩し方）
         if (breakage == ToolArgumentFuzz.Breakages.Missing && required == "No")

@@ -8,10 +8,11 @@ namespace QuickER.Tests.TestSupport;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 流れは入口に依らず同じ：ツールごとの成功する引数（ベースライン）を実行し、成功したものから
+/// 流れは入口に依らず同じ：ツールごとに引数の全体をオブジェクトでない値にしたケース（<see cref="ToolArgumentFuzz.RootCases"/>）を流し、
+/// 成功する引数（ベースライン）を実行し、成功したものから
 /// <see cref="ToolArgumentFuzz.Generate"/> が崩したケースを作り、<see cref="KnownCaseLedger"/> を通して 1 件ずつ
 /// 3 つの表明を確かめる。(1) 生の例外にならない、(2) 断るべきケース（<see cref="ToolArgumentFuzz.Case.MustFail"/>）は
-/// 失敗で返る、(3) 失敗したら何も変えない。最後に台帳の古い項目・網羅の計数・最低件数を照合する。
+/// 失敗で返る（引数の全体のケースは入口の形の検査の文で返る）、(3) 失敗したら何も変えない。最後に台帳の古い項目・網羅の計数・最低件数を照合する。
 /// </para>
 /// <para>
 /// 入口ごとに違うのは <see cref="Entrance"/> の抽象メンバー（ツールとベースライン・実行のしかた・生の例外の見分け方・
@@ -60,10 +61,18 @@ internal static class ToolArgumentShapeFuzzRunner
         public virtual void PrepareCase() { }
 
         /// <summary>崩したケース 1 件を実行する（台帳の中で呼ぶ）</summary>
-        public abstract CaseOutcome RunCase(string toolName, JsonObject args);
+        /// <remarks>引数はふつうオブジェクトで、引数の全体を崩したケース（<see cref="ToolArgumentFuzz.RootCases"/>）だけオブジェクトでない値か null。</remarks>
+        public abstract CaseOutcome RunCase(string toolName, JsonNode? args);
 
         /// <summary>結果の文が、入口が例外を受け止めた（＝生の例外）ときのものか</summary>
         public abstract bool IsRawException(string result);
+
+        /// <summary>入口の形の検査が引数の全体（オブジェクトでない値）を断ったときの結果の文</summary>
+        /// <remarks>
+        /// 引数の全体のケースは、ツールの処理が別の理由（必須の引数が無いなど）で失敗しても合格にしない。入口が形の検査で
+        /// 断ったことを、この文との一致で確かめる（ツールへ届けば文が違う）。
+        /// </remarks>
+        public abstract string RootRefusal { get; }
     }
 
     /// <summary>入口へ全ツールの崩したケースを流し、問題があれば赤にする</summary>
@@ -77,6 +86,23 @@ internal static class ToolArgumentShapeFuzzRunner
         foreach (var tool in entrance.Tools())
         {
             var schema = ToolArgumentFuzz.SchemaOf(tool.InputSchema);
+
+            // 引数の全体がオブジェクトでないケースはベースラインに依らないので、ツールごとに 1 回だけ流す
+            foreach (
+                var fuzzCase in ToolArgumentFuzz.RootCases(
+                    $"{tool.Name}#{ToolArgumentFuzz.RootType}"
+                )
+            )
+            {
+                caseCount++;
+                ToolArgumentFuzzDimensions.Observe(coverage, fuzzCase);
+                entrance.PrepareCase();
+                entrance.Ledger.Run(
+                    fuzzCase.Id,
+                    () => Check(entrance, tool.Name, fuzzCase, seenIds),
+                    problems
+                );
+            }
 
             foreach (var (label, baseline) in tool.Baselines)
             {
@@ -141,6 +167,16 @@ internal static class ToolArgumentShapeFuzzRunner
         if (fuzzCase.MustFail && outcome.Success)
         {
             throw new Xunit.Sdk.XunitException($"成功した（断るべき）: {outcome.Result}");
+        }
+
+        if (
+            fuzzCase.Breakage == ToolArgumentFuzz.Breakages.NonObjectRoot
+            && outcome.Result != entrance.RootRefusal
+        )
+        {
+            throw new Xunit.Sdk.XunitException(
+                $"引数の全体を入口の形の検査で断っていない（期待: {entrance.RootRefusal}）: {outcome.Result}"
+            );
         }
 
         if (outcome.Success)

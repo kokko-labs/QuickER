@@ -461,6 +461,16 @@
 - 図には列の無い表が入り得る（MCP の `add_entity` の直後・GUI で全列を消した表・列を復元できなかった C# リバース・列の行の無い Excel 定義書のシート）。図の側の入口では知らせず、DDL と同期の入口で名指しする。
 - 固定は `DialectDdlTableTests` の行 `ddl-table-without-columns-is-rejected`・`sync-add-table-without-columns-is-excluded-with-warning`（スクリプトの文の面）・`sync-add-table-without-columns-plan-is-rejected`（手で組んだ計画）・期待の行 `plan-add-table-without-columns-is-excluded-with-warning`（計画の面・中立と 5 方言）・実 DB の行 `realdb-add-table-without-columns-is-excluded-and-other-tables-are-created`（5 方言）・`SchemaSyncWarningTextTests`。mutation 実証済み（DDL の判定・計画の除外・スクリプトの入口・除外の位置）。
 
+### 同じ名前の表と列
+
+- 図の中で同じ名前（`SchemaNames` の規則）の表が 2 つ以上、または 1 つの表に同じ名前の列が 2 つ以上あると、DDL は同じ表・列を 2 回作って DB に途中で断られ、差分は名前で表を組めずに（`NameLookup` は片側の 2 件以上を見つからない扱いにする）同じ表の追加を 2 つ出す。
+- 判定は Model の `DiagramNameDuplicates` の 1 か所、例外文は `SqlNameDuplicates.Validate`（英語・`TABLE 'x' and TABLE 'X'`・`COLUMN 'x'.'y' and COLUMN 'x'.'Y'`）で、次の 3 つの入口が通す（5 方言とも同じ扱い）。
+  - DDL：基底（`DdlGeneratorBase.Build`）と SQLite（`SqliteDdlGenerator.Build`）の `SqlTableShape.Validate(diagram)` の直後。名指しして図全体を止める。
+  - 差分：`SchemaDiffService.Compute` の冒頭（図の側だけを見る）。差分ごと止め、同期のダイアログはステータス行へ出す。計画と同期スクリプトの入口には置かない（差分を経ない計画へは図が届かない）。
+  - DB の側の同じ名前（引用識別子で共存する `Dup` と `dup`）は断らず、`NameLookup` が綴りまで一致する 1 件を選ぶ。
+- 図には手で編集したファイル（読込検査は名前の重複を断らない）と、同じ名前の表を警告つきで受け入れる C# リバースから入り得る。図の側の入口では知らせず、DDL と差分の入口で名指しする（列の無い表と同じ）。
+- 固定は名前の総当たりの入口 `NameIdentityDdlFuzzTests`（`ddl:{方言}:table`・`ddl:{方言}:column`・`diff:{方言}:table`・`diff:{方言}:column`＝同じ名前の組を受け付けたら `duplicate-accepted`、違う名前の組を断ったら `distinct-rejected`）。mutation 実証済み（3 つの入口・列の判定・比べ方）。
+
 ### セクションの順序
 
 - `SyncPlanner.SectionOrder` は DropFK → DropUnique → DropTable → AddTable → AddColumn → PK:Drop → AlterColumn → PK:Add → DropColumn → AddUnique → AddFK → SetTableDescription → SetColumnDescription。

@@ -62,6 +62,12 @@ internal sealed record DocObservation
 
     public required CurrentDocumentSettings Meta { get; init; }
 
+    /// <summary>この手で開く・再読込が図へ読み込んだ版と、読み込んだ直後の表の配置（順に）</summary>
+    public required IReadOnlyList<DocLoad> Loads { get; init; }
+
+    /// <summary>この手で掛けたアクセスの条件（ファイルが無くて掛けなかったときと、条件の無い手は null）</summary>
+    public required DocAccess? AppliedAccess { get; init; }
+
     /// <summary>この手の警告の確認の本文（順に）</summary>
     public IReadOnlyList<string> WarningConfirms =>
         Confirms.Where(c => c.Warning).Select(c => c.Message).ToList();
@@ -92,6 +98,29 @@ internal sealed record DocObservation
     /// <summary>ファイルの実パス</summary>
     public string PathOf(DocFile file) => Harness.PathOf(file);
 }
+
+/// <summary>表 1 つの配置（位置・幅と、製品が重なりの判定に使う表示の高さ）</summary>
+internal sealed record DocPlacement(
+    Guid Id,
+    string Table,
+    double X,
+    double Y,
+    double Width,
+    double Height
+)
+{
+    /// <summary>2 つの表の矩形が重なるか（辺が接するだけは重ならない）</summary>
+    public bool Overlaps(DocPlacement other) =>
+        X < other.X + other.Width
+        && other.X < X + Width
+        && Y < other.Y + other.Height
+        && other.Y < Y + Height;
+}
+
+/// <summary>開く・再読込が図へ読み込んだ 1 回（読んだ版と、読み込んだ直後の表の配置）</summary>
+/// <param name="Label">読んだ版（ハーネスが知らなければ null）</param>
+/// <param name="Placements">読み込んだ直後の表の配置（図の並び）</param>
+internal sealed record DocLoad(string? Label, IReadOnlyList<DocPlacement> Placements);
 
 /// <summary>開く・保存ダイアログの結果を手ごとに差し替えられるテストダブル</summary>
 internal sealed class SteppingFileDialogService : IFileDialogService
@@ -132,6 +161,11 @@ internal sealed class SteppingFileDialogService : IFileDialogService
 /// <see cref="MainViewModel.RaiseExternalChangeForTests"/> で配送する。上書き保存と開く・再読込の口
 /// （<c>AfterSaveWriteForTests</c>・<c>AfterLoadReadForTests</c>）は常に差し込み、VM が書いた／読んだ版を控え、
 /// 割り込みの書き込みを 1 回だけ流す。
+/// </para>
+/// <para>
+/// アクセスの条件（<see cref="DocStep.Access"/>）：製品へ差し込まず、実物のファイルを手の間だけ FileShare.None / FileShare.Read で
+/// 開いたまま・読み取り専用の属性にする（<see cref="HoldAccess"/>）。条件は観測より前に必ず外す。開く・再読込の口では、図へ
+/// 読み込んだ直後の表の配置も控える（<see cref="Loads"/>。不変条件 (6) が読む）。
 /// </para>
 /// </remarks>
 internal sealed class DocumentFileHarness : IDisposable
@@ -207,6 +241,12 @@ internal sealed class DocumentFileHarness : IDisposable
 
     /// <summary>この手で VM が最後に読み書きした版（上書き保存・開く・再読込の口を通ったとき）</summary>
     public string? LastIo { get; private set; }
+
+    /// <summary>この手で開く・再読込が図へ読み込んだ版と、読み込んだ直後の表の配置（開く・再読込の口で控える）</summary>
+    public List<DocLoad> Loads { get; } = [];
+
+    /// <summary>この手で掛けたアクセスの条件（ファイルが無くて掛けなかったときと、条件の無い手は null）</summary>
+    public DocAccess? AppliedAccess { get; private set; }
 
     /// <summary>この手で始めたドラッグの表と開始位置（無ければ null）</summary>
     public (EntityViewModel Entity, double X, double Y)? DragStart { get; private set; }
@@ -324,6 +364,8 @@ internal sealed class DocumentFileHarness : IDisposable
         MaxConfirmDepth = 0;
         VmWrites.Clear();
         LastIo = null;
+        Loads.Clear();
+        AppliedAccess = null;
         Dialogs.ConfirmMessages.Clear();
         Dialogs.WarningConfirmMessages.Clear();
         Dialogs.ErrorMessages.Clear();
@@ -339,8 +381,66 @@ internal sealed class DocumentFileHarness : IDisposable
             StartHashes[file] = DocumentContentHash.TryCompute(PathOf(file));
         }
 
-        ApplyOp(step.Op);
+        // アクセスの条件は手の間だけ掛け、観測（Observe）より前に必ず外す
+        using (HoldAccess(step.Access))
+        {
+            ApplyOp(step.Op);
+        }
     }
+
+    /// <summary>
+    /// アクセスの条件を掛ける（ファイルが無ければ掛けずに null）。破棄で開いたファイルを閉じ、読み取り専用の属性を外す
+    /// </summary>
+    /// <remarks>
+    /// 製品の読み書きは条件の下で失敗する（AtomicFile の書き込みは短いやり直しの後に UnauthorizedAccessException、
+    /// FileShare.None の読み取りは共有違反）。条件の外し忘れが後の手の観測と一時フォルダの片付けを壊さないよう、
+    /// 外すのは using の finally に置く。
+    /// </remarks>
+    private IDisposable? HoldAccess(DocAccess? access)
+    {
+        if (access is null)
+        {
+            return null;
+        }
+
+        var path = PathOf(access.File);
+
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        AppliedAccess = access;
+
+        switch (access.Kind)
+        {
+            case DocAccessKind.ShareNone:
+                return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+            case DocAccessKind.ShareRead:
+                return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            default:
+                File.SetAttributes(path, File.GetAttributes(path) | FileAttributes.ReadOnly);
+                return new ReadOnlyAttribute(path);
+        }
+    }
+
+    /// <summary>破棄で読み取り専用の属性を外す</summary>
+    private sealed class ReadOnlyAttribute(string path) : IDisposable
+    {
+        public void Dispose()
+        {
+            if (File.Exists(path))
+            {
+                File.SetAttributes(path, File.GetAttributes(path) & ~FileAttributes.ReadOnly);
+            }
+        }
+    }
+
+    /// <summary>この手の間、ファイルが読めないか（FileShare.None の条件をそのファイルに掛ける手で、手の前にファイルがある）</summary>
+    public bool UnreadableDuring(DocStep step, DocFile? file) =>
+        step.Access is { Readable: false } access
+        && access.File == file
+        && File.Exists(PathOf(access.File));
 
     private readonly List<DocConfirm> _confirmLog = [];
 
@@ -551,6 +651,13 @@ internal sealed class DocumentFileHarness : IDisposable
                 case DocContentKind.Diagram:
                     JsonStorageService.SaveAtomic(path, Document(write.Table!, 0));
                     break;
+                case DocContentKind.DiagramWithLayout:
+                case DocContentKind.DiagramPartialLayout:
+                    JsonStorageService.SaveAtomic(
+                        path,
+                        LayoutDocument(write.Content, write.Table!)
+                    );
+                    break;
                 case DocContentKind.Newer:
                     JsonStorageService.SaveAtomic(
                         path,
@@ -662,6 +769,75 @@ internal sealed class DocumentFileHarness : IDisposable
         return document;
     }
 
+    /// <summary>配置を持つ図の表の配置（位置と幅。後の表ほど右下へずらし、互いに重ならない）</summary>
+    private static readonly (double X, double Y, double Width)[] SavedPlacements =
+    [
+        (40, 40, 220),
+        (420, 60, 180),
+        (160, 420, 260),
+    ];
+
+    /// <summary>配置を持つ外部の図の表の名前（<see cref="LayoutDocument"/> と同じ並び。ほかの種類は表 1 つ）</summary>
+    public static IReadOnlyList<string> LayoutTables(DocContentKind content, string table) =>
+        content switch
+        {
+            DocContentKind.DiagramWithLayout => [$"{table}a", $"{table}b", $"{table}c"],
+            DocContentKind.DiagramPartialLayout =>
+            [
+                $"{table}a",
+                $"{table}b",
+                $"{table}c",
+                $"{table}d",
+            ],
+            _ => [table],
+        };
+
+    /// <summary>配置を持つ外部の図（全部の表が配置を持つ・前の 2 つの表だけが配置を持つ）</summary>
+    /// <remarks>
+    /// 配置の欠けた表が 2 つあるので、取込が欠けた表を追記配置しないと、欠けた表どうしが既定の位置（原点）で重なる。
+    /// </remarks>
+    public static DiagramDocument LayoutDocument(DocContentKind content, string table)
+    {
+        var placed = content == DocContentKind.DiagramWithLayout ? 3 : 2;
+        var document = new DiagramDocument
+        {
+            Schema = new ErDiagram { TargetDbms = "sqlserver" },
+            Layout = [],
+        };
+        var names = LayoutTables(content, table);
+
+        for (var index = 0; index < names.Count; index++)
+        {
+            var entity = new Entity
+            {
+                TableName = names[index],
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "Id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                    },
+                },
+            };
+            document.Schema.Entities.Add(entity);
+
+            if (index < placed)
+            {
+                var (x, y, width) = SavedPlacements[index];
+                document.Layout[entity.Id] = new EntityLayout
+                {
+                    X = x,
+                    Y = y,
+                    Width = width,
+                };
+            }
+        }
+
+        return document;
+    }
+
     private void Register(string label, byte[] bytes)
     {
         var hash = DocumentContentHash.ComputeForBytes(bytes);
@@ -690,8 +866,40 @@ internal sealed class DocumentFileHarness : IDisposable
         var file = _openTarget ?? FileOf(Vm.CurrentFilePath);
         _openTarget = null;
         LastIo = file is { } read ? Disk[read] : null;
+
+        // 口は図へ読み込んだ直後（LoadDocumentIntoDiagram の後・割り込みの書き込みの前）に通るので、ここで配置を控える
+        Loads.Add(new DocLoad(LastIo, Placements()));
         Race(DocHook.AfterLoadRead);
     }
+
+    /// <summary>いまの図の表の配置（図の並び）</summary>
+    private List<DocPlacement> Placements() =>
+        Vm
+            .Entities.Select(e => new DocPlacement(
+                e.Id,
+                e.TableName,
+                e.X,
+                e.Y,
+                e.Width,
+                e.DisplayHeight
+            ))
+            .ToList();
+
+    /// <summary>版の配置（図として読み、表の Id → 配置。配置を持たない図は空）</summary>
+    public IReadOnlyDictionary<Guid, EntityLayout> SavedLayoutOf(string label)
+    {
+        if (!_layoutOfLabel.TryGetValue(label, out var layout))
+        {
+            layout = Decode(label).Layout ?? [];
+            _layoutOfLabel[label] = layout;
+        }
+
+        return layout;
+    }
+
+    private readonly Dictionary<string, Dictionary<Guid, EntityLayout>> _layoutOfLabel = new(
+        StringComparer.Ordinal
+    );
 
     private void Race(DocHook hook)
     {
@@ -769,6 +977,8 @@ internal sealed class DocumentFileHarness : IDisposable
             },
             AutoSaveHash = DocumentContentHash.TryCompute(AutoSavePath),
             Meta = new GuiAppSettingsStore(_temp.Path).Load().CurrentDocument,
+            Loads = [.. Loads],
+            AppliedAccess = AppliedAccess,
         };
     }
 

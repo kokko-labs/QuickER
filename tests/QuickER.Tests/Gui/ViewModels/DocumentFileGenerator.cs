@@ -26,10 +26,26 @@ internal static class DocumentFileGenerator
     /// <summary>1 種の手の数</summary>
     public const int Length = 40;
 
+    /// <summary>脇の乱数の列の種（主の列と別の列。アクセスの条件と配置つきの外部の図だけを決める）</summary>
+    public static int SideSeed(int seed) => unchecked(seed * 7919 + 104729);
+
+    /// <summary>アクセスの条件を掛け得る手（<see cref="AccessTarget"/>）に条件を掛ける割合（百分率）</summary>
+    private const int AccessPercent = 30;
+
+    /// <summary>図の外部の書き込みを、配置つきの図（全部・一部）へ差し替える割合（百分率）</summary>
+    private const int LayoutPercent = 40;
+
     /// <summary>種から手の列を作る</summary>
+    /// <remarks>
+    /// 主の列（<c>new Random(seed)</c>）は手の種類と引数を決め、脇の列（<see cref="SideSeed"/>）は主の列が決めた手に
+    /// アクセスの条件を掛けるか・図の外部の書き込みを配置つきの図へ差し替えるかだけを決める。脇の列は手ごとに決まった数だけ引き、
+    /// 主の列の引き方を変えない（脇の列が何も変えない種は、脇の列を足す前と同じ手の列になる）。脇の列が手を変えた種は、
+    /// 後の手の選び方が参照モデルの状態を読むので、その後の手の列が変わる。
+    /// </remarks>
     public static IReadOnlyList<DocStep> Generate(int seed)
     {
         var random = new Random(seed);
+        var side = new Random(SideSeed(seed));
         var model = new DocumentFileModel(
             (left, right) => string.Equals(left, right, StringComparison.Ordinal),
             file => file.ToString()
@@ -42,7 +58,7 @@ internal static class DocumentFileGenerator
 
         for (var index = 0; index < Length; index++)
         {
-            var step = Next(random, model, NewLabel, seenOnA);
+            var step = Side(side, model, Next(random, model, NewLabel, seenOnA));
             steps.Add(step);
             model.Apply(index, step);
 
@@ -209,6 +225,61 @@ internal static class DocumentFileGenerator
         };
 
         return answer ? step : step.No();
+    }
+
+    /// <summary>脇の列で、手にアクセスの条件を掛けるか・図の外部の書き込みを配置つきの図へ差し替えるかを決める</summary>
+    /// <remarks>脇の列は手ごとに 4 回だけ引く（手の種類に依らない）。</remarks>
+    private static DocStep Side(Random side, DocumentFileModel model, DocStep step)
+    {
+        var accessRoll = side.Next(100);
+        var accessKind = (DocAccessKind)side.Next(3);
+        var layoutRoll = side.Next(100);
+        var layoutKind =
+            side.Next(2) == 0
+                ? DocContentKind.DiagramWithLayout
+                : DocContentKind.DiagramPartialLayout;
+
+        if (
+            step.Op is ExternalWriteOp { Content: DocContentKind.Diagram } write
+            && layoutRoll < LayoutPercent
+        )
+        {
+            return step with { Op = write with { Content = layoutKind } };
+        }
+
+        if (accessRoll < AccessPercent && AccessTarget(model, step) is { } file)
+        {
+            return step with { Access = new DocAccess(file, accessKind) };
+        }
+
+        return step;
+    }
+
+    /// <summary>
+    /// アクセスの条件を掛けるファイル（手が読み書きする文書のファイルで、いまある。掛けられない手は null）
+    /// </summary>
+    /// <remarks>
+    /// 開くは開くファイル、保存は保存先、監視の内容の変更の配送は現在のファイル（ハッシュと再読込）、再起動は自動保存の文書メタの
+    /// ファイル（起動時の照合）。割り込みの書き込み・確認の最中の手を持つ手には掛けない（ハーネスの外部の書き込みが条件に断られる）。
+    /// </remarks>
+    private static DocFile? AccessTarget(DocumentFileModel model, DocStep step)
+    {
+        if (step.Race is not null || step.DuringConfirm.Count > 0)
+        {
+            return null;
+        }
+
+        var file = step.Op switch
+        {
+            OpenOp open => open.File,
+            SaveOp save => model.Path ?? save.DialogTarget,
+            SaveAsOp saveAs => saveAs.Target,
+            DeliverOp { Change: DocumentFileChangeKind.Modified, OtherPath: false } => model.Path,
+            RestartOp => model.Meta?.Path,
+            _ => null,
+        };
+
+        return file is { } target && model.Disk[target] is not null ? target : null;
     }
 
     /// <summary>1 割の確率で、口に割り込みの書き込みを足す</summary>

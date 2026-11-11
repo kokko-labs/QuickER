@@ -164,6 +164,40 @@ public abstract class NameFuzzDdlRoundTripTestsBase
             );
         }
 
+        // 既定名・合成名を上限で縮めさせる形（名前の無い制約の既定名・同じ親子の 2 本目・縮めた後の番号）。縮めた名前が上限の内で
+        // 互いに違い、DB が切り詰めないことを、適用と取り込み直しの差分で確かめる。形が上限を超えない名前になっていたら
+        // （空振り）、形と名前を名指しして赤にする
+        foreach (var (shape, diagram, shortened) in NameFuzzDiagrams.DerivedNameCases(dialect))
+        {
+            if (diagram is null)
+            {
+                coverageProblems.Add($"derived-name shape {shape} was not built on {dialect}");
+                continue;
+            }
+
+            if (!Limit.IsUnlimited)
+            {
+                coverageProblems.AddRange(
+                    shortened
+                        .Where(Limit.Accepts)
+                        .Select(name =>
+                            $"derived-name shape {shape} on {dialect}: [{NameFuzz.Describe(name)}] fits the limit and is not shortened"
+                        )
+                );
+            }
+
+            executed++;
+            await RoundTripAsync(
+                ledger,
+                $"ddl:{dialect}:DerivedName",
+                shape,
+                diagram,
+                $"[{shape}]",
+                accepted: true,
+                ct
+            );
+        }
+
         TestContext.Current.TestOutputHelper?.WriteLine($"{dialect}: {executed} ケースを流した");
 
         // 網羅の宣言の誤りは往復の結果より先に赤にする

@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json.Nodes;
 using QuickER.Cli;
 using QuickER.Documents;
+using QuickER.Mcp;
 using QuickER.Tests.TestSupport;
 using QuickER.Tests.TestSupport.Engines;
 
@@ -128,7 +129,7 @@ public sealed class CodeGenToolArgumentShapeFuzzTests : IDisposable
 
         public override ToolArgumentShapeFuzzRunner.CaseOutcome RunCase(
             string toolName,
-            JsonObject args
+            JsonNode? args
         )
         {
             var (result, success) = Run(toolName, args, out var output);
@@ -153,15 +154,24 @@ public sealed class CodeGenToolArgumentShapeFuzzTests : IDisposable
         public override bool IsRawException(string result) =>
             result.StartsWith(RawExceptionPrefix, StringComparison.Ordinal);
 
+        public override string RootRefusal { get; } =
+            ToolArgumentShape.DescribeEnglish(
+                new ToolArgumentProblem(
+                    ToolArgumentProblemKind.WrongType,
+                    ToolArgumentFuzz.RootType,
+                    "object"
+                )
+            );
+
         /// <summary>MCP サーバと同じ入口でツールを実行する（出力先の目印は未使用のパスへ置き換える）</summary>
         private (string Result, bool Success) Run(
             string toolName,
-            JsonObject arguments,
+            JsonNode? arguments,
             out string? output
         )
         {
             output = null;
-            var args = (JsonObject)arguments.DeepClone();
+            var args = (arguments as JsonObject)?.DeepClone() as JsonObject;
 
             foreach (
                 var (name, marker, extension) in new[]
@@ -172,19 +182,19 @@ public sealed class CodeGenToolArgumentShapeFuzzTests : IDisposable
             )
             {
                 if (
-                    args[name] is JsonValue value
+                    args?[name] is JsonValue value
                     && value.TryGetValue<string>(out var text)
                     && text == marker
                 )
                 {
                     output = Path.Combine(dir, Guid.NewGuid().ToString("N") + extension);
-                    args[name] = output;
+                    args![name] = output;
                 }
             }
 
             try
             {
-                return toolSet.Execute(toolName, args.ToJsonString());
+                return toolSet.Execute(toolName, ToolArgumentFuzz.JsonText(args ?? arguments));
             }
             catch (Exception ex)
             {

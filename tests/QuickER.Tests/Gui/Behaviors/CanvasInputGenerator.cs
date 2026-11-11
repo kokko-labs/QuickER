@@ -17,6 +17,10 @@ namespace QuickER.Tests.Gui.Behaviors;
 /// キャンバスへの持ち込み）・ドラッグ中の Delete・カードの上のホバー・キャンバスの付け外し。
 /// </para>
 /// <para>
+/// Space を押さない余白・カードの押下は、別の乱数の列（<see cref="SideSeed"/>）で Ctrl で包むことがある（押下の時と解放の時の
+/// Ctrl＝追加のラバーバンド・Ctrl のクリックの切り替え・グループ移動の抑止）。本流の乱数の引き方は変えない。
+/// </para>
+/// <para>
 /// フォーカスをクリックで移す手と、キャンバスの外（列一覧・プロパティパネル）の押下は、何も押していないときにだけ置く
 /// （ハーネスは列一覧の行を出すために先頭のテーブルのカードをクリックすることがあり、Space や Ctrl を押したままだと
 /// そのクリックがパンや選択の切り替えになる）。キャンバスの外の押下の後は、フォーカスの行き先を対象で言えないので、
@@ -51,10 +55,23 @@ internal static class CanvasInputGenerator
         CanvasSpot.Line,
     ];
 
+    /// <summary>Ctrl で包む押下を選ぶ別の乱数の列の種（本流の乱数の引き方を変えずに、Ctrl の水準を重ねる）</summary>
+    /// <remarks>
+    /// 本流の <see cref="Random"/> は手の列の形を決め、引く順と回数を変えない（種の指紋と網羅の一覧が本流の列に合わせてある）。
+    /// 包むかどうかとその水準はこの列だけで引くので、包まない種の手の列は本流だけで決まったときと同じになる。
+    /// </remarks>
+    public static int SideSeed(int seed) => unchecked(seed * 7919 + 104729);
+
+    /// <summary>
+    /// Space の押下の外の左ボタンの押下（余白・カード）を Ctrl で包む割合（別の乱数の列で、包める押下ごとに <c>WrapPercent</c>%）
+    /// </summary>
+    public const int WrapPercent = 90;
+
     /// <summary>種から手の列を作る</summary>
     public static IReadOnlyList<CanvasStep> Generate(int seed)
     {
         var random = new Random(seed);
+        var side = new Random(SideSeed(seed));
         var steps = new List<CanvasStep>();
         var deleted = false;
 
@@ -62,7 +79,7 @@ internal static class CanvasInputGenerator
         {
             AddFocusMove(random, steps, force: false);
 
-            if (random.Next(10) < 4 && AddFreeGesture(random, steps, ref deleted))
+            if (random.Next(10) < 4 && AddFreeGesture(random, side, steps, ref deleted))
             {
                 AddFocusMove(random, steps, force: true);
             }
@@ -106,31 +123,38 @@ internal static class CanvasInputGenerator
     }
 
     /// <summary>Space を押さないマウスの操作（キャンバスの外を押したら true＝次にフォーカスを移す）</summary>
-    private static bool AddFreeGesture(Random random, List<CanvasStep> steps, ref bool deleted)
+    private static bool AddFreeGesture(
+        Random random,
+        Random side,
+        List<CanvasStep> steps,
+        ref bool deleted
+    )
     {
         switch (random.Next(9))
         {
             case 8:
-                // グループ移動（先頭のテーブルを選び、Ctrl のクリックで 2 番目を足し、先頭のカードを Ctrl なしでドラッグ）
+                // グループ移動（先頭のテーブルを選び、Ctrl のクリックで 2 番目を足し、先頭のカードを Ctrl なしでドラッグ）。
+                // 先頭のカードの押下は、別の乱数の列で Ctrl で包むことがある（グループ移動にならない・解放でクリックが切り替える）
                 steps.Add(CanvasStep.ClickFocus(CanvasTarget.Canvas));
                 steps.Add(CanvasStep.CtrlDown);
                 steps.Add(CanvasStep.LeftDown(CanvasSpot.Card2));
                 steps.Add(CanvasStep.LeftUp);
                 steps.Add(CanvasStep.CtrlUp);
-                steps.Add(CanvasStep.LeftDown(CanvasSpot.Card));
-                steps.Add(CanvasStep.Move(Delta(random), Delta(random)));
+                var press = new List<CanvasStep> { CanvasStep.LeftDown(CanvasSpot.Card) };
+                press.Add(CanvasStep.Move(Delta(random), Delta(random)));
 
                 if (random.Next(3) == 0)
                 {
-                    steps.Add(CanvasStep.ExternalCancel);
+                    press.Add(CanvasStep.ExternalCancel);
                 }
 
-                steps.Add(CanvasStep.Move(Delta(random), Delta(random)));
-                steps.Add(CanvasStep.LeftUp);
+                press.Add(CanvasStep.Move(Delta(random), Delta(random)));
+                press.Add(CanvasStep.LeftUp);
+                steps.AddRange(WrapWithCtrl(side, press));
                 return false;
             case 0:
             case 1:
-                AddCanvasDrag(random, steps);
+                AddCanvasDrag(random, side, steps);
                 return false;
             case 2:
                 AddDrag(random, steps, left: false, inner: null);
@@ -180,36 +204,87 @@ internal static class CanvasInputGenerator
         }
     }
 
-    /// <summary>キャンバスの上の左ドラッグ（途中に Space・Ctrl・外部の取り消し・キャンバスの外への持ち出しを挟める）</summary>
-    private static void AddCanvasDrag(Random random, List<CanvasStep> steps)
+    /// <summary>
+    /// キャンバスの上の左ドラッグ（途中に Space・Ctrl・外部の取り消し・キャンバスの外への持ち出しを挟める。押下の間に Ctrl を
+    /// 挟まない余白・カードの押下は、別の乱数の列で Ctrl で包むことがある）
+    /// </summary>
+    private static void AddCanvasDrag(Random random, Random side, List<CanvasStep> steps)
     {
-        steps.Add(CanvasStep.LeftDown(CanvasPlaces[random.Next(CanvasPlaces.Length)]));
-        steps.Add(CanvasStep.Move(Delta(random), Delta(random)));
+        var press = new List<CanvasStep>
+        {
+            CanvasStep.LeftDown(CanvasPlaces[random.Next(CanvasPlaces.Length)]),
+            CanvasStep.Move(Delta(random), Delta(random)),
+        };
 
         switch (random.Next(6))
         {
             case 0:
                 // 押した後の Space（パン待機の間の移動）
-                steps.Add(CanvasStep.SpaceDown);
-                steps.Add(CanvasStep.Move(Delta(random), Delta(random)));
-                steps.Add(CanvasStep.SpaceUp);
+                press.Add(CanvasStep.SpaceDown);
+                press.Add(CanvasStep.Move(Delta(random), Delta(random)));
+                press.Add(CanvasStep.SpaceUp);
                 break;
             case 1:
-                steps.Add(CanvasStep.CtrlDown);
-                steps.Add(CanvasStep.Move(Delta(random), Delta(random)));
-                steps.Add(CanvasStep.CtrlUp);
+                press.Add(CanvasStep.CtrlDown);
+                press.Add(CanvasStep.Move(Delta(random), Delta(random)));
+                press.Add(CanvasStep.CtrlUp);
                 break;
             case 2:
-                steps.Add(CanvasStep.ExternalCancel);
+                press.Add(CanvasStep.ExternalCancel);
                 break;
             case 3:
                 // キャンバスの外へ持ち出して離す
-                steps.Add(CanvasStep.MoveTo(CanvasSpot.Outside));
+                press.Add(CanvasStep.MoveTo(CanvasSpot.Outside));
                 break;
         }
 
-        steps.Add(CanvasStep.Move(Delta(random), Delta(random)));
-        steps.Add(CanvasStep.LeftUp);
+        press.Add(CanvasStep.Move(Delta(random), Delta(random)));
+        press.Add(CanvasStep.LeftUp);
+        steps.AddRange(WrapWithCtrl(side, press));
+    }
+
+    /// <summary>
+    /// 押下から解放までの手（先頭が左ボタンの押下・末尾が解放）を、別の乱数の列で Ctrl で包む
+    /// （押下の時と解放の時の Ctrl の水準 held・released・late のどれか。包まなければそのまま返す）
+    /// </summary>
+    /// <remarks>
+    /// 包むのは余白とカード（先頭・2 番目）の押下で、押下の間に Ctrl を押さないものだけ（Ctrl を 2 回押さない）。
+    /// 包めない押下では別の乱数の列も引かない。本流の乱数は引かない。
+    /// </remarks>
+    private static List<CanvasStep> WrapWithCtrl(Random side, List<CanvasStep> press)
+    {
+        if (
+            press[0].Spot is not (CanvasSpot.Blank or CanvasSpot.Card or CanvasSpot.Card2)
+            || press.Any(step => step.Op is CanvasOp.CtrlDown or CanvasOp.CtrlUp)
+            || side.Next(100) >= WrapPercent
+        )
+        {
+            return press;
+        }
+
+        var wrapped = new List<CanvasStep>(press);
+        var release = wrapped.Count - 1;
+
+        switch (side.Next(3))
+        {
+            case 0:
+                // held：押下の前に押し、解放の後に離す
+                wrapped.Add(CanvasStep.CtrlUp);
+                wrapped.Insert(0, CanvasStep.CtrlDown);
+                break;
+            case 1:
+                // released：押下の前に押し、解放の前に離す
+                wrapped.Insert(release, CanvasStep.CtrlUp);
+                wrapped.Insert(0, CanvasStep.CtrlDown);
+                break;
+            default:
+                // late：解放の前に押し、解放の後に離す
+                wrapped.Add(CanvasStep.CtrlUp);
+                wrapped.Insert(release, CanvasStep.CtrlDown);
+                break;
+        }
+
+        return wrapped;
     }
 
     /// <summary>列一覧の操作（行ヘッダーのクリック・並べ替え・キャンバスの外の押下からの持ち込み）</summary>

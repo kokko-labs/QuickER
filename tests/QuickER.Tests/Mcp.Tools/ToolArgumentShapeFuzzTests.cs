@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json.Nodes;
 using AwesomeAssertions;
 using QuickER.Documents;
+using QuickER.Mcp;
 using QuickER.Mcp.Tools;
 using QuickER.Tests.TestSupport;
 using QuickER.Tests.TestSupport.Engines;
@@ -139,7 +140,7 @@ public sealed class ToolArgumentShapeFuzzTests : IDisposable
 
         public override ToolArgumentShapeFuzzRunner.CaseOutcome RunCase(
             string toolName,
-            JsonObject args
+            JsonNode? args
         )
         {
             var (result, success) = Run(toolName, args, out var newFile);
@@ -164,29 +165,38 @@ public sealed class ToolArgumentShapeFuzzTests : IDisposable
         public override bool IsRawException(string result) =>
             result.StartsWith(RawExceptionPrefix, StringComparison.Ordinal);
 
+        public override string RootRefusal { get; } =
+            ToolArgumentShape.DescribeEnglish(
+                new ToolArgumentProblem(
+                    ToolArgumentProblemKind.WrongType,
+                    ToolArgumentFuzz.RootType,
+                    "object"
+                )
+            );
+
         /// <summary>MCP サーバと同じ入口でツールを実行する（新しい図ファイルの目印は未使用のパスへ置き換える）</summary>
         private (string Result, bool Success) Run(
             string toolName,
-            JsonObject arguments,
+            JsonNode? arguments,
             out string? newFile
         )
         {
             newFile = null;
-            var args = (JsonObject)arguments.DeepClone();
+            var args = (arguments as JsonObject)?.DeepClone() as JsonObject;
 
             if (
-                args["file"] is JsonValue marker
+                args?["file"] is JsonValue marker
                 && marker.TryGetValue<string>(out var text)
                 && text == NewFileMarker
             )
             {
                 newFile = Path.Combine(dir, Guid.NewGuid().ToString("N") + ".json");
-                args["file"] = newFile;
+                args!["file"] = newFile;
             }
 
             try
             {
-                return toolSet.Execute(toolName, args.ToJsonString());
+                return toolSet.Execute(toolName, ToolArgumentFuzz.JsonText(args ?? arguments));
             }
             catch (Exception ex)
             {

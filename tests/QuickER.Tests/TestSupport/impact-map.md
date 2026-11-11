@@ -45,7 +45,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Mcp.Tools` | 全体 | `DiagramEdit/ToolArgument`・`DiagramEdit/Tools`・`Name/Entrances`・`rule:mcp-tools-column-nullability-raw-reads`・`table:QueryToolFormatter` |
 | `src/QuickER.Model` | 全体 | `Dialect/DdlText`・`Name/Entrances`・`SyncPlan/HistoryRows`・`rule:model-dialect-lookups`・`rule:tool-argument-parsing-owners`・`table:ForeignKeyReferentialActions` |
 | `src/QuickER.Platform` | 一部 | `Ai/MarkdownRender`・`OsBoundary/AtomicFile`・`OsBoundary/Containment`・`OsBoundary/PathEntrances`・`OsBoundary/ProcessLaunch`・`OsBoundary/Segments` |
-| `src/QuickER.Provider` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dialect/DdlText`・`Dialect/ImportWarnings`・`Dialect/Types`・`FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules`・`Name/DdlRoundTrip`・`SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/HistoryRows`・`SyncPlan/ShapeRows`・`rule:provider-column-nullability-raw-reads`・`rule:sql-name-text-name-sources`・`rule:sync-capabilities-initializers`・`rule:sync-name-comparison-tokens`・`rule:sync-selected-foreign-key-names`・`rule:sync-type-deciding-column-copies`・`table:SyncPlanExpectations` |
+| `src/QuickER.Provider` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dialect/DdlText`・`Dialect/ImportWarnings`・`Dialect/Types`・`FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules`・`Name/DdlRoundTrip`・`Name/Entrances`・`SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/HistoryRows`・`SyncPlan/ShapeRows`・`rule:provider-column-nullability-raw-reads`・`rule:sql-name-text-name-sources`・`rule:sync-capabilities-initializers`・`rule:sync-name-comparison-tokens`・`rule:sync-selected-foreign-key-names`・`rule:sync-type-deciding-column-copies`・`table:SyncPlanExpectations` |
 | `src/QuickER.Provider.MySql` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks` |
 | `src/QuickER.Provider.Oracle` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks` |
 | `src/QuickER.Provider.PostgreSql` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses` |
@@ -192,6 +192,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Mcp/ToolArguments.cs` | `DiagramEdit/ToolArgument`・`rule:tool-argument-parsing-owners` |
 | `src/QuickER.Model` | `Dialect/DdlText`・`rule:model-dialect-lookups` |
 | `src/QuickER.Model/ConstraintNames.cs` | `SyncPlan/HistoryRows` |
+| `src/QuickER.Model/DiagramNameDuplicates.cs` | `Name/Entrances` |
 | `src/QuickER.Model/ForeignKeyReferentialAction.cs` | `table:ForeignKeyReferentialActions` |
 | `src/QuickER.Model/RelationshipType.cs` | `rule:tool-argument-parsing-owners` |
 | `src/QuickER.Model/SchemaNames.cs` | `Name/Entrances` |
@@ -224,6 +225,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Provider/DiagramMergeReconciler.cs` | `FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules` |
 | `src/QuickER.Provider/NameMatching.cs` | `rule:sync-name-comparison-tokens` |
 | `src/QuickER.Provider/SchemaDiffService.cs` | `Name/DdlRoundTrip`・`SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/HistoryRows`・`SyncPlan/ShapeRows`・`rule:sync-name-comparison-tokens`・`table:SyncPlanExpectations` |
+| `src/QuickER.Provider/SqlNameDuplicates.cs` | `Name/Entrances` |
 | `src/QuickER.Provider/SqlNameText.cs` | `Name/DdlRoundTrip`・`rule:sql-name-text-name-sources` |
 | `src/QuickER.Provider/SyncDialectCapabilities.cs` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`rule:sync-capabilities-initializers` |
 | `src/QuickER.Provider/SyncPlan.cs` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`table:SyncPlanExpectations` |
@@ -252,9 +254,9 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 
 ### `Name/Entrances`
 
-- 名前：名前の総当たり（GUI・ツール・取込・クエリ定義・C# 生成の入口）
-- テストのソース：`tests/QuickER.Tests/TestSupport/NameFuzz.cs`・`tests/QuickER.Tests/TestSupport/NameFuzzDimensions.cs`・`tests/QuickER.Tests/TestSupport/NameFuzzKnownFailures.cs`・`tests/QuickER.Tests/CodeGen.CSharp/NameIdentityGenerationFuzzTests.cs`・`tests/QuickER.Tests/CodeGen.UI/NameIdentityQueryDialogFuzzTests.cs`・`tests/QuickER.Tests/Gui/Services/NameIdentityImportFuzzTests.cs`・`tests/QuickER.Tests/Gui/ViewModels/NameIdentityViewModelFuzzTests.cs`・`tests/QuickER.Tests/Mcp.Tools/NameIdentityToolFuzzTests.cs`・`tests/QuickER.Tests/Provider.Sqlite/NameIdentitySqliteImportFuzzTests.cs`
-- 範囲：`src/QuickER.Model/SchemaNames.cs`・`src/QuickER.Mcp.Tools`・`src/QuickER.Gui/ViewModels`・`src/QuickER.Gui/Services`・`src/QuickER.CodeGen.UI`・`src/QuickER.CodeGen.CSharp`・`src/QuickER.Provider.Sqlite`
+- 名前：名前の総当たり（GUI・ツール・取込・クエリ定義・C# 生成・DDL と差分の入口）
+- テストのソース：`tests/QuickER.Tests/TestSupport/NameFuzz.cs`・`tests/QuickER.Tests/TestSupport/NameFuzzDimensions.cs`・`tests/QuickER.Tests/TestSupport/NameFuzzKnownFailures.cs`・`tests/QuickER.Tests/CodeGen.CSharp/NameIdentityGenerationFuzzTests.cs`・`tests/QuickER.Tests/CodeGen.UI/NameIdentityQueryDialogFuzzTests.cs`・`tests/QuickER.Tests/Gui/Services/NameIdentityImportFuzzTests.cs`・`tests/QuickER.Tests/Gui/ViewModels/NameIdentityViewModelFuzzTests.cs`・`tests/QuickER.Tests/Mcp.Tools/NameIdentityToolFuzzTests.cs`・`tests/QuickER.Tests/Provider.Sqlite/NameIdentitySqliteImportFuzzTests.cs`・`tests/QuickER.Tests/Provider/NameIdentityDdlFuzzTests.cs`
+- 範囲：`src/QuickER.Model/SchemaNames.cs`・`src/QuickER.Model/DiagramNameDuplicates.cs`・`src/QuickER.Provider/SqlNameDuplicates.cs`・`src/QuickER.Mcp.Tools`・`src/QuickER.Gui/ViewModels`・`src/QuickER.Gui/Services`・`src/QuickER.CodeGen.UI`・`src/QuickER.CodeGen.CSharp`・`src/QuickER.Provider.Sqlite`
 
 ### `DiagramEdit/ToolArgument`
 

@@ -411,9 +411,6 @@ Default to English for all responses (the language of the app UI). Switch only i
   <data name="QueryTool_InvalidArgumentsJson" xml:space="preserve">
     <value>Could not parse the arguments JSON for tool '{0}'.</value>
   </data>
-  <data name="QueryTool_ArgumentsNotObject" xml:space="preserve">
-    <value>The arguments for tool '{0}' must be a JSON object.</value>
-  </data>
   <data name="Tool_ArgumentMissing" xml:space="preserve">
     <value>The argument '{0}' is required.</value>
   </data>

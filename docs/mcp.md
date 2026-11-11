@@ -59,6 +59,7 @@ The tables below list the other arguments, with required ones marked ✅.
 
 Arguments are checked against each tool's schema before the tool runs.
 A required argument that is missing or `null`, and an argument of the wrong JSON type (a number where a string is expected, `"true"` where a boolean is expected, an array element that is not an object where objects are expected, and so on), refuse the call and change nothing; the message names the argument.
+Arguments whose whole value is not a JSON object (an array, a string, a number, a boolean or `null`) are refused the same way, naming `(arguments)`.
 An optional argument given as `null` counts as omitted.
 The values of an enumeration such as `relationship_type` are not checked at this stage: each tool matches them ignoring case and lists the accepted values when one does not match.
 
