@@ -959,9 +959,18 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             return (server, local);
         }
 
-        string? Holder((ModelDbState Server, ModelDbState Local) states) =>
+        string? Holder(
+            (ModelDbState Server, ModelDbState Local) states,
+            IEqualityComparer<string>? uniqueValues = null
+        ) =>
             SyncModelRun
-                .OtherTableHolder(states.Server, states.Local, ModelTables.Folders, "3781")
+                .OtherTableHolder(
+                    states.Server,
+                    states.Local,
+                    ModelTables.Folders,
+                    "3781",
+                    uniqueValues ?? StringComparer.Ordinal
+                )
                 ?.Holder;
 
         Holder(Shape()).Should().Be("1781", "the shape itself");
@@ -995,6 +1004,63 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             .BeNull(
                 "a referrer in the same table is holder-referenced-by-taker's shape, not this one"
             );
+
+        // 一意な値の同じさはサーバー役の比べ方で見る：持ち主の名前が大文字と末尾の空白だけ違う形は、実 SQL Server の比べ方では
+        // 当たり、序数（SQLite のサーバー役）では当たらない
+        var otherSpelling = Shape();
+        otherSpelling.Local.Folders[1781] = (null, "H ", null);
+        Holder(otherSpelling, SyncModelSqlServerUniqueValues.Instance)
+            .Should()
+            .Be("1781", "SQL Server takes the spellings for the same value");
+        Holder(otherSpelling).Should().BeNull("the ordinal comparison takes them for two values");
+
+        // 引き留める行の中に最新の写し（ローカルの行がサーバーの行と同じ）があれば、エンジンが消さない残りの形として分ける
+        var currentChild = Shape();
+        var eventAt = new DateTime(2026, 6, 1, 9, 0, 0, DateTimeKind.Unspecified);
+        currentChild.Server.Events["e"] = (eventAt, 1782, "server-child");
+        currentChild.Local.Events["e"] = (eventAt, 1782, "server-child");
+        bool Current((ModelDbState Server, ModelDbState Local) states) =>
+            SyncModelRun.HasCurrentReferrer(
+                states.Server,
+                states.Local,
+                SyncModelRun
+                    .OtherTableHolder(
+                        states.Server,
+                        states.Local,
+                        ModelTables.Folders,
+                        "3781",
+                        StringComparer.Ordinal
+                    )!
+                    .Value.Referrers
+            );
+        Current(currentChild).Should().BeTrue("the event is the server's copy, up to date here");
+        Current(Shape()).Should().BeFalse("the only referring row differs from its server copy");
+
+        // 同じ比べ方を、同じ表の形（holder-referenced-by-taker）の分類も使う
+        var takerShape = Shape();
+        takerShape.Local.Items.Remove(1782);
+        takerShape.Local.Folders[1781] = (null, "H ", null);
+        takerShape.Local.Folders[3781] = (1781, "f3781", null);
+        SyncModelRun
+            .StuckShape(
+                takerShape.Server,
+                takerShape.Local,
+                ModelTables.Folders,
+                "3781",
+                SyncModelSqlServerUniqueValues.Instance
+            )
+            .Should()
+            .Be(("holder-referenced-by-taker", "1781"));
+        SyncModelRun
+            .StuckShape(
+                takerShape.Server,
+                takerShape.Local,
+                ModelTables.Folders,
+                "3781",
+                StringComparer.Ordinal
+            )
+            .Should()
+            .BeNull();
     }
 
     [Fact(
@@ -1020,7 +1086,7 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                         fixedIn == "区切り 30"
                         || fixedIn == "区切り 31"
                         || fixedIn == "修正 C"
-                        || fixedIn == SyncModelKnownFailures.StuckSyncFixedIn
+                        || fixedIn == SyncModelKnownFailures.StuckSyncRemainderFixedIn
                         || fixedIn.StartsWith("きっかけ待ち（台帳 ", StringComparison.Ordinal)
                             && fixedIn.EndsWith('）')
                     );

@@ -241,7 +241,7 @@
   - 2〜3 表の除外（`MultipleExclusionRate`）：本流が何も除外しなかった同期の一部（本流の 1 表の除外は変えない）。
   - 印（`ModelWriteOp.StolenKey`・`Spelling`）は internal で、種の指紋の要約（公開のプロパティ）に載らない。
 - 一意な値の同じさはサーバー役が持つ（`ISyncModelServerRole.UniqueValues`）：SQLite の代役は序数、実 SQL Server は末尾の空白を除いて大文字小文字を無視する写し（`SyncModelSqlServerUniqueValues`）。
-  - 根拠の判定（`CheckRefusalBasisAsync` の持ち主と値の手放し）と静止化の分類（`IsPendingCycle`）がこれを使う。序数のままだと、SQL Server が別表記を正しく断った競合を根拠なし（`3/spurious:*:UniqueValueTakenOnServer:no-basis`）にする。
+  - 根拠の判定（`CheckRefusalBasisAsync` の持ち主と値の手放し）と静止化の分類（`IsPendingCycle`・`StuckShape`・`OtherTableHolder`）がこれを使う。序数のままだと、SQL Server が別表記を正しく断った競合を根拠なし（`3/spurious:*:UniqueValueTakenOnServer:no-basis`）にする。
   - 写しが実際の照合順序とずれないよう、SQL Server の世界を作るたびに `VerifyAsync` が一意な列 2 本の照合順序で、生成器の別表記の関数から作った値の組を実 DB の `=` と突き合わせ、食い違えば例外にする。
   - 決まった形の行 `n7s-{ascii-case|non-ascii-case|trailing-space}-{collect|localwins|lww-serverwins}`（全転送）は、期待をサーバー役の同じさで選ぶ手 `WhenServerSameUniqueOp` で書く：同じ値なら UniqueValueTakenOnServer で断られ、Collect と LocalWins は次の同期でも報告し続け、その後の ServerWins の同期で揃う。後勝ち＋ServerWins はその同期で捨てる。別の値なら上がる。
   - 実 SQL Server の乱数の種は、AsciiCase・NonAsciiCase・TrailingSpace の別表記がそれぞれ 1 回以上サーバーに断られたことを `CoverageGuard` で表明する（`SyncModelRun.SpellingRefusals`。同じ値の Exact・Empty はどのサーバー役でも断られ、直結の種の網羅が受け持つ）。
@@ -254,10 +254,10 @@
   - Blobs=False は受け入れの組（乱数は常に blob を運ぶ。docs の「運ぶかは端末ごとに一貫させる」）。
   - サーバーの他者（Actor=Server・Via=None）× 衝突し得る別表記は受け入れの組。
 - 実行の結果の表 `SyncModelOutcomeDimensions`（登録簿 SyncModel/Outcomes）：SyncConflictReason と SyncLocalRowChangeReason の全値×Mode×Policy。実行の後の結果だけを数え、乱数を引かない。
-- 網羅の行 `SyncModelCoverageRows`（Id は `coverage-`・11 行）：
+- 網羅の行 `SyncModelCoverageRows`（Id は `coverage-`・14 行）：
   - 乱数の種で作れない組を持つ。サーバーの他者の Extras の操作 4 つ（作り直し・失敗する書き込み・キーだけのスタブ・持っていた実体での削除）・グラフ保存の失敗する書き込み。
   - DuplicateOnServer は乱数の種が同じキーの挿入で作る（行を持たない）。
-  - 既定の 60 種でたまたま欠ける組も持つ。表を除外したダウンロード・後勝ちの RemovedBeforeDownload・Collect と LocalWins の ReloadedForUniqueValue。
+  - 既定の 60 種でたまたま欠ける組も持つ。表を除外したダウンロード・後勝ちの RemovedBeforeDownload・Collect と LocalWins の ReloadedForUniqueValue・Collect と LocalWins と後勝ちの RemovedForUniqueValue（未送信の無い古い写しの形）。
   - 広い世界の既定の種でたまたま欠ける組も持つ：端末 3 のフォルダーの delete-take-reparent（`coverage-device3-delete-take-reparent-folders`・3 台の世界）と、追跡しない行を入れた端末のラベルを除外した同期（`coverage-untracked-device-sync-excluding-labels`・行の入力の `Preloads` で最初の形を宣言する）。
   - 直結の乱数のテスト `RandomSeeds_ConvergeWithoutLoss` が種の前に並列に流す（単独の種では流さない）。操作を 1 歩ずつ次元表で、同期の結果を結果の表で数える。
   - 行は生成器の代わりにモード・ポリシー・種の組を宣言する（例：`coverage-server-delete-stub`）（`SyncModelDimensions.Observe` の多重定義）。行の同期が宣言と違えば構築で断る。
@@ -268,12 +268,12 @@
 - 静止化が終わらないときは、最後の周の打ち切りと競合を分類して署名を細かくする（`SyncModelRun.ClassifyStuckTruncationsAsync`）。
   - 一意な値の厳密な入れ替え：`1/no-quiesce:unique-swap:{表}`（docs の既知の割り切り＝受け入れ）。
   - 値を取る行自身の古い参照が持ち主を残す：`1/no-quiesce:holder-referenced-by-taker:{表}`。
-  - 持ち主がサーバーに無く、別の表のローカルの行が持ち主を（推移的に）参照し、その行のサーバーの行が値を取る行の下にある：`1/no-quiesce:holder-referenced-by-other-table:{表}`。値を取る行のダウンロードは参照されて消せない持ち主で毎回止まり、ServerWins はその行のサーバーの行の親を持てないので戻さず記録を残す。既知の失敗の一覧に Pending（直す区切りは `SyncModelKnownFailures.StuckSyncFixedIn`）で載せる。
+  - 持ち主がサーバーに無く、別の表のローカルの行が持ち主を（推移的に）参照し、その行のサーバーの行が値を取る行の下にある：`1/no-quiesce:holder-referenced-by-other-table:{表}`。引き留める行がどれも送るものを持たなければエンジンが消して抜ける（`src/QuickER.Runtime.Sync/CLAUDE.md`「一意な値の持ち主を新しくする」）ので、この署名が残るのは、エンジンが消さない形だけ。そのうち、参照する行の中にローカルの行がサーバーの行と同じ最新の写しがある形（消すとダウンロードが降ろし直さないので消さない）は `1/no-quiesce:holder-referenced-by-other-table-current-child:{表}` に分ける（`SyncModelRun.HasCurrentReferrer`）。既知の失敗の一覧に Pending（直す区切りは `SyncModelKnownFailures.StuckSyncRemainderFixedIn`）で載せ、決まった形の行 `holder-referenced-by-other-table-current-child-does-not-settle` が受け持つ。
   - 端末側の一意な値の循環：`1/no-quiesce:pending-unique-cycle:{表}`。
   - 入れ替えと、値を取る行自身の古い参照の場合は打ち切った行と持ち主の行の、別の表の参照の場合は打ち切った行・持ち主・参照する行と、サーバーで値を取る行の下にあるために止まった打ち切りの行の、循環は集まりの行の競合を説明済みにする。
   - どれにも当たらない打ち切りか説明の付かない競合が残れば、粗い署名 `1/no-quiesce:conflicts-or-truncations` もあわせて出す。分類できた分が隠さない。
-  - 固定は `swap-folder-names-without-refresh-does-not-settle`・`swap-without-refresh-does-not-settle`・`n15-pending-unique-cycle`・`holder-referenced-by-other-table-does-not-settle`・`holder-referenced-by-other-table-items-does-not-settle`（どちらも端末 2 台・最初の行なし。静止化の失敗の署名は表の名前を残すので表ごとに 1 行）。mutation 実証済み。
-  - 別の表の参照の判定が狭い（持ち主がサーバーにある・参照する行のサーバーの行が値を取る行の下に無い・参照する行がサーバーに無い・同じ表の参照、のどれも数えない）ことは、DB を使わない対照 `SyncModelRuntimeTests.OtherTableHolderShape_CountsOnlyTheNarrowShape` が表明する（条件を 1 つずつ外すと赤になる）。
+  - 固定は `swap-folder-names-without-refresh-does-not-settle`・`swap-without-refresh-does-not-settle`・`n15-pending-unique-cycle`・`holder-referenced-by-other-table-current-child-does-not-settle`（静止化の失敗の署名は表の名前を残すので表ごとに 1 行）。mutation 実証済み。
+  - 別の表の参照の判定が狭い（持ち主がサーバーにある・参照する行のサーバーの行が値を取る行の下に無い・参照する行がサーバーに無い・同じ表の参照、のどれも数えない）ことは、DB を使わない対照 `SyncModelRuntimeTests.OtherTableHolderShape_CountsOnlyTheNarrowShape` が表明する（条件を 1 つずつ外すと赤になる）。一意な値の比べ方をサーバー役のものから序数へ戻すと、持ち主の名前が大文字と末尾の空白だけ違う形（実 SQL Server の比べ方では当たり、序数では当たらない）が赤になる（`StuckShape` も同じ対照で見る）。最新の写しの形を分ける判定（`HasCurrentReferrer`）も同じ対照が見る。
 - 既知の失敗の一覧の乱数の項目のうち RegularSeeds / NightlySeeds の項目は、全部の種をまとめて照合して「起きない」も赤にする。種ごとの照合は「載っていない」しか見ないため。
 - 乱数の種の照合は、静止化で起きた例外を途中の同期の例外と同じに扱い、表明 2・3 の署名から表の名前を外して行う（`SyncModelRuntimeTests.Family`）。
 - 種の数は `QUICKER_SYNC_MODEL_SEEDS`（既定 60）と、広い世界の種の `QUICKER_SYNC_MODEL_WIDE_SEEDS`（既定 48・夜間 240）。広い世界の種は同じテストの中で既存の種の後に流し、種ごとの照合と再現の手順はその範囲の決め方で、既知の失敗の「起きない」の照合は既存の範囲の種だけで、網羅しない組の照合は 2 つの範囲がどちらも既定の種の数のときだけ行う。種の指紋は範囲ごとに別の記録（`SyncModel`・`SyncModelWide`）。時刻と乱数の出どころは種だけ。
@@ -283,6 +283,7 @@
 - 決定的なシナリオは、エンジンの事実を期待の操作で表明する（操作は次元表に載せず、乱数の操作の列には混ぜない）
   - `ExpectPayloadOp` / `ExpectNoAckOp`：サーバーが断った書き込みが、行の書き込みで止まり受理記録も blob も残さない（`n6-*`）
   - `ExpectLocalRowChangeOp`：実行が自分から変えた行の一覧（`SyncResult.LocalRowChanges`）に、表・キー・理由が載る（`thrown-serverwins-run-hides-settlement` など）
+  - `RefuseJournalRemovalOp`：端末のローカル DB に、1 つのキーの記録の削除を断るトリガーを仕掛ける・外す（記録を捨ててから行を消す順を、途中で失敗させて確かめる＝`holder-referenced-by-other-table-entries-go-before-rows`）
   - `ModelRefreshOp.ExpectScopeRefusal`：範囲外の行が範囲内の行を参照する洗い替えが断られ、端末の DB が変わらない（`42-refresh-refused-by-rows-outside`）
   - `LegacyKeyTextsOp`：以前の版が書いた形のキーのテキストを作る（`25-legacy-journal-key-text` / `25-legacy-ack-key-text`）
   - `RecordJournalOp`：ジャーナルへ直接記録して、プロセスごと落ちて残った記録を作る（`replay-unlanded-delete-entry-is-discarded`）

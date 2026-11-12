@@ -1658,15 +1658,22 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         foreach (var (device, table, key) in _quiesceTruncations.Distinct())
         {
             var local = await _world.ReadStateAsync(device, _ct);
-            var stuck = key is null ? null : StuckShape(server, local, table, key);
+            var stuck = key is null
+                ? null
+                : StuckShape(server, local, table, key, _world.Server.UniqueValues);
 
             if (
                 stuck is null
                 && key is not null
-                && OtherTableHolder(server, local, table, key) is { } other
+                && OtherTableHolder(server, local, table, key, _world.Server.UniqueValues)
+                    is { } other
             )
             {
-                signatures.Add($"1/no-quiesce:holder-referenced-by-other-table:{table}");
+                // 引き留める行の中に最新の写し（ローカルの行がサーバーの行と同じ）があれば、エンジンが消さない残りの形
+                var shape = HasCurrentReferrer(server, local, other.Referrers)
+                    ? "holder-referenced-by-other-table-current-child"
+                    : "holder-referenced-by-other-table";
+                signatures.Add($"1/no-quiesce:{shape}:{table}");
                 explained.Add((device, table, key));
                 explained.Add((device, table, other.Holder));
                 takers.Add((device, table, key));
@@ -1778,12 +1785,19 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
 
     /// <summary>
     /// 打ち切った行 R の形 (b')：R のサーバーの値をローカルで持つ H がサーバーに無く、別の表のローカルの行 C が H を（推移的に）
-    /// 参照し、C のサーバーの行が R の下にある。持ち主 H と、その形の C の一覧（当たらなければ null）
+    /// 参照し、C のサーバーの行が R の下にある。持ち主 H と、その形の C の一覧（当たらなければ null）。一意な値の同じさはサーバー役の
+    /// 比べ方（<see cref="ISyncModelServerRole.UniqueValues"/>）で見る
     /// </summary>
     internal static (
         string Holder,
         IReadOnlyList<(string Table, string Key)> Referrers
-    )? OtherTableHolder(ModelDbState server, ModelDbState local, string table, string key)
+    )? OtherTableHolder(
+        ModelDbState server,
+        ModelDbState local,
+        string table,
+        string key,
+        IEqualityComparer<string> uniqueValues
+    )
     {
         if (UniqueValue(server, table, key) is not { } wanted)
         {
@@ -1795,7 +1809,7 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             .Keys.Where(k =>
                 k != key
                 && server.Row(table, k) is null
-                && string.Equals(UniqueValue(local, table, k), wanted, StringComparison.Ordinal)
+                && uniqueValues.Equals(UniqueValue(local, table, k), wanted)
             )
             .Order(StringComparer.Ordinal);
 
@@ -1819,6 +1833,20 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
 
         return null;
     }
+
+    /// <summary>
+    /// 別の表の参照の形 (b') の参照する行のうち、ローカルの行がサーバーの行と同じもの（最新の写し）があるか。エンジンは、消すと
+    /// ダウンロードが降ろし直さない最新の写しを消さないので、この形は静止化しない（<c>holder-referenced-by-other-table-current-child</c>）
+    /// </summary>
+    internal static bool HasCurrentReferrer(
+        ModelDbState server,
+        ModelDbState local,
+        IReadOnlyList<(string Table, string Key)> referrers
+    ) =>
+        referrers.Any(r =>
+            local.Row(r.Table, r.Key) is { } row
+            && string.Equals(row, server.Row(r.Table, r.Key), StringComparison.Ordinal)
+        );
 
     /// <summary>状態の中で、行 (rowTable, rowKey) の祖先（外部キーを親へ辿る。行自身は含めない）に (table, key) があるか</summary>
     private static bool IsUnder(
@@ -1862,12 +1890,16 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         return false;
     }
 
-    /// <summary>打ち切った行の形（unique-swap・holder-referenced-by-taker）と、その形の持ち主の行（どちらでもなければ null）</summary>
-    private static (string Shape, string Holder)? StuckShape(
+    /// <summary>
+    /// 打ち切った行の形（unique-swap・holder-referenced-by-taker）と、その形の持ち主の行（どちらでもなければ null）。一意な値の
+    /// 同じさはサーバー役の比べ方（<see cref="ISyncModelServerRole.UniqueValues"/>）で見る
+    /// </summary>
+    internal static (string Shape, string Holder)? StuckShape(
         ModelDbState server,
         ModelDbState local,
         string table,
-        string key
+        string key,
+        IEqualityComparer<string> uniqueValues
     )
     {
         if (UniqueValue(server, table, key) is not { } wanted)
@@ -1877,10 +1909,7 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
 
         var holders = local
             .Rows(table)
-            .Keys.Where(k =>
-                k != key
-                && string.Equals(UniqueValue(local, table, k), wanted, StringComparison.Ordinal)
-            )
+            .Keys.Where(k => k != key && uniqueValues.Equals(UniqueValue(local, table, k), wanted))
             .ToList();
 
         foreach (var holder in holders)
@@ -1888,7 +1917,7 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             // (a) 厳密な入れ替え：持ち主のサーバーの値が、打ち切った行のローカルの値と同じ（片側だけの一致は数えない）
             if (
                 UniqueValue(server, table, holder) is { } given
-                && string.Equals(given, UniqueValue(local, table, key), StringComparison.Ordinal)
+                && uniqueValues.Equals(given, UniqueValue(local, table, key))
             )
             {
                 return ("unique-swap", holder);

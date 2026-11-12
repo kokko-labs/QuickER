@@ -346,6 +346,37 @@ internal static class SyncModelCoverageRows
                 ]
             );
         }
+
+        // RemovedForUniqueValue × Collect / LocalWins / LastWriteWins：未送信の無い古い写しが一意な値の持ち主を引き留める形
+        // （holder-referenced-by-other-table-stale-copy-settles）。サーバーで品目 591 を新しいフォルダー 592 へ移し、元の
+        // フォルダー 590 を消し、592 が 590 の名前を取る。送るもののある行が無いので、ポリシーに依らず古い写しを消す
+        foreach (
+            var (mode, policy) in new[]
+            {
+                (SyncMode.Versioned, SyncConflictPolicy.Collect),
+                (SyncMode.Versioned, SyncConflictPolicy.LocalWins),
+                (SyncMode.LastWriteWins, SyncConflictPolicy.Collect),
+            }
+        )
+        {
+            yield return Row(
+                $"removed-for-unique-value-{mode}-{policy}",
+                $"古い写しを消して一意な値の持ち主を消す（RemovedForUniqueValue）を {mode} / {policy} の同期で起こす",
+                mode,
+                policy,
+                extras: false,
+                faults: false,
+                [new AddFolderOp(SV, Direct, 590, null, "h590"), Item(SV, 591, 590, "cr1")],
+                [
+                    [Sync(D1, mode, policy)],
+                    [new AddFolderOp(SV, Direct, 592, null, "r592")],
+                    [new UpdateItemOp(SV, Direct, 591, 592, null, "cr1", "t591")],
+                    [new DeleteFolderOp(SV, Direct, 590)],
+                    [new UpdateFolderOp(SV, Direct, 592, null, "h590")],
+                    [Sync(D1, mode, policy)],
+                ]
+            );
+        }
     }
 
     private static ScenarioRow<SyncModelCoverageInput> Row(

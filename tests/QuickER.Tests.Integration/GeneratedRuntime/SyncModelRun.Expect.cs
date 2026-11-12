@@ -136,6 +136,20 @@ internal sealed partial class SyncModelRun
                     .Journal.RecordAsync(record.Table, record.KeyText, record.Operation, null, _ct);
                 return true;
 
+            case RefuseJournalRemovalOp refuse:
+            {
+                // 表とキーはシナリオが書いた定数で、文字列リテラルとして引用して埋める
+                var sql = refuse.Refuse
+                    ? "CREATE TRIGGER model_refuse_journal_removal BEFORE DELETE ON quicker_sync_journal "
+                        + $"WHEN OLD.table_name = '{refuse.Table.Replace("'", "''", StringComparison.Ordinal)}' "
+                        + $"AND OLD.key_text = '{refuse.KeyText.Replace("'", "''", StringComparison.Ordinal)}' "
+                        + "BEGIN SELECT RAISE(ABORT, 'journal removal refused by the scenario'); END"
+                    : "DROP TRIGGER IF EXISTS model_refuse_journal_removal";
+                await _world.Device(refuse.Device).Sql.ExecuteSqlAsync(sql, null, _ct);
+
+                return true;
+            }
+
             case ClearJournalOp clear:
             {
                 var journal = _world.Device(clear.Device).Journal;
