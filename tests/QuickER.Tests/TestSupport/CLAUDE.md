@@ -25,7 +25,7 @@
       - `NotGuaranteed`：数えない。
     - 種を持たないエンジンは `Classify(observed, ownsScope)`（受け持つ範囲に乱数の項目があれば断る）を使う。問題の文だけが要るときは `KnownReport.Problem`。
   - `KnownCaseLedger`：ケース ID ごとに検証本体を流し、例外を「範囲＝ケース ID」の失敗にして `KnownFailureSet` へ渡すだけの台帳。照合の規則は持たない。項目は `KnownCaseLedger.Case`（ケース ID・指摘・直す区切り・期待する理由の断片）。
-  - `EngineReport`：先頭 8 件（エンジンが指定）を再現の手順つきで詳しく書き、残りは範囲ごとの件数にする。
+  - `EngineReport`：先頭 8 件（エンジンが指定）を再現の手順つきで詳しく書き、残りは範囲ごとの件数にする。種のある失敗は、残りの種の番号も範囲ごとに小さい順で並べる（`EngineReport.MaxListedSeeds`＝範囲ごとに 50 個まで・超えた分は数だけ）。件数だけだと、詳しく書いた先頭の外の種が読めず、落ちた種の一覧を取り違える。ガード：`EngineReportTests.Render_ListsSeedsOfTruncatedFailures`。
   - `CoverageGuard`：`AtLeast` / `ContainsAll`。黙った空振りを止める。
   - `SeedFingerprint` / `FingerprintFile`：種ごとの生成器の入力の要約の指紋の記録と照合。
     照合は、普段の既定の種の数なら全数・夜間の既定の種の数なら記録にある種の全部・個別の指定なら重なりだけ。書き直しは普段の既定の種の数のときだけ。
@@ -207,7 +207,7 @@
     - 写しをルートに残すと、ルートで引数なしの `dotnet build` / `dotnet test` が MSB1011（ソリューションが 2 つ）で止まる。だから写しを正本にせず、`.gitignore` にも入れる。並列度は既定値を持たせない（ホストのランナーと手元で適した値が違う）。
     - 範囲ごとのソリューションと環境変数は、スクリプトの表 `$targetSettings` の 1 か所だけが持つ（ワークフローには書かない）。表に無い範囲は `stryker/QuickER.TestsOnly.slnx` で環境をそのまま流す。表の変数は Stryker を呼ぶ間だけ立て（外し）、終わったら成否に依らず元へ戻す。範囲・ソリューション・立てた変数・外した変数を結果のフォルダの `run-environment.json` に書く（要約が読む）。
   - テストだけのソリューション `stryker/QuickER.TestsOnly.slnx` は src の全プロジェクトと QuickER.Tests・偽の app-server を持つ（Stryker は変異させるプロジェクトをソリューションから探す。QuickER.Tests は Model などを推移的にしか参照しない）。2 本目の `stryker/QuickER.TestsWithIntegration.slnx` はそれに Integration を足したもので、表が provider-sync-planner に使う（下の「同期の計画の範囲」）。実行器は MTP（「MTP の実行器」）。
-  - 上限（`additional-timeout`）は Model 120 秒・Provider の 5 本 300 秒。Provider の計装の下で最も重いカバレッジの取得は `DslConditionFuzzTests` の 1 件 54 秒（手元。CI はおよそ 3 倍）で、300 秒で取得の時間切れは出ない（2026-11-09 の実測 4 本で 0）。static の変異は 15 分前後かけて殺せるので、上限を下げると本当の Killed が Timeout に変わるだけになる。
+  - 上限（`additional-timeout`）は Model・Provider の 5 本とも 300 秒。Provider の計装の下で最も重いカバレッジの取得は `DslConditionFuzzTests` の 1 件 54 秒（手元。CI はおよそ 3 倍）で、300 秒で取得の時間切れは出ない（2026-11-09 の実測 4 本で 0）。Model も以前は 120 秒で、CI のカバレッジの取得で 1 件が上限を超え、下の #3871 の連鎖で 510 件が Dubious になってジョブの上限（330 分）に当たった（2026-11-12）ので、Provider にそろえた。static の変異は 15 分前後かけて殺せるので、上限を下げると本当の Killed が Timeout に変わるだけになる。
   - 結果は報告するだけ：どの設定も `thresholds.break` が 0（点数では赤にしない）で、`break-on-initial-test-failure` が true（初回のテストの失敗では止める＝Stryker が動かなかったときだけ赤）。
   - 除外は `ArgumentNullException.ThrowIfNull` と例外のコンストラクターの引数（`ignore-methods` の `*.ThrowIfNull`・`*Exception.ctor`）だけ。
   - `mutate` はファイル単位（`**/` で始まる後ろの一致と、`!` を付けたファイル単位の除外）だけで書く。文字の範囲（`{a..b}`）は使わない：Stryker 5 は全部の変異をまとめてコンパイルしてから範囲で印を付けるので、範囲ではコンパイルの失敗（Safe Mode）を避けられず、位置はソースが動くと黙ってずれる。

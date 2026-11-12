@@ -39,7 +39,10 @@ public class SqlServerQueryParameterInterceptorTests
     /// <summary>表の行（DbContext への操作と、記録したコマンドの値を持つパラメータの期待の型）</summary>
     /// <param name="Act">DbContext への操作</param>
     /// <param name="Expected">値が null でないパラメータの「値 型 精度 スケール 長さ」（コマンドの並び順）。値の型で束縛したパラメータの精度・スケール・長さは、SqlClient が値から決めた数</param>
-    private sealed record InterceptRow(Func<ProbeContext, CancellationToken, Task> Act, string[] Expected);
+    private sealed record InterceptRow(
+        Func<ProbeContext, CancellationToken, Task> Act,
+        string[] Expected
+    );
 
     /// <summary>行（Id → 行）</summary>
     /// <remarks>
@@ -151,7 +154,9 @@ public class SqlServerQueryParameterInterceptorTests
     /// <summary>表の行の Id</summary>
     public static TheoryData<string> Ids() => [.. Rows.Keys];
 
-    [Theory(DisplayName = "SQL Server のクエリのパラメータは、値が列の型に入らないときだけ値の型で束縛する")]
+    [Theory(
+        DisplayName = "SQL Server のクエリのパラメータは、値が列の型に入らないときだけ値の型で束縛する"
+    )]
     [MemberData(nameof(Ids))]
     public async Task Parameters_AreRetypedOnlyWhenTheValueDoesNotFit(string id)
     {
@@ -223,8 +228,16 @@ public class SqlServerQueryParameterInterceptorTests
                 entity.Property(e => e.Id).HasColumnName("id").ValueGeneratedNever();
                 entity.Property(e => e.Amount).HasColumnName("amount").HasPrecision(10, 2);
                 entity.Property(e => e.Quantity).HasColumnName("quantity");
-                entity.Property(e => e.Code).HasColumnName("code").HasMaxLength(20).IsUnicode(false);
-                entity.Property(e => e.Fixed).HasColumnName("fixed").HasMaxLength(4).IsUnicode(false);
+                entity
+                    .Property(e => e.Code)
+                    .HasColumnName("code")
+                    .HasMaxLength(20)
+                    .IsUnicode(false);
+                entity
+                    .Property(e => e.Fixed)
+                    .HasColumnName("fixed")
+                    .HasMaxLength(4)
+                    .IsUnicode(false);
             });
     }
 
@@ -258,7 +271,9 @@ public class SqlServerQueryParameterInterceptorTests
         {
             Record(command);
             return ValueTask.FromResult(
-                InterceptionResult<DbDataReader>.SuppressWithResult(new DataTable().CreateDataReader())
+                InterceptionResult<DbDataReader>.SuppressWithResult(
+                    new DataTable().CreateDataReader()
+                )
             );
         }
 
@@ -274,8 +289,7 @@ public class SqlServerQueryParameterInterceptorTests
         }
 
         private void Record(DbCommand command) =>
-            LastParameters =
-            [
+            LastParameters = [
                 .. command
                     .Parameters.Cast<DbParameter>()
                     .Where(parameter => parameter.Value is not (null or DBNull))

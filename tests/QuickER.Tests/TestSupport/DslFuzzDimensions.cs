@@ -411,7 +411,8 @@ public static class DslFuzzDimensions
     /// <summary>
     /// 使い回すパラメータの値が列の型の外になる形を作る区切り（使い回しでない形は ValueFit の水準が作る）
     /// </summary>
-    private const string ReuseOutOfTypeFixedIn = "きっかけ待ち（簡易 DSL の使い回しと列の型の外の値）";
+    private const string ReuseOutOfTypeFixedIn =
+        "きっかけ待ち（簡易 DSL の使い回しと列の型の外の値）";
 
     /// <summary>
     /// 列の文字集合の外の文字（<see cref="FitBeyondCharset"/>）を、ValueFit を含む因子の組ごとに 1 項目にする（受け入れた組＝

@@ -11,13 +11,18 @@ namespace QuickER.Tests.TestSupport.Engines;
 /// エンジンの失敗を、範囲・種・署名・再現の手順つきでまとめる報告
 /// </summary>
 /// <remarks>
-/// 先頭の <c>maxDetailed</c> 件（既定 8）を詳しく書き、残りは範囲ごとの件数だけを書く（1 回の実行で数百件出ても読める長さに保つ）。
+/// 先頭の <c>maxDetailed</c> 件（既定 8）を詳しく書き、残りは範囲ごとの件数と、種のある失敗の種の番号（範囲ごとに
+/// <see cref="MaxListedSeeds"/> 個まで・超えた分は数だけ）を書く（1 回の実行で数百件出ても読める長さに保ちつつ、どの種が
+/// 落ちたかを隠さない）。
 /// 失敗には再現の手順を必ず添える（種なら <see cref="SeedPlan.ReproductionFor"/>、シナリオなら <see cref="ScenarioReproduction"/>）。
 /// </remarks>
 public sealed class EngineReport
 {
     /// <summary>詳しく書く件数の既定</summary>
     public const int DefaultMaxDetailed = 8;
+
+    /// <summary>詳しく書かなかった失敗の種の番号を、範囲ごとに並べる上限（超えた分は数だけ）</summary>
+    public const int MaxListedSeeds = 50;
 
     private readonly List<EngineFailure> _failures = [];
     private readonly Dictionary<EngineFailure, string> _reproductions = new(
@@ -93,6 +98,36 @@ public sealed class EngineReport
                     $"  ほか {rest.Count} 件（{string.Join("・", byScope)}）\n"
                 )
             );
+
+            // 詳しく書かなかった失敗の種の番号を、範囲ごとに小さい順で並べる（件数だけだと、どの種が落ちたかが読めない）。
+            // 並べるのは範囲ごとに先頭の MaxListedSeeds 個までで、残りは数だけにする（CI のログを膨らませない）
+            foreach (
+                var group in rest.Where(f => f.Seed is not null)
+                    .GroupBy(f => f.Scope, StringComparer.Ordinal)
+                    .OrderBy(g => g.Key, StringComparer.Ordinal)
+            )
+            {
+                var seeds = group.Select(f => f.Seed!.Value).Distinct().Order().ToList();
+                var listed = string.Join(
+                    "・",
+                    seeds
+                        .Take(MaxListedSeeds)
+                        .Select(seed => seed.ToString(CultureInfo.InvariantCulture))
+                );
+                var more =
+                    seeds.Count > MaxListedSeeds
+                        ? string.Create(
+                            CultureInfo.InvariantCulture,
+                            $" ほか {seeds.Count - MaxListedSeeds} 種"
+                        )
+                        : "";
+                text.Append(
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"    {group.Key} の種：{listed}{more}\n"
+                    )
+                );
+            }
         }
 
         return text.ToString().TrimEnd('\n');

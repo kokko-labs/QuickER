@@ -2299,6 +2299,28 @@ internal static partial class SyncModelScenarios
             ]
         );
 
+        // サーバーで品目 778・779・780 の code を 3 行で回し（778→v2・779→v3・780→v1。途中は仮の値）、端末は回す前の値のまま。
+        // docs の既知の割り切り（2 行で入れ替えても 3 行以上で回しても適用できない）で、静止化しない（受け入れ）。端末は回転の
+        // 行 778 に未送信の更新を持つ＝打ち切った行から持ち主を辿って元の行へ戻る回転の行の競合を、分類できないものに数えない
+        // ことをこのシナリオが固定する（2 行の入れ替えは swap-without-refresh-does-not-settle）
+        yield return new(
+            "rotate-three-codes-without-refresh-does-not-settle",
+            [
+                Folder(SV, 777),
+                Item(SV, 778, 777, code: "v1"),
+                Item(SV, 779, 777, code: "v2"),
+                Item(SV, 780, 777, code: "v3"),
+            ],
+            [
+                new UpdateItemOp(SV, Direct, 778, 777, null, "vtmp", "t778"),
+                new UpdateItemOp(SV, Direct, 780, 777, null, "v1", "t780"),
+                new UpdateItemOp(SV, Direct, 779, 777, null, "v3", "t779"),
+                new UpdateItemOp(SV, Direct, 778, 777, null, "v2", "t778"),
+                Sync(D1),
+                new UpdateItemOp(D1, Direct, 778, 777, null, "v1", "t778d1"),
+            ]
+        );
+
         // 乱数の夜間の種 786 の形を縮めたもの：端末 2 がフォルダー 781 の下に品目を足す。端末 1 がフォルダー 781 を消して上げる。
         // 端末 2 の後勝ち＋ServerWins の同期は、親の無い品目をダウンロードの前の削除伝搬でローカルから消し（RemovedBeforeDownload）、
         // その後の blob のコピーで失敗する（記録は残る）。次の同期は「行なし＋追加だけ」の記録を送るものが無いとして捨てる

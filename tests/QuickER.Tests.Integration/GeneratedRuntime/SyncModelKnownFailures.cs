@@ -55,6 +55,14 @@ internal static class SyncModelKnownFailures
             "swap-folder-names-without-refresh-does-not-settle",
             "1/no-quiesce:unique-swap:model_folders"
         ),
+        // 受け入れ：サーバーで 3 行の一意な値を回した行も、端末へ適用できず毎回打ち切る（2 行の入れ替えと同じ署名。乱数の種では
+        // 端末の未送信の行と古い写しの行が回転に混ざる形でも出る）
+        AcceptedEntry(
+            "NS-2",
+            "docs/code-generation.md の既知の割り切り「Rows whose unique values were rotated on the device or on the server are not carried across.」（2 行で入れ替えても 3 行以上で回しても同じ。RefreshAsync で解消する）",
+            "rotate-three-codes-without-refresh-does-not-settle",
+            "1/no-quiesce:unique-swap:model_items"
+        ),
         // 一意な値の持ち主を引き留める送るものの無い行の下に、ダウンロードがもう届け終えた最新の写しの行（同じ表に後ろの版の行が
         // 残る）があると、消すと降りてこないので消さず、静止化しない（乱数の項目はこの正規形から作る）
         Entry(

@@ -1162,8 +1162,14 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             var upserts = row.Any(e => e.Operation == nameof(SyncJournalOperation.Upsert));
             var deletes = row.Any(e => e.Operation == nameof(SyncJournalOperation.Delete));
 
-            // 送るものが無い記録（行ありで削除だけ・行なしで削除なし）は、エンジンが送らずに捨てる（決着ではない）
-            if ((localRow is not null && !upserts) || (localRow is null && !deletes))
+            // 送るものが無い記録（行ありで削除だけ・行なしで削除なし・行なしで削除ありでもサーバーの版が分からない）は、エンジンが
+            // 送らずに捨てる（決着ではない。同じ実行のダウンロードが同じキーのほかの書き手の行を降ろしても、ServerWins が戻したの
+            // ではない）
+            if (
+                (localRow is not null && !upserts)
+                || (localRow is null && !deletes)
+                || (localRow is null && NeverReachedServer(before, row))
+            )
             {
                 continue;
             }
@@ -1217,15 +1223,48 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         ModelDbState Server,
         ModelDbState Local,
         IReadOnlyList<SyncJournalRow> Pending,
-        int HitIndex
+        int HitIndex,
+        IReadOnlySet<(string Table, string KeyText)> Acknowledged
     );
 
-    private async Task<RunSnapshot> SnapshotAsync(ModelActor device) =>
-        new(
+    private async Task<RunSnapshot> SnapshotAsync(ModelActor device)
+    {
+        var journal = _world.Device(device).Journal;
+        var acknowledged = new HashSet<(string Table, string KeyText)>();
+
+        foreach (var table in ModelTables.All)
+        {
+            foreach (var keyText in (await journal.ReadAcksAsync(table, _ct)).Keys)
+            {
+                acknowledged.Add((table, keyText));
+            }
+        }
+
+        return new(
             await _world.ReadStateAsync(ModelActor.Server, _ct),
             await _world.ReadStateAsync(device, _ct),
-            await _world.Device(device).Journal.ReadAllAsync(_ct),
-            _world.Faults.WriteHitCount
+            await journal.ReadAllAsync(_ct),
+            _world.Faults.WriteHitCount,
+            acknowledged
+        );
+    }
+
+    /// <summary>
+    /// 行が無く削除の記録がある行のうち、エンジンが送らずに捨てる行か：版を持つ表で、削除の記録のどれも版を持たず、受理記録も
+    /// 無い（サーバーが持っていた版が分からない＝行はサーバーに届いていない）。docs の「送る操作の決め方」の表の
+    /// 「Gone｜Otherwise｜Drops the entries: the row never reached the server」の写し（版なしの表は削除を無条件に送る）
+    /// </summary>
+    private static bool NeverReachedServer(
+        RunSnapshot before,
+        IEnumerable<SyncJournalRow> entries
+    ) =>
+        entries.All(entry =>
+            entry.TableName != ModelTables.Labels
+            && (
+                entry.Operation != nameof(SyncJournalOperation.Delete)
+                || entry.OriginalRowVersion is null
+            )
+            && !before.Acknowledged.Contains((entry.TableName, entry.KeyText))
         );
 
     /// <summary>理由ごとの、根拠を確かめた件数と根拠のあった件数（空振りしていないかを出力で確かめる）</summary>
@@ -1635,8 +1674,10 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
     private sealed record StuckClassification(IReadOnlyList<string> Signatures, bool Unclassified);
 
     /// <summary>
-    /// 静止化の最後の周に残った打ち切りを 1 件ずつ分類する。(a) 一意な値の厳密な入れ替え（打ち切った行 R のサーバーの値を
-    /// ローカルの別の行 H が持ち、H のサーバーの値を R がローカルで持つ）＝<c>1/no-quiesce:unique-swap:{表}</c>。
+    /// 静止化の最後の周に残った打ち切りを 1 件ずつ分類する。(a) 一意な値の回転（打ち切った行 R のサーバーの値をローカルの別の行
+    /// H1 が持ち、H1 のサーバーの値を H2 が持ち…と辿って R に戻る。<see cref="UniqueRotation"/>）＝<c>1/no-quiesce:unique-swap:{表}</c>。
+    /// 回転の行はすべて説明済みにする。2 行の厳密な入れ替え（最短の形）はここで、3 行以上の回転は、ほかの形（端末側の循環を含む）が
+    /// どれも説明しなかった打ち切りにだけ最後に当てる（端末だけで回した循環は (c) の形のまま数える）。
     /// (b) R のサーバーの値をローカルで持つ H がサーバーに無く、R のローカルの行が H を参照する（値を取る行自身の古い参照が
     /// 持ち主を残す）＝<c>1/no-quiesce:holder-referenced-by-taker:{表}</c>。
     /// (b') R のサーバーの値をローカルで持つ H がサーバーに無く、別の表のローカルの行 C が H を（推移的に）参照し、C のサーバーの行が R の
@@ -1658,6 +1699,19 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         foreach (var (device, table, key) in _quiesceTruncations.Distinct())
         {
             var local = await _world.ReadStateAsync(device, _ct);
+
+            // (a) 2 行の厳密な入れ替え（回転の最短の形）。3 行以上の回転は、ほかの形がどれも説明しなかった打ち切りにだけ、最後に当てる
+            if (
+                key is not null
+                && UniqueRotation(server, local, table, key, _world.Server.UniqueValues)
+                    is { Count: 2 } swap
+            )
+            {
+                signatures.Add($"1/no-quiesce:unique-swap:{table}");
+                explained.UnionWith(swap.Select(row => (device, table, row)));
+                continue;
+            }
+
             var stuck = key is null
                 ? null
                 : StuckShape(server, local, table, key, _world.Server.UniqueValues);
@@ -1735,6 +1789,27 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             )
             {
                 explained.Add((device, table, key));
+            }
+        }
+
+        // (a') 3 行以上の一意な値の回転：ほかの形（端末側の循環を含む）がどれも説明しなかった打ち切りから辿る。回転の途中に未送信の
+        // 行と古い写しの行が混ざる形（サーバーと端末の両方で値が動いた）を含む。端末だけで回した循環は (c) が先に説明する
+        foreach (var (device, table, key) in leftTruncations)
+        {
+            if (key is null || explained.Contains((device, table, key)))
+            {
+                continue;
+            }
+
+            var local = await _world.ReadStateAsync(device, _ct);
+
+            if (
+                UniqueRotation(server, local, table, key, _world.Server.UniqueValues) is
+                { } rotation
+            )
+            {
+                signatures.Add($"1/no-quiesce:unique-swap:{table}");
+                explained.UnionWith(rotation.Select(row => (device, table, row)));
             }
         }
 
@@ -1891,8 +1966,70 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
     }
 
     /// <summary>
-    /// 打ち切った行の形（unique-swap・holder-referenced-by-taker）と、その形の持ち主の行（どちらでもなければ null）。一意な値の
-    /// 同じさはサーバー役の比べ方（<see cref="ISyncModelServerRole.UniqueValues"/>）で見る
+    /// 打ち切った行 R から始まる一意な値の回転（R・H1・H2…の行のキー。当たらなければ null）：R のサーバーの値をローカルの
+    /// 別の行 H1 が持ち、H1 のサーバーの値をローカルの別の行 H2 が持ち…と辿って R に戻る。2 行の厳密な入れ替え（H1 のサーバーの
+    /// 値を R がローカルで持つ）はその最短の形。docs の既知の割り切り（一意な値を回した行は、2 行でも 3 行以上でも適用できない）の
+    /// 形で、回転の途中の行が未送信の変更を持っていても、古い写しのままでも同じ。一意な値の同じさはサーバー役の比べ方
+    /// （<see cref="ISyncModelServerRole.UniqueValues"/>）で見る
+    /// </summary>
+    internal static IReadOnlyList<string>? UniqueRotation(
+        ModelDbState server,
+        ModelDbState local,
+        string table,
+        string key,
+        IEqualityComparer<string> uniqueValues
+    )
+    {
+        var path = new List<string> { key };
+        var onPath = new HashSet<string>(StringComparer.Ordinal) { key };
+
+        // 深さ優先で辿る（ローカルの一意制約は序数なので、サーバー役の比べ方で同じ値の持ち主が 2 つ以上あり得る）
+        bool Walk(string current)
+        {
+            if (UniqueValue(server, table, current) is not { } wanted)
+            {
+                return false;
+            }
+
+            foreach (
+                var holder in local
+                    .Rows(table)
+                    .Keys.Where(k =>
+                        k != current && uniqueValues.Equals(UniqueValue(local, table, k), wanted)
+                    )
+                    .Order(StringComparer.Ordinal)
+            )
+            {
+                if (holder == key)
+                {
+                    return path.Count >= 2;
+                }
+
+                if (!onPath.Add(holder))
+                {
+                    continue;
+                }
+
+                path.Add(holder);
+
+                if (Walk(holder))
+                {
+                    return true;
+                }
+
+                path.RemoveAt(path.Count - 1);
+                onPath.Remove(holder);
+            }
+
+            return false;
+        }
+
+        return Walk(key) ? path : null;
+    }
+
+    /// <summary>
+    /// 打ち切った行の形（holder-referenced-by-taker）と、その形の持ち主の行（当たらなければ null）。一意な値の回転（unique-swap）は
+    /// <see cref="UniqueRotation"/> が先に見る。一意な値の同じさはサーバー役の比べ方（<see cref="ISyncModelServerRole.UniqueValues"/>）で見る
     /// </summary>
     internal static (string Shape, string Holder)? StuckShape(
         ModelDbState server,
@@ -1914,15 +2051,6 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
 
         foreach (var holder in holders)
         {
-            // (a) 厳密な入れ替え：持ち主のサーバーの値が、打ち切った行のローカルの値と同じ（片側だけの一致は数えない）
-            if (
-                UniqueValue(server, table, holder) is { } given
-                && uniqueValues.Equals(given, UniqueValue(local, table, key))
-            )
-            {
-                return ("unique-swap", holder);
-            }
-
             // (b) 持ち主がサーバーに無く、打ち切った行のローカルの行が持ち主を参照する
             if (
                 server.Row(table, holder) is null

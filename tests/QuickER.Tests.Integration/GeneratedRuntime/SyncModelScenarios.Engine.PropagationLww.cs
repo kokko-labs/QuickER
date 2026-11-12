@@ -244,6 +244,23 @@ internal static partial class SyncModelScenarios
                     Expect.Rows(D1, F).Contains("1 parent=null name=local-edit"),
                 ]
             ),
+            // 上げる前に消した行の記録は、サーバーが同じキーの別の行（ほかの書き手の行）を持っていても送らずに捨てる（docs の
+            // 「送る操作の決め方」の表の Gone｜Otherwise＝行はサーバーに届いていない）。同じ実行のダウンロードがその別の行を
+            // 降ろすのは決着ではなく、モデルは後勝ち＋ServerWins の決着と推定しない（推定すると根拠のない DeleteRefusedOnServer）
+            Moved(
+                "lww-serverwins-unuploaded-insert-delete-on-taken-key-is-not-a-settlement",
+                [.. Seed(1, "alice", 11, "widget")],
+                [
+                    Folder(D1, 1001, name: "draft"),
+                    Folder(SV, 1001, name: "other"),
+                    new DeleteFolderOp(D1, Direct, 1001),
+                    Plain(D1, mode: SyncMode.LastWriteWins, policy: SyncConflictPolicy.ServerWins),
+                    Expect.Result(D1).Contains("uploaded=0").Absent("conflict *"),
+                    Expect.Rows(SV, F).Contains("1001 parent=null name=other"),
+                    Expect.Rows(D1, F).Contains("1001 parent=null name=other"),
+                    Expect.Journal(D1).Empty(),
+                ]
+            ),
             Moved(
                 "lww-cascade-save-with-versionless-child-uploads",
                 [],

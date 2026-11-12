@@ -88,7 +88,10 @@ public sealed partial class BackendParityRuntimeTests
             .BeNull();
 
         // 更新する部品を他者が消すと、部品も候補になる（型の名前で kit と分ける）
-        var withGonePart = scenario with { Parts = [GoneUpdatedPart] };
+        var withGonePart = scenario with
+        {
+            Parts = [GoneUpdatedPart],
+        };
 
         BackendParitySqlServerSaveComparison
             .IndependentConflicts(withGonePart)
