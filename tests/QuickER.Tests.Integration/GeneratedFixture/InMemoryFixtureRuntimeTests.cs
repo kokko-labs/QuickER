@@ -4,6 +4,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using QuickER.Tests.Integration.GeneratedRuntime;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.GeneratedInMemoryFixture;
@@ -24,6 +26,7 @@ namespace QuickER.Tests.GeneratedInMemoryFixture;
 /// QuickER 版・EF Core・インメモリ（リモートを含むものもある）で同じ入力を流して見る。
 /// </para>
 /// </remarks>
+[RuntimeCell(RuntimeFeatures.CrudParity, RuntimeTarget.InMemory)]
 public sealed class InMemoryFixtureRuntimeTests
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;

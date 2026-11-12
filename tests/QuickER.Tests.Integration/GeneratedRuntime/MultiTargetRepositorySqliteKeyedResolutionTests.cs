@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedMultiTargetFixture;
 using QuickER.Tests.GeneratedMultiTargetFixture.Repositories.Sqlite;
 using QuickER.Tests.GeneratedMultiTargetFixture.Repositories.SqlServer;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -26,6 +27,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.MultiTarget, RuntimeTarget.AdoSqlite)]
 public sealed class MultiTargetRepositorySqliteKeyedResolutionTests
 {
     /// <summary>接続を開かないダミー接続文字列（解決のみ検証するため実 DB は不要）</summary>

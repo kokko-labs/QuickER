@@ -9,6 +9,7 @@ using QuickER.Tests.GeneratedSyncFixture;
 using QuickER.Tests.GeneratedSyncFixture.Repositories.Sqlite;
 using QuickER.Tests.GeneratedSyncFixture.Repositories.SqlServer;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -28,6 +29,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 [Trait("Category", "Integration")]
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.AdoSqlServer)]
+[RuntimeCell(RuntimeFeatures.SyncRefresh, RuntimeTarget.AdoSqlServer)]
 public sealed class SyncSqlServerRuntimeTests(
     SqlServerContainerFixture fixture,
     ITestOutputHelper output

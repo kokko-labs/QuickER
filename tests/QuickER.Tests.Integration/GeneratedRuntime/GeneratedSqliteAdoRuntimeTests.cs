@@ -7,6 +7,7 @@ using AwesomeAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedSqliteFixture;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -20,6 +21,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <see cref="GeneratedSqliteRuntimeTestsBase"/> のシナリオ（自列参照の Contains・ThenInclude の循環・生 SQL）を、SQLite 固有の
 /// 実行経路（プレーン SELECT＋DataReader・IncludeLoader・AddWithValue）で流す。
 /// </remarks>
+[RuntimeCell(RuntimeFeatures.CrudParity, RuntimeTarget.AdoSqlite)]
 public sealed class GeneratedSqliteAdoRuntimeTests : GeneratedSqliteRuntimeTestsBase
 {
     /// <summary>QuickER の SQLite リポジトリ群を登録した DI コンテナ（接続文字列は基底の一時 DB）</summary>

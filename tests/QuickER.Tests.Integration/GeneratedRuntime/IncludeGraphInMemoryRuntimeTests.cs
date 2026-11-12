@@ -1,5 +1,6 @@
 using System.Threading.Tasks;
 using QuickER.Tests.GeneratedQueryFixture;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -13,6 +14,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// （＝3 実装先の中でもっとも別物）。ここが同じ結果グラフを返すことで、Include ツリーの意味論が
 /// 「SQL の書き方」ではなく仕様として揃っていることが分かる。
 /// </remarks>
+[RuntimeCell(RuntimeFeatures.IncludeGraph, RuntimeTarget.InMemory)]
 public sealed class IncludeGraphInMemoryRuntimeTests : IncludeGraphQueryFixtureRuntimeTestsBase
 {
     /// <summary>全リポジトリで共有するインメモリストア（実 DB のファイルに相当する永続点）</summary>

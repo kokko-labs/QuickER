@@ -5,6 +5,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedBinaryFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -19,6 +20,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <c>hook-after-writes-blob-then-later-after-throws</c>・<c>hook-after-sql-then-later-after-throws</c>）が持つ。
 /// FK 制約を Repository の接続でも効かせるため、接続文字列で <c>Foreign Keys=True</c> を明示する。
 /// </remarks>
+[RuntimeCell(RuntimeFeatures.SaveHook, RuntimeTarget.AdoSqlite)]
 public sealed class SaveHookAdoRuntimeTests : SaveHookRuntimeTestsBase, IDisposable
 {
     private readonly SqliteTempDatabase _db = SqliteTempDatabase.Create();

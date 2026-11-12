@@ -7,6 +7,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedQueryFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -20,6 +21,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// ユーザー定義フックが返す「図の列に対応しない違反」がモデルレベルエラー（プロパティ名なし）になることも確かめる。
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.EditModelValidateUnique, RuntimeTarget.AdoSqlite)]
 public sealed class EditModelValidateUniqueRuntimeTests : IAsyncLifetime
 {
     /// <summary>テスト全体で使うキャンセルトークン</summary>

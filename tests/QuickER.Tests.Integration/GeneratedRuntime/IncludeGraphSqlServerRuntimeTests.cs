@@ -6,6 +6,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedUniquenessSqlServerFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -29,6 +30,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </remarks>
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.IncludeGraph, RuntimeTarget.AdoSqlServer)]
 public sealed class IncludeGraphSqlServerRuntimeTests(SqlServerContainerFixture fixture)
     : IncludeGraphRuntimeTestsBase<CustomerEntity, OrderEntity, OrderLineEntity>,
         IAsyncLifetime

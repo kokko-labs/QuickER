@@ -18,6 +18,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// という DI 契約そのものを、全共通シナリオを DI 解決経路で流して証明する。
 /// </remarks>
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.CrudParity, RuntimeTarget.EfCoreSqlServer)]
 public sealed class GeneratedRuntimeEfCoreParityTests(SqlServerContainerFixture fixture)
     : GeneratedRuntimeParityTestsBase(fixture),
         IDisposable

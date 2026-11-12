@@ -23,6 +23,11 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 [Trait("Category", "Integration")]
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(
+    RuntimeFeatures.BinaryColumn,
+    RuntimeTarget.Remote,
+    Server = RuntimeTarget.EfCoreSqlServer
+)]
 public sealed class RemoteEfCoreUnboundedBinarySqlServerRuntimeTests(
     SqlServerContainerFixture fixture
 ) : IAsyncLifetime

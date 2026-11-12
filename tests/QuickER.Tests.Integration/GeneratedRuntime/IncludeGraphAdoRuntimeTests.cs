@@ -1,6 +1,7 @@
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedQueryFixture;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -13,6 +14,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// （<c>IncludeLoader</c>）で解決する。ツリーが 3 階層になるとこの引き当てが「孫の親キー」まで連なるため、
 /// 2 階層で緑でも 3 階層目が空になり得る——ここはその段を通す唯一の経路。
 /// </remarks>
+[RuntimeCell(RuntimeFeatures.IncludeGraph, RuntimeTarget.AdoSqlite)]
 public sealed class IncludeGraphAdoRuntimeTests : IncludeGraphSqliteFileRuntimeTestsBase
 {
     /// <summary>QuickER の SQLite リポジトリ群を登録した DI コンテナ（接続文字列は基底の一時 DB）</summary>

@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using QuickER.Tests.GeneratedConcurrencyFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -32,6 +33,11 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </remarks>
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(
+    RuntimeFeatures.RemoteTransport,
+    RuntimeTarget.Remote,
+    Server = RuntimeTarget.AdoSqlServer
+)]
 public sealed class RemoteSqlClientCancellationRuntimeTests(
     SqlServerContainerFixture fixture,
     ITestOutputHelper output

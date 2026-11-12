@@ -3,6 +3,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedTranslatorParityFixture;
 using QuickER.Tests.GeneratedTranslatorParityFixture.Repositories.SqlServer;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -19,6 +20,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 [Trait("Category", "Integration")]
 [Trait("RequiresDocker", "true")]
 [Collection(SqlServerContainerCollection.Name)]
+[RuntimeCell(RuntimeFeatures.TranslatorOperator, RuntimeTarget.AdoSqlServer)]
+[RuntimeCell(RuntimeFeatures.TranslatorParity, RuntimeTarget.AdoSqlServer)]
 public sealed class TranslatorParitySqlServerRuntimeTests(SqlServerContainerFixture fixture)
     : TranslatorParityRuntimeTestsBase
 {

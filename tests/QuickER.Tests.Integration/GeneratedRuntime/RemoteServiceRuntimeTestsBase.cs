@@ -699,6 +699,13 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
 }
 
 /// <summary>リモートサービスの e2e スイートを、サーバー実体＝QuickER の SqliteRepository で実行する派生</summary>
+[RuntimeCell(RuntimeFeatures.CrudParity, RuntimeTarget.Remote, Server = RuntimeTarget.AdoSqlite)]
+[RuntimeCell(RuntimeFeatures.NamedQuery, RuntimeTarget.Remote, Server = RuntimeTarget.AdoSqlite)]
+[RuntimeCell(
+    RuntimeFeatures.NamedQueryRawSql,
+    RuntimeTarget.Remote,
+    Server = RuntimeTarget.AdoSqlite
+)]
 public sealed class RemoteServiceAdoRuntimeTests : RemoteServiceRuntimeTestsBase
 {
     protected override void ConfigureServerRepositories(
@@ -708,6 +715,13 @@ public sealed class RemoteServiceAdoRuntimeTests : RemoteServiceRuntimeTestsBase
 }
 
 /// <summary>リモートサービスの e2e スイートを、サーバー実体＝EF Core Sqlite で実行する派生</summary>
+[RuntimeCell(RuntimeFeatures.CrudParity, RuntimeTarget.Remote, Server = RuntimeTarget.EfCoreSqlite)]
+[RuntimeCell(RuntimeFeatures.NamedQuery, RuntimeTarget.Remote, Server = RuntimeTarget.EfCoreSqlite)]
+[RuntimeCell(
+    RuntimeFeatures.NamedQueryRawSql,
+    RuntimeTarget.Remote,
+    Server = RuntimeTarget.EfCoreSqlite
+)]
 public sealed class RemoteServiceEfCoreRuntimeTests : RemoteServiceRuntimeTestsBase
 {
     protected override void ConfigureServerRepositories(

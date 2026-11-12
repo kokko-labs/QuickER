@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedBinaryFixture;
+using QuickER.Tests.TestSupport;
 using Xunit;
 using Bin = QuickER.Tests.GeneratedBinaryFixture;
 
@@ -59,6 +60,7 @@ internal sealed class FailingBlobStream(byte[] data, bool throwAtEnd) : Stream
 /// コミットされることは、実装先の一致のシナリオ <c>hook-after-writes-blobs</c> が持つ。
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.SaveHook, RuntimeTarget.AdoSqlite)]
 public sealed class SaveHookBinaryWriteSqliteRuntimeTests
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;

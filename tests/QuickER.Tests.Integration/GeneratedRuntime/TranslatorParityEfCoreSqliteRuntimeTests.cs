@@ -18,6 +18,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <c>UseSqlite</c> で流せる）。スキーマは同じ図から SQLite の DDL で作る。
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.TranslatorParity, RuntimeTarget.EfCoreSqlite)]
 public sealed class TranslatorParityEfCoreSqliteRuntimeTests
     : TranslatorParityEfCoreRuntimeTestsBase,
         IDisposable

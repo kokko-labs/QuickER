@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedBinaryFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -28,6 +29,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.RemoteTransport, RuntimeTarget.Remote, ServerNone = true)]
 public sealed class RemoteResponseBodyRuntimeTests
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;

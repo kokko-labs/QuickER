@@ -22,6 +22,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 [Trait("Category", "Integration")]
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.CrudParity, RuntimeTarget.EfCoreSqlServer)]
 public sealed class GeneratedRuntimeEfCoreSpecificTests(SqlServerContainerFixture fixture)
     : IDisposable
 {

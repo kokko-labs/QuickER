@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using AwesomeAssertions;
 using QuickER.Tests.GeneratedFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -14,6 +15,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// を渡して直接 new する。
 /// </summary>
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.CrudParity, RuntimeTarget.AdoSqlServer)]
 public sealed class GeneratedRuntimeAdoParityTests(SqlServerContainerFixture fixture)
     : GeneratedRuntimeParityTestsBase(fixture)
 {

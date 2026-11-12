@@ -7,6 +7,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedRemoteServiceFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -25,6 +26,11 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(
+    RuntimeFeatures.RemoteTransport,
+    RuntimeTarget.Remote,
+    Server = RuntimeTarget.AdoSqlite
+)]
 public sealed class RemoteHealthRuntimeTests : IAsyncLifetime
 {
     /// <summary>テスト全体で使うキャンセルトークン</summary>

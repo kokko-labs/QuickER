@@ -128,6 +128,7 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
   - After は読んだ版を見て、After の例外・コミットの失敗・やり直しのどれでも DB に無い版が残らず、同一インスタンスの再保存が偽競合にならない。
 
 ガード：`BackendParitySqlServerRuntimeTests` の `force-overwrite-10-rows*`・`attempt-limit-then-row-gone-*`・`mars-*-then-missing`、`BackendParityRuntimeTests` の `insert-when-missing-10-rows*`・`deleted-then-missing-without-savepoints`（SQLite で自動セーブポイントを切る）・`ef-retry-*`・`contact-backup-delete-retried-commit`（`ParityBackendOptions.RetryEfCoreFirstCommit`＝再試行する実行戦略と、DbContext ごとに最初のコミットを一時的な失敗にする設定）・`ignored-write-*`（SQLite の `RAISE(IGNORE)` トリガー）、`EfCoreConcurrencyRuntimeTests`（上限のテスト〔UPDATE を必ず 0 行にするインターセプター〕と「SaveAsync: After は旧版を見る・例外でロールバックしても幻の版が残らない」）。mutation 実証済み。
+実行戦略そのもの（再試行する実行戦略 `EnableRetryOnFailure` の構成）を実 DB で守るのは、SQLite の `BackendParityRuntimeTests` の `ef-retry-*`・`contact-backup-delete-retried-commit` だけ。`EfCoreConcurrencyRuntimeTests`（SQL Server）は実行戦略を構成せず、競合の解決のやり直しの数え方を守る。
 
 ## カスケードの ExecuteDeleteAsync
 

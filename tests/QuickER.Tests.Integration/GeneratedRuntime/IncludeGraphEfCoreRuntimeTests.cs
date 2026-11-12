@@ -14,6 +14,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 組み替えて実行する（QuickER 版の <see cref="IncludeGraphAdoRuntimeTests"/> とは別実装）。
 /// 同一のアサーション集合を緑にすることで、同じツリーが両実行器で同じ結果グラフを返すことを固定する。
 /// </remarks>
+[RuntimeCell(RuntimeFeatures.IncludeGraph, RuntimeTarget.EfCoreSqlite)]
 public sealed class IncludeGraphEfCoreRuntimeTests : IncludeGraphSqliteFileRuntimeTestsBase
 {
     /// <summary>EF Core 版リポジトリ群を登録した DI コンテナ（UseSqlite・接続文字列は基底の一時 DB）</summary>

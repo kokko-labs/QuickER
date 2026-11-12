@@ -8,11 +8,13 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedQueryFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>QuickER 版 Repository（SQLite 方言）で流す派生</summary>
+[RuntimeCell(RuntimeFeatures.ValueObjectStringMatch, RuntimeTarget.AdoSqlite)]
 public sealed class StringMatchMethodAdoRuntimeTests : StringMatchMethodSqliteFileRuntimeTestsBase
 {
     private ServiceProvider? _provider;

@@ -19,6 +19,7 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using QuickER.Tests.GeneratedBinaryFixture;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -35,6 +36,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// <para>切断は生のソケットで作る（FIN＝送信側を閉じる・RST＝linger 0 で閉じる）。Docker 不要（CI 常時実行）。</para>
 /// </remarks>
+[RuntimeCell(RuntimeFeatures.RemoteTransport, RuntimeTarget.Remote, ServerNone = true)]
 public sealed class RemoteServerEngineRuntimeTests
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;

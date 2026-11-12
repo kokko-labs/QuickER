@@ -8,6 +8,7 @@ using AwesomeAssertions;
 using QuickER.Tests.GeneratedSyncVoFixture;
 using QuickER.Tests.GeneratedSyncVoFixture.Repositories.Sqlite;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -35,6 +36,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.AdoSqlite)]
 public sealed class SyncVoRuntimeTests : IAsyncLifetime
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;

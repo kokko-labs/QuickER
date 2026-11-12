@@ -117,3 +117,4 @@ tests/**/engine-fingerprints.json text eol=lf
 # 守りの台帳の写しと影響の地図（GeneratedTextFile が LF で書く）
 tests/QuickER.Tests.Integration/protection-registry.json text eol=lf
 tests/QuickER.Tests/TestSupport/impact-map.md text eol=lf
+tests/QuickER.Tests.Integration/GeneratedRuntime/runtime-matrix.md text eol=lf

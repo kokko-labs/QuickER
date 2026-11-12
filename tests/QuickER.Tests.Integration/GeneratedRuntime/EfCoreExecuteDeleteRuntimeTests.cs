@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedBackendParityFixture;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -25,6 +26,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.CrudParity, RuntimeTarget.EfCoreSqlite)]
 public sealed class EfCoreExecuteDeleteRuntimeTests : IDisposable
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;

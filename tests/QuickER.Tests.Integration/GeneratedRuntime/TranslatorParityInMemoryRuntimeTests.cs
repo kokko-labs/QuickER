@@ -1,6 +1,7 @@
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedTranslatorParityFixture;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -13,6 +14,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// Include の照合・更新の経路はインメモリ独自の実装を持つため、同じシナリオで突き合わせる。
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.TranslatorParity, RuntimeTarget.InMemory)]
 public sealed class TranslatorParityInMemoryRuntimeTests : TranslatorParityRuntimeTestsBase
 {
     protected override Task<ServiceProvider> CreateProviderAsync() =>

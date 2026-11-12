@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedComputedColumnFixture;
 using QuickER.Tests.GeneratedComputedColumnFixture.Repositories.Sqlite;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -36,6 +37,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.ComputedColumn, RuntimeTarget.AdoSqlite)]
 public sealed class SqliteComputedColumnDiagramDdlRuntimeTests : IAsyncLifetime
 {
     private readonly SqliteTempDatabase _sqlite = SqliteTempDatabase.Create();

@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedComputedColumnFixture;
 using QuickER.Tests.GeneratedComputedColumnFixture.Repositories.SqlServer;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -27,6 +28,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 [Trait("Category", "Integration")]
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.ComputedColumn, RuntimeTarget.AdoSqlServer)]
 public sealed class SqlServerComputedColumnRuntimeTests(SqlServerContainerFixture fixture)
     : IAsyncLifetime
 {

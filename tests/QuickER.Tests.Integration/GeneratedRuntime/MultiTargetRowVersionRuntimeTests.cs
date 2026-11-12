@@ -6,6 +6,7 @@ using QuickER.Tests.GeneratedMultiTargetRowVersionFixture;
 using QuickER.Tests.GeneratedMultiTargetRowVersionFixture.Repositories.Sqlite;
 using QuickER.Tests.GeneratedMultiTargetRowVersionFixture.Repositories.SqlServer;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -27,6 +28,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 [Trait("Category", "Integration")]
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.MultiTargetRowVersion, RuntimeTarget.AdoSqlServer)]
+[RuntimeCell(RuntimeFeatures.MultiTargetRowVersion, RuntimeTarget.AdoSqlite)]
 public sealed class MultiTargetRowVersionRuntimeTests(SqlServerContainerFixture fixture)
     : IAsyncLifetime
 {

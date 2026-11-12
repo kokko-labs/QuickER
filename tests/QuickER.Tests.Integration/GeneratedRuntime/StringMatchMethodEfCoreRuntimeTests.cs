@@ -14,6 +14,7 @@ using Xunit;
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>EF Core 版 Repository（SQLite）で流す派生</summary>
+[RuntimeCell(RuntimeFeatures.ValueObjectStringMatch, RuntimeTarget.EfCoreSqlite)]
 public sealed class StringMatchMethodEfCoreRuntimeTests
     : StringMatchMethodSqliteFileRuntimeTestsBase
 {

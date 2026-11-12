@@ -4,6 +4,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
+using QuickER.Tests.Integration.GeneratedRuntime;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.GeneratedBinaryFixture;
@@ -19,6 +21,7 @@ namespace QuickER.Tests.GeneratedBinaryFixture;
 /// インメモリは DB を持たないため、実 DB の「SELECT が除外列を返さない」を「読み取り複製で除外列を未取得状態へ
 /// strip する」ことで再現する。UPDATE ガードと、除外列を参照する射影の取得可否も実 DB と揃える。
 /// </remarks>
+[RuntimeCell(RuntimeFeatures.BinaryColumn, RuntimeTarget.InMemory)]
 public sealed class BinaryInMemoryFixtureRuntimeTests
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;

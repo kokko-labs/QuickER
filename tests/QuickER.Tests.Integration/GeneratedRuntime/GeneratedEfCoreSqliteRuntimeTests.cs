@@ -30,6 +30,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.DialectPortability, RuntimeTarget.EfCoreSqlite)]
 public sealed class GeneratedEfCoreSqliteRuntimeTests
     : GeneratedEfCoreDialectRuntimeTestsBase,
         IDisposable

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedBinaryFixture;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -15,6 +16,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// context の生 SQL は NotSupported）は、実装先の一致のシナリオ（<c>hook-skip-update-keeps-stored-row</c>・
 /// <c>hook-after-writes-blobs</c>・<c>hook-after-writes-blob-then-later-after-throws</c>・<c>hook-after-executes-sql</c>）が持つ。
 /// </remarks>
+[RuntimeCell(RuntimeFeatures.SaveHook, RuntimeTarget.InMemory)]
 public sealed class SaveHookInMemoryRuntimeTests : SaveHookRuntimeTestsBase, IDisposable
 {
     /// <summary>全リポジトリで共有するインメモリストア（実 DB のファイルに相当する永続点）</summary>

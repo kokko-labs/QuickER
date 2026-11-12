@@ -1,5 +1,6 @@
 using System.Threading.Tasks;
 using QuickER.Tests.GeneratedQueryFixture;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -19,6 +20,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <see cref="NamedQueryRawSqlRuntimeTestsBase"/> の階層には入らない。
 /// </para>
 /// </remarks>
+[RuntimeCell(RuntimeFeatures.NamedQuery, RuntimeTarget.InMemory)]
 public sealed class NamedQueryInMemoryRuntimeTests : NamedQueryRuntimeTestsBase
 {
     /// <summary>全リポジトリで共有するインメモリストア（実 DB のファイルに相当する永続点）</summary>

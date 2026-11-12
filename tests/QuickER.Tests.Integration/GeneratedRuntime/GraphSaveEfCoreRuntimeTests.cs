@@ -6,6 +6,7 @@ using QuickER.Tests.TestSupport;
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>グラフ保存のランタイムスイートを<b>EF Core Sqlite 版</b>で実行する派生。</summary>
+[RuntimeCell(RuntimeFeatures.GraphSave, RuntimeTarget.EfCoreSqlite)]
 public sealed class GraphSaveEfCoreRuntimeTests : GraphSaveSqliteFileRuntimeTestsBase
 {
     /// <summary>EF Core 版リポジトリ群を登録した DI コンテナ（UseSqlite・接続文字列は基底の一時 DB）</summary>

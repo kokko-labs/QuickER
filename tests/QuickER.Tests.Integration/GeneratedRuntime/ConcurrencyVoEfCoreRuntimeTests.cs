@@ -30,6 +30,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </remarks>
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.ConcurrencyVo, RuntimeTarget.EfCoreSqlServer)]
 public sealed class ConcurrencyVoEfCoreRuntimeTests(SqlServerContainerFixture fixture)
     : ConcurrencyRuntimeTestsBase<GadgetEntity, SaveConflictException>,
         IAsyncLifetime

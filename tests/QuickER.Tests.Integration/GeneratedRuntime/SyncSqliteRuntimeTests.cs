@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using AwesomeAssertions;
 using QuickER.Tests.GeneratedSyncFixture;
 using QuickER.Tests.GeneratedSyncFixture.Repositories.Sqlite;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -18,6 +19,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 実 SQL Server に対して動かす。共通シナリオに加えて、転送に依らないエンジン自身の安全網もここで見る。
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.AdoSqlite)]
+[RuntimeCell(RuntimeFeatures.SyncRefresh, RuntimeTarget.AdoSqlite)]
 public sealed class SyncSqliteRuntimeTests : SyncRuntimeTestsBase
 {
     /// <inheritdoc />

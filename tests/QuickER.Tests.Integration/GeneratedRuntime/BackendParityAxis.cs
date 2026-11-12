@@ -1,3 +1,4 @@
+using QuickER.Tests.TestSupport;
 using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -5,7 +6,14 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <summary>実装先どうしの一致の軸の値（実装先）ごとのアダプタ</summary>
 /// <param name="Kind">実装先</param>
 /// <param name="IsBaseline">ほかの実装先と比べる基準か（ちょうど 1 つ）</param>
-public sealed record ParityBackendAdapter(ParityBackendKind Kind, bool IsBaseline) : IMatrixAdapter
+/// <param name="Target">機能 × 実装先の行列の実装先（シナリオが受け持つセルを導く。<c>RuntimeTestMatrixTests</c>）</param>
+/// <param name="Server">リモートのサーバーの裏の実装先（リモートでなければ null）</param>
+public sealed record ParityBackendAdapter(
+    ParityBackendKind Kind,
+    bool IsBaseline,
+    RuntimeTarget Target,
+    RuntimeTarget? Server = null
+) : IMatrixAdapter
 {
     /// <summary>軸の値（実装先の列挙値の名前）</summary>
     public string AxisValue => Kind.ToString();
@@ -26,11 +34,21 @@ public static class BackendParityAxis
             "parity-backend",
             Enum.GetNames<ParityBackendKind>(),
             [
-                new(ParityBackendKind.Ado, IsBaseline: true),
-                new(ParityBackendKind.EfCore, IsBaseline: false),
-                new(ParityBackendKind.InMemory, IsBaseline: false),
-                new(ParityBackendKind.Remote, IsBaseline: false),
-                new(ParityBackendKind.RemoteEfCoreOnly, IsBaseline: false),
+                new(ParityBackendKind.Ado, IsBaseline: true, RuntimeTarget.AdoSqlite),
+                new(ParityBackendKind.EfCore, IsBaseline: false, RuntimeTarget.EfCoreSqlite),
+                new(ParityBackendKind.InMemory, IsBaseline: false, RuntimeTarget.InMemory),
+                new(
+                    ParityBackendKind.Remote,
+                    IsBaseline: false,
+                    RuntimeTarget.Remote,
+                    RuntimeTarget.AdoSqlite
+                ),
+                new(
+                    ParityBackendKind.RemoteEfCoreOnly,
+                    IsBaseline: false,
+                    RuntimeTarget.Remote,
+                    RuntimeTarget.EfCoreSqlite
+                ),
             ]
         );
 

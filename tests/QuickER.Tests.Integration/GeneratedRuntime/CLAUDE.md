@@ -15,6 +15,38 @@
   - `NamedQueryRawSqlRuntimeTestsBase` / `UniquenessCheckLocalRuntimeTestsBase<TOrder>`。
 - 新しいバックエンドを足すときは派生を 1 つ書くだけで、全共通シナリオが自動的に掛かる。機能×実装の網に穴が開かない。
 
+## 機能 × 実装先の行列
+
+生成コードのランタイムのテストを「機能 × 実装先」の行列として宣言し、照合し、生成物 `runtime-matrix.md`（このフォルダ・手で直さない・eol=lf）として固定する。空欄はバグの保管庫なので、宣言しない限り赤になる網にする。
+
+- 実装先の正本は `RuntimeTarget`（`tests/QuickER.Tests/TestSupport/RuntimeTargets.cs`・WPF 非依存で Integration へ Compile のリンク）の 9 値：`AdoSqlServer`・`AdoSqlite`・`EfCoreSqlServer`・`EfCoreSqlite`・`EfCorePostgreSql`・`EfCoreMySql`・`EfCoreOracle`・`InMemory`・`Remote`。`Ado`＝QuickER 版 Repository（ADO.NET を直接使う生成の実装）。
+  - 方言の付いた値の集合は製品の正本と一対一（QuickER 版＝`CodeGenerationOptions.SupportedRepositoryDialects`・EF Core 版＝`DialectNames.All`。`RuntimeTargets.ProductProblems`）。製品が方言を足すと、値を足すまで赤になる。
+- 担当の宣言：テストのクラスに `[RuntimeCell(RuntimeFeatures.X, RuntimeTarget.Y)]`（複数可・`Inherited = false`）。機能の名前は `RuntimeFeatures` の定数。
+  - リモートの担当は、HTTP クライアントの裏のサーバーの実装先を `Server = RuntimeTarget.Z` か `ServerNone = true`（リポジトリを持たない転送だけのスタブ・HTTP を使わない検査）のちょうど一方で名乗る。リモート以外はどちらも書かない。
+- 実装先を 1 つのテストの中で比べるエンジンは属性を手で並べず、エンジンの実装先の軸から導く（`RuntimeMatrixEngines`）。
+  - 実装先の一致（`BackendParityRuntimeTests`）：軸のアダプタ `ParityBackendAdapter` が実装先とサーバーを持ち、登録（機能・シナリオの群）の群のシナリオが流れる実装先の和を担当にする。比べる相手として流れるだけの実装先を数えないときは登録の `Engine` で絞る（EF Core の実行戦略）。
+  - 簡易 DSL の総当たり（`DslConditionFuzzSqlServerRuntimeTests`）：構成の方言と実装先の軸の名前（`DslFuzzBackends`）から実装先を引く（`RuntimeMatrixEngines.DslTarget`）。
+  - 軸を持たないエンジンの派生（`TranslatorParity*`・`BackendParitySqlServerRuntimeTests`）は普通のクラスと同じく属性で書く。
+- 担当でないセルは行の表 `RuntimeMatrixRows` にだけ宣言する（担当は書かない）。種類は 3 つ。
+  - 空き（`Gap`）：まだ検証していない。直す区切りの名前が必須（決まっていなければ `RuntimeMatrixRows.Trigger`＝きっかけ待ち）。
+  - 割り切り（`Accepted`）：意図して検証しない。根拠（`リポジトリの相対パス「見出し」`）が必須で、docs か CLAUDE.md の見出しの実在を照合する。根拠の無い「代表させている」は空きにする。
+  - 非該当（`NotApplicable`）：その組み合わせが原理的に成り立たない。
+  - リモートの担当のうち、まだ流していないサーバーは `MissingServers`（理由・区切り）に書く（今は楽観排他 × QuickER 版 SQL Server のサーバーの 1 件）。担当のサーバーに現れたら赤になるので消す。
+- 照合（`RuntimeTestMatrixTests`）：
+  - どの機能 × どの実装先も、担当か宣言のちょうど一方（両方なら「埋まったので宣言を消す」、どちらも無ければ「担当も宣言も無い」で名指し）。実装先を足すと全機能のその列が赤になる。
+  - 走査の規約（`RuntimeMatrix` の remarks・このフォルダの名前空間の全部と、`QuickER.Tests.Generated…` の `*RuntimeTests`）に合うクラスは、どれも属性を持つかエンジンの登録にある。担当の機能は行の表にある。リモートのサーバーの名乗り方。
+  - 宣言の理由は具体的に書く（`FactorInventoryGuard.IsVagueReason`）。空きは区切り、割り切りは根拠を必ず持ち、ほかの種類は持たない。
+  - 成り立つセル（担当・空き・割り切り）のうち担当が過半。非該当は分母に入れない（EF Core を方言ごとに分けると非該当の列が増え、網の質と関係なく割れるため）。
+  - 行列の生成物は宣言から作り直した内容と同じ（`RuntimeTestMatrixTests.RuntimeMatrixDrift_MatchesRecord`・`GeneratedTextFile.Verify`）。書き直しは `QUICKER_REGEN_FIXTURES` を立てて `FullyQualifiedName~RuntimeMatrixDrift`（ルートの CLAUDE.md の書き直しの段のコマンドを Integration に向けても書き直される）。
+  - 照合の関数の自己検査は `RuntimeTestMatrixTests.Checks_NameEveryProblemShape`（合成の宣言で問題の形を 1 つずつ名指しする）。
+- 名前の規則（新しく足すクラス・`RuntimeTestNaming`）：機能と実装先は属性の名前で書き、接尾辞は `*RuntimeTests`。
+  - 実装先が 1 つ：機能の名前・実装先の名前の順に並べる（例 `SaveHookInMemoryRuntimeTests`・`TranslatorParityEfCoreSqlServerRuntimeTests`）。リモートは実装先の名前の代わりに Remote とサーバーの実装先の名前を並べ、リポジトリなしは Remote だけにする。
+  - 実装先が 2 つ以上かエンジン：機能の名前で始める（例 `BackendParitySqlServerRuntimeTests`・`MultiTargetRepositoryRuntimeTests`）。間は自由。
+  - 規則に合わない既存のクラスは既知の一覧 `RuntimeTestNamingKnown`（理由つき）に載せ、`GuardKnownList` で 2 方向に照合する（一覧に無い違反も、無くなった・合うようになったクラスも赤）。改名は後の区切りで行い、改名したら一覧から消す。ガード：`RuntimeTestMatrixTests.NewRuntimeTestClasses_FollowNamingRule`。
+- 運用：
+  - テストのクラスを足すときは属性を書き、そのセルの空きの宣言を消して生成物を書き直す。例：区切り D3 が TranslatorParity の EF Core の PostgreSQL・MySQL・Oracle の派生を足して `[RuntimeCell(RuntimeFeatures.TranslatorParity, RuntimeTarget.EfCorePostgreSql)]` などを付けると、その列は「空き（区切り D3）」と担当の両方で赤になり、`RuntimeMatrixRows` の宣言を消すと緑になる（続けて生成物を書き直す）。
+  - ガード：`RuntimeTestMatrixTests`（`Targets_MatchProductDialects`・`EveryRuntimeTestClass_ShouldAppearInMatrix`・`EveryMatrixCell_ShouldBeCoveredOrDeclaredAsGap`・`Matrix_ShouldBeMostlyCovered`・`RuntimeMatrixDrift_MatchesRecord`・`NewRuntimeTestClasses_FollowNamingRule`・`Checks_NameEveryProblemShape`）。
+
 ## 実装先どうしの一致
 
 `tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParity*.cs` が、同じエンティティ型のまま操作の列を複数の実装先へ流して比べる。
@@ -128,7 +160,7 @@
   - リモートの CRUD と保存の応答の書き戻し。
 - 値そのもの（行の数・フックの順・戻り値）は期待の手（`ParityExpect`）で書く。
 - 図に載らない形（EditModel・名前付きクエリ・有界バイナリ・素の int の主キー・HTTP 固有・rowversion・SQL Server の採番列）は元のクラスに残す。
-- `RuntimeTestMatrixTests` の行列の登録は、担当のクラスに加えて実装先の一致のシナリオの一覧（`Scenarios`）を持てる。`BackendParityRegistrations_NameScenariosRunningOnTheColumn` が、一覧のシナリオが実在し、その列の実装先で流れることを照合する。
+- 機能 × 実装先の行列（下の「機能 × 実装先の行列」）で、実装先の一致が受け持つセルは、シナリオの群（`RuntimeMatrixEngines.ScenarioGroups`）のシナリオが流れる実装先から導く。群のシナリオが実在することは `RuntimeTestMatrixTests.EveryRuntimeTestClass_ShouldAppearInMatrix` が照合する。
 - 削除する行の値を代替キーで取る保存（EF Core が後回しの行を 2 つめの文脈で書く形）は、シナリオ `graph-updated-row-takes-alternate-key-of-deleted-row`・`-with-new-dependent`・`-user-connections`（`ParityScenario.EfCoreUserConnections`＝EF Core の DbContext を利用者が持つ 2 本の接続から交互に作る構成。接続は破棄の後に開くと断る）・`ef-retry-updated-row-takes-alternate-key-of-deleted-row` と SQL Server のケース `alternate-key-taken-from-deleted-kit-*` が 5 実装先（SQL Server は 2 者）の一致で持つ。
 - 代替キーでない一意な値の J3 を SQL Server の EF Core で見るのは `GraphSaveEfCoreSqlServerRuntimeTests` だけ（SQL Server のケースの図の一意な列は代替キーだけで、EF Core は代替キーを `HasIndex` で並べないので、`HasIndex` を外す壊し方はケースの図では赤にならない）。
 

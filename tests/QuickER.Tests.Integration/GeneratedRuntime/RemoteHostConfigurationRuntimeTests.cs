@@ -18,6 +18,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using QuickER.Tests.GeneratedBinaryFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -39,6 +40,11 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(
+    RuntimeFeatures.RemoteTransport,
+    RuntimeTarget.Remote,
+    Server = RuntimeTarget.AdoSqlite
+)]
 public sealed class RemoteHostConfigurationRuntimeTests(ITestOutputHelper output) : IDisposable
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;

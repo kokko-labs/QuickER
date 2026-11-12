@@ -8,11 +8,13 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedQueryFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>インメモリ Repository で流す派生</summary>
+[RuntimeCell(RuntimeFeatures.ValueObjectStringMatch, RuntimeTarget.InMemory)]
 public sealed class StringMatchMethodInMemoryRuntimeTests
     : StringMatchMethodQueryFixtureRuntimeTestsBase
 {

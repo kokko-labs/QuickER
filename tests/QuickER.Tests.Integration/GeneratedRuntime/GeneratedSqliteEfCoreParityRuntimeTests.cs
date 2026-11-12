@@ -27,6 +27,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// で検証している。これにより両バックエンドで基底を無改変で共有できる。
 /// </para>
 /// </remarks>
+[RuntimeCell(RuntimeFeatures.CrudParity, RuntimeTarget.EfCoreSqlite)]
 public sealed class GeneratedSqliteEfCoreParityRuntimeTests : GeneratedSqliteRuntimeTestsBase
 {
     /// <summary>EF Core 版リポジトリ群を登録した DI コンテナ（UseSqlite・接続文字列は基底の一時 DB）</summary>

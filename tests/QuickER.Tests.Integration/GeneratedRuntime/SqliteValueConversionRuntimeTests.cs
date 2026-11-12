@@ -8,6 +8,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedSqliteValueConversionFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -28,6 +29,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.ValueConversion, RuntimeTarget.AdoSqlite)]
 public sealed class SqliteValueConversionRuntimeTests : IAsyncLifetime
 {
     /// <summary>検証用の一時ファイル SQLite DB</summary>

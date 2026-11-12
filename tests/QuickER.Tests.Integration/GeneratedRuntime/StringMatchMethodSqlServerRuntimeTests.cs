@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedUniquenessSqlServerFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -16,6 +17,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </summary>
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.ValueObjectStringMatch, RuntimeTarget.AdoSqlServer)]
 public sealed class StringMatchMethodSqlServerRuntimeTests(SqlServerContainerFixture fixture)
     : StringMatchMethodRuntimeTestsBase<CustomerEntity>,
         IAsyncLifetime

@@ -32,6 +32,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 [Trait("Category", "Integration")]
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.IdentityColumn, RuntimeTarget.AdoSqlServer)]
+[RuntimeCell(RuntimeFeatures.IdentityColumn, RuntimeTarget.EfCoreSqlServer)]
 public sealed class SqlServerIdentityColumnRuntimeTests(SqlServerContainerFixture fixture)
     : IAsyncLifetime
 {

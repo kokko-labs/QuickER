@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedSqlServerBinaryFixture;
+using QuickER.Tests.TestSupport;
 using Xunit;
 using SsBin = QuickER.Tests.GeneratedSqlServerBinaryFixture;
 
@@ -22,6 +23,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 [Trait("Category", "Integration")]
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.SaveHook, RuntimeTarget.AdoSqlServer)]
 public sealed class SaveHookBinaryWriteSqlServerRuntimeTests(SqlServerContainerFixture fixture)
     : IAsyncLifetime
 {

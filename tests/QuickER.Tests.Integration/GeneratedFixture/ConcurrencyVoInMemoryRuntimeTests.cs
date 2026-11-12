@@ -2,6 +2,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using QuickER.Tests.Integration.GeneratedRuntime;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.GeneratedConcurrencyFixture;
@@ -23,6 +24,7 @@ namespace QuickER.Tests.GeneratedConcurrencyFixture;
 /// （ストアは取得のたびに複製を返すため、手元のインスタンスの版は古いまま残る）。
 /// </para>
 /// </remarks>
+[RuntimeCell(RuntimeFeatures.ConcurrencyVo, RuntimeTarget.InMemory)]
 public sealed class ConcurrencyVoInMemoryRuntimeTests
     : ConcurrencyRuntimeTestsBase<GadgetEntity, SaveConflictException>
 {

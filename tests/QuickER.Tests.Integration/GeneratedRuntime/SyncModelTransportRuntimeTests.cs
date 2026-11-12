@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
+using QuickER.Tests.TestSupport;
 using QuickER.Tests.TestSupport.Engines;
 using Xunit;
 
@@ -196,6 +197,7 @@ internal static class SyncModelSignatures
 /// </remarks>
 [Trait("Category", "Integration")]
 [MatrixAxisValue(SyncModelTransportAxis.Name, nameof(SyncModelTransport.Http))]
+[RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.Remote, Server = RuntimeTarget.AdoSqlite)]
 public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output) : ISyncModelTransportTests
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
@@ -278,6 +280,7 @@ public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output) : ISyncM
 [Trait("RequiresDocker", "true")]
 [Collection(SqlServerContainerCollection.Name)]
 [MatrixAxisValue(SyncModelTransportAxis.Name, nameof(SyncModelTransport.SqlServer))]
+[RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.AdoSqlServer)]
 public sealed class SyncModelSqlServerRuntimeTests(
     SqlServerContainerFixture fixture,
     ITestOutputHelper output

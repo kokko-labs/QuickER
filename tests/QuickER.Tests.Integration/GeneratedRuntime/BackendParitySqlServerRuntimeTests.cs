@@ -31,6 +31,17 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </remarks>
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.BackendParity, RuntimeTarget.AdoSqlServer)]
+[RuntimeCell(RuntimeFeatures.BackendParity, RuntimeTarget.EfCoreSqlServer)]
+[RuntimeCell(
+    RuntimeFeatures.BackendParity,
+    RuntimeTarget.Remote,
+    Server = RuntimeTarget.EfCoreSqlServer
+)]
+[RuntimeCell(RuntimeFeatures.SaveHook, RuntimeTarget.AdoSqlServer)]
+[RuntimeCell(RuntimeFeatures.SaveHook, RuntimeTarget.EfCoreSqlServer)]
+[RuntimeCell(RuntimeFeatures.GraphSave, RuntimeTarget.EfCoreSqlServer)]
+[RuntimeCell(RuntimeFeatures.GraphSave, RuntimeTarget.AdoSqlServer)]
 public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture fixture)
     : IAsyncLifetime
 {

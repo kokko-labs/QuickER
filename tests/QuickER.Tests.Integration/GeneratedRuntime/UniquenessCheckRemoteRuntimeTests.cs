@@ -7,6 +7,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedRemoteServiceFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -27,6 +28,11 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 親の <see cref="UniquenessCheckRuntimeTestsBase{TOrder}"/> を継承する。
 /// </para>
 /// </remarks>
+[RuntimeCell(
+    RuntimeFeatures.UniquenessCheck,
+    RuntimeTarget.Remote,
+    Server = RuntimeTarget.AdoSqlite
+)]
 public sealed class UniquenessCheckRemoteRuntimeTests
     : UniquenessCheckRuntimeTestsBase<OrderEntity>,
         IAsyncLifetime
