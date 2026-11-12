@@ -828,7 +828,7 @@ src 全体か src の外を読む守り。単位の守りには数えない（�
 | `rule:cjk-range-copies` | tests/**/*.cs |
 | `rule:regex-ignore-case-culture` | src/**/*.cs |
 | `rule:regex-digit-classes` | src/**/*.cs |
-| `rule:ef-core-provider-cache-limit` | tests/**/*.cs（除外 33 件） |
+| `rule:ef-core-provider-cache-limit` | tests/**/*.cs（除外 34 件） |
 | `rule:window-activation-collection` | tests/QuickER.Tests/**/*.cs（除外 3 件） |
 | `rule:window-activation-markers` | tests/QuickER.Tests/AI.Chat/AiChatDialogApiKeyBoxTests.cs・tests/QuickER.Tests/Gui/Behaviors/CanvasViewportBehaviorSpaceKeyTests.cs・tests/QuickER.Tests/Gui/Views/PropertyPanelMemoEditTests.cs |
 | `rule:wpf-main-window-creations` | tests/QuickER.Tests/**/*.cs |

@@ -22,7 +22,10 @@ namespace QuickER.Tests.GeneratedSqlServerBinaryFixture;
 /// （<see cref="Tests.Integration.SqlServerBinaryColumnRuntimeTests"/>・Docker 依存）。
 /// </para>
 /// <para>
-/// オプションは SQL Server エンジン検証に必要な最小構成（EF Core / インメモリ / リモートは付けない）。
+/// オプションは SQL Server エンジン検証に必要な構成に、リモートサービスを足したもの（EF Core / インメモリは付けない）。
+/// リモートは、サーバー実体を QuickER 版 SQL Server にしたリモートの楽観排他（実 rowversion を HTTP で往復させる）を
+/// 値オブジェクトなしの図で流すために持つ（<c>ConcurrencyRemoteAdoSqlServerRuntimeTests</c>・Docker 依存）。
+/// 本体＋<c>SqlServerBinaryFixture.RemoteServer.g.cs</c> の 2 ファイル構成。
 /// </para>
 /// </remarks>
 public static class SqlServerBinaryFixtureDefinition
@@ -30,12 +33,15 @@ public static class SqlServerBinaryFixtureDefinition
     /// <summary>生成フィクスチャの名前空間（既存フィクスチャと衝突しない専用 namespace）</summary>
     public const string NamespaceName = "QuickER.Tests.GeneratedSqlServerBinaryFixture";
 
-    /// <summary>コミット済みフィクスチャファイル名</summary>
+    /// <summary>コミット済みフィクスチャファイル名（本体）</summary>
     public const string OutputFileName = "SqlServerBinaryFixture.g.cs";
+
+    /// <summary>コミット済みフィクスチャファイル名（サーバー実装）</summary>
+    public const string ServerOutputFileName = "SqlServerBinaryFixture.RemoteServer.g.cs";
 
     /// <summary>
     /// フィクスチャ生成に用いる決定的なオプション。
-    /// SQL Server 方言のQuickER 版 Repository 単独＋無制限バイナリ除外の最小構成。
+    /// SQL Server 方言のQuickER 版 Repository＋リモートサービス＋無制限バイナリ除外。
     /// </summary>
     public static CodeGenerationOptions Options { get; } =
         new()
@@ -46,6 +52,7 @@ public static class SqlServerBinaryFixtureDefinition
             GenerateMappers = true,
             GenerateRepositories = true,
             GenerateValueObjects = false,
+            GenerateRemoteServices = true,
             RepositoryDialects = ["sqlserver"],
             ExcludeUnboundedBinaryColumns = true,
             SplitFilesByCategory = false,
