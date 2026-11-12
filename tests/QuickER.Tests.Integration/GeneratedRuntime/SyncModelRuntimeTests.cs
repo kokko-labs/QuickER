@@ -127,6 +127,9 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         );
         run.Log.Count.Should().BeGreaterThan(0);
 
+        // 生成器の誤り（書き手の DB で成功しない手）は、書き込みの失敗と分けて名指しし、その種の残りの手を作らない
+        ModelFailure? generatorFailure = null;
+
         for (var step = 0; step < StepsPerSeed; step++)
         {
             var states = new Dictionary<ModelActor, ModelDbState>();
@@ -136,7 +139,17 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                 states[actor] = await run.World.ReadStateAsync(actor, ct);
             }
 
-            var ops = generator.Next(states);
+            IReadOnlyList<ModelOp> ops;
+
+            try
+            {
+                ops = generator.Next(states);
+            }
+            catch (SyncModelGeneratorContractException e)
+            {
+                generatorFailure = new(e.Signature, e.Message);
+                break;
+            }
 
             if (coverage is not null)
             {
@@ -187,7 +200,9 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             }
         }
 
-        return (run.Failures, run.Log);
+        return generatorFailure is null
+            ? (run.Failures, run.Log)
+            : ([.. run.Failures, generatorFailure], run.Log);
     }
 
     [Fact(

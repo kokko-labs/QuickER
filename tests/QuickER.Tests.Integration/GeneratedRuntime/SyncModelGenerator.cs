@@ -12,13 +12,15 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <remarks>
 /// <para>
 /// 書き込みは、書き手の DB の現在の内容を見て、その DB で成功する操作だけを選ぶ。作らない形（失敗する書き込み・同じキーの挿入など）は
-/// <see cref="SyncModelNotGenerated"/> に宣言する。
+/// <see cref="SyncModelNotGenerated"/> に宣言する。返す前に、主キーと一意な値の分を <see cref="CheckWriterContract"/> で確かめ、
+/// 破れば生成器の誤り（署名 <c>gen/writer-contract:*</c>）として名指しする。
 /// </para>
 /// <para>
 /// キーは書き手ごとに別の範囲から採る（端末 1＝1000 台・端末 2＝2000 台・サーバーの他者＝3000 台・端末 3＝4000 台・初期データ＝1 桁）。
 /// 世界の端末の数は種の番号から決まる（<see cref="SyncModelWorldShape"/>）。端末 1・2 の世界の端末の選び方は、端末 3 を足す前の
 /// 引き方のまま（既存の種の列を変えない）。
-/// 値（名前・題名・メモ・blob）は種の中で一意にし、同じ値へ戻る書き込み（ABA）で表明が誤って通らないようにする。
+/// 値（名前・品目の code・題名・メモ・blob）は種の中で一意にし、同じ値へ戻る書き込み（ABA）で表明が誤って通らないようにする
+/// （品目の挿入の既定の code は <see cref="FreshItemCode"/>）。
 /// 日時のキーは固定の基準時刻からの通し番号＋種から作る端数で、Kind（Utc / Local / Unspecified）も種から選ぶ。
 /// 端数の最後の桁は 0 にしない（格納の文字列の末尾の 0 の省き方に照合を依存させない）。
 /// </para>
@@ -101,6 +103,9 @@ internal sealed class SyncModelGenerator
         [ModelActor.Device3] = 4000,
     };
     private int _counter;
+
+    // この生成器が品目の挿入の既定の code として出した値（盗んだキーで同じ値を 2 回出さないため。FreshItemCode）
+    private readonly HashSet<string> _issuedItemCodes = new(StringComparer.Ordinal);
 
     // 端末ごとに、この生成器が挿入した行（表, キー）。メモリに持っていた実体で消す操作の候補
     private readonly Dictionary<ModelActor, List<(string Table, string Key)>> _held = new()
@@ -507,6 +512,8 @@ internal sealed class SyncModelGenerator
 
             if (ops is not null)
             {
+                CheckWriterContract(actor, state, ops);
+
                 return ops;
             }
         }
@@ -873,7 +880,7 @@ internal sealed class SyncModelGenerator
                 var (id, stolen) = KeyFor(actor, ModelTables.Items, NewId(actor));
                 var folder = Pick(folders);
                 var label = labels.Count == 0 || _random.Next(2) == 0 ? null : Pick(labels);
-                var (code, spelling) = UniqueFor(actor, items: true, ItemCode(actor, id));
+                var (code, spelling) = UniqueFor(actor, items: true, FreshItemCode(actor, id));
 
                 return
                 [
@@ -1318,6 +1325,111 @@ internal sealed class SyncModelGenerator
         $"c{(int)actor}-{id.ToString(CultureInfo.InvariantCulture)}";
 
     /// <summary>
+    /// 品目の挿入の既定の code（種の中で一意）。自分の新しいキーは単調に増えるので <see cref="ItemCode"/> のまま重ならないが、
+    /// 盗んだキー（<see cref="KeyFor"/>）は同じ書き手が同じキーをもう一度選べる（自分で消した後にまた候補になる）。すでに
+    /// 出した値なら通し番号を足す（その形の種だけが変わる）
+    /// </summary>
+    private string FreshItemCode(ModelActor actor, int id)
+    {
+        var code = ItemCode(actor, id);
+
+        if (_issuedItemCodes.Add(code))
+        {
+            return code;
+        }
+
+        code = $"{code}-{(++_counter).ToString(CultureInfo.InvariantCulture)}";
+        _issuedItemCodes.Add(code);
+
+        return code;
+    }
+
+    /// <summary>
+    /// 書き込みの手が書き手の DB で成功する約束（<see cref="SyncModelGenerator"/> の remarks）のうち、主キーと一意な値の分を
+    /// 確かめる。手の列を順に当てた書き手の DB の写しで、挿入するキーがまだ無いことと、フォルダーの name・品目の code を
+    /// ほかの行が持っていないこと（序数）を見る。失敗を期待する手（<see cref="ModelWriteOp.ExpectFailure"/>）は当てない。
+    /// 破っていれば <see cref="SyncModelGeneratorContractException"/>（生成器の誤りを、書き込みの失敗 <c>op/failed</c> と分けて名指しする）
+    /// </summary>
+    /// <param name="actor">書き手</param>
+    /// <param name="state">書き手の DB の現在の内容</param>
+    /// <param name="ops">生成器が返す手の列</param>
+    internal static void CheckWriterContract(
+        ModelActor actor,
+        ModelDbState state,
+        IReadOnlyList<ModelOp> ops
+    )
+    {
+        var folders = state.Folders.ToDictionary(p => p.Key, p => p.Value.Name);
+        var items = state.Items.ToDictionary(p => p.Key, p => p.Value.Code);
+        var labels = state.Labels.Keys.ToHashSet(StringComparer.Ordinal);
+        var events = state.Events.Keys.ToHashSet(StringComparer.Ordinal);
+
+        void Fail(ModelWriteOp op, string what, string table) =>
+            throw new SyncModelGeneratorContractException(
+                $"gen/writer-contract:{op.GetType().Name}:{what}:{table}",
+                $"{actor}'s DB refuses {op.Describe()} ({what} already taken in {table})"
+            );
+
+        void Put(ModelWriteOp op, Dictionary<int, string> rows, int id, string value, bool insert)
+        {
+            var table = op.Table;
+
+            if (insert && rows.ContainsKey(id))
+            {
+                Fail(op, "key", table);
+            }
+
+            if (
+                rows.Any(p =>
+                    p.Key != id && string.Equals(p.Value, value, StringComparison.Ordinal)
+                )
+            )
+            {
+                Fail(op, "unique", table);
+            }
+
+            rows[id] = value;
+        }
+
+        foreach (var op in ops.OfType<ModelWriteOp>().Where(op => !op.ExpectFailure))
+        {
+            switch (op)
+            {
+                case AddFolderOp add:
+                    Put(op, folders, add.Id, add.Name, insert: true);
+                    break;
+                case UpdateFolderOp update:
+                    Put(op, folders, update.Id, update.Name, insert: false);
+                    break;
+                case DeleteFolderOp delete:
+                    folders.Remove(delete.Id);
+                    break;
+                case AddItemOp add:
+                    Put(op, items, add.Id, add.Code, insert: true);
+                    break;
+                case UpdateItemOp update:
+                    Put(op, items, update.Id, update.Code, insert: false);
+                    break;
+                case DeleteItemOp delete:
+                    items.Remove(delete.Id);
+                    break;
+                case AddLabelOp add when !labels.Add(add.Code):
+                    Fail(op, "key", op.Table);
+                    break;
+                case DeleteLabelOp delete:
+                    labels.Remove(delete.Code);
+                    break;
+                case AddEventOp add when !events.Add(add.KeyText):
+                    Fail(op, "key", op.Table);
+                    break;
+                case DeleteEventOp delete:
+                    events.Remove(delete.KeyText);
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
     /// blob の値（先頭の 4 バイトが種の中の通し番号＝種の中で一意）。<paramref name="mayBeLarge"/> なら 2 本目の乱数で
     /// <see cref="LargePayloadBytes"/> バイトへ伸ばす（先頭の 6 バイトは同じ。本流の乱数の引き方は変えない）
     /// </summary>
@@ -1575,6 +1687,18 @@ internal enum UniqueSpelling
 
     /// <summary>空の文字列</summary>
     Empty,
+}
+
+/// <summary>
+/// 生成器が書き手の DB で成功しない手を作った（生成器の誤り。<see cref="SyncModelGenerator.CheckWriterContract"/>）
+/// </summary>
+/// <param name="signature">違反の署名（<c>gen/writer-contract:{手}:{key|unique}:{表}</c>）</param>
+/// <param name="message">手と理由</param>
+internal sealed class SyncModelGeneratorContractException(string signature, string message)
+    : Exception(message)
+{
+    /// <summary>違反の署名</summary>
+    public string Signature { get; } = signature;
 }
 
 /// <summary>

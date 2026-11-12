@@ -236,6 +236,8 @@
     - delete-take-reparent：消した行の値を取って別の親へ付け替え、元の親を消す。
 - 2 本目の乱数（`SyncModelGenerator.SideSeed`）：本流が選んだ手のキー・一意な値・blob の大きさ・除外する表を、低い確率で置き換える（本流の乱数の引き方は変えない。置き換えた種は実行の結果が変わるので、後の手も変わる）。
   - 同じキー（`StolenKeyRate`）：フォルダー・品目・イベントの挿入で、ほかの書き手の範囲のキーのうち、ほかの書き手の DB にあって自分の DB に無いものを選ぶ（持ち主の採番はもう越えているので、持ち主の後の挿入は自分の DB で失敗しない）。サーバーで DuplicateOnServer になる。
+    - 品目の挿入の既定の code は `SyncModelGenerator.FreshItemCode` が作る。盗んだキーは同じ書き手がもう一度選べる（自分で消した後にまた候補になる）ので、すでに出した code なら通し番号を足す。外すと、同じキーを盗み直した手が、削除して同じ code で入れ直した自分の行とぶつかり、書き手の DB で断られる。
+- 書き手の DB で成功する手だけを選ぶ約束のうち、主キーと一意な値（序数）の分は、生成器が手を返す前に `SyncModelGenerator.CheckWriterContract` が手の列を順に当てて確かめる。破れば生成器の誤りとして `gen/writer-contract:{手}:{key|unique}:{表}` で名指しし（`RunSeedAsync` が受けてその種の残りの手を作らない）、書き込みの失敗 `op/failed` と分ける。失敗を期待する手（`ExpectFailure`）は当てない。
   - 一意な値の別表記（`SpellingRate`・`UniqueSpelling`）：端末がフォルダーの name・品目の code を新しく書く手で、Exact（ほかの書き手の値そのもの）・AsciiCase・NonAscii（非 ASCII で始まる新しい値）・NonAsciiCase・TrailingSpace・Empty へ置き換える。自分の DB に序数で同じ値が無いものだけ。サーバーの他者は NonAscii だけ（ほかはサーバー役の照合順序で成否が割れる＝網羅しない組の Accepted）。非 ASCII の大文字小文字の土台として、初期データの 2 番目のフォルダーの name と品目の code は非 ASCII で始める。
   - 大きな blob（`LargePayloadRate`・`LargePayloadBytes`＝ストリームのコピーの区切りの 2 つ分を越える 163,847 バイト）。
   - 2〜3 表の除外（`MultipleExclusionRate`）：本流が何も除外しなかった同期の一部（本流の 1 表の除外は変えない）。
@@ -266,13 +268,13 @@
   - 残る網羅しない組は Blobs=False の受け入れだけ。
   - mutation 実証済み。
 - 静止化が終わらないときは、最後の周の打ち切りと競合を分類して署名を細かくする（`SyncModelRun.ClassifyStuckTruncationsAsync`）。
-  - 一意な値の厳密な入れ替え：`1/no-quiesce:unique-swap:{表}`（docs の既知の割り切り＝受け入れ）。
+  - 一意な値の回転：`1/no-quiesce:unique-swap:{表}`（docs の既知の割り切り＝受け入れ）。打ち切った行のサーバーの値をローカルで持つ行、その行のサーバーの値をローカルで持つ行…と辿って元の行へ戻る形で、2 行の厳密な入れ替えはその最短の形（判定は `SyncModelRun.UniqueRotation`。回転の途中に未送信の行・古い写しの行が混ざっても同じ）。2 行の入れ替えは打ち切りの分類の最初に、3 行以上の回転はほかの形（端末側の循環を含む）が説明しなかった打ち切りにだけ最後に当てる。2 行に限ると 3 行以上の回転が粗い署名に落ち、最初に当てると端末だけで回した循環を `pending-unique-cycle` から奪う。
   - 値を取る行自身の古い参照が持ち主を残す：`1/no-quiesce:holder-referenced-by-taker:{表}`。
   - 持ち主がサーバーに無く、別の表のローカルの行が持ち主を（推移的に）参照し、その行のサーバーの行が値を取る行の下にある：`1/no-quiesce:holder-referenced-by-other-table:{表}`。引き留める行がどれも送るものを持たなければエンジンが消して抜ける（`src/QuickER.Runtime.Sync/CLAUDE.md`「一意な値の持ち主を新しくする」）ので、この署名が残るのは、エンジンが消さない形だけ。そのうち、参照する行の中にローカルの行がサーバーの行と同じ最新の写しがある形（消すとダウンロードが降ろし直さないので消さない）は `1/no-quiesce:holder-referenced-by-other-table-current-child:{表}` に分ける（`SyncModelRun.HasCurrentReferrer`）。既知の失敗の一覧に Pending（直す区切りは `SyncModelKnownFailures.StuckSyncRemainderFixedIn`）で載せ、決まった形の行 `holder-referenced-by-other-table-current-child-does-not-settle` が受け持つ。
   - 端末側の一意な値の循環：`1/no-quiesce:pending-unique-cycle:{表}`。
-  - 入れ替えと、値を取る行自身の古い参照の場合は打ち切った行と持ち主の行の、別の表の参照の場合は打ち切った行・持ち主・参照する行と、サーバーで値を取る行の下にあるために止まった打ち切りの行の、循環は集まりの行の競合を説明済みにする。
+  - 回転の場合は回転の行すべての、値を取る行自身の古い参照の場合は打ち切った行と持ち主の行の、別の表の参照の場合は打ち切った行・持ち主・参照する行と、サーバーで値を取る行の下にあるために止まった打ち切りの行の、循環は集まりの行の競合を説明済みにする。
   - どれにも当たらない打ち切りか説明の付かない競合が残れば、粗い署名 `1/no-quiesce:conflicts-or-truncations` もあわせて出す。分類できた分が隠さない。
-  - 固定は `swap-folder-names-without-refresh-does-not-settle`・`swap-without-refresh-does-not-settle`・`n15-pending-unique-cycle`・`holder-referenced-by-other-table-current-child-does-not-settle`（静止化の失敗の署名は表の名前を残すので表ごとに 1 行）。mutation 実証済み。
+  - 固定は `swap-folder-names-without-refresh-does-not-settle`・`swap-without-refresh-does-not-settle`・`rotate-three-codes-without-refresh-does-not-settle`（3 行の回転）・`n15-pending-unique-cycle`・`holder-referenced-by-other-table-current-child-does-not-settle`（静止化の失敗の署名は表の名前を残すので表ごとに 1 行）。mutation 実証済み。
   - 別の表の参照の判定が狭い（持ち主がサーバーにある・参照する行のサーバーの行が値を取る行の下に無い・参照する行がサーバーに無い・同じ表の参照、のどれも数えない）ことは、DB を使わない対照 `SyncModelRuntimeTests.OtherTableHolderShape_CountsOnlyTheNarrowShape` が表明する（条件を 1 つずつ外すと赤になる）。一意な値の比べ方をサーバー役のものから序数へ戻すと、持ち主の名前が大文字と末尾の空白だけ違う形（実 SQL Server の比べ方では当たり、序数では当たらない）が赤になる（`StuckShape` も同じ対照で見る）。最新の写しの形を分ける判定（`HasCurrentReferrer`）も同じ対照が見る。
 - 既知の失敗の一覧の乱数の項目のうち RegularSeeds / NightlySeeds の項目は、全部の種をまとめて照合して「起きない」も赤にする。種ごとの照合は「載っていない」しか見ないため。
 - 乱数の種の照合は、静止化で起きた例外を途中の同期の例外と同じに扱い、表明 2・3 の署名から表の名前を外して行う（`SyncModelRuntimeTests.Family`）。
@@ -291,6 +293,7 @@
   - サーバーの他者の操作は、ハーネスの `ApplyOnServerAsync` がサーバー役のリポジトリのグラフ保存での削除も行う（網羅の行のキーだけのスタブ・持っていた実体での削除）
 - 例外で終わった後勝ち＋ServerWins の実行でも、モデルは実行前の未送信の記録と突き合わせて捨てた行を推定する（`SyncModelRun.SyncAsync` の注入した失敗の catch から `RecordLastWriteWinsSettlementsAsync`）
   - 推定するのは、記録が消え、送るものがあり、サーバーの値が送った値でなく、ServerWins がローカルを戻したか、サーバーに行の無い upsert か、実行が DiscardedByServerWins と報告した行だけ（書き込みの履歴の最後の値で比べると、blob だけを書いた品目を「削除を書いた」と取り違える）
+  - 送るものが無いのは、行ありで削除だけ・行なしで削除なし・行なしで削除ありでもサーバーの版が分からない行（版を持つ表で、削除の記録のどれも版を持たず、実行の前の受理記録も無い。docs の「送る操作の決め方」の表の Gone｜Otherwise＝行はサーバーに届いていない。判定は `SyncModelRun.NeverReachedServer`）。最後の形を推定に入れると、同じ実行のダウンロードが同じキーのほかの書き手の行を降ろしたのを決着と取り違え、根拠のない `3/spurious:*:DeleteRefusedOnServer:no-basis` になる。決まった形の行は `lww-serverwins-unuploaded-insert-delete-on-taken-key-is-not-a-settlement`
 - 空の blob の期待（N12）
   - 空の blob を見逃すのは、空でない blob を書いた端末と、消された品目を上げ直した端末（同期の前にサーバーに無く後にある＝挿入の経路・`_recreators`）がすべて、その品目の競合を報告されたか ServerWins に変更を捨てられたときだけ（`_conflictsTo`）
   - blob を書いた後でその品目が削除され作り直されたら、期待値を決めない（`_blobHistoryCut`）

@@ -25,7 +25,7 @@
       - `NotGuaranteed`：数えない。
     - 種を持たないエンジンは `Classify(observed, ownsScope)`（受け持つ範囲に乱数の項目があれば断る）を使う。問題の文だけが要るときは `KnownReport.Problem`。
   - `KnownCaseLedger`：ケース ID ごとに検証本体を流し、例外を「範囲＝ケース ID」の失敗にして `KnownFailureSet` へ渡すだけの台帳。照合の規則は持たない。項目は `KnownCaseLedger.Case`（ケース ID・指摘・直す区切り・期待する理由の断片）。
-  - `EngineReport`：先頭 8 件（エンジンが指定）を再現の手順つきで詳しく書き、残りは範囲ごとの件数にする。
+  - `EngineReport`：先頭 8 件（エンジンが指定）を再現の手順つきで詳しく書き、残りは範囲ごとの件数にする。種のある失敗は、残りの種の番号も範囲ごとに小さい順で並べる（`EngineReport.MaxListedSeeds`＝範囲ごとに 50 個まで・超えた分は数だけ）。件数だけだと、詳しく書いた先頭の外の種が読めず、落ちた種の一覧を取り違える。ガード：`EngineReportTests.Render_ListsSeedsOfTruncatedFailures`。
   - `CoverageGuard`：`AtLeast` / `ContainsAll`。黙った空振りを止める。
   - `SeedFingerprint` / `FingerprintFile`：種ごとの生成器の入力の要約の指紋の記録と照合。
     照合は、普段の既定の種の数なら全数・夜間の既定の種の数なら記録にある種の全部・個別の指定なら重なりだけ。書き直しは普段の既定の種の数のときだけ。
