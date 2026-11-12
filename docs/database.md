@@ -655,7 +655,9 @@ Swapping a fixed-length and a variable-length string of the same family (`CHAR` 
 If the column has data, the change fails and the dropped constraints stay dropped.
 QuickER treats such a type difference as one that can make re-adding the foreign key fail, and on MySQL / Oracle a failed re-add leaves the foreign key missing.
 Integer types that differ only in width are not a mismatch where the table above allows them on the two ends.
-The databases accept some other combinations as well (decimal precisions on PostgreSQL, MySQL and Oracle, and integers referring to decimals on PostgreSQL), but QuickER still treats them as a mismatch: the confirmation names the foreign key, and the sync goes through when the database accepts it.
+The databases accept some other combinations as well (decimal precisions on PostgreSQL, MySQL and Oracle, integers referring to decimals on PostgreSQL, and any pair of `char`, `varchar` and `text` on PostgreSQL), but QuickER still treats them as a mismatch, and the confirmation names the foreign key.
+A sync that can change the column with the foreign key in place goes through when the database accepts the types.
+A sync that has to drop and re-add the foreign key, such as one that changes the primary key the foreign key refers to, stops at that step, because QuickER does not drop such a foreign key.
 Only a change of type counts, pair by pair: a column pair whose two ends already have different types that the database accepts is not counted when the sync changes only the nullability of its columns, the primary key it refers to, or the types of another pair of the same foreign key.
 An addition or a recreate of a foreign key that you selected is left out of the script for the same reason, and the confirmation names it.
 For such a foreign key, a column pair that no foreign key in the database has yet counts even when the sync changes neither column, because the database has never accepted its types.

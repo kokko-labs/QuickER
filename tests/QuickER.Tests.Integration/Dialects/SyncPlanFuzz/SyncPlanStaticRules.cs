@@ -44,12 +44,12 @@ internal sealed record SyncPlanStaticVerdict(
 ///   <item>R5：外部キーを足すとき、参照する列の集合が親の主キーか一意制約と一致する（候補キーの無い付け直しは DB が断る）。</item>
 ///   <item>R6：表の最後の列を消さない（SQL Server 4923・MySQL 1090・Oracle ORA-12983。PostgreSQL は列の無い表を許すので判定しない。
 ///   製品は同期後に列の残らない表の列の削除を計画から外す＝<see cref="SyncPlanWarningKind.TableLeftWithoutColumns"/>）。</item>
-///   <item>R7：列の型の変更の後、残す外部キーのその列を含む組の両端が、方言の宣言
-///   （<see cref="SyncDialectCapabilities.AreForeignKeyCompatibleTypes"/>）で並べられる（PostgreSQL 42804・Oracle ORA-02267。外し直しの方言は
-///   R2 が先に当たる）。宣言は「真なら DB が必ず受け入れる」側に置くので、偽の組を DB が受け入れる形（PostgreSQL の integer と numeric など）は
-///   予言が外れうる。生成器と形の行の外部キーの列は整数か文字列で、その範囲の宣言は実 DB の期待の行が固定する。</item>
-///   <item>R8：外部キーを足すとき、組の両端のその時点の型が方言の宣言で並べられる（MySQL 3780・SQL Server 1778 / 1753・PostgreSQL 42804・
-///   Oracle ORA-02267）。DB 側の図の外部キーが同じ型のまま持っていた組（外して付け直す文）は、DB が受け入れたので数えない。宣言の扱いは R7 と同じ。
+///   <item>R7：列の型の変更の後、残す外部キーのその列を含む組の両端を DB が必ず断る組にしない（PostgreSQL 42804・Oracle ORA-02267。外し直しの
+///   方言は R2 が先に当たる）。断る組は測った事実（<see cref="SyncPlanFuzzDialect.RefusesForeignKeyTypes"/>）で判定する。製品の宣言
+///   （<see cref="SyncDialectCapabilities.AreForeignKeyCompatibleTypes"/>）は「真なら DB が必ず受け入れる」保守側なので、偽の組の一部
+///   （PostgreSQL の整数の子と小数の親・文字列どうし、Oracle の NUMBER どうし）を DB は受け入れる。その組は予言しない。</item>
+///   <item>R8：外部キーを足すとき、組の両端のその時点の型を DB が必ず断る組にしない（MySQL 3780・SQL Server 1778 / 1753・PostgreSQL 42804・
+///   Oracle ORA-02267）。DB 側の図の外部キーが同じ型のまま持っていた組（外して付け直す文）は、DB が受け入れたので数えない。断る組の判定は R7 と同じ。
 ///   この規則が無いと、live の列どうしの型の違う外部キーの追加が警告なしに断られるのを予言できない。</item>
 ///   <item>R9：同じ列の並びに一意制約を 2 つ張れない方言（Oracle＝<see cref="SyncDialectCapabilities.SupportsUniqueConstraintOnPrimaryKey"/>
 ///   が偽の逐次 DDL の方言）で、一意制約を足すとき、その時点で残る主キー・一意制約と列集合が同じでない（ORA-02261）。</item>
@@ -176,7 +176,14 @@ internal static class SyncPlanStaticRules
 
         // M1・D9 の並び（失敗の予言の有無に依らない、暗黙コミットの方言の並びの規則）
         warningViolations.AddRange(
-            MovedFirstNotFailing(steps, doomedAt, liveEntities, capabilities)
+            MovedFirstNotFailing(
+                dialect,
+                steps,
+                doomedAt,
+                liveEntities,
+                liveRelationships,
+                capabilities
+            )
         );
 
         if (!capabilities.TransactionalDdl)
@@ -238,9 +245,11 @@ internal static class SyncPlanStaticRules
     /// この宣言の方言では MySQL だけ）を最後に持つ前寄せだけを見る。
     /// </remarks>
     private static IEnumerable<string> MovedFirstNotFailing(
+        string dialect,
         List<Step> steps,
         int doomedAt,
         IReadOnlyList<Entity> liveEntities,
+        IReadOnlyList<Relationship> liveRelationships,
         SyncDialectCapabilities capabilities
     )
     {
@@ -252,6 +261,12 @@ internal static class SyncPlanStaticRules
         }
 
         var last = steps[movedCount - 1];
+
+        // 製品の宣言が偽で DB が受け入れる組（AcceptedTypeMismatchMove）のための前寄せは、宣言どおりの振る舞い（docs の割り切り）なので数えない
+        if (AcceptedTypeMismatchMove(dialect, last, liveEntities, liveRelationships, capabilities))
+        {
+            yield break;
+        }
         var judged =
             last.Kind == SchemaDiffKind.DropUniqueConstraint
             || last.Kind == SchemaDiffKind.AlterPrimaryKey
@@ -275,6 +290,70 @@ internal static class SyncPlanStaticRules
                 ? $"{M1Prefix} {last.Describe()} is moved first but is not predicted to fail"
                 : $"{M1Prefix} {last.Describe()} is moved first but {steps[doomedAt].Describe()} is the statement predicted to fail";
         }
+    }
+
+    /// <summary>
+    /// 前寄せした列の型の変更が、製品の宣言（<see cref="SyncDialectCapabilities.AreForeignKeyCompatibleTypes"/>）では残す外部キーの相手の端の
+    /// live の型と並べられないが、DB はどの組も受け入れる（<see cref="SyncPlanFuzzDialect.RefusesForeignKeyTypes"/> が偽）変更か
+    /// </summary>
+    /// <remarks>
+    /// 製品は宣言が偽の組を必ず断られるとみなして先頭へ移す（宣言は保守側）。DB が受け入れるのでその文は通り、M1 の「前寄せの文が断られると
+    /// 予言される」は成り立たないが、前寄せは宣言どおりの振る舞い。宣言が真の組だけを持つ前寄せ（両端を別々の型へ変える組の、互換の範囲で
+    /// 広げる側の変更など）は今までどおり M1 が見る。
+    /// </remarks>
+    private static bool AcceptedTypeMismatchMove(
+        string dialect,
+        Step step,
+        IReadOnlyList<Entity> liveEntities,
+        IReadOnlyList<Relationship> liveRelationships,
+        SyncDialectCapabilities capabilities
+    )
+    {
+        if (
+            step.Kind != SchemaDiffKind.AlterColumn
+            || step.Item.Column is not { } column
+            || liveEntities.FirstOrDefault(e => Lower(e.TableName) == step.Table) is not { } table
+            || table.Columns.FirstOrDefault(c => Lower(c.Name) == Lower(column.Name))
+                is not { } liveColumn
+        )
+        {
+            return false;
+        }
+
+        // 変える列を端に持つ live の外部キーの組の（子の型, 親の型）。変える端は新しい型
+        var pairs = new List<(string Child, string Parent)>();
+
+        foreach (var relationship in liveRelationships)
+        {
+            var parent = liveEntities.FirstOrDefault(e => e.Id == relationship.SourceEntityId);
+            var child = liveEntities.FirstOrDefault(e => e.Id == relationship.TargetEntityId);
+
+            foreach (var pair in relationship.ColumnPairs)
+            {
+                var parentColumn = parent?.Columns.FirstOrDefault(c => c.Id == pair.SourceColumnId);
+                var childColumn = child?.Columns.FirstOrDefault(c => c.Id == pair.TargetColumnId);
+
+                if (parentColumn is null || childColumn is null)
+                {
+                    continue;
+                }
+
+                if (childColumn == liveColumn || parentColumn == liveColumn)
+                {
+                    pairs.Add(
+                        (
+                            childColumn == liveColumn ? column.DataType : childColumn.DataType,
+                            parentColumn == liveColumn ? column.DataType : parentColumn.DataType
+                        )
+                    );
+                }
+            }
+        }
+
+        return pairs.Any(p => !capabilities.AreForeignKeyCompatibleTypes(p.Child, p.Parent))
+            && !pairs.Any(p =>
+                SyncPlanFuzzDialect.RefusesForeignKeyTypes(dialect, capabilities, p.Child, p.Parent)
+            );
     }
 
     /// <summary>
@@ -1206,7 +1285,8 @@ internal static class SyncPlanStaticRules
                 return $"R2: {step.Table}.{column} is altered while {fk.Name} uses it";
             }
 
-            // R7：残す外部キーのこの列を含む組の両端が、列の変更の後に方言の宣言で並べられない
+            // R7：残す外部キーのこの列を含む組の両端が、列の変更の後に DB が必ず断る組になる（測った事実＝
+            // SyncPlanFuzzDialect.RefusesForeignKeyTypes。製品の宣言が偽でも DB が受け入れる組は予言しない）
             foreach (var kept in _foreignKeys)
             {
                 for (var i = 0; i < kept.ChildColumns.Count; i++)
@@ -1226,7 +1306,12 @@ internal static class SyncPlanStaticRules
                     if (
                         childType.Length > 0
                         && parentType.Length > 0
-                        && !capabilities.AreForeignKeyCompatibleTypes(childType, parentType)
+                        && SyncPlanFuzzDialect.RefusesForeignKeyTypes(
+                            dialect,
+                            capabilities,
+                            childType,
+                            parentType
+                        )
                     )
                     {
                         return $"R7: {step.Table}.{column} is altered to {newType} while {kept.Name} pairs it with {(childKey == altered ? parentType : childType)}";
@@ -1254,7 +1339,8 @@ internal static class SyncPlanStaticRules
                 return $"R5: {SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, Limit)} references {parent}({string.Join(",", parentColumns)}), which is not a key";
             }
 
-            // R8：組の両端の今の型が方言の宣言で並べられない（MySQL 3780・SQL Server 1778 / 1753・PostgreSQL 42804・Oracle ORA-02267）。
+            // R8：組の両端の今の型を DB が必ず断る（測った事実＝SyncPlanFuzzDialect.RefusesForeignKeyTypes。MySQL 3780・SQL Server 1778 / 1753・
+            // PostgreSQL 42804・Oracle ORA-02267）。
             // DB 側の図の外部キーが同じ型のまま持っていた組（外して付け直す文）は、DB が受け入れたので数えない
             foreach (var pair in item.ForeignKeyColumnPairs)
             {
@@ -1267,7 +1353,12 @@ internal static class SyncPlanStaticRules
                     childType.Length > 0
                     && parentType.Length > 0
                     && !_acceptedPairs.Contains((childKey, parentKey, childType, parentType))
-                    && !capabilities.AreForeignKeyCompatibleTypes(childType, parentType)
+                    && SyncPlanFuzzDialect.RefusesForeignKeyTypes(
+                        dialect,
+                        capabilities,
+                        childType,
+                        parentType
+                    )
                 )
                 {
                     return $"R8: {SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, Limit)} pairs {childKey.Replace('|', '.')} ({childType}) with {parentKey.Replace('|', '.')} ({parentType})";

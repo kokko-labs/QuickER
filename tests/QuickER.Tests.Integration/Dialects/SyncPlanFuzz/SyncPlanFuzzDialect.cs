@@ -52,6 +52,132 @@ internal enum FuzzTypeKind
 /// </remarks>
 internal abstract class SyncPlanFuzzDialect
 {
+    /// <summary>
+    /// 外部キーの両端の型の組（子の型・親の型）を DB が必ず断るか（静的な規則 R7・R8 が失敗を予言する組）
+    /// </summary>
+    /// <param name="dialect">方言名（<see cref="DialectNames"/> の値）</param>
+    /// <param name="capabilities">方言の能力</param>
+    /// <param name="childType">子の列の型</param>
+    /// <param name="parentType">親の列の型</param>
+    /// <remarks>
+    /// <para>
+    /// 製品の宣言（<see cref="SyncDialectCapabilities.AreForeignKeyCompatibleTypes"/>）は「真なら DB が必ず受け入れる」保守側なので、
+    /// 偽の組の一部を DB は受け入れる。宣言が偽で、ここに書いた測った事実が「断る」とする組だけを断ると答える。測っていない型の組は
+    /// 断るとは言わない（予言しない側に倒す）。宣言が真の組は断らない。
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>PostgreSQL（42804）：数値と文字列の組・子が小数（numeric / decimal）で親が整数・子が浮動小数点数で親が整数か小数。文字列どうし
+    ///   （char・varchar・text）と、子が整数か小数で親が小数か浮動小数点数の組は、両方向とも外部キーの追加も張ったままの列の変更も受け入れる。</item>
+    ///   <item>Oracle（ORA-02267）：NUMBER と文字列の組・固定長（CHAR / NCHAR）と可変長（VARCHAR2 / NVARCHAR2）の組。NUMBER どうしは精度・
+    ///   スケールを問わず受け入れ、CHAR の単位語の違いも受け入れる。CHAR と NCHAR・VARCHAR2 と NVARCHAR2 は、外部キーの追加は断るが張った
+    ///   ままの親の列の変更は通すので、断るとは言わない。</item>
+    ///   <item>SQL Server・MySQL・SQLite：製品の宣言の否定のまま（SQL Server 1778 / 1753・MySQL 3780 は宣言と同じ範囲で断る。SQLite は
+    ///   静的な規則が判定しない）。</item>
+    /// </list>
+    /// <para>出典はコンテナでの実測（外部キーの追加と、外部キーを張ったまま片方の端の型を変える文。行を 1 つずつ入れた）。</para>
+    /// </remarks>
+    public static bool RefusesForeignKeyTypes(
+        string dialect,
+        SyncDialectCapabilities capabilities,
+        string childType,
+        string parentType
+    )
+    {
+        if (capabilities.AreForeignKeyCompatibleTypes(childType, parentType))
+        {
+            return false;
+        }
+
+        var child = TypeFamilyOf(dialect, childType);
+        var parent = TypeFamilyOf(dialect, parentType);
+
+        return dialect switch
+        {
+            DialectNames.PostgreSql => (child, parent) switch
+            {
+                (ForeignKeyTypeFamily.Unknown, _) or (_, ForeignKeyTypeFamily.Unknown) => false,
+                _ when IsString(child) != IsString(parent) => true,
+                (ForeignKeyTypeFamily.Decimal, ForeignKeyTypeFamily.Integer) => true,
+                (
+                    ForeignKeyTypeFamily.Float,
+                    ForeignKeyTypeFamily.Integer
+                        or ForeignKeyTypeFamily.Decimal
+                ) => true,
+                _ => false,
+            },
+            DialectNames.Oracle => (child, parent) switch
+            {
+                (ForeignKeyTypeFamily.Unknown, _) or (_, ForeignKeyTypeFamily.Unknown) => false,
+                _ when IsString(child) != IsString(parent) => true,
+                (ForeignKeyTypeFamily.FixedString, ForeignKeyTypeFamily.VariableString)
+                or (ForeignKeyTypeFamily.VariableString, ForeignKeyTypeFamily.FixedString) => true,
+                _ => false,
+            },
+            _ => true,
+        };
+
+        static bool IsString(ForeignKeyTypeFamily family) =>
+            family
+                is ForeignKeyTypeFamily.String
+                    or ForeignKeyTypeFamily.FixedString
+                    or ForeignKeyTypeFamily.VariableString;
+    }
+
+    /// <summary>外部キーの型の事実（<see cref="RefusesForeignKeyTypes"/>）で見分ける型の系統</summary>
+    private enum ForeignKeyTypeFamily
+    {
+        /// <summary>測っていない型</summary>
+        Unknown,
+
+        /// <summary>整数</summary>
+        Integer,
+
+        /// <summary>小数（PostgreSQL の numeric / decimal・Oracle の NUMBER）</summary>
+        Decimal,
+
+        /// <summary>浮動小数点数（PostgreSQL）</summary>
+        Float,
+
+        /// <summary>文字列（PostgreSQL の char・varchar・text。どの組も受け入れる）</summary>
+        String,
+
+        /// <summary>固定長の文字列（Oracle）</summary>
+        FixedString,
+
+        /// <summary>可変長の文字列（Oracle）</summary>
+        VariableString,
+    }
+
+    /// <summary>型の表記の系統（括弧より前の基本の名前で見分ける）</summary>
+    private static ForeignKeyTypeFamily TypeFamilyOf(string dialect, string type)
+    {
+        var paren = type.IndexOf('(', StringComparison.Ordinal);
+        var name = (paren < 0 ? type : type[..paren]).Trim().ToLowerInvariant();
+
+        return dialect switch
+        {
+            DialectNames.PostgreSql => name switch
+            {
+                "smallint" or "integer" or "int" or "bigint" or "int2" or "int4" or "int8" =>
+                    ForeignKeyTypeFamily.Integer,
+                "numeric" or "decimal" => ForeignKeyTypeFamily.Decimal,
+                "real" or "double precision" or "float4" or "float8" or "float" =>
+                    ForeignKeyTypeFamily.Float,
+                "char" or "character" or "bpchar" or "varchar" or "character varying" or "text" =>
+                    ForeignKeyTypeFamily.String,
+                _ => ForeignKeyTypeFamily.Unknown,
+            },
+            DialectNames.Oracle => name switch
+            {
+                "number" => ForeignKeyTypeFamily.Decimal,
+                "char" or "nchar" => ForeignKeyTypeFamily.FixedString,
+                "varchar2" or "nvarchar2" => ForeignKeyTypeFamily.VariableString,
+                _ => ForeignKeyTypeFamily.Unknown,
+            },
+            _ => ForeignKeyTypeFamily.Unknown,
+        };
+    }
+
     /// <summary>報告に出す方言名（<see cref="DialectNames"/> の値）</summary>
     public abstract string Name { get; }
 

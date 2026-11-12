@@ -15,13 +15,17 @@
   - R4：方言の名前の範囲で名前が衝突する。
   - R5：候補キーの無い参照の外部キーを足す。
   - R6：SQL Server・MySQL・Oracle で表の最後の列を消す。
-  - R7：列の型を変えた後、残す外部キーのその列を含む組の両端が、方言の宣言（`AreForeignKeyCompatibleTypes`）で並べられない（PostgreSQL 42804・Oracle ORA-02267。外し直しの方言は R2 が先に当たる）。宣言は「真なら DB が必ず受け入れる」側なので、偽の組を DB が受け入れる形では予言が外れうる。生成器と形の行の外部キーの列は整数か文字列で、その範囲の宣言（整数の幅・文字列の長さ）は実 DB の期待の行と形の行が固定する。R2 が外し直しの方言しか見ないため、PostgreSQL・Oracle の互換でない型への変更を予言できなかった（P5-2 の試運転の 2 回目の V4）。文を順に当てた途中の状態の型で比べるので、外部キーの両端を同じ別の型へ 1 列ずつ変える途中の状態も予言する（修正 AC2 の V8）。
-  - R8：外部キーを足す文で、組の両端のその時点の型が方言の宣言で並べられない（MySQL 3780・SQL Server 1778 / 1753・PostgreSQL 42804・Oracle ORA-02267）。DB 側の図の外部キーが同じ型のまま持っていた組（外して付け直す文）は、DB が受け入れたので数えない（状態の読み込みで組と両端の型を記録する）。宣言の扱いは R7 と同じ（足す外部キーの列は、生成器・形の行とも整数か文字列）。選んだ外部キーの追加の両端の型を見る規則が無かったため、live の列どうしの型の違う外部キーの追加が警告なしに断られるのを予言できなかった（修正 AC2）。
+  - R7：列の型を変えた後、残す外部キーのその列を含む組の両端を DB が必ず断る（PostgreSQL 42804・Oracle ORA-02267。外し直しの方言は R2 が先に当たる）。
+    - 断る組は、総当たりの方言の部品が持つ測った事実（`SyncPlanFuzzDialect.RefusesForeignKeyTypes`）で判定する。製品の宣言（`AreForeignKeyCompatibleTypes`）は「真なら DB が必ず受け入れる」保守側なので、宣言が偽の組の一部を DB は受け入れる（PostgreSQL は子が整数か小数で親が小数の組と、`char`・`varchar`・`text` のどの組。Oracle は NUMBER どうしと CHAR の単位語の違い）。
+    - 宣言が偽で、事実が「断る」とする組だけを予言する（PostgreSQL は数値と文字列・子が小数で親が整数・子が浮動小数点数で親が整数か小数、Oracle は NUMBER と文字列・固定長と可変長。SQL Server・MySQL は宣言の否定のまま）。測っていない組は予言しない。事実の表は規則表 `SyncPlanFuzzOracleTests.RefusesForeignKeyTypes_FollowsMeasuredFacts` が固定する。
+    - 宣言で予言していたため、型の変更の幅（整数 → 小数・固定長と可変長の入れ替え）が外部キーの列に当たると、DB が受け入れてコミットした同期を予言の外れ（違反）にしていた（夜間の実 DB の PostgreSQL の種 425・487・565・Oracle の種 64・116）。
+    - R2 が外し直しの方言しか見ないため、PostgreSQL・Oracle の互換でない型への変更を予言できなかった（P5-2 の試運転の 2 回目の V4）。文を順に当てた途中の状態の型で比べるので、外部キーの両端を同じ別の型へ 1 列ずつ変える途中の状態も予言する（修正 AC2 の V8）。
+  - R8：外部キーを足す文で、組の両端のその時点の型を DB が必ず断る（MySQL 3780・SQL Server 1778 / 1753・PostgreSQL 42804・Oracle ORA-02267）。DB 側の図の外部キーが同じ型のまま持っていた組（外して付け直す文）は、DB が受け入れたので数えない（状態の読み込みで組と両端の型を記録する）。断る組の判定は R7 と同じ測った事実。選んだ外部キーの追加の両端の型を見る規則が無かったため、live の列どうしの型の違う外部キーの追加が警告なしに断られるのを予言できなかった（修正 AC2）。
   - R9：同じ列の並びに一意制約を 2 つ張れない方言（`SupportsUniqueConstraintOnPrimaryKey` が偽の逐次 DDL の方言＝Oracle の ORA-02261）で、足す一意制約の列集合が、その時点で残る主キーか一意制約と同じ。
   - R10：ケースが宣言した既存の行（とモデルの外の依存）で断られる文（`FuzzLiveSchema.DataFailures`）。照合は種類ごと（外部キーの追加は子の表と実効名・列の変更は表と列・一意制約の追加は表と実効名・主キーの付与は表・列の追加は表と列）。宣言した方言の事実で断られない文（`AddNotNullColumnRequiresEmptyTable`・`AlterColumnBlockedByComputedColumn` が偽の方言の列の追加・計算列の参照する列の変更）は予言しない。計画は値を見ないので、R10 の予言には予告の警告を求めない（実 DB の表明 1 と同じ）が、D9 は掛ける。網は生成器の宣言で D9 を 5000 種で見るので、断られうる文の名指し（`src/QuickER.Provider/CLAUDE.md`「既存の行で断られうる文の名指し」）を DB なしに確かめる。実 DB でも同じ宣言を渡すので、R10 が予言したのにコミットすれば違反になる（宣言の誤りを捕まえる）。
   - R12：同じ定義の外部キー（子の表・親の表・列の組の集合）を 2 本持てない Oracle（ORA-02275）で、外部キーを足すとき、その時点で残る外部キーと定義が同じ。名前だけを変えた外部キーの追加を、元の外部キーの削除を選ばずに流す形（生成器の水準 `fk-rename`）。製品は計画の依存の除外がこの追加を外して名指しする（`src/QuickER.Provider/CLAUDE.md`「選んでいない変更を前提にする項目」）。名前の重なり（R4）も同じ除外が受け持つ。
   - R11：MySQL で、残す SET NULL の外部キー（方言が書く参照アクション）の子の列を NOT NULL にする（1830）。SQL Server も `SetNullRequiresNullableChildColumn` を宣言するが、検査は外部キーを作るときだけで、NULL 許容だけの列の変更は外部キーを張ったまま通る（期待の行 `realdb-fk-set-null-child-not-null-keeps-that-fk`）。製品はこの文を計画の先頭へ移す。規則が無いと、先頭の文が実際には断られるのに、後ろの別の予言の失敗（R2 など）の前で外した制約を D9 が数える（行の水準 `set-null-child-not-null` を足した網の MySQL の網の種 4527 で見つかった）。
-- 前寄せの規則 M1（`SyncPlanStaticRules.MovedFirstNotFailing`・違反の頭 `static M1:`）：計画が前寄せしたセクション（印 `SyncPlanSection.IsMovedFirst`）の最後の文が、計画の順のその位置で断られると予言される文でなければならない（前寄せの最後がキーの削除か型を変える列の変更か、R11 の方言の NOT NULL 化のときだけ判定）。前寄せした後ろへ予言された失敗が進むなら、前寄せが通る文を移し、断られる文が元の位置に残っている。実 DB の総当たりの結果にも加える（W1 と同じ）。
+- 前寄せの規則 M1（`SyncPlanStaticRules.MovedFirstNotFailing`・違反の頭 `static M1:`）：計画が前寄せしたセクション（印 `SyncPlanSection.IsMovedFirst`）の最後の文が、計画の順のその位置で断られると予言される文でなければならない（前寄せの最後がキーの削除か型を変える列の変更か、R11 の方言の NOT NULL 化のときだけ判定）。前寄せした後ろへ予言された失敗が進むなら、前寄せが通る文を移し、断られる文が元の位置に残っている。実 DB の総当たりの結果にも加える（W1 と同じ）。製品の宣言では残す外部キーの相手の端と並べられないが、DB はどの組も受け入れる型の変更（R7 の事実で断らない組）の前寄せは、宣言どおりの振る舞いなので数えない（`SyncPlanStaticRules.AcceptedTypeMismatchMove`。宣言が真の組だけを持つ前寄せは今までどおり見る）。
 - 予言したのに予告の警告が無ければ違反にする。`NonPredictingWarnings` 以外の警告を予告とみなし、断られる文と警告は結び付けない（実 DB の表明 1 と同じ粒度）。
 - 警告の正しさの規則 W1（`SyncPlanStaticRules.SpuriousTypeMismatchWarnings`）は、予言の有無に依らず掛ける：`ForeignKeyColumnTypeMismatch` が DB にある外部キーを名指しするなら、その外部キーに「端の型を計画が変え（`AreSameType` で比べる）、同期後にその組の両端が `AreForeignKeyCompatibleTypes` で並べられない」組がある。
   - DB は今その外部キーを両端の型のまま受け入れているので、計画が型を変えない組の違いを数えて「付け直せない」と言うのは偽の警告。
@@ -113,6 +117,8 @@
 - 生成器は目標の図を方言の宣言に照らして自己検査する（`CheckDeclaredTargetShapes`・`Mutate` の最後）。同じ列の並びに一意制約を 2 つ張れない方言（`AllowDuplicateUniqueConstraints` が偽＝Oracle の ORA-02261）で同じ列集合の一意制約を 2 つ以上持つ表を作ったら、その種の失敗（`seed threw: … generator declaration: …`）にする。
   - 一意制約の列を変える変更（`ChangeUniqueColumns`）が、足す変更（`AddUnique`）と違ってほかの一意制約が乗る列へ移せたので、Oracle の目標の図が DB の持てない形になり、夜間の網の R9 だけが捕まえていた（普段の種では重複した一意制約を両方は選ばないので予言しない）。自己検査は普段の網の種でもこの形を捕まえる。
   - 宣言は Oracle の事実だけに合わせる（SQLite は同じ列集合の一意制約を持て、壊れる形も無い。`AddUnique` の `DistinguishesSameSetConstraints` まで掛けると、SQLite の総当たりの網羅の組が消える）。
+  - 既存の行で断られる列の変更の宣言（`FuzzDataFailureKind.AlterColumn`）も自己検査する：DB 側の列 → 最終の目標の図の列の変更が、行のある列の列が空でないと通らない変更・NULL を含む列の NOT NULL 化・データより短い長さのどれかに当たる（`DeclaredAlterColumnReason`）。
+  - 列が空でないと通らない変更の宣言は、変更をすべて終えた後に 1 回だけ、DB 側の型と最終の型で付ける（`DeclareEmptyColumnChanges`）。変更の途中で付けていたため、同じ列を 2 回変える種（NUMBER(10) → NUMBER(19) → NUMBER(12,2)）で途中の型から見た縮小を宣言し、DB が通す文を断られると予言していた（夜間の網の Oracle の網の種 6126。R10 の予言から D9 が名指しの外の外部キーを数えた）。
 - 既存の行で断られる文と、名前・計算列の形の水準は、さらに別の乱数の列（`DataLevelSeed`）で引く（先に足した水準の引き方も変えない）。水準は 4 つ：
   - 親の無い値の列への外部キーの追加（行のある子の、親に無い値を持つ live の整数の列へ外部キーを張る。必須の形 `orphan-fk-add`）。
   - 精度の縮小（小数の精度を 2 つ・bigint を int へ下げる。必須の形 `precision-decrease`）。日時の小数秒の縮小は、製品の宣言 `PrecisionDecreaseRequiresEmptyColumn` の方言（Oracle）の行のある表でもこの水準のときだけ作る。

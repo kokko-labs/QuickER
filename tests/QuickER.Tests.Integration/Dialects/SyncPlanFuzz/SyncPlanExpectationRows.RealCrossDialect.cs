@@ -1071,7 +1071,145 @@ internal static partial class SyncPlanExpectationRows
                             e.AfterDiff.Empty();
                         })
                 ),
+            .. RealCrossDialectAcceptedTypeDifferenceRows(),
         ];
+
+    /// <summary>
+    /// 製品の宣言（<see cref="SyncDialectCapabilities.AreForeignKeyCompatibleTypes"/>）は食い違いとみなすが DB が受け入れる外部キーの型の組
+    /// （docs の割り切り。総当たりの静的な規則はこの組を予言しない＝<see cref="SyncPlanFuzzDialect.RefusesForeignKeyTypes"/>）
+    /// </summary>
+    /// <remarks>
+    /// 外部キーを張ったまま列を変えられる同期は、名指しして通る。外部キーを外して付け直す必要がある同期（参照する主キーの変更）は、
+    /// 外し直さないのでその段で止まる。
+    /// </remarks>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > RealCrossDialectAcceptedTypeDifferenceRows() =>
+        [
+            Row(
+                    "realdb-fk-integer-child-decimal-parent-is-named-and-commits",
+                    "[Integration] 外部キーの親の列だけを整数から小数へ変えると、食い違いとして名指しするが、外部キーを張ったまま DB が受け入れて同期できる",
+                    DialectNames.PostgreSql,
+                    DialectNames.Oracle
+                )
+                .LiveWith(w => RealCrossDialectScenarios.IntegerParentChild(w.Live, w.Capability))
+                .TargetWith(w =>
+                {
+                    RealCrossDialectScenarios.IntegerParentChild(w.Target, w.Capability);
+                    w.Target.Col("iw_parent", "id").DataType =
+                        RealCrossDialectScenarios.DecimalType(w.Capability, 12);
+                })
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterColumn))
+                .OnRealDatabase(r =>
+                    r.Setup(
+                            "INSERT INTO \"iw_parent\" (\"id\") VALUES (1);\n"
+                                + "INSERT INTO \"iw_child\" (\"id\", \"parent_id\") VALUES (1, 1);"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Warnings.Exact("ForeignKeyColumnTypeMismatch(iw_child): iw_fk");
+                            e.Outcome.Exact("committed");
+                            e.After.Count("fk *", 1);
+                            e.AfterDiff.Empty();
+                        })
+                ),
+            Row(
+                    "realdb-fk-fixed-and-variable-string-is-named-and-accepted-only-where-the-database-accepts",
+                    "[Integration] 外部キーの親の列だけを可変長から固定長の文字列へ変えると、食い違いとして名指しし、PostgreSQL は受け入れて同期でき、Oracle は ORA-02267 で断る",
+                    DialectNames.PostgreSql,
+                    DialectNames.Oracle
+                )
+                .LiveWith(w => StringParentChild(w.Live, w.Capability, fixedParent: false))
+                .TargetWith(w => StringParentChild(w.Target, w.Capability, fixedParent: true))
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterColumn))
+                .OnRealDatabase(r =>
+                    r.Setup(
+                            "INSERT INTO \"sk_parent\" (\"code\") VALUES ('a');\n"
+                                + "INSERT INTO \"sk_child\" (\"id\", \"parent_code\") VALUES (1, 'a');"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Warnings.Exact("ForeignKeyColumnTypeMismatch(sk_child): sk_fk");
+                            e.For(
+                                DialectNames.PostgreSql,
+                                x => x.Outcome.Exact("committed").AfterDiff.Empty()
+                            );
+                            e.For(
+                                DialectNames.Oracle,
+                                x => x.Outcome.Exact("failed: *ORA-02267*").Unchanged()
+                            );
+                        })
+                ),
+            Row(
+                    "realdb-pk-change-with-type-difference-accepted-by-database-is-named-and-stops",
+                    "[Integration] 参照される複合主キーを並べ替えながら、その列を整数から小数へ変えると、外部キーを食い違いとして名指しして外し直さないので、主キーの解除で止まる",
+                    DialectNames.PostgreSql,
+                    DialectNames.Oracle
+                )
+                .LiveWith(w => CompositeIntegerParentChild(w.Live, w.Capability, ["a", "b"]))
+                .TargetWith(w =>
+                {
+                    CompositeIntegerParentChild(w.Target, w.Capability, ["b", "a"]);
+                    w.Target.Col("ck_parent", "a").DataType = RealCrossDialectScenarios.DecimalType(
+                        w.Capability,
+                        12
+                    );
+                })
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.Setup(
+                            "INSERT INTO \"ck_parent\" (\"a\", \"b\") VALUES (1, 1);\n"
+                                + "INSERT INTO \"ck_child\" (\"id\", \"a_ref\", \"b_ref\") VALUES (1, 1, 1);"
+                        )
+                        .Expect(e =>
+                        {
+                            // 主キーの解除が外部キーに阻まれて、何も変えずに止まる（暗黙コミットの Oracle も解除が最初の文）
+                            e.Warnings.Contains("ForeignKeyColumnTypeMismatch(ck_child): ck_fk");
+                            e.Unchanged();
+                            e.For(DialectNames.PostgreSql, x => x.Outcome.Exact("failed: *2BP01*"));
+                            e.For(DialectNames.Oracle, x => x.Outcome.Exact("failed: *ORA-02273*"));
+                        })
+                ),
+        ];
+
+    /// <summary>
+    /// 親 sk_parent(code) と、それを参照する子 sk_child(parent_code)（外部キー sk_fk）。子の列は可変長の文字列、親の列は
+    /// <paramref name="fixedParent"/> なら同じ長さの固定長の文字列
+    /// </summary>
+    private static void StringParentChild(ExpectationSchema s, string dialect, bool fixedParent)
+    {
+        var variable = dialect == DialectNames.Oracle ? "VARCHAR2(20 CHAR)" : "varchar(20)";
+        var fixedType = dialect == DialectNames.Oracle ? "CHAR(20 CHAR)" : "char(20)";
+        s.Table("sk_parent", ExpectationSchema.Pk("code", fixedParent ? fixedType : variable));
+        s.Table(
+            "sk_child",
+            ExpectationSchema.Pk("id", RealCrossDialectScenarios.IntType(dialect)),
+            ExpectationSchema.NotNull("parent_code", variable)
+        );
+        s.Fk("sk_parent", "sk_child", "sk_fk", ("code", "parent_code"));
+    }
+
+    /// <summary>
+    /// 複合主キー (a, b) の親 ck_parent と、それを参照する子 ck_child(a_ref, b_ref)（外部キー ck_fk）。主キーの順序は
+    /// <paramref name="primaryKeyOrder"/>
+    /// </summary>
+    private static void CompositeIntegerParentChild(
+        ExpectationSchema s,
+        string dialect,
+        string[] primaryKeyOrder
+    )
+    {
+        var type = RealCrossDialectScenarios.IntType(dialect);
+        s.Table("ck_parent", ExpectationSchema.Pk("a", type), ExpectationSchema.Pk("b", type));
+        s.PrimaryKeyOrder("ck_parent", primaryKeyOrder);
+        s.Table(
+            "ck_child",
+            ExpectationSchema.Pk("id", type),
+            ExpectationSchema.NotNull("a_ref", type),
+            ExpectationSchema.NotNull("b_ref", type)
+        );
+        s.Fk("ck_parent", "ck_child", "ck_fk", ("a", "a_ref"), ("b", "b_ref"));
+    }
 
     /// <summary>NOT NULL の子の列への SET NULL の外部キー（作れる方言で、親の削除が NOT NULL の違反で失敗する）</summary>
     private static IEnumerable<
