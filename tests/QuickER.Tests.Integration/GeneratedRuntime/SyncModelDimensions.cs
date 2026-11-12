@@ -71,6 +71,12 @@ internal static class SyncModelDimensions
     /// <summary>blob を書く手の blob の大きさ</summary>
     public const string PayloadSize = "PayloadSize";
 
+    /// <summary>因子：世界の端末の数（種の番号から決まる世界の形＝SyncModelWorldShape）</summary>
+    public const string Devices = "Devices";
+
+    /// <summary>因子：操作の端末の最初の形（種の番号から決まる世界の形＝SyncModelWorldShape.Preloads）</summary>
+    public const string Preload = "Preload";
+
     // 挿入でない操作の、キーの出どころの水準
     private const string NotInsert = "not-insert";
     private const string OwnKey = "own";
@@ -180,6 +186,25 @@ internal static class SyncModelDimensions
                         new Level(ExtrasFaults),
                     ],
                     "種を 4 で割った余り（0＝足さない・1＝Extras〔キーだけのスタブ・持っていた実体での削除・同じキーでの作り直し・失敗する書き込み〕・2＝Faults〔失敗の注入〕・3＝両方）"
+                ),
+                new Factor(
+                    Devices,
+                    [
+                        .. new[]
+                        {
+                            SyncModelWorldShape.TwoDevices,
+                            SyncModelWorldShape.ThreeDevices,
+                        }.Select(devices => new Level(DevicesLevel(devices.Count))),
+                    ],
+                    "世界の端末の数（既存の範囲の種・決定的なシナリオ・網羅の行は 2 台、広い世界の種〔SyncModelWorldShape.WideSeedBase から〕は 3 台。種の番号から決め、乱数を引かない）"
+                ),
+                new Factor(
+                    Preload,
+                    [
+                        .. Enum.GetValues<ModelPreload>()
+                            .Select(value => new Level(value.ToString(), AxisMember.Of(value))),
+                    ],
+                    "操作の書き手の最初の形（ModelPreload。None＝最初の行を持たない〔端末は空から始め静かな同期でそろえる・サーバーの他者は初期データのまま〕・Refresh＝洗い替えで作る・Journaled＝最初の同期の前に Repository 越しに書く・Untracked＝最初の同期の前に Repository を通らずに入れる。既存の範囲の種・決定的なシナリオ・網羅の行は None、広い世界の種は端末ごとに種の番号から回す。サーバーの他者は None）"
                 ),
                 new Factor(
                     Actor,
@@ -302,6 +327,7 @@ internal static class SyncModelDimensions
                 new FactorGroup(Mode, Policy, OpFamily),
                 new FactorGroup(Policy, OpFamily, PropagateDeletes),
                 new FactorGroup(Actor, OpFamily, UniqueTable),
+                new FactorGroup(Preload, Mode, Policy),
             ],
             IsValid
         );
@@ -404,7 +430,15 @@ internal static class SyncModelDimensions
         SyncModelGenerator generator,
         IReadOnlyList<ModelOp> ops
     ) =>
-        Observe(counter, generator.Mode, generator.Policy, generator.Extras, generator.Faults, ops);
+        Observe(
+            counter,
+            generator.Mode,
+            generator.Policy,
+            generator.Extras,
+            generator.Faults,
+            generator.Shape,
+            ops
+        );
 
     /// <summary>
     /// 1 歩の操作を、生成器の代わりに宣言したモード・ポリシー・種の組で数える（網羅の行 <see cref="SyncModelCoverageRows"/> が使う）
@@ -414,6 +448,7 @@ internal static class SyncModelDimensions
     /// <param name="policy">競合ポリシー</param>
     /// <param name="extras">Extras の操作を含む組か</param>
     /// <param name="faults">失敗の仕掛けを含む組か</param>
+    /// <param name="shape">世界の形（端末の数と端末ごとの最初の形）</param>
     /// <param name="ops">その歩の操作</param>
     public static void Observe(
         CoverageCounter counter,
@@ -421,6 +456,7 @@ internal static class SyncModelDimensions
         SyncConflictPolicy policy,
         bool extras,
         bool faults,
+        SyncModelWorldShape shape,
         IReadOnlyList<ModelOp> ops
     )
     {
@@ -441,6 +477,8 @@ internal static class SyncModelDimensions
                     [Mode] = mode.ToString(),
                     [Policy] = policy.ToString(),
                     [Group] = group,
+                    [Devices] = DevicesLevel(shape.Devices.Count),
+                    [Preload] = PreloadOf(shape, ops[i]),
                     [Actor] = ActorOf(ops[i]),
                     [OpFamily] = families[i],
                     [Via] = ViaOf(ops[i]),
@@ -561,16 +599,58 @@ internal static class SyncModelDimensions
             _ => $"(no actor: {op.GetType().Name})",
         };
 
+    /// <summary>操作の書き手の最初の形の水準（サーバーの他者は None）</summary>
+    private static string PreloadOf(SyncModelWorldShape shape, ModelOp op) =>
+        op switch
+        {
+            ModelWriteOp write => shape.PreloadOf(write.Actor).ToString(),
+            ModelSyncOp sync => shape.PreloadOf(sync.Device).ToString(),
+            ArmFaultOp fault => shape.PreloadOf(fault.Device).ToString(),
+            _ => $"(no actor: {op.GetType().Name})",
+        };
+
     private static string ViaOf(ModelOp op) =>
         op is ModelWriteOp write && write.Actor != ModelActor.Server ? write.Via.ToString() : NoVia;
+
+    /// <summary>端末の数の水準の名前</summary>
+    private static string DevicesLevel(int count) =>
+        count.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>原理的に起こり得ない組み合わせのときだけ偽（判断に要る因子が割り当てに無ければ真）</summary>
     private static bool IsValid(IReadOnlyDictionary<string, string> assignment)
     {
         assignment.TryGetValue(Group, out var group);
         assignment.TryGetValue(Actor, out var actor);
+        assignment.TryGetValue(Devices, out var devices);
+        assignment.TryGetValue(Preload, out var preload);
         assignment.TryGetValue(OpFamily, out var family);
         assignment.TryGetValue(Via, out var via);
+
+        // 端末 3 は 3 台の世界にしかいない（世界の端末の定義）
+        if (actor == nameof(ModelActor.Device3) && devices == DevicesLevel(2))
+        {
+            return false;
+        }
+
+        // 2 台の世界の端末は空から始める（最初の形を回すのは広い世界の種だけ＝世界の形の定義）
+        if (
+            devices == DevicesLevel(2)
+            && preload is not null
+            && preload != nameof(ModelPreload.None)
+        )
+        {
+            return false;
+        }
+
+        // サーバーの他者は最初の行を持たない（水準の定義）
+        if (
+            actor == nameof(ModelActor.Server)
+            && preload is not null
+            && preload != nameof(ModelPreload.None)
+        )
+        {
+            return false;
+        }
 
         // Group の水準は「Extras の操作を足すか・失敗の仕掛けを足すか」そのものの定義なので、足さない組に
         // その操作が現れることは定義から起こり得ない

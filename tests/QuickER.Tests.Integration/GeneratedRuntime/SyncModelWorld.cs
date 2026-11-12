@@ -517,15 +517,13 @@ internal sealed class SyncModelWorld : IAsyncDisposable
     private SyncModelWorld(
         ISyncModelServerRole server,
         SyncModelHttpSources? http,
-        SyncModelDevice device1,
-        SyncModelDevice device2,
+        IReadOnlyList<SyncModelDevice> devices,
         SyncModelFaults faults
     )
     {
         Server = server;
         _http = http;
-        Device1 = device1;
-        Device2 = device2;
+        _devices = devices;
         Faults = faults;
     }
 
@@ -537,11 +535,13 @@ internal sealed class SyncModelWorld : IAsyncDisposable
 
     public ISyncModelServerRole Server { get; }
 
-    public SyncModelDevice Device1 { get; }
+    private readonly IReadOnlyList<SyncModelDevice> _devices;
 
-    public SyncModelDevice Device2 { get; }
+    /// <summary>世界の端末（作った順＝<see cref="SyncModelWorldOptions.Devices"/> の順）</summary>
+    public IReadOnlyList<SyncModelDevice> Devices => _devices;
 
-    public IEnumerable<SyncModelDevice> Devices => [Device1, Device2];
+    /// <summary>書き手（世界の端末とサーバーの他者）</summary>
+    public IEnumerable<ModelActor> Actors => [.. _devices.Select(d => d.Actor), ModelActor.Server];
 
     /// <param name="options">サーバー役・転送経路・外部の ISyncTable の代役</param>
     /// <param name="ct">キャンセルトークン</param>
@@ -554,32 +554,28 @@ internal sealed class SyncModelWorld : IAsyncDisposable
         var server = await options.CreateServer(faults, ct);
         var http = options.Http ? await SyncModelHttpSources.StartAsync(server, ct) : null;
         ISyncModelSources sources = http is null ? server : http;
-        var device1 = await SyncModelDevice.CreateAsync(
-            ModelActor.Device1,
-            sources,
-            faults,
-            options.ExternalTables.Contains(ModelActor.Device1),
-            ct
-        );
-        var device2 = await SyncModelDevice.CreateAsync(
-            ModelActor.Device2,
-            sources,
-            faults,
-            options.ExternalTables.Contains(ModelActor.Device2),
-            ct
-        );
+        var devices = new List<SyncModelDevice>();
 
-        return new SyncModelWorld(server, http, device1, device2, faults);
+        foreach (var actor in options.Devices)
+        {
+            devices.Add(
+                await SyncModelDevice.CreateAsync(
+                    actor,
+                    sources,
+                    faults,
+                    options.ExternalTables.Contains(actor),
+                    ct
+                )
+            );
+        }
+
+        return new SyncModelWorld(server, http, devices, faults);
     }
 
     /// <summary>端末を引く</summary>
     public SyncModelDevice Device(ModelActor actor) =>
-        actor switch
-        {
-            ModelActor.Device1 => Device1,
-            ModelActor.Device2 => Device2,
-            _ => throw new ArgumentOutOfRangeException(nameof(actor), actor, null),
-        };
+        _devices.FirstOrDefault(device => device.Actor == actor)
+        ?? throw new ArgumentOutOfRangeException(nameof(actor), actor, null);
 
     /// <summary>書き手の DB の内容を読む</summary>
     public Task<ModelDbState> ReadStateAsync(ModelActor actor, CancellationToken ct) =>
@@ -697,6 +693,63 @@ internal sealed class SyncModelWorld : IAsyncDisposable
         {
             Faults.Writing = null;
             Faults.KeyToAssign = null;
+        }
+    }
+
+    /// <summary>
+    /// 追加の手を、端末の DB へ Repository を通らずに入れる（ジャーナル記録デコレータの内側のリポジトリ＝記録しない。
+    /// ミラー版は NULL のまま）。端末の最初の形 <see cref="ModelPreload.Untracked"/> が使う
+    /// </summary>
+    public async Task ApplyUntrackedAsync(ModelWriteOp op, CancellationToken ct)
+    {
+        var device = Device(op.Actor);
+
+        switch (op)
+        {
+            case AddFolderOp add:
+                await device.RawFolders.InsertAsync(
+                    new ModelFolderEntity
+                    {
+                        FolderId = add.Id,
+                        ParentId = add.ParentId,
+                        Name = add.Name,
+                    },
+                    ct
+                );
+                break;
+
+            case AddLabelOp add:
+                await device.RawLabels.InsertAsync(
+                    new ModelLabelEntity
+                    {
+                        LabelCode = add.Code,
+                        FolderId = add.FolderId,
+                        Caption = add.Caption,
+                    },
+                    ct
+                );
+                break;
+
+            case AddItemOp add:
+                await device.RawItems.InsertAsync(
+                    new ModelItemEntity
+                    {
+                        ItemId = add.Id,
+                        FolderId = add.FolderId,
+                        LabelCode = add.LabelCode,
+                        Code = add.Code,
+                        Title = add.Title,
+                        Payload = Convert.FromHexString(add.PayloadHex),
+                    },
+                    ct
+                );
+                break;
+
+            default:
+                throw new ArgumentException(
+                    $"Only adds of folders, labels and items go in untracked: {op.Describe()}",
+                    nameof(op)
+                );
         }
     }
 
@@ -1316,8 +1369,10 @@ internal sealed class SyncModelWorld : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        Device1.Dispose();
-        Device2.Dispose();
+        foreach (var device in _devices)
+        {
+            device.Dispose();
+        }
 
         if (_http is not null)
         {

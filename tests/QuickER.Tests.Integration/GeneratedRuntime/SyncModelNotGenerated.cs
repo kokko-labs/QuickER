@@ -84,12 +84,29 @@ internal static class SyncModelNotGenerated
                     "乱数の列ではサーバーの他者に Extras の操作を割り当てない。網羅の行が 4 つの操作を流す",
                     Random + " の行 `coverage-server-delete-stub`"
                 ),
-                NotGenerated.Pending(
-                    "more-devices-and-preloaded-devices",
-                    "端末 3 台以上・端末が最初から行を持つ",
-                    "同期のモデルの残りの区切り（未起動）",
-                    "世界は端末 2 台で、端末は空から始める。ジャーナル・ミラー版・受理記録は端末ごとに持つので、3 台目と最初から持つ行の扱いを総当たりが通らない",
+                NotGenerated.Accepted(
+                    "untracked-rows-with-server-keys",
+                    "Repository を通らずに端末へ入れた行で、サーバーにあるキーを持つもの（古いサーバーの写しの持ち込み）",
+                    "docs の既知の割り切り（Repository を通らない書き込みは記録されない）は、そうして入れた行をサーバーに無いキーの行として、次の実行で削除伝搬が消すとだけ約束する。サーバーにあるキーの行の削除・編集の結果を期待として書く根拠が docs に無い。生成器は追跡しない行のキーを端末のキーの範囲の別の帯に置く",
+                    Random
+                ),
+                NotGenerated.Accepted(
+                    "imported-mirror-versions",
+                    "ミラー版つきの行を端末へ持ち込む形",
+                    "docs の再開点の節は、再開点を保存せず順序付きの流れのミラー版から導くと約束し、流れの外から書いた版は端末がまだ見ていない行を再開点の下に永久に残すと書く。外から書いたミラー版は再開点の前提の外",
                     NotGenerated.Unguarded
+                ),
+                NotGenerated.Accepted(
+                    "copied-device-databases",
+                    "別の端末やバックアップの DB の写し（ジャーナル・受理記録・ミラー版ごと）で始める端末",
+                    "docs に約束が無い。受理記録は端末ごとの記録で、生成されるランタイムは端末の識別子を持たないので、複製した 2 台は同じ記録を二重に上げ、時間を戻した端末の受理記録は古い",
+                    NotGenerated.Unguarded
+                ),
+                NotGenerated.Accepted(
+                    "four-or-more-devices",
+                    "端末 4 台以上の世界",
+                    "同期のエンジンが分岐に読むのは、その端末の手元の記録（ジャーナル・ミラー版・受理記録・blob のコピー待ち）とサーバーの行と版だけで、サーバーは端末ごとの状態を持たない。3 台でどの端末にもほかの端末が 2 台そろい、その 2 台の書き込みが重なる形が生まれ、4 台目でエンジンが新しく読むものは無い",
+                    Random
                 ),
             ]
         );

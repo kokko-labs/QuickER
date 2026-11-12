@@ -22,7 +22,25 @@ internal sealed record SyncModelCoverageInput(
     bool Faults,
     IReadOnlyList<ModelWriteOp> Setup,
     IReadOnlyList<IReadOnlyList<ModelOp>> Steps
-);
+)
+{
+    /// <summary>世界の端末（既定は端末 1・2。端末 3 の組を埋める行は端末 1〜3）</summary>
+    public IReadOnlyList<ModelActor> Devices { get; init; } = SyncModelWorldShape.TwoDevices;
+
+    /// <summary>端末ごとの最初の形（既定は空。最初の形の組を埋める行だけが持つ。無い端末は空から始める）</summary>
+    public IReadOnlyList<SyncModelPreload> Preloads { get; init; } = [];
+
+    /// <summary>世界の形（端末と端末ごとの最初の形）</summary>
+    public SyncModelWorldShape Shape =>
+        new(
+            Devices,
+            [
+                .. Devices.Select(device =>
+                    Preloads.SingleOrDefault(p => p.Device == device)?.Kind ?? ModelPreload.None
+                ),
+            ]
+        );
+}
 
 /// <summary>
 /// 同期のモデルの網羅の行（網羅しない組の一覧の Pending を埋めるために、直結の乱数のテストが種の前に必ず流す行）
@@ -45,6 +63,7 @@ internal static class SyncModelCoverageRows
 
     private const ModelActor D1 = ModelActor.Device1;
     private const ModelActor D2 = ModelActor.Device2;
+    private const ModelActor D3 = ModelActor.Device3;
     private const ModelActor SV = ModelActor.Server;
     private const ModelWriteVia Direct = ModelWriteVia.Direct;
     private const ModelWriteVia Graph = ModelWriteVia.Graph;
@@ -72,7 +91,11 @@ internal static class SyncModelCoverageRows
         await using var run = await SyncModelRun.StartAsync(
             [.. input.Setup, .. SyncModelScenarios.Tail],
             ct,
-            SyncModelWorldOptions.Direct
+            SyncModelWorldOptions.Direct with
+            {
+                Devices = input.Devices,
+            },
+            input.Preloads
         );
 
         foreach (var step in input.Steps)
@@ -83,6 +106,7 @@ internal static class SyncModelCoverageRows
                 input.Policy,
                 input.Extras,
                 input.Faults,
+                input.Shape,
                 step
             );
 
@@ -227,6 +251,62 @@ internal static class SyncModelCoverageRows
             ]
         );
 
+        // ---- 端末 3 の一意な値の形（Actor=Device3 × delete-take-reparent × model_folders）。子のフォルダーを 2 つ持つ親は
+        // 乱数の列でまれで、広い世界の既定の種ではこの組がたまたま出ない（端末 1・2 は既存の範囲の種が出す） ----
+        yield return Row(
+            "device3-delete-take-reparent-folders",
+            "端末 3 が子のフォルダーを消し、もう一方の子をその名前で別の親へ付け替え、葉になった親を消す（delete-take-reparent）",
+            SyncMode.Versioned,
+            SyncConflictPolicy.Collect,
+            extras: false,
+            faults: false,
+            [Folder(SV, 590), Folder(SV, 591, 590), Folder(SV, 592, 590), Folder(SV, 593)],
+            [
+                new ModelShapeStep(
+                    SyncModelGenerator.DeleteTakeReparentShape,
+                    ModelTables.Folders,
+                    [
+                        new DeleteFolderOp(D3, Direct, 591),
+                        new UpdateFolderOp(D3, Direct, 592, 593, "f591"),
+                        new DeleteFolderOp(D3, Direct, 590),
+                    ]
+                ),
+                [Sync(D3, SyncMode.Versioned, SyncConflictPolicy.Collect)],
+                [Sync(D1, SyncMode.Versioned, SyncConflictPolicy.Collect)],
+            ],
+            SyncModelWorldShape.ThreeDevices
+        );
+
+        // ---- 端末の最初の形 × 除外（Preload=Untracked × Excluded=model_labels）。表を 1 つだけ除外する同期は乱数の列で 4 表に
+        // 分かれ、広い世界の既定の種ではこの組がたまたま出ない ----
+        yield return Row(
+            "untracked-device-sync-excluding-labels",
+            "Repository を通らずに行を入れた端末 1 が、ラベルを除外して最初の同期をする（追跡しない行は上がらず、削除伝搬で消える）",
+            SyncMode.Versioned,
+            SyncConflictPolicy.Collect,
+            extras: false,
+            faults: false,
+            [],
+            [
+                [
+                    Sync(
+                        D1,
+                        SyncMode.Versioned,
+                        SyncConflictPolicy.Collect,
+                        excluded: [ModelTables.Labels]
+                    ),
+                ],
+            ],
+            SyncModelWorldShape.ThreeDevices,
+            [
+                new SyncModelPreload(
+                    D1,
+                    ModelPreload.Untracked,
+                    [new AddFolderOp(D1, Direct, 1801, null, "uf1801")]
+                ),
+            ]
+        );
+
         // ---- 同期の結果の理由（SyncModelOutcomeDimensions） ----
         // RemovedBeforeDownload × LastWriteWins：端末 2 の親が端末 1 の同期で消え、端末 2 の後勝ち＋ServerWins の同期が
         // 親の無い品目の記録を決着させ、ダウンロードの前の削除伝搬でローカルから消す（n786 の形から失敗の注入を外したもの）
@@ -276,13 +356,19 @@ internal static class SyncModelCoverageRows
         bool extras,
         bool faults,
         IReadOnlyList<ModelWriteOp> setup,
-        IReadOnlyList<IReadOnlyList<ModelOp>> steps
+        IReadOnlyList<IReadOnlyList<ModelOp>> steps,
+        IReadOnlyList<ModelActor>? devices = null,
+        IReadOnlyList<SyncModelPreload>? preloads = null
     ) =>
         new(
             IdPrefix + id,
             null,
             description,
             new SyncModelCoverageInput(mode, policy, extras, faults, setup, steps)
+            {
+                Devices = devices ?? SyncModelWorldShape.TwoDevices,
+                Preloads = preloads ?? [],
+            }
         );
 
     private static ModelSyncOp Sync(
@@ -293,8 +379,8 @@ internal static class SyncModelCoverageRows
         IReadOnlyList<string>? excluded = null
     ) => new(device, kind, mode, policy, excluded ?? [], true, 500);
 
-    private static AddFolderOp Folder(ModelActor actor, int id) =>
-        new(actor, Direct, id, null, $"f{id}");
+    private static AddFolderOp Folder(ModelActor actor, int id, int? parent = null) =>
+        new(actor, Direct, id, parent, $"f{id}");
 
     private static AddItemOp Item(
         ModelActor actor,

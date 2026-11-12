@@ -15,7 +15,9 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <see cref="SyncModelNotGenerated"/> に宣言する。
 /// </para>
 /// <para>
-/// キーは書き手ごとに別の範囲から採る（端末 1＝1000 台・端末 2＝2000 台・サーバーの他者＝3000 台・初期データ＝1 桁）。
+/// キーは書き手ごとに別の範囲から採る（端末 1＝1000 台・端末 2＝2000 台・サーバーの他者＝3000 台・端末 3＝4000 台・初期データ＝1 桁）。
+/// 世界の端末の数は種の番号から決まる（<see cref="SyncModelWorldShape"/>）。端末 1・2 の世界の端末の選び方は、端末 3 を足す前の
+/// 引き方のまま（既存の種の列を変えない）。
 /// 値（名前・題名・メモ・blob）は種の中で一意にし、同じ値へ戻る書き込み（ABA）で表明が誤って通らないようにする。
 /// 日時のキーは固定の基準時刻からの通し番号＋種から作る端数で、Kind（Utc / Local / Unspecified）も種から選ぶ。
 /// 端数の最後の桁は 0 にしない（格納の文字列の末尾の 0 の省き方に照合を依存させない）。
@@ -28,6 +30,11 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 置き換えた手は書き手の DB で成功する手のまま（自分の DB に同じキー・同じ値〔序数〕が無いものだけを選ぶ）。
 /// 初期データの 2 番目のフォルダーの名前と 2 番目の品目の code は非 ASCII の文字で始める（非 ASCII の大文字小文字の別表記の
 /// 土台を種の初めから置く）。
+/// </para>
+/// <para>
+/// 広い世界の種の端末の最初の行（<see cref="Preloads"/>）は、3 本目の乱数（<see cref="PreloadSeed"/>）だけで引く。Repository を
+/// 通らずに入れた行のキーは端末のキーの範囲の別の帯（<see cref="SyncModelWorldShape.UntrackedKeyOffset"/>）に置き、ほかの書き手の
+/// 同じキー・一意な値の別表記の候補にしない（サーバーにあるキーの追跡しない行・追跡しない行と同じ一意な値の行を作らない）。
 /// </para>
 /// </remarks>
 internal sealed class SyncModelGenerator
@@ -77,8 +84,13 @@ internal sealed class SyncModelGenerator
     /// <param name="seed">本流の種</param>
     public static int SideSeed(int seed) => unchecked(seed * 7919 + 104729);
 
+    /// <summary>端末の最初の行の中身を引く乱数の種（本流の種から決定的に作る。本流・2 本目の乱数と混ぜない）</summary>
+    /// <param name="seed">本流の種</param>
+    public static int PreloadSeed(int seed) => unchecked(seed * 104723 + 7907);
+
     private readonly Random _random;
     private readonly Random _side;
+    private readonly Random _preload;
     private IReadOnlyDictionary<ModelActor, ModelDbState> _states =
         new Dictionary<ModelActor, ModelDbState>();
     private readonly Dictionary<ModelActor, int> _nextId = new()
@@ -86,6 +98,7 @@ internal sealed class SyncModelGenerator
         [ModelActor.Device1] = 1000,
         [ModelActor.Device2] = 2000,
         [ModelActor.Server] = 3000,
+        [ModelActor.Device3] = 4000,
     };
     private int _counter;
 
@@ -94,6 +107,7 @@ internal sealed class SyncModelGenerator
     {
         [ModelActor.Device1] = [],
         [ModelActor.Device2] = [],
+        [ModelActor.Device3] = [],
     };
 
     /// <summary>
@@ -109,6 +123,7 @@ internal sealed class SyncModelGenerator
     {
         _random = new Random(seed);
         _side = new Random(SideSeed(seed));
+        _preload = new Random(PreloadSeed(seed));
         var modes = Enum.GetValues<SyncMode>();
         var policies = Enum.GetValues<SyncConflictPolicy>();
         var settings = seed / 4 % (modes.Length * policies.Length);
@@ -116,6 +131,43 @@ internal sealed class SyncModelGenerator
         Policy = policies[settings % policies.Length];
         Extras = seed % 4 is 1 or 3;
         Faults = seed % 4 is 2 or 3;
+        Shape = SyncModelWorldShape.For(seed);
+    }
+
+    /// <summary>この種の世界の形（種の番号から決める。乱数は引かない）</summary>
+    public SyncModelWorldShape Shape { get; }
+
+    /// <summary>
+    /// 本流の乱数で端末を 1 台選ぶ（同期・失敗の仕掛けの対象）。端末 1・2 の世界は既存の種の列を変えない引き方のまま
+    /// </summary>
+    private ModelActor PickDevice() =>
+        Shape.Devices.Count == 2
+            ? _random.Next(2) == 0
+                ? ModelActor.Device1
+                : ModelActor.Device2
+            : Shape.Devices[_random.Next(Shape.Devices.Count)];
+
+    /// <summary>
+    /// 書き込みの書き手（本流の乱数の 1 回の値から）。端末で 0.84 を等分し、残りがサーバーの他者。端末 1・2 の世界は
+    /// 既存の種の列を変えない境目（0.42・0.84）のまま
+    /// </summary>
+    private ModelActor WriterFor(double roll)
+    {
+        const double devicesShare = 0.84;
+
+        if (roll >= devicesShare)
+        {
+            return ModelActor.Server;
+        }
+
+        if (Shape.Devices.Count == 2)
+        {
+            return roll < 0.42 ? ModelActor.Device1 : ModelActor.Device2;
+        }
+
+        var index = (int)(roll / (devicesShare / Shape.Devices.Count));
+
+        return Shape.Devices[Math.Min(index, Shape.Devices.Count - 1)];
     }
 
     /// <summary>同期の操作で削除伝搬を切る割合</summary>
@@ -200,6 +252,227 @@ internal sealed class SyncModelGenerator
     }
 
     /// <summary>
+    /// 端末ごとの最初の形と中身（<see cref="Setup"/> の後、1 歩目の前に 1 回呼ぶ）。中身は 3 本目の乱数
+    /// （<see cref="PreloadSeed"/>）だけで引く（本流・2 本目の乱数を引かない）。空から始める端末の中身は空
+    /// </summary>
+    /// <param name="setup">初期データ（<see cref="Setup"/> の戻り値）</param>
+    public IReadOnlyList<SyncModelPreload> Preloads(IReadOnlyList<ModelWriteOp> setup) =>
+        [
+            .. Shape.Devices.Select(
+                (device, i) =>
+                    new SyncModelPreload(
+                        device,
+                        Shape.Preloads[i],
+                        Shape.Preloads[i] switch
+                        {
+                            ModelPreload.Journaled => JournaledPreload(device, setup),
+                            ModelPreload.Untracked => UntrackedPreload(device),
+                            _ => [],
+                        }
+                    )
+            ),
+        ];
+
+    /// <summary>
+    /// 最初の同期の前に Repository 越しに書く手（端末の DB は空）。フォルダーの親子・ラベル・品目・イベントを足し、一部を
+    /// 名前の変更・品目の削除（足した直後に消す＝打ち消し合う記録）で書き換える。一部は初期データとぶつける：最初の
+    /// フォルダー・品目のキーを初期データのキーにする（サーバーで DuplicateOnServer）か、名前・code を初期データの値にする
+    /// （UniqueValueTakenOnServer）
+    /// </summary>
+    private List<ModelWriteOp> JournaledPreload(
+        ModelActor device,
+        IReadOnlyList<ModelWriteOp> setup
+    )
+    {
+        var initialFolders = setup.OfType<AddFolderOp>().ToList();
+        var initialItems = setup.OfType<AddItemOp>().ToList();
+        var ops = new List<ModelWriteOp>();
+        var folders = new Dictionary<int, int?>();
+        var collided = false;
+
+        ModelWriteVia Via() => _preload.Next(3) == 0 ? ModelWriteVia.Graph : ModelWriteVia.Direct;
+
+        T PickPreload<T>(IReadOnlyList<T> values) => values[_preload.Next(values.Count)];
+
+        for (var count = _preload.Next(2, 4); folders.Count < count; )
+        {
+            var roll = _preload.NextDouble();
+            var id = !collided && roll < 0.3 ? PickPreload(initialFolders).Id : NewId(device);
+            var name =
+                !collided && roll is >= 0.3 and < 0.55
+                    ? PickPreload(initialFolders).Name
+                    : Value("f");
+            collided |= roll < 0.55;
+            int? parent =
+                folders.Count == 0 || _preload.Next(2) == 0 ? null : PickPreload([.. folders.Keys]);
+            ops.Add(new AddFolderOp(device, Via(), id, parent, name));
+            folders[id] = parent;
+        }
+
+        string? label = null;
+
+        if (_preload.Next(2) == 0)
+        {
+            label = PreloadLabelCode(device);
+            ops.Add(
+                new AddLabelOp(
+                    device,
+                    ModelWriteVia.Direct,
+                    label,
+                    PickPreload([.. folders.Keys]),
+                    Value("l")
+                )
+            );
+        }
+
+        var items = new List<int>();
+        collided = false;
+
+        for (var count = _preload.Next(2, 4); items.Count < count; )
+        {
+            var roll = _preload.NextDouble();
+            var id = !collided && roll < 0.3 ? PickPreload(initialItems).Id : NewId(device);
+            var code =
+                !collided && roll is >= 0.3 and < 0.55
+                    ? PickPreload(initialItems).Code
+                    : Value("pc");
+            collided |= roll < 0.55;
+            ops.Add(
+                new AddItemOp(
+                    device,
+                    Via(),
+                    id,
+                    PickPreload([.. folders.Keys]),
+                    _preload.Next(2) == 0 ? label : null,
+                    code,
+                    Value("t"),
+                    PreloadPayload()
+                )
+            );
+            items.Add(id);
+        }
+
+        var referenced = new HashSet<int>();
+
+        if (_preload.Next(2) == 0)
+        {
+            var item = PickPreload(items);
+            referenced.Add(item);
+            ops.Add(
+                new AddEventOp(device, ModelWriteVia.Direct, PreloadEventTime(), item, Value("m"))
+            );
+        }
+
+        if (_preload.Next(2) == 0)
+        {
+            var folder = PickPreload([.. folders.Keys]);
+            ops.Add(new UpdateFolderOp(device, Via(), folder, folders[folder], Value("f")));
+        }
+
+        var removable = items.Where(item => !referenced.Contains(item)).ToList();
+
+        if (removable.Count > 0 && _preload.Next(3) == 0)
+        {
+            ops.Add(new DeleteItemOp(device, ModelWriteVia.Direct, PickPreload(removable)));
+        }
+
+        return ops;
+    }
+
+    /// <summary>
+    /// 最初の同期の前に Repository を通らずに入れる行（フォルダーの親子・ラベル・blob を持つ品目）。キーは端末のキーの範囲の
+    /// 追跡しない帯（サーバーに無いキー）、名前・code は種の中で一意な新しい値
+    /// </summary>
+    private List<ModelWriteOp> UntrackedPreload(ModelActor device)
+    {
+        var start =
+            device switch
+            {
+                ModelActor.Device1 => 1000,
+                ModelActor.Device2 => 2000,
+                ModelActor.Device3 => 4000,
+                _ => throw new ArgumentOutOfRangeException(nameof(device), device, null),
+            } + SyncModelWorldShape.UntrackedKeyOffset;
+        var ops = new List<ModelWriteOp>();
+        var folders = new List<int>();
+
+        for (var count = _preload.Next(1, 4); folders.Count < count; )
+        {
+            var id = start + folders.Count + 1;
+            int? parent = folders.Count == 0 || _preload.Next(2) == 0 ? null : folders[^1];
+            ops.Add(new AddFolderOp(device, ModelWriteVia.Direct, id, parent, Value("uf")));
+            folders.Add(id);
+        }
+
+        string? label = null;
+
+        if (_preload.Next(2) == 0)
+        {
+            label = PreloadLabelCode(device);
+            ops.Add(
+                new AddLabelOp(
+                    device,
+                    ModelWriteVia.Direct,
+                    label,
+                    folders[_preload.Next(folders.Count)],
+                    Value("ul")
+                )
+            );
+        }
+
+        for (int i = 0, count = _preload.Next(1, 4); i < count; i++)
+        {
+            ops.Add(
+                new AddItemOp(
+                    device,
+                    ModelWriteVia.Direct,
+                    start + 50 + i + 1,
+                    folders[_preload.Next(folders.Count)],
+                    _preload.Next(2) == 0 ? label : null,
+                    Value("uc"),
+                    Value("t"),
+                    PreloadPayload()
+                )
+            );
+        }
+
+        return ops;
+    }
+
+    /// <summary>最初の行のラベルの code（<see cref="LabelCode"/> と同じ形を 3 本目の乱数で引く）</summary>
+    private string PreloadLabelCode(ModelActor device)
+    {
+        var who = device switch
+        {
+            ModelActor.Device1 => "p",
+            ModelActor.Device2 => "q",
+            _ => "r",
+        };
+
+        return $"{LabelPrefixes[_preload.Next(LabelPrefixes.Length)]}{who}{++_counter}";
+    }
+
+    /// <summary>最初の行の blob（<see cref="Payload"/> と同じ形を 3 本目の乱数で引く。大きな blob にはしない）</summary>
+    private string PreloadPayload()
+    {
+        var bytes = new byte[6];
+        BitConverter.TryWriteBytes(bytes.AsSpan(0, 4), ++_counter);
+        bytes[4] = (byte)_preload.Next(256);
+        bytes[5] = (byte)_preload.Next(1, 256);
+
+        return Convert.ToHexString(bytes);
+    }
+
+    /// <summary>最初の行のイベントの日時（<see cref="EventTime"/> と同じ形を 3 本目の乱数で引く）</summary>
+    private DateTime PreloadEventTime()
+    {
+        var fraction = _preload.Next(0, 1_000_000) * 10 + _preload.Next(1, 10);
+        var value = BaseTime.AddSeconds(++_counter).AddTicks(fraction);
+
+        return DateTime.SpecifyKind(value, (DateTimeKind)_preload.Next(3));
+    }
+
+    /// <summary>
     /// 次の 1 歩（書き込み 1 つか 2 つ、または同期 1 回）を作る。
     /// </summary>
     /// <param name="states">書き手ごとの DB の現在の内容</param>
@@ -209,7 +482,7 @@ internal sealed class SyncModelGenerator
 
         if (Faults && _random.NextDouble() < 0.12)
         {
-            var device = _random.Next(2) == 0 ? ModelActor.Device1 : ModelActor.Device2;
+            var device = PickDevice();
             var kinds = Enum.GetValues<ModelFaultKind>()
                 .Where(kind => kind != ModelFaultKind.ApplySkip)
                 .ToArray();
@@ -222,11 +495,7 @@ internal sealed class SyncModelGenerator
             return [NextSync()];
         }
 
-        var roll = _random.NextDouble();
-        var actor =
-            roll < 0.42 ? ModelActor.Device1
-            : roll < 0.84 ? ModelActor.Device2
-            : ModelActor.Server;
+        var actor = WriterFor(_random.NextDouble());
         var state = states[actor];
 
         for (var attempt = 0; attempt < 30; attempt++)
@@ -250,7 +519,7 @@ internal sealed class SyncModelGenerator
 
     private ModelSyncOp NextSync()
     {
-        var device = _random.Next(2) == 0 ? ModelActor.Device1 : ModelActor.Device2;
+        var device = PickDevice();
         var kindRoll = _random.NextDouble();
         var kind =
             kindRoll < 0.8 ? ModelSyncKind.Sync
@@ -1038,6 +1307,7 @@ internal sealed class SyncModelGenerator
         {
             ModelActor.Device1 => "p",
             ModelActor.Device2 => "q",
+            ModelActor.Device3 => "r",
             _ => "s",
         };
 
@@ -1074,10 +1344,14 @@ internal sealed class SyncModelGenerator
         return Convert.ToHexString(bytes);
     }
 
-    /// <summary>キーの範囲の持ち主（端末 1＝1000 台・端末 2＝2000 台・サーバーの他者＝3000 台。初期データの 1 桁は null）</summary>
+    /// <summary>
+    /// キーの範囲の持ち主（端末 1＝1000 台・端末 2＝2000 台・サーバーの他者＝3000 台・端末 3＝4000 台。初期データの 1 桁は
+    /// null。フックが付け直したキー〔<see cref="SyncModelDevice.RekeyOffset"/> を足した値〕はサーバーの他者に数える）
+    /// </summary>
     private static ModelActor? RangeOwner(int id) =>
         id switch
         {
+            > 4000 and < 5000 => ModelActor.Device3,
             > 3000 => ModelActor.Server,
             > 2000 => ModelActor.Device2,
             > 1000 => ModelActor.Device1,
@@ -1099,7 +1373,12 @@ internal sealed class SyncModelGenerator
         var candidates = _states
             .Where(pair => pair.Key != actor)
             .SelectMany(pair => IntKeys(pair.Value, table))
-            .Where(key => RangeOwner(key) is { } owner && owner != actor && !mine.Contains(key))
+            .Where(key =>
+                RangeOwner(key) is { } owner
+                && owner != actor
+                && !mine.Contains(key)
+                && !SyncModelWorldShape.IsUntrackedKey(key)
+            )
             .Distinct()
             .Order()
             .ToList();
@@ -1160,12 +1439,16 @@ internal sealed class SyncModelGenerator
                 : SpellingKinds[_side.Next(SpellingKinds.Length)];
         var limit = items ? 20 : 40;
         var own = UniqueValues(_states[actor], items).ToHashSet(StringComparer.Ordinal);
+
+        // 別表記の元にするのは追跡する行の値だけ（追跡しない行の値は、新しい値かを確かめる known にだけ入れる）
         var all = _states
-            .Values.SelectMany(state => UniqueValues(state, items))
+            .Values.SelectMany(state => UniqueValues(state, items, includeUntracked: false))
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToList();
-        var known = all.ToHashSet(StringComparer.Ordinal);
+        var known = _states
+            .Values.SelectMany(state => UniqueValues(state, items))
+            .ToHashSet(StringComparer.Ordinal);
 
         // 自分の DB に無く、どこにも無い（別表記として新しい）値だけ
         List<string> Variants(Func<string, string?> make) =>
@@ -1201,10 +1484,18 @@ internal sealed class SyncModelGenerator
             : (value, kind);
     }
 
-    private static IEnumerable<string> UniqueValues(ModelDbState state, bool items) =>
+    private static IEnumerable<string> UniqueValues(
+        ModelDbState state,
+        bool items,
+        bool includeUntracked = true
+    ) =>
         items
-            ? state.Items.Values.Select(row => row.Code)
-            : state.Folders.Values.Select(row => row.Name);
+            ? state
+                .Items.Where(p => includeUntracked || !SyncModelWorldShape.IsUntrackedKey(p.Key))
+                .Select(p => p.Value.Code)
+            : state
+                .Folders.Where(p => includeUntracked || !SyncModelWorldShape.IsUntrackedKey(p.Key))
+                .Select(p => p.Value.Name);
 
     /// <summary>ASCII の英字の大文字小文字を入れ替える（ASCII の英字が無ければ null）</summary>
     public static string? FlipAsciiCase(string value)

@@ -72,6 +72,9 @@ internal sealed record SyncModelWorldOptions
     /// <summary>表を外部の ISyncTable 実装の代役で包む端末</summary>
     public IReadOnlyCollection<ModelActor> ExternalTables { get; init; } = [];
 
+    /// <summary>世界の端末（既定は端末 1・2。広い世界の種は <see cref="SyncModelWorldShape.Devices"/>）</summary>
+    public IReadOnlyList<ModelActor> Devices { get; init; } = SyncModelWorldShape.TwoDevices;
+
     /// <summary>この組み方の短い名前（出力用）</summary>
     public string Name { get; init; } = "direct";
 }

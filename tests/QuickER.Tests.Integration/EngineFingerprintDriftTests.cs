@@ -20,9 +20,9 @@ namespace QuickER.Tests.Integration;
 /// </para>
 /// <list type="bullet">
 /// <item>同期のモデル：生成器は 1 手ごとに実 DB から読んだ状態を見て次の手を選ぶので、実行の列は生成だけでは作れない。種の組
-/// （Mode・Policy・Extras・Faults）・初期データの手・「初期データを当てた状態」に 3 者の状態を固定して 40 回選んだ手を要約にする
+/// （Mode・Policy・Extras・Faults。広い世界の種は端末の並びも）・初期データの手・「初期データを当てた状態」に書き手全員の状態を固定して 40 回選んだ手を要約にする
 /// （1 手目は実際の実行と同じで、2 手目からは実際の列と違うが、決定的）。転送経路で生成は変わらないので、直結の種（0 から）だけを
-/// 記録し、HTTP・SQL Server の種がその部分集合であることを確かめる。</item>
+/// 記録し、HTTP・SQL Server の種がその部分集合であることを確かめる。既存の範囲の種（記録 SyncModel）と広い世界の種（記録 SyncModelWide）は別々に記録する。</item>
 /// <item>同期計画の総当たり：生成器は DB から取り込んだ図に変更を当てる。取り込む代わりに生成した図をそのまま新しい Id へ写して
 /// 変更・差分・選び方を作る（取込の正規化は通らない）。方言の部品で生成が変わるので、方言ごとにエンジン ID を分ける。</item>
 /// <item>実装先どうしの一致：生成器は実行と分かれている。シナリオの名前・初期データ・操作の列を、record の中の一覧も展開して要約にする。</item>
@@ -45,23 +45,31 @@ public sealed class EngineFingerprintDriftTests
         new("sqlite", "mysql", "sqlserver", "postgresql", "oracle");
 
     [Fact(DisplayName = "[指紋] 同期のモデルの生成器は、記録と同じ入力を作る")]
-    public void SyncModel_GeneratesRecordedInputs() =>
+    public void SyncModel_GeneratesRecordedInputs()
+    {
+        // 既存の範囲の種（端末 2 台）と広い世界の種（端末 3 台）を別々の記録で照合する
         Verify("SyncModel", SyncModelRuntimeTests.Seeds, SyncModelSummary);
+        Verify("SyncModelWide", SyncModelRuntimeTests.WideSeeds, SyncModelSummary);
+    }
 
     [Fact(DisplayName = "[指紋] 同期のモデルの転送経路の種は、直結の種の部分集合")]
     public void SyncModel_TransportSeedsAreRecorded()
     {
-        var direct = Enumerable
-            .Range(SyncModelRuntimeTests.Seeds.FirstSeed, SyncModelRuntimeTests.Seeds.RegularCount)
-            .ToHashSet();
-        var transport = SyncModelSignatures.Seeds;
+        AssertTransportSubset(SyncModelRuntimeTests.Seeds, SyncModelSignatures.Seeds);
+        AssertTransportSubset(SyncModelRuntimeTests.WideSeeds, SyncModelSignatures.WideSeeds);
+    }
+
+    /// <summary>転送経路（HTTP・実 SQL Server）の種が、記録した直結の種の部分集合</summary>
+    private static void AssertTransportSubset(SeedSettings direct, SeedSettings transport)
+    {
+        var recorded = Enumerable.Range(direct.FirstSeed, direct.RegularCount).ToHashSet();
         var http = Enumerable.Range(transport.FirstSeed, transport.RegularCount);
         var sqlServer = Enumerable
             .Range(transport.FirstSeed, transport.RegularCount * 4)
             .Where(seed => seed % 4 is 0 or 1)
             .Take(transport.RegularCount);
 
-        Assert.Subset(direct, http.Concat(sqlServer).ToHashSet());
+        Assert.Subset(recorded, http.Concat(sqlServer).ToHashSet());
     }
 
     [Theory(DisplayName = "[指紋] 同期計画の総当たりの生成器は、方言ごとに記録と同じ入力を作る")]
@@ -128,8 +136,15 @@ public sealed class EngineFingerprintDriftTests
             .Append(" extras=")
             .Append(generator.Extras)
             .Append(" faults=")
-            .Append(generator.Faults)
-            .Append('\n');
+            .Append(generator.Faults);
+
+        // 世界の形は広い世界の種にだけ書く（既存の範囲の種の要約を変えない）
+        if (SyncModelWorldShape.IsWide(seed))
+        {
+            text.Append(" devices=").Append(string.Join(",", generator.Shape.Devices));
+        }
+
+        text.Append('\n');
 
         var setup = generator.Setup();
 
@@ -138,8 +153,32 @@ public sealed class EngineFingerprintDriftTests
             text.Append("setup ").Append(SeedSummary.Object(op)).Append('\n');
         }
 
-        var states = Enum.GetValues<ModelActor>()
-            .ToDictionary(actor => actor, _ => StateAfter(setup));
+        // 端末の最初の形（広い世界の種だけ。空から始める端末は書かない＝既存の範囲の種の要約を変えない）。最初の同期をしない
+        // 端末の状態は、空の DB へ最初の行を当てた状態
+        var preloads = generator.Preloads(setup);
+
+        foreach (var preload in preloads.Where(p => p.Kind != ModelPreload.None))
+        {
+            text.Append("preload ")
+                .Append(preload.Device)
+                .Append(' ')
+                .Append(preload.Kind)
+                .Append('\n');
+
+            foreach (var write in preload.Writes)
+            {
+                text.Append("preload ").Append(SeedSummary.Object(write)).Append('\n');
+            }
+        }
+
+        var states = generator.Shape.Actors.ToDictionary(
+            actor => actor,
+            actor =>
+                preloads.SingleOrDefault(p => p.Device == actor)
+                    is { Kind: ModelPreload.Journaled or ModelPreload.Untracked } preloaded
+                    ? Applied(preloaded.Writes, addsOnly: false)
+                    : StateAfter(setup)
+        );
 
         for (var step = 0; step < SyncModelRuntimeTests.StepsPerSeed; step++)
         {
@@ -153,11 +192,17 @@ public sealed class EngineFingerprintDriftTests
     }
 
     /// <summary>初期データの手（追加だけ）を当てた状態（同期で 3 者がこの内容にそろった後の状態）</summary>
-    private static ModelDbState StateAfter(IReadOnlyList<ModelWriteOp> setup)
+    private static ModelDbState StateAfter(IReadOnlyList<ModelWriteOp> setup) =>
+        Applied(setup, addsOnly: true);
+
+    /// <summary>
+    /// 空の DB へ手を当てた状態（初期データは追加だけ。端末の最初の行は追加・フォルダーの変更・品目の削除を含む）
+    /// </summary>
+    private static ModelDbState Applied(IReadOnlyList<ModelWriteOp> ops, bool addsOnly)
     {
         var state = new ModelDbState();
 
-        foreach (var op in setup)
+        foreach (var op in ops)
         {
             switch (op)
             {
@@ -179,10 +224,18 @@ public sealed class EngineFingerprintDriftTests
                 case AddEventOp @event:
                     state.Events[@event.KeyText] = (@event.At, @event.ItemId, @event.Memo);
                     break;
-                default:
-                    throw new InvalidOperationException(
-                        $"初期データに追加でない手がある: {op.Describe()}"
+                case UpdateFolderOp update when !addsOnly:
+                    state.Folders[update.Id] = (
+                        update.ParentId,
+                        update.Name,
+                        state.Folders[update.Id].PinnedItemId
                     );
+                    break;
+                case DeleteItemOp delete when !addsOnly:
+                    state.Items.Remove(delete.Id);
+                    break;
+                default:
+                    throw new InvalidOperationException($"要約が当てない手がある: {op.Describe()}");
             }
         }
 
