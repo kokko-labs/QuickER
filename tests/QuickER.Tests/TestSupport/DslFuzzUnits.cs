@@ -38,7 +38,9 @@ public static class DslFuzzUnits
         );
     }
 
-    /// <summary>SQL Server の単位（値オブジェクトなし・あり・GuidKey の主キー。Integration の派生が実 DB で流す）</summary>
+    /// <summary>
+    /// SQL Server の単位（値オブジェクトなし・あり・GuidKey の主キー・Unicode でない文字列の列。Integration の派生が実 DB で流す）
+    /// </summary>
     public static IEnumerable<DslFuzzUnit> SqlServer(int seed)
     {
         yield return Build("sqlserver-plain", seed, SqlServerColumns(), valueObjects: false);
@@ -52,6 +54,54 @@ public static class DslFuzzUnits
                 new("i32", "int", DslClr.Int32, Nullable: true),
             ],
             valueObjects: true
+        );
+        yield return Build("sqlserver-ansi", seed, SqlServerAnsiColumns(), valueObjects: false);
+    }
+
+    /// <summary>
+    /// SQL Server の Unicode でない文字列の列の網羅の単位（種に依らない・値オブジェクトなし）：varchar・char の列の、ASCII の外の文字を
+    /// 含む値の原子（<see cref="DslFuzzGenerator.OutOfTypeCoverageQueries"/>）を使う合成のクエリと、その並び替えの写し
+    /// </summary>
+    /// <remarks>
+    /// varchar の列の相方（ほかの列で使い回す形のため）と、並び替えの写しのために主キーより前に置ける NOT NULL の整数の列を 2 本持つ
+    /// （NULL を許す整数の列は、列の型に入らない値の原子を作るので持たない）。パラメータの使い回しは、ASCII の外の文字を含む値を必ず
+    /// 使い回すクエリ（KXR0）だけを作る。
+    /// </remarks>
+    public static DslFuzzUnit SqlServerAnsiCoverage()
+    {
+        var ansi = SqlServerAnsiColumns();
+        DslColumn[] columns =
+        [
+            .. ansi,
+            // varchar の列の相方（ほかの列でパラメータを使い回す形のため。with で写すとモデルの列まで共有するので作り直す）
+            new(ansi[1].Name + PartnerSuffix, ansi[1].DataType, ansi[1].Clr, ansi[1].Nullable)
+            {
+                NonUnicode = true,
+                Values = ansi[1].Values,
+            },
+            new("o1", "int", DslClr.Int32, Nullable: false),
+            new("o2", "smallint", DslClr.Int16, Nullable: false),
+        ];
+        var rows = new DslFuzzGenerator(CoverageSeed, valueObjects: false).Rows(columns, RowCount);
+        var queries = new DslFuzzGenerator(
+            DslFuzzGenerator.OutOfTypeSeed(CoverageSeed),
+            valueObjects: false,
+            DslFuzzGenerator.OutOfTypeParameterPrefix
+        ).OutOfTypeCoverageQueries(columns, decimalOrdered: true);
+        var ordering = new DslFuzzGenerator(
+            CoverageSeed,
+            valueObjects: false,
+            DslFuzzGenerator.SideParameterPrefix
+        ).OrderingCoverageQueries(columns, queries);
+
+        return new DslFuzzUnit(
+            $"{CoveragePrefix}{DialectNames.SqlServer}-ansi",
+            TableName,
+            columns,
+            rows,
+            [.. queries, .. ordering],
+            ValueObjects: false,
+            CoverageSeed
         );
     }
 
@@ -222,6 +272,8 @@ public static class DslFuzzUnits
     /// <remarks>
     /// 列は種の単位と同じ。MySQL は網羅の単位と同じく、種の単位に無い固定長の文字列・符号つき整数・decimal・日時・Guid も持ち、
     /// その列の原子のクエリを作る（主キーは種の単位と同じ bigint）。
+    /// 列の型に入らない値の原子を使う合成のクエリ（<see cref="DslFuzzGenerator.OutOfTypeCoverageQueries"/>）も、別の乱数の列で作って足す
+    /// （列の型に入らない値は値オブジェクトなしでだけ書けるので、この単位が持つ）。
     /// </remarks>
     /// <param name="dbms">方言（<see cref="DialectNames"/> の SQLite・SQL Server・MySQL）</param>
     public static DslFuzzUnit PlainCoverage(string dbms)
@@ -245,10 +297,16 @@ public static class DslFuzzUnits
             PutOrdinalValues(rows);
         }
 
+        // 列の型に入らない値の合成のクエリは別の乱数の列で作る（ほかのクエリの値の引き方を変えない）
         List<DslQuery> queries =
         [
             .. generator.CoverageQueries(columns, atomColumns),
             .. ordinal ? generator.FixedQueries(columns, ordinalStrings: true) : [],
+            .. new DslFuzzGenerator(
+                DslFuzzGenerator.OutOfTypeSeed(CoverageSeed),
+                valueObjects: false,
+                DslFuzzGenerator.OutOfTypeParameterPrefix
+            ).OutOfTypeCoverageQueries(columns, decimalOrdered: dbms != DialectNames.Sqlite),
         ];
         var withPartners = AddPartners(columns, rows);
 
@@ -323,12 +381,23 @@ public static class DslFuzzUnits
             DslFuzzGenerator.SideParameterPrefix
         );
 
+        // 列の型に入らない値と比べる原子は、さらに別の乱数の列で作って最後に足す（本流と追加のクエリの引き方を変えない）
+        var outOfType = new DslFuzzGenerator(
+            DslFuzzGenerator.OutOfTypeSeed(seed),
+            valueObjects,
+            DslFuzzGenerator.OutOfTypeParameterPrefix
+        );
+
         return new DslFuzzUnit(
             name,
             TableName,
             columns,
             rows,
-            [.. queries, .. side.SideQueries(columns, SideReuseQueries, SideOrderingQueries)],
+            [
+                .. queries,
+                .. side.SideQueries(columns, SideReuseQueries, SideOrderingQueries),
+                .. outOfType.OutOfTypeQueries(columns),
+            ],
             valueObjects,
             seed
         );
@@ -393,6 +462,70 @@ public static class DslFuzzUnits
             new("d", "decimal(10,2)", DslClr.Decimal, Nullable: true),
             new("dt", "datetime2", DslClr.DateTime, Nullable: true),
             new("g", "uniqueidentifier", DslClr.Guid, Nullable: true),
+        ];
+
+    /// <summary>
+    /// SQL Server の Unicode でない文字列の列（varchar・char）。値の池は列の長さに収まり、ASCII の外の文字を含む値（<c>'</c> を含むものと
+    /// 含まないもの）と、それが列の文字集合で <c>?</c> に化けた形を含む
+    /// </summary>
+    /// <remarks>
+    /// 末尾の空白で終わる値（varchar の <c>'a '</c> など・char の列の 4 文字に満たない値は詰めた空白で返る）と、先頭の空白で始まる値を持つ。
+    /// SQL Server の Unicode でない列の文字列一致は列の値の末尾の空白を数えず、パターンの空白は数える（docs の「大文字小文字・空白・日付部品」の
+    /// 表の SQL Server の行。オラクルの <c>DslFuzz.MatchValue</c>）。値の池はパターンにも使うので、末尾の空白で終わるパターンも作る。
+    /// </remarks>
+    private static DslColumn[] SqlServerAnsiColumns() =>
+        [
+            new("id", "bigint", DslClr.Int64, Nullable: false, PrimaryKey: true),
+            new("s", "varchar(20)", DslClr.String, Nullable: true)
+            {
+                NonUnicode = true,
+                Values =
+                [
+                    "",
+                    "a",
+                    "A",
+                    "ab",
+                    "a b",
+                    "a%b",
+                    "_",
+                    "'",
+                    "??",
+                    "?",
+                    "a?",
+                    "?'",
+                    "日本",
+                    "日",
+                    "a日",
+                    "日'",
+                    "a ",
+                    "a  ",
+                    " a",
+                    "日 ",
+                ],
+            },
+            new("f", "char(4)", DslClr.FixedString, Nullable: true)
+            {
+                NonUnicode = true,
+                Values =
+                [
+                    "",
+                    "abcd",
+                    "ABCD",
+                    "a%bc",
+                    "a_bc",
+                    "'abc",
+                    "????",
+                    "a?bc",
+                    "?'ab",
+                    "日本日本",
+                    "a日bc",
+                    "日'ab",
+                    "a",
+                    "ab ",
+                    " a",
+                    "日",
+                ],
+            },
         ];
 
     private static DslColumn[] MySqlColumns() =>

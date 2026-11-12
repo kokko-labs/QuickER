@@ -329,10 +329,9 @@ public class RuntimeTestMatrixTests
             Row(
                 Covered(),
                 Covered(),
-                NotApplicable(
-                    "EF Core はマルチターゲットと生成時エラーで排他になり、同じエンティティ型を共有できない"
-                        + "（翻訳も EF Core の LINQ プロバイダが行い SqlExpressionTranslator を通らない）"
-                ),
+                // EF Core はマルチターゲットと排他で共通基底に入らないので、同じ図の EF Core 単独のフィクスチャへ
+                // 述語の表だけを付け替えて流す（SQL Server の EF Core 版）
+                Covered(),
                 Covered(),
                 NotApplicable("Query() はリモート面に無く、式木は転送されない")
             )
@@ -780,6 +779,7 @@ public class RuntimeTestMatrixTests
         new("TranslatorParitySqlServerRuntimeTests", "TranslatorParity", Backend.AdoSqlServer),
         new("TranslatorParitySqliteRuntimeTests", "TranslatorParity", Backend.AdoSqlite),
         new("TranslatorParityInMemoryRuntimeTests", "TranslatorParity", Backend.InMemory),
+        new("TranslatorParityEfCoreSqlServerRuntimeTests", "TranslatorParity", Backend.EfCore),
         // --- スキーマ適用 ---
         new("SqlServerSchemaBootstrapRuntimeTests", "SchemaBootstrap", Backend.AdoSqlServer),
         new("SqliteSchemaBootstrapRuntimeTests", "SchemaBootstrap", Backend.AdoSqlite),

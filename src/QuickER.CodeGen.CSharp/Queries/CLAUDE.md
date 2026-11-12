@@ -55,6 +55,13 @@ C# リテラルのエスケープの規則（`GeneratedLiteralText`）は `src/Q
 - 手書き LINQ の翻訳器はド・モルガン展開しないまま（docs の既知の割り切り）
 - ガード：`DslConditionFuzzTests`（SQLite の ADO・EF Core・インメモリ × VO の有無で、docs の意味のオラクルと照合。NOT の段数と NOT が包む合成の種類は次元表の因子 NotNesting で数え、網羅の単位 `DslFuzzUnits.Coverage`〔VO あり〕・`DslFuzzUnits.PlainCoverage`〔VO なし〕の決まった形が NOT NOT・NOT NOT NOT・NOT (AND 群)・NOT (AND (比較, IS NULL)) を毎回流す）・`QueryConditionCSharpEmitterTests`（エミッタの出力の綴りの表）。mutation 実証済み
 
+## 文字列のリテラルの持ち上げ
+
+- 簡易 DSL の文字列のリテラル（比較の右辺・LIKE の分解・CONTAINS などの引数）は、メソッド冒頭の局所変数 `var literal{番号} = "...";` へ持ち上げ、ラムダはその変数を参照する（`QueryConditionCSharpEmitter.Context.LiftStringLiteral`）。同じ値は 1 つの変数を共有し、名前はメソッド引数・ほかの持ち上げ変数とぶつかると `_` を後置する。VO の列は `Vo.Create(literal1)`
+  - 理由：ラムダの中の定数は、EF Core が SQL のリテラルへ書き、`IsUnicode(false)` の列と比べると `N` を付けないので、ASCII の外の文字が `?` になって化けた行に一致する。変数にすると EF Core はパラメータにし、`SqlServerQueryParameterInterceptor` が値の型で束縛する（`src/QuickER.Runtime.EntityFrameworkCore/CLAUDE.md`「SQL Server のクエリのパラメータの型」）
+  - QuickER 版 Repository とインメモリは、変数でも定数でも値として扱うので答えは変わらない。数値のリテラルは持ち上げない（EF Core のリテラルは値の型のまま書かれ、C# と同じ答えになる）
+- ガード：`QueryConditionCSharpEmitterTests`（行 `string-literal-*`・`value-object-string-literal` と、LIKE・CONTAINS の行の前置文）・`Dsl/SqlServer`（単位 sqlserver-ansi の Unicode でない列と ASCII の外の文字のリテラルの比較・LIKE・文字列一致）。mutation 実証済み（持ち上げを戻すと総当たりの EF Core のリテラルの形だけが 42 件赤）
+
 ## VO × IN の持ち上げ
 
 - VO × IN は、メソッド冒頭でリストを持ち上げる

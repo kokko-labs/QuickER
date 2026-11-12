@@ -171,6 +171,12 @@ public sealed class EngineFingerprintDriftTests
                         .Append(" values=")
                         .Append(SeedSummary.Object(parameter.Values))
                         .Append('\n');
+
+                    // 型トークンの行は列の型と別の型トークンを持つパラメータだけに書く（ほかのパラメータの要約は変えない）
+                    if (parameter.TypeToken is not null)
+                    {
+                        text.Append("      token ").Append(parameter.TypeToken).Append('\n');
+                    }
                 }
             }
         }

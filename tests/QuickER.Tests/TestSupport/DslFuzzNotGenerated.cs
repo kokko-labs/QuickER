@@ -64,6 +64,19 @@ internal static class DslFuzzNotGenerated
                     "SQL Server の EF Core 版はパラメータを比べる相手の列の型で束縛し、精度の外の値は例外、スケールの外の値は丸めて誤った行を返す。生成器は型が広がる組で相手の列に入る値だけを選ぶ",
                     NotGenerated.Unguarded
                 ),
+                NotGenerated.Accepted(
+                    "out-of-type-values-on-value-objects",
+                    "値オブジェクトの列と、列の型に入らない値（精度・スケールの外の decimal・整数を包む値オブジェクトへの decimal）",
+                    "値オブジェクトの Create は精度・スケールの外の値を検証エラーにし（docs の値オブジェクトの節）、整数を包む値オブジェクトの列への decimal のパラメータは型の検査が断る。どちらも比べる前に断られるので、列の型に入らない値は値オブジェクトなしの単位でだけ作る",
+                    "`table:ValueObjectScenarios`・`CodegenConfig/Cases`（行 `diag-query-type-check-rejects-*`）"
+                ),
+                NotGenerated.Pending(
+                    "bigint-column-decimal-parameter-efcore",
+                    "bigint の列と、decimal の型トークンで型付けしたパラメータの比較（SQL Server の EF Core 版）",
+                    "（未起動）EF Core の bigint の列と decimal の値の比較の区切り",
+                    "SQL Server の EF Core 版は bigint の列を CAST(... AS decimal(18,2)) にして比べ、整数部が 16 桁を超える行（long の上限など）で Arithmetic overflow の SqlException になる（パラメータの値に依らず、SqlServerQueryParameterInterceptor でも直らない）。QuickER 版 Repository とインメモリは正しく答える。生成器は decimal のパラメータを byte・short・int の列にだけ作る",
+                    NotGenerated.Unguarded
+                ),
                 NotGenerated.Pending(
                     "postgresql-oracle-backends",
                     "PostgreSQL と Oracle の構成の実装先",

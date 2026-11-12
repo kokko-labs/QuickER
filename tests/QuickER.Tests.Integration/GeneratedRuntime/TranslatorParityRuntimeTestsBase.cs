@@ -67,7 +67,7 @@ public abstract class TranslatorParityRuntimeTestsBase
     /// 列の型より細かい値と比べる列は id 1・2 が値を持つ（day は日付だけ・at2 と clock は 1/100 秒まで）。Unicode でない ansi は、
     /// 列が表せない文字が化けた形の '??'（id 2）と '?'（id 4）を持つ。
     /// </remarks>
-    protected static IReadOnlyList<ProbeEntity> SeedProbes() =>
+    internal static IReadOnlyList<ProbeEntity> SeedProbes() =>
         [
             Probe(
                 1,
@@ -459,16 +459,34 @@ public abstract class TranslatorParityRuntimeTestsBase
     private async Task SeedCrossTypeFamilyAsync()
     {
         var parents = Repository<IBigParentRepository>();
-        await parents.InsertAsync(new BigParentEntity { Id = 1, Label = "a" }, Ct);
-        await parents.InsertAsync(new BigParentEntity { Id = 2, Label = "b" }, Ct);
-        await parents.InsertAsync(new BigParentEntity { Id = 3, Label = "c" }, Ct);
+        foreach (var parent in CrossTypeParents())
+        {
+            await parents.InsertAsync(parent, Ct);
+        }
 
         var children = Repository<ISmallChildRepository>();
-        await children.InsertAsync(new SmallChildEntity { Id = 10, BigParentId = 1 }, Ct);
-        await children.InsertAsync(new SmallChildEntity { Id = 11, BigParentId = 1 }, Ct);
-        await children.InsertAsync(new SmallChildEntity { Id = 20, BigParentId = 2 }, Ct);
-        await children.InsertAsync(new SmallChildEntity { Id = 30, BigParentId = null }, Ct);
+        foreach (var child in CrossTypeChildren())
+        {
+            await children.InsertAsync(child, Ct);
+        }
     }
+
+    /// <summary>big_parent のシード（呼ぶたびに新しいインスタンスを返す）</summary>
+    internal static IReadOnlyList<BigParentEntity> CrossTypeParents() =>
+        [
+            new() { Id = 1, Label = "a" },
+            new() { Id = 2, Label = "b" },
+            new() { Id = 3, Label = "c" },
+        ];
+
+    /// <summary>small_child のシード（外部キー 1・1・2・NULL。呼ぶたびに新しいインスタンスを返す）</summary>
+    internal static IReadOnlyList<SmallChildEntity> CrossTypeChildren() =>
+        [
+            new() { Id = 10, BigParentId = 1 },
+            new() { Id = 11, BigParentId = 1 },
+            new() { Id = 20, BigParentId = 2 },
+            new() { Id = 30, BigParentId = null },
+        ];
 
     /// <summary>
     /// 主キーと外部キーの CLR の型が違う（long と int）親子でも、Include が子方向・親参照の両方で関連を組み立てることを検証する。

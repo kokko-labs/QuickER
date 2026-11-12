@@ -139,6 +139,28 @@ public static class DslFuzzDimensions
     public static IReadOnlyList<string> OrderingLevels { get; } =
     [OrderingNone, OrderingKey, OrderingOneColumn, OrderingTwoColumns];
 
+    /// <summary>原子が比べる値と、列の型の合い方</summary>
+    public const string ValueFit = "ValueFit";
+
+    /// <summary>比べる値を持たない原子（NULL 判定・空のリスト・null だけのリスト）</summary>
+    public const string FitNone = "none";
+
+    /// <summary>比べる値がどれも列の型に入る</summary>
+    public const string FitFits = "fits";
+
+    /// <summary>小数の桁が列のスケールを超える値がある（整数の列はスケール 0）</summary>
+    public const string FitBeyondScale = "beyond-scale";
+
+    /// <summary>整数部が列の型の範囲を超える値がある（decimal の列は精度−スケールの桁・整数の列は型の範囲）</summary>
+    public const string FitBeyondRange = "beyond-range";
+
+    /// <summary>Unicode でない文字列の列に、ASCII の外の文字を含む値がある</summary>
+    public const string FitBeyondCharset = "beyond-charset";
+
+    /// <summary>値と列の型の合い方の水準</summary>
+    public static IReadOnlyList<string> FitLevels { get; } =
+    [FitNone, FitFits, FitBeyondScale, FitBeyondRange, FitBeyondCharset];
+
     /// <summary>SQLite の 3 実装先と MySQL のインメモリ（QuickER.Tests）の範囲</summary>
     public static IReadOnlyList<string> SqliteMySqlScopes { get; } =
     ["sqlite:ado", "sqlite:efcore", "sqlite:inmemory", "mysql:inmemory"];
@@ -256,6 +278,11 @@ public static class DslFuzzDimensions
                     OrderingLevels.Select(level => new Level(level)).ToList(),
                     "原子を含むクエリの並び替え（並べない・主キーだけ・列 1 つの後に主キー・列 2 つの後に主キー）"
                 ),
+                new Factor(
+                    ValueFit,
+                    FitLevels.Select(level => new Level(level)).ToList(),
+                    "原子が比べる値（リテラル・パラメータ・リストの要素）と列の型の合い方（値を持たない・入る・小数の桁がスケールの外・整数部が範囲の外・Unicode でない列に ASCII の外の文字）"
+                ),
             ],
             isValid: IsValid
         );
@@ -295,6 +322,47 @@ public static class DslFuzzDimensions
                         UnmappedInSqliteAndSqlServer,
                         "SQL Server には符号つきの tinyint と、符号なしの smallint・int・bigint の型が無い（src/QuickER.Provider.SqlServer/SqlServerCSharpTypeMapper.cs の Map は tinyint→byte・smallint→short・int→int・bigint→long だけを持つ）ので、sbyte・ushort・uint・ulong の列を作れない"
                     )
+                ),
+                .. new[]
+                {
+                    "sqlite:ado",
+                    "sqlite:efcore",
+                    "sqlite:inmemory",
+                    "mysql:inmemory",
+                }.SelectMany(scope => CharsetUnavailableGaps(scope)),
+                .. SqliteMySqlScopes
+                    .Concat(SqlServerScopes)
+                    .Select(scope =>
+                        CoverageGap.Matching(
+                            scope,
+                            "EP",
+                            ReuseOutOfTypeFixedIn,
+                            "パラメータを使い回す形は、型が広がる組で相手の列の型に入る値だけを選ぶ（DslFuzzGenerator.SharedPool・作らない形の宣言 values-outside-column-type-efcore）ので、使い回すパラメータの値が列の小数の桁・整数部の外になる形を作らない",
+                            ParameterReuse,
+                            ValueFit,
+                            (reuse, fit) =>
+                                reuse != ReuseNone && fit is FitBeyondScale or FitBeyondRange
+                        )
+                    ),
+                .. SqlServerScopes.Select(scope =>
+                    CoverageGap.Tuple(
+                        scope,
+                        "EP",
+                        "きっかけ待ち（Unicode でない列の値オブジェクトの単位）",
+                        "GuidKey の列は値オブジェクトの単位にしか無く、Unicode でない文字列の列の単位（sqlserver-ansi・coverage-sqlserver-ansi）は値オブジェクトを持たない（varchar(36) の GuidKey の主キーを作っていない）",
+                        (Clr, nameof(DslClr.GuidKey)),
+                        (ValueFit, FitBeyondCharset)
+                    )
+                ),
+                CoverageGap.AcceptedMatching(
+                    "sqlite:efcore",
+                    "EP",
+                    "EF Core の SQLite プロバイダは decimal のサーバー側の順序比較を翻訳できない（DslConditionFuzzTests の ExcludedOnEfCoreSqlite が流さない）。小数の桁・整数部が列の型の外のリテラル（decimal の値）の順序比較は decimal の列にしか書けない（整数の列と小数のリテラルは形 compare-*-literal-fractional）ので、EF Core（SQLite）では作れない",
+                    Shape,
+                    ValueFit,
+                    (shape, fit) =>
+                        fit is FitBeyondScale or FitBeyondRange
+                        && OrderedOps.Any(op => shape == $"compare-{op}-literal")
                 ),
                 CoverageGap.AcceptedMatching(
                     "sqlite:efcore",
@@ -340,6 +408,30 @@ public static class DslFuzzDimensions
                 CoverageGap.AcceptedMatching(scope, "P1-3", reason, Clr, pair.Other, pair.Predicate)
             );
 
+    /// <summary>
+    /// 使い回すパラメータの値が列の型の外になる形を作る区切り（作らない形の宣言 values-outside-column-type-efcore の直す区切りと同じ）
+    /// </summary>
+    private const string ReuseOutOfTypeFixedIn = "EF Core のパラメータの型の区切り（未起動）";
+
+    /// <summary>
+    /// 列の文字集合の外の文字（<see cref="FitBeyondCharset"/>）を、ValueFit を含む因子の組ごとに 1 項目にする（受け入れた組＝
+    /// SQLite・MySQL の列は Unicode で文字を持つので、単位を直しても作れない）
+    /// </summary>
+    private static IEnumerable<CoverageGapEntry> CharsetUnavailableGaps(string scope) =>
+        Table
+            .Factors.Select(factor => factor.Name)
+            .Where(name => name != ValueFit)
+            .Select(other =>
+                CoverageGap.AcceptedMatching(
+                    scope,
+                    "EP",
+                    "SQLite は varchar・char の列も文字列を Unicode のまま持ち、インメモリは .NET の文字列で持つ（MySQL の構成はインメモリだけ）ので、列の文字集合の外の文字は無い（照合順序のコードページで持つのは SQL Server の varchar・char だけで、Integration の DslConditionFuzzSqlServerRuntimeTests の単位 sqlserver-ansi が流す）",
+                    other,
+                    ValueFit,
+                    (_, fit) => fit == FitBeyondCharset
+                )
+            );
+
     /// <summary>列の種類を含む因子の組ごとの、指定した種類に当たる述語</summary>
     private static IEnumerable<(string Other, Func<string, string, bool> Predicate)> ClrPairs(
         DslClr[] kinds
@@ -358,6 +450,7 @@ public static class DslFuzzDimensions
             Query,
             ParameterReuse,
             Ordering,
+            ValueFit,
         }.Select(other => (other, (Func<string, string, bool>)((clr, _) => names.Contains(clr))));
     }
 
@@ -414,8 +507,100 @@ public static class DslFuzzDimensions
                 [Query] = queryKind,
                 [ParameterReuse] = ReuseOf(atom, atoms),
                 [Ordering] = ordering,
+                [ValueFit] = ValueFitOf(atom),
             };
         }
+    }
+
+    /// <summary>
+    /// 原子が比べる値と列の型の合い方（値ごとに判定し、範囲の外 → スケールの外 → 文字の外 → 入るの順に強いものを採る）
+    /// </summary>
+    /// <param name="atom">原子</param>
+    internal static string ValueFitOf(DslAtom atom)
+    {
+        IEnumerable<object?> values = atom switch
+        {
+            DslCompare { Operand: DslLiteral literal } => [literal.Value],
+            DslLike { Operand: DslLiteral literal } => [literal.Value],
+            DslMatch { Operand: DslLiteral literal } => [literal.Value],
+            _ => DslFuzz.ParameterOf(atom)?.Values ?? [],
+        };
+        var fits = values.OfType<object>().Select(value => FitOf(value, atom.Column)).ToList();
+
+        return fits.Count == 0 ? FitNone
+            : fits.Contains(FitBeyondRange) ? FitBeyondRange
+            : fits.Contains(FitBeyondScale) ? FitBeyondScale
+            : fits.Contains(FitBeyondCharset) ? FitBeyondCharset
+            : FitFits;
+    }
+
+    /// <summary>値 1 つと列の型の合い方（数値の列は値を decimal にして、文字列の列は Unicode でない列だけを見る）</summary>
+    private static string FitOf(object value, DslColumn column)
+    {
+        if (column.IsString)
+        {
+            return column.NonUnicode && value is string text && !text.All(char.IsAscii)
+                ? FitBeyondCharset
+                : FitFits;
+        }
+
+        (decimal Min, decimal Max)? range = column.Clr switch
+        {
+            DslClr.Int64 => (long.MinValue, long.MaxValue),
+            DslClr.Int32 => (int.MinValue, int.MaxValue),
+            DslClr.Int16 => (short.MinValue, short.MaxValue),
+            DslClr.SByte => (sbyte.MinValue, sbyte.MaxValue),
+            DslClr.Byte => (byte.MinValue, byte.MaxValue),
+            DslClr.UInt16 => (ushort.MinValue, ushort.MaxValue),
+            DslClr.UInt32 => (uint.MinValue, uint.MaxValue),
+            DslClr.UInt64 => (0m, ulong.MaxValue),
+            _ => null,
+        };
+        var facets =
+            column.Clr == DslClr.Decimal ? DslFuzzGenerator.DecimalFacets(column.DataType) : null;
+
+        if (range is null && facets is null)
+        {
+            return FitFits;
+        }
+
+        // 型の検査が断るリテラル（整数の範囲の外）は綴りのまま持つので、数として読めなければ範囲の外
+        if (!TryNumber(value, out var number))
+        {
+            return FitBeyondRange;
+        }
+
+        var (scale, outOfRange) = facets is var (precision, digits)
+            ? (
+                digits,
+                Math.Abs(decimal.Truncate(number)) >= DslFuzzGenerator.Pow10(precision - digits)
+            )
+            : (
+                0,
+                decimal.Truncate(number) < range!.Value.Min
+                    || decimal.Truncate(number) > range.Value.Max
+            );
+
+        return outOfRange ? FitBeyondRange
+            : decimal.Round(number, scale) != number ? FitBeyondScale
+            : FitFits;
+    }
+
+    /// <summary>数値の値（文字列は綴りを読む）を decimal にする</summary>
+    private static bool TryNumber(object value, out decimal number)
+    {
+        if (value is string text)
+        {
+            return decimal.TryParse(
+                text,
+                System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out number
+            );
+        }
+
+        number = Convert.ToDecimal(value, System.Globalization.CultureInfo.InvariantCulture);
+        return true;
     }
 
     /// <summary>クエリの並び替えの水準</summary>
@@ -583,7 +768,7 @@ public static class DslFuzzDimensions
         assignment.TryGetValue(Query, out var queryKind);
         assignment.TryGetValue(Grouping, out var grouping);
 
-        if (!IsValidReuseAndOrdering(assignment))
+        if (!IsValidReuseAndOrdering(assignment) || !IsValidValueFit(assignment))
         {
             return false;
         }
@@ -766,6 +951,109 @@ public static class DslFuzzDimensions
         nameof(DslClr.UInt64),
         nameof(DslClr.Decimal),
     ];
+
+    /// <summary>値と列の型の合い方の水準が、ほかの因子と原理的に組めるか（判断に要る因子が無ければ真）</summary>
+    private static bool IsValidValueFit(IReadOnlyDictionary<string, string> assignment)
+    {
+        if (!assignment.TryGetValue(ValueFit, out var fit))
+        {
+            return true;
+        }
+
+        assignment.TryGetValue(Shape, out var shape);
+        assignment.TryGetValue(Clr, out var clr);
+        assignment.TryGetValue(Quote, out var quote);
+        assignment.TryGetValue(ParameterReuse, out var reuse);
+        var numeric = fit is FitBeyondScale or FitBeyondRange;
+
+        if (shape is not null)
+        {
+            // 比べる値を持たないのは NULL 判定・空のリスト・null だけのリストだけ（形の定義）
+            var valueless = shape is "null-check" or "in-empty" or "in-all-null";
+
+            if ((fit == FitNone) != valueless)
+            {
+                return false;
+            }
+
+            // 小数のリテラルの形は整数の列と小数の値の比較なので、値は必ず整数の列の型に入らない
+            if (shape.EndsWith("-literal-fractional", StringComparison.Ordinal) && !numeric)
+            {
+                return false;
+            }
+
+            // 文字列一致は文字列の列だけ（型の検査）なので、数値の外れ方を持たない
+            var stringMatch =
+                shape.StartsWith("like-", StringComparison.Ordinal)
+                || Enum.GetValues<DslMatchKind>()
+                    .Any(match =>
+                        shape.StartsWith(
+                            $"{match.ToString().ToLowerInvariant()}-",
+                            StringComparison.Ordinal
+                        )
+                    );
+
+            // 数値の列の IN のリストで null を持てるのは値オブジェクトのリストだけ（値型の要素は null を持てない）で、値オブジェクトの
+            // Create は列の型に入らない値を検証エラーにする（docs の値オブジェクトの節）
+            if ((stringMatch || shape == "in-with-null") && numeric)
+            {
+                return false;
+            }
+
+            // 順序比較は文字列の列に書けない（型の検査）ので、文字の外れ方を持たない
+            if (
+                fit == FitBeyondCharset
+                && OrderedOps.Any(op =>
+                    shape.StartsWith($"compare-{op}-", StringComparison.Ordinal)
+                )
+            )
+            {
+                return false;
+            }
+        }
+
+        // 数値の外れ方は数値の列だけ、文字の外れ方は文字列の列だけ（水準の定義）
+        if (clr is not null)
+        {
+            var kind = Enum.Parse<DslClr>(clr);
+            var isNumber =
+                kind
+                is DslClr.Int64
+                    or DslClr.Int32
+                    or DslClr.Int16
+                    or DslClr.Byte
+                    or DslClr.SByte
+                    or DslClr.UInt16
+                    or DslClr.UInt32
+                    or DslClr.UInt64
+                    or DslClr.Decimal;
+            var isText = kind is DslClr.String or DslClr.FixedString or DslClr.GuidKey;
+
+            if ((numeric && !isNumber) || (fit == FitBeyondCharset && !isText))
+            {
+                return false;
+            }
+        }
+
+        // 文字列のリテラルは値（文字列）を持ち、数値の列の値ではない
+        if (quote is not (null or "none") && (fit == FitNone || numeric))
+        {
+            return false;
+        }
+
+        // 値のパラメータは値を 1 つ持ち、型が広がる列は数値の列
+        if (
+            (
+                reuse is ReuseSameColumn or ReuseOtherColumnSameType or ReuseOtherColumnWidening
+                && fit == FitNone
+            ) || (reuse == ReuseOtherColumnWidening && fit == FitBeyondCharset)
+        )
+        {
+            return false;
+        }
+
+        return true;
+    }
 
     /// <summary>パラメータの使い回しと並び替えの水準が、ほかの因子と原理的に組めるか（判断に要る因子が無ければ真）</summary>
     private static bool IsValidReuseAndOrdering(IReadOnlyDictionary<string, string> assignment)

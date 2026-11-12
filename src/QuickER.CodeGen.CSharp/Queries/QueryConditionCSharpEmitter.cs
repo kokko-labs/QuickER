@@ -149,6 +149,44 @@ public static class QueryConditionCSharpEmitter
             PreludeLines.Add($"var {candidate} = {initializer};");
             return candidate;
         }
+
+        /// <summary>持ち上げ済みの文字列のリテラル（値 → ローカル変数名）</summary>
+        private readonly Dictionary<string, string> _liftedLiterals = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// 文字列のリテラルをメソッド冒頭のローカル変数へ持ち上げ、その変数名を返す。名前は <c>literal{番号}</c>（出てきた順）を
+        /// 基本に、メソッド引数名・ほかの持ち上げ変数と衝突する限り <c>_</c> を後置する。同じ値は同じ変数を返す
+        /// </summary>
+        /// <remarks>
+        /// ラムダの中に定数のまま書くと、EF Core は SQL の文字列リテラルへ書き、<c>IsUnicode(false)</c> の列と比べるときは
+        /// <c>N</c> を付けない。SQL Server は ASCII の外の文字を <c>?</c> へ置き換えてから比べるので、化けた値の行に一致する。
+        /// ローカル変数にすると EF Core はパラメータにし、値が列の型に入らないパラメータは
+        /// <c>SqlServerQueryParameterInterceptor</c> が値の型で束縛する。QuickER 版とインメモリの答えは変わらない。
+        /// </remarks>
+        /// <param name="value">リテラルの値</param>
+        public string LiftStringLiteral(string value)
+        {
+            if (_liftedLiterals.TryGetValue(value, out var existing))
+            {
+                return existing;
+            }
+
+            var candidate =
+                "literal" + (_liftedLiterals.Count + 1).ToString(CultureInfo.InvariantCulture);
+
+            while (
+                TakenNames.Contains(candidate)
+                || _liftedLists.ContainsValue(candidate)
+                || _liftedLiterals.ContainsValue(candidate)
+            )
+            {
+                candidate += "_";
+            }
+
+            _liftedLiterals.Add(value, candidate);
+            PreludeLines.Add($"var {candidate} = {RenderStringLiteral(value)};");
+            return candidate;
+        }
     }
 
     /// <summary>ノードを C# 式テキストへ変換する</summary>
@@ -276,7 +314,7 @@ public static class QueryConditionCSharpEmitter
         var operand = node.Operand switch
         {
             ParameterOperand parameter => ParameterName(parameter),
-            StringOperand literal => RenderStringLiteral(literal.Value),
+            StringOperand literal => context.LiftStringLiteral(literal.Value),
             _ => throw new InvalidOperationException(
                 "文字列一致の右辺はパラメータか文字列リテラルのみです。"
             ),
@@ -307,7 +345,7 @@ public static class QueryConditionCSharpEmitter
     {
         // Exact のオペランドは常に文字列リテラル（パーサが LIKE のリテラル分解からのみ作る）。
         // VO 列は等値比較のため VO へ包む（文字列一致メソッドの string オーバーロードとは違う）
-        var literal = RenderStringLiteral(((StringOperand)node.Operand).Value);
+        var literal = context.LiftStringLiteral(((StringOperand)node.Operand).Value);
         var operand = column.ValueObjectClassName is { } voClass
             ? $"{voClass}.Create({literal})"
             : literal;
@@ -403,7 +441,7 @@ public static class QueryConditionCSharpEmitter
         {
             ParameterOperand parameter => ParameterName(parameter),
             NumberOperand number => RenderNumberLiteral(number.Literal, column.UnderlyingTypeName),
-            StringOperand literal => RenderStringLiteral(literal.Value),
+            StringOperand literal => context.LiftStringLiteral(literal.Value),
             _ => throw new InvalidOperationException(
                 $"未知のオペランドです: {operand.GetType().Name}"
             ),

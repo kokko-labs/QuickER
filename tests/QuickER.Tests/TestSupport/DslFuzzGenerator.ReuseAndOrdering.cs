@@ -277,7 +277,7 @@ public sealed partial class DslFuzzGenerator
     /// 列の型でパラメータを型付けして例外にするか、丸めて誤った行を返す（直す区切りが別にある）ので作らない。
     /// </remarks>
     private static List<object> SharedPool(DslColumn column, DslColumn other) =>
-        DslFuzz.ValuePool(column.Clr).Where(value => FitsColumn(value, other)).ToList();
+        DslFuzz.ValuePool(column).Where(value => FitsColumn(value, other)).ToList();
 
     /// <summary>値が列の型に入るか（decimal の列は宣言の精度とスケールで見る。ほかの列は値の池が列の種類の範囲なので入る）</summary>
     private static bool FitsColumn(object value, DslColumn column)
@@ -297,7 +297,7 @@ public sealed partial class DslFuzzGenerator
     }
 
     /// <summary>decimal の宣言型の精度とスケール（<c>decimal(10,2)</c> の形でなければ null）</summary>
-    private static (int Precision, int Scale)? DecimalFacets(string dataType)
+    internal static (int Precision, int Scale)? DecimalFacets(string dataType)
     {
         var open = dataType.IndexOf('(', StringComparison.Ordinal);
         var parts = open < 0 ? [] : dataType[(open + 1)..].TrimEnd(')').Split(',');
@@ -310,7 +310,7 @@ public sealed partial class DslFuzzGenerator
             : null;
     }
 
-    private static decimal Pow10(int exponent) =>
+    internal static decimal Pow10(int exponent) =>
         Enumerable.Range(0, exponent).Aggregate(1m, (product, _) => product * 10m);
 
     /// <summary>使い回す値のパラメータ（1 つめの列の値の池のうち、2 つめの列の型にも入る値を選ぶ）</summary>
@@ -543,6 +543,29 @@ public sealed partial class DslFuzzGenerator
         );
 
         return [.. reuseQueries, .. orderingQueries];
+    }
+
+    /// <summary>
+    /// 網羅の単位の並び替えのクエリだけ（<see cref="ReuseAndOrderingCoverageQueries"/> の 2 段目）：<paramref name="baseQueries"/>
+    /// の並びの水準を変えた写しのうち、因子 Ordering とほかの因子の組を足すものを貪欲に選ぶ
+    /// </summary>
+    /// <remarks>
+    /// 使い回しのクエリを選ばない網羅の単位（Unicode でない列の網羅の単位 <see cref="DslFuzzUnits.SqlServerAnsiCoverage"/>）が使う。
+    /// 乱数は引かない。
+    /// </remarks>
+    /// <param name="columns">列（先頭が主キー。主キーより前に置ける並びの列を 2 本以上含む）</param>
+    /// <param name="baseQueries">網羅の単位のほかのクエリ</param>
+    public List<DslQuery> OrderingCoverageQueries(
+        IReadOnlyList<DslColumn> columns,
+        IReadOnlyList<DslQuery> baseQueries
+    )
+    {
+        var covered = new HashSet<string>(
+            baseQueries.SelectMany(query => PairKeys(query)),
+            StringComparer.Ordinal
+        );
+
+        return SelectOrderingQueries(columns, baseQueries, covered);
     }
 
     /// <summary>1 段目：使い回しのクエリを選ぶ</summary>

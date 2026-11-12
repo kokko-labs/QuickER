@@ -172,12 +172,12 @@ public class QueryGenerationTests
         var content = AllContent(result);
 
         // 非 NULL 列は前提が不要（従来どおり素の否定）
-        content.Should().Contain("!(e.Code == \"abc\")");
+        content.Should().Contain("!(e.Code == literal1)");
         // 肯定形のワイルドカードなし LIKE は従来どおり素の等値比較
         content
             .Should()
-            .Contain("e.Memo == \"abc\"")
-            .And.NotContain("e.Memo != null && e.Memo == \"abc\"");
+            .Contain("e.Memo == literal1")
+            .And.NotContain("e.Memo != null && e.Memo == literal1");
     }
 
     /// <summary>

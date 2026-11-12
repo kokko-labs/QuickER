@@ -81,7 +81,9 @@ public sealed record DslFuzzUnit(
                 {
                     Name = parameter.Name,
                     IsList = parameter.IsList,
-                    Type = parameter.ByColumn ? null : DslFuzz.TypeToken(parameter.Column.Clr),
+                    Type = parameter.ByColumn
+                        ? null
+                        : parameter.TypeToken ?? DslFuzz.TypeToken(parameter.Column.Clr),
                     SourceColumnId = parameter.ByColumn ? parameter.Column.Model.Id : null,
                 }
             );
@@ -159,7 +161,7 @@ public sealed partial class DslFuzzGenerator(
                 row[column.Name] =
                     column.PrimaryKey ? KeyValue(column, i)
                     : column.Nullable && (i == 0 || (i > 1 && _random.Next(4) == 0)) ? null
-                    : Pick(DslFuzz.ValuePool(column.Clr));
+                    : Pick(DslFuzz.ValuePool(column));
             }
 
             rows.Add(row);
@@ -280,6 +282,28 @@ public sealed partial class DslFuzzGenerator(
                 )
             )
             .ToList();
+
+        return WithCompoundCoverageQueries(queries, forms, columns, "K", withFit: false);
+    }
+
+    /// <summary>
+    /// 網羅の単位の合成のクエリを <paramref name="queries"/> の後ろに足し、優先順位で括弧を省いた描画の写しを足して、合成のクエリの
+    /// 綴りを番号で回した一覧を返す（戻り形ごと・射影の非 NULL 指定・NOT の入れ子の全水準。名前は <paramref name="prefix"/> で始める）
+    /// </summary>
+    /// <remarks>乱数は引かない（パラメータ名を付け直すだけ）。</remarks>
+    /// <param name="queries">先に置くクエリ（原子のクエリを含んでよい）</param>
+    /// <param name="forms">合成に使う原子の候補</param>
+    /// <param name="columns">列（先頭が主キー）</param>
+    /// <param name="prefix">クエリの名前の接頭辞</param>
+    /// <param name="withFit">原子を選ぶ水準に、値と列の型の合い方（次元表の因子 ValueFit）も数えるか</param>
+    private List<DslQuery> WithCompoundCoverageQueries(
+        List<DslQuery> queries,
+        IReadOnlyList<DslAtom> forms,
+        IReadOnlyList<DslColumn> columns,
+        string prefix,
+        bool withFit
+    )
+    {
         var projectable = columns.Skip(1).ToList();
         var shapes = new[]
         {
@@ -291,11 +315,11 @@ public sealed partial class DslFuzzGenerator(
 
         foreach (var shape in shapes)
         {
-            var chunks = CoverageChunks(forms);
+            var chunks = CoverageChunks(forms, withFit);
 
             for (var i = 0; i < chunks.Count; i++)
             {
-                var name = $"K{shape}{i}";
+                var name = $"{prefix}{shape}{i}";
                 queries.Add(
                     new DslQuery
                     {
@@ -318,14 +342,14 @@ public sealed partial class DslFuzzGenerator(
         var pinned = columns
             .Skip(1)
             .First(column => column.Nullable && (column.IsString || valueObjects));
-        var pinnedChunks = CoverageChunks(forms);
+        var pinnedChunks = CoverageChunks(forms, withFit);
 
         for (var i = 0; i < pinnedChunks.Count; i++)
         {
             queries.Add(
                 new DslQuery
                 {
-                    Name = $"KP{i}",
+                    Name = $"{prefix}P{i}",
                     Condition = new DslAnd([
                         new DslNullCheck(IsNot: true) { Column = pinned },
                         pinnedChunks[i],
@@ -334,12 +358,12 @@ public sealed partial class DslFuzzGenerator(
                     IsAtomQuery = false,
                     ProjectedColumn = pinned,
                     ProjectedNonNull = true,
-                    ResultTypeName = $"KP{i}Row",
+                    ResultTypeName = $"{prefix}P{i}Row",
                 }
             );
         }
 
-        queries.AddRange(NestingQueries(forms, shapes, projectable, pinned));
+        queries.AddRange(NestingQueries(forms, shapes, projectable, pinned, prefix, withFit));
 
         // 合成のクエリを、優先順位で決まる括弧を省いた描画でもう 1 本ずつ流す（構文木は同じ＝オラクルの答えも同じ。
         // 描画が変わらないクエリは流し直さない）
@@ -392,15 +416,23 @@ public sealed partial class DslFuzzGenerator(
     /// <remarks>
     /// 水準ごとの包み方は <see cref="WrapForNesting"/>。乱数は引かない（パラメータ名を付け直すだけ）。
     /// </remarks>
+    /// <param name="forms">原子の候補</param>
+    /// <param name="shapes">戻り形</param>
+    /// <param name="projectable">射影できる列</param>
+    /// <param name="pinned">射影の非 NULL 指定の列</param>
+    /// <param name="prefix">クエリの名前の接頭辞</param>
+    /// <param name="withFit">原子を選ぶ水準に、値と列の型の合い方も数えるか（<see cref="CoveringForms"/>）</param>
     private List<DslQuery> NestingQueries(
         IReadOnlyList<DslAtom> forms,
         IReadOnlyList<QueryReturnShape> shapes,
         IReadOnlyList<DslColumn> projectable,
-        DslColumn pinned
+        DslColumn pinned,
+        string prefix = "K",
+        bool withFit = false
     )
     {
         var queries = new List<DslQuery>();
-        var picked = CoveringForms(forms);
+        var picked = CoveringForms(forms, withFit);
 
         for (var level = 0; level < DslFuzzDimensions.NestingLevels.Count; level++)
         {
@@ -421,7 +453,7 @@ public sealed partial class DslFuzzGenerator(
                 queries.Add(
                     new DslQuery
                     {
-                        Name = $"KN{level}c{i}",
+                        Name = $"{prefix}N{level}c{i}",
                         Condition = i % 2 == 1 ? new DslNot(condition) : condition,
                         Returns = QueryReturnShape.List,
                         IsAtomQuery = false,
@@ -432,7 +464,7 @@ public sealed partial class DslFuzzGenerator(
 
         foreach (var shape in shapes.Where(shape => shape != QueryReturnShape.List))
         {
-            var name = $"KM{shape}";
+            var name = $"{prefix}M{shape}";
             queries.Add(
                 new DslQuery
                 {
@@ -450,7 +482,7 @@ public sealed partial class DslFuzzGenerator(
         queries.Add(
             new DslQuery
             {
-                Name = "KMP",
+                Name = $"{prefix}MP",
                 Condition = new DslAnd([
                     new DslNullCheck(IsNot: true) { Column = pinned },
                     AllNestings(picked),
@@ -459,7 +491,7 @@ public sealed partial class DslFuzzGenerator(
                 IsAtomQuery = false,
                 ProjectedColumn = pinned,
                 ProjectedNonNull = true,
-                ResultTypeName = "KMPRow",
+                ResultTypeName = $"{prefix}MPRow",
             }
         );
 
@@ -688,9 +720,11 @@ public sealed partial class DslFuzzGenerator(
     /// 形・自身の否定・列の種類のまだ出していない水準を足す原子を貪欲に選び、<see cref="CoverageAtomsPerQuery"/> 個ずつ
     /// OR でまとめた条件（1 つおきに NOT で包む）
     /// </summary>
-    private List<DslNode> CoverageChunks(IReadOnlyList<DslAtom> forms)
+    /// <param name="forms">原子の候補</param>
+    /// <param name="withFit">原子を選ぶ水準に、値と列の型の合い方も数えるか（<see cref="CoveringForms"/>）</param>
+    private List<DslNode> CoverageChunks(IReadOnlyList<DslAtom> forms, bool withFit = false)
     {
-        var picked = CoveringForms(forms).Select(Rename).ToList();
+        var picked = CoveringForms(forms, withFit).Select(Rename).ToList();
 
         return picked
             .Chunk(CoverageAtomsPerQuery)
@@ -711,14 +745,18 @@ public sealed partial class DslFuzzGenerator(
     /// 形・自身の否定・列の種類・文字列のリテラルの水準のまだ出していない組を足す原子を、並びの先頭から貪欲に選ぶ
     /// （名前は付け直さない。文字列のリテラルの水準は形・否定・列の種類のそれぞれと組で数える）
     /// </summary>
-    private static List<DslAtom> CoveringForms(IReadOnlyList<DslAtom> forms)
+    /// <param name="forms">原子の候補</param>
+    /// <param name="withFit">文字列のリテラルの水準に、値と列の型の合い方（次元表の因子 ValueFit）も添えて数えるか</param>
+    private static List<DslAtom> CoveringForms(IReadOnlyList<DslAtom> forms, bool withFit = false)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var picked = new List<DslAtom>();
 
         foreach (var atom in forms)
         {
-            var quote = DslFuzz.QuoteOf(atom);
+            var quote = withFit
+                ? $"{DslFuzz.QuoteOf(atom)}:{DslFuzzDimensions.ValueFitOf(atom)}"
+                : DslFuzz.QuoteOf(atom);
             string[] keys =
             [
                 $"shape:{DslFuzzDimensions.ShapeOf(atom)}:{quote}",
@@ -850,7 +888,7 @@ public sealed partial class DslFuzzGenerator(
             return StringLiteral(column, likeSafe: false, quote);
         }
 
-        var value = Pick(DslFuzz.ValuePool(column.Clr));
+        var value = Pick(DslFuzz.ValuePool(column));
 
         return new DslLiteral(value, DslFuzz.NumberText(value));
     }
@@ -1060,7 +1098,7 @@ public sealed partial class DslFuzzGenerator(
                 return new DslCompare(op, FractionalLiteral()) { Column = column };
             }
 
-            var value = Pick(DslFuzz.ValuePool(column.Clr));
+            var value = Pick(DslFuzz.ValuePool(column));
 
             return new DslCompare(op, new DslLiteral(value, DslFuzz.NumberText(value)))
             {
@@ -1130,7 +1168,7 @@ public sealed partial class DslFuzzGenerator(
     private DslOperand StringLiteral(DslColumn column, bool likeSafe, bool? quote = null)
     {
         var pool = DslFuzz
-            .ValuePool(column.Clr)
+            .ValuePool(column)
             .Cast<string>()
             .Where(value =>
                 !likeSafe || (value.Length > 0 && !value.Contains('%') && !value.Contains('_'))
@@ -1145,7 +1183,7 @@ public sealed partial class DslFuzzGenerator(
     private DslParam Param(DslColumn column) =>
         new(
             parameterPrefix + _parameterIndex++,
-            [Pick(DslFuzz.ValuePool(column.Clr))],
+            [Pick(DslFuzz.ValuePool(column))],
             IsList: false,
             ByColumn: !DslFuzz.HasTypeToken(column.Clr) || _random.Next(2) == 0,
             column
@@ -1183,7 +1221,7 @@ public sealed partial class DslFuzzGenerator(
     /// <summary>IN のリストのパラメータ（null を含む形は、値オブジェクトありなら列で型付けする）</summary>
     private DslParam ListParam(DslColumn column, string shape)
     {
-        var pool = DslFuzz.ValuePool(column.Clr);
+        var pool = DslFuzz.ValuePool(column);
         List<object?> values = shape switch
         {
             DslIn.ListEmpty => [],

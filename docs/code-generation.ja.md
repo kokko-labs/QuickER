@@ -616,7 +616,7 @@ GUI のクエリ定義ダイアログと `set_query` も、保存前に同じ検
 
 | バックエンド | `Contains` / `StartsWith` / `EndsWith` の判定 |
 |---|---|
-| SQL Server | 列の照合順序に従う（既定の `..._CI_AS` なら大文字小文字を区別しない） |
+| SQL Server | 列の照合順序に従う（既定の `..._CI_AS` なら大文字小文字を区別しない）。Unicode でない列（`char`・`varchar`）では列の値の末尾の空白を数えず、パターンの空白は数える |
 | SQLite | 組み込みの `LIKE` が ASCII の英字だけを畳む（`A` は `a` に一致し、`Á` は `á` に一致しない） |
 | EF Core | プロバイダ任せで、やはり格納先次第 |
 | インメモリ | 式木を C# として評価するため序数比較になり、素の string 列でも値オブジェクトでも区別する |
@@ -631,18 +631,26 @@ SQL Server の空の判定は `DATALENGTH` で行います（`= ''` は末尾の
 `IsNullOrWhiteSpace` は `char.IsWhiteSpace` が空白とする文字（タブ・改行・ノーブレークスペース・全角空白など）をすべて数えます。
 
 SQL Server の固定長の列（`nchar(n)`・`char(n)`）は値を空白で詰めて格納し、詰めたまま返します。
-そのため `EndsWith` は詰めた値に対して比べ、これはリポジトリが読み戻した値へ C# で当てた結果と同じです。
-インメモリ実装は値を詰めずに持つため、結果が食い違うことがあります。
+そのため `nchar(n)` の列の `EndsWith` は詰めた値に対して比べ、これはリポジトリが読み戻した値へ C# で当てた結果と同じです。
+Unicode でない列（`char(n)`・`varchar(n)`）の文字列一致は、列の値の末尾の空白を数えません。
+`char(4)` の列の `a   ` も `varchar` の列の `a ` も `EndsWith("a")` に一致し、読み戻した値へ C# で当てた結果（一致しない）と食い違います。
+インメモリ実装は値を詰めずに持ち、そのまま比べるため、結果が食い違うことがあります。
 
 日付部品（`Year`・`Month` など）へ変換されるのは、読み出し元が `DateTime` / `DateOnly` / `DateTimeOffset`（いずれも nullable を含む）の列である場合だけです。
 同名のプロパティを別の型に持たせても、日付部品とは見なしません（値オブジェクトへ partial で足した場合など）。
 黙って `YEAR([col])` になる代わりに、`NotSupportedException` で失敗します。
 `DateTimeOffset` の列の日付部品は、C# と同じく値が持つ時差のまま取り出します（`2024-01-01 05:00 +09:00` は 2024 年・5 時）。
 
-SQL Server の QuickER 版 Repository は、比べる値が列の型にそのまま入るときだけ、値を列の型で束縛します。
+SQL Server の QuickER 版 Repository と EF Core 版 Repository は、比べる値が列の型にそのまま入るときだけ、値を列の型で束縛します。
 入らない値は値の型で束縛するので、比較は C# と同じ答えになります。
 対象は、整数の列と小数や範囲の外の整数（`x.Qty < 1.5`・`x.Tiny < 300`）、列の精度とスケールより桁の多い decimal、`date` の列と時刻つきの日時、Unicode でない列（`varchar`・`char`）と ASCII の外の文字です。
 このときサーバーはその比較のために列の側を変換するので、列のインデックスが使われないことがあります。
+EF Core 版 Repository では、クエリのすべてのパラメータ（名前付きクエリ・手書きの LINQ の `Query()`・IN のリストの要素・`Contains` のパターン）と、`ExecuteDeleteAsync` の条件が対象です（[EF Core モード](#ef-core-モードgenerateefcorerepositories)を参照）。
+
+> **既知の割り切り**: EF Core 版 Repository では、手書きの LINQ に書いた定数はパラメータになりません。
+> EF Core は定数を SQL へ書き込み、Unicode でない列と比べる文字列の定数は Unicode でない文字列で書くので、ASCII の外の文字は `?` に変わり、`?` を持つ行に一致します（`Query().Where(x => x.Code == "日本")`）。
+> こうした値は変数で渡してください（EF Core はパラメータで送ります）。
+> 簡易 DSL の条件の文字列のリテラルは変数として生成するので、名前付きクエリは C# と同じ答えになります。
 
 リストの `Contains` は要素 1 個につきバインド変数 1 個へ展開され、チャンク分割はしません。
 そのため巨大なリストは方言のバインド変数・IN リスト上限を超えて実行時エラーになります（SQL Server の 2100 パラメータ、SQLite の歴史的な 999 など）。
@@ -1188,10 +1196,20 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 **列と型の構成**
 
 - 値オブジェクトの列にも、ほかの列と同じく長さと桁（`HasMaxLength` / `HasPrecision`）を構成します。
-  そのためパラメータと `.Value` の条件は、EF Core の既定（`nvarchar(max)`・`decimal(18,2)`）でなく列自身の型を使います
+  そのため列に入る値は、EF Core の既定（`nvarchar(max)`・`decimal(18,2)`）でなく列自身の型で送られ、`.Value` の条件も列自身の型へ CAST します
 - Unicode でない文字列の列（SQL Server の `varchar`・`char`・`text`、Oracle の `VARCHAR2`・`CHAR`・`CLOB`）は、`IsUnicode(false)` で構成します。
-  パラメータと定数は Unicode でない文字列で送られ、DB は列を変換せずに比べられます。
+  パラメータは Unicode でない文字列で送られ、DB は列を変換せずに比べられます。
   この構成は図の方言の型で決まるので、複数の DB で使う図は、文字列の列を Unicode（`nvarchar` など）にそろえてください
+- SQL Server では、EF Core がパラメータに付けた型に入らない比べる値を、QuickER 版 Repository と同じく値の型で送ります（[クエリ](#クエリ式木--sql-変換)を参照）。
+  EF Core はパラメータに比べる相手の列の型を付け、SqlClient は値をその型へ変換してから送ります。
+  `decimal(10,2)` の列と比べる `1.234` は `1.23` に、整数の列（decimal と比べるとき EF Core が `decimal(18,2)` へ CAST する）と比べる `0.999` は `1.00` になり、精度を超える値は `ArgumentException` になり、Unicode でない列と比べる ASCII の外の文字は `?` になります。
+  `SqlServerQueryParameterInterceptor` は、こうした decimal のパラメータの精度とスケールを外し、こうした文字列を Unicode の文字列で送ります。
+  列に入る値は列の型のままなので、SQL と列のインデックスの使われ方は変わりません。
+  変えるのは LINQ のクエリと `ExecuteDelete` / `ExecuteUpdate` のコマンドだけです。
+  `SaveChanges` は今までどおりに値を送るので、入らない値は列が変換したとおりに保存されます。
+  `AddGeneratedEfCoreRepositories` は、渡した構成の後にこのインターセプターを DbContext のオプションへ足します。
+  `DbContextOptions` を自分で組むときは、`AddInterceptors` で `SqlServerQueryParameterInterceptor.Instance` を足してください。
+  ほかのプロバイダの接続には触れません
 - EF Core の Npgsql のプロバイダが、プロパティの型の既定の対応では書けない PostgreSQL の列は、`HasColumnType` で構成します（`date`・`timestamp`・`time with time zone`・`json`・`jsonb`・`xml` と、その配列の `date[]` など）。
   構成しないと、プロバイダは `DateTime` を `timestamp with time zone` として送って `DateTimeKind.Unspecified` の値を断り、`DateTimeOffset` も同じく送って UTC 以外のオフセットを断り、文字列を `text` として送って JSON・XML の列で PostgreSQL に断られます。
   `DateTimeKind.Utc` の `DateTime` は `timestamp` の列へ書けず、`timestamptz` の列は UTC のオフセットだけを受け付けます（どちらも Npgsql の規則）。
