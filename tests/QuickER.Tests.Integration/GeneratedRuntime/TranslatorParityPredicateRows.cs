@@ -106,6 +106,12 @@ public static class TranslatorParityPredicateRows
         var noonOfFirstDay = new DateTime(2024, 1, 1, 12, 0, 0);
         var finerThanCentisecond = new DateTime(2024, 1, 1, 10, 0, 0).AddTicks(1_200_001);
         var finerClock = new TimeSpan(0, 10, 0, 0, 120).Add(TimeSpan.FromTicks(1));
+        var amountBeyondScale = 100.004m;
+        var amountBeyondPrecision = 123456789.5m;
+        var amountsBeyondScale = new List<decimal?> { 100.004m, 300m };
+        decimal? fractionBelowOne = 0.999m;
+        var nonAscii = "日本";
+        var nonAsciiPart = "本";
 
         List<ScenarioRow<TranslatorParityPredicate>> rows =
         [
@@ -439,6 +445,43 @@ public static class TranslatorParityPredicateRows
                 "varchar-equals-ascii",
                 "Unicode でない列と ASCII の値の == は列の型のまま比べる",
                 x => x.Ansi == "??"
+            ),
+            // ---- 同じ値を変数で渡す形（EF Core は定数を SQL のリテラルにし、変数をパラメータにするので、
+            //      列の型で束縛するかの判定はこちらの形にだけ掛かる） ----
+            Probe(
+                "decimal-equals-beyond-scale-variable",
+                "decimal(10,2) の列と桁の多い decimal の変数の == は値を列の桁へ丸めない",
+                x => x.Amount == amountBeyondScale
+            ),
+            Probe(
+                "decimal-greater-or-equal-beyond-scale-variable",
+                "decimal(10,2) の列と桁の多い decimal の変数の >= は値を列の桁へ丸めない",
+                x => x.Amount != null && x.Amount.Value >= amountBeyondScale
+            ),
+            Probe(
+                "decimal-equals-beyond-precision-variable",
+                "decimal(10,2) の列と整数部の桁が列に入らない decimal の変数の == はどの行にも一致しない（例外にしない）",
+                x => x.Amount == amountBeyondPrecision
+            ),
+            Probe(
+                "in-decimal-list-beyond-scale",
+                "decimal(10,2) の列と桁の多い要素を持つ decimal のリストの IN は要素を列の桁へ丸めない",
+                x => amountsBeyondScale.Contains(x.Amount)
+            ),
+            SmallChild(
+                "int-column-less-or-equal-decimal-fraction-variable",
+                "int の列と 1 未満の decimal の変数の <= は値を丸めずに数として比べる",
+                c => c.BigParentId <= fractionBelowOne
+            ),
+            Probe(
+                "varchar-equals-non-ascii-variable",
+                "Unicode でない列と ASCII の外の文字の変数の == は、化けた '??' の行に一致しない",
+                x => x.Ansi == nonAscii
+            ),
+            Probe(
+                "varchar-contains-non-ascii-variable",
+                "Unicode でない列と ASCII の外の文字の変数の Contains は、化けた '?' を含む行に一致しない",
+                x => x.Ansi != null && x.Ansi.Contains(nonAsciiPart)
             ),
             // ---- bool 列の短縮形と否定の深さ ----
             Probe("bool-column", "bool 列（col = 1）", x => x.IsActive),

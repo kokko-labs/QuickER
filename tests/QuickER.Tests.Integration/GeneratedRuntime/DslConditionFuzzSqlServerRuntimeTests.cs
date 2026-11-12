@@ -89,6 +89,7 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
             [
                 DslFuzzUnits.Coverage(DialectNames.SqlServer),
                 DslFuzzUnits.PlainCoverage(DialectNames.SqlServer),
+                DslFuzzUnits.SqlServerAnsiCoverage(),
             ];
 
         foreach (var unit in coverageUnits)

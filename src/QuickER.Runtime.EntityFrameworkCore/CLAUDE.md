@@ -152,6 +152,21 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
   - 図の方言で決まるので、可搬の図は文字列を Unicode にそろえる運用（docs）。
 - ガード：`CodegenCaseTests` の行 `model-efcore-non-unicode-*`（生成した DbContext のモデルの `IsUnicode`）・`code-efcore-non-unicode-follows-max-length*`（Fluent の鎖で `HasMaxLength` の次に `IsUnicode(false)`）、`GeneratedFixtureEfCoreNonUnicodeTests`（生成物のままの DbContext の `ToQueryString` で、varchar の列の比較と LIKE が varchar／`N` なし）。mutation 実証済み。
 
+### SQL Server のクエリのパラメータの型
+
+- EF Core はパラメータに比べる相手の列の型（`HasPrecision`・`IsUnicode(false)`、decimal と比べる整数の列は CAST の `decimal(18,2)`）を付け、SqlClient は値をその型へ変換してから送る。列に入らない値は丸められる（`1.234`→`1.23`・`0.999`→`1.00`）か `ArgumentException` になり、ASCII の外の文字は `?` になって、C# と違う行を返す（`ExecuteDeleteAsync` は違う行を消す）。
+- 公開の `SqlServerQueryParameterInterceptor`（`DbCommandInterceptor`・`Instance`）が、SqlClient の接続（型の名前で判定。派生を含む）の、出どころが LinqQuery・ExecuteDelete・ExecuteUpdate のコマンドの各パラメータを見て、値が入らないものだけ型を外す。
+  - decimal で `Precision > 0`：末尾の 0 を除いた小数の桁がスケールを、整数部の桁が精度−スケールを超えたら Precision / Scale を 0 にする（SqlClient が値から決める）。
+  - AnsiString / AnsiStringFixedLength：値に ASCII の外の文字があれば String・Size 0 にする。
+  - 判定は QuickER 版の `QueryValueFits`（`src/QuickER.Runtime.SqlServer/CLAUDE.md`「SqlParameter の明示型」）と同じ規則。パッケージが別なので `FitsDecimal`・`TryExactDecimal` は写しで持つ（片方だけ変えない）。
+  - date・整数の DbType は入れない。生成の DbContext は SQL Server の date に列の型を教えないので DateTime は datetime2 で送られ、整数の列と比べる long・double・decimal はそれぞれ bigint・float・decimal で束縛される（実測）。赤にできない枝を持たない。
+- 入る値は EF Core が付けた型のまま（SQL・計画・索引の使われ方を変えない）。入らない値だけ、サーバーが列の側を変換する（QuickER 版と同じ割り切り）。
+- SaveChanges のコマンドは変えない。保存される値は同じだが、精度を超える値の INSERT の例外が ArgumentException から SqlException（Arithmetic overflow）に変わる（実測）。書き込みの意味は変えない。
+- 登録は `AddGeneratedEfCoreRepositories` が `configureDbContext` の後に `SqliteBusyTimeoutInterceptor` と並べて `AddInterceptors` で足す。DbContext を自分で組む利用者は `Instance` を足す（docs）。
+  - `QuickErDbContext.OnConfiguring` で足さない：OnConfiguring でオプションを変えると EF Core の本物のプールが断る（値オブジェクトありの生成コードと同じ制約が全部の図に広がる）。
+- 定数は直せない。EF Core はラムダの中の定数を SQL のリテラルへ書き、非 Unicode の列と比べる文字列の定数に `N` を付けない（手書きの LINQ の定数は docs の既知の割り切り）。簡易 DSL の文字列のリテラルは、発行器がメソッド冒頭の局所変数へ持ち上げてパラメータにする（`src/QuickER.CodeGen.CSharp/Queries/CLAUDE.md`「文字列のリテラルの持ち上げ」）。
+- ガード：`SqlServerQueryParameterInterceptorTests`（DB を使わない行の表：入る値は型のまま・入らない値だけ外す・IN の要素ごと・LIKE のパターン・ExecuteDelete・SaveChanges は変えない・SQL Server でない接続は触らない）・`SqliteBusyTimeoutInterceptorTests.GeneratedRegistration_AddsInterceptorAfterConfigure`（生成の DI の登録）・`Dsl/SqlServer`（因子 ValueFit の水準 beyond-scale・beyond-range・beyond-charset と単位 sqlserver-ansi。列で型付けしたパラメータ・広い型トークン・IN・LIKE を実 SQL Server で C# と比べる）・`table:TranslatorParityPredicates`（EF Core の派生 `TranslatorParityEfCoreSqlServerRuntimeTests`）。mutation 実証済み（判定を外して何もしないと、総当たりの EF Core の失敗が 90 件・述語の表の変数の 7 行が赤、常に型を外すと単体の表の 5 行が赤。QuickER 版は 0 件）
+
 ### 値オブジェクトの文字列一致の LIKE
 
 - `ValueObjectStringMethodTranslator` は、受け手が型の対応付けを持たない（値オブジェクトのパラメータ・定数。`term.Contains(c.Name)`）ときは、TSelf の引数（列）の対応付けを当てる。素の string の対応付けでは値オブジェクトを送れないため。

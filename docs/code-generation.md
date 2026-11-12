@@ -585,7 +585,7 @@ And the stores disagree.
 
 | Backend | How `Contains` / `StartsWith` / `EndsWith` decide |
 |---|---|
-| SQL Server | Follows the column's collation, which is case-insensitive under the usual `..._CI_AS` default |
+| SQL Server | Follows the column's collation, which is case-insensitive under the usual `..._CI_AS` default. On a non-Unicode column (`char`, `varchar`), trailing blanks in the column's value are not counted, while blanks in the pattern are |
 | SQLite | The built-in `LIKE` folds case for ASCII letters only, so `A` matches `a` but `Á` does not match `á` |
 | EF Core | Hands the call to its provider and gets that same store-dependent answer |
 | In-memory | Compiles the expression and evaluates it in C#, so the comparison is ordinal and case matters, on a plain string column and on a value object alike |
@@ -601,17 +601,24 @@ SQL Server measures emptiness with `DATALENGTH`, because `= ''` ignores trailing
 `IsNullOrWhiteSpace` counts every character `char.IsWhiteSpace` accepts, including the tab, the newline, and the non-breaking and full-width spaces.
 
 A fixed-length column (`nchar(n)`, `char(n)`) on SQL Server holds its value padded with blanks and returns it padded.
-`EndsWith` therefore compares against the padded value, which is also what C# gives on the value the repository reads back.
-The in-memory backend stores the value unpadded, so its answer can differ.
+On an `nchar(n)` column, `EndsWith` therefore compares against the padded value, which is also what C# gives on the value the repository reads back.
+On a non-Unicode column (`char(n)`, `varchar(n)`), a string match does not count the trailing blanks of the column's value, so `EndsWith("a")` holds for `a   ` in a `char(4)` column and for `a ` in a `varchar` column, while C# on the value read back says no.
+The in-memory backend stores the value unpadded and compares it as it is, so its answer can differ.
 
 Date parts (`Year`, `Month`, …) are translated only when the member is read from a `DateTime`, `DateOnly`, or `DateTimeOffset` column, nullable forms included.
 A property of the same name on any other type is not a date part, such as one added to a value object through a partial declaration.
 It fails with `NotSupportedException` instead of silently becoming `YEAR([col])`.
 The date parts of a `DateTimeOffset` column are taken in the offset the value carries, as C# does (`2024-01-01 05:00 +09:00` is year 2024, hour 5).
 
-On SQL Server, the QuickER Repository binds a compared value with the column's type only when the value fits that type.
+On SQL Server, the QuickER Repository and the EF Core Repository bind a compared value with the column's type only when the value fits that type.
 A value that does not fit is bound with its own type, so the comparison answers as C# does: a fraction or an integer out of range against an integer column (`x.Qty < 1.5`, `x.Tiny < 300`), a decimal with more digits than the column's precision and scale, a time of day against a `date` column, and a character outside ASCII against a non-Unicode column (`varchar`, `char`).
 The server then converts the column for that comparison, so an index on the column may not be used for it.
+On the EF Core Repository this covers every parameter of a query (a named query, `Query()` with hand-written LINQ, the elements of an IN list, the pattern of `Contains`) and the condition of `ExecuteDeleteAsync` (see [EF Core mode](#ef-core-mode-generateefcorerepositories)).
+
+> **Known limitation**: on the EF Core Repository, a constant written in hand-written LINQ is not a parameter.
+> EF Core writes it into the SQL, and writes a string constant compared with a non-Unicode column as non-Unicode text, so a character outside ASCII turns into `?` and the comparison matches the rows that hold `?` (`Query().Where(x => x.Code == "日本")`).
+> Pass such a value in a variable, which EF Core sends as a parameter.
+> A string literal in a mini DSL condition is generated as a variable, so a named query answers as C# does.
 
 `Contains` on a list expands to one bind variable per element and is not chunked.
 A very large list therefore runs into the dialect's bind-variable or IN-list limit and fails at runtime (SQL Server's 2100 parameters, SQLite's historical 999).
@@ -1130,9 +1137,16 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 
 **Column and type configuration**
 
-- A value-object column carries its length and precision (`HasMaxLength` / `HasPrecision`) like any other column, so its parameters and a condition on `.Value` use the column's own type rather than EF Core's defaults (`nvarchar(max)`, `decimal(18,2)`).
-- A non-Unicode string column (`varchar`, `char` or `text` on SQL Server, `VARCHAR2`, `CHAR` or `CLOB` on Oracle) is configured with `IsUnicode(false)`, so its parameters and literals are sent as non-Unicode text and the database can compare the column without converting it.
+- A value-object column carries its length and precision (`HasMaxLength` / `HasPrecision`) like any other column, so a value that fits it is sent with the column's own type, and a condition on `.Value` casts to that type, rather than to EF Core's defaults (`nvarchar(max)`, `decimal(18,2)`).
+- A non-Unicode string column (`varchar`, `char` or `text` on SQL Server, `VARCHAR2`, `CHAR` or `CLOB` on Oracle) is configured with `IsUnicode(false)`, so its parameters are sent as non-Unicode text and the database can compare the column without converting it.
   The configuration follows the diagram's dialect, so a diagram meant to run on several databases keeps its string columns Unicode (`nvarchar` and the like).
+- On SQL Server, a compared value that does not fit the type EF Core gave its parameter is sent with its own type, as the QuickER Repository sends it (see [Queries](#queries-expression-tree--sql)).
+  EF Core gives a parameter the type of the column it is compared with, and SqlClient converts the value to that type before sending it: `1.234` against a `decimal(10,2)` column becomes `1.23`, `0.999` against an integer column (which EF Core casts to `decimal(18,2)` for the comparison) becomes `1.00`, a value beyond the precision throws `ArgumentException`, and a character outside ASCII against a non-Unicode column becomes `?`.
+  `SqlServerQueryParameterInterceptor` drops the precision and scale of such a decimal parameter, and sends such text as Unicode text; a value that fits keeps the column's type, so the SQL and the use of an index on the column stay as they were.
+  It changes the commands of LINQ queries and of `ExecuteDelete` / `ExecuteUpdate` only: `SaveChanges` sends its values as before, so a value that does not fit is stored as the column converts it.
+  `AddGeneratedEfCoreRepositories` adds it to the DbContext options after your configuration.
+  When you build `DbContextOptions` yourself, add `SqlServerQueryParameterInterceptor.Instance` with `AddInterceptors`.
+  Connections of other providers are left untouched.
 - A PostgreSQL column that EF Core's Npgsql provider cannot write with its default mapping for the property type is configured with `HasColumnType`: `date`, `timestamp`, `time with time zone`, `json`, `jsonb` and `xml`, and arrays of them (`date[]` and the like).
   Without it, the provider sends a `DateTime` as `timestamp with time zone` and refuses a value of `DateTimeKind.Unspecified`, sends a `DateTimeOffset` the same way and refuses an offset other than UTC, and sends a string as `text`, which PostgreSQL refuses for a JSON or XML column.
   A `DateTime` of `DateTimeKind.Utc` cannot be written to a `timestamp` column, and a `timestamptz` column takes a UTC offset only (both are Npgsql's rules).

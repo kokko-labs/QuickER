@@ -82,6 +82,15 @@ public sealed record DslColumn(
     /// <summary>順序比較（&lt; など）を使える列か（型の検査が文字列・Guid の順序比較を断る）</summary>
     public bool IsOrdered => IsInteger || Clr is DslClr.Decimal or DslClr.DateTime;
 
+    /// <summary>
+    /// Unicode でない文字列の列か（SQL Server の varchar・char＝照合順序のコードページで持ち、ASCII の外の文字が <c>?</c> に化ける列。
+    /// SQLite・MySQL の varchar・char は Unicode で持つので立てない）
+    /// </summary>
+    public bool NonUnicode { get; init; }
+
+    /// <summary>列の値の候補（null なら種類ごとの値の池 <see cref="DslFuzz.ValuePool(DslClr)"/>）</summary>
+    public IReadOnlyList<object>? Values { get; init; }
+
     /// <summary>モデルの列（Id は図を組み立てるときに決まる）</summary>
     public Column Model { get; } =
         new()
@@ -132,7 +141,14 @@ public sealed record DslParam(
     bool IsList,
     bool ByColumn,
     DslColumn Column
-) : DslOperand;
+) : DslOperand
+{
+    /// <summary>
+    /// 型トークン（<see cref="ByColumn"/> が偽のとき。null なら列の種類の型トークン <see cref="DslFuzz.TypeToken"/>）。
+    /// 列の型に入らない値を、列より広い型で渡すときに指定する
+    /// </summary>
+    public string? TypeToken { get; init; }
+}
 
 /// <summary>条件の構文木</summary>
 public abstract record DslNode;
@@ -485,8 +501,9 @@ public enum DslCaseRule
     /// </summary>
     /// <remarks>
     /// docs の表の SQL Server の行（「列の照合順序に従う」）と、同じ節の「<c>= ''</c> は末尾の空白を無視する」の写し。
-    /// 文字列一致（LIKE のワイルドカードつき・Contains / StartsWith / EndsWith）は末尾の空白を区別するので、
-    /// 大文字小文字だけを畳む（同じ節の「<c>EndsWith</c> は詰めた値に対して比べる」）。
+    /// 文字列一致（LIKE のワイルドカードつき・Contains / StartsWith / EndsWith）は Unicode の列では末尾の空白を区別するので、
+    /// 大文字小文字だけを畳む（同じ節の「<c>EndsWith</c> は詰めた値に対して比べる」）。Unicode でない列（<c>char</c>・<c>varchar</c>）の
+    /// 文字列一致は列の値の末尾の空白を数えない（同じ表の SQL Server の行。<c>MatchValue</c>）。
     /// </remarks>
     Collation,
 }
@@ -775,7 +792,10 @@ public static class DslFuzz
                         ? DslCaseRule.Indeterminate
                         : caseRule;
 
-                return Xor(Match((string)value, kind, pattern, rule), like.Negated ^ negate);
+                return Xor(
+                    MatchValue((string)value, atom.Column, kind, pattern, rule, caseRule),
+                    like.Negated ^ negate
+                );
             }
 
             case DslMatch match:
@@ -793,7 +813,14 @@ public static class DslFuzz
                 };
 
                 return Xor(
-                    Match((string)value, kind, (string)OperandValue(match.Operand), caseRule),
+                    MatchValue(
+                        (string)value,
+                        atom.Column,
+                        kind,
+                        (string)OperandValue(match.Operand),
+                        caseRule,
+                        caseRule
+                    ),
                     match.Negated ^ negate
                 );
             }
@@ -825,6 +852,43 @@ public static class DslFuzz
             "prefix" => (shape, pattern[..^1]),
             _ => (shape, pattern),
         };
+    }
+
+    /// <summary>
+    /// 列の値への文字列一致。照合順序の実装先（SQL Server）の Unicode でない列（<c>char</c>・<c>varchar</c>）は、列の値の末尾の空白を
+    /// 数えない（docs の「大文字小文字・空白・日付部品」の表の SQL Server の行）ので、末尾の空白を 0 個から全部まで外したどの値かが
+    /// 一致すれば一致とする。パターンの空白は数える（<c>'a '</c> で始まる値は <c>'a  '</c> に一致する）。
+    /// </summary>
+    private static bool? MatchValue(
+        string value,
+        DslColumn column,
+        string kind,
+        string pattern,
+        DslCaseRule rule,
+        DslCaseRule caseRule
+    )
+    {
+        if (caseRule != DslCaseRule.Collation || !column.NonUnicode)
+        {
+            return Match(value, kind, pattern, rule);
+        }
+
+        var trimmed = value.TrimEnd(' ').Length;
+        var unknown = false;
+
+        for (var length = value.Length; length >= trimmed; length--)
+        {
+            var result = Match(value[..length], kind, pattern, rule);
+
+            if (result == true)
+            {
+                return true;
+            }
+
+            unknown |= result is null;
+        }
+
+        return unknown ? null : false;
     }
 
     /// <summary>文字列一致（大文字小文字の扱いは実装先ごと）</summary>
@@ -1066,6 +1130,10 @@ public static class DslFuzz
             ],
             _ => throw new ArgumentOutOfRangeException(nameof(clr)),
         };
+
+    /// <summary>列の値の候補（列が値の池を持てばそれ、無ければ種類ごとの値の池）</summary>
+    public static IReadOnlyList<object> ValuePool(DslColumn column) =>
+        column.Values ?? ValuePool(column.Clr);
 
     /// <summary>数値のリテラルの綴り</summary>
     public static string NumberText(object value) =>

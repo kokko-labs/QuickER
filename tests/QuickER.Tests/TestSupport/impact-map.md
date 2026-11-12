@@ -53,7 +53,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Provider.Sqlite` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`Name/Entrances`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses`・`rule:sqlite-file-connection-pooling-off` |
 | `src/QuickER.Runtime` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`table:EditModelScenarios`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
 | `src/QuickER.Runtime.AspNetCore` | 全体 | `GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues` |
-| `src/QuickER.Runtime.EntityFrameworkCore` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues` |
+| `src/QuickER.Runtime.EntityFrameworkCore` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.InMemory` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityValues`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.SqlServer` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/ParitySqlServerSaves`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.Sqlite` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParityValues`・`table:TranslatorParityPredicates` |
@@ -127,6 +127,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_01_ValueObjects.scriban` | `table:ValueObjectScenarios` |
 | `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_03_EditModelsAndMappers.scriban` | `table:EditModelScenarios` |
 | `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_05_QueryPipeline.scriban` | `table:TranslatorParityPredicates` |
+| `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_08_EfCore.scriban` | `table:TranslatorParityPredicates` |
 | `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_10_Sync.scriban` | `SyncModel/Config`・`SyncModel/Random` |
 | `src/QuickER.CodeGen.UI` | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Name/Entrances` |
 | `src/QuickER.CodeGen.UI/CodeGenerationFeatureModule.cs` | `OsBoundary/FeatureModules` |
@@ -235,7 +236,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Provider/UniqueConstraintNaming.cs` | `rule:sync-name-comparison-tokens` |
 | `src/QuickER.Runtime` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`table:EditModelScenarios`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
 | `src/QuickER.Runtime.AspNetCore` | `GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues` |
-| `src/QuickER.Runtime.EntityFrameworkCore` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues` |
+| `src/QuickER.Runtime.EntityFrameworkCore` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.InMemory` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityValues`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.SqlServer` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/ParitySqlServerSaves`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.Sqlite` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParityValues`・`table:TranslatorParityPredicates` |
@@ -668,9 +669,9 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 
 ### `table:TranslatorParityPredicates`
 
-- 名前：式の翻訳の述語の表（SQL Server・SQLite・インメモリの結果を C# の意味論と突き合わせる）
-- テストのソース：`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityPredicateRows.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityRuntimeTestsBase.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityInMemoryRuntimeTests.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParitySqlServerRuntimeTests.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParitySqliteRuntimeTests.cs`
-- 範囲：`src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_05_QueryPipeline.scriban`・`src/QuickER.Runtime`・`src/QuickER.Runtime.InMemory`・`src/QuickER.Runtime.SqlServer`・`src/QuickER.Runtime.Sqlite`
+- 名前：式の翻訳の述語の表（SQL Server・SQLite・インメモリと SQL Server の EF Core 版の結果を C# の意味論と突き合わせる）
+- テストのソース：`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityPredicateRows.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityRuntimeTestsBase.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityInMemoryRuntimeTests.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParitySqlServerRuntimeTests.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParitySqliteRuntimeTests.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityEfCoreSqlServerRuntimeTests.cs`
+- 範囲：`src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_05_QueryPipeline.scriban`・`src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_08_EfCore.scriban`・`src/QuickER.Runtime`・`src/QuickER.Runtime.EntityFrameworkCore`・`src/QuickER.Runtime.InMemory`・`src/QuickER.Runtime.SqlServer`・`src/QuickER.Runtime.Sqlite`
 
 ### `table:SyncPlanExpectations`
 
@@ -827,7 +828,7 @@ src 全体か src の外を読む守り。単位の守りには数えない（�
 | `rule:cjk-range-copies` | tests/**/*.cs |
 | `rule:regex-ignore-case-culture` | src/**/*.cs |
 | `rule:regex-digit-classes` | src/**/*.cs |
-| `rule:ef-core-provider-cache-limit` | tests/**/*.cs（除外 32 件） |
+| `rule:ef-core-provider-cache-limit` | tests/**/*.cs（除外 33 件） |
 | `rule:window-activation-collection` | tests/QuickER.Tests/**/*.cs（除外 3 件） |
 | `rule:window-activation-markers` | tests/QuickER.Tests/AI.Chat/AiChatDialogApiKeyBoxTests.cs・tests/QuickER.Tests/Gui/Behaviors/CanvasViewportBehaviorSpaceKeyTests.cs・tests/QuickER.Tests/Gui/Views/PropertyPanelMemoEditTests.cs |
 | `rule:wpf-main-window-creations` | tests/QuickER.Tests/**/*.cs |

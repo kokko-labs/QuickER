@@ -67,6 +67,7 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 - **コード生成のガイドのインメモリ Repository の節「実 DB との既知の乖離」が、並び替えの `null` の位置を書くようになりました** — インメモリは `null` を最も小さい値として昇順の先頭に並べ、SQLite・SQL Server・MySQL も同じです。PostgreSQL と Oracle は昇順の末尾に並べます。振る舞いは変わりません
 - **同じ節が、インメモリ Repository は NOT NULL を検査しないことを書くようになりました** — 挿入とグラフ保存は NOT NULL の列が `null` の行を保存し、除外した無制限バイナリ列の Stream アクセサで書く `null` も保存します。実 DB はどれも断ります。振る舞いは変わりません
 - **コード生成のガイドのグラフ保存と EF Core モードの節が、代替キーをめぐる QuickER 版 Repository と EF Core 版 Repository の違いを 2 つ書くようになりました** — 代替キーを変え、同じ保存で古い値を参照する行を別の行へ向け直す保存は、QuickER 版 Repository では向け直す行を先に渡せば通り、EF Core 版 Repository では渡す順に依らず外部キーに断られます。どの実装先でも断られる保存に他者が削除した行も含まれていると、QuickER 版 Repository は `SaveConflictException` を、EF Core 版 Repository は DB の断りを報告することがあります。振る舞いは変わりません
+- **コード生成のガイドの「大文字小文字・空白・日付部品」の節が、SQL Server の Unicode でない列（`char`・`varchar`）の文字列一致は列の値の末尾の空白を数えないことを書くようになりました** — `char(4)` の列の `a   ` も `varchar` の列の `a ` も `EndsWith("a")` に一致し、パターンの空白は数えます。これまでガイドは固定長の列の文字列一致は詰めた値に対して比べると書いていましたが、それが当たるのは `nchar` だけです。振る舞いは変わりません
 
 #### 配布
 
@@ -182,6 +183,7 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 #### 生成コード
 
 - **SQL Server の QuickER 版 Repository が、列の型に入らない値との比較を、手書きの LINQ でも名前付きクエリでも C# と同じく比べるようになりました** — 整数の列と小数や範囲の外の整数（`x.Qty == 1.5` が値 2 の行に一致し、`x.Tiny < 300` は `OverflowException` になり、`int` の列と `int` の範囲の外の `long` のリストの IN も例外になっていました）、列の精度とスケールより桁の多い decimal（`decimal(10,2)` の列で `amount == 100.004m` が 100 に一致していました）、`date` の列と時刻つきの日時（`day == 2024-01-01 12:00` が 2024-01-01 に一致していました）、`varchar`・`char` の列と ASCII の外の文字（`"日本"` が格納された `??` に一致していました）です。値を列の型で束縛し、比べる前に変換していました。こうした値は値の型で束縛するようになり、サーバーはその比較のために列の側を変換するので、列のインデックスが使われないことがあります。列の型に入る値の束縛は変わりません
+- **SQL Server の EF Core 版 Repository が、列の型に入らない値との比較を、名前付きクエリでも手書きの LINQ でも `ExecuteDeleteAsync` でも C# と同じく比べるようになりました** — EF Core が比べる値に列の型を付け、SqlClient が比べる前に値を変換していました。列の精度とスケールより桁の多い decimal（`decimal(10,2)` の列で `amount == 1.234m` が 1.23 に一致し、同じ条件の `ExecuteDeleteAsync` はその行を消していました）、整数の列と、EF Core が列を CAST する `decimal(18,2)` で整数に丸まる decimal（`qty == 0.999m` が 1 に一致していました）、精度を超える値（`ArgumentException` になっていました）、`varchar`・`char` の列と ASCII の外の文字（`"日本"` が格納された `??` に一致していました。等値・`Contains` のパターン・IN のリストのどれでも）です。`AddGeneratedEfCoreRepositories` が `SqlServerQueryParameterInterceptor` を足すようになり、クエリのコマンドでこうした値を値の型で束縛します。列の型に入る値の束縛と `SaveChanges` は変わりません。`DbContextOptions` を自分で組むときは、`AddInterceptors` で `SqlServerQueryParameterInterceptor.Instance` を足してください。簡易 DSL の条件の文字列のリテラルは変数として生成するようになり、EF Core はパラメータで送ります。手書きの LINQ に書いた文字列の定数は、今までどおり Unicode でない文字列として SQL へ書き込まれます
 - **EF Core 版 Repository のグラフ保存で、Save フックの Before が値を書き換えてから `false` を返した行が、QuickER 版 Repository と同じく値を保ったまま書かれずに残るようになりました** — 飛ばした更新は書き換えが元の値へ戻り、飛ばした削除は書き換えた値の UPDATE になり、飛ばした挿入は `SaveConflictException`（`NotFound`）で保存全体を失敗させていました
 - **リモートのグラフ保存で、サーバーの Save フックの Before が、飛ばした行と削除した行に書いた値も、クライアントのエンティティへ戻るようになりました** — 保存の応答の新しい欄 `RemoteSaveResult.Unsaved` が運び、クライアントは `RowState` を変えずに書き戻します。この欄を持たない応答（以前のサーバー）では、これまでどおり戻りません
 - **EF Core 版 Repository のグラフ保存で、同じ保存で削除する行の代替キーの値を取る行が断られなくなりました** — キーを削除より先に書いていたので、消す前の行と一意制約でぶつかっていました。QuickER 版 Repository と同じく削除を先に流します。後回しの行は、接続とトランザクションを共有する文脈の 2 回目の `SaveChanges` で保存します

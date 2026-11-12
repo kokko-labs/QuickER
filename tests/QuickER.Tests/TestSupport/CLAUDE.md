@@ -442,6 +442,10 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
 - 種の単位の追加のクエリ：パラメータを使い回す `S{i}` と列で並べ替える `O{i}` を 6 本ずつ、本流と別の乱数の列（`DslFuzzGenerator.SideSeed`・パラメータ名の接頭辞 `q`）の生成器で作って末尾に足す（本流の列・行・クエリの引き方を変えない）。
 - 網羅の単位の決まった形（`DslFuzzGenerator.ReuseAndOrderingCoverageQueries`）：次元表の網羅すべき組のうち、ParameterReuse・Ordering とほかの因子の組で、網羅の単位のほかのクエリがまだ持たない組を足すクエリを貪欲に選ぶ（名前は `KR{i}`・`KB{i}`）。1 段目は使い回しの組を NOT の入れ子の 6 水準 × 戻り形 5 つ × 括弧の書き方 2 つで包んだ候補、2 段目はほかのクエリの並びの水準を変えた写しの候補。網羅すべき組は次元表から引くので、因子・水準を足すと選ぶクエリも増える。
   - 網羅の単位は、同じ種類の列がほかに無いフィルタの列ごとに相方の列（`{列}_r`）を持つ（どの種類の列でも、ほかの同じ種類の列で使い回す形を作るため）。相方の値は乱数を引かずに元の列の 7 行先を写す。
+- 列の型に入らない値（次元表の因子 ValueFit＝none・fits・beyond-scale・beyond-range・beyond-charset。判定は `DslFuzzDimensions.ValueFitOf`）：decimal の列とスケール・整数部の外の値（列で型付けしたパラメータ・広い型トークン `decimal(18,6)`・`int64` のパラメータ・リテラル・IN）、NULL を許す byte・short・int の列と decimal の型トークンの小数・範囲の外の値、整数の列と範囲の外の小数のリテラル、Unicode でない列（`DslColumn.NonUnicode`＝SQL Server の varchar・char の単位 `sqlserver-ansi`）と ASCII の外の文字を含む値（値の池は末尾の空白で終わる値も持ち、オラクルは Unicode でない列の文字列一致で列の値の末尾の空白を数えない＝docs の表の SQL Server の行・`DslFuzz.MatchValue`）。値は列の型へ丸めたり `?` に化けたりすると行の値に重なるものを選ぶ（SQL Server の EF Core 版が値を列の型で束縛すると赤になる）。
+  - 種の単位は 3 本目の乱数の列（`DslFuzzGenerator.OutOfTypeSeed`・パラメータ名の接頭辞 `r`）の生成器で、絞った形の原子のクエリ `X{i}` を末尾に足す（本流・使い回しと並び替えの列の引き方を変えない）。網羅の単位は、値オブジェクトなしの単位（`DslFuzzUnits.PlainCoverage`）と SQL Server の Unicode でない列の単位 `DslFuzzUnits.SqlServerAnsiCoverage`（`coverage-sqlserver-ansi`）が全ての形の合成のクエリ `KX*` を持つ（SQLite の単位は EF Core〔SQLite〕が流さない decimal の列の順序比較を作らない）。
+  - 作らない形（作らない形の宣言）：値オブジェクトの単位（`Create` が型の外の値を断る）・bigint の列と decimal のパラメータ（EF Core 版が列を `decimal(18,2)` へ CAST して桁あふれの例外になる）。
+  - 網羅しない組：SQLite・MySQL の範囲の beyond-charset（受け入れ）・使い回しと列の型の外の値（Pending）・EF Core（SQLite）の decimal の値の順序比較のリテラル（受け入れ）・SQL Server の GuidKey と beyond-charset（Pending）。
 - mutation 実証済み。
 
 ## カルチャのガード

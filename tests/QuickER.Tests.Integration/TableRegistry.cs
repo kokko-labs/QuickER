@@ -17,17 +17,20 @@ internal static class TableRegistry
     [
         new(
             "TranslatorParityPredicates",
-            "式の翻訳の述語の表（SQL Server・SQLite・インメモリの結果を C# の意味論と突き合わせる）",
+            "式の翻訳の述語の表（SQL Server・SQLite・インメモリと SQL Server の EF Core 版の結果を C# の意味論と突き合わせる）",
             [
                 Runtime + "TranslatorParityPredicateRows.cs",
                 Runtime + "TranslatorParityRuntimeTestsBase.cs",
                 Runtime + "TranslatorParityInMemoryRuntimeTests.cs",
                 Runtime + "TranslatorParitySqlServerRuntimeTests.cs",
                 Runtime + "TranslatorParitySqliteRuntimeTests.cs",
+                Runtime + "TranslatorParityEfCoreSqlServerRuntimeTests.cs",
             ],
             [
                 "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_05_QueryPipeline.scriban",
+                "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_08_EfCore.scriban",
                 "src/QuickER.Runtime",
+                "src/QuickER.Runtime.EntityFrameworkCore",
                 "src/QuickER.Runtime.InMemory",
                 "src/QuickER.Runtime.SqlServer",
                 "src/QuickER.Runtime.Sqlite",

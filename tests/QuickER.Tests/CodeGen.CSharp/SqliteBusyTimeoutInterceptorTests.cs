@@ -192,13 +192,22 @@ public class SqliteBusyTimeoutInterceptorTests
                         services.AddDbContextFactory<QuickErDbContext>(options =>
                         {
                             configureDbContext(options);
-                            options.AddInterceptors(SqliteBusyTimeoutInterceptor.Instance);
+                            options.AddInterceptors(
+                                SqliteBusyTimeoutInterceptor.Instance,
+                                SqlServerQueryParameterInterceptor.Instance
+                            );
                         });
                 """.ReplaceLineEndings("\n")
             );
 
         // インラインでは型を自分で出し、パッケージ参照では QuickER.Runtime.EntityFrameworkCore の型を使う
         code.Contains("public sealed class SqliteBusyTimeoutInterceptor", StringComparison.Ordinal)
+            .Should()
+            .Be(!useRuntimePackages);
+        code.Contains(
+                "public sealed class SqlServerQueryParameterInterceptor",
+                StringComparison.Ordinal
+            )
             .Should()
             .Be(!useRuntimePackages);
     }

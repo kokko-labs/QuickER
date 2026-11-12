@@ -13,6 +13,7 @@ SQL Server 方言エンジン（QuickER 版 Repository の ADO 実装）の固�
   - DateTime の値は datetime2 で束縛する（AddWithValue は datetime を選び、1/300 秒に丸める）。符号なし整数と sbyte の値は bigint（範囲の外は decimal）で束縛する（SqlClient はこの型を対応付けられず ArgumentException になる）。
   - インデックス：入る値は今までどおり列の型で束縛するので、列の側の変換は起きず、インデックスの使われ方は変わらない。入らない値だけ、サーバーが列の側を暗黙に変換し（CONVERT_IMPLICIT）、seek が scan になり得る（そうした比較は以前は誤答か例外だった）。
   - datetime2(n)・time(n) の列は、属性が小数秒の桁を持たず、値の精度のまま束縛されるので割れない（式の翻訳の表の行が回帰の網として持つ）。
+  - EF Core 版は `SqlServerQueryParameterInterceptor` が同じ規則で decimal と非 Unicode の文字列を束縛し直す（`src/QuickER.Runtime.EntityFrameworkCore/CLAUDE.md`「SQL Server のクエリのパラメータの型」。判定の写しを片方だけ変えない）。
   - ガード：`table:TranslatorParityPredicates`（`TranslatorParityPredicateRows` の行 `int-column-*`・`int-key-*`・`in-long-list-beyond-int`・`in-uint-list-beyond-int`・`decimal-*-beyond-scale`・`date-*-time-of-day`・`varchar-*`・`datetime2-scaled-*`・`time-scaled-*`）・`Dsl/SqlServer`（形 `compare-*-literal-fractional`）。直す前の束縛で SQL Server の 13 行と総当たりの 4 件が赤になることを確かめた。
 
 ## BulkInsert のオプション

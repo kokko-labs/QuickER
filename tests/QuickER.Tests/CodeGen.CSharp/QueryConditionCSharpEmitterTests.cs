@@ -67,14 +67,14 @@ public class QueryConditionCSharpEmitterTests
             ["string-match-like-prefix"] = new(
                 "Memo LIKE 'abc%'",
                 Binding.Plain,
-                "e => (e.Memo != null && e.Memo!.StartsWith(\"abc\"))",
-                []
+                "e => (e.Memo != null && e.Memo!.StartsWith(literal1))",
+                ["var literal1 = \"abc\";"]
             ),
             ["string-match-not-like-suffix"] = new(
                 "Memo NOT LIKE '%abc'",
                 Binding.Plain,
-                "e => (e.Memo != null && !(e.Memo!.EndsWith(\"abc\")))",
-                []
+                "e => (e.Memo != null && !(e.Memo!.EndsWith(literal1)))",
+                ["var literal1 = \"abc\";"]
             ),
             ["string-match-startswith-param"] = new(
                 "Memo STARTSWITH @keyword",
@@ -83,43 +83,68 @@ public class QueryConditionCSharpEmitterTests
                 []
             ),
             // ワイルドカードなしの LIKE：肯定は素の等値・否定と外側の NOT は NULL 前提の内側（元 Emit_ExactLike_NegatesInsideNullPremise）
-            ["exact-like"] = new("Memo LIKE 'abc'", Binding.Plain, "e => e.Memo == \"abc\"", []),
+            ["exact-like"] = new(
+                "Memo LIKE 'abc'",
+                Binding.Plain,
+                "e => e.Memo == literal1",
+                ["var literal1 = \"abc\";"]
+            ),
             ["exact-like-negated"] = new(
                 "Memo NOT LIKE 'abc'",
                 Binding.Plain,
-                "e => (e.Memo != null && !(e.Memo == \"abc\"))",
-                []
+                "e => (e.Memo != null && !(e.Memo == literal1))",
+                ["var literal1 = \"abc\";"]
             ),
             ["exact-like-under-not"] = new(
                 "NOT Memo LIKE 'abc'",
                 Binding.Plain,
-                "e => (e.Memo != null && !(e.Memo == \"abc\"))",
-                []
+                "e => (e.Memo != null && !(e.Memo == literal1))",
+                ["var literal1 = \"abc\";"]
             ),
             ["exact-like-under-double-not"] = new(
                 "NOT NOT Memo LIKE 'abc'",
                 Binding.Plain,
-                "e => e.Memo == \"abc\"",
-                []
+                "e => e.Memo == literal1",
+                ["var literal1 = \"abc\";"]
             ),
             ["exact-like-in-negated-or"] = new(
                 "NOT (Memo LIKE 'abc' OR CustomerId = 1)",
                 Binding.Plain,
-                "e => ((e.Memo != null && !(e.Memo == \"abc\")) && e.CustomerId != 1)",
-                []
+                "e => ((e.Memo != null && !(e.Memo == literal1)) && e.CustomerId != 1)",
+                ["var literal1 = \"abc\";"]
             ),
             // 前置 NOT の連鎖は偶奇で畳む（元 Emit_ChainedNot_FoldsByParity）
             ["chained-not-double"] = new(
                 "NOT NOT Memo LIKE '%x%'",
                 Binding.Plain,
-                "e => (e.Memo != null && e.Memo!.Contains(\"x\"))",
-                []
+                "e => (e.Memo != null && e.Memo!.Contains(literal1))",
+                ["var literal1 = \"x\";"]
             ),
             ["chained-not-triple"] = new(
                 "NOT NOT NOT Memo LIKE '%x%'",
                 Binding.Plain,
-                "e => (e.Memo != null && !(e.Memo!.Contains(\"x\")))",
-                []
+                "e => (e.Memo != null && !(e.Memo!.Contains(literal1)))",
+                ["var literal1 = \"x\";"]
+            ),
+            // 文字列のリテラルは前置文のローカル変数へ持ち上げる（EF Core がパラメータにする）。同じ値は 1 つの変数を共有し、
+            // 名前はメソッド引数（literal2）とぶつかると _ を後置する。比較の右辺の文字列のリテラルも同じ
+            ["string-literal-same-value-shares-one-local"] = new(
+                "Memo = 'abc' OR Memo LIKE '%abc'",
+                Binding.Plain,
+                "e => (e.Memo == literal1 || (e.Memo != null && e.Memo!.EndsWith(literal1)))",
+                ["var literal1 = \"abc\";"]
+            ),
+            ["string-literal-avoids-parameter-name"] = new(
+                "Memo = 'a' OR Memo = 'b'",
+                Binding.Plain,
+                "e => (e.Memo == literal1 || e.Memo == literal2_)",
+                ["var literal1 = \"a\";", "var literal2_ = \"b\";"]
+            ),
+            ["value-object-string-literal"] = new(
+                "Memo = 'abc'",
+                Binding.ValueObjects,
+                "e => e.Memo == MemoValue.Create(literal1)",
+                ["var literal1 = \"abc\";"]
             ),
             // NULL 非許容の文字列の列には ! も NULL 前提も付けない（元 Emit_StringMatch_NonNullableColumn）
             ["string-match-non-nullable-column"] = new(
@@ -256,6 +281,8 @@ public class QueryConditionCSharpEmitterTests
                 Type = "int32",
                 IsList = true,
             },
+            // 持ち上げた文字列のリテラルの名前とぶつかる引数（行 string-literal-avoids-parameter-name）
+            new QueryParameter { Name = "literal2", Type = "string(50)" },
         ];
     }
 
