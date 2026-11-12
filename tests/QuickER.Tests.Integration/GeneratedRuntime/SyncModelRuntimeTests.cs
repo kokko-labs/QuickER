@@ -1103,7 +1103,6 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                         fixedIn == "区切り 30"
                         || fixedIn == "区切り 31"
                         || fixedIn == "修正 C"
-                        || fixedIn == SyncModelKnownFailures.StuckSyncRemainderFixedIn
                         || fixedIn.StartsWith("きっかけ待ち（台帳 ", StringComparison.Ordinal)
                             && fixedIn.EndsWith('）')
                     );

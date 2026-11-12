@@ -245,12 +245,12 @@
 - 持ち主を引き留める送るものの無い行を消す：サーバーに無い持ち主を今の手（持ち主を消す・`MoveOffHoldersAsync`）で消せなかったとき、`SyncParentResolver.RemoveRowsKeepingHoldersAsync` が、持ち主を（推移的に）参照するローカルの行を集める（同じ表も別の表も。子の表の行は失敗の経路でだけ表ごとに読み、記述子の親の参照で絞る＝`ISyncTableRunSupport.FindLocalRowsReferringAsync`。公開 API は変えない）。どれもが次を満たすときだけ、子から消してから持ち主を消す（`BringHoldersUpToDateAsync`）。
   - 送るものが無い（`HoldsUnsentChange` が偽＝未送信の変更が無いか、ランが捨てる記録しか無い）・読み直しの途中の行でない。
   - ランの範囲の固定クラスの表の行で、ほかの行（範囲の外の表・同期しない表・記述子に無い外部キー）に参照されていない（`IsReferencedOutsideAsync`）。循環が無い。
-  - サーバーにある行は、消した後の残りの行が導く再開点より版が上（`FindRowsNotBroughtBackAsync`＝消すとダウンロードが降ろし直す）。消す最新の写しより後ろの版の行が同じ表に残ると、その写しは二度と降りないので何も消さない。守りを外すと、最新の写しが端末から消えたまま戻らない（シナリオ `holder-referenced-by-other-table-current-child-does-not-settle` と乱数の種が `2/diverge:model_events:missing-on-device` で赤）。この形は静止化しないまま残り、同期のモデルの既知の失敗の一覧に Pending（直す区切りは `SyncModelKnownFailures.StuckSyncRemainderFixedIn`）で載る。
+  - サーバーにあり、版が消した後の残りの行の導く再開点以下の行（`FindRowsNotBroughtBackAsync`＝ダウンロードがもう一度は降ろさない最新の写し）も消すが、消す前に降ろし直す約束を残す（「降ろし直す約束（quicker_sync_row_pending）」）。
   - 呼ぶのはランが削除を伝搬するときだけ（`TryResolveCollisionAsync` の門。持ち主を消す規則と同じ）。止める条件はどれも、消す前にすべて確かめる。
   - 理由：引き留める行のサーバーの行は値を待つ行の下にあり（端末が作った同じキーの行・サーバーが移した行の古い写し）、外部キーは文ごとに検査するので、サーバーの内容で先に入れられない（`MoveOffHoldersAsync` は移り先がローカルにあるときだけ効く）。消さないと、どのポリシーでも毎回止まり、洗い替えでしか抜けない（未送信の無い古い写しの形は、サーバーの操作だけで全端末が止まる）。
-  - 順：ランが捨てる記録（解決役が受け取る `discarding`＝実行の初めに読んだ id）を先に捨て、それから行を消す（受理記録も消す）。逆順だと、途中で落ちたときに作り直した行の削除の記録が残り、次の実行がサーバーの行を消し得る。この順なら残るのは記録の無い行で、次の実行が同じ手で消す。
+  - 順：ランが捨てる記録（解決役が受け取る `discarding`＝実行の初めに読んだ id）を先に捨て、降ろし直す約束を書き、それから行を消す（受理記録も消す）。逆順だと、途中で落ちたときに作り直した行の削除の記録が残り、次の実行がサーバーの行を消し得る。この順なら残るのは記録の無い行で、次の実行が同じ手で消す。
   - 消した行は `SyncLocalRowChangeReason.RemovedForUniqueValue` で載せ、捨てた記録の行は `DiscardedByServerWins` でも載せる。サーバーにある行はダウンロード（表が値を待つ行の表より後ろなら同じ実行）か、ServerWins の適用で入る。
-  - ガード：シナリオ `holder-referenced-by-other-table-settles`・`holder-referenced-by-other-table-serverwins-settles-in-one-sync`・`holder-referenced-by-other-table-lww-serverwins-settles-in-one-sync`・`holder-referenced-by-other-table-collect-keeps-unsent-referrer`・`holder-referenced-by-other-table-propagation-off-keeps-referrer`・`holder-referenced-by-other-table-entries-go-before-rows`・`holder-referenced-by-other-table-items-settles`・`holder-referenced-by-other-table-through-label-settles`・`holder-referenced-by-other-table-stale-copy-settles`・`holder-referenced-by-other-table-edited-stale-copy-is-kept`・`holder-referenced-by-other-table-stale-copy-in-excluded-table-is-kept`、網羅の行（`SyncModelCoverageRows` の RemovedForUniqueValue の 3 行）、乱数の種（種 400・広い世界の種）。mutation 実証済み（段を外す・引き留める行の未送信の確認・呼び出し側の伝搬の門・範囲の条件・記録と行の順・再開点の守り）。
+  - ガード：シナリオ `holder-referenced-by-other-table-settles`・`holder-referenced-by-other-table-serverwins-settles-in-one-sync`・`holder-referenced-by-other-table-lww-serverwins-settles-in-one-sync`・`holder-referenced-by-other-table-collect-keeps-unsent-referrer`・`holder-referenced-by-other-table-propagation-off-keeps-referrer`・`holder-referenced-by-other-table-entries-go-before-rows`・`holder-referenced-by-other-table-items-settles`・`holder-referenced-by-other-table-through-label-settles`・`holder-referenced-by-other-table-stale-copy-settles`・`holder-referenced-by-other-table-edited-stale-copy-is-kept`・`holder-referenced-by-other-table-stale-copy-in-excluded-table-is-kept`、網羅の行（`SyncModelCoverageRows` の RemovedForUniqueValue の 3 行）、乱数の種（種 400・広い世界の種）。mutation 実証済み（段を外す・引き留める行の未送信の確認・呼び出し側の伝搬の門・範囲の条件・記録と行の順。最新の写しの約束の mutation は「降ろし直す約束（quicker_sync_row_pending）」）。
 - 一意な値を手放す：持ち主のサーバーの行を入れられない理由が、新しい親が読み直しの途中の行（`SyncParentResolver.IsInProgress`）であることだけのとき、`ISyncTableRunSupport.ReleaseUniqueValuesAsync` がローカルの持ち主にサーバーの一意な値だけを書く（親とほかの内容・ミラー版は残す）。
 - ガード：シナリオ `n8-unique-value-moved-then-updated`・`n8-holder-with-unsent-change-stops`・`n8-serverwins-holder-is-read-back`・`n8-chain`・`n8-true-swap-stops`・`n14-holder-moved-under-new-parent-in-batch`・`n13-holder-referenced-by-taker`・`serverwins-holder-moves-under-taker`・`serverwins-holder-chain-moves-under-taker`・`holder-held-for-another-reason-keeps-its-values`。
 
@@ -287,6 +287,27 @@
 - 登録簿を受け取らずに組んだ表でフックが飛ばしたら例外にする（後ろの行は書かれた後で、止めても再開点は戻らない）。
 - 止め方は経路ごとに 1 つ：版あり・版なしのダウンロードはその表を止めて `SyncDownloadTruncation.SkippedBySaveHook` を立てる（版なしは走査も止める＝`ScanByKeyAsync` の `onBatch` が false）。ServerWins・親・一意な値の持ち主の読み直しは、飛ばした行から後ろを保留にする（記録は残し受理記録も書かない・親を持てない子は `MissingParentTableName` で止まる）。protected の `ApplyBatchAsync` は飛ばしたら例外（洗い替えの読み直しの行もこれで書く）。
 - ガード：シナリオ `hook-download-skip-stops-table-and-retries`・`hook-parent-read-back-skip-stops-child-table`・`hook-serverwins-read-back-skip-keeps-entry`・`hook-versionless-download-skip-stops-table`・`apply-skip-stops-table`（失敗の種類 `ApplySkip`・既存の種の列を変えないよう乱数の操作の列には混ぜない・モデルの端末の表は登録簿を受け取る）、`SyncRuntimeTestsBase` の登録簿なしの例外、`SyncLocalSaveHookRegistrationTests`（mutation 実証済み）。
+
+### 降ろし直す約束（quicker_sync_row_pending）
+
+- 何を：一意な値の持ち主を引き留める行を消すとき（`SyncParentResolver.RemoveRowsKeepingHoldersAsync`）、消す行のうち、サーバーにあり版が残る行の導く再開点以下の行（この端末で最新のままの写しで、同じ表に後ろの版の行が降りている）は、ダウンロードの流れではもう一度は降りない。その行の（表・キー）を、消す前にローカルの表 `quicker_sync_row_pending`（`SyncJournal.RecordOwedRowsAsync`）へ記録する。
+  - 引き金の形：サーバーが子を持つ行を新しい親へ移し、元の親を消して、その一意な値を新しい親へ付ける（フォルダーの作り直し）。移した行の子が端末にもう降りていれば、引き留める古い写しを消すと子も消える。端末が同じキーの行を作った形（キーの重複）でも同じ。
+- 順：ランが捨てる記録を消す → 約束を書く → 行を子から消す。
+  - 約束の後・行の前に落ちる：行と約束が残り、戻す段が「同じキーの行がある」で約束を消す（次の実行の解決役が同じ手でまた消して記録する）。
+  - 行の後・読み直しの前に落ちる：約束が残るので、次の実行が読み直す。
+  - 逆の順（行の後に約束）は、間で落ちると最新の写しが端末から消えたまま戻らない。
+- 戻す：版を持つ表の `DownloadAsync` の先頭（`CopyOwedBlobsAsync` の前・何かを取得する前）で、`SyncTableBase.BringOwedRowsBackAsync` がバッチと同じく書き込みロックの中で未送信を読み直し、解決役の `SyncParentResolver.BringOwedRowsBackAsync` に行ごとに決めさせる。
+  - ローカルに同じキーの行がある：約束を消す（その後に書いた行の方が新しい。アプリが書いた行を上書きしない）。
+  - そのキーに未送信の変更がある（ランが捨てない）：約束を残す。
+  - それ以外：`ApplyServerRowsAsync` でサーバーの行を読んで入れる（親は解決役が先に読み直す）。入ったら受理記録を書いて約束を消す。サーバーに無ければ約束を消す（削除伝搬と同じ結果）。入らない（親がそろわない・一意な値を別のローカルの行が持つ）なら約束を残す。
+  - 残った約束はダウンロードを止めない（打ち切りにしない）。後の実行が試し直す。
+  - エンジンが動かさないダウンロード（解決役が無い直接の呼び出し）は何もせず、約束を残す。
+- ミラー版と受理記録：読み直した行は、親を読み直した行と同じく内容だけを入れてミラー版を書かず（「アンカーは保存せず導出する」「ミラー版を書くのはダウンロードだけ」を崩さない）、サーバーの版を受理記録に書く（解決役の `RecordAckAsync`）。戻した行への後の編集は、この受理記録を original にして版で守られる（`ApplyServerRowsAsync` の remarks の「再開点以下の版で戻した行」）。
+  - 同じ実行で古い写しがこの受理記録を上書きすることは無い：表のダウンロードのバッチはこの段の後に取得するので、読み直した版か、それより後ろの版を持つ（「ack の掃除」の解決役の受理記録の規則に当たらない）。
+- 洗い替え：版を持つ表の洗い替えは、その表の約束を消す（行はほかの行と同じく洗い替えで入る）。
+- キーのテキストの書き直し（`NormalizeKeyTextsAsync`）は、約束の表も書き直す。
+- 表の作成：`SyncJournal.EnsureCreatedAsync` が 4 つの表をそれぞれ `CREATE TABLE IF NOT EXISTS` で作る。以前の版のローカルの DB（3 つの表だけ）でも、新しいインスタンスの最初の使用で作られる。
+- ガード：シナリオ `holder-referenced-by-other-table-current-child-settles`・`holder-referenced-by-other-table-current-child-serverwins-settles-in-one-sync`・`holder-referenced-by-other-table-current-child-lww-serverwins-settles-in-one-sync`・`holder-referenced-by-other-table-current-child-collect-keeps-unsent-referrer`・`holder-referenced-by-other-table-current-child-localwins-keeps-unsent-referrer`・`holder-referenced-by-other-table-stale-copy-with-current-child-settles-collect`・`holder-referenced-by-other-table-stale-copy-with-current-child-settles-localwins`・`holder-referenced-by-other-table-stale-copy-with-current-child-settles-serverwins`・`holder-referenced-by-other-table-stale-copy-with-current-child-settles-lww-serverwins`・`holder-referenced-by-other-table-current-child-read-back-row-uploads-its-edit`・`holder-referenced-by-other-table-current-child-owed-row-recorded-before-removal`・`holder-referenced-by-other-table-current-child-owed-row-dropped-when-row-is-still-there`・`holder-referenced-by-other-table-current-child-owed-row-survives-failed-run`・`holder-referenced-by-other-table-current-child-owed-row-gone-on-server`・`holder-referenced-by-other-table-current-child-owed-row-waits-for-parent-with-unsent-delete`・`holder-referenced-by-other-table-current-child-owed-row-waits-for-unsent-entry`・`holder-referenced-by-other-table-current-child-owed-row-key-created-on-device`・`holder-referenced-by-other-table-current-child-owed-row-cleared-by-refresh`・`holder-referenced-by-other-table-current-child-legacy-local-schema`、乱数の種（広い世界の種 120195）。mutation 実証済み（約束を書かない・約束と行の順を逆にする・戻す段を外す・同じキーの行があっても約束を残す・サーバーに無い行の約束を残す・入らない行の約束を消す・未送信の確認を外す・洗い替えで消さない・古い DB に表を足さない・受理記録を書かない）。
 
 ## 親をそろえる解決役
 
