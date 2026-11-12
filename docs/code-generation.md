@@ -747,6 +747,15 @@ The QuickER repositories write in graph order, so the insert reaches the databas
 The EF Core repositories write the changed alternate keys before the other statements of the save (see [EF Core mode](#ef-core-mode-generateefcorerepositories)), so the same save succeeds, and the in-memory repository accepts it as well.
 The remote services follow the repository behind them.
 Pass the row that gives the value up before the row that takes it, and the save succeeds on every backend.
+The order is the other way round for a row that refers to such a value.
+When a save changes an alternate key and, in the same save, points the rows that refer to its old value at another row, the backends differ.
+The QuickER repositories write in graph order, so the save succeeds when the rows that change their foreign key are passed before the row that changes its alternate key, and is refused by the foreign key otherwise.
+The EF Core repositories write the changed alternate key before every other statement, so the foreign key refuses the save whatever the order.
+To change such a value on every backend, point the referring rows elsewhere in one save and change the value in the next.
+When a save is refused on every backend, for example because a row takes a value a row passed after it still holds, and it also holds a row another writer deleted, the backends may report different failures.
+The QuickER repositories report the first failure in graph order, which can be a `SaveConflictException` for the deleted row.
+The EF Core repositories write the changed alternate keys first, so they report the database's refusal.
+Either way the save writes nothing, and it cannot succeed until the order is fixed.
 
 One shape cannot be saved in a single call: deleting a row, adding a new row that takes its unique value, and pointing the rows that referred to the deleted row at the new one, such as moving the children of a parent under its replacement.
 With a `NO ACTION` foreign key, writing the new row first is refused by the unique constraint, and deleting the old row first is refused by the foreign key of the rows that still point to it.
@@ -1142,10 +1151,12 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   For each updated row of a table that has an alternate key, `UpdateAsync` and a graph save first read the row's stored key and row version (one extra query per row), then write a changed value with one more statement in the save's transaction, before `SaveChanges`.
   The write follows the same rules as the rest of the row: under `Optimistic` a stale row version leaves it unwritten and the save fails with `SaveConflictException`, and `ForceOverwrite` writes it anyway.
   A value another row still references is refused by the database (`NO ACTION`), and the save writes nothing.
+  This includes a value whose referring rows the same save points at another row: the changed value is written before those rows, so the QuickER repositories accept a save the EF Core repositories refuse (see [Graph save](#graph-save-save-parent-and-children-in-one-call)).
   A value a save hook's Before sets is written the same way.
   An `UpdateAsync` of such a table runs in a transaction inside the execution strategy, like a graph save.
   A row that takes the alternate key of a row the same save deletes is written after the deletion, as in the QuickER repositories: the held-back rows (and the rows below them) are saved by a second `SaveChanges` on a second context that shares the connection and the transaction, after their keys are written.
   Because the changed alternate keys are written first, a row the save inserts can take the alternate key that an updated row passed after it gives up, which the QuickER repositories refuse (see [Graph save](#graph-save-save-parent-and-children-in-one-call)).
+  For the same reason, a save that the database refuses on every backend reports that refusal even when a row passed earlier was deleted by another writer, where the QuickER repositories report a `SaveConflictException` for that row.
   The second context gives its own connection back afterwards, so a pooled context leases the next save as it was.
   A context built from a connection string gets the connection string back (EF Core disposes the connection it created as soon as another connection is set, and creates a new one when the context is next used).
   A connection passed in the options (`UseSqlServer(connection)`) is given back owned as the options say, and a connection the factory attached at run time with `SetDbConnection` is given back as not owned, so the context never disposes it.

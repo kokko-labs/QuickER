@@ -30,9 +30,11 @@ internal static partial class BackendParitySqlServerSaveComparison
     /// 単独でも競合になる行（Before のフックが飛ばさない行のうち、insertWhenUpdateMissing なしで他者が消した行＝NotFound と、
     /// Optimistic で他者が版を進めた行＝Modified）と、その行が報告されるときの理由・キー
     /// </summary>
-    public static IReadOnlyList<(SaveConflictReason Reason, string Key)> IndependentConflicts(
-        SqlServerSaveScenario scenario
-    ) =>
+    public static IReadOnlyList<(
+        SaveConflictReason Reason,
+        string Type,
+        string Key
+    )> IndependentConflicts(SqlServerSaveScenario scenario) =>
         [
             .. scenario
                 .Rows.Where(row => !row.Skipped && !row.IsNew())
@@ -54,7 +56,22 @@ internal static partial class BackendParitySqlServerSaveComparison
                 .Select(candidate =>
                     (
                         candidate.Reason!.Value,
+                        nameof(KitEntity),
                         candidate.Row.KitId.ToString(CultureInfo.InvariantCulture)
+                    )
+                ),
+            // 部品は版を持たず Before のフックも無いので、他者が消した更新・付け替えの部品だけが NotFound になる
+            .. scenario
+                .Parts.Where(part =>
+                    part.Condition == SaveRowCondition.Gone
+                    && part.Role is SavePartRole.Update or SavePartRole.Move
+                    && !scenario.InsertWhenUpdateMissing
+                )
+                .Select(part =>
+                    (
+                        SaveConflictReason.NotFound,
+                        nameof(KitPartEntity),
+                        part.PartId.ToString(CultureInfo.InvariantCulture)
                     )
                 ),
         ];
@@ -91,19 +108,21 @@ internal static partial class BackendParitySqlServerSaveComparison
         return "differs";
     }
 
-    /// <summary>結果の行の書き方（競合はキーまで書く）</summary>
+    /// <summary>結果の行の書き方（競合は型とキーまで書く）</summary>
     public static string ConflictLine(SaveConflictException conflict) =>
-        $"throws SaveConflictException reason={conflict.Reason} key={conflict.Key}";
+        $"throws SaveConflictException reason={conflict.Reason} type={conflict.EntityTypeName} key={conflict.Key}";
 
-    /// <summary>競合の結果の行から理由とキーを読む（競合の行でなければ null）</summary>
-    private static (SaveConflictReason Reason, string Key)? ParseConflict(string line) =>
+    /// <summary>競合の結果の行から理由と型とキーを読む（競合の行でなければ null）</summary>
+    private static (SaveConflictReason Reason, string Type, string Key)? ParseConflict(
+        string line
+    ) =>
         ConflictPattern().Match(line) is { Success: true } match
         && Enum.TryParse<SaveConflictReason>(match.Groups[1].Value, out var reason)
-            ? (reason, match.Groups[2].Value)
+            ? (reason, match.Groups[2].Value, match.Groups[3].Value)
             : null;
 
     [GeneratedRegex(
-        "^throws SaveConflictException reason=([A-Za-z]+) key=(.*)$",
+        "^throws SaveConflictException reason=([A-Za-z]+) type=([A-Za-z]*) key=(.*)$",
         RegexOptions.CultureInvariant
     )]
     private static partial Regex ConflictPattern();
