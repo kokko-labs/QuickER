@@ -99,6 +99,43 @@ internal static partial class SyncModelScenarios
                 [.. Seed(1, "alice", 11, "widget")],
                 [Plain(D1), Expect.Result(D1).Contains("downloaded=0", "uploaded=0")]
             ),
+            // 端末 1 の変更が端末 2 と端末 3 へ違う順で届く（3 台目があって初めて起きる順序）。端末 1 は UploadAsync だけで
+            // 上げて受理記録を残す。端末 2 は端末 1 の版を降ろしてから編集して上げ、端末 3 は端末 1 の版を見ずに端末 2 の版だけを
+            // 降ろす。端末 1 は、自分の受理記録のキーに来た端末 2 の版（端末 1 の版を元にした別の書き込み）を自分のエコーと
+            // みなさずに降ろし、端末 3 は端末 2 の版を元にした編集を競合なしに上げる
+            MovedAll(
+                "three-devices-change-reaches-the-other-two-in-different-orders",
+                [.. Seed(1, "alice", 11, "widget")],
+                [
+                    Rename(D1, 1, "d1-edit"),
+                    PlainOnly(D1, ModelSyncKind.Upload),
+                    Expect.Result(D1).Contains("uploaded=1").Absent("conflict *"),
+                    Plain(D2),
+                    Expect.Result(D2).Contains("uploaded=0", "downloaded=1"),
+                    Expect.Rows(D2, F).Contains("1 parent=null name=d1-edit"),
+                    Rename(D2, 1, "d2-edit"),
+                    Plain(D2),
+                    Expect.Result(D2).Contains("uploaded=1", "downloaded=0").Absent("conflict *"),
+                    Plain(D3),
+                    Expect.Result(D3).Contains("uploaded=0", "downloaded=1"),
+                    Expect.Rows(D3, F).Contains("1 parent=null name=d2-edit"),
+                    Plain(D1),
+                    Expect.Result(D1).Contains("uploaded=0", "downloaded=1"),
+                    Expect.Rows(D1, F).Contains("1 parent=null name=d2-edit"),
+                    Rename(D3, 1, "d3-edit"),
+                    Plain(D3),
+                    Expect.Result(D3).Contains("uploaded=1", "downloaded=0").Absent("conflict *"),
+                    Plain(D1),
+                    Expect.Result(D1).Contains("downloaded=1").Absent("conflict *"),
+                    Plain(D2),
+                    Expect.Result(D2).Contains("downloaded=1").Absent("conflict *"),
+                    Expect.Rows(D1, F).Contains("1 parent=null name=d3-edit"),
+                    Expect.Rows(D2, F).Contains("1 parent=null name=d3-edit"),
+                ]
+            ) with
+            {
+                Devices = SyncModelWorldShape.ThreeDevices,
+            },
             Moved(
                 "dl-empty-server-syncs-to-zero",
                 [],

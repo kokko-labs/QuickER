@@ -187,6 +187,24 @@
 
 端末 2 台＋サーバー役（SQLite）＋サーバーへ直接書く他者に、乱数の操作の列と、指摘ごとの決定的なシナリオを流すモデルベースのテスト。
 
+- 世界の形（`SyncModelWorldShape`）は種の番号から決め、乱数を引かない。
+  - 既存の範囲の種（`SyncModelWorldShape.WideSeedBase`＝120000 より小さい種）・決定的なシナリオ・網羅の行は、端末 1・2 が空から始める世界。
+  - 広い世界の種（120000 から）は端末 1〜3 の世界にし、端末 i の最初の形（`ModelPreload`）を `Kinds[(種 / 4 + i) % 4]` で回す（種の組＝余りと独立に回し、モード×ポリシーとは続いた 48 種でどの組にもすべての形が出る）。範囲を分けるので、既存の種の操作の列と種の指紋は変わらない。端末 1・2 の世界の端末の選び方は、端末 3 を足す前の引き方のまま。
+  - 端末 3 は列挙の末尾（値 3）に足し、キーは 4000 台・ラベルの印は `r`。
+  - 端末を 3 台までにする根拠は `SyncModelWorldShape` の remarks（エンジンが分岐に読むのはその端末の手元の記録とサーバーの行と版だけ。3 台でどの端末にもほかの端末が 2 台そろい、4 台目で新しく読むものは無い）。
+- 最初の形（1 歩目の前に端末がどう行を持つか）：
+  - None：空から始め、後勝ちの静かな同期 1 回で初期データへそろえる。
+  - Refresh：洗い替え（blob を運ぶ）1 回で作る（docs の洗い替えの用途の初回構築）。
+  - Journaled：最初の同期の前に Repository 越しに書く（通常のオフライン編集。一部は初期データのキー・一意な値とぶつける）。書き手の操作として履歴へ積む。
+  - Untracked：最初の同期の前に Repository を通らずに入れる（記録されない・ミラー版も無い・サーバーに無いキーだけ＝端末のキーの範囲の基点＋800 の帯）。誰の書き込みでもないので履歴へ積まず、消失なしの表明は「無い」を期待する（docs：上がらず削除伝搬で消える）。
+  - 中身は 3 本目の乱数（`SyncModelGenerator.PreloadSeed`）だけで引く。追跡しない帯のキーと値は、ほかの書き手の同じキー・別表記の候補にしない。
+  - 初期データへそろったかの照合は None・Refresh の端末だけに掛ける。
+  - 最初の同期をしない端末（Journaled・Untracked）から見ると、初期データはまだ受け取っていないほかの書き手の内容。その端末がそのキーをサーバーと同じ内容（品目は blob も）で持つまで、版の競合の根拠の判定と消失なしの表明は、初期データをそのキーの書き手に数える。
+  - 追跡しない行に端末が初めて書いたら、その行の今の内容と blob をその端末の書き込みとして履歴へ積む（Repository 越しの更新・blob の書き込みは、サーバーへの挿入として全列を送る）。
+  - 作らない形（サーバーにあるキーの追跡しない行・ミラー版つきの行の持ち込み・別の端末の DB の写し・端末 4 台以上）は `SyncModelNotGenerated` に宣言する。
+- 空振りの守り：広い世界の種が既定の種の数のとき、最初の形ごとに実際に効いたことを `CoverageGuard` で表明する（`SyncModelRun.PreloadEffects`＝洗い替えで作った端末がそろった・初期データのキーへの記録が DuplicateOnServer になった・最初の同期の前の記録が UniqueValueTakenOnServer で断られた・どの書き込みも触れなかった追跡しない行が静止化の後にどの端末にも無い）。
+- 3 台目があって初めて起きる順序は、決まった形の行 `three-devices-change-reaches-the-other-two-in-different-orders`（全転送・3 台の世界）が持つ：端末 1 が UploadAsync だけで上げて受理記録を残し、端末 2 がその版を降ろしてから編集して上げ、端末 3 は端末 2 の版だけを降ろす。端末 1 は受理記録のキーに来た端末 2 の版を自分のエコーとみなさずに降ろす（エコーの判定をキーだけにする壊し方で赤）。
+
 - 表明：
   - 止まらない：静止化が、例外・未送信・競合・打ち切りを残さず終わる。
   - 収束：3 者の全表と blob が一致する。
@@ -229,14 +247,16 @@
 - 表どうしの循環の列（`pinned_item_id`）は乱数の列が書かない（並行の書き手が行の循環を作るのを生成器は防げず、サーバーで消えた循環の行は端末に残る＝docs の既知の割り切り）。洗い替え以外の経路は決まった形の行が持つ：`cycle-pin-to-new-item-uploads-in-rounds`（新しい品目へのピン留めが最初の巡で断られ次の巡で通る）・`cycle-pinned-item-is-read-back-before-folder`（ダウンロードで解決役がピン留めの先を読み直す）・`cycle-serverwins-restores-folder-pinned-to-new-item`（ServerWins の読み直しで同じ）。解決役がフォルダー→品目の辺を辿らない壊し方で 3 行とも赤になる（mutation 実証済み）。
 - 次元表 `SyncModelDimensions`：
   - OpFamily に 4 つの形、因子 UniqueTable・PropagateDeletes・Excluded（2 表・3 表の水準 two・three を含む）・Batch・Blobs（後ろ 4 つは SyncOptions の Source）・FaultKind・KeyOrigin（own・stolen・not-insert）・Spelling（UniqueSpelling の値と none）・PayloadSize（small・large・none）。
-  - 3 因子の組 (Policy, OpFamily, PropagateDeletes)・(Actor, OpFamily, UniqueTable)。
+  - 世界の形の因子 Devices（2・3）・Preload（操作の書き手の最初の形＝`ModelPreload` の値。サーバーの他者は None）。2 台の世界の最初の形が None 以外の組・端末 3 が 2 台の世界にいる組・サーバーの他者が None 以外の組は、定義から起こり得ない組として外す。
+  - 3 因子の組 (Policy, OpFamily, PropagateDeletes)・(Actor, OpFamily, UniqueTable)・(Preload, Mode, Policy)。
   - Blobs=False は受け入れの組（乱数は常に blob を運ぶ。docs の「運ぶかは端末ごとに一貫させる」）。
   - サーバーの他者（Actor=Server・Via=None）× 衝突し得る別表記は受け入れの組。
 - 実行の結果の表 `SyncModelOutcomeDimensions`（登録簿 SyncModel/Outcomes）：SyncConflictReason と SyncLocalRowChangeReason の全値×Mode×Policy。実行の後の結果だけを数え、乱数を引かない。
-- 網羅の行 `SyncModelCoverageRows`（Id は `coverage-`・9 行）：
+- 網羅の行 `SyncModelCoverageRows`（Id は `coverage-`・11 行）：
   - 乱数の種で作れない組を持つ。サーバーの他者の Extras の操作 4 つ（作り直し・失敗する書き込み・キーだけのスタブ・持っていた実体での削除）・グラフ保存の失敗する書き込み。
   - DuplicateOnServer は乱数の種が同じキーの挿入で作る（行を持たない）。
   - 既定の 60 種でたまたま欠ける組も持つ。表を除外したダウンロード・後勝ちの RemovedBeforeDownload・Collect と LocalWins の ReloadedForUniqueValue。
+  - 広い世界の既定の種でたまたま欠ける組も持つ：端末 3 のフォルダーの delete-take-reparent（`coverage-device3-delete-take-reparent-folders`・3 台の世界）と、追跡しない行を入れた端末のラベルを除外した同期（`coverage-untracked-device-sync-excluding-labels`・行の入力の `Preloads` で最初の形を宣言する）。
   - 直結の乱数のテスト `RandomSeeds_ConvergeWithoutLoss` が種の前に並列に流す（単独の種では流さない）。操作を 1 歩ずつ次元表で、同期の結果を結果の表で数える。
   - 行は生成器の代わりにモード・ポリシー・種の組を宣言する（例：`coverage-server-delete-stub`）（`SyncModelDimensions.Observe` の多重定義）。行の同期が宣言と違えば構築で断る。
   - 決定的なシナリオ（`SyncModelScenarios`）は別の Theory で流れて網羅の計数に入らないが、網羅の行は数える。行は期待の操作を持たず、次元表に無い操作の型は宣言の誤り。
@@ -246,13 +266,15 @@
 - 静止化が終わらないときは、最後の周の打ち切りと競合を分類して署名を細かくする（`SyncModelRun.ClassifyStuckTruncationsAsync`）。
   - 一意な値の厳密な入れ替え：`1/no-quiesce:unique-swap:{表}`（docs の既知の割り切り＝受け入れ）。
   - 値を取る行自身の古い参照が持ち主を残す：`1/no-quiesce:holder-referenced-by-taker:{表}`。
+  - 持ち主がサーバーに無く、別の表のローカルの行が持ち主を（推移的に）参照し、その行のサーバーの行が値を取る行の下にある：`1/no-quiesce:holder-referenced-by-other-table:{表}`。値を取る行のダウンロードは参照されて消せない持ち主で毎回止まり、ServerWins はその行のサーバーの行の親を持てないので戻さず記録を残す。既知の失敗の一覧に Pending（直す区切りは `SyncModelKnownFailures.StuckSyncFixedIn`）で載せる。
   - 端末側の一意な値の循環：`1/no-quiesce:pending-unique-cycle:{表}`。
-  - 入れ替えと、値を取る行自身の古い参照の場合は打ち切った行と持ち主の行の、循環は集まりの行の競合を説明済みにする。
+  - 入れ替えと、値を取る行自身の古い参照の場合は打ち切った行と持ち主の行の、別の表の参照の場合は打ち切った行・持ち主・参照する行と、サーバーで値を取る行の下にあるために止まった打ち切りの行の、循環は集まりの行の競合を説明済みにする。
   - どれにも当たらない打ち切りか説明の付かない競合が残れば、粗い署名 `1/no-quiesce:conflicts-or-truncations` もあわせて出す。分類できた分が隠さない。
-  - 固定は `swap-folder-names-without-refresh-does-not-settle`・`swap-without-refresh-does-not-settle`・`n15-pending-unique-cycle`。mutation 実証済み。
+  - 固定は `swap-folder-names-without-refresh-does-not-settle`・`swap-without-refresh-does-not-settle`・`n15-pending-unique-cycle`・`holder-referenced-by-other-table-does-not-settle`・`holder-referenced-by-other-table-items-does-not-settle`（どちらも端末 2 台・最初の行なし。静止化の失敗の署名は表の名前を残すので表ごとに 1 行）。mutation 実証済み。
+  - 別の表の参照の判定が狭い（持ち主がサーバーにある・参照する行のサーバーの行が値を取る行の下に無い・参照する行がサーバーに無い・同じ表の参照、のどれも数えない）ことは、DB を使わない対照 `SyncModelRuntimeTests.OtherTableHolderShape_CountsOnlyTheNarrowShape` が表明する（条件を 1 つずつ外すと赤になる）。
 - 既知の失敗の一覧の乱数の項目のうち RegularSeeds / NightlySeeds の項目は、全部の種をまとめて照合して「起きない」も赤にする。種ごとの照合は「載っていない」しか見ないため。
 - 乱数の種の照合は、静止化で起きた例外を途中の同期の例外と同じに扱い、表明 2・3 の署名から表の名前を外して行う（`SyncModelRuntimeTests.Family`）。
-- 種の数は `QUICKER_SYNC_MODEL_SEEDS`（既定 60）。時刻と乱数の出どころは種だけ。
+- 種の数は `QUICKER_SYNC_MODEL_SEEDS`（既定 60）と、広い世界の種の `QUICKER_SYNC_MODEL_WIDE_SEEDS`（既定 48・夜間 240）。広い世界の種は同じテストの中で既存の種の後に流し、種ごとの照合と再現の手順はその範囲の決め方で、既知の失敗の「起きない」の照合は既存の範囲の種だけで、網羅しない組の照合は 2 つの範囲がどちらも既定の種の数のときだけ行う。種の指紋は範囲ごとに別の記録（`SyncModel`・`SyncModelWide`）。時刻と乱数の出どころは種だけ。
 
 ### シナリオの操作とモデルの期待
 
@@ -277,7 +299,7 @@
 - `SyncModelSqlServerRuntimeTests`（Docker）：世界ごとにデータベースを作る実 SQL Server のサーバー役。生成された直結の差分ソース・本物の rowversion。サーバー側の失敗を仕掛けるシナリオと組は流さない。
 - どちらも次を確かめる。
   - 決定的なシナリオが直結と同じ違反になること。例外は入口・違反の種類・推定した形へ正規化して比べる（`SyncModelSignatures`）。
-  - 乱数の種が既知の失敗にしか当たらないこと。種の数は `QUICKER_SYNC_MODEL_TRANSPORT_SEEDS`（既定 10）。
+  - 乱数の種が既知の失敗にしか当たらないこと。種の数は `QUICKER_SYNC_MODEL_TRANSPORT_SEEDS`（既定 10）と、広い世界の種の `QUICKER_SYNC_MODEL_TRANSPORT_WIDE_SEEDS`（既定 4・夜間 40）。実 SQL Server は、どちらの範囲も種の組の余り 0・1 の種だけを流す。
 - SQL Server でだけ起きる既知の失敗は `SyncModelSqlServerRuntimeTests.SqlServerOnly` に置く。
 - 既知の失敗は `SyncModelKnownFailures` の厳格な一覧（載っているシナリオはその署名の組どおりに失敗しなければ赤・載っていない失敗も赤）で一時的に外し、直したら消す。受け入れの項目（サーバーでの一意な値の入れ替え 2 本）は、理由に docs の既知の割り切りの文を名指しする。
 

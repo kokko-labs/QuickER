@@ -33,6 +33,9 @@ internal sealed record SyncModelScenario(
     /// </summary>
     public bool OmitsTail { get; init; }
 
+    /// <summary>世界の端末（既定は端末 1・2。3 台目があって初めて起きる順序を書くシナリオだけが端末 3 を足す）</summary>
+    public IReadOnlyList<ModelActor> Devices { get; init; } = SyncModelWorldShape.TwoDevices;
+
     /// <summary>すべての転送（既定）</summary>
     public static IReadOnlySet<SyncModelTransport> AllTransports { get; } =
         new HashSet<SyncModelTransport>(Enum.GetValues<SyncModelTransport>());
@@ -87,6 +90,7 @@ internal sealed record SyncModelScenario(
             (options ?? SyncModelWorldOptions.Direct) with
             {
                 ExternalTables = ExternalTables,
+                Devices = Devices,
             }
         );
 
@@ -130,6 +134,7 @@ internal static partial class SyncModelScenarios
 {
     private const ModelActor D1 = ModelActor.Device1;
     private const ModelActor D2 = ModelActor.Device2;
+    private const ModelActor D3 = ModelActor.Device3;
     private const ModelActor SV = ModelActor.Server;
     private const ModelWriteVia Direct = ModelWriteVia.Direct;
 
@@ -2268,6 +2273,41 @@ internal static partial class SyncModelScenarios
                 new UpdateFolderOp(SV, Direct, 772, 773, "c772"),
                 new DeleteFolderOp(SV, Direct, 771),
                 new UpdateFolderOp(SV, Direct, 772, 773, "h771"),
+                Sync(D1),
+            ]
+        );
+
+        // 広い世界の種 120022 の形を縮めたもの（端末 2 台・最初の行なし）：端末が作ったフォルダー 1781 の名前を、サーバーの他者が
+        // 先にフォルダー 3781 で使い、端末の 1781 の下の品目 1782 と同じキーの品目を、サーバーでは 3781 の子 3782 の下に作る。
+        // サーバーの 3781 は、名前の持ち主 1781（サーバーに無い）を別の表の品目 1782 が参照していて消せないので毎回止まり、
+        // ServerWins は品目 1782 のサーバーの行の親（3782 → 3781）を持てないので戻さず記録を残す。どのポリシーの周でも抜けず、
+        // 静止化しない（既知の失敗の一覧に Pending で載せる。分類は holder-referenced-by-other-table）
+        yield return new(
+            "holder-referenced-by-other-table-does-not-settle",
+            [],
+            [
+                Folder(D1, 1781, name: "h1781"),
+                Item(D1, 1782, 1781),
+                Folder(SV, 3781, name: "h1781"),
+                Folder(SV, 3782, 3781),
+                Item(SV, 1782, 3782, code: "c-sv-1782"),
+                Sync(D1),
+            ]
+        );
+
+        // 夜間の種 400 の形を縮めたもの（品目の表）：端末が作った品目 1791 の code を、サーバーの他者が先に品目 3791 で使い、端末の
+        // 1791 を参照するイベントと同じキーのイベントを、サーバーでは 3791 を参照して作る。サーバーの 3791 は、code の持ち主 1791
+        // （サーバーに無い）を別の表のイベントが参照していて消せないので毎回止まり、ServerWins はイベントのサーバーの行の親（3791）を
+        // 持てないので戻さず記録を残す（既知の失敗の一覧に Pending で載せる）
+        var holderCycleEventAt = new DateTime(2026, 6, 1, 9, 0, 0, DateTimeKind.Unspecified);
+        yield return new(
+            "holder-referenced-by-other-table-items-does-not-settle",
+            [Folder(SV, 790)],
+            [
+                Item(D1, 1791, 790, code: "h1791"),
+                new AddEventOp(D1, Direct, holderCycleEventAt, 1791, "local"),
+                Item(SV, 3791, 790, code: "h1791"),
+                new AddEventOp(SV, Direct, holderCycleEventAt, 3791, "server"),
                 Sync(D1),
             ]
         );

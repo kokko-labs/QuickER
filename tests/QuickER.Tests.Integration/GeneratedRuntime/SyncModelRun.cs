@@ -93,12 +93,13 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         StringComparer.Ordinal
     );
 
-    // 報告された競合（根拠の確認用）
+    // 報告された競合（根拠の確認用）。InitialUnseen＝競合の時点で、その端末がまだ受け取っていない初期データのキーだったか
     private readonly List<(
         ModelActor Device,
         string Table,
         string Key,
-        SyncConflictReason Reason
+        SyncConflictReason Reason,
+        bool InitialUnseen
     )> _conflicts = [];
 
     private ModelDbState _initial = new();
@@ -119,15 +120,22 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
     public SyncModelWorld World => _world;
 
     /// <summary>
-    /// 世界を作り、サーバーへ初期データを入れて、端末 2 台を初期データへそろえる。
+    /// 世界を作り、サーバーへ初期データを入れて、端末を最初の形にする（既定は全端末を初期データへそろえる）。
     /// </summary>
     /// <param name="setup">初期データ（サーバーの他者の書き込みだけ）</param>
     /// <param name="ct">キャンセルトークン</param>
     /// <param name="options">世界の組み方（既定は直結・SQLite のサーバー役）</param>
+    /// <param name="preloads">
+    /// 端末ごとの最初の形（無い端末は <see cref="ModelPreload.None"/>＝後勝ちの静かな同期 1 回でそろえる）。
+    /// <see cref="ModelPreload.Refresh"/> は洗い替え 1 回で作り、<see cref="ModelPreload.Journaled"/> は書き込みの手を書き手の
+    /// 操作として流し（履歴へ積む）、<see cref="ModelPreload.Untracked"/> は行を Repository を通らずに入れる（誰の書き込みでも
+    /// ない＝履歴へ積まない）。後ろ 2 つは最初の同期をしない。初期データへそろったかの照合は前の 2 つの端末にだけ掛ける
+    /// </param>
     public static async Task<SyncModelRun> StartAsync(
         IReadOnlyList<ModelWriteOp> setup,
         CancellationToken ct,
-        SyncModelWorldOptions? options = null
+        SyncModelWorldOptions? options = null,
+        IReadOnlyList<SyncModelPreload>? preloads = null
     )
     {
         options ??= SyncModelWorldOptions.Direct;
@@ -144,26 +152,178 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             await run._world.ApplyAsync(op, ct);
         }
 
+        // 端末の最初の形はサーバーへ書かない（空の端末の静かな同期は送るものが無く、洗い替えは読むだけ）ので、初期データはここで読む
+        run._initial = await run._world.ReadStateAsync(ModelActor.Server, ct);
+
+        // 最初の同期をしない端末から見ると、初期データはまだ受け取っていないほかの書き手の内容（消失なし・根拠のない競合の判定が
+        // 使う。その端末がサーバーと同じ内容で持った時点で外す＝ForgetSeenInitialAsync）。最初の書き込みより前に控える
+        var unsynced = (preloads ?? [])
+            .Where(p => p.Kind is ModelPreload.Journaled or ModelPreload.Untracked)
+            .Select(p => p.Device)
+            .ToList();
+
+        foreach (var device in unsynced)
+        {
+            run._initialUnseen[device] =
+            [
+                .. ModelTables.All.SelectMany(table =>
+                    run._initial.Rows(table).Keys.Select(key => (table, key))
+                ),
+            ];
+        }
+
         foreach (var device in run._world.Devices)
         {
-            var op = Quiet(device.Actor, SyncMode.LastWriteWins);
-            run._log.Add("setup: " + op.Describe());
-            var outcome = await run._world.SyncAsync(op, ct);
+            var preload =
+                preloads?.SingleOrDefault(p => p.Device == device.Actor)
+                ?? new SyncModelPreload(device.Actor, ModelPreload.None, []);
 
-            if (outcome.Conflicts.Count > 0 || outcome.Truncations.Count > 0)
+            switch (preload.Kind)
             {
-                run._failures.Add(new("0/setup", "The initial sync did not finish cleanly."));
+                case ModelPreload.None:
+                {
+                    var op = Quiet(device.Actor, SyncMode.LastWriteWins);
+                    run._log.Add("setup: " + op.Describe());
+                    var outcome = await run._world.SyncAsync(op, ct);
+
+                    if (outcome.Conflicts.Count > 0 || outcome.Truncations.Count > 0)
+                    {
+                        run._failures.Add(
+                            new("0/setup", "The initial sync did not finish cleanly.")
+                        );
+                    }
+
+                    break;
+                }
+
+                case ModelPreload.Refresh:
+                    run._log.Add($"setup: {device.Actor} Refresh blobs=True");
+                    await run._world.RefreshAsync(
+                        device.Actor,
+                        new SyncRefreshOptions { IncludeUnboundedBinary = true },
+                        ct
+                    );
+                    run.CountPreloadEffect(RefreshBuilt);
+                    break;
+
+                case ModelPreload.Journaled:
+                    foreach (var write in preload.Writes)
+                    {
+                        run._log.Add("setup: " + write.Describe());
+                        run._preloadWritten.Add((device.Actor, write.Table, write.KeyText));
+
+                        if (!await run.WriteAsync(write))
+                        {
+                            run._failures.Add(
+                                new("0/setup", $"A preload write did not apply: {write.Describe()}")
+                            );
+                        }
+                    }
+
+                    break;
+
+                case ModelPreload.Untracked:
+                    foreach (var write in preload.Writes)
+                    {
+                        run._log.Add("setup: untracked " + write.Describe());
+                        await run._world.ApplyUntrackedAsync(write, ct);
+                        run._untrackedPreload.Add((write.Table, write.KeyText));
+                    }
+
+                    break;
             }
         }
 
-        run._initial = await run._world.ReadStateAsync(ModelActor.Server, ct);
-
-        if (!await run.ConvergedAsync())
+        if ((await run.DivergencesAsync(unsynced)).Count > 0)
         {
             run._failures.Add(new("0/setup", "The devices did not converge on the initial data."));
         }
 
         return run;
+    }
+
+    /// <summary>
+    /// 最初の同期をしていない端末が、まだ受け取っていない初期データのキー（その端末の版の競合では、初期データがほかの書き手に
+    /// なる。端末がそのキーをサーバーと同じ内容で持った時点で外す）
+    /// </summary>
+    private readonly Dictionary<ModelActor, HashSet<(string Table, string Key)>> _initialUnseen =
+    [];
+
+    /// <summary>
+    /// 端末が、まだ受け取っていない初期データのキーへ書いたキー（初期データもそのキーの書き手になる＝消失なしの表明は、書き手が
+    /// 2 人のキーとして期待を決めない）
+    /// </summary>
+    private readonly HashSet<(string Table, string Key)> _initialContested = [];
+
+    /// <summary>
+    /// 端末が Repository を通らずに入れ、まだどの書き込みも触れていない行（端末が初めて書いた時点で、その行の今の内容と blob を
+    /// その端末の書き込みとして履歴へ積む＝Repository 越しの更新・blob の書き込みは、サーバーへの挿入として全列を送る）
+    /// </summary>
+    private readonly HashSet<(string Table, string Key)> _untrackedPreload = [];
+
+    /// <summary>空振りの守り：洗い替えで作った端末が、初期データへそろった</summary>
+    public const string RefreshBuilt = "refresh-built";
+
+    /// <summary>空振りの守り：最初の同期の前に初期データのキーへ書いた記録が、サーバーへ上がって DuplicateOnServer になった</summary>
+    public const string JournaledDuplicateOnInitialKey = "journaled-duplicate-on-initial-key";
+
+    /// <summary>空振りの守り：最初の同期の前に書いた記録が、サーバーの一意な値の持ち主に断られた（UniqueValueTakenOnServer）</summary>
+    public const string JournaledUniqueValueTaken = "journaled-unique-value-taken";
+
+    /// <summary>空振りの守り：どの書き込みも触れなかった追跡しない行が、静止化の後にどの端末にも無い</summary>
+    public const string UntrackedRemoved = "untracked-removed";
+
+    /// <summary>空振りの守りの種類（<see cref="PreloadEffects"/> の鍵）</summary>
+    public static IReadOnlyList<string> PreloadEffectKinds { get; } =
+    [RefreshBuilt, JournaledDuplicateOnInitialKey, JournaledUniqueValueTaken, UntrackedRemoved];
+
+    /// <summary>端末の最初の形が実際に効いた件数（空振りしていないかを、既定の種の数で表明する）</summary>
+    public IReadOnlyDictionary<string, int> PreloadEffects => _preloadEffects;
+
+    private readonly Dictionary<string, int> _preloadEffects = new(StringComparer.Ordinal);
+
+    /// <summary>最初の同期の前に Repository 越しに書いた（端末, 表, キー）</summary>
+    private readonly HashSet<(ModelActor Device, string Table, string Key)> _preloadWritten = [];
+
+    private void CountPreloadEffect(string kind) =>
+        _preloadEffects[kind] = _preloadEffects.GetValueOrDefault(kind) + 1;
+
+    /// <summary>端末がまだ受け取っていない初期データのキーへ書いたら、そのキーを初期データとの書き手 2 人のキーとして控える</summary>
+    private void NoteInitialContested(ModelActor actor, string table, string key)
+    {
+        if (_initialUnseen.TryGetValue(actor, out var unseen) && unseen.Contains((table, key)))
+        {
+            _initialContested.Add((table, key));
+        }
+    }
+
+    /// <summary>
+    /// 端末の同期の後、まだ受け取っていない初期データのキーのうち、端末がサーバーと同じ内容（品目は blob も）で持つものを外す
+    /// </summary>
+    private async Task ForgetSeenInitialAsync(ModelActor device)
+    {
+        if (!_initialUnseen.TryGetValue(device, out var unseen) || unseen.Count == 0)
+        {
+            return;
+        }
+
+        var local = await _world.ReadStateAsync(device, _ct);
+        var server = await _world.ReadStateAsync(ModelActor.Server, _ct);
+        var localPayloads = local.Payloads();
+        var serverPayloads = server.Payloads();
+
+        unseen.RemoveWhere(entry =>
+            local.Row(entry.Table, entry.Key) is { } row
+            && string.Equals(row, server.Row(entry.Table, entry.Key), StringComparison.Ordinal)
+            && (
+                entry.Table != ModelTables.Items
+                || string.Equals(
+                    localPayloads.GetValueOrDefault(entry.Key),
+                    serverPayloads.GetValueOrDefault(entry.Key),
+                    StringComparison.Ordinal
+                )
+            )
+        );
     }
 
     /// <summary>
@@ -563,7 +723,19 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
 
                 if (!string.Equals(oldRow, newRow, StringComparison.Ordinal))
                 {
+                    NoteInitialContested(actor, table, key);
                     Append(_rows, (table, key), (actor, newRow));
+
+                    // 追跡しない行に端末が初めて書いた：その行の blob はこの端末の内容としてサーバーへ挿入される（挿入は全列を送る）
+                    if (
+                        _untrackedPreload.Remove((table, key))
+                        && table == ModelTables.Items
+                        && newRow is not null
+                        && after.Payloads().TryGetValue(key, out var adoptedHex)
+                    )
+                    {
+                        Append(_blobs, key, (actor, adoptedHex));
+                    }
 
                     // blob を書いた品目が消えたら、それ以前の blob の書き込みは期待値の根拠にならない（作り直した端末の
                     // blob が入る＝挿入は全列を送る）
@@ -586,7 +758,17 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         {
             if (!oldPayloads.TryGetValue(key, out var oldHex) || oldHex != hex)
             {
+                NoteInitialContested(actor, ModelTables.Items, key);
                 Append(_blobs, key, (actor, hex));
+
+                // 追跡しない行に端末が初めて書いたのが blob だけ：その行の内容もこの端末の内容としてサーバーへ挿入される
+                if (
+                    _untrackedPreload.Remove((ModelTables.Items, key))
+                    && after.Row(ModelTables.Items, key) is { } adoptedRow
+                )
+                {
+                    Append(_rows, (ModelTables.Items, key), (actor, adoptedRow));
+                }
             }
         }
     }
@@ -668,6 +850,8 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                 );
             }
 
+            await ForgetSeenInitialAsync(op.Device);
+
             return false;
         }
         catch (Exception ex) when (!quiescing && ConsumeExpectedThrow(op.Device, ex))
@@ -736,7 +920,34 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             }
 
             set.Add(op.Device);
-            _conflicts.Add((op.Device, conflict.TableName, key, conflict.Reason));
+
+            if (
+                conflict.Reason == SyncConflictReason.DuplicateOnServer
+                && _initialUnseen.TryGetValue(op.Device, out var unseenNow)
+                && unseenNow.Contains((conflict.TableName, key))
+            )
+            {
+                CountPreloadEffect(JournaledDuplicateOnInitialKey);
+            }
+
+            if (
+                conflict.Reason == SyncConflictReason.UniqueValueTakenOnServer
+                && _preloadWritten.Contains((op.Device, conflict.TableName, key))
+            )
+            {
+                CountPreloadEffect(JournaledUniqueValueTaken);
+            }
+
+            _conflicts.Add(
+                (
+                    op.Device,
+                    conflict.TableName,
+                    key,
+                    conflict.Reason,
+                    _initialUnseen.TryGetValue(op.Device, out var unseen)
+                        && unseen.Contains((conflict.TableName, key))
+                )
+            );
         }
 
         foreach (var truncation in outcome.Truncations)
@@ -748,6 +959,8 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                     + $"parent={(truncation.MissingParentTableName is { } parent ? ModelTables.Short(parent) : "-")}"
             );
         }
+
+        await ForgetSeenInitialAsync(op.Device);
 
         if (before is not null)
         {
@@ -1308,6 +1521,23 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
 
         await CheckConvergenceAsync();
         await CheckNoLossAsync();
+
+        // どの書き込みも触れなかった追跡しない行が、静止化の後にどの端末にも無い（上がらず削除伝搬で消えた）
+        foreach (var (table, key) in _untrackedPreload)
+        {
+            var present = false;
+
+            foreach (var device in _world.Devices)
+            {
+                present |=
+                    (await _world.ReadStateAsync(device.Actor, _ct)).Row(table, key) is not null;
+            }
+
+            if (!present)
+            {
+                CountPreloadEffect(UntrackedRemoved);
+            }
+        }
     }
 
     private async Task<bool> QuiesceAsync()
@@ -1408,7 +1638,10 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
     /// 静止化の最後の周に残った打ち切りを 1 件ずつ分類する。(a) 一意な値の厳密な入れ替え（打ち切った行 R のサーバーの値を
     /// ローカルの別の行 H が持ち、H のサーバーの値を R がローカルで持つ）＝<c>1/no-quiesce:unique-swap:{表}</c>。
     /// (b) R のサーバーの値をローカルで持つ H がサーバーに無く、R のローカルの行が H を参照する（値を取る行自身の古い参照が
-    /// 持ち主を残す）＝<c>1/no-quiesce:holder-referenced-by-taker:{表}</c>。続いて、説明の付いていない競合の行を端末・表ごとに集め、
+    /// 持ち主を残す）＝<c>1/no-quiesce:holder-referenced-by-taker:{表}</c>。
+    /// (b') R のサーバーの値をローカルで持つ H がサーバーに無く、別の表のローカルの行 C が H を（推移的に）参照し、C のサーバーの行が R の
+    /// 下にある（C は H を参照したまま R を待つ）＝<c>1/no-quiesce:holder-referenced-by-other-table:{表}</c>。H・C と、サーバーで R の
+    /// 下にあるために止まった打ち切りの行も説明済みにする。続いて、説明の付いていない競合の行を端末・表ごとに集め、
     /// (c) 端末側の一意な値の循環（どの行もローカルの値を、集まりの別の行がサーバーで持つ）＝<c>1/no-quiesce:pending-unique-cycle:{表}</c>
     /// に分ける。どれにも当たらない打ち切りか、説明の付かない競合が最後の周に残ったら、分類できないものがある（呼び出し側が粗い署名もあわせて出す＝分類できた分が隠さない）。
     /// </summary>
@@ -1419,12 +1652,32 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         var unclassified = _quiesceTruncations.Count == 0 && _quiesceConflicts.Count == 0;
         var explained = new HashSet<(ModelActor, string, string)>();
         var leftTruncations = new List<(ModelActor Device, string Table, string? Key)>();
+        var takers = new List<(ModelActor Device, string Table, string Key)>();
 
-        // (a)・(b)：打ち切りを 1 件ずつ分類する（打ち切った行と、その形の持ち主の行は説明済み）
+        // (a)・(b)・(b')：打ち切りを 1 件ずつ分類する（打ち切った行と、その形の持ち主の行は説明済み）
         foreach (var (device, table, key) in _quiesceTruncations.Distinct())
         {
             var local = await _world.ReadStateAsync(device, _ct);
             var stuck = key is null ? null : StuckShape(server, local, table, key);
+
+            if (
+                stuck is null
+                && key is not null
+                && OtherTableHolder(server, local, table, key) is { } other
+            )
+            {
+                signatures.Add($"1/no-quiesce:holder-referenced-by-other-table:{table}");
+                explained.Add((device, table, key));
+                explained.Add((device, table, other.Holder));
+                takers.Add((device, table, key));
+
+                foreach (var (referrerTable, referrer) in other.Referrers)
+                {
+                    explained.Add((device, referrerTable, referrer));
+                }
+
+                continue;
+            }
 
             if (stuck is not { } found)
             {
@@ -1461,6 +1714,20 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                 {
                     explained.Add((group.Key.Device, group.Key.Table, row));
                 }
+            }
+        }
+
+        // (b') の値を取る行 R を待つ打ち切り：サーバーの行が R の下にある行は、R が降りるまで止まる（R の形で説明済み）
+        foreach (var (device, table, key) in leftTruncations)
+        {
+            if (
+                key is not null
+                && takers.Any(t =>
+                    t.Device == device && IsUnder(server, table, key, t.Table, t.Key)
+                )
+            )
+            {
+                explained.Add((device, table, key));
             }
         }
 
@@ -1507,6 +1774,92 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                 )
             )
         );
+    }
+
+    /// <summary>
+    /// 打ち切った行 R の形 (b')：R のサーバーの値をローカルで持つ H がサーバーに無く、別の表のローカルの行 C が H を（推移的に）
+    /// 参照し、C のサーバーの行が R の下にある。持ち主 H と、その形の C の一覧（当たらなければ null）
+    /// </summary>
+    internal static (
+        string Holder,
+        IReadOnlyList<(string Table, string Key)> Referrers
+    )? OtherTableHolder(ModelDbState server, ModelDbState local, string table, string key)
+    {
+        if (UniqueValue(server, table, key) is not { } wanted)
+        {
+            return null;
+        }
+
+        var holders = local
+            .Rows(table)
+            .Keys.Where(k =>
+                k != key
+                && server.Row(table, k) is null
+                && string.Equals(UniqueValue(local, table, k), wanted, StringComparison.Ordinal)
+            )
+            .Order(StringComparer.Ordinal);
+
+        foreach (var holder in holders)
+        {
+            var referrers = ModelTables
+                .All.Where(other => other != table)
+                .SelectMany(other => local.Rows(other).Keys.Select(k => (Table: other, Key: k)))
+                .Where(c =>
+                    IsUnder(local, c.Table, c.Key, table, holder)
+                    && server.Row(c.Table, c.Key) is not null
+                    && IsUnder(server, c.Table, c.Key, table, key)
+                )
+                .ToList();
+
+            if (referrers.Count > 0)
+            {
+                return (holder, referrers);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>状態の中で、行 (rowTable, rowKey) の祖先（外部キーを親へ辿る。行自身は含めない）に (table, key) があるか</summary>
+    private static bool IsUnder(
+        ModelDbState state,
+        string rowTable,
+        string rowKey,
+        string table,
+        string key
+    )
+    {
+        var seen = new HashSet<(string, string)>();
+        var queue = new Queue<(string Table, string Key)>();
+        queue.Enqueue((rowTable, rowKey));
+
+        while (queue.TryDequeue(out var row))
+        {
+            if (!seen.Add(row))
+            {
+                continue;
+            }
+
+            foreach (var (_, parent, read) in References.Where(r => r.Child == row.Table))
+            {
+                foreach (var (_, parentKey) in read(state).Where(p => p.Key == row.Key))
+                {
+                    if (parentKey is null)
+                    {
+                        continue;
+                    }
+
+                    if (parent == table && parentKey == key)
+                    {
+                        return true;
+                    }
+
+                    queue.Enqueue((parent, parentKey));
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>打ち切った行の形（unique-swap・holder-referenced-by-taker）と、その形の持ち主の行（どちらでもなければ null）</summary>
@@ -1559,12 +1912,16 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
     /// <summary>端末 2 台がサーバーと一致しているか（表明 2 の判定の本体）</summary>
     private async Task<bool> ConvergedAsync() => (await DivergencesAsync()).Count == 0;
 
-    private async Task<List<ModelFailure>> DivergencesAsync()
+    private async Task<List<ModelFailure>> DivergencesAsync(
+        IReadOnlyCollection<ModelActor>? skipped = null
+    )
     {
         var server = await _world.ReadStateAsync(ModelActor.Server, _ct);
         var found = new List<ModelFailure>();
 
-        foreach (var device in _world.Devices)
+        foreach (
+            var device in _world.Devices.Where(d => skipped is null || !skipped.Contains(d.Actor))
+        )
         {
             var local = await _world.ReadStateAsync(device.Actor, _ct);
 
@@ -1650,11 +2007,13 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                 current.TryGetValue(key, out var finalRow);
                 _rows.TryGetValue((table, key), out var history);
 
-                // blob だけの書き込みも行への書き込み（再生は行を丸ごと送る＝行の単位で勝ち負けが決まる）
-                var blobWriters =
+                // blob だけの書き込みも行への書き込み（再生は行を丸ごと送る＝行の単位で勝ち負けが決まる）。まだ受け取って
+                // いない初期データのキーへ端末が書いたキーは、初期データ（サーバーの他者）も書き手に数える
+                var blobWriters = (
                     table == ModelTables.Items
                         ? (_blobs.GetValueOrDefault(key) ?? []).Select(h => h.Actor)
-                        : [];
+                        : []
+                ).Concat(_initialContested.Contains((table, key)) ? [ModelActor.Server] : []);
                 CheckKey(
                     table,
                     key,
@@ -1723,11 +2082,21 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                 continue;
             }
 
-            var writers = history.Select(h => h.Actor).Distinct().ToList();
+            var writers = history
+                .Select(h => h.Actor)
+                .Concat(
+                    _initialContested.Contains((ModelTables.Items, key)) ? [ModelActor.Server] : []
+                )
+                .Distinct()
+                .ToList();
             var expected = writers.Count switch
             {
                 0 => initialHex,
-                1 when conflicted is null || !conflicted.Contains(writers[0]) => history[^1].Hex,
+                1
+                    when history.Count > 0
+                        && (conflicted is null || !conflicted.Contains(writers[0])) => history[
+                    ^1
+                ].Hex,
                 _ => null,
             };
 
@@ -1743,7 +2112,7 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             }
         }
 
-        foreach (var (device, table, key, reason) in _conflicts)
+        foreach (var (device, table, key, reason, initialUnseen) in _conflicts)
         {
             if (
                 reason
@@ -1766,7 +2135,7 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                 )
                 .Where(a => a != device);
 
-            if (!others.Any())
+            if (!others.Any() && !initialUnseen)
             {
                 found.Add(
                     new(

@@ -6,7 +6,10 @@ using QuickER.Tests.GeneratedSyncModelFixture;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
-/// <summary>モデルの書き手（端末 2 台と、サーバーへ直接書く「他者」）</summary>
+/// <summary>
+/// モデルの書き手（端末と、サーバーへ直接書く「他者」）。世界の端末は端末 1・2 か、広い世界（<see cref="SyncModelWorldShape"/>）
+/// では端末 1〜3（値は品目の code に入るので、端末 3 は末尾に置いて端末 1・2 とサーバーの他者の値を変えない）
+/// </summary>
 internal enum ModelActor
 {
     /// <summary>端末 1（ローカル SQLite・ジャーナル記録デコレータ越しに書く）</summary>
@@ -17,6 +20,9 @@ internal enum ModelActor
 
     /// <summary>サーバーへ直接書く他者（版を採番するサーバー役のリポジトリ越し）</summary>
     Server,
+
+    /// <summary>端末 3（広い世界だけ）</summary>
+    Device3,
 }
 
 /// <summary>端末の書き込みの経路（直接の CRUD か、グラフ保存か）</summary>
@@ -113,7 +119,9 @@ internal abstract record ModelOp
         {
             ModelActor.Device1 => "D1",
             ModelActor.Device2 => "D2",
-            _ => "SV",
+            ModelActor.Device3 => "D3",
+            ModelActor.Server => "SV",
+            _ => throw new ArgumentOutOfRangeException(nameof(actor), actor, null),
         };
 
     /// <summary>NULL を含む値の表記</summary>

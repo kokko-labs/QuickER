@@ -77,17 +77,44 @@ internal static class SyncModelSignatures
     public static SeedSettings Seeds { get; } =
         new("QUICKER_SYNC_MODEL_TRANSPORT_SEEDS", 10, NightlySeedCount, firstSeed: 0);
 
+    /// <summary>夜間の広い世界の種の既定の数</summary>
+    public const int NightlyWideSeedCount = 40;
+
+    /// <summary>
+    /// 派生で流す広い世界の種（端末 3 台・環境変数 QUICKER_SYNC_MODEL_TRANSPORT_WIDE_SEEDS・既定 4・夜間は
+    /// <see cref="NightlyWideSeedCount"/>・<see cref="SyncModelWorldShape.WideSeedBase"/> から）
+    /// </summary>
+    public static SeedSettings WideSeeds { get; } =
+        new(
+            "QUICKER_SYNC_MODEL_TRANSPORT_WIDE_SEEDS",
+            4,
+            NightlyWideSeedCount,
+            firstSeed: SyncModelWorldShape.WideSeedBase
+        );
+
+    /// <summary>
+    /// 実 SQL Server の派生が流す種（失敗の注入なしの組＝種を 4 で割った余り 0・1 から、決め方の数だけ開始番号から順に）
+    /// </summary>
+    /// <param name="plan">決め方</param>
+    public static IReadOnlyList<int> SqlServerSeeds(SeedPlan plan) =>
+        Enumerable
+            .Range(plan.Settings.FirstSeed, plan.Seeds.Count * 4)
+            .Where(seed => seed % 4 is 0 or 1)
+            .Take(plan.Seeds.Count)
+            .ToList();
+
     /// <summary>種を並列に流し、既知の失敗（正規化）に当たらない失敗のある種を報告する</summary>
-    /// <param name="plan">流す種の決め方</param>
-    /// <param name="seeds">流す種</param>
+    /// <param name="ranges">
+    /// 流す種の範囲（決め方と、その決め方で流す種。既存の範囲の種と広い世界の種＝<see cref="SyncModelWorldShape"/>。種ごとに、その範囲の
+    /// 決め方で照合し再現の手順を書く）
+    /// </param>
     /// <param name="options">世界の作り方</param>
     /// <param name="known">既知の失敗の一覧</param>
     /// <param name="parallelism">並列度</param>
     /// <param name="ct">取り消し</param>
     /// <param name="coverage">操作を次元表のケースとして数える先（観測と要約だけ＝網羅しない組は照合しない）</param>
     public static async Task<string> RunSeedsAsync(
-        SeedPlan plan,
-        IEnumerable<int> seeds,
+        IReadOnlyList<(SeedPlan Plan, IReadOnlyList<int> Seeds)> ranges,
         SyncModelWorldOptions options,
         KnownFailureSet known,
         int parallelism,
@@ -101,7 +128,7 @@ internal static class SyncModelSignatures
 
         async Task RunAllAsync() =>
             await Parallel.ForEachAsync(
-                seeds,
+                ranges.SelectMany(range => range.Seeds),
                 new ParallelOptions
                 {
                     MaxDegreeOfParallelism = parallelism,
@@ -130,6 +157,7 @@ internal static class SyncModelSignatures
 
         foreach (var (seed, (failures, log)) in results.OrderBy(p => p.Key))
         {
+            var plan = ranges.First(range => range.Seeds.Contains(seed)).Plan;
             var classified = known.Classify(
                 failures.Select(f => new EngineFailure(
                     SyncModelKnownFailures.RandomScope,
@@ -214,10 +242,11 @@ public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output) : ISyncM
     {
         var plan = SeedSource.Resolve(SyncModelSignatures.Seeds);
         plan.WriteWarnings(output);
+        var widePlan = SeedSource.Resolve(SyncModelSignatures.WideSeeds);
+        widePlan.WriteWarnings(output);
         var coverage = new CoverageCounter(SyncModelDimensions.Table);
         var report = await SyncModelSignatures.RunSeedsAsync(
-            plan,
-            plan.Seeds,
+            [(plan, plan.Seeds), (widePlan, widePlan.Seeds)],
             Http,
             SyncModelSignatures.Known([]),
             Math.Clamp(Environment.ProcessorCount, 1, 4),
@@ -345,18 +374,18 @@ public sealed class SyncModelSqlServerRuntimeTests(
     {
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
 
-        // 失敗の注入なしの組（余り 0・1）から、種の数だけ（0 から順に）
+        // 失敗の注入なしの組（余り 0・1）から、種の数だけ（範囲の開始番号から順に）。広い世界の種も同じ選び方
         var plan = SeedSource.Resolve(SyncModelSignatures.Seeds);
         plan.WriteWarnings(output);
-        var seeds = Enumerable
-            .Range(0, plan.Seeds.Count * 4)
-            .Where(seed => seed % 4 is 0 or 1)
-            .Take(plan.Seeds.Count);
+        var widePlan = SeedSource.Resolve(SyncModelSignatures.WideSeeds);
+        widePlan.WriteWarnings(output);
         var coverage = new CoverageCounter(SyncModelDimensions.Table);
         var spellingTally = new ConcurrentDictionary<UniqueSpelling, int>();
         var report = await SyncModelSignatures.RunSeedsAsync(
-            plan,
-            seeds,
+            [
+                (plan, SyncModelSignatures.SqlServerSeeds(plan)),
+                (widePlan, SyncModelSignatures.SqlServerSeeds(widePlan)),
+            ],
             Options,
             SyncModelSignatures.Known(SqlServerOnly),
             2,

@@ -16,7 +16,7 @@ using Xunit;
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
-/// 同期エンジンのモデルベーステスト（端末 2 台＋サーバー・直結・サーバー役は SQLite）。乱数の操作の列と、指摘ごとの
+/// 同期エンジンのモデルベーステスト（端末 2 台か 3 台＋サーバー・直結・サーバー役は SQLite）。乱数の操作の列と、指摘ごとの
 /// 決定的なシナリオを流し、止まらない・収束する・消えないを表明する（表明の中身は <see cref="SyncModelRun"/>）。
 /// </summary>
 /// <remarks>
@@ -26,7 +26,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 既知として数えるだけにする（件数は出力へ書く）。
 /// </para>
 /// <para>
-/// 種の数は既定 60（環境変数 <c>QUICKER_SYNC_MODEL_SEEDS</c> で変えられる）。種は 1 つのテストの中で並列に流す
+/// 種の数は既定 60（環境変数 <c>QUICKER_SYNC_MODEL_SEEDS</c> で変えられる）。その後に広い世界の種（端末 3 台・端末ごとの
+/// 最初の形＝<see cref="SyncModelWorldShape"/>・<see cref="WideSeeds"/>）を流す。種は 1 つのテストの中で並列に流す
 /// （xUnit は同じクラスの Theory の行を並列に流さない）。世界は種ごとに作り、プロセス全体で共有するものは無い（ローカルの
 /// 書き込みロックはローカルの生 SQL 実行器ごと、抑制の印は非同期フローごと）。
 /// </para>
@@ -49,6 +50,21 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
     /// <summary>乱数の種（環境変数 QUICKER_SYNC_MODEL_SEEDS・既定 60・夜間は <see cref="NightlySeedCount"/>・0 から）</summary>
     public static SeedSettings Seeds { get; } =
         new("QUICKER_SYNC_MODEL_SEEDS", 60, NightlySeedCount, firstSeed: 0);
+
+    /// <summary>夜間の広い世界の種の既定の数</summary>
+    public const int NightlyWideSeedCount = 240;
+
+    /// <summary>
+    /// 広い世界の種（端末 3 台・<see cref="SyncModelWorldShape"/>。端末ごとの最初の形を種の番号から回す。環境変数 QUICKER_SYNC_MODEL_WIDE_SEEDS・既定 48・夜間は
+    /// <see cref="NightlyWideSeedCount"/>・<see cref="SyncModelWorldShape.WideSeedBase"/> から）。既存の範囲の種と同じテストの中で流す
+    /// </summary>
+    public static SeedSettings WideSeeds { get; } =
+        new(
+            "QUICKER_SYNC_MODEL_WIDE_SEEDS",
+            48,
+            NightlyWideSeedCount,
+            firstSeed: SyncModelWorldShape.WideSeedBase
+        );
 
     /// <summary>根拠を確かめる競合・決着の種類（<see cref="SyncModelRun.BasisChecks"/> の鍵）</summary>
     private static readonly string[] RefusalBasisKinds =
@@ -81,6 +97,9 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
     /// 一意な値の形ごとの、サーバーが同じ値の持ち主を根拠に断った件数を足し込む先（<see cref="SyncModelRun.SpellingRefusals"/>。
     /// null なら数えない）
     /// </param>
+    /// <param name="preloadTally">
+    /// 端末の最初の形が実際に効いた件数を足し込む先（<see cref="SyncModelRun.PreloadEffects"/>。null なら数えない）
+    /// </param>
     internal static async Task<(
         IReadOnlyList<ModelFailure> Failures,
         IReadOnlyList<string> Log
@@ -91,18 +110,28 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         CoverageCounter? coverage = null,
         ConcurrentDictionary<string, (int Checked, int WithBasis)>? basisTally = null,
         CoverageCounter? outcomes = null,
-        ConcurrentDictionary<UniqueSpelling, int>? spellingTally = null
+        ConcurrentDictionary<UniqueSpelling, int>? spellingTally = null,
+        ConcurrentDictionary<string, int>? preloadTally = null
     )
     {
         var generator = new SyncModelGenerator(seed);
-        await using var run = await SyncModelRun.StartAsync(generator.Setup(), ct, options);
+        var setup = generator.Setup();
+        await using var run = await SyncModelRun.StartAsync(
+            setup,
+            ct,
+            (options ?? SyncModelWorldOptions.Direct) with
+            {
+                Devices = generator.Shape.Devices,
+            },
+            generator.Preloads(setup)
+        );
         run.Log.Count.Should().BeGreaterThan(0);
 
         for (var step = 0; step < StepsPerSeed; step++)
         {
             var states = new Dictionary<ModelActor, ModelDbState>();
 
-            foreach (var actor in Enum.GetValues<ModelActor>())
+            foreach (var actor in run.World.Actors)
             {
                 states[actor] = await run.World.ReadStateAsync(actor, ct);
             }
@@ -138,6 +167,14 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             }
         }
 
+        if (preloadTally is not null)
+        {
+            foreach (var (kind, count) in run.PreloadEffects)
+            {
+                preloadTally.AddOrUpdate(kind, count, (_, sum) => sum + count);
+            }
+        }
+
         if (basisTally is not null)
         {
             foreach (var (reason, (count, withBasis)) in run.BasisChecks)
@@ -169,11 +206,14 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         var elapsed = new ConcurrentDictionary<int, TimeSpan>();
         var plan = SeedSource.Resolve(Seeds);
         plan.WriteWarnings(output);
+        var widePlan = SeedSource.Resolve(WideSeeds);
+        widePlan.WriteWarnings(output);
         var coverage = new CoverageCounter(SyncModelDimensions.Table);
         var outcomes = new CoverageCounter(SyncModelOutcomeDimensions.Table);
         var basisTally = new ConcurrentDictionary<string, (int Checked, int WithBasis)>(
             StringComparer.Ordinal
         );
+        var preloadTally = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
 
         var rowResults = new ConcurrentDictionary<
             string,
@@ -206,8 +246,9 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                     );
                 }
 
+                // 既存の範囲の種の後に、広い世界の種（端末 3 台）を同じ並列の列で流す
                 await Parallel.ForEachAsync(
-                    plan.Seeds,
+                    plan.Seeds.Concat(widePlan.Seeds),
                     new ParallelOptions
                     {
                         MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 1, 8),
@@ -221,7 +262,8 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                             ct,
                             coverage: coverage,
                             basisTally: basisTally,
-                            outcomes: outcomes
+                            outcomes: outcomes,
+                            preloadTally: preloadTally
                         );
                         elapsed[seed] = watch.Elapsed;
                     }
@@ -250,6 +292,8 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
 
         foreach (var (seed, (failures, log)) in results.OrderBy(p => p.Key))
         {
+            // 広い世界の種は広い世界の種の決め方で照合し、再現の手順もそちらの変数で書く
+            var seedPlan = SyncModelWorldShape.IsWide(seed) ? widePlan : plan;
             var classified = known.Classify(
                 failures.Select(f => new EngineFailure(
                     SyncModelKnownFailures.RandomScope,
@@ -258,7 +302,7 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                     seed,
                     f
                 )),
-                plan,
+                seedPlan,
                 scope => scope == SyncModelKnownFailures.RandomScope
             );
 
@@ -278,7 +322,7 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
 
             report.Add(
                 SeedFailure(seed, failures, classified, log, normalize: null),
-                plan.ReproductionFor(seed)
+                seedPlan.ReproductionFor(seed)
             );
         }
 
@@ -304,7 +348,9 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             );
         }
 
-        output.WriteLine($"seeds: {plan.Seeds.Count}, coverage rows: {rowResults.Count}");
+        output.WriteLine(
+            $"seeds: {plan.Seeds.Count}, wide seeds: {widePlan.Seeds.Count}, coverage rows: {rowResults.Count}"
+        );
 
         // 理由ごとの根拠の確認の件数（0 件の理由は確かめが一度も走っていない）
         foreach (
@@ -315,6 +361,12 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         )
         {
             output.WriteLine($"refusal basis {reason}: checked {count}, with basis {withBasis}");
+        }
+
+        // 端末の最初の形が実際に効いた件数（0 件の形は空振り）
+        foreach (var kind in SyncModelRun.PreloadEffectKinds)
+        {
+            output.WriteLine($"preload effect {kind}: {preloadTally.GetValueOrDefault(kind)}");
         }
 
         foreach (var (seed, time) in elapsed.OrderByDescending(p => p.Value).Take(5))
@@ -334,18 +386,21 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             );
 
         // 既定の種の数で必ず起きる乱数の項目（Reproduction＝RegularSeeds）が、どの種でも起きなかったら赤（種ごとの照合は
-        // 載っていない失敗だけを見るので、起きないことは全部の種をまとめて照合する）
+        // 載っていない失敗だけを見るので、起きないことは全部の種をまとめて照合する）。照合するのは既存の範囲の種だけ（項目の
+        // 再現の扱いは既存の範囲の既定の種の数で決めてある。広い世界の種は載っていない失敗だけを見る）
         known
             .Classify(
-                results.SelectMany(p =>
-                    p.Value.Failures.Select(f => new EngineFailure(
-                        SyncModelKnownFailures.RandomScope,
-                        f.Signature,
-                        f.Detail,
-                        p.Key,
-                        f
-                    ))
-                ),
+                results
+                    .Where(p => !SyncModelWorldShape.IsWide(p.Key))
+                    .SelectMany(p =>
+                        p.Value.Failures.Select(f => new EngineFailure(
+                            SyncModelKnownFailures.RandomScope,
+                            f.Signature,
+                            f.Detail,
+                            p.Key,
+                            f
+                        ))
+                    ),
                 plan,
                 scope => scope == SyncModelKnownFailures.RandomScope
             )
@@ -354,11 +409,17 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             .BeEmpty("a random-seed entry reproduced at the default seed count must still occur");
 
         // エンジンの結果を表明してから網羅を照合する（網羅の赤がエンジンの失敗を隠さない）
-        coverageReport.AssertGaps(SyncModelDimensions.Gaps, SyncModelDimensions.DirectScope, plan);
+        // 網羅しない組の照合は、2 つの範囲がどちらも既定の種の数のときだけ（広い世界の種の数を変えた実行は照合しない）
+        var gapPlan = widePlan.IsDefaultCount ? plan : widePlan;
+        coverageReport.AssertGaps(
+            SyncModelDimensions.Gaps,
+            SyncModelDimensions.DirectScope,
+            gapPlan
+        );
         outcomeReport.AssertGaps(
             SyncModelOutcomeDimensions.Gaps,
             SyncModelDimensions.DirectScope,
-            plan
+            gapPlan
         );
 
         // 理由の根拠の確認が空振りしていない（既定の種の数で、どの理由も 1 回以上確かめ、根拠のある形を 1 回以上見る）
@@ -369,6 +430,19 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                 var (count, withBasis) = basisTally.GetValueOrDefault(reason);
                 CoverageGuard.AtLeast($"refusal basis checks of {reason}", count, 1);
                 CoverageGuard.AtLeast($"refusal basis found for {reason}", withBasis, 1);
+            }
+        }
+
+        // 端末の最初の形が空振りしていない（広い世界の種が既定の種の数のとき、どの形も 1 回以上効く）
+        if (widePlan.IsDefaultCount)
+        {
+            foreach (var kind in SyncModelRun.PreloadEffectKinds)
+            {
+                CoverageGuard.AtLeast(
+                    $"preload effect {kind}",
+                    preloadTally.GetValueOrDefault(kind),
+                    1
+                );
             }
         }
     }
@@ -865,6 +939,65 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
     }
 
     [Fact(
+        DisplayName = "[Sync/モデル] 静止化の分類 holder-referenced-by-other-table は、名前の持ち主がサーバーに無く、別の表の参照する行のサーバーの行が値を取る行の下にある形だけを数える（対照）"
+    )]
+    public void OtherTableHolderShape_CountsOnlyTheNarrowShape()
+    {
+        // サーバー：フォルダー 3781（名前 h）とその子 3782、品目 1782 は 3782 の下。端末：フォルダー 1781（名前 h）の下に品目 1782
+        static (ModelDbState Server, ModelDbState Local) Shape()
+        {
+            var server = new ModelDbState();
+            server.Folders[3781] = (null, "h", null);
+            server.Folders[3782] = (3781, "f3782", null);
+            server.Folders[3790] = (null, "f3790", null);
+            server.Items[1782] = (3782, null, "c-sv", "t", "00");
+            var local = new ModelDbState();
+            local.Folders[1781] = (null, "h", null);
+            local.Folders[3790] = (null, "f3790", null);
+            local.Items[1782] = (1781, null, "c-local", "t", "00");
+
+            return (server, local);
+        }
+
+        string? Holder((ModelDbState Server, ModelDbState Local) states) =>
+            SyncModelRun
+                .OtherTableHolder(states.Server, states.Local, ModelTables.Folders, "3781")
+                ?.Holder;
+
+        Holder(Shape()).Should().Be("1781", "the shape itself");
+
+        var throughLabel = Shape();
+        throughLabel.Local.Labels["lab"] = (1781, "caption");
+        throughLabel.Local.Items[1782] = (3790, "lab", "c-local", "t", "00");
+        Holder(throughLabel)
+            .Should()
+            .Be("1781", "the referring row reaches the holder through a row of a third table");
+
+        var holderOnServer = Shape();
+        holderOnServer.Server.Folders[1781] = (null, "other", null);
+        Holder(holderOnServer).Should().BeNull("the holder is on the server");
+
+        var notUnderTaker = Shape();
+        notUnderTaker.Server.Items[1782] = (3790, null, "c-sv", "t", "00");
+        Holder(notUnderTaker)
+            .Should()
+            .BeNull("the referring row's server copy is not under the taker");
+
+        var referrerNotOnServer = Shape();
+        referrerNotOnServer.Server.Items.Remove(1782);
+        Holder(referrerNotOnServer).Should().BeNull("the referring row is not on the server");
+
+        var sameTableReferrer = Shape();
+        sameTableReferrer.Local.Items.Remove(1782);
+        sameTableReferrer.Local.Folders[3782] = (1781, "f3782", null);
+        Holder(sameTableReferrer)
+            .Should()
+            .BeNull(
+                "a referrer in the same table is holder-referenced-by-taker's shape, not this one"
+            );
+    }
+
+    [Fact(
         DisplayName = "[Sync/モデル] 既知の失敗の一覧は、存在するシナリオを名指しし、指摘の番号と直す区切りを持つ"
     )]
     public void KnownFailures_AreWellFormed()
@@ -887,6 +1020,7 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                         fixedIn == "区切り 30"
                         || fixedIn == "区切り 31"
                         || fixedIn == "修正 C"
+                        || fixedIn == SyncModelKnownFailures.StuckSyncFixedIn
                         || fixedIn.StartsWith("きっかけ待ち（台帳 ", StringComparison.Ordinal)
                             && fixedIn.EndsWith('）')
                     );
