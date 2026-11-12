@@ -669,8 +669,8 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 
 ### `table:TranslatorParityPredicates`
 
-- 名前：式の翻訳の述語の表（SQL Server・SQLite・インメモリと SQL Server の EF Core 版の結果を C# の意味論と突き合わせる）
-- テストのソース：`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityPredicateRows.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityRuntimeTestsBase.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityInMemoryRuntimeTests.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParitySqlServerRuntimeTests.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParitySqliteRuntimeTests.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityEfCoreSqlServerRuntimeTests.cs`
+- 名前：式の翻訳の述語の表（SQL Server・SQLite・インメモリと SQL Server・SQLite の EF Core 版の結果を C# の意味論と突き合わせる）
+- テストのソース：`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityPredicateRows.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityRuntimeTestsBase.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityInMemoryRuntimeTests.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParitySqlServerRuntimeTests.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParitySqliteRuntimeTests.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityEfCoreRuntimeTestsBase.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityEfCoreSqlServerRuntimeTests.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityEfCoreSqliteRuntimeTests.cs`
 - 範囲：`src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_05_QueryPipeline.scriban`・`src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_08_EfCore.scriban`・`src/QuickER.Runtime`・`src/QuickER.Runtime.EntityFrameworkCore`・`src/QuickER.Runtime.InMemory`・`src/QuickER.Runtime.SqlServer`・`src/QuickER.Runtime.Sqlite`
 
 ### `table:SyncPlanExpectations`

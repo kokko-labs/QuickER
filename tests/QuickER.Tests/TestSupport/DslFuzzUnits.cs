@@ -307,6 +307,11 @@ public static class DslFuzzUnits
                 valueObjects: false,
                 DslFuzzGenerator.OutOfTypeParameterPrefix
             ).OutOfTypeCoverageQueries(columns, decimalOrdered: dbms != DialectNames.Sqlite),
+            .. new DslFuzzGenerator(
+                DslFuzzGenerator.BigintDecimalSeed(CoverageSeed),
+                valueObjects: false,
+                DslFuzzGenerator.BigintDecimalParameterPrefix
+            ).BigintDecimalCoverageQueries(columns),
         ];
         var withPartners = AddPartners(columns, rows);
 
@@ -388,6 +393,13 @@ public static class DslFuzzUnits
             DslFuzzGenerator.OutOfTypeParameterPrefix
         );
 
+        // bigint の列と decimal のパラメータの原子は、4 本目の乱数の列で作って最後に足す（ほかの列の引き方を変えない）
+        var bigintDecimal = new DslFuzzGenerator(
+            DslFuzzGenerator.BigintDecimalSeed(seed),
+            valueObjects,
+            DslFuzzGenerator.BigintDecimalParameterPrefix
+        );
+
         return new DslFuzzUnit(
             name,
             TableName,
@@ -397,6 +409,7 @@ public static class DslFuzzUnits
                 .. queries,
                 .. side.SideQueries(columns, SideReuseQueries, SideOrderingQueries),
                 .. outOfType.OutOfTypeQueries(columns),
+                .. bigintDecimal.BigintDecimalQueries(columns),
             ],
             valueObjects,
             seed

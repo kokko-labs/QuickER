@@ -620,6 +620,11 @@ On the EF Core Repository this covers every parameter of a query (a named query,
 > Pass such a value in a variable, which EF Core sends as a parameter.
 > A string literal in a mini DSL condition is generated as a variable, so a named query answers as C# does.
 
+> **Known limitation**: on the EF Core Repository on SQL Server, comparing an integer column with a decimal column (`Query().Where(x => x.Qty > x.Price)`) can fail with an arithmetic overflow.
+> EF Core casts the integer column to the type of the decimal column (`decimal(10,2)`, say), so one row whose integer has more integral digits than that type holds makes the whole query fail.
+> The QuickER Repository compares the two columns without the cast.
+> A mini DSL condition compares a column with a value only, so a named query does not meet this.
+
 `Contains` on a list expands to one bind variable per element and is not chunked.
 A very large list therefore runs into the dialect's bind-variable or IN-list limit and fails at runtime (SQL Server's 2100 parameters, SQLite's historical 999).
 For a large set of keys, stage them in a temporary table and join, or use raw SQL.
@@ -1140,8 +1145,24 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 - A value-object column carries its length and precision (`HasMaxLength` / `HasPrecision`) like any other column, so a value that fits it is sent with the column's own type, and a condition on `.Value` casts to that type, rather than to EF Core's defaults (`nvarchar(max)`, `decimal(18,2)`).
 - A non-Unicode string column (`varchar`, `char` or `text` on SQL Server, `VARCHAR2`, `CHAR` or `CLOB` on Oracle) is configured with `IsUnicode(false)`, so its parameters are sent as non-Unicode text and the database can compare the column without converting it.
   The configuration follows the diagram's dialect, so a diagram meant to run on several databases keeps its string columns Unicode (`nvarchar` and the like).
+- On SQL Server, the generated `QuickErDbContext` makes EF Core convert an expression to `decimal(38,19)` when the conversion has no column to take its type from.
+  C# widens an integer to `decimal` when it is compared with one (`x.Id > 1.5m`), and EF Core writes that as `CAST([id] AS decimal(…))`.
+  With EF Core's default `decimal(18,2)`, a `bigint` value with more than 16 integral digits overflows the cast, and the whole query fails with an arithmetic overflow, whatever value it is compared with.
+  `decimal(38,19)` holds every `long` in its 19 integral digits and keeps 19 fractional digits.
+  A compared value with more digits than that is sent with its own type (see the next item).
+  The type of every property stays as it is, with or without a precision.
+  A parameter compared with a column still takes the column's type.
+  The same conversion in a projection or a calculation (`Select(x => x.Qty / 3m)`) also uses `decimal(38,19)`, so its result carries more fractional digits than with EF Core's default.
+  Other providers keep EF Core's default.
+  The generated context overrides `ConfigureConventions` for this.
+  To add conventions of your own, implement the partial method `ConfigureConventionsPartial(ModelConfigurationBuilder)` in another part of `QuickErDbContext`.
+- On SQLite, an equality or an IN between an integer and a `decimal` (`x.Qty == 10m`, or `Contains` over `decimal` values) is rewritten into a comparison of integers before EF Core translates the condition.
+  EF Core's SQLite provider stores a `decimal` as text and writes such an equality as a comparison of text (`CAST("qty" AS TEXT) = '10.0'`), so an integer value would never match.
+  The rewrite keeps the meaning C# gives the condition: a fraction or a value outside `long` matches no row, and `null` matches a `NULL` row.
+  It applies to the conditions of `Query()` (a named query, hand-written LINQ, `ExecuteDeleteAsync`).
+  Ordering comparisons, and comparisons of a `decimal` column, are not rewritten and are translated by EF Core as they were.
 - On SQL Server, a compared value that does not fit the type EF Core gave its parameter is sent with its own type, as the QuickER Repository sends it (see [Queries](#queries-expression-tree--sql)).
-  EF Core gives a parameter the type of the column it is compared with, and SqlClient converts the value to that type before sending it: `1.234` against a `decimal(10,2)` column becomes `1.23`, `0.999` against an integer column (which EF Core casts to `decimal(18,2)` for the comparison) becomes `1.00`, a value beyond the precision throws `ArgumentException`, and a character outside ASCII against a non-Unicode column becomes `?`.
+  EF Core gives a parameter the type of the column it is compared with, and SqlClient converts the value to that type before sending it: `1.234` against a `decimal(10,2)` column becomes `1.23`, a value beyond the precision throws `ArgumentException`, and a character outside ASCII against a non-Unicode column becomes `?`.
   `SqlServerQueryParameterInterceptor` drops the precision and scale of such a decimal parameter, and sends such text as Unicode text; a value that fits keeps the column's type, so the SQL and the use of an index on the column stay as they were.
   It changes the commands of LINQ queries and of `ExecuteDelete` / `ExecuteUpdate` only: `SaveChanges` sends its values as before, so a value that does not fit is stored as the column converts it.
   `AddGeneratedEfCoreRepositories` adds it to the DbContext options after your configuration.
