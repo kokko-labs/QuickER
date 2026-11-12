@@ -34,9 +34,9 @@
 | 機能 | QuickER 版 SQL Server | QuickER 版 SQLite | EF Core SQL Server | EF Core SQLite | EF Core PostgreSQL | EF Core MySQL | EF Core Oracle | インメモリ | リモート |
 |---|---|---|---|---|---|---|---|---|---|
 | `CrudParity` | 担当 | 担当 | 担当 | 担当 | 空き（きっかけ待ち） | 空き（きっかけ待ち） | 空き（きっかけ待ち） | 担当 | 担当（サーバー：QuickER 版 SQLite・EF Core SQLite） |
-| `Concurrency` | 担当 | 非該当 | 担当 | 非該当 | 非該当 | 非該当 | 非該当 | 担当 | 担当（サーバー：インメモリ） |
-| `EditModelSave` | 担当 | 非該当 | 担当 | 非該当 | 非該当 | 非該当 | 非該当 | 担当 | 担当（サーバー：インメモリ） |
-| `ConcurrencyVo` | 担当 | 非該当 | 担当 | 非該当 | 非該当 | 非該当 | 非該当 | 担当 | 担当（サーバー：インメモリ） |
+| `Concurrency` | 担当 | 非該当 | 担当 | 非該当 | 非該当 | 非該当 | 非該当 | 担当 | 担当（サーバー：QuickER 版 SQL Server・インメモリ・リポジトリなし） |
+| `EditModelSave` | 担当 | 非該当 | 担当 | 非該当 | 非該当 | 非該当 | 非該当 | 担当 | 担当（サーバー：QuickER 版 SQL Server・インメモリ） |
+| `ConcurrencyVo` | 担当 | 非該当 | 担当 | 非該当 | 非該当 | 非該当 | 非該当 | 担当 | 担当（サーバー：QuickER 版 SQL Server・インメモリ） |
 | `SaveHook` | 担当 | 担当 | 担当 | 担当 | 空き（きっかけ待ち） | 空き（きっかけ待ち） | 空き（きっかけ待ち） | 担当 | 担当（サーバー：QuickER 版 SQLite・EF Core SQLite） |
 | `BinaryColumn` | 担当 | 担当 | 空き（きっかけ待ち） | 担当 | 空き（きっかけ待ち） | 空き（きっかけ待ち） | 空き（きっかけ待ち） | 担当 | 担当（サーバー：QuickER 版 SQLite・EF Core SQL Server・EF Core SQLite・リポジトリなし） |
 | `BinaryColumnEditModel` | 空き（きっかけ待ち） | 担当 | 非該当 | 非該当 | 非該当 | 非該当 | 非該当 | 空き（きっかけ待ち） | 非該当 |
@@ -97,8 +97,7 @@ rowversion による楽観排他（版ガード・SaveConflictException の分�
 - EF Core MySQL：非該当＝rowversion 型は SQL Server だけにあり（src/QuickER.Runtime/CLAUDE.md「rowversion による楽観排他」の既知の制限）、PostgreSQL・MySQL・Oracle の図に版の列が生まれないため、版ガードの対象そのものが存在しない
 - EF Core Oracle：非該当＝rowversion 型は SQL Server だけにあり（src/QuickER.Runtime/CLAUDE.md「rowversion による楽観排他」の既知の制限）、PostgreSQL・MySQL・Oracle の図に版の列が生まれないため、版ガードの対象そのものが存在しない
 - インメモリ：担当＝`InMemoryConcurrencyRuntimeTests`・`SaveConflictDetailsRuntimeTests`
-- リモート：担当＝`RemoteConcurrencyRuntimeTests`（サーバー：インメモリ）・`SaveConflictDetailsRuntimeTests`（サーバー：インメモリ）
-- リモートの足りないサーバー：QuickER 版 SQL Server（きっかけ待ち）＝リモートの楽観排他のサーバーはインメモリだけで、実 rowversion を HTTP で往復させる QuickER 版 SQL Server のサーバーのテストは無い
+- リモート：担当＝`ConcurrencyRemoteAdoSqlServerRuntimeTests`（サーバー：QuickER 版 SQL Server）・`RemoteConcurrencyRuntimeTests`（サーバー：インメモリ）・`SaveConflictDetailsRuntimeTests`（サーバー：リポジトリなし）
 
 ### `EditModelSave`
 
@@ -112,7 +111,7 @@ EditModel の保存の受け入れ（AcceptSaved＝版・DB とフックが書�
 - EF Core MySQL：非該当＝rowversion 型は SQL Server だけにあり（src/QuickER.Runtime/CLAUDE.md「rowversion による楽観排他」の既知の制限）、PostgreSQL・MySQL・Oracle の図に版の列が生まれないため、版ガードの対象そのものが存在しない
 - EF Core Oracle：非該当＝rowversion 型は SQL Server だけにあり（src/QuickER.Runtime/CLAUDE.md「rowversion による楽観排他」の既知の制限）、PostgreSQL・MySQL・Oracle の図に版の列が生まれないため、版ガードの対象そのものが存在しない
 - インメモリ：担当＝`EditModelSaveInMemoryRuntimeTests`
-- リモート：担当＝`EditModelSaveRemoteRuntimeTests`（サーバー：インメモリ）
+- リモート：担当＝`EditModelSaveRemoteAdoSqlServerRuntimeTests`（サーバー：QuickER 版 SQL Server）・`EditModelSaveRemoteRuntimeTests`（サーバー：インメモリ）
 
 ### `ConcurrencyVo`
 
@@ -126,7 +125,7 @@ EditModel の保存の受け入れ（AcceptSaved＝版・DB とフックが書�
 - EF Core MySQL：非該当＝rowversion 型は SQL Server だけにあり（src/QuickER.Runtime/CLAUDE.md「rowversion による楽観排他」の既知の制限）、PostgreSQL・MySQL・Oracle の図に版の列が生まれないため、版ガードの対象そのものが存在しない
 - EF Core Oracle：非該当＝rowversion 型は SQL Server だけにあり（src/QuickER.Runtime/CLAUDE.md「rowversion による楽観排他」の既知の制限）、PostgreSQL・MySQL・Oracle の図に版の列が生まれないため、版ガードの対象そのものが存在しない
 - インメモリ：担当＝`ConcurrencyVoInMemoryRuntimeTests`
-- リモート：担当＝`ConcurrencyVoRemoteRuntimeTests`（サーバー：インメモリ）
+- リモート：担当＝`ConcurrencyVoRemoteAdoSqlServerRuntimeTests`（サーバー：QuickER 版 SQL Server）・`ConcurrencyVoRemoteRuntimeTests`（サーバー：インメモリ）
 
 ### `SaveHook`
 

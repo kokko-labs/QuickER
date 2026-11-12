@@ -164,6 +164,10 @@ public sealed class ConcurrencyVoSqlServerRuntimeTests(SqlServerContainerFixture
         child.MarkUpdated();
     }
 
+    protected override (string Reason, string? EntityTypeName, string? Key) Describe(
+        SaveConflictException exception
+    ) => (exception.Reason.ToString(), exception.EntityTypeName, exception.Key);
+
     protected override async Task<string?> ReadChildNoteAsync(int noteId) =>
         (await Notes().GetByIdAsync(NoteIdValue.Create(noteId), Ct))?.Note.Value;
 

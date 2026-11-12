@@ -145,24 +145,15 @@ public static class RuntimeMatrixRows
         Row(
             RuntimeFeatures.Concurrency,
             "rowversion による楽観排他（版ガード・SaveConflictException の分類）",
-            [
-                On(
-                    NotApplicable(
-                        "SQLite 単独の図に rowversion 列は生まれない（timestamp は日時の別名へ解決される）ため、"
-                            + "版ガードの対象そのものが存在しない。マルチターゲットでの非対称は MultiTargetRowVersion 行が持つ"
-                    ),
-                    RuntimeTarget.AdoSqlite,
-                    RuntimeTarget.EfCoreSqlite
+            On(
+                NotApplicable(
+                    "SQLite 単独の図に rowversion 列は生まれない（timestamp は日時の別名へ解決される）ため、"
+                        + "版ガードの対象そのものが存在しない。マルチターゲットでの非対称は MultiTargetRowVersion 行が持つ"
                 ),
-                On(NotApplicable(RowVersionOnlyOnSqlServer), EfCoreOthers),
-            ],
-            [
-                new(
-                    RuntimeTarget.AdoSqlServer,
-                    Trigger,
-                    "リモートの楽観排他のサーバーはインメモリだけで、実 rowversion を HTTP で往復させる QuickER 版 SQL Server のサーバーのテストは無い"
-                ),
-            ]
+                RuntimeTarget.AdoSqlite,
+                RuntimeTarget.EfCoreSqlite
+            ),
+            On(NotApplicable(RowVersionOnlyOnSqlServer), EfCoreOthers)
         ),
         Row(
             RuntimeFeatures.EditModelSave,

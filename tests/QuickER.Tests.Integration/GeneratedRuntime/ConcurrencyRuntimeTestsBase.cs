@@ -41,6 +41,7 @@ public enum ConcurrencyChoice
 ///   <item><c>ForceOverwrite</c> は版条件を外す（明示的な last-write-wins）</item>
 ///   <item>単一 <c>UpdateAsync</c> の「行なし」は競合ではなく従来契約の <c>false</c></item>
 ///   <item><c>insertWhenUpdateMissing</c> は「行なし→INSERT／版が古い→競合」を区別する（倒すと主キー重複に化ける）</item>
+///   <item>競合例外は内訳（理由 Modified / NotFound・型名・キー）を持つ（リモートは HTTP 409 を越えて同じ内訳を復元する）</item>
 ///   <item>列挙に無い <c>ConcurrencyMode</c> は入口で <see cref="ArgumentOutOfRangeException"/></item>
 /// </list>
 /// <para>
@@ -76,6 +77,9 @@ public abstract class ConcurrencyRuntimeTestsBase<TEntity, TConflictException>
 
     /// <summary>競合として報告されたことを示すメッセージ断片（全実装先で共通の文言）</summary>
     protected const string ConflictMessage = "*modified by another user*";
+
+    /// <summary>更新する行が無いことを競合として報告したことを示すメッセージ断片（全実装先で共通の文言）</summary>
+    protected const string NotFoundMessage = "*record to update was not found*";
 
     // ── 派生が差し込むアダプタ ──
 
@@ -145,6 +149,29 @@ public abstract class ConcurrencyRuntimeTestsBase<TEntity, TConflictException>
     /// <summary>子の現在値を読む（行なしは null）</summary>
     protected abstract Task<string?> ReadChildNoteAsync(int noteId);
 
+    /// <summary>
+    /// 競合例外の内訳（<c>Reason</c> の名前・<c>EntityTypeName</c>・<c>Key</c>）を読む
+    /// （<c>SaveConflictReason</c> もフィクスチャごとの namespace に出るため、名前の文字列で受ける）。
+    /// </summary>
+    protected abstract (string Reason, string? EntityTypeName, string? Key) Describe(
+        TConflictException exception
+    );
+
+    /// <summary>競合例外の内訳が、理由・ルートの型名・キーのとおりであることを表明する</summary>
+    private void ShouldDescribe(TConflictException exception, string reason, int key)
+    {
+        var (actualReason, entityTypeName, actualKey) = Describe(exception);
+
+        actualReason.Should().Be(reason, "競合の理由が内訳に載る");
+        entityTypeName.Should().Be(typeof(TEntity).Name, "競合した行の型名が内訳に載る");
+        actualKey
+            .Should()
+            .Be(
+                key.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "競合した行のキーが内訳に載る"
+            );
+    }
+
     /// <summary>保存先の現在のタイトルを読む（先勝ち／上書きの確認用・行なしは null）</summary>
     protected async Task<string?> ReadTitleAsync(int id)
     {
@@ -206,9 +233,10 @@ public abstract class ConcurrencyRuntimeTestsBase<TEntity, TConflictException>
         SetTitle(stale!, "by-me");
         var act = async () => await UpdateAsync(stale!);
 
-        await act.Should()
+        var thrown = await act.Should()
             .ThrowAsync<TConflictException>()
             .WithMessage(ConflictMessage, "版が一致せず競合として弾かれる");
+        ShouldDescribe(thrown.Which, "Modified", SeededRootId);
 
         (await ReadTitleAsync(SeededRootId))
             .Should()
@@ -274,7 +302,8 @@ public abstract class ConcurrencyRuntimeTestsBase<TEntity, TConflictException>
 
         var act = async () => await SaveAsync(root!);
 
-        await act.Should().ThrowAsync<TConflictException>();
+        var thrown = await act.Should().ThrowAsync<TConflictException>();
+        ShouldDescribe(thrown.Which, "Modified", SeededRootId);
 
         (await ReadTitleAsync(SeededRootId)).Should().Be("by-another-user", "親は先勝ちのまま");
         (await ReadChildNoteAsync(SeededChildId))
@@ -317,9 +346,10 @@ public abstract class ConcurrencyRuntimeTestsBase<TEntity, TConflictException>
         MarkRemoved(stale!);
         var act = async () => await SaveAsync(stale!);
 
-        await act.Should()
+        var thrown = await act.Should()
             .ThrowAsync<TConflictException>()
             .WithMessage(ConflictMessage, "版の古い行は削除できない");
+        ShouldDescribe(thrown.Which, "Modified", SeededChildlessRootId);
         (await GetAsync(SeededChildlessRootId)).Should().NotBeNull("削除はロールバックされる");
 
         (await SaveAsync(stale!, ConcurrencyChoice.ForceOverwrite)).Should().BeGreaterThan(0);
@@ -353,12 +383,35 @@ public abstract class ConcurrencyRuntimeTestsBase<TEntity, TConflictException>
 
         var act = async () => await SaveAsync(stale!, insertWhenUpdateMissing: true);
 
-        await act.Should()
+        var thrown = await act.Should()
             .ThrowAsync<TConflictException>()
             .WithMessage(
                 ConflictMessage,
                 "版違いは INSERT へ倒さず競合として報告する（主キー重複に化けない）"
             );
+        ShouldDescribe(thrown.Which, "Modified", SeededRootId);
+    }
+
+    /// <summary>
+    /// 8b. insertWhenUpdateMissing なしのグラフ保存で、更新する行が無ければ競合（理由 NotFound）になる
+    /// （単一 <c>UpdateAsync</c> の <c>false</c> と違い、グラフ保存は行なしを競合として報告する）。
+    /// </summary>
+    [Fact(DisplayName = "[Concurrency] 8b: SaveAsync の行なしの更新は NotFound の競合")]
+    public async Task SaveAsync_UpdateOfMissingRow_IsNotFoundConflict()
+    {
+        await ResetAndSeedAsync();
+
+        var missing = NewEntity(999, "ghost");
+        SetRowVersion(missing, [0, 0, 0, 0, 0, 0, 0, 1]);
+        MarkUpdated(missing);
+
+        var act = async () => await SaveAsync(missing);
+
+        var thrown = await act.Should()
+            .ThrowAsync<TConflictException>()
+            .WithMessage(NotFoundMessage, "行なしのグラフ更新は競合として報告する");
+        ShouldDescribe(thrown.Which, "NotFound", 999);
+        (await GetAsync(999)).Should().BeNull("行は作られない");
     }
 
     // ── 9. 未定義の ConcurrencyMode ──

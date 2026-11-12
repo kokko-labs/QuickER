@@ -99,7 +99,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
   - RemoteContractFixture.g.cs：QueryFixture と同一図で GenerateRemoteContracts=true
   - RemoteServiceFixture：同図で GenerateRemoteServices=true。本体＋RemoteServiceFixture.RemoteServer.g.cs の 2 ファイル構成（サーバーファイルの実コンパイルで ASP.NET Core 参照を検証）
   - BinaryFixture：ExcludeUnboundedBinaryColumns=true の SQLite 方言＋EF Core＋InMemory＋リモート。本体＋BinaryFixture.RemoteServer.g.cs の 2 ファイル構成
-  - SqlServerBinaryFixture.g.cs：BinaryFixture と同一図の SQL Server 方言版（QuickER 版 Repository 単独・図は BinaryFixtureDefinition.Build()。SqlServerBinaryColumnRuntimeTests）
+  - SqlServerBinaryFixture：BinaryFixture と同一図の SQL Server 方言版（QuickER 版 Repository＋リモート・図は BinaryFixtureDefinition.Build()）。本体＋SqlServerBinaryFixture.RemoteServer.g.cs の 2 ファイル構成（SqlServerBinaryColumnRuntimeTests・ConcurrencyRemoteAdoSqlServerRuntimeTests）
   - BinaryVoFixture.g.cs：VO 有効 × 無制限バイナリ除外 × EditModel/Mapper の最小構成（vault_items。BinaryVoEditModelRuntimeTests）
   - ConcurrencyFixture：rowversion 列 × VO の SQL Server 方言＋EF Core＋InMemory＋リモート。本体＋ConcurrencyFixture.RemoteServer.g.cs の 2 ファイル構成（gadgets / gadget_notes・除外列 attachment・kits / kit_parts の代替キー。ConcurrencyVo{InMemory,SqlServer,EfCore,Remote}RuntimeTests・RemoteEfCoreUnboundedBinarySqlServerRuntimeTests・BackendParitySqlServerRuntimeTests）
   - MultiTargetRowVersionFixture.g.cs：rowversion 列 × sqlserver/sqlite マルチターゲット（sync_items。MultiTargetRowVersion{,Sqlite}RuntimeTests）
