@@ -12,6 +12,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <summary>EditModel の保存と <c>AcceptSaved</c> の共通シナリオを、EF Core 版 Repository（SQL Server・実コンテナ）で流す派生（Docker）。</summary>
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.EditModelSave, RuntimeTarget.EfCoreSqlServer)]
 public sealed class EditModelSaveEfCoreRuntimeTests(SqlServerContainerFixture fixture)
     : EditModelSaveRuntimeTestsBase,
         IAsyncLifetime

@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using QuickER.Tests.GeneratedBinaryFixture;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -30,6 +31,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <para>実 DB を使わない（サーバー実体はインメモリ Repository）ため Docker 不要＝CI 常時実行。</para>
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.Concurrency, RuntimeTarget.InMemory)]
+[RuntimeCell(RuntimeFeatures.Concurrency, RuntimeTarget.Remote, Server = RuntimeTarget.InMemory)]
 public sealed class SaveConflictDetailsRuntimeTests : IAsyncLifetime
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;

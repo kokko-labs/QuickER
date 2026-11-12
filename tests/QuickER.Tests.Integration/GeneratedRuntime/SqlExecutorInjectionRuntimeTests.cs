@@ -6,6 +6,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedSqliteFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -25,6 +26,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.SqlExecutorInjection, RuntimeTarget.AdoSqlite)]
 public sealed class SqlExecutorInjectionRuntimeTests : IDisposable
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;

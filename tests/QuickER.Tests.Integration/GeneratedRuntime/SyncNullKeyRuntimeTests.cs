@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using AwesomeAssertions;
 using QuickER.Tests.GeneratedSyncModelFixture;
 using QuickER.Tests.GeneratedSyncModelFixture.Repositories.Sqlite;
+using QuickER.Tests.TestSupport;
 using Xunit;
 using SV = QuickER.Tests.GeneratedSyncVoFixture;
 using SVR = QuickER.Tests.GeneratedSyncVoFixture.Repositories.Sqlite;
@@ -15,6 +16,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// ジャーナル記録デコレータの GetById・Delete も、null のキーを ArgumentNullException（ParamName = "id"）で断り、ジャーナルへ
 /// 何も記録しないことを検証する（SyncModelFixture の文字列キーの model_labels）。
 /// </summary>
+[RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.AdoSqlite)]
 public sealed class SyncNullKeyRuntimeTests : IDisposable
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;

@@ -4,6 +4,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedTranslatorParityFixture;
 using QuickER.Tests.GeneratedTranslatorParityFixture.Repositories.Sqlite;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -13,6 +14,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// QuickER 版 Repository へ流す派生（Docker 不要＝CI で常時実行）。
 /// </summary>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.TranslatorOperator, RuntimeTarget.AdoSqlite)]
+[RuntimeCell(RuntimeFeatures.TranslatorParity, RuntimeTarget.AdoSqlite)]
 public sealed class TranslatorParitySqliteRuntimeTests
     : TranslatorParityRuntimeTestsBase,
         IDisposable

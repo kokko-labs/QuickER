@@ -32,6 +32,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.BusyTimeoutDefault, RuntimeTarget.EfCoreSqlite)]
 public sealed class EfCoreSqliteBusyTimeoutRuntimeTests : IDisposable
 {
     /// <summary>テスト全体で使うキャンセルトークン</summary>

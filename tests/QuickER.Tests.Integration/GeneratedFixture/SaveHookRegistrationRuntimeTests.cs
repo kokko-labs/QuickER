@@ -4,6 +4,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using QuickER.Tests.Integration.GeneratedRuntime;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.GeneratedInMemoryFixture;
@@ -24,6 +26,7 @@ namespace QuickER.Tests.GeneratedInMemoryFixture;
 /// </para>
 /// <para>実 DB を使わないインメモリ実装のため Docker 不要＝CI 常時実行。</para>
 /// </remarks>
+[RuntimeCell(RuntimeFeatures.SaveHook, RuntimeTarget.InMemory)]
 public sealed class SaveHookRegistrationRuntimeTests
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;

@@ -15,6 +15,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 [Trait("Category", "Integration")]
 [Collection(PostgreSqlContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.DialectPortability, RuntimeTarget.EfCorePostgreSql)]
 public sealed class GeneratedEfCorePostgreSqlRuntimeTests(PostgreSqlContainerFixture fixture)
     : GeneratedEfCoreDialectRuntimeTestsBase,
         IDisposable

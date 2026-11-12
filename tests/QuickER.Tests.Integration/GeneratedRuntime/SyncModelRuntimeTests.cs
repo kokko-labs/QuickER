@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using QuickER.Tests.GeneratedSyncModelFixture;
+using QuickER.Tests.TestSupport;
 using QuickER.Tests.TestSupport.Engines;
 using Xunit;
 
@@ -34,6 +35,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </remarks>
 [Trait("Category", "Integration")]
 [MatrixAxisValue(SyncModelTransportAxis.Name, nameof(SyncModelTransport.Direct))]
+[RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.AdoSqlite)]
 public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModelTransportTests
 {
     /// <summary>1 つの種の操作の数</summary>

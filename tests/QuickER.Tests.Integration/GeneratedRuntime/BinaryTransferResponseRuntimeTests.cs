@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedBinaryFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -22,6 +23,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// JSON の経路は期待した本文でない成功応答を失敗にしており、バイナリの経路もそろえる。
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.BinaryColumn, RuntimeTarget.Remote, ServerNone = true)]
 public sealed class BinaryTransferResponseRuntimeTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

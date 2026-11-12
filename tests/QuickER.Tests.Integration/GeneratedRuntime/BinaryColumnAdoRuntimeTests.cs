@@ -6,6 +6,7 @@ using AwesomeAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedBinaryFixture;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -15,6 +16,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 除外の読み書き・<c>WithUnboundedBinary()</c>・射影・生 SQL・Stream アクセサの契約は、実装先どうしの一致のシナリオ（<c>blob-*</c>）が
 /// 見る。ここに残すのは、その図に無いもの（有界バイナリ <c>checksum</c>・EditModel・名前付きクエリ）と、SQLite の rowid を使う単独の Read。
 /// </summary>
+[RuntimeCell(RuntimeFeatures.BinaryColumn, RuntimeTarget.AdoSqlite)]
 public sealed class BinaryColumnAdoRuntimeTests : BinaryColumnRuntimeTestsBase
 {
     /// <summary>QuickER の SQLite リポジトリ群を登録した DI コンテナ（接続文字列は基底の一時 DB）</summary>

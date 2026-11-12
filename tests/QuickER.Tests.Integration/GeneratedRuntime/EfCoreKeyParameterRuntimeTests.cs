@@ -24,6 +24,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// DB のプランが増える。値オブジェクトのキー（<c>CustomerIdValue</c>）を持つ QueryFixture を実ファイルの SQLite で動かし、
 /// 送られたコマンドをインターセプターで捕まえて見る。Docker 不要（CI 常時実行）。
 /// </remarks>
+[RuntimeCell(RuntimeFeatures.CrudParity, RuntimeTarget.EfCoreSqlite)]
 public sealed class EfCoreKeyParameterRuntimeTests : IDisposable
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;

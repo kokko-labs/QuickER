@@ -26,6 +26,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </remarks>
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.CrudParity, RuntimeTarget.EfCoreSqlServer)]
+[RuntimeCell(RuntimeFeatures.CrudParity, RuntimeTarget.AdoSqlServer)]
 public sealed class SchemaQualifiedTableRuntimeTests(SqlServerContainerFixture fixture)
     : IAsyncLifetime
 {

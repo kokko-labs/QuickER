@@ -18,6 +18,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 [Trait("Category", "Integration")]
 [Collection(OracleContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.DialectPortability, RuntimeTarget.EfCoreOracle)]
 public sealed class GeneratedEfCoreOracleRuntimeTests(OracleContainerFixture fixture)
     : GeneratedEfCoreDialectRuntimeTestsBase,
         IDisposable

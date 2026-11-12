@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using QuickER.Tests.GeneratedInMemoryFixture;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -23,6 +24,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 無条件に連なる。VO／string 主キーで null になる経路と<b>同じ観測結果</b>になることを固定する。
 /// </para>
 /// </remarks>
+[RuntimeCell(RuntimeFeatures.UniquenessCheck, RuntimeTarget.InMemory)]
 public sealed class UniquenessCheckInMemoryRuntimeTests
     : UniquenessCheckLocalRuntimeTestsBase<OrderEntity>
 {

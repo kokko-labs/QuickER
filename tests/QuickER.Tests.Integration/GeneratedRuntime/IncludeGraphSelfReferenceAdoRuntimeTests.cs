@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedMultiTargetFixture;
 using QuickER.Tests.GeneratedMultiTargetFixture.Repositories.Sqlite;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -11,6 +12,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// edge-skip の実行時観測を<b>QuickER の <c>SqliteRepository</c> 版</b>で実ファイル SQLite に流す派生
 /// （Docker 不要＝CI 常時実行）。
 /// </summary>
+[RuntimeCell(RuntimeFeatures.IncludeGraphSelfReference, RuntimeTarget.AdoSqlite)]
 public sealed class IncludeGraphSelfReferenceAdoRuntimeTests
     : IncludeGraphSelfReferenceMultiTargetRuntimeTestsBase,
         IDisposable

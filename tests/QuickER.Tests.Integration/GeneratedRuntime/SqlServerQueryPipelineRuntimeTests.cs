@@ -7,6 +7,7 @@ using AwesomeAssertions;
 using QuickER.Provider.SqlServer;
 using QuickER.Tests.GeneratedFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -47,6 +48,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 [Trait("Category", "Integration")]
 [Trait("RequiresDocker", "true")]
 [Collection(SqlServerContainerCollection.Name)]
+[RuntimeCell(RuntimeFeatures.CrudParity, RuntimeTarget.AdoSqlServer)]
 public sealed class SqlServerQueryPipelineRuntimeTests(SqlServerContainerFixture fixture)
 {
     /// <summary>共有コンテナのフィクスチャ</summary>

@@ -2,6 +2,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedConcurrencyFixture;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -10,6 +11,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// EditModel の保存と <c>AcceptSaved</c> の共通シナリオを、リモート（in-process の Kestrel・サーバー実体はインメモリ
 /// Repository）で流す派生（CI 常時）。Save フックはサーバー側に登録する。
 /// </summary>
+[RuntimeCell(RuntimeFeatures.EditModelSave, RuntimeTarget.Remote, Server = RuntimeTarget.InMemory)]
 public sealed class EditModelSaveRemoteRuntimeTests : EditModelSaveRuntimeTestsBase, IAsyncLifetime
 {
     private InProcessRemoteServer? _server;

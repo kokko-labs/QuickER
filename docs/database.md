@@ -19,7 +19,8 @@ How diff sync differs between them is listed in [Detected differences](#detected
 | SQLite | File DB |
 
 Import and sync against live databases have real-DB integration tests (SQL Server / PostgreSQL / MySQL / Oracle use Testcontainers containers; SQLite uses a real file DB).
-The container-based tests run only in environments where Docker is available and are skipped automatically on CI.
+The container-based tests are skipped automatically where Docker is unavailable (including the Windows CI job).
+The Linux CI job runs them against real containers in strict mode (`QUICKER_REQUIRE_DOCKER=1`), where a container that fails to start fails the test instead of skipping it.
 Each DBMS is also verified against one representative version rather than across the whole supported range in the table.
 
 ## Schema import (DB → diagram)

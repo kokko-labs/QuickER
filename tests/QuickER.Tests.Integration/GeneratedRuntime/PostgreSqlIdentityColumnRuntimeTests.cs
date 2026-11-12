@@ -29,6 +29,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 [Trait("Category", "Integration")]
 [Collection(PostgreSqlContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.IdentityColumn, RuntimeTarget.EfCorePostgreSql)]
 public sealed class PostgreSqlIdentityColumnRuntimeTests(PostgreSqlContainerFixture fixture)
     : IAsyncLifetime
 {

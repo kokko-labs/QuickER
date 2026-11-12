@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedConcurrencyFixture;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -25,6 +26,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// リモート面への転送登録も行う）。クライアントは生成された HTTP リモート実装のみを使う。
 /// </para>
 /// </remarks>
+[RuntimeCell(RuntimeFeatures.ConcurrencyVo, RuntimeTarget.Remote, Server = RuntimeTarget.InMemory)]
 public sealed class ConcurrencyVoRemoteRuntimeTests
     : ConcurrencyRuntimeTestsBase<GadgetEntity, SaveConflictException>,
         IAsyncLifetime

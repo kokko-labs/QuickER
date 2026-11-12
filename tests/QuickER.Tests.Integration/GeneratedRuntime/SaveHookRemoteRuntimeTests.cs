@@ -5,6 +5,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedBinaryFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -22,6 +23,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// スキップの原因を解いてから同じインスタンスを再保存する形は、途中でフックの規則を差し替える手が要るのでここに残す。
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.SaveHook, RuntimeTarget.Remote, Server = RuntimeTarget.AdoSqlite)]
 public sealed class SaveHookRemoteRuntimeTests : IAsyncLifetime
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;

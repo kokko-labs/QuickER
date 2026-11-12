@@ -15,6 +15,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 [Trait("Category", "Integration")]
 [Trait("RequiresDocker", "true")]
 [Collection(SqlServerContainerCollection.Name)]
+[RuntimeCell(RuntimeFeatures.TranslatorParity, RuntimeTarget.EfCoreSqlServer)]
 public sealed class TranslatorParityEfCoreSqlServerRuntimeTests(SqlServerContainerFixture fixture)
     : TranslatorParityEfCoreRuntimeTestsBase
 {

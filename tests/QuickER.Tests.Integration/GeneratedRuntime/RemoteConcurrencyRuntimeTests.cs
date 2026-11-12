@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedBinaryFixture;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -29,6 +30,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 除外列（payload / thumb）は値を持ったままだと UPDATE が拒否される既存仕様のため、一貫して未取得状態のまま扱う。
 /// </para>
 /// </remarks>
+[RuntimeCell(RuntimeFeatures.Concurrency, RuntimeTarget.Remote, Server = RuntimeTarget.InMemory)]
 public sealed class RemoteConcurrencyRuntimeTests
     : ConcurrencyRuntimeTestsBase<DocumentEntity, SaveConflictException>,
         IAsyncLifetime

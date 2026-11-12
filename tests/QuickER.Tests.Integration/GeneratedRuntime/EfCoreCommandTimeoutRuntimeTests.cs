@@ -22,6 +22,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </remarks>
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.CrudParity, RuntimeTarget.EfCoreSqlServer)]
+[RuntimeCell(RuntimeFeatures.SaveHook, RuntimeTarget.EfCoreSqlServer)]
 public sealed class EfCoreCommandTimeoutRuntimeTests(SqlServerContainerFixture fixture)
     : IAsyncLifetime
 {

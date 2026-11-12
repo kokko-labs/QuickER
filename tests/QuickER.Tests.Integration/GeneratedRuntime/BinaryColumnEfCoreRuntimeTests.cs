@@ -17,6 +17,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 除外列に値を入れたまま Update しても例外にならず DB へ書ける（この 2 つと Stream アクセサの NotSupportedException は、
 /// 実装先どうしの一致のシナリオ <c>blob-*</c> が QuickER 版と並べて見る）。ここに残すのは、その図に無い EditModel と名前付きクエリ。
 /// </summary>
+[RuntimeCell(RuntimeFeatures.BinaryColumn, RuntimeTarget.EfCoreSqlite)]
 public sealed class BinaryColumnEfCoreRuntimeTests : BinaryColumnRuntimeTestsBase
 {
     /// <summary>EF Core 版リポジトリ群を登録した DI コンテナ（UseSqlite・接続文字列は基底の一時 DB）</summary>

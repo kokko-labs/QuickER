@@ -4,6 +4,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedSyncFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -25,6 +26,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.Remote, Server = RuntimeTarget.AdoSqlite)]
+[RuntimeCell(RuntimeFeatures.SyncRefresh, RuntimeTarget.Remote, Server = RuntimeTarget.AdoSqlite)]
 public sealed class SyncHttpRuntimeTests : SyncRuntimeTestsBase
 {
     private InProcessRemoteServer? _remoteServer;

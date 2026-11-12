@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using QuickER.Tests.TestSupport;
 using QuickER.Tests.TestSupport.Engines;
 using Xunit;
 
@@ -30,6 +31,12 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 [Trait("Category", "Integration")]
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.AdoSqlServer)]
+[RuntimeCell(
+    RuntimeFeatures.SyncSupport,
+    RuntimeTarget.Remote,
+    Server = RuntimeTarget.AdoSqlServer
+)]
 public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixture)
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;

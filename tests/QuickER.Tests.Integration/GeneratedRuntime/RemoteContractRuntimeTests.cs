@@ -27,6 +27,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.RemoteContract, RuntimeTarget.AdoSqlite)]
+[RuntimeCell(RuntimeFeatures.RemoteContract, RuntimeTarget.EfCoreSqlite)]
 public sealed class RemoteContractRuntimeTests : IDisposable
 {
     /// <summary>テスト全体で使うキャンセルトークン</summary>

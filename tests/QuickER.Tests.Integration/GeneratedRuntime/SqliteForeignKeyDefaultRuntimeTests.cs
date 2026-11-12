@@ -6,6 +6,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedBinaryFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -25,6 +26,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.ForeignKeyDefault, RuntimeTarget.AdoSqlite)]
 public sealed class SqliteForeignKeyDefaultRuntimeTests : IAsyncLifetime
 {
     /// <summary>テスト全体で使うキャンセルトークン</summary>

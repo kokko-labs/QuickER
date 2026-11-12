@@ -8,6 +8,7 @@ using AwesomeAssertions;
 using QuickER.Tests.GeneratedSyncFixture;
 using QuickER.Tests.GeneratedSyncFixture.Repositories.Sqlite;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -41,6 +42,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.SyncRefresh, RuntimeTarget.AdoSqlite)]
 public sealed class SyncRefreshBenchmarkRuntimeTests(ITestOutputHelper output) : IAsyncLifetime
 {
     /// <summary>テスト全体で使うキャンセルトークン</summary>

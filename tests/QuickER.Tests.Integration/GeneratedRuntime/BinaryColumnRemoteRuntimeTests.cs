@@ -14,6 +14,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedBinaryFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -30,6 +31,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// HTTP に固有のもの（リクエストサイズの上限と 413・411・400・marker のない 404）。
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.BinaryColumn, RuntimeTarget.Remote, Server = RuntimeTarget.AdoSqlite)]
 public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;

@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using QuickER.Tests.GeneratedInMemoryFixture;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -14,6 +15,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 「Include ツリーに無い辺は組み立てない」がここでも成り立つことを固定する
 /// （FK が揃っているのだから“親切に”埋めてしまう実装は容易に書けてしまう）。
 /// </remarks>
+[RuntimeCell(RuntimeFeatures.IncludeGraphSelfReference, RuntimeTarget.InMemory)]
 public sealed class IncludeGraphSelfReferenceInMemoryRuntimeTests
     : IncludeGraphSelfReferenceRuntimeTestsBase<NodeEntity>
 {

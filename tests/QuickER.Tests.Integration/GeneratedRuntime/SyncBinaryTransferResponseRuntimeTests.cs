@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedSyncFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -20,6 +21,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// として書き、アップロードは何も保存されていないのにコピー済みとして記録を片づけてしまう。
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.Remote, ServerNone = true)]
 public sealed class SyncBinaryTransferResponseRuntimeTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

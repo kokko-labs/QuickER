@@ -15,6 +15,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 [Trait("Category", "Integration")]
 [Collection(MySqlContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.DialectPortability, RuntimeTarget.EfCoreMySql)]
 public sealed class GeneratedEfCoreMySqlRuntimeTests(MySqlContainerFixture fixture)
     : GeneratedEfCoreDialectRuntimeTestsBase,
         IDisposable

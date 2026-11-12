@@ -2,6 +2,8 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
+using QuickER.Tests.Integration.GeneratedRuntime;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.GeneratedInMemoryFixture;
@@ -28,6 +30,7 @@ namespace QuickER.Tests.GeneratedInMemoryFixture;
 /// ものもある）を比べて見る。ここに残すのは、その図に無い複合の一意制約と NULL を許す一意な列の規則だけ。
 /// </para>
 /// </remarks>
+[RuntimeCell(RuntimeFeatures.UniquenessEnforcement, RuntimeTarget.InMemory)]
 public sealed class InMemoryUniquenessRuntimeTests
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;

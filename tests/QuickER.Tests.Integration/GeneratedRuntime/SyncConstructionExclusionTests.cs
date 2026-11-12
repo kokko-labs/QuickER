@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedSyncFixture;
 using QuickER.Tests.GeneratedSyncFixture.Repositories.Sqlite;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -23,6 +24,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// カスケードで書く同期対象の行だけが記録される（その流れは同期の構成の行列の水準 GraphViaExcludedParent が見る）。
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.AdoSqlite)]
 public sealed class SyncConstructionExclusionTests : IDisposable
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;

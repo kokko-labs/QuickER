@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using QuickER.Tests.GeneratedBinaryFixture;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -11,6 +12,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// リモートの要求の印（<see cref="UnboundedBinaryColumns.EnterRemoteRequest"/>）が、入れ子・例外・並行の要求・呼び出し元へ
 /// 漏れないことを検証する（印が漏れると、直結の EF Core の更新が除外列を書かなくなる）。
 /// </summary>
+[RuntimeCell(RuntimeFeatures.BinaryColumn, RuntimeTarget.Remote, ServerNone = true)]
 public sealed class RemoteRequestMarkRuntimeTests
 {
     [Fact(DisplayName = "リモートの要求の印: 破棄すると外の状態へ戻り、2 回破棄しても変わらない")]

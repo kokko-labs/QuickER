@@ -39,6 +39,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 [Trait("Category", "Integration")]
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.BinaryColumn, RuntimeTarget.AdoSqlServer)]
 public sealed class SqlServerBinaryColumnRuntimeTests(SqlServerContainerFixture fixture)
     : IAsyncLifetime
 {

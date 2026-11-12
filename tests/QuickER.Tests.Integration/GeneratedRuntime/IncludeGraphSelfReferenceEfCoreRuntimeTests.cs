@@ -26,6 +26,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// このクラスは<b>モデル検証が通ること自体の実行時証拠</b>でもある（<c>Model</c> は最初の取得で必ず構築される）。
 /// </para>
 /// </remarks>
+[RuntimeCell(RuntimeFeatures.IncludeGraphSelfReference, RuntimeTarget.EfCoreSqlite)]
 public sealed class IncludeGraphSelfReferenceEfCoreRuntimeTests
     : IncludeGraphSelfReferenceRuntimeTestsBase<NodeEntity>,
         IDisposable

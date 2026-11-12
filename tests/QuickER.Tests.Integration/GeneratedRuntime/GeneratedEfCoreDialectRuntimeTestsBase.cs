@@ -238,9 +238,9 @@ public abstract class GeneratedEfCoreDialectRuntimeTestsBase
         order.Customer.Name.Value.Should().Be("Alice");
     }
 
-    /// <summary>4. TrackGraph グラフ保存（追加・更新・削除混在）: SaveAsync で再取得結果が一致する</summary>
+    /// <summary>4. SaveAsync のグラフ保存（追加・更新・削除混在）: 再取得結果が一致する</summary>
     [Fact(
-        DisplayName = "[Dialect] 4: TrackGraph グラフ保存（追加・更新・削除混在）が再取得で一致する"
+        DisplayName = "[Dialect] 4: SaveAsync のグラフ保存（追加・更新・削除混在）が再取得で一致する"
     )]
     public async Task SaveAsync_PersistsMixedGraph()
     {

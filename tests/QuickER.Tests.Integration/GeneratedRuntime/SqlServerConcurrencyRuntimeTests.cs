@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedSqlServerBinaryFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -27,6 +28,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </remarks>
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.Concurrency, RuntimeTarget.AdoSqlServer)]
 public sealed class SqlServerConcurrencyRuntimeTests(SqlServerContainerFixture fixture)
     : ConcurrencyRuntimeTestsBase<DocumentEntity, SaveConflictException>,
         IAsyncLifetime

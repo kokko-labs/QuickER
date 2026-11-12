@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using QuickER.Tests.Integration.GeneratedRuntime;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.GeneratedBinaryFixture;
@@ -28,6 +29,7 @@ namespace QuickER.Tests.GeneratedBinaryFixture;
 /// 未取得状態（null / 空配列）のまま扱う。
 /// </para>
 /// </remarks>
+[RuntimeCell(RuntimeFeatures.Concurrency, RuntimeTarget.InMemory)]
 public sealed class InMemoryConcurrencyRuntimeTests
     : ConcurrencyRuntimeTestsBase<DocumentEntity, SaveConflictException>
 {

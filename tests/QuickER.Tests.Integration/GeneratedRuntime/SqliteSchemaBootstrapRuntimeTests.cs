@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using QuickER.Provider.Sqlite;
 using QuickER.Tests.GeneratedBinaryFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -20,6 +21,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 1 コマンドで実行できる）、(2) 適用した DB に対して生成リポジトリの CRUD がそのまま動くこと。
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.SchemaBootstrap, RuntimeTarget.AdoSqlite)]
 public sealed class SqliteSchemaBootstrapRuntimeTests : IDisposable
 {
     /// <summary>テスト全体で使うキャンセルトークン</summary>

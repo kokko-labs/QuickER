@@ -2,11 +2,13 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedConcurrencyFixture;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>EditModel の保存と <c>AcceptSaved</c> の共通シナリオを、インメモリ Repository で流す派生（CI 常時）。</summary>
+[RuntimeCell(RuntimeFeatures.EditModelSave, RuntimeTarget.InMemory)]
 public sealed class EditModelSaveInMemoryRuntimeTests
     : EditModelSaveRuntimeTestsBase,
         System.IDisposable

@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using QuickER.Tests.GeneratedSyncFixture;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -25,6 +26,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.Remote, ServerNone = true)]
 public sealed class SyncEndpointRegistrationRuntimeTests
 {
     /// <summary>DI 登録だけを差し替えて WebApplication を組み立てる（起動はしない＝マップ時の挙動を見る）</summary>

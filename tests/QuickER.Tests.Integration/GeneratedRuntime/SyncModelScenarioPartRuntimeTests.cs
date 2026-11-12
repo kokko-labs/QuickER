@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -87,6 +88,7 @@ internal static class SyncModelScenarioParts
 
 /// <summary>直結の決定的なシナリオの 2 つ目の分（<see cref="SyncModelScenarioParts"/>）</summary>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.AdoSqlite)]
 public sealed class SyncModelRuntimeTestsPart2
 {
     /// <summary>このクラスが受け持つシナリオの名前</summary>
@@ -103,6 +105,7 @@ public sealed class SyncModelRuntimeTestsPart2
 
 /// <summary>HTTP の決定的なシナリオの 2 つ目の分（<see cref="SyncModelScenarioParts"/>）</summary>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.Remote, Server = RuntimeTarget.AdoSqlite)]
 public sealed class SyncModelHttpRuntimeTestsPart2
 {
     /// <summary>このクラスが受け持つシナリオの名前</summary>
@@ -119,6 +122,7 @@ public sealed class SyncModelHttpRuntimeTestsPart2
 
 /// <summary>HTTP の決定的なシナリオの 3 つ目の分（<see cref="SyncModelScenarioParts"/>）</summary>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.Remote, Server = RuntimeTarget.AdoSqlite)]
 public sealed class SyncModelHttpRuntimeTestsPart3
 {
     /// <summary>このクラスが受け持つシナリオの名前</summary>
@@ -135,6 +139,7 @@ public sealed class SyncModelHttpRuntimeTestsPart3
 
 /// <summary>HTTP の決定的なシナリオの 4 つ目の分（<see cref="SyncModelScenarioParts"/>）</summary>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.Remote, Server = RuntimeTarget.AdoSqlite)]
 public sealed class SyncModelHttpRuntimeTestsPart4
 {
     /// <summary>このクラスが受け持つシナリオの名前</summary>

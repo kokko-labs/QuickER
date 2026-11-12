@@ -6,6 +6,7 @@ using AwesomeAssertions;
 using Microsoft.Data.Sqlite;
 using QuickER.Tests.GeneratedSyncFixture.Repositories.Sqlite;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -27,6 +28,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.BusyTimeoutDefault, RuntimeTarget.AdoSqlite)]
 public sealed class SqliteBusyTimeoutDefaultRuntimeTests : IDisposable
 {
     /// <summary>テスト全体で使うキャンセルトークン</summary>

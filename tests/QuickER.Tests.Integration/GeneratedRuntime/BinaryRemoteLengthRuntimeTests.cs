@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedBinaryFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -24,6 +25,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 見るだけで、呼び出し側の Stream から余分なバイトを読まない。
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.BinaryColumn, RuntimeTarget.Remote, Server = RuntimeTarget.AdoSqlite)]
 public sealed class BinaryRemoteLengthRuntimeTests : IAsyncLifetime
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

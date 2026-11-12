@@ -6,6 +6,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedUniquenessSqlServerFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -25,6 +26,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </remarks>
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.UniquenessCheck, RuntimeTarget.AdoSqlServer)]
+[RuntimeCell(RuntimeFeatures.EditModelValidateUnique, RuntimeTarget.AdoSqlServer)]
 public sealed class UniquenessCheckSqlServerRuntimeTests(SqlServerContainerFixture fixture)
     : UniquenessCheckLocalRuntimeTestsBase<OrderEntity>,
         IAsyncLifetime

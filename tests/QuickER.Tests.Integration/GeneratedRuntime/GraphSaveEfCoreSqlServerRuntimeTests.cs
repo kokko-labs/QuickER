@@ -35,6 +35,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </remarks>
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
+[RuntimeCell(RuntimeFeatures.GraphSave, RuntimeTarget.EfCoreSqlServer)]
 public sealed class GraphSaveEfCoreSqlServerRuntimeTests(SqlServerContainerFixture fixture)
     : IAsyncLifetime
 {

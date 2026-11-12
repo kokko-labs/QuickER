@@ -97,6 +97,10 @@
     />
     <!-- テストの一時フォルダ（%TEMP%\QuickERTests\<guid>・破棄で消す）。QuickER.Tests と同じ 1 ファイルを使う -->
     <Compile Include="..\QuickER.Tests\TestSupport\TestTempFolder.cs" LinkBase="TestSupport" />
+    <!-- 生成コードの実装先の正本と担当の属性（機能 × 実装先の行列）。QuickER.Tests と同じ 1 ファイルを使う -->
+    <Compile Include="..\QuickER.Tests\TestSupport\RuntimeTargets.cs" LinkBase="TestSupport" />
+    <!-- 理由つきの既知の一覧の 2 方向の照合（名前の規則のガードが使う）。QuickER.Tests と同じ 1 ファイルを使う -->
+    <Compile Include="..\QuickER.Tests\TestSupport\GuardKnownList.cs" LinkBase="TestSupport" />
   </ItemGroup>
 
   <ItemGroup>

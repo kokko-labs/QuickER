@@ -31,6 +31,11 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// EF Core を続けて呼ぶ形だけを残す。
 /// </para>
 /// </remarks>
+[RuntimeCell(
+    RuntimeFeatures.BinaryColumn,
+    RuntimeTarget.Remote,
+    Server = RuntimeTarget.EfCoreSqlite
+)]
 public sealed class RemoteEfCoreUnboundedBinaryRuntimeTests : IAsyncLifetime
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;

@@ -1,6 +1,7 @@
 using System;
 using AwesomeAssertions;
 using QuickER.Tests.GeneratedSyncModelFixture;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -15,6 +16,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 生成された記述子で直接確かめる。
 /// </remarks>
 [Trait("Category", "Integration")]
+[RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.AdoSqlite)]
 public sealed class SyncKeyTextRuntimeTests
 {
     private const string Expected = "2026-07-03T08:00:00.0000009";

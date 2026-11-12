@@ -19,6 +19,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <see cref="NotSupportedException"/>）は、実装先の一致のシナリオ（<c>hook-skip-parent-orphans-child</c>・
 /// <c>hook-after-sql-then-later-after-throws</c>・<c>hook-after-write-blob-not-supported-on-ef-core</c>）が持つ。
 /// </remarks>
+[RuntimeCell(RuntimeFeatures.SaveHook, RuntimeTarget.EfCoreSqlite)]
 public sealed class SaveHookEfCoreRuntimeTests : SaveHookRuntimeTestsBase, IDisposable
 {
     private readonly SqliteTempDatabase _db = SqliteTempDatabase.Create();
