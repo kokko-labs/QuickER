@@ -23,7 +23,7 @@ internal static class DslFuzzNotGenerated
                 NotGenerated.Pending(
                     "column-type-families",
                     "列の型の族（float・bool・DateOnly・TimeOnly・DateTimeOffset・TimeSpan・Binary）",
-                    "型の族の区切り（未起動・bool から）",
+                    "きっかけ待ち（型の族の区切り・bool から）",
                     "生成器の列の型（DslClr）にこれらの族が無い。族ごとの実装先の意味が docs に無く、足すと族ごとに仕様の判断が要る",
                     "`CodegenConfig/Cases`（行 `diag-query-type-check-rejects-*`）"
                 ),
@@ -39,13 +39,6 @@ internal static class DslFuzzNotGenerated
                     "断るリテラルはクエリごと警告で飛ばすので、合成の条件に混ぜるとほかの原子を照合しなくなる。原子のクエリでだけ作り、飛ばされることを表明する",
                     "`Dsl/SqliteMySql`"
                 ),
-                NotGenerated.Pending(
-                    "same-parameter-twice",
-                    "同じパラメータを 2 回参照する条件",
-                    "簡易 DSL の残りの区切り（未起動）",
-                    "生成器は条件の値ごとに別の名前のパラメータを作るので、1 つのパラメータを条件の 2 か所から参照する形を総当たりが通らない",
-                    NotGenerated.Unguarded
-                ),
                 NotGenerated.Accepted(
                     "scalar-return",
                     "Scalar の戻り形",
@@ -58,17 +51,23 @@ internal static class DslFuzzNotGenerated
                     "名前の形の網羅は名前の総当たりが受け持つ。総当たりの照合の対象は条件の意味で、名前の綴りに依らない",
                     "`Name/Entrances`"
                 ),
+                NotGenerated.Accepted(
+                    "string-order-columns",
+                    "文字列の列での並び替え（主キーより前の並び）",
+                    "docs は実装先をまたぐ文字列の並びを約束していない（インメモリは序数・SQL Server は照合順序＝docs のインメモリの節「実 DB との既知の乖離」）。主キーの GuidKey の並びは序数で比べる",
+                    "`Dsl/SqliteMySql`"
+                ),
                 NotGenerated.Pending(
-                    "multi-column-order",
-                    "複数列の並び替え",
-                    "簡易 DSL の残りの区切り（未起動）",
-                    "並び替えはいつも 1 列で、2 列目以降の並び替えの生成コードを総当たりが通らない",
+                    "values-outside-column-type-efcore",
+                    "列の型に入らない値（decimal の精度・スケールの外）を、より広い型のパラメータで比べる（SQL Server の EF Core 版）",
+                    "EF Core のパラメータの型の区切り（未起動）",
+                    "SQL Server の EF Core 版はパラメータを比べる相手の列の型で束縛し、精度の外の値は例外、スケールの外の値は丸めて誤った行を返す。生成器は型が広がる組で相手の列に入る値だけを選ぶ",
                     NotGenerated.Unguarded
                 ),
                 NotGenerated.Pending(
                     "postgresql-oracle-backends",
                     "PostgreSQL と Oracle の構成の実装先",
-                    "簡易 DSL の残りの区切り（未起動）",
+                    "きっかけ待ち（簡易 DSL の残りの区切り）",
                     "QuickER 版 Repository は SQL Server と SQLite の方言しか生成しないので、PostgreSQL・Oracle の構成の実装先は EF Core 版とインメモリだけになる。EF Core 版は実 DB で流す実装先で、総当たりは PostgreSQL・Oracle の実 DB を持たないため、両方言の EF Core のプロバイダが条件を訳した結果を照合していない",
                     NotGenerated.Unguarded
                 ),

@@ -1086,6 +1086,7 @@ public static partial class BackendParityScenarios
         .. GraphSaveRuntimeScenarios(),
         .. SaveHookRuntimeScenarios(),
         .. BlobRuntimeScenarios(),
+        .. NullIntoNotNullScenarios(),
         .. RemoteRuntimeScenarios(),
     ];
 

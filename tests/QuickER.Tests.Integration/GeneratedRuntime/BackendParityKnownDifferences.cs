@@ -38,6 +38,12 @@ public enum ParityDeviation
 
     /// <summary>Before が値を書き換えて続ける規則に当たる削除（リモート＝P2-5-R1）</summary>
     HookEditsDeletedRow,
+
+    /// <summary>
+    /// NOT NULL の列への null の書き込み（除外した blob の Stream の SET NULL・NOT NULL の列が null の行の挿入。DB は断る・NOT NULL を
+    /// 検査しない実装先は書く）
+    /// </summary>
+    NullIntoNotNull,
 }
 
 /// <summary>直す区切りのある手の差の 1 項目（実装先・手の種類・指摘・直す区切り）</summary>
@@ -189,6 +195,9 @@ public static class BackendParityKnownDifferences
         new(InMemory, ParityDeviation.OrphanInsert, "P2", InMemoryForeignKeyReason),
         new(InMemory, ParityDeviation.ReferencedKeyUpdate, "P2", InMemoryForeignKeyReason),
         new(InMemory, ParityDeviation.DependentHeldParentDelete, "P1", InMemoryForeignKeyReason),
+        // H1（受容・直さない）: インメモリは NOT NULL を検査しない。NOT NULL の列が null の行を挿入し、除外した blob の Stream の
+        // SET NULL も書く（実 DB は断る）。インメモリの振る舞いは変えず、docs の「実 DB との既知の違い」に書く（決定 2026-11-12）
+        new(InMemory, ParityDeviation.NullIntoNotNull, "H1", InMemoryNotNullReason),
     ];
 
     /// <summary>その実装先で、その手の差を受け入れたか</summary>
@@ -238,6 +247,8 @@ public static class BackendParityKnownDifferences
         "リモートの Save フックの書き換えは保存の応答が運び、断られた保存は値を運ばない（docs のリモートサービスの「サーバーが入れた値も戻ります」）";
     private const string InMemoryForeignKeyReason =
         "インメモリは外部キーと参照動作を再現しない（決定 2026-10-13・docs の実 DB との既知の違い）";
+    private const string InMemoryNotNullReason =
+        "インメモリは NOT NULL を検査しない（決定 2026-11-12・docs の実 DB との既知の違い）";
 
     /// <summary>違いの署名（実装先と観点）</summary>
     public static string SignatureOf(ParityBackendKind backend, string aspect) =>

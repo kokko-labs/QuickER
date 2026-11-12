@@ -15,7 +15,7 @@ internal static class CanvasInputNotGenerated
                 NotGenerated.Pending(
                     "wheel-and-reorder-edges",
                     "Shift とホイール・幅の下限とズームの端・列一覧の 3 行目以降の並べ替え",
-                    "入力の列の残りの区切り（未起動）",
+                    "きっかけ待ち（入力の列の残りの区切り）",
                     "ホイールは修飾キーなし、ズームは端に届かない範囲、列一覧の並べ替えは先頭の 2 行だけ。ビューポートのビヘイビアと列一覧の並べ替えはこれらで分岐する",
                     NotGenerated.Unguarded
                 ),

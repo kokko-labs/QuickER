@@ -10,7 +10,6 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 internal static class BackendParityNotGenerated
 {
     private const string Parity = "`GeneratedRuntime/Parity`";
-    private const string Rest = "実装先の一致の残りの区切り（未起動）";
 
     /// <summary>宣言</summary>
     public static NotGeneratedDeclaration Declaration { get; } =
@@ -67,16 +66,9 @@ internal static class BackendParityNotGenerated
                     "`BackendParitySqlServerRuntimeTests`（行 `own-write-*`）"
                 ),
                 NotGenerated.Pending(
-                    "null-into-not-null-excluded-blob",
-                    "NOT NULL の除外した blob への NULL の書き込み",
-                    Rest,
-                    "インメモリが NOT NULL の除外列を検査するかを測っていない。実 DB と食い違うかを確かめてから、受け入れた差か水準かを決める",
-                    NotGenerated.Unguarded
-                ),
-                NotGenerated.Pending(
                     "other-dialects",
                     "SQLite 以外の方言の乱数の列",
-                    "実装先の一致の SQL Server の乱数の列（未起動）",
+                    "きっかけ待ち（実装先の一致の SQL Server の乱数の列）",
                     "乱数の列は SQLite の BackendParityFixture だけで流す。QuickER 版と EF Core の SQL は方言で分岐する（SQL Server の系統は乱数の保存だけを持つ）",
                     "`GeneratedRuntime/ParitySqlServerSaves`"
                 ),

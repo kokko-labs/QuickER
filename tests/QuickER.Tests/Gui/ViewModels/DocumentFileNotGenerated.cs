@@ -33,7 +33,7 @@ internal static class DocumentFileNotGenerated
                 NotGenerated.Pending(
                     "encoding-size-and-path-forms",
                     "UTF-16 のファイル・巨大なファイル・パスの形（相対・UNC・長いパス）",
-                    "図ファイルの残りの区切り（未起動）",
+                    "きっかけ待ち（図ファイルの残りの区切り）",
                     "ファイルはいつも UTF-8 の小さな内容で、パスは一時フォルダの下の絶対パス。読み込み（JsonStorageService.TryLoad）とパスの正規化はこれらで分岐する",
                     NotGenerated.Unguarded
                 ),

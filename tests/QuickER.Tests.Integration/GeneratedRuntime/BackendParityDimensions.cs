@@ -313,6 +313,7 @@ internal static class BackendParityDimensions
             DeviatingOp deviating => KindOf(deviating.Inner),
             InsertOp { Row: CustomerRow } => "InsertCustomer",
             InsertOp { Row: OrderRow } => "InsertOrder",
+            InsertOp { Row: NullColumnOrderRow } => "InsertOrder",
             InsertOp { Row: LineRow } => "InsertLine",
             InsertOp { Row: ContactRow } => "InsertContact",
             LoadOp { Table: "customers" } => "LoadCustomer",
@@ -412,6 +413,7 @@ internal static class BackendParityDimensions
                 nameof(ParityDeviation.ReferencedKeyUpdate)
                 or nameof(ParityDeviation.AlternateKeyUpdate) => ["SaveCustomer", "UpdateCustomer"],
                 nameof(ParityDeviation.DependentHeldParentDelete) => ["SaveManyCustomers"],
+                nameof(ParityDeviation.NullIntoNotNull) => ["InsertOrder", "WriteBlob"],
                 _ => CustomerSaveKinds,
             };
 
@@ -421,7 +423,7 @@ internal static class BackendParityDimensions
             }
         }
 
-        // 手の差の印と並行性の扱い：削除・挿入・複数形の顧客の保存は引数を持たず、代替キーの更新は UpdateAsync か単数の
+        // 手の差の印と並行性の扱い：削除・挿入・Stream の書き込み・複数形の顧客の保存は引数を持たず、代替キーの更新は UpdateAsync か単数の
         // グラフ保存（引数を持つ）
         if (deviation is not null && concurrency is not null)
         {
@@ -430,6 +432,7 @@ internal static class BackendParityDimensions
                     is nameof(ParityDeviation.ParentDeleteWithChildren)
                         or nameof(ParityDeviation.OrphanInsert)
                         or nameof(ParityDeviation.DependentHeldParentDelete)
+                        or nameof(ParityDeviation.NullIntoNotNull)
                 && concurrency != NotApplicable
             )
             {

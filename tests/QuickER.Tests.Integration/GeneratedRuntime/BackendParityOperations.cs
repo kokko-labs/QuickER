@@ -100,6 +100,26 @@ public sealed record OrderRow(
         };
 }
 
+/// <summary>
+/// NOT NULL の列 1 つを null にした注文の行（<paramref name="Column"/> は <see cref="Columns"/> のどれか。ほかの列は正しい値）。
+/// DB は挿入を断り、インメモリは NOT NULL を検査せずに挿入する（受け入れた手の差 <see cref="ParityDeviation.NullIntoNotNull"/>）
+/// </summary>
+public sealed record NullColumnOrderRow(int Id, int Customer, string Column) : ParityRow
+{
+    /// <summary>null にする列（除外した blob の thumb・普通の列の amount）</summary>
+    public static readonly string[] Columns = ["thumb", "amount"];
+
+    public override EntityBaseCore Build() =>
+        new OrderEntity
+        {
+            OrderId = OrderIdValue.Create(Id),
+            CustomerId = CustomerIdValue.Create(Customer),
+            Amount = Column == "amount" ? null! : AmountValue.Create(1m),
+            IsPaid = IsPaidValue.Create(false),
+            Thumb = Column == "thumb" ? null! : ThumbValue.Create([0xEE]),
+        };
+}
+
 /// <summary>明細の行</summary>
 public sealed record LineRow(int Id, int Order, string Item, int Qty, decimal? Discount = null)
     : ParityRow

@@ -106,7 +106,10 @@ docs 不在の外部エージェントが config を自己発見的に書ける�
   - `ChatToolArgumentShapeFuzzTests`（内蔵チャット）
   - `CodeGenToolArgumentShapeFuzzTests`（MCP のコード生成）
   - ホストの `relationship_type` の必須は `ToolScenarioTests` の行 `validation-relationship-type-missing-is-reported-as-required` が見る。
-  - 引数の全体は、ツールごとに根を 5 種（配列・文字列・数・真偽値・`null`）へ置き換えたケース（`ToolArgumentFuzz.RootCases`・崩し方 `non-object-root`）で、入口ごとの形の検査の文（`Entrance.RootRefusal`）との一致まで見る（ツールの処理が別の理由で失敗しても合格にしない）。mutation 実証済み（2 つの入口）。
+  - 引数の全体は、ツールごとに根を 5 種（配列・文字列・数・真偽値・`null`）へ置き換えたケース（`ToolArgumentFuzz.RootCases`・崩し方 `non-object-root`）で崩す。
+  - 断るべきケースはすべて、入口ごとの形の検査の文（`Entrance.ShapeRefusal`）との一致まで見る（ツールの処理が別の理由で失敗しても合格にしない）。期待の問題（種類・パス・スキーマの型）は崩しの定義から組み、`ToolArgumentShape.Check` を呼んで作らない（呼ぶと形の検査の誤りを捕まえない）。文の組み立てだけ製品の関数（`DescribeEnglish`・チャットの resx）を使う。
+  - 配列はベースラインのどの要素の中も、辞書はどのキーの値も崩し、崩した場所が容器の最初か 2 番目以降かを次元表の因子 Position で数える（set_query は要素が 2 つの配列を持つベースラインを持つ）。配列の要素でも辞書でもない入れ子のオブジェクトはスキーマに無く、現れたら `ToolArgumentFuzz.Generate` が名指しして止める。
+  - mutation 実証済み（2 つの入口・形の検査が最初の要素だけ・最初のキーだけを見る形）。
 - 引数の値の読み取りは `ToolArguments`（`GetString` / `GetBool`）、`relationship_type` の名前の解釈は `RelationshipTypeNames.TryParse`（Model）、列ペアの比較は `RelationshipColumnPair.HaveSamePairs` の 1 か所だけで、ほかに写さない。
 - ガード：`SourceRuleTests` の規則 `tool-argument-parsing-copies`（正本自身が拾えることは規則 `tool-argument-parsing-owners`）。
   - `SourceSymbolScan` で src の `#if` のどの分岐もシンボルで読み、次を正本の外では理由つきの一覧（別の書式を読む Mermaid と Excel 定義書の取込の `ParseRelationshipType`）とファイル・件数で厳密に照合する。

@@ -131,20 +131,87 @@ public static class DslFuzzUnits
             PutOrdinalValues(rows);
         }
 
+        List<DslQuery> queries =
+        [
+            .. generator.CoverageQueries(all, atomColumns),
+            .. generator.FixedQueries(all, ordinalStrings: ordinal),
+        ];
+        var withPartners = AddPartners(all, rows);
+
         return new DslFuzzUnit(
             $"{CoveragePrefix}{dbms}",
             TableName,
-            all,
+            withPartners,
             rows,
-            [
-                .. generator.CoverageQueries(all, atomColumns),
-                .. generator.FixedQueries(all, ordinalStrings: ordinal),
-            ],
+            [.. queries, .. ReuseAndOrdering(withPartners, queries, valueObjects: true)],
             ValueObjects: true,
             CoverageSeed,
             SelfReference: "parent"
         );
     }
+
+    /// <summary>種の単位のパラメータを使い回すクエリの数</summary>
+    private const int SideReuseQueries = 6;
+
+    /// <summary>種の単位の列で並べ替えるクエリの数</summary>
+    private const int SideOrderingQueries = 6;
+
+    /// <summary>相方の列の名前の接尾辞</summary>
+    public const string PartnerSuffix = "_r";
+
+    /// <summary>
+    /// 同じ種類の列がほかに無いフィルタの列ごとに、同じ型の相方の列を足す（ほかの列でパラメータを使い回す形を、どの種類の列でも
+    /// 作るため）。相方の値は乱数を引かずに、元の列の 7 行先の値を写す（網羅の単位のほかのクエリと行の値の引き方を変えない）
+    /// </summary>
+    private static List<DslColumn> AddPartners(
+        IReadOnlyList<DslColumn> columns,
+        List<IReadOnlyDictionary<string, object?>> rows
+    )
+    {
+        var filterable = columns
+            .Where(column => !column.PrimaryKey || column.Clr == DslClr.GuidKey)
+            .ToList();
+        var partners = filterable
+            .Where(column =>
+                !column.PrimaryKey && filterable.Count(other => other.Clr == column.Clr) == 1
+            )
+            .Select(column =>
+                (
+                    Source: column,
+                    Partner: new DslColumn(
+                        column.Name + PartnerSuffix,
+                        column.DataType,
+                        column.Clr,
+                        column.Nullable
+                    )
+                )
+            )
+            .ToList();
+
+        for (var i = 0; i < rows.Count; i++)
+        {
+            foreach (var (source, partner) in partners)
+            {
+                ((Dictionary<string, object?>)rows[i])[partner.Name] = rows[(i + 7) % rows.Count][
+                    source.Name
+                ];
+            }
+        }
+
+        return [.. columns, .. partners.Select(pair => pair.Partner)];
+    }
+
+    /// <summary>網羅の単位のパラメータの使い回しと並び替えのクエリ（別の生成器のインスタンス＝ほかのクエリの値の引き方を変えない）</summary>
+    private static List<DslQuery> ReuseAndOrdering(
+        IReadOnlyList<DslColumn> columns,
+        IReadOnlyList<DslQuery> queries,
+        bool valueObjects
+    ) =>
+        new DslFuzzGenerator(
+            CoverageSeed,
+            valueObjects,
+            DslFuzzGenerator.SideParameterPrefix
+        ).ReuseAndOrderingCoverageQueries(columns, queries);
 
     /// <summary>
     /// 値オブジェクトなしの網羅の単位（方言ごとに 1 つ・種に依らない）。網羅の単位（<see cref="Coverage"/>）は値オブジェクトありだけ
@@ -178,15 +245,19 @@ public static class DslFuzzUnits
             PutOrdinalValues(rows);
         }
 
+        List<DslQuery> queries =
+        [
+            .. generator.CoverageQueries(columns, atomColumns),
+            .. ordinal ? generator.FixedQueries(columns, ordinalStrings: true) : [],
+        ];
+        var withPartners = AddPartners(columns, rows);
+
         return new DslFuzzUnit(
             $"{CoveragePrefix}{dbms}-plain",
             TableName,
-            columns,
+            withPartners,
             rows,
-            [
-                .. generator.CoverageQueries(columns, atomColumns),
-                .. ordinal ? generator.FixedQueries(columns, ordinalStrings: true) : [],
-            ],
+            [.. queries, .. ReuseAndOrdering(withPartners, queries, valueObjects: false)],
             ValueObjects: false,
             CoverageSeed
         );
@@ -242,13 +313,22 @@ public static class DslFuzzUnits
     )
     {
         var generator = new DslFuzzGenerator(seed, valueObjects);
+        var rows = generator.Rows(columns, RowCount);
+        var queries = generator.Queries(columns, Compounds);
+
+        // パラメータを使い回すクエリと列で並べ替えるクエリは、別の乱数の列で作って末尾に足す（本流の引き方を変えない）
+        var side = new DslFuzzGenerator(
+            DslFuzzGenerator.SideSeed(seed),
+            valueObjects,
+            DslFuzzGenerator.SideParameterPrefix
+        );
 
         return new DslFuzzUnit(
             name,
             TableName,
             columns,
-            generator.Rows(columns, RowCount),
-            generator.Queries(columns, Compounds),
+            rows,
+            [.. queries, .. side.SideQueries(columns, SideReuseQueries, SideOrderingQueries)],
             valueObjects,
             seed
         );

@@ -280,6 +280,82 @@ internal static class ToolArgumentFuzzSeed
                         ),
                     }
                 ),
+                // オブジェクトの配列が 2 要素のベースライン（2 番目の要素の中の崩しを作る）
+                (
+                    "list2",
+                    new JsonObject
+                    {
+                        ["table_name"] = "Order",
+                        ["query_name"] = "ByEitherCustomer",
+                        ["returns"] = "list",
+                        ["implementation"] = "dsl",
+                        ["condition"] = "BillingCustomerId = @billing OR CustomerId = @customer",
+                        ["parameters"] = new JsonArray(
+                            new JsonObject
+                            {
+                                ["name"] = "billing",
+                                ["source_column"] = "BillingCustomerId",
+                                ["is_list"] = false,
+                            },
+                            new JsonObject
+                            {
+                                ["name"] = "customer",
+                                ["source_column"] = "CustomerId",
+                                ["is_list"] = false,
+                            }
+                        ),
+                        ["order_by"] = new JsonArray(
+                            new JsonObject { ["column"] = "Total", ["descending"] = true },
+                            new JsonObject { ["column"] = "Id", ["descending"] = false }
+                        ),
+                    }
+                ),
+                (
+                    "projection2",
+                    new JsonObject
+                    {
+                        ["table_name"] = "Order",
+                        ["query_name"] = "TotalsByCustomer",
+                        ["returns"] = "projection",
+                        ["result_type_name"] = "OrderCustomerTotalRow",
+                        ["fields"] = new JsonArray(
+                            new JsonObject
+                            {
+                                ["name"] = "Amount",
+                                ["source_column"] = "Total",
+                                ["is_nullable"] = false,
+                            },
+                            new JsonObject
+                            {
+                                ["name"] = "Customer",
+                                ["source_column"] = "CustomerId",
+                                ["is_nullable"] = false,
+                            }
+                        ),
+                    }
+                ),
+                (
+                    "sql2",
+                    new JsonObject
+                    {
+                        ["table_name"] = "Order",
+                        ["query_name"] = "CountBetween",
+                        ["returns"] = "scalar",
+                        ["scalar_type"] = "int32",
+                        ["implementation"] = "sql",
+                        ["sql"] = new JsonObject
+                        {
+                            ["sqlserver"] =
+                                "SELECT COUNT(*) FROM [Order] WHERE Total BETWEEN @min AND @max",
+                            ["sqlite"] =
+                                "SELECT COUNT(*) FROM \"Order\" WHERE Total BETWEEN @min AND @max",
+                        },
+                        ["parameters"] = new JsonArray(
+                            new JsonObject { ["name"] = "min", ["type"] = "decimal(10,2)" },
+                            new JsonObject { ["name"] = "max", ["type"] = "decimal(10,2)" }
+                        ),
+                    }
+                ),
             ],
             ["remove_query"] =
             [

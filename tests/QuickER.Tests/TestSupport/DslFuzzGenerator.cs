@@ -87,8 +87,20 @@ public sealed record DslFuzzUnit(
             );
         }
 
-        if (query.Returns is QueryReturnShape.Single or QueryReturnShape.Projection)
+        // 並びは「追加の列 → 主キー」の順に積む（最後に主キーを置くので同点は残らない）
+        if (query.IsOrdered)
         {
+            foreach (var ordering in query.Orderings)
+            {
+                definition.OrderBy.Add(
+                    new QueryOrdering
+                    {
+                        ColumnId = ordering.Column.Model.Id,
+                        Descending = ordering.Descending,
+                    }
+                );
+            }
+
             definition.OrderBy.Add(
                 new QueryOrdering { ColumnId = Key.Model.Id, Descending = query.OrderDescending }
             );
@@ -120,7 +132,11 @@ public sealed record DslFuzzUnit(
 /// <c>ulong</c> を超える値）は、値オブジェクトの有無に依らず原子のクエリでだけ作り（<see cref="AllAtoms"/>）、警告で飛ばされる
 /// ことを表明する。作らない形は <see cref="DslFuzzNotGenerated"/> に宣言する。
 /// </remarks>
-public sealed class DslFuzzGenerator(int seed, bool valueObjects)
+public sealed partial class DslFuzzGenerator(
+    int seed,
+    bool valueObjects,
+    string parameterPrefix = "p"
+)
 {
     private readonly Random _random = new(seed);
     private int _parameterIndex;
@@ -961,7 +977,11 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
             _ => atom,
         };
 
-    private DslParam Fresh(DslParam param) => param with { Name = "p" + _parameterIndex++ };
+    private DslParam Fresh(DslParam param) =>
+        param with
+        {
+            Name = parameterPrefix + _parameterIndex++,
+        };
 
     /// <summary>列に使える原子を 1 つ作る</summary>
     private DslAtom Atom(DslColumn column)
@@ -1124,7 +1144,7 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
 
     private DslParam Param(DslColumn column) =>
         new(
-            "p" + _parameterIndex++,
+            parameterPrefix + _parameterIndex++,
             [Pick(DslFuzz.ValuePool(column.Clr))],
             IsList: false,
             ByColumn: !DslFuzz.HasTypeToken(column.Clr) || _random.Next(2) == 0,
@@ -1183,7 +1203,7 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects)
         var nullable = shape is DslIn.ListWithNull or DslIn.ListAllNull;
 
         return new DslParam(
-            "p" + _parameterIndex++,
+            parameterPrefix + _parameterIndex++,
             values,
             IsList: true,
             ByColumn: (nullable && valueObjects)

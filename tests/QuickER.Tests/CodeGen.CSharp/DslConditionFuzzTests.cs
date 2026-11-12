@@ -263,7 +263,7 @@ public class DslConditionFuzzTests
     }
 
     /// <summary>
-    /// EF Core（SQLite）で流さないクエリか: decimal の列の順序比較を含むもの
+    /// EF Core（SQLite）で流さないクエリか: decimal の列の順序比較を含むものと、decimal の列で並べるもの
     /// </summary>
     /// <remarks>
     /// EF Core の SQLite プロバイダは decimal のサーバー側の順序比較・並び替えを翻訳できず例外にする（プロバイダの既知の制限＝
@@ -274,7 +274,7 @@ public class DslConditionFuzzTests
         query.Atoms.Any(atom =>
             atom is DslCompare { Op: not (DslOp.Eq or DslOp.Ne) }
             && atom.Column.Clr == DslClr.Decimal
-        );
+        ) || query.Orderings.Any(ordering => ordering.Column.Clr == DslClr.Decimal);
 
     private static CodeGenerationOptions Options(DslFuzzUnit unit, bool ado) =>
         new()
@@ -300,6 +300,7 @@ public class DslConditionFuzzTests
         new(
             name,
             rule,
+            DslNullOrder.FirstWhenAscending,
             async (probe, diagram, ct) =>
             {
                 var path = Path.Combine(

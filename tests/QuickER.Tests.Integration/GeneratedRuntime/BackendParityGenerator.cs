@@ -71,6 +71,7 @@ public sealed partial class BackendParityGenerator
         }
 
         generator.AppendTail();
+        generator.AppendNullIntoNotNullTail();
 
         return new ParityScenario(
             $"seed-{seed}-{generator._mode}",
@@ -259,6 +260,58 @@ public sealed partial class BackendParityGenerator
                 )
             );
         }
+    }
+
+    /// <summary>
+    /// 種の 4 分の 1 で、列の最後に NOT NULL の列へ null を書く手を 1 つ置く（DB は断る＝モデルは変えない。インメモリは NOT NULL を
+    /// 検査せずに書くので <see cref="ParityDeviation.NullIntoNotNull"/> の印を付ける）
+    /// </summary>
+    /// <remarks>
+    /// 値の幅と同じ別の乱数の列（<c>_values</c>）で、本流の列（<c>_random</c>）を引き終えた後に引く＝本流の操作の列は変えない。
+    /// 手は除外 blob の Stream の SET NULL（Blob の範囲だけ。EF Core は Stream を持たない）・thumb が null の注文の挿入・金額が null の
+    /// 注文の挿入（NOT NULL の普通の列）。
+    /// </remarks>
+    private void AppendNullIntoNotNullTail()
+    {
+        if (_values.Next(4) != 0)
+        {
+            return;
+        }
+
+        var customers = _customers.Keys.Order().ToList();
+        var orders = _orders.Keys.Order().ToList();
+        var freeOrders = Enumerable.Range(10, 20).Where(id => !_orders.ContainsKey(id)).ToList();
+        var forms = new List<Func<ParityOp>>();
+
+        if (_mode == ParityGeneratorMode.Blob && orders.Count > 0)
+        {
+            forms.Add(() => new WriteBlobOp(orders[_values.Next(orders.Count)], "thumb", null));
+        }
+
+        if (customers.Count > 0 && freeOrders.Count > 0)
+        {
+            foreach (var column in NullColumnOrderRow.Columns)
+            {
+                forms.Add(() =>
+                    new InsertOp(
+                        new NullColumnOrderRow(
+                            freeOrders[_values.Next(freeOrders.Count)],
+                            customers[_values.Next(customers.Count)],
+                            column
+                        )
+                    )
+                );
+            }
+        }
+
+        if (forms.Count == 0)
+        {
+            return;
+        }
+
+        _ops.Add(
+            new DeviatingOp(forms[_values.Next(forms.Count)](), ParityDeviation.NullIntoNotNull)
+        );
     }
 
     // ---- 挿入・制約違反 ----

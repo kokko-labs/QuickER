@@ -1195,6 +1195,11 @@ They are worth knowing when a test passes in memory and fails against the real t
 - **String comparison and ordering are ordinal.**
   Filtering (`Where`) and `OrderBy` both compare strings ordinally, so `"B"` sorts before `"a"`.
   SQL Server's default collation is case-insensitive and orders by the collation's rules instead, so a test that depends on case or accent handling is not evidence about the database.
+- **Ordering treats `null` as the smallest value.**
+  A `null` sorts first in ascending order and last in descending order.
+  SQLite, SQL Server and MySQL place it the same way.
+  PostgreSQL and Oracle treat `null` as the largest value, sorting it last in ascending order and first in descending order (EF Core follows the database it connects to).
+  A test that depends on where the `null` values land is not evidence about PostgreSQL or Oracle.
 - **UNIQUE constraints are enforced, but the exception type is not the database's.**
   A direct insert, update or bulk insert, and a graph save, are rejected when they would leave two rows holding the same values on a constraint the diagram declares.
   The rules are `CheckUniquenessAsync`'s: a value tuple containing a `null` is not compared, and the row being written is excluded by its primary key.
@@ -1207,6 +1212,11 @@ They are worth knowing when a test passes in memory and fails against the real t
   The store keeps rows and nothing else, so an insert or update may leave a child pointing at a parent that does not exist, and `DeleteAsync(id)` removes the parent alone, leaving its children behind whatever the foreign key's `ON DELETE` says.
   A real database refuses the first, and refuses the second or (with `ON DELETE CASCADE`) deletes the children along with the parent.
   A graph save with `cascadeDelete` and a cascading `ExecuteDeleteAsync` behave as they do elsewhere, since they delete the descendants themselves rather than relying on the database's action.
+- **NOT NULL is not enforced.**
+  An insert or a graph save stores a row whose NOT NULL column is `null` as it is.
+  Writing `null` through the Stream accessor of an excluded unbounded binary column (`Write{Column}Async(id, null)`) stores `null` even in a NOT NULL column, and a later read returns no data.
+  A real database refuses all of these.
+  A test that depends on writing `null` to a NOT NULL column is not evidence about the database.
 - **Changing an entity's RowState from a Before hook takes effect here and nowhere else.**
   This backend reads the state again when it carries the operation out, so a `BeforeSaveAsync` that turns `Modified` into `Added` changes what happens.
   The QuickER Repository and EF Core have chosen the statement by then, and the change is ignored.

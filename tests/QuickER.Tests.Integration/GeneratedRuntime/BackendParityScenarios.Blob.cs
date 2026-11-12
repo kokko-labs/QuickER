@@ -480,6 +480,64 @@ public static partial class BackendParityScenarios
             CompareWithBaseline: false
         );
     }
+
+    /// <summary>種まきの後の保存先の行のキー（NOT NULL の列への null を断ったときに変わらない並び）</summary>
+    private static readonly string[] BasicKeys =
+    [
+        "customers/1",
+        "customers/2",
+        "orders/10",
+        "orders/11",
+        "orders/12",
+        "order_lines/100",
+        "order_lines/101",
+        "order_lines/102",
+    ];
+
+    /// <summary>
+    /// NOT NULL の列への null：除外した blob の Stream の SET NULL・thumb が null の注文の挿入・金額が null の注文の挿入（NOT NULL の
+    /// 普通の列）。DB は断り、行を変えない。インメモリは NOT NULL を検査せずに書く受け入れた差（<see cref="ParityDeviation.NullIntoNotNull"/>）
+    /// なので、その手から後を比べない。ほかの実装先は基準と比べ、断られたことを期待でも表明する
+    /// </summary>
+    private static IEnumerable<ParityScenario> NullIntoNotNullScenarios()
+    {
+        yield return new(
+            "not-null-stream-set-null-excluded-blob-is-refused",
+            Basic,
+            [
+                new DeviatingOp(
+                    new WriteBlobOp(10, "thumb", null),
+                    ParityDeviation.NullIntoNotNull
+                ),
+                ParityExpect.Outcome(
+                    "stream-set-null-not-null-blob-is-refused",
+                    "throws store-rejected"
+                ),
+                ParityExpect.StateRow("stream-set-null-keeps-blob", "orders/10", Order10Blobs),
+                new ReadBlobOp(10, "thumb"),
+                ParityExpect.Outcome("stream-set-null-blob-reads-back", "read=True bytes=0A"),
+            ]
+        );
+
+        foreach (var column in NullColumnOrderRow.Columns)
+        {
+            yield return new(
+                $"not-null-insert-null-{column}-is-refused",
+                Basic,
+                [
+                    new DeviatingOp(
+                        new InsertOp(new NullColumnOrderRow(20, 1, column)),
+                        ParityDeviation.NullIntoNotNull
+                    ),
+                    ParityExpect.Outcome(
+                        $"insert-null-{column}-is-refused",
+                        "throws store-rejected"
+                    ),
+                    ParityExpect.StateKeys($"insert-null-{column}-writes-nothing", BasicKeys),
+                ]
+            );
+        }
+    }
 }
 
 /// <summary>無制限バイナリ列のシナリオの期待</summary>

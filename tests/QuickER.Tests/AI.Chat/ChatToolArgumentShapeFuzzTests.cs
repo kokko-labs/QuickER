@@ -101,12 +101,17 @@ public sealed class ChatToolArgumentShapeFuzzTests
             );
 
         /// <remarks>表示言語の文なので、ケースを流す時点のカルチャで組む</remarks>
-        public override string RootRefusal =>
-            string.Format(
-                QuickER.AI.Chat.Resources.Strings.Tool_ArgumentWrongType,
-                ToolArgumentFuzz.RootType,
-                "object"
-            );
+        public override string ShapeRefusal(ToolArgumentProblem problem) =>
+            problem.Kind == ToolArgumentProblemKind.Missing
+                ? string.Format(
+                    QuickER.AI.Chat.Resources.Strings.Tool_ArgumentMissing,
+                    problem.Path
+                )
+                : string.Format(
+                    QuickER.AI.Chat.Resources.Strings.Tool_ArgumentWrongType,
+                    problem.Path,
+                    problem.ExpectedType
+                );
     }
 
     /// <summary>種の図を読み込んだ GUI の図と、それを操作するチャットのツール実行口を作る</summary>
