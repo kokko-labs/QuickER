@@ -24,6 +24,22 @@ public sealed record SmallChildPredicate(Expression<Func<SmallChildEntity, bool>
     : TranslatorParityPredicate;
 
 /// <summary>
+/// big_parent の述語（主キー <c>id</c> が bigint。シードは <see cref="TranslatorParityRuntimeTestsBase.WideBigParents"/>＝
+/// <c>long</c> の上限と下限・整数部が 16 桁を超える値を持つ）
+/// </summary>
+/// <param name="Predicate">述語</param>
+public sealed record BigParentPredicate(Expression<Func<BigParentEntity, bool>> Predicate)
+    : TranslatorParityPredicate;
+
+/// <summary>
+/// probes の述語で、整数部の桁の大きい行も比べるもの（シードは probes のシードに
+/// <see cref="TranslatorParityRuntimeTestsBase.WideProbes"/> の行を足したもの＝<c>probe_id</c> が int の上限と下限）
+/// </summary>
+/// <param name="Predicate">述語</param>
+public sealed record WideProbePredicate(Expression<Func<ProbeEntity, bool>> Predicate)
+    : TranslatorParityPredicate;
+
+/// <summary>
 /// 翻訳器の一致の述語の表：1 行＝1 つの述語。基底の <see cref="TranslatorParityRuntimeTestsBase.Predicate_MatchesCSharp"/> が、
 /// 3 つの実装先（SQL Server・SQLite・インメモリ）で、同じ実装先から読み戻した全行へ C# のラムダを当てた結果と比べる。
 /// </summary>
@@ -86,6 +102,18 @@ public static class TranslatorParityPredicateRows
         Expression<Func<SmallChildEntity, bool>> predicate
     ) => new(id, null, description, new SmallChildPredicate(predicate));
 
+    private static ScenarioRow<TranslatorParityPredicate> BigParent(
+        string id,
+        string description,
+        Expression<Func<BigParentEntity, bool>> predicate
+    ) => new(id, null, description, new BigParentPredicate(predicate));
+
+    private static ScenarioRow<TranslatorParityPredicate> WideProbe(
+        string id,
+        string description,
+        Expression<Func<ProbeEntity, bool>> predicate
+    ) => new(id, null, description, new WideProbePredicate(predicate));
+
     private static ScenarioTable<TranslatorParityPredicate> Build()
     {
         // 変数（クロージャの捕捉＝式の木では MemberExpression）で渡す値。リテラルの null とは木の形が違う
@@ -112,6 +140,12 @@ public static class TranslatorParityPredicateRows
         decimal? fractionBelowOne = 0.999m;
         var nonAscii = "日本";
         var nonAsciiPart = "本";
+        var fraction = 1.5m;
+        var integralDecimal = 1m;
+        var beyondLong = 100000000000000000000m;
+        var decimalsForBigint = new List<decimal> { 1m, 1.5m, 10000000000000000m };
+        var decimalsForInt = new List<decimal?> { 2m, 1.5m, null };
+        decimal?[] decimalArrayForInt = [2m, 1.5m, null];
 
         List<ScenarioRow<TranslatorParityPredicate>> rows =
         [
@@ -472,6 +506,74 @@ public static class TranslatorParityPredicateRows
                 "int-column-less-or-equal-decimal-fraction-variable",
                 "int の列と 1 未満の decimal の変数の <= は値を丸めずに数として比べる",
                 c => c.BigParentId <= fractionBelowOne
+            ),
+            // ---- 整数の列と整数の値の decimal の等値・IN（C# は列の値を decimal へ広げ、数として比べる） ----
+            SmallChild(
+                "int-column-equals-decimal-integral-variable",
+                "int の列と整数の値の decimal の変数の == は、同じ値の行に一致する",
+                c => c.BigParentId == integralDecimal
+            ),
+            SmallChild(
+                "int-column-not-equals-decimal-integral-variable",
+                "int の列と整数の値の decimal の変数の != は、同じ値の行を除き NULL の行を含める",
+                c => c.BigParentId != integralDecimal
+            ),
+            SmallChild(
+                "int-column-equals-decimal-integral-constant",
+                "int の列と整数の値の decimal の定数の == は、同じ値の行に一致する",
+                c => c.BigParentId == 2m
+            ),
+            SmallChild(
+                "in-decimal-list-int-column",
+                "int の列と、整数の値・小数・null を持つ decimal のリストの IN は、整数の値の行と NULL の行に一致する",
+                c => decimalsForInt.Contains(c.BigParentId)
+            ),
+            SmallChild(
+                "in-decimal-array-int-column",
+                "int の列と、整数の値・小数・null を持つ decimal の配列の Contains は、整数の値の行と NULL の行に一致する",
+                c => decimalArrayForInt.Contains(c.BigParentId)
+            ),
+            // ---- bigint の列と decimal の値（C# は列の値を decimal へ広げる。シードは整数部が 16 桁を超える行を持つ） ----
+            BigParent(
+                "bigint-column-greater-decimal-fraction-variable",
+                "bigint の列と小数の decimal の変数の > は、整数部の大きい行も数として比べる",
+                p => p.Id > fraction
+            ),
+            BigParent(
+                "bigint-column-equals-decimal-integral-variable",
+                "bigint の列と整数の値の decimal の変数の == は、同じ値の行に一致する",
+                p => p.Id == integralDecimal
+            ),
+            BigParent(
+                "bigint-column-not-equals-decimal-fraction-variable",
+                "bigint の列と小数の decimal の変数の != は全行に一致する",
+                p => p.Id != fraction
+            ),
+            BigParent(
+                "bigint-column-less-decimal-beyond-long-variable",
+                "bigint の列と long の範囲の外の decimal の変数の < は全行に一致する",
+                p => p.Id < beyondLong
+            ),
+            BigParent(
+                "bigint-column-greater-decimal-fraction-constant",
+                "bigint の列と小数の decimal の定数の > は、整数部の大きい行も数として比べる",
+                p => p.Id > 1.5m
+            ),
+            BigParent(
+                "in-decimal-list-bigint-column",
+                "bigint の列と decimal のリストの IN は、整数部の大きい行も数として比べる",
+                p => decimalsForBigint.Contains(p.Id)
+            ),
+            // ---- 整数の列と decimal の列（列どうし。シードは整数部の桁が decimal(10,2) の整数部に入らない行を持つ） ----
+            WideProbe(
+                "int-column-greater-decimal-column",
+                "int の列と decimal(10,2) の列の > は、int の値を列の型へ切り詰めずに数として比べる",
+                x => x.ProbeId > x.Amount
+            ),
+            WideProbe(
+                "int-column-equals-decimal-column",
+                "int の列と decimal(10,2) の列の == は、同じ値の行に一致する",
+                x => x.ProbeId == x.Amount
             ),
             Probe(
                 "varchar-equals-non-ascii-variable",

@@ -154,7 +154,7 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
 
 ### SQL Server のクエリのパラメータの型
 
-- EF Core はパラメータに比べる相手の列の型（`HasPrecision`・`IsUnicode(false)`、decimal と比べる整数の列は CAST の `decimal(18,2)`）を付け、SqlClient は値をその型へ変換してから送る。列に入らない値は丸められる（`1.234`→`1.23`・`0.999`→`1.00`）か `ArgumentException` になり、ASCII の外の文字は `?` になって、C# と違う行を返す（`ExecuteDeleteAsync` は違う行を消す）。
+- EF Core はパラメータに比べる相手の列の型（`HasPrecision`・`IsUnicode(false)`、decimal と比べる整数の列は CAST の既定の decimal の型＝生成の DbContext では SQL Server で `decimal(38,19)`。下の「SQL Server の既定の decimal の型」）を付け、SqlClient は値をその型へ変換してから送る。列に入らない値は丸められる（`1.234`→`1.23`）か `ArgumentException` になり、ASCII の外の文字は `?` になって、C# と違う行を返す（`ExecuteDeleteAsync` は違う行を消す）。
 - 公開の `SqlServerQueryParameterInterceptor`（`DbCommandInterceptor`・`Instance`）が、SqlClient の接続（型の名前で判定。派生を含む）の、出どころが LinqQuery・ExecuteDelete・ExecuteUpdate のコマンドの各パラメータを見て、値が入らないものだけ型を外す。
   - decimal で `Precision > 0`：末尾の 0 を除いた小数の桁がスケールを、整数部の桁が精度−スケールを超えたら Precision / Scale を 0 にする（SqlClient が値から決める）。
   - AnsiString / AnsiStringFixedLength：値に ASCII の外の文字があれば String・Size 0 にする。
@@ -166,6 +166,29 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
   - `QuickErDbContext.OnConfiguring` で足さない：OnConfiguring でオプションを変えると EF Core の本物のプールが断る（値オブジェクトありの生成コードと同じ制約が全部の図に広がる）。
 - 定数は直せない。EF Core はラムダの中の定数を SQL のリテラルへ書き、非 Unicode の列と比べる文字列の定数に `N` を付けない（手書きの LINQ の定数は docs の既知の割り切り）。簡易 DSL の文字列のリテラルは、発行器がメソッド冒頭の局所変数へ持ち上げてパラメータにする（`src/QuickER.CodeGen.CSharp/Queries/CLAUDE.md`「文字列のリテラルの持ち上げ」）。
 - ガード：`SqlServerQueryParameterInterceptorTests`（DB を使わない行の表：入る値は型のまま・入らない値だけ外す・IN の要素ごと・LIKE のパターン・ExecuteDelete・SaveChanges は変えない・SQL Server でない接続は触らない）・`SqliteBusyTimeoutInterceptorTests.GeneratedRegistration_AddsInterceptorAfterConfigure`（生成の DI の登録）・`Dsl/SqlServer`（因子 ValueFit の水準 beyond-scale・beyond-range・beyond-charset と単位 sqlserver-ansi。列で型付けしたパラメータ・広い型トークン・IN・LIKE を実 SQL Server で C# と比べる）・`table:TranslatorParityPredicates`（EF Core の派生 `TranslatorParityEfCoreSqlServerRuntimeTests`）。mutation 実証済み（判定を外して何もしないと、総当たりの EF Core の失敗が 90 件・述語の表の変数の 7 行が赤、常に型を外すと単体の表の 5 行が赤。QuickER 版は 0 件）
+
+### SQL Server の既定の decimal の型
+
+- 生成の `QuickErDbContext` は `ConfigureConventions` をオーバーライドし、SQL Server の接続（`Database.ProviderName` が `Microsoft.EntityFrameworkCore.SqlServer`。プロバイダのパッケージを参照しないので名前で判定する）のときだけ `DefaultTypeMapping<decimal>().HasPrecision(38, 19)` を置く。続けて利用者の拡張点 `ConfigureConventionsPartial` を呼ぶ（`OnModelCreatingPartial` と同じ形）。
+- 理由：C# は decimal と比べる整数を decimal へ広げ（`x.Id > 1.5m`）、EF Core は型を取る列の無い変換を既定の decimal の型の CAST で書く。EF Core の既定の `decimal(18,2)` は整数部 16 桁なので、`bigint` の列に整数部が 16 桁を超える行が 1 行でもあると、比べる値・経路（名前付きクエリ・手書きの変数と定数・IN・演算・並び替え・射影・ExecuteDelete）に依らず Arithmetic overflow の SqlException になる。どの行の CAST を評価するかは実行計画で決まるので、主キーの seek で通ることもある。パラメータの型でなく列の CAST が原因なので、`SqlServerQueryParameterInterceptor` では直らない。
+- `decimal(38,19)` の根拠：整数部 19 桁に `long` の範囲がすべて入り、スケール 19 で C# の decimal の小数の桁（最大 28）の大半が入る。整数部を 19 桁より減らすと bigint が桁あふれし、スケールを増やすと long が入らない。それより桁の多い比べる値（スケール 20 桁以上・整数部 20 桁以上）は、パラメータの型（既定の `decimal(38,19)`）に入らないので `SqlServerQueryParameterInterceptor` が値の型で送り、SQL Server は正しく比べる（実測。インターセプターを足さずに DbContext を組むと SqlClient が丸める＝docs の「自分で組むならインターセプターを足す」の範囲）。
+- 効くのは型を取る列の無い式（CAST の型・列と比べないパラメータ）だけ。精度を指定した列・指定しない列（`money` など）のプロパティの型は変わらず（`decimal(18,2)` の既定の列も含め、実測）、列と比べるパラメータは今までどおり列の型を取る。射影・計算の中の同じ変換（`x.Qty / 3m`）も `decimal(38,19)` になり、結果の小数の桁が増える（C# に近づく。CHANGELOG の Changed）。
+- ほかのプロバイダには置かない（PostgreSQL・MySQL・Oracle の EF Core は実 DB の総当たりが無く測れない）。生成コードは方言に依らず同じで実行時に判定するので、可搬の図の出力が方言ごとに割れない。
+- 整数の列と decimal の列の比較（列どうし）は直らない：EF Core は CAST の型を相手の列の型から推論し（`CAST([i32] AS decimal(10,2))`）、既定の型を使わない。int の列でも相手の整数部の桁を超える行で桁あふれする（docs の既知の割り切り。QuickER 版は CAST せずに比べる）。直すには型を固定した CAST の関数（`HasDbFunction(...).HasTranslation` で型の対応付けを持つ `SqlUnaryExpression`）と、整数→decimal の `Convert` をその関数へ書き換える `IQueryExpressionInterceptor` が要る（試作で列どうしも一致したが、公開 API 面が増えるので採っていない）。
+- ガード：`table:TranslatorParityPredicates`（big_parent の行 `bigint-column-*`・`in-decimal-list-bigint-column`＝シード `WideBigParents` は long の上限と下限・整数部 17 桁と 16 桁の行を持つ。EF Core の派生 `TranslatorParityEfCoreSqlServerRuntimeTests`。列どうしの行 `int-column-greater-decimal-column`・`int-column-equals-decimal-column` は EF Core の `Known` に docs を出典にして宣言）・`Dsl/SqlServer`（bigint の列と decimal の型トークンのパラメータの原子＝4 本目の乱数の列の `Y{i}` と網羅の単位の `KY{i}`）。mutation 実証済み（既定の精度の設定を外す・SQL Server の判定を常に偽にする、のどちらも総当たりの EF Core の失敗 10 件と述語の表の 5 行が赤。判定を常に真にする壊し方は、SQLite の decimal の対応付けが精度を見ないので答えが変わらず、赤にできない）
+
+### SQLite の整数と decimal の等値
+
+- EF Core の SQLite プロバイダは decimal を TEXT で持ち、整数の式を decimal へ広げた等値を文字列の比較で書く（`CAST("qty" AS TEXT) = '10.0'`。decimal の値は `0.0###…` の形で送り、整数の列は `'10'` になる）。整数の値は一致せず、`==` は 0 行・`!=` は全行・IN は整数の値の要素を落とす（変数・定数・int の列も同じ）。順序比較（`ef_compare` で数として比べる）・小数の値・decimal の列・整数の列と decimal の列の比較は正しい（実測）。
+- 実行器の `ApplyPredicates`（`Query()` のすべての条件が通る 1 か所＝名前付きクエリ・手書きの LINQ・件数・`ExecuteDeleteAsync`）が、SQLite の接続（`Database.ProviderName` が `Microsoft.EntityFrameworkCore.Sqlite`）のときだけ、条件を `SqliteIntegralDecimalEquality.Rewrite` に通してから `Where` へ渡す。
+  - 「sbyte・byte・short・ushort・int・uint・long（と null 許容）を decimal へ広げた `Convert`」と「ラムダの引数を読まない式」の `==` を `Matches(v) && (long?)x == KeyOf(v)` に、`!=` をその否定に、`Contains`（インスタンス・静的のどちらも、値の型が `IEnumerable`。C# 14 は式の木の中の配列の `Contains` を `MemoryExtensions.Contains(ReadOnlySpan<T>, T, null)` に結び付けるので、第 1 引数の `op_Implicit` を剥がした元の配列を値にする。既定でない比較器を渡した呼び出しは書き換えない）を `KeysOf(values).Contains((long?)x)` に書き換える。ulong は long に入らないので書き換えない。
+  - `Matches`・`KeyOf`・`KeysOf` は値だけを見る（null は null・long の範囲の整数の値はその整数・それ以外はどの行にも一致しない）ので、EF Core はクライアントで評価してパラメータにする。書き換えた条件は null を含めて C# の条件と同じ意味（`!=` の NULL の行は EF Core の C# の null の意味論が補う）。
+  - 順序比較と decimal の列の比較は書き換えない（今の翻訳が正しいので変えない）。小数との等値は書き換え、`Matches` が偽になってどの行にも一致しない（C# と同じ）。
+- 型は internal（公開 API 面を変えない）。式の木から呼ぶ補助のメソッドも private で、EF Core のクライアントの評価は呼べる（実測）。パッケージ用ソースは `System.Collections` を using しないので、非総称の `IEnumerable` は完全修飾で書く。
+- ほかのプロバイダには掛けない（ユーザーの決定）。書き換えた形は C# と同じ意味なので掛けても答えは変わらないが、PostgreSQL・MySQL・Oracle の EF Core は実 DB の総当たりが無く、SQL が変わることを確かめられない。
+- 届かないもの：利用者が DbContext を直接使う LINQ（Repository の `Query()` を通らない）。
+- SQLite の QuickER 版は decimal を TEXT のパラメータで送り、SQLite の型の親和性で REAL として比べるので、整数の列と極端な decimal（long の上限の decimal・小数 23 桁の 1 の近傍）の比較が C# と割れる（実測。docs に約束の無い領域で、この節の書き換えとは別の実装）。EF Core 版はこの書き換えで C# と同じになる。
+- ガード：`table:TranslatorParityPredicates`（EF Core の SQLite の派生 `TranslatorParityEfCoreSqliteRuntimeTests`＝SQL Server 方言で生成した `TranslatorParityEfCoreFixture` を `UseSqlite` で流す。行 `int-column-*-decimal-integral-*`・`in-decimal-list-int-column`・`in-decimal-array-int-column`・`bigint-column-equals-decimal-integral-variable`・`in-decimal-list-bigint-column`。`time-scaled-less-finer` は SQLite のプロバイダが TimeSpan の大小を翻訳できない事実として派生の `Known` に宣言）・`Dsl/SqliteMySql`（bigint の列と decimal の型トークンのパラメータの整数の値の池）。mutation 実証済み（書き換えを外すと表の 6 行と総当たりの EF Core〔SQLite〕の 2 件が赤、IN の書き換えだけを外すと表の IN の 2 行が赤、配列の `op_Implicit` を剥がさないと表の配列の行が赤。判定を常に真にする壊し方は SQL Server でも答えが変わらず、赤にできない）
 
 ### 値オブジェクトの文字列一致の LIKE
 

@@ -174,7 +174,7 @@ public abstract class TranslatorParityRuntimeTestsBase
     protected static async Task ShouldMatchCSharpAsync<TEntity, TKey>(
         IRepository<TEntity, TKey> repository,
         Expression<Func<TEntity, bool>> predicate,
-        Func<TEntity, int> key,
+        Func<TEntity, long> key,
         int seeded
     )
         where TEntity : EntityBaseCore, new()
@@ -199,7 +199,8 @@ public abstract class TranslatorParityRuntimeTestsBase
     /// </summary>
     /// <remarks>
     /// 行は式の翻訳の NULL の補償・否定の反転と畳み込み・IN の null の要素・空の IN・bool 列の短縮形などの形を持つ。
-    /// small_child の行は、親子のシード（<see cref="SeedCrossTypeFamilyAsync"/>）を入れてから比べる。
+    /// small_child の行は、親子のシード（<see cref="SeedCrossTypeFamilyAsync"/>）を入れてから比べる。big_parent の行は
+    /// <see cref="WideBigParents"/>、整数部の大きい probes の行は probes のシードに <see cref="WideProbes"/> を足してから比べる。
     /// </remarks>
     [Theory(DisplayName = "[翻訳パリティ] 述語の表の行が C# と同じ行を返す")]
     [MemberData(
@@ -223,6 +224,36 @@ public abstract class TranslatorParityRuntimeTestsBase
                     child.Predicate,
                     c => c.Id,
                     CrossTypeChildCount
+                );
+                break;
+
+            case BigParentPredicate parent:
+                var parents = Repository<IBigParentRepository>();
+                foreach (var seed in WideBigParents())
+                {
+                    await parents.InsertAsync(seed, Ct);
+                }
+
+                await ShouldMatchCSharpAsync(
+                    parents,
+                    parent.Predicate,
+                    p => p.Id,
+                    WideBigParents().Count
+                );
+                break;
+
+            case WideProbePredicate wide:
+                var probes = Repository<IProbeRepository>();
+                foreach (var seed in WideProbes())
+                {
+                    await probes.InsertAsync(seed, Ct);
+                }
+
+                await ShouldMatchCSharpAsync(
+                    probes,
+                    wide.Predicate,
+                    p => p.ProbeId,
+                    SeedProbes().Count + WideProbes().Count
                 );
                 break;
 
@@ -477,6 +508,33 @@ public abstract class TranslatorParityRuntimeTestsBase
             new() { Id = 1, Label = "a" },
             new() { Id = 2, Label = "b" },
             new() { Id = 3, Label = "c" },
+        ];
+
+    /// <summary>
+    /// 述語の表の big_parent の行（<see cref="BigParentPredicate"/>）のシード：<c>long</c> の上限と下限、整数部が 17 桁と 16 桁の値、
+    /// 0・1・-1（呼ぶたびに新しいインスタンスを返す。親子のシード <see cref="CrossTypeParents"/> とは別）
+    /// </summary>
+    internal static IReadOnlyList<BigParentEntity> WideBigParents() =>
+        [
+            new() { Id = 1, Label = "one" },
+            new() { Id = 0, Label = "zero" },
+            new() { Id = -1, Label = "minus-one" },
+            new() { Id = long.MaxValue, Label = "max" },
+            new() { Id = long.MinValue, Label = "min" },
+            new() { Id = 10_000_000_000_000_000, Label = "17-digits" },
+            new() { Id = 9_999_999_999_999_999, Label = "16-digits" },
+        ];
+
+    /// <summary>
+    /// 述語の表の整数部の大きい probes の行（<see cref="WideProbePredicate"/>）で、probes のシードに足す行：<c>probe_id</c> が int の
+    /// 上限と下限（<c>decimal(10,2)</c> の amount の整数部 8 桁に入らない）と、<c>probe_id</c> と amount が同じ値の行
+    /// （呼ぶたびに新しいインスタンスを返す）
+    /// </summary>
+    internal static IReadOnlyList<ProbeEntity> WideProbes() =>
+        [
+            Probe(int.MaxValue, null, null, null, null, true, amount: 1.5m),
+            Probe(int.MinValue, null, null, null, null, false, amount: -1.5m),
+            Probe(12, null, null, null, null, true, amount: 12m),
         ];
 
     /// <summary>small_child のシード（外部キー 1・1・2・NULL。呼ぶたびに新しいインスタンスを返す）</summary>

@@ -780,6 +780,7 @@ public class RuntimeTestMatrixTests
         new("TranslatorParitySqliteRuntimeTests", "TranslatorParity", Backend.AdoSqlite),
         new("TranslatorParityInMemoryRuntimeTests", "TranslatorParity", Backend.InMemory),
         new("TranslatorParityEfCoreSqlServerRuntimeTests", "TranslatorParity", Backend.EfCore),
+        new("TranslatorParityEfCoreSqliteRuntimeTests", "TranslatorParity", Backend.EfCore),
         // --- スキーマ適用 ---
         new("SqlServerSchemaBootstrapRuntimeTests", "SchemaBootstrap", Backend.AdoSqlServer),
         new("SqliteSchemaBootstrapRuntimeTests", "SchemaBootstrap", Backend.AdoSqlite),

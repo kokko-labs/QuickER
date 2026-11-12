@@ -64,13 +64,6 @@ internal static class DslFuzzNotGenerated
                     "`table:ValueObjectScenarios`・`CodegenConfig/Cases`（行 `diag-query-type-check-rejects-*`）"
                 ),
                 NotGenerated.Pending(
-                    "bigint-column-decimal-parameter-efcore",
-                    "bigint の列と、decimal の型トークンで型付けしたパラメータの比較（SQL Server の EF Core 版）",
-                    "EF Core の列の型の変換の区切り（未起動）",
-                    "SQL Server の EF Core 版は bigint の列を CAST(... AS decimal(18,2)) にして比べ、整数部が 16 桁を超える行（long の上限など）で Arithmetic overflow の SqlException になる（パラメータの値に依らず、SqlServerQueryParameterInterceptor でも直らない）。QuickER 版 Repository とインメモリは正しく答える。生成器は decimal のパラメータを byte・short・int の列にだけ作る",
-                    NotGenerated.Unguarded
-                ),
-                NotGenerated.Pending(
                     "postgresql-oracle-backends",
                     "PostgreSQL と Oracle の構成の実装先",
                     "きっかけ待ち（簡易 DSL の残りの区切り）",

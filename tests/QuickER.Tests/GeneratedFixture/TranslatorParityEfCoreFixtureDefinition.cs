@@ -11,7 +11,8 @@ namespace QuickER.Tests.GeneratedTranslatorParityEfCoreFixture;
 /// <para>
 /// EF Core はマルチターゲットと生成時エラーで排他になるので、翻訳器の一致のフィクスチャには入らない。
 /// 述語の表（<c>TranslatorParityPredicateRows</c>）を EF Core 版でも流すために、同じ図をこのフィクスチャへ別に生成し、
-/// <c>TranslatorParityEfCoreSqlServerRuntimeTests</c> が述語の型をこの名前空間へ付け替えて実 SQL Server で比べる。
+/// <c>TranslatorParityEfCoreRuntimeTestsBase</c> が述語の型をこの名前空間へ付け替え、派生が実 SQL Server と SQLite で比べる
+/// （生成の EF Core のコードはプロバイダに依らないので、SQL Server 方言で生成したこのフィクスチャを SQLite でも流す）。
 /// </para>
 /// <para>
 /// 図は型の違う外部キー（主キーが bigint・外部キーが int）を外した <c>BuildWithoutCrossTypeForeignKey</c>。

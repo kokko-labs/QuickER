@@ -652,6 +652,11 @@ EF Core 版 Repository では、クエリのすべてのパラメータ（名前
 > こうした値は変数で渡してください（EF Core はパラメータで送ります）。
 > 簡易 DSL の条件の文字列のリテラルは変数として生成するので、名前付きクエリは C# と同じ答えになります。
 
+> **既知の割り切り**: SQL Server の EF Core 版 Repository では、整数の列と decimal の列の比較（`Query().Where(x => x.Qty > x.Price)`）が、桁あふれで失敗することがあります。
+> EF Core は整数の列を decimal の列の型（`decimal(10,2)` など）へ CAST するので、その型に入らない桁の整数を持つ行が 1 行でもあると、クエリ全体が失敗します。
+> QuickER 版 Repository は CAST せずに 2 つの列を比べます。
+> 簡易 DSL の条件は列と値だけを比べるので、名前付きクエリはこの形になりません。
+
 リストの `Contains` は要素 1 個につきバインド変数 1 個へ展開され、チャンク分割はしません。
 そのため巨大なリストは方言のバインド変数・IN リスト上限を超えて実行時エラーになります（SQL Server の 2100 パラメータ、SQLite の歴史的な 999 など）。
 大量のキーを渡す場合は、一時テーブルへ入れて結合するか、生 SQL を使ってください。
@@ -1209,9 +1214,26 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 - Unicode でない文字列の列（SQL Server の `varchar`・`char`・`text`、Oracle の `VARCHAR2`・`CHAR`・`CLOB`）は、`IsUnicode(false)` で構成します。
   パラメータは Unicode でない文字列で送られ、DB は列を変換せずに比べられます。
   この構成は図の方言の型で決まるので、複数の DB で使う図は、文字列の列を Unicode（`nvarchar` など）にそろえてください
+- SQL Server では、生成する `QuickErDbContext` が、型を取る列の無い変換で EF Core が式を `decimal(38,19)` へ変換するようにします。
+  C# は整数を decimal と比べるとき decimal へ広げ（`x.Id > 1.5m`）、EF Core はそれを `CAST([id] AS decimal(…))` と書きます。
+  EF Core の既定の `decimal(18,2)` では、整数部が 16 桁を超える `bigint` の値が CAST で桁あふれし、比べる値に依らずクエリ全体が桁あふれで失敗します。
+  `decimal(38,19)` は整数部の 19 桁にすべての `long` が入り、小数を 19 桁持てます。
+  それより桁の多い比べる値は値の型で送ります（次の項目を参照）。
+  プロパティの型は、精度の指定の有無に依らず変わりません。
+  列と比べるパラメータも、今までどおり列の型を取ります。
+  射影や計算の中の同じ変換（`Select(x => x.Qty / 3m)`）も `decimal(38,19)` になるので、結果の小数の桁は EF Core の既定より多くなります。
+  ほかのプロバイダは EF Core の既定のままです。
+  このために生成するコンテキストは `ConfigureConventions` をオーバーライドします。
+  自分の規約を足すときは、`QuickErDbContext` の別の部分に partial メソッド `ConfigureConventionsPartial(ModelConfigurationBuilder)` を実装してください
+- SQLite では、整数と `decimal` の等値と IN（`x.Qty == 10m` や、`decimal` の値の `Contains`）を、EF Core が条件を翻訳する前に整数の比較へ書き換えます。
+  EF Core の SQLite のプロバイダは `decimal` を文字列で持ち、こうした等値を文字列の比較（`CAST("qty" AS TEXT) = '10.0'`）で書くので、整数の値が一致しなくなるためです。
+  書き換えは C# の条件の意味を保ちます。
+  小数と `long` の範囲の外の値はどの行にも一致せず、`null` は `NULL` の行に一致します。
+  対象は `Query()` の条件（名前付きクエリ・手書きの LINQ・`ExecuteDeleteAsync`）です。
+  順序比較と、`decimal` の列の比較は書き換えず、今までどおり EF Core が翻訳します
 - SQL Server では、EF Core がパラメータに付けた型に入らない比べる値を、QuickER 版 Repository と同じく値の型で送ります（[クエリ](#クエリ式木--sql-変換)を参照）。
   EF Core はパラメータに比べる相手の列の型を付け、SqlClient は値をその型へ変換してから送ります。
-  `decimal(10,2)` の列と比べる `1.234` は `1.23` に、整数の列（decimal と比べるとき EF Core が `decimal(18,2)` へ CAST する）と比べる `0.999` は `1.00` になり、精度を超える値は `ArgumentException` になり、Unicode でない列と比べる ASCII の外の文字は `?` になります。
+  `decimal(10,2)` の列と比べる `1.234` は `1.23` になり、精度を超える値は `ArgumentException` になり、Unicode でない列と比べる ASCII の外の文字は `?` になります。
   `SqlServerQueryParameterInterceptor` は、こうした decimal のパラメータの精度とスケールを外し、こうした文字列を Unicode の文字列で送ります。
   列に入る値は列の型のままなので、SQL と列のインデックスの使われ方は変わりません。
   変えるのは LINQ のクエリと `ExecuteDelete` / `ExecuteUpdate` のコマンドだけです。

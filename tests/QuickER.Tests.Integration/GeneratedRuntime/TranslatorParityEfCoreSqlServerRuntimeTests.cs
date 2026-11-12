@@ -1,53 +1,33 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Linq.Expressions;
-using System.Reflection;
-using System.Threading;
 using System.Threading.Tasks;
-using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedTranslatorParityEfCoreFixture;
 using QuickER.Tests.TestSupport;
 using Xunit;
-using Source = QuickER.Tests.GeneratedTranslatorParityFixture;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
-/// 述語の表（<see cref="TranslatorParityPredicateRows"/>）を、実 SQL Server（Testcontainers）の EF Core 版 Repository へ流し、
-/// 同じ実装先から読み戻した全行へ C# のラムダを当てた結果と比べる。
+/// <see cref="TranslatorParityEfCoreRuntimeTestsBase"/> の述語の表を、実 SQL Server（Testcontainers）の EF Core 版 Repository へ流す派生。
 /// </summary>
-/// <remarks>
-/// <para>
-/// EF Core はマルチターゲットと生成時エラーで排他になるので、<see cref="TranslatorParityRuntimeTestsBase"/> の派生にできない
-/// （エンティティの型が別の名前空間に生成される）。同じ図を EF Core 単独で生成した
-/// <see cref="TranslatorParityEfCoreFixtureDefinition"/> のフィクスチャへ、述語の式の木を付け替えて流す
-/// （<see cref="Retarget{TSource, TTarget}"/>＝引数と、エンティティのプロパティの参照を同じ名前のプロパティへ写す。
-/// 捕捉した変数・定数はそのまま残すので、EF Core が受け取る木の形は元の行と同じ）。シードも同じ値をプロパティごとに写す。
-/// </para>
-/// <para>
-/// 表の行のうち EF Core の答えが C# と割れるものは <see cref="Known"/> に理由つきで宣言する（宣言した行が一致したら赤）。
-/// </para>
-/// </remarks>
 [Trait("Category", "Integration")]
 [Trait("RequiresDocker", "true")]
 [Collection(SqlServerContainerCollection.Name)]
 public sealed class TranslatorParityEfCoreSqlServerRuntimeTests(SqlServerContainerFixture fixture)
+    : TranslatorParityEfCoreRuntimeTestsBase
 {
-    private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
-
-    /// <summary>
-    /// EF Core の答えが C# と割れると分かっている行と、その理由。宣言した行は C# と割れることを表明する（一致したら赤）。
-    /// </summary>
+    /// <summary>EF Core（SQL Server）の答えが C# と割れると分かっている行と、その理由</summary>
     /// <remarks>
     /// Unicode でない列と ASCII の外の文字の定数の比較は、EF Core が定数を列の型の非 Unicode のリテラル（<c>N</c> の無い
     /// <c>'日本'</c>）として SQL へ書き込み、文字が <c>'??'</c> に化けて化けた行に一致する。パラメータでないので
     /// <c>SqlServerQueryParameterInterceptor</c> では直せない（docs の EF Core の節の既知の割り切り。簡易 DSL の条件は
     /// 文字列のリテラルを変数にして生成するので、この割り切りに当たらない）。
+    /// 整数の列と decimal の列の比較は、EF Core が整数の列を相手の列の型へ CAST し、その型の整数部に入らない行で
+    /// 桁あふれの例外になる（docs の既知の割り切り。既定の decimal の型を広げても、列どうしの CAST は相手の列の型を取るので直らない）。
     /// </remarks>
-    private static readonly IReadOnlyDictionary<string, string> Known = new Dictionary<
+    private static readonly IReadOnlyDictionary<string, string> KnownRows = new Dictionary<
         string,
         string
     >(StringComparer.Ordinal)
@@ -56,60 +36,17 @@ public sealed class TranslatorParityEfCoreSqlServerRuntimeTests(SqlServerContain
             "手書きの LINQ の定数は非 Unicode のリテラルになり、ASCII の外の文字が化ける（docs の既知の割り切り）",
         ["varchar-not-equals-non-ascii"] =
             "手書きの LINQ の定数は非 Unicode のリテラルになり、ASCII の外の文字が化ける（docs の既知の割り切り）",
+        ["int-column-greater-decimal-column"] =
+            "整数の列と decimal の列の比較は、EF Core が整数の列を相手の列の型（decimal(10,2)）へ CAST し、整数部の桁が入らない行で桁あふれの例外になる（docs の EF Core の節の既知の割り切り）",
+        ["int-column-equals-decimal-column"] =
+            "整数の列と decimal の列の比較は、EF Core が整数の列を相手の列の型（decimal(10,2)）へ CAST し、整数部の桁が入らない行で桁あふれの例外になる（docs の EF Core の節の既知の割り切り）",
     };
 
-    /// <summary>宣言した行が表に実在することを表明する（行の改名で宣言が黙って効かなくなるのを防ぐ）</summary>
-    [Fact(DisplayName = "[翻訳パリティ/EF Core SQL Server] 割れると宣言した行は述語の表に実在する")]
-    public void Known_NamesExistingRows() =>
-        Known
-            .Keys.Except(TranslatorParityPredicateRows.Table.Select(row => row.Id))
-            .Should()
-            .BeEmpty();
+    /// <inheritdoc />
+    protected override IReadOnlyDictionary<string, string> Known => KnownRows;
 
-    /// <summary>
-    /// 述語の表の 1 行が、EF Core 版でも C# と同じ行を返すことを検証する（<see cref="Known"/> の行は割れることを検証する）。
-    /// </summary>
-    [Theory(DisplayName = "[翻訳パリティ/EF Core SQL Server] 述語の表の行が C# と同じ行を返す")]
-    [MemberData(
-        nameof(TranslatorParityPredicateRows.Ids),
-        MemberType = typeof(TranslatorParityPredicateRows)
-    )]
-    public async Task Predicate_MatchesCSharp(string id)
-    {
-        await using var provider = await CreateProviderAsync();
-
-        var (expected, actual, predicate) = TranslatorParityPredicateRows.Table[id].Input switch
-        {
-            ProbePredicate probe => await RunAsync(
-                provider.GetRequiredService<IProbeRepository>(),
-                TranslatorParityRuntimeTestsBase.SeedProbes(),
-                Retarget<Source.ProbeEntity, ProbeEntity>(probe.Predicate),
-                p => p.ProbeId
-            ),
-            SmallChildPredicate child => await RunSmallChildAsync(provider, child),
-            _ => throw new InvalidOperationException($"行 {id} の入力の型を扱えない"),
-        };
-
-        if (Known.TryGetValue(id, out var reason))
-        {
-            actual
-                .Should()
-                .NotBeEquivalentTo(
-                    expected,
-                    "行 {0} は EF Core で割れると宣言している（{1}）。一致するようになったら宣言を消す",
-                    id,
-                    reason
-                );
-
-            return;
-        }
-
-        actual
-            .Should()
-            .BeEquivalentTo(expected, "条件 {0} は C# の意味論と同じ行を返すべき", predicate);
-    }
-
-    private async Task<ServiceProvider> CreateProviderAsync()
+    /// <inheritdoc />
+    protected override async Task<ServiceProvider> CreateProviderAsync()
     {
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
         await fixture.ResetSchemaAsync(Ct);
@@ -120,108 +57,5 @@ public sealed class TranslatorParityEfCoreSqlServerRuntimeTests(SqlServerContain
                 options.UseSqlServer(fixture.ConnectionString).IgnoreServiceProviderCacheLimit()
             )
             .BuildServiceProvider();
-    }
-
-    private static async Task<(List<int>, List<int>, LambdaExpression)> RunSmallChildAsync(
-        ServiceProvider provider,
-        SmallChildPredicate child
-    )
-    {
-        var parents = provider.GetRequiredService<IBigParentRepository>();
-        foreach (var parent in TranslatorParityRuntimeTestsBase.CrossTypeParents())
-        {
-            await parents.InsertAsync(Copy<Source.BigParentEntity, BigParentEntity>(parent), Ct);
-        }
-
-        return await RunAsync(
-            provider.GetRequiredService<ISmallChildRepository>(),
-            TranslatorParityRuntimeTestsBase.CrossTypeChildren(),
-            Retarget<Source.SmallChildEntity, SmallChildEntity>(child.Predicate),
-            c => c.Id
-        );
-    }
-
-    /// <summary>
-    /// シードを写して入れ、全行を読み戻して C# のラムダを当てた結果（期待）と、Query() の結果（実際）をキーで返す。
-    /// </summary>
-    private static async Task<(List<int>, List<int>, LambdaExpression)> RunAsync<
-        TSource,
-        TEntity,
-        TKey
-    >(
-        IRepository<TEntity, TKey> repository,
-        IReadOnlyList<TSource> seeds,
-        Expression<Func<TEntity, bool>> predicate,
-        Func<TEntity, int> key
-    )
-        where TSource : class
-        where TEntity : EntityBaseCore, new()
-    {
-        foreach (var seed in seeds)
-        {
-            await repository.InsertAsync(Copy<TSource, TEntity>(seed), Ct);
-        }
-
-        var stored = await repository.Query().ToListAsync(Ct);
-        stored.Should().HaveCount(seeds.Count);
-
-        var expected = stored.Where(predicate.Compile()).Select(key).ToList();
-        var actual = (await repository.Query().Where(predicate).ToListAsync(Ct))
-            .Select(key)
-            .ToList();
-
-        return (expected, actual, predicate);
-    }
-
-    /// <summary>翻訳器の一致のフィクスチャのエンティティを、同じ名前の列のプロパティへ写して EF Core のフィクスチャのエンティティにする</summary>
-    private static TTarget Copy<TSource, TTarget>(TSource source)
-        where TTarget : new()
-    {
-        var target = new TTarget();
-
-        foreach (var property in ColumnProperties(typeof(TSource)))
-        {
-            typeof(TTarget).GetProperty(property.Name)!.SetValue(target, property.GetValue(source));
-        }
-
-        return target;
-    }
-
-    private static IEnumerable<PropertyInfo> ColumnProperties(Type type) =>
-        type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(property =>
-                property.GetCustomAttribute<System.ComponentModel.DataAnnotations.Schema.ColumnAttribute>()
-                    is not null
-            );
-
-    /// <summary>
-    /// 述語の引数の型を <typeparamref name="TTarget"/> へ替え、引数のプロパティの参照を同じ名前のプロパティへ写す。
-    /// </summary>
-    internal static Expression<Func<TTarget, bool>> Retarget<TSource, TTarget>(
-        Expression<Func<TSource, bool>> predicate
-    )
-    {
-        var parameter = Expression.Parameter(typeof(TTarget), predicate.Parameters[0].Name);
-        var body = new EntityRetargeter(predicate.Parameters[0], parameter).Visit(predicate.Body);
-
-        return Expression.Lambda<Func<TTarget, bool>>(body, parameter);
-    }
-
-    /// <summary>引数とそのプロパティの参照だけを付け替える。捕捉した変数・定数・メソッド呼び出しはそのまま残す</summary>
-    private sealed class EntityRetargeter(ParameterExpression from, ParameterExpression to)
-        : ExpressionVisitor
-    {
-        protected override Expression VisitParameter(ParameterExpression node) =>
-            node == from ? to : base.VisitParameter(node);
-
-        protected override Expression VisitMember(MemberExpression node)
-        {
-            if (node.Expression == from)
-            {
-                return Expression.Property(to, node.Member.Name);
-            }
-
-            return base.VisitMember(node);
-        }
     }
 }
