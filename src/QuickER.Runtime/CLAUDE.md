@@ -299,7 +299,8 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
 
 - 生 SQL のエンティティ取得は縮小列が必須だが、SELECT に除外列を含めれば opportunistic にマップされる。名前付きクエリの DSL 射影が除外列を参照していれば、サーバー側刈り込み SELECT に含まれ値が取れる（WHERE 参照も可）。
 - EF Core（DbSet 経由）は非適用（EF Core の列選択は EF Core の責務なので全列読み書き）。
-- InMemory は完全パリティ：読み取り複製の除外列 strip・更新ガード・射影は完全クローンから。更新は除外列の blob を温存する（`src/QuickER.Runtime.InMemory/CLAUDE.md`「無制限バイナリ列（インメモリ）」）。
+- InMemory は読み取り・更新・射影で同じに動く：読み取り複製の除外列 strip・更新ガード・射影は完全クローンから。更新は除外列の blob を温存する（`src/QuickER.Runtime.InMemory/CLAUDE.md`「無制限バイナリ列（インメモリ）」）。
+  - NOT NULL は検査しない（docs のインメモリの節「実 DB との既知の乖離」）。NOT NULL の除外列への Stream の `Write{列}Async(id, null)` と、NOT NULL の列が null の行の挿入・グラフ保存は、DB が断るのにインメモリは保存する。実装先の一致はこれを受け入れた手の差（NOT NULL の列への null の書き込み）として、インメモリだけをその手から後の比較から外す。ガード：`GeneratedRuntime/Parity`（行 `not-null-stream-set-null-excluded-blob-is-refused`・`not-null-insert-null-thumb-is-refused`・`not-null-insert-null-amount-is-refused`）。
 - 読み取りオプトイン `SqlQuery<T>.WithUnboundedBinary()`（`SqlQueryPlan` の bool フラグ。API は常時生成・除外列なしは no-op）で、呼び出しごとに blob 込みで取得できる。
   - ON かつ Include なしのとき、SQL Server も SQLite も全列プレーン SELECT。OFF の Include なしの取得も縮小列のプレーン SELECT。SQL Server で FOR JSON を通るのは Include のある取得だけ。
   - InMemory は strip なしの完全クローンを返す（RowState=Unchanged の正当なエンティティ）。EF Core は元々全列のため no-op。

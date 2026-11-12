@@ -39,6 +39,9 @@ internal static class ToolArgumentFuzzDimensions
     /// <summary>崩した引数の深さ</summary>
     public const string Nesting = "Nesting";
 
+    /// <summary>崩した場所の容器（配列・辞書）の中の位置</summary>
+    public const string Position = "Position";
+
     /// <summary>スキーマに <c>type</c> の無い引数（<c>ToolArgumentShape</c> は型を見ない）</summary>
     private const string Untyped = "untyped";
 
@@ -83,6 +86,15 @@ internal static class ToolArgumentFuzzDimensions
                     Nesting,
                     [new Level("Root"), new Level("Top"), new Level("InArrayElement")],
                     "崩した引数の深さ（引数の全体か、ツールの引数か、オブジェクトの配列の要素の中の引数か）"
+                ),
+                new Factor(
+                    Position,
+                    [
+                        new Level(ToolArgumentFuzz.Positions.NotApplicable),
+                        new Level(ToolArgumentFuzz.Positions.First),
+                        new Level(ToolArgumentFuzz.Positions.Later),
+                    ],
+                    "崩した場所の容器の中の位置（容器の中でない・配列の最初の要素か辞書の最初のキー・2 番目以降）"
                 ),
             ],
             isValid: IsValid
@@ -149,6 +161,7 @@ internal static class ToolArgumentFuzzDimensions
                     1 => "InArrayElement",
                     _ => $"Depth{fuzzCase.Depth}",
                 },
+                [Position] = fuzzCase.Position,
             }
         );
 
@@ -158,7 +171,7 @@ internal static class ToolArgumentFuzzDimensions
         const string reason =
             "この入口のツールの入力スキーマに number・integer の引数も型を宣言しない引数も無い（ToolArgumentShape は 3 つとも見分けるが、崩す相手の引数が無い＝ツールのスキーマの事実で、エンジンを直しても作れない）";
 
-        foreach (var other in new[] { Breakage, Required, Nesting })
+        foreach (var other in new[] { Breakage, Required, Nesting, Position })
         {
             yield return CoverageGap.AcceptedMatching(
                 scope,
@@ -290,6 +303,29 @@ internal static class ToolArgumentFuzzDimensions
             Nesting,
             (_, nesting) => nesting == "InArrayElement"
         );
+
+        // 容器（配列・辞書）が無いので、崩した場所はどれも容器の中でない
+        const string noPositions = noContainers + "（容器の中の最初・2 番目以降の位置が無い）";
+
+        foreach (var other in new[] { Breakage, Required, Nesting })
+        {
+            yield return AcceptedGap(
+                CodegenScope,
+                noPositions,
+                other,
+                Position,
+                (_, position) => position != ToolArgumentFuzz.Positions.NotApplicable
+            );
+        }
+
+        yield return AcceptedGap(
+            CodegenScope,
+            noPositions,
+            ArgumentType,
+            Position,
+            (type, position) =>
+                position != ToolArgumentFuzz.Positions.NotApplicable || type is "array" or "object"
+        );
     }
 
     /// <summary>受け入れた網羅しない組の項目（指摘 P1-3・ツールのスキーマの事実で作れない組）</summary>
@@ -308,6 +344,12 @@ internal static class ToolArgumentFuzzDimensions
         assignment.TryGetValue(ArgumentType, out var type);
         assignment.TryGetValue(Required, out var required);
         assignment.TryGetValue(Nesting, out var nesting);
+        assignment.TryGetValue(Position, out var position);
+
+        if (position is not null && !IsValidPosition(breakage, type, nesting, position))
+        {
+            return false;
+        }
 
         // 引数の全体は 1 つしかなく、ツールの引数でも配列の要素の中でもない。全体を崩すのは全体の置き換えだけで、全体は
         // 省略できない（どのツールも引数のオブジェクトを受け取る）。3 つの因子の「全体」の水準は互いにだけ組む
@@ -355,5 +397,41 @@ internal static class ToolArgumentFuzzDimensions
         }
 
         return true;
+    }
+
+    /// <summary>位置の水準が、ほかの因子と原理的に組めるか（判断に要る因子が割り当てに無ければ真）</summary>
+    private static bool IsValidPosition(
+        string? breakage,
+        string? type,
+        string? nesting,
+        string position
+    )
+    {
+        var inContainer = position != ToolArgumentFuzz.Positions.NotApplicable;
+
+        // 引数の全体は容器の中に無い
+        if (inContainer && (nesting == "Root" || type == ToolArgumentFuzz.RootType))
+        {
+            return false;
+        }
+
+        // 配列の要素の中の引数は、必ず配列のどれかの要素の中にある
+        if (!inContainer && nesting == "InArrayElement")
+        {
+            return false;
+        }
+
+        // 要素 1 つだけの配列の要素は最初の要素、正しい要素の後ろに混ぜた要素は 2 番目以降の要素
+        return breakage switch
+        {
+            ToolArgumentFuzz.Breakages.Element => position == ToolArgumentFuzz.Positions.First,
+            ToolArgumentFuzz.Breakages.ElementAfterOk => position
+                == ToolArgumentFuzz.Positions.Later,
+            // 辞書の値は、辞書のどれかのキーの値
+            ToolArgumentFuzz.Breakages.DictionaryValue => inContainer,
+            // 引数の全体の置き換えは容器の中に無い
+            ToolArgumentFuzz.Breakages.NonObjectRoot => !inContainer,
+            _ => true,
+        };
     }
 }

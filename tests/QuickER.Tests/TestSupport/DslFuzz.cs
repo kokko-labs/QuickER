@@ -288,6 +288,25 @@ public sealed record DslAnd(IReadOnlyList<DslNode> Items) : DslNode;
 /// <summary>OR</summary>
 public sealed record DslOr(IReadOnlyList<DslNode> Items) : DslNode;
 
+/// <summary>並び替えの 1 項目（主キーより前に置く列と向き）</summary>
+/// <param name="Column">並べる列（整数・decimal・日時の列だけ）</param>
+/// <param name="Descending">降順か</param>
+public sealed record DslOrdering(DslColumn Column, bool Descending);
+
+/// <summary>並び替えで NULL を置く位置（docs のインメモリの節「実 DB との既知の乖離」の写し）</summary>
+/// <remarks>
+/// SQLite・SQL Server・MySQL とインメモリは NULL を最小の値として並べる（昇順で先頭・降順で末尾）。PostgreSQL・Oracle は最大の値として
+/// 並べる（昇順で末尾・降順で先頭）。EF Core は接続先の DB に従う。
+/// </remarks>
+public enum DslNullOrder
+{
+    /// <summary>昇順で先頭・降順で末尾</summary>
+    FirstWhenAscending,
+
+    /// <summary>昇順で末尾・降順で先頭</summary>
+    LastWhenAscending,
+}
+
 /// <summary>条件の括弧の書き方</summary>
 public enum DslGrouping
 {
@@ -357,14 +376,53 @@ public sealed class DslQuery
                 : name == Name ? ResultTypeName
                 : name + "Row",
             TypeNameCollision = TypeNameCollision,
+            Orderings = Orderings,
+            ListOrdered = ListOrdered,
+        };
+
+    /// <summary>並びだけを変えたクエリ（構文木・名前・描画は同じ）</summary>
+    /// <param name="orderings">主キーより前に置く並び</param>
+    /// <param name="listOrdered">一覧を並べるか</param>
+    /// <param name="descending">主キーの並びの向き</param>
+    public DslQuery WithOrdering(
+        IReadOnlyList<DslOrdering> orderings,
+        bool listOrdered,
+        bool descending
+    ) =>
+        new()
+        {
+            Name = Name,
+            Condition = Condition,
+            Grouping = Grouping,
+            Spelling = Spelling,
+            Returns = Returns,
+            IsAtomQuery = IsAtomQuery,
+            OrderDescending = descending,
+            ProjectedColumn = ProjectedColumn,
+            ProjectedNonNull = ProjectedNonNull,
+            ResultTypeName = ResultTypeName,
+            TypeNameCollision = TypeNameCollision,
+            Orderings = orderings,
+            ListOrdered = listOrdered,
         };
 
     public required QueryReturnShape Returns { get; init; }
 
+    /// <summary>主キーより前に置く並び（並べるクエリだけ。最後には必ず主キーを置くので同点は残らない）</summary>
+    public IReadOnlyList<DslOrdering> Orderings { get; init; } = [];
+
+    /// <summary>一覧を並べるか（単一・射影はいつも並べる。件数は並べない）</summary>
+    public bool ListOrdered { get; init; }
+
+    /// <summary>並び替えを持つクエリか（単一・射影と、<see cref="ListOrdered"/> の一覧）</summary>
+    public bool IsOrdered =>
+        Returns is QueryReturnShape.Single or QueryReturnShape.Projection
+        || (Returns == QueryReturnShape.List && ListOrdered);
+
     /// <summary>原子だけのクエリか（食い違いを原子の種類へ帰着させるため）</summary>
     public required bool IsAtomQuery { get; init; }
 
-    /// <summary>単一・射影の並び（主キーの降順なら true）</summary>
+    /// <summary>主キーの並びの向き（降順なら true。並び替えを持つクエリだけが使う）</summary>
     public bool OrderDescending { get; init; }
 
     /// <summary>射影の 2 つめのフィールドの列（射影のときだけ）</summary>
@@ -384,18 +442,15 @@ public sealed class DslQuery
 
     /// <summary>パラメータの一覧（出現順・重複なし）</summary>
     public IEnumerable<DslParam> Parameters =>
+        Atoms.Select(DslFuzz.ParameterOf).OfType<DslParam>().DistinctBy(p => p.Name);
+
+    /// <summary>2 つ以上の原子が同じパラメータを参照するか</summary>
+    public bool SharesParameter =>
         Atoms
-            .SelectMany(atom =>
-                atom switch
-                {
-                    DslCompare { Operand: DslParam p } => [p],
-                    DslLike { Operand: DslParam p } => [p],
-                    DslMatch { Operand: DslParam p } => [p],
-                    DslIn @in => [@in.List],
-                    _ => Array.Empty<DslParam>(),
-                }
-            )
-            .DistinctBy(p => p.Name);
+            .Select(DslFuzz.ParameterOf)
+            .OfType<DslParam>()
+            .GroupBy(p => p.Name, StringComparer.Ordinal)
+            .Any(group => group.Count() > 1);
 
     /// <summary>このクエリが起こし得る、既知の原因の診断</summary>
     public IEnumerable<(string Code, string Cause)> KnownDiagnostics(bool valueObjects)
@@ -454,6 +509,17 @@ public enum DslCaseRule
 /// </remarks>
 public static class DslFuzz
 {
+    /// <summary>原子が参照するパラメータ（リテラル・NULL 判定は null）</summary>
+    public static DslParam? ParameterOf(DslAtom atom) =>
+        atom switch
+        {
+            DslCompare { Operand: DslParam p } => p,
+            DslLike { Operand: DslParam p } => p,
+            DslMatch { Operand: DslParam p } => p,
+            DslIn @in => @in.List,
+            _ => null,
+        };
+
     /// <summary>原子を出現順に列挙する</summary>
     public static IEnumerable<DslAtom> AtomsOf(DslNode node) =>
         node switch
@@ -885,6 +951,33 @@ public static class DslFuzz
     /// <summary>読み戻した値どうしが等しいか（NULL どうしは等しい）</summary>
     public static bool SameStoredValue(object? value, object? other) =>
         value is null || other is null ? value is null && other is null : SameValue(value, other);
+
+    /// <summary>
+    /// 並び替えの昇順での 2 つの値の順序（NULL は <paramref name="nulls"/> の位置・数値は数値・日時は日時・文字列は序数）
+    /// </summary>
+    /// <remarks>
+    /// 文字列の比べ方は主キー（GuidKey）の並びでだけ使う。実装先をまたぐ文字列の並びは docs が約束していない（インメモリは序数・
+    /// SQL Server は照合順序）ので、主キーより前の並びには文字列の列を置かない。
+    /// </remarks>
+    /// <param name="value">左の値（読み戻した値）</param>
+    /// <param name="other">右の値（読み戻した値）</param>
+    /// <param name="nulls">NULL を置く位置</param>
+    public static int CompareForOrdering(object? value, object? other, DslNullOrder nulls)
+    {
+        if (value is null || other is null)
+        {
+            if (value is null && other is null)
+            {
+                return 0;
+            }
+
+            var first = nulls == DslNullOrder.FirstWhenAscending ? -1 : 1;
+
+            return value is null ? first : -first;
+        }
+
+        return CompareValues(value, other);
+    }
 
     /// <summary>値どうしの順序（数値は decimal へ・文字列は序数・Guid と日時はそのまま）</summary>
     private static int CompareValues(object value, object other) =>

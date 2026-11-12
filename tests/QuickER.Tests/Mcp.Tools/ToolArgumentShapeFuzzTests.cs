@@ -165,14 +165,8 @@ public sealed class ToolArgumentShapeFuzzTests : IDisposable
         public override bool IsRawException(string result) =>
             result.StartsWith(RawExceptionPrefix, StringComparison.Ordinal);
 
-        public override string RootRefusal { get; } =
-            ToolArgumentShape.DescribeEnglish(
-                new ToolArgumentProblem(
-                    ToolArgumentProblemKind.WrongType,
-                    ToolArgumentFuzz.RootType,
-                    "object"
-                )
-            );
+        public override string ShapeRefusal(ToolArgumentProblem problem) =>
+            ToolArgumentShape.DescribeEnglish(problem);
 
         /// <summary>MCP サーバと同じ入口でツールを実行する（新しい図ファイルの目印は未使用のパスへ置き換える）</summary>
         private (string Result, bool Success) Run(

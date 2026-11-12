@@ -45,9 +45,9 @@
   - `UndoKnownFailures` / `ToolArgumentShapeFuzzKnownFailures` とほかのガードは `KnownCaseLedger`。
 - 報告は `EngineReport`、最低件数は `CoverageGuard`（簡易 DSL の 100 件の下限は失敗のキーのまま）。
 - 実装先の一致の「受け入れた手の差」は `AcceptedDeviations`（実装先 × 手の種類）。
-  - インメモリが外部キーを検査しない差が該当する。`DeviatingOp` で印を付けた手から後は、その実装先だけを比べない（打ち切りは `ParityRunResult.Cuts`）。
+  - インメモリが外部キーを検査しない差と、NOT NULL を検査しない差が該当する。`DeviatingOp` で印を付けた手から後は、その実装先だけを比べない（打ち切りは `ParityRunResult.Cuts`）。
   - 手を全実装先から作らない理由：作らないと、ほかの実装先を見る機会まで消えるため。
-  - 生成器は列の末尾にだけ置く（`AppendTail`・種の 3 分の 2）。次元表の因子 `Deviation` と、「インメモリ・EF Core・リモート・EF Core 単独のサーバーが比べた手はそれぞれ 9 割以上」の CoverageGuard が黙った減少を止める。
+  - 生成器は列の末尾にだけ置く（外部キーの差は `AppendTail`・種の 3 分の 2、NOT NULL の差は値の幅の乱数の列で種の 4 分の 1）。次元表の因子 `Deviation` と、「インメモリ・EF Core・リモート・EF Core 単独のサーバーが比べた手はそれぞれ 9 割以上」の CoverageGuard が黙った減少を止める。
   - 直す区切りのある差は `PendingDeviations`（`tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`「直す区切りのある手の差」）。
   - 宣言を全実装先へ広げる退行（EF Core・リモートの比較まで黙って打ち切る）は、乱数の種では「打ち切りは宣言の一覧の（実装先・手の種類）にだけ起きる」の表明が、仕組みは `BackendParityRuntimeTests.AcceptedDeviation_CutsOnlyTheDeclaredBackend` が捕まえる。mutation 実証済み。
 - 種の解析を 1 つにしたことで変わった挙動（変数を指定しない普段の実行の件数は変わらない）：
@@ -435,6 +435,13 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
   - 値オブジェクトなしの網羅の単位 `DslFuzzUnits.PlainCoverage(方言)`（SQLite・SQL Server・MySQL に 1 つずつ・名前は `coverage-{方言}-plain`）：種の単位と同じ列（MySQL は網羅の単位と同じく固定長の文字列・符号つき整数・decimal・日時・Guid も持ち、その列の原子のクエリを作る）で `CoverageQueries` を流す。値オブジェクトなしでだけ書ける形（整数の列と小数のリテラル＝値オブジェクトの列は型の検査が断る）の組を種に依らず埋める。SQLite の単位だけ決まった形のクエリも流す。
   - 特殊な文字列とカルチャ：SQLite の 2 単位（`Coverage`・`PlainCoverage`）だけ、列 `s` に合成済みの「が」・分解形の「か＋濁点」・ソフトハイフンを無視すると a で始まる値を入れ、前方・後方・部分一致とソフトハイフンの LIKE を足す（SQL Server は照合順序で合成済みと分解形が等しくなるので足さない）。網羅の単位は書式のカルチャをインバリアントにして流し、SQLite の 2 単位の序数のクエリ（`DslFuzzGenerator.OrdinalQueryPrefix`＝KO0〜KO3）だけをインメモリの範囲で ja-JP・tr-TR でも流し直す（インメモリは序数＝オラクルは `DslCaseRule.Ordinal` のまま。カルチャで結果が変わり得るのはインメモリの文字列一致の比べ方だけなので、ほかのクエリは周回しない）。
   - 網羅しない組の一覧は、受け入れ（方言が列の型として持てない種類・EF Core の SQLite プロバイダの decimal の順序比較）だけ。
+- パラメータの使い回し（次元表の因子 ParameterReuse・原子ごと）：同じパラメータを同じ列の原子どうし・同じ種類のほかの列・より広い種類のほかの列（int と bigint・decimal など）で使う形と、IN のリストを同じ列の IN と NOT IN・ほかの列の IN で使う形。型の検査が受け付ける組だけを作る（値オブジェクトの列どうしは型トークンで型付けしたパラメータか、値オブジェクトの型を共有する GuidKey の主キーと自己参照の外部キー）。水準は参照するパラメータ名・相手の列・パラメータの型とこの原子の列の種類から数える（`DslFuzzDimensions.ReuseOf`。同じ原子のインスタンスを 1 つのクエリに 2 回置かない）。
+- 並び替え（次元表の因子 Ordering・クエリごと）：並べない・主キーだけ・列 1 つの後に主キー・列 2 つの後に主キー。主キーより前の列は整数・decimal・日時に限り、最後に必ず主キーを置く（同点を作らない）。文字列の列では並べない（作らない形の宣言）。一覧も並べられる（`DslQuery.ListOrdered`）。EF Core（SQLite）は decimal の列での並び替えも `ExcludedOnEfCoreSqlite` で流さない。
+  - 照合は「追加の列 → 主キー」の並びで期待を決める。単一は並びで最初に真になる行、射影と並べる一覧は返した行を同じ並びで並べ直した順との一致。NULL の位置は実装先ごとの宣言 `DslFuzzBackend.NullOrder`（docs のインメモリの節「実 DB との既知の乖離」の写し。今の実装先はどれも昇順で先頭）。
+  - 件数と原子だけのクエリは並べない（原子だけのクエリは並べない一覧と定義する）、単一・射影はいつも並べる＝`isValid`。
+- 種の単位の追加のクエリ：パラメータを使い回す `S{i}` と列で並べ替える `O{i}` を 6 本ずつ、本流と別の乱数の列（`DslFuzzGenerator.SideSeed`・パラメータ名の接頭辞 `q`）の生成器で作って末尾に足す（本流の列・行・クエリの引き方を変えない）。
+- 網羅の単位の決まった形（`DslFuzzGenerator.ReuseAndOrderingCoverageQueries`）：次元表の網羅すべき組のうち、ParameterReuse・Ordering とほかの因子の組で、網羅の単位のほかのクエリがまだ持たない組を足すクエリを貪欲に選ぶ（名前は `KR{i}`・`KB{i}`）。1 段目は使い回しの組を NOT の入れ子の 6 水準 × 戻り形 5 つ × 括弧の書き方 2 つで包んだ候補、2 段目はほかのクエリの並びの水準を変えた写しの候補。網羅すべき組は次元表から引くので、因子・水準を足すと選ぶクエリも増える。
+  - 網羅の単位は、同じ種類の列がほかに無いフィルタの列ごとに相方の列（`{列}_r`）を持つ（どの種類の列でも、ほかの同じ種類の列で使い回す形を作るため）。相方の値は乱数を引かずに元の列の 7 行先を写す。
 - mutation 実証済み。
 
 ## カルチャのガード

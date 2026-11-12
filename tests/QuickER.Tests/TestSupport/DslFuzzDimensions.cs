@@ -88,6 +88,57 @@ public static class DslFuzzDimensions
     /// <summary>射影の 2 つめのフィールドを非 NULL と指定するクエリ</summary>
     public const string ProjectionNonNull = "projection-nonnull";
 
+    /// <summary>原子のパラメータを、同じクエリのほかの原子と使い回すか（使い回す相手の列と型）</summary>
+    public const string ParameterReuse = "ParameterReuse";
+
+    /// <summary>パラメータを使い回さない原子（リテラル・NULL 判定を含む）</summary>
+    public const string ReuseNone = "none";
+
+    /// <summary>同じ列のほかの原子と同じパラメータを使う</summary>
+    public const string ReuseSameColumn = "same-column";
+
+    /// <summary>ほかの列の原子と同じパラメータを使い、パラメータの型がこの原子の列と同じ種類</summary>
+    public const string ReuseOtherColumnSameType = "other-column-same-type";
+
+    /// <summary>ほかの列の原子と同じパラメータを使い、パラメータの型がこの原子の列へ暗黙に広がる（int と bigint・decimal など）</summary>
+    public const string ReuseOtherColumnWidening = "other-column-widening";
+
+    /// <summary>同じ列のほかの IN と同じリストを使う</summary>
+    public const string ReuseListSameColumn = "in-list-same-column";
+
+    /// <summary>ほかの列の IN と同じリストを使う</summary>
+    public const string ReuseListOtherColumn = "in-list-other-column";
+
+    /// <summary>パラメータの使い回しの水準</summary>
+    public static IReadOnlyList<string> ReuseLevels { get; } =
+    [
+        ReuseNone,
+        ReuseSameColumn,
+        ReuseOtherColumnSameType,
+        ReuseOtherColumnWidening,
+        ReuseListSameColumn,
+        ReuseListOtherColumn,
+    ];
+
+    /// <summary>原子を含むクエリの並び替え</summary>
+    public const string Ordering = "Ordering";
+
+    /// <summary>並び替えを持たない（件数・並べない一覧・原子だけのクエリ）</summary>
+    public const string OrderingNone = "none";
+
+    /// <summary>主キーだけで並べる</summary>
+    public const string OrderingKey = "key";
+
+    /// <summary>列 1 つで並べてから主キーで並べる</summary>
+    public const string OrderingOneColumn = "one-column-then-key";
+
+    /// <summary>列 2 つで並べてから主キーで並べる</summary>
+    public const string OrderingTwoColumns = "two-columns-then-key";
+
+    /// <summary>並び替えの水準</summary>
+    public static IReadOnlyList<string> OrderingLevels { get; } =
+    [OrderingNone, OrderingKey, OrderingOneColumn, OrderingTwoColumns];
+
     /// <summary>SQLite の 3 実装先と MySQL のインメモリ（QuickER.Tests）の範囲</summary>
     public static IReadOnlyList<string> SqliteMySqlScopes { get; } =
     ["sqlite:ado", "sqlite:efcore", "sqlite:inmemory", "mysql:inmemory"];
@@ -193,7 +244,17 @@ public static class DslFuzzDimensions
                         }.Select(shape => new Level($"compound-{shape}", AxisMember.Of(shape))),
                         new Level(ProjectionNonNull),
                     ],
-                    "原子を含むクエリ（原子だけのクエリ＝原子 1 つかその NOT 1 つ・合成のクエリの戻り形・射影の非 NULL 指定）"
+                    "原子を含むクエリ（原子だけのクエリ＝原子 1 つかその NOT 1 つで並べない一覧・合成のクエリの戻り形・射影の非 NULL 指定）"
+                ),
+                new Factor(
+                    ParameterReuse,
+                    ReuseLevels.Select(level => new Level(level)).ToList(),
+                    "原子のパラメータを同じクエリのほかの原子と使い回すか（使い回さない・同じ列・ほかの列で型が同じ・ほかの列で型が広がる・IN のリストを同じ列・IN のリストをほかの列）"
+                ),
+                new Factor(
+                    Ordering,
+                    OrderingLevels.Select(level => new Level(level)).ToList(),
+                    "原子を含むクエリの並び替え（並べない・主キーだけ・列 1 つの後に主キー・列 2 つの後に主キー）"
                 ),
             ],
             isValid: IsValid
@@ -295,6 +356,8 @@ public static class DslFuzzDimensions
             Quote,
             Spelling,
             Query,
+            ParameterReuse,
+            Ordering,
         }.Select(other => (other, (Func<string, string, bool>)((clr, _) => names.Contains(clr))));
     }
 
@@ -308,10 +371,22 @@ public static class DslFuzzDimensions
     /// <param name="query">照合したクエリ</param>
     public static void Observe(CoverageCounter counter, DslQuery query)
     {
+        foreach (var assignment in Assignments(query))
+        {
+            counter.Observe(assignment);
+        }
+    }
+
+    /// <summary>クエリの原子ごとの割り当て（<see cref="Observe"/> が数える値。網羅の単位の生成器も組の選び方に使う）</summary>
+    /// <param name="query">クエリ</param>
+    public static IEnumerable<IReadOnlyDictionary<string, string>> Assignments(DslQuery query)
+    {
         var queryKind =
             query.IsAtomQuery ? AtomQuery
             : query.ProjectedNonNull ? ProjectionNonNull
             : $"compound-{query.Returns}";
+        var atoms = query.Atoms.ToList();
+        var ordering = OrderingOf(query);
 
         foreach (
             var (atom, underNot, nesting, precedenceEdge) in AtomsWithPolarity(
@@ -323,24 +398,70 @@ public static class DslFuzzDimensions
             )
         )
         {
-            counter.Observe(
-                new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    [Clr] = atom.Column.Clr.ToString(),
-                    [Shape] = ShapeOf(atom),
-                    [Negated] = atom.InherentNegation ? "Yes" : "No",
-                    [UnderNot] = underNot ? "Yes" : "No",
-                    [NotNesting] = nesting,
-                    [Grouping] =
-                        !precedenceEdge ? GroupingNone
-                        : query.Grouping == DslGrouping.Minimal ? GroupingPrecedence
-                        : GroupingParenthesized,
-                    [Quote] = DslFuzz.QuoteOf(atom),
-                    [Spelling] = query.Spelling.ToString().ToLowerInvariant(),
-                    [Query] = queryKind,
-                }
-            );
+            yield return new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [Clr] = atom.Column.Clr.ToString(),
+                [Shape] = ShapeOf(atom),
+                [Negated] = atom.InherentNegation ? "Yes" : "No",
+                [UnderNot] = underNot ? "Yes" : "No",
+                [NotNesting] = nesting,
+                [Grouping] =
+                    !precedenceEdge ? GroupingNone
+                    : query.Grouping == DslGrouping.Minimal ? GroupingPrecedence
+                    : GroupingParenthesized,
+                [Quote] = DslFuzz.QuoteOf(atom),
+                [Spelling] = query.Spelling.ToString().ToLowerInvariant(),
+                [Query] = queryKind,
+                [ParameterReuse] = ReuseOf(atom, atoms),
+                [Ordering] = ordering,
+            };
         }
+    }
+
+    /// <summary>クエリの並び替えの水準</summary>
+    internal static string OrderingOf(DslQuery query) =>
+        !query.IsOrdered
+            ? OrderingNone
+            : query.Orderings.Count switch
+            {
+                0 => OrderingKey,
+                1 => OrderingOneColumn,
+                _ => OrderingTwoColumns,
+            };
+
+    /// <summary>
+    /// 原子のパラメータの使い回しの水準（同じパラメータ名をほかの原子が参照するか・その相手の列・パラメータの型とこの原子の列の種類）
+    /// </summary>
+    /// <param name="atom">原子</param>
+    /// <param name="atoms">同じクエリの原子（出現順。同じ原子のインスタンスを 2 回置かない）</param>
+    internal static string ReuseOf(DslAtom atom, IReadOnlyList<DslAtom> atoms)
+    {
+        if (DslFuzz.ParameterOf(atom) is not { } parameter)
+        {
+            return ReuseNone;
+        }
+
+        var others = atoms
+            .Where(other =>
+                !ReferenceEquals(other, atom) && DslFuzz.ParameterOf(other)?.Name == parameter.Name
+            )
+            .ToList();
+
+        if (others.Count == 0)
+        {
+            return ReuseNone;
+        }
+
+        var sameColumn = others.Any(other => other.Column.Name == atom.Column.Name);
+
+        if (parameter.IsList)
+        {
+            return sameColumn ? ReuseListSameColumn : ReuseListOtherColumn;
+        }
+
+        return sameColumn ? ReuseSameColumn
+            : parameter.Column.Clr == atom.Column.Clr ? ReuseOtherColumnSameType
+            : ReuseOtherColumnWidening;
     }
 
     /// <summary>原子の形（型の検査が断るリテラルの比較は宣言していない水準＝照合したクエリに現れたら観測が断る）</summary>
@@ -461,6 +582,11 @@ public static class DslFuzzDimensions
         assignment.TryGetValue(UnderNot, out var underNot);
         assignment.TryGetValue(Query, out var queryKind);
         assignment.TryGetValue(Grouping, out var grouping);
+
+        if (!IsValidReuseAndOrdering(assignment))
+        {
+            return false;
+        }
 
         // 原子だけのクエリ（原子 1 つかその NOT 1 つ）は AND / OR を持たないので、優先順位が括弧の代わりをし得る組を持たない
         if (queryKind == AtomQuery && grouping is not (null or GroupingNone))
@@ -620,6 +746,103 @@ public static class DslFuzzDimensions
         // GuidKey の値オブジェクトは部分一致のメソッドを持たないので、ワイルドカードの無い LIKE（完全一致）以外の文字列一致を
         // 型の検査が断る（LIKE @p も部分一致）
         if (kind == DslClr.GuidKey && (isMatch || (isLike && shape != "like-exact")))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// 型が暗黙に広がる先になる列の種類（C# の暗黙の数値変換で、より狭い <see cref="DslClr"/> の値を受け取れる種類）
+    /// </summary>
+    private static readonly string[] WideningTargets =
+    [
+        nameof(DslClr.Int16),
+        nameof(DslClr.Int32),
+        nameof(DslClr.Int64),
+        nameof(DslClr.UInt16),
+        nameof(DslClr.UInt32),
+        nameof(DslClr.UInt64),
+        nameof(DslClr.Decimal),
+    ];
+
+    /// <summary>パラメータの使い回しと並び替えの水準が、ほかの因子と原理的に組めるか（判断に要る因子が無ければ真）</summary>
+    private static bool IsValidReuseAndOrdering(IReadOnlyDictionary<string, string> assignment)
+    {
+        assignment.TryGetValue(ParameterReuse, out var reuse);
+        assignment.TryGetValue(Ordering, out var ordering);
+        assignment.TryGetValue(Query, out var queryKind);
+        assignment.TryGetValue(Shape, out var shape);
+        assignment.TryGetValue(Quote, out var quote);
+        assignment.TryGetValue(Negated, out var negated);
+        assignment.TryGetValue(Clr, out var clr);
+
+        // 件数は並べない（並び順を指定できる戻り形は一覧・単一・射影＝QueryDefinitionRules.SupportsOrderBy）。単一・射影は
+        // いつも主キーで並べる。原子だけのクエリは並べない一覧（クエリの種類の定義）
+        if (ordering is not null && queryKind is not null)
+        {
+            var ordered = ordering != OrderingNone;
+
+            if (
+                (queryKind is AtomQuery or "compound-Count" && ordered)
+                || (
+                    queryKind is "compound-Single" or "compound-Projection" or ProjectionNonNull
+                    && !ordered
+                )
+            )
+            {
+                return false;
+            }
+        }
+
+        if (reuse is null or ReuseNone)
+        {
+            return true;
+        }
+
+        // 使い回すには原子が 2 つ以上要るので、原子だけのクエリ（原子 1 つかその NOT 1 つ）には無い
+        if (queryKind == AtomQuery)
+        {
+            return false;
+        }
+
+        // パラメータは文字列のリテラルを持たない
+        if (quote is not (null or "none"))
+        {
+            return false;
+        }
+
+        var isList = reuse is ReuseListSameColumn or ReuseListOtherColumn;
+
+        if (shape is not null)
+        {
+            // リストを使い回すのは IN だけ、値のパラメータを使い回すのはパラメータを持つ比較・LIKE・文字列一致だけ。
+            // 型が広がるのは数値の比較だけ（文字列一致は文字列の列にしか書けず、文字列の型は広がらない）
+            var isIn = shape.StartsWith("in", StringComparison.Ordinal);
+            var isParam = shape.EndsWith("-param", StringComparison.Ordinal);
+
+            if (
+                (isList && !isIn)
+                || (!isList && !isParam)
+                || (
+                    reuse == ReuseOtherColumnWidening
+                    && !shape.StartsWith("compare-", StringComparison.Ordinal)
+                )
+            )
+            {
+                return false;
+            }
+        }
+
+        // 型が広がる原子は比較で、比較は自身の否定を持たない
+        if (reuse == ReuseOtherColumnWidening && negated == "Yes")
+        {
+            return false;
+        }
+
+        // 型が広がるのは、より狭い種類の値を暗黙に受け取れる数値の列だけ（文字列・GuidKey・Guid・日時と、byte・sbyte は受け取れない）
+        if (reuse == ReuseOtherColumnWidening && clr is not null && !WideningTargets.Contains(clr))
         {
             return false;
         }

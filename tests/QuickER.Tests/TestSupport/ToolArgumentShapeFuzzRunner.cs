@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using QuickER.Mcp;
 using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.TestSupport;
@@ -12,7 +13,7 @@ namespace QuickER.Tests.TestSupport;
 /// 成功する引数（ベースライン）を実行し、成功したものから
 /// <see cref="ToolArgumentFuzz.Generate"/> が崩したケースを作り、<see cref="KnownCaseLedger"/> を通して 1 件ずつ
 /// 3 つの表明を確かめる。(1) 生の例外にならない、(2) 断るべきケース（<see cref="ToolArgumentFuzz.Case.MustFail"/>）は
-/// 失敗で返る（引数の全体のケースは入口の形の検査の文で返る）、(3) 失敗したら何も変えない。最後に台帳の古い項目・網羅の計数・最低件数を照合する。
+/// 失敗で返り、入口の形の検査の文（崩しの定義から組んだ問題の文）で断られる、(3) 失敗したら何も変えない。最後に台帳の古い項目・網羅の計数・最低件数を照合する。
 /// </para>
 /// <para>
 /// 入口ごとに違うのは <see cref="Entrance"/> の抽象メンバー（ツールとベースライン・実行のしかた・生の例外の見分け方・
@@ -67,12 +68,14 @@ internal static class ToolArgumentShapeFuzzRunner
         /// <summary>結果の文が、入口が例外を受け止めた（＝生の例外）ときのものか</summary>
         public abstract bool IsRawException(string result);
 
-        /// <summary>入口の形の検査が引数の全体（オブジェクトでない値）を断ったときの結果の文</summary>
+        /// <summary>入口の形の検査が問題を見つけて断ったときの結果の文（文の組み立ては製品の関数を使ってよい）</summary>
         /// <remarks>
-        /// 引数の全体のケースは、ツールの処理が別の理由（必須の引数が無いなど）で失敗しても合格にしない。入口が形の検査で
-        /// 断ったことを、この文との一致で確かめる（ツールへ届けば文が違う）。
+        /// 断るべきケースは、ツールの処理が別の理由（必須の引数が無い・辞書の値が文字列でないなど）で失敗しても合格にしない。
+        /// 入口が形の検査で断ったことを、崩しの定義から組んだ問題（<see cref="ToolArgumentFuzz.Case.Expected"/>）の文との一致で
+        /// 確かめる（形の検査が見落とせばツールへ届き、文が違う）。
         /// </remarks>
-        public abstract string RootRefusal { get; }
+        /// <param name="problem">形の検査が返すはずの問題</param>
+        public abstract string ShapeRefusal(ToolArgumentProblem problem);
     }
 
     /// <summary>入口へ全ツールの崩したケースを流し、問題があれば赤にする</summary>
@@ -170,12 +173,12 @@ internal static class ToolArgumentShapeFuzzRunner
         }
 
         if (
-            fuzzCase.Breakage == ToolArgumentFuzz.Breakages.NonObjectRoot
-            && outcome.Result != entrance.RootRefusal
+            fuzzCase is { MustFail: true, Expected: { } expected }
+            && outcome.Result != entrance.ShapeRefusal(expected)
         )
         {
             throw new Xunit.Sdk.XunitException(
-                $"引数の全体を入口の形の検査で断っていない（期待: {entrance.RootRefusal}）: {outcome.Result}"
+                $"入口の形の検査で断っていない（期待: {entrance.ShapeRefusal(expected)}）: {outcome.Result}"
             );
         }
 

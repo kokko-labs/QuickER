@@ -141,7 +141,7 @@ internal static class DslFuzzExecution
 
                 var arguments = query.Parameters.ToDictionary(p => p.Name, p => (object?)p);
                 var result = await InvokeAsync(repository, method, arguments, ct);
-                var problem = Check(query, result, rows, rule, shape);
+                var problem = Check(query, result, rows, rule, backend.NullOrder, shape);
                 checkedCount++;
 
                 // 照合したクエリの原子を網羅として数える（宣言の誤りは下の catch で受け止めずにそのまま投げる）
@@ -202,9 +202,17 @@ internal static class DslFuzzExecution
             return $"{atom.Kind}:{outer}{(atom.InherentNegation ? "neg" : "pos")}";
         }
 
+        // 並び替えの列を持つクエリ・パラメータを使い回すクエリは、合成と分けて名指しする
+        var family =
+            query.Orderings.Count > 0
+            || (query.Returns == QueryReturnShape.List && query.ListOrdered)
+                ? "ordering"
+            : query.SharesParameter ? "reuse"
+            : "composition";
+
         return query.Atoms.Any(atom => mismatchedKinds.Contains(atom.Kind))
             ? null
-            : $"composition:{query.Returns.ToString().ToLowerInvariant()}";
+            : $"{family}:{query.Returns.ToString().ToLowerInvariant()}";
     }
 
     private static string Describe(DslQuery query) =>
@@ -215,18 +223,31 @@ internal static class DslFuzzExecution
         );
 
     /// <summary>結果を、読み戻した行へオラクルを当てた期待値と比べる（一致すれば null）</summary>
+    /// <remarks>
+    /// 並び替えを持つクエリ（単一・射影・並べる一覧）は、「追加の列 → 主キー」の並び（NULL の位置は実装先の
+    /// <paramref name="nulls"/>）で期待を決める。単一は並びで最初に真になる行（その前の判定しない行も受ける）、射影と一覧は
+    /// 返した行を同じ並びで並べ直した順と一致すること。
+    /// </remarks>
     private static string? Check(
         DslQuery query,
         object? result,
         List<Dictionary<string, object?>> rows,
         DslCaseRule rule,
+        DslNullOrder nulls,
         EntityShape shape
     )
     {
         var verdicts = rows.Select(row =>
-                (Key: row[shape.KeyColumn], Verdict: DslFuzz.Evaluate(query.Condition, row, rule))
+                (
+                    Key: row[shape.KeyColumn],
+                    Verdict: DslFuzz.Evaluate(query.Condition, row, rule),
+                    Row: row
+                )
             )
             .ToList();
+        var ordering = Comparer<Dictionary<string, object?>>.Create(
+            (a, b) => CompareRows(query, shape, nulls, a, b)
+        );
         var definite = verdicts
             .Where(v => v.Verdict == true)
             .Select(v => KeyText(v.Key))
@@ -252,7 +273,7 @@ internal static class DslFuzzExecution
                 var actual = result is null ? null : KeyText(shape.KeyOf(result));
                 var acceptable = new HashSet<string?>();
 
-                foreach (var (key, verdict) in Ordered(verdicts, query.OrderDescending))
+                foreach (var (key, verdict, _) in verdicts.OrderBy(v => v.Row, ordering))
                 {
                     if (verdict is null)
                     {
@@ -304,24 +325,27 @@ internal static class DslFuzzExecution
                     problems.Add("duplicates");
                 }
 
-                if (projected)
+                var byKey = verdicts.ToDictionary(v => KeyText(v.Key), v => v.Row);
+
+                // 並べるクエリは、返した行を同じ並びで並べ直した順と比べる（返した行の欠け・余りは上で見ている）
+                if (query.IsOrdered && actual.All(byKey.ContainsKey))
                 {
-                    var sorted = Ordered(
-                            keys.Select(k => (k, (bool?)true)).ToList(),
-                            query.OrderDescending
-                        )
-                        .Select(pair => KeyText(pair.Key))
+                    var sorted = actual
+                        .Select(key => byKey[key])
+                        .Order(ordering)
+                        .Select(row => KeyText(row[shape.KeyColumn]))
                         .ToList();
 
                     if (!sorted.SequenceEqual(actual))
                     {
-                        problems.Add("order");
+                        problems.Add(
+                            $"order=[{string.Join(",", actual)}] expected=[{string.Join(",", sorted)}]"
+                        );
                     }
+                }
 
-                    var byKey = verdicts
-                        .Select((v, i) => (KeyText(v.Key), rows[i]))
-                        .ToDictionary(p => p.Item1, p => p.Item2);
-
+                if (projected)
+                {
                     foreach (var item in items)
                     {
                         var id = KeyText(shape.Unwrap(Property(item, "Id")));
@@ -344,24 +368,35 @@ internal static class DslFuzzExecution
         }
     }
 
-    /// <summary>主キーの順（降順なら逆）に並べる（数値は数値・文字列は序数）</summary>
-    private static IEnumerable<(object? Key, bool? Verdict)> Ordered(
-        IEnumerable<(object? Key, bool? Verdict)> items,
-        bool descending
+    /// <summary>
+    /// クエリの並び（追加の列を宣言の順・向きで、最後に主キー）での 2 行の順序（NULL は <paramref name="nulls"/> の位置・数値は数値・
+    /// 日時は日時・主キーの文字列は序数）
+    /// </summary>
+    private static int CompareRows(
+        DslQuery query,
+        EntityShape shape,
+        DslNullOrder nulls,
+        Dictionary<string, object?> left,
+        Dictionary<string, object?> right
     )
     {
-        var comparer = Comparer<object?>.Create(
-            (a, b) =>
-                a is string x && b is string y
-                    ? string.CompareOrdinal(x, y)
-                    : Convert
-                        .ToDecimal(a, CultureInfo.InvariantCulture)
-                        .CompareTo(Convert.ToDecimal(b, CultureInfo.InvariantCulture))
-        );
+        foreach (var ordering in query.Orderings)
+        {
+            var order = DslFuzz.CompareForOrdering(
+                left[ordering.Column.Name],
+                right[ordering.Column.Name],
+                nulls
+            );
 
-        return descending
-            ? items.OrderByDescending(i => i.Key, comparer)
-            : items.OrderBy(i => i.Key, comparer);
+            if (order != 0)
+            {
+                return ordering.Descending ? -order : order;
+            }
+        }
+
+        var key = DslFuzz.CompareForOrdering(left[shape.KeyColumn], right[shape.KeyColumn], nulls);
+
+        return query.OrderDescending ? -key : key;
     }
 
     private static string KeyText(object? key) =>

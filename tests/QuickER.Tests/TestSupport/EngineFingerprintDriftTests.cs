@@ -130,6 +130,21 @@ public sealed class EngineFingerprintDriftTests
                     .Append(SeedSummary.Quote(DslFuzz.Render(query.Condition)))
                     .Append('\n');
 
+                // 並びの行は並びを持つクエリだけに書く（並びを持たないクエリの要約は変えない）
+                if (query.ListOrdered)
+                {
+                    text.Append("    list-ordered\n");
+                }
+
+                foreach (var ordering in query.Orderings)
+                {
+                    text.Append("    order ")
+                        .Append(ordering.Column.Name)
+                        .Append(" desc=")
+                        .Append(ordering.Descending)
+                        .Append('\n');
+                }
+
                 foreach (var atom in query.Atoms)
                 {
                     text.Append("    atom ")

@@ -160,6 +160,7 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
         new(
             name,
             DslCaseRule.Collation,
+            DslNullOrder.FirstWhenAscending,
             async (probe, diagram, ct) =>
             {
                 var database = string.Create(

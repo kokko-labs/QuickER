@@ -41,6 +41,7 @@
   - 参照されている顧客のグラフ削除（依存行を同じ保存に持ち、編集すれば `DependentHeldParentDelete`）。
   - 代替キー（customers.code）の更新（参照あり `ReferencedKeyUpdate`・なし `AlternateKeyUpdate`）。
   - Save フックの規則：新しい顧客の更新・削除・挿入に Skip / EditThenSkip / EditThenContinue / ThrowBefore / ThrowAfter を当てる（`HookEditsSkippedRow` / `HookEditsDeletedRow`）。
+- 列の最後にだけ置く NOT NULL の手（`AppendNullIntoNotNullTail`・受け入れた手の差 `NullIntoNotNull`）：種の 4 分の 1 で、値の幅と同じ別の乱数の列（`ValueSeed`）から、本流の列を引き終えた後に引く。除外 blob の thumb への Stream の SET NULL（Blob の範囲だけ）・thumb が null の注文の挿入・金額が null の注文の挿入（NOT NULL の普通の列）のどれか。DB は断り、インメモリは書く（docs のインメモリの節「実 DB との既知の乖離」）ので、インメモリだけをその手から後の比較から外し、ほかの実装先は `store-rejected` の一致を比べ続ける。決まった形の行 `not-null-stream-set-null-excluded-blob-is-refused`・`not-null-insert-null-thumb-is-refused`・`not-null-insert-null-amount-is-refused` も持つ。
 - 決定的な用途だけの手とフックの振る舞い（`AfterWriteBlob`・`AfterExecuteSql`・`EditBlobsThenContinue`）は乱数の生成器に混ぜず、次元表の水準から外す（`AssignKey` と同じ）。
 - 値の幅（`BackendParityGenerator.Values.cs`）：本流の乱数の列が引いた値を、別の乱数の列（`ValueSeed`）で低い確率で端の値に置き換える（操作の列は変えない）。日時の Kind（Unspecified・Utc・Local）と端数（7 桁の tick）・decimal の精度の上下限と最小の正の値と 0・blob の空と 4 KB・文字列の非 ASCII とサロゲートペア。一意な列（顧客の名前・code）は置き換えない。比べ方は今のまま（日時は tick・decimal は値）で、Kind と decimal のスケールは比べない（実装先ごとの返し方は docs のインメモリの節「実 DB との既知の乖離」）。
 

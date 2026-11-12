@@ -87,11 +87,13 @@ internal static class DslFuzzBackends
 /// <summary>1 つの実装先</summary>
 /// <param name="Name">名前（失敗のキーに使う・実装先の軸の値＝<see cref="DslFuzzBackends.Names"/>）</param>
 /// <param name="Rule">文字列の大文字小文字・末尾の空白の扱い（docs の表から写す）</param>
+/// <param name="NullOrder">並び替えで NULL を置く位置（docs のインメモリの節「実 DB との既知の乖離」から写す）</param>
 /// <param name="OpenAsync">検証コードの型と図から、空のテーブルを用意した DI のコンテナを開く</param>
 /// <param name="Excludes">この実装先で流さないクエリ（理由は判定を定義した側の XmlDoc に書く）</param>
 internal sealed record DslFuzzBackend(
     string Name,
     DslCaseRule Rule,
+    DslNullOrder NullOrder,
     Func<Type, ErDiagram, CancellationToken, Task<DslFuzzSession>> OpenAsync,
     Func<DslQuery, bool>? Excludes = null
 ) : IMatrixAdapter
@@ -99,11 +101,12 @@ internal sealed record DslFuzzBackend(
     /// <summary>実装先の軸の値（名前）</summary>
     public string AxisValue => Name;
 
-    /// <summary>インメモリ Repository（序数で比べる）</summary>
+    /// <summary>インメモリ Repository（序数で比べる・NULL は昇順で先頭）</summary>
     public static DslFuzzBackend InMemory { get; } =
         new(
             DslFuzzBackends.InMemory,
             DslCaseRule.Ordinal,
+            DslNullOrder.FirstWhenAscending,
             (probe, _, _) => Task.FromResult(new DslFuzzSession(DslFuzzProbe.InMemory(probe)))
         );
 }
