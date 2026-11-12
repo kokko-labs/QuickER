@@ -58,6 +58,24 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
                 signature
             ))
         ),
+        .. new[] { "differs", "remote-efcore-differs" }.Select(signature => new KnownEntry(
+            "H2-D1",
+            KnownKind.Accepted,
+            null,
+            "code を手放す行を参照する行を同じ保存で別の行へ付け替える保存は、QuickER 版が付け替え先を先に渡されると付け替えを先に書いて通り、EF Core 版が代替キーを保存のほかの文より先に書いて外部キーに断られる（docs のグラフ保存の書く順と EF Core の代替キーの節。値は ExpectedLines と ExpectedEfCoreLines が固定する）",
+            "alternate-key-part-moved-off-released-taker-first",
+            KnownMatch.ExactSignature,
+            signature
+        )),
+        .. new[] { "differs", "remote-efcore-differs" }.Select(signature => new KnownEntry(
+            "H2-D2",
+            KnownKind.Accepted,
+            null,
+            "どの実装先でも断られる順を含む保存に他者が消した行があると、QuickER 版はグラフの順で前にあるその行の競合を、EF Core 版は先に書く代替キーの断りを報告する（docs のグラフ保存の書く順と EF Core の代替キーの節。値は ExpectedLines と ExpectedEfCoreLines が固定する）",
+            "alternate-key-gone-part-then-taker-first",
+            KnownMatch.ExactSignature,
+            signature
+        )),
     ];
 
     /// <summary>
@@ -81,6 +99,22 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
                 "rows=2",
                 "kits/1 code=K9 name=k1",
                 "kits/2 code=K1 name=k2",
+            ],
+            // 部品の付け替えより先に K1 を手放す代替キーを書くので、まだ K1 を参照する部品の外部キーに断られる
+            ["alternate-key-part-moved-off-released-taker-first"] =
+            [
+                "throws store-rejected",
+                "kits/1 code=K1 name=k1",
+                "kits/2 code=K2 name=k2",
+                "kit_parts/10 kit_code=K1",
+            ],
+            // 部品の更新より先に、K3 を取る代替キーを書くので、一意制約の断りを報告する
+            ["alternate-key-gone-part-then-taker-first"] =
+            [
+                "throws store-rejected",
+                "kits/1 code=K1 name=k1",
+                "kits/2 code=K2 name=k2",
+                "kits/3 code=K3 name=k3",
             ],
         };
 
@@ -280,6 +314,32 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
             "rows=2",
             "kits/1 code=K9 name=k1",
             "kits/2 code=K1 name=k2",
+        ],
+        // K1 を手放す kit 1 を先に渡すと、まだ K1 を参照する部品 10 の外部キーにどの実装先でも断られる
+        ["alternate-key-part-moved-off-released-releaser-first"] =
+        [
+            "throws store-rejected",
+            "kits/1 code=K1 name=k1",
+            "kits/2 code=K2 name=k2",
+            "kit_parts/10 kit_code=K1",
+        ],
+        // 部品 10 を持たせる kit 2 を先に渡すと、QuickER 版はグラフの順に付け替えを先に書いて通る（EF Core の値は
+        // ExpectedEfCoreLines。受け入れた差）
+        ["alternate-key-part-moved-off-released-taker-first"] =
+        [
+            "rows=3",
+            "kits/1 code=K9 name=k1",
+            "kits/2 code=K2 name=k2",
+            "kit_parts/10 kit_code=K2",
+        ],
+        // 前にある部品 10 の更新が、他者が消したので当たらず競合になる（後ろの kit 1 は K3 をまだ持つ kit 3 より先なので、
+        // 競合を解いても一意制約に断られる。EF Core の値は ExpectedEfCoreLines。受け入れた差）
+        ["alternate-key-gone-part-then-taker-first"] =
+        [
+            "throws SaveConflictException reason=NotFound type=KitPartEntity key=10",
+            "kits/1 code=K1 name=k1",
+            "kits/2 code=K2 name=k2",
+            "kits/3 code=K3 name=k3",
         ],
         // 書く列を持たない表で、消えた 11 行を insertWhenUpdateMissing で保存すると、EF Core 版も 1 試行 1 行ずつ挿入へ切り替えて
         // やり直しの上限（行ごとに数える）に掛からず、全行が挿入される

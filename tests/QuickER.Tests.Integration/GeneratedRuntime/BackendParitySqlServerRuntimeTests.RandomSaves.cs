@@ -19,13 +19,13 @@ public sealed partial class BackendParitySqlServerRuntimeTests
 {
     /// <summary>
     /// 乱数の種（<c>QUICKER_PARITY_SQLSERVER_SAVE_SEED</c> が 1 つの種、<c>QUICKER_PARITY_SQLSERVER_SAVE_SEEDS</c> が数・既定 8・
-    /// 夜間 200・1 から）
+    /// 夜間 400・1 から）
     /// </summary>
     public static SeedSettings RandomSaveSeeds { get; } =
         new(
             "QUICKER_PARITY_SQLSERVER_SAVE_SEEDS",
             8,
-            200,
+            400,
             singleVariable: "QUICKER_PARITY_SQLSERVER_SAVE_SEED"
         );
 
@@ -181,7 +181,7 @@ public sealed partial class BackendParitySqlServerRuntimeTests
         var kits = host.Client.GetRequiredService<IKitRemoteRepository>();
         var parts = host.Client.GetRequiredService<IKitPartRemoteRepository>();
         var existing = scenario.Rows.Where(row => !row.IsNew()).ToList();
-        var nextPart = 1;
+        var byId = scenario.Rows.ToDictionary(row => row.KitId);
 
         // 初めの行は、実装先に依らず QuickER 版（Save フックなし）で入れる（比べるのは保存の手だけ）
         await using (
@@ -206,39 +206,32 @@ public sealed partial class BackendParitySqlServerRuntimeTests
                 );
             }
 
-            foreach (var row in existing)
+            foreach (var part in scenario.Parts.Where(part => part.OwnerKitId is not null))
             {
-                for (var part = 0; part < row.Parts; part++)
-                {
-                    await seedParts.InsertAsync(
-                        new KitPartEntity
-                        {
-                            PartId = PartIdValue.Create(nextPart++),
-                            KitCode = CodeValue.Create(row.InitialCode),
-                        },
-                        Ct
-                    );
-                }
+                await seedParts.InsertAsync(
+                    new KitPartEntity
+                    {
+                        PartId = PartIdValue.Create(part.PartId),
+                        KitCode = CodeValue.Create(byId[part.OwnerKitId!.Value].InitialCode),
+                    },
+                    Ct
+                );
             }
         }
 
-        // 読む（消す行は部品をコレクションに持たせる）
+        // 読む
         var entities = new Dictionary<int, KitEntity>();
-        var loadedParts = (await parts.GetAllAsync(Ct)).ToList();
+        var loadedParts = (await parts.GetAllAsync(Ct)).ToDictionary(part => part.PartId.Value);
 
         foreach (var row in existing)
         {
-            var kit = (await kits.GetByIdAsync(KitIdValue.Create(row.KitId), Ct))!;
+            entities[row.KitId] = (await kits.GetByIdAsync(KitIdValue.Create(row.KitId), Ct))!;
+        }
 
-            if (row.Role == SaveRowRole.Delete)
-            {
-                foreach (var part in loadedParts.Where(p => p.KitCode?.Value == row.InitialCode))
-                {
-                    kit.KitParts.Add(part);
-                }
-            }
-
-            entities[row.KitId] = kit;
+        // 読んだ後の他者による部品の削除
+        foreach (var part in scenario.Parts.Where(p => p.Condition == SaveRowCondition.Gone))
+        {
+            await _fixture.ExecuteAsync($"DELETE FROM kit_parts WHERE part_id = {part.PartId}", Ct);
         }
 
         // 読んだ後の他者の変更
@@ -298,6 +291,49 @@ public sealed partial class BackendParitySqlServerRuntimeTests
             }
 
             roots.Add(kit);
+        }
+
+        // 部品の書き込み（持たせる kit のコレクションへ、計画の順に足す）
+        foreach (var plan in scenario.Parts)
+        {
+            var target = entities[plan.TargetKitId];
+            var targetCode = byId[plan.TargetKitId].FinalCode();
+            KitPartEntity part;
+
+            if (plan.Role == SavePartRole.New)
+            {
+                part = new KitPartEntity
+                {
+                    PartId = PartIdValue.Create(plan.PartId),
+                    KitCode =
+                        plan.ForeignKey == SavePartForeignKey.Explicit
+                            ? CodeValue.Create(targetCode)
+                            : null,
+                };
+                part.MarkAdded();
+            }
+            else
+            {
+                part = loadedParts[plan.PartId];
+
+                switch (plan.Role)
+                {
+                    case SavePartRole.Update:
+                        part.MarkUpdated();
+                        break;
+
+                    case SavePartRole.Delete:
+                        part.MarkRemoved();
+                        break;
+
+                    case SavePartRole.Move:
+                        part.KitCode = CodeValue.Create(targetCode);
+                        part.MarkUpdated();
+                        break;
+                }
+            }
+
+            target.KitParts.Add(part);
         }
 
         var outcome = await RandomSaveOutcomeAsync(() =>

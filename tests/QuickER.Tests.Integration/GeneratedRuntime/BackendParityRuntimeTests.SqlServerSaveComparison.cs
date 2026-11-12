@@ -51,7 +51,8 @@ public sealed partial class BackendParityRuntimeTests
                     "C3",
                     0
                 ),
-            ]
+            ],
+            []
         );
 
     private static IReadOnlyList<string> SqlServerSaveLines(
@@ -70,18 +71,50 @@ public sealed partial class BackendParityRuntimeTests
             .IndependentConflicts(scenario)
             .Should()
             .BeEquivalentTo([
-                (SaveConflictReason.NotFound, "1"),
-                (SaveConflictReason.Modified, "2"),
+                (SaveConflictReason.NotFound, "KitEntity", "1"),
+                (SaveConflictReason.Modified, "KitEntity", "2"),
             ]);
         BackendParitySqlServerSaveComparison
             .Difference(
                 scenario,
-                SqlServerSaveLines("throws SaveConflictException reason=NotFound key=1"),
-                SqlServerSaveLines("throws SaveConflictException reason=Modified key=2")
+                SqlServerSaveLines(
+                    "throws SaveConflictException reason=NotFound type=KitEntity key=1"
+                ),
+                SqlServerSaveLines(
+                    "throws SaveConflictException reason=Modified type=KitEntity key=2"
+                )
+            )
+            .Should()
+            .BeNull();
+
+        // 更新する部品を他者が消すと、部品も候補になる（型の名前で kit と分ける）
+        var withGonePart = scenario with { Parts = [GoneUpdatedPart] };
+
+        BackendParitySqlServerSaveComparison
+            .IndependentConflicts(withGonePart)
+            .Should()
+            .BeEquivalentTo([
+                (SaveConflictReason.NotFound, "KitEntity", "1"),
+                (SaveConflictReason.Modified, "KitEntity", "2"),
+                (SaveConflictReason.NotFound, "KitPartEntity", "1"),
+            ]);
+        BackendParitySqlServerSaveComparison
+            .Difference(
+                withGonePart,
+                SqlServerSaveLines(
+                    "throws SaveConflictException reason=NotFound type=KitPartEntity key=1"
+                ),
+                SqlServerSaveLines(
+                    "throws SaveConflictException reason=Modified type=KitEntity key=2"
+                )
             )
             .Should()
             .BeNull();
     }
+
+    /// <summary>kit 2 の下で更新する部品 1 を、読んだ後に他者が消した</summary>
+    private static SavePartPlan GoneUpdatedPart =>
+        new(1, 2, SavePartRole.Update, SaveRowCondition.Gone, 2, SavePartForeignKey.Explicit);
 
     [Fact(
         DisplayName = "[Parity/SqlServer] 乱数の保存の比べ方：単独で競合になる行が 1 つの保存では、理由とキーの違いは違い"
@@ -95,27 +128,34 @@ public sealed partial class BackendParityRuntimeTests
         BackendParitySqlServerSaveComparison
             .Difference(
                 scenario,
-                SqlServerSaveLines("throws SaveConflictException reason=NotFound key=1"),
-                SqlServerSaveLines("throws SaveConflictException reason=Modified key=2")
+                SqlServerSaveLines(
+                    "throws SaveConflictException reason=NotFound type=KitEntity key=1"
+                ),
+                SqlServerSaveLines(
+                    "throws SaveConflictException reason=Modified type=KitEntity key=2"
+                )
             )
             .Should()
             .NotBeNull();
     }
 
     [Theory(
-        DisplayName = "[Parity/SqlServer] 乱数の保存の比べ方：候補の外のキー・役に合わない理由・競合でない結果は違い"
+        DisplayName = "[Parity/SqlServer] 乱数の保存の比べ方：候補の外のキー・型・役に合わない理由・競合でない結果は違い"
     )]
-    [InlineData("throws SaveConflictException reason=Modified key=3")]
-    [InlineData("throws SaveConflictException reason=Modified key=1")]
-    [InlineData("throws SaveConflictException reason=NotFound key=2")]
-    [InlineData("throws SaveConflictException reason=Unknown key=1")]
+    [InlineData("throws SaveConflictException reason=Modified type=KitEntity key=3")]
+    [InlineData("throws SaveConflictException reason=Modified type=KitPartEntity key=2")]
+    [InlineData("throws SaveConflictException reason=Modified type=KitEntity key=1")]
+    [InlineData("throws SaveConflictException reason=NotFound type=KitEntity key=2")]
+    [InlineData("throws SaveConflictException reason=Unknown type=KitEntity key=1")]
     [InlineData("throws store-rejected")]
     public void OutsideTheCandidates_Differs(string reported)
     {
         BackendParitySqlServerSaveComparison
             .Difference(
                 SqlServerSaveTwoConflicts(),
-                SqlServerSaveLines("throws SaveConflictException reason=NotFound key=1"),
+                SqlServerSaveLines(
+                    "throws SaveConflictException reason=NotFound type=KitEntity key=1"
+                ),
                 SqlServerSaveLines(reported)
             )
             .Should()
@@ -130,9 +170,11 @@ public sealed partial class BackendParityRuntimeTests
         BackendParitySqlServerSaveComparison
             .Difference(
                 SqlServerSaveTwoConflicts(),
-                SqlServerSaveLines("throws SaveConflictException reason=NotFound key=1"),
                 SqlServerSaveLines(
-                    "throws SaveConflictException reason=Modified key=2",
+                    "throws SaveConflictException reason=NotFound type=KitEntity key=1"
+                ),
+                SqlServerSaveLines(
+                    "throws SaveConflictException reason=Modified type=KitEntity key=2",
                     "kit 1 version-matches-store=False",
                     "kit 2 version-matches-store=True",
                     "kits/2 code=K2 name=other"
@@ -156,17 +198,29 @@ public sealed partial class BackendParityRuntimeTests
             }
         )
         {
-            var scenario = SqlServerSaveTwoConflicts() with { Arguments = arguments };
+            var scenario = SqlServerSaveTwoConflicts() with
+            {
+                Arguments = arguments,
+                Parts = [GoneUpdatedPart],
+            };
 
+            // 他者が消した部品も、insertWhenUpdateMissing なら挿入へ切り替わるので候補にならない（ForceOverwrite だけなら候補）
             BackendParitySqlServerSaveComparison
                 .IndependentConflicts(scenario)
                 .Should()
-                .HaveCountLessThan(2, arguments.ToString());
+                .HaveCountLessThan(
+                    arguments == SaveArguments.ForceOverwrite ? 3 : 2,
+                    arguments.ToString()
+                );
             BackendParitySqlServerSaveComparison
                 .Difference(
                     scenario,
-                    SqlServerSaveLines("throws SaveConflictException reason=NotFound key=1"),
-                    SqlServerSaveLines("throws SaveConflictException reason=Modified key=2")
+                    SqlServerSaveLines(
+                        "throws SaveConflictException reason=NotFound type=KitEntity key=1"
+                    ),
+                    SqlServerSaveLines(
+                        "throws SaveConflictException reason=Modified type=KitEntity key=2"
+                    )
                 )
                 .Should()
                 .NotBeNull(arguments.ToString());
