@@ -2524,7 +2524,7 @@ A run uploads first and downloads second, and visits tables in foreign-key order
 | `LocalRowChanges` | The local rows the run changed on its own rather than by applying the server's change, each with the reason (below) |
 
 **`LocalRowChanges` names the local rows a run changed on its own.**
-The counts above say how many changes were discarded or rows deleted, not which ones, and three things a run does change local rows without a server change coming down for them.
+The counts above say how many changes were discarded or rows deleted, not which ones, and four things a run does change local rows without a server change coming down for them.
 Each row is listed once per reason, as a `SyncLocalRowChange` (table, key in the journal's text form, reason).
 
 | `SyncLocalRowChangeReason` | What the run did |
@@ -2532,6 +2532,7 @@ Each row is listed once per reason, as a `SyncLocalRowChange` (table, key in the
 | `DiscardedByServerWins` | A `ServerWins` run discarded the row's unsent changes and put the server's content back (or left the row to delete propagation when the server no longer has it) |
 | `ReloadedForUniqueValue` | The row held a unique value a downloaded row needed, and was read again from the server (or removed, when the server no longer has it) |
 | `RemovedBeforeDownload` | A `ServerWins` run removed the row, whose changes it was discarding and which the server does not have, before the server's rows came down, and dropped its entries with it |
+| `RemovedForUniqueValue` | The row kept a local row that held a unique value a downloaded row needed, and had nothing to send, so the run removed it (and dropped the entries it was discarding) for that row to go; when the server has the row, its server copy comes back with the download |
 
 Only `SyncAsync` fills it; `UploadAsync` and `DownloadAsync` called on their own return what they did before.
 A `SyncAsync` that throws has still done what it did up to that point, and hands the rows it had changed on in the exception's `Data`, under `SyncEngine.LocalRowChangesDataKey`, as an `IReadOnlyList<SyncLocalRowChange>`; the exception's type is the same as without it.
@@ -2878,7 +2879,13 @@ Those rows go in first, with the content of their server copies and their own un
 A local row whose server copy cannot go in only because its new parent is a row still waiting for a value, being brought in further up the same resolution, as in rows moved and renamed in a cycle, gives its unique values up instead.
 The server's values are written into the local row, which keeps its parent and the rest of its content, and the row comes in whole when the download reaches it.
 It is looked into only after a batch has failed to apply, so a batch that goes in makes no extra call, and a batch is tried at most as many times as it has rows.
-The download stops at the server's row instead, reported in `PendingKeyText` like any other stop, when the local row cannot be brought forward: it has an unsent change the run is not discarding, the server no longer has it and it cannot be removed (it is referred to, or `PropagateDeletes` is off), or the rows hold each other's values.
+A row the server no longer has can also be kept by rows whose server copies sit below the waiting row, in its own table or another: a row created here under it with a key the server holds under the waiting row, or a stale copy of a row the server moved there.
+Their server copies cannot go in first, since their parent is the waiting row.
+When every local row referring to it, directly or through other rows, has nothing to send (no unsent change, or only entries the run is discarding) and belongs to a table the run covers, those rows are removed first, children first, the entries the run is discarding go with them, and the row is removed.
+The removed rows the server has come back with the download, in the same run when their table comes after the waiting row's.
+This happens only when the run propagates deletes.
+Nothing is removed when one of the rows is up to date here while a later row of its table has come down: the resume point the remaining rows derive is past its server copy, so it would not come down again.
+The download stops at the server's row instead, reported in `PendingKeyText` like any other stop, when the local row cannot be brought forward: it has an unsent change the run is not discarding, the server no longer has it and it cannot be removed (it is referred to by a row that cannot be removed this way, or `PropagateDeletes` is off), or the rows hold each other's values.
 `ServerWins` treats such a row like one whose parent cannot be had: it is not put back and its entries stay.
 When the run propagates deletes, `ServerWins` first removes the local rows it is discarding that the server does not have, so a row recreated here under another key with the same value does not stand in the way.
 

@@ -55,22 +55,14 @@ internal static class SyncModelKnownFailures
             "swap-folder-names-without-refresh-does-not-settle",
             "1/no-quiesce:unique-swap:model_folders"
         ),
-        // 一意な値の持ち主を別の表の未送信の行が参照し、その行のサーバーの行が値を取る行の下にあると、どのポリシーの周でも抜けない
-        // （区切り H3 の広い世界の種 120022 で見つけた。乱数の項目はこの正規形から作る）
+        // 一意な値の持ち主を引き留める送るものの無い行の下に、ダウンロードがもう届け終えた最新の写しの行（同じ表に後ろの版の行が
+        // 残る）があると、消すと降りてこないので消さず、静止化しない（乱数の項目はこの正規形から作る）
         Entry(
-            "H3-1",
-            StuckSyncFixedIn,
-            "holder-referenced-by-other-table-does-not-settle",
-            "1/no-quiesce:holder-referenced-by-other-table:model_folders",
-            "サーバーの値を取る行のダウンロードは、名前の持ち主（サーバーに無い）を別の表のローカルの未送信の行が参照していて消せないので毎回止まり、ServerWins はその未送信の行のサーバーの行の親（値を取る行の下）を持てないので戻さず記録を残す"
-        ),
-        // 同じ形の品目の表（夜間の種 400 で見つけた。静止化の失敗の署名は表の名前を残すので、表ごとに項目を持つ）
-        Entry(
-            "H3-1",
-            StuckSyncFixedIn,
-            "holder-referenced-by-other-table-items-does-not-settle",
-            "1/no-quiesce:holder-referenced-by-other-table:model_items",
-            "サーバーの値を取る品目のダウンロードは、code の持ち主（サーバーに無い）を別の表のローカルの未送信のイベントが参照していて消せないので毎回止まり、ServerWins はそのイベントのサーバーの行の親（値を取る品目）を持てないので戻さず記録を残す"
+            "SK-1",
+            StuckSyncRemainderFixedIn,
+            "holder-referenced-by-other-table-current-child-does-not-settle",
+            "1/no-quiesce:holder-referenced-by-other-table-current-child:model_folders",
+            "持ち主を引き留める品目の下に、サーバーの子のイベントが最新の写しとして降りていて、同じ表に後ろの版のイベントが残るので、消すとそのイベントが二度と降りてこない。解決役は何も消さず、値を取る行のダウンロードが毎回止まる"
         ),
         // 洗い替えの取得の後にサーバーの他者が親を消すと、バッチの古い写しの子が消えた親を指したまま入る
         Entry(
@@ -89,8 +81,10 @@ internal static class SyncModelKnownFailures
         ),
     ];
 
-    /// <summary>一意な値の持ち主を別の表の未送信の行が参照する行き詰まりの項目の直す区切り（区切り H3 で見つけ、別に立てる）</summary>
-    public const string StuckSyncFixedIn = "同期の行き詰まりの区切り（未起動）";
+    /// <summary>
+    /// 一意な値の持ち主を引き留める行の下に、消すとダウンロードが降ろし直さない最新の写しがある行き詰まりの項目の直す区切り
+    /// </summary>
+    public const string StuckSyncRemainderFixedIn = "同期の行き詰まりの残りの区切り（未起動）";
 
     /// <summary>洗い替えの取得の後にサーバーで消えた親の項目の直す区切り</summary>
     private const string RefreshStaleParentFixedIn = "きっかけ待ち（台帳 本番 AG-R1）";

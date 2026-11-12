@@ -224,6 +224,25 @@ internal sealed record RecordJournalOp(
 }
 
 /// <summary>
+/// 端末のローカル DB に、1 つのキーの記録の削除を断るトリガーを仕掛ける（<paramref name="Refuse"/> が false なら外す）。
+/// 記録を捨てる処理と行を消す処理の順を、途中で失敗させて確かめる
+/// </summary>
+/// <param name="Device">端末</param>
+/// <param name="Table">記録の表</param>
+/// <param name="KeyText">記録のキー</param>
+/// <param name="Refuse">仕掛けるか（false なら外す）</param>
+internal sealed record RefuseJournalRemovalOp(
+    ModelActor Device,
+    string Table,
+    string KeyText,
+    bool Refuse
+) : ModelOp
+{
+    public override string Describe() =>
+        $"{Who(Device)} RefuseJournalRemoval {ModelTables.Short(Table)} key={KeyText} refuse={Refuse}";
+}
+
+/// <summary>
 /// 端末のジャーナルを捨てる（表を指定すれば RemoveTableAsync・null なら RemoveAllAsync）。捨てた記録のキーは、消失なしの
 /// 規則の対象から外す（利用者が送らないと決めた変更）
 /// </summary>

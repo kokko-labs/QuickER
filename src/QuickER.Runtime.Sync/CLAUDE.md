@@ -242,6 +242,15 @@
   - `CopyUniqueValues` は null（未設定）を取り、未設定なら `MoveOffHoldersAsync` も `ReleaseUniqueValuesAsync` も行を入れない（何もしない既定のデリゲートだと、一意な値を写さないまま入れる）。生成の記述子は一意制約のある表で必ず設定する。
   - 一意な値の比べ方は `SameUniqueValues`（`StructuralComparisons.StructuralEqualityComparer`＝バイナリはバイトで比べる）の 1 つ。
   - ガードなし：戻す前に返す枝は、先に入れた行が同じバッチの行で、流れの順の経路はぶつかった行の手前を、まとめて適用する経路はぶつからない行をその後でサーバーの写しで書くので、どの決定的な形でも観測できない。戻す書き込みの失敗・手で組んだ記述子・バイナリの一意な列は、作る口が無いか図に無い。
+- 持ち主を引き留める送るものの無い行を消す：サーバーに無い持ち主を今の手（持ち主を消す・`MoveOffHoldersAsync`）で消せなかったとき、`SyncParentResolver.RemoveRowsKeepingHoldersAsync` が、持ち主を（推移的に）参照するローカルの行を集める（同じ表も別の表も。子の表の行は失敗の経路でだけ表ごとに読み、記述子の親の参照で絞る＝`ISyncTableRunSupport.FindLocalRowsReferringAsync`。公開 API は変えない）。どれもが次を満たすときだけ、子から消してから持ち主を消す（`BringHoldersUpToDateAsync`）。
+  - 送るものが無い（`HoldsUnsentChange` が偽＝未送信の変更が無いか、ランが捨てる記録しか無い）・読み直しの途中の行でない。
+  - ランの範囲の固定クラスの表の行で、ほかの行（範囲の外の表・同期しない表・記述子に無い外部キー）に参照されていない（`IsReferencedOutsideAsync`）。循環が無い。
+  - サーバーにある行は、消した後の残りの行が導く再開点より版が上（`FindRowsNotBroughtBackAsync`＝消すとダウンロードが降ろし直す）。消す最新の写しより後ろの版の行が同じ表に残ると、その写しは二度と降りないので何も消さない。守りを外すと、最新の写しが端末から消えたまま戻らない（シナリオ `holder-referenced-by-other-table-current-child-does-not-settle` と乱数の種が `2/diverge:model_events:missing-on-device` で赤）。この形は静止化しないまま残り、同期のモデルの既知の失敗の一覧に Pending（直す区切りは `SyncModelKnownFailures.StuckSyncRemainderFixedIn`）で載る。
+  - 呼ぶのはランが削除を伝搬するときだけ（`TryResolveCollisionAsync` の門。持ち主を消す規則と同じ）。止める条件はどれも、消す前にすべて確かめる。
+  - 理由：引き留める行のサーバーの行は値を待つ行の下にあり（端末が作った同じキーの行・サーバーが移した行の古い写し）、外部キーは文ごとに検査するので、サーバーの内容で先に入れられない（`MoveOffHoldersAsync` は移り先がローカルにあるときだけ効く）。消さないと、どのポリシーでも毎回止まり、洗い替えでしか抜けない（未送信の無い古い写しの形は、サーバーの操作だけで全端末が止まる）。
+  - 順：ランが捨てる記録（解決役が受け取る `discarding`＝実行の初めに読んだ id）を先に捨て、それから行を消す（受理記録も消す）。逆順だと、途中で落ちたときに作り直した行の削除の記録が残り、次の実行がサーバーの行を消し得る。この順なら残るのは記録の無い行で、次の実行が同じ手で消す。
+  - 消した行は `SyncLocalRowChangeReason.RemovedForUniqueValue` で載せ、捨てた記録の行は `DiscardedByServerWins` でも載せる。サーバーにある行はダウンロード（表が値を待つ行の表より後ろなら同じ実行）か、ServerWins の適用で入る。
+  - ガード：シナリオ `holder-referenced-by-other-table-settles`・`holder-referenced-by-other-table-serverwins-settles-in-one-sync`・`holder-referenced-by-other-table-lww-serverwins-settles-in-one-sync`・`holder-referenced-by-other-table-collect-keeps-unsent-referrer`・`holder-referenced-by-other-table-propagation-off-keeps-referrer`・`holder-referenced-by-other-table-entries-go-before-rows`・`holder-referenced-by-other-table-items-settles`・`holder-referenced-by-other-table-through-label-settles`・`holder-referenced-by-other-table-stale-copy-settles`・`holder-referenced-by-other-table-edited-stale-copy-is-kept`・`holder-referenced-by-other-table-stale-copy-in-excluded-table-is-kept`、網羅の行（`SyncModelCoverageRows` の RemovedForUniqueValue の 3 行）、乱数の種（種 400・広い世界の種）。mutation 実証済み（段を外す・引き留める行の未送信の確認・呼び出し側の伝搬の門・範囲の条件・記録と行の順・再開点の守り）。
 - 一意な値を手放す：持ち主のサーバーの行を入れられない理由が、新しい親が読み直しの途中の行（`SyncParentResolver.IsInProgress`）であることだけのとき、`ISyncTableRunSupport.ReleaseUniqueValuesAsync` がローカルの持ち主にサーバーの一意な値だけを書く（親とほかの内容・ミラー版は残す）。
 - ガード：シナリオ `n8-unique-value-moved-then-updated`・`n8-holder-with-unsent-change-stops`・`n8-serverwins-holder-is-read-back`・`n8-chain`・`n8-true-swap-stops`・`n14-holder-moved-under-new-parent-in-batch`・`n13-holder-referenced-by-taker`・`serverwins-holder-moves-under-taker`・`serverwins-holder-chain-moves-under-taker`・`holder-held-for-another-reason-keeps-its-values`。
 
@@ -399,7 +408,7 @@
 
 ## 実行が変えた行の一覧
 
-- `SyncResult.LocalRowChanges`（`SyncLocalRowChange`＝表・キーのテキスト・理由の record）。理由は `SyncLocalRowChangeReason` の 3 つ：`DiscardedByServerWins`（`ApplyServerWinsToTableAsync` が捨てた行・保留した行は載せない）／`ReloadedForUniqueValue`（`SyncParentResolver.BringHoldersUpToDateAsync` が読み直した・消した持ち主）／`RemovedBeforeDownload`（ServerWins の先消しと、ダウンロード前の削除伝搬が消した「捨てる記録の行」）。(表, キー, 理由) ごとに 1 件・追加順。
+- `SyncResult.LocalRowChanges`（`SyncLocalRowChange`＝表・キーのテキスト・理由の record）。理由は `SyncLocalRowChangeReason` の 4 つ：`DiscardedByServerWins`（`ApplyServerWinsToTableAsync` が捨てた行・保留した行は載せない）／`ReloadedForUniqueValue`（`SyncParentResolver.BringHoldersUpToDateAsync` が読み直した・消した持ち主）／`RemovedBeforeDownload`（ServerWins の先消しと、ダウンロード前の削除伝搬が消した「捨てる記録の行」）／`RemovedForUniqueValue`（`SyncParentResolver.RemoveRowsKeepingHoldersAsync` が消した、持ち主を引き留める送るものの無い行）。(表, キー, 理由) ごとに 1 件・追加順。
 - 集めるのは `SyncAsync` だけ（実行中の `_changeLog`＝実行用ロックで重ならない）。単独の `UploadAsync` / `DownloadAsync` の戻り値は不変。
 - 例外で終わった `SyncAsync` は、それまでの一覧を例外の `Data[SyncEngine.LocalRowChangesDataKey]` に入れて投げ直す（例外の型は変えない）。
 - ガード：シナリオ `n2-serverwins-unique-delete-then-insert`・`thrown-serverwins-run-hides-settlement`・`thrown-serverwins-run-hides-settled-insert`（mutation 実証済み）。
