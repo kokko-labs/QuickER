@@ -1619,7 +1619,7 @@ public sealed class SyncPlanner
             var name = SelectedForeignKeyName(add, limit);
             var drop = drops.FirstOrDefault(d =>
                 SchemaNames.AreSame(SchemaDiffService.NormalizeTable(d.ChildEntity!), child)
-                && SchemaNames.AreSame(SelectedForeignKeyName(d, limit), name)
+                && SchemaNames.AreSame(DroppedForeignKeyName(d, limit, context), name)
             );
 
             if (drop is null)
@@ -2463,7 +2463,9 @@ public sealed class SyncPlanner
                     }
 
                     var child = SchemaDiffService.NormalizeTable(item.ChildEntity);
-                    var name = SelectedForeignKeyName(item, limit);
+                    var name = dropping
+                        ? DroppedForeignKeyName(item, limit, context)
+                        : SelectedForeignKeyName(item, limit);
                     return (
                         "FK"
                             + SignatureText.Part(SchemaNames.Key(child))
@@ -5280,6 +5282,26 @@ public sealed class SyncPlanner
         SchemaDiffItem item,
         IdentifierLengthLimit limit
     ) => SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, limit);
+
+    /// <summary>
+    /// 外す外部キーの項目を、付け直す項目と組むときの名前（DB の外部キーの実効名＝図全体から求めた
+    /// <see cref="SyncPlanContext.LiveForeignKeyNames"/>。名前のある DB の外部キーは項目が運ぶ DB の名前）
+    /// </summary>
+    /// <remarks>
+    /// 外す項目は DB の名前を運び、名前の無い DB の外部キーでは空になる。足す項目の名前の正本（<see cref="SelectedForeignKeyName"/>）で求めると、
+    /// 関係だけから規約名を作り直すので、名前の無い同じ組の 2 本目が 1 本目の名前になり、付け直す項目（2 本目の実効名）と組めない。
+    /// </remarks>
+    private static string DroppedForeignKeyName(
+        SchemaDiffItem item,
+        IdentifierLengthLimit limit,
+        SyncPlanContext? context
+    ) =>
+        item.ForeignKeyName is null
+        && item.Relationship is not null
+        && context is not null
+        && context.LiveForeignKeyNames(limit).TryGetValue(item.Relationship, out var resolved)
+            ? resolved
+            : SelectedForeignKeyName(item, limit);
 
     /// <summary>FK 制約名を解決する（未設定なら <c>FK_{子}_{親}</c> の規約名）</summary>
     /// <param name="relationship">外部キーのリレーション</param>

@@ -1482,8 +1482,59 @@ internal sealed partial class SyncPlanFuzzGenerator(
         ApplyRowLevel(entities, relationships, live);
         ApplyConstraintShapeLevel(entities, relationships, live);
         ApplyAttributeShapeLevel(entities, relationships, live);
-        CheckDeclaredTargetShapes(entities);
+        DeclareEmptyColumnChanges(entities, live);
+        CheckDeclaredTargetShapes(entities, live);
     }
+
+    /// <summary>
+    /// 列が空でないと通らない変更（<see cref="SyncDialectCapabilities.RequiresEmptyColumn"/>）を行のある列へ当てる文を、既存の行で
+    /// 断られる文として宣言する（計画は列の値を見ない）
+    /// </summary>
+    /// <remarks>
+    /// 同期が流す文は DB 側の型 → 最終の目標の図の型なので、変更をすべて終えた後に 1 回だけ、その 2 つで判定する。変更の途中で判定すると、
+    /// 同じ列を 2 回変える種（NUMBER(10) → NUMBER(19) → NUMBER(12,2)）で途中の型から見た縮小を宣言し、DB が通す文を断られると予言する。
+    /// 型の変更の段の外で型を変える水準（既定値のある列の型を広げるなど）も同じ判定に入る。
+    /// </remarks>
+    private void DeclareEmptyColumnChanges(List<Entity> entities, FuzzLiveSchema live)
+    {
+        var capabilities = dialect.Provider.SyncCapabilities;
+
+        foreach (var entity in entities)
+        {
+            foreach (var column in entity.Columns)
+            {
+                if (
+                    Info(live, entity, column) is { Computed: false } info
+                    && info.Values.Any(v => v is not null)
+                    && LiveColumn(live, entity, column) is { } liveColumn
+                    && !capabilities.AreSameType(liveColumn.DataType, column.DataType)
+                    && capabilities.RequiresEmptyColumn(liveColumn.DataType, column.DataType)
+                    && !live.DataFailures.Any(f =>
+                        f.Kind == FuzzDataFailureKind.AlterColumn
+                        && SchemaNames.AreSame(f.Table, entity.TableName)
+                        && SchemaNames.AreSame(f.Name, column.Name)
+                    )
+                )
+                {
+                    live.DataFailures.Add(
+                        new FuzzDataFailure(
+                            FuzzDataFailureKind.AlterColumn,
+                            entity.TableName,
+                            column.Name
+                        )
+                    );
+                }
+            }
+        }
+    }
+
+    /// <summary>目標の図の列に対応する DB 側の図の列（表と列の名前を <see cref="SchemaNames"/> の規則で引く。無ければ null）</summary>
+    private static Column? LiveColumn(FuzzLiveSchema live, Entity entity, Column column) =>
+        live
+            .Diagram.Entities.FirstOrDefault(e =>
+                SchemaNames.AreSame(e.TableName, entity.TableName)
+            )
+            ?.Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, column.Name));
 
     /// <summary>
     /// 行の水準を引き、データを変える水準なら DB 側の図の値を変える（行のある表の普通の列。構造は変えない＝本流の乱数の引き方は
@@ -1869,10 +1920,24 @@ internal sealed partial class SyncPlanFuzzGenerator(
     /// <summary>
     /// 目標の図が方言の宣言を守っているか（宣言の誤りは例外＝その種の失敗）。同じ列の並びに一意制約を 2 つ張れない方言
     /// （<see cref="SyncPlanFuzzDialect.AllowDuplicateUniqueConstraints"/> が偽＝Oracle の ORA-02261）では、同じ列集合の一意制約を
-    /// 2 つ以上持つ表を作らない（その図は DDL も同期も DB が断る。計画の誤りでなく生成器の誤りとして名指しする）
+    /// 2 つ以上持つ表を作らない（その図は DDL も同期も DB が断る。計画の誤りでなく生成器の誤りとして名指しする）。
+    /// 既存の行で断られる列の変更の宣言（<see cref="FuzzDataFailureKind.AlterColumn"/>）は、DB 側の列 → 最終の目標の図の列の変更が
+    /// 宣言の理由のどれかに当たる（<see cref="DeclaredAlterColumnReason"/>）
     /// </summary>
-    private void CheckDeclaredTargetShapes(List<Entity> entities)
+    private void CheckDeclaredTargetShapes(List<Entity> entities, FuzzLiveSchema live)
     {
+        foreach (
+            var failure in live.DataFailures.Where(f => f.Kind == FuzzDataFailureKind.AlterColumn)
+        )
+        {
+            if (!DeclaredAlterColumnReason(entities, live, failure))
+            {
+                throw new InvalidOperationException(
+                    $"generator declaration: AlterColumn {failure.Table}.{failure.Name} is declared refused by existing rows, but the change from the database column to the final target column is not one the rows refuse"
+                );
+            }
+        }
+
         if (dialect.AllowDuplicateUniqueConstraints)
         {
             return;
@@ -1893,6 +1958,50 @@ internal sealed partial class SyncPlanFuzzGenerator(
                 );
             }
         }
+    }
+
+    /// <summary>
+    /// 既存の行で断られる列の変更の宣言に理由があるか：DB 側の列 → 最終の目標の図の列の変更が、行のある列の列が空でないと通らない変更・
+    /// NULL を含む列の NOT NULL 化（主キーへ足す変更を含む）・データより短い長さ（<see cref="ApplyRowLevel"/> の長さ 5 の文字列）のどれか
+    /// </summary>
+    private bool DeclaredAlterColumnReason(
+        List<Entity> entities,
+        FuzzLiveSchema live,
+        FuzzDataFailure failure
+    )
+    {
+        var capabilities = dialect.Provider.SyncCapabilities;
+        var entity = entities.FirstOrDefault(e => SchemaNames.AreSame(e.TableName, failure.Table));
+        var column = entity?.Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, failure.Name));
+
+        if (
+            entity is null
+            || column is null
+            || Info(live, entity, column) is not { } info
+            || LiveColumn(live, entity, column) is not { } liveColumn
+        )
+        {
+            return false;
+        }
+
+        var typeChanged = !capabilities.AreSameType(liveColumn.DataType, column.DataType);
+        var shortest = dialect.TypeName(FuzzTypeKind.VarChar, 5);
+
+        return typeChanged
+                && info.Values.Any(v => v is not null)
+                && capabilities.RequiresEmptyColumn(liveColumn.DataType, column.DataType)
+            || ColumnNullability.AllowsNull(liveColumn)
+                && !ColumnNullability.AllowsNull(column)
+                && info.Values.Any(v => v is null)
+            || typeChanged
+                && string.Equals(column.DataType, shortest, StringComparison.OrdinalIgnoreCase)
+                && info.Values.Any(v => v is not null && LiteralText(v).Length > 5);
+
+        // SQL の文字列リテラルの中身（N'…' と '…'。ほかはそのまま）
+        static string LiteralText(string literal) =>
+            literal.StartsWith("N'", StringComparison.Ordinal) ? literal[2..^1]
+            : literal.StartsWith('\'') ? literal[1..^1]
+            : literal;
     }
 
     /// <summary>
@@ -2448,27 +2557,10 @@ internal sealed partial class SyncPlanFuzzGenerator(
             live.Shapes.Add(FuzzShape.PrecisionlessToPrecision);
         }
 
+        // 列が空でないと通らない変更の宣言は、変更をすべて終えた後に DB 側の型と最終の型で付ける（DeclareEmptyColumnChanges）
         foreach (var (owner, partner) in partners)
         {
-            var oldType = partner.DataType;
             partner.DataType = breadthType?.TypeName ?? dialect.TypeName(kind, length);
-
-            // 列が空でないと通らない変更を行のある列へ当てるなら、既存の行で断られる文として宣言する（計画は列の値を見ない）
-            if (
-                Info(live, owner, partner) is { } values
-                && values.Values.Any(v => v is not null)
-                && capabilities.RequiresEmptyColumn(oldType, partner.DataType)
-            )
-            {
-                live.DataFailures.Add(
-                    new FuzzDataFailure(
-                        FuzzDataFailureKind.AlterColumn,
-                        owner.TableName,
-                        partner.Name
-                    )
-                );
-            }
-
             Mutations.Add(
                 $"alter type {owner.TableName}.{partner.Name} -> {partner.DataType}{TypeTag(kind, length)}"
             );

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using AwesomeAssertions;
+using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.MySql;
@@ -17,6 +18,8 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 /// 夜間の種でも出ないので、総当たりだけでは黙って退行できる。ここで同期の前の DB・目標の図・選んだ項目・計画の警告・
 /// 失敗の後の DB・実行の結果を手で組み、規則ごとに「許される形」と「違反の形」を表明する。方言の能力は MySQL
 /// （外部キーの名前を保つ・DDL を暗黙コミットする＝1b が意味を持つ方言）。
+/// 同じく総当たりの判定の部品として、宣言した既存の行で断られる文の見分け方（表明 1）・消えた取込警告（表明 5）・静的な規則 R7・R8 が
+/// 予言する外部キーの型の組（<see cref="SyncPlanFuzzDialect.RefusesForeignKeyTypes"/>）も 1 行ずつの表で固定する。
 /// </remarks>
 public sealed class SyncPlanFuzzOracleTests
 {
@@ -1153,4 +1156,177 @@ public sealed class SyncPlanFuzzOracleTests
                 ),
             ],
         };
+
+    /// <summary>外部キーの両端の型の事実の 1 行（方言・子の型・親の型・DB が必ず断るか）</summary>
+    public sealed record ForeignKeyTypeFactCase(
+        string Name,
+        string Dialect,
+        string Child,
+        string Parent,
+        bool Refused
+    )
+    {
+        /// <inheritdoc />
+        public override string ToString() => Name;
+    }
+
+    /// <summary>
+    /// 静的な規則 R7・R8 が失敗を予言する外部キーの型の組（<see cref="SyncPlanFuzzDialect.RefusesForeignKeyTypes"/>）。製品の宣言が偽でも DB が
+    /// 受け入れる組（コンテナでの実測）と、測っていない組は断らない
+    /// </summary>
+    public static TheoryData<ForeignKeyTypeFactCase> ForeignKeyTypeFactCases() =>
+        new(
+            // PostgreSQL：子が整数か小数で親が小数なら受け入れ、子が小数で親が整数なら 42804
+            new ForeignKeyTypeFactCase(
+                "pg-integer-child-decimal-parent-is-accepted",
+                DialectNames.PostgreSql,
+                "integer",
+                "numeric(12,2)",
+                false
+            ),
+            new ForeignKeyTypeFactCase(
+                "pg-decimal-child-decimal-parent-other-scale-is-accepted",
+                DialectNames.PostgreSql,
+                "numeric(10,0)",
+                "numeric(12,2)",
+                false
+            ),
+            new ForeignKeyTypeFactCase(
+                "pg-decimal-child-integer-parent-is-refused",
+                DialectNames.PostgreSql,
+                "numeric(12,2)",
+                "integer",
+                true
+            ),
+            new ForeignKeyTypeFactCase(
+                "pg-float-child-decimal-parent-is-refused",
+                DialectNames.PostgreSql,
+                "real",
+                "numeric(12,2)",
+                true
+            ),
+            // PostgreSQL：文字列どうしはどの組も受け入れる
+            new ForeignKeyTypeFactCase(
+                "pg-fixed-child-variable-parent-is-accepted",
+                DialectNames.PostgreSql,
+                "char(20)",
+                "varchar(20)",
+                false
+            ),
+            new ForeignKeyTypeFactCase(
+                "pg-text-child-fixed-parent-is-accepted",
+                DialectNames.PostgreSql,
+                "text",
+                "char(10)",
+                false
+            ),
+            new ForeignKeyTypeFactCase(
+                "pg-string-child-integer-parent-is-refused",
+                DialectNames.PostgreSql,
+                "varchar(10)",
+                "integer",
+                true
+            ),
+            new ForeignKeyTypeFactCase(
+                "pg-unmeasured-date-and-timestamp-are-not-claimed",
+                DialectNames.PostgreSql,
+                "date",
+                "timestamp",
+                false
+            ),
+            // Oracle：NUMBER どうし・CHAR の単位語の違いは受け入れ、固定長と可変長・NUMBER と文字列は ORA-02267
+            new ForeignKeyTypeFactCase(
+                "oracle-number-precision-scale-difference-is-accepted",
+                DialectNames.Oracle,
+                "NUMBER(12,2)",
+                "NUMBER(10)",
+                false
+            ),
+            new ForeignKeyTypeFactCase(
+                "oracle-char-length-unit-difference-is-accepted",
+                DialectNames.Oracle,
+                "CHAR(20 BYTE)",
+                "CHAR(20 CHAR)",
+                false
+            ),
+            new ForeignKeyTypeFactCase(
+                "oracle-fixed-child-variable-parent-is-refused",
+                DialectNames.Oracle,
+                "CHAR(20 CHAR)",
+                "VARCHAR2(20 CHAR)",
+                true
+            ),
+            new ForeignKeyTypeFactCase(
+                "oracle-variable-national-child-fixed-national-parent-is-refused",
+                DialectNames.Oracle,
+                "NVARCHAR2(20)",
+                "NCHAR(20)",
+                true
+            ),
+            new ForeignKeyTypeFactCase(
+                "oracle-number-child-string-parent-is-refused",
+                DialectNames.Oracle,
+                "NUMBER(10)",
+                "NVARCHAR2(20)",
+                true
+            ),
+            new ForeignKeyTypeFactCase(
+                "oracle-char-and-nchar-are-not-claimed",
+                DialectNames.Oracle,
+                "NCHAR(20)",
+                "CHAR(20 CHAR)",
+                false
+            ),
+            new ForeignKeyTypeFactCase(
+                "oracle-unmeasured-date-and-timestamp-are-not-claimed",
+                DialectNames.Oracle,
+                "DATE",
+                "TIMESTAMP(6)",
+                false
+            ),
+            // 製品の宣言が真の組は断らない・SQL Server と MySQL は宣言の否定のまま
+            new ForeignKeyTypeFactCase(
+                "pg-integer-width-difference-is-accepted-by-declaration",
+                DialectNames.PostgreSql,
+                "integer",
+                "bigint",
+                false
+            ),
+            new ForeignKeyTypeFactCase(
+                "sqlserver-integer-width-difference-is-refused",
+                DialectNames.SqlServer,
+                "int",
+                "bigint",
+                true
+            ),
+            new ForeignKeyTypeFactCase(
+                "mysql-integer-and-decimal-are-refused",
+                DialectNames.MySql,
+                "int",
+                "decimal(12,2)",
+                true
+            ),
+            new ForeignKeyTypeFactCase(
+                "mysql-string-length-difference-is-accepted-by-declaration",
+                DialectNames.MySql,
+                "varchar(20)",
+                "varchar(30)",
+                false
+            )
+        );
+
+    [Theory(
+        DisplayName = "[Integration] 同期計画の静的な規則 R7・R8: DB が必ず断る外部キーの型の組だけを予言する（測った事実）"
+    )]
+    [MemberData(nameof(ForeignKeyTypeFactCases))]
+    public void RefusesForeignKeyTypes_FollowsMeasuredFacts(ForeignKeyTypeFactCase c) =>
+        SyncPlanFuzzDialect
+            .RefusesForeignKeyTypes(
+                c.Dialect,
+                SyncPlanExpectationCapabilities.Get(c.Dialect),
+                c.Child,
+                c.Parent
+            )
+            .Should()
+            .Be(c.Refused, c.Name);
 }

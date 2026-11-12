@@ -87,6 +87,45 @@ internal static partial class SyncPlanExpectationRows
                         .Items.Single($"AddForeignKey > * fk={UnnamedShipName} sel=*")
                 ),
             Row(
+                    "plan-unnamed-live-fk-second-rebuild-around-row-dependent-change-names-its-own-name",
+                    "DB 側も名前の無い同じ組の外部キー 2 本で、2 本目を作り直しながら既存の行で断られうる一意制約の追加を挟むと、2 本目の実効名で名指しし、付け直しを新しい外部キーより前に並べる（暗黙コミットの方言）",
+                    DialectNames.MySql,
+                    DialectNames.Oracle
+                )
+                // 取込は外部キーに必ず名前を付けるので利用者の経路には無い DB 側の図。外す項目が名前を持たないときも、付け直す項目と
+                // DB の外部キーの実効名（名前の無い同じ組の 2 本目は一意化した名前）で組むことを見る
+                .Live(s =>
+                {
+                    UnnamedPairSchema(s, null, null);
+                    s["customers"].Columns.Add(S.Nullable("code", "int"));
+                    s["orders"].Columns.Add(S.Nullable("third_customer_id", "int"));
+                })
+                .Target(s =>
+                {
+                    UnnamedPairSchema(s, null, null).OnDelete = ForeignKeyReferentialAction.Cascade;
+                    s["customers"].Columns.Add(S.Nullable("code", "int"));
+                    s["orders"].Columns.Add(S.Nullable("third_customer_id", "int"));
+                    s.Unique("customers", "uq_customers_code", "code");
+                    s.Relationships.Insert(
+                        0,
+                        s.Fk("customers", "orders", "fk_orders_third", ("id", "third_customer_id"))
+                    );
+                    s.Relationships.RemoveAt(s.Relationships.Count - 1);
+                })
+                .Select(SelectAll)
+                .Expect(e =>
+                    e.Warnings.Exact(
+                            $"ConstraintRebuildAroundRowDependentChange(orders): {UnnamedShipName} (UNIQUE customers (code))"
+                        )
+                        // 付け直し（定義を変えて付け直す）を新しい外部キーより前へ並べる（外部キーの追加の並び）
+                        .Items.Exact(
+                            "DropForeignKey > * pairs=(id>ship_customer_id) *",
+                            "AddUniqueConstraint > * uq=uq_customers_code *",
+                            $"AddForeignKey > * fk={UnnamedShipName} *",
+                            "AddForeignKey > * fk=fk_orders_third *"
+                        )
+                ),
+            Row(
                     "diff-unnamed-fk-many-to-many-first-matches-live-with-default-name",
                     "名前の無い多対多が先に並ぶ図は、既定名で外部キーを作った live と外部キーの差分を出さない（名前を保存する 4 方言）",
                     PersistedForeignKeyNameDialects
