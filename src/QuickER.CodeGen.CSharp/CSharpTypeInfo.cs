@@ -174,7 +174,8 @@ public sealed record CSharpTypeInfo
     /// <para>
     /// 例：PostgreSQL の <c>date</c>・<c>timestamp</c> の <c>DateTime</c> の列は、列の型を教えないと Npgsql の EF Core の
     /// プロバイダが <c>timestamp with time zone</c> のパラメータで送り、Kind=Unspecified の値を断る。<c>json</c>・<c>jsonb</c>・
-    /// <c>xml</c> の <c>string</c> の列は text で送り、PostgreSQL が断る。
+    /// <c>xml</c> の <c>string</c> の列は text で送り、PostgreSQL が断る。SQL Server の <c>money</c>・<c>smallmoney</c> の <c>decimal</c> の列は、既定の
+    /// <c>decimal(18,2)</c> で送って小数 4 桁を 2 桁へ落とし、PostgreSQL の <c>money</c> の列は numeric で送って、比べる演算子が無いと断られる。
     /// </para>
     /// <para>
     /// 値は方言の型マッパー（プロバイダ層）が決めた固定の綴りで、図の型表記をそのまま渡さない（生成コードへ利用者の文字列を

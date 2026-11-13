@@ -592,6 +592,14 @@ internal static partial class DialectTypeRows
                 );
             }
 
+            // EF Core は精度の無い decimal を既定の decimal(18,2) で書くので、小数 4 桁の money・smallmoney は列の型を教える
+            yield return SqlServerMap(
+                "efcol-smallmoney",
+                "smallmoney は精度なしの decimal で、生成 EF Core の DbContext が列の型 smallmoney を教える",
+                "smallmoney",
+                "ok type=decimal p=- s=- efcol=smallmoney"
+            );
+
             yield return SqlServerMap(
                 "unknown-sqldb-null",
                 "未知の型は SqlDbTypeName が null になる",

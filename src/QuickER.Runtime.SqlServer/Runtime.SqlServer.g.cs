@@ -3823,11 +3823,12 @@ public sealed class EntitySaveMetadata
     /// <remarks>
     /// <para>
     /// A comparison may hold a value the column's type cannot represent: a fraction or an out-of-range integer against an integer
-    /// column (C# widens the column), a decimal with more digits than the column's precision and scale, a time of day against a
-    /// date column, or a character outside ASCII against a non-Unicode column. Bound with the column's type, SqlClient or the
-    /// server converts the value first (truncating, rounding, or turning the character into '?'), or throws an overflow, so the
-    /// comparison answers differently from C#, EF Core, and the in-memory backend. Bound with its own type, the server converts
-    /// the column instead and compares the values as they are.
+    /// column (C# widens the column), a decimal with more digits than the column's precision and scale, a number outside the range
+    /// or beyond the four fractional digits of a money or smallmoney column, a time of day against a date column, or a character
+    /// outside ASCII against a non-Unicode column. Bound with the column's type, SqlClient or the server converts the value first
+    /// (truncating, rounding, or turning the character into '?'), or throws an overflow, so the comparison answers differently
+    /// from C#, EF Core, and the in-memory backend. Bound with its own type, the server converts the column instead and compares
+    /// the values as they are.
     /// </para>
     /// <para>
     /// A value that fits keeps the column's type, so the server compares without converting the column and an index on it stays
@@ -3896,6 +3897,8 @@ public sealed class EntitySaveMetadata
                 attribute.Precision,
                 attribute.Scale
             ),
+            SqlDbType.Money => FitsMoney(value, -922_337_203_685_477.5808m, 922_337_203_685_477.5807m),
+            SqlDbType.SmallMoney => FitsMoney(value, -214_748.3648m, 214_748.3647m),
             SqlDbType.Date => value is not DateTime dateTime || dateTime.TimeOfDay == TimeSpan.Zero,
             SqlDbType.VarChar or SqlDbType.Char or SqlDbType.Text => value is not string text
                 || text.All(char.IsAscii),
@@ -3925,6 +3928,13 @@ public sealed class EntitySaveMetadata
 
         return fractionalDigits <= scale && integralDigits <= precision - scale;
     }
+
+    /// <summary>Whether a number fits money or smallmoney: within the type's range and with at most four fractional digits.</summary>
+    private static bool FitsMoney(object value, decimal min, decimal max) =>
+        TryExactDecimal(value, out var number)
+        && number >= min
+        && number <= max
+        && decimal.Round(number, 4) == number;
 
     /// <summary>The number as a decimal when the conversion is exact (a double outside decimal's range, NaN, or an infinity is not).</summary>
     private static bool TryExactDecimal(object value, out decimal number)

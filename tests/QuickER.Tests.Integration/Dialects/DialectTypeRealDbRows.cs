@@ -632,6 +632,8 @@ internal static class DialectTypeRealDbRows
     /// </summary>
     private static IEnumerable<DialectTypeRealDbProbe> PostgreSqlEfCore() =>
         [
+            // money は小数 2 桁を持つ（列の型の規則で丸める）。EF Core が money として読み書きできる
+            EfCore("matrix-map-postgresql-money", PostgreSql, "1.23", 1.23m, 9876.54m),
             // Npgsql は time を TimeOnly で返すが、EF Core は TimeSpan のまま読み書きできる
             EfCore(
                 "map-postgresql-time-without-time-zone",
@@ -755,6 +757,21 @@ internal static class DialectTypeRealDbRows
                 "'2026-01-02 03:04:05.123456 +09:00'",
                 new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.FromHours(9)).AddTicks(1234560),
                 new DateTimeOffset(2026, 5, 6, 7, 8, 9, TimeSpan.FromHours(-5)).AddTicks(1234560)
+            ),
+            // money・smallmoney は小数 4 桁を持つ。EF Core が列の型を知らないと既定の decimal(18,2) で書き、4 桁目まで落とす
+            EfCore(
+                "matrix-map-sqlserver-money",
+                DialectNames.SqlServer,
+                "1.2345",
+                1.2345m,
+                9876.5432m
+            ),
+            EfCore(
+                "map-sqlserver-sqldb-smallmoney",
+                DialectNames.SqlServer,
+                "1.2345",
+                1.2345m,
+                9876.5432m
             ),
         ];
 

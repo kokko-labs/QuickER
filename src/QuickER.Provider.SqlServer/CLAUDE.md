@@ -39,6 +39,13 @@
 - 取込は `DATETIME_PRECISION` を読み、既定の 7 は括弧を省く（読まないと `datetime2(3)` が `datetime2` で入り、同期が精度を黙って 7 へ変える）。
 - 固定は `SqlServerTypeNotationIntegrationTests`・`SqlServerDdlRoundTripIntegrationTests`（起点 DDL の表記との照合）。
 
+### 型マッパーの EF Core に教える列の型
+
+- `money`・`smallmoney` は C# の `decimal`（精度なし）へ写し、EF Core に教える列の型（`CSharpTypeInfo.EfCoreColumnType`）に同じ名前を入れる（`src/QuickER.CodeGen.CSharp/CLAUDE.md`「EF Core に教える列の型」）。
+  - 教えないと EF Core は既定の `decimal(18,2)` で書き、挿入・更新・一括挿入・グラフ保存が小数を 2 桁へ丸める（QuickER 版と ADO は列の 4 桁で書く）。
+  - 精度 19,4・10,4 で写す案は採らない：プロパティの型の精度が変わり、値オブジェクトの検証・生成物が money の列でだけ変わる。
+- 固定は `DialectTypeTableTests` のマッパーの行（`efcol-smallmoney` と宣言のセルの `matrix-map-*`）・`SqlServerDialectTypeRealDbTests`（EF Core の手順の行 `matrix-map-sqlserver-money`・`map-sqlserver-sqldb-smallmoney`＝4 桁を書いて読み戻す）。
+
 ### TryFormat の上限と書き出さない型
 
 - 上限：nvarchar／nchar 4000・varchar／char／binary／varbinary 8000・decimal の精度 38 とスケール ≦ 精度・時刻系の精度 7。固定長の max（`nchar(max)` は存在しない表記）は書き出さない。

@@ -233,6 +233,9 @@ internal static partial class DialectTypeRows
             [(DialectNames.PostgreSql, "timestamp(6)")] = "timestamp without time zone",
             [(DialectNames.PostgreSql, "xml")] = "xml",
             [(DialectNames.PostgreSql, "jsonb")] = "jsonb",
+            // money・smallmoney（SQL Server）と money（PostgreSQL）は、既定の対応だと小数 4 桁を落とすか比べる演算子が無い
+            [(DialectNames.SqlServer, "money")] = "money",
+            [(DialectNames.PostgreSql, "money")] = "money",
         };
 
     /// <summary>

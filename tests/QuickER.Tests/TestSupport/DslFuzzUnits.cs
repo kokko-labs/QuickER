@@ -8,7 +8,7 @@ namespace QuickER.Tests.TestSupport;
 /// テーブル名はどの単位も <c>items</c>（生成物の型は <c>ItemEntity</c> / <c>IItemRepository</c>）。
 /// SQLite の単位は QuickER 版 Repository・EF Core・インメモリの 3 実装先で実行し、MySQL の単位は符号なし整数・sbyte の列を
 /// 持つ図をインメモリでだけ実行する（MySQL の QuickER 版 Repository は無く、実 DB の検証は区切り 23a の範囲外）。
-/// SQL Server の単位は Integration の派生が実コンテナの QuickER 版 Repository・EF Core で実行する。
+/// SQL Server の単位は Integration の派生が実コンテナの QuickER 版 Repository・EF Core で実行する。 PostgreSQL・Oracle の単位と MySQL の単位は、Integration の派生が実コンテナの EF Core 版で実行する。
 /// </remarks>
 public static class DslFuzzUnits
 {
@@ -105,7 +105,115 @@ public static class DslFuzzUnits
         );
     }
 
-    /// <summary>MySQL の単位（符号なし整数・sbyte。インメモリでだけ実行する）</summary>
+    /// <summary>
+    /// SQL Server の money・smallmoney の列の網羅の単位（種に依らない・値オブジェクトなし）：小数 4 桁の外・範囲の外の値と比べる原子 1 つずつの
+    /// クエリ <c>KM*</c>（経路ごとの結果を読む）と、それを使う合成のクエリ <c>KX*</c>
+    /// </summary>
+    /// <remarks>
+    /// money の値の範囲は 10 の累乗の桁では表せないので、列の型に入るかは <see cref="DslMoneyType"/> で決める。行の値の池は型の両端を持つ
+    /// （smallmoney の列は、種類ごとの decimal の池の ±99999999.99 が入らないので範囲の中の値だけ）。種の単位は money の列を持たない
+    /// （種の生成器の入力と指紋を変えないため）。
+    /// </remarks>
+    public static DslFuzzUnit SqlServerMoneyCoverage()
+    {
+        DslColumn[] columns =
+        [
+            new("id", "bigint", DslClr.Int64, Nullable: false, PrimaryKey: true),
+            // 射影の非 NULL 指定の合成のクエリが射影する、NULL を許す文字列の列
+            new("s", "nvarchar(50)", DslClr.String, Nullable: true),
+            new("m", "money", DslClr.Decimal, Nullable: true)
+            {
+                Money = DslMoneyType.Money,
+                Values =
+                [
+                    DslMoneyType.Money.Min,
+                    -1.5m,
+                    0m,
+                    0.01m,
+                    1.5m,
+                    2.25m,
+                    10m,
+                    DslMoneyType.Money.Max,
+                ],
+            },
+            new("sm", "smallmoney", DslClr.Decimal, Nullable: true)
+            {
+                Money = DslMoneyType.SmallMoney,
+                Values =
+                [
+                    DslMoneyType.SmallMoney.Min,
+                    -1.5m,
+                    0m,
+                    0.01m,
+                    1.5m,
+                    2.25m,
+                    10m,
+                    DslMoneyType.SmallMoney.Max,
+                ],
+            },
+        ];
+        var rows = new DslFuzzGenerator(CoverageSeed, valueObjects: false).Rows(columns, RowCount);
+        var atoms = new DslFuzzGenerator(
+            DslFuzzGenerator.OutOfTypeSeed(CoverageSeed),
+            valueObjects: false,
+            DslFuzzGenerator.OutOfTypeParameterPrefix
+        ).OutOfTypeAtomQueries(columns, "KM");
+        var queries = new DslFuzzGenerator(
+            DslFuzzGenerator.OutOfTypeSeed(CoverageSeed),
+            valueObjects: false,
+            DslFuzzGenerator.OutOfTypeParameterPrefix
+        ).OutOfTypeCoverageQueries(columns, decimalOrdered: true);
+
+        return new DslFuzzUnit(
+            $"{CoveragePrefix}{DialectNames.SqlServer}-money",
+            TableName,
+            columns,
+            rows,
+            [.. atoms, .. queries],
+            ValueObjects: false,
+            CoverageSeed
+        );
+    }
+
+    /// <summary>
+    /// PostgreSQL の単位（値オブジェクトなし・あり・GuidKey の主キー。Integration の派生が実 DB の EF Core 版で流す）
+    /// </summary>
+    public static IEnumerable<DslFuzzUnit> PostgreSql(int seed)
+    {
+        yield return Build("postgresql-plain", seed, PostgreSqlColumns(), valueObjects: false);
+        yield return Build("postgresql-vo", seed, PostgreSqlColumns(), valueObjects: true);
+        yield return Build(
+            "postgresql-vo-guidkey",
+            seed,
+            [
+                new("id", "varchar(36)", DslClr.GuidKey, Nullable: false, PrimaryKey: true),
+                new("s", "varchar(50)", DslClr.String, Nullable: true),
+                new("i32", "integer", DslClr.Int32, Nullable: true),
+            ],
+            valueObjects: true
+        );
+    }
+
+    /// <summary>
+    /// Oracle の単位（値オブジェクトなし・あり・GuidKey の主キー。Integration の派生が実 DB の EF Core 版で流す）
+    /// </summary>
+    public static IEnumerable<DslFuzzUnit> Oracle(int seed)
+    {
+        yield return Build("oracle-plain", seed, OracleColumns(), valueObjects: false);
+        yield return Build("oracle-vo", seed, OracleColumns(), valueObjects: true);
+        yield return Build(
+            "oracle-vo-guidkey",
+            seed,
+            [
+                new("id", "NVARCHAR2(36)", DslClr.GuidKey, Nullable: false, PrimaryKey: true),
+                new("s", "NVARCHAR2(50)", DslClr.String, Nullable: true),
+                new("i32", "NUMBER(10)", DslClr.Int32, Nullable: true),
+            ],
+            valueObjects: true
+        );
+    }
+
+    /// <summary>MySQL の単位（符号なし整数・sbyte。インメモリと、Integration の派生が実 DB の EF Core 版で流す）</summary>
     public static IEnumerable<DslFuzzUnit> MySql(int seed)
     {
         yield return Build("mysql-plain", seed, MySqlColumns(), valueObjects: false);
@@ -136,7 +244,7 @@ public static class DslFuzzUnits
     /// が名指しする）。そのため、実装先ごとの照合したクエリの下限（DslFuzzRunner の MinimumCheckedQueries）は掛けない。
     /// </para>
     /// </remarks>
-    /// <param name="dbms">方言（<see cref="DialectNames"/> の SQLite・SQL Server・MySQL）</param>
+    /// <param name="dbms">方言（<see cref="DialectNames"/> の SQLite・SQL Server・MySQL・PostgreSQL・Oracle）</param>
     public static DslFuzzUnit Coverage(string dbms)
     {
         var (key, text, columns, atomColumns) = dbms switch
@@ -154,6 +262,18 @@ public static class DslFuzzUnits
                 "varchar(36)",
                 MySqlColumns().Skip(1).Concat(MySqlCoverageExtraColumns()),
                 new[] { "id", "parent", "f", "i64", "i32", "i16", "d", "dt", "g" }
+            ),
+            DialectNames.PostgreSql => (
+                "varchar(36)",
+                "varchar(36)",
+                PostgreSqlColumns().Skip(1),
+                new[] { "parent" }
+            ),
+            DialectNames.Oracle => (
+                "NVARCHAR2(36)",
+                "NVARCHAR2(36)",
+                OracleColumns().Skip(1),
+                new[] { "parent" }
             ),
             _ => throw new ArgumentOutOfRangeException(nameof(dbms), dbms, null),
         };
@@ -275,7 +395,7 @@ public static class DslFuzzUnits
     /// 列の型に入らない値の原子を使う合成のクエリ（<see cref="DslFuzzGenerator.OutOfTypeCoverageQueries"/>）も、別の乱数の列で作って足す
     /// （列の型に入らない値は値オブジェクトなしでだけ書けるので、この単位が持つ）。
     /// </remarks>
-    /// <param name="dbms">方言（<see cref="DialectNames"/> の SQLite・SQL Server・MySQL）</param>
+    /// <param name="dbms">方言（<see cref="DialectNames"/> の SQLite・SQL Server・MySQL・PostgreSQL・Oracle）</param>
     public static DslFuzzUnit PlainCoverage(string dbms)
     {
         var (columns, atomColumns) = dbms switch
@@ -286,6 +406,8 @@ public static class DslFuzzUnits
                 [.. MySqlColumns(), .. MySqlCoverageExtraColumns()],
                 MySqlCoverageExtraColumns().Select(column => column.Name).ToArray()
             ),
+            DialectNames.PostgreSql => (PostgreSqlColumns(), Array.Empty<string>()),
+            DialectNames.Oracle => (OracleColumns(), Array.Empty<string>()),
             _ => throw new ArgumentOutOfRangeException(nameof(dbms), dbms, null),
         };
         var generator = new DslFuzzGenerator(CoverageSeed, valueObjects: false);
@@ -539,6 +661,57 @@ public static class DslFuzzUnits
                     "日",
                 ],
             },
+        ];
+
+    /// <summary>
+    /// PostgreSQL の列（SQL Server の列の組を PostgreSQL の型へ写したもの。PostgreSQL は 1 バイトの整数の型を持たないので byte の列は無い）
+    /// </summary>
+    /// <remarks>
+    /// <c>money</c> の列 <c>m</c> は、型マッパーが精度なしの decimal に写す型で、EF Core が比べる値をどの型で束縛するかを試す
+    /// （値の池の decimal は小数 2 桁までなので、money の列に丸めずに入る）。
+    /// <c>m</c> と比べる数のリテラルは負の値を作らない（行の値・パラメータは負の値も持つ）。Npgsql の EF Core のプロバイダは負の定数を
+    /// <c>-99999999.99::money</c> と書き、PostgreSQL は money の単項の負号を持たないので断る（42883。docs の「大文字小文字・空白・日付部品」の
+    /// 節の既知の割り切り）。
+    /// </remarks>
+    private static DslColumn[] PostgreSqlColumns() =>
+        [
+            new("id", "bigint", DslClr.Int64, Nullable: false, PrimaryKey: true),
+            new("s", "varchar(50)", DslClr.String, Nullable: true),
+            new("sn", "varchar(50)", DslClr.String, Nullable: false),
+            new("f", "char(10)", DslClr.FixedString, Nullable: true),
+            new("i16", "smallint", DslClr.Int16, Nullable: true),
+            new("i32", "integer", DslClr.Int32, Nullable: true),
+            new("i32n", "integer", DslClr.Int32, Nullable: false),
+            new("i64", "bigint", DslClr.Int64, Nullable: true),
+            new("d", "numeric(10,2)", DslClr.Decimal, Nullable: true),
+            new("dt", "timestamp", DslClr.DateTime, Nullable: true),
+            new("g", "uuid", DslClr.Guid, Nullable: true),
+            new("m", "money", DslClr.Decimal, Nullable: true) { NonNegativeLiterals = true },
+        ];
+
+    /// <summary>
+    /// Oracle の列（SQL Server の列の組を Oracle の型へ写したもの。Oracle の型マッパーは RAW を byte[] に写すので Guid の列は無い）
+    /// </summary>
+    /// <remarks>
+    /// NOT NULL の文字列の列 <c>sn</c> の値の池は空文字列を持たない（Oracle は空文字列を NULL として持ち、NOT NULL の列は断る＝
+    /// docs の「大文字小文字・空白・日付部品」の節）。NULL を許す列は空文字列を持ち、読み戻すと NULL になる。
+    /// </remarks>
+    private static DslColumn[] OracleColumns() =>
+        [
+            new("id", "NUMBER(19)", DslClr.Int64, Nullable: false, PrimaryKey: true),
+            new("s", "NVARCHAR2(50)", DslClr.String, Nullable: true),
+            new("sn", "NVARCHAR2(50)", DslClr.String, Nullable: false)
+            {
+                Values = [.. DslFuzz.ValuePool(DslClr.String).Where(value => !Equals(value, ""))],
+            },
+            new("f", "NCHAR(10)", DslClr.FixedString, Nullable: true),
+            new("i8", "NUMBER(3)", DslClr.Byte, Nullable: true),
+            new("i16", "NUMBER(5)", DslClr.Int16, Nullable: true),
+            new("i32", "NUMBER(10)", DslClr.Int32, Nullable: true),
+            new("i32n", "NUMBER(10)", DslClr.Int32, Nullable: false),
+            new("i64", "NUMBER(19)", DslClr.Int64, Nullable: true),
+            new("d", "NUMBER(10,2)", DslClr.Decimal, Nullable: true),
+            new("dt", "TIMESTAMP", DslClr.DateTime, Nullable: true),
         ];
 
     private static DslColumn[] MySqlColumns() =>

@@ -14,12 +14,14 @@ C# コード生成の生成器の側（オプション・モデルビルダー�
 ## EF Core に教える列の型
 
 - 生成 DbContext は、EF Core のプロバイダがプロパティの型の既定の対応では書けない列にだけ `HasColumnType` を出す。値は `CSharpTypeInfo.EfCoreColumnType` で、方言の型マッパーが固定の綴りで決める（生成器は方言を知らず、値を `EscapeNameForCSharpString` に通して出すだけ）
-  - 今入れるのは PostgreSQL のマッパーだけ：`date`・`timestamp`（→ `timestamp without time zone`）・`timetz`（→ `time with time zone`）・`json`・`jsonb`・`xml` と、その配列（要素の値＋`[]`）。教えないと Npgsql の EF Core のプロバイダが `DateTime` を timestamptz・`string` を text で送り、書き込みを断られる（`src/QuickER.Provider.PostgreSql/CLAUDE.md`「型マッパー」）
+  - 今入れるのは PostgreSQL と SQL Server のマッパー
+    - PostgreSQL：`date`・`timestamp`（→ `timestamp without time zone`）・`timetz`（→ `time with time zone`）・`json`・`jsonb`・`xml`・`money` と、その配列（要素の値＋`[]`）。教えないと Npgsql の EF Core のプロバイダが `DateTime` を timestamptz・`string` を text・`decimal` を numeric で送り、書き込みか `money` の列の条件を断られる（`src/QuickER.Provider.PostgreSql/CLAUDE.md`「型マッパー」）
+    - SQL Server：`money`・`smallmoney`。教えないと EF Core が既定の `decimal(18,2)` で書き、小数を 2 桁へ丸める（`src/QuickER.Provider.SqlServer/CLAUDE.md`「型マッパーの EF Core に教える列の型」）
   - 既定の対応で書ける列には入れない。全列に図の型表記を出すと、可搬図の出力が方言ごとに割れ、代替の string の列（geometry など）はプロバイダに対応が無くモデルの組み立てで落ちる
   - 図の型表記をそのまま出さない（生成コードへ利用者の文字列を流さない）
 - テンプレートは Fluent の鎖の `HasColumnName` の直後に出す（`_08_EfCore.scriban`）。DbContext の XmlDoc も「既定の対応で書けない列にだけ宣言する」と書く
 - 実 DB の EF Core の手順（`DialectTypeRealDbRows`）は、マッパーの同じ値を `HasColumnType` で当てたモデルで読み書きする。テンプレートが同じ値を出すことは生成の行が見る（手順と生成物の間を繋ぐ）
-- ガード：`CodegenCaseTests` の行 `model-efcore-column-type-postgresql` / `model-efcore-column-type-postgresql-vo`（PostgreSQL の図の列ごとの構成した列の型と、教えない列は構成なし）/ `model-efcore-column-type-mysql-none`・`DialectTypeTableTests`（マッパーの行の `efcol`）・`PostgreSqlDialectTypeRealDbTests`（EF Core の手順）・`CodegenCaseTests` の行 `code-portable-fixture-identical-across-postgresql-mysql-oracle`（可搬図は方言に依らず同じ）。mutation 実証済み（マッパーの値を外すと型の表・生成の行・実 DB が赤、テンプレートの出力を消すと生成の行が赤）
+- ガード：`CodegenCaseTests` の行 `model-efcore-column-type-postgresql` / `model-efcore-column-type-postgresql-vo`（PostgreSQL の図の列ごとの構成した列の型と、教えない列は構成なし）/ `model-efcore-column-type-mysql-none`・`DialectTypeTableTests`（マッパーの行の `efcol`）・`PostgreSqlDialectTypeRealDbTests`・`SqlServerDialectTypeRealDbTests`（EF Core の手順）・`CodegenCaseTests` の行 `code-portable-fixture-identical-across-postgresql-mysql-oracle`（可搬図は方言に依らず同じ）。mutation 実証済み（マッパーの値を外すと型の表・生成の行・実 DB が赤、テンプレートの出力を消すと生成の行が赤）
 
 ## 生成の単発オプションのケース
 

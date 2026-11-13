@@ -191,6 +191,27 @@ public sealed class MatrixAxisGuardTests
         axis.Excluded.Keys.Should().Equal(DslFuzzBackends.InMemory);
     }
 
+    [Fact(
+        DisplayName = "簡易 DSL の総当たりの PostgreSQL・MySQL・Oracle の構成の実装先の軸は作れ、EF Core だけを流して QuickER 版とインメモリを理由つきで除く（Docker なし）"
+    )]
+    public void DslEfCoreOnlyBackendAxes_AreComplete()
+    {
+        // コンテナには実装先を開くときにだけ触れるので、軸を作るだけなら null でよい
+        foreach (
+            var axis in new[]
+            {
+                NamedQueryDslConditionFuzzPostgreSqlRuntimeTests.BackendAxis(null!),
+                NamedQueryDslConditionFuzzMySqlRuntimeTests.BackendAxis(null!),
+                NamedQueryDslConditionFuzzOracleRuntimeTests.BackendAxis(null!),
+            }
+        )
+        {
+            axis.Adapters.Select(backend => backend.Name).Should().Equal(DslFuzzBackends.EfCore);
+            axis.Excluded.Keys.Should()
+                .BeEquivalentTo([DslFuzzBackends.Ado, DslFuzzBackends.InMemory]);
+        }
+    }
+
     /// <summary>
     /// 派生クラスを、コンストラクタの引数（コンテナのフィクスチャ・出力）をすべて null にして作り、値を読む
     /// （作ったものが破棄できれば破棄する）

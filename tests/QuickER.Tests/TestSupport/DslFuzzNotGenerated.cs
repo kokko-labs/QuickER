@@ -3,8 +3,8 @@ using QuickER.Tests.TestSupport.Engines;
 namespace QuickER.Tests.TestSupport;
 
 /// <summary>
-/// 簡易 DSL の条件の総当たりの生成器（<see cref="DslFuzzGenerator"/>）が作らない形の宣言。SQLite・MySQL と SQL Server の実装先が同じ生成器の
-/// 入力を使う
+/// 簡易 DSL の条件の総当たりの生成器（<see cref="DslFuzzGenerator"/>）が作らない形の宣言。SQLite・MySQL（QuickER.Tests）と、SQL Server・
+/// PostgreSQL・MySQL・Oracle（Integration の実 DB）の実装先が同じ生成器の入力を使う
 /// </summary>
 /// <remarks>
 /// 純粋なデータ（Engines の型と BCL だけを参照する）。Integration にも <c>DslFuzz*.cs</c> の Compile のリンクで入る。
@@ -18,6 +18,9 @@ internal static class DslFuzzNotGenerated
             [
                 ProtectionNames.EnginePart(EngineIds.Dsl, "SqliteMySql"),
                 ProtectionNames.EnginePart(EngineIds.Dsl, "SqlServer"),
+                ProtectionNames.EnginePart(EngineIds.Dsl, "PostgreSql"),
+                ProtectionNames.EnginePart(EngineIds.Dsl, "MySql"),
+                ProtectionNames.EnginePart(EngineIds.Dsl, "Oracle"),
             ],
             [
                 NotGenerated.Pending(
@@ -63,12 +66,11 @@ internal static class DslFuzzNotGenerated
                     "値オブジェクトの Create は精度・スケールの外の値を検証エラーにし（docs の値オブジェクトの節）、整数を包む値オブジェクトの列への decimal のパラメータは型の検査が断る。どちらも比べる前に断られるので、列の型に入らない値は値オブジェクトなしの単位でだけ作る",
                     "`table:ValueObjectScenarios`・`CodegenConfig/Cases`（行 `diag-query-type-check-rejects-*`）"
                 ),
-                NotGenerated.Pending(
-                    "postgresql-oracle-backends",
-                    "PostgreSQL と Oracle の構成の実装先",
-                    "きっかけ待ち（簡易 DSL の残りの区切り）",
-                    "QuickER 版 Repository は SQL Server と SQLite の方言しか生成しないので、PostgreSQL・Oracle の構成の実装先は EF Core 版とインメモリだけになる。EF Core 版は実 DB で流す実装先で、総当たりは PostgreSQL・Oracle の実 DB を持たないため、両方言の EF Core のプロバイダが条件を訳した結果を照合していない",
-                    NotGenerated.Unguarded
+                NotGenerated.Accepted(
+                    "oracle-empty-string-in-not-null-columns",
+                    "Oracle の単位の NOT NULL の文字列の列に入れる空文字列",
+                    "Oracle は空文字列を NULL として持ち、NOT NULL の列への空文字列の挿入を断る（ORA-01400。docs の「大文字小文字・空白・日付部品」の節の Oracle の段落）。単位の行が入らず照合が始まらないので、NOT NULL の列の値の池から空文字列を外す。NULL を許す列は空文字列を持ち、読み戻すと NULL になる形を照合する",
+                    "`Dsl/Oracle`"
                 ),
             ]
         );

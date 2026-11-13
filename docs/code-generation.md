@@ -588,6 +588,9 @@ And the stores disagree.
 | SQL Server | Follows the column's collation, which is case-insensitive under the usual `..._CI_AS` default. On a non-Unicode column (`char`, `varchar`), trailing blanks in the column's value are not counted, while blanks in the pattern are |
 | SQLite | The built-in `LIKE` folds case for ASCII letters only, so `A` matches `a` but `Á` does not match `á` |
 | EF Core | Hands the call to its provider and gets that same store-dependent answer |
+| EF Core on PostgreSQL | Case matters under the database's default collation, a deterministic one such as `en_US.utf8` |
+| EF Core on MySQL | The default collation `utf8mb4_0900_ai_ci` ignores letter case and accents, matches a precomposed letter with its decomposed form, and matches `ß` with `ss`. On a value object column all three calls follow it. On a plain string column `StartsWith` and `EndsWith` are the exception: case matters, and trailing blanks in the pattern are not counted |
+| EF Core on Oracle | Case matters under the default binary comparison (`NLS_COMP=BINARY`) |
 | In-memory | Compiles the expression and evaluates it in C#, so the comparison is ordinal and case matters, on a plain string column and on a value object alike |
 
 `Equals(..., StringComparison.*IgnoreCase)` is translated as `LOWER(col) = LOWER(@p)` and folds by the engine's own rules, ASCII-only on SQLite included.
@@ -595,6 +598,10 @@ And the stores disagree.
 This is worth knowing wherever one predicate has to hold across backends.
 A hybrid build runs the identical predicate on two engines, so a search that is case-insensitive on the server can be case-sensitive on the local side.
 Multi-target generation is one such build; a remote repository against the server with a local one against the copy is another.
+
+On MySQL the collation decides equality as well.
+`x.Name == "a"`, `x.Name != "a"`, and an `IN` list treat `a`, `A`, and `á` as the same value, as a string match does, while C# and the in-memory backend compare them ordinally.
+PostgreSQL and Oracle compare equality ordinally under their defaults.
 
 In a `Query()` predicate, `string.IsNullOrEmpty` and `string.IsNullOrWhiteSpace` hold for `NULL` too and give the C# answer on both SQL engines.
 SQL Server measures emptiness with `DATALENGTH`, because `= ''` ignores trailing blanks and would call a value of blanks empty.
@@ -605,25 +612,49 @@ On an `nchar(n)` column, `EndsWith` therefore compares against the padded value,
 On a non-Unicode column (`char(n)`, `varchar(n)`), a string match does not count the trailing blanks of the column's value, so `EndsWith("a")` holds for `a   ` in a `char(4)` column and for `a ` in a `varchar` column, while C# on the value read back says no.
 The in-memory backend stores the value unpadded and compares it as it is, so its answer can differ.
 
+On PostgreSQL, a `char(n)` column also returns its value padded, and `=`, `IN`, and a `LIKE` without wildcards ignore the trailing blanks.
+`x.Code == "a"` therefore holds for a row that C# reads back as `a` followed by blanks.
+On MySQL, a `char(n)` column returns its value with the trailing blanks removed, so a value written as `a ` reads back as `a`.
+
+Oracle stores an empty string as `NULL`.
+An empty string written to a column reads back as `null`, and a `NOT NULL` column refuses it.
+A comparison with an empty string held in a variable (`var empty = "";`) compares with `NULL`: `x.Name != empty` matches no row, and an `IN` or `NOT IN` list holding `""` behaves as if it held `NULL`.
+The same comparison written with a literal in hand-written LINQ is translated otherwise: `x.Name == ""` becomes `IS NULL` and matches the rows holding `NULL`, while `x.Name == empty` with a variable matches no row.
+`string.IsNullOrEmpty` gives the C# answer on the value read back.
+A string literal in a mini DSL condition is generated as a variable, so a named query compares as a variable does.
+
 Date parts (`Year`, `Month`, …) are translated only when the member is read from a `DateTime`, `DateOnly`, or `DateTimeOffset` column, nullable forms included.
 A property of the same name on any other type is not a date part, such as one added to a value object through a partial declaration.
 It fails with `NotSupportedException` instead of silently becoming `YEAR([col])`.
 The date parts of a `DateTimeOffset` column are taken in the offset the value carries, as C# does (`2024-01-01 05:00 +09:00` is year 2024, hour 5).
 
 On SQL Server, the QuickER Repository and the EF Core Repository bind a compared value with the column's type only when the value fits that type.
-A value that does not fit is bound with its own type, so the comparison answers as C# does: a fraction or an integer out of range against an integer column (`x.Qty < 1.5`, `x.Tiny < 300`), a decimal with more digits than the column's precision and scale, a time of day against a `date` column, and a character outside ASCII against a non-Unicode column (`varchar`, `char`).
+A value that does not fit is bound with its own type, so the comparison answers as C# does: a fraction or an integer out of range against an integer column (`x.Qty < 1.5`, `x.Tiny < 300`), a decimal with more digits than the column's precision and scale, a number outside the range or beyond the four fractional digits of a `money` or `smallmoney` column (`x.Price == 1.23456m`), a time of day against a `date` column, and a character outside ASCII against a non-Unicode column (`varchar`, `char`).
 The server then converts the column for that comparison, so an index on the column may not be used for it.
 On the EF Core Repository this covers every parameter of a query (a named query, `Query()` with hand-written LINQ, the elements of an IN list, the pattern of `Contains`) and the condition of `ExecuteDeleteAsync` (see [EF Core mode](#ef-core-mode-generateefcorerepositories)).
+On PostgreSQL, the EF Core Repository does the same for a `DateTime` with a time of day compared with a `date` column, which it sends as a `timestamp`.
 
 > **Known limitation**: on the EF Core Repository, a constant written in hand-written LINQ is not a parameter.
 > EF Core writes it into the SQL, and writes a string constant compared with a non-Unicode column as non-Unicode text, so a character outside ASCII turns into `?` and the comparison matches the rows that hold `?` (`Query().Where(x => x.Code == "日本")`).
 > Pass such a value in a variable, which EF Core sends as a parameter.
 > A string literal in a mini DSL condition is generated as a variable, so a named query answers as C# does.
 
-> **Known limitation**: on the EF Core Repository on SQL Server, comparing an integer column with a decimal column (`Query().Where(x => x.Qty > x.Price)`) can fail with an arithmetic overflow.
+> **Known limitation**: on the EF Core Repository on SQL Server, PostgreSQL, and Oracle, comparing an integer column with a decimal column (`Query().Where(x => x.Qty > x.Price)`) can fail with an arithmetic overflow.
 > EF Core casts the integer column to the type of the decimal column (`decimal(10,2)`, say), so one row whose integer has more integral digits than that type holds makes the whole query fail.
-> The QuickER Repository compares the two columns without the cast.
+> The QuickER Repository and the EF Core Repository on MySQL compare the two columns without failing.
 > A mini DSL condition compares a column with a value only, so a named query does not meet this.
+
+> **Known limitation**: PostgreSQL and MySQL keep a date and time to the microsecond, and their drivers drop the part of a compared value finer than that before sending it.
+> A `DateTime` or `TimeSpan` with a fraction finer than a microsecond (a tick is 100 nanoseconds) therefore compares as the value cut to the microsecond, so `x.At == value` can hold where C# says no.
+> SQL Server and Oracle keep as many fractional digits as the value has, up to their own limits, and compare as C# does.
+
+> **Known limitation**: on the EF Core Repository on PostgreSQL, a value compared with a `money` column is sent as `money`, which keeps two fractional digits.
+> A compared value with more fractional digits is rounded first, so `x.Price == 1.234m` matches a row that holds `1.23`, where C# says no.
+> PostgreSQL has no comparison between `money` and `numeric`, so the value cannot be sent with its own type.
+> A value with two fractional digits or fewer compares as C# does.
+> PostgreSQL refuses a condition that compares a `money` column with a negative number written as a literal (`x.Price < -1m` in hand-written LINQ, or `price < -1` in a mini DSL condition) with `operator does not exist: - money`.
+> Npgsql writes such a constant as `-1::money`, and PostgreSQL has no minus sign for `money`.
+> Pass a negative value as a parameter instead (a variable in hand-written LINQ, or a parameter of the named query).
 
 `Contains` on a list expands to one bind variable per element and is not chunked.
 A very large list therefore runs into the dialect's bind-variable or IN-list limit and fails at runtime (SQL Server's 2100 parameters, SQLite's historical 999).
@@ -1145,11 +1176,11 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 - A value-object column carries its length and precision (`HasMaxLength` / `HasPrecision`) like any other column, so a value that fits it is sent with the column's own type, and a condition on `.Value` casts to that type, rather than to EF Core's defaults (`nvarchar(max)`, `decimal(18,2)`).
 - A non-Unicode string column (`varchar`, `char` or `text` on SQL Server, `VARCHAR2`, `CHAR` or `CLOB` on Oracle) is configured with `IsUnicode(false)`, so its parameters are sent as non-Unicode text and the database can compare the column without converting it.
   The configuration follows the diagram's dialect, so a diagram meant to run on several databases keeps its string columns Unicode (`nvarchar` and the like).
-- On SQL Server, the generated `QuickErDbContext` makes EF Core convert an expression to `decimal(38,19)` when the conversion has no column to take its type from.
+- On SQL Server and Oracle, the generated `QuickErDbContext` makes EF Core convert an expression to `decimal(38,19)` (`NUMBER(38,19)` on Oracle) when the conversion has no column to take its type from.
   C# widens an integer to `decimal` when it is compared with one (`x.Id > 1.5m`), and EF Core writes that as `CAST([id] AS decimal(…))`.
-  With EF Core's default `decimal(18,2)`, a `bigint` value with more than 16 integral digits overflows the cast, and the whole query fails with an arithmetic overflow, whatever value it is compared with.
+  With EF Core's default `decimal(18,2)`, a `bigint` value with more than 16 integral digits overflows the cast, and the whole query fails with an overflow error (an arithmetic overflow on SQL Server, ORA-01438 on Oracle), whatever value it is compared with.
   `decimal(38,19)` holds every `long` in its 19 integral digits and keeps 19 fractional digits.
-  A compared value with more digits than that is sent with its own type (see the next item).
+  On SQL Server, a compared value with more digits than that is sent with its own type (see the item on `SqlServerQueryParameterInterceptor` below).
   The type of every property stays as it is, with or without a precision.
   A parameter compared with a column still takes the column's type.
   The same conversion in a projection or a calculation (`Select(x => x.Qty / 3m)`) also uses `decimal(38,19)`, so its result carries more fractional digits than with EF Core's default.
@@ -1162,16 +1193,30 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   It applies to the conditions of `Query()` (a named query, hand-written LINQ, `ExecuteDeleteAsync`).
   Ordering comparisons, and comparisons of a `decimal` column, are not rewritten and are translated by EF Core as they were.
 - On SQL Server, a compared value that does not fit the type EF Core gave its parameter is sent with its own type, as the QuickER Repository sends it (see [Queries](#queries-expression-tree--sql)).
-  EF Core gives a parameter the type of the column it is compared with, and SqlClient converts the value to that type before sending it: `1.234` against a `decimal(10,2)` column becomes `1.23`, a value beyond the precision throws `ArgumentException`, and a character outside ASCII against a non-Unicode column becomes `?`.
-  `SqlServerQueryParameterInterceptor` drops the precision and scale of such a decimal parameter, and sends such text as Unicode text; a value that fits keeps the column's type, so the SQL and the use of an index on the column stay as they were.
+  EF Core gives a parameter the type of the column it is compared with, and SqlClient converts the value to that type before sending it: `1.234` against a `decimal(10,2)` column becomes `1.23`, a value beyond the precision throws `ArgumentException`, a `money` or `smallmoney` column rounds a value to four fractional digits and throws `OverflowException` for a value outside its range, and a character outside ASCII against a non-Unicode column becomes `?`.
+  `SqlServerQueryParameterInterceptor` drops the precision and scale of such a decimal parameter, sends such a `money` or `smallmoney` value as a decimal, and sends such text as Unicode text; a value that fits keeps the column's type, so the SQL and the use of an index on the column stay as they were.
   It changes the commands of LINQ queries and of `ExecuteDelete` / `ExecuteUpdate` only: `SaveChanges` sends its values as before, so a value that does not fit is stored as the column converts it.
   `AddGeneratedEfCoreRepositories` adds it to the DbContext options after your configuration.
   When you build `DbContextOptions` yourself, add `SqlServerQueryParameterInterceptor.Instance` with `AddInterceptors`.
   Connections of other providers are left untouched.
+- On PostgreSQL, a `DateTime` with a time of day compared with a `date` column keeps its time of day.
+  EF Core gives the parameter the column's type `date`, and Npgsql drops the time of day before sending it, so `x.Day < noon` misses the rows of that day and `x.Day == noon` matches them.
+  `PostgreSqlQueryParameterInterceptor` sends such a value as `timestamp`, so PostgreSQL compares the date with the whole value, as C# does; a value at midnight keeps the type `date`.
+  Like the SQL Server interceptor, it changes the commands of LINQ queries and of `ExecuteDelete` / `ExecuteUpdate` only.
+  `AddGeneratedEfCoreRepositories` adds it to the DbContext options after your configuration.
+  When you build `DbContextOptions` yourself, add `PostgreSqlQueryParameterInterceptor.Instance` with `AddInterceptors`.
+  Connections of other providers are left untouched.
+- On PostgreSQL, an IN over a value-object column whose values hold `null` (`list.Contains(x.Code)` with a `null` in `list`) is rewritten before EF Core translates the condition.
+  Npgsql sends the values as one array parameter and converts each element with the value object's converter, which throws `NullReferenceException` on a `null` element.
+  The rewrite sends the values without `null`, and adds `x.Code == null` when the values held one, which is the meaning C# gives the condition.
+  It applies to the conditions of `Query()` (a named query, hand-written LINQ, `ExecuteDeleteAsync`); a query written on `QuickErDbContext` directly is not rewritten.
+- A `money` or `smallmoney` column on SQL Server, and a `money` column on PostgreSQL, is configured with `HasColumnType`.
+  Without it, EF Core gives the `decimal` property its default type: SQL Server stores `1.2345` in a `money` column as `1.23` (`decimal(18,2)`), and PostgreSQL refuses a condition on the column (`operator does not exist: money = numeric`).
+  With it, SQL Server stores the four fractional digits the column keeps, and PostgreSQL compares the column with a `money` value (see the known limitation on `money` under [Letter case, whitespace, and date parts](#letter-case-whitespace-and-date-parts)).
 - A PostgreSQL column that EF Core's Npgsql provider cannot write with its default mapping for the property type is configured with `HasColumnType`: `date`, `timestamp`, `time with time zone`, `json`, `jsonb` and `xml`, and arrays of them (`date[]` and the like).
   Without it, the provider sends a `DateTime` as `timestamp with time zone` and refuses a value of `DateTimeKind.Unspecified`, sends a `DateTimeOffset` the same way and refuses an offset other than UTC, and sends a string as `text`, which PostgreSQL refuses for a JSON or XML column.
   A `DateTime` of `DateTimeKind.Utc` cannot be written to a `timestamp` column, and a `timestamptz` column takes a UTC offset only (both are Npgsql's rules).
-  No other column gets a column type, so a diagram of types every dialect maps to the same C# type generates the same code whatever its dialect.
+  No other column gets a column type apart from `money` (the previous item), so a diagram of types every dialect maps to the same C# type generates the same code whatever its dialect.
 - The MySQL mappings (`timestamp` as `DateTime`, `char(36)` as `Guid`, see [Database types and C# types](#database-types-and-c-types)) were checked with MySql.EntityFrameworkCore, whose driver is MySql.Data.
   Pomelo was not checked.
 - A single-column integer primary key, or another single-column key EF Core cannot generate a value for, is configured with `ValueGeneratedNever()`, so EF Core sends the key the application set, `0` included, as the QuickER Repository does.

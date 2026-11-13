@@ -91,6 +91,17 @@ public sealed record DslColumn(
     /// <summary>列の値の候補（null なら種類ごとの値の池 <see cref="DslFuzz.ValuePool(DslClr)"/>）</summary>
     public IReadOnlyList<object>? Values { get; init; }
 
+    /// <summary>
+    /// 数のリテラルを負の値にしないか（値の池から選んだ負の値は符号を外す。乱数の引き方・行の値・パラメータの値は変えない）
+    /// </summary>
+    public bool NonNegativeLiterals { get; init; }
+
+    /// <summary>
+    /// SQL Server の money・smallmoney の列の値の範囲（null ならそうでない列。PostgreSQL の money は立てない＝比べる値は money で送られて
+    /// 丸められる docs の既知の割り切りで、列の型に入らない値の原子を作らない）
+    /// </summary>
+    public DslMoneyType? Money { get; init; }
+
     /// <summary>モデルの列（Id は図を組み立てるときに決まる）</summary>
     public Column Model { get; } =
         new()
@@ -100,6 +111,28 @@ public sealed record DslColumn(
             IsNullable = Nullable && !PrimaryKey,
             IsPrimaryKey = PrimaryKey,
         };
+}
+
+/// <summary>SQL Server の money・smallmoney の型（小数 4 桁と値の範囲。範囲は 10 の累乗の桁では表せない）</summary>
+/// <param name="Min">最小値</param>
+/// <param name="Max">最大値</param>
+public sealed record DslMoneyType(decimal Min, decimal Max)
+{
+    /// <summary>money（-922,337,203,685,477.5808〜922,337,203,685,477.5807）</summary>
+    public static DslMoneyType Money { get; } =
+        new(-922_337_203_685_477.5808m, 922_337_203_685_477.5807m);
+
+    /// <summary>smallmoney（-214,748.3648〜214,748.3647）</summary>
+    public static DslMoneyType SmallMoney { get; } = new(-214_748.3648m, 214_748.3647m);
+
+    /// <summary>小数の桁（money・smallmoney とも 4）</summary>
+    public const int Scale = 4;
+
+    /// <summary>値が範囲の中か</summary>
+    public bool InRange(decimal value) => value >= Min && value <= Max;
+
+    /// <summary>値が列の型に丸めずに入るか（範囲の中で、小数が 4 桁以下）</summary>
+    public bool Fits(decimal value) => InRange(value) && decimal.Round(value, Scale) == value;
 }
 
 /// <summary>比較演算子</summary>
@@ -506,6 +539,42 @@ public enum DslCaseRule
     /// 文字列一致は列の値の末尾の空白を数えない（同じ表の SQL Server の行。<c>MatchValue</c>）。
     /// </remarks>
     Collation,
+
+    /// <summary>
+    /// PostgreSQL（EF Core）。序数で比べ、固定長の文字列の列（<c>char(n)</c>）は詰めた値を返し、<c>=</c>・<c>&lt;&gt;</c>・IN・
+    /// ワイルドカードの無い LIKE は末尾の空白を無視する（読み戻した詰めた値の末尾の空白を外して比べる）
+    /// </summary>
+    /// <remarks>
+    /// docs の「大文字小文字・空白・日付部品」の表の EF Core（PostgreSQL）の行と、同じ節の PostgreSQL の <c>char(n)</c> の段落の写し。
+    /// 固定長の列のワイルドカードつきの LIKE と Contains / StartsWith / EndsWith は docs が約束していないので、末尾の空白を外すかで
+    /// 結果が変わる行を判定しない。
+    /// </remarks>
+    PostgreSql,
+
+    /// <summary>
+    /// MySQL（EF Core・既定の照合順序 <c>utf8mb4_0900_ai_ci</c>）。大文字小文字・アクセント・合成済みの文字と分解形・<c>ß</c> と
+    /// <c>ss</c> を畳むと結果が変わる行を判定しない（<c>=</c>・<c>&lt;&gt;</c>・IN・LIKE・Contains / StartsWith / EndsWith のどれも）。
+    /// StartsWith / EndsWith はパターンの末尾の空白を外すと結果が変わる行も判定しない
+    /// </summary>
+    /// <remarks>
+    /// docs の表の EF Core（MySQL）の行と、同じ節の「MySQL では等値の比較も照合順序が決める」の段落の写し。素の string の列の
+    /// StartsWith / EndsWith は大文字小文字を区別し、値オブジェクトの列は区別しない（docs の同じ行）が、オラクルは列が値オブジェクトかを
+    /// 持たないので、どちらの列でも畳むと変わる行を判定しない側に倒す。<c>char(n)</c> の末尾の空白は読み戻した値から既に落ちている。
+    /// </remarks>
+    MySql,
+
+    /// <summary>
+    /// Oracle（EF Core）。序数で比べ、空文字列は NULL として扱う：<c>""</c> と比べる <c>=</c>・<c>&lt;&gt;</c> は NULL でない行のどれにも
+    /// 一致せず（否定でも一致しない）、<c>""</c> を含む IN・NOT IN のリストは、ほかの要素に一致しない NULL でない行のどれにも一致しない
+    /// </summary>
+    /// <remarks>
+    /// docs の表の EF Core（Oracle）の行と、同じ節の Oracle の空文字列の段落（変数に入れた空文字列との比較は NULL との比較になる）の写し。
+    /// 簡易 DSL の条件の文字列のリテラルは変数（パラメータ）として生成する（docs の同じ段落の最後の文）ことが前提で、そのためリテラルの
+    /// <c>''</c> もパラメータの <c>""</c> と同じに扱う。手書きの LINQ のリテラルの <c>""</c>（<c>IS NULL</c> へ変換される）は総当たりの
+    /// 外で、docs の事実として書くだけ。NULL の行は C# の意味のまま（EF Core が NULL の行の補償を付ける）。<c>""</c> のパターンの
+    /// 文字列一致は docs が約束していないので、NULL でない行を判定しない。読み戻した値の空文字列は既に NULL になっている。
+    /// </remarks>
+    Oracle,
 }
 
 /// <summary>
@@ -758,10 +827,17 @@ public static class DslFuzz
         {
             // 比較と NOT は C# の lifted な意味（NULL は非 null 値と等しくない＝<> は真・順序比較は偽。NOT はそのまま否定）
             case DslCompare compare:
-                return Xor(
-                    CompareUnder(value, compare.Op, OperandValue(compare.Operand), caseRule),
-                    negate
-                );
+            {
+                var operand = OperandValue(compare.Operand);
+
+                // Oracle：空文字列との比較は NULL との比較（UNKNOWN）で、NULL でない行はどちらの向きでも一致しない
+                if (caseRule == DslCaseRule.Oracle && value is not null && operand is "")
+                {
+                    return false;
+                }
+
+                return Xor(CompareUnder(value, compare.Op, operand, caseRule, atom.Column), negate);
+            }
 
             case DslNullCheck check:
                 return (value is null) ^ check.IsNot ^ negate;
@@ -769,7 +845,23 @@ public static class DslFuzz
             // IN は C# の List.Contains（docs の Null compensation 節の IN の箇条：NULL の列は null を含むリストにだけ
             // 一致する・空のリストは IN が偽で NOT IN が真）
             case DslIn @in:
-                return Xor(InUnder(value, @in.List.Values, caseRule), @in.Negated ^ negate);
+            {
+                // Oracle：空文字列の要素は NULL で、ほかの要素に一致しない NULL でない行は IN でも NOT IN でも一致しない
+                if (
+                    caseRule == DslCaseRule.Oracle
+                    && value is not null
+                    && @in.List.Values.Any(v => v is "")
+                    && !@in.List.Values.Any(v => v is not null and not "" && SameValue(value, v))
+                )
+                {
+                    return false;
+                }
+
+                return Xor(
+                    InUnder(value, @in.List.Values, caseRule, atom.Column),
+                    @in.Negated ^ negate
+                );
+            }
 
             // 文字列一致は NULL の行がどちらの向きでも一致しない
             case DslLike like:
@@ -785,6 +877,18 @@ public static class DslFuzz
                     DslParam param => ("contains", (string)param.Values[0]!),
                     _ => throw new ArgumentOutOfRangeException(nameof(atom)),
                 };
+
+                // Oracle の空文字列のパターン（NULL として届く）の一致は docs が約束していないので判定しない
+                var raw = like.Operand switch
+                {
+                    DslLiteral literal => Unquote(literal.Text),
+                    _ => pattern,
+                };
+
+                if (caseRule == DslCaseRule.Oracle && raw.Length == 0)
+                {
+                    return null;
+                }
 
                 // 完全一致の LIKE は docs の大文字小文字の表に載っていない＝序数以外の実装先では判定しない側に倒す
                 var rule =
@@ -811,16 +915,16 @@ public static class DslFuzz
                     DslMatchKind.StartsWith => "prefix",
                     _ => "suffix",
                 };
+                var pattern = (string)OperandValue(match.Operand);
+
+                // Oracle の空文字列のパターン（NULL として届く）の一致は docs が約束していないので判定しない
+                if (caseRule == DslCaseRule.Oracle && pattern.Length == 0)
+                {
+                    return null;
+                }
 
                 return Xor(
-                    MatchValue(
-                        (string)value,
-                        atom.Column,
-                        kind,
-                        (string)OperandValue(match.Operand),
-                        caseRule,
-                        caseRule
-                    ),
+                    MatchValue((string)value, atom.Column, kind, pattern, caseRule, caseRule),
                     match.Negated ^ negate
                 );
             }
@@ -868,6 +972,38 @@ public static class DslFuzz
         DslCaseRule caseRule
     )
     {
+        // PostgreSQL の固定長の列（読み戻した値は詰めてある）：ワイルドカードの無い LIKE は末尾の空白を無視する（docs）。パターンの
+        // 末尾の空白の扱いと、ほかの一致での列の値の末尾の空白の扱いは docs が約束していないので、どちらに読んでも同じ行だけを判定する
+        if (caseRule == DslCaseRule.PostgreSql && column.Clr == DslClr.FixedString)
+        {
+            var unpadded = value.TrimEnd(' ');
+            var first =
+                kind == "exact"
+                    ? Match(unpadded, kind, pattern.TrimEnd(' '), DslCaseRule.Ordinal)
+                    : Match(value, kind, pattern, DslCaseRule.Ordinal);
+            var second = Match(unpadded, kind, pattern, DslCaseRule.Ordinal);
+
+            return first == second ? first : null;
+        }
+
+        // MySQL：StartsWith / EndsWith（と LIKE の前方・後方一致）はパターンの末尾の空白を数えないので、外すと結果が変わる行は判定しない
+        if (caseRule == DslCaseRule.MySql)
+        {
+            var result = Match(value, kind, pattern, rule);
+
+            if (
+                result is not null
+                && kind is "prefix" or "suffix"
+                && pattern.TrimEnd(' ').Length != pattern.Length
+                && Match(value, kind, pattern.TrimEnd(' '), rule) != result
+            )
+            {
+                return null;
+            }
+
+            return result;
+        }
+
         if (caseRule != DslCaseRule.Collation || !column.NonUnicode)
         {
             return Match(value, kind, pattern, rule);
@@ -912,7 +1048,8 @@ public static class DslFuzz
 
         return rule switch
         {
-            DslCaseRule.Ordinal => ordinal,
+            DslCaseRule.Ordinal or DslCaseRule.PostgreSql or DslCaseRule.Oracle => ordinal,
+            DslCaseRule.MySql => Test(MySqlKey) == ordinal ? ordinal : null,
             DslCaseRule.AsciiFold => Test(FoldAscii),
             DslCaseRule.Collation => Test(s => CollationKey(s, trimTrailing: kind == "exact"))
             == ordinal
@@ -928,23 +1065,64 @@ public static class DslFuzz
     private static string CollationKey(string value, bool trimTrailing) =>
         trimTrailing ? value.ToLowerInvariant().TrimEnd(' ') : value.ToLowerInvariant();
 
-    /// <summary>比較（照合順序の実装先の文字列の =・&lt;&gt; は、照合順序で結果が変わる行を判定しない）</summary>
-    private static bool? CompareUnder(object? value, DslOp op, object operand, DslCaseRule rule)
+    /// <summary>
+    /// MySQL の既定の照合順序 <c>utf8mb4_0900_ai_ci</c> で同じとみなされる形の近似（<c>ß</c> を <c>ss</c> へ・分解して結合文字を外し・
+    /// 大文字へ）。オラクルは畳んだ形で結果が変わる行を判定しないだけなので、近似で足りる（docs の表の EF Core（MySQL）の行）
+    /// </summary>
+    private static string MySqlKey(string value) =>
+        string.Concat(
+                value
+                    .Replace("ß", "ss", StringComparison.Ordinal)
+                    .Normalize(NormalizationForm.FormD)
+                    .Where(c =>
+                        CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark
+                    )
+            )
+            .ToUpperInvariant();
+
+    /// <summary>
+    /// 比較（照合順序の実装先の文字列の =・&lt;&gt; は、照合順序で結果が変わる行を判定しない。PostgreSQL の固定長の列は末尾の空白を
+    /// 無視する）
+    /// </summary>
+    private static bool? CompareUnder(
+        object? value,
+        DslOp op,
+        object operand,
+        DslCaseRule rule,
+        DslColumn column
+    )
     {
         var ordinal = Compare(value, op, operand);
 
-        if (
-            rule != DslCaseRule.Collation
-            || value is not string text
-            || operand is not string other
-        )
+        if (value is not string text || operand is not string other)
         {
             return ordinal;
         }
 
-        var folded = Compare(CollationKey(text, true), op, CollationKey(other, true));
+        switch (rule)
+        {
+            case DslCaseRule.Collation:
+            {
+                var folded = Compare(CollationKey(text, true), op, CollationKey(other, true));
 
-        return folded == ordinal ? ordinal : null;
+                return folded == ordinal ? ordinal : null;
+            }
+
+            case DslCaseRule.MySql:
+                return Compare(MySqlKey(text), op, MySqlKey(other)) == ordinal ? ordinal : null;
+
+            // 読み戻した詰めた値の末尾の空白を外して比べる。比べる値の末尾の空白の扱いは docs が約束していないので、外しても外さなくても
+            // 同じ結果の行だけを判定する
+            case DslCaseRule.PostgreSql when column.Clr == DslClr.FixedString:
+            {
+                var bothTrimmed = Compare(text.TrimEnd(' '), op, other.TrimEnd(' '));
+
+                return bothTrimmed == Compare(text.TrimEnd(' '), op, other) ? bothTrimmed : null;
+            }
+
+            default:
+                return ordinal;
+        }
     }
 
     /// <summary>IN（照合順序の実装先の文字列は、序数で一致しないが照合順序で一致する値があれば判定しない）</summary>
@@ -952,11 +1130,30 @@ public static class DslFuzz
     /// docs の Null compensation 節の IN の箇条の写し：リストの null は列の NULL にだけ一致し（C# の <c>Contains</c> と同じく
     /// null を含むリストは NULL の行に一致する）、null だけのリストは NULL の行だけ・空のリストはどの行にも一致しない。
     /// </remarks>
-    private static bool? InUnder(object? value, IReadOnlyList<object?> values, DslCaseRule rule)
+    private static bool? InUnder(
+        object? value,
+        IReadOnlyList<object?> values,
+        DslCaseRule rule,
+        DslColumn column
+    )
     {
         if (value is null)
         {
             return values.Any(v => v is null);
+        }
+
+        // PostgreSQL の固定長の列：IN は = と同じく末尾の空白を無視する（CompareUnder と同じ読み方）
+        if (
+            rule == DslCaseRule.PostgreSql
+            && column.Clr == DslClr.FixedString
+            && value is string padded
+        )
+        {
+            var trimmed = padded.TrimEnd(' ');
+            var bothTrimmed = values.Any(v => v is string other && trimmed == other.TrimEnd(' '));
+            var valueTrimmed = values.Any(v => v is string other && trimmed == other);
+
+            return bothTrimmed == valueTrimmed ? bothTrimmed : null;
         }
 
         if (values.Any(v => v is not null && SameValue(value, v)))
@@ -964,14 +1161,20 @@ public static class DslFuzz
             return true;
         }
 
-        return
-            rule == DslCaseRule.Collation
-            && value is string text
-            && values.Any(v =>
-                v is string other && CollationKey(text, true) == CollationKey(other, true)
-            )
-            ? null
-            : false;
+        var foldedMatch =
+            value is string text
+            && rule switch
+            {
+                DslCaseRule.Collation => values.Any(v =>
+                    v is string other && CollationKey(text, true) == CollationKey(other, true)
+                ),
+                DslCaseRule.MySql => values.Any(v =>
+                    v is string other && MySqlKey(text) == MySqlKey(other)
+                ),
+                _ => false,
+            };
+
+        return foldedMatch ? null : false;
     }
 
     /// <summary>ASCII の英字だけを小文字へ畳む</summary>

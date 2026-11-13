@@ -9,7 +9,7 @@ EF Core モード（`GenerateEfCoreRepositories`）の固定ランタイムと�
 - DI 登録の差し替え（`AddGenerated{方言}Repositories` と `AddGeneratedEfCoreRepositories`）だけで QuickER 版 Repository と交換できる。
 - `GenerateEfCoreRepositories=false` のとき、生成物に EF Core への依存は一切出ない（using を含む）。
 - スキーマ作成は DDL 生成の責務で、EF Core は既存スキーマへの接続専用とする（Migrations は範囲外）。
-  - 列の型（`HasColumnType`）は、プロバイダの既定の対応では書けない列（PostgreSQL の `date`・`timestamp`・`timetz`・`json`・`jsonb`・`xml` とその配列）にだけ出す。DB には何も作らず、パラメータの型を決めるためだけに使う。判定は型マッパー（`src/QuickER.CodeGen.CSharp/CLAUDE.md`「EF Core に教える列の型」）。
+  - 列の型（`HasColumnType`）は、プロバイダの既定の対応では書けない列（PostgreSQL の `date`・`timestamp`・`timetz`・`json`・`jsonb`・`xml`・`money` とその配列、SQL Server の `money`・`smallmoney`）にだけ出す。DB には何も作らず、パラメータの型を決めるためだけに使う。判定は型マッパー（`src/QuickER.CodeGen.CSharp/CLAUDE.md`「EF Core に教える列の型」）。
 - EF Core 単独のスコープ（EF Core のランタイムパッケージを含む）は、行の組み立て器を出さない。
   - 対象は `SelectMaterializer`・`MapEntity`・型ごとの読み取り・値オブジェクトの速い経路。QuickER 版 Repository のあるスコープだけに出す。
   - EF Core は自分で行を組み立て、生 SQL のエンティティ取得は列ごとの写し `SetColumnValue` で行うので使われない。生 SQL の列の解決の `SelectOrdinals` は残る。
@@ -155,28 +155,41 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
 
 ### SQL Server のクエリのパラメータの型
 
-- EF Core はパラメータに比べる相手の列の型（`HasPrecision`・`IsUnicode(false)`、decimal と比べる整数の列は CAST の既定の decimal の型＝生成の DbContext では SQL Server で `decimal(38,19)`。下の「SQL Server の既定の decimal の型」）を付け、SqlClient は値をその型へ変換してから送る。列に入らない値は丸められる（`1.234`→`1.23`）か `ArgumentException` になり、ASCII の外の文字は `?` になって、C# と違う行を返す（`ExecuteDeleteAsync` は違う行を消す）。
+- EF Core はパラメータに比べる相手の列の型（`HasPrecision`・`IsUnicode(false)`、decimal と比べる整数の列は CAST の既定の decimal の型＝生成の DbContext では SQL Server で `decimal(38,19)`。下の「SQL Server と Oracle の既定の decimal の型」）を付け、SqlClient は値をその型へ変換してから送る。列に入らない値は丸められる（`1.234`→`1.23`）か `ArgumentException` になり、ASCII の外の文字は `?` になって、C# と違う行を返す（`ExecuteDeleteAsync` は違う行を消す）。
 - 公開の `SqlServerQueryParameterInterceptor`（`DbCommandInterceptor`・`Instance`）が、SqlClient の接続（型の名前で判定。派生を含む）の、出どころが LinqQuery・ExecuteDelete・ExecuteUpdate のコマンドの各パラメータを見て、値が入らないものだけ型を外す。
   - decimal で `Precision > 0`：末尾の 0 を除いた小数の桁がスケールを、整数部の桁が精度−スケールを超えたら Precision / Scale を 0 にする（SqlClient が値から決める）。
+  - Currency（EF Core が money・smallmoney の列と比べるパラメータに付ける DbType。両方とも Currency で、SqlDbType が Money / SmallMoney＝実測）：値が型の範囲か小数 4 桁の外なら Decimal・精度 0 にして値を decimal にする（decimal は型の優先順位で money より上なので、サーバーが列の側を変換する）。money と smallmoney の区別は、SqlClient を参照しないので SqlParameter のプロパティ SqlDbType を反射の名前で読む（`IsSmallMoney`）。
   - AnsiString / AnsiStringFixedLength：値に ASCII の外の文字があれば String・Size 0 にする。
-  - 判定は QuickER 版の `QueryValueFits`（`src/QuickER.Runtime.SqlServer/CLAUDE.md`「SqlParameter の明示型」）と同じ規則。パッケージが別なので `FitsDecimal`・`TryExactDecimal` は写しで持つ（片方だけ変えない）。
+  - 判定は QuickER 版の `QueryValueFits`（`src/QuickER.Runtime.SqlServer/CLAUDE.md`「SqlParameter の明示型」）と同じ規則。パッケージが別なので `FitsDecimal`・`FitsMoney`・`TryExactDecimal` は写しで持つ（片方だけ変えない）。
   - date・整数の DbType は入れない。生成の DbContext は SQL Server の date に列の型を教えないので DateTime は datetime2 で送られ、整数の列と比べる long・double・decimal はそれぞれ bigint・float・decimal で束縛される（実測）。赤にできない枝を持たない。
 - 入る値は EF Core が付けた型のまま（SQL・計画・索引の使われ方を変えない）。入らない値だけ、サーバーが列の側を変換する（QuickER 版と同じ割り切り）。
 - SaveChanges のコマンドは変えない。保存される値は同じだが、精度を超える値の INSERT の例外が ArgumentException から SqlException（Arithmetic overflow）に変わる（実測）。書き込みの意味は変えない。
 - 登録は `AddGeneratedEfCoreRepositories` が `configureDbContext` の後に `SqliteBusyTimeoutInterceptor` と並べて `AddInterceptors` で足す。DbContext を自分で組む利用者は `Instance` を足す（docs）。
   - `QuickErDbContext.OnConfiguring` で足さない：OnConfiguring でオプションを変えると EF Core の本物のプールが断る（値オブジェクトありの生成コードと同じ制約が全部の図に広がる）。
 - 定数は直せない。EF Core はラムダの中の定数を SQL のリテラルへ書き、非 Unicode の列と比べる文字列の定数に `N` を付けない（手書きの LINQ の定数は docs の既知の割り切り）。簡易 DSL の文字列のリテラルは、発行器がメソッド冒頭の局所変数へ持ち上げてパラメータにする（`src/QuickER.CodeGen.CSharp/Queries/CLAUDE.md`「文字列のリテラルの持ち上げ」）。
-- ガード：`SqlServerQueryParameterInterceptorTests`（DB を使わない行の表：入る値は型のまま・入らない値だけ外す・IN の要素ごと・LIKE のパターン・ExecuteDelete・SaveChanges は変えない・SQL Server でない接続は触らない）・`SqliteBusyTimeoutInterceptorTests.GeneratedRegistration_AddsInterceptorAfterConfigure`（生成の DI の登録）・`Dsl/SqlServer`（因子 ValueFit の水準 beyond-scale・beyond-range・beyond-charset と単位 sqlserver-ansi。列で型付けしたパラメータ・広い型トークン・IN・LIKE を実 SQL Server で C# と比べる）・`table:TranslatorParityPredicates`（EF Core の派生 `TranslatorParityEfCoreSqlServerRuntimeTests`）。mutation 実証済み（判定を外して何もしないと、総当たりの EF Core の失敗が 90 件・述語の表の変数の 7 行が赤、常に型を外すと単体の表の 5 行が赤。QuickER 版は 0 件）
+- ガード：`SqlServerQueryParameterInterceptorTests`（DB を使わない行の表：入る値は型のまま・入らない値だけ外す・IN の要素ごと・LIKE のパターン・ExecuteDelete・SaveChanges は変えない・SQL Server でない接続は触らない）・`SqliteBusyTimeoutInterceptorTests.GeneratedRegistration_AddsInterceptorAfterConfigure`（生成の DI の登録）・`Dsl/SqlServer`（因子 ValueFit の水準 beyond-scale・beyond-range・beyond-charset と単位 sqlserver-ansi・網羅の単位 coverage-sqlserver-money。列で型付けしたパラメータ・広い型トークン・IN・LIKE を実 SQL Server で C# と比べる）・`table:TranslatorParityPredicates`（EF Core の派生 `TranslatorParityEfCoreSqlServerRuntimeTests`）。mutation 実証済み（判定を外して何もしないと、総当たりの EF Core の失敗が 90 件・述語の表の変数の 7 行が赤、常に型を外すと単体の表の 5 行が赤。QuickER 版は 0 件。money の分岐を外すと EF Core のスケールの外・範囲の外の 16 件、範囲の判定だけを外すと範囲の外の 8 件が赤）
 
-### SQL Server の既定の decimal の型
+### PostgreSQL のクエリのパラメータの型
 
-- 生成の `QuickErDbContext` は `ConfigureConventions` をオーバーライドし、SQL Server の接続（`Database.ProviderName` が `Microsoft.EntityFrameworkCore.SqlServer`。プロバイダのパッケージを参照しないので名前で判定する）のときだけ `DefaultTypeMapping<decimal>().HasPrecision(38, 19)` を置く。続けて利用者の拡張点 `ConfigureConventionsPartial` を呼ぶ（`OnModelCreatingPartial` と同じ形）。
-- 理由：C# は decimal と比べる整数を decimal へ広げ（`x.Id > 1.5m`）、EF Core は型を取る列の無い変換を既定の decimal の型の CAST で書く。EF Core の既定の `decimal(18,2)` は整数部 16 桁なので、`bigint` の列に整数部が 16 桁を超える行が 1 行でもあると、比べる値・経路（名前付きクエリ・手書きの変数と定数・IN・演算・並び替え・射影・ExecuteDelete）に依らず Arithmetic overflow の SqlException になる。どの行の CAST を評価するかは実行計画で決まるので、主キーの seek で通ることもある。パラメータの型でなく列の CAST が原因なので、`SqlServerQueryParameterInterceptor` では直らない。
+- EF Core は `date` の列と比べる `DateTime` のパラメータに列の型（`HasColumnType("date")`＝PostgreSQL のマッパーが教える列の型）を付け、Npgsql は時刻を落として送る。`x.Day < 正午` はその日の行を落とし、`x.Day == 正午` はその日の行に一致する（C# と違う行を返し、`ExecuteDeleteAsync` は違う行を消す）。
+- 公開の `PostgreSqlQueryParameterInterceptor`（`DbCommandInterceptor`・`Instance`）が、Npgsql の接続（型の名前 `Npgsql.NpgsqlConnection` で判定。派生を含む。Npgsql を参照しない）の、出どころが LinqQuery・ExecuteDelete・ExecuteUpdate のコマンドの各パラメータを見て、DbType が Date で値が時刻つきの `DateTime` のものだけ、`ResetDbType()` の後に DbType を DateTime2（timestamp without time zone）にする。
+  - `ResetDbType()` が要る：EF Core はパラメータにプロバイダの型の名前（date）を刻み、Npgsql はそれを DbType より優先する。DbType だけを変えても効かない（実測）。
+  - 判定は QuickER 版の `QueryValueFits` の date の枝（`src/QuickER.Runtime.SqlServer/CLAUDE.md`「SqlParameter の明示型」）と同じ規則。0 時ちょうどの値は列の型のまま（SQL・索引の使われ方を変えない）。
+  - 小数・文字列の枝は持たない：PostgreSQL の EF Core 版は numeric（精度なし）と text で送り、桁・文字が落ちない（区切り D3 の実 DB の総当たりで測った）。
+- SaveChanges のコマンドは変えない（`date` の列へ書く値は日付として保存される）。
+- 登録は `AddGeneratedEfCoreRepositories` が `SqliteBusyTimeoutInterceptor`・`SqlServerQueryParameterInterceptor` と並べて足す。DbContext を自分で組む利用者は `Instance` を足す（docs）。
+- ガード：`table:TranslatorParityPredicates`（EF Core の PostgreSQL の派生 `TranslatorParityEfCorePostgreSqlRuntimeTests`・行 `date-*-time-of-day`）・`SqliteBusyTimeoutInterceptorTests.GeneratedRegistration_AddsInterceptorAfterConfigure`（生成の DI の登録）。mutation 実証済み（登録を外すと表の 2 行が赤）
+
+### SQL Server と Oracle の既定の decimal の型
+
+- 生成の `QuickErDbContext` は `ConfigureConventions` をオーバーライドし、SQL Server と Oracle の接続（`Database.ProviderName` が `Microsoft.EntityFrameworkCore.SqlServer` か `Oracle.EntityFrameworkCore`。プロバイダのパッケージを参照しないので名前で判定する）のときだけ `DefaultTypeMapping<decimal>().HasPrecision(38, 19)` を置く。続けて利用者の拡張点 `ConfigureConventionsPartial` を呼ぶ（`OnModelCreatingPartial` と同じ形）。
+- 理由：C# は decimal と比べる整数を decimal へ広げ（`x.Id > 1.5m`）、EF Core は型を取る列の無い変換を既定の decimal の型の CAST で書く。EF Core の既定の `decimal(18,2)` は整数部 16 桁なので、`bigint` の列に整数部が 16 桁を超える行が 1 行でもあると、比べる値・経路（名前付きクエリ・手書きの変数と定数・IN・演算・並び替え・射影・ExecuteDelete）に依らず Arithmetic overflow の SqlException（Oracle は `CAST(id AS DECIMAL(18, 2))` の ORA-01438）になる。どの行の CAST を評価するかは実行計画で決まるので、主キーの seek で通ることもある。パラメータの型でなく列の CAST が原因なので、`SqlServerQueryParameterInterceptor` では直らない。
 - `decimal(38,19)` の根拠：整数部 19 桁に `long` の範囲がすべて入り、スケール 19 で C# の decimal の小数の桁（最大 28）の大半が入る。整数部を 19 桁より減らすと bigint が桁あふれし、スケールを増やすと long が入らない。それより桁の多い比べる値（スケール 20 桁以上・整数部 20 桁以上）は、パラメータの型（既定の `decimal(38,19)`）に入らないので `SqlServerQueryParameterInterceptor` が値の型で送り、SQL Server は正しく比べる（実測。インターセプターを足さずに DbContext を組むと SqlClient が丸める＝docs の「自分で組むならインターセプターを足す」の範囲）。
 - 効くのは型を取る列の無い式（CAST の型・列と比べないパラメータ）だけ。精度を指定した列・指定しない列（`money` など）のプロパティの型は変わらず（`decimal(18,2)` の既定の列も含め、実測）、列と比べるパラメータは今までどおり列の型を取る。射影・計算の中の同じ変換（`x.Qty / 3m`）も `decimal(38,19)` になり、結果の小数の桁が増える（C# に近づく。CHANGELOG の Changed）。
-- ほかのプロバイダには置かない（PostgreSQL・MySQL・Oracle の EF Core は実 DB の総当たりが無く測れない）。生成コードは方言に依らず同じで実行時に判定するので、可搬の図の出力が方言ごとに割れない。
+- ほかのプロバイダには置かない：PostgreSQL（Npgsql の既定の decimal は精度なしの numeric）と MySQL は bigint の端の値でも桁あふれしない（区切り D3 の実 DB の述語の表と総当たりで測った）。生成コードは方言に依らず同じで実行時に判定するので、可搬の図の出力が方言ごとに割れない。
+- Oracle の比べる値の桁：Oracle は SqlClient のような値の変換をせず、`NUMBER(38,19)` を超える比べる値も C# と同じ答えになる（実測。インターセプターは要らない）。
 - 整数の列と decimal の列の比較（列どうし）は直らない：EF Core は CAST の型を相手の列の型から推論し（`CAST([i32] AS decimal(10,2))`）、既定の型を使わない。int の列でも相手の整数部の桁を超える行で桁あふれする（docs の既知の割り切り。QuickER 版は CAST せずに比べる）。直すには型を固定した CAST の関数（`HasDbFunction(...).HasTranslation` で型の対応付けを持つ `SqlUnaryExpression`）と、整数→decimal の `Convert` をその関数へ書き換える `IQueryExpressionInterceptor` が要る（試作で列どうしも一致したが、公開 API 面が増えるので採っていない）。
-- ガード：`table:TranslatorParityPredicates`（big_parent の行 `bigint-column-*`・`in-decimal-list-bigint-column`＝シード `WideBigParents` は long の上限と下限・整数部 17 桁と 16 桁の行を持つ。EF Core の派生 `TranslatorParityEfCoreSqlServerRuntimeTests`。列どうしの行 `int-column-greater-decimal-column`・`int-column-equals-decimal-column` は EF Core の `Known` に docs を出典にして宣言）・`Dsl/SqlServer`（bigint の列と decimal の型トークンのパラメータの原子＝4 本目の乱数の列の `Y{i}` と網羅の単位の `KY{i}`）。mutation 実証済み（既定の精度の設定を外す・SQL Server の判定を常に偽にする、のどちらも総当たりの EF Core の失敗 10 件と述語の表の 5 行が赤。判定を常に真にする壊し方は、SQLite の decimal の対応付けが精度を見ないので答えが変わらず、赤にできない）
+- ガード：`table:TranslatorParityPredicates`（big_parent の行 `bigint-column-*`・`in-decimal-list-bigint-column`＝シード `WideBigParents` は long の上限と下限・整数部 17 桁と 16 桁の行を持つ。EF Core の派生 `TranslatorParityEfCoreSqlServerRuntimeTests`・`TranslatorParityEfCoreOracleRuntimeTests`。列どうしの行 `int-column-greater-decimal-column`・`int-column-equals-decimal-column` は EF Core の `Known` に docs を出典にして宣言）・`Dsl/SqlServer`・`Dsl/Oracle`（bigint の列と decimal の型トークンのパラメータの原子＝4 本目の乱数の列の `Y{i}` と網羅の単位の `KY{i}`）。Oracle の条件は、プロバイダの名前を外すと Oracle の派生の 6 行が赤（mutation 実証済み）。mutation 実証済み（既定の精度の設定を外す・SQL Server の判定を常に偽にする、のどちらも総当たりの EF Core の失敗 10 件と述語の表の 5 行が赤。判定を常に真にする壊し方は、SQLite の decimal の対応付けが精度を見ないので答えが変わらず、赤にできない）
 
 ### SQLite の整数と decimal の等値
 
@@ -186,10 +199,22 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
   - `Matches`・`KeyOf`・`KeysOf` は値だけを見る（null は null・long の範囲の整数の値はその整数・それ以外はどの行にも一致しない）ので、EF Core はクライアントで評価してパラメータにする。書き換えた条件は null を含めて C# の条件と同じ意味（`!=` の NULL の行は EF Core の C# の null の意味論が補う）。
   - 順序比較と decimal の列の比較は書き換えない（今の翻訳が正しいので変えない）。小数との等値は書き換え、`Matches` が偽になってどの行にも一致しない（C# と同じ）。
 - 型は internal（公開 API 面を変えない）。式の木から呼ぶ補助のメソッドも private で、EF Core のクライアントの評価は呼べる（実測）。パッケージ用ソースは `System.Collections` を using しないので、非総称の `IEnumerable` は完全修飾で書く。
-- ほかのプロバイダには掛けない（ユーザーの決定）。書き換えた形は C# と同じ意味なので掛けても答えは変わらないが、PostgreSQL・MySQL・Oracle の EF Core は実 DB の総当たりが無く、SQL が変わることを確かめられない。
+- ほかのプロバイダには掛けない（ユーザーの決定）。書き換えた形は C# と同じ意味なので掛けても答えは変わらないが、PostgreSQL・MySQL・Oracle の EF Core は整数と decimal の等値をそのまま正しく翻訳する（区切り D3 の実 DB の述語の表と総当たりで測った）ので、SQL を変える理由が無い。
 - 届かないもの：利用者が DbContext を直接使う LINQ（Repository の `Query()` を通らない）。
 - SQLite の QuickER 版は decimal を TEXT のパラメータで送り、SQLite の型の親和性で REAL として比べるので、整数の列と極端な decimal（long の上限の decimal・小数 23 桁の 1 の近傍）の比較が C# と割れる（実測。docs に約束の無い領域で、この節の書き換えとは別の実装）。EF Core 版はこの書き換えで C# と同じになる。
 - ガード：`table:TranslatorParityPredicates`（EF Core の SQLite の派生 `TranslatorParityEfCoreSqliteRuntimeTests`＝SQL Server 方言で生成した `TranslatorParityEfCoreFixture` を `UseSqlite` で流す。行 `int-column-*-decimal-integral-*`・`in-decimal-list-int-column`・`in-decimal-array-int-column`・`bigint-column-equals-decimal-integral-variable`・`in-decimal-list-bigint-column`。`time-scaled-less-finer` は SQLite のプロバイダが TimeSpan の大小を翻訳できない事実として派生の `Known` に宣言）・`Dsl/SqliteMySql`（bigint の列と decimal の型トークンのパラメータの整数の値の池）。mutation 実証済み（書き換えを外すと表の 6 行と総当たりの EF Core〔SQLite〕の 2 件が赤、IN の書き換えだけを外すと表の IN の 2 行が赤、配列の `op_Implicit` を剥がさないと表の配列の行が赤。判定を常に真にする壊し方は SQL Server でも答えが変わらず、赤にできない）
+- 書き換えの共有の部品（ラムダの引数を読まない式の判定 `IsRowFree`・`Contains` の値と項目の取り出し `ContainsOperands`・`ParameterFinder`）は internal の `PredicateExpressionParts` に置き、下の Npgsql の書き換えと共有する（写しを作らない）。
+
+### PostgreSQL の値オブジェクトの IN の null
+
+- Npgsql は `list.Contains(x.Code)` を 1 つの配列のパラメータ（`= ANY(@p)`）で送り、要素ごとに値オブジェクトの値変換を当てる。生成の変換は null を受けないので、値に null を含む IN が `NullReferenceException` になる（スタックは `ValueConverter.SanitizeConverter` → `NpgsqlArrayTypeMapping.CreateParameter`）。値オブジェクトでない列は通る。
+- 実行器の `ApplyPredicates` が、PostgreSQL の接続（`Database.ProviderName` が `Npgsql.EntityFrameworkCore.PostgreSQL`）のときだけ、条件を `NpgsqlValueObjectListNulls.Rewrite` に通してから `Where` へ渡す（SQLite の書き換えと同じ 1 か所）。
+  - 項目が値オブジェクトで、値がラムダの引数を読まない `Contains` を、`WithoutNulls(values).Contains(x) || (HasNull(values) && x == null)` に書き換える。`WithoutNulls`・`HasNull` は値だけを見るので EF Core がクライアントで評価してパラメータにし、書き換えた条件は C# の IN の意味（null を含むリストは NULL の行に一致する）と同じ。
+  - 値オブジェクトかは、型がインターフェイス `IValueObjectCore` を名前で持つかで決める。値オブジェクトを生成しない構成ではこの型が無く、名指しするとコンパイルできない（CS0246）。
+- 型は internal（公開 API 面を変えない）。
+- 値変換の provider の型を null 許容にする案は採らない：全部の値オブジェクトの列（主キー・外部キーを含む）の EF Core のモデルが全方言で変わる。null を既定値へ写す案は、配列の要素が 0 などになって意味が変わる。
+- 届かないもの：利用者が DbContext を直接使う LINQ（docs）。
+- ガード：`Dsl/PostgreSql`（値オブジェクトの単位の IN の形 in-with-null・in-all-null を、int16・int32・int64・decimal・datetime・guid の列で実 PostgreSQL の EF Core 版と C# で比べる）。mutation 実証済み（書き換えを止めると総当たりの 64 件が赤）
 
 ### 値オブジェクトの文字列一致の LIKE
 

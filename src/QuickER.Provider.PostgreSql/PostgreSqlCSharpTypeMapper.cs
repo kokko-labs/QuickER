@@ -19,7 +19,7 @@ namespace QuickER.Provider.PostgreSql;
 /// <item><description>uuid → Guid</description></item>
 /// <item><description>bytea → byte[]（参照型）。長さ宣言を持たないため常に無制限バイナリ</description></item>
 /// <item><description>varchar / char / text / xml / json / jsonb → string（長さ指定があれば MaxLength として保持）</description></item>
-/// <item><description>date / timestamp / timetz / xml / json / jsonb は、生成 EF Core の DbContext が列の型を教える
+/// <item><description>date / timestamp / timetz / xml / json / jsonb / money は、生成 EF Core の DbContext が列の型を教える
 /// （<see cref="CSharpTypeInfo.EfCoreColumnType"/>。Npgsql の EF Core のプロバイダの既定の対応では書き込めないため）</description></item>
 /// <item><description>未知の型 → string（生成失敗を避けるための安全側フォールバック。<c>CSharpTypeInfo.IsFallbackType</c> に true を刻む）</description></item>
 /// </list>
@@ -84,7 +84,9 @@ public sealed partial class PostgreSqlCSharpTypeMapper : IColumnTypeMapper
             "real" => Value("float"),
             "double precision" => Value("double"),
             "numeric" => Decimal(precision, scale),
-            "money" => Value("decimal"),
+            // Npgsql の EF Core のプロバイダは、列の型を教えない decimal を numeric のパラメータで送り、PostgreSQL は money と numeric を
+            // 比べる演算子を持たない。money の列にだけ列の型を教える
+            "money" => Value("decimal") with { EfCoreColumnType = "money" },
             // Npgsql の EF Core のプロバイダは、列の型を教えない DateTime を timestamp with time zone として送り、
             // Kind=Unspecified の値を断る。date・timestamp の列にだけ列の型を教える（timestamptz は既定の対応のまま）
             "date" => Value("DateTime") with { EfCoreColumnType = "date" },

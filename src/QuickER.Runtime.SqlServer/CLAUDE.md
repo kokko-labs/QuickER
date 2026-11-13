@@ -8,13 +8,14 @@ SQL Server 方言エンジン（QuickER 版 Repository の ADO 実装）の固�
 - 生成ランタイムの SqlParameter は `[SqlColumnType]` 属性由来の明示型にする。
 - 文字列 Size の「宣言長超過なら値長」ガードを固定 Size にしてはいけない。サイレントなデータ破損を招く。
 - 式の翻訳の WHERE の値（`EntitySaveMetadata.AddQueryParameter` → `AddQueryColumnParameter`）は、値が列の SQL の型にそのまま入るときだけ列の型で束縛し、入らないときは値の型で束縛する（判定は `QueryValueFits` の 1 か所・値そのもので見る）。
-  - 入らない値：整数の列（tinyint・smallint・int・bigint）と整数でない数・範囲の外の整数（整数ちょうどの double は入る。NaN・無限大は入らない）、decimal(p,s) の列と末尾の 0 を除いた小数の桁が s を超える値・整数部の桁が p−s を超える値、date の列と時刻つきの DateTime、Unicode でない文字列の列（varchar・char・text）と ASCII の外の文字を含む値。ほかの型と null は列の型のまま。
+  - 入らない値：整数の列（tinyint・smallint・int・bigint）と整数でない数・範囲の外の整数（整数ちょうどの double は入る。NaN・無限大は入らない）、decimal(p,s) の列と末尾の 0 を除いた小数の桁が s を超える値・整数部の桁が p−s を超える値、money・smallmoney の列と型の範囲（money は ±922,337,203,685,477.5807〔下限は .5808〕、smallmoney は ±214,748.3647〔下限は .3648〕）の外の値・小数が 4 桁を超える値、date の列と時刻つきの DateTime、Unicode でない文字列の列（varchar・char・text）と ASCII の外の文字を含む値。ほかの型と null は列の型のまま。
   - 理由：比較の値が列の型に入らないことがある（C# は整数の列を double・long へ拡大して比べる。手書きの LINQ の `x.Tiny < 300`・簡易 DSL の `qty < 1.5`・int の列と long のリストの IN）。列の型で束縛すると SqlClient かサーバーが値を先に変換し（切り捨て・丸め・`?` への置き換え）、C#・EF Core・インメモリと違う行を返すか、オーバーフローの例外になる。値の型で束縛すると、サーバーが列の側を変換して値のまま比べる。
   - DateTime の値は datetime2 で束縛する（AddWithValue は datetime を選び、1/300 秒に丸める）。符号なし整数と sbyte の値は bigint（範囲の外は decimal）で束縛する（SqlClient はこの型を対応付けられず ArgumentException になる）。
   - インデックス：入る値は今までどおり列の型で束縛するので、列の側の変換は起きず、インデックスの使われ方は変わらない。入らない値だけ、サーバーが列の側を暗黙に変換し（CONVERT_IMPLICIT）、seek が scan になり得る（そうした比較は以前は誤答か例外だった）。
   - datetime2(n)・time(n) の列は、属性が小数秒の桁を持たず、値の精度のまま束縛されるので割れない（式の翻訳の表の行が回帰の網として持つ）。
-  - EF Core 版は `SqlServerQueryParameterInterceptor` が同じ規則で decimal と非 Unicode の文字列を束縛し直す（`src/QuickER.Runtime.EntityFrameworkCore/CLAUDE.md`「SQL Server のクエリのパラメータの型」。判定の写しを片方だけ変えない）。
+  - EF Core 版は `SqlServerQueryParameterInterceptor` が同じ規則で decimal と money・smallmoney と非 Unicode の文字列を束縛し直す（`src/QuickER.Runtime.EntityFrameworkCore/CLAUDE.md`「SQL Server のクエリのパラメータの型」。判定の写しを片方だけ変えない）。
   - ガード：`table:TranslatorParityPredicates`（`TranslatorParityPredicateRows` の行 `int-column-*`・`int-key-*`・`in-long-list-beyond-int`・`in-uint-list-beyond-int`・`decimal-*-beyond-scale`・`date-*-time-of-day`・`varchar-*`・`datetime2-scaled-*`・`time-scaled-*`）・`Dsl/SqlServer`（形 `compare-*-literal-fractional`）。直す前の束縛で SQL Server の 13 行と総当たりの 4 件が赤になることを確かめた。
+  - money・smallmoney：範囲は 10 の累乗の桁で表せないので、精度・スケールでなく型の端で判定する（`FitsMoney`）。入らない値を値の型で束縛しても、long の値（bigint）を含めてサーバーは正しく比べる（実測。money が型の優先順位で bigint より上でも桁あふれしない）。ガード：`Dsl/SqlServer`（網羅の単位 coverage-sqlserver-money＝列で型付けしたパラメータ・広い型トークン・int64 の型トークン・リテラル・IN と NOT IN の原子 1 つずつのクエリ KM* と合成のクエリ）。直す前に赤になる組と mutation（分岐を外すと QuickER 版のスケールの外・範囲の外の 26 件、範囲の判定だけを外すと範囲の外の 14 件が赤）を確かめた。
 
 ## BulkInsert のオプション
 

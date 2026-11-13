@@ -44,8 +44,27 @@
   - 実装先が 2 つ以上かエンジン：機能の名前で始める（例 `BackendParitySqlServerRuntimeTests`・`MultiTargetRepositoryRuntimeTests`）。間は自由。
   - 規則に合わない既存のクラスは既知の一覧 `RuntimeTestNamingKnown`（理由つき）に載せ、`GuardKnownList` で 2 方向に照合する（一覧に無い違反も、無くなった・合うようになったクラスも赤）。改名は後の区切りで行い、改名したら一覧から消す。ガード：`RuntimeTestMatrixTests.NewRuntimeTestClasses_FollowNamingRule`。
 - 運用：
-  - テストのクラスを足すときは属性を書き、そのセルの空きの宣言を消して生成物を書き直す。例：区切り D3 が TranslatorParity の EF Core の PostgreSQL・MySQL・Oracle の派生を足して `[RuntimeCell(RuntimeFeatures.TranslatorParity, RuntimeTarget.EfCorePostgreSql)]` などを付けると、その列は「空き（区切り D3）」と担当の両方で赤になり、`RuntimeMatrixRows` の宣言を消すと緑になる（続けて生成物を書き直す）。
+  - テストのクラスを足すときは属性を書き、そのセルの空きの宣言を消して生成物を書き直す。空きの宣言を残したまま属性を付けると、その列は空きと担当の両方で赤になり、`RuntimeMatrixRows` の宣言を消すと緑になる（続けて生成物を書き直す）。
   - ガード：`RuntimeTestMatrixTests`（`Targets_MatchProductDialects`・`EveryRuntimeTestClass_ShouldAppearInMatrix`・`EveryMatrixCell_ShouldBeCoveredOrDeclaredAsGap`・`Matrix_ShouldBeMostlyCovered`・`RuntimeMatrixDrift_MatchesRecord`・`NewRuntimeTestClasses_FollowNamingRule`・`Checks_NameEveryProblemShape`）。
+
+## 述語の表の EF Core の派生
+
+`TranslatorParityEfCoreRuntimeTestsBase` は、述語の表（`TranslatorParityPredicateRows`）を EF Core 版 Repository の 5 方言へ流す共通基底。
+
+- 生成物は束縛（`TranslatorParityEfCoreBinding`）で差し込む。エンティティとリポジトリの型を名前で引き、リポジトリを反射で呼ぶ（生成物の型は名前空間ごとに別で、基底から名指しできないため）。
+  - SQL Server・SQLite の派生：チェックイン済みのフィクスチャ（`TranslatorParityEfCoreFixture`＝SQL Server 方言で生成）。SQLite の型マッパーで生成した物と Fluent が同じ（違いは `[SqlColumnType]` の有無だけ）。
+  - PostgreSQL・MySQL・Oracle の派生：述語の表の図を方言切替（`DiagramTypeConverter`）でその方言へ写し、その方言の型マッパーで実行時に生成・コンパイルした物（`TranslatorParityEfCoreGenerated`・方言ごとにプロセスで 1 回）。利用者が方言を切り替えて生成したときのコードそのものを流す（PostgreSQL は日時の列に `HasColumnType` が付き、MySQL は `at_offset` が DateTime になる）。テンプレートと型マッパーの変化は、チェックイン済みのフィクスチャの再生成を待たずに同じコミットで表に流れる。
+  - 実行時の生成の図から外すもの：rowversion の表（どの方言にも写せず、表のどの行も使わない）と、方言切替が写せない列（Oracle の `clock`＝Oracle の型マッパーに TimeSpan に写す型が無い）。
+- 派生の宣言は 3 つ。
+  - `Known`：EF Core の答えが C# と割れる行（docs の割り切りを出典にする。一致したら赤）。
+  - `NotApplicable`：生成物にその行の列が無いか型が違うので流せない行（製品の事実）。付け替えられない行の集合とちょうど同じでなければ赤（`NotApplicable_IsExactlyTheRowsThatCannotBeRetargeted`）。
+  - `SeedValue`：シードの値を方言のプロバイダの規則に合わせる差し込み口（PostgreSQL は DateTimeOffset を UTC へ・MySQL は `at_offset` の日時の部分）。
+
+## 簡易 DSL の総当たりの EF Core だけの方言
+
+- `NamedQueryDslConditionFuzz{PostgreSql,MySql,Oracle}RuntimeTests` は、簡易 DSL の総当たりを実コンテナの EF Core 版 Repository で流す（手順は `DslConditionFuzzEfCore` の 1 か所・SQL Server の派生と同じ）。QuickER 版 Repository はこの 3 方言を生成せず、インメモリは方言に依らないので、実装先の軸は EF Core だけ（ほかは理由つきの除外）。
+- 文字列の扱いは `DslCaseRule` の方言の値（docs の「大文字小文字・空白・日付部品」の方言の行の写し）、NULL の位置は PostgreSQL・Oracle が昇順で末尾。種は普段 1・夜間 16。
+- 行列の担当は軸から導く（`RuntimeMatrixEngines` の `DslFuzz` の登録）。値オブジェクトの文字列一致（`ValueObjectStringMatch`）の 3 方言は `ValueObjectStringMatchEfCore{PostgreSql,MySql,Oracle}RuntimeTests`（クエリフィクスチャの生成物を、方言切替で写した DDL のスキーマで流す。図の列は int・nvarchar・decimal だけで、生成の Fluent は方言に依らない）。
 
 ## 実装先どうしの一致
 

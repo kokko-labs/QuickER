@@ -194,7 +194,8 @@ public class SqliteBusyTimeoutInterceptorTests
                             configureDbContext(options);
                             options.AddInterceptors(
                                 SqliteBusyTimeoutInterceptor.Instance,
-                                SqlServerQueryParameterInterceptor.Instance
+                                SqlServerQueryParameterInterceptor.Instance,
+                                PostgreSqlQueryParameterInterceptor.Instance
                             );
                         });
                 """.ReplaceLineEndings("\n")
@@ -206,6 +207,12 @@ public class SqliteBusyTimeoutInterceptorTests
             .Be(!useRuntimePackages);
         code.Contains(
                 "public sealed class SqlServerQueryParameterInterceptor",
+                StringComparison.Ordinal
+            )
+            .Should()
+            .Be(!useRuntimePackages);
+        code.Contains(
+                "public sealed class PostgreSqlQueryParameterInterceptor",
                 StringComparison.Ordinal
             )
             .Should()
