@@ -1192,7 +1192,7 @@ public sealed partial class DslFuzzGenerator(
     private DslParam Param(DslColumn column) =>
         new(
             parameterPrefix + _parameterIndex++,
-            [Pick(DslFuzz.ValuePool(column))],
+            [Pick(DslFuzz.OperandPool(column))],
             IsList: false,
             ByColumn: !DslFuzz.HasTypeToken(column.Clr) || _random.Next(2) == 0,
             column
@@ -1232,7 +1232,7 @@ public sealed partial class DslFuzzGenerator(
     /// <summary>IN のリストのパラメータ（null を含む形は、値オブジェクトありなら列で型付けする）</summary>
     private DslParam ListParam(DslColumn column, string shape)
     {
-        var pool = DslFuzz.ValuePool(column);
+        var pool = DslFuzz.OperandPool(column);
         List<object?> values = shape switch
         {
             DslIn.ListEmpty => [],

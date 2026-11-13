@@ -25,6 +25,10 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 public sealed class TranslatorParitySqlServerRuntimeTests(SqlServerContainerFixture fixture)
     : TranslatorParityRuntimeTestsBase
 {
+    /// <inheritdoc />
+    protected override IReadOnlyDictionary<string, int>? FixedBinaryLengths =>
+        SqlServerFixedBinaryLengths;
+
     protected override async Task<ServiceProvider> CreateProviderAsync()
     {
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);

@@ -98,6 +98,27 @@ public sealed record DslColumn(
     public IReadOnlyList<object>? Values { get; init; }
 
     /// <summary>
+    /// パラメータと IN のリストにだけ使う値の候補（null なら <see cref="Values"/> と同じ）。行に入らない値（固定長のバイナリの列より長い値）で
+    /// 比べる形を作るときに持たせる
+    /// </summary>
+    public IReadOnlyList<object>? OperandValues { get; init; }
+
+    /// <summary>
+    /// 固定長のバイナリの列（宣言型 <c>binary(n)</c>）の長さ n（ほかの列は null。可変長の <c>varbinary(n)</c> は含まない）
+    /// </summary>
+    public int? FixedBinaryLength =>
+        Clr == DslClr.Binary
+        && DataType.StartsWith("binary(", StringComparison.OrdinalIgnoreCase)
+        && int.TryParse(
+            DataType.AsSpan(7, DataType.Length - 8),
+            System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out var length
+        )
+            ? length
+            : null;
+
+    /// <summary>
     /// 数のリテラルを負の値にしないか（値の池から選んだ負の値は符号を外す。乱数の引き方・行の値・パラメータの値は変えない）
     /// </summary>
     public bool NonNegativeLiterals { get; init; }
@@ -595,6 +616,12 @@ public enum DslBinaryRule
     /// 読み戻した値と比べる値の両方の末尾の 0x00 を外して比べる
     /// </summary>
     TrailingZerosIgnored,
+
+    /// <summary>
+    /// 固定長の列（<c>binary(n)</c>）とは、比べる値をその列へ保存したときの値（0x00 で詰める・超えた分が 0x00 だけなら切る）に直してから
+    /// バイトの列で比べ、可変長の列とはバイトの列のまま比べる（SQL Server の QuickER 版 Repository）。読み戻した値は詰めてある
+    /// </summary>
+    FixedLengthAsStored,
 }
 
 /// <summary>
@@ -813,11 +840,34 @@ public static class DslFuzz
     /// ほかの列と規則はそのまま）
     /// </summary>
     private static object? BinaryUnder(object? value, DslColumn column, DslBinaryRule rule) =>
-        rule == DslBinaryRule.TrailingZerosIgnored
-        && column.Clr == DslClr.Binary
-        && value is byte[] bytes
-            ? bytes.AsSpan().TrimEnd((byte)0).ToArray()
-            : value;
+        (rule, value, column.FixedBinaryLength) switch
+        {
+            (DslBinaryRule.TrailingZerosIgnored, byte[] bytes, _)
+                when column.Clr == DslClr.Binary => bytes.AsSpan().TrimEnd((byte)0).ToArray(),
+            (DslBinaryRule.FixedLengthAsStored, byte[] bytes, int length) => AsStored(
+                bytes,
+                length
+            ),
+            _ => value,
+        };
+
+    /// <summary>
+    /// 固定長のバイナリの列（<c>binary(n)</c>）へ保存したときの値（短い値は 0x00 で n バイトに詰め、超えた分が 0x00 だけの長い値は
+    /// n バイトに切る。ほかの長い値は保存できないのでそのまま＝長さが違うのでどの行とも等しくない）。docs のバイナリの段落の写し
+    /// </summary>
+    private static byte[] AsStored(byte[] bytes, int length)
+    {
+        if (bytes.Length < length)
+        {
+            var padded = new byte[length];
+            bytes.CopyTo(padded, 0);
+            return padded;
+        }
+
+        return bytes.Length > length && bytes.AsSpan(length).IndexOfAnyExcept((byte)0) < 0
+            ? bytes[..length]
+            : bytes;
+    }
 
     /// <summary>Oracle が NULL として持つ空の値か（空文字列と空のバイナリ）</summary>
     private static bool IsOracleEmpty(object? value) => value is "" or byte[] { Length: 0 };
@@ -1399,6 +1449,10 @@ public static class DslFuzz
     /// <summary>列の値の候補（列が値の池を持てばそれ、無ければ種類ごとの値の池）</summary>
     public static IReadOnlyList<object> ValuePool(DslColumn column) =>
         column.Values ?? ValuePool(column.Clr);
+
+    /// <summary>パラメータと IN のリストの値の候補（列がパラメータだけの値の池を持てばそれ、無ければ列の値の池）</summary>
+    public static IReadOnlyList<object> OperandPool(DslColumn column) =>
+        column.OperandValues ?? ValuePool(column);
 
     /// <summary>数値のリテラルの綴り</summary>
     public static string NumberText(object value) =>

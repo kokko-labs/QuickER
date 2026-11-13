@@ -149,6 +149,9 @@ public static class TranslatorParityPredicateRows
         byte[] bin01 = [0x01];
         byte[] bin0100 = [0x01, 0x00];
         byte[] bin01000000 = [0x01, 0x00, 0x00, 0x00];
+        byte[] bin0100000000 = [0x01, 0x00, 0x00, 0x00, 0x00];
+        byte[] bin0100000001 = [0x01, 0x00, 0x00, 0x00, 0x01];
+        List<byte[]?> shortBinaries = [new byte[] { 0x01 }, new byte[] { 0x01, 0x00 }];
         List<byte[]?> binaries = [new byte[] { 0x01 }, new byte[] { 0xFF }];
         List<byte[]?> binariesWithNull = [new byte[] { 0x01 }, null];
 
@@ -608,13 +611,33 @@ public static class TranslatorParityPredicateRows
             ),
             Probe(
                 "binary-fixed-equals-short-value",
-                "固定長の列（0x00 で詰めて持つ）と短い値の == は、詰めた値と違うのでどの行にも一致しない",
+                "固定長の列と短い値の == は、比べる値をその列へ保存したときの値（0x00 で詰めた値）に直して比べ、詰めた値が同じ行に一致する（詰めない実装先では長さまで同じ行）",
                 x => x.BinFixed == bin01
             ),
             Probe(
                 "binary-fixed-equals-padded-value",
                 "固定長の列と、詰めた長さの値の == は、詰めた値が同じ行に一致する",
                 x => x.BinFixed == bin01000000
+            ),
+            Probe(
+                "binary-fixed-equals-zero-excess-value",
+                "固定長の列と、列の長さを超えた分が 0x00 だけの値の == は、超えた分を切った値が同じ行に一致する（詰めない実装先では長さまで同じ行）",
+                x => x.BinFixed == bin0100000000
+            ),
+            Probe(
+                "binary-fixed-equals-overlong-value",
+                "固定長の列と、列の長さを超えた分が 0x00 でない値の == は、どの行にも一致しない",
+                x => x.BinFixed == bin0100000001
+            ),
+            Probe(
+                "binary-fixed-not-equals-overlong-value",
+                "固定長の列と、列の長さを超えた分が 0x00 でない値の != は、NULL の行を含む全行に一致する",
+                x => x.BinFixed != bin0100000001
+            ),
+            Probe(
+                "binary-fixed-in-short-values",
+                "固定長の列と短い値のリストの IN は、要素ごとに保存したときの値に直して比べる（詰めない実装先では長さまで同じ行）",
+                x => shortBinaries.Contains(x.BinFixed)
             ),
             Probe(
                 "binary-in-list",

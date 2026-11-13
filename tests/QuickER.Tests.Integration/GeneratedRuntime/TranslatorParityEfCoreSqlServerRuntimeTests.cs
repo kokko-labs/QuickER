@@ -44,7 +44,6 @@ public sealed class TranslatorParityEfCoreSqlServerRuntimeTests(SqlServerContain
         ["binary-equals-value"] = BinaryPadding,
         ["binary-not-equals-value"] = BinaryPadding,
         ["binary-equals-trailing-zero-value"] = BinaryPadding,
-        ["binary-fixed-equals-short-value"] = BinaryPadding,
         ["binary-in-list"] = BinaryPadding,
         ["binary-not-in-list"] = BinaryPadding,
         ["binary-in-list-with-null"] = BinaryPadding,
@@ -58,6 +57,10 @@ public sealed class TranslatorParityEfCoreSqlServerRuntimeTests(SqlServerContain
 
     /// <inheritdoc />
     protected override IReadOnlyDictionary<string, string> Known => KnownRows;
+
+    /// <inheritdoc />
+    protected override IReadOnlyDictionary<string, int>? FixedBinaryLengths =>
+        TranslatorParityRuntimeTestsBase.SqlServerFixedBinaryLengths;
 
     /// <inheritdoc />
     protected override async Task<ServiceProvider> CreateProviderAsync()

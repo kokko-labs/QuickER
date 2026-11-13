@@ -442,7 +442,7 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
 - 列の型の族（bool・バイナリ）は、既存の単位の列に足さず族の単位で流す（既存の単位の乱数の引き方と、種の指紋の要約の既存の行を変えないため）。
   - 種の単位は各方言の種の単位の列挙の末尾の `{方言}-families`・`{方言}-families-vo`、網羅の単位は `DslFuzzUnits.FamiliesCoverage`（`coverage-{方言}-families`・`-families-plain`）。列は bool（NULL 許容と NOT NULL）・可変長のバイナリ（NULL 許容と NOT NULL）・固定長のバイナリ（固定長を持たない PostgreSQL・Oracle は可変長）・相方の整数。
   - 形はパラメータとの `=`・`<>`・IN・NULL 判定だけ（DSL に真偽値・バイナリのリテラルが無く、順序比較は型の検査が断る＝`isValid`）。
-  - バイナリの値の池は末尾の 0x00 だけが違う組を持つ。オラクルは実装先ごとの `DslFuzzBackend.BinaryRule` で比べる（SQL Server の EF Core 版だけ両側の末尾の 0x00 を外して比べる＝docs の「大文字小文字・空白・日付部品」の節のバイナリの段落の既知の割り切り）。Oracle の空のバイナリは空文字列と同じ規則（`DslCaseRule.Oracle`）で、Oracle の NOT NULL のバイナリの列の値の池は空の配列を持たない。
+  - バイナリの値の池は末尾の 0x00 だけが違う組を持つ。オラクルは実装先ごとの `DslFuzzBackend.BinaryRule` で比べる（SQL Server の QuickER 版は固定長の列と比べる値をその列へ保存したときの値に直してから比べ、SQL Server の EF Core 版は両側の末尾の 0x00 を外して比べる＝docs の「大文字小文字・空白・日付部品」の節のバイナリの段落とその既知の割り切り）。固定長の列の比べる値の池（`DslColumn.OperandValues`）は、列の長さを超える値（超えた分が 0x00 だけの値とそうでない値）も持つ（行には書かない）。Oracle の空のバイナリは空文字列と同じ規則（`DslCaseRule.Oracle`）で、Oracle の NOT NULL のバイナリの列の値の池は空の配列を持たない。
   - 並び替えの列は bool も使い（false が先でどの DB も同じ）、バイナリは使わない（作らない形の宣言）。
 - パラメータの使い回し（次元表の因子 ParameterReuse・原子ごと）：同じパラメータを同じ列の原子どうし・同じ種類のほかの列・より広い種類のほかの列（int と bigint・decimal など）で使う形と、IN のリストを同じ列の IN と NOT IN・ほかの列の IN で使う形。型の検査が受け付ける組だけを作る（値オブジェクトの列どうしは型トークンで型付けしたパラメータか、値オブジェクトの型を共有する GuidKey の主キーと自己参照の外部キー）。水準は参照するパラメータ名・相手の列・パラメータの型とこの原子の列の種類から数える（`DslFuzzDimensions.ReuseOf`。同じ原子のインスタンスを 1 つのクエリに 2 回置かない）。
 - 並び替え（次元表の因子 Ordering・クエリごと）：並べない・主キーだけ・列 1 つの後に主キー・列 2 つの後に主キー。主キーより前の列は整数・decimal・日時に限り、最後に必ず主キーを置く（同点を作らない）。文字列の列では並べない（作らない形の宣言）。一覧も並べられる（`DslQuery.ListOrdered`）。EF Core（SQLite）は decimal の列での並び替えも `ExcludedOnEfCoreSqlite` で流さない。

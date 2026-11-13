@@ -136,7 +136,15 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
         DslFuzzBackends.Axis(
             DialectNames.SqlServer,
             [
-                Database(fixture, DslFuzzBackends.Ado, (probe, cs) => DslFuzzProbe.Ado(probe, cs)),
+                Database(
+                    fixture,
+                    DslFuzzBackends.Ado,
+                    (probe, cs) => DslFuzzProbe.Ado(probe, cs)
+                ) with
+                {
+                    // QuickER 版は固定長の列とは比べる値を保存したときの値に直してから長さまで比べる（docs のバイナリの段落）
+                    BinaryRule = DslBinaryRule.FixedLengthAsStored,
+                },
                 Database(
                     fixture,
                     DslFuzzBackends.EfCore,
