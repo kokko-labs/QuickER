@@ -638,10 +638,17 @@ Equality and `IN` on a binary (`byte[]`) column compare the bytes.
 The in-memory implementation does the same: it compares the contents of the arrays, not the references.
 SQL Server treats two values that differ only in trailing `0x00` bytes as equal, because it pads the shorter value with `0x00` before comparing.
 A fixed-length column (`binary(n)`) stores a value padded with `0x00` to `n` bytes and returns it padded.
-The QuickER Repository compares the lengths as well, so `0x01` and `0x0100` are different values, as they are to C# on the value read back.
+The QuickER Repository on SQL Server compares the lengths as well, so on a variable-length column `0x01` and `0x0100` are different values, as they are to C# on the value read back.
+Against a fixed-length column, it first turns the compared value into the value the column would store, then compares the lengths as well.
+A shorter value is padded with `0x00` to `n` bytes, and a longer value whose excess is only `0x00` bytes is cut to `n` bytes (`0x01` and `0x0100000000` compared with a `binary(4)` column both match a row holding `0x01000000`).
+A value whose excess holds a byte other than `0x00` cannot be stored in the column, so it equals no row.
 
-> **Known limitation**: the EF Core Repository on SQL Server keeps the SQL Server comparison and treats values that differ only in trailing `0x00` bytes as equal (`x.Data == value` with `value` holding `0x01` also matches a row holding `0x0100`).
+> **Known limitation**: the EF Core Repository on SQL Server keeps the SQL Server comparison and, on a variable-length column, treats values that differ only in trailing `0x00` bytes as equal (`x.Data == value` with `value` holding `0x01` also matches a row holding `0x0100`).
 > EF Core writes the comparison itself, and QuickER has no way to change the form of the SQL it emits.
+> A comparison with a fixed-length column gives the same answer as the QuickER Repository.
+
+> **Known limitation**: the EF Core Repository on MySQL stores a `binary(n)` value padded with `0x00`, but compares the compared value as written, byte for byte.
+> A shorter value written to a `binary(n)` column is therefore not found by the value written, only by the padded value (`0x01` written to a `binary(4)` column matches only a comparison with `0x01000000`).
 
 Oracle stores an empty binary value as `NULL`, as it does an empty string.
 A comparison with an empty `byte[]` compares with `NULL`: `x.Data != empty` matches no row, and an `IN` or `NOT IN` list holding an empty array behaves as if it held `NULL`.
@@ -1361,7 +1368,8 @@ They are worth knowing when a test passes in memory and fails against the real t
   A `decimal` with more fractional digits than its column is rounded to the column's scale, a half rounding away from zero (`1.245` in a `decimal(10,2)` column is stored as `1.25`).
   Fractional seconds beyond the scale of a `datetime2(n)`, `time(n)`, or `datetimeoffset(n)` column are rounded too, a half rounding up, and a `date` column keeps only the date of a `DateTime`.
   An `nchar(n)` value comes back padded with spaces to `n` characters.
-  A shorter value written to a `binary(n)` column comes back padded with `0x00` bytes to `n` bytes, and a key read with the shorter value or the padded one finds the same row (`0x09` in a `binary(4)` key reads back as `0x09000000`).
+  A shorter value written to a `binary(n)` column comes back padded with `0x00` bytes to `n` bytes (`0x09` in a `binary(4)` key reads back as `0x09000000`).
+  Keys and condition values are compared as the column would store them, so the shorter value and the padded one find the same row (the binary paragraph of "Letter case, whitespace, and date parts").
   A `varchar` or `char` column keeps the characters its code page can hold (code page 1252 under the default collation) and turns any other character into `?` or a similar character (`Ā` into `A`).
   The QuickER Repository and EF Core store the same value on every path, `BulkInsertAsync` included.
   A test that relies on such a value staying as written is not evidence about SQL Server.

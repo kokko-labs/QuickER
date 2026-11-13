@@ -2433,8 +2433,10 @@ internal sealed class ColumnNamingValueObjectConverter<TVo>(Type entityType, Pro
     /// SQL Server pads the shorter of two binary values with <c>0x00</c> before comparing, so <c>0x01 = 0x0100</c> holds, where C#,
     /// the in-memory backend, and the other databases compare the bytes. The lengths are compared as well (<c>DATALENGTH</c>); the
     /// equality on the column itself stays, so an index on the column can still be used. A value is bound in its variable-length
-    /// form: bound as <c>binary(n)</c>, it would be padded to <c>n</c> bytes and its length would no longer tell it apart. The null
-    /// compensation is the same as for any other <c>==</c> / <c>!=</c> (see <see cref="VisitComparison"/>).
+    /// form, so its length is its own; against a fixed-length <c>binary(n)</c> column the binding first turns it into the value
+    /// the column would store (padded with <c>0x00</c> to <c>n</c> bytes, or cut to <c>n</c> bytes when the excess is only
+    /// <c>0x00</c>), so it finds the row that writing it would have stored. The null compensation is the same as for any other
+    /// <c>==</c> / <c>!=</c> (see <see cref="VisitComparison"/>).
     /// </remarks>
     private static string? BinaryComparison(
         bool equal,

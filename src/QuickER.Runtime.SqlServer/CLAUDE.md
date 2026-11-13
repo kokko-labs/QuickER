@@ -88,8 +88,11 @@ SQL Server 方言エンジン（QuickER 版 Repository の ADO 実装）の固�
   - IN は要素ごとの等値の OR。NOT IN はその NOT（NULL でない列では要素の比較がどれも真か偽なので NOT で足りる）に、NULL の列の扱いをほかの型の IN と同じに付ける。
   - `col = @p` を残すので、列の索引は使える（長さの比較は絞った後の行に当てる）。
 - 比べる値は可変長（`varbinary`）で束縛する（`AddParameter` の `variableLength`。LIKE のパターンと同じ経路）。固定長の列の型（`binary(n)`）で束縛すると、パラメータが 0x00 で `n` バイトに詰められ、`DATALENGTH` も `n` になって長さの比較が効かない（実測：`binary(4)` で束縛した `0x01` は `0x01000000`・長さ 4）。
-- 外すと、`0x01` の条件が `0x0100`・`0x01000000` の行に当たり、C#・インメモリ・ほかの DB と答えが割れる。EF Core 版は SQL の形を変えられないので SQL Server の比べ方のまま（docs の既知の割り切り）。`Equals` のメソッドの形は対象にしない（ほかの型と同じく素の `a = b`。上の「式の翻訳」の範囲の外）。
-- ガード：簡易 DSL の総当たりの族の単位（`Dsl/SqlServer`）と、述語の表の行 `binary-*`（`table:TranslatorParityPredicates`。EF Core 版 SQL Server は理由つきの `Known`）。
+- 比べる相手が固定長の列（`[SqlColumnType]` が `SqlDbType.Binary` で長さあり）なら、束縛の前に値をその列へ保存したときの値へ直す（`_06_RemoteSaveInfraAndDI.scriban` の `AddQueryColumnParameter` → `AsStoredInFixedBinary`）：短い値は 0x00 で `n` バイトに詰め、超えた分が 0x00 だけの長い値は `n` バイトに切り（判定は SqlBulkCopy の値の切りと同じ `EntityDataReader.IsPaddingBeyond`）、ほかの長い値はそのまま（長さが違うのでどの行とも等しくない）。直すのは翻訳器の WHERE の値だけで、INSERT・UPDATE・生 SQL・LIKE の束縛は通らない。
+  - 外すと、`binary(n)` の列へ書いた短い値（キーを含む）が、書いた値では見つからない（列は詰めた値を持ち、長さの比較が詰めない値と食い違う）。
+  - EF Core 版は値を実際の長さの `varbinary` で送るので、SQL Server の比べ方（短い側を詰める）で同じ答えになる。MySQL の EF Core 版は詰めずに比べる（docs の既知の割り切り）。
+- 外すと、可変長の列で `0x01` の条件が `0x0100` の行に当たり、C#・インメモリ・ほかの DB と答えが割れる。EF Core 版は SQL の形を変えられないので、可変長の列では SQL Server の比べ方のまま（docs の既知の割り切り）。`Equals` のメソッドの形は対象にしない（ほかの型と同じく素の `a = b`。上の「式の翻訳」の範囲の外）。
+- ガード：簡易 DSL の総当たりの族の単位（`Dsl/SqlServer`。固定長の列の比べる値に列の長さを超える値を持つ）と、述語の表の行 `binary-*`（`table:TranslatorParityPredicates`。固定長の列の行 `binary-fixed-*`。EF Core 版 SQL Server は可変長の列の行だけ理由つきの `Known`）と、実装先どうしの一致のシナリオ `key-shape-binary-short-key-full`（`BackendParitySqlServerRuntimeTests`）。
 
 ## Save フックが書いた blob の版の読み直し
 

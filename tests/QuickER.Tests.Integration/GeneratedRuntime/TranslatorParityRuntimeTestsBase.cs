@@ -37,6 +37,18 @@ public abstract class TranslatorParityRuntimeTestsBase
     /// <summary>スキーマを作り直し（DB を持つ実装先だけ）、リポジトリを登録した DI コンテナを返す</summary>
     protected abstract Task<ServiceProvider> CreateProviderAsync();
 
+    /// <summary>
+    /// 固定長のバイナリの列（プロパティ名 → 長さ）。期待を作るとき、これらの列と比べる値をその列へ保存したときの値へ直す
+    /// （<see cref="ComparingBytes"/>。SQL Server の派生だけが持つ）
+    /// </summary>
+    protected virtual IReadOnlyDictionary<string, int>? FixedBinaryLengths => null;
+
+    /// <summary>
+    /// SQL Server の図の固定長のバイナリの列（<c>bin_fixed</c> は <c>binary(4)</c>＝<see cref="TranslatorParityFixtureDefinition"/>）
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, int> SqlServerFixedBinaryLengths =
+        new Dictionary<string, int>(StringComparer.Ordinal) { ["BinFixed"] = 4 };
+
     /// <summary>実装先を初期化し、probes のシードを投入する。各テストの先頭で呼ぶ</summary>
     protected async Task SetUpAsync()
     {
@@ -175,7 +187,8 @@ public abstract class TranslatorParityRuntimeTestsBase
             Repository<IProbeRepository>(),
             predicate,
             p => p.ProbeId,
-            SeedProbes().Count
+            SeedProbes().Count,
+            FixedBinaryLengths
         );
 
     /// <summary>
@@ -186,7 +199,8 @@ public abstract class TranslatorParityRuntimeTestsBase
         IRepository<TEntity, TKey> repository,
         Expression<Func<TEntity, bool>> predicate,
         Func<TEntity, long> key,
-        int seeded
+        int seeded,
+        IReadOnlyDictionary<string, int>? fixedBinaryLengths = null
     )
         where TEntity : EntityBaseCore, new()
     {
@@ -194,7 +208,11 @@ public abstract class TranslatorParityRuntimeTestsBase
         stored.Should().HaveCount(seeded);
 
         var expected = stored
-            .Where(((Expression<Func<TEntity, bool>>)ComparingBytes(predicate)).Compile())
+            .Where(
+                (
+                    (Expression<Func<TEntity, bool>>)ComparingBytes(predicate, fixedBinaryLengths)
+                ).Compile()
+            )
             .Select(key)
             .ToList();
 
@@ -216,8 +234,14 @@ public abstract class TranslatorParityRuntimeTestsBase
     /// 期待にする。
     /// </remarks>
     /// <param name="predicate">述語</param>
-    internal static LambdaExpression ComparingBytes(LambdaExpression predicate) =>
-        (LambdaExpression)new ByteComparisonRewriter().Visit(predicate);
+    /// <param name="fixedBinaryLengths">
+    /// 固定長のバイナリの列（プロパティ名 → 長さ）。その列と比べる値は、その列へ保存したときの値（<see cref="AsStoredInFixedBinary"/>）へ
+    /// 直してから比べる（docs のバイナリの段落の SQL Server の固定長の列の規則）。列どうしの比較は直さない
+    /// </param>
+    internal static LambdaExpression ComparingBytes(
+        LambdaExpression predicate,
+        IReadOnlyDictionary<string, int>? fixedBinaryLengths = null
+    ) => (LambdaExpression)new ByteComparisonRewriter(fixedBinaryLengths).Visit(predicate);
 
     /// <summary>2 つのバイナリがバイトの列で等しいか（NULL どうしは等しく、片方だけの NULL は等しくない）</summary>
     private static bool SameBytes(byte[]? left, byte[]? right) =>
@@ -227,9 +251,63 @@ public abstract class TranslatorParityRuntimeTestsBase
     private static bool ContainsBytes(IEnumerable<byte[]?> values, byte[]? value) =>
         values.Any(item => SameBytes(item, value));
 
-    /// <summary><see cref="ComparingBytes"/> の書き換え</summary>
-    private sealed class ByteComparisonRewriter : ExpressionVisitor
+    /// <summary>並びの要素をそれぞれ固定長の列へ保存したときの値に直したとき、バイトの列で等しいバイナリがあるか</summary>
+    private static bool ContainsBytesAsStored(
+        IEnumerable<byte[]?> values,
+        byte[]? value,
+        int length
+    ) => values.Any(item => SameBytes(AsStoredInFixedBinary(item, length), value));
+
+    /// <summary>
+    /// 固定長のバイナリの列（<c>binary(n)</c>）へ保存したときの値：短い値は 0x00 で n バイトに詰め、超えた分が 0x00 だけの長い値は
+    /// n バイトに切る。ほかの長い値は保存できないのでそのまま（長さが違うのでどの行とも等しくない）。docs のバイナリの段落の写し
+    /// </summary>
+    private static byte[]? AsStoredInFixedBinary(byte[]? value, int length)
     {
+        if (value is null)
+        {
+            return null;
+        }
+
+        if (value.Length < length)
+        {
+            var padded = new byte[length];
+            value.CopyTo(padded, 0);
+            return padded;
+        }
+
+        return value.Length > length && value.AsSpan(length).IndexOfAnyExcept((byte)0) < 0
+            ? value[..length]
+            : value;
+    }
+
+    /// <summary><see cref="ComparingBytes"/> の書き換え</summary>
+    private sealed class ByteComparisonRewriter(
+        IReadOnlyDictionary<string, int>? fixedBinaryLengths
+    ) : ExpressionVisitor
+    {
+        /// <summary>式が固定長のバイナリの列（述語の引数のプロパティ）なら、その長さ</summary>
+        private int? FixedLengthOf(Expression expression) =>
+            expression is MemberExpression { Expression: ParameterExpression } member
+            && fixedBinaryLengths?.TryGetValue(member.Member.Name, out var length) == true
+                ? length
+                : null;
+
+        /// <summary>値の側を、相手が固定長の列なら、その列へ保存したときの値へ直す式（列どうしは直さない）</summary>
+        private Expression AsStored(Expression value, Expression other) =>
+            FixedLengthOf(other) is int length
+            && value is not MemberExpression { Expression: ParameterExpression }
+                ? Expression.Call(
+                    typeof(TranslatorParityRuntimeTestsBase).GetMethod(
+                        nameof(AsStoredInFixedBinary),
+                        System.Reflection.BindingFlags.NonPublic
+                            | System.Reflection.BindingFlags.Static
+                    )!,
+                    Visit(value),
+                    Expression.Constant(length)
+                )
+                : Visit(value);
+
         protected override Expression VisitBinary(BinaryExpression node)
         {
             if (
@@ -244,8 +322,8 @@ public abstract class TranslatorParityRuntimeTestsBase
                         System.Reflection.BindingFlags.NonPublic
                             | System.Reflection.BindingFlags.Static
                     )!,
-                    Visit(node.Left),
-                    Visit(node.Right)
+                    AsStored(node.Left, node.Right),
+                    AsStored(node.Right, node.Left)
                 );
 
                 return node.NodeType == ExpressionType.Equal ? same : Expression.Not(same);
@@ -276,6 +354,20 @@ public abstract class TranslatorParityRuntimeTestsBase
                 && typeof(IEnumerable<byte[]?>).IsAssignableFrom(source.Type)
             )
             {
+                if (FixedLengthOf(value) is int length)
+                {
+                    return Expression.Call(
+                        typeof(TranslatorParityRuntimeTestsBase).GetMethod(
+                            nameof(ContainsBytesAsStored),
+                            System.Reflection.BindingFlags.NonPublic
+                                | System.Reflection.BindingFlags.Static
+                        )!,
+                        Visit(source),
+                        Visit(value),
+                        Expression.Constant(length)
+                    );
+                }
+
                 return Expression.Call(
                     typeof(TranslatorParityRuntimeTestsBase).GetMethod(
                         nameof(ContainsBytes),

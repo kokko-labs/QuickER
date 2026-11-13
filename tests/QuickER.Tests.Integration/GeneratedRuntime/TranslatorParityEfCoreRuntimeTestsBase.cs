@@ -70,6 +70,12 @@ public abstract class TranslatorParityEfCoreRuntimeTestsBase
     /// <param name="value">翻訳器の一致のフィクスチャのシードの値</param>
     protected virtual object? SeedValue(PropertyInfo target, object? value) => value;
 
+    /// <summary>
+    /// 固定長のバイナリの列（プロパティ名 → 長さ）。期待を作るとき、これらの列と比べる値をその列へ保存したときの値へ直す
+    /// （<see cref="TranslatorParityRuntimeTestsBase.ComparingBytes"/>。SQL Server の派生だけが持つ）
+    /// </summary>
+    protected virtual IReadOnlyDictionary<string, int>? FixedBinaryLengths => null;
+
     /// <summary>宣言した行が表に実在し、割れる行と流せない行が重ならないことを表明する（行の改名で宣言が黙って効かなくなるのを防ぐ）</summary>
     [Fact(DisplayName = "[翻訳パリティ/EF Core] 割れる・流せないと宣言した行は述語の表に実在する")]
     public void Known_NamesExistingRows()
@@ -237,7 +243,9 @@ public abstract class TranslatorParityEfCoreRuntimeTestsBase
         stored.Should().HaveCount(count);
 
         // バイナリは docs のとおりバイトの列で比べる（TranslatorParityRuntimeTestsBase.ComparingBytes）
-        var compiled = TranslatorParityRuntimeTestsBase.ComparingBytes(predicate).Compile();
+        var compiled = TranslatorParityRuntimeTestsBase
+            .ComparingBytes(predicate, FixedBinaryLengths)
+            .Compile();
         var expected = stored.Where(e => (bool)compiled.DynamicInvoke(e)!).Select(KeyOf).ToList();
         var actual = (await TranslatorParityEfCoreBinding.QueryAsync(repository, predicate, Ct))
             .Select(KeyOf)

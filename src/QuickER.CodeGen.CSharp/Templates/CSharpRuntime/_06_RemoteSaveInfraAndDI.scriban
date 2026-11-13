@@ -3155,6 +3155,12 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             static p => p.GetCustomAttribute<SqlColumnTypeAttribute>()
         );
 
+        // A binary value compared with a fixed-length column (binary(n)) is compared as that column stores it (see AsStoredInFixedBinary)
+        if (variableLength && attribute is { DbType: SqlDbType.Binary, Size: > 0 } && rawValue is byte[] bytes)
+        {
+            rawValue = AsStoredInFixedBinary(bytes, attribute.Size);
+        }
+
         if (attribute is null || rawValue is null || QueryValueFits(attribute, rawValue))
         {
             AddColumnParameter(command, name, property, rawValue, variableLength);
@@ -3182,6 +3188,30 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         }
 
         command.Parameters.AddWithValue(name, rawValue);
+    }
+
+    /// <summary>
+    /// A binary value as a fixed-length binary(n) column stores it: a shorter value padded with 0x00 to n bytes, and a longer
+    /// value cut to n bytes when its excess is only 0x00 bytes.
+    /// </summary>
+    /// <remarks>
+    /// Only the WHERE values of the translator's binary comparisons come here: they are bound in their variable-length form and
+    /// their lengths are compared too, so a value is first turned into the form the column holds, and finds the row that writing
+    /// the same value would have stored. A longer value with any other excess cannot be stored and is left as it is: its length
+    /// differs from every stored value, so it equals no row.
+    /// </remarks>
+    private static byte[] AsStoredInFixedBinary(byte[] bytes, int size)
+    {
+        if (bytes.Length < size)
+        {
+            var padded = new byte[size];
+            bytes.CopyTo(padded, 0);
+            return padded;
+        }
+
+        return bytes.Length > size && EntityDataReader.IsPaddingBeyond(bytes, size)
+            ? bytes[..size]
+            : bytes;
     }
 
     /// <summary>Whether a non-null value keeps its meaning when bound with the column's SQL type.</summary>
@@ -3457,8 +3487,8 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             return true;
         }
 
-        /// <summary>Whether every byte from <paramref name="length"/> on is 0x00.</summary>
-        private static bool IsPaddingBeyond(byte[] bytes, int length)
+        /// <summary>Whether every byte from <paramref name="length"/> on is 0x00 (shared with the query binding's AsStoredInFixedBinary).</summary>
+        internal static bool IsPaddingBeyond(byte[] bytes, int length)
         {
             for (var index = length; index < bytes.Length; index++)
             {

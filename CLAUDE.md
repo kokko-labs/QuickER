@@ -308,7 +308,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **版は `OUTPUT INSERTED` で回収し `RowVersionCollector` がコミット後に適用する**：ロールバック時に幻の版が残る。ガード：`SqlServerConcurrencyRuntimeTests`。→ `src/QuickER.Runtime.SqlServer/CLAUDE.md`「行バージョンの OUTPUT と版の回収」
 - **Include の無い取得は FOR JSON でなく `MaterializeRootsAsync` で読む。Include のある取得の float / real は `CONVERT(…, 3)` で書き、NULL は resolver modifier で既定値へ戻す**：FOR JSON は float を 16 桁に丸め NULL をキーごと落とし、`GetAllAsync` と値が食い違う。ガード：`SqlServerPlainQueryRuntimeTests`。→ `src/QuickER.Runtime.SqlServer/CLAUDE.md`「Include の無い取得と FOR JSON」
 - **空・空白は `DATALENGTH` と `NOT LIKE` で判定し、LIKE パターンは可変長形で束縛する**：`= ''` が末尾の空白を無視し、固定長で束縛するとパターンが空白で詰められる。ガード：`TranslatorParitySqlServerRuntimeTests`。→ `src/QuickER.Runtime.SqlServer/CLAUDE.md`「式の翻訳（SQL Server）」
-- **バイナリの `==`・`!=`・IN は長さ（`DATALENGTH`）も比べて翻訳し、比べる値を可変長（`varbinary`）で束縛する**：SQL Server は末尾の 0x00 だけ違う値を等しいとみなすので、外すと `0x01` の条件が `0x0100` の行に当たる。固定長の型で束縛すると値が 0x00 で詰められて長さの比較が効かない。ガード：`Dsl/SqlServer`・`table:TranslatorParityPredicates`（行 `binary-*`）。→ `src/QuickER.Runtime.SqlServer/CLAUDE.md`「バイナリの比較」
+- **バイナリの `==`・`!=`・IN は長さ（`DATALENGTH`）も比べて翻訳し、比べる値を可変長（`varbinary`）で束縛する。固定長の列（`binary(n)`）と比べる値は、束縛の前にその列へ保存したときの値（0x00 で詰める・超えた分が 0x00 だけなら切る）へ直す**：SQL Server は末尾の 0x00 だけ違う値を等しいとみなすので、外すと `0x01` の条件が `0x0100` の行に当たる。固定長の型で束縛すると値が 0x00 で詰められて長さの比較が効かない。保存したときの値へ直さないと、`binary(n)` の列へ書いた短い値（キーを含む）が書いた値で見つからない。ガード：`Dsl/SqlServer`・`table:TranslatorParityPredicates`（行 `binary-*`・`binary-fixed-*`）・`BackendParitySqlServerRuntimeTests`（ケース `key-shape-binary-short-key-full`）。→ `src/QuickER.Runtime.SqlServer/CLAUDE.md`「バイナリの比較」
 
 ### SQLite
 

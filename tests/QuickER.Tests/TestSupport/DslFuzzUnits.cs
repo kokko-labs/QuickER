@@ -587,7 +587,16 @@ public static class DslFuzzUnits
             new("b", boolean, DslClr.Boolean, Nullable: true),
             new("bn", boolean, DslClr.Boolean, Nullable: false),
             new("bin", varbinary, DslClr.Binary, Nullable: true),
-            new("binf", fixedBinary, DslClr.Binary, Nullable: true),
+            new("binf", fixedBinary, DslClr.Binary, Nullable: true)
+            {
+                // 比べる値には列の長さを超える値も使う（超えた分が 0x00 だけの値と、そうでない値。どちらも行には書かない）
+                OperandValues =
+                [
+                    .. DslFuzz.ValuePool(DslClr.Binary),
+                    new byte[] { 0x01, 0x00, 0x00, 0x00, 0x00 },
+                    new byte[] { 0x01, 0x00, 0x00, 0x00, 0x01 },
+                ],
+            },
             dbms == DialectNames.Oracle
                 ? new("binn", varbinary, DslClr.Binary, Nullable: false)
                 {
