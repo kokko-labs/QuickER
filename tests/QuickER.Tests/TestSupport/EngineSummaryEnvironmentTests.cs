@@ -1,3 +1,4 @@
+using AwesomeAssertions;
 using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.TestSupport;
@@ -35,6 +36,93 @@ public sealed class EngineSummaryEnvironmentTests
             SummaryEnvironmentGuard.FirstSeeds(SeedsOf(engineId)),
             SummaryOf(engineId)
         );
+
+    /// <summary>時差のガードの自己検査の行（行 Id → 要約・赤になるか）</summary>
+    private static readonly Dictionary<string, (Func<string> Summary, bool Red)> OffsetProbes = new(
+        StringComparer.Ordinal
+    )
+    {
+        // 負の TimeSpan は符号と時・分の並びを持つが、時差ではない
+        ["timespan-negative-tick"] = (
+            () => "t=" + SeedSummary.Object(TimeSpan.FromTicks(-10)),
+            false
+        ),
+        ["timespan-negative-list"] = (
+            () =>
+                SeedSummary.Object(
+                    new List<object?>
+                    {
+                        TimeSpan.Zero,
+                        TimeSpan.FromHours(-1),
+                        -new TimeSpan(34, 22, 59, 59),
+                    }
+                ),
+            false
+        ),
+        ["datetime-utc"] = (
+            () => SeedSummary.Object(new DateTime(2026, 2, 1, 8, 0, 0, DateTimeKind.Utc)),
+            false
+        ),
+        ["datetime-local-written-by-summary"] = (
+            () => SeedSummary.Object(new DateTime(2026, 2, 1, 8, 0, 0, DateTimeKind.Local)),
+            false
+        ),
+        // 往復の書式で書いた Local の日時は機械の時差を持つ（時差 0 の機械でも +00:00）
+        ["datetime-local-round-trip"] = (
+            () =>
+                "at="
+                + new DateTime(2026, 2, 1, 8, 0, 0, DateTimeKind.Local).ToString(
+                    "o",
+                    System.Globalization.CultureInfo.InvariantCulture
+                ),
+            true
+        ),
+        ["datetime-local-round-trip-without-fraction"] = (
+            () =>
+                "at="
+                + new DateTime(2026, 2, 1, 8, 0, 0, DateTimeKind.Local).ToString(
+                    "yyyy-MM-ddTHH:mm:sszzz",
+                    System.Globalization.CultureInfo.InvariantCulture
+                ),
+            true
+        ),
+        ["datetimeoffset-plus-nine"] = (
+            () =>
+                SeedSummary.Object(new DateTimeOffset(2026, 2, 1, 8, 0, 0, TimeSpan.FromHours(9))),
+            true
+        ),
+        ["datetimeoffset-minus-five"] = (
+            () =>
+                SeedSummary.Object(new DateTimeOffset(2026, 2, 1, 8, 0, 0, TimeSpan.FromHours(-5))),
+            true
+        ),
+    };
+
+    /// <summary>時差のガードの自己検査の行 Id</summary>
+    public static TheoryData<string> OffsetProbeIds() => [.. OffsetProbes.Keys];
+
+    /// <remarks>
+    /// 時差の形は日時の秒・小数秒の直後だけを見る。負の TimeSpan（簡易 DSL の TimeSpan の値の池）を時差と取り違えず、
+    /// 往復の書式の Local の日時と DateTimeOffset の時差は名指しする。
+    /// </remarks>
+    [Theory(
+        DisplayName = "[指紋] 時差のガードは日時の時差だけを名指しし、負の TimeSpan を時差としない"
+    )]
+    [MemberData(nameof(OffsetProbeIds))]
+    public void UtcOffsetGuard_FlagsOnlyOffsetsOfDates(string id)
+    {
+        var (summary, red) = OffsetProbes[id];
+        var check = () => SummaryEnvironmentGuard.AssertNoUtcOffset(id, [1], _ => summary());
+
+        if (red)
+        {
+            check.Should().Throw<Xunit.Sdk.XunitException>().WithMessage("*時差の形*");
+        }
+        else
+        {
+            check.Should().NotThrow();
+        }
+    }
 
     private static Func<int, string> SummaryOf(string engineId) =>
         engineId switch

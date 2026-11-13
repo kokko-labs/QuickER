@@ -28,9 +28,15 @@ public static class SummaryEnvironmentGuard
     /// <summary>外側に切り替えるカルチャ（記録を作る機械と CI の言語）</summary>
     public static IReadOnlyList<string> OuterCultures { get; } = ["ja-JP", "en-US"];
 
-    /// <summary>時差の形（<c>+09:00</c> など）</summary>
+    /// <summary>
+    /// 日時の後ろに付く時差の形（時刻の秒・小数秒の直後の <c>+09:00</c> など）
+    /// </summary>
+    /// <remarks>
+    /// 時刻の直後に限るのは、負の TimeSpan（<c>TimeSpan:-00:00:00.0000010</c>）が符号と時・分の並びだけで時差の形に見えるため。
+    /// 往復の書式の日時（<c>2026-02-01T08:00:00.7654321+09:00</c>）と DateTimeOffset は、時差を必ず秒か小数秒の直後に書く。
+    /// </remarks>
     private static readonly Regex UtcOffset = new(
-        @"[+-][0-9][0-9]:[0-9][0-9]",
+        @"[0-9][0-9]:[0-9][0-9]:[0-9][0-9](?:\.[0-9]+)?[+-][0-9][0-9]:[0-9][0-9]",
         RegexOptions.CultureInvariant
     );
 
