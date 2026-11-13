@@ -83,15 +83,16 @@ public abstract class TranslatorParityEfCoreRuntimeTestsBase
         var ids = TranslatorParityPredicateRows.Table.Select(row => row.Id).ToHashSet();
         Known.Keys.Concat(NotApplicable.Keys).Where(id => !ids.Contains(id)).Should().BeEmpty();
         Known.Keys.Intersect(NotApplicable.Keys).Should().BeEmpty();
-        KnownParameterOverflows.Where(id => !Known.ContainsKey(id)).Should().BeEmpty();
+        KnownParameterRefusals.Keys.Where(id => !Known.ContainsKey(id)).Should().BeEmpty();
     }
 
     /// <summary>
-    /// <see cref="Known"/> のうち、ドライバがパラメータの値を型の範囲の外として <see cref="OverflowException"/> で断って割れる行
-    /// （既定は無し。ほかの Known の行は DB の例外か翻訳の失敗でだけ割れたとみなす）
+    /// <see cref="Known"/> のうち、ドライバがパラメータの値を送れないとして断って割れる行と、断るときの例外の型（既定は無し。ほかの Known の
+    /// 行は DB の例外か翻訳の失敗でだけ割れたとみなす）。例：SqlClient が time の範囲の外の TimeSpan を <see cref="OverflowException"/> で、
+    /// Npgsql が時差 0 でない DateTimeOffset を <see cref="ArgumentException"/> で断る
     /// </summary>
-    protected virtual IReadOnlySet<string> KnownParameterOverflows { get; } =
-        new HashSet<string>(StringComparer.Ordinal);
+    protected virtual IReadOnlyDictionary<string, Type> KnownParameterRefusals { get; } =
+        new Dictionary<string, Type>(StringComparer.Ordinal);
 
     /// <summary>流せないと宣言した行が、生成物へ付け替えられない行とちょうど同じことを表明する</summary>
     [Fact(
@@ -141,12 +142,15 @@ public abstract class TranslatorParityEfCoreRuntimeTestsBase
             when (Known.ContainsKey(id)
                 && (
                     exception is DbException or InvalidOperationException
-                    || (exception is OverflowException && KnownParameterOverflows.Contains(id))
+                    || (
+                        KnownParameterRefusals.TryGetValue(id, out var refusal)
+                        && refusal.IsInstanceOfType(exception)
+                    )
                 )
             )
         {
-            // 宣言した行が DB の例外か翻訳の失敗で割れた。OverflowException（ドライバがパラメータの値を型の範囲の外として断る）は
-            // KnownParameterOverflows に載せた行だけ（ほかの Known の行の桁あふれを黙って通さない）。C# は例外にしない
+            // 宣言した行が DB の例外か翻訳の失敗で割れた。ドライバがパラメータの値を断る例外（OverflowException・ArgumentException）は
+            // KnownParameterRefusals に載せた行の、載せた型だけ（ほかの Known の行の桁あふれや引数の誤りを黙って通さない）。C# は例外にしない
             TestContext.Current.TestOutputHelper?.WriteLine(
                 $"行 {id} は宣言どおり割れた: {exception.Message}"
             );

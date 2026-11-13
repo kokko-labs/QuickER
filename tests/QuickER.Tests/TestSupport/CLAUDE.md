@@ -29,7 +29,7 @@
   - `CoverageGuard`：`AtLeast` / `ContainsAll`。黙った空振りを止める。
   - `SeedFingerprint` / `FingerprintFile`：種ごとの生成器の入力の要約の指紋の記録と照合。
     照合は、普段の既定の種の数なら全数・夜間の既定の種の数なら記録にある種の全部・個別の指定なら重なりだけ。書き直しは普段の既定の種の数のときだけ。
-  - `SeedSummary`：要約の書き方。値は型名つき・インバリアント、文字列は引用して ASCII 以外を `\uXXXX`、日時は往復の書式、バイト列は 16 進、一覧は要素を展開、オブジェクトは公開プロパティを名前の序数順に展開する。
+  - `SeedSummary`：要約の書き方。値は型名つき・インバリアント、文字列は引用して ASCII 以外を `\uXXXX`、日時は往復の書式（DateTimeOffset は時差なしの時刻と `@` の後の時差＝`2024-01-01T12:00:00.0000000@+09:00`。時刻の直後に時差を書くと時差のガードが機械の時差と見分けられない）、バイト列は 16 進、一覧は要素を展開、オブジェクトは公開プロパティを名前の序数順に展開する。
     Kind が Local の日時は、機械の時差を付けず `DateTime:Local:` と時差なしの時刻を書く。読むだけで乱数を引かない。
 - ガード：TestSupport 直下の `SeedSourceTests` / `KnownFailureSetTests` / `KnownCaseLedgerTests` / `EngineReportTests` / `CoverageGuardTests` / `SeedFingerprintTests`。mutation 実証済み。
 
@@ -259,7 +259,7 @@
 - 指紋の要約は機械の環境に依らない：記録は日本語・日本時間の機械で作り、CI は英語・UTC で動く。両アセンブリの指紋のドリフトテストは `SeedFingerprint.Compute` を通し、要約を `SeedSummary.UnderInvariantCulture`（要約を作る間だけ CurrentCulture と CurrentUICulture をインバリアントにする）の中で作る。差分の説明のような resx の文が入っても言語で変わらない。
 - ガード：両アセンブリの `EngineSummaryEnvironmentTests`（共有の部品は `SummaryEnvironmentGuard`）。ドリフトテストのクラスに置かない（`CultureInvariantGenerationTests` がドリフトテストのクラスの引数の無いテストを流し直すため）。
   - `Summary_DoesNotDependOnCulture`：全エンジンの先頭 10 種の要約を、外側のカルチャを ja-JP と en-US に切り替えて作り、一致を表明する。切り替わったカルチャの名前も表明する（ICU の無い環境で比べたつもりにならない）。
-  - `Summary_HasNoUtcOffset`：要約に日時の時差（時刻の秒・小数秒の直後の `[+-]hh:mm`）が無い。タイムゾーンはプロセスの中で切り替えられないので、赤になるのは時差のある機械だけ。時刻の直後に限るのは、負の TimeSpan（`TimeSpan:-00:00:00.0000010`）を時差と取り違えないため。自己検査は `EngineSummaryEnvironmentTests.UtcOffsetGuard_FlagsOnlyOffsetsOfDates`（負の TimeSpan は通し、往復の書式の Local の日時と DateTimeOffset の時差は名指しする）。
+  - `Summary_HasNoUtcOffset`：要約に日時の時差（時刻の秒・小数秒の直後の `[+-]hh:mm`）が無い。タイムゾーンはプロセスの中で切り替えられないので、赤になるのは時差のある機械だけ。時刻の直後に限るのは、負の TimeSpan（`TimeSpan:-00:00:00.0000010`）を時差と取り違えないため。自己検査は `EngineSummaryEnvironmentTests.UtcOffsetGuard_FlagsOnlyOffsetsOfDates`（負の TimeSpan と要約が書いた DateTimeOffset は通し、往復の書式の Local の日時と DateTimeOffset の時差は名指しする）。
   - `SeedFingerprintTests` の Local の日時と `UnderInvariantCulture` の 2 件。
   - mutation 実証済み。
 
@@ -458,8 +458,13 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
   - 形はパラメータとの比較（順序比較を含む）・IN・NULL 判定（DSL に TimeSpan のリテラルは無い＝`isValid`）。並び替えの列にも使う。
   - 値の池は docs の TimeSpan の既知の割り切りの写し：SQLite・SQL Server は日の中（0〜24 時間未満・100 ナノ秒の端数も）、PostgreSQL の `time` の列は日の中（比べる値も）、PostgreSQL の `interval` の列は負の値・1 日超の値と比べる値に範囲の外の値、MySQL は ±838:59:59 の中の負の値・1 日超の値。PostgreSQL・MySQL の値はマイクロ秒の粒度。
   - 列の型の範囲（`DslColumn.TimeRange`）の外の値は次元表の因子 ValueFit の beyond-range に数える。範囲の外の値と比べる形は、SQL Server の QuickER 版だけで流す網羅の単位 `DslFuzzUnits.SqlServerOutOfDayCoverage`（`coverage-sqlserver-timespan-out-of-day`・原子 `KT*` と合成 `KX*`）が作る（SQL Server の EF Core 版は範囲の外の値を送れず例外にする）。
-  - EF Core（SQLite）は TimeSpan の列の順序比較と並び替えを流さない（`ExcludedOnEfCoreSqlite`）。SQLite の網羅の単位は、それを作らない単位（生成器の `TimeSpanOrdered` を偽にする）を 3 実装先で、作る単位 `coverage-sqlite-timespan-ordered{,-plain}` を QuickER 版とインメモリで流す。
+  - EF Core（SQLite）は TimeSpan の列の順序比較と並び替えを流さない（`ExcludedOnEfCoreSqlite`）。SQLite の網羅の単位は、それを作らない単位（生成器の `UnorderedClrs` に TimeSpan を入れる）を 3 実装先で、作る単位 `coverage-sqlite-timespan-ordered{,-plain}` を QuickER 版とインメモリで流す。
   - オラクルは C# の TimeSpan の比較（`CompareValues`）だけで、方言ごとの割り切りは値の池で表す。
+- DateTimeOffset の列も既存の単位の列に足さず、SQLite・SQL Server・PostgreSQL・Oracle の種の単位の列挙の末尾の `{方言}-datetimeoffset`・`{方言}-datetimeoffset-vo` と、網羅の単位 `DslFuzzUnits.DateTimeOffsetCoverage`（`coverage-{方言}-datetimeoffset`・`-datetimeoffset-plain`）で流す。MySQL は DateTimeOffset へ写す型を持たず、PostgreSQL の timetz は瞬間で比べないので作らない（作らない形の宣言）。
+  - 形は TimeSpan と同じ（パラメータとの比較・順序比較・IN・NULL 判定・並び替え）。オラクルは C# の DateTimeOffset の比較（瞬間）だけで、方言ごとの割り切りは値の池で表す：SQL Server・Oracle は時差の混ざった値（同じ瞬間の別の時差・局所の時刻の順と瞬間の順が逆の組・端。SQL Server は 100 ナノ秒の端数も）、SQLite は時差をそろえた値（TEXT で持ち、同じ時差の値どうしでだけ瞬間の順と一致する）、PostgreSQL は時差 0 の値（timestamptz は Npgsql が時差 0 でない値を断る）。
+  - SQL Server の NULL 許容の列は `datetimeoffset(2)` で、比べる値に列の桁より細かい値を持つ（`DslColumn.FractionalScale`＝次元表の因子 ValueFit の beyond-scale）。
+  - EF Core（SQLite）は順序比較と並び替えを流さない（`ExcludedOnEfCoreSqlite`）。SQLite の網羅の単位は TimeSpan と同じく、作らない単位を 3 実装先で、作る単位 `coverage-sqlite-datetimeoffset-ordered{,-plain}` を QuickER 版とインメモリで流す。
+  - DateTime と DateTimeOffset の混在（型の検査が断る）：単位は NOT NULL の DateTime の列 `dt` を相方に持ち、DateTimeOffset の列と `dt` に `DslColumn.ProbesDateTimeMix` を立てる。生成器はその列にだけ、もう一方の型の型トークンのパラメータとの等値・順序比較と、値の並ぶリストの IN を、断られる原子のクエリとして作る（形 `compare-*-param-rejected`・`in-rejected`。警告で飛ばされることを表明する）。
 - パラメータの使い回し（次元表の因子 ParameterReuse・原子ごと）：同じパラメータを同じ列の原子どうし・同じ種類のほかの列・より広い種類のほかの列（int と bigint・decimal など）で使う形と、IN のリストを同じ列の IN と NOT IN・ほかの列の IN で使う形。型の検査が受け付ける組だけを作る（値オブジェクトの列どうしは型トークンで型付けしたパラメータか、値オブジェクトの型を共有する GuidKey の主キーと自己参照の外部キー）。水準は参照するパラメータ名・相手の列・パラメータの型とこの原子の列の種類から数える（`DslFuzzDimensions.ReuseOf`。同じ原子のインスタンスを 1 つのクエリに 2 回置かない）。
 - 並び替え（次元表の因子 Ordering・クエリごと）：並べない・主キーだけ・列 1 つの後に主キー・列 2 つの後に主キー。主キーより前の列は整数・decimal・日時に限り、最後に必ず主キーを置く（同点を作らない）。文字列の列では並べない（作らない形の宣言）。一覧も並べられる（`DslQuery.ListOrdered`）。EF Core（SQLite）は decimal の列での並び替えも `ExcludedOnEfCoreSqlite` で流さない。
   - 照合は「追加の列 → 主キー」の並びで期待を決める。単一は並びで最初に真になる行、射影と並べる一覧は返した行を同じ並びで並べ直した順との一致。NULL の位置は実装先ごとの宣言 `DslFuzzBackend.NullOrder`（docs のインメモリの節「実 DB との既知の乖離」の写し。PostgreSQL・Oracle の EF Core 版は昇順で末尾、ほかの実装先は昇順で先頭）。
@@ -472,7 +477,7 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
   - bigint の列と decimal のパラメータ：NULL を許す bigint の列と、decimal の型トークン（`decimal(18,6)`・`decimal(38,6)`・`decimal(18,2)`）のパラメータの比較を、4 本目の乱数の列（`DslFuzzGenerator.BigintDecimalSeed`・パラメータ名の接頭辞 `w`）の生成器で作る。種の単位は絞った形の原子のクエリ `Y{i}` を末尾に足し、値オブジェクトなしの網羅の単位（`DslFuzzUnits.PlainCoverage`）は 6 つの演算子の原子のクエリ `KY{i}` を持つ。行の値の池は long の上限と下限を持つので、SQL Server の EF Core 版が列を CAST する decimal の型の整数部の桁をいつも試す（生成の DbContext が既定の decimal の型を広げないと、どの値でも桁あふれの例外になる）。比べる値の池に整数の値（0・1・-1・10）を持つので、SQLite の EF Core 版が整数と decimal の等値を文字列で比べる形も試す（実行器の書き換えを外すと赤）。byte・short・int の列の原子（3 本目の列）の引き方は変えない。
   - SQL Server の money・smallmoney：網羅の単位 `DslFuzzUnits.SqlServerMoneyCoverage`（`coverage-sqlserver-money`）が、列の型に入らない値の原子 1 つずつのクエリ `KM*`（経路ごとの結果を読む）と合成のクエリ `KX*` を持つ。列の型に入るかは列の `Money`（`DslMoneyType`＝小数 4 桁と型の端。範囲は 10 の累乗の桁で表せない）で決め、値の池は money 用（小数 5 桁で 4 桁へ丸めると行の値に重なる値・型の範囲の外の値）。種の単位は money の列を持たない（種の生成器の入力と指紋を変えない）。PostgreSQL の money の列は `Money` を立てない（比べる値は money で送られて丸められる docs の既知の割り切り）。
   - 作らない形（作らない形の宣言）：値オブジェクトの単位（`Create` が型の外の値を断る）。
-  - 網羅しない組：SQLite・MySQL の範囲の beyond-charset（受け入れ）・使い回しと列の型の外の値（Pending）・EF Core（SQLite）の decimal の値の順序比較のリテラル（受け入れ）・SQL Server の GuidKey と beyond-charset（Pending）・PostgreSQL・MySQL・Oracle の EF Core 版の beyond-charset（受け入れ）・PostgreSQL の byte と符号なし・sbyte の列と Oracle の Guid・TimeSpan と符号なし・sbyte の列（受け入れ＝型マッパーに対応する型が無い）・TimeSpan と beyond-range（SQLite・MySQL・SQL Server の EF Core 版は受け入れ、PostgreSQL は time の列の書き込みの区切りの Pending）・EF Core（SQLite）の TimeSpan の順序比較（受け入れ）。
+  - 網羅しない組：SQLite・MySQL の範囲の beyond-charset（受け入れ）・使い回しと列の型の外の値（Pending）・EF Core（SQLite）の decimal の値の順序比較のリテラル（受け入れ）・SQL Server の GuidKey と beyond-charset（Pending）・PostgreSQL・MySQL・Oracle の EF Core 版の beyond-charset（受け入れ）・PostgreSQL の byte と符号なし・sbyte の列と Oracle の Guid・TimeSpan と符号なし・sbyte の列（受け入れ＝型マッパーに対応する型が無い）・TimeSpan と beyond-range（SQLite・MySQL・SQL Server の EF Core 版は受け入れ、PostgreSQL は time の列の書き込みの区切りの Pending）・EF Core（SQLite）の TimeSpan の順序比較（受け入れ）・MySQL の DateTimeOffset（受け入れ＝型マッパーに無い）・EF Core（SQLite）の DateTimeOffset の順序比較（受け入れ）・SQL Server 以外の DateTimeOffset と beyond-scale（受け入れ＝小数秒の桁を宣言する列は SQL Server の単位だけ）。
 - mutation 実証済み。
 
 ## カルチャのガード

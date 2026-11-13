@@ -63,11 +63,10 @@ public sealed class TranslatorParityEfCoreSqlServerRuntimeTests(SqlServerContain
 
     /// <inheritdoc />
     /// <remarks>time の列と範囲の外の TimeSpan の行（SqlClient が SqlDbType.Time の範囲の外として断る）</remarks>
-    protected override IReadOnlySet<string> KnownParameterOverflows { get; } =
+    protected override IReadOnlyDictionary<string, Type> KnownParameterRefusals { get; } =
         KnownRows
             .Where(pair => pair.Value == TimeOutOfDay)
-            .Select(pair => pair.Key)
-            .ToHashSet(StringComparer.Ordinal);
+            .ToDictionary(pair => pair.Key, _ => typeof(OverflowException), StringComparer.Ordinal);
 
     /// <summary>time の列と範囲の外の TimeSpan の割り切りの理由</summary>
     private const string TimeOutOfDay =

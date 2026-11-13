@@ -581,6 +581,11 @@ A DSL condition on a `bool` or binary (`byte[]`) column can use only `=`, `<>`, 
 The DSL has no literal for these types, and QuickER warns and skips a query that uses an ordering comparison (`<` and the like) on them.
 A DSL condition on a `TimeSpan` column can use comparisons against a parameter (ordering comparisons included), `IN`, and `IS [NOT] NULL`.
 The DSL has no `TimeSpan` literal either.
+A DSL condition on a `DateTimeOffset` column can use the same forms, and the DSL has no `DateTimeOffset` literal.
+
+QuickER warns and skips a query that compares a `DateTimeOffset` column with a `DateTime` parameter or list, or a `DateTime` column with a `DateTimeOffset` one.
+C# converts the `DateTime` to a `DateTimeOffset` with the time zone of the machine running the code, so the answer would depend on that machine.
+Declare the parameter with the column's type (the `datetimeoffset` type token, or a `datetime` one for a `DateTime` column), or type it by the column.
 
 The result type name of a projection becomes a class in the generated namespace, so it must not collide with another type there.
 QuickER refuses a name that is a generated class or interface (`OrderEntity`, `IOrderRepository`, a value object such as `AmountValue`), a runtime type, or a library type the generated code uses by its simple name (`Task`, `Expression`, and the like).
@@ -672,6 +677,25 @@ The EF Core Repository on PostgreSQL compares a `time` column with a value outsi
 > Equality and `IN` give the C# answer for any value, but an ordering comparison (`<` and the like) and sorting follow the order of the text, and give the C# answer only between values from 0 to under 24 hours.
 > The EF Core Repository refuses an ordering comparison and sorting on a `TimeSpan` column (a limitation of the EF Core SQLite provider).
 
+A comparison on a `DateTimeOffset` column compares instants, as C# does.
+Two values with different offsets that mark the same instant are equal (`2024-01-01 12:00 +09:00` equals `2024-01-01 03:00 +00:00`), and `<` orders by the instant, not by the local time.
+
+> **Known limitation**: SQLite stores a `DateTimeOffset` as text (`yyyy-MM-dd HH:mm:ss.FFFFFFF+hh:mm`) and compares it as text.
+> Equality, `IN`, an ordering comparison, and sorting give the C# answer only between values with the same offset.
+> Values with different offsets compare by their text, so the same instant with another offset is not equal.
+> The EF Core Repository refuses an ordering comparison and sorting on a `DateTimeOffset` column (a limitation of the EF Core SQLite provider).
+
+> **Known limitation**: on the EF Core Repository, a PostgreSQL `timestamp with time zone` (`timestamptz`) column takes only UTC values (offset 0).
+> Npgsql refuses to write a `DateTimeOffset` with another offset, or to send one as a compared value, with an `ArgumentException`, so convert the value with `ToUniversalTime()` first.
+> A value read back has offset 0.
+
+> **Known limitation**: a PostgreSQL `time with time zone` (`timetz`) column holds a time of day and an offset, without a date.
+> PostgreSQL compares two values by their time of day in UTC and then by their offsets, so two values that mark the same instant with different offsets are not equal, unlike in C#.
+> Npgsql writes no date and reads a value back with the date 0001-01-02.
+
+> **Known limitation**: hand-written LINQ that compares a `DateTimeOffset` column with a `DateTime` (`Query().Where(x => x.At == dateTime)`) compiles, because C# converts the `DateTime` with the time zone of the machine running the code.
+> The mini DSL refuses this comparison, but QuickER does not check hand-written LINQ, so pass a `DateTimeOffset`.
+
 Date parts (`Year`, `Month`, …) are translated only when the member is read from a `DateTime`, `DateOnly`, or `DateTimeOffset` column, nullable forms included.
 A property of the same name on any other type is not a date part, such as one added to a value object through a partial declaration.
 It fails with `NotSupportedException` instead of silently becoming `YEAR([col])`.
@@ -694,7 +718,7 @@ On PostgreSQL, the EF Core Repository does the same for a `DateTime` with a time
 > A mini DSL condition compares a column with a value only, so a named query does not meet this.
 
 > **Known limitation**: PostgreSQL and MySQL keep a date and time to the microsecond, and their drivers drop the part of a compared value finer than that before sending it.
-> A `DateTime` or `TimeSpan` with a fraction finer than a microsecond (a tick is 100 nanoseconds) therefore compares as the value cut to the microsecond, so `x.At == value` can hold where C# says no.
+> A `DateTime`, `DateTimeOffset`, or `TimeSpan` with a fraction finer than a microsecond (a tick is 100 nanoseconds) therefore compares as the value cut to the microsecond, so `x.At == value` can hold where C# says no.
 > SQL Server and Oracle keep as many fractional digits as the value has, up to their own limits, and compare as C# does.
 
 > **Known limitation**: on the EF Core Repository on PostgreSQL, a value compared with a `money` column is sent as `money`, which keeps two fractional digits.

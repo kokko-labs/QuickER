@@ -681,6 +681,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Query_ConditionTimeZoneDependentOperand {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ConditionTimeZoneDependentOperand", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Query_ScalarRequiresType {
             get {
                 return ResourceManager.GetString("CodeGen_Query_ScalarRequiresType", resourceCulture);

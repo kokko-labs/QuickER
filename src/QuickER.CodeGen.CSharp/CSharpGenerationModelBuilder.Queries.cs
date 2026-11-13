@@ -615,7 +615,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             else
             {
                 // 型整合検査（列の生成型 × 演算子 × オペランド）。違反はエミットされる C# が必ず
-                // コンパイルエラーになる組み合わせなので、Warning 診断＋このクエリだけスキップする
+                // コンパイルエラーになる組み合わせと、答えが実行する機械の時間帯で変わる DateTime と DateTimeOffset の混在なので、
+                // Warning 診断＋このクエリだけスキップする
                 // （Guid 参照切れ・生 SQL の未宣言パラメータと同じ流儀＝他クエリと生成全体は無傷）
                 var violations = QueryConditionTypeChecker.Check(
                     parsed.Root!,
@@ -640,6 +641,10 @@ internal sealed partial class CSharpGenerationModelBuilder
                                             .ViolationKind
                                             .StringMatchUnsupported =>
                                             Strings.CodeGen_Query_ConditionStringMatchUnsupported,
+                                        QueryConditionTypeChecker
+                                            .ViolationKind
+                                            .TimeZoneDependentOperand =>
+                                            Strings.CodeGen_Query_ConditionTimeZoneDependentOperand,
                                         _ => Strings.CodeGen_Query_ConditionOperandTypeMismatch,
                                     },
                                     query.Name,

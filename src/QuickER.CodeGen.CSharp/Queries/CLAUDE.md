@@ -78,7 +78,12 @@ C# リテラルのエスケープの規則（`GeneratedLiteralText`）は `src/Q
   - SQL Server の QuickER 版 Repository は、列の型に入らない値を値の型で束縛する（`src/QuickER.Runtime.SqlServer/CLAUDE.md`「SqlParameter の明示型」）。列の型で束縛すると値が切り捨てられて誤った行を返す
 - GuidKey の VO 列（FK 列が親の GuidKey VO を共有する場合を含む）への文字列一致は、完全一致の LIKE と `=` 以外を同じく警告で飛ばす
   - `ValueObjectGuidKeyBase` は `IStringMatchValueObject` を持たず、そのまま生成すると生成ファイル全体が CS1929 になる
-- ガード：`CodegenCaseTests` の行 `diag-query-type-check-rejects-*`（断る組み合わせ 1 行 1 入力：警告の種類とクエリ名・そのクエリのメソッドだけが無い・ほかのクエリは生成してコンパイルできる）・`CodegenCaseTests` の行 `compile-query-type-check-accepts-widening-forms`（int・long の列×小数リテラルを含む）・`DslConditionFuzzTests`（受理する形は警告 0 のコンパイルと実行、断るリテラルは警告で飛ばされること。整数の列×小数リテラルは次元表の形 `compare-*-literal-fractional`）・`Dsl/SqlServer`（同じ形を実 SQL Server で）
+- DateTime と DateTimeOffset の混在は、コンパイルが通っても警告で飛ばす（型の検査の「コンパイルの通る形を断らない」の唯一の例外。違反の種類 `TimeZoneDependentOperand`・文面 `CodeGen_Query_ConditionTimeZoneDependentOperand`）
+  - 対象：DateTimeOffset の列 × DateTime のパラメータ（型トークン・列で型付け）の比較と、その逆向き、IN のリストの要素の同じ組、値オブジェクトの列（内包型で見る）。判定は `MixesDateTimeAndOffset` の 1 か所で、比較・IN の型の判定より先に当てる。暗黙変換の表（`ImplicitConversions`）と `Comparable` は DateTime → DateTimeOffset を通さない
+  - 理由：C# の暗黙変換が DateTime（Kind が Unspecified・Local）を実行する機械の時間帯の時差で DateTimeOffset にするので、同じクエリの答えが機械で変わる。docs は「簡易 DSL と名前付きクエリの制約」に、手書きの LINQ は検査しないことを既知の割り切りに書く
+  - 重さは既存の型の違反と同じ Warning でそのクエリだけ飛ばす（そのクエリの中で完結する問題。Error にすると、こういうクエリを 1 本持つだけで生成全体が止まる）
+  - 値オブジェクトで型付けしたパラメータは値オブジェクトの一致で判定するので対象にしない（違う値オブジェクトは既存の `OperandTypeMismatch`）
+- ガード：`CodegenCaseTests` の行 `diag-query-type-check-rejects-*`（断る組み合わせ 1 行 1 入力：警告の種類とクエリ名・そのクエリのメソッドだけが無い・ほかのクエリは生成してコンパイルできる）・`CodegenCaseTests` の行 `compile-query-type-check-accepts-widening-forms`（int・long の列×小数リテラルを含む）・`DslConditionFuzzTests`（受理する形は警告 0 のコンパイルと実行、断るリテラルは警告で飛ばされること。整数の列×小数リテラルは次元表の形 `compare-*-literal-fractional`。DateTime と DateTimeOffset の混在のパラメータは DateTimeOffset の単位の断られる原子＝形 `compare-*-param-rejected`・`in-rejected`）・`Dsl/SqlServer`・`Dsl/PostgreSql`・`Dsl/Oracle`（同じ形を実 DB で）。混在の 6 行（`diag-query-type-check-rejects-bad-offset-*`・`-bad-datetime-*`・`-bad-vo-offset-*`）は文面のキーまで照合する（判定を外すと既存の `OperandTypeMismatch` の文面で断られて赤）。mutation 実証済み
 
 ## 射影 DTO の型名
 

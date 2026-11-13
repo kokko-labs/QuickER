@@ -611,6 +611,11 @@ QuickER は警告して、そのクエリを飛ばします。
 これらの型のリテラルは簡易 DSL に無く、順序比較（`<` など）を書いたクエリは、QuickER が警告して飛ばします。
 `TimeSpan` の列の簡易 DSL の条件は、パラメータとの比較（順序比較を含む）・`IN`・`IS [NOT] NULL` を書けます。
 `TimeSpan` のリテラルも簡易 DSL にありません。
+`DateTimeOffset` の列の簡易 DSL の条件も同じ形を書け、`DateTimeOffset` のリテラルは簡易 DSL にありません。
+
+`DateTimeOffset` の列を `DateTime` のパラメータ・リストと比べるクエリと、`DateTime` の列を `DateTimeOffset` のパラメータ・リストと比べるクエリは、QuickER が警告して飛ばします。
+C# は `DateTime` を、実行する機械の時間帯で `DateTimeOffset` に変換するので、答えが機械で変わるためです。
+パラメータは列の型（`datetimeoffset` の型トークン、`DateTime` の列なら `datetime` の型トークン）で宣言するか、列で型付けしてください。
 
 射影の結果型名は生成 namespace のクラスになるため、そこにある別の型と衝突してはいけません。
 QuickER は、生成されるクラス・インターフェイス（`OrderEntity`、`IOrderRepository`、`AmountValue` のような値オブジェクト）、ランタイムの型、生成コードが単純名で使うライブラリの型（`Task`・`Expression` など）と同じ名前を断ります。
@@ -703,6 +708,25 @@ PostgreSQL の EF Core 版 Repository は、`time` の列を範囲の外の値�
 > 等値と `IN` はどの値でも C# と同じ答えですが、順序比較（`<` など）と並び替えは文字列の順になり、0〜24 時間未満の値どうしでだけ C# と同じ答えになります。
 > EF Core 版 Repository は、`TimeSpan` の列の順序比較と並び替えを断ります（EF Core の SQLite プロバイダの制限）。
 
+`DateTimeOffset` の列の比較は、C# と同じく瞬間で比べます。
+時差が違っても同じ瞬間を表す 2 つの値は等しく（`2024-01-01 12:00 +09:00` と `2024-01-01 03:00 +00:00` は等しい）、`<` は局所の時刻でなく瞬間の順で比べます。
+
+> **既知の割り切り**: SQLite は `DateTimeOffset` を文字列（`yyyy-MM-dd HH:mm:ss.FFFFFFF+hh:mm`）で持ち、文字列として比べます。
+> 等値・`IN`・順序比較・並び替えは、時差の同じ値どうしでだけ C# と同じ答えになります。
+> 時差の違う値は文字列で比べるので、時差の違う同じ瞬間は等しくなりません。
+> EF Core 版 Repository は、`DateTimeOffset` の列の順序比較と並び替えを断ります（EF Core の SQLite プロバイダの制限）。
+
+> **既知の割り切り**: EF Core 版 Repository では、PostgreSQL の `timestamp with time zone`（`timestamptz`）の列は UTC（時差 0）の値だけを扱えます。
+> Npgsql は時差 0 でない `DateTimeOffset` の書き込みと、比べる値としての送信を `ArgumentException` で断るので、値は先に `ToUniversalTime()` で変換してください。
+> 読み戻した値の時差は 0 です。
+
+> **既知の割り切り**: PostgreSQL の `time with time zone`（`timetz`）の列は、日付を持たずに時刻と時差を持ちます。
+> PostgreSQL は 2 つの値を UTC の時刻で比べてから時差で比べるので、C# と違い、時差の違う同じ瞬間の 2 つの値は等しくなりません。
+> Npgsql は日付を書かず、読み戻した値の日付は 0001-01-02 になります。
+
+> **既知の割り切り**: 手書きの LINQ で `DateTimeOffset` の列を `DateTime` と比べる式（`Query().Where(x => x.At == dateTime)`）は、C# が `DateTime` を実行する機械の時間帯で変換するのでコンパイルできます。
+> 簡易 DSL はこの比較を断りますが、QuickER は手書きの LINQ を検査しないので、`DateTimeOffset` を渡してください。
+
 日付部品（`Year`・`Month` など）へ変換されるのは、読み出し元が `DateTime` / `DateOnly` / `DateTimeOffset`（いずれも nullable を含む）の列である場合だけです。
 同名のプロパティを別の型に持たせても、日付部品とは見なしません（値オブジェクトへ partial で足した場合など）。
 黙って `YEAR([col])` になる代わりに、`NotSupportedException` で失敗します。
@@ -726,7 +750,7 @@ PostgreSQL の EF Core 版 Repository も、`date` の列と比べる時刻つ�
 > 簡易 DSL の条件は列と値だけを比べるので、名前付きクエリはこの形になりません。
 
 > **既知の割り切り**: PostgreSQL と MySQL は日時をマイクロ秒までしか持たず、ドライバは比べる値のそれより細かい部分を落として送ります。
-> そのため 1 マイクロ秒より細かい端数を持つ `DateTime`・`TimeSpan`（1 tick は 100 ナノ秒）は、マイクロ秒へ切り詰めた値として比べられ、C# では一致しない `x.At == value` が一致することがあります。
+> そのため 1 マイクロ秒より細かい端数を持つ `DateTime`・`DateTimeOffset`・`TimeSpan`（1 tick は 100 ナノ秒）は、マイクロ秒へ切り詰めた値として比べられ、C# では一致しない `x.At == value` が一致することがあります。
 > SQL Server と Oracle は、それぞれの上限まで値の端数をそのまま持ち、C# と同じ答えになります。
 
 > **既知の割り切り**: PostgreSQL の EF Core 版 Repository は、`money` の列と比べる値を `money` で送り、`money` は小数を 2 桁だけ持ちます。

@@ -13,7 +13,7 @@ namespace QuickER.Tests.TestSupport.Engines;
 /// <remarks>
 /// <para>
 /// 値は型の名前つきで、カルチャに依らない書式で書く（<c>1</c> の int と long、空白の有無を見分ける）。
-/// 文字列は引用符で囲み、ASCII の印字できる文字以外を <c>\uXXXX</c> で書く。日時は往復の書式（Kind を含む。Local は機械の時差を付けず <c>Local:</c> と時差なしの時刻を書く）、
+/// 文字列は引用符で囲み、ASCII の印字できる文字以外を <c>\uXXXX</c> で書く。日時は往復の書式（Kind を含む。Local は機械の時差を付けず <c>Local:</c> と時差なしの時刻を書く。DateTimeOffset は時差なしの時刻と <c>@</c> の後の時差）、
 /// バイト列は 16 進、一覧は要素を並べて展開する（<c>ToString</c> が型の名前しか出さない一覧の中身を見落とさない）。
 /// </para>
 /// <para>
@@ -61,6 +61,20 @@ public static class SeedSummary
                     .SpecifyKind(value, DateTimeKind.Unspecified)
                     .ToString("o", CultureInfo.InvariantCulture)
             : value.ToString("o", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// DateTimeOffset の書き方（時差なしの局所の時刻を往復の書式で書き、<c>@</c> の後に値が持つ時差を書く。例
+    /// <c>2024-01-01T12:00:00.0000000@+09:00</c>）
+    /// </summary>
+    /// <remarks>
+    /// 時差は値のデータで、機械に依らない。往復の書式のまま（時刻の直後に時差）書くと、機械の時差の入った Local の日時と同じ形になり、
+    /// 時差のガード（<c>SummaryEnvironmentGuard.AssertNoUtcOffset</c>）が見分けられないので、時刻と時差の間に <c>@</c> を挟む。
+    /// </remarks>
+    /// <param name="value">日時</param>
+    public static string DateTimeOffsetText(DateTimeOffset value) =>
+        value.DateTime.ToString("o", CultureInfo.InvariantCulture)
+        + "@"
+        + value.ToString("zzz", CultureInfo.InvariantCulture);
 
     /// <summary>値を 1 つ書く（オブジェクトはプロパティを展開する）</summary>
     /// <param name="value">値</param>
@@ -120,8 +134,7 @@ public static class SeedSummary
                 text.Append("DateTime:").Append(DateTimeText(dt));
                 return;
             case DateTimeOffset dto:
-                text.Append("DateTimeOffset:")
-                    .Append(dto.ToString("o", CultureInfo.InvariantCulture));
+                text.Append("DateTimeOffset:").Append(DateTimeOffsetText(dto));
                 return;
             case TimeSpan ts:
                 text.Append("TimeSpan:").Append(ts.ToString("c", CultureInfo.InvariantCulture));

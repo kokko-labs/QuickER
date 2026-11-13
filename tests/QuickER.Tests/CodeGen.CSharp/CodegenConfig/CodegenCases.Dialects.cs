@@ -1872,12 +1872,14 @@ internal static partial class CodegenCases
     );
 
     /// <summary>
-    /// QueryConditionTypeCheckTests の拒否の 18 行（値オブジェクトなし）と値オブジェクトの拒否の 5 行。総当たりの型の検査が断るリテラルと
-    /// 重なる行も含めて全部を行にする（総当たりは「そのクエリのメソッドが生成物に無い」を見ない）
+    /// QueryConditionTypeCheckTests の拒否の 18 行（値オブジェクトなし）と値オブジェクトの拒否の 5 行に、DateTime と DateTimeOffset の
+    /// 混在を断る 6 行（値オブジェクトなし 4・あり 2）を足したもの。総当たりの型の検査が断るリテラル・パラメータと重なる行も含めて全部を
+    /// 行にする（総当たりは「そのクエリのメソッドが生成物に無い」を見ない）
     /// </summary>
     private static IEnumerable<Dialects_TypeCheckRejection> Dialects_TypeCheckRejections()
     {
         const string mismatch = nameof(Strings.CodeGen_Query_ConditionOperandTypeMismatch);
+        const string timeZone = nameof(Strings.CodeGen_Query_ConditionTimeZoneDependentOperand);
         static QueryParameter[] None(Entity _) => [];
         static QueryParameter[] Int32(Entity _) =>
             [new QueryParameter { Name = "num", Type = "int32" }];
@@ -2013,6 +2015,79 @@ internal static partial class CodegenCases
             new("bad-vo-tiny-range", "BadVoTinyRange", "Tiny < 300", None, true, mismatch),
             new("bad-vo-tiny-negative", "BadVoTinyNegative", "Tiny <> -1", None, true, mismatch),
             new("bad-vo-int-range", "BadVoIntRange", "Qty = 3000000000", None, true, mismatch),
+            // DateTime と DateTimeOffset の混在（コンパイルは通るが、C# の暗黙変換が DateTime を実行する機械の時間帯の時差で
+            // DateTimeOffset にするので、答えが機械で変わる）。比較の両向き・列で型付けしたパラメータ・IN・値オブジェクト
+            new(
+                "bad-offset-datetime-param",
+                "BadOffsetDateTimeParam",
+                "OffsetAt = @at",
+                _ => [new QueryParameter { Name = "at", Type = "datetime" }],
+                false,
+                timeZone
+            ),
+            new(
+                "bad-datetime-offset-param",
+                "BadDateTimeOffsetParam",
+                "SeenAt < @o",
+                _ => [new QueryParameter { Name = "o", Type = "datetimeoffset" }],
+                false,
+                timeZone
+            ),
+            new(
+                "bad-offset-column-typed-param",
+                "BadOffsetColumnTypedParam",
+                "OffsetAt >= @seen",
+                order =>
+                    [
+                        new QueryParameter
+                        {
+                            Name = "seen",
+                            SourceColumnId = Dialects_Column(order, "SeenAt").Id,
+                        },
+                    ],
+                false,
+                timeZone
+            ),
+            new(
+                "bad-datetime-in-offset-list",
+                "BadDateTimeInOffsetList",
+                "SeenAt IN @os",
+                _ =>
+                    [
+                        new QueryParameter
+                        {
+                            Name = "os",
+                            Type = "datetimeoffset",
+                            IsList = true,
+                        },
+                    ],
+                false,
+                timeZone
+            ),
+            new(
+                "bad-vo-offset-datetime-param",
+                "BadVoOffsetDateTimeParam",
+                "OffsetAt <> @at",
+                _ => [new QueryParameter { Name = "at", Type = "datetime" }],
+                true,
+                timeZone
+            ),
+            new(
+                "bad-vo-offset-in-datetime-list",
+                "BadVoOffsetInDateTimeList",
+                "OffsetAt IN @ats",
+                _ =>
+                    [
+                        new QueryParameter
+                        {
+                            Name = "ats",
+                            Type = "datetime",
+                            IsList = true,
+                        },
+                    ],
+                true,
+                timeZone
+            ),
         ];
     }
 
@@ -2030,7 +2105,7 @@ internal static partial class CodegenCases
             Parameters = [.. parameters],
         };
 
-    /// <summary>QueryConditionTypeCheckTests の型ファミリを網羅する Order（Name・Qty・Big・Amount・SeenAt・Flag・Quantity〔NULL 許容〕・Tiny・Reorder）の図</summary>
+    /// <summary>QueryConditionTypeCheckTests の型ファミリを網羅する Order（Name・Qty・Big・Amount・SeenAt・OffsetAt・Flag・Quantity〔NULL 許容〕・Tiny・Reorder）の図</summary>
     private static ErDiagram Dialects_TypeCheckDiagram(
         Func<Entity, IEnumerable<QueryDefinition>> queries
     )
@@ -2054,6 +2129,7 @@ internal static partial class CodegenCases
                 ("Big", "bigint", false),
                 ("Amount", "decimal(12,2)", false),
                 ("SeenAt", "datetime2", false),
+                ("OffsetAt", "datetimeoffset", false),
                 ("Flag", "bit", false),
                 ("Quantity", "int", true),
                 ("Tiny", "tinyint", false),
