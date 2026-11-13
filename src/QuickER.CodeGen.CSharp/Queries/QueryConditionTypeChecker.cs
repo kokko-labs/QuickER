@@ -17,6 +17,10 @@ namespace QuickER.CodeGen.CSharp.Queries;
 /// （未知の CLR 型名）は違反にしない（寛容側＝方言マッパーの将来の型追加で正当なクエリを誤って弾かない）。
 /// </para>
 /// <para>
+/// 例外は DateTime と DateTimeOffset の混在の 1 つ（<see cref="ViolationKind.TimeZoneDependentOperand"/>）。コンパイルは通るが、C# の暗黙変換が
+/// DateTime を実行する機械の時間帯の時差で DateTimeOffset にするので、同じクエリの答えが機械で変わる。
+/// </para>
+/// <para>
 /// 具体的には次を鏡写しにする: 順序比較演算子の有無（数値・日時系のみ。VO は基底の派生規則
 /// <see cref="CSharpGenerationModelBuilder"/> の <c>ValueObjectHasOrderingOperators</c> が正）・
 /// 数値リテラルの型サフィックス（<c>long</c> 列の小数リテラルは <c>1.5L</c> となり字句エラー）・
@@ -48,6 +52,12 @@ internal static class QueryConditionTypeChecker
 
         /// <summary>列とオペランド（リテラル・パラメータ）の型が両立しない</summary>
         OperandTypeMismatch,
+
+        /// <summary>
+        /// DateTime と DateTimeOffset を比べる（コンパイルはできるが、C# の暗黙変換が DateTime を実行する機械の時間帯の時差で
+        /// DateTimeOffset にするので、答えが機械で変わる）
+        /// </summary>
+        TimeZoneDependentOperand,
     }
 
     /// <summary>違反 1 件（列名・列の生成型表記・詳細＝演算子またはオペランドの表記）</summary>
@@ -160,6 +170,23 @@ internal static class QueryConditionTypeChecker
             return;
         }
 
+        if (
+            node.Operand is ParameterOperand mixedOperand
+            && TryResolveParameter(mixedOperand, parameters, out var mixedParameter)
+            && MixesDateTimeAndOffset(column, mixedParameter)
+        )
+        {
+            violations.Add(
+                new Violation(
+                    ViolationKind.TimeZoneDependentOperand,
+                    node.Column.ResolvedName ?? node.Column.Text,
+                    ColumnTypeText(column),
+                    ParameterText(mixedOperand, mixedParameter)
+                )
+            );
+            return;
+        }
+
         if (!OperandCompatible(column, node.Operand, parameters, out var operandText))
         {
             violations.Add(
@@ -260,6 +287,19 @@ internal static class QueryConditionTypeChecker
             || !TryResolveParameter(node.Parameter, parameters, out var element)
         )
         {
+            return;
+        }
+
+        if (MixesDateTimeAndOffset(column, element))
+        {
+            violations.Add(
+                new Violation(
+                    ViolationKind.TimeZoneDependentOperand,
+                    node.Column.ResolvedName ?? node.Column.Text,
+                    ColumnTypeText(column),
+                    ParameterText(node.Parameter, element)
+                )
+            );
             return;
         }
 
@@ -525,16 +565,37 @@ internal static class QueryConditionTypeChecker
             return !IsUnsignedLongSignedMix(left, right);
         }
 
-        // DateTime と DateTimeOffset は暗黙変換（DateTime → DateTimeOffset）で比較できる
-        if (
-            (leftFamily == TypeFamily.DateTime && rightFamily == TypeFamily.DateTimeOffset)
-            || (leftFamily == TypeFamily.DateTimeOffset && rightFamily == TypeFamily.DateTime)
-        )
+        // DateTime と DateTimeOffset は C# では暗黙変換（DateTime → DateTimeOffset）で比べられるが、変換が機械の時間帯に依るので
+        // 両立させない（比べる前に MixesDateTimeAndOffset が TimeZoneDependentOperand として断る）
+        return false;
+    }
+
+    /// <summary>
+    /// 列の内包型とパラメータ（IN ならリストの要素）の型の片方が DateTime でもう片方が DateTimeOffset か（値オブジェクトの列は内包型で見る。
+    /// 値オブジェクトで型付けしたパラメータは値オブジェクトの一致で判定するので対象にしない）
+    /// </summary>
+    /// <remarks>
+    /// C# は DateTime を DateTimeOffset へ暗黙に変換して比べ（値オブジェクトの <c>Create(DateTime)</c> も同じ変換を通る）、変換は DateTime の
+    /// Kind が Unspecified・Local なら実行する機械の時間帯の時差を付ける。生成コードはコンパイルできるが、同じクエリの答えが機械ごとに
+    /// 変わるので、コンパイルの通る形を断らないという第一条件の例外として断る（docs の「簡易 DSL と名前付きクエリの制約」）。
+    /// </remarks>
+    private static bool MixesDateTimeAndOffset(
+        QueryColumnBinding column,
+        ParameterTypeInfo parameter
+    )
+    {
+        if (parameter.ValueObjectClassName is not null)
         {
-            return true;
+            return false;
         }
 
-        return false;
+        var columnFamily = Classify(column.UnderlyingTypeName);
+        var parameterFamily = Classify(parameter.TypeName);
+
+        return (columnFamily == TypeFamily.DateTime && parameterFamily == TypeFamily.DateTimeOffset)
+            || (
+                columnFamily == TypeFamily.DateTimeOffset && parameterFamily == TypeFamily.DateTime
+            );
     }
 
     /// <summary>ulong と符号付き整数の組か（C# の二項数値昇格が拒否する組）</summary>
@@ -559,7 +620,8 @@ internal static class QueryConditionTypeChecker
     }
 
     /// <summary>
-    /// 暗黙変換の表（変換元の型名 → 変換先の型名の集合。C# の暗黙数値変換と DateTime → DateTimeOffset）
+    /// 暗黙変換の表（変換元の型名 → 変換先の型名の集合。C# の暗黙数値変換。DateTime → DateTimeOffset は C# にあるが、機械の時間帯に依るので
+    /// 載せない＝<see cref="MixesDateTimeAndOffset"/>）
     /// </summary>
     /// <remarks>型の検査のたびに引くので、呼ぶごとに配列を作らない読み取り専用の表にする</remarks>
     private static readonly FrozenDictionary<string, FrozenSet<string>> ImplicitConversions =
@@ -585,7 +647,6 @@ internal static class QueryConditionTypeChecker
             ["long"] = ["float", "double", "decimal"],
             ["ulong"] = ["float", "double", "decimal"],
             ["float"] = ["double"],
-            ["DateTime"] = ["DateTimeOffset"],
         }.ToFrozenDictionary(
             pair => pair.Key,
             pair => pair.Value.ToFrozenSet(StringComparer.Ordinal),

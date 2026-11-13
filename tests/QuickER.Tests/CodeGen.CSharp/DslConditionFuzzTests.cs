@@ -181,6 +181,26 @@ public class DslConditionFuzzTests
                     .Select(unit => (unit, MySqlTarget, InvariantCultureName))
             );
 
+            // DateTimeOffset も同じ（EF Core〔SQLite〕は順序比較と並び替えを流さない）。MySQL は DateTimeOffset へ写す型を持たない
+            coverageUnits.AddRange(
+                DslFuzzUnits
+                    .DateTimeOffsetCoverage(DialectNames.Sqlite, ordered: false)
+                    .Select(unit => (unit, SqliteTarget, InvariantCultureName))
+            );
+            coverageUnits.AddRange(
+                DslFuzzUnits
+                    .DateTimeOffsetCoverage(DialectNames.Sqlite)
+                    .Select(unit => (unit, SqliteOrderedTimeSpanTarget, InvariantCultureName))
+            );
+
+            // 時差の混ざった DateTimeOffset の値はインメモリだけで流す（SQLite は TEXT で持ち、同じ時差の値どうしでだけ瞬間の比較と
+            // 一致する＝docs の既知の割り切り。オラクルの瞬間の比較を Docker なしで確かめる）
+            coverageUnits.AddRange(
+                DslFuzzUnits
+                    .SqliteMixedOffsetInMemoryCoverage()
+                    .Select(unit => (unit, SqliteInMemoryTarget, InvariantCultureName))
+            );
+
             foreach (var culture in InMemoryCultures)
             {
                 coverageUnits.Add(
@@ -260,8 +280,8 @@ public class DslConditionFuzzTests
     };
 
     /// <summary>
-    /// SQLite の構成の QuickER 版とインメモリだけ（TimeSpan の列の順序比較と並び替えを作る網羅の単位。EF Core〔SQLite〕は流さない＝
-    /// <see cref="ExcludedOnEfCoreSqlite"/>）
+    /// SQLite の構成の QuickER 版とインメモリだけ（TimeSpan・DateTimeOffset の列の順序比較と並び替えを作る網羅の単位。EF Core〔SQLite〕は
+    /// 流さない＝<see cref="ExcludedOnEfCoreSqlite"/>）
     /// </summary>
     private static readonly DslFuzzTarget SqliteOrderedTimeSpanTarget = SqliteTarget with
     {
@@ -303,21 +323,21 @@ public class DslConditionFuzzTests
     }
 
     /// <summary>
-    /// EF Core（SQLite）で流さないクエリか: decimal・TimeSpan の列の順序比較を含むものと、decimal・TimeSpan の列で並べるもの
+    /// EF Core（SQLite）で流さないクエリか: decimal・TimeSpan・DateTimeOffset の列の順序比較を含むものと、それらの列で並べるもの
     /// </summary>
     /// <remarks>
-    /// EF Core の SQLite プロバイダは decimal・TimeSpan のサーバー側の順序比較・並び替えを翻訳できず例外にする（プロバイダの既知の制限＝
-    /// CLAUDE.md の名前付きクエリの節「EF Core Sqlite は decimal のサーバーサイド比較・並び替え非対応」と、Microsoft Learn の
-    /// 「SQLite Database Provider - Limitations」の Query limitations。docs の TimeSpan の既知の割り切り）。
+    /// EF Core の SQLite プロバイダは decimal・TimeSpan・DateTimeOffset のサーバー側の順序比較・並び替えを翻訳できず例外にする（プロバイダの
+    /// 既知の制限＝CLAUDE.md の名前付きクエリの節「EF Core Sqlite は decimal のサーバーサイド比較・並び替え非対応」と、Microsoft Learn の
+    /// 「SQLite Database Provider - Limitations」の Query limitations。docs の TimeSpan・DateTimeOffset の既知の割り切り）。
     /// QuickER の不具合ではないので、この 1 か所で EF Core（SQLite）の実行から外す（ほかの実装先では流す）。
     /// </remarks>
     private static bool ExcludedOnEfCoreSqlite(DslQuery query) =>
         query.Atoms.Any(atom =>
             atom is DslCompare { Op: not (DslOp.Eq or DslOp.Ne) }
-            && atom.Column.Clr is DslClr.Decimal or DslClr.TimeSpan
+            && atom.Column.Clr is DslClr.Decimal or DslClr.TimeSpan or DslClr.DateTimeOffset
         )
         || query.Orderings.Any(ordering =>
-            ordering.Column.Clr is DslClr.Decimal or DslClr.TimeSpan
+            ordering.Column.Clr is DslClr.Decimal or DslClr.TimeSpan or DslClr.DateTimeOffset
         );
 
     private static CodeGenerationOptions Options(DslFuzzUnit unit, bool ado) =>

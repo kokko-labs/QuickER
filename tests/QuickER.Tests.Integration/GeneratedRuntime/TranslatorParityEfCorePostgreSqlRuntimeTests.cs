@@ -38,7 +38,20 @@ public sealed class TranslatorParityEfCorePostgreSqlRuntimeTests(PostgreSqlConta
         ["time-scaled-less-finer"] = SubMicrosecond,
         ["int-column-greater-decimal-column"] = ColumnCast,
         ["int-column-equals-decimal-column"] = ColumnCast,
+        ["offset-greater-or-equal-instant"] = NonUtcOffset,
+        ["offset-negated-equals"] = NonUtcOffset,
+        ["offset-in-mixed-offsets"] = NonUtcOffset,
     };
+
+    private const string NonUtcOffset =
+        "PostgreSQL の timestamptz は時差 0（UTC）の値だけを扱い、Npgsql が時差 0 でない DateTimeOffset のパラメータを ArgumentException で断る（docs の DateTimeOffset の既知の割り切り）";
+
+    /// <inheritdoc />
+    /// <remarks>時差 0 でない DateTimeOffset と比べる行（Npgsql が timestamptz へ送れないとして断る）</remarks>
+    protected override IReadOnlyDictionary<string, Type> KnownParameterRefusals { get; } =
+        KnownRows
+            .Where(pair => pair.Value == NonUtcOffset)
+            .ToDictionary(pair => pair.Key, _ => typeof(ArgumentException), StringComparer.Ordinal);
 
     private const string SubMicrosecond =
         "PostgreSQL の timestamp・time はマイクロ秒までしか持たず、Npgsql が 1 マイクロ秒より細かい値を切り詰めて比べる（docs の EF Core の節の既知の割り切り）";

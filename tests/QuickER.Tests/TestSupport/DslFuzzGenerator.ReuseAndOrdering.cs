@@ -48,19 +48,22 @@ public sealed partial class DslFuzzGenerator
         columns.Where(column => !column.PrimaryKey || column.Clr == DslClr.GuidKey).ToList();
 
     /// <summary>
-    /// 主キーより前に置ける並びの列（主キーでない整数・decimal・日時・bool・TimeSpan の列。bool は false が先でどの DB も同じ。TimeSpan は
-    /// <see cref="TimeSpanOrdered"/> のときだけ。バイナリは並べない＝作らない形の宣言）
+    /// 主キーより前に置ける並びの列（主キーでない整数・decimal・日時・bool・TimeSpan・DateTimeOffset の列。bool は false が先でどの DB も同じ。
+    /// DateTimeOffset は瞬間の順で、同じ瞬間の行は最後の主キーで決まる。TimeSpan・DateTimeOffset は <see cref="UnorderedClrs"/> に無いときだけ。
+    /// バイナリは並べない＝作らない形の宣言）
     /// </summary>
     private List<DslColumn> OrderableColumns(IReadOnlyList<DslColumn> columns, bool withDecimal) =>
         columns
             .Where(column =>
                 !column.PrimaryKey
+                && !UnorderedClrs.Contains(column.Clr)
                 && (
                     column.IsInteger
                     || column.Clr == DslClr.DateTime
                     || column.Clr == DslClr.Boolean
                     || (withDecimal && column.Clr == DslClr.Decimal)
-                    || (TimeSpanOrdered && column.Clr == DslClr.TimeSpan)
+                    || column.Clr == DslClr.TimeSpan
+                    || column.Clr == DslClr.DateTimeOffset
                 )
             )
             .ToList();

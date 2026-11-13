@@ -46,6 +46,11 @@ public static class DslFuzzUnits
         {
             yield return unit;
         }
+
+        foreach (var unit in DateTimeOffsets("sqlite", DialectNames.Sqlite, seed))
+        {
+            yield return unit;
+        }
     }
 
     /// <summary>
@@ -73,6 +78,11 @@ public static class DslFuzzUnits
         }
 
         foreach (var unit in TimeSpans("sqlserver", DialectNames.SqlServer, seed))
+        {
+            yield return unit;
+        }
+
+        foreach (var unit in DateTimeOffsets("sqlserver", DialectNames.SqlServer, seed))
         {
             yield return unit;
         }
@@ -222,6 +232,11 @@ public static class DslFuzzUnits
         {
             yield return unit;
         }
+
+        foreach (var unit in DateTimeOffsets("postgresql", DialectNames.PostgreSql, seed))
+        {
+            yield return unit;
+        }
     }
 
     /// <summary>
@@ -243,6 +258,11 @@ public static class DslFuzzUnits
         );
 
         foreach (var unit in Families("oracle", DialectNames.Oracle, seed))
+        {
+            yield return unit;
+        }
+
+        foreach (var unit in DateTimeOffsets("oracle", DialectNames.Oracle, seed))
         {
             yield return unit;
         }
@@ -656,22 +676,43 @@ public static class DslFuzzUnits
     /// 使い回しと並び替えのクエリ
     /// </summary>
     /// <remarks>
-    /// <paramref name="ordered"/> が偽なら、TimeSpan の列の順序比較と並び替えを作らない（<see cref="DslFuzzGenerator.TimeSpanOrdered"/>。
+    /// <paramref name="ordered"/> が偽なら、TimeSpan の列の順序比較と並び替えを作らない（<see cref="DslFuzzGenerator.UnorderedClrs"/>。
     /// EF Core〔SQLite〕が流さないので、SQLite の 3 実装先で流す単位はこちら）。真の SQLite の単位は名前に <c>-ordered</c> を足し、
     /// QuickER 版とインメモリだけで流す。
     /// </remarks>
     /// <param name="dbms">方言（<see cref="DialectNames"/> の SQLite・SQL Server・PostgreSQL・MySQL）</param>
     /// <param name="ordered">TimeSpan の列の順序比較と並び替えを作るか</param>
-    public static IEnumerable<DslFuzzUnit> TimeSpanCoverage(string dbms, bool ordered = true)
+    public static IEnumerable<DslFuzzUnit> TimeSpanCoverage(string dbms, bool ordered = true) =>
+        ColumnFamilyCoverage(dbms, "timespan", TimeSpanColumns, DslClr.TimeSpan, ordered);
+
+    /// <summary>
+    /// 1 つの列の種類だけを持つ単位（TimeSpan・DateTimeOffset）の網羅の単位（値オブジェクトあり・なし。種に依らない。名前は
+    /// <c>coverage-{方言}-{族}</c> と <c>coverage-{方言}-{族}-plain</c>）：その単位の列の原子のクエリと
+    /// <see cref="DslFuzzGenerator.CoverageQueries"/>・パラメータの使い回しと並び替えのクエリ
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="ordered"/> が偽なら、<paramref name="clr"/> の列の順序比較と並び替えを作らない（EF Core〔SQLite〕が流さない）。真の
+    /// SQLite の単位は名前に <c>-ordered</c> を足し、QuickER 版とインメモリだけで流す。
+    /// </remarks>
+    private static IEnumerable<DslFuzzUnit> ColumnFamilyCoverage(
+        string dbms,
+        string family,
+        Func<string, DslColumn[]> columnsOf,
+        DslClr clr,
+        bool ordered
+    )
     {
         var suffix = dbms == DialectNames.Sqlite && ordered ? "-ordered" : "";
+        IReadOnlySet<DslClr> unordered = ordered
+            ? new HashSet<DslClr>()
+            : new HashSet<DslClr> { clr };
 
         foreach (var valueObjects in new[] { true, false })
         {
-            var columns = TimeSpanColumns(dbms);
+            var columns = columnsOf(dbms);
             var generator = new DslFuzzGenerator(CoverageSeed, valueObjects)
             {
-                TimeSpanOrdered = ordered,
+                UnorderedClrs = unordered,
             };
             var rows = generator.Rows(columns, RowCount);
             List<DslQuery> queries =
@@ -688,11 +729,11 @@ public static class DslFuzzUnits
                 DslFuzzGenerator.SideParameterPrefix
             )
             {
-                TimeSpanOrdered = ordered,
+                UnorderedClrs = unordered,
             };
 
             yield return new DslFuzzUnit(
-                $"{CoveragePrefix}{dbms}-timespan{suffix}{(valueObjects ? "" : "-plain")}",
+                $"{CoveragePrefix}{dbms}-{family}{suffix}{(valueObjects ? "" : "-plain")}",
                 TableName,
                 withPartners,
                 rows,
@@ -701,6 +742,172 @@ public static class DslFuzzUnits
                 CoverageSeed
             );
         }
+    }
+
+    /// <summary>
+    /// DateTimeOffset の列の種の単位（値オブジェクトなし・あり）。SQLite・SQL Server・PostgreSQL・Oracle の種の単位の列挙の末尾に足す（MySQL は
+    /// DateTimeOffset へ写す型を持たない）
+    /// </summary>
+    /// <remarks>
+    /// DateTimeOffset の列は既存の単位の列に足さず、この単位だけが持つ（既存の単位の行・クエリの乱数の引き方と、種の指紋の要約の既存の
+    /// 行を変えないため）。列は <see cref="DateTimeOffsetColumns"/>。
+    /// </remarks>
+    private static IEnumerable<DslFuzzUnit> DateTimeOffsets(string prefix, string dbms, int seed)
+    {
+        yield return Build(
+            $"{prefix}-datetimeoffset",
+            seed,
+            DateTimeOffsetColumns(dbms),
+            valueObjects: false
+        );
+        yield return Build(
+            $"{prefix}-datetimeoffset-vo",
+            seed,
+            DateTimeOffsetColumns(dbms),
+            valueObjects: true
+        );
+    }
+
+    /// <summary>
+    /// DateTimeOffset の列の網羅の単位（値オブジェクトあり・なし。種に依らない。名前は <c>coverage-{方言}-datetimeoffset</c> と
+    /// <c>coverage-{方言}-datetimeoffset-plain</c>）
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="ordered"/> が偽なら、DateTimeOffset の列の順序比較と並び替えを作らない（EF Core〔SQLite〕が流さないので、SQLite の
+    /// 3 実装先で流す単位はこちら）。真の SQLite の単位は名前に <c>-ordered</c> を足し、QuickER 版とインメモリだけで流す。
+    /// </remarks>
+    /// <param name="dbms">方言（<see cref="DialectNames"/> の SQLite・SQL Server・PostgreSQL・Oracle）</param>
+    /// <param name="ordered">DateTimeOffset の列の順序比較と並び替えを作るか</param>
+    public static IEnumerable<DslFuzzUnit> DateTimeOffsetCoverage(
+        string dbms,
+        bool ordered = true
+    ) =>
+        ColumnFamilyCoverage(
+            dbms,
+            "datetimeoffset",
+            DateTimeOffsetColumns,
+            DslClr.DateTimeOffset,
+            ordered
+        );
+
+    /// <summary>
+    /// SQLite の構成のインメモリだけで流す、時差の混ざった DateTimeOffset の値の網羅の単位（名前は
+    /// <c>coverage-sqlite-datetimeoffset-mixed-ordered</c> と <c>-mixed-ordered-plain</c>）
+    /// </summary>
+    /// <remarks>
+    /// SQLite の単位の値の池は時差をそろえた値（docs の既知の割り切り）なので、局所の時刻で比べても瞬間で比べても答えが変わらない。
+    /// インメモリは C# の比較なので時差の混ざった値でも割り切りが無く、Docker の要らない QuickER.Tests でもオラクルの瞬間の比較と
+    /// 並び替えを確かめられる（列の型は SQLite の宣言型のまま。QuickER 版と EF Core〔SQLite〕では流さない）。混在を断る形は作らない
+    /// （生成の段の形で、ほかの単位が作る）。
+    /// </remarks>
+    public static IEnumerable<DslFuzzUnit> SqliteMixedOffsetInMemoryCoverage() =>
+        ColumnFamilyCoverage(
+            DialectNames.Sqlite,
+            "datetimeoffset-mixed",
+            dbms =>
+                [
+                    .. DateTimeOffsetColumns(dbms)
+                        .Select(column =>
+                            column.Clr is DslClr.DateTimeOffset or DslClr.DateTime
+                                ? new DslColumn(
+                                    column.Name,
+                                    column.DataType,
+                                    column.Clr,
+                                    column.Nullable
+                                )
+                                {
+                                    Values =
+                                        column.Clr == DslClr.DateTimeOffset
+                                            ? DslFuzz.MixedOffsetPool
+                                            : null,
+                                }
+                                : column
+                        ),
+                ],
+            DslClr.DateTimeOffset,
+            ordered: true
+        );
+
+    /// <summary>
+    /// DateTimeOffset の列：主キー（bigint）・DateTimeOffset（NULL 許容と NOT NULL）・DateTime と DateTimeOffset の混在を断る形の相方の
+    /// NOT NULL の DateTime の列・射影の非 NULL 指定に使う NULL 許容の可変長のバイナリ・並び替えと合成の相方の整数の列
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 行と比べる値の池は docs の DateTimeOffset の既知の割り切りの写し：SQL Server・Oracle は時差の混ざった値（SQL Server は 100 ナノ秒の端数も。
+    /// Oracle はマイクロ秒の粒度）、SQLite は時差をそろえた値（TEXT で持ち、同じ時差の値どうしでだけ TEXT の順が瞬間の順と一致する）、
+    /// PostgreSQL は時差 0 の値（timestamptz は Npgsql が時差 0 でない値を断る）。PostgreSQL の timetz は作らない（作らない形の宣言）。
+    /// </para>
+    /// <para>
+    /// SQL Server の NULL 許容の列は <c>datetimeoffset(2)</c> で、比べる値に列の桁より細かい値を持つ（次元表の因子 ValueFit の beyond-scale）。
+    /// DateTimeOffset の列と DateTime の列は <see cref="DslColumn.ProbesDateTimeMix"/> を立て、混在のパラメータの原子（型の検査が断る）を作る。
+    /// DateTime の列は NOT NULL（NOT NULL の列の IN は要素の型への暗黙変換で型を決めるので、混在のリストが通る形を作れる）。
+    /// </para>
+    /// </remarks>
+    private static DslColumn[] DateTimeOffsetColumns(string dbms)
+    {
+        var (key, offsetNullable, offset, dateTime, varbinary, integer) = dbms switch
+        {
+            DialectNames.Sqlite => (
+                "INTEGER",
+                "DATETIMEOFFSET",
+                "DATETIMEOFFSET",
+                "DATETIME",
+                "VARBINARY(4)",
+                "int"
+            ),
+            DialectNames.SqlServer => (
+                "bigint",
+                "datetimeoffset(2)",
+                "datetimeoffset",
+                "datetime2",
+                "varbinary(4)",
+                "int"
+            ),
+            DialectNames.PostgreSql => (
+                "bigint",
+                "timestamptz",
+                "timestamptz",
+                "timestamp",
+                "bytea",
+                "integer"
+            ),
+            DialectNames.Oracle => (
+                "NUMBER(19)",
+                "TIMESTAMP WITH TIME ZONE",
+                "TIMESTAMP WITH TIME ZONE",
+                "TIMESTAMP",
+                "RAW(4)",
+                "NUMBER(10)"
+            ),
+            _ => throw new ArgumentOutOfRangeException(nameof(dbms), dbms, null),
+        };
+        var pool = dbms switch
+        {
+            DialectNames.Sqlite => DslFuzz.SameOffsetPool,
+            DialectNames.SqlServer => DslFuzz.MixedOffsetTickPool,
+            DialectNames.PostgreSql => DslFuzz.UtcOffsetPool,
+            _ => DslFuzz.MixedOffsetPool,
+        };
+
+        return
+        [
+            new("id", key, DslClr.Int64, Nullable: false, PrimaryKey: true),
+            new("dto", offsetNullable, DslClr.DateTimeOffset, Nullable: true)
+            {
+                Values = pool,
+                FractionalScale = dbms == DialectNames.SqlServer ? 2 : null,
+                ProbesDateTimeMix = true,
+            },
+            new("dton", offset, DslClr.DateTimeOffset, Nullable: false)
+            {
+                Values = pool,
+                ProbesDateTimeMix = true,
+            },
+            new("dt", dateTime, DslClr.DateTime, Nullable: false) { ProbesDateTimeMix = true },
+            new("bin", varbinary, DslClr.Binary, Nullable: true),
+            new("i32", integer, DslClr.Int32, Nullable: true),
+        ];
     }
 
     /// <summary>

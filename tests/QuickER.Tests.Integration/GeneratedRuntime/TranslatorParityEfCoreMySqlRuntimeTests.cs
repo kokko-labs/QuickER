@@ -40,6 +40,25 @@ public sealed class TranslatorParityEfCoreMySqlRuntimeTests(MySqlContainerFixtur
     private const string SubMicrosecond =
         "MySQL の datetime・time はマイクロ秒までしか持たず、ドライバが 1 マイクロ秒より細かい値を切り詰めて比べる（docs の EF Core の節の既知の割り切り）";
 
+    /// <summary>生成物の列の型が違うので流せない行と、その理由</summary>
+    private static readonly IReadOnlyDictionary<string, string> NotApplicableRows = new[]
+    {
+        "offset-equals-same-instant-other-offset",
+        "offset-not-equals-same-instant-other-offset",
+        "offset-less-instant-order-differs-from-local",
+        "offset-greater-or-equal-instant",
+        "offset-value-on-left",
+        "offset-negated-equals",
+        "offset-in-mixed-offsets",
+        "offset-not-in-with-null",
+    }.ToDictionary(id => id, _ => NoDateTimeOffsetType, StringComparer.Ordinal);
+
+    private const string NoDateTimeOffsetType =
+        "MySQL の型マッパーに DateTimeOffset に写す型が無く、方言切替が datetimeoffset の列 at_offset を timestamp（DateTime）へ写すので、DateTimeOffset の値と比べる述語を付け替えられない";
+
+    /// <inheritdoc />
+    protected override IReadOnlyDictionary<string, string> NotApplicable => NotApplicableRows;
+
     private static TranslatorParityEfCoreGenerated.Generated Generated =>
         TranslatorParityEfCoreGenerated.For(DialectNames.MySql);
 
@@ -51,7 +70,7 @@ public sealed class TranslatorParityEfCoreMySqlRuntimeTests(MySqlContainerFixtur
 
     /// <summary>
     /// MySQL はオフセットつき日時の型を持たず、方言切替が <c>at_offset</c> を <c>timestamp</c>（DateTime）へ写すので、
-    /// シードのオフセットつき日時はその日時の部分を入れる（この列を参照する行は表に無い）
+    /// シードのオフセットつき日時はその日時の部分を入れる（この列を参照する行は <see cref="NotApplicable"/> で流さない）
     /// </summary>
     protected override object? SeedValue(PropertyInfo target, object? value) =>
         value is DateTimeOffset offset && target.PropertyType != typeof(DateTimeOffset?)

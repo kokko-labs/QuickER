@@ -57,6 +57,9 @@ public enum DslClr
 
     /// <summary>TimeSpan（リテラルは書けず、パラメータとの比較・順序比較・IN・NULL 判定だけ）</summary>
     TimeSpan,
+
+    /// <summary>DateTimeOffset（リテラルは書けず、パラメータとの比較・順序比較・IN・NULL 判定だけ。瞬間で比べる）</summary>
+    DateTimeOffset,
 }
 
 /// <summary>総当たりの図の列</summary>
@@ -90,7 +93,8 @@ public sealed record DslColumn(
 
     /// <summary>順序比較（&lt; など）を使える列か（型の検査が文字列・Guid の順序比較を断る）</summary>
     public bool IsOrdered =>
-        IsInteger || Clr is DslClr.Decimal or DslClr.DateTime or DslClr.TimeSpan;
+        IsInteger
+        || Clr is DslClr.Decimal or DslClr.DateTime or DslClr.TimeSpan or DslClr.DateTimeOffset;
 
     /// <summary>
     /// Unicode でない文字列の列か（SQL Server の varchar・char＝照合順序のコードページで持ち、ASCII の外の文字が <c>?</c> に化ける列。
@@ -138,6 +142,18 @@ public sealed record DslColumn(
     /// 次元表の因子 ValueFit の beyond-range に数える）
     /// </summary>
     public DslTimeRange? TimeRange { get; init; }
+
+    /// <summary>
+    /// 日時の列の小数秒の桁（null なら値の桁のまま持つ列。SQL Server の <c>datetimeoffset(n)</c> の n が 7 より小さい列だけ立てる）。
+    /// 比べる値の小数秒がこの桁より細かければ、次元表の因子 ValueFit の beyond-scale に数える
+    /// </summary>
+    public int? FractionalScale { get; init; }
+
+    /// <summary>
+    /// DateTime と DateTimeOffset の混在を断る形（型の検査が断る原子）を作る列か。DateTimeOffset の単位の DateTimeOffset の列と、
+    /// その相方の DateTime の列だけ立てる（既存の単位の DateTime の列の乱数の引き方を変えないため）
+    /// </summary>
+    public bool ProbesDateTimeMix { get; init; }
 
     /// <summary>モデルの列（Id は図を組み立てるときに決まる）</summary>
     public Column Model { get; } =
@@ -273,20 +289,25 @@ public sealed record DslCompare(DslOp Op, DslOperand Operand) : DslAtom
         $"compare-{Op.ToString().ToLowerInvariant()}-{OperandKind}:{Column.Clr.ToString().ToLowerInvariant()}";
 
     private string OperandKind =>
-        Operand is DslParam ? "param"
-        : Fractional
-            ? RejectedByTypeCheck ? "literal-fractional-rejected"
-                : "literal-fractional"
-        : RejectedByTypeCheck ? "literal-rejected"
-        : "literal";
+        Operand is DslParam
+            ? RejectedByTypeCheck
+                ? "param-rejected"
+                : "param"
+            : Fractional
+                ? RejectedByTypeCheck
+                    ? "literal-fractional-rejected"
+                    : "literal-fractional"
+                : RejectedByTypeCheck
+                    ? "literal-rejected"
+                    : "literal";
 
     /// <summary>整数の列と小数のリテラルの比較か（docs：素の整数の列は数として比べ、整数の値オブジェクトの列は断る）</summary>
     public bool Fractional =>
         Column.IsInteger && Operand is DslLiteral literal && literal.Text.Contains('.');
 
     /// <summary>
-    /// 型の検査が断るリテラルか（C# の整数リテラルにならない値と、列の型〔値オブジェクトなら内包型〕の範囲外。
-    /// 生成時に警告で飛ばされることを確かめる）
+    /// 型の検査が断るオペランドか（C# の整数リテラルにならない値と、列の型〔値オブジェクトなら内包型〕の範囲外のリテラル・DateTime と
+    /// DateTimeOffset の混在のパラメータ。生成時に警告で飛ばされることを確かめる）
     /// </summary>
     public bool RejectedByTypeCheck { get; init; }
 
@@ -362,12 +383,25 @@ public sealed record DslIn(bool Negated, DslParam List) : DslAtom
         : List.Values.Any(value => value is null) ? ListWithNull
         : ListValues;
 
-    /// <summary>原子の形の名前（値の並ぶリストは <c>in</c>、ほかは <c>in-{リストの形}</c>）</summary>
-    public string ShapeName => ListShape == ListValues ? "in" : $"in-{ListShape}";
+    /// <summary>
+    /// 原子の形の名前（値の並ぶリストは <c>in</c>、ほかは <c>in-{リストの形}</c>。型の検査が断るリストは <c>in-rejected</c>＝次元表に宣言して
+    /// いない水準で、照合したクエリに現れたら観測が断る）
+    /// </summary>
+    public string ShapeName =>
+        RejectedByTypeCheck ? "in-rejected"
+        : ListShape == ListValues ? "in"
+        : $"in-{ListShape}";
 
     public override string Kind => $"{ShapeName}:{Column.Clr.ToString().ToLowerInvariant()}";
 
     public override bool InherentNegation => Negated;
+
+    /// <summary>
+    /// 型の検査が断るリストか（DateTime と DateTimeOffset の混在。生成時に警告で飛ばされることを確かめる）
+    /// </summary>
+    public bool RejectedByTypeCheck { get; init; }
+
+    public override bool IsRejectedByTypeCheck => RejectedByTypeCheck;
 
     public override IEnumerable<(string Code, string Cause)> KnownDiagnostics(bool valueObjects) =>
         valueObjects && Column.Nullable ? [("CS8604", "in-nullable-vo")] : [];
@@ -1381,6 +1415,8 @@ public static class DslFuzz
             (byte[] a, byte[] b) => a.AsSpan().SequenceEqual(b) ? 0 : 1,
             (DateTime a, DateTime b) => a.CompareTo(b),
             (TimeSpan a, TimeSpan b) => a.CompareTo(b),
+            // DateTimeOffset は瞬間（UTC の時刻）で比べる（C# の比較と同じ。時差の違う同じ瞬間は等しい）
+            (DateTimeOffset a, DateTimeOffset b) => a.CompareTo(b),
             _ => Convert
                 .ToDecimal(value, CultureInfo.InvariantCulture)
                 .CompareTo(Convert.ToDecimal(other, CultureInfo.InvariantCulture)),
@@ -1475,8 +1511,63 @@ public static class DslFuzz
                 new byte[] { 0x41 },
             ],
             DslClr.TimeSpan => TimeOfDayPool,
+            DslClr.DateTimeOffset => MixedOffsetPool,
             _ => throw new ArgumentOutOfRangeException(nameof(clr)),
         };
+
+    /// <summary>
+    /// 時差の混ざった DateTimeOffset の値の池（マイクロ秒の粒度）：同じ瞬間で時差の違う組（03:00Z・12:00+09:00・前日 22:00-05:00）、局所の
+    /// 時刻の順と瞬間の順が逆の組（12:00+09:00＝03:00Z と 05:00Z）、日付をまたぐ時差（+14:00・-12:00）、小数秒、端
+    /// </summary>
+    public static IReadOnlyList<object> MixedOffsetPool { get; } =
+    [
+        new DateTimeOffset(2024, 1, 1, 3, 0, 0, TimeSpan.Zero),
+        new DateTimeOffset(2024, 1, 1, 12, 0, 0, TimeSpan.FromHours(9)),
+        new DateTimeOffset(2023, 12, 31, 22, 0, 0, TimeSpan.FromHours(-5)),
+        new DateTimeOffset(2024, 1, 1, 5, 0, 0, TimeSpan.Zero),
+        new DateTimeOffset(2024, 1, 1, 3, 0, 0, 500, TimeSpan.Zero),
+        new DateTimeOffset(2024, 1, 1, 3, 0, 0, TimeSpan.Zero).AddTicks(10),
+        new DateTimeOffset(2024, 2, 29, 23, 59, 59, TimeSpan.FromHours(14)).AddTicks(9_999_990),
+        new DateTimeOffset(2024, 3, 1, 0, 0, 0, TimeSpan.FromHours(-12)),
+        new DateTimeOffset(1, 1, 1, 0, 0, 0, TimeSpan.Zero),
+        new DateTimeOffset(9999, 12, 31, 23, 59, 59, TimeSpan.Zero).AddTicks(9_999_990),
+    ];
+
+    /// <summary>
+    /// 時差の混ざった池に、100 ナノ秒の端数を持つ値（上の端の 7 桁を含む）を足したもの（SQL Server の datetimeoffset は 7 桁の端数を持つ）
+    /// </summary>
+    public static IReadOnlyList<object> MixedOffsetTickPool { get; } =
+    [
+        .. MixedOffsetPool,
+        new DateTimeOffset(2024, 1, 1, 12, 0, 0, TimeSpan.FromHours(9)).AddTicks(1),
+        new DateTimeOffset(9999, 12, 31, 23, 59, 59, TimeSpan.Zero).AddTicks(9_999_999),
+    ];
+
+    /// <summary>
+    /// 時差をそろえた DateTimeOffset の値の池（時差の混ざった池の局所の時刻を +09:00 にしたもの＝上の端を除く）。SQLite は値を TEXT で持ち、
+    /// 同じ時差の値どうしでだけ TEXT の順が瞬間の順と一致する（docs の DateTimeOffset の既知の割り切り）
+    /// </summary>
+    public static IReadOnlyList<object> SameOffsetPool { get; } =
+    [
+        .. MixedOffsetPool
+            .Cast<DateTimeOffset>()
+            .Where(value => value.Year < 9999 && value.Year > 1)
+            .Select(value => (object)new DateTimeOffset(value.DateTime, TimeSpan.FromHours(9)))
+            .Distinct(),
+        new DateTimeOffset(2024, 1, 1, 12, 0, 0, TimeSpan.FromHours(9)).AddTicks(1),
+    ];
+
+    /// <summary>
+    /// 時差 0（UTC）の DateTimeOffset の値の池（時差の混ざった池を UTC にしたもの・マイクロ秒の粒度）。PostgreSQL の timestamptz は時差 0 の値
+    /// だけを書け、比べられる（docs の DateTimeOffset の既知の割り切り）
+    /// </summary>
+    public static IReadOnlyList<object> UtcOffsetPool { get; } =
+    [
+        .. MixedOffsetPool
+            .Cast<DateTimeOffset>()
+            .Select(value => (object)value.ToUniversalTime())
+            .Distinct(),
+    ];
 
     /// <summary>
     /// 日の中（0〜24 時間未満）の TimeSpan の値の池（マイクロ秒の粒度＝PostgreSQL・MySQL が端数を落とさない値。docs の
@@ -1561,6 +1652,7 @@ public static class DslFuzz
             DslClr.Boolean => "boolean",
             DslClr.Binary => "binary(4)",
             DslClr.TimeSpan => "time",
+            DslClr.DateTimeOffset => "datetimeoffset",
             _ => throw new ArgumentOutOfRangeException(nameof(clr), clr, "型トークンの無い種類"),
         };
 

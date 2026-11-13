@@ -144,14 +144,14 @@ public sealed partial class DslFuzzGenerator(
     private int _parameterIndex;
 
     /// <summary>
-    /// TimeSpan の列の順序比較と、TimeSpan の列での並び替えを作るか（既定は作る）。EF Core〔SQLite〕は TimeSpan の大小の比較と並び替えを
+    /// 順序比較と並び替えを作らない列の種類（既定は空＝作る）。EF Core〔SQLite〕は TimeSpan・DateTimeOffset の大小の比較と並び替えを
     /// 翻訳できず流さない（<c>DslConditionFuzzTests</c> の ExcludedOnEfCoreSqlite）ので、SQLite の網羅の単位のうち 3 実装先で流す側は作らない
     /// </summary>
-    public bool TimeSpanOrdered { get; init; } = true;
+    public IReadOnlySet<DslClr> UnorderedClrs { get; init; } = new HashSet<DslClr>();
 
-    /// <summary>列に順序比較を作るか（順序を持つ列で、TimeSpan の列は <see cref="TimeSpanOrdered"/> のときだけ）</summary>
+    /// <summary>列に順序比較を作るか（順序を持つ列で、<see cref="UnorderedClrs"/> に無い種類のときだけ）</summary>
     private bool CanOrder(DslColumn column) =>
-        column.IsOrdered && (TimeSpanOrdered || column.Clr != DslClr.TimeSpan);
+        column.IsOrdered && !UnorderedClrs.Contains(column.Clr);
 
     /// <summary>行を作る（NULL 許容の列は約 4 分の 1 を NULL にする）</summary>
     public List<IReadOnlyDictionary<string, object?>> Rows(
@@ -857,6 +857,26 @@ public sealed partial class DslFuzzGenerator(
             };
         }
 
+        // DateTime と DateTimeOffset の混在（型の検査が断る＝C# の暗黙変換が DateTime を機械の時間帯で DateTimeOffset にするので、答えが
+        // 実行する機械で変わる）。断られる形は演算子に依らないので、等値と順序比較を 1 つずつと値の並ぶリストの IN だけを作る
+        if (column.ProbesDateTimeMix)
+        {
+            foreach (var op in new[] { DslOp.Eq, DslOp.Ge })
+            {
+                yield return new DslCompare(op, MixedDateParam(column, isList: false))
+                {
+                    Column = column,
+                    RejectedByTypeCheck = true,
+                };
+            }
+
+            yield return new DslIn(Negated: false, MixedDateParam(column, isList: true))
+            {
+                Column = column,
+                RejectedByTypeCheck = true,
+            };
+        }
+
         if (!column.IsString)
         {
             yield break;
@@ -1197,6 +1217,27 @@ public sealed partial class DslFuzzGenerator(
         var value = Pick(pool);
 
         return new DslLiteral(value, DslFuzz.QuoteText(value));
+    }
+
+    /// <summary>
+    /// DateTime と DateTimeOffset の混在のパラメータ（DateTimeOffset の列には DateTime の型トークン、DateTime の列には DateTimeOffset の
+    /// 型トークンで型付けし、値はその型の値の池から選ぶ。型の検査が断るので実行しない）
+    /// </summary>
+    private DslParam MixedDateParam(DslColumn column, bool isList)
+    {
+        var other = column.Clr == DslClr.DateTimeOffset ? DslClr.DateTime : DslClr.DateTimeOffset;
+        var pool = DslFuzz.ValuePool(other);
+
+        return new DslParam(
+            parameterPrefix + _parameterIndex++,
+            isList ? [Pick(pool), Pick(pool)] : [Pick(pool)],
+            isList,
+            ByColumn: false,
+            column
+        )
+        {
+            TypeToken = DslFuzz.TypeToken(other),
+        };
     }
 
     private DslParam Param(DslColumn column) =>

@@ -379,6 +379,9 @@
   <data name="CodeGen_Query_ConditionOperandTypeMismatch" xml:space="preserve">
     <value>Named query '{0}' (table '{4}'): the condition compares column '{1}' ({2}) with {3}, which does not fit the generated C# types, so the query was skipped. Align the operand with the column's type (a typed @parameter usually works).</value>
   </data>
+  <data name="CodeGen_Query_ConditionTimeZoneDependentOperand" xml:space="preserve">
+    <value>Named query '{0}' (table '{4}'): the condition compares column '{1}' ({2}) with {3}. Comparing a DateTime with a DateTimeOffset converts the DateTime with the time zone of the machine running the code, so the answer depends on that machine, and the query was skipped. Declare the parameter with the column's type (datetimeoffset or datetime).</value>
+  </data>
   <data name="CodeGen_Query_ScalarRequiresType" xml:space="preserve">
     <value>Named query '{0}': the scalar return shape requires a scalar type token.</value>
   </data>

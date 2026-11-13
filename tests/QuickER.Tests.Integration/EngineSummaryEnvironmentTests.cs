@@ -12,13 +12,15 @@ public sealed class EngineSummaryEnvironmentTests
     public static TheoryData<string> Engines() =>
         new(
             "SyncModel",
+            "SyncModelWide",
             "SyncPlan.sqlite",
             "SyncPlan.mysql",
             "SyncPlan.sqlserver",
             "SyncPlan.postgresql",
             "SyncPlan.oracle",
             "BackendParity",
-            "BackendParitySqlServerSaves"
+            "BackendParitySqlServerSaves",
+            "BackendParitySqlServerValues"
         );
 
     [Theory(DisplayName = "[指紋] 要約は外側のカルチャ（ja-JP・en-US）に依らない")]
@@ -61,6 +63,13 @@ public sealed class EngineSummaryEnvironmentTests
                     EngineFingerprintDriftTests.SyncModelSummary
                 );
                 return;
+            case "SyncModelWide":
+                // 広い世界の種（端末 3 台・最初の形）は既存の範囲の種と別の記録（SyncModelWide）で、要約は同じ関数
+                use(
+                    GeneratedRuntime.SyncModelRuntimeTests.WideSeeds,
+                    EngineFingerprintDriftTests.SyncModelSummary
+                );
+                return;
             case "BackendParity":
                 use(
                     GeneratedRuntime.BackendParityRuntimeTests.Seeds,
@@ -71,6 +80,13 @@ public sealed class EngineSummaryEnvironmentTests
                 use(
                     GeneratedRuntime.BackendParitySqlServerRuntimeTests.RandomSaveSeeds,
                     EngineFingerprintDriftTests.ParitySqlServerSaveSummary
+                );
+                return;
+            case "BackendParitySqlServerValues":
+                // 値の往復は DateTimeOffset の値を要約に持つ（SeedSummary は時差を時刻と @ で隔てて書くので、時差の形にならない）
+                use(
+                    GeneratedRuntime.BackendParitySqlServerValueRuntimeTests.Seeds,
+                    EngineFingerprintDriftTests.ParitySqlServerValueSummary
                 );
                 return;
         }

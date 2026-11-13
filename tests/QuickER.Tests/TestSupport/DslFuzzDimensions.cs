@@ -417,6 +417,7 @@ public static class DslFuzzDimensions
                             shape.StartsWith($"compare-{op}-", StringComparison.Ordinal)
                         )
                 ),
+                .. DateTimeOffsetGaps(),
                 CoverageGap.AcceptedMatching(
                     "sqlite:efcore",
                     "P1-3",
@@ -541,6 +542,69 @@ public static class DslFuzzDimensions
             ),
         ];
     }
+
+    /// <summary>
+    /// DateTimeOffset の列の網羅しない組：MySQL は DateTimeOffset へ写す型を持たない・EF Core（SQLite）は順序比較を翻訳できない・小数秒の
+    /// 桁を宣言する列（<see cref="DslColumn.FractionalScale"/>）は SQL Server の単位にしか無い
+    /// </summary>
+    private static IEnumerable<CoverageGapEntry> DateTimeOffsetGaps() =>
+        [
+            .. new[] { "mysql:inmemory", "mysql:efcore" }.SelectMany(scope =>
+                UnmappedClrGaps(
+                    scope,
+                    [DslClr.DateTimeOffset],
+                    "MySQL の型マッパー（src/QuickER.Provider.MySql/MySqlCSharpTypeMapper.cs の Map）は DateTimeOffset へ写す型を持たない（timestamp・datetime は DateTime へ写す）ので、DateTimeOffset の列を作れない",
+                    "DO"
+                )
+            ),
+            CoverageGap.AcceptedMatching(
+                "sqlite:efcore",
+                "DO",
+                "EF Core の SQLite プロバイダは DateTimeOffset の大小の比較を翻訳できず例外にする（Microsoft Learn の「SQLite Database Provider - Limitations」の Query limitations。docs の DateTimeOffset の既知の割り切り）ので、DslConditionFuzzTests の ExcludedOnEfCoreSqlite が DateTimeOffset の列の順序比較を含むクエリを EF Core（SQLite）で流さない",
+                Clr,
+                Shape,
+                (clr, shape) =>
+                    clr == nameof(DslClr.DateTimeOffset)
+                    && OrderedOps.Any(op =>
+                        shape.StartsWith($"compare-{op}-", StringComparison.Ordinal)
+                    )
+            ),
+            .. new[]
+            {
+                "sqlite:ado",
+                "sqlite:efcore",
+                "sqlite:inmemory",
+                "postgresql:efcore",
+                "oracle:efcore",
+            }.Select(scope =>
+                CoverageGap.AcceptedTuple(
+                    scope,
+                    "DO",
+                    "小数秒の桁を宣言する DateTimeOffset の列（datetimeoffset(n)）を持つのは SQL Server の単位だけ。SQLite は値を TEXT で持ち、PostgreSQL の timestamptz と Oracle の TIMESTAMP WITH TIME ZONE の値の池はマイクロ秒の粒度にそろえる（マイクロ秒より細かい値の切り詰めは docs の日時の既知の割り切り）ので、列の桁より細かい値を作らない",
+                    (Clr, nameof(DslClr.DateTimeOffset)),
+                    (ValueFit, FitBeyondScale)
+                )
+            ),
+            // null を含む IN のリストに列の型の外の値を持てるのは、値オブジェクトの検証が小数秒の桁を見ない DateTimeOffset の列だけ
+            .. new[]
+            {
+                "sqlite:ado",
+                "sqlite:efcore",
+                "sqlite:inmemory",
+                "mysql:inmemory",
+                "postgresql:efcore",
+                "mysql:efcore",
+                "oracle:efcore",
+            }.Select(scope =>
+                CoverageGap.AcceptedTuple(
+                    scope,
+                    "DO",
+                    "null を含む IN のリスト（値オブジェクトのリスト）が列の型の外の値を持てるのは、値オブジェクトの Create が小数秒の桁を検証しない DateTimeOffset の列で、小数秒の桁を宣言する列（datetimeoffset(n)）は SQL Server の単位だけ（数値の値オブジェクトは型の外の値を検証エラーにする）",
+                    (Shape, "in-with-null"),
+                    (ValueFit, FitBeyondScale)
+                )
+            ),
+        ];
 
     /// <summary>
     /// 使い回すパラメータの値が列の型の外になる形を作る区切り（使い回しでない形は ValueFit の水準が作る）
@@ -702,6 +766,15 @@ public static class DslFuzzDimensions
         if (column.TimeRange is { } timeRange)
         {
             return value is TimeSpan time && !timeRange.Contains(time) ? FitBeyondRange : FitFits;
+        }
+
+        // 小数秒の桁を持つ日時の列（SQL Server の datetimeoffset(n)）は、桁より細かい小数秒の値をスケールの外に数える
+        if (column.FractionalScale is { } fractionalDigits)
+        {
+            var unit = (long)Math.Pow(10, 7 - fractionalDigits);
+            return value is DateTimeOffset offset && offset.Ticks % unit != 0
+                ? FitBeyondScale
+                : FitFits;
         }
 
         if (column.Money is { } money)
@@ -1048,9 +1121,10 @@ public static class DslFuzzDimensions
                 or DslClr.UInt64
                 or DslClr.Decimal
                 or DslClr.DateTime
-                or DslClr.TimeSpan;
+                or DslClr.TimeSpan
+                or DslClr.DateTimeOffset;
 
-        // 順序比較は順序を持つ型（整数・decimal・日時・TimeSpan）だけ（型の検査が文字列・Guid・GuidKey の順序比較を断る＝OrderedOperatorUnsupported）
+        // 順序比較は順序を持つ型（整数・decimal・日時・TimeSpan・DateTimeOffset）だけ（型の検査が文字列・Guid・GuidKey の順序比較を断る＝OrderedOperatorUnsupported）
         if (OrderedOps.Any(op => shape.StartsWith($"compare-{op}-", StringComparison.Ordinal)))
         {
             if (!isOrdered)
@@ -1059,8 +1133,8 @@ public static class DslFuzzDimensions
             }
         }
 
-        // 日時・Guid・bool・バイナリ・TimeSpan はリテラルを書けない（DSL に真偽値・日時・バイナリ・TimeSpan のリテラルは無く、型の検査は
-        // 文字列リテラルを文字列の列だけ・数値リテラルを数値の列だけに許す）
+        // 日時・Guid・bool・バイナリ・TimeSpan・DateTimeOffset はリテラルを書けない（DSL に真偽値・日時・バイナリ・TimeSpan のリテラルは無く、
+        // 型の検査は文字列リテラルを文字列の列だけ・数値リテラルを数値の列だけに許す）
         if (
             shape.EndsWith("-literal", StringComparison.Ordinal)
             && shape.StartsWith("compare-", StringComparison.Ordinal)
@@ -1070,6 +1144,7 @@ public static class DslFuzzDimensions
                     or DslClr.Boolean
                     or DslClr.Binary
                     or DslClr.TimeSpan
+                    or DslClr.DateTimeOffset
         )
         {
             return false;
@@ -1156,8 +1231,12 @@ public static class DslFuzzDimensions
                     );
 
             // 数値の列の IN のリストで null を持てるのは値オブジェクトのリストだけ（値型の要素は null を持てない）で、値オブジェクトの
-            // Create は列の型に入らない値を検証エラーにする（docs の値オブジェクトの節）
-            if ((stringMatch || shape == "in-with-null") && numeric)
+            // Create は列の型に入らない値を検証エラーにする（docs の値オブジェクトの節）。DateTimeOffset の値オブジェクトは小数秒の桁を
+            // 検証しないので、DateTimeOffset の列（か列の種類を問わない組）の小数秒の桁の外れ方は null を含むリストでも起こり得る
+            var offsetScale =
+                fit == FitBeyondScale && (clr is null || clr == nameof(DslClr.DateTimeOffset));
+
+            if ((stringMatch || (shape == "in-with-null" && !offsetScale)) && numeric)
             {
                 return false;
             }
@@ -1194,7 +1273,13 @@ public static class DslFuzzDimensions
             // TimeSpan の列は値の範囲（DslColumn.TimeRange）を持ち、範囲の外の値はあるが小数の桁の外れ方は無い
             var timeRange = kind == DslClr.TimeSpan && fit == FitBeyondRange;
 
-            if ((numeric && !isNumber && !timeRange) || (fit == FitBeyondCharset && !isText))
+            // DateTimeOffset の列は小数秒の桁（DslColumn.FractionalScale）を持ち、桁より細かい値はあるが範囲の外れ方は無い
+            var fractionalScale = kind == DslClr.DateTimeOffset && fit == FitBeyondScale;
+
+            if (
+                (numeric && !isNumber && !timeRange && !fractionalScale)
+                || (fit == FitBeyondCharset && !isText)
+            )
             {
                 return false;
             }

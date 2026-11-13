@@ -42,7 +42,22 @@ public sealed class TranslatorParityEfCoreSqliteRuntimeTests
         ["time-out-of-day-greater-or-equal-negative"] = TimeSpanOrdering,
         ["time-out-of-day-less-or-equal-negative"] = TimeSpanOrdering,
         ["time-out-of-day-value-on-left"] = TimeSpanOrdering,
+        ["offset-less-instant-order-differs-from-local"] = OffsetOrdering,
+        ["offset-greater-or-equal-instant"] = OffsetOrdering,
+        ["offset-value-on-left"] = OffsetOrdering,
+        ["offset-equals-same-instant-other-offset"] = OffsetText,
+        ["offset-not-equals-same-instant-other-offset"] = OffsetText,
+        ["offset-negated-equals"] = OffsetText,
+        ["offset-in-mixed-offsets"] = OffsetText,
     };
+
+    /// <summary>DateTimeOffset の列の大小の比較の割り切りの理由</summary>
+    private const string OffsetOrdering =
+        "EF Core の SQLite プロバイダは DateTimeOffset の列の大小の比較を翻訳できず、InvalidOperationException で断る（プロバイダの文書の Query limitations。docs の DateTimeOffset の既知の割り切り）";
+
+    /// <summary>DateTimeOffset の列の等値の割り切りの理由</summary>
+    private const string OffsetText =
+        "SQLite は DateTimeOffset を TEXT で持ち、EF Core の SQLite プロバイダは等値と IN を TEXT の比較にするので、時差の違う同じ瞬間を等しいとしない（docs の DateTimeOffset の既知の割り切り）";
 
     /// <summary>TimeSpan の列の大小の比較の割り切りの理由</summary>
     private const string TimeSpanOrdering =

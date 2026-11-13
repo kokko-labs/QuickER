@@ -33,7 +33,18 @@ public sealed class TranslatorParitySqliteRuntimeTests
             ["time-out-of-day-less"] = OutOfDayOrdering,
             ["time-out-of-day-greater"] = OutOfDayOrdering,
             ["time-out-of-day-value-on-left"] = OutOfDayOrdering,
+            ["offset-equals-same-instant-other-offset"] = OffsetText,
+            ["offset-not-equals-same-instant-other-offset"] = OffsetText,
+            ["offset-less-instant-order-differs-from-local"] = OffsetText,
+            ["offset-greater-or-equal-instant"] = OffsetText,
+            ["offset-value-on-left"] = OffsetText,
+            ["offset-negated-equals"] = OffsetText,
+            ["offset-in-mixed-offsets"] = OffsetText,
         };
+
+    /// <summary>時差の違う DateTimeOffset との比較の割り切りの理由</summary>
+    private const string OffsetText =
+        "SQLite は DateTimeOffset を TEXT（yyyy-MM-dd HH:mm:ss.FFFFFFF+hh:mm）で持ち、等値・IN・順序比較を TEXT の比較にするので、時差の違う値どうしは瞬間の比較と割れる（docs の DateTimeOffset の既知の割り切り。同じ時差の値どうしは C# と同じ）";
 
     /// <summary>1 日の値との順序比較の割り切りの理由</summary>
     private const string OutOfDayOrdering =

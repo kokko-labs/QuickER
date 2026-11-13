@@ -379,6 +379,9 @@
   <data name="CodeGen_Query_ConditionOperandTypeMismatch" xml:space="preserve">
     <value>名前付きクエリ '{0}'（テーブル '{4}'）: 条件式が列 '{1}'（{2}）を {3} と比較していますが、生成される C# の型と両立しないため、このクエリをスキップしました。オペランドを列の型に合わせてください（型付きの @パラメータが確実です）。</value>
   </data>
+  <data name="CodeGen_Query_ConditionTimeZoneDependentOperand" xml:space="preserve">
+    <value>名前付きクエリ '{0}'（テーブル '{4}'）: 条件式が列 '{1}'（{2}）を {3} と比較しています。DateTime と DateTimeOffset の比較は DateTime を実行する機械の時間帯で変換し、答えが機械で変わるため、このクエリをスキップしました。パラメータを列の型（datetimeoffset か datetime）で宣言してください。</value>
+  </data>
   <data name="CodeGen_Query_ScalarRequiresType" xml:space="preserve">
     <value>名前付きクエリ '{0}': スカラー戻り形には型トークン（scalarType）が必要です。</value>
   </data>

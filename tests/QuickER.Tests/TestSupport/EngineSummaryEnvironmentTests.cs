@@ -86,15 +86,37 @@ public sealed class EngineSummaryEnvironmentTests
                 ),
             true
         ),
+        // 往復の書式の DateTimeOffset は時差を時刻の直後に書くので、時差の形として名指しする
         ["datetimeoffset-plus-nine"] = (
             () =>
-                SeedSummary.Object(new DateTimeOffset(2026, 2, 1, 8, 0, 0, TimeSpan.FromHours(9))),
+                "at="
+                + new DateTimeOffset(2026, 2, 1, 8, 0, 0, TimeSpan.FromHours(9)).ToString(
+                    "o",
+                    System.Globalization.CultureInfo.InvariantCulture
+                ),
             true
         ),
         ["datetimeoffset-minus-five"] = (
             () =>
-                SeedSummary.Object(new DateTimeOffset(2026, 2, 1, 8, 0, 0, TimeSpan.FromHours(-5))),
+                "at="
+                + new DateTimeOffset(2026, 2, 1, 8, 0, 0, TimeSpan.FromHours(-5)).ToString(
+                    "o",
+                    System.Globalization.CultureInfo.InvariantCulture
+                ),
             true
+        ),
+        // 要約は DateTimeOffset の時差（値のデータ）を時刻と @ で隔てて書くので、時差の形にならない（簡易 DSL の DateTimeOffset の値の池）
+        ["datetimeoffset-written-by-summary"] = (
+            () =>
+                SeedSummary.Object(
+                    new List<object?>
+                    {
+                        new DateTimeOffset(2026, 2, 1, 8, 0, 0, TimeSpan.FromHours(9)),
+                        new DateTimeOffset(2026, 2, 1, 8, 0, 0, 500, TimeSpan.FromHours(-5)),
+                        new DateTimeOffset(2026, 2, 1, 8, 0, 0, TimeSpan.Zero),
+                    }
+                ),
+            false
         ),
     };
 

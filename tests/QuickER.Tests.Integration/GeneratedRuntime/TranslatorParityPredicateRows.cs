@@ -138,6 +138,29 @@ public static class TranslatorParityPredicateRows
         var negativeHour = TimeSpan.FromHours(-1);
         var clocksWithOutOfDay = new List<TimeSpan?> { oneDay, new TimeSpan(0, 10, 0, 0, 120) };
         var onlyOutOfDayClocks = new List<TimeSpan?> { oneDay, negativeHour };
+        // probes の at_offset：id 1＝2024-01-01 05:00+09:00（12/31 20:00Z）・id 2＝2023-12-31 22:00-03:00（1/1 01:00Z）・
+        // id 3＝2024-06-30 23:30Z・id 5＝2024-01-01 00:00+09:00（12/31 15:00Z）・ほかは NULL。局所の時刻の順と瞬間の順が逆の組を持つ
+        var sameInstantAsFirstUtc = new DateTimeOffset(2023, 12, 31, 20, 0, 0, TimeSpan.Zero);
+        var sameInstantAsSecondTokyo = new DateTimeOffset(
+            2024,
+            1,
+            1,
+            10,
+            0,
+            0,
+            TimeSpan.FromHours(9)
+        );
+        var halfPastMidnightUtc = new DateTimeOffset(2024, 1, 1, 0, 30, 0, TimeSpan.Zero);
+        var offsetsMixed = new List<DateTimeOffset?>
+        {
+            sameInstantAsFirstUtc,
+            sameInstantAsSecondTokyo,
+        };
+        var offsetsUtcWithNull = new List<DateTimeOffset?>
+        {
+            new DateTimeOffset(2024, 6, 30, 23, 30, 0, TimeSpan.Zero),
+            null,
+        };
         var amountBeyondScale = 100.004m;
         var amountBeyondPrecision = 123456789.5m;
         var amountsBeyondScale = new List<decimal?> { 100.004m, 300m };
@@ -527,6 +550,47 @@ public static class TranslatorParityPredicateRows
                 "time-out-of-day-not-in-only",
                 "範囲の外の値だけのリストの NOT IN は NULL の行を含む全行に一致する",
                 x => !onlyOutOfDayClocks.Contains(x.Clock)
+            ),
+            // ---- DateTimeOffset は瞬間で比べる（時差の違う同じ瞬間は等しく、大小は局所の時刻でなく瞬間の順） ----
+            Probe(
+                "offset-equals-same-instant-other-offset",
+                "時差の違う同じ瞬間との == は一致する（id 1 の 05:00+09:00 と 20:00Z）",
+                x => x.AtOffset == sameInstantAsFirstUtc
+            ),
+            Probe(
+                "offset-not-equals-same-instant-other-offset",
+                "時差の違う同じ瞬間との != は、その行を除き NULL の行を含む全行に一致する",
+                x => x.AtOffset != sameInstantAsFirstUtc
+            ),
+            Probe(
+                "offset-less-instant-order-differs-from-local",
+                "< は局所の時刻でなく瞬間で比べる（id 2 の 1/1 01:00Z は 00:30Z より後・id 1 の局所の 05:00 は前）",
+                x => x.AtOffset < halfPastMidnightUtc
+            ),
+            Probe(
+                "offset-greater-or-equal-instant",
+                ">= は時差の違う同じ瞬間も含む（10:00+09:00 は id 2 の 01:00Z と同じ瞬間）",
+                x => x.AtOffset >= sameInstantAsSecondTokyo
+            ),
+            Probe(
+                "offset-value-on-left",
+                "値が左の 00:30Z > 列は、列 < 00:30Z と同じく瞬間で比べる",
+                x => halfPastMidnightUtc > x.AtOffset
+            ),
+            Probe(
+                "offset-negated-equals",
+                "時差の違う同じ瞬間との == の否定（式の木の Not）は、その行を除き NULL の行を含む全行に一致する",
+                Negate<ProbeEntity>(x => x.AtOffset == sameInstantAsSecondTokyo, 1)
+            ),
+            Probe(
+                "offset-in-mixed-offsets",
+                "時差の違う値のリストの IN は、同じ瞬間の行に一致する（id 1・2）",
+                x => offsetsMixed.Contains(x.AtOffset)
+            ),
+            Probe(
+                "offset-not-in-with-null",
+                "時差 0 の値と null のリストの NOT IN は、NULL でなくリストの瞬間でない行に一致する",
+                x => !offsetsUtcWithNull.Contains(x.AtOffset)
             ),
             Probe(
                 "varchar-equals-non-ascii",

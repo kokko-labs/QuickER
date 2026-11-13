@@ -47,6 +47,7 @@ public sealed class NamedQueryDslConditionFuzzPostgreSqlRuntimeTests(
                 DslFuzzUnits.PlainCoverage(DialectNames.PostgreSql),
                 .. DslFuzzUnits.FamiliesCoverage(DialectNames.PostgreSql),
                 .. DslFuzzUnits.TimeSpanCoverage(DialectNames.PostgreSql),
+                .. DslFuzzUnits.DateTimeOffsetCoverage(DialectNames.PostgreSql),
             ],
             Ct
         );

@@ -25,10 +25,34 @@ internal static class DslFuzzNotGenerated
             [
                 NotGenerated.Pending(
                     "column-type-families",
-                    "列の型の族（float・DateTimeOffset）",
-                    "族ごとの区切り（DateTimeOffset → float）",
-                    "生成器の列の型（DslClr）にこれらの族が無い。族ごとの実装先の意味（SQLite の文字列の比較・NaN・PostgreSQL の時差の制限など。区切り TF のフェーズ 1 の分析）を docs に書いてから足す",
+                    "列の型の族（float）",
+                    "float の区切り（未起動）",
+                    "生成器の列の型（DslClr）に float の族が無い。族の実装先の意味（NaN・±∞・単精度の丸めなど。区切り TF のフェーズ 1 の分析）を docs に書いてから足す",
                     "`CodegenConfig/Cases`（行 `diag-query-type-check-rejects-*`）"
+                ),
+                NotGenerated.Accepted(
+                    "mysql-datetimeoffset-columns",
+                    "MySQL の単位の DateTimeOffset の列",
+                    "MySQL の型マッパーは DateTimeOffset へ写す型を持たない（timestamp・datetime は DateTime へ写す）ので、MySQL の生成物に DateTimeOffset の列が現れない",
+                    "`Dialect/Types`"
+                ),
+                NotGenerated.Accepted(
+                    "datetimeoffset-offsets-beyond-dialect",
+                    "SQLite の単位の時差の違う DateTimeOffset の値と、PostgreSQL の単位の時差 0 でない DateTimeOffset の値",
+                    "docs の DateTimeOffset の既知の割り切り：SQLite は DateTimeOffset を TEXT で持ち、同じ時差の値どうしでだけ TEXT の比較が瞬間の比較と一致する。PostgreSQL の timestamptz は Npgsql が時差 0 でない値を書く・パラメータにするのを断る。SQLite の単位は時差をそろえた値、PostgreSQL の単位は時差 0 の値だけを作る（時差の混ざった値は SQL Server・Oracle の単位とインメモリが流す）",
+                    "`Dsl/SqliteMySql`・`Dsl/PostgreSql`・`table:TranslatorParityPredicates`"
+                ),
+                NotGenerated.Accepted(
+                    "efcore-sqlite-datetimeoffset-ordering",
+                    "EF Core（SQLite）での DateTimeOffset の列の順序比較と、DateTimeOffset の列での並び替え",
+                    "EF Core の SQLite プロバイダは DateTimeOffset の大小の比較と並び替えを翻訳できず例外にする（Microsoft Learn の「SQLite Database Provider - Limitations」の Query limitations。docs の DateTimeOffset の既知の割り切り）ので、DslConditionFuzzTests の ExcludedOnEfCoreSqlite が EF Core（SQLite）で流さない。QuickER 版とインメモリは網羅の単位 coverage-sqlite-datetimeoffset-ordered で流す",
+                    "`Dsl/SqliteMySql`"
+                ),
+                NotGenerated.Accepted(
+                    "postgresql-timetz-columns",
+                    "PostgreSQL の単位の timetz（time with time zone）の列",
+                    "docs の DateTimeOffset の既知の割り切り：timetz は日付を持たず（Npgsql は日付を書かず、読み戻した値の日付は 0001-01-02）、PostgreSQL は timetz を UTC の時刻で比べてから時差で比べるので、時差の違う同じ瞬間を等しいとしない。瞬間で比べる C# の意味と合わないので、総当たりの PostgreSQL の単位は timestamptz だけを持つ",
+                    "`Dialect/Types`"
                 ),
                 NotGenerated.Accepted(
                     "oracle-timespan-columns",
@@ -68,8 +92,8 @@ internal static class DslFuzzNotGenerated
                 ),
                 NotGenerated.Accepted(
                     "rejected-integer-literal-in-composite",
-                    "型の検査が断る整数のリテラル（列の型の範囲の外と ulong を超える値）を合成の条件に混ぜる",
-                    "断るリテラルはクエリごと警告で飛ばすので、合成の条件に混ぜるとほかの原子を照合しなくなる。原子のクエリでだけ作り、飛ばされることを表明する",
+                    "型の検査が断る原子（列の型の範囲の外と ulong を超える整数のリテラル・DateTime と DateTimeOffset の混在のパラメータ）を合成の条件に混ぜる",
+                    "断る原子はクエリごと警告で飛ばすので、合成の条件に混ぜるとほかの原子を照合しなくなる。原子のクエリでだけ作り、飛ばされることを表明する",
                     "`Dsl/SqliteMySql`"
                 ),
                 NotGenerated.Accepted(

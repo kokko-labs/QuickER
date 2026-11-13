@@ -103,7 +103,7 @@ SQL Server 方言エンジン（QuickER 版 Repository の ADO 実装）の固�
   - IN・NOT IN（`BuildInClause`）は範囲の外の要素を、null の要素と同じく自分のパラメータを持たせずに飛ばす。残りが空なら空のリストの既存の規則（IN は `1 = 0`・NOT IN は `1 = 1`、null の要素があれば `col IS NULL`・`col IS NOT NULL`）が C# の答えを出す。
   - 範囲の中の値は今の `col op @p` のまま（列の索引が使える）。値の側が null の `==`・`!=` は既存の `IS [NOT] NULL` が先に返す。列どうしは畳まない（両側とも範囲の中）。
 - 外すと、範囲の外の値との比較が `OverflowException` になり、C#・インメモリ・ほかの DB と割れる。EF Core 版は SQL の形を変えられず、パラメータの型を変えても比べられる型が無いので、docs の既知の割り切り（SqlClient の `OverflowException`）。
-- ガード：簡易 DSL の総当たりの網羅の単位 `coverage-sqlserver-timespan-out-of-day`（`Dsl/SqlServer`。QuickER 版だけで流す）と、述語の表の行 `time-out-of-day-*`（`table:TranslatorParityPredicates`。値が左の形・否定の反転・IN の混在・NOT IN の範囲の外だけ。EF Core 版 SQL Server は理由つきの `Known` と `KnownParameterOverflows`）。
+- ガード：簡易 DSL の総当たりの網羅の単位 `coverage-sqlserver-timespan-out-of-day`（`Dsl/SqlServer`。QuickER 版だけで流す）と、述語の表の行 `time-out-of-day-*`（`table:TranslatorParityPredicates`。値が左の形・否定の反転・IN の混在・NOT IN の範囲の外だけ。EF Core 版 SQL Server は理由つきの `Known` と `KnownParameterRefusals`）。
 
 ## Save フックが書いた blob の版の読み直し
 
