@@ -282,6 +282,16 @@ public sealed partial class DslFuzzGenerator
     /// <summary>値が列の型に入るか（decimal の列は宣言の精度とスケールで見る。ほかの列は値の池が列の種類の範囲なので入る）</summary>
     private static bool FitsColumn(object value, DslColumn column)
     {
+        if (column.Money is { } money)
+        {
+            var amount = Convert.ToDecimal(
+                value,
+                System.Globalization.CultureInfo.InvariantCulture
+            );
+
+            return money.Fits(amount);
+        }
+
         if (
             column.Clr != DslClr.Decimal
             || DecimalFacets(column.DataType) is not var (precision, scale)

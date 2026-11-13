@@ -48,11 +48,11 @@
 | `EfCoreExecutionStrategy` | 非該当 | 非該当 | 空き（きっかけ待ち） | 担当 | 空き（きっかけ待ち） | 空き（きっかけ待ち） | 空き（きっかけ待ち） | 非該当 | 非該当 |
 | `IgnoredWrite` | 空き（きっかけ待ち） | 担当 | 空き（きっかけ待ち） | 担当 | 空き（きっかけ待ち） | 空き（きっかけ待ち） | 空き（きっかけ待ち） | 非該当 | 担当（サーバー：QuickER 版 SQLite・EF Core SQLite） |
 | `IncludeGraphSelfReference` | 担当 | 担当 | 空き（きっかけ待ち） | 担当 | 空き（きっかけ待ち） | 空き（きっかけ待ち） | 空き（きっかけ待ち） | 担当 | 非該当 |
-| `NamedQuery` | 担当 | 担当 | 担当 | 担当 | 空き（区切り D3） | 空き（区切り D3） | 空き（区切り D3） | 担当 | 担当（サーバー：QuickER 版 SQLite・EF Core SQLite） |
+| `NamedQuery` | 担当 | 担当 | 担当 | 担当 | 担当 | 担当 | 担当 | 担当 | 担当（サーバー：QuickER 版 SQLite・EF Core SQLite） |
 | `NamedQueryRawSql` | 空き（きっかけ待ち） | 担当 | 空き（きっかけ待ち） | 担当 | 空き（きっかけ待ち） | 空き（きっかけ待ち） | 空き（きっかけ待ち） | 非該当 | 担当（サーバー：QuickER 版 SQLite・EF Core SQLite） |
 | `TranslatorOperator` | 担当 | 担当 | 非該当 | 非該当 | 非該当 | 非該当 | 非該当 | 非該当 | 非該当 |
-| `ValueObjectStringMatch` | 担当 | 担当 | 空き（きっかけ待ち） | 担当 | 空き（区切り D3） | 空き（区切り D3） | 空き（区切り D3） | 担当 | 非該当 |
-| `TranslatorParity` | 担当 | 担当 | 担当 | 担当 | 空き（区切り D3） | 空き（区切り D3） | 空き（区切り D3） | 担当 | 非該当 |
+| `ValueObjectStringMatch` | 担当 | 担当 | 空き（きっかけ待ち） | 担当 | 担当 | 担当 | 担当 | 担当 | 非該当 |
+| `TranslatorParity` | 担当 | 担当 | 担当 | 担当 | 担当 | 担当 | 担当 | 担当 | 非該当 |
 | `SchemaBootstrap` | 担当 | 担当 | 非該当 | 非該当 | 非該当 | 非該当 | 非該当 | 非該当 | 非該当 |
 | `MultiTarget` | 担当 | 担当 | 非該当 | 非該当 | 非該当 | 非該当 | 非該当 | 空き（きっかけ待ち） | 空き（きっかけ待ち） |
 | `MultiTargetRowVersion` | 担当 | 担当 | 非該当 | 非該当 | 非該当 | 非該当 | 非該当 | 空き（きっかけ待ち） | 空き（きっかけ待ち） |
@@ -289,9 +289,9 @@ IncludeGraph の edge-skip（自己参照ナビを展開しない）
 - QuickER 版 SQLite：担当＝`NamedQueryAdoRuntimeTests`・`SqlitePortableNamedQueryRuntimeTests`
 - EF Core SQL Server：担当＝`DslConditionFuzzSqlServerRuntimeTests`（実装先の軸 ado・efcore（方言 sqlserver））
 - EF Core SQLite：担当＝`NamedQueryEfCoreRuntimeTests`
-- EF Core PostgreSQL：空き（区切り D3）＝PostgreSQL・MySQL・Oracle の EF Core 版のクエリ（述語・簡易 DSL・照合順序・空文字列）の照合は区切り D3 が足す
-- EF Core MySQL：空き（区切り D3）＝PostgreSQL・MySQL・Oracle の EF Core 版のクエリ（述語・簡易 DSL・照合順序・空文字列）の照合は区切り D3 が足す
-- EF Core Oracle：空き（区切り D3）＝PostgreSQL・MySQL・Oracle の EF Core 版のクエリ（述語・簡易 DSL・照合順序・空文字列）の照合は区切り D3 が足す
+- EF Core PostgreSQL：担当＝`NamedQueryDslConditionFuzzPostgreSqlRuntimeTests`（実装先の軸 efcore（方言 postgresql））
+- EF Core MySQL：担当＝`NamedQueryDslConditionFuzzMySqlRuntimeTests`（実装先の軸 efcore（方言 mysql））
+- EF Core Oracle：担当＝`NamedQueryDslConditionFuzzOracleRuntimeTests`（実装先の軸 efcore（方言 oracle））
 - インメモリ：担当＝`NamedQueryInMemoryRuntimeTests`
 - リモート：担当＝`RemoteServiceAdoRuntimeTests`（サーバー：QuickER 版 SQLite）・`RemoteServiceEfCoreRuntimeTests`（サーバー：EF Core SQLite）
 
@@ -331,9 +331,9 @@ IncludeGraph の edge-skip（自己参照ナビを展開しない）
 - QuickER 版 SQLite：担当＝`StringMatchMethodAdoRuntimeTests`
 - EF Core SQL Server：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - EF Core SQLite：担当＝`StringMatchMethodEfCoreRuntimeTests`
-- EF Core PostgreSQL：空き（区切り D3）＝PostgreSQL・MySQL・Oracle の EF Core 版のクエリ（述語・簡易 DSL・照合順序・空文字列）の照合は区切り D3 が足す
-- EF Core MySQL：空き（区切り D3）＝PostgreSQL・MySQL・Oracle の EF Core 版のクエリ（述語・簡易 DSL・照合順序・空文字列）の照合は区切り D3 が足す
-- EF Core Oracle：空き（区切り D3）＝PostgreSQL・MySQL・Oracle の EF Core 版のクエリ（述語・簡易 DSL・照合順序・空文字列）の照合は区切り D3 が足す
+- EF Core PostgreSQL：担当＝`ValueObjectStringMatchEfCorePostgreSqlRuntimeTests`
+- EF Core MySQL：担当＝`ValueObjectStringMatchEfCoreMySqlRuntimeTests`
+- EF Core Oracle：担当＝`ValueObjectStringMatchEfCoreOracleRuntimeTests`
 - インメモリ：担当＝`StringMatchMethodInMemoryRuntimeTests`
 - リモート：非該当＝Query() はリモート面に無く、式木は転送されない
 
@@ -345,9 +345,9 @@ IncludeGraph の edge-skip（自己参照ナビを展開しない）
 - QuickER 版 SQLite：担当＝`TranslatorParitySqliteRuntimeTests`
 - EF Core SQL Server：担当＝`TranslatorParityEfCoreSqlServerRuntimeTests`
 - EF Core SQLite：担当＝`TranslatorParityEfCoreSqliteRuntimeTests`
-- EF Core PostgreSQL：空き（区切り D3）＝PostgreSQL・MySQL・Oracle の EF Core 版のクエリ（述語・簡易 DSL・照合順序・空文字列）の照合は区切り D3 が足す
-- EF Core MySQL：空き（区切り D3）＝PostgreSQL・MySQL・Oracle の EF Core 版のクエリ（述語・簡易 DSL・照合順序・空文字列）の照合は区切り D3 が足す
-- EF Core Oracle：空き（区切り D3）＝PostgreSQL・MySQL・Oracle の EF Core 版のクエリ（述語・簡易 DSL・照合順序・空文字列）の照合は区切り D3 が足す
+- EF Core PostgreSQL：担当＝`TranslatorParityEfCorePostgreSqlRuntimeTests`
+- EF Core MySQL：担当＝`TranslatorParityEfCoreMySqlRuntimeTests`
+- EF Core Oracle：担当＝`TranslatorParityEfCoreOracleRuntimeTests`
 - インメモリ：担当＝`TranslatorParityInMemoryRuntimeTests`
 - リモート：非該当＝Query() はリモート面に無く、式木は転送されない
 

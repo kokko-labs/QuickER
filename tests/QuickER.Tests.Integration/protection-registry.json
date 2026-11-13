@@ -234,6 +234,81 @@
       ]
     },
     {
+      "id": "Dsl",
+      "part": "PostgreSql",
+      "title": "簡易 DSL の条件の総当たり（PostgreSQL の EF Core 版）",
+      "sourceFiles": [
+        "tests/QuickER.Tests/TestSupport/DslFuzz.cs",
+        "tests/QuickER.Tests/TestSupport/DslFuzzDimensions.cs",
+        "tests/QuickER.Tests/TestSupport/DslFuzzGenerator.cs",
+        "tests/QuickER.Tests/TestSupport/DslFuzzKnownFailures.cs",
+        "tests/QuickER.Tests/TestSupport/DslFuzzUnits.cs",
+        "tests/QuickER.Tests/CodeGen.CSharp/DslFuzzExecution.cs",
+        "tests/QuickER.Tests/CodeGen.CSharp/DslFuzzRunner.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/NamedQueryDslConditionFuzzPostgreSqlRuntimeTests.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/DslConditionFuzzEfCore.cs"
+      ],
+      "covers": [
+        "src/QuickER.CodeGen.CSharp/Queries",
+        "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime",
+        "src/QuickER.Runtime",
+        "src/QuickER.Runtime.Sqlite",
+        "src/QuickER.Runtime.SqlServer",
+        "src/QuickER.Runtime.EntityFrameworkCore",
+        "src/QuickER.Runtime.InMemory"
+      ]
+    },
+    {
+      "id": "Dsl",
+      "part": "MySql",
+      "title": "簡易 DSL の条件の総当たり（MySQL の EF Core 版）",
+      "sourceFiles": [
+        "tests/QuickER.Tests/TestSupport/DslFuzz.cs",
+        "tests/QuickER.Tests/TestSupport/DslFuzzDimensions.cs",
+        "tests/QuickER.Tests/TestSupport/DslFuzzGenerator.cs",
+        "tests/QuickER.Tests/TestSupport/DslFuzzKnownFailures.cs",
+        "tests/QuickER.Tests/TestSupport/DslFuzzUnits.cs",
+        "tests/QuickER.Tests/CodeGen.CSharp/DslFuzzExecution.cs",
+        "tests/QuickER.Tests/CodeGen.CSharp/DslFuzzRunner.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/NamedQueryDslConditionFuzzMySqlRuntimeTests.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/DslConditionFuzzEfCore.cs"
+      ],
+      "covers": [
+        "src/QuickER.CodeGen.CSharp/Queries",
+        "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime",
+        "src/QuickER.Runtime",
+        "src/QuickER.Runtime.Sqlite",
+        "src/QuickER.Runtime.SqlServer",
+        "src/QuickER.Runtime.EntityFrameworkCore",
+        "src/QuickER.Runtime.InMemory"
+      ]
+    },
+    {
+      "id": "Dsl",
+      "part": "Oracle",
+      "title": "簡易 DSL の条件の総当たり（Oracle の EF Core 版）",
+      "sourceFiles": [
+        "tests/QuickER.Tests/TestSupport/DslFuzz.cs",
+        "tests/QuickER.Tests/TestSupport/DslFuzzDimensions.cs",
+        "tests/QuickER.Tests/TestSupport/DslFuzzGenerator.cs",
+        "tests/QuickER.Tests/TestSupport/DslFuzzKnownFailures.cs",
+        "tests/QuickER.Tests/TestSupport/DslFuzzUnits.cs",
+        "tests/QuickER.Tests/CodeGen.CSharp/DslFuzzExecution.cs",
+        "tests/QuickER.Tests/CodeGen.CSharp/DslFuzzRunner.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/NamedQueryDslConditionFuzzOracleRuntimeTests.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/DslConditionFuzzEfCore.cs"
+      ],
+      "covers": [
+        "src/QuickER.CodeGen.CSharp/Queries",
+        "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime",
+        "src/QuickER.Runtime",
+        "src/QuickER.Runtime.Sqlite",
+        "src/QuickER.Runtime.SqlServer",
+        "src/QuickER.Runtime.EntityFrameworkCore",
+        "src/QuickER.Runtime.InMemory"
+      ]
+    },
+    {
       "id": "Name",
       "part": "DdlRoundTrip",
       "title": "名前の総当たりの DDL の往復（5 方言の実 DB）",

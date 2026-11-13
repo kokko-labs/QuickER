@@ -57,6 +57,60 @@ public sealed partial class DslFuzzGenerator
     private static readonly object[] BeyondRangeLongs = [long.MaxValue, long.MinValue, 100000000L];
 
     /// <summary>
+    /// SQL Server の money・smallmoney の列の小数 4 桁の外の値（4 桁へ丸めると行の値の池の 2.25・0.01・10・-1.5・1.5 に重なる）
+    /// </summary>
+    private static readonly object[] BeyondScaleMoney =
+    [
+        2.25004m,
+        0.01004m,
+        10.00004m,
+        -1.50004m,
+        1.49996m,
+    ];
+
+    /// <summary>SQL Server の money の列の範囲の外の値（列で型付けする）</summary>
+    private static readonly object[] BeyondRangeMoney =
+    [
+        922_337_203_685_478m,
+        -922_337_203_685_478m,
+        1_000_000_000_000_000m,
+    ];
+
+    /// <summary>SQL Server の money の列の範囲の外の値（<c>int64</c> で型付けする）</summary>
+    private static readonly object[] BeyondRangeMoneyLongs =
+    [
+        long.MaxValue,
+        long.MinValue,
+        1_000_000_000_000_000L,
+    ];
+
+    /// <summary>SQL Server の smallmoney の列の範囲の外の値（列で型付けする）</summary>
+    private static readonly object[] BeyondRangeSmallMoney = [214_749m, -214_749m, 1_000_000m];
+
+    /// <summary>SQL Server の smallmoney の列の範囲の外の値（<c>int64</c> で型付けする）</summary>
+    private static readonly object[] BeyondRangeSmallMoneyLongs =
+    [
+        214_749L,
+        -214_749L,
+        long.MaxValue,
+    ];
+
+    /// <summary>
+    /// decimal の列と比べる、列の型に入らない値の池（スケールの外・範囲の外・<c>int64</c> で型付けする範囲の外）。money・smallmoney の列は
+    /// その型の小数 4 桁と範囲、ほかは <c>decimal(10,2)</c> の列の池
+    /// </summary>
+    private static (
+        object[] BeyondScale,
+        object[] BeyondRange,
+        object[] BeyondRangeLongs
+    ) OutOfTypePools(DslColumn column) =>
+        column.Money == DslMoneyType.Money
+            ? (BeyondScaleMoney, BeyondRangeMoney, BeyondRangeMoneyLongs)
+        : column.Money == DslMoneyType.SmallMoney
+            ? (BeyondScaleMoney, BeyondRangeSmallMoney, BeyondRangeSmallMoneyLongs)
+        : (BeyondScaleDecimals, BeyondRangeDecimals, BeyondRangeLongs);
+
+    /// <summary>
     /// 整数の列と比べる小数（<c>decimal(18,2)</c> へ丸めると下がって、行の値の池の 1・0・-1・5 に重なる）
     /// </summary>
     private static readonly object[] BeyondScaleFractions = [1.004m, 0.0001m, -0.9951m, 5.0049m];
@@ -90,6 +144,17 @@ public sealed partial class DslFuzzGenerator
     public List<DslQuery> OutOfTypeQueries(IReadOnlyList<DslColumn> columns) =>
         OutOfTypeAtoms(columns, decimalOrdered: true, bothQuotes: false, seedSubset: true)
             .Select((atom, i) => AtomQuery($"X{i}", atom, SpellingAt(i)))
+            .ToList();
+
+    /// <summary>
+    /// 列の型に入らない値の原子 1 つずつのクエリ（網羅の単位の全ての形。結果が赤になったとき、どの経路〔列で型付けしたパラメータ・
+    /// 広い型トークン・リテラル・IN / NOT IN〕の原子かを 1 つのクエリで読めるようにする）
+    /// </summary>
+    /// <param name="columns">列（先頭が主キー）</param>
+    /// <param name="prefix">クエリ名の接頭辞</param>
+    public List<DslQuery> OutOfTypeAtomQueries(IReadOnlyList<DslColumn> columns, string prefix) =>
+        OutOfTypeAtoms(columns, decimalOrdered: true, bothQuotes: false, seedSubset: false)
+            .Select((atom, i) => AtomQuery($"{prefix}{i}", atom, SpellingAt(i)))
             .ToList();
 
     /// <summary>
@@ -201,7 +266,8 @@ public sealed partial class DslFuzzGenerator
         foreach (var column in FilterableColumns(columns))
         {
             var atoms =
-                column.Clr == DslClr.Decimal && DecimalFacets(column.DataType) is not null
+                column.Clr == DslClr.Decimal
+                && (column.Money is not null || DecimalFacets(column.DataType) is not null)
                     ? DecimalOutOfType(column, decimalOrdered, seedSubset)
                 : column.Nullable && column.IsInteger ? IntegerOutOfType(column, seedSubset)
                 : column.NonUnicode ? NonAsciiAtoms(column, bothQuotes)
@@ -220,28 +286,30 @@ public sealed partial class DslFuzzGenerator
     /// </summary>
     private IEnumerable<DslAtom> DecimalOutOfType(DslColumn column, bool ordered, bool seedSubset)
     {
+        var (beyondScale, beyondRange, beyondRangeLongs) = OutOfTypePools(column);
+
         foreach (
             var op in Enum.GetValues<DslOp>().Where(op => ordered || op is DslOp.Eq or DslOp.Ne)
         )
         {
             if (!seedSubset)
             {
-                yield return OutOfTypeCompare(column, op, BeyondScaleDecimals, typeToken: null);
-                yield return OutOfTypeCompare(column, op, BeyondScaleDecimals, "decimal(18,6)");
-                yield return OutOfTypeCompare(column, op, BeyondRangeDecimals, typeToken: null);
-                yield return OutOfTypeCompare(column, op, BeyondRangeLongs, "int64");
+                yield return OutOfTypeCompare(column, op, beyondScale, typeToken: null);
+                yield return OutOfTypeCompare(column, op, beyondScale, "decimal(18,6)");
+                yield return OutOfTypeCompare(column, op, beyondRange, typeToken: null);
+                yield return OutOfTypeCompare(column, op, beyondRangeLongs, "int64");
             }
 
-            yield return OutOfTypeLiteral(column, op, BeyondScaleDecimals);
-            yield return OutOfTypeLiteral(column, op, BeyondRangeDecimals);
+            yield return OutOfTypeLiteral(column, op, beyondScale);
+            yield return OutOfTypeLiteral(column, op, beyondRange);
         }
 
         foreach (var negated in new[] { false, true })
         {
             // 種の単位は IN をスケールの外、NOT IN を整数部の外の 1 つずつにする
             var pools = seedSubset
-                ? [negated ? BeyondRangeDecimals : BeyondScaleDecimals]
-                : new[] { BeyondScaleDecimals, BeyondRangeDecimals };
+                ? [negated ? beyondRange : beyondScale]
+                : new[] { beyondScale, beyondRange };
 
             foreach (var pool in pools)
             {

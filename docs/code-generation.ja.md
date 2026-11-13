@@ -619,12 +619,19 @@ GUI のクエリ定義ダイアログと `set_query` も、保存前に同じ検
 | SQL Server | 列の照合順序に従う（既定の `..._CI_AS` なら大文字小文字を区別しない）。Unicode でない列（`char`・`varchar`）では列の値の末尾の空白を数えず、パターンの空白は数える |
 | SQLite | 組み込みの `LIKE` が ASCII の英字だけを畳む（`A` は `a` に一致し、`Á` は `á` に一致しない） |
 | EF Core | プロバイダ任せで、やはり格納先次第 |
+| EF Core（PostgreSQL） | データベースの既定の照合順序（`en_US.utf8` などの決定的な照合順序）で、大文字小文字を区別する |
+| EF Core（MySQL） | 既定の照合順序 `utf8mb4_0900_ai_ci` は、大文字小文字とアクセントを区別せず、合成済みの文字と分解形を同じとみなし、`ß` と `ss` も同じとみなす。値オブジェクトの列では 3 つの呼び出しともこれに従う。素の string の列の `StartsWith` と `EndsWith` だけは例外で、大文字小文字を区別し、パターンの末尾の空白を数えない |
+| EF Core（Oracle） | 既定のバイナリ比較（`NLS_COMP=BINARY`）で、大文字小文字を区別する |
 | インメモリ | 式木を C# として評価するため序数比較になり、素の string 列でも値オブジェクトでも区別する |
 
 `Equals(..., StringComparison.*IgnoreCase)` は `LOWER(col) = LOWER(@p)` へ変換されますが、畳み方はやはりエンジン任せです（SQLite では ASCII のみ）。
 
 影響が出るのはハイブリッド構成です。
 マルチターゲットや「サーバーへリモート・ローカルコピーへ直結」の構成は同じ述語を 2 つのエンジンで走らせるため、サーバー側では大文字小文字を区別しない検索が、ローカル側では区別する検索になり得ます。
+
+MySQL では、等値の比較も照合順序が決めます。
+`x.Name == "a"`・`x.Name != "a"`・`IN` のリストは、文字列一致と同じく `a`・`A`・`á` を同じ値とみなし、C# とインメモリ実装は序数で比べます。
+PostgreSQL と Oracle は、既定では等値を序数で比べます。
 
 `Query()` の述語の `string.IsNullOrEmpty` と `string.IsNullOrWhiteSpace` は `NULL` でも真になり、両 SQL エンジンで C# と同じ結果を返します。
 SQL Server の空の判定は `DATALENGTH` で行います（`= ''` は末尾の空白を無視するため、空白だけの値も空とみなしてしまいます）。
@@ -636,6 +643,17 @@ Unicode でない列（`char(n)`・`varchar(n)`）の文字列一致は、列の
 `char(4)` の列の `a   ` も `varchar` の列の `a ` も `EndsWith("a")` に一致し、読み戻した値へ C# で当てた結果（一致しない）と食い違います。
 インメモリ実装は値を詰めずに持ち、そのまま比べるため、結果が食い違うことがあります。
 
+PostgreSQL の `char(n)` の列も値を詰めて返し、`=`・`IN`・ワイルドカードの無い `LIKE` は末尾の空白を無視します。
+そのため `x.Code == "a"` は、C# で読み戻すと `a` の後ろに空白が続く行に一致します。
+MySQL の `char(n)` の列は末尾の空白を落として返すので、`a ` と書いた値は `a` で戻ります。
+
+Oracle は空文字列を `NULL` として持ちます。
+列に書いた空文字列は `null` で戻り、`NOT NULL` の列は空文字列を断ります。
+変数に入れた空文字列（`var empty = "";`）との比較は `NULL` との比較になります：`x.Name != empty` はどの行にも一致せず、`""` を含む `IN`・`NOT IN` のリストは `NULL` を含むリストと同じに振る舞います。
+手書きの LINQ にリテラルで書いた同じ比較は、別の形に変換されます：`x.Name == ""` は `IS NULL` になって `NULL` の行に一致し、変数の `x.Name == empty` はどの行にも一致しません。
+`string.IsNullOrEmpty` は、読み戻した値へ C# で当てた答えと同じです。
+簡易 DSL の条件の文字列のリテラルは変数として生成するので、名前付きクエリは変数と同じに比べます。
+
 日付部品（`Year`・`Month` など）へ変換されるのは、読み出し元が `DateTime` / `DateOnly` / `DateTimeOffset`（いずれも nullable を含む）の列である場合だけです。
 同名のプロパティを別の型に持たせても、日付部品とは見なしません（値オブジェクトへ partial で足した場合など）。
 黙って `YEAR([col])` になる代わりに、`NotSupportedException` で失敗します。
@@ -643,19 +661,32 @@ Unicode でない列（`char(n)`・`varchar(n)`）の文字列一致は、列の
 
 SQL Server の QuickER 版 Repository と EF Core 版 Repository は、比べる値が列の型にそのまま入るときだけ、値を列の型で束縛します。
 入らない値は値の型で束縛するので、比較は C# と同じ答えになります。
-対象は、整数の列と小数や範囲の外の整数（`x.Qty < 1.5`・`x.Tiny < 300`）、列の精度とスケールより桁の多い decimal、`date` の列と時刻つきの日時、Unicode でない列（`varchar`・`char`）と ASCII の外の文字です。
+対象は、整数の列と小数や範囲の外の整数（`x.Qty < 1.5`・`x.Tiny < 300`）、列の精度とスケールより桁の多い decimal、`money`・`smallmoney` の列と範囲の外か小数 4 桁を超える数（`x.Price == 1.23456m`）、`date` の列と時刻つきの日時、Unicode でない列（`varchar`・`char`）と ASCII の外の文字です。
 このときサーバーはその比較のために列の側を変換するので、列のインデックスが使われないことがあります。
 EF Core 版 Repository では、クエリのすべてのパラメータ（名前付きクエリ・手書きの LINQ の `Query()`・IN のリストの要素・`Contains` のパターン）と、`ExecuteDeleteAsync` の条件が対象です（[EF Core モード](#ef-core-モードgenerateefcorerepositories)を参照）。
+PostgreSQL の EF Core 版 Repository も、`date` の列と比べる時刻つきの `DateTime` を同じように扱い、`timestamp` で送ります。
 
 > **既知の割り切り**: EF Core 版 Repository では、手書きの LINQ に書いた定数はパラメータになりません。
 > EF Core は定数を SQL へ書き込み、Unicode でない列と比べる文字列の定数は Unicode でない文字列で書くので、ASCII の外の文字は `?` に変わり、`?` を持つ行に一致します（`Query().Where(x => x.Code == "日本")`）。
 > こうした値は変数で渡してください（EF Core はパラメータで送ります）。
 > 簡易 DSL の条件の文字列のリテラルは変数として生成するので、名前付きクエリは C# と同じ答えになります。
 
-> **既知の割り切り**: SQL Server の EF Core 版 Repository では、整数の列と decimal の列の比較（`Query().Where(x => x.Qty > x.Price)`）が、桁あふれで失敗することがあります。
+> **既知の割り切り**: SQL Server・PostgreSQL・Oracle の EF Core 版 Repository では、整数の列と decimal の列の比較（`Query().Where(x => x.Qty > x.Price)`）が、桁あふれで失敗することがあります。
 > EF Core は整数の列を decimal の列の型（`decimal(10,2)` など）へ CAST するので、その型に入らない桁の整数を持つ行が 1 行でもあると、クエリ全体が失敗します。
-> QuickER 版 Repository は CAST せずに 2 つの列を比べます。
+> QuickER 版 Repository と MySQL の EF Core 版 Repository は、失敗せずに 2 つの列を比べます。
 > 簡易 DSL の条件は列と値だけを比べるので、名前付きクエリはこの形になりません。
+
+> **既知の割り切り**: PostgreSQL と MySQL は日時をマイクロ秒までしか持たず、ドライバは比べる値のそれより細かい部分を落として送ります。
+> そのため 1 マイクロ秒より細かい端数を持つ `DateTime`・`TimeSpan`（1 tick は 100 ナノ秒）は、マイクロ秒へ切り詰めた値として比べられ、C# では一致しない `x.At == value` が一致することがあります。
+> SQL Server と Oracle は、それぞれの上限まで値の端数をそのまま持ち、C# と同じ答えになります。
+
+> **既知の割り切り**: PostgreSQL の EF Core 版 Repository は、`money` の列と比べる値を `money` で送り、`money` は小数を 2 桁だけ持ちます。
+> 小数が 3 桁以上の値は先に丸められるので、C# では一致しない `x.Price == 1.234m` が `1.23` を持つ行に一致します。
+> PostgreSQL には `money` と `numeric` の比較が無いので、値の型では送れません。
+> 小数が 2 桁以下の値は C# と同じ答えになります。
+> `money` の列とリテラルで書いた負の数を比べる条件（手書きの LINQ の `x.Price < -1m`、簡易 DSL の条件の `price < -1`）は、PostgreSQL が `operator does not exist: - money` で断ります。
+> Npgsql はこうした定数を `-1::money` と書き、PostgreSQL は `money` の負号を持たないためです。
+> 負の値はパラメータで渡してください（手書きの LINQ では変数、名前付きクエリではパラメータ）。
 
 リストの `Contains` は要素 1 個につきバインド変数 1 個へ展開され、チャンク分割はしません。
 そのため巨大なリストは方言のバインド変数・IN リスト上限を超えて実行時エラーになります（SQL Server の 2100 パラメータ、SQLite の歴史的な 999 など）。
@@ -1214,11 +1245,11 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 - Unicode でない文字列の列（SQL Server の `varchar`・`char`・`text`、Oracle の `VARCHAR2`・`CHAR`・`CLOB`）は、`IsUnicode(false)` で構成します。
   パラメータは Unicode でない文字列で送られ、DB は列を変換せずに比べられます。
   この構成は図の方言の型で決まるので、複数の DB で使う図は、文字列の列を Unicode（`nvarchar` など）にそろえてください
-- SQL Server では、生成する `QuickErDbContext` が、型を取る列の無い変換で EF Core が式を `decimal(38,19)` へ変換するようにします。
+- SQL Server と Oracle では、生成する `QuickErDbContext` が、型を取る列の無い変換で EF Core が式を `decimal(38,19)`（Oracle では `NUMBER(38,19)`）へ変換するようにします。
   C# は整数を decimal と比べるとき decimal へ広げ（`x.Id > 1.5m`）、EF Core はそれを `CAST([id] AS decimal(…))` と書きます。
-  EF Core の既定の `decimal(18,2)` では、整数部が 16 桁を超える `bigint` の値が CAST で桁あふれし、比べる値に依らずクエリ全体が桁あふれで失敗します。
+  EF Core の既定の `decimal(18,2)` では、整数部が 16 桁を超える `bigint` の値が CAST で桁あふれし、比べる値に依らずクエリ全体が桁あふれのエラー（SQL Server では算術オーバーフロー、Oracle では ORA-01438）で失敗します。
   `decimal(38,19)` は整数部の 19 桁にすべての `long` が入り、小数を 19 桁持てます。
-  それより桁の多い比べる値は値の型で送ります（次の項目を参照）。
+  SQL Server では、それより桁の多い比べる値は値の型で送ります（後の `SqlServerQueryParameterInterceptor` の項目を参照）。
   プロパティの型は、精度の指定の有無に依らず変わりません。
   列と比べるパラメータも、今までどおり列の型を取ります。
   射影や計算の中の同じ変換（`Select(x => x.Qty / 3m)`）も `decimal(38,19)` になるので、結果の小数の桁は EF Core の既定より多くなります。
@@ -1233,18 +1264,33 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   順序比較と、`decimal` の列の比較は書き換えず、今までどおり EF Core が翻訳します
 - SQL Server では、EF Core がパラメータに付けた型に入らない比べる値を、QuickER 版 Repository と同じく値の型で送ります（[クエリ](#クエリ式木--sql-変換)を参照）。
   EF Core はパラメータに比べる相手の列の型を付け、SqlClient は値をその型へ変換してから送ります。
-  `decimal(10,2)` の列と比べる `1.234` は `1.23` になり、精度を超える値は `ArgumentException` になり、Unicode でない列と比べる ASCII の外の文字は `?` になります。
-  `SqlServerQueryParameterInterceptor` は、こうした decimal のパラメータの精度とスケールを外し、こうした文字列を Unicode の文字列で送ります。
+  `decimal(10,2)` の列と比べる `1.234` は `1.23` になり、精度を超える値は `ArgumentException` になり、`money`・`smallmoney` の列は値を小数 4 桁へ丸めて範囲の外の値で `OverflowException` を出し、Unicode でない列と比べる ASCII の外の文字は `?` になります。
+  `SqlServerQueryParameterInterceptor` は、こうした decimal のパラメータの精度とスケールを外し、こうした `money`・`smallmoney` の値を decimal で送り、こうした文字列を Unicode の文字列で送ります。
   列に入る値は列の型のままなので、SQL と列のインデックスの使われ方は変わりません。
   変えるのは LINQ のクエリと `ExecuteDelete` / `ExecuteUpdate` のコマンドだけです。
   `SaveChanges` は今までどおりに値を送るので、入らない値は列が変換したとおりに保存されます。
   `AddGeneratedEfCoreRepositories` は、渡した構成の後にこのインターセプターを DbContext のオプションへ足します。
   `DbContextOptions` を自分で組むときは、`AddInterceptors` で `SqlServerQueryParameterInterceptor.Instance` を足してください。
   ほかのプロバイダの接続には触れません
+- PostgreSQL では、`date` の列と比べる時刻つきの `DateTime` の時刻を落としません。
+  EF Core はパラメータに列の型 `date` を付け、Npgsql は時刻を落としてから送るので、`x.Day < noon` はその日の行を落とし、`x.Day == noon` はその日の行に一致します。
+  `PostgreSqlQueryParameterInterceptor` はこうした値を `timestamp` で送るので、PostgreSQL は C# と同じく日付を値の全体と比べます。
+  0 時ちょうどの値は `date` の型のままです。
+  SQL Server のインターセプターと同じく、変えるのは LINQ のクエリと `ExecuteDelete` / `ExecuteUpdate` のコマンドだけです。
+  `AddGeneratedEfCoreRepositories` は、渡した構成の後にこのインターセプターを DbContext のオプションへ足します。
+  `DbContextOptions` を自分で組むときは、`AddInterceptors` で `PostgreSqlQueryParameterInterceptor.Instance` を足してください。
+  ほかのプロバイダの接続には触れません
+- PostgreSQL では、値に `null` を含む値オブジェクトの列の IN（`list` に `null` がある `list.Contains(x.Code)`）を、EF Core が条件を翻訳する前に書き換えます。
+  Npgsql は値を 1 つの配列のパラメータで送り、要素ごとに値オブジェクトの変換を当てるので、`null` の要素で `NullReferenceException` になるためです。
+  書き換えは `null` を除いた値を送り、値に `null` があれば `x.Code == null` を足します（C# の条件の意味と同じ）。
+  対象は `Query()` の条件（名前付きクエリ・手書きの LINQ・`ExecuteDeleteAsync`）で、`QuickErDbContext` へ直接書いたクエリは書き換えません
+- SQL Server の `money`・`smallmoney` の列と PostgreSQL の `money` の列は、`HasColumnType` で構成します。
+  構成しないと、EF Core は `decimal` のプロパティに既定の型を付け、SQL Server は `money` の列へ `1.2345` を `1.23`（`decimal(18,2)`）で保存し、PostgreSQL はその列の条件を断ります（`operator does not exist: money = numeric`）。
+  構成すると、SQL Server は列が持つ小数の 4 桁を保存し、PostgreSQL は列を `money` の値と比べます（[大文字小文字・空白・日付部品](#大文字小文字空白日付部品)の `money` の既知の割り切りを参照）
 - EF Core の Npgsql のプロバイダが、プロパティの型の既定の対応では書けない PostgreSQL の列は、`HasColumnType` で構成します（`date`・`timestamp`・`time with time zone`・`json`・`jsonb`・`xml` と、その配列の `date[]` など）。
   構成しないと、プロバイダは `DateTime` を `timestamp with time zone` として送って `DateTimeKind.Unspecified` の値を断り、`DateTimeOffset` も同じく送って UTC 以外のオフセットを断り、文字列を `text` として送って JSON・XML の列で PostgreSQL に断られます。
   `DateTimeKind.Utc` の `DateTime` は `timestamp` の列へ書けず、`timestamptz` の列は UTC のオフセットだけを受け付けます（どちらも Npgsql の規則）。
-  ほかの列には列の型を構成しないので、どの方言でも同じ C# 型へ写る型だけの図は、方言に依らず同じコードを生成します。
+  `money`（前の項目）を除き、ほかの列には列の型を構成しないので、どの方言でも同じ C# 型へ写る型だけの図は、方言に依らず同じコードを生成します。
 - MySQL の写し方（`timestamp` を `DateTime`、`char(36)` を `Guid`。[DB 型と C# 型の対応](#db-型と-c-型の対応)を参照）は、ドライバが MySql.Data の MySql.EntityFrameworkCore で確かめました。
   Pomelo では確かめていません。
 - 単一列の整数の主キー（ほかに EF Core が値を作れない単一列の主キー）は `ValueGeneratedNever()` で構成します。

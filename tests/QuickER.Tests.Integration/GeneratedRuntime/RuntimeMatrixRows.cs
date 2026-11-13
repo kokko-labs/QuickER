@@ -98,12 +98,6 @@ public static class RuntimeMatrixRows
     /// <summary>直す区切りが決まっていない空きの区切りの名前</summary>
     public const string Trigger = "きっかけ待ち";
 
-    /// <summary>PostgreSQL・MySQL・Oracle の EF Core 版のクエリの照合を足す区切り</summary>
-    public const string D3 = "区切り D3";
-
-    private const string EfCoreOtherDialectsQuery =
-        "PostgreSQL・MySQL・Oracle の EF Core 版のクエリ（述語・簡易 DSL・照合順序・空文字列）の照合は区切り D3 が足す";
-
     private const string EfCoreUntested =
         "この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）";
 
@@ -287,11 +281,7 @@ public static class RuntimeMatrixRows
             On(Gap(Trigger, EfCoreUntested), [RuntimeTarget.EfCoreSqlServer, .. EfCoreOthers]),
             On(NotApplicable(IncludeNotRemote), RuntimeTarget.Remote)
         ),
-        Row(
-            RuntimeFeatures.NamedQuery,
-            "名前付きクエリ（簡易 DSL・射影・手動実装）",
-            On(Gap(D3, EfCoreOtherDialectsQuery), EfCoreOthers)
-        ),
+        Row(RuntimeFeatures.NamedQuery, "名前付きクエリ（簡易 DSL・射影・手動実装）"),
         Row(
             RuntimeFeatures.NamedQueryRawSql,
             "名前付きクエリの生 SQL 実装（戻り形・パラメータ展開）",
@@ -333,13 +323,11 @@ public static class RuntimeMatrixRows
             RuntimeFeatures.ValueObjectStringMatch,
             "値オブジェクトの文字列一致（Contains / StartsWith / EndsWith）の判定を、具象の値オブジェクト型から引いた MethodInfo でも同じにする",
             On(Gap(Trigger, EfCoreUntested), RuntimeTarget.EfCoreSqlServer),
-            On(Gap(D3, EfCoreOtherDialectsQuery), EfCoreOthers),
             On(NotApplicable(QueryNotRemote), RuntimeTarget.Remote)
         ),
         Row(
             RuntimeFeatures.TranslatorParity,
             "式木の翻訳・識別子の引用・Include の照合・UPDATE 文の組み立てを C# の意味論と突き合わせる共通シナリオ",
-            On(Gap(D3, EfCoreOtherDialectsQuery), EfCoreOthers),
             On(NotApplicable(QueryNotRemote), RuntimeTarget.Remote)
         ),
         Row(

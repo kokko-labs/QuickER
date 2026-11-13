@@ -77,7 +77,7 @@
     - 照合は `CoverageReport.AssertGaps(CoverageGapSet, scope, SeedPlan?)` が `KnownFailureSet` の規則のまま行う。一覧に無い欠けも、一覧にあるのに網羅した組も赤。照合は既定の種の数で流したときだけ。一覧の項目が次元表の組を指していないことは、種の数に依らず宣言の誤りにする。
   - `EngineIds`（13 の ID）と `EngineDescriptor`（ID・部分・次元表・シナリオの数・ソース・守る src の領域）と、アセンブリごとの登録簿。
     - `tests/QuickER.Tests/TestSupport/EngineRegistry.cs`：Dsl/SqliteMySql・Name/Entrances・DiagramEdit/ToolArgument・DiagramEdit/Undo・Dialect/Types・Dialect/Identifiers・Dialect/DdlText・Dialect/ImportWarnings・DocumentFile/Scenarios・DocumentFile/Random・DocumentFile/Format・DocumentFile/Settings・FormatRoundTrip/RoundTrip・FormatRoundTrip/Omissions・FormatRoundTrip/Rules・FormatRoundTrip/Merge・Ai/ChatEngines・Ai/Drivers・Ai/Attachments・Ai/ConnectionSettings・Ai/ApiKeyStore・Ai/MarkdownRender・Ai/ChatDialog・OsBoundary/ProcessLaunch・OsBoundary/ShellPermission・OsBoundary/PathEntrances・OsBoundary/AtomicFile・OsBoundary/Containment・OsBoundary/Segments・OsBoundary/Lifecycle・OsBoundary/PostExitExhaustive・OsBoundary/ShutdownChainExhaustive・OsBoundary/FeatureModules・OsBoundary/ProfileStore・DiagramEdit/CanvasInput・Ai/MockAgents・Ai/MockRunner・Ai/MockBuildBoundary・Ai/MockScaffold・Ai/MockFolder・Ai/MockOutputs・Ai/MockDialog・Ai/DbConnectionDialog・Ai/DbImportSync・Guard/SourceRules・Guard/Parity・Guard/Phrases。
-    - `tests/QuickER.Tests.Integration/EngineRegistry.cs`：SyncModel/Random・SyncModel/Outcomes・SyncModel/Config・SyncPlan/Fuzz・SyncPlan/CapabilityNet・SyncPlan/ShapeRows・SyncPlan/HistoryRows・GeneratedRuntime/Parity・GeneratedRuntime/ParityOutcomes・Dsl/SqlServer・Name/DdlRoundTrip・Dialect/TypesRealDb。Guard は QuickER.Tests の台帳に載せる（Integration にはガードが無い）。
+    - `tests/QuickER.Tests.Integration/EngineRegistry.cs`：SyncModel/Random・SyncModel/Outcomes・SyncModel/Config・SyncPlan/Fuzz・SyncPlan/CapabilityNet・SyncPlan/ShapeRows・SyncPlan/HistoryRows・GeneratedRuntime/Parity・GeneratedRuntime/ParityOutcomes・Dsl/SqlServer・Dsl/PostgreSql・Dsl/MySql・Dsl/Oracle・Name/DdlRoundTrip・Dialect/TypesRealDb。Guard は QuickER.Tests の台帳に載せる（Integration にはガードが無い）。
   - 因子の棚卸し：`FactorInventoryGuard` は、製品の仕様の軸の全項目が、そのアセンブリの登録簿の次元表の Source に載っているか、理由つきの除外（担当のエンジン ID・区切り・空や仮置きでない理由）の**ちょうど一方**であることを検査する。
     14 の軸（設計 2.9 の 13 軸と P3-8 の `ExportOmissionKind`）をどちらのアセンブリが見るかは `FactorInventoryAssignment` が決め、各ガードは自分の軸の並びが割り当てと一致することを表明する。
   - 行列の軸：`MatrixAxis<TAdapter>` は、正本の値ごとにアダプタがちょうど 1 つあるか、理由つきで外してあるかを構築時に検査する。`[MatrixAxisValue]` と `MatrixAxisGuard.DerivedClassesCover`（基底か目印のインターフェースの具象の派生と正本の照合）、`DeclaredValuesMatch`（派生の名乗る値と実際の値の照合）で固める。
@@ -409,11 +409,15 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
 
 ## 簡易 DSL の総当たり
 
-- 簡易 DSL の条件の意味は、総当たりで docs の意味と照合する。`DslConditionFuzzTests`（QuickER 版 Repository・EF Core〔いずれも SQLite〕とインメモリ。MySQL の符号なし整数の図はインメモリだけ）と、Integration の `DslConditionFuzzSqlServerRuntimeTests`（実コンテナの QuickER 版 Repository・EF Core〔SQL Server〕・既定はシード 1 つ）が流す。
+- 簡易 DSL の条件の意味は、総当たりで docs の意味と照合する。`DslConditionFuzzTests`（QuickER 版 Repository・EF Core〔いずれも SQLite〕とインメモリ。MySQL の符号なし整数の図はインメモリだけ）と、Integration の `DslConditionFuzzSqlServerRuntimeTests`（実コンテナの QuickER 版 Repository・EF Core〔SQL Server〕・既定はシード 1 つ）と `NamedQueryDslConditionFuzz{PostgreSql,MySql,Oracle}RuntimeTests`（実コンテナの EF Core 版だけ・既定はシード 1 つ・夜間 16。`tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`「簡易 DSL の総当たりの EF Core だけの方言」）が流す。
   - 列ごとに書ける全ての形の原子（演算子・リテラルかパラメータか・否定の有無。値だけ乱数）とその NOT、乱数で組んだ合成の条件を、生成 → 実コンパイル（エラー 0・警告 0）→ NULL を含むデータで実行し、同じ実装先から読み戻した全行へオラクル `DslFuzz.Evaluate` を当てた結果と照合する。
   - 本体は `DslFuzzRunner`、実行部は `DslFuzzExecution`（QuickER.Tests の CodeGen.CSharp。Integration は TestSupport の `DslFuzz*.cs` と一緒に Compile リンクする）。
 - **オラクルは docs の写しで、実装の挙動を写さない**：「クエリ（式木 → SQL 変換）」節の NULL の規則（NOT と `<>` は C# の否定と同じ・文字列一致は NULL の行がどちら向きでも一致しない・IN の箇条＝null を含むリストは NULL の行に一致し、null だけのリストは NULL の行だけ、空のリストは IN が偽で NOT IN が真）と、「大文字小文字・空白・日付部品」の表（`DslCaseRule`）。条件の読み方（優先順位）は「簡易 DSL と名前付きクエリの制約」節の写しで、描画だけが使う（構文木は生成器が作る）。
   - 大文字小文字の扱い：インメモリは序数、SQLite の QuickER 版 Repository は ASCII の英字だけを畳む、EF Core（SQLite）は格納先次第、SQL Server は照合順序。
+  - EF Core だけの方言（docs の表の方言の行）：
+    - PostgreSQL は序数で、固定長の列の `=`・`<>`・IN・ワイルドカードの無い LIKE は読み戻した詰めた値の末尾の空白を外して比べる（比べる値の末尾の空白の扱いで変わる行は判定しない）。
+    - MySQL は大文字小文字・アクセント・合成済みの文字と分解形・`ß` と `ss` を畳むと結果が変わる行を、`=`・IN を含めて判定しない（StartsWith・EndsWith はパターンの末尾の空白を外すと変わる行も）。
+    - Oracle は序数で、空文字列との `=`・`<>` と、空文字列を含む IN・NOT IN のリストは、NULL でない行のどれにも（否定でも）一致しない。この規則は、簡易 DSL の文字列のリテラルが変数（パラメータ）として生成されることが前提（手書きの LINQ のリテラルの `""` は docs の事実として書くだけ）。
   - 大文字小文字か末尾の空白だけで結果が変わる行は判定しない。NULL の行と、照合順序に依らず決まる行は判定する。
 - 型の検査が断ると決まっているリテラル（ulong を超える値・素の ulong の列に負の値・符号付きの列に long を超える値・値オブジェクトの内包型の範囲外）は、「警告で飛ばされること」を表明する。
 - EF Core（SQLite）の decimal の順序比較だけは、プロバイダの制限として `ExcludedOnEfCoreSqlite` の 1 か所で流さない。
@@ -437,7 +441,7 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
   - 網羅しない組の一覧は、受け入れ（方言が列の型として持てない種類・EF Core の SQLite プロバイダの decimal の順序比較）だけ。
 - パラメータの使い回し（次元表の因子 ParameterReuse・原子ごと）：同じパラメータを同じ列の原子どうし・同じ種類のほかの列・より広い種類のほかの列（int と bigint・decimal など）で使う形と、IN のリストを同じ列の IN と NOT IN・ほかの列の IN で使う形。型の検査が受け付ける組だけを作る（値オブジェクトの列どうしは型トークンで型付けしたパラメータか、値オブジェクトの型を共有する GuidKey の主キーと自己参照の外部キー）。水準は参照するパラメータ名・相手の列・パラメータの型とこの原子の列の種類から数える（`DslFuzzDimensions.ReuseOf`。同じ原子のインスタンスを 1 つのクエリに 2 回置かない）。
 - 並び替え（次元表の因子 Ordering・クエリごと）：並べない・主キーだけ・列 1 つの後に主キー・列 2 つの後に主キー。主キーより前の列は整数・decimal・日時に限り、最後に必ず主キーを置く（同点を作らない）。文字列の列では並べない（作らない形の宣言）。一覧も並べられる（`DslQuery.ListOrdered`）。EF Core（SQLite）は decimal の列での並び替えも `ExcludedOnEfCoreSqlite` で流さない。
-  - 照合は「追加の列 → 主キー」の並びで期待を決める。単一は並びで最初に真になる行、射影と並べる一覧は返した行を同じ並びで並べ直した順との一致。NULL の位置は実装先ごとの宣言 `DslFuzzBackend.NullOrder`（docs のインメモリの節「実 DB との既知の乖離」の写し。今の実装先はどれも昇順で先頭）。
+  - 照合は「追加の列 → 主キー」の並びで期待を決める。単一は並びで最初に真になる行、射影と並べる一覧は返した行を同じ並びで並べ直した順との一致。NULL の位置は実装先ごとの宣言 `DslFuzzBackend.NullOrder`（docs のインメモリの節「実 DB との既知の乖離」の写し。PostgreSQL・Oracle の EF Core 版は昇順で末尾、ほかの実装先は昇順で先頭）。
   - 件数と原子だけのクエリは並べない（原子だけのクエリは並べない一覧と定義する）、単一・射影はいつも並べる＝`isValid`。
 - 種の単位の追加のクエリ：パラメータを使い回す `S{i}` と列で並べ替える `O{i}` を 6 本ずつ、本流と別の乱数の列（`DslFuzzGenerator.SideSeed`・パラメータ名の接頭辞 `q`）の生成器で作って末尾に足す（本流の列・行・クエリの引き方を変えない）。
 - 網羅の単位の決まった形（`DslFuzzGenerator.ReuseAndOrderingCoverageQueries`）：次元表の網羅すべき組のうち、ParameterReuse・Ordering とほかの因子の組で、網羅の単位のほかのクエリがまだ持たない組を足すクエリを貪欲に選ぶ（名前は `KR{i}`・`KB{i}`）。1 段目は使い回しの組を NOT の入れ子の 6 水準 × 戻り形 5 つ × 括弧の書き方 2 つで包んだ候補、2 段目はほかのクエリの並びの水準を変えた写しの候補。網羅すべき組は次元表から引くので、因子・水準を足すと選ぶクエリも増える。
@@ -445,8 +449,9 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
 - 列の型に入らない値（次元表の因子 ValueFit＝none・fits・beyond-scale・beyond-range・beyond-charset。判定は `DslFuzzDimensions.ValueFitOf`）：decimal の列とスケール・整数部の外の値（列で型付けしたパラメータ・広い型トークン `decimal(18,6)`・`int64` のパラメータ・リテラル・IN）、NULL を許す byte・short・int の列と decimal の型トークンの小数・範囲の外の値、整数の列と範囲の外の小数のリテラル、Unicode でない列（`DslColumn.NonUnicode`＝SQL Server の varchar・char の単位 `sqlserver-ansi`）と ASCII の外の文字を含む値（値の池は末尾の空白で終わる値も持ち、オラクルは Unicode でない列の文字列一致で列の値の末尾の空白を数えない＝docs の表の SQL Server の行・`DslFuzz.MatchValue`）。値は列の型へ丸めたり `?` に化けたりすると行の値に重なるものを選ぶ（SQL Server の EF Core 版が値を列の型で束縛すると赤になる）。
   - 種の単位は 3 本目の乱数の列（`DslFuzzGenerator.OutOfTypeSeed`・パラメータ名の接頭辞 `r`）の生成器で、絞った形の原子のクエリ `X{i}` を末尾に足す（本流・使い回しと並び替えの列の引き方を変えない）。網羅の単位は、値オブジェクトなしの単位（`DslFuzzUnits.PlainCoverage`）と SQL Server の Unicode でない列の単位 `DslFuzzUnits.SqlServerAnsiCoverage`（`coverage-sqlserver-ansi`）が全ての形の合成のクエリ `KX*` を持つ（SQLite の単位は EF Core〔SQLite〕が流さない decimal の列の順序比較を作らない）。
   - bigint の列と decimal のパラメータ：NULL を許す bigint の列と、decimal の型トークン（`decimal(18,6)`・`decimal(38,6)`・`decimal(18,2)`）のパラメータの比較を、4 本目の乱数の列（`DslFuzzGenerator.BigintDecimalSeed`・パラメータ名の接頭辞 `w`）の生成器で作る。種の単位は絞った形の原子のクエリ `Y{i}` を末尾に足し、値オブジェクトなしの網羅の単位（`DslFuzzUnits.PlainCoverage`）は 6 つの演算子の原子のクエリ `KY{i}` を持つ。行の値の池は long の上限と下限を持つので、SQL Server の EF Core 版が列を CAST する decimal の型の整数部の桁をいつも試す（生成の DbContext が既定の decimal の型を広げないと、どの値でも桁あふれの例外になる）。比べる値の池に整数の値（0・1・-1・10）を持つので、SQLite の EF Core 版が整数と decimal の等値を文字列で比べる形も試す（実行器の書き換えを外すと赤）。byte・short・int の列の原子（3 本目の列）の引き方は変えない。
+  - SQL Server の money・smallmoney：網羅の単位 `DslFuzzUnits.SqlServerMoneyCoverage`（`coverage-sqlserver-money`）が、列の型に入らない値の原子 1 つずつのクエリ `KM*`（経路ごとの結果を読む）と合成のクエリ `KX*` を持つ。列の型に入るかは列の `Money`（`DslMoneyType`＝小数 4 桁と型の端。範囲は 10 の累乗の桁で表せない）で決め、値の池は money 用（小数 5 桁で 4 桁へ丸めると行の値に重なる値・型の範囲の外の値）。種の単位は money の列を持たない（種の生成器の入力と指紋を変えない）。PostgreSQL の money の列は `Money` を立てない（比べる値は money で送られて丸められる docs の既知の割り切り）。
   - 作らない形（作らない形の宣言）：値オブジェクトの単位（`Create` が型の外の値を断る）。
-  - 網羅しない組：SQLite・MySQL の範囲の beyond-charset（受け入れ）・使い回しと列の型の外の値（Pending）・EF Core（SQLite）の decimal の値の順序比較のリテラル（受け入れ）・SQL Server の GuidKey と beyond-charset（Pending）。
+  - 網羅しない組：SQLite・MySQL の範囲の beyond-charset（受け入れ）・使い回しと列の型の外の値（Pending）・EF Core（SQLite）の decimal の値の順序比較のリテラル（受け入れ）・SQL Server の GuidKey と beyond-charset（Pending）・PostgreSQL・MySQL・Oracle の EF Core 版の beyond-charset（受け入れ）・PostgreSQL の byte と符号なし・sbyte の列と Oracle の Guid と符号なし・sbyte の列（受け入れ＝型マッパーに対応する型が無い）。
 - mutation 実証済み。
 
 ## カルチャのガード

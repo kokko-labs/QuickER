@@ -49,6 +49,7 @@
 - 時間帯なしの `time` は `TimeSpan`・`timestamptz` は `DateTimeOffset`（Npgsql の `GetFieldType` は `TimeOnly`／`DateTime`）。PostgreSQL の列を読むのは生成 EF Core のコードだけで、EF Core はこの型のまま読み書きできる（`timestamptz` の +00:00 以外の値は Npgsql が断る＝`PostgreSqlColumnClrTypeIntegrationTests`）。
 - EF Core に教える列の型（`CSharpTypeInfo.EfCoreColumnType`）：`date`→`date`・`timestamp`（精度つき・`without time zone` も）→`timestamp without time zone`・`timetz`→`time with time zone`・`json`／`jsonb`／`xml`→同じ名前。配列は要素の値に `[]` を付けて引き継ぐ（`Array`）。
   - 教えないと Npgsql の EF Core のプロバイダが `DateTime` を timestamptz で送って Kind=Unspecified を断り、`DateTimeOffset` を timestamptz で送って UTC 以外のオフセットを断り、`string` を text で送って PostgreSQL が 42804 で断る（配列も同じ）。
+  - `money`→`money`：教えないと EF Core は decimal を numeric で送り、PostgreSQL が `money` と `numeric` の比較を断る（42883。条件・重複の事前チェックが失敗する）。教えると比べる値は `money` で送られ、小数 3 桁以上は丸められる（docs の既知の割り切り。`money` と `numeric` の比較が無いので値の型では送れない）。
   - `timestamptz`・`text`・`integer` などの既定の対応で書ける列には入れない（可搬図の出力を変えない）。値は図の綴りでなくマッパーの固定の綴り。
 - 固定は `DialectTypeTableTests` のマッパーの行（`map-postgresql-timestamp-precision-*`＝精度つきでも時間帯の語を落とさない・`map-postgresql-timetz-*`＝time with time zone は DateTimeOffset・`map-postgresql-*-efcore-column-type` と `map-postgresql-array-*-efcore-column-type`＝教える列の型・宣言のセルの `matrix-map-postgresql-*`）・`PostgreSqlDialectTypeRealDbTests`（ドライバの実測 CLR 型との一致・EF Core の手順＝教える列の型を当てて読み書きする）・`PostgreSqlColumnClrTypeIntegrationTests`（UTC 書き込み・EF Core の読み書き）・`CodegenCaseTests` の行 `model-efcore-column-type-postgresql`。mutation 実証済み。
 

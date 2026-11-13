@@ -14,7 +14,7 @@ namespace QuickER.Provider.SqlServer;
 /// <list type="bullet">
 /// <item><description>bit → bool、tinyint → byte、smallint → short、int → int、bigint → long</description></item>
 /// <item><description>real → float、float → double（SQL の float は倍精度のため）。ただし float(1)〜float(24) は real と同じ単精度なので float</description></item>
-/// <item><description>decimal / numeric / money / smallmoney → decimal</description></item>
+/// <item><description>decimal / numeric / money / smallmoney → decimal。money・smallmoney は、生成 EF Core の DbContext が列の型を教える（<see cref="CSharpTypeInfo.EfCoreColumnType"/>。EF Core の既定の decimal(18,2) では小数 4 桁を書けないため）</description></item>
 /// <item><description>date / datetime / datetime2 / smalldatetime → DateTime、time → TimeSpan、datetimeoffset → DateTimeOffset</description></item>
 /// <item><description>uniqueidentifier → Guid</description></item>
 /// <item><description>binary / varbinary / image / rowversion / timestamp → byte[]（参照型）。image・varbinary(max) は無制限バイナリ、binary(n)/varbinary(n)/rowversion/timestamp は有界</description></item>
@@ -82,7 +82,12 @@ public sealed partial class SqlServerCSharpTypeMapper : IColumnTypeMapper
             "real" => Value("float", sqlDbTypeName),
             "float" => Value("double", sqlDbTypeName),
             "decimal" or "numeric" => Decimal(precision, scale, sqlDbTypeName),
-            "money" or "smallmoney" => Value("decimal", sqlDbTypeName),
+            // EF Core は精度の無い decimal のプロパティを既定の decimal(18,2) で書き、小数 4 桁の money・smallmoney の値を 2 桁へ落とす。
+            // 列の型を教えて、money・smallmoney として書かせる
+            "money" or "smallmoney" => Value("decimal", sqlDbTypeName) with
+            {
+                EfCoreColumnType = baseType,
+            },
             "date" or "datetime" or "datetime2" or "smalldatetime" => Value(
                 "DateTime",
                 sqlDbTypeName

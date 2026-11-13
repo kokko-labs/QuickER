@@ -24,6 +24,9 @@ internal static class EngineRegistry
         BackendParityValueDimensions.Descriptor,
         BackendParitySqlServerSaveDimensions.Descriptor,
         DslFuzzDimensions.SqlServerDescriptor,
+        DslFuzzDimensions.PostgreSqlDescriptor,
+        DslFuzzDimensions.MySqlDescriptor,
+        DslFuzzDimensions.OracleDescriptor,
         NameFuzzDdlRoundTripDimensions.Descriptor,
         DialectTypeRealDbDimensions.Descriptor,
     ];

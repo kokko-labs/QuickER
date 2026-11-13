@@ -169,6 +169,19 @@ public static class DslFuzzDimensions
     public static IReadOnlyList<string> SqlServerScopes { get; } =
     ["sqlserver:ado", "sqlserver:efcore"];
 
+    /// <summary>PostgreSQL の EF Core 版（Integration）の範囲</summary>
+    public static IReadOnlyList<string> PostgreSqlScopes { get; } = ["postgresql:efcore"];
+
+    /// <summary>MySQL の EF Core 版（Integration）の範囲</summary>
+    public static IReadOnlyList<string> MySqlScopes { get; } = ["mysql:efcore"];
+
+    /// <summary>Oracle の EF Core 版（Integration）の範囲</summary>
+    public static IReadOnlyList<string> OracleScopes { get; } = ["oracle:efcore"];
+
+    /// <summary>EF Core 版だけを実 DB で流す方言（PostgreSQL・MySQL・Oracle）の範囲</summary>
+    private static IReadOnlyList<string> EfCoreOnlyScopes { get; } =
+    [.. PostgreSqlScopes, .. MySqlScopes, .. OracleScopes];
+
     /// <summary>比較の演算子（DslOp の小文字）</summary>
     private static readonly string[] CompareOps = ["eq", "ne", "lt", "le", "gt", "ge"];
 
@@ -330,8 +343,35 @@ public static class DslFuzzDimensions
                     "sqlite:inmemory",
                     "mysql:inmemory",
                 }.SelectMany(scope => CharsetUnavailableGaps(scope)),
+                .. UnmappedClrGaps(
+                    "postgresql:efcore",
+                    [.. UnmappedInSqliteAndSqlServer, DslClr.Byte],
+                    "PostgreSQL には 1 バイトの整数の型と符号なしの整数の型が無い（src/QuickER.Provider.PostgreSql/PostgreSqlCSharpTypeMapper.cs の Map は smallint→short・integer→int・bigint→long だけを持つ）ので、byte・sbyte・ushort・uint・ulong の列を作れない",
+                    "D3"
+                ),
+                CoverageGap.AcceptedTuple(
+                    "postgresql:efcore",
+                    "D3",
+                    "smallint の列へ型が広がって使い回せるのは、それより狭い byte・sbyte のパラメータだけで、PostgreSQL には 1 バイトの整数の型が無い（src/QuickER.Provider.PostgreSql/PostgreSqlCSharpTypeMapper.cs の Map は smallint→short が最も狭い）ので、smallint の列への型の広がる使い回しを作れない",
+                    (Clr, nameof(DslClr.Int16)),
+                    (ParameterReuse, ReuseOtherColumnWidening)
+                ),
+                .. UnmappedClrGaps(
+                    "oracle:efcore",
+                    [.. UnmappedInSqliteAndSqlServer, DslClr.Guid],
+                    "Oracle の型マッパー（src/QuickER.Provider.Oracle/OracleCSharpTypeMapper.cs の Map）は NUMBER の精度で bool・byte・short・int・long へ振り分けるだけで符号なしと sbyte の型を持たず、RAW を byte[] に写して Guid の型を持たないので、sbyte・ushort・uint・ulong・Guid の列を作れない",
+                    "D3"
+                ),
+                .. EfCoreOnlyScopes.SelectMany(scope =>
+                    CharsetUnavailableGaps(
+                        scope,
+                        "PostgreSQL・MySQL の文字列の列と Oracle の NVARCHAR2・NCHAR の列は文字列を Unicode のまま持つ（照合順序のコードページで持つのは SQL Server の varchar・char だけ）ので、列の文字集合の外の文字は無い",
+                        "D3"
+                    )
+                ),
                 .. SqliteMySqlScopes
                     .Concat(SqlServerScopes)
+                    .Concat(EfCoreOnlyScopes)
                     .Select(scope =>
                         CoverageGap.Matching(
                             scope,
@@ -395,17 +435,52 @@ public static class DslFuzzDimensions
             "tests/QuickER.Tests.Integration/GeneratedRuntime/DslConditionFuzzSqlServerRuntimeTests.cs"
         );
 
+    /// <summary>台帳の行（PostgreSQL・Integration）</summary>
+    public static EngineDescriptor PostgreSqlDescriptor { get; } =
+        Descriptor(
+            "PostgreSql",
+            "簡易 DSL の条件の総当たり（PostgreSQL の EF Core 版）",
+            "tests/QuickER.Tests.Integration/GeneratedRuntime/NamedQueryDslConditionFuzzPostgreSqlRuntimeTests.cs",
+            "tests/QuickER.Tests.Integration/GeneratedRuntime/DslConditionFuzzEfCore.cs"
+        );
+
+    /// <summary>台帳の行（MySQL・Integration）</summary>
+    public static EngineDescriptor MySqlDescriptor { get; } =
+        Descriptor(
+            "MySql",
+            "簡易 DSL の条件の総当たり（MySQL の EF Core 版）",
+            "tests/QuickER.Tests.Integration/GeneratedRuntime/NamedQueryDslConditionFuzzMySqlRuntimeTests.cs",
+            "tests/QuickER.Tests.Integration/GeneratedRuntime/DslConditionFuzzEfCore.cs"
+        );
+
+    /// <summary>台帳の行（Oracle・Integration）</summary>
+    public static EngineDescriptor OracleDescriptor { get; } =
+        Descriptor(
+            "Oracle",
+            "簡易 DSL の条件の総当たり（Oracle の EF Core 版）",
+            "tests/QuickER.Tests.Integration/GeneratedRuntime/NamedQueryDslConditionFuzzOracleRuntimeTests.cs",
+            "tests/QuickER.Tests.Integration/GeneratedRuntime/DslConditionFuzzEfCore.cs"
+        );
+
     /// <summary>
     /// 方言が列の型として持てない種類を、列の種類を含む因子の組ごとに 1 項目にする（受け入れた組＝単位を直しても作れない）
     /// </summary>
     private static IEnumerable<CoverageGapEntry> UnmappedClrGaps(
         string scope,
         DslClr[] unmapped,
-        string reason
+        string reason,
+        string finding = "P1-3"
     ) =>
         ClrPairs(unmapped)
             .Select(pair =>
-                CoverageGap.AcceptedMatching(scope, "P1-3", reason, Clr, pair.Other, pair.Predicate)
+                CoverageGap.AcceptedMatching(
+                    scope,
+                    finding,
+                    reason,
+                    Clr,
+                    pair.Other,
+                    pair.Predicate
+                )
             );
 
     /// <summary>
@@ -418,20 +493,28 @@ public static class DslFuzzDimensions
     /// 列の文字集合の外の文字（<see cref="FitBeyondCharset"/>）を、ValueFit を含む因子の組ごとに 1 項目にする（受け入れた組＝
     /// SQLite・MySQL の列は Unicode で文字を持つので、単位を直しても作れない）
     /// </summary>
-    private static IEnumerable<CoverageGapEntry> CharsetUnavailableGaps(string scope) =>
+    private static IEnumerable<CoverageGapEntry> CharsetUnavailableGaps(
+        string scope,
+        string reason = CharsetUnavailableReason,
+        string finding = "EP"
+    ) =>
         Table
             .Factors.Select(factor => factor.Name)
             .Where(name => name != ValueFit)
             .Select(other =>
                 CoverageGap.AcceptedMatching(
                     scope,
-                    "EP",
-                    "SQLite は varchar・char の列も文字列を Unicode のまま持ち、インメモリは .NET の文字列で持つ（MySQL の構成はインメモリだけ）ので、列の文字集合の外の文字は無い（照合順序のコードページで持つのは SQL Server の varchar・char だけで、Integration の DslConditionFuzzSqlServerRuntimeTests の単位 sqlserver-ansi が流す）",
+                    finding,
+                    reason,
                     other,
                     ValueFit,
                     (_, fit) => fit == FitBeyondCharset
                 )
             );
+
+    /// <summary>SQLite・MySQL のインメモリの範囲の、列の文字集合の外の文字が無い理由</summary>
+    private const string CharsetUnavailableReason =
+        "SQLite は varchar・char の列も文字列を Unicode のまま持ち、インメモリは .NET の文字列で持つ（MySQL の構成はインメモリだけ）ので、列の文字集合の外の文字は無い（照合順序のコードページで持つのは SQL Server の varchar・char だけで、Integration の DslConditionFuzzSqlServerRuntimeTests の単位 sqlserver-ansi が流す）";
 
     /// <summary>列の種類を含む因子の組ごとの、指定した種類に当たる述語</summary>
     private static IEnumerable<(string Other, Func<string, string, bool> Predicate)> ClrPairs(
@@ -557,6 +640,13 @@ public static class DslFuzzDimensions
             DslClr.UInt64 => (0m, ulong.MaxValue),
             _ => null,
         };
+        if (column.Money is { } money)
+        {
+            return !TryNumber(value, out var amount) || !money.InRange(amount) ? FitBeyondRange
+                : decimal.Round(amount, DslMoneyType.Scale) != amount ? FitBeyondScale
+                : FitFits;
+        }
+
         var facets =
             column.Clr == DslClr.Decimal ? DslFuzzGenerator.DecimalFacets(column.DataType) : null;
 
@@ -724,7 +814,7 @@ public static class DslFuzzDimensions
             _ => throw new ArgumentOutOfRangeException(nameof(node), node.GetType().Name, null),
         };
 
-    private static EngineDescriptor Descriptor(string part, string title, string test) =>
+    private static EngineDescriptor Descriptor(string part, string title, params string[] tests) =>
         new(
             EngineIds.Dsl,
             part,
@@ -739,7 +829,7 @@ public static class DslFuzzDimensions
                 "tests/QuickER.Tests/TestSupport/DslFuzzUnits.cs",
                 "tests/QuickER.Tests/CodeGen.CSharp/DslFuzzExecution.cs",
                 "tests/QuickER.Tests/CodeGen.CSharp/DslFuzzRunner.cs",
-                test,
+                .. tests,
             ],
             [
                 "src/QuickER.CodeGen.CSharp/Queries",

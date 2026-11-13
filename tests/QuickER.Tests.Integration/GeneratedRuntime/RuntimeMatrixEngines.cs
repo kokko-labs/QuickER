@@ -206,6 +206,24 @@ public static class RuntimeMatrixEngines
             // 軸を作るだけでフィクスチャに触れない（MatrixAxisGuardTests と同じ）
             () => DslConditionFuzzSqlServerRuntimeTests.BackendAxis(null!).Adapters
         ),
+        (
+            nameof(NamedQueryDslConditionFuzzPostgreSqlRuntimeTests),
+            RuntimeFeatures.NamedQuery,
+            DialectNames.PostgreSql,
+            () => NamedQueryDslConditionFuzzPostgreSqlRuntimeTests.BackendAxis(null!).Adapters
+        ),
+        (
+            nameof(NamedQueryDslConditionFuzzMySqlRuntimeTests),
+            RuntimeFeatures.NamedQuery,
+            DialectNames.MySql,
+            () => NamedQueryDslConditionFuzzMySqlRuntimeTests.BackendAxis(null!).Adapters
+        ),
+        (
+            nameof(NamedQueryDslConditionFuzzOracleRuntimeTests),
+            RuntimeFeatures.NamedQuery,
+            DialectNames.Oracle,
+            () => NamedQueryDslConditionFuzzOracleRuntimeTests.BackendAxis(null!).Adapters
+        ),
     ];
 
     /// <summary>エンジンの登録のクラスの名前（逆方向の照合に使う）</summary>

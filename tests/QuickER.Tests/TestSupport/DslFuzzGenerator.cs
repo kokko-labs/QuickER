@@ -685,7 +685,14 @@ public sealed partial class DslFuzzGenerator(
             }
         )
         {
-            var column = columns.First(column => column.Clr == clr && !column.PrimaryKey);
+            // 方言がその種類の列を持たない（PostgreSQL の byte）ときは、その種類の両端を作らない
+            if (
+                columns.FirstOrDefault(column => column.Clr == clr && !column.PrimaryKey)
+                is not { } column
+            )
+            {
+                continue;
+            }
 
             foreach (var value in new[] { min, max })
             {
@@ -889,6 +896,11 @@ public sealed partial class DslFuzzGenerator(
         }
 
         var value = Pick(DslFuzz.ValuePool(column));
+
+        if (column.NonNegativeLiterals && value is decimal number && number < 0m)
+        {
+            value = -number;
+        }
 
         return new DslLiteral(value, DslFuzz.NumberText(value));
     }
@@ -1098,12 +1110,8 @@ public sealed partial class DslFuzzGenerator(
                 return new DslCompare(op, FractionalLiteral()) { Column = column };
             }
 
-            var value = Pick(DslFuzz.ValuePool(column));
-
-            return new DslCompare(op, new DslLiteral(value, DslFuzz.NumberText(value)))
-            {
-                Column = column,
-            };
+            // 値の池から選ぶ（列の印 NonNegativeLiterals があれば負の値の符号を外す＝Literal と同じ）
+            return new DslCompare(op, Literal(column)) { Column = column };
         }
 
         return new DslCompare(op, Param(column)) { Column = column };
