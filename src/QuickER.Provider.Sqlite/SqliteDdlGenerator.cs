@@ -145,6 +145,28 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
         // ドットを含む表名は添付したデータベースの表と読まれる（扱いの表が注記とする方言だけ書き添える）
         SchemaQualifiedTableNameNote.Append(sb, entity.TableName, DialectName);
 
+        // 外部キーの行を先に組み、子と親が違う DB の外部キーは作らずに CREATE TABLE の前へ注記する
+        var foreignKeyLines = new List<string>();
+
+        foreach (var fk in fks)
+        {
+            if (BuildForeignKeyConstraint(entity.TableName, fk) is { } line)
+            {
+                foreignKeyLines.Add(line);
+            }
+            else
+            {
+                CrossSchemaForeignKeyNote.Append(
+                    sb,
+                    fk.ConstraintName,
+                    entity.TableName,
+                    fk.ParentTableName,
+                    DialectName,
+                    UnsupportedFeature.Ddl
+                );
+            }
+        }
+
         sb.AppendLine($"CREATE TABLE {SqliteIdentifier.Quote(entity.TableName)} (");
 
         // 末尾に別立てで出す制約行（PK・UNIQUE・全 FK）を収集する
@@ -173,10 +195,7 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
             trailingConstraints.Add(BuildUniqueConstraintLine(unique.Name, unique.ColumnNames));
         }
 
-        foreach (var fk in fks)
-        {
-            trailingConstraints.Add(BuildForeignKeyConstraint(fk));
-        }
+        trailingConstraints.AddRange(foreignKeyLines);
 
         // 列定義を出力する。後続の列行または末尾制約行が続く場合はカンマで区切る
         for (var i = 0; i < entity.Columns.Count; i++)
@@ -298,10 +317,14 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
     )]
     private static partial System.Text.RegularExpressions.Regex UnquotedDeclaredTypePattern();
 
-    /// <summary>解決済み外部キー情報からインライン <c>FOREIGN KEY</c> 制約行を組み立てる</summary>
-    private static string BuildForeignKeyConstraint(ResolvedForeignKey fk) =>
+    /// <summary>解決済み外部キー情報からインライン <c>FOREIGN KEY</c> 制約行を組み立てる（子と親が違う DB なら <c>null</c>）</summary>
+    private static string? BuildForeignKeyConstraint(
+        string childTableName,
+        ResolvedForeignKey fk
+    ) =>
         BuildForeignKeyConstraintLine(
             fk.ConstraintName,
+            childTableName,
             fk.FkColumnNames,
             fk.ParentTableName,
             fk.PkColumnNames,
@@ -309,10 +332,17 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
             fk.OnUpdate
         );
 
-    /// <summary>インライン <c>FOREIGN KEY</c> 制約行を各要素から組み立てる（DDL 生成と同期再構築で共有する）</summary>
-    /// <remarks>構成列は宣言順にカンマ区切りで並べる（単列なら従来と同一の出力）</remarks>
-    internal static string BuildForeignKeyConstraintLine(
+    /// <summary>
+    /// インライン <c>FOREIGN KEY</c> 制約行を各要素から組み立てる（DDL 生成と同期の表の追加・再構築で共有する）。
+    /// 子と親が違う DB の表なら外部キーを作れないので <c>null</c> を返す（呼び出し側が省いて注記する）
+    /// </summary>
+    /// <remarks>
+    /// 構成列は宣言順にカンマ区切りで並べる（単列なら従来と同一の出力）。<c>REFERENCES</c> には親の表の部分だけを書く
+    /// （<see cref="SqliteIdentifier.QuoteReferencedTable"/>）
+    /// </remarks>
+    internal static string? BuildForeignKeyConstraintLine(
         string constraintName,
+        string childTableName,
         IReadOnlyList<string> fkColumnNames,
         string parentTableName,
         IReadOnlyList<string> pkColumnNames,
@@ -320,6 +350,14 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
         ForeignKeyReferentialAction onUpdate
     )
     {
+        if (
+            SqliteIdentifier.QuoteReferencedTable(childTableName, parentTableName)
+            is not { } referencedTable
+        )
+        {
+            return null;
+        }
+
         var referentialActions = ForeignKeyReferentialActionHelper.BuildReferentialActionClause(
             onDelete,
             onUpdate
@@ -329,7 +367,7 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
 
         return $"    CONSTRAINT \"{SqliteIdentifier.Escape(constraintName)}\" "
             + $"FOREIGN KEY ({fkColumnList}) "
-            + $"REFERENCES {SqliteIdentifier.Quote(parentTableName)} ({pkColumnList}){referentialActions}";
+            + $"REFERENCES {referencedTable} ({pkColumnList}){referentialActions}";
     }
 
     /// <summary>リレーション一覧を「子テーブル ID → その子が持つ FK 一覧」へ解決する</summary>

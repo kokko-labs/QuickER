@@ -189,6 +189,7 @@ public static class DialectDeclarations
             { Kind.SetNullOnNotNullColumn, NotExpressible() }, // E3 ×（エラー 1761）
             { Kind.Description, Expressible() }, // E5 ○
             { Kind.SchemaQualifiedTableName, Expressible() }, // E6 ○
+            { Kind.CrossSchemaForeignKey, Expressible() }, // E7 ○
             { Kind.ColumnOrder, NotExpressible() }, // X1 ×
             { Kind.ForeignKeyConstraintName, Expressible() }, // X2 ○
             { Kind.CompositeForeignKeyColumnOrder, Expressible() }, // X3 ○（並び必須）
@@ -250,6 +251,7 @@ public static class DialectDeclarations
             { Kind.SetNullOnNotNullColumn, PartlyExpressible() }, // E3 △（作れるが親の削除・更新で失敗）
             { Kind.Description, Expressible() }, // E5 ○
             { Kind.SchemaQualifiedTableName, Expressible() }, // E6 ○（逆引きは to_regclass）
+            { Kind.CrossSchemaForeignKey, Expressible() }, // E7 ○
             { Kind.ColumnOrder, NotExpressible() }, // X1 ×
             { Kind.ForeignKeyConstraintName, Expressible() }, // X2 ○
             { Kind.CompositeForeignKeyColumnOrder, Expressible() }, // X3 ○（並び不問）
@@ -311,6 +313,7 @@ public static class DialectDeclarations
             { Kind.SetNullOnNotNullColumn, NotExpressible() }, // E3 ×（エラー 1830）
             { Kind.Description, Expressible() }, // E5 ○
             { Kind.SchemaQualifiedTableName, Expressible() }, // E6 ○
+            { Kind.CrossSchemaForeignKey, Expressible() }, // E7 ○
             { Kind.ColumnOrder, Expressible() }, // X1 ○（ネイティブ）
             { Kind.ForeignKeyConstraintName, Expressible() }, // X2 ○
             { Kind.CompositeForeignKeyColumnOrder, Expressible() }, // X3 ○（並び必須）
@@ -375,6 +378,7 @@ public static class DialectDeclarations
             { Kind.SetNullOnNotNullColumn, PartlyExpressible() }, // E3 △（ON DELETE だけ。親の削除で失敗）
             { Kind.Description, Expressible() }, // E5 ○
             { Kind.SchemaQualifiedTableName, Expressible() }, // E6 ○
+            { Kind.CrossSchemaForeignKey, Expressible() }, // E7 ○
             { Kind.ColumnOrder, NotExpressible() }, // X1 ×
             { Kind.ForeignKeyConstraintName, Expressible() }, // X2 ○
             { Kind.CompositeForeignKeyColumnOrder, Expressible() }, // X3 ○（並び不問）
@@ -436,6 +440,7 @@ public static class DialectDeclarations
             { Kind.SetNullOnNotNullColumn, PartlyExpressible() }, // E3 △（作れるが親の削除・更新で失敗）
             { Kind.Description, NotExpressible() }, // E5 ×
             { Kind.SchemaQualifiedTableName, NotExpressible() }, // E6 ×
+            { Kind.CrossSchemaForeignKey, NotExpressible() }, // E7 ×（外部キーの句にスキーマを書けない）
             { Kind.ColumnOrder, Expressible() }, // X1 ○（再構築）
             { Kind.ForeignKeyConstraintName, NotExpressible() }, // X2 ×
             { Kind.CompositeForeignKeyColumnOrder, Expressible() }, // X3 ○（並び不問）

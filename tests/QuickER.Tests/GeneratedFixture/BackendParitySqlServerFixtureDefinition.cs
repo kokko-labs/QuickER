@@ -70,6 +70,18 @@ public static class BackendParitySqlServerFixtureDefinition
     public static ErDiagram Build()
     {
         var diagram = BackendParityFixtureDefinition.Build();
+
+        // キーと表名の形の表は実装先どうしの一致の SQLite の 5 実装先だけが使う（値の往復は使わない・main スキーマは SQL Server に無い）
+        var keyShapeTables = diagram
+            .Entities.Where(e =>
+                BackendParityFixtureDefinition.KeyShapeTableNames.Contains(e.TableName)
+            )
+            .Select(e => e.Id)
+            .ToHashSet();
+        diagram.Entities.RemoveAll(e => keyShapeTables.Contains(e.Id));
+        diagram.Relationships.RemoveAll(r =>
+            keyShapeTables.Contains(r.SourceEntityId) || keyShapeTables.Contains(r.TargetEntityId)
+        );
         diagram.Entities.Add(
             new Entity
             {

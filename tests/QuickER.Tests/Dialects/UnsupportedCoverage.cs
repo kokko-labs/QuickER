@@ -1419,6 +1419,22 @@ public static class UnsupportedCoverage
             ["DialectDdlRows:ddl-schema-qualified-dotted-table-name-note"]
         ),
         (
+            UnsupportedDefinitionKind.CrossSchemaForeignKey,
+            UnsupportedFeature.Sync,
+            null,
+            [
+                "DialectDdlRows:sync-add-table-fk-across-schemas-omitted-with-note-sqlite",
+                "DialectDdlRows:sync-rebuild-fk-across-schemas-omitted-with-note-sqlite",
+                "SyncPlanExpectationRows:plan-cross-schema-fk-*",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.CrossSchemaForeignKey,
+            UnsupportedFeature.Ddl,
+            null,
+            ["DialectDdlRows:ddl-fk-across-schemas-omitted-with-note-sqlite"]
+        ),
+        (
             UnsupportedDefinitionKind.DefaultValue,
             UnsupportedFeature.Sync,
             DialectNames.SqlServer,

@@ -77,6 +77,7 @@ public static class ConcurrencyFixtureDefinition
             GenerateMappers = true,
             GenerateRepositories = true,
             GenerateValueObjects = true,
+            UseGuidKeyForStringPrimaryKey = true,
             GenerateEfCoreRepositories = true,
             GenerateInMemoryRepositories = true,
             GenerateRemoteServices = true,
@@ -402,7 +403,7 @@ public static class ConcurrencyFixtureDefinition
             },
         };
 
-        return new ErDiagram
+        var diagram = new ErDiagram
         {
             Entities = { gadget, note, kit, part, tag, tagLink, stamp, marker },
             Relationships =
@@ -446,5 +447,180 @@ public static class ConcurrencyFixtureDefinition
                 },
             },
         };
+
+        AddKeyShapeTables(diagram);
+
+        return diagram;
     }
+
+    /// <summary>キーと表名の形の表の名前（SQL Server の系統の 2 者比較のケース <c>key-shape-*</c> が使う）</summary>
+    public static IReadOnlyList<string> KeyShapeTableNames { get; } =
+    ["vouchers", "voucher_uses", "badges", "badge_marks", "dbo.zones", "dbo.zone_notes"];
+
+    private static readonly Guid VoucherId = new("ab100000-0000-0000-0000-000000000001");
+    private static readonly Guid VoucherPkColId = new("ab100000-0000-0000-0000-000000000002");
+    private static readonly Guid VoucherLabelColId = new("ab100000-0000-0000-0000-000000000003");
+    private static readonly Guid VoucherUseId = new("ab100000-0000-0000-0000-000000000011");
+    private static readonly Guid VoucherUsePkColId = new("ab100000-0000-0000-0000-000000000012");
+    private static readonly Guid VoucherUseFkColId = new("ab100000-0000-0000-0000-000000000013");
+    private static readonly Guid VoucherUseTextColId = new("ab100000-0000-0000-0000-000000000014");
+    private static readonly Guid RelVoucherUses = new("ab100000-0000-0000-0000-000000000101");
+
+    private static readonly Guid BadgeId = new("ab200000-0000-0000-0000-000000000001");
+    private static readonly Guid BadgePkColId = new("ab200000-0000-0000-0000-000000000002");
+    private static readonly Guid BadgeTitleColId = new("ab200000-0000-0000-0000-000000000003");
+    private static readonly Guid BadgeMarkId = new("ab200000-0000-0000-0000-000000000011");
+    private static readonly Guid BadgeMarkPkColId = new("ab200000-0000-0000-0000-000000000012");
+    private static readonly Guid BadgeMarkFkColId = new("ab200000-0000-0000-0000-000000000013");
+    private static readonly Guid BadgeMarkTextColId = new("ab200000-0000-0000-0000-000000000014");
+    private static readonly Guid RelBadgeMarks = new("ab200000-0000-0000-0000-000000000101");
+
+    private static readonly Guid ZoneId = new("ab300000-0000-0000-0000-000000000001");
+    private static readonly Guid ZonePkColId = new("ab300000-0000-0000-0000-000000000002");
+    private static readonly Guid ZoneNameColId = new("ab300000-0000-0000-0000-000000000003");
+    private static readonly Guid ZoneNoteId = new("ab300000-0000-0000-0000-000000000011");
+    private static readonly Guid ZoneNotePkColId = new("ab300000-0000-0000-0000-000000000012");
+    private static readonly Guid ZoneNoteFkColId = new("ab300000-0000-0000-0000-000000000013");
+    private static readonly Guid ZoneNoteBodyColId = new("ab300000-0000-0000-0000-000000000014");
+    private static readonly Guid RelZoneNotes = new("ab300000-0000-0000-0000-000000000101");
+
+    /// <summary>
+    /// キーと表名の形の親子 3 組を図へ足す：GuidKey の主キー（<c>vouchers</c>）・<c>binary(4)</c> の主キー（<c>badges</c>）・
+    /// ドットを含む表名（<c>dbo.zones</c>＝SQL Server にいつもある既定のスキーマ <c>dbo</c>。スキーマを作らずに
+    /// <c>[dbo].[zones]</c> の引用を通す）。外部キーは ON DELETE CASCADE。列名はほかの表と重ねない
+    /// </summary>
+    private static void AddKeyShapeTables(ErDiagram diagram)
+    {
+        AddKeyShapePair(
+            diagram,
+            KeyShapeTable(
+                VoucherId,
+                "vouchers",
+                KeyShapeKey(VoucherPkColId, "voucher_id", "nvarchar(36)"),
+                KeyShapeText(VoucherLabelColId, "voucher_label")
+            ),
+            KeyShapeTable(
+                VoucherUseId,
+                "voucher_uses",
+                KeyShapeKey(VoucherUsePkColId, "voucher_use_id", "int"),
+                KeyShapeReference(VoucherUseFkColId, "voucher_id", "nvarchar(36)"),
+                KeyShapeText(VoucherUseTextColId, "voucher_use_text")
+            ),
+            RelVoucherUses,
+            VoucherPkColId,
+            VoucherUseFkColId,
+            "FK_voucher_uses_vouchers"
+        );
+
+        AddKeyShapePair(
+            diagram,
+            KeyShapeTable(
+                BadgeId,
+                "badges",
+                KeyShapeKey(BadgePkColId, "badge_hash", "binary(4)"),
+                KeyShapeText(BadgeTitleColId, "badge_title")
+            ),
+            KeyShapeTable(
+                BadgeMarkId,
+                "badge_marks",
+                KeyShapeKey(BadgeMarkPkColId, "badge_mark_id", "int"),
+                KeyShapeReference(BadgeMarkFkColId, "badge_hash", "binary(4)"),
+                KeyShapeText(BadgeMarkTextColId, "badge_mark_text")
+            ),
+            RelBadgeMarks,
+            BadgePkColId,
+            BadgeMarkFkColId,
+            "FK_badge_marks_badges"
+        );
+
+        AddKeyShapePair(
+            diagram,
+            KeyShapeTable(
+                ZoneId,
+                "dbo.zones",
+                KeyShapeKey(ZonePkColId, "zone_id", "int"),
+                KeyShapeText(ZoneNameColId, "zone_name")
+            ),
+            KeyShapeTable(
+                ZoneNoteId,
+                "dbo.zone_notes",
+                KeyShapeKey(ZoneNotePkColId, "zone_note_id", "int"),
+                KeyShapeReference(ZoneNoteFkColId, "zone_id", "int"),
+                KeyShapeText(ZoneNoteBodyColId, "zone_note_body")
+            ),
+            RelZoneNotes,
+            ZonePkColId,
+            ZoneNoteFkColId,
+            "FK_zone_notes_zones"
+        );
+    }
+
+    /// <summary>親と子と、子から親への 1 対多（ON DELETE CASCADE）を足す</summary>
+    private static void AddKeyShapePair(
+        ErDiagram diagram,
+        Entity parent,
+        Entity child,
+        Guid relationshipId,
+        Guid parentColumn,
+        Guid childColumn,
+        string constraintName
+    )
+    {
+        diagram.Entities.Add(parent);
+        diagram.Entities.Add(child);
+        diagram.Relationships.Add(
+            new Relationship
+            {
+                Id = relationshipId,
+                Type = RelationshipType.OneToMany,
+                SourceEntityId = parent.Id,
+                TargetEntityId = child.Id,
+                ColumnPairs = [new(parentColumn, childColumn)],
+                ConstraintName = constraintName,
+                OnDelete = ForeignKeyReferentialAction.Cascade,
+                OnUpdate = ForeignKeyReferentialAction.NoAction,
+            }
+        );
+    }
+
+    private static Entity KeyShapeTable(Guid id, string name, params Column[] columns)
+    {
+        var entity = new Entity { Id = id, TableName = name };
+
+        foreach (var column in columns)
+        {
+            entity.Columns.Add(column);
+        }
+
+        return entity;
+    }
+
+    private static Column KeyShapeKey(Guid id, string name, string type) =>
+        new()
+        {
+            Id = id,
+            Name = name,
+            DataType = type,
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+
+    private static Column KeyShapeReference(Guid id, string name, string type) =>
+        new()
+        {
+            Id = id,
+            Name = name,
+            DataType = type,
+            IsForeignKey = true,
+            IsNullable = false,
+        };
+
+    private static Column KeyShapeText(Guid id, string name) =>
+        new()
+        {
+            Id = id,
+            Name = name,
+            DataType = "nvarchar(30)",
+            IsNullable = false,
+        };
 }

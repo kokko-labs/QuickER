@@ -19,6 +19,20 @@ namespace QuickER.Tests.GeneratedBackendParityFixture;
 /// 行バージョンは持たせない＝SQLite では QuickER 版も EF Core も版を採番しないのに、インメモリは擬似版を採番するため、
 /// 同じ操作で結果が割れる（行バージョンの系統は <c>ConcurrencyFixture</c> が SQL Server で担う）。
 /// </para>
+/// <para>
+/// ほかに、キーと表名の形の親子 3 組を持つ（決まった形のシナリオ <c>key-shape-*</c>）。どれも「キーで行を引く・キーを比べる・
+/// 名前を引用する」経路が実装先ごとに別の実装なので、同じ操作を全部の実装先へ流して比べる。
+/// </para>
+/// <list type="bullet">
+/// <item><c>tokens</c>：文字列の主キー＝GuidKey の値オブジェクト（オプション <c>UseGuidKeyForStringPrimaryKey</c>。図のほかの表に文字列の主キーは無い）。<c>token_uses</c> が外部キーで参照する（値オブジェクトの型を共有する）。</item>
+/// <item><c>blobs</c>：<c>binary(4)</c> の主キー＝byte[] を包む値オブジェクト。<c>blob_tags</c> が外部キーで参照する。</item>
+/// <item><c>main.regions</c>・<c>main.region_notes</c>：ドットを含む表名。SQLite は <c>"main"."regions"</c> を、どの接続にもある DB <c>main</c> の表と読む（添付は要らない）。外部キーは同じ DB の中なので <c>REFERENCES "regions"</c> になる。<c>main.regions.photo</c> は除外 blob（Stream アクセサが表名を DB と表に分けて渡す経路）。</item>
+/// </list>
+/// <para>
+/// 列名はほかの表と重ねない（値オブジェクトの型は列名で決まり、同じ名前の列は型を共有するため）。外部キーは ON DELETE CASCADE
+/// （orders → order_lines と同じ）。SQL Server の値の往復の図（<c>BackendParitySqlServerFixtureDefinition</c>）はこの 6 表を外す
+/// （<see cref="KeyShapeTableNames"/>）。
+/// </para>
 /// </remarks>
 public static class BackendParityFixtureDefinition
 {
@@ -45,6 +59,7 @@ public static class BackendParityFixtureDefinition
             GenerateMappers = false,
             GenerateRepositories = true,
             GenerateValueObjects = true,
+            UseGuidKeyForStringPrimaryKey = true,
             GenerateEfCoreRepositories = true,
             GenerateInMemoryRepositories = true,
             GenerateRemoteServices = true,
@@ -327,7 +342,7 @@ public static class BackendParityFixtureDefinition
             },
         };
 
-        return new ErDiagram
+        var diagram = new ErDiagram
         {
             Entities = { customer, order, line, contact },
             Relationships =
@@ -402,6 +417,10 @@ public static class BackendParityFixtureDefinition
                 },
             },
         };
+
+        AddKeyShapeTables(diagram);
+
+        return diagram;
     }
 
     /// <summary>連絡先から顧客の主キーへの外部キーの列（int）</summary>
@@ -433,5 +452,180 @@ public static class BackendParityFixtureDefinition
             ConstraintName = name,
             OnDelete = onDelete,
             OnUpdate = ForeignKeyReferentialAction.NoAction,
+        };
+
+    /// <summary>キーと表名の形の表の名前（派生の図から外すとき使う）</summary>
+    public static IReadOnlyList<string> KeyShapeTableNames { get; } =
+    ["tokens", "token_uses", "blobs", "blob_tags", "main.regions", "main.region_notes"];
+
+    private static readonly Guid TokenId = new("ba100000-0000-0000-0000-000000000001");
+    private static readonly Guid TokenPkColId = new("ba100000-0000-0000-0000-000000000002");
+    private static readonly Guid TokenCaptionColId = new("ba100000-0000-0000-0000-000000000003");
+    private static readonly Guid TokenUseId = new("ba100000-0000-0000-0000-000000000011");
+    private static readonly Guid TokenUsePkColId = new("ba100000-0000-0000-0000-000000000012");
+    private static readonly Guid TokenUseFkColId = new("ba100000-0000-0000-0000-000000000013");
+    private static readonly Guid TokenUsePurposeColId = new("ba100000-0000-0000-0000-000000000014");
+    private static readonly Guid RelTokenUses = new("ba100000-0000-0000-0000-000000000101");
+
+    private static readonly Guid BlobId = new("ba200000-0000-0000-0000-000000000001");
+    private static readonly Guid BlobPkColId = new("ba200000-0000-0000-0000-000000000002");
+    private static readonly Guid BlobTitleColId = new("ba200000-0000-0000-0000-000000000003");
+    private static readonly Guid BlobTagId = new("ba200000-0000-0000-0000-000000000011");
+    private static readonly Guid BlobTagPkColId = new("ba200000-0000-0000-0000-000000000012");
+    private static readonly Guid BlobTagFkColId = new("ba200000-0000-0000-0000-000000000013");
+    private static readonly Guid BlobTagTextColId = new("ba200000-0000-0000-0000-000000000014");
+    private static readonly Guid RelBlobTags = new("ba200000-0000-0000-0000-000000000101");
+
+    private static readonly Guid RegionId = new("ba300000-0000-0000-0000-000000000001");
+    private static readonly Guid RegionPkColId = new("ba300000-0000-0000-0000-000000000002");
+    private static readonly Guid RegionNameColId = new("ba300000-0000-0000-0000-000000000003");
+    private static readonly Guid RegionPhotoColId = new("ba300000-0000-0000-0000-000000000004");
+    private static readonly Guid RegionNoteId = new("ba300000-0000-0000-0000-000000000011");
+    private static readonly Guid RegionNotePkColId = new("ba300000-0000-0000-0000-000000000012");
+    private static readonly Guid RegionNoteFkColId = new("ba300000-0000-0000-0000-000000000013");
+    private static readonly Guid RegionNoteBodyColId = new("ba300000-0000-0000-0000-000000000014");
+    private static readonly Guid RelRegionNotes = new("ba300000-0000-0000-0000-000000000101");
+
+    /// <summary>キーと表名の形の親子 3 組を図へ足す</summary>
+    private static void AddKeyShapeTables(ErDiagram diagram)
+    {
+        AddParentAndChild(
+            diagram,
+            Table(
+                TokenId,
+                "tokens",
+                Key(TokenPkColId, "token_id", "nvarchar(36)"),
+                Text(TokenCaptionColId, "caption")
+            ),
+            Table(
+                TokenUseId,
+                "token_uses",
+                Key(TokenUsePkColId, "use_id", "int"),
+                Reference(TokenUseFkColId, "token_id", "nvarchar(36)"),
+                Text(TokenUsePurposeColId, "purpose")
+            ),
+            RelTokenUses,
+            TokenPkColId,
+            TokenUseFkColId,
+            "FK_token_uses_tokens"
+        );
+
+        AddParentAndChild(
+            diagram,
+            Table(
+                BlobId,
+                "blobs",
+                Key(BlobPkColId, "hash", "binary(4)"),
+                Text(BlobTitleColId, "title")
+            ),
+            Table(
+                BlobTagId,
+                "blob_tags",
+                Key(BlobTagPkColId, "tag_id", "int"),
+                Reference(BlobTagFkColId, "hash", "binary(4)"),
+                Text(BlobTagTextColId, "tag_text")
+            ),
+            RelBlobTags,
+            BlobPkColId,
+            BlobTagFkColId,
+            "FK_blob_tags_blobs"
+        );
+
+        AddParentAndChild(
+            diagram,
+            Table(
+                RegionId,
+                "main.regions",
+                Key(RegionPkColId, "region_id", "int"),
+                Text(RegionNameColId, "region_name"),
+                new Column
+                {
+                    Id = RegionPhotoColId,
+                    Name = "photo",
+                    DataType = "varbinary(max)",
+                    IsNullable = true,
+                }
+            ),
+            Table(
+                RegionNoteId,
+                "main.region_notes",
+                Key(RegionNotePkColId, "region_note_id", "int"),
+                Reference(RegionNoteFkColId, "region_id", "int"),
+                Text(RegionNoteBodyColId, "body")
+            ),
+            RelRegionNotes,
+            RegionPkColId,
+            RegionNoteFkColId,
+            "FK_region_notes_regions"
+        );
+    }
+
+    /// <summary>親と子と、子から親への 1 対多（ON DELETE CASCADE）を足す</summary>
+    private static void AddParentAndChild(
+        ErDiagram diagram,
+        Entity parent,
+        Entity child,
+        Guid relationshipId,
+        Guid parentColumn,
+        Guid childColumn,
+        string constraintName
+    )
+    {
+        diagram.Entities.Add(parent);
+        diagram.Entities.Add(child);
+        diagram.Relationships.Add(
+            new Relationship
+            {
+                Id = relationshipId,
+                Type = RelationshipType.OneToMany,
+                SourceEntityId = parent.Id,
+                TargetEntityId = child.Id,
+                ColumnPairs = [new(parentColumn, childColumn)],
+                ConstraintName = constraintName,
+                OnDelete = ForeignKeyReferentialAction.Cascade,
+                OnUpdate = ForeignKeyReferentialAction.NoAction,
+            }
+        );
+    }
+
+    private static Entity Table(Guid id, string name, params Column[] columns)
+    {
+        var entity = new Entity { Id = id, TableName = name };
+
+        foreach (var column in columns)
+        {
+            entity.Columns.Add(column);
+        }
+
+        return entity;
+    }
+
+    private static Column Key(Guid id, string name, string type) =>
+        new()
+        {
+            Id = id,
+            Name = name,
+            DataType = type,
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+
+    private static Column Reference(Guid id, string name, string type) =>
+        new()
+        {
+            Id = id,
+            Name = name,
+            DataType = type,
+            IsForeignKey = true,
+            IsNullable = false,
+        };
+
+    private static Column Text(Guid id, string name) =>
+        new()
+        {
+            Id = id,
+            Name = name,
+            DataType = "nvarchar(30)",
+            IsNullable = false,
         };
 }

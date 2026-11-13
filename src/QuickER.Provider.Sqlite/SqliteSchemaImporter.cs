@@ -841,25 +841,7 @@ ORDER BY name;";
         [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SchemaTableEntry? entry
     ) => tables.TryGetValue(name, out entry) && SqliteNameEquals(entry.Key, name);
 
-    /// <summary>SQLite の識別子の照合（ASCII の英字だけ大文字小文字を同一視し、それ以外は序数で比べる）</summary>
-    private static bool SqliteNameEquals(string left, string right)
-    {
-        if (left.Length != right.Length)
-        {
-            return false;
-        }
-
-        for (var i = 0; i < left.Length; i++)
-        {
-            if (AsciiLower(left[i]) != AsciiLower(right[i]))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /// <summary>ASCII の大文字だけを小文字にする</summary>
-    private static char AsciiLower(char c) => c is >= 'A' and <= 'Z' ? (char)(c + 32) : c;
+    /// <summary>SQLite の識別子の照合（<see cref="SqliteIdentifier.NameEquals"/>）</summary>
+    private static bool SqliteNameEquals(string left, string right) =>
+        SqliteIdentifier.NameEquals(left, right);
 }

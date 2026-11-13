@@ -420,7 +420,7 @@ internal static class GeneratedFileUsings
                 // Stream 引数型は常に System.IO を要求する（契約 ISaveHookContext が常に Stream を含むため、分割 EF Core ファイルでも必須）
                 yield return "System.IO";
                 yield return "Microsoft.EntityFrameworkCore";
-                // Save フックの EF Core 経路（TrackGraph の記録＝EntityEntry の保持・State 落とし込み）で使う
+                // Save フックの EF Core 経路（カスケードの閉包の EntityEntry の保持・State の落とし込み）で使う
                 yield return "Microsoft.EntityFrameworkCore.ChangeTracking";
                 yield return "Microsoft.EntityFrameworkCore.Diagnostics";
                 yield return "Microsoft.EntityFrameworkCore.Infrastructure";

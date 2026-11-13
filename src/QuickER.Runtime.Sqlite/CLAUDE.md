@@ -44,6 +44,7 @@ SQLite 方言エンジン（QuickER 版 Repository の ADO 実装）の固定コ
 - Stream の長さの検査を外すと、先に確保した zeroblob の残りを 0 で埋めたまま true でコミットする（例外にならない）。
 - 単独の Read は、rowid の照会から blob の読み取りまでを 1 つの読み取りトランザクション（deferred）で行う。外すと、その間に別の接続が最大 rowid の行を消して挿入した行（同じ rowid を再利用する）の blob を返す。
 - 参加モード（Save フックの context）の書き込みはセーブポイント（`quicker_unbounded_binary_write`）の中で行い、失敗したらそこまで戻して解放する（`UnboundedBinaryColumnEngine.RollbackEnlistedWriteQuietlyAsync`）。宣言の長さの zeroblob を確保してから写すので、短い・途中で失敗する Stream では 0 と途中のバイトが残る。フックが例外を握りつぶすと、保存がそのままコミットしてしまうため。
+- `SqliteBlob` には DB 名と表名を分けて渡す（`SqliteBlob(connection, db, table, …)`。分け方は `EntitySaveMetadata.SplitTableName`＝`QuoteTableName` と同じ写しで、スキーマの無い名前は `main`）。分けない名前を渡すと、`sales.regions` を「`main` の中の `sales.regions` という名前の表」と探して no such table で必ず失敗する（ほかの文は `"sales"."regions"` を添付した DB の表として読む）。ガード：実装先どうしの一致のシナリオ `key-shape-dotted-blob-stream`（表 `main.regions`。QuickER 版とリモート〔QuickER 版のサーバー〕）。mutation 実証済み。
 - ガード：`BinaryColumnAdoRuntimeTests.Stream_Read_Standalone_DoesNotReadBlobOfRowThatReusedRowid`（WAL モードで照会の直後に profile フックから行を入れ替える。rollback ジャーナルでは照会側の共有ロックが残っていて差が出ない）、`SaveHookBinaryWriteSqliteRuntimeTests`（失敗した書き込み 2 通り＝短い Stream と途中で失敗する Stream。成功した書き込みがコミットされることは実装先の一致のシナリオ `hook-after-writes-blobs`）。mutation 実証済み。
 
 ## Include のローダ（IncludeLoader）

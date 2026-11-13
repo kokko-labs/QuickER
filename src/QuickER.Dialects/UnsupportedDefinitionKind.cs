@@ -162,6 +162,9 @@ public enum UnsupportedDefinitionKind
     /// <summary>E6 スキーマ付きテーブル名（ドット付き）</summary>
     SchemaQualifiedTableName,
 
+    /// <summary>E7 スキーマをまたぐ外部キー（子と親が違うスキーマ。SQLite は外部キーの句にスキーマを書けず、添付した別の DB の表を参照できない）</summary>
+    CrossSchemaForeignKey,
+
     /// <summary>X1 列順（SQL Server・PostgreSQL・Oracle は同期で並び替えられない）</summary>
     ColumnOrder,
 

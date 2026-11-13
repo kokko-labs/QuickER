@@ -402,6 +402,7 @@ The following table summarizes how the dialects differ, and the subsections belo
 | A unique constraint on exactly the primary key's columns is kept | ✅ | ✅ | ✅ | — (left out with a note) | — (left out with a note) |
 | `CREATE TABLE` drops a unique constraint on the same column list as the primary key or an earlier unique constraint | — | ✅ (added with `ALTER TABLE` after the table) | — | — (ORA-02261) | ✅ (one index) |
 | A table name with a dot is a schema-qualified name | ✅ | ✅ | ✅ | ✅ | — (an attached database) |
+| A foreign key can reference a table in another schema | ✅ | ✅ | ✅ | ✅ | — (left out with a note) |
 | Foreign key names are stored | ✅ | ✅ | ✅ | ✅ | — (synthesized on import) |
 | Descriptions are synced | ✅ | ✅ | ✅ | ✅ | — |
 | A failed script rolls back | ✅ | ✅ | — | — | ✅ |
@@ -422,6 +423,8 @@ A foreign key of an unnamed relationship is matched by the same default name the
 
 SQLite reads a table name with a dot such as `a.b` as table b in an attached database a, so the DDL and the sync for that table fail unless that database is attached.
 The DDL adds a comment before the table, and the sync lists such tables in the confirmation dialog.
+A foreign key between tables of the same database is written with the parent's table part alone (`REFERENCES "b"`), because SQLite looks for the parent in the child's database, and a table without a dot belongs to `main`.
+A foreign key between tables of different databases cannot exist in SQLite, so the DDL and the sync leave it out and write a comment before the child table.
 
 Column types are compared after bringing both sides to the spelling the database stores.
 A database does not always remember a declaration as written: a column declared `numeric(18,0)` comes back as `numeric(18)`.

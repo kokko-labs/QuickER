@@ -267,6 +267,40 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
         IReadOnlyList<TableRebuildForeignKey> foreignKeys
     )
     {
+        // 外部キーの行を先に組み、子と親が違う DB の外部キーは作らずに CREATE TABLE の前へ注記する（DDL 生成と同じ 1 か所の判定。
+        // 子は実テーブル名＝再構築の一時表も同じ DB に作る）
+        var foreignKeyLines = new List<string>();
+
+        foreach (var fk in foreignKeys)
+        {
+            if (
+                SqliteDdlGenerator.BuildForeignKeyConstraintLine(
+                    fk.ConstraintName,
+                    definition.TableName,
+                    fk.ChildColumns,
+                    fk.ParentTable,
+                    fk.ParentColumns,
+                    fk.OnDelete,
+                    fk.OnUpdate
+                ) is
+                { } line
+            )
+            {
+                foreignKeyLines.Add(line);
+            }
+            else
+            {
+                CrossSchemaForeignKeyNote.Append(
+                    sb,
+                    fk.ConstraintName,
+                    definition.TableName,
+                    fk.ParentTable,
+                    DialectName,
+                    UnsupportedFeature.Sync
+                );
+            }
+        }
+
         sb.AppendLine($"CREATE TABLE {quotedTableName} (");
 
         // 末尾へまとめて出す制約行（PK → UNIQUE → FK）を収集する
@@ -300,19 +334,7 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
             );
         }
 
-        foreach (var fk in foreignKeys)
-        {
-            trailingConstraints.Add(
-                SqliteDdlGenerator.BuildForeignKeyConstraintLine(
-                    fk.ConstraintName,
-                    fk.ChildColumns,
-                    fk.ParentTable,
-                    fk.ParentColumns,
-                    fk.OnDelete,
-                    fk.OnUpdate
-                )
-            );
-        }
+        trailingConstraints.AddRange(foreignKeyLines);
 
         // 列定義。後続の列行または末尾制約行が続く場合はカンマで区切る
         for (var i = 0; i < definition.Columns.Count; i++)

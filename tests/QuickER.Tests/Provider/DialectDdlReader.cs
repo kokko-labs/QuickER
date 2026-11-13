@@ -40,6 +40,7 @@ internal static class DialectDdlReader
         ("set-default-omitted", Prefix("-- Note: Oracle does not support ON DELETE SET DEFAULT")),
         ("on-update-omitted", Prefix("-- Note: Oracle does not support ON UPDATE")),
         ("dotted-table-name", Prefix("-- Note: this database reads ")),
+        ("cross-schema-fk", Prefix("-- Note: this database cannot reference ")),
         (
             "unique-on-primary-key",
             Prefix(

@@ -242,6 +242,19 @@ public sealed class ParityBackend : IAsyncDisposable
             )
             : _scope.ServiceProvider.GetRequiredService<IOrderLineRepository>();
 
+    /// <summary>リモート面のリポジトリ（全実装先にある。キーと表名の形の手が型で引く）</summary>
+    public TRepository Remote<TRepository>()
+        where TRepository : notnull => _scope.ServiceProvider.GetRequiredService<TRepository>();
+
+    /// <summary>全機能面のリポジトリ（リモートには無い。キーと表名の形の手が型で引く）</summary>
+    public TRepository Full<TRepository>()
+        where TRepository : notnull =>
+        ParityBackendKinds.IsRemote(Kind)
+            ? throw new InvalidOperationException(
+                "The remote backend has no full-featured surface."
+            )
+            : _scope.ServiceProvider.GetRequiredService<TRepository>();
+
     /// <summary>実装先を組み立てる（保存先は空のスキーマ）</summary>
     /// <param name="kind">実装先の種類</param>
     /// <param name="options">シナリオが求める条件</param>
@@ -287,7 +300,13 @@ public sealed class ParityBackend : IAsyncDisposable
                 new InMemoryCustomerRepository(store),
                 new InMemoryOrderRepository(store),
                 new InMemoryOrderLineRepository(store),
-                new InMemoryContactRepository(store)
+                new InMemoryContactRepository(store),
+                new InMemoryTokenRepository(store),
+                new InMemoryTokenUseRepository(store),
+                new InMemoryBlobRepository(store),
+                new InMemoryBlobTagRepository(store),
+                new InMemoryMainRegionRepository(store),
+                new InMemoryMainRegionNoteRepository(store)
             );
 
             return new ParityBackend(kind, provider, outside, hooks, null, null);
@@ -305,7 +324,13 @@ public sealed class ParityBackend : IAsyncDisposable
             outsideProvider.GetRequiredService<ICustomerRepository>(),
             outsideProvider.GetRequiredService<IOrderRepository>(),
             outsideProvider.GetRequiredService<IOrderLineRepository>(),
-            outsideProvider.GetRequiredService<IContactRepository>()
+            outsideProvider.GetRequiredService<IContactRepository>(),
+            outsideProvider.GetRequiredService<ITokenRepository>(),
+            outsideProvider.GetRequiredService<ITokenUseRepository>(),
+            outsideProvider.GetRequiredService<IBlobRepository>(),
+            outsideProvider.GetRequiredService<IBlobTagRepository>(),
+            outsideProvider.GetRequiredService<IMainRegionRepository>(),
+            outsideProvider.GetRequiredService<IMainRegionNoteRepository>()
         );
         var storage = new CompositeDisposable(outsideProvider, db);
 
@@ -497,6 +522,9 @@ public sealed class ParityBackend : IAsyncDisposable
         {
             rows.Add(ParityFormat.Contact(contact));
         }
+
+        // キーと表名の形の表（GuidKey・binary(4) の主キー・ドットを含む表名）
+        rows.AddRange(await KeyShapes.ReadStateAsync(Outside, ct));
 
         return rows;
     }
@@ -1149,7 +1177,13 @@ public sealed record ParityRepositories(
     ICustomerRepository Customers,
     IOrderRepository Orders,
     IOrderLineRepository Lines,
-    IContactRepository Contacts
+    IContactRepository Contacts,
+    ITokenRepository Tokens,
+    ITokenUseRepository TokenUses,
+    IBlobRepository Blobs,
+    IBlobTagRepository BlobTags,
+    IMainRegionRepository Regions,
+    IMainRegionNoteRepository RegionNotes
 );
 
 /// <summary>エンティティ・例外を、実装先に依らない文字列へ整える</summary>
@@ -1163,7 +1197,8 @@ public static class ParityFormat
             OrderEntity o => $"orders/{o.OrderId?.Value}",
             OrderLineEntity l => $"order_lines/{l.LineId?.Value}",
             ContactEntity c => $"contacts/{c.ContactId?.Value}",
-            _ => throw new ArgumentException(entity.GetType().Name, nameof(entity)),
+            _ => KeyShapes.KeyOf(entity)
+                ?? throw new ArgumentException(entity.GetType().Name, nameof(entity)),
         };
 
     /// <summary>顧客の列</summary>
