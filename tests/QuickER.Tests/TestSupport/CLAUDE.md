@@ -197,7 +197,7 @@
   夜間の実行で見つけた同期計画の総当たりの失敗は `SyncPlanFuzzKnownFailures` に載せる（中身はその一覧のコメント）。
 - 同期計画の総当たりの表明 1b（失敗の後に制約が消えていない）の規則 1〜5（`SyncPlanFuzzRunner.FailedSyncConstraintLosses`）、注 `warned-alter-foreign-key-exempt:{own-failure|collateral}`、違反の文の `(rule n; warned=…; dropped-before-failure=…)`、規則を固定する `SyncPlanFuzzOracleTests`（DB なし・1 規則 1 行の表）は `tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`「表明 1b の規則」を参照する。
   1 種の処理の予期しない例外を `seed threw:` として記録して次の種へ進める `SyncPlanFuzzRunner.RunGuardedAsync`（例外でテストごと止まると、それより前の種の違反が隠れる。取り消しは止める）も `tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`「1 種の例外」を参照する。
-- 同期計画の総当たりは、必須の形の表明と網羅しない組の照合を、普段の既定の種の数が 50 以上の方言だけで行う（夜間に種が増えた PostgreSQL・Oracle では行わない）。必須の形の表明は、流す種の数が普段の既定の数以上のときだけ行う（夜間の数は既定以上なので表明する。網も同じ）。既知の失敗の照合と必須の形の表明は両方を集めて 1 つの失敗にする（どちらかの赤がもう一方を隠さない）。失敗した種の警告の内訳と「失敗を予告しない種類の警告しか無いのに失敗した種」は出力する（測るだけ）。
+- 同期計画の総当たりは、必須の形の表明を普段の既定の種の数が 50 以上の方言と形の種を宣言した方言（PostgreSQL・Oracle）で行い、網羅しない組の照合は普段の既定の種の数が 50 以上の方言だけで行う（`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`「照合のまとめ方」）。必須の形の表明は、流す種の数が普段の既定の数以上のときだけ行う（夜間の数は既定以上なので表明する。網も同じ）。既知の失敗の照合と必須の形の表明は両方を集めて 1 つの失敗にする（どちらかの赤がもう一方を隠さない）。失敗した種の警告の内訳と「失敗を予告しない種類の警告しか無いのに失敗した種」は出力する（測るだけ）。
 - ガード：`SeedSourceTests`（目印の判定と `Resolve` の検査）・`KnownFailureSetTests.NightlyOnlyRandomEntry_NotObservedOnlyAtNightlyDefaultCount`・`CoverageCounterTests` の夜間の 4 件・`SyncPlanFuzzRunnerGuardTests`（Integration・Docker 不要）・`WorkflowGuardTests` の `Nightly_*` 6 件・`ParityTests`（行 `nightly-actions-pinned-like-other-workflows`・`nightly-jobs`・`nightly-job-test-commands`・`nightly-job-engine-profile`）。`SchemaNamesTests` の目印の付け忘れも `SeedSource` が拾う。mutation 実証済み。
 
 ## 変異テスト（Stryker.NET）

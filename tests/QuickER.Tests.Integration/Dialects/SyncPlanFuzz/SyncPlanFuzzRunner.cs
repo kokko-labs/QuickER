@@ -93,6 +93,7 @@ internal sealed class FuzzSeedOutcome
         text.AppendLine("after diff:");
         AfterDiff.ForEach(s => text.AppendLine("  " + s));
         text.AppendLine("warnings: " + string.Join(", ", Warnings));
+        text.AppendLine("shapes: " + string.Join(", ", Shapes.Order(StringComparer.Ordinal)));
         text.AppendLine("error: " + Error);
         text.AppendLine("script:");
         text.AppendLine(Script);
