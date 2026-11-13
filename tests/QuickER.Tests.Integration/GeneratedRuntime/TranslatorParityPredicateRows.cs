@@ -134,6 +134,10 @@ public static class TranslatorParityPredicateRows
         var noonOfFirstDay = new DateTime(2024, 1, 1, 12, 0, 0);
         var finerThanCentisecond = new DateTime(2024, 1, 1, 10, 0, 0).AddTicks(1_200_001);
         var finerClock = new TimeSpan(0, 10, 0, 0, 120).Add(TimeSpan.FromTicks(1));
+        var oneDay = TimeSpan.FromDays(1);
+        var negativeHour = TimeSpan.FromHours(-1);
+        var clocksWithOutOfDay = new List<TimeSpan?> { oneDay, new TimeSpan(0, 10, 0, 0, 120) };
+        var onlyOutOfDayClocks = new List<TimeSpan?> { oneDay, negativeHour };
         var amountBeyondScale = 100.004m;
         var amountBeyondPrecision = 123456789.5m;
         var amountsBeyondScale = new List<decimal?> { 100.004m, 300m };
@@ -472,6 +476,57 @@ public static class TranslatorParityPredicateRows
                 "time-scaled-less-finer",
                 "time(2) の列と 1/100 秒より細かい TimeSpan の < は端数を落とさずに比べる",
                 x => x.Clock < finerClock
+            ),
+            // ---- time の列と 0〜24 時間の外の TimeSpan（SQL Server の time の範囲の外。C# の答えは、等しくなく大小は決まる） ----
+            Probe(
+                "time-out-of-day-equals",
+                "time の列と 1 日の == はどの行にも一致しない",
+                x => x.Clock == oneDay
+            ),
+            Probe(
+                "time-out-of-day-not-equals-negative",
+                "time の列と負の値の != は NULL の行を含む全行に一致する",
+                x => x.Clock != negativeHour
+            ),
+            Probe(
+                "time-out-of-day-less",
+                "time の列と 1 日の < は NULL でない全行に一致する",
+                x => x.Clock < oneDay
+            ),
+            Probe(
+                "time-out-of-day-greater",
+                "time の列と 1 日の > はどの行にも一致しない",
+                x => x.Clock > oneDay
+            ),
+            Probe(
+                "time-out-of-day-greater-or-equal-negative",
+                "time の列と負の値の >= は NULL でない全行に一致する",
+                x => x.Clock >= negativeHour
+            ),
+            Probe(
+                "time-out-of-day-less-or-equal-negative",
+                "time の列と負の値の <= はどの行にも一致しない",
+                x => x.Clock <= negativeHour
+            ),
+            Probe(
+                "time-out-of-day-value-on-left",
+                "値が左の 1 日 > time の列は、列 < 1 日と同じく NULL でない全行に一致する",
+                x => oneDay > x.Clock
+            ),
+            Probe(
+                "time-out-of-day-negated-equals",
+                "time の列と 1 日の == の否定（式の木の Not）は NULL の行を含む全行に一致する",
+                Negate<ProbeEntity>(x => x.Clock == oneDay, 1)
+            ),
+            Probe(
+                "time-out-of-day-in-mixed",
+                "1 日と範囲の中の値を持つリストの IN は、範囲の中の値の行にだけ一致する",
+                x => clocksWithOutOfDay.Contains(x.Clock)
+            ),
+            Probe(
+                "time-out-of-day-not-in-only",
+                "範囲の外の値だけのリストの NOT IN は NULL の行を含む全行に一致する",
+                x => !onlyOutOfDayClocks.Contains(x.Clock)
             ),
             Probe(
                 "varchar-equals-non-ascii",

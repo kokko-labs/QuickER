@@ -143,6 +143,16 @@ public sealed partial class DslFuzzGenerator(
     private readonly Random _random = new(seed);
     private int _parameterIndex;
 
+    /// <summary>
+    /// TimeSpan の列の順序比較と、TimeSpan の列での並び替えを作るか（既定は作る）。EF Core〔SQLite〕は TimeSpan の大小の比較と並び替えを
+    /// 翻訳できず流さない（<c>DslConditionFuzzTests</c> の ExcludedOnEfCoreSqlite）ので、SQLite の網羅の単位のうち 3 実装先で流す側は作らない
+    /// </summary>
+    public bool TimeSpanOrdered { get; init; } = true;
+
+    /// <summary>列に順序比較を作るか（順序を持つ列で、TimeSpan の列は <see cref="TimeSpanOrdered"/> のときだけ）</summary>
+    private bool CanOrder(DslColumn column) =>
+        column.IsOrdered && (TimeSpanOrdered || column.Clr != DslClr.TimeSpan);
+
     /// <summary>行を作る（NULL 許容の列は約 4 分の 1 を NULL にする）</summary>
     public List<IReadOnlyDictionary<string, object?>> Rows(
         IReadOnlyList<DslColumn> columns,
@@ -807,7 +817,7 @@ public sealed partial class DslFuzzGenerator(
             }
         }
 
-        var ops = column.IsOrdered ? Enum.GetValues<DslOp>() : [DslOp.Eq, DslOp.Ne];
+        var ops = CanOrder(column) ? Enum.GetValues<DslOp>() : [DslOp.Eq, DslOp.Ne];
         var literalAllowed = column.IsString || column.IsInteger || column.Clr == DslClr.Decimal;
 
         foreach (var op in ops)
@@ -1052,7 +1062,7 @@ public sealed partial class DslFuzzGenerator(
             choices.Add(() => new DslNullCheck(_random.Next(2) == 0) { Column = column });
         }
 
-        if (column.IsOrdered)
+        if (CanOrder(column))
         {
             choices.Add(() => Compare(column, PickOp(all: true)));
             choices.Add(() => Compare(column, PickOp(all: true)));

@@ -45,6 +45,16 @@ public sealed class TranslatorParityEfCoreOracleRuntimeTests(OracleContainerFixt
     {
         ["time-scaled-equals-finer"] = NoTimeSpanType,
         ["time-scaled-less-finer"] = NoTimeSpanType,
+        ["time-out-of-day-equals"] = NoTimeSpanType,
+        ["time-out-of-day-not-equals-negative"] = NoTimeSpanType,
+        ["time-out-of-day-less"] = NoTimeSpanType,
+        ["time-out-of-day-greater"] = NoTimeSpanType,
+        ["time-out-of-day-greater-or-equal-negative"] = NoTimeSpanType,
+        ["time-out-of-day-less-or-equal-negative"] = NoTimeSpanType,
+        ["time-out-of-day-value-on-left"] = NoTimeSpanType,
+        ["time-out-of-day-negated-equals"] = NoTimeSpanType,
+        ["time-out-of-day-in-mixed"] = NoTimeSpanType,
+        ["time-out-of-day-not-in-only"] = NoTimeSpanType,
     };
 
     private const string NoTimeSpanType =

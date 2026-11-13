@@ -271,6 +271,7 @@ public sealed partial class DslFuzzGenerator
                     ? DecimalOutOfType(column, decimalOrdered, seedSubset)
                 : column.Nullable && column.IsInteger ? IntegerOutOfType(column, seedSubset)
                 : column.NonUnicode ? NonAsciiAtoms(column, bothQuotes)
+                : column.TimeRange is { } range ? TimeSpanOutOfRange(column, range)
                 : [];
 
             foreach (var atom in atoms)
@@ -361,6 +362,60 @@ public sealed partial class DslFuzzGenerator
         foreach (var op in DslFuzzDimensions.FractionalOps)
         {
             yield return OutOfTypeLiteral(column, op, BeyondRangeFractionalLiterals);
+        }
+    }
+
+    /// <summary>
+    /// TimeSpan の列と、列の型の範囲（<see cref="DslColumn.TimeRange"/>）の外の値の原子：6 つの演算子 × 上の外・下の外の値 × 列で型付けと
+    /// 型トークン <c>time</c>、IN と NOT IN（上の外だけ・下の外と範囲の中・上の外と下の外）。比べる値の池（<see cref="DslColumn.OperandValues"/>）に
+    /// 範囲の外の値が無い列（種の単位の列）は作らない
+    /// </summary>
+    private IEnumerable<DslAtom> TimeSpanOutOfRange(DslColumn column, DslTimeRange range)
+    {
+        var operands = (column.OperandValues ?? []).OfType<TimeSpan>().ToList();
+        var above = operands.Where(value => value > range.Max).Cast<object>().ToList();
+        var below = operands.Where(value => value < range.Min).Cast<object>().ToList();
+        var inside = DslFuzz.ValuePool(column);
+
+        if (above.Count == 0 || below.Count == 0)
+        {
+            yield break;
+        }
+
+        foreach (var op in Enum.GetValues<DslOp>())
+        {
+            foreach (var pool in new[] { above, below })
+            {
+                yield return OutOfTypeCompare(column, op, pool, typeToken: null);
+                yield return OutOfTypeCompare(column, op, pool, DslFuzz.TypeToken(DslClr.TimeSpan));
+            }
+        }
+
+        foreach (var negated in new[] { false, true })
+        {
+            foreach (
+                var values in new[]
+                {
+                    new[] { Pick(above) },
+                    [Pick(below), Pick(inside)],
+                    [Pick(above), Pick(below)],
+                }
+            )
+            {
+                yield return new DslIn(
+                    negated,
+                    new DslParam(
+                        parameterPrefix + _parameterIndex++,
+                        values,
+                        IsList: true,
+                        ByColumn: _random.Next(2) == 0,
+                        column
+                    )
+                )
+                {
+                    Column = column,
+                };
+            }
         }
     }
 

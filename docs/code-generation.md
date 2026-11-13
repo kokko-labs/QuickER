@@ -579,6 +579,8 @@ An exact `LIKE` (no `%`) and `=` work.
 
 A DSL condition on a `bool` or binary (`byte[]`) column can use only `=`, `<>`, `IN`, and `IS [NOT] NULL` against a parameter.
 The DSL has no literal for these types, and QuickER warns and skips a query that uses an ordering comparison (`<` and the like) on them.
+A DSL condition on a `TimeSpan` column can use comparisons against a parameter (ordering comparisons included), `IN`, and `IS [NOT] NULL`.
+The DSL has no `TimeSpan` literal either.
 
 The result type name of a projection becomes a class in the generated namespace, so it must not collide with another type there.
 QuickER refuses a name that is a generated class or interface (`OrderEntity`, `IOrderRepository`, a value object such as `AmountValue`), a runtime type, or a library type the generated code uses by its simple name (`Task`, `Expression`, and the like).
@@ -652,6 +654,23 @@ A value whose excess holds a byte other than `0x00` cannot be stored in the colu
 
 Oracle stores an empty binary value as `NULL`, as it does an empty string.
 A comparison with an empty `byte[]` compares with `NULL`: `x.Data != empty` matches no row, and an `IN` or `NOT IN` list holding an empty array behaves as if it held `NULL`.
+
+A comparison on a `TimeSpan` column compares the lengths of the values, as C# does.
+The column types hold a limited range: SQL Server's `time` holds 0 to under 24 hours, PostgreSQL's `time` holds 0 to 24 hours, and MySQL's `time` holds ±838:59:59 (PostgreSQL's `interval` holds negative values and values of a day or more).
+The QuickER Repository on SQL Server replaces a comparison between a `time` column and a value outside its range (a negative value or a value of a day or more) with a condition that gives the C# answer.
+An equality matches no row, `<>` matches every row including the rows holding `NULL`, and `x.Clock < oneDay` matches every row not holding `NULL`.
+An element of an `IN` list outside the range matches no row.
+The EF Core Repository on PostgreSQL compares a `time` column with a value outside its range and gives the C# answer.
+
+> **Known limitation**: the EF Core Repository on SQL Server cannot send a `TimeSpan` outside the range of a `time` column it is compared with, and SqlClient refuses it with an `OverflowException`.
+> EF Core sends the value as the column's type (`time`), and SQL Server has no other type that compares with a `time` column as it is.
+
+> **Known limitation**: the EF Core Repository on MySQL compares a `time` column with a value outside ±838:59:59 as if the value were the nearest end of the range (838:59:59).
+> It gives an answer different from C# without an exception, so keep the compared values within that range.
+
+> **Known limitation**: SQLite stores a `TimeSpan` as text (`hh:mm:ss.fffffff`, and `d.hh:mm:ss` from a day on).
+> Equality and `IN` give the C# answer for any value, but an ordering comparison (`<` and the like) and sorting follow the order of the text, and give the C# answer only between values from 0 to under 24 hours.
+> The EF Core Repository refuses an ordering comparison and sorting on a `TimeSpan` column (a limitation of the EF Core SQLite provider).
 
 Date parts (`Year`, `Month`, …) are translated only when the member is read from a `DateTime`, `DateOnly`, or `DateTimeOffset` column, nullable forms included.
 A property of the same name on any other type is not a date part, such as one added to a value object through a partial declaration.

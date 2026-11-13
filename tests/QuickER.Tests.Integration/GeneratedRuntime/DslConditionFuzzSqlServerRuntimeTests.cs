@@ -83,20 +83,32 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
 
         // 網羅の単位（DslFuzzUnits.Coverage）を種の前に流して数える（種を 1 つだけ流すときは流さない）。単位のクエリは
         // どの実装先でも照合したクエリにならなければ名指しで赤にする
-        DslFuzzUnit[] coverageUnits = plan.IsSingle
+        // time の列と範囲の外の値の単位は QuickER 版だけで流す（EF Core 版は範囲の外の値を送れず例外にする＝docs の TimeSpan の
+        // 既知の割り切り）
+        var adoTarget = target with
+        {
+            Backends = [.. target.Backends.Where(backend => backend.Name == DslFuzzBackends.Ado)],
+        };
+        (DslFuzzUnit Unit, DslFuzzTarget Target)[] coverageUnits = plan.IsSingle
             ? []
             :
             [
-                DslFuzzUnits.Coverage(DialectNames.SqlServer),
-                DslFuzzUnits.PlainCoverage(DialectNames.SqlServer),
-                .. DslFuzzUnits.FamiliesCoverage(DialectNames.SqlServer),
-                DslFuzzUnits.SqlServerAnsiCoverage(),
-                DslFuzzUnits.SqlServerMoneyCoverage(),
+                (DslFuzzUnits.Coverage(DialectNames.SqlServer), target),
+                (DslFuzzUnits.PlainCoverage(DialectNames.SqlServer), target),
+                .. DslFuzzUnits
+                    .FamiliesCoverage(DialectNames.SqlServer)
+                    .Select(unit => (unit, target)),
+                (DslFuzzUnits.SqlServerAnsiCoverage(), target),
+                (DslFuzzUnits.SqlServerMoneyCoverage(), target),
+                .. DslFuzzUnits
+                    .TimeSpanCoverage(DialectNames.SqlServer)
+                    .Select(unit => (unit, target)),
+                (DslFuzzUnits.SqlServerOutOfDayCoverage(), adoTarget),
             ];
 
-        foreach (var unit in coverageUnits)
+        foreach (var (unit, unitTarget) in coverageUnits)
         {
-            await DslFuzzRunner.RunAsync(ledger, unit, target, Ct, coverage, minimumChecked: 0);
+            await DslFuzzRunner.RunAsync(ledger, unit, unitTarget, Ct, coverage, minimumChecked: 0);
         }
 
         foreach (var seed in plan.Seeds)
@@ -113,11 +125,11 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
 
         ledger.AssertMatchesKnown($"{Suite}-");
         coverageUnits
-            .SelectMany(unit =>
+            .SelectMany(pair =>
                 coverage.UncheckedProblems(
-                    unit,
-                    target.Dbms,
-                    target.Backends.Select(backend => backend.Name)
+                    pair.Unit,
+                    pair.Target.Dbms,
+                    pair.Target.Backends.Select(backend => backend.Name)
                 )
             )
             .Should()

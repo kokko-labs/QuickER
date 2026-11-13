@@ -48,13 +48,10 @@ public sealed partial class DslFuzzGenerator
         columns.Where(column => !column.PrimaryKey || column.Clr == DslClr.GuidKey).ToList();
 
     /// <summary>
-    /// 主キーより前に置ける並びの列（主キーでない整数・decimal・日時・bool の列。bool は false が先でどの DB も同じ。バイナリは並べない＝
-    /// 作らない形の宣言）
+    /// 主キーより前に置ける並びの列（主キーでない整数・decimal・日時・bool・TimeSpan の列。bool は false が先でどの DB も同じ。TimeSpan は
+    /// <see cref="TimeSpanOrdered"/> のときだけ。バイナリは並べない＝作らない形の宣言）
     /// </summary>
-    private static List<DslColumn> OrderableColumns(
-        IReadOnlyList<DslColumn> columns,
-        bool withDecimal
-    ) =>
+    private List<DslColumn> OrderableColumns(IReadOnlyList<DslColumn> columns, bool withDecimal) =>
         columns
             .Where(column =>
                 !column.PrimaryKey
@@ -63,6 +60,7 @@ public sealed partial class DslFuzzGenerator
                     || column.Clr == DslClr.DateTime
                     || column.Clr == DslClr.Boolean
                     || (withDecimal && column.Clr == DslClr.Decimal)
+                    || (TimeSpanOrdered && column.Clr == DslClr.TimeSpan)
                 )
             )
             .ToList();
@@ -228,7 +226,7 @@ public sealed partial class DslFuzzGenerator
     /// <param name="column">原子の列</param>
     /// <param name="compareOnly">比較だけか（型が広がる原子）</param>
     /// <param name="decimalOrdered">decimal の列の順序比較も作るか（網羅の単位は作らない）</param>
-    private static List<Func<DslParam, DslAtom>> ScalarShapes(
+    private List<Func<DslParam, DslAtom>> ScalarShapes(
         DslColumn column,
         bool compareOnly,
         bool decimalOrdered
@@ -236,7 +234,7 @@ public sealed partial class DslFuzzGenerator
     {
         var shapes = new List<Func<DslParam, DslAtom>>();
         var ops =
-            column.IsOrdered && (decimalOrdered || column.Clr != DslClr.Decimal)
+            CanOrder(column) && (decimalOrdered || column.Clr != DslClr.Decimal)
                 ? Enum.GetValues<DslOp>()
                 : [DslOp.Eq, DslOp.Ne];
 
@@ -398,7 +396,7 @@ public sealed partial class DslFuzzGenerator
     }
 
     /// <summary>形の組の作り方の数（網羅の単位で形を回す回数）</summary>
-    private static int ShapeVariants(ReuseForm form, bool decimalOrdered) =>
+    private int ShapeVariants(ReuseForm form, bool decimalOrdered) =>
         form.IsList
             ? DslIn.ListShapes.Count * 2
             : Math.Max(

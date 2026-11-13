@@ -36,9 +36,17 @@ public sealed class TranslatorParityEfCoreSqliteRuntimeTests
         string
     >(StringComparer.Ordinal)
     {
-        ["time-scaled-less-finer"] =
-            "EF Core の SQLite プロバイダは TimeSpan の列の大小の比較を翻訳できず、InvalidOperationException で断る（プロバイダの文書の Query limitations：SQLite が持たない型の比較と並び替えはクライアントの評価が要る）",
+        ["time-scaled-less-finer"] = TimeSpanOrdering,
+        ["time-out-of-day-less"] = TimeSpanOrdering,
+        ["time-out-of-day-greater"] = TimeSpanOrdering,
+        ["time-out-of-day-greater-or-equal-negative"] = TimeSpanOrdering,
+        ["time-out-of-day-less-or-equal-negative"] = TimeSpanOrdering,
+        ["time-out-of-day-value-on-left"] = TimeSpanOrdering,
     };
+
+    /// <summary>TimeSpan の列の大小の比較の割り切りの理由</summary>
+    private const string TimeSpanOrdering =
+        "EF Core の SQLite プロバイダは TimeSpan の列の大小の比較を翻訳できず、InvalidOperationException で断る（プロバイダの文書の Query limitations：SQLite が持たない型の比較と並び替えはクライアントの評価が要る）";
 
     /// <inheritdoc />
     protected override IReadOnlyDictionary<string, string> Known => KnownRows;

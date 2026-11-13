@@ -609,6 +609,8 @@ QuickER は警告して、そのクエリを飛ばします。
 
 `bool` とバイナリ（`byte[]`）の列の簡易 DSL の条件は、パラメータとの `=`・`<>`・`IN`・`IS [NOT] NULL` だけを書けます。
 これらの型のリテラルは簡易 DSL に無く、順序比較（`<` など）を書いたクエリは、QuickER が警告して飛ばします。
+`TimeSpan` の列の簡易 DSL の条件は、パラメータとの比較（順序比較を含む）・`IN`・`IS [NOT] NULL` を書けます。
+`TimeSpan` のリテラルも簡易 DSL にありません。
 
 射影の結果型名は生成 namespace のクラスになるため、そこにある別の型と衝突してはいけません。
 QuickER は、生成されるクラス・インターフェイス（`OrderEntity`、`IOrderRepository`、`AmountValue` のような値オブジェクト）、ランタイムの型、生成コードが単純名で使うライブラリの型（`Task`・`Expression` など）と同じ名前を断ります。
@@ -683,6 +685,23 @@ SQL Server の QuickER 版 Repository は長さも比べるので、可変長の
 
 Oracle は、空文字列と同じく空のバイナリを `NULL` として持ちます。
 空の `byte[]` との比較は `NULL` との比較になります：`x.Data != empty` はどの行にも一致せず、空の配列を含む `IN`・`NOT IN` のリストは `NULL` を含むリストと同じに振る舞います。
+
+`TimeSpan` の列の比較は、C# と同じく値の長さで比べます。
+列の型が持てる値には範囲があります：SQL Server の `time` は 0〜24 時間未満、PostgreSQL の `time` は 0〜24 時間、MySQL の `time` は ±838:59:59 です（PostgreSQL の `interval` は負の値も 1 日以上の値も持ちます）。
+SQL Server の QuickER 版 Repository は、`time` の列と範囲の外の値（負の値と 1 日以上の値）の比較を、C# と同じ答えの条件に置き換えます。
+等値はどの行にも一致せず、`<>` は `NULL` の行を含む全行に一致し、`x.Clock < oneDay` は `NULL` でない全行に一致します。
+`IN` のリストの範囲の外の要素は、どの行にも一致しません。
+PostgreSQL の EF Core 版 Repository は、`time` の列を範囲の外の値とも C# と同じ答えで比べます。
+
+> **既知の割り切り**: SQL Server の EF Core 版 Repository は、`time` の列と比べる範囲の外の `TimeSpan` を送れず、SqlClient が `OverflowException` で断ります。
+> EF Core は値を列の型（`time`）で送り、SQL Server には `time` の列とそのまま比べられるほかの型が無いためです。
+
+> **既知の割り切り**: MySQL の EF Core 版 Repository は、`time` の列と比べる ±838:59:59 の外の値を、端の値（838:59:59）に丸めて比べます。
+> 例外にならずに C# と違う答えになるので、比べる値はその範囲に収めてください。
+
+> **既知の割り切り**: SQLite は `TimeSpan` を文字列（`hh:mm:ss.fffffff`、1 日以上は `d.hh:mm:ss`）で持ちます。
+> 等値と `IN` はどの値でも C# と同じ答えですが、順序比較（`<` など）と並び替えは文字列の順になり、0〜24 時間未満の値どうしでだけ C# と同じ答えになります。
+> EF Core 版 Repository は、`TimeSpan` の列の順序比較と並び替えを断ります（EF Core の SQLite プロバイダの制限）。
 
 日付部品（`Year`・`Month` など）へ変換されるのは、読み出し元が `DateTime` / `DateOnly` / `DateTimeOffset`（いずれも nullable を含む）の列である場合だけです。
 同名のプロパティを別の型に持たせても、日付部品とは見なしません（値オブジェクトへ partial で足した場合など）。
