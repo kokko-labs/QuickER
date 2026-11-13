@@ -83,7 +83,15 @@ public abstract class TranslatorParityEfCoreRuntimeTestsBase
         var ids = TranslatorParityPredicateRows.Table.Select(row => row.Id).ToHashSet();
         Known.Keys.Concat(NotApplicable.Keys).Where(id => !ids.Contains(id)).Should().BeEmpty();
         Known.Keys.Intersect(NotApplicable.Keys).Should().BeEmpty();
+        KnownParameterOverflows.Where(id => !Known.ContainsKey(id)).Should().BeEmpty();
     }
+
+    /// <summary>
+    /// <see cref="Known"/> のうち、ドライバがパラメータの値を型の範囲の外として <see cref="OverflowException"/> で断って割れる行
+    /// （既定は無し。ほかの Known の行は DB の例外か翻訳の失敗でだけ割れたとみなす）
+    /// </summary>
+    protected virtual IReadOnlySet<string> KnownParameterOverflows { get; } =
+        new HashSet<string>(StringComparer.Ordinal);
 
     /// <summary>流せないと宣言した行が、生成物へ付け替えられない行とちょうど同じことを表明する</summary>
     [Fact(
@@ -130,9 +138,15 @@ public abstract class TranslatorParityEfCoreRuntimeTestsBase
             (expected, actual, predicate) = await RunRowAsync(provider, id);
         }
         catch (Exception exception)
-            when (Known.ContainsKey(id) && exception is DbException or InvalidOperationException)
+            when (Known.ContainsKey(id)
+                && (
+                    exception is DbException or InvalidOperationException
+                    || (exception is OverflowException && KnownParameterOverflows.Contains(id))
+                )
+            )
         {
-            // 宣言した行が DB の例外か翻訳の失敗で割れた（C# は例外にしない）
+            // 宣言した行が DB の例外か翻訳の失敗で割れた。OverflowException（ドライバがパラメータの値を型の範囲の外として断る）は
+            // KnownParameterOverflows に載せた行だけ（ほかの Known の行の桁あふれを黙って通さない）。C# は例外にしない
             TestContext.Current.TestOutputHelper?.WriteLine(
                 $"行 {id} は宣言どおり割れた: {exception.Message}"
             );

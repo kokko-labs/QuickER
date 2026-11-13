@@ -182,13 +182,19 @@ public abstract class TranslatorParityRuntimeTestsBase
     /// <summary>
     /// 実装先の Query() が返す行の集合が、同じ実装先から読み戻した全行へ C# のラムダを当てた結果と一致することを表明する。
     /// </summary>
-    protected Task ShouldMatchCSharpAsync(Expression<Func<ProbeEntity, bool>> predicate) =>
+    /// <param name="predicate">述語</param>
+    /// <param name="known">C# と割れると宣言した行の理由（null なら一致を表明し、あれば割れることを表明する）</param>
+    protected Task ShouldMatchCSharpAsync(
+        Expression<Func<ProbeEntity, bool>> predicate,
+        string? known = null
+    ) =>
         ShouldMatchCSharpAsync(
             Repository<IProbeRepository>(),
             predicate,
             p => p.ProbeId,
             SeedProbes().Count,
-            FixedBinaryLengths
+            FixedBinaryLengths,
+            known
         );
 
     /// <summary>
@@ -200,7 +206,8 @@ public abstract class TranslatorParityRuntimeTestsBase
         Expression<Func<TEntity, bool>> predicate,
         Func<TEntity, long> key,
         int seeded,
-        IReadOnlyDictionary<string, int>? fixedBinaryLengths = null
+        IReadOnlyDictionary<string, int>? fixedBinaryLengths = null,
+        string? known = null
     )
         where TEntity : EntityBaseCore, new()
     {
@@ -217,6 +224,21 @@ public abstract class TranslatorParityRuntimeTestsBase
             .ToList();
 
         var actual = await repository.Query().Where(predicate).ToListAsync(Ct);
+
+        if (known is not null)
+        {
+            actual
+                .Select(key)
+                .Should()
+                .NotBeEquivalentTo(
+                    expected,
+                    "条件 {0} は C# と割れると宣言している（{1}）。一致するようになったら宣言を消す",
+                    predicate,
+                    known
+                );
+
+            return;
+        }
 
         actual
             .Select(key)
@@ -386,6 +408,24 @@ public abstract class TranslatorParityRuntimeTestsBase
     // ===== 述語の表 =====
 
     /// <summary>
+    /// 実装先の答えが C# と割れると分かっている probes の行と、その理由（docs の既知の割り切りを出典にする。宣言した行が一致したら赤）
+    /// </summary>
+    protected virtual IReadOnlyDictionary<string, string> Known { get; } =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
+    /// <summary>割れると宣言した行が述語の表の probes の行に実在することを表明する（行の改名で宣言が黙って効かなくなるのを防ぐ）</summary>
+    [Fact(DisplayName = "[翻訳パリティ] 割れると宣言した行は述語の表の probes の行に実在する")]
+    public void Known_NamesExistingProbeRows()
+    {
+        var probeIds = TranslatorParityPredicateRows
+            .Table.Where(row => row.Input is ProbePredicate)
+            .Select(row => row.Id)
+            .ToHashSet();
+
+        Known.Keys.Where(id => !probeIds.Contains(id)).Should().BeEmpty();
+    }
+
+    /// <summary>
     /// 述語の表（<see cref="TranslatorParityPredicateRows"/>）の 1 行が、C# と同じ行を返すことを検証する。
     /// </summary>
     /// <remarks>
@@ -405,7 +445,7 @@ public abstract class TranslatorParityRuntimeTestsBase
         switch (TranslatorParityPredicateRows.Table[id].Input)
         {
             case ProbePredicate probe:
-                await ShouldMatchCSharpAsync(probe.Predicate);
+                await ShouldMatchCSharpAsync(probe.Predicate, Known.GetValueOrDefault(id));
                 break;
 
             case SmallChildPredicate child:

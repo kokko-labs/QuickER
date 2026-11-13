@@ -358,8 +358,8 @@ public static class DslFuzzDimensions
                 ),
                 .. UnmappedClrGaps(
                     "oracle:efcore",
-                    [.. UnmappedInSqliteAndSqlServer, DslClr.Guid],
-                    "Oracle の型マッパー（src/QuickER.Provider.Oracle/OracleCSharpTypeMapper.cs の Map）は NUMBER の精度で bool・byte・short・int・long へ振り分けるだけで符号なしと sbyte の型を持たず、RAW を byte[] に写して Guid の型を持たないので、sbyte・ushort・uint・ulong・Guid の列を作れない",
+                    [.. UnmappedInSqliteAndSqlServer, DslClr.Guid, DslClr.TimeSpan],
+                    "Oracle の型マッパー（src/QuickER.Provider.Oracle/OracleCSharpTypeMapper.cs の Map）は NUMBER の精度で bool・byte・short・int・long へ振り分けるだけで符号なしと sbyte の型を持たず、RAW を byte[] に写して Guid の型を持たず、TIME の型が無く INTERVAL DAY TO SECOND も TimeSpan に写さないので、sbyte・ushort・uint・ulong・Guid・TimeSpan の列を作れない",
                     "D3"
                 ),
                 .. EfCoreOnlyScopes.SelectMany(scope =>
@@ -403,6 +403,19 @@ public static class DslFuzzDimensions
                     (shape, fit) =>
                         fit is FitBeyondScale or FitBeyondRange
                         && OrderedOps.Any(op => shape == $"compare-{op}-literal")
+                ),
+                .. TimeSpanBeyondRangeGaps(),
+                CoverageGap.AcceptedMatching(
+                    "sqlite:efcore",
+                    "TS",
+                    "EF Core の SQLite プロバイダは TimeSpan の大小の比較を翻訳できず例外にする（Microsoft Learn の「SQLite Database Provider - Limitations」の Query limitations。docs の TimeSpan の既知の割り切り）ので、DslConditionFuzzTests の ExcludedOnEfCoreSqlite が TimeSpan の列の順序比較を含むクエリを EF Core（SQLite）で流さない",
+                    Clr,
+                    Shape,
+                    (clr, shape) =>
+                        clr == nameof(DslClr.TimeSpan)
+                        && OrderedOps.Any(op =>
+                            shape.StartsWith($"compare-{op}-", StringComparison.Ordinal)
+                        )
                 ),
                 CoverageGap.AcceptedMatching(
                     "sqlite:efcore",
@@ -482,6 +495,52 @@ public static class DslFuzzDimensions
                     pair.Predicate
                 )
             );
+
+    /// <summary>
+    /// TimeSpan の列と、列の型の範囲の外の値（<see cref="FitBeyondRange"/>）の組を作らない範囲（docs の TimeSpan の既知の割り切り。
+    /// 作るのは SQL Server の QuickER 版の網羅の単位 <c>coverage-sqlserver-timespan-out-of-day</c> だけ）
+    /// </summary>
+    private static IEnumerable<CoverageGapEntry> TimeSpanBeyondRangeGaps()
+    {
+        (string[] Scopes, string Reason)[] groups =
+        [
+            (
+                ["sqlite:ado", "sqlite:efcore", "sqlite:inmemory"],
+                "SQLite は TimeSpan を文字列で持ち、0〜24 時間未満の値どうしの順序比較だけが数の順と一致する（docs の TimeSpan の既知の割り切り）ので、SQLite の単位の値の池は日の中だけにする"
+            ),
+            (
+                ["mysql:inmemory", "mysql:efcore"],
+                "MySQL の time の列は ±838:59:59 の値とだけ比べられ、範囲の外の値は端の値へ丸めて比べる（docs の TimeSpan の既知の割り切り）ので、MySQL の単位の値の池はその範囲の中だけにする"
+            ),
+            (
+                ["sqlserver:efcore"],
+                "SQL Server の EF Core 版 Repository は time の列と範囲の外の TimeSpan を送れず SqlClient が例外にする（docs の TimeSpan の既知の割り切り）ので、範囲の外の値の網羅の単位は QuickER 版だけで流す"
+            ),
+        ];
+
+        return
+        [
+            .. groups.SelectMany(group =>
+                group.Scopes.Select(scope =>
+                    CoverageGap.AcceptedTuple(
+                        scope,
+                        "TS",
+                        group.Reason,
+                        (Clr, nameof(DslClr.TimeSpan)),
+                        (ValueFit, FitBeyondRange)
+                    )
+                )
+            ),
+            CoverageGap.Tuple(
+                "postgresql:efcore",
+                "TS",
+                "PostgreSQL の time の列の書き込みの区切り（未起動）",
+                "PostgreSQL の time の列と比べる値は日の中だけにする（EF Core 版が time の列へ 24 時間以上の値を日を落として書く形を直す区切りの直し方に、総当たりが左右されないため）。範囲の外の値は範囲を持たない interval の列とだけ比べる",
+                (Clr, nameof(DslClr.TimeSpan)),
+                (ValueFit, FitBeyondRange)
+            ),
+        ];
+    }
 
     /// <summary>
     /// 使い回すパラメータの値が列の型の外になる形を作る区切り（使い回しでない形は ValueFit の水準が作る）
@@ -640,6 +699,11 @@ public static class DslFuzzDimensions
             DslClr.UInt64 => (0m, ulong.MaxValue),
             _ => null,
         };
+        if (column.TimeRange is { } timeRange)
+        {
+            return value is TimeSpan time && !timeRange.Contains(time) ? FitBeyondRange : FitFits;
+        }
+
         if (column.Money is { } money)
         {
             return !TryNumber(value, out var amount) || !money.InRange(amount) ? FitBeyondRange
@@ -983,9 +1047,10 @@ public static class DslFuzzDimensions
                 or DslClr.UInt32
                 or DslClr.UInt64
                 or DslClr.Decimal
-                or DslClr.DateTime;
+                or DslClr.DateTime
+                or DslClr.TimeSpan;
 
-        // 順序比較は順序を持つ型（整数・decimal・日時）だけ（型の検査が文字列・Guid・GuidKey の順序比較を断る＝OrderedOperatorUnsupported）
+        // 順序比較は順序を持つ型（整数・decimal・日時・TimeSpan）だけ（型の検査が文字列・Guid・GuidKey の順序比較を断る＝OrderedOperatorUnsupported）
         if (OrderedOps.Any(op => shape.StartsWith($"compare-{op}-", StringComparison.Ordinal)))
         {
             if (!isOrdered)
@@ -994,12 +1059,17 @@ public static class DslFuzzDimensions
             }
         }
 
-        // 日時・Guid・bool・バイナリはリテラルを書けない（DSL に真偽値・日時・バイナリのリテラルは無く、型の検査は文字列リテラルを
-        // 文字列の列だけ・数値リテラルを数値の列だけに許す）
+        // 日時・Guid・bool・バイナリ・TimeSpan はリテラルを書けない（DSL に真偽値・日時・バイナリ・TimeSpan のリテラルは無く、型の検査は
+        // 文字列リテラルを文字列の列だけ・数値リテラルを数値の列だけに許す）
         if (
             shape.EndsWith("-literal", StringComparison.Ordinal)
             && shape.StartsWith("compare-", StringComparison.Ordinal)
-            && kind is DslClr.DateTime or DslClr.Guid or DslClr.Boolean or DslClr.Binary
+            && kind
+                is DslClr.DateTime
+                    or DslClr.Guid
+                    or DslClr.Boolean
+                    or DslClr.Binary
+                    or DslClr.TimeSpan
         )
         {
             return false;
@@ -1121,7 +1191,10 @@ public static class DslFuzzDimensions
                     or DslClr.Decimal;
             var isText = kind is DslClr.String or DslClr.FixedString or DslClr.GuidKey;
 
-            if ((numeric && !isNumber) || (fit == FitBeyondCharset && !isText))
+            // TimeSpan の列は値の範囲（DslColumn.TimeRange）を持ち、範囲の外の値はあるが小数の桁の外れ方は無い
+            var timeRange = kind == DslClr.TimeSpan && fit == FitBeyondRange;
+
+            if ((numeric && !isNumber && !timeRange) || (fit == FitBeyondCharset && !isText))
             {
                 return false;
             }

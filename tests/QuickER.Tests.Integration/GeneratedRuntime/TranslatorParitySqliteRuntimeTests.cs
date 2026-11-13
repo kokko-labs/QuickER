@@ -22,6 +22,23 @@ public sealed class TranslatorParitySqliteRuntimeTests
 {
     private readonly SqliteTempDatabase _db = SqliteTempDatabase.Create();
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// SQLite は TimeSpan を文字列（<c>hh:mm:ss.fffffff</c>・1 日以上は <c>d.hh:mm:ss</c>）で持ち、順序比較は文字列の順で比べる。
+    /// 0〜24 時間未満の値どうしなら数の順と一致するが、1 日の値との比較は文字列の順で割れる（docs の TimeSpan の既知の割り切り）。
+    /// </remarks>
+    protected override IReadOnlyDictionary<string, string> Known { get; } =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["time-out-of-day-less"] = OutOfDayOrdering,
+            ["time-out-of-day-greater"] = OutOfDayOrdering,
+            ["time-out-of-day-value-on-left"] = OutOfDayOrdering,
+        };
+
+    /// <summary>1 日の値との順序比較の割り切りの理由</summary>
+    private const string OutOfDayOrdering =
+        "SQLite は TimeSpan を文字列で持ち、0〜24 時間未満の値どうしの順序比較だけが数の順と一致する。1 日の値（'1.00:00:00'）とは文字列の順で比べて割れる（docs の TimeSpan の既知の割り切り）";
+
     protected override async Task<ServiceProvider> CreateProviderAsync()
     {
         await _db.ResetSchemaAsync(Ct);

@@ -94,6 +94,17 @@ SQL Server 方言エンジン（QuickER 版 Repository の ADO 実装）の固�
 - 外すと、可変長の列で `0x01` の条件が `0x0100` の行に当たり、C#・インメモリ・ほかの DB と答えが割れる。EF Core 版は SQL の形を変えられないので、可変長の列では SQL Server の比べ方のまま（docs の既知の割り切り）。`Equals` のメソッドの形は対象にしない（ほかの型と同じく素の `a = b`。上の「式の翻訳」の範囲の外）。
 - ガード：簡易 DSL の総当たりの族の単位（`Dsl/SqlServer`。固定長の列の比べる値に列の長さを超える値を持つ）と、述語の表の行 `binary-*`（`table:TranslatorParityPredicates`。固定長の列の行 `binary-fixed-*`。EF Core 版 SQL Server は可変長の列の行だけ理由つきの `Known`）と、実装先どうしの一致のシナリオ `key-shape-binary-short-key-full`（`BackendParitySqlServerRuntimeTests`）。
 
+## time の列と範囲の外の TimeSpan
+
+- SQL Server の型マッパーが TimeSpan へ写すのは `time` だけで、`time` の列は 00:00:00〜23:59:59.9999999 を持つ。SqlClient は `SqlDbType.Time` のパラメータに範囲の外の値（負の値・1 日以上）を送れず `OverflowException` で断り、SQL Server には `time` の列とそのまま比べられるほかの型が無い（束縛の型を変えても直らない）。
+- 翻訳器（`_05_QueryPipeline.scriban` の SQL Server の枝）は、列と範囲の外の TimeSpan（値オブジェクトを開いた値）の比較を、C# の答えの条件へ畳む（`FoldOutOfDayComparison`・判定は `OutOfDayTimeSpan`）。
+  - `==` は `1 = 0`、`!=` は `1 = 1`（NULL の列も非 null の値と違う＝lifted な `!=`）。値が 1 日以上なら `<`・`<=` は `col IS NOT NULL`・`>`・`>=` は `1 = 0`、負なら逆。値が左なら演算子を入れ替えてから畳む。否定の反転（`!(col == v)`）は `!=` へ反転してから畳む。
+  - 畳んだ条件は行ごとに真か偽で UNKNOWN にならないので、合成の条件を包む既存の `NOT (...)` の形でも C# と同じ答え（`NOT (col IS NOT NULL)`＝`!(col < v)`）。
+  - IN・NOT IN（`BuildInClause`）は範囲の外の要素を、null の要素と同じく自分のパラメータを持たせずに飛ばす。残りが空なら空のリストの既存の規則（IN は `1 = 0`・NOT IN は `1 = 1`、null の要素があれば `col IS NULL`・`col IS NOT NULL`）が C# の答えを出す。
+  - 範囲の中の値は今の `col op @p` のまま（列の索引が使える）。値の側が null の `==`・`!=` は既存の `IS [NOT] NULL` が先に返す。列どうしは畳まない（両側とも範囲の中）。
+- 外すと、範囲の外の値との比較が `OverflowException` になり、C#・インメモリ・ほかの DB と割れる。EF Core 版は SQL の形を変えられず、パラメータの型を変えても比べられる型が無いので、docs の既知の割り切り（SqlClient の `OverflowException`）。
+- ガード：簡易 DSL の総当たりの網羅の単位 `coverage-sqlserver-timespan-out-of-day`（`Dsl/SqlServer`。QuickER 版だけで流す）と、述語の表の行 `time-out-of-day-*`（`table:TranslatorParityPredicates`。値が左の形・否定の反転・IN の混在・NOT IN の範囲の外だけ。EF Core 版 SQL Server は理由つきの `Known` と `KnownParameterOverflows`）。
+
 ## Save フックが書いた blob の版の読み直し
 
 共通の規則は `src/QuickER.Runtime/CLAUDE.md`「Save フックが無制限バイナリ列を書いたとき」。

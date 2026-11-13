@@ -49,7 +49,29 @@ public sealed class TranslatorParityEfCoreSqlServerRuntimeTests(SqlServerContain
         ["binary-in-list-with-null"] = BinaryPadding,
         ["binary-column-equals-column"] = BinaryPadding,
         ["binary-column-not-equals-column"] = BinaryPadding,
+        ["time-out-of-day-equals"] = TimeOutOfDay,
+        ["time-out-of-day-not-equals-negative"] = TimeOutOfDay,
+        ["time-out-of-day-less"] = TimeOutOfDay,
+        ["time-out-of-day-greater"] = TimeOutOfDay,
+        ["time-out-of-day-greater-or-equal-negative"] = TimeOutOfDay,
+        ["time-out-of-day-less-or-equal-negative"] = TimeOutOfDay,
+        ["time-out-of-day-value-on-left"] = TimeOutOfDay,
+        ["time-out-of-day-negated-equals"] = TimeOutOfDay,
+        ["time-out-of-day-in-mixed"] = TimeOutOfDay,
+        ["time-out-of-day-not-in-only"] = TimeOutOfDay,
     };
+
+    /// <inheritdoc />
+    /// <remarks>time の列と範囲の外の TimeSpan の行（SqlClient が SqlDbType.Time の範囲の外として断る）</remarks>
+    protected override IReadOnlySet<string> KnownParameterOverflows { get; } =
+        KnownRows
+            .Where(pair => pair.Value == TimeOutOfDay)
+            .Select(pair => pair.Key)
+            .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>time の列と範囲の外の TimeSpan の割り切りの理由</summary>
+    private const string TimeOutOfDay =
+        "EF Core 版は time の列と比べる値を列の型（time）で送り、SqlClient が 0〜24 時間未満の外の TimeSpan を範囲の外として断る（docs の TimeSpan の既知の割り切り。SQL Server に TimeSpan をそのまま比べられる型は無く、パラメータの型を変えても直らない）";
 
     /// <summary>バイナリの比較の割り切りの理由</summary>
     private const string BinaryPadding =

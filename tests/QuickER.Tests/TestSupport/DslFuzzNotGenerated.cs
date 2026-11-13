@@ -25,10 +25,28 @@ internal static class DslFuzzNotGenerated
             [
                 NotGenerated.Pending(
                     "column-type-families",
-                    "列の型の族（float・DateTimeOffset・TimeSpan）",
-                    "族ごとの区切り（TimeSpan → DateTimeOffset → float）",
-                    "生成器の列の型（DslClr）にこれらの族が無い。族ごとの実装先の意味（SQLite の文字列の比較・SQL Server の time の範囲・NaN・PostgreSQL の時差の制限など。区切り TF のフェーズ 1 の分析）を docs に書いてから足す",
+                    "列の型の族（float・DateTimeOffset）",
+                    "族ごとの区切り（DateTimeOffset → float）",
+                    "生成器の列の型（DslClr）にこれらの族が無い。族ごとの実装先の意味（SQLite の文字列の比較・NaN・PostgreSQL の時差の制限など。区切り TF のフェーズ 1 の分析）を docs に書いてから足す",
                     "`CodegenConfig/Cases`（行 `diag-query-type-check-rejects-*`）"
+                ),
+                NotGenerated.Accepted(
+                    "oracle-timespan-columns",
+                    "Oracle の単位の TimeSpan の列",
+                    "Oracle の型マッパーは TimeSpan へ写す型を持たない（TIME の型が無く、INTERVAL DAY TO SECOND も TimeSpan に写さない）ので、Oracle の生成物に TimeSpan の列が現れない",
+                    "`Dialect/Types`"
+                ),
+                NotGenerated.Accepted(
+                    "timespan-beyond-column-range",
+                    "TimeSpan の列の型の範囲の外の値との比較（SQLite のすべての実装先・SQL Server の EF Core 版・MySQL）と、PostgreSQL の time の列の 24 時間以上の値",
+                    "docs の TimeSpan の既知の割り切り：SQLite は TimeSpan を文字列で持ち 0〜24 時間未満の値どうしの順序比較だけが数の順と一致し、SQL Server の EF Core 版は time の列の範囲の外の値を送れず例外にし、MySQL は ±838:59:59 の外の値を端へ丸めて比べる。PostgreSQL の time の列は EF Core 版が 24 時間以上の値を日を落として書くので行に書かず、比べる値も日の中に限る（範囲の外の値は interval の列とだけ比べる）。SQL Server の範囲の外の値は QuickER 版だけの網羅の単位 coverage-sqlserver-timespan-out-of-day が作る",
+                    "`Dsl/SqliteMySql`・`Dsl/SqlServer`・`Dsl/MySql`・`Dsl/PostgreSql`"
+                ),
+                NotGenerated.Accepted(
+                    "efcore-sqlite-timespan-ordering",
+                    "EF Core（SQLite）での TimeSpan の列の順序比較と、TimeSpan の列での並び替え",
+                    "EF Core の SQLite プロバイダは TimeSpan の大小の比較と並び替えを翻訳できず例外にする（Microsoft Learn の「SQLite Database Provider - Limitations」の Query limitations。docs の TimeSpan の既知の割り切り）ので、DslConditionFuzzTests の ExcludedOnEfCoreSqlite が EF Core（SQLite）で流さない。QuickER 版とインメモリは網羅の単位 coverage-sqlite-timespan-ordered で流す",
+                    "`Dsl/SqliteMySql`"
                 ),
                 NotGenerated.Accepted(
                     "date-time-only-families",

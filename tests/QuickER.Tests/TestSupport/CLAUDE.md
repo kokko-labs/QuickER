@@ -444,6 +444,12 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
   - 形はパラメータとの `=`・`<>`・IN・NULL 判定だけ（DSL に真偽値・バイナリのリテラルが無く、順序比較は型の検査が断る＝`isValid`）。
   - バイナリの値の池は末尾の 0x00 だけが違う組を持つ。オラクルは実装先ごとの `DslFuzzBackend.BinaryRule` で比べる（SQL Server の QuickER 版は固定長の列と比べる値をその列へ保存したときの値に直してから比べ、SQL Server の EF Core 版は両側の末尾の 0x00 を外して比べる＝docs の「大文字小文字・空白・日付部品」の節のバイナリの段落とその既知の割り切り）。固定長の列の比べる値の池（`DslColumn.OperandValues`）は、列の長さを超える値（超えた分が 0x00 だけの値とそうでない値）も持つ（行には書かない）。Oracle の空のバイナリは空文字列と同じ規則（`DslCaseRule.Oracle`）で、Oracle の NOT NULL のバイナリの列の値の池は空の配列を持たない。
   - 並び替えの列は bool も使い（false が先でどの DB も同じ）、バイナリは使わない（作らない形の宣言）。
+- TimeSpan の列も既存の単位の列に足さず、各方言（SQLite・SQL Server・PostgreSQL・MySQL）の種の単位の列挙の末尾の `{方言}-timespan`・`{方言}-timespan-vo` と、網羅の単位 `DslFuzzUnits.TimeSpanCoverage`（`coverage-{方言}-timespan`・`-timespan-plain`）で流す。Oracle は TimeSpan へ写す型を持たないので作らない（作らない形の宣言）。
+  - 形はパラメータとの比較（順序比較を含む）・IN・NULL 判定（DSL に TimeSpan のリテラルは無い＝`isValid`）。並び替えの列にも使う。
+  - 値の池は docs の TimeSpan の既知の割り切りの写し：SQLite・SQL Server は日の中（0〜24 時間未満・100 ナノ秒の端数も）、PostgreSQL の `time` の列は日の中（比べる値も）、PostgreSQL の `interval` の列は負の値・1 日超の値と比べる値に範囲の外の値、MySQL は ±838:59:59 の中の負の値・1 日超の値。PostgreSQL・MySQL の値はマイクロ秒の粒度。
+  - 列の型の範囲（`DslColumn.TimeRange`）の外の値は次元表の因子 ValueFit の beyond-range に数える。範囲の外の値と比べる形は、SQL Server の QuickER 版だけで流す網羅の単位 `DslFuzzUnits.SqlServerOutOfDayCoverage`（`coverage-sqlserver-timespan-out-of-day`・原子 `KT*` と合成 `KX*`）が作る（SQL Server の EF Core 版は範囲の外の値を送れず例外にする）。
+  - EF Core（SQLite）は TimeSpan の列の順序比較と並び替えを流さない（`ExcludedOnEfCoreSqlite`）。SQLite の網羅の単位は、それを作らない単位（生成器の `TimeSpanOrdered` を偽にする）を 3 実装先で、作る単位 `coverage-sqlite-timespan-ordered{,-plain}` を QuickER 版とインメモリで流す。
+  - オラクルは C# の TimeSpan の比較（`CompareValues`）だけで、方言ごとの割り切りは値の池で表す。
 - パラメータの使い回し（次元表の因子 ParameterReuse・原子ごと）：同じパラメータを同じ列の原子どうし・同じ種類のほかの列・より広い種類のほかの列（int と bigint・decimal など）で使う形と、IN のリストを同じ列の IN と NOT IN・ほかの列の IN で使う形。型の検査が受け付ける組だけを作る（値オブジェクトの列どうしは型トークンで型付けしたパラメータか、値オブジェクトの型を共有する GuidKey の主キーと自己参照の外部キー）。水準は参照するパラメータ名・相手の列・パラメータの型とこの原子の列の種類から数える（`DslFuzzDimensions.ReuseOf`。同じ原子のインスタンスを 1 つのクエリに 2 回置かない）。
 - 並び替え（次元表の因子 Ordering・クエリごと）：並べない・主キーだけ・列 1 つの後に主キー・列 2 つの後に主キー。主キーより前の列は整数・decimal・日時に限り、最後に必ず主キーを置く（同点を作らない）。文字列の列では並べない（作らない形の宣言）。一覧も並べられる（`DslQuery.ListOrdered`）。EF Core（SQLite）は decimal の列での並び替えも `ExcludedOnEfCoreSqlite` で流さない。
   - 照合は「追加の列 → 主キー」の並びで期待を決める。単一は並びで最初に真になる行、射影と並べる一覧は返した行を同じ並びで並べ直した順との一致。NULL の位置は実装先ごとの宣言 `DslFuzzBackend.NullOrder`（docs のインメモリの節「実 DB との既知の乖離」の写し。PostgreSQL・Oracle の EF Core 版は昇順で末尾、ほかの実装先は昇順で先頭）。
@@ -456,7 +462,7 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
   - bigint の列と decimal のパラメータ：NULL を許す bigint の列と、decimal の型トークン（`decimal(18,6)`・`decimal(38,6)`・`decimal(18,2)`）のパラメータの比較を、4 本目の乱数の列（`DslFuzzGenerator.BigintDecimalSeed`・パラメータ名の接頭辞 `w`）の生成器で作る。種の単位は絞った形の原子のクエリ `Y{i}` を末尾に足し、値オブジェクトなしの網羅の単位（`DslFuzzUnits.PlainCoverage`）は 6 つの演算子の原子のクエリ `KY{i}` を持つ。行の値の池は long の上限と下限を持つので、SQL Server の EF Core 版が列を CAST する decimal の型の整数部の桁をいつも試す（生成の DbContext が既定の decimal の型を広げないと、どの値でも桁あふれの例外になる）。比べる値の池に整数の値（0・1・-1・10）を持つので、SQLite の EF Core 版が整数と decimal の等値を文字列で比べる形も試す（実行器の書き換えを外すと赤）。byte・short・int の列の原子（3 本目の列）の引き方は変えない。
   - SQL Server の money・smallmoney：網羅の単位 `DslFuzzUnits.SqlServerMoneyCoverage`（`coverage-sqlserver-money`）が、列の型に入らない値の原子 1 つずつのクエリ `KM*`（経路ごとの結果を読む）と合成のクエリ `KX*` を持つ。列の型に入るかは列の `Money`（`DslMoneyType`＝小数 4 桁と型の端。範囲は 10 の累乗の桁で表せない）で決め、値の池は money 用（小数 5 桁で 4 桁へ丸めると行の値に重なる値・型の範囲の外の値）。種の単位は money の列を持たない（種の生成器の入力と指紋を変えない）。PostgreSQL の money の列は `Money` を立てない（比べる値は money で送られて丸められる docs の既知の割り切り）。
   - 作らない形（作らない形の宣言）：値オブジェクトの単位（`Create` が型の外の値を断る）。
-  - 網羅しない組：SQLite・MySQL の範囲の beyond-charset（受け入れ）・使い回しと列の型の外の値（Pending）・EF Core（SQLite）の decimal の値の順序比較のリテラル（受け入れ）・SQL Server の GuidKey と beyond-charset（Pending）・PostgreSQL・MySQL・Oracle の EF Core 版の beyond-charset（受け入れ）・PostgreSQL の byte と符号なし・sbyte の列と Oracle の Guid と符号なし・sbyte の列（受け入れ＝型マッパーに対応する型が無い）。
+  - 網羅しない組：SQLite・MySQL の範囲の beyond-charset（受け入れ）・使い回しと列の型の外の値（Pending）・EF Core（SQLite）の decimal の値の順序比較のリテラル（受け入れ）・SQL Server の GuidKey と beyond-charset（Pending）・PostgreSQL・MySQL・Oracle の EF Core 版の beyond-charset（受け入れ）・PostgreSQL の byte と符号なし・sbyte の列と Oracle の Guid・TimeSpan と符号なし・sbyte の列（受け入れ＝型マッパーに対応する型が無い）・TimeSpan と beyond-range（SQLite・MySQL・SQL Server の EF Core 版は受け入れ、PostgreSQL は time の列の書き込みの区切りの Pending）・EF Core（SQLite）の TimeSpan の順序比較（受け入れ）。
 - mutation 実証済み。
 
 ## カルチャのガード

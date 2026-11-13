@@ -41,6 +41,11 @@ public static class DslFuzzUnits
         {
             yield return unit;
         }
+
+        foreach (var unit in TimeSpans("sqlite", DialectNames.Sqlite, seed))
+        {
+            yield return unit;
+        }
     }
 
     /// <summary>
@@ -63,6 +68,11 @@ public static class DslFuzzUnits
         yield return Build("sqlserver-ansi", seed, SqlServerAnsiColumns(), valueObjects: false);
 
         foreach (var unit in Families("sqlserver", DialectNames.SqlServer, seed))
+        {
+            yield return unit;
+        }
+
+        foreach (var unit in TimeSpans("sqlserver", DialectNames.SqlServer, seed))
         {
             yield return unit;
         }
@@ -207,6 +217,11 @@ public static class DslFuzzUnits
         {
             yield return unit;
         }
+
+        foreach (var unit in TimeSpans("postgresql", DialectNames.PostgreSql, seed))
+        {
+            yield return unit;
+        }
     }
 
     /// <summary>
@@ -240,6 +255,11 @@ public static class DslFuzzUnits
         yield return Build("mysql-vo", seed, MySqlColumns(), valueObjects: true);
 
         foreach (var unit in Families("mysql", DialectNames.MySql, seed))
+        {
+            yield return unit;
+        }
+
+        foreach (var unit in TimeSpans("mysql", DialectNames.MySql, seed))
         {
             yield return unit;
         }
@@ -610,6 +630,198 @@ public static class DslFuzzUnits
                 : new("binn", varbinary, DslClr.Binary, Nullable: false),
             new("i32", integer, DslClr.Int32, Nullable: true),
         ];
+    }
+
+    /// <summary>
+    /// TimeSpan の列の種の単位（値オブジェクトなし・あり）。各方言の種の単位の列挙の末尾に足す（Oracle は TimeSpan へ写す型を持たない）
+    /// </summary>
+    /// <remarks>
+    /// TimeSpan の列は既存の単位（族の単位を含む）の列に足さず、この単位だけが持つ（既存の単位の行・クエリの乱数の引き方と、種の指紋の
+    /// 要約の既存の行を変えないため）。列は <see cref="TimeSpanColumns"/>。
+    /// </remarks>
+    private static IEnumerable<DslFuzzUnit> TimeSpans(string prefix, string dbms, int seed)
+    {
+        yield return Build($"{prefix}-timespan", seed, TimeSpanColumns(dbms), valueObjects: false);
+        yield return Build(
+            $"{prefix}-timespan-vo",
+            seed,
+            TimeSpanColumns(dbms),
+            valueObjects: true
+        );
+    }
+
+    /// <summary>
+    /// TimeSpan の列の網羅の単位（値オブジェクトあり・なし。種に依らない。名前は <c>coverage-{方言}-timespan</c> と
+    /// <c>coverage-{方言}-timespan-plain</c>）：TimeSpan の列の原子のクエリと <see cref="DslFuzzGenerator.CoverageQueries"/>・パラメータの
+    /// 使い回しと並び替えのクエリ
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="ordered"/> が偽なら、TimeSpan の列の順序比較と並び替えを作らない（<see cref="DslFuzzGenerator.TimeSpanOrdered"/>。
+    /// EF Core〔SQLite〕が流さないので、SQLite の 3 実装先で流す単位はこちら）。真の SQLite の単位は名前に <c>-ordered</c> を足し、
+    /// QuickER 版とインメモリだけで流す。
+    /// </remarks>
+    /// <param name="dbms">方言（<see cref="DialectNames"/> の SQLite・SQL Server・PostgreSQL・MySQL）</param>
+    /// <param name="ordered">TimeSpan の列の順序比較と並び替えを作るか</param>
+    public static IEnumerable<DslFuzzUnit> TimeSpanCoverage(string dbms, bool ordered = true)
+    {
+        var suffix = dbms == DialectNames.Sqlite && ordered ? "-ordered" : "";
+
+        foreach (var valueObjects in new[] { true, false })
+        {
+            var columns = TimeSpanColumns(dbms);
+            var generator = new DslFuzzGenerator(CoverageSeed, valueObjects)
+            {
+                TimeSpanOrdered = ordered,
+            };
+            var rows = generator.Rows(columns, RowCount);
+            List<DslQuery> queries =
+            [
+                .. generator.CoverageQueries(
+                    columns,
+                    columns.Skip(1).Select(column => column.Name).ToArray()
+                ),
+            ];
+            var withPartners = AddPartners(columns, rows);
+            var side = new DslFuzzGenerator(
+                CoverageSeed,
+                valueObjects,
+                DslFuzzGenerator.SideParameterPrefix
+            )
+            {
+                TimeSpanOrdered = ordered,
+            };
+
+            yield return new DslFuzzUnit(
+                $"{CoveragePrefix}{dbms}-timespan{suffix}{(valueObjects ? "" : "-plain")}",
+                TableName,
+                withPartners,
+                rows,
+                [.. queries, .. side.ReuseAndOrderingCoverageQueries(withPartners, queries)],
+                valueObjects,
+                CoverageSeed
+            );
+        }
+    }
+
+    /// <summary>
+    /// SQL Server の time の列と、列の型の範囲（0〜24 時間未満）の外の値の網羅の単位（種に依らない・値オブジェクトなし。名前は
+    /// <c>coverage-sqlserver-timespan-out-of-day</c>）：範囲の外の値と比べる原子 1 つずつのクエリ <c>KT*</c> と、それを使う合成のクエリ
+    /// <c>KX*</c>
+    /// </summary>
+    /// <remarks>
+    /// QuickER 版 Repository だけで流す。EF Core 版 Repository は範囲の外の値を送れず例外にする（docs の TimeSpan の既知の割り切り。
+    /// 作らない形の宣言）。行は範囲の中の値だけ。
+    /// </remarks>
+    public static DslFuzzUnit SqlServerOutOfDayCoverage()
+    {
+        IReadOnlyList<object> operands = [.. DslFuzz.TimeOfDayTickPool, .. DslFuzz.OutOfDayPool];
+        DslColumn[] columns =
+        [
+            new("id", "bigint", DslClr.Int64, Nullable: false, PrimaryKey: true),
+            new("t", "time", DslClr.TimeSpan, Nullable: true)
+            {
+                Values = DslFuzz.TimeOfDayTickPool,
+                OperandValues = operands,
+                TimeRange = DslTimeRange.SqlServerTime,
+            },
+            new("tn", "time", DslClr.TimeSpan, Nullable: false)
+            {
+                Values = DslFuzz.TimeOfDayTickPool,
+                OperandValues = operands,
+                TimeRange = DslTimeRange.SqlServerTime,
+            },
+            // 射影の非 NULL 指定の合成のクエリが射影する、NULL を許す参照型の列
+            new("bin", "varbinary(4)", DslClr.Binary, Nullable: true),
+        ];
+        var rows = new DslFuzzGenerator(CoverageSeed, valueObjects: false).Rows(columns, RowCount);
+        var atoms = new DslFuzzGenerator(
+            DslFuzzGenerator.OutOfTypeSeed(CoverageSeed),
+            valueObjects: false,
+            DslFuzzGenerator.OutOfTypeParameterPrefix
+        ).OutOfTypeAtomQueries(columns, "KT");
+        var queries = new DslFuzzGenerator(
+            DslFuzzGenerator.OutOfTypeSeed(CoverageSeed),
+            valueObjects: false,
+            DslFuzzGenerator.OutOfTypeParameterPrefix
+        ).OutOfTypeCoverageQueries(columns, decimalOrdered: true);
+
+        return new DslFuzzUnit(
+            $"{CoveragePrefix}{DialectNames.SqlServer}-timespan-out-of-day",
+            TableName,
+            columns,
+            rows,
+            [.. atoms, .. queries],
+            ValueObjects: false,
+            CoverageSeed
+        );
+    }
+
+    /// <summary>
+    /// TimeSpan の列：主キー（bigint）・TimeSpan（NULL 許容と NOT NULL。PostgreSQL は interval の列も）・射影の非 NULL 指定に使う NULL 許容の
+    /// 可変長のバイナリ・並び替えと合成の相方の整数の列
+    /// </summary>
+    /// <remarks>
+    /// 行と比べる値の池は docs の TimeSpan の既知の割り切りの写し：SQLite（文字列で持つ）と SQL Server（time は 0〜24 時間未満）は日の中だけ、
+    /// PostgreSQL の time の列も日の中だけ（EF Core 版は 24 時間以上の値を日を落として書くので行に書かず、比べる値も日の中に限る）、
+    /// PostgreSQL の interval の列は負の値と 1 日超の値と範囲の外の値、MySQL の time は ±838:59:59 の中の負の値と 1 日超の値（範囲の外の値は
+    /// 端へ丸めて比べられるので作らない）。PostgreSQL・MySQL の値はマイクロ秒の粒度（端数の切り詰めは docs の既存の割り切り）。
+    /// </remarks>
+    private static DslColumn[] TimeSpanColumns(string dbms)
+    {
+        DslColumn Time(string name, string dataType, bool nullable) =>
+            dbms switch
+            {
+                DialectNames.Sqlite => new(name, dataType, DslClr.TimeSpan, nullable)
+                {
+                    Values = DslFuzz.TimeOfDayTickPool,
+                },
+                DialectNames.SqlServer => new(name, dataType, DslClr.TimeSpan, nullable)
+                {
+                    Values = DslFuzz.TimeOfDayTickPool,
+                    TimeRange = DslTimeRange.SqlServerTime,
+                },
+                DialectNames.PostgreSql => new(name, dataType, DslClr.TimeSpan, nullable)
+                {
+                    TimeRange = DslTimeRange.PostgreSqlTime,
+                },
+                DialectNames.MySql => new(name, dataType, DslClr.TimeSpan, nullable)
+                {
+                    Values = DslFuzz.WideTimeSpanPool,
+                    TimeRange = DslTimeRange.MySqlTime,
+                },
+                _ => throw new ArgumentOutOfRangeException(nameof(dbms), dbms, null),
+            };
+
+        var (key, time, varbinary, integer) = dbms switch
+        {
+            DialectNames.Sqlite => ("INTEGER", "TIME", "VARBINARY(4)", "int"),
+            DialectNames.SqlServer => ("bigint", "time", "varbinary(4)", "int"),
+            DialectNames.PostgreSql => ("bigint", "time", "bytea", "integer"),
+            DialectNames.MySql => ("bigint", "time(6)", "varbinary(4)", "int"),
+            _ => throw new ArgumentOutOfRangeException(nameof(dbms), dbms, null),
+        };
+        List<DslColumn> columns =
+        [
+            new("id", key, DslClr.Int64, Nullable: false, PrimaryKey: true),
+            Time("t", time, nullable: true),
+            Time("tn", time, nullable: false),
+        ];
+
+        if (dbms == DialectNames.PostgreSql)
+        {
+            columns.Add(
+                new("ti", "interval", DslClr.TimeSpan, Nullable: true)
+                {
+                    Values = DslFuzz.WideTimeSpanPool,
+                    OperandValues = [.. DslFuzz.WideTimeSpanPool.Union(DslFuzz.OutOfDayPool)],
+                }
+            );
+        }
+
+        columns.Add(new("bin", varbinary, DslClr.Binary, Nullable: true));
+        columns.Add(new("i32", integer, DslClr.Int32, Nullable: true));
+
+        return [.. columns];
     }
 
     /// <summary>射影の結果の型名を、生成物の既存の型名と衝突させる単位（行なし＝コンパイルだけ）</summary>

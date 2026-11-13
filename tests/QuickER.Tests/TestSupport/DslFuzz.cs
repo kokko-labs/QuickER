@@ -54,6 +54,9 @@ public enum DslClr
 
     /// <summary>byte[]（リテラルは書けず、パラメータとの等値・IN・NULL 判定だけ。バイトの列で比べる）</summary>
     Binary,
+
+    /// <summary>TimeSpan（リテラルは書けず、パラメータとの比較・順序比較・IN・NULL 判定だけ）</summary>
+    TimeSpan,
 }
 
 /// <summary>総当たりの図の列</summary>
@@ -86,7 +89,8 @@ public sealed record DslColumn(
                 or DslClr.UInt64;
 
     /// <summary>順序比較（&lt; など）を使える列か（型の検査が文字列・Guid の順序比較を断る）</summary>
-    public bool IsOrdered => IsInteger || Clr is DslClr.Decimal or DslClr.DateTime;
+    public bool IsOrdered =>
+        IsInteger || Clr is DslClr.Decimal or DslClr.DateTime or DslClr.TimeSpan;
 
     /// <summary>
     /// Unicode でない文字列の列か（SQL Server の varchar・char＝照合順序のコードページで持ち、ASCII の外の文字が <c>?</c> に化ける列。
@@ -129,6 +133,12 @@ public sealed record DslColumn(
     /// </summary>
     public DslMoneyType? Money { get; init; }
 
+    /// <summary>
+    /// TimeSpan の列が持てる値の範囲（null なら範囲を持たない列＝SQLite の TEXT・PostgreSQL の interval。比べる値がこの外なら
+    /// 次元表の因子 ValueFit の beyond-range に数える）
+    /// </summary>
+    public DslTimeRange? TimeRange { get; init; }
+
     /// <summary>モデルの列（Id は図を組み立てるときに決まる）</summary>
     public Column Model { get; } =
         new()
@@ -160,6 +170,26 @@ public sealed record DslMoneyType(decimal Min, decimal Max)
 
     /// <summary>値が列の型に丸めずに入るか（範囲の中で、小数が 4 桁以下）</summary>
     public bool Fits(decimal value) => InRange(value) && decimal.Round(value, Scale) == value;
+}
+
+/// <summary>TimeSpan の列の型が持てる値の範囲（両端を含む）</summary>
+/// <param name="Min">最小値</param>
+/// <param name="Max">最大値</param>
+public sealed record DslTimeRange(TimeSpan Min, TimeSpan Max)
+{
+    /// <summary>SQL Server の time（00:00:00〜23:59:59.9999999）</summary>
+    public static DslTimeRange SqlServerTime { get; } =
+        new(TimeSpan.Zero, TimeSpan.FromDays(1) - TimeSpan.FromTicks(1));
+
+    /// <summary>PostgreSQL の time（00:00:00〜24:00:00）</summary>
+    public static DslTimeRange PostgreSqlTime { get; } = new(TimeSpan.Zero, TimeSpan.FromDays(1));
+
+    /// <summary>MySQL の time（-838:59:59〜838:59:59）</summary>
+    public static DslTimeRange MySqlTime { get; } =
+        new(-new TimeSpan(34, 22, 59, 59), new TimeSpan(34, 22, 59, 59));
+
+    /// <summary>値が範囲の中か</summary>
+    public bool Contains(TimeSpan value) => value >= Min && value <= Max;
 }
 
 /// <summary>比較演算子</summary>
@@ -1350,6 +1380,7 @@ public static class DslFuzz
             // バイナリは等しいかだけを比べる（順序の比較は型の検査が断り、並び替えの列にもしない）
             (byte[] a, byte[] b) => a.AsSpan().SequenceEqual(b) ? 0 : 1,
             (DateTime a, DateTime b) => a.CompareTo(b),
+            (TimeSpan a, TimeSpan b) => a.CompareTo(b),
             _ => Convert
                 .ToDecimal(value, CultureInfo.InvariantCulture)
                 .CompareTo(Convert.ToDecimal(other, CultureInfo.InvariantCulture)),
@@ -1443,8 +1474,65 @@ public static class DslFuzz
                 new byte[] { 0x01, 0x02, 0x03 },
                 new byte[] { 0x41 },
             ],
+            DslClr.TimeSpan => TimeOfDayPool,
             _ => throw new ArgumentOutOfRangeException(nameof(clr)),
         };
+
+    /// <summary>
+    /// 日の中（0〜24 時間未満）の TimeSpan の値の池（マイクロ秒の粒度＝PostgreSQL・MySQL が端数を落とさない値。docs の
+    /// マイクロ秒の既知の割り切りに当たらない）
+    /// </summary>
+    public static IReadOnlyList<object> TimeOfDayPool { get; } =
+    [
+        TimeSpan.Zero,
+        TimeSpan.FromTicks(10),
+        TimeSpan.FromSeconds(1),
+        new TimeSpan(0, 9, 59, 59).Add(TimeSpan.FromTicks(9_999_990)),
+        TimeSpan.FromHours(10),
+        TimeSpan.FromHours(12),
+        new TimeSpan(0, 12, 0, 0, 500),
+        new TimeSpan(0, 23, 59, 59),
+        new TimeSpan(0, 23, 59, 59).Add(TimeSpan.FromTicks(9_999_990)),
+    ];
+
+    /// <summary>
+    /// 日の中の値の池に、100 ナノ秒の端数を持つ値（SQL Server の time の上限を含む）を足したもの（SQL Server・SQLite は 7 桁の端数を持つ）
+    /// </summary>
+    public static IReadOnlyList<object> TimeOfDayTickPool { get; } =
+    [
+        .. TimeOfDayPool,
+        TimeSpan.FromHours(10).Add(TimeSpan.FromTicks(1)),
+        TimeSpan.FromDays(1) - TimeSpan.FromTicks(1),
+    ];
+
+    /// <summary>
+    /// 日の中の値の池に、負の値と 1 日以上の値を足したもの（MySQL の time の範囲 ±838:59:59 の中・マイクロ秒の粒度）
+    /// </summary>
+    public static IReadOnlyList<object> WideTimeSpanPool { get; } =
+    [
+        .. TimeOfDayPool,
+        TimeSpan.FromDays(1),
+        new TimeSpan(1, 1, 0, 0),
+        -TimeSpan.FromTicks(10),
+        -TimeSpan.FromHours(1),
+        new TimeSpan(2, 3, 4, 5),
+        new TimeSpan(34, 22, 59, 59),
+        -new TimeSpan(34, 22, 59, 59),
+    ];
+
+    /// <summary>
+    /// 0〜24 時間未満の外の比べる値（上の端ちょうど・端のすぐ外・負・1 日超・TimeSpan の両端をマイクロ秒に丸めた値）。行には書かない
+    /// </summary>
+    public static IReadOnlyList<object> OutOfDayPool { get; } =
+    [
+        TimeSpan.FromDays(1),
+        TimeSpan.FromDays(1) + TimeSpan.FromTicks(10),
+        -TimeSpan.FromTicks(10),
+        -TimeSpan.FromHours(1),
+        new TimeSpan(2, 3, 4, 5),
+        TimeSpan.FromTicks(TimeSpan.MaxValue.Ticks / 10 * 10),
+        TimeSpan.FromTicks(TimeSpan.MinValue.Ticks / 10 * 10),
+    ];
 
     /// <summary>列の値の候補（列が値の池を持てばそれ、無ければ種類ごとの値の池）</summary>
     public static IReadOnlyList<object> ValuePool(DslColumn column) =>
@@ -1472,6 +1560,7 @@ public static class DslFuzz
             DslClr.Guid => "guid",
             DslClr.Boolean => "boolean",
             DslClr.Binary => "binary(4)",
+            DslClr.TimeSpan => "time",
             _ => throw new ArgumentOutOfRangeException(nameof(clr), clr, "型トークンの無い種類"),
         };
 
