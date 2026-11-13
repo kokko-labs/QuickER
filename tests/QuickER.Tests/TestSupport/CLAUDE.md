@@ -259,7 +259,7 @@
 - 指紋の要約は機械の環境に依らない：記録は日本語・日本時間の機械で作り、CI は英語・UTC で動く。両アセンブリの指紋のドリフトテストは `SeedFingerprint.Compute` を通し、要約を `SeedSummary.UnderInvariantCulture`（要約を作る間だけ CurrentCulture と CurrentUICulture をインバリアントにする）の中で作る。差分の説明のような resx の文が入っても言語で変わらない。
 - ガード：両アセンブリの `EngineSummaryEnvironmentTests`（共有の部品は `SummaryEnvironmentGuard`）。ドリフトテストのクラスに置かない（`CultureInvariantGenerationTests` がドリフトテストのクラスの引数の無いテストを流し直すため）。
   - `Summary_DoesNotDependOnCulture`：全エンジンの先頭 10 種の要約を、外側のカルチャを ja-JP と en-US に切り替えて作り、一致を表明する。切り替わったカルチャの名前も表明する（ICU の無い環境で比べたつもりにならない）。
-  - `Summary_HasNoUtcOffset`：要約に `[+-]hh:mm` が無い。タイムゾーンはプロセスの中で切り替えられないので、赤になるのは時差のある機械だけ。
+  - `Summary_HasNoUtcOffset`：要約に日時の時差（時刻の秒・小数秒の直後の `[+-]hh:mm`）が無い。タイムゾーンはプロセスの中で切り替えられないので、赤になるのは時差のある機械だけ。時刻の直後に限るのは、負の TimeSpan（`TimeSpan:-00:00:00.0000010`）を時差と取り違えないため。自己検査は `EngineSummaryEnvironmentTests.UtcOffsetGuard_FlagsOnlyOffsetsOfDates`（負の TimeSpan は通し、往復の書式の Local の日時と DateTimeOffset の時差は名指しする）。
   - `SeedFingerprintTests` の Local の日時と `UnderInvariantCulture` の 2 件。
   - mutation 実証済み。
 
