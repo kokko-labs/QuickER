@@ -328,13 +328,20 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
 - GUI テストが失敗した瞬間の状態は `TestSupport.GuiFailureDiagnostics` が書き出す（全件実行でだけまれに落ちる GUI テストの原因を測るためで、結果は変えない）。
   - `WpfApplicationTestSupport.RunSta` / `RunInIsolatedWindow` が本体を `catch (Exception ex) when (GuiFailureDiagnostics.Capture(ex))` の層で囲む。フィルターは例外処理の 1 回目の走査で、テストがウィンドウを閉じる finally より前に、所有するスレッドで動く。
   - **`Capture` は必ず false を返し、例外を外へ出さない**。true を返すとこの catch が元の失敗を飲み込み、投げると元の失敗が別の例外に置き換わる。区画ごと・出力先ごとに失敗を受け止め「記録に失敗」と書く。
-  - 書き出すもの：入力（フォーカス・キャプチャ・左ボタンの状態＝WPF の `Mouse.LeftButton` と実際の `GetAsyncKeyState(VK_LBUTTON)` の両方）、`Track` したウィンドウ、前面のウィンドウ、`CanvasViewportBehavior` / `DragBehavior` / `RubberBandBehavior` の静的フィールド（反射で全部）、`Track` したウィンドウのイベントの時系列。出力先はテストの出力・標準エラー・`%TEMP%\QuickER.Tests-gui-failure-state.log`。
-  - 前面のウィンドウが別のプロセスなら、タイトルを書かずプロセス名だけにする（利用者のほかのアプリのタイトルを %TEMP% のログや CI の出力へ残さない）。
+  - 違反を例外にせず値で返し、窓を閉じた後にまとめて表明するエンジン（入力の列のエンジン）は、例外フィルターを通らない（フィルターだけに頼ると、そのエンジンの失敗は 1 件も記録されない）。そのエンジンは違反を見つけた瞬間（後始末の前）に `CaptureViolation` で状態を取って違反に持たせ、既知の失敗の一覧と照合した後、赤にする失敗（新しい失敗・理由の食い違い）の記録だけを `Publish` で出力先へ書く（既知の失敗は毎回起きるので書くと記録が埋もれる）。`CaptureViolation` も例外を出さない。
+  - 書き出すもの：入力（フォーカス・キャプチャ・左右中のボタンの状態＝WPF の `Mouse.LeftButton` などと実際の `GetAsyncKeyState` の両方）、`Track` したウィンドウ、前面のウィンドウ、Win32 から届いた入力（`InputManager.PreProcessInput` で見た生の報告の件数と直前 30 件。テストが流す合成の入力は通らないので、利用者の本物の操作・アクティブの行き来・WPF 自身のマウスの同期だけが載る）、`CanvasViewportBehavior` / `DragBehavior` / `RubberBandBehavior` の静的フィールド（反射で全部）、イベントの時系列（`Track` したウィンドウのアクティブ・キー・マウス・フォーカス・キャプチャの移り、前面のウィンドウの移り、エンジンが `Note` で書く手の区切り）、エンジンが渡す直前の手の状態。出力先はテストの出力・標準エラー・`%TEMP%\QuickER.Tests-gui-failure-state.log`。
+  - 前面のウィンドウが別のプロセスなら、タイトルを書かずプロセス名だけにする（利用者のほかのアプリのタイトルを %TEMP% のログや CI の出力へ残さない）。キーボードの生の報告は押したキーを書かない（同じ理由）。
   - `GuiFailureDiagnostics.cs` は目印の API を使うがテストを持たないので、`SourceRuleTests` の規則 `window-activation-collection` の範囲の除外に理由つきで載せる。
-  - ガード：`GuiFailureDiagnosticsTests`（false を返す・区画が投げても false で例外を出さない・RunSta / RunInIsolatedWindow の失敗が元の例外のまま・閉じる前の状態と時系列・前面の別のプロセスのタイトルを書かない）。mutation 実証済み（前面のタイトルは前面が別のプロセスのときだけ観測できる）。
+  - ガード：`GuiFailureDiagnosticsTests`（false を返す・区画が投げても false で例外を出さない・RunSta / RunInIsolatedWindow の失敗が元の例外のまま・閉じる前の状態と時系列・キャプチャの移り・Win32 から届いた入力〔生の報告を反射で作って流す〕・前面の別のプロセスのタイトルを書かない・`CaptureViolation` は区画が投げても例外を出さず要約と直前の手を書く）と `CanvasInputTests.Violation_IsRecordedBeforeCleanup`（手の列の違反と種の始めの違反の両方で、後始末の前の状態と直前の手が違反に付き、赤にする失敗の記録だけを書く）。mutation 実証済み（前面のタイトルは前面が別のプロセスのときだけ観測できる）。
+- 合成の入力を流すテストが、WPF のコントロールに読ませるマウスのボタンを決めるときは `TestSupport.MouseButtonKeyState` を通す。
+  - 理由：WPF のコントロール（`ButtonBase` の Space の解放・`DataGrid` のドラッグ選択）は、ビヘイビアと違って読み口の差し替え（`BehaviorInput`）を通らず、実際のボタンをスレッドのキーの状態の表（`GetKeyState`）から読む。全件の実行中に利用者がほかのアプリでクリックすると、その押下が表に入って合成の入力の結果が変わる（入力の列のエンジンが全件でだけ落ちた原因。本物のクリックを混ぜて 10 回中 6 回赤・表を押下にすると毎回同じ違反で再現した）。製品の不具合ではない。
+  - 動作：`Release` は表の左・右・中・X1・X2 だけを「離れている」にし、ほかのキーには触らない。`Capture` で取った値へ `Saved.Restore` で戻す。
+  - `Mouse.LeftButton` と合成の `MouseEventArgs.LeftButton` は、マウスがその窓でアクティブ（`Mouse.PrimaryDevice.ActiveSource` がある）の間だけ表を読み、アクティブでなければ表に依らず Released。`ButtonBase` は表を直接読む。
+  - 表は書いたままにならない：Windows は実際のボタンが変わるとスレッドの表を実際の状態へ同期し直す。2026-11-14 の測定（補助が本物のクリックを打つ間に 5 ms おきに読む）では、1 回だけ書いて読み続けると実際の押下の 93%（271 回中 253 回）で表が押下を返し、読む直前に毎回書いても 9%（180 回中 17 回）が漏れた。だから入力の列のエンジンは、手ごとに先に `PhysicalMouseButtons.WaitUntilReleased`（押されていなければ待たない）を通し、そのうえで入力を流すたびに直前で書く。それでも手の途中で押されると漏れるので、違反の文に名指しする。
+  - 表で防げるのはボタンの状態だけ。テストの窓が本当の前面でないと Windows がキャプチャを取り消す（`CancelCapture`）ので、前面が別のアプリへ移ると合成の入力の結果が変わりうる。入力の列のエンジンは、手の列の間に前面が別のプロセスへ移ったら違反の文に名指しする（流し直さない）。
 - Space で押せることを見るテストは、先に `TestSupport.PhysicalMouseButtons.WaitUntilReleased` を通す。
   - 理由：この記録で、実行中に実際のマウスのボタンが押されたままだったために失敗していたと分かった（`Mouse.LeftButton=Pressed`・`GetAsyncKeyState(VK_LBUTTON)` の最上位ビットが立ち、キャプチャがボタンに残る）。WPF の `ButtonBase` は左右のボタンが離されていないと Space の解放で Click しない。製品の不具合ではない。Enter は押下で Click するので関係しない。
-  - 動作：左右のボタンが離されるまで約 30 ms ごとにメッセージを処理しながら待つ。約 10 秒で「実際のマウスのボタンが押されたまま」と押されているボタンを名指しして失敗する（スキップしない）。離されていれば待たない。使うのは `CanvasViewportBehaviorSpaceKeyTests` の `SendKey`・入力の列のエンジンのハーネス（`CanvasInputHarness`）が Space を流す前・`DragBehaviorTests` の実際の入力の押下。
+  - 動作：左右のボタンが離されるまで約 30 ms ごとにメッセージを処理しながら待つ。約 10 秒で「実際のマウスのボタンが押されたまま」と押されているボタンを名指しして失敗する（スキップしない）。離されていれば待たない。使うのは `CanvasViewportBehaviorSpaceKeyTests` の `SendKey`・入力の列のエンジンのハーネス（`CanvasInputHarness`）の手の始め・`DragBehaviorTests` の実際の入力の押下。
   - ガード：`PhysicalMouseButtonsTests`（ボタンの状態と待ち方を差し替え、押されている間は待って離されたら進む・離されていれば待たない・上限で名指しして失敗する）。mutation 実証済み。
 
 ## 入力の列のエンジン
@@ -355,6 +362,8 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
   - 見えない場所への手は、ボタンを押していないとき（押下と、押していない移動）だけスクロールで見せる。押している間（ドラッグ・パン・ドラッグ＆ドロップ）の移動はスクロールさせない。
 - 流さないもの：
   - `Mouse.DirectlyOver`・`IsMouseOver` の追跡、WPF のコントロールが自分で読む実際のボタンの状態（ボタンをマウスで押す手はフォーカスが移るところまで）、OLE のドラッグ＆ドロップのループ。
+  - WPF のコントロールが読む実際のボタンは、ハーネスが手の始めに実際のボタンが離れるまで待ち（`PhysicalMouseButtons.WaitUntilReleased`）、入力を流すたび（手の始めと、キー・マウスのボタン・移動・ホイール・落とし込みの直前）にキーの状態の表で「離れている」に固定し、破棄で作る前の値へ戻す（`MouseButtonKeyState`。人が触らない状態がエンジンの前提で、利用者の押下を混ぜない）。仮想のボタン（押下〜解放の間の押下）をコントロールに見せる形にはしない（エンジンの意味が変わる）。自己検査は `CanvasInputTests.MouseButtons_ArePinnedReleasedAndRestored`（表を押下にしてから網羅の行を流し、固定ありは緑・固定なしは赤・種の始めと手ごとに実際のボタンが離れるまで待つ・実際のボタンが押されていた形は違反の文に名指し・成功・違反・例外の後に表を戻す・ほかのキーに触らない。入力を送る箇所ごとの固定は、手の途中の押下を作れないので機械では見分けられず、本物のクリックを混ぜる実行で確かめる）。
+  - 手の列の間に前面が別のプロセスのウィンドウへ移った・実際のボタンが押されていた手があれば、違反の文に「外からの乱れ」として名指しする（署名には入れず、赤のまま・流し直さない。自己検査は `CanvasInputTests.Disturbance_IsNamedOnTheViolation`）。テストの出力へ、Win32 から届いた入力の種類ごとの件数と実際のボタンが押されていた手の数を、緑の回でも書く。
   - パンの実行中に子孫の要素がキャプチャを奪う手（台帳の G6）。奪うのは WPF のコントロールの内部の処理で、流すには手の語彙をコントロールごとに広げる必要がある。G6 は台帳のきっかけ待ちのまま語彙に入れていない。
 - 窓は 1 つを全部の行と種で使い回す。種の始めに図を差し替え、ズームとスクロールとミニマップを戻し、前の種の状態（進行中の状態・キャプチャ・フォーカス・選択・Undo の履歴・ズーム・スクロール）が残っていないことを表明する。
 - 次元表は 3 つ。
@@ -362,6 +371,7 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
   - 左ボタンの押下：場所 × 押下の時のパン待機 × 押下の間の最初の手 × Ctrl（`PressCtrl`＝押下の時と解放の時の Ctrl の組。none・blip〔押下の間だけ押す〕・held・released〔押下の時だけ〕・late〔解放の時だけ〕）の 2 因子の組を全部網羅する（網羅しない組の一覧は空）。製品は Ctrl を押下の時〔`RubberBandBehavior` の追加選択・`DragBehavior` のグループ移動の抑止〕と解放の時〔`DragBehavior` のクリックの切り替え〕に読むので、2 つの時点の組を水準にする。Ctrl の押下・解放は押下の間の最初の手に数えない。
   - Space の持ち主の判定（新しい押下と、パンが持っていない押下のリピートを 1 回ずつ）：判定の時の対象 × 判定の種類 × パンの実行中かを全組網羅する（網羅しない組の一覧は空）。Space の押下の表は押下の後に重なった手しか数えないので、パンが先に始まり、その最中に Tab で移った対象で持ち主を決める順序をここで数える（夜間の種でだけ出た形）。
   - どれも数え方は仕様のモデルだけで手の列をなぞり、乱数を引かない。網羅の行（`CanvasInputRows.Coverage`・`PressCoverage`・`DecisionCoverage`）が種に依らず全組を流す。
+- 失敗の記録：違反はすべて `CanvasInputHarness.Run` の 1 か所を通り、後始末（押しているものを離す・キャプチャを外す）の前に `GuiFailureDiagnostics.CaptureViolation` で窓と入力の状態と直前 30 手の状態を取って違反に持たせる。テストは既知の失敗の一覧と照合した後、`CanvasInputHarness.PublishStates` で赤にする失敗の記録だけを書く（「GUI テストの土台」）。手ごとに `GuiFailureDiagnostics.Note` で時系列へ手の区切りを書く。
 - 空振りの検出：ハーネスは表明の分岐が実際に通ったことを記録し（`Exercised`）、決まった形の行の後に `CoverageGuard.ContainsAll` で必須の一覧（`CanvasInputHarness.RequiredExercises`）と照合する。表明の条件を誤って狭めると、ここが名指しして赤にする。
 - 種：普段 40・夜間 400（変数 `QUICKER_CANVAS_INPUT_SEEDS`・1 種だけは `QUICKER_CANVAS_INPUT_SEED`）、1 種につき 3 つの手の列。普段の実行の所要はおよそ 14 秒。
   - Space を押さない余白・カードの押下（押下の間に Ctrl を押さないもの）は、別の乱数の列（`CanvasInputGenerator.SideSeed`）で、包める押下ごとに 90% の割合で Ctrl の held・released・late のどれかで包む。本流の乱数の引き方は変えない（包まない種の手の列は本流だけで決まる）。既定の 40 種には包める押下が数個しかないので、割合を高くして 3 つの水準を既定の種で出す（引き換えに、包める押下を包まずに流す形〔Ctrl の無いグループ移動など〕は乱数の列がまれにしか作らない。その形は網羅の行 `CanvasInputRows.PressCoverage`〔Ctrl の水準 none の行〕と決まった形の行 `group-drag-pushes-one-group-move`・`group-click-restores-members`・`external-cancel-restores-group`・`rubber-band-replaces-selection`・`blank-click-clears-selection` が流す）。

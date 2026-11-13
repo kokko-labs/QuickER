@@ -86,9 +86,12 @@ public class GuiFailureDiagnosticsTests
             .And.Contain("Mouse.Captured=")
             .And.Contain("Mouse.LeftButton=")
             .And.Contain("GetAsyncKeyState(VK_LBUTTON)の最上位ビット=")
+            .And.Contain("Mouse.RightButton=")
+            .And.Contain("実際のボタン=L=")
             .And.Contain("[追跡しているウィンドウ]")
             .And.Contain("W1:Window: Title='DiagnosticsWindow'")
             .And.Contain("[前面のウィンドウ]")
+            .And.Contain("[Win32 から届いた入力]")
             .And.Contain("[CanvasViewportBehavior の静的状態]")
             .And.Contain("_focusArrivedByKeyboard=")
             .And.Contain("_isPanActive=")
@@ -172,6 +175,9 @@ public class GuiFailureDiagnosticsTests
                     button.Focus();
                     SendKey(window, Key.A, down: true);
                     SendKey(window, Key.A, down: false);
+                    button.CaptureMouse();
+                    button.ReleaseMouseCapture();
+                    InjectRawMouseMove(window);
                     throw new InvalidOperationException(marker);
                 }
                 finally
@@ -194,7 +200,124 @@ public class GuiFailureDiagnosticsTests
             .And.Contain("W1:Window: PreviewKeyDown A")
             .And.Contain("W1:Window: PreviewKeyUp A")
             .And.Contain("PreviewGotKeyboardFocus")
+            .And.Contain("W1:Window: GotMouseCapture src=Button(DiagnosticsButton)")
+            .And.Contain("W1:Window: LostMouseCapture src=Button(DiagnosticsButton) now=null")
+            .And.Contain("前面: hwnd=", "実行の始めの前面のウィンドウを書く")
             .And.NotContain("W1:Window: Closed");
+
+        // Win32 から届いた入力（合成の MouseEventArgs / KeyEventArgs ではない生の報告）は、件数と中身を区画へ書く
+        report.Should().MatchRegex(@"件数=[1-9]").And.Contain("RawMouseInputReport");
+    }
+
+    /// <summary>
+    /// Win32 から届くのと同じ形の生のマウスの移動の報告を、入力の経路へ流す（利用者の本物の操作の代わり。
+    /// 報告の型は internal なので反射で作る）
+    /// </summary>
+    private static void InjectRawMouseMove(Window window)
+    {
+        const System.Reflection.BindingFlags Any =
+            System.Reflection.BindingFlags.Instance
+            | System.Reflection.BindingFlags.Public
+            | System.Reflection.BindingFlags.NonPublic;
+        var assembly = typeof(InputManager).Assembly;
+        var argsType = assembly.GetType("System.Windows.Input.InputReportEventArgs", true)!;
+        var actionsType = assembly.GetType("System.Windows.Input.RawMouseActions", true)!;
+        var reportType = assembly.GetType("System.Windows.Input.RawMouseInputReport", true)!;
+        var report = Activator.CreateInstance(
+            reportType,
+            Any,
+            binder: null,
+            args:
+            [
+                InputMode.Foreground,
+                Environment.TickCount,
+                PresentationSource.FromVisual(window)!,
+                Enum.Parse(actionsType, "AbsoluteMove"),
+                10,
+                10,
+                0,
+                IntPtr.Zero,
+            ],
+            culture: null
+        )!;
+        var args = (InputEventArgs)
+            Activator.CreateInstance(
+                argsType,
+                Any,
+                binder: null,
+                args: [Mouse.PrimaryDevice, report],
+                culture: null
+            )!;
+        args.RoutedEvent = (RoutedEvent)
+            typeof(InputManager)
+                .GetField(
+                    "PreviewInputReportEvent",
+                    System.Reflection.BindingFlags.Static
+                        | System.Reflection.BindingFlags.Public
+                        | System.Reflection.BindingFlags.NonPublic
+                )!
+                .GetValue(null)!;
+        GuiFailureDiagnostics
+            .IsPreviewInputReport(args)
+            .Should()
+            .BeTrue("見分け方が WPF の実際のイベントに合う");
+        InputManager.Current.ProcessInput(args);
+        DoEvents();
+    }
+
+    [Fact(
+        DisplayName = "CaptureViolation は区画が例外を投げても例外を出さず、違反の要約・直前の手・ほかの区画を記録する"
+    )]
+    public void CaptureViolation_RecordsSummaryAndRecentSteps_WithoutThrowing()
+    {
+        using var _ = GuiFailureDiagnostics.SuppressSinksForTests();
+        string? report = null;
+        Exception? escaped = null;
+        var marker = "violation-" + Guid.NewGuid().ToString("N");
+
+        RunSta(() =>
+        {
+            var (window, _) = ShowTrackedWindow();
+            GuiFailureDiagnostics.ExtraSectionForTests = _ =>
+                throw new InvalidOperationException("injected-section-failure");
+
+            try
+            {
+                GuiFailureDiagnostics.Note("step-marker");
+                GuiFailureDiagnostics.CaptureViolation(
+                    $"{marker}\nsecond-line",
+                    ["recent-1", "recent-2"]
+                );
+                report = GuiFailureDiagnostics.LastReport;
+            }
+            catch (Exception ex)
+            {
+                escaped = ex;
+            }
+            finally
+            {
+                GuiFailureDiagnostics.ExtraSectionForTests = null;
+                window.Close();
+            }
+        });
+
+        escaped.Should().BeNull("記録の失敗をテストへ持ち込まない");
+        GuiFailureDiagnostics
+            .LastRunReport.Should()
+            .Be(report, "実行の文脈へ残す（テストのスレッドから読める）");
+        report
+            .Should()
+            .NotBeNull()
+            .And.Contain("[表明の失敗]")
+            .And.Contain($"  {marker}")
+            .And.Contain("  second-line")
+            .And.Contain("[直前の手]")
+            .And.Contain("  recent-1")
+            .And.Contain("  recent-2")
+            .And.Contain("手: step-marker")
+            .And.Contain("W1:Window: Title='DiagnosticsWindow'")
+            .And.Contain("記録に失敗: InvalidOperationException: injected-section-failure")
+            .And.Contain("[イベントの時系列]", "ほかの区画は記録される");
     }
 
     [Fact(

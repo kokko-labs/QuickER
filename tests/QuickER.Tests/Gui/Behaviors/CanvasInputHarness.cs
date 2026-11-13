@@ -9,6 +9,7 @@ using System.Windows.Media;
 using QuickER.Behaviors;
 using QuickER.Model;
 using QuickER.Services;
+using QuickER.Tests.TestSupport.Engines;
 using QuickER.UndoRedo;
 using QuickER.ViewModels;
 using QuickER.Views;
@@ -114,6 +115,9 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
             Top = -10000,
         };
 
+        // アクティブの行き来の相手も、失敗の記録の時系列へ載せる
+        TestSupport.GuiFailureDiagnostics.Track(_other);
+
         window.AddHandler(ButtonBase.ClickEvent, new RoutedEventHandler(OnClick), true);
         window.AddHandler(ToggleButton.CheckedEvent, new RoutedEventHandler(OnChecked), true);
         window.AddHandler(ToggleButton.UncheckedEvent, new RoutedEventHandler(OnChecked), true);
@@ -126,6 +130,7 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
         InputManager.Current.PostProcessInput += OnPostProcessInput;
         _initialMiniMap = vm.IsMiniMapEnabled;
         _inputScope = BehaviorInput.OverrideForTests(this);
+        _savedMouseButtons = TestSupport.MouseButtonKeyState.Capture();
     }
 
     // ---------- 読み口の差し替え（IBehaviorInputSource） ----------
@@ -220,45 +225,181 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
         "I10:カードのドラッグ",
     ];
 
-    /// <summary>手ごとの状態の記録（調べるときだけ入れる。null なら記録しない）</summary>
-    public List<string>? Trace { get; set; }
+    /// <summary>失敗の記録へ載せる直前の手の数</summary>
+    private const int RecentStepCapacity = 30;
+
+    /// <summary>直前の手ごとの状態（古い順。違反を見つけたら失敗の記録へ載せる）</summary>
+    private readonly Queue<string> _recentSteps = new();
+
+    /// <summary>ハーネスを作る前の、キーの状態の表のマウスのボタン（破棄で戻す）</summary>
+    private readonly TestSupport.MouseButtonKeyState.Saved _savedMouseButtons;
+
+    /// <summary>
+    /// 入力を流す前に、このスレッドのキーの状態の表のマウスのボタンを「離れている」に固定するか（既定は固定する。
+    /// 固定の自己検査が、外すと利用者の押下が混ざることを確かめるためだけに false にする）
+    /// </summary>
+    internal bool PinsMouseButtons { get; set; } = true;
+
+    /// <summary>
+    /// 種の始めと手の始めに、実際のマウスのボタンが離れるまで待つ処理（既定は
+    /// <see cref="TestSupport.PhysicalMouseButtons.WaitUntilReleased()"/>。固定の自己検査が、待つ回数を数えるためだけに差し替える）
+    /// </summary>
+    internal Action WaitForPhysicalRelease { get; set; } =
+        TestSupport.PhysicalMouseButtons.WaitUntilReleased;
+
+    /// <summary>
+    /// 手を流した直後に実際のマウスのボタンが押されているかを読む処理（既定は
+    /// <see cref="TestSupport.GuiFailureDiagnostics.AnyPhysicalButtonDown"/>。名指しの自己検査が、押されていた形を作るためだけに差し替える）
+    /// </summary>
+    internal Func<bool> PhysicalButtonDown { get; set; } =
+        TestSupport.GuiFailureDiagnostics.AnyPhysicalButtonDown;
+
+    /// <summary>
+    /// このスレッドのキーの状態の表のマウスのボタンを「離れている」にする。WPF のコントロール（ButtonBase・DataGrid）は
+    /// ビヘイビアと違って読み口の差し替えを通らず、実際のボタンをこの表から読むので、利用者がほかのアプリで押したボタンが
+    /// 合成の入力に混ざる。エンジンの前提（人が触らない状態）へ戻すために、入力を流すたびに直前で固定する
+    /// </summary>
+    private void PinMouseButtons()
+    {
+        if (PinsMouseButtons)
+        {
+            TestSupport.MouseButtonKeyState.Release();
+        }
+    }
+
+    /// <summary>流した手の数（このハーネスを作ってから）</summary>
+    public int StepCount { get; private set; }
+
+    /// <summary>手を流した直後に、実際のマウスのボタンが押されていた手の数（利用者の本物の操作が混ざったかを数で見る）</summary>
+    public int PhysicalButtonSteps { get; private set; }
 
     // ---------- 1 種の実行 ----------
 
     /// <summary>手の列を流し、最初に破れた不変条件を返す（破れなければ null）</summary>
+    /// <remarks>
+    /// 違反はすべてここを通り、後始末の前（窓が開いていて押下・キャプチャが残っている瞬間）に失敗の記録を書く
+    /// （<see cref="TestSupport.GuiFailureDiagnostics.CaptureViolation"/>。違反は値で返り、テストが表明するのは窓を閉じた後なので、
+    /// 例外フィルターの記録を通らない）。
+    /// </remarks>
     public CanvasViolation? Run(IReadOnlyList<CanvasStep> steps)
     {
-        if (BeginSeed() is { } start)
-        {
-            return start;
-        }
-
+        _recentSteps.Clear();
+        TestSupport.GuiFailureDiagnostics.Note("種の始め");
+        _foreignForegroundAtStart = TestSupport.GuiFailureDiagnostics.ForeignForegroundChanges;
+        _physicalButtonStepsAtStart = PhysicalButtonSteps;
         var model = new CanvasInputModel();
 
+        // 種の始めのクリックの前にも、実際のボタンが離れるまで待つ（押されていなければ待たない）
+        WaitForPhysicalRelease();
+
+        if (BeginSeed() is { } start)
+        {
+            return WithState(start);
+        }
+
+        if (RunSteps(steps, model) is not { } violation)
+        {
+            return null;
+        }
+
+        var recorded = WithState(violation);
+        ReleaseAll(model);
+        return recorded;
+    }
+
+    /// <summary>種の始めの後の手を流し、最初に破れた不変条件を返す</summary>
+    private CanvasViolation? RunSteps(IReadOnlyList<CanvasStep> steps, CanvasInputModel model)
+    {
         for (var index = 0; index < steps.Count; index++)
         {
-            var step = steps[index];
-
-            if (Execute(index, step, model) is { } violation)
+            if (Execute(index, steps[index], model) is { } violation)
             {
-                ReleaseAll(model);
                 return violation;
             }
         }
 
-        if (!model.Quiescent)
-        {
-            ReleaseAll(model);
-            return new(
+        return model.Quiescent
+            ? null
+            : new(
                 "Shape",
                 -1,
                 null,
                 model.Focus,
                 "手の列がキーかボタンを押したまま終わった（生成器の誤り）"
             );
+    }
+
+    /// <summary>違反を見つけた瞬間の状態を記録し、違反に持たせる（例外を出さない）</summary>
+    private CanvasViolation WithState(CanvasViolation violation)
+    {
+        var named = violation with { Disturbance = Disturbance() };
+        return named with
+        {
+            StateReport = TestSupport.GuiFailureDiagnostics.CaptureViolation(
+                $"{named}\n署名 {named.Signature}・ハーネスのキャプチャ {Describe(Mouse.Captured)}・左 {_left}・中 {_middle}・修飾 {_modifiers}",
+                _recentSteps.ToList()
+            ),
+        };
+    }
+
+    /// <summary>この手の列の始めの、前面が別のプロセスへ移った回数</summary>
+    private int _foreignForegroundAtStart;
+
+    /// <summary>この手の列の始めの、実際のボタンが押されていた手の数</summary>
+    private int _physicalButtonStepsAtStart;
+
+    /// <summary>
+    /// この手の列を流す間に見た外からの乱れ（前面が別のプロセスへ移った・実際のボタンが押されていた）を名指しする
+    /// （無ければ null）。乱れがあっても違反は赤のまま残し、流し直さない。ボタンは表で「離れている」に固定しているので
+    /// WPF のコントロールには見えないが、前面の移りは Windows のキャプチャの取り消しを招き、固定では防げない
+    /// </summary>
+    private string? Disturbance() =>
+        DescribeDisturbance(
+            TestSupport.GuiFailureDiagnostics.ForeignForegroundChanges - _foreignForegroundAtStart,
+            PhysicalButtonSteps - _physicalButtonStepsAtStart,
+            PinsMouseButtons
+        );
+
+    /// <summary>外からの乱れの数から、名指しの文を組む（無ければ null。自己検査が文の形を確かめる）</summary>
+    /// <param name="foreground">前面が別のプロセスのウィンドウへ移った回数</param>
+    /// <param name="physical">実際のマウスのボタンが押されていた手の数</param>
+    /// <param name="pinned">キーの状態の表のボタンを離れているに固定していたか</param>
+    internal static string? DescribeDisturbance(int foreground, int physical, bool pinned)
+    {
+        var parts = new List<string>();
+
+        if (foreground > 0)
+        {
+            parts.Add($"手の列の間に前面が別のプロセスのウィンドウへ {foreground} 回移った");
         }
 
-        return null;
+        if (physical > 0)
+        {
+            parts.Add(
+                $"実際のマウスのボタンが押されていた手 {physical} 個（表は離れているに固定{(pinned ? "" : "していない")}）"
+            );
+        }
+
+        return parts.Count == 0 ? null : string.Join("・", parts);
+    }
+
+    /// <summary>
+    /// 既知の失敗の一覧と照合した結果のうち、赤にする失敗（新しい失敗・理由の食い違い）の違反の瞬間の状態を、
+    /// 出力先へ書く（テストのスレッドで、表明の前に呼ぶ。既知として数えた失敗は書かない）
+    /// </summary>
+    public static void PublishStates(KnownReport report)
+    {
+        foreach (
+            var failure in report.Unknown.Concat(
+                report.ReasonMismatch.Select(match => match.Failure)
+            )
+        )
+        {
+            if (failure.Source is CanvasViolation { StateReport: { } state })
+            {
+                TestSupport.GuiFailureDiagnostics.Publish(state);
+            }
+        }
     }
 
     /// <summary>種の始め：前の種の残りを表明し、図・ズーム・スクロールを戻し、先頭のテーブルのカードをクリックする</summary>
@@ -374,6 +515,17 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
             held.Disturbed = true;
         }
 
+        // 失敗の記録の時系列へ、手の区切りを書く（手が流すイベントの前に。前面のウィンドウの移りもここで拾う）
+        TestSupport.GuiFailureDiagnostics.Note(
+            string.Create(CultureInfo.InvariantCulture, $"{index} {step}")
+        );
+
+        // 実際のボタンが離れるまで待ってから（押されていなければ待たない）、手の始めにも固定する。表は実際のボタンが
+        // 変わると Windows が同期し直すので、押されている間に書いても漏れる。手の中の DoEvents で WPF が読む分も含め、
+        // 入力を流す箇所でも毎回固定する
+        WaitForPhysicalRelease();
+        PinMouseButtons();
+
         if (Perform(step) is { } shape)
         {
             return new("Shape", index, step, model.Focus, shape);
@@ -403,10 +555,23 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
             );
         }
 
-        Trace?.Add(
+        // 手ごとの状態は常に直前の分だけ持ち、違反の記録へ載せる（全件でだけまれに落ちる形を、その 1 回で調べられるように）
+        while (_recentSteps.Count >= RecentStepCapacity)
+        {
+            _recentSteps.Dequeue();
+        }
+
+        StepCount++;
+
+        if (PhysicalButtonDown())
+        {
+            PhysicalButtonSteps++;
+        }
+
+        _recentSteps.Enqueue(
             string.Create(
                 CultureInfo.InvariantCulture,
-                $"{index} {step}: pan={CanvasViewportBehavior.IsPanActive} panning={(bool)IsPanningField.GetValue(null)!} drag={DragBehavior.IsInteractionActiveForTests} rubber={RubberBandBehavior.IsSelectionActiveForTests}/{_vm.IsRubberBandVisible} capture={Describe(Mouse.Captured)} focus={Describe(Keyboard.FocusedElement)} undo={UndoCount()} top={TopUndo()?.GetType().Name} sel={_vm.SelectedEntity?.TableName}"
+                $"{index} {step}: pan={CanvasViewportBehavior.IsPanActive} panning={(bool)IsPanningField.GetValue(null)!} drag={DragBehavior.IsInteractionActiveForTests} rubber={RubberBandBehavior.IsSelectionActiveForTests}/{_vm.IsRubberBandVisible} capture={Describe(Mouse.Captured)} focus={Describe(Keyboard.FocusedElement)} undo={UndoCount()} top={TopUndo()?.GetType().Name} sel={string.Join(",", _vm.SelectedEntities.Select(e => e.TableName))} 実際のボタン={TestSupport.GuiFailureDiagnostics.PhysicalButtons()}"
             )
         );
 
@@ -1175,7 +1340,6 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
         switch (step.Op)
         {
             case CanvasOp.SpaceDown:
-                TestSupport.PhysicalMouseButtons.WaitUntilReleased();
                 SendKey(Key.Space, down: true, repeat: false);
                 return null;
             case CanvasOp.SpaceRepeat:
@@ -1383,6 +1547,7 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
                 ],
                 CultureInfo.InvariantCulture
             )!;
+        PinMouseButtons();
         args.RoutedEvent = DragDrop.PreviewDropEvent;
         target.RaiseEvent(args);
 
@@ -1595,6 +1760,7 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
         }
 
         _keyDownHandled = null;
+        PinMouseButtons();
         InputManager.Current.ProcessInput(args);
 
         // 処理済みにならなかった Space の押下だけが文字を生む（WM_CHAR の写し）
@@ -1644,6 +1810,7 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
 
     private void MouseButton(MouseButton button, bool down)
     {
+        PinMouseButtons();
         var source = HitTarget();
         var preview = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, button)
         {
@@ -1666,6 +1833,7 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
 
     private void MouseMove()
     {
+        PinMouseButtons();
         var source = HitTarget();
         var preview = new MouseEventArgs(Mouse.PrimaryDevice, Environment.TickCount)
         {
@@ -1688,6 +1856,7 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
 
     private void MouseWheel(int delta)
     {
+        PinMouseButtons();
         var source = HitTarget();
         var preview = new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, delta)
         {
@@ -2001,13 +2170,21 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
 
     public void Dispose()
     {
-        InputManager.Current.PostProcessInput -= OnPostProcessInput;
-        _grid.BeginningEdit -= OnBeginningEdit;
-        _inputScope.Dispose();
-
-        if (_otherShown)
+        try
         {
-            _other.Close();
+            InputManager.Current.PostProcessInput -= OnPostProcessInput;
+            _grid.BeginningEdit -= OnBeginningEdit;
+            _inputScope.Dispose();
+
+            if (_otherShown)
+            {
+                _other.Close();
+            }
+        }
+        finally
+        {
+            // キーの状態の表のマウスのボタンを、ハーネスを作る前の値へ戻す（ほかの後始末が投げても戻す）
+            _savedMouseButtons.Restore();
         }
     }
 
@@ -2149,10 +2326,25 @@ internal sealed record CanvasViolation(
     string Detail
 )
 {
+    /// <summary>
+    /// 違反を見つけた瞬間（後始末の前）の窓と入力の状態の記録（<see cref="TestSupport.GuiFailureDiagnostics.CaptureViolation"/>。
+    /// 記録に失敗したら null）。新しい失敗と分かったときだけ出力先へ書く（<see cref="CanvasInputHarness.PublishStates"/>）
+    /// </summary>
+    public string? StateReport { get; init; }
+
+    /// <summary>
+    /// 手の列を流す間に見た外からの乱れ（前面の移り・実際のボタンの押下。無ければ null）。違反は赤のまま残し、
+    /// 失敗の文に名指しする（署名には入れない）
+    /// </summary>
+    public string? Disturbance { get; init; }
+
     /// <summary>既知の失敗の署名（種の番号でなく形で名指す：不変条件・手の種類・フォーカスの対象）</summary>
     public string Signature =>
         $"{Invariant}:{Step?.Op.ToString() ?? "Start"}:{Focus?.ToString() ?? "Other"}";
 
     public override string ToString() =>
-        string.Create(CultureInfo.InvariantCulture, $"[{Invariant}] 手 {Index} {Step}: {Detail}");
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"[{Invariant}] 手 {Index} {Step}: {Detail}{(Disturbance is null ? "" : $"（外からの乱れ: {Disturbance}）")}"
+        );
 }
