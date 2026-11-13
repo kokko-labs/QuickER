@@ -89,6 +89,7 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
             [
                 DslFuzzUnits.Coverage(DialectNames.SqlServer),
                 DslFuzzUnits.PlainCoverage(DialectNames.SqlServer),
+                .. DslFuzzUnits.FamiliesCoverage(DialectNames.SqlServer),
                 DslFuzzUnits.SqlServerAnsiCoverage(),
                 DslFuzzUnits.SqlServerMoneyCoverage(),
             ];
@@ -144,7 +145,11 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
                             probe,
                             options => options.UseSqlServer(cs).IgnoreServiceProviderCacheLimit()
                         )
-                ),
+                ) with
+                {
+                    // EF Core 版は SQL Server の比べ方のまま（末尾の 0x00 だけが違う値を等しいとみなす＝docs のバイナリの段落の既知の割り切り）
+                    BinaryRule = DslBinaryRule.TrailingZerosIgnored,
+                },
             ],
             new Dictionary<string, string>(StringComparer.Ordinal)
             {

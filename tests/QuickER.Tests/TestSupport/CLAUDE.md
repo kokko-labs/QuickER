@@ -439,6 +439,11 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
   - 値オブジェクトなしの網羅の単位 `DslFuzzUnits.PlainCoverage(方言)`（SQLite・SQL Server・MySQL に 1 つずつ・名前は `coverage-{方言}-plain`）：種の単位と同じ列（MySQL は網羅の単位と同じく固定長の文字列・符号つき整数・decimal・日時・Guid も持ち、その列の原子のクエリを作る）で `CoverageQueries` を流す。値オブジェクトなしでだけ書ける形（整数の列と小数のリテラル＝値オブジェクトの列は型の検査が断る）の組を種に依らず埋める。SQLite の単位だけ決まった形のクエリも流す。
   - 特殊な文字列とカルチャ：SQLite の 2 単位（`Coverage`・`PlainCoverage`）だけ、列 `s` に合成済みの「が」・分解形の「か＋濁点」・ソフトハイフンを無視すると a で始まる値を入れ、前方・後方・部分一致とソフトハイフンの LIKE を足す（SQL Server は照合順序で合成済みと分解形が等しくなるので足さない）。網羅の単位は書式のカルチャをインバリアントにして流し、SQLite の 2 単位の序数のクエリ（`DslFuzzGenerator.OrdinalQueryPrefix`＝KO0〜KO3）だけをインメモリの範囲で ja-JP・tr-TR でも流し直す（インメモリは序数＝オラクルは `DslCaseRule.Ordinal` のまま。カルチャで結果が変わり得るのはインメモリの文字列一致の比べ方だけなので、ほかのクエリは周回しない）。
   - 網羅しない組の一覧は、受け入れ（方言が列の型として持てない種類・EF Core の SQLite プロバイダの decimal の順序比較）だけ。
+- 列の型の族（bool・バイナリ）は、既存の単位の列に足さず族の単位で流す（既存の単位の乱数の引き方と、種の指紋の要約の既存の行を変えないため）。
+  - 種の単位は各方言の種の単位の列挙の末尾の `{方言}-families`・`{方言}-families-vo`、網羅の単位は `DslFuzzUnits.FamiliesCoverage`（`coverage-{方言}-families`・`-families-plain`）。列は bool（NULL 許容と NOT NULL）・可変長のバイナリ（NULL 許容と NOT NULL）・固定長のバイナリ（固定長を持たない PostgreSQL・Oracle は可変長）・相方の整数。
+  - 形はパラメータとの `=`・`<>`・IN・NULL 判定だけ（DSL に真偽値・バイナリのリテラルが無く、順序比較は型の検査が断る＝`isValid`）。
+  - バイナリの値の池は末尾の 0x00 だけが違う組を持つ。オラクルは実装先ごとの `DslFuzzBackend.BinaryRule` で比べる（SQL Server の EF Core 版だけ両側の末尾の 0x00 を外して比べる＝docs の「大文字小文字・空白・日付部品」の節のバイナリの段落の既知の割り切り）。Oracle の空のバイナリは空文字列と同じ規則（`DslCaseRule.Oracle`）で、Oracle の NOT NULL のバイナリの列の値の池は空の配列を持たない。
+  - 並び替えの列は bool も使い（false が先でどの DB も同じ）、バイナリは使わない（作らない形の宣言）。
 - パラメータの使い回し（次元表の因子 ParameterReuse・原子ごと）：同じパラメータを同じ列の原子どうし・同じ種類のほかの列・より広い種類のほかの列（int と bigint・decimal など）で使う形と、IN のリストを同じ列の IN と NOT IN・ほかの列の IN で使う形。型の検査が受け付ける組だけを作る（値オブジェクトの列どうしは型トークンで型付けしたパラメータか、値オブジェクトの型を共有する GuidKey の主キーと自己参照の外部キー）。水準は参照するパラメータ名・相手の列・パラメータの型とこの原子の列の種類から数える（`DslFuzzDimensions.ReuseOf`。同じ原子のインスタンスを 1 つのクエリに 2 回置かない）。
 - 並び替え（次元表の因子 Ordering・クエリごと）：並べない・主キーだけ・列 1 つの後に主キー・列 2 つの後に主キー。主キーより前の列は整数・decimal・日時に限り、最後に必ず主キーを置く（同点を作らない）。文字列の列では並べない（作らない形の宣言）。一覧も並べられる（`DslQuery.ListOrdered`）。EF Core（SQLite）は decimal の列での並び替えも `ExcludedOnEfCoreSqlite` で流さない。
   - 照合は「追加の列 → 主キー」の並びで期待を決める。単一は並びで最初に真になる行、射影と並べる一覧は返した行を同じ並びで並べ直した順との一致。NULL の位置は実装先ごとの宣言 `DslFuzzBackend.NullOrder`（docs のインメモリの節「実 DB との既知の乖離」の写し。PostgreSQL・Oracle の EF Core 版は昇順で末尾、ほかの実装先は昇順で先頭）。

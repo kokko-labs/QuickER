@@ -141,7 +141,15 @@ internal static class DslFuzzExecution
 
                 var arguments = query.Parameters.ToDictionary(p => p.Name, p => (object?)p);
                 var result = await InvokeAsync(repository, method, arguments, ct);
-                var problem = Check(query, result, rows, rule, backend.NullOrder, shape);
+                var problem = Check(
+                    query,
+                    result,
+                    rows,
+                    rule,
+                    backend.BinaryRule,
+                    backend.NullOrder,
+                    shape
+                );
                 checkedCount++;
 
                 // 照合したクエリの原子を網羅として数える（宣言の誤りは下の catch で受け止めずにそのまま投げる）
@@ -233,6 +241,7 @@ internal static class DslFuzzExecution
         object? result,
         List<Dictionary<string, object?>> rows,
         DslCaseRule rule,
+        DslBinaryRule binaryRule,
         DslNullOrder nulls,
         EntityShape shape
     )
@@ -240,7 +249,7 @@ internal static class DslFuzzExecution
         var verdicts = rows.Select(row =>
                 (
                     Key: row[shape.KeyColumn],
-                    Verdict: DslFuzz.Evaluate(query.Condition, row, rule),
+                    Verdict: DslFuzz.Evaluate(query.Condition, row, rule, binaryRule: binaryRule),
                     Row: row
                 )
             )

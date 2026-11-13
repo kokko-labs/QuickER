@@ -82,7 +82,9 @@ public abstract class TranslatorParityRuntimeTestsBase
                 day: new DateTime(2024, 1, 1),
                 at2: new DateTime(2024, 1, 1, 10, 0, 0).AddMilliseconds(120),
                 clock: new TimeSpan(0, 10, 0, 0, 120),
-                ansi: "abc"
+                ansi: "abc",
+                bin: [0x01],
+                binFixed: [0x01]
             ),
             Probe(
                 2,
@@ -95,7 +97,9 @@ public abstract class TranslatorParityRuntimeTestsBase
                 day: new DateTime(2024, 1, 2),
                 at2: new DateTime(2024, 1, 1, 10, 0, 0).AddMilliseconds(130),
                 clock: new TimeSpan(0, 10, 0, 0, 130),
-                ansi: "??"
+                ansi: "??",
+                bin: [0x01, 0x00],
+                binFixed: [0x01, 0x00]
             ),
             Probe(
                 3,
@@ -104,9 +108,11 @@ public abstract class TranslatorParityRuntimeTestsBase
                 new DateTime(2024, 1, 14, 23, 59, 59),
                 new DateTimeOffset(2024, 6, 30, 23, 30, 0, TimeSpan.Zero),
                 true,
-                amount: 300m
+                amount: 300m,
+                bin: [0x01, 0x00, 0x00, 0x00],
+                binFixed: [0x01]
             ),
-            Probe(4, "\t", null, null, null, false, ansi: "?"),
+            Probe(4, "\t", null, null, null, false, ansi: "?", bin: [0xFF]),
             Probe(
                 5,
                 "　",
@@ -114,7 +120,8 @@ public abstract class TranslatorParityRuntimeTestsBase
                 new DateTime(2023, 5, 1, 0, 0, 0),
                 new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.FromHours(9)),
                 true,
-                amount: 100m
+                amount: 100m,
+                binFixed: [0x01, 0x00, 0x00, 0x00]
             ),
             Probe(6, "", "Zc", new DateTime(2024, 1, 15, 0, 0, 0), null, false),
             Probe(7, "Bob\n", null, new DateTime(2025, 1, 15, 8, 0, 0), null, true, amount: 250m),
@@ -137,7 +144,9 @@ public abstract class TranslatorParityRuntimeTestsBase
         DateTime? day = null,
         DateTime? at2 = null,
         TimeSpan? clock = null,
-        string? ansi = null
+        string? ansi = null,
+        byte[]? bin = null,
+        byte[]? binFixed = null
     ) =>
         new()
         {
@@ -154,6 +163,8 @@ public abstract class TranslatorParityRuntimeTestsBase
             At2 = at2,
             Clock = clock,
             Ansi = ansi,
+            Bin = bin,
+            BinFixed = binFixed,
         };
 
     /// <summary>
@@ -182,7 +193,10 @@ public abstract class TranslatorParityRuntimeTestsBase
         var stored = await repository.Query().ToListAsync(Ct);
         stored.Should().HaveCount(seeded);
 
-        var expected = stored.Where(predicate.Compile()).Select(key).ToList();
+        var expected = stored
+            .Where(((Expression<Func<TEntity, bool>>)ComparingBytes(predicate)).Compile())
+            .Select(key)
+            .ToList();
 
         var actual = await repository.Query().Where(predicate).ToListAsync(Ct);
 
@@ -190,6 +204,91 @@ public abstract class TranslatorParityRuntimeTestsBase
             .Select(key)
             .Should()
             .BeEquivalentTo(expected, "条件 {0} は C# の意味論と同じ行を返すべき", predicate);
+    }
+
+    /// <summary>
+    /// 期待を作る述語の、バイナリ（<c>byte[]</c>）の <c>==</c>・<c>!=</c> と、<c>byte[]</c> の並びの <c>Contains</c> を、バイトの列の比較へ
+    /// 書き換える（ほかの部分はそのまま）
+    /// </summary>
+    /// <remarks>
+    /// コンパイルした C# の <c>byte[]</c> の <c>==</c> は参照の比較で、読み戻した配列はどれも別のインスタンスなので、どの行にも一致しない。
+    /// docs の約束（「大文字小文字・空白・日付部品」の節のバイナリの段落＝どの実装先もバイトの列で比べる。インメモリ実装も中身で比べる）を
+    /// 期待にする。
+    /// </remarks>
+    /// <param name="predicate">述語</param>
+    internal static LambdaExpression ComparingBytes(LambdaExpression predicate) =>
+        (LambdaExpression)new ByteComparisonRewriter().Visit(predicate);
+
+    /// <summary>2 つのバイナリがバイトの列で等しいか（NULL どうしは等しく、片方だけの NULL は等しくない）</summary>
+    private static bool SameBytes(byte[]? left, byte[]? right) =>
+        left is null ? right is null : right is not null && left.AsSpan().SequenceEqual(right);
+
+    /// <summary>並びに、バイトの列で等しいバイナリがあるか</summary>
+    private static bool ContainsBytes(IEnumerable<byte[]?> values, byte[]? value) =>
+        values.Any(item => SameBytes(item, value));
+
+    /// <summary><see cref="ComparingBytes"/> の書き換え</summary>
+    private sealed class ByteComparisonRewriter : ExpressionVisitor
+    {
+        protected override Expression VisitBinary(BinaryExpression node)
+        {
+            if (
+                node.NodeType is ExpressionType.Equal or ExpressionType.NotEqual
+                && node.Left.Type == typeof(byte[])
+                && node.Right.Type == typeof(byte[])
+            )
+            {
+                Expression same = Expression.Call(
+                    typeof(TranslatorParityRuntimeTestsBase).GetMethod(
+                        nameof(SameBytes),
+                        System.Reflection.BindingFlags.NonPublic
+                            | System.Reflection.BindingFlags.Static
+                    )!,
+                    Visit(node.Left),
+                    Visit(node.Right)
+                );
+
+                return node.NodeType == ExpressionType.Equal ? same : Expression.Not(same);
+            }
+
+            return base.VisitBinary(node);
+        }
+
+        protected override Expression VisitMethodCall(MethodCallExpression node)
+        {
+            // リストの Contains（インスタンス）と Enumerable.Contains（静的）の両方
+            var (source, value) = node switch
+            {
+                { Method.Name: "Contains", Object: { } list, Arguments.Count: 1 } => (
+                    list,
+                    node.Arguments[0]
+                ),
+                { Method.Name: "Contains", Object: null, Arguments.Count: 2 } => (
+                    node.Arguments[0],
+                    node.Arguments[1]
+                ),
+                _ => (null, null),
+            };
+
+            if (
+                source is not null
+                && value?.Type == typeof(byte[])
+                && typeof(IEnumerable<byte[]?>).IsAssignableFrom(source.Type)
+            )
+            {
+                return Expression.Call(
+                    typeof(TranslatorParityRuntimeTestsBase).GetMethod(
+                        nameof(ContainsBytes),
+                        System.Reflection.BindingFlags.NonPublic
+                            | System.Reflection.BindingFlags.Static
+                    )!,
+                    Visit(source),
+                    Visit(value)
+                );
+            }
+
+            return base.VisitMethodCall(node);
+        }
     }
 
     // ===== 述語の表 =====

@@ -47,7 +47,10 @@ public sealed partial class DslFuzzGenerator
     private static List<DslColumn> FilterableColumns(IReadOnlyList<DslColumn> columns) =>
         columns.Where(column => !column.PrimaryKey || column.Clr == DslClr.GuidKey).ToList();
 
-    /// <summary>主キーより前に置ける並びの列（主キーでない整数・decimal・日時の列）</summary>
+    /// <summary>
+    /// 主キーより前に置ける並びの列（主キーでない整数・decimal・日時・bool の列。bool は false が先でどの DB も同じ。バイナリは並べない＝
+    /// 作らない形の宣言）
+    /// </summary>
     private static List<DslColumn> OrderableColumns(
         IReadOnlyList<DslColumn> columns,
         bool withDecimal
@@ -58,6 +61,7 @@ public sealed partial class DslFuzzGenerator
                 && (
                     column.IsInteger
                     || column.Clr == DslClr.DateTime
+                    || column.Clr == DslClr.Boolean
                     || (withDecimal && column.Clr == DslClr.Decimal)
                 )
             )
@@ -617,9 +621,7 @@ public sealed partial class DslFuzzGenerator
         }
 
         var projectable = columns.Skip(1).ToList();
-        var pinned = columns
-            .Skip(1)
-            .First(column => column.Nullable && (column.IsString || valueObjects));
+        var pinned = columns.Skip(1).First(CanPinNonNull);
         var groups = pairs.Chunk(ReusePairsPerQuery).ToList();
         var candidates = new List<DslQuery>();
         QueryReturnShape?[] kinds =

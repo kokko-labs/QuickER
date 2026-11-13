@@ -41,7 +41,20 @@ public sealed class TranslatorParityEfCoreSqlServerRuntimeTests(SqlServerContain
             "整数の列と decimal の列の比較は、EF Core が整数の列を相手の列の型（decimal(10,2)）へ CAST し、整数部の桁が入らない行で桁あふれの例外になる（docs の EF Core の節の既知の割り切り）",
         ["int-column-equals-decimal-column"] =
             "整数の列と decimal の列の比較は、EF Core が整数の列を相手の列の型（decimal(10,2)）へ CAST し、整数部の桁が入らない行で桁あふれの例外になる（docs の EF Core の節の既知の割り切り）",
+        ["binary-equals-value"] = BinaryPadding,
+        ["binary-not-equals-value"] = BinaryPadding,
+        ["binary-equals-trailing-zero-value"] = BinaryPadding,
+        ["binary-fixed-equals-short-value"] = BinaryPadding,
+        ["binary-in-list"] = BinaryPadding,
+        ["binary-not-in-list"] = BinaryPadding,
+        ["binary-in-list-with-null"] = BinaryPadding,
+        ["binary-column-equals-column"] = BinaryPadding,
+        ["binary-column-not-equals-column"] = BinaryPadding,
     };
+
+    /// <summary>バイナリの比較の割り切りの理由</summary>
+    private const string BinaryPadding =
+        "EF Core 版は SQL Server の比べ方のままで、末尾の 0x00 だけが違うバイナリを等しいとみなす（docs の「大文字小文字・空白・日付部品」の節のバイナリの段落の既知の割り切り）";
 
     /// <inheritdoc />
     protected override IReadOnlyDictionary<string, string> Known => KnownRows;

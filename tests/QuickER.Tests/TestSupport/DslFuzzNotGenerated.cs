@@ -25,10 +25,22 @@ internal static class DslFuzzNotGenerated
             [
                 NotGenerated.Pending(
                     "column-type-families",
-                    "列の型の族（float・bool・DateOnly・TimeOnly・DateTimeOffset・TimeSpan・Binary）",
-                    "きっかけ待ち（型の族の区切り・bool から）",
-                    "生成器の列の型（DslClr）にこれらの族が無い。族ごとの実装先の意味が docs に無く、足すと族ごとに仕様の判断が要る",
+                    "列の型の族（float・DateTimeOffset・TimeSpan）",
+                    "族ごとの区切り（TimeSpan → DateTimeOffset → float）",
+                    "生成器の列の型（DslClr）にこれらの族が無い。族ごとの実装先の意味（SQLite の文字列の比較・SQL Server の time の範囲・NaN・PostgreSQL の時差の制限など。区切り TF のフェーズ 1 の分析）を docs に書いてから足す",
                     "`CodegenConfig/Cases`（行 `diag-query-type-check-rejects-*`）"
+                ),
+                NotGenerated.Accepted(
+                    "date-time-only-families",
+                    "DateOnly・TimeOnly の列",
+                    "型マッパーは DateOnly・TimeOnly を作らない（5 方言とも date は DateTime、time は TimeSpan。Oracle は TIME を持たない）。型の検査の族は寛容側の受け皿で、生成される列にもパラメータの型トークン（列と同じマッパーを通る）にも現れない",
+                    "`Dialect/Types`"
+                ),
+                NotGenerated.Accepted(
+                    "binary-ordering-columns",
+                    "バイナリの列での並び替え（主キーより前の並び）",
+                    "docs は実装先をまたぐバイナリの並びを約束していない（SQL Server は短い側を 0x00 で詰めて比べる）",
+                    "`Dsl/SqlServer`"
                 ),
                 NotGenerated.Accepted(
                     "docs-unwritable-forms",
@@ -70,6 +82,12 @@ internal static class DslFuzzNotGenerated
                     "oracle-empty-string-in-not-null-columns",
                     "Oracle の単位の NOT NULL の文字列の列に入れる空文字列",
                     "Oracle は空文字列を NULL として持ち、NOT NULL の列への空文字列の挿入を断る（ORA-01400。docs の「大文字小文字・空白・日付部品」の節の Oracle の段落）。単位の行が入らず照合が始まらないので、NOT NULL の列の値の池から空文字列を外す。NULL を許す列は空文字列を持ち、読み戻すと NULL になる形を照合する",
+                    "`Dsl/Oracle`"
+                ),
+                NotGenerated.Accepted(
+                    "oracle-empty-binary-in-not-null-columns",
+                    "Oracle の単位の NOT NULL のバイナリの列に入れる空の配列",
+                    "Oracle は空のバイナリを NULL として持ち、NOT NULL の列への空の挿入を断る（docs の「大文字小文字・空白・日付部品」の節のバイナリの段落。空文字列と同じ）。単位の行が入らず照合が始まらないので、NOT NULL の列の値の池から空の配列を外す。NULL を許す列は空の配列を持ち、読み戻すと NULL になる形を照合する",
                     "`Dsl/Oracle`"
                 ),
                 NotGenerated.Accepted(

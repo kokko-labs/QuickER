@@ -152,6 +152,16 @@ public class DslConditionFuzzTests
             coverageUnits.Add(
                 (DslFuzzUnits.PlainCoverage(DialectNames.MySql), MySqlTarget, InvariantCultureName)
             );
+            coverageUnits.AddRange(
+                DslFuzzUnits
+                    .FamiliesCoverage(DialectNames.Sqlite)
+                    .Select(unit => (unit, SqliteTarget, InvariantCultureName))
+            );
+            coverageUnits.AddRange(
+                DslFuzzUnits
+                    .FamiliesCoverage(DialectNames.MySql)
+                    .Select(unit => (unit, MySqlTarget, InvariantCultureName))
+            );
 
             foreach (var culture in InMemoryCultures)
             {

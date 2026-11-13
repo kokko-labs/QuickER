@@ -577,6 +577,9 @@ A value object limited to the shape of a GUID has no partial-match method, and a
 QuickER warns and skips that query.
 An exact `LIKE` (no `%`) and `=` work.
 
+A DSL condition on a `bool` or binary (`byte[]`) column can use only `=`, `<>`, `IN`, and `IS [NOT] NULL` against a parameter.
+The DSL has no literal for these types, and QuickER warns and skips a query that uses an ordering comparison (`<` and the like) on them.
+
 The result type name of a projection becomes a class in the generated namespace, so it must not collide with another type there.
 QuickER refuses a name that is a generated class or interface (`OrderEntity`, `IOrderRepository`, a value object such as `AmountValue`), a runtime type, or a library type the generated code uses by its simple name (`Task`, `Expression`, and the like).
 The error names the query and the type.
@@ -630,6 +633,18 @@ A comparison with an empty string held in a variable (`var empty = "";`) compare
 The same comparison written with a literal in hand-written LINQ is translated otherwise: `x.Name == ""` becomes `IS NULL` and matches the rows holding `NULL`, while `x.Name == empty` with a variable matches no row.
 `string.IsNullOrEmpty` gives the C# answer on the value read back.
 A string literal in a mini DSL condition is generated as a variable, so a named query compares as a variable does.
+
+Equality and `IN` on a binary (`byte[]`) column compare the bytes.
+The in-memory implementation does the same: it compares the contents of the arrays, not the references.
+SQL Server treats two values that differ only in trailing `0x00` bytes as equal, because it pads the shorter value with `0x00` before comparing.
+A fixed-length column (`binary(n)`) stores a value padded with `0x00` to `n` bytes and returns it padded.
+The QuickER Repository compares the lengths as well, so `0x01` and `0x0100` are different values, as they are to C# on the value read back.
+
+> **Known limitation**: the EF Core Repository on SQL Server keeps the SQL Server comparison and treats values that differ only in trailing `0x00` bytes as equal (`x.Data == value` with `value` holding `0x01` also matches a row holding `0x0100`).
+> EF Core writes the comparison itself, and QuickER has no way to change the form of the SQL it emits.
+
+Oracle stores an empty binary value as `NULL`, as it does an empty string.
+A comparison with an empty `byte[]` compares with `NULL`: `x.Data != empty` matches no row, and an `IN` or `NOT IN` list holding an empty array behaves as if it held `NULL`.
 
 Date parts (`Year`, `Month`, …) are translated only when the member is read from a `DateTime`, `DateOnly`, or `DateTimeOffset` column, nullable forms included.
 A property of the same name on any other type is not a date part, such as one added to a value object through a partial declaration.
