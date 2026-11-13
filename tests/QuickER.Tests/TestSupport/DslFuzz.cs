@@ -48,6 +48,12 @@ public enum DslClr
 
     /// <summary>GuidKey の値オブジェクト（文字列の主キー）</summary>
     GuidKey,
+
+    /// <summary>bool（リテラルは書けず、パラメータとの等値・IN・NULL 判定だけ）</summary>
+    Boolean,
+
+    /// <summary>byte[]（リテラルは書けず、パラメータとの等値・IN・NULL 判定だけ。バイトの列で比べる）</summary>
+    Binary,
 }
 
 /// <summary>総当たりの図の列</summary>
@@ -573,8 +579,22 @@ public enum DslCaseRule
     /// <c>''</c> もパラメータの <c>""</c> と同じに扱う。手書きの LINQ のリテラルの <c>""</c>（<c>IS NULL</c> へ変換される）は総当たりの
     /// 外で、docs の事実として書くだけ。NULL の行は C# の意味のまま（EF Core が NULL の行の補償を付ける）。<c>""</c> のパターンの
     /// 文字列一致は docs が約束していないので、NULL でない行を判定しない。読み戻した値の空文字列は既に NULL になっている。
+    /// 空のバイナリも同じ規則に当たる（docs のバイナリの段落：Oracle は空のバイナリを NULL として持つ）。
     /// </remarks>
     Oracle,
+}
+
+/// <summary>バイナリの列の比べ方（実装先ごと。docs の「大文字小文字・空白・日付部品」の節のバイナリの段落の写し）</summary>
+public enum DslBinaryRule
+{
+    /// <summary>バイトの列のまま比べる（長さも比べる）</summary>
+    Bytes,
+
+    /// <summary>
+    /// 末尾の 0x00 だけが違う値を等しいとみなす（SQL Server の EF Core 版 Repository。SQL Server は短い側を 0x00 で詰めて比べる）。
+    /// 読み戻した値と比べる値の両方の末尾の 0x00 を外して比べる
+    /// </summary>
+    TrailingZerosIgnored,
 }
 
 /// <summary>
@@ -761,24 +781,46 @@ public static class DslFuzz
     /// <param name="row">列名 → 実装先から読み戻した値（VO は開いた値）</param>
     /// <param name="caseRule">文字列一致の大文字小文字の扱い</param>
     /// <param name="negate">外側の NOT（ド・モルガンで押し下げる）</param>
+    /// <param name="binaryRule">バイナリの列の比べ方（実装先ごと。既定はバイトの列のまま）</param>
     public static bool? Evaluate(
         DslNode node,
         IReadOnlyDictionary<string, object?> row,
         DslCaseRule caseRule,
-        bool negate = false
+        bool negate = false,
+        DslBinaryRule binaryRule = DslBinaryRule.Bytes
     ) =>
         node switch
         {
-            DslNot not => Evaluate(not.Inner, row, caseRule, !negate),
+            DslNot not => Evaluate(not.Inner, row, caseRule, !negate, binaryRule),
             DslAnd and => negate
-                ? Any(and.Items.Select(item => Evaluate(item, row, caseRule, true)))
-                : All(and.Items.Select(item => Evaluate(item, row, caseRule, false))),
+                ? Any(and.Items.Select(item => Evaluate(item, row, caseRule, true, binaryRule)))
+                : All(and.Items.Select(item => Evaluate(item, row, caseRule, false, binaryRule))),
             DslOr or => negate
-                ? All(or.Items.Select(item => Evaluate(item, row, caseRule, true)))
-                : Any(or.Items.Select(item => Evaluate(item, row, caseRule, false))),
-            DslAtom atom => EvaluateAtom(atom, row[atom.Column.Name], caseRule, negate),
+                ? All(or.Items.Select(item => Evaluate(item, row, caseRule, true, binaryRule)))
+                : Any(or.Items.Select(item => Evaluate(item, row, caseRule, false, binaryRule))),
+            DslAtom atom => EvaluateAtom(
+                atom,
+                BinaryUnder(row[atom.Column.Name], atom.Column, binaryRule),
+                caseRule,
+                negate,
+                binaryRule
+            ),
             _ => throw new ArgumentOutOfRangeException(nameof(node)),
         };
+
+    /// <summary>
+    /// バイナリの列の値を、実装先の比べ方の形へ写す（<see cref="DslBinaryRule.TrailingZerosIgnored"/> は末尾の 0x00 を外す。
+    /// ほかの列と規則はそのまま）
+    /// </summary>
+    private static object? BinaryUnder(object? value, DslColumn column, DslBinaryRule rule) =>
+        rule == DslBinaryRule.TrailingZerosIgnored
+        && column.Clr == DslClr.Binary
+        && value is byte[] bytes
+            ? bytes.AsSpan().TrimEnd((byte)0).ToArray()
+            : value;
+
+    /// <summary>Oracle が NULL として持つ空の値か（空文字列と空のバイナリ）</summary>
+    private static bool IsOracleEmpty(object? value) => value is "" or byte[] { Length: 0 };
 
     /// <summary>Kleene の AND</summary>
     private static bool? All(IEnumerable<bool?> values)
@@ -820,7 +862,8 @@ public static class DslFuzz
         DslAtom atom,
         object? value,
         DslCaseRule caseRule,
-        bool negate
+        bool negate,
+        DslBinaryRule binaryRule
     )
     {
         switch (atom)
@@ -828,10 +871,10 @@ public static class DslFuzz
             // 比較と NOT は C# の lifted な意味（NULL は非 null 値と等しくない＝<> は真・順序比較は偽。NOT はそのまま否定）
             case DslCompare compare:
             {
-                var operand = OperandValue(compare.Operand);
+                var operand = BinaryUnder(OperandValue(compare.Operand), atom.Column, binaryRule)!;
 
-                // Oracle：空文字列との比較は NULL との比較（UNKNOWN）で、NULL でない行はどちらの向きでも一致しない
-                if (caseRule == DslCaseRule.Oracle && value is not null && operand is "")
+                // Oracle：空文字列・空のバイナリとの比較は NULL との比較（UNKNOWN）で、NULL でない行はどちらの向きでも一致しない
+                if (caseRule == DslCaseRule.Oracle && value is not null && IsOracleEmpty(operand))
                 {
                     return false;
                 }
@@ -846,21 +889,22 @@ public static class DslFuzz
             // 一致する・空のリストは IN が偽で NOT IN が真）
             case DslIn @in:
             {
-                // Oracle：空文字列の要素は NULL で、ほかの要素に一致しない NULL でない行は IN でも NOT IN でも一致しない
+                var values = @in
+                    .List.Values.Select(v => BinaryUnder(v, atom.Column, binaryRule))
+                    .ToList();
+
+                // Oracle：空文字列・空のバイナリの要素は NULL で、ほかの要素に一致しない NULL でない行は IN でも NOT IN でも一致しない
                 if (
                     caseRule == DslCaseRule.Oracle
                     && value is not null
-                    && @in.List.Values.Any(v => v is "")
-                    && !@in.List.Values.Any(v => v is not null and not "" && SameValue(value, v))
+                    && values.Any(IsOracleEmpty)
+                    && !values.Any(v => v is not null && !IsOracleEmpty(v) && SameValue(value, v))
                 )
                 {
                     return false;
                 }
 
-                return Xor(
-                    InUnder(value, @in.List.Values, caseRule, atom.Column),
-                    @in.Negated ^ negate
-                );
+                return Xor(InUnder(value, values, caseRule, atom.Column), @in.Negated ^ negate);
             }
 
             // 文字列一致は NULL の行がどちらの向きでも一致しない
@@ -1252,6 +1296,9 @@ public static class DslFuzz
         {
             (string a, string b) => string.CompareOrdinal(a, b),
             (Guid a, Guid b) => a.Equals(b) ? 0 : 1,
+            (bool a, bool b) => a.CompareTo(b),
+            // バイナリは等しいかだけを比べる（順序の比較は型の検査が断り、並び替えの列にもしない）
+            (byte[] a, byte[] b) => a.AsSpan().SequenceEqual(b) ? 0 : 1,
             (DateTime a, DateTime b) => a.CompareTo(b),
             _ => Convert
                 .ToDecimal(value, CultureInfo.InvariantCulture)
@@ -1331,6 +1378,21 @@ public static class DslFuzz
                 "ffffffff-ffff-ffff-ffff-ffffffffffff",
                 "6f9619ff-8b86-d011-b42d-00c04fc964f'",
             ],
+            DslClr.Boolean => [false, true],
+            // 末尾の 0x00 だけが違う組（01・0100・010000、空と 00）を持つ（SQL Server は短い側を 0x00 で詰めて比べる＝docs の
+            // バイナリの段落）。長さは族の単位のバイナリの列（4 バイト）に収まる
+            DslClr.Binary =>
+            [
+                Array.Empty<byte>(),
+                new byte[] { 0x00 },
+                new byte[] { 0x01 },
+                new byte[] { 0x01, 0x00 },
+                new byte[] { 0x01, 0x00, 0x00 },
+                new byte[] { 0x00, 0x01 },
+                new byte[] { 0xFF },
+                new byte[] { 0x01, 0x02, 0x03 },
+                new byte[] { 0x41 },
+            ],
             _ => throw new ArgumentOutOfRangeException(nameof(clr)),
         };
 
@@ -1354,6 +1416,8 @@ public static class DslFuzz
             DslClr.Decimal => "decimal(10,2)",
             DslClr.DateTime => "datetime",
             DslClr.Guid => "guid",
+            DslClr.Boolean => "boolean",
+            DslClr.Binary => "binary(4)",
             _ => throw new ArgumentOutOfRangeException(nameof(clr), clr, "型トークンの無い種類"),
         };
 

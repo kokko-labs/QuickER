@@ -236,7 +236,8 @@ public abstract class TranslatorParityEfCoreRuntimeTestsBase
         var stored = await TranslatorParityEfCoreBinding.QueryAsync(repository, null, Ct);
         stored.Should().HaveCount(count);
 
-        var compiled = predicate.Compile();
+        // バイナリは docs のとおりバイトの列で比べる（TranslatorParityRuntimeTestsBase.ComparingBytes）
+        var compiled = TranslatorParityRuntimeTestsBase.ComparingBytes(predicate).Compile();
         var expected = stored.Where(e => (bool)compiled.DynamicInvoke(e)!).Select(KeyOf).ToList();
         var actual = (await TranslatorParityEfCoreBinding.QueryAsync(repository, predicate, Ct))
             .Select(KeyOf)

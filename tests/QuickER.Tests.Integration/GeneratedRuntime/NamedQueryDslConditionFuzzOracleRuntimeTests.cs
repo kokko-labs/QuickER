@@ -43,6 +43,7 @@ public sealed class NamedQueryDslConditionFuzzOracleRuntimeTests(OracleContainer
             [
                 DslFuzzUnits.Coverage(DialectNames.Oracle),
                 DslFuzzUnits.PlainCoverage(DialectNames.Oracle),
+                .. DslFuzzUnits.FamiliesCoverage(DialectNames.Oracle),
             ],
             Ct
         );

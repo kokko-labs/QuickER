@@ -201,10 +201,7 @@ public sealed partial class DslFuzzGenerator(
         }
 
         // 射影のフィールドを非 NULL と指定する形（NULL 許容の参照型・値オブジェクトの列）
-        var pinned = columns
-            .Skip(1)
-            .Where(column => column.Nullable && (column.IsString || valueObjects))
-            .ToList();
+        var pinned = columns.Skip(1).Where(CanPinNonNull).ToList();
 
         for (var i = 0; i < pinned.Count; i++)
         {
@@ -339,9 +336,7 @@ public sealed partial class DslFuzzGenerator(
         }
 
         // 射影の非 NULL 指定（射影する列は NULL 許容の参照型か値オブジェクトの列＝Queries と同じ条件）
-        var pinned = columns
-            .Skip(1)
-            .First(column => column.Nullable && (column.IsString || valueObjects));
+        var pinned = columns.Skip(1).First(CanPinNonNull);
         var pinnedChunks = CoverageChunks(forms, withFit);
 
         for (var i = 0; i < pinnedChunks.Count; i++)
@@ -399,6 +394,12 @@ public sealed partial class DslFuzzGenerator(
             )
             .ToList();
     }
+
+    /// <summary>
+    /// 射影のフィールドを非 NULL と指定できる列か（NULL 許容の参照型＝文字列・バイナリの列と、値オブジェクトの列）
+    /// </summary>
+    private bool CanPinNonNull(DslColumn column) =>
+        column.Nullable && (column.IsString || column.Clr == DslClr.Binary || valueObjects);
 
     /// <summary>番号で回す綴り（大文字・小文字・先頭だけ大文字の順）</summary>
     private static DslSpelling SpellingAt(int index) =>
@@ -1200,13 +1201,15 @@ public sealed partial class DslFuzzGenerator(
     /// <summary>
     /// リストに null を入れられるか（要素が参照型のリストだけ）：値オブジェクトなしの文字列の列のリスト（<c>IReadOnlyList&lt;string&gt;</c>）と、
     /// 値オブジェクトありで列で型付けしたリスト（<c>IReadOnlyList&lt;値オブジェクト&gt;</c>）
+    /// バイナリの列のリスト（<c>IReadOnlyList&lt;byte[]&gt;</c>）も要素が参照型なので null を持てる。
     /// </summary>
     /// <remarks>
     /// 値型のリスト（<c>IReadOnlyList&lt;int&gt;</c> など）は null を持てない。値オブジェクトの列へ型トークンで型付けしたリストは
     /// メソッドの冒頭で <c>Create</c> へ渡して持ち上げ、値オブジェクトは null を包まず null の入力を検証エラーにする
     /// （docs の値オブジェクトの節）ので、null を入れない。
     /// </remarks>
-    private bool CanHoldNull(DslColumn column) => valueObjects || column.IsString;
+    private bool CanHoldNull(DslColumn column) =>
+        valueObjects || column.IsString || column.Clr == DslClr.Binary;
 
     /// <summary>リストの形を作れる列か（null を含む形は <see cref="CanHoldNull"/> の列だけ）</summary>
     private bool CanHoldList(DslColumn column, string shape) =>

@@ -994,11 +994,12 @@ public static class DslFuzzDimensions
             }
         }
 
-        // 日時と Guid はリテラルを書けない（型の検査は文字列リテラルを文字列の列だけ・数値リテラルを数値の列だけに許す）
+        // 日時・Guid・bool・バイナリはリテラルを書けない（DSL に真偽値・日時・バイナリのリテラルは無く、型の検査は文字列リテラルを
+        // 文字列の列だけ・数値リテラルを数値の列だけに許す）
         if (
             shape.EndsWith("-literal", StringComparison.Ordinal)
             && shape.StartsWith("compare-", StringComparison.Ordinal)
-            && kind is DslClr.DateTime or DslClr.Guid
+            && kind is DslClr.DateTime or DslClr.Guid or DslClr.Boolean or DslClr.Binary
         )
         {
             return false;

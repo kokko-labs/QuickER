@@ -146,6 +146,11 @@ public static class TranslatorParityPredicateRows
         var decimalsForBigint = new List<decimal> { 1m, 1.5m, 10000000000000000m };
         var decimalsForInt = new List<decimal?> { 2m, 1.5m, null };
         decimal?[] decimalArrayForInt = [2m, 1.5m, null];
+        byte[] bin01 = [0x01];
+        byte[] bin0100 = [0x01, 0x00];
+        byte[] bin01000000 = [0x01, 0x00, 0x00, 0x00];
+        List<byte[]?> binaries = [new byte[] { 0x01 }, new byte[] { 0xFF }];
+        List<byte[]?> binariesWithNull = [new byte[] { 0x01 }, null];
 
         List<ScenarioRow<TranslatorParityPredicate>> rows =
         [
@@ -584,6 +589,57 @@ public static class TranslatorParityPredicateRows
                 "varchar-contains-non-ascii-variable",
                 "Unicode でない列と ASCII の外の文字の変数の Contains は、化けた '?' を含む行に一致しない",
                 x => x.Ansi != null && x.Ansi.Contains(nonAsciiPart)
+            ),
+            // ---- バイナリ（docs のバイナリの段落：バイトの列で比べ、SQL Server の QuickER 版は長さも比べる） ----
+            Probe(
+                "binary-equals-value",
+                "バイナリの列と値の == は、末尾の 0x00 だけが違う行（0x0100・0x01000000）に一致しない",
+                x => x.Bin == bin01
+            ),
+            Probe(
+                "binary-not-equals-value",
+                "バイナリの列と値の != は、末尾の 0x00 だけが違う行と NULL の行に一致する",
+                x => x.Bin != bin01
+            ),
+            Probe(
+                "binary-equals-trailing-zero-value",
+                "末尾が 0x00 の値との == は、0x00 の数まで同じ行だけに一致する",
+                x => x.Bin == bin0100
+            ),
+            Probe(
+                "binary-fixed-equals-short-value",
+                "固定長の列（0x00 で詰めて持つ）と短い値の == は、詰めた値と違うのでどの行にも一致しない",
+                x => x.BinFixed == bin01
+            ),
+            Probe(
+                "binary-fixed-equals-padded-value",
+                "固定長の列と、詰めた長さの値の == は、詰めた値が同じ行に一致する",
+                x => x.BinFixed == bin01000000
+            ),
+            Probe(
+                "binary-in-list",
+                "バイナリの列の IN は、要素ごとに長さまで同じ行だけに一致する",
+                x => binaries.Contains(x.Bin)
+            ),
+            Probe(
+                "binary-not-in-list",
+                "バイナリの列の NOT IN は、末尾の 0x00 だけが違う行と NULL の行に一致する",
+                x => !binaries.Contains(x.Bin)
+            ),
+            Probe(
+                "binary-in-list-with-null",
+                "null を含むバイナリのリストの IN は、長さまで同じ行と NULL の行に一致する",
+                x => binariesWithNull.Contains(x.Bin)
+            ),
+            Probe(
+                "binary-column-equals-column",
+                "バイナリの列どうしの == は、長さまで同じ行と両方 NULL の行に一致する",
+                x => x.Bin == x.BinFixed
+            ),
+            Probe(
+                "binary-column-not-equals-column",
+                "バイナリの列どうしの != は、末尾の 0x00 だけが違う行と片方だけ NULL の行に一致する",
+                x => x.Bin != x.BinFixed
             ),
             // ---- bool 列の短縮形と否定の深さ ----
             Probe("bool-column", "bool 列（col = 1）", x => x.IsActive),

@@ -36,6 +36,11 @@ public static class DslFuzzUnits
             ],
             valueObjects: true
         );
+
+        foreach (var unit in Families("sqlite", DialectNames.Sqlite, seed))
+        {
+            yield return unit;
+        }
     }
 
     /// <summary>
@@ -56,6 +61,11 @@ public static class DslFuzzUnits
             valueObjects: true
         );
         yield return Build("sqlserver-ansi", seed, SqlServerAnsiColumns(), valueObjects: false);
+
+        foreach (var unit in Families("sqlserver", DialectNames.SqlServer, seed))
+        {
+            yield return unit;
+        }
     }
 
     /// <summary>
@@ -192,6 +202,11 @@ public static class DslFuzzUnits
             ],
             valueObjects: true
         );
+
+        foreach (var unit in Families("postgresql", DialectNames.PostgreSql, seed))
+        {
+            yield return unit;
+        }
     }
 
     /// <summary>
@@ -211,6 +226,11 @@ public static class DslFuzzUnits
             ],
             valueObjects: true
         );
+
+        foreach (var unit in Families("oracle", DialectNames.Oracle, seed))
+        {
+            yield return unit;
+        }
     }
 
     /// <summary>MySQL の単位（符号なし整数・sbyte。インメモリと、Integration の派生が実 DB の EF Core 版で流す）</summary>
@@ -218,6 +238,11 @@ public static class DslFuzzUnits
     {
         yield return Build("mysql-plain", seed, MySqlColumns(), valueObjects: false);
         yield return Build("mysql-vo", seed, MySqlColumns(), valueObjects: true);
+
+        foreach (var unit in Families("mysql", DialectNames.MySql, seed))
+        {
+            yield return unit;
+        }
     }
 
     /// <summary>網羅の単位の乱数の種（網羅の単位は種の列の外で、いつも同じ値とパラメータ名を作る）</summary>
@@ -479,6 +504,103 @@ public static class DslFuzzUnits
         {
             ((Dictionary<string, object?>)rows[2 + i])["s"] = values[i];
         }
+    }
+
+    /// <summary>
+    /// 列の型の族（bool・バイナリ）の種の単位（値オブジェクトなし・あり）。各方言の種の単位の列挙の末尾に足す
+    /// </summary>
+    /// <remarks>
+    /// 族の列は既存の種の単位の列に足さず、この単位だけが持つ（既存の単位の行・クエリの乱数の引き方と、種の指紋の要約の既存の行を
+    /// 変えないため）。列は <see cref="FamiliesColumns"/>。
+    /// </remarks>
+    private static IEnumerable<DslFuzzUnit> Families(string prefix, string dbms, int seed)
+    {
+        yield return Build($"{prefix}-families", seed, FamiliesColumns(dbms), valueObjects: false);
+        yield return Build(
+            $"{prefix}-families-vo",
+            seed,
+            FamiliesColumns(dbms),
+            valueObjects: true
+        );
+    }
+
+    /// <summary>
+    /// 列の型の族（bool・バイナリ）の網羅の単位（値オブジェクトあり・なし。種に依らない。名前は <c>coverage-{方言}-families</c> と
+    /// <c>coverage-{方言}-families-plain</c>）：族の列の原子のクエリと <see cref="DslFuzzGenerator.CoverageQueries"/>・パラメータの
+    /// 使い回しと並び替えのクエリで、族の列の種類の水準を種に依らず埋める
+    /// </summary>
+    /// <remarks>
+    /// 既存の網羅の単位（<see cref="Coverage"/>・<see cref="PlainCoverage"/>）の列は変えない（行の乱数の引き方が変わるため）。
+    /// </remarks>
+    /// <param name="dbms">方言（<see cref="DialectNames"/> の SQLite・SQL Server・MySQL・PostgreSQL・Oracle）</param>
+    public static IEnumerable<DslFuzzUnit> FamiliesCoverage(string dbms)
+    {
+        foreach (var valueObjects in new[] { true, false })
+        {
+            var columns = FamiliesColumns(dbms);
+            var generator = new DslFuzzGenerator(CoverageSeed, valueObjects);
+            var rows = generator.Rows(columns, RowCount);
+            List<DslQuery> queries =
+            [
+                .. generator.CoverageQueries(
+                    columns,
+                    columns.Skip(1).Select(column => column.Name).ToArray()
+                ),
+            ];
+            var withPartners = AddPartners(columns, rows);
+
+            yield return new DslFuzzUnit(
+                $"{CoveragePrefix}{dbms}-families{(valueObjects ? "" : "-plain")}",
+                TableName,
+                withPartners,
+                rows,
+                [.. queries, .. ReuseAndOrdering(withPartners, queries, valueObjects)],
+                valueObjects,
+                CoverageSeed
+            );
+        }
+    }
+
+    /// <summary>
+    /// 列の型の族の列：主キー（bigint）・bool（NULL 許容と NOT NULL）・可変長のバイナリ（NULL 許容と NOT NULL）・固定長のバイナリ
+    /// （NULL 許容。固定長を持たない PostgreSQL・Oracle は可変長）・並び替えと合成の相方の整数の列
+    /// </summary>
+    /// <remarks>
+    /// バイナリの列の長さは 4（値の池はそれより短い）。SQL Server・MySQL の固定長の列は値を 0x00 で詰めて読み戻す（docs のバイナリの
+    /// 段落）。Oracle の NOT NULL のバイナリの列の値の池は空の配列を持たない（Oracle は空のバイナリを NULL として持ち、NOT NULL の列は
+    /// 断る＝文字列の空文字列と同じ。NULL を許す列は空を持ち、読み戻すと NULL になる）。
+    /// </remarks>
+    private static DslColumn[] FamiliesColumns(string dbms)
+    {
+        var (key, boolean, varbinary, fixedBinary, integer) = dbms switch
+        {
+            DialectNames.Sqlite => ("INTEGER", "BIT", "VARBINARY(4)", "BINARY(4)", "int"),
+            DialectNames.SqlServer => ("bigint", "bit", "varbinary(4)", "binary(4)", "int"),
+            DialectNames.PostgreSql => ("bigint", "boolean", "bytea", "bytea", "integer"),
+            DialectNames.MySql => ("bigint", "tinyint(1)", "varbinary(4)", "binary(4)", "int"),
+            DialectNames.Oracle => ("NUMBER(19)", "NUMBER(1)", "RAW(4)", "RAW(4)", "NUMBER(10)"),
+            _ => throw new ArgumentOutOfRangeException(nameof(dbms), dbms, null),
+        };
+        return
+        [
+            new("id", key, DslClr.Int64, Nullable: false, PrimaryKey: true),
+            new("b", boolean, DslClr.Boolean, Nullable: true),
+            new("bn", boolean, DslClr.Boolean, Nullable: false),
+            new("bin", varbinary, DslClr.Binary, Nullable: true),
+            new("binf", fixedBinary, DslClr.Binary, Nullable: true),
+            dbms == DialectNames.Oracle
+                ? new("binn", varbinary, DslClr.Binary, Nullable: false)
+                {
+                    Values =
+                    [
+                        .. DslFuzz
+                            .ValuePool(DslClr.Binary)
+                            .Where(value => value is not byte[] { Length: 0 }),
+                    ],
+                }
+                : new("binn", varbinary, DslClr.Binary, Nullable: false),
+            new("i32", integer, DslClr.Int32, Nullable: true),
+        ];
     }
 
     /// <summary>射影の結果の型名を、生成物の既存の型名と衝突させる単位（行なし＝コンパイルだけ）</summary>

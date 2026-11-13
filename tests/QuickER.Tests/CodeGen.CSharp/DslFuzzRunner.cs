@@ -90,12 +90,14 @@ internal static class DslFuzzBackends
 /// <param name="NullOrder">並び替えで NULL を置く位置（docs のインメモリの節「実 DB との既知の乖離」から写す）</param>
 /// <param name="OpenAsync">検証コードの型と図から、空のテーブルを用意した DI のコンテナを開く</param>
 /// <param name="Excludes">この実装先で流さないクエリ（理由は判定を定義した側の XmlDoc に書く）</param>
+/// <param name="BinaryRule">バイナリの列の比べ方（docs の「大文字小文字・空白・日付部品」の節のバイナリの段落から写す）</param>
 internal sealed record DslFuzzBackend(
     string Name,
     DslCaseRule Rule,
     DslNullOrder NullOrder,
     Func<Type, ErDiagram, CancellationToken, Task<DslFuzzSession>> OpenAsync,
-    Func<DslQuery, bool>? Excludes = null
+    Func<DslQuery, bool>? Excludes = null,
+    DslBinaryRule BinaryRule = DslBinaryRule.Bytes
 ) : IMatrixAdapter
 {
     /// <summary>実装先の軸の値（名前）</summary>

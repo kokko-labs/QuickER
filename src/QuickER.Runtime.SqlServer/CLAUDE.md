@@ -80,6 +80,17 @@ SQL Server 方言エンジン（QuickER 版 Repository の ADO 実装）の固�
 - LIKE のパターンは列の型の可変長形（nchar→nvarchar・char→varchar）で束縛する。固定長で束縛するとパターン自体が空白で詰められて一致しない。
 - ガード：`TranslatorParitySqlServerRuntimeTests`（述語の表 `TranslatorParityPredicateRows` を実 SQL Server で C# の意味論と突き合わせる）。値オブジェクトの列の IN は `BackendParitySqlServerRuntimeTests`（ケース `value-object-in-null-semantics`）。mutation 実証済み（可変長束縛・空と空白の判定）。
 
+## バイナリの比較
+
+- SQL Server は 2 つのバイナリを比べる前に短い側を 0x00 で詰める（`0x01 = 0x0100` が真）。固定長の列（`binary(n)`）は値を 0x00 で `n` バイトに詰めて持ち、詰めたまま返す。
+- 翻訳器（`_05_QueryPipeline.scriban` の SQL Server の枝）は、バイナリ（`byte[]` と、それを包む値オブジェクト）の `==`・`!=`・IN・NOT IN に長さの比較を足す（`BinaryComparison`・`BinaryEquals`）。
+  - 列と値：`(col = @p AND DATALENGTH(col) = DATALENGTH(@p))`、否定は `(col <> @p OR DATALENGTH(col) <> DATALENGTH(@p) OR col IS NULL)`。列どうしは両方 NULL・片方だけ NULL の補償をほかの型と同じに付ける。
+  - IN は要素ごとの等値の OR。NOT IN はその NOT（NULL でない列では要素の比較がどれも真か偽なので NOT で足りる）に、NULL の列の扱いをほかの型の IN と同じに付ける。
+  - `col = @p` を残すので、列の索引は使える（長さの比較は絞った後の行に当てる）。
+- 比べる値は可変長（`varbinary`）で束縛する（`AddParameter` の `variableLength`。LIKE のパターンと同じ経路）。固定長の列の型（`binary(n)`）で束縛すると、パラメータが 0x00 で `n` バイトに詰められ、`DATALENGTH` も `n` になって長さの比較が効かない（実測：`binary(4)` で束縛した `0x01` は `0x01000000`・長さ 4）。
+- 外すと、`0x01` の条件が `0x0100`・`0x01000000` の行に当たり、C#・インメモリ・ほかの DB と答えが割れる。EF Core 版は SQL の形を変えられないので SQL Server の比べ方のまま（docs の既知の割り切り）。`Equals` のメソッドの形は対象にしない（ほかの型と同じく素の `a = b`。上の「式の翻訳」の範囲の外）。
+- ガード：簡易 DSL の総当たりの族の単位（`Dsl/SqlServer`）と、述語の表の行 `binary-*`（`table:TranslatorParityPredicates`。EF Core 版 SQL Server は理由つきの `Known`）。
+
 ## Save フックが書いた blob の版の読み直し
 
 共通の規則は `src/QuickER.Runtime/CLAUDE.md`「Save フックが無制限バイナリ列を書いたとき」。
