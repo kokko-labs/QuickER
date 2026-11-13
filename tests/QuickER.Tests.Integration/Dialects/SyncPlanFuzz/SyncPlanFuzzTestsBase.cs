@@ -20,7 +20,8 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 /// 1 つの種の流れと表明の一覧は <see cref="SyncPlanFuzzRunner"/>、図・変更・選び方の作り方は
 /// <see cref="SyncPlanFuzzGenerator"/>。生成器は自己参照・同じ列に外部キー 2 本・同じ列ペアに 2 本・計算列・
 /// 大文字小文字だけ違う名前・名前付きの一意制約などの形（<see cref="FuzzShape.Required"/>）を一定の確率で必ず混ぜ、
-/// 種の集合全体でそれらが全部出たことも表明する（生成器が形を作らなくなったら赤）。
+/// 種の集合全体でそれらが全部出たことも表明する（生成器が形を作らなくなったら赤）。普段の種が少ない方言は、普段の種に
+/// 出ない形を形の種（<see cref="ShapeSeeds"/>・<see cref="SyncPlanShapeSeeds"/>）で決定的に出して表明に足す。
 /// </para>
 /// <para>
 /// 乱数の種は固定（1 から方言の既定の種の数まで。夜間はその方言の夜間の数まで）。既知の失敗（<see cref="SyncPlanFuzzKnownFailures"/>）は形で除き、失敗した種は種・方言・変更・選んだ項目・スクリプトを
@@ -47,12 +48,17 @@ public abstract class SyncPlanFuzzTestsBase
     private const int DetailedFailures = 8;
 
     /// <summary>必須の形（<see cref="FuzzShape.Required"/>）が全部出たことを表明する最小の種の数</summary>
-    private const int ShapeCoverageMinimumSeeds = 50;
+    internal const int ShapeCoverageMinimumSeeds = 50;
 
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
     /// <summary>この方言で流す種の決め方（普段と夜間の既定の種の数）</summary>
     internal abstract SeedSettings SeedSettings { get; }
+
+    /// <summary>
+    /// この方言の形の種（普段の種の範囲の外で、普段の種に出ない実 DB の必須の形を出す種。<see cref="SyncPlanShapeSeeds"/>）
+    /// </summary>
+    internal virtual IReadOnlyList<FuzzShapeSeed> ShapeSeeds => [];
 
     /// <summary>方言の既定の種の数から、流す種の決め方を作る（1 から・単独の種は <see cref="SeedVariable"/>）</summary>
     /// <param name="regularCount">方言の普段の既定の種の数</param>
@@ -138,6 +144,7 @@ public abstract class SyncPlanFuzzTestsBase
         var outcomes = new List<FuzzSeedOutcome>();
         var scenarioOutcomes = new List<FuzzSeedOutcome>();
         var coverageOutcomes = new List<FuzzSeedOutcome>();
+        var shapeSeedOutcomes = new List<FuzzSeedOutcome>();
         var coverage = new CoverageCounter(SyncPlanFuzzDimensions.Table);
 
         try
@@ -208,19 +215,44 @@ public abstract class SyncPlanFuzzTestsBase
                 outcomes.Add(outcome);
                 SyncPlanFuzzDimensions.Observe(coverage, outcome);
             }
+
+            // 形の種は、流した種の範囲に無いものだけを乱数の種の後に流す（単独の種では流さない）
+            foreach (var seed in SyncPlanShapeSeeds.ToRun(plan, ShapeSeeds))
+            {
+                var outcome = await SyncPlanFuzzRunner.RunGuardedAsync(
+                    dialect.Name,
+                    seed,
+                    () => SyncPlanFuzzRunner.RunAsync(dialect, seed, Ct)
+                );
+                shapeSeedOutcomes.Add(outcome);
+                SyncPlanFuzzDimensions.Observe(coverage, outcome);
+            }
         }
         finally
         {
             (dialect as IDisposable)?.Dispose();
         }
 
-        var failures = outcomes.Where(o => o.Violations.Count > 0).ToList();
+        // 形の種は普通の種と同じく既知の失敗の照合へ渡す（範囲は方言名・再現は単独の種の変数）
+        var failures = outcomes
+            .Concat(shapeSeedOutcomes)
+            .Where(o => o.Violations.Count > 0)
+            .ToList();
         var output = TestContext.Current.TestOutputHelper;
         output?.WriteLine(
             $"{dialect.Name}: seeds {outcomes.Count}, committed {outcomes.Count(o => o.Committed)}, "
                 + $"failed with a warning {outcomes.Count(o => !o.Committed && o.Violations.Count == 0)}, "
-                + $"violations {failures.Count}"
+                + $"violations {outcomes.Count(o => o.Violations.Count > 0)}"
         );
+
+        if (!plan.IsSingle && ShapeSeeds.Count > 0)
+        {
+            output?.WriteLine(
+                $"{dialect.Name}: shape seeds declared [{string.Join(", ", ShapeSeeds.Select(s => s.Seed))}], "
+                    + $"run after the seeds [{string.Join(", ", shapeSeedOutcomes.Select(o => o.Seed))}], "
+                    + $"violations {shapeSeedOutcomes.Count(o => o.Violations.Count > 0)}"
+            );
+        }
 
         foreach (var scenario in scenarioOutcomes)
         {
@@ -283,6 +315,7 @@ public abstract class SyncPlanFuzzTestsBase
                 scenarioOutcomes
                     .Concat(coverageOutcomes)
                     .Concat(outcomes)
+                    .Concat(shapeSeedOutcomes)
                     .Select(o => o.Describe()),
                 Ct
             );
@@ -306,19 +339,18 @@ public abstract class SyncPlanFuzzTestsBase
         // 既知の失敗の照合と必須の形の表明は、両方を集めてから 1 つの失敗にする（どちらかの赤がもう一方を隠さない）
         var problems = new List<string>();
 
-        // 必須の形の表明は、普段の既定の種の数が十分に多い方言だけ（少ない種では確率的に出ない形がある。夜間に種が増えた
-        // 方言でも表明しない＝普段の CI で確かめていない形の欠けで夜間だけ赤にしない）。そのうえで、流す種が普段の既定の種を
-        // 全部含む（数が既定以上の）ときだけ表明する。既定より少ない種を明示した実行（変異テストの SQLite の 100 種）で、
-        // 確率でしか出ない形の欠けを赤にしない
-        var assertsRequiredShapes =
-            !plan.IsSingle
-            && plan.Settings.RegularCount >= ShapeCoverageMinimumSeeds
-            && seeds.Count >= plan.Settings.RegularCount;
+        // 必須の形の表明の門は SyncPlanShapeSeeds.AssertsRequiredShapes（普段の既定の種の数が十分に多い方言か、形の種を
+        // 宣言した方言だけ・流す種が普段の既定の種を全部含むときだけ）。表明の対象は種と形の種の形の和
+        var assertsRequiredShapes = SyncPlanShapeSeeds.AssertsRequiredShapes(
+            plan,
+            ShapeCoverageMinimumSeeds,
+            ShapeSeeds
+        );
 
         if (
             !plan.IsSingle
-            && plan.Settings.RegularCount >= ShapeCoverageMinimumSeeds
-            && seeds.Count < plan.Settings.RegularCount
+            && !assertsRequiredShapes
+            && SyncPlanShapeSeeds.HasShapeAssertion(plan, ShapeCoverageMinimumSeeds, ShapeSeeds)
         )
         {
             output?.WriteLine(
@@ -331,8 +363,8 @@ public abstract class SyncPlanFuzzTestsBase
             try
             {
                 CoverageGuard.ContainsAll(
-                    $"{dialect.Name}: 種の集合全体に出た図の形",
-                    outcomes.SelectMany(o => o.Shapes),
+                    $"{dialect.Name}: 種の集合全体に出た図の形（形の種を含む）",
+                    outcomes.Concat(shapeSeedOutcomes).SelectMany(o => o.Shapes),
                     FuzzShape.RequiredFor(dialect, realDatabase: true)
                 );
             }
@@ -341,6 +373,17 @@ public abstract class SyncPlanFuzzTestsBase
                 problems.Add(ex.Message);
             }
         }
+
+        // 形の種が宣言した形を出しているか（形の種は種の指紋の記録の外なので、これが記録の代わりの守り）。単独の種でない
+        // 実行では、種の数に依らず必ず照合する（流れなかった形の種も名指しする）
+        problems.AddRange(
+            SyncPlanShapeSeeds.Problems(
+                dialect.Name,
+                plan,
+                ShapeSeeds,
+                outcomes.Concat(shapeSeedOutcomes)
+            )
+        );
 
         // 既知の失敗（形で名指しする）を除いた失敗だけを赤にする。一覧に載っているのに起きなかった項目も、
         // 既定の種の数で流したときは赤にする（直ったなら一覧から外す）
@@ -415,6 +458,277 @@ public abstract class SyncPlanFuzzTestsBase
             coverageReport.AssertGaps(SyncPlanFuzzDimensions.Gaps, dialect.Name, plan);
         }
     }
+}
+
+/// <summary>形の種 1 つ（種と、その種が出すはずの実 DB の必須の形）</summary>
+/// <param name="Seed">実 DB の種（方言の普段の種の範囲の外）</param>
+/// <param name="Shapes">この種が出すはずの形（<see cref="FuzzShape.RequiredFor"/> の実 DB の形）</param>
+internal sealed record FuzzShapeSeed(int Seed, IReadOnlyList<string> Shapes);
+
+/// <summary>
+/// 同期計画の総当たりの形の種（普段の既定の種の数が少ない方言で、普段の種に出ない実 DB の必須の形を決定的に出す種）の
+/// 流し方と照合
+/// </summary>
+/// <remarks>
+/// 形の種は、夜間の種の数で流した記録から、普段の種に欠ける必須の形を出す種を貪欲に選んだもの。単独の種でない実行では、
+/// 流した種の範囲に無い形の種を乱数の種の後に流し（<see cref="ToRun"/>）、必須の形の表明の対象に足す。形の種は種の指紋の
+/// 記録の外にあるので、宣言した形を出さなくなったら（生成器を変えて種のケースが変わったら）<see cref="Problems"/> が種を名指しして
+/// 赤にする。単独の種の実行では流さず、照合もしない。
+/// </remarks>
+internal static class SyncPlanShapeSeeds
+{
+    /// <summary>形の種を宣言しているか、普段の既定の種の数が十分に多い（必須の形を表明しうる方言か）</summary>
+    /// <param name="plan">流す種</param>
+    /// <param name="minimumRegularSeeds">形の種なしで表明する普段の既定の種の数の下限</param>
+    /// <param name="declared">方言の形の種</param>
+    public static bool HasShapeAssertion(
+        SeedPlan plan,
+        int minimumRegularSeeds,
+        IReadOnlyList<FuzzShapeSeed> declared
+    ) => plan.Settings.RegularCount >= minimumRegularSeeds || declared.Count > 0;
+
+    /// <summary>
+    /// 必須の形を表明するか（単独の種でなく、表明しうる方言で、流す種が普段の既定の種を全部含む＝数が既定以上のとき）。
+    /// 既定より少ない種を明示した実行（変異テストの SQLite の 100 種）では、確率でしか出ない形の欠けを赤にしない
+    /// </summary>
+    /// <param name="plan">流す種</param>
+    /// <param name="minimumRegularSeeds">形の種なしで表明する普段の既定の種の数の下限</param>
+    /// <param name="declared">方言の形の種</param>
+    public static bool AssertsRequiredShapes(
+        SeedPlan plan,
+        int minimumRegularSeeds,
+        IReadOnlyList<FuzzShapeSeed> declared
+    ) =>
+        !plan.IsSingle
+        && HasShapeAssertion(plan, minimumRegularSeeds, declared)
+        && plan.Seeds.Count >= plan.Settings.RegularCount;
+
+    /// <summary>乱数の種の後に流す形の種（単独の種なら無し・流した種の範囲にある種は重ねて流さない）</summary>
+    /// <param name="plan">流す種</param>
+    /// <param name="declared">方言の形の種</param>
+    public static IReadOnlyList<int> ToRun(SeedPlan plan, IReadOnlyList<FuzzShapeSeed> declared)
+    {
+        if (plan.IsSingle)
+        {
+            return [];
+        }
+
+        var seeds = plan.Seeds.ToHashSet();
+        return declared
+            .Select(s => s.Seed)
+            .Where(seed => !seeds.Contains(seed))
+            .Distinct()
+            .ToList();
+    }
+
+    /// <summary>
+    /// 形の種が宣言した形を出していない問題（単独の種なら無し）。形の種の結果が無い（流れなかった）ときも名指しする
+    /// </summary>
+    /// <param name="dialect">方言名</param>
+    /// <param name="plan">流す種</param>
+    /// <param name="declared">方言の形の種</param>
+    /// <param name="outcomes">乱数の種と形の種の結果</param>
+    public static IReadOnlyList<string> Problems(
+        string dialect,
+        SeedPlan plan,
+        IReadOnlyList<FuzzShapeSeed> declared,
+        IEnumerable<FuzzSeedOutcome> outcomes
+    )
+    {
+        if (plan.IsSingle)
+        {
+            return [];
+        }
+
+        var bySeed = outcomes
+            .Where(o => o.ScenarioId is null)
+            .GroupBy(o => o.Seed)
+            .ToDictionary(g => g.Key, g => g.First());
+        var problems = new List<string>();
+
+        foreach (var shapeSeed in declared)
+        {
+            if (!bySeed.TryGetValue(shapeSeed.Seed, out var outcome))
+            {
+                problems.Add($"{dialect}: shape seed {shapeSeed.Seed} was not run");
+                continue;
+            }
+
+            var missing = shapeSeed.Shapes.Where(s => !outcome.Shapes.Contains(s)).ToList();
+
+            if (missing.Count > 0)
+            {
+                problems.Add(
+                    $"{dialect}: shape seed {shapeSeed.Seed} no longer produces [{string.Join(", ", missing)}] "
+                        + $"(produced [{string.Join(", ", outcome.Shapes.Order(StringComparer.Ordinal))}]). "
+                        + "Pick the shape seeds again from a nightly-count run (SyncPlanFuzz/CLAUDE.md「照合のまとめ方」)"
+                );
+            }
+        }
+
+        return problems;
+    }
+}
+
+/// <summary>
+/// 形の種の宣言と、流し方・照合の門（単独の種・既定・明示の数・夜間）を DB なしで固定する（形の種の照合が、種の指定の
+/// 仕方で黙って外れないこと）
+/// </summary>
+public sealed class SyncPlanShapeSeedGuardTests
+{
+    /// <summary>形の種を宣言する方言 × 種の指定の仕方</summary>
+    public static TheoryData<string, string> Modes()
+    {
+        var data = new TheoryData<string, string>();
+
+        foreach (var dialect in new[] { DialectNames.PostgreSql, DialectNames.Oracle })
+        {
+            foreach (
+                var mode in new[]
+                {
+                    "single",
+                    "default",
+                    "explicit-fewer",
+                    "explicit-more",
+                    "nightly",
+                }
+            )
+            {
+                data.Add(dialect, mode);
+            }
+        }
+
+        data.Add(DialectNames.Oracle, "oracle-extended");
+        return data;
+    }
+
+    [Theory(
+        DisplayName = "形の種は、単独の種では流さず照合もせず、ほかの指定では範囲の外だけを流して必ず照合する"
+    )]
+    [MemberData(nameof(Modes))]
+    public void ShapeSeeds_RunAndAreCheckedUnlessSingle(string dialect, string mode)
+    {
+        var (settings, declared) = Declared(dialect, mode);
+        var plan = SeedSource.Resolve(
+            settings,
+            name =>
+                mode switch
+                {
+                    "single" when name == SyncPlanFuzzTestsBase.SeedVariable => "7",
+                    "explicit-fewer" when name == SyncPlanFuzzTestsBase.SeedCountVariable => "2",
+                    "explicit-more" when name == SyncPlanFuzzTestsBase.SeedCountVariable => "40",
+                    "nightly" when name == SeedSource.ProfileVariable => SeedSource.NightlyValue,
+                    _ => null,
+                }
+        );
+        var toRun = SyncPlanShapeSeeds.ToRun(plan, declared);
+        var asserts = SyncPlanShapeSeeds.AssertsRequiredShapes(
+            plan,
+            SyncPlanFuzzTestsBase.ShapeCoverageMinimumSeeds,
+            declared
+        );
+        var notRun = SyncPlanShapeSeeds.Problems(dialect, plan, declared, []);
+
+        if (mode == "single")
+        {
+            toRun.Should().BeEmpty("単独の種では形の種を流さない");
+            asserts.Should().BeFalse("単独の種では必須の形を表明しない");
+            notRun.Should().BeEmpty("単独の種では形の種を照合しない");
+            return;
+        }
+
+        // 流した種の範囲の外の形の種だけを流す（範囲の中の種は乱数の種の結果で照合する）
+        toRun
+            .Should()
+            .Equal(declared.Select(s => s.Seed).Where(seed => !plan.Seeds.Contains(seed)));
+        asserts
+            .Should()
+            .Be(mode != "explicit-fewer", "既定より少ない数を明示した実行では表明しない");
+
+        // 形の種の結果が無ければ、種の数に依らず名指しする（黙って外れない）
+        notRun.Should().Equal(declared.Select(s => $"{dialect}: shape seed {s.Seed} was not run"));
+
+        // 宣言した形を出していれば問題は無く、1 つ欠ければその種を名指しする
+        var produced = declared
+            .Select(s =>
+            {
+                var outcome = new FuzzSeedOutcome { Seed = s.Seed, Dialect = dialect };
+                outcome.Shapes.UnionWith(s.Shapes);
+                return outcome;
+            })
+            .ToList();
+        SyncPlanShapeSeeds.Problems(dialect, plan, declared, produced).Should().BeEmpty();
+        produced[0].Shapes.Remove(declared[0].Shapes[0]);
+        SyncPlanShapeSeeds
+            .Problems(dialect, plan, declared, produced)
+            .Should()
+            .ContainSingle()
+            .Which.Should()
+            .Contain($"shape seed {declared[0].Seed} no longer produces [{declared[0].Shapes[0]}]");
+    }
+
+    [Theory(
+        DisplayName = "形の種は普段の種の範囲の外にあり、方言の実 DB の必須の形だけを名指しする"
+    )]
+    [InlineData(DialectNames.PostgreSql)]
+    [InlineData(DialectNames.Oracle)]
+    public void ShapeSeeds_AreOutsideRegularSeedsAndNameRequiredShapes(string dialect)
+    {
+        var (settings, declared) = Declared(dialect, "default");
+        var required = FuzzShape.RequiredFor(
+            EngineFingerprintDriftTests.CreateDialect(dialect),
+            realDatabase: true
+        );
+
+        declared.Should().NotBeEmpty();
+        declared.Select(s => s.Seed).Should().OnlyHaveUniqueItems();
+        declared.Should().OnlyContain(s => s.Seed > settings.RegularCount && s.Shapes.Count > 0);
+        declared.SelectMany(s => s.Shapes).Should().OnlyContain(shape => required.Contains(shape));
+    }
+
+    [Fact(
+        DisplayName = "普段の既定の種が 50 以上の方言は形の種を宣言しない（普段の種だけで必須の形を表明する）"
+    )]
+    public void DialectsWithManyRegularSeeds_DeclareNoShapeSeeds()
+    {
+        // fixture は渡さない（形の種と種の決め方は fixture に触れない）
+        foreach (
+            var tests in new SyncPlanFuzzTestsBase[]
+            {
+                new SqliteSyncPlanFuzzTests(),
+                new MySqlSyncPlanFuzzTests(null!),
+                new SqlServerSyncPlanFuzzTests(null!),
+            }
+        )
+        {
+            tests.ShapeSeeds.Should().BeEmpty();
+            SyncPlanShapeSeeds
+                .AssertsRequiredShapes(
+                    SeedSource.Resolve(tests.SeedSettings, _ => null),
+                    SyncPlanFuzzTestsBase.ShapeCoverageMinimumSeeds,
+                    tests.ShapeSeeds
+                )
+                .Should()
+                .BeTrue();
+        }
+    }
+
+    private static (SeedSettings Settings, IReadOnlyList<FuzzShapeSeed> Declared) Declared(
+        string dialect,
+        string mode
+    ) =>
+        dialect switch
+        {
+            DialectNames.PostgreSql => (
+                PostgreSqlSyncPlanFuzzTests.Seeds,
+                PostgreSqlSyncPlanFuzzTests.ShapeSeedList
+            ),
+            DialectNames.Oracle => (
+                OracleSyncPlanFuzzTests.SeedsFor(extended: mode == "oracle-extended"),
+                OracleSyncPlanFuzzTests.ShapeSeedList
+            ),
+            _ => throw new ArgumentOutOfRangeException(nameof(dialect), dialect, null),
+        };
 }
 
 /// <summary>SQLite（実ファイル・Docker 不要＝CI の両ジョブで常時実行）</summary>
@@ -501,7 +815,13 @@ public sealed class PostgreSqlSyncPlanFuzzTests(PostgreSqlContainerFixture fixtu
     /// <summary>種の決め方</summary>
     public static SeedSettings Seeds { get; } = SeedSettingsFor(DefaultSeeds, NightlySeeds);
 
+    /// <summary>形の種（夜間の 600 種の記録から選んだ。普段の 15 種に出ない形を出す）</summary>
+    internal static IReadOnlyList<FuzzShapeSeed> ShapeSeedList { get; } =
+    [new(43, [FuzzShape.ForeignKeyOnUnique])];
+
     internal override SeedSettings SeedSettings => Seeds;
+
+    internal override IReadOnlyList<FuzzShapeSeed> ShapeSeeds => ShapeSeedList;
 
     protected override string? UnavailableReason =>
         fixture.IsAvailable ? null : fixture.UnavailableReason;
@@ -539,8 +859,18 @@ public sealed class OracleSyncPlanFuzzTests(OracleContainerFixture fixture) : Sy
     public static SeedSettings SeedsFor(bool extended) =>
         SeedSettingsFor(extended ? ExtendedOracleSeedCount : DefaultOracleSeedCount, NightlySeeds);
 
+    /// <summary>形の種（夜間の 120 種の記録から選んだ。普段の 4 種に出ない形を出す）</summary>
+    internal static IReadOnlyList<FuzzShapeSeed> ShapeSeedList { get; } =
+    [
+        new(6, [FuzzShape.DropPrimaryKeyColumnAlone, FuzzShape.SymbolName]),
+        new(32, [FuzzShape.CaseOnlyName, FuzzShape.SameColumnTwoForeignKeys]),
+        new(102, [FuzzShape.DropUniqueMemberAlone]),
+    ];
+
     internal override SeedSettings SeedSettings =>
         SeedsFor(Environment.GetEnvironmentVariable(ExtendVariable) == "1");
+
+    internal override IReadOnlyList<FuzzShapeSeed> ShapeSeeds => ShapeSeedList;
 
     protected override string? UnavailableReason =>
         fixture.IsAvailable ? null : fixture.UnavailableReason;
