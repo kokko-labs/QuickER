@@ -210,6 +210,23 @@
       ]
     },
     {
+      "id": "GeneratedRuntime",
+      "part": "ParityValuesSqlServer",
+      "title": "実装先どうしの一致（SQL Server の系統の値の往復：小数秒の丸め・decimal の丸めと桁あふれ・文字列とバイナリの長さと文字・BulkInsert を含む書く経路）",
+      "sourceFiles": [
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParitySqlServerValueDimensions.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParitySqlServerValueGenerator.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParitySqlServerValueExpectations.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParitySqlServerValueRuntimeTests.cs"
+      ],
+      "covers": [
+        "src/QuickER.Runtime",
+        "src/QuickER.Runtime.SqlServer",
+        "src/QuickER.Runtime.EntityFrameworkCore",
+        "src/QuickER.Provider.SqlServer"
+      ]
+    },
+    {
       "id": "Dsl",
       "part": "SqlServer",
       "title": "簡易 DSL の条件の総当たり（SQL Server の QuickER 版 Repository と EF Core）",

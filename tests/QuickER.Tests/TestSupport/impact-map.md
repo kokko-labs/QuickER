@@ -49,13 +49,13 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Provider.MySql` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks` |
 | `src/QuickER.Provider.Oracle` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks` |
 | `src/QuickER.Provider.PostgreSql` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses` |
-| `src/QuickER.Provider.SqlServer` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses` |
+| `src/QuickER.Provider.SqlServer` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`GeneratedRuntime/ParityValuesSqlServer`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses` |
 | `src/QuickER.Provider.Sqlite` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`Name/Entrances`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses`・`rule:sqlite-file-connection-pooling-off` |
-| `src/QuickER.Runtime` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`table:EditModelScenarios`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
+| `src/QuickER.Runtime` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`GeneratedRuntime/ParityValuesSqlServer`・`table:EditModelScenarios`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
 | `src/QuickER.Runtime.AspNetCore` | 全体 | `GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues` |
-| `src/QuickER.Runtime.EntityFrameworkCore` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`table:TranslatorParityPredicates` |
+| `src/QuickER.Runtime.EntityFrameworkCore` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`GeneratedRuntime/ParityValuesSqlServer`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.InMemory` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityValues`・`table:TranslatorParityPredicates` |
-| `src/QuickER.Runtime.SqlServer` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/ParitySqlServerSaves`・`table:TranslatorParityPredicates` |
+| `src/QuickER.Runtime.SqlServer` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValuesSqlServer`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.Sqlite` | 全体 | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParityValues`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.Sync` | 全体 | `SyncModel/Config`・`SyncModel/Outcomes`・`SyncModel/Random` |
 | `src/QuickER.Settings` | 全体 | `DocumentFile/Settings` |
@@ -214,7 +214,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Provider.PostgreSql` | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads` |
 | `src/QuickER.Provider.PostgreSql/PostgreSqlSchemaImporter.cs` | `rule:schema-command-bypasses`・`rule:schema-command-helper-uses` |
 | `src/QuickER.Provider.PostgreSql/PostgreSqlSchemaSyncExecutor.cs` | `rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses` |
-| `src/QuickER.Provider.SqlServer` | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads` |
+| `src/QuickER.Provider.SqlServer` | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`GeneratedRuntime/ParityValuesSqlServer`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads` |
 | `src/QuickER.Provider.SqlServer/SqlServerSchemaImporter.cs` | `rule:schema-command-bypasses`・`rule:schema-command-helper-uses` |
 | `src/QuickER.Provider.SqlServer/SqlServerSchemaSyncExecutor.cs` | `rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses` |
 | `src/QuickER.Provider.Sqlite` | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`Name/Entrances`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads` |
@@ -234,11 +234,11 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Provider/SyncScriptBuilderBase.cs` | `SyncPlan/Fuzz` |
 | `src/QuickER.Provider/SyncScriptBuilderHelper.cs` | `SyncPlan/Fuzz` |
 | `src/QuickER.Provider/UniqueConstraintNaming.cs` | `rule:sync-name-comparison-tokens` |
-| `src/QuickER.Runtime` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`table:EditModelScenarios`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
+| `src/QuickER.Runtime` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`GeneratedRuntime/ParityValuesSqlServer`・`table:EditModelScenarios`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
 | `src/QuickER.Runtime.AspNetCore` | `GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues` |
-| `src/QuickER.Runtime.EntityFrameworkCore` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`table:TranslatorParityPredicates` |
+| `src/QuickER.Runtime.EntityFrameworkCore` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`GeneratedRuntime/ParityValuesSqlServer`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.InMemory` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityValues`・`table:TranslatorParityPredicates` |
-| `src/QuickER.Runtime.SqlServer` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/ParitySqlServerSaves`・`table:TranslatorParityPredicates` |
+| `src/QuickER.Runtime.SqlServer` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValuesSqlServer`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.Sqlite` | `Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParityValues`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.Sync` | `SyncModel/Config`・`SyncModel/Outcomes`・`SyncModel/Random` |
 | `src/QuickER.Settings` | `DocumentFile/Settings` |
@@ -619,6 +619,12 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 - テストのソース：`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParitySqlServerSaveComparison.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParityRuntimeTests.SqlServerSaveComparison.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParitySqlServerSaveDimensions.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParitySqlServerSaveGenerator.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParitySqlServerRuntimeTests.RandomSaves.cs`
 - 範囲：`src/QuickER.Runtime`・`src/QuickER.Runtime.SqlServer`・`src/QuickER.Runtime.EntityFrameworkCore`・`src/QuickER.Runtime.AspNetCore`
 
+### `GeneratedRuntime/ParityValuesSqlServer`
+
+- 名前：実装先どうしの一致（SQL Server の系統の値の往復：小数秒の丸め・decimal の丸めと桁あふれ・文字列とバイナリの長さと文字・BulkInsert を含む書く経路）
+- テストのソース：`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParitySqlServerValueDimensions.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParitySqlServerValueGenerator.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParitySqlServerValueExpectations.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/BackendParitySqlServerValueRuntimeTests.cs`
+- 範囲：`src/QuickER.Runtime`・`src/QuickER.Runtime.SqlServer`・`src/QuickER.Runtime.EntityFrameworkCore`・`src/QuickER.Provider.SqlServer`
+
 ### `Dsl/SqlServer`
 
 - 名前：簡易 DSL の条件の総当たり（SQL Server の QuickER 版 Repository と EF Core）
@@ -828,7 +834,7 @@ src 全体か src の外を読む守り。単位の守りには数えない（�
 | `rule:cjk-range-copies` | tests/**/*.cs |
 | `rule:regex-ignore-case-culture` | src/**/*.cs |
 | `rule:regex-digit-classes` | src/**/*.cs |
-| `rule:ef-core-provider-cache-limit` | tests/**/*.cs（除外 33 件） |
+| `rule:ef-core-provider-cache-limit` | tests/**/*.cs（除外 34 件） |
 | `rule:window-activation-collection` | tests/QuickER.Tests/**/*.cs（除外 3 件） |
 | `rule:window-activation-markers` | tests/QuickER.Tests/AI.Chat/AiChatDialogApiKeyBoxTests.cs・tests/QuickER.Tests/Gui/Behaviors/CanvasViewportBehaviorSpaceKeyTests.cs・tests/QuickER.Tests/Gui/Views/PropertyPanelMemoEditTests.cs |
 | `rule:wpf-main-window-creations` | tests/QuickER.Tests/**/*.cs |

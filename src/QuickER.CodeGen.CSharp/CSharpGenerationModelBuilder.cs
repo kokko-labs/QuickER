@@ -651,6 +651,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             // SQL パラメータ型明示化（[SqlColumnType]）用。VO 有無に関わらず DB 由来の生値を載せる（束縛は素値へ開いてから）
             SqlDbTypeName = typeInfo.SqlDbTypeName,
             SqlDeclaredLength = typeInfo.SqlDeclaredLength,
+            // [SqlColumnType] の Scale に載せる小数秒の桁（SqlBulkCopy へ渡す値をこの桁へ丸める。VO 有無に関わらず DB 由来の生値）
+            SqlFractionalSecondsScale = typeInfo.SqlFractionalSecondsScale,
             // 無制限バイナリ列のマーカー（[UnboundedBinaryColumn] 付与判定用）。付与可否はテンプレート側の
             // グローバル変数（exclude_unbounded_binary）で制御するため、ここでは options 条件を掛けず常時転記する
             IsUnboundedBinary = typeInfo.IsUnboundedBinary,

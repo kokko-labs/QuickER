@@ -25,6 +25,17 @@ SQL Server 方言エンジン（QuickER 版 Repository の ADO 実装）の固�
 - `BulkCopyTimeout` は接続の `CommandTimeout`（接続文字列の `Command Timeout`・既定 30）を渡す。外すと接続文字列の値が届かず、常に 30 秒で打ち切られる。
 - ガード：`GeneratedRuntimeAdoParityTests` の `BulkInsert_NullIntoColumnWithDefault_StoresNull` / `BulkInsert_FollowsConnectionStringCommandTimeout`（Docker）。mutation 実証済み。
 
+### SqlBulkCopy へ渡す値をサーバーの形へ合わせる
+
+行単位の INSERT のパラメータはサーバーが列へ合わせ、SqlBulkCopy はクライアントの側で合わせる。`EntityDataReader.GetValue`（`_06`）の `AsServerStores` が、SqlBulkCopy へ渡す値だけをサーバーの形へ直す（パラメータの束縛は変えない）。
+
+- 小数秒の桁を持つ列（`[SqlColumnType]` の DbType が DateTime2 / Time / DateTimeOffset で Scale < 7）：小数秒を Scale 桁へ四捨五入する（ちょうど半分は上げる・日付も繰り上がる）。丸めると型の範囲を出る値は、範囲の中のその桁の最後の値で止める（サーバーも例外にせずそこで止める）。DateTimeOffset はローカルの時刻を丸め、UTC が範囲を出ない最後の値で止める。time の 0 未満・24 時間以上は直さずに渡す（どの経路も SqlClient が断る）。外すと SqlBulkCopy が切り捨て、同じ値を InsertAsync と違う値（日付の境目では日付まで）で保存する。
+- 文字列の列（NVarChar / NChar / VarChar / Char・Size > 0）：長さを超えた分が U+0020 だけなら Size 文字へ切る。バイナリの列（VarBinary / Binary）：超えた分が 0x00 だけなら Size バイトへ切る。どちらもサーバーが INSERT で黙って落とす形で、外すと SqlBulkCopy がコピー全体を断る。それ以外の超過は直さず、どの経路も断る（例外の型は経路で違う＝docs の一括追加の節）。
+  - Unicode でない列で、超えた分がコードページで空白に置き換わる文字（U+3000 など）は直さない。サーバーは置き換えた後の空白を落とすが、置き換えの表を写さないと合わせられない（docs に書いた割り切り・値の往復の生成器の作らない形の宣言にも Accepted で載せる）。
+- 小数秒の桁は型マッパー（`SqlServerCSharpTypeMapper`）が `CSharpTypeInfo.SqlFractionalSecondsScale` で返し、生成器が `[SqlColumnType]` の Scale へ出す。datetime2・time・datetimeoffset の列にはいつも出す（指定なしは 7）。属性の Scale は byte なので、出さないと `datetime2(0)` の 0 と区別できない。decimal の `Precision` / `Scale` には入れない（EF Core の HasPrecision・値オブジェクトの検証・サンプル値へ波及する）。マルチターゲットは `MultiDialectTypeReconciler.SupplementSqlColumnTypes` が sqlserver の辞書から補う。
+- パラメータの束縛（`AddColumnParameter`）は Precision のある列にだけ Scale を当てる。日時の列に Scale を当てると SqlClient が送る前に値を切る（mutation で確かめた）。
+- ガード：`GeneratedRuntime/ParityValuesSqlServer`（`BackendParitySqlServerValueRuntimeTests`＝QuickER 版と EF Core 版の 5 つの書く経路の値の往復・docs の写しの期待・Docker）・`DialectTypeTableTests`（行 `map-sqlserver-fractional-seconds-scale-*` と行列の項目 `frac`）。mutation 実証済み。
+
 ## 行バージョンの OUTPUT と版の回収
 
 楽観排他の共通の骨格は `src/QuickER.Runtime/CLAUDE.md`「rowversion による楽観排他」。

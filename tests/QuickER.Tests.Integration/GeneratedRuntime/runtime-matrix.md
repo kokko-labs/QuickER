@@ -230,9 +230,9 @@ UNIQUE 制約の事前チェック（重複検出・自分自身の除外）
 
 実装先どうしの一致（同じ操作の列を流し、戻り値・保存先・呼び出し側のグラフ・Save フックを QuickER 版と比べる）
 
-- QuickER 版 SQL Server：担当＝`BackendParitySqlServerRuntimeTests`
+- QuickER 版 SQL Server：担当＝`BackendParitySqlServerRuntimeTests`・`BackendParitySqlServerValueRuntimeTests`
 - QuickER 版 SQLite：担当＝`BackendParityRuntimeTests`（全シナリオ）
-- EF Core SQL Server：担当＝`BackendParitySqlServerRuntimeTests`
+- EF Core SQL Server：担当＝`BackendParitySqlServerRuntimeTests`・`BackendParitySqlServerValueRuntimeTests`
 - EF Core SQLite：担当＝`BackendParityRuntimeTests`（全シナリオ）
 - EF Core PostgreSQL：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - EF Core MySQL：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）

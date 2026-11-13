@@ -103,7 +103,7 @@ public sealed class SqlColumnTypeAttribute : Attribute
     /// <summary>Gets or sets the total number of digits (precision) for decimal types.</summary>
     public byte Precision { get; set; }
 
-    /// <summary>Gets or sets the number of fractional digits (scale) for decimal types.</summary>
+    /// <summary>Gets or sets the number of fractional digits: the scale for decimal types, and the fractional seconds for datetime2, time, and datetimeoffset (7 when the column declares none).</summary>
     public byte Scale { get; set; }
 
     /// <summary>Gets the number of integral digits (Precision - Scale) for decimal types; -1 for non-decimal types.</summary>

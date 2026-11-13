@@ -51,6 +51,17 @@ public sealed record CSharpTypeInfo
     public int SqlDeclaredLength { get; init; }
 
     /// <summary>
+    /// SQL Server の小数秒の桁（<c>datetime2(n)</c>・<c>time(n)</c>・<c>datetimeoffset(n)</c> の n。桁の指定なしは 7）。
+    /// ほかの型とほかの方言は null。<c>[SqlColumnType]</c> の Scale に載せ、SqlBulkCopy へ渡す値をこの桁へ丸めるのに使う。
+    /// </summary>
+    /// <remarks>
+    /// decimal の <see cref="Precision"/> / <see cref="Scale"/> とは別に持つ（入れると EF Core の HasPrecision・値オブジェクトの
+    /// 桁数検証・サンプル値まで変わる）。属性の Scale は byte なので、<c>datetime2(0)</c> の 0 と「出していない」を区別するため、
+    /// 指定なしの 7 も出す。
+    /// </remarks>
+    public int? SqlFractionalSecondsScale { get; init; }
+
+    /// <summary>
     /// 行バージョン（SQL Server の <c>rowversion</c> / <c>timestamp</c> 等）かどうか。
     /// EF Core の Fluent 構成で <c>IsRowVersion()</c>（並行性トークン）を出すかの判定に使う。
     /// 生成器は DB 非依存のため、この判定はプロバイダ（型マッパー）が行って渡す

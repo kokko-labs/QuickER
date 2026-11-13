@@ -648,6 +648,31 @@ internal static partial class DialectTypeRows
                 );
             }
 
+            (string Input, string Scale)[] fractionalSeconds =
+            [
+                ("datetime2(0)", "0"),
+                ("datetime2(2)", "2"),
+                ("datetime2", "7"),
+                ("time(0)", "0"),
+                ("time", "7"),
+                ("datetimeoffset(3)", "3"),
+                ("datetimeoffset", "7"),
+                ("datetime", "-"),
+                ("smalldatetime", "-"),
+                ("date", "-"),
+                ("decimal(10,2)", "-"),
+            ];
+
+            foreach (var (input, scale) in fractionalSeconds)
+            {
+                yield return SqlServerMap(
+                    $"fractional-seconds-scale-{SqlServerSlug(input)}",
+                    "datetime2・time・datetimeoffset は小数秒の桁（指定なしは 7・datetime2(0) の 0 も運ぶ）を持ち、ほかの型は持たない",
+                    input,
+                    $"ok frac={scale}"
+                );
+            }
+
             yield return SqlServerMap(
                 "case-whitespace-nvarchar",
                 "大文字小文字・前後空白を許容して SqlDbTypeName を解決できる",

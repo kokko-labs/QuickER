@@ -137,6 +137,16 @@
 - `BackendParityValueDimensions`（登録簿の部分 GeneratedRuntime/ParityValues）は、乱数の列の操作が書く値 1 つを 1 ケースとし、範囲 × 日時の Kind × 日時の端数 × decimal の端 × blob の長さ × 文字列の文字を持つ。1 ケースは値の系統を 1 つだけ持つ（ほかは None）。網羅しない組は無く、既定の種の数（200）で全組が出る。
 - mutation 実証済み（QuickER 版の SQLite の束縛で、Utc の日時をローカルへ換算する・端数をミリ秒へ切る・decimal を float 経由にする・非 ASCII を ? にする・空の blob を NULL にする、のどれも値の幅があると赤、値の幅を外すと違いが出ない）。
 
+### SQL Server の系統の値の往復
+
+- `BackendParitySqlServerValueRuntimeTests`（登録簿の部分 GeneratedRuntime/ParityValuesSqlServer・Docker）：乱数の操作の列とは別に、値の往復だけを QuickER 版 SQL Server と EF Core 版 SQL Server へ流す。図は `BackendParitySqlServerFixture`（値オブジェクトなし＝範囲の外の値もパラメータと SqlBulkCopy まで届く。DDL は SQL Server が断る SET DEFAULT の 2 本目を NO ACTION にした `BuildForSqlServerDdl` から作る）の表 `value_probes`。
+- 書く経路 5 つ（InsertAsync・UpdateAsync・SaveAsync の挿入と更新・BulkInsertAsync）で書き、GetById・Include の無い Query・最後に 1 回の customers からの Include（QuickER 版は FOR JSON）で読む。比べるのは、期待（`BackendParitySqlServerValueExpectations`＝docs の写し）・2 つの実装先どうし・読む経路どうし・断られた書き込みが何も残さないこと（BulkInsert は 1 行でも断られればどの行も無い・更新は元の値のまま）。例外の型と文は比べない（docs の一括追加の節）。除外 blob は生の SELECT で読む。
+- 次元表 `BackendParitySqlServerValueDimensions`：実装先 × 書く経路 × 列 × 値の形（列の型に無い形は `isValid`）。網羅しない組は、除外 blob の列と長い blob の形 × 更新の 2 経路の 4 組（除外列は UPDATE の値で書けない）だけ。
+- `FixedCases_MatchDocsOnBothBackends`（普段・種なし）が成り立つ組を 1 行ずつ流して全組を出し、網羅しない組を照合する。`RandomSeeds_MatchDocsOnBothBackends`（`NightlyEngine`・`QUICKER_PARITY_SQLSERVER_VALUE_SEEDS` 普段 8・夜間 200）は 1 行に 2〜4 列の値を混ぜ、BulkInsert は 2〜5 行、2 回に 1 回 1 つの値を断られる形（列と形の組から一様に）へ置き換える。網羅しない組の照合は夜間の既定の種の数でだけ行う（普段の 8 種は書く経路 × 断られる形の組が欠ける）。
+- 作らない形は `BackendParitySqlServerValueNotGenerated.cs`。乱数の本流（`BackendParityGenerator`）と別の種の式で引くので、本流の種の指紋は変わらない（記録 `BackendParitySqlServerValues`）。
+- 時間：決まった形 4 秒前後・普段の 8 種 1〜2 秒・夜間の 200 種 13 秒前後。
+- mutation 実証済み（SqlBulkCopy へ渡す値の丸めを外す・切り捨てに戻す・範囲の端で止めない・空白と 0x00 の切りを外す・空白以外や 0x00 以外も切る・属性の Scale を出さない、の各回で赤）。
+
 ### 網羅の行
 
 - `BackendParityCoverageRows`：Id は `coverage-`・4 行。乱数の列のテスト `RandomSequences_MatchBaseline` が種の前に流し（単独の種では流さない）、同じ次元表と結果の表で数える。

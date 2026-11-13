@@ -260,6 +260,9 @@ internal static partial class DialectTypeRows
         builder.Append(
             $" declen={(sqlServer ? SqlServerDeclaredLength(native) : 0).ToString(CultureInfo.InvariantCulture)}"
         );
+        builder.Append(
+            $" frac={(sqlServer ? SqlServerFractionalSecondsScale(native, parsed) : "-")}"
+        );
         builder.Append($" rowver={Bit(parsed.Kind == CanonicalTypeKind.RowVersion)}");
         builder.Append(
             $" unbounded={Bit(parsed.Kind == CanonicalTypeKind.Binary && parsed.Length == -1)}"
@@ -282,6 +285,15 @@ internal static partial class DialectTypeRows
     }
 
     /// <summary>SQL Server の表記の宣言長（文字列・バイナリの n・max は -1・それ以外は 0）</summary>
+    /// <summary>
+    /// SQL Server の表記の小数秒の桁（datetime2・time・datetimeoffset は括弧の桁、指定なしは 7。ほかの型は「-」）。
+    /// SqlBulkCopy へ渡す値をこの桁へ丸めるので、datetime2(0) の 0 と指定なしの 7 を区別して運ぶ
+    /// </summary>
+    private static string SqlServerFractionalSecondsScale(string native, CanonicalType parsed) =>
+        SqlDbTypeNameOf(native) is "DateTime2" or "Time" or "DateTimeOffset"
+            ? SpecNum(parsed.Precision ?? 7)
+            : "-";
+
     private static int SqlServerDeclaredLength(string native)
     {
         var (name, arguments, _) = DialectTypeAdapter.SplitType(native);
