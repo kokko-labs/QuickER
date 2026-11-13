@@ -11,7 +11,7 @@ internal static partial class SyncModelScenarios
 {
     private static IEnumerable<SyncModelScenario> EngineConflictsScenarios() =>
         [
-            MovedAll(
+            Moved(
                 "conflict-collected-by-default-with-both-rows",
                 [.. Seed(1, "alice", 11, "widget")],
                 [
@@ -261,7 +261,7 @@ internal static partial class SyncModelScenarios
             ),
             // ローカルで作った行のキーがサーバーに既にある（DuplicateOnServer）× ServerWins：サーバーへ書かずに記録を捨て、
             // その行をサーバーから読み直して上書きする（docs のポリシー×競合の種類の表）
-            MovedAll(
+            Moved(
                 "sw-duplicate-key-on-server-reloads-server-row",
                 [],
                 [
@@ -276,7 +276,7 @@ internal static partial class SyncModelScenarios
             ),
             // 同じ形を単独の UploadAsync で：後にダウンロードが続かないので、ServerWins が自分でサーバーの行を読み直して上書き
             // する（SyncAsync の形は同じ実行のダウンロードがサーバーの行を降ろすので、読み直しが無くても揃う）
-            MovedAll(
+            Moved(
                 "sw-duplicate-key-on-server-upload-only-reloads-server-row",
                 [],
                 [
@@ -290,7 +290,7 @@ internal static partial class SyncModelScenarios
                 ]
             ),
             // 同じ形 × 後勝ち：競合にならず、ForceOverwrite でサーバーの行をローカルの内容へ更新する（docs の同じ表）
-            MovedAll(
+            Moved(
                 "lww-duplicate-key-on-server-overwrites",
                 [],
                 [
@@ -401,6 +401,16 @@ internal static partial class SyncModelScenarios
                     ),
                     Plain(D1),
                     Expect.Result(D1).Contains("uploaded=1"),
+                    // 上限を実行の始めに固定するサーバー役（実 SQL Server）では、取得の直前に書かれた版は上限より後なので
+                    // その同期では降りず、次の同期で降りる
+                    new WhenServerFixesCeilingOp(
+                        [
+                            Expect.Rows(D1, F).Contains("1 parent=null name=alice-local"),
+                            Plain(D1),
+                            Expect.Result(D1).Contains("downloaded=1"),
+                        ],
+                        []
+                    ),
                     Expect.Rows(D1, F).Contains("1 parent=null name=alice-server-later"),
                 ]
             ),

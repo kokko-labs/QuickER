@@ -16,6 +16,9 @@ public enum SyncModelTransport
 
     /// <summary>直結・実 SQL Server のサーバー役（<see cref="SyncModelSqlServerRuntimeTests"/>）</summary>
     SqlServer,
+
+    /// <summary>HTTP 越し・実 SQL Server のサーバー役（<see cref="SyncSupportRemoteAdoSqlServerRuntimeTests"/>）</summary>
+    SqlServerHttp,
 }
 
 /// <summary>転送経路の軸</summary>

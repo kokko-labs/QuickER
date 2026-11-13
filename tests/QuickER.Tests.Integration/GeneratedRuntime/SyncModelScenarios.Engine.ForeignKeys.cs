@@ -297,7 +297,7 @@ internal static partial class SyncModelScenarios
         SyncMode mode,
         SyncConflictPolicy policy
     ) =>
-        MovedAll(
+        Moved(
             $"fk-write-of-row-whose-parent-is-gone-is-reported-as-parent-missing-{shape}",
             [.. Seed(1, "alice", 11, "widget")],
             [
@@ -328,7 +328,7 @@ internal static partial class SyncModelScenarios
         string shape,
         SyncConflictPolicy policy
     ) =>
-        MovedAll(
+        Moved(
             $"fk-delete-refused-on-server-holds-back-child-{shape}",
             [Folder(SV, 1, name: "alice"), Folder(SV, 2, name: "bob")],
             [
@@ -375,7 +375,7 @@ internal static partial class SyncModelScenarios
         [
             // アップロード：フォルダーの更新（新しい品目へのピン留め）は表の順で品目より先に送られ、品目がまだ無いサーバーの
             // 外部キーに断られる。品目が通った次の巡で送り直されて通る（競合にしない）
-            MovedAll(
+            Moved(
                 "cycle-pin-to-new-item-uploads-in-rounds",
                 [Folder(SV, 760)],
                 [
@@ -389,7 +389,7 @@ internal static partial class SyncModelScenarios
             ),
             // ダウンロード：フォルダーの表を先に降ろすとき、ピン留めの先の品目がまだローカルに無いので、親をそろえる解決役が
             // その品目をサーバーから読み直して先に入れる（打ち切らない）
-            MovedAll(
+            Moved(
                 "cycle-pinned-item-is-read-back-before-folder",
                 [Folder(SV, 770)],
                 [
@@ -403,7 +403,7 @@ internal static partial class SyncModelScenarios
             ),
             // ServerWins の読み直し（単独の UploadAsync＝後にダウンロードが続かないので、捨てる行を自分で読み直す）：読み直した
             // フォルダーが指す品目がまだローカルに無いので、解決役が先に入れる
-            MovedAll(
+            Moved(
                 "cycle-serverwins-restores-folder-pinned-to-new-item",
                 [Folder(SV, 780)],
                 [

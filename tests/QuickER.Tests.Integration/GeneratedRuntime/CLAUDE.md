@@ -204,12 +204,13 @@
 ### 決定的なシナリオと Theory
 
 - エンジンの振る舞いの決定的なシナリオは `SyncModelScenarios.Engine*.cs` にある。対象はダウンロード・アップロードの基本・再生の判定・ack・削除伝搬・グラフ保存・後勝ち・競合と ServerWins / LocalWins・外部キー・割り込み・記録の取り消し・洗い替え・blob・フック。
-- 同期のモデルの 3 つの Theory（直結・HTTP・実 SQL Server）が、同じ宣言 `SyncModelScenario.Transports` から行を作って流す。
+- 同期のモデルの 4 つの転送（直結・HTTP・実 SQL Server の 3 つの Theory と、HTTP × 実 SQL Server の夜間だけの Fact）が、同じ宣言 `SyncModelScenario.Transports` から行を作って流す。今はどのシナリオも全転送で流れる（サーバー役の口は SQLite の代役も実 SQL Server も同じ点で持つ）。
 - 直結と HTTP の Theory は `SyncModelScenarioParts` が行の番号の余りで 2 つ・4 つのクラスへ分けて並列に流す。xUnit は同じクラスの行を並列に流さず、HTTP の行を 1 クラスに置くと直列が同期の Theory の時間を決めるため。
   - 分けたクラス（`SyncModelRuntimeTestsPart2`・`SyncModelHttpRuntimeTestsPart2`〜`4`）は転送の軸の目印（`ISyncModelTransportTests`・`MatrixAxisValue`）を持たない。軸の値ごとのクラスは本体の 1 つだけ。
   - 実 SQL Server の Theory はコンテナのコレクションで 1 本ずつ流れるので分けない。
+  - HTTP × 実 SQL Server の決定的なシナリオは、普段の CI で流さず夜間だけ全部流す（ユーザーの決定 2026-11-13＝普段は実 SQL Server の直結が失敗の注入の行も持つ）。行ごとの Theory でなく、夜間の目印（`NightlyEngine`）を持つ 1 つの Fact `SyncSupportRemoteAdoSqlServerRuntimeTests.Scenarios_MatchDirect_Nightly` が、種の決め方（`SeedSource.Resolve`）のプロファイルが夜間のときだけ全シナリオを並列度 2 で流し、失敗をまとめて報告する。普段のプロファイルで行を出さない Theory はスキップ（スキップ 0 の原則に当たる）になるため。
   - 分ける数とその数のクラスは別々の場所にあるので、`SyncModelRuntimeTests.ScenarioParts_CoverEveryScenarioOncePerTransport` が `SyncModelScenarioParts.Names` を呼ぶ MemberData を反射で集め、転送ごとの行の和が流すシナリオとちょうど一致し重ならないことを表明する。mutation 実証済み。
-- 実 SQL Server でも流すシナリオ（`AllTransports`）：本物の rowversion の版ガード・`MIN_ACTIVE_ROWVERSION()` の上限のアンカー・TOP のページング・外部キーエラーの分類・実 `varbinary(max)`。
+- 実 SQL Server の転送が見るもの：本物の rowversion の版ガード・`MIN_ACTIVE_ROWVERSION()` の上限のアンカー・TOP のページング・外部キーエラーの分類・実 `varbinary(max)`・照合順序、それらと失敗の注入・割り込みの点・HTTP のシリアライズ（版の Base64・400 / 409 / 500 の分類）との組み合わせ。
   - SQL Server に固有の事実を期待の手（結果・行・ジャーナル・受理記録・ミラー版の面）で表明し、Theory は「直結と同じ違反になる」を比べる。
   - SQL Server だけに効く壊れ方は実 SQL Server の Theory が、全転送に効く壊れ方は直結の Theory が拾う。mutation 実証済み。
 
@@ -310,6 +311,9 @@
   - 写しが実際の照合順序とずれないよう、SQL Server の世界を作るたびに `VerifyAsync` が一意な列 2 本の照合順序で、生成器の別表記の関数から作った値の組を実 DB の `=` と突き合わせ、食い違えば例外にする。
   - 決まった形の行 `n7s-{ascii-case|non-ascii-case|trailing-space}-{collect|localwins|lww-serverwins}`（全転送）は、期待をサーバー役の同じさで選ぶ手 `WhenServerSameUniqueOp` で書く：同じ値なら UniqueValueTakenOnServer で断られ、Collect と LocalWins は次の同期でも報告し続け、その後の ServerWins の同期で揃う。後勝ち＋ServerWins はその同期で捨てる。別の値なら上がる。
   - 実 SQL Server の乱数の種は、AsciiCase・NonAsciiCase・TrailingSpace の別表記がそれぞれ 1 回以上サーバーに断られたことを `CoverageGuard` で表明する（`SyncModelRun.SpellingRefusals`。同じ値の Exact・Empty はどのサーバー役でも断られ、直結の種の網羅が受け持つ）。
+- 取得の上限の固定もサーバー役が持つ（`ISyncModelServerRole.FixesFetchCeilingAtRunStart`）：SQLite の代役は上限を持たない（false）、実 SQL Server は `MIN_ACTIVE_ROWVERSION()` を実行ごとに 1 回取る（true）。実行の途中にサーバーへ書かれた行は、固定するサーバー役ではその実行で降りず、次の実行で降りる（docs の洗い替えの節と上限の説明）。
+  - 決まった形の行は、期待を転送の名前でなくこの性質で選ぶ手 `WhenServerFixesCeilingOp(IfFixed, IfOpen)` で書く。固定する側（IfFixed）では「その実行の直後は降りていない → 次の同期で降りる」を表明する（取りこぼさないことの裏付け）。
+  - 使う行は `dl-server-update-after-upload-is-still-downloaded`（取得の直前に書かれた版）と、割り込みの網の洗い替え × 持ち主 × 更新 × 取得の前の点の 4 行（下の「割り込みの点」）。持ち主の読み直し・親の解決役はキーで読み直して上限の後の版を拾うので、ほかの行はどのサーバー役でも同じ期待になる。
 - DuplicateOnServer の決着の中身は決まった形の行が持つ：Collect＝`conflict-duplicate-key-on-server-is-reported`・LocalWins＝`lw-overwrites-duplicate-key-on-server`・ServerWins＝`sw-duplicate-key-on-server-reloads-server-row`（同期＝同じ実行のダウンロードが揃える）と `sw-duplicate-key-on-server-upload-only-reloads-server-row`（単独の UploadAsync＝ServerWins が自分で読み直す）・後勝ち＝`lww-duplicate-key-on-server-overwrites`。モデルは書き手が 2 人のキーの決着を表明しない（報告せずに上書きする壊し方は、乱数の種では結果の表の網羅だけが捕まえる）。
 - 表どうしの循環の列（`pinned_item_id`）は乱数の列が書かない（並行の書き手が行の循環を作るのを生成器は防げず、サーバーで消えた循環の行は端末に残る＝docs の既知の割り切り）。洗い替え以外の経路は決まった形の行が持つ：`cycle-pin-to-new-item-uploads-in-rounds`（新しい品目へのピン留めが最初の巡で断られ次の巡で通る）・`cycle-pinned-item-is-read-back-before-folder`（ダウンロードで解決役がピン留めの先を読み直す）・`cycle-serverwins-restores-folder-pinned-to-new-item`（ServerWins の読み直しで同じ）。解決役がフォルダー→品目の辺を辿らない壊し方で 3 行とも赤になる（mutation 実証済み）。
 - 次元表 `SyncModelDimensions`：
@@ -366,11 +370,13 @@
 ### HTTP・実 SQL Server の派生
 
 - `SyncModelHttpRuntimeTests`：in-process の Kestrel・生成された HTTP の差分ソースと同期専用のエンドポイント。サーバー側の注入した失敗は 500 で届くので、実行中に失敗が起きたかで見分ける。
-- `SyncModelSqlServerRuntimeTests`（Docker）：世界ごとにデータベースを作る実 SQL Server のサーバー役。生成された直結の差分ソース・本物の rowversion。サーバー側の失敗を仕掛けるシナリオと組は流さない。
-- どちらも次を確かめる。
+- `SyncModelSqlServerRuntimeTests`（Docker）：世界ごとにデータベースを作る実 SQL Server のサーバー役。生成された直結の差分ソース・本物の rowversion。
+- `SyncSupportRemoteAdoSqlServerRuntimeTests`（Docker・転送の値 `SqlServerHttp`）：同じ実 SQL Server のサーバー役を in-process の Kestrel の背後へ置き、生成された HTTP の差分ソースでつなぐ。決定的なシナリオは夜間だけ（上の「決定的なシナリオと Theory」）、乱数の種は普段も流す。名前は行列の名前の規則に従う（同期のモデルの仲間の `SyncModel…` は既知の一覧の Rename で、後の改名の区切りでそろえる）。
+- 実 SQL Server のサーバー役は、生成物の外側の包み（`SyncModelFaultingRepository`・`SyncModelFaultingSource`・`SyncModelFaultingBinaryColumns`）で、SQLite の代役と同じ点の失敗の注入と割り込みを起こす（版の採番とガードはしない）。版なしの表（ラベル）の書き手は代役と同じく包まない（書き込みの失敗をラベルの書き込みで使わない）。入口の割り込みと書き込みの失敗は `SyncModelFaults.BeforeServerWriteAsync` の 1 つを両方の包みが呼ぶ。
+- どれも次を確かめる。
   - 決定的なシナリオが直結と同じ違反になること。例外は入口・違反の種類・推定した形へ正規化して比べる（`SyncModelSignatures`）。
-  - 乱数の種が既知の失敗にしか当たらないこと。種の数は `QUICKER_SYNC_MODEL_TRANSPORT_SEEDS`（既定 10）と、広い世界の種の `QUICKER_SYNC_MODEL_TRANSPORT_WIDE_SEEDS`（既定 4・夜間 40）。実 SQL Server は、どちらの範囲も種の組の余り 0・1 の種だけを流す。
-- SQL Server でだけ起きる既知の失敗は `SyncModelSqlServerRuntimeTests.SqlServerOnly` に置く。
+  - 乱数の種が既知の失敗にしか当たらないこと。種の数は `QUICKER_SYNC_MODEL_TRANSPORT_SEEDS`（既定 10）と、広い世界の種の `QUICKER_SYNC_MODEL_TRANSPORT_WIDE_SEEDS`（既定 4・夜間 40）。実 SQL Server の 2 つのクラスは、どちらの範囲も種の組の余り 0・1 の種（失敗の注入なし）と余り 2・3 の種（失敗の注入の組）を別の Fact で流す（`SyncModelSignatures.SqlServerSeeds`・`SqlServerFaultSeeds`）。
+- SQL Server でだけ起きる既知の失敗は `SyncModelSqlServerRuntimeTests.SqlServerOnly` に置く（HTTP × 実 SQL Server も同じ一覧で比べる）。
 - 既知の失敗は `SyncModelKnownFailures` の厳格な一覧（載っているシナリオはその署名の組どおりに失敗しなければ赤・載っていない失敗も赤）で一時的に外し、直したら消す。受け入れの項目（サーバーでの一意な値の入れ替え 2 本）は、理由に docs の既知の割り切りの文を名指しする。
 
 ### 同期の構成の行列
@@ -384,7 +390,7 @@
   - 書き込みの経路（因子 Via）：直接の挿入・グラフ保存・`GraphRemoveParentWithNewChild`・`GraphViaExcludedParent`。
 - 流れは「登録 → 解決 → 登録の形の検査 → 新しい行を同期 1 回で上げる → サーバーの新しい行を 1 回で降ろす → 洗い替え 1 回で両方の行がそろう」。
   - 解決はスコープを検査するプロバイダ（`ValidateScopes = true`）の、行ごとのスコープの中で行う（シングルトンがスコープのサービスを掴む登録の形を断る）。
-  - 洗い替えの段は登録の形ごとに全消しと流し込みが通ることを見る（今の 2 つのフィクスチャは木の図。表どうしの循環は同期のモデルの決定的な行 `refresh-*-foreign-key-cycle*` が 3 つの Theory で見る。図の形の軸は足していない）。
+  - 洗い替えの段は登録の形ごとに全消しと流し込みが通ることを見る（今の 2 つのフィクスチャは木の図。表どうしの循環は同期のモデルの決定的な行 `refresh-*-foreign-key-cycle*` が 4 つの転送で見る。図の形の軸は足していない）。
   - 登録の形（`SyncConfigFixtures.RegistrationProblems`）：ローカルの注文と明細のリポジトリがジャーナル記録デコレータ（構築時に除外した親の表も）／差分ソースが転送経路の型（HTTP は HttpSyncServerSource・直結は DirectSyncSource）／サーバーのリポジトリは素のまま。
   - 2 回目の同期が降ろすのはその 1 行だけ（ミラー版から導いたアンカー）。
   - `GraphRemoveParentWithNewChild` は、新しい親をグラフ保存で書いて同じ流れを通した後に段を 1 つ足す：上げ下げした 2 つの親に、キーの無い新しい子を足して親を消すグラフ保存（単数と複数の SaveAsync）と、新しい子だけを MarkRemoved したグラフ保存を流し、後勝ちの同期 1 回でサーバーから親が消え、ジャーナルに未送信もキーの無い記録も残らないことを見る。IntKey は消す親の下に、サーバーに同じキーの行がある新しい版なしの子（`sync_notes`）も入れ、サーバーのその行が残ることを見る。
@@ -396,12 +402,13 @@
 
 ### 割り込みの点
 
-- 同期・洗い替えの実行の名前つきの時点（`ModelInterruptPoint`）で、実行と別の流れから書き込みを 1 回差し込む。書き手（`SyncModelScenarios.InterruptWriter`）はその端末（ローカルの書き込み）かサーバーの他者（サーバーへの書き込み）で、1 つの割り込みに書き込みを順に並べられる。操作は `ArmInterruptOp`、仕組みは `SyncModelFaults.InterruptAsync`（呼ぶのは SQLite のサーバー役の包み）。
+- 同期・洗い替えの実行の名前つきの時点（`ModelInterruptPoint`）で、実行と別の流れから書き込みを 1 回差し込む。書き手（`SyncModelScenarios.InterruptWriter`）はその端末（ローカルの書き込み）かサーバーの他者（サーバーへの書き込み）で、1 つの割り込みに書き込みを順に並べられる。操作は `ArmInterruptOp`、仕組みは `SyncModelFaults.InterruptAsync`（呼ぶのはサーバー役の包み＝SQLite の代役と実 SQL Server の両方）。
   - 時点：サーバーへの行の書き込みの直前／差分・ページ・キーの取得の直前／取得が 1 行以上を返した後でエンジンがロックを取って適用する前。
   - 別の流れは `ExecutionContext.SuppressFlow` の下の `Task.Run`。同期の抑止の印も書き込みロックのリースも引き継がない。
 - 点はどれも、エンジンがローカルの書き込みロックを持たない時点に置く。端末の割り込みの書き込みはデコレータの書き込みロックを待つので、ロックの中に置くと待ち合って止まる（適用の最中・洗い替えには差し込めない）。上限 30 秒で待つのをやめ、`interrupt/deadlock` の違反にする。サーバーの他者の書き込みはローカルのロックを待たないので、洗い替えの取得の前後にも差し込む。
 - 割り込みの書き込みは通常の書き込みと同じ経路（`WriteAsync`）で、書き手の操作として履歴へ積む。
 - 仕掛けたのに点に来なかった割り込みは `interrupt/not-fired:{点}` の違反にする（黙った空振りの守り）。
+- 決まった形のシナリオが仕掛けたのに起きなかった失敗（`ArmFaultOp` の種類・空の取得・適用の飛ばし・フックの blob の書き込み）も、シナリオの終わりに `fault/not-fired:{種類}` の違反にする（`SyncModelFaults.PendingFaults`・`FinishAsync` の `requireArmedFaultsFired`）。失敗の口がサーバー役から外れても結果が同じになる行（失敗の後のやり直し・根拠の判定の after-fault の行など 29 行）が、黙って緑になるのを防ぐ。乱数の種と網羅の行は確率で仕掛けるので対象外。サーバー役の包み（SQLite の代役・実 SQL Server）の入口を外すと、失敗の口を使う行すべてが `interrupt/not-fired` か `fault/not-fired` で赤になる（mutation 実証済み）。
 - 端末の書き手の行は点 3 × ポリシー 2（Collect・ServerWins）× 前段 4（更新・削除→作り直し・削除・blob の書き込み）× 割り込みの書き込み 3（更新・削除・作り直し）のうち起こり得る 35 行＋フォルダーの `d1-folder-recreate-delete` の 1 行。
   - 外す組は原理的に起こり得ないものだけ：行が無いのに更新・削除する組・行があるのに作り直す組（`SyncModelScenarios.IsPossibleInterruptShape`）と、ServerWins × サーバーへの書き込みの直前（Versioned＋ServerWins はサーバーへ書かない＝`IsPossibleInterruptPoint`）。
   - Collect の行の名前は 4m-D1 からのまま（`interrupt-{点}-{形}`）、ServerWins の行は `-serverwins` を付ける。ServerWins の行はサーバーの他者が別の品目を変え、取得が 1 行以上を返す点にも来るようにする。
@@ -414,7 +421,6 @@
   - 後段の期待は期待の操作で表明する（汎用の「消失なし」は、端末の編集が古い受理記録でサーバーの新しい内容を上書きする形を拾えない）。取得の後の点の更新は、次の同期が内容ごと降ろす（downloaded=1）・Collect の編集は ModifiedOnServer の競合。取得の前の点は、次の同期は何も降ろさない・Collect の編集はそのまま上がる。ServerWins の編集は点に依らず捨てられてサーバーの内容に戻る。削除は次の同期の後に対象の行が端末に無い。
   - 洗い替え × `parent-after-child-selfref` × 削除 × 取得の後の点の 2 行（Collect・ServerWins）は、`SyncModelKnownFailures` の厳格な一覧に Pending（きっかけ待ち）で載っている：洗い替えのバッチの古い写しの子が、取得の後にサーバーで消えた親を指し、ローカルの外部キーで例外になる（洗い替えは失敗として止まり、次の洗い替えで取り直せる）。今の挙動を期待の操作で固定しない。署名は種の正規形の項目を作らない（`SeedOnlySignatures`。洗い替えの取得の後に割り込む書き込みは乱数の種の列に無い）。
   - 書き手ごとの行の宣言が起こり得る組をすべて含み、行の同期がそのポリシーで流れ、サーバーの書き手の行の割り込まれる実行が宣言の種類であることは `SyncModelRuntimeTests.InterruptScenarios_CoverEveryPointAndShape` が表明する（外す規則はテストの中で書き下ろす）。
-  - 割り込みは SQLite のサーバー役の包みでしか仕掛けられないので、この網の行は直結と HTTP の 2 つの Theory でだけ流れる（下の「実 SQL Server の転送は…」）。
+  - この網の行は 4 つの転送すべてで流れる（HTTP × 実 SQL Server は夜間）。洗い替え × `unique-holder-after-taker` × 更新 × 取得の前の点の 4 行は、上限を実行の始めに固定するサーバー役（実 SQL Server）では割り込みの版がその洗い替えに入らない（洗い替えは一意な値の持ち主を読み直さない）ので、期待の手 `WhenServerFixesCeilingOp` で「洗い替えの直後の端末に対象の行は無い → 次の同期で降りる」を表明してから、同じ後段へ進む。同期と親の前段は、持ち主の読み直し・親の解決役がキーで読み直して上限の後の版を拾うので、どのサーバー役でも同じ期待になる。
 - 割り込みは乱数の操作の列に入れない。生成器は毎歩実際の DB を読んで操作を選ぶので、派生の乱数で割り込みを選んでも既存の種の列が変わる。入れるなら別の種の列にする。
-- 実 SQL Server の転送は包みを持たないので、割り込みのシナリオを流さない（`SyncModelScenario.ArmsServerFaults`）。
 - mutation 実証済み。

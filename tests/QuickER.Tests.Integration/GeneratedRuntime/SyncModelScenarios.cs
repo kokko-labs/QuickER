@@ -40,14 +40,10 @@ internal sealed record SyncModelScenario(
     public static IReadOnlySet<SyncModelTransport> AllTransports { get; } =
         new HashSet<SyncModelTransport>(Enum.GetValues<SyncModelTransport>());
 
-    /// <summary>直結と HTTP（SyncRuntimeTestsBase から移したシナリオの既定＝元のテストが流れていた 2 つ）</summary>
-    public static IReadOnlySet<SyncModelTransport> DirectAndHttp { get; } =
-        new HashSet<SyncModelTransport> { SyncModelTransport.Direct, SyncModelTransport.Http };
-
     /// <summary>
-    /// シナリオを流す転送（直結のテスト・HTTP のテスト・実 SQL Server のテストがこの宣言から行を作る）。直結は必ず含む
-    /// （HTTP と実 SQL Server のテストは直結の結果と比べる）。実 SQL Server は、サーバー役の口を使うシナリオ
-    /// （<see cref="ArmsServerFaults"/>）では宣言があっても流さない
+    /// シナリオを流す転送（直結・HTTP・実 SQL Server・HTTP × 実 SQL Server のテストがこの宣言から行を作る）。直結は必ず含む
+    /// （ほかの転送のテストは直結の結果と比べる）。サーバー役の口（失敗の注入と割り込みの点）は、SQLite の代役も実 SQL Server も
+    /// 同じ点で持つ（<see cref="SyncModelServerRepository{TEntity, TKey}"/>・<see cref="SyncModelFaultingRepository{TEntity, TKey}"/>）
     /// </summary>
     public IReadOnlySet<SyncModelTransport> Transports { get; init; } = AllTransports;
 
@@ -55,26 +51,7 @@ internal sealed record SyncModelScenario(
     public bool RunsOn(SyncModelTransport transport) =>
         Transports.Contains(SyncModelTransport.Direct)
             ? Transports.Contains(transport)
-                && (transport != SyncModelTransport.SqlServer || !ArmsServerFaults)
             : throw new InvalidOperationException($"{Name} must run on the direct transport.");
-
-    /// <summary>
-    /// サーバー役の口（失敗の注入と割り込みの点）を使うか（実 SQL Server では流さない）。サーバー側の失敗（ServerWrite・
-    /// ServerFetch・BlobDownload・BlobUpload）と割り込みの点（<see cref="ArmInterruptOp"/>）は、SQLite のサーバー役の包み
-    /// （<see cref="SyncModelServerRepository{TEntity, TKey}"/>・差分ソース）が起こす。実 SQL Server のサーバー役は生成された
-    /// リポジトリと直結の差分ソースをそのまま使い、この包みを持たないので、仕掛けても起きない（割り込みは not-fired の違反になる）
-    /// </summary>
-    public bool ArmsServerFaults =>
-        Ops.OfType<ArmInterruptOp>().Any()
-        || Ops.OfType<ArmEmptyFetchOp>().Any()
-        || Ops.OfType<ArmFaultOp>()
-            .Any(a =>
-                a.Kind
-                    is ModelFaultKind.ServerWrite
-                        or ModelFaultKind.ServerFetch
-                        or ModelFaultKind.BlobDownload
-                        or ModelFaultKind.BlobUpload
-            );
 
     /// <summary>シナリオを流し、見つかった違反を返す</summary>
     /// <param name="ct">キャンセルトークン</param>
@@ -99,7 +76,7 @@ internal sealed record SyncModelScenario(
             await run.ExecuteAsync(op);
         }
 
-        await run.FinishAsync();
+        await run.FinishAsync(requireArmedFaultsFired: true);
         var failures = run.Failures.ToList();
 
         if (
@@ -2076,6 +2053,30 @@ internal static partial class SyncModelScenarios
             var stale = point == ModelInterruptPoint.AfterServerFetchBeforeApply;
             var row = $"{target} parent=null name=p-interrupt";
 
+            // 洗い替え × 持ち主 × 取得の前の点 × 更新：上限を実行の始めに固定するサーバー役（実 SQL Server）では、割り込みの
+            // 版は上限より後なので洗い替えに入らない。洗い替えは表を空にしてから入れるので一意な値の持ち主の読み直しも走らず
+            // （親の前段は親の解決役がキーで読み直すので拾う）、洗い替えの直後の端末に対象の行は無い。次の同期で降りる
+            // （取りこぼさない）ことを表明してから、上限を持たないサーバー役と同じ後段へ進む
+            if (
+                run == InterruptRun.Refresh
+                && point == ModelInterruptPoint.BeforeServerFetch
+                && prelude == ServerInterruptPrelude.UniqueHolderAfterTaker
+                && write == ServerInterruptWrite.Update
+            )
+            {
+                ops.Add(
+                    new WhenServerFixesCeilingOp(
+                        [
+                            Expect.Rows(D1, ModelTables.Folders).Absent($"{target} *"),
+                            Sync(D1, policy: policy),
+                            Expect.Result(D1).Contains("downloaded=1").Absent("conflict *"),
+                            Expect.Rows(D1, ModelTables.Folders).Contains(row),
+                        ],
+                        []
+                    )
+                );
+            }
+
             if (write == ServerInterruptWrite.Delete)
             {
                 ops.Add(Sync(D1, policy: policy));
@@ -2148,8 +2149,8 @@ internal static partial class SyncModelScenarios
     /// P5-2 の S1＝<c>interrupt-BeforeServerWrite-recreate-deleted</c>（計画した削除を送る前の作り直し）、S2＝
     /// <c>interrupt-*-update-blob-written-serverwins</c>（ServerWins の実行中の blob を書いた行の更新）、先行の D5＝
     /// <c>interrupt-*-recreate-deleted-serverwins</c>。S2 の削除の版の枝は <c>interrupt-*-delete-recreated-serverwins</c>・
-    /// <c>interrupt-*-update-recreated-serverwins</c>（どれも、ServerWins が適用しなかった行の記録を捨てて落ちていた）。割り込みは SQLite のサーバー役の包みでしか仕掛けられないので、どの行も実
-    /// SQL Server の転送では流れない（<see cref="SyncModelScenario.ArmsServerFaults"/>）。
+    /// <c>interrupt-*-update-recreated-serverwins</c>（どれも、ServerWins が適用しなかった行の記録を捨てて落ちていた）。割り込みはサーバー役の包み（SQLite の代役と実
+    /// SQL Server の両方）が起こすので、どの行もすべての転送で流れる。
     /// </para>
     /// <para>
     /// 4m-D1＝<c>interrupt-BeforeServerWrite-delete-recreated</c>：計画の後・再生の前（701 の書き込みの直前）にアプリが 702 をもう一度

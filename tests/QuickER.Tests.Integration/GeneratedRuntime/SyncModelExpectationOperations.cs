@@ -119,6 +119,24 @@ internal sealed record WhenServerSameUniqueOp(
         + $"different [{string.Join("; ", IfDifferent.Select(op => op.Describe()))}]";
 }
 
+/// <summary>
+/// サーバー役が取得の上限を実行の始めに固定するか（<see cref="ISyncModelServerRole.FixesFetchCeilingAtRunStart"/>＝実 SQL Server の
+/// <c>MIN_ACTIVE_ROWVERSION()</c>。SQLite の代役は上限を持たない）で、続ける手を選ぶ。実行の途中でサーバーの他者が書いた行は、
+/// 上限を固定するサーバー役ではその実行の取得に入らず、次の実行で降りる。同じ決まった形の行を両方のサーバー役で流し、
+/// それぞれの期待（固定するなら「その実行の直後は降りていない → 次の同期で降りる」）を表明する
+/// </summary>
+/// <param name="IfFixed">上限を実行の始めに固定するサーバー役の手</param>
+/// <param name="IfOpen">上限を持たないサーバー役の手</param>
+internal sealed record WhenServerFixesCeilingOp(
+    IReadOnlyList<ModelOp> IfFixed,
+    IReadOnlyList<ModelOp> IfOpen
+) : ModelOp
+{
+    public override string Describe() =>
+        $"WhenServerFixesCeiling: fixed [{string.Join("; ", IfFixed.Select(op => op.Describe()))}] "
+        + $"open [{string.Join("; ", IfOpen.Select(op => op.Describe()))}]";
+}
+
 /// <summary>期待の手を組み立てる（<c>Expect.Result(D1).Exact(...)</c>）</summary>
 internal static class Expect
 {

@@ -79,6 +79,24 @@ internal sealed partial class SyncModelRun
                 return true;
             }
 
+            case WhenServerFixesCeilingOp ceiling:
+            {
+                var fixedCeiling = _world.Server.FixesFetchCeilingAtRunStart;
+                _log.Add(
+                    $"  -> the server {(fixedCeiling ? "fixes" : "does not fix")} the fetch ceiling at the start of a run"
+                );
+
+                foreach (var inner in fixedCeiling ? ceiling.IfFixed : ceiling.IfOpen)
+                {
+                    if (!await ExecuteAsync(inner))
+                    {
+                        break;
+                    }
+                }
+
+                return true;
+            }
+
             case BulkAddFoldersOp folders:
                 await BulkWriteAsync(
                     folders.Actor,

@@ -3193,6 +3193,9 @@ When the tables of a run form such a cycle, every one of them is a generated tab
 Tables without a cycle are emptied one at a time as before.
 The state this leaves that a single transaction would not is a partly rebuilt local database: between the first delete and the last row of the last table, a reader sees fewer rows than either side holds.
 Nothing is lost by it, and local writes wait until the refresh is over, but a screen reading the tables meanwhile sees them half empty, so a refresh is not something to run underneath a live screen.
+A refresh also takes its ceiling once, at the start, as an ordinary run does.
+A row of a versioned table written to the server while the refresh is running carries a version above that ceiling, so the refresh does not bring it down and the local database may lack it right afterwards.
+The next sync brings it down; nothing is skipped.
 
 ### Known limitations
 
