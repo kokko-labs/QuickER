@@ -105,9 +105,19 @@ internal static class GuiFailureDiagnostics
     [ThreadStatic]
     private static int _inputReportCount;
 
-    /// <summary>最後に見た前面のウィンドウ（変わったときだけ時系列へ書く）</summary>
+    /// <summary>
+    /// 最後に見た前面のウィンドウ（変わったときだけ時系列へ書く）。実行の始めは null＝まだ見ていない。前面が無い（0）
+    /// 環境（対話するデスクトップの無い CI のランナー）でも、実行の始めの 1 行は必ず書く
+    /// </summary>
     [ThreadStatic]
-    private static IntPtr _lastForeground;
+    private static IntPtr? _lastForeground;
+
+    /// <summary>前面のウィンドウの取得を差し替える（自己検査が、前面の無い環境を作るため。null なら Win32 から読む）</summary>
+    [ThreadStatic]
+    internal static Func<IntPtr>? ForegroundForTests;
+
+    /// <summary>前面のウィンドウ（差し替えがあればその値）</summary>
+    private static IntPtr Foreground() => ForegroundForTests?.Invoke() ?? GetForegroundWindow();
 
     /// <summary>Win32 から届いた入力を記録に載せる件数（直前のものから）</summary>
     private const int InputReportCapacity = 30;
@@ -200,7 +210,7 @@ internal static class GuiFailureDiagnostics
             _inputReports = new Queue<string>();
             _inputReportCount = 0;
             _inputReportKinds = null;
-            _lastForeground = IntPtr.Zero;
+            _lastForeground = null;
             NoteForegroundChange();
             _foreignForegroundChanges = 0;
 
@@ -248,9 +258,9 @@ internal static class GuiFailureDiagnostics
     /// <summary>前面のウィンドウが前に見たものから変わっていれば時系列へ書く</summary>
     private static void NoteForegroundChange()
     {
-        var handle = GetForegroundWindow();
+        var handle = Foreground();
 
-        if (handle == _lastForeground)
+        if (_lastForeground == handle)
         {
             return;
         }
@@ -792,7 +802,7 @@ internal static class GuiFailureDiagnostics
     /// プロセス名だけを書く（利用者のほかのアプリのタイトル＝ブラウザのタブ名などを、%TEMP% のログや CI の出力へ残さない）
     /// </summary>
     private static void AppendForegroundWindow(StringBuilder builder) =>
-        builder.Append("  ").AppendLine(DescribeForeground(GetForegroundWindow()));
+        builder.Append("  ").AppendLine(DescribeForeground(Foreground()));
 
     /// <summary>前面のウィンドウを 1 行で書く（タイトルはこのプロセスのウィンドウだけ）</summary>
     private static string DescribeForeground(IntPtr handle)

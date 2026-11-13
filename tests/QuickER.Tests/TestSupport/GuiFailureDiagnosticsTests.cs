@@ -202,7 +202,10 @@ public class GuiFailureDiagnosticsTests
             .And.Contain("PreviewGotKeyboardFocus")
             .And.Contain("W1:Window: GotMouseCapture src=Button(DiagnosticsButton)")
             .And.Contain("W1:Window: LostMouseCapture src=Button(DiagnosticsButton) now=null")
-            .And.Contain("前面: hwnd=", "実行の始めの前面のウィンドウを書く")
+            .And.Contain(
+                "ms] 前面: ",
+                "実行の始めの前面のウィンドウを書く（前面が無い CI のランナーでも「前面のウィンドウなし」と書く）"
+            )
             .And.NotContain("W1:Window: Closed");
 
         // Win32 から届いた入力（合成の MouseEventArgs / KeyEventArgs ではない生の報告）は、件数と中身を区画へ書く
@@ -263,6 +266,56 @@ public class GuiFailureDiagnosticsTests
             .BeTrue("見分け方が WPF の実際のイベントに合う");
         InputManager.Current.ProcessInput(args);
         DoEvents();
+    }
+
+    [Fact(
+        DisplayName = "前面のウィンドウが無い環境（CI のランナー）でも、実行の始めの前面の行を時系列へ書き、移ったら書き足す"
+    )]
+    public void Enter_WithoutForegroundWindow_StillRecordsTheFirstForegroundLine()
+    {
+        using var _ = GuiFailureDiagnostics.SuppressSinksForTests();
+        string? report = null;
+
+        RunSta(() =>
+        {
+            var foreground = IntPtr.Zero;
+            GuiFailureDiagnostics.ForegroundForTests = () => foreground;
+
+            try
+            {
+                // 実行の始めを前面の無い状態でやり直す（RunSta の Enter は差し替えの前に動いている。
+                // 出力先へは書かない＝調べる人が読むファイルを汚さない）
+                GuiFailureDiagnostics.Enter(
+                    new GuiFailureDiagnostics.RunContext { SuppressSinks = true }
+                );
+                GuiFailureDiagnostics.Note("first");
+                foreground = new IntPtr(0x1234);
+                GuiFailureDiagnostics.Note("second");
+                GuiFailureDiagnostics.Note("third");
+                GuiFailureDiagnostics.Capture(new InvalidOperationException("no-foreground"));
+                report = GuiFailureDiagnostics.LastReport;
+            }
+            finally
+            {
+                GuiFailureDiagnostics.ForegroundForTests = null;
+            }
+        });
+
+        var foregroundLines = report!
+            .Split('\n')
+            .Select(line => line.TrimEnd('\r'))
+            .Where(line => line.Contains("ms] 前面: ", StringComparison.Ordinal))
+            .ToList();
+        foregroundLines
+            .Should()
+            .HaveCount(2, "始めの 1 行と、移ったときの 1 行だけ（変わらなければ書かない）");
+        foregroundLines[0]
+            .Should()
+            .EndWith("前面: (前面のウィンドウなし)", "前面が 0 でも実行の始めは必ず書く");
+        foregroundLines[1].Should().Contain("前面: hwnd=0x1234");
+        report
+            .Should()
+            .Contain("[前面のウィンドウ]\r\n  hwnd=0x1234", "区画も差し替えた取得を読む");
     }
 
     [Fact(
