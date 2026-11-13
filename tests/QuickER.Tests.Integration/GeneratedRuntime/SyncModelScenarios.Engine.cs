@@ -9,7 +9,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// （版なしの子）、sync_orders.attachment → model_items.payload。同期は blob を運ぶ（<see cref="Plain"/>）：
 /// 元のテストの既定は運ばないが、明細の表は blob を持たず、注文の blob は書いていない（運んでも元の表明は変わらない）。
 /// モデルの品目は NOT NULL の blob を持ち、運ぶかを端末の中で切り替えると文書の既知の割り切り（O1＝切り替えたら洗い替え）
-/// に当たって収束しないため、端末ごとに運ぶ側へそろえる。転送は元のテストと同じ直結と HTTP（<see cref="Moved"/>）。
+/// に当たって収束しないため、端末ごとに運ぶ側へそろえる。転送はすべて（<see cref="Moved"/>）。
 /// </summary>
 internal static partial class SyncModelScenarios
 {
@@ -17,22 +17,15 @@ internal static partial class SyncModelScenarios
     private const string I = ModelTables.Items;
     private const string L = ModelTables.Labels;
 
-    /// <summary>移したシナリオ（直結と HTTP で流す）</summary>
+    /// <summary>
+    /// 移したシナリオ（すべての転送で流す。元の SyncSqlServerRuntimeTests が守っていた本物の rowversion・
+    /// MIN_ACTIVE_ROWVERSION() の上限・外部キーエラーの分類・TOP のページングは、実 SQL Server の転送でも期待の手で表明する）
+    /// </summary>
     private static SyncModelScenario Moved(
         string name,
         IReadOnlyList<ModelWriteOp> setup,
         IReadOnlyList<ModelOp> ops
-    ) => new(name, setup, ops) { Transports = SyncModelScenario.DirectAndHttp };
-
-    /// <summary>
-    /// 移したシナリオのうち、実 SQL Server の転送でも流すもの（元の SyncSqlServerRuntimeTests が守っていた
-    /// 本物の rowversion・MIN_ACTIVE_ROWVERSION() の上限・外部キーエラーの分類・TOP のページングを、期待の手で表明する）
-    /// </summary>
-    private static SyncModelScenario MovedAll(
-        string name,
-        IReadOnlyList<ModelWriteOp> setup,
-        IReadOnlyList<ModelOp> ops
-    ) => new(name, setup, ops) { Transports = SyncModelScenario.AllTransports };
+    ) => new(name, setup, ops);
 
     /// <summary>元のテストの既定の同期（blob は運ぶ＝型の注を見る）</summary>
     private static ModelSyncOp Plain(
@@ -67,7 +60,7 @@ internal static partial class SyncModelScenarios
 
     private static IEnumerable<SyncModelScenario> EngineBasicScenarios() =>
         [
-            MovedAll(
+            Moved(
                 "dl-initial-downloads-everything",
                 [],
                 [
@@ -83,7 +76,7 @@ internal static partial class SyncModelScenarios
                     Expect.Journal(D1).Empty(),
                 ]
             ),
-            MovedAll(
+            Moved(
                 "dl-incremental-downloads-only-newer-rows",
                 [.. Seed(1, "alice", 11, "widget")],
                 [
@@ -103,7 +96,7 @@ internal static partial class SyncModelScenarios
             // 上げて受理記録を残す。端末 2 は端末 1 の版を降ろしてから編集して上げ、端末 3 は端末 1 の版を見ずに端末 2 の版だけを
             // 降ろす。端末 1 は、自分の受理記録のキーに来た端末 2 の版（端末 1 の版を元にした別の書き込み）を自分のエコーと
             // みなさずに降ろし、端末 3 は端末 2 の版を元にした編集を競合なしに上げる
-            MovedAll(
+            Moved(
                 "three-devices-change-reaches-the-other-two-in-different-orders",
                 [.. Seed(1, "alice", 11, "widget")],
                 [
@@ -241,7 +234,7 @@ internal static partial class SyncModelScenarios
                 [],
                 [.. Seed(1, "alice", 11, "widget"), Plain(D1), Expect.Journal(D1).Empty()]
             ),
-            MovedAll(
+            Moved(
                 "ul-local-update-is-uploaded",
                 [.. Seed(1, "alice", 11, "widget")],
                 [

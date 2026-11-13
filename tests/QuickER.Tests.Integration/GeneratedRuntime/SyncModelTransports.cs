@@ -48,6 +48,13 @@ internal interface ISyncModelServerRole : ISyncModelSources, IAsyncDisposable
     /// </summary>
     IEqualityComparer<string> UniqueValues { get; }
 
+    /// <summary>
+    /// 取得の上限を実行（同期・洗い替え）の始めに固定するか（実 SQL Server は <c>MIN_ACTIVE_ROWVERSION()</c> を実行ごとに 1 回取る＝
+    /// 実行の途中にサーバーへ書かれた行はその実行の取得に入らず、次の実行で降りる。SQLite の代役は上限を持たない）。期待の手
+    /// <see cref="WhenServerFixesCeilingOp"/> がこれで枝を選ぶ
+    /// </summary>
+    bool FixesFetchCeilingAtRunStart { get; }
+
     /// <summary>内容を読む</summary>
     Task<ModelDbState> ReadStateAsync(CancellationToken ct);
 }
@@ -261,8 +268,9 @@ internal sealed class SyncModelHttpSources : ISyncModelSources, IAsyncDisposable
 /// <c>MIN_ACTIVE_ROWVERSION()</c>）。世界ごとにデータベースを 1 つ作り、破棄で消す。
 /// </summary>
 /// <remarks>
-/// サーバー側の失敗の注入はつながない（生成された差分ソースとリポジトリをそのまま使うため）。このサーバー役で流すのは、
-/// サーバー側の失敗を仕掛けない種とシナリオだけ。
+/// サーバー側の失敗の注入と割り込みの点は、生成されたリポジトリ・差分ソース・blob のアクセサの外側の包み
+/// （<see cref="SyncModelFaultingRepository{TEntity, TKey}"/>・<see cref="SyncModelFaultingSource{TEntity, TKey}"/>・
+/// <see cref="SyncModelFaultingBinaryColumns"/>）が、SQLite の代役と同じ点で起こす。
 /// </remarks>
 internal sealed class SyncModelSqlServerServer : ISyncModelServerRole
 {
@@ -294,6 +302,8 @@ internal sealed class SyncModelSqlServerServer : ISyncModelServerRole
 
     public IEqualityComparer<string> UniqueValues => SyncModelSqlServerUniqueValues.Instance;
 
+    public bool FixesFetchCeilingAtRunStart => true;
+
     public ISyncServerSource<ModelFolderEntity, int> FolderSource { get; private set; } = null!;
 
     public ISyncServerSource<ModelLabelEntity, string> LabelSource { get; private set; } = null!;
@@ -305,6 +315,7 @@ internal sealed class SyncModelSqlServerServer : ISyncModelServerRole
     /// <summary>コンテナに新しいデータベースを作り、図の DDL を当てる</summary>
     public static async Task<SyncModelSqlServerServer> CreateAsync(
         string masterConnectionString,
+        SyncModelFaults faults,
         CancellationToken ct
     )
     {
@@ -343,33 +354,70 @@ internal sealed class SyncModelSqlServerServer : ISyncModelServerRole
                 factory
             );
 
-        server.Folders = folders;
-        server.Labels = labels;
-        server.Items = items;
-        server.Events = events;
-        server.ItemBlobs = new SyncRepositoryBinaryColumns<ModelItemEntity, int>(
-            GeneratedSyncTables.ModelItem,
-            items
-        );
-        server.FolderSource = new DirectSyncSource<ModelFolderEntity, int>(
-            sql,
+        // 失敗の口（SQLite の代役と同じ点）。版なしの表の書き手は代役と同じく素のまま（ServerWrite を消費しない）
+        var faultingFolders = new SyncModelFaultingRepository<ModelFolderEntity, int>(
             folders,
-            GeneratedSyncTables.ModelFolder
+            e => e.FolderId,
+            faults
         );
-        server.LabelSource = new VersionlessDirectSyncSource<ModelLabelEntity, string>(
-            sql,
-            labels,
-            GeneratedSyncTables.ModelLabel
-        );
-        server.ItemSource = new DirectSyncSource<ModelItemEntity, int>(
-            sql,
+        var faultingItems = new SyncModelFaultingRepository<ModelItemEntity, int>(
             items,
-            GeneratedSyncTables.ModelItem
+            e => e.ItemId,
+            faults
         );
-        server.EventSource = new DirectSyncSource<ModelEventEntity, DateTime>(
-            sql,
+        var faultingEvents = new SyncModelFaultingRepository<ModelEventEntity, DateTime>(
             events,
-            GeneratedSyncTables.ModelEvent
+            e => e.EventAt,
+            faults
+        );
+        var itemBlobs = new SyncModelFaultingBinaryColumns(
+            new SyncRepositoryBinaryColumns<ModelItemEntity, int>(
+                GeneratedSyncTables.ModelItem,
+                items
+            ),
+            faults
+        );
+
+        server.Folders = faultingFolders;
+        server.Labels = labels;
+        server.Items = faultingItems;
+        server.Events = faultingEvents;
+        server.ItemBlobs = itemBlobs;
+        server.FolderSource = new SyncModelFaultingSource<ModelFolderEntity, int>(
+            new DirectSyncSource<ModelFolderEntity, int>(
+                sql,
+                folders,
+                GeneratedSyncTables.ModelFolder
+            ),
+            faultingFolders,
+            null,
+            faults
+        );
+        server.LabelSource = new SyncModelFaultingSource<ModelLabelEntity, string>(
+            new VersionlessDirectSyncSource<ModelLabelEntity, string>(
+                sql,
+                labels,
+                GeneratedSyncTables.ModelLabel
+            ),
+            labels,
+            null,
+            faults
+        );
+        server.ItemSource = new SyncModelFaultingSource<ModelItemEntity, int>(
+            new DirectSyncSource<ModelItemEntity, int>(sql, items, GeneratedSyncTables.ModelItem),
+            faultingItems,
+            itemBlobs,
+            faults
+        );
+        server.EventSource = new SyncModelFaultingSource<ModelEventEntity, DateTime>(
+            new DirectSyncSource<ModelEventEntity, DateTime>(
+                sql,
+                events,
+                GeneratedSyncTables.ModelEvent
+            ),
+            faultingEvents,
+            null,
+            faults
         );
 
         return server;

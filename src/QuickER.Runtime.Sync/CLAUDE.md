@@ -456,7 +456,7 @@
 
 ## ガードテストの一覧
 
-- 決定的なシナリオは同期のモデル（`SyncModelRuntimeTests`＝直結・`SyncModelHttpRuntimeTests`＝HTTP・`SyncModelSqlServerRuntimeTests`＝実 SQL Server、SQL Server だけの既知の失敗は `SyncModelSqlServerRuntimeTests.SqlServerOnly`）が流す。転送の軸の目印は `ISyncModelTransportTests`。行の分割は `SyncModelRuntimeTests.ScenarioParts_CoverEveryScenarioOncePerTransport`、割り込みのシナリオの全積は `SyncModelRuntimeTests.InterruptScenarios_CoverEveryPointAndShape`、乱数の種の照合の正規化は `SyncModelRuntimeTests.Family`。仕組みは `tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`「双方向同期のテスト」。
+- 決定的なシナリオは同期のモデル（`SyncModelRuntimeTests`＝直結・`SyncModelHttpRuntimeTests`＝HTTP・`SyncModelSqlServerRuntimeTests`＝実 SQL Server・`SyncSupportRemoteAdoSqlServerRuntimeTests`＝HTTP × 実 SQL Server、SQL Server だけの既知の失敗は `SyncModelSqlServerRuntimeTests.SqlServerOnly`）が流す。転送の軸の目印は `ISyncModelTransportTests`。行の分割は `SyncModelRuntimeTests.ScenarioParts_CoverEveryScenarioOncePerTransport`、割り込みのシナリオの全積は `SyncModelRuntimeTests.InterruptScenarios_CoverEveryPointAndShape`、乱数の種の照合の正規化は `SyncModelRuntimeTests.Family`。仕組みは `tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`「双方向同期のテスト」。
 - エンジンの外の仕組み（並行のロックと割り込み・記録の文の形・全書き込み入口の記録・登録簿なしの例外・別の DB の保存のフック・NULL 許容の計算列・サーバーで NULL になった blob・知らない除外の型・一覧に載らない参照）は `SyncRuntimeTestsBase` と転送別の派生 `SyncSqliteRuntimeTests`（直結・サーバー役も SQLite）・`SyncHttpRuntimeTests`（in-process Kestrel）。
 - 実 SQL Server の固有は `SyncSqlServerRuntimeTests`（NULL を許す一意制約・洗い替えの内容の一致の計測）と `SyncSqlServerHttpRuntimeTests`。
 - 値オブジェクト×同期は `SyncVoRuntimeTests`（オフライン新規行のアップロード・キーだけのスタブのグラフ削除記録・版書き戻し）。

@@ -140,6 +140,28 @@ internal sealed class SyncModelFaults
         }
     }
 
+    /// <summary>
+    /// 仕掛けたまま、まだ起きていない失敗の種類（<see cref="ModelFaultKind"/> の名前と、決定的なシナリオだけの口
+    /// <c>EmptyFetch</c>・<c>HookBlobWrite</c>）。決まった形のシナリオの終わりに、黙った空振りを
+    /// <c>fault/not-fired:{種類}</c> の違反にするのに使う（割り込みの <see cref="PendingInterrupt"/> と同じ守り）
+    /// </summary>
+    public IReadOnlyList<string> PendingFaults
+    {
+        get
+        {
+            var pending = _armed.Select(armed => armed.Kind.ToString()).ToList();
+            pending.AddRange(_emptyFetches.Select(_ => "EmptyFetch"));
+            pending.AddRange(_applySkips.Select(_ => nameof(ModelFaultKind.ApplySkip)));
+
+            if (_hookBlobWrite is not null)
+            {
+                pending.Add("HookBlobWrite");
+            }
+
+            return [.. pending.Distinct().Order(StringComparer.Ordinal)];
+        }
+    }
+
     /// <summary>仕掛けた失敗が起きた回数（操作の前後で比べ、失敗が効いた操作を見分ける）</summary>
     public int Fired { get; private set; }
 
@@ -391,6 +413,34 @@ internal sealed class SyncModelFaults
         }
 
         return new SyncChangeBatch<TEntity>(rows, rows.Count >= batchSize);
+    }
+
+    /// <summary>
+    /// 差分・ページの取得が返したバッチを、エンジンへ返す前に通す（続きの有無は取得の答えのまま。1 行以上なら
+    /// <see cref="ModelInterruptPoint.AfterServerFetchBeforeApply"/> の割り込みの点）
+    /// </summary>
+    public async Task<SyncChangeBatch<TEntity>> AfterFetchAsync<TEntity>(
+        SyncChangeBatch<TEntity> batch
+    )
+        where TEntity : EntityBase, new()
+    {
+        if (batch.Rows.Count > 0)
+        {
+            await InterruptAsync(ModelInterruptPoint.AfterServerFetchBeforeApply)
+                .ConfigureAwait(false);
+        }
+
+        return batch;
+    }
+
+    /// <summary>
+    /// サーバーへの行の書き込み（挿入・更新・保存・削除）の入口で呼ぶ（割り込みの点
+    /// <see cref="ModelInterruptPoint.BeforeServerWrite"/> と、仕掛けた ServerWrite の失敗）。サーバー役の包みが共通に呼ぶ
+    /// </summary>
+    public async Task BeforeServerWriteAsync(Type entityType, object key)
+    {
+        await InterruptAsync(ModelInterruptPoint.BeforeServerWrite).ConfigureAwait(false);
+        ThrowOnServerWrite(entityType, key);
     }
 
     private readonly List<(ModelActor Device, string Table, string Key)> _writeHits = [];

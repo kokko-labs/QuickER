@@ -286,7 +286,7 @@ public sealed class MatrixAxisGuardTests
             (false, true) => nameof(SyncModelTransport.Direct),
             (true, true) => nameof(SyncModelTransport.Http),
             (false, false) => nameof(SyncModelTransport.SqlServer),
-            _ => "HTTP 越しの実 SQL Server（正本に無い組み方）",
+            (true, false) => nameof(SyncModelTransport.SqlServerHttp),
         };
     }
 }

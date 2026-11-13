@@ -77,6 +77,10 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **The same section now states that PostgreSQL and MySQL compare a date and time to the microsecond** — their drivers drop the part of a compared value finer than a microsecond before sending it, so `x.At == value` can hold where C# says no. The behavior is unchanged
 - **The same section now states that on PostgreSQL the EF Core repositories round a value compared with a `money` column to two fractional digits** — PostgreSQL has no comparison between `money` and `numeric`, so the value is sent as `money`, and `x.Price == 1.234m` matches a row that holds `1.23`. It also states that PostgreSQL refuses a negative number written as a literal against a `money` column (`operator does not exist: - money`), so such a value is passed as a parameter. The behavior is unchanged
 
+#### Bidirectional sync
+
+- **The refresh section of the docs now states what happens to a row written to the server while a refresh is running** — a refresh takes its ceiling (`MIN_ACTIVE_ROWVERSION()`) once at the start, as an ordinary run does, so a row of a versioned table written meanwhile is not brought down by that refresh and the local database may lack it right afterwards. The next sync brings it down. The behavior is unchanged
+
 #### Distribution
 
 - **The launcher `QuickER.exe` and `Update.exe` that the installer and the portable zip place next to the app are now x64 instead of x86** — the app itself was already x64. An installed QuickER switches to them when it updates to this version

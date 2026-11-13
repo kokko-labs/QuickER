@@ -34,7 +34,7 @@ internal static partial class SyncModelScenarios
 
     private static IEnumerable<SyncModelScenario> EngineRefreshScenarios() =>
         [
-            MovedAll(
+            Moved(
                 "refresh-rebuilds-local-from-server",
                 [],
                 [
@@ -62,7 +62,7 @@ internal static partial class SyncModelScenarios
                     Expect.Mirror(D1, F).Contains("key=1 mirror=server"),
                 ]
             ),
-            MovedAll(
+            Moved(
                 "refresh-leaves-anchor-next-sync-resumes-from",
                 [.. Seed(1, "alice", 11, "widget")],
                 [
@@ -229,7 +229,7 @@ internal static partial class SyncModelScenarios
             // P5-2 の S3：表どうしの外部キーの循環（品目→フォルダー・フォルダーのピン留め→品目）。行は循環しない（フォルダー 700
             // が別のフォルダー 710 の品目 711 をピン留めする）。1 表ずつの全消しは、どの順でも最初の DELETE がもう一方の表の行に
             // 参照されて断られた（Force では未送信の記録だけが先に消えた）
-            MovedAll(
+            Moved(
                 "refresh-empties-tables-in-a-foreign-key-cycle",
                 [],
                 [
@@ -244,7 +244,7 @@ internal static partial class SyncModelScenarios
                     Expect.Rows(D1, I).Exact("711 folder=710 *", "999 *"),
                 ]
             ),
-            MovedAll(
+            Moved(
                 "refresh-force-in-a-foreign-key-cycle-replaces-pending-changes",
                 [],
                 [
@@ -259,7 +259,7 @@ internal static partial class SyncModelScenarios
             ),
             // 循環の全消しは 1 つのトランザクション：最後の表（親のフォルダー）の DELETE が断られると、先に消した表も含めて
             // 何も消えず、受理記録も残り、開いたトランザクションも残らない（次の書き込みと同期が普通に通る）
-            MovedAll(
+            Moved(
                 "refresh-failed-wipe-in-a-foreign-key-cycle-deletes-nothing",
                 [],
                 [
@@ -392,7 +392,7 @@ internal static partial class SyncModelScenarios
                     new ModelRefreshOp(D1, SyncMode.LastWriteWins, IncludeBlobs: true),
                 ]
             ),
-            MovedAll(
+            Moved(
                 "blob-include-downloads-blobs",
                 [],
                 [

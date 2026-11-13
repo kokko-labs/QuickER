@@ -70,8 +70,9 @@ internal sealed class SyncModelServerRepository<TEntity, TKey>(
 
     public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
-        await faults.InterruptAsync(ModelInterruptPoint.BeforeServerWrite).ConfigureAwait(false);
-        faults.ThrowOnServerWrite(typeof(TEntity), readKey(entity)!);
+        await faults
+            .BeforeServerWriteAsync(typeof(TEntity), readKey(entity)!)
+            .ConfigureAwait(false);
         Stamp(entity);
         await inner.InsertAsync(entity, cancellationToken).ConfigureAwait(false);
     }
@@ -82,8 +83,9 @@ internal sealed class SyncModelServerRepository<TEntity, TKey>(
         CancellationToken cancellationToken = default
     )
     {
-        await faults.InterruptAsync(ModelInterruptPoint.BeforeServerWrite).ConfigureAwait(false);
-        faults.ThrowOnServerWrite(typeof(TEntity), readKey(entity)!);
+        await faults
+            .BeforeServerWriteAsync(typeof(TEntity), readKey(entity)!)
+            .ConfigureAwait(false);
         var key = readKey(entity);
 
         if (await inner.GetByIdAsync(key, cancellationToken).ConfigureAwait(false) is null)
@@ -105,8 +107,7 @@ internal sealed class SyncModelServerRepository<TEntity, TKey>(
 
     public async Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
     {
-        await faults.InterruptAsync(ModelInterruptPoint.BeforeServerWrite).ConfigureAwait(false);
-        faults.ThrowOnServerWrite(typeof(TEntity), id!);
+        await faults.BeforeServerWriteAsync(typeof(TEntity), id!).ConfigureAwait(false);
 
         return await inner.DeleteAsync(id, cancellationToken).ConfigureAwait(false);
     }
@@ -120,8 +121,9 @@ internal sealed class SyncModelServerRepository<TEntity, TKey>(
         CancellationToken cancellationToken = default
     )
     {
-        await faults.InterruptAsync(ModelInterruptPoint.BeforeServerWrite).ConfigureAwait(false);
-        faults.ThrowOnServerWrite(typeof(TEntity), readKey(entity)!);
+        await faults
+            .BeforeServerWriteAsync(typeof(TEntity), readKey(entity)!)
+            .ConfigureAwait(false);
 
         // 同期エンジンが使うのは「版ガード付きの削除」だけ（RowState=Removed のスタブ 1 件）
         if (entity.RowState == RowState.Removed)
@@ -435,4 +437,254 @@ internal static class SyncModelServerSql
         + "ORDER BY \"label_code\" LIMIT @batchSize";
 
     public static readonly string LabelKeys = Keys("model_labels", "label_code");
+}
+
+/// <summary>
+/// 実 SQL Server のサーバー役のリポジトリへ失敗の口をつなぐ包み（SQLite の代役の
+/// <see cref="SyncModelServerRepository{TEntity, TKey}"/> と同じ点で <see cref="SyncModelFaults"/> を呼ぶ）。
+/// </summary>
+/// <remarks>
+/// 版の採番とガードはしない（本物の rowversion と生成リポジトリの版ガードに任せる）。差分ソースの書き手と、サーバーへ直接
+/// 書く他者のリポジトリに同じインスタンスを使う（失敗は同期中の端末にしか起きないので、他者の書き込みでは起きない）。
+/// </remarks>
+/// <typeparam name="TEntity">エンティティ型</typeparam>
+/// <typeparam name="TKey">主キー型</typeparam>
+internal sealed class SyncModelFaultingRepository<TEntity, TKey>(
+    IRepository<TEntity, TKey> inner,
+    Func<TEntity, TKey> readKey,
+    SyncModelFaults faults
+) : IRepository<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default) =>
+        inner.GetByIdAsync(id, cancellationToken);
+
+    public Task<IReadOnlyList<TEntity>> GetAllAsync(
+        CancellationToken cancellationToken = default
+    ) => inner.GetAllAsync(cancellationToken);
+
+    public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
+        TEntity entity,
+        CancellationToken cancellationToken = default
+    ) => inner.CheckUniquenessAsync(entity, cancellationToken);
+
+    public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
+    {
+        await faults
+            .BeforeServerWriteAsync(typeof(TEntity), readKey(entity)!)
+            .ConfigureAwait(false);
+        await inner.InsertAsync(entity, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<bool> UpdateAsync(
+        TEntity entity,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    )
+    {
+        await faults
+            .BeforeServerWriteAsync(typeof(TEntity), readKey(entity)!)
+            .ConfigureAwait(false);
+
+        return await inner.UpdateAsync(entity, mode, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
+    {
+        await faults.BeforeServerWriteAsync(typeof(TEntity), id!).ConfigureAwait(false);
+
+        return await inner.DeleteAsync(id, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<int> SaveAsync(
+        TEntity entity,
+        bool cascadeSave = true,
+        bool cascadeDelete = true,
+        bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    )
+    {
+        await faults
+            .BeforeServerWriteAsync(typeof(TEntity), readKey(entity)!)
+            .ConfigureAwait(false);
+
+        return await inner
+            .SaveAsync(
+                entity,
+                cascadeSave,
+                cascadeDelete,
+                insertWhenUpdateMissing,
+                mode,
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+    }
+
+    public Task<int> SaveAsync(
+        IEnumerable<TEntity> entities,
+        bool cascadeSave = true,
+        bool cascadeDelete = true,
+        bool insertWhenUpdateMissing = false,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        CancellationToken cancellationToken = default
+    ) =>
+        inner.SaveAsync(
+            entities,
+            cascadeSave,
+            cascadeDelete,
+            insertWhenUpdateMissing,
+            mode,
+            cancellationToken
+        );
+
+    public Task<int> BulkInsertAsync(
+        IEnumerable<TEntity> entities,
+        CancellationToken cancellationToken = default
+    ) => inner.BulkInsertAsync(entities, cancellationToken);
+
+    public SqlQuery<TEntity> Query() => inner.Query();
+
+    public Task<IReadOnlyList<TEntity>> QueryBySqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => inner.QueryBySqlAsync(sql, parameters, cancellationToken);
+
+    public Task<int> ExecuteSqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => inner.ExecuteSqlAsync(sql, parameters, cancellationToken);
+
+    public Task<TResult?> ExecuteScalarSqlAsync<TResult>(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => inner.ExecuteScalarSqlAsync<TResult>(sql, parameters, cancellationToken);
+}
+
+/// <summary>
+/// 実 SQL Server のサーバー役の差分ソースへ失敗の口をつなぐ包み（SQLite の代役の差分ソースと同じ点で
+/// <see cref="SyncModelFaults"/> を呼ぶ）。取得は内側（生成された直結の差分ソース）の答えをそのまま返す。
+/// </summary>
+/// <remarks>
+/// 上限（<c>MIN_ACTIVE_ROWVERSION()</c>）の取得には点を置かない（SQLite の代役と同じ）。書き手と blob のアクセサは、
+/// 包んだもの（<paramref name="writer"/>・<paramref name="binaryColumns"/>）を返す。
+/// </remarks>
+/// <typeparam name="TEntity">エンティティ型</typeparam>
+/// <typeparam name="TKey">主キー型</typeparam>
+internal sealed class SyncModelFaultingSource<TEntity, TKey>(
+    ISyncServerSource<TEntity, TKey> inner,
+    IRemoteRepositoryCore<TEntity, TKey> writer,
+    ISyncBinaryColumns<TKey>? binaryColumns,
+    SyncModelFaults faults
+) : ISyncServerSource<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    public IRemoteRepositoryCore<TEntity, TKey> Writer => writer;
+
+    public ISyncBinaryColumns<TKey>? BinaryColumns => binaryColumns;
+
+    public Task<byte[]?> GetChangeCeilingAsync(CancellationToken cancellationToken = default) =>
+        inner.GetChangeCeilingAsync(cancellationToken);
+
+    public async Task<SyncChangeBatch<TEntity>> GetChangesAsync(
+        byte[]? anchor,
+        byte[]? ceiling,
+        int batchSize,
+        CancellationToken cancellationToken = default
+    )
+    {
+        await BeforeFetchAsync().ConfigureAwait(false);
+
+        // 決定的なシナリオが仕掛ける「最初の差分の取得を空で返す」（ダウンロードが届かなかった形）
+        if (faults.TakeEmptyFetch(typeof(TEntity)))
+        {
+            return new SyncChangeBatch<TEntity>([], false);
+        }
+
+        var batch = await inner
+            .GetChangesAsync(anchor, ceiling, batchSize, cancellationToken)
+            .ConfigureAwait(false);
+
+        return await faults.AfterFetchAsync(batch).ConfigureAwait(false);
+    }
+
+    public async Task<SyncChangeBatch<TEntity>> GetFirstPageAsync(
+        int batchSize,
+        CancellationToken cancellationToken = default
+    )
+    {
+        await BeforeFetchAsync().ConfigureAwait(false);
+        var batch = await inner
+            .GetFirstPageAsync(batchSize, cancellationToken)
+            .ConfigureAwait(false);
+
+        return await faults.AfterFetchAsync(batch).ConfigureAwait(false);
+    }
+
+    public async Task<SyncChangeBatch<TEntity>> GetPageAfterAsync(
+        TKey afterKey,
+        int batchSize,
+        CancellationToken cancellationToken = default
+    )
+    {
+        await BeforeFetchAsync().ConfigureAwait(false);
+        var batch = await inner
+            .GetPageAfterAsync(afterKey, batchSize, cancellationToken)
+            .ConfigureAwait(false);
+
+        return await faults.AfterFetchAsync(batch).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<TKey>> GetAllKeysAsync(
+        CancellationToken cancellationToken = default
+    )
+    {
+        await BeforeFetchAsync().ConfigureAwait(false);
+
+        return await inner.GetAllKeysAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>取得の入口（割り込みの点と、仕掛けた取得の失敗）</summary>
+    private async Task BeforeFetchAsync()
+    {
+        await faults.InterruptAsync(ModelInterruptPoint.BeforeServerFetch).ConfigureAwait(false);
+        faults.ThrowOnServer(ModelFaultKind.ServerFetch);
+    }
+}
+
+/// <summary>実 SQL Server のサーバー役の品目の除外列のアクセサへ失敗の口をつなぐ包み（版は書き込みで DB が進める）</summary>
+internal sealed class SyncModelFaultingBinaryColumns(
+    ISyncBinaryColumns<int> inner,
+    SyncModelFaults faults
+) : ISyncBinaryColumns<int>
+{
+    public IReadOnlyList<string> UnboundedBinaryColumnNames => inner.UnboundedBinaryColumnNames;
+
+    public Task<bool> ReadUnboundedBinaryAsync(
+        string columnName,
+        int id,
+        Stream destination,
+        CancellationToken cancellationToken = default
+    )
+    {
+        faults.ThrowOnServer(ModelFaultKind.BlobDownload);
+
+        return inner.ReadUnboundedBinaryAsync(columnName, id, destination, cancellationToken);
+    }
+
+    public Task<bool> WriteUnboundedBinaryAsync(
+        string columnName,
+        int id,
+        Stream? source,
+        long? length,
+        CancellationToken cancellationToken = default
+    )
+    {
+        faults.ThrowOnServer(ModelFaultKind.BlobUpload);
+
+        return inner.WriteUnboundedBinaryAsync(columnName, id, source, length, cancellationToken);
+    }
 }

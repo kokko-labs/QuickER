@@ -433,7 +433,7 @@ IncludeGraph の edge-skip（自己参照ナビを展開しない）
 - EF Core MySQL：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - EF Core Oracle：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - インメモリ：非該当＝同期はサーバー DB とローカル DB の 2 つの実 DB の間の話で、インメモリにはミラーすべきサーバー版を採番する主体が居ない
-- リモート：担当＝`SyncBinaryTransferResponseRuntimeTests`（サーバー：リポジトリなし）・`SyncConfigMatrixRuntimeTests`（サーバー：QuickER 版 SQL Server）・`SyncEndpointRegistrationRuntimeTests`（サーバー：リポジトリなし）・`SyncHttpRuntimeTests`（サーバー：QuickER 版 SQLite）・`SyncModelHttpRuntimeTests`（サーバー：QuickER 版 SQLite）・`SyncModelHttpRuntimeTestsPart2`（サーバー：QuickER 版 SQLite）・`SyncModelHttpRuntimeTestsPart3`（サーバー：QuickER 版 SQLite）・`SyncModelHttpRuntimeTestsPart4`（サーバー：QuickER 版 SQLite）・`SyncSqlServerHttpRuntimeTests`（サーバー：QuickER 版 SQL Server）
+- リモート：担当＝`SyncBinaryTransferResponseRuntimeTests`（サーバー：リポジトリなし）・`SyncConfigMatrixRuntimeTests`（サーバー：QuickER 版 SQL Server）・`SyncEndpointRegistrationRuntimeTests`（サーバー：リポジトリなし）・`SyncHttpRuntimeTests`（サーバー：QuickER 版 SQLite）・`SyncModelHttpRuntimeTests`（サーバー：QuickER 版 SQLite）・`SyncModelHttpRuntimeTestsPart2`（サーバー：QuickER 版 SQLite）・`SyncModelHttpRuntimeTestsPart3`（サーバー：QuickER 版 SQLite）・`SyncModelHttpRuntimeTestsPart4`（サーバー：QuickER 版 SQLite）・`SyncSqlServerHttpRuntimeTests`（サーバー：QuickER 版 SQL Server）・`SyncSupportRemoteAdoSqlServerRuntimeTests`（サーバー：QuickER 版 SQL Server）
 
 ### `SyncRefresh`
 

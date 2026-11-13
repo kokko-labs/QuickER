@@ -297,7 +297,7 @@ internal static partial class SyncModelScenarios
                     new ExpectPayloadOp(SV, 11, "0707"),
                 ]
             ),
-            MovedAll(
+            Moved(
                 "blob-uploaded-blob-does-not-echo",
                 [],
                 [
@@ -311,7 +311,7 @@ internal static partial class SyncModelScenarios
                     new ExpectPayloadOp(D1, 5, "090807"),
                 ]
             ),
-            MovedAll(
+            Moved(
                 "blob-refresh-refuses-when-blobs-would-be-lost",
                 [],
                 [
@@ -346,7 +346,7 @@ internal static partial class SyncModelScenarios
                     new ModelRefreshOp(D1, SyncMode.LastWriteWins, IncludeBlobs: true),
                 ]
             ),
-            MovedAll(
+            Moved(
                 "blob-refresh-include-reloads-blobs",
                 [],
                 [

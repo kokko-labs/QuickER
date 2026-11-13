@@ -104,6 +104,17 @@ internal static class SyncModelSignatures
             .Take(plan.Seeds.Count)
             .ToList();
 
+    /// <summary>
+    /// 実 SQL Server の派生が流す失敗の注入の組の種（種を 4 で割った余り 2・3 から、決め方の数だけ開始番号から順に）
+    /// </summary>
+    /// <param name="plan">決め方</param>
+    public static IReadOnlyList<int> SqlServerFaultSeeds(SeedPlan plan) =>
+        Enumerable
+            .Range(plan.Settings.FirstSeed, plan.Seeds.Count * 4)
+            .Where(seed => seed % 4 is 2 or 3)
+            .Take(plan.Seeds.Count)
+            .ToList();
+
     /// <summary>種を並列に流し、既知の失敗（正規化）に当たらない失敗のある種を報告する</summary>
     /// <param name="ranges">
     /// 流す種の範囲（決め方と、その決め方で流す種。既存の範囲の種と広い世界の種＝<see cref="SyncModelWorldShape"/>。種ごとに、その範囲の
@@ -269,7 +280,10 @@ public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output) : ISyncM
 /// </summary>
 /// <remarks>
 /// <para>
-/// サーバー側の失敗を仕掛けるシナリオと種の組（余り 2・3）は流さない（生成された差分ソースへ失敗の口をつながないため）。
+/// サーバー側の失敗の注入と割り込みの点は、生成物の外側の包み（<see cref="SyncModelFaultingRepository{TEntity, TKey}"/> ほか）が
+/// SQLite の代役と同じ点で起こす。乱数の種は、失敗の注入なしの組（余り 0・1）と注入の組（余り 2・3）を別の Fact で流す。
+/// 取得の上限は実行の始めに固定する（<see cref="ISyncModelServerRole.FixesFetchCeilingAtRunStart"/>）ので、実行の途中に
+/// サーバーへ書かれた行は次の実行で降りる（決まった形の行の期待は <see cref="WhenServerFixesCeilingOp"/> で書く）。
 /// </para>
 /// <para>
 /// SQL Server でだけ起きる既知の失敗（<see cref="SqlServerOnly"/>）は、直結の違反に足して比べる。一覧は厳格で、載せた
@@ -294,8 +308,8 @@ public sealed class SyncModelSqlServerRuntimeTests(
     private SyncModelWorldOptions Options =>
         new()
         {
-            CreateServer = async (_, ct) =>
-                await SyncModelSqlServerServer.CreateAsync(fixture.ConnectionString, ct),
+            CreateServer = async (faults, ct) =>
+                await SyncModelSqlServerServer.CreateAsync(fixture.ConnectionString, faults, ct),
             Name = "sqlserver",
         };
 
@@ -325,10 +339,18 @@ public sealed class SyncModelSqlServerRuntimeTests(
     public async Task Scenario_MatchesDirect(string name)
     {
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await AssertMatchesDirect(name, Options);
+    }
 
+    /// <summary>
+    /// 決定的なシナリオを直結と実 SQL Server のサーバー役（<paramref name="options"/>）で流し、直結と同じ違反（＋SQL Server
+    /// だけの既知の失敗）になることを表明する
+    /// </summary>
+    internal static async Task AssertMatchesDirect(string name, SyncModelWorldOptions options)
+    {
         var scenario = SyncModelScenarios.Get(name);
         var (direct, _) = await scenario.RunAsync(Ct);
-        var (sqlServer, log) = await scenario.RunAsync(Ct, Options);
+        var (sqlServer, log) = await scenario.RunAsync(Ct, options);
         var expected = SyncModelSignatures
             .Normalize(direct)
             .Concat(
@@ -343,7 +365,7 @@ public sealed class SyncModelSqlServerRuntimeTests(
             .Should()
             .BeEquivalentTo(
                 expected,
-                "SQL Server must behave like the direct source (plus the SQL Server only known failures).\n"
+                $"SQL Server ({options.Name}) must behave like the direct source (plus the SQL Server only known failures).\n"
                     + "sqlserver failures:\n"
                     + string.Join("\n", sqlServer.Select(f => "  " + f.Signature))
                     + "\nops:\n"
@@ -429,5 +451,177 @@ public sealed class SyncModelSqlServerRuntimeTests(
                 );
             }
         }
+    }
+
+    [Fact(
+        DisplayName = "[Sync/モデル/SqlServer] 乱数の操作の列（失敗の注入の組）で、既知の失敗の外の違反が出ない"
+    )]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
+    public async Task RandomFaultSeeds_OnlyKnownFailures()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        output.WriteLine(await RunFaultSeedsAsync(Options));
+    }
+
+    /// <summary>失敗の注入の組（余り 2・3）の種を流し、既知の失敗の外の違反が無いことを表明する（報告を返す）</summary>
+    internal static async Task<string> RunFaultSeedsAsync(SyncModelWorldOptions options)
+    {
+        var plan = SeedSource.Resolve(SyncModelSignatures.Seeds);
+        var widePlan = SeedSource.Resolve(SyncModelSignatures.WideSeeds);
+        var report = await SyncModelSignatures.RunSeedsAsync(
+            [
+                (plan, SyncModelSignatures.SqlServerFaultSeeds(plan)),
+                (widePlan, SyncModelSignatures.SqlServerFaultSeeds(widePlan)),
+            ],
+            options,
+            SyncModelSignatures.Known(SqlServerOnly),
+            2,
+            Ct,
+            new CoverageCounter(SyncModelDimensions.Table)
+        );
+
+        report.Should().BeEmpty();
+
+        return report;
+    }
+}
+
+/// <summary>
+/// 同期エンジンのモデルベーステストを、HTTP 越し（in-process の Kestrel・生成された HTTP の差分ソースと同期専用の
+/// エンドポイント）× 実 SQL Server のサーバー役で流す派生（Docker）。
+/// </summary>
+/// <remarks>
+/// 実 SQL Server の事実（本物の rowversion・<c>MIN_ACTIVE_ROWVERSION()</c>・照合順序・外部キーのエラー）が、HTTP の
+/// シリアライズ（版の Base64・400 / 409 / 500 の分類）と組み合わさった形を見る。サーバー側の失敗の注入は Kestrel の中で
+/// 起き、500 として届く。比べる相手と既知の失敗の一覧は <see cref="SyncModelSqlServerRuntimeTests"/> と同じ。
+/// </remarks>
+[Trait("Category", "Integration")]
+[Trait("RequiresDocker", "true")]
+[Collection(SqlServerContainerCollection.Name)]
+[MatrixAxisValue(SyncModelTransportAxis.Name, nameof(SyncModelTransport.SqlServerHttp))]
+[RuntimeCell(
+    RuntimeFeatures.SyncSupport,
+    RuntimeTarget.Remote,
+    Server = RuntimeTarget.AdoSqlServer
+)]
+public sealed class SyncSupportRemoteAdoSqlServerRuntimeTests(
+    SqlServerContainerFixture fixture,
+    ITestOutputHelper output
+) : ISyncModelTransportTests
+{
+    private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
+
+    private SyncModelWorldOptions Options =>
+        new()
+        {
+            CreateServer = async (faults, ct) =>
+                await SyncModelSqlServerServer.CreateAsync(fixture.ConnectionString, faults, ct),
+            Http = true,
+            Name = "sqlserverhttp",
+        };
+
+    /// <summary>世界の組み方（コンテナにはサーバー役を作るときにだけ触れる）</summary>
+    SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => Options;
+
+    /// <summary>HTTP × 実 SQL Server で流す決定的なシナリオの名前</summary>
+    internal static IReadOnlyList<string> ScenarioNames() =>
+        [
+            .. SyncModelScenarios
+                .All.Where(s => s.RunsOn(SyncModelTransport.SqlServerHttp))
+                .Select(s => s.Name),
+        ];
+
+    /// <summary>夜間に決定的なシナリオを流す並列度（シナリオごとにデータベースを作る。乱数の種と同じ 2）</summary>
+    private const int NightlyScenarioParallelism = 2;
+
+    /// <summary>
+    /// 決定的なシナリオを、夜間（<see cref="EngineProfile.Nightly"/>）にだけ全部流す（普段の CI では流さない＝ユーザーの決定
+    /// 2026-11-13 の振り分け。実 SQL Server の直結の Theory が普段の網を持ち、HTTP のシリアライズとの組み合わせは夜間に見る）。
+    /// </summary>
+    /// <remarks>
+    /// プロファイルは種の決め方（<see cref="SeedSource.Resolve"/>）から読む（読み方の写しを作らない）。夜間のワークフローは
+    /// <see cref="NightlyEngineTrait"/> の目印でこのテストを選ぶ。行ごとの Theory にしないのは、普段のプロファイルで行を出さない
+    /// Theory がスキップ（スキップ 0 の原則に当たる）になるため。失敗はシナリオの名前と違反を並べて 1 つの報告にする。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/モデル/SqlServer/HTTP] 決定的なシナリオは、HTTP 越しの実 SQL Server でも直結と同じ違反（＋SQL Server だけの既知の失敗）になる（夜間だけ）"
+    )]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
+    public async Task Scenarios_MatchDirect_Nightly()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+
+        var names = ScenarioNames();
+        names.Should().NotBeEmpty();
+
+        if (SeedSource.Resolve(SyncModelSignatures.Seeds).Profile != EngineProfile.Nightly)
+        {
+            output.WriteLine(
+                $"regular profile: the {names.Count} scenarios run only in the nightly profile"
+            );
+            return;
+        }
+
+        var failures = new ConcurrentBag<string>();
+        await Parallel.ForEachAsync(
+            names,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = NightlyScenarioParallelism,
+                CancellationToken = Ct,
+            },
+            async (name, _) =>
+            {
+                try
+                {
+                    await SyncModelSqlServerRuntimeTests.AssertMatchesDirect(name, Options);
+                }
+                catch (Exception e) when (e is not OperationCanceledException)
+                {
+                    failures.Add($"{name}:\n{e.Message}");
+                }
+            }
+        );
+
+        output.WriteLine($"nightly profile: ran {names.Count} scenarios");
+        string.Join("\n\n", failures.OrderBy(f => f, StringComparer.Ordinal)).Should().BeEmpty();
+    }
+
+    [Fact(
+        DisplayName = "[Sync/モデル/SqlServer/HTTP] 乱数の操作の列（失敗の注入なしの組）で、既知の失敗の外の違反が出ない"
+    )]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
+    public async Task RandomSeeds_OnlyKnownFailures()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+
+        var plan = SeedSource.Resolve(SyncModelSignatures.Seeds);
+        plan.WriteWarnings(output);
+        var widePlan = SeedSource.Resolve(SyncModelSignatures.WideSeeds);
+        widePlan.WriteWarnings(output);
+        var report = await SyncModelSignatures.RunSeedsAsync(
+            [
+                (plan, SyncModelSignatures.SqlServerSeeds(plan)),
+                (widePlan, SyncModelSignatures.SqlServerSeeds(widePlan)),
+            ],
+            Options,
+            SyncModelSignatures.Known(SyncModelSqlServerRuntimeTests.SqlServerOnly),
+            2,
+            Ct,
+            new CoverageCounter(SyncModelDimensions.Table)
+        );
+
+        output.WriteLine(report);
+        report.Should().BeEmpty();
+    }
+
+    [Fact(
+        DisplayName = "[Sync/モデル/SqlServer/HTTP] 乱数の操作の列（失敗の注入の組）で、既知の失敗の外の違反が出ない"
+    )]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
+    public async Task RandomFaultSeeds_OnlyKnownFailures()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        output.WriteLine(await SyncModelSqlServerRuntimeTests.RunFaultSeedsAsync(Options));
     }
 }

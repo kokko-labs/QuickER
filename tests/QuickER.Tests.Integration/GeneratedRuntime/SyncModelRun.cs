@@ -1512,7 +1512,11 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
     /// 静止化してから、収束と消失なしを確かめる（静止化が失敗したら、その失敗だけを報告する＝後段の表明は
     /// 静止化した状態を前提にしており、静止化の失敗に引きずられた違反で署名を濁さない）。
     /// </summary>
-    public async Task FinishAsync()
+    /// <param name="requireArmedFaultsFired">
+    /// 仕掛けたまま起きなかった失敗を <c>fault/not-fired:{種類}</c> の違反にするか（決まった形のシナリオ＝失敗を狙って仕掛ける。
+    /// 乱数の種と網羅の行は確率で仕掛けるので、起きないのは正当）
+    /// </param>
+    public async Task FinishAsync(bool requireArmedFaultsFired = false)
     {
         // 仕掛けたのに点に来なかった割り込みは違反（点の置き場所がずれた・点に来ない操作の列＝黙った空振り）。
         // 割り込みの書き込みが上限の時間で終わらなかったのも違反（エンジンがロックを持ったまま点に来た疑い）
@@ -1524,6 +1528,15 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                     "The armed interrupt never reached its point."
                 )
             );
+        }
+
+        // 仕掛けたのに起きなかった失敗も同じ空振り（失敗の口がサーバー役から外れても、結果が同じになる行が黙って緑になる）
+        if (requireArmedFaultsFired)
+        {
+            foreach (var kind in _world.Faults.PendingFaults)
+            {
+                _failures.Add(new($"fault/not-fired:{kind}", "The armed fault never fired."));
+            }
         }
 
         foreach (var device in _expectThrow)
