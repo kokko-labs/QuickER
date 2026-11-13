@@ -26,7 +26,7 @@ public static class BackendParityEfCoreOnlyFixtureDefinition
     public const string ServerOutputFileName = "BackendParityEfCoreOnlyFixture.RemoteServer.g.cs";
 
     /// <summary>
-    /// フィクスチャ生成に用いる決定的なオプション。EF Core とリモートサービスだけを出し、値オブジェクトと無制限バイナリ除外を
+    /// フィクスチャ生成に用いる決定的なオプション。EF Core とリモートサービスだけを出し、値オブジェクト（GuidKey を含む）と無制限バイナリ除外を
     /// 実装先一致フィクスチャとそろえる
     /// </summary>
     public static CodeGenerationOptions Options { get; } =
@@ -38,6 +38,7 @@ public static class BackendParityEfCoreOnlyFixtureDefinition
             GenerateMappers = false,
             GenerateRepositories = false,
             GenerateValueObjects = true,
+            UseGuidKeyForStringPrimaryKey = true,
             GenerateEfCoreRepositories = true,
             GenerateInMemoryRepositories = false,
             GenerateRemoteServices = true,

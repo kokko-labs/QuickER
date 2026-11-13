@@ -174,6 +174,63 @@ internal static partial class SyncPlanExpectationRows
                         }
                     }
                 }),
+            // スキーマをまたぐ外部キー：SQLite は作らずに注記する（同期スクリプトの面は実 SQLite の行
+            // realdb-sqlite-cross-schema-fk-to-dotted-parent-is-omitted-with-note）。計画は両端のドットの表を名指しする
+            Row(
+                    "plan-cross-schema-fk-names-both-dotted-ends-only-where-declared",
+                    "同期: 子と親が違うスキーマの外部キーの追加は、SQLite だけが両端のドットの表を表ごとに警告する",
+                    AllDialects
+                )
+                .Live(s =>
+                {
+                    s.Table("temp.regions", S.Pk("id", "INTEGER"));
+                    s.Table("main.notes", S.Pk("id", "INTEGER"), S.NotNull("region_id", "INTEGER"));
+                })
+                .Items(w =>
+                {
+                    var parent = w.Live["temp.regions"];
+                    var child = w.Live["main.notes"];
+                    return
+                    [
+                        new SchemaDiffItem
+                        {
+                            Kind = SchemaDiffKind.AddForeignKey,
+                            TableName = child.TableName,
+                            ColumnName = "region_id",
+                            ForeignKeyColumnPairs = [new("id", "region_id")],
+                            ParentEntity = parent,
+                            ChildEntity = child,
+                            Relationship = new Relationship
+                            {
+                                SourceEntityId = parent.Id,
+                                TargetEntityId = child.Id,
+                                Type = RelationshipType.OneToMany,
+                                ColumnPairs = [new(parent.Columns[0].Id, child.Columns[1].Id)],
+                            },
+                            IsSelected = true,
+                        },
+                    ];
+                })
+                .Expect(e =>
+                {
+                    e.For(
+                        DialectNames.Sqlite,
+                        d =>
+                            d.Warnings.Count("SchemaQualifiedTableName*", 2)
+                                .Warnings.Contains(
+                                    "SchemaQualifiedTableName(temp.regions)",
+                                    "SchemaQualifiedTableName(main.notes)"
+                                )
+                    );
+
+                    foreach (var dialect in AllDialects)
+                    {
+                        if (dialect != DialectNames.Sqlite)
+                        {
+                            e.For(dialect, d => d.Warnings.Absent("SchemaQualifiedTableName*"));
+                        }
+                    }
+                }),
             // 空白だけの説明
             BlankDescriptionDiffRow(
                     "diff-blank-description-null-to-blank-is-same-as-none",

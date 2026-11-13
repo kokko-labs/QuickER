@@ -91,6 +91,7 @@ public static class UnsupportedDefinitionKinds
             { UnsupportedDefinitionKind.SetNullOnNotNullColumn, InDiagram("E3") },
             { UnsupportedDefinitionKind.Description, InDiagram("E5") },
             { UnsupportedDefinitionKind.SchemaQualifiedTableName, InDiagram("E6") },
+            { UnsupportedDefinitionKind.CrossSchemaForeignKey, InDiagram("E7") },
             { UnsupportedDefinitionKind.ColumnOrder, InDiagram("X1") },
             { UnsupportedDefinitionKind.ForeignKeyConstraintName, InDiagram("X2") },
             { UnsupportedDefinitionKind.CompositeForeignKeyColumnOrder, InDiagram("X3") },

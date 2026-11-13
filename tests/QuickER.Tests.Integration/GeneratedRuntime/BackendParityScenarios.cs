@@ -1088,6 +1088,7 @@ public static partial class BackendParityScenarios
         .. BlobRuntimeScenarios(),
         .. NullIntoNotNullScenarios(),
         .. RemoteRuntimeScenarios(),
+        .. KeyShapeScenarios(),
     ];
 
     /// <summary>

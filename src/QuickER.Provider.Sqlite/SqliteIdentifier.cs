@@ -53,6 +53,52 @@ public static class SqliteIdentifier
     /// </summary>
     public static string QuoteSimple(string name) => $"\"{Escape(name)}\"";
 
+    /// <summary>スキーマを付けない表の DB 名（SQLite はスキーマの無い表を main に作り、main で引く）</summary>
+    private const string MainDatabase = "main";
+
+    /// <summary>
+    /// 外部キーの句（<c>REFERENCES</c>）に書く親の表名を、子と同じ DB の表なら表の部分だけクォートして返す。違う DB なら <c>null</c>
+    /// </summary>
+    /// <remarks>
+    /// SQLite の外部キーの句は表名にスキーマを書けず（<c>REFERENCES "sales"."regions"</c> は構文エラー）、親は子と同じ DB の中で
+    /// 解決する。そのため添付した別の DB の表は参照できない。DB 名は <see cref="SchemaQualifiedName"/> の分け方で取り、スキーマの無い名前は
+    /// <c>main</c> とみなし、SQLite の照合（<see cref="NameEquals"/>）で比べる。DDL 生成・同期の表の追加・再構築はこの 1 か所を通す。
+    /// </remarks>
+    /// <param name="childTable">外部キーを持つ子の表名（図のまま）</param>
+    /// <param name="parentTable">参照先の親の表名（図のまま）</param>
+    public static string? QuoteReferencedTable(string childTable, string parentTable)
+    {
+        var childDatabase = SchemaQualifiedName.Split(childTable).Schema ?? MainDatabase;
+        var (parentDatabase, parentPart) = SchemaQualifiedName.Split(parentTable);
+
+        return NameEquals(childDatabase, parentDatabase ?? MainDatabase)
+            ? QuoteSimple(parentPart)
+            : null;
+    }
+
+    /// <summary>SQLite の識別子の照合（ASCII の英字だけ大文字小文字を同一視し、それ以外は序数で比べる）</summary>
+    /// <remarks>SQLite は名前の大文字小文字を ASCII でだけ畳むので、<c>Äpfel</c> と <c>äpfel</c> は別の名前になる</remarks>
+    public static bool NameEquals(string left, string right)
+    {
+        if (left.Length != right.Length)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < left.Length; i++)
+        {
+            if (AsciiLower(left[i]) != AsciiLower(right[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>ASCII の大文字だけを小文字にする</summary>
+    private static char AsciiLower(char c) => c is >= 'A' and <= 'Z' ? (char)(c + 32) : c;
+
     /// <summary>識別子内の <c>"</c> を SQLite の規則（二重化）に従ってエスケープする</summary>
     public static string Escape(string name) => (name ?? string.Empty).Replace("\"", "\"\"");
 }

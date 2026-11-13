@@ -670,6 +670,41 @@ internal static partial class DialectDdlRows
         return entity;
     }
 
+    /// <summary>
+    /// 親（主キー id）と、親を外部キー region_id（名前なし＝既定の名前）で参照する子（主キー id）を並べた図
+    /// </summary>
+    /// <param name="parentName">親の表名</param>
+    /// <param name="childNames">子の表名（子ごとに親への外部キーを 1 本持つ）</param>
+    private static ErDiagram TrForeignKeyDiagram(string parentName, params string[] childNames)
+    {
+        var parent = TrIntegerKeyTable(parentName);
+        var diagram = new ErDiagram { Entities = [parent] };
+
+        foreach (var childName in childNames)
+        {
+            var child = TrIntegerKeyTable(childName);
+            var regionId = new Column
+            {
+                Name = "region_id",
+                DataType = "INTEGER",
+                IsNullable = true,
+            };
+            child.Columns.Add(regionId);
+            diagram.Entities.Add(child);
+            diagram.Relationships.Add(
+                new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                    Type = RelationshipType.OneToMany,
+                    ColumnPairs = [new(parent.Columns[0].Id, regionId.Id)],
+                }
+            );
+        }
+
+        return diagram;
+    }
+
     /// <summary>orders テーブル（int 主キー＋指定型の memo 列）の最小の図</summary>
     private static ErDiagram TrOrdersDiagram(string memoDataType) =>
         new()
@@ -729,6 +764,166 @@ internal static partial class DialectDdlRows
                     Ft.Ddl,
                     (Tm.Annotation, [Sl]),
                     (Tm.None, [Ss, Pg, My, Or])
+                ),
+            // SQLite の外部キーの句は表名にスキーマを書けない（親は子と同じ DB で解決する）。同じ DB なら表の部分だけを書く
+            DialectDdlRow
+                .Ddl(
+                    "ddl-fk-to-schema-qualified-parent-in-same-schema-references-table-part",
+                    "DDL: 子と親が同じスキーマ（sales）の外部キーは、SQLite だけ REFERENCES に表の部分だけを書く（src/QuickER.Provider.Sqlite/CLAUDE.md「スキーマをまたぐ外部キー」）",
+                    E.SchemaQualified,
+                    F.StatementShape,
+                    _ => TrForeignKeyDiagram("sales.regions", "sales.region_notes")
+                )
+                .Expect(
+                    Sl,
+                    e =>
+                        e.Lines("fk * * (region_id) -> regions (id) inline")
+                            .NoText("*REFERENCES \"sales\"*", "*cannot reference*")
+                )
+                .Expect(
+                    [Ss, Pg, My, Or],
+                    e => e.Lines("fk * * (region_id) -> sales.regions (id)*")
+                ),
+            DialectDdlRow
+                .Ddl(
+                    "ddl-fk-to-main-qualified-parent-from-unqualified-child-references-table-part",
+                    "DDL: スキーマの無い子は main の表とみなし、main で修飾した親への外部キーは同じ DB として SQLite も表の部分を書く（src/QuickER.Provider.Sqlite/CLAUDE.md「スキーマをまたぐ外部キー」）",
+                    E.SchemaQualified,
+                    F.StatementShape,
+                    _ => TrForeignKeyDiagram("MAIN.regions", "notes")
+                )
+                .Expect(
+                    Sl,
+                    e =>
+                        e.Lines("fk notes * (region_id) -> regions (id) inline")
+                            .NoText("*cannot reference*")
+                )
+                .Expect(
+                    [Ss, Pg, My, Or],
+                    e => e.Lines("fk notes * (region_id) -> MAIN.regions (id)*")
+                ),
+            DialectDdlRow
+                .Ddl(
+                    "ddl-fk-across-schemas-omitted-with-note-sqlite",
+                    "DDL: 子と親が違うスキーマの外部キーは、SQLite だけ作らずに CREATE TABLE の前に注記する（ほかの方言は作る）",
+                    E.SchemaQualified,
+                    F.Note,
+                    _ => TrForeignKeyDiagram("sales.regions", "notes", "archive.notes")
+                )
+                .Expect(
+                    Sl,
+                    e =>
+                        e.Lines(
+                                "note cross-schema-fk | -- Note: this database cannot reference sales.regions from notes across attached databases; the foreign key FK_notes_sales_regions is not created",
+                                "note cross-schema-fk | -- Note: this database cannot reference sales.regions from archive.notes across attached databases; the foreign key FK_archive_notes_sales_regions is not created"
+                            )
+                            .NoLines("fk * * * -> * *")
+                            .NoText("*REFERENCES*")
+                )
+                .Expect(
+                    [Ss, Pg, My, Or],
+                    e =>
+                        e.Lines(
+                                "fk notes * (region_id) -> sales.regions (id)*",
+                                "fk archive.notes * (region_id) -> sales.regions (id)*"
+                            )
+                            .NoText("*cannot reference*")
+                )
+                .TreatsGroups(
+                    K.CrossSchemaForeignKey,
+                    Ft.Ddl,
+                    (Tm.OmitWithAnnotation, [Sl]),
+                    (Tm.None, [Ss, Pg, My, Or])
+                ),
+            DialectDdlRow
+                .SyncDiff(
+                    "sync-add-table-fk-to-schema-qualified-parent-in-same-schema-references-table-part",
+                    "同期: 表の追加で、子と親が同じスキーマの外部キーは SQLite も表の部分だけを書く。計画は両端のドットの表を名指しする",
+                    P.SyncAddTable,
+                    E.SchemaQualified,
+                    F.StatementShape,
+                    _ =>
+                    {
+                        var diagram = TrForeignKeyDiagram("sales.regions", "sales.region_notes");
+                        return CvDiff([], [], diagram.Entities, diagram.Relationships);
+                    }
+                )
+                .Expect(
+                    Sl,
+                    e =>
+                        e.Lines("fk * * (region_id) -> regions (id) inline")
+                            .NoText("*REFERENCES \"sales\"*", "*cannot reference*")
+                            .Contains(
+                                O.Warnings,
+                                "SchemaQualifiedTableName sales.regions",
+                                "SchemaQualifiedTableName sales.region_notes"
+                            )
+                )
+                .Expect(
+                    [Ss, Pg, My, Or],
+                    e => e.Lines("fk * * (region_id) -> sales.regions (id)*")
+                ),
+            DialectDdlRow
+                .SyncDiff(
+                    "sync-add-table-fk-across-schemas-omitted-with-note-sqlite",
+                    "同期: 表の追加で、子と親が違うスキーマの外部キーは SQLite だけ作らずに注記し、計画は両端のドットの表を名指しする",
+                    P.SyncAddTable,
+                    E.SchemaQualified,
+                    F.Note,
+                    _ =>
+                    {
+                        var diagram = TrForeignKeyDiagram("sales.regions", "archive.notes");
+                        return CvDiff([], [], diagram.Entities, diagram.Relationships);
+                    }
+                )
+                .Expect(
+                    Sl,
+                    e =>
+                        e.Lines(
+                                "note cross-schema-fk | -- Note: this database cannot reference sales.regions from archive.notes across attached databases;*"
+                            )
+                            .NoText("*REFERENCES*")
+                            .Contains(
+                                O.Warnings,
+                                "SchemaQualifiedTableName sales.regions",
+                                "SchemaQualifiedTableName archive.notes"
+                            )
+                )
+                .Expect(
+                    [Ss, Pg, My, Or],
+                    e =>
+                        e.Text("*REFERENCES*")
+                            .NoText("*cannot reference*")
+                            .Absent(O.Warnings, "SchemaQualifiedTableName*")
+                )
+                .TreatsGroups(
+                    K.CrossSchemaForeignKey,
+                    Ft.Sync,
+                    (Tm.OmitWithAnnotation, [Sl]),
+                    (Tm.None, [Ss, Pg, My, Or])
+                ),
+            DialectDdlRow
+                .SyncDiff(
+                    "sync-rebuild-fk-across-schemas-omitted-with-note-sqlite",
+                    "同期: SQLite の再構築で付ける外部キーも、子と親が違うスキーマなら作らずに注記する（DDL と同じ 1 か所の判定）",
+                    P.SyncRebuild,
+                    E.SchemaQualified,
+                    F.Note,
+                    _ =>
+                    {
+                        var live = TrForeignKeyDiagram("sales.regions", "notes");
+                        var target = TrForeignKeyDiagram("sales.regions", "notes");
+                        return CvDiff(live.Entities, [], target.Entities, target.Relationships);
+                    }
+                )
+                .Expect(
+                    Sl,
+                    e =>
+                        e.Lines(
+                                "note cross-schema-fk | -- Note: this database cannot reference sales.regions from notes across attached databases;*"
+                            )
+                            .Text("*CREATE TABLE \"notes_quicker_rebuild\"*")
+                            .NoText("*REFERENCES*")
                 ),
             DialectDdlRow
                 .Ddl(

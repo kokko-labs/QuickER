@@ -2666,9 +2666,13 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
             rowid = reader.GetInt64(0);
         }
 
+        // SqliteBlob takes the database and the table apart: a schema-qualified name (sales.orders) is the table orders in
+        // the attached database sales, as in every other statement, and a name without a '.' is in main
+        var (blobDatabase, blobTable) = EntitySaveMetadata.SplitTableName(metadata.RawTableName);
         await using var blob = new SqliteBlob(
             connection,
-            metadata.RawTableName,
+            blobDatabase ?? "main",
+            blobTable,
             metadata.RawColumnName(column),
             rowid,
             readOnly: true
@@ -2787,10 +2791,14 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
                 rowid = (long)(await rowidCommand.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
             }
 
+            // The database and the table apart, as in the read above
+            var (blobDatabase, blobTable) = EntitySaveMetadata.SplitTableName(metadata.RawTableName);
+
             await using (
                 var blob = new SqliteBlob(
                     connection,
-                    metadata.RawTableName,
+                    blobDatabase ?? "main",
+                    blobTable,
                     metadata.RawColumnName(column),
                     rowid,
                     readOnly: false

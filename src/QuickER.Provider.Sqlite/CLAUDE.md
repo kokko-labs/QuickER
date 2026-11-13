@@ -92,6 +92,17 @@
   - 排他で開けるかは、Windows で移動・削除と同じ答えになる（再現の実測で全組が一致）。Linux の排他（flock）は SQLite のロック（fcntl）と関係しないので常に開け、受け入れの表明は Windows のジョブでだけ効く。
   - mutation 実証済み（3 入口それぞれで `Pooling=False` を外すと、該当の行が赤になる）。
 
+## スキーマをまたぐ外部キー
+
+- SQLite の外部キーの句（`REFERENCES`）は表名にスキーマを書けず、親は子と同じ DB の中で解決する。DDL 生成・同期の表の追加・再構築の外部キーの制約行は `SqliteDdlGenerator.BuildForeignKeyConstraintLine` の 1 か所で組み、親の表名は `SqliteIdentifier.QuoteReferencedTable` が決める。
+  - 子と親の DB 名は `SchemaQualifiedName.Split` で取り、スキーマの無い名前は `main`（スキーマを付けない `CREATE TABLE` は main に作られる）とみなし、SQLite の照合（`SqliteIdentifier.NameEquals`＝ASCII だけ大文字小文字を無視。取込と共有）で比べる。
+  - 同じ DB なら親の表の部分だけを書く（`REFERENCES "regions"`）。違う DB なら制約行を出さない。
+- 違う DB の外部キーは作らず、その表の `CREATE TABLE` の前に `CrossSchemaForeignKeyNote` が注記する（図で表せない定義の種類 `CrossSchemaForeignKey`＝E7。扱いの表の SQLite の DDL・同期のマスが `OmitWithAnnotation` かで決め、方言名で分岐しない）。
+  - 同期の計画は、外部キーの両端のドットの表を `SyncPlanWarningKind.SchemaQualifiedTableName` で表ごとに名指しする（専用の警告の種類は持たない）。
+  - 差分は畳まない：SQLite の取込はドットを含む表を持ち帰らない（docs/database.md）ので、DB の側にドットの表が現れず、差分は表の追加として出続ける（下の「既知の割り切り」）。
+- 壊すと：`REFERENCES "sales"."regions"` は DB を添付しても構文エラーになり、ドットの表を親に持つ図の DDL・同期が流せない。違う DB の外部キーを書いても同じ。
+- ガード：`DialectDdlTableTests`（行 `ddl-fk-to-schema-qualified-parent-in-same-schema-references-table-part`・`ddl-fk-to-main-qualified-parent-from-unqualified-child-references-table-part`・`ddl-fk-across-schemas-omitted-with-note-sqlite`・`sync-add-table-fk-to-schema-qualified-parent-in-same-schema-references-table-part`・`sync-add-table-fk-across-schemas-omitted-with-note-sqlite`・`sync-rebuild-fk-across-schemas-omitted-with-note-sqlite`）・期待の行 `plan-cross-schema-fk-names-both-dotted-ends-only-where-declared`・実装先どうしの一致のシナリオ `key-shape-dotted`（`main.region_notes` の外部キーが実 SQLite で親の無い子を断る）・`UnsupportedCoverageTests`・`DialectDocsTableTests.SyncCapabilitiesTable_MatchesDeclarations`。mutation 実証済み。
+
 ## 既知の割り切り
 
 - 各方言の Identifier はドット付きテーブル名を 5 方言対称に `"a"."b"` へ分割クォートする（`DialectIdentifierTableTests` の行 `quote-dot-*` が固定）。SQLite では `"a"."b"` が「アタッチ済み DB a のテーブル b」を意味するので、dbo 以外のスキーマを含む図を sqlite へ切り替えて DDL・同期を実行すると `unknown database` エラーになり得る。対称性を優先して直さない。

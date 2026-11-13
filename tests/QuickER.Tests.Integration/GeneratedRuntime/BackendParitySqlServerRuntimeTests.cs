@@ -87,6 +87,15 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
             KnownMatch.ExactSignature,
             signature
         )),
+        new(
+            "KF-binary-padding",
+            KnownKind.Accepted,
+            null,
+            "SQL Server は binary(n) の列へ短い値を 0x00 で詰めて保存し、詰めた値で読み戻す（短いキーでも詰めたキーでも同じ行が見つかる）。インメモリは書いた値のまま持つ（docs のインメモリの節「実 DB との既知の乖離」。値は ExpectedLines が固定する）",
+            "key-shape-binary-short-key-full",
+            KnownMatch.ExactSignature,
+            "inmemory-differs"
+        ),
     ];
 
     /// <summary>
@@ -166,6 +175,11 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
         foreach (var heldBackFactoryCase in HeldBackFactoryCaseNames)
         {
             cases.Add(heldBackFactoryCase);
+        }
+
+        foreach (var keyShapeCase in SqlServerKeyShapeCase.All)
+        {
+            cases.Add(keyShapeCase.Name);
         }
 
         return cases;
@@ -401,6 +415,14 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
                 ? await OwnWriteAsync(efCore: true, ownWriteCase, remoteEfCore: true)
             : HandoffCase.Find(name) is { } handoffCase
                 ? await HandoffAsync(efCore: true, handoffCase, remoteEfCore: true)
+            : SqlServerKeyShapeCase.Find(name)
+                is { Surface: not SqlServerKeyShapeSurface.Full } keyShapeCase
+                ? await KeyShapeAsync(keyShapeCase, KeyShapeHost.RemoteEfCore)
+            : null;
+
+        // キーと表名の形のケースは、インメモリ（同じ図の生成物）でも流す
+        var inMemory = SqlServerKeyShapeCase.Find(name) is { } inMemoryCase
+            ? await KeyShapeAsync(inMemoryCase, KeyShapeHost.InMemory)
             : null;
         var report =
             $"QuickER:\n  {string.Join("\n  ", baseline)}\nEF Core:\n  {string.Join("\n  ", efCore)}"
@@ -408,12 +430,19 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
                 remoteEfCore is null
                     ? ""
                     : $"\nRemote (EF Core server):\n  {string.Join("\n  ", remoteEfCore)}"
-            );
+            )
+            + (inMemory is null ? "" : $"\nInMemory:\n  {string.Join("\n  ", inMemory)}");
 
         // 値を固定したケースは、基準の行がその値になる（EF Core は下で基準と比べる）
         if (ExpectedLines.TryGetValue(name, out var expected))
         {
             baseline.Should().Equal(expected, report);
+        }
+
+        // キーと表名の形のケースも、基準の行の値を固定する（形ごとのキーの書き方から組み立てる）
+        if (SqlServerKeyShapeCase.Find(name) is { } expectedKeyShape)
+        {
+            baseline.Should().Equal(KeyShapeExpectedLines(expectedKeyShape), report);
         }
 
         // 受け入れた差のケースは、EF Core とリモート（EF Core のサーバー）の値も固定する
@@ -437,6 +466,11 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
         )
         {
             observed.Add(new EngineFailure(name, "remote-efcore-differs", report));
+        }
+
+        if (inMemory is not null && !inMemory.SequenceEqual(baseline, StringComparer.Ordinal))
+        {
+            observed.Add(new EngineFailure(name, "inmemory-differs", report));
         }
 
         KnownSet
@@ -480,6 +514,13 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
             "[Parity/SqlServer] 2 つめの文脈とファクトリの作り方",
             cases,
             HeldBackFactoryCaseNames
+        );
+
+        // キーと表名の形 × 面の組も、どれもケースとして流れる
+        CoverageGuard.ContainsAll(
+            "[Parity/SqlServer] キーと表名の形と面の組",
+            cases,
+            SqlServerKeyShapeCase.All.Select(keyShapeCase => keyShapeCase.Name)
         );
     }
 
@@ -704,6 +745,14 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
     {
         await _fixture.ResetSchemaAsync(Ct);
         await _fixture.ApplyDdlAsync(ConcurrencyFixtureDefinition.Build(), Ct);
+
+        if (SqlServerKeyShapeCase.Find(name) is { } keyShapeCase)
+        {
+            return await KeyShapeAsync(
+                keyShapeCase,
+                efCore ? KeyShapeHost.EfCore : KeyShapeHost.Ado
+            );
+        }
 
         return name switch
         {

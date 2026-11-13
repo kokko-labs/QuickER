@@ -986,9 +986,13 @@ public static class UnboundedBinaryColumnEngine
             rowid = reader.GetInt64(0);
         }
 
+        // SqliteBlob takes the database and the table apart: a schema-qualified name (sales.orders) is the table orders in
+        // the attached database sales, as in every other statement, and a name without a '.' is in main
+        var (blobDatabase, blobTable) = EntitySaveMetadata.SplitTableName(metadata.RawTableName);
         await using var blob = new SqliteBlob(
             connection,
-            metadata.RawTableName,
+            blobDatabase ?? "main",
+            blobTable,
             metadata.RawColumnName(column),
             rowid,
             readOnly: true
@@ -1089,10 +1093,14 @@ public static class UnboundedBinaryColumnEngine
                 rowid = (long)(await rowidCommand.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
             }
 
+            // The database and the table apart, as in the read above
+            var (blobDatabase, blobTable) = EntitySaveMetadata.SplitTableName(metadata.RawTableName);
+
             await using (
                 var blob = new SqliteBlob(
                     connection,
-                    metadata.RawTableName,
+                    blobDatabase ?? "main",
+                    blobTable,
                     metadata.RawColumnName(column),
                     rowid,
                     readOnly: false
@@ -2864,11 +2872,20 @@ public sealed class EntitySaveMetadata
     /// <remarks>Quoting the whole name in one go would name a single table that literally contains a dot, so every statement against a table outside the default schema would fail at run time. The DDL generator splits the same way.</remarks>
     internal static string QuoteTableName(string name)
     {
+        var (schema, table) = SplitTableName(name);
+
+        return schema is null
+            ? QuoteIdentifier(table)
+            : $"{QuoteIdentifier(schema)}.{QuoteIdentifier(table)}";
+    }
+
+    /// <summary>Splits a table name on its first '.' into its schema (null when the name has no '.') and the table, as <see cref="QuoteTableName"/> reads it.</summary>
+    /// <remarks>Statements that take the two parts apart instead of a quoted name (SqliteBlob takes the database and the table separately) use this, so every statement names the same table.</remarks>
+    internal static (string? Schema, string Table) SplitTableName(string name)
+    {
         var separator = name.IndexOf('.');
 
-        return separator < 0
-            ? QuoteIdentifier(name)
-            : $"{QuoteIdentifier(name[..separator])}.{QuoteIdentifier(name[(separator + 1)..])}";
+        return separator < 0 ? (null, name) : (name[..separator], name[(separator + 1)..]);
     }
 
     /// <summary>Quotes a single SQL identifier, doubling the closing quote character so that a name containing it cannot escape the quotes.</summary>

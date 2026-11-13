@@ -339,6 +339,12 @@ public sealed class DialectDocsTableTests
         ] = c => CreateTableUniqueConstraints.DropsDuplicateColumnLists(DialectOf(c)),
         ["A table name with a dot is a schema-qualified name"] = c =>
             c.SupportsSchemaQualifiedTableNames,
+        ["A foreign key can reference a table in another schema"] = c =>
+            UnsupportedTreatments.For(
+                UnsupportedDefinitionKind.CrossSchemaForeignKey,
+                UnsupportedFeature.Sync,
+                DialectOf(c)
+            ) == UnsupportedTreatment.None,
         ["Foreign key names are stored"] = c => c.PersistsForeignKeyConstraintNames,
         ["Descriptions are synced"] = c => c.SupportsDescriptions,
         ["A failed script rolls back"] = c => c.TransactionalDdl,

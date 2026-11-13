@@ -1162,6 +1162,32 @@ public static class UnsupportedTreatments
             reverse: Same(None) // なし
         );
 
+        // E7 スキーマをまたぐ外部キー
+        Add(
+            cells,
+            Kind.CrossSchemaForeignKey,
+            import: Same(None), // なし（SQLite の取込はドットを含む表を取り込まない）
+            diff: Same(None), // なし（SQLite の DB の側にドットの表が現れないので、畳んでも差分は収束しない）
+            sync: new TreatmentCell(
+                SqlServer: None,
+                PostgreSql: None,
+                MySql: None,
+                Oracle: None,
+                Sqlite: OmitWithAnnotation // 外部キーを作らずに注記（表の追加・再構築。表は計画の SchemaQualifiedTableName が名指し）
+            ),
+            ddl: new TreatmentCell(
+                SqlServer: None,
+                PostgreSql: None,
+                MySql: None,
+                Oracle: None,
+                Sqlite: OmitWithAnnotation // 外部キーを作らずに注記
+            ),
+            cSharpGeneration: Same(None), // なし
+            export: Same(None), // なし
+            toolHosts: Same(None), // なし
+            reverse: Same(None) // なし
+        );
+
         // X1 列順
         Add(
             cells,

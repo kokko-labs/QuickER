@@ -1346,6 +1346,7 @@ They are worth knowing when a test passes in memory and fails against the real t
   A `decimal` with more fractional digits than its column is rounded to the column's scale, a half rounding away from zero (`1.245` in a `decimal(10,2)` column is stored as `1.25`).
   Fractional seconds beyond the scale of a `datetime2(n)`, `time(n)`, or `datetimeoffset(n)` column are rounded too, a half rounding up, and a `date` column keeps only the date of a `DateTime`.
   An `nchar(n)` value comes back padded with spaces to `n` characters.
+  A shorter value written to a `binary(n)` column comes back padded with `0x00` bytes to `n` bytes, and a key read with the shorter value or the padded one finds the same row (`0x09` in a `binary(4)` key reads back as `0x09000000`).
   A `varchar` or `char` column keeps the characters its code page can hold (code page 1252 under the default collation) and turns any other character into `?` or a similar character (`Ā` into `A`).
   The QuickER Repository and EF Core store the same value on every path, `BulkInsertAsync` included.
   A test that relies on such a value staying as written is not evidence about SQL Server.
