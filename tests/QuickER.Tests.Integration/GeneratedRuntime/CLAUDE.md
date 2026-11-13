@@ -302,11 +302,11 @@
 - 静止化が終わらないときは、最後の周の打ち切りと競合を分類して署名を細かくする（`SyncModelRun.ClassifyStuckTruncationsAsync`）。
   - 一意な値の回転：`1/no-quiesce:unique-swap:{表}`（docs の既知の割り切り＝受け入れ）。打ち切った行のサーバーの値をローカルで持つ行、その行のサーバーの値をローカルで持つ行…と辿って元の行へ戻る形で、2 行の厳密な入れ替えはその最短の形（判定は `SyncModelRun.UniqueRotation`。回転の途中に未送信の行・古い写しの行が混ざっても同じ）。2 行の入れ替えは打ち切りの分類の最初に、3 行以上の回転はほかの形（端末側の循環を含む）が説明しなかった打ち切りにだけ最後に当てる。2 行に限ると 3 行以上の回転が粗い署名に落ち、最初に当てると端末だけで回した循環を `pending-unique-cycle` から奪う。
   - 値を取る行自身の古い参照が持ち主を残す：`1/no-quiesce:holder-referenced-by-taker:{表}`。
-  - 持ち主がサーバーに無く、別の表のローカルの行が持ち主を（推移的に）参照し、その行のサーバーの行が値を取る行の下にある：`1/no-quiesce:holder-referenced-by-other-table:{表}`。引き留める行がどれも送るものを持たなければエンジンが消して抜ける（`src/QuickER.Runtime.Sync/CLAUDE.md`「一意な値の持ち主を新しくする」）ので、この署名が残るのは、エンジンが消さない形だけ。そのうち、参照する行の中にローカルの行がサーバーの行と同じ最新の写しがある形（消すとダウンロードが降ろし直さないので消さない）は `1/no-quiesce:holder-referenced-by-other-table-current-child:{表}` に分ける（`SyncModelRun.HasCurrentReferrer`）。既知の失敗の一覧に Pending（直す区切りは `SyncModelKnownFailures.StuckSyncRemainderFixedIn`）で載せ、決まった形の行 `holder-referenced-by-other-table-current-child-does-not-settle` が受け持つ。
+  - 持ち主がサーバーに無く、別の表のローカルの行が持ち主を（推移的に）参照し、その行のサーバーの行が値を取る行の下にある：`1/no-quiesce:holder-referenced-by-other-table:{表}`。引き留める行がどれも送るものを持たなければエンジンが消して抜ける（`src/QuickER.Runtime.Sync/CLAUDE.md`「一意な値の持ち主を新しくする」）ので、この署名が残るのは、エンジンが消さない形だけ。そのうち、参照する行の中にローカルの行がサーバーの行と同じ最新の写しがある形は `1/no-quiesce:holder-referenced-by-other-table-current-child:{表}` に分ける（`SyncModelRun.HasCurrentReferrer`）。最新の写しはエンジンが降ろし直す約束を残して消す（`src/QuickER.Runtime.Sync/CLAUDE.md`「降ろし直す約束（quicker_sync_row_pending）」）ので、この署名が出るのは、ほかの理由（送るものがある・範囲の外の行が参照する）で消せない形に最新の写しが混ざるときだけ。
   - 端末側の一意な値の循環：`1/no-quiesce:pending-unique-cycle:{表}`。
   - 回転の場合は回転の行すべての、値を取る行自身の古い参照の場合は打ち切った行と持ち主の行の、別の表の参照の場合は打ち切った行・持ち主・参照する行と、サーバーで値を取る行の下にあるために止まった打ち切りの行の、循環は集まりの行の競合を説明済みにする。
   - どれにも当たらない打ち切りか説明の付かない競合が残れば、粗い署名 `1/no-quiesce:conflicts-or-truncations` もあわせて出す。分類できた分が隠さない。
-  - 固定は `swap-folder-names-without-refresh-does-not-settle`・`swap-without-refresh-does-not-settle`・`rotate-three-codes-without-refresh-does-not-settle`（3 行の回転）・`n15-pending-unique-cycle`・`holder-referenced-by-other-table-current-child-does-not-settle`（静止化の失敗の署名は表の名前を残すので表ごとに 1 行）。mutation 実証済み。
+  - 固定は `swap-folder-names-without-refresh-does-not-settle`・`swap-without-refresh-does-not-settle`・`rotate-three-codes-without-refresh-does-not-settle`（3 行の回転）・`n15-pending-unique-cycle`（静止化の失敗の署名は表の名前を残すので表ごとに 1 行）。mutation 実証済み。
   - 別の表の参照の判定が狭い（持ち主がサーバーにある・参照する行のサーバーの行が値を取る行の下に無い・参照する行がサーバーに無い・同じ表の参照、のどれも数えない）ことは、DB を使わない対照 `SyncModelRuntimeTests.OtherTableHolderShape_CountsOnlyTheNarrowShape` が表明する（条件を 1 つずつ外すと赤になる）。一意な値の比べ方をサーバー役のものから序数へ戻すと、持ち主の名前が大文字と末尾の空白だけ違う形（実 SQL Server の比べ方では当たり、序数では当たらない）が赤になる（`StuckShape` も同じ対照で見る）。最新の写しの形を分ける判定（`HasCurrentReferrer`）も同じ対照が見る。
 - 既知の失敗の一覧の乱数の項目のうち RegularSeeds / NightlySeeds の項目は、全部の種をまとめて照合して「起きない」も赤にする。種ごとの照合は「載っていない」しか見ないため。
 - 乱数の種の照合は、静止化で起きた例外を途中の同期の例外と同じに扱い、表明 2・3 の署名から表の名前を外して行う（`SyncModelRuntimeTests.Family`）。
@@ -318,6 +318,7 @@
   - `ExpectPayloadOp` / `ExpectNoAckOp`：サーバーが断った書き込みが、行の書き込みで止まり受理記録も blob も残さない（`n6-*`）
   - `ExpectLocalRowChangeOp`：実行が自分から変えた行の一覧（`SyncResult.LocalRowChanges`）に、表・キー・理由が載る（`thrown-serverwins-run-hides-settlement` など）
   - `RefuseJournalRemovalOp`：端末のローカル DB に、1 つのキーの記録の削除を断るトリガーを仕掛ける・外す（記録を捨ててから行を消す順を、途中で失敗させて確かめる＝`holder-referenced-by-other-table-entries-go-before-rows`）
+  - `OpenNewJournalOp`：端末のローカル DB に新しい `SyncJournal` のインスタンスを開き、最初の使用の表の作成を流す（アプリの再起動に当たる。補助の表の一部が無い古い DB に足りない表が作られる＝`holder-referenced-by-other-table-current-child-legacy-local-schema`）。降ろし直す約束の件数とトリガーは、汎用の `ExpectLocalSqlOp`・`LocalSqlOp` で書く
   - `ModelRefreshOp.ExpectScopeRefusal`：範囲外の行が範囲内の行を参照する洗い替えが断られ、端末の DB が変わらない（`42-refresh-refused-by-rows-outside`）
   - `LegacyKeyTextsOp`：以前の版が書いた形のキーのテキストを作る（`25-legacy-journal-key-text` / `25-legacy-ack-key-text`）
   - `RecordJournalOp`：ジャーナルへ直接記録して、プロセスごと落ちて残った記録を作る（`replay-unlanded-delete-entry-is-discarded`）

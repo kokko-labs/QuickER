@@ -2440,6 +2440,7 @@ flowchart LR
     jr["quicker_sync_journal (offline edits)"]
     ack["quicker_sync_ack (versions the server accepted)"]
     bp["quicker_sync_blob_pending (blob copies not done yet)"]
+    rp["quicker_sync_row_pending (rows to read back from the server)"]
   end
   subgraph srv["Server (SQL Server): no extra schema"]
     st["Synced tables"]
@@ -2469,9 +2470,10 @@ flowchart TD
 ### What it puts where
 
 The server gets no extra schema at all.
-The local database gets three shared tables, created on first use with `CREATE TABLE IF NOT EXISTS`.
+The local database gets four shared tables, each created on first use with `CREATE TABLE IF NOT EXISTS`, so a local database kept from an earlier version gets the ones it lacks.
 `quicker_sync_journal` records offline edits (table, key, operation, for a delete the version the row carried, and the unbounded binary columns the write stored a value in), and `quicker_sync_ack` records, per row, the version the server stamped on an upload it took.
 `quicker_sync_blob_pending` records the blob copies a download still owes (see [Unbounded binary columns](#unbounded-binary-columns)).
+`quicker_sync_row_pending` records the rows a download still owes: rows removed here so a unique value's holder could go, which the ordered stream had already passed (see [Conflicts](#conflicts)).
 
 The resume point is derived, not stored.
 It is the highest mirrored version among the local rows, so there is no bookkeeping row that can drift out of step with the data.
@@ -2578,7 +2580,7 @@ Each row is listed once per reason, as a `SyncLocalRowChange` (table, key in the
 | `DiscardedByServerWins` | A `ServerWins` run discarded the row's unsent changes and put the server's content back (or left the row to delete propagation when the server no longer has it) |
 | `ReloadedForUniqueValue` | The row held a unique value a downloaded row needed, and was read again from the server (or removed, when the server no longer has it) |
 | `RemovedBeforeDownload` | A `ServerWins` run removed the row, whose changes it was discarding and which the server does not have, before the server's rows came down, and dropped its entries with it |
-| `RemovedForUniqueValue` | The row kept a local row that held a unique value a downloaded row needed, and had nothing to send, so the run removed it (and dropped the entries it was discarding) for that row to go; when the server has the row, its server copy comes back with the download |
+| `RemovedForUniqueValue` | The row kept a local row that held a unique value a downloaded row needed, and had nothing to send, so the run removed it (and dropped the entries it was discarding) for that row to go; when the server has the row, its server copy comes back with the download, read back by key when the download had already passed it |
 
 Only `SyncAsync` fills it; `UploadAsync` and `DownloadAsync` called on their own return what they did before.
 A `SyncAsync` that throws has still done what it did up to that point, and hands the rows it had changed on in the exception's `Data`, under `SyncEngine.LocalRowChangesDataKey`, as an `IReadOnlyList<SyncLocalRowChange>`; the exception's type is the same as without it.
@@ -2930,7 +2932,12 @@ Their server copies cannot go in first, since their parent is the waiting row.
 When every local row referring to it, directly or through other rows, has nothing to send (no unsent change, or only entries the run is discarding) and belongs to a table the run covers, those rows are removed first, children first, the entries the run is discarding go with them, and the row is removed.
 The removed rows the server has come back with the download, in the same run when their table comes after the waiting row's.
 This happens only when the run propagates deletes.
-Nothing is removed when one of the rows is up to date here while a later row of its table has come down: the resume point the remaining rows derive is past its server copy, so it would not come down again.
+A removed row can be one that is up to date here while a later row of its table has come down: the resume point the remaining rows derive is past its server copy, so the download would not bring it again.
+Such a row is recorded in `quicker_sync_row_pending` before anything is removed, and its table's download reads it back from the server by key before it fetches anything else.
+The row read back takes the server's content without its mirror version, and the server's version is kept in `quicker_sync_ack`, as for a parent brought in.
+The record goes once the row is back, once the local database has a row with that key again (the application wrote one, say), or once the server no longer has the row.
+It stays while the key holds an unsent change, or while the row cannot go in (a parent that cannot be had), and a later run tries again; it does not stop the table's download.
+A refresh drops the records of the tables it reloads.
 The download stops at the server's row instead, reported in `PendingKeyText` like any other stop, when the local row cannot be brought forward: it has an unsent change the run is not discarding, the server no longer has it and it cannot be removed (it is referred to by a row that cannot be removed this way, or `PropagateDeletes` is off), or the rows hold each other's values.
 `ServerWins` treats such a row like one whose parent cannot be had: it is not put back and its entries stay.
 When the run propagates deletes, `ServerWins` first removes the local rows it is discarding that the server does not have, so a row recreated here under another key with the same value does not stand in the way.

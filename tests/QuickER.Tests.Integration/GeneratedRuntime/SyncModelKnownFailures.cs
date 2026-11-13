@@ -63,15 +63,6 @@ internal static class SyncModelKnownFailures
             "rotate-three-codes-without-refresh-does-not-settle",
             "1/no-quiesce:unique-swap:model_items"
         ),
-        // 一意な値の持ち主を引き留める送るものの無い行の下に、ダウンロードがもう届け終えた最新の写しの行（同じ表に後ろの版の行が
-        // 残る）があると、消すと降りてこないので消さず、静止化しない（乱数の項目はこの正規形から作る）
-        Entry(
-            "SK-1",
-            StuckSyncRemainderFixedIn,
-            "holder-referenced-by-other-table-current-child-does-not-settle",
-            "1/no-quiesce:holder-referenced-by-other-table-current-child:model_folders",
-            "持ち主を引き留める品目の下に、サーバーの子のイベントが最新の写しとして降りていて、同じ表に後ろの版のイベントが残るので、消すとそのイベントが二度と降りてこない。解決役は何も消さず、値を取る行のダウンロードが毎回止まる"
-        ),
         // 洗い替えの取得の後にサーバーの他者が親を消すと、バッチの古い写しの子が消えた親を指したまま入る
         Entry(
             "AG-R1",
@@ -88,11 +79,6 @@ internal static class SyncModelKnownFailures
             RefreshStaleParentReason
         ),
     ];
-
-    /// <summary>
-    /// 一意な値の持ち主を引き留める行の下に、消すとダウンロードが降ろし直さない最新の写しがある行き詰まりの項目の直す区切り
-    /// </summary>
-    public const string StuckSyncRemainderFixedIn = "同期の行き詰まりの残りの区切り（未起動）";
 
     /// <summary>洗い替えの取得の後にサーバーで消えた親の項目の直す区切り</summary>
     private const string RefreshStaleParentFixedIn = "きっかけ待ち（台帳 本番 AG-R1）";

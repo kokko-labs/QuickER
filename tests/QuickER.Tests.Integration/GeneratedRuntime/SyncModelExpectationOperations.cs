@@ -415,11 +415,21 @@ internal sealed record SaveFolderGraphOp(
 /// 書き込みの履歴に残らない（同期のモデルの汎用の表明〔消失なし〕が根拠にする書き手の値にならない）。使うシナリオは blob-refresh-discard-drops-local-blobs・
 /// blob-refresh-refuses-when-blobs-would-be-lost・blob-default-preserves-existing-local-blobs-new-rows-arrive-empty・
 /// refresh-excluding-referencing-child-refuses-under-cascade・refresh-failed-wipe-keeps-acks・
-/// refresh-leaves-local-only-tables-alone。
+/// refresh-leaves-local-only-tables-alone と、holder-referenced-by-other-table-current-child-* の降ろし直す約束の行
+/// （約束の書き込み・行の削除・読み直しを途中で断るトリガーと、約束の表を消す古い DB の形）。
 /// </remarks>
 internal sealed record LocalSqlOp(ModelActor Device, string Sql) : ModelOp
 {
     public override string Describe() => $"{Who(Device)} LocalSql {Sql}";
+}
+
+/// <summary>
+/// 端末のローカル DB に新しい <c>SyncJournal</c> のインスタンスを開き、最初の使用の表の作成を流す（アプリの再起動に当たる）。
+/// 補助の表の一部が無い古い端末の DB でも、足りない表が作られることを確かめる
+/// </summary>
+internal sealed record OpenNewJournalOp(ModelActor Device) : ModelOp
+{
+    public override string Describe() => $"{Who(Device)} OpenNewJournal";
 }
 
 /// <summary>端末のローカル DB から表を消す（作り直すための定義を控える。<see cref="RestoreLocalTableOp"/> で戻す）</summary>

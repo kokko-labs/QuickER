@@ -208,6 +208,10 @@ internal sealed partial class SyncModelRun
                 await LocalSqlAsync(sql.Device, [sql.Sql]);
                 return true;
 
+            case OpenNewJournalOp open:
+                await new SyncJournal(_world.Device(open.Device).Sql).EnsureCreatedAsync(_ct);
+                return true;
+
             case DropLocalTableOp drop:
             {
                 var definitions = await LocalDefinitionsAsync(drop.Device, drop.Table);

@@ -195,6 +195,7 @@ public static class GeneratedFixedTypeNames
             "SyncLocalRowChangeReason",
             "SyncMode",
             "SyncOptions",
+            "SyncOwedRow",
             "SyncParentReference",
             "SyncParentResolver",
             "SyncPendingChange",
