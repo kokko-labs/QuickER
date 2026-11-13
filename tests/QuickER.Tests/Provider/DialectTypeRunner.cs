@@ -578,6 +578,7 @@ internal static class DialectTypeRunner
             new("s", Num(info.Scale)),
             new("sqldb", info.SqlDbTypeName ?? "-"),
             new("declen", Num(info.SqlDeclaredLength)),
+            new("frac", Num(info.SqlFractionalSecondsScale)),
             new("rowver", Bit(info.IsRowVersion)),
             new("unbounded", Bit(info.IsUnboundedBinary)),
             new("token", info.CanonicalTypeToken ?? "-"),

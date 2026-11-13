@@ -542,6 +542,9 @@ internal sealed class CSharpPropertyModel
     /// <summary>[SqlColumnType] の Size に載せる宣言長（n / max=-1 / 無指定=0）。文字列・バイナリ以外は 0</summary>
     public int SqlDeclaredLength { get; init; }
 
+    /// <summary>[SqlColumnType] の Scale に載せる SQL Server の小数秒の桁（datetime2・time・datetimeoffset だけ。ほかは null）</summary>
+    public int? SqlFractionalSecondsScale { get; init; }
+
     /// <summary>
     /// 無制限バイナリ列（varbinary(max) / image / 長さ宣言なし BLOB 等）かどうか。<c>ExcludeUnboundedBinaryColumns</c> オプション ON のとき
     /// マーカー属性 [UnboundedBinaryColumn] を付与する対象の識別に使う（判定はプロバイダの型マッパーの責務）。

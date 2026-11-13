@@ -216,8 +216,8 @@ internal static class MultiDialectTypeReconciler
     /// </summary>
     /// <remarks>
     /// 図の方言が非 sqlserver でも、sqlserver 実装が明示 SqlParameter を組み立てるため属性が必要になる。
-    /// 主辞書の SqlDbTypeName が空で sqlserver 辞書に値がある列だけ、その 4 項目（SqlDbTypeName / SqlDeclaredLength /
-    /// Precision / Scale）を差し替えた新しい型情報を作る。型名・参照区分など他の項目は主辞書のまま保つ。
+    /// 主辞書の SqlDbTypeName が空で sqlserver 辞書に値がある列だけ、その 5 項目（SqlDbTypeName / SqlDeclaredLength /
+    /// Precision / Scale / SqlFractionalSecondsScale）を差し替えた新しい型情報を作る。型名・参照区分など他の項目は主辞書のまま保つ。
     /// sqlserver がターゲットに含まれない場合は主辞書をそのまま返す。
     /// </remarks>
     public static IReadOnlyDictionary<Guid, CSharpTypeInfo> SupplementSqlColumnTypes(
@@ -261,6 +261,7 @@ internal static class MultiDialectTypeReconciler
                 Scale = sqlServer.Scale,
                 SqlDbTypeName = sqlServer.SqlDbTypeName,
                 SqlDeclaredLength = sqlServer.SqlDeclaredLength,
+                SqlFractionalSecondsScale = sqlServer.SqlFractionalSecondsScale,
             };
         }
 

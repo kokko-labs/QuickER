@@ -104,6 +104,14 @@ public sealed class EngineFingerprintDriftTests
             ParitySqlServerSaveSummary
         );
 
+    [Fact(DisplayName = "[指紋] SQL Server の系統の値の往復の生成器は、記録と同じ書き込みを作る")]
+    public void BackendParitySqlServerValues_GeneratesRecordedInputs() =>
+        Verify(
+            "BackendParitySqlServerValues",
+            BackendParitySqlServerValueRuntimeTests.Seeds,
+            seed => SeedSummary.Object(BackendParitySqlServerValueGenerator.Create(seed))
+        );
+
     /// <summary>SQL Server の系統の乱数の保存：保存の引数・フック・行（record の中の一覧も展開する）</summary>
     internal static string ParitySqlServerSaveSummary(int seed) =>
         SeedSummary.Object(BackendParitySqlServerSaveGenerator.Create(seed));

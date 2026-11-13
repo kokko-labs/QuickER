@@ -417,6 +417,14 @@ Triggers are deliberately not fired, since QuickER's DDL generates none.
 `KeepNulls` is always on as well, so a `null` is stored as NULL even in a column with a DEFAULT, as `InsertAsync` stores it.
 The copy times out after the connection string's `Command Timeout` (30 seconds unless it says otherwise).
 
+The server fits each value of a row-at-a-time `InsertAsync` to its column, while `SqlBulkCopy` fits the values on the client, so the QuickER Repository fits them the server's way before the copy.
+Fractional seconds beyond the scale of a `datetime2(n)`, `time(n)`, or `datetimeoffset(n)` column are rounded, a half rounding up and the date carrying over.
+A value that would round past the end of the type's range stops at the last value at that scale (`DateTime.MaxValue` is stored as 9999-12-31 23:59:59.99 in a `datetime2(2)` column).
+A string longer than its column whose excess is only spaces (U+0020), and a binary value whose excess is only `0x00` bytes, are cut to the column's length, as the server does on an `InsertAsync`.
+A non-Unicode column converts a character to its code page before the server looks at the trailing spaces, so a value whose excess the code page turns into spaces (an ideographic space, for one) is stored by `InsertAsync` and refused by `BulkInsertAsync` alone.
+A value outside the column's range, such as a string with other characters in its excess or a `decimal` too large for its precision, is refused on every path.
+The type and message of the exception differ by path (`SqlBulkCopy` checks lengths on the client and throws an `InvalidOperationException`, for one), so do not branch on the exception type.
+
 ## Queries (expression tree → SQL)
 
 ```csharp
@@ -1334,6 +1342,13 @@ They are worth knowing when a test passes in memory and fails against the real t
   A `decimal` comes back at the scale the column declares on SQL Server (`1.1` in a `decimal(10,2)` column reads back as `1.10`) and without trailing zeros on SQLite (`1.10` reads back as `1.1`).
   The values compare equal across the backends, since `DateTime` equality ignores the kind and `decimal` equality ignores the scale, so a test that compares them with `==` holds on every backend.
   A test that reads `Kind`, formats the value, or compares its text is testing this backend only.
+- **SQL Server changes some values as it stores them, where the in-memory store keeps them as written.**
+  A `decimal` with more fractional digits than its column is rounded to the column's scale, a half rounding away from zero (`1.245` in a `decimal(10,2)` column is stored as `1.25`).
+  Fractional seconds beyond the scale of a `datetime2(n)`, `time(n)`, or `datetimeoffset(n)` column are rounded too, a half rounding up, and a `date` column keeps only the date of a `DateTime`.
+  An `nchar(n)` value comes back padded with spaces to `n` characters.
+  A `varchar` or `char` column keeps the characters its code page can hold (code page 1252 under the default collation) and turns any other character into `?` or a similar character (`Ā` into `A`).
+  The QuickER Repository and EF Core store the same value on every path, `BulkInsertAsync` included.
+  A test that relies on such a value staying as written is not evidence about SQL Server.
 
 ## Comparing columns whose values the database produces
 

@@ -88,12 +88,20 @@ public sealed partial class SqlServerCSharpTypeMapper : IColumnTypeMapper
             {
                 EfCoreColumnType = baseType,
             },
-            "date" or "datetime" or "datetime2" or "smalldatetime" => Value(
-                "DateTime",
-                sqlDbTypeName
-            ),
-            "time" => Value("TimeSpan", sqlDbTypeName),
-            "datetimeoffset" => Value("DateTimeOffset", sqlDbTypeName),
+            "date" or "datetime" or "smalldatetime" => Value("DateTime", sqlDbTypeName),
+            // 小数秒の桁を持つ型は、桁（指定なしは 7）を [SqlColumnType] の Scale へ運ぶ（SqlBulkCopy へ渡す値をこの桁へ丸める）
+            "datetime2" => Value("DateTime", sqlDbTypeName) with
+            {
+                SqlFractionalSecondsScale = precision ?? DefaultFractionalSecondsScale,
+            },
+            "time" => Value("TimeSpan", sqlDbTypeName) with
+            {
+                SqlFractionalSecondsScale = precision ?? DefaultFractionalSecondsScale,
+            },
+            "datetimeoffset" => Value("DateTimeOffset", sqlDbTypeName) with
+            {
+                SqlFractionalSecondsScale = precision ?? DefaultFractionalSecondsScale,
+            },
             "uniqueidentifier" => Value("Guid", sqlDbTypeName),
             "binary" or "varbinary" or "image" or "rowversion" or "timestamp" => Reference(
                 "byte[]",
@@ -158,6 +166,9 @@ public sealed partial class SqlServerCSharpTypeMapper : IColumnTypeMapper
             "rowversion" or "timestamp" => "Timestamp",
             _ => null,
         };
+
+    /// <summary>小数秒の桁の指定が無い datetime2・time・datetimeoffset の桁（SQL Server の既定）</summary>
+    private const int DefaultFractionalSecondsScale = 7;
 
     /// <summary>値型の型情報を作成する</summary>
     private static CSharpTypeInfo Value(string typeName, string? sqlDbTypeName) =>
