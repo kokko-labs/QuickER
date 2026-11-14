@@ -332,5 +332,50 @@ internal static partial class SourceRuleProbes
             {
                 InactiveBranch = true,
             },
+            // シンボルの規則のプロジェクトの集め方：フォルダごとに {フォルダ}.csproj の 1 プロジェクトだけを組み、同じフォルダの
+            // ビルドの一時のプロジェクト（*_wpftmp.csproj）と obj の下の csproj をプロジェクトにしない（読むと同じ行を 2 回数える）
+            new SourceRuleProbe(
+                "raw-file-writes-build-leftover-project",
+                "raw-file-writes",
+                [
+                    new ProbeFile("src/QuickER.Probe/QuickER.Probe.csproj", ProbeProjectFile),
+                    new ProbeFile(
+                        "src/QuickER.Probe/QuickER.Probe_x1y2z3ab_wpftmp.csproj",
+                        ProbeProjectFile
+                    ),
+                    new ProbeFile("src/QuickER.Probe/obj/QuickER.Probe.csproj", ProbeProjectFile),
+                    new ProbeFile(
+                        "src/QuickER.Probe/Probe.cs",
+                        """
+                        using System.IO;
+
+                        internal static class Probe
+                        {
+                            public static void Save(string path) => File.WriteAllText(path, "x");
+                        }
+                        """,
+                        "File.WriteAllText"
+                    ),
+                    new ProbeFile("src/QuickER.Other/QuickER.Other.csproj", ProbeProjectFile),
+                    new ProbeFile(
+                        "src/QuickER.Other/Other.cs",
+                        """
+                        using System.IO;
+
+                        internal static class Other
+                        {
+                            public static void Remove(string path) => File.Delete(path);
+                        }
+                        """,
+                        "File.Delete"
+                    ),
+                ]
+            ) with
+            {
+                ThroughProjectDiscovery = true,
+            },
         ];
+
+    /// <summary>プロジェクトの集め方を通す自己検査の行の csproj の本文</summary>
+    private const string ProbeProjectFile = """<Project Sdk="Microsoft.NET.Sdk" />""";
 }

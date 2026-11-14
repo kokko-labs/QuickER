@@ -18,7 +18,8 @@ namespace QuickER.Tests.TestSupport;
 /// シンボルで判定すれば、書き方に依らず「どの API を呼んでいるか」で数えられる。
 /// </para>
 /// <para>
-/// 組み方：<c>src/</c> の <c>.csproj</c> を持つフォルダを 1 プロジェクトとし、その下の <c>.cs</c>（<c>bin</c> / <c>obj</c> を除く）に、
+/// 組み方：<c>src/</c> の <c>.csproj</c> を持つフォルダを 1 プロジェクトとし（csproj はフォルダの名前のもの 1 つだけ＝
+/// <see cref="SourceFiles.SrcProjectFiles"/>）、その下の <c>.cs</c>（<c>bin</c> / <c>obj</c> を除く）に、
 /// ビルドが作った暗黙の using（<c>obj/**/{.csproj の名前}.GlobalUsings.g.cs</c>）を足す。参照はテストの実行時の
 /// TRUSTED_PLATFORM_ASSEMBLIES と、テストの出力フォルダの管理された DLL（自分自身のアセンブリを除く）。
 /// アセンブリ名は <c>.csproj</c> の <c>AssemblyName</c>（無ければフォルダ名）にして、<c>InternalsVisibleTo</c> を効かせる。
@@ -91,19 +92,23 @@ internal static class SourceSymbolScan
 
     private static IReadOnlyList<SourceProject> LoadProjects()
     {
-        var root = NeutralResxFiles.FindRepositoryRoot();
-        var src = Path.Combine(root, "src");
         var watch = System.Diagnostics.Stopwatch.StartNew();
-        var projects = Directory
-            .EnumerateFiles(src, "*.csproj", SearchOption.AllDirectories)
-            .Where(csproj => !IsBuildOutput(csproj))
+        var projects = LoadSrcProjects(NeutralResxFiles.FindRepositoryRoot());
+        LoadElapsed = watch.Elapsed;
+        return projects;
+    }
+
+    /// <summary>
+    /// 根の下の <c>src</c> のプロジェクトを組む（本物の src と、プロジェクトの集め方を通す自己検査の合成の木が同じ道を通る）
+    /// </summary>
+    /// <param name="root">リポジトリのルート（自己検査は合成の木の根）</param>
+    public static IReadOnlyList<SourceProject> LoadSrcProjects(string root) =>
+        SourceFiles
+            .SrcProjectFiles(root)
             .AsParallel()
             .Select(csproj => LoadProject(root, csproj))
             .OrderBy(project => project.Name, StringComparer.Ordinal)
             .ToList();
-        LoadElapsed = watch.Elapsed;
-        return projects;
-    }
 
     /// <summary>src のプロジェクトを組み終えるまでにかかった時間（走査の費用の報告用）</summary>
     public static TimeSpan LoadElapsed { get; private set; }
@@ -379,9 +384,8 @@ internal static class SourceSymbolScan
     private static CSharpParseOptions LoadParseOptions()
     {
         var root = NeutralResxFiles.FindRepositoryRoot();
-        var symbols = Directory
-            .EnumerateFiles(Path.Combine(root, "src"), "*.csproj", SearchOption.AllDirectories)
-            .Where(path => !IsBuildOutput(path))
+        var symbols = SourceFiles
+            .SrcProjectFiles(root)
             .SelectMany(path => Regex.Matches(File.ReadAllText(path), "QUICKER_[A-Z_]+"))
             .Select(match => match.Value)
             .Distinct(StringComparer.Ordinal)
