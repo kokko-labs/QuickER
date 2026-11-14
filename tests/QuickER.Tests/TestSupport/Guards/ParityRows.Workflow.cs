@@ -303,13 +303,8 @@ internal static partial class ParityRows
                 {
                     string[] projects =
                     [
-                        .. Directory
-                            .EnumerateFiles(
-                                Path.Combine(WorkflowGuardTests.Root, "src"),
-                                "*.csproj",
-                                SearchOption.AllDirectories
-                            )
-                            .Where(path => !SourceFiles.IsBuildOutput(path))
+                        .. SourceFiles
+                            .SrcProjectFiles(WorkflowGuardTests.Root)
                             .Select(path => "../" + RelativeToRoot(path)),
                         "../tests/QuickER.Tests/QuickER.Tests.csproj",
                         "../tests/QuickER.Tests.FakeCodexAppServer/QuickER.Tests.FakeCodexAppServer.csproj",

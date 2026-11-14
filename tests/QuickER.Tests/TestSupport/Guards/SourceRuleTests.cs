@@ -1,3 +1,4 @@
+using System.IO;
 using AwesomeAssertions;
 using Microsoft.CodeAnalysis;
 using QuickER.Tests.TestSupport.Engines;
@@ -131,6 +132,18 @@ public sealed class SourceRuleTests(ITestOutputHelper output)
             SourceRuleProbes
                 .All.Where(probe => SourceRules.All.All(rule => rule.Id != probe.RuleId))
                 .Select(probe => $"{probe.Id}: 規則 {probe.RuleId} が無い")
+        );
+        problems.AddRange(
+            SourceRuleProbes
+                .All.Where(probe =>
+                    probe.ThroughProjectDiscovery
+                    && SourceRules.All.Any(rule =>
+                        rule.Id == probe.RuleId && rule.Finder is not SymbolFinder
+                    )
+                )
+                .Select(probe =>
+                    $"{probe.Id}: プロジェクトの集め方を通す行はシンボルの規則にだけ置ける"
+                )
         );
 
         foreach (var rule in SourceRules.All)
@@ -276,18 +289,55 @@ public sealed class SourceRuleTests(ITestOutputHelper output)
         }
     }
 
-    /// <summary>シンボルの規則の自己検査：合成のソースを 1 プロジェクトとしてコンパイルして当てる</summary>
+    /// <summary>
+    /// シンボルの規則の自己検査：合成のソースを 1 プロジェクトとしてコンパイルして当てる
+    /// （<see cref="SourceRuleProbe.ThroughProjectDiscovery"/> の行は、一時フォルダに書いた木を本物の src と同じ集め方で組む）
+    /// </summary>
     private static Dictionary<string, List<string>> ProbeSymbols(
         SourceRuleProbe probe,
         SymbolFinder finder,
         CancellationToken cancellationToken
     )
     {
-        var project = SourceSymbolScan.CompileProbeProject(
+        if (probe.ThroughProjectDiscovery)
+        {
+            using var folder = new TestTempFolder();
+
+            foreach (var file in probe.Files)
+            {
+                var path = Path.Combine([folder.Path, .. file.Path.Split('/')]);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, file.Text);
+            }
+
+            return SourceSymbolScan
+                .LoadSrcProjects(folder.Path)
+                .SelectMany(project => Scan(probe, project, finder, cancellationToken))
+                .GroupBy(item => item.RelativePath)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.Select(item => item.What).ToList()
+                );
+        }
+
+        var single = SourceSymbolScan.CompileProbeProject(
             "QuickER.Tests.Probe",
             [.. probe.Files.Select(file => (file.Path, file.Text))]
         );
 
+        return Scan(probe, single, finder, cancellationToken)
+            .GroupBy(item => item.RelativePath)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.What).ToList());
+    }
+
+    /// <summary>組んだプロジェクトがコンパイルできることを確かめ、規則の見つける形が拾う出現を返す</summary>
+    private static IEnumerable<(string RelativePath, string What)> Scan(
+        SourceRuleProbe probe,
+        SourceProject project,
+        SymbolFinder finder,
+        CancellationToken cancellationToken
+    )
+    {
         project
             .Compilation.GetDiagnostics(cancellationToken)
             .Where(diagnostic =>
@@ -295,13 +345,17 @@ public sealed class SourceRuleTests(ITestOutputHelper output)
                 && !probe.IgnoredDiagnostics.Contains(diagnostic.Id)
             )
             .Should()
-            .BeEmpty($"[{probe.Id}] 合成のソースはコンパイルできる");
+            .BeEmpty($"[{probe.Id}] 合成のソースはコンパイルできる（{project.Name}）");
 
-        return project
-            .ScanNodes(cancellationToken)
-            .Select(item => (item.File.RelativePath, What: finder.Describe(item.Model, item.Node)))
-            .Where(item => item.What is not null)
-            .GroupBy(item => item.RelativePath)
-            .ToDictionary(group => group.Key, group => group.Select(item => item.What!).ToList());
+        return
+        [
+            .. project
+                .ScanNodes(cancellationToken)
+                .Select(item =>
+                    (item.File.RelativePath, What: finder.Describe(item.Model, item.Node))
+                )
+                .Where(item => item.What is not null)
+                .Select(item => (item.RelativePath, item.What!)),
+        ];
     }
 }

@@ -742,7 +742,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         _pendingRequests[requestId] = completionSource;
 
         // リクエストタイムアウト（30 秒）+ 呼び出し元キャンセルを合成する
-        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var timeoutCts = new CancellationTokenSource(RequestTimeoutForTests);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             timeoutCts.Token
@@ -915,6 +915,16 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     /// 起きない。テストは書き込みの終わりを門で止めて、その経路を決定的に通す
     /// </remarks>
     internal Func<Task, Task>? WriteCompletionForTests { get; set; }
+
+    /// <summary>
+    /// テスト専用：リクエストのタイムアウト（既定は 30 秒＝製品の振る舞い。値を変えるのはテストだけ）
+    /// </summary>
+    /// <remarks>
+    /// 呼び出し元の取り消しとこのタイムアウトは、どちらもスレッドプールで走るタイマーで知らされる。プールの待ちが
+    /// タイムアウトに届くと、取り消しを処理する時点で両方が立っていて、優先順でタイムアウトとして返る。取り消しの経路を
+    /// 確かめるテストは <see cref="Timeout.InfiniteTimeSpan"/> にして、競争の相手を無くす
+    /// </remarks>
+    internal TimeSpan RequestTimeoutForTests { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>書き込みの継続から書き込みロックを手放す（破棄の後なら何もしない）</summary>
     /// <remarks>

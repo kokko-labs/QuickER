@@ -16,6 +16,12 @@ internal sealed record SourceRuleProbe(string Id, string RuleId, IReadOnlyList<P
 
     /// <summary>シンボルの規則のコンパイルで、エラーでも数えない診断の Id（理由はソースのコメントに書く）</summary>
     public IReadOnlyList<string> IgnoredDiagnostics { get; init; } = [];
+
+    /// <summary>
+    /// シンボルの規則で、合成のソースを 1 プロジェクトにせず、本物の src と同じプロジェクトの集め方を通す行か
+    /// （ファイルのパスは合成の木の根からの相対パス。csproj もファイルとして置く）
+    /// </summary>
+    public bool ThroughProjectDiscovery { get; init; }
 }
 
 /// <summary>自己検査の合成のソース 1 つ</summary>

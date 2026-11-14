@@ -1,6 +1,8 @@
+using System.IO;
 using System.Reflection;
 using AwesomeAssertions;
 using QuickER.AI;
+using AiStrings = QuickER.AI.Resources.Strings;
 
 namespace QuickER.Tests.AI;
 
@@ -25,7 +27,7 @@ public class CodexAppServerClientConnectionTests
     public async Task Request_WhenWriteIsStuck_CancelsAndAbortsConnection()
     {
         await using var server = new FakeCodexAppServerProcess("block");
-        var client = server.CreateClient();
+        var client = CreateClientWithoutTimeout(server);
         var disconnected = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
@@ -66,7 +68,7 @@ public class CodexAppServerClientConnectionTests
     public async Task Request_CanceledBeforeWriteEnds_ReleasesWriteLockOnceWhenWriteEnds()
     {
         await using var server = new FakeCodexAppServerProcess("block");
-        var client = server.CreateClient();
+        var client = CreateClientWithoutTimeout(server);
         var writeEnds = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
@@ -118,7 +120,7 @@ public class CodexAppServerClientConnectionTests
     public async Task Request_CanceledWhileWaitingForWriteLock_KeepsConnection()
     {
         await using var server = new FakeCodexAppServerProcess("block");
-        var client = server.CreateClient();
+        var client = CreateClientWithoutTimeout(server);
         var disconnected = false;
         client.Disconnected += (_, _) => disconnected = true;
         Task? stuck = null;
@@ -127,7 +129,7 @@ public class CodexAppServerClientConnectionTests
         {
             await server.StartAsync(client, TestContext.Current.CancellationToken);
 
-            // 先のリクエストが書き込みロックを握ったまま詰まる（取り消さない＝30 秒のタイムアウトまで握り続ける）
+            // 先のリクエストが書き込みロックを握ったまま詰まる（取り消さず、タイムアウトも無いので破棄まで握り続ける）
             stuck = client.StartTurnAsync("thread", LargePrompt, CancellationToken.None);
             await WaitUntilAsync(() => GetWriteLock(client).CurrentCount == 0);
 
@@ -159,7 +161,8 @@ public class CodexAppServerClientConnectionTests
     /// </summary>
     /// <remarks>
     /// 標準入力を先に閉じようとすると、書き込みの途中なので閉じる処理が例外になり、子プロセスを止める前に抜ける。
-    /// さらにその後は相手を止めても詰まった書き込みが失敗で終わらず、30 秒のタイムアウトまで残る
+    /// さらにその後は相手を止めても詰まった書き込みが失敗で終わらず、タイムアウトまで残る。
+    /// 要求のタイムアウトを外してあるので、要求が終わるなら破棄が終わらせたことになる
     /// </remarks>
     [Fact(
         DisplayName = "書き込みが詰まっている最中の破棄は子プロセスを止めて詰まった要求もすぐ終わらせる"
@@ -167,7 +170,7 @@ public class CodexAppServerClientConnectionTests
     public async Task Dispose_WhileWriteIsStuck_StopsServerAndEndsStuckRequest()
     {
         await using var server = new FakeCodexAppServerProcess("block");
-        var client = server.CreateClient();
+        var client = CreateClientWithoutTimeout(server);
         Task? stuck = null;
 
         try
@@ -182,13 +185,19 @@ public class CodexAppServerClientConnectionTests
             await dispose.Should().NotThrowAsync();
             (await server.WaitForServersToExitAsync(Patience)).Should().Be(0);
 
-            var completed = await Task.WhenAny(
-                stuck,
-                Task.Delay(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken)
-            );
-
-            completed.Should().BeSameAs(stuck, "30 秒のタイムアウトを待たずに終わる");
-            stuck.IsFaulted.Should().BeTrue("相手を止めた書き込みは失敗で終わる");
+            // 相手を止めた書き込みは、パイプの切断（IOException）か停止の取り消し（接続断）のどちらかが先に起きて失敗で終わる
+            var failure = await StuckRequestFailureAsync(stuck);
+            failure
+                .Should()
+                .Match<Exception>(
+                    exception =>
+                        exception is IOException
+                        || (
+                            exception is InvalidOperationException
+                            && exception.Message == AiStrings.Codex_ConnectionClosed
+                        ),
+                    "破棄で止めた書き込みは接続断で失敗する"
+                );
         }
         finally
         {
@@ -206,8 +215,9 @@ public class CodexAppServerClientConnectionTests
     /// 書き込みを自分で取り消し、要求をすぐ接続断で終わらせることを検証する。
     /// </summary>
     /// <remarks>
-    /// 読み口が残ると、詰まった書き込みは相手が止まっても失敗で終わらず、30 秒のタイムアウトまで残る。
-    /// 偽サーバーの標準入力のハンドルをこのテストのプロセスへ複製して持ち、その状態を決定的に作る
+    /// 読み口が残ると、詰まった書き込みは相手が止まっても失敗で終わらず、タイムアウトまで残る。
+    /// 偽サーバーの標準入力のハンドルをこのテストのプロセスへ複製して持ち、その状態を決定的に作る。
+    /// 要求のタイムアウトを外してあるので、要求が終わるなら破棄が終わらせたことになる
     /// </remarks>
     [Fact(
         DisplayName = "読み口が残っていても、書き込みが詰まっている最中の破棄は詰まった要求をすぐ終わらせる"
@@ -215,7 +225,7 @@ public class CodexAppServerClientConnectionTests
     public async Task Dispose_WhileWriteIsStuckAndReadEndStaysOpen_EndsStuckRequest()
     {
         await using var server = new FakeCodexAppServerProcess("stdin-handle", "block");
-        var client = server.CreateClient();
+        var client = CreateClientWithoutTimeout(server);
         Task? stuck = null;
         var heldReadEnd = IntPtr.Zero;
 
@@ -272,15 +282,15 @@ public class CodexAppServerClientConnectionTests
             await client.DisposeAsync();
             (await server.WaitForServersToExitAsync(Patience)).Should().Be(0);
 
-            var completed = await Task.WhenAny(
-                stuck,
-                Task.Delay(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken)
-            );
-
-            completed
+            // 読み口が残っているのでパイプは切れない。停止の取り消しだけが書き込みを終わらせる
+            var failure = await StuckRequestFailureAsync(stuck);
+            failure
                 .Should()
-                .BeSameAs(stuck, "読み口が残っていても 30 秒のタイムアウトを待たずに終わる");
-            stuck.IsFaulted.Should().BeTrue("破棄で取り消した書き込みは接続断の失敗で終わる");
+                .BeOfType<InvalidOperationException>(
+                    "破棄で取り消した書き込みは接続断の失敗で終わる"
+                )
+                .Which.Message.Should()
+                .Be(AiStrings.Codex_ConnectionClosed);
         }
         finally
         {
@@ -358,6 +368,42 @@ public class CodexAppServerClientConnectionTests
         {
             await client.DisposeAsync();
         }
+    }
+
+    /// <summary>
+    /// 要求のタイムアウトを外したクライアントを作る（取り消しと破棄の経路を確かめるテスト用）
+    /// </summary>
+    /// <remarks>
+    /// 取り消しと 30 秒のタイムアウトは、どちらもスレッドプールで走るタイマーで知らされる。混んだ機械でプールの待ちが
+    /// 30 秒に届くと、取り消しを処理する時点で両方が立っていて、優先順でタイムアウトとして返る。
+    /// タイムアウトを外せば、取り消しと破棄だけが要求を終わらせる
+    /// </remarks>
+    private static CodexAppServerClient CreateClientWithoutTimeout(FakeCodexAppServerProcess server)
+    {
+        var client = server.CreateClient();
+        client.RequestTimeoutForTests = Timeout.InfiniteTimeSpan;
+        return client;
+    }
+
+    /// <summary>詰まっていた要求が失敗で終わるのを待ち、その例外を返す（上限を過ぎたら失敗にする）</summary>
+    private static async Task<Exception> StuckRequestFailureAsync(Task stuck)
+    {
+        try
+        {
+            await stuck.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        }
+        catch (TimeoutException) when (!stuck.IsCompleted)
+        {
+            throw new Xunit.Sdk.XunitException(
+                "破棄の後も詰まった要求が上限時間内に終わりませんでした"
+            );
+        }
+        catch (Exception exception)
+        {
+            return exception;
+        }
+
+        throw new Xunit.Sdk.XunitException("詰まっていた要求が失敗せずに終わりました");
     }
 
     /// <summary>条件が成り立つまで待つ（上限を過ぎたら失敗にする）</summary>
