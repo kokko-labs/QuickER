@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
@@ -27,6 +28,21 @@ public enum ConcurrencyChoice
 }
 
 /// <summary>
+/// 版の書き戻しのシナリオ（基底の Fact 1・10・11 の本体。リモートの派生は同じ本体を応答の経路ごとに流す）。
+/// </summary>
+public enum RowVersionWriteBack
+{
+    /// <summary>1 行の Insert → Update → Save で版が進み、再取得なしで次の更新に使える</summary>
+    SingleRow,
+
+    /// <summary>親子のグラフ保存で版が書き戻り、同じグラフを続けて保存できる</summary>
+    Graph,
+
+    /// <summary>複数ルートの保存でルートごとに版が書き戻る</summary>
+    ManyRoots,
+}
+
+/// <summary>
 /// rowversion 列を持つテーブルの楽観排他（<c>ConcurrencyMode</c>）を、実装先（QuickER 版 Repository の SQL Server・
 /// EF Core・インメモリ・HTTP リモート）と VO の有無を跨いでパリティ検証する共通基底。
 /// </summary>
@@ -36,7 +52,7 @@ public enum ConcurrencyChoice
 /// シナリオを <c>[Fact]</c> として持つ。各派生はリポジトリ生成・シード・「他者による更新」の作り方だけを差し込む。
 /// </para>
 /// <list type="bullet">
-///   <item>保存成功後は新しい版が<b>同一インスタンス</b>へ反映され、再取得なしで続けて保存できる</item>
+///   <item>保存成功後は新しい版が<b>同一インスタンス</b>へ反映され、再取得なしで続けて保存できる（1 行・親子のグラフ・複数ルート）</item>
 ///   <item>UPDATE / DELETE は版一致を条件に成立し、他者が先に更新していれば競合例外</item>
 ///   <item><c>ForceOverwrite</c> は版条件を外す（明示的な last-write-wins）</item>
 ///   <item>単一 <c>UpdateAsync</c> の「行なし」は競合ではなく従来契約の <c>false</c></item>
@@ -146,6 +162,15 @@ public abstract class ConcurrencyRuntimeTestsBase<TEntity, TConflictException>
     /// <summary>取得済みルートの先頭の子を編集して更新マークを付ける（グラフ保存の巻き戻し検証用）</summary>
     protected abstract void EditFirstChild(TEntity root, string note);
 
+    /// <summary>ルートの子のナビゲーションへ、新規（Added）の子を 1 件足す（グラフ保存の版の書き戻し用）</summary>
+    protected abstract void AttachNewChild(TEntity root, int childId, string note);
+
+    /// <summary>ルートとカスケードの子がすべて Unchanged か（保存後の状態の確定の確認用）</summary>
+    protected abstract bool IsGraphUnchanged(TEntity root);
+
+    /// <summary>複数ルートをまとめて保存する（<c>SaveAsync(IEnumerable)</c>・既定の Optimistic）</summary>
+    protected abstract Task<int> SaveManyAsync(IReadOnlyList<TEntity> roots);
+
     /// <summary>子の現在値を読む（行なしは null）</summary>
     protected abstract Task<string?> ReadChildNoteAsync(int noteId);
 
@@ -186,7 +211,105 @@ public abstract class ConcurrencyRuntimeTestsBase<TEntity, TConflictException>
     [Fact(
         DisplayName = "[Concurrency] 1: 版反映: Insert / Update / Save 後に同一インスタンスの版が進む"
     )]
-    public async Task RowVersion_IsWrittenBack_ToTheSameInstance()
+    public Task RowVersion_IsWrittenBack_ToTheSameInstance() =>
+        RunRowVersionWriteBackAsync(RowVersionWriteBack.SingleRow);
+
+    /// <summary>10. グラフ保存は親子の版を書き戻し、再取得なしで同じグラフを続けて保存できる</summary>
+    [Fact(
+        DisplayName = "[Concurrency] 10: 版反映: グラフ保存で親子の版が書き戻り同じグラフを続けて保存できる"
+    )]
+    public Task GraphSave_WritesBackRowVersions_AndAllowsConsecutiveSaves() =>
+        RunRowVersionWriteBackAsync(RowVersionWriteBack.Graph);
+
+    /// <summary>11. 複数ルートの保存は、ルートごとに版を書き戻す</summary>
+    [Fact(DisplayName = "[Concurrency] 11: 版反映: 複数ルートの保存はルートごとに版を書き戻す")]
+    public Task SaveMany_WritesBackRowVersionPerRoot() =>
+        RunRowVersionWriteBackAsync(RowVersionWriteBack.ManyRoots);
+
+    /// <summary>版の書き戻しのシナリオを流す（Fact 1・10・11 と、リモートの応答の経路の Theory が共有する本体）</summary>
+    protected Task RunRowVersionWriteBackAsync(RowVersionWriteBack scenario) =>
+        scenario switch
+        {
+            RowVersionWriteBack.SingleRow => SingleRowWriteBackAsync(),
+            RowVersionWriteBack.Graph => GraphWriteBackAsync(),
+            RowVersionWriteBack.ManyRoots => ManyRootsWriteBackAsync(),
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario), scenario, null),
+        };
+
+    /// <summary>グラフ保存の版の書き戻しで使う親の ID（シードと重ならない）</summary>
+    private const int GraphRootId = 8;
+
+    /// <summary>グラフ保存の版の書き戻しで使う子の ID（シードと重ならない）</summary>
+    private const int GraphChildId = 80;
+
+    /// <summary>
+    /// 親 1 件＋子 1 件を新規のグラフで保存し、書き戻った版のまま両方を編集して続けて保存する。
+    /// </summary>
+    /// <remarks>
+    /// 2 回目の保存は既定の Optimistic なので、親と子（子の表が版を持つ図）の版が保存先の現在値と一致していないと競合になる。
+    /// 子の版を直接表明しないのは、子の表が版を持たない図（BinaryFixture）でも同じシナリオを流すため。
+    /// </remarks>
+    private async Task GraphWriteBackAsync()
+    {
+        await ResetAndSeedAsync();
+
+        var root = NewEntity(GraphRootId, "parent");
+        MarkAdded(root);
+        AttachNewChild(root, GraphChildId, "child");
+
+        (await SaveAsync(root)).Should().Be(2, "親 1 件＋子 1 件が保存される");
+
+        GetRowVersion(root).Should().NotBeNull("保存で採番された親の版が書き戻る");
+        GetRowVersion(root)!
+            .Length.Should()
+            .Be(8, "SQL Server の rowversion（およびインメモリの擬似版）は 8 バイト");
+        IsGraphUnchanged(root).Should().BeTrue("保存後の状態確定はカスケードで行われる");
+        var afterInsert = GetRowVersion(root);
+
+        // 2 回目: 再取得せずそのまま保存できる＝書き戻された親子の版が保存先の現在値と一致している
+        SetTitle(root, "parent-2");
+        MarkUpdated(root);
+        EditFirstChild(root, "child-2");
+
+        (await SaveAsync(root)).Should().Be(2, "書き戻された版で版チェックが通る");
+        GetRowVersion(root).Should().NotEqual(afterInsert, "保存のたびに新しい版が反映される");
+        IsGraphUnchanged(root).Should().BeTrue();
+        (await ReadTitleAsync(GraphRootId)).Should().Be("parent-2");
+        (await ReadChildNoteAsync(GraphChildId)).Should().Be("child-2");
+    }
+
+    /// <summary>新規の 2 ルートをまとめて保存し、ルートごとに書き戻った版のまま両方を編集して続けて保存する</summary>
+    private async Task ManyRootsWriteBackAsync()
+    {
+        await ResetAndSeedAsync();
+
+        var first = NewEntity(11, "alpha");
+        var second = NewEntity(12, "beta");
+        MarkAdded(first);
+        MarkAdded(second);
+
+        (await SaveManyAsync([first, second])).Should().Be(2);
+
+        GetRowVersion(first).Should().NotBeNull();
+        GetRowVersion(second).Should().NotBeNull();
+        GetRowVersion(first)
+            .Should()
+            .NotEqual(GetRowVersion(second), "版はルートごとに別々に対応付けられる");
+
+        SetTitle(first, "alpha2");
+        SetTitle(second, "beta2");
+        MarkUpdated(first);
+        MarkUpdated(second);
+
+        (await SaveManyAsync([first, second]))
+            .Should()
+            .Be(2, "どちらのルートも書き戻された版で版チェックが通る");
+        (await ReadTitleAsync(11)).Should().Be("alpha2");
+        (await ReadTitleAsync(12)).Should().Be("beta2");
+    }
+
+    /// <summary>1 行の Insert → Update → Save → Update で、同一インスタンスの版が進み続ける</summary>
+    private async Task SingleRowWriteBackAsync()
     {
         await ResetAndSeedAsync();
 

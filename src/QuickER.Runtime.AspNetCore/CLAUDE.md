@@ -143,6 +143,10 @@ Kestrel は本文の読み取りの例外を先に投げ、`RequestAborted` は�
   - 削除した子を残った親のコレクションから外す共通規則と、サーバーが残った Removed の子を「飛ばした行」として応答に載せる処理（`RemoteEntityGraph.CollectSkipped`）は `src/QuickER.Runtime/CLAUDE.md`「削除した子の外れ方」を参照する。
 - クライアントは `Saved` の値の後に、`RowState` を変えずに書き戻す。数が合わなければ値を使わず、従来どおり確定する。以前のサーバーの応答は欄を持たず書き戻さない。以前のクライアントは知らない欄を読み捨てる。
 - 値は版の表（キーで照合）の後に書き戻す。食い違えば値が勝つ（フックが主キーを変えると版の表は外れる）。
+- 版は 2 つの経路が運ぶ。版の表（Insert / Update の `RowVersion`・Save / SaveMany の `RowVersions`）と、列の値（`Values`・`Saved`）。
+  - 同じ版の生成物どうしでは列の値が勝ち、版の表は冗長になる。版の表は以前のサーバー（列の値を運ばない）・以前のクライアント（列の値を読み捨てる）とのワイヤ互換の経路として残す。
+  - 片方だけを外す退行は通常の応答では答えが変わらないので、テストはクライアントの HTTP に `RemoteResponseChannelHandler` を挟み、応答から片方を外してもう片方だけで版が届くことを確かめる（版の表だけ＝以前のサーバーの応答を新しいクライアントが読む形）。
+  - ガード：`ConcurrencyRemoteRuntimeTestsBase.RowVersion_IsWrittenBack_ThroughEachResponseChannelAlone`（版の書き戻しのシナリオ 3 つ × 版の表だけ・列の値だけ。リモートの派生 5 つ＝サーバーはインメモリ・QuickER 版 SQL Server・EF Core SQL Server）。mutation 実証済み（サーバーの版の表の収集を外す・列の値から版を抜く・クライアントの版の表の書き戻しを外す・列の値の書き戻しを外す、のどれもその経路の行だけが赤）。
 - ガード：実装先の一致のシナリオ `remote-save-writes-back-hook-values`・`remote-write-back-by-position`（Remote・RemoteEfCoreOnly）、`RemoteEfCoreGeneratedValuesRuntimeTests`（EF Core のサーバー・実 SQL Server の採番列が Insert / Save / Update で戻る・Docker）、`RemoteSaveResponseClientTests`（応答を差し替えた HTTP）、`EditModelSaveRuntimeTestsBase` の Before フックのシナリオ（リモートの派生でも流す）、`h3-edit-then-skip-*`・`hook-edit-then-continue-delete`（Remote・RemoteEfCoreOnly の slots）。mutation 実証済み。
 - `CollectSaveRows` が削除行を飛ばさないようにしても緑のまま（両側が同じ関数で並びを作るので食い違わない）。サーバーの一覧を保存の後に作っても緑のまま（EF Core の保存が渡したエンティティのナビゲーションを元へ戻すため）。保存の前に作る形は二重の守りとして残す。
 

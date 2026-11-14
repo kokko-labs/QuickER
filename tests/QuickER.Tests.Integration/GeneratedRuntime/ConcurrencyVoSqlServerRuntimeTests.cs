@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using AwesomeAssertions;
@@ -19,8 +20,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <c>byte[]</c> なので、書き戻しの <c>PropertyInfo.SetValue</c> は VO へ包み直さなければ <c>ArgumentException</c> に
 /// なる（実バグ＝UPDATE はコミット済みなのに保存が例外・手元の版は古いまま＝次回保存が偽の競合）。
 /// 基底 <see cref="ConcurrencyRuntimeTestsBase{TEntity, TConflictException}"/> のシナリオはアダプタで VO を開閉するため、
-/// それが緑になること自体が包み直しの実証になる。本クラスは加えて「版が VO 型として載る」ことと、
-/// カスケード子の版も書き戻ることを VO 固有の観点として持つ。
+/// それが緑になること自体が包み直しの実証になる。本クラスは加えて「版が VO 型として載る」ことを VO 固有の観点として持つ
+/// （カスケード子の版の書き戻しは基底のテスト 10）。
 /// </para>
 /// <para>
 /// 「他者による更新」は生 SQL（<c>ExecuteSqlAsync</c>）で直接 UPDATE して作る＝Repository を経由しないため
@@ -164,6 +165,20 @@ public sealed class ConcurrencyVoSqlServerRuntimeTests(SqlServerContainerFixture
         child.MarkUpdated();
     }
 
+    protected override void AttachNewChild(GadgetEntity root, int childId, string note)
+    {
+        var child = NewNote(childId, root.GadgetId.Value, note);
+        child.MarkAdded();
+        root.GadgetNotes.Add(child);
+    }
+
+    protected override bool IsGraphUnchanged(GadgetEntity root) =>
+        root.RowState == RowState.Unchanged
+        && root.GadgetNotes.All(note => note.RowState == RowState.Unchanged);
+
+    protected override Task<int> SaveManyAsync(IReadOnlyList<GadgetEntity> roots) =>
+        Gadgets().SaveAsync(roots, cancellationToken: Ct);
+
     protected override (string Reason, string? EntityTypeName, string? Key) Describe(
         SaveConflictException exception
     ) => (exception.Reason.ToString(), exception.EntityTypeName, exception.Key);
@@ -171,7 +186,7 @@ public sealed class ConcurrencyVoSqlServerRuntimeTests(SqlServerContainerFixture
     protected override async Task<string?> ReadChildNoteAsync(int noteId) =>
         (await Notes().GetByIdAsync(NoteIdValue.Create(noteId), Ct))?.Note.Value;
 
-    // ── VO 固有 1: 版が VO 型として載る ──
+    // ── VO 固有: 版が VO 型として載る ──
 
     /// <summary>DB 採番の版が生の <c>byte[]</c> ではなく <c>RowVerValue</c> として同一インスタンスへ書き戻る</summary>
     /// <remarks>旧実装は INSERT の <c>OUTPUT INSERTED</c> 戻り値を包み直さず <c>ArgumentException</c> になっていた。</remarks>
@@ -185,38 +200,5 @@ public sealed class ConcurrencyVoSqlServerRuntimeTests(SqlServerContainerFixture
 
         entity.RowVer.Should().NotBeNull("OUTPUT INSERTED で採番された版が VO として入る");
         entity.RowVer.Value.Length.Should().Be(8, "SQL Server の rowversion は 8 バイト");
-    }
-
-    // ── VO 固有 2: カスケード子の版 ──
-
-    /// <summary>グラフ保存では子（カスケード）の版も VO 型で書き戻り、そのまま続けて保存できる</summary>
-    [Fact(DisplayName = "[Concurrency/VO/SqlServer] 版反映: グラフ保存は子の版も書き戻す")]
-    public async Task SaveAsync_WritesBackRowVersion_ForCascadedChildren()
-    {
-        await ResetAndSeedAsync();
-
-        var gadget = NewEntity(8, "parent");
-        gadget.MarkAdded();
-
-        var note = NewNote(80, 8, "child");
-        note.MarkAdded();
-        gadget.GadgetNotes.Add(note);
-
-        (await Gadgets().SaveAsync(gadget, cancellationToken: Ct))
-            .Should()
-            .Be(2, "親 1 件＋子 1 件が保存される");
-
-        gadget.RowVer.Should().NotBeNull("親の版が書き戻る");
-        note.RowVer.Should().NotBeNull("子の版も書き戻る");
-
-        // 2 回目: 再読込せずそのまま保存できる＝親子とも版が DB の現在値と一致している
-        gadget.Name = NameValue.Create("parent-2");
-        gadget.MarkUpdated();
-        note.Note = NoteValue.Create("child-2");
-        note.MarkUpdated();
-
-        (await Gadgets().SaveAsync(gadget, cancellationToken: Ct))
-            .Should()
-            .Be(2, "書き戻された版で版チェックが通る");
     }
 }

@@ -9,6 +9,7 @@
 - 生成コードのランタイムテストは「共通基底 1＋バックエンド派生 N＋派生固有 Fact」に揃える。
   - バックエンド非依存のシナリオは基底の `[Fact]` が持つ。派生はリポジトリ生成・シード・「他者による更新」の作り方だけを差し込む。
   - 基底は `SaveHookRuntimeTestsBase` / `ConcurrencyRuntimeTestsBase<TEntity, TConflictException>` / `NamedQueryRuntimeTestsBase` / `UniquenessCheckRuntimeTestsBase<TOrder>`。
+  - 楽観排他のリモートの派生は中間基底 `ConcurrencyRemoteRuntimeTestsBase<TEntity, TConflictException>` を通す。Kestrel とクライアントの生成・破棄を 1 か所に持ち、基底の版の書き戻しのシナリオ（テスト 1・10・11）を応答の経路（版の表だけ・列の値だけ）ごとに流す（`src/QuickER.Runtime.AspNetCore/CLAUDE.md`「保存の応答は列の値を運び位置で突き合わせる」）。
 - 生成物はフィクスチャごとに別 namespace へ出る。`SaveConflictException` も `ConcurrencyMode` も `OrderEntity` も基底からは名指しできない。
   - エンティティ型・競合例外型だけを型引数で受け、値の読み書きは派生のアダプタへ委ねる。VO 有効の図と無効の図が同じシナリオを共有できる。
 - バックエンドによって存在しない面（リモートの `Query()`・インメモリの生 SQL）は、条件スキップでなくサブクラス階層で分ける（スキップ 0 の原則）。

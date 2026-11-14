@@ -36,7 +36,7 @@
 | `CrudParity` | 担当 | 担当 | 担当 | 担当 | 空き（きっかけ待ち） | 空き（きっかけ待ち） | 空き（きっかけ待ち） | 担当 | 担当（サーバー：QuickER 版 SQLite・EF Core SQLite） |
 | `Concurrency` | 担当 | 非該当 | 担当 | 非該当 | 非該当 | 非該当 | 非該当 | 担当 | 担当（サーバー：QuickER 版 SQL Server・インメモリ・リポジトリなし） |
 | `EditModelSave` | 担当 | 非該当 | 担当 | 非該当 | 非該当 | 非該当 | 非該当 | 担当 | 担当（サーバー：QuickER 版 SQL Server・インメモリ） |
-| `ConcurrencyVo` | 担当 | 非該当 | 担当 | 非該当 | 非該当 | 非該当 | 非該当 | 担当 | 担当（サーバー：QuickER 版 SQL Server・インメモリ） |
+| `ConcurrencyVo` | 担当 | 非該当 | 担当 | 非該当 | 非該当 | 非該当 | 非該当 | 担当 | 担当（サーバー：QuickER 版 SQL Server・EF Core SQL Server・インメモリ） |
 | `SaveHook` | 担当 | 担当 | 担当 | 担当 | 空き（きっかけ待ち） | 空き（きっかけ待ち） | 空き（きっかけ待ち） | 担当 | 担当（サーバー：QuickER 版 SQLite・EF Core SQLite） |
 | `BinaryColumn` | 担当 | 担当 | 空き（きっかけ待ち） | 担当 | 空き（きっかけ待ち） | 空き（きっかけ待ち） | 空き（きっかけ待ち） | 担当 | 担当（サーバー：QuickER 版 SQLite・EF Core SQL Server・EF Core SQLite・リポジトリなし） |
 | `BinaryColumnEditModel` | 空き（きっかけ待ち） | 担当 | 非該当 | 非該当 | 非該当 | 非該当 | 非該当 | 空き（きっかけ待ち） | 非該当 |
@@ -125,7 +125,7 @@ EditModel の保存の受け入れ（AcceptSaved＝版・DB とフックが書�
 - EF Core MySQL：非該当＝rowversion 型は SQL Server だけにあり（src/QuickER.Runtime/CLAUDE.md「rowversion による楽観排他」の既知の制限）、PostgreSQL・MySQL・Oracle の図に版の列が生まれないため、版ガードの対象そのものが存在しない
 - EF Core Oracle：非該当＝rowversion 型は SQL Server だけにあり（src/QuickER.Runtime/CLAUDE.md「rowversion による楽観排他」の既知の制限）、PostgreSQL・MySQL・Oracle の図に版の列が生まれないため、版ガードの対象そのものが存在しない
 - インメモリ：担当＝`ConcurrencyVoInMemoryRuntimeTests`
-- リモート：担当＝`ConcurrencyVoRemoteAdoSqlServerRuntimeTests`（サーバー：QuickER 版 SQL Server）・`ConcurrencyVoRemoteRuntimeTests`（サーバー：インメモリ）
+- リモート：担当＝`ConcurrencyVoRemoteAdoSqlServerRuntimeTests`（サーバー：QuickER 版 SQL Server）・`ConcurrencyVoRemoteEfCoreSqlServerRuntimeTests`（サーバー：EF Core SQL Server）・`ConcurrencyVoRemoteRuntimeTests`（サーバー：インメモリ）
 
 ### `SaveHook`
 
