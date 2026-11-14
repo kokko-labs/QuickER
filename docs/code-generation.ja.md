@@ -696,7 +696,12 @@ Oracle は、空文字列と同じく空のバイナリを `NULL` として持�
 SQL Server の QuickER 版 Repository は、`time` の列と範囲の外の値（負の値と 1 日以上の値）の比較を、C# と同じ答えの条件に置き換えます。
 等値はどの行にも一致せず、`<>` は `NULL` の行を含む全行に一致し、`x.Clock < oneDay` は `NULL` でない全行に一致します。
 `IN` のリストの範囲の外の要素は、どの行にも一致しません。
-PostgreSQL の EF Core 版 Repository は、`time` の列を範囲の外の値とも C# と同じ答えで比べます。
+PostgreSQL の EF Core 版 Repository は、クエリ（名前付きクエリ・`Query()` に書いた手書きの LINQ・`IN` のリストの要素）では、`time` の列を範囲の外の値とも C# と同じ答えで比べます。
+範囲の外の値は書き込みません：`InsertAsync`・`UpdateAsync`・`BulkInsertAsync`・グラフ保存は、日の部分を落として保存せずに、PostgreSQL の `22008: time out of range` で失敗します。
+
+> **既知の割り切り**: PostgreSQL の EF Core 版 Repository は、`cascadeDelete` なしの `ExecuteDeleteAsync` の条件と、`QuickErDbContext` へ書いた `ExecuteUpdate` の条件では、`time` の列の範囲の外の値を断ります（`22008: time out of range`）。
+> EF Core が 2 つのコマンドを同じに報告するので、そこでは値が列の型のまま送られるためです。
+> `cascadeDelete: true` の `ExecuteDeleteAsync` は、一致する行のキーを先にクエリで読むので、C# と同じ答えになります。
 
 > **既知の割り切り**: SQL Server の EF Core 版 Repository は、`time` の列と比べる範囲の外の `TimeSpan` を送れず、SqlClient が `OverflowException` で断ります。
 > EF Core は値を列の型（`time`）で送り、SQL Server には `time` の列とそのまま比べられるほかの型が無いためです。
@@ -737,7 +742,7 @@ SQL Server の QuickER 版 Repository と EF Core 版 Repository は、比べる
 対象は、整数の列と小数や範囲の外の整数（`x.Qty < 1.5`・`x.Tiny < 300`）、列の精度とスケールより桁の多い decimal、`money`・`smallmoney` の列と範囲の外か小数 4 桁を超える数（`x.Price == 1.23456m`）、`date` の列と時刻つきの日時、Unicode でない列（`varchar`・`char`）と ASCII の外の文字です。
 このときサーバーはその比較のために列の側を変換するので、列のインデックスが使われないことがあります。
 EF Core 版 Repository では、クエリのすべてのパラメータ（名前付きクエリ・手書きの LINQ の `Query()`・IN のリストの要素・`Contains` のパターン）と、`ExecuteDeleteAsync` の条件が対象です（[EF Core モード](#ef-core-モードgenerateefcorerepositories)を参照）。
-PostgreSQL の EF Core 版 Repository も、`date` の列と比べる時刻つきの `DateTime` を同じように扱い、`timestamp` で送ります。
+PostgreSQL の EF Core 版 Repository も、`date` の列と比べる時刻つきの `DateTime` を同じように扱って `timestamp` で送り、クエリでは `time` の列と比べる範囲の外の `TimeSpan` を `interval` で送ります。
 
 > **既知の割り切り**: EF Core 版 Repository では、手書きの LINQ に書いた定数はパラメータになりません。
 > EF Core は定数を SQL へ書き込み、Unicode でない列と比べる文字列の定数は Unicode でない文字列で書くので、ASCII の外の文字は `?` に変わり、`?` を持つ行に一致します（`Query().Where(x => x.Code == "日本")`）。
@@ -1353,6 +1358,11 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   `AddGeneratedEfCoreRepositories` は、渡した構成の後にこのインターセプターを DbContext のオプションへ足します。
   `DbContextOptions` を自分で組むときは、`AddInterceptors` で `PostgreSqlQueryParameterInterceptor.Instance` を足してください。
   ほかのプロバイダの接続には触れません
+- PostgreSQL では、LINQ のクエリで `time` の列と比べる範囲の外の `TimeSpan`（負の値と 24 時間を超える値）を `interval` で送ります。
+  EF Core はパラメータに列の型 `time` を付け、PostgreSQL はその型のこうした値を断ります。
+  `PostgreSqlQueryParameterInterceptor` はその型を外し（こうした値を含む `IN` のリストも）、PostgreSQL は C# と同じく列を interval と比べます。
+  範囲の中の値は `time` の型のままです。
+  変えるのは LINQ のクエリのコマンドだけです：`ExecuteDelete` / `ExecuteUpdate` の条件は `time` の型のままで（[大文字小文字・空白・日付部品](#大文字小文字空白日付部品)の `time` の既知の割り切りを参照）、`SaveChanges` は値を `time` で書くので PostgreSQL が断ります
 - PostgreSQL では、値に `null` を含む値オブジェクトの列の IN（`list` に `null` がある `list.Contains(x.Code)`）を、EF Core が条件を翻訳する前に書き換えます。
   Npgsql は値を 1 つの配列のパラメータで送り、要素ごとに値オブジェクトの変換を当てるので、`null` の要素で `NullReferenceException` になるためです。
   書き換えは `null` を除いた値を送り、値に `null` があれば `x.Code == null` を足します（C# の条件の意味と同じ）。
@@ -1360,8 +1370,10 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 - SQL Server の `money`・`smallmoney` の列と PostgreSQL の `money` の列は、`HasColumnType` で構成します。
   構成しないと、EF Core は `decimal` のプロパティに既定の型を付け、SQL Server は `money` の列へ `1.2345` を `1.23`（`decimal(18,2)`）で保存し、PostgreSQL はその列の条件を断ります（`operator does not exist: money = numeric`）。
   構成すると、SQL Server は列が持つ小数の 4 桁を保存し、PostgreSQL は列を `money` の値と比べます（[大文字小文字・空白・日付部品](#大文字小文字空白日付部品)の `money` の既知の割り切りを参照）
-- EF Core の Npgsql のプロバイダが、プロパティの型の既定の対応では書けない PostgreSQL の列は、`HasColumnType` で構成します（`date`・`timestamp`・`time with time zone`・`json`・`jsonb`・`xml` と、その配列の `date[]` など）。
+- EF Core の Npgsql のプロバイダが、プロパティの型の既定の対応では正しく書けない PostgreSQL の列は、`HasColumnType` で構成します（`date`・`timestamp`・`time`・`time with time zone`・`json`・`jsonb`・`xml` と、その配列の `date[]` など）。
   構成しないと、プロバイダは `DateTime` を `timestamp with time zone` として送って `DateTimeKind.Unspecified` の値を断り、`DateTimeOffset` も同じく送って UTC 以外のオフセットを断り、文字列を `text` として送って JSON・XML の列で PostgreSQL に断られます。
+  `TimeSpan` は `interval` として送り、PostgreSQL は `time` の列の範囲の外の値を、日の部分を落としてエラーなしに保存します（`1.01:00:00` は `01:00:00`、`-01:00:00` は `23:00:00`）。
+  構成すると、PostgreSQL はこうした値を断ります。
   `DateTimeKind.Utc` の `DateTime` は `timestamp` の列へ書けず、`timestamptz` の列は UTC のオフセットだけを受け付けます（どちらも Npgsql の規則）。
   `money`（前の項目）を除き、ほかの列には列の型を構成しないので、どの方言でも同じ C# 型へ写る型だけの図は、方言に依らず同じコードを生成します。
 - MySQL の写し方（`timestamp` を `DateTime`、`char(36)` を `Guid`。[DB 型と C# 型の対応](#db-型と-c-型の対応)を参照）は、ドライバが MySql.Data の MySql.EntityFrameworkCore で確かめました。

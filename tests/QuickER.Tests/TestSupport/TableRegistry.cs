@@ -86,5 +86,11 @@ internal static class TableRegistry
                 "src/QuickER.AI.Chat/QueryToolLocalizedFormatter.cs",
             ]
         ),
+        new(
+            "PostgreSqlQueryParameters",
+            "PostgreSQL のクエリのパラメータの束縛し直しの表（date の列と時刻つきの値・time の列と範囲の外の値と IN のリストは値の型へ、入る値と書き込みのコマンド〔SaveChanges・ExecuteUpdate の SET〕と ExecuteDelete の条件は列の型のまま）",
+            ["tests/QuickER.Tests/CodeGen.CSharp/PostgreSqlQueryParameterInterceptorTests.cs"],
+            [Templates + "_08_EfCore.scriban", "src/QuickER.Runtime.EntityFrameworkCore"]
+        ),
     ];
 }

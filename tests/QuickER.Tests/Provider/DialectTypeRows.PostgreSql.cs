@@ -29,14 +29,15 @@ internal static partial class DialectTypeRows
     private const string PgImporter = "取込の正規化は同じ関数を通す";
     private const string PgWired = "PostgreSQL の capabilities は正規化を配線している";
     private const string PgTimetz = "time with time zone は DateTimeOffset へマップされる";
-    private const string PgTimeNoTz = "time without time zone は従来どおり TimeSpan のまま";
+    private const string PgTimeNoTz =
+        "time without time zone は TimeSpan のまま（EF Core に教える列の型は time）";
     private const string PgTsPrecision = "精度つきでも時間帯の語を落とさない";
     private const string PgUnknownMap = "未知の型は IsFallbackType が true になる";
     private const string PgKnownMap = "解決できる型は IsFallbackType が false になる";
     private const string PgNotUnbounded = "非バイナリ型は IsUnboundedBinary=false になる";
     private const string PgDriverType = "interval・cidr は Npgsql が返す CLR 型へ写す";
     private const string PgEfCoreColumnType =
-        "Npgsql の EF Core の既定の対応で書けない列（date・timestamp・timetz・json・jsonb・xml）だけが EF Core に教える列の型を持つ";
+        "Npgsql の EF Core の既定の対応で書けない列（date・timestamp・time・timetz・json・jsonb・xml）だけが EF Core に教える列の型を持つ";
     private const string PgConvertFromSql = "sqlserver → postgresql の代表変換";
     private const string PgConvertToSql = "postgresql → sqlserver の代表変換";
 
@@ -726,19 +727,19 @@ internal static partial class DialectTypeRows
                 "timetz(3)",
                 "ok type=DateTimeOffset ref=0 fallback=0 efcol=\"time with time zone\""
             ),
-            PgMap("time-plain", PgTimeNoTz, "time", "ok type=TimeSpan efcol=-"),
-            PgMap("time-precision", PgTimeNoTz, "time(6)", "ok type=TimeSpan efcol=-"),
+            PgMap("time-plain", PgTimeNoTz, "time", "ok type=TimeSpan efcol=\"time\""),
+            PgMap("time-precision", PgTimeNoTz, "time(6)", "ok type=TimeSpan efcol=\"time\""),
             PgMap(
                 "time-without-time-zone",
                 PgTimeNoTz,
                 "time without time zone",
-                "ok type=TimeSpan efcol=-"
+                "ok type=TimeSpan efcol=\"time\""
             ),
             PgMap(
                 "time-precision-without-time-zone",
                 PgTimeNoTz,
                 "time(6) without time zone",
-                "ok type=TimeSpan efcol=-"
+                "ok type=TimeSpan efcol=\"time\""
             ),
             PgMap(
                 "timestamp-precision-with-time-zone",
@@ -817,6 +818,7 @@ internal static partial class DialectTypeRows
             .. new (string Slug, string Native, string Spec)[]
             {
                 ("date", "date[]", "ok type=DateTime[] array=1 efcol=\"date[]\""),
+                ("time", "time[]", "ok type=TimeSpan[] array=1 efcol=\"time[]\""),
                 (
                     "timestamp-6",
                     "timestamp(6)[]",

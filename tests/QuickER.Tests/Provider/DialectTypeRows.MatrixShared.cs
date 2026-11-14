@@ -231,6 +231,8 @@ internal static partial class DialectTypeRows
         {
             [(DialectNames.PostgreSql, "date")] = "date",
             [(DialectNames.PostgreSql, "timestamp(6)")] = "timestamp without time zone",
+            // time は既定の対応（interval）だと範囲の外の値の日の部分を黙って落として書く
+            [(DialectNames.PostgreSql, "time(6)")] = "time",
             [(DialectNames.PostgreSql, "xml")] = "xml",
             [(DialectNames.PostgreSql, "jsonb")] = "jsonb",
             // money・smallmoney（SQL Server）と money（PostgreSQL）は、既定の対応だと小数 4 桁を落とすか比べる演算子が無い

@@ -176,9 +176,12 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
   - `ResetDbType()` が要る：EF Core はパラメータにプロバイダの型の名前（date）を刻み、Npgsql はそれを DbType より優先する。DbType だけを変えても効かない（実測）。
   - 判定は QuickER 版の `QueryValueFits` の date の枝（`src/QuickER.Runtime.SqlServer/CLAUDE.md`「SqlParameter の明示型」）と同じ規則。0 時ちょうどの値は列の型のまま（SQL・索引の使われ方を変えない）。
   - 小数・文字列の枝は持たない：PostgreSQL の EF Core 版は numeric（精度なし）と text で送り、桁・文字が落ちない（区切り D3 の実 DB の総当たりで測った）。
-- SaveChanges のコマンドは変えない（`date` の列へ書く値は日付として保存される）。
+- `time` の枝：生成の DbContext は PostgreSQL の `time` の列に列の型 `time` を教える（範囲の外の値の書き込みを DB に断らせるため。教えないと interval で送られ、PostgreSQL が日の部分を黙って落として保存する＝`src/QuickER.Provider.PostgreSql/CLAUDE.md`「型マッパー」）。すると範囲の外の値との比較も `time` で送られて 22008 で断られるので、出どころが **LinqQuery のコマンドだけ**、DbType が Time で値が 0〜24:00:00 の外の `TimeSpan` のパラメータと、範囲の外の `TimeSpan` の要素を含む列挙のパラメータ（IN のリスト）を `ResetDbType()` する。Npgsql は値から interval を選び、PostgreSQL は列を interval と比べて C# と同じ答えになる。範囲の中の値は `time` のまま。
+  - ExecuteDelete・ExecuteUpdate のコマンドには掛けない：EF Core 10 は ExecuteDelete のコマンドも出どころ `ExecuteUpdate`（`BulkUpdate` と同じ値）で報告し（実測）、ExecuteUpdate の SET の値を interval で送ると PostgreSQL の代入が日の部分を黙って落とす。だから、カスケードなしの `ExecuteDeleteAsync` と `ExecuteUpdate` の条件の範囲の外の値は 22008 で断られる（docs の既知の割り切り）。カスケードありの `ExecuteDeleteAsync` はキーを LinqQuery で読むので C# と同じ答え。
+  - 値オブジェクトの列の IN のリストも同じ判定で外れる（総当たりの PostgreSQL の値オブジェクトの単位が範囲の外の値を含むリストを作る）。
+- SaveChanges のコマンドは変えない（`date` の列へ書く値は日付として保存され、`time` の列の範囲の外の値は断られる）。
 - 登録は `AddGeneratedEfCoreRepositories` が `SqliteBusyTimeoutInterceptor`・`SqlServerQueryParameterInterceptor` と並べて足す。DbContext を自分で組む利用者は `Instance` を足す（docs）。
-- ガード：`table:TranslatorParityPredicates`（EF Core の PostgreSQL の派生 `TranslatorParityEfCorePostgreSqlRuntimeTests`・行 `date-*-time-of-day`）・`SqliteBusyTimeoutInterceptorTests.GeneratedRegistration_AddsInterceptorAfterConfigure`（生成の DI の登録）。mutation 実証済み（登録を外すと表の 2 行が赤）
+- ガード：`table:TranslatorParityPredicates`（EF Core の PostgreSQL の派生 `TranslatorParityEfCorePostgreSqlRuntimeTests`・行 `date-*-time-of-day`・`time-out-of-day-*`）・`table:PostgreSqlQueryParameters`（DB を使わない行の表＝どのコマンドのどのパラメータを直し、どれを直さないか）・`PostgreSqlDialectTypeRealDbTests`（書き込みの範囲の手順の ExecuteUpdate の経路＝生成と同じインターセプターを付けて流す）・`Dsl/PostgreSql`（time の列と範囲の外の値・その値オブジェクトのリスト）・`SqliteBusyTimeoutInterceptorTests.GeneratedRegistration_AddsInterceptorAfterConfigure`（生成の DI の登録）。mutation 実証済み（登録を外すと表の 2 行が赤。time の枝を外すと行の表 4 件・述語の表の負の値の 4 行・総当たりが赤、枝を ExecuteUpdate の出どころへも掛けると行の表 2 件と実 DB の段の ExecuteUpdate の経路が赤、IN のリストの枝を外すと行の表 1 件・述語の表 `time-out-of-day-not-in-only`・総当たりが赤）
 
 ### SQL Server と Oracle の既定の decimal の型
 

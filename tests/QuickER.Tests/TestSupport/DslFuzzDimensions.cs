@@ -499,7 +499,7 @@ public static class DslFuzzDimensions
 
     /// <summary>
     /// TimeSpan の列と、列の型の範囲の外の値（<see cref="FitBeyondRange"/>）の組を作らない範囲（docs の TimeSpan の既知の割り切り。
-    /// 作るのは SQL Server の QuickER 版の網羅の単位 <c>coverage-sqlserver-timespan-out-of-day</c> だけ）
+    /// 作るのは SQL Server の QuickER 版の網羅の単位 <c>coverage-sqlserver-timespan-out-of-day</c> と、PostgreSQL の time の列の比べる値の池）
     /// </summary>
     private static IEnumerable<CoverageGapEntry> TimeSpanBeyondRangeGaps()
     {
@@ -531,14 +531,6 @@ public static class DslFuzzDimensions
                         (ValueFit, FitBeyondRange)
                     )
                 )
-            ),
-            CoverageGap.Tuple(
-                "postgresql:efcore",
-                "TS",
-                "PostgreSQL の time の列の書き込みの区切り（未起動）",
-                "PostgreSQL の time の列と比べる値は日の中だけにする（EF Core 版が time の列へ 24 時間以上の値を日を落として書く形を直す区切りの直し方に、総当たりが左右されないため）。範囲の外の値は範囲を持たない interval の列とだけ比べる",
-                (Clr, nameof(DslClr.TimeSpan)),
-                (ValueFit, FitBeyondRange)
             ),
         ];
     }
@@ -603,6 +595,34 @@ public static class DslFuzzDimensions
                     (Shape, "in-with-null"),
                     (ValueFit, FitBeyondScale)
                 )
+            ),
+            // null を含む IN のリストに列の型の範囲の外の値を持てるのは、値オブジェクトの検証が範囲を見ない TimeSpan の列だけで、
+            // 作るのは PostgreSQL の time の列の値オブジェクトの単位だけ
+            .. new[]
+            {
+                "sqlite:ado",
+                "sqlite:efcore",
+                "sqlite:inmemory",
+                "mysql:inmemory",
+                "mysql:efcore",
+                "oracle:efcore",
+                "sqlserver:efcore",
+            }.Select(scope =>
+                CoverageGap.AcceptedTuple(
+                    scope,
+                    "PT",
+                    "null を含む IN のリスト（値オブジェクトのリスト）が列の型の範囲の外の値を持てるのは、値オブジェクトの Create が範囲を検証しない TimeSpan の列だけ（数値の値オブジェクトは型の外の値を検証エラーにする）。TimeSpan の範囲の外の値は、SQLite・MySQL の単位は docs の割り切りで作らず、SQL Server の EF Core 版は送れず例外にし、Oracle は TimeSpan の列を持たない",
+                    (Shape, "in-with-null"),
+                    (ValueFit, FitBeyondRange)
+                )
+            ),
+            CoverageGap.Tuple(
+                "sqlserver:ado",
+                "PT",
+                "きっかけ待ち（SQL Server の TimeSpan の値オブジェクトの範囲の外の値）",
+                "範囲の外の値と比べる SQL Server の網羅の単位 coverage-sqlserver-timespan-out-of-day は値オブジェクトを持たないので、null を含む値オブジェクトのリストに範囲の外の値を入れる形を作らない（QuickER 版は畳んで C# と同じ答えを返すので、単位を足せば作れる）",
+                (Shape, "in-with-null"),
+                (ValueFit, FitBeyondRange)
             ),
         ];
 
@@ -1236,7 +1256,15 @@ public static class DslFuzzDimensions
             var offsetScale =
                 fit == FitBeyondScale && (clr is null || clr == nameof(DslClr.DateTimeOffset));
 
-            if ((stringMatch || (shape == "in-with-null" && !offsetScale)) && numeric)
+            // TimeSpan の値オブジェクトも範囲（DslColumn.TimeRange）を検証しないので、TimeSpan の列（か列の種類を問わない組）の
+            // 範囲の外れ方も null を含むリストで起こり得る
+            var timeSpanRange =
+                fit == FitBeyondRange && (clr is null || clr == nameof(DslClr.TimeSpan));
+
+            if (
+                (stringMatch || (shape == "in-with-null" && !offsetScale && !timeSpanRange))
+                && numeric
+            )
             {
                 return false;
             }
