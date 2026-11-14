@@ -540,6 +540,27 @@ public sealed class FuzzFailureLog(KnownFailureSet known)
         }
     }
 
+    /// <summary>
+    /// ほかの記録の観測を、その記録が記録した順でこの記録へ流し込む（並べて流した単位ごとの記録を、計画の順で 1 つにまとめる）
+    /// </summary>
+    /// <remarks>
+    /// 単位ごとの記録を計画の順で流し込むと、キーごとの例（最初の 3 つ）とキーの並びは、同じ単位を 1 つずつ順に流して
+    /// この記録へ直接記録したときと同じになる。流し込む側の網羅しない組の照合（<see cref="DeferCoverageCheck"/>）は運ばない。
+    /// </remarks>
+    /// <param name="other">流し込む記録</param>
+    public void Absorb(FuzzFailureLog other)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+
+        foreach (var (key, examples) in other._observed)
+        {
+            foreach (var example in examples)
+            {
+                Record(key, example);
+            }
+        }
+    }
+
     /// <summary>入口の接頭辞に属する観測と一覧を厳密に照合する</summary>
     /// <param name="entrancePrefixes">このテストが受け持つ入口の接頭辞</param>
     public void AssertMatchesKnown(params string[] entrancePrefixes)

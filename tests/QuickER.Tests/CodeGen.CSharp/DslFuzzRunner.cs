@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.RegularExpressions;
+using AwesomeAssertions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.EntityFrameworkCore;
@@ -56,6 +57,16 @@ internal sealed record DslFuzzTarget(
         );
 }
 
+/// <summary>総当たりで流す 1 単位（単位・方言の構成・書式のカルチャ）</summary>
+/// <param name="Unit">単位</param>
+/// <param name="Target">方言の構成</param>
+/// <param name="Culture">流す間の書式のカルチャの名前（null なら差し替えない）</param>
+internal sealed record DslFuzzRun(DslFuzzUnit Unit, DslFuzzTarget Target, string? Culture = null)
+{
+    /// <summary>流し終えたことを照合するときの名前（入口・方言・単位・種）</summary>
+    public string Key => $"{Target.Suite}:{Target.Dbms}:{Unit.Name}:seed={Unit.Seed}";
+}
+
 /// <summary>
 /// 実装先の名前の正本（実装先の軸の値。各構成の実装先は <see cref="Axis"/> で、正本の値ごとにアダプタか理由つきの除外を持つ）
 /// </summary>
@@ -91,13 +102,18 @@ internal static class DslFuzzBackends
 /// <param name="OpenAsync">検証コードの型と図から、空のテーブルを用意した DI のコンテナを開く</param>
 /// <param name="Excludes">この実装先で流さないクエリ（理由は判定を定義した側の XmlDoc に書く）</param>
 /// <param name="BinaryRule">バイナリの列の比べ方（docs の「大文字小文字・空白・日付部品」の節のバイナリの段落から写す）</param>
+/// <param name="Exclusive">
+/// 開いてから閉じるまでを 1 本にする実装先の排他（単位どうしで 1 つのデータベースのスキーマを作り直して使う実装先）。
+/// null なら単位ごとに別のデータベースを使い、並べて流せる
+/// </param>
 internal sealed record DslFuzzBackend(
     string Name,
     DslCaseRule Rule,
     DslNullOrder NullOrder,
     Func<Type, ErDiagram, CancellationToken, Task<DslFuzzSession>> OpenAsync,
     Func<DslQuery, bool>? Excludes = null,
-    DslBinaryRule BinaryRule = DslBinaryRule.Bytes
+    DslBinaryRule BinaryRule = DslBinaryRule.Bytes,
+    SemaphoreSlim? Exclusive = null
 ) : IMatrixAdapter
 {
     /// <summary>実装先の軸の値（名前）</summary>
@@ -189,6 +205,158 @@ internal static class DslFuzzRunner
 {
     /// <summary>実装先・単位ごとに、結果を照合したクエリの最小数（GuidKey の単位で約 120）</summary>
     public const int MinimumCheckedQueries = 100;
+
+    /// <summary>
+    /// 段の中で同時に流す単位の数の上限の既定（CPU の数・最大 8）
+    /// </summary>
+    /// <remarks>
+    /// 1 単位の中は生成→コンパイル→実行の 1 本の流れで、CPU を 2 本前後しか使わない。CI の 4 vCPU で単位を 4 つ並べると
+    /// CPU が埋まり、それより多く並べると遅くなる（区切り NT の測定）。8 で抑えるのは、コアの多い機械で同時に組み立てる
+    /// コンパイルのメモリを抑えるため。<see cref="ParallelismVariable"/> で上書きできる（1 で 1 つずつ順に流す）。
+    /// </remarks>
+    public static int DefaultParallelism => Math.Min(Environment.ProcessorCount, 8);
+
+    /// <summary>段の中で同時に流す単位の数の上限を上書きする環境変数（調べるとき 1 にすると 1 つずつ順に流す）</summary>
+    public const string ParallelismVariable = "QUICKER_DSL_FUZZ_PARALLELISM";
+
+    /// <summary>
+    /// 総当たりを流して照合する（5 本の総当たりの共通の流し方）: 網羅の段 → 種の段の順で、段の中の単位を上限つきで並べて流し、
+    /// 全単位が終わった後のこの 1 か所で照合する
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 網羅の段の単位がすべて終わってから種の段を始める（網羅の単位を種の前に流す）。単位ごとに自分の失敗の記録を持たせ、
+    /// 段の終わりに計画の順で全体の記録へ流し込む（<see cref="FuzzFailureLog.Absorb"/>）ので、記録は 1 つずつ順に流したときと同じになる。
+    /// 網羅の計数はスレッドセーフで、数える順に依らない。
+    /// </para>
+    /// <para>
+    /// 照合の順：計画した単位がすべて終わったこと（流し忘れた単位を名指しする）→ 網羅の宣言の誤り → 既知の失敗の一覧
+    /// → 網羅の単位のクエリをすべて照合したこと → 網羅しない組（既定の種の数のときだけ）。
+    /// </para>
+    /// </remarks>
+    /// <param name="coverage">網羅を数える先</param>
+    /// <param name="plan">流す種（網羅しない組の照合に使う）</param>
+    /// <param name="coverageRuns">網羅の段の単位（種を 1 つだけ流すときは空にする）</param>
+    /// <param name="seedRuns">種の段の単位</param>
+    /// <param name="entrancePrefixes">このテストが受け持つ失敗のキーの入口の接頭辞</param>
+    /// <param name="ct">取り消し</param>
+    /// <param name="parallelism">段の中で同時に流す単位の数の上限（null なら <see cref="ResolveParallelism"/>）</param>
+    public static async Task RunSuiteAsync(
+        DslFuzzCoverage coverage,
+        SeedPlan plan,
+        IReadOnlyList<DslFuzzRun> coverageRuns,
+        IReadOnlyList<DslFuzzRun> seedRuns,
+        IReadOnlyList<string> entrancePrefixes,
+        CancellationToken ct,
+        int? parallelism = null
+    )
+    {
+        var ledger = new FuzzFailureLog(DslFuzzKnownFailures.Set);
+        var degree = parallelism ?? ResolveParallelism();
+        var completed = new List<string>();
+
+        // 網羅の単位は全クエリを照合したことを UncheckedProblems が表明するので、照合したクエリの下限を掛けない
+        await RunPhaseAsync(
+            ledger,
+            coverage,
+            coverageRuns,
+            minimumChecked: 0,
+            degree,
+            completed,
+            ct
+        );
+        await RunPhaseAsync(
+            ledger,
+            coverage,
+            seedRuns,
+            MinimumCheckedQueries,
+            degree,
+            completed,
+            ct
+        );
+
+        // 並べて流しても、計画した単位はどれも 1 回流し終えている（単位を流し忘れると、その単位の失敗も網羅も黙って欠ける）
+        CoverageGuard.ContainsAll(
+            "流し終えた簡易 DSL の総当たりの単位",
+            completed,
+            coverageRuns.Concat(seedRuns).Select(run => run.Key)
+        );
+
+        // 網羅の宣言の誤りは照合の結果より先に赤にする
+        var coverageReports = coverage.Reports();
+        DslFuzzCoverage.WriteSummaries(coverageReports);
+
+        ledger.AssertMatchesKnown([.. entrancePrefixes]);
+        coverageRuns
+            .SelectMany(run =>
+                coverage.UncheckedProblems(
+                    run.Unit,
+                    run.Target.Dbms,
+                    run.Target.Backends.Select(backend => backend.Name)
+                )
+            )
+            .Should()
+            .BeEmpty();
+
+        // 網羅しない組は、照合の結果を表明してから照合する（既定の種の数のときだけ＝種の数で欠けが変わるため）
+        DslFuzzCoverage.AssertGaps(coverageReports, plan);
+    }
+
+    /// <summary>
+    /// 段の中で同時に流す単位の数の上限（<see cref="ParallelismVariable"/> が 1 以上の整数ならその値・ほかは <see cref="DefaultParallelism"/>）
+    /// </summary>
+    public static int ResolveParallelism() =>
+        int.TryParse(
+            Environment.GetEnvironmentVariable(ParallelismVariable),
+            System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out var value
+        )
+        && value > 0
+            ? value
+            : DefaultParallelism;
+
+    /// <summary>1 つの段の単位を上限つきで並べて流し、単位ごとの記録を計画の順で全体の記録へ流し込む</summary>
+    private static async Task RunPhaseAsync(
+        FuzzFailureLog ledger,
+        DslFuzzCoverage coverage,
+        IReadOnlyList<DslFuzzRun> runs,
+        int minimumChecked,
+        int degree,
+        List<string> completed,
+        CancellationToken ct
+    )
+    {
+        var logs = new FuzzFailureLog?[runs.Count];
+
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, runs.Count),
+            new ParallelOptions { MaxDegreeOfParallelism = degree, CancellationToken = ct },
+            async (index, token) =>
+            {
+                var run = runs[index];
+                var log = new FuzzFailureLog(DslFuzzKnownFailures.Set);
+
+                // 書式のカルチャは非同期の流れに付いて回るので、この単位の中だけで差し替わる
+                using (run.Culture is null ? null : new CultureScope(run.Culture))
+                {
+                    await RunAsync(log, run.Unit, run.Target, token, coverage, minimumChecked);
+                }
+
+                logs[index] = log;
+            }
+        );
+
+        // 計画の順で流し込み、流し込んだ単位を流し終えたと数える（流さなかった単位も、記録を流し込まなかった単位も数えない）
+        for (var index = 0; index < runs.Count; index++)
+        {
+            if (logs[index] is { } log)
+            {
+                ledger.Absorb(log);
+                completed.Add(runs[index].Key);
+            }
+        }
+    }
 
     /// <summary>1 単位を生成→コンパイル→実行する</summary>
     /// <param name="ledger">失敗の記録先</param>
