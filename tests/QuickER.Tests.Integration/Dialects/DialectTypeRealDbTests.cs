@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using MySqlConnector;
 using Npgsql;
 using Oracle.ManagedDataAccess.Client;
+using QuickER.CodeGen.CSharp;
 using QuickER.Dialects;
 using QuickER.Provider;
 using QuickER.Provider.MySql;
@@ -211,7 +212,8 @@ public abstract class DialectTypeRealDbTestsBase
                 break;
             }
 
-            case DialectTypeRealDbProbeKinds.EfCoreWriteRange:
+            case DialectTypeRealDbProbeKinds.EfCoreWriteRange
+            or DialectTypeRealDbProbeKinds.AdoWriteRange:
             {
                 problems.AddRange(
                     await EfCoreWriteRangeProblemsAsync(probe, adapter, spelling, ct)
@@ -289,13 +291,13 @@ public abstract class DialectTypeRealDbTestsBase
             .MakeGenericMethod(type);
 
         return await (Task<IReadOnlyList<string>>)
-            run.Invoke(this, [probe, mapped.EfCoreColumnType, ct])!;
+            run.Invoke(this, [probe, EfCoreProbeColumn.Of(mapped), ct])!;
     }
 
     /// <summary>EF Core で入れた行を読み、書いて読み戻す（例外は食い違いの文にする）</summary>
     private async Task<IReadOnlyList<string>> EfCoreReadWriteAsync<T>(
         DialectTypeRealDbProbe probe,
-        string? columnType,
+        EfCoreProbeColumn column,
         CancellationToken ct
     )
     {
@@ -304,7 +306,7 @@ public abstract class DialectTypeRealDbTestsBase
 
         try
         {
-            await using var context = new EfCoreProbeContext<T>(options, StoreName, columnType);
+            await using var context = new EfCoreProbeContext<T>(options, StoreName, column);
             var read = (await context.Rows.AsNoTracking().SingleAsync(ct)).Value;
             ExpectValue(problems, "EF Core で読んだ値", probe.ReadBack, read);
         }
@@ -315,13 +317,13 @@ public abstract class DialectTypeRealDbTestsBase
 
         try
         {
-            await using (var context = new EfCoreProbeContext<T>(options, StoreName, columnType))
+            await using (var context = new EfCoreProbeContext<T>(options, StoreName, column))
             {
                 context.Rows.Add(new EfCoreProbeRow<T> { Id = 2, Value = (T)probe.Write! });
                 await context.SaveChangesAsync(ct);
             }
 
-            await using (var context = new EfCoreProbeContext<T>(options, StoreName, columnType))
+            await using (var context = new EfCoreProbeContext<T>(options, StoreName, column))
             {
                 var back = (
                     await context.Rows.AsNoTracking().SingleAsync(row => row.Id == 2, ct)
@@ -357,8 +359,9 @@ public abstract class DialectTypeRealDbTestsBase
     }
 
     /// <summary>
-    /// 書き込みの範囲の手順：表記の列を NULL 許容で作り、手順の値ごとに書き込みの 4 つの経路で書いて読み戻す。範囲の中の値は
-    /// 同じ値で読み戻し、範囲の外の値は DB（かドライバ）が断るか同じ値で読み戻す（黙って別の値を保存しない）
+    /// 書き込みの範囲の手順：表記の列を NULL 許容で作り、手順の値ごとに書き込みの経路（EF Core の 4 つか、QuickER 版の束縛の 3 つ）で
+    /// 書いて読み戻す。DB が断らない値は同じ値（DB が決まって変える値は手順の値）で読み戻し、範囲の外の値は DB（かドライバ）が断るか
+    /// 同じ値で読み戻す（黙って別の値を保存しない）。保存して読めない値は、読むと例外になる
     /// </summary>
     private async Task<IReadOnlyList<string>> EfCoreWriteRangeProblemsAsync(
         DialectTypeRealDbProbe probe,
@@ -385,13 +388,15 @@ public abstract class DialectTypeRealDbTestsBase
 
         var run = typeof(DialectTypeRealDbTestsBase)
             .GetMethod(
-                nameof(EfCoreWriteRangeAsync),
+                probe.Kind == DialectTypeRealDbProbeKinds.AdoWriteRange
+                    ? nameof(AdoWriteRangeAsync)
+                    : nameof(EfCoreWriteRangeAsync),
                 BindingFlags.NonPublic | BindingFlags.Instance
             )!
             .MakeGenericMethod(type);
 
         return await (Task<IReadOnlyList<string>>)
-            run.Invoke(this, [writes, mapped.EfCoreColumnType, ct])!;
+            run.Invoke(this, [writes, EfCoreProbeColumn.Of(mapped), ct])!;
     }
 
     /// <summary>書き込みの経路（名前と、キーと値を受けて書く操作）</summary>
@@ -403,13 +408,13 @@ public abstract class DialectTypeRealDbTestsBase
     /// <summary>書き込みの範囲の手順の本体（値 × 経路ごとに別の行を書き、読み戻した値を比べる）</summary>
     private async Task<IReadOnlyList<string>> EfCoreWriteRangeAsync<T>(
         IReadOnlyList<DialectTypeRealDbWrite> writes,
-        string? columnType,
+        EfCoreProbeColumn column,
         CancellationToken ct
     )
     {
         var problems = new List<string>();
         var options = EfCoreOptions();
-        // 更新と ExecuteUpdate の前に入れておく行の値（範囲の中の最初の値）
+        // 更新と ExecuteUpdate の前に入れておく行の値（DB が断らない最初の値）
         var seed = (T)writes.First(write => write.Fits).Value;
         WritePath<T>[] paths =
         [
@@ -425,7 +430,7 @@ public abstract class DialectTypeRealDbTestsBase
                 "SaveChanges の更新",
                 async (context, id, value, token) =>
                 {
-                    await SeedAsync(options, columnType, id, seed, token);
+                    await SeedAsync(options, column, id, seed, token);
                     context.Rows.Update(new EfCoreProbeRow<T> { Id = id, Value = value });
                     await context.SaveChangesAsync(token);
                 }
@@ -446,7 +451,7 @@ public abstract class DialectTypeRealDbTestsBase
                 "ExecuteUpdate の SET",
                 async (context, id, value, token) =>
                 {
-                    await SeedAsync(options, columnType, id, seed, token);
+                    await SeedAsync(options, column, id, seed, token);
                     await context
                         .Rows.Where(row => row.Id == id)
                         .ExecuteUpdateAsync(
@@ -470,11 +475,7 @@ public abstract class DialectTypeRealDbTestsBase
 
                 try
                 {
-                    await using var context = new EfCoreProbeContext<T>(
-                        options,
-                        StoreName,
-                        columnType
-                    );
+                    await using var context = new EfCoreProbeContext<T>(options, StoreName, column);
                     await path.Write(context, id, value, ct);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
@@ -482,37 +483,28 @@ public abstract class DialectTypeRealDbTestsBase
                     refusal = ex;
                 }
 
-                var what =
-                    $"{path.Name}で {Show(value)}{(write.Fits ? string.Empty : "（範囲の外）")}";
-
-                if (refusal is not null)
-                {
-                    if (write.Fits)
+                var problem = await WriteProblemAsync(
+                    write,
+                    $"{path.Name}で {Show(value)}{(write.Fits ? string.Empty : "（範囲の外）")}",
+                    refusal,
+                    async () =>
                     {
-                        problems.Add($"{what}: 範囲の中の値を書けない（{Describe(refusal)}）");
+                        await using var reader = new EfCoreProbeContext<T>(
+                            options,
+                            StoreName,
+                            column
+                        );
+                        var stored = await reader
+                            .Rows.AsNoTracking()
+                            .SingleOrDefaultAsync(row => row.Id == id, ct);
+
+                        return stored is null ? (false, null) : (true, stored.Value);
                     }
+                );
 
-                    continue;
-                }
-
-                await using var reader = new EfCoreProbeContext<T>(options, StoreName, columnType);
-                var stored = await reader
-                    .Rows.AsNoTracking()
-                    .SingleOrDefaultAsync(row => row.Id == id, ct);
-
-                if (stored is null)
+                if (problem is not null)
                 {
-                    problems.Add($"{what}: 書いた行が無い");
-                }
-                else if (
-                    !StructuralComparisons.StructuralEqualityComparer.Equals(value, stored.Value)
-                )
-                {
-                    problems.Add(
-                        write.Fits
-                            ? $"{what}: 読み戻した値が違う（{Show(stored.Value)}）"
-                            : $"{what}: 断らずに別の値を保存した（{Show(stored.Value)}）"
-                    );
+                    problems.Add(problem);
                 }
             }
         }
@@ -520,16 +512,209 @@ public abstract class DialectTypeRealDbTestsBase
         return problems;
     }
 
+    /// <summary>
+    /// QuickER 版 Repository の束縛の書き込みの範囲の手順の本体（SQLite だけ）。生成 SQLite 版と同じく、挿入・更新はコマンドごとに
+    /// <c>AddWithValue</c> で束縛し、一括挿入は 1 つのコマンドの値を差し替えて行ごとに実行する（<c>RebindInsertParameters</c>）。
+    /// 読み戻しも生成 SQLite 版と同じく <c>GetDecimal</c> などの型の読み取り（<c>GetFieldValue</c>）で読む
+    /// </summary>
+    private async Task<IReadOnlyList<string>> AdoWriteRangeAsync<T>(
+        IReadOnlyList<DialectTypeRealDbWrite> writes,
+        EfCoreProbeColumn column,
+        CancellationToken ct
+    )
+    {
+        _ = column;
+        var problems = new List<string>();
+        var seed = writes.First(write => write.Fits).Value;
+        var insert = $"INSERT INTO {ProbeTable} (id, c) VALUES (@id, @c)";
+        (string Name, Func<SqliteConnection, int, object, Task> Write)[] paths =
+        [
+            (
+                "QuickER 版の挿入（InsertAsync）",
+                async (connection, id, value) =>
+                    await AdoExecuteAsync(connection, insert, id, value, ct)
+            ),
+            (
+                "QuickER 版の更新（UpdateAsync）",
+                async (connection, id, value) =>
+                {
+                    await AdoExecuteAsync(connection, insert, id, seed, ct);
+                    await AdoExecuteAsync(
+                        connection,
+                        $"UPDATE {ProbeTable} SET c = @c WHERE id = @id",
+                        id,
+                        value,
+                        ct
+                    );
+                }
+            ),
+            (
+                "QuickER 版の一括挿入の形（BulkInsertAsync）",
+                async (connection, id, value) =>
+                {
+                    await using var transaction = connection.BeginTransaction();
+                    await using var command = connection.CreateCommand();
+                    command.Transaction = transaction;
+                    command.CommandText = insert;
+                    command.Parameters.AddWithValue("@id", -id);
+                    // 製品の束縛の写し：Runtime.Sqlite.g.cs の AddColumnParameter で束縛し、2 行目からは RebindInsertParameters
+                    // と同じく値だけを差し替える（テンプレートは _06_RemoteSaveInfraAndDI.scriban。製品の束縛が変わったら直す）
+                    command.Parameters.AddWithValue("@c", seed);
+                    await command.ExecuteNonQueryAsync(ct);
+                    command.Parameters[0].Value = id;
+                    command.Parameters[1].Value = value;
+                    await command.ExecuteNonQueryAsync(ct);
+                    await transaction.CommitAsync(ct);
+                }
+            ),
+        ];
+
+        for (var index = 0; index < writes.Count; index++)
+        {
+            var write = writes[index];
+
+            for (var pathIndex = 0; pathIndex < paths.Length; pathIndex++)
+            {
+                var (name, path) = paths[pathIndex];
+                var id = (index * paths.Length) + pathIndex + 1;
+                Exception? refusal = null;
+
+                try
+                {
+                    await using var connection = await OpenSqliteAsync(ct);
+                    await path(connection, id, write.Value);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    refusal = ex;
+                }
+
+                var problem = await WriteProblemAsync(
+                    write,
+                    $"{name}で {Show(write.Value)}{(write.Fits ? string.Empty : "（範囲の外）")}",
+                    refusal,
+                    async () =>
+                    {
+                        await using var connection = await OpenSqliteAsync(ct);
+                        await using var command = connection.CreateCommand();
+                        command.CommandText = $"SELECT c FROM {ProbeTable} WHERE id = @id";
+                        command.Parameters.AddWithValue("@id", id);
+                        await using var reader = await command.ExecuteReaderAsync(ct);
+
+                        if (!await reader.ReadAsync(ct))
+                        {
+                            return (false, null);
+                        }
+
+                        return (true, reader.GetFieldValue<T>(0));
+                    }
+                );
+
+                if (problem is not null)
+                {
+                    problems.Add(problem);
+                }
+            }
+        }
+
+        return problems;
+    }
+
+    /// <summary>QuickER 版の束縛の手順の接続（SQLite の派生だけが QuickER 版の束縛の手順を持つ）</summary>
+    private async Task<SqliteConnection> OpenSqliteAsync(CancellationToken ct) =>
+        await OpenAsync(ct) as SqliteConnection
+        ?? throw new InvalidOperationException(
+            "QuickER 版の束縛の書き込みの範囲の手順は SQLite の派生だけが流す"
+        );
+
+    /// <summary>生成 SQLite 版と同じ束縛（<c>AddWithValue</c>）で 1 行を書く</summary>
+    private static async Task AdoExecuteAsync(
+        SqliteConnection connection,
+        string sql,
+        int id,
+        object value,
+        CancellationToken ct
+    )
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.Parameters.AddWithValue("@id", id);
+        // 製品の束縛の写し：Runtime.Sqlite.g.cs の AddColumnParameter（テンプレートは _06_RemoteSaveInfraAndDI.scriban の
+        // [SqlColumnType] を生成しない枝）。製品が明示の型の束縛へ変わったら、この写しと一括挿入の形の写しも同じ束縛へ直す
+        command.Parameters.AddWithValue("@c", value);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>
+    /// 書いた結果を手順の期待と比べる（食い違いが無ければ null）：DB が断らない値は断られず、決まって変える値（Stored）か同じ値で
+    /// 読み戻す。範囲の外の値は断るか同じ値で読み戻す。保存して読めない値（Unreadable）は断られずに保存され、読むと例外になる
+    /// </summary>
+    /// <param name="write">書いた値と期待</param>
+    /// <param name="what">食い違いの文の頭（経路と値）</param>
+    /// <param name="refusal">書き込みが断られたときの例外（断られなければ null）</param>
+    /// <param name="read">書いた行を読む操作（行が無ければ Found が false）</param>
+    private static async Task<string?> WriteProblemAsync(
+        DialectTypeRealDbWrite write,
+        string what,
+        Exception? refusal,
+        Func<Task<(bool Found, object? Value)>> read
+    )
+    {
+        if (refusal is not null)
+        {
+            return write.Fits || write.Unreadable
+                ? $"{what}: 断らない値を書けない（{Describe(refusal)}）"
+                : null;
+        }
+
+        (bool Found, object? Value) stored;
+
+        try
+        {
+            stored = await read();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return write.Unreadable ? null : $"{what}: 書いた行を読めない（{Describe(ex)}）";
+        }
+
+        if (!stored.Found)
+        {
+            return $"{what}: 書いた行が無い";
+        }
+
+        if (write.Unreadable)
+        {
+            return $"{what}: 読むと例外になるはずの行を読めた（{Show(stored.Value)}。根拠：{write.Basis}）";
+        }
+
+        var expected = write.Stored ?? write.Value;
+
+        if (StructuralComparisons.StructuralEqualityComparer.Equals(expected, stored.Value))
+        {
+            return null;
+        }
+
+        if (write.Stored is not null)
+        {
+            return $"{what}: DB が変えて保存するはずの値と違う（期待 {Show(expected)}・実際 {Show(stored.Value)}。根拠：{write.Basis}）";
+        }
+
+        return write.Fits
+            ? $"{what}: 読み戻した値が違う（{Show(stored.Value)}）"
+            : $"{what}: 断らずに別の値を保存した（{Show(stored.Value)}）";
+    }
+
     /// <summary>更新の経路の前に、範囲の中の値の行を入れておく（別の DbContext で）</summary>
     private async Task SeedAsync<T>(
         DbContextOptions options,
-        string? columnType,
+        EfCoreProbeColumn column,
         int id,
         T seed,
         CancellationToken ct
     )
     {
-        await using var context = new EfCoreProbeContext<T>(options, StoreName, columnType);
+        await using var context = new EfCoreProbeContext<T>(options, StoreName, column);
         context.Rows.Add(new EfCoreProbeRow<T> { Id = id, Value = seed });
         await context.SaveChangesAsync(ct);
     }
@@ -756,21 +941,35 @@ internal sealed class EfCoreProbeRow<T>
 }
 
 /// <summary>
+/// EF Core の手順の列の構成（生成 DbContext が型マッパーの値から出す Fluent の指定のうち、値の読み書きに効くもの）
+/// </summary>
+/// <param name="ColumnType">EF Core に教える列の型（<c>CSharpTypeInfo.EfCoreColumnType</c>。null なら指定しない）</param>
+/// <param name="Precision">精度（<c>CSharpTypeInfo.Precision</c>。マッパーが持つのは decimal の列だけ。null なら指定しない）</param>
+/// <param name="Scale">スケール（<c>CSharpTypeInfo.Scale</c>。精度があるときだけ使う）</param>
+internal sealed record EfCoreProbeColumn(string? ColumnType, int? Precision, int? Scale)
+{
+    /// <summary>型マッパーの値から作る（生成の <c>CSharpGenerationModelBuilder.BuildEfCorePropertyConfig</c> と同じ値を拾う）</summary>
+    public static EfCoreProbeColumn Of(CSharpTypeInfo mapped) =>
+        new(mapped.EfCoreColumnType, mapped.Precision, mapped.Scale);
+}
+
+/// <summary>
 /// EF Core の手順のモデル。生成 DbContext（<c>_08_EfCore.scriban</c>）と同じく、列名を指定し、列の型（<c>HasColumnType</c>）は
-/// 型マッパーが EF Core に教える列の型（<c>CSharpTypeInfo.EfCoreColumnType</c>）を持つときだけ指定する。精度・Unicode は
-/// 指定しない（だからそれ以外はプロバイダがマッパーの型から選ぶ既定の対応で読み書きする）。生成 DbContext が同じ値を出すことは
-/// <c>CodegenCaseTests</c> の EF Core のモデルの行（<c>model-efcore-column-type-*</c>）が確かめる
+/// 型マッパーが EF Core に教える列の型（<c>CSharpTypeInfo.EfCoreColumnType</c>）を持つときだけ、精度とスケール（<c>HasPrecision</c>）は
+/// マッパーが精度を持つ（decimal の）ときだけ指定する。Unicode は指定しない（だからそれ以外はプロバイダがマッパーの型から選ぶ
+/// 既定の対応で読み書きする）。生成 DbContext が同じ値を出すことは <c>CodegenCaseTests</c> の EF Core のモデルの行
+/// （<c>model-efcore-column-type-*</c>）が確かめる
 /// </summary>
 internal sealed class EfCoreProbeContext<T>(
     DbContextOptions options,
     Func<string, string> storeName,
-    string? columnType
+    EfCoreProbeColumn column
 ) : DbContext(options)
 {
     public DbSet<EfCoreProbeRow<T>> Rows => Set<EfCoreProbeRow<T>>();
 
-    /// <summary>EF Core に教える列の型（モデルのキャッシュのキーに含める）</summary>
-    public string? ColumnType => columnType;
+    /// <summary>列の構成（モデルのキャッシュのキーに含める）</summary>
+    public EfCoreProbeColumn Column => column;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -780,23 +979,37 @@ internal sealed class EfCoreProbeContext<T>(
         row.Property(r => r.Id).HasColumnName(storeName("id")).ValueGeneratedNever();
         var value = row.Property(r => r.Value).HasColumnName(storeName("c"));
 
-        if (columnType is not null)
+        if (column.ColumnType is { } columnType)
         {
             value.HasColumnType(columnType);
+        }
+
+        // 生成の HasPrecision({precision}[, {scale}]) と同じ（スケールが無ければ精度だけ）
+        if (column.Precision is { } precision)
+        {
+            if (column.Scale is { } scale)
+            {
+                value.HasPrecision(precision, scale);
+            }
+            else
+            {
+                value.HasPrecision(precision);
+            }
         }
     }
 }
 
 /// <summary>
-/// EF Core の手順のモデルのキャッシュのキー（DbContext の型に、EF Core に教える列の型を足す）。既定は DbContext の型だけで
-/// モデルを引くので、同じ C# 型で列の型の違う手順（PostgreSQL の jsonb と xml など）が先に作ったモデルを使い回してしまう
+/// EF Core の手順のモデルのキャッシュのキー（DbContext の型に、列の構成を足す）。既定は DbContext の型だけでモデルを引くので、
+/// 同じ C# 型で列の型・精度の違う手順（PostgreSQL の jsonb と xml、decimal(12,3) と decimal(28,10) など）が先に作ったモデルを
+/// 使い回してしまう
 /// </summary>
 internal sealed class EfCoreProbeModelCacheKeyFactory : IModelCacheKeyFactory
 {
     public object Create(DbContext context, bool designTime) =>
         (
             context.GetType(),
-            context.GetType().GetProperty("ColumnType")?.GetValue(context) as string,
+            context.GetType().GetProperty("Column")?.GetValue(context) as EfCoreProbeColumn,
             designTime
         );
 }

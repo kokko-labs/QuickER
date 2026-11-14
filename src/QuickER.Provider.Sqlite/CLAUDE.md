@@ -45,6 +45,8 @@
   - 判定は `SqliteTypeAffinity.IsReal`（SQLite の判定順 INT → CHAR/CLOB/TEXT → BLOB → REAL/FLOA/DOUB）を型カタログと型マッパーが共有する（写しを作らない）。
   - `TryFormat` は Float32→`REAL`・Float64→`FLOAT` のまま据え置くので、`REAL` の列は型トークンで `FLOAT` へ畳まれ、verbatim 併記（`NativeType = "REAL"`）と生成時 Info の対象になる。
 - `DECIMAL` は NUMERIC アフィニティの宣言でしかなく丸めの単位を持たないので、負のスケールは書き出さない。精度なしの Decimal は `DECIMAL` のまま。
+- `DECIMAL(p,s)` の列の値は、QuickER 版 Repository（`AddWithValue`）も EF Core も文字列で送り、SQLite が NUMERIC アフィニティで整数か倍精度へ変えて持つ。だから有効桁がおよそ 15 桁を超える値は宣言の範囲の中でも丸めて保存され、宣言のスケール・精度は当ても検査もされず、decimal の上限付近の値は保存できて読むと `OverflowException` になる（docs の割り切り：database「SQLite の decimal の列」。製品は変えない＝区切り DW の決定）。DDL の宣言をアフィニティの違う型へ変えると答えが変わる。
+  - 固定は `Dialect/TypesRealDb`（行 `matrix-map-sqlite-decimal-12-3-upper`・`map-sqlite-decimal-28-10` の書き込みの範囲と QuickER 版の束縛の手順。期待は DB が変えて保存する値と読めない値で、根拠に docs の見出しを名指す）・`DialectTypeRealDbTableTests.WriteBases_PointAtExistingDocsHeadings`（根拠の見出しが英日の docs にある）。
 - 固定は `CodegenCaseTests` の行 `code-sqlite-real-double-with-verbatim-spelling`・`CodegenCaseTests` の行 `code-sqlite-float-double-without-verbatim`・`SqliteDialectTypeRealDbTests`・`DialectTypeTableTests` の REAL アフィニティの行（`map-sqlite-real-affinity-*`・`roundtrip-sqlite-real-affinity-*`）。mutation 実証済み。
 
 ## 同期

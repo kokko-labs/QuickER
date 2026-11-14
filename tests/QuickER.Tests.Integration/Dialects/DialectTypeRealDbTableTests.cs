@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using QuickER.Tests.Provider;
 using QuickER.Tests.TestSupport.Engines;
@@ -7,7 +8,7 @@ namespace QuickER.Tests.Integration.Dialects;
 /// <summary>
 /// 方言の型の表の実 DB の段の手順（<see cref="DialectTypeRealDbRows"/>）の宣言の照合（DB に触れない・Docker なしで流れる）
 /// </summary>
-public sealed class DialectTypeRealDbTableTests(ITestOutputHelper output)
+public sealed partial class DialectTypeRealDbTableTests(ITestOutputHelper output)
 {
     [Fact(
         DisplayName = "[方言の型・実 DB] 手順は、その方言の期待を持つ表の行を指し、行の観点と境界が手順の種類に合う"
@@ -45,6 +46,92 @@ public sealed class DialectTypeRealDbTableTests(ITestOutputHelper output)
         );
     }
 
+    [Fact(
+        DisplayName = "[方言の型・実 DB] 書き込みの範囲の値の根拠が docs の約束なら、英日の docs にその見出しがある"
+    )]
+    public void WriteBases_PointAtExistingDocsHeadings()
+    {
+        var root = EngineFingerprintDriftTests.RepositoryRoot();
+        var problems = new List<string>();
+
+        foreach (
+            var basis in DialectTypeRealDbRows
+                .All.SelectMany(probe => probe.Writes ?? [])
+                .Select(write => write.Basis)
+                .OfType<string>()
+                .Distinct(StringComparer.Ordinal)
+        )
+        {
+            foreach (Match match in DocsBasisPattern().Matches(basis))
+            {
+                var path = Path.Combine(root, "docs", match.Groups["file"].Value);
+                var heading = match.Groups["heading"].Value;
+
+                if (
+                    !File.Exists(path)
+                    || !File.ReadLines(path)
+                        .Any(line => line.StartsWith('#') && line.TrimStart('#').Trim() == heading)
+                )
+                {
+                    problems.Add($"{match.Value} の見出しが無い（根拠：{basis}）");
+                }
+            }
+        }
+
+        problems.Should().BeEmpty();
+    }
+
+    /// <summary>docs の約束の根拠の書き方（<see cref="DialectTypeRealDbRows.DocsBasis"/>）</summary>
+    [GeneratedRegex(
+        @"docs/(?<file>[a-z-]+(\.ja)?\.md)「(?<heading>[^」]+)」",
+        RegexOptions.CultureInvariant
+    )]
+    private static partial Regex DocsBasisPattern();
+
+    /// <summary>書き込みの範囲の手順か（EF Core の経路と QuickER 版の束縛）</summary>
+    private static bool IsWriteRange(string kind) =>
+        kind
+            is DialectTypeRealDbProbeKinds.EfCoreWriteRange
+                or DialectTypeRealDbProbeKinds.AdoWriteRange;
+
+    /// <summary>
+    /// 書く値 1 つの期待の宣言の食い違い：DB が変えて保存する値と読めない値は根拠を持ち（根拠は変える値か読めない値にだけ書く）、
+    /// 両方は持たない。変えて保存する値は DB が断らない値で、書く値と違う。docs の約束を根拠にするなら英日の両方を名指す
+    /// </summary>
+    private static IEnumerable<string> WriteExpectationProblems(DialectTypeRealDbWrite write)
+    {
+        var changes = write.Stored is not null || write.Unreadable;
+
+        if (changes != write.Basis is not null)
+        {
+            yield return "DB が変えて保存する値・読めない値は根拠（Basis）を持ち、ほかの値は持たない";
+        }
+
+        if (write.Stored is not null && write.Unreadable)
+        {
+            yield return "変えて保存する値と読めない値の両方は持たない";
+        }
+
+        if (write.Stored is not null && !write.Fits)
+        {
+            yield return "変えて保存する値は DB が断らない値（Fits）にだけ書く";
+        }
+
+        if (write.Stored is not null && write.Stored.Equals(write.Value))
+        {
+            yield return "変えて保存する値が書く値と同じ（同じ値なら Stored を書かない）";
+        }
+
+        if (
+            write.Basis is { } basis
+            && basis.Contains("docs/", StringComparison.Ordinal)
+            && DocsBasisPattern().Matches(basis).Count != 2
+        )
+        {
+            yield return $"docs の約束の根拠は英日の見出しを DocsBasis の形で名指す（{basis}）";
+        }
+    }
+
     /// <summary>読み書きできない組の理由の書き出し（製品の候補＝直す区切りが手順を通る形へ書き換える）</summary>
     private const string ProductCandidate = "製品の候補（P5）：";
 
@@ -69,7 +156,7 @@ public sealed class DialectTypeRealDbTableTests(ITestOutputHelper output)
             yield return "書く値は EF Core の手順だけが持つ";
         }
 
-        if (probe.Kind != DialectTypeRealDbProbeKinds.EfCoreWriteRange && probe.Writes is not null)
+        if (!IsWriteRange(probe.Kind) && probe.Writes is not null)
         {
             yield return "範囲の端と外の書く値は書き込みの範囲の手順だけが持つ";
         }
@@ -194,7 +281,8 @@ public sealed class DialectTypeRealDbTableTests(ITestOutputHelper output)
                 break;
             }
 
-            case DialectTypeRealDbProbeKinds.EfCoreWriteRange:
+            case DialectTypeRealDbProbeKinds.EfCoreWriteRange
+            or DialectTypeRealDbProbeKinds.AdoWriteRange:
             {
                 if (row.Facet != DialectTypeFacets.Map)
                 {
@@ -229,14 +317,36 @@ public sealed class DialectTypeRealDbTableTests(ITestOutputHelper output)
 
                 foreach (var write in writes)
                 {
-                    var name = DialectTypeRealDbTestsBase.CSharpNames.GetValueOrDefault(
-                        write.Value.GetType()
-                    );
-
-                    if (name != mappedType)
+                    foreach (var value in new[] { write.Value, write.Stored }.OfType<object>())
                     {
-                        yield return $"書く値の型 {name ?? write.Value.GetType().Name} がマッパーの型 {mappedType} と違う";
+                        var name = DialectTypeRealDbTestsBase.CSharpNames.GetValueOrDefault(
+                            value.GetType()
+                        );
+
+                        if (name != mappedType)
+                        {
+                            yield return $"書く値・変えて保存する値の型 {name ?? value.GetType().Name} がマッパーの型 {mappedType} と違う";
+                        }
                     }
+
+                    foreach (var problem in WriteExpectationProblems(write))
+                    {
+                        yield return $"{write.Value}: {problem}";
+                    }
+                }
+
+                // QuickER 版の束縛の手順は、同じ方言の書き込みの範囲の手順と同じ行・同じ値を持つ（束縛の違いだけを見る）
+                if (
+                    probe.Kind == DialectTypeRealDbProbeKinds.AdoWriteRange
+                    && !DialectTypeRealDbRows.All.Any(other =>
+                        other.Kind == DialectTypeRealDbProbeKinds.EfCoreWriteRange
+                        && other.RowId == probe.RowId
+                        && other.Dialect == probe.Dialect
+                        && other.Writes!.SequenceEqual(probe.Writes!)
+                    )
+                )
+                {
+                    yield return "QuickER 版の束縛の手順に、同じ行・同じ値の書き込みの範囲の手順が無い";
                 }
 
                 break;

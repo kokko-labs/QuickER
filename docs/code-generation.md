@@ -170,6 +170,9 @@ Entity properties, EF Core, the in-memory repository and remote transfer handle 
 
 SQLite's REAL affinity (`REAL`, `FLOAT`, `DOUBLE` and the other type names SQLite treats that way) holds an 8-byte double, so a single-precision `float` would drop the low digits of the value on every read and write.
 
+A SQLite `decimal` column maps to `decimal` with its precision and scale, but SQLite holds the values in NUMERIC affinity.
+A value with more than about 15 significant digits is stored rounded, and a value near the end of the `decimal` range cannot be read back once stored (see [SQLite decimal columns](database.md#sqlite-decimal-columns)).
+
 PostgreSQL's `interval`, `cidr` and `inet` map to the types the driver (Npgsql) returns.
 It cannot read them as strings.
 **Reading an `inet` value as `IPAddress` drops its netmask** (the `/24` in `192.168.0.1/24`), as Npgsql does by default.
