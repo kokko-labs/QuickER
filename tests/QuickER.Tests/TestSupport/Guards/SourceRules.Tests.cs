@@ -25,6 +25,21 @@ internal static partial class SourceRules
         "Deac" + "tivated",
     ];
 
+    /// <summary>
+    /// 合成のマウス・キーの入力を流すことを表す目印（このファイル自身が写り込まないよう分割して書く）
+    /// </summary>
+    private static readonly string[] SyntheticInputMarkers =
+    [
+        "InputManager.Current." + "ProcessInput",
+        "new Mouse" + "ButtonEventArgs(",
+        "new Mouse" + "EventArgs(",
+        "new Mouse" + "WheelEventArgs(",
+        "new Key" + "EventArgs(",
+    ];
+
+    /// <summary>合成の入力の間、実際のマウスのボタンを混ぜない共有の部品の呼び出し（分割して書く）</summary>
+    private const string MouseIsolationCall = "PhysicalMouseButtons." + "Isolate(";
+
     /// <summary>WindowActivation のコレクションへの所属を表す属性</summary>
     private static readonly Regex WindowActivationCollectionAttribute = new(
         @"\[Collection\((TestSupport\.)?WindowActivationTestCollection\.Name\)\]"
@@ -142,6 +157,71 @@ internal static partial class SourceRules
                     "フォーカス依存の目印",
                     1,
                     "並列の全件実行でだけ落ちた実例（メモの編集のフォーカス）"
+                )
+            ) with
+            {
+                MinimumFiles = 3,
+            },
+            // 合成のマウス・キーの入力を流すテストは、利用者の実際のマウスのボタンを混ぜないスコープ（PhysicalMouseButtons.Isolate）を
+            // 使う。WPF のコントロールはボタンをスレッドのキーの状態の表から読むので、全件の実行中のほかのアプリのクリックが結果を
+            // 変える。結果がボタンの状態に左右されないテストは、理由つきで範囲から外す。目印を含むのに部品の呼び出しの無いファイルを
+            // 1 件と数える（文字列で読むので、コメントでの言及も数える。取りこぼさない側へ倒す）
+            SourceRule.Forbid(
+                "synthetic-input-mouse-isolation",
+                "合成のマウス・キーの入力を流すテストは PhysicalMouseButtons.Isolate のスコープで、実際のマウスのボタンを待ってから固定する",
+                SourceScope
+                    .Under("tests/QuickER.Tests")
+                    .Except(
+                        "Gui/Behaviors/CanvasViewportBehaviorDetachTests.cs",
+                        "見るのは Space の押下で立つパン待機だけ（パンの開始がボタンを読むのはマウスの押下の時）で、ボタンの状態を読むコントロールを置かない"
+                    )
+                    .Except(
+                        "Gui/Behaviors/RubberBandBehaviorPressTests.cs",
+                        "窓に載せない要素へ押下を流す（PresentationSource が無いので WPF はボタンを表から読まない）。押下の判定は押下元だけを見る"
+                    )
+                    .Except(
+                        "Gui/Views/ColumnGridDeleteKeyTests.cs",
+                        "マウスの入力を流さず、列一覧の Delete の処理はボタンの状態を読まない"
+                    )
+                    .Except(
+                        "AI.Mock/MockGenerationDialogTests.cs",
+                        "表明は押下の時点の確定とフォーカス（ButtonBase はボタンの状態を見る前にフォーカスする）と、反射で呼んだ OnClick の結果だけ。Enter はボタンの状態を見ない"
+                    )
+                    .Except(
+                        "TestSupport/GuiFailureDiagnosticsTests.cs",
+                        "失敗の記録の自己検査（流した入力が記録に載ることを見るだけで、コントロールの結果を表明しない）"
+                    ),
+                GuardFinder.File(GuardReader.Text, FindMouseIsolationOffenders)
+            ),
+            // 目印の綴りが崩れて何も拾わなくなると、上の規則は黙って緑になる。部品を使う既知の 3 つ（エンジンのハーネス・Space のパン・
+            // カードのドラッグ）を目印が拾えること
+            SourceRule.Require(
+                "synthetic-input-markers",
+                "合成の入力の目印は、部品を使う既知のテストを拾える（拾えないと上の規則が空振りする）",
+                SourceScope.Files(
+                    "tests/QuickER.Tests",
+                    "tests/QuickER.Tests/Gui/Behaviors/CanvasInputHarness.cs",
+                    "tests/QuickER.Tests/Gui/Behaviors/CanvasViewportBehaviorSpaceKeyTests.cs",
+                    "tests/QuickER.Tests/Gui/Behaviors/DragBehaviorTests.cs"
+                ),
+                GuardFinder.File(GuardReader.Text, FindSyntheticInputMarker),
+                new(
+                    "tests/QuickER.Tests/Gui/Behaviors/CanvasInputHarness.cs",
+                    "合成の入力の目印",
+                    1,
+                    "入力の列のエンジン（全件でだけ利用者のクリックが混ざって落ちた実例）"
+                ),
+                new(
+                    "tests/QuickER.Tests/Gui/Behaviors/CanvasViewportBehaviorSpaceKeyTests.cs",
+                    "合成の入力の目印",
+                    1,
+                    "Space で押せることを見る（ButtonBase が Space の解放で表のボタンを読む）"
+                ),
+                new(
+                    "tests/QuickER.Tests/Gui/Behaviors/DragBehaviorTests.cs",
+                    "合成の入力の目印",
+                    1,
+                    "キャプチャを取った瞬間の擬似の移動が実際の左ボタンを読む"
                 )
             ) with
             {
@@ -380,6 +460,33 @@ internal static partial class SourceRules
     private static IEnumerable<GuardFinding> FindWindowActivationMarker(GuardFile file) =>
         FirstWindowActivationMarker(file.Text) is { } index
             ? [new GuardFinding("フォーカス依存の目印", file.LineAt(index))]
+            : [];
+
+    /// <summary>合成の入力の目印の最初の位置（無ければ null）</summary>
+    private static int? FirstSyntheticInputMarker(string text) =>
+        SyntheticInputMarkers
+            .Select(marker => text.IndexOf(marker, StringComparison.Ordinal))
+            .Where(index => index >= 0)
+            .Select(index => (int?)index)
+            .Min();
+
+    /// <summary>目印を含むのに部品の呼び出しの無いファイル（1 ファイル 1 件・行は最初の目印の行）</summary>
+    private static IEnumerable<GuardFinding> FindMouseIsolationOffenders(GuardFile file) =>
+        FirstSyntheticInputMarker(file.Text) is { } index
+        && !file.Text.Contains(MouseIsolationCall, StringComparison.Ordinal)
+            ?
+            [
+                new GuardFinding(
+                    "実際のマウスのボタンを混ぜるおそれのある合成の入力",
+                    file.LineAt(index)
+                ),
+            ]
+            : [];
+
+    /// <summary>合成の入力の目印を含むファイル（1 ファイル 1 件）</summary>
+    private static IEnumerable<GuardFinding> FindSyntheticInputMarker(GuardFile file) =>
+        FirstSyntheticInputMarker(file.Text) is { } index
+            ? [new GuardFinding("合成の入力の目印", file.LineAt(index))]
             : [];
 
     /// <summary>節が Roslyn のパースの直接の呼び出しなら、そのメソッド名（メソッド名で判定する）</summary>
