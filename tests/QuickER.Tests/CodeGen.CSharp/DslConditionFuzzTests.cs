@@ -121,8 +121,6 @@ public class DslConditionFuzzTests
     [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public async Task DslConditions_MatchDocumentedSemantics()
     {
-        var ledger = new FuzzFailureLog(DslFuzzKnownFailures.Set);
-
         var plan = SeedSource.Resolve(Seeds);
         plan.WriteWarnings();
         var coverage = new DslFuzzCoverage(DslFuzzDimensions.SqliteMySqlScopes);
@@ -220,48 +218,27 @@ public class DslConditionFuzzTests
             }
         }
 
-        foreach (var (unit, target, culture) in coverageUnits)
-        {
-            using var scope = new CultureScope(culture);
-            await DslFuzzRunner.RunAsync(ledger, unit, target, Ct, coverage, minimumChecked: 0);
-        }
-
-        foreach (var seed in plan.Seeds)
-        {
-            foreach (var unit in DslFuzzUnits.Sqlite(seed))
-            {
-                await DslFuzzRunner.RunAsync(ledger, unit, SqliteTarget, Ct, coverage);
-            }
-
-            foreach (var unit in DslFuzzUnits.MySql(seed))
-            {
-                await DslFuzzRunner.RunAsync(ledger, unit, MySqlTarget, Ct, coverage);
-            }
-        }
-
-        foreach (var unit in DslFuzzUnits.Collisions())
-        {
-            await DslFuzzRunner.RunAsync(ledger, unit, SqliteTarget, Ct, coverage);
-        }
-
-        // 網羅の宣言の誤りは照合の結果より先に赤にする
-        var coverageReports = coverage.Reports();
-        DslFuzzCoverage.WriteSummaries(coverageReports);
-
-        ledger.AssertMatchesKnown($"{Suite}-generate:", $"{Suite}-compile:", $"{Suite}-exec:");
-        coverageUnits
-            .SelectMany(pair =>
-                coverage.UncheckedProblems(
-                    pair.Unit,
-                    pair.Target.Dbms,
-                    pair.Target.Backends.Select(backend => backend.Name)
-                )
+        // 種の段：種ごとの SQLite と MySQL の単位と、種に依らない射影の型名の衝突の単位
+        var seedRuns = plan
+            .Seeds.SelectMany(seed =>
+                DslFuzzUnits
+                    .Sqlite(seed)
+                    .Select(unit => new DslFuzzRun(unit, SqliteTarget))
+                    .Concat(
+                        DslFuzzUnits.MySql(seed).Select(unit => new DslFuzzRun(unit, MySqlTarget))
+                    )
             )
-            .Should()
-            .BeEmpty();
+            .Concat(DslFuzzUnits.Collisions().Select(unit => new DslFuzzRun(unit, SqliteTarget)))
+            .ToList();
 
-        // 網羅しない組は、照合の結果を表明してから照合する（既定の種の数のときだけ）
-        DslFuzzCoverage.AssertGaps(coverageReports, plan);
+        await DslFuzzRunner.RunSuiteAsync(
+            coverage,
+            plan,
+            [.. coverageUnits.Select(run => new DslFuzzRun(run.Unit, run.Target, run.Culture))],
+            seedRuns,
+            [$"{Suite}-generate:", $"{Suite}-compile:", $"{Suite}-exec:"],
+            Ct
+        );
     }
 
     /// <summary>網羅の単位を流す書式のカルチャ（インバリアント）の名前</summary>

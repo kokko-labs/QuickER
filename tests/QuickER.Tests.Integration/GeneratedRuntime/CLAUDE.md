@@ -65,6 +65,7 @@
 
 - `NamedQueryDslConditionFuzz{PostgreSql,MySql,Oracle}RuntimeTests` は、簡易 DSL の総当たりを実コンテナの EF Core 版 Repository で流す（手順は `DslConditionFuzzEfCore` の 1 か所・SQL Server の派生と同じ）。QuickER 版 Repository はこの 3 方言を生成せず、インメモリは方言に依らないので、実装先の軸は EF Core だけ（ほかは理由つきの除外）。
 - 文字列の扱いは `DslCaseRule` の方言の値（docs の「大文字小文字・空白・日付部品」の方言の行の写し）、NULL の位置は PostgreSQL・Oracle が昇順で末尾。種は普段 1・夜間 16。
+- 実装先は単位ごとにコンテナの 1 つのスキーマを空にして DDL を当てるので、`DslFuzzBackend.Exclusive` で開いてから閉じるまでを 1 本にする（単位の生成・コンパイルは並ぶ。流し方は `tests/QuickER.Tests/TestSupport/CLAUDE.md`「簡易 DSL の総当たり」）。SQL Server の派生は単位・実装先ごとにデータベースを作って捨てるので排他を持たず、単位ごと並ぶ。
 - 行列の担当は軸から導く（`RuntimeMatrixEngines` の `DslFuzz` の登録）。値オブジェクトの文字列一致（`ValueObjectStringMatch`）の 3 方言は `ValueObjectStringMatchEfCore{PostgreSql,MySql,Oracle}RuntimeTests`（クエリフィクスチャの生成物を、方言切替で写した DDL のスキーマで流す。図の列は int・nvarchar・decimal だけで、生成の Fluent は方言に依らない）。
 
 ## 実装先どうしの一致

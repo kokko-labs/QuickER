@@ -44,23 +44,63 @@ internal static class DslFuzzExecution
 
         foreach (var backend in target.Backends)
         {
-            await using var session = await backend.OpenAsync(probe, diagram, ct);
-            executed[backend.Name] = await RunBackendAsync(
-                ledger,
-                $"{target.Suite}-exec:{backend.Name}:{unit.Name}",
-                unit,
-                backend,
-                session.Services.GetRequiredService(repositoryType),
-                repositoryType,
-                shape,
-                coverage is null
-                    ? null
-                    : query => coverage.Observe(target.Dbms, backend.Name, query),
-                ct
-            );
+            // スキーマを共有する実装先は、開いてから閉じるまでをほかの単位と重ねない（生成・コンパイルは重ねてよい）
+            if (backend.Exclusive is { } exclusive)
+            {
+                await exclusive.WaitAsync(ct);
+            }
+
+            try
+            {
+                executed[backend.Name] = await RunSessionAsync(
+                    ledger,
+                    unit,
+                    target,
+                    backend,
+                    probe,
+                    repositoryType,
+                    shape,
+                    diagram,
+                    coverage,
+                    ct
+                );
+            }
+            finally
+            {
+                backend.Exclusive?.Release();
+            }
         }
 
         return executed;
+    }
+
+    /// <summary>実装先を開いて単位を流し、照合したクエリの数を返す（閉じるまでが 1 つの排他の区間）</summary>
+    private static async Task<int> RunSessionAsync(
+        FuzzFailureLog ledger,
+        DslFuzzUnit unit,
+        DslFuzzTarget target,
+        DslFuzzBackend backend,
+        Type probe,
+        Type repositoryType,
+        EntityShape shape,
+        ErDiagram diagram,
+        DslFuzzCoverage? coverage,
+        CancellationToken ct
+    )
+    {
+        await using var session = await backend.OpenAsync(probe, diagram, ct);
+
+        return await RunBackendAsync(
+            ledger,
+            $"{target.Suite}-exec:{backend.Name}:{unit.Name}",
+            unit,
+            backend,
+            session.Services.GetRequiredService(repositoryType),
+            repositoryType,
+            shape,
+            coverage is null ? null : query => coverage.Observe(target.Dbms, backend.Name, query),
+            ct
+        );
     }
 
     private static async Task<int> RunBackendAsync(

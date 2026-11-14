@@ -419,7 +419,14 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
 
 - 簡易 DSL の条件の意味は、総当たりで docs の意味と照合する。`DslConditionFuzzTests`（QuickER 版 Repository・EF Core〔いずれも SQLite〕とインメモリ。MySQL の符号なし整数の図はインメモリだけ）と、Integration の `DslConditionFuzzSqlServerRuntimeTests`（実コンテナの QuickER 版 Repository・EF Core〔SQL Server〕・既定はシード 1 つ）と `NamedQueryDslConditionFuzz{PostgreSql,MySql,Oracle}RuntimeTests`（実コンテナの EF Core 版だけ・既定はシード 1 つ・夜間 16。`tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`「簡易 DSL の総当たりの EF Core だけの方言」）が流す。
   - 列ごとに書ける全ての形の原子（演算子・リテラルかパラメータか・否定の有無。値だけ乱数）とその NOT、乱数で組んだ合成の条件を、生成 → 実コンパイル（エラー 0・警告 0）→ NULL を含むデータで実行し、同じ実装先から読み戻した全行へオラクル `DslFuzz.Evaluate` を当てた結果と照合する。
-  - 本体は `DslFuzzRunner`、実行部は `DslFuzzExecution`（QuickER.Tests の CodeGen.CSharp。Integration は TestSupport の `DslFuzz*.cs` と一緒に Compile リンクする）。
+  - 本体は `DslFuzzRunner`、実行部は `DslFuzzExecution`（QuickER.Tests の CodeGen.CSharp。Integration は TestSupport の `DslFuzz*.cs` と `CultureScope.cs` と一緒に Compile リンクする）。
+- **5 本は同じ流し方（`DslFuzzRunner.RunSuiteAsync`）で、照合は全単位が終わった後の 1 か所だけで掛ける**：
+  - 網羅の段の単位がすべて終わってから種の段を始め、段の中の単位を上限つきで並べる。上限は CPU の数・最大 8（`DslFuzzRunner.DefaultParallelism`）で、`QUICKER_DSL_FUZZ_PARALLELISM` で上書きできる（1 で 1 つずつ順に流す）。1 単位は生成→コンパイル→実行の 1 本の流れで CPU を 2 本前後しか使わないので、CI の 4 vCPU では単位を 4 つ並べると CPU が埋まる。
+  - 単位ごとに自分の失敗の記録を持ち、段の終わりに計画の順で全体の記録へ流し込む（`FuzzFailureLog.Absorb`）。記録（キーと例の順）と網羅の計数は、1 つずつ順に流したときと同じになる（網羅の計数はスレッドセーフで和）。書式のカルチャ（`DslFuzzRun.Culture`）はその単位の中だけで差し替える。
+  - 照合の順：記録を流し込んだ単位が計画した単位とそろうこと（`CoverageGuard.ContainsAll`＝単位を流さない・記録を流し込まないと、その単位を名指しして赤）→ 網羅の宣言の誤り → 既知の失敗の一覧 → 網羅の単位のクエリをすべて照合したこと → 網羅しない組。
+  - 単位どうしで 1 つのスキーマを作り直す実装先（EF Core だけの 3 方言）は `DslFuzzBackend.Exclusive` を持ち、開いてから閉じるまでをほかの単位と重ねない（生成・コンパイルは重ねる）。単位・実装先ごとに別のデータベース・ファイルを使う実装先（SQL Server・SQLite・インメモリ）は持たない。
+  - SQL Server の派生は自分のコレクション（`SqlServerDslFuzzContainerCollection`＝2 つめの SQL Server のコンテナ）で流す。`SqlServerContainerCollection` に置くと、夜間の種の数の総当たりがほかの SQL Server のテストの後ろに直列で並び、Integration の夜間のジョブの終わりの時刻を決める。単位・実装先ごとのデータベースの接続はプールし（プールのキーはデータベースごと）、データベースを捨てる前に `SqlConnection.ClearPool` で空にする。プールしないとクエリごとに TCP を張り直し、単位を並べると TIME_WAIT がエフェメラルポートを使い切る（Windows の Docker Desktop で最大 14,976／16,384 を実測、プールで 81）。
+  - mutation 実証済み（段の単位を 1 つ流さない・1 つの単位の記録を流し込まない・網羅の単位の観測を捨てる、の各回で赤。段の順を入れ替えても結果は変わらない＝記録は段ごとに計画の順で流し込むので、網羅の段を先に流すのは結果に出ない取り決め）。
 - **オラクルは docs の写しで、実装の挙動を写さない**：「クエリ（式木 → SQL 変換）」節の NULL の規則（NOT と `<>` は C# の否定と同じ・文字列一致は NULL の行がどちら向きでも一致しない・IN の箇条＝null を含むリストは NULL の行に一致し、null だけのリストは NULL の行だけ、空のリストは IN が偽で NOT IN が真）と、「大文字小文字・空白・日付部品」の表（`DslCaseRule`）。条件の読み方（優先順位）は「簡易 DSL と名前付きクエリの制約」節の写しで、描画だけが使う（構文木は生成器が作る）。
   - 大文字小文字の扱い：インメモリは序数、SQLite の QuickER 版 Repository は ASCII の英字だけを畳む、EF Core（SQLite）は格納先次第、SQL Server は照合順序。
   - EF Core だけの方言（docs の表の方言の行）：

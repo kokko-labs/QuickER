@@ -81,7 +81,9 @@ internal static class DslConditionFuzzEfCore
                                 }
                             )
                         );
-                    }
+                    },
+                    // 単位ごとにコンテナの同じスキーマを空にして使うので、開いてから閉じるまでをほかの単位と重ねない
+                    Exclusive: new SemaphoreSlim(1, 1)
                 ),
             ],
             new Dictionary<string, string>(StringComparer.Ordinal)
@@ -135,44 +137,25 @@ internal static class DslConditionFuzzEfCore
         CancellationToken ct
     )
     {
-        var ledger = new FuzzFailureLog(DslFuzzKnownFailures.Set);
         var plan = SeedSource.Resolve(Seeds);
         plan.WriteWarnings();
         var coverage = new DslFuzzCoverage(scopes);
         IReadOnlyList<DslFuzzUnit> coverageRun = plan.IsSingle ? [] : coverageUnits;
 
-        // 網羅の単位のクエリは、どの実装先でも照合したクエリにならなければ名指しで赤にする
-        foreach (var unit in coverageRun)
-        {
-            await DslFuzzRunner.RunAsync(ledger, unit, target, ct, coverage, minimumChecked: 0);
-        }
-
-        foreach (var seed in plan.Seeds)
-        {
-            foreach (var unit in units(seed))
-            {
-                await DslFuzzRunner.RunAsync(ledger, unit, target, ct, coverage);
-            }
-        }
-
-        // 網羅の宣言の誤りは照合の結果より先に赤にする
-        var coverageReports = coverage.Reports();
-        DslFuzzCoverage.WriteSummaries(coverageReports);
-
-        ledger.AssertMatchesKnown($"{target.Suite}-");
-        coverageRun
-            .SelectMany(unit =>
-                coverage.UncheckedProblems(
-                    unit,
-                    target.Dbms,
-                    target.Backends.Select(backend => backend.Name)
-                )
-            )
-            .Should()
-            .BeEmpty();
-
-        // 網羅しない組は、照合の結果を表明してから照合する（既定の種の数のときだけ＝種の数で欠けが変わるため）
-        DslFuzzCoverage.AssertGaps(coverageReports, plan);
+        // 実装先はコンテナの 1 つのスキーマを単位ごとに作り直すので、実行は排他（BackendAxis の Exclusive）で 1 本にし、
+        // 生成・コンパイルだけを並べる
+        await DslFuzzRunner.RunSuiteAsync(
+            coverage,
+            plan,
+            [.. coverageRun.Select(unit => new DslFuzzRun(unit, target))],
+            [
+                .. plan.Seeds.SelectMany(seed =>
+                    units(seed).Select(unit => new DslFuzzRun(unit, target))
+                ),
+            ],
+            [$"{target.Suite}-"],
+            ct
+        );
     }
 
     private static string DdlOf(string dbms, ErDiagram diagram) =>

@@ -150,3 +150,19 @@ public sealed class SqlServerContainerCollection : ICollectionFixture<SqlServerC
     /// <summary>コレクション名（各統合テストクラスの <c>[Collection]</c> で参照する）</summary>
     public const string Name = "SQL Server Integration";
 }
+
+/// <summary>
+/// 簡易 DSL の総当たり（SQL Server）だけのコレクション定義（<see cref="SqlServerContainerCollection"/> と別の SQL Server のコンテナを持つ）
+/// </summary>
+/// <remarks>
+/// xunit は同じコレクションのテストを 1 本ずつ流すので、夜間の種の数で長い総当たりを <see cref="SqlServerContainerCollection"/> に置くと、
+/// ほかの SQL Server のテストの後ろに直列で並び、夜間のジョブの終わりの時刻を決める。別のコンテナで並べて流す（コンテナが 1 つ増える）。
+/// 総当たりは単位ごとにデータベースを作って捨てるので、コンテナの状態をほかのテストと共有する必要はない。
+/// </remarks>
+[CollectionDefinition(Name)]
+public sealed class SqlServerDslFuzzContainerCollection
+    : ICollectionFixture<SqlServerContainerFixture>
+{
+    /// <summary>コレクション名（<c>DslConditionFuzzSqlServerRuntimeTests</c> の <c>[Collection]</c> で参照する）</summary>
+    public const string Name = "SQL Server DSL Fuzz";
+}

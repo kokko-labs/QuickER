@@ -30,7 +30,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// （<c>QUICKER_FUZZ_SEEDS</c> を指定したときはその数）。
 /// </para>
 /// </remarks>
-[Collection(SqlServerContainerCollection.Name)]
+[Collection(SqlServerDslFuzzContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
 public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixture fixture)
 {
@@ -76,7 +76,6 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
             InMemory: false,
             BackendAxis(fixture).Adapters
         );
-        var ledger = new FuzzFailureLog(DslFuzzKnownFailures.Set);
         var plan = SeedSource.Resolve(Seeds);
         plan.WriteWarnings();
         var coverage = new DslFuzzCoverage(DslFuzzDimensions.SqlServerScopes);
@@ -109,37 +108,19 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
                 (DslFuzzUnits.SqlServerOutOfDayCoverage(), adoTarget),
             ];
 
-        foreach (var (unit, unitTarget) in coverageUnits)
-        {
-            await DslFuzzRunner.RunAsync(ledger, unit, unitTarget, Ct, coverage, minimumChecked: 0);
-        }
-
-        foreach (var seed in plan.Seeds)
-        {
-            foreach (var unit in DslFuzzUnits.SqlServer(seed))
-            {
-                await DslFuzzRunner.RunAsync(ledger, unit, target, Ct, coverage);
-            }
-        }
-
-        // 網羅の宣言の誤りは照合の結果より先に赤にする
-        var coverageReports = coverage.Reports();
-        DslFuzzCoverage.WriteSummaries(coverageReports);
-
-        ledger.AssertMatchesKnown($"{Suite}-");
-        coverageUnits
-            .SelectMany(pair =>
-                coverage.UncheckedProblems(
-                    pair.Unit,
-                    pair.Target.Dbms,
-                    pair.Target.Backends.Select(backend => backend.Name)
-                )
-            )
-            .Should()
-            .BeEmpty();
-
-        // 網羅しない組は、照合の結果を表明してから照合する（既定の種の数のときだけ＝種の数で欠けが変わるため）
-        DslFuzzCoverage.AssertGaps(coverageReports, plan);
+        // 単位・実装先ごとに別のデータベースを作るので、単位を並べて流せる
+        await DslFuzzRunner.RunSuiteAsync(
+            coverage,
+            plan,
+            [.. coverageUnits.Select(pair => new DslFuzzRun(pair.Unit, pair.Target))],
+            [
+                .. plan.Seeds.SelectMany(seed =>
+                    DslFuzzUnits.SqlServer(seed).Select(unit => new DslFuzzRun(unit, target))
+                ),
+            ],
+            [$"{Suite}-"],
+            Ct
+        );
     }
 
     /// <summary>
@@ -182,6 +163,11 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
         );
 
     /// <summary>単位ごとに新しいデータベースを作り、DDL を当てて開く実装先（閉じるときにデータベースを捨てる）</summary>
+    /// <remarks>
+    /// 接続はプールする。プールは接続文字列ごとで、データベースの名前が単位・実装先ごとに違うので、単位どうしで接続を共有しない。
+    /// プールしないとクエリごとに TCP の接続を張り直し、単位を並べて流すと TIME_WAIT がエフェメラルポートを使い切って
+    /// 接続が断られる（Windows の Docker Desktop で実測）。データベースを捨てる前にそのプールを空にする。
+    /// </remarks>
     private static DslFuzzBackend Database(
         SqlServerContainerFixture fixture,
         string name,
@@ -202,7 +188,6 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
                 var cs = new SqlConnectionStringBuilder(fixture.ConnectionString)
                 {
                     InitialCatalog = database,
-                    Pooling = false,
                 }.ConnectionString;
 
                 await using (var connection = new SqlConnection(cs))
@@ -218,10 +203,17 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
                 return new DslFuzzSession(
                     build(probe, cs),
                     async () =>
+                    {
+                        using (var connection = new SqlConnection(cs))
+                        {
+                            SqlConnection.ClearPool(connection);
+                        }
+
                         await fixture.ExecuteAsync(
                             $"ALTER DATABASE [{database}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{database}];",
                             CancellationToken.None
-                        )
+                        );
+                    }
                 );
             }
         );
