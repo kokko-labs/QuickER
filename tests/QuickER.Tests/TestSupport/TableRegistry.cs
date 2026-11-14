@@ -62,7 +62,7 @@ internal static class TableRegistry
         ),
         new(
             "Converters",
-            "XAML の表示の値のコンバーターの表（反転のパラメーター・件数のしきい値・null の扱い。使われていないアプリ本体の BoolToVisibilityConverter は入れない）",
+            "XAML の表示の値のコンバーターの表（反転のパラメーター・件数のしきい値・null の扱い）",
             [
                 "tests/QuickER.Tests/Gui/Converters/ConverterRows.cs",
                 "tests/QuickER.Tests/Gui/Converters/ConverterTests.cs",

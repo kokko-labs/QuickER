@@ -29,11 +29,6 @@ internal sealed record ConverterCase(
 /// <see cref="AiUiBoolToVisibilityConverter"/>（<c>src/QuickER.AI.UI</c>）。判断は、反転のパラメーター <c>"Inverse"</c>（大文字小文字を無視）・
 /// 件数のしきい値（0 より大きい int だけ表示）・null の扱い。
 /// </para>
-/// <para>
-/// アプリ本体の <c>QuickER.Converters.BoolToVisibilityConverter</c> は表に入れない。<c>App.xaml</c> のキー <c>BoolToVisibilityConverter</c> は
-/// WPF 組み込みの <c>BooleanToVisibilityConverter</c> を当てていて、アプリ本体のこの型はどこからも使われていない（消す候補）。
-/// 使われていないコードを表で守ると、消すときに表まで直すことになる。
-/// </para>
 /// <para>期待はコンバーターの XmlDoc から手で書く。文書に定めの無い値（null・型の違う値）は説明の先頭に「特性の固定」と書く。</para>
 /// </remarks>
 internal static class ConverterRows

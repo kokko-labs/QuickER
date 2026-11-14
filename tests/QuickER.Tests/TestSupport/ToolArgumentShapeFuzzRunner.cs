@@ -22,14 +22,20 @@ namespace QuickER.Tests.TestSupport;
 /// </remarks>
 internal static class ToolArgumentShapeFuzzRunner
 {
-    /// <summary>総当たりするツール 1 つ（崩す元の入力スキーマと、成功する引数の並び）</summary>
+    /// <summary>総当たりするツール 1 つ（崩す元の入力スキーマと、成功する引数の並びと、手書きの必須の引数）</summary>
     /// <param name="Name">ツール名</param>
     /// <param name="InputSchema">入力スキーマ（<see cref="ToolArgumentFuzz.SchemaOf"/> へ渡す）</param>
     /// <param name="Baselines">成功する引数（ラベルと引数）。ケース ID の接頭辞は <c>{ツール名}#{ラベル}</c></param>
+    /// <param name="Required">
+    /// 必須の引数（手書き。配列の要素の中の必須は <c>{引数}[].{名前}</c>）。崩す元の必須と入口の形の検査はどちらもスキーマを読むので、
+    /// スキーマから必須を外す退行は両方が同じだけ緩んで赤にならない。スキーマの必須（<see cref="ToolArgumentFuzz.RequiredPaths"/>）と
+    /// 集合で照合して名指しする
+    /// </param>
     internal sealed record Tool(
         string Name,
         object InputSchema,
-        IReadOnlyList<(string Label, JsonObject Args)> Baselines
+        IReadOnlyList<(string Label, JsonObject Args)> Baselines,
+        IReadOnlyCollection<string> Required
     );
 
     /// <summary>ケース 1 件の実行の結果</summary>
@@ -89,6 +95,17 @@ internal static class ToolArgumentShapeFuzzRunner
         foreach (var tool in entrance.Tools())
         {
             var schema = ToolArgumentFuzz.SchemaOf(tool.InputSchema);
+            var schemaRequired = ToolArgumentFuzz.RequiredPaths(schema);
+
+            // 崩す元の必須はスキーマから読むので、スキーマの必須が手書きの一覧とずれていたら先に名指しする
+            if (!schemaRequired.SetEquals(tool.Required))
+            {
+                problems.Add(
+                    $"[{tool.Name}] スキーマの必須 [{string.Join(", ", schemaRequired.Order(StringComparer.Ordinal))}] が"
+                        + $"手書きの一覧 [{string.Join(", ", tool.Required.Order(StringComparer.Ordinal))}] と違う。"
+                        + "必須を外した・足したのが意図どおりなら、手書きの一覧も直す。"
+                );
+            }
 
             // 引数の全体がオブジェクトでないケースはベースラインに依らないので、ツールごとに 1 回だけ流す
             foreach (

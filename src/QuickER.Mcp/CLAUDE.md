@@ -110,6 +110,7 @@ docs 不在の外部エージェントが config を自己発見的に書ける�
   - 断るべきケースはすべて、入口ごとの形の検査の文（`Entrance.ShapeRefusal`）との一致まで見る（ツールの処理が別の理由で失敗しても合格にしない）。期待の問題（種類・パス・スキーマの型）は崩しの定義から組み、`ToolArgumentShape.Check` を呼んで作らない（呼ぶと形の検査の誤りを捕まえない）。文の組み立てだけ製品の関数（`DescribeEnglish`・チャットの resx）を使う。
   - 配列はベースラインのどの要素の中も、辞書はどのキーの値も崩し、崩した場所が容器の最初か 2 番目以降かを次元表の因子 Position で数える（set_query は要素が 2 つの配列を持つベースラインを持つ）。配列の要素でも辞書でもない入れ子のオブジェクトはスキーマに無く、現れたら `ToolArgumentFuzz.Generate` が名指しして止める。
   - mutation 実証済み（2 つの入口・形の検査が最初の要素だけ・最初のキーだけを見る形）。
+  - スキーマの必須の引数そのものは、総当たりのツールの宣言に手書きの必須の一覧（`ToolArgumentShapeFuzzRunner.Tool` の `Required`。オブジェクトの配列の要素の中の必須は `parameters[].name` と書く）を持たせて照合する。崩す元の必須（`ToolArgumentFuzz.Generate`）と入口の形の検査はどちらもスキーマの `required` を読むので、カタログから必須を外す退行（`add_column` の `data_type` など）は両方が同じだけ緩んで赤にならない（同語反復）。ランナーがスキーマの必須（`ToolArgumentFuzz.RequiredPaths`）と手書きの一覧を集合で比べ、違えばツールを名指しして赤にする。一覧はカタログの 15 ツールが `ToolArgumentFuzzSeed.CatalogRequired`（MCP と内蔵チャットが共有）、MCP の `file`（`FileParameterInjector` が足す）と `create_diagram`、コード生成の 2 ツールはそれぞれのテストの中。mutation 実証済み（`add_column` の `data_type`・`generate_csharp` の `out_dir`・`set_query` の `order_by[].column` を外す）。
 - 引数の値の読み取りは `ToolArguments`（`GetString` / `GetBool`）、`relationship_type` の名前の解釈は `RelationshipTypeNames.TryParse`（Model）、列ペアの比較は `RelationshipColumnPair.HaveSamePairs` の 1 か所だけで、ほかに写さない。
 - ガード：`SourceRuleTests` の規則 `tool-argument-parsing-copies`（正本自身が拾えることは規則 `tool-argument-parsing-owners`）。
   - `SourceSymbolScan` で src の `#if` のどの分岐もシンボルで読み、次を正本の外では理由つきの一覧（別の書式を読む Mermaid と Excel 定義書の取込の `ParseRelationshipType`）とファイル・件数で厳密に照合する。

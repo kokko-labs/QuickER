@@ -103,13 +103,25 @@ public sealed class ToolArgumentShapeFuzzTests : IDisposable
             .Should()
             .BeEquivalentTo(baselines.Keys, "公開しているツールすべてにベースラインを持つ");
 
-        ToolArgumentShapeFuzzRunner.Run(new Entrance(toolSet, baselines, file, seed, _dir));
+        // 必須の引数（手書き）：カタログの一覧に、FileParameterInjector がどのツールにも足す file を加える
+        var required = ToolArgumentFuzzSeed
+            .CatalogRequired()
+            .ToDictionary(
+                pair => pair.Key,
+                pair => (IReadOnlyCollection<string>)[.. pair.Value, "file"]
+            );
+        required[DocumentErDiagramToolHost.CreateDiagramToolName] = ["file", "target_dbms"];
+
+        ToolArgumentShapeFuzzRunner.Run(
+            new Entrance(toolSet, baselines, required, file, seed, _dir)
+        );
     }
 
     /// <summary>MCP の ER 図操作ツールの入口（図ファイルをケースごとに種へ戻す）</summary>
     private sealed class Entrance(
         QuickER.Mcp.McpToolSet toolSet,
         IReadOnlyDictionary<string, IReadOnlyList<(string Label, JsonObject Args)>> baselines,
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>> required,
         string file,
         byte[] seed,
         string dir
@@ -126,7 +138,8 @@ public sealed class ToolArgumentShapeFuzzTests : IDisposable
                 .Tools.Select(tool => new ToolArgumentShapeFuzzRunner.Tool(
                     tool.Name,
                     tool.InputSchema,
-                    baselines[tool.Name]
+                    baselines[tool.Name],
+                    required[tool.Name]
                 ))
                 .ToList();
 

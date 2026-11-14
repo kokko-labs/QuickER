@@ -681,7 +681,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 
 ### `table:Converters`
 
-- 名前：XAML の表示の値のコンバーターの表（反転のパラメーター・件数のしきい値・null の扱い。使われていないアプリ本体の BoolToVisibilityConverter は入れない）
+- 名前：XAML の表示の値のコンバーターの表（反転のパラメーター・件数のしきい値・null の扱い）
 - テストのソース：`tests/QuickER.Tests/Gui/Converters/ConverterRows.cs`・`tests/QuickER.Tests/Gui/Converters/ConverterTests.cs`
 - 範囲：`src/QuickER.Gui/Converters/CountToVisibilityConverter.cs`・`src/QuickER.Gui/Converters/NullToBooleanConverter.cs`・`src/QuickER.Gui/Converters/NullToVisibilityConverter.cs`・`src/QuickER.AI.UI/BoolToVisibilityConverter.cs`
 

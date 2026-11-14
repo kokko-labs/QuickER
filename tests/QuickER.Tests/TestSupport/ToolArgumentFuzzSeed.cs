@@ -365,4 +365,40 @@ internal static class ToolArgumentFuzzSeed
                 ),
             ],
         };
+
+    /// <summary>
+    /// ER 図操作ツール（カタログの 15 ツール）ごとの必須の引数（手書き。配列の要素の中の必須は <c>{引数}[].{名前}</c>）
+    /// </summary>
+    /// <remarks>
+    /// 総当たりは崩す元の必須をカタログのスキーマから読み、入口の形の検査も同じスキーマを読む。カタログから必須を外しても
+    /// 両方が同じだけ緩むので、この一覧と照合して名指しする（<see cref="ToolArgumentShapeFuzzRunner"/>）。
+    /// 期待は各ツールの description と、ツールの処理が断る引数（表名・列名・関係の両端・クエリの名前と戻り値）から手で書く。
+    /// </remarks>
+    public static IReadOnlyDictionary<string, string[]> CatalogRequired() =>
+        new Dictionary<string, string[]>
+        {
+            ["get_diagram_summary"] = [],
+            ["list_queries"] = [],
+            ["add_entity"] = ["table_name"],
+            ["remove_entity"] = ["table_name"],
+            ["add_column"] = ["table_name", "column_name", "data_type"],
+            ["remove_column"] = ["table_name", "column_name"],
+            ["set_entity_property"] = ["table_name"],
+            ["set_column_property"] = ["table_name", "column_name"],
+            ["add_relationship"] = ["source_table", "target_table", "relationship_type"],
+            ["remove_relationship"] = ["source_table", "target_table"],
+            ["set_primary_key"] = ["table_name", "columns"],
+            ["set_unique_constraint"] = ["table_name", "columns"],
+            ["remove_unique_constraint"] = ["table_name", "columns"],
+            ["set_query"] =
+            [
+                "table_name",
+                "query_name",
+                "returns",
+                "parameters[].name",
+                "order_by[].column",
+                "fields[].name",
+            ],
+            ["remove_query"] = ["table_name", "query_name"],
+        };
 }

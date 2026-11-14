@@ -92,11 +92,19 @@ public sealed class CodeGenToolArgumentShapeFuzzTests : IDisposable
             },
         };
 
+        // 必須の引数（手書き。file は FileParameterInjector が足す）
+        var required = new Dictionary<string, string[]>
+        {
+            ["generate_csharp"] = ["file", "out_dir"],
+            ["generate_ddl"] = ["file", "out_file"],
+        };
+
         var tools = baselines
             .Select(pair => new ToolArgumentShapeFuzzRunner.Tool(
                 pair.Key,
                 toolSet.Tools.Single(candidate => candidate.Name == pair.Key).InputSchema,
-                [("base", pair.Value)]
+                [("base", pair.Value)],
+                required[pair.Key]
             ))
             .ToList();
 

@@ -510,6 +510,30 @@ internal static partial class ConnectionDialogRows
                 }
             ),
             Row(
+                "edit-unreadable-uncheck-save-deletes-secret",
+                "読めないパスワードのプロファイルで「パスワードを保存」を外して保存すると、保存が通り、暗号ファイルが消え、プロファイルはパスワードを保存しない",
+                [(Unreadable, Edit)],
+                h =>
+                {
+                    var vm = CreateUnreadableSelected(h, out var id, out _);
+
+                    // 根拠：src/QuickER.Db.UI/DbConnectionDialogViewModel.cs:751-764（断るのは「保存」付きで空欄のときだけ）・
+                    // docs/database.ja.md の読めないパスワードの段落（入力し直すか「保存」のチェックを外してから保存）。
+                    // 暗号ファイルを消すのは利用者が保存をやめた操作で、組の不変条件 7 はこのプロファイルを例外として記録する
+                    h.Edit(vm, v => v.SavePassword = false);
+                    h.Save(vm);
+
+                    vm.StatusMessage.Should()
+                        .Be(string.Format(Strings.DbConnection_ProfileSaved, "本番DB"));
+                    File.Exists(h.SecretFile(id)).Should().BeFalse();
+                    h.Store.Read()
+                        .Profiles.Should()
+                        .ContainSingle()
+                        .Which.SavePassword.Should()
+                        .BeFalse();
+                }
+            ),
+            Row(
                 "delete-unreadable-confirmed-removes-profile-secret-and-mark",
                 "読めないパスワードのプロファイルを確認のうえ削除すると、プロファイルと暗号ファイルが消え、読めなかった印も消えて同名の保存が断られない",
                 [(Unreadable, Delete)],
