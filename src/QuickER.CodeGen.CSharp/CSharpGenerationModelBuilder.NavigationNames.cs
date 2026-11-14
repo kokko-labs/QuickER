@@ -61,9 +61,17 @@ internal sealed partial class CSharpGenerationModelBuilder
             if (
                 relationship.Type == RelationshipType.ManyToMany
                 || relationship.ColumnPairs.Count != 1
-                || !entitiesById.TryGetValue(relationship.SourceEntityId, out var source)
-                || !entitiesById.TryGetValue(relationship.TargetEntityId, out var target)
             )
+            {
+                continue;
+            }
+
+            if (!entitiesById.TryGetValue(relationship.SourceEntityId, out var source))
+            {
+                continue;
+            }
+
+            if (!entitiesById.TryGetValue(relationship.TargetEntityId, out var target))
             {
                 continue;
             }

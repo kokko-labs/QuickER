@@ -4,7 +4,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace QuickER.Tests.TestSupport.Guards;
 
-/// <summary>ソースの規則の表：ソースのテキストの横断の規則（見えない文字・英語ガードの CJK の範囲）</summary>
+/// <summary>ソースの規則の表：ソースのテキストの横断の規則（見えない文字・英語ガードの CJK の範囲・カルチャ・変異テストの Safe Mode）</summary>
 /// <remarks>
 /// tests を走査する規則が、このファイル自身の文字列を拾わないよう、目印の文字はすべて数値から作る（範囲は狭めない）。
 /// </remarks>
@@ -124,6 +124,28 @@ internal static partial class SourceRules
                     ),
                     41,
                     "正規表現を作る構文の中の文字列リテラル"
+                ),
+            },
+            // 変異テストの範囲のプロジェクトでは、早く抜ける if の条件の || の 2 つ目以降の項で宣言した out の変数と、条件のパターンの
+            // 変数（単独の is not { } x を含む）を if の後ろで使わない。Stryker が if の跳び（continue / break / return; / throw）を消す
+            // 変異で変数が確実に代入されなくなり（CS0165）、そのメソッドの変異を全部外す（Safe Mode）。項ごとに早く抜ける if に分けて
+            // out の呼び出しを 1 つ目の項にするか、初期化子つきの変数を null で判定するか、肯定形の then で使う
+            SourceRule.Forbid(
+                "mutation-safe-mode-jump-guards",
+                "変異テストの範囲で、早く抜ける if の || の 2 つ目以降の項の out の変数と条件のパターンの変数を if の後ろで使わない（跳びを消す変異が CS0165 になり、Stryker がそのメソッドの変異を全部外す）",
+                Src.Within("QuickER.Model")
+                    .Within("QuickER.Provider")
+                    .Within("QuickER.CodeGen.CSharp"),
+                GuardFinder.Nodes(SafeModeJumpGuards.Describe)
+            ) with
+            {
+                // 範囲が 8 つのプロジェクト（Model・Provider と 5 方言・CodeGen.CSharp）を読んでいること（いまは 186 ファイル）
+                MinimumFiles = 150,
+                // 候補（跳びで終わる if 文）を見つけていること（いまは 432）
+                Floor = new(
+                    GuardFinder.Nodes(SafeModeJumpGuards.DescribeCandidate),
+                    400,
+                    "跳びで終わる if 文"
                 ),
             },
         ];

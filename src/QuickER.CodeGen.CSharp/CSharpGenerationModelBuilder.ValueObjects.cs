@@ -206,10 +206,12 @@ internal sealed partial class CSharpGenerationModelBuilder
                     continue;
                 }
 
-                if (
-                    !_columnTypes.TryGetValue(parentId, out var parentType)
-                    || !_columnTypes.TryGetValue(childId, out var childType)
-                )
+                if (!_columnTypes.TryGetValue(parentId, out var parentType))
+                {
+                    continue;
+                }
+
+                if (!_columnTypes.TryGetValue(childId, out var childType))
                 {
                     continue;
                 }

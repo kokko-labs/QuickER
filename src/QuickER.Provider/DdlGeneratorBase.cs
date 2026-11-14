@@ -137,10 +137,12 @@ public abstract class DdlGeneratorBase : IDdlGenerator
         {
             // 1対多 / 1対1 とも、親 (Source) の PK を子 (Target) が外部キーとして参照する。
             // 参照先エンティティが解決できないリレーションは出力対象外とする
-            if (
-                !entitiesById.TryGetValue(rel.SourceEntityId, out var pkEntity)
-                || !entitiesById.TryGetValue(rel.TargetEntityId, out var fkEntity)
-            )
+            if (!entitiesById.TryGetValue(rel.SourceEntityId, out var pkEntity))
+            {
+                continue;
+            }
+
+            if (!entitiesById.TryGetValue(rel.TargetEntityId, out var fkEntity))
             {
                 continue;
             }

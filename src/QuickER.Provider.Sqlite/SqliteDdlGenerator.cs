@@ -395,10 +395,12 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
             }
 
             // 親（PK 側 = Source）・子（FK 保有 = Target）が解決できないリレーションはスキップする
-            if (
-                !entitiesById.TryGetValue(rel.SourceEntityId, out var pkEntity)
-                || !entitiesById.TryGetValue(rel.TargetEntityId, out var fkEntity)
-            )
+            if (!entitiesById.TryGetValue(rel.SourceEntityId, out var pkEntity))
+            {
+                continue;
+            }
+
+            if (!entitiesById.TryGetValue(rel.TargetEntityId, out var fkEntity))
             {
                 continue;
             }

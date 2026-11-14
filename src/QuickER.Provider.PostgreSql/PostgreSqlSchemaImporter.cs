@@ -568,10 +568,12 @@ ORDER BY c.relname COLLATE ""C"", a.attnum;";
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            if (
-                !SchemaTableEntry.TryGetExact(tables, reader.GetString(0), out var entry)
-                || !entry.TryGetColumnExact(reader.GetString(1), out var column)
-            )
+            if (!SchemaTableEntry.TryGetExact(tables, reader.GetString(0), out var entry))
+            {
+                continue;
+            }
+
+            if (!entry.TryGetColumnExact(reader.GetString(1), out var column))
             {
                 continue;
             }

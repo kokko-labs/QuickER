@@ -282,10 +282,12 @@ internal static class QueryConditionTypeChecker
         List<Violation> violations
     )
     {
-        if (
-            !TryBind(node.Column, columns, out var column)
-            || !TryResolveParameter(node.Parameter, parameters, out var element)
-        )
+        if (!TryBind(node.Column, columns, out var column))
+        {
+            return;
+        }
+
+        if (!TryResolveParameter(node.Parameter, parameters, out var element))
         {
             return;
         }

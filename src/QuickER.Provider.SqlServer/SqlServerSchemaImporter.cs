@@ -477,8 +477,13 @@ ORDER BY s.name COLLATE Latin1_General_BIN2, t.name COLLATE Latin1_General_BIN2,
                     tables,
                     TableKey(reader.GetString(0), reader.GetString(1)),
                     out var entry
-                ) || !entry.TryGetColumnExact(reader.GetString(2), out var column)
+                )
             )
+            {
+                continue;
+            }
+
+            if (!entry.TryGetColumnExact(reader.GetString(2), out var column))
             {
                 continue;
             }

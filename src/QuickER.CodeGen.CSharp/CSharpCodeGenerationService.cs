@@ -986,14 +986,30 @@ public sealed partial class CSharpCodeGenerationService
 
         foreach (var group in duplicates)
         {
-            if (
-                !entitiesById.TryGetValue(group.Key.SourceEntityId, out var parent)
-                || !entitiesById.TryGetValue(group.Key.TargetEntityId, out var child)
-                || parent.Columns.FirstOrDefault(column => column.Id == group.Key.SourceColumnId)
-                    is not { } parentColumn
-                || child.Columns.FirstOrDefault(column => column.Id == group.Key.TargetColumnId)
-                    is not { } childColumn
-            )
+            if (!entitiesById.TryGetValue(group.Key.SourceEntityId, out var parent))
+            {
+                continue;
+            }
+
+            if (!entitiesById.TryGetValue(group.Key.TargetEntityId, out var child))
+            {
+                continue;
+            }
+
+            var parentColumn = parent.Columns.FirstOrDefault(column =>
+                column.Id == group.Key.SourceColumnId
+            );
+
+            if (parentColumn is null)
+            {
+                continue;
+            }
+
+            var childColumn = child.Columns.FirstOrDefault(column =>
+                column.Id == group.Key.TargetColumnId
+            );
+
+            if (childColumn is null)
             {
                 continue;
             }
@@ -1759,23 +1775,21 @@ public sealed partial class CSharpCodeGenerationService
     )
     {
         if (
-            string.IsNullOrWhiteSpace(value)
-            || LayerDirectoryValidator.Check(value) is not { } violation
+            !string.IsNullOrWhiteSpace(value)
+            && LayerDirectoryValidator.Check(value) is { } violation
         )
         {
-            return;
-        }
-
-        diagnostics.Add(
-            GenerationDiagnostic.Error(
-                string.Format(
-                    Strings.CodeGen_Error_InvalidOutputSubdirectory,
-                    optionName,
-                    value.Trim(),
-                    PathSegments.Describe(violation, CultureInfo.CurrentUICulture)
+            diagnostics.Add(
+                GenerationDiagnostic.Error(
+                    string.Format(
+                        Strings.CodeGen_Error_InvalidOutputSubdirectory,
+                        optionName,
+                        value.Trim(),
+                        PathSegments.Describe(violation, CultureInfo.CurrentUICulture)
+                    )
                 )
-            )
-        );
+            );
+        }
     }
 
     /// <summary>

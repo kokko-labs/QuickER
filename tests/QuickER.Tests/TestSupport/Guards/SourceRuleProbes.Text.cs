@@ -1,6 +1,6 @@
 namespace QuickER.Tests.TestSupport.Guards;
 
-/// <summary>規則の自己検査の表：ソースのテキストの横断の規則（見えない文字・英語ガードの CJK の範囲）</summary>
+/// <summary>規則の自己検査の表：ソースのテキストの横断の規則（見えない文字・英語ガードの CJK の範囲・カルチャ・変異テストの Safe Mode）</summary>
 /// <remarks>
 /// このファイルも tests を走査する規則の範囲に入る。見えない文字は数値から作って連結し、CJK の範囲の写しは生文字列の中に
 /// エスケープの表記で書く（生文字列はエスケープを解かないので、このファイルのトークンの値には範囲の文字が現れない）。
@@ -135,5 +135,209 @@ internal static partial class SourceRuleProbes
                     ),
                 ]
             ),
+            // || の 2 つ目以降の項の out の宣言と、条件のどこかのパターンの変数（単独の is not { } を含む）を if の後ろで読む
+            // 早く抜ける if を、continue・break・return;・throw・本体の最後の跳びで拾い、1 つ目の項の out の宣言・値を返す return・
+            // 後ろで読まない・肯定形の && の then・項ごとの if・初期化子つきの変数の null の判定・ラムダの中の宣言・ブロックでない
+            // 親は拾わない
+            new SourceRuleProbe(
+                "mutation-safe-mode-jump-guards-forms",
+                "mutation-safe-mode-jump-guards",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System;
+                        using System.Collections.Generic;
+                        using System.Linq;
+
+                        internal static class Probe
+                        {
+                            public static void OutSecond(Dictionary<int, string> map, int[] keys)
+                            {
+                                foreach (var key in keys)
+                                {
+                                    if (key < 0 || !map.TryGetValue(key, out var value))
+                                    {
+                                        continue;
+                                    }
+
+                                    Console.WriteLine(value);
+                                }
+                            }
+
+                            public static void PatternSecond(string? text, object? other)
+                            {
+                                if (text is null || other is not string found)
+                                {
+                                    return;
+                                }
+
+                                Console.WriteLine(found);
+                            }
+
+                            public static string Throws(Dictionary<int, string> map, int? key)
+                            {
+                                if (key is not { } id || !map.TryGetValue(id, out var value))
+                                {
+                                    throw new InvalidOperationException("missing");
+                                }
+
+                                return value;
+                            }
+
+                            public static void BreaksAfterWork(Dictionary<int, string> map, int[] keys, List<int> missed)
+                            {
+                                while (true)
+                                {
+                                    if (keys.Length == 0 || !map.TryGetValue(keys[0], out var value))
+                                    {
+                                        missed.Add(keys.Length);
+                                        break;
+                                    }
+
+                                    Console.WriteLine(value);
+                                }
+                            }
+
+                            public static void PatternOnly(Dictionary<int, string> map, int[] keys)
+                            {
+                                foreach (var key in keys)
+                                {
+                                    if (map.GetValueOrDefault(key) is not { } value)
+                                    {
+                                        continue;
+                                    }
+
+                                    Console.WriteLine(value);
+                                }
+                            }
+
+                            public static void NullCheck(Dictionary<int, string> map, int key)
+                            {
+                                var value = map.GetValueOrDefault(key);
+
+                                if (value is null)
+                                {
+                                    return;
+                                }
+
+                                Console.WriteLine(value);
+                            }
+
+                            public static void FirstOperand(Dictionary<int, string> map, int key)
+                            {
+                                if (!map.TryGetValue(key, out var value) || value.Length == 0)
+                                {
+                                    return;
+                                }
+
+                                Console.WriteLine(value);
+                            }
+
+                            public static string? ValueReturn(Dictionary<int, string> map, int key)
+                            {
+                                if (key < 0 || !map.TryGetValue(key, out var value))
+                                {
+                                    return null;
+                                }
+
+                                return value;
+                            }
+
+                            public static void NotReadAfter(Dictionary<int, string> map, int key)
+                            {
+                                if (key < 0 || !map.TryGetValue(key, out var value) || value.Length == 0)
+                                {
+                                    return;
+                                }
+
+                                Console.WriteLine(key);
+                            }
+
+                            public static void Positive(Dictionary<int, string> map, int key)
+                            {
+                                if (key >= 0 && map.TryGetValue(key, out var value))
+                                {
+                                    Console.WriteLine(value);
+                                    return;
+                                }
+
+                                Console.WriteLine(key);
+                            }
+
+                            public static void Split(Dictionary<int, string> map, int key)
+                            {
+                                if (key < 0)
+                                {
+                                    return;
+                                }
+
+                                if (!map.TryGetValue(key, out var value))
+                                {
+                                    return;
+                                }
+
+                                Console.WriteLine(value);
+                            }
+
+                            public static void InLambda(List<string> items, string value)
+                            {
+                                if (items.Count == 0 || items.Any(item => item is { Length: > 0 } value))
+                                {
+                                    return;
+                                }
+
+                                Console.WriteLine(value);
+                            }
+
+                            public static void NotInBlock(Dictionary<int, string> map, int key, bool flag)
+                            {
+                                if (flag)
+                                    if (key < 0 || !map.TryGetValue(key, out var value))
+                                        return;
+                            }
+                        }
+                        """,
+                        "OutSecond",
+                        "PatternSecond",
+                        "Throws",
+                        "BreaksAfterWork",
+                        "PatternOnly"
+                    ),
+                ]
+            ),
+            // 条件コンパイルの外れる分岐の中の早く抜ける if も拾う
+            new SourceRuleProbe(
+                "mutation-safe-mode-jump-guards-inactive-branch",
+                "mutation-safe-mode-jump-guards",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System;
+                        using System.Collections.Generic;
+
+                        internal static class Probe
+                        {
+                        #if QUICKER_PROBE_NEVER
+                            public static void Hidden(Dictionary<int, string> map, int key)
+                            {
+                                if (key < 0 || !map.TryGetValue(key, out var value))
+                                {
+                                    return;
+                                }
+
+                                Console.WriteLine(value);
+                            }
+                        #endif
+                        }
+                        """,
+                        "Hidden"
+                    ),
+                ]
+            )
+            {
+                InactiveBranch = true,
+            },
         ];
 }
