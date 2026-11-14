@@ -387,7 +387,8 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowCreateNewFile));
         OnPropertyChanged(nameof(ShowServerFields));
 
-        // SQLite 以外へ切り替えると「新規作成」ボタンは実行不可になるため CanExecute を再評価する
+        // SQLite 以外へ切り替えると「参照」「新規作成」ボタンは実行不可になるため CanExecute を再評価する
+        BrowseFileCommand.NotifyCanExecuteChanged();
         BrowseNewFileCommand.NotifyCanExecuteChanged();
     }
 
@@ -1051,8 +1052,11 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         StatusMessage = string.Format(Strings.DbConnection_ProfileDeleted, name);
     }
 
+    /// <summary>「参照」ボタンを実行できるか（ファイルのパスの欄が出ている＝SQLite 選択時）</summary>
+    private bool CanBrowseFile() => ShowFilePath;
+
     /// <summary>ファイル選択ダイアログで SQLite のデータベースファイルを選ぶ（取込専用のため既存ファイルのみ）</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanBrowseFile))]
     private void BrowseFile()
     {
         var picked = _files.PickOpenFile(Strings.DbConnection_SqliteFileFilter);

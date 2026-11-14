@@ -58,7 +58,7 @@ internal enum ConnectionDialects
 /// <item>接続テストの実行中は OK で確定できない（:326・:910。:633-636 で戻す）。行の終わりには接続テストが終わっている。</item>
 /// <item>取り消せない上書き・削除は警告つきの確認（ConfirmWarning）だけで聞き、通常の確認・詳細つきの確認は使わない（:730-740・:835-840）。削除は選択中のプロファイルがあれば必ず確認する。</item>
 /// <item>プロファイルの保存・名前の変更・削除の後と行の終わりに、一覧（DBMS・名前・接続先）はディスクの実体どおり（同期モードは固定した方言の分。読めないときは読めるようになってから見る）。ただし VM が一覧を読めなかったと言っている間（AreProfilesUnavailable）は、一覧も選択も空で、ステータス行がそれを知らせている（ProfilesUnavailable か、保存の中止の ProfileStoreUnavailable）。失敗は例外を外へ出さない（中止 :701-707・:794-799・:852-857 は何も書かず、書き込みの失敗 :708-712・:800-804・:858-864 は一覧を読み直す :475-480）。</item>
-/// <item>読めない保存済みパスワードの暗号ファイルを失わない：プロファイルが残る限り、暗号ファイルは元のバイト列のままか、入力し直したパスワードで書き直されている（:679-688・:789-792）。</item>
+/// <item>読めない保存済みパスワードの暗号ファイルを失わない：プロファイルが残る限り、暗号ファイルは元のバイト列のままか、入力し直したパスワードで書き直されている（:679-688・:789-792）。例外は、利用者が「パスワードを保存」を外して保存したプロファイル（手の前の入力で記録する。断りの文と docs/database.ja.md が案内する、保存をやめる操作）。</item>
 /// <item>保存・名前の変更の直後も入力欄（接続先・認証・パスワード・ファイル・タイムアウト・方言）を保存値で塗り直さない（:483-497・:714-718・:816-818）。</item>
 /// <item>一覧のプロファイルは（DBMS, 名前）で大文字小文字を無視して一意で、行の終わりにはディスクのプロファイルも同じく一意（:664-674・:771-777）。</item>
 /// <item>SQLite の新規作成で選んだファイルは、OK で確定するまで作られない（:896-907・:940-967）。</item>
@@ -66,8 +66,9 @@ internal enum ConnectionDialects
 /// <item>SQLite の新規作成で作ったファイルを、作った後に誰も掴んでいない（:952-957 の <c>SqliteDatabaseFile.CreateEmpty</c> はプールしない接続で作る＝src/QuickER.Provider.Sqlite/SqliteFileConnections.cs）。掴んでいると、作った直後に利用者がファイルを移動・削除できない。排他で開けるかで見る。</item>
 /// <item>選択を付け替えた手の後、選択中のプロファイルがあれば、保存名の欄はその名前（選んだプロファイルが入力欄に当たった。:526-578）。同じ項目の選び直し（セッターが何もしない）は対象外。食い違うと、名前の変更・削除が入力欄に出ていないプロファイルに効く。</item>
 /// <item>開いた直後、connections.json が壊れていれば（ストアの分類 Corrupt＝JSON として読めない・旧配列形式）、一覧も選択も空で、ステータス行が壊れていること・ファイルの場所・最初に壊れていたファイルの写しの場所を知らせている（ProfilesCorrupt。ReloadProfiles）。読めない一覧を「保存されたものが無い」と同じ空として黙って出さない。</item>
+/// <item>参照・新規作成のコマンドは、画面でボタンが出ているときだけ実行できる（参照は ShowFilePath＝SQLite・新規作成は ShowCreateNewFile。CanBrowseFile・CanBrowseNewFile）。ボタンが出ていないのに実行できると、画面に出ていない方言の接続設定にファイルのパスを書く。</item>
 /// </list>
-/// 3・4 は VM の変更通知でも見張り、1・2・3・5・8〜12 は手の後に、6 は保存・名前の変更・削除の後と行の終わりに、7・9・12 は行の終わりに、13 は選択の手の後に、14 は開いた直後に見る。
+/// 3・4 は VM の変更通知でも見張り、1・2・3・5・8〜12・15 は手の後に、6 は保存・名前の変更・削除の後と行の終わりに、7・9・12 は行の終わりに、13 は選択の手の後に、14 は開いた直後に見る。
 /// </remarks>
 internal sealed class ConnectionDialogHarness : IDisposable
 {
@@ -80,6 +81,7 @@ internal sealed class ConnectionDialogHarness : IDisposable
     private readonly HashSet<DbConnectionDialogViewModel> _confirmed = [];
     private readonly List<string> _newFilePaths = [];
     private readonly List<(Guid Id, byte[] Bytes)> _corruptedSecrets = [];
+    private readonly HashSet<Guid> _passwordSaveDeclined = [];
     private readonly List<Task> _tests = [];
     private SqlConnectionProfileStore? _store;
     private bool _dpapi;
@@ -331,6 +333,7 @@ internal sealed class ConnectionDialogHarness : IDisposable
     public void Save(DbConnectionDialogViewModel vm)
     {
         var fields = Fields(vm);
+        RecordDeclinedPasswordSave(vm);
         vm.SaveProfileCommand.Execute(null);
         CheckFieldsKept(vm, fields, "保存");
         CheckListMatchesDisk(vm, "保存");
@@ -403,10 +406,14 @@ internal sealed class ConnectionDialogHarness : IDisposable
         return new RunningTest(gate, run);
     }
 
-    /// <summary>参照（既存ファイル）のコマンドを実行する</summary>
+    /// <summary>参照（既存ファイル）のコマンドを実行する（実行できるときだけ＝画面でボタンが出ているときだけ押せるのと同じ）</summary>
     public void BrowseFile(DbConnectionDialogViewModel vm)
     {
-        vm.BrowseFileCommand.Execute(null);
+        if (vm.BrowseFileCommand.CanExecute(null))
+        {
+            vm.BrowseFileCommand.Execute(null);
+        }
+
         After(vm, "参照");
     }
 
@@ -664,7 +671,7 @@ internal sealed class ConnectionDialogHarness : IDisposable
         }
     }
 
-    /// <summary>どの手の後にも見る不変条件（3・4・5・9・10・11）</summary>
+    /// <summary>どの手の後にも見る不変条件（3・4・5・9・10・11・15）</summary>
     private void After(DbConnectionDialogViewModel vm, string op, bool errorsAllowed = false)
     {
         if (_fixedDialect.ContainsKey(vm) && vm.CanSelectDbms)
@@ -677,6 +684,7 @@ internal sealed class ConnectionDialogHarness : IDisposable
         CheckBusy(vm, op);
         CheckNoPlainConfirm();
         CheckUnique(vm, op);
+        CheckFileButtons(vm, op);
 
         if (!_confirmed.Contains(vm))
         {
@@ -703,6 +711,24 @@ internal sealed class ConnectionDialogHarness : IDisposable
         if (vm.IsBusy && vm.OkCommand.CanExecute(null))
         {
             Violate($"不変条件 4：接続テストの実行中に OK で確定できる（{when}）");
+        }
+    }
+
+    /// <summary>不変条件 15（参照・新規作成のコマンドは、画面でボタンが出ているときだけ実行できる）</summary>
+    private void CheckFileButtons(DbConnectionDialogViewModel vm, string when)
+    {
+        if (vm.BrowseFileCommand.CanExecute(null) != vm.ShowFilePath)
+        {
+            Violate(
+                $"不変条件 15：参照のコマンドの実行可否 {vm.BrowseFileCommand.CanExecute(null)} がボタンの表示 {vm.ShowFilePath} と違う（{when}の後）"
+            );
+        }
+
+        if (vm.BrowseNewFileCommand.CanExecute(null) != vm.ShowCreateNewFile)
+        {
+            Violate(
+                $"不変条件 15：新規作成のコマンドの実行可否 {vm.BrowseNewFileCommand.CanExecute(null)} がボタンの表示 {vm.ShowCreateNewFile} と違う（{when}の後）"
+            );
         }
     }
 
@@ -871,14 +897,49 @@ internal sealed class ConnectionDialogHarness : IDisposable
         }
     }
 
-    /// <summary>不変条件 7（読めない暗号ファイルを失わない）</summary>
+    /// <summary>
+    /// 不変条件 7 の例外の記録：「パスワードを保存」を外したまま保存する手が上書きする、読めない暗号ファイルのプロファイルの Id
+    /// </summary>
+    /// <remarks>
+    /// 利用者が保存をやめた操作なので、暗号ファイルを消すのは文書どおり（docs/database.ja.md の読めないパスワードの段落・
+    /// 断りの文 DbConnection_SaveRefusedPasswordUnreadable）。手の前の VM の入力（チェックの状態・方言・保存名）で決め、
+    /// 保存後のディスクの SavePassword は見ない（空欄のまま「保存」付きで上書きしても、ストアの正規化が SavePassword を偽へ倒すため）。
+    /// </remarks>
+    private void RecordDeclinedPasswordSave(DbConnectionDialogViewModel vm)
+    {
+        if (vm.SavePassword || string.IsNullOrWhiteSpace(vm.ProfileName))
+        {
+            return;
+        }
+
+        var name = vm.ProfileName.Trim();
+
+        // 上書き先は（DBMS, 名前）の大文字小文字を無視した一致（製品の SqlConnectionProfile.HasEntryKey は internal）
+        foreach (var item in vm.Profiles)
+        {
+            if (
+                string.Equals(
+                    item.Profile.Dbms,
+                    vm.SelectedProvider.Name,
+                    StringComparison.OrdinalIgnoreCase
+                )
+                && string.Equals(item.Profile.Name, name, StringComparison.OrdinalIgnoreCase)
+                && _corruptedSecrets.Any(secret => secret.Id == item.Profile.Id)
+            )
+            {
+                _passwordSaveDeclined.Add(item.Profile.Id);
+            }
+        }
+    }
+
+    /// <summary>不変条件 7（読めない暗号ファイルを失わない。利用者が「パスワードを保存」を外して保存したプロファイルを除く）</summary>
     private void CheckCorruptedSecretsKept()
     {
         var profiles = Store.Read().Profiles;
 
         foreach (var (id, bytes) in _corruptedSecrets)
         {
-            if (!profiles.Any(profile => profile.Id == id))
+            if (!profiles.Any(profile => profile.Id == id) || _passwordSaveDeclined.Contains(id))
             {
                 continue;
             }

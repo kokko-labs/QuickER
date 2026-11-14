@@ -147,7 +147,7 @@
    - 使うのは `ToolScenarioTests`（`OpenAligned`＝GUI も 5 方言のレジストリと画面を出さないダイアログで行の方言の図を開き、開けなければ例外・`ToolHostSession.WroteDiagram`＝GUI は Undo の世代と未保存の状態・File はファイルのバイトと、呼び出しの前に過去の固定の値へ戻した更新日時で「図を書いたか」を見る＝同じ内容の書き直しも書いたとみなす）・`NameIdentityToolFuzzTests`・`ErDiagramToolHostParityTests`・`ConstraintNameCreationPathTests`。Parity は 2 つのホストを同時に持って 1 手ずつ比べる。CNCP は DDL と同じ名前を独立の期待値として照合する。ホストどうしを比べるだけでは両方が同時に退行しても緑のままなので、作成経路の照合を Parity へ載せない。
    - `TestSupport/ToolHostAxisGuardTests` は、`ToolHostKind` を引数に取る Theory を反射で集め、ほかの引数の組ごとに軸の全ホストの行（InlineData・MemberData・ClassData）があることを照合する。
    - 前提の図ファイルは `TestSupport/DiagramFiles.Create`（WPF 非依存・create_diagram を実行して成功を表明する）で作る。create_diagram そのものを確かめるテストは使わない。
-3. 引数の形の総当たり：`TestSupport/ToolArgumentShapeFuzzRunner`（WPF 非依存）。順は「ベースライン → 崩したケース → `KnownCaseLedger` → 3 つの表明 → 台帳の古い項目 → 網羅の計数 → 最低件数」。3 つの入口は `Entrance` の抽象メンバーだけを渡す。
+3. 引数の形の総当たり：`TestSupport/ToolArgumentShapeFuzzRunner`（WPF 非依存）。順は「スキーマの必須と手書きの必須の一覧の照合 → ベースライン → 崩したケース → `KnownCaseLedger` → 3 つの表明 → 台帳の古い項目 → 網羅の計数 → 最低件数」。3 つの入口は `Entrance` の抽象メンバーと、ツールごとの手書きの必須の一覧（`Tool.Required`。崩す元と入口の検査が同じスキーマを読む同語反復を破る＝`src/QuickER.Mcp/CLAUDE.md`「ツールの引数の形の検査」）だけを渡す。
 4. ツール定義の英語のガード：`PhraseTests`（英語の行 `tool-definitions-*`＝ツール定義の出どころごとの行。文言の表 `TestSupport/Guards/EnglishTextRows.Mcp.cs`）。
 5. 生成オプション・設定のキー：`TestSupport/OptionKeys`（`Writable` / `IsWritable`＝公開の setter か init を持つ公開のインスタンスのプロパティ）。設定 JSON の照合・CLI のフラグ表・GUI の設定の照合と、因子の棚卸しの `CodeGenerationOptions` の軸が使う。
 6. テストの一時フォルダ：`TestSupport/TestTempFolder`（TEMP 直下の固定名の親フォルダ＝`TestTempFolder.Root` の下に guid の名前のフォルダを作り、破棄で中身ごと消す。消せないときは黙って残す）。Integration も同じ 1 ファイルを Compile リンクで使う。

@@ -41,6 +41,7 @@ public sealed class ChatToolArgumentShapeFuzzTests
     public void MalformedArguments_AreRefusedWithoutSideEffects()
     {
         var baselines = ToolArgumentFuzzSeed.CatalogBaselines();
+        var required = ToolArgumentFuzzSeed.CatalogRequired();
         var tools = ErDiagramToolCatalog.GetDefinitions();
 
         tools
@@ -54,7 +55,8 @@ public sealed class ChatToolArgumentShapeFuzzTests
                     .Select(tool => new ToolArgumentShapeFuzzRunner.Tool(
                         tool.Name,
                         tool.InputSchema,
-                        baselines[tool.Name]
+                        baselines[tool.Name],
+                        required[tool.Name]
                     ))
                     .ToList()
             )

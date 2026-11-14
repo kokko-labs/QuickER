@@ -355,6 +355,31 @@ internal static class ToolArgumentFuzz
         string expectedType
     ) => expectedType.Length == 0 ? null : new(kind, path, expectedType);
 
+    /// <summary>
+    /// スキーマの必須の引数（ツールの引数の <c>required</c> と、オブジェクトの配列の要素の <c>required</c> を
+    /// <c>{引数}[].{名前}</c> と書いたもの。手書きの必須の一覧と照合する）
+    /// </summary>
+    /// <param name="schema">ツールの入力スキーマ</param>
+    public static HashSet<string> RequiredPaths(JsonObject schema)
+    {
+        var paths = RequiredNames(schema);
+        var properties = schema["properties"] as JsonObject ?? [];
+
+        foreach (var (name, node) in properties)
+        {
+            if (
+                node is JsonObject propertySchema
+                && TypeOf(propertySchema) == "array"
+                && propertySchema["items"] is JsonObject items
+            )
+            {
+                paths.UnionWith(RequiredNames(items).Select(inner => $"{name}[].{inner}"));
+            }
+        }
+
+        return paths;
+    }
+
     /// <summary>スキーマの <c>required</c> の名前</summary>
     private static HashSet<string> RequiredNames(JsonObject schema) =>
         schema["required"] is JsonArray required
