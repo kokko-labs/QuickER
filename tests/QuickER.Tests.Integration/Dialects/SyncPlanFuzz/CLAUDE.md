@@ -190,10 +190,11 @@
   - 決定的な行は回帰の網で、選び方を行の述語で決める。
   - 網羅の行は変更の種類と差分の選び方の組を実際に流すための行で、選び方を本物の 5 通りの意味のまま強制する。包み `SelectionOverrideCase`、選び方の本体は生成器の `Select` から切り出した `SyncPlanFuzzGenerator.ApplySelection`（引く順と回数は同じなので、選んだ項目まで含む種の指紋は 5 方言とも不変）。
 - 形は 2 つ。
-  - 種の行：実 DB の種 N の DB と変更をそのまま使い、選び方だけを強制する。選び方は 1 ケースの最後に引く乱数なので DB と変更は種 N と同じ。実 DB でだけ流す。MySQL 22 行・SQL Server 32 行。夜間の種の数で `QUICKER_SYNC_FUZZ_LOG` 付きで流した記録から、欠けを多く埋める種を貪欲に選んだ。種の番号と埋める組は行の表に書く。自由な変数が種で次元表の因子でないので `CoveringArray` は使わない。
+  - 種の行：実 DB の種 N の DB と変更をそのまま使い、選び方だけを強制する。選び方は 1 ケースの最後に引く乱数なので DB と変更は種 N と同じ。実 DB でだけ流す。MySQL 22 行・SQL Server 32 行・PostgreSQL 17 行・Oracle 21 行。夜間の種の数（Oracle は 300 種）で `QUICKER_SYNC_FUZZ_LOG` 付きで流した記録から、欠けを多く埋める種を貪欲に選んだ。種の番号と埋める組は行の表に書く。自由な変数が種で次元表の因子でないので `CoveringArray` は使わない。
     - 制約の形の水準（6 本目の乱数の列）で形が変わった SQL Server の 2 行（種 120・537）と MySQL の 1 行（種 544 の respell type）は、水準を足した後の夜間の種の数の記録から選び直した（SQL Server は種 639 の All と、1 つの種で両方を出す種が無いので種 113・149 の Single に分け、MySQL は種 153 の Default を足した）。同じ水準で普段の種から欠けた組（SQL Server 1 組・MySQL 2 組）は、同じ記録から種 112（SQL Server）と種 196（MySQL）の行を足して埋める。
     - 属性の形の水準（8 本目の乱数の列）で形が変わった MySQL の 1 行（種 925 の Default）は、水準を足した後の夜間の種の数の記録から選び直した（1 つの種で 3 組を出す種が無いので種 32 と種 38 に分けた）。同じ水準で普段の種から欠けた組（SQL Server 3 組＝新しい変更の種類 `set description` の Default を含む）は、同じ記録から種 6・種 5 の行を足して埋める。
     - SQL Server の 2 行（種 56）と MySQL の 1 行（種 16）は、生成器に水準を足して普段の種のケースが変わり、普段の種から欠けた組（SQL Server 3 組・MySQL 1 組）を埋める行（水準を足した後の普段の種の記録から選んだ。今の生成器のまま流す）。水準を足しても既存の種の行は崩れなかった。
+    - PostgreSQL 17 行・Oracle 21 行は、普段の数を 100・60 にしたときに欠ける組（PostgreSQL 36 組・Oracle 50 組）を埋める（2026-11-14 の実 DB の 600 種・300 種の記録から、選び方ごとに欠ける変更の種類を最も少ない種で覆うように選んだ）。Oracle の同じ組の外部キー 2 本・同じ列の並びの一意制約 2 つの変更の種類（20 組）は DB の事実で作れないので、行で埋めずに受け入れの欠けとして一覧に載せる。
   - 手で書いた行：SQL Server の参照アクションの変更。互いに独立した親子 8 組の ON DELETE / ON UPDATE を NO ACTION・CASCADE・SET NULL・SET DEFAULT へ変える形 × 選び方 5 通り。生成器は SQL Server で参照アクションを変えない（`AllowCascade` が偽）。実 DB と網の両方で流す。
     - 子の列が NOT NULL の親子 2 組ずつを SET NULL・SET DEFAULT へ変える行（接尾辞 `fk-actions-not-null-child-set-null`・`fk-actions-not-null-child-set-default`・選び方 5 通り）を別に持つ。SET NULL は計画が外して名指しし（`SetNullRequiresNullableChildColumn`）、SET DEFAULT は列の DEFAULT 制約が要ると計画が警告して DB が断る（`SetDefaultRequiresColumnDefault`）。NULL を許す組と同じ行に入れると、断られる SET DEFAULT の巻き戻しがほかの組の適用まで消すので行を分ける。SET NULL と SET DEFAULT も行を分ける（同じ行だと SET NULL の警告が SET DEFAULT の失敗の予告に数えられ、SET DEFAULT の警告を外しても表明 1 が赤にならなかった）。生成器の行の水準 `set-null-child-not-null`・`set-default-not-null-child` の SQL Server の分を受け持つ。
 - 網羅しない組の一覧に残るのは受け入れ（製品・DB の事実）だけ。
@@ -285,8 +286,9 @@
 
 ### 照合のまとめ方
 
-- 必須の形の表明は、普段の既定の種の数が 50 以上の方言（SQLite・MySQL・SQL Server）と、形の種を宣言した方言（PostgreSQL・Oracle）で行う（門は `SyncPlanShapeSeeds.AssertsRequiredShapes`）。網羅しない組の照合は、普段の既定の種の数が 50 以上の方言だけで行う（夜間に種が増えた PostgreSQL・Oracle では行わない）。
-  - 形の種（派生の `ShapeSeeds`）は、普段の種の範囲の外で、普段の種に出ない実 DB の必須の形を出す種と、出すはずの形の組。PostgreSQL は種 43（`fk-on-unique`）、Oracle は種 6・32・102（`drop-pk-column-alone`・`symbol-name`・`case-only-name`・`same-column-two-fks`・`drop-unique-member-alone`）。普段の数を増やさず決定的に掛けるために置いた（2026-11-13 の測定で、普段の 15 種・4 種ではこれらの形が出ず、夜間の 600 種・120 種では出た。Oracle の 2 つの形は 120 種で 2 回だけなので、乱数の種だけの表明を夜間に足していない）。
+- 必須の形の表明と網羅しない組の照合は、普段の既定の種の数が 50 以上の方言で行う（門は `SyncPlanShapeSeeds.AssertsRequiredShapes` と `checksGaps`）。5 方言とも普段の数が 50 以上（SQLite 2000・MySQL 150・SQL Server 100・PostgreSQL 100・Oracle 60）で、`SyncPlanShapeSeedGuardTests.DialectsWithManyRegularSeeds_DeclareNoShapeSeeds` がどの方言も既定の数で表明することを固定する。
+  - PostgreSQL・Oracle の普段の数は、2026-11-14 の実 DB の測定（PostgreSQL 600 種 1 分・Oracle 300 種 3 分 40 秒。どちらも決定的な行を含む）から決めた。PostgreSQL は 1 種が約 50 ms なので 100、Oracle は 1 種が PostgreSQL の数倍なので門を少し超える 60 にとどめ、欠ける組を網羅の行で埋める。Oracle の夜間の 120 種は普段の 60 種以上のまま（同じ測定の 300 種で、夜間の範囲の外の種 221 が生成器の穴＝計算列が参照する列を広げる形を見つけ、生成器を直した）。
+  - 形の種（派生の `ShapeSeeds`）は、普段の種の範囲の外で、普段の種に出ない実 DB の必須の形を出す種と、出すはずの形の組。今は Oracle の種 102（`drop-unique-member-alone`。同じ測定の 300 種で初めて出るのが種 102）だけ。PostgreSQL は必須の形が 43 種までに全部出るので持たない（2026-11-13 に普段の 15 種・4 種で置いた PostgreSQL の種 43・Oracle の種 6・32 は、普段の数を増やして範囲の中に入ったので外した）。
   - 単独の種でない実行は、流した種の範囲に無い形の種を乱数の種の後に流し（`SyncPlanShapeSeeds.ToRun`）、結果を普通の種と同じく既知の失敗の照合へ渡し、必須の形の表明の対象に足す。夜間は形の種が種の範囲に入るので重ねて流さない。単独の種の実行では流さず、照合もしない。
   - 形の種は種の指紋の記録の外にあるので、形の種が宣言した形を出さない（流れなかったものも含む）と、種の数に依らず `SyncPlanShapeSeeds.Problems` が種を名指しして赤にする。門と流し方は `SyncPlanShapeSeedGuardTests`（DB なし）が単独の種・既定・明示の数・夜間の指定ごとに固定する。mutation 実証済み（生成器が `fk-on-unique`・`symbol-name` を作らない・形の種をずらす）。
   - 選び直し：生成器を変えて形の種が形を出さなくなったら、その方言を夜間の種の数で `QUICKER_SYNC_FUZZ_LOG` 付きで流して種ごとの形（記録の `shapes:` の行）を読み、普段の種に欠ける形を出す種を普段の種の範囲の外から貪欲に選び直して `ShapeSeeds` を書き換える。普段の種に新しく欠ける形が出たときも同じ手順で足す。

@@ -15,10 +15,8 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 /// （<see cref="MutationKinds"/>）で決め、知らない頭は文の頭の語をそのまま水準にする＝宣言していない水準として観測が断る。
 /// </para>
 /// <para>
-/// 範囲は方言の名前。網羅しない組の照合は、既定の種の数で、種が <c>ShapeCoverageMinimumSeeds</c>（50）以上の方言だけで
-/// 行う（必須の形の表明と同じ条件＝SQLite 2000・MySQL 150・SQL Server 100）。PostgreSQL（既定 15 種）と Oracle（既定 4 種）
-/// は観測と要約だけにする。種が少なく欠けが種の引き方の偶然で決まるうえ、Oracle は <c>QUICKER_SYNC_FUZZ_ORACLE=1</c> で
-/// 既定の数そのものが 4 から 30 に変わり（<see cref="SeedPlan.IsDefaultCount"/> は真のまま）、一覧が環境で入れ替わるため。
+/// 範囲は方言の名前。網羅しない組の照合は、既定の種の数で、普段の既定の種の数が <c>ShapeCoverageMinimumSeeds</c>（50）以上の
+/// 方言で行う（5 方言とも＝SQLite 2000・MySQL 150・SQL Server 100・PostgreSQL 100・Oracle 60）。
 /// </para>
 /// </remarks>
 internal static class SyncPlanFuzzDimensions
@@ -108,7 +106,7 @@ internal static class SyncPlanFuzzDimensions
             ]
         );
 
-    /// <summary>網羅しない組の一覧（範囲は方言の名前＝sqlite・mysql・sqlserver）</summary>
+    /// <summary>網羅しない組の一覧（範囲は方言の名前）</summary>
     /// <remarks>
     /// 載せるのは受け入れ（製品か DB の事実）だけ。既定の種の並びで欠ける変更の種類と選び方の組は、網羅の行
     /// （<see cref="SyncPlanCoverageRows"/>）が種の前に流して埋める（網羅の行は既定の種の並びに合わせて選んだので、生成器を変えて
@@ -141,8 +139,31 @@ internal static class SyncPlanFuzzDimensions
                     "drop one of duplicated uniques",
                     "SQLite は同じ列の並びの UNIQUE 制約を 1 つの索引にまとめ（DB の事実）、製品は名前の無い制約を同じ列集合の DB の制約で満たされるとみなす（製品の事実）ので、同じ列の並びの一意制約 2 つの形が無い"
                 ),
-                // SQL Server の参照アクションの変更（生成器が作らない＝AllowCascade が偽）と、MySQL・SQL Server の変更の種類と
-                // 選び方の組で既定の種の並びに出ないもの（出にくい変更 × 選び方）は、網羅の行（SyncPlanCoverageRows）が埋める
+                // Oracle の DB は同じ定義の外部キー 2 本・同じ列の並びの一意制約 2 つを持てないので、生成器はその形を作らない
+                // （SyncPlanFuzzDialect.AllowDuplicateForeignKeys・AllowDuplicateUniqueConstraints が偽）。2026-11-14 の実 DB の
+                // 300 種の記録で 4 つの変更の種類はどれも 0 回
+                MissingMutationGap(
+                    "oracle",
+                    "alter type duplicated fk",
+                    "Oracle は同じ定義（子の表・親の表・列の組）の外部キーを 2 本持てない（DB の事実＝ORA-02275・生成器の宣言 AllowDuplicateForeignKeys が偽）ので、同じ列ペアの外部キー 2 本の形が無い"
+                ),
+                MissingMutationGap(
+                    "oracle",
+                    "drop one of duplicated fks",
+                    "Oracle は同じ定義（子の表・親の表・列の組）の外部キーを 2 本持てない（DB の事実＝ORA-02275・生成器の宣言 AllowDuplicateForeignKeys が偽）ので、同じ列ペアの外部キー 2 本の形が無い"
+                ),
+                MissingMutationGap(
+                    "oracle",
+                    "alter type duplicated unique",
+                    "Oracle は同じ列の並びに一意制約を 2 つ張れない（DB の事実＝ORA-02261・生成器の宣言 AllowDuplicateUniqueConstraints が偽）ので、同じ列の並びの一意制約 2 つの形が無い"
+                ),
+                MissingMutationGap(
+                    "oracle",
+                    "drop one of duplicated uniques",
+                    "Oracle は同じ列の並びに一意制約を 2 つ張れない（DB の事実＝ORA-02261・生成器の宣言 AllowDuplicateUniqueConstraints が偽）ので、同じ列の並びの一意制約 2 つの形が無い"
+                ),
+                // SQL Server の参照アクションの変更（生成器が作らない＝AllowCascade が偽）と、MySQL・SQL Server・PostgreSQL・Oracle の
+                // 変更の種類と選び方の組で既定の種の並びに出ないもの（出にくい変更 × 選び方）は、網羅の行（SyncPlanCoverageRows）が埋める
             ]
         );
 

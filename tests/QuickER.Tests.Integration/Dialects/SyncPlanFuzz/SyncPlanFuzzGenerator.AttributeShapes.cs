@@ -300,9 +300,13 @@ internal sealed partial class SyncPlanFuzzGenerator
     }
 
     /// <summary>
-    /// 既定値のある列の型を広げる（半々。目標の図でまだ型を変えていない列だけ）：整数は 64 ビット整数へ、文字列は長さを 20 足すか方言の上限
-    /// ちょうどの型へ、小数は精度を 2 足す（どれも値のあるまま通る）
+    /// 既定値のある列の型を広げる（半々。目標の図でまだ型を変えていない列だけ・計算列が参照する列（<see cref="FuzzColumnInfo.Pinned"/>）は
+    /// 除く）：整数は 64 ビット整数へ、文字列は長さを 20 足すか方言の上限ちょうどの型へ、小数は精度を 2 足す（どれも値のあるまま通る）
     /// </summary>
+    /// <remarks>
+    /// 計算列が参照する列は、乱数を引き終えてから除く（引き方を変えない＝ケースが変わるのはその列を引いた種だけ）。計算列が参照する列の変更は
+    /// 宣言つきで行の水準 <see cref="FuzzShape.ComputedSourceChange"/> が受け持つ（宣言なしで広げると、式の依存で断る方言が警告なしに断る）。
+    /// </remarks>
     private void WidenDefaultColumn(List<Entity> entities, FuzzLiveSchema live)
     {
         if (_defaultColumns.Count == 0 || attributeShapeRng!.Next(2) != 0)
@@ -320,7 +324,11 @@ internal sealed partial class SyncPlanFuzzGenerator
             c.Name.Equals(columnName, StringComparison.OrdinalIgnoreCase)
         );
 
-        if (entity is null || column is null || live.Find(tableName, columnName) is not { } info)
+        if (
+            entity is null
+            || column is null
+            || live.Find(tableName, columnName) is not { Pinned: false } info
+        )
         {
             return;
         }

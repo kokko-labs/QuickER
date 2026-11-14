@@ -40,7 +40,7 @@ public sealed class EngineFingerprintDriftTests
     /// <summary>記録のファイル（リポジトリ直下からの相対パス）</summary>
     private const string RecordPath = "tests/QuickER.Tests.Integration/engine-fingerprints.json";
 
-    /// <summary>同期計画の総当たりの方言と既定の種の数（Oracle は <c>QUICKER_SYNC_FUZZ_ORACLE</c> を見ずに既定の 4）</summary>
+    /// <summary>同期計画の総当たりの方言（記録は方言ごとの普段の既定の種の数）</summary>
     public static TheoryData<string> SyncPlanDialects() =>
         new("sqlite", "mysql", "sqlserver", "postgresql", "oracle");
 
@@ -263,7 +263,7 @@ public sealed class EngineFingerprintDriftTests
             "mysql" => MySqlSyncPlanFuzzTests.Seeds,
             "sqlserver" => SqlServerSyncPlanFuzzTests.Seeds,
             "postgresql" => PostgreSqlSyncPlanFuzzTests.Seeds,
-            "oracle" => OracleSyncPlanFuzzTests.SeedsFor(extended: false),
+            "oracle" => OracleSyncPlanFuzzTests.Seeds,
             _ => throw new ArgumentOutOfRangeException(nameof(dialect), dialect, null),
         };
 
