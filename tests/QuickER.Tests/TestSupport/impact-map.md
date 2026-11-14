@@ -867,6 +867,7 @@ src 全体か src の外を読む守り。単位の守りには数えない（�
 | `rule:window-activation-markers` | tests/QuickER.Tests/AI.Chat/AiChatDialogApiKeyBoxTests.cs・tests/QuickER.Tests/Gui/Behaviors/CanvasViewportBehaviorSpaceKeyTests.cs・tests/QuickER.Tests/Gui/Views/PropertyPanelMemoEditTests.cs |
 | `rule:synthetic-input-mouse-isolation` | tests/QuickER.Tests/**/*.cs（除外 5 件） |
 | `rule:synthetic-input-markers` | tests/QuickER.Tests/Gui/Behaviors/CanvasInputHarness.cs・tests/QuickER.Tests/Gui/Behaviors/CanvasViewportBehaviorSpaceKeyTests.cs・tests/QuickER.Tests/Gui/Behaviors/DragBehaviorTests.cs |
+| `rule:gui-test-foreground-activation` | tests/QuickER.Tests/**/*.cs |
 | `rule:wpf-main-window-creations` | tests/QuickER.Tests/**/*.cs |
 | `rule:direct-roslyn-parses` | tests/**/*.cs |
 | `rule:test-host-server-gc` | tests/QuickER.Tests/QuickER.Tests.csproj |

@@ -56,7 +56,7 @@ public sealed class CanvasInputTests(ITestOutputHelper output)
                 }
 
                 inputReports =
-                    $"{GuiFailureDiagnostics.InputReportSummary()}・実際のボタンが押されていた手 {harness.PhysicalButtonSteps}/{harness.StepCount}・{harness.WaitSummary}";
+                    $"{GuiFailureDiagnostics.InputReportSummary()}・実際のボタンが押されていた手 {harness.PhysicalButtonSteps}/{harness.StepCount}・{harness.WaitSummary}・アクティブの行き来の手の外で非アクティブになった {harness.ForeignDeactivations} 回";
             }
         );
 
@@ -135,7 +135,7 @@ public sealed class CanvasInputTests(ITestOutputHelper output)
                 }
 
                 inputReports =
-                    $"{GuiFailureDiagnostics.InputReportSummary()}・実際のボタンが押されていた手 {harness.PhysicalButtonSteps}/{harness.StepCount}・{harness.WaitSummary}";
+                    $"{GuiFailureDiagnostics.InputReportSummary()}・実際のボタンが押されていた手 {harness.PhysicalButtonSteps}/{harness.StepCount}・{harness.WaitSummary}・アクティブの行き来の手の外で非アクティブになった {harness.ForeignDeactivations} 回";
             }
         );
 
@@ -506,27 +506,34 @@ public sealed class CanvasInputTests(ITestOutputHelper output)
     public void Disturbance_IsNamedOnTheViolation()
     {
         var none = TimeSpan.Zero;
-        CanvasInputHarness.DescribeDisturbance(0, 0, true, 0, none).Should().BeNull();
+        CanvasInputHarness.DescribeDisturbance(0, 0, 0, true, 0, none).Should().BeNull();
         CanvasInputHarness
-            .DescribeDisturbance(2, 0, true, 0, none)
+            .DescribeDisturbance(2, 0, 0, true, 0, none)
             .Should()
             .Be("手の列の間に前面が別のプロセスのウィンドウへ 2 回移った");
         CanvasInputHarness
-            .DescribeDisturbance(0, 3, true, 0, none)
+            .DescribeDisturbance(0, 2, 0, true, 0, none)
+            .Should()
+            .Be(
+                "テストの窓がアクティブの行き来の手の外で 2 回非アクティブになった",
+                "前面を取っていたテストの窓が、利用者のほかのアプリのクリックで非アクティブになった形"
+            );
+        CanvasInputHarness
+            .DescribeDisturbance(0, 0, 3, true, 0, none)
             .Should()
             .Be("実際のマウスのボタンが押されていた手 3 個（表は離れているに固定）");
         CanvasInputHarness
-            .DescribeDisturbance(0, 0, true, 2, TimeSpan.FromSeconds(12.34))
+            .DescribeDisturbance(0, 0, 0, true, 2, TimeSpan.FromSeconds(12.34))
             .Should()
             .Be(
                 "実際のマウスのボタンが離れるまで 2 回待った（計 12.3 秒）",
                 "待った後の手で違反が出たら、待ったことも名指しする（前面の移りなどを招きうる）"
             );
         CanvasInputHarness
-            .DescribeDisturbance(1, 1, false, 0, none)
+            .DescribeDisturbance(1, 1, 1, false, 0, none)
             .Should()
             .Be(
-                "手の列の間に前面が別のプロセスのウィンドウへ 1 回移った・実際のマウスのボタンが押されていた手 1 個（表は離れているに固定していない）"
+                "手の列の間に前面が別のプロセスのウィンドウへ 1 回移った・テストの窓がアクティブの行き来の手の外で 1 回非アクティブになった・実際のマウスのボタンが押されていた手 1 個（表は離れているに固定していない）"
             );
 
         var violation = new CanvasViolation("I4", 3, CanvasStep.LeftUp, null, "キャプチャ X");
@@ -538,6 +545,115 @@ public sealed class CanvasInputTests(ITestOutputHelper output)
         (violation with { Disturbance = "前面が移った" })
             .Signature.Should()
             .Be(violation.Signature, "署名（既知の失敗の照合）には入れない");
+    }
+
+    /// <summary>
+    /// 手の途中でテストの窓が外から非アクティブになった・前面が別のプロセスへ移った形は、違反を赤のまま残して乱れを名指しし、
+    /// アクティブの行き来の手が自分で替えた非アクティブ化は数えない（外からの非アクティブ化の自己検査）
+    /// </summary>
+    /// <remarks>
+    /// 全件の実行で、前面を取っていたテストの窓が利用者のほかのアプリのクリックで非アクティブになり、フォーカスが消えて落ちた。
+    /// ハーネスは前面を取りに行かない（<see cref="TestWindowActivation"/>）ので普段は起きないが、すり抜けた分を名指しする。
+    /// 外からの非アクティブ化は、同じスレッドの 3 つめの窓をアクティブにして作る（ハーネスから見て、アクティブの行き来の手の
+    /// 外の非アクティブ化であることは前面を取られたときと同じ）。前面の移りは、最後の手の区切りの後に前面の取得を別の
+    /// プロセスの値へ差し替えて作る（違反の瞬間に前面を見直さないと数えない形）
+    /// </remarks>
+    [Fact(
+        DisplayName = "入力の列: テストの窓の外からの非アクティブ化と前面の移りは違反に名指しし、アクティブの行き来の手は数えない"
+    )]
+    public void ForeignDeactivation_IsNamedOnTheViolation()
+    {
+        IReadOnlyList<CanvasStep> reactivate =
+        [
+            CanvasStep.ClickFocus(CanvasTarget.Canvas),
+            CanvasStep.Reactivate,
+        ];
+        IReadOnlyList<CanvasStep> tab = [CanvasStep.TabTo(CanvasTarget.Button)];
+        CanvasViolation? reactivated = null;
+        var countAfterReactivate = -1;
+        CanvasViolation? deactivated = null;
+        var countAfterDeactivate = -1;
+        CanvasViolation? moved = null;
+
+        using var _ = GuiFailureDiagnostics.SuppressSinksForTests();
+
+        RunInIsolatedWindow(
+            (vm, window) =>
+            {
+                var intruder = new Window
+                {
+                    Width = 100,
+                    Height = 100,
+                    ShowInTaskbar = false,
+                    ShowActivated = false,
+                    WindowStartupLocation = WindowStartupLocation.Manual,
+                    Left = -10000,
+                    Top = -10000,
+                };
+                intruder.Show();
+
+                try
+                {
+                    using (var harness = new CanvasInputHarness(vm, window))
+                    {
+                        // アクティブの行き来の手は、自分で替えた非アクティブ化を数えない
+                        reactivated = harness.Run(reactivate);
+                        countAfterReactivate = harness.ForeignDeactivations;
+
+                        // 外からの非アクティブ化：Tab で移った直後に、別の窓をアクティブにする
+                        harness.AfterPerformForTests = _ =>
+                        {
+                            TestWindowActivation.ActivateWithinThread(intruder);
+                            DoEvents();
+                        };
+                        deactivated = harness.Run(tab);
+                        countAfterDeactivate = harness.ForeignDeactivations;
+                    }
+
+                    // 前面の移り：最後の手の区切りの後に、前面が別のプロセスへ移る（前面の取得を差し替える。
+                    // 0x1234 はどのプロセスのウィンドウでもないので、このプロセスでないと読まれる）
+                    using (var harness = new CanvasInputHarness(vm, window))
+                    {
+                        harness.AfterPerformForTests = _ =>
+                        {
+                            GuiFailureDiagnostics.ForegroundForTests = () => new IntPtr(0x1234);
+                            TestWindowActivation.ActivateWithinThread(intruder);
+                            DoEvents();
+                        };
+                        moved = harness.Run(tab);
+                    }
+                }
+                finally
+                {
+                    GuiFailureDiagnostics.ForegroundForTests = null;
+                    intruder.Close();
+                }
+            }
+        );
+
+        reactivated.Should().BeNull("アクティブの行き来の手だけなら違反にならない");
+        countAfterReactivate
+            .Should()
+            .Be(0, "アクティブの行き来の手が自分で替えた非アクティブ化は外からのものに数えない");
+        countAfterDeactivate.Should().Be(1, "手の外の非アクティブ化を 1 回数える");
+        deactivated.Should().NotBeNull("フォーカスがテストの窓から消えた形は、黙って緑にしない");
+        deactivated!
+            .ToString()
+            .Should()
+            .Contain("（外からの乱れ: ")
+            .And.Contain(
+                "テストの窓がアクティブの行き来の手の外で 1 回非アクティブになった",
+                "違反は赤のまま、外からの非アクティブ化を名指しする"
+            );
+        deactivated.StateReport.Should().Contain("非アクティブになった", "記録にも名指しを載せる");
+        moved.Should().NotBeNull();
+        moved!
+            .ToString()
+            .Should()
+            .Contain(
+                "手の列の間に前面が別のプロセスのウィンドウへ 1 回移った",
+                "最後の手の区切りの後の前面の移りも、違反の瞬間に見直して名指しする"
+            );
     }
 
     /// <summary>読み口の差し替えは、差し替えたスレッドだけに効き、スコープの破棄で前の値へ戻る（二重の破棄では何もしない）</summary>

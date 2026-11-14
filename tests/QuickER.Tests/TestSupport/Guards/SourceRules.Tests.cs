@@ -227,6 +227,16 @@ internal static partial class SourceRules
             {
                 MinimumFiles = 3,
             },
+            // テストは窓の本当の前面を取りに行かない（Window.Activate も SetForegroundWindow も呼ばず、同じスレッドの中だけで
+            // アクティブにする TestWindowActivation を通す）。前面を取ると、全件の実行の途中で戻った利用者がほかのアプリを
+            // クリックした瞬間にテストの窓が非アクティブになり、フォーカスが消えて入力のテストが落ちる（利用者のキー入力も
+            // テストの窓へ届く）。構文木で読むので、文字列・コメントの中の綴りと名前の違う呼び出しは数えない
+            SourceRule.Forbid(
+                "gui-test-foreground-activation",
+                "テストは窓の前面を取りに行かない（Window.Activate・SetForegroundWindow を呼ばず TestWindowActivation を通す）",
+                SourceScope.Under("tests/QuickER.Tests"),
+                GuardFinder.Nodes(DescribeForegroundActivation)
+            ),
             // テストの MainWindow の生成は共有の窓口（WpfApplicationTestSupport.CreateMainWindow / RunInIsolatedWindow）を通す。
             // MainWindow の生成は BAML のロードを伴い、複数の STA テストのクラスが同時に読むと XamlParseException で散発的に落ちる
             // （直列化は窓口が担う）。文字列で読むので、コメントの中の表記も数える
@@ -533,6 +543,36 @@ internal static partial class SourceRules
                     IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
                     _ => null,
                 } == CreateTempSubdirectoryName => CreateTempSubdirectoryName,
+            _ => null,
+        };
+
+    /// <summary>
+    /// 節が窓の前面を取りに行く書き方（引数の無い <c>Activate()</c> の呼び出し・<c>SetForegroundWindow</c> の宣言と呼び出し）なら、
+    /// その表記
+    /// </summary>
+    /// <remarks>
+    /// tests のソースはシンボルで組まない（<see cref="SourceSymbolScan"/> は src だけ）ので、名前で読む。引数の無い
+    /// <c>Activate()</c> を呼ぶ型は、テストでは <see cref="System.Windows.Window"/> だけ。受け手を書かない呼び出し（窓の派生の
+    /// 中）も拾う。名前の違う <c>ActivateWithinThread</c>・<c>AllowSetForegroundWindow</c> は拾わない。
+    /// </remarks>
+    private static string? DescribeForegroundActivation(SyntaxNode node) =>
+        node switch
+        {
+            InvocationExpressionSyntax { ArgumentList.Arguments.Count: 0 } invocation
+                when InvokedName(invocation) == "Activate" => "Window.Activate",
+            InvocationExpressionSyntax invocation
+                when InvokedName(invocation) == "SetForegroundWindow" => "SetForegroundWindow",
+            MethodDeclarationSyntax { Identifier.ValueText: "SetForegroundWindow" } =>
+                "SetForegroundWindow",
+            _ => null,
+        };
+
+    /// <summary>呼び出しのメソッド名（受け手つき・受け手なし。それ以外の形は null）</summary>
+    private static string? InvokedName(InvocationExpressionSyntax invocation) =>
+        invocation.Expression switch
+        {
+            MemberAccessExpressionSyntax member => member.Name.Identifier.ValueText,
+            IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
             _ => null,
         };
 }

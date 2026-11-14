@@ -169,6 +169,7 @@ public class GuiFailureDiagnosticsTests
             RunSta(() =>
             {
                 var (window, button) = ShowTrackedWindow();
+                var (other, _) = ShowTrackedWindow();
 
                 try
                 {
@@ -178,10 +179,23 @@ public class GuiFailureDiagnosticsTests
                     button.CaptureMouse();
                     button.ReleaseMouseCapture();
                     InjectRawMouseMove(window);
+
+                    // アクティブの移りに前面の持ち主を添える：前面が別のプロセスの間に W1 から W2 へ、
+                    // このプロセスの間に W2 から W1 へ移す（0x1234 はどのプロセスのウィンドウでもない）
+                    GuiFailureDiagnostics.ForegroundForTests = () => new IntPtr(0x1234);
+                    TestWindowActivation.ActivateWithinThread(window);
+                    TestWindowActivation.ActivateWithinThread(other);
+                    DoEvents();
+                    var own = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+                    GuiFailureDiagnostics.ForegroundForTests = () => own;
+                    TestWindowActivation.ActivateWithinThread(window);
+                    DoEvents();
                     throw new InvalidOperationException(marker);
                 }
                 finally
                 {
+                    GuiFailureDiagnostics.ForegroundForTests = null;
+                    other.Close();
                     window.Close();
                 }
             });
@@ -207,6 +221,34 @@ public class GuiFailureDiagnosticsTests
                 "実行の始めの前面のウィンドウを書く（前面が無い CI のランナーでも「前面のウィンドウなし」と書く）"
             )
             .And.NotContain("W1:Window: Closed");
+
+        // アクティブの移りの行には、その瞬間の前面の持ち主を添える（別のプロセスならプロセス名だけで、タイトルは書かない）
+        var activationLines = report
+            .Split('\n')
+            .Select(line => line.TrimEnd('\r'))
+            .Where(line =>
+                line.Contains(": Activated", StringComparison.Ordinal)
+                || line.Contains(": Deactivated", StringComparison.Ordinal)
+            )
+            .ToList();
+        activationLines
+            .Should()
+            .Contain(line =>
+                line.Contains(
+                    "W1:Window: Deactivated 前面=別のプロセス process=",
+                    StringComparison.Ordinal
+                )
+            )
+            .And.Contain(line =>
+                line.Contains(
+                    "W2:Window: Activated 前面=別のプロセス process=",
+                    StringComparison.Ordinal
+                )
+            )
+            .And.Contain(line =>
+                line.EndsWith("W1:Window: Activated 前面=このプロセス", StringComparison.Ordinal)
+            )
+            .And.NotContain(line => line.Contains("title=", StringComparison.Ordinal));
 
         // Win32 から届いた入力（合成の MouseEventArgs / KeyEventArgs ではない生の報告）は、件数と中身を区画へ書く
         report.Should().MatchRegex(@"件数=[1-9]").And.Contain("RawMouseInputReport");
