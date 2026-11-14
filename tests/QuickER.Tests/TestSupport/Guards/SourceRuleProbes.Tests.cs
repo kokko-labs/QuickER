@@ -283,6 +283,51 @@ internal static partial class SourceRuleProbes
                     new ProbeFile("Plain.cs", "_ = new RoutedEventArgs(ButtonBase.ClickEvent);\n"),
                 ]
             ),
+            // 窓の前面を取りに行く書き方（受け手つき・受け手なしの Activate()・SetForegroundWindow の宣言と呼び出し）を拾い、
+            // スレッドの中だけのアクティブ化・引数のある Activate・名前の違う API・文字列とコメントの中の綴りは拾わない
+            new SourceRuleProbe(
+                "gui-test-foreground-activation-forms",
+                "gui-test-foreground-activation",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System;
+                        using System.Runtime.InteropServices;
+                        using System.Windows;
+
+                        internal sealed class ProbeWindow : Window
+                        {
+                            public void Hits(Window other, IntPtr handle)
+                            {
+                                other.Activate();
+                                Activate();
+                                SetForegroundWindow(handle);
+                            }
+
+                            public void Misses(Window other, Activator activator)
+                            {
+                                TestWindowActivation.ActivateWithinThread(other);
+                                activator.Activate(other);
+                                AllowSetForegroundWindow(-1);
+                                _ = "other.Activate()";
+                                // other.Activate();
+                            }
+
+                            [DllImport("user32.dll")]
+                            private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+                            [DllImport("user32.dll")]
+                            private static extern bool AllowSetForegroundWindow(int processId);
+                        }
+                        """,
+                        "Window.Activate",
+                        "Window.Activate",
+                        "SetForegroundWindow",
+                        "SetForegroundWindow"
+                    ),
+                ]
+            ),
             // MainWindow の生成をコメントの中も含めて 1 出現 1 件拾い、名前が MainWindow で始まる別の型の生成は拾わない
             new SourceRuleProbe(
                 "wpf-main-window-creations-forms",

@@ -243,6 +243,22 @@ internal static class GuiFailureDiagnostics
         }
     }
 
+    /// <summary>
+    /// 前面のウィンドウを見直し、変わっていれば時系列へ書いて別のプロセスへの移りを数える（エンジンが違反の瞬間に呼ぶ。
+    /// 前面は <see cref="Note"/> の手の区切りでしか見ないので、最後の区切りの後の移りを落とさないため。例外を出さない）
+    /// </summary>
+    internal static void ObserveForeground()
+    {
+        try
+        {
+            NoteForegroundChange();
+        }
+        catch
+        {
+            // 診断の失敗をテストへ持ち込まない
+        }
+    }
+
     /// <summary>実際のマウスのボタン（<c>GetAsyncKeyState</c> の最上位ビット）を L・R・M の順に短く書く</summary>
     internal static string PhysicalButtons() =>
         $"L={IsPhysicallyDown(VkLButton)} R={IsPhysicallyDown(VkRButton)} M={IsPhysicallyDown(VkMButton)}";
@@ -436,8 +452,11 @@ internal static class GuiFailureDiagnostics
             tracked.Add(entry);
 
             var label = entry.Label;
-            EventHandler activated = (_, _) => Record(label, "Activated", "");
-            EventHandler deactivated = (_, _) => Record(label, "Deactivated", "");
+
+            // アクティブの移りには、その瞬間の前面の持ち主を添える（テストの窓が本当の前面だったのか、スレッドの中だけで
+            // アクティブだったのかを、手の区切りを書かないテストでも見分ける）
+            EventHandler activated = (_, _) => Record(label, "Activated", ForegroundOwner());
+            EventHandler deactivated = (_, _) => Record(label, "Deactivated", ForegroundOwner());
             KeyEventHandler keyDown = (_, e) => Record(label, "PreviewKeyDown", DescribeKey(e));
             KeyEventHandler keyUp = (_, e) => Record(label, "PreviewKeyUp", DescribeKey(e));
             MouseButtonEventHandler mouseDown = (_, e) =>
@@ -803,6 +822,32 @@ internal static class GuiFailureDiagnostics
     /// </summary>
     private static void AppendForegroundWindow(StringBuilder builder) =>
         builder.Append("  ").AppendLine(DescribeForeground(Foreground()));
+
+    /// <summary>
+    /// 前面のウィンドウの持ち主を短く書く（このプロセス・別のプロセスとその名前・前面なし。別のプロセスのタイトルは書かない。
+    /// イベントのハンドラーから呼ぶので例外を出さない）
+    /// </summary>
+    private static string ForegroundOwner()
+    {
+        try
+        {
+            var handle = Foreground();
+
+            if (handle == IntPtr.Zero)
+            {
+                return "前面=なし";
+            }
+
+            _ = GetWindowThreadProcessId(handle, out var processId);
+            return processId == (uint)Environment.ProcessId
+                ? "前面=このプロセス"
+                : $"前面=別のプロセス process={ProcessNameOf(processId)}";
+        }
+        catch
+        {
+            return "前面=記録に失敗";
+        }
+    }
 
     /// <summary>前面のウィンドウを 1 行で書く（タイトルはこのプロセスのウィンドウだけ）</summary>
     private static string DescribeForeground(IntPtr handle)

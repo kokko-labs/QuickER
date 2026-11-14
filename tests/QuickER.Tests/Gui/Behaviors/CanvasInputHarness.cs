@@ -34,7 +34,8 @@ namespace QuickER.Tests.Gui.Behaviors;
 ///     <see cref="BehaviorInput"/> の差し替えで仮想の値を返す</item>
 ///   <item>流さないもの：<c>Mouse.DirectlyOver</c>・<c>IsMouseOver</c> の追跡、WPF のコントロールが自分で読む実際のボタンの
 ///     状態（ボタンをマウスで押す手はフォーカスが移るところまで）、OLE のドラッグ＆ドロップのループ</item>
-///   <item>アクティブの行き来は本物（別のウィンドウの <see cref="Window.Activate"/> と戻り）</item>
+///   <item>アクティブの行き来は本物の窓の行き来（別のウィンドウをアクティブにして戻る）。ただし前面を取りに行かず、同じスレッドの
+///     中だけで替える（<see cref="TestSupport.TestWindowActivation"/>）</item>
 /// </list>
 /// <para>
 /// 窓は 1 つを全種で使い回す。種の始めに図を差し替え・ズームとスクロールを戻し・先頭のテーブルのカードをクリックし、
@@ -127,6 +128,8 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
             true
         );
         _grid.BeginningEdit += OnBeginningEdit;
+        window.Deactivated += OnWindowDeactivated;
+        _other.Deactivated += OnWindowDeactivated;
         InputManager.Current.PostProcessInput += OnPostProcessInput;
         _initialMiniMap = vm.IsMiniMapEnabled;
         _inputScope = BehaviorInput.OverrideForTests(this);
@@ -272,6 +275,31 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
     /// </summary>
     private void PinMouseButtons() => _mouse.Pin();
 
+    /// <summary>
+    /// 手を流した直後（表明の前）に呼ぶ処理（既定は無し。外からの乱れの名指しの自己検査が、手の途中でテストの窓を外から
+    /// 非アクティブにした形・前面が移った形を作るためだけに差し替える。引数は手の番号）
+    /// </summary>
+    internal Action<int>? AfterPerformForTests { get; set; }
+
+    /// <summary>アクティブの行き来の手（Reactivate）が、自分で窓のアクティブを替えている最中か</summary>
+    private bool _activatingWithinHarness;
+
+    /// <summary>
+    /// ハーネスの窓 2 つが、アクティブの行き来の手の外で非アクティブになった回数（このハーネスを作ってから）。ハーネスは
+    /// 前面を取りに行かないので、普段は 0。前面を取っていたテストの窓が、利用者のほかのアプリのクリックで非アクティブに
+    /// なると増える（フォーカスが消え、合成の入力の結果が変わる）
+    /// </summary>
+    public int ForeignDeactivations { get; private set; }
+
+    /// <summary>窓の非アクティブ化を、アクティブの行き来の手の外なら外からのものとして数える</summary>
+    private void OnWindowDeactivated(object? sender, EventArgs e)
+    {
+        if (!_activatingWithinHarness)
+        {
+            ForeignDeactivations++;
+        }
+    }
+
     /// <summary>流した手の数（このハーネスを作ってから）</summary>
     public int StepCount { get; private set; }
 
@@ -298,6 +326,7 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
         _recentSteps.Clear();
         TestSupport.GuiFailureDiagnostics.Note("種の始め");
         _foreignForegroundAtStart = TestSupport.GuiFailureDiagnostics.ForeignForegroundChanges;
+        _foreignDeactivationsAtStart = ForeignDeactivations;
         _physicalButtonStepsAtStart = PhysicalButtonSteps;
         _waitedCountAtStart = _mouse.WaitedCount;
         _waitedAtStart = _mouse.Waited;
@@ -359,6 +388,9 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
     /// <summary>この手の列の始めの、前面が別のプロセスへ移った回数</summary>
     private int _foreignForegroundAtStart;
 
+    /// <summary>この手の列の始めの、ハーネスの窓が外から非アクティブになった回数</summary>
+    private int _foreignDeactivationsAtStart;
+
     /// <summary>この手の列の始めの、実際のボタンが押されていた手の数</summary>
     private int _physicalButtonStepsAtStart;
 
@@ -369,27 +401,35 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
     private TimeSpan _waitedAtStart;
 
     /// <summary>
-    /// この手の列を流す間に見た外からの乱れ（前面が別のプロセスへ移った・実際のボタンが押されていた）を名指しする
-    /// （無ければ null）。乱れがあっても違反は赤のまま残し、流し直さない。ボタンは表で「離れている」に固定しているので
-    /// WPF のコントロールには見えないが、前面の移りは Windows のキャプチャの取り消しを招き、固定では防げない
+    /// この手の列を流す間に見た外からの乱れ（前面が別のプロセスへ移った・ハーネスの窓が外から非アクティブになった・
+    /// 実際のボタンが押されていた）を名指しする（無ければ null）。乱れがあっても違反は赤のまま残し、流し直さない。
+    /// ボタンは表で「離れている」に固定しているので WPF のコントロールには見えないが、前面の移りと外からの非アクティブ化は
+    /// キャプチャの取り消しとフォーカスの消失を招き、固定では防げない。前面は手の区切りでも見るが、最後の手の区切りの後の
+    /// 移りを落とさないよう、ここでも見直す
     /// </summary>
-    private string? Disturbance() =>
-        DescribeDisturbance(
+    private string? Disturbance()
+    {
+        TestSupport.GuiFailureDiagnostics.ObserveForeground();
+        return DescribeDisturbance(
             TestSupport.GuiFailureDiagnostics.ForeignForegroundChanges - _foreignForegroundAtStart,
+            ForeignDeactivations - _foreignDeactivationsAtStart,
             PhysicalButtonSteps - _physicalButtonStepsAtStart,
             PinsMouseButtons,
             _mouse.WaitedCount - _waitedCountAtStart,
             _mouse.Waited - _waitedAtStart
         );
+    }
 
     /// <summary>外からの乱れの数から、名指しの文を組む（無ければ null。自己検査が文の形を確かめる）</summary>
     /// <param name="foreground">前面が別のプロセスのウィンドウへ移った回数</param>
+    /// <param name="deactivated">ハーネスの窓がアクティブの行き来の手の外で非アクティブになった回数</param>
     /// <param name="physical">実際のマウスのボタンが押されていた手の数</param>
     /// <param name="pinned">キーの状態の表のボタンを離れているに固定していたか</param>
     /// <param name="waitedCount">実際のボタンが離れるまで待った回数（種の始めと手の始め）</param>
     /// <param name="waited">待った時間の合計</param>
     internal static string? DescribeDisturbance(
         int foreground,
+        int deactivated,
         int physical,
         bool pinned,
         int waitedCount,
@@ -401,6 +441,13 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
         if (foreground > 0)
         {
             parts.Add($"手の列の間に前面が別のプロセスのウィンドウへ {foreground} 回移った");
+        }
+
+        if (deactivated > 0)
+        {
+            parts.Add(
+                $"テストの窓がアクティブの行き来の手の外で {deactivated} 回非アクティブになった"
+            );
         }
 
         if (physical > 0)
@@ -570,6 +617,7 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
             return new("Shape", index, step, model.Focus, shape);
         }
 
+        AfterPerformForTests?.Invoke(index);
         model.Apply(step);
 
         if (step.Op == CanvasOp.LeftDown && _press is { } pressed)
@@ -1410,10 +1458,23 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
                     _otherShown = true;
                 }
 
-                _other.Activate();
-                DoEvents();
-                _window.Activate();
-                DoEvents();
+                // 前面を取りに行かず、同じスレッドの中だけでアクティブを行き来させる（前面を取ると、利用者のほかのアプリの
+                // クリックでテストの窓が非アクティブになる。TestWindowActivation）。自分で替えている間の非アクティブ化は
+                // 外からのものに数えない
+                _activatingWithinHarness = true;
+
+                try
+                {
+                    TestSupport.TestWindowActivation.ActivateWithinThread(_other);
+                    DoEvents();
+                    TestSupport.TestWindowActivation.ActivateWithinThread(_window);
+                    DoEvents();
+                }
+                finally
+                {
+                    _activatingWithinHarness = false;
+                }
+
                 return null;
             case CanvasOp.MiddleDown:
                 if (SpotPoint(step.Spot!.Value) is not { } middle)
@@ -2213,6 +2274,8 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
         {
             InputManager.Current.PostProcessInput -= OnPostProcessInput;
             _grid.BeginningEdit -= OnBeginningEdit;
+            _window.Deactivated -= OnWindowDeactivated;
+            _other.Deactivated -= OnWindowDeactivated;
             _inputScope.Dispose();
 
             if (_otherShown)
@@ -2372,7 +2435,8 @@ internal sealed record CanvasViolation(
     public string? StateReport { get; init; }
 
     /// <summary>
-    /// 手の列を流す間に見た外からの乱れ（前面の移り・実際のボタンの押下。無ければ null）。違反は赤のまま残し、
+    /// 手の列を流す間に見た外からの乱れ（前面の移り・テストの窓の外からの非アクティブ化・実際のボタンの押下・待ち。
+    /// 無ければ null）。違反は赤のまま残し、
     /// 失敗の文に名指しする（署名には入れない）
     /// </summary>
     public string? Disturbance { get; init; }
