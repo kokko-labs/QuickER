@@ -23,9 +23,9 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.AI.Mock` | 一部 | `Ai/MockAgents`・`Ai/MockBuildBoundary`・`Ai/MockDialog`・`Ai/MockFolder`・`Ai/MockOutputs`・`Ai/MockRunner`・`Ai/MockScaffold`・`OsBoundary/Containment`・`OsBoundary/FeatureModules`・`OsBoundary/PathEntrances`・`OsBoundary/Segments` |
 | `src/QuickER.AI.UI` | 一部 | `Ai/ApiKeyStore`・`Ai/Attachments`・`Ai/ConnectionSettings`・`Ai/MarkdownRender`・`OsBoundary/ProcessLaunch`・`table:Converters` |
 | `src/QuickER.Cli` | 一部 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`DiagramEdit/ToolArgument` |
-| `src/QuickER.CodeGen.CSharp` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`Name/Entrances`・`OsBoundary/Segments`・`SyncModel/Config`・`SyncModel/Random`・`table:EditModelScenarios`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
+| `src/QuickER.CodeGen.CSharp` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`Name/Entrances`・`OsBoundary/Segments`・`SyncModel/Config`・`SyncModel/Random`・`table:EditModelScenarios`・`table:PostgreSqlQueryParameters`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
 | `src/QuickER.CodeGen.CSharp/Queries` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`Name/Entrances` |
-| `src/QuickER.CodeGen.CSharp/Templates` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`Name/Entrances`・`SyncModel/Config`・`SyncModel/Random`・`table:EditModelScenarios`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
+| `src/QuickER.CodeGen.CSharp/Templates` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`Name/Entrances`・`SyncModel/Config`・`SyncModel/Random`・`table:EditModelScenarios`・`table:PostgreSqlQueryParameters`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
 | `src/QuickER.CodeGen.UI` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Name/Entrances`・`OsBoundary/FeatureModules` |
 | `src/QuickER.CodeReverse.CSharp` | 全体 | `FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules` |
 | `src/QuickER.Db.UI` | 一部 | `Ai/DbConnectionDialog`・`Ai/DbImportSync`・`OsBoundary/FeatureModules`・`OsBoundary/ProfileStore` |
@@ -53,7 +53,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Provider.Sqlite` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`Name/Entrances`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses`・`rule:sqlite-file-connection-pooling-off` |
 | `src/QuickER.Runtime` | 全体 | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`GeneratedRuntime/ParityValuesSqlServer`・`table:EditModelScenarios`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
 | `src/QuickER.Runtime.AspNetCore` | 全体 | `GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues` |
-| `src/QuickER.Runtime.EntityFrameworkCore` | 全体 | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`GeneratedRuntime/ParityValuesSqlServer`・`table:TranslatorParityPredicates` |
+| `src/QuickER.Runtime.EntityFrameworkCore` | 全体 | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`GeneratedRuntime/ParityValuesSqlServer`・`table:PostgreSqlQueryParameters`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.InMemory` | 全体 | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityValues`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.SqlServer` | 全体 | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValuesSqlServer`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.Sqlite` | 全体 | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParityValues`・`table:TranslatorParityPredicates` |
@@ -127,7 +127,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_01_ValueObjects.scriban` | `table:ValueObjectScenarios` |
 | `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_03_EditModelsAndMappers.scriban` | `table:EditModelScenarios` |
 | `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_05_QueryPipeline.scriban` | `table:TranslatorParityPredicates` |
-| `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_08_EfCore.scriban` | `table:TranslatorParityPredicates` |
+| `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_08_EfCore.scriban` | `table:PostgreSqlQueryParameters`・`table:TranslatorParityPredicates` |
 | `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_10_Sync.scriban` | `SyncModel/Config`・`SyncModel/Random` |
 | `src/QuickER.CodeGen.UI` | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Name/Entrances` |
 | `src/QuickER.CodeGen.UI/CodeGenerationFeatureModule.cs` | `OsBoundary/FeatureModules` |
@@ -236,7 +236,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Provider/UniqueConstraintNaming.cs` | `rule:sync-name-comparison-tokens` |
 | `src/QuickER.Runtime` | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`GeneratedRuntime/ParityValuesSqlServer`・`table:EditModelScenarios`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
 | `src/QuickER.Runtime.AspNetCore` | `GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues` |
-| `src/QuickER.Runtime.EntityFrameworkCore` | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`GeneratedRuntime/ParityValuesSqlServer`・`table:TranslatorParityPredicates` |
+| `src/QuickER.Runtime.EntityFrameworkCore` | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`GeneratedRuntime/ParityValuesSqlServer`・`table:PostgreSqlQueryParameters`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.InMemory` | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityValues`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.SqlServer` | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValuesSqlServer`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.Sqlite` | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParityValues`・`table:TranslatorParityPredicates` |
@@ -657,7 +657,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 
 ### `Dialect/TypesRealDb`
 
-- 名前：方言の型の表の実 DB の段（上限の対の DDL の適用と取り込み直し・マッパーとドライバの CLR 型の一致・EF Core の読み書き）
+- 名前：方言の型の表の実 DB の段（上限の対の DDL の適用と取り込み直し・マッパーとドライバの CLR 型の一致・EF Core の読み書きと書き込みの範囲）
 - テストのソース：`tests/QuickER.Tests.Integration/Dialects/DialectTypeRealDbRows.cs`・`tests/QuickER.Tests.Integration/Dialects/DialectTypeRealDbTests.cs`・`tests/QuickER.Tests.Integration/Dialects/DialectTypeRealDbDimensions.cs`・`tests/QuickER.Tests.Integration/Dialects/DialectTypeRealDbTableTests.cs`・`tests/QuickER.Tests/Provider/DialectTypeRows.cs`
 - 範囲：`src/QuickER.Provider.SqlServer`・`src/QuickER.Provider.PostgreSql`・`src/QuickER.Provider.MySql`・`src/QuickER.Provider.Oracle`・`src/QuickER.Provider.Sqlite`
 
@@ -690,6 +690,12 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 - 名前：名前付きクエリのツールの結果の整形の表（MCP 面の英語の整形と、内蔵チャット面の UI の言語〔en・ja〕に追従する整形・改行は LF だけ）
 - テストのソース：`tests/QuickER.Tests/Mcp.Tools/QueryToolFormatterRows.cs`・`tests/QuickER.Tests/Mcp.Tools/QueryToolFormatterTests.cs`
 - 範囲：`src/QuickER.Mcp.Tools/QueryToolEnglishFormatter.cs`・`src/QuickER.AI.Chat/QueryToolLocalizedFormatter.cs`
+
+### `table:PostgreSqlQueryParameters`
+
+- 名前：PostgreSQL のクエリのパラメータの束縛し直しの表（date の列と時刻つきの値・time の列と範囲の外の値と IN のリストは値の型へ、入る値と書き込みのコマンド〔SaveChanges・ExecuteUpdate の SET〕と ExecuteDelete の条件は列の型のまま）
+- テストのソース：`tests/QuickER.Tests/CodeGen.CSharp/PostgreSqlQueryParameterInterceptorTests.cs`
+- 範囲：`src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_08_EfCore.scriban`・`src/QuickER.Runtime.EntityFrameworkCore`
 
 ### `table:TranslatorParityPredicates`
 

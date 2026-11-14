@@ -21,9 +21,22 @@ internal static class DialectTypeRealDbProbeKinds
     /// </summary>
     public const string EfCore = "efcore";
 
+    /// <summary>
+    /// 型マッパーの型：列の型の範囲の端と外の値を、生成 EF Core のコードと同じ構成（EF Core の手順と同じモデル＋
+    /// <c>AddGeneratedEfCoreRepositories</c> が足すインターセプター）で、書き込みのどの経路（SaveChanges の挿入・更新・一括挿入の形・
+    /// ExecuteUpdate の SET）で書いても、DB が断るか同じ値で読み戻す（黙って別の値を保存しない）。範囲の中の値は同じ値で読み戻す
+    /// </summary>
+    public const string EfCoreWriteRange = "efcore-write-range";
+
     /// <summary>すべての種類（次元表の水準の並び）</summary>
-    public static IReadOnlyList<string> All { get; } = [AtLimit, OverLimit, Driver, EfCore];
+    public static IReadOnlyList<string> All { get; } =
+    [AtLimit, OverLimit, Driver, EfCore, EfCoreWriteRange];
 }
+
+/// <summary>書き込みの範囲の手順で書く値 1 つ</summary>
+/// <param name="Value">マッパーの型の値</param>
+/// <param name="Fits">列の型の範囲の中か（中なら同じ値で読み戻す。外なら DB が断るか同じ値で読み戻す）</param>
+internal sealed record DialectTypeRealDbWrite(object Value, bool Fits);
 
 /// <summary>
 /// 方言の型の表（<see cref="DialectTypeRows"/>）の 1 行を、1 方言の実 DB で確かめる 1 つの手順
@@ -58,6 +71,7 @@ internal static class DialectTypeRealDbProbeKinds
 /// <param name="GapSymptom">
 /// 読み書きできない組で、今出ている食い違いの文に含まれる文字列（出なくなったら手順が赤になり、直ったことを知らせる）
 /// </param>
+/// <param name="Writes">書き込みの範囲の手順で書く値（範囲の端と外）</param>
 internal sealed record DialectTypeRealDbProbe(
     string RowId,
     string Dialect,
@@ -71,7 +85,8 @@ internal sealed record DialectTypeRealDbProbe(
     bool NarrowingLoses = false,
     object? Write = null,
     string? GapReason = null,
-    string? GapSymptom = null
+    string? GapSymptom = null,
+    IReadOnlyList<DialectTypeRealDbWrite>? Writes = null
 )
 {
     /// <summary>NULL を入れる手順か（列を NULL 許容で作り、型で読む確認は飛ばす）</summary>
@@ -127,6 +142,7 @@ internal static class DialectTypeRealDbRows
         .. PostgreSqlEfCore(),
         .. SqlServerEfCore(),
         .. SqliteEfCore(),
+        .. EfCoreWriteRanges(),
     ];
 
     /// <summary>方言の手順</summary>
@@ -787,6 +803,85 @@ internal static class DialectTypeRealDbRows
             ),
             EfCore("matrix-map-sqlite-bit-upper", DialectNames.Sqlite, "1", true, false),
         ];
+
+    /// <summary>
+    /// TimeSpan の列の型の範囲の端と外の値の書き込み（範囲は docs の TimeSpan の段落：SQL Server の time は 0〜24 時間未満、
+    /// PostgreSQL の time は 0〜24:00:00、MySQL の time は ±838:59:59、SQLite は文字列で持ち範囲を持たない）。値はマイクロ秒の粒度
+    /// （PostgreSQL・MySQL・time(6) が端数を落とさない）。SQLite だけは 100 ナノ秒の端数も持つ
+    /// </summary>
+    /// <remarks>
+    /// Oracle は TimeSpan へ写す型を持たない（型マッパーに TIME が無く、INTERVAL DAY TO SECOND も TimeSpan に写さない）ので手順を持たない
+    /// </remarks>
+    private static IEnumerable<DialectTypeRealDbProbe> EfCoreWriteRanges()
+    {
+        var micro = TimeSpan.FromTicks(10);
+        var clock = new TimeSpan(0, 10, 30, 0).Add(TimeSpan.FromTicks(1234560));
+        var day = TimeSpan.FromDays(1);
+        var dayAndHour = new TimeSpan(1, 1, 0, 0);
+        var hour = TimeSpan.FromHours(1);
+        var mySqlMax = new TimeSpan(34, 22, 59, 59);
+        var mySqlBeyond = new TimeSpan(34, 23, 0, 0);
+
+        return
+        [
+            WriteRange(
+                "map-postgresql-time-plain",
+                PostgreSql,
+                Fits(TimeSpan.Zero, clock, day),
+                Beyond(day + micro, dayAndHour, -micro, -hour, mySqlMax)
+            ),
+            WriteRange(
+                "map-postgresql-array-time-efcore-column-type",
+                PostgreSql,
+                Fits(new[] { hour, clock }, new[] { day }),
+                Beyond(new[] { hour, dayAndHour }, new[] { -hour })
+            ),
+            WriteRange(
+                "matrix-map-sqlserver-time-6",
+                DialectNames.SqlServer,
+                Fits(TimeSpan.Zero, clock, day - micro),
+                Beyond(day, dayAndHour, -micro)
+            ),
+            WriteRange(
+                "matrix-map-mysql-time-6",
+                MySql,
+                Fits(TimeSpan.Zero, clock, dayAndHour, -hour, mySqlMax, -mySqlMax),
+                Beyond(mySqlBeyond, -mySqlBeyond)
+            ),
+            WriteRange(
+                "matrix-map-sqlite-time-6-upper",
+                DialectNames.Sqlite,
+                Fits(
+                    TimeSpan.Zero,
+                    TimeSpan.FromHours(10).Add(TimeSpan.FromTicks(1)),
+                    dayAndHour,
+                    -hour,
+                    mySqlBeyond,
+                    -mySqlBeyond
+                ),
+                []
+            ),
+        ];
+
+        static DialectTypeRealDbWrite[] Fits(params object[] values) =>
+            [.. values.Select(value => new DialectTypeRealDbWrite(value, Fits: true))];
+
+        static DialectTypeRealDbWrite[] Beyond(params object[] values) =>
+            [.. values.Select(value => new DialectTypeRealDbWrite(value, Fits: false))];
+    }
+
+    private static DialectTypeRealDbProbe WriteRange(
+        string rowId,
+        string dialect,
+        DialectTypeRealDbWrite[] fits,
+        DialectTypeRealDbWrite[] beyond
+    ) =>
+        new(
+            rowId,
+            dialect,
+            DialectTypeRealDbProbeKinds.EfCoreWriteRange,
+            Writes: [.. fits, .. beyond]
+        );
 
     private static DialectTypeRealDbProbe EfCore(
         string rowId,

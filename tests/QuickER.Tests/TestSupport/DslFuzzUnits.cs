@@ -969,7 +969,7 @@ public static class DslFuzzUnits
     /// </summary>
     /// <remarks>
     /// 行と比べる値の池は docs の TimeSpan の既知の割り切りの写し：SQLite（文字列で持つ）と SQL Server（time は 0〜24 時間未満）は日の中だけ、
-    /// PostgreSQL の time の列も日の中だけ（EF Core 版は 24 時間以上の値を日を落として書くので行に書かず、比べる値も日の中に限る）、
+    /// PostgreSQL の time の列は行の値が日の中だけで比べる値に範囲の外の値も持つ（time は 0〜24:00:00 しか持たず、EF Core 版は範囲の外の値の書き込みを断る）、
     /// PostgreSQL の interval の列は負の値と 1 日超の値と範囲の外の値、MySQL の time は ±838:59:59 の中の負の値と 1 日超の値（範囲の外の値は
     /// 端へ丸めて比べられるので作らない）。PostgreSQL・MySQL の値はマイクロ秒の粒度（端数の切り詰めは docs の既存の割り切り）。
     /// </remarks>
@@ -989,6 +989,7 @@ public static class DslFuzzUnits
                 },
                 DialectNames.PostgreSql => new(name, dataType, DslClr.TimeSpan, nullable)
                 {
+                    OperandValues = [.. DslFuzz.TimeOfDayPool, .. DslFuzz.OutOfDayPool],
                     TimeRange = DslTimeRange.PostgreSqlTime,
                 },
                 DialectNames.MySql => new(name, dataType, DslClr.TimeSpan, nullable)

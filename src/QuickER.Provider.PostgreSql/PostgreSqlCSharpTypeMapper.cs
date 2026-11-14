@@ -19,8 +19,9 @@ namespace QuickER.Provider.PostgreSql;
 /// <item><description>uuid → Guid</description></item>
 /// <item><description>bytea → byte[]（参照型）。長さ宣言を持たないため常に無制限バイナリ</description></item>
 /// <item><description>varchar / char / text / xml / json / jsonb → string（長さ指定があれば MaxLength として保持）</description></item>
-/// <item><description>date / timestamp / timetz / xml / json / jsonb / money は、生成 EF Core の DbContext が列の型を教える
-/// （<see cref="CSharpTypeInfo.EfCoreColumnType"/>。Npgsql の EF Core のプロバイダの既定の対応では書き込めないため）</description></item>
+/// <item><description>date / timestamp / time / timetz / xml / json / jsonb / money は、生成 EF Core の DbContext が列の型を教える
+/// （<see cref="CSharpTypeInfo.EfCoreColumnType"/>。Npgsql の EF Core のプロバイダの既定の対応では書き込めないか、time は範囲の外の値を
+/// 黙って変えて書くため）</description></item>
 /// <item><description>未知の型 → string（生成失敗を避けるための安全側フォールバック。<c>CSharpTypeInfo.IsFallbackType</c> に true を刻む）</description></item>
 /// </list>
 /// 型名は大文字小文字を区別せず、"varchar(50)" のような長さ指定付き表記や "double precision" 等の複数語型名を受け付ける
@@ -95,7 +96,10 @@ public sealed partial class PostgreSqlCSharpTypeMapper : IColumnTypeMapper
                 EfCoreColumnType = "timestamp without time zone",
             },
             "timestamptz" => Value("DateTimeOffset"),
-            "time" => Value("TimeSpan"),
+            // 列の型を教えない TimeSpan は interval のパラメータで送られ、PostgreSQL は interval から time への代入で日の部分を
+            // 黙って落とす（1.01:00 は 01:00、-01:00 は 23:00 で保存される）。time の列にだけ列の型を教え、範囲（0〜24:00:00）の外の
+            // 値の書き込みを DB に断らせる（範囲の外の値との比較は PostgreSqlQueryParameterInterceptor が interval で束縛し直す）
+            "time" => Value("TimeSpan") with { EfCoreColumnType = "time" },
             // timetz は「時刻＋オフセット」。Npgsql が返す CLR 型は DateTimeOffset で、
             // TimeSpan で受けると読み取り自体が InvalidCastException になる（実 PG で実測）。
             // DateTimeOffset の既定の対応は timestamp with time zone で、UTC 以外のオフセットを断るので列の型を教える

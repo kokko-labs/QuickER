@@ -665,7 +665,12 @@ The column types hold a limited range: SQL Server's `time` holds 0 to under 24 h
 The QuickER Repository on SQL Server replaces a comparison between a `time` column and a value outside its range (a negative value or a value of a day or more) with a condition that gives the C# answer.
 An equality matches no row, `<>` matches every row including the rows holding `NULL`, and `x.Clock < oneDay` matches every row not holding `NULL`.
 An element of an `IN` list outside the range matches no row.
-The EF Core Repository on PostgreSQL compares a `time` column with a value outside its range and gives the C# answer.
+The EF Core Repository on PostgreSQL compares a `time` column with a value outside its range in a query (a named query, `Query()` with hand-written LINQ, the elements of an `IN` list) and gives the C# answer.
+It does not write such a value: `InsertAsync`, `UpdateAsync`, `BulkInsertAsync` and a graph save fail with PostgreSQL's `22008: time out of range`, rather than storing the value without its days.
+
+> **Known limitation**: the EF Core Repository on PostgreSQL refuses a value outside the range of a `time` column in the condition of `ExecuteDeleteAsync` without `cascadeDelete`, and in the condition of `ExecuteUpdate` written on `QuickErDbContext` (`22008: time out of range`).
+> EF Core reports both commands the same way, so the value keeps the column's type there.
+> With `cascadeDelete: true`, `ExecuteDeleteAsync` reads the keys of the matching rows with a query first and gives the C# answer.
 
 > **Known limitation**: the EF Core Repository on SQL Server cannot send a `TimeSpan` outside the range of a `time` column it is compared with, and SqlClient refuses it with an `OverflowException`.
 > EF Core sends the value as the column's type (`time`), and SQL Server has no other type that compares with a `time` column as it is.
@@ -705,7 +710,7 @@ On SQL Server, the QuickER Repository and the EF Core Repository bind a compared
 A value that does not fit is bound with its own type, so the comparison answers as C# does: a fraction or an integer out of range against an integer column (`x.Qty < 1.5`, `x.Tiny < 300`), a decimal with more digits than the column's precision and scale, a number outside the range or beyond the four fractional digits of a `money` or `smallmoney` column (`x.Price == 1.23456m`), a time of day against a `date` column, and a character outside ASCII against a non-Unicode column (`varchar`, `char`).
 The server then converts the column for that comparison, so an index on the column may not be used for it.
 On the EF Core Repository this covers every parameter of a query (a named query, `Query()` with hand-written LINQ, the elements of an IN list, the pattern of `Contains`) and the condition of `ExecuteDeleteAsync` (see [EF Core mode](#ef-core-mode-generateefcorerepositories)).
-On PostgreSQL, the EF Core Repository does the same for a `DateTime` with a time of day compared with a `date` column, which it sends as a `timestamp`.
+On PostgreSQL, the EF Core Repository does the same for a `DateTime` with a time of day compared with a `date` column, which it sends as a `timestamp`, and, in a query, for a `TimeSpan` outside the range of a `time` column, which it sends as an `interval`.
 
 > **Known limitation**: on the EF Core Repository, a constant written in hand-written LINQ is not a parameter.
 > EF Core writes it into the SQL, and writes a string constant compared with a non-Unicode column as non-Unicode text, so a character outside ASCII turns into `?` and the comparison matches the rows that hold `?` (`Query().Where(x => x.Code == "日本")`).
@@ -1279,6 +1284,10 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   `AddGeneratedEfCoreRepositories` adds it to the DbContext options after your configuration.
   When you build `DbContextOptions` yourself, add `PostgreSqlQueryParameterInterceptor.Instance` with `AddInterceptors`.
   Connections of other providers are left untouched.
+- On PostgreSQL, a `TimeSpan` outside the range of a `time` column (a negative value or one beyond 24 hours) compared in a LINQ query is sent as an `interval`.
+  EF Core gives the parameter the column's type `time`, which PostgreSQL refuses for such a value.
+  `PostgreSqlQueryParameterInterceptor` drops that type, also for an `IN` list holding such a value, and PostgreSQL compares the column with the interval as C# does; a value within the range keeps the type `time`.
+  It changes the commands of LINQ queries only: the condition of `ExecuteDelete` / `ExecuteUpdate` keeps the type `time` (see the known limitation on `time` under [Letter case, whitespace, and date parts](#letter-case-whitespace-and-date-parts)), and `SaveChanges` writes the value as `time`, which PostgreSQL refuses.
 - On PostgreSQL, an IN over a value-object column whose values hold `null` (`list.Contains(x.Code)` with a `null` in `list`) is rewritten before EF Core translates the condition.
   Npgsql sends the values as one array parameter and converts each element with the value object's converter, which throws `NullReferenceException` on a `null` element.
   The rewrite sends the values without `null`, and adds `x.Code == null` when the values held one, which is the meaning C# gives the condition.
@@ -1286,8 +1295,10 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 - A `money` or `smallmoney` column on SQL Server, and a `money` column on PostgreSQL, is configured with `HasColumnType`.
   Without it, EF Core gives the `decimal` property its default type: SQL Server stores `1.2345` in a `money` column as `1.23` (`decimal(18,2)`), and PostgreSQL refuses a condition on the column (`operator does not exist: money = numeric`).
   With it, SQL Server stores the four fractional digits the column keeps, and PostgreSQL compares the column with a `money` value (see the known limitation on `money` under [Letter case, whitespace, and date parts](#letter-case-whitespace-and-date-parts)).
-- A PostgreSQL column that EF Core's Npgsql provider cannot write with its default mapping for the property type is configured with `HasColumnType`: `date`, `timestamp`, `time with time zone`, `json`, `jsonb` and `xml`, and arrays of them (`date[]` and the like).
+- A PostgreSQL column that EF Core's Npgsql provider cannot write correctly with its default mapping for the property type is configured with `HasColumnType`: `date`, `timestamp`, `time`, `time with time zone`, `json`, `jsonb` and `xml`, and arrays of them (`date[]` and the like).
   Without it, the provider sends a `DateTime` as `timestamp with time zone` and refuses a value of `DateTimeKind.Unspecified`, sends a `DateTimeOffset` the same way and refuses an offset other than UTC, and sends a string as `text`, which PostgreSQL refuses for a JSON or XML column.
+  It sends a `TimeSpan` as an `interval`, and PostgreSQL stores a value outside the range of a `time` column without its days and without an error (`1.01:00:00` as `01:00:00`, `-01:00:00` as `23:00:00`).
+  With the column type, PostgreSQL refuses such a value.
   A `DateTime` of `DateTimeKind.Utc` cannot be written to a `timestamp` column, and a `timestamptz` column takes a UTC offset only (both are Npgsql's rules).
   No other column gets a column type apart from `money` (the previous item), so a diagram of types every dialect maps to the same C# type generates the same code whatever its dialect.
 - The MySQL mappings (`timestamp` as `DateTime`, `char(36)` as `Guid`, see [Database types and C# types](#database-types-and-c-types)) were checked with MySql.EntityFrameworkCore, whose driver is MySql.Data.

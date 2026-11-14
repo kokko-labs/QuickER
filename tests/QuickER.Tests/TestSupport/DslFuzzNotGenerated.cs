@@ -62,8 +62,8 @@ internal static class DslFuzzNotGenerated
                 ),
                 NotGenerated.Accepted(
                     "timespan-beyond-column-range",
-                    "TimeSpan の列の型の範囲の外の値との比較（SQLite のすべての実装先・SQL Server の EF Core 版・MySQL）と、PostgreSQL の time の列の 24 時間以上の値",
-                    "docs の TimeSpan の既知の割り切り：SQLite は TimeSpan を文字列で持ち 0〜24 時間未満の値どうしの順序比較だけが数の順と一致し、SQL Server の EF Core 版は time の列の範囲の外の値を送れず例外にし、MySQL は ±838:59:59 の外の値を端へ丸めて比べる。PostgreSQL の time の列は EF Core 版が 24 時間以上の値を日を落として書くので行に書かず、比べる値も日の中に限る（範囲の外の値は interval の列とだけ比べる）。SQL Server の範囲の外の値は QuickER 版だけの網羅の単位 coverage-sqlserver-timespan-out-of-day が作る",
+                    "TimeSpan の列の型の範囲の外の値との比較（SQLite のすべての実装先・SQL Server の EF Core 版・MySQL）と、PostgreSQL の time の列への範囲の外の値の書き込み",
+                    "docs の TimeSpan の既知の割り切り：SQLite は TimeSpan を文字列で持ち 0〜24 時間未満の値どうしの順序比較だけが数の順と一致し、SQL Server の EF Core 版は time の列の範囲の外の値を送れず例外にし、MySQL は ±838:59:59 の外の値を端へ丸めて比べる。PostgreSQL の time の列は 0〜24:00:00 しか持たず、EF Core 版は範囲の外の値の書き込みを断る（docs の TimeSpan の既知の割り切り）ので行に書かない（範囲の外の値との比較は作る）。SQL Server の範囲の外の値は QuickER 版だけの網羅の単位 coverage-sqlserver-timespan-out-of-day が作る",
                     "`Dsl/SqliteMySql`・`Dsl/SqlServer`・`Dsl/MySql`・`Dsl/PostgreSql`"
                 ),
                 NotGenerated.Accepted(

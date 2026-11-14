@@ -70,6 +70,7 @@ public abstract class DialectTypeRealDbTestsBase
         [typeof(Guid)] = "Guid",
         [typeof(DateTime[])] = "DateTime[]",
         [typeof(DateTimeOffset[])] = "DateTimeOffset[]",
+        [typeof(TimeSpan[])] = "TimeSpan[]",
         [typeof(string[])] = "string[]",
     };
 
@@ -210,6 +211,14 @@ public abstract class DialectTypeRealDbTestsBase
                 break;
             }
 
+            case DialectTypeRealDbProbeKinds.EfCoreWriteRange:
+            {
+                problems.AddRange(
+                    await EfCoreWriteRangeProblemsAsync(probe, adapter, spelling, ct)
+                );
+                break;
+            }
+
             default:
                 throw new InvalidOperationException($"知らない手順の種類 {probe.Kind}");
         }
@@ -291,11 +300,7 @@ public abstract class DialectTypeRealDbTestsBase
     )
     {
         var problems = new List<string>();
-        var builder = new DbContextOptionsBuilder();
-        ConfigureEfCore(builder);
-        // 同じ型のプロパティでも列の型が違えば別のモデル（既定のモデルのキャッシュは DbContext の型だけで引く）
-        builder.ReplaceService<IModelCacheKeyFactory, EfCoreProbeModelCacheKeyFactory>();
-        var options = builder.Options;
+        var options = EfCoreOptions();
 
         try
         {
@@ -330,6 +335,203 @@ public abstract class DialectTypeRealDbTestsBase
         }
 
         return problems;
+    }
+
+    /// <summary>
+    /// EF Core の手順のオプション：派生のプロバイダに、生成コードの <c>AddGeneratedEfCoreRepositories</c> が足すのと同じ
+    /// インターセプター（Compile リンクした可搬の固定フィクスチャの生成物）を足す
+    /// </summary>
+    private DbContextOptions EfCoreOptions()
+    {
+        var builder = new DbContextOptionsBuilder();
+        ConfigureEfCore(builder);
+        // 同じ型のプロパティでも列の型が違えば別のモデル（既定のモデルのキャッシュは DbContext の型だけで引く）
+        builder.ReplaceService<IModelCacheKeyFactory, EfCoreProbeModelCacheKeyFactory>();
+        builder.AddInterceptors(
+            GeneratedPortableFixture.SqliteBusyTimeoutInterceptor.Instance,
+            GeneratedPortableFixture.SqlServerQueryParameterInterceptor.Instance,
+            GeneratedPortableFixture.PostgreSqlQueryParameterInterceptor.Instance
+        );
+
+        return builder.Options;
+    }
+
+    /// <summary>
+    /// 書き込みの範囲の手順：表記の列を NULL 許容で作り、手順の値ごとに書き込みの 4 つの経路で書いて読み戻す。範囲の中の値は
+    /// 同じ値で読み戻し、範囲の外の値は DB（かドライバ）が断るか同じ値で読み戻す（黙って別の値を保存しない）
+    /// </summary>
+    private async Task<IReadOnlyList<string>> EfCoreWriteRangeProblemsAsync(
+        DialectTypeRealDbProbe probe,
+        DialectTypeAdapter adapter,
+        string spelling,
+        CancellationToken ct
+    )
+    {
+        var mapped = adapter.Map(spelling);
+        var type = CSharpNames.SingleOrDefault(pair => pair.Value == mapped.TypeName).Key;
+
+        if (type is null || mapped.IsFallbackType || probe.Writes is not { Count: > 0 } writes)
+        {
+            return
+            [
+                $"Map({spelling}) の C# 型 {mapped.TypeName} を書き込みの範囲の手順で書けない（代替の型か、表に無い型か、書く値が無い）",
+            ];
+        }
+
+        await ExecuteAsync(
+            $"CREATE TABLE {ProbeTable} (id {KeyColumnType} NOT NULL PRIMARY KEY, c {spelling} NULL)",
+            ct
+        );
+
+        var run = typeof(DialectTypeRealDbTestsBase)
+            .GetMethod(
+                nameof(EfCoreWriteRangeAsync),
+                BindingFlags.NonPublic | BindingFlags.Instance
+            )!
+            .MakeGenericMethod(type);
+
+        return await (Task<IReadOnlyList<string>>)
+            run.Invoke(this, [writes, mapped.EfCoreColumnType, ct])!;
+    }
+
+    /// <summary>書き込みの経路（名前と、キーと値を受けて書く操作）</summary>
+    private sealed record WritePath<T>(
+        string Name,
+        Func<EfCoreProbeContext<T>, int, T, CancellationToken, Task> Write
+    );
+
+    /// <summary>書き込みの範囲の手順の本体（値 × 経路ごとに別の行を書き、読み戻した値を比べる）</summary>
+    private async Task<IReadOnlyList<string>> EfCoreWriteRangeAsync<T>(
+        IReadOnlyList<DialectTypeRealDbWrite> writes,
+        string? columnType,
+        CancellationToken ct
+    )
+    {
+        var problems = new List<string>();
+        var options = EfCoreOptions();
+        // 更新と ExecuteUpdate の前に入れておく行の値（範囲の中の最初の値）
+        var seed = (T)writes.First(write => write.Fits).Value;
+        WritePath<T>[] paths =
+        [
+            new(
+                "SaveChanges の挿入",
+                async (context, id, value, token) =>
+                {
+                    context.Rows.Add(new EfCoreProbeRow<T> { Id = id, Value = value });
+                    await context.SaveChangesAsync(token);
+                }
+            ),
+            new(
+                "SaveChanges の更新",
+                async (context, id, value, token) =>
+                {
+                    await SeedAsync(options, columnType, id, seed, token);
+                    context.Rows.Update(new EfCoreProbeRow<T> { Id = id, Value = value });
+                    await context.SaveChangesAsync(token);
+                }
+            ),
+            // 生成の BulkInsertAsync と同じく、各行の Entry.State を Added にして 1 回の SaveChanges で書く（範囲の中の行と並べる）
+            new(
+                "一括挿入の形",
+                async (context, id, value, token) =>
+                {
+                    context.Entry(new EfCoreProbeRow<T> { Id = -id, Value = seed }).State =
+                        EntityState.Added;
+                    context.Entry(new EfCoreProbeRow<T> { Id = id, Value = value }).State =
+                        EntityState.Added;
+                    await context.SaveChangesAsync(token);
+                }
+            ),
+            new(
+                "ExecuteUpdate の SET",
+                async (context, id, value, token) =>
+                {
+                    await SeedAsync(options, columnType, id, seed, token);
+                    await context
+                        .Rows.Where(row => row.Id == id)
+                        .ExecuteUpdateAsync(
+                            setters => setters.SetProperty(row => row.Value, value),
+                            token
+                        );
+                }
+            ),
+        ];
+
+        for (var index = 0; index < writes.Count; index++)
+        {
+            var write = writes[index];
+            var value = (T)write.Value;
+
+            for (var pathIndex = 0; pathIndex < paths.Length; pathIndex++)
+            {
+                var path = paths[pathIndex];
+                var id = (index * paths.Length) + pathIndex + 1;
+                Exception? refusal = null;
+
+                try
+                {
+                    await using var context = new EfCoreProbeContext<T>(
+                        options,
+                        StoreName,
+                        columnType
+                    );
+                    await path.Write(context, id, value, ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    refusal = ex;
+                }
+
+                var what =
+                    $"{path.Name}で {Show(value)}{(write.Fits ? string.Empty : "（範囲の外）")}";
+
+                if (refusal is not null)
+                {
+                    if (write.Fits)
+                    {
+                        problems.Add($"{what}: 範囲の中の値を書けない（{Describe(refusal)}）");
+                    }
+
+                    continue;
+                }
+
+                await using var reader = new EfCoreProbeContext<T>(options, StoreName, columnType);
+                var stored = await reader
+                    .Rows.AsNoTracking()
+                    .SingleOrDefaultAsync(row => row.Id == id, ct);
+
+                if (stored is null)
+                {
+                    problems.Add($"{what}: 書いた行が無い");
+                }
+                else if (
+                    !StructuralComparisons.StructuralEqualityComparer.Equals(value, stored.Value)
+                )
+                {
+                    problems.Add(
+                        write.Fits
+                            ? $"{what}: 読み戻した値が違う（{Show(stored.Value)}）"
+                            : $"{what}: 断らずに別の値を保存した（{Show(stored.Value)}）"
+                    );
+                }
+            }
+        }
+
+        return problems;
+    }
+
+    /// <summary>更新の経路の前に、範囲の中の値の行を入れておく（別の DbContext で）</summary>
+    private async Task SeedAsync<T>(
+        DbContextOptions options,
+        string? columnType,
+        int id,
+        T seed,
+        CancellationToken ct
+    )
+    {
+        await using var context = new EfCoreProbeContext<T>(options, StoreName, columnType);
+        context.Rows.Add(new EfCoreProbeRow<T> { Id = id, Value = seed });
+        await context.SaveChangesAsync(ct);
     }
 
     /// <summary>例外の型と 1 行目の文言（内側の例外があれば添える）</summary>

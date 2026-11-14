@@ -69,6 +69,11 @@ public sealed class DialectTypeRealDbTableTests(ITestOutputHelper output)
             yield return "書く値は EF Core の手順だけが持つ";
         }
 
+        if (probe.Kind != DialectTypeRealDbProbeKinds.EfCoreWriteRange && probe.Writes is not null)
+        {
+            yield return "範囲の端と外の書く値は書き込みの範囲の手順だけが持つ";
+        }
+
         // 読み書きできない組は、理由と今の症状の両方を持つ（片方だけだと、直ったことを知らせられないか、理由が残らない）
         if ((probe.GapReason is null) != (probe.GapSymptom is null))
         {
@@ -183,6 +188,54 @@ public sealed class DialectTypeRealDbTableTests(ITestOutputHelper output)
                     if (name != mapped)
                     {
                         yield return $"{what}の型 {name ?? value.GetType().Name} がマッパーの型 {mapped} と違う";
+                    }
+                }
+
+                break;
+            }
+
+            case DialectTypeRealDbProbeKinds.EfCoreWriteRange:
+            {
+                if (row.Facet != DialectTypeFacets.Map)
+                {
+                    yield return $"行の観点が {row.Facet}（マッパーの行を指す）";
+                    break;
+                }
+
+                if (probe.Writes is not { } writes || !writes.Any(write => write.Fits))
+                {
+                    yield return "書き込みの範囲の手順は、範囲の中の値を 1 つ以上含む書く値を持つ";
+                    break;
+                }
+
+                if (
+                    probe.Spelling is not null
+                    || probe.Value is not null
+                    || probe.ReadBack is not null
+                    || probe.Driver is not null
+                    || probe.MapperType is not null
+                    || probe.NarrowingLoses
+                    || probe.GapReason is not null
+                )
+                {
+                    yield return "書き込みの範囲の手順は行の入力を DDL に流し、書く値のほかを持たない";
+                }
+
+                // 書く値の型は、マッパーが行の入力を写す C# の型（違うと書けないか、読み戻した値と型の違いで食い違う）
+                var mappedType = DialectTypeAxis
+                    .Get(probe.Dialect)
+                    .Map((string)row.Input!)
+                    .TypeName;
+
+                foreach (var write in writes)
+                {
+                    var name = DialectTypeRealDbTestsBase.CSharpNames.GetValueOrDefault(
+                        write.Value.GetType()
+                    );
+
+                    if (name != mappedType)
+                    {
+                        yield return $"書く値の型 {name ?? write.Value.GetType().Name} がマッパーの型 {mappedType} と違う";
                     }
                 }
 
