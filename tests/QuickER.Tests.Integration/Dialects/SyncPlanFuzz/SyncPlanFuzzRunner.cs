@@ -130,7 +130,8 @@ internal sealed class FuzzSeedOutcome
 /// （型＝選んだ AlterColumn が型の変更を述べている・NULL 許容＝選んだ AlterColumn が NULL 許容の変更を述べているか、
 /// 選んだ主キーの変更の新しい主キー列・計算列か＝再構築の喪失の警告がその表に出ている・主キー＝選んだ主キーの変更）。</item>
 /// <item>残った表の行数は変わらない。取込の警告の種類（種別と表）は増えない。残った列の NULL の行の数は変わらない
-/// （表明 5b・<see cref="NullCountChanges"/>）。残った列の既定値の式は変わらない（表明 5c・<see cref="ColumnDefaultChanges"/>）。</item>
+/// （表明 5b・<see cref="NullCountChanges"/>）。残った列の既定値の式は変わらない（表明 5c・<see cref="ColumnDefaultChanges"/>）。
+/// 同期の前に発火できたトリガーは、同期の後も発火できる（表明 5d・<see cref="NewlyBrokenTriggers"/>）。</item>
 /// </list>
 /// </remarks>
 internal static class SyncPlanFuzzRunner
@@ -260,6 +261,8 @@ internal static class SyncPlanFuzzRunner
             await dialect.ExecuteRawAsync(raw, ct).ConfigureAwait(false);
         }
 
+        // 表明 5d の同期の前の状態（もとから発火できないトリガーは数えない）
+        var brokenTriggersBefore = dialect.BrokenTriggers();
         var before = await ImportAsync(dialect, ct).ConfigureAwait(false);
         outcome.Before = before;
         await generator.OnImportedAsync(dialect, before, ct).ConfigureAwait(false);
@@ -540,6 +543,11 @@ internal static class SyncPlanFuzzRunner
         // 表明 5c: 残った列の既定値の式は変わらない
         outcome.Violations.AddRange(ColumnDefaultChanges(before, after, selected, plan.Warnings));
 
+        // 表明 5d: 同期の前に発火できたトリガーは、コミットした同期の後も発火できる
+        outcome.Violations.AddRange(
+            NewlyBrokenTriggers(brokenTriggersBefore, dialect.BrokenTriggers())
+        );
+
         var beforeWarnings = before
             .Warnings.Select(w => $"{w.Kind}|{w.TableName.ToLowerInvariant()}")
             .ToHashSet();
@@ -556,6 +564,34 @@ internal static class SyncPlanFuzzRunner
 
         outcome.Violations.AddRange(LostImportWarnings(before, after, selected, plan.Warnings));
         return outcome;
+    }
+
+    /// <summary>違反の文の頭（表明 5d の発火できなくなったトリガー）</summary>
+    public const string BrokenTriggerPrefix =
+        "trigger can no longer fire after the committed sync:";
+
+    /// <summary>
+    /// 表明 5d（発火できなくなったトリガー）：同期の前には発火できたのに、コミットした同期の後に発火できないトリガーを違反の文にする
+    /// </summary>
+    /// <remarks>
+    /// テーブル再構築（SQLite）はトリガーの本文を検証しないので、消した列・表を参照するトリガーがあっても同期はコミットし、後で表へ
+    /// 書いたときに初めて断られる。判定は方言（<see cref="SyncPlanFuzzDialect.BrokenTriggers"/>＝製品の実行器と同じ部品）に任せ、
+    /// 判定を持たない方言（<see langword="null"/>）は比べない。消えたトリガー（表の削除で一緒に消えた）は数えない。
+    /// </remarks>
+    internal static IEnumerable<string> NewlyBrokenTriggers(
+        IReadOnlySet<string>? before,
+        IReadOnlySet<string>? after
+    )
+    {
+        if (before is null || after is null)
+        {
+            return [];
+        }
+
+        return after
+            .Where(name => !before.Contains(name))
+            .Order(StringComparer.Ordinal)
+            .Select(name => $"{BrokenTriggerPrefix} {name}");
     }
 
     /// <summary>違反の文の頭（表明 5 の消えた取込警告）</summary>

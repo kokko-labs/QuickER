@@ -132,7 +132,7 @@ public class SqliteSchemaImporter : ISchemaImporter
             .ConfigureAwait(false);
         var aux = await LoadAuxiliaryObjectsAsync(conn, tables, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
-        var liveViewCheck = await LoadLiveViewCheckAsync(
+        var liveDependentCheck = await LoadLiveDependentCheckAsync(
                 conn,
                 replayTableSql,
                 commandTimeoutSeconds,
@@ -159,7 +159,7 @@ public class SqliteSchemaImporter : ISchemaImporter
             TableCreateSql = tableCreateSql,
             Warnings = warnings,
             ColumnDefaults = defaults,
-            LiveViewCheck = liveViewCheck,
+            LiveDependentCheck = liveDependentCheck,
         };
     }
 
@@ -218,8 +218,8 @@ ORDER BY name;";
         // 取り込まない表・ビューの名前（外部キーの参照先が「DB にあるが外した表」かを見分けるため）
         var excludedNames = new List<string>();
 
-        // ビューの判定（SqliteLiveViewCheck）がメモリの DB へ写す表の原文。取り込まない表（仮想表・ドットを含む表・名前の衝突で
-        // 捨てた表）もビューが読みうるので入れ、仮想表の付属表だけは入れない（仮想表の作成で自動でできる）
+        // ビュー・トリガーの判定（SqliteLiveDependentCheck）がメモリの DB へ写す表の原文。取り込まない表（仮想表・ドットを含む表・名前の衝突で
+        // 捨てた表）もビュー・トリガーが参照しうるので入れ、仮想表の付属表だけは入れない（仮想表の作成で自動でできる）
         var replayTableSql = new List<string>();
         await using var cmd = DbCommands.Create(conn, TablesSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -324,22 +324,23 @@ ORDER BY name;";
         return (dict, createSql, withoutRowidByTable, warnings, excludedNames, replayTableSql);
     }
 
-    /// <summary>ビューの原文を読むクエリ（作られた順）</summary>
-    private const string ViewsSql =
+    /// <summary>ビュー・トリガー・索引の原文を読むクエリ（作られた順。自動の索引は sql が無いので入らない）</summary>
+    private const string DependentObjectsSql =
         @"
-SELECT sql
+SELECT type, name, tbl_name, sql
 FROM sqlite_master
-WHERE type = 'view' AND sql IS NOT NULL
+WHERE type IN ('view', 'trigger', 'index') AND sql IS NOT NULL
 ORDER BY rowid;";
 
     /// <summary>
-    /// ビューがあれば、ビューの原文と表の原文から、ビューが同期後の表の形でも読めるかを試す入口を作る（ビューが無ければ <c>null</c>）
+    /// ビューかトリガーがあれば、表・索引・ビュー・トリガーの原文から、ビューが同期後の表の形でも読めるか・トリガーが発火できるかを試す
+    /// 入口を作る（どちらも無ければ <c>null</c>）
     /// </summary>
     /// <remarks>
-    /// 取込はビューを図に入れない（<see cref="SchemaImportWarningKind.ViewExcluded"/>）。同期の計画がビューを読めなくする変更を外せるよう、
-    /// 図の外の情報として <see cref="SchemaImportResult.LiveViewCheck"/> で持ち帰る（判定は <see cref="SqliteLiveViewCheck"/>）。
+    /// 取込はビューもトリガーも図に入れない（<see cref="SchemaImportWarningKind.ViewExcluded"/>・トリガーは表の補助オブジェクト）。同期の計画が
+    /// ビューを読めなくする変更・トリガーを壊す変更を外せるよう、図の外の情報として <see cref="SchemaImportResult.LiveDependentCheck"/> で持ち帰る（判定は <see cref="SqliteLiveDependentCheck"/>）。
     /// </remarks>
-    private static async Task<ILiveViewCheck?> LoadLiveViewCheckAsync(
+    private static async Task<ILiveDependentCheck?> LoadLiveDependentCheckAsync(
         SqliteConnection conn,
         List<string> replayTableSql,
         int commandTimeoutSeconds,
@@ -347,18 +348,37 @@ ORDER BY rowid;";
     )
     {
         var viewSql = new List<string>();
+        var triggers = new List<SqliteTrigger>();
+        var indexSql = new List<SqliteIndexSql>();
 
-        await using (var cmd = DbCommands.Create(conn, ViewsSql, commandTimeoutSeconds))
+        await using (var cmd = DbCommands.Create(conn, DependentObjectsSql, commandTimeoutSeconds))
         {
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
-                viewSql.Add(reader.GetString(0));
+                var sql = reader.GetString(3);
+
+                switch (reader.GetString(0))
+                {
+                    case "view":
+                        viewSql.Add(sql);
+                        break;
+                    case "trigger":
+                        triggers.Add(
+                            new SqliteTrigger(reader.GetString(1), reader.GetString(2), sql)
+                        );
+                        break;
+                    default:
+                        indexSql.Add(new SqliteIndexSql(reader.GetString(2), sql));
+                        break;
+                }
             }
         }
 
-        return viewSql.Count == 0 ? null : new SqliteLiveViewCheck(replayTableSql, viewSql);
+        return viewSql.Count == 0 && triggers.Count == 0
+            ? null
+            : new SqliteLiveDependentCheck(replayTableSql, indexSql, viewSql, triggers);
     }
 
     /// <summary>

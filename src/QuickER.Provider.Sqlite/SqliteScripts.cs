@@ -31,7 +31,7 @@ internal static class SqliteScripts
 
     /// <summary>コマンドの文を最後まで実行する（同期版。どの文が断られても例外になる）</summary>
     /// <param name="command">SQLite の接続のコマンド（複数の文でよい）</param>
-    /// <remarks>計画の段のビューの判定（<see cref="SqliteLiveViewCheck"/>）がメモリの DB で使う（計画は同期の処理）。</remarks>
+    /// <remarks>計画の段のビューとトリガーの判定（<see cref="SqliteLiveDependentCheck"/>）がメモリの DB で使う（計画は同期の処理）。</remarks>
     public static void RunToEnd(DbCommand command)
     {
         using var reader = command.ExecuteReader();

@@ -176,6 +176,9 @@
   <data name="Sync_Error_SqliteBrokenView" xml:space="preserve">
     <value>同期によってビューが壊れる（存在しない列・表を参照する）ため、ロールバックしました: {0}</value>
   </data>
+  <data name="Sync_Error_SqliteBrokenTrigger" xml:space="preserve">
+    <value>同期によってトリガーが発火できなくなる（存在しない列・表・キーを参照する、または値の数が合わない）ため、ロールバックしました: {0}</value>
+  </data>
   <data name="Sync_Error_SqliteForeignKeyViolation" xml:space="preserve">
     <value>テーブル再構築後に外部キー制約違反が検出されたため、トランザクションをロールバックしました。対象テーブル: {0}</value>
   </data>

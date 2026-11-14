@@ -201,8 +201,8 @@ internal static partial class SourceRules
                 new(
                     TransactionalSyncExecutorFiles[2],
                     "DbTransactions.RollbackQuietlyAsync",
-                    3,
-                    "SQLite の同期のトランザクションの後始末"
+                    4,
+                    "SQLite の同期のトランザクションの後始末（外部キー違反・壊れたビュー・発火できないトリガー・例外の 4 経路）"
                 )
             ) with
             {

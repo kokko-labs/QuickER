@@ -395,6 +395,10 @@
     <value>注意: 以下の表の削除と、列を足す・消す変更は実行しません（ほかの変更はそのまま実行します）。DB のビュー（表ごとに後ろへ示します）がこれらの表を読んでいて、これらの変更をするとビューが読めなくなり、同期が巻き戻されます。これらの変更を同期するには、先に DB 側でビューを直すか消してから、もう一度取り込んでください:
 {0}</value>
   </data>
+  <data name="SchemaSync_ExecuteConfirmTableChangeBreaksDependentTrigger" xml:space="preserve">
+    <value>注意: 以下の表の削除と、列を足す・消す変更は実行しません（ほかの変更はそのまま実行します）。DB のトリガー（表ごとに後ろへ示します）がこれらの表や列を参照していて、これらの変更をするとトリガーが発火したときに失敗するため、同期が巻き戻されます。これらの変更を同期するには、先に DB 側でトリガーを直すか消してから、もう一度取り込んでください:
+{0}</value>
+  </data>
   <data name="SchemaSync_ExecuteConfirmForeignKeyNotOnCandidateKey" xml:space="preserve">
     <value>注意: 以下の外部キーは、同期後の参照先の列が主キーにも一意制約にもちょうど一致しません。追加は失敗する可能性が高く、既存の外部キーの作り直しでは、MySQL / Oracle で外部キーが外れたまま残り得ます:
 {0}</value>

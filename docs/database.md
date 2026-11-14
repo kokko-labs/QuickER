@@ -348,7 +348,7 @@ It is not imported, it never appears in generated DDL, and the diff sync neither
 | Automatic numbering that refuses given values | Imported as the mark of a column the database numbers, and reported (SQL Server, PostgreSQL, Oracle; the numbering definition is lost) | Emitted as an ordinary column, with a note | Not applicable (SQLite has none) |
 | Automatic numbering that accepts given values | Not imported (named) | Not emitted | Lost (a primary key whose declared type is `INTEGER` stays a rowid alias, so implicit auto-numbering survives; see the note below) |
 | Non-unique index | Not imported | Not emitted | Preserved (captured as its `CREATE` statement and replayed) |
-| Trigger | Not imported | Not emitted | Preserved (same) |
+| Trigger | Not imported | Not emitted | Preserved (same; a change that would make it fail when it fires is left out and named) |
 | Table options after the column list (`WITHOUT ROWID`, `STRICT`) | Not imported | Not emitted | Lost |
 | Constraint clauses (`ON CONFLICT`, `DEFERRABLE INITIALLY DEFERRED`) | Not imported | Not emitted | Lost |
 | View | Not imported (named) | Not emitted | Preserved (it keeps pointing at the rebuilt table; a change that would leave it unreadable is left out and named) |
@@ -766,6 +766,11 @@ SQLite does not check foreign keys by default, so databases that hold child rows
 A view that refers to a rebuilt table does not stop the rebuild, and it keeps pointing at the rebuilt table (`PRAGMA legacy_alter_table` is turned on for the duration).
 A change that would leave a view unreadable is left out of the script beforehand (see below).
 If the sync still breaks a view, for example one that refers to a dropped column, it rolls back and names the view.
+A trigger that refers to a rebuilt table also stays, and the rebuild recreates the table's own triggers from their `CREATE` statements.
+SQLite does not check a trigger's body during the rebuild, so a change that removes a column or table a trigger uses would otherwise commit and make the trigger fail the next time it fires.
+A change that would do that is left out of the script beforehand as well (see below).
+If the sync still leaves a trigger that can no longer fire, it rolls back and names the trigger.
+An index that reads a dropped column cannot be recreated, so such a sync fails and rolls back.
 
 ```mermaid
 flowchart TD
@@ -774,9 +779,9 @@ flowchart TD
   q -- "Yes" --> n1
   subgraph tx["Transaction"]
     direction TB
-    n1["Create a new table from the database's current state + the selected differences"] --> n2["Migrate the data"] --> n3["Swap out the old table"] --> n4["Recreate auxiliary objects such as indexes"] --> chk{"Did the sync add foreign key violations or break a view?"}
+    n1["Create a new table from the database's current state + the selected differences"] --> n2["Migrate the data"] --> n3["Swap out the old table"] --> n4["Recreate auxiliary objects such as indexes"] --> chk{"Did the sync add foreign key violations, break a view, or leave a trigger that cannot fire?"}
   end
-  chk -- "Yes" --> rb["Roll back and report the violating tables or views"]
+  chk -- "Yes" --> rb["Roll back and report the violating tables, views, or triggers"]
   chk -- "No" --> ok["Commit"]
 ```
 
@@ -805,6 +810,18 @@ A `SELECT *` view without a column list keeps working with fewer columns, so dro
 To apply such a change, first change or drop the view in the database, then import again.
 A view over a table that the copy cannot recreate (one that uses a collation or virtual table module registered outside the database) is not checked when the script is built, and neither is a view that uses a function registered by an application.
 If such a view breaks, the check after the rebuild rolls the sync back and names the view, as described above.
+
+Triggers are not part of the diagram either, and they are checked the same way.
+The in-memory copy also holds the triggers and indexes, and for each trigger QuickER asks SQLite to prepare, without running them, the inserts, updates, and deletes that would fire it.
+A change that would make a trigger fail when it fires is left out of the script, and the confirmation names the table and the triggers.
+Again, only dropping a column, adding a column, and dropping a table can do that, and changing a column's type does not.
+A trigger that uses a dropped column or table is named, whether it belongs to the rebuilt table, another table, or a view (`INSTEAD OF`), and so is a trigger that inserts into the table without a column list when a column is added.
+A trigger on a dropped table goes away with the table and is not named, and neither is a trigger on `UPDATE OF` a dropped column, which simply never fires again.
+To apply such a change, first change or drop the trigger in the database, then import again.
+The copy keeps the primary key and unique constraints whose columns remain, but not the key changes that the same sync makes.
+A trigger whose `ON CONFLICT` target the same sync removes is therefore not caught when the script is built, and the check after the rebuild rolls the sync back and names the trigger.
+A trigger over a table that the copy cannot recreate (one that uses a collation or virtual table module registered outside the database) is not checked when the script is built.
+A trigger that uses a function registered by an application cannot be prepared outside that application, so QuickER does not check it.
 
 The sync-target SQLite file can also be created fresh with the "Create new" button in the connection dialog.
 Apply the whole diagram to an empty database to set it up from scratch.

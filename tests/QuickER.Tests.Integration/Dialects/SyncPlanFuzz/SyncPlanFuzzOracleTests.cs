@@ -992,6 +992,37 @@ public sealed class SyncPlanFuzzOracleTests
     }
 
     [Theory(
+        DisplayName = "[Integration] 同期計画の総当たりの表明 5d: 同期の後に新しく発火できなくなったトリガーだけを違反にする（もとから発火できない・消えた・判定の無い方言は数えない）"
+    )]
+    [InlineData("newly-broken-is-a-violation", "", "trg_a", 1)]
+    [InlineData("already-broken-is-not-counted", "trg_a", "trg_a", 0)]
+    [InlineData("fixed-or-gone-is-not-counted", "trg_a", "", 0)]
+    [InlineData("only-the-new-one-is-counted", "trg_a", "trg_a,trg_b", 1)]
+    [InlineData("dialect-without-trigger-check-is-skipped", null, "trg_a", 0)]
+    public void NewlyBrokenTriggers_CountsOnlyTriggersBrokenBySync(
+        string name,
+        string? before,
+        string after,
+        int violations
+    )
+    {
+        static IReadOnlySet<string>? Set(string? names) =>
+            names is null
+                ? null
+                : names
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .ToHashSet(StringComparer.Ordinal);
+
+        SyncPlanFuzzRunner
+            .NewlyBrokenTriggers(Set(before), Set(after))
+            .Should()
+            .HaveCount(violations, name)
+            .And.OnlyContain(v =>
+                v.StartsWith(SyncPlanFuzzRunner.BrokenTriggerPrefix, StringComparison.Ordinal)
+            );
+    }
+
+    [Theory(
         DisplayName = "[Integration] 同期計画の総当たりの表明 1b: 規則ごとに、許される形は違反にならず、違反の形は規則の番号で名指しされる"
     )]
     [MemberData(nameof(Cases))]

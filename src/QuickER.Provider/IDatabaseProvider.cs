@@ -51,12 +51,13 @@ public sealed class SchemaImportResult
     /// </remarks>
     public IReadOnlyList<SchemaColumnDefault> ColumnDefaults { get; init; } = [];
 
-    /// <summary>DB のビュー（図には入れない）が同期後の表の形でも読めるかを試す入口（図の外の情報）</summary>
+    /// <summary>DB のビューとトリガー（図には入れない）が同期後の表の形でも読める・発火できるかを試す入口（図の外の情報）</summary>
     /// <remarks>
-    /// 現状は SQLite だけが、ビューがあるときに埋める（取込で読んだ表とビューの原文を持つ）。ほかの方言とビューの無い DB では
-    /// <c>null</c>。同期の画面が <see cref="SyncPlanContext.LiveViewCheck"/> へ渡し、計画がビューを壊す変更を外す。
+    /// 現状は SQLite だけが、ビューかトリガーがあるときに埋める（取込で読んだ表・索引・ビュー・トリガーの原文を持つ）。ほかの方言と、ビューも
+    /// トリガーも無い DB では <c>null</c>。同期の画面が <see cref="SyncPlanContext.LiveDependentCheck"/> へ渡し、計画がビュー・トリガーを
+    /// 壊す変更を外す。
     /// </remarks>
-    public ILiveViewCheck? LiveViewCheck { get; init; }
+    public ILiveDependentCheck? LiveDependentCheck { get; init; }
 }
 
 /// <summary>接続文字列から DB スキーマを取得して意味モデルへ変換するインポーター（DB 方言ごとに実装）</summary>

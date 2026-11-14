@@ -24,7 +24,7 @@ namespace QuickER.Provider.Sqlite;
 ///     切り替えた PRAGMA は接続を閉じると一緒に消え、元へ戻す処理は要らない。
 ///   </item>
 ///   <item>
-///     BEGIN → 同期前の外部キー違反（(子表, 親表) ごとの件数）と壊れたビューを控え、スクリプト本文を実行する
+///     BEGIN → 同期前の外部キー違反（(子表, 親表) ごとの件数）と壊れたビューと発火できないトリガーを控え、スクリプト本文を実行する
 ///     （Microsoft.Data.Sqlite は 1 コマンドで複数文を実行できる。本文中に埋まった PRAGMA はトランザクション内では無害）。
 ///   </item>
 ///   <item>
@@ -34,6 +34,10 @@ namespace QuickER.Provider.Sqlite;
 ///   </item>
 ///   <item>
 ///     同期前には読めたのに読めなくなったビュー（作り直しで消した列を参照するもの等）があれば、同じく ROLLBACK する。
+///   </item>
+///   <item>
+///     同期前には発火できたのに発火できなくなったトリガー（作り直しで消した列・表を参照するもの等。判定は <see cref="SqliteTriggers"/>）が
+///     あれば、同じく ROLLBACK する。
 ///   </item>
 ///   <item>どちらも無ければ COMMIT する（<c>Committed=true</c>）。</item>
 /// </list>
@@ -83,11 +87,11 @@ public sealed class SqliteSchemaSyncExecutor : ISchemaSyncExecutor
             .ConfigureAwait(false);
     }
 
-    /// <summary>トランザクション内でスクリプトを実行し、外部キーとビューを同期の前後で検査してコミットする</summary>
+    /// <summary>トランザクション内でスクリプトを実行し、外部キーとビューとトリガーを同期の前後で検査してコミットする</summary>
     /// <remarks>
-    /// 外部キーの違反とビューの破損は、同期で<b>増えたとき</b>だけ失敗にする。SQLite は既定で外部キーを検査しないため
+    /// 外部キーの違反とビュー・トリガーの破損は、同期で<b>増えたとき</b>だけ失敗にする。SQLite は既定で外部キーを検査しないため
     /// 親の無い子行を抱えた DB は珍しくなく、DB 全体の検査結果で判定すると、無関係な同期まで失敗する
-    /// （壊れたビューを作れるのも同じ）。比べる単位は外部キー違反が (子表, 親表) ごとの件数、ビューが名前。
+    /// （壊れたビュー・トリガーを作れるのも同じ）。比べる単位は外部キー違反が (子表, 親表) ごとの件数、ビュー・トリガーが名前。
     /// </remarks>
     private static async Task<SchemaSyncResult> ExecuteInTransactionAsync(
         SqliteConnection conn,
@@ -117,6 +121,11 @@ public sealed class SqliteSchemaSyncExecutor : ISchemaSyncExecutor
                     ct
                 )
                 .ConfigureAwait(false);
+            var brokenTriggersBefore = SqliteTriggers.CollectBroken(
+                conn,
+                tran,
+                settings.CommandTimeoutSeconds
+            );
 
             // スクリプト本文（複数文）を 1 コマンドで実行し、結果を最後まで読み切る（断られた文の後ろを黙って飛ばさない＝SqliteScripts）
             await using (
@@ -166,6 +175,24 @@ public sealed class SqliteSchemaSyncExecutor : ISchemaSyncExecutor
                 result.Error = string.Format(
                     QuickER.Provider.Resources.Strings.Sync_Error_SqliteBrokenView,
                     string.Join(", ", newlyBrokenViews)
+                );
+                result.Batches.Add(new SchemaSyncBatchResult(1, script, false, result.Error));
+                return result;
+            }
+
+            // 作り直しで発火できなくなったトリガー（消した列・表を参照するもの等。作り直しはトリガーの本文を検証しない）があればロールバックする
+            var newlyBrokenTriggers = SqliteTriggers
+                .CollectBroken(conn, tran, settings.CommandTimeoutSeconds)
+                .Where(trigger => !brokenTriggersBefore.Contains(trigger))
+                .Order(StringComparer.Ordinal)
+                .ToList();
+
+            if (newlyBrokenTriggers.Count > 0)
+            {
+                await DbTransactions.RollbackQuietlyAsync(tran).ConfigureAwait(false);
+                result.Error = string.Format(
+                    QuickER.Provider.Resources.Strings.Sync_Error_SqliteBrokenTrigger,
+                    string.Join(", ", newlyBrokenTriggers)
                 );
                 result.Batches.Add(new SchemaSyncBatchResult(1, script, false, result.Error));
                 return result;

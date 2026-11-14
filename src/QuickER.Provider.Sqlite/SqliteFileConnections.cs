@@ -14,7 +14,7 @@ namespace QuickER.Provider.Sqlite;
 /// 新規作成・取込・同期はどれも操作 1 回で接続を 1 本しか開かないので、プールを切っても性能は変わらない。
 /// 閉じた接続はプールへ戻らないので、接続に設定した PRAGMA（外部キー検査など）も接続と一緒に消え、後から開いた接続へ残らない。
 /// 生成コードのランタイム（QuickER.Runtime.Sqlite）は利用者のアプリの接続なので、ここを通さない。
-/// 計画の段のビューの判定（<see cref="SqliteLiveViewCheck"/>）が開くメモリの DB の接続も、ここで作る（作り手を 1 つに保つ）。
+/// 計画の段のビューとトリガーの判定（<see cref="SqliteLiveDependentCheck"/>）が開くメモリの DB の接続も、ここで作る（作り手を 1 つに保つ）。
 /// </para>
 /// </remarks>
 internal static class SqliteFileConnections

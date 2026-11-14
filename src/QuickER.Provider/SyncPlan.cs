@@ -280,7 +280,7 @@ public enum SyncPlanWarningKind
 
     /// <summary>
     /// DB のビューが読む表の列を消す・足す変更と表の削除のうち、ビューを読めなくするものを、計画から外した
-    /// （DB のビューを試せる方言＝SQLite。<see cref="SyncPlanContext.LiveViewCheck"/>）。
+    /// （DB のビューを試せる方言＝SQLite。<see cref="SyncPlanContext.LiveDependentCheck"/>）。
     /// </summary>
     /// <remarks>
     /// ビューは図に無く、同期はビューを直さないので、読めなくなるビューがあると実行器が同期の前後の比較で見つけて巻き戻す。ビューが読めるかは
@@ -289,6 +289,19 @@ public enum SyncPlanWarningKind
     /// 仮想表のモジュール・関数に頼るもの）は数えない（実行器の比較が最後に拾う）。表ごとに 1 件。
     /// </remarks>
     TableChangeBreaksDependentView,
+
+    /// <summary>
+    /// DB のトリガーが参照する表の列を消す・足す変更と表の削除のうち、トリガーを発火できなくするものを、計画から外した
+    /// （DB のトリガーを試せる方言＝SQLite。<see cref="SyncPlanContext.LiveDependentCheck"/>）。
+    /// </summary>
+    /// <remarks>
+    /// トリガーは図に無く、同期はトリガーを直さない。テーブル再構築はトリガーの本文を検証しないので、トリガーが参照する列・表を消しても
+    /// （列の並びを書かない <c>INSERT</c> のトリガーは列を足しても）同期はコミットし、トリガーは発火したときに初めて断られる。外すのは
+    /// ビューと同じく、その表の列の削除・列の追加・表の削除だけ（型などの変更は流す）。消した表自身のトリガーは表と一緒に消えるので数えない。
+    /// 同じ同期が主キー・一意制約を変えてトリガーの <c>ON CONFLICT</c> の的が消える形は計画では試さない（実行器の同期の前後の比較が
+    /// 巻き戻して名指しする）。表ごとに 1 件。
+    /// </remarks>
+    TableChangeBreaksDependentTrigger,
 }
 
 /// <summary>
@@ -314,7 +327,8 @@ public enum SyncPlanWarningKind
 /// <see cref="SyncPlanWarningKind.TableWithoutColumns"/> では追加を外した列の無い表（Detail は空）、
 /// <see cref="SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent"/> では作り直しを外した表（Detail は取込警告が名指しした捨てた物をカンマ区切りで並べたもの）、
 /// <see cref="SyncPlanWarningKind.UniqueConstraintRebuildKeptForForeignKey"/> では一意制約の表（Detail は「残した一意制約の名前 (支える外部キーの名前)」）、
-/// <see cref="SyncPlanWarningKind.TableChangeBreaksDependentView"/> では変更を外した表（Detail は読めなくなるビューの名前をカンマ区切りで並べたもの）。
+/// <see cref="SyncPlanWarningKind.TableChangeBreaksDependentView"/> では変更を外した表（Detail は読めなくなるビューの名前をカンマ区切りで並べたもの）、
+/// <see cref="SyncPlanWarningKind.TableChangeBreaksDependentTrigger"/> では変更を外した表（Detail は発火できなくなるトリガーの名前をカンマ区切りで並べたもの）。
 /// </param>
 /// <param name="Detail">
 /// 補足（外部キー制約名など。無ければ空文字）。

@@ -286,6 +286,12 @@ namespace QuickER.Provider.Resources {
             }
         }
 
+        public static string Sync_Error_SqliteBrokenTrigger {
+            get {
+                return ResourceManager.GetString("Sync_Error_SqliteBrokenTrigger", resourceCulture);
+            }
+        }
+
         public static string Sync_Error_SqliteBrokenView {
             get {
                 return ResourceManager.GetString("Sync_Error_SqliteBrokenView", resourceCulture);

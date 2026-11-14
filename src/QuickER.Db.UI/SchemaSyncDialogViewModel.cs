@@ -658,6 +658,12 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 Strings.SchemaSync_ExecuteConfirmTableChangeBreaksDependentView,
                 BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
             ),
+            // DB のトリガーが参照する表の列を消す・足す変更と表の削除は、トリガーを発火できなくして同期ごと巻き戻されるので、計画から外した
+            // （SQLite。Detail は発火できなくなるトリガーの名前）
+            SyncPlanWarningKind.TableChangeBreaksDependentTrigger => string.Format(
+                Strings.SchemaSync_ExecuteConfirmTableChangeBreaksDependentTrigger,
+                BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
+            ),
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
 
