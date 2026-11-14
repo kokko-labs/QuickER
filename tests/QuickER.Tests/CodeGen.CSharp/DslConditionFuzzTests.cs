@@ -191,6 +191,18 @@ public class DslConditionFuzzTests
                     .Select(unit => (unit, SqliteOrderedTimeSpanTarget, InvariantCultureName))
             );
 
+            // 浮動小数点（float・double）の列は順序比較と並び替えもどの実装先も流す。SQLite は float の列を持たない（double だけ）
+            coverageUnits.AddRange(
+                DslFuzzUnits
+                    .FloatingCoverage(DialectNames.Sqlite)
+                    .Select(unit => (unit, SqliteTarget, InvariantCultureName))
+            );
+            coverageUnits.AddRange(
+                DslFuzzUnits
+                    .FloatingCoverage(DialectNames.MySql)
+                    .Select(unit => (unit, MySqlTarget, InvariantCultureName))
+            );
+
             // 時差の混ざった DateTimeOffset の値はインメモリだけで流す（SQLite は TEXT で持ち、同じ時差の値どうしでだけ瞬間の比較と
             // 一致する＝docs の既知の割り切り。オラクルの瞬間の比較を Docker なしで確かめる）
             coverageUnits.AddRange(

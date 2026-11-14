@@ -46,6 +46,7 @@ public sealed class NamedQueryDslConditionFuzzMySqlRuntimeTests(MySqlContainerFi
                 DslFuzzUnits.PlainCoverage(DialectNames.MySql),
                 .. DslFuzzUnits.FamiliesCoverage(DialectNames.MySql),
                 .. DslFuzzUnits.TimeSpanCoverage(DialectNames.MySql),
+                .. DslFuzzUnits.FloatingCoverage(DialectNames.MySql),
             ],
             Ct
         );

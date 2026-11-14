@@ -146,6 +146,27 @@ public class QueryConditionCSharpEmitterTests
                 "e => e.Memo == MemoValue.Create(literal1)",
                 ["var literal1 = \"abc\";"]
             ),
+            // float の列の数値のリテラルは、文字列のリテラルと同じく前置文のローカル変数へ持ち上げる（EF Core がパラメータ〔単精度〕に
+            // する）。同じ綴りでも文字列のリテラルとは別の変数になり、名前は文字列と同じ規則で決まる
+            ["float-literal-lifted"] = new(
+                "Ratio = 0.1 OR Ratio > 16777217 OR Memo = '0.1f'",
+                Binding.Plain,
+                "e => ((e.Ratio == literal1 || e.Ratio > literal2_) || e.Memo == literal3)",
+                ["var literal1 = 0.1f;", "var literal2_ = 16777217f;", "var literal3 = \"0.1f\";"]
+            ),
+            ["value-object-float-literal"] = new(
+                "Ratio = 0.5",
+                Binding.ValueObjects,
+                "e => e.Ratio == RatioValue.Create(literal1)",
+                ["var literal1 = 0.5f;"]
+            ),
+            // double の列の数値のリテラルは定数のまま（EF Core のリテラルが倍精度の値のまま書かれ、C# と同じ答えになる）
+            ["double-literal-inline"] = new(
+                "Score = 0.1",
+                Binding.Plain,
+                "e => e.Score == 0.1d",
+                []
+            ),
             // NULL 非許容の文字列の列には ! も NULL 前提も付けない（元 Emit_StringMatch_NonNullableColumn）
             ["string-match-non-nullable-column"] = new(
                 "Memo CONTAINS @keyword",
@@ -269,6 +290,22 @@ public class QueryConditionCSharpEmitterTests
             }
         );
         _entity.Columns.Add(new Column { Name = "Memo", DataType = "nvarchar(200)" });
+        _entity.Columns.Add(
+            new Column
+            {
+                Name = "Ratio",
+                DataType = "real",
+                IsNullable = false,
+            }
+        );
+        _entity.Columns.Add(
+            new Column
+            {
+                Name = "Score",
+                DataType = "float",
+                IsNullable = false,
+            }
+        );
 
         _parameters =
         [
@@ -334,6 +371,22 @@ public class QueryConditionCSharpEmitterTests
                 valueObjects ? "MemoValue" : null,
                 memoNullable,
                 IsUnderlyingReferenceType: true,
+                IsGuidKeyValueObject: false
+            ),
+            [_entity.Columns[3].Id] = new QueryColumnBinding(
+                "Ratio",
+                "float",
+                valueObjects ? "RatioValue" : null,
+                false,
+                IsUnderlyingReferenceType: false,
+                IsGuidKeyValueObject: false
+            ),
+            [_entity.Columns[4].Id] = new QueryColumnBinding(
+                "Score",
+                "double",
+                valueObjects ? "ScoreValue" : null,
+                false,
+                IsUnderlyingReferenceType: false,
                 IsGuidKeyValueObject: false
             ),
         };

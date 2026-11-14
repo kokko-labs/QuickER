@@ -272,6 +272,7 @@ public sealed partial class DslFuzzGenerator
                 : column.Nullable && column.IsInteger ? IntegerOutOfType(column, seedSubset)
                 : column.NonUnicode ? NonAsciiAtoms(column, bothQuotes)
                 : column.TimeRange is { } range ? TimeSpanOutOfRange(column, range)
+                : column.Clr == DslClr.Single ? FloatBeyondPrecision(column, seedSubset)
                 : [];
 
             foreach (var atom in atoms)
@@ -425,6 +426,60 @@ public sealed partial class DslFuzzGenerator
         10000000000000000000.5m,
         -10000000000000000000.5m,
     ];
+
+    /// <summary>
+    /// float の列と、float に入らない double の値（<see cref="DslFuzz.FloatOperandDoubles"/> のうち float へ変換すると値が変わるもの）を
+    /// <c>float64</c> の型トークンで型付けしたパラメータとの比較と、NOT NULL の列の double のリストの IN・NOT IN（C# は列を double へ
+    /// 広げて比べる。NULL を許す列の IN は要素型の一致を型の検査が求めるので作らない）
+    /// </summary>
+    /// <remarks>種の単位は = と &gt; と IN の 3 つにする。</remarks>
+    private IEnumerable<DslAtom> FloatBeyondPrecision(DslColumn column, bool seedSubset)
+    {
+        var token = DslFuzz.TypeToken(DslClr.Double);
+        var beyond = DslFuzz
+            .OperandPool(column)
+            .OfType<double>()
+            .Where(value => (double)(float)value != value)
+            .Cast<object>()
+            .ToList();
+        var stored = DslFuzz
+            .ValuePool(column)
+            .OfType<float>()
+            .Select(value => (object)(double)value)
+            .ToList();
+
+        foreach (
+            var op in Enum.GetValues<DslOp>().Where(op => !seedSubset || op is DslOp.Eq or DslOp.Gt)
+        )
+        {
+            yield return OutOfTypeCompare(column, op, beyond, token);
+        }
+
+        if (column.Nullable)
+        {
+            yield break;
+        }
+
+        foreach (var negated in seedSubset ? [false] : new[] { false, true })
+        {
+            yield return new DslIn(
+                negated,
+                new DslParam(
+                    parameterPrefix + _parameterIndex++,
+                    [Pick(beyond), Pick(stored)],
+                    IsList: true,
+                    ByColumn: false,
+                    column
+                )
+                {
+                    TypeToken = token,
+                }
+            )
+            {
+                Column = column,
+            };
+        }
+    }
 
     /// <summary>値の池から 1 つ選んだリテラルとの比較</summary>
     private DslCompare OutOfTypeLiteral(DslColumn column, DslOp op, IReadOnlyList<object> pool)

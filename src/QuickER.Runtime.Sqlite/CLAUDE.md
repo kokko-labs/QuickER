@@ -60,4 +60,7 @@ SQLite 方言エンジン（QuickER 版 Repository の ADO 実装）の固定コ
 
 - 空・空白の判定は `col = ''` と `trim(col, char(…))`。
 - 日付部品：`.Date` は `datetime(date(col))` にする（パラメータの `'YYYY-MM-DD HH:MM:SS'` とそろえる）。`DateTimeOffset` の列は、格納した文字列の位置から取り出す（strftime は UTC へ換算するため）。
+- 整数の列と浮動小数点：C# が float・double へ変換して比べる整数の列（式の木で列の側が浮動小数点への変換に包まれたもの。比較の両辺と IN の項目）は `CAST(col AS REAL)` で比べる（`AsFloatingColumn`。EF Core の SQLite のプロバイダと同じ形）。SQLite は INTEGER と REAL を丸めずに比べるので、外すと 2^53 を超える整数の行（2^53+1 と 2^53）が C# と違う答えになる。SQLite に単精度の型は無いので float で比べる式も double で比べる（名前付きクエリでは型トークン float32 も double なので起きない＝docs の既知の割り切り）。束縛は変わらない（SQLite はどの値も AddWithValue で束縛し、列の名前を使わない）。
+  - 値の側も同じ：C# が浮動小数点へ変換して比べる整数の値（浮動小数点の列と比べる long・int のパラメータ）は double へ変換してから束縛する（`AsFloatingValue`）。翻訳器は値の側の変換も `Unwrap` で外してから評価するので、外すと long のまま INTEGER で束縛され、2^53 を超える値が REAL の列と丸めずに比べられる。IN は値の側に浮動小数点への変換が無い（簡易 DSL は浮動小数点の列と整数のリストの IN を型の検査が断る）ので掛からない。
+  - ガード：`Dsl/SqliteMySql`（単位 sqlite-floating と網羅の単位 coverage-sqlite-floating-plain の整数 × 浮動小数点の原子・NOT NULL の bigint の列の double のリストの IN・網羅の単位の鏡の形＝double の列と int64 の型トークンのパラメータ 2^53+1）。直す前に列の側の比較の 5 件と値の側の 4 件、IN 側だけを外す mutation で IN の 4 件、値の側を外す mutation で 4 件が赤になることを確かめた。値の側は夜間の種（36・76）のパラメータの使い回しで見つかった。
 - ガード：`TranslatorParitySqliteRuntimeTests`（述語の表 `TranslatorParityPredicateRows` を実 SQLite で C# の意味論と突き合わせる）。mutation 実証済み（`.Date` と時差の分岐・空と空白の判定）。

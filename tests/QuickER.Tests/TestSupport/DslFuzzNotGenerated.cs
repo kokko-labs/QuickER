@@ -23,12 +23,29 @@ internal static class DslFuzzNotGenerated
                 ProtectionNames.EnginePart(EngineIds.Dsl, "Oracle"),
             ],
             [
-                NotGenerated.Pending(
-                    "column-type-families",
-                    "列の型の族（float）",
-                    "float の区切り（未起動）",
-                    "生成器の列の型（DslClr）に float の族が無い。族の実装先の意味（NaN・±∞・単精度の丸めなど。区切り TF のフェーズ 1 の分析）を docs に書いてから足す",
-                    "`CodegenConfig/Cases`（行 `diag-query-type-check-rejects-*`）"
+                NotGenerated.Accepted(
+                    "floating-nan-infinity",
+                    "浮動小数点の列の NaN と無限大",
+                    "docs の浮動小数点の既知の割り切り：SQL Server・MySQL と SQLite の EF Core 版は書き込みも比較もできず、PostgreSQL と Oracle は NaN を自分自身と等しく最大の値とみなす（C# の IEEE の比較と違う）",
+                    "`Dsl/SqliteMySql`・`Dsl/SqlServer`・`Dsl/PostgreSql`・`Dsl/MySql`・`Dsl/Oracle`"
+                ),
+                NotGenerated.Accepted(
+                    "sqlite-single-columns",
+                    "SQLite の単位の float（単精度）の列とパラメータ",
+                    "SQLite の型マッパーは REAL アフィニティを double へ写し、単精度の型を持たない（型トークン float32 も REAL）。整数の列を float と比べる手書きの LINQ の割り切りは docs に書く",
+                    "`Dialect/Types`"
+                ),
+                NotGenerated.Accepted(
+                    "mysql-float-inexact-values",
+                    "MySQL の単位の float の列の、単精度で丸まる値・6 桁を超える値・最大と最小、と、相方の整数の列の 2^24 の外の値",
+                    "docs の既知の割り切り：MySQL の float の列は値を 6 桁に丸めて読み戻し、最大・最小を書けず、単精度で丸まる値の等値と IN が一致しない。MySQL の EF Core 版は整数の列と浮動小数点の値を丸めずに比べる",
+                    "`Dsl/MySql`"
+                ),
+                NotGenerated.Accepted(
+                    "oracle-number-float-columns",
+                    "Oracle の単位の NUMBER 系 FLOAT の列",
+                    "docs の既知の割り切り：EF Core 版が値を decimal へ変換して書くので 15 桁へ丸まり、非正規化数は 0 になり、decimal の範囲の外の値は書けない（2 進の値を持つ BINARY_DOUBLE の列で浮動小数点を流す）",
+                    "`Dsl/Oracle`"
                 ),
                 NotGenerated.Accepted(
                     "mysql-datetimeoffset-columns",

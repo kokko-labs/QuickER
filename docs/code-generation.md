@@ -585,6 +585,9 @@ The DSL has no literal for these types, and QuickER warns and skips a query that
 A DSL condition on a `TimeSpan` column can use comparisons against a parameter (ordering comparisons included), `IN`, and `IS [NOT] NULL`.
 The DSL has no `TimeSpan` literal either.
 A DSL condition on a `DateTimeOffset` column can use the same forms, and the DSL has no `DateTimeOffset` literal.
+A DSL condition on a floating-point (`float` or `double`) column can use comparisons against a number literal or a parameter (ordering comparisons included), `IN`, and `IS [NOT] NULL`.
+A literal compared with a `float` column is read as a C# `float` literal (`f = 0.1` compares with `0.1f`).
+The DSL has no exponent notation (`1e10`).
 
 QuickER warns and skips a query that compares a `DateTimeOffset` column with a `DateTime` parameter or list, or a `DateTime` column with a `DateTimeOffset` one.
 C# converts the `DateTime` to a `DateTimeOffset` with the time zone of the machine running the code, so the answer would depend on that machine.
@@ -704,13 +707,34 @@ Two values with different offsets that mark the same instant are equal (`2024-01
 > **Known limitation**: hand-written LINQ that compares a `DateTimeOffset` column with a `DateTime` (`Query().Where(x => x.At == dateTime)`) compiles, because C# converts the `DateTime` with the time zone of the machine running the code.
 > The mini DSL refuses this comparison, but QuickER does not check hand-written LINQ, so pass a `DateTimeOffset`.
 
+A comparison on a floating-point column compares binary floating-point values, as C# does.
+Comparing a `float` column with a `double` value widens the column's value to `double`, as C# does, so a row holding `0.1f` does not equal `0.1`.
+Comparing an integer column with a floating-point value converts the column's value to that type, as C# does: a `float` rounds an integer beyond 2^24, and a `double` one beyond 2^53 (`x.Qty == 16777216f` holds for a row holding 16777217).
+The SQLite QuickER Repository makes this comparison as a `REAL` (`CAST(col AS REAL)`), as the EF Core Repository does.
+`-0.0` and `0.0` are equal, and SQLite, MySQL, and Oracle read `-0.0` back as `0.0`.
+
+> **Known limitation**: QuickER does not handle NaN or infinity.
+> SQL Server, MySQL, and the SQLite EF Core Repository cannot write them or compare with them, and PostgreSQL and Oracle treat NaN as equal to itself and greater than every other value.
+
+> **Known limitation**: a MySQL `float` column reads a value back rounded to six significant digits (`16777216` comes back as `16777200`) and cannot store the largest and smallest `float` values.
+> Equality and `IN` do not match a value that rounds in single precision, such as `0.1`, whether it is a literal or a parameter.
+> Compare such a column with a range (`<`, `>`), or use a `double` column.
+
+> **Known limitation**: the MySQL EF Core Repository compares an integer column with a floating-point value without rounding the column (C# rounds an integer beyond 2^24 for a `float` and beyond 2^53 for a `double`).
+
+> **Known limitation**: the EF Core Repository writes a value of an Oracle `FLOAT` column (a `NUMBER` type) through `decimal`, so the value is rounded to 15 significant digits, a subnormal value becomes 0, and a value outside the range of `decimal` cannot be written.
+> Use `BINARY_DOUBLE` to keep the binary value.
+
+> **Known limitation**: SQLite has no single-precision type, so hand-written LINQ that compares an integer column with a `float` does not round the column as C# does.
+> A named query cannot make this comparison on SQLite, where the `float32` type token is a `double` too.
+
 Date parts (`Year`, `Month`, …) are translated only when the member is read from a `DateTime`, `DateOnly`, or `DateTimeOffset` column, nullable forms included.
 A property of the same name on any other type is not a date part, such as one added to a value object through a partial declaration.
 It fails with `NotSupportedException` instead of silently becoming `YEAR([col])`.
 The date parts of a `DateTimeOffset` column are taken in the offset the value carries, as C# does (`2024-01-01 05:00 +09:00` is year 2024, hour 5).
 
 On SQL Server, the QuickER Repository and the EF Core Repository bind a compared value with the column's type only when the value fits that type.
-A value that does not fit is bound with its own type, so the comparison answers as C# does: a fraction or an integer out of range against an integer column (`x.Qty < 1.5`, `x.Tiny < 300`), a decimal with more digits than the column's precision and scale, a number outside the range or beyond the four fractional digits of a `money` or `smallmoney` column (`x.Price == 1.23456m`), a time of day against a `date` column, and a character outside ASCII against a non-Unicode column (`varchar`, `char`).
+A value that does not fit is bound with its own type, so the comparison answers as C# does: a fraction or an integer out of range against an integer column (`x.Qty < 1.5`, `x.Tiny < 300`), any `float` or `double` value against an integer column, a `double` that a `real` column cannot hold exactly (`x.Ratio == 0.1` against a `float` property), a decimal with more digits than the column's precision and scale, a number outside the range or beyond the four fractional digits of a `money` or `smallmoney` column (`x.Price == 1.23456m`), a time of day against a `date` column, and a character outside ASCII against a non-Unicode column (`varchar`, `char`).
 The server then converts the column for that comparison, so an index on the column may not be used for it.
 On the EF Core Repository this covers every parameter of a query (a named query, `Query()` with hand-written LINQ, the elements of an IN list, the pattern of `Contains`) and the condition of `ExecuteDeleteAsync` (see [EF Core mode](#ef-core-mode-generateefcorerepositories)).
 On PostgreSQL, the EF Core Repository does the same for a `DateTime` with a time of day compared with a `date` column, which it sends as a `timestamp`, and, in a query, for a `TimeSpan` outside the range of a `time` column, which it sends as an `interval`.

@@ -818,7 +818,7 @@ public sealed partial class DslFuzzGenerator(
         }
 
         var ops = CanOrder(column) ? Enum.GetValues<DslOp>() : [DslOp.Eq, DslOp.Ne];
-        var literalAllowed = column.IsString || column.IsInteger || column.Clr == DslClr.Decimal;
+        var literalAllowed = LiteralAllowed(column);
 
         foreach (var op in ops)
         {
@@ -916,6 +916,10 @@ public sealed partial class DslFuzzGenerator(
         }
     }
 
+    /// <summary>リテラルを書ける列か（文字列・整数・decimal・浮動小数点。日時・Guid・bool・バイナリ・TimeSpan はパラメータだけ）</summary>
+    private static bool LiteralAllowed(DslColumn column) =>
+        column.IsString || column.IsInteger || column.Clr == DslClr.Decimal || column.IsFloating;
+
     /// <summary>列の型の範囲内のリテラル</summary>
     /// <param name="column">列</param>
     /// <param name="quote">文字列のリテラルの値に <c>'</c> を含めるか（null は値の池全体から選ぶ）</param>
@@ -924,6 +928,14 @@ public sealed partial class DslFuzzGenerator(
         if (column.IsString)
         {
             return StringLiteral(column, likeSafe: false, quote);
+        }
+
+        // 浮動小数点の列は綴りの池から選び、綴りをそのまま書く（値は綴りを列の型で読んだもの）
+        if (column.IsFloating)
+        {
+            var text = Pick(DslFuzz.LiteralPool(column));
+
+            return new DslLiteral(DslFuzz.FloatingLiteralValue(text, column.Clr), text);
         }
 
         var value = Pick(DslFuzz.ValuePool(column));
@@ -1117,7 +1129,7 @@ public sealed partial class DslFuzzGenerator(
     private DslCompare Compare(DslColumn column, DslOp op)
     {
         // 文字列・数値はリテラルも使える（日時・Guid はリテラルを書けないのでパラメータだけ）
-        var literalAllowed = column.IsString || column.IsInteger || column.Clr == DslClr.Decimal;
+        var literalAllowed = LiteralAllowed(column);
 
         if (literalAllowed && _random.Next(2) == 0)
         {
@@ -1240,14 +1252,51 @@ public sealed partial class DslFuzzGenerator(
         };
     }
 
-    private DslParam Param(DslColumn column) =>
-        new(
+    private DslParam Param(DslColumn column)
+    {
+        if (column.IsFloating)
+        {
+            return FloatingParam(column);
+        }
+
+        return new(
             parameterPrefix + _parameterIndex++,
             [Pick(DslFuzz.OperandPool(column))],
             IsList: false,
             ByColumn: !DslFuzz.HasTypeToken(column.Clr) || _random.Next(2) == 0,
             column
         );
+    }
+
+    /// <summary>
+    /// 浮動小数点の列のパラメータ。float の列の比べる値の池の double の値（<see cref="DslFuzz.FloatOperandDoubles"/>）は
+    /// <c>float64</c> の型トークンで型付けする（C# は列を double へ広げて比べる）。値オブジェクトの float の列は double のパラメータを
+    /// 型の検査が断るので、列の型の値だけを選ぶ
+    /// </summary>
+    private DslParam FloatingParam(DslColumn column)
+    {
+        var value = Pick(valueObjects ? SameTypeOperands(column) : DslFuzz.OperandPool(column));
+        var widened = column.Clr == DslClr.Single && value is double;
+
+        return new DslParam(
+            parameterPrefix + _parameterIndex++,
+            [value],
+            IsList: false,
+            ByColumn: !widened && _random.Next(2) == 0,
+            column
+        )
+        {
+            TypeToken = widened ? DslFuzz.TypeToken(DslClr.Double) : null,
+        };
+    }
+
+    /// <summary>
+    /// 比べる値の池のうち、列の型の値だけ（float の列の double の値を除く。ほかの列は比べる値の池のまま）
+    /// </summary>
+    private static List<object> SameTypeOperands(DslColumn column) =>
+        column.Clr == DslClr.Single
+            ? [.. DslFuzz.OperandPool(column).Where(value => value is float)]
+            : [.. DslFuzz.OperandPool(column)];
 
     /// <summary>
     /// リストに null を入れられるか（要素が参照型のリストだけ）：値オブジェクトなしの文字列の列のリスト（<c>IReadOnlyList&lt;string&gt;</c>）と、
@@ -1281,9 +1330,13 @@ public sealed partial class DslFuzzGenerator(
     }
 
     /// <summary>IN のリストのパラメータ（null を含む形は、値オブジェクトありなら列で型付けする）</summary>
+    /// <remarks>
+    /// float の列のリストは列の型の値だけで作る（double のリストは NOT NULL の列だけに書けるので、列の型に入らない値の原子
+    /// <see cref="OutOfTypeQueries"/> が作る）。
+    /// </remarks>
     private DslParam ListParam(DslColumn column, string shape)
     {
-        var pool = DslFuzz.OperandPool(column);
+        var pool = column.IsFloating ? SameTypeOperands(column) : DslFuzz.OperandPool(column);
         List<object?> values = shape switch
         {
             DslIn.ListEmpty => [],

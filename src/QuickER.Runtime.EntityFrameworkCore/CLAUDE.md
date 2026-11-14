@@ -161,7 +161,7 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
   - Currency（EF Core が money・smallmoney の列と比べるパラメータに付ける DbType。両方とも Currency で、SqlDbType が Money / SmallMoney＝実測）：値が型の範囲か小数 4 桁の外なら Decimal・精度 0 にして値を decimal にする（decimal は型の優先順位で money より上なので、サーバーが列の側を変換する）。money と smallmoney の区別は、SqlClient を参照しないので SqlParameter のプロパティ SqlDbType を反射の名前で読む（`IsSmallMoney`）。
   - AnsiString / AnsiStringFixedLength：値に ASCII の外の文字があれば String・Size 0 にする。
   - 判定は QuickER 版の `QueryValueFits`（`src/QuickER.Runtime.SqlServer/CLAUDE.md`「SqlParameter の明示型」）と同じ規則。パッケージが別なので `FitsDecimal`・`FitsMoney`・`TryExactDecimal` は写しで持つ（片方だけ変えない）。
-  - date・整数の DbType は入れない。生成の DbContext は SQL Server の date に列の型を教えないので DateTime は datetime2 で送られ、整数の列と比べる long・double・decimal はそれぞれ bigint・float・decimal で束縛される（実測）。赤にできない枝を持たない。
+  - date・整数・浮動小数点の DbType は入れない。生成の DbContext は SQL Server の date に列の型を教えないので DateTime は datetime2 で送られ、整数の列と比べる long・double・decimal はそれぞれ bigint・float・decimal で束縛される（実測）。real の列と比べる double は、EF Core が列を `CAST(… AS float)` で広げて float のパラメータで比べる（総当たりの実測。QuickER 版の `QueryValueFits` の整数の列 × float・double と real の列の 2 つの枝は、列の型で束縛する QuickER 版だけに要るもので、EF Core 版はもとから C# と同じ答え）。赤にできない枝を持たない。
 - 入る値は EF Core が付けた型のまま（SQL・計画・索引の使われ方を変えない）。入らない値だけ、サーバーが列の側を変換する（QuickER 版と同じ割り切り）。
 - SaveChanges のコマンドは変えない。保存される値は同じだが、精度を超える値の INSERT の例外が ArgumentException から SqlException（Arithmetic overflow）に変わる（実測）。書き込みの意味は変えない。
 - 登録は `AddGeneratedEfCoreRepositories` が `configureDbContext` の後に `SqliteBusyTimeoutInterceptor` と並べて `AddInterceptors` で足す。DbContext を自分で組む利用者は `Instance` を足す（docs）。

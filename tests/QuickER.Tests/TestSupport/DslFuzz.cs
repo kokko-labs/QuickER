@@ -60,6 +60,12 @@ public enum DslClr
 
     /// <summary>DateTimeOffset（リテラルは書けず、パラメータとの比較・順序比較・IN・NULL 判定だけ。瞬間で比べる）</summary>
     DateTimeOffset,
+
+    /// <summary>float（単精度。リテラルは C# の float のリテラルとして読む。2 進の浮動小数点の値で比べる）</summary>
+    Single,
+
+    /// <summary>double（倍精度。2 進の浮動小数点の値で比べる）</summary>
+    Double,
 }
 
 /// <summary>総当たりの図の列</summary>
@@ -91,10 +97,20 @@ public sealed record DslColumn(
                 or DslClr.UInt32
                 or DslClr.UInt64;
 
+    /// <summary>浮動小数点（float・double）の列か</summary>
+    public bool IsFloating => Clr is DslClr.Single or DslClr.Double;
+
     /// <summary>順序比較（&lt; など）を使える列か（型の検査が文字列・Guid の順序比較を断る）</summary>
     public bool IsOrdered =>
         IsInteger
+        || IsFloating
         || Clr is DslClr.Decimal or DslClr.DateTime or DslClr.TimeSpan or DslClr.DateTimeOffset;
+
+    /// <summary>
+    /// 数値のリテラルの綴りの候補（浮動小数点の列だけ。null なら種類ごとの綴りの池 <see cref="DslFuzz.LiteralPool(DslClr)"/>）。
+    /// 綴りをそのまま DSL に書き、オラクルの値は綴りを列の型で読んだ値にする（DSL のパーサは指数表記を読まないので、値から綴りを作らない）
+    /// </summary>
+    public IReadOnlyList<string>? LiteralValues { get; init; }
 
     /// <summary>
     /// Unicode でない文字列の列か（SQL Server の varchar・char＝照合順序のコードページで持ち、ASCII の外の文字が <c>?</c> に化ける列。
@@ -1417,10 +1433,27 @@ public static class DslFuzz
             (TimeSpan a, TimeSpan b) => a.CompareTo(b),
             // DateTimeOffset は瞬間（UTC の時刻）で比べる（C# の比較と同じ。時差の違う同じ瞬間は等しい）
             (DateTimeOffset a, DateTimeOffset b) => a.CompareTo(b),
+            (float or double, _) or (_, float or double) => CompareFloating(value, other),
             _ => Convert
                 .ToDecimal(value, CultureInfo.InvariantCulture)
                 .CompareTo(Convert.ToDecimal(other, CultureInfo.InvariantCulture)),
         };
+
+    /// <summary>
+    /// 浮動小数点を含む数値どうしの順序（C# の 2 項の数値の昇格の写し：どちらかが double なら両方を double へ、そうでなければ両方を
+    /// float へ変換して比べる。整数は浮動小数点へ変換するので、float は 2^24・double は 2^53 を超える整数を丸める。-0.0 と 0.0 は等しい）
+    /// </summary>
+    /// <remarks>
+    /// docs の浮動小数点の比較の写し。NaN と無限大は値の池に入れない（扱わない）。decimal と浮動小数点の混在は型の検査が断るので来ない。
+    /// </remarks>
+    private static int CompareFloating(object value, object other) =>
+        value is double || other is double
+            ? Convert
+                .ToDouble(value, CultureInfo.InvariantCulture)
+                .CompareTo(Convert.ToDouble(other, CultureInfo.InvariantCulture))
+            : Convert
+                .ToSingle(value, CultureInfo.InvariantCulture)
+                .CompareTo(Convert.ToSingle(other, CultureInfo.InvariantCulture));
 
     // ---------------- データの値 ----------------
 
@@ -1512,8 +1545,158 @@ public static class DslFuzz
             ],
             DslClr.TimeSpan => TimeOfDayPool,
             DslClr.DateTimeOffset => MixedOffsetPool,
+            DslClr.Single => FloatPool,
+            DslClr.Double => DoublePool,
             _ => throw new ArgumentOutOfRangeException(nameof(clr)),
         };
+
+    /// <summary>
+    /// double の値の池（NaN・無限大は入れない＝docs の既知の割り切り）：負・-0.0・0・2 進で正確でない値（0.1・0.30000000000000004）・
+    /// 2^53・最小の正規化数・非正規化数（double.Epsilon・1e-310）・最大・最小・1e20
+    /// </summary>
+    public static IReadOnlyList<object> DoublePool { get; } =
+    [
+        -2.5d,
+        -0.0d,
+        0.0d,
+        0.1d,
+        0.30000000000000004d,
+        1.5d,
+        9007199254740992d,
+        2.2250738585072014E-308d,
+        double.Epsilon,
+        1e-310d,
+        double.MaxValue,
+        double.MinValue,
+        1e20d,
+    ];
+
+    /// <summary>
+    /// float の値の池（NaN・無限大は入れない）：負・-0.0・0・2 進で正確でない値（0.1・0.3）・2^24・最小の正規化数・非正規化数
+    /// （float.Epsilon・1e-40）・最大・最小・100
+    /// </summary>
+    public static IReadOnlyList<object> FloatPool { get; } =
+    [
+        -2.5f,
+        -0.0f,
+        0.0f,
+        0.1f,
+        0.3f,
+        1.5f,
+        16777216f,
+        1.17549435E-38f,
+        float.Epsilon,
+        1e-40f,
+        float.MaxValue,
+        float.MinValue,
+        100f,
+    ];
+
+    /// <summary>
+    /// MySQL の float の列の値の池（2 進で正確で 6 桁以内の値だけ）。MySQL の float の列は値を 6 桁に丸めて読み戻し、最大・最小を書けず、
+    /// 単精度で丸まる値の等値と IN が一致しない（docs の既知の割り切り）
+    /// </summary>
+    public static IReadOnlyList<object> MySqlFloatPool { get; } =
+    [-2.5f, -0.0f, 0.0f, 0.25f, 0.5f, 1.5f, 100f, 1024f];
+
+    /// <summary>
+    /// float の列と比べる double の値（float に入らない値＝2 進で丸まる値・float の範囲の外・非正規化数と、float に正確に入る
+    /// <c>(double)0.1f</c>）。C# は列を double へ広げて比べる。行には書かない
+    /// </summary>
+    public static IReadOnlyList<object> FloatOperandDoubles { get; } =
+    [0.1d, 0.1000000012d, 1e39d, 1e-310d, double.MaxValue, (double)0.1f];
+
+    /// <summary>double の列と比べる数値のリテラルの綴り（DSL のパーサは指数表記を読まないので、綴りで持つ）</summary>
+    public static IReadOnlyList<string> DoubleLiteralTexts { get; } =
+    ["0", "0.1", "0.3", "1.5", "-2.5", "16777217", "100", "0.30000000000000004"];
+
+    /// <summary>
+    /// float の列と比べる数値のリテラルの綴り（C# の float のリテラルとして読む：<c>0.1</c> は <c>0.1f</c>・<c>16777217</c> は
+    /// <c>16777216f</c>。float の最大は 10 進の全桁で書く）
+    /// </summary>
+    public static IReadOnlyList<string> FloatLiteralTexts { get; } =
+    [
+        "0",
+        "0.1",
+        "0.3",
+        "1.5",
+        "-2.5",
+        "16777217",
+        "100",
+        "340282346638528859811704183484516925440",
+    ];
+
+    /// <summary>MySQL の float の列と比べる数値のリテラルの綴り（2 進で正確で 6 桁以内の値だけ＝<see cref="MySqlFloatPool"/> と同じ割り切り）</summary>
+    public static IReadOnlyList<string> MySqlFloatLiteralTexts { get; } =
+    ["0", "0.25", "0.5", "1.5", "-2.5", "100", "1024"];
+
+    /// <summary>種類ごとの数値のリテラルの綴りの池（浮動小数点の列だけ）</summary>
+    public static IReadOnlyList<string> LiteralPool(DslClr clr) =>
+        clr switch
+        {
+            DslClr.Single => FloatLiteralTexts,
+            DslClr.Double => DoubleLiteralTexts,
+            _ => throw new ArgumentOutOfRangeException(nameof(clr), clr, "綴りの池の無い種類"),
+        };
+
+    /// <summary>列の数値のリテラルの綴りの候補（列が綴りの池を持てばそれ、無ければ種類ごとの綴りの池）</summary>
+    public static IReadOnlyList<string> LiteralPool(DslColumn column) =>
+        column.LiteralValues ?? LiteralPool(column.Clr);
+
+    /// <summary>
+    /// 浮動小数点の列と比べる数値のリテラルの綴りを、列の型の値として読む（float の列は C# の float のリテラル、double の列は double の
+    /// リテラルと同じ丸め）
+    /// </summary>
+    public static object FloatingLiteralValue(string text, DslClr clr) =>
+        clr switch
+        {
+            DslClr.Single => float.Parse(
+                text,
+                NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
+                CultureInfo.InvariantCulture
+            ),
+            DslClr.Double => double.Parse(
+                text,
+                NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
+                CultureInfo.InvariantCulture
+            ),
+            _ => throw new ArgumentOutOfRangeException(nameof(clr), clr, "浮動小数点でない種類"),
+        };
+
+    /// <summary>
+    /// 浮動小数点の列の相方の int の列の値の池（2^24 の前後・0・-1・型の端。float へ変換すると 16777217 は 16777216 に、100000001 は
+    /// 1e8 に丸まる）
+    /// </summary>
+    public static IReadOnlyList<object> FloatingPartnerInt32Pool { get; } =
+    [16777216, 16777217, 0, -1, int.MinValue, int.MaxValue, 100000001];
+
+    /// <summary>
+    /// 浮動小数点の列の相方の bigint の列の値の池（2^24・2^53 の前後・0・-1・型の端。double へ変換すると 2^53+1 は 2^53 に、
+    /// 10000000000000001 は 1e16 に丸まる）
+    /// </summary>
+    public static IReadOnlyList<object> FloatingPartnerInt64Pool { get; } =
+    [
+        16777216L,
+        16777217L,
+        9007199254740992L,
+        9007199254740993L,
+        10000000000000001L,
+        0L,
+        -1L,
+        long.MinValue,
+        long.MaxValue,
+    ];
+
+    /// <summary>
+    /// MySQL の浮動小数点の列の相方の整数の列の値の池（2^24 の内側だけ）。MySQL の EF Core 版は整数の列と浮動小数点の値を丸めずに比べる
+    /// （docs の既知の割り切り）
+    /// </summary>
+    public static IReadOnlyList<object> MySqlFloatingPartnerInt32Pool { get; } =
+    [0, -1, 1, 1000, 16777215, -16777215];
+
+    /// <summary>MySQL の浮動小数点の列の相方の bigint の列の値の池（2^24 の内側だけ）</summary>
+    public static IReadOnlyList<object> MySqlFloatingPartnerInt64Pool { get; } =
+    [0L, -1L, 1L, 1000L, 16777215L, -16777215L];
 
     /// <summary>
     /// 時差の混ざった DateTimeOffset の値の池（マイクロ秒の粒度）：同じ瞬間で時差の違う組（03:00Z・12:00+09:00・前日 22:00-05:00）、局所の
@@ -1653,6 +1836,8 @@ public static class DslFuzz
             DslClr.Binary => "binary(4)",
             DslClr.TimeSpan => "time",
             DslClr.DateTimeOffset => "datetimeoffset",
+            DslClr.Single => "float32",
+            DslClr.Double => "float64",
             _ => throw new ArgumentOutOfRangeException(nameof(clr), clr, "型トークンの無い種類"),
         };
 
