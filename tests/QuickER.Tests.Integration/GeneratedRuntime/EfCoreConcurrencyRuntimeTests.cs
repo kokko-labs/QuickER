@@ -187,6 +187,25 @@ public sealed class EfCoreConcurrencyRuntimeTests(SqlServerContainerFixture fixt
         child.MarkUpdated();
     }
 
+    protected override void AttachNewChild(DocumentEntity root, int childId, string note)
+    {
+        var child = new DocumentNoteEntity
+        {
+            NoteId = childId,
+            DocumentId = root.DocumentId,
+            Note = note,
+        };
+        child.MarkAdded();
+        root.DocumentNotes.Add(child);
+    }
+
+    protected override bool IsGraphUnchanged(DocumentEntity root) =>
+        root.RowState == RowState.Unchanged
+        && root.DocumentNotes.All(note => note.RowState == RowState.Unchanged);
+
+    protected override Task<int> SaveManyAsync(IReadOnlyList<DocumentEntity> roots) =>
+        Documents().SaveAsync(roots, cancellationToken: Ct);
+
     protected override (string Reason, string? EntityTypeName, string? Key) Describe(
         SaveConflictException exception
     ) => (exception.Reason.ToString(), exception.EntityTypeName, exception.Key);

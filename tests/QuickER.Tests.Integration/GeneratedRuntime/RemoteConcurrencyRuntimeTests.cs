@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -5,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using AwesomeAssertions;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedBinaryFixture;
 using QuickER.Tests.TestSupport;
@@ -20,58 +23,38 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <para>
 /// サーバー実体は BinaryFixture の<b>インメモリ Repository</b>（<c>AddGeneratedInMemoryRepositories</c> はリモート面
 /// <c>I{Entity}RemoteRepository</c> への転送登録も行う）。クライアントは生成された HTTP リモート実装のみを使う。
-/// バックエンド非依存のシナリオは基底 <see cref="ConcurrencyRuntimeTestsBase{TEntity, TConflictException}"/> が持ち、
-/// それが緑になること自体が「<c>ConcurrencyMode</c> がリクエストへ載る」「応答の版対応表が手元のグラフへ書き戻る」
-/// 「サーバーの競合が HTTP 409 経由で同じ型のまま復元される」の証明になる。
+/// バックエンド非依存のシナリオは基底 <see cref="ConcurrencyRuntimeTestsBase{TEntity, TConflictException}"/> が、
+/// 応答の経路ごとの版の書き戻しはリモートの共通部 <see cref="ConcurrencyRemoteRuntimeTestsBase{TEntity, TConflictException}"/> が持つ。
 /// </para>
 /// <para>
-/// 本クラスはリモート固有の検証——複数ルートの版書き戻し・親子グラフの版対応表・旧エンベロープ（<c>Mode</c> 欠落）の
-/// 既定 Optimistic 退化・クライアント検証を迂回した生 JSON の未定義 <c>Mode</c> を 400 で弾くこと——を持つ。
+/// 本クラスはリモート固有の検証——旧エンベロープ（<c>Mode</c> 欠落）の既定 Optimistic 退化・クライアント検証を迂回した
+/// 生 JSON の未定義 <c>Mode</c> を 400 で弾くこと——を持つ（要求の解釈だけで決まり、リポジトリの実装先に依らない）。
 /// 除外列（payload / thumb）は値を持ったままだと UPDATE が拒否される既存仕様のため、一貫して未取得状態のまま扱う。
 /// </para>
 /// </remarks>
 [RuntimeCell(RuntimeFeatures.Concurrency, RuntimeTarget.Remote, Server = RuntimeTarget.InMemory)]
 public sealed class RemoteConcurrencyRuntimeTests
-    : ConcurrencyRuntimeTestsBase<DocumentEntity, SaveConflictException>,
-        IAsyncLifetime
+    : ConcurrencyRemoteRuntimeTestsBase<DocumentEntity, SaveConflictException>
 {
-    private InProcessRemoteServer? _server;
-    private ServiceProvider? _clientProvider;
-    private string _baseUrl = string.Empty;
+    /// <summary>サーバー実体はインメモリ Repository（サンプルデータなし・テストごとに空で起動する）</summary>
+    protected override void RegisterServerServices(IServiceCollection services) =>
+        services.AddGeneratedInMemoryRepositories(seedSampleData: false);
 
-    /// <summary>Kestrel 起動（空きポート・サーバー実体はインメモリ Repository・サンプルデータなし）→ HTTP クライアント DI 構築</summary>
-    public async ValueTask InitializeAsync()
-    {
-        _server = await InProcessRemoteServer.StartAsync(
-            services => services.AddGeneratedInMemoryRepositories(seedSampleData: false),
-            app => app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous),
-            Ct
-        );
+    protected override void MapRemoteEndpoints(WebApplication app) =>
+        app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous);
 
-        _baseUrl = _server.BaseUrl;
-        _clientProvider = new ServiceCollection()
-            .AddGeneratedHttpRemoteRepositories(_server.BaseAddress(RemotePaths.DefaultPrefix))
-            .BuildServiceProvider();
-    }
+    protected override string RemotePathPrefix => RemotePaths.DefaultPrefix;
 
-    /// <summary>使い終えたクライアント DI・サーバーを破棄する</summary>
-    public async ValueTask DisposeAsync()
-    {
-        _clientProvider?.Dispose();
-
-        if (_server is not null)
-        {
-            await _server.DisposeAsync();
-        }
-    }
+    protected override void RegisterClientServices(
+        IServiceCollection services,
+        Func<IServiceProvider, HttpClient> httpClientFactory
+    ) => services.AddGeneratedHttpRemoteRepositories(httpClientFactory);
 
     /// <summary>クライアント側の文書リモート面を解決する</summary>
-    private IDocumentRemoteRepository Documents =>
-        _clientProvider!.GetRequiredService<IDocumentRemoteRepository>();
+    private IDocumentRemoteRepository Documents => Client<IDocumentRemoteRepository>();
 
     /// <summary>クライアント側のメモリモート面を解決する</summary>
-    private IDocumentNoteRemoteRepository Notes =>
-        _clientProvider!.GetRequiredService<IDocumentNoteRemoteRepository>();
+    private IDocumentNoteRemoteRepository Notes => Client<IDocumentNoteRemoteRepository>();
 
     /// <summary>中立表現の楽観排他ポリシーを、このフィクスチャの <c>ConcurrencyMode</c> へ翻訳する</summary>
     private static ConcurrencyMode Translate(ConcurrencyChoice choice) =>
@@ -174,6 +157,25 @@ public sealed class RemoteConcurrencyRuntimeTests
         child.MarkUpdated();
     }
 
+    protected override void AttachNewChild(DocumentEntity root, int childId, string note)
+    {
+        var child = new DocumentNoteEntity
+        {
+            NoteId = childId,
+            DocumentId = root.DocumentId,
+            Note = note,
+        };
+        child.MarkAdded();
+        root.DocumentNotes.Add(child);
+    }
+
+    protected override bool IsGraphUnchanged(DocumentEntity root) =>
+        root.RowState == RowState.Unchanged
+        && root.DocumentNotes.All(note => note.RowState == RowState.Unchanged);
+
+    protected override Task<int> SaveManyAsync(IReadOnlyList<DocumentEntity> roots) =>
+        Documents.SaveAsync(roots, cancellationToken: Ct);
+
     protected override (string Reason, string? EntityTypeName, string? Key) Describe(
         SaveConflictException exception
     ) => (exception.Reason.ToString(), exception.EntityTypeName, exception.Key);
@@ -181,73 +183,7 @@ public sealed class RemoteConcurrencyRuntimeTests
     protected override async Task<string?> ReadChildNoteAsync(int noteId) =>
         (await Notes.GetByIdAsync(noteId, Ct))?.Note;
 
-    // ── リモート固有 1: グラフ保存の版対応表 ──
-
-    /// <summary>グラフ保存の応答は親子それぞれの版を運び、同じグラフをそのまま 2 回目も保存できる</summary>
-    [Fact(
-        DisplayName = "[Concurrency/Remote] SaveAsync の応答で親子の版が書き戻り同じグラフを続けて保存できる"
-    )]
-    public async Task SaveAsync_WritesBackRowVersion_AndAllowsConsecutiveSaves()
-    {
-        var document = NewEntity(SeededRootId, "alpha");
-        document.MarkAdded();
-
-        var note = new DocumentNoteEntity
-        {
-            NoteId = SeededChildId,
-            DocumentId = SeededRootId,
-            Note = "first",
-        };
-        note.MarkAdded();
-        document.DocumentNotes.Add(note);
-
-        (await Documents.SaveAsync(document, cancellationToken: Ct))
-            .Should()
-            .Be(2, "親 1 件＋子 1 件が保存される");
-
-        document.RowVer.Should().NotBeNull("応答の版対応表から手元のエンティティへ書き戻される");
-        document.RowState.Should().Be(RowState.Unchanged, "保存後の状態確定はカスケードで行われる");
-        note.RowState.Should().Be(RowState.Unchanged);
-        var afterInsert = document.RowVer;
-
-        // 2 回目: 再取得せずそのまま保存できる＝書き戻された版がサーバーの現在値と一致している証明
-        document.Title = "beta";
-        document.MarkUpdated();
-        note.Note = "second";
-        note.MarkUpdated();
-
-        (await Documents.SaveAsync(document, cancellationToken: Ct))
-            .Should()
-            .Be(2, "書き戻された版で版チェックが通る");
-        document.RowVer.Should().NotEqual(afterInsert, "保存のたびに新しい版が反映される");
-    }
-
-    /// <summary>複数ルートの保存でもルートごとに版が書き戻される</summary>
-    [Fact(DisplayName = "[Concurrency/Remote] SaveMany は複数ルートそれぞれへ版を書き戻す")]
-    public async Task SaveManyAsync_WritesBackRowVersionPerRoot()
-    {
-        var first = NewEntity(1, "alpha");
-        var second = NewEntity(2, "beta");
-        first.MarkAdded();
-        second.MarkAdded();
-
-        (await Documents.SaveAsync([first, second], cancellationToken: Ct)).Should().Be(2);
-
-        first.RowVer.Should().NotBeNull();
-        second.RowVer.Should().NotBeNull();
-        first.RowVer.Should().NotEqual(second.RowVer, "版はルートごとに別々に対応付けられる");
-
-        first.Title = "alpha2";
-        second.Title = "beta2";
-        first.MarkUpdated();
-        second.MarkUpdated();
-
-        (await Documents.SaveAsync([first, second], cancellationToken: Ct))
-            .Should()
-            .Be(2, "どちらのルートも書き戻された版で版チェックが通る");
-    }
-
-    // ── リモート固有 2: 旧エンベロープ互換 ──
+    // ── リモート固有: 旧エンベロープ互換 ──
 
     /// <summary>Mode を持たない旧エンベロープは既定の Optimistic として読まれる</summary>
     [Fact(
@@ -329,7 +265,7 @@ public sealed class RemoteConcurrencyRuntimeTests
     {
         using var content = new StringContent(json, Encoding.UTF8, "application/json");
         using var response = await client.PostAsync(
-            $"{_baseUrl}/quicker/Document/Update",
+            $"{BaseUrl}/quicker/Document/Update",
             content,
             Ct
         );

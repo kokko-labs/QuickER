@@ -1,6 +1,10 @@
+using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http;
 using System.Threading.Tasks;
 using AwesomeAssertions;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedSqlServerBinaryFixture;
 using QuickER.Tests.TestSupport;
@@ -20,8 +24,9 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// HTTP 409 を越えて同じ競合例外に戻ることを、インメモリの擬似の版でなく本物の版で確かめる。
 /// </para>
 /// <para>
-/// 基底 <see cref="ConcurrencyRuntimeTestsBase{TEntity, TConflictException}"/> のシナリオに加えて、グラフ保存の親子の版対応表と
-/// 複数ルートの版の書き戻しを持つ。要求の解釈だけで決まるリモートの検証（旧エンベロープ・未定義の Mode の 400）は
+/// 基底 <see cref="ConcurrencyRuntimeTestsBase{TEntity, TConflictException}"/> のシナリオ（グラフ保存の親子と複数ルートの版の
+/// 書き戻しを含む）と、リモートの共通部 <see cref="ConcurrencyRemoteRuntimeTestsBase{TEntity, TConflictException}"/> の
+/// 応答の経路ごとの版の書き戻しを流す。要求の解釈だけで決まるリモートの検証（旧エンベロープ・未定義の Mode の 400）は
 /// リポジトリの実装先に依らないので、インメモリのサーバーの <see cref="RemoteConcurrencyRuntimeTests"/> だけが持つ。
 /// 除外列（payload / thumb）は、挿入で NOT NULL の thumb に空の値を入れ、取得後は未取得のまま扱う。
 /// </para>
@@ -34,49 +39,34 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
     Server = RuntimeTarget.AdoSqlServer
 )]
 public sealed class ConcurrencyRemoteAdoSqlServerRuntimeTests(SqlServerContainerFixture fixture)
-    : ConcurrencyRuntimeTestsBase<DocumentEntity, SaveConflictException>,
-        IAsyncLifetime
+    : ConcurrencyRemoteRuntimeTestsBase<DocumentEntity, SaveConflictException>
 {
     /// <summary>共有する SQL Server コンテナ</summary>
     private readonly SqlServerContainerFixture _fixture = fixture;
 
-    private InProcessRemoteServer? _server;
-    private ServiceProvider? _clientProvider;
-
-    /// <summary>Docker の有無を判定し、Kestrel（サーバー実体は QuickER 版の SQL Server リポジトリ）と HTTP クライアントを用意する</summary>
-    public async ValueTask InitializeAsync()
-    {
+    /// <summary>Docker の有無を判定する</summary>
+    protected override void BeforeServerStart() =>
         Assert.SkipUnless(_fixture.IsAvailable, _fixture.UnavailableReason);
 
-        _server = await InProcessRemoteServer.StartAsync(
-            services => services.AddGeneratedSqlServerRepositories(_fixture.ConnectionString),
-            app => app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous),
-            Ct
-        );
+    /// <summary>サーバー実体は QuickER 版の SQL Server リポジトリ</summary>
+    protected override void RegisterServerServices(IServiceCollection services) =>
+        services.AddGeneratedSqlServerRepositories(_fixture.ConnectionString);
 
-        _clientProvider = new ServiceCollection()
-            .AddGeneratedHttpRemoteRepositories(_server.BaseAddress(RemotePaths.DefaultPrefix))
-            .BuildServiceProvider();
-    }
+    protected override void MapRemoteEndpoints(WebApplication app) =>
+        app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous);
 
-    /// <summary>使い終えたクライアント DI・サーバーを破棄する</summary>
-    public async ValueTask DisposeAsync()
-    {
-        _clientProvider?.Dispose();
+    protected override string RemotePathPrefix => RemotePaths.DefaultPrefix;
 
-        if (_server is not null)
-        {
-            await _server.DisposeAsync();
-        }
-    }
+    protected override void RegisterClientServices(
+        IServiceCollection services,
+        Func<IServiceProvider, HttpClient> httpClientFactory
+    ) => services.AddGeneratedHttpRemoteRepositories(httpClientFactory);
 
     /// <summary>クライアント側の文書リモート面を解決する</summary>
-    private IDocumentRemoteRepository Documents =>
-        _clientProvider!.GetRequiredService<IDocumentRemoteRepository>();
+    private IDocumentRemoteRepository Documents => Client<IDocumentRemoteRepository>();
 
     /// <summary>クライアント側のメモリモート面を解決する</summary>
-    private IDocumentNoteRemoteRepository Notes =>
-        _clientProvider!.GetRequiredService<IDocumentNoteRemoteRepository>();
+    private IDocumentNoteRemoteRepository Notes => Client<IDocumentNoteRemoteRepository>();
 
     /// <summary>中立表現の楽観排他ポリシーを、このフィクスチャの <c>ConcurrencyMode</c> へ翻訳する</summary>
     private static ConcurrencyMode Translate(ConcurrencyChoice choice) =>
@@ -194,78 +184,24 @@ public sealed class ConcurrencyRemoteAdoSqlServerRuntimeTests(SqlServerContainer
         child.MarkUpdated();
     }
 
+    protected override void AttachNewChild(DocumentEntity root, int childId, string note)
+    {
+        var child = NewNote(childId, root.DocumentId, note);
+        child.MarkAdded();
+        root.DocumentNotes.Add(child);
+    }
+
+    protected override bool IsGraphUnchanged(DocumentEntity root) =>
+        root.RowState == RowState.Unchanged
+        && root.DocumentNotes.All(note => note.RowState == RowState.Unchanged);
+
+    protected override Task<int> SaveManyAsync(IReadOnlyList<DocumentEntity> roots) =>
+        Documents.SaveAsync(roots, cancellationToken: Ct);
+
     protected override (string Reason, string? EntityTypeName, string? Key) Describe(
         SaveConflictException exception
     ) => (exception.Reason.ToString(), exception.EntityTypeName, exception.Key);
 
     protected override async Task<string?> ReadChildNoteAsync(int noteId) =>
         (await Notes.GetByIdAsync(noteId, Ct))?.Note;
-
-    // ── リモート固有: グラフ保存の版対応表 ──
-
-    /// <summary>グラフ保存の応答は親の実 rowversion を運び（子の表は版を持たない）、同じ親子のグラフをそのまま 2 回目も保存できる</summary>
-    [Fact(
-        DisplayName = "[Concurrency/Remote/SQL Server] SaveAsync の応答で版が書き戻り同じ親子のグラフを続けて保存できる"
-    )]
-    public async Task SaveAsync_WritesBackRowVersion_AndAllowsConsecutiveSaves()
-    {
-        await ClearStoreAsync();
-
-        var document = NewEntity(SeededRootId, "alpha");
-        document.MarkAdded();
-
-        var note = NewNote(SeededChildId, SeededRootId, "first");
-        note.MarkAdded();
-        document.DocumentNotes.Add(note);
-
-        (await Documents.SaveAsync(document, cancellationToken: Ct))
-            .Should()
-            .Be(2, "親 1 件＋子 1 件が保存される");
-
-        document.RowVer.Should().NotBeNull("応答の版対応表から手元のエンティティへ書き戻される");
-        document.RowVer!.Length.Should().Be(8, "DB が採番した rowversion");
-        document.RowState.Should().Be(RowState.Unchanged, "保存後の状態確定はカスケードで行われる");
-        note.RowState.Should().Be(RowState.Unchanged);
-        var afterInsert = document.RowVer;
-
-        // 2 回目: 再取得せずそのまま保存できる＝書き戻された版がサーバーの現在値と一致している証明
-        document.Title = "beta";
-        document.MarkUpdated();
-        note.Note = "second";
-        note.MarkUpdated();
-
-        (await Documents.SaveAsync(document, cancellationToken: Ct))
-            .Should()
-            .Be(2, "書き戻された版で版チェックが通る");
-        document.RowVer.Should().NotEqual(afterInsert, "保存のたびに新しい版が反映される");
-    }
-
-    /// <summary>複数ルートの保存でもルートごとに実 rowversion が書き戻される</summary>
-    [Fact(
-        DisplayName = "[Concurrency/Remote/SQL Server] SaveMany は複数ルートそれぞれへ版を書き戻す"
-    )]
-    public async Task SaveManyAsync_WritesBackRowVersionPerRoot()
-    {
-        await ClearStoreAsync();
-
-        var first = NewEntity(1, "alpha");
-        var second = NewEntity(2, "beta");
-        first.MarkAdded();
-        second.MarkAdded();
-
-        (await Documents.SaveAsync([first, second], cancellationToken: Ct)).Should().Be(2);
-
-        first.RowVer.Should().NotBeNull();
-        second.RowVer.Should().NotBeNull();
-        first.RowVer.Should().NotEqual(second.RowVer, "版はルートごとに別々に対応付けられる");
-
-        first.Title = "alpha2";
-        second.Title = "beta2";
-        first.MarkUpdated();
-        second.MarkUpdated();
-
-        (await Documents.SaveAsync([first, second], cancellationToken: Ct))
-            .Should()
-            .Be(2, "どちらのルートも書き戻された版で版チェックが通る");
-    }
 }

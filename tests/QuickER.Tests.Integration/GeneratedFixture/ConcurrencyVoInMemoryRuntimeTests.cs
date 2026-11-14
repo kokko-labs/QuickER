@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using AwesomeAssertions;
@@ -17,7 +18,7 @@ namespace QuickER.Tests.GeneratedConcurrencyFixture;
 /// 版番号の書き戻しはリフレクション（<c>PropertyInfo.SetValue</c>）で行われるため、生の <c>byte[]</c> を
 /// そのまま渡すと <c>ArgumentException</c>（「Byte[] は RowVerValue へ変換できない」）で保存が落ちていた。
 /// バックエンド非依存のシナリオは基底 <see cref="ConcurrencyRuntimeTestsBase{TEntity, TConflictException}"/> が持ち、
-/// 本クラスは VO 固有の観点（子の版・EditModel・バイナリ VO の並び替えと等値）を持つ。
+/// 本クラスは VO 固有の観点（EditModel・バイナリ VO の並び替えと等値）を持つ。子（カスケード）の版の書き戻しは基底のテスト 10。
 /// </para>
 /// <para>
 /// 「他者による更新」は、同じストアを共有する別のリポジトリインスタンス経由で更新して作る
@@ -135,6 +136,20 @@ public sealed class ConcurrencyVoInMemoryRuntimeTests
         child.MarkUpdated();
     }
 
+    protected override void AttachNewChild(GadgetEntity root, int childId, string note)
+    {
+        var child = NewNote(childId, root.GadgetId.Value, note);
+        child.MarkAdded();
+        root.GadgetNotes.Add(child);
+    }
+
+    protected override bool IsGraphUnchanged(GadgetEntity root) =>
+        root.RowState == RowState.Unchanged
+        && root.GadgetNotes.All(note => note.RowState == RowState.Unchanged);
+
+    protected override Task<int> SaveManyAsync(IReadOnlyList<GadgetEntity> roots) =>
+        Gadgets.SaveAsync(roots, cancellationToken: Ct);
+
     protected override (string Reason, string? EntityTypeName, string? Key) Describe(
         SaveConflictException exception
     ) => (exception.Reason.ToString(), exception.EntityTypeName, exception.Key);
@@ -142,41 +157,7 @@ public sealed class ConcurrencyVoInMemoryRuntimeTests
     protected override async Task<string?> ReadChildNoteAsync(int noteId) =>
         (await Notes.GetByIdAsync(NoteIdValue.Create(noteId), Ct))?.Note.Value;
 
-    // ── VO 固有 1: 子の版も VO 型で書き戻る ──
-
-    /// <summary>グラフ保存では子（カスケード）の版も VO 型で書き戻り、そのまま続けて保存できる</summary>
-    [Fact(DisplayName = "[Concurrency/VO/InMemory] 版反映: グラフ保存は子の版も VO 型で書き戻す")]
-    public async Task SaveAsync_WritesBackRowVersion_ForCascadedChildren()
-    {
-        await ResetAndSeedAsync();
-
-        var gadget = NewEntity(8, "parent");
-        gadget.MarkAdded();
-
-        var note = NewNote(80, 8, "child");
-        note.MarkAdded();
-        gadget.GadgetNotes.Add(note);
-
-        (await Gadgets.SaveAsync(gadget, cancellationToken: Ct))
-            .Should()
-            .Be(2, "親 1 件＋子 1 件が保存される");
-
-        gadget.RowVer.Should().NotBeNull("親の版が書き戻る");
-        gadget.RowVer.Value.Length.Should().Be(8, "擬似版も rowversion と同じ 8 バイト");
-        note.RowVer.Should().NotBeNull("子の版も書き戻る");
-
-        // 2 回目: 再取得せずそのまま保存できる＝親子とも版が現在値と一致している
-        gadget.Name = NameValue.Create("parent-2");
-        gadget.MarkUpdated();
-        note.Note = NoteValue.Create("child-2");
-        note.MarkUpdated();
-
-        (await Gadgets.SaveAsync(gadget, cancellationToken: Ct))
-            .Should()
-            .Be(2, "書き戻された版で版チェックが通る");
-    }
-
-    // ── VO 固有 2: EditModel / Mapper ──
+    // ── VO 固有 1: EditModel / Mapper ──
 
     /// <summary>DB 採番の rowversion 列は EditModel の入力必須にならず、未入力のまま新規行を保存できる</summary>
     /// <remarks>
@@ -235,7 +216,7 @@ public sealed class ConcurrencyVoInMemoryRuntimeTests
         (await ReadTitleAsync(SeededRootId)).Should().Be("renamed");
     }
 
-    // ── VO 固有 3: バイナリ VO の並び替えと等値 ──
+    // ── VO 固有 2: バイナリ VO の並び替えと等値 ──
 
     /// <summary>バイナリ VO 列（版）の OrderBy が例外にならず、包んでいる byte[] の辞書式順に並ぶ</summary>
     [Fact(

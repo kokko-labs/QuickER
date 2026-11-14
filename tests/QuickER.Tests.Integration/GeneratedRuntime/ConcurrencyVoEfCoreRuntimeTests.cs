@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using AwesomeAssertions;
@@ -161,43 +162,24 @@ public sealed class ConcurrencyVoEfCoreRuntimeTests(SqlServerContainerFixture fi
         child.MarkUpdated();
     }
 
+    protected override void AttachNewChild(GadgetEntity root, int childId, string note)
+    {
+        var child = NewNote(childId, root.GadgetId.Value, note);
+        child.MarkAdded();
+        root.GadgetNotes.Add(child);
+    }
+
+    protected override bool IsGraphUnchanged(GadgetEntity root) =>
+        root.RowState == RowState.Unchanged
+        && root.GadgetNotes.All(note => note.RowState == RowState.Unchanged);
+
+    protected override Task<int> SaveManyAsync(IReadOnlyList<GadgetEntity> roots) =>
+        Gadgets().SaveAsync(roots, cancellationToken: Ct);
+
     protected override (string Reason, string? EntityTypeName, string? Key) Describe(
         SaveConflictException exception
     ) => (exception.Reason.ToString(), exception.EntityTypeName, exception.Key);
 
     protected override async Task<string?> ReadChildNoteAsync(int noteId) =>
         (await Notes().GetByIdAsync(NoteIdValue.Create(noteId), Ct))?.Note.Value;
-
-    // ── VO 固有: 値コンバータ越しの版の復元 ──
-
-    /// <summary>DB 採番の版が値コンバータ経由で <c>RowVerValue</c> として復元され、カスケード子の版も反映される</summary>
-    [Fact(DisplayName = "[Concurrency/VO/EFCore] 版反映: 版が VO へ復元され子の版も反映される")]
-    public async Task RowVersion_IsMaterializedAsValueObject_ForRootAndChildren()
-    {
-        await ResetAndSeedAsync();
-
-        var gadget = NewEntity(8, "parent");
-        gadget.MarkAdded();
-
-        var note = NewNote(80, 8, "child");
-        note.MarkAdded();
-        gadget.GadgetNotes.Add(note);
-
-        (await Gadgets().SaveAsync(gadget, cancellationToken: Ct))
-            .Should()
-            .Be(2, "親 1 件＋子 1 件が保存される");
-
-        gadget.RowVer.Should().NotBeNull("DB 採番の版が VO へ復元される（値コンバータ経由）");
-        gadget.RowVer.Value.Length.Should().Be(8, "SQL Server の rowversion は 8 バイト");
-        note.RowVer.Should().NotBeNull("子の版も反映される");
-
-        gadget.Name = NameValue.Create("parent-2");
-        gadget.MarkUpdated();
-        note.Note = NoteValue.Create("child-2");
-        note.MarkUpdated();
-
-        (await Gadgets().SaveAsync(gadget, cancellationToken: Ct))
-            .Should()
-            .Be(2, "反映された版で版チェックが通る");
-    }
 }
