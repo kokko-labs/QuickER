@@ -298,6 +298,209 @@ internal static class SyncPlanCoverageRows
                     FuzzSelection.ByKinds,
                     ["alter type duplicated fk", "drop one of duplicated fks"]
                 ),
+                // ---- PostgreSQL の変更の種類と選び方の組（普段の 100 種で欠ける 36 組）。種は実 DB の総当たりを夜間の 600 種で流した
+                // 記録から、選び方ごとに欠ける変更の種類を最も少ない種で覆うように選んだ（2026-11-14・並びは種の番号順）。
+                // 計算列が参照する列を広げない直し（WidenDefaultColumn）でケースが変わった種 221・242・281・554 は選ばない ----
+                SeedRow(
+                    DialectNames.PostgreSql,
+                    12,
+                    FuzzSelection.Default,
+                    ["reorder referenced pk"]
+                ),
+                SeedRow(
+                    DialectNames.PostgreSql,
+                    53,
+                    FuzzSelection.ByKinds,
+                    ["add fk", "alter type duplicated fk", "drop one of duplicated fks"]
+                ),
+                SeedRow(
+                    DialectNames.PostgreSql,
+                    90,
+                    FuzzSelection.ByKinds,
+                    ["move pk", "retarget fk"]
+                ),
+                SeedRow(
+                    DialectNames.PostgreSql,
+                    107,
+                    FuzzSelection.All,
+                    ["computed nullable", "shrink pk"]
+                ),
+                SeedRow(
+                    DialectNames.PostgreSql,
+                    107,
+                    FuzzSelection.Single,
+                    ["computed nullable", "shrink pk"]
+                ),
+                SeedRow(DialectNames.PostgreSql, 138, FuzzSelection.All, ["move pk"]),
+                SeedRow(DialectNames.PostgreSql, 156, FuzzSelection.All, ["replace pk"]),
+                SeedRow(
+                    DialectNames.PostgreSql,
+                    157,
+                    FuzzSelection.ByKinds,
+                    [
+                        "alter type duplicated unique",
+                        "drop one of duplicated uniques",
+                        "drop tables",
+                    ]
+                ),
+                SeedRow(
+                    DialectNames.PostgreSql,
+                    157,
+                    FuzzSelection.Random,
+                    [
+                        "alter type duplicated unique",
+                        "drop one of duplicated uniques",
+                        "drop tables",
+                    ]
+                ),
+                SeedRow(
+                    DialectNames.PostgreSql,
+                    159,
+                    FuzzSelection.ByKinds,
+                    ["reorder pk", "replace pk"]
+                ),
+                SeedRow(
+                    DialectNames.PostgreSql,
+                    159,
+                    FuzzSelection.Random,
+                    ["reorder pk", "replace pk"]
+                ),
+                SeedRow(
+                    DialectNames.PostgreSql,
+                    183,
+                    FuzzSelection.Random,
+                    ["add column", "reorder referenced pk"]
+                ),
+                SeedRow(
+                    DialectNames.PostgreSql,
+                    205,
+                    FuzzSelection.Default,
+                    ["drop fk", "replace pk"]
+                ),
+                SeedRow(
+                    DialectNames.PostgreSql,
+                    270,
+                    FuzzSelection.Single,
+                    ["extend pk", "reorder pk"]
+                ),
+                SeedRow(
+                    DialectNames.PostgreSql,
+                    273,
+                    FuzzSelection.Single,
+                    [
+                        "alter type duplicated fk",
+                        "drop one of duplicated fks",
+                        "fk action",
+                        "replace pk",
+                    ]
+                ),
+                SeedRow(DialectNames.PostgreSql, 519, FuzzSelection.Random, ["shrink pk"]),
+                SeedRow(
+                    DialectNames.PostgreSql,
+                    552,
+                    FuzzSelection.Default,
+                    ["alter type duplicated unique", "drop one of duplicated uniques", "shrink pk"]
+                ),
+                // ---- Oracle の変更の種類と選び方の組（普段の 60 種と形の種 102 で欠ける 50 組・受け入れの 20 組は除く）。種は実 DB の
+                // 総当たりを 300 種で流した記録から、選び方ごとに欠ける変更の種類を最も少ない種で覆うように選んだ（2026-11-14・並びは
+                // 種の番号順）。計算列が参照する列を広げない直しでケースが変わった種 221・242 は選ばない ----
+                SeedRow(DialectNames.Oracle, 23, FuzzSelection.Random, ["add fk", "extend pk"]),
+                SeedRow(
+                    DialectNames.Oracle,
+                    24,
+                    FuzzSelection.Default,
+                    ["add table", "drop tables", "remove pk", "replace pk"]
+                ),
+                SeedRow(DialectNames.Oracle, 25, FuzzSelection.Default, ["extend pk", "move pk"]),
+                SeedRow(
+                    DialectNames.Oracle,
+                    43,
+                    FuzzSelection.All,
+                    ["extend pk", "fk action", "reorder pk"]
+                ),
+                SeedRow(DialectNames.Oracle, 43, FuzzSelection.Single, ["fk action", "reorder pk"]),
+                SeedRow(DialectNames.Oracle, 43, FuzzSelection.Random, ["reorder pk"]),
+                SeedRow(
+                    DialectNames.Oracle,
+                    50,
+                    FuzzSelection.All,
+                    ["rename table case", "reorder referenced pk", "set description"]
+                ),
+                SeedRow(
+                    DialectNames.Oracle,
+                    50,
+                    FuzzSelection.Default,
+                    ["reorder referenced pk", "respell type"]
+                ),
+                SeedRow(
+                    DialectNames.Oracle,
+                    50,
+                    FuzzSelection.ByKinds,
+                    [
+                        "rename table case",
+                        "reorder referenced pk",
+                        "respell type",
+                        "retarget fk",
+                        "set description",
+                    ]
+                ),
+                SeedRow(
+                    DialectNames.Oracle,
+                    50,
+                    FuzzSelection.Random,
+                    ["rename table case", "reorder referenced pk", "retarget fk"]
+                ),
+                SeedRow(
+                    DialectNames.Oracle,
+                    59,
+                    FuzzSelection.Default,
+                    ["add fk", "computed type", "drop fk", "reorder columns", "reorder pk"]
+                ),
+                SeedRow(DialectNames.Oracle, 60, FuzzSelection.Default, ["computed nullable"]),
+                SeedRow(
+                    DialectNames.Oracle,
+                    60,
+                    FuzzSelection.Single,
+                    ["computed nullable", "drop fk"]
+                ),
+                SeedRow(DialectNames.Oracle, 97, FuzzSelection.Random, ["computed nullable"]),
+                SeedRow(
+                    DialectNames.Oracle,
+                    113,
+                    FuzzSelection.Default,
+                    ["rename column case", "shrink pk"]
+                ),
+                SeedRow(
+                    DialectNames.Oracle,
+                    113,
+                    FuzzSelection.Single,
+                    ["drop unique", "shrink pk"]
+                ),
+                SeedRow(
+                    DialectNames.Oracle,
+                    113,
+                    FuzzSelection.Random,
+                    ["rename column case", "shrink pk"]
+                ),
+                SeedRow(
+                    DialectNames.Oracle,
+                    168,
+                    FuzzSelection.All,
+                    ["computed nullable", "move pk"]
+                ),
+                SeedRow(
+                    DialectNames.Oracle,
+                    184,
+                    FuzzSelection.ByKinds,
+                    ["move pk", "rename column case"]
+                ),
+                SeedRow(
+                    DialectNames.Oracle,
+                    190,
+                    FuzzSelection.Single,
+                    ["computed type", "replace pk"]
+                ),
+                SeedRow(DialectNames.Oracle, 207, FuzzSelection.All, ["add fk", "shrink pk"]),
             ]
         );
 

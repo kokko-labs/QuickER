@@ -324,8 +324,8 @@ public abstract class SyncPlanFuzzTestsBase
         // 網羅の宣言の誤りは種の結果より先に赤にする。要約はどの方言でも書く
         var coverageReport = coverage.Report();
         coverageReport.WriteSummary(output);
-        // 網羅しない組の一覧は、普段の既定の種の数が十分に多い方言だけに書いてある。夜間に種が増えて閾値を超えた方言
-        // （PostgreSQL・Oracle）は一覧が無いので照合しない
+        // 網羅しない組の一覧は、普段の既定の種の数での網羅に合わせて書いてある（5 方言とも普段の数が閾値以上。普段の数が閾値を
+        // 下回る方言を足したら、夜間に種が増えて閾値を超えても一覧が無いので照合しない）
         var checksGaps =
             !plan.IsSingle
             && seeds.Count >= ShapeCoverageMinimumSeeds
@@ -581,7 +581,7 @@ public sealed class SyncPlanShapeSeedGuardTests
     {
         var data = new TheoryData<string, string>();
 
-        foreach (var dialect in new[] { DialectNames.PostgreSql, DialectNames.Oracle })
+        foreach (var dialect in new[] { DialectNames.Oracle })
         {
             foreach (
                 var mode in new[]
@@ -598,7 +598,6 @@ public sealed class SyncPlanShapeSeedGuardTests
             }
         }
 
-        data.Add(DialectNames.Oracle, "oracle-extended");
         return data;
     }
 
@@ -608,7 +607,7 @@ public sealed class SyncPlanShapeSeedGuardTests
     [MemberData(nameof(Modes))]
     public void ShapeSeeds_RunAndAreCheckedUnlessSingle(string dialect, string mode)
     {
-        var (settings, declared) = Declared(dialect, mode);
+        var (settings, declared) = Declared(dialect);
         var plan = SeedSource.Resolve(
             settings,
             name =>
@@ -616,7 +615,7 @@ public sealed class SyncPlanShapeSeedGuardTests
                 {
                     "single" when name == SyncPlanFuzzTestsBase.SeedVariable => "7",
                     "explicit-fewer" when name == SyncPlanFuzzTestsBase.SeedCountVariable => "2",
-                    "explicit-more" when name == SyncPlanFuzzTestsBase.SeedCountVariable => "40",
+                    "explicit-more" when name == SyncPlanFuzzTestsBase.SeedCountVariable => "80",
                     "nightly" when name == SeedSource.ProfileVariable => SeedSource.NightlyValue,
                     _ => null,
                 }
@@ -670,11 +669,10 @@ public sealed class SyncPlanShapeSeedGuardTests
     [Theory(
         DisplayName = "形の種は普段の種の範囲の外にあり、方言の実 DB の必須の形だけを名指しする"
     )]
-    [InlineData(DialectNames.PostgreSql)]
     [InlineData(DialectNames.Oracle)]
     public void ShapeSeeds_AreOutsideRegularSeedsAndNameRequiredShapes(string dialect)
     {
-        var (settings, declared) = Declared(dialect, "default");
+        var (settings, declared) = Declared(dialect);
         var required = FuzzShape.RequiredFor(
             EngineFingerprintDriftTests.CreateDialect(dialect),
             realDatabase: true
@@ -687,21 +685,30 @@ public sealed class SyncPlanShapeSeedGuardTests
     }
 
     [Fact(
-        DisplayName = "普段の既定の種が 50 以上の方言は形の種を宣言しない（普段の種だけで必須の形を表明する）"
+        DisplayName = "普段の種だけで必須の形がそろう方言は形の種を宣言せず、どの方言も既定の数で必須の形を表明する"
     )]
     public void DialectsWithManyRegularSeeds_DeclareNoShapeSeeds()
     {
         // fixture は渡さない（形の種と種の決め方は fixture に触れない）
-        foreach (
-            var tests in new SyncPlanFuzzTestsBase[]
-            {
-                new SqliteSyncPlanFuzzTests(),
-                new MySqlSyncPlanFuzzTests(null!),
-                new SqlServerSyncPlanFuzzTests(null!),
-            }
-        )
+        var withoutShapeSeeds = new SyncPlanFuzzTestsBase[]
+        {
+            new SqliteSyncPlanFuzzTests(),
+            new MySqlSyncPlanFuzzTests(null!),
+            new SqlServerSyncPlanFuzzTests(null!),
+            new PostgreSqlSyncPlanFuzzTests(null!),
+        };
+
+        foreach (var tests in withoutShapeSeeds)
         {
             tests.ShapeSeeds.Should().BeEmpty();
+        }
+
+        // 必須の形の表明と網羅しない組の照合は、どの方言も普段の既定の種の数で動く（普段の数が門の下限を下回ると黙って外れる）
+        foreach (var tests in withoutShapeSeeds.Append(new OracleSyncPlanFuzzTests(null!)))
+        {
+            tests
+                .SeedSettings.RegularCount.Should()
+                .BeGreaterThanOrEqualTo(SyncPlanFuzzTestsBase.ShapeCoverageMinimumSeeds);
             SyncPlanShapeSeeds
                 .AssertsRequiredShapes(
                     SeedSource.Resolve(tests.SeedSettings, _ => null),
@@ -714,17 +721,12 @@ public sealed class SyncPlanShapeSeedGuardTests
     }
 
     private static (SeedSettings Settings, IReadOnlyList<FuzzShapeSeed> Declared) Declared(
-        string dialect,
-        string mode
+        string dialect
     ) =>
         dialect switch
         {
-            DialectNames.PostgreSql => (
-                PostgreSqlSyncPlanFuzzTests.Seeds,
-                PostgreSqlSyncPlanFuzzTests.ShapeSeedList
-            ),
             DialectNames.Oracle => (
-                OracleSyncPlanFuzzTests.SeedsFor(extended: mode == "oracle-extended"),
+                OracleSyncPlanFuzzTests.Seeds,
                 OracleSyncPlanFuzzTests.ShapeSeedList
             ),
             _ => throw new ArgumentOutOfRangeException(nameof(dialect), dialect, null),
@@ -799,7 +801,12 @@ public sealed class SqlServerSyncPlanFuzzTests(SqlServerContainerFixture fixture
         new SqlServerSyncPlanFuzzDialect(fixture);
 }
 
-/// <summary>PostgreSQL（Testcontainers・主キー・外部キーの逆引きの DO ブロックを通すため少ない種で流す）</summary>
+/// <summary>PostgreSQL（Testcontainers）</summary>
+/// <remarks>
+/// 普段の種の数は、網羅しない組の照合と必須の形の表明の門（<see cref="SyncPlanFuzzTestsBase.ShapeCoverageMinimumSeeds"/>）を超える
+/// 100（2026-11-14 の測定で 1 種あたり約 50 ms・600 種で 1 分。必須の形は 43 種までに全部出るので形の種は要らない）。
+/// 普段の種で欠ける変更の種類と選び方の組は、網羅の行（<see cref="SyncPlanCoverageRows"/>）が埋める。
+/// </remarks>
 [MatrixAxisValue(SyncPlanFuzzTestsBase.DialectAxis, DialectNames.PostgreSql)]
 [Collection(PostgreSqlContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
@@ -807,7 +814,7 @@ public sealed class PostgreSqlSyncPlanFuzzTests(PostgreSqlContainerFixture fixtu
     : SyncPlanFuzzTestsBase
 {
     /// <summary>既定の種の数</summary>
-    public const int DefaultSeeds = 15;
+    public const int DefaultSeeds = 100;
 
     /// <summary>夜間の既定の種の数</summary>
     public const int NightlySeeds = 600;
@@ -815,13 +822,7 @@ public sealed class PostgreSqlSyncPlanFuzzTests(PostgreSqlContainerFixture fixtu
     /// <summary>種の決め方</summary>
     public static SeedSettings Seeds { get; } = SeedSettingsFor(DefaultSeeds, NightlySeeds);
 
-    /// <summary>形の種（夜間の 600 種の記録から選んだ。普段の 15 種に出ない形を出す）</summary>
-    internal static IReadOnlyList<FuzzShapeSeed> ShapeSeedList { get; } =
-    [new(43, [FuzzShape.ForeignKeyOnUnique])];
-
     internal override SeedSettings SeedSettings => Seeds;
-
-    internal override IReadOnlyList<FuzzShapeSeed> ShapeSeeds => ShapeSeedList;
 
     protected override string? UnavailableReason =>
         fixture.IsAvailable ? null : fixture.UnavailableReason;
@@ -830,45 +831,32 @@ public sealed class PostgreSqlSyncPlanFuzzTests(PostgreSqlContainerFixture fixtu
         new PostgreSqlSyncPlanFuzzDialect(fixture);
 }
 
-/// <summary>Oracle（Testcontainers・既定では少ない種だけ流す）</summary>
+/// <summary>Oracle（Testcontainers）</summary>
 /// <remarks>
-/// Oracle は 1 種ごとの DDL・取込がほかの方言より桁違いに遅く、ほかの方言と同じ種の数を流すと実行時間の予算を超える。
-/// そのため既定では <see cref="DefaultOracleSeedCount"/> 種だけを常に流し（スキップにはしない＝厳格モードでスキップ 0 を保つ）、
-/// 環境変数 <c>QUICKER_SYNC_FUZZ_ORACLE=1</c> のときに <see cref="ExtendedOracleSeedCount"/> 種へ増やす。
-/// コンテナは Oracle のほかの統合テストと共有する。
+/// Oracle は 1 種ごとの DDL・取込がほかの方言より遅い（2026-11-14 の測定で、決定的な行を含めて 300 種で 3 分 40 秒）。普段の種の数は
+/// 網羅しない組の照合と必須の形の表明の門（<see cref="SyncPlanFuzzTestsBase.ShapeCoverageMinimumSeeds"/>）を少し超える 60 にとどめ、
+/// 普段の種で欠ける変更の種類と選び方の組は網羅の行（<see cref="SyncPlanCoverageRows"/>、1 行は種 1 つ分）で埋める。
+/// 普段の 60 種に出ない必須の形は形の種（<see cref="ShapeSeedList"/>）が出す。コンテナは Oracle のほかの統合テストと共有する。
 /// </remarks>
 [MatrixAxisValue(SyncPlanFuzzTestsBase.DialectAxis, DialectNames.Oracle)]
 [Collection(OracleContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
 public sealed class OracleSyncPlanFuzzTests(OracleContainerFixture fixture) : SyncPlanFuzzTestsBase
 {
-    /// <summary>Oracle の種を増やす環境変数</summary>
-    public const string ExtendVariable = "QUICKER_SYNC_FUZZ_ORACLE";
+    /// <summary>既定の種の数</summary>
+    public const int DefaultSeeds = 60;
 
-    /// <summary>既定で流す種の数</summary>
-    public const int DefaultOracleSeedCount = 4;
-
-    /// <summary><see cref="ExtendVariable"/> を立てたときの種の数</summary>
-    public const int ExtendedOracleSeedCount = 30;
-
-    /// <summary>夜間の既定の種の数（<see cref="ExtendedOracleSeedCount"/> 以上＝夜間は <see cref="ExtendVariable"/> に依らずこの数）</summary>
+    /// <summary>夜間の既定の種の数</summary>
     public const int NightlySeeds = 120;
 
-    /// <summary>種の決め方（<paramref name="extended"/> なら普段の数を <see cref="ExtendedOracleSeedCount"/> にする）</summary>
-    /// <param name="extended"><see cref="ExtendVariable"/> を立てたか</param>
-    public static SeedSettings SeedsFor(bool extended) =>
-        SeedSettingsFor(extended ? ExtendedOracleSeedCount : DefaultOracleSeedCount, NightlySeeds);
+    /// <summary>種の決め方</summary>
+    public static SeedSettings Seeds { get; } = SeedSettingsFor(DefaultSeeds, NightlySeeds);
 
-    /// <summary>形の種（夜間の 120 種の記録から選んだ。普段の 4 種に出ない形を出す）</summary>
+    /// <summary>形の種（実 DB の 300 種の記録から選んだ。普段の 60 種に出ない形を出す）</summary>
     internal static IReadOnlyList<FuzzShapeSeed> ShapeSeedList { get; } =
-    [
-        new(6, [FuzzShape.DropPrimaryKeyColumnAlone, FuzzShape.SymbolName]),
-        new(32, [FuzzShape.CaseOnlyName, FuzzShape.SameColumnTwoForeignKeys]),
-        new(102, [FuzzShape.DropUniqueMemberAlone]),
-    ];
+    [new(102, [FuzzShape.DropUniqueMemberAlone])];
 
-    internal override SeedSettings SeedSettings =>
-        SeedsFor(Environment.GetEnvironmentVariable(ExtendVariable) == "1");
+    internal override SeedSettings SeedSettings => Seeds;
 
     internal override IReadOnlyList<FuzzShapeSeed> ShapeSeeds => ShapeSeedList;
 
