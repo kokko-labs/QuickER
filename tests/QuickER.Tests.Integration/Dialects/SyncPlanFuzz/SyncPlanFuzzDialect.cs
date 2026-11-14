@@ -307,6 +307,13 @@ internal abstract class SyncPlanFuzzDialect
     /// </summary>
     public virtual string? HeldFileProblem() => null;
 
+    /// <summary>
+    /// DB のトリガーのうち、今は発火できないものの名前（汎用の表明 5d が同期の前後で比べる）。トリガーの判定を持たない方言は
+    /// <see langword="null"/>（比べない）
+    /// </summary>
+    /// <remarks>判定は製品の実行器の最後の守りと同じ部品を通す（写しを作らない）。</remarks>
+    public virtual System.Collections.Generic.IReadOnlySet<string>? BrokenTriggers() => null;
+
     /// <summary>識別子を引用する</summary>
     public abstract string Quote(string identifier);
 
@@ -416,6 +423,15 @@ internal sealed class SqliteSyncPlanFuzzDialect : SyncPlanFuzzDialect, IDisposab
         {
             return $"the database file is still held by a product connection after the row ({ex.Message})";
         }
+    }
+
+    /// <summary>DB のトリガーのうち今は発火できないもの（製品の <see cref="SqliteTriggers.CollectBroken"/> を通す）</summary>
+    public override System.Collections.Generic.IReadOnlySet<string>? BrokenTriggers()
+    {
+        using var connection = new SqliteConnection(NonPooled(_db.ReadWriteConnectionString));
+        connection.Open();
+
+        return SqliteTriggers.CollectBroken(connection, null, DbCommands.DefaultTimeoutSeconds);
     }
 
     /// <summary>接続文字列にプールなしを立てる</summary>

@@ -1,6 +1,6 @@
 namespace QuickER.Provider.Sqlite;
 
-/// <summary>ビューが読めるかの判定の文（同期の実行器と計画のビューの判定 <see cref="SqliteLiveViewCheck"/> が共有する）</summary>
+/// <summary>ビューが読めるかの判定の文（同期の実行器と計画の段の判定 <see cref="SqliteLiveDependentCheck"/> が共有する）</summary>
 /// <remarks>
 /// SQLite はビューを作るときに参照先を検証しないので、読めない（壊れた）ビューは既存の DB にもあり得る。各ビューを
 /// <c>SELECT * … LIMIT 0</c> で準備させ、失敗したものを読めないビューとする。実行器は同期の前後で、計画の判定はスキーマだけを写した

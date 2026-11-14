@@ -176,6 +176,9 @@
   <data name="Sync_Error_SqliteBrokenView" xml:space="preserve">
     <value>The sync broke views (they refer to a column or table that no longer exists), so it was rolled back: {0}</value>
   </data>
+  <data name="Sync_Error_SqliteBrokenTrigger" xml:space="preserve">
+    <value>The sync broke triggers (they refer to a column, table, or key that no longer exists, or insert a different number of values), so it was rolled back: {0}</value>
+  </data>
   <data name="Sync_Error_SqliteForeignKeyViolation" xml:space="preserve">
     <value>Foreign key constraint violations were detected after the table rebuild, so the transaction was rolled back. Affected table(s): {0}</value>
   </data>

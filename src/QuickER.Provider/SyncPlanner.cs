@@ -36,7 +36,7 @@ public sealed class SyncPlanContext
             TableCreateSql = live.TableCreateSql,
             ColumnDefaults = live.ColumnDefaults,
             ImportWarnings = live.Warnings,
-            LiveViewCheck = live.LiveViewCheck,
+            LiveDependentCheck = live.LiveDependentCheck,
         };
     }
 
@@ -78,12 +78,15 @@ public sealed class SyncPlanContext
     /// </remarks>
     public IReadOnlyList<SchemaImportWarning> ImportWarnings { get; init; } = [];
 
-    /// <summary>DB のビューが同期後の表の形でも読めるかを試す入口（取込の結果＝<see cref="SchemaImportResult.LiveViewCheck"/>）</summary>
+    /// <summary>
+    /// DB のビュー・トリガーが同期後の表の形でも読める・発火できるかを試す入口（取込の結果＝<see cref="SchemaImportResult.LiveDependentCheck"/>）
+    /// </summary>
     /// <remarks>
-    /// 合成には使わない。ビューが読む表の列を消す・足す変更と表の削除のうち、ビューを読めなくするものを外すためだけに参照する
-    /// （<see cref="SyncPlanWarningKind.TableChangeBreaksDependentView"/>）。<c>null</c> なら何もしない。
+    /// 合成には使わない。ビュー・トリガーが参照する表の列を消す・足す変更と表の削除のうち、ビューを読めなくするもの・トリガーを発火できなく
+    /// するものを外すためだけに参照する（<see cref="SyncPlanWarningKind.TableChangeBreaksDependentView"/>・
+    /// <see cref="SyncPlanWarningKind.TableChangeBreaksDependentTrigger"/>）。<c>null</c> なら何もしない。
     /// </remarks>
-    public ILiveViewCheck? LiveViewCheck { get; init; }
+    public ILiveDependentCheck? LiveDependentCheck { get; init; }
 
     /// <summary>live の外部キーの実効名（図全体から求めた名前＝DDL が付けるのと同じ規則）</summary>
     /// <remarks>
@@ -945,7 +948,7 @@ public sealed class SyncPlanner
     /// <summary>
     /// 選んだ項目のうち、計画に載せられない項目を外して名指しする：列の無い表の追加（<see cref="ExcludeTablesWithoutColumns"/>）・
     /// 名前の重なる表の追加（<see cref="ExcludeTablesWithCollidingConstraintNames"/>）・DB のビューを読めなくする変更
-    /// （<see cref="ExcludeChangesBreakingLiveViews"/>）・選んでいない変更を前提にする項目（<see cref="ExcludeItemsRequiringUnselected"/>）
+    /// （<see cref="ExcludeChangesBreakingLiveDependents"/>）・選んでいない変更を前提にする項目（<see cref="ExcludeItemsRequiringUnselected"/>）
     /// </summary>
     /// <remarks>
     /// <para>
@@ -978,7 +981,7 @@ public sealed class SyncPlanner
         {
             var excludedBefore = excluded.Count;
             current = ExcludeItemsRequiringUnselected(
-                ExcludeChangesBreakingLiveViews(
+                ExcludeChangesBreakingLiveDependents(
                     ExcludeTablesWithCollidingConstraintNames(
                         current,
                         capabilities,
@@ -1011,67 +1014,69 @@ public sealed class SyncPlanner
     }
 
     /// <summary>
-    /// DB のビューが読む表の列を消す・足す変更と表の削除のうち、ビューを読めなくするものを計画から外し、
-    /// <see cref="SyncPlanWarningKind.TableChangeBreaksDependentView"/> で表ごとに名指しする（<see cref="SyncPlanContext.LiveViewCheck"/> が
+    /// DB のビュー・トリガーが参照する表の列を消す・足す変更と表の削除のうち、ビューを読めなくするもの・トリガーを発火できなくするものを
+    /// 計画から外し、<see cref="SyncPlanWarningKind.TableChangeBreaksDependentView"/> と
+    /// <see cref="SyncPlanWarningKind.TableChangeBreaksDependentTrigger"/> で表ごとに名指しする（<see cref="SyncPlanContext.LiveDependentCheck"/> が
     /// 無ければ何もしない）。
     /// </summary>
     /// <remarks>
     /// <para>
-    /// ビューは図に無いので、同期はビューを直さない。ビューが読む列・表を消すと（列の並びを書いた <c>SELECT *</c> のビューは列を足しても）
-    /// ビューが読めなくなり、実行器が同期の前後の比較で見つけて同期ごと巻き戻す。ビューが読めるかは表の列の名前の集合と表の有無だけで
-    /// 決まるので、外すのはその表の列の削除・列の追加・表の削除だけで、型・主キー・制約などの変更は流す。
+    /// ビューもトリガーも図に無いので、同期は直さない。ビューが読む列・表を消すと（列の並びを書いた <c>SELECT *</c> のビューは列を足しても）
+    /// ビューが読めなくなり、トリガーが参照する列・表を消すと（列の並びを書かない <c>INSERT</c> のトリガーは列を足しても）トリガーは発火した
+    /// ときに断られる（テーブル再構築はトリガーの本文を検証しないので、同期はそのままコミットする）。どちらも表の列の名前の集合と表の有無の
+    /// 変化だけで壊れるので、外すのはその表の列の削除・列の追加・表の削除だけで、型・主キー・制約などの変更は流す。
     /// </para>
     /// <para>
-    /// 判定は DB 自身に試させる（<see cref="ILiveViewCheck"/>。ビューの SQL を解析しない）。まず計画全体の同期後の列名で試し、読めなく
-    /// なるビューが無ければ何も外さない（<c>SELECT *</c> のビューの列の削除・列の数が変わらない名前の変更などに偽の警告を出さない）。
-    /// 読めなくなるときだけ、表ごとに試して原因の表を決め、その表の名前を変える項目を外す。表どうしの組み合わせでだけ読めなくなるときは、
+    /// 判定は DB 自身に試させる（<see cref="ILiveDependentCheck"/>。SQL を解析しない）。まず計画全体の同期後の列名で試し、壊れるビュー・トリガーが
+    /// 無ければ何も外さない（<c>SELECT *</c> のビューの列の削除・列の数が変わらない名前の変更・トリガーが読まない列の削除などに偽の警告を
+    /// 出さない）。壊れるときだけ、表ごとに試して原因の表を決め、その表の名前を変える項目を外す。表どうしの組み合わせでだけ壊れるときは、
     /// 名前を変える表をすべて原因とする。外した後の計画は <see cref="ExcludeUntilStable"/> の次の周でもう一度試す。
     /// </para>
     /// </remarks>
-    private static List<SchemaDiffItem> ExcludeChangesBreakingLiveViews(
+    private static List<SchemaDiffItem> ExcludeChangesBreakingLiveDependents(
         List<SchemaDiffItem> selected,
         SyncPlanContext? context,
         List<SyncPlanWarning> warnings,
         List<SchemaDiffItem> excluded
     )
     {
-        if (context?.LiveViewCheck is not { } check)
+        if (context?.LiveDependentCheck is not { } check)
         {
             return selected;
         }
 
         var changes = PostSyncColumnNames(selected, IndexLiveTables(context));
 
-        if (changes.Count == 0 || check.ViewsBrokenBy(ToTableChanges(changes)).Count == 0)
+        if (changes.Count == 0 || check.DependentsBrokenBy(ToTableChanges(changes)).IsEmpty)
         {
             return selected;
         }
 
-        // 表ごとに試して原因の表を決める（表 → 読めなくするビュー）
-        var culprits = new Dictionary<string, (string Table, IReadOnlyList<string> Views)>(
+        // 表ごとに試して原因の表を決める（表 → 壊れるビュー・トリガー）
+        var culprits = new Dictionary<string, (string Table, LiveDependentBreaks Breaks)>(
             SchemaNames.Comparer
         );
 
         foreach (var change in changes)
         {
-            var views = check.ViewsBrokenBy(ToTableChanges([change]));
+            var breaks = check.DependentsBrokenBy(ToTableChanges([change]));
 
-            if (views.Count > 0)
+            if (!breaks.IsEmpty)
             {
-                culprits[change.Table] = (change.Table, views);
+                culprits[change.Table] = (change.Table, breaks);
             }
         }
 
-        // 表どうしの組み合わせでだけ読めなくなる（どの表の変更も単独では読めなくしない）ときは、名前を変える表をすべて原因とする。
-        // この枝を通す形は見つかっておらず、行で通していない守りの無い枝（src/QuickER.Provider.Sqlite/CLAUDE.md「計画の段のビューの判定」）。
+        // 表どうしの組み合わせでだけ壊れる（どの表の変更も単独では壊さない）ときは、名前を変える表をすべて原因とする。
+        // この枝を通す形は見つかっておらず、行で通していない守りの無い枝（src/QuickER.Provider.Sqlite/CLAUDE.md「計画の段のビューとトリガーの判定」）。
         // 作れる形が見つかったら、同期計画の期待の行の実 SQLite の段へ行を足す
         if (culprits.Count == 0)
         {
-            var views = check.ViewsBrokenBy(ToTableChanges(changes));
+            var breaks = check.DependentsBrokenBy(ToTableChanges(changes));
 
             foreach (var change in changes)
             {
-                culprits[change.Table] = (change.Table, views);
+                culprits[change.Table] = (change.Table, breaks);
             }
         }
 
@@ -1084,16 +1089,29 @@ public sealed class SyncPlanner
                 && culprits.TryGetValue(SchemaNames.ToStoredForm(item.TableName), out var culprit)
             )
             {
-                ExcludeSelected(
-                    item,
-                    new SyncPlanWarning(
-                        SyncPlanWarningKind.TableChangeBreaksDependentView,
-                        culprit.Table,
-                        string.Join(", ", culprit.Views)
-                    ),
-                    warnings,
-                    excluded
-                );
+                if (culprit.Breaks.Views.Count > 0)
+                {
+                    AddWarningOnce(
+                        new SyncPlanWarning(
+                            SyncPlanWarningKind.TableChangeBreaksDependentView,
+                            culprit.Table,
+                            string.Join(", ", culprit.Breaks.Views)
+                        )
+                    );
+                }
+
+                if (culprit.Breaks.Triggers.Count > 0)
+                {
+                    AddWarningOnce(
+                        new SyncPlanWarning(
+                            SyncPlanWarningKind.TableChangeBreaksDependentTrigger,
+                            culprit.Table,
+                            string.Join(", ", culprit.Breaks.Triggers)
+                        )
+                    );
+                }
+
+                excluded.Add(item);
                 continue;
             }
 
@@ -1101,6 +1119,14 @@ public sealed class SyncPlanner
         }
 
         return kept;
+
+        void AddWarningOnce(SyncPlanWarning warning)
+        {
+            if (!warnings.Contains(warning))
+            {
+                warnings.Add(warning);
+            }
+        }
 
         static IReadOnlyDictionary<string, IReadOnlyList<string>?> ToTableChanges(
             IEnumerable<(string Table, IReadOnlyList<string>? Columns)> tables

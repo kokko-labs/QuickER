@@ -10,7 +10,7 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 internal static partial class SyncPlanExpectationRows
 {
     /// <summary>SQLite の実 DB の段の行の数の下限（行を足したら・消したら合わせる）</summary>
-    private const int RealSqliteRowCount = 60;
+    private const int RealSqliteRowCount = 72;
 
     /// <summary>実 DB の段：SQLite の同期（テーブル再構築・外部キー・主キー・一意制約・ビュー）</summary>
     private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealSqliteRows() =>
@@ -18,6 +18,7 @@ internal static partial class SyncPlanExpectationRows
             .. RealSqliteRebuildRows(),
             .. RealSqliteKeyRows(),
             .. RealSqliteViewRows(),
+            .. RealSqliteTriggerRows(),
             .. RealSqliteScriptRows(),
             .. RealSqliteImportDiscardedRows(),
             .. RealSqliteRowidAliasNullRows(),
@@ -1321,6 +1322,344 @@ internal static partial class SyncPlanExpectationRows
                         })
                 ),
         ];
+
+    /// <summary>
+    /// DB のトリガー（図に無い）が参照する表・列を作り直しで消す・足す形（作り直しはトリガーの本文を検証しないので、壊れたトリガーは
+    /// 発火したときに初めて断られる＝src/QuickER.Provider/CLAUDE.md「テーブル再構築の合成」のトリガーの段）
+    /// </summary>
+    /// <remarks>
+    /// 計画はトリガーを壊す表の列の削除・列の追加・表の削除を外して名指しし、同じ同期のほかの変更は流す。名指ししない形（偽の警告の側）も
+    /// 並べる。トリガーが発火できるかは、汎用の表明 5d が同期の前後で比べ、探りの問い合わせが実際に発火させて確かめる。
+    /// </remarks>
+    private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealSqliteTriggerRows() =>
+        [
+            // 別の表のトリガーが消す列へ書く（同期でトリガーが黙って壊れる元の形）。消す列の削除は外し、同じ表の型の変更はコミットする
+            Row(
+                    "realdb-trigger-other-table-writing-dropped-column-excludes-drop-and-applies-type-change",
+                    "[Integration] SQLite 同期: 別の表のトリガーが書く列の削除は外してトリガーを名指しし、同じ表の型の変更はコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s =>
+                {
+                    s["tr_item"].Columns.RemoveAll(c => c.Name == "note");
+                    s.Col("tr_item", "extra").DataType = "INTEGER";
+                })
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            TriggerItemSql
+                                + "CREATE TRIGGER \"trg_src_writes_note\" AFTER INSERT ON \"tr_src\" BEGIN "
+                                + "UPDATE \"tr_item\" SET \"note\" = NEW.\"note\" WHERE \"id\" = NEW.\"id\"; END;"
+                        )
+                        .Query("fire", "INSERT INTO \"tr_src\" (\"id\", \"note\") VALUES (1, 'b');")
+                        .Query("note", "SELECT \"note\" FROM \"tr_item\" WHERE \"id\" = 1;")
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single(
+                                "TableChangeBreaksDependentTrigger(tr_item): trg_src_writes_note"
+                            );
+                            e.Excluded.Exact("DropColumn tr_item.note");
+                            e.After.Contains("col tr_item.note *");
+                            e.After.Single("col tr_item.extra INTEGER *");
+                            e.Probe("fire").Empty();
+                            e.Probe("note").Exact("b");
+                        })
+                ),
+            // 作り直す表自身のトリガーが NEW の消す列を読む（作り直しはトリガーを原文で作り直し、そのときも断られない）
+            Row(
+                    "realdb-trigger-same-table-reading-dropped-column-is-excluded",
+                    "[Integration] SQLite 同期: 作り直す表自身のトリガーが読む列の削除は外してトリガーを名指しする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s["tr_item"].Columns.RemoveAll(c => c.Name == "note"))
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            TriggerItemSql
+                                + "CREATE TRIGGER \"trg_item_logs_note\" AFTER INSERT ON \"tr_item\" BEGIN "
+                                + "INSERT INTO \"tr_log\" (\"msg\") VALUES (NEW.\"note\"); END;"
+                        )
+                        .Query("fire", "INSERT INTO \"tr_item\" (\"id\") VALUES (2);")
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single(
+                                "TableChangeBreaksDependentTrigger(tr_item): trg_item_logs_note"
+                            );
+                            e.Excluded.Exact("DropColumn tr_item.note");
+                            e.Unchanged();
+                            e.Probe("fire").Empty();
+                        })
+                ),
+            // 列の並びを書かない INSERT のトリガーは、列を足すと値の数が合わなくなる（ビューの列の並びを書いた SELECT * と同じ形）
+            Row(
+                    "realdb-trigger-insert-without-column-list-add-column-is-excluded",
+                    "[Integration] SQLite 同期: 列の並びを書かずに表へ挿入するトリガーがあると、その表への列の追加は外してトリガーを名指しする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s =>
+                    s["tr_item"].Columns.Add(ExpectationSchema.Nullable("memo", "TEXT"))
+                )
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            TriggerItemSql
+                                + "CREATE TRIGGER \"trg_src_copies_row\" AFTER INSERT ON \"tr_src\" BEGIN "
+                                + "INSERT INTO \"tr_item\" VALUES (NEW.\"id\" + 100, NEW.\"note\", NULL); END;"
+                        )
+                        .Query("fire", "INSERT INTO \"tr_src\" (\"id\", \"note\") VALUES (1, 'b');")
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single(
+                                "TableChangeBreaksDependentTrigger(tr_item): trg_src_copies_row"
+                            );
+                            e.Excluded.Exact("AddColumn tr_item.memo");
+                            e.Unchanged();
+                            e.Probe("fire").Empty();
+                        })
+                ),
+            // 別の表のトリガーが消す表を読む（列を読まない count(*) でも）。ほかの表の削除はコミットする
+            Row(
+                    "realdb-trigger-reading-dropped-table-excludes-drop-table",
+                    "[Integration] SQLite 同期: 別の表のトリガーが読む表の削除は外してトリガーを名指しし、ほかの表の削除はコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s =>
+                    s.Entities.RemoveAll(t => t.TableName is "tr_item" or "tr_other")
+                )
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            TriggerItemSql
+                                + "CREATE TABLE \"tr_other\" (\"id\" INTEGER NOT NULL, CONSTRAINT \"PK_tr_other\" PRIMARY KEY (\"id\"));"
+                                + "CREATE TRIGGER \"trg_src_counts_items\" AFTER INSERT ON \"tr_src\" BEGIN "
+                                + "INSERT INTO \"tr_log\" (\"msg\") SELECT count(*) FROM \"tr_item\"; END;"
+                        )
+                        .Query("fire", "INSERT INTO \"tr_src\" (\"id\", \"note\") VALUES (1, 'b');")
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single(
+                                "TableChangeBreaksDependentTrigger(tr_item): trg_src_counts_items"
+                            );
+                            e.Excluded.Exact("DropTable tr_item");
+                            e.After.Contains("table tr_item");
+                            e.After.Absent("table tr_other");
+                            e.Probe("fire").Empty();
+                        })
+                ),
+            // ビューの INSTEAD OF のトリガーが消す列へ書く（取込はビューのトリガーを補助オブジェクトに入れないが、判定はすべてのトリガーを写す）
+            Row(
+                    "realdb-trigger-instead-of-on-view-writing-dropped-column-is-named",
+                    "[Integration] SQLite 同期: ビューの INSTEAD OF のトリガーが書く列の削除は外してトリガーを名指しする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s["tr_item"].Columns.RemoveAll(c => c.Name == "note"))
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            TriggerItemSql
+                                + "CREATE VIEW \"tr_src_view\" AS SELECT \"id\", \"note\" FROM \"tr_src\";"
+                                + "CREATE TRIGGER \"trg_view_writes_note\" INSTEAD OF INSERT ON \"tr_src_view\" BEGIN "
+                                + "UPDATE \"tr_item\" SET \"note\" = NEW.\"note\" WHERE \"id\" = NEW.\"id\"; END;"
+                        )
+                        .Query(
+                            "fire",
+                            "INSERT INTO \"tr_src_view\" (\"id\", \"note\") VALUES (1, 'b');"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single(
+                                "TableChangeBreaksDependentTrigger(tr_item): trg_view_writes_note"
+                            );
+                            e.Excluded.Exact("DropColumn tr_item.note");
+                            e.Unchanged();
+                            e.Probe("fire").Empty();
+                        })
+                ),
+            // ほかの列だけを読むトリガーは、列の削除で壊れない（偽の警告を出さない）
+            Row(
+                    "realdb-trigger-reading-other-column-drop-column-is-not-named",
+                    "[Integration] SQLite 同期: トリガーが読まない列の削除は名指しせずにコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s["tr_item"].Columns.RemoveAll(c => c.Name == "note"))
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            TriggerItemSql
+                                + "CREATE TRIGGER \"trg_src_reads_extra\" AFTER INSERT ON \"tr_src\" BEGIN "
+                                + "INSERT INTO \"tr_log\" (\"msg\") SELECT \"extra\" FROM \"tr_item\" WHERE \"id\" = NEW.\"id\"; END;"
+                        )
+                        .Query("fire", "INSERT INTO \"tr_src\" (\"id\", \"note\") VALUES (1, 'b');")
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Absent("TableChangeBreaksDependentTrigger*");
+                            e.Excluded.Empty();
+                            e.After.Absent("col tr_item.note *");
+                            e.Probe("fire").Empty();
+                        })
+                ),
+            // UPDATE OF の列が無くなったトリガーは二度と発火しないだけで、表への書き込みを断らない
+            Row(
+                    "realdb-trigger-update-of-dropped-column-is-not-named",
+                    "[Integration] SQLite 同期: UPDATE OF の列の削除は、トリガーが発火しなくなるだけなので名指しせずにコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s["tr_item"].Columns.RemoveAll(c => c.Name == "note"))
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            TriggerItemSql
+                                + "CREATE TRIGGER \"trg_item_update_of_note\" AFTER UPDATE OF \"note\" ON \"tr_item\" BEGIN "
+                                + "INSERT INTO \"tr_log\" (\"msg\") VALUES ('updated'); END;"
+                        )
+                        .Query("write", "UPDATE \"tr_item\" SET \"extra\" = 'z';")
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Absent("TableChangeBreaksDependentTrigger*");
+                            e.Excluded.Empty();
+                            e.After.Absent("col tr_item.note *");
+                            e.Probe("write").Empty();
+                        })
+                ),
+            // 表の削除は、その表自身のトリガーを表と一緒に消す（壊れたのではない）
+            Row(
+                    "realdb-trigger-same-table-drop-table-is-not-named",
+                    "[Integration] SQLite 同期: 表自身のトリガーは表の削除で一緒に消えるので、名指しせずにコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s.Entities.RemoveAll(t => t.TableName == "tr_item"))
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            TriggerItemSql
+                                + "CREATE TRIGGER \"trg_item_logs_note\" AFTER INSERT ON \"tr_item\" BEGIN "
+                                + "INSERT INTO \"tr_log\" (\"msg\") VALUES (NEW.\"note\"); END;"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Absent("TableChangeBreaksDependentTrigger*");
+                            e.Excluded.Empty();
+                            e.After.Absent("table tr_item");
+                        })
+                ),
+            // UPSERT の的（主キー）は、列を足す作り直しでも残る（判定の写しが置き換えの表へキーを写さないと偽の警告になる形）
+            Row(
+                    "realdb-trigger-upsert-on-primary-key-add-column-is-not-named",
+                    "[Integration] SQLite 同期: 主キーを的にする UPSERT のトリガーは、列の追加で壊れないので名指しせずにコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s =>
+                    s["tr_item"].Columns.Add(ExpectationSchema.Nullable("memo", "TEXT"))
+                )
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            TriggerItemSql
+                                + "CREATE TRIGGER \"trg_src_upserts_item\" AFTER INSERT ON \"tr_src\" BEGIN "
+                                + "INSERT INTO \"tr_item\" (\"id\", \"extra\") VALUES (NEW.\"id\", 'u') "
+                                + "ON CONFLICT (\"id\") DO UPDATE SET \"extra\" = 'u2'; END;"
+                        )
+                        .Query("fire", "INSERT INTO \"tr_src\" (\"id\", \"note\") VALUES (1, 'b');")
+                        .Query("extra", "SELECT \"extra\" FROM \"tr_item\" WHERE \"id\" = 1;")
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Absent("TableChangeBreaksDependentTrigger*");
+                            e.Excluded.Empty();
+                            e.After.Contains("col tr_item.memo *");
+                            e.Probe("fire").Empty();
+                            e.Probe("extra").Exact("u2");
+                        })
+                ),
+            // もとから発火できないトリガー（参照先の無い列）は数えない（実行器と同じく増えたときだけ見る）
+            Row(
+                    "realdb-trigger-already-broken-is-not-named",
+                    "[Integration] SQLite 同期: もとから発火できないトリガーは、列の削除でも名指しせずにコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s["tr_item"].Columns.RemoveAll(c => c.Name == "note"))
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(TriggerItemSql)
+                        .RawSetup(
+                            "CREATE TRIGGER \"trg_src_pre_broken\" AFTER INSERT ON \"tr_src\" BEGIN "
+                                + "UPDATE \"tr_item\" SET \"no_such_column\" = NEW.\"note\"; END;"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Absent("TableChangeBreaksDependentTrigger*");
+                            e.Excluded.Empty();
+                            e.After.Absent("col tr_item.note *");
+                        })
+                ),
+            // 型の変更はトリガーを壊さない（列の名前の集合が変わらない）
+            Row(
+                    "realdb-trigger-type-change-of-written-column-is-not-named",
+                    "[Integration] SQLite 同期: トリガーが書く列の型の変更は名指しせずにコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s.Col("tr_item", "note").DataType = "VARCHAR(50)")
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            TriggerItemSql
+                                + "CREATE TRIGGER \"trg_src_writes_note\" AFTER INSERT ON \"tr_src\" BEGIN "
+                                + "UPDATE \"tr_item\" SET \"note\" = NEW.\"note\" WHERE \"id\" = NEW.\"id\"; END;"
+                        )
+                        .Query("fire", "INSERT INTO \"tr_src\" (\"id\", \"note\") VALUES (1, 'b');")
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Absent("TableChangeBreaksDependentTrigger*");
+                            e.Excluded.Empty();
+                            e.After.Single("col tr_item.note VARCHAR(50) *");
+                            e.Probe("fire").Empty();
+                        })
+                ),
+            // 同じ同期が UPSERT の的の一意制約を外す。計画の段の写しは live のキーを持ったまま試す（列の名前の集合も変わらない）ので
+            // 名指しせず、実行器の前後の比較が最後の守りとして巻き戻してトリガーを名指しする（docs の割り切り）
+            Row(
+                    "realdb-trigger-upsert-target-dropped-by-same-sync-rolls-back",
+                    "[Integration] SQLite 同期: UPSERT の的の一意制約を外す同期は、トリガーが発火できなくなるので実行器が巻き戻してトリガーを名指しする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s["tr_keyed"].UniqueConstraints.Clear())
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            TriggerItemSql
+                                + "CREATE TABLE \"tr_keyed\" (\"id\" INTEGER NOT NULL, \"code\" TEXT NOT NULL, \"hits\" INTEGER NULL, "
+                                + "CONSTRAINT \"PK_tr_keyed\" PRIMARY KEY (\"id\"), CONSTRAINT \"UQ_tr_keyed_code\" UNIQUE (\"code\"));"
+                                + "CREATE TRIGGER \"trg_src_upserts_code\" AFTER INSERT ON \"tr_src\" BEGIN "
+                                + "INSERT INTO \"tr_keyed\" (\"id\", \"code\", \"hits\") VALUES (NEW.\"id\", NEW.\"note\", 1) "
+                                + "ON CONFLICT (\"code\") DO UPDATE SET \"hits\" = \"hits\" + 1; END;"
+                        )
+                        .ExpectsUnwarnedFailure(
+                            "割り切り：計画の段の判定の写しは、同じ同期の主キー・一意制約の変更を写さない（実行器の前後の比較が巻き戻して名指しする）"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("failed: *trg_src_upserts_code*");
+                            e.Unchanged();
+                        })
+                ),
+        ];
+
+    /// <summary>トリガーの行の表（tr_item は id・note・extra と 1 行、tr_src と tr_log は行なし）</summary>
+    private const string TriggerItemSql =
+        "CREATE TABLE \"tr_item\" (\"id\" INTEGER NOT NULL, \"note\" TEXT NULL, \"extra\" TEXT NULL, CONSTRAINT \"PK_tr_item\" PRIMARY KEY (\"id\"));"
+        + "INSERT INTO \"tr_item\" (\"id\", \"note\", \"extra\") VALUES (1, 'a', '7');"
+        + "CREATE TABLE \"tr_src\" (\"id\" INTEGER NOT NULL, \"note\" TEXT NULL, CONSTRAINT \"PK_tr_src\" PRIMARY KEY (\"id\"));"
+        + "CREATE TABLE \"tr_log\" (\"id\" INTEGER NOT NULL, \"msg\" TEXT NULL, CONSTRAINT \"PK_tr_log\" PRIMARY KEY (\"id\"));";
 
     /// <summary>ビューの行の表（id・note・extra と 1 行）</summary>
     private const string ViewItemSql =

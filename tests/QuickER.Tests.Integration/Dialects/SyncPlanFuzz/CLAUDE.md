@@ -220,7 +220,7 @@
 - `.OnRealDatabase(r => …)` で実 DB の段を持つ行は、方言ごとの `SyncPlanFuzzTestsBase.ExpectationRows_MatchOnRealDatabase`（5 方言の派生・`SyncPlanRealStage.cs`）が実 DB でも流す。
   - 流れは「DB 側の図を作る → 取込 → 目標の図との差分 → 選び方 → 計画 → 実行 → 取り込み直し」。
   - 目標の図は既定で別の Guid 空間。`PreserveIds(理由)` は例外で、今は使う行が無い。
-- 総当たりと同じランナー（`SyncPlanFuzzRunner.RunCaseAsync`）の汎用の表明 1〜5（5b を含む）を照合する。
+- 総当たりと同じランナー（`SyncPlanFuzzRunner.RunCaseAsync`）の汎用の表明 1〜5（5b・5c・5d を含む）を照合する。
   - 表明 1：失敗は計画の警告が予告する。
   - 表明 1b：失敗で消えてよい制約だけが消える。
   - 表明 2 / 2b / 3：選んだ項目が消え、新しい差分が出ず、選ばなかった項目が残る。
@@ -228,6 +228,7 @@
   - 表明 5：行数と取込の警告。新しく出た取込警告に加え、同期の前の取込警告が同期の後に消えたら、選んだ項目で説明できない限り違反にする（`SyncPlanFuzzRunner.LostImportWarnings`・違反の頭 `import warning lost:`）。取込が表の中の物を捨てた種別（`SchemaImportWarningKinds.RebuildLosesTableContent`）は、その表の削除か名指しした列の削除を選んだときだけ説明でき、ほかの種別はその表に触れる選んだ項目か、計画の `TableRebuildDropsColumnAttribute` の警告で説明できる。外部キーの警告は Subject が列でないので、その外部キーの子の列の削除では説明できない（今は生成器・期待の行がその形を作らない。限界は関数の remarks）。
   - 表明 5b：コミットした同期の前後で、両方にある表の両方にある列（計算列を除く）の NULL の行の数が同じ（`SyncPlanFuzzRunner.NullCountChanges`・違反の頭 `null count changed:`）。型を変えた列も比べる。比べないのは選んだ表の追加・削除の表と、選んだ列の追加・削除の列。数え方は `SUM(CASE WHEN 列 IS NULL THEN 1 ELSE 0 END)`（SQL Server の `COUNT(列)` は text・ntext・image を受けない）。同期は値を書き換えないので、NULL の数が変わるのは値が黙って書き換わったとき（SQLite の rowid の別名へ写した NULL が採番の値に変わる形）だけ。番号は、期待の行の実 DB の段だけの汎用の表明 6 と重ねない。
   - 表明 5c：コミットした同期の前後で、両方にある表の両方にある列の、取込の既定値の式（`ColumnDefaults`）が同じ（消えた・現れたも含む。`SyncPlanFuzzRunner.ColumnDefaultChanges`・違反の頭 `column default changed:`）。型を変えた列も比べる。比べないのは、選んだ表の追加・削除の表と、選んだ列の追加・削除の列と、計画が `TableRebuildDropsColumnAttribute` で名指しした表（SQLite の再構築は既定値を落とすと告げて進める）。列の変更が既定値を読み直して保つ約束（`src/QuickER.Provider/CLAUDE.md`「列の変更が保つ属性」）の総当たりの守り。
+  - 表明 5d：同期の前（取込の前）に発火できたトリガーが、コミットした同期の後も発火できる（`SyncPlanFuzzRunner.NewlyBrokenTriggers`・違反の頭 `trigger can no longer fire after the committed sync:`）。判定は方言の `SyncPlanFuzzDialect.BrokenTriggers`（SQLite だけが製品の実行器と同じ `SqliteTriggers.CollectBroken` を通す。ほかの方言は null で比べない）。もとから発火できないトリガーと、表と一緒に消えたトリガーは数えない。テーブル再構築はトリガーの本文を検証しないので、製品が黙ってトリガーを壊す形の総当たりの守り（`src/QuickER.Provider.Sqlite/CLAUDE.md`「計画の段のビューとトリガーの判定」）。判定の行は `SyncPlanFuzzOracleTests.NewlyBrokenTriggers_CountsOnlyTriggersBrokenBySync`。トリガーの無い行・種は `sqlite_master` の読み取りが 2 回増えるだけ（期待の行 109 行で約 +0.08 秒）。
 - 実 DB の段だけの汎用の表明 6：行の後に、製品の取込・実行器が DB のファイルを掴んでいない（`SyncPlanFuzzDialect.HeldFileProblem`。ファイルの DB の SQLite だけが実装し、DB のファイルを排他で開けるかで見る）。
   - SQLite の方言の自分の接続（行数・探針・問い合わせ・空のファイルの作成）はプールしない。製品と同じ組み方の接続文字列でプールすると、製品の掴みとテストの接続を区別できない。取込の接続文字列は画面と同じ `SqliteConnectionStringFactory.Build`。
   - Linux の排他は SQLite のロックと関係しないので、Windows のジョブでだけ効く（→ `src/QuickER.Provider.Sqlite/CLAUDE.md`「ファイルを掴まない接続」）。総当たりの種には掛けない。

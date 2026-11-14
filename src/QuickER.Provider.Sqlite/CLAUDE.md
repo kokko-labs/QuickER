@@ -72,27 +72,32 @@
 
 ### 同期実行器
 
-- 外部キー違反とビューの破損を同期の前後で比べ、増えたときだけ失敗にする。DB 全体の結果で判定すると、既存の孤児行や壊れたビュー（CREATE VIEW は参照先を検証しない）で無関係な同期まで失敗する。
-  - 比べる単位は、外部キー違反が（子表, 親表）ごとの件数、ビューが名前。外部キーの検査は `foreign_key_check` を実行側で行い、PRAGMA はトランザクションの外で流す。
+- 外部キー違反とビューの破損と発火できないトリガーを同期の前後で比べ、増えたときだけ失敗にする。DB 全体の結果で判定すると、既存の孤児行や壊れたビュー・トリガー（CREATE VIEW も CREATE TRIGGER も参照先を検証しない）で無関係な同期まで失敗する。
+  - 比べる単位は、外部キー違反が（子表, 親表）ごとの件数、ビュー・トリガーが名前。外部キーの検査は `foreign_key_check` を実行側で行い、PRAGMA はトランザクションの外で流す。
+  - トリガーの判定は `SqliteTriggers.CollectBroken`（下の「計画の段のビューとトリガーの判定」と同じ部品）。作り直しはトリガーの本文を検証しないので、比べないと消した列・表を参照するトリガーを残してコミットし、発火したときに初めて断られる。計画の段の写しが見ない形（同じ同期のキーの変更で `ON CONFLICT` の的が消える）は、ここが巻き戻して `Sync_Error_SqliteBrokenTrigger` で名指しする。ガード：期待の行 `realdb-trigger-upsert-target-dropped-by-same-sync-rolls-back`・同期計画の総当たりの汎用の表明 5d（`SyncPlanFuzzOracleTests.NewlyBrokenTriggers_CountsOnlyTriggersBrokenBySync`）。mutation 実証済み（検査を外すと期待の行が赤・表明 5d がトリガーを名指し）。
 - 実行器はトランザクションの前に `foreign_keys=OFF` と `legacy_alter_table=ON` を流し、元へ戻さない。接続はプールしない（「ファイルを掴まない接続」）ので、切り替えた PRAGMA は接続を閉じると一緒に消え、後から開いた接続へ残らない。
-- 実行器はスクリプトを 1 回のコマンドで流し、結果を最後まで読み切る（`SqliteScripts.RunToEndAsync`＝`ExecuteReaderAsync` の後に `NextResultAsync` を最後まで）。QuickER 自身が SQLite で結果を読まない文（DDL・PRAGMA）を実行するのは `SqliteScripts` だけ（取込などの問い合わせは `ExecuteReader` で読む）。同期版の `RunToEnd` は、計画の段のビューの判定（下の「計画の段のビューの判定」）がメモリの DB で使う。
+- 実行器はスクリプトを 1 回のコマンドで流し、結果を最後まで読み切る（`SqliteScripts.RunToEndAsync`＝`ExecuteReaderAsync` の後に `NextResultAsync` を最後まで）。QuickER 自身が SQLite で結果を読まない文（DDL・PRAGMA）を実行するのは `SqliteScripts` だけ（取込などの問い合わせは `ExecuteReader` で読む）。同期版の `RunToEnd` は、計画の段のビューとトリガーの判定（下の「計画の段のビューとトリガーの判定」）がメモリの DB で使う。
   - Microsoft.Data.Sqlite の `ExecuteNonQuery` は、行の無い表への `ADD COLUMN … NOT NULL`（SQLite は行があれば断る検査の問い合わせを文の中に持つ）の後ろの文が断られると、例外を出さずにその文から後ろを実行しない。実行器はトランザクションの中で、断られた文の前までをコミットし、後ろの文（外部キーの検査を含む）を黙って飛ばしていた。読み切ると、断られた文の例外が届いてスクリプト全体を巻き戻す。
   - スクリプトが複数の文かは静的に見分けられないので、1 文でも部品を通す。
   - ガード：`SourceRuleTests` の規則 `sqlite-script-executions`（QuickER.Provider.Sqlite・Db.UI・Cli・Gui の `ExecuteNonQuery(Async)` の呼び出しを断る。自己検査の行 `sqlite-script-executions-forms`・`sqlite-script-executions-inactive-branch`）・実 SQLite の期待の行 `realdb-sqlite-script-refused-statement-after-not-null-add-rolls-back`・同期計画の総当たりの行の水準（行のある表への NOT NULL の列の追加。本流の生成器が行の無い表へ NOT NULL の列を足す）。mutation 実証済み（読み切りを `ExecuteNonQueryAsync` へ戻すと、期待の行と総当たりの種が赤）。
 - 固定は実 SQLite の期待の行（ビューの `realdb-rebuild-with-dependent-view-succeeds`／`realdb-view-reading-dropped-column-excludes-drop-and-applies-type-change`・既存の違反の `realdb-existing-fk-violations-unrelated-add-column-succeeds`・`realdb-existing-fk-violations-child-rebuild-succeeds`・`realdb-existing-fk-violations-new-violation-fails`）。PRAGMA が残らないことは、接続をプールしないことの規則（`SourceRuleTests` の規則 `sqlite-file-connection-creations`・`sqlite-file-connection-pooling-off`）が守る。mutation 実証済み。
 
-### 計画の段のビューの判定
+### 計画の段のビューとトリガーの判定
 
-- ビューは図に無く、同期はビューを直さない。ビューが読む列・表を同期が消すと（列の並びを書いた `SELECT *` のビューは列を足しても）ビューが読めなくなり、実行器が同期の前後の比較で見つけて同期全体を巻き戻す。計画はその変更を前もって外して名指しする（`SyncPlanner.ExcludeChangesBreakingLiveViews`・`SyncPlanWarningKind.TableChangeBreaksDependentView`・方言をまたぐ規則は `src/QuickER.Provider/CLAUDE.md`「テーブル再構築の合成」）。
-- 判定は SQLite 自身に試させる（ビューの SQL を解析しない）。`SqliteLiveViewCheck`（`ILiveViewCheck` の実装）が、試すたびにメモリの DB へスキーマだけ（表・仮想表・ビューの原文。行は写さない）を写し、変わる表を同期後の列名だけの表に置き換え（新しい表 → DROP → RENAME・`legacy_alter_table`=ON＝実行器と同じ）、前後で読めるかを比べて新しく読めなくなったビューを返す。
+- ビューもトリガーも図に無く、同期は直さない。ビューが読む列・表を同期が消すと（列の並びを書いた `SELECT *` のビューは列を足しても）ビューが読めなくなる。トリガーが使う列・表を消すと（列の並びを書かずに挿入するトリガーは、その表へ列を足しても）、トリガーは発火したときに断られる。作り直しはトリガーの本文を検証せず、作り直す表自身のトリガーも原文で作り直せてしまうので、同期はそのままコミットする（2026-11 の実測で 19 形 × 8 変更。`PRAGMA integrity_check` も DB の開き直しも検出しない）。計画はどちらの変更も前もって外して名指しする（`SyncPlanner.ExcludeChangesBreakingLiveDependents`・`SyncPlanWarningKind.TableChangeBreaksDependentView`・`TableChangeBreaksDependentTrigger`・方言をまたぐ規則は `src/QuickER.Provider/CLAUDE.md`「テーブル再構築の合成」）。
+- 判定は SQLite 自身に試させる（SQL を解析しない）。`SqliteLiveDependentCheck`（`ILiveDependentCheck` の実装）が、試すたびにメモリの DB へスキーマだけ（表・仮想表・索引・ビューの原文。行は写さない）を写し、変わる表を同期後の列名の表に置き換え（新しい表 → DROP → RENAME・`legacy_alter_table`=ON＝実行器と同じ）、前後で比べて新しく読めなくなったビューと発火できなくなったトリガーを返す。
   - 読めるかの文（`SELECT * … LIMIT 0`）とビューの列挙は `SqliteViews` の 1 か所で、実行器と共有する（判定の文を写さない＝計画が外すビューと実行器が巻き戻すビューが割れない）。
+  - 発火できるかの判定は `SqliteTriggers` の 1 か所で、実行器と同期計画の総当たりの汎用の表明 5d と共有する。トリガーを全部外し、1 つずつ作って、その表（INSTEAD OF はビュー）への `INSERT`・`UPDATE`（書ける全列）・`DELETE` を `WHERE 0` で準備だけし（実行しない）、トリガーを置かないときに無かった誤り（種類と文）が出るか、トリガーを作れなければ発火できないとする。1 つずつ置くのは、本文が別の表へ書くとその表のトリガーも準備に巻き込まれ、巻き添えを名指ししないため。トリガーを置かないときと比べるのは、INSTEAD OF の無いビューへの書き込みのように、もとから断られる文を数えないため。実 DB（実行器・表明 5d）ではセーブポイントの中でトリガーを外して戻す。
+  - `UPDATE OF 列` のトリガーは、その列が無くなると二度と発火しないだけなので数えない（SQLite もそう扱う）。消した表のトリガーは表と一緒に消えるので数えない。
+  - 置き換えの表には、同期後の列名に加えて、今の表の主キー・一意制約のうち列がすべて残るものを写し（SQL を解析せず `PRAGMA table_info`・`index_list`・`index_info` から読む）、その表の索引を原文で作り直す（作り直せない索引は飛ばす）。名前だけの表にすると、`ON CONFLICT` の的を失ったトリガーを列の追加だけで壊れたと数える（偽の警告）。同じ同期が主キー・一意制約を変える形は写さないので、その変更で `ON CONFLICT` の的が消えるトリガーは計画の段で名指しせず、実行器の前後の比較が巻き戻して名指しする（ユーザーが受け入れた割り切り・docs に明記）。
   - メモリの接続も `SqliteFileConnections.Create`（`Data Source=:memory:`）で作り、文は `SqliteScripts.RunToEnd` で流す。
-  - ビューを壊すのは表の列の名前の集合と表の有無の変化だけ（型・主キー・NOT NULL・列順・制約の作り直しは壊さない。2026-11 の実測で 15 形 × 11 変更）。入力は表ごとの同期後の列名だけにする。
-- 取込（`SqliteSchemaImporter.LoadLiveViewCheckAsync`）は、ビューがあるときだけ判定器を作って `SchemaImportResult.LiveViewCheck` で持ち帰る（ビューが無ければ null）。写す表の原文は表の列挙の 1 回の読み取りで集め、取り込まない表（仮想表・ドットを含む表・名前の衝突で捨てた表）も入れ、仮想表の付属表（`PRAGMA table_list` の `shadow`）は入れない（仮想表の作成で自動でできる）。
-- 写せない表（DB の外で登録した照合順序の列・同梱の SQLite に無い仮想表のモジュール）は飛ばすので、その上のビューは写しの中で同期の前から読めず、判定しない（警告しない）。アプリが登録した関数を使うビューも同じ。どちらも実行器の前後の比較が最後に拾って巻き戻す。この形は SQL だけでは作れない（CREATE が断る）ので、期待の行を持たない。
-- 守りの無い枝：表どうしの組み合わせでだけ読めなくなる（どの表の変更も単独では読めなくしない）ときに、名前を変える表をすべて原因とする枝は、通す形が見つかっておらず行で通していない（コードのコメントにも書いた）。作れる形が見つかったら期待の行を足す。
-- 壊すと：ビューが読む列の削除を選んだ同期が、無関係な変更ごと巻き戻る（直す前の振る舞い）。判定をビューの読む列の照合や単独の変更の和にすると、`SELECT *` のビューの列の削除や、列の並びを書いた `SELECT *` のビューの列の名前の変更（消す＋足す）に偽の警告を出す。
-- ガード：期待の行 `realdb-view-reading-dropped-column-excludes-drop-and-applies-type-change`・`realdb-view-select-star-drop-column-is-not-named`・`realdb-view-star-with-column-list-add-column-is-excluded`・`realdb-view-star-with-column-list-rename-column-is-not-named`・`realdb-view-reading-dropped-table-excludes-drop-table`・`realdb-view-nested-names-inner-and-outer-views`・`realdb-view-already-broken-is-not-named`・`realdb-view-joining-virtual-table-is-named`（実 SQLite と網）・`SchemaSyncWarningTextTests`。mutation 実証済み（判定器がいつも空・列の追加を数えない・原因の表の項目を全部外す・計画全体の試しを飛ばす・`SyncPlanContext.FromImport` が判定器を写さない、のどれも該当の行が赤）。
+  - ビュー・トリガーを壊すのは表の列の名前の集合と表の有無の変化だけ（型・主キー・NOT NULL・列順・制約の作り直しは壊さない。ビューは 15 形 × 11 変更、トリガーは 19 形 × 8 変更の実測）。入力は表ごとの同期後の列名だけにする。
+- 取込（`SqliteSchemaImporter.LoadLiveDependentCheckAsync`）は、ビューかトリガーがあるときだけ判定器を作って `SchemaImportResult.LiveDependentCheck` で持ち帰る（どちらも無ければ null）。ビュー・トリガー（ビューの INSTEAD OF のもの・取り込まない表のものも）・索引の原文は `sqlite_master` の 1 回の読み取りで集める。写す表の原文は表の列挙の 1 回の読み取りで集め、取り込まない表（仮想表・ドットを含む表・名前の衝突で捨てた表）も入れ、仮想表の付属表（`PRAGMA table_list` の `shadow`）は入れない（仮想表の作成で自動でできる）。
+- 写せない表（DB の外で登録した照合順序の列・同梱の SQLite に無い仮想表のモジュール）は飛ばすので、その上のビュー・トリガーは写しの中で同期の前から読めず（発火できず）、判定しない（警告しない）。アプリが登録した関数を使うビュー・トリガーも同じ。この形は SQL だけでは作れない（CREATE が断る）ので、期待の行を持たない。
+- 守りの無い枝：表どうしの組み合わせでだけ壊れる（どの表の変更も単独では壊さない）ときに、名前を変える表をすべて原因とする枝は、通す形が見つかっておらず行で通していない（コードのコメントにも書いた）。作れる形が見つかったら期待の行を足す。
+- 範囲の外：作り直す表の索引が消した列を読むと、索引の作り直しが断られて同期は巻き戻る（計画の段では名指ししない）。
+- 壊すと：ビューが読む列の削除を選んだ同期が無関係な変更ごと巻き戻り、トリガーが使う列の削除を選んだ同期はコミットしてトリガーが後で断られる（直す前の振る舞い）。判定をビューの読む列の照合や単独の変更の和にすると、`SELECT *` のビューの列の削除や、列の並びを書いた `SELECT *` のビューの列の名前の変更（消す＋足す）に偽の警告を出す。
+- ガード：期待の行 `realdb-view-reading-dropped-column-excludes-drop-and-applies-type-change`・`realdb-view-select-star-drop-column-is-not-named`・`realdb-view-star-with-column-list-add-column-is-excluded`・`realdb-view-star-with-column-list-rename-column-is-not-named`・`realdb-view-reading-dropped-table-excludes-drop-table`・`realdb-view-nested-names-inner-and-outer-views`・`realdb-view-already-broken-is-not-named`・`realdb-view-joining-virtual-table-is-named`・`realdb-trigger-other-table-writing-dropped-column-excludes-drop-and-applies-type-change`・`realdb-trigger-same-table-reading-dropped-column-is-excluded`・`realdb-trigger-insert-without-column-list-add-column-is-excluded`・`realdb-trigger-reading-dropped-table-excludes-drop-table`・`realdb-trigger-instead-of-on-view-writing-dropped-column-is-named`・`realdb-trigger-reading-other-column-drop-column-is-not-named`・`realdb-trigger-update-of-dropped-column-is-not-named`・`realdb-trigger-same-table-drop-table-is-not-named`・`realdb-trigger-upsert-on-primary-key-add-column-is-not-named`・`realdb-trigger-already-broken-is-not-named`・`realdb-trigger-type-change-of-written-column-is-not-named`（実 SQLite と網）・`SchemaSyncWarningTextTests`。mutation 実証済み（ビュー：判定器がいつも空・列の追加を数えない・原因の表の項目を全部外す・計画全体の試しを飛ばす・`SyncPlanContext.FromImport` が判定器を写さない。トリガー：写しがトリガーを返さない・写しの表へキーを写さない・取込がビューの無い DB で判定器を作らない・トリガーを置かないときと比べない。どれも該当の行が赤）。
 
 ## ファイルを掴まない接続
 
