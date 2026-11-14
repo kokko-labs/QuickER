@@ -196,7 +196,8 @@ internal static class DslFuzzProbe
 /// <para>
 /// コンパイラの診断は出た位置からクエリ（メソッド・射影の型）へ引き当て、そのクエリの原子が持つ「その診断を起こし得る既知の原因」
 /// （<see cref="DslAtom.KnownDiagnostics"/>）で原因の名前を付ける。当たらなければ <c>unexplained</c>（新しい失敗）。
-/// エラーの出たクエリは外して生成し直し、残りを実行する。
+/// エラーの出たクエリは外して生成し直し、残りを実行する。実行する単位は検証コードを生成物と同じコンパイルに入れ、
+/// 診断の検証（生成物のファイルの分だけ）と実行に同じ 1 回のコンパイルを使う。
 /// 実装先・単位ごとに照合したクエリが <see cref="MinimumCheckedQueries"/> に届かなければそれも失敗にする（黙って空振りしない）。
 /// <c>QUICKER_DSL_FUZZ_DUMP</c> にフォルダを指定すると生成物を書き出す。
 /// </para>
@@ -379,6 +380,11 @@ internal static class DslFuzzRunner
     {
         var queries = unit.Queries.ToList();
 
+        // 実行する単位は、検証コードを生成物と同じコンパイルに入れ、診断の検証と実行に同じ 1 回のコンパイルを使う
+        // （診断は生成物のファイルの分だけを見る）
+        string[] probe = unit.Rows.Count > 0 ? [target.ProbeSource] : [];
+        LastCompilation? last = null;
+
         // エラーの出たクエリを外して生成し直す（外すのは最大 3 回）
         for (var attempt = 0; attempt < 3; attempt++)
         {
@@ -427,10 +433,12 @@ internal static class DslFuzzRunner
             }
 
             Dump(current, generated);
-            var compiled = GeneratedCodeCompiler.Compile(
+            var compiled = GeneratedCodeCompiler.CompileWithExtraSources(
                 generated,
-                $"Dsl.{unit.Name}.{Guid.NewGuid():N}"
+                $"Dsl.{unit.Name}.{Guid.NewGuid():N}",
+                probe
             );
+            last = new(current, generated, compiled);
             var broken = RecordCompileDiagnostics(ledger, target.Suite, current, compiled);
             queries = queries
                 .Where(q => !broken.Contains(q.Name) && !rejected.Contains(q.Name))
@@ -454,11 +462,7 @@ internal static class DslFuzzRunner
         }
 
         var executable = unit with { Queries = queries };
-        var assembly = GeneratedCodeCompiler.CompileAndLoad(
-            Generate(executable, target),
-            $"Dsl.Exec.{unit.Name}.{Guid.NewGuid():N}",
-            target.ProbeSource
-        );
+        var assembly = LoadExecutable(executable, target, last!, probe);
         var executed = await DslFuzzExecution.RunAsync(
             ledger,
             executable,
@@ -486,6 +490,59 @@ internal static class DslFuzzRunner
                 );
             }
         }
+    }
+
+    /// <summary>最後にコンパイルした単位・生成物・コンパイルの結果</summary>
+    private sealed record LastCompilation(
+        DslFuzzUnit Unit,
+        CodeGenerationResult Generated,
+        GeneratedCodeCompilationResult Compiled
+    );
+
+    /// <summary>
+    /// 実行するアセンブリを読み込む: 最後にコンパイルした生成物と同じ生成物なら、そのコンパイルを使い回す
+    /// </summary>
+    /// <remarks>
+    /// 実行するクエリは、最後にコンパイルしたクエリから生成時に断られたクエリを外したもの。クエリの並び（名前）が同じなら生成物は同じ。
+    /// 違えば生成し直し、ファイル名と内容がすべて同じなら使い回す（生成器は警告で飛ばしたクエリを出さないので、
+    /// 普段はこちら）。違えばその生成物を検証コードと一緒にコンパイルし直す。
+    /// </remarks>
+    private static System.Reflection.Assembly LoadExecutable(
+        DslFuzzUnit executable,
+        DslFuzzTarget target,
+        LastCompilation last,
+        IReadOnlyList<string> probe
+    )
+    {
+        var (lastUnit, lastGenerated, lastCompiled) = last;
+
+        if (
+            executable
+                .Queries.Select(query => query.Name)
+                .SequenceEqual(lastUnit.Queries.Select(query => query.Name))
+        )
+        {
+            return lastCompiled.Load();
+        }
+
+        var regenerated = Generate(executable, target);
+
+        if (
+            regenerated
+                .Files.Select(file => (file.FileName, file.Content))
+                .SequenceEqual(lastGenerated.Files.Select(file => (file.FileName, file.Content)))
+        )
+        {
+            return lastCompiled.Load();
+        }
+
+        return GeneratedCodeCompiler
+            .CompileWithExtraSources(
+                regenerated,
+                $"Dsl.Exec.{executable.Name}.{Guid.NewGuid():N}",
+                probe
+            )
+            .Load();
     }
 
     private static CodeGenerationResult Generate(DslFuzzUnit unit, DslFuzzTarget target) =>

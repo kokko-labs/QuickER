@@ -137,8 +137,8 @@
 
 同じことを別々に書いていたテストの土台は、共有の部品を通す。置き場所は `tests/QuickER.Tests` の中。Integration は WPF に依存しない部品だけを Compile のリンクで使う。
 
-1. 生成コードのコンパイル：`CodeGen.CSharp/GeneratedCodeCompiler`（`Compile` / `CompileProject` / `CreateCompilation` / `CompileAndLoad` と、依存を絞った参照集合でコンパイルする `Emit`。構文木のパースは中の 1 か所だけ）と `CodeGen.CSharp/RuntimeReferenceSet`。
-   - 構文木はリストへ確定してから `CSharpCompilation.Create` へ渡す（`CreateCompilationCore`）。`Create` は受け取った列挙を中で 3 回なめるので、遅延の `Select` のまま渡すと同じファイルを 3 回パースする（生成の構成のエンジンでパースの時間が約 1.8 倍）。結果は変わらず遅くなるだけなので、ガードは置かない。
+1. 生成コードのコンパイル：`CodeGen.CSharp/GeneratedCodeCompiler`（`Compile` / `CompileProject` / `CompileWithExtraSources` / `CreateCompilation` / `CompileAndLoad` と、依存を絞った参照集合でコンパイルする `Emit`。構文木のパースは中の 1 か所だけ）と `CodeGen.CSharp/RuntimeReferenceSet`。
+   - 構文木はリストへ確定してから `CSharpCompilation.Create` へ渡す（`ParseAll`）。`Create` は受け取った列挙を中で 3 回なめるので、遅延の `Select` のまま渡すと同じファイルを 3 回パースする（生成の構成のエンジンでパースの時間が約 1.8 倍）。結果は変わらず遅くなるだけなので、ガードは置かない。
    - `RuntimeReferenceSet` は、TPA から ADO・EF Core・DI（指定があれば配布ランタイムの `QuickER.Runtime*`）を外し、許す依存だけを戻す参照集合。許さない ADO・EF Core は、その名前空間（`Microsoft.Data.SqlClient`・`Microsoft.Data.Sqlite`・`Microsoft.EntityFrameworkCore`）に型を宣言するアセンブリをメタデータで見つけて全部外す（`Microsoft.Data.SqlClient.Extensions.Abstractions`・`Npgsql.EntityFrameworkCore.PostgreSQL` などの名前の違う衛星が同じ名前空間に型を置くので、ファイル名だけで外すと許さない依存の `using` が解決されてしまう）。ガード：`RuntimePackageSourceRendererTests` の `Render*_Compiles*`（パッケージ用ソースへ許さない依存の `using` を足すと赤）
    - `Full` は何も外さない集合で、GeneratedCodeCompiler が使う。生成の構成のエンジンのパッケージ参照のコンパイル（`CodegenConfig/Judges/CompileJudge.cs`。`CodegenCaseTests` の行 `compile-package-*`）は 9 つの構成を使う（`QuickER.Runtime*` も外す＝その場でコンパイルした同じ型と CS0433 で衝突させない）。`RuntimePackageSourceRendererTests` は `Create(…, excludeRuntimePackages: false)` を使う。Integration は 2 つともリンクする。
 2. 2 つのツールホスト：`TestSupport/TwoHostToolHarness`（WPF 依存なので Engines/ の外）。
@@ -420,6 +420,7 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
 - 簡易 DSL の条件の意味は、総当たりで docs の意味と照合する。`DslConditionFuzzTests`（QuickER 版 Repository・EF Core〔いずれも SQLite〕とインメモリ。MySQL の符号なし整数の図はインメモリだけ）と、Integration の `DslConditionFuzzSqlServerRuntimeTests`（実コンテナの QuickER 版 Repository・EF Core〔SQL Server〕・既定はシード 1 つ）と `NamedQueryDslConditionFuzz{PostgreSql,MySql,Oracle}RuntimeTests`（実コンテナの EF Core 版だけ・既定はシード 1 つ・夜間 16。`tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`「簡易 DSL の総当たりの EF Core だけの方言」）が流す。
   - 列ごとに書ける全ての形の原子（演算子・リテラルかパラメータか・否定の有無。値だけ乱数）とその NOT、乱数で組んだ合成の条件を、生成 → 実コンパイル（エラー 0・警告 0）→ NULL を含むデータで実行し、同じ実装先から読み戻した全行へオラクル `DslFuzz.Evaluate` を当てた結果と照合する。
   - 本体は `DslFuzzRunner`、実行部は `DslFuzzExecution`（QuickER.Tests の CodeGen.CSharp。Integration は TestSupport の `DslFuzz*.cs` と `CultureScope.cs` と一緒に Compile リンクする）。
+  - 1 単位のコンパイルは 1 回：実行する単位（行のある単位）は、生成物に検証コード（`DslFuzzTarget.ProbeSource`）を足して `GeneratedCodeCompiler.CompileWithExtraSources` で 1 回コンパイルし、診断の検証と実行に同じ結果を使う。記録・やり直しの判定に使う診断は生成物のファイルの分だけ（XmlDoc の診断を拾うモードで、`Compile` と同じ集合）で、検証コードの警告は捨て、エラーは読み込み（`Load`）で投げる。実行するクエリの並び（名前）が最後にコンパイルしたクエリと違う（生成時に断られたクエリを外した）ときは生成し直し、ファイル名と内容がすべて同じならそのコンパイルを使い回し、違えばコンパイルし直す。診断の振り分けを外すと検証コードの CS1591 が全単位の失敗になり、生成物の警告を捨てると生成物に差し込んだ警告が記録から消える（mutation 実証済み）。
 - **5 本は同じ流し方（`DslFuzzRunner.RunSuiteAsync`）で、照合は全単位が終わった後の 1 か所だけで掛ける**：
   - 網羅の段の単位がすべて終わってから種の段を始め、段の中の単位を上限つきで並べる。上限は CPU の数・最大 8（`DslFuzzRunner.DefaultParallelism`）で、`QUICKER_DSL_FUZZ_PARALLELISM` で上書きできる（1 で 1 つずつ順に流す）。1 単位は生成→コンパイル→実行の 1 本の流れで CPU を 2 本前後しか使わないので、CI の 4 vCPU では単位を 4 つ並べると CPU が埋まる。
   - 単位ごとに自分の失敗の記録を持ち、段の終わりに計画の順で全体の記録へ流し込む（`FuzzFailureLog.Absorb`）。記録（キーと例の順）と網羅の計数は、1 つずつ順に流したときと同じになる（網羅の計数はスレッドセーフで和）。書式のカルチャ（`DslFuzzRun.Culture`）はその単位の中だけで差し替える。

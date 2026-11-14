@@ -55,25 +55,80 @@ internal static class GeneratedCodeCompiler
         out MetadataReference? emittedReference
     )
     {
+        var result = CompileWithExtraSourcesCore(
+            files,
+            extraSources: [],
+            assemblyName,
+            MetadataReferences.Concat(projectReferences)
+        );
+
+        emittedReference = result.Image is { } image
+            ? MetadataReference.CreateFromImage(image)
+            : null;
+
+        return result;
+    }
+
+    /// <summary>
+    /// 生成結果の全ファイルに追加のソースを足して 1 コンパイル単位としてコンパイルし、生成物のファイルの診断と、
+    /// 読み込める PE イメージを返す（診断の検証と実行の両方に 1 回のコンパイルを使う検証用）
+    /// </summary>
+    /// <param name="result">検証対象の生成結果</param>
+    /// <param name="assemblyName">コンパイル対象アセンブリ名（テストごとに一意にする）</param>
+    /// <param name="extraSources">生成物と一緒にコンパイルする追加ソース（生成物の型を静的に使う検証コードなど）</param>
+    /// <remarks>
+    /// <see cref="GeneratedCodeCompilationResult.Errors"/> と <see cref="GeneratedCodeCompilationResult.Warnings"/> は
+    /// <see cref="Compile"/> と同じ判定で、生成物のファイルの診断だけを持つ（位置の無い診断も生成物の側に数える）。
+    /// 追加のソースの警告は捨て、エラーは <see cref="GeneratedCodeCompilationResult.ExtraSourceErrors"/> に分ける。
+    /// 読み込みは <see cref="GeneratedCodeCompilationResult.Load"/>。
+    /// </remarks>
+    public static GeneratedCodeCompilationResult CompileWithExtraSources(
+        CodeGenerationResult result,
+        string assemblyName,
+        IReadOnlyList<string> extraSources
+    ) => CompileWithExtraSourcesCore(result.Files, extraSources, assemblyName, MetadataReferences);
+
+    /// <summary>生成物のファイルと追加のソースをコンパイルし、診断を生成物の側と追加のソースの側へ分ける</summary>
+    private static GeneratedCodeCompilationResult CompileWithExtraSourcesCore(
+        IEnumerable<GeneratedFile> files,
+        IReadOnlyList<string> extraSources,
+        string assemblyName,
+        IEnumerable<MetadataReference> references
+    )
+    {
         // DocumentationMode.Diagnose: XmlDoc の整合診断（CS1573=param 欠落・CS1574=cref 解決不能・
         // CS1591=公開メンバーの XmlDoc 欠落など）を警告として拾う＝GenerateDocumentationFile=true の
         // 利用者ビルドで初めて出る警告を、ここで先に検出する（テストが合成する利用例ソースは internal にして対象外へ）
-        var compilation = CreateCompilationCore(
+        var generatedTrees = ParseAll(
             files.Select(file => (file.FileName, file.Content)),
-            assemblyName,
-            MetadataReferences.Concat(projectReferences),
             DocumentationMode.Diagnose
+        );
+        var extraTrees = ParseAll(
+            extraSources.Select((source, index) => ($"Extra{index}.cs", source)),
+            DocumentationMode.Diagnose
+        );
+        var compilation = CreateCompilationCore(
+            [.. generatedTrees, .. extraTrees],
+            assemblyName,
+            references
         );
 
         using var peStream = new MemoryStream();
         var emitResult = compilation.Emit(peStream);
 
-        emittedReference = emitResult.Success
-            ? MetadataReference.CreateFromImage(peStream.ToArray())
-            : null;
+        bool InExtraSource(Diagnostic diagnostic) =>
+            diagnostic.Location.SourceTree is { } tree && extraTrees.Contains(tree);
+
+        var extraErrors = emitResult
+            .Diagnostics.Where(diagnostic =>
+                diagnostic.Severity == DiagnosticSeverity.Error && InExtraSource(diagnostic)
+            )
+            .ToArray();
 
         var diagnostics = emitResult
-            .Diagnostics.Where(diagnostic => diagnostic.Severity >= DiagnosticSeverity.Warning)
+            .Diagnostics.Where(diagnostic =>
+                diagnostic.Severity >= DiagnosticSeverity.Warning && !InExtraSource(diagnostic)
+            )
             .ToArray();
 
         var errors = diagnostics
@@ -95,6 +150,8 @@ internal static class GeneratedCodeCompiler
             Success = emitResult.Success && errors.Length == 0,
             Errors = errors,
             Warnings = warnings,
+            ExtraSourceErrors = extraErrors,
+            Image = emitResult.Success ? peStream.ToArray() : null,
         };
     }
 
@@ -191,21 +248,35 @@ internal static class GeneratedCodeCompiler
     }
 
     /// <summary>ソース群を構文木にしてコンパイルを作る（オプションは全入口で共通）</summary>
-    /// <remarks>
-    /// 構文木は先にリストへ確定してから渡す。<see cref="CSharpCompilation.Create"/> は受け取った列挙を中で 3 回なめるので、
-    /// 遅延の <c>Select</c> のまま渡すと同じファイルを 3 回パースする（結果は同じで、遅くなるだけ）。
-    /// </remarks>
     private static CSharpCompilation CreateCompilationCore(
         IEnumerable<(string FileName, string Content)> sources,
         string assemblyName,
         IEnumerable<MetadataReference> references,
         DocumentationMode documentationMode
+    ) => CreateCompilationCore(ParseAll(sources, documentationMode), assemblyName, references);
+
+    /// <summary>ソース群を構文木のリストにする</summary>
+    /// <remarks>
+    /// 構文木は先にリストへ確定してから渡す。<see cref="CSharpCompilation.Create"/> は受け取った列挙を中で 3 回なめるので、
+    /// 遅延の <c>Select</c> のまま渡すと同じファイルを 3 回パースする（結果は同じで、遅くなるだけ）。
+    /// </remarks>
+    private static List<SyntaxTree> ParseAll(
+        IEnumerable<(string FileName, string Content)> sources,
+        DocumentationMode documentationMode
+    ) =>
+        sources
+            .Select(source => Parse(source.Content, source.FileName, documentationMode))
+            .ToList();
+
+    /// <summary>構文木のリストからコンパイルを作る（オプションは全入口で共通）</summary>
+    private static CSharpCompilation CreateCompilationCore(
+        IReadOnlyList<SyntaxTree> trees,
+        string assemblyName,
+        IEnumerable<MetadataReference> references
     ) =>
         CSharpCompilation.Create(
             assemblyName,
-            sources
-                .Select(source => Parse(source.Content, source.FileName, documentationMode))
-                .ToList(),
+            trees,
             references,
             new CSharpCompilationOptions(
                 OutputKind.DynamicallyLinkedLibrary,
@@ -227,7 +298,8 @@ internal static class GeneratedCodeCompiler
 }
 
 /// <summary>
-/// <see cref="GeneratedCodeCompiler.Compile"/> の結果
+/// <see cref="GeneratedCodeCompiler.Compile"/>・<see cref="GeneratedCodeCompiler.CompileProject"/>・
+/// <see cref="GeneratedCodeCompiler.CompileWithExtraSources"/> の結果
 /// </summary>
 internal sealed class GeneratedCodeCompilationResult
 {
@@ -239,6 +311,35 @@ internal sealed class GeneratedCodeCompilationResult
 
     /// <summary>生成コード起因の警告診断の一覧（CS1701/CS1702 などアセンブリ統一系は除外済み）</summary>
     public required IReadOnlyList<Diagnostic> Warnings { get; init; }
+
+    /// <summary>
+    /// 追加のソースのエラー診断の一覧（<see cref="GeneratedCodeCompiler.CompileWithExtraSources"/> だけが入れる。ほかは空）
+    /// </summary>
+    public IReadOnlyList<Diagnostic> ExtraSourceErrors { get; init; } = [];
+
+    /// <summary>emit に成功したときの PE イメージ（失敗時は null）</summary>
+    public byte[]? Image { get; init; }
+
+    /// <summary>
+    /// コンパイルしたアセンブリを読み込む（生成物か追加のソースにエラーがあれば、
+    /// <see cref="GeneratedCodeCompiler.CompileAndLoad"/> と同じ文言で投げる）
+    /// </summary>
+    public Assembly Load()
+    {
+        if (Image is null)
+        {
+            throw new InvalidOperationException(
+                "生成コードのコンパイルに失敗:"
+                    + Environment.NewLine
+                    + string.Join(
+                        Environment.NewLine,
+                        Errors.Concat(ExtraSourceErrors).Select(diagnostic => diagnostic.ToString())
+                    )
+            );
+        }
+
+        return Assembly.Load(Image);
+    }
 
     /// <summary>診断一覧を改行区切りの読みやすい文字列にまとめる（テスト失敗メッセージ用）</summary>
     public string DescribeErrors() =>
