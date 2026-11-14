@@ -29,8 +29,10 @@ namespace QuickER.Tests.Gui.Behaviors;
 /// その間のマウスやアクティブの変化で押下が解け得る。Space の押下と解放はメッセージを処理させずに続けて流す。
 /// </para>
 /// <para>
-/// ボタンは実際のマウスのボタンが押されている間は Space の解放で Click しないので、Space の押下の前に離されるのを待つ
-/// （<see cref="TestSupport.PhysicalMouseButtons"/>。押されたままなら約 10 秒で失敗する）。
+/// ボタン・チェックボックスは Space の解放でマウスのボタンをスレッドのキーの状態の表から読み、押されていれば Click も
+/// 切り替えもしない。利用者の実際のボタンを混ぜないよう、ウィンドウごとに <see cref="TestSupport.PhysicalMouseButtons.Isolate"/> の
+/// スコープを持ち、Space の押下の前は押されている間待ってから表を「離れている」に固定し、ほかの入力の前は固定だけする
+/// （押下と解放の間にメッセージを処理させない）。
 /// </para>
 /// <para>
 /// 判断が <c>Deactivated</c> に左右されるので、ほかのテストのウィンドウにアクティブを奪われないよう
@@ -45,11 +47,25 @@ public class CanvasViewportBehaviorSpaceKeyTests
         Window Window,
         ScrollViewer Canvas,
         Button Button,
-        CheckBox CheckBox
+        CheckBox CheckBox,
+        TestSupport.PhysicalMouseButtons.Isolation Mouse
     )
     {
         /// <summary>ボタンの Click の回数</summary>
         public int Clicks { get; set; }
+
+        /// <summary>ウィンドウを閉じ、キーの状態の表のマウスのボタンを表示する前の値へ戻す</summary>
+        public void Close()
+        {
+            try
+            {
+                Window.Close();
+            }
+            finally
+            {
+                Mouse.Dispose();
+            }
+        }
     }
 
     /// <summary>キャンバス・ボタン・チェックボックスの順に並べたウィンドウを表示し、ビヘイビアを有効にする</summary>
@@ -76,7 +92,13 @@ public class CanvasViewportBehaviorSpaceKeyTests
             Left = -10000,
             Top = -10000,
         };
-        var testWindow = new TestWindow(window, canvas, button, checkBox);
+        var testWindow = new TestWindow(
+            window,
+            canvas,
+            button,
+            checkBox,
+            TestSupport.PhysicalMouseButtons.Isolate()
+        );
         button.Click += (_, _) => testWindow.Clicks++;
 
         // まれに全件実行でだけ落ちるので、失敗した瞬間の状態の記録へイベントを残す（観測だけで結果は変えない）
@@ -92,18 +114,23 @@ public class CanvasViewportBehaviorSpaceKeyTests
 
     /// <summary>キーの押下か解放を、入力の経路（InputManager）へ流す</summary>
     /// <remarks>
-    /// Space の押下の前には、実際のマウスのボタンが離されるのを待つ（押されたままだと WPF のボタンは Space の解放で
-    /// Click しない＝<see cref="TestSupport.PhysicalMouseButtons"/>）。パンを見るテストの Space も同じ経路を通す
-    /// （離されていれば待たずに進むので、結果は変わらない）
+    /// Space の押下の前には、実際のマウスのボタンが離されるまで待ってからキーの状態の表のボタンを「離れている」に固定する
+    /// （押されたままだと WPF のボタンは Space の解放で Click しない＝<see cref="TestSupport.PhysicalMouseButtons"/>）。
+    /// ほかのキー（Space の解放を含む）の前は固定だけする（押下と解放の間にメッセージを処理させない）。パンを見るテストの
+    /// Space も同じ経路を通す（離されていれば待たずに進むので、結果は変わらない）
     /// </remarks>
-    private static void SendKey(Window window, Key key, bool down)
+    private static void SendKey(TestWindow w, Key key, bool down)
     {
         if (key == Key.Space && down)
         {
-            TestSupport.PhysicalMouseButtons.WaitUntilReleased();
+            w.Mouse.WaitAndPin();
+        }
+        else
+        {
+            w.Mouse.Pin();
         }
 
-        var source = PresentationSource.FromVisual(window)!;
+        var source = PresentationSource.FromVisual(w.Window)!;
         InputManager.Current.ProcessInput(
             new KeyEventArgs(Keyboard.PrimaryDevice, source, 0, key)
             {
@@ -113,15 +140,16 @@ public class CanvasViewportBehaviorSpaceKeyTests
     }
 
     /// <summary>Tab を押して離す（キーボードでフォーカスを次へ移す）</summary>
-    private static void PressTab(Window window)
+    private static void PressTab(TestWindow w)
     {
-        SendKey(window, Key.Tab, down: true);
-        SendKey(window, Key.Tab, down: false);
+        SendKey(w, Key.Tab, down: true);
+        SendKey(w, Key.Tab, down: false);
     }
 
     /// <summary>要素をマウスでクリックしたときの順序（ウィンドウのトンネル → フォーカス移動）を再現する</summary>
-    private static void ClickToFocus(UIElement element)
+    private static void ClickToFocus(TestWindow w, UIElement element)
     {
+        w.Mouse.Pin();
         element.RaiseEvent(
             new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left)
             {
@@ -143,18 +171,18 @@ public class CanvasViewportBehaviorSpaceKeyTests
             try
             {
                 // 直前の入力がキーボード（Tab）のまま、フォーカスがキャンバスへ移る
-                ClickToFocus(w.CheckBox);
-                PressTab(w.Window);
+                ClickToFocus(w, w.CheckBox);
+                PressTab(w);
                 w.Canvas.Focus();
                 Keyboard.FocusedElement.Should().BeSameAs(w.Canvas);
 
-                SendKey(w.Window, Key.Space, down: true);
+                SendKey(w, Key.Space, down: true);
                 CanvasViewportBehavior.IsPanActive.Should().BeTrue();
-                SendKey(w.Window, Key.Space, down: false);
+                SendKey(w, Key.Space, down: false);
             }
             finally
             {
-                w.Window.Close();
+                w.Close();
                 DoEvents();
             }
         });
@@ -183,8 +211,8 @@ public class CanvasViewportBehaviorSpaceKeyTests
             try
             {
                 // マウス押下の購読: 外れていないと、無効化したウィンドウの押下が「直前の入力」を書き換える
-                ClickToFocus(w.Canvas);
-                PressTab(w.Window);
+                ClickToFocus(w, w.Canvas);
+                PressTab(w);
                 disabled.Window.RaiseEvent(
                     new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left)
                     {
@@ -192,17 +220,17 @@ public class CanvasViewportBehaviorSpaceKeyTests
                     }
                 );
                 w.CheckBox.Focus();
-                SendKey(w.Window, Key.Space, down: true);
-                SendKey(w.Window, Key.Space, down: false);
+                SendKey(w, Key.Space, down: true);
+                SendKey(w, Key.Space, down: false);
                 w.CheckBox.IsChecked.Should()
                     .BeTrue("直前の入力は Tab のまま＝キーボードで移ったフォーカスとして押せる");
 
                 // フォーカス移動の購読: 外れていないと、無効化したウィンドウのフォーカス移動が記録を書き換える。
                 // マウスでクリックしたボタンの上で、フォーカスを動かさないキー（Shift）だけを押した状態を作る
                 // （直前の入力はキーボード・キーボードで来た記録は無い）。ここで記録を作り直されると押下に化ける
-                ClickToFocus(w.Button);
-                SendKey(w.Window, Key.LeftShift, down: true);
-                SendKey(w.Window, Key.LeftShift, down: false);
+                ClickToFocus(w, w.Button);
+                SendKey(w, Key.LeftShift, down: true);
+                SendKey(w, Key.LeftShift, down: false);
                 Keyboard.FocusedElement.Should().BeSameAs(w.Button);
                 disabled.Window.RaiseEvent(
                     new KeyboardFocusChangedEventArgs(
@@ -215,17 +243,17 @@ public class CanvasViewportBehaviorSpaceKeyTests
                         RoutedEvent = Keyboard.PreviewGotKeyboardFocusEvent,
                     }
                 );
-                SendKey(w.Window, Key.Space, down: true);
+                SendKey(w, Key.Space, down: true);
                 CanvasViewportBehavior
                     .IsPanActive.Should()
                     .BeTrue("ボタンへはマウスで来たまま＝パン");
-                SendKey(w.Window, Key.Space, down: false);
+                SendKey(w, Key.Space, down: false);
                 w.Clicks.Should().Be(0);
             }
             finally
             {
-                w.Window.Close();
-                disabled.Window.Close();
+                w.Close();
+                disabled.Close();
                 DoEvents();
             }
         });

@@ -56,7 +56,7 @@ public sealed class CanvasInputTests(ITestOutputHelper output)
                 }
 
                 inputReports =
-                    $"{GuiFailureDiagnostics.InputReportSummary()}・実際のボタンが押されていた手 {harness.PhysicalButtonSteps}/{harness.StepCount}";
+                    $"{GuiFailureDiagnostics.InputReportSummary()}・実際のボタンが押されていた手 {harness.PhysicalButtonSteps}/{harness.StepCount}・{harness.WaitSummary}";
             }
         );
 
@@ -135,7 +135,7 @@ public sealed class CanvasInputTests(ITestOutputHelper output)
                 }
 
                 inputReports =
-                    $"{GuiFailureDiagnostics.InputReportSummary()}・実際のボタンが押されていた手 {harness.PhysicalButtonSteps}/{harness.StepCount}";
+                    $"{GuiFailureDiagnostics.InputReportSummary()}・実際のボタンが押されていた手 {harness.PhysicalButtonSteps}/{harness.StepCount}・{harness.WaitSummary}";
             }
         );
 
@@ -424,7 +424,11 @@ public sealed class CanvasInputTests(ITestOutputHelper output)
                     using (var harness = new CanvasInputHarness(vm, window))
                     {
                         // 種の始めと手ごとに、実際のボタンが離れるまで待つ（ここでは回数だけ数える）
-                        harness.WaitForPhysicalRelease = () => waits++;
+                        harness.WaitForPhysicalRelease = () =>
+                        {
+                            waits++;
+                            return TimeSpan.Zero;
+                        };
                         pinned = harness.Run(row);
                     }
 
@@ -501,17 +505,25 @@ public sealed class CanvasInputTests(ITestOutputHelper output)
     [Fact(DisplayName = "入力の列: 外からの乱れは違反の文に名指しし、無ければ何も足さない")]
     public void Disturbance_IsNamedOnTheViolation()
     {
-        CanvasInputHarness.DescribeDisturbance(0, 0, pinned: true).Should().BeNull();
+        var none = TimeSpan.Zero;
+        CanvasInputHarness.DescribeDisturbance(0, 0, true, 0, none).Should().BeNull();
         CanvasInputHarness
-            .DescribeDisturbance(2, 0, pinned: true)
+            .DescribeDisturbance(2, 0, true, 0, none)
             .Should()
             .Be("手の列の間に前面が別のプロセスのウィンドウへ 2 回移った");
         CanvasInputHarness
-            .DescribeDisturbance(0, 3, pinned: true)
+            .DescribeDisturbance(0, 3, true, 0, none)
             .Should()
             .Be("実際のマウスのボタンが押されていた手 3 個（表は離れているに固定）");
         CanvasInputHarness
-            .DescribeDisturbance(1, 1, pinned: false)
+            .DescribeDisturbance(0, 0, true, 2, TimeSpan.FromSeconds(12.34))
+            .Should()
+            .Be(
+                "実際のマウスのボタンが離れるまで 2 回待った（計 12.3 秒）",
+                "待った後の手で違反が出たら、待ったことも名指しする（前面の移りなどを招きうる）"
+            );
+        CanvasInputHarness
+            .DescribeDisturbance(1, 1, false, 0, none)
             .Should()
             .Be(
                 "手の列の間に前面が別のプロセスのウィンドウへ 1 回移った・実際のマウスのボタンが押されていた手 1 個（表は離れているに固定していない）"

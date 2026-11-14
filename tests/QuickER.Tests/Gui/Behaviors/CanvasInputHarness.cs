@@ -130,7 +130,7 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
         InputManager.Current.PostProcessInput += OnPostProcessInput;
         _initialMiniMap = vm.IsMiniMapEnabled;
         _inputScope = BehaviorInput.OverrideForTests(this);
-        _savedMouseButtons = TestSupport.MouseButtonKeyState.Capture();
+        _mouse = TestSupport.PhysicalMouseButtons.Isolate();
     }
 
     // ---------- 読み口の差し替え（IBehaviorInputSource） ----------
@@ -231,21 +231,32 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
     /// <summary>直前の手ごとの状態（古い順。違反を見つけたら失敗の記録へ載せる）</summary>
     private readonly Queue<string> _recentSteps = new();
 
-    /// <summary>ハーネスを作る前の、キーの状態の表のマウスのボタン（破棄で戻す）</summary>
-    private readonly TestSupport.MouseButtonKeyState.Saved _savedMouseButtons;
+    /// <summary>
+    /// 合成の入力の間、利用者の実際のマウスのボタンを混ぜないスコープ（作るときにキーの状態の表のマウスのボタンを取り、
+    /// 破棄で戻す。待ちと固定はこのスコープを通す）
+    /// </summary>
+    private readonly TestSupport.PhysicalMouseButtons.Isolation _mouse;
 
     /// <summary>
     /// 入力を流す前に、このスレッドのキーの状態の表のマウスのボタンを「離れている」に固定するか（既定は固定する。
     /// 固定の自己検査が、外すと利用者の押下が混ざることを確かめるためだけに false にする）
     /// </summary>
-    internal bool PinsMouseButtons { get; set; } = true;
+    internal bool PinsMouseButtons
+    {
+        get => _mouse.Pins;
+        set => _mouse.Pins = value;
+    }
 
     /// <summary>
     /// 種の始めと手の始めに、実際のマウスのボタンが離れるまで待つ処理（既定は
-    /// <see cref="TestSupport.PhysicalMouseButtons.WaitUntilReleased()"/>。固定の自己検査が、待つ回数を数えるためだけに差し替える）
+    /// <see cref="TestSupport.PhysicalMouseButtons.WaitUntilReleased()"/>。待った時間を返す。固定の自己検査が、
+    /// 待つ回数を数えるため・待った形を作るためだけに差し替える）
     /// </summary>
-    internal Action WaitForPhysicalRelease { get; set; } =
-        TestSupport.PhysicalMouseButtons.WaitUntilReleased;
+    internal Func<TimeSpan> WaitForPhysicalRelease
+    {
+        get => _mouse.Wait;
+        set => _mouse.Wait = value;
+    }
 
     /// <summary>
     /// 手を流した直後に実際のマウスのボタンが押されているかを読む処理（既定は
@@ -259,19 +270,20 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
     /// ビヘイビアと違って読み口の差し替えを通らず、実際のボタンをこの表から読むので、利用者がほかのアプリで押したボタンが
     /// 合成の入力に混ざる。エンジンの前提（人が触らない状態）へ戻すために、入力を流すたびに直前で固定する
     /// </summary>
-    private void PinMouseButtons()
-    {
-        if (PinsMouseButtons)
-        {
-            TestSupport.MouseButtonKeyState.Release();
-        }
-    }
+    private void PinMouseButtons() => _mouse.Pin();
 
     /// <summary>流した手の数（このハーネスを作ってから）</summary>
     public int StepCount { get; private set; }
 
     /// <summary>手を流した直後に、実際のマウスのボタンが押されていた手の数（利用者の本物の操作が混ざったかを数で見る）</summary>
     public int PhysicalButtonSteps { get; private set; }
+
+    /// <summary>実際のボタンが離れるまで待った回数と時間（緑の回でもテストの出力へ書き、待ったことを黙らせない）</summary>
+    public string WaitSummary =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"実際のボタンが離れるまで待った {_mouse.WaitedCount} 回（計 {_mouse.Waited.TotalSeconds:0.0} 秒）"
+        );
 
     // ---------- 1 種の実行 ----------
 
@@ -287,10 +299,12 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
         TestSupport.GuiFailureDiagnostics.Note("種の始め");
         _foreignForegroundAtStart = TestSupport.GuiFailureDiagnostics.ForeignForegroundChanges;
         _physicalButtonStepsAtStart = PhysicalButtonSteps;
+        _waitedCountAtStart = _mouse.WaitedCount;
+        _waitedAtStart = _mouse.Waited;
         var model = new CanvasInputModel();
 
-        // 種の始めのクリックの前にも、実際のボタンが離れるまで待つ（押されていなければ待たない）
-        WaitForPhysicalRelease();
+        // 種の始めのクリックの前にも、実際のボタンが離れるまで待ってから固定する（押されていなければ待たない）
+        _mouse.WaitAndPin();
 
         if (BeginSeed() is { } start)
         {
@@ -348,6 +362,12 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
     /// <summary>この手の列の始めの、実際のボタンが押されていた手の数</summary>
     private int _physicalButtonStepsAtStart;
 
+    /// <summary>この手の列の始めの、実際のボタンが離れるまで待った回数</summary>
+    private int _waitedCountAtStart;
+
+    /// <summary>この手の列の始めの、実際のボタンが離れるまで待った時間の合計</summary>
+    private TimeSpan _waitedAtStart;
+
     /// <summary>
     /// この手の列を流す間に見た外からの乱れ（前面が別のプロセスへ移った・実際のボタンが押されていた）を名指しする
     /// （無ければ null）。乱れがあっても違反は赤のまま残し、流し直さない。ボタンは表で「離れている」に固定しているので
@@ -357,14 +377,24 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
         DescribeDisturbance(
             TestSupport.GuiFailureDiagnostics.ForeignForegroundChanges - _foreignForegroundAtStart,
             PhysicalButtonSteps - _physicalButtonStepsAtStart,
-            PinsMouseButtons
+            PinsMouseButtons,
+            _mouse.WaitedCount - _waitedCountAtStart,
+            _mouse.Waited - _waitedAtStart
         );
 
     /// <summary>外からの乱れの数から、名指しの文を組む（無ければ null。自己検査が文の形を確かめる）</summary>
     /// <param name="foreground">前面が別のプロセスのウィンドウへ移った回数</param>
     /// <param name="physical">実際のマウスのボタンが押されていた手の数</param>
     /// <param name="pinned">キーの状態の表のボタンを離れているに固定していたか</param>
-    internal static string? DescribeDisturbance(int foreground, int physical, bool pinned)
+    /// <param name="waitedCount">実際のボタンが離れるまで待った回数（種の始めと手の始め）</param>
+    /// <param name="waited">待った時間の合計</param>
+    internal static string? DescribeDisturbance(
+        int foreground,
+        int physical,
+        bool pinned,
+        int waitedCount,
+        TimeSpan waited
+    )
     {
         var parts = new List<string>();
 
@@ -377,6 +407,16 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
         {
             parts.Add(
                 $"実際のマウスのボタンが押されていた手 {physical} 個（表は離れているに固定{(pinned ? "" : "していない")}）"
+            );
+        }
+
+        if (waitedCount > 0)
+        {
+            parts.Add(
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"実際のマウスのボタンが離れるまで {waitedCount} 回待った（計 {waited.TotalSeconds:0.0} 秒）"
+                )
             );
         }
 
@@ -523,8 +563,7 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
         // 実際のボタンが離れるまで待ってから（押されていなければ待たない）、手の始めにも固定する。表は実際のボタンが
         // 変わると Windows が同期し直すので、押されている間に書いても漏れる。手の中の DoEvents で WPF が読む分も含め、
         // 入力を流す箇所でも毎回固定する
-        WaitForPhysicalRelease();
-        PinMouseButtons();
+        _mouse.WaitAndPin();
 
         if (Perform(step) is { } shape)
         {
@@ -2184,7 +2223,7 @@ internal sealed class CanvasInputHarness : IBehaviorInputSource, IDisposable
         finally
         {
             // キーの状態の表のマウスのボタンを、ハーネスを作る前の値へ戻す（ほかの後始末が投げても戻す）
-            _savedMouseButtons.Restore();
+            _mouse.Dispose();
         }
     }
 

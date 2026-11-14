@@ -45,7 +45,9 @@ public class DragBehaviorTests
     {
         RunSta(() =>
         {
-            TestSupport.PhysicalMouseButtons.WaitUntilReleased();
+            // 押下の直前に、実際の左ボタンが離れるまで待ってからキーの状態の表のボタンを「離れている」に固定する
+            // （キャプチャを取った瞬間の擬似の移動が表を読む。利用者の押下を混ぜない）。破棄で表示する前の値へ戻す
+            using var mouse = TestSupport.PhysicalMouseButtons.Isolate();
             var card = new Border
             {
                 Width = 100,
@@ -74,6 +76,7 @@ public class DragBehaviorTests
                 window.Show();
                 DoEvents();
 
+                mouse.WaitAndPin();
                 card.RaiseEvent(
                     new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left)
                     {

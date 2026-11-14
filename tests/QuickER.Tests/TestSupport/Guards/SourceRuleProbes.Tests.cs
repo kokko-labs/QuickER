@@ -21,6 +21,19 @@ internal static partial class SourceRuleProbes
 
     private const string DeactivatedMarker = "Deac" + "tivated";
 
+    /// <summary>合成の入力の目印と、実際のマウスのボタンを混ぜない部品の呼び出し（綴りを割る）</summary>
+    private const string ProcessInputMarker = "InputManager.Current." + "ProcessInput";
+
+    private const string MouseButtonArgsMarker = "new Mouse" + "ButtonEventArgs(";
+
+    private const string MouseArgsMarker = "new Mouse" + "EventArgs(";
+
+    private const string MouseWheelArgsMarker = "new Mouse" + "WheelEventArgs(";
+
+    private const string KeyArgsMarker = "new Key" + "EventArgs(";
+
+    private const string MouseIsolationCall = "PhysicalMouseButtons." + "Isolate(";
+
     /// <summary>MainWindow の生成（綴りを割る）</summary>
     private const string MainWindowCreation = "new MainWindow" + "(";
 
@@ -200,6 +213,76 @@ internal static partial class SourceRuleProbes
             {
                 InactiveBranch = true,
             },
+            // 合成の入力の目印を含むのに部品の呼び出しの無いファイルを 1 件拾う（コメントの中の目印も・目印を 2 つ含んでも 1 件）。
+            // 部品を呼ぶファイルと、目印の無いファイル（ClickEvent を直接発火するだけ）は拾わない
+            new SourceRuleProbe(
+                "synthetic-input-mouse-isolation-forms",
+                "synthetic-input-mouse-isolation",
+                [
+                    new ProbeFile(
+                        "Hit.cs",
+                        $$"""
+                        public class SpaceTests
+                        {
+                            public void Press(PresentationSource s) =>
+                                {{ProcessInputMarker}}({{KeyArgsMarker}}k, s, 0, Key.Space));
+                        }
+                        """,
+                        "実際のマウスのボタンを混ぜるおそれのある合成の入力"
+                    ),
+                    new ProbeFile(
+                        "Comment.cs",
+                        $$"""
+                        // raises {{MouseWheelArgsMarker}}...) indirectly
+                        public class CommentTests { }
+                        """,
+                        "実際のマウスのボタンを混ぜるおそれのある合成の入力"
+                    ),
+                    new ProbeFile(
+                        "Isolated.cs",
+                        $$"""
+                        public class DragTests
+                        {
+                            public void Press(UIElement e)
+                            {
+                                using var mouse = {{MouseIsolationCall}});
+                                mouse.WaitAndPin();
+                                e.RaiseEvent({{MouseButtonArgsMarker}}Mouse.PrimaryDevice, 0, MouseButton.Left));
+                            }
+                        }
+                        """
+                    ),
+                    new ProbeFile(
+                        "ClickOnly.cs",
+                        "public class ClickTests { void C(Button b) => b.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent, b)); }\n"
+                    ),
+                ]
+            ),
+            // 5 つの目印のどれでも 1 ファイル 1 件拾い（2 つ含んでも 1 件）、目印の無いファイルは拾わない
+            new SourceRuleProbe(
+                "synthetic-input-markers-forms",
+                "synthetic-input-markers",
+                [
+                    new ProbeFile("A.cs", $"{ProcessInputMarker}(e);\n", "合成の入力の目印"),
+                    new ProbeFile(
+                        "B.cs",
+                        $"_ = {MouseButtonArgsMarker}d, 0, b);\n",
+                        "合成の入力の目印"
+                    ),
+                    new ProbeFile("C.cs", $"_ = {MouseArgsMarker}d, 0);\n", "合成の入力の目印"),
+                    new ProbeFile(
+                        "D.cs",
+                        $"_ = {MouseWheelArgsMarker}d, 0, 120);\n",
+                        "合成の入力の目印"
+                    ),
+                    new ProbeFile(
+                        "E.cs",
+                        $"_ = {KeyArgsMarker}k, s, 0, Key.A);\n{ProcessInputMarker}(e);\n",
+                        "合成の入力の目印"
+                    ),
+                    new ProbeFile("Plain.cs", "_ = new RoutedEventArgs(ButtonBase.ClickEvent);\n"),
+                ]
+            ),
             // MainWindow の生成をコメントの中も含めて 1 出現 1 件拾い、名前が MainWindow で始まる別の型の生成は拾わない
             new SourceRuleProbe(
                 "wpf-main-window-creations-forms",
