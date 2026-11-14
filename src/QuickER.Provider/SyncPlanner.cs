@@ -17,6 +17,29 @@ namespace QuickER.Provider;
 /// </remarks>
 public sealed class SyncPlanContext
 {
+    /// <summary>取込の結果から、計画の入力（live のスキーマと図の外の情報）を作る</summary>
+    /// <remarks>
+    /// 取込の結果から計画へ渡す項目（表・リレーション・補助オブジェクト・<c>CREATE TABLE</c> の原文・列の既定値・取込の警告・ビューの判定）は
+    /// ここで 1 回だけ写す。呼び出し側（同期の画面・同期計画の総当たり）ごとに写すと、項目を足したときに写し忘れた側だけが
+    /// 黙ってその入力の無い計画を作る（警告・除外が画面とテストで割れる）。
+    /// </remarks>
+    /// <param name="live">DB の取込の結果</param>
+    public static SyncPlanContext FromImport(SchemaImportResult live)
+    {
+        ArgumentNullException.ThrowIfNull(live);
+
+        return new SyncPlanContext
+        {
+            LiveEntities = live.Entities,
+            LiveRelationships = live.Relationships,
+            AuxiliaryObjects = live.AuxiliaryObjects,
+            TableCreateSql = live.TableCreateSql,
+            ColumnDefaults = live.ColumnDefaults,
+            ImportWarnings = live.Warnings,
+            LiveViewCheck = live.LiveViewCheck,
+        };
+    }
+
     /// <summary>DB から取得した現在のエンティティ（合成の土台）。</summary>
     public IReadOnlyList<Entity> LiveEntities { get; init; } = [];
 
@@ -54,6 +77,13 @@ public sealed class SyncPlanContext
     /// テーブル再構築の方言で作り直さないためだけに参照する（<see cref="SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent"/>）。
     /// </remarks>
     public IReadOnlyList<SchemaImportWarning> ImportWarnings { get; init; } = [];
+
+    /// <summary>DB のビューが同期後の表の形でも読めるかを試す入口（取込の結果＝<see cref="SchemaImportResult.LiveViewCheck"/>）</summary>
+    /// <remarks>
+    /// 合成には使わない。ビューが読む表の列を消す・足す変更と表の削除のうち、ビューを読めなくするものを外すためだけに参照する
+    /// （<see cref="SyncPlanWarningKind.TableChangeBreaksDependentView"/>）。<c>null</c> なら何もしない。
+    /// </remarks>
+    public ILiveViewCheck? LiveViewCheck { get; init; }
 
     /// <summary>live の外部キーの実効名（図全体から求めた名前＝DDL が付けるのと同じ規則）</summary>
     /// <remarks>
@@ -914,8 +944,8 @@ public sealed class SyncPlanner
 
     /// <summary>
     /// 選んだ項目のうち、計画に載せられない項目を外して名指しする：列の無い表の追加（<see cref="ExcludeTablesWithoutColumns"/>）・
-    /// 名前の重なる表の追加（<see cref="ExcludeTablesWithCollidingConstraintNames"/>）・選んでいない変更を前提にする項目
-    /// （<see cref="ExcludeItemsRequiringUnselected"/>）
+    /// 名前の重なる表の追加（<see cref="ExcludeTablesWithCollidingConstraintNames"/>）・DB のビューを読めなくする変更
+    /// （<see cref="ExcludeChangesBreakingLiveViews"/>）・選んでいない変更を前提にする項目（<see cref="ExcludeItemsRequiringUnselected"/>）
     /// </summary>
     /// <remarks>
     /// <para>
@@ -923,7 +953,9 @@ public sealed class SyncPlanner
     /// 前提にする項目を外す。
     /// </para>
     /// <para>
-    /// 名前の重なる表の追加と依存の除外は、何も外れなくなるまで繰り返す。名前の重なりの判定（<see cref="RemainingLiveConstraints"/>）は
+    /// 名前の重なる表の追加・ビューを読めなくする変更・依存の除外は、何も外れなくなるまで繰り返す（ビューの判定は外した列の追加を前提にする
+    /// 項目を同じ周の依存の除外が外せるよう、その前に置く。依存の除外が列の追加だけを外すと残った列の削除がビューを読めなくしうるので、
+    /// 次の周でもう一度試す）。名前の重なりの判定（<see cref="RemainingLiveConstraints"/>）は
     /// 選んだ表・列の削除で消える制約を「残らない」と数えるが、その削除自身が同じ段で外されることがある（主キーの変更を選ばない
     /// 主キーの列の削除）。1 回で止めると、外された削除の表・列の制約が残るのに、その名前と重なる追加が外されずに断られる。
     /// 繰り返しは必ず止まる：周ごとに少なくとも 1 つの選んだ項目を外したときだけ次の周へ進み、外すほど残る制約は増えるだけ
@@ -946,9 +978,14 @@ public sealed class SyncPlanner
         {
             var excludedBefore = excluded.Count;
             current = ExcludeItemsRequiringUnselected(
-                ExcludeTablesWithCollidingConstraintNames(
-                    current,
-                    capabilities,
+                ExcludeChangesBreakingLiveViews(
+                    ExcludeTablesWithCollidingConstraintNames(
+                        current,
+                        capabilities,
+                        context,
+                        warnings,
+                        excluded
+                    ),
                     context,
                     warnings,
                     excluded
@@ -971,6 +1008,169 @@ public sealed class SyncPlanner
                 $"Excluding the selected items did not settle within {selected.Count + 1} rounds."
             )
         );
+    }
+
+    /// <summary>
+    /// DB のビューが読む表の列を消す・足す変更と表の削除のうち、ビューを読めなくするものを計画から外し、
+    /// <see cref="SyncPlanWarningKind.TableChangeBreaksDependentView"/> で表ごとに名指しする（<see cref="SyncPlanContext.LiveViewCheck"/> が
+    /// 無ければ何もしない）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ビューは図に無いので、同期はビューを直さない。ビューが読む列・表を消すと（列の並びを書いた <c>SELECT *</c> のビューは列を足しても）
+    /// ビューが読めなくなり、実行器が同期の前後の比較で見つけて同期ごと巻き戻す。ビューが読めるかは表の列の名前の集合と表の有無だけで
+    /// 決まるので、外すのはその表の列の削除・列の追加・表の削除だけで、型・主キー・制約などの変更は流す。
+    /// </para>
+    /// <para>
+    /// 判定は DB 自身に試させる（<see cref="ILiveViewCheck"/>。ビューの SQL を解析しない）。まず計画全体の同期後の列名で試し、読めなく
+    /// なるビューが無ければ何も外さない（<c>SELECT *</c> のビューの列の削除・列の数が変わらない名前の変更などに偽の警告を出さない）。
+    /// 読めなくなるときだけ、表ごとに試して原因の表を決め、その表の名前を変える項目を外す。表どうしの組み合わせでだけ読めなくなるときは、
+    /// 名前を変える表をすべて原因とする。外した後の計画は <see cref="ExcludeUntilStable"/> の次の周でもう一度試す。
+    /// </para>
+    /// </remarks>
+    private static List<SchemaDiffItem> ExcludeChangesBreakingLiveViews(
+        List<SchemaDiffItem> selected,
+        SyncPlanContext? context,
+        List<SyncPlanWarning> warnings,
+        List<SchemaDiffItem> excluded
+    )
+    {
+        if (context?.LiveViewCheck is not { } check)
+        {
+            return selected;
+        }
+
+        var changes = PostSyncColumnNames(selected, IndexLiveTables(context));
+
+        if (changes.Count == 0 || check.ViewsBrokenBy(ToTableChanges(changes)).Count == 0)
+        {
+            return selected;
+        }
+
+        // 表ごとに試して原因の表を決める（表 → 読めなくするビュー）
+        var culprits = new Dictionary<string, (string Table, IReadOnlyList<string> Views)>(
+            SchemaNames.Comparer
+        );
+
+        foreach (var change in changes)
+        {
+            var views = check.ViewsBrokenBy(ToTableChanges([change]));
+
+            if (views.Count > 0)
+            {
+                culprits[change.Table] = (change.Table, views);
+            }
+        }
+
+        // 表どうしの組み合わせでだけ読めなくなる（どの表の変更も単独では読めなくしない）ときは、名前を変える表をすべて原因とする。
+        // この枝を通す形は見つかっておらず、行で通していない守りの無い枝（src/QuickER.Provider.Sqlite/CLAUDE.md「計画の段のビューの判定」）。
+        // 作れる形が見つかったら、同期計画の期待の行の実 SQLite の段へ行を足す
+        if (culprits.Count == 0)
+        {
+            var views = check.ViewsBrokenBy(ToTableChanges(changes));
+
+            foreach (var change in changes)
+            {
+                culprits[change.Table] = (change.Table, views);
+            }
+        }
+
+        var kept = new List<SchemaDiffItem>(selected.Count);
+
+        foreach (var item in selected)
+        {
+            if (
+                IsColumnNameSetChange(item.Kind)
+                && culprits.TryGetValue(SchemaNames.ToStoredForm(item.TableName), out var culprit)
+            )
+            {
+                ExcludeSelected(
+                    item,
+                    new SyncPlanWarning(
+                        SyncPlanWarningKind.TableChangeBreaksDependentView,
+                        culprit.Table,
+                        string.Join(", ", culprit.Views)
+                    ),
+                    warnings,
+                    excluded
+                );
+                continue;
+            }
+
+            kept.Add(item);
+        }
+
+        return kept;
+
+        static IReadOnlyDictionary<string, IReadOnlyList<string>?> ToTableChanges(
+            IEnumerable<(string Table, IReadOnlyList<string>? Columns)> tables
+        ) => tables.ToDictionary(t => t.Table, t => t.Columns, SchemaNames.Comparer);
+    }
+
+    /// <summary>表の列の名前の集合か表の有無を変える項目の種別（列の削除・列の追加・表の削除）か</summary>
+    private static bool IsColumnNameSetChange(SchemaDiffKind kind) =>
+        kind is SchemaDiffKind.DropColumn or SchemaDiffKind.AddColumn or SchemaDiffKind.DropTable;
+
+    /// <summary>
+    /// 選んだ項目で列の名前の集合が変わる live の表と、その同期後の列名（表の削除は <c>null</c>）を、項目に最初に現れた順に返す
+    /// </summary>
+    /// <remarks>
+    /// 同期後の列名は「live の列 − 選んだ列の削除 ＋ 選んだ列の追加」（<see cref="ExcludeDropsLeavingNoColumns"/> と同じ数え方）。
+    /// 列が 1 本も残らない表は数えない（その削除は <see cref="ExcludeDropsLeavingNoColumns"/> が外す）。live に無い表（追加する表）は
+    /// ビューが読んでいないので数えない。表の名前は live の綴りで返す。
+    /// </remarks>
+    private static List<(string Table, IReadOnlyList<string>? Columns)> PostSyncColumnNames(
+        List<SchemaDiffItem> selected,
+        NameLookup<Entity> liveByName
+    )
+    {
+        var changes = new List<(string Table, IReadOnlyList<string>? Columns)>();
+
+        foreach (
+            var items in selected
+                .Where(i => IsColumnNameSetChange(i.Kind))
+                .GroupBy(i => SchemaNames.ToStoredForm(i.TableName), SchemaNames.Comparer)
+        )
+        {
+            if (!liveByName.TryGet(items.Key, out var live))
+            {
+                continue;
+            }
+
+            if (items.Any(i => i.Kind == SchemaDiffKind.DropTable))
+            {
+                changes.Add((live.TableName, null));
+                continue;
+            }
+
+            var dropped = items
+                .Where(i => i.Kind == SchemaDiffKind.DropColumn && i.ColumnName is not null)
+                .Select(i => i.ColumnName!)
+                .ToList();
+            var columns = live
+                .Columns.Select(c => c.Name)
+                .Where(name => !dropped.Any(d => SchemaNames.AreSame(d, name)))
+                .ToList();
+
+            foreach (
+                var added in items
+                    .Where(i => i.Kind == SchemaDiffKind.AddColumn)
+                    .Select(i => i.Column?.Name ?? i.ColumnName)
+            )
+            {
+                if (added is not null && !columns.Any(c => SchemaNames.AreSame(c, added)))
+                {
+                    columns.Add(added);
+                }
+            }
+
+            if (columns.Count > 0)
+            {
+                changes.Add((live.TableName, columns));
+            }
+        }
+
+        return changes;
     }
 
     /// <summary>

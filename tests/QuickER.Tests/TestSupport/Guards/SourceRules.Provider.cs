@@ -157,7 +157,7 @@ internal static partial class SourceRules
                 new(SchemaCommandFiles[5], "DbCommands.Create", 2, "MySQL の同期実行器"),
                 new(SchemaCommandFiles[6], "DbCommands.Create", 11, "Oracle の取込"),
                 new(SchemaCommandFiles[7], "DbCommands.Create", 1, "Oracle の同期実行器"),
-                new(SchemaCommandFiles[8], "DbCommands.Create", 7, "SQLite の取込"),
+                new(SchemaCommandFiles[8], "DbCommands.Create", 8, "SQLite の取込"),
                 new(SchemaCommandFiles[9], "DbCommands.Create", 5, "SQLite の同期実行器")
             ) with
             {

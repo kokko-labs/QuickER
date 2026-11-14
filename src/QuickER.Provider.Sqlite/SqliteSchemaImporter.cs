@@ -71,8 +71,14 @@ public class SqliteSchemaImporter : ISchemaImporter
         int commandTimeoutSeconds = DbCommands.DefaultTimeoutSeconds
     )
     {
-        var (tables, tableCreateSql, withoutRowidByTable, tableWarnings, excludedNames) =
-            await LoadTablesAsync(conn, commandTimeoutSeconds, ct).ConfigureAwait(false);
+        var (
+            tables,
+            tableCreateSql,
+            withoutRowidByTable,
+            tableWarnings,
+            excludedNames,
+            replayTableSql
+        ) = await LoadTablesAsync(conn, commandTimeoutSeconds, ct).ConfigureAwait(false);
 
         // 各テーブルの列・主キーは PRAGMA table_xinfo でまとめて取得する
         var defaults = new List<SchemaColumnDefault>();
@@ -126,6 +132,13 @@ public class SqliteSchemaImporter : ISchemaImporter
             .ConfigureAwait(false);
         var aux = await LoadAuxiliaryObjectsAsync(conn, tables, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
+        var liveViewCheck = await LoadLiveViewCheckAsync(
+                conn,
+                replayTableSql,
+                commandTimeoutSeconds,
+                ct
+            )
+            .ConfigureAwait(false);
 
         // DDL へ出せない型表記は、後で DDL / 同期を叩いた瞬間に図全体を止める。取込完了時に名指しする
         var warnings = tableWarnings
@@ -146,6 +159,7 @@ public class SqliteSchemaImporter : ISchemaImporter
             TableCreateSql = tableCreateSql,
             Warnings = warnings,
             ColumnDefaults = defaults,
+            LiveViewCheck = liveViewCheck,
         };
     }
 
@@ -189,7 +203,8 @@ ORDER BY name;";
         Dictionary<string, string> CreateSql,
         Dictionary<string, bool> WithoutRowidByTable,
         List<SchemaImportWarning> Warnings,
-        List<string> ExcludedNames
+        List<string> ExcludedNames,
+        List<string> ReplayTableSql
     )> LoadTablesAsync(SqliteConnection conn, int commandTimeoutSeconds, CancellationToken ct)
     {
         var tableTypes = await LoadTableTypesAsync(conn, commandTimeoutSeconds, ct)
@@ -202,6 +217,10 @@ ORDER BY name;";
 
         // 取り込まない表・ビューの名前（外部キーの参照先が「DB にあるが外した表」かを見分けるため）
         var excludedNames = new List<string>();
+
+        // ビューの判定（SqliteLiveViewCheck）がメモリの DB へ写す表の原文。取り込まない表（仮想表・ドットを含む表・名前の衝突で
+        // 捨てた表）もビューが読みうるので入れ、仮想表の付属表だけは入れない（仮想表の作成で自動でできる）
+        var replayTableSql = new List<string>();
         await using var cmd = DbCommands.Create(conn, TablesSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
@@ -209,6 +228,21 @@ ORDER BY name;";
         {
             var name = reader.GetString(0);
             var hasTableListEntry = tableTypes.TryGetValue(name, out var tableListEntry);
+
+            if (
+                !reader.IsDBNull(1)
+                && !(
+                    hasTableListEntry
+                    && string.Equals(
+                        tableListEntry.Type,
+                        "shadow",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+            )
+            {
+                replayTableSql.Add(reader.GetString(1));
+            }
 
             if (hasTableListEntry)
             {
@@ -287,7 +321,44 @@ ORDER BY name;";
             excludedNames.Add(view);
         }
 
-        return (dict, createSql, withoutRowidByTable, warnings, excludedNames);
+        return (dict, createSql, withoutRowidByTable, warnings, excludedNames, replayTableSql);
+    }
+
+    /// <summary>ビューの原文を読むクエリ（作られた順）</summary>
+    private const string ViewsSql =
+        @"
+SELECT sql
+FROM sqlite_master
+WHERE type = 'view' AND sql IS NOT NULL
+ORDER BY rowid;";
+
+    /// <summary>
+    /// ビューがあれば、ビューの原文と表の原文から、ビューが同期後の表の形でも読めるかを試す入口を作る（ビューが無ければ <c>null</c>）
+    /// </summary>
+    /// <remarks>
+    /// 取込はビューを図に入れない（<see cref="SchemaImportWarningKind.ViewExcluded"/>）。同期の計画がビューを読めなくする変更を外せるよう、
+    /// 図の外の情報として <see cref="SchemaImportResult.LiveViewCheck"/> で持ち帰る（判定は <see cref="SqliteLiveViewCheck"/>）。
+    /// </remarks>
+    private static async Task<ILiveViewCheck?> LoadLiveViewCheckAsync(
+        SqliteConnection conn,
+        List<string> replayTableSql,
+        int commandTimeoutSeconds,
+        CancellationToken ct
+    )
+    {
+        var viewSql = new List<string>();
+
+        await using (var cmd = DbCommands.Create(conn, ViewsSql, commandTimeoutSeconds))
+        {
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                viewSql.Add(reader.GetString(0));
+            }
+        }
+
+        return viewSql.Count == 0 ? null : new SqliteLiveViewCheck(replayTableSql, viewSql);
     }
 
     /// <summary>

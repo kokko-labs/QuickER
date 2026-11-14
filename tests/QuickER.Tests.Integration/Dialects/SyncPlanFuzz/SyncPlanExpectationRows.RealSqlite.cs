@@ -1,18 +1,16 @@
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Tests.TestSupport.Engines;
-using ProviderStrings = QuickER.Provider.Resources.Strings;
 
 namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 
 internal static partial class SyncPlanExpectationRows
 {
     /// <summary>SQLite の実 DB の段の行の数の下限（行を足したら・消したら合わせる）</summary>
-    private const int RealSqliteRowCount = 53;
+    private const int RealSqliteRowCount = 60;
 
     /// <summary>実 DB の段：SQLite の同期（テーブル再構築・外部キー・主キー・一意制約・ビュー）</summary>
     private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealSqliteRows() =>
@@ -1136,36 +1134,202 @@ internal static partial class SyncPlanExpectationRows
                             e.Unchanged();
                         })
                 ),
+            // ビューが読む列の削除は外して名指しし、同じ表の型の変更は流す（作り直しでビューが読めなくなると実行器が同期ごと巻き戻すので、
+            // 計画の段で外す＝src/QuickER.Provider/CLAUDE.md「テーブル再構築の合成」のビューの段）
             Row(
-                    "realdb-rebuild-breaking-view-rolls-back",
-                    "[Integration] SQLite 同期: 再構築でビューが壊れるならビューを名指ししてロールバックする",
+                    "realdb-view-reading-dropped-column-excludes-drop-and-applies-type-change",
+                    "[Integration] SQLite 同期: ビューが読む列の削除は外してビューを名指しし、同じ表の型の変更はコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s =>
+                {
+                    s["vw_item"].Columns.RemoveAll(c => c.Name == "note");
+                    s.Col("vw_item", "extra").DataType = "INTEGER";
+                })
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            ViewItemSql
+                                + "CREATE VIEW \"vw_notes\" AS SELECT \"id\", \"note\" FROM \"vw_item\";"
+                        )
+                        .Query("view", "SELECT COUNT(*) FROM \"vw_notes\" WHERE \"note\" = 'a';")
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single("TableChangeBreaksDependentView(vw_item): vw_notes");
+                            e.Excluded.Exact("DropColumn vw_item.note");
+                            e.After.Contains("col vw_item.note *");
+                            e.After.Single("col vw_item.extra INTEGER *");
+                            e.Probe("view").Exact("1");
+                        })
+                ),
+            // SELECT * のビューは列が減るだけで読める（偽の警告を出さない）
+            Row(
+                    "realdb-view-select-star-drop-column-is-not-named",
+                    "[Integration] SQLite 同期: SELECT * のビューが読む表の列の削除は名指しせずにコミットする",
                     DialectNames.Sqlite
                 )
                 .TargetFromLive(s => s["vw_item"].Columns.RemoveAll(c => c.Name == "note"))
-                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.DropColumn))
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(ViewItemSql + "CREATE VIEW \"vw_all\" AS SELECT * FROM \"vw_item\";")
+                        .Query("view", "SELECT COUNT(*) FROM \"vw_all\";")
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Absent("TableChangeBreaksDependentView*");
+                            e.Excluded.Empty();
+                            e.After.Absent("col vw_item.note *");
+                            e.Probe("view").Exact("1");
+                        })
+                ),
+            // 列の並びを書いた SELECT * のビューは、列を足すと列の数が合わなくなる
+            Row(
+                    "realdb-view-star-with-column-list-add-column-is-excluded",
+                    "[Integration] SQLite 同期: 列の並びを書いた SELECT * のビューが読む表への列の追加は外してビューを名指しする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s =>
+                    s["vw_item"].Columns.Add(ExpectationSchema.Nullable("memo", "TEXT"))
+                )
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(ViewItemSql + ViewWithColumnListSql)
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single("TableChangeBreaksDependentView(vw_item): vw_listed");
+                            e.Excluded.Exact("AddColumn vw_item.memo");
+                            e.Unchanged();
+                        })
+                ),
+            // 列の数が変わらない名前の変更（消す＋足す）は、列の並びを書いた SELECT * のビューを壊さない（表ごとの単独の変更の和で判定すると偽の警告になる形）
+            Row(
+                    "realdb-view-star-with-column-list-rename-column-is-not-named",
+                    "[Integration] SQLite 同期: 列の並びを書いた SELECT * のビューが読む表の列の名前の変更（消す＋足す）は名指しせずにコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s =>
+                {
+                    s["vw_item"].Columns.RemoveAll(c => c.Name == "note");
+                    s["vw_item"].Columns.Add(ExpectationSchema.Nullable("note2", "TEXT"));
+                })
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(ViewItemSql + ViewWithColumnListSql)
+                        .Query("view", "SELECT COUNT(*) FROM \"vw_listed\";")
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Absent("TableChangeBreaksDependentView*");
+                            e.Excluded.Empty();
+                            e.After.Contains("col vw_item.note2 *");
+                            e.Probe("view").Exact("1");
+                        })
+                ),
+            // 表の削除は、その表を読むビューを（列を読まない count(*) でも）読めなくする
+            Row(
+                    "realdb-view-reading-dropped-table-excludes-drop-table",
+                    "[Integration] SQLite 同期: ビューが読む表の削除は外してビューを名指しし、ほかの表の削除はコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s =>
+                    s.Entities.RemoveAll(t => t.TableName is "vw_item" or "vw_other")
+                )
+                .Select(RealScenarios.SelectAll)
                 .OnRealDatabase(r =>
                     r.LiveSql(
-                            "CREATE TABLE \"vw_item\" (\"id\" INTEGER NOT NULL, \"note\" TEXT NULL, CONSTRAINT \"PK_vw_item\" PRIMARY KEY (\"id\"));"
-                                + "CREATE VIEW \"vw_notes\" AS SELECT \"id\", \"note\" FROM \"vw_item\";"
-                        )
-                        .ExpectsUnwarnedFailure(
-                            "モデルの外の物：計画が見ないビュー vw_notes が壊れ、実行器が後から検出して巻き戻す（docs の SQLite の再構築の節の仕様）"
+                            ViewItemSql
+                                + "CREATE TABLE \"vw_other\" (\"id\" INTEGER NOT NULL, CONSTRAINT \"PK_vw_other\" PRIMARY KEY (\"id\"));"
+                                + "CREATE VIEW \"vw_count\" AS SELECT count(*) AS \"n\" FROM \"vw_item\";"
                         )
                         .Expect(e =>
                         {
-                            e.Outcome.Exact(
-                                "failed: "
-                                    + string.Format(
-                                        CultureInfo.InvariantCulture,
-                                        ProviderStrings.Sync_Error_SqliteBrokenView,
-                                        "vw_notes"
-                                    )
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single("TableChangeBreaksDependentView(vw_item): vw_count");
+                            e.Excluded.Exact("DropTable vw_item");
+                            e.After.Contains("table vw_item");
+                            e.After.Absent("table vw_other");
+                        })
+                ),
+            // 入れ子のビューも読めなくなる（基の表の列を読む内側のビューと、その上のビューの両方を名指しする）
+            Row(
+                    "realdb-view-nested-names-inner-and-outer-views",
+                    "[Integration] SQLite 同期: ビューの上のビューも、基の表の列の削除で読めなくなるビューとして名指しする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s["vw_item"].Columns.RemoveAll(c => c.Name == "note"))
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            ViewItemSql
+                                + "CREATE VIEW \"vw_inner\" AS SELECT \"id\", \"note\" FROM \"vw_item\";"
+                                + "CREATE VIEW \"vw_outer\" AS SELECT * FROM \"vw_inner\";"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single(
+                                "TableChangeBreaksDependentView(vw_item): vw_inner, vw_outer"
                             );
+                            e.Excluded.Exact("DropColumn vw_item.note");
                             e.Unchanged();
-                            e.After.Contains("col vw_item.note *");
+                        })
+                ),
+            // もとから読めないビュー（参照先の無いビュー）は数えない（実行器と同じく増えたときだけ見る）
+            Row(
+                    "realdb-view-already-broken-is-not-named",
+                    "[Integration] SQLite 同期: もとから読めないビューは、列の削除でも名指しせずにコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s["vw_item"].Columns.RemoveAll(c => c.Name == "note"))
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(ViewItemSql)
+                        // 参照先の無いビュー（実行器は壊れたビューの増加を断るので、検査を通さずに作る）
+                        .RawSetup(
+                            "CREATE VIEW \"vw_broken\" AS SELECT \"note\" FROM \"no_such_table\";"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Absent("TableChangeBreaksDependentView*");
+                            e.Excluded.Empty();
+                            e.After.Absent("col vw_item.note *");
+                        })
+                ),
+            // 仮想表（FTS5）と結合するビューも、取込が図に入れない仮想表ごと写して判定する
+            Row(
+                    "realdb-view-joining-virtual-table-is-named",
+                    "[Integration] SQLite 同期: 取込が図に入れない仮想表と結合するビューも、読む列の削除で名指しする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s["vw_item"].Columns.RemoveAll(c => c.Name == "note"))
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            ViewItemSql
+                                + "CREATE VIRTUAL TABLE \"vw_docs\" USING fts5(\"body\");"
+                                + "CREATE VIEW \"vw_search\" AS SELECT \"vw_item\".\"id\", \"vw_item\".\"note\" FROM \"vw_item\" JOIN \"vw_docs\" ON \"vw_docs\".\"rowid\" = \"vw_item\".\"id\";"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single("TableChangeBreaksDependentView(vw_item): vw_search");
+                            e.Excluded.Exact("DropColumn vw_item.note");
+                            e.Unchanged();
                         })
                 ),
         ];
+
+    /// <summary>ビューの行の表（id・note・extra と 1 行）</summary>
+    private const string ViewItemSql =
+        "CREATE TABLE \"vw_item\" (\"id\" INTEGER NOT NULL, \"note\" TEXT NULL, \"extra\" TEXT NULL, CONSTRAINT \"PK_vw_item\" PRIMARY KEY (\"id\"));"
+        + "INSERT INTO \"vw_item\" (\"id\", \"note\", \"extra\") VALUES (1, 'a', '7');";
+
+    /// <summary>列の並びを書いた SELECT * のビュー（表の列の数と同じ 3 つ）</summary>
+    private const string ViewWithColumnListSql =
+        "CREATE VIEW \"vw_listed\" (\"a\", \"b\", \"c\") AS SELECT * FROM \"vw_item\";";
 
     /// <summary>同期スクリプトの文の形（新しい表・写す列の無い再構築・逐次の文・型の引用・主キーの順序）</summary>
     private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealSqliteScriptRows() =>

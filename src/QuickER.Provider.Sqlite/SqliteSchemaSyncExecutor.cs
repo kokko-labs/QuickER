@@ -207,7 +207,7 @@ public sealed class SqliteSchemaSyncExecutor : ISchemaSyncExecutor
     /// <summary>読み込めない（壊れた）ビューの名前を集める</summary>
     /// <remarks>
     /// SQLite はビューを作るときにも参照先を検証しないため、壊れたビューは既存の DB にもあり得る。
-    /// 各ビューを <c>SELECT * … LIMIT 0</c> で準備させ、失敗したものを壊れたビューとする。
+    /// 判定の文は計画のビューの判定と共有する（<see cref="SqliteViews"/>）。
     /// </remarks>
     private static async Task<HashSet<string>> CollectBrokenViewsAsync(
         SqliteConnection conn,
@@ -219,12 +219,7 @@ public sealed class SqliteSchemaSyncExecutor : ISchemaSyncExecutor
         var views = new List<string>();
 
         await using (
-            var list = DbCommands.Create(
-                conn,
-                "SELECT name FROM sqlite_master WHERE type = 'view';",
-                commandTimeoutSeconds,
-                tran
-            )
+            var list = DbCommands.Create(conn, SqliteViews.ListSql, commandTimeoutSeconds, tran)
         )
         await using (var reader = await list.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {
@@ -242,7 +237,7 @@ public sealed class SqliteSchemaSyncExecutor : ISchemaSyncExecutor
             {
                 await using var probe = DbCommands.Create(
                     conn,
-                    $"SELECT * FROM {SqliteIdentifier.QuoteSimple(view)} LIMIT 0;",
+                    SqliteViews.ReadProbeSql(view),
                     commandTimeoutSeconds,
                     tran
                 );

@@ -563,6 +563,12 @@ SQLite の同期は `SyncPlan.Rebuilds`／`TableRebuildPlan` で表を作り直�
   - 外すのは、その表を作り直す選んだ項目（列・主キー・外部キー・一意制約・列順の変更と作り直し）と、その表の外部キーの端（親の表・列）を消す表・列の削除。列の追加（作り直さずに足せる）とその表自身の削除は外さない。外した項目は `ExcludedItems` へ積み、`SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent`（表ごと・Detail は取込警告が名指しした物）で名指しする。文言は DB 側で直してから取り込み直すことを案内する。
   - 宣言は既定の腕を持たない網羅の switch（種別を足したら必ず決める）。列の属性・テーブルオプションの喪失は `TableRebuildDropsColumnAttribute` が警告して進めるので偽、表の外の物（ビュー・除外した表そのもの）も偽。
   - ガード：`SchemaImportWarningKindMapTests.EveryWarningKind_DeclaresWhetherRebuildLosesTableContent`・SQLite の期待の行 `realdb-rebuild-skipped-when-import-discarded-*`（捨てた物 3 × 作り直す項目 3）・同期計画の総当たりの汎用の表明 5（消えた取込警告）。
+- DB のビュー（図に無い）を読めなくする変更は計画から外して名指しする（`SyncPlanner.ExcludeChangesBreakingLiveViews`・`SyncPlanWarningKind.TableChangeBreaksDependentView`・表ごと・Detail は読めなくなるビューの名前）。入口は取込が持ち帰る `ILiveViewCheck`（`SyncPlanContext.LiveViewCheck`。null なら何もしない＝今は SQLite だけが埋める）。
+  - 外すのは、原因の表の列の名前の集合か表の有無を変える項目（列の削除・列の追加・表の削除）だけで、型などの変更は流す。同期後の列名は「live の列 − 選んだ列の削除 ＋ 選んだ列の追加」（列が残らない表は数えない＝`ExcludeDropsLeavingNoColumns` が外す）。
+  - まず計画全体の同期後の列名で 1 回試し、読めなくなるビューが無ければ何も外さない（単独の変更の和で判定すると、列の数を保つ名前の変更に偽の警告を出す）。読めなくなるときだけ表ごとに試して原因の表を決める。
+  - `ExcludeUntilStable` の周の中、名前の重なる表の追加の除外の後・依存の除外の前に置く（外した列の追加を前提にする項目を同じ周の依存の除外が外し、次の周でもう一度全体を試す）。
+  - 方言の判定と守りの無い枝は `src/QuickER.Provider.Sqlite/CLAUDE.md`「計画の段のビューの判定」。
+- 取込の結果から計画の入力を作るのは `SyncPlanContext.FromImport` の 1 か所（同期の画面と同期計画の総当たりが通す）。項目を足したら、ここに足す（呼び出し側ごとに写すと、写し忘れた側だけが黙ってその入力の無い計画を作り、画面とテストで警告・除外が割れる）。ガード：期待の行 `realdb-view-*`（判定器を写さないと赤）。
 - 再構築の合成で解決できない項目（同じ計画で消える列の一意制約など）は処理済みにせずセクションへ残してスキップのコメントを出す（`IsResolvableInRebuild`＝処理済みにすると何も変えずに成功扱いになる）。
 - 固定は `TableRebuildAttributeDetectorTests`・期待の行 `plan-rebuild-*`（`plan-rebuild-alter-column-keeps-live-column-identity`・`plan-rebuild-column-changes-without-alter-pk-keep-live-pk`・`plan-rebuild-dropped-table-is-not-rebuilt`・`plan-rebuild-unresolvable-item-stays-in-section`）・実 SQLite の行 `realdb-rebuild-*`。mutation 実証済み。
 

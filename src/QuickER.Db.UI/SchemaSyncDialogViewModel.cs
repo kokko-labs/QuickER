@@ -34,24 +34,8 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     /// <summary>差分から方言中立の実行計画を組み立てるプランナー</summary>
     private readonly SyncPlanner _planner = new();
 
-    /// <summary>直近の取込で得た DB 現状のエンティティ（再構築計画の合成に用いる）</summary>
-    private IReadOnlyList<Entity> _liveEntities = [];
-
-    /// <summary>直近の取込で得た DB 現状のリレーション（既存 FK 集合の復元に用いる）</summary>
-    private IReadOnlyList<Relationship> _liveRelationships = [];
-
-    /// <summary>直近の取込で得た補助オブジェクト（再構築で温存するインデックス・トリガー・一意制約）</summary>
-    private IReadOnlyList<SchemaAuxiliaryObject> _liveAuxiliaryObjects = [];
-
-    /// <summary>直近の取込で得たテーブルの CREATE 文全文（再構築で失われる列属性の検出に用いる）</summary>
-    private IReadOnlyDictionary<string, string> _liveTableCreateSql =
-        new Dictionary<string, string>();
-
-    /// <summary>直近の取込で得た列の既定値（既定値のある列の型の種類の変更の警告に用いる）</summary>
-    private IReadOnlyList<SchemaColumnDefault> _liveColumnDefaults = [];
-
-    /// <summary>直近の取込の警告（取込が捨てた物のある表を作り直さないために用いる）</summary>
-    private IReadOnlyList<SchemaImportWarning> _liveImportWarnings = [];
+    /// <summary>直近の取込の結果（計画の入力＝<see cref="SyncPlanContext.FromImport"/> の材料。取り込む前と取り直しに失敗した後は空）</summary>
+    private SchemaImportResult _live = new();
 
     /// <summary>直近の <see cref="UpdatePreview"/> で組み立てた実行計画（実行確認の文言分岐に用いる）</summary>
     private SyncPlan _currentPlan = new();
@@ -184,12 +168,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
 
             // rebuild 方言（SQLite）の再構築計画は「DB 現状（live）＋選択差分のみ」を合成するため、
             // 取込結果を保持して以降の UpdatePreview へ SyncPlanContext として渡せるようにする
-            _liveEntities = live.Entities;
-            _liveRelationships = live.Relationships;
-            _liveAuxiliaryObjects = live.AuxiliaryObjects;
-            _liveTableCreateSql = live.TableCreateSql;
-            _liveColumnDefaults = live.ColumnDefaults;
-            _liveImportWarnings = live.Warnings;
+            _live = live;
 
             // 対象方言のケーパビリティを渡す（SQLite は説明差分を抑止し FK 制約名を比較から除外する）
             var diff = new SchemaDiffService().Compute(
@@ -269,27 +248,13 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     {
         DiffItems.Clear();
         HasDiff = false;
-        _liveEntities = [];
-        _liveRelationships = [];
-        _liveAuxiliaryObjects = [];
-        _liveTableCreateSql = new Dictionary<string, string>();
-        _liveColumnDefaults = [];
-        _liveImportWarnings = [];
+        _live = new SchemaImportResult();
         _currentPlan = new SyncPlan();
         ScriptPreview = string.Empty;
     }
 
     /// <summary>直近の取込結果から、計画組み立て用の live スキーマ入力を作る</summary>
-    private SyncPlanContext BuildPlanContext() =>
-        new()
-        {
-            LiveEntities = _liveEntities,
-            LiveRelationships = _liveRelationships,
-            AuxiliaryObjects = _liveAuxiliaryObjects,
-            TableCreateSql = _liveTableCreateSql,
-            ColumnDefaults = _liveColumnDefaults,
-            ImportWarnings = _liveImportWarnings,
-        };
+    private SyncPlanContext BuildPlanContext() => SyncPlanContext.FromImport(_live);
 
     /// <summary>選択中の差分から実行計画を組み立て、スクリプトプレビューを再生成する（選択変更時に呼ぶ）</summary>
     /// <remarks>
@@ -685,6 +650,12 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             // （Detail は「制約名 (支える外部キーの名前)」）
             SyncPlanWarningKind.UniqueConstraintRebuildKeptForForeignKey => string.Format(
                 Strings.SchemaSync_ExecuteConfirmUniqueConstraintRebuildKeptForForeignKey,
+                BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
+            ),
+            // DB のビューが読む表の列を消す・足す変更と表の削除は、ビューを読めなくして同期ごと巻き戻されるので、計画から外した（SQLite。
+            // Detail は読めなくなるビューの名前）
+            SyncPlanWarningKind.TableChangeBreaksDependentView => string.Format(
+                Strings.SchemaSync_ExecuteConfirmTableChangeBreaksDependentView,
                 BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
             ),
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
