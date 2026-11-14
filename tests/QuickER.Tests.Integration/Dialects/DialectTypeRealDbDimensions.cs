@@ -44,8 +44,9 @@ internal static class DialectTypeRealDbDimensions
                         new Level(DialectTypeRealDbProbeKinds.Driver),
                         new Level(DialectTypeRealDbProbeKinds.EfCore),
                         new Level(DialectTypeRealDbProbeKinds.EfCoreWriteRange),
+                        new Level(DialectTypeRealDbProbeKinds.AdoWriteRange),
                     ],
-                    "手順の種類（上限ちょうどは取り込み直した表記を同期の能力の型の表記の正規化と比べる。EF Core は生成 DbContext と同じ構成のモデルで読み書きする。書き込みの範囲は列の型の範囲の端と外の値を書き込みの経路ごとに書き、黙って別の値を保存しないことを確かめる）"
+                    "手順の種類（上限ちょうどは取り込み直した表記を同期の能力の型の表記の正規化と比べる。EF Core は生成 DbContext と同じ構成のモデルで読み書きする。書き込みの範囲は列の型の範囲の端と外の値を書き込みの経路ごとに書き、黙って別の値を保存しないことを確かめる。QuickER 版の束縛は同じ値を QuickER 版 Repository と同じ束縛で書く）"
                 ),
             ],
             isValid: IsValid
@@ -61,13 +62,14 @@ internal static class DialectTypeRealDbDimensions
             [
                 CoverageGap.AcceptedTuple(
                     Scope,
-                    "PT",
-                    "Oracle の型マッパー（src/QuickER.Provider.Oracle/OracleCSharpTypeMapper.cs の Map）は TimeSpan へ写す型を持たない"
-                        + "（TIME の型が無く、INTERVAL DAY TO SECOND も TimeSpan に写さない＝DslFuzzNotGenerated の oracle-timespan-columns と"
-                        + "同じ事実）。書き込みの範囲の手順は、列の型の範囲が C# の型より狭い TimeSpan の列だけを持ち、Oracle の整数の"
-                        + " NUMBER(p) はマッパーが範囲の収まる C# の型へ写すので、範囲の外の値を作れる行が無い",
-                    (Dialect, DialectNames.Oracle),
-                    (Probe, DialectTypeRealDbProbeKinds.EfCoreWriteRange)
+                    "DW",
+                    "SQL Server の QuickER 版 Repository の書き込みの経路（InsertAsync・UpdateAsync・SaveAsync の挿入と更新・BulkInsertAsync）での"
+                        + " decimal の丸めと整数部の桁あふれは、実装先どうしの一致の値の往復（GeneratedRuntime/ParityValuesSqlServer の列 Amount＝"
+                        + "decimal(10,2)、値の形 Max・Min・RoundDown・RoundUp・Half・RoundsToOverflow・Overflow）が、生成した Repository を通して照合する。"
+                        + "SqlParameter の明示型（[SqlColumnType] の精度・スケール）と、SqlBulkCopy へ渡す値の直しは生成コードの中にある。この段の手順は"
+                        + "生成コードを通らないので、写しを置かずにそちらへ任せる",
+                    (Dialect, DialectNames.SqlServer),
+                    (Probe, DialectTypeRealDbProbeKinds.AdoWriteRange)
                 ),
             ]
         );
@@ -110,18 +112,31 @@ internal static class DialectTypeRealDbDimensions
 
     /// <summary>
     /// 原理的に起こり得ない組を外す：SQLite は型の表記の長さ・精度に上限を持たず（宣言の型をそのまま覚える）、DB が断る
-    /// 上限が無いので、上限の対の手順を持てない（マッパーの手順＝ドライバ・EF Core・書き込みの範囲だけを持つ）
+    /// 上限が無いので、上限の対の手順を持てない（マッパーの手順＝ドライバ・EF Core・書き込みの範囲・QuickER 版の束縛だけを持つ）。
+    /// QuickER 版 Repository（ADO）は SQL Server と SQLite だけが持ち（PostgreSQL・MySQL・Oracle の列を読み書きするのは生成 EF Core の
+    /// コードとそのプロバイダだけ＝ルートの CLAUDE.md の索引「型マッパーは読み取る経路が読み書きできる型へ写す」）、ほかの 3 方言には
+    /// QuickER 版の書き込みの経路が無いので、QuickER 版の束縛の手順を持てない
     /// </summary>
-    private static bool IsValid(IReadOnlyDictionary<string, string> assignment) =>
-        !(
-            assignment.TryGetValue(Dialect, out var dialect)
-            && dialect == DialectNames.Sqlite
-            && assignment.TryGetValue(Probe, out var probe)
-            && probe
-                is not (
-                    DialectTypeRealDbProbeKinds.Driver
+    private static bool IsValid(IReadOnlyDictionary<string, string> assignment)
+    {
+        if (
+            !assignment.TryGetValue(Dialect, out var dialect)
+            || !assignment.TryGetValue(Probe, out var probe)
+        )
+        {
+            return true;
+        }
+
+        if (dialect == DialectNames.Sqlite)
+        {
+            return probe
+                is DialectTypeRealDbProbeKinds.Driver
                     or DialectTypeRealDbProbeKinds.EfCore
                     or DialectTypeRealDbProbeKinds.EfCoreWriteRange
-                )
-        );
+                    or DialectTypeRealDbProbeKinds.AdoWriteRange;
+        }
+
+        return probe != DialectTypeRealDbProbeKinds.AdoWriteRange
+            || dialect == DialectNames.SqlServer;
+    }
 }

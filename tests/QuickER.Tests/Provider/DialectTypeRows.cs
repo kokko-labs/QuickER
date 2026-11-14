@@ -1,3 +1,4 @@
+using QuickER.Dialects;
 using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Provider;
@@ -56,8 +57,32 @@ internal static partial class DialectTypeRows
             .. ParamTypeRows(),
             .. FullWidthRows(),
             .. LengthlessRows(),
+            .. HighPrecisionDecimalRows(),
         ];
 
         return [.. bases, .. MatrixDerivedRows(bases)];
     }
+
+    /// <summary>
+    /// 有効桁が 15 を超える decimal の列（精度 28・スケール 10）は精度とスケールを保つ decimal へ写す（5 方言。宣言のセルの
+    /// decimal(12,3) は精度が 15 以下なので、方言の型の表の実 DB の段の書き込みの範囲の手順が、double の有効桁を超える範囲の中の値を
+    /// 書くのにこの行を使う）
+    /// </summary>
+    private static IEnumerable<DialectTypeRow> HighPrecisionDecimalRows() =>
+        new (string Dialect, string Slug, string Native)[]
+        {
+            (DialectNames.SqlServer, "decimal-28-10", "decimal(28,10)"),
+            (DialectNames.PostgreSql, "numeric-28-10", "numeric(28,10)"),
+            (DialectNames.MySql, "decimal-28-10", "decimal(28,10)"),
+            (DialectNames.Oracle, "number-28-10", "NUMBER(28,10)"),
+            (DialectNames.Sqlite, "decimal-28-10", "DECIMAL(28,10)"),
+        }.Select(item =>
+            DialectTypeRow
+                .Map(
+                    $"map-{item.Dialect}-{item.Slug}",
+                    "有効桁が 15 を超える decimal の列は精度とスケールを保つ decimal へマップされる",
+                    item.Native
+                )
+                .Expect(item.Dialect, "ok type=decimal fallback=0 p=28 s=10 efcol=-")
+        );
 }

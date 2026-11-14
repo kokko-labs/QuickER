@@ -376,6 +376,18 @@ A sync can turn a column that is not an alias into one, by making it the primary
 The rebuild script then checks that column for NULL before it copies the rows, and if any row holds NULL the sync fails and rolls back, as making a column `NOT NULL` fails in every dialect.
 The error names the column as `quicker_rowid_null_guard.<table>.<column>`; fill in or delete the rows that hold NULL and sync again.
 
+### SQLite decimal columns
+
+QuickER declares a `decimal` column in SQLite as `DECIMAL(p,s)`, which SQLite treats as NUMERIC affinity rather than as a type with a precision.
+The QuickER Repository and the EF Core repositories send a `decimal` as text, and SQLite stores text that reads as a number as an integer or an 8-byte double.
+**A value with more than about 15 significant digits is stored rounded, even when it fits the declared type.**
+`1234567890123456.78` written to a `DECIMAL(18,2)` column reads back as `1234567890123456.8`, and `-9999999999999999.99` reads back as `-10000000000000000`.
+A value with 15 significant digits or fewer reads back as it was written, so a column whose precision is 15 or less keeps every value of its declared range.
+SQLite neither rounds a value to the declared scale nor checks it against the declared precision: `1.2345` written to a `DECIMAL(12,3)` column reads back as `1.2345`, and a value with too many integral digits is stored as it is.
+**A value near the end of the `decimal` range (about 7.9 × 10^28), outside every declared type, is stored without an error, and reading its row then throws an `OverflowException`.**
+Every query that reads that row fails until the row is changed or deleted.
+Use another database for columns that need more than 15 significant digits.
+
 ## Diff sync (diagram → DB)
 
 The "DB Sync" button on the toolbar opens the "DB Schema Sync (Apply Diff)" dialog.

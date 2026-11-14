@@ -483,7 +483,8 @@ public sealed class EngineFingerprintDriftTests
 
     // ---------------- 補助 ----------------
 
-    private static string RepositoryRoot()
+    /// <summary>リポジトリ直下（QuickER.slnx のあるフォルダ。方言の型の表の実 DB の段の docs の見出しの照合も使う）</summary>
+    internal static string RepositoryRoot()
     {
         var dir = new DirectoryInfo(
             Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!

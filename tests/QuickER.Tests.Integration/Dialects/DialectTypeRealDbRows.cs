@@ -24,19 +24,48 @@ internal static class DialectTypeRealDbProbeKinds
     /// <summary>
     /// 型マッパーの型：列の型の範囲の端と外の値を、生成 EF Core のコードと同じ構成（EF Core の手順と同じモデル＋
     /// <c>AddGeneratedEfCoreRepositories</c> が足すインターセプター）で、書き込みのどの経路（SaveChanges の挿入・更新・一括挿入の形・
-    /// ExecuteUpdate の SET）で書いても、DB が断るか同じ値で読み戻す（黙って別の値を保存しない）。範囲の中の値は同じ値で読み戻す
+    /// ExecuteUpdate の SET）で書いても、DB が断るか同じ値で読み戻す（黙って別の値を保存しない）。範囲の中の値は同じ値で読み戻す。
+    /// DB が決まって変える値（宣言のスケールへの丸めなど）は、手順に書いた値と根拠（<see cref="DialectTypeRealDbWrite.Stored"/>・
+    /// <see cref="DialectTypeRealDbWrite.Basis"/>）のとおりに読み戻す
     /// </summary>
     public const string EfCoreWriteRange = "efcore-write-range";
 
+    /// <summary>
+    /// 型マッパーの型：書き込みの範囲の手順と同じ値を、QuickER 版 Repository（ADO）の束縛で挿入・更新・一括挿入の形で書き、
+    /// 同じ答えになる（生成 SQLite 版はすべてのパラメータを <c>AddWithValue</c> で束縛する＝<c>Runtime.Sqlite.g.cs</c> の
+    /// <c>AddColumnParameter</c>。束縛は private なので同じ 1 行を写す。一括挿入は 1 つのコマンドの値を差し替える
+    /// <c>RebindInsertParameters</c> と同じ形）
+    /// </summary>
+    public const string AdoWriteRange = "ado-write-range";
+
     /// <summary>すべての種類（次元表の水準の並び）</summary>
     public static IReadOnlyList<string> All { get; } =
-    [AtLimit, OverLimit, Driver, EfCore, EfCoreWriteRange];
+    [AtLimit, OverLimit, Driver, EfCore, EfCoreWriteRange, AdoWriteRange];
 }
 
 /// <summary>書き込みの範囲の手順で書く値 1 つ</summary>
 /// <param name="Value">マッパーの型の値</param>
-/// <param name="Fits">列の型の範囲の中か（中なら同じ値で読み戻す。外なら DB が断るか同じ値で読み戻す）</param>
-internal sealed record DialectTypeRealDbWrite(object Value, bool Fits);
+/// <param name="Fits">
+/// DB が断らない値か（列の型の範囲の中の値と、DB が丸めるか検査せずに受け入れる値。DB は断らずに同じ値か
+/// <paramref name="Stored"/> で読み戻す。そうでなければ範囲の外の値で、DB が断るか同じ値で読み戻す。
+/// <paramref name="Unreadable"/> なら断らずに保存して読むと例外になる）
+/// </param>
+/// <param name="Stored">
+/// DB が決まって変えて保存する値（null なら同じ値）。宣言のスケールへの四捨五入、SQLite の decimal の double への丸めなど
+/// </param>
+/// <param name="Unreadable">DB が断らずに保存し、その行を読むと例外になる（SQLite の decimal の上限付近の値）</param>
+/// <param name="Basis">
+/// <paramref name="Stored"/>・<paramref name="Unreadable"/> の根拠（DB が決まって変えることの出どころ）。docs の約束なら
+/// <see cref="DialectTypeRealDbRows.DocsBasis"/> の形（<c>docs/{ファイル}.md「{見出し}」</c>）で書き、英日の docs にその見出しがあることを
+/// <see cref="DialectTypeRealDbTableTests"/> が照合する
+/// </param>
+internal sealed record DialectTypeRealDbWrite(
+    object Value,
+    bool Fits,
+    object? Stored = null,
+    bool Unreadable = false,
+    string? Basis = null
+);
 
 /// <summary>
 /// 方言の型の表（<see cref="DialectTypeRows"/>）の 1 行を、1 方言の実 DB で確かめる 1 つの手順
@@ -143,7 +172,19 @@ internal static class DialectTypeRealDbRows
         .. SqlServerEfCore(),
         .. SqliteEfCore(),
         .. EfCoreWriteRanges(),
+        .. DecimalWriteRanges(),
+        .. AdoWriteRanges(),
     ];
+
+    /// <summary>
+    /// docs の約束を書き込みの値の根拠（<see cref="DialectTypeRealDbWrite.Basis"/>）にするときの書き方（英語の docs と日本語の docs の
+    /// 見出しを並べる。どちらの見出しも実在することを <see cref="DialectTypeRealDbTableTests"/> が照合する）
+    /// </summary>
+    /// <param name="file">docs のファイル名（英語版。日本語版は <c>.ja.md</c>）</param>
+    /// <param name="heading">英語版の見出し</param>
+    /// <param name="jaHeading">日本語版の見出し</param>
+    public static string DocsBasis(string file, string heading, string jaHeading) =>
+        $"docs/{file}「{heading}」・docs/{Path.ChangeExtension(file, ".ja.md")}「{jaHeading}」";
 
     /// <summary>方言の手順</summary>
     /// <param name="dialect">方言</param>
@@ -882,6 +923,156 @@ internal static class DialectTypeRealDbRows
             DialectTypeRealDbProbeKinds.EfCoreWriteRange,
             Writes: [.. fits, .. beyond]
         );
+
+    /// <summary>SQLite の decimal の列の割り切り（docs の約束。S1・S2 の値の根拠）</summary>
+    private static string SqliteDecimalBasis() =>
+        DocsBasis("database.md", "SQLite decimal columns", "SQLite の decimal の列");
+
+    /// <summary>
+    /// decimal の列の型の範囲の端と外の値の書き込み（宣言のセルの decimal(12,3) と、有効桁が 15 を超える decimal(28,10)。整数部の桁あふれ・
+    /// スケールの外の小数・端の値）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// SQL Server・PostgreSQL・MySQL・Oracle は、スケールの外の小数を宣言のスケールへ四捨五入（ちょうど半分は 0 から遠い側）して保存し、
+    /// 丸めた値の整数部が精度からスケールを引いた桁に入らなければ断る（書き込みのどの経路でも同じ）。
+    /// </para>
+    /// <para>
+    /// SQLite は丸めも桁の検査もせず、書いた値を NUMERIC アフィニティで数に変えて持つ（docs の割り切り「SQLite decimal columns」）。
+    /// 有効桁が 15 以下の値は書いた値のまま読み戻し（範囲の外の整数部も断らない）、15 を超える値は double へ丸めた値で読み戻す（S1）。
+    /// decimal の上限付近の値は保存して、読むと例外になる（S2）。
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<DialectTypeRealDbProbe> DecimalWriteRanges()
+    {
+        // 宣言のセルの decimal(12,3)：整数部 9 桁・小数 3 桁
+        DialectTypeRealDbWrite[] fits12 =
+        [
+            .. Same(0m, 0.001m, 123456789.123m, 999999999.999m, -999999999.999m),
+        ];
+        (decimal Value, decimal Rounded)[] scaled12 =
+        [
+            (1.2345m, 1.235m),
+            (-1.2345m, -1.235m),
+            (0.0005m, 0.001m),
+            (1.2344999m, 1.234m),
+            (999999999.9994m, 999999999.999m),
+        ];
+        // 有効桁 28 の小数（スケールの外。SQLite では double の有効桁も超える）
+        const decimal LongFraction = 1.2345678901234567890123456789m;
+        decimal[] beyond12 = [999999999.9995m, 1000000000m, -1000000000m];
+
+        // 有効桁が 15 を超える decimal(28,10)：整数部 18 桁・小数 10 桁
+        const decimal Max28 = 999999999999999999.9999999999m;
+        const decimal Sixteen = 1234567890123456.78m;
+        decimal[] beyond28 = [1000000000000000000m];
+
+        foreach (
+            var (dialect, rowId12, rowId28) in new[]
+            {
+                (
+                    DialectNames.SqlServer,
+                    "matrix-map-sqlserver-decimal-12-3",
+                    "map-sqlserver-decimal-28-10"
+                ),
+                (PostgreSql, "matrix-map-postgresql-numeric-12-3", "map-postgresql-numeric-28-10"),
+                (MySql, "matrix-map-mysql-decimal-12-3", "map-mysql-decimal-28-10"),
+                (
+                    DialectNames.Oracle,
+                    "matrix-map-oracle-number-12-3-upper",
+                    "map-oracle-number-28-10"
+                ),
+            }
+        )
+        {
+            var basis = ServerRoundingBasis(dialect);
+
+            yield return WriteRange(
+                rowId12,
+                dialect,
+                [
+                    .. fits12,
+                    .. scaled12.Select(item => Rounds(item.Value, item.Rounded, basis)),
+                    Rounds(LongFraction, 1.235m, basis),
+                ],
+                [.. Beyond(beyond12), Beyond(decimal.MaxValue)[0]]
+            );
+
+            yield return WriteRange(
+                rowId28,
+                dialect,
+                [.. Same(Max28, -Max28, Sixteen)],
+                Beyond(beyond28)
+            );
+        }
+
+        var sqlite = SqliteDecimalBasis();
+
+        yield return WriteRange(
+            "matrix-map-sqlite-decimal-12-3-upper",
+            DialectNames.Sqlite,
+            [
+                .. fits12,
+                // 丸めずに書いた値のまま持つ（有効桁が 15 以下）
+                .. Same([.. scaled12.Select(item => item.Value)]),
+                Rounds(LongFraction, 1.2345678901234567m, sqlite),
+            ],
+            [
+                // 範囲の外の整数部も断らずに書いた値のまま持つ
+                .. Beyond(beyond12),
+                new DialectTypeRealDbWrite(
+                    decimal.MaxValue,
+                    Fits: false,
+                    Unreadable: true,
+                    Basis: sqlite
+                ),
+            ]
+        );
+
+        yield return WriteRange(
+            "map-sqlite-decimal-28-10",
+            DialectNames.Sqlite,
+            [
+                // double へ丸めると整数部が 19 桁になり、宣言の精度も超える
+                Rounds(Max28, 1000000000000000000m, sqlite),
+                Rounds(-Max28, -1000000000000000000m, sqlite),
+                Rounds(Sixteen, 1234567890123456.8m, sqlite),
+            ],
+            Beyond(beyond28)
+        );
+
+        static DialectTypeRealDbWrite[] Same(params decimal[] values) =>
+            [.. values.Select(value => new DialectTypeRealDbWrite(value, Fits: true))];
+
+        static DialectTypeRealDbWrite[] Beyond(params decimal[] values) =>
+            [.. values.Select(value => new DialectTypeRealDbWrite(value, Fits: false))];
+
+        static DialectTypeRealDbWrite Rounds(decimal value, decimal stored, string basis) =>
+            new(value, Fits: true, Stored: stored, Basis: basis);
+    }
+
+    /// <summary>SQL Server・PostgreSQL・MySQL・Oracle が decimal を宣言のスケールへ四捨五入して保存することの根拠</summary>
+    private static string ServerRoundingBasis(string dialect) =>
+        dialect == DialectNames.SqlServer
+            ? DocsBasis(
+                "code-generation.md",
+                "Known divergences from a real database",
+                "実 DB との既知の乖離"
+            )
+            : $"{dialect} の decimal の列は宣言のスケールへ四捨五入（ちょうど半分は 0 から遠い側）して保存する（DB の仕様。docs は約束しない）";
+
+    /// <summary>
+    /// QuickER 版 Repository（ADO）の束縛の書き込み：SQLite の decimal の書き込みの範囲の手順と同じ値（生成 SQLite 版は
+    /// <c>AddWithValue</c> で decimal を TEXT で送り、EF Core 版と同じく DB のアフィニティが値を決めるので答えも同じ）
+    /// </summary>
+    /// <remarks>
+    /// SQL Server の QuickER 版は、生成した Repository を通す実装先どうしの一致の値の往復（<c>GeneratedRuntime/ParityValuesSqlServer</c>）が
+    /// 受け持つ（網羅しない組の一覧）。PostgreSQL・MySQL・Oracle は QuickER 版 Repository を持たない
+    /// </remarks>
+    private static IEnumerable<DialectTypeRealDbProbe> AdoWriteRanges() =>
+        DecimalWriteRanges()
+            .Where(probe => probe.Dialect == DialectNames.Sqlite)
+            .Select(probe => probe with { Kind = DialectTypeRealDbProbeKinds.AdoWriteRange });
 
     private static DialectTypeRealDbProbe EfCore(
         string rowId,

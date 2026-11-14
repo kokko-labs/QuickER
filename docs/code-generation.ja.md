@@ -173,6 +173,9 @@ Repository の保存前チェックはこの制約にも効き、制約そのも
 
 SQLite の REAL アフィニティ（`REAL`・`FLOAT`・`DOUBLE` など、SQLite がそう扱う型の名前）は 8 バイトの倍精度で値を持つため、単精度の `float` では読み書きのたびに値の下位の桁が落ちます。
 
+SQLite の `decimal` の列は精度とスケールを保つ `decimal` へ写りますが、SQLite は値を NUMERIC アフィニティで持ちます。
+有効桁がおよそ 15 桁を超える値は丸めて保存され、`decimal` の範囲の端に近い値は保存すると読み戻せません（[SQLite の decimal の列](database.ja.md#sqlite-の-decimal-の列)を参照）。
+
 PostgreSQL の `interval`・`cidr`・`inet` の C# 型は、ドライバ（Npgsql）が返す型です。
 いずれも文字列としては読めません。
 **`inet` の値を `IPAddress` で読むと、ネットマスク（`192.168.0.1/24` の `/24`）は落ちます**（Npgsql の既定の扱い）。
