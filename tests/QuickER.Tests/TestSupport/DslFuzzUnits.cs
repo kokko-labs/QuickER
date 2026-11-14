@@ -51,6 +51,8 @@ public static class DslFuzzUnits
         {
             yield return unit;
         }
+
+        yield return Floating("sqlite", DialectNames.Sqlite, seed);
     }
 
     /// <summary>
@@ -86,6 +88,8 @@ public static class DslFuzzUnits
         {
             yield return unit;
         }
+
+        yield return Floating("sqlserver", DialectNames.SqlServer, seed);
     }
 
     /// <summary>
@@ -237,6 +241,8 @@ public static class DslFuzzUnits
         {
             yield return unit;
         }
+
+        yield return Floating("postgresql", DialectNames.PostgreSql, seed);
     }
 
     /// <summary>
@@ -266,6 +272,8 @@ public static class DslFuzzUnits
         {
             yield return unit;
         }
+
+        yield return Floating("oracle", DialectNames.Oracle, seed);
     }
 
     /// <summary>MySQL の単位（符号なし整数・sbyte。インメモリと、Integration の派生が実 DB の EF Core 版で流す）</summary>
@@ -283,6 +291,8 @@ public static class DslFuzzUnits
         {
             yield return unit;
         }
+
+        yield return Floating("mysql", DialectNames.MySql, seed);
     }
 
     /// <summary>網羅の単位の乱数の種（網羅の単位は種の列の外で、いつも同じ値とパラメータ名を作る）</summary>
@@ -692,20 +702,24 @@ public static class DslFuzzUnits
     /// </summary>
     /// <remarks>
     /// <paramref name="ordered"/> が偽なら、<paramref name="clr"/> の列の順序比較と並び替えを作らない（EF Core〔SQLite〕が流さない）。真の
-    /// SQLite の単位は名前に <c>-ordered</c> を足し、QuickER 版とインメモリだけで流す。
+    /// SQLite の単位は名前に <c>-ordered</c> を足し、QuickER 版とインメモリだけで流す（<paramref name="clr"/> が null の族＝順序比較を
+    /// どの実装先も流す族は足さない）。<paramref name="extraQueries"/> は値オブジェクトの有無ごとに、その単位の列（相方の列を足す前）から
+    /// 作る追加のクエリ（別の乱数の列の生成器で作る。パラメータの使い回しと並び替えのクエリより前に置き、並びの水準を変えた写しの候補にする）。
+    /// <paramref name="adjustRows"/> は乱数で作った行に決まった値を入れる（乱数は引かない。相方の列は入れた後の値を写す）。
     /// </remarks>
     private static IEnumerable<DslFuzzUnit> ColumnFamilyCoverage(
         string dbms,
         string family,
         Func<string, DslColumn[]> columnsOf,
-        DslClr clr,
-        bool ordered
+        DslClr? clr,
+        bool ordered,
+        Func<IReadOnlyList<DslColumn>, bool, IEnumerable<DslQuery>>? extraQueries = null,
+        Action<List<IReadOnlyDictionary<string, object?>>>? adjustRows = null
     )
     {
-        var suffix = dbms == DialectNames.Sqlite && ordered ? "-ordered" : "";
-        IReadOnlySet<DslClr> unordered = ordered
-            ? new HashSet<DslClr>()
-            : new HashSet<DslClr> { clr };
+        var suffix = dbms == DialectNames.Sqlite && ordered && clr is not null ? "-ordered" : "";
+        IReadOnlySet<DslClr> unordered =
+            ordered || clr is null ? new HashSet<DslClr>() : new HashSet<DslClr> { clr.Value };
 
         foreach (var valueObjects in new[] { true, false })
         {
@@ -715,12 +729,14 @@ public static class DslFuzzUnits
                 UnorderedClrs = unordered,
             };
             var rows = generator.Rows(columns, RowCount);
+            adjustRows?.Invoke(rows);
             List<DslQuery> queries =
             [
                 .. generator.CoverageQueries(
                     columns,
                     columns.Skip(1).Select(column => column.Name).ToArray()
                 ),
+                .. extraQueries?.Invoke(columns, valueObjects) ?? [],
             ];
             var withPartners = AddPartners(columns, rows);
             var side = new DslFuzzGenerator(
@@ -1028,6 +1044,242 @@ public static class DslFuzzUnits
 
         columns.Add(new("bin", varbinary, DslClr.Binary, Nullable: true));
         columns.Add(new("i32", integer, DslClr.Int32, Nullable: true));
+
+        return [.. columns];
+    }
+
+    /// <summary>
+    /// 浮動小数点（float・double）の列の種の単位（値オブジェクトなしの 1 本・名前は <c>{方言}-floating</c>）。各方言の種の単位の列挙の末尾に足す
+    /// </summary>
+    /// <remarks>
+    /// 浮動小数点の列は既存の単位の列に足さず、この単位だけが持つ（既存の単位の行・クエリの乱数の引き方と、種の指紋の要約の既存の行を
+    /// 変えないため）。値オブジェクトありの形は網羅の単位（<see cref="FloatingCoverage"/>）が受け持つ。列は <see cref="FloatingColumns"/>。
+    /// 整数の列と浮動小数点のパラメータの原子は、5 本目の乱数の列（<see cref="DslFuzzGenerator.IntegerFloatingSeed"/>）の生成器で作って
+    /// 最後に足す。
+    /// </remarks>
+    private static DslFuzzUnit Floating(string prefix, string dbms, int seed)
+    {
+        var columns = FloatingColumns(dbms);
+        var unit = Build($"{prefix}-floating", seed, columns, valueObjects: false);
+        var integerFloating = new DslFuzzGenerator(
+            DslFuzzGenerator.IntegerFloatingSeed(seed),
+            valueObjects: false,
+            DslFuzzGenerator.IntegerFloatingParameterPrefix
+        );
+
+        return unit with
+        {
+            Queries =
+            [
+                .. unit.Queries,
+                .. integerFloating.IntegerFloatingQueries(
+                    columns,
+                    float32: dbms != DialectNames.Sqlite
+                ),
+            ],
+        };
+    }
+
+    /// <summary>
+    /// 浮動小数点の列の網羅の単位（値オブジェクトあり・なし。種に依らない。名前は <c>coverage-{方言}-floating</c> と
+    /// <c>coverage-{方言}-floating-plain</c>）：浮動小数点の列の原子のクエリと <see cref="DslFuzzGenerator.CoverageQueries"/>・パラメータの
+    /// 使い回しと並び替えのクエリ
+    /// </summary>
+    /// <remarks>
+    /// 値オブジェクトなしの単位は、float の列と float に入らない double の値の合成のクエリ（<see cref="DslFuzzGenerator.OutOfTypeCoverageQueries"/>）
+    /// と、整数の列と浮動小数点のパラメータの原子のクエリ（<see cref="DslFuzzGenerator.IntegerFloatingCoverageQueries"/>・6 つの演算子）も
+    /// 持つ（どちらも値オブジェクトの列は型の検査が断る）。順序比較と並び替えはどの実装先も流す。
+    /// </remarks>
+    /// <param name="dbms">方言（<see cref="DialectNames"/> の SQLite・SQL Server・PostgreSQL・MySQL・Oracle）</param>
+    public static IEnumerable<DslFuzzUnit> FloatingCoverage(string dbms) =>
+        ColumnFamilyCoverage(
+            dbms,
+            "floating",
+            FloatingColumns,
+            clr: null,
+            ordered: true,
+            (columns, valueObjects) =>
+                valueObjects
+                    ? []
+                    :
+                    [
+                        .. new DslFuzzGenerator(
+                            DslFuzzGenerator.OutOfTypeSeed(CoverageSeed),
+                            valueObjects: false,
+                            DslFuzzGenerator.OutOfTypeParameterPrefix
+                        ).OutOfTypeCoverageQueries(
+                            columns,
+                            decimalOrdered: dbms != DialectNames.Sqlite
+                        ),
+                        .. new DslFuzzGenerator(
+                            DslFuzzGenerator.IntegerFloatingSeed(CoverageSeed),
+                            valueObjects: false,
+                            DslFuzzGenerator.IntegerFloatingParameterPrefix
+                        ).IntegerFloatingCoverageQueries(
+                            columns,
+                            float32: dbms != DialectNames.Sqlite
+                        ),
+                    ],
+            dbms == DialectNames.MySql ? null : PutRoundingValues
+        );
+
+    /// <summary>
+    /// 相方の整数の列の 3〜6 行目に、浮動小数点へ変換すると丸まる値とその丸めた先を入れる（int の列は 16777217・16777216、bigint の列〔NULL 許容と NOT NULL〕は
+    /// 2^53+1・2^53・16777217。6 行目は 10 進で短く書ける値へ丸まる値＝int の列は 100000001〔1e8f〕・bigint の列は 10000000000000001〔1e16〕。
+    /// 1 行目の NULL と 2 行目の値は保つ。MySQL の単位は 2^24 の内側に絞るので入れない）
+    /// </summary>
+    private static void PutRoundingValues(List<IReadOnlyDictionary<string, object?>> rows)
+    {
+        object?[] int32 = [16777217, 16777216, null, 100000001];
+        object?[] int64 = [9007199254740993L, 9007199254740992L, 16777217L, 10000000000000001L];
+
+        for (var i = 0; i < int32.Length; i++)
+        {
+            var row = (Dictionary<string, object?>)rows[2 + i];
+
+            if (int32[i] is { } value)
+            {
+                row["i32"] = value;
+            }
+
+            row["i64"] = int64[i];
+            row["i64n"] = int64[i];
+        }
+
+        // 浮動小数点の列の 3 行目に、鏡の形（浮動小数点の列と整数のパラメータ）の値が丸まる先（float は 16777216f・double は 2^53）を入れる
+        var third = (Dictionary<string, object?>)rows[2];
+
+        foreach (
+            var (name, value) in new[]
+            {
+                ("f32", (object)16777216f),
+                ("f32n", 16777216f),
+                ("f64", 9007199254740992d),
+                ("f64n", 9007199254740992d),
+            }
+        )
+        {
+            if (third.ContainsKey(name))
+            {
+                third[name] = value;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 浮動小数点の列：主キー（bigint）・float（NULL 許容と NOT NULL。SQLite は無い）・double（NULL 許容と NOT NULL）・射影の非 NULL 指定に
+    /// 使う NULL 許容の可変長のバイナリ・整数 × 浮動小数点の相方の NULL 許容の int・bigint の列と NOT NULL の bigint の列（double のリストの IN を書ける）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 型は SQLite が <c>REAL</c>・<c>DOUBLE</c>（REAL アフィニティは double。単精度の型を持たない＝作らない形の宣言）、SQL Server が
+    /// <c>real</c>・<c>float</c>、PostgreSQL が <c>real</c>・<c>double precision</c>、MySQL が <c>float</c>・<c>double</c>、Oracle が
+    /// <c>BINARY_FLOAT</c>・<c>BINARY_DOUBLE</c>（NUMBER 系の <c>FLOAT</c> は作らない形の宣言）。
+    /// </para>
+    /// <para>
+    /// 値の池は NaN・無限大を持たない（docs の既知の割り切り）。float の列の比べる値は double の値（<see cref="DslFuzz.FloatOperandDoubles"/>）も
+    /// 持つ。MySQL の float の列は 2 進で正確で 6 桁以内の値だけ、相方の整数の列は 2^24 の内側の値だけにする（docs の MySQL の既知の割り切りを
+    /// 値の池で表す）。
+    /// </para>
+    /// </remarks>
+    private static DslColumn[] FloatingColumns(string dbms)
+    {
+        var (key, single, dbl, dblNotNull, varbinary, int32, int64) = dbms switch
+        {
+            DialectNames.Sqlite => (
+                "INTEGER",
+                (string?)null,
+                "REAL",
+                "DOUBLE",
+                "VARBINARY(4)",
+                "int",
+                "INTEGER"
+            ),
+            DialectNames.SqlServer => (
+                "bigint",
+                "real",
+                "float",
+                "float",
+                "varbinary(4)",
+                "int",
+                "bigint"
+            ),
+            DialectNames.PostgreSql => (
+                "bigint",
+                "real",
+                "double precision",
+                "double precision",
+                "bytea",
+                "integer",
+                "bigint"
+            ),
+            DialectNames.MySql => (
+                "bigint",
+                "float",
+                "double",
+                "double",
+                "varbinary(4)",
+                "int",
+                "bigint"
+            ),
+            DialectNames.Oracle => (
+                "NUMBER(19)",
+                "BINARY_FLOAT",
+                "BINARY_DOUBLE",
+                "BINARY_DOUBLE",
+                "RAW(4)",
+                "NUMBER(10)",
+                "NUMBER(19)"
+            ),
+            _ => throw new ArgumentOutOfRangeException(nameof(dbms), dbms, null),
+        };
+        var mySql = dbms == DialectNames.MySql;
+        IReadOnlyList<object> floats = mySql ? DslFuzz.MySqlFloatPool : DslFuzz.FloatPool;
+        DslColumn Float(string name, bool nullable) =>
+            new(name, single!, DslClr.Single, nullable)
+            {
+                Values = floats,
+                OperandValues = [.. floats, .. DslFuzz.FloatOperandDoubles],
+                LiteralValues = mySql ? DslFuzz.MySqlFloatLiteralTexts : null,
+            };
+
+        List<DslColumn> columns = [new("id", key, DslClr.Int64, Nullable: false, PrimaryKey: true)];
+
+        if (single is not null)
+        {
+            columns.Add(Float("f32", nullable: true));
+            columns.Add(Float("f32n", nullable: false));
+        }
+
+        columns.Add(new("f64", dbl, DslClr.Double, Nullable: true));
+        columns.Add(new("f64n", dblNotNull, DslClr.Double, Nullable: false));
+        columns.Add(new("bin", varbinary, DslClr.Binary, Nullable: true));
+        columns.Add(
+            new("i32", int32, DslClr.Int32, Nullable: true)
+            {
+                Values = mySql
+                    ? DslFuzz.MySqlFloatingPartnerInt32Pool
+                    : DslFuzz.FloatingPartnerInt32Pool,
+            }
+        );
+        columns.Add(
+            new("i64", int64, DslClr.Int64, Nullable: true)
+            {
+                Values = mySql
+                    ? DslFuzz.MySqlFloatingPartnerInt64Pool
+                    : DslFuzz.FloatingPartnerInt64Pool,
+            }
+        );
+
+        // NOT NULL の bigint の列（IN の要素型は列型からの暗黙変換で決まるので、double のリストの IN を書ける）
+        columns.Add(
+            new("i64n", int64, DslClr.Int64, Nullable: false)
+            {
+                Values = mySql
+                    ? DslFuzz.MySqlFloatingPartnerInt64Pool
+                    : DslFuzz.FloatingPartnerInt64Pool,
+            }
+        );
 
         return [.. columns];
     }

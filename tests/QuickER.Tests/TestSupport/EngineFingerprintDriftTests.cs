@@ -32,6 +32,12 @@ public sealed class EngineFingerprintDriftTests
     [Fact(DisplayName = "[指紋] 簡易 DSL の総当たりの生成器は、記録と同じ入力を作る")]
     public void Dsl_GeneratesRecordedInputs() => Verify("Dsl", NameFuzz.SeedSettings, DslSummary);
 
+    [Fact(
+        DisplayName = "[指紋] 簡易 DSL の総当たりの生成器は、PostgreSQL・Oracle の単位で記録と同じ入力を作る"
+    )]
+    public void DslPostgreSqlOracle_GeneratesRecordedInputs() =>
+        Verify("DslPostgreSqlOracle", NameFuzz.SeedSettings, DslPostgreSqlOracleSummary);
+
     [Fact(DisplayName = "[指紋] 名前の総当たりの生成器は、記録と同じ名前の組を作る")]
     public void Name_GeneratesRecordedInputs() =>
         Verify("Name", NameFuzz.SeedSettings, NameSummary);
@@ -66,14 +72,23 @@ public sealed class EngineFingerprintDriftTests
         );
     }
 
-    /// <summary>簡易 DSL：種から作る全単位（SQLite・MySQL・SQL Server）の列・行・クエリ</summary>
-    internal static string DslSummary(int seed)
+    /// <summary>簡易 DSL：種から作る SQLite・MySQL・SQL Server の全単位の列・行・クエリ</summary>
+    internal static string DslSummary(int seed) =>
+        DslUnitsSummary(
+            DslFuzzUnits
+                .Sqlite(seed)
+                .Concat(DslFuzzUnits.MySql(seed))
+                .Concat(DslFuzzUnits.SqlServer(seed))
+        );
+
+    /// <summary>簡易 DSL：種から作る PostgreSQL・Oracle の全単位の列・行・クエリ</summary>
+    internal static string DslPostgreSqlOracleSummary(int seed) =>
+        DslUnitsSummary(DslFuzzUnits.PostgreSql(seed).Concat(DslFuzzUnits.Oracle(seed)));
+
+    /// <summary>簡易 DSL の単位の列・行・クエリの要約（生成器が作った入力だけを読む）</summary>
+    private static string DslUnitsSummary(IEnumerable<DslFuzzUnit> units)
     {
         var text = new StringBuilder();
-        var units = DslFuzzUnits
-            .Sqlite(seed)
-            .Concat(DslFuzzUnits.MySql(seed))
-            .Concat(DslFuzzUnits.SqlServer(seed));
 
         foreach (var unit in units)
         {

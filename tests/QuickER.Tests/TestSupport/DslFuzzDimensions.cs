@@ -157,9 +157,12 @@ public static class DslFuzzDimensions
     /// <summary>Unicode でない文字列の列に、ASCII の外の文字を含む値がある</summary>
     public const string FitBeyondCharset = "beyond-charset";
 
+    /// <summary>float の列に、float に入らない double の値（2 進で丸まる値・float の範囲の外・非正規化数）がある</summary>
+    public const string FitBeyondPrecision = "beyond-precision";
+
     /// <summary>値と列の型の合い方の水準</summary>
     public static IReadOnlyList<string> FitLevels { get; } =
-    [FitNone, FitFits, FitBeyondScale, FitBeyondRange, FitBeyondCharset];
+    [FitNone, FitFits, FitBeyondScale, FitBeyondRange, FitBeyondCharset, FitBeyondPrecision];
 
     /// <summary>SQLite の 3 実装先と MySQL のインメモリ（QuickER.Tests）の範囲</summary>
     public static IReadOnlyList<string> SqliteMySqlScopes { get; } =
@@ -336,6 +339,17 @@ public static class DslFuzzDimensions
                         "SQL Server には符号つきの tinyint と、符号なしの smallint・int・bigint の型が無い（src/QuickER.Provider.SqlServer/SqlServerCSharpTypeMapper.cs の Map は tinyint→byte・smallint→short・int→int・bigint→long だけを持つ）ので、sbyte・ushort・uint・ulong の列を作れない"
                     )
                 ),
+                .. new[] { "sqlite:ado", "sqlite:efcore", "sqlite:inmemory" }.SelectMany(scope =>
+                    UnmappedClrGaps(
+                        scope,
+                        [DslClr.Single],
+                        "SQLite の型の対応（src/QuickER.Provider.Sqlite/SqliteCSharpTypeMapper.cs の Map）は REAL・FLOAT・DOUBLE を REAL アフィニティの double へ写し、単精度の型を持たない（型トークン float32 も REAL）ので、float の列を作れない",
+                        "DF"
+                    )
+                ),
+                .. new[] { "sqlite:ado", "sqlite:efcore", "sqlite:inmemory" }.SelectMany(scope =>
+                    PrecisionUnavailableGaps(scope)
+                ),
                 .. new[]
                 {
                     "sqlite:ado",
@@ -377,11 +391,12 @@ public static class DslFuzzDimensions
                             scope,
                             "EP",
                             ReuseOutOfTypeFixedIn,
-                            "パラメータを使い回す形は、型が広がる組で相手の列の型に入る値だけを選ぶ（DslFuzzGenerator.SharedPool）ので、使い回すパラメータの値が列の小数の桁・整数部の外になる形を作らない",
+                            "パラメータを使い回す形は、1 つめの列の値の池（列の型の値）から、型が広がる組で相手の列の型に入る値だけを選ぶ（DslFuzzGenerator.SharedPool）ので、使い回すパラメータの値が列の小数の桁・整数部の外になる形と、float の列で float に入らない double の値のパラメータを使い回す形を作らない",
                             ParameterReuse,
                             ValueFit,
                             (reuse, fit) =>
-                                reuse != ReuseNone && fit is FitBeyondScale or FitBeyondRange
+                                reuse != ReuseNone
+                                && fit is FitBeyondScale or FitBeyondRange or FitBeyondPrecision
                         )
                     ),
                 .. SqlServerScopes.Select(scope =>
@@ -655,6 +670,25 @@ public static class DslFuzzDimensions
                 )
             );
 
+    /// <summary>
+    /// float に入らない double の値（<see cref="FitBeyondPrecision"/>）を、ValueFit と列の種類以外の因子の組ごとに 1 項目にする（受け入れた組＝
+    /// SQLite は float の列を持たないので、単位を直しても作れない。列の種類との組は float の列の項目〔UnmappedClrGaps〕が受け持つ）
+    /// </summary>
+    private static IEnumerable<CoverageGapEntry> PrecisionUnavailableGaps(string scope) =>
+        Table
+            .Factors.Select(factor => factor.Name)
+            .Where(name => name is not (ValueFit or Clr))
+            .Select(other =>
+                CoverageGap.AcceptedMatching(
+                    scope,
+                    "DF",
+                    "float に入らない double の値は float の列と比べる値で、SQLite には float の列が無い（src/QuickER.Provider.Sqlite/SqliteCSharpTypeMapper.cs の Map は REAL アフィニティを double へ写す）ので、SQLite の単位では作れない",
+                    other,
+                    ValueFit,
+                    (_, fit) => fit == FitBeyondPrecision
+                )
+            );
+
     /// <summary>SQLite・MySQL のインメモリの範囲の、列の文字集合の外の文字が無い理由</summary>
     private const string CharsetUnavailableReason =
         "SQLite は varchar・char の列も文字列を Unicode のまま持ち、インメモリは .NET の文字列で持つ（MySQL の構成はインメモリだけ）ので、列の文字集合の外の文字は無い（照合順序のコードページで持つのは SQL Server の varchar・char だけで、Integration の DslConditionFuzzSqlServerRuntimeTests の単位 sqlserver-ansi が流す）";
@@ -758,16 +792,27 @@ public static class DslFuzzDimensions
             : fits.Contains(FitBeyondRange) ? FitBeyondRange
             : fits.Contains(FitBeyondScale) ? FitBeyondScale
             : fits.Contains(FitBeyondCharset) ? FitBeyondCharset
+            : fits.Contains(FitBeyondPrecision) ? FitBeyondPrecision
             : FitFits;
     }
 
-    /// <summary>値 1 つと列の型の合い方（数値の列は値を decimal にして、文字列の列は Unicode でない列だけを見る）</summary>
+    /// <summary>
+    /// 値 1 つと列の型の合い方（数値の列は値を decimal にして、文字列の列は Unicode でない列だけを見る。float の列は double の値が
+    /// float へ変換して変わるかを見る）
+    /// </summary>
     private static string FitOf(object value, DslColumn column)
     {
         if (column.IsString)
         {
             return column.NonUnicode && value is string text && !text.All(char.IsAscii)
                 ? FitBeyondCharset
+                : FitFits;
+        }
+
+        if (column.IsFloating)
+        {
+            return column.Clr == DslClr.Single && value is double wide && (float)wide != wide
+                ? FitBeyondPrecision
                 : FitFits;
         }
 
@@ -1142,9 +1187,11 @@ public static class DslFuzzDimensions
                 or DslClr.Decimal
                 or DslClr.DateTime
                 or DslClr.TimeSpan
-                or DslClr.DateTimeOffset;
+                or DslClr.DateTimeOffset
+                or DslClr.Single
+                or DslClr.Double;
 
-        // 順序比較は順序を持つ型（整数・decimal・日時・TimeSpan・DateTimeOffset）だけ（型の検査が文字列・Guid・GuidKey の順序比較を断る＝OrderedOperatorUnsupported）
+        // 順序比較は順序を持つ型（整数・decimal・浮動小数点・日時・TimeSpan・DateTimeOffset）だけ（型の検査が文字列・Guid・GuidKey の順序比較を断る＝OrderedOperatorUnsupported）
         if (OrderedOps.Any(op => shape.StartsWith($"compare-{op}-", StringComparison.Ordinal)))
         {
             if (!isOrdered)
@@ -1207,6 +1254,8 @@ public static class DslFuzzDimensions
         nameof(DslClr.UInt32),
         nameof(DslClr.UInt64),
         nameof(DslClr.Decimal),
+        nameof(DslClr.Single),
+        nameof(DslClr.Double),
     ];
 
     /// <summary>値と列の型の合い方の水準が、ほかの因子と原理的に組めるか（判断に要る因子が無ければ真）</summary>
@@ -1222,6 +1271,11 @@ public static class DslFuzzDimensions
         assignment.TryGetValue(Quote, out var quote);
         assignment.TryGetValue(ParameterReuse, out var reuse);
         var numeric = fit is FitBeyondScale or FitBeyondRange;
+
+        if (fit == FitBeyondPrecision && !IsValidBeyondPrecision(clr, shape, quote, reuse))
+        {
+            return false;
+        }
 
         if (shape is not null)
         {
@@ -1332,6 +1386,32 @@ public static class DslFuzzDimensions
 
         return true;
     }
+
+    /// <summary>
+    /// float に入らない double の値（<see cref="FitBeyondPrecision"/>）が、ほかの因子と原理的に組めるか（判断に要る因子が無ければ真）
+    /// </summary>
+    /// <remarks>
+    /// 水準の定義が float の列と double の値なので、列は float だけ。リテラルは float の列では C# の float のリテラルとして読む（値は
+    /// float）ので、double の値を持つのはパラメータとの比較と値の並ぶ IN のリストだけ（double のリストは値型の要素で null を持てず、
+    /// null を含むリストは値オブジェクトのリスト＝float の値）。型が広がって float の列に来るパラメータは整数だけで、double の値を持たない。
+    /// </remarks>
+    private static bool IsValidBeyondPrecision(
+        string? clr,
+        string? shape,
+        string? quote,
+        string? reuse
+    ) =>
+        (clr is null || clr == nameof(DslClr.Single))
+        && (
+            shape is null
+            || shape == "in"
+            || (
+                shape.StartsWith("compare-", StringComparison.Ordinal)
+                && shape.EndsWith("-param", StringComparison.Ordinal)
+            )
+        )
+        && (quote is null or "none")
+        && reuse != ReuseOtherColumnWidening;
 
     /// <summary>パラメータの使い回しと並び替えの水準が、ほかの因子と原理的に組めるか（判断に要る因子が無ければ真）</summary>
     private static bool IsValidReuseAndOrdering(IReadOnlyDictionary<string, string> assignment)

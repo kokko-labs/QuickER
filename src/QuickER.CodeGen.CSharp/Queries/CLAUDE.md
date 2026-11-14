@@ -59,7 +59,10 @@ C# リテラルのエスケープの規則（`GeneratedLiteralText`）は `src/Q
 
 - 簡易 DSL の文字列のリテラル（比較の右辺・LIKE の分解・CONTAINS などの引数）は、メソッド冒頭の局所変数 `var literal{番号} = "...";` へ持ち上げ、ラムダはその変数を参照する（`QueryConditionCSharpEmitter.Context.LiftStringLiteral`）。同じ値は 1 つの変数を共有し、名前はメソッド引数・ほかの持ち上げ変数とぶつかると `_` を後置する。VO の列は `Vo.Create(literal1)`
   - 理由：ラムダの中の定数は、EF Core が SQL のリテラルへ書き、`IsUnicode(false)` の列と比べると `N` を付けないので、ASCII の外の文字が `?` になって化けた行に一致する。変数にすると EF Core はパラメータにし、`SqlServerQueryParameterInterceptor` が値の型で束縛する（`src/QuickER.Runtime.EntityFrameworkCore/CLAUDE.md`「SQL Server のクエリのパラメータの型」）
-  - QuickER 版 Repository とインメモリは、変数でも定数でも値として扱うので答えは変わらない。数値のリテラルは持ち上げない（EF Core のリテラルは値の型のまま書かれ、C# と同じ答えになる）
+  - QuickER 版 Repository とインメモリは、変数でも定数でも値として扱うので答えは変わらない。数値のリテラルは、float の列と比べるものだけを持ち上げる（`LiftFloatLiteral`＝`var literal1 = 0.1f;`。文字列と同じ `LiftLiteral` の名前の規則・同じ初期化式は 1 つの変数。辞書のキーは描画した初期化式なので、同じ綴りの文字列と数値は別の変数）
+    - 理由：PostgreSQL の EF Core のプロバイダは float の定数を倍精度の数として SQL へ書き、列を倍精度へ広げて比べるので、`0.1f` のように 2 進で丸まる値が単精度の行と一致しない（`f > 0.1` は 0.1f の行にも当たる）。変数にすると単精度のパラメータで送られて C# と同じ答えになる
+    - ほかの数値のリテラル（整数・decimal・double の列）は定数のまま（EF Core のリテラルは値の型のまま書かれ、C# と同じ答えになる。持ち上げると生成コードが変わるだけ）
+- ガード（float の列の数値のリテラル）：`QueryConditionCSharpEmitterTests`（行 `float-literal-lifted`・`value-object-float-literal`・`double-literal-inline`）・`Dsl/PostgreSql`（単位 postgresql-floating と網羅の単位 coverage-postgresql-floating のリテラルの原子）。直す前に PostgreSQL の総当たりの 10 件が赤、持ち上げを外す mutation でエミッタの表の 2 行と同じ 10 件が赤になることを確かめた
 - ガード：`QueryConditionCSharpEmitterTests`（行 `string-literal-*`・`value-object-string-literal` と、LIKE・CONTAINS の行の前置文）・`Dsl/SqlServer`（単位 sqlserver-ansi の Unicode でない列と ASCII の外の文字のリテラルの比較・LIKE・文字列一致）。mutation 実証済み（持ち上げを戻すと総当たりの EF Core のリテラルの形だけが 42 件赤）
 
 ## VO × IN の持ち上げ

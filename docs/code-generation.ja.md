@@ -615,6 +615,9 @@ QuickER は警告して、そのクエリを飛ばします。
 `TimeSpan` の列の簡易 DSL の条件は、パラメータとの比較（順序比較を含む）・`IN`・`IS [NOT] NULL` を書けます。
 `TimeSpan` のリテラルも簡易 DSL にありません。
 `DateTimeOffset` の列の簡易 DSL の条件も同じ形を書け、`DateTimeOffset` のリテラルは簡易 DSL にありません。
+浮動小数点（`float`・`double`）の列の簡易 DSL の条件は、数値リテラル・パラメータとの比較（順序比較を含む）・`IN`・`IS [NOT] NULL` を書けます。
+`float` の列と比べるリテラルは、C# の `float` のリテラルとして読みます（`f = 0.1` は `0.1f` と比べます）。
+指数表記（`1e10`）は簡易 DSL にありません。
 
 `DateTimeOffset` の列を `DateTime` のパラメータ・リストと比べるクエリと、`DateTime` の列を `DateTimeOffset` のパラメータ・リストと比べるクエリは、QuickER が警告して飛ばします。
 C# は `DateTime` を、実行する機械の時間帯で `DateTimeOffset` に変換するので、答えが機械で変わるためです。
@@ -735,6 +738,27 @@ PostgreSQL の EF Core 版 Repository は、クエリ（名前付きクエリ・
 > **既知の割り切り**: 手書きの LINQ で `DateTimeOffset` の列を `DateTime` と比べる式（`Query().Where(x => x.At == dateTime)`）は、C# が `DateTime` を実行する機械の時間帯で変換するのでコンパイルできます。
 > 簡易 DSL はこの比較を断りますが、QuickER は手書きの LINQ を検査しないので、`DateTimeOffset` を渡してください。
 
+浮動小数点の列の比較は、C# と同じく 2 進の浮動小数点の値で比べます。
+`float` の列を `double` の値と比べると、C# と同じく列の値を `double` へ広げて比べるので、`0.1f` を持つ行は `0.1` と等しくありません。
+整数の列を浮動小数点の値と比べると、C# と同じく列の値をその型へ変換して比べます：`float` は 2^24 を超える整数を丸め、`double` は 2^53 を超える整数を丸めます（16777217 を持つ行に `x.Qty == 16777216f` が一致します）。
+SQLite の QuickER 版 Repository は、この比較を EF Core 版 Repository と同じく `REAL` で行います（`CAST(col AS REAL)`）。
+`-0.0` と `0.0` は等しく、SQLite・MySQL・Oracle は `-0.0` を `0.0` で読み戻します。
+
+> **既知の割り切り**: QuickER は NaN と無限大を扱いません。
+> SQL Server・MySQL と SQLite の EF Core 版 Repository は書き込みも比較もできず、PostgreSQL と Oracle は NaN を自分自身と等しく、どの値より大きいとみなします。
+
+> **既知の割り切り**: MySQL の `float` の列は、値を有効数字 6 桁に丸めて読み戻し（`16777216` は `16777200` で戻ります）、`float` の最大と最小の値を書けません。
+> 等値と `IN` は、`0.1` のように単精度で丸まる値と一致しません（リテラルでもパラメータでも同じです）。
+> こうした列は範囲（`<`・`>`）で比べるか、`double` の列を使ってください。
+
+> **既知の割り切り**: MySQL の EF Core 版 Repository は、整数の列と浮動小数点の値を、列を丸めずに比べます（C# は `float` なら 2^24、`double` なら 2^53 を超える整数を丸めます）。
+
+> **既知の割り切り**: Oracle の `FLOAT`（`NUMBER` 系）の列の値は、EF Core 版 Repository が `decimal` を通して書くので、有効数字 15 桁に丸まり、非正規化数は 0 になり、`decimal` の範囲の外の値は書けません。
+> 2 進の値のまま持つには `BINARY_DOUBLE` を使ってください。
+
+> **既知の割り切り**: SQLite には単精度の型が無いので、手書きの LINQ で整数の列を `float` と比べる式は、C# と違って列を丸めません。
+> SQLite では型トークン `float32` も `double` なので、名前付きクエリはこの比較を作りません。
+
 日付部品（`Year`・`Month` など）へ変換されるのは、読み出し元が `DateTime` / `DateOnly` / `DateTimeOffset`（いずれも nullable を含む）の列である場合だけです。
 同名のプロパティを別の型に持たせても、日付部品とは見なしません（値オブジェクトへ partial で足した場合など）。
 黙って `YEAR([col])` になる代わりに、`NotSupportedException` で失敗します。
@@ -742,7 +766,7 @@ PostgreSQL の EF Core 版 Repository は、クエリ（名前付きクエリ・
 
 SQL Server の QuickER 版 Repository と EF Core 版 Repository は、比べる値が列の型にそのまま入るときだけ、値を列の型で束縛します。
 入らない値は値の型で束縛するので、比較は C# と同じ答えになります。
-対象は、整数の列と小数や範囲の外の整数（`x.Qty < 1.5`・`x.Tiny < 300`）、列の精度とスケールより桁の多い decimal、`money`・`smallmoney` の列と範囲の外か小数 4 桁を超える数（`x.Price == 1.23456m`）、`date` の列と時刻つきの日時、Unicode でない列（`varchar`・`char`）と ASCII の外の文字です。
+対象は、整数の列と小数や範囲の外の整数（`x.Qty < 1.5`・`x.Tiny < 300`）、整数の列とすべての `float`・`double` の値、`real` の列がそのまま持てない `double`（`float` のプロパティと比べる `x.Ratio == 0.1`）、列の精度とスケールより桁の多い decimal、`money`・`smallmoney` の列と範囲の外か小数 4 桁を超える数（`x.Price == 1.23456m`）、`date` の列と時刻つきの日時、Unicode でない列（`varchar`・`char`）と ASCII の外の文字です。
 このときサーバーはその比較のために列の側を変換するので、列のインデックスが使われないことがあります。
 EF Core 版 Repository では、クエリのすべてのパラメータ（名前付きクエリ・手書きの LINQ の `Query()`・IN のリストの要素・`Contains` のパターン）と、`ExecuteDeleteAsync` の条件が対象です（[EF Core モード](#ef-core-モードgenerateefcorerepositories)を参照）。
 PostgreSQL の EF Core 版 Repository も、`date` の列と比べる時刻つきの `DateTime` を同じように扱って `timestamp` で送り、クエリでは `time` の列と比べる範囲の外の `TimeSpan` を `interval` で送ります。

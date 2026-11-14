@@ -2141,6 +2141,13 @@ public static class SqlExpressionTranslator
             }
         }
 
+        // An integer column that C# converts to float or double for the comparison is compared as a REAL (see AsFloatingColumn),
+        // and so is an integer value (see AsFloatingValue)
+        leftSql = AsFloatingColumn(binary.Left, leftSql);
+        rightSql = AsFloatingColumn(binary.Right, rightSql);
+        leftValue = AsFloatingValue(binary.Left, leftValue);
+        rightValue = AsFloatingValue(binary.Right, rightValue);
+
         // "not equal to a non-null value" also has to admit the rows whose column is NULL (see the remarks); the null
         // value cases have already returned above, so what reaches here is exactly the non-null comparison
         if (nodeType == ExpressionType.NotEqual)
@@ -2184,6 +2191,55 @@ public static class SqlExpressionTranslator
         // In a column-versus-value comparison, the value parameter carries the opposing column name for explicit typing (omitted when both sides are columns or both are values)
         return $"{leftSql ?? AddParameter(leftValue, parameters, RawColumnName(rightSql))} {op} {rightSql ?? AddParameter(rightValue, parameters, RawColumnName(leftSql))}";
     }
+
+    /// <summary>
+    /// The SQL of an operand as the comparison reads it: an integer operand that C# converts to <c>float</c> or <c>double</c>
+    /// for the comparison is cast to <c>REAL</c>, as the EF Core SQLite provider writes it. Any other operand, and a value
+    /// operand (null SQL), is returned as it is.
+    /// </summary>
+    /// <remarks>
+    /// SQLite compares an INTEGER with a REAL exactly, while C# first converts the integer to the floating-point type, which
+    /// rounds an integer beyond 2^53 for a <c>double</c>; without the cast such a row would answer differently. SQLite has no
+    /// single-precision type, so a comparison made in <c>float</c> is made in <c>double</c> here (only hand-written LINQ can
+    /// form one: a named query's float32 is a double on SQLite). The value side is bound as it is (Microsoft.Data.Sqlite binds
+    /// a <c>double</c> as a REAL), and losing the bare column name changes nothing, since SQLite binds every value with
+    /// AddWithValue.
+    /// </remarks>
+    private static string? AsFloatingColumn(Expression operand, string? sql) =>
+        sql is not null && IsFloatingType(operand.Type) && IsIntegerType(Unwrap(operand).Type)
+            ? $"CAST({sql} AS REAL)"
+            : sql;
+
+    /// <summary>
+    /// The value an operand is bound with: an integer value that C# converts to <c>float</c> or <c>double</c> for the comparison
+    /// is converted to <c>double</c> here, so it is bound as a REAL. Any other value is returned as it is.
+    /// </summary>
+    /// <remarks>
+    /// The translator evaluates a value operand with its conversions unwrapped, so <c>x.Ratio == count</c> (a <c>long</c>
+    /// compared with a <c>double</c> column) would otherwise bind the <c>long</c> as an INTEGER, which SQLite compares with the
+    /// REAL column exactly, while C# first rounds an integer beyond 2^53 to <c>double</c>. A comparison made in <c>float</c> is
+    /// made in <c>double</c> here too, for the reason given on <see cref="AsFloatingColumn"/>.
+    /// </remarks>
+    private static object? AsFloatingValue(Expression operand, object? value) =>
+        value is not null && IsFloatingType(operand.Type) && IsIntegerType(value.GetType())
+            ? Convert.ToDouble(value, CultureInfo.InvariantCulture)
+            : value;
+
+    /// <summary>Whether the type is <c>float</c> or <c>double</c> (nullable forms included).</summary>
+    private static bool IsFloatingType(Type type) =>
+        (Nullable.GetUnderlyingType(type) ?? type) is var t && (t == typeof(float) || t == typeof(double));
+
+    /// <summary>Whether the type is a built-in integer type (nullable forms included).</summary>
+    private static bool IsIntegerType(Type type) =>
+        Type.GetTypeCode(Nullable.GetUnderlyingType(type) ?? type)
+            is TypeCode.SByte
+                or TypeCode.Byte
+                or TypeCode.Int16
+                or TypeCode.UInt16
+                or TypeCode.Int32
+                or TypeCode.UInt32
+                or TypeCode.Int64
+                or TypeCode.UInt64;
 
     /// <summary>Renders an operand that stays on the SQL side (a column reference, or a date component of a date-time column). Returns null for a value operand.</summary>
     private static string? OperandSql(Expression expression) =>
@@ -2274,7 +2330,7 @@ public static class SqlExpressionTranslator
 
             if (Unwrap(call.Arguments[1]) is MemberExpression staticItem && IsColumn(staticItem))
             {
-                column = ColumnName(staticItem.Member);
+                column = AsFloatingColumn(call.Arguments[1], ColumnName(staticItem.Member))!;
                 collection = UnwrapCollection(call.Arguments[0]);
                 return true;
             }
@@ -2288,7 +2344,7 @@ public static class SqlExpressionTranslator
         {
             if (Unwrap(call.Arguments[0]) is MemberExpression instanceItem && IsColumn(instanceItem))
             {
-                column = ColumnName(instanceItem.Member);
+                column = AsFloatingColumn(call.Arguments[0], ColumnName(instanceItem.Member))!;
                 collection = UnwrapCollection(call.Object);
                 return true;
             }

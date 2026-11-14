@@ -105,6 +105,9 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
                 .. DslFuzzUnits
                     .DateTimeOffsetCoverage(DialectNames.SqlServer)
                     .Select(unit => (unit, target)),
+                .. DslFuzzUnits
+                    .FloatingCoverage(DialectNames.SqlServer)
+                    .Select(unit => (unit, target)),
                 (DslFuzzUnits.SqlServerOutOfDayCoverage(), adoTarget),
             ];
 

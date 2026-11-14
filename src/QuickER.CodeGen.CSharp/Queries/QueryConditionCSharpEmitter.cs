@@ -164,9 +164,29 @@ public static class QueryConditionCSharpEmitter
         /// <c>SqlServerQueryParameterInterceptor</c> が値の型で束縛する。QuickER 版とインメモリの答えは変わらない。
         /// </remarks>
         /// <param name="value">リテラルの値</param>
-        public string LiftStringLiteral(string value)
+        public string LiftStringLiteral(string value) => LiftLiteral(RenderStringLiteral(value));
+
+        /// <summary>
+        /// float の列と比べる数値のリテラル（サフィックス <c>f</c> つきの C# のリテラル）を、文字列のリテラルと同じくメソッド冒頭の
+        /// ローカル変数へ持ち上げ、その変数名を返す
+        /// </summary>
+        /// <remarks>
+        /// ラムダの中に定数のまま書くと、EF Core の PostgreSQL のプロバイダは定数を倍精度の数として SQL へ書き、列を倍精度へ広げて
+        /// 比べるので、<c>0.1f</c> のように 2 進で丸まる値が単精度の値と一致しない。ローカル変数にすると EF Core はパラメータ（単精度）で
+        /// 送り、C# と同じ答えになる。QuickER 版とインメモリの答えは変わらない。double の列のリテラルは定数のままで C# と同じ答えなので
+        /// 持ち上げない。
+        /// </remarks>
+        /// <param name="literal">サフィックスつきの C# の数値リテラル</param>
+        public string LiftFloatLiteral(string literal) => LiftLiteral(literal);
+
+        /// <summary>
+        /// C# のリテラルをメソッド冒頭のローカル変数へ持ち上げ、その変数名を返す。名前は <c>literal{番号}</c>（出てきた順）を基本に、
+        /// メソッド引数名・ほかの持ち上げ変数と衝突する限り <c>_</c> を後置する。同じリテラルは同じ変数を返す
+        /// </summary>
+        /// <param name="initializer">ローカル変数の初期化式（C# のリテラル）</param>
+        private string LiftLiteral(string initializer)
         {
-            if (_liftedLiterals.TryGetValue(value, out var existing))
+            if (_liftedLiterals.TryGetValue(initializer, out var existing))
             {
                 return existing;
             }
@@ -183,8 +203,8 @@ public static class QueryConditionCSharpEmitter
                 candidate += "_";
             }
 
-            _liftedLiterals.Add(value, candidate);
-            PreludeLines.Add($"var {candidate} = {RenderStringLiteral(value)};");
+            _liftedLiterals.Add(initializer, candidate);
+            PreludeLines.Add($"var {candidate} = {initializer};");
             return candidate;
         }
     }
@@ -440,6 +460,10 @@ public static class QueryConditionCSharpEmitter
         var raw = operand switch
         {
             ParameterOperand parameter => ParameterName(parameter),
+            NumberOperand number when column.UnderlyingTypeName == "float" =>
+                context.LiftFloatLiteral(
+                    RenderNumberLiteral(number.Literal, column.UnderlyingTypeName)
+                ),
             NumberOperand number => RenderNumberLiteral(number.Literal, column.UnderlyingTypeName),
             StringOperand literal => context.LiftStringLiteral(literal.Value),
             _ => throw new InvalidOperationException(

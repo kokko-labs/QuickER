@@ -14,7 +14,8 @@ namespace QuickER.Tests.TestSupport;
 public sealed class EngineSummaryEnvironmentTests
 {
     /// <summary>エンジンの名前</summary>
-    public static TheoryData<string> Engines() => new("Dsl", "Name", "DocumentFile", "CanvasInput");
+    public static TheoryData<string> Engines() =>
+        new("Dsl", "DslPostgreSqlOracle", "Name", "DocumentFile", "CanvasInput");
 
     [Theory(DisplayName = "[指紋] 要約は外側のカルチャ（ja-JP・en-US）に依らない")]
     [MemberData(nameof(Engines))]
@@ -150,6 +151,7 @@ public sealed class EngineSummaryEnvironmentTests
         engineId switch
         {
             "Dsl" => EngineFingerprintDriftTests.DslSummary,
+            "DslPostgreSqlOracle" => EngineFingerprintDriftTests.DslPostgreSqlOracleSummary,
             "Name" => EngineFingerprintDriftTests.NameSummary,
             "DocumentFile" => Gui.ViewModels.DocumentFileGenerator.Summary,
             "CanvasInput" => Gui.Behaviors.CanvasInputGenerator.Summary,

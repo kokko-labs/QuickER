@@ -59,6 +59,7 @@ public sealed partial class DslFuzzGenerator
                 && !UnorderedClrs.Contains(column.Clr)
                 && (
                     column.IsInteger
+                    || column.IsFloating
                     || column.Clr == DslClr.DateTime
                     || column.Clr == DslClr.Boolean
                     || (withDecimal && column.Clr == DslClr.Decimal)
@@ -68,9 +69,14 @@ public sealed partial class DslFuzzGenerator
             )
             .ToList();
 
-    /// <summary><paramref name="from"/> の値を <paramref name="to"/> の列が暗黙に受け取れるか（C# の暗黙の数値変換）</summary>
+    /// <summary>
+    /// <paramref name="from"/> の値を <paramref name="to"/> の列が暗黙に受け取れるか（C# の暗黙の数値変換。整数は float・double へ、
+    /// float は double へ広がる）
+    /// </summary>
     private static bool Widens(DslClr from, DslClr to) =>
-        from switch
+        (IsIntegerClr(from) && to is DslClr.Single or DslClr.Double)
+        || (from == DslClr.Single && to == DslClr.Double)
+        || from switch
         {
             DslClr.Byte => to
                 is DslClr.Int16
@@ -93,6 +99,18 @@ public sealed partial class DslFuzzGenerator
             DslClr.Int64 or DslClr.UInt64 => to is DslClr.Decimal,
             _ => false,
         };
+
+    /// <summary>整数の種類か</summary>
+    private static bool IsIntegerClr(DslClr clr) =>
+        clr
+            is DslClr.Int64
+                or DslClr.Int32
+                or DslClr.Int16
+                or DslClr.Byte
+                or DslClr.SByte
+                or DslClr.UInt16
+                or DslClr.UInt32
+                or DslClr.UInt64;
 
     /// <summary>
     /// 型の検査が受け付ける使い回しの形をすべて挙げる（値オブジェクトの列どうしは型トークンか、同じ値オブジェクトの型を共有する
