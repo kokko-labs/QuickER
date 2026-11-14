@@ -290,18 +290,11 @@ internal static class SyncPlanFuzzRunner
 
         try
         {
+            // 同期の画面と同じ写し方で取込の結果から計画の入力を作る（写す項目を画面と割らない）
             plan = new SyncPlanner().BuildPlan(
                 diff.Items,
                 capabilities,
-                new SyncPlanContext
-                {
-                    LiveEntities = before.Entities,
-                    LiveRelationships = before.Relationships,
-                    AuxiliaryObjects = before.AuxiliaryObjects,
-                    TableCreateSql = before.TableCreateSql,
-                    ColumnDefaults = before.ColumnDefaults,
-                    ImportWarnings = before.Warnings,
-                }
+                SyncPlanContext.FromImport(before)
             );
             outcome.Script = provider.SyncScriptBuilder.Build(plan);
         }

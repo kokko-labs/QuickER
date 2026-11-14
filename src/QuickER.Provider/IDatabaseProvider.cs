@@ -50,6 +50,13 @@ public sealed class SchemaImportResult
     /// 自動採番・計算列の式・値が NULL の既定値は含めない（告げるものと同じ集合）。
     /// </remarks>
     public IReadOnlyList<SchemaColumnDefault> ColumnDefaults { get; init; } = [];
+
+    /// <summary>DB のビュー（図には入れない）が同期後の表の形でも読めるかを試す入口（図の外の情報）</summary>
+    /// <remarks>
+    /// 現状は SQLite だけが、ビューがあるときに埋める（取込で読んだ表とビューの原文を持つ）。ほかの方言とビューの無い DB では
+    /// <c>null</c>。同期の画面が <see cref="SyncPlanContext.LiveViewCheck"/> へ渡し、計画がビューを壊す変更を外す。
+    /// </remarks>
+    public ILiveViewCheck? LiveViewCheck { get; init; }
 }
 
 /// <summary>接続文字列から DB スキーマを取得して意味モデルへ変換するインポーター（DB 方言ごとに実装）</summary>

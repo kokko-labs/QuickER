@@ -351,7 +351,7 @@ It is not imported, it never appears in generated DDL, and the diff sync neither
 | Trigger | Not imported | Not emitted | Preserved (same) |
 | Table options after the column list (`WITHOUT ROWID`, `STRICT`) | Not imported | Not emitted | Lost |
 | Constraint clauses (`ON CONFLICT`, `DEFERRABLE INITIALLY DEFERRED`) | Not imported | Not emitted | Lost |
-| View | Not imported (named) | Not emitted | Preserved (it keeps pointing at the rebuilt table) |
+| View | Not imported (named) | Not emitted | Preserved (it keeps pointing at the rebuilt table; a change that would leave it unreadable is left out and named) |
 | Stored procedure, function, sequence | Not imported | Not emitted | Not applicable |
 
 Outside a SQLite table rebuild, these objects are simply left alone: the diff sync does not diff them, so an index or a `DEFAULT` you created by hand stays in the database.
@@ -764,7 +764,8 @@ A new `NOT NULL` column makes the rebuild fail on a table with rows, and the syn
 The rebuild runs inside a transaction, and before committing it checks foreign-key integrity (`PRAGMA foreign_key_check`); if the sync added violations it rolls back and reports the violating tables.
 SQLite does not check foreign keys by default, so databases that hold child rows without a parent are common, and violations that existed before the sync do not make it fail.
 A view that refers to a rebuilt table does not stop the rebuild, and it keeps pointing at the rebuilt table (`PRAGMA legacy_alter_table` is turned on for the duration).
-If the sync breaks a view, for example one that refers to a dropped column, it rolls back and names the view.
+A change that would leave a view unreadable is left out of the script beforehand (see below).
+If the sync still breaks a view, for example one that refers to a dropped column, it rolls back and names the view.
 
 ```mermaid
 flowchart TD
@@ -794,6 +795,16 @@ A rebuild would silently drop what the import left out, together with its data.
 The changes that would rebuild that table (altering or dropping columns, changing primary keys, unique constraints or foreign keys, and reordering columns) are left out of the script, together with drops of the tables and columns its foreign keys refer to, and the confirmation names the table and what the import left out.
 Adding columns and dropping the table still run.
 To sync the table, fix what the import warning names in the database (rename the column, drop the foreign key, and so on) and import it again.
+
+Views are not part of the diagram, and the sync does not change them, so a change that removes what a view reads would, if it ran as is, leave the view unreadable.
+Before building the script, QuickER copies the database's tables and views, without their rows, into an in-memory database, applies the selected changes to that copy, and asks SQLite whether each view can still be read.
+A change that would leave a view unreadable is left out of the script, and the confirmation names the table and the views.
+Only dropping a column, adding a column, and dropping a table can do that, so the other changes to the same table still run.
+A view that reads a dropped column or table is named, and so is a view that uses `SELECT *` with an explicit column list when a column is added.
+A `SELECT *` view without a column list keeps working with fewer columns, so dropping a column it does not name does not stop the sync.
+To apply such a change, first change or drop the view in the database, then import again.
+A view over a table that the copy cannot recreate (one that uses a collation or virtual table module registered outside the database) is not checked when the script is built, and neither is a view that uses a function registered by an application.
+If such a view breaks, the check after the rebuild rolls the sync back and names the view, as described above.
 
 The sync-target SQLite file can also be created fresh with the "Create new" button in the connection dialog.
 Apply the whole diagram to an empty database to set it up from scratch.

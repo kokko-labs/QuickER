@@ -277,6 +277,18 @@ public enum SyncPlanWarningKind
     /// 外した作り直しごとに 1 件。
     /// </remarks>
     UniqueConstraintRebuildKeptForForeignKey,
+
+    /// <summary>
+    /// DB のビューが読む表の列を消す・足す変更と表の削除のうち、ビューを読めなくするものを、計画から外した
+    /// （DB のビューを試せる方言＝SQLite。<see cref="SyncPlanContext.LiveViewCheck"/>）。
+    /// </summary>
+    /// <remarks>
+    /// ビューは図に無く、同期はビューを直さないので、読めなくなるビューがあると実行器が同期の前後の比較で見つけて巻き戻す。ビューが読めるかは
+    /// 表の列の名前の集合と表の有無だけで決まるので、外すのはその表の列の削除・列の追加・表の削除だけ（型などの変更は流す）。
+    /// 計画全体で試して読めなくなるビューがあるときだけ、表ごとに試して原因の表を決める。試せなかった表・ビュー（DB の外の照合順序・
+    /// 仮想表のモジュール・関数に頼るもの）は数えない（実行器の比較が最後に拾う）。表ごとに 1 件。
+    /// </remarks>
+    TableChangeBreaksDependentView,
 }
 
 /// <summary>
@@ -301,7 +313,8 @@ public enum SyncPlanWarningKind
 /// <see cref="SyncPlanWarningKind.TableLeftWithoutColumns"/> では列を消す表（Detail は計画から外した列の削除の列名をカンマ区切りで並べたもの）、
 /// <see cref="SyncPlanWarningKind.TableWithoutColumns"/> では追加を外した列の無い表（Detail は空）、
 /// <see cref="SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent"/> では作り直しを外した表（Detail は取込警告が名指しした捨てた物をカンマ区切りで並べたもの）、
-/// <see cref="SyncPlanWarningKind.UniqueConstraintRebuildKeptForForeignKey"/> では一意制約の表（Detail は「残した一意制約の名前 (支える外部キーの名前)」）。
+/// <see cref="SyncPlanWarningKind.UniqueConstraintRebuildKeptForForeignKey"/> では一意制約の表（Detail は「残した一意制約の名前 (支える外部キーの名前)」）、
+/// <see cref="SyncPlanWarningKind.TableChangeBreaksDependentView"/> では変更を外した表（Detail は読めなくなるビューの名前をカンマ区切りで並べたもの）。
 /// </param>
 /// <param name="Detail">
 /// 補足（外部キー制約名など。無ければ空文字）。

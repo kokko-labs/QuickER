@@ -893,7 +893,8 @@ public static class UnsupportedCoverage
             DialectNames.Sqlite,
             [
                 "SyncPlanExpectationRows:realdb-rebuild-with-dependent-view-succeeds",
-                "SyncPlanExpectationRows:realdb-rebuild-breaking-view-rolls-back",
+                "SyncPlanExpectationRows:realdb-view-reading-dropped-column-excludes-drop-and-applies-type-change",
+                "SyncPlanExpectationRows:realdb-view-select-star-drop-column-is-not-named",
             ]
         ),
         (
