@@ -111,12 +111,20 @@ internal sealed partial class CSharpGenerationModelBuilder
         {
             foreach (var pair in relationship.ColumnPairs)
             {
+                if (!columnOwners.TryGetValue(pair.SourceColumnId, out var principal))
+                {
+                    continue;
+                }
+
                 if (
-                    !columnOwners.TryGetValue(pair.SourceColumnId, out var principal)
-                    || !columnOwners.TryGetValue(pair.TargetColumnId, out var dependent)
+                    !columnOwners.TryGetValue(pair.TargetColumnId, out var dependent)
                     || principal == dependent
-                    || !parents.TryGetValue(dependent, out var set)
                 )
+                {
+                    continue;
+                }
+
+                if (!parents.TryGetValue(dependent, out var set))
                 {
                     continue;
                 }

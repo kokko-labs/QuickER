@@ -211,7 +211,14 @@
   - 結果は報告するだけ：どの設定も `thresholds.break` が 0（点数では赤にしない）で、`break-on-initial-test-failure` が true（初回のテストの失敗では止める＝Stryker が動かなかったときだけ赤）。
   - 除外は `ArgumentNullException.ThrowIfNull` と例外のコンストラクターの引数（`ignore-methods` の `*.ThrowIfNull`・`*Exception.ctor`）だけ。
   - `mutate` はファイル単位（`**/` で始まる後ろの一致と、`!` を付けたファイル単位の除外）だけで書く。文字の範囲（`{a..b}`）は使わない：Stryker 5 は全部の変異をまとめてコンパイルしてから範囲で印を付けるので、範囲ではコンパイルの失敗（Safe Mode）を避けられず、位置はソースが動くと黙ってずれる。
-- Safe Mode：変異が CS0165（`out var` を `||` でつないだ条件の変異や、その if の `continue` の削除で、後ろの変数が確実に代入されなくなる）になると、Stryker はそのメソッドの変異を全部 CompileError にして外す。Model の `ConstraintNames.ResolveForeignKeyNamesCore`（41 件）・Provider の 8 か所・CodeGen の 14 か所・方言の各 1 か所が当たる。設定では外せない（上の理由）ので受け入れ、外れたメソッドと数を夜間の出力に毎回出す。直すなら製品のコードを CS0165 にならない形へ書き直す修正の区切りになる。
+- Safe Mode：変異が CS0165（未代入の変数の使用）になると、エラーの位置が変異の外（変数を読む所）なので Stryker はどの変異のせいか特定できず、そのメソッドの変異を全部 CompileError にして外す（ログの「Safe Mode! … in {メソッド}」）。設定では外せない（上の理由）。
+  - 当たる形：早く抜ける if（本体が跳び＝`continue;`・`break;`・値を返さない `return;`・`throw` で終わる）の条件で宣言した変数を if の後ろで使うもの。Stryker が跳びを消す変異で、条件が真のまま後ろへ進む。
+    - `||` の 2 つ目以降の項の `out var`：評価されないことがある。1 つ目の項の `out` は呼び出しが必ず評価されるので当たらない。
+    - パターンの変数（単独の `if (x is not { } v) { continue; }` を含む）：条件が偽のときだけ代入される。
+    - 宣言を含む条件の式そのもの（`||` と `&&` の入れ替え・`!` の削除・三項）は変異せず、値を返す `return x;` は消さないので、どちらも当たらない。肯定形の then の中で使う変数も当たらない。
+  - 書き方：項ごとに早く抜ける if に分けて、`out` の呼び出しを各 if の 1 つ目の項にする（評価の順は変わらない）。パターンの変数は、初期化子つきの変数へ取って null で判定する（`var v = F(); if (v is null) { continue; }`。null 許容の構造体は判定の後に `.Value` で取り出す。Stryker のコンパイルでは警告はエラーにならない）。抜けるときに跳び以外の処理がある if は、肯定形の then で使う（`if (A(out var x) && B(out var y)) { 使う } else { 抜けるときの処理 }`）。宣言だけして if / else の枝で代入する変数は、最後の枝の跳びを消すと未代入になるので、跳びを入れ子の if の中に置き、その後で代入する（`CSharpGenerationModelBuilder.PlanQueryMethod`）。
+  - いまの範囲の 8 プロジェクト（Model・Provider と 5 方言・CodeGen.CSharp）で当たるメソッドは 0。外れたメソッドと数は夜間の要約に毎回出す（「要約」）。
+  - ガード：`SourceRuleTests` の規則 `mutation-safe-mode-jump-guards`（範囲は上の 8 プロジェクト・既知の一覧は空・見つける形は `Guards/Finders/SafeModeJumpGuards`。自己検査の行 `mutation-safe-mode-jump-guards-forms`・`mutation-safe-mode-jump-guards-inactive-branch`）。読みの限界：宣言だけして枝で代入する形は拾わないので、要約の Safe Mode の行で見る。mutation 実証済み（書き直しを戻すとメソッドを名指しして赤）。
 - 範囲の大きさ（Stryker が検査する数・2026-11）：Model 425・Provider の同期の計画 885／差分 489（static 25）／残り 547／型の 2 本 188（CanonicalTypeToken.cs〔static 26〕と、SqlTypeText.cs〔static 18〕・SchemaTableEntry.cs〔2〕・QueryParameterTypeResolver.cs〔1〕）・休止中の CodeGen の診断 250・クエリの型の検査とエミッタ 404・エスケープ 56（`GeneratedLiteralText` だけ。XmlDoc の名前のエスケープはビルダーの中のメソッドなので、ファイル単位では入れていない）。方言のプロバイダ 5 本は 4,407 で、当面は入れない（1 本 739〜1,026 件で、下の固定の費用が方言ごとにかかる）。入れるなら 1 週に 1 方言ずつ回す。
   - Provider の 5 本の mutate は、Provider の手で書いたソースをちょうど 1 回ずつ覆うように分ける（残りは `**/*.cs` からほかの 4 本のファイルを `!` で外す）。漏れは要約の「範囲の外」に出る。
 - 時間（2026-11・手元の 24 論理コア・並列度 8）：Model は 74 分（ビルドと初回のテスト実行 4.4 分・テスト 1 件ずつのカバレッジの取得 29.7 分・変異の検査 39.8 分＝1 件 5.7 秒）、エスケープは 53 分（変異の検査 1 件 17.6 秒）。カバレッジの取得はテストの数で決まり、範囲の大きさに依らない固定の費用（範囲を 1 つ割るたびに 1 回増える）。

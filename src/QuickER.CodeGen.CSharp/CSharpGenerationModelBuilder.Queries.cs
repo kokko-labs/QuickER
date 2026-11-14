@@ -504,15 +504,16 @@ internal sealed partial class CSharpGenerationModelBuilder
                     parameterValueObjects[parameter.Name] = vo;
                 }
             }
-            else if (TryResolveTokenInfo(query, parameter.Type, diagnostics, out var tokenInfo))
-            {
-                typeName = tokenInfo.TypeName;
-                isReferenceType = tokenInfo.IsReferenceType;
-            }
             else
             {
-                hasError = true;
-                continue;
+                if (!TryResolveTokenInfo(query, parameter.Type, diagnostics, out var tokenInfo))
+                {
+                    hasError = true;
+                    continue;
+                }
+
+                typeName = tokenInfo.TypeName;
+                isReferenceType = tokenInfo.IsReferenceType;
             }
 
             parameterTypes[parameter.Name] = new QueryConditionTypeChecker.ParameterTypeInfo(

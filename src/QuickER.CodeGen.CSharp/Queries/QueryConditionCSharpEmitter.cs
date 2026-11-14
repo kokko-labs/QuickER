@@ -482,17 +482,14 @@ public static class QueryConditionCSharpEmitter
     /// <summary>解決済みの列参照から列情報を引く</summary>
     private static QueryColumnBinding Bind(ColumnReference column, Context context)
     {
-        if (
-            column.ResolvedColumnId is not { } id
-            || !context.Columns.TryGetValue(id, out var binding)
-        )
+        if (column.ResolvedColumnId is { } id && context.Columns.TryGetValue(id, out var binding))
         {
-            throw new InvalidOperationException(
-                $"列 '{column.Text}' が未解決です。ParseAndValidate を通した構文木を渡してください。"
-            );
+            return binding;
         }
 
-        return binding;
+        throw new InvalidOperationException(
+            $"列 '{column.Text}' が未解決です。ParseAndValidate を通した構文木を渡してください。"
+        );
     }
 
     /// <summary>解決済みのパラメータ名（正準名）を返す</summary>

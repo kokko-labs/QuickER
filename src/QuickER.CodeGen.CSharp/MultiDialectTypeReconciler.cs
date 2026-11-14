@@ -172,10 +172,12 @@ internal static class MultiDialectTypeReconciler
         {
             foreach (var column in entity.Columns)
             {
-                if (
-                    rowVersionColumnIds.Contains(column.Id)
-                    || !baseline.Types.TryGetValue(column.Id, out var baseInfo)
-                )
+                if (rowVersionColumnIds.Contains(column.Id))
+                {
+                    continue;
+                }
+
+                if (!baseline.Types.TryGetValue(column.Id, out var baseInfo))
                 {
                     continue;
                 }
@@ -239,30 +241,30 @@ internal static class MultiDialectTypeReconciler
 
         foreach (var (columnId, primary) in primaryColumnTypes)
         {
-            // 主辞書が既に SqlDbTypeName を持つ（図の方言が sqlserver）場合はそのまま使う
+            // 主辞書が既に SqlDbTypeName を持つ（図の方言が sqlserver）場合と、SqlServer 側に型名が無い場合はそのまま使う
             if (
-                primary.SqlDbTypeName is not null
-                || !sqlServerTypes.TryGetValue(columnId, out var sqlServer)
-                || sqlServer.SqlDbTypeName is null
+                primary.SqlDbTypeName is null
+                && sqlServerTypes.TryGetValue(columnId, out var sqlServer)
+                && sqlServer.SqlDbTypeName is not null
             )
             {
-                result[columnId] = primary;
-
-                continue;
+                // 主辞書の型（型名・参照区分・MaxLength・中立トークン等）は保ちつつ、SqlServer 由来の SqlColumnType
+                // メタ情報だけを差し替える。全項目を列挙して new し直すと、プロパティが増えたときに写し漏れても
+                // コンパイルが通ってしまう（実際に CanonicalTypeToken の写し漏れで、図の方言が非 sqlserver の
+                // マルチターゲットから [DbColumnMeta] が黙って消えていた）ため with 式で差分だけを書く
+                result[columnId] = primary with
+                {
+                    Precision = sqlServer.Precision,
+                    Scale = sqlServer.Scale,
+                    SqlDbTypeName = sqlServer.SqlDbTypeName,
+                    SqlDeclaredLength = sqlServer.SqlDeclaredLength,
+                    SqlFractionalSecondsScale = sqlServer.SqlFractionalSecondsScale,
+                };
             }
-
-            // 主辞書の型（型名・参照区分・MaxLength・中立トークン等）は保ちつつ、SqlServer 由来の SqlColumnType
-            // メタ情報だけを差し替える。全項目を列挙して new し直すと、プロパティが増えたときに写し漏れても
-            // コンパイルが通ってしまう（実際に CanonicalTypeToken の写し漏れで、図の方言が非 sqlserver の
-            // マルチターゲットから [DbColumnMeta] が黙って消えていた）ため with 式で差分だけを書く
-            result[columnId] = primary with
+            else
             {
-                Precision = sqlServer.Precision,
-                Scale = sqlServer.Scale,
-                SqlDbTypeName = sqlServer.SqlDbTypeName,
-                SqlDeclaredLength = sqlServer.SqlDeclaredLength,
-                SqlFractionalSecondsScale = sqlServer.SqlFractionalSecondsScale,
-            };
+                result[columnId] = primary;
+            }
         }
 
         return result;

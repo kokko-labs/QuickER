@@ -61,12 +61,24 @@ public static class ForeignKeyColumnPairResolver
 
         foreach (var relationship in relationships)
         {
-            if (
-                relationship.Type == RelationshipType.ManyToMany
-                || !entitiesById.TryGetValue(relationship.SourceEntityId, out var parent)
-                || !entitiesById.TryGetValue(relationship.TargetEntityId, out var child)
-                || Resolve(relationship, parent, child) is not { } columnPairs
-            )
+            if (relationship.Type == RelationshipType.ManyToMany)
+            {
+                continue;
+            }
+
+            if (!entitiesById.TryGetValue(relationship.SourceEntityId, out var parent))
+            {
+                continue;
+            }
+
+            if (!entitiesById.TryGetValue(relationship.TargetEntityId, out var child))
+            {
+                continue;
+            }
+
+            var columnPairs = Resolve(relationship, parent, child);
+
+            if (columnPairs is null)
             {
                 continue;
             }

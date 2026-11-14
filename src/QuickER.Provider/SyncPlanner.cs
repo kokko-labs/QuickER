@@ -1101,11 +1101,12 @@ public sealed class SyncPlanner
                 .GroupBy(i => SchemaNames.ToStoredForm(i.TableName), SchemaNames.Comparer)
         )
         {
-            if (
-                droppedTables.Contains(drops.Key)
-                || tablesWithAddedColumns.Contains(drops.Key)
-                || !liveByName.TryGet(drops.Key, out var live)
-            )
+            if (droppedTables.Contains(drops.Key) || tablesWithAddedColumns.Contains(drops.Key))
+            {
+                continue;
+            }
+
+            if (!liveByName.TryGet(drops.Key, out var live))
             {
                 continue;
             }
@@ -1455,7 +1456,12 @@ public sealed class SyncPlanner
 
         foreach (var (table, newKey) in pkChangedTables)
         {
-            if (newKey.Count == 0 || !liveByName.TryGet(table, out var live))
+            if (newKey.Count == 0)
+            {
+                continue;
+            }
+
+            if (!liveByName.TryGet(table, out var live))
             {
                 continue;
             }
@@ -2375,11 +2381,14 @@ public sealed class SyncPlanner
 
         for (var drop = 0; drop < steps.Count; drop++)
         {
-            if (Identity(steps[drop], dropping: true) is not { } identity)
+            var dropped = Identity(steps[drop], dropping: true);
+
+            if (dropped is null)
             {
                 continue;
             }
 
+            var identity = dropped.Value;
             var readd = steps.FindIndex(
                 drop + 1,
                 s => Identity(s, dropping: false) is { } added && added.Key == identity.Key
@@ -4607,8 +4616,12 @@ public sealed class SyncPlanner
                     || droppedForeignKeys.Contains(
                         ForeignKeyKey(child, parent, fk.ColumnPairs, fk.Relationship, limit)
                     )
-                    || !liveNames.TryGetValue(fk.Relationship, out var name)
                 )
+                {
+                    continue;
+                }
+
+                if (!liveNames.TryGetValue(fk.Relationship, out var name))
                 {
                     continue;
                 }

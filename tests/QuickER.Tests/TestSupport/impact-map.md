@@ -23,9 +23,9 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.AI.Mock` | 一部 | `Ai/MockAgents`・`Ai/MockBuildBoundary`・`Ai/MockDialog`・`Ai/MockFolder`・`Ai/MockOutputs`・`Ai/MockRunner`・`Ai/MockScaffold`・`OsBoundary/Containment`・`OsBoundary/FeatureModules`・`OsBoundary/PathEntrances`・`OsBoundary/Segments` |
 | `src/QuickER.AI.UI` | 一部 | `Ai/ApiKeyStore`・`Ai/Attachments`・`Ai/ConnectionSettings`・`Ai/MarkdownRender`・`OsBoundary/ProcessLaunch`・`table:Converters` |
 | `src/QuickER.Cli` | 一部 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`DiagramEdit/ToolArgument` |
-| `src/QuickER.CodeGen.CSharp` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`Name/Entrances`・`OsBoundary/Segments`・`SyncModel/Config`・`SyncModel/Random`・`table:EditModelScenarios`・`table:PostgreSqlQueryParameters`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
-| `src/QuickER.CodeGen.CSharp/Queries` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`Name/Entrances` |
-| `src/QuickER.CodeGen.CSharp/Templates` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`Name/Entrances`・`SyncModel/Config`・`SyncModel/Random`・`table:EditModelScenarios`・`table:PostgreSqlQueryParameters`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
+| `src/QuickER.CodeGen.CSharp` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`Name/Entrances`・`OsBoundary/Segments`・`SyncModel/Config`・`SyncModel/Random`・`rule:mutation-safe-mode-jump-guards`・`table:EditModelScenarios`・`table:PostgreSqlQueryParameters`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
+| `src/QuickER.CodeGen.CSharp/Queries` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`Name/Entrances`・`rule:mutation-safe-mode-jump-guards` |
+| `src/QuickER.CodeGen.CSharp/Templates` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`Name/Entrances`・`SyncModel/Config`・`SyncModel/Random`・`rule:mutation-safe-mode-jump-guards`・`table:EditModelScenarios`・`table:PostgreSqlQueryParameters`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
 | `src/QuickER.CodeGen.UI` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Name/Entrances`・`OsBoundary/FeatureModules` |
 | `src/QuickER.CodeReverse.CSharp` | 全体 | `FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules` |
 | `src/QuickER.Db.UI` | 一部 | `Ai/DbConnectionDialog`・`Ai/DbImportSync`・`OsBoundary/FeatureModules`・`OsBoundary/ProfileStore` |
@@ -43,14 +43,14 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Gui/Views` | 守りの無い領域（Accepted） | （なし） |
 | `src/QuickER.Mcp` | 一部 | `DiagramEdit/ToolArgument`・`DiagramEdit/Tools`・`rule:tool-argument-parsing-owners` |
 | `src/QuickER.Mcp.Tools` | 全体 | `DiagramEdit/ToolArgument`・`DiagramEdit/Tools`・`Name/Entrances`・`rule:mcp-tools-column-nullability-raw-reads`・`table:QueryToolFormatter` |
-| `src/QuickER.Model` | 全体 | `Dialect/DdlText`・`Name/Entrances`・`SyncPlan/HistoryRows`・`rule:model-dialect-lookups`・`rule:tool-argument-parsing-owners`・`table:ForeignKeyReferentialActions` |
+| `src/QuickER.Model` | 全体 | `Dialect/DdlText`・`Name/Entrances`・`SyncPlan/HistoryRows`・`rule:model-dialect-lookups`・`rule:mutation-safe-mode-jump-guards`・`rule:tool-argument-parsing-owners`・`table:ForeignKeyReferentialActions` |
 | `src/QuickER.Platform` | 一部 | `Ai/MarkdownRender`・`OsBoundary/AtomicFile`・`OsBoundary/Containment`・`OsBoundary/PathEntrances`・`OsBoundary/ProcessLaunch`・`OsBoundary/Segments` |
-| `src/QuickER.Provider` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dialect/DdlText`・`Dialect/ImportWarnings`・`Dialect/Types`・`FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules`・`Name/DdlRoundTrip`・`Name/Entrances`・`SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/HistoryRows`・`SyncPlan/ShapeRows`・`rule:provider-column-nullability-raw-reads`・`rule:sql-name-text-name-sources`・`rule:sync-capabilities-initializers`・`rule:sync-name-comparison-tokens`・`rule:sync-selected-foreign-key-names`・`rule:sync-type-deciding-column-copies`・`table:SyncPlanExpectations` |
-| `src/QuickER.Provider.MySql` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks` |
-| `src/QuickER.Provider.Oracle` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks` |
-| `src/QuickER.Provider.PostgreSql` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses` |
-| `src/QuickER.Provider.SqlServer` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`GeneratedRuntime/ParityValuesSqlServer`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses` |
-| `src/QuickER.Provider.Sqlite` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`Name/Entrances`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses`・`rule:sqlite-file-connection-pooling-off` |
+| `src/QuickER.Provider` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dialect/DdlText`・`Dialect/ImportWarnings`・`Dialect/Types`・`FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules`・`Name/DdlRoundTrip`・`Name/Entrances`・`SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/HistoryRows`・`SyncPlan/ShapeRows`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads`・`rule:sql-name-text-name-sources`・`rule:sync-capabilities-initializers`・`rule:sync-name-comparison-tokens`・`rule:sync-selected-foreign-key-names`・`rule:sync-type-deciding-column-copies`・`table:SyncPlanExpectations` |
+| `src/QuickER.Provider.MySql` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks` |
+| `src/QuickER.Provider.Oracle` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks` |
+| `src/QuickER.Provider.PostgreSql` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses` |
+| `src/QuickER.Provider.SqlServer` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`GeneratedRuntime/ParityValuesSqlServer`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses` |
+| `src/QuickER.Provider.Sqlite` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`Name/Entrances`・`SyncPlan/Fuzz`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses`・`rule:sqlite-file-connection-pooling-off` |
 | `src/QuickER.Runtime` | 全体 | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`GeneratedRuntime/ParityValuesSqlServer`・`table:EditModelScenarios`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
 | `src/QuickER.Runtime.AspNetCore` | 全体 | `GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues` |
 | `src/QuickER.Runtime.EntityFrameworkCore` | 全体 | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`GeneratedRuntime/ParityValuesSqlServer`・`table:PostgreSqlQueryParameters`・`table:TranslatorParityPredicates` |
@@ -119,7 +119,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Cli/CodeGenToolSet.cs` | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`DiagramEdit/ToolArgument` |
 | `src/QuickER.Cli/GenerationConfigLoader.cs` | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success` |
 | `src/QuickER.Cli/GenerationExecutor.cs` | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success` |
-| `src/QuickER.CodeGen.CSharp` | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Name/Entrances` |
+| `src/QuickER.CodeGen.CSharp` | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Name/Entrances`・`rule:mutation-safe-mode-jump-guards` |
 | `src/QuickER.CodeGen.CSharp/CSharpCodeGenerationService.cs` | `OsBoundary/Segments` |
 | `src/QuickER.CodeGen.CSharp/GeneratedFileWriter.cs` | `OsBoundary/Segments` |
 | `src/QuickER.CodeGen.CSharp/Queries` | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql` |
@@ -191,7 +191,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Mcp/McpToolSet.cs` | `DiagramEdit/ToolArgument` |
 | `src/QuickER.Mcp/ToolArgumentShape.cs` | `DiagramEdit/ToolArgument` |
 | `src/QuickER.Mcp/ToolArguments.cs` | `DiagramEdit/ToolArgument`・`rule:tool-argument-parsing-owners` |
-| `src/QuickER.Model` | `Dialect/DdlText`・`rule:model-dialect-lookups` |
+| `src/QuickER.Model` | `Dialect/DdlText`・`rule:model-dialect-lookups`・`rule:mutation-safe-mode-jump-guards` |
 | `src/QuickER.Model/ConstraintNames.cs` | `SyncPlan/HistoryRows` |
 | `src/QuickER.Model/DiagramNameDuplicates.cs` | `Name/Entrances` |
 | `src/QuickER.Model/ForeignKeyReferentialAction.cs` | `table:ForeignKeyReferentialActions` |
@@ -204,20 +204,20 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Platform/PathExecutableResolver.cs` | `OsBoundary/ProcessLaunch` |
 | `src/QuickER.Platform/PathSegments.cs` | `OsBoundary/PathEntrances`・`OsBoundary/Segments` |
 | `src/QuickER.Platform/UrlPolicy.cs` | `Ai/MarkdownRender`・`OsBoundary/ProcessLaunch` |
-| `src/QuickER.Provider` | `Dialect/DdlText`・`Dialect/ImportWarnings`・`Dialect/Types`・`rule:provider-column-nullability-raw-reads` |
-| `src/QuickER.Provider.MySql` | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads` |
+| `src/QuickER.Provider` | `Dialect/DdlText`・`Dialect/ImportWarnings`・`Dialect/Types`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads` |
+| `src/QuickER.Provider.MySql` | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads` |
 | `src/QuickER.Provider.MySql/MySqlSchemaImporter.cs` | `rule:schema-command-bypasses`・`rule:schema-command-helper-uses` |
 | `src/QuickER.Provider.MySql/MySqlSchemaSyncExecutor.cs` | `rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks` |
-| `src/QuickER.Provider.Oracle` | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads` |
+| `src/QuickER.Provider.Oracle` | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads` |
 | `src/QuickER.Provider.Oracle/OracleSchemaImporter.cs` | `rule:schema-command-bypasses`・`rule:schema-command-helper-uses` |
 | `src/QuickER.Provider.Oracle/OracleSchemaSyncExecutor.cs` | `rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks` |
-| `src/QuickER.Provider.PostgreSql` | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads` |
+| `src/QuickER.Provider.PostgreSql` | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads` |
 | `src/QuickER.Provider.PostgreSql/PostgreSqlSchemaImporter.cs` | `rule:schema-command-bypasses`・`rule:schema-command-helper-uses` |
 | `src/QuickER.Provider.PostgreSql/PostgreSqlSchemaSyncExecutor.cs` | `rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses` |
-| `src/QuickER.Provider.SqlServer` | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`GeneratedRuntime/ParityValuesSqlServer`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads` |
+| `src/QuickER.Provider.SqlServer` | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`GeneratedRuntime/ParityValuesSqlServer`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads` |
 | `src/QuickER.Provider.SqlServer/SqlServerSchemaImporter.cs` | `rule:schema-command-bypasses`・`rule:schema-command-helper-uses` |
 | `src/QuickER.Provider.SqlServer/SqlServerSchemaSyncExecutor.cs` | `rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses` |
-| `src/QuickER.Provider.Sqlite` | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`Name/Entrances`・`SyncPlan/Fuzz`・`rule:provider-column-nullability-raw-reads` |
+| `src/QuickER.Provider.Sqlite` | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`Name/Entrances`・`SyncPlan/Fuzz`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads` |
 | `src/QuickER.Provider.Sqlite/SqliteFileConnections.cs` | `rule:sqlite-file-connection-pooling-off` |
 | `src/QuickER.Provider.Sqlite/SqliteSchemaImporter.cs` | `rule:schema-command-bypasses`・`rule:schema-command-helper-uses` |
 | `src/QuickER.Provider.Sqlite/SqliteSchemaSyncExecutor.cs` | `rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses` |
@@ -760,6 +760,10 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 ### `rule:sql-name-text-name-sources`
 
 - 範囲：`src/QuickER.Provider/SqlNameText.cs`
+
+### `rule:mutation-safe-mode-jump-guards`
+
+- 範囲：`src/QuickER.CodeGen.CSharp`・`src/QuickER.Model`・`src/QuickER.Provider`・`src/QuickER.Provider.MySql`・`src/QuickER.Provider.Oracle`・`src/QuickER.Provider.PostgreSql`・`src/QuickER.Provider.SqlServer`・`src/QuickER.Provider.Sqlite`
 
 ### `rule:dialog-owner-resolve-uses`
 

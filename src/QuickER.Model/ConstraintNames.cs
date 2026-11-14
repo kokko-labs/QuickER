@@ -649,11 +649,17 @@ public static class ConstraintNames
             }
 
             // 外部キーを作らない関係は DDL が名前を付けないので、既定名を取らない（取ると本物の外部キーがずれる）
-            if (
-                !tablesById.TryGetValue(relationship.SourceEntityId, out var parent)
-                || !tablesById.TryGetValue(relationship.TargetEntityId, out var child)
-                || !DefinesForeignKey(relationship, parent, child)
-            )
+            if (!tablesById.TryGetValue(relationship.SourceEntityId, out var parent))
+            {
+                continue;
+            }
+
+            if (!tablesById.TryGetValue(relationship.TargetEntityId, out var child))
+            {
+                continue;
+            }
+
+            if (!DefinesForeignKey(relationship, parent, child))
             {
                 continue;
             }

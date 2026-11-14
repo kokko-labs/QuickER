@@ -1385,7 +1385,7 @@ public class SchemaDiffService
         foreach (var add in adds)
         {
             if (
-                !dropsByKey.TryGetValue(
+                dropsByKey.TryGetValue(
                     ForeignKeyPairingKey(
                         add,
                         add.ForeignKeyName,
@@ -1393,15 +1393,16 @@ public class SchemaDiffService
                         dialect.IdentifierLengthLimit
                     ),
                     out var candidates
-                ) || !candidates.TryDequeue(out var drop)
+                ) && candidates.TryDequeue(out var drop)
             )
             {
-                result.Add(add);
-                continue;
+                paired.Add(drop);
+                result.Add(BuildForeignKeyAlter(add, drop, dialect));
             }
-
-            paired.Add(drop);
-            result.Add(BuildForeignKeyAlter(add, drop, dialect));
+            else
+            {
+                result.Add(add);
+            }
         }
 
         result.AddRange(drops.Where(d => !paired.Contains(d)));

@@ -78,10 +78,12 @@ public static class QueryParameterTypeResolver
 
         foreach (var token in tokens)
         {
-            if (
-                !CanonicalTypeToken.TryParse(token, out var canonical)
-                || !TryFormatForParameter(typeCatalog, canonical, out var nativeType)
-            )
+            if (!CanonicalTypeToken.TryParse(token, out var canonical))
+            {
+                continue;
+            }
+
+            if (!TryFormatForParameter(typeCatalog, canonical, out var nativeType))
             {
                 continue;
             }
