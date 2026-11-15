@@ -737,6 +737,12 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string SchemaSync_ExecuteConfirmTableChangeBreaksDependentIndex {
+            get {
+                return ResourceManager.GetString("SchemaSync_ExecuteConfirmTableChangeBreaksDependentIndex", resourceCulture);
+            }
+        }
+
         public static string SchemaSync_ExecuteConfirmDescriptionCharactersReplaced {
             get {
                 return ResourceManager.GetString("SchemaSync_ExecuteConfirmDescriptionCharactersReplaced", resourceCulture);

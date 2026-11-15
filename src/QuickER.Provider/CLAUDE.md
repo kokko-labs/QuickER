@@ -568,8 +568,9 @@ SQLite の同期は `SyncPlan.Rebuilds`／`TableRebuildPlan` で表を作り直�
   - トリガーを壊すのもビューと同じ 3 種類の項目だけ（型の変更では壊れない）。作り直しはトリガーの本文を検証しないので、外さないと同期はコミットし、トリガーは発火したときに初めて断られる。
   - まず計画全体の同期後の列名で 1 回試し、壊れるビュー・トリガーが無ければ何も外さない（単独の変更の和で判定すると、列の数を保つ名前の変更に偽の警告を出す）。壊れるときだけ表ごとに試して原因の表を決める。
   - `ExcludeUntilStable` の周の中、名前の重なる表の追加の除外の後・依存の除外の前に置く（外した列の追加を前提にする項目を同じ周の依存の除外が外し、次の周でもう一度全体を試す）。
-  - 方言の判定と守りの無い枝は `src/QuickER.Provider.Sqlite/CLAUDE.md`「計画の段のビューとトリガーの判定」。
-- 取込の結果から計画の入力を作るのは `SyncPlanContext.FromImport` の 1 か所（同期の画面と同期計画の総当たりが通す）。項目を足したら、ここに足す（呼び出し側ごとに写すと、写し忘れた側だけが黙ってその入力の無い計画を作り、画面とテストで警告・除外が割れる）。ガード：期待の行 `realdb-view-*`・`realdb-trigger-*`（判定器を写さないと赤）。
+  - 作り直す表の索引（図に無い）が読む列の削除も外して名指しする（`TableChangeBreaksDependentIndex`・Detail は作り直せなくなる索引の名前）。索引を壊すのは列の削除だけなので、索引だけが原因の表は列の削除の全部（索引が読まない列の削除も含む＝表の単位）を外し、列の追加・型の変更・表の削除は流す（名前の変更は消す側だけが外れる）。外さないと、作り直しの途中で索引を作れずに同期全体が巻き戻る。
+  - 方言の判定と守りの無い枝は `src/QuickER.Provider.Sqlite/CLAUDE.md`「計画の段のビュー・トリガー・索引の判定」。
+- 取込の結果から計画の入力を作るのは `SyncPlanContext.FromImport` の 1 か所（同期の画面と同期計画の総当たりが通す）。項目を足したら、ここに足す（呼び出し側ごとに写すと、写し忘れた側だけが黙ってその入力の無い計画を作り、画面とテストで警告・除外が割れる）。ガード：期待の行 `realdb-view-*`・`realdb-trigger-*`・`realdb-index-*`（判定器を写さないと赤）。
 - 再構築の合成で解決できない項目（同じ計画で消える列の一意制約など）は処理済みにせずセクションへ残してスキップのコメントを出す（`IsResolvableInRebuild`＝処理済みにすると何も変えずに成功扱いになる）。
 - 固定は `TableRebuildAttributeDetectorTests`・期待の行 `plan-rebuild-*`（`plan-rebuild-alter-column-keeps-live-column-identity`・`plan-rebuild-column-changes-without-alter-pk-keep-live-pk`・`plan-rebuild-dropped-table-is-not-rebuilt`・`plan-rebuild-unresolvable-item-stays-in-section`）・実 SQLite の行 `realdb-rebuild-*`。mutation 実証済み。
 

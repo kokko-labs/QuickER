@@ -664,6 +664,12 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 Strings.SchemaSync_ExecuteConfirmTableChangeBreaksDependentTrigger,
                 BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
             ),
+            // 作り直す表の DB のインデックスが読む列の削除は、作り直しでインデックスを作れず同期ごと巻き戻されるので、計画から外した
+            // （SQLite。Detail は作り直せなくなるインデックスの名前）
+            SyncPlanWarningKind.TableChangeBreaksDependentIndex => string.Format(
+                Strings.SchemaSync_ExecuteConfirmTableChangeBreaksDependentIndex,
+                BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
+            ),
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
 

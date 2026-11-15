@@ -64,15 +64,34 @@ internal sealed class SqliteLiveDependentCheck : ILiveDependentCheck
     {
         ArgumentNullException.ThrowIfNull(tablesAfterSync);
 
-        if (tablesAfterSync.Count == 0 || (_viewSql.Count == 0 && _triggers.Count == 0))
+        if (
+            tablesAfterSync.Count == 0
+            || (_viewSql.Count == 0 && _triggers.Count == 0 && _indexSql.Count == 0)
+        )
         {
-            return new LiveDependentBreaks([], []);
+            return new LiveDependentBreaks([], [], []);
         }
 
         using var conn = SqliteFileConnections.Create(InMemory);
         conn.Open();
 
-        foreach (var sql in _tableSql.Concat(_indexSql.Select(i => i.Sql)).Concat(_viewSql))
+        foreach (var sql in _tableSql)
+        {
+            TryRun(conn, sql);
+        }
+
+        // 同期の前に写しで作れた索引（DB の外の照合順序・アプリの関数・写せない表の索引は作れず、後で作れなくても数えない）
+        var indexesBefore = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var index in _indexSql)
+        {
+            if (TryRun(conn, index.Sql))
+            {
+                indexesBefore.Add(index.Name);
+            }
+        }
+
+        foreach (var sql in _viewSql)
         {
             TryRun(conn, sql);
         }
@@ -81,13 +100,25 @@ internal sealed class SqliteLiveDependentCheck : ILiveDependentCheck
         var viewsBefore = UnreadableViews(conn);
         var triggersBefore = BrokenTriggers(conn, _triggers);
 
+        // 置き換えた表の索引を、作り直しと同じく原文で作り直す（消した表の索引は表と一緒に消えるので作り直さない）。同期の前に作れたのに
+        // 作れない索引が、作り直しで断られる索引
+        var indexes = new List<string>();
+
         foreach (var (table, columns) in tablesAfterSync)
         {
             TryRun(conn, ReplaceSql(conn, table, columns));
 
+            if (columns is null)
+            {
+                continue;
+            }
+
             foreach (var index in _indexSql.Where(i => SqliteIdentifier.NameEquals(i.Table, table)))
             {
-                TryRun(conn, index.Sql);
+                if (!TryRun(conn, index.Sql) && indexesBefore.Contains(index.Name))
+                {
+                    indexes.Add(index.Name);
+                }
             }
         }
 
@@ -105,7 +136,11 @@ internal sealed class SqliteLiveDependentCheck : ILiveDependentCheck
             .Order(StringComparer.Ordinal)
             .ToList();
 
-        return new LiveDependentBreaks(views, triggers);
+        return new LiveDependentBreaks(
+            views,
+            triggers,
+            [.. indexes.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.Ordinal)]
+        );
     }
 
     /// <summary>表を同期後の形に置き換える文（列名と、列がすべて残る主キー・一意制約・<c>null</c> は表の削除）</summary>
@@ -295,16 +330,18 @@ internal sealed class SqliteLiveDependentCheck : ILiveDependentCheck
         return unreadable;
     }
 
-    /// <summary>文を流す（断られたら飛ばす＝写せない表・置き換えられない表は試さない）</summary>
-    private static void TryRun(SqliteConnection conn, string sql)
+    /// <summary>文を流す（断られたら飛ばして false＝写せない表・置き換えられない表は試さない・作れない索引を数える）</summary>
+    private static bool TryRun(SqliteConnection conn, string sql)
     {
         try
         {
             Run(conn, sql);
+            return true;
         }
         catch (SqliteException)
         {
             // 写せない物は数えない（クラスの remarks）
+            return false;
         }
     }
 
@@ -315,5 +352,5 @@ internal sealed class SqliteLiveDependentCheck : ILiveDependentCheck
     }
 }
 
-/// <summary>DB の索引 1 つ（表と <c>CREATE INDEX</c> の原文）</summary>
-internal sealed record SqliteIndexSql(string Table, string Sql);
+/// <summary>DB の索引 1 つ（名前・表・<c>CREATE INDEX</c> の原文）</summary>
+internal sealed record SqliteIndexSql(string Name, string Table, string Sql);
