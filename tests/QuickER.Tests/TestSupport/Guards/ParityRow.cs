@@ -45,7 +45,7 @@ internal enum ParityCompare
 internal static partial class ParityRows
 {
     private static readonly Lazy<IReadOnlyList<ParityRow>> LazyAll = new(() =>
-        [.. Docs(), .. Workflow(), .. Resources(), .. CodeGen(), .. AiMock()]
+        [.. Docs(), .. Workflow(), .. Resources(), .. CodeGen(), .. AiMock(), .. Integration()]
     );
 
     /// <summary>すべての行（宣言の順）</summary>

@@ -190,6 +190,11 @@
   - コンソールのログに出ないテストの出力（`ITestOutputHelper` に書く網羅の要約・夜間なら埋まる組・種の数の警告）と、方言の派生ごとの時間（同期計画の総当たり・名前の DDL の往復の派生は同じ表示名なので、TRX のクラス名で見分ける）はこれで読む。
   - ガード：`WorkflowGuardTests.Nightly_JobsKeepTestResultsAsArtifacts`（TRX とコンソールの引数・結果のフォルダ・保存の手順が 1 つ・`if: always()`・path・保持日数・名前の重複なし）と `ParityTests`（行 `nightly-actions-pinned-like-other-workflows`）。
 - 夜間の種の数は各エンジンの `SeedSettings` の第 3 引数（`NightlyCount`＝普段の数以上・普段の種を先頭に含む）に置く。ここに表は持たない。
+- 時間の予算：2 ジョブとも 50 分未満を目安にし、`timeout-minutes: 60` は上げずに仕事を減らすか並べ方を変える。
+  - unit-nightly は `DslConditionFuzzTests` がほぼ全部の時間を占める。種の段の族の単位を間引く（「簡易 DSL の総当たり」）。
+  - integration-nightly は xunit が同時に流すコレクションの数（`maxParallelThreads`＝CPU の数・CI は 4）で詰め方が決まる。xunit v3 の既定（Collections・Conservative）は、コレクションが枠を取ってから最後のテストが終わるまで枠を持ち、枠を待つコレクションをコレクションの順の宣言の順に並べる。
+  - `ContainerCollectionOrderer`（Integration の直下・`[assembly: TestCollectionOrderer]`）が、コンテナのコレクションを夜間の実測の長い順（SQL Server・Oracle・PostgreSQL・MySQL・SQL Server の簡易 DSL・PostGIS）に先頭へ置き、残りは xunit の既定の順のまま。既定の順だけだと、コンテナ 1 つで直列に流れる SQL Server のコレクションが後ろに並んだとき、それがジョブの終わりを決める。普段の CI と手元の Integration も同じ順で流れる。
+  - コンテナのコレクション（`CollectionDefinition` を持ち `ICollectionFixture` を実装するクラス）を足したら `ContainerCollectionOrderer.Order` に載せる。ガード：`parity:integration-container-collections-ordered`（載せ漏れ・コンテナのコレクションでない型・重複を名指しする。mutation 実証済み）。
 - 選び漏れを防ぐ：`SeedSource.Resolve` は、プロセスの環境変数で種を決めるとき、いま走っているテストが `[Trait("NightlyEngine", "true")]`（夜間に流す）か `"false"`（種を使うが夜間に流さない・理由のコメントを添える）の**ちょうど一方**を宣言していなければ、テストの名前と直し方を書いた `XunitException` で赤にする（`NightlyEngineTrait`。テストの外と、環境の読み取りを差し替えた呼び出しでは検査しない）。
   - どのテストが種を使うかを人が一覧で持たないので、補助を経由する使い方も拾える。種の指紋のドリフトテストを別のカルチャで流し直す `CultureInvariantGenerationTests.DriftTests_PassUnderCulture` の付け忘れも、これで見つかった（`"false"` と理由を付けた）。
 - 網羅しない組の夜間の扱い：`CoverageReport.AssertGaps` は、夜間の既定の種の数では「一覧にあるのに網羅した組」を赤にせず、「夜間なら埋まる組」としてテストの出力へ書く（普段の既定の種の数では欠けるので一覧に残す）。一覧に無い欠けは夜間でも赤。
@@ -474,6 +479,11 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
 - キーワードと不等号の綴り（`DslSpelling`＝大文字と `<>`・小文字と `!=`・先頭だけ大文字と `<>`。docs：キーワードは大文字小文字を区別せず `!=` は `<>` と同じ）：構文木は同じで描画だけが変わる。原子のクエリと網羅の単位の合成のクエリは番号で回し、種の合成のクエリは乱数で選ぶ。次元表の因子 Spelling。
 - 整数の列と小数のリテラル（docs：素の整数の列は数として比べ、整数の値オブジェクトの列は断る）：形 `compare-{eq,lt,ge}-literal-fractional`（`DslFuzzDimensions.FractionalOps`＝x.5 の値と整数で結果の違う 3 つ）。値は 2 進で正確な x.5 の値だけ（オラクルの decimal の比較と C# の double の比較が食い違わない）。値オブジェクトありの単位は等値の 1 つを断られる原子としてだけ作る（`RejectedByTypeCheck`）。
 - 黙って空振りしないよう、実装先・単位ごとに照合したクエリが 100 未満なら赤（`DslFuzzRunner.MinimumCheckedQueries`）。
+- 単体の総当たり（`DslConditionFuzzTests`）の種の段は、族・TimeSpan・DateTimeOffset の種の単位（`DslFuzzUnit.ThinnedAtNightly`＝SQLite の 6 つ・MySQL の 4 つ）を普段の種（1・2）と偶数の種でだけ流す（`DslFuzzUnits.RunsAtSeed` の 1 か所。夜間 80 種のうち 41 種）。主の単位（plain・vo・vo-guidkey）と浮動小数点の単位はどの種でも流す。
+  - 理由：夜間のジョブの時間の予算（unit-nightly は 50 分未満を目安にする）。族の単位は列の種類を 1 つの族に絞るので組の空間が狭く、主の単位と一番新しい族の浮動小数点の単位は幅を残す。
+  - 単位は作ってから選ぶので、種ごとの乱数の引き方と種の指紋は変わらない（`EngineFingerprintDriftTests`）。普段の種は必ず流すので、夜間に新しい網羅の欠けは出ない（網羅しない組の一覧は普段の既定の種の数で書く）。
+  - Integration の 4 本の総当たりは間引かない。
+  - ガード：`DslConditionFuzzTests.NightlyThinningRows_MatchExpectation`（種ごとの期待の行。偶数の判定・普段の種・単位の印のどれを外しても赤＝mutation 実証済み）。
 - 網羅の単位：`DslFuzzUnits.Coverage(方言)`（SQLite・SQL Server・MySQL に 1 つずつ・種に依らない＝種の指紋の要約の外。名前は `coverage-{方言}`）を、両テストが種の前に流す（単独の種では流さない）。
   - 単位は主キーを GuidKey にし（値オブジェクトあり）、主キーを参照する NULL 許容の自己参照の外部キー列 `parent` を持つ（`DslFuzzUnit.SelfReference`＝BuildDiagram が自己参照のリレーションを足し、外部キーの値オブジェクトの統一で GuidKey になる。行の parent はその行より前の行のキーか NULL）。
   - 列は種の単位と同じ。MySQL は種の単位に無い固定長の文字列・符号つき整数・decimal・日時・Guid（`char(36)`）も持つ。MySQL の主キーと `parent` は `varchar(36)`（固定長の `char(36)` は型マッパーが Guid へ写すので、string の主キーの GuidKey にならない）。

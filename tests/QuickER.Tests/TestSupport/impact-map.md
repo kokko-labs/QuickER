@@ -914,6 +914,7 @@ src 全体か src の外を読む守り。単位の守りには数えない（�
 | `parity:generation-settings-keys-match-options` | 正本と写しの照合 |
 | `parity:mock-project-package-ids` | 正本と写しの照合 |
 | `parity:mock-project-package-versions` | 正本と写しの照合 |
+| `parity:integration-container-collections-ordered` | 正本と写しの照合 |
 | `english:neutral-resx-values` | 英語の文言の照合 |
 | `english:sample-files` | 英語の文言の照合 |
 | `english:tool-definitions-er-diagram-catalog` | 英語の文言の照合 |

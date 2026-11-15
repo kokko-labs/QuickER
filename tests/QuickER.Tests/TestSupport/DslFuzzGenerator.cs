@@ -27,6 +27,12 @@ public sealed record DslFuzzUnit(
     string? SelfReference = null
 )
 {
+    /// <summary>
+    /// 単体の総当たりの夜間の種の段で間引く単位か（列の種類を 1 つの族に絞った種の単位。流す種の規則は
+    /// <see cref="DslFuzzUnits.RunsAtSeed"/>）
+    /// </summary>
+    public bool ThinnedAtNightly { get; init; }
+
     /// <summary>主キーの列</summary>
     public DslColumn Key => Columns[0];
 
