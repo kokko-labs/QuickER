@@ -1307,6 +1307,8 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
     ///   （その付け替えは同じ実行で届くはずなので、削除を先に断るのは順序の誤り）。</item>
     ///   <item>UniqueValueTakenOnServer：サーバーに、送った行と同じ一意な値を持つ別の行がある。ただし、その持ち主が
     ///   この端末で未送信で値を手放し（ローカルの行がもうその値を持たない）、この実行で断られていないなら数えない。
+    ///   手放す書き込み自身に実行の後のサーバーで断られる根拠（親が無い・手放されていない別の行が値を持つ）があれば数える
+    ///   （ServerWins が戻せずに決着を保留した行は報告されないので、断られたかを根拠で決める。判定は 1 段だけ）。
     ///   同じ値かどうかはサーバーの一意制約の比べ方（<see cref="ISyncModelServerRole.UniqueValues"/>＝実 SQL Server は
     ///   大文字小文字と末尾の空白を区別しない）で決める。</item>
     ///   <item>ParentMissingOnServer：送った行が参照する親のどれかがサーバーに無い。</item>
@@ -1420,22 +1422,23 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             // サーバーに同じ一意な値を持つ別の行がある（この端末の未送信で値を手放し、この実行で断られていない行は除く）
             bool HasHolder(ModelDbState state) => Holders(state).Any(h => !IsReleased(h));
 
-            // 送った行が参照する親のどれかがサーバーに無い
-            bool ParentMissing() =>
+            // 送った行（of を渡せばその行）が参照する親のどれかがサーバーに無い
+            bool ParentMissing(string? of = null) =>
                 References
                     .Where(r => r.Child == table)
                     .Any(r =>
-                        r.Read(before.Local).FirstOrDefault(p => p.Key == key).ParentKey
+                        r.Read(before.Local).FirstOrDefault(p => p.Key == (of ?? key)).ParentKey
                             is { } parentKey
                         && server.Row(r.Parent, parentKey) is null
                     );
 
-            IEnumerable<string> Holders(ModelDbState state) =>
-                UniqueValue(before.Local, table, key) is { } value
+            // 送った行（of を渡せばその行）のローカルの一意な値を持つ、その状態の別の行
+            IEnumerable<string> Holders(ModelDbState state, string? of = null) =>
+                UniqueValue(before.Local, table, of ?? key) is { } value
                     ? state
                         .Rows(table)
                         .Keys.Where(k =>
-                            k != key
+                            k != (of ?? key)
                             && _world.Server.UniqueValues.Equals(
                                 UniqueValue(state, table, k),
                                 value
@@ -1443,16 +1446,29 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                         )
                     : [];
 
-            // 持ち主 h がこの端末の未送信で値を手放した（ローカルの行がまだあり、値が違う）
+            // 持ち主 h がこの端末の未送信で値を手放した（Releases）。ただし、手放す書き込み自身に実行の後のサーバーで断られる
+            // 根拠があれば、手放しはこの実行で届かなかったので割り引かない（ServerWins が戻せずに決着を保留した行は記録が残り、
+            // 競合にも決着にも報告されないので refused に入らない）。手放しの根拠の判定は 1 段だけで、その中の持ち主の割り引きは
+            // 再帰させない。循環（手放す行の値をサーバーで持つのが送った行自身）は根拠に数えない＝今までどおり割り引く（厳しい側）
             bool IsReleased(string holder) =>
+                Releases(holder, key) && !ReleaseRefusedOnServer(holder);
+
+            // 持ち主 h が、行 of の値をこの端末の未送信で手放した（ローカルの行がまだあり、値が違う）
+            bool Releases(string holder, string of) =>
                 inScope.Contains(table)
                 && pending.Contains((table, holder))
                 && !refused.Contains((table, holder))
                 && before.Local.Row(table, holder) is not null
                 && !_world.Server.UniqueValues.Equals(
                     UniqueValue(before.Local, table, holder),
-                    UniqueValue(before.Local, table, key)
+                    UniqueValue(before.Local, table, of)
                 );
+
+            // 持ち主 h の手放す書き込みに、実行の後のサーバーで断られる根拠がある（親が無い・h のローカルの値を、手放されて
+            // いない別の行が持つ。送った行自身は循環なので数えない）
+            bool ReleaseRefusedOnServer(string holder) =>
+                ParentMissing(holder)
+                || Holders(server, holder).Any(h => h != key && !Releases(h, holder));
 
             // 参照する行 r がこの端末の未送信で付け替わった（ローカルの行がまだあり、もうこのキーを参照しない）
             bool IsReparented((string Table, string Key, int Reference) referrer)

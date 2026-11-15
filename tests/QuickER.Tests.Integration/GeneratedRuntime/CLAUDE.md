@@ -284,6 +284,7 @@
   - サーバーが書き込みを断った理由の競合（DeleteRefusedOnServer・UniqueValueTakenOnServer・ParentMissingOnServer）と、後勝ち＋ServerWins の決着は、実行の直後のサーバーに根拠が無ければ `3/spurious:{表}:{理由}:{形}` にする（`SyncModelRun.CheckRefusalBasisAsync`）。
   - 根拠はサーバーの状態からだけ取る。DeleteRefused＝参照する行がある／UniqueValueTaken＝同じ一意な値の別の行がある／ParentMissing＝親が無い。
   - 参照する行・持ち主が同じ端末の未送信で付け替わる／値を手放すなら、その表がその実行の範囲にあり、その行がその実行で届かなかったのでない限り数えない。
+    - 届かなかったかは、報告された競合・決着に加え、値を手放す書き込み自身に実行の後のサーバーで断られる根拠（親が無い・手放されていない別の行が値を持つ）があるかで決める（判定は 1 段。ServerWins が戻せずに決着を保留した行は報告されないため）。決まった形の行は `repro-d2-upsert-unique-lww-serverwins-held-holder-is-basis`。
   - 注入した失敗は根拠にしない。当たったかは形 `after-fault` を分けるのにだけ使う（`SyncModelFaults.ThrowOnServerWrite` が当たった端末・表・キーを控える）。
   - Versioned＋ServerWins が捨てた記録は確かめない。理由で分類せず範囲の未送信をすべて捨てるのが、利用者が頼んだ操作のため。
   - 根拠の違反だけは静止化が失敗しても報告する。各実行の直後に確定し、静止化の後段の表明とは独立のため。
