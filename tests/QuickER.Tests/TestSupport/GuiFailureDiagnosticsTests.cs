@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -164,12 +165,23 @@ public class GuiFailureDiagnosticsTests
     {
         using var _ = GuiFailureDiagnostics.SuppressSinksForTests();
         var marker = "marker-" + Guid.NewGuid().ToString("N");
+        var windowHandle = IntPtr.Zero;
+        var otherHandle = IntPtr.Zero;
+
+        // WM_ACTIVATEAPP の相手に使う、このプロセスの別のスレッド（STA スレッドではない呼び出し元のプロセスのスレッド）
+        var processThreadIds = System
+            .Diagnostics.Process.GetCurrentProcess()
+            .Threads.Cast<System.Diagnostics.ProcessThread>()
+            .Select(thread => (uint)thread.Id)
+            .ToList();
 
         var act = () =>
             RunSta(() =>
             {
                 var (window, button) = ShowTrackedWindow();
                 var (other, _) = ShowTrackedWindow();
+                windowHandle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+                otherHandle = new System.Windows.Interop.WindowInteropHelper(other).Handle;
 
                 try
                 {
@@ -190,6 +202,26 @@ public class GuiFailureDiagnosticsTests
                     GuiFailureDiagnostics.ForegroundForTests = () => own;
                     TestWindowActivation.ActivateWithinThread(window);
                     DoEvents();
+
+                    // WM_ACTIVATEAPP は窓のメッセージで作れないので、記録の関数へ直に渡す（相手なし・このプロセスの
+                    // 別のスレッド。先頭の 3 つのどれかは生きている＝少なくとも呼び出し元のスレッドと主スレッド）
+                    GuiFailureDiagnostics.RecordActivationMessage(
+                        "W9:Probe",
+                        0x001C,
+                        IntPtr.Zero,
+                        IntPtr.Zero
+                    );
+
+                    foreach (var threadId in processThreadIds.Take(3))
+                    {
+                        GuiFailureDiagnostics.RecordActivationMessage(
+                            "W9:Probe",
+                            0x001C,
+                            new IntPtr(1),
+                            new IntPtr(threadId)
+                        );
+                    }
+
                     throw new InvalidOperationException(marker);
                 }
                 finally
@@ -246,9 +278,45 @@ public class GuiFailureDiagnosticsTests
                 )
             )
             .And.Contain(line =>
-                line.EndsWith("W1:Window: Activated 前面=このプロセス", StringComparison.Ordinal)
+                line.Contains("W1:Window: Activated 前面=このプロセス ", StringComparison.Ordinal)
             )
-            .And.NotContain(line => line.Contains("title=", StringComparison.Ordinal));
+            .And.NotContain(line => line.Contains("title=", StringComparison.Ordinal))
+            .And.OnlyContain(
+                line =>
+                    Regex.IsMatch(
+                        line,
+                        @"最後の入力から=([0-9]+ms|不明) 実際のボタン L=(True|False) R=(True|False) M=(True|False)$"
+                    ),
+                "アクティブの移りには利用者の最後の入力からの時間と実際のボタンを添える"
+            );
+
+        // 何がアクティブを取ったかを WM_ACTIVATE の相手で書く（同じスレッドの窓どうしの行き来）。
+        // WM_ACTIVATEAPP は相手のスレッドの持ち主を書く
+        var timelineLines = report.Split('\n').Select(line => line.TrimEnd('\r')).ToList();
+        timelineLines
+            .Should()
+            .Contain(line =>
+                line.EndsWith(
+                    $"W1:Window: WM_ACTIVATE 非活性 相手=このスレッドの窓 hwnd=0x{otherHandle.ToInt64():x} title='DiagnosticsWindow'",
+                    StringComparison.Ordinal
+                )
+            )
+            .And.Contain(line =>
+                line.EndsWith(
+                    $"W2:Window: WM_ACTIVATE 活性 相手=このスレッドの窓 hwnd=0x{windowHandle.ToInt64():x} title='DiagnosticsWindow'",
+                    StringComparison.Ordinal
+                )
+            )
+            .And.Contain(line =>
+                line.EndsWith("W9:Probe: WM_ACTIVATEAPP 非活性 相手=なし", StringComparison.Ordinal)
+            )
+            .And.Contain(line =>
+                line.EndsWith(
+                    "W9:Probe: WM_ACTIVATEAPP 活性 相手=このプロセスの別のスレッド",
+                    StringComparison.Ordinal
+                )
+            );
+        report.Should().MatchRegex(@"利用者の最後の入力から=([0-9]+ms|不明)");
 
         // Win32 から届いた入力（合成の MouseEventArgs / KeyEventArgs ではない生の報告）は、件数と中身を区画へ書く
         report.Should().MatchRegex(@"件数=[1-9]").And.Contain("RawMouseInputReport");

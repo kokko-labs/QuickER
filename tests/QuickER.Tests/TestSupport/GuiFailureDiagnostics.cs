@@ -454,9 +454,32 @@ internal static class GuiFailureDiagnostics
             var label = entry.Label;
 
             // アクティブの移りには、その瞬間の前面の持ち主を添える（テストの窓が本当の前面だったのか、スレッドの中だけで
-            // アクティブだったのかを、手の区切りを書かないテストでも見分ける）
-            EventHandler activated = (_, _) => Record(label, "Activated", ForegroundOwner());
-            EventHandler deactivated = (_, _) => Record(label, "Deactivated", ForegroundOwner());
+            // アクティブだったのかを、手の区切りを書かないテストでも見分ける）。利用者の最後の入力からの時間と実際の
+            // ボタンも添える（長い無操作の後か・利用者のクリックの瞬間と重なったかを見分ける）
+            EventHandler activated = (_, _) =>
+                Record(label, "Activated", $"{ForegroundOwner()} {UserInputState()}");
+            EventHandler deactivated = (_, _) =>
+                Record(label, "Deactivated", $"{ForegroundOwner()} {UserInputState()}");
+
+            // 何がアクティブを取った（渡した）かを、窓に届く WM_ACTIVATE / WM_ACTIVATEAPP の相手で書く。
+            // 受け身のフック（handled を立てず 0 を返す）で、メッセージの処理は変えない。Track は表示の前に呼ばれるので、
+            // 窓のハンドルができた時点（SourceInitialized）で張る
+            HwndSource? hookedSource = null;
+            HwndSourceHook activationHook = (
+                IntPtr _,
+                int message,
+                IntPtr wParam,
+                IntPtr lParam,
+                ref bool _
+            ) =>
+            {
+                RecordActivationMessage(label, message, wParam, lParam);
+                return IntPtr.Zero;
+            };
+            EventHandler sourceInitialized = (_, _) =>
+                hookedSource ??= AddActivationHook(window, activationHook);
+            window.SourceInitialized += sourceInitialized;
+            hookedSource = AddActivationHook(window, activationHook);
             KeyEventHandler keyDown = (_, e) => Record(label, "PreviewKeyDown", DescribeKey(e));
             KeyEventHandler keyUp = (_, e) => Record(label, "PreviewKeyUp", DescribeKey(e));
             MouseButtonEventHandler mouseDown = (_, e) =>
@@ -504,6 +527,8 @@ internal static class GuiFailureDiagnostics
                 window.RemoveHandler(UIElement.PreviewGotKeyboardFocusEvent, gotFocus);
                 window.RemoveHandler(Mouse.GotMouseCaptureEvent, gotCapture);
                 window.RemoveHandler(Mouse.LostMouseCaptureEvent, lostCapture);
+                window.SourceInitialized -= sourceInitialized;
+                RemoveActivationHook(hookedSource, activationHook);
                 window.Closed -= closed;
             };
             window.Closed += closed;
@@ -720,6 +745,9 @@ internal static class GuiFailureDiagnostics
                 builder.AppendLine(
                     $"  InputManager.MostRecentInputDevice={Describe(InputManager.Current.MostRecentInputDevice)}"
                 );
+
+                // 利用者の最後の入力からの時間（長い無操作の後は Windows がほかのプロセスへ前面を渡す）
+                builder.AppendLine($"  利用者の最後の入力から={IdleText()}");
             }
         );
 
@@ -846,6 +874,182 @@ internal static class GuiFailureDiagnostics
         catch
         {
             return "前面=記録に失敗";
+        }
+    }
+
+    /// <summary>
+    /// 利用者の最後の入力からの時間と実際のボタンを短く書く（長い無操作の後か・利用者のクリックの瞬間と重なったかを
+    /// 見分ける。イベントのハンドラーから呼ぶので例外を出さない）
+    /// </summary>
+    private static string UserInputState()
+    {
+        try
+        {
+            return $"最後の入力から={IdleText()} 実際のボタン {PhysicalButtons()}";
+        }
+        catch
+        {
+            return "最後の入力から=記録に失敗";
+        }
+    }
+
+    /// <summary>
+    /// 利用者の最後の入力（このセッションの全体のキー・マウス）からの経過を書く（<c>GetLastInputInfo</c>。読めなければ「不明」）。
+    /// Windows は既定で 200 秒より長く入力の無いときにほかのプロセスへ前面を渡すので、その状態かを見分ける
+    /// </summary>
+    private static string IdleText()
+    {
+        var info = new LastInputInfo { Size = (uint)Marshal.SizeOf<LastInputInfo>() };
+
+        if (!GetLastInputInfo(ref info))
+        {
+            return "不明";
+        }
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"{unchecked((uint)Environment.TickCount - info.Time)}ms"
+        );
+    }
+
+    /// <summary>窓のハンドルができていればアクティブの移りのフックを張る（張れなければ null。例外を出さない）</summary>
+    private static HwndSource? AddActivationHook(Window window, HwndSourceHook hook)
+    {
+        try
+        {
+            var handle = new WindowInteropHelper(window).Handle;
+
+            if (handle == IntPtr.Zero)
+            {
+                return null;
+            }
+
+            var source = HwndSource.FromHwnd(handle);
+            source?.AddHook(hook);
+            return source;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>張ったアクティブの移りのフックを外す（例外を出さない）</summary>
+    private static void RemoveActivationHook(HwndSource? source, HwndSourceHook hook)
+    {
+        try
+        {
+            if (source is not null && !source.IsDisposed)
+            {
+                source.RemoveHook(hook);
+            }
+        }
+        catch
+        {
+            // 診断の失敗をテストへ持ち込まない
+        }
+    }
+
+    /// <summary>
+    /// 窓に届いた <c>WM_ACTIVATE</c>（相手＝入れ替わりにアクティブを失う・得る窓）と <c>WM_ACTIVATEAPP</c>（相手＝ほかの
+    /// アプリのスレッド）を時系列へ書く。ほかのメッセージは見ない（フックから呼ぶので例外を出さない）。
+    /// 自己テストは、窓のメッセージで作れない WM_ACTIVATEAPP をこれで直に書く
+    /// </summary>
+    internal static void RecordActivationMessage(
+        string label,
+        int message,
+        IntPtr wParam,
+        IntPtr lParam
+    )
+    {
+        try
+        {
+            switch (message)
+            {
+                case WmActivate:
+                    var state = (wParam.ToInt64() & 0xFFFF) switch
+                    {
+                        0 => "非活性",
+                        1 => "活性",
+                        2 => "活性（クリック）",
+                        var other => string.Create(CultureInfo.InvariantCulture, $"状態={other}"),
+                    };
+                    Record(label, "WM_ACTIVATE", $"{state} 相手={DescribeOtherWindow(lParam)}");
+                    break;
+
+                case WmActivateApp:
+                    Record(
+                        label,
+                        "WM_ACTIVATEAPP",
+                        $"{(wParam != IntPtr.Zero ? "活性" : "非活性")} 相手={DescribeThread(unchecked((uint)lParam.ToInt64()))}"
+                    );
+                    break;
+            }
+        }
+        catch
+        {
+            // 診断の失敗をテストへ持ち込まない
+        }
+    }
+
+    /// <summary>
+    /// アクティブの相手の窓を書く（このスレッドの窓・このプロセスの別のスレッドの窓・別のプロセス・なし。タイトルを書くのは
+    /// このプロセスの窓だけ）
+    /// </summary>
+    private static string DescribeOtherWindow(IntPtr handle)
+    {
+        if (handle == IntPtr.Zero)
+        {
+            return "なし";
+        }
+
+        var threadId = GetWindowThreadProcessId(handle, out var processId);
+        var where =
+            threadId == GetCurrentThreadId() ? "このスレッドの窓"
+            : processId == (uint)Environment.ProcessId ? "このプロセスの別のスレッドの窓"
+            : null;
+
+        if (where is null)
+        {
+            return $"別のプロセス process={ProcessNameOf(processId)}";
+        }
+
+        var buffer = new char[256];
+        var length = GetWindowTextW(handle, buffer, buffer.Length);
+        return $"{where} hwnd=0x{handle.ToInt64():x} title='{new string(buffer, 0, Math.Max(0, length))}'";
+    }
+
+    /// <summary>アクティブの相手のスレッドを書く（このスレッド・このプロセスの別のスレッド・別のプロセスの名前・なし）</summary>
+    private static string DescribeThread(uint threadId)
+    {
+        if (threadId == 0)
+        {
+            return "なし";
+        }
+
+        if (threadId == GetCurrentThreadId())
+        {
+            return "このスレッド";
+        }
+
+        var thread = OpenThread(ThreadQueryLimitedInformation, false, threadId);
+
+        if (thread == IntPtr.Zero)
+        {
+            return "スレッド=不明";
+        }
+
+        try
+        {
+            var processId = GetProcessIdOfThread(thread);
+
+            return processId == 0 ? "スレッド=不明"
+                : processId == (uint)Environment.ProcessId ? "このプロセスの別のスレッド"
+                : $"別のプロセス process={ProcessNameOf(processId)}";
+        }
+        finally
+        {
+            CloseHandle(thread);
         }
     }
 
@@ -1095,4 +1299,47 @@ internal static class GuiFailureDiagnostics
     [DllImport("user32.dll")]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern short GetAsyncKeyState(int vKey);
+
+    /// <summary>窓のアクティブの移りのメッセージ</summary>
+    private const int WmActivate = 0x0006;
+
+    /// <summary>アクティブなアプリ（スレッド）の移りのメッセージ</summary>
+    private const int WmActivateApp = 0x001C;
+
+    /// <summary>スレッドの限られた情報の照会（OpenThread のアクセス権）</summary>
+    private const uint ThreadQueryLimitedInformation = 0x0800;
+
+    /// <summary>最後の入力の時刻（GetLastInputInfo の引数）</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LastInputInfo
+    {
+        public uint Size;
+        public uint Time;
+    }
+
+    [DllImport("user32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetLastInputInfo(ref LastInputInfo info);
+
+    [DllImport("kernel32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("kernel32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern IntPtr OpenThread(
+        uint desiredAccess,
+        [MarshalAs(UnmanagedType.Bool)] bool inheritHandle,
+        uint threadId
+    );
+
+    [DllImport("kernel32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern uint GetProcessIdOfThread(IntPtr thread);
+
+    [DllImport("kernel32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
 }

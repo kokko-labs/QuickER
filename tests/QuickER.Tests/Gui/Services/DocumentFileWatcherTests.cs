@@ -128,39 +128,119 @@ public sealed class DocumentFileWatcherTests : IDisposable
         last.ContentHash.Should().Be(newHash);
     }
 
-    /// <summary>連続書き込みのバーストがデバウンスで合流し、最終ハッシュの通知に収束することを検証する</summary>
-    [Fact(DisplayName = "デバウンス: 連続書き込みが 1〜2 件へ合流する")]
-    public void RapidWrites_AreCoalescedByDebounce()
+    /// <summary>
+    /// 照合（内容を読んで期待ハッシュと比べる）の 1 回目を、期待ハッシュを読む手前で止める
+    /// （照合が内容を読んだ後に、全件の負荷でスレッドが横取りされた代役。止めないときは素通しする）
+    /// </summary>
+    /// <remarks>
+    /// 期待ハッシュの供給は「内容を読む → 比べる → 通知する」の間で呼ばれるので、製品に差し込み口を足さずに
+    /// 「読んだ後に遅れた照合」を作れる。解放を忘れても止めたままにしないよう、破棄で解放する。
+    /// </remarks>
+    private sealed class FirstComparisonStall(string expectedHash, bool enabled) : IDisposable
+    {
+        private readonly ManualResetEventSlim _entered = new();
+        private readonly ManualResetEventSlim _release = new();
+        private int _calls;
+
+        /// <summary>期待ハッシュの供給（止めるときは 1 回目だけ、解放されるまで返らない）</summary>
+        public string? Provide()
+        {
+            if (enabled && Interlocked.Increment(ref _calls) == 1)
+            {
+                _entered.Set();
+                _release.Wait(TimeSpan.FromSeconds(30));
+            }
+
+            return expectedHash;
+        }
+
+        /// <summary>1 回目の照合が内容を読んで止まるまで待つ</summary>
+        public bool WaitEntered() => _entered.Wait(TimeSpan.FromSeconds(30));
+
+        /// <summary>止めた照合を続けさせる</summary>
+        public void Release() => _release.Set();
+
+        public void Dispose() => _release.Set();
+    }
+
+    /// <summary>
+    /// 連続書き込みのバーストがデバウンスで合流し、最後の通知が最終内容のハッシュになることを検証する
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 届くことは固定の時間でなく通知そのものを待って確かめる。最終内容の通知が届いた時点で件数を数え（デバウンスが
+    /// 効かなければ書き込みごとの通知がその時点までに届いている）、合流の後に通知が増えないことと最後の通知は、観測の窓の後に
+    /// 番兵の内容を書いてその通知が届くまでに並んだ通知で見届ける（後から届く余分な通知は、番兵の通知より前に並ぶ）。
+    /// </para>
+    /// <para>
+    /// 止める行は、途中の内容を読んだ照合を期待ハッシュの手前で止め、その間に最終内容を書いて最終内容の通知が届いてから
+    /// 続けさせる。デバウンスの満了はスレッドプールで重なって走るので、捨てないと途中の内容の通知が最終内容の通知より
+    /// 後に届く（全件の負荷でスレッドが横取りされると起きる）。
+    /// </para>
+    /// </remarks>
+    [Theory(DisplayName = "デバウンス: 連続書き込みが 1〜2 件へ合流し、最後の通知は最終内容")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RapidWrites_AreCoalescedByDebounce(bool stallIntermediateComparison)
     {
         var path = Path.Combine(_folder, "doc.json");
         File.WriteAllText(path, "A");
         var expected = HashOf(path);
 
-        using var watcher = CreateWatcher(() => expected, debounceMs: 250);
+        using var stall = new FirstComparisonStall(expected, stallIntermediateComparison);
+        using var watcher = CreateWatcher(stall.Provide, debounceMs: 250);
         watcher.Watch(path);
 
-        // デバウンス幅より短い間隔で連続書き込みし、最終内容を D にする
-        foreach (var content in new[] { "B", "CC", "DDD" })
+        // デバウンス幅より短い間隔で連続書き込みし、最終内容を DDD にする
+        foreach (var content in new[] { "B", "CC" })
         {
             File.WriteAllText(path, content);
             Thread.Sleep(30);
         }
 
+        if (stallIntermediateComparison)
+        {
+            // 途中の内容を読んだ照合が止まってから、最終内容を書く
+            stall.WaitEntered().Should().BeTrue("途中の内容を読んだ照合が止まるはず");
+        }
+
+        File.WriteAllText(path, "DDD");
         var finalHash = HashOf(path);
 
-        WaitUntil(() => EventCount() >= 1).Should().BeTrue();
-
-        // 合流後に追加が来ないことを見届ける（デバウンス幅の 2 倍ほど待つ）
-        Thread.Sleep(600);
-
-        var snapshot = Snapshot();
-        snapshot
-            .Count.Should()
+        WaitUntil(() => Snapshot().Any(e => e.ContentHash == finalHash))
+            .Should()
+            .BeTrue("最終内容のハッシュの通知が届くはず");
+        EventCount()
+            .Should()
             .BeLessThanOrEqualTo(
                 2,
                 "デバウンスにより 3 回の書き込み（本来 6 件超の FS 通知）が合流するはず"
             );
-        snapshot[^1].ContentHash.Should().Be(finalHash, "最終内容のハッシュへ収束する");
+        stall.Release();
+
+        // 合流の後に通知が増えないことを見届ける。増えないことは待たないと示せないので、デバウンス幅の 2 倍の観測の
+        // 窓を置いてから番兵を書き、番兵の通知が届くまでに並んだ件数で数える（負荷で遅れた余分な通知も番兵の前に並ぶ。
+        // 窓が負荷で短く見えても検出が弱まるだけで、届いた通知を取りこぼして赤になることはない）
+        Thread.Sleep(500);
+        File.WriteAllText(path, "SENTINEL");
+        var sentinelHash = HashOf(path);
+
+        WaitUntil(() => Snapshot().Any(e => e.ContentHash == sentinelHash))
+            .Should()
+            .BeTrue("番兵の内容の通知が届くはず");
+        var burst = Snapshot().TakeWhile(e => e.ContentHash != sentinelHash).ToList();
+        burst
+            .Should()
+            .HaveCountLessThanOrEqualTo(
+                2,
+                "最終内容の通知の後に、連続書き込みの分の通知が増えない"
+            );
+        burst[^1]
+            .ContentHash.Should()
+            .Be(
+                finalHash,
+                "最後の通知は最終内容（途中の内容を読んだ照合が遅れても、その通知は捨てる）"
+            );
     }
 
     /// <summary>最終既知ハッシュと同一内容の書き込みは通知されない（自己書き込み抑制）ことを検証する</summary>
@@ -182,22 +262,58 @@ public sealed class DocumentFileWatcherTests : IDisposable
         EventCount().Should().Be(0, "内容が同一なら自己書き込みとして抑制される");
     }
 
-    /// <summary>削除が Deleted 種別で通知されることを検証する</summary>
-    [Fact(DisplayName = "削除検知: 削除を Deleted で通知する")]
-    public void Deleted_IsNotified()
+    /// <summary>
+    /// 削除が Deleted 種別で通知され、削除より前に内容を読んだ照合の通知が削除の後に届かないことを検証する
+    /// </summary>
+    /// <remarks>
+    /// 止める行は、書き込みの内容を読んだ照合を期待ハッシュの手前で止め、その間にファイルを消して削除の通知が届いてから
+    /// 続けさせる。削除の後に届くことを見届けるため、同じ名前で番兵の内容を作り直し、その通知が届くまでに並んだ通知を見る。
+    /// </remarks>
+    [Theory(
+        DisplayName = "削除検知: 削除を Deleted で通知し、削除の前に読んだ内容を後から通知しない"
+    )]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Deleted_IsNotified(bool stallComparisonBeforeDelete)
     {
         var path = Path.Combine(_folder, "doc.json");
         File.WriteAllText(path, "A");
         var expected = HashOf(path);
 
-        using var watcher = CreateWatcher(() => expected);
+        using var stall = new FirstComparisonStall(expected, stallComparisonBeforeDelete);
+        using var watcher = CreateWatcher(stall.Provide);
         watcher.Watch(path);
+
+        if (stallComparisonBeforeDelete)
+        {
+            File.WriteAllText(path, "B");
+            stall.WaitEntered().Should().BeTrue("書き込みの内容を読んだ照合が止まるはず");
+        }
 
         File.Delete(path);
 
         WaitUntil(() => Snapshot().Any(e => e.Kind == DocumentFileChangeKind.Deleted))
             .Should()
             .BeTrue("削除が Deleted 種別で通知されるはず");
+
+        if (!stallComparisonBeforeDelete)
+        {
+            return;
+        }
+
+        stall.Release();
+        File.WriteAllText(path, "SENTINEL");
+        var sentinelHash = HashOf(path);
+
+        WaitUntil(() => Snapshot().Any(e => e.ContentHash == sentinelHash))
+            .Should()
+            .BeTrue("作り直した番兵の内容の通知が届くはず");
+        Snapshot()
+            .SkipWhile(e => e.Kind != DocumentFileChangeKind.Deleted)
+            .Skip(1)
+            .TakeWhile(e => e.ContentHash != sentinelHash)
+            .Should()
+            .BeEmpty("削除の後に、削除より前に読んだ内容の通知が届かない");
     }
 
     /// <summary>一時停止中は自己書き込みが通知されず、再開後は通常どおり検知することを検証する</summary>
