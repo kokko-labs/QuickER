@@ -893,6 +893,7 @@ src 全体か src の外を読む守り。単位の守りには数えない（�
 | `parity:release-vpk-pack-runtime` | 正本と写しの照合 |
 | `parity:pack-velopack-vpk-pack-runtime` | 正本と写しの照合 |
 | `parity:test-projects-run-on-mtp` | 正本と写しの照合 |
+| `parity:test-project-files-skip-build-leftovers` | 正本と写しの照合 |
 | `parity:workflow-test-commands-use-mtp-options` | 正本と写しの照合 |
 | `parity:workflow-test-telemetry-opt-out` | 正本と写しの照合 |
 | `parity:mutation-actions-pinned-like-other-workflows` | 正本と写しの照合 |
