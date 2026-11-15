@@ -150,6 +150,17 @@ internal static partial class ParityRows
                 MinimumCanon = 3,
             },
             new(
+                "test-project-files-skip-build-leftovers",
+                "自己検査の行：照合の行 test-projects-run-on-mtp が本物のテストのプロジェクトを集める関数そのものを、一時フォルダに書いた"
+                    + "合成の木で確かめる（正本と写しを比べる行ではない。正本は合成の木で集めるべきプロジェクト）。集め方は src と同じ規則"
+                    + "（フォルダごとに {フォルダ}/{フォルダ}.csproj を 1 つ・bin / obj の下を読まない）で、同じフォルダの WPF のビルドの"
+                    + "一時のプロジェクト（*_wpftmp.csproj）と obj の下の csproj を拾うと、ビルドの残りをそろえるべきテストのプロジェクトに数え、"
+                    + "中身が違えば偽の赤になる。xunit を参照しないプロジェクトはテストのプロジェクトではない",
+                ParityCompare.Sequence,
+                () => ["tests/QuickER.Probe.Tests/QuickER.Probe.Tests.csproj"],
+                ProbeTestProjectFiles
+            ),
+            new(
                 "workflow-test-commands-use-mtp-options",
                 "ワークフローの dotnet test の行は VSTest だけのオプション（--logger・--settings・--collect）を持たない"
                     + "（MTP の dotnet test はそれを受けず、終了コード 5 でテストを 1 件も流さずに止まる）",
@@ -304,7 +315,7 @@ internal static partial class ParityRows
                     string[] projects =
                     [
                         .. SourceFiles
-                            .SrcProjectFiles(WorkflowGuardTests.Root)
+                            .ProjectFiles(WorkflowGuardTests.Root, "src")
                             .Select(path => "../" + RelativeToRoot(path)),
                         "../tests/QuickER.Tests/QuickER.Tests.csproj",
                         "../tests/QuickER.Tests.FakeCodexAppServer/QuickER.Tests.FakeCodexAppServer.csproj",
@@ -657,26 +668,80 @@ internal static partial class ParityRows
             "ワークフローから dotnet test の行を読み取れなかった"
         );
 
-    /// <summary>テストのプロジェクト（tests の下の csproj のうち xunit v3 を参照するもの・序数の順）</summary>
+    /// <summary>テストのプロジェクト（リポジトリの tests の下の csproj のうち xunit v3 を参照するもの・序数の順）</summary>
     private static IReadOnlyList<string> TestProjectFiles() =>
         NonEmpty(
-            [
-                .. Directory
-                    .EnumerateFiles(
-                        Path.Combine(WorkflowGuardTests.Root, "tests"),
-                        "*.csproj",
-                        SearchOption.AllDirectories
-                    )
-                    .Where(path =>
-                        Regex.IsMatch(
-                            File.ReadAllText(path),
-                            @"<PackageReference\s+Include=""xunit\.v3[.""]"
-                        )
-                    )
-                    .Order(StringComparer.Ordinal),
-            ],
+            TestProjectFilesUnder(WorkflowGuardTests.Root),
             "tests の下に xunit v3 を参照する csproj が無い"
         );
+
+    /// <summary>
+    /// 根の下の tests のテストのプロジェクト（src と同じ規則で集めたプロジェクト＝<see cref="SourceFiles.ProjectFiles"/> のうち、
+    /// xunit v3 を参照するもの・序数の順のフルパス）
+    /// </summary>
+    /// <param name="root">リポジトリのルート（自己検査の行は合成の木の根）</param>
+    private static IReadOnlyList<string> TestProjectFilesUnder(string root) =>
+        [
+            .. SourceFiles
+                .ProjectFiles(root, "tests")
+                .Where(path =>
+                    Regex.IsMatch(
+                        File.ReadAllText(path),
+                        @"<PackageReference\s+Include=""xunit\.v3[.""]"
+                    )
+                )
+                .Order(StringComparer.Ordinal),
+        ];
+
+    /// <summary>
+    /// 自己検査の行の合成の木から集めたテストのプロジェクト（根からの相対パス）。木は本物のテストのプロジェクトと、その隣の
+    /// WPF のビルドの一時のプロジェクト・obj の下の csproj（同じ中身と、xunit v3 の別のパッケージだけを参照する中身の違うもの）・
+    /// xunit を参照しないプロジェクトを持つ
+    /// </summary>
+    private static IReadOnlyList<string> ProbeTestProjectFiles()
+    {
+        const string testProject = """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+                <IsTestProject>true</IsTestProject>
+              </PropertyGroup>
+              <ItemGroup>
+                <PackageReference Include="xunit.v3.mtp-v2" />
+              </ItemGroup>
+            </Project>
+            """;
+        const string otherXunitPackage = """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <ItemGroup>
+                <PackageReference Include="xunit.v3.core" />
+              </ItemGroup>
+            </Project>
+            """;
+        const string helperProject = """<Project Sdk="Microsoft.NET.Sdk" />""";
+        using var folder = new TestTempFolder();
+        (string Path, string Text)[] files =
+        [
+            ("tests/QuickER.Probe.Tests/QuickER.Probe.Tests.csproj", testProject),
+            ("tests/QuickER.Probe.Tests/QuickER.Probe.Tests_x1y2z3ab_wpftmp.csproj", testProject),
+            ("tests/QuickER.Probe.Tests/obj/QuickER.Probe.Tests.csproj", testProject),
+            ("tests/QuickER.Probe.Tests/obj/leftover/Leftover.csproj", otherXunitPackage),
+            ("tests/QuickER.Probe.Helper/QuickER.Probe.Helper.csproj", helperProject),
+        ];
+
+        foreach (var file in files)
+        {
+            var path = Path.Combine([folder.Path, .. file.Path.Split('/')]);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, file.Text);
+        }
+
+        return
+        [
+            .. TestProjectFilesUnder(folder.Path)
+                .Select(path => Path.GetRelativePath(folder.Path, path).Replace('\\', '/')),
+        ];
+    }
 
     /// <summary>実行器をそろえる対象（global.json とテストのプロジェクト）</summary>
     private static IReadOnlyList<string> TestRunnerTargets() =>

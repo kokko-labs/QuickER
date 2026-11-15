@@ -159,7 +159,7 @@
      - dotnet CLI が `dotnet test` のたびに書くワークロードのログ（`Microsoft.NET.Workload_<pid>_<時刻>.log`）。テストのものではない。
      - まれに `MockPreviewPanelRuntimeTests` の WebView2 のユーザーデータ（`userdata\EBWebView`）。ブラウザプロセスの終了を最大 30 秒待ち、削除を 10 秒やり直しても、負荷の高い全件の中では描画・GPU の子プロセスがまだ掴んでいることがある。上限を延ばしても負荷しだいで超える点は変わらず、テストの終わりが遅れるだけなので、消せないものとして残す。
    - 古い版のコードを流した実行（計測で直す前の版を流すなど）は、その版の残りを本物の %TEMP% に残す。古い版は直せないので、次の実行の始めに古い残りを消す掃除は入れていない（消すかどうかは利用者が決める）。
-7. ソースの走査のガード：`TestSupport/GuardKnownList.AssertMatches`（見つかった出現と理由つきの既知の一覧を件数まで 2 方向で照合する。Integration も機能 × 実装先の行列の名前の規則で同じ 1 ファイルを Compile のリンクで使う）と `TestSupport/SourceFiles`（ガードが読むファイルの列挙と、bin / obj の判定 `IsBuildOutput` と src のプロジェクトの集め方 `SrcProjectFiles` の唯一の場所。パースはしない）。ソースの規則は規則の表（`TestSupport/Guards/`・「ソースを走査するガード」）の行にし、走査・照合・報告は表の 1 か所が持つ。表へ移していないガードは、条件コンパイルの全分岐を読む `ConditionalSourceParse` / `SourceSymbolScan` を自分で呼ぶ。
+7. ソースの走査のガード：`TestSupport/GuardKnownList.AssertMatches`（見つかった出現と理由つきの既知の一覧を件数まで 2 方向で照合する。Integration も機能 × 実装先の行列の名前の規則で同じ 1 ファイルを Compile のリンクで使う）と `TestSupport/SourceFiles`（ガードが読むファイルの列挙と、bin / obj の判定 `IsBuildOutput` と src・tests のプロジェクトの集め方 `ProjectFiles` の唯一の場所。パースはしない）。ソースの規則は規則の表（`TestSupport/Guards/`・「ソースを走査するガード」）の行にし、走査・照合・報告は表の 1 か所が持つ。表へ移していないガードは、条件コンパイルの全分岐を読む `ConditionalSourceParse` / `SourceSymbolScan` を自分で呼ぶ。
 
 8. テストホストの GC：`QuickER.Tests` の csproj は `ServerGarbageCollection` を true にする（runtimeconfig の `System.GC.Server` 経由で testhost に効く）。
    - 理由：並列の全件実行では、生成コードのコンパイル・emit と総当たりが大量に割り当てる。既定のワークステーション GC では CPU の使用率が 3 割前後のまま GC の待ちで止まり、1 行の時間が単独で流したときの 2〜8 倍に伸びる。サーバー GC にすると全件の壁時計がおよそ半分になる（24 論理コアの開発機で 281 秒 → 139 秒）。testhost のメモリの最大は 322 MB から 535 MB に増える。
@@ -406,10 +406,13 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
 - 記号は 1 つのファイル（変種はプロジェクト）で 6 個 = 64 通りまで。超えると黙って間引かず、ファイル名を添えて例外にする。
 - テストが Roslyn のパース（`ParseText` / `ParseSyntaxTree`）を直接呼ぶのは、`SourceRuleTests` の規則 `direct-roslyn-parses` の理由つきの一覧（生成器・レンダラーの出力を 1 つの構成でコンパイル・読み取りするもの・入口そのもの・自己検査の対照とプローブ）にあるものだけ。tests/ の全 `.cs` をファイル・メソッド名と件数で厳密に照合する。
 - `SourceSymbolScan` は QuickER.Gui の暗黙の using を読む（ファイル名は AssemblyName でなく .csproj の名前で付く）。
-- src のプロジェクトの集め方は `SourceFiles.SrcProjectFiles` の 1 か所：src の csproj を持つフォルダごとに、フォルダの名前の csproj（`{フォルダ}/{フォルダ}.csproj`）を 1 つだけプロジェクトにする（bin / obj の下は読まない）。`SourceSymbolScan`（プロジェクトの組み方とプリプロセッサの記号）と照合の行 `stryker-tests-only-solution-projects` がこれを通す。
-  - 走査はフォルダの下の .cs を全部そのプロジェクトのソースにするので、同じフォルダのほかの csproj（WPF のビルドが途中で止まると残る一時のプロジェクト `*_wpftmp.csproj`。.gitignore 済み）をプロジェクトにすると、シンボルの規則が同じ行を 2 回数え、照合の行もソリューションに無いプロジェクトとして赤になる。
-  - csproj を持つのにフォルダの名前の csproj が無いフォルダは、フォルダを名指しして例外にする（名前の違う新しいプロジェクトを黙って読まないことにしない）。
-  - ガード：`SourceRuleTests` の自己検査の行 `raw-file-writes-build-leftover-project`（`SourceRuleProbe.ThroughProjectDiscovery`＝合成の木を一時フォルダに書き、本物の src と同じ `SourceSymbolScan.LoadSrcProjects` で組む。同じフォルダの一時のプロジェクトと obj の下の csproj を置いても、書き込みの呼び出しを 1 回だけ拾う）。集め方を元の「src の csproj を全部」に戻すと 2 回拾って赤になる。名前の合わないフォルダの例外は、本物の src にフォルダを置いて確かめた。
+- src と tests のプロジェクトの集め方は `SourceFiles.ProjectFiles(root, area)` の 1 か所：その領域の csproj を持つフォルダごとに、フォルダの名前の csproj（`{フォルダ}/{フォルダ}.csproj`）を 1 つだけプロジェクトにする（bin / obj の下は読まない）。src は `SourceSymbolScan`（プロジェクトの組み方とプリプロセッサの記号）と照合の行 `stryker-tests-only-solution-projects`、tests は照合の行 `test-projects-run-on-mtp`（集めたうちの xunit v3 を参照するものをテストのプロジェクトにする）が通す。
+  - 走査はフォルダの下の .cs を全部そのプロジェクトのソースにするので、同じフォルダのほかの csproj（WPF のビルドが途中で止まると残る一時のプロジェクト `*_wpftmp.csproj`。.gitignore 済み）をプロジェクトにすると、シンボルの規則が同じ行を 2 回数え、照合の行もビルドの残りをプロジェクトに数える（ソリューションに無いプロジェクト・中身の違う csproj なら写しの不一致として赤）。いまの QuickER.Tests は XAML を持たないので一時のプロジェクトを作らないが、規則は src と同じにそろえる。
+  - csproj を持つのにフォルダの名前の csproj が無いフォルダは、どちらの領域でもフォルダを名指しして例外にする（名前の違う新しいプロジェクトを黙って読まないことにしない）。
+  - ガード：
+    - src：`SourceRuleTests` の自己検査の行 `raw-file-writes-build-leftover-project`（`SourceRuleProbe.ThroughProjectDiscovery`＝合成の木を一時フォルダに書き、本物の src と同じ `SourceSymbolScan.LoadSrcProjects` で組む。同じフォルダの一時のプロジェクトと obj の下の csproj を置いても、書き込みの呼び出しを 1 回だけ拾う）。集め方を元の「src の csproj を全部」に戻すと 2 回拾って赤になる。
+    - tests：`ParityTests` の行 `test-project-files-skip-build-leftovers`（照合の表に置いた自己検査の行。照合の行 `test-projects-run-on-mtp` が使う関数そのものを、一時フォルダに書いた合成の木〔本物のテストのプロジェクト・隣の一時のプロジェクト・obj の下の同じ中身の csproj と xunit v3 の別のパッケージだけを参照する csproj・xunit を参照しないプロジェクト〕で確かめ、本物の 1 本だけを集める）。集め方を元の「tests の csproj を全部」に戻すと 4 本を集めて赤、bin / obj の除外を外すと obj のフォルダが名前の csproj の無いフォルダとして例外になり、src と tests の両方の行が赤になる。
+    - 名前の合わないフォルダの例外は、本物の src にフォルダを置いて確かめた。
 - ガード：`ConditionalSourceParseTests`（`#if !DEBUG` と `QUICKER_*` の `#else` の中の呼び出しが、1 通りのパースでは見えず全組み合わせでは見える〔構文とシンボルの両方〕・実ファイルの組み合わせの数＝UpdateFeed.cs 2・FeatureModuleCatalog.cs 8・条件コンパイルの無いファイル 1・分岐の外を重ねない・入れ子の条件・上限・QuickER.Gui の 15 の変種〔エラーなし〕）。mutation 実証済み。
 
 ## EF Core のテストの構成

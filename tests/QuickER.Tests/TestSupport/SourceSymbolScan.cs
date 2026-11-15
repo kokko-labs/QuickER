@@ -19,7 +19,7 @@ namespace QuickER.Tests.TestSupport;
 /// </para>
 /// <para>
 /// 組み方：<c>src/</c> の <c>.csproj</c> を持つフォルダを 1 プロジェクトとし（csproj はフォルダの名前のもの 1 つだけ＝
-/// <see cref="SourceFiles.SrcProjectFiles"/>）、その下の <c>.cs</c>（<c>bin</c> / <c>obj</c> を除く）に、
+/// <see cref="SourceFiles.ProjectFiles"/>）、その下の <c>.cs</c>（<c>bin</c> / <c>obj</c> を除く）に、
 /// ビルドが作った暗黙の using（<c>obj/**/{.csproj の名前}.GlobalUsings.g.cs</c>）を足す。参照はテストの実行時の
 /// TRUSTED_PLATFORM_ASSEMBLIES と、テストの出力フォルダの管理された DLL（自分自身のアセンブリを除く）。
 /// アセンブリ名は <c>.csproj</c> の <c>AssemblyName</c>（無ければフォルダ名）にして、<c>InternalsVisibleTo</c> を効かせる。
@@ -104,7 +104,7 @@ internal static class SourceSymbolScan
     /// <param name="root">リポジトリのルート（自己検査は合成の木の根）</param>
     public static IReadOnlyList<SourceProject> LoadSrcProjects(string root) =>
         SourceFiles
-            .SrcProjectFiles(root)
+            .ProjectFiles(root, "src")
             .AsParallel()
             .Select(csproj => LoadProject(root, csproj))
             .OrderBy(project => project.Name, StringComparer.Ordinal)
@@ -385,7 +385,7 @@ internal static class SourceSymbolScan
     {
         var root = NeutralResxFiles.FindRepositoryRoot();
         var symbols = SourceFiles
-            .SrcProjectFiles(root)
+            .ProjectFiles(root, "src")
             .SelectMany(path => Regex.Matches(File.ReadAllText(path), "QUICKER_[A-Z_]+"))
             .Select(match => match.Value)
             .Distinct(StringComparer.Ordinal)
