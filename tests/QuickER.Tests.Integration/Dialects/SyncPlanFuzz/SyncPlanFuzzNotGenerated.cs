@@ -88,6 +88,14 @@ internal static class SyncPlanFuzzNotGenerated
                     "DB は QuickER の DDL と素の接続で作るので、アプリが登録した照合順序・関数を使う物を作れない（DB の事実）。作り直しの除外は決まった形の行が受け持つ",
                     Expectations + " の行 `realdb-external-*`"
                 ),
+                NotGenerated.Pending(
+                    "exclusion-chains",
+                    "ある除外が外した項目を、別の除外の判定が前提にしていた形（列が残らない表の列の削除と、その一意制約と同じ名前の一意制約の追加・作り直しを外す表の主キーの変更と、その新しい主キーを参照する外部キーの追加・型の食い違いで外す外部キーの作り直しと、古い外部キーと同じ定義の外部キーの追加）",
+                    "候補 (m)：同期計画の生成器に除外の連鎖の形を足す",
+                    "後ろの除外が外す形と、前の判定が数える形の組で、今の水準の掛け合わせでは出ない（網の普段の種の数では、除外を周へ入れる前後で計画が変わるケースが無い）",
+                    Expectations
+                        + " の行 `realdb-name-collision-unique-with-excluded-last-column-drop` / `realdb-rebuild-skipped-when-import-discarded-excludes-fk-requiring-its-pk-change` / `plan-type-mismatch-excluded-alter-keeps-live-fk-with-same-definition-as-added-fk` / `plan-type-mismatch-excluded-add-with-same-definition-is-not-warned-for-set-null`・`rule:sync-exclusions-inside-stable-loop`"
+                ),
                 NotGenerated.Accepted(
                     "legacy-history",
                     "旧版の来歴（PostgreSQL の切り詰め名）",

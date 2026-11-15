@@ -551,6 +551,82 @@ internal static partial class SyncPlanExpectationRows
                         e.After.Single("fk c fk_x *");
                     })
                 ),
+            // 型の食い違いで外す外部キーの作り直し（古い外部キーが DB に残る）と、その古い外部キーと同じ定義の外部キーの追加。同じ定義の
+            // 外部キーを 2 本持てない方言（Oracle の ORA-02275）では、作り直しが外れると古い外部キーが残るので、追加も古い外部キーの削除を
+            // 前提にする項目として外す
+            Row(
+                    "plan-type-mismatch-excluded-alter-keeps-live-fk-with-same-definition-as-added-fk",
+                    "型の食い違い: 作り直しを外した外部キーと同じ定義の外部キーの追加は、同じ定義を 2 本持てない方言では外して名指しする",
+                    DialectNames.Oracle
+                )
+                .Live(s =>
+                {
+                    s.Tbl("p_old", ("id", "NUMBER(10)", true));
+                    s.Tbl("p_new", ("id", "NUMBER(10)", true));
+                    s.Tbl("c", ("id", "NUMBER(10)", true), ("pid", "NUMBER(10)", false));
+                    s.Fk("p_old", "c", "fk_x", ("id", "pid"));
+                })
+                .Target(s =>
+                {
+                    s.Tbl("p_old", ("id", "NUMBER(10)", true));
+                    s.Tbl("p_new", ("id", "VARCHAR2(10)", true));
+                    s.Tbl("c", ("id", "NUMBER(10)", true), ("pid", "NUMBER(10)", false));
+                    s.Fk("p_new", "c", "fk_x", ("id", "pid"));
+                    s.Fk("p_old", "c", "fk_y", ("id", "pid"));
+                })
+                .Select(SelectAll)
+                .Expect(e =>
+                    e.Excluded.Contains("AlterForeignKey *")
+                        .Excluded.Contains("AddForeignKey *")
+                        .Warnings.Contains("ForeignKeyColumnTypeMismatch(c): fk_x")
+                        .Warnings.Contains("SelectedItemRequiresUnselectedItem(c): fk_y (c.fk_x)")
+                )
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Outcome.Exact("committed");
+                        e.After.Count("fk *", 1);
+                        e.After.Single("fk c fk_x *");
+                    })
+                ),
+            // 上と同じ形で、足す外部キーが SET NULL・子の列が NOT NULL。SET NULL を作れる方言（Oracle）は外さずに警告だけを出すが、
+            // 外部キーの追加が同じ定義の重なりで外れたら、計画に無い外部キーの SET NULL の警告は残さない（警告は外し終えた項目で 1 回だけ決める）
+            Row(
+                    "plan-type-mismatch-excluded-add-with-same-definition-is-not-warned-for-set-null",
+                    "型の食い違い: 同じ定義の重なりで外した SET NULL の外部キーの追加には、SET NULL の警告を残さない",
+                    DialectNames.Oracle
+                )
+                .Live(s =>
+                {
+                    s.Table("p_old", S.Pk("id", "NUMBER(10)"));
+                    s.Table("p_new", S.Pk("id", "NUMBER(10)"));
+                    s.Table("c", S.Pk("id", "NUMBER(10)"), S.NotNull("pid", "NUMBER(10)"));
+                    s.Fk("p_old", "c", "fk_x", ("id", "pid"));
+                })
+                .Target(s =>
+                {
+                    s.Table("p_old", S.Pk("id", "NUMBER(10)"));
+                    s.Table("p_new", S.Pk("id", "VARCHAR2(10)"));
+                    s.Table("c", S.Pk("id", "NUMBER(10)"), S.NotNull("pid", "NUMBER(10)"));
+                    s.Fk("p_new", "c", "fk_x", ("id", "pid"));
+                    s.Fk("p_old", "c", "fk_y", ("id", "pid")).OnDelete =
+                        ForeignKeyReferentialAction.SetNull;
+                })
+                .Select(SelectAll)
+                .Expect(e =>
+                    e.Excluded.Contains("AlterForeignKey *")
+                        .Excluded.Contains("AddForeignKey *")
+                        .Warnings.Contains("SelectedItemRequiresUnselectedItem(c): fk_y (c.fk_x)")
+                        .Warnings.Absent("SetNullOnNotNullColumn*")
+                )
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Outcome.Exact("committed");
+                        e.After.Count("fk *", 1);
+                        e.After.Single("fk c fk_x *");
+                    })
+                ),
         ];
 
     /// <summary>差分の項目をすべて選ぶ</summary>

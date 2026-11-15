@@ -219,81 +219,46 @@ public sealed class SyncPlanner
         // 利用者が選んだのに計画から外した項目（外す箇所は警告と一緒に ExcludeSelected で積む）
         var excluded = new List<SchemaDiffItem>();
 
-        // 選択済みの項目のみを対象にする（未選択は完全に除外）。列の無い表の追加・名前の重なる表の追加・選んでいない変更を前提にする
-        // 項目を外して名指しする（ExcludeUntilStable）。外部キー・一意制約の作り直しはその後で DROP と ADD の 2 項目へ展開し、
-        // 以降は通常の差分として扱う（展開の前に判定する＝作り直しを外すときは削除と追加をまとめて外し、削除だけが走って制約が
-        // 消えたまま残らない）
-        var dependable = ExcludeUntilStable(
-            [.. items.Where(i => i.IsSelected)],
-            capabilities,
-            context,
-            warnings,
-            excluded
-        );
-
-        // 選んだ列の削除で同期後に列が 1 本も残らない表は、その表の列の削除を外して名指しする（方言に依らない。
-        // 依存の除外の後の項目で数えるので、外れた項目は列の追加にも削除にも数えない）
-        dependable = ExcludeDropsLeavingNoColumns(dependable, context, warnings, excluded);
-
         // ALTER COLUMN も FK の後付けもできない方言はテーブル再構築が必要になる
         var isRebuildDialect =
             !capabilities.SupportsAlterColumn || !capabilities.SupportsForeignKeyAlter;
 
-        // テーブル再構築の方言では、取込が捨てた表の中の物（図に無い列・外部キー）がある表を作り直す項目を外して名指しする
-        // （作り直すと捨てた物がデータごと黙って消える）
-        var discardedContent = isRebuildDialect
-            ? CollectImportDiscardedContent(context)
-            : new Dictionary<string, List<string>>(SchemaNames.Comparer);
-
-        if (discardedContent.Count > 0)
-        {
-            dependable = ExcludeRebuildsOfProtectedTables(
-                dependable,
-                discardedContent,
-                SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent,
-                context!,
-                warnings,
-                excluded
-            );
-        }
-
-        // テーブル再構築の方言では、DB の外で登録した照合順序・関数を使う物があって作り直せない表を作り直す項目も、同じ規則で外して
-        // 名指しする（QuickER の接続では作り直しが必ず巻き戻る）
-        var blockedTables = isRebuildDialect
-            ? CollectRebuildBlockedTables(context)
-            : new Dictionary<string, List<string>>(SchemaNames.Comparer);
-
-        if (blockedTables.Count > 0)
-        {
-            dependable = ExcludeRebuildsOfProtectedTables(
-                dependable,
-                blockedTables,
-                SyncPlanWarningKind.TableRebuildBlockedByExternalDefinition,
-                context!,
-                warnings,
-                excluded
-            );
-        }
-
-        // 逐次 DDL の方言では、同期後に両端の型が食い違う外部キーの追加・作り直しを外して名指しする（付け直しが必ず
-        // 失敗する）。再構築の方言は外部キーの型を確かめない。続けて、子の列が同期後に NOT NULL になる SET NULL の外部キーの
-        // 追加・作り直しを名指しし、作れない方言（SQL Server・MySQL）では外す。どちらも展開の前に判定し、作り直しは
-        // 削除と追加をまとめて外す
-        var beforeExpansion = ExcludeSetNullForeignKeysOnNotNullColumns(
-            isRebuildDialect
-                ? dependable
-                : ExcludeForeignKeysWithPostSyncTypeMismatch(
-                    dependable,
-                    capabilities,
-                    context,
-                    warnings,
-                    excluded
+        // テーブル再構築の方言で作り直さない表と、その表を作り直す項目を外すときの警告の種類（どちらも選んだ項目に依らないので、
+        // 除外の周の前に 1 回だけ求める）：取込が捨てた表の中の物（図に無い列・外部キー）がある表（作り直すと捨てた物がデータごと
+        // 黙って消える）と、DB の外で登録した照合順序・関数を使う物があって作り直せない表（QuickER の接続では作り直しが必ず巻き戻る）
+        List<(
+            Dictionary<string, List<string>> Tables,
+            SyncPlanWarningKind Warning
+        )> protectedTables = isRebuildDialect
+            ?
+            [
+                (
+                    CollectImportDiscardedContent(context),
+                    SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent
                 ),
+                (
+                    CollectRebuildBlockedTables(context),
+                    SyncPlanWarningKind.TableRebuildBlockedByExternalDefinition
+                ),
+            ]
+            : [];
+
+        // 選択済みの項目のみを対象にする（未選択は完全に除外）。計画に載せられない項目を、何も外れなくなるまで繰り返して外し、
+        // 名指しする（ExcludeUntilStable）。外部キー・一意制約の作り直しはその後で DROP と ADD の 2 項目へ展開し、以降は通常の差分
+        // として扱う（展開の前に判定する＝作り直しを外すときは削除と追加をまとめて外し、削除だけが走って制約が消えたまま残らない）
+        var beforeExpansion = ExcludeUntilStable(
+            [.. items.Where(i => i.IsSelected)],
             capabilities,
             context,
+            isRebuildDialect,
+            protectedTables,
             warnings,
             excluded
         );
+
+        // SET NULL を作れる方言では、子の列が同期後に NOT NULL になる SET NULL の外部キーの追加・作り直しを、外さずに名指しする。
+        // 警告だけの判定は、外し終えた項目で 1 回だけ行う（周の中で積むと、後の周で外れた外部キーの警告が残る）
+        WarnSetNullForeignKeysOnNotNullColumns(beforeExpansion, capabilities, context, warnings);
         var selected = ExpandAlters(beforeExpansion);
 
         // 主キーの変更で新しく主キーに加わる NULL 許容の列は、NOT NULL 化を選んでいなくても暗黙に NOT NULL にする
@@ -339,7 +304,7 @@ public sealed class SyncPlanner
         WarnAddedForeignKeysNotOnCandidateKey(selected, capabilities, context, warnings);
 
         // SET DEFAULT の外部キーの NOT NULL の子の列は、DEFAULT 制約が無いと作れない方言（SQL Server）で名指しする
-        WarnSetDefaultOnNotNullColumns(selected, capabilities, warnings);
+        WarnSetDefaultOnNotNullColumns(selected, capabilities, context, warnings);
 
         // ドットを含む表名を表せない方言（SQLite）では、選んだ項目が触れるその表を名指しする
         WarnSchemaQualifiedTableNames(selected, capabilities, warnings);
@@ -973,31 +938,67 @@ public sealed class SyncPlanner
     }
 
     /// <summary>
-    /// 選んだ項目のうち、計画に載せられない項目を外して名指しする：列の無い表の追加（<see cref="ExcludeTablesWithoutColumns"/>）・
-    /// 名前の重なる表の追加（<see cref="ExcludeTablesWithCollidingConstraintNames"/>）・DB のビューを読めなくする変更
-    /// （<see cref="ExcludeChangesBreakingLiveDependents"/>）・選んでいない変更を前提にする項目（<see cref="ExcludeItemsRequiringUnselected"/>）
+    /// 選んだ項目のうち、計画に載せられない項目を、何も外れなくなるまで繰り返して外し、名指しする。計画が選んだ項目を外すのは
+    /// ここだけ（除外の関数をこの周の外から呼ばない）。
     /// </summary>
+    /// <param name="selected">選択済みの項目（外部キー・一意制約の作り直しは展開前）</param>
+    /// <param name="capabilities">方言のケーパビリティ</param>
+    /// <param name="context">live スキーマ</param>
+    /// <param name="isRebuildDialect">テーブル再構築の方言か（再構築の方言は外部キーの両端の型を確かめない）</param>
+    /// <param name="protectedTables">
+    /// 作り直さない表と、その表を作り直す項目を外すときの警告の種類（再構築の方言だけ。選んだ項目に依らないので呼び出し側が
+    /// 1 回だけ求める）
+    /// </param>
+    /// <param name="warnings">名指しの警告を積む先</param>
+    /// <param name="excluded">外した項目を積む先</param>
+    /// <returns>残す項目</returns>
     /// <remarks>
     /// <para>
-    /// 列の無い表の追加は項目そのものだけで決まるので 1 回だけ外す。外した表の追加は選ばなかった項目と同じに扱い、続く段がそれを
-    /// 前提にする項目を外す。
+    /// 列の無い表の追加（<see cref="ExcludeTablesWithoutColumns"/>）は項目そのものだけで決まるので 1 回だけ外す。外した表の追加は
+    /// 選ばなかった項目と同じに扱い、続く段がそれを前提にする項目を外す。
     /// </para>
     /// <para>
-    /// 名前の重なる表の追加・ビューを読めなくする変更・依存の除外は、何も外れなくなるまで繰り返す（ビューの判定は外した列の追加を前提にする
-    /// 項目を同じ周の依存の除外が外せるよう、その前に置く。依存の除外が列の追加だけを外すと残った列の削除がビューを読めなくしうるので、
-    /// 次の周でもう一度試す）。名前の重なりの判定（<see cref="RemainingLiveConstraints"/>）は
-    /// 選んだ表・列の削除で消える制約を「残らない」と数えるが、その削除自身が同じ段で外されることがある（主キーの変更を選ばない
-    /// 主キーの列の削除）。1 回で止めると、外された削除の表・列の制約が残るのに、その名前と重なる追加が外されずに断られる。
-    /// 繰り返しは必ず止まる：周ごとに少なくとも 1 つの選んだ項目を外したときだけ次の周へ進み、外すほど残る制約は増えるだけ
-    /// （外した項目が戻ることはない）で、選んだ項目の数は有限。NULL 許容化だけを外して型の変更を残す列の変更は、残した項目が
-    /// 次の周で外れない（NULL 許容化を含まない）。周の数が選んだ項目の数を超えたら、止まる理由が崩れたので例外にする（途中の計画を
-    /// 返さない）。どの周も、その周で外した項目だけを名指しするので、警告は重ならず、並びは周の順で決まる。
+    /// 残りの除外は、この順で何も外れなくなるまで繰り返す：名前の重なる表の追加
+    /// （<see cref="ExcludeTablesWithCollidingConstraintNames"/>）・DB のビュー・トリガー・索引を壊す変更
+    /// （<see cref="ExcludeChangesBreakingLiveDependents"/>）・選んでいない変更を前提にする項目
+    /// （<see cref="ExcludeItemsRequiringUnselected"/>）・同期後に列が 1 本も残らない表の列の削除
+    /// （<see cref="ExcludeDropsLeavingNoColumns"/>。依存の除外の後の項目で数えるので、外れた項目は列の追加にも削除にも数えない）・
+    /// 作り直さない表を作り直す項目（<see cref="ExcludeRebuildsOfProtectedTables"/>。再構築の方言だけ）・同期後に両端の型が
+    /// 食い違う外部キーの追加・作り直し（<see cref="ExcludeForeignKeysWithPostSyncTypeMismatch"/>。逐次 DDL の方言だけ）・
+    /// 子の列が同期後に NOT NULL になる SET NULL の外部キーの追加・作り直し
+    /// （<see cref="ExcludeSetNullForeignKeysOnNotNullColumns"/>。作れない方言だけ）。
+    /// </para>
+    /// <para>
+    /// 繰り返す理由：どの除外の判定も、ほかの選んだ項目を材料にする。名前の重なりの判定（<see cref="RemainingLiveConstraints"/>）は
+    /// 選んだ表・列の削除と作り直しで消える制約を「残らない」と数え、依存の除外は選んだ追加と主キーの変更を「同期後に在る」と
+    /// 数える。その項目自身が別の除外で外されると、判定が古くなる（主キーの変更を選ばない主キーの列の削除・列が残らない表の
+    /// 列の削除・作り直さない表の主キーの変更・型の食い違う外部キーの作り直し）。1 回で止めると、外された削除の制約が残るのに
+    /// その名前と重なる追加が、外された主キーの変更を前提にする外部キーの追加が、外されずに DB で断られる。ビューの判定は、
+    /// 外した列の追加を前提にする項目を同じ周の依存の除外が外せるよう、その前に置く（依存の除外が列の追加だけを外すと残った
+    /// 列の削除がビューを読めなくしうるので、次の周でもう一度試す）。
+    /// </para>
+    /// <para>
+    /// 繰り返しは必ず止まる：周ごとに少なくとも 1 つの選んだ項目を外したときだけ次の周へ進み、外すほど残る制約と足りない前提は
+    /// 増えるだけ（外した項目が戻ることはない）で、選んだ項目の数は有限。NULL 許容化だけを外して型の変更を残す列の変更は、
+    /// 残した項目が次の周で外れない（NULL 許容化を含まない）。周の数が選んだ項目の数を超えたら、止まる理由が崩れたので例外にする
+    /// （途中の計画を返さない）。どの周も、その周で外した項目だけを名指しするので、警告は重ならず、並びは周の順で決まる。
+    /// 1 周目の呼び出しの並びは、除外を 1 回ずつ流すときと同じなので、2 周目に入らない入力では警告の並びも変わらない。
+    /// </para>
+    /// <para>
+    /// 周の中で積む警告は、外した項目の名指し（<see cref="ExcludeSelected"/>）だけにする。外した項目は戻らないので、その名指しは
+    /// 古くならない。項目を外さずに積む警告（<see cref="WarnSetNullForeignKeysOnNotNullColumns"/> など）は、後の周で外れた項目の
+    /// 警告が残るので、周の後に、外し終えた項目で 1 回だけ決める。
     /// </para>
     /// </remarks>
     private static List<SchemaDiffItem> ExcludeUntilStable(
         List<SchemaDiffItem> selected,
         SyncDialectCapabilities capabilities,
         SyncPlanContext? context,
+        bool isRebuildDialect,
+        IReadOnlyList<(
+            Dictionary<string, List<string>> Tables,
+            SyncPlanWarningKind Warning
+        )> protectedTables,
         List<SyncPlanWarning> warnings,
         List<SchemaDiffItem> excluded
     )
@@ -1020,6 +1021,41 @@ public sealed class SyncPlanner
                     warnings,
                     excluded
                 ),
+                capabilities,
+                context,
+                warnings,
+                excluded
+            );
+            current = ExcludeDropsLeavingNoColumns(current, context, warnings, excluded);
+
+            foreach (var (tables, warning) in protectedTables)
+            {
+                if (tables.Count > 0)
+                {
+                    current = ExcludeRebuildsOfProtectedTables(
+                        current,
+                        tables,
+                        warning,
+                        context!,
+                        warnings,
+                        excluded
+                    );
+                }
+            }
+
+            if (!isRebuildDialect)
+            {
+                current = ExcludeForeignKeysWithPostSyncTypeMismatch(
+                    current,
+                    capabilities,
+                    context,
+                    warnings,
+                    excluded
+                );
+            }
+
+            current = ExcludeSetNullForeignKeysOnNotNullColumns(
+                current,
                 capabilities,
                 context,
                 warnings,
@@ -4077,22 +4113,19 @@ public sealed class SyncPlanner
     }
 
     /// <summary>
+    /// <see cref="SyncDialectCapabilities.SetNullRequiresNullableChildColumn"/> が <c>true</c> の方言（SQL Server・MySQL）で、
     /// 選んだ外部キーの追加・作り直しのうち、参照アクション <c>SET NULL</c> を使い、子の列が同期後に NOT NULL になるものを
-    /// <see cref="SyncPlanWarningKind.SetNullOnNotNullColumn"/> で名指しする。
-    /// <see cref="SyncDialectCapabilities.SetNullRequiresNullableChildColumn"/> が <c>true</c> の方言（SQL Server・MySQL）では
-    /// 計画から外す（作り直しは展開前の 1 項目として外すので、削除だけが走って外部キーが消えたまま残らない）。
+    /// 計画から外し、<see cref="SyncPlanWarningKind.SetNullOnNotNullColumn"/> で名指しする（作り直しは展開前の 1 項目として
+    /// 外すので、削除だけが走って外部キーが消えたまま残らない）。ほかの方言では何も外さない
+    /// （外さずに名指しするのは <see cref="WarnSetNullForeignKeysOnNotNullColumns"/>）。
     /// </summary>
     /// <param name="selected">選択済みの項目（外部キーの作り直しは展開前）</param>
     /// <param name="capabilities">方言のケーパビリティ（方言が書く参照アクションと、作れるかの宣言）</param>
     /// <param name="context">live スキーマ（無ければ図の値で見る）</param>
     /// <param name="warnings">名指しの警告を積む先</param>
+    /// <param name="excluded">外した項目を積む先</param>
     /// <returns>残す項目</returns>
-    /// <remarks>
-    /// 子の列の同期後の NULL 許容は、選んだ主キーの変更で主キーに入る列は NOT NULL、選んだ列の変更があればその値、
-    /// live に在る列は live の値、live に無い列（追加する表・列）は図の値（<see cref="PostSyncNullability"/>）。
-    /// 参照アクションは方言が書くもの（<see cref="SyncDialectCapabilities.EffectiveOnDelete"/> /
-    /// <see cref="SyncDialectCapabilities.EffectiveOnUpdate"/>）で見る＝ON UPDATE を持たない方言（Oracle）の ON UPDATE は数えない。
-    /// </remarks>
+    /// <remarks>判定は <see cref="FindSetNullForeignKeysOnNotNullColumns"/>。</remarks>
     private static List<SchemaDiffItem> ExcludeSetNullForeignKeysOnNotNullColumns(
         List<SchemaDiffItem> selected,
         SyncDialectCapabilities capabilities,
@@ -4101,51 +4134,135 @@ public sealed class SyncPlanner
         List<SchemaDiffItem> excluded
     )
     {
+        if (!capabilities.SetNullRequiresNullableChildColumn)
+        {
+            return selected;
+        }
+
+        var found = FindSetNullForeignKeysOnNotNullColumns(selected, capabilities, context);
+
+        if (found.Count == 0)
+        {
+            return selected;
+        }
+
+        foreach (var (item, childTable, constraintName, notNull) in found)
+        {
+            ExcludeSelected(
+                item,
+                SetNullWarning(childTable, constraintName, notNull),
+                warnings,
+                excluded
+            );
+        }
+
+        var dropped = found.Select(f => f.Item).ToHashSet(ReferenceEqualityComparer.Instance);
+
+        return [.. selected.Where(item => !dropped.Contains(item))];
+    }
+
+    /// <summary>
+    /// <see cref="SyncDialectCapabilities.SetNullRequiresNullableChildColumn"/> が <c>false</c> の方言（SET NULL を作れる方言）で、
+    /// 選んだ外部キーの追加・作り直しのうち、参照アクション <c>SET NULL</c> を使い、子の列が同期後に NOT NULL になるものを、
+    /// 外さずに <see cref="SyncPlanWarningKind.SetNullOnNotNullColumn"/> で名指しする。作れない方言では何もしない
+    /// （外して名指しするのは <see cref="ExcludeSetNullForeignKeysOnNotNullColumns"/>）。
+    /// </summary>
+    /// <param name="selected">除外を終えた選択済みの項目（外部キーの作り直しは展開前）</param>
+    /// <param name="capabilities">方言のケーパビリティ（方言が書く参照アクションと、作れるかの宣言）</param>
+    /// <param name="context">live スキーマ（無ければ図の値で見る）</param>
+    /// <param name="warnings">名指しの警告を積む先</param>
+    /// <remarks>
+    /// 除外の周（<see cref="ExcludeUntilStable"/>）の後に 1 回だけ呼ぶ。周の中で積むと、警告した外部キーが後の周で別の理由で
+    /// 外れても、計画に無い外部キーの警告が残る。判定は <see cref="FindSetNullForeignKeysOnNotNullColumns"/>。
+    /// </remarks>
+    private static void WarnSetNullForeignKeysOnNotNullColumns(
+        List<SchemaDiffItem> selected,
+        SyncDialectCapabilities capabilities,
+        SyncPlanContext? context,
+        List<SyncPlanWarning> warnings
+    )
+    {
+        if (capabilities.SetNullRequiresNullableChildColumn)
+        {
+            return;
+        }
+
+        foreach (
+            var (_, childTable, constraintName, notNull) in FindSetNullForeignKeysOnNotNullColumns(
+                selected,
+                capabilities,
+                context
+            )
+        )
+        {
+            AddSetNullWarning(warnings, childTable, constraintName, notNull);
+        }
+    }
+
+    /// <summary>
+    /// 選んだ外部キーの追加・作り直しのうち、参照アクション <c>SET NULL</c> を使い、子の列が同期後に NOT NULL になるものを、
+    /// 項目の並びの順に返す（子の表・スクリプトが付ける名前・NOT NULL になる子の列つき）。
+    /// </summary>
+    /// <remarks>
+    /// 子の列の同期後の NULL 許容は、選んだ主キーの変更で主キーに入る列は NOT NULL、選んだ列の変更があればその値、
+    /// live に在る列は live の値、live に無い列（追加する表・列）は図の値（<see cref="PostSyncNullability"/>）。
+    /// 参照アクションは方言が書くもの（<see cref="SyncDialectCapabilities.EffectiveOnDelete"/> /
+    /// <see cref="SyncDialectCapabilities.EffectiveOnUpdate"/>）で見る＝ON UPDATE を持たない方言（Oracle）の ON UPDATE は数えない。
+    /// </remarks>
+    private static List<(
+        SchemaDiffItem Item,
+        string ChildTable,
+        string ConstraintName,
+        List<string> NotNullColumns
+    )> FindSetNullForeignKeysOnNotNullColumns(
+        List<SchemaDiffItem> selected,
+        SyncDialectCapabilities capabilities,
+        SyncPlanContext? context
+    )
+    {
         var postSyncNullable = PostSyncNullability(selected, context);
-        var kept = new List<SchemaDiffItem>(selected.Count);
+        var found =
+            new List<(
+                SchemaDiffItem Item,
+                string ChildTable,
+                string ConstraintName,
+                List<string> NotNullColumns
+            )>();
 
         foreach (var item in selected)
         {
             if (
-                item.Kind is SchemaDiffKind.AddForeignKey or SchemaDiffKind.AlterForeignKey
-                && item.Relationship is { } relationship
-                && item.ChildEntity is { } child
-                && item.ParentEntity is { } parent
-                && UsesSetNull(relationship, capabilities)
+                item.Kind is not (SchemaDiffKind.AddForeignKey or SchemaDiffKind.AlterForeignKey)
+                || item.Relationship is null
+                || item.ChildEntity is null
+                || item.ParentEntity is null
+                || !UsesSetNull(item.Relationship, capabilities)
             )
             {
-                var childTable = SchemaDiffService.NormalizeTable(child);
-                var notNull = ForeignKeyColumnPairResolver
-                    .ChildColumns(SyncScriptBuilderHelper.ResolveColumnPairs(item))
-                    .Where(column => !postSyncNullable(child, childTable, column))
-                    .ToList();
-
-                if (notNull.Count > 0)
-                {
-                    var constraintName = SelectedForeignKeyName(
-                        item,
-                        capabilities.IdentifierLengthLimit
-                    );
-
-                    if (capabilities.SetNullRequiresNullableChildColumn)
-                    {
-                        ExcludeSelected(
-                            item,
-                            SetNullWarning(childTable, constraintName, notNull),
-                            warnings,
-                            excluded
-                        );
-                        continue;
-                    }
-
-                    AddSetNullWarning(warnings, childTable, constraintName, notNull);
-                }
+                continue;
             }
 
-            kept.Add(item);
+            var child = item.ChildEntity;
+            var childTable = SchemaDiffService.NormalizeTable(child);
+            var notNull = ForeignKeyColumnPairResolver
+                .ChildColumns(SyncScriptBuilderHelper.ResolveColumnPairs(item))
+                .Where(column => !postSyncNullable(child, childTable, column))
+                .ToList();
+
+            if (notNull.Count > 0)
+            {
+                found.Add(
+                    (
+                        item,
+                        childTable,
+                        SelectedForeignKeyName(item, capabilities.IdentifierLengthLimit),
+                        notNull
+                    )
+                );
+            }
         }
 
-        return kept;
+        return found;
     }
 
     /// <summary>
@@ -4562,13 +4679,20 @@ public sealed class SyncPlanner
     /// 列があるものを <see cref="SyncPlanWarningKind.SetDefaultOnNotNullColumn"/> で名指しする
     /// （<see cref="SyncDialectCapabilities.SetDefaultRequiresColumnDefault"/> が <c>true</c> の方言のみ）。
     /// </summary>
+    /// <param name="selected">展開と暗黙の項目の注入を終えた項目（主キーの変更が足す暗黙の NOT NULL 化を含む）</param>
+    /// <param name="capabilities">方言のケーパビリティ</param>
+    /// <param name="context">live スキーマ（無ければ図の値で見る）</param>
+    /// <param name="warnings">名指しの警告を積む先</param>
     /// <remarks>
-    /// 子の列の NULL 許容は図（項目の子の表）の値で見る。主キーの変更などに伴う暗黙の付け直しは対象外
+    /// 子の列の NULL 許容は同期後の値で見る（<see cref="PostSyncNullability"/>＝選んだ主キーの変更で主キーに入る列は NOT NULL、
+    /// 選んだ列の変更があればその値、live に在る列は live の値、live に無い列は図の値）。図の値で見ると、NULL 許容化を選ばずに
+    /// 外部キーだけを足す同期で、DB では NOT NULL のままの列を見逃す。主キーの変更などに伴う暗黙の付け直しは対象外
     /// （live に既にある外部キーなので、DB の列は DEFAULT 制約を持っている）。
     /// </remarks>
     private static void WarnSetDefaultOnNotNullColumns(
         IReadOnlyList<SchemaDiffItem> selected,
         SyncDialectCapabilities capabilities,
+        SyncPlanContext? context,
         List<SyncPlanWarning> warnings
     )
     {
@@ -4576,6 +4700,8 @@ public sealed class SyncPlanner
         {
             return;
         }
+
+        var postSyncNullable = PostSyncNullability(selected, context);
 
         foreach (
             var add in selected.Where(i =>
@@ -4588,13 +4714,10 @@ public sealed class SyncPlanner
         )
         {
             var child = add.ChildEntity!;
+            var childTable = SchemaDiffService.NormalizeTable(child);
             var notNull = ForeignKeyColumnPairResolver
                 .ChildColumns(SyncScriptBuilderHelper.ResolveColumnPairs(add))
-                .Where(name =>
-                    child.Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, name))
-                        is { } column
-                    && !ColumnNullability.AllowsNull(column)
-                )
+                .Where(name => !postSyncNullable(child, childTable, name))
                 .ToList();
 
             if (notNull.Count == 0)
@@ -4602,7 +4725,6 @@ public sealed class SyncPlanner
                 continue;
             }
 
-            var childTable = SchemaDiffService.NormalizeTable(child);
             var name = SelectedForeignKeyName(add, capabilities.IdentifierLengthLimit);
 
             warnings.Add(

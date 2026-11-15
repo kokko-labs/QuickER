@@ -493,6 +493,68 @@ internal static partial class SyncPlanExpectationRows
                 );
         }
 
+        // 列が残らない表として外す列の削除（依存の除外の周の後で外れる）で消えるはずだった一意制約と、同じ名前の一意制約の追加。
+        // 一意制約の名前がスキーマの中で一意な方言では、外した列の削除の一意制約が残るので、追加も外して名指しする
+        string[] lastColumnColliding =
+        [
+            DialectNames.SqlServer,
+            DialectNames.PostgreSql,
+            DialectNames.Oracle,
+        ];
+
+        yield return Row(
+                "realdb-name-collision-unique-with-excluded-last-column-drop",
+                "[Integration] 同期: 表の最後の列の削除（列が残らないので外す）と、その列の一意制約と同じ名前の別の表の一意制約の追加を選ぶと、名前が重なる方言では追加も外して名指しし、成功する",
+                AllDialects
+            )
+            .LiveWith(w => NameCollisionScenarios.DroppedLastColumnLive(w.Live, w.Capability))
+            .TargetWith(w => NameCollisionScenarios.DroppedLastColumnTarget(w.Target, w.Capability))
+            .Select(items =>
+                RealScenarios.SelectKinds(
+                    items,
+                    SchemaDiffKind.AddUniqueConstraint,
+                    SchemaDiffKind.DropColumn
+                )
+            )
+            .Expect(e =>
+            {
+                foreach (var dialect in AllDialects)
+                {
+                    e.For(
+                        dialect,
+                        x =>
+                        {
+                            x.Warnings.Single("TableLeftWithoutColumns(t9a): u");
+
+                            if (lastColumnColliding.Contains(dialect))
+                            {
+                                x.Excluded.Count("*", 2)
+                                    .Warnings.Single(
+                                        "SelectedItemRequiresUnselectedItem(t9b): uq_left (t9a.uq_left)"
+                                    );
+                                return;
+                            }
+
+                            x.Excluded.Count("*", 1);
+                        }
+                    );
+                }
+            })
+            .OnRealDatabase(r =>
+                X.SetupPerDialect(
+                        r,
+                        d =>
+                            X.Insert(d, "t9a", ["u"], "1")
+                            + "\n"
+                            + X.Insert(d, "t9b", ["id", "w"], "1, 1")
+                    )
+                    .Expect(e =>
+                    {
+                        e.Outcome.Exact("committed");
+                        e.After.Count("col t9a.*", 1);
+                    })
+            );
+
         // 同じ表の一意制約と同じ名前の外部キーの追加（MySQL は外部キーの列に索引が無ければ、外部キーと同じ名前の索引を作る）
         string[] sameTableColliding =
         [
@@ -605,6 +667,24 @@ internal static class NameCollisionScenarios
         }
 
         s.Unique("c7", "fk_keep", "u");
+    }
+
+    /// <summary>主キーの無い t9a(u) の一意制約 uq_left(u) と、t9b(id, w)</summary>
+    public static void DroppedLastColumnLive(ExpectationSchema s, string dialect)
+    {
+        var type = X.IntType(dialect);
+        s.Table("t9a", S.NotNull("u", type));
+        s.Table("t9b", S.Pk("id", type), S.NotNull("w", type));
+        s.Unique("t9a", "uq_left", "u");
+    }
+
+    /// <summary>t9a の列をすべて消し（一意制約 uq_left も図から消える）、名前 uq_left を t9b(w) の一意制約に付ける</summary>
+    public static void DroppedLastColumnTarget(ExpectationSchema s, string dialect)
+    {
+        var type = X.IntType(dialect);
+        s.Table("t9a");
+        s.Table("t9b", S.Pk("id", type), S.NotNull("w", type));
+        s.Unique("t9b", "uq_left", "w");
     }
 
     /// <summary>親 p2(id) と子 c2a(id, pid)・c2b(id, pid)、外部キー fk_mv は c2a から</summary>
