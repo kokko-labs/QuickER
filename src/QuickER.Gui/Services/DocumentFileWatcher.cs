@@ -60,6 +60,8 @@ public sealed class DocumentFileChangedEventArgs : EventArgs
 /// <item>発火時に内容ハッシュを算出し、<see cref="ExpectedHashProvider"/> と一致すれば通知しない
 /// （自己書き込み・無内容変更の抑制）。読み取りは書き込み途中の共有違反に備え短くリトライする</item>
 /// <item>削除・リネームは種別付きで即時通知する（デバウンスしない）</item>
+/// <item>内容変更の通知は照合を読み始めた順に届け、古い内容の通知を新しい通知・削除・リネームの後に届けない
+/// （重なって走る照合のうち、後から読み始めた照合が決着した後に届く古い照合の通知は捨てる）</item>
 /// <item>監視器自身のエラー（内部バッファ溢れ等）では監視を張り直し、停止中の変更を 1 回照合して拾う</item>
 /// <item>監視を張れない（監視開始・張り直しの失敗）ときはパスを保持したまま間隔をおいて張り直しを試み続け
 /// （<see cref="DocumentFileChangeKind.WatchInterrupted"/> / <see cref="DocumentFileChangeKind.WatchResumed"/> を
@@ -73,6 +75,20 @@ public sealed class DocumentFileWatcher : IDisposable
 
     /// <summary>状態（監視器・タイマ・対象パス）の一貫性を守るロック</summary>
     private readonly object _gate = new();
+
+    /// <summary>
+    /// 通知の順を守るロック（古い照合の判定と発火を 1 つにする）。<see cref="_gate"/> を持ったまま取らない
+    /// （購読側が通知の中から <see cref="Watch"/> などを呼ぶと、こちらを持ったまま <see cref="_gate"/> を取るため）
+    /// </summary>
+    private readonly object _raiseGate = new();
+
+    /// <summary>照合（内容を読んで期待ハッシュと比べる）の通し番号。読み始める前に <see cref="_gate"/> の中で振る</summary>
+    private long _comparisonTicket;
+
+    /// <summary>
+    /// この番号以下の照合は古い（より後に読み始めた照合が決着した・削除かリネームを通知した）。<see cref="_raiseGate"/> の中で読み書きする
+    /// </summary>
+    private long _supersededTicket;
 
     /// <summary>現在の監視器（未監視のときは null）</summary>
     private FileSystemWatcher? _watcher;
@@ -111,6 +127,11 @@ public sealed class DocumentFileWatcher : IDisposable
     private volatile bool _disposed;
 
     /// <summary>外部変更を通知するイベント（スレッドプール上で発火する）</summary>
+    /// <remarks>
+    /// 通知の順を守るため、発火は内部のロックを持ったまま行う。購読側は通知の中で別のスレッド（UI など）を
+    /// 同期で待たない（UI へは非同期で載せ替える）。待つと、そのスレッドが <see cref="Watch"/> などから通知を出そうとして
+    /// 同じロックを待ち、デッドロックになる。通知の中から同じスレッドで <see cref="Watch"/> などを呼ぶのはよい。
+    /// </remarks>
     public event EventHandler<DocumentFileChangedEventArgs>? FileChanged;
 
     /// <summary>
@@ -376,7 +397,7 @@ public sealed class DocumentFileWatcher : IDisposable
         }
 
         CancelPendingDebounce();
-        RaiseImmediate(DocumentFileChangeKind.Deleted);
+        RaiseImmediate(DocumentFileChangeKind.Deleted, supersedesComparisons: true);
     }
 
     /// <summary>
@@ -408,7 +429,7 @@ public sealed class DocumentFileWatcher : IDisposable
         if (string.Equals(e.OldName, targetName, StringComparison.OrdinalIgnoreCase))
         {
             CancelPendingDebounce();
-            RaiseImmediate(DocumentFileChangeKind.Renamed);
+            RaiseImmediate(DocumentFileChangeKind.Renamed, supersedesComparisons: true);
         }
     }
 
@@ -510,10 +531,20 @@ public sealed class DocumentFileWatcher : IDisposable
         }
     }
 
-    /// <summary>デバウンス満了。内容ハッシュを算出し、期待値と異なるときのみ内容変更を通知する</summary>
+    /// <summary>
+    /// 照合（デバウンス満了・張り直しの直後）。内容ハッシュを算出し、期待値と異なるときのみ内容変更を通知する
+    /// </summary>
+    /// <remarks>
+    /// 照合はスレッドプールで重なって走る（満了のタイマのコールバック・張り直しの直後の照合）。先に読み始めた照合が
+    /// 読んだ後に遅れると、古い内容の通知が新しい内容の通知より後に届いてしまうので、読み始める順に番号を振り、
+    /// 後から読み始めた照合がすでに決着していれば（通知した・期待ハッシュと同じで抑止した・ファイルが無かった）、
+    /// 古い照合の通知は捨てる。削除・リネームの通知も、それより前に読み始めた照合を古くする。
+    /// 判定と発火は <see cref="_raiseGate"/> の中で 1 つにする（判定の後・発火の前に新しい照合が割り込む隙間を作らない）。
+    /// </remarks>
     private void OnDebounceElapsed()
     {
         string path;
+        long ticket;
 
         lock (_gate)
         {
@@ -523,33 +554,48 @@ public sealed class DocumentFileWatcher : IDisposable
             }
 
             path = _path;
+            ticket = ++_comparisonTicket;
         }
 
         // 書き込み途中の共有違反に備え短くリトライして算出する。消滅していれば null（削除側で通知済み）
         var hash = DocumentContentHash.TryComputeWithRetry(path);
+        var expected = hash is null ? null : ExpectedHashProvider?.Invoke();
 
-        if (hash is null)
+        lock (_raiseGate)
         {
-            return;
-        }
+            if (ticket <= _supersededTicket)
+            {
+                return;
+            }
 
-        // 自己書き込み・無内容変更（最終既知ハッシュと同一）は通知しない
-        if (string.Equals(hash, ExpectedHashProvider?.Invoke(), StringComparison.Ordinal))
-        {
-            return;
-        }
+            _supersededTicket = ticket;
 
-        RaiseChanged(new DocumentFileChangedEventArgs(DocumentFileChangeKind.Modified, path, hash));
+            // 消滅・自己書き込み・無内容変更（最終既知ハッシュと同一）は通知しない
+            if (hash is null || string.Equals(hash, expected, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            RaiseChanged(
+                new DocumentFileChangedEventArgs(DocumentFileChangeKind.Modified, path, hash)
+            );
+        }
     }
 
-    /// <summary>削除・リネームを種別付きで即時通知する（ハッシュなし）</summary>
-    private void RaiseImmediate(DocumentFileChangeKind kind)
+    /// <summary>削除・リネーム・監視の中断と再開を種別付きで即時通知する（ハッシュなし）</summary>
+    /// <param name="kind">通知する種別</param>
+    /// <param name="supersedesComparisons">
+    /// それより前に読み始めた照合を古くする（削除・リネーム＝その後に届く古い内容の通知を捨てる）
+    /// </param>
+    private void RaiseImmediate(DocumentFileChangeKind kind, bool supersedesComparisons = false)
     {
         string? path;
+        long latestTicket;
 
         lock (_gate)
         {
             path = _path;
+            latestTicket = _comparisonTicket;
         }
 
         if (path is null)
@@ -557,7 +603,15 @@ public sealed class DocumentFileWatcher : IDisposable
             return;
         }
 
-        RaiseChanged(new DocumentFileChangedEventArgs(kind, path, null));
+        lock (_raiseGate)
+        {
+            if (supersedesComparisons && latestTicket > _supersededTicket)
+            {
+                _supersededTicket = latestTicket;
+            }
+
+            RaiseChanged(new DocumentFileChangedEventArgs(kind, path, null));
+        }
     }
 
     /// <summary>破棄済みでなければイベントを発火する</summary>
