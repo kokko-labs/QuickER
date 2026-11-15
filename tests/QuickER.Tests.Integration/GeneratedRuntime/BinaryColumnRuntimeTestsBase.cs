@@ -12,8 +12,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <summary>
 /// 無制限バイナリ列の除外（<c>ExcludeUnboundedBinaryColumns</c>）を、実 SQLite（一時ファイル DB・Docker 不要＝
 /// CI 常時実行）で意味検証するパリティスイートの共通基底。DB ライフサイクル・DDL 適用・共通シードだけを持ち、
-/// 観点別の <c>[Fact]</c> は「除外が効くQuickER 版 Repository 版（<see cref="BinaryColumnAdoRuntimeTests"/>）」と
-/// 「除外非適用の EF Core 版（<see cref="BinaryColumnEfCoreRuntimeTests"/>）」で期待が逆になるため各派生に書く。
+/// 観点別の <c>[Fact]</c> は「除外が効くQuickER 版 Repository 版（<see cref="BinaryColumnAdoSqliteRuntimeTests"/>）」と
+/// 「除外非適用の EF Core 版（<see cref="BinaryColumnEfCoreSqliteRuntimeTests"/>）」で期待が逆になるため各派生に書く。
 /// 除外の読み書き・<c>WithUnboundedBinary()</c>・射影・生 SQL・Stream アクセサの契約は、実装先どうしの一致のシナリオ
 /// （<c>blob-*</c>＝<see cref="BackendParityScenarios"/>）が 5 実装先で見る。ここに残すのは、その図に無いもの
 /// （素の int の主キー・有界バイナリ <c>checksum</c>・名前付きクエリ・EditModel・SQLite の rowid）だけ。

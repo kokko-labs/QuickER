@@ -133,8 +133,8 @@ public sealed class RuntimeTestMatrixTests
             violations,
             RuntimeTestNamingKnown.All.Select(entry => (entry.ClassName, 1)),
             (name, _) => name,
-            "名前が規則に合わない実行時テストクラスがある（実装先が 1 つなら {機能}{実装先}RuntimeTests、リモートは {機能}Remote{サーバー}RuntimeTests、"
-                + "実装先が 2 つ以上なら {機能}…RuntimeTests。RuntimeCell 属性の機能・実装先の名前で付ける）",
+            "名前が規則に合わない実行時テストクラスがある（実装先が 1 つなら {機能}{実装先}[{区別}]RuntimeTests、リモートは {機能}Remote{サーバー}[{区別}]RuntimeTests、"
+                + "実装先が 2 つ以上なら {機能}…RuntimeTests。RuntimeCell 属性の機能・実装先の名前で付け、区別の語は大文字で始めて実装先の名前で始めない）",
             "既知の一覧のクラスが無くなったか規則に合うようになった（RuntimeTestNamingKnown から消す）"
         );
         RuntimeTestNamingKnown
@@ -285,6 +285,52 @@ public sealed class RuntimeTestMatrixTests
             .Follows("FeatureRemoteRuntimeTests", [Cover(RuntimeTarget.Remote, none: true)], false)
             .Should()
             .BeTrue();
+
+        // 名前の規則の区別の語：実装先の名前の後ろに大文字で始めて挟む・実装先の名前で始めない
+        RuntimeTestNaming
+            .Follows("FeatureAdoSqlitePlainRuntimeTests", [Cover(RuntimeTarget.AdoSqlite)], false)
+            .Should()
+            .BeTrue();
+        RuntimeTestNaming
+            .Follows(
+                "FeatureRemoteInMemoryPlainRuntimeTests",
+                [Cover(RuntimeTarget.Remote, RuntimeTarget.InMemory)],
+                false
+            )
+            .Should()
+            .BeTrue();
+        RuntimeTestNaming
+            .Follows(
+                "FeatureRemotePlainRuntimeTests",
+                [Cover(RuntimeTarget.Remote, none: true)],
+                false
+            )
+            .Should()
+            .BeTrue();
+        RuntimeTestNaming
+            .Follows("FeatureAdoSqliteplainRuntimeTests", [Cover(RuntimeTarget.AdoSqlite)], false)
+            .Should()
+            .BeFalse();
+        RuntimeTestNaming
+            .Follows(
+                "FeatureRemoteAdoSqliteRuntimeTests",
+                [Cover(RuntimeTarget.Remote, none: true)],
+                false
+            )
+            .Should()
+            .BeFalse();
+        RuntimeTestNaming
+            .Follows(
+                "FeatureAdoSqliteInMemoryRuntimeTests",
+                [Cover(RuntimeTarget.AdoSqlite)],
+                false
+            )
+            .Should()
+            .BeFalse();
+        RuntimeTestNaming
+            .Follows("FeaturePlainAdoSqliteRuntimeTests", [Cover(RuntimeTarget.AdoSqlite)], false)
+            .Should()
+            .BeFalse();
         RuntimeTestNaming
             .Follows(
                 "FeatureAnythingRuntimeTests",
@@ -312,10 +358,15 @@ public sealed class RuntimeTestMatrixTests
 public static class RuntimeTestNaming
 {
     /// <summary>
-    /// 名前が規則に合うか：実装先（とリモートのサーバー）が 1 つなら <c>{機能}{実装先}RuntimeTests</c>
-    /// （リモートは <c>{機能}Remote{サーバー}RuntimeTests</c>・リポジトリなしは <c>{機能}RemoteRuntimeTests</c>）、
+    /// 名前が規則に合うか：実装先（とリモートのサーバー）が 1 つなら <c>{機能}{実装先}[{区別}]RuntimeTests</c>
+    /// （リモートは <c>{機能}Remote{サーバー}[{区別}]RuntimeTests</c>・リポジトリなしは <c>{機能}Remote[{区別}]RuntimeTests</c>）、
     /// 2 つ以上かエンジンなら <c>{機能}…RuntimeTests</c>（機能はクラスが名乗るもののどれか）
     /// </summary>
+    /// <remarks>
+    /// 区別の語は、同じ機能 × 実装先を担当するクラスが 2 本以上あるときに名前を分ける語。大文字で始め（語の境目）、
+    /// 実装先の名前（<see cref="RuntimeTarget"/> の値の名前）で始めない（リポジトリなしのクラスがサーバーを名乗る名前や、
+    /// 別の実装先を担当する名前に読めないようにする）
+    /// </remarks>
     /// <param name="className">クラスの名前</param>
     /// <param name="cells">そのクラスの担当</param>
     /// <param name="isEngine">実装先を比べるエンジンか</param>
@@ -350,7 +401,28 @@ public static class RuntimeTestNaming
         var token = target.ToString() + (server?.ToString() ?? "");
 
         return features.Any(feature =>
-            string.Equals(className, feature + token + Suffix, StringComparison.Ordinal)
-        );
+        {
+            var prefix = feature + token;
+
+            if (
+                !className.StartsWith(prefix, StringComparison.Ordinal)
+                || !className.EndsWith(Suffix, StringComparison.Ordinal)
+                || className.Length < prefix.Length + Suffix.Length
+            )
+            {
+                return false;
+            }
+
+            var distinction = className[prefix.Length..^Suffix.Length];
+
+            return distinction.Length == 0 || IsDistinction(distinction);
+        });
     }
+
+    /// <summary>区別の語として受けるか（大文字で始まり、実装先の名前で始まらない）</summary>
+    /// <param name="distinction">実装先の名前と接尾辞の間の部分（空でないもの）</param>
+    private static bool IsDistinction(string distinction) =>
+        char.IsAsciiLetterUpper(distinction[0])
+        && !Enum.GetNames<RuntimeTarget>()
+            .Any(name => distinction.StartsWith(name, StringComparison.Ordinal));
 }

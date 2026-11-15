@@ -183,7 +183,7 @@ public sealed class MatrixAxisGuardTests
     public void DslSqlServerBackendAxis_IsComplete()
     {
         // コンテナには実装先を開くときにだけ触れるので、軸を作るだけなら null でよい
-        var axis = DslConditionFuzzSqlServerRuntimeTests.BackendAxis(null!);
+        var axis = NamedQueryDslConditionFuzzSqlServerRuntimeTests.BackendAxis(null!);
 
         axis.Adapters.Select(backend => backend.Name)
             .Should()

@@ -419,7 +419,7 @@ public static partial class BackendParityScenarios
         ),
         // 区切り 43（#1）: 主キー 0 の行も、アプリが決めたキーのまま挿入・グラフ保存する。同じ 0 の 2 行目は主キーの重複。
         // このフィクスチャのキーは値オブジェクト（EF Core は変換のある列の値を作らない）。素の int のキーは
-        // BinaryColumnRuntimeTestsBase と SqlServerIdentityColumnRuntimeTests が見る
+        // BinaryColumnRuntimeTestsBase と IdentityColumnSqlServerRuntimeTests が見る
         new(
             "insert-and-save-key-zero",
             Basic,
@@ -559,7 +559,7 @@ public static partial class BackendParityScenarios
             CompareWithBaseline: false
         ),
         // F6: 循環するカスケード（顧客の自己参照）の一括削除は、どの実装先も NotSupportedException で断り、何も変えない
-        // （EF Core が断る前に文を流さないことは EfCoreExecuteDeleteRuntimeTests が DELETE の数で確かめる）
+        // （EF Core が断る前に文を流さないことは CrudParityEfCoreSqliteExecuteDeleteRuntimeTests が DELETE の数で確かめる）
         new(
             "execute-delete-cyclic-cascade",
             Basic,

@@ -628,7 +628,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 ### `Dsl/SqlServer`
 
 - 名前：簡易 DSL の条件の総当たり（SQL Server の QuickER 版 Repository と EF Core）
-- テストのソース：`tests/QuickER.Tests/TestSupport/DslFuzz.cs`・`tests/QuickER.Tests/TestSupport/DslFuzzDimensions.cs`・`tests/QuickER.Tests/TestSupport/DslFuzzGenerator.cs`・`tests/QuickER.Tests/TestSupport/DslFuzzKnownFailures.cs`・`tests/QuickER.Tests/TestSupport/DslFuzzUnits.cs`・`tests/QuickER.Tests/CodeGen.CSharp/DslFuzzExecution.cs`・`tests/QuickER.Tests/CodeGen.CSharp/DslFuzzRunner.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/DslConditionFuzzSqlServerRuntimeTests.cs`
+- テストのソース：`tests/QuickER.Tests/TestSupport/DslFuzz.cs`・`tests/QuickER.Tests/TestSupport/DslFuzzDimensions.cs`・`tests/QuickER.Tests/TestSupport/DslFuzzGenerator.cs`・`tests/QuickER.Tests/TestSupport/DslFuzzKnownFailures.cs`・`tests/QuickER.Tests/TestSupport/DslFuzzUnits.cs`・`tests/QuickER.Tests/CodeGen.CSharp/DslFuzzExecution.cs`・`tests/QuickER.Tests/CodeGen.CSharp/DslFuzzRunner.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/NamedQueryDslConditionFuzzSqlServerRuntimeTests.cs`
 - 範囲：`src/QuickER.CodeGen.CSharp/Queries`・`src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime`・`src/QuickER.Runtime`・`src/QuickER.Runtime.Sqlite`・`src/QuickER.Runtime.SqlServer`・`src/QuickER.Runtime.EntityFrameworkCore`・`src/QuickER.Runtime.InMemory`
 
 ### `Dsl/PostgreSql`
@@ -700,7 +700,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 ### `table:TranslatorParityPredicates`
 
 - 名前：式の翻訳の述語の表（SQL Server・SQLite・インメモリと SQL Server・SQLite の EF Core 版の結果を C# の意味論と突き合わせる）
-- テストのソース：`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityPredicateRows.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityRuntimeTestsBase.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityInMemoryRuntimeTests.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParitySqlServerRuntimeTests.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParitySqliteRuntimeTests.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityEfCoreRuntimeTestsBase.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityEfCoreSqlServerRuntimeTests.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityEfCoreSqliteRuntimeTests.cs`
+- テストのソース：`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityPredicateRows.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityRuntimeTestsBase.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityInMemoryRuntimeTests.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityAdoSqlServerRuntimeTests.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityAdoSqliteRuntimeTests.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityEfCoreRuntimeTestsBase.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityEfCoreSqlServerRuntimeTests.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityEfCoreSqliteRuntimeTests.cs`
 - 範囲：`src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_05_QueryPipeline.scriban`・`src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_08_EfCore.scriban`・`src/QuickER.Runtime`・`src/QuickER.Runtime.EntityFrameworkCore`・`src/QuickER.Runtime.InMemory`・`src/QuickER.Runtime.SqlServer`・`src/QuickER.Runtime.Sqlite`
 
 ### `table:SyncPlanExpectations`

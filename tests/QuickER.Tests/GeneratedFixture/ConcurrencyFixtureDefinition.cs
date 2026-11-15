@@ -170,7 +170,7 @@ public static class ConcurrencyFixtureDefinition
                     IsNullable = false,
                 },
                 // 除外する無制限バイナリ列＝EF Core のサーバーのリモートで、版の古い ForceOverwrite のやり直しの後も
-                // blob を書かないことを確かめる（RemoteEfCoreUnboundedBinarySqlServerRuntimeTests）
+                // blob を書かないことを確かめる（BinaryColumnRemoteEfCoreSqlServerRuntimeTests）
                 new Column
                 {
                     Id = GadgetAttachmentColId,

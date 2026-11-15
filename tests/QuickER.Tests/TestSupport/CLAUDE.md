@@ -56,7 +56,7 @@
   - `QUICKER_FUZZ_SEEDS` の「既定（2）以下の指定は無視」がなくなる（1 なら 1 種だけ流す）。
   - 同期計画の `QUICKER_SYNC_FUZZ_SEEDS=0` が 0 種でなく既定の種の数になる。
   - 同期計画の読めない単独の種が例外でなく無視になる。
-- 簡易 DSL の SQL Server（`DslConditionFuzzSqlServerRuntimeTests`）も種の解析を `SeedSource` へ載せた。読めない `QUICKER_FUZZ_SEEDS` は「既定の 1 種・網羅の照合あり」になる。
+- 簡易 DSL の SQL Server（`NamedQueryDslConditionFuzzSqlServerRuntimeTests`）も種の解析を `SeedSource` へ載せた。読めない `QUICKER_FUZZ_SEEDS` は「既定の 1 種・網羅の照合あり」になる。
 - 夜間の種の数（`NightlyCount`）は各エンジンの `SeedSettings` の第 3 引数に置く（「夜間の深い実行」参照）。
 - 載せ替えで生成器の入力が変わらないことは種の指紋が、流れるケースの数が変わらないことは `-list full -preEnumerateTheories` の照合が示す。
 
@@ -459,7 +459,7 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
 
 ## 簡易 DSL の総当たり
 
-- 簡易 DSL の条件の意味は、総当たりで docs の意味と照合する。`DslConditionFuzzTests`（QuickER 版 Repository・EF Core〔いずれも SQLite〕とインメモリ。MySQL の符号なし整数の図はインメモリだけ）と、Integration の `DslConditionFuzzSqlServerRuntimeTests`（実コンテナの QuickER 版 Repository・EF Core〔SQL Server〕・既定はシード 1 つ）と `NamedQueryDslConditionFuzz{PostgreSql,MySql,Oracle}RuntimeTests`（実コンテナの EF Core 版だけ・既定はシード 1 つ・夜間 16。`tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`「簡易 DSL の総当たりの EF Core だけの方言」）が流す。
+- 簡易 DSL の条件の意味は、総当たりで docs の意味と照合する。`DslConditionFuzzTests`（QuickER 版 Repository・EF Core〔いずれも SQLite〕とインメモリ。MySQL の符号なし整数の図はインメモリだけ）と、Integration の `NamedQueryDslConditionFuzzSqlServerRuntimeTests`（実コンテナの QuickER 版 Repository・EF Core〔SQL Server〕・既定はシード 1 つ）と `NamedQueryDslConditionFuzz{PostgreSql,MySql,Oracle}RuntimeTests`（実コンテナの EF Core 版だけ・既定はシード 1 つ・夜間 16。`tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`「簡易 DSL の総当たりの EF Core だけの方言」）が流す。
   - 列ごとに書ける全ての形の原子（演算子・リテラルかパラメータか・否定の有無。値だけ乱数）とその NOT、乱数で組んだ合成の条件を、生成 → 実コンパイル（エラー 0・警告 0）→ NULL を含むデータで実行し、同じ実装先から読み戻した全行へオラクル `DslFuzz.Evaluate` を当てた結果と照合する。
   - 本体は `DslFuzzRunner`、実行部は `DslFuzzExecution`（QuickER.Tests の CodeGen.CSharp。Integration は TestSupport の `DslFuzz*.cs` と `CultureScope.cs` と一緒に Compile リンクする）。
   - 1 単位のコンパイルは 1 回：実行する単位（行のある単位）は、生成物に検証コード（`DslFuzzTarget.ProbeSource`）を足して `GeneratedCodeCompiler.CompileWithExtraSources` で 1 回コンパイルし、診断の検証と実行に同じ結果を使う。記録・やり直しの判定に使う診断は生成物のファイルの分だけ（XmlDoc の診断を拾うモードで、`Compile` と同じ集合）で、検証コードの警告は捨て、エラーは読み込み（`Load`）で投げる。実行するクエリの並び（名前）が最後にコンパイルしたクエリと違う（生成時に断られたクエリを外した）ときは生成し直し、ファイル名と内容がすべて同じならそのコンパイルを使い回し、違えばコンパイルし直す。診断の振り分けを外すと検証コードの CS1591 が全単位の失敗になり、生成物の警告を捨てると生成物に差し込んだ警告が記録から消える（mutation 実証済み）。

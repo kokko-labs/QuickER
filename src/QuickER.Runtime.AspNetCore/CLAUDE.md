@@ -27,7 +27,7 @@ Save フック・楽観排他・無制限バイナリの共通規則は `src/Qui
   - `RequireAuthorization` はグループ全体（health を含む）へ既定認可ポリシーを適用する。
   - `AllowAnonymous` はメタデータを付けない。`[AllowAnonymous]` を付けると、ホストの FallbackPolicy を弱体化させるため。
   - 未定義値はマップ時に `ArgumentOutOfRangeException`。
-- ガード：`RemoteAccessRuntimeTests`（実 HTTP）。
+- ガード：`RemoteTransportRemoteAdoSqliteAccessRuntimeTests`（実 HTTP）。
 
 ## エンドポイントのマップ
 
@@ -50,7 +50,7 @@ Save フック・楽観排他・無制限バイナリの共通規則は `src/Qui
 - 500 を書く分類の catch は共通ヘルパー `WriteServerErrorAsync(context, ex)`（ログ→フック→本文の 3 手順を 1 箇所へ）を呼ぶだけにする。500 のフックの例外は隔離して別の 1 件として記録し、本文は必ず書く。
 - 400/409 はスイッチの影響を受けない。400/409 ではログも `OnServerError` も呼ばない（両者は 500 専用）。
 - 応答書き込みは共通ヘルパー `WriteErrorAsync(context, statusCode, type, message, conflict?, correlationId?)` へ集約する。
-- ガード：`RemoteErrorDetailRuntimeTests`（500 の非公開/透過・相関 ID のログ突き合わせ・400/409 の対照・旧ボディ退化・バイナリ経路）。
+- ガード：`RemoteTransportRemoteAdoSqliteErrorDetailRuntimeTests`（500 の非公開/透過・相関 ID のログ突き合わせ・400/409 の対照・旧ボディ退化・バイナリ経路）。
 
 ## クライアントの分類
 
@@ -63,14 +63,14 @@ Save フック・楽観排他・無制限バイナリの共通規則は `src/Qui
 - 成功ステータスなのに本文が期待した JSON でない応答も `RemoteRepositoryException` にする。`InvokeAsync` の成功パスが `JsonException` / `NotSupportedException` を包み直す。
   - 応答しているのが生成エンドポイントではない別物（プロキシやポータルの 200）で、実体は転送の失敗のため。素の `JsonException` では他のリモート失敗と同じ catch で拾えない。
   - JSON リテラル `null` の本文は正当な JSON で例外にならないため、明示チェックで同じ分類にする。クライアントの実体は private `InvokeCoreAsync(…, allowNullResult)` 1 本で、null が正当な結果の操作（GetById・単一戻り形・null 許容スカラー。内側の型の `?` サフィックスで振り分ける）だけが `InvokeNullableAsync` 経由になる。200＋`null` は従来どおり「該当行なし」で返す。
-  - ガード：`RemoteResponseBodyRuntimeTests`（両アーム）。
+  - ガード：`RemoteTransportRemoteResponseBodyRuntimeTests`（両アーム）。
 - VO 併用時は `ValueObjectValidationException` も同じ 2 フィルタ（成功パス／`ReadErrorAsync`）へ含める。`ValueObjectJsonConverter.Read` の `TVo.Create` 検証違反は JsonException で出ないため、含めないと素通りする。
 - 失敗応答の本文を読めなかった理由も保全する。`ReadErrorAsync` が解析失敗の例外を `ToException` まで運び innerException へ載せる。「本文が RemoteError でなかった」と「message が空の RemoteError だった」を呼び出し側が区別できる。
 - バイナリ転送は、エンドポイントが返す形の成功応答だけを成功にする（`HttpRemoteRepositoryCore.EnsureBinaryEndpointAnswered`）。
   - GET は 200 かつ Content-Type のメディア型が `application/octet-stream`（パラメータを除き大文字小文字を無視）。PUT / DELETE は 204。それ以外の 2xx は `RemoteRepositoryException`（ステータスと Content-Type を名指し）で、GET は宛先へ何も書かない。
   - エンドポイントの手前の別物（セッション切れをサインインページへ転送する認証プロキシ・何にでも 200 を返す中継）の 2xx を成功と読むと、GET はその HTML を blob として書いて true、PUT / DELETE はサーバーに届いていない書き込みで true になる。JSON と同じ理由。
   - HTTP の同期の blob のコピー（`HttpSyncServerSource` の `ISyncBinaryColumns`）も同じヘルパーを通る。
-  - ガード：`BinaryTransferResponseRuntimeTests`（転送するプロキシ・200 で答える中継 × GET / PUT / DELETE と JSON の対照）、`SyncBinaryTransferResponseRuntimeTests`。mutation 実証済み。
+  - ガード：`BinaryColumnRemoteTransferResponseRuntimeTests`（転送するプロキシ・200 で答える中継 × GET / PUT / DELETE と JSON の対照）、`SyncBinaryTransferResponseRuntimeTests`。mutation 実証済み。
 
 ## 400 の分類
 
@@ -115,7 +115,7 @@ Kestrel は本文の読み取りの例外を先に投げ、`RequestAborted` は�
 3. 分類した応答の書き込みは catch の外で 1 回だけ行い、切断で失敗したら黙って終える（書いている最中にトークンが立つと `WriteAsJsonAsync` が `OperationCanceledException` を投げる）。`ReadRequestAsync` も切断（同じ判定）なら `RemoteBadRequestException` に包まない。
 
 - 既知の残余：`ConnectionResetException` を使わないホスト（HTTP.sys 等）では、トークンより先に別の `IOException` が届くと 400 / 500 になり得る（Kestrel と IIS は `ConnectionResetException`）。HTTP/2 のストリームのリセットは型を持たない `IOException`（InnerException なし）で来るので、HTTP/2 では時期への依存が残る。見送りで、docs の既知の限界に書く。
-- ガード：`RemoteServerEngineRuntimeTests` の `Json_` / `Upload_ClientDisconnectsMidBody_IsNotAnsweredAsFault`（生ソケットで FIN / RST × JSON / アップロード × トークンの時期。要求の寿命の機能を差し替えて「分類まで立たない」〔Late〕「分類の前に立ちホストも知っている」〔Early〕を決め、実 Kestrel のままの 2 通りを持つ。全ケースで回線 0 バイト・Error のログ 0・OnServerError のフック 0 を厳密に表明する）。`RemoteHostConfigurationRuntimeTests` の HTTP/2 のケースは、トークンが立っている間の緑を固定するだけで、決定的な赤は作らない。mutation 実証済み。
+- ガード：`RemoteTransportRemoteServerEngineRuntimeTests` の `Json_` / `Upload_ClientDisconnectsMidBody_IsNotAnsweredAsFault`（生ソケットで FIN / RST × JSON / アップロード × トークンの時期。要求の寿命の機能を差し替えて「分類まで立たない」〔Late〕「分類の前に立ちホストも知っている」〔Early〕を決め、実 Kestrel のままの 2 通りを持つ。全ケースで回線 0 バイト・Error のログ 0・OnServerError のフック 0 を厳密に表明する）。`RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests` の HTTP/2 のケースは、トークンが立っている間の緑を固定するだけで、決定的な赤は作らない。mutation 実証済み。
 
 ### 要求のタイムアウト
 
@@ -126,7 +126,7 @@ Kestrel は本文の読み取りの例外を先に投げ、`RequestAborted` は�
 - 要求のトークンが立った後の DB の例外（`System.Data.Common.DbException`）も切断に数える。SqlClient は取り消しを `SqlException` で報告するため。それ以外の型は、クライアントがいなくなっていても 500＋ログ＋フックのままにする（遅い経路の本物の不具合を隠さない）。
 - アップロードの本文は前進専用の包み（`ForwardOnlyRequestBody`）で渡す。`EnableBuffering` のホストでは本文がシーク可能になり、バッファした分だけの長さが宣言長と食い違ってすべて 500 になるため。
 - バイナリの PUT は `?id=` のキーを 411 / 413 の検査より先に読む。
-- ガード：`RemoteHostConfigurationRuntimeTests`（RequestTimeouts の止まった PUT・遅い Save の 504・EnableBuffering 3 通り・投げるフック・キーの 2 件・HTTP/2）、`RemoteSqlClientCancellationRuntimeTests`（実 SQL Server でクエリ中の取り消し＝Debug 1 件だけ。対照＝取り消しと重なった DB でない失敗、取り消していない DB のエラーは Error＋フック）、`RemoteServerEngineRuntimeTests` の「サーバーのタイムアウトは、要求のトークンが立っていなくても…」、`BinaryColumnRemoteRuntimeTests` の 9c（上限超え＋読めないキーは 400）。mutation 実証済み。
+- ガード：`RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests`（RequestTimeouts の止まった PUT・遅い Save の 504・EnableBuffering 3 通り・投げるフック・キーの 2 件・HTTP/2）、`RemoteTransportRemoteAdoSqlServerRuntimeTests`（実 SQL Server でクエリ中の取り消し＝Debug 1 件だけ。対照＝取り消しと重なった DB でない失敗、取り消していない DB のエラーは Error＋フック）、`RemoteTransportRemoteServerEngineRuntimeTests` の「サーバーのタイムアウトは、要求のトークンが立っていなくても…」、`BinaryColumnRemoteAdoSqliteRuntimeTests` の 9c（上限超え＋読めないキーは 400）。mutation 実証済み。
 
 ## 保存の応答は列の値を運び位置で突き合わせる
 
@@ -147,7 +147,7 @@ Kestrel は本文の読み取りの例外を先に投げ、`RequestAborted` は�
   - 同じ版の生成物どうしでは列の値が勝ち、版の表は冗長になる。版の表は以前のサーバー（列の値を運ばない）・以前のクライアント（列の値を読み捨てる）とのワイヤ互換の経路として残す。
   - 片方だけを外す退行は通常の応答では答えが変わらないので、テストはクライアントの HTTP に `RemoteResponseChannelHandler` を挟み、応答から片方を外してもう片方だけで版が届くことを確かめる（版の表だけ＝以前のサーバーの応答を新しいクライアントが読む形）。
   - ガード：`ConcurrencyRemoteRuntimeTestsBase.RowVersion_IsWrittenBack_ThroughEachResponseChannelAlone`（版の書き戻しのシナリオ 3 つ × 版の表だけ・列の値だけ。リモートの派生 5 つ＝サーバーはインメモリ・QuickER 版 SQL Server・EF Core SQL Server）。mutation 実証済み（サーバーの版の表の収集を外す・列の値から版を抜く・クライアントの版の表の書き戻しを外す・列の値の書き戻しを外す、のどれもその経路の行だけが赤）。
-- ガード：実装先の一致のシナリオ `remote-save-writes-back-hook-values`・`remote-write-back-by-position`（Remote・RemoteEfCoreOnly）、`RemoteEfCoreGeneratedValuesRuntimeTests`（EF Core のサーバー・実 SQL Server の採番列が Insert / Save / Update で戻る・Docker）、`RemoteSaveResponseClientTests`（応答を差し替えた HTTP）、`EditModelSaveRuntimeTestsBase` の Before フックのシナリオ（リモートの派生でも流す）、`h3-edit-then-skip-*`・`hook-edit-then-continue-delete`（Remote・RemoteEfCoreOnly の slots）。mutation 実証済み。
+- ガード：実装先の一致のシナリオ `remote-save-writes-back-hook-values`・`remote-write-back-by-position`（Remote・RemoteEfCoreOnly）、`IdentityColumnRemoteEfCoreSqlServerRuntimeTests`（EF Core のサーバー・実 SQL Server の採番列が Insert / Save / Update で戻る・Docker）、`RemoteSaveResponseClientTests`（応答を差し替えた HTTP）、`EditModelSaveRuntimeTestsBase` の Before フックのシナリオ（リモートの派生でも流す）、`h3-edit-then-skip-*`・`hook-edit-then-continue-delete`（Remote・RemoteEfCoreOnly の slots）。mutation 実証済み。
 - `CollectSaveRows` が削除行を飛ばさないようにしても緑のまま（両側が同じ関数で並びを作るので食い違わない）。サーバーの一覧を保存の後に作っても緑のまま（EF Core の保存が渡したエンティティのナビゲーションを元へ戻すため）。保存の前に作る形は二重の守りとして残す。
 
 ## 除外した無制限バイナリ列を値として運ばない
@@ -159,7 +159,7 @@ Kestrel は本文の読み取りの例外を先に投げ、`RequestAborted` は�
 - EF Core のリポジトリは、印が立っている間だけ、SaveChanges の前に毎回 `KeepStoredUnboundedBinaries`（更新する行の除外列の元の値を今の値にして未変更にする）を通す。送られてくる除外列は未取得なので、全列を書くと保存済みの blob が NULL や空になるため。
   - 毎回通すのは、後勝ちのやり直しで保存先の値を元の値として取り込む（`OriginalValues.SetValues`）と元の値が blob に戻り、次の変更の検出が除外列を書き換えた列として扱うため。
   - 挿入は送られた値を書く。直結の EF Core は全列を読み書きする（印が無い）。
-- ガード：実装先の一致のシナリオ `blob-excluded-columns-read-and-write-guard`・`blob-unset-update-from-new-entity-keeps-blobs`・`remote-crud-round-trip`（EF Core のサーバー〔RemoteEfCoreOnly〕）、`RemoteEfCoreUnboundedBinaryRuntimeTests`（BinaryFixture・SQLite の EF Core のサーバー）、`RemoteEfCoreUnboundedBinarySqlServerRuntimeTests`（ConcurrencyFixture の gadgets.attachment・実 SQL Server で版の古い ForceOverwrite の単一の更新とグラフ保存）、`RemoteRequestMarkRuntimeTests`（破棄・入れ子・例外・非同期のメソッドから呼び出し元へ戻らない・並行の流れに見えない）。mutation 実証済み。
+- ガード：実装先の一致のシナリオ `blob-excluded-columns-read-and-write-guard`・`blob-unset-update-from-new-entity-keeps-blobs`・`remote-crud-round-trip`（EF Core のサーバー〔RemoteEfCoreOnly〕）、`BinaryColumnRemoteEfCoreSqliteRuntimeTests`（BinaryFixture・SQLite の EF Core のサーバー）、`BinaryColumnRemoteEfCoreSqlServerRuntimeTests`（ConcurrencyFixture の gadgets.attachment・実 SQL Server で版の古い ForceOverwrite の単一の更新とグラフ保存）、`BinaryColumnRemoteRequestMarkRuntimeTests`（破棄・入れ子・例外・非同期のメソッドから呼び出し元へ戻らない・並行の流れに見えない）。mutation 実証済み。
 
 ## バイナリ転送エンドポイント
 
@@ -202,11 +202,11 @@ JSON エンベロープ（POST+Base64）とは意図的に別形式の、第 2 �
 - 渡された Stream の所有権は呼び出し側にあり、閉じも破棄もしない（直結エンジンと同じ）。本文 `ExactLengthContent` は Stream を破棄しない。`StreamContent` へ呼び出し側の Stream を渡すための非クローズのラッパー `NonClosingStream`（Core パッケージ収載・Dispose/DisposeAsync だけ無視して他は委譲）は、公開の型として残る。
 - キー直列化は `RemoteJson.Options`（VO 内包値）を URL エンコードし、サーバーが同設定で復元する。クライアント固定部（`FormatKeyForQuery`・Download/Upload ヘルパー）は `HttpRemoteRepositoryCore` 基底（Core パッケージ収載）。
 - `WithUnboundedBinary()`・`Query()`・生 SQL のリモート化はスコープ外。
-- ガード：`BinaryColumnRemoteRuntimeTests` の 9b（`Stream_Put_WithoutOptIn_IsRejectedByDefaultRequestSizeLimit`＝生成クライアントで 413 の `RemoteRepositoryException` だけを合格にする。テストのクライアントだけ待ち時間を 30 秒にして負荷に依らず決定的にし、プロセスで最初の 413 はサーバー側の JIT で閉じるのが遅れて競合が出にくいので、同じ 413 の経路を `Expect` 付きの素の PUT で先に 1 回通してから確かめる）、`BinaryRemoteLengthRuntimeTests`（`BinaryLengthMismatchCases` を実サーバーへ流して blob が変わらない・長さちょうどのシークできない Stream は読んだバイト数がちょうど・`WithExactLength` 単体の同期と非同期の両方・307 で送り直す本文が開始位置から読まれる）、`BinaryColumn{Ado,EfCore,Remote}RuntimeTests`・`BinaryInMemoryFixtureRuntimeTests`（リモートは HTTP 越しの往復/404 false/DELETE→NULL/空ボディ 0 バイト/送信前 length 例外/`allowUnboundedUploads: true` での 31MB 転送成功と既定での 413 拒否の対照。CI 常時実行）。mutation 実証済み。
+- ガード：`BinaryColumnRemoteAdoSqliteRuntimeTests` の 9b（`Stream_Put_WithoutOptIn_IsRejectedByDefaultRequestSizeLimit`＝生成クライアントで 413 の `RemoteRepositoryException` だけを合格にする。テストのクライアントだけ待ち時間を 30 秒にして負荷に依らず決定的にし、プロセスで最初の 413 はサーバー側の JIT で閉じるのが遅れて競合が出にくいので、同じ 413 の経路を `Expect` 付きの素の PUT で先に 1 回通してから確かめる）、`BinaryColumnRemoteAdoSqliteLengthRuntimeTests`（`BinaryLengthMismatchCases` を実サーバーへ流して blob が変わらない・長さちょうどのシークできない Stream は読んだバイト数がちょうど・`WithExactLength` 単体の同期と非同期の両方・307 で送り直す本文が開始位置から読まれる）、`BinaryColumn{AdoSqlite,EfCoreSqlite,RemoteAdoSqlite}RuntimeTests`・`BinaryColumnInMemoryRuntimeTests`（リモートは HTTP 越しの往復/404 false/DELETE→NULL/空ボディ 0 バイト/送信前 length 例外/`allowUnboundedUploads: true` での 31MB 転送成功と既定での 413 拒否の対照。CI 常時実行）。mutation 実証済み。
 
 ## DI 登録
 
 - 非 keyed・keyed の 2 系統 ×（ベースアドレス版／HttpClient ファクトリ版）の 4 本を用意する。keyed 版は方言別拡張の keyed 版と対で、「サーバー＝HTTP・ローカル＝SQLite」のハイブリッド構成を組むための部品。
 - Save の応答の版対応表は `RemoteRowVersionEntry`（CLR 型名＋`RemoteJson` でシリアライズしたキー）で運ぶ。クライアントが書き込んだ行の版として書き戻す。
 - 共有 HttpClient（`OwnedHttpClient`）も同じキーで `AddKeyedSingleton` する。非 keyed 登録とも別キーとも衝突せず、コンテナ所有（破棄も従来どおり）を保つ。
-- ガード：`RemoteService{Ado,EfCore}RuntimeTests`（Kestrel を 127.0.0.1 の空きポートで in-process 起動・CI 常時実行）、`RemoteKeyedRegistrationRuntimeTests`（Kestrel 2 台をキー別に登録して往復・非 keyed 解決との分離・同一キー後勝ち・コンテナ所有の破棄）。
+- ガード：`CrudParityRemote{AdoSqlite,EfCoreSqlite}RuntimeTests`（Kestrel を 127.0.0.1 の空きポートで in-process 起動・CI 常時実行）、`RemoteTransportRemoteAdoSqliteKeyedRegistrationRuntimeTests`（Kestrel 2 台をキー別に登録して往復・非 keyed 解決との分離・同一キー後勝ち・コンテナ所有の破棄）。

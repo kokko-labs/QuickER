@@ -127,8 +127,8 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
 - フックありの経路は `SaveChangesAsync(acceptAllChangesOnSuccess: false)` で流し、採番値（版・計算列）はコミットの後の `AcceptAllChanges` でエンティティへ書く。EF Core は `acceptAllChangesOnSuccess=false` の間、採番値をエンティティへ書かないことを実 SQL Server で確認済み。
   - After は読んだ版を見て、After の例外・コミットの失敗・やり直しのどれでも DB に無い版が残らず、同一インスタンスの再保存が偽競合にならない。
 
-ガード：`BackendParitySqlServerRuntimeTests` の `force-overwrite-10-rows*`・`attempt-limit-then-row-gone-*`・`mars-*-then-missing`、`BackendParityRuntimeTests` の `insert-when-missing-10-rows*`・`deleted-then-missing-without-savepoints`（SQLite で自動セーブポイントを切る）・`ef-retry-*`・`contact-backup-delete-retried-commit`（`ParityBackendOptions.RetryEfCoreFirstCommit`＝再試行する実行戦略と、DbContext ごとに最初のコミットを一時的な失敗にする設定）・`ignored-write-*`（SQLite の `RAISE(IGNORE)` トリガー）、`EfCoreConcurrencyRuntimeTests`（上限のテスト〔UPDATE を必ず 0 行にするインターセプター〕と「SaveAsync: After は旧版を見る・例外でロールバックしても幻の版が残らない」）。mutation 実証済み。
-実行戦略そのもの（再試行する実行戦略 `EnableRetryOnFailure` の構成）を実 DB で守るのは、SQLite の `BackendParityRuntimeTests` の `ef-retry-*`・`contact-backup-delete-retried-commit` だけ。`EfCoreConcurrencyRuntimeTests`（SQL Server）は実行戦略を構成せず、競合の解決のやり直しの数え方を守る。
+ガード：`BackendParitySqlServerRuntimeTests` の `force-overwrite-10-rows*`・`attempt-limit-then-row-gone-*`・`mars-*-then-missing`、`BackendParityRuntimeTests` の `insert-when-missing-10-rows*`・`deleted-then-missing-without-savepoints`（SQLite で自動セーブポイントを切る）・`ef-retry-*`・`contact-backup-delete-retried-commit`（`ParityBackendOptions.RetryEfCoreFirstCommit`＝再試行する実行戦略と、DbContext ごとに最初のコミットを一時的な失敗にする設定）・`ignored-write-*`（SQLite の `RAISE(IGNORE)` トリガー）、`ConcurrencyEfCoreSqlServerRuntimeTests`（上限のテスト〔UPDATE を必ず 0 行にするインターセプター〕と「SaveAsync: After は旧版を見る・例外でロールバックしても幻の版が残らない」）。mutation 実証済み。
+実行戦略そのもの（再試行する実行戦略 `EnableRetryOnFailure` の構成）を実 DB で守るのは、SQLite の `BackendParityRuntimeTests` の `ef-retry-*`・`contact-backup-delete-retried-commit` だけ。`ConcurrencyEfCoreSqlServerRuntimeTests`（SQL Server）は実行戦略を構成せず、競合の解決のやり直しの数え方を守る。
 
 ## カスケードの ExecuteDeleteAsync
 
@@ -136,7 +136,7 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
   - 子孫を消した後で根の条件を評価し直すと、ナビゲーションを読む条件（`o => o.OrderLines.Any()`）で子孫だけが消えて根が残る。
   - キーは 500 件ずつ、パラメータの OR（偏りの無い木）で送る。1 つの `Contains` にすると、EF Core 10 は既定で 1 つずつのパラメータへ展開して SQL Server の 2,100 の上限を超え、設定や版によっては OPENJSON（互換性レベル 130 以上）を使う。
 - 循環するカスケードは、トランザクションを開く前にメタデータだけで断る（`ThrowIfCascadeIsCyclic`。走査の途中の判定は安全網として残す）。
-- ガード：`BackendParityRuntimeTests` の `execute-delete-cascade-navigation-predicate`・`execute-delete-cyclic-cascade`・`ef-retry-execute-delete-cascade`、`EfCoreExecuteDeleteRuntimeTests`（循環を断る前に DELETE が 0 本・根 1,200 件）、`BackendParitySqlServerRuntimeTests` の「根がパラメータの上限より多くても、互換性レベル 120 の DB でも動く」（根 2,500 件）。mutation 実証済み。
+- ガード：`BackendParityRuntimeTests` の `execute-delete-cascade-navigation-predicate`・`execute-delete-cyclic-cascade`・`ef-retry-execute-delete-cascade`、`CrudParityEfCoreSqliteExecuteDeleteRuntimeTests`（循環を断る前に DELETE が 0 本・根 1,200 件）、`BackendParitySqlServerRuntimeTests` の「根がパラメータの上限より多くても、互換性レベル 120 の DB でも動く」（根 2,500 件）。mutation 実証済み。
 
 ## 値オブジェクトの列と式の翻訳
 
@@ -225,12 +225,12 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
 - パターン・エスケープ文字・string の引数は、列の Unicode が既定の string の対応付けと違うときだけ Unicode でない string の対応付けで作る。列の格納型そのものは使わない（固定長だとパターンが空白で詰められ、列より長い引数もあり得る）。Unicode の列の SQL はバイト不変。
 - `LikeEscapeBehavior.ConcatenationSkipsNull`（Oracle だけ true）のとき、パラメータのパターンに `IS NOT NULL` を添える。Oracle は NULL の連結が残りの文字列になり、null のパターンが `'%%'` で全行に一致するため。null かどうかは EF Core が .NET の値で判断するので、Oracle に NULL で届く空文字列は全行に一致したまま。
 - 判別できないプロバイダは ESCAPE を書き、書かないのは Npgsql だけ。基底の `[Dialect] 2c`（空文字列）は `IS NOT NULL` のガードではない（空文字列ではその判定が SQL から消える）。
-- ガード：`QueryFixtureEfCoreLikePatternTests`（派生の DbContext で `IsUnicode(false)` にした列・プロバイダ名の表）、`StringMatchMethodEfCoreRuntimeTests` の受け手のケース、`GeneratedEfCoreOracleRuntimeTests` の null のパターンのケース。mutation 実証済み。
+- ガード：`QueryFixtureEfCoreLikePatternTests`（派生の DbContext で `IsUnicode(false)` にした列・プロバイダ名の表）、`ValueObjectStringMatchEfCoreSqliteRuntimeTests` の受け手のケース、`DialectPortabilityEfCoreOracleRuntimeTests` の null のパターンのケース。mutation 実証済み。
 
 ## 主キーの引き当て・生 SQL・タイムアウト
 
-- 主キーで引く操作（`GetByIdAsync` / `DeleteAsync`）のキーは、保持オブジェクトのメンバー参照で式木へ渡す（`BuildKeyPredicate` の `KeyHolder`）。定数で渡すと EF Core が SQL へリテラルで書き込み、キーの値ごとにクエリのコンパイルと DB のプランが増える。ガード：`EfCoreKeyParameterRuntimeTests`。
-- 生 SQL（`EfCoreSqlExecutor`）と Save フックの `ExecuteSqlAsync` は、DbContext のコマンドタイムアウトを写す。どちらも接続から自分でコマンドを作るので、写さないと接続の既定のまま走る。`GetCommandTimeout()` が null なら写さない。ガード：`EfCoreCommandTimeoutRuntimeTests`（Docker）。mutation 実証済み。
+- 主キーで引く操作（`GetByIdAsync` / `DeleteAsync`）のキーは、保持オブジェクトのメンバー参照で式木へ渡す（`BuildKeyPredicate` の `KeyHolder`）。定数で渡すと EF Core が SQL へリテラルで書き込み、キーの値ごとにクエリのコンパイルと DB のプランが増える。ガード：`CrudParityEfCoreSqliteKeyParameterRuntimeTests`。
+- 生 SQL（`EfCoreSqlExecutor`）と Save フックの `ExecuteSqlAsync` は、DbContext のコマンドタイムアウトを写す。どちらも接続から自分でコマンドを作るので、写さないと接続の既定のまま走る。`GetCommandTimeout()` が null なら写さない。ガード：`CrudParityEfCoreSqlServerCommandTimeoutRuntimeTests`（Docker）。mutation 実証済み。
 - EF Core の生 SQL のエンティティ取得は、無制限バイナリ列の除外が効く図でも除外した列を必須にする（`RequireUnboundedBinaryColumns`）。EF Core は保存で全列を書くので、読まずに取得したエンティティの次の保存が保存先の blob を上書きするため。QuickER 版は UPDATE で除外列に触れないので任意のまま。ガード：`BackendParityRuntimeTests` の `raw-sql-*-then-update`。mutation 実証済み。
 - 無制限バイナリ列の除外は EF Core（DbSet 経由）には適用されず、全列を読み書きする。リモートのサーバー側で除外列を保つ仕組みは `src/QuickER.Runtime.AspNetCore/CLAUDE.md`「除外した無制限バイナリ列を値として運ばない」を参照する。
 
@@ -241,4 +241,4 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
 - EF Core のパッケージは Microsoft.Data.Sqlite を参照しないので、型は名前で判定する。
 - 生成の `AddGeneratedEfCoreRepositories` は `configureDbContext` の後に `AddInterceptors` で足す（利用者のインターセプターと並んで動く）。
 - 値は接続を開いたときに決まる（開いている接続で `SetCommandTimeout` を変えると次の接続から）。
-- ガード：`EfCoreSqliteBusyTimeoutRuntimeTests`（実 SQLite）、`SqliteBusyTimeoutInterceptorTests`（値の表・派生の接続・SQLite でない接続にコマンドを作らない・生成の DI のテキスト）。mutation 実証済み。
+- ガード：`BusyTimeoutDefaultEfCoreSqliteRuntimeTests`（実 SQLite）、`SqliteBusyTimeoutInterceptorTests`（値の表・派生の接続・SQLite でない接続にコマンドを作らない・生成の DI のテキスト）。mutation 実証済み。

@@ -9,7 +9,7 @@ namespace QuickER.Tests.GeneratedFixture;
 /// </summary>
 /// <remarks>
 /// SQLite の Include ローダーとインメモリの Include・カスケード削除が、このキーで突き合わせる。
-/// 実 DB での関連の組み立ては <c>TranslatorParity{SqlServer,Sqlite,InMemory}RuntimeTests</c> が固定する。
+/// 実 DB での関連の組み立ては <c>TranslatorParity{AdoSqlServer,AdoSqlite,InMemory}RuntimeTests</c> が固定する。
 /// </remarks>
 public sealed class IncludeKeysTests
 {

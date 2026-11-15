@@ -22,7 +22,7 @@ C# リテラルのエスケープの規則（`GeneratedLiteralText`）は `src/Q
 - 型トークンの解決は列型と同じくプロバイダ層（`QueryParameterTypeResolver`。列と同一経路）
 - LIKE の意味論はランタイムのエスケープ設計に合わせる：リテラルは `%` 位置で分解し、`LIKE @p` は部分一致（値リテラル扱い）。生 LIKE パターンは生 SQL の担当
 - EF Core の SQLite は decimal のサーバーサイド比較・並び替え非対応。SQLite × EF Core で使う図の DSL 条件・並び順は整数キーなどに限る
-  - 実 DB パリティ：`NamedQuery{Ado,EfCore}RuntimeTests`（CI 常時実行）
+  - 実 DB パリティ：`NamedQueryRawSql{AdoSqlite,EfCoreSqlite}RuntimeTests`（CI 常時実行）
 
 ## Repository の無い表のクエリ
 

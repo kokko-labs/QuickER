@@ -238,7 +238,7 @@
         "tests/QuickER.Tests/TestSupport/DslFuzzUnits.cs",
         "tests/QuickER.Tests/CodeGen.CSharp/DslFuzzExecution.cs",
         "tests/QuickER.Tests/CodeGen.CSharp/DslFuzzRunner.cs",
-        "tests/QuickER.Tests.Integration/GeneratedRuntime/DslConditionFuzzSqlServerRuntimeTests.cs"
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/NamedQueryDslConditionFuzzSqlServerRuntimeTests.cs"
       ],
       "covers": [
         "src/QuickER.CodeGen.CSharp/Queries",
@@ -376,8 +376,8 @@
         "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityPredicateRows.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityRuntimeTestsBase.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityInMemoryRuntimeTests.cs",
-        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParitySqlServerRuntimeTests.cs",
-        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParitySqliteRuntimeTests.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityAdoSqlServerRuntimeTests.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityAdoSqliteRuntimeTests.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityEfCoreRuntimeTestsBase.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityEfCoreSqlServerRuntimeTests.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityEfCoreSqliteRuntimeTests.cs"

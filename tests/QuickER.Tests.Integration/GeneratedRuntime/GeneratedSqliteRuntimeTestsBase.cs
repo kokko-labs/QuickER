@@ -149,7 +149,7 @@ public abstract class GeneratedSqliteRuntimeTestsBase : IDisposable
     /// no-tracking クエリは Include パス <c>Orders-&gt;Customer</c> のサイクルを拒否する
     /// （"Cycles are not allowed in no-tracking queries"）。そのため本テストはバックエンド別に置き、
     /// EF Core 派生では非サイクルの等価経路（子を Include(Customer) で別ロード）へ置き換える
-    /// （<see cref="GeneratedSqliteEfCoreParityRuntimeTests"/> でオーバーライド）。
+    /// （<see cref="CrudParityEfCoreSqliteRuntimeTests"/> でオーバーライド）。
     /// </remarks>
     [Fact(
         DisplayName = "[SQLite] 4b: ThenInclude 再帰（親→子→親のサイクル）が子の親参照をロードする"

@@ -1,0 +1,102 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using AwesomeAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using QuickER.Tests.GeneratedBinaryFixture;
+using QuickER.Tests.TestSupport;
+using Xunit;
+
+namespace QuickER.Tests.Integration.GeneratedRuntime;
+
+/// <summary>
+/// 無制限バイナリ列の除外が<b>EF Core（<c>DbSet</c> 経由）には非適用</b>であることを検証する派生
+/// （<c>AddGeneratedEfCoreRepositories</c>）。EF Core の列選択は EF Core の責務のため、GetById で除外列も普通に読め、
+/// 除外列に値を入れたまま Update しても例外にならず DB へ書ける（この 2 つと Stream アクセサの NotSupportedException は、
+/// 実装先どうしの一致のシナリオ <c>blob-*</c> が QuickER 版と並べて見る）。ここに残すのは、その図に無い EditModel と名前付きクエリ。
+/// </summary>
+[RuntimeCell(RuntimeFeatures.BinaryColumn, RuntimeTarget.EfCoreSqlite)]
+public sealed class BinaryColumnEfCoreSqliteRuntimeTests : BinaryColumnRuntimeTestsBase
+{
+    /// <summary>EF Core 版リポジトリ群を登録した DI コンテナ（UseSqlite・接続文字列は基底の一時 DB）</summary>
+    private ServiceProvider? _provider;
+
+    private ServiceProvider Provider() =>
+        _provider ??= new ServiceCollection()
+            .AddGeneratedEfCoreRepositories(options =>
+                options.UseSqlite(ConnectionString).IgnoreServiceProviderCacheLimit()
+            )
+            .BuildServiceProvider();
+
+    protected override IDocumentRepository CreateDocumentRepository() =>
+        Provider().GetRequiredService<IDocumentRepository>();
+
+    protected override IDocumentNoteRepository CreateDocumentNoteRepository() =>
+        Provider().GetRequiredService<IDocumentNoteRepository>();
+
+    /// <summary>
+    /// 2b. EditModel が AcceptSaved で保存を受け入れても、除外列の blob は EditModel に残る（EF Core は全列を書くので、
+    /// 未取得へ戻すと次の保存が空の値で blob を消す）。作り直した Entity でも、使い回した Entity でも消えない。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Binary/EF Core] 2b: AcceptSaved の後の 2 回目の保存でも、除外列の blob は消えない"
+    )]
+    public async Task AcceptSaved_ThenSaveAgain_KeepsStoredBlobs()
+    {
+        await ResetAndSeedAsync();
+        var documents = CreateDocumentRepository();
+        var mapper = new DocumentMapper();
+
+        var editModel = mapper.CreateEditModel((await documents.GetByIdAsync(1, Ct))!);
+        editModel.BindingTitle = "first";
+        var entity = mapper.CreateEntity(editModel, includeRemoved: true);
+        await documents.SaveAsync(entity, cancellationToken: Ct);
+        mapper.AcceptSaved(editModel, entity);
+
+        // 作り直した Entity で保存する
+        editModel.BindingTitle = "second";
+        await documents.SaveAsync(
+            mapper.CreateEntity(editModel, includeRemoved: true),
+            cancellationToken: Ct
+        );
+
+        // 保存した Entity へ書き戻して保存する
+        editModel.BindingTitle = "third";
+        mapper.ApplyToEntity(editModel, entity, includeRemoved: true);
+        await documents.SaveAsync(entity, cancellationToken: Ct);
+
+        var reread = await documents.GetByIdAsync(1, Ct);
+        reread!.Title.Should().Be("third");
+        reread
+            .Payload.Should()
+            .Equal(Doc1Payload, "AcceptSaved は EF Core の構成で blob を未取得へ戻さない");
+        reread.Thumb.Should().Equal(Doc1Thumb);
+    }
+
+    /// <summary>3. 共有 DSL 実装の名前付きクエリ（射影・件数）は EF Core でも同じ結果を返す</summary>
+    [Fact(DisplayName = "[Binary/EF Core] 3: 名前付きクエリ（射影・件数）が EF Core でも動く")]
+    public async Task NamedQueries_WorkOnEfCore()
+    {
+        await ResetAndSeedAsync();
+        var documents = CreateDocumentRepository();
+
+        // 射影（GetPayloads）: EF Core も payload を実体化して DTO へ射影する
+        var rows = await documents.GetPayloadsAsync(Ct);
+        rows.Should().HaveCount(3);
+        rows.Single(r => r.DocumentId == 1).Payload.Should().Equal(Doc1Payload);
+        rows.Single(r => r.DocumentId == 2).Payload.Should().BeNull();
+
+        // 件数（CountWithPayload）: payload IS NOT NULL（文書 1・3）
+        (await documents.CountWithPayloadAsync(Ct))
+            .Should()
+            .Be(2);
+    }
+
+    public override void Dispose()
+    {
+        _provider?.Dispose();
+        base.Dispose();
+    }
+}

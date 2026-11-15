@@ -31,7 +31,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// DdlGenerator（<see cref="SqlServerDdlGenerator"/> / <see cref="SqliteDdlGenerator"/>）で作成する。
 /// SQL Server 側は既存統合テストと同じく Docker（Testcontainers）依存のため、Docker 不在時は
 /// <see cref="SqlServerContainerFixture"/> の検出でスキップされる（CI では常にスキップ）。SQLite 単独で足りる
-/// 型検証は <see cref="MultiTargetRepositorySqliteKeyedResolutionTests"/> に分離し CI でも回す。
+/// 型検証は <see cref="MultiTargetAdoSqliteRuntimeTests"/> に分離し CI でも回す。
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]

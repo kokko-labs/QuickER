@@ -75,92 +75,92 @@
 
 CRUD・グラフ保存・Query() の共通シナリオ（パリティ基底が同一シナリオを各実装へ掛ける）
 
-- QuickER 版 SQL Server：担当＝`GeneratedRuntimeAdoParityTests`・`SchemaQualifiedTableRuntimeTests`・`SqlServerPlainQueryRuntimeTests`・`SqlServerQueryPipelineRuntimeTests`
-- QuickER 版 SQLite：担当＝`BackendParityRuntimeTests`（シナリオの群 CrudParityRemote）・`GeneratedSqliteAdoRuntimeTests`
-- EF Core SQL Server：担当＝`EfCoreCommandTimeoutRuntimeTests`・`GeneratedRuntimeEfCoreParityTests`・`GeneratedRuntimeEfCoreSpecificTests`・`SchemaQualifiedTableRuntimeTests`
-- EF Core SQLite：担当＝`BackendParityRuntimeTests`（シナリオの群 CrudParityRemote）・`EfCoreExecuteDeleteRuntimeTests`・`EfCoreKeyParameterRuntimeTests`・`GeneratedSqliteEfCoreParityRuntimeTests`
+- QuickER 版 SQL Server：担当＝`CrudParityAdoSqlServerPlainQueryRuntimeTests`・`CrudParityAdoSqlServerQueryPipelineRuntimeTests`・`CrudParityAdoSqlServerRuntimeTests`・`CrudParitySchemaQualifiedTableRuntimeTests`
+- QuickER 版 SQLite：担当＝`BackendParityRuntimeTests`（シナリオの群 CrudParityRemote）・`CrudParityAdoSqliteRuntimeTests`
+- EF Core SQL Server：担当＝`CrudParityEfCoreSqlServerCommandTimeoutRuntimeTests`・`CrudParityEfCoreSqlServerRuntimeTests`・`CrudParityEfCoreSqlServerSpecificRuntimeTests`・`CrudParitySchemaQualifiedTableRuntimeTests`
+- EF Core SQLite：担当＝`BackendParityRuntimeTests`（シナリオの群 CrudParityRemote）・`CrudParityEfCoreSqliteExecuteDeleteRuntimeTests`・`CrudParityEfCoreSqliteKeyParameterRuntimeTests`・`CrudParityEfCoreSqliteRuntimeTests`
 - EF Core PostgreSQL：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - EF Core MySQL：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - EF Core Oracle：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
-- インメモリ：担当＝`BackendParityRuntimeTests`（シナリオの群 CrudParityRemote）・`InMemoryFixtureRuntimeTests`
-- リモート：担当＝`BackendParityRuntimeTests`（サーバー：QuickER 版 SQLite・EF Core SQLite／シナリオの群 CrudParityRemote）・`RemoteServiceAdoRuntimeTests`（サーバー：QuickER 版 SQLite）・`RemoteServiceEfCoreRuntimeTests`（サーバー：EF Core SQLite）
+- インメモリ：担当＝`BackendParityRuntimeTests`（シナリオの群 CrudParityRemote）・`CrudParityInMemoryRuntimeTests`
+- リモート：担当＝`BackendParityRuntimeTests`（サーバー：QuickER 版 SQLite・EF Core SQLite／シナリオの群 CrudParityRemote）・`CrudParityRemoteAdoSqliteRuntimeTests`（サーバー：QuickER 版 SQLite）・`CrudParityRemoteEfCoreSqliteRuntimeTests`（サーバー：EF Core SQLite）
 
 ### `Concurrency`
 
 rowversion による楽観排他（版ガード・SaveConflictException の分類）
 
-- QuickER 版 SQL Server：担当＝`SqlServerConcurrencyRuntimeTests`
+- QuickER 版 SQL Server：担当＝`ConcurrencyAdoSqlServerRuntimeTests`
 - QuickER 版 SQLite：非該当＝SQLite 単独の図に rowversion 列は生まれない（timestamp は日時の別名へ解決される）ため、版ガードの対象そのものが存在しない。マルチターゲットでの非対称は MultiTargetRowVersion 行が持つ
-- EF Core SQL Server：担当＝`EfCoreConcurrencyRuntimeTests`
+- EF Core SQL Server：担当＝`ConcurrencyEfCoreSqlServerRuntimeTests`
 - EF Core SQLite：非該当＝SQLite 単独の図に rowversion 列は生まれない（timestamp は日時の別名へ解決される）ため、版ガードの対象そのものが存在しない。マルチターゲットでの非対称は MultiTargetRowVersion 行が持つ
 - EF Core PostgreSQL：非該当＝rowversion 型は SQL Server だけにあり（src/QuickER.Runtime/CLAUDE.md「rowversion による楽観排他」の既知の制限）、PostgreSQL・MySQL・Oracle の図に版の列が生まれないため、版ガードの対象そのものが存在しない
 - EF Core MySQL：非該当＝rowversion 型は SQL Server だけにあり（src/QuickER.Runtime/CLAUDE.md「rowversion による楽観排他」の既知の制限）、PostgreSQL・MySQL・Oracle の図に版の列が生まれないため、版ガードの対象そのものが存在しない
 - EF Core Oracle：非該当＝rowversion 型は SQL Server だけにあり（src/QuickER.Runtime/CLAUDE.md「rowversion による楽観排他」の既知の制限）、PostgreSQL・MySQL・Oracle の図に版の列が生まれないため、版ガードの対象そのものが存在しない
-- インメモリ：担当＝`InMemoryConcurrencyRuntimeTests`・`SaveConflictDetailsRuntimeTests`
-- リモート：担当＝`ConcurrencyRemoteAdoSqlServerRuntimeTests`（サーバー：QuickER 版 SQL Server）・`RemoteConcurrencyRuntimeTests`（サーバー：インメモリ）・`SaveConflictDetailsRuntimeTests`（サーバー：リポジトリなし）
+- インメモリ：担当＝`ConcurrencyInMemoryRuntimeTests`・`ConcurrencySaveConflictDetailsRuntimeTests`
+- リモート：担当＝`ConcurrencyRemoteAdoSqlServerRuntimeTests`（サーバー：QuickER 版 SQL Server）・`ConcurrencyRemoteInMemoryRuntimeTests`（サーバー：インメモリ）・`ConcurrencySaveConflictDetailsRuntimeTests`（サーバー：リポジトリなし）
 
 ### `EditModelSave`
 
 EditModel の保存の受け入れ（AcceptSaved＝版・DB とフックが書いた値の読み戻し・フックが飛ばした行・足して消した子）
 
-- QuickER 版 SQL Server：担当＝`EditModelSaveSqlServerRuntimeTests`
+- QuickER 版 SQL Server：担当＝`EditModelSaveAdoSqlServerRuntimeTests`
 - QuickER 版 SQLite：非該当＝シナリオは rowversion 列の版を読み戻す形で、SQLite 単独の図に rowversion 列は生まれない。読み戻しの処理は実装先に依らない（マッパーの共通部）
-- EF Core SQL Server：担当＝`EditModelSaveEfCoreRuntimeTests`
+- EF Core SQL Server：担当＝`EditModelSaveEfCoreSqlServerRuntimeTests`
 - EF Core SQLite：非該当＝シナリオは rowversion 列の版を読み戻す形で、SQLite 単独の図に rowversion 列は生まれない。読み戻しの処理は実装先に依らない（マッパーの共通部）
 - EF Core PostgreSQL：非該当＝rowversion 型は SQL Server だけにあり（src/QuickER.Runtime/CLAUDE.md「rowversion による楽観排他」の既知の制限）、PostgreSQL・MySQL・Oracle の図に版の列が生まれないため、版ガードの対象そのものが存在しない
 - EF Core MySQL：非該当＝rowversion 型は SQL Server だけにあり（src/QuickER.Runtime/CLAUDE.md「rowversion による楽観排他」の既知の制限）、PostgreSQL・MySQL・Oracle の図に版の列が生まれないため、版ガードの対象そのものが存在しない
 - EF Core Oracle：非該当＝rowversion 型は SQL Server だけにあり（src/QuickER.Runtime/CLAUDE.md「rowversion による楽観排他」の既知の制限）、PostgreSQL・MySQL・Oracle の図に版の列が生まれないため、版ガードの対象そのものが存在しない
 - インメモリ：担当＝`EditModelSaveInMemoryRuntimeTests`
-- リモート：担当＝`EditModelSaveRemoteAdoSqlServerRuntimeTests`（サーバー：QuickER 版 SQL Server）・`EditModelSaveRemoteRuntimeTests`（サーバー：インメモリ）
+- リモート：担当＝`EditModelSaveRemoteAdoSqlServerRuntimeTests`（サーバー：QuickER 版 SQL Server）・`EditModelSaveRemoteInMemoryRuntimeTests`（サーバー：インメモリ）
 
 ### `ConcurrencyVo`
 
 楽観排他 × 値オブジェクト（版プロパティが VO 型になる経路の Wrap/Unwrap）
 
-- QuickER 版 SQL Server：担当＝`ConcurrencyVoSqlServerRuntimeTests`
+- QuickER 版 SQL Server：担当＝`ConcurrencyVoAdoSqlServerRuntimeTests`
 - QuickER 版 SQLite：非該当＝Concurrency 行と同じ理由（SQLite 単独図に rowversion 列が無い）
-- EF Core SQL Server：担当＝`ConcurrencyVoEfCoreRuntimeTests`
+- EF Core SQL Server：担当＝`ConcurrencyVoEfCoreSqlServerRuntimeTests`
 - EF Core SQLite：非該当＝Concurrency 行と同じ理由（SQLite 単独図に rowversion 列が無い）
 - EF Core PostgreSQL：非該当＝rowversion 型は SQL Server だけにあり（src/QuickER.Runtime/CLAUDE.md「rowversion による楽観排他」の既知の制限）、PostgreSQL・MySQL・Oracle の図に版の列が生まれないため、版ガードの対象そのものが存在しない
 - EF Core MySQL：非該当＝rowversion 型は SQL Server だけにあり（src/QuickER.Runtime/CLAUDE.md「rowversion による楽観排他」の既知の制限）、PostgreSQL・MySQL・Oracle の図に版の列が生まれないため、版ガードの対象そのものが存在しない
 - EF Core Oracle：非該当＝rowversion 型は SQL Server だけにあり（src/QuickER.Runtime/CLAUDE.md「rowversion による楽観排他」の既知の制限）、PostgreSQL・MySQL・Oracle の図に版の列が生まれないため、版ガードの対象そのものが存在しない
 - インメモリ：担当＝`ConcurrencyVoInMemoryRuntimeTests`
-- リモート：担当＝`ConcurrencyVoRemoteAdoSqlServerRuntimeTests`（サーバー：QuickER 版 SQL Server）・`ConcurrencyVoRemoteEfCoreSqlServerRuntimeTests`（サーバー：EF Core SQL Server）・`ConcurrencyVoRemoteRuntimeTests`（サーバー：インメモリ）
+- リモート：担当＝`ConcurrencyVoRemoteAdoSqlServerRuntimeTests`（サーバー：QuickER 版 SQL Server）・`ConcurrencyVoRemoteEfCoreSqlServerRuntimeTests`（サーバー：EF Core SQL Server）・`ConcurrencyVoRemoteInMemoryRuntimeTests`（サーバー：インメモリ）
 
 ### `SaveHook`
 
 ISaveHook（Before のスキップ・After のトランザクション参加）
 
-- QuickER 版 SQL Server：担当＝`BackendParitySqlServerRuntimeTests`・`SaveHookBinaryWriteSqlServerRuntimeTests`・`SaveHookSqlServerRuntimeTests`
-- QuickER 版 SQLite：担当＝`BackendParityRuntimeTests`（シナリオの群 SaveHook・SaveHookFullSurface・SaveHookBlobStream・SaveHookForeignKey・SaveHookWriteBack）・`SaveHookAdoRuntimeTests`・`SaveHookBinaryWriteSqliteRuntimeTests`
-- EF Core SQL Server：担当＝`BackendParitySqlServerRuntimeTests`・`EfCoreCommandTimeoutRuntimeTests`
-- EF Core SQLite：担当＝`BackendParityRuntimeTests`（シナリオの群 SaveHook・SaveHookFullSurface・SaveHookBlobStream・SaveHookForeignKey・SaveHookWriteBack）・`SaveHookEfCoreRuntimeTests`
+- QuickER 版 SQL Server：担当＝`BackendParitySqlServerRuntimeTests`・`SaveHookAdoSqlServerBinaryWriteRuntimeTests`・`SaveHookAdoSqlServerRuntimeTests`
+- QuickER 版 SQLite：担当＝`BackendParityRuntimeTests`（シナリオの群 SaveHook・SaveHookFullSurface・SaveHookBlobStream・SaveHookForeignKey・SaveHookWriteBack）・`SaveHookAdoSqliteBinaryWriteRuntimeTests`・`SaveHookAdoSqliteRuntimeTests`
+- EF Core SQL Server：担当＝`BackendParitySqlServerRuntimeTests`・`CrudParityEfCoreSqlServerCommandTimeoutRuntimeTests`
+- EF Core SQLite：担当＝`BackendParityRuntimeTests`（シナリオの群 SaveHook・SaveHookFullSurface・SaveHookBlobStream・SaveHookForeignKey・SaveHookWriteBack）・`SaveHookEfCoreSqliteRuntimeTests`
 - EF Core PostgreSQL：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - EF Core MySQL：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - EF Core Oracle：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
-- インメモリ：担当＝`BackendParityRuntimeTests`（シナリオの群 SaveHook・SaveHookFullSurface・SaveHookBlobStream・SaveHookForeignKey・SaveHookWriteBack）・`SaveHookInMemoryRuntimeTests`・`SaveHookRegistrationRuntimeTests`
-- リモート：担当＝`BackendParityRuntimeTests`（サーバー：QuickER 版 SQLite・EF Core SQLite／シナリオの群 SaveHook・SaveHookFullSurface・SaveHookBlobStream・SaveHookForeignKey・SaveHookWriteBack）・`SaveHookRemoteRuntimeTests`（サーバー：QuickER 版 SQLite）
+- インメモリ：担当＝`BackendParityRuntimeTests`（シナリオの群 SaveHook・SaveHookFullSurface・SaveHookBlobStream・SaveHookForeignKey・SaveHookWriteBack）・`SaveHookInMemoryRegistrationRuntimeTests`・`SaveHookInMemoryRuntimeTests`
+- リモート：担当＝`BackendParityRuntimeTests`（サーバー：QuickER 版 SQLite・EF Core SQLite／シナリオの群 SaveHook・SaveHookFullSurface・SaveHookBlobStream・SaveHookForeignKey・SaveHookWriteBack）・`SaveHookRemoteAdoSqliteRuntimeTests`（サーバー：QuickER 版 SQLite）
 
 ### `BinaryColumn`
 
 無制限バイナリ列の除外・WithUnboundedBinary・Stream アクセサ
 
-- QuickER 版 SQL Server：担当＝`SqlServerBinaryColumnRuntimeTests`
-- QuickER 版 SQLite：担当＝`BackendParityRuntimeTests`（シナリオの群 BinaryColumn・BinaryColumnFullSurface・BinaryColumnRawSql・BinaryColumnBlobStream・BinaryColumnBlobStreamFullSurface）・`BinaryColumnAdoRuntimeTests`
+- QuickER 版 SQL Server：担当＝`BinaryColumnAdoSqlServerRuntimeTests`
+- QuickER 版 SQLite：担当＝`BackendParityRuntimeTests`（シナリオの群 BinaryColumn・BinaryColumnFullSurface・BinaryColumnRawSql・BinaryColumnBlobStream・BinaryColumnBlobStreamFullSurface）・`BinaryColumnAdoSqliteRuntimeTests`
 - EF Core SQL Server：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
-- EF Core SQLite：担当＝`BackendParityRuntimeTests`（シナリオの群 BinaryColumn・BinaryColumnFullSurface・BinaryColumnRawSql・BinaryColumnBlobStream・BinaryColumnBlobStreamFullSurface）・`BinaryColumnEfCoreRuntimeTests`
+- EF Core SQLite：担当＝`BackendParityRuntimeTests`（シナリオの群 BinaryColumn・BinaryColumnFullSurface・BinaryColumnRawSql・BinaryColumnBlobStream・BinaryColumnBlobStreamFullSurface）・`BinaryColumnEfCoreSqliteRuntimeTests`
 - EF Core PostgreSQL：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - EF Core MySQL：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - EF Core Oracle：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
-- インメモリ：担当＝`BackendParityRuntimeTests`（シナリオの群 BinaryColumn・BinaryColumnFullSurface・BinaryColumnRawSql・BinaryColumnBlobStream・BinaryColumnBlobStreamFullSurface）・`BinaryInMemoryFixtureRuntimeTests`
-- リモート：担当＝`BackendParityRuntimeTests`（サーバー：QuickER 版 SQLite・EF Core SQLite／シナリオの群 BinaryColumn・BinaryColumnFullSurface・BinaryColumnRawSql・BinaryColumnBlobStream・BinaryColumnBlobStreamFullSurface）・`BinaryColumnRemoteRuntimeTests`（サーバー：QuickER 版 SQLite）・`BinaryRemoteLengthRuntimeTests`（サーバー：QuickER 版 SQLite）・`BinaryTransferResponseRuntimeTests`（サーバー：リポジトリなし）・`RemoteEfCoreUnboundedBinaryRuntimeTests`（サーバー：EF Core SQLite）・`RemoteEfCoreUnboundedBinarySqlServerRuntimeTests`（サーバー：EF Core SQL Server）・`RemoteRequestMarkRuntimeTests`（サーバー：リポジトリなし）
+- インメモリ：担当＝`BackendParityRuntimeTests`（シナリオの群 BinaryColumn・BinaryColumnFullSurface・BinaryColumnRawSql・BinaryColumnBlobStream・BinaryColumnBlobStreamFullSurface）・`BinaryColumnInMemoryRuntimeTests`
+- リモート：担当＝`BackendParityRuntimeTests`（サーバー：QuickER 版 SQLite・EF Core SQLite／シナリオの群 BinaryColumn・BinaryColumnFullSurface・BinaryColumnRawSql・BinaryColumnBlobStream・BinaryColumnBlobStreamFullSurface）・`BinaryColumnRemoteAdoSqliteLengthRuntimeTests`（サーバー：QuickER 版 SQLite）・`BinaryColumnRemoteAdoSqliteRuntimeTests`（サーバー：QuickER 版 SQLite）・`BinaryColumnRemoteEfCoreSqlServerRuntimeTests`（サーバー：EF Core SQL Server）・`BinaryColumnRemoteEfCoreSqliteRuntimeTests`（サーバー：EF Core SQLite）・`BinaryColumnRemoteRequestMarkRuntimeTests`（サーバー：リポジトリなし）・`BinaryColumnRemoteTransferResponseRuntimeTests`（サーバー：リポジトリなし）
 
 ### `BinaryColumnEditModel`
 
 無制限バイナリ除外 × 値オブジェクト × EditModel / Mapper の往復（未取得の除外列を素通しする保存）
 
 - QuickER 版 SQL Server：空き（きっかけ待ち）＝EditModel / Mapper は方言に依らない生成物で、除外の意味論は SQLite で代表させている（SQL Server 側の除外の実 DB 検証は BinaryColumn 行が持つ）
-- QuickER 版 SQLite：担当＝`BinaryVoEditModelRuntimeTests`
+- QuickER 版 SQLite：担当＝`BinaryColumnEditModelAdoSqliteRuntimeTests`
 - EF Core SQL Server：非該当＝EF Core は列選択を自身が行うため除外が非適用＝除外列が未取得になる状況が発生しない
 - EF Core SQLite：非該当＝EF Core は列選択を自身が行うため除外が非適用＝除外列が未取得になる状況が発生しない
 - EF Core PostgreSQL：非該当＝EF Core は列選択を自身が行うため除外が非適用＝除外列が未取得になる状況が発生しない
@@ -173,15 +173,15 @@ ISaveHook（Before のスキップ・After のトランザクション参加）
 
 UNIQUE 制約の事前チェック（重複検出・自分自身の除外）
 
-- QuickER 版 SQL Server：担当＝`UniquenessCheckSqlServerRuntimeTests`
-- QuickER 版 SQLite：担当＝`UniquenessCheckAdoRuntimeTests`
+- QuickER 版 SQL Server：担当＝`UniquenessCheckAdoSqlServerRuntimeTests`
+- QuickER 版 SQLite：担当＝`UniquenessCheckAdoSqliteRuntimeTests`
 - EF Core SQL Server：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
-- EF Core SQLite：担当＝`UniquenessCheckEfCoreRuntimeTests`
+- EF Core SQLite：担当＝`UniquenessCheckEfCoreSqliteRuntimeTests`
 - EF Core PostgreSQL：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - EF Core MySQL：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - EF Core Oracle：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - インメモリ：担当＝`UniquenessCheckInMemoryRuntimeTests`
-- リモート：担当＝`UniquenessCheckRemoteRuntimeTests`（サーバー：QuickER 版 SQLite）
+- リモート：担当＝`UniquenessCheckRemoteAdoSqliteRuntimeTests`（サーバー：QuickER 版 SQLite）
 
 ### `UniquenessEnforcement`
 
@@ -194,17 +194,17 @@ UNIQUE 制約の事前チェック（重複検出・自分自身の除外）
 - EF Core PostgreSQL：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - EF Core MySQL：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - EF Core Oracle：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
-- インメモリ：担当＝`BackendParityRuntimeTests`（シナリオの群 UniquenessEnforcement）・`InMemoryUniquenessRuntimeTests`
+- インメモリ：担当＝`BackendParityRuntimeTests`（シナリオの群 UniquenessEnforcement）・`UniquenessEnforcementInMemoryRuntimeTests`
 - リモート：担当＝`BackendParityRuntimeTests`（サーバー：QuickER 版 SQLite・EF Core SQLite／シナリオの群 UniquenessEnforcement）
 
 ### `IncludeGraph`
 
 グラフ取得糖衣（IncludeGraph＝カスケード閉包の Include ツリー）
 
-- QuickER 版 SQL Server：担当＝`IncludeGraphSqlServerRuntimeTests`
-- QuickER 版 SQLite：担当＝`IncludeGraphAdoRuntimeTests`
+- QuickER 版 SQL Server：担当＝`IncludeGraphAdoSqlServerRuntimeTests`
+- QuickER 版 SQLite：担当＝`IncludeGraphAdoSqliteRuntimeTests`
 - EF Core SQL Server：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
-- EF Core SQLite：担当＝`IncludeGraphEfCoreRuntimeTests`
+- EF Core SQLite：担当＝`IncludeGraphEfCoreSqliteRuntimeTests`
 - EF Core PostgreSQL：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - EF Core MySQL：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - EF Core Oracle：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
@@ -216,9 +216,9 @@ UNIQUE 制約の事前チェック（重複検出・自分自身の除外）
 グラフ保存がカスケードの閉包だけを保存する（親への逆参照を辿らない・削除の根の子孫）
 
 - QuickER 版 SQL Server：担当＝`BackendParitySqlServerRuntimeTests`
-- QuickER 版 SQLite：担当＝`BackendParityRuntimeTests`（シナリオの群 GraphSaveOrder・GraphSaveRuntime・GraphSaveRuntimeRemote）・`GraphSaveAdoRuntimeTests`
+- QuickER 版 SQLite：担当＝`BackendParityRuntimeTests`（シナリオの群 GraphSaveOrder・GraphSaveRuntime・GraphSaveRuntimeRemote）・`GraphSaveAdoSqliteRuntimeTests`
 - EF Core SQL Server：担当＝`BackendParitySqlServerRuntimeTests`・`GraphSaveEfCoreSqlServerRuntimeTests`
-- EF Core SQLite：担当＝`BackendParityRuntimeTests`（シナリオの群 GraphSaveOrder・GraphSaveRuntime・GraphSaveRuntimeRemote）・`GraphSaveEfCoreRuntimeTests`
+- EF Core SQLite：担当＝`BackendParityRuntimeTests`（シナリオの群 GraphSaveOrder・GraphSaveRuntime・GraphSaveRuntimeRemote）・`GraphSaveEfCoreSqliteRuntimeTests`
 - EF Core PostgreSQL：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - EF Core MySQL：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - EF Core Oracle：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
@@ -271,10 +271,10 @@ UNIQUE 制約の事前チェック（重複検出・自分自身の除外）
 
 IncludeGraph の edge-skip（自己参照ナビを展開しない）
 
-- QuickER 版 SQL Server：担当＝`IncludeGraphSelfReferenceSqlServerRuntimeTests`
-- QuickER 版 SQLite：担当＝`IncludeGraphSelfReferenceAdoRuntimeTests`
+- QuickER 版 SQL Server：担当＝`IncludeGraphSelfReferenceAdoSqlServerRuntimeTests`
+- QuickER 版 SQLite：担当＝`IncludeGraphSelfReferenceAdoSqliteRuntimeTests`
 - EF Core SQL Server：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
-- EF Core SQLite：担当＝`IncludeGraphSelfReferenceEfCoreRuntimeTests`
+- EF Core SQLite：担当＝`IncludeGraphSelfReferenceEfCoreSqliteRuntimeTests`
 - EF Core PostgreSQL：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - EF Core MySQL：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - EF Core Oracle：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
@@ -285,36 +285,36 @@ IncludeGraph の edge-skip（自己参照ナビを展開しない）
 
 名前付きクエリ（簡易 DSL・射影・手動実装）
 
-- QuickER 版 SQL Server：担当＝`DslConditionFuzzSqlServerRuntimeTests`（実装先の軸 ado・efcore（方言 sqlserver））
-- QuickER 版 SQLite：担当＝`NamedQueryAdoRuntimeTests`・`SqlitePortableNamedQueryRuntimeTests`
-- EF Core SQL Server：担当＝`DslConditionFuzzSqlServerRuntimeTests`（実装先の軸 ado・efcore（方言 sqlserver））
-- EF Core SQLite：担当＝`NamedQueryEfCoreRuntimeTests`
+- QuickER 版 SQL Server：担当＝`NamedQueryDslConditionFuzzSqlServerRuntimeTests`（実装先の軸 ado・efcore（方言 sqlserver））
+- QuickER 版 SQLite：担当＝`NamedQueryAdoSqliteRuntimeTests`・`NamedQueryRawSqlAdoSqliteRuntimeTests`
+- EF Core SQL Server：担当＝`NamedQueryDslConditionFuzzSqlServerRuntimeTests`（実装先の軸 ado・efcore（方言 sqlserver））
+- EF Core SQLite：担当＝`NamedQueryRawSqlEfCoreSqliteRuntimeTests`
 - EF Core PostgreSQL：担当＝`NamedQueryDslConditionFuzzPostgreSqlRuntimeTests`（実装先の軸 efcore（方言 postgresql））
 - EF Core MySQL：担当＝`NamedQueryDslConditionFuzzMySqlRuntimeTests`（実装先の軸 efcore（方言 mysql））
 - EF Core Oracle：担当＝`NamedQueryDslConditionFuzzOracleRuntimeTests`（実装先の軸 efcore（方言 oracle））
 - インメモリ：担当＝`NamedQueryInMemoryRuntimeTests`
-- リモート：担当＝`RemoteServiceAdoRuntimeTests`（サーバー：QuickER 版 SQLite）・`RemoteServiceEfCoreRuntimeTests`（サーバー：EF Core SQLite）
+- リモート：担当＝`CrudParityRemoteAdoSqliteRuntimeTests`（サーバー：QuickER 版 SQLite）・`CrudParityRemoteEfCoreSqliteRuntimeTests`（サーバー：EF Core SQLite）
 
 ### `NamedQueryRawSql`
 
 名前付きクエリの生 SQL 実装（戻り形・パラメータ展開）
 
 - QuickER 版 SQL Server：空き（きっかけ待ち）＝SQL Server の名前付きクエリの実行時テストは簡易 DSL の総当たりだけで、生 SQL の実装は未整備
-- QuickER 版 SQLite：担当＝`NamedQueryAdoRuntimeTests`
+- QuickER 版 SQLite：担当＝`NamedQueryRawSqlAdoSqliteRuntimeTests`
 - EF Core SQL Server：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
-- EF Core SQLite：担当＝`NamedQueryEfCoreRuntimeTests`
+- EF Core SQLite：担当＝`NamedQueryRawSqlEfCoreSqliteRuntimeTests`
 - EF Core PostgreSQL：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - EF Core MySQL：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - EF Core Oracle：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - インメモリ：非該当＝生 SQL の実装先を持たないインメモリでは契約宣言のみが生成され、実装は利用者の partial 実装になる（「SQL が与えられていない実装先は手動実装」の統一規則）
-- リモート：担当＝`RemoteServiceAdoRuntimeTests`（サーバー：QuickER 版 SQLite）・`RemoteServiceEfCoreRuntimeTests`（サーバー：EF Core SQLite）
+- リモート：担当＝`CrudParityRemoteAdoSqliteRuntimeTests`（サーバー：QuickER 版 SQLite）・`CrudParityRemoteEfCoreSqliteRuntimeTests`（サーバー：EF Core SQLite）
 
 ### `TranslatorOperator`
 
 式木 → SQL 翻訳の演算子分岐（NULL 意味論の補償・bool 列の短縮形）
 
-- QuickER 版 SQL Server：担当＝`TranslatorParitySqlServerRuntimeTests`
-- QuickER 版 SQLite：担当＝`TranslatorParitySqliteRuntimeTests`
+- QuickER 版 SQL Server：担当＝`TranslatorParityAdoSqlServerRuntimeTests`
+- QuickER 版 SQLite：担当＝`TranslatorParityAdoSqliteRuntimeTests`
 - EF Core SQL Server：非該当＝EF Core は式木を Where へ直接渡し、翻訳は EF Core の LINQ プロバイダが行う（SqlExpressionTranslator を通らない）
 - EF Core SQLite：非該当＝EF Core は式木を Where へ直接渡し、翻訳は EF Core の LINQ プロバイダが行う（SqlExpressionTranslator を通らない）
 - EF Core PostgreSQL：非該当＝EF Core は式木を Where へ直接渡し、翻訳は EF Core の LINQ プロバイダが行う（SqlExpressionTranslator を通らない）
@@ -327,22 +327,22 @@ IncludeGraph の edge-skip（自己参照ナビを展開しない）
 
 値オブジェクトの文字列一致（Contains / StartsWith / EndsWith）の判定を、具象の値オブジェクト型から引いた MethodInfo でも同じにする
 
-- QuickER 版 SQL Server：担当＝`StringMatchMethodSqlServerRuntimeTests`
-- QuickER 版 SQLite：担当＝`StringMatchMethodAdoRuntimeTests`
+- QuickER 版 SQL Server：担当＝`ValueObjectStringMatchAdoSqlServerRuntimeTests`
+- QuickER 版 SQLite：担当＝`ValueObjectStringMatchAdoSqliteRuntimeTests`
 - EF Core SQL Server：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
-- EF Core SQLite：担当＝`StringMatchMethodEfCoreRuntimeTests`
+- EF Core SQLite：担当＝`ValueObjectStringMatchEfCoreSqliteRuntimeTests`
 - EF Core PostgreSQL：担当＝`ValueObjectStringMatchEfCorePostgreSqlRuntimeTests`
 - EF Core MySQL：担当＝`ValueObjectStringMatchEfCoreMySqlRuntimeTests`
 - EF Core Oracle：担当＝`ValueObjectStringMatchEfCoreOracleRuntimeTests`
-- インメモリ：担当＝`StringMatchMethodInMemoryRuntimeTests`
+- インメモリ：担当＝`ValueObjectStringMatchInMemoryRuntimeTests`
 - リモート：非該当＝Query() はリモート面に無く、式木は転送されない
 
 ### `TranslatorParity`
 
 式木の翻訳・識別子の引用・Include の照合・UPDATE 文の組み立てを C# の意味論と突き合わせる共通シナリオ
 
-- QuickER 版 SQL Server：担当＝`TranslatorParitySqlServerRuntimeTests`
-- QuickER 版 SQLite：担当＝`TranslatorParitySqliteRuntimeTests`
+- QuickER 版 SQL Server：担当＝`TranslatorParityAdoSqlServerRuntimeTests`
+- QuickER 版 SQLite：担当＝`TranslatorParityAdoSqliteRuntimeTests`
 - EF Core SQL Server：担当＝`TranslatorParityEfCoreSqlServerRuntimeTests`
 - EF Core SQLite：担当＝`TranslatorParityEfCoreSqliteRuntimeTests`
 - EF Core PostgreSQL：担当＝`TranslatorParityEfCorePostgreSqlRuntimeTests`
@@ -355,8 +355,8 @@ IncludeGraph の edge-skip（自己参照ナビを展開しない）
 
 生成 DDL の適用ヘルパー（ApplyDdlAsync）
 
-- QuickER 版 SQL Server：担当＝`SqlServerSchemaBootstrapRuntimeTests`
-- QuickER 版 SQLite：担当＝`SqliteSchemaBootstrapRuntimeTests`
+- QuickER 版 SQL Server：担当＝`SchemaBootstrapAdoSqlServerRuntimeTests`
+- QuickER 版 SQLite：担当＝`SchemaBootstrapAdoSqliteRuntimeTests`
 - EF Core SQL Server：非該当＝スキーマ作成は DDL 生成の責務で、EF Core は既存スキーマへの接続専用
 - EF Core SQLite：非該当＝スキーマ作成は DDL 生成の責務で、EF Core は既存スキーマへの接続専用
 - EF Core PostgreSQL：非該当＝スキーマ作成は DDL 生成の責務で、EF Core は既存スキーマへの接続専用
@@ -370,7 +370,7 @@ IncludeGraph の edge-skip（自己参照ナビを展開しない）
 マルチターゲット生成（中立契約 1 回＋方言別実装・keyed DI）
 
 - QuickER 版 SQL Server：担当＝`MultiTargetRepositoryRuntimeTests`
-- QuickER 版 SQLite：担当＝`MultiTargetRepositoryRuntimeTests`・`MultiTargetRepositorySqliteKeyedResolutionTests`
+- QuickER 版 SQLite：担当＝`MultiTargetAdoSqliteRuntimeTests`・`MultiTargetRepositoryRuntimeTests`
 - EF Core SQL Server：非該当＝マルチターゲットと EF Core は生成時に排他（診断エラー）
 - EF Core SQLite：非該当＝マルチターゲットと EF Core は生成時に排他（診断エラー）
 - EF Core PostgreSQL：非該当＝マルチターゲットと EF Core は生成時に排他（診断エラー）
@@ -384,7 +384,7 @@ IncludeGraph の edge-skip（自己参照ナビを展開しない）
 マルチターゲット × rowversion（SQL Server は書き込み除外＋版ガード・SQLite は通常列）
 
 - QuickER 版 SQL Server：担当＝`MultiTargetRowVersionRuntimeTests`
-- QuickER 版 SQLite：担当＝`MultiTargetRowVersionRuntimeTests`・`MultiTargetRowVersionSqliteRuntimeTests`
+- QuickER 版 SQLite：担当＝`MultiTargetRowVersionAdoSqliteRuntimeTests`・`MultiTargetRowVersionRuntimeTests`
 - EF Core SQL Server：非該当＝マルチターゲットと EF Core は生成時に排他
 - EF Core SQLite：非該当＝マルチターゲットと EF Core は生成時に排他
 - EF Core PostgreSQL：非該当＝マルチターゲットと EF Core は生成時に排他
@@ -397,8 +397,8 @@ IncludeGraph の edge-skip（自己参照ナビを展開しない）
 
 計算列・生成列（[ComputedColumn] による INSERT / UPDATE 除外・SELECT では読む）
 
-- QuickER 版 SQL Server：担当＝`SqlServerComputedColumnRuntimeTests`
-- QuickER 版 SQLite：担当＝`SqliteComputedColumnDiagramDdlRuntimeTests`・`SqliteComputedColumnRuntimeTests`
+- QuickER 版 SQL Server：担当＝`ComputedColumnAdoSqlServerRuntimeTests`
+- QuickER 版 SQLite：担当＝`ComputedColumnAdoSqliteDiagramDdlRuntimeTests`・`ComputedColumnAdoSqliteRuntimeTests`
 - EF Core SQL Server：非該当＝計算列フィクスチャはマルチターゲットで、EF Core とは生成時に排他。Fluent の ValueGeneratedOnAddOrUpdate は生成テキストの両アームテストが固定する
 - EF Core SQLite：非該当＝計算列フィクスチャはマルチターゲットで、EF Core とは生成時に排他。Fluent の ValueGeneratedOnAddOrUpdate は生成テキストの両アームテストが固定する
 - EF Core PostgreSQL：非該当＝計算列フィクスチャはマルチターゲットで、EF Core とは生成時に排他。Fluent の ValueGeneratedOnAddOrUpdate は生成テキストの両アームテストが固定する
@@ -411,15 +411,15 @@ IncludeGraph の edge-skip（自己参照ナビを展開しない）
 
 非主キーの自動採番列（[IdentityColumn] による INSERT / UPDATE 除外・EF Core の ValueGeneratedOnAddOrUpdate・SELECT では読む）
 
-- QuickER 版 SQL Server：担当＝`SqlServerIdentityColumnRuntimeTests`
+- QuickER 版 SQL Server：担当＝`IdentityColumnSqlServerRuntimeTests`
 - QuickER 版 SQLite：非該当＝自動採番列を持つ図は SQL Server 方言の図で、SQLite 単独の図に IDENTITY の概念が無い（除外は列自身の事実で方言に依らないため、SQL Server の実 DB で代表させている）
-- EF Core SQL Server：担当＝`SqlServerIdentityColumnRuntimeTests`
+- EF Core SQL Server：担当＝`IdentityColumnSqlServerRuntimeTests`
 - EF Core SQLite：非該当＝自動採番列を持つ図は SQL Server 方言の図で、SQLite 単独の図に IDENTITY の概念が無い（除外は列自身の事実で方言に依らないため、SQL Server の実 DB で代表させている）
-- EF Core PostgreSQL：担当＝`PostgreSqlIdentityColumnRuntimeTests`
+- EF Core PostgreSQL：担当＝`IdentityColumnEfCorePostgreSqlRuntimeTests`
 - EF Core MySQL：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - EF Core Oracle：空き（きっかけ待ち）＝この機能を EF Core 版のこの方言の実 DB で流すテストは無い（EF Core の列を方言ごとに分けて見えた空き）
 - インメモリ：非該当＝インメモリは採番を行わない＝自動採番列も普通のプロパティとして値を保つ（意図的な割り切り）
-- リモート：担当＝`RemoteEfCoreGeneratedValuesRuntimeTests`（サーバー：EF Core SQL Server）
+- リモート：担当＝`IdentityColumnRemoteEfCoreSqlServerRuntimeTests`（サーバー：EF Core SQL Server）
 
 ### `SyncSupport`
 
@@ -456,10 +456,10 @@ IncludeGraph の edge-skip（自己参照ナビを展開しない）
 - QuickER 版 SQL Server：非該当＝可搬フィクスチャは EF Core 単独出力で生成しており QuickER 版 Repository を持たない
 - QuickER 版 SQLite：非該当＝可搬フィクスチャは EF Core 単独出力で生成しており QuickER 版 Repository を持たない
 - EF Core SQL Server：空き（きっかけ待ち）＝可搬フィクスチャを SQL Server の実 DB で流すテストは無い（SQL Server の EF Core 版は SQL Server 方言のフィクスチャで CrudParity 行が持つ）
-- EF Core SQLite：担当＝`GeneratedEfCoreSqliteRuntimeTests`
-- EF Core PostgreSQL：担当＝`GeneratedEfCorePostgreSqlRuntimeTests`
-- EF Core MySQL：担当＝`GeneratedEfCoreMySqlRuntimeTests`
-- EF Core Oracle：担当＝`GeneratedEfCoreOracleRuntimeTests`
+- EF Core SQLite：担当＝`DialectPortabilityEfCoreSqliteRuntimeTests`
+- EF Core PostgreSQL：担当＝`DialectPortabilityEfCorePostgreSqlRuntimeTests`
+- EF Core MySQL：担当＝`DialectPortabilityEfCoreMySqlRuntimeTests`
+- EF Core Oracle：担当＝`DialectPortabilityEfCoreOracleRuntimeTests`
 - インメモリ：非該当＝可搬フィクスチャは EF Core 単独出力で生成しており QuickER 版 Repository を持たない（インメモリは方言に依らないため可搬性の検証対象にならない）
 - リモート：非該当＝可搬フィクスチャは EF Core 単独出力で生成しており QuickER 版 Repository を持たない
 
@@ -467,8 +467,8 @@ IncludeGraph の edge-skip（自己参照ナビを展開しない）
 
 EditModel.ValidateUniqueAsync（DB 照合による重複検出）
 
-- QuickER 版 SQL Server：担当＝`UniquenessCheckSqlServerRuntimeTests`
-- QuickER 版 SQLite：担当＝`EditModelValidateUniqueRuntimeTests`
+- QuickER 版 SQL Server：担当＝`UniquenessCheckAdoSqlServerRuntimeTests`
+- QuickER 版 SQLite：担当＝`EditModelValidateUniqueAdoSqliteRuntimeTests`
 - EF Core SQL Server：空き（きっかけ待ち）＝DB 照合の実 DB 検証は QuickER 版（SQLite・SQL Server）だけ。照合 SQL は UniquenessCheck 側で 5 実装を通している
 - EF Core SQLite：空き（きっかけ待ち）＝DB 照合の実 DB 検証は QuickER 版（SQLite・SQL Server）だけ。照合 SQL は UniquenessCheck 側で 5 実装を通している
 - EF Core PostgreSQL：空き（きっかけ待ち）＝DB 照合の実 DB 検証は QuickER 版（SQLite・SQL Server）だけ。照合 SQL は UniquenessCheck 側で 5 実装を通している
@@ -503,14 +503,14 @@ HTTP 転送層（health・エラー分類と詳細秘匿・応答本文・VO 本
 - EF Core MySQL：非該当＝転送層はサーバー背後のエンジンに依らない（サーバーの背後が QuickER 版と EF Core の 2 通りでも同じことは、CrudParity 行の RemoteService 系と実装先の一致のリモート 2 つの実装先が見る）
 - EF Core Oracle：非該当＝転送層はサーバー背後のエンジンに依らない（サーバーの背後が QuickER 版と EF Core の 2 通りでも同じことは、CrudParity 行の RemoteService 系と実装先の一致のリモート 2 つの実装先が見る）
 - インメモリ：非該当＝転送層はサーバー背後のエンジンに依らない（サーバーの背後が QuickER 版と EF Core の 2 通りでも同じことは、CrudParity 行の RemoteService 系と実装先の一致のリモート 2 つの実装先が見る）
-- リモート：担当＝`RemoteAccessRuntimeTests`（サーバー：QuickER 版 SQLite）・`RemoteErrorDetailRuntimeTests`（サーバー：QuickER 版 SQLite）・`RemoteHealthRuntimeTests`（サーバー：QuickER 版 SQLite）・`RemoteHostConfigurationRuntimeTests`（サーバー：QuickER 版 SQLite）・`RemoteKeyedRegistrationRuntimeTests`（サーバー：QuickER 版 SQLite）・`RemoteResponseBodyRuntimeTests`（サーバー：リポジトリなし）・`RemoteServerEngineRuntimeTests`（サーバー：リポジトリなし）・`RemoteSqlClientCancellationRuntimeTests`（サーバー：QuickER 版 SQL Server）・`RemoteValueObjectBodyRuntimeTests`（サーバー：リポジトリなし）
+- リモート：担当＝`RemoteTransportRemoteAdoSqlServerRuntimeTests`（サーバー：QuickER 版 SQL Server）・`RemoteTransportRemoteAdoSqliteAccessRuntimeTests`（サーバー：QuickER 版 SQLite）・`RemoteTransportRemoteAdoSqliteErrorDetailRuntimeTests`（サーバー：QuickER 版 SQLite）・`RemoteTransportRemoteAdoSqliteHealthRuntimeTests`（サーバー：QuickER 版 SQLite）・`RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests`（サーバー：QuickER 版 SQLite）・`RemoteTransportRemoteAdoSqliteKeyedRegistrationRuntimeTests`（サーバー：QuickER 版 SQLite）・`RemoteTransportRemoteResponseBodyRuntimeTests`（サーバー：リポジトリなし）・`RemoteTransportRemoteServerEngineRuntimeTests`（サーバー：リポジトリなし）・`RemoteTransportRemoteValueObjectBodyRuntimeTests`（サーバー：リポジトリなし）
 
 ### `SqlExecutorInjection`
 
 DI 登録した ISqlExecutor が生 SQL 経路へ実際に届くこと
 
 - QuickER 版 SQL Server：割り切り＝注入経路はテンプレート上で方言に依らないため SQLite で代表させている（根拠：src/QuickER.CodeGen.CSharp/CLAUDE.md「DB アクセスの排他と単独出力」）
-- QuickER 版 SQLite：担当＝`SqlExecutorInjectionRuntimeTests`
+- QuickER 版 SQLite：担当＝`SqlExecutorInjectionAdoSqliteRuntimeTests`
 - EF Core SQL Server：空き（きっかけ待ち）＝EF Core 版も同じ省略可能引数を持つが実行時検証は無い
 - EF Core SQLite：空き（きっかけ待ち）＝EF Core 版も同じ省略可能引数を持つが実行時検証は無い
 - EF Core PostgreSQL：空き（きっかけ待ち）＝EF Core 版も同じ省略可能引数を持つが実行時検証は無い
@@ -524,7 +524,7 @@ DI 登録した ISqlExecutor が生 SQL 経路へ実際に届くこと
 生成 SqlConnectionFactory が FK 検査を既定で有効にすること
 
 - QuickER 版 SQL Server：非該当＝SQL Server は FK を常に検査するため既定の補完という概念が無い
-- QuickER 版 SQLite：担当＝`SqliteForeignKeyDefaultRuntimeTests`
+- QuickER 版 SQLite：担当＝`ForeignKeyDefaultAdoSqliteRuntimeTests`
 - EF Core SQL Server：非該当＝接続文字列の組み立ては QuickER 版 Repository の責務
 - EF Core SQLite：非該当＝接続文字列の組み立ては QuickER 版 Repository の責務
 - EF Core PostgreSQL：非該当＝接続文字列の組み立ては QuickER 版 Repository の責務
@@ -538,9 +538,9 @@ DI 登録した ISqlExecutor が生 SQL 経路へ実際に届くこと
 SQLite の接続を開くたびに busy timeout を待ち時間（Default Timeout・EF Core はコマンドタイムアウト）へ合わせること
 
 - QuickER 版 SQL Server：非該当＝SQL Server のロック待ちは CommandTimeout が決め、接続に当てる設定が無い
-- QuickER 版 SQLite：担当＝`SqliteBusyTimeoutDefaultRuntimeTests`
+- QuickER 版 SQLite：担当＝`BusyTimeoutDefaultAdoSqliteRuntimeTests`
 - EF Core SQL Server：非該当＝SQL Server のロック待ちは CommandTimeout が決め、接続に当てる設定が無い
-- EF Core SQLite：担当＝`EfCoreSqliteBusyTimeoutRuntimeTests`
+- EF Core SQLite：担当＝`BusyTimeoutDefaultEfCoreSqliteRuntimeTests`
 - EF Core PostgreSQL：非該当＝busy timeout は SQLite の接続の設定で、PostgreSQL・MySQL・Oracle に当てる設定が無い
 - EF Core MySQL：非該当＝busy timeout は SQLite の接続の設定で、PostgreSQL・MySQL・Oracle に当てる設定が無い
 - EF Core Oracle：非該当＝busy timeout は SQLite の接続の設定で、PostgreSQL・MySQL・Oracle に当てる設定が無い
@@ -552,7 +552,7 @@ SQLite の接続を開くたびに busy timeout を待ち時間（Default Timeou
 SQLite の TEXT 値から IConvertible でない CLR 型（TimeSpan 等）への変換
 
 - QuickER 版 SQL Server：非該当＝SQL Server は対応する SQL 型を持ち、この変換経路を通らない
-- QuickER 版 SQLite：担当＝`SqliteValueConversionRuntimeTests`
+- QuickER 版 SQLite：担当＝`ValueConversionAdoSqliteRuntimeTests`
 - EF Core SQL Server：非該当＝値変換は EF Core の ValueConverter の責務
 - EF Core SQLite：非該当＝値変換は EF Core の ValueConverter の責務
 - EF Core PostgreSQL：非該当＝値変換は EF Core の ValueConverter の責務

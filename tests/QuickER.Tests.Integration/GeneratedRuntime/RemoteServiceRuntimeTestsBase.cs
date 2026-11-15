@@ -706,7 +706,7 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
     RuntimeTarget.Remote,
     Server = RuntimeTarget.AdoSqlite
 )]
-public sealed class RemoteServiceAdoRuntimeTests : RemoteServiceRuntimeTestsBase
+public sealed class CrudParityRemoteAdoSqliteRuntimeTests : RemoteServiceRuntimeTestsBase
 {
     protected override void ConfigureServerRepositories(
         IServiceCollection services,
@@ -722,7 +722,7 @@ public sealed class RemoteServiceAdoRuntimeTests : RemoteServiceRuntimeTestsBase
     RuntimeTarget.Remote,
     Server = RuntimeTarget.EfCoreSqlite
 )]
-public sealed class RemoteServiceEfCoreRuntimeTests : RemoteServiceRuntimeTestsBase
+public sealed class CrudParityRemoteEfCoreSqliteRuntimeTests : RemoteServiceRuntimeTestsBase
 {
     protected override void ConfigureServerRepositories(
         IServiceCollection services,

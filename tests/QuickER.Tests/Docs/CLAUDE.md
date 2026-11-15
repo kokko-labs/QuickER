@@ -63,7 +63,7 @@ docs の方言ごとの違いの表は宣言と一致する。表の直前の HT
 `ClaudeMdReferenceTests` は、リポジトリの全 CLAUDE.md（ルートと領域のフォルダ。`bin` / `obj` / `.git` / `.claude`〔worktree のコピーがある〕/ `tasks` は探さない）が書いた名前の実在を固定する。
 索引から詳細を指す書き方と、不変条件ごとにガードの名前を書く運用は、名前が古くなっても誰も気付かないので、書かれた側を実体と突き合わせる。
 
-- テストの名前：末尾が `Tests` か `TestsBase` の識別子を拾い、`Prefix{A,B}Suffix` の中括弧の省略は展開する。tests/ の C# の型の宣言にあること。直前が `*` の名前（`*DdlGeneratorTests`）はパターンなので照合しない。`…ForTests` で終わる名前（`ResetForTests` など）は製品のテスト用メンバーなので拾わない。実装先をスラッシュで並べる省略は、最後の部分が別の名前に読まれるので、中括弧の形（`RemoteService{Ado,EfCore}RuntimeTests`）で書く
+- テストの名前：末尾が `Tests` か `TestsBase` の識別子を拾い、`Prefix{A,B}Suffix` の中括弧の省略は展開する。tests/ の C# の型の宣言にあること。直前が `*` の名前（`*DdlGeneratorTests`）はパターンなので照合しない。`…ForTests` で終わる名前（`ResetForTests` など）は製品のテスト用メンバーなので拾わない。実装先をスラッシュで並べる省略は、最後の部分が別の名前に読まれるので、中括弧の形（`CrudParityRemote{AdoSqlite,EfCoreSqlite}RuntimeTests`）で書く
   - 名前の直後が `.cs` ならファイルの実在、`.メソッド名` ならそのクラスを宣言するファイルにメソッド名が現れること。メソッド名が `_` で終わるか直後が `*` なら前方一致
 - 期待の行・シナリオの Id：ハイフンを含み、ハイフンで終わらないバッククォートの小文字の語のうち、最初のハイフンまでの語が行 Id の接頭辞の集合にあるもの。tests/ の C# ソースに現れること
   - 照合の本文には `ClaudeMdReferenceTests.cs` 自身と、生成器の作らない形の宣言のファイル（名前が `NotGenerated.cs` で終わるもの）を入れない（ファイルの名前の一致で外す）。どちらも行 Id を書くファイルで、入れると書いた Id がそのファイル自身に当たって実在に見える（宣言の受け持つ守りの照合は `tests/QuickER.Tests/TestSupport/CLAUDE.md`「作らない形の宣言」）。宣言とファイル名の照合には入れる
