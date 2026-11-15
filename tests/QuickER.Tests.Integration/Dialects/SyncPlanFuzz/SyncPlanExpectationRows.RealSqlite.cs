@@ -10,7 +10,7 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 internal static partial class SyncPlanExpectationRows
 {
     /// <summary>SQLite の実 DB の段の行の数の下限（行を足したら・消したら合わせる）</summary>
-    private const int RealSqliteRowCount = 72;
+    private const int RealSqliteRowCount = 82;
 
     /// <summary>実 DB の段：SQLite の同期（テーブル再構築・外部キー・主キー・一意制約・ビュー）</summary>
     private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealSqliteRows() =>
@@ -19,6 +19,7 @@ internal static partial class SyncPlanExpectationRows
             .. RealSqliteKeyRows(),
             .. RealSqliteViewRows(),
             .. RealSqliteTriggerRows(),
+            .. RealSqliteIndexRows(),
             .. RealSqliteScriptRows(),
             .. RealSqliteImportDiscardedRows(),
             .. RealSqliteRowidAliasNullRows(),
@@ -1653,6 +1654,274 @@ internal static partial class SyncPlanExpectationRows
                         })
                 ),
         ];
+
+    /// <summary>
+    /// DB の索引（図に無い・再構築が原文で作り直す）が読む列を作り直しで消す形（索引を作り直せず、同期は実行してから巻き戻る＝
+    /// src/QuickER.Provider/CLAUDE.md「テーブル再構築の合成」の索引の段）
+    /// </summary>
+    /// <remarks>
+    /// 計画は索引を作り直せなくする列の削除だけを外して名指しし、同じ表のほかの変更（型の変更・列の追加）は流す。名指ししない形
+    /// （偽の警告の側）と、写しで同期の前から作れない索引（DB の外で登録した照合順序）を数えない形も並べる。
+    /// </remarks>
+    private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealSqliteIndexRows() =>
+        [
+            // 索引が読む列の削除は外し、同じ表の型の変更はコミットする（索引はそのまま残る）
+            Row(
+                    "realdb-index-reading-dropped-column-excludes-drop-and-applies-type-change",
+                    "[Integration] SQLite 同期: 索引が読む列の削除は外して索引を名指しし、同じ表の型の変更はコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s =>
+                {
+                    s["ix_item"].Columns.RemoveAll(c => c.Name == "note");
+                    s.Col("ix_item", "extra").DataType = "INTEGER";
+                })
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            IndexItemSql
+                                + "CREATE INDEX \"ix_item_note\" ON \"ix_item\" (\"note\");"
+                        )
+                        .Query("index", IndexExistsSql("ix_item_note"))
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single(
+                                "TableChangeBreaksDependentIndex(ix_item): ix_item_note"
+                            );
+                            e.Excluded.Exact("DropColumn ix_item.note");
+                            e.After.Contains("col ix_item.note *");
+                            e.After.Single("col ix_item.extra INTEGER *");
+                            e.Probe("index").Exact("1");
+                        })
+                ),
+            // 式の索引も、式が読む列の削除で作り直せない
+            Row(
+                    "realdb-index-expression-reading-dropped-column-is-named",
+                    "[Integration] SQLite 同期: 式の索引が読む列の削除は外して索引を名指しする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s["ix_item"].Columns.RemoveAll(c => c.Name == "note"))
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            IndexItemSql
+                                + "CREATE INDEX \"ix_item_lower_note\" ON \"ix_item\" (lower(\"note\"));"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single(
+                                "TableChangeBreaksDependentIndex(ix_item): ix_item_lower_note"
+                            );
+                            e.Excluded.Exact("DropColumn ix_item.note");
+                            e.Unchanged();
+                        })
+                ),
+            // 部分索引の WHERE が読む列の削除も作り直せない（索引の列は別の列）
+            Row(
+                    "realdb-index-partial-where-reading-dropped-column-is-named",
+                    "[Integration] SQLite 同期: 部分索引の WHERE が読む列の削除は外して索引を名指しする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s["ix_item"].Columns.RemoveAll(c => c.Name == "note"))
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            IndexItemSql
+                                + "CREATE INDEX \"ix_item_extra_noted\" ON \"ix_item\" (\"extra\") WHERE \"note\" IS NOT NULL;"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single(
+                                "TableChangeBreaksDependentIndex(ix_item): ix_item_extra_noted"
+                            );
+                            e.Excluded.Exact("DropColumn ix_item.note");
+                            e.Unchanged();
+                        })
+                ),
+            // 複数列の索引は、先頭でない列の削除でも作り直せない
+            Row(
+                    "realdb-index-multi-column-with-dropped-column-not-leading-is-named",
+                    "[Integration] SQLite 同期: 複数列の索引の先頭でない列の削除も外して索引を名指しする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s["ix_item"].Columns.RemoveAll(c => c.Name == "note"))
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            IndexItemSql
+                                + "CREATE INDEX \"ix_item_extra_note\" ON \"ix_item\" (\"extra\", \"note\");"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single(
+                                "TableChangeBreaksDependentIndex(ix_item): ix_item_extra_note"
+                            );
+                            e.Excluded.Exact("DropColumn ix_item.note");
+                            e.Unchanged();
+                        })
+                ),
+            // 一意索引の列の名前の変更（消す＋足す）は、消す側だけを外し、足す側はコミットする
+            Row(
+                    "realdb-index-unique-on-renamed-column-excludes-drop-and-applies-add",
+                    "[Integration] SQLite 同期: 一意索引の列の名前の変更は、列の削除だけを外して索引を名指しし、列の追加はコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s =>
+                {
+                    s["ix_item"].Columns.RemoveAll(c => c.Name == "code");
+                    s["ix_item"].Columns.Add(ExpectationSchema.Nullable("code2", "TEXT"));
+                })
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            IndexItemSql
+                                + "CREATE UNIQUE INDEX \"ux_item_code\" ON \"ix_item\" (\"code\");"
+                        )
+                        .Query("index", IndexExistsSql("ux_item_code"))
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single(
+                                "TableChangeBreaksDependentIndex(ix_item): ux_item_code"
+                            );
+                            e.Excluded.Exact("DropColumn ix_item.code");
+                            e.After.Contains("col ix_item.code *");
+                            e.After.Contains("col ix_item.code2 *");
+                            e.Probe("index").Exact("1");
+                        })
+                ),
+            // 索引が読まない列の削除は名指ししない（偽の警告を出さない）
+            Row(
+                    "realdb-index-on-other-column-drop-column-is-not-named",
+                    "[Integration] SQLite 同期: 索引が読まない列の削除は名指しせずにコミットし、索引は残る",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s["ix_item"].Columns.RemoveAll(c => c.Name == "note"))
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            IndexItemSql
+                                + "CREATE INDEX \"ix_item_extra\" ON \"ix_item\" (\"extra\");"
+                        )
+                        .Query("index", IndexExistsSql("ix_item_extra"))
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Absent("TableChangeBreaksDependentIndex*");
+                            e.Excluded.Empty();
+                            e.After.Absent("col ix_item.note *");
+                            e.Probe("index").Exact("1");
+                        })
+                ),
+            // 索引が読む列の型の変更は名指ししない
+            Row(
+                    "realdb-index-type-change-of-indexed-column-is-not-named",
+                    "[Integration] SQLite 同期: 索引が読む列の型の変更は名指しせずにコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s.Col("ix_item", "note").DataType = "VARCHAR(50)")
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            IndexItemSql
+                                + "CREATE INDEX \"ix_item_note\" ON \"ix_item\" (\"note\");"
+                        )
+                        .Query("index", IndexExistsSql("ix_item_note"))
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Absent("TableChangeBreaksDependentIndex*");
+                            e.Excluded.Empty();
+                            e.After.Single("col ix_item.note VARCHAR(50) *");
+                            e.Probe("index").Exact("1");
+                        })
+                ),
+            // 索引のある表への列の追加は名指ししない
+            Row(
+                    "realdb-index-add-column-is-not-named",
+                    "[Integration] SQLite 同期: 索引のある表への列の追加は名指しせずにコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s =>
+                    s["ix_item"].Columns.Add(ExpectationSchema.Nullable("memo", "TEXT"))
+                )
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            IndexItemSql
+                                + "CREATE INDEX \"ix_item_note\" ON \"ix_item\" (\"note\");"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Absent("TableChangeBreaksDependentIndex*");
+                            e.Excluded.Empty();
+                            e.After.Contains("col ix_item.memo *");
+                        })
+                ),
+            // 表の削除は、その表の索引を表と一緒に消す（作り直さない）
+            Row(
+                    "realdb-index-drop-table-with-own-index-is-not-named",
+                    "[Integration] SQLite 同期: 表の削除はその表の索引も一緒に消すので、名指しせずにコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s.Entities.RemoveAll(t => t.TableName == "ix_item"))
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            IndexItemSql
+                                + "CREATE INDEX \"ix_item_note\" ON \"ix_item\" (\"note\");"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Absent("TableChangeBreaksDependentIndex*");
+                            e.Excluded.Empty();
+                            e.After.Absent("table ix_item");
+                        })
+                ),
+            // DB の外で登録した照合順序を使う索引は、判定の写しで同期の前から作れないので数えない（名指ししない）。実行器の接続にも
+            // 登録が無いので、この表の作り直しは索引の作り直しで巻き戻る（作り直しの対象の外の既存の振る舞い・別の区切りの候補）
+            Row(
+                    "realdb-index-with-collation-registered-outside-is-not-named",
+                    "[Integration] SQLite 同期: DB の外で登録した照合順序を使う索引は、計画の段で数えずに名指ししない",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s["ix_item"].Columns.RemoveAll(c => c.Name == "note"))
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(IndexItemSql)
+                        // 照合順序を登録した接続でだけ作れる（実行器の検査を通さずに作る）
+                        .RawSetup(
+                            "CREATE INDEX \"ix_item_extra_collated\" ON \"ix_item\" (\"extra\" COLLATE "
+                                + SqliteSyncPlanFuzzDialect.TestCollation
+                                + ");"
+                        )
+                        .ExpectsUnwarnedFailure(
+                            "既存の振る舞い：実行器の接続に DB の外の照合順序の登録が無いので、この表の作り直しは索引の作り直しで断られる（計画の段の写しも同期の前から作れないので数えない）"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("failed: *no such collation sequence*");
+                            e.Warnings.Absent("TableChangeBreaksDependentIndex*");
+                            e.Excluded.Empty();
+                            e.Unchanged();
+                        })
+                ),
+        ];
+
+    /// <summary>索引の行の表（ix_item は id・note・extra・code と 1 行）</summary>
+    private const string IndexItemSql =
+        "CREATE TABLE \"ix_item\" (\"id\" INTEGER NOT NULL, \"note\" TEXT NULL, \"extra\" TEXT NULL, \"code\" TEXT NULL, CONSTRAINT \"PK_ix_item\" PRIMARY KEY (\"id\"));"
+        + "INSERT INTO \"ix_item\" (\"id\", \"note\", \"extra\", \"code\") VALUES (1, 'a', '7', 'k1');";
+
+    /// <summary>索引が DB に在るかを数える問い合わせ</summary>
+    private static string IndexExistsSql(string index) =>
+        $"SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = '{index}';";
 
     /// <summary>トリガーの行の表（tr_item は id・note・extra と 1 行、tr_src と tr_log は行なし）</summary>
     private const string TriggerItemSql =

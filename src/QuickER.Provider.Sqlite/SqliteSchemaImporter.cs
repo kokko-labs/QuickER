@@ -370,13 +370,15 @@ ORDER BY rowid;";
                         );
                         break;
                     default:
-                        indexSql.Add(new SqliteIndexSql(reader.GetString(2), sql));
+                        indexSql.Add(
+                            new SqliteIndexSql(reader.GetString(1), reader.GetString(2), sql)
+                        );
                         break;
                 }
             }
         }
 
-        return viewSql.Count == 0 && triggers.Count == 0
+        return viewSql.Count == 0 && triggers.Count == 0 && indexSql.Count == 0
             ? null
             : new SqliteLiveDependentCheck(replayTableSql, indexSql, viewSql, triggers);
     }

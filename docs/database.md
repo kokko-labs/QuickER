@@ -347,7 +347,7 @@ It is not imported, it never appears in generated DDL, and the diff sync neither
 | Generated / computed column | Imported as a read-only column without its expression, carrying the computed mark, and reported | Emitted as an ordinary column, with a note | Lost (rebuilt as an ordinary column, with a note) |
 | Automatic numbering that refuses given values | Imported as the mark of a column the database numbers, and reported (SQL Server, PostgreSQL, Oracle; the numbering definition is lost) | Emitted as an ordinary column, with a note | Not applicable (SQLite has none) |
 | Automatic numbering that accepts given values | Not imported (named) | Not emitted | Lost (a primary key whose declared type is `INTEGER` stays a rowid alias, so implicit auto-numbering survives; see the note below) |
-| Non-unique index | Not imported | Not emitted | Preserved (captured as its `CREATE` statement and replayed) |
+| Non-unique index | Not imported | Not emitted | Preserved (captured as its `CREATE` statement and replayed; dropping a column it reads is left out and named) |
 | Trigger | Not imported | Not emitted | Preserved (same; a change that would make it fail when it fires is left out and named) |
 | Table options after the column list (`WITHOUT ROWID`, `STRICT`) | Not imported | Not emitted | Lost |
 | Constraint clauses (`ON CONFLICT`, `DEFERRABLE INITIALLY DEFERRED`) | Not imported | Not emitted | Lost |
@@ -770,7 +770,7 @@ A trigger that refers to a rebuilt table also stays, and the rebuild recreates t
 SQLite does not check a trigger's body during the rebuild, so a change that removes a column or table a trigger uses would otherwise commit and make the trigger fail the next time it fires.
 A change that would do that is left out of the script beforehand as well (see below).
 If the sync still leaves a trigger that can no longer fire, it rolls back and names the trigger.
-An index that reads a dropped column cannot be recreated, so such a sync fails and rolls back.
+An index that reads a dropped column cannot be recreated, so dropping such a column is left out of the script beforehand as well (see below).
 
 ```mermaid
 flowchart TD
@@ -822,6 +822,16 @@ The copy keeps the primary key and unique constraints whose columns remain, but 
 A trigger whose `ON CONFLICT` target the same sync removes is therefore not caught when the script is built, and the check after the rebuild rolls the sync back and names the trigger.
 A trigger over a table that the copy cannot recreate (one that uses a collation or virtual table module registered outside the database) is not checked when the script is built.
 A trigger that uses a function registered by an application cannot be prepared outside that application, so QuickER does not check it.
+
+Indexes are not part of the diagram either, and the rebuild recreates the table's indexes from their `CREATE` statements.
+An index that reads a dropped column, whether in its column list, in an expression, or in the `WHERE` clause of a partial index, cannot be recreated, so the sync would fail at that statement and roll back.
+The in-memory copy also recreates the indexes, and QuickER counts an index that the copy could create before the change but not after it.
+For such a table, dropping its columns is left out of the script, and the confirmation names the table and the indexes.
+Every column drop on that table is left out, including drops of columns the index does not read, the same table-wide rule as for views and triggers.
+Adding columns, changing types, and dropping the table itself still run, because they do not break an index (dropping a table drops its indexes with it).
+Renaming a column is a drop and an add, so only the drop is left out: after the sync the table holds both the old column and the new one.
+Once you drop or change the index in the database and import again, the next sync runs the remaining drop.
+An index that uses a collation or function registered outside the database cannot be created in the copy, so it is not counted when the script is built.
 
 The sync-target SQLite file can also be created fresh with the "Create new" button in the connection dialog.
 Apply the whole diagram to an empty database to set it up from scratch.

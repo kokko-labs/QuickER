@@ -385,8 +385,19 @@ internal sealed class SqliteSyncPlanFuzzDialect : SyncPlanFuzzDialect, IDisposab
     public override DbConnection CreateConnection() =>
         new SqliteConnection(NonPooled(_db.ReadOnlyConnectionString));
 
-    public override DbConnection CreateQueryConnection() =>
-        new SqliteConnection(NonPooled(_db.ReadWriteConnectionString));
+    /// <summary>
+    /// 問い合わせ・生の準備の接続（照合順序 <see cref="TestCollation"/> を登録する＝DB の外で登録した照合順序を使う索引を、期待の行の
+    /// 生の準備で作れる。製品の取込・実行器の接続は登録しない）
+    /// </summary>
+    public override DbConnection CreateQueryConnection()
+    {
+        var connection = new SqliteConnection(NonPooled(_db.ReadWriteConnectionString));
+        connection.CreateCollation(TestCollation, (a, b) => string.CompareOrdinal(a, b));
+        return connection;
+    }
+
+    /// <summary>テストの側の接続だけが登録する照合順序の名前（製品の接続には無い）</summary>
+    public const string TestCollation = "quicker_test_collation";
 
     /// <summary>
     /// 種ごとに新しいファイルを作る（前の種のジャーナルを持ち越さない）。

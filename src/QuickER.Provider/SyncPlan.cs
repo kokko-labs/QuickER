@@ -302,6 +302,17 @@ public enum SyncPlanWarningKind
     /// 巻き戻して名指しする）。表ごとに 1 件。
     /// </remarks>
     TableChangeBreaksDependentTrigger,
+
+    /// <summary>
+    /// 作り直す表の DB の索引（図に無い）が読む列の削除を、計画から外した（作り直しの途中で索引を作れず、同期全体が巻き戻るため。
+    /// DB の索引を試せる方言＝SQLite。<see cref="SyncPlanContext.LiveDependentCheck"/>）。
+    /// </summary>
+    /// <remarks>
+    /// 再構築は索引を原文で作り直すので、索引が読む列（列の並び・式・部分索引の <c>WHERE</c>）を消すと <c>no such column</c> で断られる。
+    /// 外すのはその表の列の削除だけで、列の追加・型の変更などは流す。消した表の索引は表と一緒に消えるので数えない。同期の前に判定の写しで
+    /// 作れない索引（DB の外で登録した照合順序・アプリの関数を使うもの）は数えない。表ごとに 1 件。
+    /// </remarks>
+    TableChangeBreaksDependentIndex,
 }
 
 /// <summary>
@@ -328,7 +339,8 @@ public enum SyncPlanWarningKind
 /// <see cref="SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent"/> では作り直しを外した表（Detail は取込警告が名指しした捨てた物をカンマ区切りで並べたもの）、
 /// <see cref="SyncPlanWarningKind.UniqueConstraintRebuildKeptForForeignKey"/> では一意制約の表（Detail は「残した一意制約の名前 (支える外部キーの名前)」）、
 /// <see cref="SyncPlanWarningKind.TableChangeBreaksDependentView"/> では変更を外した表（Detail は読めなくなるビューの名前をカンマ区切りで並べたもの）、
-/// <see cref="SyncPlanWarningKind.TableChangeBreaksDependentTrigger"/> では変更を外した表（Detail は発火できなくなるトリガーの名前をカンマ区切りで並べたもの）。
+/// <see cref="SyncPlanWarningKind.TableChangeBreaksDependentTrigger"/> では変更を外した表（Detail は発火できなくなるトリガーの名前をカンマ区切りで並べたもの）、
+/// <see cref="SyncPlanWarningKind.TableChangeBreaksDependentIndex"/> では列の削除を外した表（Detail は作り直せなくなる索引の名前をカンマ区切りで並べたもの）。
 /// </param>
 /// <param name="Detail">
 /// 補足（外部キー制約名など。無ければ空文字）。
