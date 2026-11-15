@@ -149,6 +149,104 @@ internal static class PhysicalMouseButtons
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern short GetAsyncKeyState(int vKey);
 
+    /// <summary>固定の自己検査の対照を流し直す上限（1 回は 1 秒に満たない。人の手のクリックが 3 回続けて当たることは無い）</summary>
+    public const int ControlAttemptLimit = 3;
+
+    /// <summary>
+    /// 固定の自己検査の対照（キーの状態の表に押下を書き、固定を外して流すと押下が WPF のコントロールに届くことを見る側）を、
+    /// 途中の本物のクリックで黙って落とさずに流す（流し直しの経過をテストの出力と失敗の記録の時系列へ書く）
+    /// </summary>
+    /// <param name="attempt">
+    /// 対照を 1 回流す（毎回、表に押下を書き直してから流し、スコープ・ハーネスを破棄する前に表の押下が残っているかを読む。
+    /// 破棄は作る前の値を書き戻して、消えた跡を隠す）
+    /// </param>
+    /// <returns>結果（<see cref="ControlRun.Problem"/> が null なら合格。null でなければその文で失敗させる）</returns>
+    /// <remarks>
+    /// <para>
+    /// Windows は実際のボタンが変わるとスレッドの表を実際の状態へ同期し直すので、対照の途中に本物のクリックが入ると、
+    /// 書いた押下が消えて押下が届かない（自己検査が効いていないように見える）。落ちる原因そのもの（表の押下が消えた）を、
+    /// 流した後の表で見分ける。ほかのアプリの上のクリックは Win32 の報告としてテストの窓に届かず、<c>GetAsyncKeyState</c> を
+    /// 何点かで読むだけでは短いクリックを取りこぼすので、使わない。
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>届いた → 合格（何回目かを返す）。</item>
+    ///   <item>届かず表が押下のまま → 乱れなしの失敗。流し直さず、すぐに失敗の文を返す（本物の欠陥を隠さない）。</item>
+    ///   <item>届かず表が離れている → 外からの乱れ。名指しして流し直す。<paramref name="maxAttempts"/> 回とも乱れたら、
+    ///     名指しの失敗の文を返す。</item>
+    /// </list>
+    /// <para>
+    /// 見分けられない形：流している間に押して離し、終わり際にもう一度押していると、表は押下に見えるので、対照が落ちても
+    /// 乱れなしの失敗になる（偽の赤の側で、本物の欠陥は隠さない）。
+    /// </para>
+    /// </remarks>
+    internal static ControlRun RunPressedTableControl(
+        Func<ControlAttempt> attempt,
+        int maxAttempts,
+        Action<string> report
+    )
+    {
+        var disturbed = 0;
+
+        for (var number = 1; number <= maxAttempts; number++)
+        {
+            var result = attempt();
+
+            if (result.PressReached)
+            {
+                return new(true, number, disturbed, null);
+            }
+
+            if (result.TableKeptPress)
+            {
+                return new(
+                    false,
+                    number,
+                    disturbed,
+                    "表に押下が残っていたのに、固定を外しても押下が WPF のコントロールに届かなかった"
+                        + "（外からの乱れなし＝固定の自己検査が効いていない）"
+                );
+            }
+
+            disturbed++;
+            report(
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"対照の途中で実際のマウスのボタンの状態が変わり、キーの状態の表に書いた押下が消えた（外からの乱れ）。対照を流し直す（{number} / {maxAttempts} 回目）"
+                )
+            );
+        }
+
+        return new(
+            false,
+            maxAttempts,
+            disturbed,
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"対照を {maxAttempts} 回流したが、どの回も途中で実際のマウスのボタンの状態が変わり、表に書いた押下が消えた（外からの乱れ。人が触らない状態で流し直す）"
+            )
+        );
+    }
+
+    /// <summary>固定の自己検査の対照の流し直しを、テストの出力と失敗の記録の時系列へ書く（待ちの経過と同じ先）</summary>
+    internal static void ReportControlRetry(string text) => Report(text);
+
+    /// <summary>固定の自己検査の対照を 1 回流した結果</summary>
+    /// <param name="PressReached">表に書いた押下が WPF のコントロールに届いたか（対照が期待どおりか）</param>
+    /// <param name="TableKeptPress">流した後（破棄の前）に、表の左ボタンがまだ押下か</param>
+    internal readonly record struct ControlAttempt(bool PressReached, bool TableKeptPress);
+
+    /// <summary>固定の自己検査の対照を流した結果</summary>
+    /// <param name="PressReached">押下が届いたか（合格）</param>
+    /// <param name="Attempts">流した回数</param>
+    /// <param name="Disturbed">外からの乱れで流し直した回数</param>
+    /// <param name="Problem">失敗の文（合格なら null）</param>
+    internal readonly record struct ControlRun(
+        bool PressReached,
+        int Attempts,
+        int Disturbed,
+        string? Problem
+    );
+
     /// <summary>待つ上限（0 なら待たない）と、待っている間に経過を書く間隔</summary>
     internal readonly record struct WaitPolicy(TimeSpan Limit, TimeSpan ReportInterval)
     {
