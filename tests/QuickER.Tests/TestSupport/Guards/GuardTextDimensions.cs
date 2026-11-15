@@ -75,20 +75,21 @@ internal static class GuardTextDimensions
         new(
             EngineIds.Guard,
             "Parity",
-            "照合の表（正本の一覧と写しの一覧の比べ方 × 結果。docs・ワークフロー・resx・設定のキー・パッケージの版）",
+            "照合の表（正本の一覧と写しの一覧の比べ方 × 結果。docs・CHANGELOG・ワークフロー・resx・設定のキー・パッケージの版）",
             ParityTable,
             ParityRows.All.Count + ParityTests.ComparerProbes.Length,
             [
                 "tests/QuickER.Tests/TestSupport/Guards/GuardTextDimensions.cs",
                 "tests/QuickER.Tests/TestSupport/Guards/ParityRow.cs",
                 "tests/QuickER.Tests/TestSupport/Guards/ParityRows.AiMock.cs",
+                "tests/QuickER.Tests/TestSupport/Guards/ParityRows.Changelog.cs",
                 "tests/QuickER.Tests/TestSupport/Guards/ParityRows.CodeGen.cs",
                 "tests/QuickER.Tests/TestSupport/Guards/ParityRows.Docs.cs",
                 "tests/QuickER.Tests/TestSupport/Guards/ParityRows.Resources.cs",
                 "tests/QuickER.Tests/TestSupport/Guards/ParityRows.Workflow.cs",
                 "tests/QuickER.Tests/TestSupport/Guards/ParityTests.cs",
             ],
-            ["docs", ".github/workflows", "src"]
+            ["docs", "CHANGELOG.md", "CHANGELOG.ja.md", ".github/workflows", "src"]
         );
 
     /// <summary>文言の表の台帳の行</summary>

@@ -96,3 +96,22 @@ docs の方言ごとの違いの表は宣言と一致する。表の直前の HT
   - 行 Id は「行」の直後に書いたものだけを拾う（`行 xxx-yyy`・`行 <c>xxx-yyy</c>`・``行 `xxx-yyy` ``）。
   - 既知の一覧は空（例外を持たない）。
 - ガード：`SourceRuleTests`（規則 `comment-test-names-src`・`comment-test-names-templates`・`comment-test-names-workflows`・`comment-test-names-scripts`／自己検査の行 `comment-test-names-src-forms`・`comment-test-names-src-inactive-branch`・`comment-test-names-workflows-forms`）。mutation 実証済み（src の XmlDoc に消えたクラスの名前を戻す・ワークフローに架空の名前を足す、のどちらも赤）。
+
+## CHANGELOG の項目の長さ
+
+CHANGELOG（英日）の Unreleased の項目は、CONTRIBUTING の「書き方」のとおり「- **要約** — 本文」の 1 行で、本文は 2 文以内、行は上限の字数に収まる。文章だけの規則では、区切りごとに項目を書き足すうちに 1 項目の字数が 0.3.0 の約 2.4 倍に伸び、リリースの前に詰め直すことになったので、照合の表で機械で守る。
+
+- 置き場所は照合の表の部分ファイル `tests/QuickER.Tests/TestSupport/Guards/ParityRows.Changelog.cs`（読み取りは `ChangelogEntries`・合成の入力は `ChangelogEntryProbes`）。規則の表（`SourceRuleTests`）は範囲の根がリポジトリの直下を扱えないので使わない。
+  - 本物の行は、正本＝範囲のすべての項目と書式の違反の行・写し＝上限を満たす項目・比べ方 Multiset。違反は「正本だけにある」として、ファイル・行・要約の先頭 40 字・本文の文の数・行の字数・上限で名指しされる。
+- 読み方：
+  - 範囲は `## [Unreleased]` の次の行から、次の `## [` で始まる行の前まで。
+  - 種類の見出し（`### `）の下で、空行・見出し（`#` で始まる行）以外の行は `- **` で始まらなければ書式の違反（太字で始めない項目・2 行目へ折り返した続きの行がガードを素通りしないため）。要点（Highlights）の箇条は最初の種類の見出しの前にあるので読まない。
+  - 要約は `- **` から `** — ` まで、本文はその後ろ（区切りが無ければ本文なし＝0 文）。
+  - 文の数の前に、インラインのコード（`` `…` ``）と括弧（全角・半角。入れ子は内側から 3 段まで）の中を除く。日本語は「。」で区切った空でない部分の数。英語は `.`・`!`・`?` の後の空白で、続く文字が大文字・バッククォート・引用符・開き括弧のときだけ区切る（`e.g. the` や `1.5` を区切らない）。
+  - 行の字数は行全体の `string.Length`。節の見出しが無ければ読み取りの失敗として例外（空の節として通さない）。
+- 上限：本文は 2 文まで（主な歯止め）。行の字数は膨らんだ外れ値を止めるもので、日本語は Breaking 280 字・ほか 250 字、英語は Breaking 520 字・ほか 460 字。確定した 0.4.0 の節（日本語の最大は Breaking 271 字・ほか 246 字、英語は 468 字・457 字、本文 3 文以上は 0 件）が通る値から決めた。Breaking は移行の文を必ず入れるのでほかより 1 句長い。
+- 空振りの検知：Unreleased はリリースの直後に空になるので、本物の行の正本の最低数は 0。代わりに 2 つで示す。
+  - 証人の行 `changelog-0-4-0-entries-within-limits`：確定した 0.4.0 の節を同じ読み取りで読み（英日 130 項目ずつ＝正本の最低数 260）、上限を満たす。本物のファイルの書式（`- **` と `** — ` の区切り）が読み取りと合っていることを、合成の入力では示せないため常設する。上限を 0.4.0 より厳しくするときは、証人の節を新しい版へ移す。
+  - 自己検査の行（合成の入力・比べ方 Sequence）：日本語と英語で、本文 3 文・Breaking 以外の上限 +1 字・Breaking の上限 +1 字・太字で始まらない行・折り返した続きの行・2 つの違反を持つ項目を名指しし、2 文の項目・Breaking の上限ちょうど・括弧とインラインのコードの中の句点（英語はピリオド）・本文の無い項目・Unreleased の後ろの版の項目（英語は小文字が続く略語と小数も）を通す。空の Unreleased（種類の見出しだけ）の行は、すぐ下の版の節の違反を数えない。合成の入力の行の長さは上限の定数から作らず数値で書く（定数から作ると、上限を緩めたときに入力も一緒に伸びて赤にならない）。
+- 上限・数え方を変えるときは、`ChangelogEntries` の定数と、合成の入力の数値と期待の並び、ルートの `CLAUDE.md` の索引の 1 行（上限の数値を書いている）を一緒に直す。CONTRIBUTING には上限の数値を書かない（照合の行の Id だけを書く）。
+- ガード：`ParityTests`（行 `changelog-unreleased-entries-within-limits`・`changelog-0-4-0-entries-within-limits`・`changelog-entry-limits-probe-ja`・`changelog-entry-limits-probe-en`・`changelog-entry-limits-probe-empty-unreleased`）。mutation 実証済み（文の数の上限を 3 にする・日本語の上限を緩める・英語の Breaking の上限を緩める・書式の違反の判定を外す・括弧の除外を外す、のどれも自己検査の行が赤。節の終わりを読まないと 5 行とも赤）。

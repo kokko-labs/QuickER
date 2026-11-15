@@ -46,9 +46,15 @@ Issues and pull requests are welcome, but support is **best-effort** (no promise
   Internal refactoring and test-only changes need no entry, so the section is often empty, which is expected.
   Write an entry as follows
   - **Headings**: under the type heading (`### Breaking changes` / `### Added` / `### Changed` / `### Security` / `### Fixed` / `### Removed`; the Japanese file keeps these in English), group entries by area with a sub-heading (`#### Diagram editing & files` / `#### DB import` / `#### DB sync & DDL` / `#### C# code import` / `#### Code generation dialog` / `#### Generated code` / `#### Bidirectional sync` / `#### AI chat & mock generation` / `#### CLI & MCP` / `#### Distribution & settings` / `#### License`, and so on), adding the heading if it is not there yet
-  - **Length**: a bold summary followed by one to three sentences.
-    Say what changed and what the user needs to do, nothing more; the reasoning and the internals belong in the docs (for users) or the CLAUDE.md files (for developers: the root index and the file in the area's folder), linked if needed
-  - **Breaking changes**: write them under `### Breaking changes` only (not repeated in another section), with a one- or two-sentence migration step
+  - **Length**: a bold summary followed by zero to two sentences.
+    The bold summary says what changed.
+    The sentences say only what the user needs to do, what the user saw before (briefly), and the conditions that tell whether the change applies to them (the dialect, the backend, the option).
+    Leave out the reasoning, the internals, long lists of conditions, and example values; put them in the docs (for users) or the CLAUDE.md files (for developers: the root index and the file in the area's folder) and link them if needed.
+    Error codes may stay.
+    Most entries end up around 100 characters in the Japanese file.
+    A test (the parity row `changelog-unreleased-entries-within-limits`) checks the format, the number of sentences, and the line length of each Unreleased entry
+  - **Breaking changes**: write them under `### Breaking changes` only (not repeated in another section), and always include the migration step (what the user needs to do).
+    When two sentences cannot hold everything, keep the migration step and drop the rest
   - **Consolidation**: fold a change into the existing entry on the same topic.
     A fix to a feature added during the same Unreleased period gets no entry, since no user ever saw the bug
   - **Highlights**: at release time, open the section with a three-to-five-line list of highlights
@@ -79,6 +85,7 @@ Releases always ship **all distributables together** (the NuGet packages, the GU
 Timing is discretionary; no cadence is promised.
 
 1. Review the Unreleased section of the changelog and decide the version number (minor / patch per the rules above).
+   Before renaming it, fold entries on the same topic together, remove entries for fixes to features added during the same Unreleased period, and check the length (see "Write an entry as follows" above).
    Rename that section to the version with a release date (`## [0.2.0] - 2026-09-01`) and open a fresh empty `## [Unreleased]` above it, in **both [CHANGELOG.md](CHANGELOG.md) and [CHANGELOG.ja.md](CHANGELOG.ja.md)**
 2. Update `VersionPrefix` in `Directory.Build.props` and commit it together with the changelog finalization as a single commit
 3. Push the commit.
