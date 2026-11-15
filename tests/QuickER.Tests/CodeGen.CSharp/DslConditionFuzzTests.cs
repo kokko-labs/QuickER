@@ -230,14 +230,19 @@ public class DslConditionFuzzTests
             }
         }
 
-        // 種の段：種ごとの SQLite と MySQL の単位と、種に依らない射影の型名の衝突の単位
+        // 種の段：種ごとの SQLite と MySQL の単位と、種に依らない射影の型名の衝突の単位。族・TimeSpan・DateTimeOffset の単位は
+        // 普段の種と偶数の種でだけ流す（DslFuzzUnits.RunsAtSeed。夜間のジョブの時間の予算）
         var seedRuns = plan
             .Seeds.SelectMany(seed =>
                 DslFuzzUnits
                     .Sqlite(seed)
+                    .Where(unit => DslFuzzUnits.RunsAtSeed(unit, Seeds))
                     .Select(unit => new DslFuzzRun(unit, SqliteTarget))
                     .Concat(
-                        DslFuzzUnits.MySql(seed).Select(unit => new DslFuzzRun(unit, MySqlTarget))
+                        DslFuzzUnits
+                            .MySql(seed)
+                            .Where(unit => DslFuzzUnits.RunsAtSeed(unit, Seeds))
+                            .Select(unit => new DslFuzzRun(unit, MySqlTarget))
                     )
             )
             .Concat(DslFuzzUnits.Collisions().Select(unit => new DslFuzzRun(unit, SqliteTarget)))
@@ -251,6 +256,54 @@ public class DslConditionFuzzTests
             [$"{Suite}-generate:", $"{Suite}-compile:", $"{Suite}-exec:"],
             Ct
         );
+    }
+
+    /// <summary>夜間の種の段で間引く単位（族・TimeSpan・DateTimeOffset の種の単位）の名前</summary>
+    private static readonly string[] ThinnedUnitNames =
+    [
+        "sqlite-families",
+        "sqlite-families-vo",
+        "sqlite-timespan",
+        "sqlite-timespan-vo",
+        "sqlite-datetimeoffset",
+        "sqlite-datetimeoffset-vo",
+        "mysql-families",
+        "mysql-families-vo",
+        "mysql-timespan",
+        "mysql-timespan-vo",
+    ];
+
+    /// <summary>
+    /// 夜間の間引きの行：種ごとに、間引く単位を流すかの期待（普段の種 1・2 と偶数の種だけ）。主の単位と浮動小数点の単位はどの種でも流す
+    /// </summary>
+    /// <remarks>
+    /// 期待は規則（<see cref="DslFuzzUnits.RunsAtSeed"/>）を写さずに書く。偶数の判定を外す・普段の種を外す・単位の印を外すと赤になる。
+    /// </remarks>
+    [Theory(DisplayName = "簡易 DSL の総当たりの夜間の間引きの行は、規則の期待どおり")]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    [InlineData(3, false)]
+    [InlineData(4, true)]
+    [InlineData(79, false)]
+    [InlineData(80, true)]
+    public void NightlyThinningRows_MatchExpectation(int seed, bool runsThinnedUnits)
+    {
+        var units = DslFuzzUnits.Sqlite(seed).Concat(DslFuzzUnits.MySql(seed)).ToList();
+
+        units
+            .Where(unit => unit.ThinnedAtNightly)
+            .Select(unit => unit.Name)
+            .Should()
+            .BeEquivalentTo(ThinnedUnitNames);
+        units
+            .Where(unit => DslFuzzUnits.RunsAtSeed(unit, Seeds))
+            .Select(unit => unit.Name)
+            .Should()
+            .BeEquivalentTo(
+                units
+                    .Select(unit => unit.Name)
+                    .Where(name => runsThinnedUnits || !ThinnedUnitNames.Contains(name))
+            );
     }
 
     /// <summary>網羅の単位を流す書式のカルチャ（インバリアント）の名前</summary>

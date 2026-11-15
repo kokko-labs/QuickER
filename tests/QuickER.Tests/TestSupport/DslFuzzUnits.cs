@@ -1,5 +1,6 @@
 using QuickER.Dialects;
 using QuickER.Model;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.TestSupport;
 
@@ -20,6 +21,36 @@ public static class DslFuzzUnits
 
     /// <summary>単位あたりの合成のクエリの数</summary>
     private const int Compounds = 30;
+
+    /// <summary>
+    /// 種の単位をその種で流すか：夜間の種の段で間引く単位（<see cref="DslFuzzUnit.ThinnedAtNightly"/>＝族・TimeSpan・DateTimeOffset の
+    /// 種の単位）は、普段の種と偶数の種でだけ流す。ほかの単位（主の単位と浮動小数点の単位）はどの種でも流す
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 単体の総当たり（<c>DslConditionFuzzTests</c>）の SQLite・MySQL の種の段だけが使う（夜間のジョブの時間の予算のため。Integration の
+    /// 総当たりは間引かない）。単位は作ってから選ぶので、種ごとの乱数の引き方と種の指紋は変わらない。
+    /// </para>
+    /// <para>
+    /// 普段の種は必ず流す：網羅しない組の一覧は普段の既定の種の数で書いてあり、夜間は新しい欠けだけを赤にする
+    /// （<c>CoverageCounter.AssertGaps</c>）。夜間が普段の種の単位をすべて含む限り、間引いても夜間に新しい欠けは出ない。
+    /// 族の単位は列の種類を 1 つの族に絞るので組の空間が狭い。主の単位と、一番新しい族の浮動小数点の単位は間引かない。
+    /// </para>
+    /// </remarks>
+    /// <param name="unit">種の単位</param>
+    /// <param name="settings">種の決め方（普段の種の範囲を読む）</param>
+    public static bool RunsAtSeed(DslFuzzUnit unit, SeedSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(unit);
+        ArgumentNullException.ThrowIfNull(settings);
+
+        return !unit.ThinnedAtNightly
+            || unit.Seed < settings.FirstSeed + settings.RegularCount
+            || unit.Seed % 2 == 0;
+    }
+
+    /// <summary>夜間の種の段で間引く単位の印を付ける（<see cref="RunsAtSeed"/>）</summary>
+    private static DslFuzzUnit Thinned(DslFuzzUnit unit) => unit with { ThinnedAtNightly = true };
 
     /// <summary>SQLite の単位（値オブジェクトなし・あり・GuidKey の主キー）</summary>
     public static IEnumerable<DslFuzzUnit> Sqlite(int seed)
@@ -565,12 +596,11 @@ public static class DslFuzzUnits
     /// </remarks>
     private static IEnumerable<DslFuzzUnit> Families(string prefix, string dbms, int seed)
     {
-        yield return Build($"{prefix}-families", seed, FamiliesColumns(dbms), valueObjects: false);
-        yield return Build(
-            $"{prefix}-families-vo",
-            seed,
-            FamiliesColumns(dbms),
-            valueObjects: true
+        yield return Thinned(
+            Build($"{prefix}-families", seed, FamiliesColumns(dbms), valueObjects: false)
+        );
+        yield return Thinned(
+            Build($"{prefix}-families-vo", seed, FamiliesColumns(dbms), valueObjects: true)
         );
     }
 
@@ -671,12 +701,11 @@ public static class DslFuzzUnits
     /// </remarks>
     private static IEnumerable<DslFuzzUnit> TimeSpans(string prefix, string dbms, int seed)
     {
-        yield return Build($"{prefix}-timespan", seed, TimeSpanColumns(dbms), valueObjects: false);
-        yield return Build(
-            $"{prefix}-timespan-vo",
-            seed,
-            TimeSpanColumns(dbms),
-            valueObjects: true
+        yield return Thinned(
+            Build($"{prefix}-timespan", seed, TimeSpanColumns(dbms), valueObjects: false)
+        );
+        yield return Thinned(
+            Build($"{prefix}-timespan-vo", seed, TimeSpanColumns(dbms), valueObjects: true)
         );
     }
 
@@ -770,17 +799,21 @@ public static class DslFuzzUnits
     /// </remarks>
     private static IEnumerable<DslFuzzUnit> DateTimeOffsets(string prefix, string dbms, int seed)
     {
-        yield return Build(
-            $"{prefix}-datetimeoffset",
-            seed,
-            DateTimeOffsetColumns(dbms),
-            valueObjects: false
+        yield return Thinned(
+            Build(
+                $"{prefix}-datetimeoffset",
+                seed,
+                DateTimeOffsetColumns(dbms),
+                valueObjects: false
+            )
         );
-        yield return Build(
-            $"{prefix}-datetimeoffset-vo",
-            seed,
-            DateTimeOffsetColumns(dbms),
-            valueObjects: true
+        yield return Thinned(
+            Build(
+                $"{prefix}-datetimeoffset-vo",
+                seed,
+                DateTimeOffsetColumns(dbms),
+                valueObjects: true
+            )
         );
     }
 
