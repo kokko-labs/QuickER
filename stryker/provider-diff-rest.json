@@ -1,6 +1,6 @@
 {
   "stryker-config": {
-    "project": "QuickER.Model.csproj",
+    "project": "QuickER.Provider.csproj",
     "test-runner": "mtp",
     "coverage-analysis": "perTest",
     "additional-timeout": 300000,
@@ -11,6 +11,12 @@
       "break": 0
     },
     "reporters": ["json", "html", "progress", "cleartext"],
-    "ignore-methods": ["*.ThrowIfNull", "*Exception.ctor"]
+    "ignore-methods": ["*.ThrowIfNull", "*Exception.ctor"],
+    "mutate": [
+      "**/SchemaSignature.cs",
+      "**/DiagramMergeReconciler.cs",
+      "**/NameMatching.cs",
+      "**/SchemaDiff.cs"
+    ]
   }
 }

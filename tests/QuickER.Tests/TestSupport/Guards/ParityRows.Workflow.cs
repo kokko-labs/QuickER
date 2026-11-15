@@ -376,6 +376,37 @@ internal static partial class ParityRows
                     ]
             ),
             new(
+                "stryker-mutate-scopes-cover-each-file-once",
+                "毎晩・週 1 回に流す stryker の設定（休止中を除く）の mutate の範囲は、どれかの設定が変異させる project の src のフォルダの"
+                    + "手で書いたソースを、ちょうど 1 回ずつ覆う（範囲を割ったときに漏れたファイルは夜間に一度も変異させず、2 つの範囲に入れた"
+                    + "ファイルは同じ変異を 2 回数えて要約の数が水増しになる）",
+                ParityCompare.Multiset,
+                () =>
+                    [
+                        .. ActiveStrykerConfigFiles()
+                            .Select(StrykerProjectFolder)
+                            .Distinct(StringComparer.Ordinal)
+                            .SelectMany(ProjectSourceFiles),
+                    ],
+                () =>
+                    [
+                        .. ActiveStrykerConfigFiles()
+                            .SelectMany(file =>
+                            {
+                                var inScope = StrykerMutateScope.FromConfigFile(
+                                    Path.Combine(WorkflowGuardTests.Root, "stryker", file)
+                                );
+
+                                return ProjectSourceFiles(StrykerProjectFolder(file))
+                                    .Where(inScope);
+                            }),
+                    ]
+            )
+            {
+                // いまの変異させる project は Model（16 ファイル）と Provider（59 ファイル）。読み取りが外れて正本が減ったら赤にする
+                MinimumCanon = 70,
+            },
+            new(
                 "stryker-configs-report-only",
                 "stryker の設定は、どれも MTP の実行器を使い（ソリューションは設定では読まれないので、起動スクリプト scripts/run-mutation.ps1 が -s で渡す）、点数では赤にせず（thresholds.break が 0）、"
                     + "初回のテストの失敗では止める（変異テストの結果は報告するだけ。赤になるのは Stryker が動かなかったときだけ）",
@@ -575,6 +606,31 @@ internal static partial class ParityRows
                 .Select(path => Path.GetFileName(path))
                 .Order(StringComparer.Ordinal),
         ];
+
+    /// <summary>毎晩・週 1 回の一覧に載る stryker の設定のファイル名（休止中の範囲を除く）</summary>
+    private static IReadOnlyList<string> ActiveStrykerConfigFiles() =>
+        [
+            .. StrykerConfigFiles()
+                .Where(file =>
+                    !PausedStrykerTargets.ContainsKey(Path.GetFileNameWithoutExtension(file))
+                ),
+        ];
+
+    /// <summary>stryker の設定の project の src のフォルダ（リポジトリの根からの相対・区切りは /。StrykerMutateScope.FromConfigFile と同じ決め方）</summary>
+    private static string StrykerProjectFolder(string configFile) =>
+        "src/" + Path.GetFileNameWithoutExtension(Text(StrykerConfig(configFile), "project"));
+
+    /// <summary>src のフォルダの手で書いた C# のソース（リポジトリの根からの相対・区切りは /・ビルドの出力を除く）</summary>
+    private static IEnumerable<string> ProjectSourceFiles(string projectFolder) =>
+        Directory
+            .EnumerateFiles(
+                Path.Combine(WorkflowGuardTests.Root, projectFolder),
+                "*.cs",
+                SearchOption.AllDirectories
+            )
+            .Where(path => !SourceFiles.IsBuildOutput(path))
+            .Select(path => RelativeToRoot(path))
+            .Order(StringComparer.Ordinal);
 
     /// <summary>Stryker の設定の stryker-config の要素</summary>
     private static System.Text.Json.JsonElement StrykerConfig(string fileName)

@@ -901,6 +901,7 @@ src 全体か src の外を読む守り。単位の守りには数えない（�
 | `parity:mutation-targets-match-stryker-configs` | 正本と写しの照合 |
 | `parity:stryker-tests-only-solution-projects` | 正本と写しの照合 |
 | `parity:stryker-mutate-globs-match-files` | 正本と写しの照合 |
+| `parity:stryker-mutate-scopes-cover-each-file-once` | 正本と写しの照合 |
 | `parity:stryker-configs-report-only` | 正本と写しの照合 |
 | `parity:stryker-docker-fixtures-honor-skip` | 正本と写しの照合 |
 | `parity:mutation-script-variables-match-test-constants` | 正本と写しの照合 |
