@@ -840,7 +840,7 @@ src 全体か src の外を読む守り。単位の守りには数えない（�
 | 名前 | 読む範囲 |
 |---|---|
 | `Guard/SourceRules` | src・tests |
-| `Guard/Parity` | docs・.github/workflows・src |
+| `Guard/Parity` | docs・CHANGELOG.md・CHANGELOG.ja.md・.github/workflows・src |
 | `Guard/Phrases` | src・samples |
 | `rule:app-data-path-lookups` | src/**/*.cs（除外 1 件） |
 | `rule:path-name-checks` | src/**/*.cs（除外 1 件） |
@@ -889,6 +889,11 @@ src 全体か src の外を読む守り。単位の守りには数えない（�
 | `parity:licensing-ja-mit-row` | 正本と写しの照合 |
 | `parity:license-nc-scope-holds-nc-packages` | 正本と写しの照合 |
 | `parity:license-nc-scope-lists-existing-non-mit-projects` | 正本と写しの照合 |
+| `parity:changelog-unreleased-entries-within-limits` | 正本と写しの照合 |
+| `parity:changelog-0-4-0-entries-within-limits` | 正本と写しの照合 |
+| `parity:changelog-entry-limits-probe-ja` | 正本と写しの照合 |
+| `parity:changelog-entry-limits-probe-en` | 正本と写しの照合 |
+| `parity:changelog-entry-limits-probe-empty-unreleased` | 正本と写しの照合 |
 | `parity:nightly-actions-pinned-like-other-workflows` | 正本と写しの照合 |
 | `parity:nightly-jobs` | 正本と写しの照合 |
 | `parity:nightly-job-test-commands` | 正本と写しの照合 |

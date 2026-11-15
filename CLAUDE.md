@@ -554,6 +554,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 - **ルートの `CLAUDE.md` の機械照合できる一覧（依存矢印・プロジェクト網羅・フォルダ一覧・固定フィクスチャ一覧）は書式が契約**：書式を変えるときはテストも更新する。ガード：`ClaudeMdParityTests`。→ `tests/QuickER.Tests/Docs/CLAUDE.md`「CLAUDE.md の照合」
 - **src のコメント・ワークフロー・スクリプト・生成テンプレートが名指すテストの名前と行 Id は実在する（読み方は CLAUDE.md の照合と同じ関数）**：テストの改名・表の行への移し替えで名指しが古いまま残る。ガード：`rule:comment-test-names-src`・`rule:comment-test-names-templates`・`rule:comment-test-names-workflows`・`rule:comment-test-names-scripts`。→ `tests/QuickER.Tests/Docs/CLAUDE.md`「src・ワークフロー・スクリプト・生成テンプレートの名指し」
 - **CLAUDE.md 群が書いた影響の地図の名前は地図に実在し、地図の名前とテストのクラスの名前に続けて書いた行 Id はその持ち主のテストのソースにある（地図の名前はその守り・クラスはそれを宣言するファイルを含む守りのどれか〔守りに属さなければ宣言するファイル〕。名前の集合は地図と同じ関数から作る）**：台帳の部分の改名・行の移し替えで、地図の名前で書いたガードが黙って古くなる。tests/ の全体だけで照合すると、組み立てる行 Id が別の表の文字列で偶然通り、行が消えても赤にならない。ガード：`ClaudeMdReferenceTests.MapNames_ExistInImpactMap`・`ClaudeMdReferenceTests.Checker_ReportsFictitiousNamesIdsAndLinks`。→ `tests/QuickER.Tests/Docs/CLAUDE.md`「CLAUDE.md の照合」
+- **CHANGELOG（英日）の Unreleased の項目は、種類の見出しの下の「- **要約** — 本文」の 1 行で、本文は 2 文以内、行は上限の字数（日本語 250 字・Breaking 280 字、英語 460 字・Breaking 520 字）に収まる**：文章だけの規則では、区切りごとに項目を書き足すうちに 1 項目の字数が 0.3.0 の約 2.4 倍に伸び、リリースの前に詰め直すことになった。太字で始めない項目や折り返した続きの行はガードを素通りする。ガード：`parity:changelog-unreleased-entries-within-limits`・`parity:changelog-0-4-0-entries-within-limits`・`parity:changelog-entry-limits-probe-ja`・`parity:changelog-entry-limits-probe-en`・`parity:changelog-entry-limits-probe-empty-unreleased`。→ `tests/QuickER.Tests/Docs/CLAUDE.md`「CHANGELOG の項目の長さ」
 
 ## コーディング規約
 
