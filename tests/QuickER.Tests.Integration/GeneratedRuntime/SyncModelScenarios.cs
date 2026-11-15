@@ -2383,6 +2383,40 @@ internal static partial class SyncModelScenarios
             ]
         );
 
+        // 値を手放す持ち主の書き込み自身がサーバーに断られた形（種 4288 を縮めたもの）。サーバーの他者が 798 で x798 を取り、
+        // 797 を消す。端末は 799 で x798 を取りに行き（c799 を手放す）、サーバーに無い 797 で c799 を取る。後勝ち＋ServerWins・
+        // 削除伝搬なしの同期で両方が断られ、797 は決着する（サーバーの 799 が c799 を持つ＝根拠がある）。799 のサーバーの行は
+        // ローカルの 797 が c799 を持ち消せないので戻せず、記録が残り報告されない（docs の「戻せない行は記録を残す」）。
+        // 判定役は、手放しが同じ実行で届くはずとみなして持ち主 799 を割り引かない（手放し自身にサーバーで断られる根拠がある）
+        yield return new(
+            "repro-d2-upsert-unique-lww-serverwins-held-holder-is-basis",
+            [
+                Folder(SV, 797, name: "a797"),
+                Folder(SV, 798, name: "b798"),
+                Folder(SV, 799, name: "c799"),
+            ],
+            [
+                new UpdateFolderOp(SV, Direct, 798, null, "x798"),
+                new DeleteFolderOp(SV, Direct, 797),
+                new UpdateFolderOp(D1, Direct, 799, null, "x798"),
+                new UpdateFolderOp(D1, Direct, 797, null, "c799"),
+                Sync(
+                    D1,
+                    SyncMode.LastWriteWins,
+                    SyncConflictPolicy.ServerWins,
+                    propagateDeletes: false
+                ),
+                Expect.Result(D1).Absent("conflict *"),
+                new ExpectLocalRowChangeOp(
+                    D1,
+                    ModelTables.Folders,
+                    "797",
+                    SyncLocalRowChangeReason.DiscardedByServerWins
+                ),
+                Expect.Journal(D1).Exact($"{ModelTables.Folders} key=799 op=Upsert *"),
+            ]
+        );
+
         // P2-3-N14（夜間の種 132・146 を縮めたもの）：サーバーでフォルダー 803 が名前を手放し、802 がその名前を取り、その後 803 を
         // 新しく作ったフォルダー 804 の下へ移す。端末のダウンロードは 802 の適用が一意な名前でぶつかり、持ち主 803 を読み直す
         // （親の 804 も読み直して先に入れる）。読み直しの後のやり直しは、最初の試行で挿入と決めた 804 を、ローカルにある行として
