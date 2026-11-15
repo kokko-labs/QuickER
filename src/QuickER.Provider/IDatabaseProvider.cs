@@ -58,6 +58,13 @@ public sealed class SchemaImportResult
     /// 壊す変更を外す。
     /// </remarks>
     public ILiveDependentCheck? LiveDependentCheck { get; init; }
+
+    /// <summary>テーブル再構築の作り直しを、QuickER の接続では必ず止める DB の物（図の外の情報）</summary>
+    /// <remarks>
+    /// 現状は SQLite だけが埋める（DB の外で登録した照合順序・関数を使う索引・仮想の生成列）。ほかの方言と、そうした物の無い DB では空。
+    /// 同期の画面が <see cref="SyncPlanContext.RebuildBlockers"/> へ渡し、計画がその作り直しを外す。
+    /// </remarks>
+    public IReadOnlyList<TableRebuildBlocker> RebuildBlockers { get; init; } = [];
 }
 
 /// <summary>接続文字列から DB スキーマを取得して意味モデルへ変換するインポーター（DB 方言ごとに実装）</summary>

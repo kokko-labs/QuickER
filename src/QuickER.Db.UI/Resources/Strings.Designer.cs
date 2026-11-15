@@ -743,6 +743,12 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string SchemaSync_ExecuteConfirmTableRebuildBlockedByExternalDefinition {
+            get {
+                return ResourceManager.GetString("SchemaSync_ExecuteConfirmTableRebuildBlockedByExternalDefinition", resourceCulture);
+            }
+        }
+
         public static string SchemaSync_ExecuteConfirmDescriptionCharactersReplaced {
             get {
                 return ResourceManager.GetString("SchemaSync_ExecuteConfirmDescriptionCharactersReplaced", resourceCulture);

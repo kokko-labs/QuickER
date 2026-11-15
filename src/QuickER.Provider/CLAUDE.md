@@ -558,11 +558,15 @@ SQLite の同期は `SyncPlan.Rebuilds`／`TableRebuildPlan` で表を作り直�
   - 既定と同じ即時検査（`NOT DEFERRABLE`・`DEFERRABLE INITIALLY IMMEDIATE`）と、再構築で保たれる `NOT DEFERRABLE INITIALLY DEFERRED`・外部キーの `SET DEFAULT` は数えない（数えると本当の喪失が埋もれる）。
 - 削除を選んだ表は再構築しない。
 - 合成後の主キーが単一列で、宣言 `SyncDialectCapabilities.SingleColumnPrimaryKeyReplacesNull`（入れた NULL を DB が採番の値へ置き換える型＝SQLite の rowid の別名）に当たり、live ではその列が同じ主キーでなかった写す列を `TableRebuildPlan.RowidAliasNullGuardColumn` に印す（`SyncPlanner.RowidAliasNullGuardColumn`）。スクリプトが移送の前にその列の NULL を断る（`src/QuickER.Provider.Sqlite/CLAUDE.md`「rowid の別名へ写す列の NULL」）。宣言は既定値を持たず、SQLite 以外は常に偽。
-- 取込が表の中の物を捨てた表（`SyncPlanContext.ImportWarnings` のうち `SchemaImportWarningKinds.RebuildLosesTableContent` が真の種別＝大文字小文字・前後の空白だけ違う列名の後着の列・範囲外や除外した表への外部キー・列を読めない表・名前を縮めた物・無効化した制約）は再構築しない（`SyncPlanner.ExcludeRebuildsLosingImportDiscardedContent`。再構築の方言だけ・`ExcludeDropsLeavingNoColumns` の後・暗黙の削除の注入の前）。
+- 取込が表の中の物を捨てた表（`SyncPlanContext.ImportWarnings` のうち `SchemaImportWarningKinds.RebuildLosesTableContent` が真の種別＝大文字小文字・前後の空白だけ違う列名の後着の列・範囲外や除外した表への外部キー・列を読めない表・名前を縮めた物・無効化した制約）は再構築しない（`SyncPlanner.ExcludeRebuildsOfProtectedTables` に警告の種類 `TableRebuildLosesImportDiscardedContent` を渡す。再構築の方言だけ・`ExcludeDropsLeavingNoColumns` の後・暗黙の削除の注入の前）。
   - 合成の正本は live の図で、捨てた物は図に無いので、作り直した表からデータごと黙って消える。
   - 外すのは、その表を作り直す選んだ項目（列・主キー・外部キー・一意制約・列順の変更と作り直し）と、その表の外部キーの端（親の表・列）を消す表・列の削除。列の追加（作り直さずに足せる）とその表自身の削除は外さない。外した項目は `ExcludedItems` へ積み、`SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent`（表ごと・Detail は取込警告が名指しした物）で名指しする。文言は DB 側で直してから取り込み直すことを案内する。
   - 宣言は既定の腕を持たない網羅の switch（種別を足したら必ず決める）。列の属性・テーブルオプションの喪失は `TableRebuildDropsColumnAttribute` が警告して進めるので偽、表の外の物（ビュー・除外した表そのもの）も偽。
   - ガード：`SchemaImportWarningKindMapTests.EveryWarningKind_DeclaresWhetherRebuildLosesTableContent`・SQLite の期待の行 `realdb-rebuild-skipped-when-import-discarded-*`（捨てた物 3 × 作り直す項目 3）・同期計画の総当たりの汎用の表明 5（消えた取込警告）。
+- DB の外で登録した照合順序・関数を使う物（索引・関数の仮想の生成列）があって QuickER の接続では作り直せない表も、同じ関数で作り直す項目を外し、`SyncPlanWarningKind.TableRebuildBlockedByExternalDefinition`（表ごと・Detail は作り直しを止める物の名指し）で名指しする（取込が捨てた物の除外の直後）。
+  - 入力は取込が持ち帰る `TableRebuildBlocker`（`SyncPlanContext.RebuildBlockers`＝`SchemaImportResult.RebuildBlockers`。今は SQLite だけが埋める）で、`SyncPlanner.CollectRebuildBlockedTables` が表ごとにまとめる。局所の物はその表だけを、大域の物（照合順序を使う索引＝RENAME がスキーマ全体を読み直すときに断られる）はその索引の表以外の live の表すべてを止める。
+  - 外さないと、作り直しが索引を作れず・生成列を読めず、照合順序の索引が 1 つあればどの表の作り直しも、無関係な変更ごと同期全体が巻き戻る。
+  - 方言の判定は `src/QuickER.Provider.Sqlite/CLAUDE.md`「DB の外の照合順序・関数」。ガード：SQLite の期待の行 `realdb-external-*`。
 - DB のビュー（図に無い）を読めなくする変更と、DB のトリガー（図に無い）を発火できなくする変更は計画から外して名指しする（`SyncPlanner.ExcludeChangesBreakingLiveDependents`・`SyncPlanWarningKind.TableChangeBreaksDependentView`／`TableChangeBreaksDependentTrigger`・表ごと・Detail は読めなくなるビュー／発火できなくなるトリガーの名前。原因の表がどちらも壊すなら警告は 2 件で、項目は 1 回だけ外す）。入口は取込が持ち帰る `ILiveDependentCheck`（`SyncPlanContext.LiveDependentCheck`。null なら何もしない＝今は SQLite だけが埋める）。
   - 外すのは、原因の表の列の名前の集合か表の有無を変える項目（列の削除・列の追加・表の削除）だけで、型などの変更は流す。同期後の列名は「live の列 − 選んだ列の削除 ＋ 選んだ列の追加」（列が残らない表は数えない＝`ExcludeDropsLeavingNoColumns` が外す）。
   - トリガーを壊すのもビューと同じ 3 種類の項目だけ（型の変更では壊れない）。作り直しはトリガーの本文を検証しないので、外さないと同期はコミットし、トリガーは発火したときに初めて断られる。
@@ -570,7 +574,7 @@ SQLite の同期は `SyncPlan.Rebuilds`／`TableRebuildPlan` で表を作り直�
   - `ExcludeUntilStable` の周の中、名前の重なる表の追加の除外の後・依存の除外の前に置く（外した列の追加を前提にする項目を同じ周の依存の除外が外し、次の周でもう一度全体を試す）。
   - 作り直す表の索引（図に無い）が読む列の削除も外して名指しする（`TableChangeBreaksDependentIndex`・Detail は作り直せなくなる索引の名前）。索引を壊すのは列の削除だけなので、索引だけが原因の表は列の削除の全部（索引が読まない列の削除も含む＝表の単位）を外し、列の追加・型の変更・表の削除は流す（名前の変更は消す側だけが外れる）。外さないと、作り直しの途中で索引を作れずに同期全体が巻き戻る。
   - 方言の判定と守りの無い枝は `src/QuickER.Provider.Sqlite/CLAUDE.md`「計画の段のビュー・トリガー・索引の判定」。
-- 取込の結果から計画の入力を作るのは `SyncPlanContext.FromImport` の 1 か所（同期の画面と同期計画の総当たりが通す）。項目を足したら、ここに足す（呼び出し側ごとに写すと、写し忘れた側だけが黙ってその入力の無い計画を作り、画面とテストで警告・除外が割れる）。ガード：期待の行 `realdb-view-*`・`realdb-trigger-*`・`realdb-index-*`（判定器を写さないと赤）。
+- 取込の結果から計画の入力を作るのは `SyncPlanContext.FromImport` の 1 か所（同期の画面と同期計画の総当たりが通す）。項目を足したら、ここに足す（呼び出し側ごとに写すと、写し忘れた側だけが黙ってその入力の無い計画を作り、画面とテストで警告・除外が割れる）。ガード：期待の行 `realdb-view-*`・`realdb-trigger-*`・`realdb-index-*`（判定器を写さないと赤）・`realdb-external-*`（作り直しを止める物を写さないと赤）。
 - 再構築の合成で解決できない項目（同じ計画で消える列の一意制約など）は処理済みにせずセクションへ残してスキップのコメントを出す（`IsResolvableInRebuild`＝処理済みにすると何も変えずに成功扱いになる）。
 - 固定は `TableRebuildAttributeDetectorTests`・期待の行 `plan-rebuild-*`（`plan-rebuild-alter-column-keeps-live-column-identity`・`plan-rebuild-column-changes-without-alter-pk-keep-live-pk`・`plan-rebuild-dropped-table-is-not-rebuilt`・`plan-rebuild-unresolvable-item-stays-in-section`）・実 SQLite の行 `realdb-rebuild-*`。mutation 実証済み。
 

@@ -313,6 +313,18 @@ public enum SyncPlanWarningKind
     /// 作れない索引（DB の外で登録した照合順序・アプリの関数を使うもの）は数えない。表ごとに 1 件。
     /// </remarks>
     TableChangeBreaksDependentIndex,
+
+    /// <summary>
+    /// DB の外（アプリ）で登録した照合順序・関数を使う物（索引・仮想の生成列）があり、QuickER の接続では作り直せない表を作り直す項目を、
+    /// 計画から外した（テーブル再構築の方言＝SQLite。<see cref="SyncPlanContext.RebuildBlockers"/>）。
+    /// </summary>
+    /// <remarks>
+    /// 再構築は索引を原文で作り直し、写すときに列を読むので、照合順序・関数の無い QuickER の接続では索引を作れず、仮想の生成列を読めず、
+    /// 同期全体が巻き戻る。照合順序を使う索引は、作り直しの RENAME がスキーマ全体を読み直すときにも断られるので、ほかの表の作り直しも
+    /// 止める（大域）。外すのは取込が捨てた物の除外と同じ項目（その表を作り直す項目と、その表の外部キーの端を消す削除）で、列の追加と
+    /// 表の削除は流す。表ごとに 1 件。
+    /// </remarks>
+    TableRebuildBlockedByExternalDefinition,
 }
 
 /// <summary>
@@ -340,7 +352,9 @@ public enum SyncPlanWarningKind
 /// <see cref="SyncPlanWarningKind.UniqueConstraintRebuildKeptForForeignKey"/> では一意制約の表（Detail は「残した一意制約の名前 (支える外部キーの名前)」）、
 /// <see cref="SyncPlanWarningKind.TableChangeBreaksDependentView"/> では変更を外した表（Detail は読めなくなるビューの名前をカンマ区切りで並べたもの）、
 /// <see cref="SyncPlanWarningKind.TableChangeBreaksDependentTrigger"/> では変更を外した表（Detail は発火できなくなるトリガーの名前をカンマ区切りで並べたもの）、
-/// <see cref="SyncPlanWarningKind.TableChangeBreaksDependentIndex"/> では列の削除を外した表（Detail は作り直せなくなる索引の名前をカンマ区切りで並べたもの）。
+/// <see cref="SyncPlanWarningKind.TableChangeBreaksDependentIndex"/> では列の削除を外した表（Detail は作り直せなくなる索引の名前をカンマ区切りで並べたもの）、
+/// <see cref="SyncPlanWarningKind.TableRebuildBlockedByExternalDefinition"/> では作り直しを外した表（Detail は作り直しを止める物の名指し
+/// ＝<see cref="TableRebuildBlocker.Detail"/> をカンマ区切りで並べたもの）。
 /// </param>
 /// <param name="Detail">
 /// 補足（外部キー制約名など。無ければ空文字）。

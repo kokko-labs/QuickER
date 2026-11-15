@@ -83,6 +83,12 @@ internal static class SyncPlanFuzzNotGenerated
                     Expectations + " の行 `realdb-rebuild-skipped-when-import-discarded-*`"
                 ),
                 NotGenerated.Accepted(
+                    "sqlite-external-collations-functions",
+                    "SQLite の DB の外で登録した照合順序・関数を使う索引・生成列",
+                    "DB は QuickER の DDL と素の接続で作るので、アプリが登録した照合順序・関数を使う物を作れない（DB の事実）。作り直しの除外は決まった形の行が受け持つ",
+                    Expectations + " の行 `realdb-external-*`"
+                ),
+                NotGenerated.Accepted(
                     "legacy-history",
                     "旧版の来歴（PostgreSQL の切り詰め名）",
                     "乱数の DB はいつも今の DDL で作る。旧版の DDL が作った名前は来歴の行が受け持つ",

@@ -831,7 +831,22 @@ Every column drop on that table is left out, including drops of columns the inde
 Adding columns, changing types, and dropping the table itself still run, because they do not break an index (dropping a table drops its indexes with it).
 Renaming a column is a drop and an add, so only the drop is left out: after the sync the table holds both the old column and the new one.
 Once you drop or change the index in the database and import again, the next sync runs the remaining drop.
-An index that uses a collation or function registered outside the database cannot be created in the copy, so it is not counted when the script is built.
+An index that uses a collation or function registered outside the database cannot be created in the copy, so it is not counted as an index that a column drop breaks; the next paragraph covers it.
+
+Objects that use a collation or function registered outside the database, for example by an application, cannot be recreated or read over QuickER's connection, because that connection does not have them registered.
+Rebuilding a table that has either of the following ends with the whole sync rolled back:
+
+- an index that uses such a collation or function, because it cannot be recreated
+- a virtual generated column (`VIRTUAL`) that uses such a function, because it cannot be read during the copy
+
+In addition, a single index that uses such a collation makes the rebuild of every other table fail too, when the rename (`RENAME`) reads the whole schema again.
+This also applies to an index that does not name the collation itself but inherits it from its column.
+QuickER finds these objects at import and leaves out of the script the changes that rebuild those tables (for a collation index, every other table), with the same scope as for content the import dropped, and the confirmation names the tables and the objects.
+Adding columns, dropping tables, and creating new tables do not rebuild a table, so they still run.
+To sync, drop the index in the database or change it to a built-in collation (`BINARY`, `NOCASE`, `RTRIM`) or built-in functions, then import again.
+For a virtual generated column, drop the column or make it a regular column, then import again.
+A table with a virtual generated column that uses such a function skips every rebuild, including a change that drops that column, because QuickER does not check whether the copy reads the column; this is a deliberate choice on the safe side.
+A `STORED` generated column copies its stored value, so its table can be rebuilt, and the automatic index of a constraint (such as `UNIQUE`) on a column with such a collation does not block other tables, so neither is left out.
 
 The sync-target SQLite file can also be created fresh with the "Create new" button in the connection dialog.
 Apply the whole diagram to an empty database to set it up from scratch.
