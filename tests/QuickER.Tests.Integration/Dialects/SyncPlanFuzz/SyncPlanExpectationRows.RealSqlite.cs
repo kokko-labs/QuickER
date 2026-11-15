@@ -236,6 +236,40 @@ internal static partial class SyncPlanExpectationRows
                     );
             }
         }
+
+        // 取込が捨てた物のある表 t の主キーの変更（外す）を前提にする、別の表 c からの外部キーの追加。主キーの変更が外れると、
+        // 外部キーの参照先 t(b) は同期後の主キーでも一意制約でもないので、外部キーの追加も主キーの変更を前提にする項目として外す
+        yield return Row(
+                "realdb-rebuild-skipped-when-import-discarded-excludes-fk-requiring-its-pk-change",
+                "[Integration] SQLite 同期: 取込が捨てた物のある表の主キーの変更を外すと、その新しい主キーを参照する別の表の外部キーの追加も外して名指しし、何も変えない",
+                DialectNames.Sqlite
+            )
+            .TargetFromLive(s =>
+            {
+                s.Col("t", "a").IsPrimaryKey = false;
+                s.Col("t", "b").IsPrimaryKey = true;
+                s.Fk("t", "c", "fk_c_t", ("b", "tb"));
+            })
+            .Select(RealScenarios.SelectAll)
+            .OnRealDatabase(r =>
+                r.LiveSql(
+                        "CREATE TABLE \"t\" (\"a\" INTEGER NOT NULL, \"b\" INTEGER NOT NULL, \"zid\" INTEGER NULL, "
+                            + "CONSTRAINT \"PK_t\" PRIMARY KEY (\"a\"), "
+                            + "CONSTRAINT \"FK_t_zz\" FOREIGN KEY (\"zid\") REFERENCES \"zz\" (\"id\"));"
+                            + "CREATE TABLE \"c\" (\"id\" INTEGER NOT NULL, \"tb\" INTEGER NULL, CONSTRAINT \"PK_c\" PRIMARY KEY (\"id\"));"
+                            + "INSERT INTO \"t\" VALUES (1, 10, NULL);"
+                            + "INSERT INTO \"c\" VALUES (1, 10);"
+                    )
+                    .Expect(e =>
+                    {
+                        e.Outcome.Exact("committed");
+                        e.Warnings.Single("TableRebuildLosesImportDiscardedContent(t): *");
+                        e.Warnings.Single(
+                            "SelectedItemRequiresUnselectedItem(c): fk_c_t (PRIMARY KEY)"
+                        );
+                        e.Unchanged();
+                    })
+            );
     }
 
     /// <summary>再構築で温存するもの・失うもの（行・補助オブジェクト・外部キー・列順・属性）</summary>

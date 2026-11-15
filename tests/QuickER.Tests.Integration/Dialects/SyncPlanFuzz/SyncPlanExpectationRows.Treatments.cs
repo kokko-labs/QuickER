@@ -75,7 +75,7 @@ internal static partial class SyncPlanExpectationRows
             SetDefaultAddRow(
                     Row(
                         "plan-set-default-on-primary-key-child-flagged-nullable-warns-like-not-null",
-                        "同期: 図で主キーの子の列への SET DEFAULT の追加は、NULL 許容の印があっても NOT NULL の列と同じく SQL Server が警告する",
+                        "同期: DB に無い表の、図で主キーの子の列への SET DEFAULT の追加は、NULL 許容の印があっても NOT NULL の列と同じく SQL Server が警告する",
                         DialectNames.SqlServer
                     ),
                     childNullable: true,
@@ -85,6 +85,18 @@ internal static partial class SyncPlanExpectationRows
                     e.Warnings.Count("SetDefaultOnNotNullColumn*", 1)
                         .Warnings.Single(SetDefaultWarning)
                 ),
+            // 図でだけ主キーにした子の列（DB では NULL を許す主キーでない列）は、主キーの変更を選ばなければ同期後も NULL を許すので
+            // 警告しない（同期後の値は、選んでいない主キーの変更を図の主キーで読まない）
+            SetDefaultAddRow(
+                    Row(
+                        "plan-set-default-on-child-key-only-in-diagram-without-primary-key-change-does-not-warn",
+                        "同期: DB では NULL を許す主キーでない子の列を図でだけ主キーにしても、主キーの変更を選ばなければ列は NULL を許すままなので、SET DEFAULT の追加を SQL Server でも警告しない",
+                        DialectNames.SqlServer
+                    ),
+                    childNullable: true,
+                    childKeyOnlyInDiagram: true
+                )
+                .Expect(e => e.Warnings.Absent("SetDefaultOnNotNullColumn*")),
             Row(
                     "plan-alter-foreign-key-to-set-default-on-not-null-child-warns-only-where-declared",
                     "同期: 外部キーを NOT NULL の子の列への SET DEFAULT へ作り直す変更も SQL Server の計画だけが警告する",
@@ -120,6 +132,61 @@ internal static partial class SyncPlanExpectationRows
                         d => d.Warnings.Absent("SetDefaultOnNotNullColumn*")
                     );
                 }),
+            // 子の列の NULL 許容は同期後の値で見る：図は NULL 許容でも、NULL 許容化を選ばなければ DB の列は NOT NULL のまま
+            Row(
+                    "plan-set-default-on-child-kept-not-null-by-unselected-alter-warns",
+                    "同期: 図で NULL 許容にした子の列への SET DEFAULT の追加は、NULL 許容化を選ばなければ列が NOT NULL のままなので、SQL Server の計画が警告する",
+                    DialectNames.SqlServer
+                )
+                .Live(s =>
+                {
+                    s.Table("parent", S.Pk("id", "int"));
+                    s.Table("child", S.Pk("id", "int"), S.NotNull("parent_id", "int"));
+                })
+                .TargetFromLive(s =>
+                {
+                    s.Col("child", "parent_id").IsNullable = true;
+                    s.Fk("parent", "child", "FK_child_parent", ("id", "parent_id")).OnDelete =
+                        ForeignKeyReferentialAction.SetDefault;
+                })
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddForeignKey))
+                .Expect(e =>
+                    e.Warnings.Count("SetDefaultOnNotNullColumn*", 1)
+                        .Warnings.Single(SetDefaultWarning)
+                )
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Outcome.Exact("failed: *");
+                        e.Unchanged();
+                    })
+                ),
+            // 逆向き：図は NOT NULL でも、NOT NULL 化を選ばなければ DB の列は NULL を許すままなので警告しない
+            Row(
+                    "plan-set-default-on-child-kept-nullable-by-unselected-alter-does-not-warn",
+                    "同期: 図で NOT NULL にした子の列への SET DEFAULT の追加は、NOT NULL 化を選ばなければ列が NULL を許すままなので、SQL Server でも警告しない",
+                    DialectNames.SqlServer
+                )
+                .Live(s =>
+                {
+                    s.Table("parent", S.Pk("id", "int"));
+                    s.Table("child", S.Pk("id", "int"), S.Nullable("parent_id", "int"));
+                })
+                .TargetFromLive(s =>
+                {
+                    s.Col("child", "parent_id").IsNullable = false;
+                    s.Fk("parent", "child", "FK_child_parent", ("id", "parent_id")).OnDelete =
+                        ForeignKeyReferentialAction.SetDefault;
+                })
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddForeignKey))
+                .Expect(e => e.Warnings.Absent("SetDefaultOnNotNullColumn*"))
+                .OnRealDatabase(r =>
+                    r.Expect(e =>
+                    {
+                        e.Outcome.Exact("committed");
+                        e.After.Count("fk *", 1);
+                    })
+                ),
             // ドットを含む表名
             Row(
                     "plan-dotted-table-name-warns-only-where-declared",
@@ -347,53 +414,88 @@ internal static partial class SyncPlanExpectationRows
     private static ExpectationRow SetDefaultAddRow(
         ExpectationRow row,
         bool childNullable,
-        bool childKeyFlaggedNullable = false
+        bool childKeyFlaggedNullable = false,
+        bool childKeyOnlyInDiagram = false
     ) =>
         row.Live(s =>
             {
                 s.Table("parent", S.Pk("id", "int"));
-                s.Table(
-                    "child",
-                    S.Pk("id", "int"),
-                    childNullable ? S.Nullable("parent_id", "int") : S.NotNull("parent_id", "int")
-                );
+
+                // 主キーの列の印を見る行は、子の表を DB に置かない（子の列の NULL 許容は同期後の値で見るので、DB に在る列は DB の値が
+                // 使われる。図の列の印が読まれるのは DB に無い表・列だけ）
+                if (!childKeyFlaggedNullable)
+                {
+                    s.Table(
+                        "child",
+                        S.Pk("id", "int"),
+                        childNullable
+                            ? S.Nullable("parent_id", "int")
+                            : S.NotNull("parent_id", "int")
+                    );
+                }
             })
             .Items(w =>
             {
                 var parent = w.Live["parent"];
-                var child = w.Live["child"];
+                Entity child;
 
-                // 図の子の表では parent_id を主キーへ加え、NULL 許容の印を立てたままにする（図のファイルの手書きでだけ作れる形）
                 if (childKeyFlaggedNullable)
                 {
-                    child = child.Clone(preserveId: true);
-                    child.Columns[1].IsPrimaryKey = true;
-                    child.Columns[1].IsNullable = true;
+                    // 図の子の表（DB に無い）では parent_id を主キーへ加え、NULL 許容の印を立てたままにする（図のファイルの手書きで
+                    // だけ作れる形）
+                    var flagged = S.Nullable("parent_id", "int");
+                    flagged.IsPrimaryKey = true;
+                    child = new Entity { TableName = "child" };
+                    child.Columns.Add(S.Pk("id", "int"));
+                    child.Columns.Add(flagged);
+                }
+                else
+                {
+                    child = w.Live["child"];
+
+                    // 項目の子の表（図）でだけ parent_id を主キーへ加える（DB の列は主キーでないまま。主キーの変更の項目は作らない）
+                    if (childKeyOnlyInDiagram)
+                    {
+                        child = child.Clone(preserveId: true);
+                        child.Columns[1].IsPrimaryKey = true;
+                    }
                 }
 
-                return
-                [
-                    new SchemaDiffItem
+                var addForeignKey = new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AddForeignKey,
+                    TableName = "child",
+                    ColumnName = "parent_id",
+                    ForeignKeyColumnPairs = [new("id", "parent_id")],
+                    ForeignKeyName = "FK_child_parent",
+                    ParentEntity = parent,
+                    ChildEntity = child,
+                    Relationship = new Relationship
                     {
-                        Kind = SchemaDiffKind.AddForeignKey,
-                        TableName = "child",
-                        ColumnName = "parent_id",
-                        ForeignKeyColumnPairs = [new("id", "parent_id")],
-                        ForeignKeyName = "FK_child_parent",
-                        ParentEntity = parent,
-                        ChildEntity = child,
-                        Relationship = new Relationship
-                        {
-                            SourceEntityId = parent.Id,
-                            TargetEntityId = child.Id,
-                            Type = RelationshipType.OneToMany,
-                            ColumnPairs = [new(parent.Columns[0].Id, child.Columns[1].Id)],
-                            ConstraintName = "FK_child_parent",
-                            OnUpdate = ForeignKeyReferentialAction.SetDefault,
-                        },
-                        IsSelected = true,
+                        SourceEntityId = parent.Id,
+                        TargetEntityId = child.Id,
+                        Type = RelationshipType.OneToMany,
+                        ColumnPairs = [new(parent.Columns[0].Id, child.Columns[1].Id)],
+                        ConstraintName = "FK_child_parent",
+                        OnUpdate = ForeignKeyReferentialAction.SetDefault,
                     },
-                ];
+                    IsSelected = true,
+                };
+
+                // DB に無い子の表は、表の追加も選ぶ（選ばないと、外部キーの追加が前提の欠けで外れる）
+                return childKeyFlaggedNullable
+                    ?
+                    [
+                        new SchemaDiffItem
+                        {
+                            Kind = SchemaDiffKind.AddTable,
+                            TableName = "child",
+                            Entity = child,
+                            IsSelected = true,
+                        },
+                        addForeignKey,
+                    ]
+                    : [addForeignKey];
             });
 
     /// <summary>

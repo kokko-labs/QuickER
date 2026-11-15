@@ -337,6 +337,24 @@ internal static partial class SourceRules
                     "再構築の合成で、外す外部キーの項目（削除の項目のリレーションは live のもの）を live の外部キーと名前で突き合わせる（警告の名指しではない）"
                 )
             ),
+            // 同期の計画の除外の関数（SyncPlanner の Exclude*）は、何も外れなくなるまで繰り返す周（ExcludeUntilStable）の中からだけ呼ぶ。
+            // 周の外で項目を外すと、周の中の判定（名前の重なり・前提の欠け）が外れた項目を「選ばれている」と数えたまま残り、追加が
+            // 名指しなしに DB で断られた（列が残らない表の除外の後の同じ名前の一意制約・作り直しを外した表の主キーの変更を前提にする
+            // 外部キー・型の食い違いで外した作り直しと同じ定義の外部キー）。警告だけの関数は Warn* で、周の後に置く。例外は無い
+            SourceRule.Forbid(
+                "sync-exclusions-inside-stable-loop",
+                "同期の計画の除外の関数（SyncPlanner の Exclude*）は ExcludeUntilStable の周の中からだけ呼ぶ",
+                SourceScope.Files("src", "src/QuickER.Provider/SyncPlanner.cs"),
+                GuardFinder.Nodes(SyncExclusionCalls.Describe)
+            ) with
+            {
+                // 除外の関数の呼び出しを見つけられること（周の中の呼び出しも数える。いまは除外の関数 8 つを 1 回ずつ）
+                Floor = new(
+                    GuardFinder.Nodes(SyncExclusionCalls.DescribeCandidate),
+                    8,
+                    "SyncPlanner の除外の関数の呼び出し"
+                ),
+            },
             // DB の取込・DDL・差分・同期の計画は、列が NULL を持てるかを ColumnNullability.AllowsNull で読み、NULL 許容の印
             // （Column.IsNullable）を直接読まない。図は主キーの列に印を持てる（図のファイルの手書き）ので、印をそのまま読むと
             // DDL が NOT NULL で作る列を NULL 許容とみなし、同じ実効の図から違う計画・注記を作る。

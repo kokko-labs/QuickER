@@ -54,6 +54,101 @@ internal static partial class SourceRuleProbes
                     ),
                 ]
             ),
+            // SyncPlanner の除外の関数（Exclude*）の呼び出しのうち、BuildPlan からの直接の呼び出し・補助のメソッドからの呼び出し・
+            // 補助のメソッドのローカル関数とラムダの中の呼び出しを拾い、周（ExcludeUntilStable）の中・ほかの除外の関数の中からの呼び出し・
+            // 積むだけの ExcludeSelected・周そのもの・警告だけの関数（Warn*）・ほかのクラスの Exclude* は拾わない
+            new SourceRuleProbe(
+                "sync-exclusions-inside-stable-loop-forms",
+                "sync-exclusions-inside-stable-loop",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System;
+                        using System.Collections.Generic;
+
+                        internal sealed class SyncPlanner
+                        {
+                            public List<int> BuildPlan(List<int> items)
+                            {
+                                var stable = ExcludeUntilStable(items);
+                                var direct = ExcludeDirect(stable);
+                                WarnOnly(direct);
+                                return Helper(this.ExcludeQualified(direct));
+                            }
+
+                            private static List<int> ExcludeUntilStable(List<int> items)
+                            {
+                                var current = ExcludeInside(items);
+                                ExcludeSelected(current);
+                                return current;
+                            }
+
+                            private static List<int> ExcludeInside(List<int> items) => ExcludeNested(items);
+
+                            private static List<int> ExcludeNested(List<int> items) => items;
+
+                            private static List<int> ExcludeDirect(List<int> items) => items;
+
+                            private List<int> ExcludeQualified(List<int> items) => items;
+
+                            private static void ExcludeSelected(List<int> items) { }
+
+                            private static void WarnOnly(List<int> items) { }
+
+                            private static List<int> Helper(List<int> items)
+                            {
+                                List<int> Local() => ExcludeDirect(items);
+                                Func<List<int>> lambda = () => ExcludeNested(items);
+                                return lambda().Count > 0 ? Local() : items;
+                            }
+                        }
+
+                        internal sealed class OtherService
+                        {
+                            public static List<int> Run(List<int> items) => ExcludeElsewhere(items);
+
+                            private static List<int> ExcludeElsewhere(List<int> items) => items;
+                        }
+                        """,
+                        "BuildPlan: ExcludeDirect",
+                        "BuildPlan: ExcludeQualified",
+                        "Helper: ExcludeDirect",
+                        "Helper: ExcludeNested"
+                    ),
+                ]
+            ),
+            // 構文の規則は、条件コンパイルの外れる分岐の中の呼び出しも読む
+            new SourceRuleProbe(
+                "sync-exclusions-inside-stable-loop-inactive-branch",
+                "sync-exclusions-inside-stable-loop",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System.Collections.Generic;
+
+                        internal sealed class SyncPlanner
+                        {
+                            public List<int> BuildPlan(List<int> items)
+                            {
+                        #if QUICKER_PROBE_BRANCH
+                                return ExcludeOutside(items);
+                        #else
+                                return items;
+                        #endif
+                            }
+
+                            private static List<int> ExcludeOutside(List<int> items) => items;
+                        }
+                        """,
+                        "BuildPlan: ExcludeOutside"
+                    ),
+                ]
+            ) with
+            {
+                InactiveBranch = true,
+            },
             // 列の NULL 許容の印の読み取り（素の・否定・?. ・プロパティパターン・代入の右辺・ラムダの中）を拾い、書き込み（代入の左辺・
             // 初期化子）・nameof・ほかの型の IsNullable は拾わない
             new SourceRuleProbe(
