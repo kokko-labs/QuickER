@@ -1,0 +1,22 @@
+{
+  "stryker-config": {
+    "project": "QuickER.Model.csproj",
+    "test-runner": "mtp",
+    "coverage-analysis": "perTest",
+    "additional-timeout": 300000,
+    "break-on-initial-test-failure": true,
+    "thresholds": {
+      "high": 80,
+      "low": 60,
+      "break": 0
+    },
+    "reporters": ["json", "html", "progress", "cleartext"],
+    "ignore-methods": ["*.ThrowIfNull", "*Exception.ctor"],
+    "mutate": [
+      "**/*.cs",
+      "!**/ConstraintNames.cs",
+      "!**/Entity.cs",
+      "!**/Column.cs"
+    ]
+  }
+}

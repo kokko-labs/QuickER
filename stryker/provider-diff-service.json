@@ -13,18 +13,7 @@
     "reporters": ["json", "html", "progress", "cleartext"],
     "ignore-methods": ["*.ThrowIfNull", "*Exception.ctor"],
     "mutate": [
-      "**/*.cs",
-      "!**/SyncPlanner.cs",
-      "!**/SchemaDiffService.cs",
-      "!**/TableRebuildAttributeDetector.cs",
-      "!**/SchemaSignature.cs",
-      "!**/DiagramMergeReconciler.cs",
-      "!**/SchemaDiff.cs",
-      "!**/NameMatching.cs",
-      "!**/CanonicalTypeToken.cs",
-      "!**/SqlTypeText.cs",
-      "!**/SchemaTableEntry.cs",
-      "!**/QueryParameterTypeResolver.cs"
+      "**/SchemaDiffService.cs"
     ]
   }
 }

@@ -40,7 +40,7 @@
     Stryker を呼ばず、範囲の表の環境で表のテストだけを流す。
 
 .EXAMPLE
-    ./scripts/run-mutation.ps1 -Target model -OutputDirectory ./artifacts/stryker/model -Concurrency 8
+    ./scripts/run-mutation.ps1 -Target model-rest -OutputDirectory ./artifacts/stryker/model-rest -Concurrency 8
 
 .EXAMPLE
     ./scripts/run-mutation.ps1 -Target provider-sync-planner -TestsOnly -OutputDirectory ./artifacts/mutation-env

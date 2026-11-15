@@ -948,11 +948,14 @@ public sealed class WorkflowGuardTests
             );
     }
 
-    /// <summary>毎晩の変異テストの cron</summary>
-    internal const string MutationNightlyCron = "30 18 * * *";
+    /// <summary>
+    /// 毎晩の変異テストの cron（04:16 UTC の直後。定時の起動の遅れでジョブが 04:16 UTC をまたがないように：
+    /// tests/QuickER.Tests/TestSupport/CLAUDE.md「変異テスト（Stryker.NET）」）
+    /// </summary>
+    internal const string MutationNightlyCron = "17 5 * * *";
 
-    /// <summary>週 1 回の変異テストの cron</summary>
-    internal const string MutationWeeklyCron = "0 20 * * 6";
+    /// <summary>週 1 回の変異テストの cron（毎晩と同じ理由で 04:16 UTC の直後）</summary>
+    internal const string MutationWeeklyCron = "47 5 * * 6";
 
     /// <summary>CI の Windows のテストが TRX を書くフォルダ（テストの手順と保存の手順で同じ値）</summary>
     private const string CiResultsDirectory = "${{ runner.temp }}/test-results";

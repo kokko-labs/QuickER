@@ -1,6 +1,6 @@
 {
   "stryker-config": {
-    "project": "QuickER.Provider.csproj",
+    "project": "QuickER.Model.csproj",
     "test-runner": "mtp",
     "coverage-analysis": "perTest",
     "additional-timeout": 300000,
@@ -13,9 +13,8 @@
     "reporters": ["json", "html", "progress", "cleartext"],
     "ignore-methods": ["*.ThrowIfNull", "*Exception.ctor"],
     "mutate": [
-      "**/SqlTypeText.cs",
-      "**/SchemaTableEntry.cs",
-      "**/QueryParameterTypeResolver.cs"
+      "**/Entity.cs",
+      "**/Column.cs"
     ]
   }
 }

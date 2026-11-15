@@ -13,12 +13,7 @@
     "reporters": ["json", "html", "progress", "cleartext"],
     "ignore-methods": ["*.ThrowIfNull", "*Exception.ctor"],
     "mutate": [
-      "**/SchemaDiffService.cs",
-      "**/TableRebuildAttributeDetector.cs",
-      "**/SchemaSignature.cs",
-      "**/DiagramMergeReconciler.cs",
-      "**/SchemaDiff.cs",
-      "**/NameMatching.cs"
+      "**/SqlTypeText.cs"
     ]
   }
 }

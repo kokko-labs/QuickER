@@ -1,7 +1,9 @@
 # QuickER Mutation: 変異テスト（Stryker.NET）を夜間に流し、結果を報告する（点数では赤にしない）
 #
-# - 毎晩: QuickER.Model 全体（stryker/model.json）
-# - 週 1 回（土曜）: QuickER.Provider を割った 5 本（同期の計画・差分・残り・型のトークン・型の表記）。
+# - 毎晩: QuickER.Model を割った 3 本（制約名・表と列・残り）
+# - 週 1 回（土曜）: QuickER.Provider を割った 8 本（同期の計画・差分の 3 本・残りの 2 本・型のトークン・型の表記）。
+#   範囲は 1 ジョブが 3 時間未満になる大きさに割る（static の変異を持つ 1 ファイルの 3 本は例外で 4.5 時間未満。理由と止める基準は
+#   tests/QuickER.Tests/TestSupport/CLAUDE.md の「変異テスト（Stryker.NET）」）
 #   QuickER.CodeGen.CSharp の 3 部分（診断・クエリ・エスケープ）は休止中（設定は stryker/ に残す。理由と再開の合図は
 #   tests/QuickER.Tests/TestSupport/CLAUDE.md の「変異テスト（Stryker.NET）」）
 # - 範囲・除外・点数で赤にしない設定（thresholds.break 0）・初回のテストの失敗で止める設定は stryker/*.json が持つ。
@@ -16,15 +18,17 @@
 name: Mutation
 
 on:
+  # 予定の時刻は 04:16 UTC の直後に置く（定時の起動は 3〜7 時間遅れることがあり、04:16 UTC 付近で長く動いているランナーが失われる
+  # ことがある。遅れても 1 日の残りの側へずれるだけで、18 時間を超えない限り 04:16 をまたがない）
   schedule:
-    # 毎晩 18:30 UTC（日本時間 3:30）：Model
-    - cron: "30 18 * * *"
-    # 土曜 20:00 UTC（日本時間 日曜 5:00）：Provider の 5 本
-    - cron: "0 20 * * 6"
+    # 毎日 05:17 UTC（日本時間 14:17）：Model の 3 本
+    - cron: "17 5 * * *"
+    # 土曜 05:47 UTC（日本時間 14:47）：Provider の 8 本
+    - cron: "47 5 * * 6"
   workflow_dispatch:
     inputs:
       scope:
-        description: "流す範囲（nightly＝Model・weekly＝Provider の 5 本・all＝両方）"
+        description: "流す範囲（nightly＝Model の 3 本・weekly＝Provider の 8 本・all＝両方）"
         type: choice
         options: [nightly, weekly, all]
         default: nightly
@@ -55,11 +59,11 @@ jobs:
           SCHEDULE: ${{ github.event.schedule }}
           SCOPE: ${{ inputs.scope }}
         run: |
-          nightly='"model"'
-          weekly='"provider-sync-planner","provider-diff","provider-rest","provider-type-token","provider-type-text"'
+          nightly='"model-constraint-names","model-entity","model-rest"'
+          weekly='"provider-sync-planner","provider-diff-service","provider-diff-rest","provider-rebuild-detector","provider-rest-sql","provider-rest-main","provider-type-token","provider-sql-type-text"'
           case "$SCHEDULE|$SCOPE" in
-            "30 18 * * *|"|"|nightly") targets="[$nightly]" ;;
-            "0 20 * * 6|"|"|weekly") targets="[$weekly]" ;;
+            "17 5 * * *|"|"|nightly") targets="[$nightly]" ;;
+            "47 5 * * 6|"|"|weekly") targets="[$weekly]" ;;
             "|all") targets="[$nightly,$weekly]" ;;
             *) echo "知らないスケジュールか範囲: schedule='$SCHEDULE' scope='$SCOPE'" >&2; exit 1 ;;
           esac
@@ -68,8 +72,10 @@ jobs:
   mutation:
     needs: plan
     runs-on: windows-latest
-    # 手元（24 論理コア・並列度 8）で Model 74 分。ホストのランナー（4 vCPU・並列度 4）は 145〜215 分の見込みで、6 時間の上限の手前で止める
+    # ホストのランナー（4 vCPU・並列度 4）で 1 本 2〜3 時間（static の変異の 3 本は 3.5〜4.5 時間）の見込み。6 時間の上限の手前で止める
     timeout-minutes: 330
+    # max-parallel は付けない：土曜は Model 3 本と Provider 8 本に普段の CI・夜間が重なって 15 本前後になるが、公開リポジトリの同時に
+    # 走るジョブの上限（20）に届かない。絞ると全体が延びて翌日の 04:16 UTC に近づく
     strategy:
       fail-fast: false
       matrix:
