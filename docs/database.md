@@ -619,6 +619,12 @@ SQLite rebuilds tables and uses its own order.
   Among the drops run together, the drops of a unique constraint that is re-created (a named constraint whose columns change) and of a primary key that is replaced run last, so a refused sync leaves that key in its old form.
   When two or more of those keys are re-created, one of them would be lost whatever the order, so one unique constraint re-creation is left out of the script and named in the confirmation; the unique constraint left in place keeps supporting the foreign key, and the other changes still run.
   Foreign key additions run in this order: foreign keys re-added as they were dropped, foreign keys re-created with a changed definition, new foreign keys, and those whose referenced columns are not proven to be a key, so a new foreign key that existing rows refuse does not stop the re-adds before it
+- On SQL Server, PostgreSQL, MySQL, and Oracle, the sync does not check the views in the database (views are not part of the diagram), and the confirmation does not name them.
+  What happens to a view that reads a column or table the sync drops depends on the database.
+  PostgreSQL refuses the drop, and also a type change of a column the view reads, so the sync fails and rolls back.
+  SQL Server, MySQL, and Oracle run the drop, and the view fails the next time it is queried (SQL Server refuses the drop only for a view created `WITH SCHEMABINDING`).
+  Before syncing such a change, change or drop the view in the database.
+  On SQLite, a change that would leave a view unreadable is left out and named (see [SQLite diff sync](#sqlite-diff-sync-table-rebuilds))
 - The Oracle script and DDL can also be run by hand in SQL*Plus.
   Ordinary statements end with `;`, and a `/` line follows only a PL/SQL block, so each statement runs exactly once (SQL*Plus runs the previous statement again on a `/` line)
 
