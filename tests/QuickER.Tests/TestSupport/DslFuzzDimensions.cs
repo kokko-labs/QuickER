@@ -15,7 +15,7 @@ namespace QuickER.Tests.TestSupport;
 /// </para>
 /// <para>
 /// 範囲は「方言:実装先」（例 <c>sqlite:ado</c>）。SQLite と MySQL の単位は QuickER.Tests の
-/// <c>DslConditionFuzzTests</c>、SQL Server の単位は Integration の <c>DslConditionFuzzSqlServerRuntimeTests</c> が流す。
+/// <c>DslConditionFuzzTests</c>、SQL Server の単位は Integration の <c>NamedQueryDslConditionFuzzSqlServerRuntimeTests</c> が流す。
 /// 網羅しない組の照合は既定の種の数のときだけ行う（SQL Server は <c>QUICKER_FUZZ_SEEDS</c> を指定しないとき＝先頭の種 1 つ）。
 /// </para>
 /// <para>
@@ -461,7 +461,7 @@ public static class DslFuzzDimensions
         Descriptor(
             "SqlServer",
             "簡易 DSL の条件の総当たり（SQL Server の QuickER 版 Repository と EF Core）",
-            "tests/QuickER.Tests.Integration/GeneratedRuntime/DslConditionFuzzSqlServerRuntimeTests.cs"
+            "tests/QuickER.Tests.Integration/GeneratedRuntime/NamedQueryDslConditionFuzzSqlServerRuntimeTests.cs"
         );
 
     /// <summary>台帳の行（PostgreSQL・Integration）</summary>
@@ -691,7 +691,7 @@ public static class DslFuzzDimensions
 
     /// <summary>SQLite・MySQL のインメモリの範囲の、列の文字集合の外の文字が無い理由</summary>
     private const string CharsetUnavailableReason =
-        "SQLite は varchar・char の列も文字列を Unicode のまま持ち、インメモリは .NET の文字列で持つ（MySQL の構成はインメモリだけ）ので、列の文字集合の外の文字は無い（照合順序のコードページで持つのは SQL Server の varchar・char だけで、Integration の DslConditionFuzzSqlServerRuntimeTests の単位 sqlserver-ansi が流す）";
+        "SQLite は varchar・char の列も文字列を Unicode のまま持ち、インメモリは .NET の文字列で持つ（MySQL の構成はインメモリだけ）ので、列の文字集合の外の文字は無い（照合順序のコードページで持つのは SQL Server の varchar・char だけで、Integration の NamedQueryDslConditionFuzzSqlServerRuntimeTests の単位 sqlserver-ansi が流す）";
 
     /// <summary>列の種類を含む因子の組ごとの、指定した種類に当たる述語</summary>
     private static IEnumerable<(string Other, Func<string, string, bool> Predicate)> ClrPairs(

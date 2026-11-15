@@ -10,7 +10,7 @@ namespace QuickER.Tests.GeneratedTranslatorParityFixture;
 /// 更新できる列が 1 本も無い表の UPDATE 文が、空の SET でなくキー列の自己代入になることを固定する単体テスト。
 /// </summary>
 /// <remarks>
-/// 実 DB での更新・版の照合は <c>TranslatorParity{SqlServer,Sqlite,InMemory}RuntimeTests</c> が固定する。
+/// 実 DB での更新・版の照合は <c>TranslatorParity{AdoSqlServer,AdoSqlite,InMemory}RuntimeTests</c> が固定する。
 /// </remarks>
 public sealed class UpdateSqlWithoutAssignableColumnsTests
 {

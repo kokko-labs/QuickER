@@ -136,7 +136,7 @@ ADO の 2 方言が共有する `EntitySaveMetadata` の規則もここに置く
 - DB 採番列は EditModel の入力必須にしない。rowversion 列は `IsRequired=false` で、Mapper の Entity へのコピーは「入力があるときだけ代入」（未入力は現在値維持）。さもないと新規行の EditModel 保存が `"{列} has no input value."` で必ず失敗する。
 - 既知の制限：他方言に `rowversion` 型が無く対象外／`SqlBulkCopy` は生成値を返せず版未反映／`OUTPUT` 句はトリガーのあるテーブルで使えない（QuickER の DDL はトリガー非生成）／「行なし削除」は ADO 黙認・EF グラフ例外の既存非対称／rowversion 列は `[DbColumnMeta]` トークンなしで C# リバース対象外／生 SQL・バイナリ Stream アクセサは非対象。
 - 実装先ごとの細部：QuickER 版 ADO（SQL Server のみ）は `src/QuickER.Runtime.SqlServer/CLAUDE.md`「行バージョンの OUTPUT と版の回収」、インメモリは `src/QuickER.Runtime.InMemory/CLAUDE.md`「保存単位のステージング」、EF Core は `src/QuickER.Runtime.EntityFrameworkCore/CLAUDE.md`「保存のやり直しと実行戦略」、リモートは `src/QuickER.Runtime.AspNetCore/CLAUDE.md`「保存の応答は列の値を運び位置で突き合わせる」。
-- ガード（実 DB）：`SqlServerConcurrencyRuntimeTests`・`EfCoreConcurrencyRuntimeTests`（Docker）、`InMemoryConcurrencyRuntimeTests`・`RemoteConcurrencyRuntimeTests`（CI 常時。リモートはインメモリ実体を Kestrel で公開）。VO 併用は `ConcurrencyVo{SqlServer,EfCore}RuntimeTests`（Docker）・`ConcurrencyVo{InMemory,Remote}RuntimeTests`（CI 常時）。
+- ガード（実 DB）：`ConcurrencyAdoSqlServerRuntimeTests`・`ConcurrencyEfCoreSqlServerRuntimeTests`（Docker）、`ConcurrencyInMemoryRuntimeTests`・`ConcurrencyRemoteInMemoryRuntimeTests`（CI 常時。リモートはインメモリ実体を Kestrel で公開）。VO 併用は `ConcurrencyVo{AdoSqlServer,EfCoreSqlServer}RuntimeTests`（Docker）・`ConcurrencyVo{InMemory,RemoteInMemory}RuntimeTests`（CI 常時）。
 
 ## Save フック
 
@@ -152,7 +152,7 @@ ADO の 2 方言が共有する `EntitySaveMetadata` の規則もここに置く
 - 実装先の差：ADO は各 DML 直後に After（`SqlSaveHookContext`＝進行中の (connection, transaction) 共有）。EF Core は SaveChanges 後に一括。インメモリは擬似。リモートはサーバー側 DI で発火。
   - EF Core の細部は `src/QuickER.Runtime.EntityFrameworkCore/CLAUDE.md`「削除の振る舞いとフックの順」、インメモリは `src/QuickER.Runtime.InMemory/CLAUDE.md`「Save フックのインメモリの差分」、リモート（スキップの応答への伝搬）は `src/QuickER.Runtime.AspNetCore/CLAUDE.md`「保存の応答は列の値を運び位置で突き合わせる」。
 - EF Core・InMemory・マルチターゲット・UseRuntimePackages と直交する。
-- ガード：実装先の一致のシナリオ（`BackendParityScenarios.SaveHook.cs` の `hook-*`、CI 常時）、SQL Server の 2 者比較（`BackendParitySqlServerRuntimeTests` の `hook-*` のケース）、`SaveHook{Ado,EfCore,InMemory,SqlServer,Remote}RuntimeTests`。
+- ガード：実装先の一致のシナリオ（`BackendParityScenarios.SaveHook.cs` の `hook-*`、CI 常時）、SQL Server の 2 者比較（`BackendParitySqlServerRuntimeTests` の `hook-*` のケース）、`SaveHook{AdoSqlite,EfCoreSqlite,InMemory,AdoSqlServer,RemoteAdoSqlite}RuntimeTests`。
 
 ## グラフ取得（IncludeGraph）
 
@@ -164,7 +164,7 @@ ADO の 2 方言が共有する `EntitySaveMetadata` の規則もここに置く
   - `AddIncludeNodes` はツリーをディープコピーして取り込む。デデュープは既存ノードの再利用なので、コピーしないと `IncludeGraph().Include(...).ThenInclude(...)` が生成拡張の static 共有ツリーを変異させ、以後の全クエリを汚染する。
 - 閉包計算（`CSharpGenerationModelBuilder.IncludeGraph.cs`）が組んだツリーを `SqlQuery<T>.AddIncludeNodes`（infra_visibility）へ直接渡す構造は不変。閉包はナビ宣言順 DFS の edge-skip で、パス上に既出のテーブルへ向かう辺は展開しない。スキップした辺は Info 診断 `CodeGen_Info_IncludeGraphSkippedNavigations` で名指しする。自己参照・相互参照ナビは空のまま返る。
 - 実行器 4 実装は無変更。
-- ガード：`IncludeGraph{SqlServer,Ado,EfCore,InMemory}RuntimeTests`（3 階層チェーン＋取得→編集→保存の往復。パリティは `IncludeGraphRuntimeTestsBase`）、自己参照 edge-skip の `IncludeGraphSelfReference{SqlServer,Ado,InMemory,EfCore}RuntimeTests`（重複 Include マージ / 兄弟分岐 / 共有ツリー不変性のシナリオを含む）。
+- ガード：`IncludeGraph{AdoSqlServer,AdoSqlite,EfCoreSqlite,InMemory}RuntimeTests`（3 階層チェーン＋取得→編集→保存の往復。パリティは `IncludeGraphRuntimeTestsBase`）、自己参照 edge-skip の `IncludeGraphSelfReference{AdoSqlServer,AdoSqlite,InMemory,EfCoreSqlite}RuntimeTests`（重複 Include マージ / 兄弟分岐 / 共有ツリー不変性のシナリオを含む）。
 
 ## 拡張シム層
 
@@ -202,7 +202,7 @@ ADO の 2 方言が共有する `EntitySaveMetadata` の規則もここに置く
   - 参照の一致にすると、具象 VO 型から引いた MethodInfo（ReflectedType が違う）を認識せず、手で組んだ式木が翻訳できず null の引数も先に断れない。写しは 3 か所（`_05` の 2 つ＝Core の null ガードと `SqlExpressionTranslator`・`_08` の 1 つ）で照合をそろえる。
   - `IsAssignableFrom`＋名前一致にしてはいけない。具象 VO も面を継承実装しているので、利用者が per-VO partial へ書いた自前の `Contains` が中身を一度も実行されないまま列の LIKE へ化ける。
   - TSelf 版オーバーロードも契約に含めるのが必須（含めないと VO 引数の `Contains` が翻訳対象から外れ、実 DB テストが割れる）。EF Core 側は判定が返す閉じた契約の型引数から TSelf を取る。
-  - ガード：`StringMatchMethod{Ado,SqlServer,EfCore,InMemory}RuntimeTests`（同じ式を 4 つの実装先へ流す。null の引数は変数で渡す＝定数の null は翻訳器が自分で断るのでガードの写しが見えない）、`SqlExpressionTranslatorStringMatchTests`（両アーム）。
+  - ガード：`ValueObjectStringMatch{AdoSqlite,AdoSqlServer,EfCoreSqlite,InMemory}RuntimeTests`（同じ式を 4 つの実装先へ流す。null の引数は変数で渡す＝定数の null は翻訳器が自分で断るのでガードの写しが見えない）、`SqlExpressionTranslatorStringMatchTests`（両アーム）。
 
 ### Repository 契約シムと実装側
 
@@ -247,7 +247,7 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
 - 文字列一致（Contains / StartsWith / EndsWith）の null 引数は、全バックエンドで `ArgumentNullException` にする（`SqlQuery.Where` の共有ガードで fail-fast 統一）。
 - 手書き LINQ の翻訳器はド・モルガン展開しないまま（docs の既知の割り切り）。
 - 方言固有の部分（空・空白の判定、日付部品、固定長の `EndsWith`）は `src/QuickER.Runtime.SqlServer/CLAUDE.md`「式の翻訳（SQL Server）」・`src/QuickER.Runtime.Sqlite/CLAUDE.md`「式の翻訳（SQLite）」。
-- ガード：`TranslatorParity{SqlServer,Sqlite,InMemory}RuntimeTests`（期待値は同じ実装先から読み戻した全行へ C# のラムダを当てた結果。「ナビゲーションを使う条件・並び替えは NotSupportedException で断る」を含む）とその述語の表 `TranslatorParityPredicateRows`（値の側が null の `==` / `!=`・列側の `!=`・列どうし・否定の反転と深さ 1〜4・IN / NOT IN の null の要素と空・bool 列の短縮形・NULL 許容の decimal の行）、値オブジェクトの列の IN / null 変数は `BackendParityRuntimeTests`（シナリオ `query-null-comparison-and-ordering`）と `BackendParitySqlServerRuntimeTests`（ケース `value-object-in-null-semantics`・`value-object-in-all-null-elements`）、SQL の断片でしか言えない表明（パラメータの `ColumnName`・IN の null の要素をパラメータにしない数・等値以外の否定を `NOT (...)` で包む形）は `SqlExpressionTranslatorInClauseTests`・`SqlExpressionTranslatorNullComparisonTests`、`SqlExpressionTranslatorFoldingTests`。mutation 実証済み。
+- ガード：`TranslatorParity{AdoSqlServer,AdoSqlite,InMemory}RuntimeTests`（期待値は同じ実装先から読み戻した全行へ C# のラムダを当てた結果。「ナビゲーションを使う条件・並び替えは NotSupportedException で断る」を含む）とその述語の表 `TranslatorParityPredicateRows`（値の側が null の `==` / `!=`・列側の `!=`・列どうし・否定の反転と深さ 1〜4・IN / NOT IN の null の要素と空・bool 列の短縮形・NULL 許容の decimal の行）、値オブジェクトの列の IN / null 変数は `BackendParityRuntimeTests`（シナリオ `query-null-comparison-and-ordering`）と `BackendParitySqlServerRuntimeTests`（ケース `value-object-in-null-semantics`・`value-object-in-all-null-elements`）、SQL の断片でしか言えない表明（パラメータの `ColumnName`・IN の null の要素をパラメータにしない数・等値以外の否定を `NOT (...)` で包む形）は `SqlExpressionTranslatorInClauseTests`・`SqlExpressionTranslatorNullComparisonTests`、`SqlExpressionTranslatorFoldingTests`。mutation 実証済み。
 
 ## 識別子の引用（生成ランタイム）
 
@@ -258,7 +258,7 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
   - EF Core は自分で SQL を組むので、`ColumnList` は例外文の表記にしか使わない。ある方言の引用符で囲むと、ほかの方言で列名を取り違えて見せる
 - SQL Server の FOR JSON（`JsonQueryPlanner`）も同じヘルパーを通す（列名・列の別名〔プロパティ名〕・Include の別名〔ナビゲーション名〕・相関の列名）
   - 素のまま書くと、`group` の列を持つ表の `Query()` や `Include(x => x.Order)` が構文エラーになり、`]` を含む列名で文が壊れる。FOR JSON PATH は角括弧を外した別名をキーにするので、JSON の形は変わらない
-- ガード：`GeneratedIdentifierQuotingTests`（ランタイムパッケージを実行して引用を見る）・`EfCoreEntitySaveMetadataTests.ColumnList_IsUnquoted`・`TranslatorParitySqlServerRuntimeTests` の予約語の 2 件・`SqlServerPlainQueryRuntimeTests`（`group`・`x]y` の列の値の比較）。mutation 実証済み
+- ガード：`GeneratedIdentifierQuotingTests`（ランタイムパッケージを実行して引用を見る）・`EfCoreEntitySaveMetadataTests.ColumnList_IsUnquoted`・`TranslatorParityAdoSqlServerRuntimeTests` の予約語の 2 件・`CrudParityAdoSqlServerPlainQueryRuntimeTests`（`group`・`x]y` の列の値の比較）。mutation 実証済み
 
 ## 生 SQL バインダ
 
@@ -292,8 +292,8 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
 - NOT NULL の除外列は新規行（RowState=Added）でのみ必須にする（`IsRequiredWhenAdded`＝列テーブルの独立フラグ）。
   - VO×NOT NULL では null の INSERT は DB の NOT NULL 違反で必ず落ちる。正当な 2 段方式（INSERT→Write）は空の値（VO は `Create([])`・非 VO は空配列＝初期値で自然成立）を入れる形でしか成立しないので、この検証は DB 行き確定の null だけを列名つきで止め、正当な経路を塞がない。
   - 判定は基底 ValidateSelf ループの `IsRequired || (IsRequiredWhenAdded && RowState==Added)`。Added を抜けた行の必須エラーは else 枝の `ClearRequiredError` が取り下げる。
-  - ガード：`CodegenCaseTests` の行 `exec-excluded-binary-required-when-added-*`、`BinaryVoEditModelRuntimeTests`（2 段方式の実測）。
-- WithUnboundedBinary 取得後の Mapper 経由保存が UPDATE ガードで拒否されるのは設計どおり。組合せは `BinaryVoFixture` ＋ `BinaryVoEditModelRuntimeTests` が固定する。
+  - ガード：`CodegenCaseTests` の行 `exec-excluded-binary-required-when-added-*`、`BinaryColumnEditModelAdoSqliteRuntimeTests`（2 段方式の実測）。
+- WithUnboundedBinary 取得後の Mapper 経由保存が UPDATE ガードで拒否されるのは設計どおり。組合せは `BinaryVoFixture` ＋ `BinaryColumnEditModelAdoSqliteRuntimeTests` が固定する。
 
 ### 取得・実装先ごとの扱い
 
@@ -318,7 +318,7 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
 - Stream はちょうど `length` バイトを返さなければならない。`UnboundedBinaryColumns.ResolveWriteLength` がシーク可能な Stream の残りと違う明示の `length` を断り、エンジンは Stream を `UnboundedBinaryColumns.WithExactLength` 越しに読む（SQL Server は SqlParameter へ渡す値・SQLite は blob へのコピー元・インメモリは MemoryStream へのコピー元）。外すと、SQL Server は `length` を無視して Stream の中身をすべて保存し、SQLite は先に確保した zeroblob の残りを 0 で埋めたまま true でコミットする（どちらも例外にならない）。
 - `source=null` で SET NULL、行なし / NULL は false。INSERT 専用メソッドはなく「INSERT→Write の 2 段」。楽観排他はスコープ外。
 - リモート時の HTTP でのストリーミング転送は `src/QuickER.Runtime.AspNetCore/CLAUDE.md`「バイナリ転送エンドポイント」。
-- ガード：`BinaryColumn{Ado,EfCore,Remote}RuntimeTests`・`BinaryInMemoryFixtureRuntimeTests`（WithUnboundedBinary の取得・Include 併用例外・取得後 Update ガード・Stream の往復 / SET NULL / 行なし / 非シーク length 必須 / ファイル糖衣）、`SqlServerBinaryColumnRuntimeTests`、実装先の一致のシナリオ `blob-stream-contract`（QuickER 版〔SQLite〕・インメモリ・リモート）、`BinaryRemoteLengthRuntimeTests`。mutation 実証済み。
+- ガード：`BinaryColumn{AdoSqlite,EfCoreSqlite,RemoteAdoSqlite}RuntimeTests`・`BinaryColumnInMemoryRuntimeTests`（WithUnboundedBinary の取得・Include 併用例外・取得後 Update ガード・Stream の往復 / SET NULL / 行なし / 非シーク length 必須 / ファイル糖衣）、`BinaryColumnAdoSqlServerRuntimeTests`、実装先の一致のシナリオ `blob-stream-contract`（QuickER 版〔SQLite〕・インメモリ・リモート）、`BinaryColumnRemoteAdoSqliteLengthRuntimeTests`。mutation 実証済み。
 
 ## パッケージの依存集合と公開 API 面
 
@@ -360,7 +360,7 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
 - キーも同じで、同じ保存で行を削除し同じキーの行を足すと置き換わる（DB に無いキーでは新しい行が残る）。EF Core は同じキーの削除と挿入を 1 つの UPDATE に畳むので、戻り値の行数だけが 1 になる（BackendParity の既知の違い）。
 - 実装：QuickER 版は `EntityGraphSaver.SaveGraphsAsync`（Repository の単一・複数の入口が通る。既存の `SaveAsync` はグラフの順のまま）、インメモリは Before の走査と書き込みの走査が同じ計画を歩く。
 - EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、文の順は 1 回の SaveChanges の中で EF Core が決める。補いは `src/QuickER.Runtime.EntityFrameworkCore/CLAUDE.md`「書く順への対応」「変わった代替キーを自分で書く」（試行ごとの外部キーの読み取りと、一意制約ごとの `HasIndex(…).IsUnique()`。削除する行の値を代替キーで取る行があるときは、3 段目を 2 つめの文脈の SaveChanges で書く。分ける判定は `GraphSaveOrder.TakesDeletedValue`＝後回しの判定の本体を列で絞ったもの）。
-- ガード：`GraphSaveOrderTests`、`BackendParityRuntimeTests` のシナリオ（`graph-delete-then-add-same-unique-value-*`・`graph-remove-and-add-same-key-*`・`graph-move-*`・J3 の `graph-updated-row-takes-deleted-unique-value-*` と、子を持つ形の `graph-updated-row-takes-unique-value-of-deleted-row-with-children-*`、新しい行を後回しにしない `graph-new-row-referenced-by-another-root-*`・`graph-save-new-row-without-shared-value-keeps-order`、順序を固定する `graph-save-*-keeps-order` など）、`GraphSaveEfCoreSqlServerRuntimeTests`、`GraphSaveSqliteFileRuntimeTestsBase.NullUniqueValues_DoNotOrderTheSave`、`BackendParitySqlServerRuntimeTests`（`move-stale-note-and-delete-old-gadget`）、`InMemoryConcurrencyRuntimeTests.SaveAsync_RemoveAndAddSameKeyInOneSave_KeepsNewRow`。mutation 実証済み。
+- ガード：`GraphSaveOrderTests`、`BackendParityRuntimeTests` のシナリオ（`graph-delete-then-add-same-unique-value-*`・`graph-remove-and-add-same-key-*`・`graph-move-*`・J3 の `graph-updated-row-takes-deleted-unique-value-*` と、子を持つ形の `graph-updated-row-takes-unique-value-of-deleted-row-with-children-*`、新しい行を後回しにしない `graph-new-row-referenced-by-another-root-*`・`graph-save-new-row-without-shared-value-keeps-order`、順序を固定する `graph-save-*-keeps-order` など）、`GraphSaveEfCoreSqlServerRuntimeTests`、`GraphSaveSqliteFileRuntimeTestsBase.NullUniqueValues_DoNotOrderTheSave`、`BackendParitySqlServerRuntimeTests`（`move-stale-note-and-delete-old-gadget`）、`ConcurrencyInMemoryRuntimeTests.SaveAsync_RemoveAndAddSameKeyInOneSave_KeepsNewRow`。mutation 実証済み。
 
 ### 削除した子の外れ方
 
@@ -399,7 +399,7 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
 - 除外した無制限バイナリ列がある図は、EF Core のリポジトリを生成しない構成でだけ、生成 Mapper の `LoadSavedColumns` が読み戻しの前に Entity の除外列を未取得の値へ戻す（NOT NULL の非 VO＝空配列・NULL 許容＝null・NOT NULL の VO＝`null!`）。外すと、保存した Entity を使い回した次の保存が更新ガードで止まる。
   - EF Core を生成する構成（QuickER 版と併せる構成も）では出さない。EF Core は全列を読み書きするので、戻すと次の保存が空の値で blob を黙って消す（併せる構成で blob を持つ EditModel を QuickER 版で保存すると更新ガードが断る＝docs に明記）。
 - Added のまま削除の印を付けた行（`IsDiscardedNewRow`＝RowState の setter が Added から Removed へ変わったときだけ立てる）は、Entity のグラフに入れない（コレクションは `CreateEntities` の絞り込み・単一の子は `IsLeftOutOfSave`）。入れると、キーが未入力の行は `Required` で例外になり、キーのある行は存在しない行の削除になる。受け入れはその行をコレクションから外す（挿入し直さない。単一の子はナビゲーションに残る）。
-- ガード：`EditModelSaveRuntimeTestsBase`（ConcurrencyFixture・7 シナリオ × インメモリ・リモート・SQL Server・EF Core の派生）、`BinaryVoEditModelRuntimeTests.AcceptSaved_NewRowWithBlobs_NextSaveKeepsStoredBlobs`、`BinaryColumnEfCoreRuntimeTests.AcceptSaved_ThenSaveAgain_KeepsStoredBlobs`、`CodegenCaseTests` の行 `exec-accept-saved-excluded-binary-override-*`（QuickER 版だけ・インメモリだけでは出て、EF Core だけ・QuickER 版と併せる構成では出ない）、`InMemoryFixtureRuntimeTests.EditModel_SingleChildAddedThenMarkedRemoved_IsLeftOutOfTheSave`。mutation 実証済み。
+- ガード：`EditModelSaveRuntimeTestsBase`（ConcurrencyFixture・7 シナリオ × インメモリ・リモート・SQL Server・EF Core の派生）、`BinaryColumnEditModelAdoSqliteRuntimeTests.AcceptSaved_NewRowWithBlobs_NextSaveKeepsStoredBlobs`、`BinaryColumnEfCoreSqliteRuntimeTests.AcceptSaved_ThenSaveAgain_KeepsStoredBlobs`、`CodegenCaseTests` の行 `exec-accept-saved-excluded-binary-override-*`（QuickER 版だけ・インメモリだけでは出て、EF Core だけ・QuickER 版と併せる構成では出ない）、`CrudParityInMemoryRuntimeTests.EditModel_SingleChildAddedThenMarkedRemoved_IsLeftOutOfTheSave`。mutation 実証済み。
 
 ### Save フックが無制限バイナリ列を書いたとき
 
@@ -411,7 +411,7 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
 - 読み直した版をコミットの前にエンティティへ書いてはいけない（コミットが失敗すると DB に無い版が残る）。
 - EF Core は blob を書けない（`WriteBinaryColumnAsync` は NotSupported）ので読み直しを持たない。インメモリは元から公開後のスナップショットから版を読み直す。
 - SQL Server の読み直しは `src/QuickER.Runtime.SqlServer/CLAUDE.md`「Save フックが書いた blob の版の読み直し」、SQLite のセーブポイントは `src/QuickER.Runtime.Sqlite/CLAUDE.md`「無制限バイナリ列のストリーミング」。
-- ガード：SQL Server の 2 者比較 `BackendParitySqlServerRuntimeTests` のケース（`hook-sql-stamps-same-row`・`hook-sql-stamps-saved-parent`・`hook-without-writes-no-reread`・`hook-audit-row-no-reread`）、`SaveHookBinaryWriteSqlServerRuntimeTests`、`SaveHookBinaryWriteSqliteRuntimeTests`。mutation 実証済み。
+- ガード：SQL Server の 2 者比較 `BackendParitySqlServerRuntimeTests` のケース（`hook-sql-stamps-same-row`・`hook-sql-stamps-saved-parent`・`hook-without-writes-no-reread`・`hook-audit-row-no-reread`）、`SaveHookAdoSqlServerBinaryWriteRuntimeTests`、`SaveHookAdoSqliteBinaryWriteRuntimeTests`。mutation 実証済み。
 
 ## 重複の事前チェックの NULL の規則
 
@@ -419,7 +419,7 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
   - `UniquenessChecker.CheckAsync` の `nullValuesCollide` の多重定義が本体。真なら NULL を含む組も照合する（等値の条件は、値の側の null を `IS NULL` へ補償する翻訳を通るので、同じ構成列に NULL を持つ行が見つかる）。
   - 方言の規則は `RepositoryDialectVariables.UniqueConstraintNullsCollide`（SQL Server＝true・SQLite＝false。テンプレート変数 `dialect_unique_nulls_collide`）で、方言の Repository の `CheckUniquenessAsync` だけが渡す。EF Core とインメモリは引数の無い多重定義（NULL を含む組を外す）のまま（EF Core は SQL Server でも外す＝docs の実装先の違い）。
   - 外すと、SQL Server の UNIQUE 制約が断る 2 行目の NULL を事前チェックが見落とし、同期の `ExplainServerRefusalAsync` が断られた書き込みの理由を見つけられず、元の例外（2627）を投げ直して毎回止まる（Versioned＋ServerWins だけは送らずに捨てるので止まらない）。EditModel の `ValidateUniqueAsync` も同じ照合を通る。
-- ガード：`SyncSqlServerRuntimeTests.NullUniqueValueTakenOnServer_IsReportedOrSettled`・`ServerCheckUniqueness_ComparesNullsAsValues`、`SyncSqlServerHttpRuntimeTests.NullUniqueValueTakenOnServer_IsReportedOverHttp`、`UniquenessCheckRuntimeTestsBase` の 3（期待は SQL Server の派生 `UniquenessCheckSqlServerRuntimeTests` が上書きする＝条件スキップでなくサブクラスで分ける）と同じ派生の `ValidateUnique_SecondNull_IsReported`、`UniquenessGenerationTests.CheckUniqueness_PassesDialectNullRule`。図は SyncFixture の `sync_markers`（NULL を許す単一列と 2 列の複合の一意制約）。mutation 実証済み。
+- ガード：`SyncSqlServerRuntimeTests.NullUniqueValueTakenOnServer_IsReportedOrSettled`・`ServerCheckUniqueness_ComparesNullsAsValues`、`SyncSqlServerHttpRuntimeTests.NullUniqueValueTakenOnServer_IsReportedOverHttp`、`UniquenessCheckRuntimeTestsBase` の 3（期待は SQL Server の派生 `UniquenessCheckAdoSqlServerRuntimeTests` が上書きする＝条件スキップでなくサブクラスで分ける）と同じ派生の `ValidateUnique_SecondNull_IsReported`、`UniquenessGenerationTests.CheckUniqueness_PassesDialectNullRule`。図は SyncFixture の `sync_markers`（NULL を許す単一列と 2 列の複合の一意制約）。mutation 実証済み。
 - 重複事前チェックの契約と実装は基底に 1 回だけ置く（宣言はランタイム共通の `IRemoteRepositoryCore<TEntity,TKey>`、実装は 4 つのリポジトリ基底と `HttpRemoteRepositoryCore`）。per-entity に残るのは `UniquenessConstraintSet<TEntity>` と `CollectCustomUniquenessChecks` partial フックへの橋渡しのみ。基底の実行順は「制約テーブル→カスタムフック」。
 
 ## Include とカスケード削除のキー照合
@@ -429,7 +429,7 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
   - 正規化した値は突き合わせ専用。SQLite の `IncludeLoader` が子の IN 句へ束縛するのは元の値（`binary` のキーだけはバイト列、それ以外は従来どおり正規化した値）。16 進文字列を束縛すると列のどの値にも一致しない。
   - SQLite の `IncludeLoader` の 3 か所とインメモリの `IncludeAttacher`・`InMemoryCascade` が共有する。SQL Server は FOR JSON の相関で SQL 側が比べるので該当しない。
 - SQLite の 3 か所の扱いは `src/QuickER.Runtime.Sqlite/CLAUDE.md`「Include のローダ（IncludeLoader）」、インメモリは `src/QuickER.Runtime.InMemory/CLAUDE.md`「ストアのキー比較」。
-- ガード：`TranslatorParity{SqlServer,Sqlite,InMemory}RuntimeTests` の `IncludeAcrossKeyTypes_AssemblesRelations` / `CascadeDeleteAcrossKeyTypes_RemovesChildren`、`IncludeKeysTests`。mutation 実証済み。
+- ガード：`TranslatorParity{AdoSqlServer,AdoSqlite,InMemory}RuntimeTests` の `IncludeAcrossKeyTypes_AssemblesRelations` / `CascadeDeleteAcrossKeyTypes_RemovesChildren`、`IncludeKeysTests`。mutation 実証済み。
 
 ## 更新できる列が無い表の UPDATE
 
@@ -438,7 +438,7 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
   - 自己代入にしたのは、影響行数・版の照合（`AND [row_ver] = @originalRowVersion`）・`OUTPUT INSERTED` を読む全経路をそのまま使えるため（SELECT による照合へ切り替えると、影響行数を読む非版の経路が成り立たない）。
   - 実 SQL Server で確かめた前提：同じ値への主キーの更新は `ON UPDATE CASCADE` を実行しない（子の行は書き換わらず、子の rowversion も進まず、子の UPDATE トリガーも動かない。値を変える更新では子の版が進みトリガーが動くことを対照として確認）。NO ACTION の外部キーに参照された主キーでも拒否されない。その表自身の行は更新されるので、版つきの表では版が進む。
   - 既知の制限：主キーが IDENTITY の取込表は自己代入を拒否されるので更新できない（DB の自動採番は対象外）。
-- ガード：`UpdateSqlWithoutAssignableColumnsTests`（両方言の文・版つきの照合と OUTPUT・列のある表は不変）、`TranslatorParity{SqlServer,Sqlite,InMemory}RuntimeTests` の `UpdateOfKeyOnlyTable_ReportsWhetherTheRowExists` / `UpdateOfVersionOnlyTable_Succeeds`、SQL Server だけの `VersionOnlyTable_GuardsTheVersion`。mutation 実証済み。
+- ガード：`UpdateSqlWithoutAssignableColumnsTests`（両方言の文・版つきの照合と OUTPUT・列のある表は不変）、`TranslatorParity{AdoSqlServer,AdoSqlite,InMemory}RuntimeTests` の `UpdateOfKeyOnlyTable_ReportsWhetherTheRowExists` / `UpdateOfVersionOnlyTable_Succeeds`、SQL Server だけの `VersionOnlyTable_GuardsTheVersion`。mutation 実証済み。
 
 ## ドライバが返した値の型変換
 
@@ -454,7 +454,7 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
 - `ConvertRaw`（DB から来た値）だけは、日時の TEXT を `AdjustToUniversal`（オフセットつきは UTC・なしは Unspecified）で読み、16 バイトの `byte[]` を `Guid` として読む。Microsoft.Data.Sqlite の `GetDateTime` / `GetGuid`（GetById・GetAll の速い読み取り）と同じ読み方にそろえる。外すと、同じ格納値が `Query()`・値オブジェクトの再ラップ・生 SQL では Local の日時になり、BLOB の Guid は読めない。`ConvertInput` は人が書いた値なので対象外。
 - 行マッピング `SetColumnValue` は「VO は `Wrap`・それ以外は `CoerceScalar`」で分岐する（SQLite の値オブジェクトありの `MapEntityObject` は列ごとにこれを呼ぶ）。VO 有効時に無条件 `Wrap` にすると、`ISqlExecutor.QueryBySqlAsync<TEntity>` へ渡された手書きエンティティの素の列に格納値の文字列がそのまま渡り `ArgumentException` になる。
 - 格納値を値オブジェクトが拒んだときは、どの読み取り経路でも列を名指しする。文言の正本は `EntitySaveMetadata.ColumnMappingFailure`（`InvalidOperationException`・内側が `ValueObjectValidationException`）。経路は 3 つ：`SetColumnValue`、速い読み取り（`BuildColumnAssign` の値オブジェクトの分岐が `Create` を式木の `TryCatch` で包む）、SQL Server の FOR JSON（`src/QuickER.Runtime.SqlServer/CLAUDE.md`「Include の無い取得と FOR JSON」）。
-- ガード：`RawValueConverterTests`、`SqliteValueConversionRuntimeTests`（CI 常時。「値オブジェクトが拒む格納値はどの経路でも列名つきの例外になる」を含む）、`TranslatorParitySqliteRuntimeTests.RawSqlEntity_MalformedStoredText_ThrowsInvalidOperationWithFormatInner`、`EfCoreRawSqlValueConversionTests`、`IncludeGraphSqlServerRuntimeTests`。mutation 実証済み。
+- ガード：`RawValueConverterTests`、`ValueConversionAdoSqliteRuntimeTests`（CI 常時。「値オブジェクトが拒む格納値はどの経路でも列名つきの例外になる」を含む）、`TranslatorParityAdoSqliteRuntimeTests.RawSqlEntity_MalformedStoredText_ThrowsInvalidOperationWithFormatInner`、`EfCoreRawSqlValueConversionTests`、`IncludeGraphAdoSqlServerRuntimeTests`。mutation 実証済み。
 
 ## 値オブジェクト
 

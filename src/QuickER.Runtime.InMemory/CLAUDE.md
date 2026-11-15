@@ -53,7 +53,7 @@
 - staged が削除マークなら競合にしない（既に無い行の削除は実 DB でも no-op。版の有無に依らない）。
 - 取り込み時に行が無かった削除（基準 null・staged 削除）は、検証も適用もしない。公開時にそのキーにある行は After 待機中に他者が入れた行で、この保存が見た行ではない。適用すると他者の行を消し、版あり×Optimistic では偽の Modified になる。判定は `InMemorySaveStaging.StartedWithoutRow`。
   - 同じ保存で同じキーを削除して足すと、削除が先に走る（`GraphSaveOrder`：削除する行のキーを取る新しい行は削除の後に書く）。取り込み時に行が無ければ削除は何もせず、新しい行が残る。並びに依らない。
-- ガード：`InMemoryConcurrencyRuntimeTests` の `SaveAsync_DeleteOfAbsentRow_KeepsRowInsertedDuringAfter` / `SaveAsync_VersionedDeleteOfAbsentRow_IsNotAConflict` / `SaveAsync_RemoveAndAddSameKeyInOneSave_KeepsNewRow`。mutation 実証済み。
+- ガード：`ConcurrencyInMemoryRuntimeTests` の `SaveAsync_DeleteOfAbsentRow_KeepsRowInsertedDuringAfter` / `SaveAsync_VersionedDeleteOfAbsentRow_IsNotAConflict` / `SaveAsync_RemoveAndAddSameKeyInOneSave_KeepsNewRow`。mutation 実証済み。
 
 ### ExecuteDeleteAsync
 
@@ -68,7 +68,7 @@
   - グラフごとの JSON 複製をやめた理由は 2 つ：(a) 子を複製した直後に捨てていたので、n ノードのグラフ保存が各ノードの部分木を複製する超線形コストだった。(b) 落とさないと、Include なし取得が RowState=Added の子を返し（SQL 版はナビ空）、その戻り値の再保存が子を二重 INSERT する。
   - 読みは Include が子行から組み立てるので影響なし。
 - 読み取りも同じ列コピーで返す（`InMemoryDataStore.CopyRow`）。除外したバイナリ列は写さず、コンストラクタの値（未取得状態）のまま返す。JSON で丸ごと複製してから捨てると、捨てる blob も Base64 で往復して blob の数倍を割り当てる。
-- ガード：`BinaryInMemoryFixtureRuntimeTests.Read_DoesNotCopyExcludedBlob`（割り当て量）。mutation 実証済み。
+- ガード：`BinaryColumnInMemoryRuntimeTests.Read_DoesNotCopyExcludedBlob`（割り当て量）。mutation 実証済み。
 
 ## 一意制約の索引
 
@@ -99,4 +99,4 @@
 - `InMemoryQueryExecutor` の `NavigationGuard` が、述語と並び替えのキーをコンパイルする前に、ラムダ引数から辿るナビゲーションを `NotSupportedException` で断る。
 - ストアは行だけを持ち、保存行のナビゲーションは常に空。評価すると `x.Orders.Any()` が 0 件、`x.Customer == null` が全件を、黙って返してしまう。
 - SQL 実行器側の同じ規則は `src/QuickER.Runtime/CLAUDE.md`「式の翻訳と NULL 補償」。
-- ガード：`TranslatorParity{SqlServer,Sqlite,InMemory}RuntimeTests` の「ナビゲーションを使う条件・並び替えは NotSupportedException で断る」。mutation 実証済み（ガードを外す・並び替え側だけ外す）。
+- ガード：`TranslatorParity{AdoSqlServer,AdoSqlite,InMemory}RuntimeTests` の「ナビゲーションを使う条件・並び替えは NotSupportedException で断る」。mutation 実証済み（ガードを外す・並び替え側だけ外す）。

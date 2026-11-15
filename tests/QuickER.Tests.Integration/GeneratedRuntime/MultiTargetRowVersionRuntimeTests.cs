@@ -22,7 +22,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// <para>
 /// SQL Server は Testcontainers を使うため Docker 不在時はスキップされる。SQLite 単独で足りるミラー列の
-/// 読み書きは <see cref="MultiTargetRowVersionSqliteRuntimeTests"/> に分離し CI でも常時回す。
+/// 読み書きは <see cref="MultiTargetRowVersionAdoSqliteRuntimeTests"/> に分離し CI でも常時回す。
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]

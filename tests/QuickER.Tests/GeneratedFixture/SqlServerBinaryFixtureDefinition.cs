@@ -19,7 +19,7 @@ namespace QuickER.Tests.GeneratedSqlServerBinaryFixture;
 /// ストリーミングエンジン（読み=<c>CommandBehavior.SequentialAccess</c>＋<c>GetStream</c>・書き=Stream 値の
 /// <c>SqlParameter</c>）と、除外の FOR JSON 縮小 SELECT・<c>WithUnboundedBinary()</c> のプレーン全列 SELECT の
 /// SQL Server 経路。これらを Testcontainers の実 SQL Server で往復検証するために本フィクスチャを追加する
-/// （<see cref="Tests.Integration.SqlServerBinaryColumnRuntimeTests"/>・Docker 依存）。
+/// （<see cref="Tests.Integration.BinaryColumnAdoSqlServerRuntimeTests"/>・Docker 依存）。
 /// </para>
 /// <para>
 /// オプションは SQL Server エンジン検証に必要な構成に、リモートサービスを足したもの（EF Core / インメモリは付けない）。

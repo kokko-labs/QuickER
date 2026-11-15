@@ -200,11 +200,11 @@ public static class RuntimeMatrixEngines
     )> DslFuzz { get; } =
     [
         (
-            nameof(DslConditionFuzzSqlServerRuntimeTests),
+            nameof(NamedQueryDslConditionFuzzSqlServerRuntimeTests),
             RuntimeFeatures.NamedQuery,
             DialectNames.SqlServer,
             // 軸を作るだけでフィクスチャに触れない（MatrixAxisGuardTests と同じ）
-            () => DslConditionFuzzSqlServerRuntimeTests.BackendAxis(null!).Adapters
+            () => NamedQueryDslConditionFuzzSqlServerRuntimeTests.BackendAxis(null!).Adapters
         ),
         (
             nameof(NamedQueryDslConditionFuzzPostgreSqlRuntimeTests),

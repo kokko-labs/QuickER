@@ -25,7 +25,7 @@ SQL Server 方言エンジン（QuickER 版 Repository の ADO 実装）の固�
 - `SqlBulkCopyOptions.CheckConstraints` を常時付ける。既定では FK / CHECK が検査されず、行単位 INSERT が弾く行を一括追加だけが通す非対称になる。`FireTriggers` は付けない（QuickER の DDL はトリガー非生成）。
 - `KeepNulls` も常時付ける。外すと、DEFAULT のある列へ null を一括追加したときだけ既定値が入る（行単位 INSERT は NULL）。
 - `BulkCopyTimeout` は接続の `CommandTimeout`（接続文字列の `Command Timeout`・既定 30）を渡す。外すと接続文字列の値が届かず、常に 30 秒で打ち切られる。
-- ガード：`GeneratedRuntimeAdoParityTests` の `BulkInsert_NullIntoColumnWithDefault_StoresNull` / `BulkInsert_FollowsConnectionStringCommandTimeout`（Docker）。mutation 実証済み。
+- ガード：`CrudParityAdoSqlServerRuntimeTests` の `BulkInsert_NullIntoColumnWithDefault_StoresNull` / `BulkInsert_FollowsConnectionStringCommandTimeout`（Docker）。mutation 実証済み。
 
 ### SqlBulkCopy へ渡す値をサーバーの形へ合わせる
 
@@ -45,7 +45,7 @@ SQL Server 方言エンジン（QuickER 版 Repository の ADO 実装）の固�
 - QuickER 版 ADO の版チェックは `sqlserver` 方言のみ。`WHERE ... AND [row_ver] = @original` と `OUTPUT INSERTED` で版を回収する。
 - 回収した版は `RowVersionCollector` がコミット後に適用する。ロールバック時に幻の版を残さないため。
 - UPDATE が 0 件のときは `RowVersionConcurrency.RowExistsAsync` で実在確認し、「行なし」と「版が古い」を分ける。問いは存在の有無だけなので、専用の `EntitySaveMetadata.ExistsByIdSql`（`SELECT CASE WHEN EXISTS (SELECT 1 …) THEN 1 ELSE 0 END`）を使う（全列 SELECT して捨てない）。
-- ガード：`SqlServerConcurrencyRuntimeTests`（Docker）。
+- ガード：`ConcurrencyAdoSqlServerRuntimeTests`（Docker）。
 
 ## 無制限バイナリ列のストリーミング
 
@@ -54,7 +54,7 @@ SQL Server 方言エンジン（QuickER 版 Repository の ADO 実装）の固�
 - エンジンは `SequentialAccess`＋`GetStream` で読み、Stream 値の `SqlParameter`（`VarBinary`, -1）で書く。
 - Stream の長さの検査を外すと、SQL Server は `length` を無視して Stream の中身をすべて保存する（例外にならない）。
 - ラッパーの `ArgumentException` は SqlClient に包まれずにそのまま出る。このとき UPDATE は適用されない（実測）。
-- ガード：`SqlServerBinaryColumnRuntimeTests.Stream_Write_LengthMismatch_Throws_AndKeepsBlob`（入力は共有の `BinaryLengthMismatchCases`。Include のある取得でも除外列は未取得状態、を含む）。
+- ガード：`BinaryColumnAdoSqlServerRuntimeTests.Stream_Write_LengthMismatch_Throws_AndKeepsBlob`（入力は共有の `BinaryLengthMismatchCases`。Include のある取得でも除外列は未取得状態、を含む）。
 
 ## Include の無い取得と FOR JSON
 
@@ -70,7 +70,7 @@ SQL Server 方言エンジン（QuickER 版 Repository の ADO 実装）の固�
   - NULL は resolver modifier `ReadMissingColumnsAsNull` が `JsonTypeInfo.OnDeserializing` で SELECT 列（`SelectProperties`）だけを既定値へ戻してからキーを読ませる。除外したバイナリ列（未取得状態）・ナビゲーション・`RowState` には触れない。
   - SQL 側の `INCLUDE_NULL_VALUES` を採らないのは、子が 0 件の Include が null のナビゲーションになり、NOT NULL 宣言の値型の列の NULL が System.Text.Json の例外になるため。
 - 格納値を値オブジェクトが拒んだときの列名指しは、FOR JSON でも実行器の resolver modifier `NameRejectedStoredValues` が値オブジェクトのプロパティだけに `ColumnNamingValueObjectConverter<TVo>` を被せて行う（共有の `ValueObjectJsonConverterFactory` は触らないので、リモートの例外分類は変わらない）。経路の一覧は `src/QuickER.Runtime/CLAUDE.md`「ドライバが返した値の型変換」。
-- ガード：`SqlServerPlainQueryRuntimeTests`（発行 SQL を SqlClient の DiagnosticListener で捕まえ、Include の無い取得に `FOR JSON` が無いこと。並び替えなしの Take / Skip の `ORDER BY (SELECT NULL)` の補完。型の境界値〔double の最大値・最小の正規化数・負のゼロ・`0.1 + 0.2`・9 桁が要る real・double を包む値オブジェクト〕と NULL で、Include の無い `Query()`＝`GetAllAsync`＝Include のある取得のルートと子の値・`RowState`・Include していないナビゲーションと子が 0 件の Include の初期状態が一致すること）。mutation 実証済み。
+- ガード：`CrudParityAdoSqlServerPlainQueryRuntimeTests`（発行 SQL を SqlClient の DiagnosticListener で捕まえ、Include の無い取得に `FOR JSON` が無いこと。並び替えなしの Take / Skip の `ORDER BY (SELECT NULL)` の補完。型の境界値〔double の最大値・最小の正規化数・負のゼロ・`0.1 + 0.2`・9 桁が要る real・double を包む値オブジェクト〕と NULL で、Include の無い `Query()`＝`GetAllAsync`＝Include のある取得のルートと子の値・`RowState`・Include していないナビゲーションと子が 0 件の Include の初期状態が一致すること）。mutation 実証済み。
 
 ## 式の翻訳（SQL Server）
 
@@ -79,7 +79,7 @@ SQL Server 方言エンジン（QuickER 版 Repository の ADO 実装）の固�
 - 空・空白の判定は `DATALENGTH(col) = 0`（`= ''` は末尾の空白を無視する）と、`col NOT LIKE N'%[^…]%'`（括弧の中は `char.IsWhiteSpace` の全文字を `NCHAR(n)` で連結）。TRIM の文字指定は 2017 以降で、docs の 2016 宣言に合わないため使わない。
 - 固定長の列は値を空白で詰めて返すので、`EndsWith` は詰めた値で比べる（読み戻した値へ C# を当てた結果と同じにする。`RTRIM` は付けない）。
 - LIKE のパターンは列の型の可変長形（nchar→nvarchar・char→varchar）で束縛する。固定長で束縛するとパターン自体が空白で詰められて一致しない。
-- ガード：`TranslatorParitySqlServerRuntimeTests`（述語の表 `TranslatorParityPredicateRows` を実 SQL Server で C# の意味論と突き合わせる）。値オブジェクトの列の IN は `BackendParitySqlServerRuntimeTests`（ケース `value-object-in-null-semantics`）。mutation 実証済み（可変長束縛・空と空白の判定）。
+- ガード：`TranslatorParityAdoSqlServerRuntimeTests`（述語の表 `TranslatorParityPredicateRows` を実 SQL Server で C# の意味論と突き合わせる）。値オブジェクトの列の IN は `BackendParitySqlServerRuntimeTests`（ケース `value-object-in-null-semantics`）。mutation 実証済み（可変長束縛・空と空白の判定）。
 
 ## バイナリの比較
 
@@ -113,4 +113,4 @@ SQL Server 方言エンジン（QuickER 版 Repository の ADO 実装）の固�
 - `BinaryColumnWritten` のときだけ、Save の単一・複数とも `RowVersionCollector.RereadAsync` が、記録した行（保存が書いた行）の版を同じトランザクションで読み直す。`EntitySaveMetadata.SelectRowVersionByIdSql` を使い、行が無ければ文の版のままにする。
 - 反映は従来どおりコミット後の `Apply`。
 - SQL Server の blob の書き込みは 1 つの UPDATE なので、失敗した書き込みは何も変えず、保存はコミットできる（実測）。
-- ガード：`BackendParitySqlServerRuntimeTests` のケース（`hook-sql-stamps-same-row`・`hook-sql-stamps-saved-parent`・`hook-without-writes-no-reread`・`hook-audit-row-no-reread`）、`SaveHookBinaryWriteSqlServerRuntimeTests`（blob を書いた後の版・読み直しの後でコミットを取り消すと版が読んだときのまま・失敗した書き込み 2 通り）。
+- ガード：`BackendParitySqlServerRuntimeTests` のケース（`hook-sql-stamps-same-row`・`hook-sql-stamps-saved-parent`・`hook-without-writes-no-reread`・`hook-audit-row-no-reread`）、`SaveHookAdoSqlServerBinaryWriteRuntimeTests`（blob を書いた後の版・読み直しの後でコミットを取り消すと版が読んだときのまま・失敗した書き込み 2 通り）。

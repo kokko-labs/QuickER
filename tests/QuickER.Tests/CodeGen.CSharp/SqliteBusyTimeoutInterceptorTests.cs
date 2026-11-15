@@ -25,7 +25,7 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// <remarks>
 /// 待ち時間は DbContext のコマンドタイムアウト（設定したとき）か、接続文字列の <c>Default Timeout</c>（設定しないとき）で、
 /// <c>0</c> とミリ秒で表せない値は上限なしにする（QuickER 版の <c>SqlConnectionFactory</c> と同じ規則）。実際にロックを待つことは
-/// <c>EfCoreSqliteBusyTimeoutRuntimeTests</c>（Integration）が確かめる。
+/// <c>BusyTimeoutDefaultEfCoreSqliteRuntimeTests</c>（Integration）が確かめる。
 /// </remarks>
 public class SqliteBusyTimeoutInterceptorTests
 {

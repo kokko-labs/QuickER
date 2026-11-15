@@ -17,7 +17,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <remarks>
 /// <para>
 /// 本体（生成器・オラクル・診断の引き当て・照合）は QuickER.Tests の <see cref="DslFuzzRunner"/> を共有し、手順は SQL Server の派生
-/// （<see cref="DslConditionFuzzSqlServerRuntimeTests"/>）と同じ：網羅の単位を種の前に流し、種の単位を流し、既知の失敗の一覧と厳密に
+/// （<see cref="NamedQueryDslConditionFuzzSqlServerRuntimeTests"/>）と同じ：網羅の単位を種の前に流し、種の単位を流し、既知の失敗の一覧と厳密に
 /// 照合し、網羅しない組を照合する。
 /// </para>
 /// <para>

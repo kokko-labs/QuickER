@@ -779,7 +779,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("entity.RowState = RowState.Unchanged;");
     }
 
-    /// <summary>Include のある Query の取得が FOR JSON＋STJ で生成され、Include / ThenInclude（多階層）が生成されることを検証する（Include の無い取得のプレーン SELECT は SqlServerPlainQueryRuntimeTests が実 DB で固定する）</summary>
+    /// <summary>Include のある Query の取得が FOR JSON＋STJ で生成され、Include / ThenInclude（多階層）が生成されることを検証する（Include の無い取得のプレーン SELECT は CrudParityAdoSqlServerPlainQueryRuntimeTests が実 DB で固定する）</summary>
     // 残す理由（P3-4b）：FOR JSON・CONVERT・JSON_QUERY の SQL Server の SQL の断片。構造の表明は行 code-repository-json-include-query-helpers へ移した
     [Fact]
     public void Generate_ShouldCreateJsonIncludeQuery()
@@ -1574,7 +1574,7 @@ public class CSharpCodeGenerationServiceTests
 
     /// <summary>
     /// rowversion 列を持つ図の SQL Server 方言で、楽観排他（ConcurrencyMode）の契約と版条件付き SQL 変種が
-    /// 生成されることを検証する（意味論の実 DB 検証は SqlServerConcurrencyRuntimeTests）。
+    /// 生成されることを検証する（意味論の実 DB 検証は ConcurrencyAdoSqlServerRuntimeTests）。
     /// </summary>
     // 残す理由（P3-4b）：版条件・新版の返却の SQL Server の SQL の断片と、競合の例外の文言。構造の表明は行 code-rowversion-concurrency-contract-and-metadata へ移した
     [Fact(

@@ -610,7 +610,7 @@ public abstract class TranslatorParityRuntimeTestsBase
     /// <remarks>
     /// SQL Server の取得は列名を角括弧で囲む（Include の無い取得はプレーン SELECT の列リスト、Include のある取得は
     /// FOR JSON の列ごとの別名）。囲まないと予約語で構文エラーになり、<c>]</c> を二重にしないと文が壊れる。
-    /// FOR JSON の別名の側は <see cref="SqlServerPlainQueryRuntimeTests"/> の値の比較が同じ列名で確かめる。
+    /// FOR JSON の別名の側は <see cref="CrudParityAdoSqlServerPlainQueryRuntimeTests"/> の値の比較が同じ列名で確かめる。
     /// </remarks>
     [Fact(DisplayName = "[翻訳パリティ] 予約語・閉じ角括弧の列名の値を Query で読み戻せる")]
     public async Task ReservedAndBracketColumnNames_RoundTripThroughQuery()

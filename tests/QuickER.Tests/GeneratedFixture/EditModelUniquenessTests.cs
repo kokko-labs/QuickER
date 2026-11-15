@@ -12,7 +12,7 @@ namespace QuickER.Tests.GeneratedQueryFixture;
 /// <remarks>
 /// フィクスチャの orders には単一列制約 <c>UQ_orders_memo</c>（NULL 許容列）と複合制約
 /// （<c>customer_id</c>＋<c>amount</c>）がある。DB 照合（<c>ValidateUniqueAsync</c>）は別スイート
-/// （<c>EditModelValidateUniqueRuntimeTests</c>）が担当し、ここは実 DB を使わない要素間比較だけを扱う。
+/// （<c>EditModelValidateUniqueAdoSqliteRuntimeTests</c>）が担当し、ここは実 DB を使わない要素間比較だけを扱う。
 /// <para>
 /// コレクション内の重複の登録先と、確定値の編集で DB 由来の重複エラーが取り下げられることは <see cref="EditModelScenarioTests"/> の em-sibling・em-db-error の表にある。
 /// </para>
@@ -215,7 +215,7 @@ public class EditModelUniquenessTests
     /// <summary>兄弟間チェックの再実行は、DB 照合が登録したエラーを巻き添えで消さない（ソース分離）</summary>
     /// <remarks>
     /// 旧実装は重複エラーストアを一括クリアしていたため、直前の <c>ValidateUniqueAsync</c>（DB 突合）の結果が
-    /// 親の <c>Validate</c> 1 回で静かに消えていた。実 DB を使う検証は EditModelValidateUniqueRuntimeTests 側。
+    /// 親の <c>Validate</c> 1 回で静かに消えていた。実 DB を使う検証は EditModelValidateUniqueAdoSqliteRuntimeTests 側。
     /// </remarks>
     [Fact(DisplayName = "兄弟間チェックの再実行で DB 由来の重複エラーが消えない")]
     public void SiblingValidation_KeepsDatabaseDuplicateErrors()

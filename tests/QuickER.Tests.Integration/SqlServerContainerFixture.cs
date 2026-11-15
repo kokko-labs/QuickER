@@ -163,6 +163,6 @@ public sealed class SqlServerContainerCollection : ICollectionFixture<SqlServerC
 public sealed class SqlServerDslFuzzContainerCollection
     : ICollectionFixture<SqlServerContainerFixture>
 {
-    /// <summary>コレクション名（<c>DslConditionFuzzSqlServerRuntimeTests</c> の <c>[Collection]</c> で参照する）</summary>
+    /// <summary>コレクション名（<c>NamedQueryDslConditionFuzzSqlServerRuntimeTests</c> の <c>[Collection]</c> で参照する）</summary>
     public const string Name = "SQL Server DSL Fuzz";
 }

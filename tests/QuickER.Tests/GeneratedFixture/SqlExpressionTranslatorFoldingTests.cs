@@ -17,7 +17,7 @@ namespace QuickER.Tests.GeneratedFixture;
 /// char の文字列一致・LIKE の束縛の型・空と空白の判定・SQLite の日付部品を、意図した SQL へ翻訳することを固定する単体テスト。
 /// </summary>
 /// <remarks>
-/// 行集合としての意味論は実 DB の <c>TranslatorParity{SqlServer,Sqlite,InMemory}RuntimeTests</c> が C# と突き合わせる。
+/// 行集合としての意味論は実 DB の <c>TranslatorParity{AdoSqlServer,AdoSqlite,InMemory}RuntimeTests</c> が C# と突き合わせる。
 /// ここは出力の形（列を含む比較の NULL 補償が畳み込みで変わらないこと、など）を方言ごとに名指しする。
 /// </remarks>
 public sealed class SqlExpressionTranslatorFoldingTests

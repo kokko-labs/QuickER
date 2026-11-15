@@ -26,7 +26,7 @@
   - リモートの担当は、HTTP クライアントの裏のサーバーの実装先を `Server = RuntimeTarget.Z` か `ServerNone = true`（リポジトリを持たない転送だけのスタブ・HTTP を使わない検査）のちょうど一方で名乗る。リモート以外はどちらも書かない。
 - 実装先を 1 つのテストの中で比べるエンジンは属性を手で並べず、エンジンの実装先の軸から導く（`RuntimeMatrixEngines`）。
   - 実装先の一致（`BackendParityRuntimeTests`）：軸のアダプタ `ParityBackendAdapter` が実装先とサーバーを持ち、登録（機能・シナリオの群）の群のシナリオが流れる実装先の和を担当にする。比べる相手として流れるだけの実装先を数えないときは登録の `Engine` で絞る（EF Core の実行戦略）。
-  - 簡易 DSL の総当たり（`DslConditionFuzzSqlServerRuntimeTests`）：構成の方言と実装先の軸の名前（`DslFuzzBackends`）から実装先を引く（`RuntimeMatrixEngines.DslTarget`）。
+  - 簡易 DSL の総当たり（`NamedQueryDslConditionFuzzSqlServerRuntimeTests`）：構成の方言と実装先の軸の名前（`DslFuzzBackends`）から実装先を引く（`RuntimeMatrixEngines.DslTarget`）。
   - 軸を持たないエンジンの派生（`TranslatorParity*`・`BackendParitySqlServerRuntimeTests`）は普通のクラスと同じく属性で書く。
 - 担当でないセルは行の表 `RuntimeMatrixRows` にだけ宣言する（担当は書かない）。種類は 3 つ。
   - 空き（`Gap`）：まだ検証していない。直す区切りの名前が必須（決まっていなければ `RuntimeMatrixRows.Trigger`＝きっかけ待ち）。
@@ -40,10 +40,11 @@
   - 成り立つセル（担当・空き・割り切り）のうち担当が過半。非該当は分母に入れない（EF Core を方言ごとに分けると非該当の列が増え、網の質と関係なく割れるため）。
   - 行列の生成物は宣言から作り直した内容と同じ（`RuntimeTestMatrixTests.RuntimeMatrixDrift_MatchesRecord`・`GeneratedTextFile.Verify`）。書き直しは `QUICKER_REGEN_FIXTURES` を立てて `FullyQualifiedName~RuntimeMatrixDrift`（ルートの CLAUDE.md の書き直しの段のコマンドを Integration に向けても書き直される）。
   - 照合の関数の自己検査は `RuntimeTestMatrixTests.Checks_NameEveryProblemShape`（合成の宣言で問題の形を 1 つずつ名指しする）。
-- 名前の規則（新しく足すクラス・`RuntimeTestNaming`）：機能と実装先は属性の名前で書き、接尾辞は `*RuntimeTests`。
+- 名前の規則（`RuntimeTestNaming`）：機能と実装先は属性の名前で書き、接尾辞は `*RuntimeTests`。
   - 実装先が 1 つ：機能の名前・実装先の名前の順に並べる（例 `SaveHookInMemoryRuntimeTests`・`TranslatorParityEfCoreSqlServerRuntimeTests`）。リモートは実装先の名前の代わりに Remote とサーバーの実装先の名前を並べ、リポジトリなしは Remote だけにする。
+  - 同じ機能 × 実装先を担当するクラスが 2 本以上あるときは、実装先の名前と接尾辞の間に区別の語を挟む（例 `SaveHookAdoSqliteBinaryWriteRuntimeTests`・`RemoteTransportRemoteServerEngineRuntimeTests`）。区別の語は大文字で始め、実装先の名前（`RuntimeTarget` の値の名前）で始めない（リポジトリなしのクラスがサーバーを名乗る名前や、別の実装先を担当する名前に読めないようにする）。区別の語は名前がぶつかるときだけ使い、組の主（ほかの実装先に同じ基底の兄弟があるクラス）は区別なしにする。
   - 実装先が 2 つ以上かエンジン：機能の名前で始める（例 `BackendParitySqlServerRuntimeTests`・`MultiTargetRepositoryRuntimeTests`）。間は自由。
-  - 規則に合わない既存のクラスは既知の一覧 `RuntimeTestNamingKnown`（理由つき）に載せ、`GuardKnownList` で 2 方向に照合する（一覧に無い違反も、無くなった・合うようになったクラスも赤）。改名は後の区切りで行い、改名したら一覧から消す。ガード：`RuntimeTestMatrixTests.NewRuntimeTestClasses_FollowNamingRule`。
+  - 規則に合わない既存のクラスは既知の一覧 `RuntimeTestNamingKnown`（理由つき）に載せ、`GuardKnownList` で 2 方向に照合する（一覧に無い違反も、無くなった・合うようになったクラスも赤）。今の一覧は双方向同期のクラス 20 本だけで、同期の作り直し（0.4.0 の後）で構成と一緒に付け直す。改名したら一覧から消す。基底クラス（`*RuntimeTestsBase`）は抽象で走査の外なので規則を掛けない。ガード：`RuntimeTestMatrixTests.NewRuntimeTestClasses_FollowNamingRule`。
 - 運用：
   - テストのクラスを足すときは属性を書き、そのセルの空きの宣言を消して生成物を書き直す。空きの宣言を残したまま属性を付けると、その列は空きと担当の両方で赤になり、`RuntimeMatrixRows` の宣言を消すと緑になる（続けて生成物を書き直す）。
   - ガード：`RuntimeTestMatrixTests`（`Targets_MatchProductDialects`・`EveryRuntimeTestClass_ShouldAppearInMatrix`・`EveryMatrixCell_ShouldBeCoveredOrDeclaredAsGap`・`Matrix_ShouldBeMostlyCovered`・`RuntimeMatrixDrift_MatchesRecord`・`NewRuntimeTestClasses_FollowNamingRule`・`Checks_NameEveryProblemShape`）。
@@ -373,7 +374,7 @@
 
 - `SyncModelHttpRuntimeTests`：in-process の Kestrel・生成された HTTP の差分ソースと同期専用のエンドポイント。サーバー側の注入した失敗は 500 で届くので、実行中に失敗が起きたかで見分ける。
 - `SyncModelSqlServerRuntimeTests`（Docker）：世界ごとにデータベースを作る実 SQL Server のサーバー役。生成された直結の差分ソース・本物の rowversion。
-- `SyncSupportRemoteAdoSqlServerRuntimeTests`（Docker・転送の値 `SqlServerHttp`）：同じ実 SQL Server のサーバー役を in-process の Kestrel の背後へ置き、生成された HTTP の差分ソースでつなぐ。決定的なシナリオは夜間だけ（上の「決定的なシナリオと Theory」）、乱数の種は普段も流す。名前は行列の名前の規則に従う（同期のモデルの仲間の `SyncModel…` は既知の一覧の Rename で、後の改名の区切りでそろえる）。
+- `SyncSupportRemoteAdoSqlServerRuntimeTests`（Docker・転送の値 `SqlServerHttp`）：同じ実 SQL Server のサーバー役を in-process の Kestrel の背後へ置き、生成された HTTP の差分ソースでつなぐ。決定的なシナリオは夜間だけ（上の「決定的なシナリオと Theory」）、乱数の種は普段も流す。名前は行列の名前の規則に従う（同期のモデルの仲間の `SyncModel…` は既知の一覧に載っていて、双方向同期の作り直しでそろえる）。
 - 実 SQL Server のサーバー役は、生成物の外側の包み（`SyncModelFaultingRepository`・`SyncModelFaultingSource`・`SyncModelFaultingBinaryColumns`）で、SQLite の代役と同じ点の失敗の注入と割り込みを起こす（版の採番とガードはしない）。版なしの表（ラベル）の書き手は代役と同じく包まない（書き込みの失敗をラベルの書き込みで使わない）。入口の割り込みと書き込みの失敗は `SyncModelFaults.BeforeServerWriteAsync` の 1 つを両方の包みが呼ぶ。
 - どれも次を確かめる。
   - 決定的なシナリオが直結と同じ違反になること。例外は入口・違反の種類・推定した形へ正規化して比べる（`SyncModelSignatures`）。

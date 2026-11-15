@@ -75,7 +75,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 - 主キーが計算列の図は生成時エラー。生成時 Info 診断が除外列を名指しする
 - C# リバースは `[ComputedColumn]` で往復する。DBML / Mermaid / Excel は運ばない（DBML / Mermaid は出力時に欠落告知、Excel のマージ取込は一致した列の指定を現在図から引き継ぐ）
 - GUI は `ColumnViewModel` のパススルーのみ（編集 UI なし）。図ファイルは v1 のまま。マルチターゲットの SQLite ミラーへは同期でも値が運ばれない（docs の既知の割り切り）
-- ガード：`CodegenCaseTests` の行 `code-computed-column-*`・`CodegenCaseTests` の行 `model-computed-column-*`・`CodegenCaseTests` の行 `exec-computed-column-*`・`DialectDdlTableTests`（行 `ddl-computed-column-*`・`sync-*-computed-column-*`）・`{Sqlite,SqlServer}ComputedColumnRuntimeTests`・5 方言の `*ImportFidelityIntegrationTests`・`DocumentFormatTests`（行 `*-is-computed-*`・`roundtrip-computed-column-flag-preserved`）。mutation 実証済み
+- ガード：`CodegenCaseTests` の行 `code-computed-column-*`・`CodegenCaseTests` の行 `model-computed-column-*`・`CodegenCaseTests` の行 `exec-computed-column-*`・`DialectDdlTableTests`（行 `ddl-computed-column-*`・`sync-*-computed-column-*`）・`ComputedColumn{AdoSqlite,AdoSqlServer}RuntimeTests`・5 方言の `*ImportFidelityIntegrationTests`・`DocumentFormatTests`（行 `*-is-computed-*`・`roundtrip-computed-column-flag-preserved`）。mutation 実証済み
 
 ### DB が値を拒む採番列
 
@@ -103,7 +103,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
   - CodeGen.CSharp は Provider を参照できないので、持てるかの判定の正本は QuickER.Dialects の `DialectDeclarations.CanOccur` に置き、`IdentityColumnMarks.CanBeHeldBy` はそれへ委譲する
 - 実 DB の書き込み除外は IdentityColumnFixture（SQL Server 方言の QuickER 版 Repository＋EF Core・非主キーの採番列 1 本）で固定する
   - SqlBulkCopy は KeepIdentity なしでは送った値を無視して採番するので、BulkInsert の除外は実 DB では観測できない（回帰の網としてだけ持つ）
-- ガード：`DialectDdlTableTests`（行 `ddl-identity-column-*`・`sync-*-identity-column-*`。注記を出す方言を書き下ろした期待で照合し、扱いの表との一致は行の Treats の自動の照合）・`CodegenCaseTests` の行 `code-identity-column-*`・`CodegenCaseTests` の行 `model-identity-column-*`・`CodegenCaseTests` の行 `exec-identity-column-*`・`IdentityColumnSaveMetadataTests`・`{SqlServer,PostgreSql,Oracle}ImportFidelityIntegrationTests` の `Import_*Identity*`・`{SqlServer,PostgreSql}IdentityColumnRuntimeTests`・`DocumentFormatTests`（行 `*-is-identity-*`・`roundtrip-identity-column-flag-preserved`）・`SchemaSignatureTests` の `Compute_IdentityFlag_ChangesSignature`
+- ガード：`DialectDdlTableTests`（行 `ddl-identity-column-*`・`sync-*-identity-column-*`。注記を出す方言を書き下ろした期待で照合し、扱いの表との一致は行の Treats の自動の照合）・`CodegenCaseTests` の行 `code-identity-column-*`・`CodegenCaseTests` の行 `model-identity-column-*`・`CodegenCaseTests` の行 `exec-identity-column-*`・`IdentityColumnSaveMetadataTests`・`{SqlServer,PostgreSql,Oracle}ImportFidelityIntegrationTests` の `Import_*Identity*`・`IdentityColumn{SqlServer,EfCorePostgreSql}RuntimeTests`・`DocumentFormatTests`（行 `*-is-identity-*`・`roundtrip-identity-column-flag-preserved`）・`SchemaSignatureTests` の `Compute_IdentityFlag_ChangesSignature`
 - 切替・CLI・MCP・コード取込側のガード：`MainViewModelTargetDbmsTests` の「採番の…」3 件・`UndoCommandRoundTripTests` の `ChangeTargetDbmsCommand`・`ProviderMismatchWarningTests` の採番の 4 件・`CSharpReverseRoundTripTests` の `Merge_IdentityPrimaryKey_KeepsMarkAndNeedsNoReplacementConfirmation`・`CodeReverseCommandServiceTests` の `Run_IdentityPrimaryKey_NoConfirmAndKeepsMark`
 - mutation 実証済み
 
@@ -132,7 +132,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
    - InMemory は SQL Server の代役（擬似版採番）。EF Core はマルチターゲットと排他。リモートは現状維持
 
 - フィクスチャは `MultiTargetRowVersionFixture.g.cs`（1 テーブル `sync_items`・sqlserver/sqlite）
-- 実 DB 検証：`MultiTargetRowVersionRuntimeTests`（Docker。版ガード維持＋keyed DI での同期最小形）・`MultiTargetRowVersionSqliteRuntimeTests`（CI 常時。ミラー列の読み書き・変換 DDL の BLOB / NULL 許容）
+- 実 DB 検証：`MultiTargetRowVersionRuntimeTests`（Docker。版ガード維持＋keyed DI での同期最小形）・`MultiTargetRowVersionAdoSqliteRuntimeTests`（CI 常時。ミラー列の読み書き・変換 DDL の BLOB / NULL 許容）
 
 ## FK 列の値オブジェクト型統一
 
@@ -349,7 +349,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 - マルチターゲット（実効方言 2 つ以上）と `GenerateEfCoreRepositories` は排他で、併用指定は診断エラーになる
 - GUI の生成ダイアログは DB アクセスをラジオ 3 択（なし＝既定／QuickER 版 Repository／EF Core）で排他選択させる。両方 ON はパリティ検証用に CLI／オプション直指定でのみ可能
   - QuickER 版 Repository は常時選択可。対象 DB チェック群（SQL Server / SQLite）で選ぶ。既定は図の方言、未対応方言の図では空、最低 1 つ必須
-- ガード：`MultiTargetRepositoryRuntimeTests`（Docker 依存の実 DB 結合）・`MultiTargetRepositorySqliteKeyedResolutionTests`（keyed 解決の型検証。CI 実行）
+- ガード：`MultiTargetRepositoryRuntimeTests`（Docker 依存の実 DB 結合）・`MultiTargetAdoSqliteRuntimeTests`（keyed 解決の型検証。CI 実行）
 
 ## Repository を作れる表が無い図
 
@@ -406,7 +406,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 - 外すと、何も入力していない新しい行が NOT NULL の列の必須チェックを素通りして空の値で保存され、空欄の新しい行どうしが兄弟の重複と報告される（兄弟の検査は null を含む組を飛ばすので、null に読めば自然に消える）
 - `ValidateUniqueAsync` は、NULL を許さない文字列・バイナリの列で入力の無いものも照合から外す（`BuildEditModelValidateUniqueMethod` の未入力の列＝値型に加えて Entity 側の型が `string` / `byte[]`）
   - Entity を初期化子から組むので、外すと初期値の空文字列を保存済みの行と照合する。値オブジェクトの初期化子は null なので要らない
-- ガード：`EditModelBlankInputTests`（InMemoryFixture の `blank_codes`＝文字列の主キー・一意な NOT NULL の文字列・NULL 許容の文字列と、`blank_probes` の NOT NULL の `binary(8)`）・EditModel の表 `EditModelScenarioTests` の em-blank-required の行 `blank-required-new-row-empty-binary`・`BinaryColumnAdoRuntimeTests.NewEditModel_KeepsEmptyExcludedBlob_AndTwoStepWriteWorks`。mutation 実証済み
+- ガード：`EditModelBlankInputTests`（InMemoryFixture の `blank_codes`＝文字列の主キー・一意な NOT NULL の文字列・NULL 許容の文字列と、`blank_probes` の NOT NULL の `binary(8)`）・EditModel の表 `EditModelScenarioTests` の em-blank-required の行 `blank-required-new-row-empty-binary`・`BinaryColumnAdoSqliteRuntimeTests.NewEditModel_KeepsEmptyExcludedBlob_AndTwoStepWriteWorks`。mutation 実証済み
 
 ### Mapper の 4 分岐の Value
 

@@ -27,7 +27,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 基底 <see cref="ConcurrencyRuntimeTestsBase{TEntity, TConflictException}"/> のシナリオ（グラフ保存の親子と複数ルートの版の
 /// 書き戻しを含む）と、リモートの共通部 <see cref="ConcurrencyRemoteRuntimeTestsBase{TEntity, TConflictException}"/> の
 /// 応答の経路ごとの版の書き戻しを流す。要求の解釈だけで決まるリモートの検証（旧エンベロープ・未定義の Mode の 400）は
-/// リポジトリの実装先に依らないので、インメモリのサーバーの <see cref="RemoteConcurrencyRuntimeTests"/> だけが持つ。
+/// リポジトリの実装先に依らないので、インメモリのサーバーの <see cref="ConcurrencyRemoteInMemoryRuntimeTests"/> だけが持つ。
 /// 除外列（payload / thumb）は、挿入で NOT NULL の thumb に空の値を入れ、取得後は未取得のまま扱う。
 /// </para>
 /// </remarks>
