@@ -381,7 +381,8 @@ public sealed class CanvasInputTests(ITestOutputHelper output)
     /// 状態の表から読む。全件の実行中に利用者がほかのアプリで押したボタンが混ざると、列一覧の押下の後にキャプチャが残る
     /// （網羅の行 coverage-press-rowother-move-out-none-none の I4）。ハーネスが入力を流すたびに表のボタンを「離れている」に
     /// 固定し、破棄で元へ戻すことを、表を押下にしてから同じ行を流して確かめる（固定の自己検査）。固定を外すと赤になることで、
-    /// 押下が WPF に届く形を作れていることも確かめる。戻すことは成功・違反・例外の 3 つの道で見て、ほかのキーには触らない
+    /// 押下が WPF に届く形を作れていることも確かめる。戻すことは成功・違反・例外の 3 つの道で見て、ほかのキーには触らない。
+    /// 固定を外した対照は、途中の本物のクリックで表の押下が消えたら名指しして流し直す（<see cref="PhysicalMouseButtons.RunPressedTableControl"/>）
     /// </summary>
     [Fact(
         DisplayName = "入力の列: 入力を流す間はキーの状態の表のマウスのボタンを離れているに固定し、破棄で元へ戻す"
@@ -405,6 +406,7 @@ public sealed class CanvasInputTests(ITestOutputHelper output)
         var markerKept = false;
         var waits = 0;
         Exception? thrown = null;
+        PhysicalMouseButtons.ControlRun control = default;
 
         using var _ = GuiFailureDiagnostics.SuppressSinksForTests();
 
@@ -435,19 +437,28 @@ public sealed class CanvasInputTests(ITestOutputHelper output)
                     restoredAfterSuccess = MouseButtonKeyState.IsDown(Left);
                     markerKept = MouseButtonKeyState.IsDown(Marker);
 
-                    // 違反の道：固定を外すと、表の押下が DataGrid に届いてキャプチャが残る。実際のボタンが押されていた
-                    // 形にして（読み取りを差し替える）、違反の文に外からの乱れとして名指しされることも見る
-                    using (
-                        var harness = new CanvasInputHarness(vm, window)
+                    // 違反の道（対照）：固定を外すと、表の押下が DataGrid に届いてキャプチャが残る。実際のボタンが押されていた
+                    // 形にして（読み取りを差し替える）、違反の文に外からの乱れとして名指しされることも見る。途中の本物の
+                    // クリックで表の押下が消えたら、名指しして流し直す（RunPressedTableControl）。対照のハーネスは本物の
+                    // ボタンを待たない（乱れは表で見分ける。待つと乱れの名指しの文が変わる）。本体の側の待ちは変えない
+                    control = PhysicalMouseButtons.RunPressedTableControl(
+                        () =>
                         {
-                            PinsMouseButtons = false,
-                            PhysicalButtonDown = () => true,
-                        }
-                    )
-                    {
-                        unpinned = harness.Run(row);
-                        Mouse.Capture(null);
-                    }
+                            MouseButtonKeyState.SetForTests(Left, true);
+                            using var harness = new CanvasInputHarness(vm, window)
+                            {
+                                PinsMouseButtons = false,
+                                PhysicalButtonDown = () => true,
+                                WaitForPhysicalRelease = () => TimeSpan.Zero,
+                            };
+                            unpinned = harness.Run(row);
+                            var kept = MouseButtonKeyState.IsDown(Left);
+                            Mouse.Capture(null);
+                            return new(unpinned is not null, kept);
+                        },
+                        PhysicalMouseButtons.ControlAttemptLimit,
+                        PhysicalMouseButtons.ReportControlRetry
+                    );
 
                     restoredAfterViolation = MouseButtonKeyState.IsDown(Left);
 
@@ -479,6 +490,11 @@ public sealed class CanvasInputTests(ITestOutputHelper output)
                 row.Count + 1,
                 "種の始めと手ごとに、実際のボタンが離れるまで待つ（表は押されている間に書いても漏れる）"
             );
+        // 対照を流した回数は、緑の回でもテストの出力へ書く（流し直したことを黙らせない）
+        output.WriteLine(
+            $"固定を外した対照を {control.Attempts} 回流した（外からの乱れで流し直した {control.Disturbed} 回）"
+        );
+        control.Problem.Should().BeNull();
         unpinned
             .Should()
             .NotBeNull("固定を外すと押下が WPF のコントロールに届く（自己検査が効いている）");
@@ -486,8 +502,9 @@ public sealed class CanvasInputTests(ITestOutputHelper output)
         unpinned
             .ToString()
             .Should()
-            .Contain(
-                "（外からの乱れ: 実際のマウスのボタンが押されていた手 4 個（表は離れているに固定していない））",
+            .Contain("（外からの乱れ: ")
+            .And.Contain(
+                "実際のマウスのボタンが押されていた手 4 個（表は離れているに固定していない）",
                 "手の列の間に実際のボタンが押されていたら、違反の文に名指しする（赤のまま）"
             );
         unpinned.StateReport.Should().Contain("外からの乱れ: 実際のマウスのボタンが押されていた手");
