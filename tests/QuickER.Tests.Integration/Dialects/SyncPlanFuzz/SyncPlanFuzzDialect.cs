@@ -382,22 +382,42 @@ internal sealed class SqliteSyncPlanFuzzDialect : SyncPlanFuzzDialect, IDisposab
 
     public override DbConnectionSettings Settings => new() { FilePath = _db.FilePath };
 
+    /// <summary>
+    /// 行の数・探針の読み取りの接続（照合順序 <see cref="TestCollation"/> と関数 <see cref="TestFunction"/> を登録する＝DB の外の関数を使う
+    /// 仮想の生成列も読める。製品の取込・実行器の接続は登録しない）
+    /// </summary>
     public override DbConnection CreateConnection() =>
-        new SqliteConnection(NonPooled(_db.ReadOnlyConnectionString));
+        WithTestDefinitions(new SqliteConnection(NonPooled(_db.ReadOnlyConnectionString)));
 
     /// <summary>
-    /// 問い合わせ・生の準備の接続（照合順序 <see cref="TestCollation"/> を登録する＝DB の外で登録した照合順序を使う索引を、期待の行の
-    /// 生の準備で作れる。製品の取込・実行器の接続は登録しない）
+    /// 問い合わせ・生の準備の接続（照合順序 <see cref="TestCollation"/> と関数 <see cref="TestFunction"/> を登録する＝DB の外で登録した
+    /// 照合順序・関数を使う索引・生成列を、期待の行の生の準備で作れる。製品の取込・実行器の接続は登録しない）
     /// </summary>
-    public override DbConnection CreateQueryConnection()
+    public override DbConnection CreateQueryConnection() =>
+        WithTestDefinitions(new SqliteConnection(NonPooled(_db.ReadWriteConnectionString)));
+
+    /// <summary>テストの側の接続に照合順序 <see cref="TestCollation"/> と関数 <see cref="TestFunction"/> を登録する</summary>
+    /// <remarks>
+    /// 関数は開いた後に登録する（開く前の登録は決定的の印を落とし、索引の式・生成列で non-deterministic functions prohibited になる）。
+    /// </remarks>
+    private static SqliteConnection WithTestDefinitions(SqliteConnection connection)
     {
-        var connection = new SqliteConnection(NonPooled(_db.ReadWriteConnectionString));
         connection.CreateCollation(TestCollation, (a, b) => string.CompareOrdinal(a, b));
+        connection.StateChange += (_, e) =>
+        {
+            if (e.CurrentState == System.Data.ConnectionState.Open)
+            {
+                connection.CreateFunction(TestFunction, (string? s) => s, isDeterministic: true);
+            }
+        };
         return connection;
     }
 
     /// <summary>テストの側の接続だけが登録する照合順序の名前（製品の接続には無い）</summary>
     public const string TestCollation = "quicker_test_collation";
+
+    /// <summary>テストの側の接続だけが登録する関数の名前（引数の文字列をそのまま返す・製品の接続には無い）</summary>
+    public const string TestFunction = "quicker_test_function";
 
     /// <summary>
     /// 種ごとに新しいファイルを作る（前の種のジャーナルを持ち越さない）。

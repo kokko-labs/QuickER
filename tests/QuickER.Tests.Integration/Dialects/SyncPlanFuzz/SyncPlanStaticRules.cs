@@ -107,6 +107,7 @@ internal static class SyncPlanStaticRules
             SyncPlanWarningKind.TableChangeBreaksDependentView,
             SyncPlanWarningKind.TableChangeBreaksDependentTrigger,
             SyncPlanWarningKind.TableChangeBreaksDependentIndex,
+            SyncPlanWarningKind.TableRebuildBlockedByExternalDefinition,
         };
 
     /// <summary>計画を規則で判定する</summary>

@@ -670,6 +670,12 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 Strings.SchemaSync_ExecuteConfirmTableChangeBreaksDependentIndex,
                 BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
             ),
+            // DB の外で登録した照合順序・関数を使う物があって作り直せない表は、作り直しが同期ごと巻き戻されるので、作り直す項目を
+            // 計画から外した（SQLite。Detail は作り直しを止める物の名指し）
+            SyncPlanWarningKind.TableRebuildBlockedByExternalDefinition => string.Format(
+                Strings.SchemaSync_ExecuteConfirmTableRebuildBlockedByExternalDefinition,
+                BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
+            ),
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
 

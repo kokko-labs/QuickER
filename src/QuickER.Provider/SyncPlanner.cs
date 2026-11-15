@@ -37,6 +37,7 @@ public sealed class SyncPlanContext
             ColumnDefaults = live.ColumnDefaults,
             ImportWarnings = live.Warnings,
             LiveDependentCheck = live.LiveDependentCheck,
+            RebuildBlockers = live.RebuildBlockers,
         };
     }
 
@@ -87,6 +88,13 @@ public sealed class SyncPlanContext
     /// <see cref="SyncPlanWarningKind.TableChangeBreaksDependentTrigger"/>）。<c>null</c> なら何もしない。
     /// </remarks>
     public ILiveDependentCheck? LiveDependentCheck { get; init; }
+
+    /// <summary>テーブル再構築の作り直しを QuickER の接続では必ず止める DB の物（取込の結果＝<see cref="SchemaImportResult.RebuildBlockers"/>）</summary>
+    /// <remarks>
+    /// 合成には使わない。DB の外で登録した照合順序・関数を使う索引・仮想の生成列がある DB で、作り直しの項目を外すためだけに参照する
+    /// （<see cref="SyncPlanWarningKind.TableRebuildBlockedByExternalDefinition"/>）。空なら何もしない。
+    /// </remarks>
+    public IReadOnlyList<TableRebuildBlocker> RebuildBlockers { get; init; } = [];
 
     /// <summary>live の外部キーの実効名（図全体から求めた名前＝DDL が付けるのと同じ規則）</summary>
     /// <remarks>
@@ -239,9 +247,28 @@ public sealed class SyncPlanner
 
         if (discardedContent.Count > 0)
         {
-            dependable = ExcludeRebuildsLosingImportDiscardedContent(
+            dependable = ExcludeRebuildsOfProtectedTables(
                 dependable,
                 discardedContent,
+                SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent,
+                context!,
+                warnings,
+                excluded
+            );
+        }
+
+        // テーブル再構築の方言では、DB の外で登録した照合順序・関数を使う物があって作り直せない表を作り直す項目も、同じ規則で外して
+        // 名指しする（QuickER の接続では作り直しが必ず巻き戻る）
+        var blockedTables = isRebuildDialect
+            ? CollectRebuildBlockedTables(context)
+            : new Dictionary<string, List<string>>(SchemaNames.Comparer);
+
+        if (blockedTables.Count > 0)
+        {
+            dependable = ExcludeRebuildsOfProtectedTables(
+                dependable,
+                blockedTables,
+                SyncPlanWarningKind.TableRebuildBlockedByExternalDefinition,
                 context!,
                 warnings,
                 excluded
@@ -4353,18 +4380,66 @@ public sealed class SyncPlanner
     }
 
     /// <summary>
-    /// テーブル再構築の方言で、取込が捨てた表の中の物がある表を作り直す選んだ項目を計画から外し、
-    /// <see cref="SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent"/> で名指しする。
+    /// DB の外で登録した照合順序・関数を使う物があって作り直せない表を、表ごとに集める（<see cref="SyncPlanContext.RebuildBlockers"/>。
+    /// 値は作り直しを止める物の名指し）
+    /// </summary>
+    /// <remarks>
+    /// 局所の物（索引・仮想の生成列）はその表だけを、大域の物（照合順序を使う索引）はその索引の表以外の live の表すべてを止める。
+    /// 大域の索引の表自身は大域の規則で止めない（その表の作り直しは古い表を消してから RENAME するので、索引は読み直されない。
+    /// 索引の文が照合順序を書いていれば、作り直しで索引を作れないので局所の物として別に止まる）。同じ同期でその索引の表を消しても外さない
+    /// （同期スクリプトは表の削除を作り直しより後に置く）。
+    /// </remarks>
+    private static Dictionary<string, List<string>> CollectRebuildBlockedTables(
+        SyncPlanContext? context
+    )
+    {
+        var blocked = new Dictionary<string, List<string>>(SchemaNames.Comparer);
+
+        if (context is null || context.RebuildBlockers.Count == 0)
+        {
+            return blocked;
+        }
+
+        foreach (var entity in context.LiveEntities)
+        {
+            var table = SchemaNames.ToStoredForm(entity.TableName);
+            var details = context
+                .RebuildBlockers.Where(b =>
+                    b.BlocksOtherTables != SchemaNames.AreSame(b.Table, table)
+                )
+                .Select(b => b.Detail)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+            if (details.Count > 0)
+            {
+                blocked[table] = details;
+            }
+        }
+
+        return blocked;
+    }
+
+    /// <summary>
+    /// テーブル再構築の方言で、守る表（取込が捨てた物がある表・DB の外の物で作り直せない表）を作り直す選んだ項目を計画から外し、
+    /// <paramref name="kind"/> の警告で表ごとに名指しする。
     /// </summary>
     /// <param name="selected">依存の除外を済ませた選んだ項目</param>
-    /// <param name="discarded">表 → 取込が捨てた物（<see cref="CollectImportDiscardedContent"/>）</param>
+    /// <param name="protectedTables">
+    /// 表 → 名指しする物（<see cref="CollectImportDiscardedContent"/>・<see cref="CollectRebuildBlockedTables"/>）
+    /// </param>
+    /// <param name="kind">
+    /// 警告の種類（<see cref="SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent"/>・
+    /// <see cref="SyncPlanWarningKind.TableRebuildBlockedByExternalDefinition"/>）
+    /// </param>
     /// <param name="context">live スキーマ</param>
     /// <param name="warnings">警告の積み先</param>
     /// <param name="excluded">外した選んだ項目の積み先</param>
     /// <remarks>
     /// <para>
     /// 再構築は live の図から表を作り直すので、取込が捨てた物（大文字小文字・前後の空白だけ違う列名の後着の列・範囲の外や取り込まなかった
-    /// 表への外部キーなど）は新しい表に無く、データごと黙って消える。外すのは次の 2 つ（どちらもその表を作り直す）。
+    /// 表への外部キーなど）は新しい表に無く、データごと黙って消える。DB の外で登録した照合順序・関数を使う物は、QuickER の接続では作り直せず
+    /// 同期全体が巻き戻る。外すのは次の 2 つ（どちらもその表を作り直す）。
     /// </para>
     /// <list type="bullet">
     /// <item>その表の列・主キー・外部キー・一意制約・列順の変更（作り直しを含む）。列の追加だけは作り直さずに足せるので残す。</item>
@@ -4372,12 +4447,13 @@ public sealed class SyncPlanner
     /// </list>
     /// <para>
     /// 依存の除外の後・暗黙の削除の注入の前に置く（外した削除を前提に、端の消える外部キーの暗黙の削除を足さない）。その表自身の削除は
-    /// 作り直さないので外さない。逐次 DDL の方言は列・制約を ALTER で変えるので、捨てた物は残る（掛けない）。
+    /// 作り直さないので外さない。逐次 DDL の方言は列・制約を ALTER で変えるので掛けない。
     /// </para>
     /// </remarks>
-    private static List<SchemaDiffItem> ExcludeRebuildsLosingImportDiscardedContent(
+    private static List<SchemaDiffItem> ExcludeRebuildsOfProtectedTables(
         List<SchemaDiffItem> selected,
-        Dictionary<string, List<string>> discarded,
+        Dictionary<string, List<string>> protectedTables,
+        SyncPlanWarningKind kind,
         SyncPlanContext context,
         List<SyncPlanWarning> warnings,
         List<SchemaDiffItem> excluded
@@ -4391,7 +4467,7 @@ public sealed class SyncPlanner
         // 守る表を子に持つ live の外部キーの端（親の表・親の列）
         var protectedEnds = EnumerateLiveForeignKeys(context)
             .Where(fk =>
-                discarded.ContainsKey(SchemaDiffService.NormalizeTable(fk.Child))
+                protectedTables.ContainsKey(SchemaDiffService.NormalizeTable(fk.Child))
                 && !droppedTables.Contains(SchemaDiffService.NormalizeTable(fk.Child))
             )
             .Select(fk =>
@@ -4420,11 +4496,7 @@ public sealed class SyncPlanner
 
             ExcludeSelected(
                 item,
-                new SyncPlanWarning(
-                    SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent,
-                    rebuilt,
-                    string.Join(", ", discarded[rebuilt])
-                ),
+                new SyncPlanWarning(kind, rebuilt, string.Join(", ", protectedTables[rebuilt])),
                 warnings,
                 excluded
             );
@@ -4436,7 +4508,7 @@ public sealed class SyncPlanner
         string? ProtectedTableRebuiltBy(SchemaDiffItem item, string table)
         {
             if (
-                discarded.ContainsKey(table)
+                protectedTables.ContainsKey(table)
                 && !droppedTables.Contains(table)
                 && (
                     IsRebuildTriggerKind(item.Kind)
@@ -4446,7 +4518,7 @@ public sealed class SyncPlanner
                 )
             )
             {
-                return discarded.Keys.First(k => SchemaNames.AreSame(k, table));
+                return protectedTables.Keys.First(k => SchemaNames.AreSame(k, table));
             }
 
             return item.Kind switch

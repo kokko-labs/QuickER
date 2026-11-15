@@ -10,7 +10,7 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 internal static partial class SyncPlanExpectationRows
 {
     /// <summary>SQLite の実 DB の段の行の数の下限（行を足したら・消したら合わせる）</summary>
-    private const int RealSqliteRowCount = 82;
+    private const int RealSqliteRowCount = 95;
 
     /// <summary>実 DB の段：SQLite の同期（テーブル再構築・外部キー・主キー・一意制約・ビュー）</summary>
     private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealSqliteRows() =>
@@ -20,6 +20,7 @@ internal static partial class SyncPlanExpectationRows
             .. RealSqliteViewRows(),
             .. RealSqliteTriggerRows(),
             .. RealSqliteIndexRows(),
+            .. RealSqliteExternalDefinitionRows(),
             .. RealSqliteScriptRows(),
             .. RealSqliteImportDiscardedRows(),
             .. RealSqliteRowidAliasNullRows(),
@@ -1884,11 +1885,12 @@ internal static partial class SyncPlanExpectationRows
                             e.After.Absent("table ix_item");
                         })
                 ),
-            // DB の外で登録した照合順序を使う索引は、判定の写しで同期の前から作れないので数えない（名指ししない）。実行器の接続にも
-            // 登録が無いので、この表の作り直しは索引の作り直しで巻き戻る（作り直しの対象の外の既存の振る舞い・別の区切りの候補）
+            // DB の外で登録した照合順序を使う索引は、判定の写しで同期の前から作れないので、列の削除が壊す索引としては数えない。
+            // 実行器の接続にも登録が無いので、この表の作り直しは索引の作り直しで断られる。計画は作り直しの除外（DB の外の物）で外して
+            // 名指しする（区切り IX の索引の警告とは別の警告）
             Row(
-                    "realdb-index-with-collation-registered-outside-is-not-named",
-                    "[Integration] SQLite 同期: DB の外で登録した照合順序を使う索引は、計画の段で数えずに名指ししない",
+                    "realdb-index-with-collation-registered-outside-is-named-as-external",
+                    "[Integration] SQLite 同期: DB の外で登録した照合順序を使う索引の表の列の削除は、DB の外の物の警告で外して名指しする",
                     DialectNames.Sqlite
                 )
                 .TargetFromLive(s => s["ix_item"].Columns.RemoveAll(c => c.Name == "note"))
@@ -1901,18 +1903,389 @@ internal static partial class SyncPlanExpectationRows
                                 + SqliteSyncPlanFuzzDialect.TestCollation
                                 + ");"
                         )
-                        .ExpectsUnwarnedFailure(
-                            "既存の振る舞い：実行器の接続に DB の外の照合順序の登録が無いので、この表の作り直しは索引の作り直しで断られる（計画の段の写しも同期の前から作れないので数えない）"
-                        )
                         .Expect(e =>
                         {
-                            e.Outcome.Exact("failed: *no such collation sequence*");
+                            e.Outcome.Exact("committed");
                             e.Warnings.Absent("TableChangeBreaksDependentIndex*");
-                            e.Excluded.Empty();
+                            e.Warnings.Single(
+                                "TableRebuildBlockedByExternalDefinition(ix_item): INDEX ix_item_extra_collated COLLATE "
+                                    + SqliteSyncPlanFuzzDialect.TestCollation
+                            );
+                            e.Excluded.Exact("DropColumn ix_item.note");
                             e.Unchanged();
                         })
                 ),
         ];
+
+    /// <summary>
+    /// DB の外（アプリ）で登録した照合順序・関数を使う物（照合順序の索引・関数の索引・関数の仮想の生成列）のある DB を作り直す形
+    /// （src/QuickER.Provider.Sqlite/CLAUDE.md「DB の外の照合順序・関数」）
+    /// </summary>
+    /// <remarks>
+    /// 物は照合順序 <see cref="SqliteSyncPlanFuzzDialect.TestCollation"/> と関数 <see cref="SqliteSyncPlanFuzzDialect.TestFunction"/> を
+    /// 登録したテストの側の接続（生の準備）でだけ作れる。製品の取込・計画の写し・実行器の接続は登録しないので、作り直しは巻き戻る。
+    /// 計画はその作り直しを外して名指しし（照合順序の索引はほかの表の作り直しも止める＝RENAME がスキーマ全体を読み直す）、作り直さない
+    /// 変更（列の追加・表の削除）は流す。偽の名指しをしない形（組み込みの照合順序・自動の索引・その表自身の列の COLLATE・STORED の生成列・
+    /// ほかの表の関数の索引）も並べる。
+    /// </remarks>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > RealSqliteExternalDefinitionRows() =>
+        [
+            // 照合順序を書いた索引の表の作り直しは外して名指しする（索引を作り直せない）
+            Row(
+                    "realdb-external-collation-index-own-table-rebuild-is-excluded",
+                    "[Integration] SQLite 同期: DB の外の照合順序を書いた索引の表の作り直しは、外して索引を名指しする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s.Col("xd_a", "extra").DataType = "INTEGER")
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(ExternalItemSql)
+                        .RawSetup(
+                            "CREATE INDEX \"xi_a_note\" ON \"xd_a\" (\"note\" COLLATE "
+                                + SqliteSyncPlanFuzzDialect.TestCollation
+                                + ");"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single(
+                                "TableRebuildBlockedByExternalDefinition(xd_a): INDEX xi_a_note COLLATE "
+                                    + SqliteSyncPlanFuzzDialect.TestCollation
+                            );
+                            e.Excluded.Exact("AlterColumn xd_a.extra");
+                            e.Unchanged();
+                        })
+                ),
+            // 照合順序の索引は、ほかの表の作り直しも止める（大域）
+            Row(
+                    "realdb-external-collation-index-blocks-other-table-rebuild",
+                    "[Integration] SQLite 同期: DB の外の照合順序の索引は、ほかの表の作り直しも外して、その索引を表と一緒に名指しする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s.Col("xd_a", "extra").DataType = "INTEGER")
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(ExternalItemSql)
+                        .RawSetup(
+                            "CREATE INDEX \"xi_b_memo\" ON \"xd_b\" (\"memo\" COLLATE "
+                                + SqliteSyncPlanFuzzDialect.TestCollation
+                                + ");"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single(
+                                "TableRebuildBlockedByExternalDefinition(xd_a): INDEX xi_b_memo ON xd_b COLLATE "
+                                    + SqliteSyncPlanFuzzDialect.TestCollation
+                            );
+                            e.Excluded.Exact("AlterColumn xd_a.extra");
+                            e.Unchanged();
+                        })
+                ),
+            // 作り直さない変更（列の追加）は、照合順序の索引があっても流す
+            Row(
+                    "realdb-external-collation-index-add-column-is-not-named",
+                    "[Integration] SQLite 同期: DB の外の照合順序の索引があっても、作り直さない列の追加は名指しせずにコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s =>
+                    s["xd_a"]
+                        .Columns.Add(
+                            new Column
+                            {
+                                Name = "more",
+                                DataType = "TEXT",
+                                IsNullable = true,
+                            }
+                        )
+                )
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(ExternalItemSql)
+                        .RawSetup(
+                            "CREATE INDEX \"xi_b_memo\" ON \"xd_b\" (\"memo\" COLLATE "
+                                + SqliteSyncPlanFuzzDialect.TestCollation
+                                + ");"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Absent("TableRebuildBlockedByExternalDefinition*");
+                            e.Excluded.Empty();
+                            e.After.Contains("col xd_a.more *");
+                        })
+                ),
+            // 表の削除は作り直さないので流す。同期スクリプトは表の削除を作り直しより後に置くので、照合順序の索引の表を同じ同期で
+            // 消しても、ほかの表の作り直しは止まる（外して名指しする）
+            Row(
+                    "realdb-external-collation-index-table-dropped-in-same-sync-still-blocks",
+                    "[Integration] SQLite 同期: DB の外の照合順序の索引の表の削除は流し、同じ同期のほかの表の作り直しは外して名指しする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s =>
+                {
+                    s.Entities.RemoveAll(t => t.TableName == "xd_b");
+                    s.Col("xd_a", "extra").DataType = "INTEGER";
+                })
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(ExternalItemSql)
+                        .RawSetup(
+                            "CREATE INDEX \"xi_b_memo\" ON \"xd_b\" (\"memo\" COLLATE "
+                                + SqliteSyncPlanFuzzDialect.TestCollation
+                                + ");"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single(
+                                "TableRebuildBlockedByExternalDefinition(xd_a): INDEX xi_b_memo ON xd_b COLLATE "
+                                    + SqliteSyncPlanFuzzDialect.TestCollation
+                            );
+                            e.Excluded.Exact("AlterColumn xd_a.extra");
+                            e.After.Absent("table xd_b");
+                            e.After.Contains("col xd_a.extra TEXT *");
+                        })
+                ),
+            // 列の COLLATE を継ぐ普通の索引も、照合順序を使う索引（索引の文に照合順序が無くても、ほかの表の作り直しを止める）
+            Row(
+                    "realdb-external-column-collation-index-blocks-other-table-rebuild",
+                    "[Integration] SQLite 同期: 列の DB の外の照合順序を継ぐ索引も、ほかの表の作り直しを外して名指しする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s.Col("xd_a", "extra").DataType = "INTEGER")
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(ExternalItemSql)
+                        .RawSetup(ExternalCollatedColumnTableSql)
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single(
+                                "TableRebuildBlockedByExternalDefinition(xd_a): INDEX xi_c_word ON xd_c COLLATE "
+                                    + SqliteSyncPlanFuzzDialect.TestCollation
+                            );
+                            e.Excluded.Exact("AlterColumn xd_a.extra");
+                            e.Unchanged();
+                        })
+                ),
+            // その索引の表自身の作り直しは、作り直しが列の COLLATE を落とすので索引を作り直せてコミットする（COLLATE を落とす警告だけ）
+            Row(
+                    "realdb-external-column-collation-index-own-table-rebuild-is-not-named",
+                    "[Integration] SQLite 同期: 列の照合順序を継ぐ索引の表自身の作り直しは、COLLATE を落とす警告だけでコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s.Col("xd_c", "note").DataType = "VARCHAR(50)")
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(ExternalItemSql)
+                        .RawSetup(ExternalCollatedColumnTableSql)
+                        .Query("index", IndexExistsSql("xi_c_word"))
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Absent("TableRebuildBlockedByExternalDefinition*");
+                            e.Warnings.Contains("TableRebuildDropsColumnAttribute(xd_c): COLLATE*");
+                            e.Excluded.Empty();
+                            e.After.Contains("col xd_c.note VARCHAR(50) *");
+                            e.Probe("index").Exact("1");
+                        })
+                ),
+            // 列の COLLATE の自動の索引（インラインの UNIQUE）は RENAME で読み直されないので、ほかの表の作り直しを止めない
+            Row(
+                    "realdb-external-collation-autoindex-is-not-named",
+                    "[Integration] SQLite 同期: 照合順序の列のインラインの UNIQUE（自動の索引）は、ほかの表の作り直しを止めず名指ししない",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s.Col("xd_a", "extra").DataType = "INTEGER")
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(ExternalItemSql)
+                        .RawSetup(
+                            "CREATE TABLE \"xd_d\" (\"id\" INTEGER NOT NULL PRIMARY KEY, \"word\" TEXT COLLATE "
+                                + SqliteSyncPlanFuzzDialect.TestCollation
+                                + " NULL UNIQUE);"
+                                + "INSERT INTO \"xd_d\" (\"id\", \"word\") VALUES (1, 'w');"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Absent("TableRebuildBlockedByExternalDefinition*");
+                            e.Excluded.Empty();
+                            e.After.Contains("col xd_a.extra INTEGER *");
+                        })
+                ),
+            // 組み込みの照合順序（NOCASE・RTRIM・BINARY）は実行器の接続にあるので名指ししない（その表自身とほかの表）
+            Row(
+                    "realdb-external-builtin-collations-are-not-named",
+                    "[Integration] SQLite 同期: 組み込みの照合順序の索引は、その表とほかの表の作り直しを名指しせずにコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s =>
+                {
+                    s.Col("xd_a", "extra").DataType = "INTEGER";
+                    s.Col("xd_b", "memo").DataType = "VARCHAR(50)";
+                })
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            ExternalItemSql
+                                + "CREATE INDEX \"xi_a_nocase\" ON \"xd_a\" (\"note\" COLLATE NOCASE);"
+                                + "CREATE INDEX \"xi_b_rtrim\" ON \"xd_b\" (\"memo\" COLLATE RTRIM);"
+                                + "CREATE INDEX \"xi_b_binary\" ON \"xd_b\" (\"memo\" COLLATE BINARY);"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Absent("TableRebuildBlockedByExternalDefinition*");
+                            e.Excluded.Empty();
+                            e.After.Contains("col xd_a.extra INTEGER *");
+                            e.After.Contains("col xd_b.memo VARCHAR(50) *");
+                        })
+                ),
+            // 関数の式の索引の表の作り直しは外して名指しする
+            Row(
+                    "realdb-external-function-index-own-table-rebuild-is-excluded",
+                    "[Integration] SQLite 同期: DB の外の関数を使う式の索引の表の作り直しは、外して索引を名指しする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s.Col("xd_a", "extra").DataType = "INTEGER")
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(ExternalItemSql)
+                        .RawSetup(
+                            "CREATE INDEX \"xi_a_fn\" ON \"xd_a\" ("
+                                + SqliteSyncPlanFuzzDialect.TestFunction
+                                + "(\"note\"));"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single(
+                                "TableRebuildBlockedByExternalDefinition(xd_a): INDEX xi_a_fn FUNCTION"
+                            );
+                            e.Excluded.Exact("AlterColumn xd_a.extra");
+                            e.Unchanged();
+                        })
+                ),
+            // 関数の索引は、ほかの表の作り直しを止めない
+            Row(
+                    "realdb-external-function-index-other-table-rebuild-is-not-named",
+                    "[Integration] SQLite 同期: DB の外の関数を使う索引は、ほかの表の作り直しを止めず名指ししない",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s.Col("xd_a", "extra").DataType = "INTEGER")
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(ExternalItemSql)
+                        .RawSetup(
+                            "CREATE INDEX \"xi_b_fn\" ON \"xd_b\" ("
+                                + SqliteSyncPlanFuzzDialect.TestFunction
+                                + "(\"memo\"));"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Absent("TableRebuildBlockedByExternalDefinition*");
+                            e.Excluded.Empty();
+                            e.After.Contains("col xd_a.extra INTEGER *");
+                        })
+                ),
+            // 部分索引の WHERE の関数も、その表の作り直しを止める
+            Row(
+                    "realdb-external-function-partial-index-own-table-rebuild-is-excluded",
+                    "[Integration] SQLite 同期: 部分索引の WHERE が DB の外の関数を使う表の作り直しは、外して索引を名指しする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s.Col("xd_a", "extra").DataType = "INTEGER")
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(ExternalItemSql)
+                        .RawSetup(
+                            "CREATE INDEX \"xi_a_part\" ON \"xd_a\" (\"extra\") WHERE "
+                                + SqliteSyncPlanFuzzDialect.TestFunction
+                                + "(\"note\") IS NOT NULL;"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single(
+                                "TableRebuildBlockedByExternalDefinition(xd_a): INDEX xi_a_part FUNCTION"
+                            );
+                            e.Excluded.Exact("AlterColumn xd_a.extra");
+                            e.Unchanged();
+                        })
+                ),
+            // 関数の仮想の生成列の表は、作り直しの写しが列を読めないので、その表の作り直しを全部外す（保守的）
+            Row(
+                    "realdb-external-function-virtual-generated-column-rebuild-is-excluded",
+                    "[Integration] SQLite 同期: DB の外の関数を使う仮想の生成列の表の作り直しは、外して列を名指しする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s.Col("xd_g", "extra").DataType = "INTEGER")
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(ExternalItemSql)
+                        .RawSetup(ExternalGeneratedTableSql("VIRTUAL"))
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single(
+                                "TableRebuildBlockedByExternalDefinition(xd_g): GENERATED g FUNCTION"
+                            );
+                            e.Excluded.Exact("AlterColumn xd_g.extra");
+                            e.Unchanged();
+                        })
+                ),
+            // STORED の生成列は保存した値を写すので作り直せる（生成列を落とす既存の警告だけ）
+            Row(
+                    "realdb-external-function-stored-generated-column-is-not-named",
+                    "[Integration] SQLite 同期: DB の外の関数を使う STORED の生成列の表の作り直しは、名指しせずに生成列を落とす警告だけでコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s.Col("xd_g", "extra").DataType = "INTEGER")
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(ExternalItemSql)
+                        .RawSetup(ExternalGeneratedTableSql("STORED"))
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Absent("TableRebuildBlockedByExternalDefinition*");
+                            e.Warnings.Contains(
+                                "TableRebuildDropsColumnAttribute(xd_g): GENERATED*"
+                            );
+                            e.Excluded.Empty();
+                            e.After.Contains("col xd_g.extra INTEGER *");
+                        })
+                ),
+        ];
+
+    /// <summary>DB の外の物の行の表（xd_a は id・note・extra、xd_b は id・memo。どちらも 1 行）</summary>
+    private const string ExternalItemSql =
+        "CREATE TABLE \"xd_a\" (\"id\" INTEGER NOT NULL, \"note\" TEXT NULL, \"extra\" TEXT NULL, CONSTRAINT \"PK_xd_a\" PRIMARY KEY (\"id\"));"
+        + "INSERT INTO \"xd_a\" (\"id\", \"note\", \"extra\") VALUES (1, 'a', '7');"
+        + "CREATE TABLE \"xd_b\" (\"id\" INTEGER NOT NULL, \"memo\" TEXT NULL, CONSTRAINT \"PK_xd_b\" PRIMARY KEY (\"id\"));"
+        + "INSERT INTO \"xd_b\" (\"id\", \"memo\") VALUES (1, 'm');";
+
+    /// <summary>列に DB の外の照合順序を持つ表 xd_c と、その列の普通の索引（索引の文には照合順序が無い）</summary>
+    private static string ExternalCollatedColumnTableSql =>
+        "CREATE TABLE \"xd_c\" (\"id\" INTEGER NOT NULL PRIMARY KEY, \"word\" TEXT COLLATE "
+        + SqliteSyncPlanFuzzDialect.TestCollation
+        + " NULL, \"note\" TEXT NULL);"
+        + "INSERT INTO \"xd_c\" (\"id\", \"word\", \"note\") VALUES (1, 'w', 'n');"
+        + "CREATE INDEX \"xi_c_word\" ON \"xd_c\" (\"word\");";
+
+    /// <summary>DB の外の関数の生成列 g を持つ表 xd_g（<paramref name="storage"/> は VIRTUAL か STORED）</summary>
+    private static string ExternalGeneratedTableSql(string storage) =>
+        "CREATE TABLE \"xd_g\" (\"id\" INTEGER NOT NULL PRIMARY KEY, \"note\" TEXT NULL, \"extra\" TEXT NULL, \"g\" TEXT GENERATED ALWAYS AS ("
+        + SqliteSyncPlanFuzzDialect.TestFunction
+        + "(\"note\")) "
+        + storage
+        + ");"
+        + "INSERT INTO \"xd_g\" (\"id\", \"note\", \"extra\") VALUES (1, 'n', '7');";
 
     /// <summary>索引の行の表（ix_item は id・note・extra・code と 1 行）</summary>
     private const string IndexItemSql =

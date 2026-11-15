@@ -33,7 +33,7 @@ internal sealed class SqliteLiveDependentCheck : ILiveDependentCheck
     private const string ProbeSuffix = "_quicker_view_check";
 
     /// <summary>メモリの DB の接続文字列</summary>
-    private const string InMemory = "Data Source=:memory:";
+    internal const string InMemory = "Data Source=:memory:";
 
     private readonly IReadOnlyList<string> _tableSql;
     private readonly IReadOnlyList<SqliteIndexSql> _indexSql;
@@ -331,7 +331,7 @@ internal sealed class SqliteLiveDependentCheck : ILiveDependentCheck
     }
 
     /// <summary>文を流す（断られたら飛ばして false＝写せない表・置き換えられない表は試さない・作れない索引を数える）</summary>
-    private static bool TryRun(SqliteConnection conn, string sql)
+    internal static bool TryRun(SqliteConnection conn, string sql)
     {
         try
         {

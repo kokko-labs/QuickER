@@ -132,13 +132,22 @@ public class SqliteSchemaImporter : ISchemaImporter
             .ConfigureAwait(false);
         var aux = await LoadAuxiliaryObjectsAsync(conn, tables, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
-        var liveDependentCheck = await LoadLiveDependentCheckAsync(
+        var (liveDependentCheck, indexSql) = await LoadLiveDependentCheckAsync(
                 conn,
                 replayTableSql,
                 commandTimeoutSeconds,
                 ct
             )
             .ConfigureAwait(false);
+
+        // 作り直しを QuickER の接続では必ず止める物（DB の外で登録した照合順序・関数を使う索引・仮想の生成列）
+        var rebuildBlockers = SqliteRebuildBlockers.Collect(
+            conn,
+            replayTableSql,
+            indexSql,
+            [.. tables.Values.Select(entry => (entry.Key, entry.Entity.TableName))],
+            commandTimeoutSeconds
+        );
 
         // DDL へ出せない型表記は、後で DDL / 同期を叩いた瞬間に図全体を止める。取込完了時に名指しする
         var warnings = tableWarnings
@@ -160,6 +169,7 @@ public class SqliteSchemaImporter : ISchemaImporter
             Warnings = warnings,
             ColumnDefaults = defaults,
             LiveDependentCheck = liveDependentCheck,
+            RebuildBlockers = rebuildBlockers,
         };
     }
 
@@ -339,8 +349,12 @@ ORDER BY rowid;";
     /// <remarks>
     /// 取込はビューもトリガーも図に入れない（<see cref="SchemaImportWarningKind.ViewExcluded"/>・トリガーは表の補助オブジェクト）。同期の計画が
     /// ビューを読めなくする変更・トリガーを壊す変更を外せるよう、図の外の情報として <see cref="SchemaImportResult.LiveDependentCheck"/> で持ち帰る（判定は <see cref="SqliteLiveDependentCheck"/>）。
+    /// 読んだ索引は、作り直しを止める物の判定（<see cref="SqliteRebuildBlockers"/>）にも渡す。
     /// </remarks>
-    private static async Task<ILiveDependentCheck?> LoadLiveDependentCheckAsync(
+    private static async Task<(
+        ILiveDependentCheck? Check,
+        List<SqliteIndexSql> Indexes
+    )> LoadLiveDependentCheckAsync(
         SqliteConnection conn,
         List<string> replayTableSql,
         int commandTimeoutSeconds,
@@ -378,9 +392,12 @@ ORDER BY rowid;";
             }
         }
 
-        return viewSql.Count == 0 && triggers.Count == 0 && indexSql.Count == 0
-            ? null
-            : new SqliteLiveDependentCheck(replayTableSql, indexSql, viewSql, triggers);
+        return (
+            viewSql.Count == 0 && triggers.Count == 0 && indexSql.Count == 0
+                ? null
+                : new SqliteLiveDependentCheck(replayTableSql, indexSql, viewSql, triggers),
+            indexSql
+        );
     }
 
     /// <summary>
