@@ -31,13 +31,13 @@ public static class AiModelCatalog
     public const string DefaultClaudeModel = "claude-sonnet-5-5";
 
     /// <summary>
-    /// Anthropic (Claude) の候補モデル一覧（2026-11 時点。fable-5-1=最上位・opus-5-5=長時間のエージェント作業と
+    /// Anthropic (Claude) の候補モデル一覧（2026-11 時点。fable-5-2=最上位・opus-5-5=長時間のエージェント作業と
     /// コーディング向け・sonnet-5-5=速度と知能のバランス・haiku-5-5=最速で、上位から順に並べる）。
     /// 並び順と既定の関係・旧世代の扱いは <see cref="OpenAiModels"/> と同じ。
     /// </summary>
     public static readonly IReadOnlyList<string> ClaudeModels =
     [
-        "claude-fable-5-1",
+        "claude-fable-5-2",
         "claude-opus-5-5",
         "claude-sonnet-5-5", // = DefaultClaudeModel
         "claude-haiku-5-5",
@@ -52,7 +52,7 @@ public static class AiModelCatalog
     /// 先頭の空文字だけは表示順ではなく既定＝<see cref="DefaultClaudeCodeModel"/> の意味で、
     /// 選ぶと <c>--model</c> を渡さず Claude Code 側の既定に従う。
     /// エイリアスは常に「その系列の最新」を指すため、世代が上がっても書き換え不要
-    /// （特定世代へ固定したいときは <c>claude-fable-5-1</c> のようなフルネームを手入力する）。
+    /// （特定世代へ固定したいときは <c>claude-fable-5-2</c> のようなフルネームを手入力する）。
     /// </summary>
     public static readonly IReadOnlyList<string> ClaudeCodeModels =
     [
