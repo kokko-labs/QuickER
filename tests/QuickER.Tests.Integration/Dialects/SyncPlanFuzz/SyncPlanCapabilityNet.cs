@@ -447,6 +447,35 @@ internal static class SyncPlanCapabilityNetKnownFailures
     [
         // synthesized-unique-name-collision（mysql-386・postgresql-386 の行）は 2026-11-01 の修正 E で直して一覧から消した
         // （名前の無い一意制約の名前を図全体で決め、ぶつかれば番号を足す）。行は回帰の網として残る
+        //
+        // n3-kept-unique-stale-judgments：前寄せの中で一意制約の作り直しを 1 つ取り下げた（KeepOneReaddedUnique）後、その前に決めた
+        // 判定が見直されない。取り下げで参照先の一意制約が残るのに、付け直す外部キーの候補キーの警告
+        // （ForeignKeyRebuildMayLoseCandidateKey）と一意制約の削除の警告が残り、外部キーの追加の並びも「証明できない付け直しを最後」の
+        // ままになる（取り下げた項目を最初から選ばない計画では、付け直しが新しい外部キーより前に並ぶ）。関係 N3 が見つけた。
+        // 直すのは、取り下げを輪へ戻す区切り（設計書の区切り 7）。
+        // 条件：再設計が止まるか、0.5.0 までに区切り 7 に届かない見込みになったら、今の計画器で直す区切りを立てる
+        // （2026-11-16 のレビューの判断。害は当てはまらない警告と安全側でない並びで、名指しなしに制約が消える形ではない）
+        .. SyncPlanFuzzKnownFailures.Scenario(
+            "n3-kept-unique-stale-judgments",
+            "mysql",
+            "スキーマ同期の再設計の区切り 7（評価の取り下げを輪へ戻す）",
+            ["d4-mysql-265"],
+            outcome =>
+                outcome.Violations.Count > 0
+                && outcome.Violations.All(v =>
+                    v.StartsWith(
+                        SyncPlanCapabilityNetRunner.ExclusionFixedPointRelationPrefix
+                            + "the plan differs without the excluded items",
+                        StringComparison.Ordinal
+                    )
+                )
+                && outcome.Warnings.Any(w =>
+                    w.StartsWith(
+                        nameof(SyncPlanWarningKind.UniqueConstraintRebuildKeptForForeignKey),
+                        StringComparison.Ordinal
+                    )
+                )
+        ),
     ];
 
     /// <summary>一覧</summary>
@@ -481,6 +510,7 @@ internal static class SyncPlanCapabilityNetRunner
             Entities = [.. live.Diagram.Entities],
             Relationships = [.. live.Diagram.Relationships],
             ColumnDefaults = [.. live.ColumnDefaults],
+            Warnings = [.. live.ImportWarnings],
         };
         var (targetEntities, targetRelationships) = SyncPlanFuzzRunner.CloneWithFreshIds(before);
         generator.Mutate(targetEntities, targetRelationships, live);
@@ -498,24 +528,23 @@ internal static class SyncPlanCapabilityNetRunner
         var selected = diff.Items.Where(i => i.IsSelected).ToList();
         outcome.Selected.AddRange(selected.Select(i => $"{i.Kind}: {i.Description}"));
         outcome.Shapes.UnionWith(SyncPlanFuzzRunner.SelectionShapes(before, selected));
+        outcome.Shapes.UnionWith(SyncPlanFuzzRunner.ExclusionChainShapes(live, selected));
         outcome.Unselected.AddRange(
             diff.Items.Where(i => !i.IsSelected).Select(i => $"{i.Kind}: {i.Description}")
         );
 
         SyncPlan plan;
+        var context = new SyncPlanContext
+        {
+            LiveEntities = before.Entities,
+            LiveRelationships = before.Relationships,
+            ColumnDefaults = before.ColumnDefaults,
+            ImportWarnings = before.Warnings,
+        };
 
         try
         {
-            plan = new SyncPlanner().BuildPlan(
-                diff.Items,
-                capabilities,
-                new SyncPlanContext
-                {
-                    LiveEntities = before.Entities,
-                    LiveRelationships = before.Relationships,
-                    ColumnDefaults = before.ColumnDefaults,
-                }
-            );
+            plan = new SyncPlanner().BuildPlan(diff.Items, capabilities, context);
             outcome.Script = provider.SyncScriptBuilder.Build(plan);
         }
         catch (Exception ex)
@@ -545,6 +574,16 @@ internal static class SyncPlanCapabilityNetRunner
                 diff.Items,
                 plan,
                 outcome.Script
+            )
+        );
+
+        outcome.Violations.AddRange(
+            ExclusionFixedPointProblems(
+                diff.Items,
+                plan,
+                capabilities,
+                context,
+                provider.SyncScriptBuilder.Build
             )
         );
 
@@ -654,6 +693,7 @@ internal static class SyncPlanCapabilityNetRunner
                     LiveEntities = before.Entities,
                     LiveRelationships = before.Relationships,
                     ColumnDefaults = before.ColumnDefaults,
+                    ImportWarnings = before.Warnings,
                 }
             );
             flaggedScript = provider.SyncScriptBuilder.Build(flaggedPlan);
@@ -709,6 +749,163 @@ internal static class SyncPlanCapabilityNetRunner
 
         static string DescribeWarning(SyncPlanWarning warning) =>
             $"{warning.Kind}({warning.TableName}): {warning.Detail}";
+    }
+
+    /// <summary>関係 N3 の違反の頭</summary>
+    public const string ExclusionFixedPointRelationPrefix = "relation N3: ";
+
+    /// <summary>
+    /// 関係 N3（除外の不動点）：計画が外した項目を最初から選ばずに計画を作り直しても、新しく外れる項目が無く、計画の形が元と同じ
+    /// （破れた面ごとに違反の文を返す。計画が何も外さなかったケースは何もしない）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 製品は選んだ項目を外す除外の規則を、何も外れなくなるまで繰り返す周の中で呼ぶ（<c>src/QuickER.Provider/CLAUDE.md</c>「除外の周」）。
+    /// 周の外で項目を外すと、周の中の判定はその項目を選ばれていると数えたまま残る。外した項目を最初から選ばない 2 回目の計画では、
+    /// 周の中の判定がその先の項目を外すので、「新しく外れる項目が無い」が破れる。DB の規則を知らずに周の約束そのものを見るので、
+    /// 静的な規則が判定しない再構築の方言にも、予告の警告があって静的な規則が通す形にも掛かる。
+    /// </para>
+    /// <para>
+    /// 警告は比べない（外した項目の名指しは、項目を選ばない 2 回目には出ない）。選び方は元の項目の印を一時的に落として渡し、
+    /// 必ず戻す（差分を作り直さない＝項目の同一性を保つ）。
+    /// </para>
+    /// </remarks>
+    /// <param name="items">差分の項目（元のケースの選び方のまま）</param>
+    /// <param name="plan">元の計画</param>
+    /// <param name="capabilities">元の計画と同じ能力</param>
+    /// <param name="context">元の計画と同じ文脈</param>
+    /// <param name="describe">計画の形を比べる文字列にする（実方言は同期スクリプト）</param>
+    internal static IEnumerable<string> ExclusionFixedPointProblems(
+        IReadOnlyList<SchemaDiffItem> items,
+        SyncPlan plan,
+        SyncDialectCapabilities capabilities,
+        SyncPlanContext? context,
+        Func<SyncPlan, string> describe
+    )
+    {
+        if (plan.ExcludedItems.Count == 0)
+        {
+            return [];
+        }
+
+        var excluded = new HashSet<SchemaDiffItem>(
+            plan.ExcludedItems,
+            ReferenceEqualityComparer.Instance
+        );
+        var found = items.Where(i => i.IsSelected && excluded.Contains(i)).ToList();
+
+        if (found.Count != excluded.Count)
+        {
+            return
+            [
+                ExclusionFixedPointRelationPrefix
+                    + "an excluded item is not one of the selected items: "
+                    + string.Join(" / ", excluded.Except(found).Select(Describe)),
+            ];
+        }
+
+        // 一部だけ外す項目（型の変更も含む列の変更の NULL 許容化だけを外し、型の変更は残す＝src/QuickER.Provider/CLAUDE.md
+        // 「選んでいない変更を前提にする項目」）は、外した一覧に載っても型の変更が計画に残る。選んだままにして、2 回目も同じ項目が
+        // 同じように外れることを見る（選ばないと、残るはずの型の変更まで消えて計画の形が変わる）
+        var partial = found
+            .Where(i =>
+                i is { Kind: SchemaDiffKind.AlterColumn, Column: not null, OldColumn: not null }
+                && !capabilities.AreSameType(i.OldColumn.DataType, i.Column.DataType)
+            )
+            .ToHashSet<SchemaDiffItem>(ReferenceEqualityComparer.Instance);
+        var dropped = found.Where(i => !partial.Contains(i)).ToList();
+
+        if (dropped.Count == 0)
+        {
+            return [];
+        }
+
+        SyncPlan second;
+        string first;
+        string again;
+
+        foreach (var item in dropped)
+        {
+            item.IsSelected = false;
+        }
+
+        try
+        {
+            second = new SyncPlanner().BuildPlan(items, capabilities, context);
+            again = describe(second);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return
+            [
+                $"{ExclusionFixedPointRelationPrefix}planning without the excluded items threw: {ex.GetType().Name}: {ex.Message}",
+            ];
+        }
+        finally
+        {
+            foreach (var item in dropped)
+            {
+                item.IsSelected = true;
+            }
+        }
+
+        var problems = new List<string>();
+
+        var more = second.ExcludedItems.Where(i => !partial.Contains(i)).ToList();
+
+        if (more.Count > 0 || second.ExcludedItems.Count(partial.Contains) != partial.Count)
+        {
+            problems.Add(
+                ExclusionFixedPointRelationPrefix
+                    + "planning without the excluded items excludes more: "
+                    + string.Join(" / ", more.Select(Describe))
+                    + (
+                        second.ExcludedItems.Count(partial.Contains) != partial.Count
+                            ? " [a partially excluded column change is no longer excluded]"
+                            : ""
+                    )
+                    + " (first excluded: "
+                    + string.Join(" / ", plan.ExcludedItems.Select(Describe))
+                    + ")"
+            );
+        }
+
+        try
+        {
+            first = describe(plan);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // 元の計画の形を作れない失敗は、呼び出し側が自分の違反として報告する
+            _ = ex;
+            return problems;
+        }
+
+        if (!string.Equals(first, again, StringComparison.Ordinal))
+        {
+            var lines = first.Split('\n');
+            var againLines = again.Split('\n');
+            var at = Enumerable
+                .Range(0, Math.Min(lines.Length, againLines.Length))
+                .FirstOrDefault(
+                    i => !string.Equals(lines[i], againLines[i], StringComparison.Ordinal),
+                    Math.Min(lines.Length, againLines.Length)
+                );
+            problems.Add(
+                $"{ExclusionFixedPointRelationPrefix}the plan differs without the excluded items: "
+                    + string.Join(" / ", againLines.Except(lines).Select(l => l.Trim()))
+                    + " <> "
+                    + string.Join(" / ", lines.Except(againLines).Select(l => l.Trim()))
+                    + $" (first difference at line {at + 1}: [{Line(againLines, at)}] <> [{Line(lines, at)}])"
+            );
+
+            static string Line(string[] source, int index) =>
+                index < source.Length ? source[index].Trim() : "(end)";
+        }
+
+        return problems;
+
+        static string Describe(SchemaDiffItem item) => $"{item.Kind}: {item.Description}";
     }
 
     /// <summary>関係 N2 の違反の頭</summary>
@@ -789,6 +986,10 @@ internal static class SyncPlanCapabilityNetRunner
                             Fold(d.ColumnName),
                             d.Expression
                         )),
+                    ],
+                    ImportWarnings =
+                    [
+                        .. before.Warnings.Select(w => w with { TableName = Fold(w.TableName) }),
                     ],
                 }
             );
@@ -945,11 +1146,20 @@ internal static class SyncPlanCapabilityNetRunner
 
     /// <summary>
     /// 実 DB では DDL の後に SQL で足す計算列（<see cref="FuzzLiveSchema.ComputedColumnStatements"/>）を、取込の結果と同じく
-    /// DB 側の図の列にする（NULL を許す計算列。式は図に載らない）
+    /// DB 側の図の列にする（NULL を許す計算列。式は図に載らない）。同じ文で足す普通の列（<see cref="FuzzLiveSchema.StatementColumns"/>＝
+    /// 取込が外部キーを捨てる列）も、取込の結果と同じく NULL を許す普通の列にする（文の順＝列の情報を足した順）
     /// </summary>
     private static void AddComputedColumns(FuzzLiveSchema live, SyncPlanFuzzDialect dialect)
     {
-        foreach (var (key, info) in live.Columns.Where(pair => pair.Value.Computed).ToList())
+        var statementColumns = live
+            .StatementColumns.Select(c => FuzzLiveSchema.Key(c.Table, c.Column))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (
+            var (key, info) in live
+                .Columns.Where(pair => pair.Value.Computed || statementColumns.Contains(pair.Key))
+                .ToList()
+        )
         {
             var parts = key.Split('\u0001');
             var entity = live.Diagram.Entities.Single(e =>
@@ -961,7 +1171,7 @@ internal static class SyncPlanCapabilityNetRunner
                     Name = parts[1],
                     DataType = dialect.TypeName(info.Kind, info.Length),
                     IsNullable = true,
-                    IsComputed = true,
+                    IsComputed = info.Computed,
                 }
             );
         }
@@ -1021,6 +1231,12 @@ public abstract class SyncPlanCapabilityNetTestsBase
                 .ToList();
             TestContext.Current.TestOutputHelper?.WriteLine(
                 $"{dialect.Name}: expectation rows {rows.Count}, problems {problems.Count}"
+            );
+            // 関係 N3 を掛けない行は、手で項目を組む行だけ（差分が作らない項目の組み合わせを持ちうる）
+            var handBuilt = rows.Count(row => row.Input.Items is not null);
+            TestContext.Current.TestOutputHelper?.WriteLine(
+                $"{dialect.Name}: relation N3 on {rows.Count - handBuilt} of {rows.Count} expectation rows "
+                    + $"(not on {handBuilt} rows with hand-built items)"
             );
 
             if (problems.Count > 0)
@@ -1127,6 +1343,19 @@ public abstract class SyncPlanCapabilityNetTestsBase
                     caseFoldSeeds < outcomes.Count
                         ? " (regular runs check every 4th seed; nightly checks all)"
                         : ""
+                )
+        );
+        // 関係 N3 が実際に 2 回目の計画を作った種の数（計画が項目を外した種）と、除外の連鎖の形の種の数
+        output?.WriteLine(
+            $"{dialect.Name}: relation N3 on {outcomes.Count(o => o.Plan is { ExcludedItems.Count: > 0 })} of {outcomes.Count} seeds; exclusion chains "
+                + string.Join(
+                    ", ",
+                    outcomes
+                        .SelectMany(o => o.Shapes)
+                        .Where(s => s.StartsWith("exclusion-chain-", StringComparison.Ordinal))
+                        .GroupBy(s => s, StringComparer.Ordinal)
+                        .OrderBy(g => g.Key, StringComparer.Ordinal)
+                        .Select(g => $"{g.Key}={g.Count()}")
                 )
         );
 

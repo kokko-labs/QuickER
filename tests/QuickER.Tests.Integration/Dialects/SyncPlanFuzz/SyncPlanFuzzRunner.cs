@@ -288,6 +288,7 @@ internal static class SyncPlanFuzzRunner
         outcome.Selected.AddRange(selected.Select(i => $"{i.Kind}: {i.Description}"));
         outcome.Unselected.AddRange(unselected.Select(i => $"{i.Kind}: {i.Description}"));
         outcome.Shapes.UnionWith(SelectionShapes(before, selected));
+        outcome.Shapes.UnionWith(ExclusionChainShapes(liveSchema, selected));
 
         SyncPlan plan;
 
@@ -1523,6 +1524,34 @@ internal static class SyncPlanFuzzRunner
             }
         }
     }
+
+    /// <summary>
+    /// 除外の連鎖が起きた形（ケースが宣言した <see cref="FuzzLiveSchema.ExclusionChains"/> のうち、宣言の項目を全部選び、選ばない項目を
+    /// どれも選ばなかったもの）を返す（網も使う。計画の結果は見ない＝選び方と項目だけで決める）
+    /// </summary>
+    /// <param name="live">ケースの DB 側の図（目標の図の変更を加えた後）</param>
+    /// <param name="selected">選んだ項目</param>
+    internal static IEnumerable<string> ExclusionChainShapes(
+        FuzzLiveSchema live,
+        List<SchemaDiffItem> selected
+    ) =>
+        live
+            .ExclusionChains.Where(chain =>
+                chain.Selected.All(spec => selected.Any(item => Matches(item, spec)))
+                && !chain.Unselected.Any(spec => selected.Any(item => Matches(item, spec)))
+            )
+            .Select(chain => chain.Shape);
+
+    /// <summary>項目が除外の連鎖の項目に当たるか（種類・表・名前＝列・外部キー・一意制約のどれかの名前）</summary>
+    private static bool Matches(SchemaDiffItem item, FuzzChainItem spec) =>
+        item.Kind == spec.Kind
+        && SchemaNames.AreSame(item.TableName, spec.Table)
+        && (
+            spec.Name is null
+            || new[] { item.ColumnName, item.ForeignKeyName, item.UniqueConstraintName }.Any(name =>
+                name is not null && SchemaNames.AreSame(name, spec.Name)
+            )
+        );
 
     /// <summary>選ばなかった項目が、選んだ項目から必然的に消えるものか（規則は <see cref="SyncPlanFuzzRunner"/> の remarks）</summary>
     private static bool IsImpliedBySelection(

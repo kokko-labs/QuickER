@@ -461,8 +461,9 @@
   - NOT NULL の列への SET NULL は関数を 2 つに分ける。作れない方言（`SetNullRequiresNullableChildColumn`）で外す `ExcludeSetNullForeignKeysOnNotNullColumns` は周の中、作れる方言で警告だけを積む `WarnSetNullForeignKeysOnNotNullColumns` は周の後（展開の前）。判定の本体は `FindSetNullForeignKeysOnNotNullColumns` の 1 か所。
   - 警告だけの側を周の中へ置くと、警告した外部キーが後の周で別の理由で外れたとき、計画に無い外部キーの警告が残る。
   - 外す関数は `Exclude`、警告だけの関数は `Warn` で始める（ソースの規則がこの名前で見分ける）。
-- 生成器はこの連鎖の形を作らない（作らない形の宣言 `SyncPlanFuzzNotGenerated` の Pending）。形は期待の行が受け持つ。
-- ガード：`SourceRuleTests` の規則 `sync-exclusions-inside-stable-loop`（`SyncPlanner.cs` の `Exclude*` の呼び出しのうち、呼び出し元が `ExcludeUntilStable` でも `Exclude*` でもないもの。`ExcludeSelected` は数えない。自己検査の行 `sync-exclusions-inside-stable-loop-forms`・`sync-exclusions-inside-stable-loop-inactive-branch`）・期待の行 `realdb-name-collision-unique-with-excluded-last-column-drop`（網と 5 方言の実 DB）・`realdb-rebuild-skipped-when-import-discarded-excludes-fk-requiring-its-pk-change`（実 SQLite）・`plan-type-mismatch-excluded-alter-keeps-live-fk-with-same-definition-as-added-fk`・`plan-type-mismatch-excluded-add-with-same-definition-is-not-warned-for-set-null`（網と実 Oracle）。
+- 周の約束そのもの（外した項目を最初から選ばずに計画を作り直しても、新しく外れる項目が無い）は、能力の組の網の関係 N3 が、同期計画の生成器の除外の連鎖の水準（9 本目の乱数の列）の種と期待の行で見る（`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`「能力の組の網」「生成器と方言の宣言」）。
+  - 前寄せの中の取り下げ（`KeepOneReaddedUnique`）は周の外で項目を外す。取り下げの前に決めた警告と外部キーの追加の並びが見直されないことを N3 が見つけ、網の既知の失敗の一覧（`n3-kept-unique-stale-judgments`）に直す区切りつきで載せてある。
+- ガード：能力の組の網の関係 N3（`SyncPlanCapabilityNetRunner.ExclusionFixedPointProblems`）・`SourceRuleTests` の規則 `sync-exclusions-inside-stable-loop`（`SyncPlanner.cs` の `Exclude*` の呼び出しのうち、呼び出し元が `ExcludeUntilStable` でも `Exclude*` でもないもの。`ExcludeSelected` は数えない。自己検査の行 `sync-exclusions-inside-stable-loop-forms`・`sync-exclusions-inside-stable-loop-inactive-branch`）・期待の行 `realdb-name-collision-unique-with-excluded-last-column-drop`（網と 5 方言の実 DB）・`realdb-rebuild-skipped-when-import-discarded-excludes-fk-requiring-its-pk-change`（実 SQLite）・`plan-type-mismatch-excluded-alter-keeps-live-fk-with-same-definition-as-added-fk`・`plan-type-mismatch-excluded-add-with-same-definition-is-not-warned-for-set-null`（網と実 Oracle）。
 
 ### 構成列の削除と列が残らない表
 
