@@ -51,6 +51,11 @@ jobs:
         run: dotnet build QuickER.slnx -c Release
 
       - name: テスト
+        # テストの一時ファイルをランナーの一時領域（D: ドライブ）へ置く（理由は ci.yml の同名ステップのコメントを参照。
+        # 既定の C: のままだと全件がジョブの上限 30 分に収まらない）
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
         run: dotnet test QuickER.slnx -c Release --no-build --output detailed
 
       - name: バージョンを取得（Directory.Build.props の VersionPrefix）
