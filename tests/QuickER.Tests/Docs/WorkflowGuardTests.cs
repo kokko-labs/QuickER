@@ -197,13 +197,18 @@ public sealed class WorkflowGuardTests
     /// <remarks>
     /// テストは SQLite の実ファイル DB や偽の app-server の一時フォルダを Path.GetTempPath() の下に作る。既定の TEMP
     /// （C: のユーザープロファイルの下）はファイルの作成と削除が遅く、手順の env が消えると全体の時間が静かに延びる。
+    /// 公開の 2 つのワークフローも全件を流すので同じにする（既定の TEMP のままでは全件がジョブの上限 30 分に収まらず、
+    /// 公開の前に打ち切られる）。
     /// </remarks>
-    [Fact(
-        DisplayName = "ci.yml の Windows のテストの手順は TEMP と TMP をランナーの一時領域へ向ける"
+    [Theory(
+        DisplayName = "Windows で全件を流すテストの手順は TEMP と TMP をランナーの一時領域へ向ける"
     )]
-    public void WindowsTestStep_PutsTempFilesOnRunnerTemp()
+    [InlineData("ci.yml")]
+    [InlineData("publish.yml")]
+    [InlineData("release.yml")]
+    public void WindowsTestStep_PutsTempFilesOnRunnerTemp(string workflow)
     {
-        var lines = ReadWorkflow("ci.yml").ReplaceLineEndings("\n").Split('\n');
+        var lines = ReadWorkflow(workflow).ReplaceLineEndings("\n").Split('\n');
         var start = Array.FindIndex(lines, line => line.Trim() == "- name: テスト");
 
         start.Should().BeGreaterThanOrEqualTo(0, "Windows のジョブにテストの手順がある");
@@ -213,7 +218,7 @@ public sealed class WorkflowGuardTests
                 .Skip(start + 1)
                 .TakeWhile(line => !line.TrimStart().StartsWith("- ", StringComparison.Ordinal))
         );
-        body.Should().Contain("dotnet test QuickER.slnx --no-build");
+        body.Should().MatchRegex(@"dotnet test QuickER\.slnx (-c Release )?--no-build");
         AssertTempOnRunnerTemp(body);
     }
 
