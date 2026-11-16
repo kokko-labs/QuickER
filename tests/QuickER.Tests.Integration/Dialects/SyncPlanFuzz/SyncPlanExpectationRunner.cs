@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Tests.TestSupport.Engines;
 
@@ -171,6 +172,25 @@ internal static class SyncPlanExpectationRunner
             );
         }
 
+        // 関係 N3（除外の不動点）：差分から作った項目の行にだけ掛ける（手で組んだ項目の行は、差分が作らない組み合わせを持ちうる）。
+        // 計画の形は、実方言なら同期スクリプト、能力の組だけの行ならセクション・再構築・列順の 3 面で比べる
+        if (input.Items is null)
+        {
+            problems.AddRange(
+                SyncPlanCapabilityNetRunner
+                    .ExclusionFixedPointProblems(
+                        items,
+                        plan,
+                        world.Capabilities,
+                        context,
+                        isDialect
+                            ? SyncPlanExpectationCapabilities.Provider(key).SyncScriptBuilder.Build
+                            : shape => PlanShape(shape, labels, world.Live.Entities)
+                    )
+                    .Select(p => $"[{key}] {p}")
+            );
+        }
+
         if (isDialect)
         {
             // 実方言の行は、網と同じく同期スクリプトまで作り、静的な規則で DB が断る文の並びを見る
@@ -203,6 +223,29 @@ internal static class SyncPlanExpectationRunner
         }
 
         return facets;
+    }
+
+    /// <summary>計画の形（セクション・再構築・列順の 3 面）を 1 つの文字列にする（関係 N3 が能力の組だけの行で比べる）</summary>
+    private static string PlanShape(
+        SyncPlan plan,
+        Dictionary<SchemaDiffItem, int> labels,
+        IReadOnlyList<Entity> liveEntities
+    )
+    {
+        var facets = SyncPlanProjection.Plan(plan, labels, liveEntities);
+        string[] shapeFacets =
+        [
+            ExpectationFacet.Sections,
+            ExpectationFacet.Rebuilds,
+            ExpectationFacet.Reorders,
+        ];
+
+        return string.Join(
+            "\n",
+            shapeFacets.SelectMany(facet =>
+                facets.TryGetValue(facet, out var lines) ? lines.Prepend($"[{facet}]") : []
+            )
+        );
     }
 
     private static string Describe(Exception ex) =>

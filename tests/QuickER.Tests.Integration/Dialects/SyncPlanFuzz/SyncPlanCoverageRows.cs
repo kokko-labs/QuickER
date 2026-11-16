@@ -104,18 +104,6 @@ internal static class SyncPlanCoverageRows
                 ),
                 SeedRow(
                     DialectNames.SqlServer,
-                    85,
-                    FuzzSelection.All,
-                    ["alter type duplicated unique", "drop one of duplicated uniques", "move pk"]
-                ),
-                SeedRow(
-                    DialectNames.SqlServer,
-                    85,
-                    FuzzSelection.ByKinds,
-                    ["add table", "alter type duplicated unique", "drop one of duplicated uniques"]
-                ),
-                SeedRow(
-                    DialectNames.SqlServer,
                     574,
                     FuzzSelection.Default,
                     ["extend pk", "replace pk", "retarget fk"]
@@ -147,24 +135,6 @@ internal static class SyncPlanCoverageRows
                 ),
                 SeedRow(
                     DialectNames.SqlServer,
-                    556,
-                    FuzzSelection.Random,
-                    ["computed nullable", "computed type"]
-                ),
-                SeedRow(
-                    DialectNames.SqlServer,
-                    556,
-                    FuzzSelection.Single,
-                    ["computed nullable", "computed type"]
-                ),
-                SeedRow(
-                    DialectNames.SqlServer,
-                    556,
-                    FuzzSelection.ByKinds,
-                    ["computed nullable", "computed type"]
-                ),
-                SeedRow(
-                    DialectNames.SqlServer,
                     897,
                     FuzzSelection.All,
                     ["replace pk", "shrink pk"]
@@ -172,8 +142,6 @@ internal static class SyncPlanCoverageRows
                 SeedRow(DialectNames.SqlServer, 22, FuzzSelection.Random, ["replace pk"]),
                 SeedRow(DialectNames.SqlServer, 81, FuzzSelection.Random, ["reorder pk"]),
                 SeedRow(DialectNames.SqlServer, 81, FuzzSelection.Single, ["reorder pk"]),
-                SeedRow(DialectNames.SqlServer, 133, FuzzSelection.All, ["computed nullable"]),
-                SeedRow(DialectNames.SqlServer, 133, FuzzSelection.Default, ["computed nullable"]),
                 SeedRow(DialectNames.SqlServer, 149, FuzzSelection.All, ["reorder referenced pk"]),
                 SeedRow(
                     DialectNames.SqlServer,
@@ -216,6 +184,37 @@ internal static class SyncPlanCoverageRows
                     FuzzSelection.Single,
                     ["alter type duplicated fk", "drop one of duplicated fks"]
                 ),
+                // 除外の連鎖の水準（9 本目の乱数の列）で形が変わった 7 行（種 85 の All・ByKinds、種 556 の Random・Single・ByKinds、
+                // 種 133 の All・Default）を、水準を足した後の夜間の 1000 種の記録から選び直した（2026-11-16・欠けた 11 組を種 440・
+                // 275・109 の 4 行で埋める。種 440 の Single は、種 556 の Single が埋めていた remove pk も埋める）
+                SeedRow(
+                    DialectNames.SqlServer,
+                    440,
+                    FuzzSelection.Single,
+                    [
+                        "alter type duplicated unique",
+                        "computed nullable",
+                        "drop one of duplicated uniques",
+                        "remove pk",
+                    ]
+                ),
+                SeedRow(
+                    DialectNames.SqlServer,
+                    440,
+                    FuzzSelection.All,
+                    [
+                        "alter type duplicated unique",
+                        "computed nullable",
+                        "drop one of duplicated uniques",
+                    ]
+                ),
+                SeedRow(
+                    DialectNames.SqlServer,
+                    275,
+                    FuzzSelection.ByKinds,
+                    ["add table", "alter type duplicated unique", "drop one of duplicated uniques"]
+                ),
+                SeedRow(DialectNames.SqlServer, 109, FuzzSelection.Default, ["computed nullable"]),
                 // ---- MySQL の変更の種類と選び方の組（SamplingGaps に書いていた 31 組）。種は実 DB の総当たりを夜間の 1500 種で流した
                 // 記録から貪欲に選んだ（2026-11-02・並びは埋める組の多い順） ----
                 SeedRow(
@@ -332,7 +331,6 @@ internal static class SyncPlanCoverageRows
                     ["computed nullable", "shrink pk"]
                 ),
                 SeedRow(DialectNames.PostgreSql, 138, FuzzSelection.All, ["move pk"]),
-                SeedRow(DialectNames.PostgreSql, 156, FuzzSelection.All, ["replace pk"]),
                 SeedRow(
                     DialectNames.PostgreSql,
                     157,
@@ -352,24 +350,6 @@ internal static class SyncPlanCoverageRows
                         "drop one of duplicated uniques",
                         "drop tables",
                     ]
-                ),
-                SeedRow(
-                    DialectNames.PostgreSql,
-                    159,
-                    FuzzSelection.ByKinds,
-                    ["reorder pk", "replace pk"]
-                ),
-                SeedRow(
-                    DialectNames.PostgreSql,
-                    159,
-                    FuzzSelection.Random,
-                    ["reorder pk", "replace pk"]
-                ),
-                SeedRow(
-                    DialectNames.PostgreSql,
-                    183,
-                    FuzzSelection.Random,
-                    ["add column", "reorder referenced pk"]
                 ),
                 SeedRow(
                     DialectNames.PostgreSql,
@@ -401,6 +381,25 @@ internal static class SyncPlanCoverageRows
                     FuzzSelection.Default,
                     ["alter type duplicated unique", "drop one of duplicated uniques", "shrink pk"]
                 ),
+                // 除外の連鎖の水準（9 本目の乱数の列）で形が変わった 4 行（種 156 の All、種 159 の ByKinds・Random、種 183 の Random）を、
+                // 水準を足した後の夜間の 600 種の記録から選び直した（2026-11-16・欠けた 8 組を種 157・245・123 の 6 行で埋める。
+                // reorder pk と replace pk を両方出す種が無いので、replace pk は種 123 の 3 行に分けた）
+                SeedRow(
+                    DialectNames.PostgreSql,
+                    157,
+                    FuzzSelection.Single,
+                    ["alter type duplicated unique", "drop one of duplicated uniques"]
+                ),
+                SeedRow(
+                    DialectNames.PostgreSql,
+                    245,
+                    FuzzSelection.Random,
+                    ["reorder pk", "reorder referenced pk"]
+                ),
+                SeedRow(DialectNames.PostgreSql, 245, FuzzSelection.ByKinds, ["reorder pk"]),
+                SeedRow(DialectNames.PostgreSql, 123, FuzzSelection.All, ["replace pk"]),
+                SeedRow(DialectNames.PostgreSql, 123, FuzzSelection.ByKinds, ["replace pk"]),
+                SeedRow(DialectNames.PostgreSql, 123, FuzzSelection.Random, ["replace pk"]),
                 // ---- Oracle の変更の種類と選び方の組（普段の 60 種と形の種 102 で欠ける 50 組・受け入れの 20 組は除く）。種は実 DB の
                 // 総当たりを 300 種で流した記録から、選び方ごとに欠ける変更の種類を最も少ない種で覆うように選んだ（2026-11-14・並びは
                 // 種の番号順）。計算列が参照する列を広げない直しでケースが変わった種 221・242 は選ばない ----
@@ -422,36 +421,6 @@ internal static class SyncPlanCoverageRows
                 SeedRow(DialectNames.Oracle, 43, FuzzSelection.Random, ["reorder pk"]),
                 SeedRow(
                     DialectNames.Oracle,
-                    50,
-                    FuzzSelection.All,
-                    ["rename table case", "reorder referenced pk", "set description"]
-                ),
-                SeedRow(
-                    DialectNames.Oracle,
-                    50,
-                    FuzzSelection.Default,
-                    ["reorder referenced pk", "respell type"]
-                ),
-                SeedRow(
-                    DialectNames.Oracle,
-                    50,
-                    FuzzSelection.ByKinds,
-                    [
-                        "rename table case",
-                        "reorder referenced pk",
-                        "respell type",
-                        "retarget fk",
-                        "set description",
-                    ]
-                ),
-                SeedRow(
-                    DialectNames.Oracle,
-                    50,
-                    FuzzSelection.Random,
-                    ["rename table case", "reorder referenced pk", "retarget fk"]
-                ),
-                SeedRow(
-                    DialectNames.Oracle,
                     59,
                     FuzzSelection.Default,
                     ["add fk", "computed type", "drop fk", "reorder columns", "reorder pk"]
@@ -466,41 +435,73 @@ internal static class SyncPlanCoverageRows
                 SeedRow(DialectNames.Oracle, 97, FuzzSelection.Random, ["computed nullable"]),
                 SeedRow(
                     DialectNames.Oracle,
-                    113,
-                    FuzzSelection.Default,
-                    ["rename column case", "shrink pk"]
+                    168,
+                    FuzzSelection.All,
+                    ["computed nullable", "move pk"]
                 ),
+                // 除外の連鎖の水準（9 本目の乱数の列）で形が変わった 10 行（種 50 の 4 行、種 113 の Default・Single・Random、種 184 の
+                // ByKinds、種 190 の Single、種 207 の All）を、水準を足した後の 300 種の記録から選び直した（2026-11-16・選び方ごとに
+                // 欠ける変更の種類を最も少ない種で覆う。種 113 の 3 行と種 190 の Single は、同じ種が今も出す種類で欠けを埋めるので
+                // 埋める組を書き換えて残し、種 50・184・207 の 6 行は消した。欠けた 14 組を残す 4 行と新しい 10 行で埋める）
+                SeedRow(DialectNames.Oracle, 113, FuzzSelection.Default, ["shrink pk"]),
                 SeedRow(
                     DialectNames.Oracle,
                     113,
                     FuzzSelection.Single,
-                    ["drop unique", "shrink pk"]
+                    ["rename table case", "shrink pk"]
                 ),
                 SeedRow(
                     DialectNames.Oracle,
                     113,
                     FuzzSelection.Random,
-                    ["rename column case", "shrink pk"]
-                ),
-                SeedRow(
-                    DialectNames.Oracle,
-                    168,
-                    FuzzSelection.All,
-                    ["computed nullable", "move pk"]
-                ),
-                SeedRow(
-                    DialectNames.Oracle,
-                    184,
-                    FuzzSelection.ByKinds,
-                    ["move pk", "rename column case"]
+                    ["rename table case", "shrink pk"]
                 ),
                 SeedRow(
                     DialectNames.Oracle,
                     190,
                     FuzzSelection.Single,
-                    ["computed type", "replace pk"]
+                    ["computed type", "respell type"]
                 ),
-                SeedRow(DialectNames.Oracle, 207, FuzzSelection.All, ["add fk", "shrink pk"]),
+                SeedRow(
+                    DialectNames.Oracle,
+                    113,
+                    FuzzSelection.All,
+                    ["add fk", "rename table case", "shrink pk"]
+                ),
+                SeedRow(DialectNames.Oracle, 115, FuzzSelection.All, ["reorder referenced pk"]),
+                SeedRow(
+                    DialectNames.Oracle,
+                    89,
+                    FuzzSelection.Default,
+                    ["rename column case", "respell type"]
+                ),
+                SeedRow(DialectNames.Oracle, 115, FuzzSelection.Default, ["reorder referenced pk"]),
+                SeedRow(DialectNames.Oracle, 65, FuzzSelection.ByKinds, ["move pk", "replace pk"]),
+                SeedRow(
+                    DialectNames.Oracle,
+                    87,
+                    FuzzSelection.ByKinds,
+                    ["rename table case", "respell type"]
+                ),
+                SeedRow(
+                    DialectNames.Oracle,
+                    241,
+                    FuzzSelection.ByKinds,
+                    ["reorder referenced pk", "set description"]
+                ),
+                SeedRow(
+                    DialectNames.Oracle,
+                    211,
+                    FuzzSelection.Random,
+                    ["drop fk", "rename column case", "respell type"]
+                ),
+                SeedRow(
+                    DialectNames.Oracle,
+                    186,
+                    FuzzSelection.Random,
+                    ["drop fk", "reorder referenced pk"]
+                ),
+                SeedRow(DialectNames.Oracle, 115, FuzzSelection.Single, ["reorder referenced pk"]),
             ]
         );
 

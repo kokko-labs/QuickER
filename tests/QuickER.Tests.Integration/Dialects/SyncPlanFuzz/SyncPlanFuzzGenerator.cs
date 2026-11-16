@@ -223,6 +223,38 @@ internal static class FuzzShape
     /// <summary>目標の図で既定値のある列の型を広げる（属性の形の水準）</summary>
     public const string ColumnDefaultTypeChange = "column-default-type-change";
 
+    /// <summary>
+    /// 列が残らない表の列の削除と、その列の一意制約と同じ名前の別の表の一意制約の追加を組んだ（除外の連鎖の水準。一意制約の名前の範囲が
+    /// 表より広い方言だけ）
+    /// </summary>
+    public const string ExclusionChainLastColumnUniqueReady =
+        "exclusion-chain-ready-last-column-unique";
+
+    /// <summary>
+    /// 列が残らない表の列の削除と同じ名前の一意制約の追加を選び、その一意制約の削除を選ばなかった（除外の連鎖が起きる選び方）
+    /// </summary>
+    public const string ExclusionChainLastColumnUnique = "exclusion-chain-last-column-unique";
+
+    /// <summary>
+    /// 取込が捨てる物のある表の主キーの変更と、その新しい主キーを参照する外部キーの追加を組んだ（除外の連鎖の水準。再構築の方言だけ）
+    /// </summary>
+    public const string ExclusionChainUnrebuiltPrimaryKeyReady =
+        "exclusion-chain-ready-unrebuilt-pk-fk";
+
+    /// <summary>取込が捨てる物のある表の主キーの変更と、それを前提にする外部キーの追加を両方選んだ（除外の連鎖が起きる選び方）</summary>
+    public const string ExclusionChainUnrebuiltPrimaryKey = "exclusion-chain-unrebuilt-pk-fk";
+
+    /// <summary>
+    /// 型の食い違いで外れる外部キーの作り直しと、古い外部キーと同じ定義の外部キーの追加を組んだ（除外の連鎖の水準。同じ定義の外部キーを
+    /// 2 本持てない方言だけ）
+    /// </summary>
+    public const string ExclusionChainTypeMismatchReady = "exclusion-chain-ready-type-mismatch-fk";
+
+    /// <summary>
+    /// 新しい親の列の型の変更・外部キーの作り直し・古い定義と同じ外部キーの追加を全部選んだ（除外の連鎖が起きる選び方）
+    /// </summary>
+    public const string ExclusionChainTypeMismatch = "exclusion-chain-type-mismatch-fk";
+
     /// <summary>種の集合全体で必ず出ていなければならない形（方言が作れない形は除く＝<see cref="RequiredFor"/>）</summary>
     public static readonly IReadOnlyList<string> Required =
     [
@@ -294,6 +326,9 @@ internal static class FuzzShape
         DescriptionNewElement,
         ColumnDefault,
         ColumnDefaultTypeChange,
+        ExclusionChainLastColumnUnique,
+        ExclusionChainUnrebuiltPrimaryKey,
+        ExclusionChainTypeMismatch,
     ];
 
     /// <summary>
@@ -385,6 +420,22 @@ internal static class FuzzShape
                         && dialect.AddColumnDefaultSql("t", "c", "0") is not null,
                     LongDefaultName => !realDatabase
                         && !dialect.Provider.SyncCapabilities.IdentifierLengthLimit.IsUnlimited,
+                    // 除外の連鎖が起きる選び方は網でだけ求める（実 DB の普段の種で出ない種の集合がありうる。実 DB は期待の行が受け持つ）。
+                    // どの方言で組むかは生成器（SyncPlanFuzzGenerator.ExclusionChainForms）と同じ宣言で決める
+                    ExclusionChainLastColumnUnique => !realDatabase
+                        && dialect.Provider.SyncCapabilities.ConstraintNamesCollide(
+                            false,
+                            "a",
+                            false,
+                            "b"
+                        ),
+                    ExclusionChainUnrebuiltPrimaryKey => !realDatabase
+                        && (
+                            !dialect.Provider.SyncCapabilities.SupportsAlterColumn
+                            || !dialect.Provider.SyncCapabilities.SupportsForeignKeyAlter
+                        ),
+                    ExclusionChainTypeMismatch => !realDatabase
+                        && !dialect.AllowDuplicateForeignKeys,
                     _ => true,
                 }
             )
@@ -502,8 +553,27 @@ internal sealed class FuzzLiveSchema
     /// <summary>データを入れる文（親→子の順）</summary>
     public List<string> InsertStatements { get; } = [];
 
-    /// <summary>計算列を足す文（データを入れた後に流す）</summary>
+    /// <summary>
+    /// 計算列と、DDL の図に無い列（<see cref="StatementColumns"/>）を足す文（データを入れた後に流す）
+    /// </summary>
     public List<string> ComputedColumnStatements { get; } = [];
+
+    /// <summary>
+    /// <see cref="ComputedColumnStatements"/> が足す普通の列（表名と列名。DDL の図に無く、列の情報は <see cref="Columns"/> にある。網は取込の代わりに
+    /// DB 側の図の列にする）
+    /// </summary>
+    public List<(string Table, string Column)> StatementColumns { get; } = [];
+
+    /// <summary>
+    /// 生の文が作る物を取込が捨てて告げる警告（取込と同じ種別・表・Subject。網は取込の代わりにこれを計画の文脈へ渡す）
+    /// </summary>
+    public List<SchemaImportWarning> ImportWarnings { get; } = [];
+
+    /// <summary>
+    /// 除外の連鎖が起きる選び方（生成器が目標の図の変更を加えたときに宣言する。総当たりと網が選んだ項目から起きた形を決める＝
+    /// <see cref="SyncPlanFuzzRunner.ExclusionChainShapes"/>）
+    /// </summary>
+    public List<FuzzExclusionChain> ExclusionChains { get; } = [];
 
     /// <summary>既定値を足す文（計算列の文の後に流す。図は既定値を持たない）</summary>
     public List<string> ColumnDefaultStatements { get; } = [];
@@ -601,6 +671,7 @@ internal sealed partial class SyncPlanFuzzGenerator(
     Random? constraintShapeRng,
     Random? tableShapeRng,
     Random? attributeShapeRng,
+    Random? exclusionChainRng,
     SyncPlanFuzzDialect dialect
 ) : ISyncPlanFuzzCase
 {
@@ -631,6 +702,7 @@ internal sealed partial class SyncPlanFuzzGenerator(
             levels ? new Random(ConstraintShapeSeed(seed)) : null,
             levels ? new Random(TableShapeSeed(seed)) : null,
             levels ? new Random(AttributeShapeSeed(seed)) : null,
+            levels ? new Random(ExclusionChainSeed(seed)) : null,
             dialect
         );
 
@@ -691,6 +763,14 @@ internal sealed partial class SyncPlanFuzzGenerator(
     /// <remarks>既存の 7 本の列と分けて、それらの引き方を変えない（種の指紋は、この列の水準が図を変えた種だけ変わる）。</remarks>
     private static int AttributeShapeSeed(int seed) =>
         (int)(unchecked((uint)TableShapeSeed(seed) * 2654435761u) ^ 0xA77E5u) & int.MaxValue;
+
+    /// <summary>
+    /// 除外の連鎖の水準（列が残らない表と同じ名前の一意制約・作り直さない表の主キーの変更とそれを前提にする外部キー・型の食い違いで外れる
+    /// 作り直しと同じ定義の外部キー）の乱数の列の種（<see cref="AttributeShapeSeed"/> から決定的に作る）
+    /// </summary>
+    /// <remarks>既存の 8 本の列と分けて、それらの引き方を変えない（種の指紋は、この列の水準が図を変えた種だけ変わる）。</remarks>
+    private static int ExclusionChainSeed(int seed) =>
+        (int)(unchecked((uint)AttributeShapeSeed(seed) * 374761393u) ^ 0xE8C1A5u) & int.MaxValue;
 
     /// <summary>行の水準（<see cref="RowLevelSeed"/> の列で 1 回だけ引く）</summary>
     private enum RowLevel
@@ -778,6 +858,7 @@ internal sealed partial class SyncPlanFuzzGenerator(
         RemoveLivePrimaryKey(live);
         AddLiveDescriptions(live);
         AddColumnDefaults(live);
+        AddExclusionChainLive(live);
         BuildInserts(live, dialect);
         AddComputedColumn(live);
 
@@ -1482,6 +1563,7 @@ internal sealed partial class SyncPlanFuzzGenerator(
         ApplyRowLevel(entities, relationships, live);
         ApplyConstraintShapeLevel(entities, relationships, live);
         ApplyAttributeShapeLevel(entities, relationships, live);
+        ApplyExclusionChainLevel(entities, relationships, live);
         DeclareEmptyColumnChanges(entities, live);
         CheckDeclaredTargetShapes(entities, live);
     }
