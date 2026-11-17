@@ -15,6 +15,8 @@
     "mutate": [
       "**/*.cs",
       "!**/SyncPlanner.cs",
+      "!**/SchemaIds.cs",
+      "!**/LiveSchema.cs",
       "!**/SchemaDiffService.cs",
       "!**/SchemaSignature.cs",
       "!**/DiagramMergeReconciler.cs",

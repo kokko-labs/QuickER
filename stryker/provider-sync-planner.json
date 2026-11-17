@@ -13,7 +13,9 @@
     "reporters": ["json", "html", "progress", "cleartext"],
     "ignore-methods": ["*.ThrowIfNull", "*Exception.ctor"],
     "mutate": [
-      "**/SyncPlanner.cs"
+      "**/SyncPlanner.cs",
+      "**/SchemaIds.cs",
+      "**/LiveSchema.cs"
     ]
   }
 }
