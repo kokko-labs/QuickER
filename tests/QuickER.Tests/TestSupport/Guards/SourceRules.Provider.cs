@@ -265,7 +265,7 @@ internal static partial class SourceRules
                     "-- の行コメントを組み立てる文"
                 ),
             },
-            // 同期の差分と計画の照合（6 ファイル）は大文字小文字・空白を自前で畳まず SchemaNames を通す。Trim 系・ToLower / ToUpper 系・
+            // 同期の差分と計画の照合（7 ファイル）は大文字小文字・空白を自前で畳まず SchemaNames を通す。Trim 系・ToLower / ToUpper 系・
             // 大小を無視する比較の指定が識別子として現れたら数える（コメント・文字列の中は数えない）。例外は無い
             SourceRule.Forbid(
                 "sync-name-comparison-tokens",
@@ -277,7 +277,8 @@ internal static partial class SourceRules
                     "src/QuickER.Provider/NameMatching.cs",
                     "src/QuickER.Provider/UniqueConstraintNaming.cs",
                     "src/QuickER.Provider/Sync/State/SchemaIds.cs",
-                    "src/QuickER.Provider/Sync/State/LiveSchema.cs"
+                    "src/QuickER.Provider/Sync/State/LiveSchema.cs",
+                    "src/QuickER.Provider/Sync/State/PostSyncSchema.cs"
                 ),
                 GuardFinder.Tokens(token =>
                     token.IsKind(SyntaxKind.IdentifierToken)
@@ -287,7 +288,7 @@ internal static partial class SourceRules
                 )
             ) with
             {
-                MinimumFiles = 6,
+                MinimumFiles = 7,
             },
             // 同期の計画で「この同期で型が決まる列」は CollectTypeDecidingColumns の 1 か所が決める（NULL 許容だけの列の変更は型を
             // 決めない）。外部キーの型の照合の 3 か所がそれぞれ列の変更の新しい型を辞書へ写していたため、NULL 許容だけの変更まで
@@ -296,10 +297,14 @@ internal static partial class SourceRules
             SourceRule.Forbid(
                 "sync-type-deciding-column-copies",
                 "同期の計画で差分の項目の列の新しい型を読むのは、型が決まる列の正本（CollectTypeDecidingColumns）と理由つきの一覧だけ",
-                SourceScope.Files("src", "src/QuickER.Provider/SyncPlanner.cs"),
+                SourceScope.Files(
+                    "src",
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "src/QuickER.Provider/Sync/State/PostSyncSchema.cs"
+                ),
                 GuardFinder.Symbols(DiffItemNewTypeReads.Describe),
                 new(
-                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "src/QuickER.Provider/Sync/State/PostSyncSchema.cs",
                     "CollectTypeDecidingColumns",
                     1,
                     "この同期で型が決まる列の正本そのもの"
@@ -360,24 +365,127 @@ internal static partial class SourceRules
             // 同期の計画は、DB の今の図（live の表・リレーション）を live の状態（LiveSchema）からだけ読む。LiveSchema は計画の入口で
             // 1 回だけ作り、表の索引・列ペアを解いた外部キーの一覧・外部キーの実効名を持つ。各段が文脈の LiveEntities・LiveRelationships を
             // 直接読んで索引や一覧を作り直すと、同じ材料の作り方が段ごとに割れる（表の引き方・外部キーの解き方・実効名の求め方）。
-            // 範囲は計画器と識別の型で、LiveSchema 自身（文脈から読む 1 か所）は範囲に入れない。例外は無い
+            // 範囲は計画器と識別の型と同期後の状態で、LiveSchema 自身（文脈から読む 1 か所）は範囲に入れない。例外は無い
             SourceRule.Forbid(
                 "sync-live-schema-single-source",
                 "同期の計画は DB の今の図を LiveSchema からだけ読む（文脈の LiveEntities・LiveRelationships と外部キーの解決を直接使わない）",
                 SourceScope.Files(
                     "src",
                     "src/QuickER.Provider/SyncPlanner.cs",
-                    "src/QuickER.Provider/Sync/State/SchemaIds.cs"
+                    "src/QuickER.Provider/Sync/State/SchemaIds.cs",
+                    "src/QuickER.Provider/Sync/State/PostSyncSchema.cs"
                 ),
                 GuardFinder.Nodes(LiveSchemaBypasses.Describe)
             ) with
             {
-                MinimumFiles = 2,
-                // live の状態の読みを見つけられること（いまは計画器に 35。計画器が LiveSchema を使わなくなったら空振りになる）
+                MinimumFiles = 3,
+                // live の状態の読みを見つけられること（いまは計画器に 29・同期後の状態に 2。計画器が LiveSchema を使わなくなったら空振りになる）
                 Floor = new(
                     GuardFinder.Nodes(LiveSchemaBypasses.DescribeCandidate),
-                    30,
+                    26,
                     "計画器の LiveSchema の読み"
+                ),
+            },
+            // 同期の計画は、同期後の事実（同期後の主キー・一意制約・NULL 許容・型が決まる列・外す制約・消える表と列）を PostSyncSchema から
+            // だけ求め、どの時点の項目の並びから求めるか（PlanStage）を呼び出しに書く。求める所を「含むメソッド: 時点」で集め、理由つきの
+            // 一覧と照合する。一覧に無い時点から求め直すと、同じ材料の答えが段ごとに割れうる（時点で中身が変わる材料：外す一意制約・
+            // 同期後の一意制約・項目が外す外部キー）。時点を PlanStage.X の形で書かない From は「?」として必ず名指しする
+            SourceRule.Forbid(
+                "sync-post-sync-schema-single-source",
+                "同期の計画は同期後の事実を PostSyncSchema から、一覧に載せた時点の並びからだけ求める",
+                SourceScope.Files("src", "src/QuickER.Provider/SyncPlanner.cs"),
+                GuardFinder.Nodes(PostSyncSchemaCalls.Describe),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "BuildPlan: Selected",
+                    1,
+                    "選んだ項目の最終形（暗黙の削除まで足した並び）の同期後の事実を、警告・外し直しの注入・並べ替え・再構築の合成で共有する。作った後に selected へ項目を足さない"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "ExcludeItemsRequiringUnselected: ExclusionRound",
+                    1,
+                    "除外の周の途中の並びで、追加する表を引く（追加する表は展開や暗黙の項目で変わらない）"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "ExcludeItemsRequiringUnselected: ExclusionRoundExpanded",
+                    1,
+                    "前提の判定は作り直しを外す削除と付ける追加に分けて見るので、周の途中の並びを展開した並びから同期後の一意制約・外す一意制約と外部キー・消える表と列を求める（暗黙の削除の前の並び）"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "ExcludeItemsRequiringUnselected: PostSyncPrimaryKeyOf",
+                    1,
+                    "同期後の主キーを、この段で外さない主キーの変更だけの独自の辞書（構成列が同期後に在るもの・同じ表は先勝ち）から引く。依存の除外は前提が同期後に在るかを問うので、正本の辞書（全部・後勝ち）と別にしている"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "ExcludeChangesBreakingLiveDependents: ExclusionRound",
+                    1,
+                    "除外の周の途中の並びで、ビュー・トリガー・索引を壊すかを同期後の列名で試す（列名は展開で変わらない）"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "ExcludeTablesWithCollidingConstraintNames: ExclusionRoundExpanded",
+                    1,
+                    "同期後も残る DB の制約を、周の途中の並びを展開した並び（作り直しの削除を含む）から求める"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "ExcludeForeignKeysWithPostSyncTypeMismatch: ExclusionRound",
+                    1,
+                    "除外の周の途中の並びで、選んだ外部キーの追加・作り直しの両端の型を型が決まる列から読む（型が決まる列は後の段で足す項目で変わらない）"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "FindSetNullForeignKeysOnNotNullColumns: ExclusionRound",
+                    1,
+                    "除外の周の中（外す）と周の後（警告だけ）で、展開の前の並びから同期後の NULL 許容を読む（後の段で足す NOT NULL 化は新しい主キーの列だけで、答えを変えない）"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "InjectVanishingForeignKeyDrops: Expanded",
+                    1,
+                    "展開と主キーの NOT NULL 化の後で、端が消える外部キーを、利用者が既に外す外部キーと比べて足す（自分が足す前の並びを見る）"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "InjectVanishingUniqueConstraintDrops: WithVanishingForeignKeyDrops",
+                    1,
+                    "構成列が消える一意制約を、それまでの並びが既に外す一意制約と比べて足す（自分が足す前の並びを見る）"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "InjectUniqueConstraintsReplacedByPrimaryKey: WithVanishingUniqueDrops",
+                    1,
+                    "主キーが置き換える一意制約を、それまでの並びが既に外す一意制約と比べて足す（自分が足す前の並びを見る）"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "MoveCertainFailureFirst: WithRebuilds",
+                    1,
+                    "前寄せは計画が一度外す外部キー（暗黙の外し直しを含む）を残す外部キーから除くので、付け直しを足した後の並びから求める。一意制約の作り直しを取り下げた再帰でも、取り下げた後の並びから作り直す"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "WarnConstraintsAroundRefusableChanges: Arranged",
+                    1,
+                    "並べ終えた計画の文の列そのものを見て、断られうる文の前後で外して付け直す制約を名指しする"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "ApplySelectedUniqueConstraintDrops: ExplicitlyDroppedUniqueConstraints",
+                    1,
+                    "再構築の合成で、作り直す表の一意制約の削除の項目 1 件ごとに外す一意制約の照合キーを作る（時点の並びでなく項目 1 件）"
+                )
+            ) with
+            {
+                // 同期後の事実を求める呼び出しを見つけられること（いまは計画器に 14。PostSyncSchema を使わなくなったら空振りになる）
+                Floor = new(
+                    GuardFinder.Nodes(PostSyncSchemaCalls.DescribeCandidate),
+                    10,
+                    "計画器の PostSyncSchema の呼び出し"
                 ),
             },
             // DB の取込・DDL・差分・同期の計画は、列が NULL を持てるかを ColumnNullability.AllowsNull で読み、NULL 許容の印

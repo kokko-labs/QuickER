@@ -340,11 +340,12 @@ internal static class SyncPlanFuzzRunner
             liveSchema.DataFailures
         );
 
-        // 静的な規則のうち DB に依らない規則（警告の正しさ W1・前寄せ M1・新しい外部キーの追加と付け直しの並び）の違反は、実 DB の
+        // 静的な規則のうち DB に依らない規則（警告の正しさ W1・W2・前寄せ M1・新しい外部キーの追加と付け直しの並び）の違反は、実 DB の
         // 結果にも加える（DB の断る文の並びの違反は実 DB の表明 1・1b が見るので加えない）
         outcome.Violations.AddRange(
             staticVerdict.Violations.Where(v =>
                 v.StartsWith(SyncPlanStaticRules.W1Prefix, StringComparison.Ordinal)
+                || v.StartsWith(SyncPlanStaticRules.W2Prefix, StringComparison.Ordinal)
                 || v.StartsWith(SyncPlanStaticRules.M1Prefix, StringComparison.Ordinal)
                 || v.StartsWith(SyncPlanStaticRules.D9OrderPrefix, StringComparison.Ordinal)
             )

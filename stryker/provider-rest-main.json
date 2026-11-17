@@ -17,6 +17,7 @@
       "!**/SyncPlanner.cs",
       "!**/SchemaIds.cs",
       "!**/LiveSchema.cs",
+      "!**/PostSyncSchema.cs",
       "!**/SchemaDiffService.cs",
       "!**/SchemaSignature.cs",
       "!**/DiagramMergeReconciler.cs",
