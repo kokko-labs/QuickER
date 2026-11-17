@@ -81,6 +81,11 @@ internal sealed record SyncPlanStaticVerdict(
 /// 「予言された失敗」として通っていた（P5-2 の試運転の L4・2 回目の V1）。
 /// </para>
 /// <para>
+/// 警告の正しさの規則 W2（<see cref="ReplacedUniquesNotDropped"/>）も、予言の有無に依らず掛ける：
+/// <see cref="SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey"/> が名指しした一意制約は、計画の文の列で、その表の主キーの付与より
+/// 前に外されている。
+/// </para>
+/// <para>
 /// 状態の初期値は渡された DB 側の図（実 DB なら取込の結果、能力の網なら生成器が作った図）。名前の無い制約は DDL と同じ実効名
 /// （<see cref="ConstraintNames"/>・<see cref="UniqueConstraintNaming"/>）で置く。再構築の方言（SQLite）は計画が文の並びを持たないので、
 /// 何も判定しない。
@@ -195,6 +200,9 @@ internal static class SyncPlanStaticRules
             warningViolations.AddRange(ReAddsAfterNewAdds(steps, plan, capabilities));
         }
 
+        // W2（主キーが置き換えると名指しした一意制約の削除）も、失敗の予言の有無に依らず掛ける
+        warningViolations.AddRange(ReplacedUniquesNotDropped(steps, plan));
+
         if (reason is null)
         {
             return warningViolations.Count == 0
@@ -237,6 +245,57 @@ internal static class SyncPlanStaticRules
 
     /// <summary>D9 の並び（付け直しの後ろへ回す新しい外部キーの追加）の違反の文の頭</summary>
     public const string D9OrderPrefix = "static D9 (order):";
+
+    /// <summary>W2 の違反の文の頭</summary>
+    public const string W2Prefix = "static W2:";
+
+    /// <summary>
+    /// W2：<see cref="SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey"/> が名指しした一意制約は、計画の文の列で、その表の
+    /// 主キーの付与より前に外されている
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 警告は「新しい主キーが置き換えるので、この一意制約を外す」と告げる。外す文が計画に無いか、主キーの付与より後ろにあると、同じ列の
+    /// 並びに一意制約を 2 つ張れない方言（Oracle の ORA-02261）で主キーの付与が断られる。警告は失敗を予告しない種類
+    /// （<see cref="NonPredictingWarnings"/>）で、文を順に当てる規則は主キーの付与と残る一意制約の列集合の重なりを見ないので、警告と
+    /// 計画の文の食い違いをここで直接見る。
+    /// </para>
+    /// <para>
+    /// 照合は、警告の表と同じ表の一意制約の削除の文のうち、警告の Detail（「名前 (列, …)」）の末尾がその文の構成列の並びと同じもの
+    /// （製品は警告と削除の項目を同じ構成列から作る。Detail を列へ分けて読まないので、括弧やカンマを含む列名でも取り違えない）。
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<string> ReplacedUniquesNotDropped(List<Step> steps, SyncPlan plan)
+    {
+        foreach (
+            var warning in plan.Warnings.Where(w =>
+                w.Kind == SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey
+            )
+        )
+        {
+            var table = Lower(warning.TableName);
+            var keyAdd = steps.FindIndex(s =>
+                s.Kind == SchemaDiffKind.AlterPrimaryKey
+                && s.Section.PrimaryKeyPhase == PrimaryKeyPhase.Add
+                && s.Table == table
+            );
+            var dropped = steps
+                .Take(keyAdd < 0 ? steps.Count : keyAdd)
+                .Any(s =>
+                    s.Kind == SchemaDiffKind.DropUniqueConstraint
+                    && s.Table == table
+                    && warning.Detail.EndsWith(
+                        $"({string.Join(", ", s.Item.UniqueConstraintColumns)})",
+                        StringComparison.Ordinal
+                    )
+                );
+
+            if (!dropped)
+            {
+                yield return $"{W2Prefix} {warning.Kind}({warning.TableName}: {warning.Detail}) names a unique constraint that the plan does not drop before it adds the primary key";
+            }
+        }
+    }
 
     /// <summary>
     /// M1：前寄せしたセクション（<see cref="SyncPlanSection.IsMovedFirst"/>）のどれかの文が、計画の順のその位置で断られると予言される（前寄せの後ろへ進まない）。

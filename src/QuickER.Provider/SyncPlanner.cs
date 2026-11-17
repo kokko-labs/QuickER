@@ -247,7 +247,7 @@ public sealed class SyncPlanner
             selected,
             liveSchema,
             includeDroppedChildTables: !isRebuildDialect,
-            capabilities.IdentifierLengthLimit
+            capabilities
         );
 
         // 選んだ列の削除で構成列が消える live の一意制約も、削除を選んでいなくても暗黙に外して名指しする
@@ -255,7 +255,7 @@ public sealed class SyncPlanner
             selected,
             liveSchema,
             warnings,
-            capabilities.IdentifierLengthLimit
+            capabilities
         );
 
         // 主キーと同じ列集合の一意制約を持てない逐次 DDL の方言（Oracle）では、選んだ主キーの変更の新しい主キーと同じ列集合の
@@ -266,22 +266,26 @@ public sealed class SyncPlanner
                 selected,
                 liveSchema,
                 warnings,
-                capabilities.IdentifierLengthLimit
+                capabilities
             );
         }
 
+        // 選んだ項目の最終形の同期後の事実を 1 つ作り、警告・外し直しの注入・並べ替え・再構築の合成で共有する。
+        // これ以降 selected へ項目を足さない（足すのは sectionItems の側）。selected へ項目を足す段を入れるなら、その後の並びから作り直す
+        var postSync = PostSyncSchema.From(PlanStage.Selected, selected, liveSchema, capabilities);
+
         // 選んだ列の変更（主キーの変更に伴う暗黙の NOT NULL 化を含む）で、DB にある SET NULL の外部キーの子の列が
         // NOT NULL になるときは名指しする（方言に依らない。作れない方言で外し直さないのは暗黙の付け直しの段）
-        WarnSetNullOnNotNullLiveForeignKeys(selected, capabilities, liveSchema, warnings);
+        WarnSetNullOnNotNullLiveForeignKeys(postSync, capabilities, liveSchema, warnings);
 
         // 一意制約の削除が既存 FK の被参照列を候補キーでなくしうる場合は警告する（方言に依らず同じ危険）
-        WarnUniqueConstraintDropsBreakingForeignKeys(selected, liveSchema, warnings, capabilities);
+        WarnUniqueConstraintDropsBreakingForeignKeys(postSync, liveSchema, warnings, capabilities);
 
         // 選んだ外部キーの追加・作り直しの参照先が、同期後に候補キーでない場合も警告する（暗黙の付け直しと同じ証明）
-        WarnAddedForeignKeysNotOnCandidateKey(selected, capabilities, liveSchema, warnings);
+        WarnAddedForeignKeysNotOnCandidateKey(postSync, capabilities, liveSchema, warnings);
 
         // SET DEFAULT の外部キーの NOT NULL の子の列は、DEFAULT 制約が無いと作れない方言（SQL Server）で名指しする
-        WarnSetDefaultOnNotNullColumns(selected, capabilities, liveSchema, warnings);
+        WarnSetDefaultOnNotNullColumns(postSync, capabilities, warnings);
 
         // ドットを含む表名を表せない方言（SQLite）では、選んだ項目が触れるその表を名指しする
         WarnSchemaQualifiedTableNames(selected, capabilities, warnings);
@@ -305,7 +309,7 @@ public sealed class SyncPlanner
 
             // 主キー変更・（方言によっては）列定義変更に巻き込まれる live FK を、暗黙の DROP → 再 ADD として注入する
             var sectionItems = InjectImplicitForeignKeyRebuilds(
-                selected,
+                postSync,
                 capabilities,
                 liveSchema,
                 warnings
@@ -314,7 +318,7 @@ public sealed class SyncPlanner
             // 列定義変更に巻き込まれる live の一意制約も、同じ流儀で暗黙の DROP → 再 ADD として注入する
             sectionItems = InjectImplicitUniqueConstraintRebuilds(
                 sectionItems,
-                selected,
+                postSync,
                 capabilities,
                 liveSchema
             );
@@ -322,7 +326,7 @@ public sealed class SyncPlanner
             // 列定義変更に巻き込まれる live の主キーは、同じ構成のままの主キー変更として外して付け直す
             sectionItems = InjectImplicitPrimaryKeyRebuilds(
                 sectionItems,
-                selected,
+                postSync,
                 capabilities,
                 liveSchema
             );
@@ -331,7 +335,7 @@ public sealed class SyncPlanner
             // 外部キーの追加（明示の追加・作り直し・暗黙の付け直し）を参照先の同期後のキーの並びへ並べ替える
             if (capabilities.ReferencedKeyRequiresSameColumnOrder)
             {
-                sectionItems = ArrangeForeignKeysToPostSyncKeys(sectionItems, selected, liveSchema);
+                sectionItems = ArrangeForeignKeysToPostSyncKeys(sectionItems, postSync, liveSchema);
             }
 
             var sections = BuildSections(sectionItems);
@@ -344,9 +348,9 @@ public sealed class SyncPlanner
                 sections = MoveCertainFailureFirst(
                     ArrangeForeignKeyAddsByFailureRisk(
                         sections,
-                        selected,
+                        postSync,
                         liveSchema,
-                        capabilities.IdentifierLengthLimit
+                        capabilities
                     ),
                     sectionItems,
                     [.. beforeExpansion.Where(i => i.Kind == SchemaDiffKind.AlterUniqueConstraint)],
@@ -384,7 +388,7 @@ public sealed class SyncPlanner
         }
 
         return BuildRebuildPlan(
-            selected,
+            postSync,
             capabilities,
             context,
             liveSchema,
@@ -564,17 +568,21 @@ public sealed class SyncPlanner
                 g => g.First().Entity!.GetPrimaryKeyColumnsInOrder().Select(c => c.Name).ToList(),
                 SchemaNames.Comparer
             );
-        var addedEntities = CollectAddedTables(selected);
-        var postSyncUniques = BuildPostSyncUniqueConstraints(ExpandAlters(selected), liveSchema);
-        // 選んだ削除・作り直しで外す DB の一意制約（照合キー）
-        var droppedUniques = ExplicitlyDroppedUniqueConstraints(ExpandAlters(selected));
-        // 同期後も残る DB の外部キー・一意制約（選んだ削除・作り直しで外れず、表・構成列も消えないもの）。名前・定義の重なりの判定に使う
-        var remaining = RemainingLiveConstraints.From(
-            selected,
-            droppedUniques,
-            capabilities.IdentifierLengthLimit,
-            liveSchema
+        var addedEntities = PostSyncSchema
+            .From(PlanStage.ExclusionRound, selected, liveSchema, capabilities)
+            .AddedTables;
+        // 作り直しを展開した並びの同期後の事実（同期後の一意制約・外す一意制約と外部キー・消える表と列）
+        var expanded = PostSyncSchema.From(
+            PlanStage.ExclusionRoundExpanded,
+            ExpandAlters(selected),
+            liveSchema,
+            capabilities
         );
+        var postSyncUniques = expanded.UniqueColumnSets;
+        // 選んだ削除・作り直しで外す DB の一意制約（照合キー）
+        var droppedUniques = expanded.DroppedUniqueConstraints;
+        // 同期後も残る DB の外部キー・一意制約（選んだ削除・作り直しで外れず、表・構成列も消えないもの）。名前・定義の重なりの判定に使う
+        var remaining = RemainingLiveConstraints.From(expanded, capabilities, liveSchema);
 
         var kept = new List<SchemaDiffItem>(selected.Count);
 
@@ -879,7 +887,8 @@ public sealed class SyncPlanner
 
         // 同期後の主キーの列名（この段で外さない主キーの変更を選んでいればその構成、追加する表は図の構成、無ければ live の構成）
         IReadOnlyList<string> PostSyncPrimaryKey(string table) =>
-            PostSyncPrimaryKeyOf(table, primaryKeyChanges, addedEntities, liveByName) ?? [];
+            PostSyncSchema.PostSyncPrimaryKeyOf(table, primaryKeyChanges, addedEntities, liveByName)
+            ?? [];
     }
 
     /// <summary>
@@ -998,6 +1007,7 @@ public sealed class SyncPlanner
                         excluded
                     ),
                     context,
+                    capabilities,
                     liveSchema,
                     warnings,
                     excluded
@@ -1082,6 +1092,7 @@ public sealed class SyncPlanner
     private static List<SchemaDiffItem> ExcludeChangesBreakingLiveDependents(
         List<SchemaDiffItem> selected,
         SyncPlanContext? context,
+        SyncDialectCapabilities capabilities,
         LiveSchema? liveSchema,
         List<SyncPlanWarning> warnings,
         List<SchemaDiffItem> excluded
@@ -1092,7 +1103,9 @@ public sealed class SyncPlanner
             return selected;
         }
 
-        var changes = PostSyncColumnNames(selected, liveSchema.Tables);
+        var changes = PostSyncSchema
+            .From(PlanStage.ExclusionRound, selected, liveSchema, capabilities)
+            .ChangedTableColumnNames;
 
         if (changes.Count == 0 || check.DependentsBrokenBy(ToTableChanges(changes)).IsEmpty)
         {
@@ -1199,70 +1212,8 @@ public sealed class SyncPlanner
     }
 
     /// <summary>表の列の名前の集合か表の有無を変える項目の種別（列の削除・列の追加・表の削除）か</summary>
-    private static bool IsColumnNameSetChange(SchemaDiffKind kind) =>
+    internal static bool IsColumnNameSetChange(SchemaDiffKind kind) =>
         kind is SchemaDiffKind.DropColumn or SchemaDiffKind.AddColumn or SchemaDiffKind.DropTable;
-
-    /// <summary>
-    /// 選んだ項目で列の名前の集合が変わる live の表と、その同期後の列名（表の削除は <c>null</c>）を、項目に最初に現れた順に返す
-    /// </summary>
-    /// <remarks>
-    /// 同期後の列名は「live の列 − 選んだ列の削除 ＋ 選んだ列の追加」（<see cref="ExcludeDropsLeavingNoColumns"/> と同じ数え方）。
-    /// 列が 1 本も残らない表は数えない（その削除は <see cref="ExcludeDropsLeavingNoColumns"/> が外す）。live に無い表（追加する表）は
-    /// ビューが読んでいないので数えない。表の名前は live の綴りで返す。
-    /// </remarks>
-    private static List<(string Table, IReadOnlyList<string>? Columns)> PostSyncColumnNames(
-        List<SchemaDiffItem> selected,
-        NameLookup<Entity> liveByName
-    )
-    {
-        var changes = new List<(string Table, IReadOnlyList<string>? Columns)>();
-
-        foreach (
-            var items in selected
-                .Where(i => IsColumnNameSetChange(i.Kind))
-                .GroupBy(i => SchemaNames.ToStoredForm(i.TableName), SchemaNames.Comparer)
-        )
-        {
-            if (!liveByName.TryGet(items.Key, out var live))
-            {
-                continue;
-            }
-
-            if (items.Any(i => i.Kind == SchemaDiffKind.DropTable))
-            {
-                changes.Add((live.TableName, null));
-                continue;
-            }
-
-            var dropped = items
-                .Where(i => i.Kind == SchemaDiffKind.DropColumn && i.ColumnName is not null)
-                .Select(i => i.ColumnName!)
-                .ToList();
-            var columns = live
-                .Columns.Select(c => c.Name)
-                .Where(name => !dropped.Any(d => SchemaNames.AreSame(d, name)))
-                .ToList();
-
-            foreach (
-                var added in items
-                    .Where(i => i.Kind == SchemaDiffKind.AddColumn)
-                    .Select(i => i.Column?.Name ?? i.ColumnName)
-            )
-            {
-                if (added is not null && !columns.Any(c => SchemaNames.AreSame(c, added)))
-                {
-                    columns.Add(added);
-                }
-            }
-
-            if (columns.Count > 0)
-            {
-                changes.Add((live.TableName, columns));
-            }
-        }
-
-        return changes;
-    }
 
     /// <summary>
     /// 一意制約の名前が、同期後も残る DB の制約と方言の名前の範囲で重なる表の追加（<see cref="SchemaDiffKind.AddTable"/>）を、その制約の削除を
@@ -1290,9 +1241,13 @@ public sealed class SyncPlanner
 
         var limit = capabilities.IdentifierLengthLimit;
         var remaining = RemainingLiveConstraints.From(
-            selected,
-            ExplicitlyDroppedUniqueConstraints(ExpandAlters(selected)),
-            limit,
+            PostSyncSchema.From(
+                PlanStage.ExclusionRoundExpanded,
+                ExpandAlters(selected),
+                liveSchema,
+                capabilities
+            ),
+            capabilities,
             liveSchema
         );
         var dropped = new HashSet<SchemaDiffItem>(ReferenceEqualityComparer.Instance);
@@ -1540,6 +1495,7 @@ public sealed class SyncPlanner
     /// 並ぶので、親と子を一緒に消すときに親を先に消して失敗する順序の問題も消える）。再構築の方言（SQLite）では
     /// 外さない（消す表を作り直す意味が無く、表の削除が外部キーごと消す）。
     /// </param>
+    /// <param name="capabilities">方言のケーパビリティ（外部キーの実効名を求める識別子の上限）</param>
     /// <remarks>
     /// <para>
     /// 端が消える外部キーは同期後に残れないので、差分の外部キーの削除（既定で未選択）を選んでいなくても外す。
@@ -1557,22 +1513,25 @@ public sealed class SyncPlanner
         List<SchemaDiffItem> selected,
         LiveSchema? liveSchema,
         bool includeDroppedChildTables,
-        IdentifierLengthLimit limit
+        SyncDialectCapabilities capabilities
     )
     {
+        var limit = capabilities.IdentifierLengthLimit;
+
         if (liveSchema is null)
         {
             return selected;
         }
 
-        var dropped = DroppedObjects.From(selected);
+        var postSync = PostSyncSchema.From(PlanStage.Expanded, selected, liveSchema, capabilities);
+        var dropped = postSync.Dropped;
 
         if (dropped.IsEmpty)
         {
             return selected;
         }
 
-        var explicitlyDropped = CollectExplicitlyDroppedForeignKeys(selected, limit);
+        var explicitlyDropped = postSync.DroppedForeignKeys;
         var drops = new List<SchemaDiffItem>();
 
         foreach (var fk in liveSchema.ForeignKeys)
@@ -1634,22 +1593,30 @@ public sealed class SyncPlanner
         List<SchemaDiffItem> selected,
         LiveSchema? liveSchema,
         List<SyncPlanWarning> warnings,
-        IdentifierLengthLimit limit
+        SyncDialectCapabilities capabilities
     )
     {
+        var limit = capabilities.IdentifierLengthLimit;
+
         if (liveSchema is null)
         {
             return selected;
         }
 
-        var dropped = DroppedObjects.From(selected);
+        var postSync = PostSyncSchema.From(
+            PlanStage.WithVanishingForeignKeyDrops,
+            selected,
+            liveSchema,
+            capabilities
+        );
+        var dropped = postSync.Dropped;
 
         if (dropped.Columns.Count == 0)
         {
             return selected;
         }
 
-        var explicitlyDropped = ExplicitlyDroppedUniqueConstraints(selected);
+        var explicitlyDropped = postSync.DroppedUniqueConstraints;
         var drops = new List<SchemaDiffItem>();
 
         foreach (var entity in liveSchema.Entities)
@@ -1726,22 +1693,30 @@ public sealed class SyncPlanner
         List<SchemaDiffItem> selected,
         LiveSchema? liveSchema,
         List<SyncPlanWarning> warnings,
-        IdentifierLengthLimit limit
+        SyncDialectCapabilities capabilities
     )
     {
+        var limit = capabilities.IdentifierLengthLimit;
+
         if (liveSchema is null)
         {
             return selected;
         }
 
-        var pkChangedTables = CollectPrimaryKeyChanges(selected);
+        var postSync = PostSyncSchema.From(
+            PlanStage.WithVanishingUniqueDrops,
+            selected,
+            liveSchema,
+            capabilities
+        );
+        var pkChangedTables = postSync.PrimaryKeyChanges;
 
         if (pkChangedTables.Count == 0)
         {
             return selected;
         }
 
-        var explicitlyDropped = ExplicitlyDroppedUniqueConstraints(selected);
+        var explicitlyDropped = postSync.DroppedUniqueConstraints;
         var liveByName = liveSchema.Tables;
         var drops = new List<SchemaDiffItem>();
 
@@ -1842,9 +1817,9 @@ public sealed class SyncPlanner
     /// 定義を変えて付け直す追加（選んだ作り直し）→ 新しい外部キーの追加 → 参照先が同期後の候補キーだと証明できない追加。
     /// </summary>
     /// <param name="sections">セクション</param>
-    /// <param name="selected">選択済みの項目（同期後の主キー・一意制約の合成に使う）</param>
+    /// <param name="postSync">選択済みの項目の同期後の事実（同期後の主キー・一意制約）</param>
     /// <param name="liveSchema">live スキーマ（無ければ並べ替えない）</param>
-    /// <param name="limit">外部キーの実効名を求める識別子の上限</param>
+    /// <param name="capabilities">方言のケーパビリティ（外部キーの実効名を求める識別子の上限）</param>
     /// <remarks>
     /// <para>
     /// DDL が暗黙コミットされる方言では、断られた追加の後ろにある外部キーの付け直し（同じ計画で先に外したもの）が走らず、外した
@@ -1865,20 +1840,19 @@ public sealed class SyncPlanner
     /// </remarks>
     private static List<SyncPlanSection> ArrangeForeignKeyAddsByFailureRisk(
         List<SyncPlanSection> sections,
-        IReadOnlyList<SchemaDiffItem> selected,
+        PostSyncSchema postSync,
         LiveSchema? liveSchema,
-        IdentifierLengthLimit limit
+        SyncDialectCapabilities capabilities
     )
     {
+        var limit = capabilities.IdentifierLengthLimit;
+
         if (liveSchema is null)
         {
             return sections;
         }
 
-        var pkChangedTables = CollectPrimaryKeyChanges(selected);
-        var addedTables = CollectAddedTables(selected);
-        var liveByName = liveSchema.Tables;
-        var postSyncUniques = BuildPostSyncUniqueConstraints(selected, liveSchema);
+        var postSyncUniques = postSync.UniqueColumnSets;
         var drops = sections
             .Where(s => s.Kind == SchemaDiffKind.DropForeignKey)
             .SelectMany(s => s.Items)
@@ -1955,12 +1929,7 @@ public sealed class SyncPlanner
             }
 
             var parentTable = SchemaDiffService.NormalizeTable(add.ParentEntity);
-            var postSyncKey = PostSyncPrimaryKeyOf(
-                parentTable,
-                pkChangedTables,
-                addedTables,
-                liveByName
-            );
+            var postSyncKey = postSync.PrimaryKeyOf(parentTable);
             var referencedColumns = ForeignKeyColumnPairResolver
                 .ParentColumns(SyncScriptBuilderHelper.ResolveColumnPairs(add))
                 .ToList();
@@ -2036,7 +2005,13 @@ public sealed class SyncPlanner
         }
 
         var limit = capabilities.IdentifierLengthLimit;
-        var dropped = CollectExplicitlyDroppedForeignKeys(sectionItems, limit);
+        var postSync = PostSyncSchema.From(
+            PlanStage.WithRebuilds,
+            sectionItems,
+            liveSchema,
+            capabilities
+        );
+        var dropped = postSync.DroppedForeignKeys;
         var retained = liveSchema
             .ForeignKeys.Select(fk =>
                 (
@@ -2058,11 +2033,7 @@ public sealed class SyncPlanner
         }
 
         var liveByName = liveSchema.Tables;
-        var typeDecidingColumns = CollectTypeDecidingColumns(
-            sectionItems,
-            liveByName,
-            capabilities
-        );
+        var typeDecidingColumns = postSync.TypeDecidingColumns;
 
         // この計画で外すキー（一意制約は照合キー・主キーは表）
         var droppedUniques = sectionItems
@@ -2625,11 +2596,9 @@ public sealed class SyncPlanner
         var limit = capabilities.IdentifierLengthLimit;
         var liveByName = liveSchema.Tables;
         var steps = sections.SelectMany(s => s.Items.Select(i => (Section: s, Item: i))).ToList();
-        var typeDecidingColumns = CollectTypeDecidingColumns(
-            [.. steps.Select(s => s.Item)],
-            liveByName,
-            capabilities
-        );
+        var typeDecidingColumns = PostSyncSchema
+            .From(PlanStage.Arranged, steps.Select(s => s.Item), liveSchema, capabilities)
+            .TypeDecidingColumns;
 
         // 列が空でないと通らない列の変更の位置と、その文面（表.列: 旧 → 新）
         var emptyColumnChanges = new List<(int Index, string Text)>();
@@ -2810,7 +2779,7 @@ public sealed class SyncPlanner
     /// <summary>既存の行（とモデルの外の依存）で断られうる文の位置と文面（列が空でないと通らない変更を含めて数える）</summary>
     /// <param name="steps">並べ終えた計画の文</param>
     /// <param name="liveByName">live の表</param>
-    /// <param name="typeDecidingColumns">この同期で型が決まる列（<see cref="CollectTypeDecidingColumns"/>）</param>
+    /// <param name="typeDecidingColumns">この同期で型が決まる列（<see cref="PostSyncSchema.TypeDecidingColumns"/>）</param>
     /// <param name="capabilities">方言のケーパビリティ</param>
     /// <remarks>
     /// <para>
@@ -2830,7 +2799,7 @@ public sealed class SyncPlanner
     private static IEnumerable<(int Index, string Text)> RowDependentChanges(
         List<(SyncPlanSection Section, SchemaDiffItem Item)> steps,
         NameLookup<Entity> liveByName,
-        Dictionary<ColumnId, string> typeDecidingColumns,
+        IReadOnlyDictionary<ColumnId, string> typeDecidingColumns,
         SyncDialectCapabilities capabilities
     )
     {
@@ -2929,7 +2898,7 @@ public sealed class SyncPlanner
             Entity? liveTable,
             string table,
             IReadOnlyList<string> columns,
-            Dictionary<ColumnId, string> typeDecidingColumns
+            IReadOnlyDictionary<ColumnId, string> typeDecidingColumns
         )
         {
             if (
@@ -3013,7 +2982,7 @@ public sealed class SyncPlanner
     /// </para>
     /// </remarks>
     private static List<SchemaDiffItem> InjectImplicitForeignKeyRebuilds(
-        List<SchemaDiffItem> selected,
+        PostSyncSchema postSync,
         SyncDialectCapabilities capabilities,
         LiveSchema? liveSchema,
         List<SyncPlanWarning> warnings
@@ -3021,16 +2990,17 @@ public sealed class SyncPlanner
     {
         // 外部キーの既定名は同期の方言の上限で縮める
         var limit = capabilities.IdentifierLengthLimit;
+        var selected = postSync.Items;
 
         if (liveSchema is null)
         {
             // live 情報が無ければ既存 FK を復元できない（逐次方言では VM が常に渡すため実質防御）
-            return selected;
+            return [.. selected];
         }
 
         // (a) 主キー構成が変わるテーブル → 新しい主キー列名の集合
         // （そのテーブルを参照する FK は方言を問わず一旦外す必要がある。列集合は候補キー喪失の判定に使う）
-        var pkChangedTables = CollectPrimaryKeyChanges(selected);
+        var pkChangedTables = postSync.PrimaryKeyChanges;
 
         // (b) 外し直しの理由になる、定義が変わる列（FK 参加列の型変更が依存エラーになる方言のみ対象。NULL 許容だけの変更も含む）
         var alteredColumns = new HashSet<ColumnId>();
@@ -3050,7 +3020,7 @@ public sealed class SyncPlanner
         var liveByName = liveSchema.Tables;
 
         // この同期で型が決まる列（同期後の両端の型の照合は方言に依らずこれだけを使う。NULL 許容だけの変更は型を決めない）
-        var typeDecidingColumns = CollectTypeDecidingColumns(selected, liveByName, capabilities);
+        var typeDecidingColumns = postSync.TypeDecidingColumns;
 
         // (c) 外部キーを支える索引が消える表 → 消える索引の列（旧主キー・削除する一意制約。MySQL のみ対象）
         var lostIndexes = capabilities.ForeignKeyRequiresLeadingIndex
@@ -3059,7 +3029,7 @@ public sealed class SyncPlanner
 
         // 明示的に DROP が選択されている FK（自動 DROP の重複も再 ADD も行わない）。
         // 端が消える外部キーは InjectVanishingForeignKeyDrops が先に外す項目として足しているのでここに含まれる
-        var explicitlyDropped = CollectExplicitlyDroppedForeignKeys(selected, limit);
+        var explicitlyDropped = postSync.DroppedForeignKeys;
 
         // 型の食い違いの名指しはここの 1 か所（方言に依らない）：明示に外さない live の外部キーに、端の型がこの同期で決まり
         // 同期後に両端が並べられない組があれば名指しする。その外部キーは外し直さない（下の 1 本ごとの判定）か、
@@ -3114,17 +3084,14 @@ public sealed class SyncPlanner
             && intermediateBlocked.Count == 0
         )
         {
-            return selected;
+            return [.. selected];
         }
 
         // 候補キーの証明に使う「同期後に存在する一意制約」（テーブル → 列集合シグネチャの集合）
-        var postSyncUniques = BuildPostSyncUniqueConstraints(selected, liveSchema);
-
-        // 候補キーの証明に使う同期後の主キーの材料（主キーの変更・追加する表・live の表）
-        var addedTables = CollectAddedTables(selected);
+        var postSyncUniques = postSync.UniqueColumnSets;
 
         // 同期後の列の NULL 許容（SET NULL の外部キーの子の列が NOT NULL になるかの判定に使う）
-        var postSyncNullable = PostSyncNullability(selected, liveSchema);
+        Func<Entity, string, string, bool> postSyncNullable = postSync.AllowsNull;
 
         var autoDrops = new List<SchemaDiffItem>();
         var autoAdds = new List<SchemaDiffItem>();
@@ -3248,7 +3215,7 @@ public sealed class SyncPlanner
             // 暗黙コミットの方言（MySQL・Oracle）で消えたまま残る
             if (
                 !StaysCandidateKey(
-                    PostSyncPrimaryKeyOf(parentTable, pkChangedTables, addedTables, liveByName),
+                    postSync.PrimaryKeyOf(parentTable),
                     postSyncUniques,
                     parentTable,
                     referencedColumns
@@ -3285,7 +3252,7 @@ public sealed class SyncPlanner
 
         if (autoDrops.Count == 0)
         {
-            return selected;
+            return [.. selected];
         }
 
         // 自動 DROP は DropForeignKey セクションの先頭側・再 ADD は AddForeignKey セクションの末尾側へ置く
@@ -3419,59 +3386,12 @@ public sealed class SyncPlanner
     }
 
     /// <summary>
-    /// この同期で型が決まる列（列の照合キー → 同期後の型）を集める：列の変更の項目のうち、live に無い列か、live の型と
-    /// <see cref="SyncDialectCapabilities.AreSameType"/> で同じでない型へ変える列
-    /// </summary>
-    /// <param name="items">項目（列の変更以外は読まない）</param>
-    /// <param name="liveByName">live の表の索引</param>
-    /// <param name="capabilities">型の比較に使う方言のケーパビリティ</param>
-    /// <remarks>
-    /// 外部キーの両端の型の照合（<see cref="HasPostSyncTypeMismatch"/>・<see cref="ExcludeForeignKeysWithPostSyncTypeMismatch"/>）は、
-    /// この関数が返す列だけを「この同期で型が決まる」とみなす。NULL 許容だけを変える列の変更は型を決めない：DB はその外部キーを
-    /// 今の両端の型のまま受け入れているので、型を変えずに外して付け直せば同じ組の型で通る。数えると、DB が受け入れている型の違う
-    /// 外部キー（PostgreSQL の integer → bigint など）を「付け直せない」と名指しして外し直さず、その外部キーに阻まれる主キーの
-    /// 解除が必ず失敗した。
-    /// </remarks>
-    private static Dictionary<ColumnId, string> CollectTypeDecidingColumns(
-        IEnumerable<SchemaDiffItem> items,
-        NameLookup<Entity> liveByName,
-        SyncDialectCapabilities capabilities
-    )
-    {
-        var decided = new Dictionary<ColumnId, string>();
-
-        foreach (
-            var alter in items.Where(i =>
-                i.Kind == SchemaDiffKind.AlterColumn && i.ColumnName is not null
-            )
-        )
-        {
-            var newType = alter.Column?.DataType ?? string.Empty;
-            var table = SchemaNames.ToStoredForm(alter.TableName);
-
-            if (
-                liveByName.TryGet(table, out var live)
-                && live.Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, alter.ColumnName))
-                    is { } liveColumn
-                && capabilities.AreSameType(liveColumn.DataType, newType)
-            )
-            {
-                continue;
-            }
-
-            decided[ColumnKey(alter.TableName, alter.ColumnName!)] = newType;
-        }
-
-        return decided;
-    }
-
-    /// <summary>
     /// 端の型がこの同期で決まる組のうち、同期後（その型を当てた後）に両端の列の型が並べられない組がある外部キーか
     /// </summary>
     /// <param name="fk">live の外部キー</param>
     /// <param name="childTable">子表</param>
     /// <param name="parentTable">親表</param>
-    /// <param name="typeDecidingColumns">この同期で型が決まる列（<see cref="CollectTypeDecidingColumns"/>）</param>
+    /// <param name="typeDecidingColumns">この同期で型が決まる列（<see cref="PostSyncSchema.TypeDecidingColumns"/>）</param>
     /// <param name="capabilities">型の比較に使う方言のケーパビリティ</param>
     /// <param name="column">null でなければ、この列（列の照合キー）を端に持つ組だけを見る</param>
     /// <remarks>
@@ -3486,7 +3406,7 @@ public sealed class SyncPlanner
         ResolvedForeignKeyRelationship fk,
         string childTable,
         string parentTable,
-        Dictionary<ColumnId, string> typeDecidingColumns,
+        IReadOnlyDictionary<ColumnId, string> typeDecidingColumns,
         SyncDialectCapabilities capabilities,
         ColumnId? column = null
     )
@@ -3517,7 +3437,7 @@ public sealed class SyncPlanner
     /// <see cref="ForeignKeyKey"/> の集合）を集める
     /// </summary>
     /// <param name="liveSchema">live スキーマ</param>
-    /// <param name="typeDecidingColumns">この同期で型が決まる列（<see cref="CollectTypeDecidingColumns"/>）</param>
+    /// <param name="typeDecidingColumns">この同期で型が決まる列（<see cref="PostSyncSchema.TypeDecidingColumns"/>）</param>
     /// <param name="explicitlyDropped">明示的に外す外部キー（数えない）</param>
     /// <param name="capabilities">型の比較に使う方言のケーパビリティ</param>
     /// <remarks>
@@ -3531,8 +3451,8 @@ public sealed class SyncPlanner
     /// </remarks>
     private static HashSet<ForeignKeyId> CollectForeignKeysBlockedInIntermediateState(
         LiveSchema liveSchema,
-        Dictionary<ColumnId, string> typeDecidingColumns,
-        HashSet<ForeignKeyId> explicitlyDropped,
+        IReadOnlyDictionary<ColumnId, string> typeDecidingColumns,
+        IReadOnlySet<ForeignKeyId> explicitlyDropped,
         SyncDialectCapabilities capabilities
     )
     {
@@ -3647,7 +3567,7 @@ public sealed class SyncPlanner
     /// </remarks>
     private static List<SchemaDiffItem> InjectImplicitPrimaryKeyRebuilds(
         List<SchemaDiffItem> sectionItems,
-        IReadOnlyList<SchemaDiffItem> selected,
+        PostSyncSchema postSync,
         SyncDialectCapabilities capabilities,
         LiveSchema? liveSchema
     )
@@ -3657,7 +3577,7 @@ public sealed class SyncPlanner
             return sectionItems;
         }
 
-        var pkChangedTables = CollectPrimaryKeyChanges(selected);
+        var pkChangedTables = postSync.PrimaryKeyChanges;
         var injected = new List<SchemaDiffItem>();
 
         foreach (var live in liveSchema.Entities)
@@ -3670,7 +3590,7 @@ public sealed class SyncPlanner
             }
 
             var pkColumns = live.GetPrimaryKeyColumnsInOrder();
-            var touchesPrimaryKey = selected.Any(i =>
+            var touchesPrimaryKey = postSync.Items.Any(i =>
                 i.Kind == SchemaDiffKind.AlterColumn
                 && i.ColumnName is not null
                 && SchemaNames.AreSame(SchemaNames.ToStoredForm(i.TableName), table)
@@ -3702,25 +3622,6 @@ public sealed class SyncPlanner
 
     // ---------------- 候補キー喪失の判定（逐次 DDL 方言・再構築方言で共有） ----------------
 
-    /// <summary>選択済みの主キー変更を「テーブル名 → 新しい主キー列名の集合」へまとめる</summary>
-    private static Dictionary<string, List<string>> CollectPrimaryKeyChanges(
-        IReadOnlyList<SchemaDiffItem> selected
-    )
-    {
-        var pkChangedTables = new Dictionary<string, List<string>>(SchemaNames.Comparer);
-
-        foreach (var item in selected.Where(i => i.Kind == SchemaDiffKind.AlterPrimaryKey))
-        {
-            // 新しい主キーの列を実効順で持つ（候補キーの証明は列の集合・外部キーの並べ替えは並びを使う）
-            pkChangedTables[SchemaNames.ToStoredForm(item.TableName)] =
-            [
-                .. item.Entity?.GetPrimaryKeyColumnsInOrder().Select(c => c.Name) ?? [],
-            ];
-        }
-
-        return pkChangedTables;
-    }
-
     /// <summary>主キーが変わる表を参照する外部キーの被参照列が、同期後も候補キーであることを証明できるか</summary>
     /// <remarks>
     /// 根拠は「同期後の主キーが被参照列集合とちょうど一致」か「同期後に同じ列集合の一意制約が在る」のいずれか。
@@ -3734,7 +3635,7 @@ public sealed class SyncPlanner
     /// </remarks>
     private static bool StaysCandidateKey(
         IReadOnlyList<string>? newPkColumns,
-        Dictionary<string, HashSet<string>> postSyncUniques,
+        IReadOnlyDictionary<string, IReadOnlySet<string>> postSyncUniques,
         string parentTable,
         IReadOnlyList<string> referencedColumns
     ) =>
@@ -3767,22 +3668,23 @@ public sealed class SyncPlanner
     /// </para>
     /// </remarks>
     private static void WarnRebuildForeignKeysLosingCandidateKey(
-        IReadOnlyList<SchemaDiffItem> selected,
+        PostSyncSchema postSync,
         LiveSchema liveSchema,
         List<SyncPlanWarning> warnings,
-        IdentifierLengthLimit limit
+        SyncDialectCapabilities capabilities
     )
     {
-        var pkChangedTables = CollectPrimaryKeyChanges(selected);
+        var limit = capabilities.IdentifierLengthLimit;
+        var pkChangedTables = postSync.PrimaryKeyChanges;
 
         if (pkChangedTables.Count == 0)
         {
             return;
         }
 
-        var postSyncUniques = BuildPostSyncUniqueConstraints(selected, liveSchema);
-        var dropped = DroppedObjects.From(selected);
-        var explicitlyDropped = CollectExplicitlyDroppedForeignKeys(selected, limit);
+        var postSyncUniques = postSync.UniqueColumnSets;
+        var dropped = postSync.Dropped;
+        var explicitlyDropped = postSync.DroppedForeignKeys;
 
         foreach (var fk in liveSchema.ForeignKeys)
         {
@@ -3832,7 +3734,7 @@ public sealed class SyncPlanner
     /// <remarks>
     /// <para>
     /// 同期後の主キーは、主キーの変更を選んだ表はその新しい主キー、追加を選んだ表は図の主キー、それ以外は live の主キー。
-    /// 同期後の一意制約は <see cref="BuildPostSyncUniqueConstraints"/>（live − 削除 ＋ 追加、追加を選んだ表の一意制約を含む）。
+    /// 同期後の一意制約は <see cref="PostSyncSchema.UniqueColumnSets"/>（live − 削除 ＋ 追加、追加を選んだ表の一意制約を含む）。
     /// 比べ方は暗黙の付け直しと同じ <see cref="StaysCandidateKey"/>（列の集合）。
     /// </para>
     /// <para>
@@ -3840,14 +3742,14 @@ public sealed class SyncPlanner
     /// </para>
     /// </remarks>
     private static void WarnAddedForeignKeysNotOnCandidateKey(
-        IReadOnlyList<SchemaDiffItem> selected,
+        PostSyncSchema postSync,
         SyncDialectCapabilities capabilities,
         LiveSchema? liveSchema,
         List<SyncPlanWarning> warnings
     )
     {
-        var adds = selected
-            .Where(i =>
+        var adds = postSync
+            .Items.Where(i =>
                 i.Kind == SchemaDiffKind.AddForeignKey
                 && i.ChildEntity is not null
                 && i.ParentEntity is not null
@@ -3859,21 +3761,13 @@ public sealed class SyncPlanner
             return;
         }
 
-        var pkChangedTables = CollectPrimaryKeyChanges(selected);
-        var addedTables = CollectAddedTables(selected);
-        var liveByName = liveSchema.Tables;
-        var postSyncUniques = BuildPostSyncUniqueConstraints(selected, liveSchema);
+        var postSyncUniques = postSync.UniqueColumnSets;
 
         foreach (var add in adds)
         {
             var childTable = SchemaDiffService.NormalizeTable(add.ChildEntity!);
             var parentTable = SchemaDiffService.NormalizeTable(add.ParentEntity!);
-            var postSyncKey = PostSyncPrimaryKeyOf(
-                parentTable,
-                pkChangedTables,
-                addedTables,
-                liveByName
-            );
+            var postSyncKey = postSync.PrimaryKeyOf(parentTable);
 
             if (postSyncKey is null)
             {
@@ -3914,7 +3808,7 @@ public sealed class SyncPlanner
     /// <remarks>
     /// <para>
     /// 同期後の型は、型を変える列の変更を選んだ列はその新しい型、live に在る列は live の型、live に無い列（追加する表・列）は図の型。
-    /// 判定は、構成列のどれかの型がこの同期で決まるときだけ（<see cref="CollectTypeDecidingColumns"/>＝NULL 許容だけの変更は型を
+    /// 判定は、構成列のどれかの型がこの同期で決まるときだけ（<see cref="PostSyncSchema.TypeDecidingColumns"/>＝NULL 許容だけの変更は型を
     /// 決めない。live の時点で綴りだけ違う・DB が受け入れている型の違う既存の外部キーの作り直しは止めない）。
     /// 型の比較は暗黙の付け直しと同じ <see cref="SyncDialectCapabilities.AreForeignKeyCompatibleTypes"/>。
     /// </para>
@@ -3939,7 +3833,9 @@ public sealed class SyncPlanner
         }
 
         var liveByName = liveSchema.Tables;
-        var typeDecidingColumns = CollectTypeDecidingColumns(selected, liveByName, capabilities);
+        var typeDecidingColumns = PostSyncSchema
+            .From(PlanStage.ExclusionRound, selected, liveSchema, capabilities)
+            .TypeDecidingColumns;
         var livePairs = liveSchema.ForeignKeyPairs;
         var kept = new List<SchemaDiffItem>(selected.Count);
 
@@ -4113,7 +4009,7 @@ public sealed class SyncPlanner
     /// </summary>
     /// <remarks>
     /// 子の列の同期後の NULL 許容は、選んだ主キーの変更で主キーに入る列は NOT NULL、選んだ列の変更があればその値、
-    /// live に在る列は live の値、live に無い列（追加する表・列）は図の値（<see cref="PostSyncNullability"/>）。
+    /// live に在る列は live の値、live に無い列（追加する表・列）は図の値（<see cref="PostSyncSchema.AllowsNull"/>）。
     /// 参照アクションは方言が書くもの（<see cref="SyncDialectCapabilities.EffectiveOnDelete"/> /
     /// <see cref="SyncDialectCapabilities.EffectiveOnUpdate"/>）で見る＝ON UPDATE を持たない方言（Oracle）の ON UPDATE は数えない。
     /// </remarks>
@@ -4128,7 +4024,9 @@ public sealed class SyncPlanner
         LiveSchema? liveSchema
     )
     {
-        var postSyncNullable = PostSyncNullability(selected, liveSchema);
+        Func<Entity, string, string, bool> postSyncNullable = PostSyncSchema
+            .From(PlanStage.ExclusionRound, selected, liveSchema, capabilities)
+            .AllowsNull;
         var found =
             new List<(
                 SchemaDiffItem Item,
@@ -4184,7 +4082,7 @@ public sealed class SyncPlanner
     /// <see cref="InjectImplicitForeignKeyRebuilds"/>。
     /// </remarks>
     private static void WarnSetNullOnNotNullLiveForeignKeys(
-        IReadOnlyList<SchemaDiffItem> selected,
+        PostSyncSchema postSync,
         SyncDialectCapabilities capabilities,
         LiveSchema? liveSchema,
         List<SyncPlanWarning> warnings
@@ -4196,8 +4094,8 @@ public sealed class SyncPlanner
         }
 
         var limit = capabilities.IdentifierLengthLimit;
-        var explicitlyDropped = CollectExplicitlyDroppedForeignKeys(selected, limit);
-        var postSyncNullable = PostSyncNullability(selected, liveSchema);
+        var explicitlyDropped = postSync.DroppedForeignKeys;
+        Func<Entity, string, string, bool> postSyncNullable = postSync.AllowsNull;
 
         foreach (var fk in liveSchema.ForeignKeys)
         {
@@ -4273,70 +4171,6 @@ public sealed class SyncPlanner
         capabilities.EffectiveOnDelete(relationship.OnDelete) == ForeignKeyReferentialAction.SetNull
         || capabilities.EffectiveOnUpdate(relationship.OnUpdate)
             == ForeignKeyReferentialAction.SetNull;
-
-    /// <summary>
-    /// 同期後の列の NULL 許容を引く関数を作る（引数は列の表のエンティティ・正規化した表名・列名）。
-    /// </summary>
-    /// <remarks>
-    /// 選んだ主キーの変更で主キーに入る列は NOT NULL、選んだ列の変更があればその値、live に在る列は live の値、
-    /// live に無い列は渡したエンティティ（図）の値。主キーの列は NULL を許さない。
-    /// </remarks>
-    private static Func<Entity, string, string, bool> PostSyncNullability(
-        IReadOnlyList<SchemaDiffItem> selected,
-        LiveSchema? liveSchema
-    )
-    {
-        var altered = new Dictionary<ColumnId, bool>();
-        var newKeyColumns = new HashSet<ColumnId>();
-
-        foreach (var item in selected)
-        {
-            if (
-                item.Kind == SchemaDiffKind.AlterColumn
-                && item.ColumnName is not null
-                && item.Column is not null
-            )
-            {
-                altered[ColumnKey(item.TableName, item.ColumnName)] = ColumnNullability.AllowsNull(
-                    item.Column
-                );
-            }
-            else if (item.Kind == SchemaDiffKind.AlterPrimaryKey && item.Entity is not null)
-            {
-                foreach (var column in item.Entity.GetPrimaryKeyColumnsInOrder())
-                {
-                    newKeyColumns.Add(ColumnKey(item.TableName, column.Name));
-                }
-            }
-        }
-
-        var liveByName = liveSchema?.Tables;
-
-        return (entity, table, column) =>
-        {
-            var key = ColumnKey(table, column);
-
-            if (newKeyColumns.Contains(key))
-            {
-                return false;
-            }
-
-            if (altered.TryGetValue(key, out var nullable))
-            {
-                return nullable;
-            }
-
-            var source =
-                liveByName is not null
-                && liveByName.TryGet(table, out var live)
-                && live.Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, column))
-                    is { } liveColumn
-                    ? liveColumn
-                    : entity.Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, column));
-
-            return source is null || ColumnNullability.AllowsNull(source);
-        };
-    }
 
     /// <summary>
     /// <see cref="SyncPlanWarningKind.SetNullOnNotNullColumn"/> を積む（同じ外部キーの同じ警告は重ねない）
@@ -4594,20 +4428,18 @@ public sealed class SyncPlanner
     /// 列があるものを <see cref="SyncPlanWarningKind.SetDefaultOnNotNullColumn"/> で名指しする
     /// （<see cref="SyncDialectCapabilities.SetDefaultRequiresColumnDefault"/> が <c>true</c> の方言のみ）。
     /// </summary>
-    /// <param name="selected">展開と暗黙の項目の注入を終えた項目（主キーの変更が足す暗黙の NOT NULL 化を含む）</param>
+    /// <param name="postSync">展開と暗黙の項目の注入を終えた項目（主キーの変更が足す暗黙の NOT NULL 化を含む）の同期後の事実（live の図が無ければ図の値で見る）</param>
     /// <param name="capabilities">方言のケーパビリティ</param>
-    /// <param name="liveSchema">live スキーマ（無ければ図の値で見る）</param>
     /// <param name="warnings">名指しの警告を積む先</param>
     /// <remarks>
-    /// 子の列の NULL 許容は同期後の値で見る（<see cref="PostSyncNullability"/>＝選んだ主キーの変更で主キーに入る列は NOT NULL、
+    /// 子の列の NULL 許容は同期後の値で見る（<see cref="PostSyncSchema.AllowsNull"/>＝選んだ主キーの変更で主キーに入る列は NOT NULL、
     /// 選んだ列の変更があればその値、live に在る列は live の値、live に無い列は図の値）。図の値で見ると、NULL 許容化を選ばずに
     /// 外部キーだけを足す同期で、DB では NOT NULL のままの列を見逃す。主キーの変更などに伴う暗黙の付け直しは対象外
     /// （live に既にある外部キーなので、DB の列は DEFAULT 制約を持っている）。
     /// </remarks>
     private static void WarnSetDefaultOnNotNullColumns(
-        IReadOnlyList<SchemaDiffItem> selected,
+        PostSyncSchema postSync,
         SyncDialectCapabilities capabilities,
-        LiveSchema? liveSchema,
         List<SyncPlanWarning> warnings
     )
     {
@@ -4616,10 +4448,10 @@ public sealed class SyncPlanner
             return;
         }
 
-        var postSyncNullable = PostSyncNullability(selected, liveSchema);
+        Func<Entity, string, string, bool> postSyncNullable = postSync.AllowsNull;
 
         foreach (
-            var add in selected.Where(i =>
+            var add in postSync.Items.Where(i =>
                 i.Kind == SchemaDiffKind.AddForeignKey
                 && i.Relationship is not null
                 && i.ChildEntity is not null
@@ -4798,47 +4630,12 @@ public sealed class SyncPlanner
         }
     }
 
-    /// <summary>追加を選んだ表（表名 → 図のエンティティ）</summary>
-    private static Dictionary<string, Entity> CollectAddedTables(
-        IReadOnlyList<SchemaDiffItem> selected
-    ) =>
-        selected
-            .Where(i => i.Kind == SchemaDiffKind.AddTable && i.Entity is not null)
-            .GroupBy(i => SchemaNames.ToStoredForm(i.TableName), SchemaNames.Comparer)
-            .ToDictionary(g => g.Key, g => g.First().Entity!, SchemaNames.Comparer);
-
-    /// <summary>
-    /// 同期後の表の主キー（実効順）。主キーの変更を選んだ表はその新しい主キー、追加を選んだ表は図の主キー、
-    /// それ以外は live の主キー。どこにも無い表は <c>null</c>。
-    /// </summary>
-    private static IReadOnlyList<string>? PostSyncPrimaryKeyOf(
-        string table,
-        Dictionary<string, List<string>> pkChangedTables,
-        Dictionary<string, Entity> addedTables,
-        NameLookup<Entity> liveByName
-    )
-    {
-        if (pkChangedTables.TryGetValue(table, out var changedKey))
-        {
-            return changedKey;
-        }
-
-        if (addedTables.TryGetValue(table, out var addedTable))
-        {
-            return [.. addedTable.GetPrimaryKeyColumnsInOrder().Select(c => c.Name)];
-        }
-
-        return liveByName.TryGet(table, out var liveTable)
-            ? [.. liveTable.GetPrimaryKeyColumnsInOrder().Select(c => c.Name)]
-            : null;
-    }
-
     /// <summary>
     /// 外部キーの追加（明示の追加・作り直しを展開した追加・暗黙の付け直し）の列ペアを、参照先の同期後のキーの並びへ
     /// 並べ替える（参照する列の並びがキーの並びと一致しないと外部キーを作れない方言＝SQL Server・MySQL）。
     /// </summary>
     /// <param name="items">セクションへ入れる項目（暗黙の付け直しを注入した後）</param>
-    /// <param name="selected">選択済みの項目（同期後の主キー・一意制約の合成に使う）</param>
+    /// <param name="postSync">選択済みの項目の同期後の事実（同期後の主キー・一意制約）</param>
     /// <param name="liveSchema">live スキーマ（無ければ項目の参照先の表のキーへそろえる）</param>
     /// <returns>外部キーの追加の列ペアを並べ替えた項目（それ以外の項目はそのまま）</returns>
     /// <remarks>
@@ -4850,7 +4647,7 @@ public sealed class SyncPlanner
     /// </para>
     /// <para>
     /// 参照先の同期後のキーは、主キー（主キーの変更を選んだ表はその新しい主キー、追加を選んだ表は図の主キー、それ以外は
-    /// live の主キー）、続いて同期後の一意制約（<see cref="BuildPostSyncUniqueKeys"/>）。参照先の列の集合がどのキーとも
+    /// live の主キー）、続いて同期後の一意制約（<see cref="PostSyncSchema.UniqueKeys"/>）。参照先の列の集合がどのキーとも
     /// ちょうど一致しなければ並べ替えない（キーが決まらない。証明できない付け直しは
     /// <see cref="SyncPlanWarningKind.ForeignKeyNotOnCandidateKey"/> などで別に警告する）。規則の本体は DDL と同じ
     /// <see cref="ForeignKeyColumnOrder.ArrangeToKey"/>。
@@ -4858,14 +4655,11 @@ public sealed class SyncPlanner
     /// </remarks>
     private static List<SchemaDiffItem> ArrangeForeignKeysToPostSyncKeys(
         List<SchemaDiffItem> items,
-        IReadOnlyList<SchemaDiffItem> selected,
+        PostSyncSchema postSync,
         LiveSchema? liveSchema
     )
     {
-        var pkChangedTables = CollectPrimaryKeyChanges(selected);
-        var addedTables = CollectAddedTables(selected);
-        var liveByName = liveSchema?.Tables;
-        var postSyncUniques = BuildPostSyncUniqueKeys(selected, liveSchema);
+        var postSyncUniques = postSync.UniqueKeys;
 
         return [.. items.Select(Arrange)];
 
@@ -4881,9 +4675,7 @@ public sealed class SyncPlanner
             }
 
             var parentTable = SchemaDiffService.NormalizeTable(item.ParentEntity);
-            var postSyncKey = liveByName is null
-                ? null
-                : PostSyncPrimaryKeyOf(parentTable, pkChangedTables, addedTables, liveByName);
+            var postSyncKey = liveSchema is null ? null : postSync.PrimaryKeyOf(parentTable);
             var arranged = postSyncKey is null
                 ? ForeignKeyColumnOrder.ArrangeToReferencedKey(
                     item.ForeignKeyColumnPairs,
@@ -4940,20 +4732,21 @@ public sealed class SyncPlanner
 
         private readonly List<(string Table, string Name)> _uniques = [];
 
-        /// <summary>選んだ項目と DB の図から集める</summary>
+        /// <summary>選んだ項目（作り直しを展開した並び）の同期後の事実と DB の図から集める</summary>
+        /// <param name="expanded">作り直しを展開した並びの同期後の事実（外す外部キー・一意制約と消える表・列を読む）</param>
+        /// <param name="capabilities">方言のケーパビリティ（外部キーの実効名の上限）</param>
+        /// <param name="liveSchema">DB の今の図</param>
         public static RemainingLiveConstraints From(
-            IReadOnlyList<SchemaDiffItem> selected,
-            HashSet<UniqueConstraintId> droppedUniques,
-            IdentifierLengthLimit limit,
+            PostSyncSchema expanded,
+            SyncDialectCapabilities capabilities,
             LiveSchema liveSchema
         )
         {
+            var limit = capabilities.IdentifierLengthLimit;
             var remaining = new RemainingLiveConstraints();
-            var droppedForeignKeys = CollectExplicitlyDroppedForeignKeys(
-                ExpandAlters(selected),
-                limit
-            );
-            var droppedObjects = DroppedObjects.From(selected);
+            var droppedUniques = expanded.DroppedUniqueConstraints;
+            var droppedForeignKeys = expanded.DroppedForeignKeys;
+            var droppedObjects = expanded.Dropped;
             var liveNames = liveSchema.ForeignKeyNames(limit);
 
             foreach (var fk in liveSchema.ForeignKeys)
@@ -5084,169 +4877,7 @@ public sealed class SyncPlanner
             );
     }
 
-    /// <summary>明示的に削除が選ばれた外部キー（選択済み DropForeignKey）の照合キーを集める</summary>
-    private static HashSet<ForeignKeyId> CollectExplicitlyDroppedForeignKeys(
-        IReadOnlyList<SchemaDiffItem> selected,
-        IdentifierLengthLimit limit
-    )
-    {
-        var explicitlyDropped = new HashSet<ForeignKeyId>();
-
-        foreach (var dropFk in selected.Where(i => i.Kind == SchemaDiffKind.DropForeignKey))
-        {
-            var signature = ResolveDroppedForeignKeySignature(dropFk);
-
-            if (signature is null || dropFk.ChildEntity is null)
-            {
-                continue;
-            }
-
-            var (parentTable, columnPairs) = signature.Value;
-            explicitlyDropped.Add(
-                ForeignKeyKey(
-                    SchemaDiffService.NormalizeTable(dropFk.ChildEntity),
-                    parentTable,
-                    columnPairs,
-                    dropFk.Relationship,
-                    limit
-                )
-            );
-        }
-
-        return explicitlyDropped;
-    }
-
     // ---------------- 一意制約（UNIQUE）の合成・注入・警告 ----------------
-
-    /// <summary>
-    /// 「同期後に存在する一意制約」をテーブルごとに合成する
-    /// （live の一意制約 − 選択済み <see cref="SchemaDiffKind.DropUniqueConstraint"/> ＋
-    /// 選択済み <see cref="SchemaDiffKind.AddUniqueConstraint"/>）。
-    /// </summary>
-    /// <returns>テーブル名 → 列集合シグネチャ（<see cref="UniqueConstraintNaming.ColumnSetSignature"/>）の集合</returns>
-    /// <remarks>
-    /// 図（target）の定義を直接見ないのは、未選択の追加をあてにしてしまうため。合成は選択済み差分だけで行い、
-    /// 「実行後に確実に存在する」ものだけを候補キーの証明材料にする。
-    /// </remarks>
-    private static Dictionary<string, HashSet<string>> BuildPostSyncUniqueConstraints(
-        IReadOnlyList<SchemaDiffItem> selected,
-        LiveSchema? liveSchema
-    ) =>
-        BuildPostSyncUniqueKeys(selected, liveSchema)
-            .ToDictionary(
-                pair => pair.Key,
-                pair =>
-                    pair.Value.Select(UniqueConstraintNaming.ColumnSetSignature)
-                        .ToHashSet(StringComparer.Ordinal),
-                SchemaNames.Comparer
-            );
-
-    /// <summary>
-    /// 「同期後に存在する一意制約」の構成列を、列の並びのままテーブルごとに合成する
-    /// （<see cref="BuildPostSyncUniqueConstraints"/> と同じ合成。外部キーの列ペアを一意制約の並びへそろえるのに使う）。
-    /// </summary>
-    /// <returns>テーブル名 → 一意制約の構成列（live の宣言順、続いて追加を選んだ表の一意制約、選択済みの追加の順）</returns>
-    /// <remarks>
-    /// 削除は DB の一意制約の照合キー（<see cref="UniqueConstraintKey"/>＝名前と列集合）で照合し、外す制約だけを落とす
-    /// （同じ列集合の一意制約が 2 つある表で、1 つを外しても、もう 1 つは同期後のキーとして残る）。
-    /// </remarks>
-    private static Dictionary<string, List<IReadOnlyList<string>>> BuildPostSyncUniqueKeys(
-        IReadOnlyList<SchemaDiffItem> selected,
-        LiveSchema? liveSchema
-    )
-    {
-        // 構成列と、DB の一意制約なら照合キー（外す項目と照合する。図から来た制約は null）
-        var byTable = new Dictionary<
-            string,
-            List<(IReadOnlyList<string> Columns, UniqueConstraintId? LiveKey)>
-        >(SchemaNames.Comparer);
-
-        if (liveSchema is null)
-        {
-            return [];
-        }
-
-        // live の一意制約を土台にする
-        foreach (var entity in liveSchema.Entities)
-        {
-            var table = SchemaDiffService.NormalizeTable(entity);
-
-            foreach (var constraint in entity.UniqueConstraints)
-            {
-                if (
-                    !UniqueConstraintNaming.TryResolveColumnNames(
-                        entity,
-                        constraint,
-                        out var columns
-                    )
-                )
-                {
-                    continue;
-                }
-
-                Keys(table).Add((columns, UniqueConstraintKey(table, constraint.Name, columns)));
-            }
-        }
-
-        // 追加を選んだ表の一意制約を足す（表の作成と一緒に作られる）
-        foreach (
-            var item in selected.Where(i =>
-                i.Kind == SchemaDiffKind.AddTable && i.Entity is not null
-            )
-        )
-        {
-            foreach (var constraint in item.Entity!.UniqueConstraints)
-            {
-                if (
-                    UniqueConstraintNaming.TryResolveColumnNames(
-                        item.Entity,
-                        constraint,
-                        out var columns
-                    )
-                )
-                {
-                    Keys(SchemaNames.ToStoredForm(item.TableName)).Add((columns, null));
-                }
-            }
-        }
-
-        // 選択済みの削除を落とす（外す DB の一意制約だけ）
-        var dropped = ExplicitlyDroppedUniqueConstraints(selected);
-
-        foreach (var keys in byTable.Values)
-        {
-            keys.RemoveAll(key => key.LiveKey is not null && dropped.Contains(key.LiveKey));
-        }
-
-        // 選択済みの追加を足す
-        foreach (var item in selected.Where(i => i.Kind == SchemaDiffKind.AddUniqueConstraint))
-        {
-            if (item.UniqueConstraintColumns.Count == 0)
-            {
-                continue;
-            }
-
-            Keys(SchemaNames.ToStoredForm(item.TableName))
-                .Add((item.UniqueConstraintColumns, null));
-        }
-
-        return byTable.ToDictionary(
-            pair => pair.Key,
-            pair => pair.Value.Select(key => key.Columns).ToList(),
-            SchemaNames.Comparer
-        );
-
-        List<(IReadOnlyList<string> Columns, UniqueConstraintId? LiveKey)> Keys(string table)
-        {
-            if (!byTable.TryGetValue(table, out var keys))
-            {
-                keys = [];
-                byTable[table] = keys;
-            }
-
-            return keys;
-        }
-    }
 
     /// <summary>2 つの列名集合が（順序・大文字小文字を無視して）ちょうど一致するか</summary>
     private static bool IsSameColumnSet(IEnumerable<string> left, IEnumerable<string> right) =>
@@ -5259,7 +4890,7 @@ public sealed class SyncPlanner
     /// <summary>エンティティの列の型（列名は <see cref="SchemaNames"/> の規則で引く。列が無ければ空文字列）</summary>
     /// <remarks>
     /// live の列の型（DB が今受け入れている型）・図の列の型を読む箇所が通す。この同期で型が決まる列の新しい型は
-    /// <see cref="CollectTypeDecidingColumns"/> が決め、ここでは読まない。
+    /// <see cref="PostSyncSchema.TypeDecidingColumns"/> が決め、ここでは読まない。
     /// </remarks>
     private static string ColumnTypeOf(Entity entity, string column) =>
         entity.Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, column))?.DataType
@@ -5311,7 +4942,7 @@ public sealed class SyncPlanner
     /// </remarks>
     private static List<SchemaDiffItem> InjectImplicitUniqueConstraintRebuilds(
         List<SchemaDiffItem> sectionItems,
-        IReadOnlyList<SchemaDiffItem> selected,
+        PostSyncSchema postSync,
         SyncDialectCapabilities capabilities,
         LiveSchema? liveSchema
     )
@@ -5321,8 +4952,8 @@ public sealed class SyncPlanner
             return sectionItems;
         }
 
-        var alteredColumns = selected
-            .Where(i => i.Kind == SchemaDiffKind.AlterColumn && i.ColumnName is not null)
+        var alteredColumns = postSync
+            .Items.Where(i => i.Kind == SchemaDiffKind.AlterColumn && i.ColumnName is not null)
             .Select(i => ColumnKey(i.TableName, i.ColumnName!))
             .ToHashSet();
 
@@ -5332,8 +4963,8 @@ public sealed class SyncPlanner
         }
 
         // 明示的に DROP が選択されている一意制約（自動 DROP の重複も再 ADD も行わない）
-        var explicitlyDropped = ExplicitlyDroppedUniqueConstraints(selected);
-        var dropped = DroppedObjects.From(selected);
+        var explicitlyDropped = postSync.DroppedUniqueConstraints;
+        var dropped = postSync.Dropped;
 
         var autoDrops = new List<SchemaDiffItem>();
         var autoAdds = new List<SchemaDiffItem>();
@@ -5424,7 +5055,7 @@ public sealed class SyncPlanner
     /// 実行はブロックしない（レンダラーは DROP を出す）。
     /// </remarks>
     private static void WarnUniqueConstraintDropsBreakingForeignKeys(
-        IReadOnlyList<SchemaDiffItem> selected,
+        PostSyncSchema postSync,
         LiveSchema? liveSchema,
         List<SyncPlanWarning> warnings,
         SyncDialectCapabilities capabilities
@@ -5437,7 +5068,9 @@ public sealed class SyncPlanner
             return;
         }
 
-        var drops = selected.Where(i => i.Kind == SchemaDiffKind.DropUniqueConstraint).ToList();
+        var drops = postSync
+            .Items.Where(i => i.Kind == SchemaDiffKind.DropUniqueConstraint)
+            .ToList();
 
         if (drops.Count == 0)
         {
@@ -5445,9 +5078,9 @@ public sealed class SyncPlanner
         }
 
         // 同期で外す外部キー（明示的に外す・端が消える＝計画の入口で外す項目を足している）は壊れようがないので警告しない
-        var explicitlyDropped = CollectExplicitlyDroppedForeignKeys(selected, limit);
-        var dropped = DroppedObjects.From(selected);
-        var pkChangedTables = CollectPrimaryKeyChanges(selected);
+        var explicitlyDropped = postSync.DroppedForeignKeys;
+        var dropped = postSync.Dropped;
+        var pkChangedTables = postSync.PrimaryKeyChanges;
 
         foreach (var fk in liveSchema.ForeignKeys)
         {
@@ -5527,67 +5160,6 @@ public sealed class SyncPlanner
         IEnumerable<string> columnNames
     ) => UniqueConstraintId.Of(table, name, columnNames);
 
-    /// <summary>外す項目（DropUniqueConstraint）が外す DB の一意制約の照合キー（<see cref="UniqueConstraintKey"/>）</summary>
-    private static HashSet<UniqueConstraintId> ExplicitlyDroppedUniqueConstraints(
-        IEnumerable<SchemaDiffItem> selected
-    ) =>
-        selected
-            .Where(i => i.Kind == SchemaDiffKind.DropUniqueConstraint)
-            .Select(i =>
-                UniqueConstraintKey(i.TableName, i.UniqueConstraintName, i.UniqueConstraintColumns)
-            )
-            .ToHashSet();
-
-    /// <summary>選んだ表・列の削除（制約の端が同じ計画で消えるかの判定に使う）</summary>
-    private sealed class DroppedObjects
-    {
-        /// <summary>削除する表</summary>
-        public HashSet<string> Tables { get; } = new(SchemaNames.Comparer);
-
-        /// <summary>削除する列（<see cref="ColumnKey"/> の照合キー）</summary>
-        public HashSet<ColumnId> Columns { get; } = [];
-
-        /// <summary>表・列の削除が 1 つも無いか</summary>
-        public bool IsEmpty => Tables.Count == 0 && Columns.Count == 0;
-
-        /// <summary>選んだ項目から削除する表・列を集める</summary>
-        public static DroppedObjects From(IEnumerable<SchemaDiffItem> selected)
-        {
-            var dropped = new DroppedObjects();
-
-            foreach (var item in selected)
-            {
-                if (item.Kind == SchemaDiffKind.DropTable)
-                {
-                    dropped.Tables.Add(SchemaNames.ToStoredForm(item.TableName));
-                }
-                else if (item.Kind == SchemaDiffKind.DropColumn && item.ColumnName is not null)
-                {
-                    dropped.Columns.Add(ColumnKey(item.TableName, item.ColumnName));
-                }
-            }
-
-            return dropped;
-        }
-
-        /// <summary>外部キーの子表・親表・構成列のどれかが消えるか</summary>
-        public bool Touches(
-            ResolvedForeignKeyRelationship fk,
-            string childTable,
-            string parentTable
-        ) =>
-            Tables.Contains(childTable)
-            || Tables.Contains(parentTable)
-            || fk.ColumnPairs.Any(p =>
-                Columns.Contains(ColumnKey(childTable, p.ChildColumn))
-                || Columns.Contains(ColumnKey(parentTable, p.ParentColumn))
-            );
-
-        /// <summary>表の列のどれかが消えるか</summary>
-        public bool TouchesColumns(string table, IEnumerable<string> columns) =>
-            columns.Any(c => Columns.Contains(ColumnKey(table, c)));
-    }
-
     /// <summary>テーブル・列の照合キー（名前は <see cref="SchemaNames.Key"/> で畳む）</summary>
     private static ColumnId ColumnKey(string table, string column) => ColumnId.Of(table, column);
 
@@ -5607,7 +5179,7 @@ public sealed class SyncPlanner
     /// 参照アクションは、名前を保存しない能力と暗黙の外し直しの組のための成分で、いまの実在の方言の組には当たらない
     /// （名前を保存しない SQLite の再構築の合成は、削除 1 件につき 1 本を外す数え方で 2 本を扱う）。
     /// </remarks>
-    private static ForeignKeyId ForeignKeyKey(
+    internal static ForeignKeyId ForeignKeyKey(
         string childTable,
         string parentTable,
         IEnumerable<ForeignKeyColumnNamePair> columnPairs,
@@ -5687,7 +5259,7 @@ public sealed class SyncPlanner
     /// 残り（新規テーブル対象でない列追加・テーブル削除）はセクションへ残す。
     /// </summary>
     private static SyncPlan BuildRebuildPlan(
-        List<SchemaDiffItem> selected,
+        PostSyncSchema postSync,
         SyncDialectCapabilities capabilities,
         SyncPlanContext context,
         LiveSchema liveSchema,
@@ -5696,6 +5268,8 @@ public sealed class SyncPlanner
         IdentifierLengthLimit limit
     )
     {
+        var selected = postSync.Items;
+
         // 選択済み AddTable のテーブル名（新規テーブル＝CreateOnly の対象）
         var addedTables = selected
             .Where(i => i.Kind == SchemaDiffKind.AddTable)
@@ -5711,7 +5285,7 @@ public sealed class SyncPlanner
         // レンダラーのスキップコメントに委ねる（例外にすると UI のチェック操作でクラッシュするため）
         // 削除を選んだ表は作り直さない（作り直してから消すのは無駄で、意味の無い喪失警告も出る）。
         // その表への作り直しの項目は、表ごと消えるので処理済みとして捨てる
-        var droppedTables = DroppedObjects.From(selected).Tables;
+        var droppedTables = postSync.Dropped.Tables;
         var existingRebuildTables = selected
             .Where(i =>
                 IsRebuildTriggerKind(i.Kind)
@@ -5762,7 +5336,7 @@ public sealed class SyncPlanner
         WarnRebuildDropsColumnAttributes(rebuilds, context, warnings);
 
         // 主キーを付け替える親表を参照する外部キーの、候補キー喪失（逐次 DDL の方言と同じ判定）
-        WarnRebuildForeignKeysLosingCandidateKey(selected, liveSchema, warnings, limit);
+        WarnRebuildForeignKeysLosingCandidateKey(postSync, liveSchema, warnings, capabilities);
 
         // 転用済みの項目を除いた残りをセクション化する（転用できなかった項目はレンダラーがスキップを明示する）
         var sectionItems = selected.Where(i => !diverted.Contains(i)).ToList();
@@ -5836,7 +5410,7 @@ public sealed class SyncPlanner
     /// <paramref name="diverted"/> が埋まらず、列挙の前にセクションを組むと転用済みの項目が二重に残るため、リストで返す。
     /// </remarks>
     private static List<TableRebuildPlan> BuildCreateOnlyRebuilds(
-        List<SchemaDiffItem> selected,
+        IReadOnlyList<SchemaDiffItem> selected,
         HashSet<string> addedTables,
         HashSet<SchemaDiffItem> diverted,
         IdentifierLengthLimit limit
@@ -5901,7 +5475,7 @@ public sealed class SyncPlanner
     /// 畳み込んだ項目は <paramref name="diverted"/> へ足すので、<see cref="BuildCreateOnlyRebuilds"/> と同じくリストで返す。
     /// </remarks>
     private static List<TableRebuildPlan> BuildExistingTableRebuilds(
-        List<SchemaDiffItem> selected,
+        IReadOnlyList<SchemaDiffItem> selected,
         HashSet<string> existingRebuildTables,
         NameLookup<Entity> liveByName,
         HashSet<SchemaDiffItem> diverted,
@@ -6221,7 +5795,7 @@ public sealed class SyncPlanner
     {
         foreach (var drop in tableItems.Where(i => i.Kind == SchemaDiffKind.DropUniqueConstraint))
         {
-            var dropped = ExplicitlyDroppedUniqueConstraints([drop]);
+            var dropped = PostSyncSchema.ExplicitlyDroppedUniqueConstraints([drop]);
             newDef.UniqueConstraints.RemoveAll(constraint =>
                 UniqueConstraintNaming.TryResolveColumnNames(newDef, constraint, out var columns)
                 && dropped.Contains(UniqueConstraintKey(drop.TableName, constraint.Name, columns))
@@ -6664,7 +6238,7 @@ public sealed class SyncPlanner
     /// <summary>
     /// DropForeignKey 差分項目を、live FK 照合用のシグネチャ（親テーブル・構成列ペア）へ解決する
     /// </summary>
-    private static (
+    internal static (
         string ParentTable,
         IReadOnlyList<ForeignKeyColumnNamePair> ColumnPairs
     )? ResolveDroppedForeignKeySignature(SchemaDiffItem item)

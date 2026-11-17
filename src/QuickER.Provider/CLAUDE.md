@@ -229,7 +229,24 @@
   - `UniqueConstraintId`：表・DB の名前・列集合（列の並びは見ない）。名前の無い制約（null）は空文字列として持つ（「一意制約の照合キーと付け直し」）。
   - `ForeignKeyId`：子の表・親の表・列ペアの並び（宣言順）・実効名・参照アクション（「外部キーの暗黙の外し直し」）。
   - `SyncPlanner` の `ColumnKey`・`ForeignKeyPairKey`・`UniqueConstraintKey`・`ForeignKeyKey` は、項目・モデルからこれらの型を作る入口。
-- ガード：`SourceRuleTests` の規則 `sync-live-schema-single-source`（`SyncPlanner.cs` と `SchemaIds.cs` の、`LiveEntities`・`LiveRelationships` のメンバーの読みと `ForeignKeyColumnPairResolver.ResolveAll` の呼び出し。例外は無い。`LiveSchema.cs` は範囲の外。自己検査の行 `sync-live-schema-single-source-forms`・`sync-live-schema-single-source-inactive-branch`）。識別の等値と live の状態の中身は、同期計画の期待の行・能力の組の網・総当たりが計画の結果として見る。読みの限界：live の表の一覧を別の名前の引数で受け取って索引を作り直す形は規則が拾わない。
+- ガード：`SourceRuleTests` の規則 `sync-live-schema-single-source`（`SyncPlanner.cs`・`SchemaIds.cs`・`PostSyncSchema.cs` の、`LiveEntities`・`LiveRelationships` のメンバーの読みと `ForeignKeyColumnPairResolver.ResolveAll` の呼び出し。例外は無い。`LiveSchema.cs` は範囲の外。自己検査の行 `sync-live-schema-single-source-forms`・`sync-live-schema-single-source-inactive-branch`）。識別の等値と live の状態の中身は、同期計画の期待の行・能力の組の網・総当たりが計画の結果として見る。読みの限界：live の表の一覧を別の名前の引数で受け取って索引を作り直す形は規則が拾わない。
+
+### 同期後の状態と時点
+
+置き場所は `src/QuickER.Provider/Sync/State/PostSyncSchema.cs`（internal）。
+
+- 同期の計画が同期後の事実（live の図に、項目の並びを当てた結果）を求める場所は `PostSyncSchema` の 1 か所。`PostSyncSchema.From(時点, 項目の並び, liveSchema, capabilities)` で作り、材料は初めて読まれたときに求めて覚える。
+  - 材料：消える表・列（`Dropped`）・足す表（`AddedTables`）・主キーの変更（`PrimaryKeyChanges`）・同期後の主キー（`PrimaryKeyOf`）・外す一意制約（`DroppedUniqueConstraints`）・同期後の一意制約（`UniqueKeys`＝構成列の並びつき、`UniqueColumnSets`＝列集合）・同期後の NULL 許容（`AllowsNull`）・型が決まる列（`TypeDecidingColumns`）・項目が外す外部キー（`DroppedForeignKeys`）・列の名前の集合が変わる表の同期後の列名（`ChangedTableColumnNames`）。
+  - 受けた項目の並びは、作るときに写して持つ。作った後に元の並びへ項目を足しても中身は変わらない。項目を足した後の事実が要る段は、足した後の並びから作り直す。
+  - `BuildPlan` は、選んだ項目の最終形（`PlanStage.Selected`）の `PostSyncSchema` を 1 つ作り、警告の段・外し直しの注入・並べ替え・再構築の合成で共有する。作った後に `selected` へ項目を足さない（足すのは `sectionItems` の側）。
+- 計画器の「同期後」は 1 つの時点ではない。時点（`PlanStage`）は計算を変えない名札で、どの段まで項目を足した並びから求めたかを呼び出しに書く。
+  - 時点は 8 つ：除外の周（`ExclusionRound`）・その作り直しを展開した並び（`ExclusionRoundExpanded`）・展開と主キーの NOT NULL 化の後（`Expanded`）・端が消える外部キーの削除を足した後（`WithVanishingForeignKeyDrops`）・構成列が消える一意制約の削除を足した後（`WithVanishingUniqueDrops`）・選んだ項目の最終形（`Selected`）・暗黙の外し直しを足した後（`WithRebuilds`）・並べ終えた計画の全項目（`Arranged`）。
+  - 時点で答えが変わる材料は 3 つ。外す一意制約は、注入の各段が自分の足す前の並びを見る。同期後の一意制約は、依存の除外だけが暗黙の一意制約の削除を足す前の並びから求める。項目が外す外部キーは、`WithRebuilds` の並びでは暗黙に外して付け直す外部キーも含む（同期後に無い外部キーとは限らない。前寄せは「計画が一度外す外部キー」の意味で読む）。
+  - ほかの材料（消える表・列・足す表・主キーの変更・NULL 許容・型が決まる列）は、どの時点の並びから求めても同じ答えになる（後の段が足す項目がこれらを変えない）。
+  - 時点を 1 つへそろえない。そろえると、上の 3 つの材料を読む段の答えが変わる。
+- `PostSyncSchema` へ寄せていない求め方が、依存の除外（`ExcludeItemsRequiringUnselected`）のローカルに 4 つある：主キーの変更の辞書（構成列が同期後に在る変更だけ・同じ表は先の項目）・足す表の集合（`Entity` の有無を問わない）・`RequireColumns`（選んだ削除を引かない）・`RemainingLiveUniquesOn`（消える表・列を引かない）。「前提が同期後に在るか」を問う別の求め方で、正本へ寄せると計画が変わりうる。前寄せ（`MoveCertainFailureFirst`）の「この計画で外す一意制約」は `DroppedUniqueConstraints` と同じ規則の写しで、答えは同じ。再構築の方言の表の合成（「テーブル再構築の合成」）も `PostSyncSchema` を通さず、作り直す表ごとに live の表へ項目を当てる。
+- 計画の文は、共有する状態が持つ項目の並び（`PostSyncSchema.Items`）から組む（外し直しの注入・再構築の合成）。状態を作る位置を前へ動かすと、その後に足した項目が計画から消える。主キーが置き換える一意制約の削除（Oracle）がこの形で消えると、警告だけが残り主キーの付与が断られる。
+- ガード：`SourceRuleTests` の規則 `sync-post-sync-schema-single-source`（`SyncPlanner.cs` の `PostSyncSchema.From` の呼び出しを「含むメソッド: 時点」、ほかの静的なメソッドの直接の呼び出しを「含むメソッド: メソッド名」で集め、理由つきの一覧と照合する。一覧に無い時点から求め直すと赤。時点を `PlanStage.X` の形で書かない呼び出しは必ず名指しする。自己検査の行 `sync-post-sync-schema-single-source-forms`・`sync-post-sync-schema-single-source-inactive-branch`）。材料の中身は、同期計画の期待の行・能力の組の網・総当たりが計画の結果として見る。共有する状態を作る位置は、同期計画の総当たりの静的な規則 W2（`SyncPlan/CapabilityNet`。主キーが置き換えると名指しした一意制約が主キーの付与より前に外されている＝`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`「静的な規則」）が DB なしで見る。読みの限界：`using static`・別名の `using` で受け手の名前を変えた呼び出しは規則が拾わない。
 
 ### 生成 SQL の固定文
 
@@ -293,7 +310,7 @@
 - 差分は 5 方言とも複合外部キーの列ペアを並びを見ずに比べる（列ペアは対応の集合で並びは意味を持たない。Oracle のカタログは宣言の並びを残さない）。
 - `ReferencedKeyRequiresSameColumnOrder` が true の方言（SQL Server・MySQL）の DDL は、列ペアを参照先のキー（主キーの実効順、合わなければ一意制約の宣言順）の並びへ並べ替えて出す（`ForeignKeyColumnOrder.ArrangeToReferencedKey`・扱いの表の DDL のマスが Reorder かで判定）。
   - DDL だけを並べ替えて差分が並びを比べると、取り込み直した live がキーの並びになり、図と永久に食い違う。
-- 同期も同じ方言で、外部キーの追加（明示・作り直しの展開・暗黙の付け直し）を参照先の同期後のキー（主キーの変更を選んだ表は新しい主キー・追加を選んだ表は図の主キー・それ以外は live の主キー、続いて同期後の一意制約＝`BuildPostSyncUniqueKeys`）の並びへ並べ替える（`SyncPlanner.ArrangeForeignKeysToPostSyncKeys`・規則の本体は DDL と同じ `ForeignKeyColumnOrder.ArrangeToKey`）。
+- 同期も同じ方言で、外部キーの追加（明示・作り直しの展開・暗黙の付け直し）を参照先の同期後のキー（主キーの変更を選んだ表は新しい主キー・追加を選んだ表は図の主キー・それ以外は live の主キー、続いて同期後の一意制約＝`PostSyncSchema.UniqueKeys`）の並びへ並べ替える（`SyncPlanner.ArrangeForeignKeysToPostSyncKeys`・規則の本体は DDL と同じ `ForeignKeyColumnOrder.ArrangeToKey`）。
   - 図や live の並びのまま付け直すと、参照される複合主キーの並びだけの変更と、並びの違う外部キーの作り直しが必ず失敗する（暗黙コミットの方言では外部キーが消えたまま残る）。
   - 主キーと同じ列集合の一意制約があっても主キーを先に試す。どのキーとも列の集合が一致しない外部キーは並べ替えない。
 - 並べ替えた項目は `SchemaDiffItem.WithForeignKeyColumnPairs`（メンバーごとの複製＋列ペアの差し替え・変更通知の購読は写さない）で作り、プロパティを手で写さない。`SchemaDiffItemTests` が反射で全プロパティを照合する。
@@ -359,7 +376,7 @@
 ### 候補キーの証明
 
 - 付け直す外部キーの参照先の列が、同期後の PK とも同期後に在る一意制約とも列の集合で完全一致しなければ、`SyncPlan.Warnings`（候補キー喪失）として実行確認に出す。
-  - 外し直しの理由に依らず、暗黙に付け直すすべての外部キー（主キーの変更・列の変更・途中の状態の食い違い・索引の喪失）に掛ける。同期後の主キーは `PostSyncPrimaryKeyOf`（主キーの変更を選んだ表は新しい主キー・追加する表は図の主キー・ほかは live の主キー）で、外部キーの追加を並べる `ArrangeForeignKeyAddsByFailureRisk` と同じ材料を使う。
+  - 外し直しの理由に依らず、暗黙に付け直すすべての外部キー（主キーの変更・列の変更・途中の状態の食い違い・索引の喪失）に掛ける。同期後の主キーは `PostSyncSchema.PrimaryKeyOf`（主キーの変更を選んだ表は新しい主キー・追加する表は図の主キー・ほかは live の主キー）で、外部キーの追加を並べる `ArrangeForeignKeyAddsByFailureRisk` と同じ材料を使う。
   - 主キーの変更で付け直す外部キーにだけ掛けていたため、参照先の唯一の一意制約を同じ計画で外しながら列の変更で外部キーを付け直す同期が、名指しされずに付け直しで断られ、暗黙コミットの方言（MySQL・Oracle）で外部キーが消えたまま残った（修正 AC2。Oracle は途中の状態の付け直しで初めてこの経路を通る）。ガード：形の行（`SyncPlan/ShapeRows` の `TypeChange`=BothEndsKindChange × `ReferencedKey`=Unique × 一意制約の削除。網の静的な規則の D9〔断られる文自身が、前の方で外した外部キーの付け直しである形〕と実 DB の表明 1b）。
   - 証明ベース：同期後の一意制約の集合は live − 選んだ削除 ＋ 選んだ追加から厳密に合成する（自然キーの UNIQUE＋代理 PK の定番構成では警告しない）。
   - ⊆ の判定にはしない（`(id)→(id,code)` の拡張で多くの方言が失敗する）。並びまで比べない（並びは付け直しで直すので、比べると通る付け直しを誤って警告する）＝`StaysCandidateKey`。
@@ -403,7 +420,7 @@
   - 列の変更で外部キーを外し直さない方言でも、組の両端の型がこの同期で決まり、片側だけ変えた途中の状態（新しい子 × 古い親、古い子 × 新しい親）のどちらかが並べられない外部キーは、外して付け直す（`SyncPlanner.CollectForeignKeysBlockedInIntermediateState`・外部キー単位。同期後に食い違う外部キーと明示に外す外部キーは数えない）。外部キーを張ったまま両端を 1 列ずつ変えるので、両端を同じ別の型（int → varchar(10)）へ変える同期が、名指しも外し直しもされずに最初の列の変更で断られた（PostgreSQL 42804・Oracle ORA-02267。修正 AC2 の V8）。宣言は保守側なので、DB が受け入れる途中の状態（PostgreSQL の integer と numeric など）でも付け直す。ガード：形の行（`SyncPlan/ShapeRows` の `TypeChange`=BothEndsKindChange と必ず含む行 V8）・期待の行（`plan-type-mismatch-both-sides-kind-change-rebuilds-and-warns-where-declared`・`plan-type-mismatch-selected-fk-alter-is-excluded-as-a-whole`）・静的な規則 R7（途中の状態に掛かる）・生成器の水準（型の種類を変える）。
   - 列が空でないと通らない列の変更（`SyncDialectCapabilities.RequiresEmptyColumn`＝`TypeKindChangeRequiresEmptyColumn` の方言の型の種類の変更〔方言の正規化を通した括弧より前の基本の名前を `AreSameType` で比べる＝`ChangesTypeKind`。既定値のある列の型の種類の変更の警告と共有〕と、`PrecisionDecreaseRequiresEmptyColumn` の方言の精度・スケール・整数部の桁・小数秒を下げる変更〔精度なし → 精度ありを含む＝`DecreasesPrecision`〕。どちらも Oracle＝ORA-01439・ORA-01440・ORA-30082。同じ系統の固定長と可変長の文字列の入れ替え〔`CHAR` と `VARCHAR2`・`NCHAR` と `NVARCHAR2`〕で長さを下げないものは、Oracle が値のある列でも受け付けるので型の種類の変更に数えない＝`StringLengthChange`）を挟んで「前で外して後ろで付け直す」制約（外部キー・一意制約・主キー＝主キーの変更の解除を含む）を、`SyncPlanner.WarnConstraintsAroundRefusableChanges` が `SyncPlanWarningKind.ConstraintRebuildAroundEmptyColumnChange` で全部名指しする（止めない。列に値があると列の変更が断られ、暗黙コミットで外した制約が付け直されずに残る）。
     - 並べ終えた計画（前寄せの後）を見る。外す理由（外部キーの外し直し・主キーの変更・キーの列の変更）と、挟む変更がどの表かに依らない。外部キーの構成列の変更に限ると、主キー自体や無関係な表の変更を挟む外し直しが名指しされずに消える。
-    - 型の決まる列は `CollectTypeDecidingColumns` を通す。Detail は「制約名 (表.列: 旧 → 新, …)」、主キーの制約名は PRIMARY KEY。暗黙コミットの方言だけ（トランザクションの方言は失敗で巻き戻る）。
+    - 型の決まる列は `PostSyncSchema.TypeDecidingColumns` を通す。Detail は「制約名 (表.列: 旧 → 新, …)」、主キーの制約名は PRIMARY KEY。暗黙コミットの方言だけ（トランザクションの方言は失敗で巻き戻る）。
     - 同期計画の総当たりの表明 1b は、この警告が名指しした制約の消失だけを受け入れる（注 `warned-empty-column-change-exempt`）。
     - ガード：期待の行 `plan-empty-column-change-intermediate-rebuild-names-fk`・`plan-empty-column-change-pk-change-names-primary-key-and-fk`・`plan-type-mismatch-both-sides-kind-change-rebuilds-and-warns-where-declared`・生成器の水準（精度の縮小・必須の形 `precision-decrease`）・`SchemaSyncWarningTextTests`・`DialectDocsTableTests.ForeignKeyRebuildTable_MatchesDeclarations`。
   - 型の比較は `SyncDialectCapabilities.AreForeignKeyCompatibleTypes`（`AreSameType` に加え、`ForeignKeyAllowsStringLengthDifference` の方言では同じ文字列型の長さだけの違いを許す＝`SyncDialectCapabilities.DiffersOnlyInStringLength`。Oracle の単位語 CHAR／BYTE は両端で同じこと。`ForeignKeyAllowsIntegerWidthDifference` の方言＝PostgreSQL・Oracle・SQLite では幅だけ違う整数型を許す＝`SyncDialectCapabilities.DiffersOnlyInIntegerWidth`）。
@@ -411,7 +428,7 @@
   - ガード：形の行（`SyncPlan/ShapeRows` の `ForeignKeyTypes`=DecimalOtherKeyColumn と必ず含む行 V1・V4）・期待の行（`plan-type-mismatch-composite-undecided-pair-is-not-counted-alter-column`・`plan-type-mismatch-composite-undecided-pair-is-not-counted-pk-change`・`realdb-fk-integer-width-difference-is-accepted-without-warning`）・静的な規則 W1・R7（`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`「静的な規則」）・`CapabilityTreatmentParityTests`・`DialectDocsTableTests.ForeignKeyRebuildTable_MatchesDeclarations`・`SyncPlannerTests`（幅の違いの表）。
   - 主キーの変更で付け直す外部キーも、構成列の型を変えて両端が食い違うなら外さずに名指しする。
   - SQL Server（長さも一致が要る）の DDL は長さだけ違う外部キーの前に注記を出す（`ForeignKeyStatementNotes`）。
-  - 「この同期で型が決まる列」は `SyncPlanner.CollectTypeDecidingColumns` の 1 か所が決める（live に無い列か、live の型と `AreSameType` で同じでない型へ変える列の変更）。NULL 許容だけの列の変更は型を決めない。外部キーの型の照合（`HasPostSyncTypeMismatch`・`ExcludeForeignKeysWithPostSyncTypeMismatch`・前寄せの型の判定）はどれもこの関数を通す。
+  - 「この同期で型が決まる列」は `PostSyncSchema.TypeDecidingColumns` の 1 か所が決める（live に無い列か、live の型と `AreSameType` で同じでない型へ変える列の変更）。NULL 許容だけの列の変更は型を決めない。外部キーの型の照合（`HasPostSyncTypeMismatch`・`ExcludeForeignKeysWithPostSyncTypeMismatch`・前寄せの型の判定）はどれもこの関数を通す。
     - 数えると、DB が受け入れている型の違う外部キー（PostgreSQL の integer → bigint など）を NULL 許容の変更だけで「付け直せない」と名指しして外し直さず、その外部キーに阻まれる主キーの解除が必ず失敗した（PostgreSQL 2BP01・Oracle ORA-02273）。3 か所がそれぞれ列の変更の新しい型を辞書へ写していたので、誤りも 3 か所に写っていた。
     - ガード：形の行（`SyncPlanShapeRows` の因子 `ForeignKeyTypes`=Wider × `TypeChange`=ChildNullability と必ず含む行 L4）・静的な規則 W1（`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`「静的な規則」）・`SourceRuleTests`（規則 `sync-type-deciding-column-copies`＝差分の項目の列の新しい型を直接読む箇所をメソッドで数え、理由つきの一覧と照合する）。
 - 選んだ外部キーの追加・作り直しを警告で名指しする名前は、スクリプトが付ける名前（`SyncPlanner.SelectedForeignKeyName`＝`SyncScriptBuilderHelper.ForeignKeyNameToAdd`）の 1 か所で作る（型の食い違いの除外・`ForeignKeyNotOnCandidateKey`・SET NULL の除外・SET DEFAULT の 4 つの警告と、選んでいない変更を前提にする項目の除外の名指し）。
@@ -560,7 +577,7 @@
 - 方言が表せない参照アクションは、比べる前に方言の実効値へ畳む。DDL・同期は注意コメントを出して句を省くので、素で比べると取り込み直すたびに作り直しの差分が出て、既定の追加だけで同じ名前の衝突になる。
 - 宣言は `SyncDialectCapabilities.SupportsOnUpdateAction`／`SupportsSetDefaultAction`（ON DELETE・ON UPDATE の両方に効く）。畳み込みは `EffectiveOnDelete`／`EffectiveOnUpdate` で、外部キーのシグネチャと AlterForeignKey の変更文言の両方が通る。
 - SQL Server は SET DEFAULT を作るのに列の DEFAULT 制約が要るので、`SetDefaultRequiresColumnDefault` で NOT NULL の子の列への SET DEFAULT を `SyncPlanWarningKind.SetDefaultOnNotNullColumn` で名指しする（実行は止めない）。DDL は `ForeignKeyStatementNotes` が注記する。判定は差分の AlterForeignKey を展開した後の追加に掛ける。ガード：期待の行 `plan-set-default-on-not-null-child-warns-only-where-declared`・`plan-alter-foreign-key-to-set-default-on-not-null-child-warns-only-where-declared`・網羅の行（SQL Server の手で書いた行のうち接尾辞 `fk-actions-not-null-child-set-default` の 5 行。実 SQL Server で DB が断るので、警告を外すと表明 1 が赤）・生成器の行の水準 `set-default-not-null-child`（参照アクションを変える方言）。
-  - 子の列の NULL 許容は同期後の値で読む（`SyncPlanner.PostSyncNullability`＝選んだ主キーの変更で主キーに入る列は NOT NULL、選んだ列の変更があればその値、DB に在る列は DB の値、DB に無い列は図の値。SET NULL の側と同じ読み方）。図の値で読むと、DB では NOT NULL・図では NULL 許容の列へ、NULL 許容化を選ばずに外部キーだけを足す同期が警告なしに断られ、逆向き（DB では NULL 許容・図では NOT NULL）では当てはまらない警告が出る。DDL の注記（`ForeignKeyStatementNotes`）は図が目標なので、図の値のまま読む。ガード：期待の行 `plan-set-default-on-child-kept-not-null-by-unselected-alter-warns`・`plan-set-default-on-child-kept-nullable-by-unselected-alter-does-not-warn`（網と実 SQL Server）・`plan-set-default-on-primary-key-child-flagged-nullable-warns-like-not-null`（DB に無い表の、図の主キーの列の印）。
+  - 子の列の NULL 許容は同期後の値で読む（`PostSyncSchema.AllowsNull`＝選んだ主キーの変更で主キーに入る列は NOT NULL、選んだ列の変更があればその値、DB に在る列は DB の値、DB に無い列は図の値。SET NULL の側と同じ読み方）。図の値で読むと、DB では NOT NULL・図では NULL 許容の列へ、NULL 許容化を選ばずに外部キーだけを足す同期が警告なしに断られ、逆向き（DB では NULL 許容・図では NOT NULL）では当てはまらない警告が出る。DDL の注記（`ForeignKeyStatementNotes`）は図が目標なので、図の値のまま読む。ガード：期待の行 `plan-set-default-on-child-kept-not-null-by-unselected-alter-warns`・`plan-set-default-on-child-kept-nullable-by-unselected-alter-does-not-warn`（網と実 SQL Server）・`plan-set-default-on-primary-key-child-flagged-nullable-warns-like-not-null`（DB に無い表の、図の主キーの列の印）。
 - 方言ごとの事実は MySQL・Oracle・SQL Server の CLAUDE.md。固定は期待の行 `diff-fk-unsupported-referential-action-is-folded-*`・`diff-fk-alter-describes-effective-actions-only`・`diff-fk-mysql-folds-only-set-default-*`・`DialectDdlTableTests`（行 `ddl-fk-set-default-*`）・期待の行 `plan-set-default-*`。mutation 実証済み。
 
 ### 計算列と主キーと同じ列集合の一意制約

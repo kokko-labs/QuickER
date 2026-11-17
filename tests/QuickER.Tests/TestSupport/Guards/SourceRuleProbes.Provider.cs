@@ -246,6 +246,117 @@ internal static partial class SourceRuleProbes
             {
                 InactiveBranch = true,
             },
+            // 同期後の事実を求める呼び出し（From の普通の形・改行をまたぐ形・ラムダの中・修飾した受け手・時点を PlanStage.X で書かない From・
+            // ほかの静的なメソッドの直接の呼び出し）を拾い、インスタンスのメンバーの読み・別の型の From・文字列・コメントは拾わない
+            new SourceRuleProbe(
+                "sync-post-sync-schema-single-source-forms",
+                "sync-post-sync-schema-single-source",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System.Collections.Generic;
+                        using System.Linq;
+
+                        internal enum PlanStage
+                        {
+                            Selected,
+                            Arranged,
+                        }
+
+                        internal sealed class PostSyncSchema
+                        {
+                            public int Count => 0;
+
+                            public static PostSyncSchema From(PlanStage stage, List<int> items) => new();
+
+                            public static int PostSyncPrimaryKeyOf(int table) => table;
+                        }
+
+                        internal static class Other
+                        {
+                            public static int From(PlanStage stage, List<int> items) => 0;
+                        }
+
+                        internal static class Planner
+                        {
+                            // PostSyncSchema.From(PlanStage.Arranged, items)
+                            public static int Plain(List<int> items) =>
+                                PostSyncSchema.From(PlanStage.Selected, items).Count;
+
+                            public static int Wrapped(List<int> items) =>
+                                PostSyncSchema
+                                    .From(PlanStage.Arranged, items)
+                                    .Count;
+
+                            public static int Lambda(List<List<int>> all) =>
+                                all.Sum(items => PostSyncSchema.From(PlanStage.Selected, items).Count);
+
+                            public static int Qualified(List<int> items) =>
+                                global::PostSyncSchema.From(PlanStage.Arranged, items).Count;
+
+                            public static int Variable(List<int> items, PlanStage stage) =>
+                                PostSyncSchema.From(stage, items).Count;
+
+                            public static int Direct(int table) => PostSyncSchema.PostSyncPrimaryKeyOf(table);
+
+                            public static int Allowed(PostSyncSchema postSync, List<int> items)
+                            {
+                                var text = "PostSyncSchema.From(PlanStage.Selected, items)";
+                                return postSync.Count + Other.From(PlanStage.Selected, items) + text.Length;
+                            }
+                        }
+                        """,
+                        "Plain: Selected",
+                        "Wrapped: Arranged",
+                        "Lambda: Selected",
+                        "Qualified: Arranged",
+                        "Variable: ?",
+                        "Direct: PostSyncPrimaryKeyOf"
+                    ),
+                ]
+            ),
+            // 構文の規則は、条件コンパイルの外れる分岐の中の呼び出しも拾う
+            new SourceRuleProbe(
+                "sync-post-sync-schema-single-source-inactive-branch",
+                "sync-post-sync-schema-single-source",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System.Collections.Generic;
+
+                        internal enum PlanStage
+                        {
+                            Selected,
+                        }
+
+                        internal sealed class PostSyncSchema
+                        {
+                            public int Count => 0;
+
+                            public static PostSyncSchema From(PlanStage stage, List<int> items) => new();
+                        }
+
+                        internal static class Planner
+                        {
+                            public static int Count(List<int> items)
+                            {
+                        #if QUICKER_PROBE_BRANCH
+                                return PostSyncSchema.From(PlanStage.Selected, items).Count;
+                        #else
+                                return 0;
+                        #endif
+                            }
+                        }
+                        """,
+                        "Count: Selected"
+                    ),
+                ]
+            ) with
+            {
+                InactiveBranch = true,
+            },
             // 列の NULL 許容の印の読み取り（素の・否定・?. ・プロパティパターン・代入の右辺・ラムダの中）を拾い、書き込み（代入の左辺・
             // 初期化子）・nameof・ほかの型の IsNullable は拾わない
             new SourceRuleProbe(
