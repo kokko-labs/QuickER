@@ -78,6 +78,25 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
     ];
 
     /// <summary>
+    /// 既定の種の数で 1 回以上確かめることを表明する実行ごとの照合（<see cref="SyncModelRun.RunChecks"/> の鍵。状態の面との比較は
+    /// 決められないものを除いた件数）
+    /// </summary>
+    private static readonly string[] GuardedRunChecks =
+    [
+        SyncModelRun.StaleOverwriteCheck,
+        SyncModelRun.LocalDiscardCheck,
+        SyncModelRun.CarryHeldCheck,
+        SyncModelRun.CarryFulfilledCheck,
+        SyncModelRun.CarryOverwroteCheck,
+        SyncModelRun.LocalDiscardAfterUnreportedServerWinsCheck,
+        SyncModelRun.FacetServerKnowsCheck,
+        SyncModelRun.UnreportedOverwriteCheck,
+        SyncModelRun.OutOfScopeWriteCheck,
+        SyncModelRun.ServerWinsWroteCheck,
+        SyncModelRun.UnownedSendCheck,
+    ];
+
+    /// <summary>
     /// 直結で流す決定的なシナリオの名前のうち、このクラスが受け持つ分（残りは <see cref="SyncModelScenarioParts"/> の
     /// 分けたクラスが受け持つ）
     /// </summary>
@@ -102,6 +121,9 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
     /// <param name="preloadTally">
     /// 端末の最初の形が実際に効いた件数を足し込む先（<see cref="SyncModelRun.PreloadEffects"/>。null なら数えない）
     /// </param>
+    /// <param name="runTally">
+    /// 実行ごとの照合の、照合ごとの確かめた件数と違反の件数を足し込む先（<see cref="SyncModelRun.RunChecks"/>。null なら数えない）
+    /// </param>
     internal static async Task<(
         IReadOnlyList<ModelFailure> Failures,
         IReadOnlyList<string> Log
@@ -113,7 +135,8 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         ConcurrentDictionary<string, (int Checked, int WithBasis)>? basisTally = null,
         CoverageCounter? outcomes = null,
         ConcurrentDictionary<UniqueSpelling, int>? spellingTally = null,
-        ConcurrentDictionary<string, int>? preloadTally = null
+        ConcurrentDictionary<string, int>? preloadTally = null,
+        ConcurrentDictionary<string, (int Checked, int Violations)>? runTally = null
     )
     {
         var generator = new SyncModelGenerator(seed);
@@ -202,6 +225,18 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             }
         }
 
+        if (runTally is not null)
+        {
+            foreach (var (kind, (count, violations)) in run.RunChecks)
+            {
+                runTally.AddOrUpdate(
+                    kind,
+                    (count, violations),
+                    (_, sum) => (sum.Checked + count, sum.Violations + violations)
+                );
+            }
+        }
+
         return generatorFailure is null
             ? (run.Failures, run.Log)
             : ([.. run.Failures, generatorFailure], run.Log);
@@ -231,6 +266,9 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             StringComparer.Ordinal
         );
         var preloadTally = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
+        var runTally = new ConcurrentDictionary<string, (int Checked, int Violations)>(
+            StringComparer.Ordinal
+        );
 
         var rowResults = new ConcurrentDictionary<
             string,
@@ -280,7 +318,8 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                             coverage: coverage,
                             basisTally: basisTally,
                             outcomes: outcomes,
-                            preloadTally: preloadTally
+                            preloadTally: preloadTally,
+                            runTally: runTally
                         );
                         elapsed[seed] = watch.Elapsed;
                     }
@@ -380,6 +419,13 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             output.WriteLine($"refusal basis {reason}: checked {count}, with basis {withBasis}");
         }
 
+        // 実行ごとの照合の件数（0 件の照合は確かめが一度も走っていない）
+        foreach (var kind in SyncModelRun.RunCheckKinds)
+        {
+            var (count, violations) = runTally.GetValueOrDefault(kind);
+            output.WriteLine($"run check {kind}: checked {count}, violations {violations}");
+        }
+
         // 端末の最初の形が実際に効いた件数（0 件の形は空振り）
         foreach (var kind in SyncModelRun.PreloadEffectKinds)
         {
@@ -447,6 +493,23 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                 var (count, withBasis) = basisTally.GetValueOrDefault(reason);
                 CoverageGuard.AtLeast($"refusal basis checks of {reason}", count, 1);
                 CoverageGuard.AtLeast($"refusal basis found for {reason}", withBasis, 1);
+            }
+        }
+
+        // 実行ごとの照合が空振りしていない（2 つの範囲がどちらも既定の種の数のとき、どの照合も 1 回以上確かめる）
+        if (plan.IsDefaultCount && widePlan.IsDefaultCount)
+        {
+            foreach (var kind in GuardedRunChecks)
+            {
+                var (count, _) = runTally.GetValueOrDefault(kind);
+                CoverageGuard.AtLeast($"run checks of {kind}", count, 1);
+            }
+
+            // 決定の後の編集の消失は普段の種の数では起きないので、夜間の既定の種の数のときだけ表明する（普段は件数を出力へ書くだけ）
+            if (plan.Profile == EngineProfile.Nightly && widePlan.Profile == EngineProfile.Nightly)
+            {
+                var (count, _) = runTally.GetValueOrDefault(SyncModelRun.CarryEditLostCheck);
+                CoverageGuard.AtLeast($"run checks of {SyncModelRun.CarryEditLostCheck}", count, 1);
             }
         }
 
@@ -629,7 +692,38 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         }
 
         problems.Should().BeEmpty();
+
+        // 判定役の対照の行は直結だけで流れ（上の照合が直結の行に数える）、実行ごとの照合 4 つのそれぞれに 1 本以上ある
+        var judgeRows = SyncModelScenarios
+            .All.Where(s => s.ExpectedJudgeSignatures is not null)
+            .ToList();
+        judgeRows
+            .Where(s => s.Transports.Count != 1 || !s.RunsOn(SyncModelTransport.Direct))
+            .Select(s => s.Name)
+            .Should()
+            .BeEmpty("a judge row runs only on the direct transport");
+        CoverageGuard.ContainsAll(
+            "judge rows for each run check",
+            judgeRows
+                .SelectMany(s => s.ExpectedJudgeSignatures!)
+                .Select(signature => signature[..signature.LastIndexOf(':')]),
+            JudgedRunChecks
+        );
     }
+
+    /// <summary>対照の行が 1 本以上あることを表明する、実行ごとの照合の署名の頭（表の名前を除いた部分）</summary>
+    private static readonly string[] JudgedRunChecks =
+    [
+        "5/stale-overwrite",
+        "5/carry:overwrote",
+        "5/carry:edit-lost",
+        "5/local-discard",
+        "5/facet:server-knows",
+        "5/unreported-overwrite",
+        "5/out-of-scope-write",
+        "5/serverwins-wrote",
+        "5/unowned-send",
+    ];
 
     [Fact(
         DisplayName = "[Sync/モデル] 割り込みの行は、書き手ごとに点 × ポリシー × 前段 × 割り込みの書き込み（サーバーの書き手は × 実行の種類 × 後段 × その後の失敗）の起こり得る組をそろえ、どの行も割り込みを 1 つだけ仕掛けてそのポリシーで同期する"
@@ -826,7 +920,31 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
     /// <summary>決定的なシナリオを直結で流し、既知の失敗の一覧に載った署名の組どおりに失敗することを表明する</summary>
     internal static async Task AssertFailsExactlyAsListed(string name)
     {
-        var (failures, log) = await SyncModelScenarios.Get(name).RunAsync(Ct);
+        var scenario = SyncModelScenarios.Get(name);
+        var (failures, log) = await scenario.RunAsync(Ct);
+
+        // 判定役の対照の行は、既知の失敗の一覧を通さず、出た署名の集合と宣言の集合の一致で判定する
+        if (scenario.ExpectedJudgeSignatures is { } expected)
+        {
+            var actual = failures.Select(f => f.Signature).ToHashSet(StringComparer.Ordinal);
+
+            if (!actual.SetEquals(expected))
+            {
+                throw new Xunit.Sdk.XunitException(
+                    $"[Sync/モデル] 判定役の対照の行 {name}: 出た署名の集合が宣言と一致しない\n"
+                        + $"declared: [{string.Join(", ", expected.Order(StringComparer.Ordinal))}]\n"
+                        + $"actual:   [{string.Join(", ", actual.Order(StringComparer.Ordinal))}]\n"
+                        + string.Join(
+                            "\n",
+                            failures.Select(f => $"  {f.Signature}: {FirstLine(f.Detail)}")
+                        )
+                        + "\nops:\n"
+                        + string.Join("\n", log.Select(l => "  " + l))
+                );
+            }
+
+            return;
+        }
 
         // 署名の組が一覧のそのシナリオの組と等しいこと（載っていない署名も、載っているのに出ない署名も赤）
         var problem = SyncModelKnownFailures

@@ -277,7 +277,9 @@
 - 表明：
   - 止まらない：静止化が、例外・未送信・競合・打ち切りを残さず終わる。
   - 収束：3 者の全表と blob が一致する。
-  - 消失なし：最終値は誰かが書いた値。書き手が 1 人で競合も ServerWins の破棄も無いキーはその値。外部キー（`foreign_key_check`）も表明する。
+  - 消失なし：最終値は誰かが書いた値。書き手が 1 人で競合も ServerWins の破棄も無いキーはその値。
+  - 外部キー：書き込みの手・実行の前後で `foreign_key_check` の違反の集合を比べ、新しく出来た違反だけを数える（下の「判定役の継ぎ目・台帳・実行ごとの照合」）。
+  - 実行ごとの照合（署名 `5/` の族）：実行 1 回がサーバーと端末に起こした変化を、モデルの台帳と照らす（同じ節）。
   - 書き手が 2 人のキーの期待は、ポリシー×ぶつかり方の決定的なシナリオが持つ。
 - 根拠のない競合：
   - 書き手がその端末だけのキーへの版の競合は、根拠なしとして違反にする。
@@ -350,6 +352,45 @@
 - 既知の失敗の一覧の乱数の項目のうち RegularSeeds / NightlySeeds の項目は、全部の種をまとめて照合して「起きない」も赤にする。種ごとの照合は「載っていない」しか見ないため。
 - 乱数の種の照合は、静止化で起きた例外を途中の同期の例外と同じに扱い、表明 2・3 の署名から表の名前を外して行う（`SyncModelRuntimeTests.Family`）。
 - 種の数は `QUICKER_SYNC_MODEL_SEEDS`（既定 60）と、広い世界の種の `QUICKER_SYNC_MODEL_WIDE_SEEDS`（既定 48・夜間 240）。広い世界の種は同じテストの中で既存の種の後に流し、種ごとの照合と再現の手順はその範囲の決め方で、既知の失敗の「起きない」の照合は既存の範囲の種だけで、網羅しない組の照合は 2 つの範囲がどちらも既定の種の数のときだけ行う。種の指紋は範囲ごとに別の記録（`SyncModel`・`SyncModelWide`）。時刻と乱数の出どころは種だけ。
+
+### 判定役の継ぎ目・台帳・実行ごとの照合
+
+判定役（`SyncModelRun`）は、端末のエンジンを面越しに呼び、エンジンの自己申告に依らない台帳で実行 1 回ごとの結果を照らす。規則の正本は `SyncModelRun.Ledger.cs` の先頭の remarks。
+
+- 継ぎ目（`SyncModelDeviceFacets.cs`）：
+  - 端末のエンジンの面 `IModelDeviceSync`（`RunAsync`・`RefreshAsync`）と、状態の面 `IModelDeviceSyncState`（未送信の行ごとの `ModelPendingRow`＝表・キー・追加か更新を含むか・削除を含むか・サーバーがその行を知っているか・変わる印）。製品のエンジンの実装は `ProductModelDeviceSync`・`JournalModelDeviceSyncState`。
+  - 端末の作り方は `SyncModelWorldOptions.CreateDevice` で差し替える。判定役は、エンジンの記録の表（ジャーナル・受理記録）を直接読まずに、状態の面を読む。
+  - エンジンの宣言 `IModelDeviceSync.CarriesServerWinsDecision`：ServerWins の実行が戻せなかった行の決定を、後の実行へ持ち越すか。製品のエンジンは偽。
+- 台帳「端末の持ち分」（`SyncModelRun.Ledger.cs`）：（端末・表・キー）→ その端末が自分で書いてまだ届いていない最後の内容。品目の blob は行と別の品目。
+  - 作るのは、書き込みの手の前後の端末の DB の差分・実行の前後の端末とサーバーの DB・実行の公開の結果（競合・`LocalRowChanges`）・失敗の注入の控えだけ。状態の面・ジャーナル・受理記録は読まない（エンジンが印を間違えたときに、判定が一緒に間違えないため）。状態の面を読むのは、比べる相手にする照合（`5/facet:server-knows`）だけ。
+- 実行ごとの照合（署名は `5/` の族。根拠の判定と同じく実行の直後に確定し、静止化が失敗しても報告する）：
+  - `5/stale-overwrite`：実行が、端末の持ち分の無い行の古い内容で、サーバーの内容を変えた。
+  - `5/unreported-overwrite`：版で守る実行が、端末が最後に見た後のほかの書き手の内容を、競合を報告せずに端末の内容で上書きした。
+  - `5/local-discard`：端末の持ち分の内容が、報告なしに端末からもサーバーからも消えた（Collect の競合の報告だけでは許さない）。
+  - `5/carry:overwrote`・`5/carry:edit-lost`：戻せなかった行の決定の内容をサーバーへ書いた（宣言が真のエンジンだけ違反）・決定の後の編集が報告なしに消えた（宣言に依らず違反）。
+  - `5/out-of-scope-write`・`5/serverwins-wrote`：実行が範囲の外の表のサーバーの行を変えた・Versioned＋ServerWins の実行がサーバーを変えた。
+  - `5/unowned-send`：追加・更新の競合か DiscardedByServerWins を報告したキーに、端末の書き込みが無かった。
+  - `5/facet:server-knows`：状態の面の「サーバーが知っているか」が、モデルの観測と食い違う。
+  - `5/ledger-invariant`：台帳の見張り（削除の blob の持ち分は行の持ち分に従う）。
+- 乱数の種が既定の種の数のとき、照合ごとに確かめた件数が 1 件以上あることを `CoverageGuard` で表明する（`SyncModelRuntimeTests` の `GuardedRunChecks`。空振りの守り）。
+- 違反にせず数えるだけにする形（宣言が偽のエンジンの今の振る舞い。宣言が真のエンジンでは違反）：
+  - 単独のアップロード × ServerWins が戻せなかった行を知らせず、後の実行が送るか黙って片付ける。
+  - 行を書いた後・帳簿（記録の削除・受理記録）を書く前に、blob のコピーの失敗で例外になる窓の 4 つの現れ方。決まった形の行が今の振る舞いを固定する：`blob-thrown-serverwins-then-collect-overwrites-newer-server-blob`（残った blob の記録が後で古い blob を送る）・`thrown-serverwins-sync-leaves-restored-row-out-of-local-row-changes`（戻した行が例外の一覧に載らない）・`thrown-serverwins-upload-then-lww-sends-restored-row-as-edit`（戻した行の記録が残り、後の実行が古い写しを送る）・`thrown-resolver-row-delete-is-dropped-and-row-comes-back`（親の解決役が持ち込んだ行の削除が黙って捨てられ、行が戻る）。
+  - 数えるだけにするのは、その実行でその行の blob の読み出しの失敗が当たったとき（失敗の注入の控え）か、同期で端末が最後に見た後にほかの書き手がその行を変えていたときだけ。窓の外の同じ形は違反のまま。
+  - 持ち越しを宣言するエンジンを足すときは、この 4 本が違反にならないことを受け入れにし、行の期待を書き直す。
+- 台帳の規則の守りの行：`sw-discards-insert-then-delete-on-key-taken-on-server`（ほかの書き手と同じキーで入れてすぐ消した行の記録を ServerWins が捨てたと報告する）・`sw-discards-delete-left-by-failed-run-after-recreate-elsewhere`（例外で送る前に止まった削除の記録が、後で競合と破棄として報告される）。どちらも docs どおりの報告で、`5/unowned-send` にならない。
+- 外部キーの表明（`4/foreign-key:{子の表}`）：書き込みの手・一括挿入・実行（例外で終わった実行・洗い替えを含む）の前後で `PRAGMA foreign_key_check` の違反の集合を比べ、新しく出来た違反だけを数える。違反の同一性は（子の表・子の行の主キーの値・親の表・外部キーの番号）で、rowid では比べない。利用者の手（`LocalSqlOp`＝外部キーを切った専用の接続）が作った違反は数えない。
+- 対照の行 `judge-*`（`SyncModelScenarios.Judge.cs`・21 本・直結だけ）：端末のエンジンを外から壊す包み（`SyncModelJudgeBreaks.cs`）で違反の形を作り、判定役が宣言した署名の集合どおりに名指しすることを確かめる。
+  - 行は `JudgeDevice`（包みと宣言）と `ExpectedJudgeSignatures`（空の集合は違反なし）を持ち、既知の失敗の一覧を通さずに、出た署名の集合と宣言の一致で判定する。起きなかった壊し方は行の誤りとして赤にする。
+  - 製品の本当の振る舞いや利用者の正当な手では作らない（その形を受け入れると決まっても、対照の行が嘘にならないようにする）。
+  - 照合ごとに 1 本以上：`judge-stale-overwrite-is-a-violation`・`judge-unreported-overwrite-is-a-violation`・`judge-local-discard-is-a-violation`・`judge-thrown-run-restore-is-a-violation`・`judge-carry-overwrite-is-a-violation`・`judge-carry-fulfilled-is-not-lost`・`judge-carry-edit-lost-is-a-violation`・`judge-undeclared-carry-discard-is-lost`・`judge-out-of-scope-write-is-a-violation`・`judge-serverwins-wrote-is-a-violation`・`judge-unowned-send-is-a-violation`・`judge-server-knows-facet-is-compared`。
+  - 数えるだけの範囲と控えの守り：`judge-unowned-send-after-settled-record-is-a-violation`・`judge-local-discard-of-edit-on-row-brought-in-by-thrown-run-is-a-violation`・`judge-local-discard-of-delete-on-row-brought-in-without-blob-failure-is-a-violation`・`judge-resend-after-thrown-serverwins-restore-without-blob-failure-is-a-violation`。
+  - 外部キー：`judge-foreign-key-existing-violation-is-not-counted`・`judge-foreign-key-new-violation-is-counted`・`judge-foreign-key-new-violation-in-thrown-run-is-counted`・`judge-foreign-key-swapped-violation-is-counted`・`judge-foreign-key-reinserted-violation-is-not-counted`。
+- 守りの薄い点：
+  - 数えるだけの窓のうち blob の読み出しの失敗は行の単位で判定する。エンジンはバッチの行を全部書いてから blob をコピーするので、同じバッチのほかの品目も同じ状態になりうる。その形は違反になる（偽の赤の向き）。出たら、表の単位（その実行でその端末の失敗が当たり、行が blob を持つ表の行）へ広げる。
+  - ダウンロードの側の窓（ほかの書き手の変更）は、普段の種にも決まった形の行にも例が無い。
+  - 持ち越しを宣言するエンジンでだけ効く条件（数えるだけにする条件の「宣言が偽」）は、そのエンジンの受け入れが守る。
+- mutation 実証済み（照合と下ろす規則を 1 つずつ壊す・控えの立て方と外し方・数えるだけの窓の条件・外部キーの表明の比べ方）。製品のエンジンを外から細工して 288 種を流す計測では、古い内容での上書きと持ち越した決定の上書きは当たった種をすべて名指しし、ローカルの変更を黙って捨てる細工は、細工が効いていない種（直後の実行がどのみち同じ行を戻して報告する種）を除いてすべて名指しする。
 
 ### シナリオの操作とモデルの期待
 

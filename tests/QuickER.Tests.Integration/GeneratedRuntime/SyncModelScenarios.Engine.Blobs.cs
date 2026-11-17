@@ -261,6 +261,105 @@ internal static partial class SyncModelScenarios
                     new ExpectPayloadOp(SV, 11, "0909"),
                 ]
             ),
+            // 例外で終わった ServerWins の同期の後、ServerWins でない同期が、端末の古い blob でサーバーの他者の新しい blob を
+            // 競合なしに上書きする。持ち越しを宣言しないエンジンでは数えるだけ（照合 5 の数えるだけの種類）。持ち越しを宣言する
+            // エンジン（適用が全部か無しか）では違反になる形なので、そのエンジンではこの行の期待を「競合として報告される」へ書き直す
+            Moved(
+                "blob-thrown-serverwins-then-collect-overwrites-newer-server-blob",
+                [.. Seed(1, "alice", 11, "widget")],
+                [
+                    new WritePayloadOp(D1, 11, "0D0D"),
+                    new UpdateItemOp(SV, Direct, 11, 1, null, "c-11", "server-new"),
+                    new WritePayloadOp(SV, 11, "0E0E"),
+                    new ArmFaultOp(D1, ModelFaultKind.BlobDownload),
+                    new ExpectThrowOp(D1),
+                    Plain(D1, policy: SyncConflictPolicy.ServerWins),
+                    Expect.Result(D1).Contains("exception *"),
+                    Expect
+                        .Rows(D1, I)
+                        .Contains("11 folder=1 label=null code=c-11 title=server-new"),
+                    new ExpectPayloadOp(D1, 11, "0D0D"),
+                    Plain(D1),
+                    Expect.Result(D1).Absent("conflict *"),
+                    new ExpectPayloadOp(SV, 11, "0D0D"),
+                ]
+            ),
+            // 持ち越しを宣言しないエンジンでは、例外で終わった ServerWins の同期が戻した行が、例外の LocalRowChanges に載らない
+            // （照合 3 の数えるだけの種類）。持ち越しを宣言するエンジン（適用が全部か無しか）では、戻した行が一覧に載る（または
+            // 戻らない）形へ期待を書き直す。
+            // この行の窓は、表のダウンロードの直後に走る ServerWins の決着（捨てる記録の行をサーバーから読み直して書く）：行を書いた
+            // 後の blob のコピーで例外になると、記録を捨てる前・一覧に載せる前に止まる。もう一方の窓はダウンロードの側で、捨てる
+            // 未送信を持つ行のサーバーの版が進んでいるとき、ダウンロードがその行を書いた後の blob のコピーで例外になると、決着の前に
+            // 止まる（行は戻り、記録は残り、一覧に載らない）。フォルダーの編集は、例外が一覧を運ぶ（先に捨てた行が一覧にある）ように
+            // するため
+            Moved(
+                "thrown-serverwins-sync-leaves-restored-row-out-of-local-row-changes",
+                [.. Seed(1, "alice", 11, "widget")],
+                [
+                    new UpdateFolderOp(D1, Direct, 1, null, "alice-local"),
+                    new DeleteItemOp(D1, Direct, 11),
+                    new ArmFaultOp(D1, ModelFaultKind.BlobDownload),
+                    new ExpectThrowOp(D1),
+                    Plain(D1, policy: SyncConflictPolicy.ServerWins),
+                    Expect
+                        .Result(D1)
+                        .Contains("exception *")
+                        .Contains("local-change model_folders key=1 reason=DiscardedByServerWins")
+                        .Absent($"local-change {I} key=11 *"),
+                    Expect.Rows(D1, I).Contains("11 folder=1 label=null code=c-11 title=widget"),
+                    Plain(D1),
+                    Expect.Rows(D1, I).Contains("11 *"),
+                    Expect.Rows(SV, I).Contains("11 *"),
+                ]
+            ),
+            // 持ち越しを宣言しないエンジンでは、例外で終わった ServerWins の実行が戻した行の記録が残り、後の実行がその行を端末の
+            // 編集として送る。持ち越しを宣言するエンジン（適用が全部か無しか）では起きない形なので、そのエンジンでは期待を書き直す。
+            // 単独の UploadAsync の ServerWins が捨てる記録の行をサーバーから読み直して書いた後、その行の blob のコピーで例外に
+            // なる。後勝ちの同期は、残った記録で戻した古い写しを送り、サーバーの他者の更新を上書きする（照合 1 の数えるだけの種類）
+            Moved(
+                "thrown-serverwins-upload-then-lww-sends-restored-row-as-edit",
+                [.. Seed(1, "alice", 11, "widget")],
+                [
+                    new UpdateItemOp(D1, Direct, 11, 1, null, "c-11", "widget-local"),
+                    new ArmFaultOp(D1, ModelFaultKind.BlobDownload),
+                    new ExpectThrowOp(D1),
+                    PlainOnly(D1, ModelSyncKind.Upload, policy: SyncConflictPolicy.ServerWins),
+                    Expect.Result(D1).Contains("exception *"),
+                    Expect.Rows(D1, I).Contains("11 folder=1 label=null code=c-11 title=widget"),
+                    new UpdateItemOp(SV, Direct, 11, 1, null, "c-11", "server-new"),
+                    Plain(D1, SyncMode.LastWriteWins),
+                    Expect.Rows(SV, I).Contains("11 folder=1 label=null code=c-11 title=widget"),
+                ]
+            ),
+            // 持ち越しを宣言しないエンジンでは、例外で終わった実行の解決役が持ち込んだ行の削除が、サーバーに一度も届いていない行の
+            // 削除として黙って捨てられ、後の同期がサーバーの行を端末へ戻す（照合 3 の数えるだけの種類）。持ち越しを宣言するエンジン
+            // （適用が全部か無しか）では違反になる形なので、そのエンジンの受け入れでこの行の期待を書き直す。
+            // 品目の表のダウンロードは、Versioned が触れない版なしの表（ラベル）を参照する品目 21 で打ち切られ、イベントの
+            // ダウンロードの親の解決役が品目 22 をサーバーから読み直して書く。その blob のコピーで例外になると、品目 22 はミラー版
+            // も受理記録も無い行として残る
+            Moved(
+                "thrown-resolver-row-delete-is-dropped-and-row-comes-back",
+                [.. Seed(1, "alice", 11, "widget")],
+                [
+                    new AddLabelOp(SV, Direct, "L9", 1, "server-only"),
+                    new AddItemOp(SV, Direct, 21, 1, "L9", "c-21", "labelled", "0A0B0015"),
+                    Line(SV, 22, 1, "resolved"),
+                    new AddEventOp(SV, Direct, ResolverEventAt, 22, "needs-22"),
+                    new ArmFaultOp(D1, ModelFaultKind.BlobDownload),
+                    new ExpectThrowOp(D1),
+                    Plain(D1),
+                    Expect.Result(D1).Contains("exception *"),
+                    Expect.Rows(D1, I).Contains("22 folder=1 label=null code=c-22 title=resolved"),
+                    Expect.Rows(D1, I).Absent("21 *"),
+                    Expect.Mirror(D1, I).Contains("key=22 mirror=null"),
+                    Expect.Acks(D1, I).Absent("key=22 *"),
+                    new DeleteItemOp(D1, Direct, 22),
+                    Plain(D1),
+                    Expect.Result(D1).Absent("conflict *", "local-change *"),
+                    Expect.Rows(D1, I).Contains("22 folder=1 label=null code=c-22 title=resolved"),
+                    Expect.Rows(SV, I).Contains("22 folder=1 label=null code=c-22 title=resolved"),
+                ]
+            ),
             Moved(
                 "blob-owed-copy-made-for-ordinary-edit",
                 [],
@@ -364,4 +463,7 @@ internal static partial class SyncModelScenarios
                 ]
             ),
         ];
+
+    /// <summary>解決役が親の品目を読み直すイベントの時刻（thrown-resolver-row-delete-is-dropped-and-row-comes-back）</summary>
+    private static DateTime ResolverEventAt => new(2026, 6, 2, 9, 0, 0, DateTimeKind.Unspecified);
 }

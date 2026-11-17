@@ -152,6 +152,13 @@ internal sealed partial class SyncModelRun
                 await _world
                     .Device(record.Device)
                     .Journal.RecordAsync(record.Table, record.KeyText, record.Operation, null, _ct);
+
+                // エンジンの記録を直接作る手（照合 4 はこのキーを決められないとして数える）
+                NoteRecordTouched(
+                    record.Device,
+                    record.Table,
+                    CanonicalKey(record.Table, record.KeyText)
+                );
                 return true;
 
             case RefuseJournalRemovalOp refuse:
@@ -192,6 +199,8 @@ internal sealed partial class SyncModelRun
                     await journal.RemoveTableAsync(clear.Table, _ct);
                 }
 
+                // 利用者が記録を捨てる手：その範囲の表の持ち分と戻せなかった行の決定を下ろす
+                ForgetDiscardedRecords(clear.Device, clear.Table);
                 return true;
             }
 
@@ -224,6 +233,13 @@ internal sealed partial class SyncModelRun
 
             case LocalSqlOp sql:
                 await LocalSqlAsync(sql.Device, [sql.Sql]);
+
+                // 同期の補助の表に触れる文はエンジンの記録を直接変える（照合 4 はその端末を決められないとして数える）
+                if (sql.Sql.Contains("quicker_sync", StringComparison.OrdinalIgnoreCase))
+                {
+                    NoteRecordTouched(sql.Device, null, null);
+                }
+
                 return true;
 
             case OpenNewJournalOp open:
@@ -322,20 +338,27 @@ internal sealed partial class SyncModelRun
     /// <summary>端末のローカル DB へ、外部キーの検査を切って文を順に流す（記録しない）</summary>
     private async Task LocalSqlAsync(ModelActor device, IEnumerable<string> statements)
     {
-        await using var connection = new SqliteConnection(_world.Device(device).ConnectionString);
+        // 専用の接続（外部キーの検査を切り、プールしない＝プールの接続の PRAGMA を変えない）
+        await using var connection = new SqliteConnection(
+            WithoutForeignKeys(_world.Device(device).ConnectionString)
+        );
         await connection.OpenAsync(_ct);
 
-        foreach (
-            var sql in statements
-                .Prepend("PRAGMA foreign_keys = OFF")
-                .Append("PRAGMA foreign_keys = ON")
-        )
+        foreach (var sql in statements)
         {
             await using var command = connection.CreateCommand();
             command.CommandText = sql;
             await command.ExecuteNonQueryAsync(_ct);
         }
     }
+
+    /// <summary>外部キーの検査を切り、プールしない接続文字列（利用者の手やエンジンの壊し方が親の無い行を書くため）</summary>
+    internal static string WithoutForeignKeys(string connectionString) =>
+        new SqliteConnectionStringBuilder(connectionString)
+        {
+            ForeignKeys = false,
+            Pooling = false,
+        }.ToString();
 
     /// <summary>表の CREATE 文（先頭）と、その表の索引の CREATE 文</summary>
     private async Task<List<string>> LocalDefinitionsAsync(ModelActor device, string table)
@@ -376,6 +399,7 @@ internal sealed partial class SyncModelRun
         }
 
         var before = await _world.ReadStateAsync(actor, _ct);
+        var foreignKeysBefore = await ReadForeignKeyViolationsAsync(actor);
         var rows = build();
 
         switch (mode)
@@ -414,8 +438,13 @@ internal sealed partial class SyncModelRun
             }
         }
 
+        // 記録しない一括挿入は、持ち分があるキーの内容を置き換えるだけ（無いキーには立てない）。サーバーの一括挿入は、サーバーの
+        // キーを最後に変えた書き手として控える
+        NoteWrite(actor, before, after, tracked: mode == ModelBulkMode.Journaled, $"bulk {mode}");
+
         RecordChanges(actor, before, after);
-        await CheckForeignKeysAsync(actor, $"bulk {mode}");
+
+        await CheckNewForeignKeyViolationsAsync(actor, foreignKeysBefore, $"bulk {mode}");
     }
 
     /// <summary>一括で挿入する品目の payload（キーの 4 バイトの big-endian）</summary>
@@ -438,32 +467,42 @@ internal sealed partial class SyncModelRun
     {
         // Force の洗い替えが捨てる範囲内の未送信の記録（利用者が明示して破棄した変更＝ClearJournalOp と同じく、成功したら
         // そのキーを消失なしの規則の対象から外す）
+        // 未送信の行は端末の同期の状態の面から読む（製品の端末ではジャーナルを表・キーでまとめたもの＝キーの集合は同じ）
         var discarded = options.Force
-            ? (await _world.Device(device).Journal.ReadAllAsync(_ct))
-                .Where(e => InRefreshScope(e.TableName, options))
-                .Select(e => (e.TableName, CanonicalKey(e.TableName, e.KeyText)))
+            ? (await _world.Device(device).State.ReadPendingAsync(_ct))
+                .Where(e => InRefreshScope(e.Table, options))
+                .Select(e => (e.Table, CanonicalKey(e.Table, e.KeyText)))
                 .ToList()
             : [];
+
+        // 実行ごとの照合の入力（オプションを渡さないときも、エンジンが使う既定の値で範囲を決める）
+        var frame = await BeginRefreshRunAsync(op, device, options);
 
         try
         {
             var result = await _world.RefreshAsync(device, omitOptions ? null : options, _ct);
             _untrackedKeys.UnionWith(discarded);
             RecordRefreshResult(op, device, result);
+
+            // 洗い替えの結果は自分から変えた行を名指ししない（空として照らす）
+            await EndRunAsync(frame, [], [], threw: false);
         }
         catch (Exception ex) when (ConsumeExpectedThrow(device, ex))
         {
             // 期待した例外（結果の面に残した）
+            await EndRunAsync(frame, [], ThrownLocalRowChanges(ex), threw: true);
         }
         catch (Exception ex) when (InjectedFaultException.IsInjected(ex))
         {
             _log.Add($"  -> injected fault: {ex.GetType().Name}");
             _lastResult[device] = ExceptionLines(ex);
+            await EndRunAsync(frame, [], ThrownLocalRowChanges(ex), threw: true);
         }
         catch (Exception ex)
         {
             _lastResult[device] = ExceptionLines(ex);
             _failures.Add(new($"1/throw:{Phase(ex)}:{ErrorText(ex)}", $"{op.Describe()}: {ex}"));
+            await EndRunAsync(frame, [], ThrownLocalRowChanges(ex), threw: true);
         }
     }
 

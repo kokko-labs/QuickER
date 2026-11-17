@@ -82,7 +82,20 @@ internal sealed class ModelDbState
     internal static string Pinned(int? value) => value is { } v ? $" pinned={Key(v)}" : "";
 
     /// <summary>SQLite の DB ファイルから内容を読む</summary>
-    public static async Task<ModelDbState> ReadAsync(string connectionString, CancellationToken ct)
+    public static Task<ModelDbState> ReadAsync(string connectionString, CancellationToken ct) =>
+        ReadAsync(connectionString, ct, missingTablesAreEmpty: false);
+
+    /// <summary>SQLite の DB ファイルから内容を読む</summary>
+    /// <param name="connectionString">DB の接続文字列</param>
+    /// <param name="ct">キャンセルトークン</param>
+    /// <param name="missingTablesAreEmpty">
+    /// 無いイベントの表を空として読むか（実行ごとの照合が使う。偽ならイベントの表が無いと例外。ラベルの表はどちらでも空として読む）
+    /// </param>
+    public static async Task<ModelDbState> ReadAsync(
+        string connectionString,
+        CancellationToken ct,
+        bool missingTablesAreEmpty
+    )
     {
         var state = new ModelDbState();
 
@@ -149,7 +162,13 @@ internal sealed class ModelDbState
         }
 
         await foreach (
-            var r in QueryAsync(connection, "SELECT event_at, item_id, memo FROM model_events", ct)
+            var r in QueryAsync(
+                connection,
+                !missingTablesAreEmpty || tables.Contains(ModelTables.Events)
+                    ? "SELECT event_at, item_id, memo FROM model_events"
+                    : "SELECT NULL, NULL, NULL WHERE 0",
+                ct
+            )
         )
         {
             var text = r.GetString(0);
@@ -222,7 +241,14 @@ internal sealed class SyncModelDevice : IDisposable
 
     public ISqlExecutor Sql { get; private set; } = null!;
 
+    /// <summary>製品のジャーナル（既定の端末だけが持つ。別のエンジンへ差し替えた端末では null）</summary>
     public SyncJournal Journal { get; private set; } = null!;
+
+    /// <summary>接続ファクトリ（<see cref="OpenAsync"/> が作る）</summary>
+    public ISqlConnectionFactory Factory { get; private set; } = null!;
+
+    /// <summary>失敗の注入の Save フックの登録簿（<see cref="OpenAsync"/> が作る）</summary>
+    public SaveHookRegistry Hooks { get; private set; } = null!;
 
     public IModelFolderRepository Folders { get; private set; } = null!;
 
@@ -241,7 +267,14 @@ internal sealed class SyncModelDevice : IDisposable
     /// <summary>記録しないラベルのリポジトリ</summary>
     public IModelLabelRepository RawLabels { get; private set; } = null!;
 
+    /// <summary>製品の同期エンジン（既定の端末だけが持つ。別のエンジンへ差し替えた端末では null）</summary>
     public SyncEngine Engine { get; private set; } = null!;
+
+    /// <summary>端末のエンジンの面（同期・洗い替えを流す入口）</summary>
+    public IModelDeviceSync Sync { get; private set; } = null!;
+
+    /// <summary>端末の同期の状態の面（未送信の行の事実）</summary>
+    public IModelDeviceSyncState State { get; private set; } = null!;
 
     /// <summary>
     /// この端末が挿入したときの実体（表とキーで引く）。同期の後もメモリに持っていた実体で削除する操作
@@ -263,37 +296,11 @@ internal sealed class SyncModelDevice : IDisposable
         CancellationToken ct
     )
     {
-        var device = new SyncModelDevice(actor, SqliteTempDatabase.Create());
-        await device._db.ApplyDdlAsync(SyncModelFixtureDefinition.BuildSqliteMirror(), ct);
-
-        var factory = new LightJournalSyncModelConnectionFactory(
-            device._db.ReadWriteCreateConnectionString
-        );
-        device._factory = factory;
-        device.Sql = new SqlExecutor(factory);
+        var device = await OpenAsync(actor, faults, ct);
+        var factory = device.Factory;
+        var hooks = device.Hooks;
         device.Journal = new SyncJournal(device.Sql);
         await device.Journal.EnsureCreatedAsync(ct);
-
-        // 失敗の注入の口（Save フック）。キーを決めるフックは整数キーの表だけ（挿入する行の主キーを別の値へ変える）
-        var hooks = new SaveHookRegistry()
-            .Add(
-                new SyncModelHook<ModelFolderEntity>(
-                    faults,
-                    e => e.FolderId += RekeyOffset,
-                    e => e.FolderId == 0,
-                    (e, key) => e.FolderId = key
-                )
-            )
-            .Add(new SyncModelHook<ModelLabelEntity>(faults, null))
-            .Add(
-                new SyncModelHook<ModelItemEntity>(
-                    faults,
-                    e => e.ItemId += RekeyOffset,
-                    e => e.ItemId == 0,
-                    (e, key) => e.ItemId = key
-                )
-            )
-            .Add(new SyncModelHook<ModelEventEntity>(faults, null));
 
         device.RawFolders = new ModelFolderRepository(factory, hooks);
         device.RawLabels = new ModelLabelRepository(factory, hooks);
@@ -342,16 +349,85 @@ internal sealed class SyncModelDevice : IDisposable
             externalTables ? tables.Select(t => (ISyncTable)new SyncModelExternalTable(t)) : tables,
             device.Journal
         );
+        device.Sync = new ProductModelDeviceSync(device.Engine);
+        device.State = new JournalModelDeviceSyncState(device.Journal);
 
         return device;
+    }
+
+    /// <summary>
+    /// 端末の殻だけを開く（ローカルの一時 DB にモデルの図の DDL を当て、接続ファクトリ・生 SQL 実行器・失敗の注入の Save フックを
+    /// 作る）。リポジトリ・エンジンの面・状態の面は載せない。別のエンジンの端末を作る端末の作り方（
+    /// <see cref="SyncModelWorldOptions.CreateDevice"/>）が、これで殻を開いて <see cref="Install"/> で部品を載せる
+    /// </summary>
+    /// <param name="actor">端末</param>
+    /// <param name="faults">失敗の注入（ローカルの Save フックが見る）</param>
+    /// <param name="ct">キャンセルトークン</param>
+    public static async Task<SyncModelDevice> OpenAsync(
+        ModelActor actor,
+        SyncModelFaults faults,
+        CancellationToken ct
+    )
+    {
+        var device = new SyncModelDevice(actor, SqliteTempDatabase.Create());
+        await device._db.ApplyDdlAsync(SyncModelFixtureDefinition.BuildSqliteMirror(), ct);
+
+        var factory = new LightJournalSyncModelConnectionFactory(
+            device._db.ReadWriteCreateConnectionString
+        );
+        device._factory = factory;
+        device.Factory = factory;
+        device.Sql = new SqlExecutor(factory);
+
+        // 失敗の注入の口（Save フック）。キーを決めるフックは整数キーの表だけ（挿入する行の主キーを別の値へ変える）
+        var hooks = new SaveHookRegistry()
+            .Add(
+                new SyncModelHook<ModelFolderEntity>(
+                    faults,
+                    e => e.FolderId += RekeyOffset,
+                    e => e.FolderId == 0,
+                    (e, key) => e.FolderId = key
+                )
+            )
+            .Add(new SyncModelHook<ModelLabelEntity>(faults, null))
+            .Add(
+                new SyncModelHook<ModelItemEntity>(
+                    faults,
+                    e => e.ItemId += RekeyOffset,
+                    e => e.ItemId == 0,
+                    (e, key) => e.ItemId = key
+                )
+            )
+            .Add(new SyncModelHook<ModelEventEntity>(faults, null));
+
+        device.Hooks = hooks;
+
+        return device;
+    }
+
+    /// <summary>
+    /// 殻（<see cref="OpenAsync"/>）へ、リポジトリ・エンジンの面・状態の面を載せる（別のエンジンの端末用）。リポジトリが記録
+    /// デコレータで包まれていなければ、記録しないリポジトリ（Raw 系）には同じものを渡す。<see cref="Journal"/> と
+    /// <see cref="Engine"/> は載せない（null のまま＝製品のジャーナルを読む決定的なシナリオの期待の手は使えない）
+    /// </summary>
+    public void Install(SyncModelDeviceParts parts)
+    {
+        Folders = parts.Folders;
+        Labels = parts.Labels;
+        Items = parts.Items;
+        Events = parts.Events;
+        RawFolders = parts.RawFolders ?? parts.Folders;
+        RawLabels = parts.RawLabels ?? parts.Labels;
+        RawItems = parts.RawItems ?? parts.Items;
+        Sync = parts.Sync;
+        State = parts.State;
     }
 
     /// <summary>キーを決めるフックが挿入する行の主キーへ足す値</summary>
     public const int RekeyOffset = 100000;
 
     /// <summary>未送信のジャーナルの件数</summary>
-    public async Task<int> PendingCountAsync(CancellationToken ct) =>
-        (await Journal.ReadAllAsync(ct)).Count;
+    public Task<int> PendingCountAsync(CancellationToken ct) => State.CountPendingAsync(ct);
 
     private ISqlConnectionFactory? _factory;
 
@@ -562,11 +638,13 @@ internal sealed class SyncModelWorld : IAsyncDisposable
         foreach (var actor in options.Devices)
         {
             devices.Add(
-                await SyncModelDevice.CreateAsync(
-                    actor,
-                    sources,
-                    faults,
-                    options.ExternalTables.Contains(actor),
+                await options.CreateDevice(
+                    new SyncModelDeviceRequest(
+                        actor,
+                        sources,
+                        faults,
+                        options.ExternalTables.Contains(actor)
+                    ),
                     ct
                 )
             );
@@ -601,55 +679,8 @@ internal sealed class SyncModelWorld : IAsyncDisposable
         }
     }
 
-    private async Task<ModelSyncOutcome> SyncCoreAsync(ModelSyncOp op, CancellationToken ct)
-    {
-        var engine = Device(op.Device).Engine;
-        var options = op.ToOptions();
-
-        switch (op.Kind)
-        {
-            case ModelSyncKind.Sync:
-            {
-                var result = await engine.SyncAsync(options, ct);
-
-                return new ModelSyncOutcome(result.Conflicts, result.Truncations)
-                {
-                    LocalRowChanges = result.LocalRowChanges,
-                    Uploaded = result.Uploaded,
-                    Downloaded = result.Downloaded,
-                    DeletedLocally = result.DeletedLocally,
-                    Discarded = result.Discarded,
-                    ReportedFlags = (result.HasConflicts, result.HasTruncations),
-                };
-            }
-
-            case ModelSyncKind.Upload:
-            {
-                var conflicts = new List<SyncConflict>();
-                var (uploaded, discarded) = await engine.UploadAsync(options, conflicts, ct);
-
-                return new ModelSyncOutcome(conflicts, [])
-                {
-                    Uploaded = uploaded,
-                    Discarded = discarded,
-                };
-            }
-
-            case ModelSyncKind.Download:
-            {
-                var (downloaded, deletedLocally) = await engine.DownloadAsync(options, ct);
-
-                return new ModelSyncOutcome([], [])
-                {
-                    Downloaded = downloaded,
-                    DeletedLocally = deletedLocally,
-                };
-            }
-
-            default:
-                throw new ArgumentOutOfRangeException(nameof(op), op.Kind, null);
-        }
-    }
+    private Task<ModelSyncOutcome> SyncCoreAsync(ModelSyncOp op, CancellationToken ct) =>
+        Device(op.Device).Sync.RunAsync(op.Kind, op.ToOptions(), ct);
 
     /// <summary>洗い替えを 1 回流す</summary>
     public Task<SyncRefreshResult> RefreshAsync(ModelRefreshOp op, CancellationToken ct) =>
@@ -667,7 +698,7 @@ internal sealed class SyncModelWorld : IAsyncDisposable
 
         try
         {
-            return await Device(device).Engine.RefreshAsync(options, ct);
+            return await Device(device).Sync.RefreshAsync(options, ct);
         }
         finally
         {

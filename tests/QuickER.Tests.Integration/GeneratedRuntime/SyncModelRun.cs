@@ -41,8 +41,15 @@ internal sealed record ModelFailure(string Signature, string Detail);
 ///   決着も、実行の直後のサーバーの状態に根拠が無ければ違反にする（<see cref="CheckRefusalBasisAsync"/>。注入した失敗は
 ///   根拠にならない）。Versioned＋ServerWins の実行が捨てた記録は確かめない（理由で分類せず範囲の未送信をすべて捨てる、
 ///   利用者が頼んだ操作のため）。</item>
-///   <item><b>外部キー</b>: どの DB でも <c>PRAGMA foreign_key_check</c> が空（SQLite は書き込み時に検査するので、
-///   これが崩れるのはエンジンが外部キーの検査を切ったまま書いたときだけ）。</item>
+///   <item><b>外部キー</b>: 書き込みの手・一括挿入・実行（同期・単独のアップロード／ダウンロード・洗い替え。例外で終わった
+///   実行も）の前後で <c>PRAGMA foreign_key_check</c> の違反の集合を比べ、新しく出来た違反だけを 1 件ずつ
+///   <c>4/foreign-key:{子の表}</c> として数える（SQLite は書き込み時に検査するので、新しい違反が出来るのはエンジンが外部キーの
+///   検査を切ったまま書いたときだけ）。違反の同一性は（子の表・子の行の主キーの値・親の表・外部キーの番号）で、rowid では
+///   比べない（消して同じキーで入れ直した行は同じ違反）。前からある違反（利用者の手が外部キーの検査を切って作った親の無い行）は
+///   数えない。サーバーの他者の手はサーバーの SQLite の代役の DB を見る。実 SQL Server のサーバー役は外部キーを DB が強制する
+///   ので確かめない。行は rowid から主キーの値を引いて見分けるので、rowid の無い表の違反が現れたら例外で止める（モデルの表は
+///   どれも rowid を持つ）。実行の間の割り込みの書き込みの手も前後で比べるので、その間に実行が作った違反は、割り込みの手の後と
+///   実行の後の両方で数えることがある（署名は同じ。説明の文が割り込みの手を名指しすることがある）。</item>
 /// </list>
 /// <para>
 /// 書き手が 2 人以上のキーの期待値（ポリシーごとの編集×編集・削除×編集）は、乱数の種ではなく決定的なシナリオが
@@ -239,6 +246,24 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             run._failures.Add(new("0/setup", "The devices did not converge on the initial data."));
         }
 
+        // 最初の形の後の、サーバーのキーを最後に変えた書き手と、端末が最後に見た番号を始める（照合 5 の始まり）
+        await run.StartLedgerAsync();
+
+        // 最初の形の後の「サーバーが知っているか」を観測する（照合 4 の始まり）
+        var serverAfterSetup = await run._world.ReadStateAsync(ModelActor.Server, ct);
+
+        foreach (var device in run._world.Devices)
+        {
+            run.ObserveServerKnows(
+                device.Actor,
+                serverAfterSetup,
+                await run._world.ReadStateAsync(device.Actor, ct),
+                threw: false,
+                forgets: true,
+                _ => true
+            );
+        }
+
         return run;
     }
 
@@ -410,6 +435,8 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                         );
                 }
 
+                // エンジンの記録を直接変える手（照合 4 はこの表を決められないとして数える）
+                NoteRecordTouched(legacy.Device, legacy.Table, null);
                 break;
 
             case ExpectPayloadOp expect:
@@ -461,6 +488,9 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             {
                 var device = _world.Device(leftover.Device);
                 var pendingBefore = await device.Journal.CountPendingAsync(_ct);
+
+                // エンジンの記録を直接作る手（照合 4 はこのキーを決められないとして数える）
+                NoteRecordTouched(leftover.Device, leftover.Table, SyncJournal.UnsetKeyText);
                 await device.Sql.ExecuteSqlAsync(
                     "INSERT INTO quicker_sync_journal (table_name, key_text, operation, "
                         + "original_row_version, unbounded_binary_columns, recorded_at) "
@@ -588,6 +618,13 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             }
 
             case ModelRefreshOp refresh:
+            {
+                var frame = await BeginRefreshRunAsync(
+                    refresh,
+                    refresh.Device,
+                    refresh.ToOptions()
+                );
+
                 try
                 {
                     RecordRefreshResult(
@@ -595,15 +632,20 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                         refresh.Device,
                         await _world.RefreshAsync(refresh, _ct)
                     );
+
+                    // 洗い替えの結果は自分から変えた行を名指ししない（空として照らす）
+                    await EndRunAsync(frame, [], [], threw: false);
                 }
                 catch (Exception ex) when (ConsumeExpectedThrow(refresh.Device, ex))
                 {
                     // 期待した例外（結果の面に残した）
+                    await EndRunAsync(frame, [], ThrownLocalRowChanges(ex), threw: true);
                 }
                 catch (Exception ex) when (InjectedFaultException.IsInjected(ex))
                 {
                     _log.Add($"  -> injected fault: {ex.GetType().Name}");
                     _lastResult[refresh.Device] = ExceptionLines(ex);
+                    await EndRunAsync(frame, [], ThrownLocalRowChanges(ex), threw: true);
                 }
                 catch (Exception ex)
                 {
@@ -625,9 +667,11 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                     _failures.Add(
                         new($"1/throw:{phase}:{ErrorText(ex)}{diagnosis}", $"{op.Describe()}: {ex}")
                     );
+                    await EndRunAsync(frame, [], ThrownLocalRowChanges(ex), threw: true);
                 }
 
                 break;
+            }
 
             default:
                 if (!await ExecuteScenarioOpAsync(op))
@@ -647,10 +691,20 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
     /// </summary>
     private async Task InterruptWriteAsync(ArmInterruptOp interrupt)
     {
-        foreach (var write in interrupt.Writes)
+        // 割り込みの書き込みが変えたキーは、実行の間に書かれたキーとして実行ごとの照合から外す
+        _interrupting = true;
+
+        try
         {
-            _log.Add($"  -> interrupt {interrupt.Point}: {write.Describe()}");
-            await WriteAsync(write);
+            foreach (var write in interrupt.Writes)
+            {
+                _log.Add($"  -> interrupt {interrupt.Point}: {write.Describe()}");
+                await WriteAsync(write);
+            }
+        }
+        finally
+        {
+            _interrupting = false;
         }
 
         if (interrupt.ThenArm is { } kind)
@@ -664,7 +718,10 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
     private async Task<bool> WriteAsync(ModelWriteOp op)
     {
         var before = await _world.ReadStateAsync(op.Actor, _ct);
+        var foreignKeysBefore = await ReadForeignKeyViolationsAsync(op.Actor);
         var applied = true;
+        var firedBefore = _world.Faults.Fired;
+        var hookSkipIndex = _world.Faults.HookSkipHitCount;
 
         try
         {
@@ -703,8 +760,20 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
 
         // 書き込みの前後の内容を比べ、実際に変わった行と blob だけを履歴へ積む（失敗した書き込み・フックが飛ばした
         // 書き込みは何も積まない。キーを決めるフックが変えたキーも、変わった行として拾える）
-        RecordChanges(op.Actor, before, await _world.ReadStateAsync(op.Actor, _ct));
-        await CheckForeignKeysAsync(op.Actor, op.Describe());
+        var after = await _world.ReadStateAsync(op.Actor, _ct);
+        // 成功した手（失敗も注入した失敗・フックの飛ばしも無い）は、内容が変わらなくても手が名指しする行の持ち分を立てる
+        NoteWrite(
+            op.Actor,
+            before,
+            after,
+            tracked: true,
+            op.Describe(),
+            applied && _world.Faults.Fired == firedBefore ? op : null
+        );
+        RecordChanges(op.Actor, before, after);
+        // この手の間にモデルが仕掛けた Before フックの飛ばしが当たった行を控える（照合 8 から外す）
+        _hookSkipped.UnionWith(_world.Faults.HookSkipHitsSince(hookSkipIndex));
+        await CheckNewForeignKeyViolationsAsync(op.Actor, foreignKeysBefore, op.Describe());
 
         return applied;
     }
@@ -787,6 +856,9 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         // 後勝ち＋ServerWins の決着（どれを捨てたかは返らない）の推定と、競合・決着の理由の根拠の確認が使う
         var before = op.Kind != ModelSyncKind.Download ? await SnapshotAsync(op.Device) : null;
 
+        // 実行ごとの照合の入力（実行の前のサーバーと端末の内容・その端末の持ち分）
+        var frame = await BeginSyncRunAsync(op, before);
+
         // 後勝ち＋ServerWins の実行は、外部キー・一意な値に由来する競合だけを競合として返さずに捨てる。実行の前の未送信の
         // 記録と、実行の後で突き合わせる（RecordLastWriteWinsSettlementsAsync）
         var settles =
@@ -799,9 +871,9 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         if (!quiescing)
         {
             _journalAtLastSync[op.Device] = (
-                await _world.Device(op.Device).Journal.ReadAllAsync(_ct)
+                await _world.Device(op.Device).State.ReadPendingAsync(_ct)
             )
-                .Select(e => e.Id)
+                .SelectMany(row => row.ChangeMarks)
                 .ToHashSet();
         }
 
@@ -851,11 +923,14 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             }
 
             await ForgetSeenInitialAsync(op.Device);
+            await EndRunAsync(frame, [], ThrownLocalRowChanges(ex), threw: true);
 
             return false;
         }
         catch (Exception ex) when (!quiescing && ConsumeExpectedThrow(op.Device, ex))
         {
+            await EndRunAsync(frame, [], ThrownLocalRowChanges(ex), threw: true);
+
             return false;
         }
         catch (Exception ex)
@@ -868,6 +943,7 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                     $"{op.Describe()}: {ex}"
                 )
             );
+            await EndRunAsync(frame, [], ThrownLocalRowChanges(ex), threw: true);
 
             return false;
         }
@@ -991,7 +1067,14 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             );
         }
 
-        await CheckForeignKeysAsync(op.Device, op.Describe());
+        // 実行ごとの照合（根拠の判定と同じく実行の直後に確定する）
+        await EndRunAsync(
+            frame,
+            outcome.Conflicts,
+            outcome.LocalRowChanges,
+            threw: false,
+            outcome.Truncations.Select(t => t.TableName).ToHashSet(StringComparer.Ordinal)
+        );
 
         if (quiescing)
         {
@@ -1092,14 +1175,14 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
     {
         var excluded = op.Excluded.Append(ModelTables.Labels).ToHashSet(StringComparer.Ordinal);
 
-        foreach (var entry in await _world.Device(op.Device).Journal.ReadAllAsync(_ct))
+        foreach (var entry in await _world.Device(op.Device).State.ReadPendingAsync(_ct))
         {
-            if (excluded.Contains(entry.TableName))
+            if (excluded.Contains(entry.Table))
             {
                 continue;
             }
 
-            var key = (entry.TableName, CanonicalKey(entry.TableName, entry.KeyText));
+            var key = (entry.Table, CanonicalKey(entry.Table, entry.KeyText));
 
             if (!_conflictsTo.TryGetValue(key, out var set))
             {
@@ -1141,26 +1224,22 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             .Select(c => (c.TableName, CanonicalKey(c.TableName, c.KeyText)))
             .ToHashSet();
         var settled = new List<(string Table, string Key, SyncConflictReason? Reason)>();
-        var remaining = (await _world.Device(op.Device).Journal.ReadAllAsync(_ct))
-            .Select(entry => entry.Id)
+        var remaining = (await _world.Device(op.Device).State.ReadPendingAsync(_ct))
+            .SelectMany(row => row.ChangeMarks)
             .ToHashSet();
         var server = await _world.ReadStateAsync(ModelActor.Server, _ct);
 
-        foreach (
-            var row in pendingBefore.GroupBy(entry =>
-                (entry.TableName, Key: CanonicalKey(entry.TableName, entry.KeyText))
-            )
-        )
+        foreach (var row in pendingBefore)
         {
-            if (row.Any(entry => remaining.Contains(entry.Id)))
+            if (row.Marks.Any(remaining.Contains))
             {
                 continue;
             }
 
-            var serverRow = server.Row(row.Key.TableName, row.Key.Key);
-            var localRow = localBefore.Row(row.Key.TableName, row.Key.Key);
-            var upserts = row.Any(e => e.Operation == nameof(SyncJournalOperation.Upsert));
-            var deletes = row.Any(e => e.Operation == nameof(SyncJournalOperation.Delete));
+            var serverRow = server.Row(row.Table, row.Key);
+            var localRow = localBefore.Row(row.Table, row.Key);
+            var upserts = row.HasUpsert;
+            var deletes = row.HasDelete;
 
             // 送るものが無い記録（行ありで削除だけ・行なしで削除なし・行なしで削除ありでもサーバーの版が分からない）は、エンジンが
             // 送らずに捨てる（決着ではない。同じ実行のダウンロードが同じキーのほかの書き手の行を降ろしても、ServerWins が戻したの
@@ -1168,7 +1247,7 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             if (
                 (localRow is not null && !upserts)
                 || (localRow is null && !deletes)
-                || (localRow is null && NeverReachedServer(before, row))
+                || (localRow is null && !row.ServerKnows)
             )
             {
                 continue;
@@ -1182,26 +1261,26 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                 || (
                     !string.Equals(
                         serverRow,
-                        localAfter.Row(row.Key.TableName, row.Key.Key),
+                        localAfter.Row(row.Table, row.Key),
                         StringComparison.Ordinal
                     )
                     && serverRow is not null
-                    && !discarded.Contains((row.Key.TableName, row.Key.Key))
+                    && !discarded.Contains((row.Table, row.Key))
                 )
             )
             {
                 continue;
             }
 
-            _log.Add($"  -> settled {ModelTables.Short(row.Key.TableName)} key={row.Key.Key}");
+            _log.Add($"  -> settled {ModelTables.Short(row.Table)} key={row.Key}");
 
-            if (!_conflictsTo.TryGetValue((row.Key.TableName, row.Key.Key), out var set))
+            if (!_conflictsTo.TryGetValue((row.Table, row.Key), out var set))
             {
-                _conflictsTo[(row.Key.TableName, row.Key.Key)] = set = [];
+                _conflictsTo[(row.Table, row.Key)] = set = [];
             }
 
             set.Add(op.Device);
-            settled.Add((row.Key.TableName, row.Key.Key, null));
+            settled.Add((row.Table, row.Key, null));
         }
 
         return settled;
@@ -1222,50 +1301,68 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
     private sealed record RunSnapshot(
         ModelDbState Server,
         ModelDbState Local,
-        IReadOnlyList<SyncJournalRow> Pending,
-        int HitIndex,
-        IReadOnlySet<(string Table, string KeyText)> Acknowledged
+        IReadOnlyList<PendingGroup> Pending,
+        int HitIndex
     );
+
+    /// <summary>
+    /// 未送信の行（端末の同期の状態の面が返す行）を、表記の正規化後のキーでまとめたもの（同じキーの行は、変わる印を印の順に
+    /// 合わせ、「サーバーが知っているか」はどれかが知っていれば真）
+    /// </summary>
+    private sealed record PendingGroup(
+        string Table,
+        string Key,
+        bool HasUpsert,
+        bool HasDelete,
+        bool ServerKnows,
+        IReadOnlyList<long> Marks,
+        IReadOnlyList<string> Operations
+    );
+
+    private static IReadOnlyList<PendingGroup> GroupPending(IReadOnlyList<ModelPendingRow> rows) =>
+        [
+            .. rows.GroupBy(row => (row.Table, Key: CanonicalKey(row.Table, row.KeyText)))
+                .Select(group =>
+                {
+                    var changes = group
+                        .SelectMany(row =>
+                            row.ChangeMarks.Select(
+                                (mark, i) =>
+                                    (
+                                        Mark: mark,
+                                        Operation: i < row.Operations.Count ? row.Operations[i] : ""
+                                    )
+                            )
+                        )
+                        .OrderBy(change => change.Mark)
+                        .ToList();
+
+                    return new PendingGroup(
+                        group.Key.Table,
+                        group.Key.Key,
+                        group.Any(row => row.HasUpsert),
+                        group.Any(row => row.HasDelete),
+                        group.Any(row => row.ServerKnowsRow),
+                        [.. changes.Select(change => change.Mark)],
+                        [.. changes.Select(change => change.Operation)]
+                    );
+                }),
+        ];
 
     private async Task<RunSnapshot> SnapshotAsync(ModelActor device)
     {
-        var journal = _world.Device(device).Journal;
-        var acknowledged = new HashSet<(string Table, string KeyText)>();
-
-        foreach (var table in ModelTables.All)
-        {
-            foreach (var keyText in (await journal.ReadAcksAsync(table, _ct)).Keys)
-            {
-                acknowledged.Add((table, keyText));
-            }
-        }
-
-        return new(
+        var snapshot = new RunSnapshot(
             await _world.ReadStateAsync(ModelActor.Server, _ct),
             await _world.ReadStateAsync(device, _ct),
-            await journal.ReadAllAsync(_ct),
-            _world.Faults.WriteHitCount,
-            acknowledged
+            GroupPending(await _world.Device(device).State.ReadPendingAsync(_ct)),
+            _world.Faults.WriteHitCount
         );
-    }
 
-    /// <summary>
-    /// 行が無く削除の記録がある行のうち、エンジンが送らずに捨てる行か：版を持つ表で、削除の記録のどれも版を持たず、受理記録も
-    /// 無い（サーバーが持っていた版が分からない＝行はサーバーに届いていない）。docs の「送る操作の決め方」の表の
-    /// 「Gone｜Otherwise｜Drops the entries: the row never reached the server」の写し（版なしの表は削除を無条件に送る）
-    /// </summary>
-    private static bool NeverReachedServer(
-        RunSnapshot before,
-        IEnumerable<SyncJournalRow> entries
-    ) =>
-        entries.All(entry =>
-            entry.TableName != ModelTables.Labels
-            && (
-                entry.Operation != nameof(SyncJournalOperation.Delete)
-                || entry.OriginalRowVersion is null
-            )
-            && !before.Acknowledged.Contains((entry.TableName, entry.KeyText))
-        );
+        // 判定役が「サーバーが知っているか」を読む行で、状態の面の答えをモデルの観測と比べる（照合 4）
+        CompareServerKnows(device, snapshot.Local, snapshot.Pending);
+
+        return snapshot;
+    }
 
     /// <summary>理由ごとの、根拠を確かめた件数と根拠のあった件数（空振りしていないかを出力で確かめる）</summary>
     public IReadOnlyDictionary<string, (int Checked, int WithBasis)> BasisChecks => _basisChecks;
@@ -1340,9 +1437,7 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             .Where(h => h.Device == op.Device)
             .Select(h => (h.Table, h.Key))
             .ToHashSet();
-        var pending = before
-            .Pending.Select(e => (e.TableName, CanonicalKey(e.TableName, e.KeyText)))
-            .ToHashSet();
+        var pending = before.Pending.Select(e => (e.Table, e.Key)).ToHashSet();
         // この実行で届かなかった行（理由を問わず競合になった行と決着させた行）。その行の付け替え・値の手放しは届いて
         // いないので、根拠を打ち消さない
         var refused = refusals.Select(r => (r.Table, r.Key)).Concat(conflicted).ToHashSet();
@@ -1404,10 +1499,8 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                         + string.Join(
                             ",",
                             before
-                                .Pending.Where(e =>
-                                    e.TableName == table && CanonicalKey(table, e.KeyText) == key
-                                )
-                                .Select(e => e.Operation)
+                                .Pending.Where(e => e.Table == table && e.Key == key)
+                                .SelectMany(e => e.Operations)
                         )
                         + ")"
                 )
@@ -1579,8 +1672,9 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         _world.Faults.Clear();
         var quiesced = await QuiesceAsync();
 
-        // 根拠の無い競合・決着は、静止化の成否に依らず報告する（静止化の中で見つけたものを含む）
+        // 根拠の無い競合・決着と実行ごとの照合の違反は、静止化の成否に依らず報告する（静止化の中で見つけたものを含む）
         _failures.AddRange(Distinct(_basisFailures));
+        _failures.AddRange(Distinct(_runFailures));
 
         if (!quiesced)
         {
@@ -2321,7 +2415,8 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                 )
                 .Where(a => a != device);
 
-            if (!others.Any() && !initialUnseen)
+            // 果たされた持ち越しの決定（宣言が真のエンジンだけ）は、その端末の競合の根拠を問わない
+            if (!others.Any() && !initialUnseen && !_carryFulfilled.Contains((device, table, key)))
             {
                 found.Add(
                     new(
@@ -2405,31 +2500,167 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         }
     }
 
-    private async Task CheckForeignKeysAsync(ModelActor actor, string after)
+    /// <summary>
+    /// 外部キーの違反 1 件の同一性（子の表・子の行の主キーの値のテキスト・親の表・外部キーの番号）。rowid は持たない（消して同じ
+    /// キーで入れ直した行は rowid が変わるが、同じ違反）
+    /// </summary>
+    internal readonly record struct ForeignKeyViolation(
+        string Table,
+        string Key,
+        string Parent,
+        long ForeignKeyId
+    );
+
+    /// <summary>
+    /// 書き手の DB の外部キーの違反の集合を読む（<c>PRAGMA foreign_key_check</c> の行の rowid を、その表の主キーの値のテキストへ
+    /// 引き直す）。実 SQL Server のサーバー役は外部キーを DB が強制するので読まない（null）
+    /// </summary>
+    private async Task<IReadOnlySet<ForeignKeyViolation>?> ReadForeignKeyViolationsAsync(
+        ModelActor actor
+    )
     {
         var connectionString =
             actor == ModelActor.Server
                 ? _world.Server.SqliteConnectionString
                 : _world.Device(actor).ConnectionString;
 
-        // 実 SQL Server のサーバー役は外部キーを DB が強制するので確かめない
         if (connectionString is null)
         {
-            return;
+            return null;
         }
 
         await using var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync(_ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "PRAGMA foreign_key_check";
-        await using var reader = await command.ExecuteReaderAsync(_ct);
+        var found = new List<(string Table, long? RowId, string Parent, long ForeignKeyId)>();
 
-        if (await reader.ReadAsync(_ct))
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "PRAGMA foreign_key_check";
+            await using var reader = await command.ExecuteReaderAsync(_ct);
+
+            while (await reader.ReadAsync(_ct))
+            {
+                found.Add(
+                    (
+                        reader.GetString(0),
+                        reader.IsDBNull(1) ? null : reader.GetInt64(1),
+                        reader.GetString(2),
+                        reader.GetInt64(3)
+                    )
+                );
+            }
+        }
+
+        var violations = new HashSet<ForeignKeyViolation>();
+
+        foreach (var (table, rowId, parent, foreignKeyId) in found)
+        {
+            violations.Add(
+                new(
+                    table,
+                    await PrimaryKeyTextAsync(connection, table, rowId),
+                    parent,
+                    foreignKeyId
+                )
+            );
+        }
+
+        return violations;
+    }
+
+    /// <summary>行の rowid から、その表の主キーの列の値のテキスト（複数の列は | でつなぐ）を引く</summary>
+    private async Task<string> PrimaryKeyTextAsync(
+        SqliteConnection connection,
+        string table,
+        long? rowId
+    )
+    {
+        // rowid の無い表（WITHOUT ROWID）の違反は行を見分けられない（同じ表・同じ外部キーの違反が 1 つの同一性にまとまり、前から
+        // ある違反が新しい違反を隠す）。モデルの表はどれも rowid を持つので、持たない表が現れたら黙って進めずに止める
+        if (rowId is null)
+        {
+            throw new InvalidOperationException(
+                $"PRAGMA foreign_key_check returned no rowid for a row of {table}: the foreign key check tells "
+                    + "violations apart by the row's primary key, which it reads through the rowid."
+            );
+        }
+
+        var keyColumns = new List<(int Order, string Name)>();
+
+        await using (var info = connection.CreateCommand())
+        {
+            info.CommandText = $"PRAGMA table_info(\"{table.Replace("\"", "\"\"")}\")";
+            await using var reader = await info.ExecuteReaderAsync(_ct);
+
+            while (await reader.ReadAsync(_ct))
+            {
+                var order = reader.GetInt32(reader.GetOrdinal("pk"));
+
+                if (order > 0)
+                {
+                    keyColumns.Add((order, reader.GetString(reader.GetOrdinal("name"))));
+                }
+            }
+        }
+
+        var columns =
+            keyColumns.Count == 0
+                ? ["rowid"]
+                : keyColumns.OrderBy(c => c.Order).Select(c => c.Name).ToList();
+        await using var select = connection.CreateCommand();
+        select.CommandText =
+            $"SELECT {string.Join(", ", columns.Select(c => $"\"{c.Replace("\"", "\"\"")}\""))} "
+            + $"FROM \"{table.Replace("\"", "\"\"")}\" WHERE rowid = $rowid";
+        select.Parameters.AddWithValue("$rowid", rowId.Value);
+        await using var row = await select.ExecuteReaderAsync(_ct);
+
+        if (!await row.ReadAsync(_ct))
+        {
+            return $"(rowid {rowId.Value.ToString(CultureInfo.InvariantCulture)})";
+        }
+
+        return string.Join(
+            "|",
+            Enumerable
+                .Range(0, columns.Count)
+                .Select(i =>
+                    row.IsDBNull(i)
+                        ? "null"
+                        : Convert.ToString(row.GetValue(i), CultureInfo.InvariantCulture)
+                )
+        );
+    }
+
+    /// <summary>
+    /// 外部キーの表明：書き手の DB の外部キーの違反のうち、手か実行の前（<paramref name="before"/>）に無かった違反を 1 件ずつ
+    /// <c>4/foreign-key:{子の表}</c> として足す（前からある違反は数えない）
+    /// </summary>
+    /// <param name="actor">書き手</param>
+    /// <param name="before">手か実行の前の違反の集合（実 SQL Server のサーバー役は null＝確かめない）</param>
+    /// <param name="after">手か実行の説明</param>
+    private async Task CheckNewForeignKeyViolationsAsync(
+        ModelActor actor,
+        IReadOnlySet<ForeignKeyViolation>? before,
+        string after
+    )
+    {
+        if (before is null || await ReadForeignKeyViolationsAsync(actor) is not { } now)
+        {
+            return;
+        }
+
+        foreach (
+            var violation in now.Where(v => !before.Contains(v))
+                .OrderBy(v => v.Table, StringComparer.Ordinal)
+                .ThenBy(v => v.Key, StringComparer.Ordinal)
+        )
         {
             _failures.Add(
                 new(
-                    $"4/foreign-key:{reader.GetString(0)}",
-                    $"{actor} has a row of {reader.GetString(0)} whose parent is missing, after {after}"
+                    $"4/foreign-key:{violation.Table}",
+                    $"{actor} has a row of {violation.Table} (key {violation.Key}) whose parent in "
+                        + $"{violation.Parent} is missing (foreign key {violation.ForeignKeyId.ToString(CultureInfo.InvariantCulture)}), "
+                        + $"newly after {after}"
                 )
             );
         }
@@ -2522,8 +2753,8 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
 
         var local = await _world.ReadStateAsync(op.Device, _ct);
         var server = await _world.ReadStateAsync(ModelActor.Server, _ct);
-        var pending = (await _world.Device(op.Device).Journal.ReadAllAsync(_ct))
-            .Select(e => (e.TableName, CanonicalKey(e.TableName, e.KeyText)))
+        var pending = GroupPending(await _world.Device(op.Device).State.ReadPendingAsync(_ct))
+            .Select(e => (e.Table, e.Key))
             .ToHashSet();
         var outOfScope = op.Excluded.ToHashSet(StringComparer.Ordinal);
 

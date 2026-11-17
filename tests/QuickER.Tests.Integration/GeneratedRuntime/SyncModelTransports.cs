@@ -73,6 +73,24 @@ internal sealed record SyncModelWorldOptions
     > CreateServer { get; init; } =
         async (faults, ct) => await SyncModelServer.CreateAsync(faults, ct);
 
+    /// <summary>
+    /// 端末の作り方（既定は製品の同期エンジンと記録デコレータの端末＝<see cref="SyncModelDevice.CreateAsync"/>）。別のエンジンの端末は
+    /// <see cref="SyncModelDevice.OpenAsync"/> で殻を開き、<see cref="SyncModelDevice.Install"/> で部品を載せて返す
+    /// </summary>
+    public Func<
+        SyncModelDeviceRequest,
+        CancellationToken,
+        Task<SyncModelDevice>
+    > CreateDevice { get; init; } =
+        (request, ct) =>
+            SyncModelDevice.CreateAsync(
+                request.Actor,
+                request.Server,
+                request.Faults,
+                request.ExternalTables,
+                ct
+            );
+
     /// <summary>端末の差分ソースを HTTP 越し（in-process の Kestrel）にするか</summary>
     public bool Http { get; init; }
 

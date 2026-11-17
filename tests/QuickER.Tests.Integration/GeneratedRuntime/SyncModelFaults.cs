@@ -290,6 +290,92 @@ internal sealed class SyncModelFaults
         return false;
     }
 
+    // HookSkip の飛ばしが当たった（端末・表・キー）。判定役の照合 8 が、飛ばした保存の記録が残った行を見分ける
+    private readonly List<(ModelActor Device, string Table, string Key)> _hookSkipHits = [];
+
+    /// <summary>
+    /// ローカルの Before フックの入口で呼ぶ（書き込み中の端末に HookSkip が仕掛けてあれば、飛ばす行を控えて true）
+    /// </summary>
+    /// <param name="entity">フックが受けた行</param>
+    public bool TryFireHookSkip(object entity)
+    {
+        if (Writing is not { } device || !TryFire(ModelFaultKind.HookSkip, device))
+        {
+            return false;
+        }
+
+        var (table, key) = ModelEntityKeys.Of(entity);
+
+        lock (_hookSkipHits)
+        {
+            _hookSkipHits.Add((device, table, key));
+        }
+
+        return true;
+    }
+
+    /// <summary>これまでに HookSkip の飛ばしが当たった（端末・表・キー）の数</summary>
+    public int HookSkipHitCount
+    {
+        get
+        {
+            lock (_hookSkipHits)
+            {
+                return _hookSkipHits.Count;
+            }
+        }
+    }
+
+    /// <summary><paramref name="from"/> 番目から後に HookSkip の飛ばしが当たった（端末・表・キー）</summary>
+    public IReadOnlyList<(ModelActor Device, string Table, string Key)> HookSkipHitsSince(int from)
+    {
+        lock (_hookSkipHits)
+        {
+            return [.. _hookSkipHits.Skip(from)];
+        }
+    }
+
+    // BlobDownload の失敗が当たった（端末・品目のキー）。判定役の照合 3 が、例外で終わった ServerWins の同期が戻した行の窓を見分ける
+    private readonly List<(ModelActor Device, string Key)> _blobReadHits = [];
+
+    /// <summary>
+    /// サーバーの品目の blob の読み出しの入口で呼ぶ（同期中の端末に BlobDownload が仕掛けてあれば、当たった品目を控えて例外）
+    /// </summary>
+    /// <param name="id">読み出す品目のキー</param>
+    public void ThrowOnBlobRead(int id)
+    {
+        if (Syncing is { } device && TryFire(ModelFaultKind.BlobDownload, device))
+        {
+            lock (_blobReadHits)
+            {
+                _blobReadHits.Add((device, ModelDbState.Key(id)));
+            }
+
+            throw new InjectedFaultException(ModelFaultKind.BlobDownload);
+        }
+    }
+
+    /// <summary>これまでに BlobDownload の失敗が当たった（端末・品目のキー）の数</summary>
+    public int BlobReadHitCount
+    {
+        get
+        {
+            lock (_blobReadHits)
+            {
+                return _blobReadHits.Count;
+            }
+        }
+    }
+
+    /// <summary><paramref name="from"/> 番目から後に BlobDownload の失敗が当たった（端末・品目のキー）</summary>
+    public IReadOnlyList<(ModelActor Device, string Key)> BlobReadHitsSince(int from)
+    {
+        lock (_blobReadHits)
+        {
+            return [.. _blobReadHits.Skip(from)];
+        }
+    }
+
     /// <summary>サーバー側の動作の入口で呼ぶ（同期中の端末に仕掛けてあれば例外）</summary>
     public void ThrowOnServer(ModelFaultKind kind)
     {
@@ -506,7 +592,7 @@ internal sealed class SyncModelHook<TEntity>(
     )
     {
         if (
-            faults.TryFire(ModelFaultKind.HookSkip, faults.Writing)
+            faults.TryFireHookSkip(entity)
             || faults.TryFire(ModelFaultKind.ApplySkip, faults.Syncing)
             || faults.TakeApplySkipFor(entity)
         )
