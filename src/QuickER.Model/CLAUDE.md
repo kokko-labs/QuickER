@@ -39,7 +39,7 @@
 ### ガード
 
 - `SourceRuleTests` の規則 `schema-name-comparisons`：`src/` の素の比較・変換を構文木で全数拾い、理由つきの既知の一覧と件数まで厳密に一致させる。拾う単位は文で、何かは文のトークンを空白なしで連結した先頭 90 字（一覧はファイル・先頭 90 字・件数）。未移行の置き場は持たない（新しい出現は直すか、理由つきの例外として一覧に載せる）。比較の指定は修飾を除いた右端の 2 つの名前で見る（`System.StringComparison.Ordinal`・`global::System.StringComparer.Ordinal` の綴りでも拾う）。
-- `SourceRuleTests` の規則 `sync-name-comparison-tokens`：同期の差分と計画の 4 ファイル（`SchemaDiffService` / `SyncPlanner` / `NameMatching` / `UniqueConstraintNaming`）に、`Trim` 系・`ToLower` / `ToUpper` 系・大小を無視する比較の指定が識別子として現れないこと。比較器をフィールドに入れて使う形や、引数名がモデルの名前でないキーの関数は本体のガードが拾えないための補助。Ordinal は綴りの判定とキーどうしの比較にだけ使ってよい。
+- `SourceRuleTests` の規則 `sync-name-comparison-tokens`：同期の差分と計画の 6 ファイル（`SchemaDiffService` / `SyncPlanner` / `NameMatching` / `UniqueConstraintNaming` / `Sync/State/SchemaIds` / `Sync/State/LiveSchema`）に、`Trim` 系・`ToLower` / `ToUpper` 系・大小を無視する比較の指定が識別子として現れないこと。比較器をフィールドに入れて使う形や、引数名がモデルの名前でないキーの関数は本体のガードが拾えないための補助。Ordinal は綴りの判定とキーどうしの比較にだけ使ってよい。
 - `SchemaNamesKeyTests`：Unicode の全スカラー値で `Key` の一致が `AreSame` と同じ。前後の空白の扱い・対になっていないサロゲートも固定する。
 - mutation 実証済み。
 

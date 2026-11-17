@@ -149,6 +149,103 @@ internal static partial class SourceRuleProbes
             {
                 InactiveBranch = true,
             },
+            // 文脈の live の表・リレーションの読み（素の・?. ・ラムダの中）と外部キーの解決の呼び出しを拾い、live の状態の読み・
+            // 初期化子の左辺・プロパティの宣言・nameof でない名前だけの一致（別の型の ResolveAll・文字列・コメント）は拾わない
+            new SourceRuleProbe(
+                "sync-live-schema-single-source-forms",
+                "sync-live-schema-single-source",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System.Collections.Generic;
+                        using System.Linq;
+
+                        internal sealed class Context
+                        {
+                            public List<int> LiveEntities { get; init; } = [];
+
+                            public List<int> LiveRelationships { get; init; } = [];
+                        }
+
+                        internal sealed class LiveState
+                        {
+                            public List<int> Entities { get; } = [];
+                        }
+
+                        internal static class ForeignKeyColumnPairResolver
+                        {
+                            public static List<int> ResolveAll(List<int> a, List<int> b) => a;
+                        }
+
+                        internal static class Other
+                        {
+                            public static List<int> ResolveAll(List<int> a) => a;
+                        }
+
+                        internal static class Planner
+                        {
+                            // context.LiveEntities
+                            public static int Plain(Context context) => context.LiveEntities.Count;
+
+                            public static int Conditional(Context? context) =>
+                                context?.LiveRelationships.Count ?? 0;
+
+                            public static List<int> Resolve(List<int> a) =>
+                                ForeignKeyColumnPairResolver.ResolveAll(a, a);
+
+                            public static int Lambda(List<Context> all) =>
+                                all.Sum(c => c.LiveEntities.Count);
+
+                            public static int Allowed(LiveState liveSchema, List<int> a)
+                            {
+                                var made = new Context { LiveEntities = a, LiveRelationships = a };
+                                var text = "context.LiveEntities";
+                                return liveSchema.Entities.Count + Other.ResolveAll(a).Count + text.Length;
+                            }
+                        }
+                        """,
+                        "Plain: LiveEntities",
+                        "Conditional: LiveRelationships",
+                        "Resolve: ForeignKeyColumnPairResolver.ResolveAll",
+                        "Lambda: LiveEntities"
+                    ),
+                ]
+            ),
+            // 構文の規則は、条件コンパイルの外れる分岐の中の読みも拾う
+            new SourceRuleProbe(
+                "sync-live-schema-single-source-inactive-branch",
+                "sync-live-schema-single-source",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System.Collections.Generic;
+
+                        internal sealed class Context
+                        {
+                            public List<int> LiveEntities { get; init; } = [];
+                        }
+
+                        internal static class Planner
+                        {
+                            public static int Count(Context context)
+                            {
+                        #if QUICKER_PROBE_BRANCH
+                                return context.LiveEntities.Count;
+                        #else
+                                return 0;
+                        #endif
+                            }
+                        }
+                        """,
+                        "Count: LiveEntities"
+                    ),
+                ]
+            ) with
+            {
+                InactiveBranch = true,
+            },
             // 列の NULL 許容の印の読み取り（素の・否定・?. ・プロパティパターン・代入の右辺・ラムダの中）を拾い、書き込み（代入の左辺・
             // 初期化子）・nameof・ほかの型の IsNullable は拾わない
             new SourceRuleProbe(

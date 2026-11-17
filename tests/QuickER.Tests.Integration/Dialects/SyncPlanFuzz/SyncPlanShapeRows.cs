@@ -405,7 +405,11 @@ internal static class SyncPlanShapeRows
                 "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanShapeRows.cs",
                 "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanScenarios.cs",
             ],
-            ["src/QuickER.Provider/SchemaDiffService.cs", "src/QuickER.Provider/SyncPlanner.cs"]
+            [
+                "src/QuickER.Provider/SchemaDiffService.cs",
+                "src/QuickER.Provider/SyncPlanner.cs",
+                "src/QuickER.Provider/Sync",
+            ]
         );
 
     /// <summary>全方言の行</summary>

@@ -46,6 +46,7 @@ internal static class TableRegistry
                 "src/QuickER.Provider/SchemaDiffService.cs",
                 "src/QuickER.Provider/SyncPlan.cs",
                 "src/QuickER.Provider/SyncPlanner.cs",
+                "src/QuickER.Provider/Sync",
             ]
         ),
     ];

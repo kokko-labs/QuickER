@@ -86,7 +86,7 @@ internal static partial class SourceRules
     /// </summary>
     private static readonly Regex SqlCommentStringLiteral = new(@"""\s*--", RegexOptions.Compiled);
 
-    /// <summary>同期の照合の 4 ファイルで禁じる識別子</summary>
+    /// <summary>同期の照合の 6 ファイルで禁じる識別子</summary>
     private static readonly HashSet<string> SyncNameForbiddenIdentifiers = new(
         StringComparer.Ordinal
     )
@@ -265,7 +265,7 @@ internal static partial class SourceRules
                     "-- の行コメントを組み立てる文"
                 ),
             },
-            // 同期の差分と計画の照合（4 ファイル）は大文字小文字・空白を自前で畳まず SchemaNames を通す。Trim 系・ToLower / ToUpper 系・
+            // 同期の差分と計画の照合（6 ファイル）は大文字小文字・空白を自前で畳まず SchemaNames を通す。Trim 系・ToLower / ToUpper 系・
             // 大小を無視する比較の指定が識別子として現れたら数える（コメント・文字列の中は数えない）。例外は無い
             SourceRule.Forbid(
                 "sync-name-comparison-tokens",
@@ -275,7 +275,9 @@ internal static partial class SourceRules
                     "src/QuickER.Provider/SchemaDiffService.cs",
                     "src/QuickER.Provider/SyncPlanner.cs",
                     "src/QuickER.Provider/NameMatching.cs",
-                    "src/QuickER.Provider/UniqueConstraintNaming.cs"
+                    "src/QuickER.Provider/UniqueConstraintNaming.cs",
+                    "src/QuickER.Provider/Sync/State/SchemaIds.cs",
+                    "src/QuickER.Provider/Sync/State/LiveSchema.cs"
                 ),
                 GuardFinder.Tokens(token =>
                     token.IsKind(SyntaxKind.IdentifierToken)
@@ -285,7 +287,7 @@ internal static partial class SourceRules
                 )
             ) with
             {
-                MinimumFiles = 4,
+                MinimumFiles = 6,
             },
             // 同期の計画で「この同期で型が決まる列」は CollectTypeDecidingColumns の 1 か所が決める（NULL 許容だけの列の変更は型を
             // 決めない）。外部キーの型の照合の 3 か所がそれぞれ列の変更の新しい型を辞書へ写していたため、NULL 許容だけの変更まで
@@ -353,6 +355,29 @@ internal static partial class SourceRules
                     GuardFinder.Nodes(SyncExclusionCalls.DescribeCandidate),
                     8,
                     "SyncPlanner の除外の関数の呼び出し"
+                ),
+            },
+            // 同期の計画は、DB の今の図（live の表・リレーション）を live の状態（LiveSchema）からだけ読む。LiveSchema は計画の入口で
+            // 1 回だけ作り、表の索引・列ペアを解いた外部キーの一覧・外部キーの実効名を持つ。各段が文脈の LiveEntities・LiveRelationships を
+            // 直接読んで索引や一覧を作り直すと、同じ材料の作り方が段ごとに割れる（表の引き方・外部キーの解き方・実効名の求め方）。
+            // 範囲は計画器と識別の型で、LiveSchema 自身（文脈から読む 1 か所）は範囲に入れない。例外は無い
+            SourceRule.Forbid(
+                "sync-live-schema-single-source",
+                "同期の計画は DB の今の図を LiveSchema からだけ読む（文脈の LiveEntities・LiveRelationships と外部キーの解決を直接使わない）",
+                SourceScope.Files(
+                    "src",
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "src/QuickER.Provider/Sync/State/SchemaIds.cs"
+                ),
+                GuardFinder.Nodes(LiveSchemaBypasses.Describe)
+            ) with
+            {
+                MinimumFiles = 2,
+                // live の状態の読みを見つけられること（いまは計画器に 35。計画器が LiveSchema を使わなくなったら空振りになる）
+                Floor = new(
+                    GuardFinder.Nodes(LiveSchemaBypasses.DescribeCandidate),
+                    30,
+                    "計画器の LiveSchema の読み"
                 ),
             },
             // DB の取込・DDL・差分・同期の計画は、列が NULL を持てるかを ColumnNullability.AllowsNull で読み、NULL 許容の印
