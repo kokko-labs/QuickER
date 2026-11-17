@@ -486,21 +486,31 @@
 ### 除外の周
 
 - 計画が選んだ項目を外す除外の関数（`SyncPlanner` の `Exclude*`）は、何も外れなくなるまで繰り返す周（`SyncPlanner.ExcludeUntilStable`）の中からだけ呼ぶ。
-  - 列の無い表の追加（`ExcludeTablesWithoutColumns`）は項目だけで決まるので、周の前に 1 回だけ外す。
-  - 周の中の順：名前の重なる表の追加 → DB のビュー・トリガー・索引を壊す変更 → 選んでいない変更を前提にする項目 → 列が残らない表の列の削除 → 作り直さない表を作り直す項目（再構築の方言だけ・`ExcludeRebuildsOfProtectedTables` を警告の種類ごとに）→ 同期後に両端の型が食い違う外部キー（逐次 DDL の方言だけ）→ NOT NULL の列への SET NULL（作れない方言だけ）。
+  - 除外の関数はどれも同じ形の規則（`Sync/Selection/` の `SelectionRule`）：いま選んでいる項目の並びと、選んだ項目に依らない文脈（`SelectionContext`＝方言の宣言・計画の入力・live の状態・再構築の方言か・作り直さない表の一覧 2 つ）を受け取り、取り下げ（`Withdrawal`＝外す項目・名指しの警告の並び・あれば代わりの項目）の並びを返す。規則は受け取った並びも警告・外した項目の一覧も書き換えない。掛けるかどうかの門（方言・一覧が空か）は規則の中に置く。
+  - 規則の並びは `SyncPlanner` の規則の表（静的な配列 `SelectionRulesBeforeRounds`・`SelectionRulesEachRound`）が宣言する。周は表を順に回し、規則が返した取り下げを次の規則の前に当てる（後ろの規則は前の規則が外した後の並びを受ける）。
+  - 当て方は `SelectionWithdrawals.Apply` の 1 か所：取り下げの順に、警告を並びの順に積み（同じ値の警告が既に積まれていれば積まない）、項目を外した項目の一覧へ積み、並びからその項目を落とす（代わりの項目があれば元の位置へ入れる）。警告の並びと外した項目の並びは、規則が返した取り下げの並びで決まる（列が残らない表の規則だけ表ごとにまとめた順・ほかは項目の順）。警告の無い取り下げは断る。
+  - 代わりの項目を返すのは、選んでいない変更を前提にする項目の規則の 1 か所だけ（型の変更も含む列の変更は、元の項目を外し、NULL 許容化だけを外した複製を元の位置に残す）。
+  - 列の無い表の追加（`ExcludeTablesWithoutColumns`）は項目だけで決まるので、周の前に 1 回だけ外す（`SelectionRulesBeforeRounds`）。
+  - 周の中の順（`SelectionRulesEachRound`）：名前の重なる表の追加 → DB のビュー・トリガー・索引を壊す変更 → 選んでいない変更を前提にする項目 → 列が残らない表の列の削除 → 取込が捨てた物のある表の作り直し → DB の外の物で作り直せない表の作り直し（この 2 つは再構築の方言だけ。本体は `ExcludeRebuildsOfProtectedTables`）→ 同期後に両端の型が食い違う外部キー（逐次 DDL の方言だけ）→ NOT NULL の列への SET NULL（作れない方言だけ）。
+  - 同期後の事実（`PostSyncSchema`・`RemainingLiveConstraints`）は、規則がそれぞれ受け取った並びから作る（「同期後の状態と時点」）。周ごとに 1 つへ寄せない（前の規則が外した後の並びから求める規則の答えが変わる）。
+  - 規則の並びは仕様。1 つの項目が 2 つの規則に当たるときは、規則の表で前の規則が名指しし、後ろの規則はその項目を外した後の並びを受ける。警告と外した項目は、項目の並びではなく規則の表の順に並ぶ。
+    - 前提の欠け → 列が残らない表：主キーの列ともう 1 本の列だけの表で両方の列の削除を選び、主キーの変更を選ばないと、主キーの列の削除だけが前提の欠けで外れ、もう 1 本の列の削除は残る（入れ替えると両方が「列が残らない表」で外れる）。
+    - 前提の欠け → 型の食い違い → SET NULL：選んでいない変更を前提にする外部キーの追加は、両端の型が食い違っていても、子の列が NOT NULL の SET NULL でも、前提の欠けで名指しする。型の食い違いと SET NULL の両方に当たる外部キーの追加は、型の食い違いで名指しする。
+    - 名前の重なる表の追加 → 前提の欠け：両方が同じ同期にあれば、警告と外した項目は名前の重なりが先。
+    - 並びの守りが無い組：SQLite だけで効く 3 つの規則（DB のビュー・トリガー・索引を壊す変更・作り直さない表の 2 つ）の位置。入れ替えると、1 つの項目が 2 つの規則に当たる形で名指しの警告が入れ替わるが、実 SQLite の期待の行は緑のまま（規則が掛かること自体は `realdb-rebuild-skipped-when-import-discarded-*`・`realdb-external-*`・`realdb-index-*`・`realdb-trigger-*`・`realdb-view-*` が守る）。
   - 1 周目の呼び出しの並びは、除外を 1 回ずつ流すときと同じ。2 周目に入らない入力では、計画・警告・外した項目・並びは変わらない。
 - 理由：どの除外の判定も、ほかの選んだ項目を材料にする（名前の重なりは選んだ削除と作り直しで消える制約を「残らない」と数え、依存の除外は選んだ追加と主キーの変更を「同期後に在る」と数える）。周の外で項目を外すと、その項目を数えた判定が古いまま残り、追加が名指しなしに DB で断られる。
   - 列が残らない表として外れた列の削除の一意制約と、同じ名前の一意制約の追加（SQL Server 2714・PostgreSQL 42P07・Oracle ORA-02264）。
   - 作り直さない表の主キーの変更が外れた後の、その新しい主キーを参照する別の表の外部キーの追加（SQLite の `foreign key mismatch`）。
   - 型の食い違いで外れた外部キーの作り直しの古い外部キーと、同じ定義の外部キーの追加（Oracle ORA-02275）。
 - 止まる理由：どの除外も項目を外すだけで戻さない。周ごとに少なくとも 1 つ外したときだけ次の周へ進み、外すほど残る制約と足りない前提は増えるだけ。除外を足すときは、前の周の判定が後の周の除外で「外さなくてよかった」に変わらないことを確かめる。
-- 周の中で積む警告は、外した項目の名指し（`ExcludeSelected`）だけにする。項目を外さずに積む警告は、周の後に、外し終えた項目で 1 回だけ決める。
+- 周の中で積む警告は、外した項目の名指し（取り下げの警告）だけにする。項目を外さずに積む警告は、周の後に、外し終えた項目で 1 回だけ決める。
   - NOT NULL の列への SET NULL は関数を 2 つに分ける。作れない方言（`SetNullRequiresNullableChildColumn`）で外す `ExcludeSetNullForeignKeysOnNotNullColumns` は周の中、作れる方言で警告だけを積む `WarnSetNullForeignKeysOnNotNullColumns` は周の後（展開の前）。判定の本体は `FindSetNullForeignKeysOnNotNullColumns` の 1 か所。
   - 警告だけの側を周の中へ置くと、警告した外部キーが後の周で別の理由で外れたとき、計画に無い外部キーの警告が残る。
   - 外す関数は `Exclude`、警告だけの関数は `Warn` で始める（ソースの規則がこの名前で見分ける）。
 - 周の約束そのもの（外した項目を最初から選ばずに計画を作り直しても、新しく外れる項目が無い）は、能力の組の網の関係 N3 が、同期計画の生成器の除外の連鎖の水準（9 本目の乱数の列）の種と期待の行で見る（`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`「能力の組の網」「生成器と方言の宣言」）。
-  - 前寄せの中の取り下げ（`KeepOneReaddedUnique`）は周の外で項目を外す。取り下げの前に決めた警告と外部キーの追加の並びが見直されないことを N3 が見つけ、網の既知の失敗の一覧（`n3-kept-unique-stale-judgments`）に直す区切りつきで載せてある。
-- ガード：能力の組の網の関係 N3（`SyncPlanCapabilityNetRunner.ExclusionFixedPointProblems`）・`SourceRuleTests` の規則 `sync-exclusions-inside-stable-loop`（`SyncPlanner.cs` の `Exclude*` の呼び出しのうち、呼び出し元が `ExcludeUntilStable` でも `Exclude*` でもないもの。`ExcludeSelected` は数えない。自己検査の行 `sync-exclusions-inside-stable-loop-forms`・`sync-exclusions-inside-stable-loop-inactive-branch`）・期待の行 `realdb-name-collision-unique-with-excluded-last-column-drop`（網と 5 方言の実 DB）・`realdb-rebuild-skipped-when-import-discarded-excludes-fk-requiring-its-pk-change`（実 SQLite）・`plan-type-mismatch-excluded-alter-keeps-live-fk-with-same-definition-as-added-fk`・`plan-type-mismatch-excluded-add-with-same-definition-is-not-warned-for-set-null`（網と実 Oracle）。
+  - 前寄せの中の取り下げ（`KeepOneReaddedUnique`）は周の外で項目を外す（積み口は `ExcludeSelected`。使うのはここだけ）。取り下げの前に決めた警告と外部キーの追加の並びが見直されないことを N3 が見つけ、網の既知の失敗の一覧（`n3-kept-unique-stale-judgments`）に直す区切りつきで載せてある。
+- ガード：能力の組の網の関係 N3（`SyncPlanCapabilityNetRunner.ExclusionFixedPointProblems`）・`SourceRuleTests` の規則 `sync-exclusions-inside-stable-loop`（`SyncPlanner.cs` の `Exclude*` への参照＝呼び出しとメソッドグループのうち、規則の表 2 つの初期化子の中でも `Exclude*` の中でもないもの。`ExcludeSelected` と `ExcludeUntilStable` は数えない。自己検査の行 `sync-exclusions-inside-stable-loop-forms`・`sync-exclusions-inside-stable-loop-inactive-branch`）・規則 `sync-selection-rules-table-complete`（規則の形の `Exclude*` の宣言はどれも規則の表にちょうど 1 回あり、表の要素はどれも `SyncPlanner` に宣言のある規則の形の関数。表に無い・2 回ある・規則の形でない・宣言の無い要素を名指しする。自己検査の行 `sync-selection-rules-table-complete-forms`・`sync-selection-rules-table-complete-tidy`・`sync-selection-rules-table-complete-inactive-branch`）・規則の並びと取り下げの当て方の期待の行（網で流れる）`plan-selection-order-pk-column-drop-is-named-as-missing-pk-change-and-other-drop-stays`・`plan-selection-order-fk-add-missing-column-and-type-mismatch-is-named-as-missing-column`・`plan-selection-order-fk-add-missing-prerequisite-and-set-null-on-not-null-is-named-as-missing-prerequisite`・`plan-selection-order-colliding-table-is-named-before-missing-prerequisite`・`plan-selection-order-fk-add-type-mismatch-and-set-null-on-not-null-is-named-as-type-mismatch`・`plan-selection-withdrawals-keep-item-order`（1 つの規則の取り下げは取り下げの順に当てる）・`plan-selection-replacement-keeps-its-position`（代わりの項目は元の位置に入る）・期待の行 `realdb-name-collision-unique-with-excluded-last-column-drop`（網と 5 方言の実 DB）・`realdb-rebuild-skipped-when-import-discarded-excludes-fk-requiring-its-pk-change`（実 SQLite）・`plan-type-mismatch-excluded-alter-keeps-live-fk-with-same-definition-as-added-fk`・`plan-type-mismatch-excluded-add-with-same-definition-is-not-warned-for-set-null`（網と実 Oracle）。
 
 ### 構成列の削除と列が残らない表
 

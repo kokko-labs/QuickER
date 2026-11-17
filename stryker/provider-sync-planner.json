@@ -16,7 +16,11 @@
       "**/SyncPlanner.cs",
       "**/SchemaIds.cs",
       "**/LiveSchema.cs",
-      "**/PostSyncSchema.cs"
+      "**/PostSyncSchema.cs",
+      "**/SelectionContext.cs",
+      "**/SelectionRule.cs",
+      "**/SelectionWithdrawals.cs",
+      "**/Withdrawal.cs"
     ]
   }
 }

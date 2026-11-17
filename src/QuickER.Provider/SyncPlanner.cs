@@ -5,6 +5,7 @@ using System.Linq;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider.Resources;
+using QuickER.Provider.Sync.Selection;
 using QuickER.Provider.Sync.State;
 
 namespace QuickER.Provider;
@@ -199,36 +200,29 @@ public sealed class SyncPlanner
         var isRebuildDialect =
             !capabilities.SupportsAlterColumn || !capabilities.SupportsForeignKeyAlter;
 
-        // テーブル再構築の方言で作り直さない表と、その表を作り直す項目を外すときの警告の種類（どちらも選んだ項目に依らないので、
-        // 除外の周の前に 1 回だけ求める）：取込が捨てた表の中の物（図に無い列・外部キー）がある表（作り直すと捨てた物がデータごと
-        // 黙って消える）と、DB の外で登録した照合順序・関数を使う物があって作り直せない表（QuickER の接続では作り直しが必ず巻き戻る）
-        List<(
-            Dictionary<string, List<string>> Tables,
-            SyncPlanWarningKind Warning
-        )> protectedTables = isRebuildDialect
-            ?
-            [
-                (
-                    CollectImportDiscardedContent(context),
-                    SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent
-                ),
-                (
-                    CollectRebuildBlockedTables(context, liveSchema),
-                    SyncPlanWarningKind.TableRebuildBlockedByExternalDefinition
-                ),
-            ]
-            : [];
+        // 選んだ項目を外す規則が読む文脈（選んだ項目に依らないので、除外の周の前に 1 回だけ作る）。テーブル再構築の方言では、
+        // 作り直さない表も求める：取込が捨てた表の中の物（図に無い列・外部キー）がある表（作り直すと捨てた物がデータごと黙って
+        // 消える）と、DB の外で登録した照合順序・関数を使う物があって作り直せない表（QuickER の接続では作り直しが必ず巻き戻る）
+        var selectionContext = new SelectionContext
+        {
+            Capabilities = capabilities,
+            PlanContext = context,
+            LiveSchema = liveSchema,
+            IsRebuildDialect = isRebuildDialect,
+            ImportDiscardedTables = isRebuildDialect
+                ? AsReadOnlyTables(CollectImportDiscardedContent(context))
+                : EmptyTables,
+            RebuildBlockedTables = isRebuildDialect
+                ? AsReadOnlyTables(CollectRebuildBlockedTables(context, liveSchema))
+                : EmptyTables,
+        };
 
         // 選択済みの項目のみを対象にする（未選択は完全に除外）。計画に載せられない項目を、何も外れなくなるまで繰り返して外し、
         // 名指しする（ExcludeUntilStable）。外部キー・一意制約の作り直しはその後で DROP と ADD の 2 項目へ展開し、以降は通常の差分
         // として扱う（展開の前に判定する＝作り直しを外すときは削除と追加をまとめて外し、削除だけが走って制約が消えたまま残らない）
         var beforeExpansion = ExcludeUntilStable(
             [.. items.Where(i => i.IsSelected)],
-            capabilities,
-            context,
-            liveSchema,
-            isRebuildDialect,
-            protectedTables,
+            selectionContext,
             warnings,
             excluded
         );
@@ -501,10 +495,8 @@ public sealed class SyncPlanner
     /// <see cref="SyncPlanWarningKind.SelectedItemRequiresUnselectedItem"/> で名指しする。
     /// </summary>
     /// <param name="selected">選択済みの項目（外部キーの作り直しは展開前）</param>
-    /// <param name="capabilities">型の比較に使う方言のケーパビリティ</param>
-    /// <param name="liveSchema">live スキーマ（無ければ何も外さない）</param>
-    /// <param name="warnings">外した項目の警告を積む先</param>
-    /// <returns>残す項目（型の変更も含む列の変更で、NULL 許容化だけを外した項目は複製に置き換わる）</returns>
+    /// <param name="context">文脈（型の比較に使う方言の宣言と live スキーマ。live スキーマが無ければ何も外さない）</param>
+    /// <returns>取り下げ（項目の並びの順。型の変更も含む列の変更は、NULL 許容化だけを外した複製を代わりの項目に持つ）</returns>
     /// <remarks>
     /// <para>
     /// 前提にする変更は次のとおり。表・列は live に在るか、同じ計画で追加を選んでいれば在るとみなす
@@ -529,17 +521,17 @@ public sealed class SyncPlanner
     /// 外した項目はセクションにも再構築にも入らない。
     /// </para>
     /// </remarks>
-    private static List<SchemaDiffItem> ExcludeItemsRequiringUnselected(
-        List<SchemaDiffItem> selected,
-        SyncDialectCapabilities capabilities,
-        LiveSchema? liveSchema,
-        List<SyncPlanWarning> warnings,
-        List<SchemaDiffItem> excluded
+    private static IReadOnlyList<Withdrawal> ExcludeItemsRequiringUnselected(
+        IReadOnlyList<SchemaDiffItem> selected,
+        SelectionContext context
     )
     {
+        var capabilities = context.Capabilities;
+        var liveSchema = context.LiveSchema;
+
         if (liveSchema is null)
         {
-            return selected;
+            return [];
         }
 
         var liveByName = liveSchema.Tables;
@@ -584,7 +576,7 @@ public sealed class SyncPlanner
         // 同期後も残る DB の外部キー・一意制約（選んだ削除・作り直しで外れず、表・構成列も消えないもの）。名前・定義の重なりの判定に使う
         var remaining = RemainingLiveConstraints.From(expanded, capabilities, liveSchema);
 
-        var kept = new List<SchemaDiffItem>(selected.Count);
+        var withdrawals = new List<Withdrawal>();
 
         foreach (var item in selected)
         {
@@ -592,20 +584,15 @@ public sealed class SyncPlanner
 
             if (missing.Count == 0)
             {
-                kept.Add(item);
                 continue;
             }
 
-            ExcludeSelected(
-                item,
-                new SyncPlanWarning(
-                    SyncPlanWarningKind.SelectedItemRequiresUnselectedItem,
-                    SchemaNames.ToStoredForm(item.TableName),
-                    $"{subject} ({string.Join(", ", missing)})"
-                ),
-                warnings,
-                excluded
+            var warning = new SyncPlanWarning(
+                SyncPlanWarningKind.SelectedItemRequiresUnselectedItem,
+                SchemaNames.ToStoredForm(item.TableName),
+                $"{subject} ({string.Join(", ", missing)})"
             );
+            SchemaDiffItem? replacement = null;
 
             // 型の変更も含む列の変更は、NULL 許容化だけを外して型の変更は残す
             if (
@@ -617,28 +604,28 @@ public sealed class SyncPlanner
             {
                 var column = item.Column.Clone(preserveId: true);
                 column.IsNullable = ColumnNullability.AllowsNull(item.OldColumn);
-                kept.Add(
-                    new SchemaDiffItem
-                    {
-                        Kind = item.Kind,
-                        TableName = item.TableName,
-                        ColumnName = item.ColumnName,
-                        Entity = item.Entity,
-                        Column = column,
-                        OldColumn = item.OldColumn,
-                        // 説明も型の変更だけにする（元の説明は外した NULL 許容化を含む）
-                        Description = SchemaDiffService.DescribeColumnTypeChange(
-                            item.TableName,
-                            item.ColumnName!,
-                            item.OldColumn.DataType,
-                            column.DataType
-                        ),
-                    }
-                );
+                replacement = new SchemaDiffItem
+                {
+                    Kind = item.Kind,
+                    TableName = item.TableName,
+                    ColumnName = item.ColumnName,
+                    Entity = item.Entity,
+                    Column = column,
+                    OldColumn = item.OldColumn,
+                    // 説明も型の変更だけにする（元の説明は外した NULL 許容化を含む）
+                    Description = SchemaDiffService.DescribeColumnTypeChange(
+                        item.TableName,
+                        item.ColumnName!,
+                        item.OldColumn.DataType,
+                        column.DataType
+                    ),
+                };
             }
+
+            withdrawals.Add(new Withdrawal(item, [warning], replacement));
         }
 
-        return kept;
+        return withdrawals;
 
         (string Subject, List<string> Missing) FindMissingDependencies(SchemaDiffItem item)
         {
@@ -901,46 +888,73 @@ public sealed class SyncPlanner
     /// <see cref="ExcludeDropsLeavingNoColumns"/> と同じく外して名指しする。依存の除外（<see cref="ExcludeItemsRequiringUnselected"/>）
     /// より前に置き、外した表の追加を前提にする項目はそこで外す。
     /// </remarks>
-    private static List<SchemaDiffItem> ExcludeTablesWithoutColumns(
-        List<SchemaDiffItem> selected,
-        List<SyncPlanWarning> warnings,
-        List<SchemaDiffItem> excluded
+    private static IReadOnlyList<Withdrawal> ExcludeTablesWithoutColumns(
+        IReadOnlyList<SchemaDiffItem> selected,
+        SelectionContext context
     )
     {
+        var withdrawals = new List<Withdrawal>();
+
         foreach (var add in selected.Where(SqlTableShape.IsAddTableWithoutColumns))
         {
-            ExcludeSelected(
-                add,
-                new SyncPlanWarning(
-                    SyncPlanWarningKind.TableWithoutColumns,
-                    SchemaNames.ToStoredForm(add.TableName),
-                    string.Empty
-                ),
-                warnings,
-                excluded
+            var warning = new SyncPlanWarning(
+                SyncPlanWarningKind.TableWithoutColumns,
+                SchemaNames.ToStoredForm(add.TableName),
+                string.Empty
             );
+            withdrawals.Add(new Withdrawal(add, [warning]));
         }
 
-        return [.. selected.Where(i => !SqlTableShape.IsAddTableWithoutColumns(i))];
+        return withdrawals;
     }
+
+    /// <summary>
+    /// 除外の周（<see cref="ExcludeUntilStable"/>）の前に 1 回だけ流す規則の表
+    /// </summary>
+    /// <remarks>
+    /// 並びは仕様（後ろの規則は前の規則が外した後の並びを受ける）。項目そのものだけで決まり、ほかの選んだ項目を材料にしない
+    /// 規則だけを置く。
+    /// </remarks>
+    private static readonly SelectionRule[] SelectionRulesBeforeRounds =
+    [
+        ExcludeTablesWithoutColumns,
+    ];
+
+    /// <summary>
+    /// 除外の周（<see cref="ExcludeUntilStable"/>）で、何も外れなくなるまで周ごとに流す規則の表
+    /// </summary>
+    /// <remarks>
+    /// 並びは仕様（後ろの規則は前の規則が外した後の並びを受ける。並びを変えると、外す項目・警告・外した項目の並びが変わりうる）。
+    /// 方言や入力で掛からない規則も表に置き、掛からないときは受け取った並びをそのまま返す（門は規則の中に持つ）。
+    /// </remarks>
+    private static readonly SelectionRule[] SelectionRulesEachRound =
+    [
+        ExcludeTablesWithCollidingConstraintNames,
+        ExcludeChangesBreakingLiveDependents,
+        ExcludeItemsRequiringUnselected,
+        ExcludeDropsLeavingNoColumns,
+        ExcludeRebuildsLosingImportDiscardedContent,
+        ExcludeRebuildsBlockedByExternalDefinition,
+        ExcludeForeignKeysWithPostSyncTypeMismatch,
+        ExcludeSetNullForeignKeysOnNotNullColumns,
+    ];
 
     /// <summary>
     /// 選んだ項目のうち、計画に載せられない項目を、何も外れなくなるまで繰り返して外し、名指しする。計画が選んだ項目を外すのは
     /// ここだけ（除外の関数をこの周の外から呼ばない）。
     /// </summary>
     /// <param name="selected">選択済みの項目（外部キー・一意制約の作り直しは展開前）</param>
-    /// <param name="capabilities">方言のケーパビリティ</param>
-    /// <param name="context">計画の入力（DB のビュー・トリガー・索引の判定を読む）</param>
-    /// <param name="liveSchema">live の図（<see cref="LiveSchema.From"/> が作ったもの。文脈が無ければ <c>null</c>）</param>
-    /// <param name="isRebuildDialect">テーブル再構築の方言か（再構築の方言は外部キーの両端の型を確かめない）</param>
-    /// <param name="protectedTables">
-    /// 作り直さない表と、その表を作り直す項目を外すときの警告の種類（再構築の方言だけ。選んだ項目に依らないので呼び出し側が
-    /// 1 回だけ求める）
-    /// </param>
+    /// <param name="context">選んだ項目に依らない文脈（選んだ項目に依らないので呼び出し側が 1 回だけ作る）</param>
     /// <param name="warnings">名指しの警告を積む先</param>
     /// <param name="excluded">外した項目を積む先</param>
     /// <returns>残す項目</returns>
     /// <remarks>
+    /// <para>
+    /// 規則は 2 つの表で宣言し、表の順に流す。規則は取り下げを返すだけで、周が次の規則の前に取り下げを当てる
+    /// （<see cref="SelectionWithdrawals.Apply"/>。後ろの規則は前の規則が外した後の並びを受ける）。周の前の表
+    /// （<see cref="SelectionRulesBeforeRounds"/>）は 1 回だけ、周ごとの表（<see cref="SelectionRulesEachRound"/>）は何も外れなく
+    /// なるまで繰り返す。
+    /// </para>
     /// <para>
     /// 列の無い表の追加（<see cref="ExcludeTablesWithoutColumns"/>）は項目そのものだけで決まるので 1 回だけ外す。外した表の追加は
     /// 選ばなかった項目と同じに扱い、続く段がそれを前提にする項目を外す。
@@ -951,7 +965,8 @@ public sealed class SyncPlanner
     /// （<see cref="ExcludeChangesBreakingLiveDependents"/>）・選んでいない変更を前提にする項目
     /// （<see cref="ExcludeItemsRequiringUnselected"/>）・同期後に列が 1 本も残らない表の列の削除
     /// （<see cref="ExcludeDropsLeavingNoColumns"/>。依存の除外の後の項目で数えるので、外れた項目は列の追加にも削除にも数えない）・
-    /// 作り直さない表を作り直す項目（<see cref="ExcludeRebuildsOfProtectedTables"/>。再構築の方言だけ）・同期後に両端の型が
+    /// 作り直さない表を作り直す項目（取込が捨てた物のある表＝<see cref="ExcludeRebuildsLosingImportDiscardedContent"/>、
+    /// DB の外の物で作り直せない表＝<see cref="ExcludeRebuildsBlockedByExternalDefinition"/>。再構築の方言だけ）・同期後に両端の型が
     /// 食い違う外部キーの追加・作り直し（<see cref="ExcludeForeignKeysWithPostSyncTypeMismatch"/>。逐次 DDL の方言だけ）・
     /// 子の列が同期後に NOT NULL になる SET NULL の外部キーの追加・作り直し
     /// （<see cref="ExcludeSetNullForeignKeysOnNotNullColumns"/>。作れない方言だけ）。
@@ -973,85 +988,43 @@ public sealed class SyncPlanner
     /// 1 周目の呼び出しの並びは、除外を 1 回ずつ流すときと同じなので、2 周目に入らない入力では警告の並びも変わらない。
     /// </para>
     /// <para>
-    /// 周の中で積む警告は、外した項目の名指し（<see cref="ExcludeSelected"/>）だけにする。外した項目は戻らないので、その名指しは
+    /// 周の中で積む警告は、規則が返した取り下げの名指し（<see cref="SelectionWithdrawals.Apply"/>）だけにする。外した項目は戻らないので、その名指しは
     /// 古くならない。項目を外さずに積む警告（<see cref="WarnSetNullForeignKeysOnNotNullColumns"/> など）は、後の周で外れた項目の
     /// 警告が残るので、周の後に、外し終えた項目で 1 回だけ決める。
     /// </para>
     /// </remarks>
     private static List<SchemaDiffItem> ExcludeUntilStable(
         List<SchemaDiffItem> selected,
-        SyncDialectCapabilities capabilities,
-        SyncPlanContext? context,
-        LiveSchema? liveSchema,
-        bool isRebuildDialect,
-        IReadOnlyList<(
-            Dictionary<string, List<string>> Tables,
-            SyncPlanWarningKind Warning
-        )> protectedTables,
+        SelectionContext context,
         List<SyncPlanWarning> warnings,
         List<SchemaDiffItem> excluded
     )
     {
-        var current = ExcludeTablesWithoutColumns(selected, warnings, excluded);
+        var current = selected;
+
+        foreach (var rule in SelectionRulesBeforeRounds)
+        {
+            current = SelectionWithdrawals.Apply(
+                current,
+                rule(current, context),
+                warnings,
+                excluded
+            );
+        }
 
         for (var round = 0; round <= selected.Count; round++)
         {
             var excludedBefore = excluded.Count;
-            current = ExcludeItemsRequiringUnselected(
-                ExcludeChangesBreakingLiveDependents(
-                    ExcludeTablesWithCollidingConstraintNames(
-                        current,
-                        capabilities,
-                        liveSchema,
-                        warnings,
-                        excluded
-                    ),
-                    context,
-                    capabilities,
-                    liveSchema,
-                    warnings,
-                    excluded
-                ),
-                capabilities,
-                liveSchema,
-                warnings,
-                excluded
-            );
-            current = ExcludeDropsLeavingNoColumns(current, liveSchema, warnings, excluded);
 
-            foreach (var (tables, warning) in protectedTables)
+            foreach (var rule in SelectionRulesEachRound)
             {
-                if (tables.Count > 0)
-                {
-                    current = ExcludeRebuildsOfProtectedTables(
-                        current,
-                        tables,
-                        warning,
-                        liveSchema!,
-                        warnings,
-                        excluded
-                    );
-                }
-            }
-
-            if (!isRebuildDialect)
-            {
-                current = ExcludeForeignKeysWithPostSyncTypeMismatch(
+                current = SelectionWithdrawals.Apply(
                     current,
-                    capabilities,
-                    liveSchema,
+                    rule(current, context),
                     warnings,
                     excluded
                 );
             }
-
-            current = ExcludeSetNullForeignKeysOnNotNullColumns(
-                current,
-                capabilities,
-                liveSchema,
-                warnings,
-                excluded
-            );
 
             if (excluded.Count == excludedBefore)
             {
@@ -1089,18 +1062,17 @@ public sealed class SyncPlanner
     /// 名前を変える表をすべて原因とする。外した後の計画は <see cref="ExcludeUntilStable"/> の次の周でもう一度試す。
     /// </para>
     /// </remarks>
-    private static List<SchemaDiffItem> ExcludeChangesBreakingLiveDependents(
-        List<SchemaDiffItem> selected,
-        SyncPlanContext? context,
-        SyncDialectCapabilities capabilities,
-        LiveSchema? liveSchema,
-        List<SyncPlanWarning> warnings,
-        List<SchemaDiffItem> excluded
+    private static IReadOnlyList<Withdrawal> ExcludeChangesBreakingLiveDependents(
+        IReadOnlyList<SchemaDiffItem> selected,
+        SelectionContext context
     )
     {
-        if (context?.LiveDependentCheck is not { } check || liveSchema is null)
+        var capabilities = context.Capabilities;
+        var liveSchema = context.LiveSchema;
+
+        if (context.PlanContext?.LiveDependentCheck is not { } check || liveSchema is null)
         {
-            return selected;
+            return [];
         }
 
         var changes = PostSyncSchema
@@ -1109,7 +1081,7 @@ public sealed class SyncPlanner
 
         if (changes.Count == 0 || check.DependentsBrokenBy(ToTableChanges(changes)).IsEmpty)
         {
-            return selected;
+            return [];
         }
 
         // 表ごとに試して原因の表を決める（表 → 壊れるビュー・トリガー）
@@ -1140,7 +1112,7 @@ public sealed class SyncPlanner
             }
         }
 
-        var kept = new List<SchemaDiffItem>(selected.Count);
+        var withdrawals = new List<Withdrawal>();
 
         foreach (var item in selected)
         {
@@ -1149,9 +1121,12 @@ public sealed class SyncPlanner
                 && BreaksDependents(item, culprit.Breaks)
             )
             {
+                // 1 項目の警告は索引 → ビュー → トリガーの順（同じ値の警告が既に積まれていれば、当てるときに積まない）
+                var itemWarnings = new List<SyncPlanWarning>();
+
                 if (culprit.Breaks.Indexes.Count > 0 && item.Kind == SchemaDiffKind.DropColumn)
                 {
-                    AddWarningOnce(
+                    itemWarnings.Add(
                         new SyncPlanWarning(
                             SyncPlanWarningKind.TableChangeBreaksDependentIndex,
                             culprit.Table,
@@ -1162,7 +1137,7 @@ public sealed class SyncPlanner
 
                 if (culprit.Breaks.Views.Count > 0)
                 {
-                    AddWarningOnce(
+                    itemWarnings.Add(
                         new SyncPlanWarning(
                             SyncPlanWarningKind.TableChangeBreaksDependentView,
                             culprit.Table,
@@ -1173,7 +1148,7 @@ public sealed class SyncPlanner
 
                 if (culprit.Breaks.Triggers.Count > 0)
                 {
-                    AddWarningOnce(
+                    itemWarnings.Add(
                         new SyncPlanWarning(
                             SyncPlanWarningKind.TableChangeBreaksDependentTrigger,
                             culprit.Table,
@@ -1182,14 +1157,11 @@ public sealed class SyncPlanner
                     );
                 }
 
-                excluded.Add(item);
-                continue;
+                withdrawals.Add(new Withdrawal(item, itemWarnings));
             }
-
-            kept.Add(item);
         }
 
-        return kept;
+        return withdrawals;
 
         // ビュー・トリガーは列の名前の集合を変える 3 種類の項目で壊れ、索引は索引が読む列の削除でだけ作り直せなくなる
         // （列の追加・表の削除では壊れないので、索引だけが原因の表の列の追加は流す）
@@ -1197,14 +1169,6 @@ public sealed class SyncPlanner
             (breaks.Views.Count > 0 || breaks.Triggers.Count > 0)
                 && IsColumnNameSetChange(item.Kind)
             || breaks.Indexes.Count > 0 && item.Kind == SchemaDiffKind.DropColumn;
-
-        void AddWarningOnce(SyncPlanWarning warning)
-        {
-            if (!warnings.Contains(warning))
-            {
-                warnings.Add(warning);
-            }
-        }
 
         static IReadOnlyDictionary<string, IReadOnlyList<string>?> ToTableChanges(
             IEnumerable<(string Table, IReadOnlyList<string>? Columns)> tables
@@ -1226,17 +1190,17 @@ public sealed class SyncPlanner
     /// 取り込まないので数えない。依存の除外（<see cref="ExcludeItemsRequiringUnselected"/>）より前に置き、外した表の追加を前提にする項目
     /// （その表の外部キー・説明）はそこで外す（列の無い表の追加の除外と同じ位置）。Detail は「一意制約の名前 (残る制約の表.名前)」。
     /// </remarks>
-    private static List<SchemaDiffItem> ExcludeTablesWithCollidingConstraintNames(
-        List<SchemaDiffItem> selected,
-        SyncDialectCapabilities capabilities,
-        LiveSchema? liveSchema,
-        List<SyncPlanWarning> warnings,
-        List<SchemaDiffItem> excluded
+    private static IReadOnlyList<Withdrawal> ExcludeTablesWithCollidingConstraintNames(
+        IReadOnlyList<SchemaDiffItem> selected,
+        SelectionContext context
     )
     {
+        var capabilities = context.Capabilities;
+        var liveSchema = context.LiveSchema;
+
         if (liveSchema is null || capabilities.ConstraintNameScope == ConstraintNameScope.None)
         {
-            return selected;
+            return [];
         }
 
         var limit = capabilities.IdentifierLengthLimit;
@@ -1250,7 +1214,7 @@ public sealed class SyncPlanner
             capabilities,
             liveSchema
         );
-        var dropped = new HashSet<SchemaDiffItem>(ReferenceEqualityComparer.Instance);
+        var withdrawals = new List<Withdrawal>();
 
         foreach (
             var add in selected.Where(i =>
@@ -1282,23 +1246,18 @@ public sealed class SyncPlanner
                 continue;
             }
 
-            dropped.Add(add);
-            ExcludeSelected(
-                add,
-                new SyncPlanWarning(
-                    SyncPlanWarningKind.SelectedItemRequiresUnselectedItem,
-                    table,
-                    string.Join(
-                        ", ",
-                        collisions.Select(c => $"{c.Name} ({string.Join(", ", c.Remaining)})")
-                    )
-                ),
-                warnings,
-                excluded
+            var warning = new SyncPlanWarning(
+                SyncPlanWarningKind.SelectedItemRequiresUnselectedItem,
+                table,
+                string.Join(
+                    ", ",
+                    collisions.Select(c => $"{c.Name} ({string.Join(", ", c.Remaining)})")
+                )
             );
+            withdrawals.Add(new Withdrawal(add, [warning]));
         }
 
-        return dropped.Count == 0 ? selected : [.. selected.Where(i => !dropped.Contains(i))];
+        return withdrawals;
     }
 
     /// <summary>
@@ -1318,16 +1277,16 @@ public sealed class SyncPlanner
     /// （外した列を前提にした暗黙の削除を足さない）。
     /// </para>
     /// </remarks>
-    private static List<SchemaDiffItem> ExcludeDropsLeavingNoColumns(
-        List<SchemaDiffItem> selected,
-        LiveSchema? liveSchema,
-        List<SyncPlanWarning> warnings,
-        List<SchemaDiffItem> excluded
+    private static IReadOnlyList<Withdrawal> ExcludeDropsLeavingNoColumns(
+        IReadOnlyList<SchemaDiffItem> selected,
+        SelectionContext context
     )
     {
+        var liveSchema = context.LiveSchema;
+
         if (liveSchema is null)
         {
-            return selected;
+            return [];
         }
 
         var liveByName = liveSchema.Tables;
@@ -1369,12 +1328,14 @@ public sealed class SyncPlanner
 
         if (emptied.Count == 0)
         {
-            return selected;
+            return [];
         }
 
         bool IsExcluded(SchemaDiffItem item) =>
             item.Kind == SchemaDiffKind.DropColumn
             && emptied.Contains(SchemaNames.ToStoredForm(item.TableName));
+
+        var withdrawals = new List<Withdrawal>();
 
         foreach (
             var drops in selected
@@ -1390,11 +1351,11 @@ public sealed class SyncPlanner
 
             foreach (var drop in drops)
             {
-                ExcludeSelected(drop, warning, warnings, excluded);
+                withdrawals.Add(new Withdrawal(drop, [warning]));
             }
         }
 
-        return [.. selected.Where(i => !IsExcluded(i))];
+        return withdrawals;
     }
 
     /// <summary>
@@ -3801,10 +3762,10 @@ public sealed class SyncPlanner
     /// <see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/> で名指しする（逐次 DDL の方言のみ）。
     /// </summary>
     /// <param name="selected">選択済みの項目（外部キーの作り直しは展開前）</param>
-    /// <param name="capabilities">型の比較に使う方言のケーパビリティ</param>
-    /// <param name="liveSchema">live スキーマ（無ければ何も外さない）</param>
-    /// <param name="warnings">外した項目の警告を積む先</param>
-    /// <returns>残す項目</returns>
+    /// <param name="context">
+    /// 文脈（型の比較に使う方言の宣言と live スキーマ。再構築の方言か live スキーマが無ければ何も外さない）
+    /// </param>
+    /// <returns>取り下げ（項目の並びの順）</returns>
     /// <remarks>
     /// <para>
     /// 同期後の型は、型を変える列の変更を選んだ列はその新しい型、live に在る列は live の型、live に無い列（追加する表・列）は図の型。
@@ -3819,17 +3780,23 @@ public sealed class SyncPlanner
     /// 食い違う外部キーとして数え、ほかの外部キーも外し直さない（<see cref="InjectImplicitForeignKeyRebuilds"/>）。
     /// </para>
     /// </remarks>
-    private static List<SchemaDiffItem> ExcludeForeignKeysWithPostSyncTypeMismatch(
-        List<SchemaDiffItem> selected,
-        SyncDialectCapabilities capabilities,
-        LiveSchema? liveSchema,
-        List<SyncPlanWarning> warnings,
-        List<SchemaDiffItem> excluded
+    private static IReadOnlyList<Withdrawal> ExcludeForeignKeysWithPostSyncTypeMismatch(
+        IReadOnlyList<SchemaDiffItem> selected,
+        SelectionContext context
     )
     {
+        // テーブル再構築の方言は外部キーの両端の型を確かめない
+        if (context.IsRebuildDialect)
+        {
+            return [];
+        }
+
+        var capabilities = context.Capabilities;
+        var liveSchema = context.LiveSchema;
+
         if (liveSchema is null)
         {
-            return selected;
+            return [];
         }
 
         var liveByName = liveSchema.Tables;
@@ -3837,7 +3804,7 @@ public sealed class SyncPlanner
             .From(PlanStage.ExclusionRound, selected, liveSchema, capabilities)
             .TypeDecidingColumns;
         var livePairs = liveSchema.ForeignKeyPairs;
-        var kept = new List<SchemaDiffItem>(selected.Count);
+        var withdrawals = new List<Withdrawal>();
 
         foreach (var item in selected)
         {
@@ -3871,17 +3838,12 @@ public sealed class SyncPlanner
                     )
                 )
                 {
-                    ExcludeSelected(
-                        item,
-                        new SyncPlanWarning(
-                            SyncPlanWarningKind.ForeignKeyColumnTypeMismatch,
-                            childTable,
-                            SelectedForeignKeyName(item, capabilities.IdentifierLengthLimit)
-                        ),
-                        warnings,
-                        excluded
+                    var warning = new SyncPlanWarning(
+                        SyncPlanWarningKind.ForeignKeyColumnTypeMismatch,
+                        childTable,
+                        SelectedForeignKeyName(item, capabilities.IdentifierLengthLimit)
                     );
-                    continue;
+                    withdrawals.Add(new Withdrawal(item, [warning]));
                 }
 
                 // 構成列の同期後の型と、その型がこの同期で決まるか（列の変更の項目の型・live に無い列は図の型＝決まる。
@@ -3909,11 +3871,9 @@ public sealed class SyncPlanner
                     return (ColumnTypeOf(diagramEntity, column), true);
                 }
             }
-
-            kept.Add(item);
         }
 
-        return kept;
+        return withdrawals;
     }
 
     /// <summary>
@@ -3924,45 +3884,32 @@ public sealed class SyncPlanner
     /// （外さずに名指しするのは <see cref="WarnSetNullForeignKeysOnNotNullColumns"/>）。
     /// </summary>
     /// <param name="selected">選択済みの項目（外部キーの作り直しは展開前）</param>
-    /// <param name="capabilities">方言のケーパビリティ（方言が書く参照アクションと、作れるかの宣言）</param>
-    /// <param name="liveSchema">live スキーマ（無ければ図の値で見る）</param>
-    /// <param name="warnings">名指しの警告を積む先</param>
-    /// <param name="excluded">外した項目を積む先</param>
-    /// <returns>残す項目</returns>
+    /// <param name="context">
+    /// 文脈（方言が書く参照アクションと作れるかの宣言・live スキーマ。live スキーマが無ければ図の値で見る）
+    /// </param>
+    /// <returns>取り下げ（項目の並びの順）</returns>
     /// <remarks>判定は <see cref="FindSetNullForeignKeysOnNotNullColumns"/>。</remarks>
-    private static List<SchemaDiffItem> ExcludeSetNullForeignKeysOnNotNullColumns(
-        List<SchemaDiffItem> selected,
-        SyncDialectCapabilities capabilities,
-        LiveSchema? liveSchema,
-        List<SyncPlanWarning> warnings,
-        List<SchemaDiffItem> excluded
+    private static IReadOnlyList<Withdrawal> ExcludeSetNullForeignKeysOnNotNullColumns(
+        IReadOnlyList<SchemaDiffItem> selected,
+        SelectionContext context
     )
     {
+        var capabilities = context.Capabilities;
+        var liveSchema = context.LiveSchema;
+
         if (!capabilities.SetNullRequiresNullableChildColumn)
         {
-            return selected;
+            return [];
         }
 
-        var found = FindSetNullForeignKeysOnNotNullColumns(selected, capabilities, liveSchema);
-
-        if (found.Count == 0)
-        {
-            return selected;
-        }
-
-        foreach (var (item, childTable, constraintName, notNull) in found)
-        {
-            ExcludeSelected(
-                item,
-                SetNullWarning(childTable, constraintName, notNull),
-                warnings,
-                excluded
-            );
-        }
-
-        var dropped = found.Select(f => f.Item).ToHashSet(ReferenceEqualityComparer.Instance);
-
-        return [.. selected.Where(item => !dropped.Contains(item))];
+        return
+        [
+            .. FindSetNullForeignKeysOnNotNullColumns(selected, capabilities, liveSchema)
+                .Select(found => new Withdrawal(
+                    found.Item,
+                    [SetNullWarning(found.ChildTable, found.ConstraintName, found.NotNullColumns)]
+                )),
+        ];
     }
 
     /// <summary>
@@ -4019,7 +3966,7 @@ public sealed class SyncPlanner
         string ConstraintName,
         List<string> NotNullColumns
     )> FindSetNullForeignKeysOnNotNullColumns(
-        List<SchemaDiffItem> selected,
+        IReadOnlyList<SchemaDiffItem> selected,
         SyncDialectCapabilities capabilities,
         LiveSchema? liveSchema
     )
@@ -4286,6 +4233,75 @@ public sealed class SyncPlanner
         return blocked;
     }
 
+    /// <summary>作り直さない表が無いことを表す空の一覧（再構築の方言でないとき）</summary>
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> EmptyTables =
+        new Dictionary<string, IReadOnlyList<string>>(SchemaNames.Comparer);
+
+    /// <summary>
+    /// 表ごとに集めた一覧（<see cref="CollectImportDiscardedContent"/>・<see cref="CollectRebuildBlockedTables"/>）を、同じ比べ方と
+    /// 同じ並びの読み取り専用の一覧にする
+    /// </summary>
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> AsReadOnlyTables(
+        Dictionary<string, List<string>> tables
+    ) =>
+        tables.ToDictionary(
+            entry => entry.Key,
+            entry => (IReadOnlyList<string>)entry.Value,
+            SchemaNames.Comparer
+        );
+
+    /// <summary>
+    /// テーブル再構築の方言で、取込が表の中の物を捨てた表（<see cref="SelectionContext.ImportDiscardedTables"/>）を作り直す選んだ項目を
+    /// 計画から外し、<see cref="SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent"/> で表ごとに名指しする
+    /// （そのような表が無ければ何も外さない。本体は <see cref="ExcludeRebuildsOfProtectedTables"/>）
+    /// </summary>
+    private static IReadOnlyList<Withdrawal> ExcludeRebuildsLosingImportDiscardedContent(
+        IReadOnlyList<SchemaDiffItem> selected,
+        SelectionContext context
+    )
+    {
+        var tables = context.ImportDiscardedTables;
+
+        if (tables.Count == 0)
+        {
+            return [];
+        }
+
+        // 一覧が空でなければ計画の入力があり、live スキーマも必ずある
+        return ExcludeRebuildsOfProtectedTables(
+            selected,
+            tables,
+            SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent,
+            context.LiveSchema!
+        );
+    }
+
+    /// <summary>
+    /// テーブル再構築の方言で、DB の外の物で作り直せない表（<see cref="SelectionContext.RebuildBlockedTables"/>）を作り直す選んだ項目を
+    /// 計画から外し、<see cref="SyncPlanWarningKind.TableRebuildBlockedByExternalDefinition"/> で表ごとに名指しする
+    /// （そのような表が無ければ何も外さない。本体は <see cref="ExcludeRebuildsOfProtectedTables"/>）
+    /// </summary>
+    private static IReadOnlyList<Withdrawal> ExcludeRebuildsBlockedByExternalDefinition(
+        IReadOnlyList<SchemaDiffItem> selected,
+        SelectionContext context
+    )
+    {
+        var tables = context.RebuildBlockedTables;
+
+        if (tables.Count == 0)
+        {
+            return [];
+        }
+
+        // 一覧が空でなければ計画の入力と live スキーマが必ずある
+        return ExcludeRebuildsOfProtectedTables(
+            selected,
+            tables,
+            SyncPlanWarningKind.TableRebuildBlockedByExternalDefinition,
+            context.LiveSchema!
+        );
+    }
+
     /// <summary>
     /// テーブル再構築の方言で、守る表（取込が捨てた物がある表・DB の外の物で作り直せない表）を作り直す選んだ項目を計画から外し、
     /// <paramref name="kind"/> の警告で表ごとに名指しする。
@@ -4299,8 +4315,7 @@ public sealed class SyncPlanner
     /// <see cref="SyncPlanWarningKind.TableRebuildBlockedByExternalDefinition"/>）
     /// </param>
     /// <param name="liveSchema">live スキーマ</param>
-    /// <param name="warnings">警告の積み先</param>
-    /// <param name="excluded">外した選んだ項目の積み先</param>
+    /// <returns>取り下げ（項目の並びの順）</returns>
     /// <remarks>
     /// <para>
     /// 再構築は live の図から表を作り直すので、取込が捨てた物（大文字小文字・前後の空白だけ違う列名の後着の列・範囲の外や取り込まなかった
@@ -4316,13 +4331,11 @@ public sealed class SyncPlanner
     /// 作り直さないので外さない。逐次 DDL の方言は列・制約を ALTER で変えるので掛けない。
     /// </para>
     /// </remarks>
-    private static List<SchemaDiffItem> ExcludeRebuildsOfProtectedTables(
-        List<SchemaDiffItem> selected,
-        Dictionary<string, List<string>> protectedTables,
+    private static IReadOnlyList<Withdrawal> ExcludeRebuildsOfProtectedTables(
+        IReadOnlyList<SchemaDiffItem> selected,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> protectedTables,
         SyncPlanWarningKind kind,
-        LiveSchema liveSchema,
-        List<SyncPlanWarning> warnings,
-        List<SchemaDiffItem> excluded
+        LiveSchema liveSchema
     )
     {
         var droppedTables = selected
@@ -4347,7 +4360,7 @@ public sealed class SyncPlanner
             )
             .ToList();
 
-        var kept = new List<SchemaDiffItem>(selected.Count);
+        var withdrawals = new List<Withdrawal>();
 
         foreach (var item in selected)
         {
@@ -4356,19 +4369,18 @@ public sealed class SyncPlanner
 
             if (rebuilt is null)
             {
-                kept.Add(item);
                 continue;
             }
 
-            ExcludeSelected(
-                item,
-                new SyncPlanWarning(kind, rebuilt, string.Join(", ", protectedTables[rebuilt])),
-                warnings,
-                excluded
+            var warning = new SyncPlanWarning(
+                kind,
+                rebuilt,
+                string.Join(", ", protectedTables[rebuilt])
             );
+            withdrawals.Add(new Withdrawal(item, [warning]));
         }
 
-        return kept;
+        return withdrawals;
 
         // この項目が作り直させる、取込が捨てた物のある表（無ければ null）
         string? ProtectedTableRebuiltBy(SchemaDiffItem item, string table)
@@ -4405,8 +4417,8 @@ public sealed class SyncPlanner
 
     /// <summary>
     /// 選んだ項目を計画から外し、名指しの警告（同じ警告は重ねない）と外した項目の一覧（<see cref="SyncPlan.ExcludedItems"/>）へ
-    /// 一緒に積む。選んだ項目を外す箇所はすべてここを通す（警告だけ・一覧だけになると、外した項目が名指しされないか、
-    /// 名指しされた項目が記録されない）。
+    /// 一緒に積む。除外の周の外で選んだ項目を外す箇所はここを通す（警告だけ・一覧だけになると、外した項目が名指しされないか、
+    /// 名指しされた項目が記録されない）。周の中の規則の取り下げは <see cref="SelectionWithdrawals.Apply"/> が同じ積み方で積む。
     /// </summary>
     private static void ExcludeSelected(
         SchemaDiffItem item,

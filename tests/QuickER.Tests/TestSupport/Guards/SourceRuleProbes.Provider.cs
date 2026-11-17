@@ -54,9 +54,12 @@ internal static partial class SourceRuleProbes
                     ),
                 ]
             ),
-            // SyncPlanner の除外の関数（Exclude*）の呼び出しのうち、BuildPlan からの直接の呼び出し・補助のメソッドからの呼び出し・
-            // 補助のメソッドのローカル関数とラムダの中の呼び出しを拾い、周（ExcludeUntilStable）の中・ほかの除外の関数の中からの呼び出し・
-            // 積むだけの ExcludeSelected・周そのもの・警告だけの関数（Warn*）・ほかのクラスの Exclude* は拾わない
+            // SyncPlanner の除外の関数（Exclude*）への参照（呼び出しとメソッドグループ）のうち、BuildPlan からの直接の呼び出し・
+            // メソッドの中でデリゲートへ取るメソッドグループ・規則の表でないフィールドの初期化子のメソッドグループ・補助のメソッドからの
+            // 呼び出しとメソッドグループ・補助のメソッドのローカル関数とラムダの中の呼び出しを拾い、規則の表（SelectionRulesBeforeRounds・
+            // SelectionRulesEachRound）の初期化子のメソッドグループ・周（ExcludeUntilStable）の中・ほかの除外の関数の中からの呼び出し・
+            // 積むだけの ExcludeSelected・周そのもの・警告だけの関数（Warn*）・nameof の中の名前・Excluded で始まるプロパティ・
+            // ほかのクラスの Exclude* は拾わない
             new SourceRuleProbe(
                 "sync-exclusions-inside-stable-loop-forms",
                 "sync-exclusions-inside-stable-loop",
@@ -67,19 +70,42 @@ internal static partial class SourceRuleProbes
                         using System;
                         using System.Collections.Generic;
 
+                        internal delegate List<int> SelectionRule(List<int> items);
+
                         internal sealed class SyncPlanner
                         {
+                            private static readonly SelectionRule[] SelectionRulesBeforeRounds = [ExcludeInside];
+
+                            private static readonly SelectionRule[] SelectionRulesEachRound = [ExcludeNested, ExcludeDirect];
+
+                            private static readonly SelectionRule[] OtherRules = [ExcludeNested];
+
+                            private List<int> ExcludedItems { get; } = [];
+
                             public List<int> BuildPlan(List<int> items)
                             {
                                 var stable = ExcludeUntilStable(items);
                                 var direct = ExcludeDirect(stable);
                                 WarnOnly(direct);
-                                return Helper(this.ExcludeQualified(direct));
+                                SelectionRule held = ExcludeNested;
+                                var count = nameof(ExcludeDirect).Length + ExcludedItems.Count;
+                                return held(Helper(this.ExcludeQualified(direct))).Count > count ? direct : items;
                             }
 
                             private static List<int> ExcludeUntilStable(List<int> items)
                             {
-                                var current = ExcludeInside(items);
+                                var current = items;
+
+                                foreach (var rule in SelectionRulesBeforeRounds)
+                                {
+                                    current = rule(current);
+                                }
+
+                                foreach (var rule in SelectionRulesEachRound)
+                                {
+                                    current = rule(current);
+                                }
+
                                 ExcludeSelected(current);
                                 return current;
                             }
@@ -100,7 +126,8 @@ internal static partial class SourceRuleProbes
                             {
                                 List<int> Local() => ExcludeDirect(items);
                                 Func<List<int>> lambda = () => ExcludeNested(items);
-                                return lambda().Count > 0 ? Local() : items;
+                                Func<List<int>, List<int>> group = new SyncPlanner().ExcludeQualified;
+                                return lambda().Count > 0 ? Local() : group(items);
                             }
                         }
 
@@ -111,10 +138,13 @@ internal static partial class SourceRuleProbes
                             private static List<int> ExcludeElsewhere(List<int> items) => items;
                         }
                         """,
+                        "OtherRules: ExcludeNested",
                         "BuildPlan: ExcludeDirect",
+                        "BuildPlan: ExcludeNested",
                         "BuildPlan: ExcludeQualified",
                         "Helper: ExcludeDirect",
-                        "Helper: ExcludeNested"
+                        "Helper: ExcludeNested",
+                        "Helper: ExcludeQualified"
                     ),
                 ]
             ),
@@ -143,6 +173,146 @@ internal static partial class SourceRuleProbes
                         }
                         """,
                         "BuildPlan: ExcludeOutside"
+                    ),
+                ]
+            ) with
+            {
+                InactiveBranch = true,
+            },
+            // 規則の表（2 つの表の和）に無い規則の形の関数・2 回ある規則・規則の形でない関数の要素・SyncPlanner に宣言の無い要素を拾い、
+            // 表にちょうど 1 回ある規則・規則の形でない Exclude*（引数の数が違う本体）・規則の表でないフィールド・ほかのクラスの規則の形の
+            // 関数は拾わない。並びは、規則の形の関数の名前の順に「表に無い」「n 回」、続いて表の要素の順
+            new SourceRuleProbe(
+                "sync-selection-rules-table-complete-forms",
+                "sync-selection-rules-table-complete",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System.Collections.Generic;
+
+                        internal sealed class SyncPlanner
+                        {
+                            private static readonly SelectionRule[] SelectionRulesBeforeRounds = [ExcludeListed];
+
+                            private static readonly SelectionRule[] SelectionRulesEachRound =
+                            [
+                                ExcludeTwice,
+                                ExcludeTwice,
+                                ExcludeWithBody,
+                                ExcludeUndeclared,
+                            ];
+
+                            private static readonly SelectionRule[] OtherRules = [ExcludeMissing];
+
+                            private static IReadOnlyList<Withdrawal> ExcludeListed(
+                                IReadOnlyList<SchemaDiffItem> selected,
+                                SelectionContext context
+                            ) => [];
+
+                            private static IReadOnlyList<Withdrawal> ExcludeTwice(
+                                IReadOnlyList<SchemaDiffItem> selected,
+                                SelectionContext context
+                            ) => [];
+
+                            private static IReadOnlyList<Withdrawal> ExcludeMissing(
+                                IReadOnlyList<SchemaDiffItem> selected,
+                                SelectionContext context
+                            ) => [];
+
+                            private static IReadOnlyList<Withdrawal> ExcludeWithBody(
+                                IReadOnlyList<SchemaDiffItem> selected,
+                                IReadOnlyList<string> tables,
+                                SelectionContext context
+                            ) => [];
+                        }
+
+                        internal sealed class OtherService
+                        {
+                            private static IReadOnlyList<Withdrawal> ExcludeElsewhere(
+                                IReadOnlyList<SchemaDiffItem> selected,
+                                SelectionContext context
+                            ) => [];
+                        }
+                        """,
+                        "missing from the rule tables: ExcludeMissing",
+                        "listed 2 times: ExcludeTwice",
+                        "not rule-shaped: ExcludeWithBody",
+                        "not declared in SyncPlanner: ExcludeUndeclared"
+                    ),
+                ]
+            ),
+            // 整った表（規則の形の関数がどれも表にちょうど 1 回・表の要素がどれも規則の形の関数）は何も拾わない
+            new SourceRuleProbe(
+                "sync-selection-rules-table-complete-tidy",
+                "sync-selection-rules-table-complete",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System.Collections.Generic;
+
+                        internal sealed class SyncPlanner
+                        {
+                            private static readonly SelectionRule[] SelectionRulesBeforeRounds = [ExcludeFirst];
+
+                            private static readonly SelectionRule[] SelectionRulesEachRound = [ExcludeSecond, ExcludeThird];
+
+                            private static IReadOnlyList<Withdrawal> ExcludeFirst(
+                                IReadOnlyList<SchemaDiffItem> selected,
+                                SelectionContext context
+                            ) => [];
+
+                            private static IReadOnlyList<Withdrawal> ExcludeSecond(
+                                IReadOnlyList<SchemaDiffItem> selected,
+                                SelectionContext context
+                            ) => [];
+
+                            private static IReadOnlyList<Withdrawal> ExcludeThird(
+                                IReadOnlyList<SchemaDiffItem> selected,
+                                SelectionContext context
+                            ) => ExcludeHelper(selected, [], context);
+
+                            private static IReadOnlyList<Withdrawal> ExcludeHelper(
+                                IReadOnlyList<SchemaDiffItem> selected,
+                                IReadOnlyList<string> tables,
+                                SelectionContext context
+                            ) => [];
+                        }
+                        """
+                    ),
+                ]
+            ),
+            // 構文の規則は、条件コンパイルの外れる分岐の中の規則の形の関数も読む
+            new SourceRuleProbe(
+                "sync-selection-rules-table-complete-inactive-branch",
+                "sync-selection-rules-table-complete",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System.Collections.Generic;
+
+                        internal sealed class SyncPlanner
+                        {
+                            private static readonly SelectionRule[] SelectionRulesBeforeRounds = [];
+
+                            private static readonly SelectionRule[] SelectionRulesEachRound = [ExcludeListed];
+
+                            private static IReadOnlyList<Withdrawal> ExcludeListed(
+                                IReadOnlyList<SchemaDiffItem> selected,
+                                SelectionContext context
+                            ) => [];
+
+                        #if QUICKER_PROBE_BRANCH
+                            private static IReadOnlyList<Withdrawal> ExcludeInBranch(
+                                IReadOnlyList<SchemaDiffItem> selected,
+                                SelectionContext context
+                            ) => [];
+                        #endif
+                        }
+                        """,
+                        "missing from the rule tables: ExcludeInBranch"
                     ),
                 ]
             ) with
