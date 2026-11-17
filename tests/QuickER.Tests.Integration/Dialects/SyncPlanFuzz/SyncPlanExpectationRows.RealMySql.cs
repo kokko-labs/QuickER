@@ -334,7 +334,7 @@ internal static partial class SyncPlanExpectationRows
                 ),
             Row(
                     "realdb-mysql-fk-set-null-child-not-null-names-fk-and-changes-nothing",
-                    "[Integration] MySQL 同期: SET NULL の子の列を NOT NULL にする変更は名指しし、どの外部キーも外さず何も変えない",
+                    "[Integration] MySQL 同期: SET NULL の子の列を NOT NULL にする変更は名指しして先頭へ移し、ほかの外部キーを外す前に断られて何も変えない",
                     DialectNames.MySql
                 )
                 .TargetFromLive(s =>
@@ -359,7 +359,15 @@ internal static partial class SyncPlanExpectationRows
                                 "SetNullOnNotNullColumn(*)*",
                                 "SetNullOnNotNullColumn(md_child): fk_parent (parent_id)"
                             );
-                            e.Sections.Absent("DropForeignKey*", "AddForeignKey*");
+                            // fk_parent は外し直さず、fk_other は外して付け直す。断られる NOT NULL 化（1830）を fk_other を
+                            // 外すより前（計画の先頭）へ移す
+                            e.Sections.Exact(
+                                "AlterColumn: AlterColumn md_child.parent_id",
+                                "DropForeignKey: DropForeignKey md_child fk=fk_other",
+                                "AlterColumn: *",
+                                "AddForeignKey: AddForeignKey md_child.other_id fk=fk_other"
+                            );
+                            e.Script.Absent("*DROP FOREIGN KEY `fk_parent`*");
                             e.Outcome.Exact("failed: *");
                             e.After.Single(
                                 "col md_child.parent_id * null*",
@@ -374,7 +382,7 @@ internal static partial class SyncPlanExpectationRows
                 ),
             Row(
                     "realdb-mysql-fk-same-column-one-mismatched-changes-nothing",
-                    "[Integration] MySQL 同期: 同じ列の外部キー 2 本の片方だけ型が食い違うと、どの外部キーも外さず何も変えない",
+                    "[Integration] MySQL 同期: 同じ列の外部キー 2 本の片方だけ型が食い違うと、それだけを外さず、断られる列の変更を先頭へ移して何も変えない",
                     DialectNames.MySql
                 )
                 .TargetFromLive(s =>
@@ -400,7 +408,19 @@ internal static partial class SyncPlanExpectationRows
                                 "ForeignKeyColumnTypeMismatch(*)*",
                                 "ForeignKeyColumnTypeMismatch(*): fk_other"
                             );
-                            e.Script.Absent("*DROP FOREIGN KEY*");
+                            // fk_other だけを外さず、fk_parent・fk_item は外して付け直す。fk_other に阻まれる
+                            // md_child.parent_id の変更を、外部キーを外すより前（計画の先頭）へ移す
+                            e.Script.Absent("*DROP FOREIGN KEY `fk_other`*");
+                            e.Script.Contains(
+                                "*DROP FOREIGN KEY `fk_parent`*",
+                                "*DROP FOREIGN KEY `fk_item`*"
+                            );
+                            e.Sections.Exact(
+                                "AlterColumn: AlterColumn md_child.parent_id",
+                                "DropForeignKey: *",
+                                "AlterColumn: *",
+                                "AddForeignKey: *"
+                            );
                             e.Outcome.Exact("failed: *");
                             e.After.Count("fk *", 3);
                             e.After.Single(
