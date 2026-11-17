@@ -126,9 +126,9 @@ internal static partial class SyncPlanExpectationRows
         StringComparer.Ordinal
     )
     {
-        [QuickER.Dialects.DialectNames.SqlServer] = 174,
-        [QuickER.Dialects.DialectNames.PostgreSql] = 36,
-        [QuickER.Dialects.DialectNames.MySql] = 82,
+        [QuickER.Dialects.DialectNames.SqlServer] = 176,
+        [QuickER.Dialects.DialectNames.PostgreSql] = 39,
+        [QuickER.Dialects.DialectNames.MySql] = 84,
         [QuickER.Dialects.DialectNames.Oracle] = 37,
         [QuickER.Dialects.DialectNames.Sqlite] = 79,
         [SyntheticOrComparisonKey] = 29,
@@ -380,6 +380,7 @@ internal static partial class SyncPlanExpectationRows
             .. CompositeForeignKeyRows(),
             .. PlanDefaultRows(),
             .. PlanNameCollisionRows(),
+            .. PlanSelectionOrderRows(),
             .. TreatmentRows(),
             .. RealSqlServerRows(),
             .. RealSqliteRows(),

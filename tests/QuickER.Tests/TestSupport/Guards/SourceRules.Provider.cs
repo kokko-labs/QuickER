@@ -265,7 +265,7 @@ internal static partial class SourceRules
                     "-- の行コメントを組み立てる文"
                 ),
             },
-            // 同期の差分と計画の照合（7 ファイル）は大文字小文字・空白を自前で畳まず SchemaNames を通す。Trim 系・ToLower / ToUpper 系・
+            // 同期の差分と計画の照合（7 ファイルと、計画の除外の規則の文脈 SelectionContext）は大文字小文字・空白を自前で畳まず SchemaNames を通す。Trim 系・ToLower / ToUpper 系・
             // 大小を無視する比較の指定が識別子として現れたら数える（コメント・文字列の中は数えない）。例外は無い
             SourceRule.Forbid(
                 "sync-name-comparison-tokens",
@@ -278,7 +278,8 @@ internal static partial class SourceRules
                     "src/QuickER.Provider/UniqueConstraintNaming.cs",
                     "src/QuickER.Provider/Sync/State/SchemaIds.cs",
                     "src/QuickER.Provider/Sync/State/LiveSchema.cs",
-                    "src/QuickER.Provider/Sync/State/PostSyncSchema.cs"
+                    "src/QuickER.Provider/Sync/State/PostSyncSchema.cs",
+                    "src/QuickER.Provider/Sync/Selection/SelectionContext.cs"
                 ),
                 GuardFinder.Tokens(token =>
                     token.IsKind(SyntaxKind.IdentifierToken)
@@ -347,25 +348,50 @@ internal static partial class SourceRules
             // 同期の計画の除外の関数（SyncPlanner の Exclude*）は、何も外れなくなるまで繰り返す周（ExcludeUntilStable）の中からだけ呼ぶ。
             // 周の外で項目を外すと、周の中の判定（名前の重なり・前提の欠け）が外れた項目を「選ばれている」と数えたまま残り、追加が
             // 名指しなしに DB で断られた（列が残らない表の除外の後の同じ名前の一意制約・作り直しを外した表の主キーの変更を前提にする
-            // 外部キー・型の食い違いで外した作り直しと同じ定義の外部キー）。警告だけの関数は Warn* で、周の後に置く。例外は無い
+            // 外部キー・型の食い違いで外した作り直しと同じ定義の外部キー）。警告だけの関数は Warn* で、周の後に置く。周は規則の表
+            // （SelectionRulesBeforeRounds・SelectionRulesEachRound）を回すので、除外の関数への参照（呼び出しとメソッドグループ）を許すのは、
+            // 表の初期化子とほかの除外の関数の中だけ。例外は無い
             SourceRule.Forbid(
                 "sync-exclusions-inside-stable-loop",
-                "同期の計画の除外の関数（SyncPlanner の Exclude*）は ExcludeUntilStable の周の中からだけ呼ぶ",
+                "同期の計画の除外の関数（SyncPlanner の Exclude*）は ExcludeUntilStable の周の中からだけ使う（参照は規則の表と除外の関数の中だけ）",
                 SourceScope.Files("src", "src/QuickER.Provider/SyncPlanner.cs"),
                 GuardFinder.Nodes(SyncExclusionCalls.Describe)
             ) with
             {
-                // 除外の関数の呼び出しを見つけられること（周の中の呼び出しも数える。いまは除外の関数 8 つを 1 回ずつ）
+                // 除外の関数への参照を見つけられること（許す場所の参照も数える。いまは規則の表の要素 9 つと、作り直さない表の規則 2 つから
+                // 本体 ExcludeRebuildsOfProtectedTables への呼び出し 2 つ＝11）
                 Floor = new(
                     GuardFinder.Nodes(SyncExclusionCalls.DescribeCandidate),
-                    8,
-                    "SyncPlanner の除外の関数の呼び出し"
+                    11,
+                    "SyncPlanner の除外の関数への参照"
+                ),
+            },
+            // 除外の周が回すのは規則の表（SelectionRulesBeforeRounds・SelectionRulesEachRound）だけなので、規則の形（SelectionRule と同じ
+            // 引数と戻り値）の Exclude* の関数は、どれも表の和にちょうど 1 回載せ、表の要素はどれも規則の形の関数にする。表から抜けた
+            // 規則は黙って一度も流れず（計画に載せられない項目が外されずに DB で断られる）、2 回載せた規則は周の中で 2 回流れる。
+            // 規則の形でない関数は表に載せられない（コンパイルが断る）が、形を変えた関数を載せ替え忘れる形も名指しする。例外は無い
+            SourceRule.Forbid(
+                "sync-selection-rules-table-complete",
+                "同期の計画の除外の規則の形の関数（SyncPlanner の Exclude*）は、どれも規則の表にちょうど 1 回載せ、表の要素はどれも規則の形の関数にする",
+                SourceScope.Files("src", "src/QuickER.Provider/SyncPlanner.cs"),
+                GuardFinder.File(GuardReader.SyntaxNodes, SyncSelectionRuleTable.Find)
+            ) with
+            {
+                // 規則の表の要素を見つけられること（いまは周の前の 1 つと周ごとの 8 つ＝9）
+                Floor = new(
+                    GuardFinder.File(
+                        GuardReader.SyntaxNodes,
+                        SyncSelectionRuleTable.FindTableEntries
+                    ),
+                    9,
+                    "SyncPlanner の規則の表の要素"
                 ),
             },
             // 同期の計画は、DB の今の図（live の表・リレーション）を live の状態（LiveSchema）からだけ読む。LiveSchema は計画の入口で
             // 1 回だけ作り、表の索引・列ペアを解いた外部キーの一覧・外部キーの実効名を持つ。各段が文脈の LiveEntities・LiveRelationships を
             // 直接読んで索引や一覧を作り直すと、同じ材料の作り方が段ごとに割れる（表の引き方・外部キーの解き方・実効名の求め方）。
-            // 範囲は計画器と識別の型と同期後の状態で、LiveSchema 自身（文脈から読む 1 か所）は範囲に入れない。例外は無い
+            // 範囲は計画器と識別の型と同期後の状態と除外の規則の文脈（計画の入力を持つ）で、LiveSchema 自身（文脈から読む 1 か所）は
+            // 範囲に入れない。例外は無い
             SourceRule.Forbid(
                 "sync-live-schema-single-source",
                 "同期の計画は DB の今の図を LiveSchema からだけ読む（文脈の LiveEntities・LiveRelationships と外部キーの解決を直接使わない）",
@@ -373,7 +399,8 @@ internal static partial class SourceRules
                     "src",
                     "src/QuickER.Provider/SyncPlanner.cs",
                     "src/QuickER.Provider/Sync/State/SchemaIds.cs",
-                    "src/QuickER.Provider/Sync/State/PostSyncSchema.cs"
+                    "src/QuickER.Provider/Sync/State/PostSyncSchema.cs",
+                    "src/QuickER.Provider/Sync/Selection/SelectionContext.cs"
                 ),
                 GuardFinder.Nodes(LiveSchemaBypasses.Describe)
             ) with
