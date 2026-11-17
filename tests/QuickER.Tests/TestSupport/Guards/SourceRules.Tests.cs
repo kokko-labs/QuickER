@@ -40,6 +40,14 @@ internal static partial class SourceRules
     /// <summary>合成の入力の間、実際のマウスのボタンを混ぜない共有の部品の呼び出し（分割して書く）</summary>
     private const string MouseIsolationCall = "PhysicalMouseButtons." + "Isolate(";
 
+    /// <summary>実際の外部変更の監視を作ることを表す目印（このファイル自身が写り込まないよう分割して書く）</summary>
+    private const string ThreadPoolDeliveryMarker = "new Document" + "FileWatcher(";
+
+    /// <summary>ThreadPoolDelivery のコレクションへの所属を表す属性</summary>
+    private static readonly Regex ThreadPoolDeliveryCollectionAttribute = new(
+        @"\[Collection\((TestSupport\.)?ThreadPoolDeliveryTestCollection\.Name\)\]"
+    );
+
     /// <summary>WindowActivation のコレクションへの所属を表す属性</summary>
     private static readonly Regex WindowActivationCollectionAttribute = new(
         @"\[Collection\((TestSupport\.)?WindowActivationTestCollection\.Name\)\]"
@@ -162,6 +170,32 @@ internal static partial class SourceRules
             {
                 MinimumFiles = 3,
             },
+            // 実際の外部変更の監視を作るテストのクラスは、ThreadPoolDelivery のコレクションに入れる（監視の通知はスレッドプールの
+            // 空きを待つので、並列の全件・変異テストの初回の負荷で上限を割って時々落ちる）。目印を含むのに Collection 属性の無い
+            // ファイルを 1 件と数える（文字列で読むので、コメントでの言及も数える。並列から外して失うのは実行時間だけなので、
+            // 取りこぼさない側へ倒す）
+            SourceRule.Forbid(
+                "thread-pool-delivery-collection",
+                "実際の外部変更の監視を作るテストのクラスには [Collection(TestSupport.ThreadPoolDeliveryTestCollection.Name)] を付ける",
+                SourceScope.Under("tests/QuickER.Tests"),
+                GuardFinder.File(GuardReader.Text, FindThreadPoolDeliveryOffenders)
+            ),
+            // 目印の綴りが崩れて何も拾わなくなると、上の規則は黙って緑になる。既知の監視のテストを目印が拾えること
+            SourceRule.Require(
+                "thread-pool-delivery-markers",
+                "目印は既知の監視のテストを拾える（拾えないと上の規則が空振りする）",
+                SourceScope.Files(
+                    "tests/QuickER.Tests",
+                    "tests/QuickER.Tests/Gui/Services/DocumentFileWatcherTests.cs"
+                ),
+                GuardFinder.File(GuardReader.Text, FindThreadPoolDeliveryMarker),
+                new GuardKnown(
+                    "tests/QuickER.Tests/Gui/Services/DocumentFileWatcherTests.cs",
+                    "監視を作る目印",
+                    1,
+                    "並列の全件実行と変異テストの初回でだけ落ちた実例（通知が 30 秒届かない）"
+                )
+            ),
             // 合成のマウス・キーの入力を流すテストは、利用者の実際のマウスのボタンを混ぜないスコープ（PhysicalMouseButtons.Isolate）を
             // 使う。WPF のコントロールはボタンをスレッドのキーの状態の表から読むので、全件の実行中のほかのアプリのクリックが結果を
             // 変える。結果がボタンの状態に左右されないテストは、理由つきで範囲から外す。目印を含むのに部品の呼び出しの無いファイルを
@@ -471,6 +505,24 @@ internal static partial class SourceRules
         FirstWindowActivationMarker(file.Text) is { } index
             ? [new GuardFinding("フォーカス依存の目印", file.LineAt(index))]
             : [];
+
+    /// <summary>監視を作る目印を含むのに Collection 属性の無いファイル（1 ファイル 1 件・行は最初の目印の行）</summary>
+    private static IEnumerable<GuardFinding> FindThreadPoolDeliveryOffenders(GuardFile file)
+    {
+        var index = file.Text.IndexOf(ThreadPoolDeliveryMarker, StringComparison.Ordinal);
+
+        return index >= 0 && !ThreadPoolDeliveryCollectionAttribute.IsMatch(file.Text)
+            ? [new GuardFinding("Collection 属性の無い監視のテスト", file.LineAt(index))]
+            : [];
+    }
+
+    /// <summary>監視を作る目印を含むファイル（1 ファイル 1 件・行は最初の目印の行）</summary>
+    private static IEnumerable<GuardFinding> FindThreadPoolDeliveryMarker(GuardFile file)
+    {
+        var index = file.Text.IndexOf(ThreadPoolDeliveryMarker, StringComparison.Ordinal);
+
+        return index >= 0 ? [new GuardFinding("監視を作る目印", file.LineAt(index))] : [];
+    }
 
     /// <summary>合成の入力の目印の最初の位置（無ければ null）</summary>
     private static int? FirstSyntheticInputMarker(string text) =>

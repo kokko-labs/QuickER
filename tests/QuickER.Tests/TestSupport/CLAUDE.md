@@ -337,6 +337,14 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
 - 時間：手元（24 論理コア）で手順 1 つ 24 秒前後（`dotnet test` の起動と探索が 12 秒・数えが 12 秒）。
 - ガード：`WorkflowGuardTests.OneOffTests_ReportedWithoutFailingOnCounts`（手順の順・入口の絞り込み・環境変数・戻しと保存のパスと鍵・保存は push だけ・同じ版の SHA 固定・`continue-on-error` と `--ignore-exit-code` が無い）と `OneOffTestCensusTests` の決まった形の行（Fact / Theory の数え方・両プロジェクト・部分ファイルとフォルダの宣言・条件コンパイル・bin / obj と数えないファイル・増えたものを合計より先に書く・近似の基点・基点なし・大きく増えても報告だけ＝行 `oneoff-report-large-increase-only-reports`）。数え方を壊すと赤になることを確かめた（`TheoryAttribute` を読まない・守りのソースを単発に数える・壊れた基点の JSON で入口が赤）。
 
+## スレッドプールで届く通知を待つテスト
+
+- 実際の外部変更の監視（`DocumentFileWatcher`）を作るテストのクラスは `[Collection(TestSupport.ThreadPoolDeliveryTestCollection.Name)]` に入れる（`DisableParallelization`＝並列のテストが全部終わってから単独で走る）。
+  - 監視の通知は、FS の通知の処理・デバウンスのタイマ・照合のどれもスレッドプールの空きを待つ。並列の全件実行と変異テストの初回のテストの実行では、ほかのテストがスレッドプールを埋めて通知を運ぶ仕事が数十秒待たされ、30 秒の上限を割って時々落ちた（2026-11-16 に CI で `Suspend_SuppressesEvents`、変異テストの初回で `RapidWrites_AreCoalescedByDebounce` が、どちらも照合が 1 回も走らない形で落ちた。同じ実行で、スレッドプールの仕事 1 つを待つだけの行が 13 秒かかっていた）。
+  - 製品は通知が届くまでの時間の上限を約束していないので、上限は伸ばさず、スレッドプールを分け合わない形で流す。
+  - 上限を割ったときは、スレッドプールのスレッド数・積まれた仕事の数・仕事 1 つの待ち、監視器の状態、ファイルを照合と同じ開き方で読めるかを表明の理由に添える（`DocumentFileWatcherTests` の `AssertEventually`）。材料は上限を割ったときだけ組み立て、取得の失敗は文字列にして元の表明の失敗を残す。次に落ちたとき、スレッドプールの待ち・読み取りの失敗・製品のどれかを 1 回で見分けるため。
+  - ガード：`SourceRuleTests` の規則 `thread-pool-delivery-collection`（目印 `new DocumentFileWatcher(` を含むテストのソースに属性が付いていることを全数検査する。文字列で読むので、コメントでの言及も数える）と空振り止めの `thread-pool-delivery-markers`。自己検査の行 `thread-pool-delivery-collection-forms`・`thread-pool-delivery-markers-forms`・`thread-pool-delivery-markers-inactive-branch`。mutation 実証済み（クラスの属性を外すと赤）。
+
 ## GUI テストの土台
 
 - キーボードフォーカス・流したキー入力・ウィンドウの Activated / Deactivated に結果が左右される GUI テストのクラスは `[Collection(TestSupport.WindowActivationTestCollection.Name)]` に入れる（`DisableParallelization`＝並列のテストが全部終わってから単独で走る）。

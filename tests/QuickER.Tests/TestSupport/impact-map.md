@@ -869,6 +869,8 @@ src 全体か src の外を読む守り。単位の守りには数えない（�
 | `rule:ef-core-provider-cache-limit` | tests/**/*.cs（除外 35 件） |
 | `rule:window-activation-collection` | tests/QuickER.Tests/**/*.cs（除外 3 件） |
 | `rule:window-activation-markers` | tests/QuickER.Tests/AI.Chat/AiChatDialogApiKeyBoxTests.cs・tests/QuickER.Tests/Gui/Behaviors/CanvasViewportBehaviorSpaceKeyTests.cs・tests/QuickER.Tests/Gui/Views/PropertyPanelMemoEditTests.cs |
+| `rule:thread-pool-delivery-collection` | tests/QuickER.Tests/**/*.cs |
+| `rule:thread-pool-delivery-markers` | tests/QuickER.Tests/Gui/Services/DocumentFileWatcherTests.cs |
 | `rule:synthetic-input-mouse-isolation` | tests/QuickER.Tests/**/*.cs（除外 5 件） |
 | `rule:synthetic-input-markers` | tests/QuickER.Tests/Gui/Behaviors/CanvasInputHarness.cs・tests/QuickER.Tests/Gui/Behaviors/CanvasViewportBehaviorSpaceKeyTests.cs・tests/QuickER.Tests/Gui/Behaviors/DragBehaviorTests.cs |
 | `rule:gui-test-foreground-activation` | tests/QuickER.Tests/**/*.cs |
