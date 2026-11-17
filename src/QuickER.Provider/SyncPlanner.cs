@@ -2995,14 +2995,12 @@ public sealed class SyncPlanner
     /// <para>
     /// 子表・親表・構成列のどれかが同じ計画で削除される FK は、<see cref="InjectVanishingForeignKeyDrops"/> が
     /// 外すだけの項目として先に足しているので、ここでは明示的に外す FK として扱われ付け直さない。
-    /// (b) で同期後に両端の列の型が食い違う FK も注入しない。付け直しが必ず失敗し、DDL が暗黙コミットされる方言では
-    /// 外部キーが消えたまま残るため、外さずに列定義変更の時点で失敗させ、
-    /// <see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/> で名指しする。(a) の付け直しも、構成列の型を変えて
-    /// 同期後に両端の型が食い違うなら同じく注入せずに名指しする（列の変更で外し直しを要しない方言でも、付け直しは失敗する）。
-    /// そうした外部キーが 1 本でもあれば、列の変更の段で必ず失敗するので、ほかの外部キーも 1 本も外さない
-    /// （付け直しは列の変更の後にしか来ない。同じ列に外部キーが 2 本あり 1 本だけ型が食い違うとき、もう 1 本を
-    /// 外すと、列の変更が失敗したままその外部キーだけが消えた。残した外部キーが参照する親の列の変更も失敗するので、
-    /// 同じ列の外部キーだけを残すのでは足りない）。
+    /// 構成列の型を変えて同期後に両端の列の型が食い違う FK も、外す理由（(a)〜(c) と途中の状態）に依らず注入しない。
+    /// 付け直しが必ず失敗し、DDL が暗黙コミットされる方言では外部キーが消えたまま残るため、その 1 本だけを外さずに
+    /// <see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/> で名指しする（列の変更で外し直しを要しない方言でも、
+    /// 付け直しは失敗する）。ほかの外部キーは普通に外して付け直す。残した外部キーに阻まれて必ず断られる文は、DDL が
+    /// 暗黙コミットされる方言では <see cref="MoveCertainFailureFirst"/> が計画の先頭へ移すので、何も外れる前に失敗する
+    /// （DDL が巻き戻る方言では、失敗すれば外したものごと戻る）。
     /// </para>
     /// <para>
     /// ユーザーが同じ FK の <see cref="SchemaDiffKind.DropForeignKey"/> を明示選択している場合は、自動 DROP を注入せず
@@ -3015,14 +3013,10 @@ public sealed class SyncPlanner
     /// <para>
     /// 参照アクション <c>SET NULL</c> の外部キーで、子の列が同期後に NOT NULL になるものは、
     /// <see cref="SyncDialectCapabilities.SetNullRequiresNullableChildColumn"/> が <c>true</c> の方言では付け直しが必ず失敗するので
-    /// 外し直さずに <see cref="SyncPlanWarningKind.SetNullOnNotNullColumn"/> で名指しする。その子の列が変更する列のときは、
-    /// 宣言の組み合わせで扱いが分かれる。<c>SetNullRequiresNullableChildColumn</c> が <c>true</c>・
-    /// <see cref="SyncDialectCapabilities.AlterColumnRequiresForeignKeyRebuild"/> が <c>true</c>（列の変更で外部キーを外し直す）・
-    /// <see cref="SyncDialectCapabilities.TransactionalDdl"/> が <c>false</c>（MySQL）なら、その列を食い違う外部キーの列と同じく
-    /// 失敗が決まった列として扱い、どの外部キーも外し直さない（MySQL は外部キーを張ったまま子の列を NOT NULL にできず
-    /// エラー 1830 になるので、外したほかの外部キーが消えたまま残らない）。<c>TransactionalDdl</c> が <c>true</c>（SQL Server）
-    /// なら、その外部キーだけを外し直さない（SQL Server は外部キーを張ったまま子の列を NOT NULL にでき、型も変える列の変更は
-    /// エラー 5074 で失敗して巻き戻る）。
+    /// その 1 本だけを外し直さずに <see cref="SyncPlanWarningKind.SetNullOnNotNullColumn"/> で名指しする（ほかの外部キーは
+    /// 外して付け直す）。MySQL は外部キーを張ったまま子の列を NOT NULL にできず（エラー 1830）、その列の変更は
+    /// <see cref="MoveCertainFailureFirst"/> が計画の先頭へ移すので、ほかの外部キーが外れる前に失敗する。SQL Server は
+    /// 外部キーを張ったまま子の列を NOT NULL にでき、型も変える列の変更はエラー 5074 で失敗して巻き戻る。
     /// </para>
     /// <para>
     /// 再 ADD する FK の参照先列が同期後も候補キーであることを証明できない場合は、再作成が実行時に失敗しうるため
@@ -3068,12 +3062,8 @@ public sealed class SyncPlanner
 
         var liveByName = IndexLiveTables(context);
 
-        // この同期で型が決まる列（同期後の両端の型の照合は方言に依らずこれだけを使う。NULL 許容だけの変更は型を決めない）と、
-        // そのうち (b) の外し直しの理由になる列（失敗が決まった列の判定に使う）
+        // この同期で型が決まる列（同期後の両端の型の照合は方言に依らずこれだけを使う。NULL 許容だけの変更は型を決めない）
         var typeDecidingColumns = CollectTypeDecidingColumns(selected, liveByName, capabilities);
-        var rebuildTypeDecidingColumns = capabilities.AlterColumnRequiresForeignKeyRebuild
-            ? typeDecidingColumns
-            : new Dictionary<string, string>();
 
         // (c) 外部キーを支える索引が消える表 → 消える索引の列（旧主キー・削除する一意制約。MySQL のみ対象）
         var lostIndexes = capabilities.ForeignKeyRequiresLeadingIndex
@@ -3085,7 +3075,7 @@ public sealed class SyncPlanner
         var explicitlyDropped = CollectExplicitlyDroppedForeignKeys(selected, limit);
 
         // 型の食い違いの名指しはここの 1 か所（方言に依らない）：明示に外さない live の外部キーに、端の型がこの同期で決まり
-        // 同期後に両端が並べられない組があれば名指しする。その外部キーは外し直さない（下の doomed・主キーの変更の分岐）か、
+        // 同期後に両端が並べられない組があれば名指しする。その外部キーは外し直さない（下の 1 本ごとの判定）か、
         // 列の変更で外し直さない方言（PostgreSQL・Oracle）では外部キーを張ったまま列を変えるので、DB が断れば列の変更が失敗する
         foreach (var fk in EnumerateLiveForeignKeys(context))
         {
@@ -3142,59 +3132,6 @@ public sealed class SyncPlanner
 
         // 同期後の列の NULL 許容（SET NULL の外部キーの子の列が NOT NULL になるかの判定に使う）
         var postSyncNullable = PostSyncNullability(selected, context);
-
-        // 同期後に両端の型が食い違う外部キーに関わる、変更する列（その列の変更は、残した外部キーに阻まれて必ず失敗する）
-        var doomedColumns = new HashSet<string>();
-
-        foreach (var fk in EnumerateLiveForeignKeys(context))
-        {
-            var childTable = SchemaDiffService.NormalizeTable(fk.Child);
-            var parentTable = SchemaDiffService.NormalizeTable(fk.Parent);
-
-            // 明示的に外す外部キーは変更を阻まない
-            if (
-                explicitlyDropped.Contains(
-                    ForeignKeyKey(childTable, parentTable, fk.ColumnPairs, fk.Relationship, limit)
-                )
-            )
-            {
-                continue;
-            }
-
-            if (
-                HasPostSyncTypeMismatch(
-                    fk,
-                    childTable,
-                    parentTable,
-                    rebuildTypeDecidingColumns,
-                    capabilities
-                )
-            )
-            {
-                foreach (var pair in fk.ColumnPairs)
-                {
-                    doomedColumns.Add(ColumnKey(childTable, pair.ChildColumn));
-                    doomedColumns.Add(ColumnKey(parentTable, pair.ParentColumn));
-                }
-            }
-
-            // 外し直さない SET NULL の外部キー（下の setNullBlocked）の子の列の変更は、DB が断ると失敗する。DDL が暗黙コミット
-            // される方言（TransactionalDdl が false）では、そのとき先に外したほかの外部キーが付け直されずに消えたまま残るので、
-            // 失敗が決まった列の変更と同じく doomed に入れ、どの外部キーも外し直さない。DDL が巻き戻る方言では、失敗しても
-            // 外したものごと戻るので、その外部キーだけを外し直さない（SQL Server は子の列の NOT NULL 化を通す）
-            if (
-                !capabilities.TransactionalDdl
-                && BlocksSetNullRebuild(fk, childTable, capabilities, postSyncNullable)
-            )
-            {
-                foreach (var pair in fk.ColumnPairs)
-                {
-                    doomedColumns.Add(ColumnKey(childTable, pair.ChildColumn));
-                }
-            }
-        }
-
-        doomedColumns.IntersectWith(alteredColumns);
 
         var autoDrops = new List<SchemaDiffItem>();
         var autoAdds = new List<SchemaDiffItem>();
@@ -3266,7 +3203,7 @@ public sealed class SyncPlanner
             );
 
             // SET NULL の外部キーの子の列が同期後に NOT NULL になると、作れない方言（SQL Server・MySQL）では付け直しが必ず
-            // 失敗する（1761 / 1830）。外し直さずに名指しする（MySQL は上の doomed で、どの外部キーも外し直さない）
+            // 失敗する（1761 / 1830）。外し直さずに名指しする
             var setNullBlocked = BlocksSetNullRebuild(
                 fk,
                 childTable,
@@ -3284,27 +3221,20 @@ public sealed class SyncPlanner
                 );
             }
 
-            // 同期後に両端の列の型が食い違う外部キーがあると、付け直しは必ず失敗し、その外部キーを残せば列の変更が
-            // 失敗する。どちらにしても列の変更の段で止まり、外し直しの付け直しはその後にしか来ないので、外すと DDL が
-            // 暗黙コミットされる方言（MySQL）では外部キーが消えたまま残る。そこで失敗が決まった列の変更が 1 つでもあれば、
-            // どの外部キーも外さずに列の変更の時点で失敗させる（食い違う外部キーは上で名指し済み。同じ列のほかの
-            // 外部キー・残した外部キーが参照する親の列の外部キー・無関係な列の外部キーも外さない）
-            if (doomedColumns.Count > 0)
-            {
-                continue;
-            }
-
+            // 付け直せない外部キーは、外す理由（主キーの変更・列の変更・途中の状態・索引の喪失）に依らず、その 1 本だけを
+            // 外さない。付け直しは必ず失敗するので、外すと DDL が暗黙コミットされる方言では外部キーが消えたまま残る。
+            // ほかの外部キーは普通に外して付け直す：残した外部キーに阻まれて必ず断られる文（型を食い違わせる列の変更・
+            // 支えるキーの削除・SET NULL の子の列の NOT NULL 化）は、暗黙コミットの方言では MoveCertainFailureFirst が計画の
+            // 先頭へ移すので、何も外れる前に失敗する。DDL が巻き戻る方言では、失敗すれば外したものごと戻る
             if (setNullBlocked)
             {
                 continue;
             }
 
-            // 主キーの変更での付け直しも、構成列の型を変えて同期後に両端の型が食い違うなら必ず失敗する（列の変更で外し直しを
-            // 要しない方言でも）。外さずに主キーの解除の時点で失敗させる（食い違う外部キーは上で名指し済み。構成列の NULL 許容
-            // だけを変える外部キーは型を変えないので、DB が受け入れている型のまま付け直す）
+            // 構成列の型を変えて同期後に両端の型が食い違う外部キー（上で名指し済み）。構成列の NULL 許容だけを変える外部キーは
+            // 型を変えないので、DB が受け入れている型のまま付け直す
             if (
-                parentPkChanged
-                && HasPostSyncTypeMismatch(
+                HasPostSyncTypeMismatch(
                     fk,
                     childTable,
                     parentTable,

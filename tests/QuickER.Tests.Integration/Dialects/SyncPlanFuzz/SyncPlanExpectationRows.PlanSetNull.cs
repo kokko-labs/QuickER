@@ -209,7 +209,7 @@ internal static partial class SyncPlanExpectationRows
                 }),
             Row(
                     "plan-set-null-alter-child-to-not-null-with-other-rebuild",
-                    "暗黙の付け直し: SQL Server はその外部キーだけ、MySQL はどの外部キーも外し直さない",
+                    "暗黙の付け直し: SET NULL の外部キーだけを外し直さず、ほかの外部キーは外して付け直す（MySQL は NOT NULL 化を先頭へ）",
                     DialectNames.SqlServer,
                     DialectNames.MySql
                 )
@@ -221,19 +221,23 @@ internal static partial class SyncPlanExpectationRows
                 .Expect(e =>
                     e.Warnings.Count("SetNullOnNotNullColumn*", 1)
                         .Warnings.Single(SetNullParentWarning)
-                        // DDL がトランザクションで巻き戻る SQL Server はほかの外部キーだけを外し直す
-                        .For(
-                            DialectNames.SqlServer,
-                            d =>
-                                d.Items.Count("DropForeignKey > *", 1)
-                                    .Items.Single("DropForeignKey > * fk=FK_child_other sel=*")
-                                    .Items.Count("AddForeignKey > *", 1)
-                                    .Items.Single("AddForeignKey > * fk=FK_child_other sel=*")
-                        )
-                        // DDL が暗黙コミットされる MySQL はどの外部キーも外し直さない
+                        // 付け直せない SET NULL の外部キーだけを外し直さず、ほかの外部キーは外して付け直す
+                        .Items.Absent("* fk=FK_child_parent *")
+                        .Items.Count("DropForeignKey > *", 1)
+                        .Items.Single("DropForeignKey > * fk=FK_child_other sel=*")
+                        .Items.Count("AddForeignKey > *", 1)
+                        .Items.Single("AddForeignKey > * fk=FK_child_other sel=*")
+                        // DDL が暗黙コミットされる MySQL は、外部キーを張ったまま断られる子の列の NOT NULL 化（1830）を
+                        // FK_child_other を外すより前（計画の先頭）へ移す
                         .For(
                             DialectNames.MySql,
-                            d => d.Items.Absent("DropForeignKey > *", "AddForeignKey > *")
+                            d =>
+                                d.Sections.Exact(
+                                    "AlterColumn: AlterColumn child.parent_id",
+                                    "DropForeignKey: DropForeignKey child fk=FK_child_other",
+                                    "AlterColumn: *",
+                                    "AddForeignKey: AddForeignKey child.other_id fk=FK_child_other"
+                                )
                         )
                 ),
             Row(

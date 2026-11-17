@@ -6,6 +6,12 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+#### DB sync & DDL
+
+- **A sync script keeps the other foreign-key rebuilds when one foreign key cannot be re-added** — A sync that fails on a foreign key with mismatched column types now lists the drop and re-add of the other foreign keys after the failing statement, and the confirmation shows the warnings about those re-adds too. The database ends up the same as before
+
 ### Fixed
 
 #### Diagram files

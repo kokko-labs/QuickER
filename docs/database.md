@@ -689,7 +689,8 @@ String types that differ only in length (`varchar(50)` and `varchar(100)`, for e
 Changing the length of one end drops and re-adds the foreign key as usual.
 SQL Server cannot create a foreign key whose ends differ in length (error 1753), so the DDL adds a comment before such a foreign key.
 The confirmation dialog lists those foreign keys so that you can change both ends to the same type.
-In that case no other foreign key is dropped and re-added either, because the column change fails anyway and the re-adding would never run.
+The other foreign keys are still dropped and re-added as usual, so the script contains those statements.
+Where the table above says DDL is committed implicitly, the change that the remaining foreign key refuses is placed first in the script, so the sync fails before anything is dropped.
 If the referenced columns of a foreign key that the sync re-creates (around a primary key change, a column change or a dropped index) are not exactly the primary key or a unique constraint after the sync, the confirmation dialog warns that re-creating those foreign keys may fail.
 Such a failure rolls the whole script back, or, where the table above says so, leaves the warned foreign key dropped (partially applied); those re-creations run after every other foreign key addition, so no other foreign key is left dropped.
 The same warning appears when a foreign key you add or change refers to columns that are not exactly a primary key or a unique constraint after the sync.
