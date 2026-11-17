@@ -538,7 +538,8 @@ public sealed class DocumentFileWatcher : IDisposable
     /// 照合はスレッドプールで重なって走る（満了のタイマのコールバック・張り直しの直後の照合）。先に読み始めた照合が
     /// 読んだ後に遅れると、古い内容の通知が新しい内容の通知より後に届いてしまうので、読み始める順に番号を振り、
     /// 後から読み始めた照合がすでに決着していれば（通知した・期待ハッシュと同じで抑止した・ファイルが無かった）、
-    /// 古い照合の通知は捨てる。削除・リネームの通知も、それより前に読み始めた照合を古くする。
+    /// 古い照合の通知は捨てる。ファイルはあるのに読めなかった照合（ほかのプロセスが共有なしで開いていた）は決着に数えず、
+    /// ほかの照合を古くしない。削除・リネームの通知も、それより前に読み始めた照合を古くする。
     /// 判定と発火は <see cref="_raiseGate"/> の中で 1 つにする（判定の後・発火の前に新しい照合が割り込む隙間を作らない）。
     /// </remarks>
     private void OnDebounceElapsed()
@@ -559,6 +560,14 @@ public sealed class DocumentFileWatcher : IDisposable
 
         // 書き込み途中の共有違反に備え短くリトライして算出する。消滅していれば null（削除側で通知済み）
         var hash = DocumentContentHash.TryComputeWithRetry(path);
+
+        // ファイルはあるのに読めなかった（ほかのプロセスが共有なしで開いている）照合は決着に数えない。
+        // 古い番号を進めると、先に内容を読んだ照合の通知まで捨ててしまう
+        if (hash is null && File.Exists(path))
+        {
+            return;
+        }
+
         var expected = hash is null ? null : ExpectedHashProvider?.Invoke();
 
         lock (_raiseGate)

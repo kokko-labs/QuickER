@@ -6,6 +6,12 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+#### Diagram files
+
+- **An external change to the open diagram file is no longer missed while another program holds the file open without sharing** — since 0.4.0, a backup or antivirus tool that opened the file right after an external save could make QuickER drop the notice of that change
+
 ## [0.4.0] - 2026-11-16
 
 Highlights of this release:

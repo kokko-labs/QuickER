@@ -21,6 +21,9 @@ internal static partial class SourceRuleProbes
 
     private const string DeactivatedMarker = "Deac" + "tivated";
 
+    /// <summary>実際の外部変更の監視を作る目印（綴りを割る）</summary>
+    private const string WatcherMarker = "new Document" + "FileWatcher(";
+
     /// <summary>合成の入力の目印と、実際のマウスのボタンを混ぜない部品の呼び出し（綴りを割る）</summary>
     private const string ProcessInputMarker = "InputManager.Current." + "ProcessInput";
 
@@ -191,6 +194,102 @@ internal static partial class SourceRuleProbes
                     new ProbeFile("Plain.cs", "_ = e.IsFocused;\n"),
                 ]
             ),
+            // 監視を作る目印を含むのに Collection 属性の無いファイルを 1 件拾う（コメントの中の目印・別のコレクションの属性も）。
+            // 属性（TestSupport. の有無を問わない）のあるファイルと、目印の無いファイルは拾わない
+            new SourceRuleProbe(
+                "thread-pool-delivery-collection-forms",
+                "thread-pool-delivery-collection",
+                [
+                    new ProbeFile(
+                        "Hit.cs",
+                        $$"""
+                        public class WatcherTests
+                        {
+                            public void Check() => _ = {{WatcherMarker}});
+                        }
+                        """,
+                        "Collection 属性の無い監視のテスト"
+                    ),
+                    new ProbeFile(
+                        "Comment.cs",
+                        $$"""
+                        // creates {{WatcherMarker}}) indirectly
+                        public class CommentTests { }
+                        """,
+                        "Collection 属性の無い監視のテスト"
+                    ),
+                    new ProbeFile(
+                        "OtherCollection.cs",
+                        $$"""
+                        [Collection(TestSupport.WindowActivationTestCollection.Name)]
+                        public class OtherTests
+                        {
+                            public void Check() => _ = {{WatcherMarker}}150);
+                        }
+                        """,
+                        "Collection 属性の無い監視のテスト"
+                    ),
+                    new ProbeFile(
+                        "Marked.cs",
+                        $$"""
+                        [Collection(TestSupport.ThreadPoolDeliveryTestCollection.Name)]
+                        public class MarkedTests
+                        {
+                            public void Check() => _ = {{WatcherMarker}});
+                        }
+                        """
+                    ),
+                    new ProbeFile(
+                        "MarkedShort.cs",
+                        $$"""
+                        [Collection(ThreadPoolDeliveryTestCollection.Name)]
+                        public class MarkedShortTests
+                        {
+                            public void Check() => _ = {{WatcherMarker}}250);
+                        }
+                        """
+                    ),
+                    new ProbeFile(
+                        "Plain.cs",
+                        "public class PlainTests { DocumentFileWatcher? watcher; }\n"
+                    ),
+                ]
+            ),
+            // 目印は 1 ファイル 1 件拾い（2 つ含んでも 1 件）、型の名前だけのファイルは拾わない
+            new SourceRuleProbe(
+                "thread-pool-delivery-markers-forms",
+                "thread-pool-delivery-markers",
+                [
+                    new ProbeFile(
+                        "A.cs",
+                        $"_ = {WatcherMarker});\n_ = {WatcherMarker}150);\n",
+                        "監視を作る目印"
+                    ),
+                    new ProbeFile("Plain.cs", "DocumentFileWatcher? watcher = null;\n"),
+                ]
+            ),
+            // 文字列で読む必須の規則は、条件コンパイルの外れる分岐の中の目印でも満たされる
+            new SourceRuleProbe(
+                "thread-pool-delivery-markers-inactive-branch",
+                "thread-pool-delivery-markers",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        $$"""
+                        public class WatcherTests
+                        {
+                        #if QUICKER_PROBE_BRANCH
+                            public void Check() => _ = {{WatcherMarker}});
+                        #endif
+                        }
+                        """,
+                        "監視を作る目印"
+                    ),
+                ]
+            ) with
+            {
+                InactiveBranch = true,
+            },
             // 文字列で読む必須の規則は、条件コンパイルの外れる分岐の中の目印でも満たされる
             new SourceRuleProbe(
                 "window-activation-markers-inactive-branch",
