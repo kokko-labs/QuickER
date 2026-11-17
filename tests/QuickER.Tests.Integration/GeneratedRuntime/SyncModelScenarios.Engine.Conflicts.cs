@@ -414,6 +414,57 @@ internal static partial class SyncModelScenarios
                     Expect.Rows(D1, F).Contains("1 parent=null name=alice-server-later"),
                 ]
             ),
+            // サーバーの他者が入れたキーへ、端末が同じキーの品目を入れて実行を挟まずに消す。端末の差し引きは何も書いていないが、
+            // エンジンには挿入と削除の記録が残り、ServerWins の同期がその記録を捨ててサーバーの行で戻し、DiscardedByServerWins と
+            // 報告する
+            Moved(
+                "sw-discards-insert-then-delete-on-key-taken-on-server",
+                [.. Seed(1, "alice", 11, "widget")],
+                [
+                    Line(SV, 21, 1, "server-row"),
+                    Line(D1, 21, 1, "device-row"),
+                    new DeleteItemOp(D1, Direct, 21),
+                    Plain(D1, policy: SyncConflictPolicy.ServerWins),
+                    new ExpectLocalRowChangeOp(
+                        D1,
+                        I,
+                        "21",
+                        SyncLocalRowChangeReason.DiscardedByServerWins
+                    ),
+                    Expect
+                        .Rows(D1, I)
+                        .Contains("21 folder=1 label=null code=c-21 title=server-row"),
+                ]
+            ),
+            // サーバーの他者が先に消した品目を端末が消し、その削除を送る前に同期がサーバーへの書き込みの失敗で止まる（フォルダーの
+            // 編集を先に送るので失敗が確実に当たる）。その後サーバーの他者が同じキーで作り直すと、端末に残った削除の記録が Collect では
+            // 削除の競合になり、ServerWins では捨てられて DiscardedByServerWins と報告される
+            Moved(
+                "sw-discards-delete-left-by-failed-run-after-recreate-elsewhere",
+                [.. Seed(1, "alice", 11, "widget")],
+                [
+                    new DeleteItemOp(SV, Direct, 11),
+                    new DeleteItemOp(D1, Direct, 11),
+                    Rename(D1, 1, "alice-local"),
+                    new ArmFaultOp(D1, ModelFaultKind.ServerWrite),
+                    new ExpectThrowOp(D1),
+                    Plain(D1, policy: SyncConflictPolicy.LocalWins),
+                    Expect.Result(D1).Contains("exception *"),
+                    Line(SV, 11, 1, "recreated"),
+                    Plain(D1),
+                    Expect
+                        .Result(D1)
+                        .Contains($"conflict {I} key=11 op=Delete reason=ModifiedOnServer*"),
+                    Plain(D1, policy: SyncConflictPolicy.ServerWins),
+                    new ExpectLocalRowChangeOp(
+                        D1,
+                        I,
+                        "11",
+                        SyncLocalRowChangeReason.DiscardedByServerWins
+                    ),
+                    Expect.Rows(D1, I).Contains("11 folder=1 label=null code=c-11 title=recreated"),
+                ]
+            ),
         ];
 
     /// <summary>

@@ -47,6 +47,18 @@ internal sealed record SyncModelScenario(
     /// </summary>
     public IReadOnlySet<SyncModelTransport> Transports { get; init; } = AllTransports;
 
+    /// <summary>
+    /// 判定役の対照の行の端末の宣言（端末のエンジンを外から壊す包み。null なら製品の端末のまま）。宣言した壊し方が起きなければ
+    /// <c>judge/break-not-fired:{壊し方}</c> の違反にする
+    /// </summary>
+    public SyncModelJudgeDevice? JudgeDevice { get; init; }
+
+    /// <summary>
+    /// 判定役の対照の行が期待する違反の署名の集合（表の名前を残した署名そのまま）。null なら宣言なし（既知の失敗の一覧で照らす）。
+    /// 宣言のある行は既知の失敗の一覧を通さず、出た署名の集合とこの集合の一致で判定する（空集合は違反なしの表明）
+    /// </summary>
+    public IReadOnlySet<string>? ExpectedJudgeSignatures { get; init; }
+
     /// <summary>この転送のテストで流すか</summary>
     public bool RunsOn(SyncModelTransport transport) =>
         Transports.Contains(SyncModelTransport.Direct)
@@ -61,14 +73,22 @@ internal sealed record SyncModelScenario(
         SyncModelWorldOptions? options = null
     )
     {
+        var world = (options ?? SyncModelWorldOptions.Direct) with
+        {
+            ExternalTables = ExternalTables,
+            Devices = Devices,
+        };
+        HashSet<JudgeBreak>? fired = null;
+
+        if (JudgeDevice is not null)
+        {
+            (world, fired) = JudgeDevice.Apply(world);
+        }
+
         await using var run = await SyncModelRun.StartAsync(
             [.. Setup, .. (OmitsTail ? [] : SyncModelScenarios.Tail)],
             ct,
-            (options ?? SyncModelWorldOptions.Direct) with
-            {
-                ExternalTables = ExternalTables,
-                Devices = Devices,
-            }
+            world
         );
 
         foreach (var op in Ops)
@@ -78,6 +98,12 @@ internal sealed record SyncModelScenario(
 
         await run.FinishAsync(requireArmedFaultsFired: true);
         var failures = run.Failures.ToList();
+
+        // 宣言した壊し方が起きなかった対照の行は、行の誤り（壊す前に照らしても何も確かめていない）
+        foreach (var brk in JudgeDevice?.Breaks.Where(b => !fired!.Contains(b)) ?? [])
+        {
+            failures.Add(new($"judge/break-not-fired:{brk.Kind}", brk.Describe()));
+        }
 
         if (
             Expect is not null
@@ -1593,6 +1619,7 @@ internal static partial class SyncModelScenarios
         list.AddRange(EngineConflictsScenarios());
         list.AddRange(EngineRefreshScenarios());
         list.AddRange(EngineBlobsScenarios());
+        list.AddRange(JudgeScenarios());
 
         return list;
     }

@@ -427,14 +427,18 @@ internal sealed record SaveFolderGraphOp(
         + ViaText;
 }
 
-/// <summary>端末のローカル DB へ生の SQL を流す（記録しない・外部キーの検査を切って流す）</summary>
+/// <summary>
+/// 端末のローカル DB へ生の SQL を流す（記録しない・外部キーの検査を切った専用の接続〔プールしない〕で流す）。利用者の手なので、
+/// 手の後に外部キーの表明を行わない（作った親の無い行は、後の実行の前の違反の集合に入る）
+/// </summary>
 /// <remarks>
 /// 元のテストの前提（ジャーナル記録デコレータを通らないローカルの書き込み・ローカルだけの表・トリガー）を作るためだけに使う。
 /// 書き込みの履歴に残らない（同期のモデルの汎用の表明〔消失なし〕が根拠にする書き手の値にならない）。使うシナリオは blob-refresh-discard-drops-local-blobs・
 /// blob-refresh-refuses-when-blobs-would-be-lost・blob-default-preserves-existing-local-blobs-new-rows-arrive-empty・
 /// refresh-excluding-referencing-child-refuses-under-cascade・refresh-failed-wipe-keeps-acks・
 /// refresh-leaves-local-only-tables-alone と、holder-referenced-by-other-table-current-child-* の降ろし直す約束の行
-/// （約束の書き込み・行の削除・読み直しを途中で断るトリガーと、約束の表を消す古い DB の形）。
+/// （約束の書き込み・行の削除・読み直しを途中で断るトリガーと、約束の表を消す古い DB の形）と、前からある外部キーの違反を作る
+/// judge-foreign-key-* の行。
 /// </remarks>
 internal sealed record LocalSqlOp(ModelActor Device, string Sql) : ModelOp
 {

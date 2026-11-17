@@ -372,7 +372,7 @@ internal sealed class SyncModelItemBinaryColumns(
         CancellationToken cancellationToken = default
     )
     {
-        faults.ThrowOnServer(ModelFaultKind.BlobDownload);
+        faults.ThrowOnBlobRead(id);
 
         return repository.ReadPayloadAsync(id, destination, cancellationToken);
     }
@@ -670,7 +670,7 @@ internal sealed class SyncModelFaultingBinaryColumns(
         CancellationToken cancellationToken = default
     )
     {
-        faults.ThrowOnServer(ModelFaultKind.BlobDownload);
+        faults.ThrowOnBlobRead(id);
 
         return inner.ReadUnboundedBinaryAsync(columnName, id, destination, cancellationToken);
     }
