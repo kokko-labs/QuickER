@@ -61,10 +61,14 @@ public interface QuickER.Runtime.Sync.ISyncTable
     public virtual string TableName { get; }
 
 public interface QuickER.Runtime.Sync.ISyncTableDescriptor
+    public virtual System.Collections.Generic.IReadOnlyList<string> LocalUnboundedBinaryColumnNames { get; }
     public virtual System.Collections.Generic.IReadOnlyList<string> UnboundedBinaryColumnNames { get; }
     public virtual System.Type EntityType { get; }
     public virtual byte[] ReadEntityRowVersion(QuickER.Runtime.EntityBaseCore entity)
     public virtual string FormatEntityKey(QuickER.Runtime.EntityBaseCore entity)
+    public virtual string LocalDatabaseName { get; }
+    public virtual string LocalKeyColumnName { get; }
+    public virtual string LocalTableName { get; }
     public virtual string TableName { get; }
 
 public abstract class QuickER.Runtime.Sync.JournalingRepository<TEntity, TKey> : QuickER.Runtime.Sync.JournalingRepositoryBase<TEntity, TKey>, QuickER.Runtime.IRemoteRepositoryCore<TEntity, TKey>, QuickER.Runtime.IRepositoryCore<TEntity, TKey>
@@ -270,6 +274,24 @@ public enum QuickER.Runtime.Sync.SyncLocalRowChangeReason : int
     RemovedBeforeDownload = 2
     RemovedForUniqueValue = 3
 
+public static class QuickER.Runtime.Sync.SyncLocalTracking
+    public const string RowTableName = "quicker_sync_row"
+    public const string StateTableName = "quicker_sync_state"
+    public const string TriggerNamePrefix = "quicker_sync_trg_"
+    public static System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.SyncLocalTrigger> TriggersFor(QuickER.Runtime.Sync.ISyncTableDescriptor table)
+    public static System.Collections.Generic.IReadOnlyList<string> Ensure(System.Data.Common.DbConnection connection, System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.ISyncTableDescriptor> tables)
+
+public sealed class QuickER.Runtime.Sync.SyncLocalTrackingGuard
+    public .ctor(System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.ISyncTableDescriptor> tables)
+    public void Check(System.Data.Common.DbConnection connection)
+    public void OnStateChange(object sender, System.Data.StateChangeEventArgs e)
+
+public sealed class QuickER.Runtime.Sync.SyncLocalTrigger : System.IEquatable<QuickER.Runtime.Sync.SyncLocalTrigger>
+    public .ctor(string Name, string TableName, string Sql)
+    public string Name { get; init; }
+    public string Sql { get; init; }
+    public string TableName { get; init; }
+
 public enum QuickER.Runtime.Sync.SyncMode : int
     LastWriteWins = 1
     Versioned = 0
@@ -399,6 +421,7 @@ public sealed class QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> : Qu
     public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.SyncLocalReference> LocalReferences { get; init; }
     public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.SyncParentReference<TEntity>> ParentReferences { get; init; }
     public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.SyncUniqueLookup<TEntity>> LocalUniqueLookups { get; init; }
+    public System.Collections.Generic.IReadOnlyList<string> LocalUnboundedBinaryColumnNames { get; init; }
     public System.Collections.Generic.IReadOnlyList<string> ReferencingTableNames { get; init; }
     public System.Collections.Generic.IReadOnlyList<string> UnboundedBinaryColumnNames { get; init; }
     public System.Collections.Generic.IReadOnlyList<string> UnlistedReferencingTableNames { get; init; }
@@ -412,10 +435,13 @@ public sealed class QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> : Qu
     public byte[] ReadEntityRowVersion(QuickER.Runtime.EntityBaseCore entity)
     public string FormatEntityKey(QuickER.Runtime.EntityBaseCore entity)
     public string LocalAnchorSql { get; init; }
+    public string LocalDatabaseName { get; init; }
     public string LocalDeleteAllSql { get; init; }
     public string LocalExistingKeysSql { get; init; }
+    public string LocalKeyColumnName { get; init; }
     public string LocalKeysSql { get; init; }
     public string LocalRowVersionSql { get; init; }
+    public string LocalTableName { get; init; }
     public string RemoteRouteName { get; init; }
     public string ServerChangesSql { get; init; }
     public string ServerKeysSql { get; init; }

@@ -43,6 +43,7 @@ public sealed class SqliteLightJournalTests : IDisposable
         [
             ["SyncModel"],
             ["Sync"],
+            ["SyncVo"],
             ["BackendParity"],
         ];
 
@@ -59,6 +60,7 @@ public sealed class SqliteLightJournalTests : IDisposable
                 connectionString
             ).CreateConnection,
             "Sync" => new LightJournalSyncConnectionFactory(connectionString).CreateConnection,
+            "SyncVo" => new LightJournalSyncVoConnectionFactory(connectionString).CreateConnection,
             "BackendParity" => new LightJournalBackendParityConnectionFactory(
                 connectionString
             ).CreateConnection,

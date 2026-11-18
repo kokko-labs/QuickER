@@ -3443,6 +3443,268 @@ internal static partial class CodegenCases
             }
         );
 
+    /// <summary>引用の要る名前の注文の表の名前（" と ' と空白を含む）</summary>
+    private const string QueryText_QuotedOrdersTable = "sync \"o'rd\" ers";
+
+    /// <summary>引用の要る名前の注文のキーの列の名前</summary>
+    private const string QueryText_QuotedOrderKey = "order \"i'd";
+
+    /// <summary>引用の要る名前の注文の除外 blob の列の名前</summary>
+    private const string QueryText_QuotedAttachment = "att \"a'ch";
+
+    /// <summary>同期の図の注文の表名・キーの列名・除外 blob の列名を、引用の要る名前へ変える（図をそのまま変えて返す）</summary>
+    /// <param name="diagram">同期の図（<see cref="SyncFixtureDefinition.Build"/> か <see cref="SyncFixtureDefinition.BuildSqliteMirror"/>）</param>
+    private static ErDiagram QueryText_SyncQuotedNamesDiagram(ErDiagram diagram)
+    {
+        var orders = diagram.Entities.First(entity => entity.TableName == "sync_orders");
+        orders.TableName = QueryText_QuotedOrdersTable;
+        orders.Columns.First(column => column.Name == "order_id").Name = QueryText_QuotedOrderKey;
+        orders.Columns.First(column => column.Name == "attachment").Name =
+            QueryText_QuotedAttachment;
+        return diagram;
+    }
+
+    /// <summary>
+    /// 表名 <paramref name="tableName"/> の記述子が別の DB に置いた表を名乗り、ローカルの変更の記録の入口
+    /// （<c>SyncLocalTracking.TriggersFor</c>・<c>SyncLocalTrackingGuard</c> の作成）が <see cref="NotSupportedException"/> で断る
+    /// </summary>
+    private static ExecCheck QueryText_SyncTrackingRefusesAttachedDatabase(string tableName) =>
+        new(
+            "local-tracking-refuses-attached-database",
+            assembly =>
+            {
+                var descriptor = QueryText_SyncDescriptors(assembly)
+                    .Single(item =>
+                        (string)ProbeKit.Get(item.Descriptor, "TableName")! == tableName
+                    )
+                    .Descriptor;
+                var problems = new List<string>();
+                var database = (string?)ProbeKit.Get(descriptor, "LocalDatabaseName");
+                var table = (string)ProbeKit.Get(descriptor, "LocalTableName")!;
+
+                if (database != "dbo")
+                {
+                    problems.Add($"LocalDatabaseName が {database ?? "null"}（期待 dbo）");
+                }
+
+                if (table != "sync.orders")
+                {
+                    problems.Add($"LocalTableName が {table}（期待 sync.orders）");
+                }
+
+                void ExpectRefusal(string entrance, Action call)
+                {
+                    try
+                    {
+                        call();
+                        problems.Add($"{entrance} が断らない");
+                    }
+                    catch (TargetInvocationException ex)
+                        when (ex.InnerException is NotSupportedException refusal)
+                    {
+                        if (
+                            !refusal.Message.Contains($"'{tableName}'", StringComparison.Ordinal)
+                            || !refusal.Message.Contains(
+                                "attached database 'dbo'",
+                                StringComparison.Ordinal
+                            )
+                        )
+                        {
+                            problems.Add(
+                                $"{entrance} の文が表の名前と別の DB に置いた表の趣旨を持たない: {refusal.Message}"
+                            );
+                        }
+                    }
+                }
+
+                var descriptors = QueryText_DescriptorList(assembly, descriptor);
+                ExpectRefusal(
+                    "SyncLocalTracking.TriggersFor",
+                    () =>
+                        ProbeKit.CallStatic(
+                            ProbeKit.Type(assembly, "SyncLocalTracking"),
+                            "TriggersFor",
+                            descriptor
+                        )
+                );
+                ExpectRefusal(
+                    "new SyncLocalTrackingGuard",
+                    () =>
+                        ProbeKit.Create(
+                            ProbeKit.Type(assembly, "SyncLocalTrackingGuard"),
+                            descriptors
+                        )
+                );
+
+                return problems;
+            }
+        );
+
+    /// <summary>記述子を <c>ISyncTableDescriptor</c> の配列（<c>IReadOnlyList&lt;ISyncTableDescriptor&gt;</c> として渡せる形）にする</summary>
+    private static Array QueryText_DescriptorList(Assembly assembly, params object[] descriptors)
+    {
+        var list = Array.CreateInstance(
+            ProbeKit.Type(assembly, "ISyncTableDescriptor"),
+            descriptors.Length
+        );
+
+        for (var i = 0; i < descriptors.Length; i++)
+        {
+            list.SetValue(descriptors[i], i);
+        }
+
+        return list;
+    }
+
+    /// <summary>
+    /// 引用の要る名前の図の生成物で、実際の SQLite（図の SQLite 方言の DDL）に <c>SyncLocalTracking.Ensure</c> を流し、
+    /// トリガーの名前・<c>tbl_name</c> と、挿入と除外 blob の更新の記録を確かめる
+    /// </summary>
+    private static ExecCheck QueryText_SyncQuotedNamesTrackingOnSqlite() =>
+        new(
+            "quoted-names-local-tracking-on-sqlite",
+            assembly =>
+                ProbeKit.WithSqlite(
+                    assembly,
+                    QueryText_SyncQuotedNamesDiagram(SyncFixtureDefinition.BuildSqliteMirror()),
+                    (_, connectionString) =>
+                    {
+                        var problems = new List<string>();
+                        var all = QueryText_SyncDescriptors(assembly)
+                            .Select(item => item.Descriptor)
+                            .ToArray();
+                        var orders = all.Single(descriptor =>
+                            (string)ProbeKit.Get(descriptor, "TableName")!
+                            == QueryText_QuotedOrdersTable
+                        );
+                        var tracking = ProbeKit.Type(assembly, "SyncLocalTracking");
+                        using var connection = new Microsoft.Data.Sqlite.SqliteConnection(
+                            connectionString
+                        );
+                        connection.Open();
+
+                        var changed = (
+                            (IEnumerable)
+                                ProbeKit.CallStatic(
+                                    tracking,
+                                    "Ensure",
+                                    connection,
+                                    QueryText_DescriptorList(assembly, all)
+                                )!
+                        )
+                            .Cast<string>()
+                            .ToList();
+
+                        if (!changed.Contains(QueryText_QuotedOrdersTable))
+                        {
+                            problems.Add(
+                                $"Ensure が引用の要る名前の表を張った表に含めない（{string.Join(", ", changed)}）"
+                            );
+                        }
+
+                        var expected = (
+                            (IEnumerable)ProbeKit.CallStatic(tracking, "TriggersFor", orders)!
+                        )
+                            .Cast<object>()
+                            .Select(trigger => (string)ProbeKit.Get(trigger, "Name")!)
+                            .Order(StringComparer.Ordinal)
+                            .ToList();
+                        var actual = new List<string>();
+
+                        using (var command = connection.CreateCommand())
+                        {
+                            command.CommandText =
+                                "SELECT name, tbl_name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = @table ORDER BY name";
+                            command.Parameters.AddWithValue("@table", QueryText_QuotedOrdersTable);
+                            using var reader = command.ExecuteReader();
+
+                            while (reader.Read())
+                            {
+                                actual.Add(reader.GetString(0));
+
+                                if (reader.GetString(1) != QueryText_QuotedOrdersTable)
+                                {
+                                    problems.Add(
+                                        $"トリガー {reader.GetString(0)} の tbl_name が {reader.GetString(1)}"
+                                    );
+                                }
+                            }
+                        }
+
+                        if (!actual.SequenceEqual(expected.Order(StringComparer.Ordinal)))
+                        {
+                            problems.Add(
+                                $"表 {QueryText_QuotedOrdersTable} のトリガーが [{string.Join("; ", actual)}]（期待 [{string.Join("; ", expected)}]）"
+                            );
+                        }
+
+                        if (
+                            expected.Any(name =>
+                                !name.StartsWith(
+                                    "quicker_sync_trg_" + QueryText_QuotedOrdersTable + "_",
+                                    StringComparison.Ordinal
+                                )
+                            )
+                        )
+                        {
+                            problems.Add(
+                                $"トリガーの名前が生の表の名前を含まない（[{string.Join("; ", expected)}]）"
+                            );
+                        }
+
+                        static string Quote(string name) =>
+                            "\"" + name.Replace("\"", "\"\"") + "\"";
+
+                        void Run(string sql)
+                        {
+                            using var command = connection.CreateCommand();
+                            command.CommandText = sql;
+                            command.ExecuteNonQuery();
+                        }
+
+                        Run(
+                            $"INSERT INTO {Quote(QueryText_QuotedOrdersTable)} ({Quote(QueryText_QuotedOrderKey)}, customer_name) VALUES (7, 'seven')"
+                        );
+                        Run("UPDATE quicker_sync_row SET blob_columns = ''");
+                        Run(
+                            $"UPDATE {Quote(QueryText_QuotedOrdersTable)} SET {Quote(QueryText_QuotedAttachment)} = x'0102' WHERE {Quote(QueryText_QuotedOrderKey)} = 7"
+                        );
+
+                        var accessor = (
+                            (IEnumerable)ProbeKit.Get(orders, "UnboundedBinaryColumnNames")!
+                        )
+                            .Cast<string>()
+                            .Single();
+                        var rows = new List<string>();
+
+                        using (var command = connection.CreateCommand())
+                        {
+                            command.CommandText =
+                                "SELECT table_name, \"key\", dirty, deleted, blob_columns FROM quicker_sync_row";
+                            using var reader = command.ExecuteReader();
+
+                            while (reader.Read())
+                            {
+                                rows.Add(
+                                    $"{reader.GetString(0)}|{reader.GetValue(1)}|{reader.GetInt64(2)}|{reader.GetInt64(3)}|{reader.GetString(4)}"
+                                );
+                            }
+                        }
+
+                        var expectedRow = $"{QueryText_QuotedOrdersTable}|7|1|0|{accessor}";
+
+                        if (!rows.SequenceEqual([expectedRow]))
+                        {
+                            problems.Add(
+                                $"行の状態の表が [{string.Join("; ", rows)}]（期待 [{expectedRow}]）"
+                            );
+                        }
+
+                        return Task.FromResult<IEnumerable<string>>(problems);
+                    }
+                )
+        );
+
     /// <summary>同期の記述子のうち、<paramref name="property"/>（<c>SyncNote</c> など）が版を持たない・持つの宣言を読む</summary>
     private static ExecCheck QueryText_SyncVersionShapes() =>
         new(
@@ -3655,6 +3917,33 @@ internal static partial class CodegenCases
                 QueryText_SyncDottedTableDiagram,
                 SyncFixtureDefinition.Options,
                 exec: [QueryText_SyncLocalSqlOnSqlite("dbo.sync.orders", "\"dbo\".\"sync.orders\"")]
+            ),
+            new(
+                "exec-sync-dotted-table-name-local-tracking-refuses-attached-database",
+                null,
+                "最初のドットの前を別の DB の名前とする表（dbo.sync.orders）の記述子は、LocalDatabaseName が dbo・LocalTableName が "
+                    + "sync.orders で、ローカルの変更の記録（SyncLocalTracking.TriggersFor と SyncLocalTrackingGuard の作成）は、"
+                    + "表の名前と別の DB に置いた表である趣旨の文で NotSupportedException を投げる",
+                new CodegenCase(
+                    QueryText_SyncDottedTableDiagram,
+                    SyncFixtureDefinition.Options,
+                    DialectNames.SqlServer,
+                    DiagnosticExpectation.Contains(),
+                    Exec: [QueryText_SyncTrackingRefusesAttachedDatabase("dbo.sync.orders")]
+                )
+            ),
+            new(
+                "exec-sync-quoted-names-local-tracking-records-on-sqlite",
+                null,
+                "表名・キーの列名・除外 blob の列名に \" と ' と空白を含む図でも、生成した SyncLocalTracking.Ensure が実際の SQLite で通り、"
+                    + "トリガーの名前と sqlite_master の tbl_name が生の名前と一致し、行の挿入と除外 blob の更新が quicker_sync_row に残る",
+                new CodegenCase(
+                    () => QueryText_SyncQuotedNamesDiagram(SyncFixtureDefinition.Build()),
+                    SyncFixtureDefinition.Options,
+                    DialectNames.SqlServer,
+                    DiagnosticExpectation.Contains(),
+                    Exec: [QueryText_SyncQuotedNamesTrackingOnSqlite()]
+                )
             ),
             QueryTextRow(
                 "code-sync-journaling-decorator-covers-every-write-entry-point",

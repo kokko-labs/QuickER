@@ -24,8 +24,9 @@
   - 理由：SQL Server は値を宣言長まで空白で詰めて返すので、ローカルで作った行のキーが同期の後に空白詰めのキーへ置き換わり、詰めていないキーを参照する子の行があると 2 行のまま収束しない（キーの序数照合では直せない）。
   - 判定は型名の文字列でなく正規型の種類（`FixedString` / `AnsiFixedString`）。`CanonicalTypeTokenAttacher` が `CSharpTypeInfo.IsFixedLengthString` を立てる。正本は `CSharpCodeGenerationService.BuildSyncFixedLengthKeyLines`。
   - ガード：`CodegenCaseTests` の行 `diag-sync-fixed-length-key-warning-nchar` / `diag-sync-fixed-length-key-warning-char` / `diag-sync-fixed-length-key-variable-nvarchar-no-warning` / `diag-sync-fixed-length-key-variable-varchar-no-warning` / `diag-sync-fixed-length-key-without-sync-support-no-warning` / `diag-sync-fixed-length-non-key-column-no-warning`（mutation 実証済み）。
-- サーバー側の追加スキーマはゼロ。ローカルにだけ共有テーブル 3 つを `SyncJournal.EnsureCreatedAsync` が実行時に作る＝`quicker_sync_journal`（オフライン編集）・`quicker_sync_blob_pending`（ダウンロードが負う blob のコピー）・`quicker_sync_ack`（`(table_name, key_text)` 主キー・`server_row_version BLOB NOT NULL`＝サーバーが受理したアップロードに採番した版の行単位の受理記録）。
-  - エンジンが端末の DB に作る物（表・索引・トリガー）の名前は `quicker_sync_` で始める（スキーマ同期の SQLite の取込がこの前置きで補助の表を外す。前置きの正本は `SyncAuxiliaryNames`・`src/QuickER.Dialects/CLAUDE.md`「双方向同期の補助の物の名前（SyncAuxiliaryNames）」）。テンプレートの名前は `SourceRuleTests`（規則 `sync-auxiliary-names-in-template`）が固定する。
+- サーバー側の追加スキーマはゼロ。ローカルにだけ共有テーブル 4 つを `SyncJournal.EnsureCreatedAsync` が実行時に作る＝`quicker_sync_journal`（オフライン編集）・`quicker_sync_blob_pending`（ダウンロードが負う blob のコピー）・`quicker_sync_ack`（`(table_name, key_text)` 主キー・`server_row_version BLOB NOT NULL`＝サーバーが受理したアップロードに採番した版の行単位の受理記録）・`quicker_sync_row_pending`（降ろし直す約束）。
+  - `SyncLocalTracking` が作る状態の表 2 つ（`quicker_sync_state`・`quicker_sync_row`）とトリガーは別の仕組みで、`SyncJournal.EnsureCreatedAsync` の 4 表には数えない（「ローカルの変更の記録（SyncLocalTracking）」）。
+  - エンジンが端末の DB に作る物（表・索引・トリガー）の名前は `quicker_sync_` で始める（スキーマ同期の SQLite の取込がこの前置きで補助の表を外す。前置きの正本は `SyncAuxiliaryNames`・`src/QuickER.Dialects/CLAUDE.md`「双方向同期の補助の物の名前（SyncAuxiliaryNames）」）。テンプレートの名前は `SourceRuleTests` の規則 `sync-auxiliary-names-in-template`（表・索引）と `sync-auxiliary-trigger-names-in-template`（トリガー）が固定する。読めた `CREATE` の数の下限は規則ごとに持つので、種類ごとに規則を分けてある（合算すると、トリガーを読めなくなっても表の数で満たしてしまう）。
 - 生成の固定：`SyncSupportGenerationTests`（親参照と被参照テーブル名・対象外の外部キー・一意制約参照の表が `UnlistedReferencingTableNames` に載る・decimal 主キーの共有書式・循環参照の FK 順）。
 
 ## アンカーと受理記録
@@ -140,6 +141,45 @@
 - キーは記述子の `ISyncHookKeyFormatter`（internal・主キーの型ならそのまま、違えば値オブジェクトの `Wrap` か `ConvertRaw`）で記録のテキストにし、読めなければ `InvalidOperationException` で保存を失敗させる（黙って記録を落とさない）。
 - `SyncSession` の抑止中（ダウンロードの適用）は観測しないので、そこで走るフックの書き込みは記録しない（docs に明記）。
 - ガード：シナリオ `blob-after-hook-write-on-update-is-uploaded`・`blob-after-hook-write-on-another-row-is-uploaded`・`blob-after-hook-write-with-other-key-type-uses-row-key`・`blob-after-hook-write-rolled-back-with-failed-save`・`blob-after-hook-write-matching-no-row-is-not-recorded`、`SyncRuntimeTestsBase` の「ローカルのフックから始めた別の DB の保存でフックが書いた blob は、ローカルの記録にしない」（mutation 実証済み）。
+
+### ローカルの変更の記録（SyncLocalTracking）
+
+- ローカルの SQLite の DB の中に、同期する表の変更を記録する表とトリガーを作る部品。同期の固定のエンジンにあり、`System.Data.Common` だけで書く（ADO のドライバを参照しない）。DI の登録（`AddGeneratedSyncEngine` ほか）はこの部品を使わず、記録デコレータとジャーナルで記録する。
+- 状態の表は 2 つ
+  - `quicker_sync_state`：1 行。書式の版 `format`・DB ごとの印 `db_id`・適用中の印 `applying`・次の変更の連番 `next_seq`。
+  - `quicker_sync_row`：行ごと。`table_name`・型なしの `"key"`（元の表のキーの格納値をそのまま持つ）・`dirty`・`deleted`・`blob_columns`・`change_seq`。
+- トリガーは表ごとに挿入（`_ai`）・更新（`_au`）・削除（`_ad`）と、除外した無制限バイナリ列ごとの `_b{n}`（その列の `UPDATE OF`）。名前は `quicker_sync_trg_{表}_…`。
+  - どのトリガーも適用中の印が 0 のときだけ記録する。エンジンが書く行（サーバーの行の適用）を、ローカルの変更として記録しないため。
+  - `ON CONFLICT` の更新は名指しした列だけを書く（`quicker_sync_row` に後から足した列を上書きしない）。
+  - 挿入は、除外した無制限バイナリ列の名前を全部付けて記録する（同じキーで消して入れ直した行も）。
+  - 主キーを変える更新は、更新後のキーの行と、古いキーの行（削除）の両方を記録する。
+  - 無制限バイナリ列の更新は、その列の名前を重複なく `blob_columns` へ足す。記録のたびに連番が進む。
+- `blob_columns` に入れる名前は、アクセサの名前（記述子の `UnboundedBinaryColumnNames`＝プロパティの名前）。トリガーの `UPDATE OF` に使うのは DB の列名（`LocalUnboundedBinaryColumnNames`）。2 つは同じ並び・同じ数で、数が違えば `TriggersFor` が断る。
+- 記述子の `Local*` の 4 メンバー（`LocalTableName`・`LocalDatabaseName`・`LocalKeyColumnName`・`LocalUnboundedBinaryColumnNames`）は引用していない生の名前で、トリガーの SQL が自分でクォートする。
+- `Ensure` は 1 つの `BEGIN IMMEDIATE` の中で、状態の表を作り、表ごとに今のトリガー（その表に付いた、名前が前置きで始まるもの）を期待と比べ、違えば落として張り直す。DB に無い表は飛ばす。一覧に無い表のトリガーには触らない。
+  - **張る前に、キーの列と除外した無制限バイナリ列が表にあることを確かめる**。無ければ何も変えずに、表・無い列・戻し方を名指しした例外にする。SQLite の `CREATE TRIGGER` は列を検査しないので、確かめずに張ると、張るときは成功し、その表への書き込みがすべて `no such column` で失敗する。
+  - 別の DB に置いた表（`LocalDatabaseName` が null でも `main` でもない）は断る（`TriggersFor` の `NotSupportedException`）。SQLite のトリガーは、別の DB の表から `main` の表へ書けないため。
+- 記録しないもの：`REPLACE`（`INSERT OR REPLACE`・`UPDATE OR REPLACE`）が一意制約で消す別の行の削除。`recursive_triggers` が切のとき、SQLite が削除のトリガーを発火させない。
+- ガード：`SyncSupportAdoSqliteTriggerRuntimeTests` が行の表 `SyncTriggerRecordingRows`（影響の地図の名前 `table:SyncTriggerRecording`）を流す。主な行は `int-key-insert`・`primary-key-change-int`・`stream-write-names-blob-column`・`delete-then-reinsert-without-blob-write-names-all-blob-columns`・`applying-within-transaction-is-not-recorded`・`cascade-delete-and-set-null`。生成の行は `exec-sync-dotted-table-name-local-tracking-refuses-attached-database`（別の DB の表を断る）・`exec-sync-quoted-names-local-tracking-records-on-sqlite`（引用符を含む名前でも記録する）。名前の前置きは規則 `sync-auxiliary-trigger-names-in-template`。mutation 実証済み（適用中の印の条件を外す・連番を進めない・主キーを変える更新の古いキーを削除として記録しない・挿入し直しで無制限バイナリ列の名前を付け直さない・張る前に列を確かめない）。
+
+### 開くたびの確認（SyncLocalTrackingGuard）
+
+- 接続が開いたときに、トリガーがそろっているかを確かめ、違えば張り直す部品。利用側が `new ObservedSqlConnectionFactory(inner, new SyncLocalTrackingGuard(tables).OnStateChange)` の形で組む（`ObservedSqlConnectionFactory` は SQLite の固定の側の汎用の包みで、同期を知らない。→ `src/QuickER.Runtime.Sqlite/CLAUDE.md`「接続ファクトリを包む型（ObservedSqlConnectionFactory）」）。DI の登録は組まない。
+- 3 段で確かめる
+  - 速い道：1 文で `schema_version` と `db_id` を読み、覚えた組と同じなら終わる。
+  - 2 段目：読み取りのトランザクションで、`schema_version` を最初に読んでから比べる（読んだ版と比べた状態を同じスナップショットにする）。書き込みのロックを取らないので、読み取り専用の接続も、そろっていれば通る。
+  - 3 段目：`Ensure` と同じ張り直し。コミットの前に組を読んで覚える。
+- 覚える場所は型の静的な表で、鍵は開いた後の `DataSource` と期待の定義のハッシュ。`DataSource` が空（メモリの DB）は覚えず、開くたびに 2 段目へ入る。
+  - 鍵に `db_id` の組を使う理由：`schema_version` だけだと、同じパスの DB のファイルが別の物に差し替わっても同じ値になりうる。
+  - 鍵に定義のハッシュを含める理由：同じ DB に、同期する表の集合が違う 2 つのガードが向きうる。
+  - インスタンスでなく静的に覚える理由：包む接続ファクトリが scoped・transient で登録されると、インスタンスごとに確かめ直すことになる。
+- 失敗したら、**接続を閉じてから**例外を投げ、覚えた値は進めない（`StateChange` のハンドラが投げるだけだと、例外が出たのに接続が開いたまま残る）。`DbException` は `InvalidOperationException` で包む。
+- 診断の値（`FullCheckCount`・`RepairCount`）は internal で、公開の面に出さない。
+- 限界
+  - 確認が走るのは、包んだ接続ファクトリが返した接続だけ。ほかの道で開いた接続（自前の `ISqlExecutor` が開く接続・生成の外の接続）では走らない（トリガーが張ってあれば記録はされる）。
+  - 表を作り直した後、次に包んだ接続を開くまでの間の外の書き込みは記録されない。
+  - 同じ DB から分かれた 2 つの写しが、同じ `schema_version` まで進んで入れ替わると、プロセスを起動し直すまで見つけない。
+- ガード：`SyncSupportAdoSqliteTriggerRuntimeTests` が行の表 `SyncTriggerGuardRows`（影響の地図の名前 `table:SyncTriggerGuard`）を流す。主な行は `nothing-happens-hundred-opens-stay-on-fast-path`・`one-trigger-dropped-is-repaired`・`database-file-replaced-is-found-and-put-in-place`・`database-file-replaced-by-database-with-state-tables-is-found-by-database-id`（置き換えを DB ごとの印だけで見分ける形）・`guards-with-different-table-sets-keep-each-other`・`lock-timeout-closes-connection-and-recovers-after-rollback`・`read-only-connection-opens-when-in-place`・`in-memory-database-is-checked-every-open`・`key-column-renamed-refuses-open-until-renamed-back`。mutation 実証済み（速い道が DB ごとの印を見ない・失敗のときに接続を閉じない・読むだけの確かめが比べない・覚える鍵に定義のハッシュを入れない）。
 
 ## アップロード
 
@@ -461,4 +501,5 @@
 - エンジンの外の仕組み（並行のロックと割り込み・記録の文の形・全書き込み入口の記録・登録簿なしの例外・別の DB の保存のフック・NULL 許容の計算列・サーバーで NULL になった blob・知らない除外の型・一覧に載らない参照）は `SyncRuntimeTestsBase` と転送別の派生 `SyncSqliteRuntimeTests`（直結・サーバー役も SQLite）・`SyncHttpRuntimeTests`（in-process Kestrel）。
 - 実 SQL Server の固有は `SyncSqlServerRuntimeTests`（NULL を許す一意制約・洗い替えの内容の一致の計測）と `SyncSqlServerHttpRuntimeTests`。
 - 値オブジェクト×同期は `SyncVoRuntimeTests`（オフライン新規行のアップロード・キーだけのスタブのグラフ削除記録・版書き戻し）。
+- ローカルの変更の記録と開くたびの確認は `SyncSupportAdoSqliteTriggerRuntimeTests`（行の表 `SyncTriggerRecordingRows`・`SyncTriggerGuardRows`。コンテナなし。端末の組み立ては `SyncTriggerHarness`。仕組みは `tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`「同期のトリガーのテスト」）。
 - 構成の行列は `SyncConfigMatrixRuntimeTests`、構築時除外は `SyncConstructionExclusionTests`、洗い替えの計測は `SyncRefreshBenchmarkRuntimeTests`、閉包は `SyncKeptRowsTests`、キーのテキストは `SyncKeyTextRuntimeTests`・`CodegenCaseTests` の行 `probe-sync-key-text-decimal-key`、生成は `SyncSupportGenerationTests`・`CodegenCaseTests` の行 `diag-sync-fixed-length-key-*`（上の 6 行）、フックの登録簿は `SyncLocalSaveHookRegistrationTests`。

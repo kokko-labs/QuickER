@@ -51,11 +51,16 @@ internal static partial class CodegenCases
                 DialectNames.SqlServer,
                 [CodegenRelation.RuntimePackages]
             ),
+            // 機能で出し分ける固定の部品（HTTP・同期）を有効にした構成で、分割の Runtime 系ファイルの型の集合が
+            // パッケージの型の集合と一致する（出た Runtime 系のファイルを全部名指しする）
             RelationRow(
                 "relation-runtime-type-set-split-multi-dialect",
                 "SplitRuntimeSymmetryTests.SplitRuntimeFiles_ShouldDeclareSameTypesAsRuntimePackages・SplitAspNetCoreRuntimeFile_ShouldDeclareSameTypesAsAspNetCorePackage",
                 RelationSymmetryDiagram,
-                RelationMultiDialectOptions(),
+                RelationMultiDialectOptions() with
+                {
+                    GenerateSyncSupport = true,
+                },
                 DialectNames.SqlServer,
                 [CodegenRelation.RuntimeTypeSet],
                 exactRuntimeTypeSets:
@@ -64,6 +69,7 @@ internal static partial class CodegenCases
                     "Runtime.SqlServer.g.cs",
                     "Runtime.Sqlite.g.cs",
                     "Runtime.AspNetCore.g.cs",
+                    "Runtime.Sync.g.cs",
                 ]
             ),
             RelationRow(

@@ -17,7 +17,7 @@
   - 利用者の表に張ったトリガーは、名前が `quicker_sync_` で始まっても外さない（補助オブジェクトとして取り込み、再構築で作り直し、計画の段と実行器のトリガーの判定に入れる）。外すと、表を作り直したときにそのトリガーが作り直されずに消え、トリガーの判定からも黙って外れる。
   - 対象は SQLite の取込だけ（ほかの 4 方言の取込・差分・計画・実行器は前置きを読まない）。
   - 壊すと：端末の SQLite の DB をスキーマ取込・差分同期で開くと、補助の表が図に無い表の削除として差分に出て、全部を選んだ同期が補助の表を消し、未送信の変更の記録が黙って無くなる。
-  - ガード：期待の行 `realdb-sync-aux-tables-are-not-diffed`・`realdb-sync-aux-tables-survive-select-all`・`realdb-sync-aux-trigger-kept-by-rebuild`・`realdb-sync-aux-trigger-excludes-key-column-drop`（実 SQLite）・`SqliteImportFidelityIntegrationTests.Import_InternalSqliteTables_AreExcludedSilently`（大文字の混ざった名前・トリガーは補助オブジェクト）・`SqliteImportFidelityIntegrationTests.Import_ForeignKeyToExcludedVirtualTable_IsReported`（外した補助の表を参照する外部キーの告知）・`SourceRuleTests`（規則 `sync-auxiliary-names-in-template`・`sync-auxiliary-name-prefix-copies`）。mutation 実証済み（取込の除外を外す・写しに入れない・外した表の一覧に入れない・大文字小文字を区別する、のどれも該当の行かテストが赤）。
+  - ガード：期待の行 `realdb-sync-aux-tables-are-not-diffed`・`realdb-sync-aux-tables-survive-select-all`・`realdb-sync-aux-trigger-kept-by-rebuild`・`realdb-sync-aux-trigger-excludes-key-column-drop`（実 SQLite）・`SqliteImportFidelityIntegrationTests.Import_InternalSqliteTables_AreExcludedSilently`（大文字の混ざった名前・トリガーは補助オブジェクト）・`SqliteImportFidelityIntegrationTests.Import_ForeignKeyToExcludedVirtualTable_IsReported`（外した補助の表を参照する外部キーの告知）・`SourceRuleTests`（規則 `sync-auxiliary-names-in-template`・`sync-auxiliary-trigger-names-in-template`・`sync-auxiliary-name-prefix-copies`）。mutation 実証済み（取込の除外を外す・写しに入れない・外した表の一覧に入れない・大文字小文字を区別する、のどれも該当の行かテストが赤）。
 
 ### 外部キーと名前の照合
 

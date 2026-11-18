@@ -68,6 +68,11 @@ internal static class SyncModelSignatures
             Normalize
         );
 
+    /// <summary>
+    /// 1 つの種だけを流す環境変数（普通の種も広い世界の種もこの 1 つで流せる。解決は <see cref="ResolvePlans"/>）
+    /// </summary>
+    public const string SeedVariable = "QUICKER_SYNC_MODEL_TRANSPORT_SEED";
+
     /// <summary>夜間の既定の種の数</summary>
     public const int NightlySeedCount = 200;
 
@@ -76,7 +81,13 @@ internal static class SyncModelSignatures
     /// <see cref="NightlySeedCount"/>・0 から）
     /// </summary>
     public static SeedSettings Seeds { get; } =
-        new("QUICKER_SYNC_MODEL_TRANSPORT_SEEDS", 10, NightlySeedCount, firstSeed: 0);
+        new(
+            "QUICKER_SYNC_MODEL_TRANSPORT_SEEDS",
+            10,
+            NightlySeedCount,
+            firstSeed: 0,
+            singleVariable: SeedVariable
+        );
 
     /// <summary>夜間の広い世界の種の既定の数</summary>
     public const int NightlyWideSeedCount = 40;
@@ -90,30 +101,59 @@ internal static class SyncModelSignatures
             "QUICKER_SYNC_MODEL_TRANSPORT_WIDE_SEEDS",
             4,
             NightlyWideSeedCount,
-            firstSeed: SyncModelWorldShape.WideSeedBase
+            firstSeed: SyncModelWorldShape.WideSeedBase,
+            singleVariable: SeedVariable
         );
+
+    /// <summary>
+    /// 普通の種と広い世界の種の決め方を解決する。単独の種が指定されたら、その種を番号の範囲が合う側の計画にだけ載せ、
+    /// もう一方の計画の種は空にする（同じ種を 2 回流さない。世界の形は種の番号から決まる）
+    /// </summary>
+    /// <param name="seeds">普通の種の決め方</param>
+    /// <param name="wideSeeds">広い世界の種の決め方（単独の種の変数は <paramref name="seeds"/> と同じ）</param>
+    public static (SeedPlan Plan, SeedPlan WidePlan) ResolvePlans(
+        SeedSettings seeds,
+        SeedSettings wideSeeds
+    )
+    {
+        var plan = SeedSource.Resolve(seeds);
+        var widePlan = SeedSource.Resolve(wideSeeds);
+
+        if (!plan.IsSingle || !widePlan.IsSingle)
+        {
+            return (plan, widePlan);
+        }
+
+        return SyncModelWorldShape.IsWide(plan.Seeds[0])
+            ? (plan with { Seeds = [] }, widePlan)
+            : (plan, widePlan with { Seeds = [] });
+    }
 
     /// <summary>
     /// 実 SQL Server の派生が流す種（失敗の注入なしの組＝種を 4 で割った余り 0・1 から、決め方の数だけ開始番号から順に）
     /// </summary>
     /// <param name="plan">決め方</param>
     public static IReadOnlyList<int> SqlServerSeeds(SeedPlan plan) =>
-        Enumerable
-            .Range(plan.Settings.FirstSeed, plan.Seeds.Count * 4)
-            .Where(seed => seed % 4 is 0 or 1)
-            .Take(plan.Seeds.Count)
-            .ToList();
+        plan.IsSingle
+            ? [.. plan.Seeds.Where(seed => seed % 4 is 0 or 1)]
+            : Enumerable
+                .Range(plan.Settings.FirstSeed, plan.Seeds.Count * 4)
+                .Where(seed => seed % 4 is 0 or 1)
+                .Take(plan.Seeds.Count)
+                .ToList();
 
     /// <summary>
     /// 実 SQL Server の派生が流す失敗の注入の組の種（種を 4 で割った余り 2・3 から、決め方の数だけ開始番号から順に）
     /// </summary>
     /// <param name="plan">決め方</param>
     public static IReadOnlyList<int> SqlServerFaultSeeds(SeedPlan plan) =>
-        Enumerable
-            .Range(plan.Settings.FirstSeed, plan.Seeds.Count * 4)
-            .Where(seed => seed % 4 is 2 or 3)
-            .Take(plan.Seeds.Count)
-            .ToList();
+        plan.IsSingle
+            ? [.. plan.Seeds.Where(seed => seed % 4 is 2 or 3)]
+            : Enumerable
+                .Range(plan.Settings.FirstSeed, plan.Seeds.Count * 4)
+                .Where(seed => seed % 4 is 2 or 3)
+                .Take(plan.Seeds.Count)
+                .ToList();
 
     /// <summary>種を並列に流し、既知の失敗（正規化）に当たらない失敗のある種を報告する</summary>
     /// <param name="ranges">
@@ -135,6 +175,19 @@ internal static class SyncModelSignatures
         ConcurrentDictionary<UniqueSpelling, int>? spellingTally = null
     )
     {
+        // 単独の種で、この組（失敗の注入なし・あり）が受け持たない種なら何も流さない（もう一方のテストが流す）
+        if (
+            ranges.Count > 0
+            && ranges[0].Plan.IsSingle
+            && ranges.All(range => range.Seeds.Count == 0)
+        )
+        {
+            TestContext.Current.TestOutputHelper?.WriteLine(
+                "この種はもう一方のテスト（失敗の注入なし・ありの組の片方）が受け持つので、このテストでは流さない"
+            );
+            return "";
+        }
+
         var results =
             new ConcurrentDictionary<int, (IReadOnlyList<ModelFailure>, IReadOnlyList<string>)>();
 
@@ -253,9 +306,11 @@ public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output) : ISyncM
     [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public async Task RandomSeeds_OnlyKnownFailures()
     {
-        var plan = SeedSource.Resolve(SyncModelSignatures.Seeds);
+        var (plan, widePlan) = SyncModelSignatures.ResolvePlans(
+            SyncModelSignatures.Seeds,
+            SyncModelSignatures.WideSeeds
+        );
         plan.WriteWarnings(output);
-        var widePlan = SeedSource.Resolve(SyncModelSignatures.WideSeeds);
         widePlan.WriteWarnings(output);
         var coverage = new CoverageCounter(SyncModelDimensions.Table);
         var report = await SyncModelSignatures.RunSeedsAsync(
@@ -400,9 +455,11 @@ public sealed class SyncModelSqlServerRuntimeTests(
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
 
         // 失敗の注入なしの組（余り 0・1）から、種の数だけ（範囲の開始番号から順に）。広い世界の種も同じ選び方
-        var plan = SeedSource.Resolve(SyncModelSignatures.Seeds);
+        var (plan, widePlan) = SyncModelSignatures.ResolvePlans(
+            SyncModelSignatures.Seeds,
+            SyncModelSignatures.WideSeeds
+        );
         plan.WriteWarnings(output);
-        var widePlan = SeedSource.Resolve(SyncModelSignatures.WideSeeds);
         widePlan.WriteWarnings(output);
         var coverage = new CoverageCounter(SyncModelDimensions.Table);
         var spellingTally = new ConcurrentDictionary<UniqueSpelling, int>();
@@ -466,8 +523,10 @@ public sealed class SyncModelSqlServerRuntimeTests(
     /// <summary>失敗の注入の組（余り 2・3）の種を流し、既知の失敗の外の違反が無いことを表明する（報告を返す）</summary>
     internal static async Task<string> RunFaultSeedsAsync(SyncModelWorldOptions options)
     {
-        var plan = SeedSource.Resolve(SyncModelSignatures.Seeds);
-        var widePlan = SeedSource.Resolve(SyncModelSignatures.WideSeeds);
+        var (plan, widePlan) = SyncModelSignatures.ResolvePlans(
+            SyncModelSignatures.Seeds,
+            SyncModelSignatures.WideSeeds
+        );
         var report = await SyncModelSignatures.RunSeedsAsync(
             [
                 (plan, SyncModelSignatures.SqlServerFaultSeeds(plan)),
@@ -595,9 +654,11 @@ public sealed class SyncSupportRemoteAdoSqlServerRuntimeTests(
     {
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
 
-        var plan = SeedSource.Resolve(SyncModelSignatures.Seeds);
+        var (plan, widePlan) = SyncModelSignatures.ResolvePlans(
+            SyncModelSignatures.Seeds,
+            SyncModelSignatures.WideSeeds
+        );
         plan.WriteWarnings(output);
-        var widePlan = SeedSource.Resolve(SyncModelSignatures.WideSeeds);
         widePlan.WriteWarnings(output);
         var report = await SyncModelSignatures.RunSeedsAsync(
             [
