@@ -25,6 +25,7 @@
   - 判定は型名の文字列でなく正規型の種類（`FixedString` / `AnsiFixedString`）。`CanonicalTypeTokenAttacher` が `CSharpTypeInfo.IsFixedLengthString` を立てる。正本は `CSharpCodeGenerationService.BuildSyncFixedLengthKeyLines`。
   - ガード：`CodegenCaseTests` の行 `diag-sync-fixed-length-key-warning-nchar` / `diag-sync-fixed-length-key-warning-char` / `diag-sync-fixed-length-key-variable-nvarchar-no-warning` / `diag-sync-fixed-length-key-variable-varchar-no-warning` / `diag-sync-fixed-length-key-without-sync-support-no-warning` / `diag-sync-fixed-length-non-key-column-no-warning`（mutation 実証済み）。
 - サーバー側の追加スキーマはゼロ。ローカルにだけ共有テーブル 3 つを `SyncJournal.EnsureCreatedAsync` が実行時に作る＝`quicker_sync_journal`（オフライン編集）・`quicker_sync_blob_pending`（ダウンロードが負う blob のコピー）・`quicker_sync_ack`（`(table_name, key_text)` 主キー・`server_row_version BLOB NOT NULL`＝サーバーが受理したアップロードに採番した版の行単位の受理記録）。
+  - エンジンが端末の DB に作る物（表・索引・トリガー）の名前は `quicker_sync_` で始める（スキーマ同期の SQLite の取込がこの前置きで補助の表を外す。前置きの正本は `SyncAuxiliaryNames`・`src/QuickER.Dialects/CLAUDE.md`「双方向同期の補助の物の名前（SyncAuxiliaryNames）」）。テンプレートの名前は `SourceRuleTests`（規則 `sync-auxiliary-names-in-template`）が固定する。
 - 生成の固定：`SyncSupportGenerationTests`（親参照と被参照テーブル名・対象外の外部キー・一意制約参照の表が `UnlistedReferencingTableNames` に載る・decimal 主キーの共有書式・循環参照の FK 順）。
 
 ## アンカーと受理記録

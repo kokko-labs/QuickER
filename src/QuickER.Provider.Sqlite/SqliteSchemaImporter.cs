@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
+using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
 
@@ -15,7 +16,8 @@ namespace QuickER.Provider.Sqlite;
 /// <c>sqlite_master</c> で通常テーブルを列挙し、各テーブルの <c>PRAGMA table_xinfo</c> /
 /// <c>PRAGMA foreign_key_list</c> / <c>PRAGMA index_list</c> ＋ <c>PRAGMA index_info</c> で
 /// 列・主キー・外部キー・一意制約を取得する。<c>sqlite_sequence</c> / <c>sqlite_stat*</c> 等の
-/// 内部テーブルや <c>sqlite_</c> で始まるシステムテーブルは除外する。
+/// 内部テーブルや <c>sqlite_</c> で始まるシステムテーブルは除外する。双方向同期の補助の表
+/// （<see cref="SyncAuxiliaryNames"/> の前置きで始まる表）も告知せずに除外する（補助のトリガーは補助オブジェクトとして取り込む）。
 /// PRAGMA の括弧内は <see cref="SqliteIdentifier.QuoteSimple"/> でクォートする
 /// （取込範囲は単一 DB なので、名前に含まれるドットはスキーマ修飾ではない）。
 /// </para>
@@ -229,7 +231,7 @@ ORDER BY name;";
         var excludedNames = new List<string>();
 
         // ビュー・トリガーの判定（SqliteLiveDependentCheck）がメモリの DB へ写す表の原文。取り込まない表（仮想表・ドットを含む表・名前の衝突で
-        // 捨てた表）もビュー・トリガーが参照しうるので入れ、仮想表の付属表だけは入れない（仮想表の作成で自動でできる）
+        // 捨てた表・双方向同期の補助の表）もビュー・トリガーが参照しうるので入れ、仮想表の付属表だけは入れない（仮想表の作成で自動でできる）
         var replayTableSql = new List<string>();
         await using var cmd = DbCommands.Create(conn, TablesSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -279,6 +281,14 @@ ORDER BY name;";
                     excludedNames.Add(name);
                     continue;
                 }
+            }
+
+            // 双方向同期の補助の表（quicker_sync_ で始まる表）は、システム表と同じく告知せずに外す。
+            // 原文は上で写しへ入れてある（補助の表へ書くトリガーの判定に表が要る）。補助のトリガーは外さない
+            if (SyncAuxiliaryNames.IsAuxiliary(name))
+            {
+                excludedNames.Add(name);
+                continue;
             }
 
             // 名前に . を含むテーブルは、図に入れる名前が添付データベースのテーブルとして読まれるので取り込まない

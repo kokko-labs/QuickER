@@ -1,6 +1,6 @@
 # QuickER.Dialects
 
-方言の宣言（`DialectNames`・`IdentifierLengthLimits`・MySQL のファイル名の符号化・`UnsupportedDefinitionKind` と `DialectDeclarations` と `UnsupportedTreatments`・`SchemaQualifiedName`・`CreateTableUniqueConstraints`）。依存ゼロ・net10.0。Model と Mcp が参照し、他は推移的に見る。
+方言の宣言（`DialectNames`・`IdentifierLengthLimits`・MySQL のファイル名の符号化・`UnsupportedDefinitionKind` と `DialectDeclarations` と `UnsupportedTreatments`・`SchemaQualifiedName`・`CreateTableUniqueConstraints`・双方向同期の補助の物の名前の前置き `SyncAuxiliaryNames`）。依存ゼロ・net10.0。Model と Mcp が参照し、他は推移的に見る。
 方言ごとの違いはここと各プロバイダの能力宣言だけが持ち、宣言は既定値を持たない。
 
 ## 宣言は既定値を持たない
@@ -55,3 +55,12 @@
 - 生成ランタイムの `EntitySaveMetadata.QuoteTableName` は Dialects を参照できないので写しを持つ。一致は `DialectIdentifierTableTests` の行 `runtime-quote-*` が固定する。分けるだけの `EntitySaveMetadata.SplitTableName`（SQLite の Stream アクセサが `SqliteBlob` へ DB と表を分けて渡す）も同じ写しを通し、2 つ目の写しを作らない。
 - SQLite の外部キーの句（`REFERENCES`）は表名にスキーマを書けないので、親の表名は `SqliteIdentifier.QuoteReferencedTable`（子と親の DB 名をこの分け方で取る）が決める（`src/QuickER.Provider.Sqlite/CLAUDE.md`「スキーマをまたぐ外部キー」）。
 - ガード：`SourceRuleTests` の規則 `schema-qualified-name-dot-splits`（Dialects・Model・Provider*・CodeGen.CSharp の .cs〔.g.cs を除く〕で、第 1 引数が `.` の `Split` / `IndexOf` / `LastIndexOf` / `Contains` を構文木で数え、理由つきの既知の一覧と厳密に一致させる）・`DialectIdentifierTableTests` の行 `split-*`（規則の表）と `runtime-quote-*`（SQL Server・SQLite の生成ランタイムの引用が方言の識別子クラスと同じ値になること。多ドット・空の部分・終端の引用符を含む名前）・`EfCoreSchemaQualifiedTableTests`（生成テキスト・両引数のエスケープ・SQL Server プロバイダの `ToQueryString`）・実 SQL Server の `CrudParitySchemaQualifiedTableRuntimeTests`（EF Core 版と QuickER 版 Repository が同じ `[sales].[orders]` を読み書きする）・`DialectDdlTableTests` の行 `sync-rebuild-schema-qualified-table-stays-in-its-schema`（SQLite の再構築の一時表の CREATE・移送・DROP・RENAME が同じ表を指す）。mutation 実証済み。
+
+## 双方向同期の補助の物の名前（SyncAuxiliaryNames）
+
+生成コードの双方向同期が端末の DB に作る物（表・索引・トリガー）の名前の前置き `quicker_sync_` の正本は `SyncAuxiliaryNames.Prefix`。判定は `SyncAuxiliaryNames.IsAuxiliary`（ASCII の大文字小文字を無視する前方一致＝SQLite の名前の規則）。
+
+- 読むのは SQLite の取込だけ（前置きで始まる表を告知せずに外す。`src/QuickER.Provider.Sqlite/CLAUDE.md`「表の判別と PRAGMA」）。ほかの 4 方言の取込・差分・計画・実行器は読まない。
+- 生成テンプレート（`_10_Sync.scriban`）は依存ゼロのランタイムへ出すので、このアセンブリを参照できず名前を直書きで持つ。テンプレートが作る名前（`CREATE TABLE`・`CREATE [UNIQUE] INDEX`・`CREATE TRIGGER` の直後の名前）が前置きで始まることはソースの規則が固定する。前置きで始まらない物を作ると、スキーマ同期がそれを図に無い表として削除の差分に出し、全部を選んだ同期が消す。
+- 前置きの文字列リテラルを QuickER.Provider* に写さない（写すと、前置きを変えたときに取込の判定だけが古い前置きのまま残る）。
+- ガード：`SourceRuleTests` の規則 `sync-auxiliary-names-in-template`（テンプレートの CREATE の文の名前。CREATE TABLE を 4 つ以上読めていること）・`sync-auxiliary-name-prefix-copies`（Provider と 5 方言の .cs〔.g.cs を除く〕の文字列リテラルと補間の文字の部分。コメントは数えない）。mutation 実証済み（前置きを変えると規則 `sync-auxiliary-names-in-template` が赤、Provider に前置きのリテラルを足すと規則 `sync-auxiliary-name-prefix-copies` が赤）。

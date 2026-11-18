@@ -752,7 +752,7 @@ public static class UnsupportedTreatments
             reverse: Same(None) // なし
         );
 
-        // C7c システム表・ツールの表
+        // C7c システム表・ツールの表（SQLite は双方向同期の補助の表 quicker_sync_ を含む）
         Add(
             cells,
             Kind.SystemTable,

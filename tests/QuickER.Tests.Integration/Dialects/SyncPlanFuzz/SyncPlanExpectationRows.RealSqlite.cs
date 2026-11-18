@@ -10,7 +10,7 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 internal static partial class SyncPlanExpectationRows
 {
     /// <summary>SQLite の実 DB の段の行の数の下限（行を足したら・消したら合わせる）</summary>
-    private const int RealSqliteRowCount = 95;
+    private const int RealSqliteRowCount = 99;
 
     /// <summary>実 DB の段：SQLite の同期（テーブル再構築・外部キー・主キー・一意制約・ビュー）</summary>
     private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealSqliteRows() =>
@@ -19,6 +19,7 @@ internal static partial class SyncPlanExpectationRows
             .. RealSqliteKeyRows(),
             .. RealSqliteViewRows(),
             .. RealSqliteTriggerRows(),
+            .. RealSqliteSyncAuxiliaryRows(),
             .. RealSqliteIndexRows(),
             .. RealSqliteExternalDefinitionRows(),
             .. RealSqliteScriptRows(),
@@ -1691,6 +1692,144 @@ internal static partial class SyncPlanExpectationRows
         ];
 
     /// <summary>
+    /// 生成コードの双方向同期が端末の DB に作る補助の表（<c>quicker_sync_</c> で始まる表）と補助のトリガーがある DB の同期
+    /// </summary>
+    /// <remarks>
+    /// 取込は補助の表を図に無い表として持ち帰らずに外す（図で表せない定義の種類 C7c・告知しない）ので、補助の表は差分に出ず、
+    /// 全部を選んだ同期でも消えない。利用者の表に張った補助のトリガーは補助オブジェクトとして取り込み、再構築で作り直し、
+    /// 計画の段のトリガーの判定にも入る（判定の写しには外した補助の表の原文も写す）。
+    /// 目標の図は利用者の図なので補助の表を持たない（<see cref="WithoutSyncAuxiliaryTables"/>。取込が補助の表を持ち帰ると、
+    /// 図に無い表の削除が差分に出る）。
+    /// </remarks>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > RealSqliteSyncAuxiliaryRows() =>
+        [
+            // 図を変えない同期：補助の表は差分に出ず、行も残る
+            Row(
+                    "realdb-sync-aux-tables-are-not-diffed",
+                    "[Integration] SQLite 同期: 双方向同期の補助の表は図に無い表として差分に出ず、図を変えない同期の後も行ごと残る",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(WithoutSyncAuxiliaryTables)
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(SyncAuxItemSql + SyncAuxTablesSql)
+                        .Query("aux", SyncAuxStateQuery)
+                        .Expect(e =>
+                        {
+                            e.Diff.Empty();
+                            e.Outcome.Exact("committed");
+                            e.Excluded.Empty();
+                            e.AfterDiff.Empty();
+                            e.Probe("aux").Exact(SyncAuxStateLines);
+                        })
+                ),
+            // 全部を選んで図に無い利用者の表を消す同期：補助の表は消えない
+            Row(
+                    "realdb-sync-aux-tables-survive-select-all",
+                    "[Integration] SQLite 同期: 全部を選んで利用者の表を消す同期でも、双方向同期の補助の表は差分に出ず行ごと残る",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s =>
+                {
+                    WithoutSyncAuxiliaryTables(s);
+                    s.Entities.RemoveAll(t => t.TableName == "ax_gone");
+                })
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            SyncAuxItemSql
+                                + SyncAuxTablesSql
+                                + "CREATE TABLE \"ax_gone\" (\"id\" INTEGER NOT NULL, CONSTRAINT \"PK_ax_gone\" PRIMARY KEY (\"id\"));"
+                                + "INSERT INTO \"ax_gone\" (\"id\") VALUES (1);"
+                        )
+                        .Query("aux", SyncAuxStateQuery)
+                        .Expect(e =>
+                        {
+                            e.Diff.Exact("DropTable ax_gone*");
+                            e.Outcome.Exact("committed");
+                            e.Excluded.Empty();
+                            e.After.Absent("table ax_gone");
+                            e.Probe("aux").Exact(SyncAuxStateLines);
+                        })
+                ),
+            // 補助のトリガーのある表の再構築：トリガーは作り直され、補助の表へ書き続ける
+            Row(
+                    "realdb-sync-aux-trigger-kept-by-rebuild",
+                    "[Integration] SQLite 同期: 双方向同期の補助のトリガーのある表を作り直しても、トリガーは名指しされずに作り直されて補助の表へ書く",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s =>
+                {
+                    WithoutSyncAuxiliaryTables(s);
+                    s.Col("ax_item", "extra").DataType = "INTEGER";
+                })
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            SyncAuxItemSql
+                                + SyncAuxTablesSql
+                                + "CREATE TRIGGER \"quicker_sync_trg_ax_item_insert\" AFTER INSERT ON \"ax_item\" BEGIN "
+                                + "INSERT INTO quicker_sync_journal (table_name, key_text, operation, recorded_at) "
+                                + "VALUES ('ax_item', NEW.\"id\", 'insert', 't'); END;"
+                        )
+                        .Query("trigger", "SELECT name FROM sqlite_master WHERE type = 'trigger';")
+                        .Query("fire", "INSERT INTO \"ax_item\" (\"id\") VALUES (2);")
+                        .Query("journal", "SELECT count(*) FROM quicker_sync_journal;")
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Absent("TableChangeBreaksDependentTrigger*");
+                            e.Excluded.Empty();
+                            e.After.Single("col ax_item.extra INTEGER *");
+                            e.Probe("trigger").Exact("quicker_sync_trg_ax_item_insert");
+                            e.Probe("fire").Empty();
+                            e.Probe("journal").Exact("2");
+                        })
+                ),
+            // 補助のトリガーが使う列の削除：補助の表を写しに入れて判定するので、列の削除を外してトリガーを名指しする
+            Row(
+                    "realdb-sync-aux-trigger-excludes-key-column-drop",
+                    "[Integration] SQLite 同期: 双方向同期の補助のトリガーが使う列の削除は外してトリガーを名指しし、同じ表の型の変更はコミットする",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s =>
+                {
+                    WithoutSyncAuxiliaryTables(s);
+                    s["ax_item"].Columns.RemoveAll(c => c.Name == "note");
+                    s.Col("ax_item", "extra").DataType = "INTEGER";
+                })
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            SyncAuxItemSql
+                                + SyncAuxTablesSql
+                                + "CREATE TRIGGER \"quicker_sync_trg_ax_item_note\" AFTER INSERT ON \"ax_item\" BEGIN "
+                                + "INSERT INTO quicker_sync_journal (table_name, key_text, operation, recorded_at) "
+                                + "VALUES ('ax_item', NEW.\"note\", 'insert', 't'); END;"
+                        )
+                        .Query(
+                            "fire",
+                            "INSERT INTO \"ax_item\" (\"id\", \"note\") VALUES (2, 'n');"
+                        )
+                        .Query("journal", "SELECT count(*) FROM quicker_sync_journal;")
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Single(
+                                "TableChangeBreaksDependentTrigger(ax_item): quicker_sync_trg_ax_item_note"
+                            );
+                            e.Excluded.Exact("DropColumn ax_item.note");
+                            e.After.Contains("col ax_item.note *");
+                            e.After.Single("col ax_item.extra INTEGER *");
+                            e.Probe("fire").Empty();
+                            e.Probe("journal").Exact("2");
+                        })
+                ),
+        ];
+
+    /// <summary>
     /// DB の索引（図に無い・再構築が原文で作り直す）が読む列を作り直しで消す形（索引を作り直せず、同期は実行してから巻き戻る＝
     /// src/QuickER.Provider/CLAUDE.md「テーブル再構築の合成」の索引の段）
     /// </summary>
@@ -2336,6 +2475,72 @@ internal static partial class SyncPlanExpectationRows
         + "INSERT INTO \"tr_item\" (\"id\", \"note\", \"extra\") VALUES (1, 'a', '7');"
         + "CREATE TABLE \"tr_src\" (\"id\" INTEGER NOT NULL, \"note\" TEXT NULL, CONSTRAINT \"PK_tr_src\" PRIMARY KEY (\"id\"));"
         + "CREATE TABLE \"tr_log\" (\"id\" INTEGER NOT NULL, \"msg\" TEXT NULL, CONSTRAINT \"PK_tr_log\" PRIMARY KEY (\"id\"));";
+
+    /// <summary>
+    /// 目標の図から双方向同期の補助の表（<c>quicker_sync_</c> で始まる表）を外す（利用者の図は補助の表を持たない。取込が外していれば
+    /// 何もしない）
+    /// </summary>
+    private static void WithoutSyncAuxiliaryTables(ExpectationSchema schema) =>
+        schema.Entities.RemoveAll(t =>
+            t.TableName.StartsWith("quicker_sync_", System.StringComparison.OrdinalIgnoreCase)
+        );
+
+    /// <summary>補助の表と並ぶ利用者の表（id・note・extra と 1 行）</summary>
+    private const string SyncAuxItemSql =
+        "CREATE TABLE \"ax_item\" (\"id\" INTEGER NOT NULL, \"note\" TEXT NULL, \"extra\" TEXT NULL, CONSTRAINT \"PK_ax_item\" PRIMARY KEY (\"id\"));"
+        + "INSERT INTO \"ax_item\" (\"id\", \"note\", \"extra\") VALUES (1, 'a', '7');";
+
+    /// <summary>
+    /// 双方向同期の補助の 4 表（生成テンプレート <c>_10_Sync.scriban</c> の <c>SyncJournal</c> が作る文の写し）と、各表の 1 行
+    /// </summary>
+    private const string SyncAuxTablesSql =
+        "CREATE TABLE IF NOT EXISTS quicker_sync_journal ("
+        + "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        + "table_name TEXT NOT NULL, "
+        + "key_text TEXT NOT NULL, "
+        + "operation TEXT NOT NULL, "
+        + "original_row_version BLOB NULL, "
+        + "unbounded_binary_columns TEXT NULL, "
+        + "recorded_at TEXT NOT NULL);"
+        + "CREATE TABLE IF NOT EXISTS quicker_sync_ack ("
+        + "table_name TEXT NOT NULL, "
+        + "key_text TEXT NOT NULL, "
+        + "server_row_version BLOB NOT NULL, "
+        + "PRIMARY KEY (table_name, key_text));"
+        + "CREATE TABLE IF NOT EXISTS quicker_sync_blob_pending ("
+        + "table_name TEXT NOT NULL, "
+        + "key_text TEXT NOT NULL, "
+        + "column_name TEXT NOT NULL, "
+        + "PRIMARY KEY (table_name, key_text, column_name));"
+        + "CREATE TABLE IF NOT EXISTS quicker_sync_row_pending ("
+        + "table_name TEXT NOT NULL, "
+        + "key_text TEXT NOT NULL, "
+        + "PRIMARY KEY (table_name, key_text));"
+        + "INSERT INTO quicker_sync_journal (table_name, key_text, operation, recorded_at) VALUES ('ax_item', '1', 'update', 't');"
+        + "INSERT INTO quicker_sync_ack (table_name, key_text, server_row_version) VALUES ('ax_item', '1', X'0000000000000001');"
+        + "INSERT INTO quicker_sync_blob_pending (table_name, key_text, column_name) VALUES ('ax_item', '1', 'note');"
+        + "INSERT INTO quicker_sync_row_pending (table_name, key_text) VALUES ('ax_item', '1');";
+
+    /// <summary>補助の表の数と各表の行の数を読む問い合わせ（面の行は <see cref="SyncAuxStateLines"/>）</summary>
+    private const string SyncAuxStateQuery =
+        "SELECT 'tables=' || (SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name LIKE 'quicker\\_sync\\_%' ESCAPE '\\') "
+        + "UNION ALL SELECT 'quicker_sync_journal=' || (SELECT count(*) FROM quicker_sync_journal) "
+        + "UNION ALL SELECT 'quicker_sync_ack=' || (SELECT count(*) FROM quicker_sync_ack) "
+        + "UNION ALL SELECT 'quicker_sync_blob_pending=' || (SELECT count(*) FROM quicker_sync_blob_pending) "
+        + "UNION ALL SELECT 'quicker_sync_row_pending=' || (SELECT count(*) FROM quicker_sync_row_pending);";
+
+    /// <summary>
+    /// 補助の 4 表が残り、どの表も入れた 1 行を持つときの <see cref="SyncAuxStateQuery"/> の行（行の表を作る静的な初期化から
+    /// 読むので、初期化の順に依らないプロパティにする）
+    /// </summary>
+    private static string[] SyncAuxStateLines =>
+        [
+            "quicker_sync_ack=1",
+            "quicker_sync_blob_pending=1",
+            "quicker_sync_journal=1",
+            "quicker_sync_row_pending=1",
+            "tables=4",
+        ];
 
     /// <summary>ビューの行の表（id・note・extra と 1 行）</summary>
     private const string ViewItemSql =

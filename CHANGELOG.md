@@ -18,6 +18,10 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 - **An external change to the open diagram file is no longer missed while another program holds the file open without sharing** — since 0.4.0, a backup or antivirus tool that opened the file right after an external save could make QuickER drop the notice of that change
 
+#### DB sync & DDL
+
+- **SQLite schema import and diff sync leave out the tables of bidirectional sync** — Selecting everything in a sync could drop the tables whose names start with `quicker_sync_`, losing the unsent changes recorded on the device. `quicker_sync_` is now a reserved prefix: your own tables whose names start with it are no longer imported either
+
 ## [0.4.0] - 2026-11-16
 
 Highlights of this release:
