@@ -297,7 +297,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
   - 命名は「ファイル名・名前空間サフィックス＝パッケージ名サフィックス」の単一規則。EfCore 略記は使わない
   - C# の型名は別軸で不変：`EfCore{Entity}Repository`・`QuickErDbContext`・`AddGeneratedEfCoreRepositories`
   - Runtime 系は有効にした機能の分だけ出る。方言ファイルは QuickER 版 Repository 生成時、EF Core / InMemory / AspNetCore / Sync は各オプション（`GenerateEfCoreRepositories` / `GenerateInMemoryRepositories` / `GenerateRemoteServices` / `GenerateSyncSupport`）が有効なとき
-  - 機能で出し分ける固定の部品は、ほかの系統のファイルの中にも出る。SQLite の方言エンジンの `ObservedSqlConnectionFactory` は `sync_support || runtime_package_export` のときだけ `Runtime.Sqlite.g.cs` に出る（`GenerateSyncSupport` を切った構成の出力には無い）。
+  - 機能で出し分ける固定の部品は、ほかの系統のファイルの中にも出る。SQLite の方言エンジンの `ObservedSqlConnectionFactory` と `SqliteLocalRowStore` は `sync_support || runtime_package_export` のときだけ `Runtime.Sqlite.g.cs` に出る（`GenerateSyncSupport` を切った構成の出力には無い）。その契約 `ILocalRowStore` も同じ条件で `Runtime.g.cs`（Core）に出る。
   - 型の集合の行（`relation-runtime-type-set-*`）は、そうした部品を有効にした構成（HTTP・同期）で照らす。既定の構成だけで照らすと、出し分ける部品の宣言がパッケージの型の集合と食い違っても赤にならない。行 `relation-runtime-type-set-split-multi-dialect` は `GenerateSyncSupport = true` で、出た Runtime 系のファイルを全部名指しする。
 - `UseRuntimePackages` の意味は「Runtime 系ファイルを 1 本も出さず、生成コードの using が固定パッケージ名前空間（`QuickER.Runtime*`）を指す」だけ。`Repositories*` 系はモードの on / off で内容が変わらない
   - ガード：`CodegenCaseTests` の行 `relation-runtime-type-set-*`（Runtime 系ファイルの型集合＝対応パッケージの型集合）・`CodegenCaseTests` の行 `code-split-runtime-files-hold-no-schema-dependent-types`（Runtime 系にスキーマ依存型が混ざらない）・`CodegenCaseTests` の行 `code-split-sync-fixed-engine-and-per-entity-code`（同期の固定部と表ごとのコードの分割）・`CodegenCaseTests` の行 `relation-runtime-packages-split-multi-dialect`（スキーマ依存ファイルはモード間で同一）・`CodegenCaseTests` の行 `files-split-runtime-packages-no-fixed-runtime-file`（パッケージモードで Runtime 系が 1 本も出ない）

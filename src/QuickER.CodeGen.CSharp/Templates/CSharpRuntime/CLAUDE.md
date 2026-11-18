@@ -19,7 +19,7 @@
 | `_01_ValueObjects.scriban` | `src/QuickER.Runtime/CLAUDE.md`「値オブジェクト」「拡張シム層」 | Create を名前で引く箇所の `FlattenHierarchy` を外すと、生値が黙って素通しされる |
 | `_02_Entities.scriban` | `src/QuickER.Runtime/CLAUDE.md`「グラフ保存」「拡張シム層」 | 列の判定は `[Column]` の許可リスト。除外リストへ戻すと手書きプロパティが実在しない列になる |
 | `_03_EditModelsAndMappers.scriban` | `src/QuickER.Runtime/CLAUDE.md`「EditModel のロード意味論と検証経路」・`src/QuickER.CodeGen.CSharp/CLAUDE.md`「EditModel と Mapper の生成」 | 確定値が正本。キャンセル・ロードで入力文字列から確定値を作り直すと秒未満・Kind が落ちる |
-| `_04_RepositoryContractCore.scriban` | `src/QuickER.Runtime/CLAUDE.md`「Save フック」「トランザクション失敗経路」・`src/QuickER.Runtime.Sqlite/CLAUDE.md`「接続ファクトリ（外部キーと busy_timeout）」 | catch から素の Rollback を呼ぶと、完了済みトランザクションの例外が元の失敗を消す |
+| `_04_RepositoryContractCore.scriban` | `src/QuickER.Runtime/CLAUDE.md`「Save フック」「トランザクション失敗経路」・`src/QuickER.Runtime.Sqlite/CLAUDE.md`「接続ファクトリ（外部キーと busy_timeout）」「ローカルの行を読み書きする口（SqliteLocalRowStore）」・`src/QuickER.Runtime/CLAUDE.md`「接続を指定して行を読み書きする契約（ILocalRowStore）」 | catch から素の Rollback を呼ぶと、完了済みトランザクションの例外が元の失敗を消す |
 | `_05_QueryPipeline.scriban` | `src/QuickER.Runtime/CLAUDE.md`「式の翻訳と NULL 補償」・`src/QuickER.Runtime.SqlServer/CLAUDE.md`「Include の無い取得と FOR JSON」・`src/QuickER.Runtime.Sqlite/CLAUDE.md`「Include のローダ（IncludeLoader）」 | NULL 補償を外すと SQL・EF Core・インメモリで結果が割れる。IncludeLoader の 3 か所のキー正規化はそろえる |
 | `_06_RemoteSaveInfraAndDI.scriban` | `src/QuickER.Runtime/CLAUDE.md`「グラフ保存」「rowversion による楽観排他」「更新できる列が無い表の UPDATE」・`src/QuickER.Runtime.AspNetCore/CLAUDE.md`「クライアントの分類」 | EntitySaveMetadata の列集合を変えると、行バージョン・計算列・除外列の書き込み除外が黙って崩れる |
 | `_07_InMemory.scriban` | `src/QuickER.Runtime.InMemory/CLAUDE.md` | ステージングの判定順（重複キー → 存否 → 版）とキーの比較器を崩すと、実 DB と結果が割れる |

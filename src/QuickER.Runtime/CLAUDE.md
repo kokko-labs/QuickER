@@ -17,6 +17,7 @@ ADO の 2 方言が共有する `EntitySaveMetadata` の規則もここに置く
 - 「パッケージの依存集合と公開 API 面」「トランザクション失敗経路」：パッケージ契約と Rollback
 - 「グラフ保存」：書く順・削除した子の外れ方・整合の検査・AcceptSaved・blob 書き込み後の版
 - 「重複の事前チェックの NULL の規則」「Include とカスケード削除のキー照合」「更新できる列が無い表の UPDATE」「ドライバが返した値の型変換」：個別の共通規則
+- 「接続を指定して行を読み書きする契約（ILocalRowStore）」：同期のエンジンがローカルの行を読み書きする Core の契約
 - 「値オブジェクト」：Create / 検証規則 / 型独自入力 / 定義済みインスタンス / GuidKey
 
 ## ランタイムの CLAUDE.md 一覧
@@ -455,6 +456,17 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
 - 行マッピング `SetColumnValue` は「VO は `Wrap`・それ以外は `CoerceScalar`」で分岐する（SQLite の値オブジェクトありの `MapEntityObject` は列ごとにこれを呼ぶ）。VO 有効時に無条件 `Wrap` にすると、`ISqlExecutor.QueryBySqlAsync<TEntity>` へ渡された手書きエンティティの素の列に格納値の文字列がそのまま渡り `ArgumentException` になる。
 - 格納値を値オブジェクトが拒んだときは、どの読み取り経路でも列を名指しする。文言の正本は `EntitySaveMetadata.ColumnMappingFailure`（`InvalidOperationException`・内側が `ValueObjectValidationException`）。経路は 3 つ：`SetColumnValue`、速い読み取り（`BuildColumnAssign` の値オブジェクトの分岐が `Create` を式木の `TryCatch` で包む）、SQL Server の FOR JSON（`src/QuickER.Runtime.SqlServer/CLAUDE.md`「Include の無い取得と FOR JSON」）。
 - ガード：`RawValueConverterTests`、`ValueConversionAdoSqliteRuntimeTests`（CI 常時。「値オブジェクトが拒む格納値はどの経路でも列名つきの例外になる」を含む）、`TranslatorParityAdoSqliteRuntimeTests.RawSqlEntity_MalformedStoredText_ThrowsInvalidOperationWithFormatInner`、`EfCoreRawSqlValueConversionTests`、`IncludeGraphAdoSqlServerRuntimeTests`。mutation 実証済み。
+
+## 接続を指定して行を読み書きする契約（ILocalRowStore）
+
+- Core の公開の契約 `ILocalRowStore`（`ISqlBatchExecutor` の直後・`_04_RepositoryContractCore.scriban`）。同期のエンジンがローカルの行を、自分が開いた接続の上で、自分が始めたトランザクションの中で読み書きする口。
+- 方言中立。署名は BCL の型（`DbConnection`・`DbException`・`Task`）と `EntityBaseCore` だけで、ドライバの型を名指ししない。
+  - 操作は `CreateDedicatedConnection`（プールしない・開く前の接続）・`IsUniqueViolation`（一意な値が取られているか）・`FindAsync`・`ExistsAsync`・`InsertAsync`・`UpdateAsync`（行を上書きして行があったかを返す）・`DeleteAsync`。
+- 実装は方言のエンジンの側に置く（今は SQLite の `SqliteLocalRowStore`・→ `src/QuickER.Runtime.Sqlite/CLAUDE.md`「ローカルの行を読み書きする口（SqliteLocalRowStore）」）。
+- どの操作もトランザクションを始めも終わりもしない。呼び出し側が接続を開き、SQL の文（SQLite なら `BEGIN IMMEDIATE`）で始め、同じ接続を全操作へ渡し、自分で終える。
+- 出す条件は `sync_support || runtime_package_export`（同期を生成する構成か、パッケージ用ソース＝`Runtime.g.cs`）。同期を使わない構成の生成物には出ない。
+- 行の対応づけ（値オブジェクト・日時・除外した無制限バイナリ列）は同じエンジンの Repository と同じ。ここだけに別の写しを作らない。
+- ガード：`CodegenConfig/Cases` の行 `exec-sync-local-row-store-on-sqlite`・`exec-sync-quoted-names-local-row-store-on-sqlite`・`exec-sync-local-row-store-value-object-key-on-sqlite`・`exec-sync-local-row-store-string-key-on-sqlite`。公開 API 面は `QuickER.Runtime.approved.txt`。
 
 ## 値オブジェクト
 

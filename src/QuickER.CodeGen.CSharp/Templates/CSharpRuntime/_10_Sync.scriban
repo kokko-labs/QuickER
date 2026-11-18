@@ -2110,11 +2110,19 @@ public sealed record SyncLocalTrigger(string Name, string TableName, string Sql)
 /// recorded as a local change), and the next change number. <c>quicker_sync_row</c> holds one row per changed row of a
 /// synchronised table: its table, its key as the table stores it, whether it is still to be sent (<c>dirty</c>), whether
 /// it was deleted, the unbounded binary columns written since it was last sent, and the number of its latest change.
+/// It also has columns only the engine writes (<c>base_version</c>, <c>known</c>, <c>sw_seq</c>, <c>blob_owed</c>).
+/// The anchor table <c>quicker_sync_table</c> holds one row per synchronised table: where its next download resumes
+/// (<c>anchor</c>).
 /// </para>
 /// <para>
 /// Each synchronised table gets an insert, an update and a delete trigger, and one trigger per unbounded binary column
 /// the ordinary row transfer leaves out (fired only by an update of that column). The triggers write only the columns
-/// named here, so columns added to <c>quicker_sync_row</c> later keep their values.
+/// named here, so the engine's columns of <c>quicker_sync_row</c> keep their values across a delete, a re-insert under
+/// the same key and a change of the primary key.
+/// </para>
+/// <para>
+/// A <c>quicker_sync_row</c> that lacks some of the engine's columns (made before they existed) gets them added with
+/// <c>ALTER TABLE</c>, so its rows - the changes still to be sent - are kept.
 /// </para>
 /// <para>
 /// SQLite triggers cannot write from a table of an attached database into the main database, so only tables of the
@@ -2128,6 +2136,9 @@ public static class SyncLocalTracking
 
     /// <summary>The name of the table that holds one row per changed row of a synchronised table.</summary>
     public const string RowTableName = "quicker_sync_row";
+
+    /// <summary>The name of the anchor table: one row per synchronised table, holding where its next download resumes.</summary>
+    public const string AnchorTableName = "quicker_sync_table";
 
     /// <summary>The prefix of the names of the triggers the change tracking puts on the synchronised tables.</summary>
     public const string TriggerNamePrefix = "quicker_sync_trg_";
@@ -2146,6 +2157,30 @@ public static class SyncLocalTracking
         "INSERT OR IGNORE INTO quicker_sync_state (id, format, db_id, applying, next_seq) "
         + "VALUES (1, 1, lower(hex(randomblob(16))), 0, 1)";
 
+    /// <summary>The declaration of the engine's column <c>base_version</c> of the row state table.</summary>
+    private const string BaseVersionColumn = "base_version BLOB NULL";
+
+    /// <summary>The declaration of the engine's column <c>known</c> of the row state table.</summary>
+    private const string KnownColumn = "known INTEGER NOT NULL DEFAULT 0";
+
+    /// <summary>The declaration of the engine's column <c>sw_seq</c> of the row state table.</summary>
+    private const string ServerWinsSequenceColumn = "sw_seq INTEGER NULL";
+
+    /// <summary>The declaration of the engine's column <c>blob_owed</c> of the row state table.</summary>
+    private const string BlobOwedColumn = "blob_owed TEXT NOT NULL DEFAULT ''";
+
+    /// <summary>
+    /// The columns of the row state table that only the engine writes, each as it is declared (the name first). Each one
+    /// allows NULL or has a default, so it can be added to an existing table.
+    /// </summary>
+    private static readonly string[] EngineRowColumns =
+    [
+        BaseVersionColumn,
+        KnownColumn,
+        ServerWinsSequenceColumn,
+        BlobOwedColumn,
+    ];
+
     /// <summary>The statement that creates the row state table when it is missing.</summary>
     /// <remarks>The key column has no declared type, so it keeps each key exactly as the synchronised table stores it.</remarks>
     private const string CreateRowTableSql =
@@ -2156,7 +2191,21 @@ public static class SyncLocalTracking
         + "deleted INTEGER NOT NULL, "
         + "blob_columns TEXT NOT NULL DEFAULT '', "
         + "change_seq INTEGER NOT NULL, "
+        + BaseVersionColumn
+        + ", "
+        + KnownColumn
+        + ", "
+        + ServerWinsSequenceColumn
+        + ", "
+        + BlobOwedColumn
+        + ", "
         + "PRIMARY KEY (table_name, \"key\"))";
+
+    /// <summary>The statement that creates the anchor table (where each synchronised table's next download resumes) when it is missing.</summary>
+    private const string CreateAnchorTableSql =
+        "CREATE TABLE IF NOT EXISTS quicker_sync_table ("
+        + "table_name TEXT NOT NULL PRIMARY KEY, "
+        + "anchor BLOB NULL)";
 
     /// <summary>The columns an upsert into the row state table writes.</summary>
     private const string RowColumns =
@@ -2278,7 +2327,8 @@ public static class SyncLocalTracking
     /// <returns>The <see cref="ISyncTableDescriptor.TableName"/> of each table whose triggers were created or recreated.</returns>
     /// <remarks>
     /// <para>
-    /// Everything runs in one immediate transaction. A table missing from the database is skipped. A table whose triggers
+    /// Everything runs in one immediate transaction. The engine's columns missing from an existing row state table are
+    /// added to it (its rows are kept). A table missing from the database is skipped. A table whose triggers
     /// already have the expected names and statements (compared with runs of white space folded to one space and a
     /// trailing semicolon dropped) is left as it is; for any other, every trigger whose name starts with
     /// <see cref="TriggerNamePrefix"/> is dropped and the expected ones are created. Triggers on tables outside
@@ -2346,6 +2396,7 @@ public static class SyncLocalTracking
         var definition = new System.Text.StringBuilder();
         definition.Append(CreateStateTableSql).Append('\n');
         definition.Append(CreateRowTableSql).Append('\n');
+        definition.Append(CreateAnchorTableSql).Append('\n');
         definition.Append(SeedStateSql).Append('\n');
 
         foreach (var (_, triggers) in expected)
@@ -2364,8 +2415,9 @@ public static class SyncLocalTracking
     }
 
     /// <summary>
-    /// Whether the database already has everything <see cref="Ensure"/> would set up: both state tables, the one row of
-    /// the state table, and the expected triggers on each table the database has. It only reads.
+    /// Whether the database already has everything <see cref="Ensure"/> would set up: the three state tables, every
+    /// engine column of the row state table, the one row of the state table, and the expected triggers on each table the
+    /// database has. It only reads.
     /// </summary>
     /// <param name="connection">An open connection to the local database.</param>
     /// <param name="expected">The tables with their expected triggers (see <see cref="Expect"/>).</param>
@@ -2374,7 +2426,16 @@ public static class SyncLocalTracking
         IReadOnlyList<(ISyncTableDescriptor Table, IReadOnlyList<SyncLocalTrigger> Triggers)> expected
     )
     {
-        if (!TableExists(connection, StateTableName) || !TableExists(connection, RowTableName))
+        if (
+            !TableExists(connection, StateTableName)
+            || !TableExists(connection, RowTableName)
+            || !TableExists(connection, AnchorTableName)
+        )
+        {
+            return false;
+        }
+
+        if (MissingRowColumns(connection).Count > 0)
         {
             return false;
         }
@@ -2401,8 +2462,8 @@ public static class SyncLocalTracking
     }
 
     /// <summary>
-    /// The body of <see cref="Ensure"/>: in one immediate transaction, creates the state tables when they are missing and
-    /// brings the triggers of each table to the expected form.
+    /// The body of <see cref="Ensure"/>: in one immediate transaction, creates the state tables when they are missing, adds
+    /// the engine's columns missing from the row state table, and brings the triggers of each table to the expected form.
     /// </summary>
     /// <param name="connection">An open connection to the local database.</param>
     /// <param name="expected">The tables with their expected triggers (see <see cref="Expect"/>).</param>
@@ -2420,6 +2481,15 @@ public static class SyncLocalTracking
         {
             Execute(connection, CreateStateTableSql);
             Execute(connection, CreateRowTableSql);
+
+            // A row state table made before the engine's columns existed gets them added in place: rebuilding it would
+            // lose the changes still to be sent
+            foreach (var column in MissingRowColumns(connection))
+            {
+                Execute(connection, "ALTER TABLE quicker_sync_row ADD COLUMN " + column);
+            }
+
+            Execute(connection, CreateAnchorTableSql);
             Execute(connection, SeedStateSql);
 
             var changed = new List<string>();
@@ -2608,26 +2678,45 @@ public static class SyncLocalTracking
     /// <param name="table">The table.</param>
     private static List<string> MissingColumns(DbConnection connection, ISyncTableDescriptor table)
     {
-        var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "SELECT name FROM pragma_table_info(@table, 'main')";
-            AddParameter(command, "@table", table.LocalTableName);
-
-            using var reader = command.ExecuteReader();
-
-            while (reader.Read())
-            {
-                present.Add(reader.GetString(0));
-            }
-        }
+        var present = ColumnNames(connection, table.LocalTableName);
 
         return new[] { table.LocalKeyColumnName }
             .Concat(table.LocalUnboundedBinaryColumnNames)
             .Where(column => !present.Contains(column))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    /// <summary>The engine's columns the row state table does not have, each as it is declared (in declaration order).</summary>
+    /// <param name="connection">The connection (the row state table exists).</param>
+    private static List<string> MissingRowColumns(DbConnection connection)
+    {
+        var present = ColumnNames(connection, RowTableName);
+
+        return EngineRowColumns
+            .Where(declaration => !present.Contains(declaration[..declaration.IndexOf(' ')]))
+            .ToList();
+    }
+
+    /// <summary>The column names of a table of the main database (compared ignoring case).</summary>
+    /// <param name="connection">The connection.</param>
+    /// <param name="tableName">The table name, unquoted.</param>
+    private static HashSet<string> ColumnNames(DbConnection connection, string tableName)
+    {
+        var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT name FROM pragma_table_info(@table, 'main')";
+        AddParameter(command, "@table", tableName);
+
+        using var reader = command.ExecuteReader();
+
+        while (reader.Read())
+        {
+            present.Add(reader.GetString(0));
+        }
+
+        return present;
     }
 
     /// <summary>Runs one statement that returns no rows.</summary>

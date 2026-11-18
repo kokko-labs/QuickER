@@ -242,7 +242,43 @@ internal sealed class SyncModelDevice : IDisposable
     public ISqlExecutor Sql { get; private set; } = null!;
 
     /// <summary>製品のジャーナル（既定の端末だけが持つ。別のエンジンへ差し替えた端末では null）</summary>
-    public SyncJournal Journal { get; private set; } = null!;
+    private SyncJournal? _journal;
+
+    /// <summary>製品の同期エンジン（既定の端末だけが持つ。別のエンジンへ差し替えた端末では null）</summary>
+    private SyncEngine? _engine;
+
+    /// <summary>
+    /// 端末が製品の部品（ジャーナル・エンジン）を持たないときに、使おうとした手が投げる例外のメッセージの先頭。例外の型は
+    /// <see cref="NotSupportedException"/> で、メッセージはこの先頭に手の名前・空白・「needs the product 部品」が続く
+    /// （<see cref="UnsupportedHand"/> が手の名前を取り出す）
+    /// </summary>
+    public const string UnsupportedPrefix = "Not supported by this device: ";
+
+    /// <summary>
+    /// 製品のジャーナルを返す（持たない端末では、使おうとした手の名前つきで <see cref="NotSupportedException"/> を投げる）
+    /// </summary>
+    /// <param name="hand">使おうとした手の名前</param>
+    public SyncJournal RequireJournal(string hand) =>
+        _journal ?? throw Unsupported(hand, "journal");
+
+    /// <summary>
+    /// 製品の同期エンジンを返す（持たない端末では、使おうとした手の名前つきで <see cref="NotSupportedException"/> を投げる）
+    /// </summary>
+    /// <param name="hand">使おうとした手の名前</param>
+    public SyncEngine RequireEngine(string hand) => _engine ?? throw Unsupported(hand, "engine");
+
+    /// <summary>
+    /// 例外が「この端末では流せない手」なら、その手の名前を返す（<see cref="RequireJournal"/>・<see cref="RequireEngine"/> が投げた
+    /// 例外。ほかの例外は null）
+    /// </summary>
+    public static string? UnsupportedHand(Exception exception) =>
+        exception is NotSupportedException
+        && exception.Message.StartsWith(UnsupportedPrefix, StringComparison.Ordinal)
+            ? exception.Message[UnsupportedPrefix.Length..].Split(' ')[0]
+            : null;
+
+    private static NotSupportedException Unsupported(string hand, string part) =>
+        new($"{UnsupportedPrefix}{hand} needs the product {part}");
 
     /// <summary>接続ファクトリ（<see cref="OpenAsync"/> が作る）</summary>
     public ISqlConnectionFactory Factory { get; private set; } = null!;
@@ -266,9 +302,6 @@ internal sealed class SyncModelDevice : IDisposable
 
     /// <summary>記録しないラベルのリポジトリ</summary>
     public IModelLabelRepository RawLabels { get; private set; } = null!;
-
-    /// <summary>製品の同期エンジン（既定の端末だけが持つ。別のエンジンへ差し替えた端末では null）</summary>
-    public SyncEngine Engine { get; private set; } = null!;
 
     /// <summary>端末のエンジンの面（同期・洗い替えを流す入口）</summary>
     public IModelDeviceSync Sync { get; private set; } = null!;
@@ -299,18 +332,19 @@ internal sealed class SyncModelDevice : IDisposable
         var device = await OpenAsync(actor, faults, ct);
         var factory = device.Factory;
         var hooks = device.Hooks;
-        device.Journal = new SyncJournal(device.Sql);
-        await device.Journal.EnsureCreatedAsync(ct);
+        var journal = new SyncJournal(device.Sql);
+        device._journal = journal;
+        await journal.EnsureCreatedAsync(ct);
 
         device.RawFolders = new ModelFolderRepository(factory, hooks);
         device.RawLabels = new ModelLabelRepository(factory, hooks);
         device.RawItems = new ModelItemRepository(factory, hooks);
-        device.Folders = new JournalingModelFolderRepository(device.RawFolders, device.Journal);
-        device.Labels = new JournalingModelLabelRepository(device.RawLabels, device.Journal);
-        device.Items = new JournalingModelItemRepository(device.RawItems, device.Journal);
+        device.Folders = new JournalingModelFolderRepository(device.RawFolders, journal);
+        device.Labels = new JournalingModelLabelRepository(device.RawLabels, journal);
+        device.Items = new JournalingModelItemRepository(device.RawItems, journal);
         device.Events = new JournalingModelEventRepository(
             new ModelEventRepository(factory, hooks),
-            device.Journal
+            journal
         );
 
         ISyncTable[] tables =
@@ -345,12 +379,13 @@ internal sealed class SyncModelDevice : IDisposable
             ),
         ];
 
-        device.Engine = new SyncEngine(
+        var engine = new SyncEngine(
             externalTables ? tables.Select(t => (ISyncTable)new SyncModelExternalTable(t)) : tables,
-            device.Journal
+            journal
         );
-        device.Sync = new ProductModelDeviceSync(device.Engine);
-        device.State = new JournalModelDeviceSyncState(device.Journal);
+        device._engine = engine;
+        device.Sync = new ProductModelDeviceSync(engine);
+        device.State = new JournalModelDeviceSyncState(journal);
 
         return device;
     }
@@ -407,8 +442,9 @@ internal sealed class SyncModelDevice : IDisposable
 
     /// <summary>
     /// 殻（<see cref="OpenAsync"/>）へ、リポジトリ・エンジンの面・状態の面を載せる（別のエンジンの端末用）。リポジトリが記録
-    /// デコレータで包まれていなければ、記録しないリポジトリ（Raw 系）には同じものを渡す。<see cref="Journal"/> と
-    /// <see cref="Engine"/> は載せない（null のまま＝製品のジャーナルを読む決定的なシナリオの期待の手は使えない）
+    /// デコレータで包まれていなければ、記録しないリポジトリ（Raw 系）には同じものを渡す。製品のジャーナルとエンジンは載せない
+    /// （<see cref="CreateAsync"/> で作った端末へ載せ直したときは持ったまま。殻から作った端末では
+    /// <see cref="RequireJournal"/>・<see cref="RequireEngine"/> が投げる＝製品のジャーナルを読む決定的なシナリオの手は使えない）
     /// </summary>
     public void Install(SyncModelDeviceParts parts)
     {
@@ -421,6 +457,152 @@ internal sealed class SyncModelDevice : IDisposable
         RawItems = parts.RawItems ?? parts.Items;
         Sync = parts.Sync;
         State = parts.State;
+        _forgetUntracked = parts.ForgetUntrackedAsync;
+        _clearPendingRecords = parts.ClearPendingRecordsAsync;
+    }
+
+    /// <summary>今の端末の部品（一部だけを差し替えて <see cref="Install"/> で載せ直す包みが使う）</summary>
+    public SyncModelDeviceParts CurrentParts() =>
+        new()
+        {
+            Folders = Folders,
+            Labels = Labels,
+            Items = Items,
+            Events = Events,
+            RawFolders = RawFolders,
+            RawLabels = RawLabels,
+            RawItems = RawItems,
+            Sync = Sync,
+            State = State,
+            ForgetUntrackedAsync = _forgetUntracked,
+            ClearPendingRecordsAsync = _clearPendingRecords,
+        };
+
+    /// <summary>記録しない書き込みを忘れさせる口（<see cref="SyncModelDeviceParts.ForgetUntrackedAsync"/>）</summary>
+    private Func<string, string, CancellationToken, Task>? _forgetUntracked;
+
+    /// <summary>1 行の未送信の記録を全部消す口（<see cref="SyncModelDeviceParts.ClearPendingRecordsAsync"/>）</summary>
+    private Func<string, string, CancellationToken, Task>? _clearPendingRecords;
+
+    /// <summary>
+    /// 記録しない書き込みで書いた 1 行を、端末の未送信の記録から忘れさせる（口が無い端末では何もしない）
+    /// </summary>
+    /// <param name="table">表の名前</param>
+    /// <param name="keyText">キーのテキスト（その表の記述子の <c>FormatKey</c> の書式）</param>
+    /// <param name="ct">キャンセルトークン</param>
+    public Task ForgetUntrackedAsync(string table, string keyText, CancellationToken ct) =>
+        _forgetUntracked?.Invoke(table, keyText, ct) ?? Task.CompletedTask;
+
+    /// <summary>記録しない書き込みを忘れさせる口を持つ端末か（偽なら書いた行を数える読み取りも要らない）</summary>
+    public bool ForgetsUntracked => _forgetUntracked is not null;
+
+    /// <summary>
+    /// 書く前に読んだ端末の DB の内容（<paramref name="before"/>）と今の内容の間で変わった行（足した・変えた・消した。品目は blob
+    /// も）を、記録しない書き込みとして 1 行ずつ忘れさせる（口が無い端末では何も読まない）。書いた行を SQL から決められない
+    /// 生の SQL の書き込みが使う
+    /// </summary>
+    /// <param name="before">書く前の内容（口が無い端末では null でよい）</param>
+    /// <param name="ct">キャンセルトークン</param>
+    public async Task ForgetUntrackedChangesAsync(ModelDbState? before, CancellationToken ct)
+    {
+        if (_forgetUntracked is null || before is null)
+        {
+            return;
+        }
+
+        var after = await ModelDbState.ReadAsync(ConnectionString, ct, missingTablesAreEmpty: true);
+
+        foreach (var (table, keyText) in ChangedKeyTexts(before, after))
+        {
+            await _forgetUntracked(table, keyText, ct);
+        }
+    }
+
+    /// <summary>
+    /// 2 つの内容の間で変わった行の、表の名前と記述子の書式のキーのテキスト（表の順・表の中はキーの序数順）
+    /// </summary>
+    private static IEnumerable<(string Table, string KeyText)> ChangedKeyTexts(
+        ModelDbState before,
+        ModelDbState after
+    )
+    {
+        var payloadsBefore = before.Payloads();
+        var payloadsAfter = after.Payloads();
+
+        foreach (var table in ModelTables.All)
+        {
+            var was = before.Rows(table);
+            var now = after.Rows(table);
+
+            foreach (
+                var key in was
+                    .Keys.Union(now.Keys, StringComparer.Ordinal)
+                    .Order(StringComparer.Ordinal)
+            )
+            {
+                var same =
+                    was.TryGetValue(key, out var oldRow)
+                    && now.TryGetValue(key, out var newRow)
+                    && string.Equals(oldRow, newRow, StringComparison.Ordinal)
+                    && (
+                        table != ModelTables.Items
+                        || string.Equals(
+                            payloadsBefore.GetValueOrDefault(key),
+                            payloadsAfter.GetValueOrDefault(key),
+                            StringComparison.Ordinal
+                        )
+                    );
+
+                if (!same)
+                {
+                    yield return (table, KeyTextOf(table, key, before, after));
+                }
+            }
+        }
+    }
+
+    /// <summary>内容の行のキー（<see cref="ModelDbState.Rows"/> の鍵）を、その表の記述子の書式のキーのテキストへ直す</summary>
+    private static string KeyTextOf(
+        string table,
+        string key,
+        ModelDbState before,
+        ModelDbState after
+    ) =>
+        table switch
+        {
+            ModelTables.Folders => GeneratedSyncTables.ModelFolder.FormatKey(
+                int.Parse(key, CultureInfo.InvariantCulture)
+            ),
+            ModelTables.Labels => GeneratedSyncTables.ModelLabel.FormatKey(key),
+            ModelTables.Items => GeneratedSyncTables.ModelItem.FormatKey(
+                int.Parse(key, CultureInfo.InvariantCulture)
+            ),
+            ModelTables.Events => GeneratedSyncTables.ModelEvent.FormatKey(
+                (after.Events.TryGetValue(key, out var row) ? row : before.Events[key]).At
+            ),
+            _ => throw new ArgumentOutOfRangeException(nameof(table), table, null),
+        };
+
+    /// <summary>
+    /// 1 行の未送信の記録を全部消す（口が無い端末では、製品のジャーナルの表からその行の記録を消す）
+    /// </summary>
+    /// <param name="table">表の名前</param>
+    /// <param name="keyText">キーのテキスト</param>
+    /// <param name="ct">キャンセルトークン</param>
+    public async Task ClearPendingRecordsAsync(string table, string keyText, CancellationToken ct)
+    {
+        if (_clearPendingRecords is { } clear)
+        {
+            await clear(table, keyText, ct);
+
+            return;
+        }
+
+        await Sql.ExecuteSqlAsync(
+            "DELETE FROM quicker_sync_journal WHERE table_name = @table AND key_text = @key",
+            new { table, key = keyText },
+            ct
+        );
     }
 
     /// <summary>キーを決めるフックが挿入する行の主キーへ足す値</summary>
@@ -732,11 +914,13 @@ internal sealed class SyncModelWorld : IAsyncDisposable
 
     /// <summary>
     /// 追加の手を、端末の DB へ Repository を通らずに入れる（ジャーナル記録デコレータの内側のリポジトリ＝記録しない。
-    /// ミラー版は NULL のまま）。端末の最初の形 <see cref="ModelPreload.Untracked"/> が使う
+    /// ミラー版は NULL のまま）。書いた行は端末の未送信の記録から忘れさせる（<see cref="SyncModelDevice.ForgetUntrackedAsync"/>）。
+    /// 端末の最初の形 <see cref="ModelPreload.Untracked"/> が使う
     /// </summary>
     public async Task ApplyUntrackedAsync(ModelWriteOp op, CancellationToken ct)
     {
         var device = Device(op.Actor);
+        string keyText;
 
         switch (op)
         {
@@ -750,6 +934,7 @@ internal sealed class SyncModelWorld : IAsyncDisposable
                     },
                     ct
                 );
+                keyText = GeneratedSyncTables.ModelFolder.FormatKey(add.Id);
                 break;
 
             case AddLabelOp add:
@@ -762,6 +947,7 @@ internal sealed class SyncModelWorld : IAsyncDisposable
                     },
                     ct
                 );
+                keyText = GeneratedSyncTables.ModelLabel.FormatKey(add.Code);
                 break;
 
             case AddItemOp add:
@@ -777,6 +963,7 @@ internal sealed class SyncModelWorld : IAsyncDisposable
                     },
                     ct
                 );
+                keyText = GeneratedSyncTables.ModelItem.FormatKey(add.Id);
                 break;
 
             default:
@@ -785,6 +972,8 @@ internal sealed class SyncModelWorld : IAsyncDisposable
                     nameof(op)
                 );
         }
+
+        await device.ForgetUntrackedAsync(op.Table, keyText, ct);
     }
 
     /// <summary>

@@ -31,6 +31,21 @@ SQLite 方言エンジン（QuickER 版 Repository の ADO 実装）の固定コ
 - 出す条件は `sync_support || runtime_package_export`（同期を生成する構成か、パッケージ用ソース）。同期を使わない構成の生成物には出ない。
 - ガード：`SyncSupportAdoSqliteTriggerRuntimeTests` が流す `table:SyncTriggerGuard`（行 `busy-timeout-is-set-before-the-check`・`custom-connection-factory-is-wrapped`）、パッケージ参照の形の生成の行 `compile-package-sync-support-*`。
 
+## ローカルの行を読み書きする口（SqliteLocalRowStore）
+
+- Core の契約 `ILocalRowStore`（→ `src/QuickER.Runtime/CLAUDE.md`「接続を指定して行を読み書きする契約（ILocalRowStore）」）の SQLite の実装。同期のエンジンがローカルの行を読み書きする。ドライバの型（`SqliteConnection`・`SqliteException`）を名指しするので SQLite のエンジンの側に置く（`ObservedSqlConnectionFactory` と同じ理由）。
+- エンジン用の接続（`CreateDedicatedConnection`）は、接続ファクトリが返した開く前の接続の接続文字列を `Pooling=False` に書き換えて作る。
+  - ファクトリを通すので、ファクトリが `StateChange` に足した購読（`busy_timeout`・`ObservedSqlConnectionFactory` の開くたびの確認）が効く。ファクトリの外で作ると効かない。
+  - プールしないので、閉じるとファイルを放す。
+  - ファクトリが開いた接続を返したら、破棄して `InvalidOperationException`。
+- 一意な値の重なり（`IsUniqueViolation`）は、エラーコード 19（制約）で、拡張のコードが主キー 1555 か一意制約 2067 のときだけ真。NOT NULL 1299・CHECK 275・外部キー 787 と、ほかのエラーは偽。
+- 行の操作は `EntitySaveMetadata` の SQL と束縛（`SelectByIdSql`・`ExistsByIdSql`・`InsertSql`・`UpdateSql`・`DeleteSql`・`BindKeyParameter` ほか）をそのまま使い、行の読みは `MapEntity` を使う。トランザクションのオブジェクトは使わず、呼び出し側が SQL の文で始めた中に入る。SQLite 以外の接続は `ArgumentException`。
+  - 挿入は除外した無制限バイナリ列も含めて全列を書く。NOT NULL の除外列が null の挿入は NOT NULL 違反になる（呼び出し側が先に埋める）。
+  - 更新は除外した無制限バイナリ列に触れない。その列に空でない値を持つエンティティの更新は、何も書かずに `InvalidOperationException`。
+  - 行バージョンの列は SQLite では普通の列で、挿入も更新もエンティティの値を書く。計算列・Repository が外す採番列は書かない。
+- 出す条件は `sync_support || runtime_package_export`（`Runtime.Sqlite.g.cs`）。同期を使わない構成の生成物には出ない。
+- ガード：`CodegenConfig/Cases` の行 `exec-sync-local-row-store-on-sqlite`（実際に SQLite で流す）・`exec-sync-quoted-names-local-row-store-on-sqlite`（引用符を含む名前）・`exec-sync-local-row-store-value-object-key-on-sqlite`・`exec-sync-local-row-store-string-key-on-sqlite`。公開 API 面は `QuickER.Runtime.Sqlite.approved.txt`。mutation 実証済み（`Pooling=False` にしない・ファクトリを通さずに同じ接続文字列で接続を作る・主キーの重なりを一意な値の重なりと答えない・NOT NULL の違反を一意な値の重なりと答える、のどれでも生成の行が赤）。
+
 ## 複数の文を 1 つのトランザクションで流す口（ISqlBatchExecutor）
 
 - SQLite の `SqlExecutor` だけが Core の公開の口 `ISqlBatchExecutor.ExecuteSqlBatchAsync` を実装する（`_04_RepositoryContractCore.scriban` の `repository_dialect == "sqlite"` の分岐）。1 つの接続で `BeginTransactionAsync` → 文ごとに `ExecuteNonQueryAsync` → `CommitAsync`。どれかの文かコミットが失敗したら `SqlTransactions.RollbackQuietlyAsync` と `await using` で巻き戻してから接続を返す。

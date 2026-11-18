@@ -417,6 +417,9 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                 break;
 
             case LegacyKeyTextsOp legacy:
+                // 製品のジャーナルの表を生の SQL で書き換える手（持たない端末では SQL を流す前に断る）
+                _ = _world.Device(legacy.Device).RequireJournal(nameof(LegacyKeyTextsOp));
+
                 foreach (
                     var table in new[]
                     {
@@ -487,7 +490,8 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             case LeftoverUnsetKeyEntryOp leftover:
             {
                 var device = _world.Device(leftover.Device);
-                var pendingBefore = await device.Journal.CountPendingAsync(_ct);
+                var journal = device.RequireJournal(nameof(LeftoverUnsetKeyEntryOp));
+                var pendingBefore = await journal.CountPendingAsync(_ct);
 
                 // エンジンの記録を直接作る手（照合 4 はこのキーを決められないとして数える）
                 NoteRecordTouched(leftover.Device, leftover.Table, SyncJournal.UnsetKeyText);
@@ -500,10 +504,10 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                 );
 
                 if (
-                    (await device.Journal.ReadAllAsync(_ct)).Any(entry =>
+                    (await journal.ReadAllAsync(_ct)).Any(entry =>
                         entry.KeyText == SyncJournal.UnsetKeyText
                     )
-                    || await device.Journal.CountPendingAsync(_ct) != pendingBefore
+                    || await journal.CountPendingAsync(_ct) != pendingBefore
                 )
                 {
                     _failures.Add(
@@ -519,6 +523,8 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
 
             case ExpectNoUnsetKeyEntryOp expect:
             {
+                // 製品のジャーナルの表を生の SQL で読む手（持たない端末では SQL を流す前に断る）
+                _ = _world.Device(expect.Device).RequireJournal(nameof(ExpectNoUnsetKeyEntryOp));
                 var left = await _world
                     .Device(expect.Device)
                     .Sql.ExecuteScalarSqlAsync<long>(
@@ -541,7 +547,8 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             {
                 var acks = await _world
                     .Device(expect.Device)
-                    .Journal.ReadAcksAsync(expect.Table, _ct);
+                    .RequireJournal(nameof(ExpectNoAckOp))
+                    .ReadAcksAsync(expect.Table, _ct);
 
                 if (acks.ContainsKey(expect.KeyText))
                 {

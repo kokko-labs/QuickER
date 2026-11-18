@@ -6966,6 +6966,95 @@ public interface ISqlBatchExecutor
     );
 }
 
+/// <summary>
+/// Reads and writes entity rows of the local database on a connection the caller opened itself, inside a transaction the
+/// caller runs itself (the access the synchronisation engine uses for the local side).
+/// </summary>
+/// <remarks>
+/// <para>
+/// The caller creates a connection with <see cref="CreateDedicatedConnection"/>, opens it, starts the transaction with an
+/// SQL statement (for example <c>BEGIN IMMEDIATE</c> on SQLite), passes the same connection to every row operation, and
+/// ends the transaction itself. No operation starts, commits or rolls back a transaction.
+/// </para>
+/// <para>
+/// A row is mapped to and from its entity exactly as the repositories of the same engine map it (value objects, dates,
+/// excluded unbounded binary columns), so a row written here reads back unchanged through a repository and the other
+/// way round.
+/// </para>
+/// </remarks>
+public interface ILocalRowStore
+{
+    /// <summary>Creates a connection that is not pooled, without opening it (the caller opens and disposes it).</summary>
+    DbConnection CreateDedicatedConnection();
+
+    /// <summary>Whether the exception reports that a value is already taken: a duplicate primary key or a unique constraint violation.</summary>
+    /// <param name="exception">The exception a row operation threw.</param>
+    bool IsUniqueViolation(DbException exception);
+
+    /// <summary>Reads the row with the given primary key (null when there is none).</summary>
+    /// <param name="connection">An open connection from <see cref="CreateDedicatedConnection"/>.</param>
+    /// <param name="key">The primary key value (the key type of the entity).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <typeparam name="TEntity">The entity type of the table.</typeparam>
+    Task<TEntity?> FindAsync<TEntity>(
+        DbConnection connection,
+        object key,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new();
+
+    /// <summary>Whether a row with the given primary key exists.</summary>
+    /// <param name="connection">An open connection from <see cref="CreateDedicatedConnection"/>.</param>
+    /// <param name="key">The primary key value (the key type of the entity).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <typeparam name="TEntity">The entity type of the table.</typeparam>
+    Task<bool> ExistsAsync<TEntity>(
+        DbConnection connection,
+        object key,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new();
+
+    /// <summary>Inserts the entity as a row, writing every column.</summary>
+    /// <param name="connection">An open connection from <see cref="CreateDedicatedConnection"/>.</param>
+    /// <param name="entity">The entity to insert.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <typeparam name="TEntity">The entity type of the table.</typeparam>
+    Task InsertAsync<TEntity>(
+        DbConnection connection,
+        TEntity entity,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new();
+
+    /// <summary>
+    /// Overwrites the row with the entity's primary key (no version check; the excluded unbounded binary columns are not
+    /// touched), and returns whether a row was updated.
+    /// </summary>
+    /// <param name="connection">An open connection from <see cref="CreateDedicatedConnection"/>.</param>
+    /// <param name="entity">The entity whose values the row takes.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <typeparam name="TEntity">The entity type of the table.</typeparam>
+    Task<bool> UpdateAsync<TEntity>(
+        DbConnection connection,
+        TEntity entity,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new();
+
+    /// <summary>Deletes the row with the given primary key, and returns whether a row was deleted.</summary>
+    /// <param name="connection">An open connection from <see cref="CreateDedicatedConnection"/>.</param>
+    /// <param name="key">The primary key value (the key type of the entity).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <typeparam name="TEntity">The entity type of the table.</typeparam>
+    Task<bool> DeleteAsync<TEntity>(
+        DbConnection connection,
+        object key,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new();
+}
+
 /// <summary>The kind of DB operation performed for a single entity during a graph save (Save).</summary>
 public enum SaveOperation
 {

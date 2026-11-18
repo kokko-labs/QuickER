@@ -115,6 +115,16 @@ public sealed class QuickER.Runtime.Sqlite.SqlSaveHookContext : QuickER.Runtime.
     public System.Threading.Tasks.Task<bool> WriteBinaryColumnAsync(string propertyName, object key, System.IO.Stream source, long? length = default, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<int> ExecuteSqlAsync(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)
 
+public sealed class QuickER.Runtime.Sqlite.SqliteLocalRowStore : QuickER.Runtime.ILocalRowStore
+    public .ctor(QuickER.Runtime.Sqlite.ISqlConnectionFactory connectionFactory)
+    public System.Data.Common.DbConnection CreateDedicatedConnection()
+    public System.Threading.Tasks.Task InsertAsync<TEntity>(System.Data.Common.DbConnection connection, TEntity entity, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<TEntity> FindAsync<TEntity>(System.Data.Common.DbConnection connection, object key, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<bool> DeleteAsync<TEntity>(System.Data.Common.DbConnection connection, object key, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<bool> ExistsAsync<TEntity>(System.Data.Common.DbConnection connection, object key, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<bool> UpdateAsync<TEntity>(System.Data.Common.DbConnection connection, TEntity entity, System.Threading.CancellationToken cancellationToken)
+    public bool IsUniqueViolation(System.Data.Common.DbException exception)
+
 public abstract class QuickER.Runtime.Sqlite.SqliteRepositoryCore<TEntity, TKey> : QuickER.Runtime.IRemoteRepositoryCore<TEntity, TKey>, QuickER.Runtime.IRepositoryCore<TEntity, TKey>
     protected .ctor(QuickER.Runtime.Sqlite.ISqlConnectionFactory connectionFactory, QuickER.Runtime.ISaveHookRegistry saveHooks = null, QuickER.Runtime.ISqlExecutor sqlExecutor = null)
     protected System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(string sql, object parameters = null, System.Threading.CancellationToken cancellationToken = default)

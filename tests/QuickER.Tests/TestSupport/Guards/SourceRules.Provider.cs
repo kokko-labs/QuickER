@@ -724,13 +724,13 @@ internal static partial class SourceRules
                 )
             ) with
             {
-                // CREATE TABLE の名前を読めていること（いまは補助の表が 6 つ。読み方を誤ると何も拾わずに緑になる）
+                // CREATE TABLE の名前を読めていること（いまは補助の表が 7 つ。読み方を誤ると何も拾わずに緑になる）
                 Floor = new(
                     GuardFinder.File(
                         GuardReader.Text,
                         file => FindSyncTemplateCreates(file, onlyNonAuxiliary: false, "TABLE")
                     ),
-                    6,
+                    7,
                     "同期のテンプレートの CREATE TABLE の文"
                 ),
             },
