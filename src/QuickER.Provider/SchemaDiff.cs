@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using QuickER.Model;
+using QuickER.Provider.Sync.Steps;
 
 namespace QuickER.Provider;
 
@@ -239,6 +240,20 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
                 or SchemaDiffKind.DropUniqueConstraint
                 or SchemaDiffKind.AlterUniqueConstraint;
 
+    /// <summary>
+    /// 計画器（<see cref="SyncPlanner"/>）が自分で作った項目の印（差分が作った項目・利用者が選んだ項目は <c>null</c>）
+    /// </summary>
+    /// <remarks>
+    /// 付けるのは計画器だけ。計画・同期スクリプト・警告・画面は読まない（<see cref="PlanItemMark"/>）。
+    /// </remarks>
+    internal PlanItemMark? PlanMark
+    {
+        get => _planMark;
+        init => _planMark = value;
+    }
+
+    private PlanItemMark? _planMark;
+
     /// <summary>列ペアだけを差し替えた複製を返す（ほかのプロパティと選択の状態はそのまま写す）</summary>
     /// <param name="pairs">新しい列ペア</param>
     /// <returns>列ペアだけが違う新しい項目（変更通知の購読は写さない）</returns>
@@ -250,6 +265,20 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
         var copy = (SchemaDiffItem)MemberwiseClone();
         copy._foreignKeyColumnPairs = pairs;
         copy.PropertyChanged = null;
+        return copy;
+    }
+
+    /// <summary>計画器が列ペアを並べ替えた複製を返す（<see cref="WithForeignKeyColumnPairs"/> の複製に計画器の印を付ける）</summary>
+    /// <param name="pairs">並べ替えた列ペア</param>
+    /// <param name="markWhenUnmarked">この項目が印を持たないときに複製へ付ける印（印を持つ項目の複製は、その印のまま）</param>
+    /// <returns>列ペアだけが違い、計画器の印を持つ新しい項目</returns>
+    internal SchemaDiffItem WithRearrangedForeignKeyColumnPairs(
+        IReadOnlyList<ForeignKeyColumnNamePair> pairs,
+        PlanItemMark markWhenUnmarked
+    )
+    {
+        var copy = WithForeignKeyColumnPairs(pairs);
+        copy._planMark ??= markWhenUnmarked;
         return copy;
     }
 

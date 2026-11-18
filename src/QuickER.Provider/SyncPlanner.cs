@@ -7,6 +7,7 @@ using QuickER.Model;
 using QuickER.Provider.Resources;
 using QuickER.Provider.Sync.Selection;
 using QuickER.Provider.Sync.State;
+using QuickER.Provider.Sync.Steps;
 
 namespace QuickER.Provider;
 
@@ -417,6 +418,9 @@ public sealed class SyncPlanner
         {
             if (item.Kind == SchemaDiffKind.AlterUniqueConstraint)
             {
+                // 削除と追加の両方へ展開したときだけ、2 つが対になる（外す側の定義の無い作り直しは追加だけ）
+                var uniquePair = item.ReplacedUniqueConstraint is null ? null : new ReaddPair();
+
                 if (item.ReplacedUniqueConstraint is { } replaced)
                 {
                     expanded.Add(
@@ -428,6 +432,7 @@ public sealed class SyncPlanner
                             UniqueConstraintName = replaced.UniqueConstraintName,
                             UniqueConstraintColumns = replaced.UniqueConstraintColumns,
                             Description = item.Description,
+                            PlanMark = PlanItemMark.Expanded(item, uniquePair),
                         }
                     );
                 }
@@ -441,6 +446,7 @@ public sealed class SyncPlanner
                         UniqueConstraintName = item.UniqueConstraintName,
                         UniqueConstraintColumns = item.UniqueConstraintColumns,
                         Description = item.Description,
+                        PlanMark = PlanItemMark.Expanded(item, uniquePair),
                     }
                 );
                 continue;
@@ -451,6 +457,8 @@ public sealed class SyncPlanner
                 expanded.Add(item);
                 continue;
             }
+
+            var foreignKeyPair = item.ReplacedForeignKey is null ? null : new ReaddPair();
 
             if (item.ReplacedForeignKey is { } old)
             {
@@ -466,6 +474,7 @@ public sealed class SyncPlanner
                         ForeignKeyName = old.ForeignKeyName,
                         ForeignKeyColumnPairs = old.ForeignKeyColumnPairs,
                         Description = item.Description,
+                        PlanMark = PlanItemMark.Expanded(item, foreignKeyPair),
                     }
                 );
             }
@@ -483,6 +492,7 @@ public sealed class SyncPlanner
                     ForeignKeyName = item.ForeignKeyName,
                     ForeignKeyColumnPairs = item.ForeignKeyColumnPairs,
                     Description = item.Description,
+                    PlanMark = PlanItemMark.Expanded(item, foreignKeyPair),
                 }
             );
         }
@@ -619,6 +629,7 @@ public sealed class SyncPlanner
                         item.OldColumn.DataType,
                         column.DataType
                     ),
+                    PlanMark = PlanItemMark.Replacement(item),
                 };
             }
 
@@ -1436,6 +1447,9 @@ public sealed class SyncPlanner
                             table,
                             liveColumn.Name
                         ),
+                        PlanMark = PlanItemMark.Implicit(
+                            ImplicitStepReason.PrimaryKeyColumnNotNull
+                        ),
                     }
                 );
             }
@@ -1524,7 +1538,8 @@ public sealed class SyncPlanner
                             limit,
                             liveSchema
                         )
-                    )
+                    ),
+                    PlanItemMark.Implicit(ImplicitStepReason.VanishingForeignKey)
                 )
             );
         }
@@ -1617,6 +1632,9 @@ public sealed class SyncPlanner
                         Description = string.Format(
                             Strings.Diff_AutoUniqueConstraintDrop,
                             string.Join(", ", columns)
+                        ),
+                        PlanMark = PlanItemMark.Implicit(
+                            ImplicitStepReason.VanishingUniqueConstraint
                         ),
                     }
                 );
@@ -1717,6 +1735,9 @@ public sealed class SyncPlanner
                         Description = string.Format(
                             Strings.Diff_AutoUniqueConstraintReplacedByPrimaryKey,
                             string.Join(", ", columns)
+                        ),
+                        PlanMark = PlanItemMark.Implicit(
+                            ImplicitStepReason.UniqueConstraintReplacedByPrimaryKey
                         ),
                     }
                 );
@@ -3192,7 +3213,9 @@ public sealed class SyncPlanner
                 );
             }
 
-            autoDrops.Add(BuildImplicitForeignKeyDrop(fk, childTable, description));
+            // 外す項目と付け直す項目は同じ対の印を持つ
+            var mark = PlanItemMark.Implicit(ImplicitStepReason.ForeignKeyRebuild, new ReaddPair());
+            autoDrops.Add(BuildImplicitForeignKeyDrop(fk, childTable, description, mark));
 
             autoAdds.Add(
                 new SchemaDiffItem
@@ -3207,6 +3230,7 @@ public sealed class SyncPlanner
                     ForeignKeyName = constraintName,
                     ForeignKeyColumnPairs = fk.ColumnPairs,
                     Description = description,
+                    PlanMark = mark,
                 }
             );
         }
@@ -3267,7 +3291,8 @@ public sealed class SyncPlanner
     private static SchemaDiffItem BuildImplicitForeignKeyDrop(
         ResolvedForeignKeyRelationship fk,
         string childTable,
-        string description
+        string description,
+        PlanItemMark mark
     ) =>
         new()
         {
@@ -3280,6 +3305,7 @@ public sealed class SyncPlanner
             ForeignKeyName = fk.Relationship.ConstraintName,
             ForeignKeyColumnPairs = fk.ColumnPairs,
             Description = description,
+            PlanMark = mark,
         };
 
     /// <summary>外部キーの子列が、索引の先頭の列とちょうど同じ集合か</summary>
@@ -3574,6 +3600,8 @@ public sealed class SyncPlanner
                         Strings.Diff_AutoPrimaryKeyRebuild,
                         string.Join(", ", pkColumns.Select(c => c.Name))
                     ),
+                    // この 1 項目が解除と付与の両方のセクションに入る（対は項目が 1 つであることで決まるので、印には持たない）
+                    PlanMark = PlanItemMark.Implicit(ImplicitStepReason.PrimaryKeyRebuild),
                 }
             );
         }
@@ -4698,9 +4726,10 @@ public sealed class SyncPlanner
                     PostSyncKeys(parentTable, postSyncKey)
                 );
 
+            // 並べ替えた複製は計画器が作った項目なので、元の項目から来た印を持つ（元が印を持てばその印のまま）
             return arranged.SequenceEqual(item.ForeignKeyColumnPairs)
                 ? item
-                : item.WithForeignKeyColumnPairs(arranged);
+                : item.WithRearrangedForeignKeyColumnPairs(arranged, PlanItemMark.Rearranged(item));
         }
 
         IEnumerable<IReadOnlyList<string>> PostSyncKeys(
@@ -5016,6 +5045,17 @@ public sealed class SyncPlanner
                     string.Join(", ", columns)
                 );
 
+                // 表・構成列が同じ計画で消える一意制約は外すだけで付け直さない（外部キーの外し直しと対称。
+                // 付け直すと消えた表・列を参照して失敗する）
+                var readded =
+                    !dropped.Tables.Contains(table) && !dropped.TouchesColumns(table, columns);
+
+                // 付け直すときだけ、外す項目と付け直す項目が同じ対の印を持つ
+                var mark = PlanItemMark.Implicit(
+                    ImplicitStepReason.UniqueConstraintRebuild,
+                    readded ? new ReaddPair() : null
+                );
+
                 autoDrops.Add(
                     new SchemaDiffItem
                     {
@@ -5025,12 +5065,11 @@ public sealed class SyncPlanner
                         UniqueConstraintName = constraint.Name,
                         UniqueConstraintColumns = columns,
                         Description = description,
+                        PlanMark = mark,
                     }
                 );
 
-                // 表・構成列が同じ計画で消える一意制約は外すだけで付け直さない（外部キーの外し直しと対称。
-                // 付け直すと消えた表・列を参照して失敗する）
-                if (dropped.Tables.Contains(table) || dropped.TouchesColumns(table, columns))
+                if (!readded)
                 {
                     continue;
                 }
@@ -5044,6 +5083,7 @@ public sealed class SyncPlanner
                         UniqueConstraintName = constraint.Name,
                         UniqueConstraintColumns = columns,
                         Description = description,
+                        PlanMark = mark,
                     }
                 );
             }

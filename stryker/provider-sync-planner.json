@@ -20,7 +20,14 @@
       "**/SelectionContext.cs",
       "**/SelectionRule.cs",
       "**/SelectionWithdrawals.cs",
-      "**/Withdrawal.cs"
+      "**/Withdrawal.cs",
+      "**/ImplicitStepReason.cs",
+      "**/PlanItemMark.cs",
+      "**/ReaddPair.cs",
+      "**/StepLowering.cs",
+      "**/StepOrigin.cs",
+      "**/StepPlan.cs",
+      "**/SyncStep.cs"
     ]
   }
 }

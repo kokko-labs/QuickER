@@ -16,10 +16,14 @@ internal static class SyncPlanExpectationRunner
     /// <param name="scopeAlias">
     /// 流す能力の鍵 → 期待の能力の鍵の読み替え（合成の能力の行を近い実方言で流してみるときに、合成の能力へ書いた期待をその実方言で照合する）
     /// </param>
+    /// <param name="onStepRoundTrip">
+    /// 計画を作った能力ごとに 1 回呼ぶ（関係 N4 を掛けたら null、計画を文で表せずに掛けなかったらその理由）
+    /// </param>
     public static IReadOnlyList<string> Run(
         ScenarioRow<SyncPlanExpectationInput> row,
         IEnumerable<string>? capabilities = null,
-        IReadOnlyDictionary<string, string>? scopeAlias = null
+        IReadOnlyDictionary<string, string>? scopeAlias = null,
+        Action<string?>? onStepRoundTrip = null
     )
     {
         var input = row.Input;
@@ -29,7 +33,7 @@ internal static class SyncPlanExpectationRunner
 
         foreach (var key in capabilities ?? input.Capabilities)
         {
-            var facets = Project(input, key, problems);
+            var facets = Project(input, key, problems, onStepRoundTrip);
             projections.Add((key, facets));
             var scope =
                 scopeAlias is not null && scopeAlias.TryGetValue(key, out var aliased)
@@ -95,7 +99,8 @@ internal static class SyncPlanExpectationRunner
     private static IReadOnlyDictionary<string, IReadOnlyList<string>> Project(
         SyncPlanExpectationInput input,
         string key,
-        List<string> problems
+        List<string> problems,
+        Action<string?>? onStepRoundTrip
     )
     {
         var facets = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
@@ -190,6 +195,17 @@ internal static class SyncPlanExpectationRunner
                     .Select(p => $"[{key}] {p}")
             );
         }
+
+        // 関係 N4（文の往復）：手で組んだ項目の行にも掛ける（文で表せない計画は掛けずに理由を数える）。同期スクリプトは実方言だけ比べる
+        var roundTrip = SyncPlanCapabilityNetRunner.StepRoundTripProblems(
+            items,
+            plan,
+            labels,
+            world.Live.Entities,
+            isDialect ? SyncPlanExpectationCapabilities.Provider(key).SyncScriptBuilder.Build : null
+        );
+        problems.AddRange(roundTrip.Problems.Select(p => $"[{key}] {p}"));
+        onStepRoundTrip?.Invoke(roundTrip.Unrepresentable);
 
         if (isDialect)
         {

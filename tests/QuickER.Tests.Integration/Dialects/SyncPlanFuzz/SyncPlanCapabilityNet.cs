@@ -5,6 +5,7 @@ using System.Linq;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.Sync.Steps;
 using QuickER.Tests.TestSupport.Engines;
 using Xunit.Sdk;
 
@@ -588,6 +589,17 @@ internal static class SyncPlanCapabilityNetRunner
             )
         );
 
+        var roundTrip = StepRoundTripProblems(
+            diff.Items,
+            plan,
+            new Dictionary<SchemaDiffItem, int>(ReferenceEqualityComparer.Instance),
+            before.Entities,
+            provider.SyncScriptBuilder.Build
+        );
+        outcome.Violations.AddRange(roundTrip.Problems);
+        outcome.StepRoundTripChecked = roundTrip.Unrepresentable is null;
+        outcome.StepRoundTripUnrepresentable = roundTrip.Unrepresentable;
+
         if (caseFoldRelation)
         {
             outcome.Violations.AddRange(
@@ -909,6 +921,410 @@ internal static class SyncPlanCapabilityNetRunner
         static string Describe(SchemaDiffItem item) => $"{item.Kind}: {item.Description}";
     }
 
+    /// <summary>関係 N4 の違反の頭</summary>
+    public const string StepRoundTripRelationPrefix = "relation N4: ";
+
+    /// <summary>関係 N4 の結果</summary>
+    /// <param name="Problems">違反の文</param>
+    /// <param name="Unrepresentable">計画を文で表せなかった理由（関係を掛けなかった。掛けたなら null）</param>
+    internal sealed record StepRoundTripResult(
+        IReadOnlyList<string> Problems,
+        string? Unrepresentable
+    );
+
+    /// <summary>
+    /// 関係 N4（文の往復）：計画を文の並びとして読み取り（<see cref="SyncPlanStepReader"/>）、製品の写し
+    /// （<see cref="StepLowering.ToSyncPlan"/>）で計画へ戻すと、読み取り用の形は計画の全部の面が元と同じで、同期スクリプトは
+    /// 読み取り用の形も文の値だけの形も元と同じ。文の由来と対は、対の約束（外す文 1 つと付ける文 1 つ・同じ表・外すのが前）と
+    /// 暗黙の理由ごとの対の有無を守る
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 文の並びは計画器の作り直しの入口で、写しは今の計画・同期スクリプト・画面へ渡す形を作る。往復で面が変われば、写しか文の値が
+    /// 今の計画の項目の持つ情報を落としている。文で表せない計画（手で組んだ項目のメンバーの欠けなど）には掛けず、理由を返す。
+    /// </para>
+    /// <para>
+    /// 同期スクリプトのビルダーが例外を投げる計画は、写した計画のビルダーも同じ型の例外を投げることを見る。
+    /// </para>
+    /// </remarks>
+    /// <param name="items">差分の項目（元のケースの選び方のまま）</param>
+    /// <param name="plan">元の計画</param>
+    /// <param name="labels">手で組んだ項目の番号（無ければ空）</param>
+    /// <param name="liveEntities">DB 側の図</param>
+    /// <param name="buildScript">同期スクリプトを作る（実方言だけ。能力の組だけなら null）</param>
+    internal static StepRoundTripResult StepRoundTripProblems(
+        IReadOnlyList<SchemaDiffItem> items,
+        SyncPlan plan,
+        IReadOnlyDictionary<SchemaDiffItem, int> labels,
+        IReadOnlyList<Entity> liveEntities,
+        Func<SyncPlan, string>? buildScript
+    )
+    {
+        var read = SyncPlanStepReader.Read(plan, items.Where(i => i.IsSelected));
+
+        if (read.Plan is not { } steps)
+        {
+            return new StepRoundTripResult(
+                [.. read.Problems.Select(p => StepRoundTripRelationPrefix + "reading: " + p)],
+                read.Unrepresentable
+            );
+        }
+
+        var problems = new List<string>(
+            read.Problems.Select(p => StepRoundTripRelationPrefix + "reading: " + p)
+        );
+        problems.AddRange(StepShapeProblems(steps));
+
+        SyncPlan lowered;
+        SyncPlan loweredFields;
+
+        try
+        {
+            lowered = StepLowering.ToSyncPlan(steps);
+            loweredFields = StepLowering.ToSyncPlan(steps, fieldsOnly: true);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            problems.Add(
+                $"{StepRoundTripRelationPrefix}lowering threw: {ex.GetType().Name}: {ex.Message}"
+            );
+            return new StepRoundTripResult(problems, null);
+        }
+
+        // 文の値だけの形の項目は、どれも文から組み立てた項目（選んだ項目そのものを返すと、文の値がビルダーに足りるかを見ていない）
+        var selectedItems = new HashSet<SchemaDiffItem>(
+            items.Where(i => i.IsSelected),
+            ReferenceEqualityComparer.Instance
+        );
+
+        if (
+            loweredFields
+                .Sections.SelectMany(s => s.Items)
+                .FirstOrDefault(selectedItems.Contains) is
+            { } reused
+        )
+        {
+            problems.Add(
+                $"{StepRoundTripRelationPrefix}the fields-only form returns a selected item itself: "
+                    + $"{reused.Kind}: {reused.Description}"
+            );
+        }
+
+        var original = SyncPlanProjection.Plan(plan, labels, liveEntities);
+        var copied = SyncPlanProjection.Plan(lowered, labels, liveEntities);
+
+        foreach (var (facet, lines) in original)
+        {
+            var other = copied.TryGetValue(facet, out var found) ? found : [];
+
+            if (!lines.SequenceEqual(other, StringComparer.Ordinal))
+            {
+                problems.Add(
+                    $"{StepRoundTripRelationPrefix}the {facet} differ{FirstDifference(lines, other)}"
+                );
+            }
+        }
+
+        // 2 つのセクションに入る同じ 1 つの項目（主キーの変更の解除と付与）は、写した計画でも同じ 1 つの項目（面の行は参照を見ない）
+        var sharing = SharedItemPattern(plan);
+
+        foreach (
+            var (form, copy) in new[] { ("readable", lowered), ("fields-only", loweredFields) }
+        )
+        {
+            if (!sharing.SequenceEqual(SharedItemPattern(copy)))
+            {
+                problems.Add(
+                    $"{StepRoundTripRelationPrefix}the {form} form shares items between sections differently: "
+                        + $"[{string.Join(",", SharedItemPattern(copy))}] <> [{string.Join(",", sharing)}]"
+                );
+            }
+        }
+
+        if (buildScript is not null)
+        {
+            var (script, thrown) = Build(plan);
+            CompareScript("readable", lowered);
+            CompareScript("fields-only", loweredFields);
+
+            void CompareScript(string form, SyncPlan copy)
+            {
+                var (copyScript, copyThrown) = Build(copy);
+
+                if (thrown is not null || copyThrown is not null)
+                {
+                    if (thrown?.GetType() != copyThrown?.GetType())
+                    {
+                        problems.Add(
+                            $"{StepRoundTripRelationPrefix}the {form} script builder throws differently: "
+                                + $"[{Name(copyThrown)}] <> [{Name(thrown)}]"
+                        );
+                    }
+
+                    return;
+                }
+
+                if (!string.Equals(script, copyScript, StringComparison.Ordinal))
+                {
+                    var lines = script!.Split('\n');
+                    var copyLines = copyScript!.Split('\n');
+                    problems.Add(
+                        $"{StepRoundTripRelationPrefix}the {form} script differs{FirstDifference(lines, copyLines)}"
+                    );
+                }
+            }
+        }
+
+        return new StepRoundTripResult(problems, null);
+
+        (string? Script, Exception? Thrown) Build(SyncPlan target)
+        {
+            try
+            {
+                return (buildScript!(target), null);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                return (null, ex);
+            }
+        }
+
+        static string Name(Exception? ex) =>
+            ex is null ? "no exception" : $"{ex.GetType().Name}: {ex.Message.Split('\n')[0]}";
+    }
+
+    /// <summary>セクションの項目ごとの、同じ項目（参照）が最初に現れた位置（計画の項目の共有の形）</summary>
+    private static List<int> SharedItemPattern(SyncPlan plan)
+    {
+        var first = new Dictionary<SchemaDiffItem, int>(ReferenceEqualityComparer.Instance);
+        var pattern = new List<int>();
+
+        foreach (var item in plan.Sections.SelectMany(s => s.Items))
+        {
+            if (!first.TryGetValue(item, out var at))
+            {
+                at = pattern.Count;
+                first[item] = at;
+            }
+
+            pattern.Add(at);
+        }
+
+        return pattern;
+    }
+
+    /// <summary>関係 N4 を掛けた数と掛けなかった数の要約（「relation N4 on X of Y; unrepresentable: 理由=数, …」）</summary>
+    /// <param name="results">計画ごとの結果（掛けたら null、掛けなかったら理由）</param>
+    internal static string DescribeStepRoundTrips(IReadOnlyCollection<string?> results) =>
+        $"relation N4 on {results.Count(r => r is null)} of {results.Count}; unrepresentable: "
+        + string.Join(
+            ", ",
+            results
+                .OfType<string>()
+                .GroupBy(r => r, StringComparer.Ordinal)
+                .Select(g => $"{g.Key}={g.Count()}")
+                .DefaultIfEmpty("none")
+        );
+
+    /// <summary>2 つの行の並びの最初の違い（「: [写し] &lt;&gt; [元] at line n」）</summary>
+    private static string FirstDifference(
+        IReadOnlyList<string> original,
+        IReadOnlyList<string> copy
+    )
+    {
+        var at = Enumerable
+            .Range(0, Math.Min(original.Count, copy.Count))
+            .FirstOrDefault(
+                i => !string.Equals(original[i], copy[i], StringComparison.Ordinal),
+                Math.Min(original.Count, copy.Count)
+            );
+
+        return $" at line {at + 1}: [{Line(copy, at)}] <> [{Line(original, at)}]";
+
+        static string Line(IReadOnlyList<string> source, int index) =>
+            index < source.Count ? source[index].Trim() : "(end)";
+    }
+
+    /// <summary>文の由来と対の形の違反（関係 N4 の 4 つ目の面）</summary>
+    private static IEnumerable<string> StepShapeProblems(StepPlan plan)
+    {
+        var steps = plan.Steps;
+
+        // 1 つの対を持つ文は、制約を外す文 1 つと付ける文 1 つ（同じ種類の制約・同じ表）で、外す文が前
+        foreach (
+            var group in steps
+                .Select((step, index) => (Step: step, Index: index))
+                .Where(s => s.Step.Pair is not null)
+                .GroupBy(s => s.Step.Pair!, ReferenceEqualityComparer.Instance)
+        )
+        {
+            var members = group.ToList();
+            var drops = members.Where(m => ConstraintOf(m.Step) is (_, false, _)).ToList();
+            var adds = members.Where(m => ConstraintOf(m.Step) is (_, true, _)).ToList();
+
+            if (
+                members.Count != 2
+                || drops.Count != 1
+                || adds.Count != 1
+                || ConstraintOf(drops[0].Step).Family != ConstraintOf(adds[0].Step).Family
+                || SchemaNames.Key(ConstraintOf(drops[0].Step).Table)
+                    != SchemaNames.Key(ConstraintOf(adds[0].Step).Table)
+                || drops[0].Index > adds[0].Index
+            )
+            {
+                yield return StepRoundTripRelationPrefix
+                    + "a re-add pair is not one drop before one add of the same constraint on the same table: "
+                    + string.Join(" / ", members.Select(m => $"#{m.Index} {DescribeStep(m.Step)}"));
+            }
+        }
+
+        // 暗黙の理由ごとの対の有無
+        for (var i = 0; i < steps.Count; i++)
+        {
+            var step = steps[i];
+
+            if (step.Origin is not ImplicitOrigin { Reason: var reason })
+            {
+                continue;
+            }
+
+            var isAdd = ConstraintOf(step) is (_, true, _);
+            bool? needsPair = reason switch
+            {
+                ImplicitStepReason.ForeignKeyRebuild or ImplicitStepReason.PrimaryKeyRebuild =>
+                    true,
+                ImplicitStepReason.UniqueConstraintRebuild => isAdd ? true : null,
+                _ => false,
+            };
+
+            if (needsPair is { } expected && expected != (step.Pair is not null))
+            {
+                yield return StepRoundTripRelationPrefix
+                    + $"an implicit {reason} step {(expected ? "has no" : "has a")} re-add pair: #{i} {DescribeStep(step)}";
+            }
+
+            // 暗黙の理由と文の種類の対応
+            var fits = reason switch
+            {
+                ImplicitStepReason.PrimaryKeyColumnNotNull => step is AlterColumnStep,
+                ImplicitStepReason.VanishingForeignKey => step is DropForeignKeyStep,
+                ImplicitStepReason.VanishingUniqueConstraint
+                or ImplicitStepReason.UniqueConstraintReplacedByPrimaryKey => step
+                    is DropUniqueConstraintStep,
+                ImplicitStepReason.ForeignKeyRebuild => step
+                    is DropForeignKeyStep
+                        or AddForeignKeyStep,
+                ImplicitStepReason.PrimaryKeyRebuild => step
+                    is DropPrimaryKeyStep
+                        or AddPrimaryKeyStep,
+                ImplicitStepReason.UniqueConstraintRebuild => step
+                    is DropUniqueConstraintStep
+                        or AddUniqueConstraintStep,
+                _ => false,
+            };
+
+            if (!fits)
+            {
+                yield return StepRoundTripRelationPrefix
+                    + $"an implicit {reason} step is of an unexpected kind: #{i} {DescribeStep(step)}";
+            }
+
+            // 外すだけの一意制約の削除は、理由ごとの警告（列と一緒に消える・主キーが置き換える）が同じ表・同じ構成列を名指しする
+            SyncPlanWarningKind? naming = reason switch
+            {
+                ImplicitStepReason.VanishingUniqueConstraint =>
+                    SyncPlanWarningKind.UniqueConstraintDroppedWithColumn,
+                ImplicitStepReason.UniqueConstraintReplacedByPrimaryKey =>
+                    SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey,
+                _ => null,
+            };
+
+            if (
+                naming is { } kind
+                && step is DropUniqueConstraintStep dropped
+                && !plan.Warnings.Any(w =>
+                    w.Kind == kind
+                    && string.Equals(w.TableName, dropped.TableName, StringComparison.Ordinal)
+                    && w.Detail.EndsWith(
+                        $"({string.Join(", ", dropped.Columns)})",
+                        StringComparison.Ordinal
+                    )
+                )
+            )
+            {
+                yield return StepRoundTripRelationPrefix
+                    + $"an implicit {reason} step has no {kind} warning naming it: #{i} {DescribeStep(step)}";
+            }
+        }
+
+        // 作り直しを展開した外す文と付ける文は、両方あれば同じ対を持つ
+        foreach (
+            var group in steps
+                .Where(s =>
+                    s.Origin
+                        is SelectedOrigin
+                        {
+                            Item.Kind: SchemaDiffKind.AlterForeignKey
+                                or SchemaDiffKind.AlterUniqueConstraint
+                        }
+                )
+                .GroupBy(s => ((SelectedOrigin)s.Origin).Item, ReferenceEqualityComparer.Instance)
+        )
+        {
+            var drops = group.Where(s => ConstraintOf(s) is (_, false, _)).ToList();
+            var adds = group.Where(s => ConstraintOf(s) is (_, true, _)).ToList();
+
+            if (
+                drops.Count > 0
+                && adds.Count > 0
+                && (
+                    drops.Count != 1
+                    || adds.Count != 1
+                    || drops[0].Pair is null
+                    || !ReferenceEquals(drops[0].Pair, adds[0].Pair)
+                )
+            )
+            {
+                yield return StepRoundTripRelationPrefix
+                    + "an expanded alter's drop and add do not share one re-add pair: "
+                    + string.Join(" / ", group.Select(DescribeStep));
+            }
+        }
+    }
+
+    /// <summary>制約を外す・付ける文の制約の種類・付けるか・表（制約の文でなければ種類は null）</summary>
+    private static (string? Family, bool? Adds, string Table) ConstraintOf(SyncStep step) =>
+        step switch
+        {
+            DropForeignKeyStep s => ("fk", false, s.ChildTable),
+            AddForeignKeyStep s => ("fk", true, s.ChildTable),
+            DropUniqueConstraintStep s => ("uq", false, s.TableName),
+            AddUniqueConstraintStep s => ("uq", true, s.TableName),
+            DropPrimaryKeyStep s => ("pk", false, s.TableName),
+            AddPrimaryKeyStep s => ("pk", true, s.TableName),
+            _ => (null, null, string.Empty),
+        };
+
+    private static string DescribeStep(SyncStep step) =>
+        step switch
+        {
+            DropForeignKeyStep s => $"DropFK {s.ChildTable} {s.Name}",
+            AddForeignKeyStep s => $"AddFK {s.ChildTable} {s.Name}",
+            DropUniqueConstraintStep s =>
+                $"DropUQ {s.TableName} {s.Name} ({string.Join(",", s.Columns)})",
+            AddUniqueConstraintStep s =>
+                $"AddUQ {s.TableName} {s.Name} ({string.Join(",", s.Columns)})",
+            DropPrimaryKeyStep s => $"DropPK {s.TableName}",
+            AddPrimaryKeyStep s => $"AddPK {s.TableName} ({string.Join(",", s.Columns)})",
+            _ => step.GetType().Name,
+        }
+        + step.Origin switch
+        {
+            ImplicitOrigin o => $" [implicit {o.Reason}]",
+            SelectedOrigin o => $" [selected {o.Item.Kind}]",
+            _ => " [merged]",
+        };
+
     /// <summary>関係 N2 の違反の頭</summary>
     public const string CaseFoldRelationPrefix = "relation N2: ";
 
@@ -1226,8 +1642,13 @@ public abstract class SyncPlanCapabilityNetTestsBase
         try
         {
             var rows = SyncPlanExpectationRows.ForDialect(dialect.Name).ToList();
+            var roundTrips = new List<string?>();
             var problems = rows.SelectMany(row =>
-                    SyncPlanExpectationRunner.Run(row, [dialect.Name])
+                    SyncPlanExpectationRunner.Run(
+                        row,
+                        [dialect.Name],
+                        onStepRoundTrip: roundTrips.Add
+                    )
                 )
                 .ToList();
             TestContext.Current.TestOutputHelper?.WriteLine(
@@ -1238,6 +1659,9 @@ public abstract class SyncPlanCapabilityNetTestsBase
             TestContext.Current.TestOutputHelper?.WriteLine(
                 $"{dialect.Name}: relation N3 on {rows.Count - handBuilt} of {rows.Count} expectation rows "
                     + $"(not on {handBuilt} rows with hand-built items)"
+            );
+            TestContext.Current.TestOutputHelper?.WriteLine(
+                $"{dialect.Name}: {SyncPlanCapabilityNetRunner.DescribeStepRoundTrips(roundTrips)} expectation rows"
             );
 
             if (problems.Count > 0)
@@ -1359,6 +1783,21 @@ public abstract class SyncPlanCapabilityNetTestsBase
                         .Select(g => $"{g.Key}={g.Count()}")
                 )
         );
+        // 関係 N4 を掛けた種の数と、計画を文で表せずに掛けなかった種の数（理由ごと）
+        output?.WriteLine(
+            $"{dialect.Name}: {DescribeRoundTrips(outcomes)} seeds; "
+                + $"{DescribeRoundTrips([.. scenarioOutcomes, .. coverageOutcomes])} scenario and coverage rows"
+        );
+
+        // 計画を作れなかったケース（掛けたでも表せないでもない）は数えない
+        static string DescribeRoundTrips(IEnumerable<FuzzSeedOutcome> source) =>
+            SyncPlanCapabilityNetRunner.DescribeStepRoundTrips([
+                .. source
+                    .Where(o =>
+                        o.StepRoundTripChecked || o.StepRoundTripUnrepresentable is not null
+                    )
+                    .Select(o => o.StepRoundTripUnrepresentable),
+            ]);
 
         foreach (var scenario in scenarioOutcomes)
         {

@@ -308,6 +308,39 @@ internal static partial class SyncPlanExpectationRows
                         .Sections.Absent("AddUniqueConstraint: *")
                 ),
             Row(
+                    "plan-implicit-unique-rebuild-on-dropped-table-drops-only",
+                    "暗黙の一意制約: 表が消える一意制約は外すだけで付け直さない",
+                    DialectNames.SqlServer
+                )
+                .Live(s =>
+                {
+                    s.Tbl("t", ("id", "INT", true), ("a", "INT", false), ("b", "INT", false));
+                    s.Unique("t", "UQ_t_ab", "a", "b");
+                })
+                .Items(w =>
+                    [
+                        new SchemaDiffItem
+                        {
+                            Kind = SchemaDiffKind.AlterColumn,
+                            TableName = "t",
+                            ColumnName = "a",
+                            Column = S.Nullable("a", "BIGINT"),
+                            IsSelected = true,
+                        },
+                        new SchemaDiffItem
+                        {
+                            Kind = SchemaDiffKind.DropTable,
+                            TableName = "t",
+                            Entity = w.Live["t"],
+                            IsSelected = true,
+                        },
+                    ]
+                )
+                .Expect(e =>
+                    e.Sections.Contains("DropUniqueConstraint: *")
+                        .Sections.Absent("AddUniqueConstraint: *")
+                ),
+            Row(
                     "plan-implicit-unique-drop-warns-for-surviving-fk",
                     "一意制約: 削除の警告は、同期で消える外部キーには出さない",
                     DialectNames.SqlServer
