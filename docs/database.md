@@ -186,6 +186,9 @@ Such a key is skipped and reported (see below) rather than dropped silently.
 SQLite does not check that a foreign key's parent table exists when the table is created, so a database can carry keys that point at a table that is not there; those are treated the same way.
 MySQL keys whose parent table is not in the connected database (created with `FOREIGN_KEY_CHECKS = 0`, or left behind when the parent table was dropped that way) are treated the same way too.
 A table whose name contains a dot is not imported, on SQLite as on the other DBMSs, because the diagram reads the first dot of a table name as a schema qualifier (on SQLite, the name of an attached database).
+On SQLite, a table whose name starts with `quicker_sync_` (a table that the [bidirectional sync of generated code](code-generation.md#what-it-puts-where) creates in the device database) is not imported either, and no warning is shown.
+Such a table therefore never shows up in the differences of a diff sync, and a sync never drops it.
+`quicker_sync_` is a prefix QuickER reserves, so a table of your own whose name starts with it is also left out of a SQLite import.
 See the import warnings below.
 
 #### Import warnings

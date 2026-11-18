@@ -98,6 +98,9 @@ public static class DialectDeclarations
 
     private const string SystemTableReason = "DB・ツールのシステム表なので、告知せずに外す（段 3）";
 
+    private const string SystemTableSqliteReason =
+        "DB・ツールのシステム表（QuickER の双方向同期の補助の表＝quicker_sync_ で始まる表を含む）なので、告知せずに外す（段 3）";
+
     private const string UserDefinedTypeReason = "型名のまま持ち帰り、同じ DB への同期は型名で通る";
 
     private const string UnparsableTypeReason =
@@ -418,7 +421,7 @@ public static class DialectDeclarations
             { Kind.TableOption, NotDetected(Drops, TableOptionReason) }, // C6 ○ 無 落
             { Kind.TemporaryTable, Impossible() }, // C7a ×
             { Kind.ExtensionOwnedTable, Impossible() }, // C7b ×
-            { Kind.SystemTable, NotDetected(NotApplicable, SystemTableReason) }, // C7c ○ 無 該
+            { Kind.SystemTable, NotDetected(NotApplicable, SystemTableSqliteReason) }, // C7c ○ 無 該
             { Kind.ForeignKeyToExcludedTable, Detected(NotApplicable) }, // C9 ○ 既 該
             { Kind.FlattenedType, Impossible() }, // D1a ×
             { Kind.UserDefinedType, Impossible() }, // D1b ×

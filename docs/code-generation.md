@@ -2640,6 +2640,9 @@ The local database gets four shared tables, each created on first use with `CREA
 `quicker_sync_blob_pending` records the blob copies a download still owes (see [Unbounded binary columns](#unbounded-binary-columns)).
 `quicker_sync_row_pending` records the rows a download still owes: rows removed here so a unique value's holder could go, which the ordered stream had already passed (see [Conflicts](#conflicts)).
 
+QuickER's schema import and diff sync on SQLite leave out the tables whose names start with `quicker_sync_`: they are not imported into the diagram and never show up as tables to drop (see [What the import looks at](database.md#what-the-import-looks-at)).
+`quicker_sync_` is a reserved prefix, so do not use it for the names of your own tables.
+
 The resume point is derived, not stored.
 It is the highest mirrored version among the local rows, so there is no bookkeeping row that can drift out of step with the data.
 Three properties make that derivation correct, and all three are load-bearing.

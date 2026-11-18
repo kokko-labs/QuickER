@@ -12,6 +12,12 @@
   - ドットを含む表は PRAGMA を読む前に外す（外した表の一覧へ入れて `ForeignKeyToExcludedTable` の経路に乗る）ので、`QuoteSimple` は二重の守り。DDL・同期スクリプト側の `Quote` は分割が正しいので据え置く。
 - 生成列は `PRAGMA table_xinfo` の hidden 2・3 で計算列とする（`table_info` は生成列を 1 行も返さない）。式は取れないので Detail は空。
 - 再構築で失う属性を告げるため、`sqlite_master` の `type='table'` の `sql` を `SchemaImportResult.TableCreateSql` として持ち帰る（使い方は `src/QuickER.Provider/CLAUDE.md`「テーブル再構築の合成」）。
+- 名前が `quicker_sync_` で始まる**表**（生成コードの双方向同期が端末の DB に作る補助の表。判定は `SyncAuxiliaryNames.IsAuxiliary`＝ASCII の大文字小文字を無視する前方一致・`src/QuickER.Dialects/CLAUDE.md`「双方向同期の補助の物の名前（SyncAuxiliaryNames）」）は、告知せずに外す（図で表せない定義の種類 C7c `SystemTable`＝システム表・ツールの表と同じ位置づけ）。
+  - 外した表の CREATE 文は計画の段の判定の写し（`replayTableSql`）に入れる（補助の表へ書くトリガーが、写しの DB で表を引けるように）。名前は外した表の一覧（`excludedNames`）に入れる（その表を参照する外部キーを `ForeignKeyToExcludedTable` で告げる）。
+  - 利用者の表に張ったトリガーは、名前が `quicker_sync_` で始まっても外さない（補助オブジェクトとして取り込み、再構築で作り直し、計画の段と実行器のトリガーの判定に入れる）。外すと、表を作り直したときにそのトリガーが作り直されずに消え、トリガーの判定からも黙って外れる。
+  - 対象は SQLite の取込だけ（ほかの 4 方言の取込・差分・計画・実行器は前置きを読まない）。
+  - 壊すと：端末の SQLite の DB をスキーマ取込・差分同期で開くと、補助の表が図に無い表の削除として差分に出て、全部を選んだ同期が補助の表を消し、未送信の変更の記録が黙って無くなる。
+  - ガード：期待の行 `realdb-sync-aux-tables-are-not-diffed`・`realdb-sync-aux-tables-survive-select-all`・`realdb-sync-aux-trigger-kept-by-rebuild`・`realdb-sync-aux-trigger-excludes-key-column-drop`（実 SQLite）・`SqliteImportFidelityIntegrationTests.Import_InternalSqliteTables_AreExcludedSilently`（大文字の混ざった名前・トリガーは補助オブジェクト）・`SqliteImportFidelityIntegrationTests.Import_ForeignKeyToExcludedVirtualTable_IsReported`（外した補助の表を参照する外部キーの告知）・`SourceRuleTests`（規則 `sync-auxiliary-names-in-template`・`sync-auxiliary-name-prefix-copies`）。mutation 実証済み（取込の除外を外す・写しに入れない・外した表の一覧に入れない・大文字小文字を区別する、のどれも該当の行かテストが赤）。
 
 ### 外部キーと名前の照合
 
@@ -92,7 +98,7 @@
   - 置き換えの表には、同期後の列名に加えて、今の表の主キー・一意制約のうち列がすべて残るものを写し（SQL を解析せず `PRAGMA table_info`・`index_list`・`index_info` から読む）、その表の索引を原文で作り直す（作り直せない索引は飛ばす）。名前だけの表にすると、`ON CONFLICT` の的を失ったトリガーを列の追加だけで壊れたと数える（偽の警告）。同じ同期が主キー・一意制約を変える形は写さないので、その変更で `ON CONFLICT` の的が消えるトリガーは計画の段で名指しせず、実行器の前後の比較が巻き戻して名指しする（ユーザーが受け入れた割り切り・docs に明記）。
   - メモリの接続も `SqliteFileConnections.Create`（`Data Source=:memory:`）で作り、文は `SqliteScripts.RunToEnd` で流す。
   - ビュー・トリガーを壊すのは表の列の名前の集合と表の有無の変化だけ（型・主キー・NOT NULL・列順・制約の作り直しは壊さない。ビューは 15 形 × 11 変更、トリガーは 19 形 × 8 変更の実測）。入力は表ごとの同期後の列名だけにする。
-- 取込（`SqliteSchemaImporter.LoadLiveDependentCheckAsync`）は、ビュー・トリガー・索引のどれかがあるときだけ判定器を作って `SchemaImportResult.LiveDependentCheck` で持ち帰る（どれも無ければ null）。ビュー・トリガー（ビューの INSTEAD OF のもの・取り込まない表のものも）・索引（名前・表・原文）は `sqlite_master` の 1 回の読み取りで集める。写す表の原文は表の列挙の 1 回の読み取りで集め、取り込まない表（仮想表・ドットを含む表・名前の衝突で捨てた表）も入れ、仮想表の付属表（`PRAGMA table_list` の `shadow`）は入れない（仮想表の作成で自動でできる）。
+- 取込（`SqliteSchemaImporter.LoadLiveDependentCheckAsync`）は、ビュー・トリガー・索引のどれかがあるときだけ判定器を作って `SchemaImportResult.LiveDependentCheck` で持ち帰る（どれも無ければ null）。ビュー・トリガー（ビューの INSTEAD OF のもの・取り込まない表のものも）・索引（名前・表・原文）は `sqlite_master` の 1 回の読み取りで集める。写す表の原文は表の列挙の 1 回の読み取りで集め、取り込まない表（仮想表・ドットを含む表・名前の衝突で捨てた表・双方向同期の補助の表）も入れ、仮想表の付属表（`PRAGMA table_list` の `shadow`）は入れない（仮想表の作成で自動でできる）。
 - 写せない表（DB の外で登録した照合順序の列・同梱の SQLite に無い仮想表のモジュール）は飛ばすので、その上のビュー・トリガーは写しの中で同期の前から読めず（発火できず）、判定しない（警告しない）。アプリが登録した関数を使うビュー・トリガーも同じ。この形は SQL だけでは作れない（CREATE が断る）ので、期待の行を持たない。
 - 守りの無い枝：表どうしの組み合わせでだけ壊れる（どの表の変更も単独では壊さない）ときに、名前を変える表をすべて原因とする枝は、通す形が見つかっておらず行で通していない（コードのコメントにも書いた）。作れる形が見つかったら期待の行を足す。
 - 索引も図に無く、再構築は作り直す表の索引を原文で作り直す。索引が読む列（列の並び・式・部分索引の `WHERE`）を消すと、作り直しの途中で `no such column` で断られて同期全体が巻き戻る（データは壊れない。2026-11 の実測で 14 形 × 8 変更）。写しは同期の前に作れた索引の名前を控え、置き換えた表（消した表は除く）の索引を原文で作り直して、前に作れたのに作れない索引を返す。計画はそうした表の列の削除を全部外し（索引が読まない列の削除も一緒に外す＝ビュー・トリガーと同じ表の単位）、`TableChangeBreaksDependentIndex` で名指しする。列の追加・型の変更・表の削除は索引を壊さないので流す（名前の変更は消す側だけが外れ、同期の後は古い列と新しい列が並ぶ）。DB の外で登録した照合順序・アプリの関数を使う索引は写しで同期の前から作れないので、列の削除が壊す索引としては数えない（その表の作り直しは実行器の接続でも索引を作れずに巻き戻るので、作り直しを止める物として下の「DB の外の照合順序・関数」が外して名指しする）。実行器の最後の守りは足さない（索引の作り直しの失敗は文の失敗として同期を巻き戻し、黙って壊れない）。

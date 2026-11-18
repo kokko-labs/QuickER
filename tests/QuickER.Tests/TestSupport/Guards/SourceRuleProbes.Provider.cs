@@ -1225,5 +1225,94 @@ internal static partial class SourceRuleProbes
                     ),
                 ]
             ),
+            // CREATE TABLE・CREATE [UNIQUE] INDEX・CREATE TRIGGER（IF NOT EXISTS つきも・大文字小文字を問わない）の名前のうち、前置きで
+            // 始まらないもの（大文字の前置き・引用符で囲んだ前置きは補助の物）と、名前の代わりに補間・連結が続くものを拾う。
+            // 文の綴りだけを書いた XmlDoc（IF NOT EXISTS の直後に名前が無い）と、CREATE VIEW は拾わない
+            new SourceRuleProbe(
+                "sync-auxiliary-names-in-template-forms",
+                "sync-auxiliary-names-in-template",
+                [
+                    new ProbeFile(
+                        "Probe.scriban",
+                        """
+                        /// <c>CREATE TABLE IF NOT EXISTS</c>.
+                        "CREATE TABLE IF NOT EXISTS quicker_sync_journal ("
+                        "CREATE TABLE QUICKER_SYNC_ACK ("
+                        "create table if not exists \"quicker_sync_blob_pending\" ("
+                        "CREATE TABLE IF NOT EXISTS sync_journal ("
+                        "CREATE UNIQUE INDEX IF NOT EXISTS ix_journal ON quicker_sync_journal (id)"
+                        "CREATE INDEX quicker_sync_ix ON quicker_sync_ack (key_text)"
+                        "CREATE TRIGGER IF NOT EXISTS trg_{{ table.name }} AFTER INSERT"
+                        "CREATE TRIGGER quicker_sync_trg AFTER INSERT"
+                        "CREATE TABLE " + name + " ("
+                        "CREATE VIEW v AS SELECT 1"
+                        """,
+                        "TABLE sync_journal",
+                        "INDEX ix_journal",
+                        "TRIGGER trg_{{",
+                        "TABLE \""
+                    ),
+                ]
+            ),
+            // 文字列リテラル（普通・逐語・生・UTF-8）と補間の文字の部分の、前置きを大文字小文字を無視して含む値を拾い、コメント・XmlDoc・
+            // 前置きの途中で切れた綴り・識別子は拾わない。.g.cs は読まない
+            new SourceRuleProbe(
+                "sync-auxiliary-name-prefix-copies-forms",
+                "sync-auxiliary-name-prefix-copies",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """"
+                        /// <summary>quicker_sync_journal を外す</summary>
+                        internal static class Probe
+                        {
+                            // "quicker_sync_ack"
+                            public static string A() => "quicker_sync_journal";
+                            public static string B() => @"DELETE FROM QUICKER_SYNC_ACK";
+                            public static string C(string t) => $"SELECT * FROM quicker_sync_{t}";
+                            public static string D() => """quicker_Sync_row_pending""";
+                            public static System.ReadOnlySpan<byte> E() => "quicker_sync_x"u8;
+                            public static string F() => "quicker_syncjournal";
+                            public static string G() => "sync_journal";
+                            public static string H() => nameof(quicker_sync_x);
+                            private static int quicker_sync_x;
+                        }
+                        """",
+                        "quicker_sync_journal",
+                        "DELETE FROM QUICKER_SYNC_ACK",
+                        "SELECT * FROM quicker_sync_",
+                        "quicker_Sync_row_pending",
+                        "quicker_sync_x"
+                    ),
+                    new ProbeFile(
+                        "Probe.g.cs",
+                        "internal static class P { const string A = \"quicker_sync_x\"; }"
+                    ),
+                ]
+            ),
+            // 構文の節の規則は、条件コンパイルの外れる分岐の中も読む
+            new SourceRuleProbe(
+                "sync-auxiliary-name-prefix-copies-inactive-branch",
+                "sync-auxiliary-name-prefix-copies",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        internal static class Probe
+                        {
+                        #if QUICKER_PROBE_BRANCH
+                            public const string Table = "quicker_sync_journal";
+                        #else
+                            public const string Table = "journal";
+                        #endif
+                        }
+                        """,
+                        "quicker_sync_journal"
+                    ),
+                ]
+            ) with
+            {
+                InactiveBranch = true,
+            },
         ];
 }

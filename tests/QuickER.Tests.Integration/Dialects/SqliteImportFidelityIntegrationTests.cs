@@ -797,16 +797,34 @@ CREATE INDEX ix_upper ON ""Äpfel"" (upper_only);
     }
 
     /// <summary>
-    /// SQLite の内部表（<c>sqlite_</c> で始まる表。AUTOINCREMENT が作る <c>sqlite_sequence</c> など）を、取り込まず告知もしないことを検証する
+    /// SQLite の内部表（<c>sqlite_</c> で始まる表。AUTOINCREMENT が作る <c>sqlite_sequence</c> など）と、双方向同期の補助の表
+    /// （<c>quicker_sync_</c> で始まる表）を、取り込まず告知もしないことと、利用者の表に張った補助のトリガーは補助オブジェクトとして
+    /// 取り込むことを検証する
     /// </summary>
-    /// <remarks>扱いの表の C7c（取込＝告知しない除外）を固定する。</remarks>
-    [Fact(DisplayName = "SQLite の内部表（sqlite_sequence）は取り込まず、告知もしない")]
+    /// <remarks>
+    /// 扱いの表の C7c（取込＝告知しない除外）を固定する。補助の表は生成テンプレートが作る 4 表の文の写しで、
+    /// <c>quicker_sync_journal</c> の AUTOINCREMENT も告げない（外した表の列は読まない）。前置きは SQLite の名前の規則と
+    /// 同じく ASCII の大文字小文字を無視して見る（大文字の混ざった名前の表も外す）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "SQLite の内部表（sqlite_sequence）と双方向同期の補助の表は取り込まず告知もせず、補助のトリガーは補助オブジェクトとして取り込む"
+    )]
     public async Task Import_InternalSqliteTables_AreExcludedSilently()
     {
         using var db = SqliteTempDatabase.Create();
 
         await db.ApplyDdlAsync(
-            "CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);",
+            @"
+CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS quicker_sync_journal (id INTEGER PRIMARY KEY AUTOINCREMENT, table_name TEXT NOT NULL, key_text TEXT NOT NULL, operation TEXT NOT NULL, original_row_version BLOB NULL, unbounded_binary_columns TEXT NULL, recorded_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS quicker_sync_ack (table_name TEXT NOT NULL, key_text TEXT NOT NULL, server_row_version BLOB NOT NULL, PRIMARY KEY (table_name, key_text));
+CREATE TABLE IF NOT EXISTS quicker_sync_blob_pending (table_name TEXT NOT NULL, key_text TEXT NOT NULL, column_name TEXT NOT NULL, PRIMARY KEY (table_name, key_text, column_name));
+CREATE TABLE IF NOT EXISTS quicker_sync_row_pending (table_name TEXT NOT NULL, key_text TEXT NOT NULL, PRIMARY KEY (table_name, key_text));
+CREATE TABLE QUICKER_SYNC_Upper (k TEXT NULL);
+CREATE TRIGGER quicker_sync_trg_items_insert AFTER INSERT ON items BEGIN
+  INSERT INTO quicker_sync_journal (table_name, key_text, operation, recorded_at) VALUES ('items', NEW.id, 'insert', 't');
+END;
+",
             Ct
         );
 
@@ -815,12 +833,19 @@ CREATE INDEX ix_upper ON ""Äpfel"" (upper_only);
 
         result.Entities.Select(e => e.TableName).Should().Equal("items");
 
-        // 内部表（sqlite_sequence）については何も告げない。告げるのは AUTOINCREMENT の列だけ
+        // 内部表（sqlite_sequence）と補助の表については何も告げない。告げるのは items の AUTOINCREMENT の列だけ
+        var warning = result.Warnings.Should().ContainSingle().Which;
+        warning.Kind.Should().Be(SchemaImportWarningKind.AutoIncrementLost);
+        warning.TableName.Should().Be("items");
+
+        // 利用者の表に張った補助のトリガーは外さない
         result
-            .Warnings.Should()
-            .ContainSingle()
-            .Which.Kind.Should()
-            .Be(SchemaImportWarningKind.AutoIncrementLost);
+            .AuxiliaryObjects.Should()
+            .ContainSingle(a => a.Name == "quicker_sync_trg_items_insert")
+            .Which.Should()
+            .Match<SchemaAuxiliaryObject>(a =>
+                a.Kind == SchemaAuxiliaryObjectKind.Trigger && a.TableName == "items"
+            );
     }
 
     /// <summary>
@@ -879,10 +904,11 @@ CREATE VIEW v_customers AS SELECT id, name FROM customers;
     }
 
     /// <summary>
-    /// 外した仮想テーブルを参照する外部キーは、範囲の外ではなく「外した表への参照」として告げる（C9）
+    /// 外した表（仮想テーブル・双方向同期の補助の表）を参照する外部キーは、範囲の外ではなく「外した表への参照」として
+    /// 告げる（C9）
     /// </summary>
     [Fact(
-        DisplayName = "[Integration] SQLite: 外した仮想テーブルを参照する外部キーは ForeignKeyToExcludedTable で告げる"
+        DisplayName = "[Integration] SQLite: 外した仮想テーブル・双方向同期の補助の表を参照する外部キーは ForeignKeyToExcludedTable で告げる"
     )]
     public async Task Import_ForeignKeyToExcludedVirtualTable_IsReported()
     {
@@ -892,6 +918,8 @@ CREATE VIEW v_customers AS SELECT id, name FROM customers;
             @"
 CREATE VIRTUAL TABLE docs USING fts5(title);
 CREATE TABLE note (id INTEGER PRIMARY KEY, doc_id INTEGER REFERENCES docs(rowid));
+CREATE TABLE quicker_sync_ack (table_name TEXT NOT NULL, key_text TEXT NOT NULL, server_row_version BLOB NOT NULL, PRIMARY KEY (table_name, key_text));
+CREATE TABLE audit (id INTEGER PRIMARY KEY, table_name TEXT, key_text TEXT, FOREIGN KEY (table_name, key_text) REFERENCES quicker_sync_ack (table_name, key_text));
 ",
             Ct
         );
@@ -899,17 +927,16 @@ CREATE TABLE note (id INTEGER PRIMARY KEY, doc_id INTEGER REFERENCES docs(rowid)
         await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
         var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
 
-        result.Entities.Select(e => e.TableName).Should().BeEquivalentTo(["note"]);
+        result.Entities.Select(e => e.TableName).Should().BeEquivalentTo(["note", "audit"]);
         result.Relationships.Should().BeEmpty();
         result
             .Warnings.Should()
             .NotContain(w => w.Kind == SchemaImportWarningKind.ForeignKeyOutsideScope);
-        var warning = result
-            .Warnings.Should()
-            .ContainSingle(w => w.Kind == SchemaImportWarningKind.ForeignKeyToExcludedTable)
-            .Subject;
-        warning.TableName.Should().Be("note");
-        warning.Detail.Should().Be("docs");
+        result
+            .Warnings.Where(w => w.Kind == SchemaImportWarningKind.ForeignKeyToExcludedTable)
+            .Select(w => (w.TableName, w.Detail))
+            .Should()
+            .BeEquivalentTo([("note", "docs"), ("audit", "quicker_sync_ack")]);
     }
 
     /// <summary>

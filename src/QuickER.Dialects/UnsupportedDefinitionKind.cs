@@ -99,7 +99,10 @@ public enum UnsupportedDefinitionKind
     /// <summary>C7b 拡張が所有する表</summary>
     ExtensionOwnedTable,
 
-    /// <summary>C7c システム表・ツールの表（sqlite_・ms_shipped・sysdiagrams）</summary>
+    /// <summary>
+    /// C7c システム表・ツールの表（sqlite_・ms_shipped・sysdiagrams。SQLite では QuickER の双方向同期の補助の表＝
+    /// <see cref="SyncAuxiliaryNames.Prefix"/> で始まる表も含む）
+    /// </summary>
     SystemTable,
 
     /// <summary>C9 除外した表を参照する外部キー</summary>

@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using QuickER.Dialects;
 using QuickER.Tests.Provider;
 
 namespace QuickER.Tests.TestSupport.Guards;
@@ -740,7 +741,148 @@ internal static partial class SourceRules
                         )),
                 ]
             ),
+            // 生成コードの双方向同期が端末の DB に作る物（表・索引・トリガー）の名前は、SQLite の取込が外す前置き
+            // （SyncAuxiliaryNames.Prefix）で始める。テンプレートは依存ゼロのランタイムへ出すので名前を直書きで持ち、前置きで始まらない
+            // 名前を作ると、スキーマ同期がその物を図に無い表の削除として差分に出し、全部を選んだ同期が消す。
+            // 同期の節のテンプレートは利用者の表を作る文を持たない（作る物はどれも補助の物）ことを前提に、CREATE の文を全部数える
+            SourceRule.Forbid(
+                "sync-auxiliary-names-in-template",
+                "双方向同期が端末の DB に作る表・索引・トリガーの名前は SyncAuxiliaryNames.Prefix で始める（SQLite の取込がこの前置きで外す）",
+                SourceScope.Files("src", SyncTemplateFile),
+                GuardFinder.File(
+                    GuardReader.Text,
+                    file =>
+                        FindSyncTemplateCreates(
+                            file,
+                            onlyNonAuxiliary: true,
+                            "TABLE",
+                            "INDEX",
+                            "TRIGGER"
+                        )
+                )
+            ) with
+            {
+                // CREATE TABLE の名前を読めていること（いまは補助の表が 4 つ。読み方を誤ると何も拾わずに緑になる）
+                Floor = new(
+                    GuardFinder.File(
+                        GuardReader.Text,
+                        file => FindSyncTemplateCreates(file, onlyNonAuxiliary: false, "TABLE")
+                    ),
+                    4,
+                    "同期のテンプレートの CREATE TABLE の文"
+                ),
+            },
+            // 前置きの正本は QuickER.Dialects の SyncAuxiliaryNames 1 つで、QuickER.Provider* は文字列で写さず SyncAuxiliaryNames を通す
+            // （写すと、前置きを変えたときに取込の判定だけが古い前置きのまま残る）。文字列リテラルと補間の文字の部分のうち、前置きを
+            // 大文字小文字を無視して含むものを数える（コメント・XmlDoc は数えない。.g.cs は読まない）
+            SourceRule.Forbid(
+                "sync-auxiliary-name-prefix-copies",
+                "双方向同期の補助の物の名前の前置きは SyncAuxiliaryNames が持ち、QuickER.Provider* は文字列で写さない",
+                Src.Within("QuickER.Provider"),
+                GuardFinder.File(GuardReader.SyntaxNodes, FindSyncAuxiliaryPrefixLiterals)
+            ) with
+            {
+                // 範囲が 6 つのプロジェクトを読んでいること（本体の QuickER.Provider だけなら 54 ファイル）
+                MinimumFiles = 100,
+                Witness = new(
+                    SourceScope.Files("src", "src/QuickER.Dialects/SyncAuxiliaryNames.cs"),
+                    [
+                        new(
+                            "src/QuickER.Dialects/SyncAuxiliaryNames.cs",
+                            SyncAuxiliaryNames.Prefix,
+                            1,
+                            "前置きの正本の定数（範囲の外の実在のリテラルを拾えること）"
+                        ),
+                    ]
+                ),
+            },
         ];
+
+    /// <summary>生成コードの双方向同期のテンプレートの部品</summary>
+    private const string SyncTemplateFile =
+        "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_10_Sync.scriban";
+
+    /// <summary>
+    /// CREATE [UNIQUE] TABLE / INDEX / TRIGGER [IF NOT EXISTS] の直後の名前（名前の代わりに IF が続く形＝文の綴りだけを書いた XmlDoc は拾わない。
+    /// 引用符・補間の印もそのまま名前として読む）
+    /// </summary>
+    private static readonly Regex SyncTemplateCreateStatement = new(
+        @"\bCREATE\s+(?:UNIQUE\s+)?(TABLE|INDEX|TRIGGER)\s+(?:IF\s+NOT\s+EXISTS\s+)?(?!IF\b)([^\s(]+)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled
+    );
+
+    /// <summary>CREATE の文の種類と名前（何かは「種類 名前」。種類は大文字）</summary>
+    /// <param name="file">テンプレート</param>
+    /// <param name="onlyNonAuxiliary">前置きで始まらない名前だけを返すか</param>
+    /// <param name="kinds">返す種類</param>
+    private static IEnumerable<GuardFinding> FindSyncTemplateCreates(
+        GuardFile file,
+        bool onlyNonAuxiliary,
+        params string[] kinds
+    )
+    {
+        foreach (Match match in SyncTemplateCreateStatement.Matches(file.Text))
+        {
+            var kind = match.Groups[1].Value.ToUpperInvariant();
+            var name = match.Groups[2].Value;
+
+            if (!kinds.Contains(kind, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
+            if (
+                onlyNonAuxiliary
+                && SyncAuxiliaryNames.IsAuxiliary(name.Trim('\\', '"', '[', ']', '`'))
+            )
+            {
+                continue;
+            }
+
+            yield return new GuardFinding($"{kind} {name}", file.LineAt(match.Index));
+        }
+    }
+
+    /// <summary>
+    /// 文字列リテラル（逐語・生の文字列を含む）と補間の文字の部分のうち、<see cref="SyncAuxiliaryNames.Prefix"/> を
+    /// 大文字小文字を無視して含むもの（何かは値の 1 行目の先頭 60 文字。.g.cs は読まない）
+    /// </summary>
+    private static IEnumerable<GuardFinding> FindSyncAuxiliaryPrefixLiterals(GuardFile file)
+    {
+        if (file.RelativePath.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase))
+        {
+            yield break;
+        }
+
+        foreach (var node in file.Nodes)
+        {
+            var value = node switch
+            {
+                LiteralExpressionSyntax literal
+                    when literal.IsKind(SyntaxKind.StringLiteralExpression)
+                        || literal.IsKind(SyntaxKind.Utf8StringLiteralExpression) => literal
+                    .Token
+                    .ValueText,
+                InterpolatedStringTextSyntax text => text.TextToken.ValueText,
+                _ => null,
+            };
+
+            if (
+                value is null
+                || !value.Contains(SyncAuxiliaryNames.Prefix, StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                continue;
+            }
+
+            var firstLine = value.Split('\n')[0].Trim();
+
+            yield return new GuardFinding(
+                firstLine.Length > 60 ? firstLine[..60] : firstLine,
+                node.GetLocation().GetLineSpan().StartLinePosition.Line + 1
+            );
+        }
+    }
 
     /// <summary>名前の入口の置き場所の関数と、例外文の置き場所の表記</summary>
     private static readonly IReadOnlyDictionary<string, string> NameSourceLocations =
