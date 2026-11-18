@@ -70,7 +70,16 @@
       "**/AssessmentRules.SetDefaultOnNotNullColumns.cs",
       "**/AssessmentRules.SetNullForeignKeysOnNotNullColumns.cs",
       "**/AssessmentRules.SetNullOnNotNullLiveForeignKeys.cs",
-      "**/AssessmentRules.UniqueConstraintDropsBreakingForeignKeys.cs"
+      "**/AssessmentRules.UniqueConstraintDropsBreakingForeignKeys.cs",
+      "**/ConstraintState.cs",
+      "**/ConstraintIdentity.cs",
+      "**/PlanWalk.cs",
+      "**/WalkPosition.cs",
+      "**/ForeignKeyStepNames.cs",
+      "**/Refusals.cs",
+      "**/MoveFirst.cs",
+      "**/RefusableChangeNaming.cs",
+      "**/UniqueRebuildWithdrawal.cs"
     ]
   }
 }

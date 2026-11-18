@@ -20,14 +20,14 @@ internal static class SyncPlanExpectationRunner
     /// 計画を作った能力ごとに 1 回呼ぶ（関係 N4 を掛けたら null、計画を文で表せずに掛けなかったらその理由）
     /// </param>
     /// <param name="onSchedulingParity">
-    /// 計画を作った能力ごとに 1 回呼ぶ（関係 N5 を掛けたら null、掛けなかったらその理由）
+    /// 計画を作った能力ごとに 1 回呼ぶ（関係 N5 の結果）
     /// </param>
     public static IReadOnlyList<string> Run(
         ScenarioRow<SyncPlanExpectationInput> row,
         IEnumerable<string>? capabilities = null,
         IReadOnlyDictionary<string, string>? scopeAlias = null,
         Action<string?>? onStepRoundTrip = null,
-        Action<string?>? onSchedulingParity = null
+        Action<SyncPlanCapabilityNetRunner.SchedulingParityResult>? onSchedulingParity = null
     )
     {
         var input = row.Input;
@@ -105,7 +105,7 @@ internal static class SyncPlanExpectationRunner
         string key,
         List<string> problems,
         Action<string?>? onStepRoundTrip,
-        Action<string?>? onSchedulingParity
+        Action<SyncPlanCapabilityNetRunner.SchedulingParityResult>? onSchedulingParity
     )
     {
         var facets = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
@@ -212,7 +212,8 @@ internal static class SyncPlanExpectationRunner
         problems.AddRange(roundTrip.Problems.Select(p => $"[{key}] {p}"));
         onStepRoundTrip?.Invoke(roundTrip.Unrepresentable);
 
-        // 関係 N5（組み立ての新旧の一致）：手で組んだ項目の行にも掛ける。同期スクリプトは実方言だけ比べる
+        // 関係 N5（計画の新旧の一致）：手で組んだ項目の行にも掛ける。同期スクリプトは実方言だけ比べる。取り下げのあるケースの関係 5
+        // （新しい計画器の除外の不動点）は関係 N3 と同じ行にだけ、関係 4（新しい計画の静的な規則）は実方言の行にだけ掛ける
         var parity = SyncPlanCapabilityNetRunner.SchedulingParityProblems(
             items,
             plan,
@@ -220,10 +221,28 @@ internal static class SyncPlanExpectationRunner
             context,
             labels,
             world.Live.Entities,
-            isDialect ? SyncPlanExpectationCapabilities.Provider(key).SyncScriptBuilder.Build : null
+            isDialect
+                ? SyncPlanExpectationCapabilities.Provider(key).SyncScriptBuilder.Build
+                : null,
+            input.Items is not null ? null
+                : isDialect ? SyncPlanExpectationCapabilities.Provider(key).SyncScriptBuilder.Build
+                : shape => PlanShape(shape, labels, world.Live.Entities),
+            isDialect
+                ? newPlan =>
+                    SyncPlanStaticRules
+                        .Evaluate(
+                            key,
+                            world.Live.Entities,
+                            world.Live.Relationships,
+                            [.. items.Where(i => i.IsSelected)],
+                            newPlan,
+                            world.Capabilities
+                        )
+                        .Violations
+                : null
         );
         problems.AddRange(parity.Problems.Select(p => $"[{key}] {p}"));
-        onSchedulingParity?.Invoke(parity.NotApplied);
+        onSchedulingParity?.Invoke(parity);
 
         if (isDialect)
         {

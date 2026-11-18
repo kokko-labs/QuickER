@@ -310,13 +310,13 @@ public sealed class SyncPlanner
         SyncPlanContext? context = null
     ) => BuildPlan(items, capabilities, context, probe: null);
 
-    /// <summary>選択済みの差分項目から実行計画を組み立て、途中の結果を <paramref name="probe"/> へ置く</summary>
+    /// <summary>選択済みの差分項目から実行計画を組み立て、新しい計画器の結果を <paramref name="probe"/> へ置く</summary>
     /// <param name="items">全差分項目</param>
     /// <param name="capabilities">対象方言の同期ケーパビリティ</param>
     /// <param name="context">live スキーマ</param>
     /// <param name="probe">
-    /// 途中の結果を受け取る入れ物（<c>null</c> なら何も置かない）。逐次 DDL の方言の計画では、必ず断られる文を先頭へ移す前の
-    /// セクション・警告・外した項目と、同じ引数から新しい計画器（<see cref="SequentialPlanner"/>）が作った結果を置く
+    /// 結果を受け取る入れ物（<c>null</c> なら何も置かない）。逐次 DDL の方言の計画では、同じ引数から新しい計画器
+    /// （<see cref="SequentialPlanner"/>）が作った結果を置く
     /// </param>
     /// <returns>計画（<paramref name="probe"/> の有無で変わらない）</returns>
     internal SyncPlan BuildPlan(
@@ -454,17 +454,6 @@ public sealed class SyncPlanner
 
             if (probe is not null)
             {
-                probe.ScheduledSections =
-                [
-                    .. sections.Select(section => new SyncPlanSection
-                    {
-                        Kind = section.Kind,
-                        PrimaryKeyPhase = section.PrimaryKeyPhase,
-                        Items = [.. section.Items],
-                    }),
-                ];
-                probe.ScheduledWarnings = [.. warnings];
-                probe.ScheduledExcludedItems = [.. excluded];
                 probe.NewPlan = SequentialPlanner.Plan(items, capabilities, context);
             }
 
@@ -1300,8 +1289,13 @@ public sealed class SyncPlanner
     /// </summary>
     /// <param name="sections">セクション</param>
     /// <param name="sectionItems">セクションへ入れた項目（暗黙の外し直しを含む）</param>
+    /// <param name="uniqueAlters">
+    /// 展開の前の選択の一意制約の作り直しの項目（付け直すキーが 2 つ以上の組から外す作り直しを、元の項目で引く）
+    /// </param>
     /// <param name="capabilities">方言のケーパビリティ</param>
     /// <param name="liveSchema">live スキーマ（無ければ移さない）</param>
+    /// <param name="warnings">警告の積み先（一意制約の作り直しを外したときの名指し）</param>
+    /// <param name="excluded">外した項目の積み先（外した一意制約の作り直し）</param>
     /// <remarks>
     /// <para>
     /// 計画は、両端の型が食い違う外部キー・付け直せない SET NULL の外部キーを外し直さずに残し、その外部キーに阻まれる文で
@@ -1339,6 +1333,12 @@ public sealed class SyncPlanner
     /// <para>
     /// 主キーの変更を移すときは Drop の段だけを移す（付与は元の位置のまま）。移した文が予言に反して通っても、ほかの文は元の並びで
     /// 続く。
+    /// </para>
+    /// <para>
+    /// 上のどれにも当たる文が無く、列の変更で外部キーを外し直さない方言（<see cref="SyncDialectCapabilities.AlterColumnRequiresForeignKeyRebuild"/>
+    /// が偽）のときは、両端の変更の組（<c>MovePairChangesFirst</c>）を見る：残す外部キーの組の両端の列をどちらも型が決まる列として変え、
+    /// 新しい型どうしが並べられない、計画の順で最初の 2 つの列の変更。単独ではどちらも先頭で断られない（DB が受け入れている型の違う組の
+    /// 両端を、それぞれ相手の今の型の仲間へ寄せる）が、先の変更が通った後に後の変更が断られるので、2 つを計画の順のまま先頭へ移す。
     /// </para>
     /// </remarks>
     private static List<SyncPlanSection> MoveCertainFailureFirst(
@@ -1908,6 +1908,9 @@ public sealed class SyncPlanner
     /// <see cref="SyncPlanWarningKind.ConstraintRebuildAroundRowDependentChange"/> で名指しする。
     /// </summary>
     /// <param name="sections">並べ終えたセクション（前寄せの後）</param>
+    /// <param name="userSelected">
+    /// 展開の前の選択（除外の周が止まったときの項目）。外す項目がこの中に参照で在れば利用者が選んだ削除で、付け直さなくても名指ししない
+    /// </param>
     /// <param name="capabilities">方言のケーパビリティ</param>
     /// <param name="liveSchema">live スキーマ（列の変更の前の型・キー。無ければ名指ししない）</param>
     /// <param name="warnings">警告の積み先</param>
@@ -2246,40 +2249,45 @@ public sealed class SyncPlanner
                 }
             }
         }
+    }
 
-        // 列集合が live のキー（主キー・一意制約）の列集合を含み、その列がどれも live にあって型を変えないか
-        static bool HoldsInLiveRows(
-            Entity? liveTable,
-            string table,
-            IReadOnlyList<string> columns,
-            IReadOnlyDictionary<ColumnId, string> typeDecidingColumns
+    /// <summary>
+    /// 列集合が live のキー（主キー・一意制約）の列集合を含み、その列がどれも live にあって型を変えないか（含む列集合の値の組は、
+    /// 含まれる側が一意なので一意）
+    /// </summary>
+    /// <param name="liveTable">live の表（無ければ証明できない）</param>
+    /// <param name="table">保存する形の表名</param>
+    /// <param name="columns">新しい主キー・一意制約の構成列</param>
+    /// <param name="typeDecidingColumns">この同期で型が決まる列（<see cref="PostSyncSchema.TypeDecidingColumns"/>）</param>
+    internal static bool HoldsInLiveRows(
+        Entity? liveTable,
+        string table,
+        IReadOnlyList<string> columns,
+        IReadOnlyDictionary<ColumnId, string> typeDecidingColumns
+    )
+    {
+        if (
+            liveTable is null
+            || columns.Any(c =>
+                !liveTable.Columns.Any(l => SchemaNames.AreSame(l.Name, c))
+                || typeDecidingColumns.ContainsKey(ColumnKey(table, c))
+            )
         )
         {
-            if (
-                liveTable is null
-                || columns.Any(c =>
-                    !liveTable.Columns.Any(l => SchemaNames.AreSame(l.Name, c))
-                    || typeDecidingColumns.ContainsKey(ColumnKey(table, c))
-                )
-            )
-            {
-                return false;
-            }
-
-            var set = columns.Select(SchemaNames.Key).ToHashSet(StringComparer.Ordinal);
-            var namesById = liveTable.Columns.ToDictionary(c => c.Id, c => SchemaNames.Key(c.Name));
-            IEnumerable<IReadOnlyList<string>> keys =
-            [
-                [.. liveTable.GetPrimaryKeyColumnsInOrder().Select(c => SchemaNames.Key(c.Name))],
-                .. liveTable
-                    .UniqueConstraints.Where(u => u.ColumnIds.All(namesById.ContainsKey))
-                    .Select(u =>
-                        (IReadOnlyList<string>)[.. u.ColumnIds.Select(id => namesById[id])]
-                    ),
-            ];
-
-            return keys.Any(key => key.Count > 0 && key.All(set.Contains));
+            return false;
         }
+
+        var set = columns.Select(SchemaNames.Key).ToHashSet(StringComparer.Ordinal);
+        var namesById = liveTable.Columns.ToDictionary(c => c.Id, c => SchemaNames.Key(c.Name));
+        IEnumerable<IReadOnlyList<string>> keys =
+        [
+            [.. liveTable.GetPrimaryKeyColumnsInOrder().Select(c => SchemaNames.Key(c.Name))],
+            .. liveTable
+                .UniqueConstraints.Where(u => u.ColumnIds.All(namesById.ContainsKey))
+                .Select(u => (IReadOnlyList<string>)[.. u.ColumnIds.Select(id => namesById[id])]),
+        ];
+
+        return keys.Any(key => key.Count > 0 && key.All(set.Contains));
     }
 
     /// <summary>この主キー変更項目が新しい主キー列を持つか（＝付与フェーズを要するか）</summary>

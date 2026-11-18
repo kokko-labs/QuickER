@@ -5,6 +5,8 @@ using System.Linq;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.Sync;
+using QuickER.Provider.Sync.Assessment;
 using QuickER.Provider.Sync.Scheduling;
 using QuickER.Provider.Sync.Steps;
 using QuickER.Tests.TestSupport.Engines;
@@ -608,11 +610,23 @@ internal static class SyncPlanCapabilityNetRunner
             context,
             new Dictionary<SchemaDiffItem, int>(ReferenceEqualityComparer.Instance),
             before.Entities,
-            provider.SyncScriptBuilder.Build
+            provider.SyncScriptBuilder.Build,
+            provider.SyncScriptBuilder.Build,
+            newPlan =>
+                SyncPlanStaticRules
+                    .Evaluate(
+                        dialect.Name,
+                        before.Entities,
+                        before.Relationships,
+                        selected,
+                        newPlan,
+                        capabilities,
+                        live.DataFailures
+                    )
+                    .Violations
         );
         outcome.Violations.AddRange(parity.Problems);
-        outcome.SchedulingParityChecked = parity.NotApplied is null;
-        outcome.SchedulingParityNotApplied = parity.NotApplied;
+        outcome.SchedulingParity = parity;
 
         if (caseFoldRelation)
         {
@@ -808,6 +822,30 @@ internal static class SyncPlanCapabilityNetRunner
         SyncDialectCapabilities capabilities,
         SyncPlanContext? context,
         Func<SyncPlan, string> describe
+    ) =>
+        ExclusionFixedPointCore(
+            items,
+            plan,
+            capabilities,
+            () => new SyncPlanner().BuildPlan(items, capabilities, context),
+            describe,
+            ExclusionFixedPointRelationPrefix
+        );
+
+    /// <summary>除外の不動点の本体（計画の作り直し方と違反の頭を受ける。関係 N3 と、関係 N5 の取り下げのあるケースの関係 5 が使う）</summary>
+    /// <param name="items">差分の項目（元のケースの選び方のまま）</param>
+    /// <param name="plan">元の計画</param>
+    /// <param name="capabilities">元の計画と同じ能力</param>
+    /// <param name="replan">外した項目の印を落とした間に、計画を作り直す</param>
+    /// <param name="describe">計画の形を比べる文字列にする（実方言は同期スクリプト）</param>
+    /// <param name="prefix">違反の頭</param>
+    internal static IEnumerable<string> ExclusionFixedPointCore(
+        IReadOnlyList<SchemaDiffItem> items,
+        SyncPlan plan,
+        SyncDialectCapabilities capabilities,
+        Func<SyncPlan> replan,
+        Func<SyncPlan, string> describe,
+        string prefix
     )
     {
         if (plan.ExcludedItems.Count == 0)
@@ -825,7 +863,7 @@ internal static class SyncPlanCapabilityNetRunner
         {
             return
             [
-                ExclusionFixedPointRelationPrefix
+                prefix
                     + "an excluded item is not one of the selected items: "
                     + string.Join(" / ", excluded.Except(found).Select(Describe)),
             ];
@@ -858,14 +896,14 @@ internal static class SyncPlanCapabilityNetRunner
 
         try
         {
-            second = new SyncPlanner().BuildPlan(items, capabilities, context);
+            second = replan();
             again = describe(second);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             return
             [
-                $"{ExclusionFixedPointRelationPrefix}planning without the excluded items threw: {ex.GetType().Name}: {ex.Message}",
+                $"{prefix}planning without the excluded items threw: {ex.GetType().Name}: {ex.Message}",
             ];
         }
         finally
@@ -883,7 +921,7 @@ internal static class SyncPlanCapabilityNetRunner
         if (more.Count > 0 || second.ExcludedItems.Count(partial.Contains) != partial.Count)
         {
             problems.Add(
-                ExclusionFixedPointRelationPrefix
+                prefix
                     + "planning without the excluded items excludes more: "
                     + string.Join(" / ", more.Select(Describe))
                     + (
@@ -919,7 +957,7 @@ internal static class SyncPlanCapabilityNetRunner
                     Math.Min(lines.Length, againLines.Length)
                 );
             problems.Add(
-                $"{ExclusionFixedPointRelationPrefix}the plan differs without the excluded items: "
+                $"{prefix}the plan differs without the excluded items: "
                     + string.Join(" / ", againLines.Except(lines).Select(l => l.Trim()))
                     + " <> "
                     + string.Join(" / ", lines.Except(againLines).Select(l => l.Trim()))
@@ -1342,31 +1380,71 @@ internal static class SyncPlanCapabilityNetRunner
     /// <summary>関係 N5 の違反の頭</summary>
     public const string SchedulingParityRelationPrefix = "relation N5: ";
 
+    /// <summary>関係 N5 の、歩きの終わりの状態の照合の違反の頭</summary>
+    public const string SchedulingParityEndStatePrefix =
+        SchedulingParityRelationPrefix + "end state: ";
+
     /// <summary>関係 N5 を掛けなかった理由：再構築の方言の計画（新しい組み立ては逐次 DDL の方言だけ）</summary>
     public const string SchedulingParityRebuildDialect = "a rebuild dialect";
 
+    /// <summary>関係 N5 の、取り下げのあるケースの関係の違反の頭（後ろに関係の番号を付ける）</summary>
+    public const string SchedulingParityWithdrawalPrefix =
+        SchedulingParityRelationPrefix + "withdrawal ";
+
+    /// <summary>関係 N5 の、取り下げのあるケースで新しい計画に掛けた静的な規則の違反の頭</summary>
+    public const string SchedulingParityStaticRulesPrefix =
+        SchedulingParityRelationPrefix + "static rules on the new plan: ";
+
     /// <summary>関係 N5 の結果</summary>
     /// <param name="Problems">違反の文</param>
-    /// <param name="NotApplied">新旧の文の並びを比べなかった理由（比べたなら null）</param>
+    /// <param name="NotApplied">新旧の計画を比べなかった理由（比べたなら null）</param>
+    /// <param name="Withdrawals">新しい計画器が取り下げた項目の数（取り下げのあるケースの関係を掛けた。無ければ 0）</param>
+    /// <param name="EndStateChecked">歩きの終わりの状態の照合を掛けたか</param>
+    /// <param name="MovedFirst">取り下げの無いケースで全部の面を比べた計画が、前寄せのセクションを持つか</param>
+    /// <param name="NamedAroundRefusable">
+    /// 取り下げの無いケースで全部の面を比べた計画が、断られうる文の前後の名指しの 2 種別の警告を持つか
+    /// </param>
     internal sealed record SchedulingParityResult(
         IReadOnlyList<string> Problems,
-        string? NotApplied
+        string? NotApplied,
+        int Withdrawals = 0,
+        bool EndStateChecked = false,
+        bool MovedFirst = false,
+        bool NamedAroundRefusable = false
     );
 
     /// <summary>
-    /// 関係 N5（計画の新旧の一致）：今の計画器が、必ず断られる文を先頭へ移す前までに作った計画（セクション・警告・外した項目）と、
-    /// 新しい計画器（<see cref="SequentialPlanner"/>）が同じ引数から作った計画が、同じ計画を表す
+    /// 関係 N5（計画の新旧の一致）：今の計画器の最終の計画と、新しい計画器（<see cref="SequentialPlanner"/>）が同じ引数から作った計画が、
+    /// 同じ計画を表す（取り下げのあるケースは、取り下げを選択からやり直した計画として関係 1〜5 を満たす）
     /// </summary>
     /// <remarks>
     /// <para>
-    /// 入れ物（<see cref="SyncPlanProbe"/>）を渡して計画を 1 回作り直し、今の側の途中の結果と新しい側の計画を受け取る。
-    /// 入れ物を渡した計画は、渡さずに作った元の計画と同じ（計画の全部の面と同期スクリプト）。
+    /// 入れ物（<see cref="SyncPlanProbe"/>）を渡して計画を 1 回作り直し、新しい側の計画を受け取る。入れ物を渡した計画は、渡さずに作った
+    /// 元の計画と同じ（計画の全部の面と同期スクリプト）。今の側は入れ物を渡した計画そのもの。
     /// </para>
     /// <para>
-    /// 比べる面：新しい計画を製品の写し（<see cref="StepLowering.ToSyncPlan"/>）で計画へ写した結果の全部の面（警告と外した項目の
-    /// 並びを含む）と項目の共有の形・同期スクリプト（実方言だけ）・文ごとの種類と由来と対（今の側は
-    /// <see cref="SyncPlanStepReader"/> で読む）。
+    /// 取り下げの無いケース（新しい計画の <see cref="SequentialPlan.Withdrawn"/> が空）：新しい計画を製品の写し
+    /// （<see cref="StepLowering.ToSyncPlan"/>）で計画へ写した結果の全部の面（警告と外した項目の並びを含む）・前寄せの印・項目の共有の形・
+    /// 同期スクリプト（実方言だけ）・文ごとの種類と由来と対（今の側は <see cref="SyncPlanStepReader"/> で読む）が今の側と同じ。今の側だけが
+    /// 取り下げていれば、頭を分けて名指しする。
     /// </para>
+    /// <para>取り下げのあるケース（K＝<see cref="SequentialPlan.Withdrawn"/>）：</para>
+    /// <list type="number">
+    /// <item>新しい計画から K の名指しと K の項目を除くと、K を選ばずに作った今の計画と同じ（上と同じ面）。</item>
+    /// <item>
+    /// K の名指しは、断られうる文の前後の名指しの 2 種別より前・ほかの警告より後に K の数だけ並び、外した項目の末尾は K の順の K。
+    /// </item>
+    /// <item>
+    /// K の i 番目は、K の先頭 i 個を選ばずに作った今の計画が最初に取り下げる項目と同じで、名指しの表と Detail も同じ（今の計画の取り下げた
+    /// 項目は、その種別の警告の数だけ外した項目の末尾に在る）。
+    /// </item>
+    /// <item>新しい計画に静的な規則を掛ける（<paramref name="staticRules"/> を渡したときだけ）。</item>
+    /// <item>
+    /// 新しい計画器に除外の不動点（関係 N3）を掛ける：新しい計画の外した項目を最初から選ばずに新しい計画器で作り直しても、新しく外れる項目も
+    /// 取り下げも無く、計画の形（<paramref name="describe"/>）が同じ（<paramref name="describe"/> を渡したときだけ）。
+    /// </item>
+    /// </list>
+    /// <para>文で表せた計画には、歩きの終わりの状態の照合（<see cref="SchedulingEndStateProblems"/>）を掛ける。</para>
     /// <para>再構築の方言の計画と、文で表せない計画には掛けず、理由を返す。</para>
     /// </remarks>
     /// <param name="items">差分の項目（元のケースの選び方のまま）</param>
@@ -1376,6 +1454,12 @@ internal static class SyncPlanCapabilityNetRunner
     /// <param name="labels">手で組んだ項目の番号（無ければ空）</param>
     /// <param name="liveEntities">DB 側の図</param>
     /// <param name="buildScript">同期スクリプトを作る（実方言だけ。能力の組だけなら null）</param>
+    /// <param name="describe">
+    /// 取り下げのあるケースの関係 5 が比べる計画の形（関係 N3 と同じ。N3 を掛けない入力なら null）
+    /// </param>
+    /// <param name="staticRules">
+    /// 取り下げのあるケースの関係 4 が新しい計画に掛ける静的な規則（違反の文を返す。静的な規則を掛けない入力なら null）
+    /// </param>
     internal static SchedulingParityResult SchedulingParityProblems(
         IReadOnlyList<SchemaDiffItem> items,
         SyncPlan plan,
@@ -1383,7 +1467,9 @@ internal static class SyncPlanCapabilityNetRunner
         SyncPlanContext? context,
         IReadOnlyDictionary<SchemaDiffItem, int> labels,
         IReadOnlyList<Entity> liveEntities,
-        Func<SyncPlan, string>? buildScript
+        Func<SyncPlan, string>? buildScript,
+        Func<SyncPlan, string>? describe = null,
+        Func<SyncPlan, IEnumerable<string>>? staticRules = null
     )
     {
         var problems = new List<string>();
@@ -1405,26 +1491,16 @@ internal static class SyncPlanCapabilityNetRunner
         }
 
         // 入れ物を渡しても計画は変わらない（ほかの関係と網の規則が見るのは、入れ物を渡さずに作った計画だけ）
-        Compare("the plan built with the probe", plan, probed, sharing: true);
+        Compare("the plan built with the probe", plan, probed);
 
-        if (
-            probe.ScheduledSections is not { } scheduledSections
-            || probe.ScheduledWarnings is not { } scheduledWarnings
-            || probe.ScheduledExcludedItems is not { } scheduledExcluded
-            || probe.NewPlan is not { } planned
-        )
+        var planned = probe.NewPlan;
+
+        if (planned is null)
         {
             return new SchedulingParityResult(problems, SchedulingParityRebuildDialect);
         }
 
-        var current = new SyncPlan
-        {
-            Sections = scheduledSections,
-            Reorders = probed.Reorders,
-            Warnings = scheduledWarnings,
-            ExcludedItems = scheduledExcluded,
-        };
-        var read = SyncPlanStepReader.Read(current, items.Where(i => i.IsSelected));
+        var read = SyncPlanStepReader.Read(probed, items.Where(i => i.IsSelected));
         problems.AddRange(
             read.Problems.Select(p => SchedulingParityRelationPrefix + "reading: " + p)
         );
@@ -1439,20 +1515,20 @@ internal static class SyncPlanCapabilityNetRunner
             return new SchedulingParityResult(problems, null);
         }
 
-        if (read.Plan is not { } currentSteps || planned.Plan is not { } plannedSteps)
+        var currentSteps = read.Plan;
+        var plannedSteps = planned.Plan;
+
+        if (currentSteps is null || plannedSteps is null)
         {
             return new SchedulingParityResult(problems, read.Unrepresentable);
         }
 
-        // 文ごとの種類・由来・対
-        var currentShapes = StepShapes(currentSteps.Steps, labels);
-        var shapes = StepShapes(plannedSteps.Steps, labels);
+        // 歩きの終わりの状態（新しい側の文の並びだけを読む）
+        var endStateChecked = planned.Facts.Live is not null;
 
-        if (!currentShapes.SequenceEqual(shapes, StringComparer.Ordinal))
+        if (endStateChecked)
         {
-            problems.Add(
-                $"{SchedulingParityRelationPrefix}the steps differ{FirstDifference(currentShapes, shapes)}"
-            );
+            problems.AddRange(SchedulingEndStateProblems(plannedSteps, planned.Facts));
         }
 
         SyncPlan lowered;
@@ -1466,13 +1542,271 @@ internal static class SyncPlanCapabilityNetRunner
             problems.Add(
                 $"{SchedulingParityRelationPrefix}lowering threw: {ex.GetType().Name}: {ex.Message}"
             );
-            return new SchedulingParityResult(problems, null);
+            return new SchedulingParityResult(
+                problems,
+                null,
+                planned.Withdrawn.Count,
+                endStateChecked
+            );
         }
 
-        Compare("the scheduled plan", current, lowered, sharing: true);
-        return new SchedulingParityResult(problems, null);
+        var withdrawn = planned.Withdrawn;
 
-        void Compare(string what, SyncPlan expected, SyncPlan actual, bool sharing)
+        if (withdrawn.Count > 0)
+        {
+            WithdrawalProblems();
+            return new SchedulingParityResult(problems, null, withdrawn.Count, endStateChecked);
+        }
+
+        if (probed.Warnings.Any(IsWithdrawalWarning))
+        {
+            problems.Add(
+                $"{SchedulingParityRelationPrefix}the current planner withdraws a unique constraint rebuild, but the new planner does not: "
+                    + string.Join(
+                        " / ",
+                        probed
+                            .Warnings.Where(IsWithdrawalWarning)
+                            .Select(w => $"{w.TableName}: {w.Detail}")
+                    )
+            );
+        }
+
+        // 文ごとの種類・由来・対
+        CompareSteps("the final plan", currentSteps.Steps);
+        Compare("the final plan", probed, lowered);
+        return new SchedulingParityResult(
+            problems,
+            null,
+            0,
+            endStateChecked,
+            probed.Sections.Any(s => s.IsMovedFirst),
+            probed.Warnings.Any(IsNamedAroundRefusable)
+        );
+
+        // 取り下げのあるケースの関係 1〜5
+        void WithdrawalProblems()
+        {
+            var withdrawnSet = new HashSet<SchemaDiffItem>(
+                withdrawn,
+                ReferenceEqualityComparer.Instance
+            );
+            var newWithdrawalWarnings = lowered.Warnings.Where(IsWithdrawalWarning).ToList();
+
+            // 1. 新しい計画から K の名指しと K の項目を除くと、K を選ばずに作った今の計画と同じ
+            var withoutK = PlanWithout(withdrawn, out var withoutKSteps, out var planningError);
+
+            if (withoutK is null)
+            {
+                problems.Add(
+                    $"{SchedulingParityWithdrawalPrefix}1: planning without the withdrawn items threw: {planningError}"
+                );
+            }
+            else
+            {
+                var newWithoutK = new SyncPlan
+                {
+                    Sections = lowered.Sections,
+                    Rebuilds = lowered.Rebuilds,
+                    Reorders = lowered.Reorders,
+                    Warnings = [.. lowered.Warnings.Where(w => !IsWithdrawalWarning(w))],
+                    ExcludedItems =
+                    [
+                        .. lowered.ExcludedItems.Where(i => !withdrawnSet.Contains(i)),
+                    ],
+                };
+                Compare(
+                    $"withdrawal 1: the plan without the withdrawn items",
+                    withoutK,
+                    newWithoutK
+                );
+
+                if (withoutKSteps is not null)
+                {
+                    CompareSteps(
+                        "withdrawal 1: the plan without the withdrawn items",
+                        withoutKSteps
+                    );
+                }
+            }
+
+            // 2. K の名指しの位置と、外した項目の末尾
+            var categories = lowered
+                .Warnings.Select(w =>
+                    IsNamedAroundRefusable(w) ? 2
+                    : IsWithdrawalWarning(w) ? 1
+                    : 0
+                )
+                .ToList();
+
+            if (
+                newWithdrawalWarnings.Count != withdrawn.Count
+                || categories.Zip(categories.Skip(1)).Any(p => p.First > p.Second)
+            )
+            {
+                problems.Add(
+                    $"{SchedulingParityWithdrawalPrefix}2: the withdrawal warnings are not {withdrawn.Count} warnings between the other warnings and the warnings around refusable statements: "
+                        + string.Join(",", categories)
+                );
+            }
+
+            var tail = lowered
+                .ExcludedItems.Skip(lowered.ExcludedItems.Count - withdrawn.Count)
+                .ToList();
+
+            if (
+                tail.Count != withdrawn.Count
+                || tail.Zip(withdrawn).Any(p => !ReferenceEquals(p.First, p.Second))
+            )
+            {
+                problems.Add(
+                    $"{SchedulingParityWithdrawalPrefix}2: the excluded items do not end with the withdrawn items in order: "
+                        + string.Join(" / ", lowered.ExcludedItems.Select(Describe))
+                );
+            }
+
+            // 3. K の i 番目は、K の先頭 i 個を選ばずに作った今の計画が最初に取り下げる項目
+            for (var i = 0; i < withdrawn.Count; i++)
+            {
+                var current = i == 0 ? probed : PlanWithout([.. withdrawn.Take(i)], out _, out _);
+
+                if (current is null)
+                {
+                    problems.Add(
+                        $"{SchedulingParityWithdrawalPrefix}3: planning without the first {i} withdrawn items threw"
+                    );
+                    continue;
+                }
+
+                var currentWarnings = current.Warnings.Where(IsWithdrawalWarning).ToList();
+                var count = currentWarnings.Count;
+                var first =
+                    count == 0 ? null : current.ExcludedItems[current.ExcludedItems.Count - count];
+
+                if (!ReferenceEquals(first, withdrawn[i]))
+                {
+                    problems.Add(
+                        $"{SchedulingParityWithdrawalPrefix}3: withdrawn item {i} is {Describe(withdrawn[i])}, but the current planner without the first {i} withdraws "
+                            + (first is null ? "nothing" : Describe(first))
+                    );
+                    continue;
+                }
+
+                var expected = currentWarnings[0];
+                var actual = i < newWithdrawalWarnings.Count ? newWithdrawalWarnings[i] : null;
+
+                if (
+                    actual is null
+                    || actual.TableName != expected.TableName
+                    || actual.Detail != expected.Detail
+                )
+                {
+                    problems.Add(
+                        $"{SchedulingParityWithdrawalPrefix}3: withdrawal warning {i} is [{actual?.TableName}: {actual?.Detail}], expected [{expected.TableName}: {expected.Detail}]"
+                    );
+                }
+            }
+
+            // 4. 新しい計画に静的な規則を掛ける
+            if (staticRules is not null)
+            {
+                try
+                {
+                    problems.AddRange(
+                        staticRules(lowered).Select(v => SchedulingParityStaticRulesPrefix + v)
+                    );
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    problems.Add(
+                        $"{SchedulingParityStaticRulesPrefix}threw: {ex.GetType().Name}: {ex.Message}"
+                    );
+                }
+            }
+
+            // 5. 新しい計画器に除外の不動点を掛ける
+            if (describe is not null)
+            {
+                var again = 0;
+                problems.AddRange(
+                    ExclusionFixedPointCore(
+                        items,
+                        lowered,
+                        capabilities,
+                        () =>
+                        {
+                            var secondProbe = new SyncPlanProbe();
+                            new SyncPlanner().BuildPlan(items, capabilities, context, secondProbe);
+                            var second =
+                                secondProbe.NewPlan?.Plan
+                                ?? throw new InvalidOperationException(
+                                    "the new planner did not express the plan as steps"
+                                );
+                            again = secondProbe.NewPlan.Withdrawn.Count;
+                            return StepLowering.ToSyncPlan(second);
+                        },
+                        describe,
+                        SchedulingParityWithdrawalPrefix + "5: "
+                    )
+                );
+
+                if (again > 0)
+                {
+                    problems.Add(
+                        $"{SchedulingParityWithdrawalPrefix}5: planning without the excluded items withdraws {again} more"
+                    );
+                }
+            }
+        }
+
+        // K の項目を選ばずに今の計画器で作った計画（選び方は印を一時的に落として渡し、必ず戻す）
+        SyncPlan? PlanWithout(
+            IReadOnlyList<SchemaDiffItem> unselected,
+            out IReadOnlyList<SyncStep>? steps,
+            out string? error
+        )
+        {
+            steps = null;
+            error = null;
+
+            foreach (var item in unselected)
+            {
+                item.IsSelected = false;
+            }
+
+            try
+            {
+                var built = new SyncPlanner().BuildPlan(items, capabilities, context);
+                steps = SyncPlanStepReader.Read(built, items.Where(i => i.IsSelected)).Plan?.Steps;
+                return built;
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                error = $"{ex.GetType().Name}: {ex.Message}";
+                return null;
+            }
+            finally
+            {
+                foreach (var item in unselected)
+                {
+                    item.IsSelected = true;
+                }
+            }
+        }
+
+        void CompareSteps(string what, IReadOnlyList<SyncStep> expectedSteps)
+        {
+            var expectedShapes = StepShapes(expectedSteps, labels);
+            var shapes = StepShapes(plannedSteps.Steps, labels);
+
+            if (!expectedShapes.SequenceEqual(shapes, StringComparer.Ordinal))
+            {
+                problems.Add(
+                    $"{SchedulingParityRelationPrefix}{what}: the steps differ{FirstDifference(expectedShapes, shapes)}"
+                );
+            }
+        }
+
+        void Compare(string what, SyncPlan expected, SyncPlan actual)
         {
             var expectedFacets = SyncPlanProjection.Plan(expected, labels, liveEntities);
             var actualFacets = SyncPlanProjection.Plan(actual, labels, liveEntities);
@@ -1489,11 +1823,23 @@ internal static class SyncPlanCapabilityNetRunner
                 }
             }
 
-            if (sharing && !SharedItemPattern(expected).SequenceEqual(SharedItemPattern(actual)))
+            if (!SharedItemPattern(expected).SequenceEqual(SharedItemPattern(actual)))
             {
                 problems.Add(
                     $"{SchedulingParityRelationPrefix}{what} shares items between sections differently: "
                         + $"[{string.Join(",", SharedItemPattern(actual))}] <> [{string.Join(",", SharedItemPattern(expected))}]"
+                );
+            }
+
+            // 前寄せの印（面の行は印を書かないので別に比べる）
+            var expectedMoved = expected.Sections.Select(s => s.IsMovedFirst).ToList();
+            var actualMoved = actual.Sections.Select(s => s.IsMovedFirst).ToList();
+
+            if (!expectedMoved.SequenceEqual(actualMoved))
+            {
+                problems.Add(
+                    $"{SchedulingParityRelationPrefix}{what} marks sections moved first differently: "
+                        + $"[{string.Join(",", actualMoved.Select(m => m ? 1 : 0))}] <> [{string.Join(",", expectedMoved.Select(m => m ? 1 : 0))}]"
                 );
             }
 
@@ -1540,6 +1886,203 @@ internal static class SyncPlanCapabilityNetRunner
 
         static string Name(Exception? ex) =>
             ex is null ? "no exception" : $"{ex.GetType().Name}: {ex.Message.Split('\n')[0]}";
+
+        static string Describe(SchemaDiffItem item) => $"{item.Kind}: {item.Description}";
+    }
+
+    /// <summary>一意制約の作り直しの取り下げの名指しか</summary>
+    private static bool IsWithdrawalWarning(SyncPlanWarning warning) =>
+        warning.Kind == SyncPlanWarningKind.UniqueConstraintRebuildKeptForForeignKey;
+
+    /// <summary>断られうる文の前後で外れている制約の名指しの 2 種別か</summary>
+    private static bool IsNamedAroundRefusable(SyncPlanWarning warning) =>
+        warning.Kind
+            is SyncPlanWarningKind.ConstraintRebuildAroundEmptyColumnChange
+                or SyncPlanWarningKind.ConstraintRebuildAroundRowDependentChange;
+
+    /// <summary>
+    /// 関係 N5 の歩きの終わりの状態の照合：新しい計画器の文の並びを DB の今の図から歩いた終わりの状態
+    /// （<see cref="PlanWalk.Over"/> の <see cref="PlanWalk.End"/>）が、同期後に在る制約と合う
+    /// </summary>
+    /// <remarks>
+    /// <para>期待の側は、計画の事実（<see cref="SequentialPlan.Facts"/>）の同期後の事実と DB の今の図から組む。</para>
+    /// <list type="bullet">
+    /// <item>
+    /// 主キー：同期後に在る表（DB の今の表のうち削除しない表と、足す表）ごとに、同期後の主キー（<see cref="PostSyncSchema.PrimaryKeyOf"/>）と
+    /// 同じ列の並び。主キーの無い表は状態にも無い。
+    /// </item>
+    /// <item>
+    /// 一意制約：同期後に在る表ごとに、同期後の一意制約（<see cref="PostSyncSchema.UniqueKeys"/>）と同じ列集合の多重集合。
+    /// </item>
+    /// <item>
+    /// 外部キー：DB の今の外部キーから、選んだ項目の最終形の外部キーの削除（項目の DB のリレーション）を除き、外部キーの追加を足した多重集合
+    /// （子の表・親の表・列の組の集合・実効名・参照アクション）。暗黙に外して付け直す外部キーは在る。
+    /// </item>
+    /// </list>
+    /// </remarks>
+    /// <param name="plan">新しい計画器の文の並びの計画</param>
+    /// <param name="facts">計画を作るのに使った計画の事実（DB の今の図があること）</param>
+    private static IEnumerable<string> SchedulingEndStateProblems(
+        StepPlan plan,
+        AssessmentFacts facts
+    )
+    {
+        var live = facts.Live!;
+        var postSync = facts.PostSync;
+        var limit = facts.Capabilities.IdentifierLengthLimit;
+        var end = PlanWalk.Over(plan.Steps, live, facts.Capabilities).End;
+
+        // 同期後に在る表（保存する形の表名）
+        var tables = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (
+            var table in live
+                .Entities.Select(SchemaDiffService.NormalizeTable)
+                .Where(t => !postSync.Dropped.Tables.Contains(t))
+                .Concat(postSync.AddedTables.Keys)
+        )
+        {
+            if (seen.Add(SchemaNames.Key(table)))
+            {
+                tables.Add(table);
+            }
+        }
+
+        // 主キー
+        foreach (var table in tables)
+        {
+            var expected = (postSync.PrimaryKeyOf(table) ?? []).Select(SchemaNames.Key).ToList();
+            var actual = end.PrimaryKeys.TryGetValue(table, out var columns)
+                ? columns.Select(SchemaNames.Key).ToList()
+                : [];
+
+            if (!expected.SequenceEqual(actual, StringComparer.Ordinal))
+            {
+                yield return $"{SchedulingParityEndStatePrefix}the primary key of {table} is ({string.Join(", ", actual)}), expected ({string.Join(", ", expected)})";
+            }
+        }
+
+        foreach (var table in end.PrimaryKeys.Keys.Where(t => !seen.Contains(SchemaNames.Key(t))))
+        {
+            yield return $"{SchedulingParityEndStatePrefix}a primary key remains on {table}, which does not exist after the sync";
+        }
+
+        // 一意制約（表と列集合の多重集合）
+        var expectedUniques = tables
+            .SelectMany(table =>
+                (
+                    postSync.UniqueKeys.TryGetValue(table, out var keys)
+                        ? keys
+                        : (IReadOnlyList<IReadOnlyList<string>>)[]
+                ).Select(columns =>
+                    $"{SchemaNames.Key(table)} {UniqueConstraintNaming.ColumnSetSignature(columns)}"
+                )
+            )
+            .Order(StringComparer.Ordinal)
+            .ToList();
+        var actualUniques = end
+            .UniqueConstraints.Select(u => $"{SchemaNames.Key(u.Table)} {u.Id.ColumnSet}")
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        if (!expectedUniques.SequenceEqual(actualUniques, StringComparer.Ordinal))
+        {
+            yield return $"{SchedulingParityEndStatePrefix}the unique constraints differ{FirstDifference(expectedUniques, actualUniques)}";
+        }
+
+        // 外部キー（子の表・親の表・列の組の集合・実効名・参照アクションの多重集合）
+        var droppedRelationships = new HashSet<Relationship>(
+            postSync
+                .Items.Where(i =>
+                    i.Kind == SchemaDiffKind.DropForeignKey && i.Relationship is not null
+                )
+                .Select(i => i.Relationship!),
+            ReferenceEqualityComparer.Instance
+        );
+        var liveNames = live.ForeignKeyNames(limit);
+        var expectedForeignKeys = live
+            .ForeignKeys.Where(fk => !droppedRelationships.Contains(fk.Relationship))
+            .Select(fk =>
+            {
+                var child = SchemaDiffService.NormalizeTable(fk.Child);
+                var parent = SchemaDiffService.NormalizeTable(fk.Parent);
+                var name = liveNames.TryGetValue(fk.Relationship, out var resolved)
+                    ? resolved
+                    : ConstraintNames.EffectiveForeignKey(
+                        fk.Relationship.ConstraintName,
+                        child,
+                        parent,
+                        limit
+                    );
+                return ForeignKeyLine(
+                    child,
+                    parent,
+                    fk.ColumnPairs,
+                    SchemaNames.Key(name),
+                    fk.Relationship.OnDelete,
+                    fk.Relationship.OnUpdate
+                );
+            })
+            .Concat(
+                postSync
+                    .Items.Where(i =>
+                        i.Kind == SchemaDiffKind.AddForeignKey
+                        && i.ChildEntity is not null
+                        && i.ParentEntity is not null
+                        && i.Relationship is not null
+                    )
+                    .Select(i =>
+                        ForeignKeyLine(
+                            SchemaDiffService.NormalizeTable(i.ChildEntity!),
+                            SchemaDiffService.NormalizeTable(i.ParentEntity!),
+                            i.ForeignKeyColumnPairs,
+                            SchemaNames.Key(SyncScriptBuilderHelper.ForeignKeyNameToAdd(i, limit)),
+                            i.Relationship!.OnDelete,
+                            i.Relationship.OnUpdate
+                        )
+                    )
+            )
+            .Order(StringComparer.Ordinal)
+            .ToList();
+        var actualForeignKeys = end
+            .ForeignKeys.Select(fk =>
+                ForeignKeyLine(
+                    fk.ChildTable,
+                    fk.ParentTable,
+                    fk.ColumnPairs,
+                    fk.Id.Name,
+                    fk.OnDelete,
+                    fk.OnUpdate
+                )
+            )
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        if (!expectedForeignKeys.SequenceEqual(actualForeignKeys, StringComparer.Ordinal))
+        {
+            yield return $"{SchedulingParityEndStatePrefix}the foreign keys differ{FirstDifference(expectedForeignKeys, actualForeignKeys)}";
+        }
+
+        // 外部キー 1 本の行（列の組は並びを見ずに対応の集合で並べる。実効名は畳んだもの）
+        static string ForeignKeyLine(
+            string child,
+            string parent,
+            IEnumerable<ForeignKeyColumnNamePair> pairs,
+            string foldedName,
+            ForeignKeyReferentialAction onDelete,
+            ForeignKeyReferentialAction onUpdate
+        ) =>
+            $"{SchemaNames.Key(child)} -> {SchemaNames.Key(parent)} ("
+            + string.Join(
+                ",",
+                pairs
+                    .Select(p =>
+                        $"{SchemaNames.Key(p.ParentColumn)}>{SchemaNames.Key(p.ChildColumn)}"
+                    )
+                    .Order(StringComparer.Ordinal)
+            )
+            + $") {foldedName} {onDelete}/{onUpdate}";
     }
 
     /// <summary>文ごとの種類・由来・対の形（対は、同じ対が最初に現れた文の位置で表す）</summary>
@@ -1582,13 +2125,25 @@ internal static class SyncPlanCapabilityNetRunner
         return shapes;
     }
 
-    /// <summary>関係 N5 を掛けた数と掛けなかった数の要約（「relation N5 on X of Y; not applied: 理由=数, …」）</summary>
-    /// <param name="results">計画ごとの結果（掛けたら null、掛けなかったら理由）</param>
-    internal static string DescribeSchedulingParity(IReadOnlyCollection<string?> results) =>
-        $"relation N5 on {results.Count(r => r is null)} of {results.Count}; not applied: "
-        + string.Join(
+    /// <summary>
+    /// 関係 N5 を掛けた数と掛けなかった数・全部の面を比べた数・取り下げのあるケースの数・終わりの状態の照合を掛けた数の要約
+    /// （「relation N5 on X of Y; not applied: 理由=数, …; compared in full F; withdrawals on W; end state on Z」）
+    /// </summary>
+    /// <param name="results">計画ごとの結果</param>
+    internal static string DescribeSchedulingParity(
+        IReadOnlyCollection<SchedulingParityResult> results
+    ) =>
+        $"relation N5 on {results.Count(r => r.NotApplied is null)} of {results.Count}; not applied: "
+        + Counts(results.Select(r => r.NotApplied))
+        + $"; compared in full {results.Count(r => r.NotApplied is null && r.Withdrawals == 0)}"
+        + $"; withdrawals on {results.Count(r => r.NotApplied is null && r.Withdrawals > 0)}"
+        + $"; end state on {results.Count(r => r.EndStateChecked)}";
+
+    /// <summary>理由ごとの数（「理由=数, …」。無ければ none）</summary>
+    private static string Counts(IEnumerable<string?> reasons) =>
+        string.Join(
             ", ",
-            results
+            reasons
                 .OfType<string>()
                 .GroupBy(r => r, StringComparer.Ordinal)
                 .Select(g => $"{g.Key}={g.Count()}")
@@ -1597,15 +2152,24 @@ internal static class SyncPlanCapabilityNetRunner
 
     /// <summary>
     /// 関係 N5 が空振りしていないこと：逐次 DDL の方言は、計画を作れた全部のケースに掛けた（掛けなかったケースが無い）。再構築の方言で
-    /// 掛けない理由は「再構築の方言」だけ
+    /// 掛けない理由は「再構築の方言」だけ。DDL がトランザクションの方言には取り下げのあるケースが無い。掛けた計画があれば、取り下げの無い
+    /// （全部の面を比べた）計画も 1 つ以上ある。DDL が暗黙コミットされる方言で、流す種が普段の既定の種を全部含むときは、全部の面を比べた計画の
+    /// 中に、前寄せのある計画と断られうる文の前後の名指しのある計画がそれぞれ 1 つ以上ある。決定的な行が取り下げの形を必ず出す方言
+    /// （<see cref="SyncPlanFuzzDialect.ScenarioRowsWithdrawUniqueRebuild"/>）で決定的な行を流したときは、取り下げのあるケースが 1 つ以上ある
     /// </summary>
     /// <param name="dialect">方言の名前</param>
     /// <param name="capabilities">方言の宣言</param>
-    /// <param name="results">計画ごとの結果（掛けたら null、掛けなかったら理由）</param>
+    /// <param name="results">計画ごとの結果</param>
+    /// <param name="assertsBehaviours">
+    /// 前寄せと前後の名指しを全部の面で比べたことを表明するか（流す種が普段の既定の種を全部含むときだけ。必須の形の表明と同じ門）
+    /// </param>
+    /// <param name="expectsWithdrawal">取り下げのあるケースを比べたことを表明するか（決定的な行が取り下げの形を必ず出す方言で、決定的な行を流したとき）</param>
     internal static IEnumerable<string> SchedulingParityCoverageProblems(
         string dialect,
         SyncDialectCapabilities capabilities,
-        IReadOnlyCollection<string?> results
+        IReadOnlyCollection<SchedulingParityResult> results,
+        bool assertsBehaviours,
+        bool expectsWithdrawal
     )
     {
         var isRebuildDialect =
@@ -1614,6 +2178,7 @@ internal static class SyncPlanCapabilityNetRunner
 
         foreach (
             var unexpected in results
+                .Select(r => r.NotApplied)
                 .OfType<string>()
                 .Where(r => !allowed.Contains(r, StringComparer.Ordinal))
                 .Distinct(StringComparer.Ordinal)
@@ -1622,9 +2187,46 @@ internal static class SyncPlanCapabilityNetRunner
             yield return $"{dialect}: relation N5 was not applied for an unexpected reason: {unexpected}";
         }
 
-        if (!isRebuildDialect && results.Count > 0 && results.All(r => r is not null))
+        if (!isRebuildDialect && results.Count > 0 && results.All(r => r.NotApplied is not null))
         {
             yield return $"{dialect}: relation N5 was not applied to any plan";
+        }
+
+        // 前寄せの中の取り下げは DDL が暗黙コミットされる方言だけの振る舞い
+        if (capabilities.TransactionalDdl && results.Any(r => r.Withdrawals > 0))
+        {
+            yield return $"{dialect}: relation N5 counted a withdrawal on a dialect with transactional DDL";
+        }
+
+        // 掛けた計画が取り下げのあるケースだけなら、全部の面の比較が空振りしている
+        if (
+            results.Any(r => r.NotApplied is null)
+            && !results.Any(r => r.NotApplied is null && r.Withdrawals == 0)
+        )
+        {
+            yield return $"{dialect}: relation N5 compared no plan in full";
+        }
+
+        // 前寄せと前後の名指しは、暗黙コミットの方言の普段の種で全部の面を比べた計画に必ず出る（出ないなら比較が空振りしている）
+        if (assertsBehaviours && !capabilities.TransactionalDdl)
+        {
+            var full = results.Where(r => r.NotApplied is null && r.Withdrawals == 0).ToList();
+
+            if (!full.Any(r => r.MovedFirst))
+            {
+                yield return $"{dialect}: relation N5 compared no plan with statements moved first in full";
+            }
+
+            if (!full.Any(r => r.NamedAroundRefusable))
+            {
+                yield return $"{dialect}: relation N5 compared no plan naming constraints around refusable statements in full";
+            }
+        }
+
+        // 決定的な行が取り下げの形を必ず出す方言では、取り下げのあるケースを比べた（出ないなら取り下げの関係が空振りしている）
+        if (expectsWithdrawal && !results.Any(r => r.NotApplied is null && r.Withdrawals > 0))
+        {
+            yield return $"{dialect}: relation N5 compared no case with a withdrawal";
         }
     }
 
@@ -1946,7 +2548,7 @@ public abstract class SyncPlanCapabilityNetTestsBase
         {
             var rows = SyncPlanExpectationRows.ForDialect(dialect.Name).ToList();
             var roundTrips = new List<string?>();
-            var parities = new List<string?>();
+            var parities = new List<SyncPlanCapabilityNetRunner.SchedulingParityResult>();
             var problems = rows.SelectMany(row =>
                     SyncPlanExpectationRunner.Run(
                         row,
@@ -2221,18 +2823,11 @@ public abstract class SyncPlanCapabilityNetTestsBase
         var parityResults = outcomes
             .Concat(scenarioOutcomes)
             .Concat(coverageOutcomes)
-            .Where(o => o.SchedulingParityChecked || o.SchedulingParityNotApplied is not null)
-            .Select(o => o.SchedulingParityNotApplied)
+            .Select(o => o.SchedulingParity)
+            .OfType<SyncPlanCapabilityNetRunner.SchedulingParityResult>()
             .ToList();
         output?.WriteLine(
             $"{dialect.Name}: {SyncPlanCapabilityNetRunner.DescribeSchedulingParity(parityResults)} seeds, scenario and coverage rows"
-        );
-        problems.AddRange(
-            SyncPlanCapabilityNetRunner.SchedulingParityCoverageProblems(
-                dialect.Name,
-                capabilities,
-                parityResults
-            )
         );
 
         // 形の行（D4）の網羅の配列は、P1・Q6 の 3 つ組を含む
@@ -2244,6 +2839,17 @@ public abstract class SyncPlanCapabilityNetTestsBase
         // とき（種は開始番号からの連番なので、数が既定以上のとき）だけ。既定で全部出る形は、それより多い種でも必ず出る。
         // 既定より少ない種を明示した実行（変異テストの 500 種）では、確率でしか出ない形が欠けるので表明しない
         var assertsRequiredShapes = !plan.IsSingle && outcomes.Count >= plan.Settings.RegularCount;
+
+        // 関係 N5 の空振りの検査（前寄せと前後の名指しを全部の面で比べたことは、必須の形と同じ門で表明する）
+        problems.AddRange(
+            SyncPlanCapabilityNetRunner.SchedulingParityCoverageProblems(
+                dialect.Name,
+                capabilities,
+                parityResults,
+                assertsRequiredShapes,
+                !plan.IsSingle && dialect.ScenarioRowsWithdrawUniqueRebuild
+            )
+        );
 
         if (!plan.IsSingle && !assertsRequiredShapes)
         {
