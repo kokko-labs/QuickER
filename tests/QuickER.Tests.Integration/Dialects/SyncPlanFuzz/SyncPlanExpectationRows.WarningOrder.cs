@@ -65,12 +65,11 @@ internal static partial class SyncPlanExpectationRows
                         )
                         .Excluded.Empty()
                 ),
-            // 特性の固定（文書に定めが無い今の振る舞い）：一意制約の削除が外部キーを壊しうる警告は、同じ外部キーを支えうる一意制約の
-            // 削除ごとに 1 件ずつ積む（同じ値が 2 件並ぶ）。根拠の実装は AssessmentRules.WarnUniqueConstraintDropsBreakingForeignKeys と、
-            // 種別で重ね方を分ける AssessmentRules.Add
+            // 一意制約の削除が外部キーを壊しうる警告は、同じ値（親の表・外部キーの名前）を重ねない。同じ外部キーを支えうる一意制約を
+            // 2 つ外しても、その外部キーの警告は 1 件（規則は削除ごとに返し、種別で重ね方を分ける AssessmentRules.Add が 1 件にする）
             Row(
-                    "plan-warning-unique-drop-may-break-fk-repeats-per-dropped-unique",
-                    "特性の固定（文書に定めが無い今の振る舞い）：同じ外部キーを支えうる一意制約を 2 つ外すと、外部キーを壊しうる警告が同じ値で 2 件並ぶ",
+                    "plan-warning-unique-drop-may-break-fk-named-once-for-two-dropped-uniques",
+                    "同じ外部キーを支えうる一意制約を 2 つ外しても、外部キーを壊しうる警告はその外部キーにつき 1 件",
                     DialectNames.SqlServer
                 )
                 .Live(s => TwinUniqueParentSchema(s, withUniques: true))
@@ -83,10 +82,7 @@ internal static partial class SyncPlanExpectationRows
                     }
                 })
                 .Expect(e =>
-                    e.Warnings.Exact(
-                            "UniqueConstraintDropMayBreakForeignKey(wo_tp): fk_wo_tc_tp",
-                            "UniqueConstraintDropMayBreakForeignKey(wo_tp): fk_wo_tc_tp"
-                        )
+                    e.Warnings.Exact("UniqueConstraintDropMayBreakForeignKey(wo_tp): fk_wo_tc_tp")
                         .Excluded.Empty()
                 ),
             // 主キーが置き換える一意制約の警告（持てない方言＝Oracle）は、DB にある SET NULL の外部キーの子の列の NOT NULL 化の

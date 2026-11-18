@@ -352,7 +352,7 @@ Do you want to run this against {0}?</value>
     <value>Note: the primary key referenced by {0} foreign key(s) changes, and the referenced column may no longer be a candidate key. If so, recreating the foreign key (on SQLite, the foreign key check after the sync) fails; on MySQL / Oracle the change may be left partially applied (the foreign key gone while the primary key is already changed).</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmUniqueConstraintDropRisk" xml:space="preserve">
-    <value>Note: the unique constraint(s) below cover a column that an existing foreign key references. Dropping them removes the candidate key, so the drop may be rejected or the foreign key may break (unless the primary key still covers the same column):
+    <value>Note: the foreign keys below (parent table / foreign key) reference columns covered by a unique constraint that this sync drops. Dropping it removes the candidate key, so the drop may be rejected or the foreign key may break (unless the primary key still covers the same columns):
 {0}</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmForeignKeyTypeMismatch" xml:space="preserve">

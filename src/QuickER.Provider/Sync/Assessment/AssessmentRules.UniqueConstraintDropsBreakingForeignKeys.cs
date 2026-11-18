@@ -10,7 +10,10 @@ internal static partial class AssessmentRules
     /// 選択された一意制約の削除が既存 FK の被参照列を候補キーでなくしうる場合に警告を作る。
     /// </summary>
     /// <param name="facts">計画の事実（<see cref="AssessmentFacts.PostSync"/>・<see cref="AssessmentFacts.Live"/>・<see cref="AssessmentFacts.Capabilities"/>）</param>
-    /// <returns>名指しの警告</returns>
+    /// <returns>
+    /// 名指しの警告（外部キーを支えうる一意制約の削除 1 つにつき 1 件。同じ外部キーを支えうる削除が 2 つ以上なら同じ値を
+    /// 続けて返し、<see cref="Add"/> が 1 件にする）
+    /// </returns>
     /// <remarks>
     /// 削除する一意制約がその外部キーを支えうるか（<see cref="SyncPlanner.CanSupportForeignKey"/>＝前寄せと同じ判定。MySQL は参照する列を先頭に
     /// 並べる一意制約も）で判定する。ほかのキーが同じ列を覆っていれば実際には壊れないが、誤警告を許容してほかのキーは数えず、

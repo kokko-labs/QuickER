@@ -54,6 +54,7 @@ internal static partial class AssessmentRules
         SyncPlanWarningKind.ConstraintRebuildAroundEmptyColumnChange,
         SyncPlanWarningKind.ConstraintRebuildAroundRowDependentChange,
         SyncPlanWarningKind.UniqueConstraintRebuildKeptForForeignKey,
+        SyncPlanWarningKind.UniqueConstraintDropMayBreakForeignKey,
     ];
 
     /// <summary>規則が見つけた警告を順に積む</summary>
@@ -64,8 +65,9 @@ internal static partial class AssessmentRules
     /// <see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/>・
     /// <see cref="SyncPlanWarningKind.ConstraintRebuildAroundEmptyColumnChange"/>・
     /// <see cref="SyncPlanWarningKind.ConstraintRebuildAroundRowDependentChange"/>・
-    /// <see cref="SyncPlanWarningKind.UniqueConstraintRebuildKeptForForeignKey"/>）は、同じ値の警告が、どの規則が積んだものでも
-    /// 既に在れば積まない。ほかの種別はそのまま積む（同じ値が 2 件並ぶことがある）。
+    /// <see cref="SyncPlanWarningKind.UniqueConstraintRebuildKeptForForeignKey"/>・
+    /// <see cref="SyncPlanWarningKind.UniqueConstraintDropMayBreakForeignKey"/>）は、同じ値の警告が、どの規則が積んだものでも
+    /// 既に在れば積まない。ほかの種別は、規則が返したとおりにそのまま積む。
     /// </remarks>
     public static void Add(List<SyncPlanWarning> warnings, IEnumerable<SyncPlanWarning> found)
     {
