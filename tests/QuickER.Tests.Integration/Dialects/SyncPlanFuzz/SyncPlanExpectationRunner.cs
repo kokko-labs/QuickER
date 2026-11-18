@@ -19,11 +19,15 @@ internal static class SyncPlanExpectationRunner
     /// <param name="onStepRoundTrip">
     /// 計画を作った能力ごとに 1 回呼ぶ（関係 N4 を掛けたら null、計画を文で表せずに掛けなかったらその理由）
     /// </param>
+    /// <param name="onSchedulingParity">
+    /// 計画を作った能力ごとに 1 回呼ぶ（関係 N5 を掛けたら null、掛けなかったらその理由）
+    /// </param>
     public static IReadOnlyList<string> Run(
         ScenarioRow<SyncPlanExpectationInput> row,
         IEnumerable<string>? capabilities = null,
         IReadOnlyDictionary<string, string>? scopeAlias = null,
-        Action<string?>? onStepRoundTrip = null
+        Action<string?>? onStepRoundTrip = null,
+        Action<string?>? onSchedulingParity = null
     )
     {
         var input = row.Input;
@@ -33,7 +37,7 @@ internal static class SyncPlanExpectationRunner
 
         foreach (var key in capabilities ?? input.Capabilities)
         {
-            var facets = Project(input, key, problems, onStepRoundTrip);
+            var facets = Project(input, key, problems, onStepRoundTrip, onSchedulingParity);
             projections.Add((key, facets));
             var scope =
                 scopeAlias is not null && scopeAlias.TryGetValue(key, out var aliased)
@@ -100,7 +104,8 @@ internal static class SyncPlanExpectationRunner
         SyncPlanExpectationInput input,
         string key,
         List<string> problems,
-        Action<string?>? onStepRoundTrip
+        Action<string?>? onStepRoundTrip,
+        Action<string?>? onSchedulingParity
     )
     {
         var facets = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
@@ -206,6 +211,19 @@ internal static class SyncPlanExpectationRunner
         );
         problems.AddRange(roundTrip.Problems.Select(p => $"[{key}] {p}"));
         onStepRoundTrip?.Invoke(roundTrip.Unrepresentable);
+
+        // 関係 N5（組み立ての新旧の一致）：手で組んだ項目の行にも掛ける。同期スクリプトは実方言だけ比べる
+        var parity = SyncPlanCapabilityNetRunner.SchedulingParityProblems(
+            items,
+            plan,
+            world.Capabilities,
+            context,
+            labels,
+            world.Live.Entities,
+            isDialect ? SyncPlanExpectationCapabilities.Provider(key).SyncScriptBuilder.Build : null
+        );
+        problems.AddRange(parity.Problems.Select(p => $"[{key}] {p}"));
+        onSchedulingParity?.Invoke(parity.NotApplied);
 
         if (isDialect)
         {

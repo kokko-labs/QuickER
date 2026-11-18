@@ -1217,5 +1217,161 @@ internal static partial class SourceRuleProbes
             {
                 InactiveBranch = true,
             },
+            // 入れ物を作る式（素の名前・名前空間で修飾した名前・初期化子つき）を拾い、型の宣言・引数の型・XmlDoc の cref・文字列・
+            // コメント・名前の一部だけが同じ型・型を書かない new() は拾わない
+            new SourceRuleProbe(
+                "sync-plan-probe-only-in-tests-forms",
+                "sync-plan-probe-only-in-tests",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        namespace Scheduling
+                        {
+                            internal sealed class SyncPlanProbe
+                            {
+                                public int Count { get; set; }
+                            }
+
+                            internal sealed class SyncPlanProbes { }
+                        }
+
+                        internal static class Planner
+                        {
+                            /// <summary><see cref="Scheduling.SyncPlanProbe"/> を作る</summary>
+                            public static object A() => new Scheduling.SyncPlanProbe();
+
+                            public static object B() => new Scheduling.SyncPlanProbe { Count = 1 };
+
+                            // new SyncPlanProbe()
+                            public static object C() => new Scheduling.SyncPlanProbes();
+
+                            public static string D() => "new SyncPlanProbe()";
+
+                            public static Scheduling.SyncPlanProbe E(Scheduling.SyncPlanProbe? probe)
+                            {
+                                Scheduling.SyncPlanProbe made = new();
+                                return probe ?? made;
+                            }
+                        }
+                        """,
+                        "new SyncPlanProbe",
+                        "new SyncPlanProbe"
+                    ),
+                ]
+            ),
+            // 構文の規則は、条件コンパイルの外れる分岐の中の生成も拾う
+            new SourceRuleProbe(
+                "sync-plan-probe-only-in-tests-inactive-branch",
+                "sync-plan-probe-only-in-tests",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        internal sealed class SyncPlanProbe { }
+
+                        internal static class Planner
+                        {
+                            public static object? Make()
+                            {
+                        #if QUICKER_PROBE_BRANCH
+                                return new SyncPlanProbe();
+                        #else
+                                return null;
+                        #endif
+                            }
+                        }
+                        """,
+                        "new SyncPlanProbe"
+                    ),
+                ]
+            ) with
+            {
+                InactiveBranch = true,
+            },
+            // 差分の項目・警告を作る式と、差分の項目の複製を作る呼び出し（素の・?. の）を拾い、文の生成・with 式・型の宣言・
+            // メソッドの宣言・XmlDoc・文字列・名前の一部だけが同じ型と呼び出しは拾わない
+            new SourceRuleProbe(
+                "sync-scheduling-builds-steps-only-forms",
+                "sync-scheduling-builds-steps-only",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        internal sealed class SchemaDiffItem
+                        {
+                            public string Name { get; init; } = "";
+
+                            public SchemaDiffItem WithForeignKeyColumnPairs(int pairs) => this;
+
+                            public SchemaDiffItem WithRearrangedForeignKeyColumnPairs(int pairs) => this;
+
+                            public SchemaDiffItem WithForeignKeyColumnPairsKept() => this;
+                        }
+
+                        internal sealed class SchemaDiffItems { }
+
+                        internal sealed record SyncPlanWarning(string Kind);
+
+                        internal sealed record Step(string Name);
+
+                        internal static class Scheduler
+                        {
+                            /// <summary><see cref="SchemaDiffItem"/> を作らない</summary>
+                            public static object A() => new SchemaDiffItem { Name = "a" };
+
+                            public static object B() => new SyncPlanWarning("kind");
+
+                            public static object C(SchemaDiffItem item) => item.WithForeignKeyColumnPairs(1);
+
+                            public static object? D(SchemaDiffItem? item) =>
+                                item?.WithRearrangedForeignKeyColumnPairs(2);
+
+                            // new SchemaDiffItem()
+                            public static object E() => new Step("new SyncPlanWarning");
+
+                            public static object F(Step step) => step with { Name = "b" };
+
+                            public static object G() => new SchemaDiffItems();
+
+                            public static object H(SchemaDiffItem item) => item.WithForeignKeyColumnPairsKept();
+                        }
+                        """,
+                        "new SchemaDiffItem",
+                        "new SyncPlanWarning",
+                        "WithForeignKeyColumnPairs",
+                        "WithRearrangedForeignKeyColumnPairs"
+                    ),
+                ]
+            ),
+            // 構文の規則は、条件コンパイルの外れる分岐の中の生成も拾う
+            new SourceRuleProbe(
+                "sync-scheduling-builds-steps-only-inactive-branch",
+                "sync-scheduling-builds-steps-only",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        internal sealed record SyncPlanWarning(string Kind);
+
+                        internal static class Scheduler
+                        {
+                            public static object? Warn()
+                            {
+                        #if QUICKER_PROBE_BRANCH
+                                return new SyncPlanWarning("kind");
+                        #else
+                                return null;
+                        #endif
+                            }
+                        }
+                        """,
+                        "new SyncPlanWarning"
+                    ),
+                ]
+            ) with
+            {
+                InactiveBranch = true,
+            },
         ];
 }

@@ -20,8 +20,13 @@ public sealed class SyncPlanExpectationTests
     {
         var rows = SyncPlanExpectationRows.ForSyntheticOrComparison().ToList();
         var roundTrips = new List<string?>();
+        var parities = new List<string?>();
         var problems = rows.SelectMany(row =>
-                SyncPlanExpectationRunner.Run(row, onStepRoundTrip: roundTrips.Add)
+                SyncPlanExpectationRunner.Run(
+                    row,
+                    onStepRoundTrip: roundTrips.Add,
+                    onSchedulingParity: parities.Add
+                )
             )
             .ToList();
         TestContext.Current.TestOutputHelper?.WriteLine(
@@ -29,6 +34,9 @@ public sealed class SyncPlanExpectationTests
         );
         TestContext.Current.TestOutputHelper?.WriteLine(
             $"{SyncPlanCapabilityNetRunner.DescribeStepRoundTrips(roundTrips)} plans of synthetic or comparison rows"
+        );
+        TestContext.Current.TestOutputHelper?.WriteLine(
+            $"{SyncPlanCapabilityNetRunner.DescribeSchedulingParity(parities)} plans of synthetic or comparison rows"
         );
 
         if (problems.Count > 0)

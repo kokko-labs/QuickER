@@ -384,6 +384,38 @@ internal static partial class SyncPlanExpectationRows
                         );
                     }
                 }),
+            // 途中の状態の片側だけが並べられない形：子 char(10) → varchar(10)・親 varchar(10) → varchar(20)。同期後の両端
+            // （varchar(10) と varchar(20)）と、先に子を変えた途中の状態（varchar(10) と varchar(10)）は並べられるが、先に親を変えた
+            // 途中の状態（char(10) と varchar(20)）は並べられない。列の変更の順はどちらもありうるので、外して付け直す
+            Row(
+                    "plan-type-mismatch-one-intermediate-state-incompatible-rebuilds-fk",
+                    "型の食い違い: 両端の型を変える外部キーは、片側だけ変えた途中の状態のどちらか一方でも並べられなければ外して付け直す",
+                    DialectNames.PostgreSql
+                )
+                .Live(s =>
+                {
+                    s.Tbl("customer", ("id", "varchar(10)", true));
+                    s.Tbl("orders", ("id", "INT", true), ("customer_id", "char(10)", false));
+                    s.Fk("customer", "orders", "FK_orders_customer", ("id", "customer_id"));
+                })
+                .TargetWith(w =>
+                {
+                    w.Target.Entities.AddRange(
+                        w.Live.Entities.Select(e => e.Clone(preserveId: true))
+                    );
+                    w.Target.Col("customer", "id").DataType = "varchar(20)";
+                    w.Target.Col("orders", "customer_id").DataType = "varchar(10)";
+                    w.Target.Relationships.Add(w.Live.Relationships[0]);
+                })
+                .Select(SelectAll)
+                .Expect(e =>
+                    e.Sections.Exact(
+                            "DropForeignKey: DropForeignKey orders fk=FK_orders_customer",
+                            "AlterColumn: *",
+                            "AddForeignKey: AddForeignKey orders.customer_id fk=FK_orders_customer"
+                        )
+                        .Warnings.Empty()
+                ),
             // 同じ列 orders.customer_id に外部キーが 2 本あり、FK_b（親 other.id は INT のまま）だけが同期後に食い違う。
             // 付け直せない FK_b だけを外さずに名指しし、食い違わない FK_a は外して付け直す。FK_b に阻まれて必ず断られる
             // orders.customer_id の変更は、暗黙コミットの能力では計画の先頭へ移す（何も外れる前に失敗する）
