@@ -85,6 +85,7 @@ internal static class GuardTextDimensions
                 "tests/QuickER.Tests/TestSupport/Guards/ParityRows.Changelog.cs",
                 "tests/QuickER.Tests/TestSupport/Guards/ParityRows.CodeGen.cs",
                 "tests/QuickER.Tests/TestSupport/Guards/ParityRows.Docs.cs",
+                "tests/QuickER.Tests/TestSupport/Guards/ParityRows.Provider.cs",
                 "tests/QuickER.Tests/TestSupport/Guards/ParityRows.Resources.cs",
                 "tests/QuickER.Tests/TestSupport/Guards/ParityRows.Workflow.cs",
                 "tests/QuickER.Tests/TestSupport/Guards/ParityTests.cs",

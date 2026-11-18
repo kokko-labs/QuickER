@@ -53,6 +53,7 @@ internal static partial class ParityRows
             .. CodeGen(),
             .. AiMock(),
             .. Integration(),
+            .. Provider(),
         ]
     );
 

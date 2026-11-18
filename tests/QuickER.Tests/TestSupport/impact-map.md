@@ -45,13 +45,13 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Mcp.Tools` | 全体 | `DiagramEdit/ToolArgument`・`DiagramEdit/Tools`・`Name/Entrances`・`rule:mcp-tools-column-nullability-raw-reads`・`table:QueryToolFormatter` |
 | `src/QuickER.Model` | 全体 | `Dialect/DdlText`・`Name/Entrances`・`SyncPlan/HistoryRows`・`rule:model-dialect-lookups`・`rule:mutation-safe-mode-jump-guards`・`rule:tool-argument-parsing-owners`・`table:ForeignKeyReferentialActions` |
 | `src/QuickER.Platform` | 一部 | `Ai/MarkdownRender`・`OsBoundary/AtomicFile`・`OsBoundary/Containment`・`OsBoundary/PathEntrances`・`OsBoundary/ProcessLaunch`・`OsBoundary/Segments` |
-| `src/QuickER.Provider` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dialect/DdlText`・`Dialect/ImportWarnings`・`Dialect/Types`・`FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules`・`Name/DdlRoundTrip`・`Name/Entrances`・`SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/HistoryRows`・`SyncPlan/ShapeRows`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads`・`rule:sql-name-text-name-sources`・`rule:sync-auxiliary-name-prefix-copies`・`rule:sync-capabilities-initializers`・`rule:sync-exclusions-inside-stable-loop`・`rule:sync-live-schema-single-source`・`rule:sync-name-comparison-tokens`・`rule:sync-plan-mark-owners`・`rule:sync-post-sync-schema-single-source`・`rule:sync-selected-foreign-key-names`・`rule:sync-selection-rules-table-complete`・`rule:sync-type-deciding-column-copies`・`table:SyncPlanExpectations` |
+| `src/QuickER.Provider` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dialect/DdlText`・`Dialect/ImportWarnings`・`Dialect/Types`・`FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules`・`Name/DdlRoundTrip`・`Name/Entrances`・`SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/HistoryRows`・`SyncPlan/ShapeRows`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads`・`rule:sql-name-text-name-sources`・`rule:sync-auxiliary-name-prefix-copies`・`rule:sync-capabilities-initializers`・`rule:sync-exclusions-inside-stable-loop`・`rule:sync-live-schema-single-source`・`rule:sync-name-comparison-tokens`・`rule:sync-plan-mark-owners`・`rule:sync-post-sync-schema-single-source`・`rule:sync-selected-foreign-key-names`・`rule:sync-type-deciding-column-copies`・`table:SyncPlanExpectations` |
 | `src/QuickER.Provider.MySql` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:sync-auxiliary-name-prefix-copies` |
 | `src/QuickER.Provider.Oracle` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:sync-auxiliary-name-prefix-copies` |
 | `src/QuickER.Provider.PostgreSql` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses`・`rule:sync-auxiliary-name-prefix-copies` |
 | `src/QuickER.Provider.SqlServer` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`GeneratedRuntime/ParityValuesSqlServer`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses`・`rule:sync-auxiliary-name-prefix-copies` |
 | `src/QuickER.Provider.Sqlite` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`Name/Entrances`・`SyncPlan/Fuzz`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses`・`rule:sqlite-file-connection-pooling-off`・`rule:sync-auxiliary-name-prefix-copies` |
-| `src/QuickER.Provider/Sync` | 全体 | `Dialect/DdlText`・`Dialect/ImportWarnings`・`Dialect/Types`・`SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/ShapeRows`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads`・`rule:sync-auxiliary-name-prefix-copies`・`rule:sync-live-schema-single-source`・`rule:sync-name-comparison-tokens`・`rule:sync-plan-mark-owners`・`rule:sync-type-deciding-column-copies`・`table:SyncPlanExpectations` |
+| `src/QuickER.Provider/Sync` | 全体 | `Dialect/DdlText`・`Dialect/ImportWarnings`・`Dialect/Types`・`SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/ShapeRows`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads`・`rule:sync-auxiliary-name-prefix-copies`・`rule:sync-exclusions-inside-stable-loop`・`rule:sync-live-schema-single-source`・`rule:sync-name-comparison-tokens`・`rule:sync-plan-mark-owners`・`rule:sync-post-sync-schema-single-source`・`rule:sync-selected-foreign-key-names`・`rule:sync-type-deciding-column-copies`・`table:SyncPlanExpectations` |
 | `src/QuickER.Runtime` | 全体 | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`GeneratedRuntime/ParityValuesSqlServer`・`table:EditModelScenarios`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
 | `src/QuickER.Runtime.AspNetCore` | 全体 | `GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues` |
 | `src/QuickER.Runtime.EntityFrameworkCore` | 全体 | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`GeneratedRuntime/ParityValuesSqlServer`・`table:PostgreSqlQueryParameters`・`table:TranslatorParityPredicates` |
@@ -205,7 +205,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Platform/PathExecutableResolver.cs` | `OsBoundary/ProcessLaunch` |
 | `src/QuickER.Platform/PathSegments.cs` | `OsBoundary/PathEntrances`・`OsBoundary/Segments` |
 | `src/QuickER.Platform/UrlPolicy.cs` | `Ai/MarkdownRender`・`OsBoundary/ProcessLaunch` |
-| `src/QuickER.Provider` | `Dialect/DdlText`・`Dialect/ImportWarnings`・`Dialect/Types`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads`・`rule:sync-auxiliary-name-prefix-copies`・`rule:sync-plan-mark-owners` |
+| `src/QuickER.Provider` | `Dialect/DdlText`・`Dialect/ImportWarnings`・`Dialect/Types`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads`・`rule:sync-auxiliary-name-prefix-copies`・`rule:sync-exclusions-inside-stable-loop`・`rule:sync-plan-mark-owners`・`rule:sync-post-sync-schema-single-source` |
 | `src/QuickER.Provider.MySql` | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads`・`rule:sync-auxiliary-name-prefix-copies` |
 | `src/QuickER.Provider.MySql/MySqlSchemaImporter.cs` | `rule:schema-command-bypasses`・`rule:schema-command-helper-uses` |
 | `src/QuickER.Provider.MySql/MySqlSchemaSyncExecutor.cs` | `rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks` |
@@ -229,14 +229,12 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Provider/SchemaDiffService.cs` | `Name/DdlRoundTrip`・`SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/HistoryRows`・`SyncPlan/ShapeRows`・`rule:sync-name-comparison-tokens`・`table:SyncPlanExpectations` |
 | `src/QuickER.Provider/SqlNameDuplicates.cs` | `Name/Entrances` |
 | `src/QuickER.Provider/SqlNameText.cs` | `Name/DdlRoundTrip`・`rule:sql-name-text-name-sources` |
-| `src/QuickER.Provider/Sync` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/ShapeRows`・`table:SyncPlanExpectations` |
-| `src/QuickER.Provider/Sync/Selection/SelectionContext.cs` | `rule:sync-live-schema-single-source`・`rule:sync-name-comparison-tokens` |
-| `src/QuickER.Provider/Sync/State/LiveSchema.cs` | `rule:sync-name-comparison-tokens` |
-| `src/QuickER.Provider/Sync/State/PostSyncSchema.cs` | `rule:sync-live-schema-single-source`・`rule:sync-name-comparison-tokens`・`rule:sync-type-deciding-column-copies` |
-| `src/QuickER.Provider/Sync/State/SchemaIds.cs` | `rule:sync-live-schema-single-source`・`rule:sync-name-comparison-tokens` |
+| `src/QuickER.Provider/Sync` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/ShapeRows`・`rule:sync-live-schema-single-source`・`rule:sync-selected-foreign-key-names`・`rule:sync-type-deciding-column-copies`・`table:SyncPlanExpectations` |
+| `src/QuickER.Provider/Sync/Selection` | `rule:sync-name-comparison-tokens` |
+| `src/QuickER.Provider/Sync/State` | `rule:sync-name-comparison-tokens` |
 | `src/QuickER.Provider/SyncDialectCapabilities.cs` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`rule:sync-capabilities-initializers` |
 | `src/QuickER.Provider/SyncPlan.cs` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`table:SyncPlanExpectations` |
-| `src/QuickER.Provider/SyncPlanner.cs` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/ShapeRows`・`rule:sync-exclusions-inside-stable-loop`・`rule:sync-live-schema-single-source`・`rule:sync-name-comparison-tokens`・`rule:sync-post-sync-schema-single-source`・`rule:sync-selected-foreign-key-names`・`rule:sync-selection-rules-table-complete`・`rule:sync-type-deciding-column-copies`・`table:SyncPlanExpectations` |
+| `src/QuickER.Provider/SyncPlanner.cs` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/ShapeRows`・`rule:sync-live-schema-single-source`・`rule:sync-name-comparison-tokens`・`rule:sync-selected-foreign-key-names`・`rule:sync-type-deciding-column-copies`・`table:SyncPlanExpectations` |
 | `src/QuickER.Provider/SyncScriptBuilderBase.cs` | `SyncPlan/Fuzz` |
 | `src/QuickER.Provider/SyncScriptBuilderHelper.cs` | `SyncPlan/Fuzz` |
 | `src/QuickER.Provider/UniqueConstraintNaming.cs` | `rule:sync-name-comparison-tokens` |
@@ -745,23 +743,19 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 
 ### `rule:sync-name-comparison-tokens`
 
-- 範囲：`src/QuickER.Provider/SchemaDiffService.cs`・`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/NameMatching.cs`・`src/QuickER.Provider/UniqueConstraintNaming.cs`・`src/QuickER.Provider/Sync/State/SchemaIds.cs`・`src/QuickER.Provider/Sync/State/LiveSchema.cs`・`src/QuickER.Provider/Sync/State/PostSyncSchema.cs`・`src/QuickER.Provider/Sync/Selection/SelectionContext.cs`
+- 範囲：`src/QuickER.Provider/SchemaDiffService.cs`・`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/NameMatching.cs`・`src/QuickER.Provider/UniqueConstraintNaming.cs`・`src/QuickER.Provider/Sync/State`・`src/QuickER.Provider/Sync/Selection`
 
 ### `rule:sync-type-deciding-column-copies`
 
-- 範囲：`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/Sync/State/PostSyncSchema.cs`
+- 範囲：`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/Sync`
 
 ### `rule:sync-selected-foreign-key-names`
 
-- 範囲：`src/QuickER.Provider/SyncPlanner.cs`
+- 範囲：`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/Sync`
 
 ### `rule:sync-exclusions-inside-stable-loop`
 
-- 範囲：`src/QuickER.Provider/SyncPlanner.cs`
-
-### `rule:sync-selection-rules-table-complete`
-
-- 範囲：`src/QuickER.Provider/SyncPlanner.cs`
+- 範囲：`src/QuickER.Provider`
 
 ### `rule:sync-plan-mark-owners`
 
@@ -769,11 +763,11 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 
 ### `rule:sync-live-schema-single-source`
 
-- 範囲：`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/Sync/State/SchemaIds.cs`・`src/QuickER.Provider/Sync/State/PostSyncSchema.cs`・`src/QuickER.Provider/Sync/Selection/SelectionContext.cs`
+- 範囲：`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/Sync`
 
 ### `rule:sync-post-sync-schema-single-source`
 
-- 範囲：`src/QuickER.Provider/SyncPlanner.cs`
+- 範囲：`src/QuickER.Provider`
 
 ### `rule:provider-column-nullability-raw-reads`
 
@@ -957,6 +951,9 @@ src 全体か src の外を読む守り。単位の守りには数えない（�
 | `parity:mock-project-package-ids` | 正本と写しの照合 |
 | `parity:mock-project-package-versions` | 正本と写しの照合 |
 | `parity:integration-container-collections-ordered` | 正本と写しの照合 |
+| `parity:sync-selection-rules-table-complete` | 正本と写しの照合 |
+| `parity:sync-selection-rules-declarations-probe` | 正本と写しの照合 |
+| `parity:sync-selection-rules-entries-probe` | 正本と写しの照合 |
 | `english:neutral-resx-values` | 英語の文言の照合 |
 | `english:sample-files` | 英語の文言の照合 |
 | `english:tool-definitions-er-diagram-catalog` | 英語の文言の照合 |

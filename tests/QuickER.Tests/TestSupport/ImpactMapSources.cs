@@ -247,7 +247,9 @@ internal static class ImpactMapSources
     /// <summary>規則の守り（範囲が src の中に絞られていれば単位の守り、そうでなければ横断）</summary>
     /// <remarks>
     /// src の直下を根にして読む領域（<see cref="SourceScope.Areas"/>）を限った範囲は、領域の接頭辞で始まる src のプロジェクトの
-    /// フォルダを守る（除外のファイルがあっても、プロジェクトの単位の守りに数える＝明示のファイルの範囲と同じ粒度）
+    /// フォルダを守る（除外のファイルがあっても、プロジェクトの単位の守りに数える＝明示のファイルの範囲と同じ粒度）。
+    /// src のプロジェクトの中を根にして読む領域を限った範囲は、その領域（根からのファイルかフォルダ）だけを守る
+    /// （領域は実在するファイルかフォルダのパスで書く。接頭辞の一部だけの領域は、存在しない範囲として照合が赤にする）
     /// </remarks>
     private static Protection RuleProtection(SourceRule rule, string repositoryRoot)
     {
@@ -258,7 +260,9 @@ internal static class ImpactMapSources
                     ? scope.Only
                     : []
                 : scope.Root.StartsWith("src/", StringComparison.Ordinal)
-                    ? [scope.Root]
+                    ? scope.Areas.Count > 0
+                        ? [.. scope.Areas.Select(area => $"{scope.Root}/{area.TrimEnd('/')}")]
+                        : [scope.Root]
                     : scope.Root == ImpactUnits.SourceRoot && scope.Areas.Count > 0
                         ? AreaProjects(repositoryRoot, scope.Areas)
                         : [];

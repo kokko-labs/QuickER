@@ -4,22 +4,25 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 namespace QuickER.Tests.TestSupport.Guards;
 
 /// <summary>
-/// 同期の計画の除外の規則の表と、規則の形の関数の宣言との突き合わせ（規則 <c>sync-selection-rules-table-complete</c> の見つける形）
+/// 同期の計画の選んだ項目を外す規則の表と、規則の形の関数の宣言の読み取り（照合の行 <c>sync-selection-rules-table-complete</c> の
+/// 正本と写し）
 /// </summary>
 /// <remarks>
 /// <para>
-/// 規則の形の関数は、クラス <c>SyncPlanner</c> の中の、名前が <c>Exclude</c> に大文字が続き、戻り値の型が
-/// <c>IReadOnlyList&lt;Withdrawal&gt;</c>、引数の型が <c>IReadOnlyList&lt;SchemaDiffItem&gt;</c>・<c>SelectionContext</c> の順の 2 つのメソッドの宣言
+/// 規則は partial クラス <c>SelectionRules</c> に 1 規則 1 ファイルで置き、表は別のファイルにあるので、宣言と表はファイルをまたいで
+/// 突き合わせる（1 ファイルずつ読む見つける形では比べられない）。
+/// </para>
+/// <para>
+/// 規則の形の関数は、クラス <c>SelectionRules</c> の中の、名前が <c>Exclude</c> に大文字が続き、戻り値の型が
+/// <c>IReadOnlyList&lt;Withdrawal&gt;</c>、引数の型が <c>SelectionState</c>・<c>SelectionContext</c> の順の 2 つのメソッドの宣言
 /// （<c>SelectionRule</c> のデリゲートと同じ形）。型は構文の綴り（空白を除く）で比べる。
 /// </para>
 /// <para>
-/// 規則の表は、<c>SyncPlanner</c> のフィールド <c>SelectionRulesBeforeRounds</c>・<c>SelectionRulesEachRound</c> の初期化子の要素
-/// （コレクション式・配列の初期化子）で、2 つの表の和で数える。
+/// 規則の表は、<c>SelectionRules</c> のフィールド <c>BeforeRounds</c>・<c>EachRound</c> の初期化子の要素（コレクション式・配列の
+/// 初期化子）で、2 つの表の和で数える。メソッドの名前でない要素は、要素の綴りのまま数える（規則の形の関数の名前と一致しない）。
 /// </para>
 /// <para>
-/// 拾う何か：表に無い規則（<c>missing from the rule tables: 名前</c>）・表に 2 回以上ある規則（<c>listed n times: 名前</c>）・
-/// 規則の形でない関数の要素（<c>not rule-shaped: 名前</c>）・<c>SyncPlanner</c> に宣言の無い名前やメソッドグループでない要素
-/// （<c>not declared in SyncPlanner: 要素</c>）。条件コンパイルのどの分岐も読む（全組み合わせの構文木の節で、同じ節は 1 回だけ数える）。
+/// 条件コンパイルのどの分岐も読む（全組み合わせの構文木の節で、同じ節は 1 回だけ数える）。
 /// </para>
 /// <para>
 /// 読みの限界：同じ表を条件コンパイルの分岐ごとに違う中身で書くと、両方の分岐の要素を合わせて数える（表に 2 回と読む）。
@@ -28,120 +31,71 @@ namespace QuickER.Tests.TestSupport.Guards;
 /// </remarks>
 internal static class SyncSelectionRuleTable
 {
-    private const string Planner = "SyncPlanner";
+    private const string Rules = "SelectionRules";
     private const string Prefix = "Exclude";
 
-    /// <summary>規則の表のフィールドの名前</summary>
     private static readonly HashSet<string> RuleTables = new(StringComparer.Ordinal)
     {
-        "SelectionRulesBeforeRounds",
-        "SelectionRulesEachRound",
+        "BeforeRounds",
+        "EachRound",
     };
 
-    /// <summary>ファイルから、規則の表と規則の形の関数の食い違いを拾う</summary>
-    public static IEnumerable<GuardFinding> Find(GuardFile file)
-    {
-        var methods = file.Nodes.OfType<MethodDeclarationSyntax>().Where(InPlanner).ToList();
-        var ruleShaped = methods
-            .Where(IsRuleShaped)
-            .GroupBy(m => m.Identifier.ValueText, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
-        var declared = methods
-            .Select(m => m.Identifier.ValueText)
-            .ToHashSet(StringComparer.Ordinal);
-        var entries = TableEntries(file).ToList();
-        var listed = entries
-            .Select(e => e.Name)
-            .OfType<string>()
-            .GroupBy(n => n, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+    /// <summary>規則の形の関数の宣言の名前（宣言ごとに 1 つ・序数の順）</summary>
+    /// <param name="sources">ソースの本文（<c>SelectionRules</c> の partial のファイルを含む並び）</param>
+    public static IReadOnlyList<string> DeclaredRules(IEnumerable<string> sources) =>
+        [
+            .. sources
+                .SelectMany(Nodes)
+                .OfType<MethodDeclarationSyntax>()
+                .Where(method => InRules(method) && IsRuleShaped(method))
+                .Select(method => method.Identifier.ValueText)
+                .Order(StringComparer.Ordinal),
+        ];
 
-        foreach (var (name, declaration) in ruleShaped.OrderBy(p => p.Key, StringComparer.Ordinal))
-        {
-            var count = listed.GetValueOrDefault(name);
-
-            if (count == 0)
-            {
-                yield return new GuardFinding(
-                    $"missing from the rule tables: {name}",
-                    GuardFile.LineOf(declaration)
-                );
-            }
-
-            if (count >= 2)
-            {
-                yield return new GuardFinding(
-                    $"listed {count} times: {name}",
-                    GuardFile.LineOf(declaration)
-                );
-            }
-        }
-
-        foreach (var entry in entries)
-        {
-            if (entry.Name is not null && ruleShaped.ContainsKey(entry.Name))
-            {
-                continue;
-            }
-
-            yield return entry.Name is not null && declared.Contains(entry.Name)
-                ? new GuardFinding($"not rule-shaped: {entry.Name}", GuardFile.LineOf(entry.Node))
-                : new GuardFinding(
-                    $"not declared in SyncPlanner: {entry.Node}",
-                    GuardFile.LineOf(entry.Node)
-                );
-        }
-    }
-
-    /// <summary>規則の表の要素（候補の数の下限に使う）</summary>
-    public static IEnumerable<GuardFinding> FindTableEntries(GuardFile file) =>
-        TableEntries(file)
-            .Select(e => new GuardFinding($"entry: {e.Node}", GuardFile.LineOf(e.Node)));
-
-    /// <summary>規則の表の初期化子の要素と、要素がメソッドグループの名前ならその名前</summary>
-    private static IEnumerable<(ExpressionSyntax Node, string? Name)> TableEntries(GuardFile file)
-    {
-        foreach (var declarator in file.Nodes.OfType<VariableDeclaratorSyntax>())
-        {
-            if (
-                declarator.Parent?.Parent is not FieldDeclarationSyntax
-                || !InPlanner(declarator)
-                || !RuleTables.Contains(declarator.Identifier.ValueText)
-            )
-            {
-                continue;
-            }
-
-            var value = declarator.Initializer?.Value;
-            IEnumerable<ExpressionSyntax> elements = value switch
-            {
-                CollectionExpressionSyntax collection => collection
-                    .Elements.OfType<ExpressionElementSyntax>()
-                    .Select(e => e.Expression),
-                ArrayCreationExpressionSyntax array => array.Initializer?.Expressions ?? [],
-                ImplicitArrayCreationExpressionSyntax implicitArray => implicitArray
-                    .Initializer
-                    .Expressions,
-                InitializerExpressionSyntax initializer => initializer.Expressions,
-                _ => [],
-            };
-
-            foreach (var element in elements)
-            {
-                yield return (
-                    element,
+    /// <summary>規則の表（2 つの表の和）の要素（要素ごとに 1 つ・序数の順）</summary>
+    /// <param name="sources">ソースの本文（<c>SelectionRules</c> の表のファイルを含む並び）</param>
+    public static IReadOnlyList<string> ListedRules(IEnumerable<string> sources) =>
+        [
+            .. sources
+                .SelectMany(Nodes)
+                .OfType<VariableDeclaratorSyntax>()
+                .Where(declarator =>
+                    declarator.Parent?.Parent is FieldDeclarationSyntax
+                    && InRules(declarator)
+                    && RuleTables.Contains(declarator.Identifier.ValueText)
+                )
+                .SelectMany(Elements)
+                .Select(element =>
                     element is IdentifierNameSyntax identifier
                         ? identifier.Identifier.ValueText
-                        : null
-                );
-            }
-        }
-    }
+                        : element.ToString()
+                )
+                .Order(StringComparer.Ordinal),
+        ];
 
-    /// <summary>節が <c>SyncPlanner</c> の中にあるか</summary>
-    private static bool InPlanner(SyntaxNode node) =>
+    /// <summary>ソースの本文の、条件コンパイルのどの分岐も読んだ節</summary>
+    private static IEnumerable<SyntaxNode> Nodes(string source) =>
+        ConditionalSourceParse.DescendantNodes(ConditionalSourceParse.Parse(source));
+
+    /// <summary>表のフィールドの初期化子の要素</summary>
+    private static IEnumerable<ExpressionSyntax> Elements(VariableDeclaratorSyntax declarator) =>
+        declarator.Initializer?.Value switch
+        {
+            CollectionExpressionSyntax collection => collection
+                .Elements.OfType<ExpressionElementSyntax>()
+                .Select(e => e.Expression),
+            ArrayCreationExpressionSyntax array => array.Initializer?.Expressions ?? [],
+            ImplicitArrayCreationExpressionSyntax implicitArray => implicitArray
+                .Initializer
+                .Expressions,
+            InitializerExpressionSyntax initializer => initializer.Expressions,
+            _ => [],
+        };
+
+    /// <summary>節が <c>SelectionRules</c> の中にあるか</summary>
+    private static bool InRules(SyntaxNode node) =>
         node.Ancestors().OfType<ClassDeclarationSyntax>().FirstOrDefault()?.Identifier.ValueText
-        == Planner;
+        == Rules;
 
     /// <summary>メソッドが規則の形（<c>SelectionRule</c> と同じ引数と戻り値）の除外の関数か</summary>
     private static bool IsRuleShaped(MethodDeclarationSyntax method)
@@ -154,7 +108,7 @@ internal static class SyncSelectionRuleTable
             && char.IsUpper(name[Prefix.Length])
             && Spelling(method.ReturnType) == "IReadOnlyList<Withdrawal>"
             && parameters.Count == 2
-            && Spelling(parameters[0].Type) == "IReadOnlyList<SchemaDiffItem>"
+            && Spelling(parameters[0].Type) == "SelectionState"
             && Spelling(parameters[1].Type) == "SelectionContext";
     }
 
