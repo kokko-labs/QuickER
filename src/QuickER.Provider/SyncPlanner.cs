@@ -5,6 +5,7 @@ using System.Linq;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider.Resources;
+using QuickER.Provider.Sync.Scheduling;
 using QuickER.Provider.Sync.Selection;
 using QuickER.Provider.Sync.State;
 using QuickER.Provider.Sync.Steps;
@@ -186,6 +187,22 @@ public sealed class SyncPlanner
         IEnumerable<SchemaDiffItem> items,
         SyncDialectCapabilities capabilities,
         SyncPlanContext? context = null
+    ) => BuildPlan(items, capabilities, context, probe: null);
+
+    /// <summary>選択済みの差分項目から実行計画を組み立て、途中の結果を <paramref name="probe"/> へ置く</summary>
+    /// <param name="items">全差分項目</param>
+    /// <param name="capabilities">対象方言の同期ケーパビリティ</param>
+    /// <param name="context">live スキーマ</param>
+    /// <param name="probe">
+    /// 途中の結果を受け取る入れ物（<c>null</c> なら何も置かない）。逐次 DDL の方言の計画では、必ず断られる文を先頭へ移す前の
+    /// セクションと、同じ同期後の事実から新しい組み立て（<see cref="SequentialScheduler"/>）が組んだ結果を置く
+    /// </param>
+    /// <returns>計画（<paramref name="probe"/> の有無で変わらない）</returns>
+    internal SyncPlan BuildPlan(
+        IEnumerable<SchemaDiffItem> items,
+        SyncDialectCapabilities capabilities,
+        SyncPlanContext? context,
+        SyncPlanProbe? probe
     )
     {
         // 計画の組み立て中に見つかった注意事項（実行は止めず、表示層が実行確認へ織り込む）
@@ -341,13 +358,32 @@ public sealed class SyncPlanner
             // 断られる文は計画の先頭へ
             if (!capabilities.TransactionalDdl)
             {
+                sections = ArrangeForeignKeyAddsByFailureRisk(
+                    sections,
+                    postSync,
+                    liveSchema,
+                    capabilities
+                );
+            }
+
+            if (probe is not null)
+            {
+                probe.ScheduledSections =
+                [
+                    .. sections.Select(section => new SyncPlanSection
+                    {
+                        Kind = section.Kind,
+                        PrimaryKeyPhase = section.PrimaryKeyPhase,
+                        Items = [.. section.Items],
+                    }),
+                ];
+                probe.Schedule = SequentialScheduler.Schedule(postSync, liveSchema, capabilities);
+            }
+
+            if (!capabilities.TransactionalDdl)
+            {
                 sections = MoveCertainFailureFirst(
-                    ArrangeForeignKeyAddsByFailureRisk(
-                        sections,
-                        postSync,
-                        liveSchema,
-                        capabilities
-                    ),
+                    sections,
                     sectionItems,
                     [.. beforeExpansion.Where(i => i.Kind == SchemaDiffKind.AlterUniqueConstraint)],
                     capabilities,
@@ -2158,7 +2194,7 @@ public sealed class SyncPlanner
     }
 
     /// <summary>この主キー変更項目が新しい主キー列を持つか（＝付与フェーズを要するか）</summary>
-    private static bool HasNewPrimaryKeyColumns(SchemaDiffItem item) =>
+    internal static bool HasNewPrimaryKeyColumns(SchemaDiffItem item) =>
         item.Entity?.Columns.Any(c => c.IsPrimaryKey) == true;
 
     // ---------------- 依存 FK の自動 DROP → 再 ADD（逐次 DDL 方言） ----------------
@@ -2170,17 +2206,21 @@ public sealed class SyncPlanner
     /// <para>
     /// 対象は (a) 選択済み <see cref="SchemaDiffKind.AlterPrimaryKey"/> のテーブルを、旧主キーと同じ列集合で<b>参照している</b>
     /// live FK（全方言。<see cref="SyncDialectCapabilities.ForeignKeyRequiresLeadingIndex"/> の方言では旧主キーの先頭の列だけを
-    /// 参照する FK も含む。一意制約を参照する FK は主キーの解除に巻き込まれないので外さない）と、
+    /// 参照する FK も含む。一意制約を参照する FK は主キーの解除に巻き込まれないので外さない。ただし、参照する列が新しい主キーと
+    /// 同じ列集合で、この計画が外す一意制約に支えられている FK は外す）と、
     /// (b) 選択済み <see cref="SchemaDiffKind.AlterColumn"/> の列が子側・親側いずれかとして関与する live FK
     /// （<see cref="SyncDialectCapabilities.AlterColumnRequiresForeignKeyRebuild"/> が <c>true</c> の方言のみ）と、
-    /// (c) 選択済み AlterPrimaryKey のテーブルの旧主キー・削除を選んだ一意制約の索引の先頭に、子列が乗る live FK
-    /// （<see cref="SyncDialectCapabilities.ForeignKeyRequiresLeadingIndex"/> が <c>true</c> の方言のみ）。
+    /// (c) 選択済み AlterPrimaryKey のテーブルの旧主キー・この計画が外す一意制約の索引の先頭に、子列が乗る live FK
+    /// （<see cref="SyncDialectCapabilities.ForeignKeyRequiresLeadingIndex"/> が <c>true</c> の方言のみ）と、
+    /// (d) 組の両端の型がこの同期で決まり、片側だけ変えた途中の状態が並べられない live FK
+    /// （<see cref="SyncDialectCapabilities.AlterColumnRequiresForeignKeyRebuild"/> が <c>false</c> の方言のみ＝
+    /// <see cref="CollectForeignKeysBlockedInIntermediateState"/>）。
     /// いずれも「FK が張られたまま」では DDL が依存エラーで失敗するため、計画側で外して戻す。
     /// </para>
     /// <para>
     /// 子表・親表・構成列のどれかが同じ計画で削除される FK は、<see cref="InjectVanishingForeignKeyDrops"/> が
     /// 外すだけの項目として先に足しているので、ここでは明示的に外す FK として扱われ付け直さない。
-    /// 構成列の型を変えて同期後に両端の列の型が食い違う FK も、外す理由（(a)〜(c) と途中の状態）に依らず注入しない。
+    /// 構成列の型を変えて同期後に両端の列の型が食い違う FK も、外す理由（(a)〜(d)）に依らず注入しない。
     /// 付け直しが必ず失敗し、DDL が暗黙コミットされる方言では外部キーが消えたまま残るため、その 1 本だけを外さずに
     /// <see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/> で名指しする（列の変更で外し直しを要しない方言でも、
     /// 付け直しは失敗する）。ほかの外部キーは普通に外して付け直す。残した外部キーに阻まれて必ず断られる文は、DDL が
@@ -2515,7 +2555,7 @@ public sealed class SyncPlanner
     /// 判定は <see cref="CanSupportForeignKey"/>（同じ列集合か、MySQL では旧主キーの先頭の列だけを参照する非標準キーの外部キーも）。
     /// 一意制約を参照する外部キーは巻き込まれない。参照先が live に無ければ支えられているとみなす。
     /// </remarks>
-    private static bool DependsOnOldPrimaryKey(
+    internal static bool DependsOnOldPrimaryKey(
         NameLookup<Entity> liveByName,
         SyncDialectCapabilities capabilities,
         string parentTable,
@@ -2560,7 +2600,7 @@ public sealed class SyncPlanner
     /// MySQL は外部キーの子列を先頭に持つ索引を要し、それが消える索引しか無いと索引を外せない（エラー 1553）。
     /// 別の索引が支えている場合も外し直すことになるが、外部キーを外して付け直すだけなので害は無い。
     /// </remarks>
-    private static bool IsLeadingPrefix(
+    internal static bool IsLeadingPrefix(
         IReadOnlyList<string> indexColumns,
         IReadOnlyList<ForeignKeyColumnNamePair> columnPairs
     )
@@ -2575,12 +2615,13 @@ public sealed class SyncPlanner
     }
 
     /// <summary>
-    /// 同期で外す索引（主キーを変える表の旧主キー・削除を選んだ一意制約）を、表ごとに列の並びで集める。
+    /// 同期で外す索引（主キーを変える表の旧主キー・この計画が外す一意制約）を、表ごとに列の並びで集める。
     /// </summary>
     /// <remarks>
     /// 外部キーを支える唯一の索引を外すと MySQL はエラー 1553 で断るので、これらの索引の先頭に子列が乗る外部キーは
-    /// 外してから付け直す（付け直しのとき MySQL が必要な索引を自動で作る）。一意制約の削除は、明示的に選んだものだけを
-    /// 見る（MySQL は列の変更で一意制約を外し直さない）。
+    /// 外してから付け直す（付け直しのとき MySQL が必要な索引を自動で作る）。一意制約の削除は、選んだ項目の最終形にある
+    /// 削除の全部を見る（選んだ削除・作り直しを展開した削除・構成列が消える一意制約の暗黙の削除）。列の変更に伴う一意制約の
+    /// 外し直しは含まない（MySQL は列の変更で一意制約を外し直さない）。
     /// </remarks>
     private static Dictionary<string, List<List<string>>> CollectLostIndexes(
         IReadOnlyList<SchemaDiffItem> selected,
@@ -2636,7 +2677,7 @@ public sealed class SyncPlanner
     /// 外部キー単位で見ると、複合外部キーのほかの組の型を変えたとき、DB が受け入れている型の違う組まで食い違いに数え、外部キーを
     /// 外し直さずに主キーの解除・列の変更を必ず失敗させた。
     /// </remarks>
-    private static bool HasPostSyncTypeMismatch(
+    internal static bool HasPostSyncTypeMismatch(
         ResolvedForeignKeyRelationship fk,
         string childTable,
         string parentTable,
@@ -3139,7 +3180,7 @@ public sealed class SyncPlanner
     /// <summary>
     /// 作れない方言で、この外部キーの付け直しが必ず失敗するか（参照アクション <c>SET NULL</c> で、子の列が同期後に NOT NULL）
     /// </summary>
-    private static bool BlocksSetNullRebuild(
+    internal static bool BlocksSetNullRebuild(
         ResolvedForeignKeyRelationship fk,
         string childTable,
         SyncDialectCapabilities capabilities,
@@ -3648,7 +3689,7 @@ public sealed class SyncPlanner
     /// 別の判定で、列の集合の完全一致のまま（非標準キーへの付け直しは証明しない）。
     /// </para>
     /// </remarks>
-    private static bool CanSupportForeignKey(
+    internal static bool CanSupportForeignKey(
         SyncDialectCapabilities capabilities,
         IReadOnlyList<string> keyColumns,
         IReadOnlyList<string> referencedColumns
@@ -3980,7 +4021,7 @@ public sealed class SyncPlanner
     /// <param name="liveSchema">
     /// live の図。live のリレーションなら、図全体から求めた実効名（<see cref="LiveSchema.ForeignKeyNames"/>）を使う
     /// </param>
-    private static string ResolveForeignKeyName(
+    internal static string ResolveForeignKeyName(
         Relationship? relationship,
         string childTable,
         string parentTable,
@@ -4605,7 +4646,7 @@ public sealed class SyncPlanner
     /// あるのに live の図が無ければ呼び出し側のバグとして例外にする）。live に無いテーブルの項目は、そのテーブル自体が
     /// 同期対象外とみなして黙って落とす。
     /// </remarks>
-    private static IReadOnlyList<TableReorderPlan> BuildReorderPlans(
+    internal static IReadOnlyList<TableReorderPlan> BuildReorderPlans(
         List<SchemaDiffItem> selected,
         LiveSchema? liveSchema
     )

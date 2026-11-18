@@ -3,7 +3,7 @@ using QuickER.Tests.Docs;
 
 namespace QuickER.Tests.TestSupport.Guards;
 
-/// <summary>照合の表：同期の計画（選んだ項目を外す規則の宣言と規則の表）</summary>
+/// <summary>照合の表：同期の計画（選んだ項目を外す規則の宣言と規則の表・外し直しの宣言と宣言の表）</summary>
 internal static partial class ParityRows
 {
     private static IEnumerable<ParityRow> Provider() =>
@@ -39,7 +39,125 @@ internal static partial class ParityRows
                 () => ["ExcludeFirst", "ExcludeSecond", "ExcludeSecond", "Other.ExcludeElsewhere"],
                 () => SyncSelectionRuleTable.ListedRules(ProbeSelectionSources)
             ),
+            new(
+                "sync-rebuild-declarations-table-complete",
+                "同期の計画の新しい組み立ての外し直しの宣言（RebuildDeclarations の宣言の形の Require*）は、どれも宣言の表（All）に"
+                    + "ちょうど 1 回載り、表の要素はどれも宣言の形の関数にする（表から抜けた宣言は黙って一度も流れず、外れていなければならない"
+                    + "制約を外さない計画が DB で断られる）",
+                ParityCompare.Multiset,
+                () =>
+                    SyncSelectionRuleTable.DeclaredRules(
+                        SchedulingSources(),
+                        SyncSelectionRuleTable.Rebuild
+                    ),
+                () =>
+                    SyncSelectionRuleTable.ListedRules(
+                        SchedulingSources(),
+                        SyncSelectionRuleTable.Rebuild
+                    )
+            )
+            {
+                // いまの宣言は 7 つ（外部キーの 5 つと、一意制約・主キーの 1 つずつ）。拾い方が外れて正本が減ったら赤にする
+                MinimumCanon = 7,
+            },
+            new(
+                "sync-rebuild-declarations-declarations-probe",
+                "自己検査の行：照合の行 sync-rebuild-declarations-table-complete が宣言の形の関数の宣言を集める形を、合成のソースで確かめる"
+                    + "（正本は合成のソースで集めるべき宣言）。ファイルをまたぐ partial の宣言と条件コンパイルの外れる分岐の宣言を拾い、"
+                    + "引数の数や型・戻り値の型が違う関数・Require で始まらない関数・ほかのクラスの宣言の形の関数は拾わない",
+                ParityCompare.Sequence,
+                () => ["RequireFirst", "RequireInBranch", "RequireSecond"],
+                () =>
+                    SyncSelectionRuleTable.DeclaredRules(
+                        ProbeRebuildSources,
+                        SyncSelectionRuleTable.Rebuild
+                    )
+            ),
+            new(
+                "sync-rebuild-declarations-entries-probe",
+                "自己検査の行：照合の行 sync-rebuild-declarations-table-complete が宣言の表の要素を集める形を、合成のソースで確かめる"
+                    + "（正本は合成のソースで集めるべき要素）。表の要素を重なりごと数え、メソッドの名前でない要素は綴りのまま数え、"
+                    + "表でないフィールド・ほかのクラスの同じ名前のフィールドの要素は拾わない",
+                ParityCompare.Sequence,
+                () => ["Other.RequireElsewhere", "RequireFirst", "RequireSecond", "RequireSecond"],
+                () =>
+                    SyncSelectionRuleTable.ListedRules(
+                        ProbeRebuildSources,
+                        SyncSelectionRuleTable.Rebuild
+                    )
+            ),
         ];
+
+    /// <summary>新しい組み立てのフォルダ（src/QuickER.Provider/Sync/Scheduling）のソースの本文</summary>
+    private static IEnumerable<string> SchedulingSources() =>
+        Directory
+            .EnumerateFiles(
+                Path.Combine(
+                    WorkflowGuardTests.Root,
+                    "src",
+                    "QuickER.Provider",
+                    "Sync",
+                    "Scheduling"
+                ),
+                "*.cs",
+                SearchOption.AllDirectories
+            )
+            .Where(path => !SourceFiles.IsBuildOutput(path))
+            .Select(File.ReadAllText);
+
+    /// <summary>外し直しの宣言の自己検査の行の合成のソース（表のファイルと、宣言のファイル 2 つ）</summary>
+    private static readonly string[] ProbeRebuildSources =
+    [
+        """
+            internal static partial class RebuildDeclarations
+            {
+                internal static readonly RebuildDeclaration[] All =
+                [
+                    RequireFirst,
+                    RequireSecond,
+                    RequireSecond,
+                    Other.RequireElsewhere,
+                ];
+
+                private static readonly RebuildDeclaration[] Unused = [RequireFirst];
+            }
+
+            internal static class Other
+            {
+                internal static readonly RebuildDeclaration[] All = [RequireElsewhere];
+
+                internal static IEnumerable<LiveConstraint> RequireElsewhere(SchedulingInput input) => [];
+            }
+            """,
+        """
+            internal static partial class RebuildDeclarations
+            {
+                private static IEnumerable<LiveConstraint> RequireFirst(SchedulingInput input) => [];
+
+                private static IEnumerable<LiveConstraint> RequireShared(
+                    SchedulingInput input,
+                    bool leading
+                ) => [];
+
+                private static IEnumerable<LiveConstraint> CollectSomething(SchedulingInput input) => [];
+            }
+            """,
+        """
+            internal static partial class RebuildDeclarations
+            {
+                private static IEnumerable<LiveConstraint> RequireSecond(SchedulingInput input) =>
+                    RequireShared(input, leading: true);
+
+            #if QUICKER_PROBE_BRANCH
+                private static IEnumerable<LiveConstraint> RequireInBranch(SchedulingInput input) => [];
+            #endif
+
+                private static List<LiveConstraint> RequireOtherReturn(SchedulingInput input) => [];
+
+                private static IEnumerable<LiveConstraint> RequireOtherInput(SelectionState state) => [];
+            }
+            """,
+    ];
 
     /// <summary>選んだ項目を外す規則のフォルダ（src/QuickER.Provider/Sync/Selection）のソースの本文</summary>
     private static IEnumerable<string> SelectionSources() =>

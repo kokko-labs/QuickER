@@ -5,6 +5,7 @@ using System.Linq;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.Sync.Scheduling;
 using QuickER.Provider.Sync.Steps;
 using QuickER.Tests.TestSupport.Engines;
 using Xunit.Sdk;
@@ -19,7 +20,7 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 /// ケースは、網の種 1 つ（同期計画の総当たりと同じ生成器・同じ番号の種）と、その種が目標の図へ加えた変更 1 つの組。
 /// <b>網の種 N と実 DB の総当たりの種 N は別のケース</b>：実 DB は取り込んだ図（表・制約の並びが DB の返す順）の並びで変更の乱数を
 /// 引くので、生成器が作った図の並びで引く網とは変更が変わる（種の番号を書くときは「網の種」「実 DB の種」を添える）。因子は総当たりと同じ
-/// 差分の選び方・変更の種類に、方言の能力（<see cref="SyncDialectCapabilities"/> のうち同期計画の形を変える 22 項目）を足したもの。
+/// 差分の選び方・変更の種類に、方言の能力（<see cref="SyncDialectCapabilities"/> のうち同期計画の形を変える 26 項目）を足したもの。
 /// </para>
 /// <para>
 /// 能力は方言ごとに固定の値なので、派生ごとの固定の水準（<c>fixedLevels</c>）として数える。固定の水準はここに書き下ろした表
@@ -599,6 +600,19 @@ internal static class SyncPlanCapabilityNetRunner
         outcome.Violations.AddRange(roundTrip.Problems);
         outcome.StepRoundTripChecked = roundTrip.Unrepresentable is null;
         outcome.StepRoundTripUnrepresentable = roundTrip.Unrepresentable;
+
+        var parity = SchedulingParityProblems(
+            diff.Items,
+            plan,
+            capabilities,
+            context,
+            new Dictionary<SchemaDiffItem, int>(ReferenceEqualityComparer.Instance),
+            before.Entities,
+            provider.SyncScriptBuilder.Build
+        );
+        outcome.Violations.AddRange(parity.Problems);
+        outcome.SchedulingParityChecked = parity.NotApplied is null;
+        outcome.SchedulingParityNotApplied = parity.NotApplied;
 
         if (caseFoldRelation)
         {
@@ -1325,6 +1339,287 @@ internal static class SyncPlanCapabilityNetRunner
             _ => " [merged]",
         };
 
+    /// <summary>関係 N5 の違反の頭</summary>
+    public const string SchedulingParityRelationPrefix = "relation N5: ";
+
+    /// <summary>関係 N5 を掛けなかった理由：再構築の方言の計画（新しい組み立ては逐次 DDL の方言だけ）</summary>
+    public const string SchedulingParityRebuildDialect = "a rebuild dialect";
+
+    /// <summary>関係 N5 の結果</summary>
+    /// <param name="Problems">違反の文</param>
+    /// <param name="NotApplied">新旧の文の並びを比べなかった理由（比べたなら null）</param>
+    internal sealed record SchedulingParityResult(
+        IReadOnlyList<string> Problems,
+        string? NotApplied
+    );
+
+    /// <summary>
+    /// 関係 N5（組み立ての新旧の一致）：今の計画器が組み立てたセクション（必ず断られる文を先頭へ移す前）と、新しい組み立て
+    /// （<see cref="SequentialScheduler"/>）が同じ同期後の事実から組んだ文の並びが、同じ計画を表す
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 入れ物（<see cref="SyncPlanProbe"/>）を渡して計画を 1 回作り直し、今の側のセクションと新しい側の文の並びを受け取る。
+    /// 入れ物を渡した計画は、渡さずに作った元の計画と同じ（計画の全部の面と同期スクリプト）。
+    /// </para>
+    /// <para>
+    /// 比べる面：新しい文の並びを製品の写し（<see cref="StepLowering.ToSyncPlan"/>）で計画へ写した結果の全部の面と項目の共有の形・
+    /// 同期スクリプト（実方言だけ）・文ごとの種類と由来と対（今の側は <see cref="SyncPlanStepReader"/> で読む）。警告と外した項目は
+    /// 比べない（新しい組み立ては持たない）。
+    /// </para>
+    /// <para>再構築の方言の計画と、文で表せない計画には掛けず、理由を返す。</para>
+    /// </remarks>
+    /// <param name="items">差分の項目（元のケースの選び方のまま）</param>
+    /// <param name="plan">元の計画（入れ物を渡さずに作ったもの）</param>
+    /// <param name="capabilities">方言の宣言</param>
+    /// <param name="context">元の計画と同じ文脈</param>
+    /// <param name="labels">手で組んだ項目の番号（無ければ空）</param>
+    /// <param name="liveEntities">DB 側の図</param>
+    /// <param name="buildScript">同期スクリプトを作る（実方言だけ。能力の組だけなら null）</param>
+    internal static SchedulingParityResult SchedulingParityProblems(
+        IReadOnlyList<SchemaDiffItem> items,
+        SyncPlan plan,
+        SyncDialectCapabilities capabilities,
+        SyncPlanContext? context,
+        IReadOnlyDictionary<SchemaDiffItem, int> labels,
+        IReadOnlyList<Entity> liveEntities,
+        Func<SyncPlan, string>? buildScript
+    )
+    {
+        var problems = new List<string>();
+        var probe = new SyncPlanProbe();
+        SyncPlan probed;
+
+        try
+        {
+            probed = new SyncPlanner().BuildPlan(items, capabilities, context, probe);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return new SchedulingParityResult(
+                [
+                    $"{SchedulingParityRelationPrefix}planning with the probe threw: {ex.GetType().Name}: {ex.Message}",
+                ],
+                null
+            );
+        }
+
+        // 入れ物を渡しても計画は変わらない（ほかの関係と網の規則が見るのは、入れ物を渡さずに作った計画だけ）
+        Compare("the plan built with the probe", plan, probed, sharing: true);
+
+        if (
+            probe.ScheduledSections is not { } scheduledSections
+            || probe.Schedule is not { } schedule
+        )
+        {
+            return new SchedulingParityResult(problems, SchedulingParityRebuildDialect);
+        }
+
+        var current = new SyncPlan { Sections = scheduledSections, Reorders = probed.Reorders };
+        var read = SyncPlanStepReader.Read(current, items.Where(i => i.IsSelected));
+        problems.AddRange(
+            read.Problems.Select(p => SchedulingParityRelationPrefix + "reading: " + p)
+        );
+
+        // 文で表せない計画は、新しい組み立ても表せないと答える
+        if ((read.Plan is null) != (schedule.Steps is null))
+        {
+            problems.Add(
+                $"{SchedulingParityRelationPrefix}only one side can express the plan as steps: "
+                    + $"[{schedule.Unrepresentable ?? "expressed"}] <> [{read.Unrepresentable ?? "expressed"}]"
+            );
+            return new SchedulingParityResult(problems, null);
+        }
+
+        if (read.Plan is not { } currentSteps || schedule.Steps is not { } steps)
+        {
+            return new SchedulingParityResult(problems, read.Unrepresentable);
+        }
+
+        // 文ごとの種類・由来・対
+        var currentShapes = StepShapes(currentSteps.Steps, labels);
+        var shapes = StepShapes(steps, labels);
+
+        if (!currentShapes.SequenceEqual(shapes, StringComparer.Ordinal))
+        {
+            problems.Add(
+                $"{SchedulingParityRelationPrefix}the steps differ{FirstDifference(currentShapes, shapes)}"
+            );
+        }
+
+        SyncPlan lowered;
+
+        try
+        {
+            lowered = StepLowering.ToSyncPlan(new StepPlan(steps, 0, [], []));
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            problems.Add(
+                $"{SchedulingParityRelationPrefix}lowering threw: {ex.GetType().Name}: {ex.Message}"
+            );
+            return new SchedulingParityResult(problems, null);
+        }
+
+        Compare("the scheduled plan", current, lowered, sharing: true);
+        return new SchedulingParityResult(problems, null);
+
+        void Compare(string what, SyncPlan expected, SyncPlan actual, bool sharing)
+        {
+            var expectedFacets = SyncPlanProjection.Plan(expected, labels, liveEntities);
+            var actualFacets = SyncPlanProjection.Plan(actual, labels, liveEntities);
+
+            foreach (var (facet, lines) in expectedFacets)
+            {
+                var other = actualFacets.TryGetValue(facet, out var found) ? found : [];
+
+                if (!lines.SequenceEqual(other, StringComparer.Ordinal))
+                {
+                    problems.Add(
+                        $"{SchedulingParityRelationPrefix}{what}: the {facet} differ{FirstDifference(lines, other)}"
+                    );
+                }
+            }
+
+            if (sharing && !SharedItemPattern(expected).SequenceEqual(SharedItemPattern(actual)))
+            {
+                problems.Add(
+                    $"{SchedulingParityRelationPrefix}{what} shares items between sections differently: "
+                        + $"[{string.Join(",", SharedItemPattern(actual))}] <> [{string.Join(",", SharedItemPattern(expected))}]"
+                );
+            }
+
+            if (buildScript is null)
+            {
+                return;
+            }
+
+            var (script, thrown) = Build(expected);
+            var (actualScript, actualThrown) = Build(actual);
+
+            if (thrown is not null || actualThrown is not null)
+            {
+                if (thrown?.GetType() != actualThrown?.GetType())
+                {
+                    problems.Add(
+                        $"{SchedulingParityRelationPrefix}{what}: the script builder throws differently: "
+                            + $"[{Name(actualThrown)}] <> [{Name(thrown)}]"
+                    );
+                }
+
+                return;
+            }
+
+            if (!string.Equals(script, actualScript, StringComparison.Ordinal))
+            {
+                problems.Add(
+                    $"{SchedulingParityRelationPrefix}{what}: the script differs{FirstDifference(script!.Split('\n'), actualScript!.Split('\n'))}"
+                );
+            }
+        }
+
+        (string? Script, Exception? Thrown) Build(SyncPlan target)
+        {
+            try
+            {
+                return (buildScript!(target), null);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                return (null, ex);
+            }
+        }
+
+        static string Name(Exception? ex) =>
+            ex is null ? "no exception" : $"{ex.GetType().Name}: {ex.Message.Split('\n')[0]}";
+    }
+
+    /// <summary>文ごとの種類・由来・対の形（対は、同じ対が最初に現れた文の位置で表す）</summary>
+    private static List<string> StepShapes(
+        IReadOnlyList<SyncStep> steps,
+        IReadOnlyDictionary<SchemaDiffItem, int> labels
+    )
+    {
+        var firstOfPair = new Dictionary<ReaddPair, int>(ReferenceEqualityComparer.Instance);
+        var shapes = new List<string>();
+
+        for (var i = 0; i < steps.Count; i++)
+        {
+            var step = steps[i];
+            var pair = "-";
+
+            if (step.Pair is { } readd)
+            {
+                if (!firstOfPair.TryGetValue(readd, out var at))
+                {
+                    at = i;
+                    firstOfPair[readd] = at;
+                }
+
+                pair = $"#{at}";
+            }
+
+            var origin = step.Origin switch
+            {
+                SelectedOrigin o => $"selected {SyncPlanProjection.Key(o.Item, labels)}",
+                ImplicitOrigin o => $"implicit {o.Reason}: {o.Description}",
+                MergedOrigin o =>
+                    $"merged {string.Join("; ", o.Items.Select(item => SyncPlanProjection.Key(item, labels)))}",
+                _ => step.Origin.GetType().Name,
+            };
+
+            shapes.Add($"{DescribeStep(step)} pair {pair} <- {origin}");
+        }
+
+        return shapes;
+    }
+
+    /// <summary>関係 N5 を掛けた数と掛けなかった数の要約（「relation N5 on X of Y; not applied: 理由=数, …」）</summary>
+    /// <param name="results">計画ごとの結果（掛けたら null、掛けなかったら理由）</param>
+    internal static string DescribeSchedulingParity(IReadOnlyCollection<string?> results) =>
+        $"relation N5 on {results.Count(r => r is null)} of {results.Count}; not applied: "
+        + string.Join(
+            ", ",
+            results
+                .OfType<string>()
+                .GroupBy(r => r, StringComparer.Ordinal)
+                .Select(g => $"{g.Key}={g.Count()}")
+                .DefaultIfEmpty("none")
+        );
+
+    /// <summary>
+    /// 関係 N5 が空振りしていないこと：逐次 DDL の方言は、計画を作れた全部のケースに掛けた（掛けなかったケースが無い）。再構築の方言で
+    /// 掛けない理由は「再構築の方言」だけ
+    /// </summary>
+    /// <param name="dialect">方言の名前</param>
+    /// <param name="capabilities">方言の宣言</param>
+    /// <param name="results">計画ごとの結果（掛けたら null、掛けなかったら理由）</param>
+    internal static IEnumerable<string> SchedulingParityCoverageProblems(
+        string dialect,
+        SyncDialectCapabilities capabilities,
+        IReadOnlyCollection<string?> results
+    )
+    {
+        var isRebuildDialect =
+            !capabilities.SupportsAlterColumn || !capabilities.SupportsForeignKeyAlter;
+        string[] allowed = isRebuildDialect ? [SchedulingParityRebuildDialect] : [];
+
+        foreach (
+            var unexpected in results
+                .OfType<string>()
+                .Where(r => !allowed.Contains(r, StringComparer.Ordinal))
+                .Distinct(StringComparer.Ordinal)
+        )
+        {
+            yield return $"{dialect}: relation N5 was not applied for an unexpected reason: {unexpected}";
+        }
+
+        if (!isRebuildDialect && results.Count > 0 && results.All(r => r is not null))
+        {
+            yield return $"{dialect}: relation N5 was not applied to any plan";
+        }
+    }
+
     /// <summary>関係 N2 の違反の頭</summary>
     public const string CaseFoldRelationPrefix = "relation N2: ";
 
@@ -1643,11 +1938,13 @@ public abstract class SyncPlanCapabilityNetTestsBase
         {
             var rows = SyncPlanExpectationRows.ForDialect(dialect.Name).ToList();
             var roundTrips = new List<string?>();
+            var parities = new List<string?>();
             var problems = rows.SelectMany(row =>
                     SyncPlanExpectationRunner.Run(
                         row,
                         [dialect.Name],
-                        onStepRoundTrip: roundTrips.Add
+                        onStepRoundTrip: roundTrips.Add,
+                        onSchedulingParity: parities.Add
                     )
                 )
                 .ToList();
@@ -1662,6 +1959,9 @@ public abstract class SyncPlanCapabilityNetTestsBase
             );
             TestContext.Current.TestOutputHelper?.WriteLine(
                 $"{dialect.Name}: {SyncPlanCapabilityNetRunner.DescribeStepRoundTrips(roundTrips)} expectation rows"
+            );
+            TestContext.Current.TestOutputHelper?.WriteLine(
+                $"{dialect.Name}: {SyncPlanCapabilityNetRunner.DescribeSchedulingParity(parities)} expectation rows"
             );
 
             if (problems.Count > 0)
@@ -1907,6 +2207,25 @@ public abstract class SyncPlanCapabilityNetTestsBase
                 problems.Add(ex.Message);
             }
         }
+
+        // 関係 N5 を掛けた数と掛けなかった数。逐次 DDL の方言は全部に掛ける（文で表せない計画は種・行に出ない）。
+        // 再構築の方言は全部を掛けない
+        var parityResults = outcomes
+            .Concat(scenarioOutcomes)
+            .Concat(coverageOutcomes)
+            .Where(o => o.SchedulingParityChecked || o.SchedulingParityNotApplied is not null)
+            .Select(o => o.SchedulingParityNotApplied)
+            .ToList();
+        output?.WriteLine(
+            $"{dialect.Name}: {SyncPlanCapabilityNetRunner.DescribeSchedulingParity(parityResults)} seeds, scenario and coverage rows"
+        );
+        problems.AddRange(
+            SyncPlanCapabilityNetRunner.SchedulingParityCoverageProblems(
+                dialect.Name,
+                capabilities,
+                parityResults
+            )
+        );
 
         // 形の行（D4）の網羅の配列は、P1・Q6 の 3 つ組を含む
         problems.AddRange(

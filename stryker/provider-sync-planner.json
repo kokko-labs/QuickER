@@ -38,7 +38,23 @@
       "**/StepLowering.cs",
       "**/StepOrigin.cs",
       "**/StepPlan.cs",
-      "**/SyncStep.cs"
+      "**/SyncStep.cs",
+      "**/ForeignKeyAddOrder.cs",
+      "**/ForeignKeyPairOrder.cs",
+      "**/Readds.cs",
+      "**/RebuildDeclarations.AlteredColumns.cs",
+      "**/RebuildDeclarations.AlteredKeyColumns.cs",
+      "**/RebuildDeclarations.DivergingColumnChanges.cs",
+      "**/RebuildDeclarations.DroppedPrimaryKeys.cs",
+      "**/RebuildDeclarations.LostIndexes.cs",
+      "**/RebuildDeclarations.UniquesReplacedByPrimaryKey.cs",
+      "**/RebuildDeclarations.cs",
+      "**/ScheduledStep.cs",
+      "**/SelectedSteps.cs",
+      "**/SequentialScheduler.cs",
+      "**/StepOrder.cs",
+      "**/SyncPlanProbe.cs",
+      "**/UnreaddableConstraints.cs"
     ]
   }
 }
