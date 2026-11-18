@@ -381,6 +381,7 @@ internal static partial class SyncPlanExpectationRows
             .. PlanDefaultRows(),
             .. PlanNameCollisionRows(),
             .. PlanSelectionOrderRows(),
+            .. PlanWarningOrderRows(),
             .. TreatmentRows(),
             .. RealSqlServerRows(),
             .. RealSqliteRows(),

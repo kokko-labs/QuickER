@@ -5,6 +5,8 @@ using System.Linq;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider.Resources;
+using QuickER.Provider.Sync;
+using QuickER.Provider.Sync.Assessment;
 using QuickER.Provider.Sync.Scheduling;
 using QuickER.Provider.Sync.Selection;
 using QuickER.Provider.Sync.State;
@@ -173,47 +175,34 @@ public sealed class SyncPlanner
         (SchemaDiffKind.SetColumnDescription, PrimaryKeyPhase.None),
     ];
 
-    /// <summary>選択済みの差分項目から実行計画を組み立てる</summary>
-    /// <param name="items">全差分項目（未選択・情報表示専用の項目を含んでよい）</param>
-    /// <param name="capabilities">対象方言の同期ケーパビリティ（rebuild への振り分けに用いる）</param>
-    /// <param name="context">
-    /// live スキーマ。rebuild 方言は合成に、列順を同期する逐次 DDL の方言（<see cref="SyncDialectCapabilities.ColumnReorder"/> が
-    /// <see cref="ColumnReorderMode.Native"/>＝MySQL）は列順の項目の移動の組み立てに用いる。ほかの逐次 DDL 方言では省いてよい
-    /// （<c>null</c> 可）。rebuild 方言で <c>null</c> を渡すか、Native の方言で
-    /// 列順の項目を選んで <c>null</c> を渡すと <see cref="InvalidOperationException"/> を投げる（呼び出し側のバグ）。
-    /// </param>
-    /// <returns>選択済み項目のみを固定順序でセクション化した計画（空セクションは含まない）</returns>
-    public SyncPlan BuildPlan(
-        IEnumerable<SchemaDiffItem> items,
-        SyncDialectCapabilities capabilities,
-        SyncPlanContext? context = null
-    ) => BuildPlan(items, capabilities, context, probe: null);
-
-    /// <summary>選択済みの差分項目から実行計画を組み立て、途中の結果を <paramref name="probe"/> へ置く</summary>
-    /// <param name="items">全差分項目</param>
+    /// <summary>
+    /// 計画の前半：選んだ項目を外し終え（<see cref="ExcludeUntilStable"/>）、作り直しを展開し、同期後の状態の差の項目を足して、
+    /// 選んだ項目の最終形とその同期後の事実（<see cref="PlanStage.Selected"/>）を作る
+    /// </summary>
+    /// <param name="items">全差分項目（未選択の項目は読まない）</param>
     /// <param name="capabilities">対象方言の同期ケーパビリティ</param>
-    /// <param name="context">live スキーマ</param>
-    /// <param name="probe">
-    /// 途中の結果を受け取る入れ物（<c>null</c> なら何も置かない）。逐次 DDL の方言の計画では、必ず断られる文を先頭へ移す前の
-    /// セクションと、同じ同期後の事実から新しい組み立て（<see cref="SequentialScheduler"/>）が組んだ結果を置く
+    /// <param name="context">計画の入力（無ければ <c>null</c>）</param>
+    /// <param name="liveSchema">DB の今の図（<paramref name="context"/> から作ったもの）</param>
+    /// <param name="warnings">外した項目の名指しの警告を積む先</param>
+    /// <param name="excluded">外した項目を積む先</param>
+    /// <param name="injectedWarnings">
+    /// 同期後の状態の差の項目を足す関数（列と一緒に消える一意制約・主キーが置き換える一意制約）の警告を積む先
     /// </param>
-    /// <returns>計画（<paramref name="probe"/> の有無で変わらない）</returns>
-    internal SyncPlan BuildPlan(
+    /// <returns>選んだ項目の最終形・評価の規則が読む事実・テーブル再構築の方言か</returns>
+    /// <remarks>
+    /// 返した後に、選んだ項目の最終形へ項目を足さない（同期後の事実は作ったときの並びの写しを持つ）。項目を足す段を入れるなら、
+    /// この関数の中で、同期後の事実を作る前に足す。
+    /// </remarks>
+    internal static PreparedSelection PrepareSelection(
         IEnumerable<SchemaDiffItem> items,
         SyncDialectCapabilities capabilities,
         SyncPlanContext? context,
-        SyncPlanProbe? probe
+        LiveSchema? liveSchema,
+        List<SyncPlanWarning> warnings,
+        List<SchemaDiffItem> excluded,
+        List<SyncPlanWarning> injectedWarnings
     )
     {
-        // 計画の組み立て中に見つかった注意事項（実行は止めず、表示層が実行確認へ織り込む）
-        var warnings = new List<SyncPlanWarning>();
-
-        // 利用者が選んだのに計画から外した項目（外す箇所は警告と一緒に ExcludeSelected で積む）
-        var excluded = new List<SchemaDiffItem>();
-
-        // DB の今の図と、そこから作る索引・一覧（各段へ渡す。文脈が無ければ null）
-        var liveSchema = LiveSchema.From(context);
-
         // ALTER COLUMN も FK の後付けもできない方言はテーブル再構築が必要になる
         var isRebuildDialect =
             !capabilities.SupportsAlterColumn || !capabilities.SupportsForeignKeyAlter;
@@ -244,12 +233,7 @@ public sealed class SyncPlanner
             warnings,
             excluded
         );
-        var beforeExpansion = settled.Items;
-
-        // SET NULL を作れる方言では、子の列が同期後に NOT NULL になる SET NULL の外部キーの追加・作り直しを、外さずに名指しする。
-        // 警告だけの判定は、外し終えた項目で 1 回だけ行う（周の中で積むと、後の周で外れた外部キーの警告が残る）
-        WarnSetNullForeignKeysOnNotNullColumns(settled, capabilities, warnings);
-        var selected = ExpandAlters(beforeExpansion);
+        var selected = ExpandAlters(settled.Items);
 
         // 主キーの変更で新しく主キーに加わる NULL 許容の列は、NOT NULL 化を選んでいなくても暗黙に NOT NULL にする
         selected = InjectPrimaryKeyNotNullChanges(selected, liveSchema);
@@ -267,7 +251,7 @@ public sealed class SyncPlanner
         selected = InjectVanishingUniqueConstraintDrops(
             selected,
             liveSchema,
-            warnings,
+            injectedWarnings,
             capabilities
         );
 
@@ -278,36 +262,131 @@ public sealed class SyncPlanner
             selected = InjectUniqueConstraintsReplacedByPrimaryKey(
                 selected,
                 liveSchema,
-                warnings,
+                injectedWarnings,
                 capabilities
             );
         }
 
-        // 選んだ項目の最終形の同期後の事実を 1 つ作り、警告・外し直しの注入・並べ替え・再構築の合成で共有する。
-        // これ以降 selected へ項目を足さない（足すのは sectionItems の側）。selected へ項目を足す段を入れるなら、その後の並びから作り直す
+        // 選んだ項目の最終形の同期後の事実を 1 つ作り、警告・外し直しの注入・並べ替え・再構築の合成で共有する
         var postSync = PostSyncSchema.From(PlanStage.Selected, selected, liveSchema, capabilities);
+
+        return new PreparedSelection(
+            new AssessmentFacts
+            {
+                Settled = settled,
+                PostSync = postSync,
+                Live = liveSchema,
+                Capabilities = capabilities,
+                Context = context,
+            },
+            selected,
+            isRebuildDialect
+        );
+    }
+
+    /// <summary>計画の前半（<see cref="PrepareSelection"/>）の結果</summary>
+    /// <param name="Facts">評価の規則が読む事実（周が止まったときの状態・選んだ項目の最終形の同期後の事実ほか）</param>
+    /// <param name="Selected">選んだ項目の最終形（作り直しを展開し、同期後の状態の差の項目を足した並び）</param>
+    /// <param name="IsRebuildDialect">テーブル再構築の方言か</param>
+    internal sealed record PreparedSelection(
+        AssessmentFacts Facts,
+        List<SchemaDiffItem> Selected,
+        bool IsRebuildDialect
+    );
+
+    /// <summary>選択済みの差分項目から実行計画を組み立てる</summary>
+    /// <param name="items">全差分項目（未選択・情報表示専用の項目を含んでよい）</param>
+    /// <param name="capabilities">対象方言の同期ケーパビリティ（rebuild への振り分けに用いる）</param>
+    /// <param name="context">
+    /// live スキーマ。rebuild 方言は合成に、列順を同期する逐次 DDL の方言（<see cref="SyncDialectCapabilities.ColumnReorder"/> が
+    /// <see cref="ColumnReorderMode.Native"/>＝MySQL）は列順の項目の移動の組み立てに用いる。ほかの逐次 DDL 方言では省いてよい
+    /// （<c>null</c> 可）。rebuild 方言で <c>null</c> を渡すか、Native の方言で
+    /// 列順の項目を選んで <c>null</c> を渡すと <see cref="InvalidOperationException"/> を投げる（呼び出し側のバグ）。
+    /// </param>
+    /// <returns>選択済み項目のみを固定順序でセクション化した計画（空セクションは含まない）</returns>
+    public SyncPlan BuildPlan(
+        IEnumerable<SchemaDiffItem> items,
+        SyncDialectCapabilities capabilities,
+        SyncPlanContext? context = null
+    ) => BuildPlan(items, capabilities, context, probe: null);
+
+    /// <summary>選択済みの差分項目から実行計画を組み立て、途中の結果を <paramref name="probe"/> へ置く</summary>
+    /// <param name="items">全差分項目</param>
+    /// <param name="capabilities">対象方言の同期ケーパビリティ</param>
+    /// <param name="context">live スキーマ</param>
+    /// <param name="probe">
+    /// 途中の結果を受け取る入れ物（<c>null</c> なら何も置かない）。逐次 DDL の方言の計画では、必ず断られる文を先頭へ移す前の
+    /// セクション・警告・外した項目と、同じ引数から新しい計画器（<see cref="SequentialPlanner"/>）が作った結果を置く
+    /// </param>
+    /// <returns>計画（<paramref name="probe"/> の有無で変わらない）</returns>
+    internal SyncPlan BuildPlan(
+        IEnumerable<SchemaDiffItem> items,
+        SyncDialectCapabilities capabilities,
+        SyncPlanContext? context,
+        SyncPlanProbe? probe
+    )
+    {
+        // 計画の組み立て中に見つかった注意事項（実行は止めず、表示層が実行確認へ織り込む）
+        var warnings = new List<SyncPlanWarning>();
+
+        // 利用者が選んだのに計画から外した項目（外す箇所は警告と一緒に ExcludeSelected で積む）
+        var excluded = new List<SchemaDiffItem>();
+
+        // DB の今の図と、そこから作る索引・一覧（各段へ渡す。文脈が無ければ null）
+        var liveSchema = LiveSchema.From(context);
+
+        // 選んだ項目を外し終え、作り直しを展開し、同期後の状態の差の項目を足した、選んだ項目の最終形とその同期後の事実。
+        // 項目を足す関数（InjectVanishingUniqueConstraintDrops など）が積む警告は、周の直後の SET NULL の警告より後に積むため、
+        // いったん別の並びへ集める
+        var injectedWarnings = new List<SyncPlanWarning>();
+        var prepared = PrepareSelection(
+            items,
+            capabilities,
+            context,
+            liveSchema,
+            warnings,
+            excluded,
+            injectedWarnings
+        );
+        var facts = prepared.Facts;
+        var isRebuildDialect = prepared.IsRebuildDialect;
+        var beforeExpansion = facts.Settled.Items;
+        var selected = prepared.Selected;
+        var postSync = facts.PostSync;
+
+        // SET NULL を作れる方言では、子の列が同期後に NOT NULL になる SET NULL の外部キーの追加・作り直しを、外さずに名指しする。
+        // 警告だけの判定は、外し終えた項目（周が止まったときの状態）で 1 回だけ行い、項目を足す関数の警告より前に積む
+        // （周の中で積むと、後の周で外れた外部キーの警告が残る）
+        AssessmentRules.Add(
+            warnings,
+            AssessmentRules.WarnSetNullForeignKeysOnNotNullColumns(facts)
+        );
+        warnings.AddRange(injectedWarnings);
 
         // 選んだ列の変更（主キーの変更に伴う暗黙の NOT NULL 化を含む）で、DB にある SET NULL の外部キーの子の列が
         // NOT NULL になるときは名指しする（方言に依らない。作れない方言で外し直さないのは暗黙の付け直しの段）
-        WarnSetNullOnNotNullLiveForeignKeys(postSync, capabilities, liveSchema, warnings);
+        AssessmentRules.Add(warnings, AssessmentRules.WarnSetNullOnNotNullLiveForeignKeys(facts));
 
         // 一意制約の削除が既存 FK の被参照列を候補キーでなくしうる場合は警告する（方言に依らず同じ危険）
-        WarnUniqueConstraintDropsBreakingForeignKeys(postSync, liveSchema, warnings, capabilities);
+        AssessmentRules.Add(
+            warnings,
+            AssessmentRules.WarnUniqueConstraintDropsBreakingForeignKeys(facts)
+        );
 
         // 選んだ外部キーの追加・作り直しの参照先が、同期後に候補キーでない場合も警告する（暗黙の付け直しと同じ証明）
-        WarnAddedForeignKeysNotOnCandidateKey(postSync, capabilities, liveSchema, warnings);
+        AssessmentRules.Add(warnings, AssessmentRules.WarnAddedForeignKeysNotOnCandidateKey(facts));
 
         // SET DEFAULT の外部キーの NOT NULL の子の列は、DEFAULT 制約が無いと作れない方言（SQL Server）で名指しする
-        WarnSetDefaultOnNotNullColumns(postSync, capabilities, warnings);
+        AssessmentRules.Add(warnings, AssessmentRules.WarnSetDefaultOnNotNullColumns(facts));
 
         // ドットを含む表名を表せない方言（SQLite）では、選んだ項目が触れるその表を名指しする
-        WarnSchemaQualifiedTableNames(selected, capabilities, warnings);
+        AssessmentRules.Add(warnings, AssessmentRules.WarnSchemaQualifiedTableNames(facts));
 
         // 既定値のある列の型の種類を変える列の変更を名指しする（SQL Server・PostgreSQL・Oracle）
-        WarnDefaultsOnColumnTypeKindChange(selected, capabilities, context, warnings);
+        AssessmentRules.Add(warnings, AssessmentRules.WarnDefaultsOnColumnTypeKindChange(facts));
 
         // 説明の BMP の外の文字を保存できない方言（MySQL）では、その文字を書く説明の項目を名指しする
-        WarnDescriptionCharactersReplaced(selected, capabilities, warnings);
+        AssessmentRules.Add(warnings, AssessmentRules.WarnDescriptionCharactersReplaced(facts));
 
         if (!isRebuildDialect)
         {
@@ -319,6 +398,13 @@ public sealed class SyncPlanner
                 capabilities.ColumnReorder == ColumnReorderMode.Native
                     ? BuildReorderPlans(selected, liveSchema)
                     : [];
+
+            // DB にある外部キーのうち、同期後に両端の型が並べられなくなるものを名指しする（方言に依らない。その外部キーは
+            // 外し直さない）。選んだ追加・作り直しを型の食い違いで外した外部キーは既に名指ししてあり、同じ警告は重ねない
+            AssessmentRules.Add(
+                warnings,
+                AssessmentRules.WarnLiveForeignKeysWithPostSyncTypeMismatch(facts)
+            );
 
             // 主キー変更・（方言によっては）列定義変更に巻き込まれる live FK を、暗黙の DROP → 再 ADD として注入する
             var sectionItems = InjectImplicitForeignKeyRebuilds(
@@ -377,7 +463,9 @@ public sealed class SyncPlanner
                         Items = [.. section.Items],
                     }),
                 ];
-                probe.Schedule = SequentialScheduler.Schedule(postSync, liveSchema, capabilities);
+                probe.ScheduledWarnings = [.. warnings];
+                probe.ScheduledExcludedItems = [.. excluded];
+                probe.NewPlan = SequentialPlanner.Plan(items, capabilities, context);
             }
 
             if (!capabilities.TransactionalDdl)
@@ -586,12 +674,13 @@ public sealed class SyncPlanner
     /// 繰り返しは必ず止まる：周ごとに少なくとも 1 つの選んだ項目を外したときだけ次の周へ進み、外すほど残る制約と足りない前提は
     /// 増えるだけ（外した項目が戻ることはない）で、選んだ項目の数は有限。NULL 許容化だけを外して型の変更を残す列の変更は、
     /// 残した項目が次の周で外れない（NULL 許容化を含まない）。周の数が選んだ項目の数を超えたら、止まる理由が崩れたので例外にする
-    /// （途中の計画を返さない）。どの周も、その周で外した項目だけを名指しするので、警告は重ならず、並びは周の順で決まる。
+    /// （途中の計画を返さない）。どの周も、その周で外した項目だけを名指しする。同じ値の名指し（同じ表の項目を 2 つ外したときなど）は
+    /// 1 件にまとめ（<see cref="SelectionWithdrawals.Apply"/>）、並びは周の順で決まる。
     /// 1 周目の呼び出しの並びは、除外を 1 回ずつ流すときと同じなので、2 周目に入らない入力では警告の並びも変わらない。
     /// </para>
     /// <para>
     /// 周の中で積む警告は、規則が返した取り下げの名指し（<see cref="SelectionWithdrawals.Apply"/>）だけにする。外した項目は戻らないので、その名指しは
-    /// 古くならない。項目を外さずに積む警告（<see cref="WarnSetNullForeignKeysOnNotNullColumns"/> など）は、後の周で外れた項目の
+    /// 古くならない。項目を外さずに積む警告（<see cref="AssessmentRules.WarnSetNullForeignKeysOnNotNullColumns"/> など）は、後の周で外れた項目の
     /// 警告が残るので、周の後に、外し終えた項目で 1 回だけ決める。
     /// </para>
     /// </remarks>
@@ -2221,9 +2310,9 @@ public sealed class SyncPlanner
     /// 子表・親表・構成列のどれかが同じ計画で削除される FK は、<see cref="InjectVanishingForeignKeyDrops"/> が
     /// 外すだけの項目として先に足しているので、ここでは明示的に外す FK として扱われ付け直さない。
     /// 構成列の型を変えて同期後に両端の列の型が食い違う FK も、外す理由（(a)〜(d)）に依らず注入しない。
-    /// 付け直しが必ず失敗し、DDL が暗黙コミットされる方言では外部キーが消えたまま残るため、その 1 本だけを外さずに
-    /// <see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/> で名指しする（列の変更で外し直しを要しない方言でも、
-    /// 付け直しは失敗する）。ほかの外部キーは普通に外して付け直す。残した外部キーに阻まれて必ず断られる文は、DDL が
+    /// 付け直しが必ず失敗し、DDL が暗黙コミットされる方言では外部キーが消えたまま残るため、その 1 本だけを外さない
+    /// （列の変更で外し直しを要しない方言でも、付け直しは失敗する。名指しは
+    /// <see cref="AssessmentRules.WarnLiveForeignKeysWithPostSyncTypeMismatch"/> が、この関数の前に行う）。ほかの外部キーは普通に外して付け直す。残した外部キーに阻まれて必ず断られる文は、DDL が
     /// 暗黙コミットされる方言では <see cref="MoveCertainFailureFirst"/> が計画の先頭へ移すので、何も外れる前に失敗する
     /// （DDL が巻き戻る方言では、失敗すれば外したものごと戻る）。
     /// </para>
@@ -2299,40 +2388,6 @@ public sealed class SyncPlanner
         // 明示的に DROP が選択されている FK（自動 DROP の重複も再 ADD も行わない）。
         // 端が消える外部キーは InjectVanishingForeignKeyDrops が先に外す項目として足しているのでここに含まれる
         var explicitlyDropped = postSync.DroppedForeignKeys;
-
-        // 型の食い違いの名指しはここの 1 か所（方言に依らない）：明示に外さない live の外部キーに、端の型がこの同期で決まり
-        // 同期後に両端が並べられない組があれば名指しする。その外部キーは外し直さない（下の 1 本ごとの判定）か、
-        // 列の変更で外し直さない方言（PostgreSQL・Oracle）では外部キーを張ったまま列を変えるので、DB が断れば列の変更が失敗する
-        foreach (var fk in liveSchema.ForeignKeys)
-        {
-            var childTable = SchemaDiffService.NormalizeTable(fk.Child);
-            var parentTable = SchemaDiffService.NormalizeTable(fk.Parent);
-
-            if (
-                !explicitlyDropped.Contains(
-                    ForeignKeyKey(childTable, parentTable, fk.ColumnPairs, fk.Relationship, limit)
-                )
-                && HasPostSyncTypeMismatch(
-                    fk,
-                    childTable,
-                    parentTable,
-                    typeDecidingColumns,
-                    capabilities
-                )
-            )
-            {
-                AddTypeMismatchWarning(
-                    childTable,
-                    ResolveForeignKeyName(
-                        fk.Relationship,
-                        childTable,
-                        parentTable,
-                        limit,
-                        liveSchema
-                    )
-                );
-            }
-        }
 
         // (d) 列の変更で外部キーを外し直さない方言で、組の両端の型がこの同期で決まり、片側だけ変えた途中の状態が並べられない
         // 外部キー（外部キーの照合キーの集合）。外部キーを張ったまま両端を 1 列ずつ変えると、同期後の型は合っても最初の列の変更で
@@ -2530,22 +2585,6 @@ public sealed class SyncPlanner
         // 自動 DROP は DropForeignKey セクションの先頭側・再 ADD は AddForeignKey セクションの末尾側へ置く
         // （BuildSections は種別で抽出しつつ入力順を保持するため、この並びがそのままセクション内の順序になる）
         return [.. autoDrops, .. selected, .. autoAdds];
-
-        // 食い違う外部キーを名指しする。選んだ作り直しを型の食い違いで外した外部キー
-        // （ExcludeForeignKeysWithPostSyncTypeMismatch）は既に名指ししているので、同じ警告を重ねない
-        void AddTypeMismatchWarning(string childTable, string constraintName)
-        {
-            var warning = new SyncPlanWarning(
-                SyncPlanWarningKind.ForeignKeyColumnTypeMismatch,
-                childTable,
-                constraintName
-            );
-
-            if (!warnings.Contains(warning))
-            {
-                warnings.Add(warning);
-            }
-        }
     }
 
     /// <summary>
@@ -3005,179 +3044,6 @@ public sealed class SyncPlanner
     }
 
     /// <summary>
-    /// 選んだ外部キーの追加（作り直しは展開後の追加）の参照先の列が、同期後の主キーにも一意制約にもちょうど一致しない
-    /// ものを <see cref="SyncPlanWarningKind.ForeignKeyNotOnCandidateKey"/> で名指しする。
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// 同期後の主キーは、主キーの変更を選んだ表はその新しい主キー、追加を選んだ表は図の主キー、それ以外は live の主キー。
-    /// 同期後の一意制約は <see cref="PostSyncSchema.UniqueColumnSets"/>（live − 削除 ＋ 追加、追加を選んだ表の一意制約を含む）。
-    /// 比べ方は暗黙の付け直しと同じ <see cref="StaysCandidateKey"/>（列の集合）。
-    /// </para>
-    /// <para>
-    /// 参照先の表が live にも追加にも無い項目は対象外（選んでいない表の追加を前提にする項目は計画の入口で外している）。
-    /// </para>
-    /// </remarks>
-    private static void WarnAddedForeignKeysNotOnCandidateKey(
-        PostSyncSchema postSync,
-        SyncDialectCapabilities capabilities,
-        LiveSchema? liveSchema,
-        List<SyncPlanWarning> warnings
-    )
-    {
-        var adds = postSync
-            .Items.Where(i =>
-                i.Kind == SchemaDiffKind.AddForeignKey
-                && i.ChildEntity is not null
-                && i.ParentEntity is not null
-            )
-            .ToList();
-
-        if (liveSchema is null || adds.Count == 0)
-        {
-            return;
-        }
-
-        var postSyncUniques = postSync.UniqueColumnSets;
-
-        foreach (var add in adds)
-        {
-            var childTable = SchemaDiffService.NormalizeTable(add.ChildEntity!);
-            var parentTable = SchemaDiffService.NormalizeTable(add.ParentEntity!);
-            var postSyncKey = postSync.PrimaryKeyOf(parentTable);
-
-            if (postSyncKey is null)
-            {
-                continue;
-            }
-
-            var referencedColumns = ForeignKeyColumnPairResolver
-                .ParentColumns(SyncScriptBuilderHelper.ResolveColumnPairs(add))
-                .ToList();
-
-            if (
-                referencedColumns.Count == 0
-                || StaysCandidateKey(postSyncKey, postSyncUniques, parentTable, referencedColumns)
-            )
-            {
-                continue;
-            }
-
-            warnings.Add(
-                new SyncPlanWarning(
-                    SyncPlanWarningKind.ForeignKeyNotOnCandidateKey,
-                    childTable,
-                    SelectedForeignKeyName(add, capabilities.IdentifierLengthLimit)
-                )
-            );
-        }
-    }
-
-    /// <summary>
-    /// <see cref="SyncDialectCapabilities.SetNullRequiresNullableChildColumn"/> が <c>false</c> の方言（SET NULL を作れる方言）で、
-    /// 選んだ外部キーの追加・作り直しのうち、参照アクション <c>SET NULL</c> を使い、子の列が同期後に NOT NULL になるものを、
-    /// 外さずに <see cref="SyncPlanWarningKind.SetNullOnNotNullColumn"/> で名指しする。作れない方言では何もしない
-    /// （外して名指しするのは <see cref="SelectionRules.ExcludeSetNullForeignKeysOnNotNullColumns"/>）。
-    /// </summary>
-    /// <param name="state">除外を終えた選択済みの項目（外部キーの作り直しは展開前）とその同期後の事実</param>
-    /// <param name="capabilities">方言のケーパビリティ（方言が書く参照アクションと、作れるかの宣言）</param>
-    /// <param name="warnings">名指しの警告を積む先</param>
-    /// <remarks>
-    /// 除外の周（<see cref="ExcludeUntilStable"/>）の後に 1 回だけ、周が止まったときの状態で呼ぶ。周の中で積むと、警告した外部キーが
-    /// 後の周で別の理由で外れても、計画に無い外部キーの警告が残る。判定は <see cref="SelectionRules.FindSetNullForeignKeysOnNotNullColumns"/>。
-    /// </remarks>
-    private static void WarnSetNullForeignKeysOnNotNullColumns(
-        SelectionState state,
-        SyncDialectCapabilities capabilities,
-        List<SyncPlanWarning> warnings
-    )
-    {
-        if (capabilities.SetNullRequiresNullableChildColumn)
-        {
-            return;
-        }
-
-        foreach (
-            var (
-                _,
-                childTable,
-                constraintName,
-                notNull
-            ) in SelectionRules.FindSetNullForeignKeysOnNotNullColumns(state, capabilities)
-        )
-        {
-            AddSetNullWarning(warnings, childTable, constraintName, notNull);
-        }
-    }
-
-    /// <summary>
-    /// 選んだ列の変更（主キーの変更に伴う暗黙の NOT NULL 化を含む）で、DB にある参照アクション <c>SET NULL</c> の外部キーの
-    /// 子の列が NOT NULL になるとき、その外部キーを <see cref="SyncPlanWarningKind.SetNullOnNotNullColumn"/> で名指しする
-    /// （明示的に外す外部キーは除く）。方言に依らない（作れる方言でも、参照される親の行の削除・更新が失敗する）。
-    /// </summary>
-    /// <remarks>
-    /// 名指しするのは、この同期で NOT NULL になる子の列があるときだけ（live の時点で既に NOT NULL の子の列を持つ外部キーは、
-    /// 同期が変えるものではない）。列は同期後に NOT NULL の子の列をすべて並べる。作れない方言で外し直さないのは
-    /// <see cref="InjectImplicitForeignKeyRebuilds"/>。
-    /// </remarks>
-    private static void WarnSetNullOnNotNullLiveForeignKeys(
-        PostSyncSchema postSync,
-        SyncDialectCapabilities capabilities,
-        LiveSchema? liveSchema,
-        List<SyncPlanWarning> warnings
-    )
-    {
-        if (liveSchema is null)
-        {
-            return;
-        }
-
-        var limit = capabilities.IdentifierLengthLimit;
-        var explicitlyDropped = postSync.DroppedForeignKeys;
-        Func<Entity, string, string, bool> postSyncNullable = postSync.AllowsNull;
-
-        foreach (var fk in liveSchema.ForeignKeys)
-        {
-            var childTable = SchemaDiffService.NormalizeTable(fk.Child);
-            var parentTable = SchemaDiffService.NormalizeTable(fk.Parent);
-
-            if (
-                !UsesSetNull(fk.Relationship, capabilities)
-                || explicitlyDropped.Contains(
-                    ForeignKeyKey(childTable, parentTable, fk.ColumnPairs, fk.Relationship, limit)
-                )
-            )
-            {
-                continue;
-            }
-
-            // この同期で NOT NULL になる子の列（live では NULL を許す列）
-            var madeNotNull = fk.ColumnPairs.Any(p =>
-                fk.Child.Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, p.ChildColumn))
-                    is { } childColumn
-                && ColumnNullability.AllowsNull(childColumn)
-                && !postSyncNullable(fk.Child, childTable, p.ChildColumn)
-            );
-
-            if (madeNotNull)
-            {
-                AddSetNullWarning(
-                    warnings,
-                    childTable,
-                    ResolveForeignKeyName(
-                        fk.Relationship,
-                        childTable,
-                        parentTable,
-                        limit,
-                        liveSchema
-                    ),
-                    PostSyncNotNullChildColumns(fk, childTable, postSyncNullable)
-                );
-            }
-        }
-    }
-
-    /// <summary>
     /// 作れない方言で、この外部キーの付け直しが必ず失敗するか（参照アクション <c>SET NULL</c> で、子の列が同期後に NOT NULL）
     /// </summary>
     internal static bool BlocksSetNullRebuild(
@@ -3191,7 +3057,7 @@ public sealed class SyncPlanner
         && PostSyncNotNullChildColumns(fk, childTable, postSyncNullable).Count > 0;
 
     /// <summary>live の外部キーの子の列のうち、同期後に NOT NULL のもの（宣言順）</summary>
-    private static List<string> PostSyncNotNullChildColumns(
+    internal static List<string> PostSyncNotNullChildColumns(
         ResolvedForeignKeyRelationship fk,
         string childTable,
         Func<Entity, string, string, bool> postSyncNullable
@@ -3363,213 +3229,6 @@ public sealed class SyncPlanner
     }
 
     /// <summary>
-    /// 選んだ外部キーの追加（作り直しは展開後の追加）のうち、参照アクション <c>SET DEFAULT</c> を使い、子の列に NOT NULL の
-    /// 列があるものを <see cref="SyncPlanWarningKind.SetDefaultOnNotNullColumn"/> で名指しする
-    /// （<see cref="SyncDialectCapabilities.SetDefaultRequiresColumnDefault"/> が <c>true</c> の方言のみ）。
-    /// </summary>
-    /// <param name="postSync">展開と暗黙の項目の注入を終えた項目（主キーの変更が足す暗黙の NOT NULL 化を含む）の同期後の事実（live の図が無ければ図の値で見る）</param>
-    /// <param name="capabilities">方言のケーパビリティ</param>
-    /// <param name="warnings">名指しの警告を積む先</param>
-    /// <remarks>
-    /// 子の列の NULL 許容は同期後の値で見る（<see cref="PostSyncSchema.AllowsNull"/>＝選んだ主キーの変更で主キーに入る列は NOT NULL、
-    /// 選んだ列の変更があればその値、live に在る列は live の値、live に無い列は図の値）。図の値で見ると、NULL 許容化を選ばずに
-    /// 外部キーだけを足す同期で、DB では NOT NULL のままの列を見逃す。主キーの変更などに伴う暗黙の付け直しは対象外
-    /// （live に既にある外部キーなので、DB の列は DEFAULT 制約を持っている）。
-    /// </remarks>
-    private static void WarnSetDefaultOnNotNullColumns(
-        PostSyncSchema postSync,
-        SyncDialectCapabilities capabilities,
-        List<SyncPlanWarning> warnings
-    )
-    {
-        if (!capabilities.SetDefaultRequiresColumnDefault)
-        {
-            return;
-        }
-
-        Func<Entity, string, string, bool> postSyncNullable = postSync.AllowsNull;
-
-        foreach (
-            var add in postSync.Items.Where(i =>
-                i.Kind == SchemaDiffKind.AddForeignKey
-                && i.Relationship is not null
-                && i.ChildEntity is not null
-                && i.ParentEntity is not null
-                && ForeignKeyStatementNotes.UsesSetDefault(i.Relationship)
-            )
-        )
-        {
-            var child = add.ChildEntity!;
-            var childTable = SchemaDiffService.NormalizeTable(child);
-            var notNull = ForeignKeyColumnPairResolver
-                .ChildColumns(SyncScriptBuilderHelper.ResolveColumnPairs(add))
-                .Where(name => !postSyncNullable(child, childTable, name))
-                .ToList();
-
-            if (notNull.Count == 0)
-            {
-                continue;
-            }
-
-            var name = SelectedForeignKeyName(add, capabilities.IdentifierLengthLimit);
-
-            warnings.Add(
-                new SyncPlanWarning(
-                    SyncPlanWarningKind.SetDefaultOnNotNullColumn,
-                    childTable,
-                    $"{name} ({string.Join(", ", notNull)})"
-                )
-            );
-        }
-    }
-
-    /// <summary>
-    /// 選んだ説明の項目のうち、方言が保存できない文字（BMP の外の文字）を書くものを
-    /// <see cref="SyncPlanWarningKind.DescriptionCharactersReplaced"/> で表・列ごとに名指しする
-    /// （判定は <see cref="SyncDialectCapabilities.IdentifierLengthLimit"/> の宣言＝MySQL だけ置き換わる）。
-    /// </summary>
-    private static void WarnDescriptionCharactersReplaced(
-        IReadOnlyList<SchemaDiffItem> selected,
-        SyncDialectCapabilities capabilities,
-        List<SyncPlanWarning> warnings
-    )
-    {
-        var limit = capabilities.IdentifierLengthLimit;
-
-        foreach (var item in selected)
-        {
-            var target = item.Kind switch
-            {
-                SchemaDiffKind.SetTableDescription => item.TableName,
-                SchemaDiffKind.SetColumnDescription when item.ColumnName is not null =>
-                    $"{item.TableName}.{item.ColumnName}",
-                _ => null,
-            };
-
-            if (
-                target is null
-                || !DescriptionText.IsPresent(item.NewDescription)
-                || limit.CanRepresent(item.NewDescription)
-            )
-            {
-                continue;
-            }
-
-            warnings.Add(
-                new SyncPlanWarning(
-                    SyncPlanWarningKind.DescriptionCharactersReplaced,
-                    item.TableName,
-                    target
-                )
-            );
-        }
-    }
-
-    /// <summary>
-    /// 選んだ項目が触れる表（項目の表と、外部キーの親子の表）のうち、ドットを含む名前のものを
-    /// <see cref="SyncPlanWarningKind.SchemaQualifiedTableName"/> で表ごとに 1 件名指しする
-    /// （<see cref="SyncDialectCapabilities.SupportsSchemaQualifiedTableNames"/> が <c>false</c> の方言のみ）。
-    /// </summary>
-    private static void WarnSchemaQualifiedTableNames(
-        IReadOnlyList<SchemaDiffItem> selected,
-        SyncDialectCapabilities capabilities,
-        List<SyncPlanWarning> warnings
-    )
-    {
-        if (capabilities.SupportsSchemaQualifiedTableNames)
-        {
-            return;
-        }
-
-        var seen = new HashSet<string>(SchemaNames.Comparer);
-
-        foreach (var item in selected)
-        {
-            foreach (
-                var name in new[]
-                {
-                    item.TableName,
-                    item.ChildEntity?.TableName,
-                    item.ParentEntity?.TableName,
-                }
-            )
-            {
-                if (name is null || !SchemaQualifiedName.IsQualified(name))
-                {
-                    continue;
-                }
-
-                var table = SchemaNames.ToStoredForm(name);
-
-                if (seen.Add(table))
-                {
-                    warnings.Add(
-                        new SyncPlanWarning(
-                            SyncPlanWarningKind.SchemaQualifiedTableName,
-                            table,
-                            string.Empty
-                        )
-                    );
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// 選んだ列の変更のうち、取込で既定値の分かった列の型の種類（方言の正規化を通した、括弧より前の基本の名前）を
-    /// 変えるものを <see cref="SyncPlanWarningKind.DefaultOnColumnTypeKindChange"/> で名指しする
-    /// （<see cref="SyncDialectCapabilities.ChecksDefaultOnColumnTypeChange"/> が <c>true</c> の方言のみ）。
-    /// </summary>
-    private static void WarnDefaultsOnColumnTypeKindChange(
-        IReadOnlyList<SchemaDiffItem> selected,
-        SyncDialectCapabilities capabilities,
-        SyncPlanContext? context,
-        List<SyncPlanWarning> warnings
-    )
-    {
-        if (
-            !capabilities.ChecksDefaultOnColumnTypeChange
-            || context is null
-            || context.ColumnDefaults.Count == 0
-        )
-        {
-            return;
-        }
-
-        foreach (
-            var alter in selected.Where(i =>
-                i.Kind == SchemaDiffKind.AlterColumn
-                && i.ColumnName is not null
-                && i.Column is not null
-                && i.OldColumn is not null
-            )
-        )
-        {
-            var oldType = alter.OldColumn!.DataType;
-            var newType = alter.Column!.DataType;
-
-            if (
-                !capabilities.ChangesTypeKind(oldType, newType)
-                || !context.ColumnDefaults.Any(d =>
-                    SchemaNames.AreSame(d.TableName, alter.TableName)
-                    && SchemaNames.AreSame(d.ColumnName, alter.ColumnName!)
-                )
-            )
-            {
-                continue;
-            }
-
-            warnings.Add(
-                new SyncPlanWarning(
-                    SyncPlanWarningKind.DefaultOnColumnTypeKindChange,
-                    SchemaNames.ToStoredForm(alter.TableName),
-                    $"{alter.ColumnName} ({oldType} → {newType})"
-                )
-            );
-        }
-    }
-
-    /// <summary>
     /// 外部キーの追加（明示の追加・作り直しを展開した追加・暗黙の付け直し）の列ペアを、参照先の同期後のキーの並びへ
     /// 並べ替える（参照する列の並びがキーの並びと一致しないと外部キーを作れない方言＝SQL Server・MySQL）。
     /// </summary>
@@ -3683,7 +3342,7 @@ public sealed class SyncPlanner
     /// </para>
     /// <para>
     /// 判定はここの 1 か所で、前寄せ（<see cref="MoveCertainFailureFirst"/>）・一意制約の削除の警告
-    /// （<see cref="WarnUniqueConstraintDropsBreakingForeignKeys"/>）・主キーの変更の外し直し（<see cref="DependsOnOldPrimaryKey"/> と、
+    /// （<see cref="AssessmentRules.WarnUniqueConstraintDropsBreakingForeignKeys"/>）・主キーの変更の外し直し（<see cref="DependsOnOldPrimaryKey"/> と、
     /// 新しい主キーへ付け直す一意制約の枝）が通す。写しが割れると、前寄せした削除を警告が名指しせず、警告を飛ばした外部キーを
     /// 外し直しも付け直さない。付け直せるか（候補キーの証明＝<see cref="StaysCandidateKey"/>）は
     /// 別の判定で、列の集合の完全一致のまま（非標準キーへの付け直しは証明しない）。
@@ -3829,96 +3488,6 @@ public sealed class SyncPlanner
 
         // 自動 DROP は DropUniqueConstraint セクションの先頭側・再 ADD は AddUniqueConstraint セクションの末尾側へ置く
         return [.. autoDrops, .. sectionItems, .. autoAdds];
-    }
-
-    /// <summary>
-    /// 選択された一意制約の削除が既存 FK の被参照列を候補キーでなくしうる場合に警告を積む。
-    /// </summary>
-    /// <remarks>
-    /// 削除する一意制約がその外部キーを支えうるか（<see cref="CanSupportForeignKey"/>＝前寄せと同じ判定。MySQL は参照する列を先頭に
-    /// 並べる一意制約も）で判定する。ほかのキーが同じ列を覆っていれば実際には壊れないが、誤警告を許容してほかのキーは数えず、
-    /// 実行はブロックしない（レンダラーは DROP を出す）。
-    /// </remarks>
-    private static void WarnUniqueConstraintDropsBreakingForeignKeys(
-        PostSyncSchema postSync,
-        LiveSchema? liveSchema,
-        List<SyncPlanWarning> warnings,
-        SyncDialectCapabilities capabilities
-    )
-    {
-        var limit = capabilities.IdentifierLengthLimit;
-
-        if (liveSchema is null)
-        {
-            return;
-        }
-
-        var drops = postSync
-            .Items.Where(i => i.Kind == SchemaDiffKind.DropUniqueConstraint)
-            .ToList();
-
-        if (drops.Count == 0)
-        {
-            return;
-        }
-
-        // 同期で外す外部キー（明示的に外す・端が消える＝計画の入口で外す項目を足している）は壊れようがないので警告しない
-        var explicitlyDropped = postSync.DroppedForeignKeys;
-        var dropped = postSync.Dropped;
-        var pkChangedTables = postSync.PrimaryKeyChanges;
-
-        foreach (var fk in liveSchema.ForeignKeys)
-        {
-            var parentTable = SchemaDiffService.NormalizeTable(fk.Parent);
-            var childTable = SchemaDiffService.NormalizeTable(fk.Child);
-
-            // 新しい主キーが参照する列とちょうど同じなら、候補キーは主キーが保つ（主キーの変更の外し直しが新しい主キーへ付け直す）
-            if (
-                dropped.Touches(fk, childTable, parentTable)
-                || explicitlyDropped.Contains(
-                    ForeignKeyKey(childTable, parentTable, fk.ColumnPairs, fk.Relationship, limit)
-                )
-                || (
-                    pkChangedTables.TryGetValue(parentTable, out var newKey)
-                    && IsSameColumnSet(
-                        newKey,
-                        ForeignKeyColumnPairResolver.ParentColumns(fk.ColumnPairs)
-                    )
-                )
-            )
-            {
-                continue;
-            }
-
-            var referenced = ForeignKeyColumnPairResolver.ParentColumns(fk.ColumnPairs).ToList();
-
-            foreach (var drop in drops)
-            {
-                if (!SchemaNames.AreSame(SchemaNames.ToStoredForm(drop.TableName), parentTable))
-                {
-                    continue;
-                }
-
-                if (!CanSupportForeignKey(capabilities, drop.UniqueConstraintColumns, referenced))
-                {
-                    continue;
-                }
-
-                warnings.Add(
-                    new SyncPlanWarning(
-                        SyncPlanWarningKind.UniqueConstraintDropMayBreakForeignKey,
-                        parentTable,
-                        ResolveForeignKeyName(
-                            fk.Relationship,
-                            SchemaDiffService.NormalizeTable(fk.Child),
-                            parentTable,
-                            limit,
-                            liveSchema
-                        )
-                    )
-                );
-            }
-        }
     }
 
     /// <summary>

@@ -348,6 +348,7 @@ public enum SyncPlanWarningKind
 /// <see cref="SyncPlanWarningKind.DescriptionCharactersReplaced"/> では説明のテーブル（Detail は「表」または「表.列」）、
 /// <see cref="SyncPlanWarningKind.TableLeftWithoutColumns"/> では列を消す表（Detail は計画から外した列の削除の列名をカンマ区切りで並べたもの）、
 /// <see cref="SyncPlanWarningKind.TableWithoutColumns"/> では追加を外した列の無い表（Detail は空）、
+/// <see cref="SyncPlanWarningKind.TableRebuildDropsColumnAttribute"/> では作り直す表（Detail は作り直しで失われる属性をカンマ区切りで並べたもの）、
 /// <see cref="SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent"/> では作り直しを外した表（Detail は取込警告が名指しした捨てた物をカンマ区切りで並べたもの）、
 /// <see cref="SyncPlanWarningKind.UniqueConstraintRebuildKeptForForeignKey"/> では一意制約の表（Detail は「残した一意制約の名前 (支える外部キーの名前)」）、
 /// <see cref="SyncPlanWarningKind.TableChangeBreaksDependentView"/> では変更を外した表（Detail は読めなくなるビューの名前をカンマ区切りで並べたもの）、
@@ -411,11 +412,25 @@ public sealed class SyncPlan
     /// 利用者が選んだのに、計画が外した項目（選んだ元の項目そのもの）。外した理由はそれぞれ警告（<see cref="Warnings"/>）で名指しする。
     /// </summary>
     /// <remarks>
-    /// 外す理由は、選んでいない変更を前提にする（<see cref="SyncPlanWarningKind.SelectedItemRequiresUnselectedItem"/>）・
-    /// 同期後に両端の型が食い違う外部キーの追加と作り直し（<see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/>）・
-    /// 作れない方言の、子の列が NOT NULL になる SET NULL の外部キーの追加と作り直し
-    /// （<see cref="SyncPlanWarningKind.SetNullOnNotNullColumn"/>）。型の変更も含む列の変更で NULL 許容化だけを外した項目も
-    /// ここに入る（型の変更は計画に残る）。警告と一覧は同じ箇所で必ず一緒に積む。
+    /// 外す理由は、外した項目を名指しする警告の種別のとおり。
+    /// <list type="bullet">
+    /// <item>選んでいない変更を前提にする項目と、同期後も残る DB の制約と名前・定義・列集合が重なる追加
+    /// （<see cref="SyncPlanWarningKind.SelectedItemRequiresUnselectedItem"/>）。</item>
+    /// <item>同期後に両端の型が食い違う外部キーの追加と作り直し（<see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/>）。</item>
+    /// <item>作れない方言の、子の列が NOT NULL になる SET NULL の外部キーの追加と作り直し
+    /// （<see cref="SyncPlanWarningKind.SetNullOnNotNullColumn"/>）。</item>
+    /// <item>列の無い表の追加（<see cref="SyncPlanWarningKind.TableWithoutColumns"/>）と、表の列が 1 本も残らなくなる列の削除
+    /// （<see cref="SyncPlanWarningKind.TableLeftWithoutColumns"/>）。</item>
+    /// <item>取込が捨てた物のある表・DB の外の物で作り直せない表を作り直す項目
+    /// （<see cref="SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent"/>・
+    /// <see cref="SyncPlanWarningKind.TableRebuildBlockedByExternalDefinition"/>）。</item>
+    /// <item>DB のビュー・トリガー・索引を壊す変更（<see cref="SyncPlanWarningKind.TableChangeBreaksDependentView"/>・
+    /// <see cref="SyncPlanWarningKind.TableChangeBreaksDependentTrigger"/>・
+    /// <see cref="SyncPlanWarningKind.TableChangeBreaksDependentIndex"/>）。</item>
+    /// <item>外部キーを支え続けるために残した一意制約の作り直し
+    /// （<see cref="SyncPlanWarningKind.UniqueConstraintRebuildKeptForForeignKey"/>）。</item>
+    /// </list>
+    /// 型の変更も含む列の変更で NULL 許容化だけを外した項目もここに入る（型の変更は計画に残る）。警告と一覧は同じ箇所で必ず一緒に積む。
     /// </remarks>
     public IReadOnlyList<SchemaDiffItem> ExcludedItems { get; init; } = [];
 

@@ -54,7 +54,23 @@
       "**/SequentialScheduler.cs",
       "**/StepOrder.cs",
       "**/SyncPlanProbe.cs",
-      "**/UnreaddableConstraints.cs"
+      "**/UnreaddableConstraints.cs",
+      "**/AssessmentFacts.cs",
+      "**/AssessmentRule.cs",
+      "**/PlanAssessment.cs",
+      "**/SequentialPlanner.cs",
+      "**/AssessmentRules.DetachedForeignKeysAtRisk.cs",
+      "**/AssessmentRules.ImplicitUniqueConstraintDrops.cs",
+      "**/AssessmentRules.LiveForeignKeysWithPostSyncTypeMismatch.cs",
+      "**/AssessmentRules.cs",
+      "**/AssessmentRules.AddedForeignKeysNotOnCandidateKey.cs",
+      "**/AssessmentRules.DefaultsOnColumnTypeKindChange.cs",
+      "**/AssessmentRules.DescriptionCharactersReplaced.cs",
+      "**/AssessmentRules.SchemaQualifiedTableNames.cs",
+      "**/AssessmentRules.SetDefaultOnNotNullColumns.cs",
+      "**/AssessmentRules.SetNullForeignKeysOnNotNullColumns.cs",
+      "**/AssessmentRules.SetNullOnNotNullLiveForeignKeys.cs",
+      "**/AssessmentRules.UniqueConstraintDropsBreakingForeignKeys.cs"
     ]
   }
 }

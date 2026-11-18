@@ -311,7 +311,7 @@ internal static partial class SourceRules
                     "前提の欠けで NULL 許容化だけを外すとき、項目自身の旧と新の型（OldColumn と Column）を比べて型の変更が残るかを決める（live を引かない入口の段で、外部キーの照合ではない）"
                 ),
                 new(
-                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "src/QuickER.Provider/Sync/Assessment/AssessmentRules.DefaultsOnColumnTypeKindChange.cs",
                     "WarnDefaultsOnColumnTypeKindChange",
                     1,
                     "既定値のある列の型の種類（括弧より前の名前）の変更を名指しする（型が同じかでなく型の種類を比べる別の判定）"
@@ -490,7 +490,7 @@ internal static partial class SourceRules
                 GuardFinder.Nodes(PostSyncSchemaCalls.Describe),
                 new GuardKnown(
                     "src/QuickER.Provider/SyncPlanner.cs",
-                    "BuildPlan: Selected",
+                    "PrepareSelection: Selected",
                     1,
                     "選んだ項目の最終形（暗黙の削除まで足した並び）の同期後の事実を、警告・外し直しの注入・並べ替え・再構築の合成で共有する。作った後に selected へ項目を足さない"
                 ),
@@ -844,7 +844,96 @@ internal static partial class SourceRules
                     ]
                 ),
             },
+            // 同期の計画の評価の規則（AssessmentRules の Warn*＝選んだ項目・同期後の事実・DB の今の図から警告を作る）を呼ぶ所を数える。
+            // 規則は警告の並びを返すだけで、積む順と重ね方は呼ぶ側が決める。呼ぶ所が増えると、同じ警告を 2 回積む・積む順が割れる。
+            // 許すのは規則の表（AssessmentRules.All）の初期化子だけ。今の計画器（SyncPlanner.BuildPlan）が警告の段から 1 つずつ直接呼ぶ
+            // 9 か所は、理由つきの一覧に載せる（終わりの条件つき）。XmlDoc の cref と nameof の中の名前は数えない
+            SourceRule.Forbid(
+                "sync-assessment-rule-callers",
+                "同期の計画の評価の規則（AssessmentRules の Warn*）は規則の表から流す（今の計画器が警告の段から直接呼ぶ所は一覧のとおり）",
+                SourceScope.Under("src/QuickER.Provider"),
+                GuardFinder.Nodes(SyncAssessmentRuleCalls.Describe),
+                AssessmentRuleCalledByCurrentPlanner("WarnSetNullForeignKeysOnNotNullColumns"),
+                AssessmentRuleCalledByCurrentPlanner("WarnSetNullOnNotNullLiveForeignKeys"),
+                AssessmentRuleCalledByCurrentPlanner(
+                    "WarnUniqueConstraintDropsBreakingForeignKeys"
+                ),
+                AssessmentRuleCalledByCurrentPlanner("WarnAddedForeignKeysNotOnCandidateKey"),
+                AssessmentRuleCalledByCurrentPlanner("WarnSetDefaultOnNotNullColumns"),
+                AssessmentRuleCalledByCurrentPlanner("WarnSchemaQualifiedTableNames"),
+                AssessmentRuleCalledByCurrentPlanner("WarnDefaultsOnColumnTypeKindChange"),
+                AssessmentRuleCalledByCurrentPlanner("WarnDescriptionCharactersReplaced"),
+                AssessmentRuleCalledByCurrentPlanner("WarnLiveForeignKeysWithPostSyncTypeMismatch")
+            ) with
+            {
+                // 規則への参照を見つけられること（許す場所の参照も数える。いまは今の計画器の 9 か所と、規則の表の要素 12）
+                Floor = new(
+                    GuardFinder.Nodes(SyncAssessmentRuleCalls.DescribeCandidate),
+                    21,
+                    "評価の規則への参照"
+                ),
+            },
+            // 計画の評価（Sync/Assessment）と新しい計画器の入口（Sync/SequentialPlanner.cs）は、差分の項目を作らず、複製もしない
+            // （警告は作る）。項目を作ると、文で表した計画の途中に今の計画器の形（項目と印）が戻る。型を書かない new() は拾わない
+            SourceRule.Forbid(
+                "sync-assessment-builds-warnings-only",
+                "同期の計画の評価（Sync/Assessment）と新しい計画器の入口は、差分の項目を作らない（警告だけを作る）",
+                SourceScope
+                    .Under("src/QuickER.Provider")
+                    .Within("Sync/Assessment/")
+                    .Within("Sync/SequentialPlanner.cs"),
+                GuardFinder.Nodes(SyncSchedulingBoundaries.DescribeItemCreation)
+            ) with
+            {
+                MinimumFiles = 13,
+                Witness = new(
+                    SourceScope.Files("src", "src/QuickER.Provider/Sync/Steps/StepLowering.cs"),
+                    [
+                        new(
+                            "src/QuickER.Provider/Sync/Steps/StepLowering.cs",
+                            "new SchemaDiffItem",
+                            11,
+                            "文を今の計画の項目へ写す所（範囲の外の実在の項目の生成を拾えること）"
+                        ),
+                        new(
+                            "src/QuickER.Provider/Sync/Steps/StepLowering.cs",
+                            "WithForeignKeyColumnPairs",
+                            1,
+                            "列の組を並べ替えた外部キーの追加の複製（範囲の外の実在の複製を拾えること）"
+                        ),
+                    ]
+                ),
+            },
+            // 新しい計画器の入口（SequentialPlanner.Plan）を呼ぶのは、今の計画器が入れ物（SyncPlanProbe）を受け取ったときの 1 か所だけ。
+            // 入れ物を作るのはテストだけ（規則 sync-plan-probe-only-in-tests）なので、製品の経路では新しい計画器は走らない。ほかの所から
+            // 呼ぶと、今の計画器と比べ終える前に、新しい計画器の計画が製品の経路へ出る
+            SourceRule.Forbid(
+                "sync-sequential-planner-callers",
+                "同期の計画の新しい計画器の入口（SequentialPlanner.Plan）を呼ぶのは、今の計画器が入れ物を受け取ったときの 1 か所だけ",
+                SourceScope.Under("src"),
+                GuardFinder.Nodes(SyncSchedulingBoundaries.DescribeSequentialPlannerCall),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "BuildPlan: SequentialPlanner.Plan",
+                    1,
+                    "今の計画器と新しい計画器を網の関係 N5 で比べるための、入れ物を受け取ったときだけの呼び出し。今の計画器を新しい計画器と入れ替える区切りで一覧から消す"
+                )
+            ),
         ];
+
+    /// <summary>
+    /// 規則 <c>sync-assessment-rule-callers</c> の一覧の 1 行：今の計画器（<c>SyncPlanner.BuildPlan</c>）が評価の規則を直接呼ぶ 1 か所
+    /// </summary>
+    /// <remarks>
+    /// 終わりの条件：今の計画器を新しい計画器と入れ替えて消す区切りで、この一覧を消す（規則を流すのは規則の表だけになる）。
+    /// </remarks>
+    private static GuardKnown AssessmentRuleCalledByCurrentPlanner(string rule) =>
+        new(
+            "src/QuickER.Provider/SyncPlanner.cs",
+            $"BuildPlan: {rule}",
+            1,
+            "今の計画器が警告の段のその位置から直接呼ぶ（規則の表は組み立ての結果を読む規則も持ち、今の計画器は表を流せない）。今の計画器を消す区切りで一覧から消す"
+        );
 
     /// <summary>生成コードの双方向同期のテンプレートの部品</summary>
     private const string SyncTemplateFile =

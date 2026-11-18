@@ -37,6 +37,58 @@ internal static class SyncSchedulingBoundaries
             _ => null,
         };
 
+    /// <summary>
+    /// 差分の項目（<c>SchemaDiffItem</c>）を作る式と、差分の項目の複製を作る呼び出し。警告を作る式は数えない
+    /// （規則 <c>sync-assessment-builds-warnings-only</c> の見つける形）
+    /// </summary>
+    public static string? DescribeItemCreation(SyntaxNode node) =>
+        DescribeItemOrWarningCreation(node) is { } what && what != "new SyncPlanWarning"
+            ? what
+            : null;
+
+    /// <summary>
+    /// 新しい計画器の入口の呼び出し（<c>SequentialPlanner.Plan(…)</c>。何かは「含むメソッド: SequentialPlanner.Plan」。
+    /// メソッドの外なら「(member outside a method): SequentialPlanner.Plan」）
+    /// </summary>
+    /// <remarks>
+    /// 受け手を <c>SequentialPlanner</c> と書いた呼び出しとメソッドグループを拾う（完全修飾も）。<c>using static</c> で受け手を省いた
+    /// 呼び出しは拾わない。
+    /// </remarks>
+    public static string? DescribeSequentialPlannerCall(SyntaxNode node)
+    {
+        if (
+            node
+            is not MemberAccessExpressionSyntax
+            {
+                Name.Identifier.ValueText: "Plan",
+                Expression: var receiver
+            }
+        )
+        {
+            return null;
+        }
+
+        var receiverName = receiver switch
+        {
+            IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
+            MemberAccessExpressionSyntax qualified => qualified.Name.Identifier.ValueText,
+            AliasQualifiedNameSyntax alias => alias.Name.Identifier.ValueText,
+            _ => null,
+        };
+
+        if (receiverName != "SequentialPlanner")
+        {
+            return null;
+        }
+
+        var method = node.Ancestors()
+            .OfType<MethodDeclarationSyntax>()
+            .FirstOrDefault()
+            ?.Identifier.ValueText;
+
+        return $"{method ?? "(member outside a method)"}: SequentialPlanner.Plan";
+    }
+
     private static bool IsItemCopy(SimpleNameSyntax name) =>
         name.Identifier.ValueText
             is "WithForeignKeyColumnPairs"

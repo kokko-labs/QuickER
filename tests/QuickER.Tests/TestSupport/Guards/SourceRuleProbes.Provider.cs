@@ -1373,5 +1373,280 @@ internal static partial class SourceRuleProbes
             {
                 InactiveBranch = true,
             },
+            // 評価の規則（AssessmentRules の Warn*）への参照のうち、規則の表でないフィールドの初期化子のメソッドグループ・規則の中からの
+            // ほかの規則の呼び出し・AssessmentRules のほかのメソッドからの呼び出し・計画器の BuildPlan の呼び出しとメソッドグループ・
+            // ラムダの中の呼び出しを拾い、規則の表（All）の初期化子のメソッドグループ（修飾の有無とも）・規則の宣言・nameof の中の名前・
+            // Warn に小文字が続く名前・ほかのクラスの修飾しない Warn*・ほかのクラスで修飾した Warn* は拾わない
+            new SourceRuleProbe(
+                "sync-assessment-rule-callers-forms",
+                "sync-assessment-rule-callers",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System;
+                        using System.Collections.Generic;
+
+                        internal delegate List<int> AssessmentRule(int facts);
+
+                        internal static class AssessmentRules
+                        {
+                            internal static readonly AssessmentRule[] All = [WarnListed, AssessmentRules.WarnQualified];
+
+                            internal static readonly AssessmentRule[] Extra = [WarnListed];
+
+                            internal static int Warnings => 0;
+
+                            internal static List<int> WarnListed(int facts) => [];
+
+                            internal static List<int> WarnQualified(int facts) => WarnListed(facts);
+
+                            internal static List<int> Helper(int facts) => WarnQualified(facts);
+                        }
+
+                        internal sealed class SyncPlanner
+                        {
+                            public List<int> BuildPlan(int facts)
+                            {
+                                var direct = AssessmentRules.WarnListed(facts);
+                                AssessmentRule held = AssessmentRules.WarnQualified;
+                                var count =
+                                    nameof(AssessmentRules.WarnListed).Length
+                                    + AssessmentRules.All.Length
+                                    + AssessmentRules.Warnings;
+                                WarnLocal(facts);
+                                return held(facts).Count > count ? direct : Run(facts);
+                            }
+
+                            private static void WarnLocal(int facts) { }
+
+                            private static List<int> Run(int facts)
+                            {
+                                Func<List<int>> lambda = () => AssessmentRules.WarnListed(facts);
+                                return lambda();
+                            }
+                        }
+
+                        internal static class OtherRules
+                        {
+                            public static List<int> WarnListed(int facts) => [];
+                        }
+
+                        internal static class Elsewhere
+                        {
+                            public static List<int> WarnElsewhere(int facts) => OtherRules.WarnListed(facts);
+                        }
+                        """,
+                        "Extra: WarnListed",
+                        "WarnQualified: WarnListed",
+                        "Helper: WarnQualified",
+                        "BuildPlan: WarnListed",
+                        "BuildPlan: WarnQualified",
+                        "Run: WarnListed"
+                    ),
+                ]
+            ),
+            // 構文の規則は、条件コンパイルの外れる分岐の中の呼び出しも読む
+            new SourceRuleProbe(
+                "sync-assessment-rule-callers-inactive-branch",
+                "sync-assessment-rule-callers",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        internal static class AssessmentRules
+                        {
+                            internal static int WarnOutside(int facts) => facts;
+                        }
+
+                        internal sealed class SyncPlanner
+                        {
+                            public int BuildPlan(int facts)
+                            {
+                        #if QUICKER_PROBE_BRANCH
+                                return AssessmentRules.WarnOutside(facts);
+                        #else
+                                return facts;
+                        #endif
+                            }
+                        }
+                        """,
+                        "BuildPlan: WarnOutside"
+                    ),
+                ]
+            ) with
+            {
+                InactiveBranch = true,
+            },
+            // 差分の項目を作る式と項目の複製の呼び出し（?. の後ろも）を拾い、警告を作る式・名前の似た型・名前の似た呼び出し・
+            // XmlDoc の cref・コメント・文字列の中の綴りは拾わない
+            new SourceRuleProbe(
+                "sync-assessment-builds-warnings-only-forms",
+                "sync-assessment-builds-warnings-only",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        internal sealed class SchemaDiffItem
+                        {
+                            public string Name { get; init; } = "";
+
+                            public SchemaDiffItem WithForeignKeyColumnPairs(int pairs) => this;
+
+                            public SchemaDiffItem WithRearrangedForeignKeyColumnPairs(int pairs) => this;
+
+                            public SchemaDiffItem WithForeignKeyColumnPairsKept() => this;
+                        }
+
+                        internal sealed class SchemaDiffItems { }
+
+                        internal sealed record SyncPlanWarning(string Kind);
+
+                        internal static class AssessmentRules
+                        {
+                            /// <summary><see cref="SchemaDiffItem"/> を作らない</summary>
+                            public static object A() => new SyncPlanWarning("kind");
+
+                            public static object B() => new SchemaDiffItem { Name = "b" };
+
+                            public static object C(SchemaDiffItem item) => item.WithForeignKeyColumnPairs(1);
+
+                            public static object? D(SchemaDiffItem? item) =>
+                                item?.WithRearrangedForeignKeyColumnPairs(2);
+
+                            // new SchemaDiffItem()
+                            public static object E(SchemaDiffItem item) => item.WithForeignKeyColumnPairsKept();
+
+                            public static object F() => new SchemaDiffItems();
+
+                            public static string G() => "new SchemaDiffItem()";
+                        }
+                        """,
+                        "new SchemaDiffItem",
+                        "WithForeignKeyColumnPairs",
+                        "WithRearrangedForeignKeyColumnPairs"
+                    ),
+                ]
+            ),
+            // 構文の規則は、条件コンパイルの外れる分岐の中の式も読む
+            new SourceRuleProbe(
+                "sync-assessment-builds-warnings-only-inactive-branch",
+                "sync-assessment-builds-warnings-only",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        internal sealed class SchemaDiffItem { }
+
+                        internal static class AssessmentRules
+                        {
+                            public static object? Make()
+                            {
+                        #if QUICKER_PROBE_BRANCH
+                                return new SchemaDiffItem();
+                        #else
+                                return null;
+                        #endif
+                            }
+                        }
+                        """,
+                        "new SchemaDiffItem"
+                    ),
+                ]
+            ) with
+            {
+                InactiveBranch = true,
+            },
+            // 新しい計画器の入口の呼び出し（修飾の有無とも）・メソッドグループ・フィールドの初期化子の中の呼び出しを拾い、入口の宣言・
+            // ほかのクラスの Plan・SequentialPlanner のほかのメンバー・nameof でない文字列・コメントは拾わない
+            new SourceRuleProbe(
+                "sync-sequential-planner-callers-forms",
+                "sync-sequential-planner-callers",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System;
+
+                        namespace Probe.Sync
+                        {
+                            internal static class SequentialPlanner
+                            {
+                                public static int Plan(int items) => items;
+
+                                public static int Other(int items) => items;
+                            }
+
+                            internal static class OtherPlanner
+                            {
+                                public static int Plan(int items) => items;
+                            }
+                        }
+
+                        namespace Probe
+                        {
+                            using Probe.Sync;
+
+                            internal sealed class SyncPlanner
+                            {
+                                private static readonly int Eager = SequentialPlanner.Plan(0);
+
+                                public int BuildPlan(int items)
+                                {
+                                    // SequentialPlanner.Plan(items)
+                                    var direct = SequentialPlanner.Plan(items);
+                                    var qualified = Probe.Sync.SequentialPlanner.Plan(items);
+                                    Func<int, int> held = SequentialPlanner.Plan;
+                                    var text = "SequentialPlanner.Plan(items)";
+                                    return direct
+                                        + qualified
+                                        + held(items)
+                                        + text.Length
+                                        + OtherPlanner.Plan(items)
+                                        + SequentialPlanner.Other(items)
+                                        + Eager;
+                                }
+                            }
+                        }
+                        """,
+                        "(member outside a method): SequentialPlanner.Plan",
+                        "BuildPlan: SequentialPlanner.Plan",
+                        "BuildPlan: SequentialPlanner.Plan",
+                        "BuildPlan: SequentialPlanner.Plan"
+                    ),
+                ]
+            ),
+            // 構文の規則は、条件コンパイルの外れる分岐の中の呼び出しも読む
+            new SourceRuleProbe(
+                "sync-sequential-planner-callers-inactive-branch",
+                "sync-sequential-planner-callers",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        internal static class SequentialPlanner
+                        {
+                            public static int Plan(int items) => items;
+                        }
+
+                        internal sealed class Service
+                        {
+                            public int Run(int items)
+                            {
+                        #if QUICKER_PROBE_BRANCH
+                                return SequentialPlanner.Plan(items);
+                        #else
+                                return items;
+                        #endif
+                            }
+                        }
+                        """,
+                        "Run: SequentialPlanner.Plan"
+                    ),
+                ]
+            ) with
+            {
+                InactiveBranch = true,
+            },
         ];
 }
