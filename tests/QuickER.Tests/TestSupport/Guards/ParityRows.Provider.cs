@@ -86,7 +86,127 @@ internal static partial class ParityRows
                         SyncSelectionRuleTable.Rebuild
                     )
             ),
+            new(
+                "sync-assessment-rules-table-complete",
+                "同期の計画の評価の規則（AssessmentRules の規則の形の Warn*）は、どれも規則の表（All）にちょうど 1 回載り、表の要素は"
+                    + "どれも規則の形の関数にする（表から抜けた規則は新しい計画器で一度も流れず、その警告が黙って消える）",
+                ParityCompare.Multiset,
+                () =>
+                    SyncSelectionRuleTable.DeclaredRules(
+                        AssessmentSources(),
+                        SyncSelectionRuleTable.Assessment
+                    ),
+                () =>
+                    SyncSelectionRuleTable.ListedRules(
+                        AssessmentSources(),
+                        SyncSelectionRuleTable.Assessment
+                    )
+            )
+            {
+                // いまの規則は 12（計画の事実だけを読む規則 9 つと、組み立ての結果も読む規則 3 つ）。拾い方が外れて正本が減ったら赤にする
+                MinimumCanon = 12,
+            },
+            new(
+                "sync-assessment-rules-declarations-probe",
+                "自己検査の行：照合の行 sync-assessment-rules-table-complete が規則の形の関数の宣言を集める形を、合成のソースで確かめる"
+                    + "（正本は合成のソースで集めるべき宣言）。引数が計画の事実の関数と組み立ての結果つきの関数の両方・ファイルをまたぐ"
+                    + " partial の宣言・条件コンパイルの外れる分岐の宣言を拾い、引数の数や型・戻り値の型が違う関数・Warn で始まらない関数・"
+                    + "ほかのクラスの規則の形の関数は拾わない",
+                ParityCompare.Sequence,
+                () => ["WarnByFacts", "WarnByPlan", "WarnInBranch"],
+                () =>
+                    SyncSelectionRuleTable.DeclaredRules(
+                        ProbeAssessmentSources,
+                        SyncSelectionRuleTable.Assessment
+                    )
+            ),
+            new(
+                "sync-assessment-rules-entries-probe",
+                "自己検査の行：照合の行 sync-assessment-rules-table-complete が規則の表の要素を集める形を、合成のソースで確かめる"
+                    + "（正本は合成のソースで集めるべき要素）。表の要素を重なりごと数え、メソッドの名前でない要素は綴りのまま数え、"
+                    + "表でないフィールド・ほかのクラスの同じ名前のフィールドの要素は拾わない",
+                ParityCompare.Sequence,
+                () => ["Other.WarnElsewhere", "WarnByFacts", "WarnByPlan", "WarnByPlan"],
+                () =>
+                    SyncSelectionRuleTable.ListedRules(
+                        ProbeAssessmentSources,
+                        SyncSelectionRuleTable.Assessment
+                    )
+            ),
         ];
+
+    /// <summary>評価の規則のフォルダ（src/QuickER.Provider/Sync/Assessment）のソースの本文</summary>
+    private static IEnumerable<string> AssessmentSources() =>
+        Directory
+            .EnumerateFiles(
+                Path.Combine(
+                    WorkflowGuardTests.Root,
+                    "src",
+                    "QuickER.Provider",
+                    "Sync",
+                    "Assessment"
+                ),
+                "*.cs",
+                SearchOption.AllDirectories
+            )
+            .Where(path => !SourceFiles.IsBuildOutput(path))
+            .Select(File.ReadAllText);
+
+    /// <summary>評価の規則の自己検査の行の合成のソース（表のファイルと、規則のファイル 2 つ）</summary>
+    private static readonly string[] ProbeAssessmentSources =
+    [
+        """
+            internal static partial class AssessmentRules
+            {
+                internal static readonly AssessmentRule[] All =
+                [
+                    WarnByFacts,
+                    WarnByPlan,
+                    WarnByPlan,
+                    Other.WarnElsewhere,
+                ];
+
+                internal static readonly AssessmentRule[] Extra = [WarnUnlisted];
+            }
+
+            internal static class Other
+            {
+                internal static readonly AssessmentRule[] All = [WarnOutside];
+
+                public static IEnumerable<SyncPlanWarning> WarnOutside(PlanAssessment assessment) => [];
+            }
+            """,
+        """
+            internal static partial class AssessmentRules
+            {
+                public static IEnumerable<SyncPlanWarning> WarnByFacts(AssessmentFacts facts) => [];
+
+                public static IEnumerable<SyncPlanWarning> WarnShared(
+                    AssessmentFacts facts,
+                    bool flag
+                ) => [];
+
+                public static List<SyncPlanWarning> WarnOtherReturn(AssessmentFacts facts) => [];
+
+                public static IEnumerable<SyncPlanWarning> WarnOtherInput(SelectionState state) => [];
+
+                public static IEnumerable<SyncPlanWarning> CollectSomething(AssessmentFacts facts) => [];
+
+                public static void Add(List<SyncPlanWarning> warnings, IEnumerable<SyncPlanWarning> found) { }
+            }
+            """,
+        """
+            internal static partial class AssessmentRules
+            {
+                public static IEnumerable<SyncPlanWarning> WarnByPlan(PlanAssessment assessment) =>
+                    WarnShared(assessment, flag: true);
+
+            #if QUICKER_PROBE_BRANCH
+                public static IEnumerable<SyncPlanWarning> WarnInBranch(AssessmentFacts facts) => [];
+            #endif
+            }
+            """,
+    ];
 
     /// <summary>新しい組み立てのフォルダ（src/QuickER.Provider/Sync/Scheduling）のソースの本文</summary>
     private static IEnumerable<string> SchedulingSources() =>

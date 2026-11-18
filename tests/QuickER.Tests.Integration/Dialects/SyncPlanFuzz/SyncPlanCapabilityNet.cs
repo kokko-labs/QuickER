@@ -1354,18 +1354,18 @@ internal static class SyncPlanCapabilityNetRunner
     );
 
     /// <summary>
-    /// 関係 N5（組み立ての新旧の一致）：今の計画器が組み立てたセクション（必ず断られる文を先頭へ移す前）と、新しい組み立て
-    /// （<see cref="SequentialScheduler"/>）が同じ同期後の事実から組んだ文の並びが、同じ計画を表す
+    /// 関係 N5（計画の新旧の一致）：今の計画器が、必ず断られる文を先頭へ移す前までに作った計画（セクション・警告・外した項目）と、
+    /// 新しい計画器（<see cref="SequentialPlanner"/>）が同じ引数から作った計画が、同じ計画を表す
     /// </summary>
     /// <remarks>
     /// <para>
-    /// 入れ物（<see cref="SyncPlanProbe"/>）を渡して計画を 1 回作り直し、今の側のセクションと新しい側の文の並びを受け取る。
+    /// 入れ物（<see cref="SyncPlanProbe"/>）を渡して計画を 1 回作り直し、今の側の途中の結果と新しい側の計画を受け取る。
     /// 入れ物を渡した計画は、渡さずに作った元の計画と同じ（計画の全部の面と同期スクリプト）。
     /// </para>
     /// <para>
-    /// 比べる面：新しい文の並びを製品の写し（<see cref="StepLowering.ToSyncPlan"/>）で計画へ写した結果の全部の面と項目の共有の形・
-    /// 同期スクリプト（実方言だけ）・文ごとの種類と由来と対（今の側は <see cref="SyncPlanStepReader"/> で読む）。警告と外した項目は
-    /// 比べない（新しい組み立ては持たない）。
+    /// 比べる面：新しい計画を製品の写し（<see cref="StepLowering.ToSyncPlan"/>）で計画へ写した結果の全部の面（警告と外した項目の
+    /// 並びを含む）と項目の共有の形・同期スクリプト（実方言だけ）・文ごとの種類と由来と対（今の側は
+    /// <see cref="SyncPlanStepReader"/> で読む）。
     /// </para>
     /// <para>再構築の方言の計画と、文で表せない計画には掛けず、理由を返す。</para>
     /// </remarks>
@@ -1409,36 +1409,44 @@ internal static class SyncPlanCapabilityNetRunner
 
         if (
             probe.ScheduledSections is not { } scheduledSections
-            || probe.Schedule is not { } schedule
+            || probe.ScheduledWarnings is not { } scheduledWarnings
+            || probe.ScheduledExcludedItems is not { } scheduledExcluded
+            || probe.NewPlan is not { } planned
         )
         {
             return new SchedulingParityResult(problems, SchedulingParityRebuildDialect);
         }
 
-        var current = new SyncPlan { Sections = scheduledSections, Reorders = probed.Reorders };
+        var current = new SyncPlan
+        {
+            Sections = scheduledSections,
+            Reorders = probed.Reorders,
+            Warnings = scheduledWarnings,
+            ExcludedItems = scheduledExcluded,
+        };
         var read = SyncPlanStepReader.Read(current, items.Where(i => i.IsSelected));
         problems.AddRange(
             read.Problems.Select(p => SchedulingParityRelationPrefix + "reading: " + p)
         );
 
-        // 文で表せない計画は、新しい組み立ても表せないと答える
-        if ((read.Plan is null) != (schedule.Steps is null))
+        // 文で表せない計画は、新しい計画器も表せないと答える
+        if ((read.Plan is null) != (planned.Plan is null))
         {
             problems.Add(
                 $"{SchedulingParityRelationPrefix}only one side can express the plan as steps: "
-                    + $"[{schedule.Unrepresentable ?? "expressed"}] <> [{read.Unrepresentable ?? "expressed"}]"
+                    + $"[{planned.Unrepresentable ?? "expressed"}] <> [{read.Unrepresentable ?? "expressed"}]"
             );
             return new SchedulingParityResult(problems, null);
         }
 
-        if (read.Plan is not { } currentSteps || schedule.Steps is not { } steps)
+        if (read.Plan is not { } currentSteps || planned.Plan is not { } plannedSteps)
         {
             return new SchedulingParityResult(problems, read.Unrepresentable);
         }
 
         // 文ごとの種類・由来・対
         var currentShapes = StepShapes(currentSteps.Steps, labels);
-        var shapes = StepShapes(steps, labels);
+        var shapes = StepShapes(plannedSteps.Steps, labels);
 
         if (!currentShapes.SequenceEqual(shapes, StringComparer.Ordinal))
         {
@@ -1451,7 +1459,7 @@ internal static class SyncPlanCapabilityNetRunner
 
         try
         {
-            lowered = StepLowering.ToSyncPlan(new StepPlan(steps, 0, [], []));
+            lowered = StepLowering.ToSyncPlan(plannedSteps);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

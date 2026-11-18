@@ -25,7 +25,15 @@ internal sealed record ScheduledStep(SyncStep Step)
 /// <summary>逐次 DDL の方言の組み立ての結果</summary>
 /// <param name="Steps">文の並び（文で表せない項目があれば null）</param>
 /// <param name="Unrepresentable">文で表せない理由（表せれば null）</param>
-internal sealed record SequentialSchedule(IReadOnlyList<SyncStep>? Steps, string? Unrepresentable);
+/// <param name="Required">
+/// 外し直しの宣言が「選んだ文を流す間、外れていなければならない」と答えた DB の今の制約（同じ計画が明示に外す制約と、
+/// 付け直せないので外さない制約も含む。DB の今の図が無いか、文で表せなければ null）
+/// </param>
+internal sealed record SequentialSchedule(
+    IReadOnlyList<SyncStep>? Steps,
+    string? Unrepresentable,
+    RequiredConstraints? Required = null
+);
 
 /// <summary>外し直しを決める段の入力</summary>
 /// <param name="Steps">選んだ項目の最終形から写した文</param>

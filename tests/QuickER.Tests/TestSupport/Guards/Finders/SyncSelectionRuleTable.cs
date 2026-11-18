@@ -5,12 +5,12 @@ namespace QuickER.Tests.TestSupport.Guards;
 
 /// <summary>
 /// 同期の計画の、同じ形の関数を並べた表と、その形の関数の宣言の読み取り（照合の行 <c>sync-selection-rules-table-complete</c>・
-/// <c>sync-rebuild-declarations-table-complete</c> の正本と写し）
+/// <c>sync-rebuild-declarations-table-complete</c>・<c>sync-assessment-rules-table-complete</c> の正本と写し）
 /// </summary>
 /// <remarks>
 /// <para>
 /// 関数は partial クラスに 1 つ 1 ファイルで置き、表は別のファイルにあるので、宣言と表はファイルをまたいで突き合わせる
-/// （1 ファイルずつ読む見つける形では比べられない）。読む形（<see cref="Shape"/>）は 2 つ。
+/// （1 ファイルずつ読む見つける形では比べられない）。読む形（<see cref="Shape"/>）は 3 つ。
 /// </para>
 /// <list type="bullet">
 /// <item><see cref="Selection"/>：選んだ項目を外す規則。クラス <c>SelectionRules</c> の中の、名前が <c>Exclude</c> に大文字が続き、
@@ -19,6 +19,9 @@ namespace QuickER.Tests.TestSupport.Guards;
 /// <item><see cref="Rebuild"/>：外し直しの宣言。クラス <c>RebuildDeclarations</c> の中の、名前が <c>Require</c> に大文字が続き、
 /// 戻り値の型が <c>IEnumerable&lt;LiveConstraint&gt;</c>、引数の型が <c>SchedulingInput</c> の 1 つのメソッドの宣言
 /// （<c>RebuildDeclaration</c> のデリゲートと同じ形）。表はフィールド <c>All</c>。</item>
+/// <item><see cref="Assessment"/>：評価の規則。クラス <c>AssessmentRules</c> の中の、名前が <c>Warn</c> に大文字が続き、戻り値の型が
+/// <c>IEnumerable&lt;SyncPlanWarning&gt;</c>、引数の型が <c>PlanAssessment</c> か、その基底の <c>AssessmentFacts</c> の 1 つのメソッドの宣言
+/// （<c>AssessmentRule</c> のデリゲートへ、引数の反変でそのまま入る形）。表はフィールド <c>All</c>。</item>
 /// </list>
 /// <para>
 /// 型は構文の綴り（空白を除く）で比べる。表は、フィールドの初期化子の要素（コレクション式・配列の初期化子）で、形の表の和で数える。
@@ -40,12 +43,16 @@ internal static class SyncSelectionRuleTable
     /// <param name="ReturnType">戻り値の型の綴り（空白を除く）</param>
     /// <param name="ParameterTypes">引数の型の綴り（順に）</param>
     /// <param name="Tables">表のフィールドの名前</param>
+    /// <param name="BaseParameterTypes">
+    /// 引数の型のもう 1 つの綴り（表の要素のデリゲートの引数の基底の型で書いた形。無ければ null）
+    /// </param>
     internal sealed record Shape(
         string Class,
         string Prefix,
         string ReturnType,
         IReadOnlyList<string> ParameterTypes,
-        IReadOnlyList<string> Tables
+        IReadOnlyList<string> Tables,
+        IReadOnlyList<string>? BaseParameterTypes = null
     );
 
     /// <summary>選んだ項目を外す規則の形</summary>
@@ -64,6 +71,16 @@ internal static class SyncSelectionRuleTable
         "IEnumerable<LiveConstraint>",
         ["SchedulingInput"],
         ["All"]
+    );
+
+    /// <summary>評価の規則の形</summary>
+    public static readonly Shape Assessment = new(
+        "AssessmentRules",
+        "Warn",
+        "IEnumerable<SyncPlanWarning>",
+        ["PlanAssessment"],
+        ["All"],
+        ["AssessmentFacts"]
     );
 
     /// <summary>形の関数の宣言の名前（宣言ごとに 1 つ・序数の順）</summary>
@@ -145,15 +162,20 @@ internal static class SyncSelectionRuleTable
     private static bool IsShaped(MethodDeclarationSyntax method, Shape shape)
     {
         var name = method.Identifier.ValueText;
-        var parameters = method.ParameterList.Parameters;
+        List<string> parameters =
+        [
+            .. method.ParameterList.Parameters.Select(p => Spelling(p.Type)),
+        ];
 
         return name.Length > shape.Prefix.Length
             && name.StartsWith(shape.Prefix, StringComparison.Ordinal)
             && char.IsUpper(name[shape.Prefix.Length])
             && Spelling(method.ReturnType) == shape.ReturnType
-            && parameters
-                .Select(p => Spelling(p.Type))
-                .SequenceEqual(shape.ParameterTypes, StringComparer.Ordinal);
+            && (
+                parameters.SequenceEqual(shape.ParameterTypes, StringComparer.Ordinal)
+                || shape.BaseParameterTypes is { } baseTypes
+                    && parameters.SequenceEqual(baseTypes, StringComparer.Ordinal)
+            );
     }
 
     /// <summary>型の構文の綴り（空白を除く）</summary>

@@ -48,11 +48,13 @@ internal static class SequentialScheduler
         }
 
         IEnumerable<ScheduledStep> steps = selected;
+        RequiredConstraints? requiredOff = null;
 
         if (live is not null)
         {
             var input = new SchedulingInput(selected, postSync, live, capabilities);
             var required = RebuildDeclarations.Collect(input);
+            requiredOff = required;
             var foreignKeys = Readds.ForeignKeys(required.ForeignKeys, input);
             var uniques = Readds.UniqueConstraints(required.UniqueConstraints, input);
             steps =
@@ -80,7 +82,8 @@ internal static class SequentialScheduler
 
         return new SequentialSchedule(
             [.. ordered.Select(s => s.Step), .. ColumnMoves(postSync.Items, live, capabilities)],
-            null
+            null,
+            requiredOff
         );
     }
 
