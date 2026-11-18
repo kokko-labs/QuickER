@@ -10,7 +10,7 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 internal static partial class SyncPlanExpectationRows
 {
     /// <summary>SQLite の実 DB の段の行の数の下限（行を足したら・消したら合わせる）</summary>
-    private const int RealSqliteRowCount = 99;
+    private const int RealSqliteRowCount = 104;
 
     /// <summary>実 DB の段：SQLite の同期（テーブル再構築・外部キー・主キー・一意制約・ビュー）</summary>
     private static IEnumerable<ScenarioRow<SyncPlanExpectationInput>> RealSqliteRows() =>
@@ -25,6 +25,151 @@ internal static partial class SyncPlanExpectationRows
             .. RealSqliteScriptRows(),
             .. RealSqliteImportDiscardedRows(),
             .. RealSqliteRowidAliasNullRows(),
+            .. RealSqliteSelectionOrderRows(),
+        ];
+
+    /// <summary>
+    /// 選んだ項目を外す規則の並び（SQLite で掛かる規則）：1 つの項目が 2 つの規則に当たる形と、1 つの取り下げが警告を 2 つ持つ形
+    /// </summary>
+    /// <remarks>
+    /// SQLite で掛かる規則は、規則の表の順に、DB のビュー・トリガー・索引を壊す変更 → 選んでいない変更を前提にする項目 → 列が残らない表の
+    /// 列の削除 → 取込が捨てた物のある表の作り直し → DB の外の物で作り直せない表の作り直し。前の規則が名指しし、後ろの規則はその項目を
+    /// 外した後の並びを受ける（<c>src/QuickER.Provider/CLAUDE.md</c>「除外の周」）。前提の欠け → 列が残らない表は、網で流れる行
+    /// <c>plan-selection-order-pk-column-drop-is-named-as-missing-pk-change-and-other-drop-stays</c> が受け持つ。取込警告・作り直しを止める物・
+    /// ビューとトリガーの判定器は実 DB の取込からしか作れないので、実 DB の段に置く。どの行も、選んだ項目が全部外れて DB は変わらない。
+    /// </remarks>
+    private static IEnumerable<
+        ScenarioRow<SyncPlanExpectationInput>
+    > RealSqliteSelectionOrderRows() =>
+        [
+            // ビューを壊す変更 → 前提の欠け：ビューが読む主キーの列の削除を、主キーの変更を選ばずに選ぶ
+            Row(
+                    "realdb-selection-order-view-broken-by-key-column-drop-is-named-as-view",
+                    "[Integration] SQLite 同期: ビューが読む主キーの列の削除を主キーの変更なしに選ぶと、ビューを名指しして外す（前提の欠けでは名指ししない）",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s["so_item"].Columns.RemoveAll(c => c.Name == "id"))
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.DropColumn))
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE \"so_item\" (\"id\" INTEGER NOT NULL, \"note\" TEXT NULL, CONSTRAINT \"PK_so_item\" PRIMARY KEY (\"id\"));"
+                                + "INSERT INTO \"so_item\" (\"id\", \"note\") VALUES (1, 'a');"
+                                + "CREATE VIEW \"so_ids\" AS SELECT \"id\" FROM \"so_item\";"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Exact("TableChangeBreaksDependentView(so_item): so_ids");
+                            e.Excluded.Exact("DropColumn so_item.id");
+                            e.Unchanged();
+                        })
+                ),
+            // 前提の欠け → 取込が捨てた物のある表：取込が捨てた物のある表の主キーの列の削除を、主キーの変更を選ばずに選ぶ
+            Row(
+                    "realdb-selection-order-key-column-drop-on-import-discarded-table-is-named-as-missing-pk-change",
+                    "[Integration] SQLite 同期: 取込が捨てた物のある表の主キーの列の削除を主キーの変更なしに選ぶと、前提の欠けで名指しして外す（取込が捨てた物では名指ししない）",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s["so_disc"].Columns.RemoveAll(c => c.Name == "id"))
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.DropColumn))
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE \"so_disc\" (\"id\" INTEGER NOT NULL, \"note\" TEXT NULL, \"zid\" INTEGER NULL, "
+                                + "CONSTRAINT \"PK_so_disc\" PRIMARY KEY (\"id\"), "
+                                + "CONSTRAINT \"FK_so_disc_zz\" FOREIGN KEY (\"zid\") REFERENCES \"zz\" (\"id\"));"
+                                + "INSERT INTO \"so_disc\" (\"id\", \"note\", \"zid\") VALUES (1, 'a', NULL);"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Exact(
+                                "SelectedItemRequiresUnselectedItem(so_disc): id (PRIMARY KEY)"
+                            );
+                            e.Excluded.Exact("DropColumn so_disc.id");
+                            e.Unchanged();
+                        })
+                ),
+            // 列が残らない表 → 取込が捨てた物のある表：取込が捨てた物のある主キーの無い表の列の削除を全部選ぶ
+            Row(
+                    "realdb-selection-order-all-column-drops-on-import-discarded-table-are-named-as-left-without-columns",
+                    "[Integration] SQLite 同期: 取込が捨てた物のある表の列の削除を全部選ぶと、列が残らない表として名指しして外す（取込が捨てた物では名指ししない）",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s["so_keyless"].Columns.Clear())
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE \"so_keyless\" (\"a\" INTEGER NULL, \"zid\" INTEGER NULL, "
+                                + "CONSTRAINT \"FK_so_keyless_zz\" FOREIGN KEY (\"zid\") REFERENCES \"zz\" (\"id\"));"
+                                + "INSERT INTO \"so_keyless\" (\"a\", \"zid\") VALUES (1, NULL);"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Exact("TableLeftWithoutColumns(so_keyless): a, zid");
+                            e.Excluded.Exact(
+                                "DropColumn so_keyless.a",
+                                "DropColumn so_keyless.zid"
+                            );
+                            e.Unchanged();
+                        })
+                ),
+            // 取込が捨てた物のある表 → DB の外の物で作り直せない表：両方に当たる表の列の型の変更
+            Row(
+                    "realdb-selection-order-rebuild-of-table-discarded-and-blocked-is-named-as-import-discarded",
+                    "[Integration] SQLite 同期: 取込が捨てた物があり DB の外の照合順序の索引もある表の作り直しは、取込が捨てた物で名指しして外す（DB の外の物では名指ししない）",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s.Col("so_both", "extra").DataType = "INTEGER")
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE \"so_both\" (\"id\" INTEGER NOT NULL, \"note\" TEXT NULL, \"extra\" TEXT NULL, \"zid\" INTEGER NULL, "
+                                + "CONSTRAINT \"PK_so_both\" PRIMARY KEY (\"id\"), "
+                                + "CONSTRAINT \"FK_so_both_zz\" FOREIGN KEY (\"zid\") REFERENCES \"zz\" (\"id\"));"
+                                + "INSERT INTO \"so_both\" (\"id\", \"note\", \"extra\", \"zid\") VALUES (1, 'a', '7', NULL);"
+                        )
+                        .RawSetup(
+                            "CREATE INDEX \"so_both_note\" ON \"so_both\" (\"note\" COLLATE "
+                                + SqliteSyncPlanFuzzDialect.TestCollation
+                                + ");"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Exact("TableRebuildLosesImportDiscardedContent(so_both): *");
+                            e.Excluded.Exact("AlterColumn so_both.extra");
+                            e.Unchanged();
+                        })
+                ),
+            // 1 つの取り下げの警告の並び：ビューとトリガーの両方を壊す列の削除は、ビュー → トリガーの順に名指しする
+            Row(
+                    "realdb-selection-warnings-view-then-trigger-for-one-item",
+                    "[Integration] SQLite 同期: ビューとトリガーの両方を壊す列の削除は、ビュー、トリガーの順に名指しして外す",
+                    DialectNames.Sqlite
+                )
+                .TargetFromLive(s => s["so_vt"].Columns.RemoveAll(c => c.Name == "note"))
+                .Select(RealScenarios.SelectAll)
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE \"so_vt\" (\"id\" INTEGER NOT NULL, \"note\" TEXT NULL, CONSTRAINT \"PK_so_vt\" PRIMARY KEY (\"id\"));"
+                                + "INSERT INTO \"so_vt\" (\"id\", \"note\") VALUES (1, 'a');"
+                                + "CREATE TABLE \"so_src\" (\"id\" INTEGER NOT NULL, \"note\" TEXT NULL, CONSTRAINT \"PK_so_src\" PRIMARY KEY (\"id\"));"
+                                + "CREATE VIEW \"so_vt_notes\" AS SELECT \"id\", \"note\" FROM \"so_vt\";"
+                                + "CREATE TRIGGER \"trg_so_src_writes_note\" AFTER INSERT ON \"so_src\" BEGIN "
+                                + "UPDATE \"so_vt\" SET \"note\" = NEW.\"note\" WHERE \"id\" = NEW.\"id\"; END;"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Outcome.Exact("committed");
+                            e.Warnings.Exact(
+                                "TableChangeBreaksDependentView(so_vt): so_vt_notes",
+                                "TableChangeBreaksDependentTrigger(so_vt): trg_so_src_writes_note"
+                            );
+                            e.Excluded.Exact("DropColumn so_vt.note");
+                            e.Unchanged();
+                        })
+                ),
         ];
 
     /// <summary>

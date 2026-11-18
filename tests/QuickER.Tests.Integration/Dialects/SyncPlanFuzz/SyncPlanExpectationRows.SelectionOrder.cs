@@ -256,5 +256,89 @@ internal static partial class SyncPlanExpectationRows
                         .Sections.Exact("AlterColumn: AlterColumn sel_t.a; AlterColumn sel_t.c")
                         .Items.Contains("AlterColumn > AlterColumn sel_t.a * col=bigint notnull*")
                 ),
+            // 後ろの規則と周の後の警告は、前の規則が外した後の並びの同期後の事実を読む：前提の欠けで外れた主キーの変更は、同じ周の SET NULL の
+            // 規則（作れない方言）にも、周の後の SET NULL の警告（作れる方言）にも、子の列を NOT NULL にする変更として数えない
+            Row(
+                    "plan-selection-facts-follow-withdrawal-pk-change-excluded-keeps-set-null-fk-add",
+                    "同期後の事実: 選んでいない列の追加を前提にする主キーの変更が外れると、その主キーに入るはずだった NULL 許容の子の列への SET NULL の外部キーの追加は、外れず警告も出ない（外した後の並びの同期後の NULL 許容で判定する）",
+                    DialectNames.MySql,
+                    DialectNames.PostgreSql
+                )
+                .Live(s =>
+                {
+                    s.Table("sel_p", S.Pk("id", "int"));
+                    s.Table("sel_c", S.Pk("id", "int"), S.Nullable("x", "int"));
+                })
+                .Target(s =>
+                {
+                    s.Table("sel_p", S.Pk("id", "int"));
+                    s.Table("sel_c", S.Pk("id", "int"), S.Pk("x", "int"), S.Pk("y", "int"));
+                    s.Fk(
+                        "sel_p",
+                        "sel_c",
+                        "fk_sel_c_p",
+                        ForeignKeyReferentialAction.SetNull,
+                        ("id", "x")
+                    );
+                })
+                .Select(items =>
+                {
+                    foreach (var item in items)
+                    {
+                        item.IsSelected =
+                            item.Kind
+                                is SchemaDiffKind.AlterPrimaryKey
+                                    or SchemaDiffKind.AddForeignKey;
+                    }
+                })
+                .Expect(e =>
+                    e.Excluded.Exact("AlterPrimaryKey sel_c*")
+                        .Warnings.Exact(
+                            "SelectedItemRequiresUnselectedItem(sel_c): PRIMARY KEY (sel_c.y)"
+                        )
+                        .Sections.Exact("AddForeignKey: AddForeignKey sel_c* fk=fk_sel_c_p")
+                ),
+            // 代わりの項目に差し替える取り下げの後も、後ろの規則は差し替えた後の並びの同期後の事実を読む：NULL 許容化だけを外した列は
+            // NOT NULL のままなので、その列への SET NULL の外部キーの追加は、作れない方言で同じ周の SET NULL の規則が外す
+            Row(
+                    "plan-selection-facts-follow-replacement-kept-not-null-excludes-set-null-fk-add",
+                    "同期後の事実: 主キーに残る列の型の変更と NULL 許容化から NULL 許容化だけが外れると、その列への SET NULL の外部キーの追加は、SET NULL を作れない方言で外して名指しする（差し替えた後の並びの同期後の NULL 許容で判定する）",
+                    DialectNames.MySql,
+                    DialectNames.SqlServer
+                )
+                .Live(s =>
+                {
+                    s.Table("sel_p", S.Pk("id", "bigint"));
+                    s.Table("sel_c", S.Pk("a", "int"), S.NotNull("b", "int"));
+                })
+                .Target(s =>
+                {
+                    s.Table("sel_p", S.Pk("id", "bigint"));
+                    s.Table("sel_c", S.Nullable("a", "bigint"), S.Pk("b", "int"));
+                    s.Fk(
+                        "sel_p",
+                        "sel_c",
+                        "fk_sel_c_p",
+                        ForeignKeyReferentialAction.SetNull,
+                        ("id", "a")
+                    );
+                })
+                .Select(items =>
+                {
+                    foreach (var item in items)
+                    {
+                        item.IsSelected =
+                            item.Kind is SchemaDiffKind.AlterColumn or SchemaDiffKind.AddForeignKey;
+                    }
+                })
+                .Expect(e =>
+                    e.Excluded.Exact("AlterColumn sel_c.a", "AddForeignKey sel_c* fk=fk_sel_c_p")
+                        .Warnings.Exact(
+                            "SelectedItemRequiresUnselectedItem(sel_c): a (PRIMARY KEY)",
+                            "SetNullOnNotNullColumn(sel_c): fk_sel_c_p (a)"
+                        )
+                        .Sections.Contains("AlterColumn: AlterColumn sel_c.a")
+                        .Sections.Absent("AddForeignKey*")
+                ),
         ];
 }

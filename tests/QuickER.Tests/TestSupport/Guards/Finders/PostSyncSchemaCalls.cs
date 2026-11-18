@@ -25,7 +25,7 @@ internal static class PostSyncSchemaCalls
     private const string Factory = "From";
     private const string Stage = "PlanStage";
 
-    /// <summary>節が同期後の事実を求める呼び出しなら「含むメソッド: 時点かメソッド名」</summary>
+    /// <summary>節が同期後の事実を求める呼び出しなら「含むメソッドかプロパティ: 時点かメソッド名」</summary>
     public static string? Describe(SyntaxNode node)
     {
         if (Callee(node) is not { } callee)
@@ -86,6 +86,10 @@ internal static class PostSyncSchemaCalls
         node.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault()?.Identifier.ValueText
         ?? node.Ancestors()
             .OfType<ConstructorDeclarationSyntax>()
+            .FirstOrDefault()
+            ?.Identifier.ValueText
+        ?? node.Ancestors()
+            .OfType<PropertyDeclarationSyntax>()
             .FirstOrDefault()
             ?.Identifier.ValueText
         ?? "(member outside a method)";

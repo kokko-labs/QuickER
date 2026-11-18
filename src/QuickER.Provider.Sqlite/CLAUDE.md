@@ -90,7 +90,7 @@
 
 ### 計画の段のビュー・トリガー・索引の判定
 
-- ビューもトリガーも図に無く、同期は直さない。ビューが読む列・表を同期が消すと（列の並びを書いた `SELECT *` のビューは列を足しても）ビューが読めなくなる。トリガーが使う列・表を消すと（列の並びを書かずに挿入するトリガーは、その表へ列を足しても）、トリガーは発火したときに断られる。作り直しはトリガーの本文を検証せず、作り直す表自身のトリガーも原文で作り直せてしまうので、同期はそのままコミットする（2026-11 の実測で 19 形 × 8 変更。`PRAGMA integrity_check` も DB の開き直しも検出しない）。計画はどちらの変更も前もって外して名指しする（`SyncPlanner.ExcludeChangesBreakingLiveDependents`・`SyncPlanWarningKind.TableChangeBreaksDependentView`・`TableChangeBreaksDependentTrigger`・方言をまたぐ規則は `src/QuickER.Provider/CLAUDE.md`「テーブル再構築の合成」）。
+- ビューもトリガーも図に無く、同期は直さない。ビューが読む列・表を同期が消すと（列の並びを書いた `SELECT *` のビューは列を足しても）ビューが読めなくなる。トリガーが使う列・表を消すと（列の並びを書かずに挿入するトリガーは、その表へ列を足しても）、トリガーは発火したときに断られる。作り直しはトリガーの本文を検証せず、作り直す表自身のトリガーも原文で作り直せてしまうので、同期はそのままコミットする（2026-11 の実測で 19 形 × 8 変更。`PRAGMA integrity_check` も DB の開き直しも検出しない）。計画はどちらの変更も前もって外して名指しする（`SelectionRules.ExcludeChangesBreakingLiveDependents`・`SyncPlanWarningKind.TableChangeBreaksDependentView`・`TableChangeBreaksDependentTrigger`・方言をまたぐ規則は `src/QuickER.Provider/CLAUDE.md`「テーブル再構築の合成」）。
 - 判定は SQLite 自身に試させる（SQL を解析しない）。`SqliteLiveDependentCheck`（`ILiveDependentCheck` の実装）が、試すたびにメモリの DB へスキーマだけ（表・仮想表・索引・ビューの原文。行は写さない）を写し、変わる表を同期後の列名の表に置き換え（新しい表 → DROP → RENAME・`legacy_alter_table`=ON＝実行器と同じ）、前後で比べて新しく読めなくなったビューと発火できなくなったトリガーを返す。
   - 読めるかの文（`SELECT * … LIMIT 0`）とビューの列挙は `SqliteViews` の 1 か所で、実行器と共有する（判定の文を写さない＝計画が外すビューと実行器が巻き戻すビューが割れない）。
   - 発火できるかの判定は `SqliteTriggers` の 1 か所で、実行器と同期計画の総当たりの汎用の表明 5d と共有する。トリガーを全部外し、1 つずつ作って、その表（INSTEAD OF はビュー）への `INSERT`・`UPDATE`（書ける全列）・`DELETE` を `WHERE 0` で準備だけし（実行しない）、トリガーを置かないときに無かった誤り（種類と文）が出るか、トリガーを作れなければ発火できないとする。1 つずつ置くのは、本文が別の表へ書くとその表のトリガーも準備に巻き込まれ、巻き添えを名指ししないため。トリガーを置かないときと比べるのは、INSTEAD OF の無いビューへの書き込みのように、もとから断られる文を数えないため。実 DB（実行器・表明 5d）ではセーブポイントの中でトリガーを外して戻す。
@@ -116,7 +116,7 @@
   - 大域：sql のある索引のキーの列の照合順序（`pragma_index_xinfo`。列から継いだものも）が、実行器と同じ素の接続の `pragma_collation_list`（組み込みと Microsoft.Data.Sqlite の登録）に無い。その索引の表以外の表を止める（その表自身は古い表を消してから RENAME するので止めない。索引の文に照合順序を書いていれば局所で止まる）。
   - 局所の索引：表と索引の原文を素のメモリの DB に写し、表を置けたのに作れない索引（索引は自分の表しか読まないので、原因は照合順序か関数。照合順序が使えるなら関数）。
   - 局所の生成列：`pragma_table_xinfo` の hidden 2 の列で、`SELECT 列 … LIMIT 0` を準備できないもの。その表の作り直しを全部外す（写しがその列を読むかを確かめないので、その列を消す変更まで外れる。ユーザーが受け入れた保守的な割り切り・docs に明記）。
-- 計画は取込が捨てた物の除外と同じ関数（`SyncPlanner.ExcludeRebuildsOfProtectedTables`）で作り直しの項目を外し、`SyncPlanWarningKind.TableRebuildBlockedByExternalDefinition` で表ごとに名指しする（`SyncPlanner.CollectRebuildBlockedTables`。Detail は `INDEX 名前 COLLATE 照合順序`・`INDEX 名前 ON 表 COLLATE 照合順序`〔大域〕・`INDEX 名前 FUNCTION`・`GENERATED 列 FUNCTION`）。列の追加・表の削除・新しい表は流す。同じ同期で大域の索引の表を消しても外す（同期スクリプトは表の削除を作り直しより後に置く）。
+- 計画は取込が捨てた物の除外と同じ関数（`SelectionRules.ExcludeRebuildsOfProtectedTables`）で作り直しの項目を外し、`SyncPlanWarningKind.TableRebuildBlockedByExternalDefinition` で表ごとに名指しする（`SyncPlanner.CollectRebuildBlockedTables`。Detail は `INDEX 名前 COLLATE 照合順序`・`INDEX 名前 ON 表 COLLATE 照合順序`〔大域〕・`INDEX 名前 FUNCTION`・`GENERATED 列 FUNCTION`）。列の追加・表の削除・新しい表は流す。同じ同期で大域の索引の表を消しても外す（同期スクリプトは表の削除を作り直しより後に置く）。
 - 実行器は変えない（作り直しの失敗は同期を巻き戻すだけで、黙って壊れない）。
 - 壊すと：照合順序の索引が 1 つある DB で、どの表の作り直しを選んだ同期も無関係な変更ごと巻き戻る。判定を索引の文に書いた照合順序に限ると列の COLLATE を継ぐ索引を見落とし、自動の索引を数えると止まらない作り直しを外し、使える照合順序に組み込みを数えないと NOCASE の索引で偽の名指しを出す。
 - ガード：期待の行 `realdb-external-*`（13 行・実 SQLite）・`realdb-index-with-collation-registered-outside-is-named-as-external`・`SchemaSyncWarningTextTests`。照合順序 `SqliteSyncPlanFuzzDialect.TestCollation` と関数 `SqliteSyncPlanFuzzDialect.TestFunction` を登録するのはテストの側の接続（生の準備と読み取り）だけ。mutation 実証済み（大域を外す・大域を索引の文に書いた照合順序に限る・自動の索引を数える・局所の索引を外す・生成列を外す・大域で索引の表自身も止める・使える照合順序を空にする。どれも該当の行が赤）。
