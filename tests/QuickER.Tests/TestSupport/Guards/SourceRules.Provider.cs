@@ -799,8 +799,8 @@ internal static partial class SourceRules
                         new(
                             "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanCapabilityNet.cs",
                             "new SyncPlanProbe",
-                            1,
-                            "網の関係 N5 が入れ物を作る 1 か所（範囲の外の実在の生成を拾えること）"
+                            2,
+                            "網の関係 N5 が入れ物を作る 2 か所（今の計画器との比較と、取り下げのあるケースの新しい計画器の除外の不動点。範囲の外の実在の生成を拾えること）"
                         ),
                     ]
                 ),
@@ -873,19 +873,20 @@ internal static partial class SourceRules
                     "評価の規則への参照"
                 ),
             },
-            // 計画の評価（Sync/Assessment）と新しい計画器の入口（Sync/SequentialPlanner.cs）は、差分の項目を作らず、複製もしない
-            // （警告は作る）。項目を作ると、文で表した計画の途中に今の計画器の形（項目と印）が戻る。型を書かない new() は拾わない
+            // 計画の評価（Sync/Assessment）と新しい計画器の入口（Sync/SequentialPlanner.cs）と位置の状態（Sync/State/ConstraintState.cs）は、
+            // 差分の項目を作らず、複製もしない（警告は作る）。項目を作ると、文で表した計画の途中に今の計画器の形（項目と印）が戻る。型を書かない new() は拾わない
             SourceRule.Forbid(
                 "sync-assessment-builds-warnings-only",
-                "同期の計画の評価（Sync/Assessment）と新しい計画器の入口は、差分の項目を作らない（警告だけを作る）",
+                "同期の計画の評価（Sync/Assessment）と新しい計画器の入口と位置の状態は、差分の項目を作らない（警告だけを作る）",
                 SourceScope
                     .Under("src/QuickER.Provider")
                     .Within("Sync/Assessment/")
-                    .Within("Sync/SequentialPlanner.cs"),
+                    .Within("Sync/SequentialPlanner.cs")
+                    .Within("Sync/State/ConstraintState.cs"),
                 GuardFinder.Nodes(SyncSchedulingBoundaries.DescribeItemCreation)
             ) with
             {
-                MinimumFiles = 13,
+                MinimumFiles = 24,
                 Witness = new(
                     SourceScope.Files("src", "src/QuickER.Provider/Sync/Steps/StepLowering.cs"),
                     [

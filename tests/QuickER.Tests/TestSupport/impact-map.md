@@ -236,6 +236,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Provider/Sync/Selection` | `rule:sync-name-comparison-tokens` |
 | `src/QuickER.Provider/Sync/SequentialPlanner.cs` | `rule:sync-assessment-builds-warnings-only` |
 | `src/QuickER.Provider/Sync/State` | `rule:sync-name-comparison-tokens` |
+| `src/QuickER.Provider/Sync/State/ConstraintState.cs` | `rule:sync-assessment-builds-warnings-only` |
 | `src/QuickER.Provider/SyncDialectCapabilities.cs` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`rule:sync-capabilities-initializers` |
 | `src/QuickER.Provider/SyncPlan.cs` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`table:SyncPlanExpectations` |
 | `src/QuickER.Provider/SyncPlanner.cs` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/ShapeRows`・`rule:sync-live-schema-single-source`・`rule:sync-name-comparison-tokens`・`rule:sync-selected-foreign-key-names`・`rule:sync-type-deciding-column-copies`・`table:SyncPlanExpectations` |
@@ -819,7 +820,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 
 ### `rule:sync-assessment-builds-warnings-only`
 
-- 範囲：`src/QuickER.Provider/Sync/Assessment`・`src/QuickER.Provider/Sync/SequentialPlanner.cs`
+- 範囲：`src/QuickER.Provider/Sync/Assessment`・`src/QuickER.Provider/Sync/SequentialPlanner.cs`・`src/QuickER.Provider/Sync/State/ConstraintState.cs`
 
 ### `rule:mutation-safe-mode-jump-guards`
 

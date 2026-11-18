@@ -106,6 +106,13 @@ internal static class SyncPlanExpectationCapabilities
     public const string NonTransactionalUnordered = "NonTransactional-UnorderedKey";
 
     /// <summary>
+    /// DDL が暗黙コミットされる <see cref="Neutral"/>。近い実方言は Oracle（列の変更で外部キーを外し直さない暗黙コミットの方言）で、違う宣言は
+    /// ForeignKeyAllowsStringLengthDifference・ForeignKeyAllowsIntegerWidthDifference（偽）・型の正規化（恒等）ほか <see cref="Neutral"/> の違いすべて。
+    /// 静的な規則（実方言の DB の事実）を掛けずに、宣言だけで決まる前寄せを見る行が使う
+    /// </summary>
+    public const string NeutralNonTransactional = "Neutral-NonTransactional";
+
+    /// <summary>
     /// ON UPDATE と ON DELETE SET DEFAULT を持たない <see cref="Neutral"/>（Oracle の参照アクションの宣言を模したもの）。
     /// 近い実方言は Oracle で、違う宣言は ChecksDefaultOnColumnTypeChange（偽）・SupportsUniqueConstraintOnPrimaryKey（真）・
     /// ReferencedKeyRequiresSameColumnOrder（真）・ForeignKeyAllowsStringLengthDifference（偽）・TransactionalDdl（真）・
@@ -194,6 +201,10 @@ internal static class SyncPlanExpectationCapabilities
             TransactionalDdl = false,
             ReferencedKeyRequiresSameColumnOrder = false,
         },
+        [NeutralNonTransactional] = TestDialectCapabilities.Neutral with
+        {
+            TransactionalDdl = false,
+        },
         [NeutralWithoutOnUpdateAndSetDefault] = TestDialectCapabilities.Neutral with
         {
             SupportsOnUpdateAction = false,
@@ -237,6 +248,7 @@ internal static class SyncPlanExpectationCapabilities
             [MySqlLikeLengthLenient] = DialectNames.MySql,
             [NonTransactionalOrdered] = DialectNames.MySql,
             [NonTransactionalUnordered] = DialectNames.MySql,
+            [NeutralNonTransactional] = DialectNames.Oracle,
             [NeutralWithoutOnUpdateAndSetDefault] = DialectNames.Oracle,
             [PostgreSqlWithoutTruncation] = DialectNames.PostgreSql,
         };

@@ -23,10 +23,8 @@ namespace QuickER.Provider.Sync.Scheduling;
 /// <item>参照先の列が同期後の主キーとも一意制約とも列の集合で一致しない文（候補キーを証明できない）。</item>
 /// </list>
 /// <para>
-/// 外す文と組む名前：付ける文は同期スクリプトが付ける名前（文の名前。無ければ既定名＝
-/// <see cref="ConstraintNames.EffectiveForeignKey"/>）。外す文は、DB の名前を持たなければ DB の今の図の外部キーの実効名
-/// （<see cref="LiveSchema.ForeignKeyNames"/>＝名前の無い同じ組の 2 本目を 1 本目と取り違えない）、それも引けなければ付ける文と
-/// 同じ求め方。列の組は並びを見ずに対応の集合で比べる。DB の今の図が無ければ並べない。
+/// 外す文と組む名前は、文の値から求めた実効名（<see cref="ForeignKeyStepNames"/>。外す文のリレーションは組み立ての途中の文が持つ
+/// DB の外部キーのリレーション）。列の組は並びを見ずに対応の集合で比べる。DB の今の図が無ければ並べない。
 /// </para>
 /// </remarks>
 internal static class ForeignKeyAddOrder
@@ -51,7 +49,6 @@ internal static class ForeignKeyAddOrder
 
         var limit = capabilities.IdentifierLengthLimit;
         var postSyncUniques = postSync.UniqueColumnSets;
-        var liveNames = live.ForeignKeyNames(limit);
         var drops = steps
             .Where(s => s.Step is DropForeignKeyStep)
             .Select(s =>
@@ -59,15 +56,7 @@ internal static class ForeignKeyAddOrder
                 var drop = (DropForeignKeyStep)s.Step;
                 return (
                     Step: drop,
-                    Name: drop.Name is null
-                    && s.Relationship is { } relationship
-                    && liveNames.TryGetValue(relationship, out var resolved)
-                        ? resolved
-                        : EffectiveName(
-                            drop.Name ?? s.Relationship?.ConstraintName,
-                            drop.ChildTable,
-                            drop.ParentTable
-                        )
+                    Name: ForeignKeyStepNames.Dropped(drop, s.Relationship, live, limit)
                 );
             })
             .ToList();
@@ -88,7 +77,7 @@ internal static class ForeignKeyAddOrder
             }
 
             var child = SchemaNames.ToStoredForm(add.ChildTable);
-            var name = EffectiveName(add.Name, add.ChildTable, add.ParentTable);
+            var name = ForeignKeyStepNames.Added(add, limit);
             var drop = drops.FirstOrDefault(d =>
                 SchemaNames.AreSame(SchemaNames.ToStoredForm(d.Step.ChildTable), child)
                 && SchemaNames.AreSame(d.Name, name)
@@ -106,14 +95,6 @@ internal static class ForeignKeyAddOrder
                 ? 0
                 : 1;
         }
-
-        string EffectiveName(string? name, string childTable, string parentTable) =>
-            ConstraintNames.EffectiveForeignKey(
-                name,
-                SchemaNames.ToStoredForm(childTable),
-                SchemaNames.ToStoredForm(parentTable),
-                limit
-            );
 
         // 参照先の列が同期後の主キーか一意制約と列の集合で一致するか（参照先の表の主キーが分からない・列の組が無い文は証明済み）
         bool IsProven(AddForeignKeyStep add)

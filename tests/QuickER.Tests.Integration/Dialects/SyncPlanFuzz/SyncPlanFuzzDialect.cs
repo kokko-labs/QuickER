@@ -251,6 +251,12 @@ internal abstract class SyncPlanFuzzDialect
     /// </summary>
     public virtual bool UniqueAllowsRepeatedNull => true;
 
+    /// <summary>
+    /// 網の決定的な行（形の行）が、前寄せの組から一意制約の作り直しを取り下げる形を必ず出すか（MySQL は形の行 d4-mysql-265 の
+    /// 一意制約の双子を両方作り直す形）。真の方言では、決定的な行を流した網の関係 N5 が取り下げのあるケースを 1 つ以上比べたことを表明する
+    /// </summary>
+    public virtual bool ScenarioRowsWithdrawUniqueRebuild => false;
+
     /// <summary>精度とスケールを指定した小数の型名（<see cref="TypeName"/> の小数はスケール 2）</summary>
     public string DecimalTypeName(int precision, int scale) =>
         TypeName(FuzzTypeKind.Decimal, precision)
@@ -513,6 +519,8 @@ internal sealed class SqliteSyncPlanFuzzDialect : SyncPlanFuzzDialect, IDisposab
 internal sealed class MySqlSyncPlanFuzzDialect(MySqlContainerFixture fixture) : SyncPlanFuzzDialect
 {
     public override string Name => DialectNames.MySql;
+
+    public override bool ScenarioRowsWithdrawUniqueRebuild => true;
 
     public override IDatabaseProvider Provider { get; } = new MySqlProvider();
 

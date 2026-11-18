@@ -68,11 +68,8 @@ internal sealed class FuzzSeedOutcome
     /// <summary>関係 N4 を掛けなかった理由（計画を文で表せなかった。掛けたか、計画を作れなかったなら null）</summary>
     public string? StepRoundTripUnrepresentable { get; set; }
 
-    /// <summary>関係 N5（組み立ての新旧の一致）を掛けたか（網だけが立てる）</summary>
-    public bool SchedulingParityChecked { get; set; }
-
-    /// <summary>関係 N5 を掛けなかった理由（掛けたか、計画を作れなかったなら null）</summary>
-    public string? SchedulingParityNotApplied { get; set; }
+    /// <summary>関係 N5（計画の新旧の一致）の結果（網だけが置く。計画を作れなかったなら null）</summary>
+    public SyncPlanCapabilityNetRunner.SchedulingParityResult? SchedulingParity { get; set; }
 
     /// <summary>同期の前に取り込んだ図（取り込めたときだけ。期待の行の実 DB の段が読む）</summary>
     public SchemaImportResult? Before { get; set; }

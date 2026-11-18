@@ -705,6 +705,73 @@ internal static partial class SyncPlanExpectationRows
                         e.After.Single("fk c fk_x *");
                     })
                 ),
+            // 両端の変更の組：DB は宣言では並べられない型の組（子 bigint・親 int）の外部キーを持つ（DB が受け入れている）。両端をそれぞれ
+            // 相手の今の型へ寄せると（子 → int・親 → bigint）、どちらの変更も単独では今の相手の端と並べられるが、同期後の両端は並べられない
+            // ので外部キーは外し直さずに残る。列の変更で外部キーを外し直さない暗黙コミットの能力では、先の変更が通った後に後の変更が断られる
+            // ので、2 つの列の変更を計画の順のまま先頭へ移す（一意制約の削除より前）。実方言の Oracle では、この形に当たる組（NUMBER どうし・
+            // 文字列の単位語の違い）を DB がどれも受け入れ、静的な規則 M1 が「断られない文の前寄せ」と数えるので、合成の能力で流す
+            Row(
+                    "plan-move-first-pair-changes-of-both-ends-oracle-like",
+                    "前寄せ: 残す外部キーの両端を互いに並べられない型へ寄せる 2 つの列の変更は、計画の順のまま先頭へ移す（列の変更で外部キーを外し直さない暗黙コミットの能力）",
+                    C.NeutralNonTransactional
+                )
+                .Live(s =>
+                {
+                    s.Tbl("p", ("id", "int", true));
+                    s.Tbl("c", ("id", "int", true), ("p_id", "bigint", false));
+                    s.Tbl("x", ("id", "int", true), ("v", "int", false));
+                    s.Unique("x", "uq_x", "v");
+                    s.Fk("p", "c", "FK_c_p", ("id", "p_id"));
+                })
+                .TargetWith(w =>
+                {
+                    w.Target.Entities.AddRange(
+                        w.Live.Entities.Select(e => e.Clone(preserveId: true))
+                    );
+                    w.Target.Col("p", "id").DataType = "bigint";
+                    w.Target.Col("c", "p_id").DataType = "int";
+                    w.Target["x"].UniqueConstraints.Clear();
+                    w.Target.Relationships.Add(w.Live.Relationships[0]);
+                })
+                .Select(SelectAll)
+                .Expect(e =>
+                    e.Sections.Exact(
+                            "AlterColumn: AlterColumn p.id; AlterColumn c.p_id",
+                            "DropUniqueConstraint: *"
+                        )
+                        .Warnings.Single("ForeignKeyColumnTypeMismatch(c): FK_c_p")
+                ),
+            // SET NULL でない残す外部キーの子の列の NOT NULL 化は前寄せしない：外部キー（NO ACTION）は親の列の型の変更で同期後に
+            // 食い違うので外し直さずに残る。計画の順で先の子の列の NOT NULL 化は SET NULL の外部キーに阻まれないので移さず、親の列の型の
+            // 変更（外部キーに阻まれて必ず断られる）を先頭へ移す
+            Row(
+                    "plan-move-first-not-null-on-child-of-retained-non-set-null-fk-stays-mysql",
+                    "前寄せ: 残す外部キーが SET NULL でなければ、子の列の NOT NULL 化は先頭へ移さず、外部キーに阻まれる型の変更を移す（MySQL）",
+                    DialectNames.MySql
+                )
+                .Live(s =>
+                {
+                    s.Tbl("c", ("id", "int", true), ("p_id", "int", false));
+                    s.Tbl("p", ("id", "int", true));
+                    s.Fk("p", "c", "FK_c_p", ("id", "p_id"));
+                })
+                .TargetWith(w =>
+                {
+                    w.Target.Entities.AddRange(
+                        w.Live.Entities.Select(e => e.Clone(preserveId: true))
+                    );
+                    w.Target.Col("c", "p_id").IsNullable = false;
+                    w.Target.Col("p", "id").DataType = "varchar(10)";
+                    w.Target.Relationships.Add(w.Live.Relationships[0]);
+                })
+                .Select(SelectAll)
+                .Expect(e =>
+                    e.Sections.Exact(
+                            "AlterColumn: AlterColumn p.id",
+                            "AlterColumn: AlterColumn c.p_id"
+                        )
+                        .Warnings.Contains("ForeignKeyColumnTypeMismatch(c): FK_c_p")
+                ),
         ];
 
     /// <summary>差分の項目をすべて選ぶ</summary>

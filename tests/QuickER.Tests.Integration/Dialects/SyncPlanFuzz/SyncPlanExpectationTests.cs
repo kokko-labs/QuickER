@@ -20,7 +20,7 @@ public sealed class SyncPlanExpectationTests
     {
         var rows = SyncPlanExpectationRows.ForSyntheticOrComparison().ToList();
         var roundTrips = new List<string?>();
-        var parities = new List<string?>();
+        var parities = new List<SyncPlanCapabilityNetRunner.SchedulingParityResult>();
         var problems = rows.SelectMany(row =>
                 SyncPlanExpectationRunner.Run(
                     row,
