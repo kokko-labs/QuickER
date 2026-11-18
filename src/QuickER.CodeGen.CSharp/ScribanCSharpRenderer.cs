@@ -407,6 +407,9 @@ internal sealed class ScribanCSharpRenderer
             // サーバー実装スペック（Sync バケットではなく RemoteServer バケット）で同期支援が有効なときだけ true＝
             // render_sync とは別軸（render_sync を立てると同期の固定エンジンごとサーバーファイルへ出てしまう）。
             ["render_sync_endpoints"] = scope.RemoteServer && options.GenerateSyncSupport,
+            // この生成が双方向同期の支援コードを生成するか（スペックに依らない機能の有効化。remote_services と同じ立場）。
+            // 同期が使う他バケットの固定の部品（SQLite の方言エンジンの ObservedSqlConnectionFactory）の出力条件に使う。
+            ["sync_support"] = options.GenerateSyncSupport,
             // 同期対象テーブル（Repository 契約を持つ単一主キーのテーブル＝版なしも含む）の per-entity 生成素材。FK トポロジカル順（親→子）。
             ["sync_tables"] = model.SyncTables,
             // 版なし（rowversion 列なし）の同期対象テーブルが 1 つでもあるか。版なし専用のエンドポイント

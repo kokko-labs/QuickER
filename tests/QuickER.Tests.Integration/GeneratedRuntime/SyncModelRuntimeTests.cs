@@ -49,9 +49,21 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
     /// <summary>夜間の既定の種の数</summary>
     public const int NightlySeedCount = 1200;
 
+    /// <summary>
+    /// 1 つの種だけを流す環境変数（普通の種も広い世界の種もこの 1 つで流せる。
+    /// 解決は <see cref="SyncModelSignatures.ResolvePlans"/>）
+    /// </summary>
+    public const string SeedVariable = "QUICKER_SYNC_MODEL_SEED";
+
     /// <summary>乱数の種（環境変数 QUICKER_SYNC_MODEL_SEEDS・既定 60・夜間は <see cref="NightlySeedCount"/>・0 から）</summary>
     public static SeedSettings Seeds { get; } =
-        new("QUICKER_SYNC_MODEL_SEEDS", 60, NightlySeedCount, firstSeed: 0);
+        new(
+            "QUICKER_SYNC_MODEL_SEEDS",
+            60,
+            NightlySeedCount,
+            firstSeed: 0,
+            singleVariable: SeedVariable
+        );
 
     /// <summary>夜間の広い世界の種の既定の数</summary>
     public const int NightlyWideSeedCount = 240;
@@ -65,7 +77,8 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             "QUICKER_SYNC_MODEL_WIDE_SEEDS",
             48,
             NightlyWideSeedCount,
-            firstSeed: SyncModelWorldShape.WideSeedBase
+            firstSeed: SyncModelWorldShape.WideSeedBase,
+            singleVariable: SeedVariable
         );
 
     /// <summary>根拠を確かめる競合・決着の種類（<see cref="SyncModelRun.BasisChecks"/> の鍵）</summary>
@@ -256,9 +269,8 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                 (IReadOnlyList<ModelFailure> Failures, IReadOnlyList<string> Log)
             >();
         var elapsed = new ConcurrentDictionary<int, TimeSpan>();
-        var plan = SeedSource.Resolve(Seeds);
+        var (plan, widePlan) = SyncModelSignatures.ResolvePlans(Seeds, WideSeeds);
         plan.WriteWarnings(output);
-        var widePlan = SeedSource.Resolve(WideSeeds);
         widePlan.WriteWarnings(output);
         var coverage = new CoverageCounter(SyncModelDimensions.Table);
         var outcomes = new CoverageCounter(SyncModelOutcomeDimensions.Table);

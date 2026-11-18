@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using BackendParitySqlite = QuickER.Tests.GeneratedBackendParityFixture;
 using SyncModelSqlite = QuickER.Tests.GeneratedSyncModelFixture.Repositories.Sqlite;
 using SyncSqlite = QuickER.Tests.GeneratedSyncFixture.Repositories.Sqlite;
+using SyncVoSqlite = QuickER.Tests.GeneratedSyncVoFixture.Repositories.Sqlite;
 
 namespace QuickER.Tests.Integration;
 
@@ -101,6 +102,16 @@ internal sealed class LightJournalSyncConnectionFactory(string connectionString)
     : SyncSqlite.ISqlConnectionFactory
 {
     private readonly SyncSqlite.SqlConnectionFactory _inner = new(connectionString);
+
+    public SqliteConnection CreateConnection() =>
+        SqliteLightJournal.Apply(_inner.CreateConnection());
+}
+
+/// <summary>値オブジェクトの同期の図の接続ファクトリ（生成された既定の接続へジャーナルの設定を足す）</summary>
+internal sealed class LightJournalSyncVoConnectionFactory(string connectionString)
+    : SyncVoSqlite.ISqlConnectionFactory
+{
+    private readonly SyncVoSqlite.SqlConnectionFactory _inner = new(connectionString);
 
     public SqliteConnection CreateConnection() =>
         SqliteLightJournal.Apply(_inner.CreateConnection());

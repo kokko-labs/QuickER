@@ -696,32 +696,48 @@ internal static partial class SourceRules
             // 生成コードの双方向同期が端末の DB に作る物（表・索引・トリガー）の名前は、SQLite の取込が外す前置き
             // （SyncAuxiliaryNames.Prefix）で始める。テンプレートは依存ゼロのランタイムへ出すので名前を直書きで持ち、前置きで始まらない
             // 名前を作ると、スキーマ同期がその物を図に無い表の削除として差分に出し、全部を選んだ同期が消す。
-            // 同期の節のテンプレートは利用者の表を作る文を持たない（作る物はどれも補助の物）ことを前提に、CREATE の文を全部数える
+            // 同期の節のテンプレートは利用者の表を作る文を持たない（作る物はどれも補助の物）ことを前提に、CREATE の文を全部数える。
+            // 表・索引とトリガーは規則を分け、それぞれが種類ごとの読めた文の数の下限を持つ（下限は規則に 1 つだけ持てるため）
             SourceRule.Forbid(
                 "sync-auxiliary-names-in-template",
-                "双方向同期が端末の DB に作る表・索引・トリガーの名前は SyncAuxiliaryNames.Prefix で始める（SQLite の取込がこの前置きで外す）",
+                "双方向同期が端末の DB に作る表・索引の名前は SyncAuxiliaryNames.Prefix で始める（SQLite の取込がこの前置きで外す）",
                 SourceScope.Files("src", SyncTemplateFile),
                 GuardFinder.File(
                     GuardReader.Text,
-                    file =>
-                        FindSyncTemplateCreates(
-                            file,
-                            onlyNonAuxiliary: true,
-                            "TABLE",
-                            "INDEX",
-                            "TRIGGER"
-                        )
+                    file => FindSyncTemplateCreates(file, onlyNonAuxiliary: true, "TABLE", "INDEX")
                 )
             ) with
             {
-                // CREATE TABLE の名前を読めていること（いまは補助の表が 4 つ。読み方を誤ると何も拾わずに緑になる）
+                // CREATE TABLE の名前を読めていること（いまは補助の表が 6 つ。読み方を誤ると何も拾わずに緑になる）
                 Floor = new(
                     GuardFinder.File(
                         GuardReader.Text,
                         file => FindSyncTemplateCreates(file, onlyNonAuxiliary: false, "TABLE")
                     ),
-                    4,
+                    6,
                     "同期のテンプレートの CREATE TABLE の文"
+                ),
+            },
+            // 同期する表の変更を記録するトリガーの名前も、表・索引と同じ前置きで始める（双方向同期の補助の物の名前の規則）
+            SourceRule.Forbid(
+                "sync-auxiliary-trigger-names-in-template",
+                "双方向同期が端末の DB に作るトリガーの名前は SyncAuxiliaryNames.Prefix で始める（SQLite の取込がこの前置きで外す）",
+                SourceScope.Files("src", SyncTemplateFile),
+                GuardFinder.File(
+                    GuardReader.Text,
+                    file => FindSyncTemplateCreates(file, onlyNonAuxiliary: true, "TRIGGER")
+                )
+            ) with
+            {
+                // CREATE TRIGGER の名前を読めていること（いまはトリガーを組む文が SyncLocalTracking.Create の 1 か所。
+                // 読み方を誤ると何も拾わずに緑になる）
+                Floor = new(
+                    GuardFinder.File(
+                        GuardReader.Text,
+                        file => FindSyncTemplateCreates(file, onlyNonAuxiliary: false, "TRIGGER")
+                    ),
+                    1,
+                    "同期のテンプレートの CREATE TRIGGER の文"
                 ),
             },
             // 前置きの正本は QuickER.Dialects の SyncAuxiliaryNames 1 つで、QuickER.Provider* は文字列で写さず SyncAuxiliaryNames を通す

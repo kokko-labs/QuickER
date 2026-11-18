@@ -116,6 +116,47 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
     }
 }
 
+/// <summary>
+/// Wraps a connection factory so that a handler sees every state change of the connections it hands out (for example,
+/// to run a check each time a connection opens).
+/// </summary>
+/// <remarks>
+/// The handler is added to each connection's <c>StateChange</c> event after the inner factory has created the
+/// connection, so it runs after whatever the inner factory subscribed itself (such as the busy timeout that
+/// <see cref="SqlConnectionFactory"/> sets when a connection opens). An exception the handler throws while a connection
+/// opens leaves <c>Open</c> with it.
+/// </remarks>
+public sealed class ObservedSqlConnectionFactory : ISqlConnectionFactory
+{
+    /// <summary>The factory that creates the connections.</summary>
+    private readonly ISqlConnectionFactory _inner;
+
+    /// <summary>The handler added to every connection's <c>StateChange</c> event.</summary>
+    private readonly System.Data.StateChangeEventHandler _onStateChange;
+
+    /// <summary>Creates the factory over the one it wraps and the handler to add to every connection.</summary>
+    /// <param name="inner">The factory that creates the connections.</param>
+    /// <param name="onStateChange">The handler that sees every state change of the connections.</param>
+    public ObservedSqlConnectionFactory(
+        ISqlConnectionFactory inner,
+        System.Data.StateChangeEventHandler onStateChange
+    )
+    {
+        ArgumentNullException.ThrowIfNull(inner);
+        ArgumentNullException.ThrowIfNull(onStateChange);
+        _inner = inner;
+        _onStateChange = onStateChange;
+    }
+
+    /// <summary>Creates a connection from the inner factory, with the handler added to its <c>StateChange</c> event.</summary>
+    public SqliteConnection CreateConnection()
+    {
+        var connection = _inner.CreateConnection();
+        connection.StateChange += _onStateChange;
+        return connection;
+    }
+}
+
 /// <summary>Creates a schema by running a DDL script against a SQLite database.</summary>
 /// <remarks>
 /// A bootstrap convenience for development, tests, and samples - it turns the DDL QuickER generates into a usable

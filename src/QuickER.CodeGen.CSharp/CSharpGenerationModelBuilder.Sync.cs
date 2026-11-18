@@ -225,14 +225,20 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         // 除外列（無制限バイナリ列）は行の転送に載らないため、blob を運ぶには列単位のコピーが要る。
         // オプション OFF・該当列なしなら空＝関連ブロックを 1 つも出さない（生成物はこの機能の追加前と同一）。
-        var binaryColumns =
-            options.ExcludeUnboundedBinaryColumns
-            && entity.Columns.Any(column => _columnTypes[column.Id].IsUnboundedBinary)
-                ? entity
-                    .Columns.Where(column => _columnTypes[column.Id].IsUnboundedBinary)
-                    .Select(column => _nameConverter.ToPropertyName(column.Name))
-                    .ToList()
-                : [];
+        // 記述子はアクセサの鍵（プロパティ名）と DB の列名（変更を記録するトリガーが名指す）の両方を同じ並びで持つ。
+        List<Column> binaryColumnDefinitions = options.ExcludeUnboundedBinaryColumns
+            ? entity.Columns.Where(column => _columnTypes[column.Id].IsUnboundedBinary).ToList()
+            : [];
+        var binaryColumns = binaryColumnDefinitions
+            .Select(column => _nameConverter.ToPropertyName(column.Name))
+            .ToList();
+
+        // 変更を記録するトリガーはスキーマの部分を除いた表の名前で張る（分け方は QuoteQualified と同じ最初のドット）
+        var isSchemaQualified = SchemaQualifiedName.TrySplit(
+            entity.TableName,
+            out var schemaPart,
+            out var tablePart
+        );
 
         // 差分走査の SELECT 列。除外列があるときだけ明示列挙へ切り替え、除外列を落とす。
         // 生 SQL のエンティティ取得は SELECT に含まれた列を opportunistic にマップするため、"*" のままだと
@@ -273,6 +279,15 @@ internal sealed partial class CSharpGenerationModelBuilder
             TableName = EscapeNameForCSharpString(entity.TableName),
             // 記述子プロパティの XmlDoc へ載せるため、XML としてエスケープした形も持つ
             TableNameXmlDoc = EscapeForXmlDocSummary(entity.TableName),
+            // 修飾されていなければ表の部分は名前全体（TrySplit の規則）
+            LocalTableName = EscapeNameForCSharpString(tablePart),
+            // 空のスキーマの部分（".x"）も名前として残すため、リテラルの形で持つ（無いときだけ空文字）
+            LocalDatabaseName = isSchemaQualified ? CSharpLiteral(schemaPart!) : string.Empty,
+            LocalKeyColumnName = EscapeNameForCSharpString(keyColumn.Name),
+            LocalUnboundedBinaryColumnNames = string.Join(
+                ", ",
+                binaryColumnDefinitions.Select(column => CSharpLiteral(column.Name))
+            ),
             IsVersionless = isVersionless,
             RemoteRouteName = repositoryName,
             DescriptorPropertyName = repositoryName,

@@ -87,6 +87,24 @@ internal sealed class CSharpSyncTableModel
     public required string TableNameXmlDoc { get; init; }
 
     /// <summary>
+    /// ローカル（SQLite）の表の名前のうちスキーマの部分を除いた表の部分（<c>sqlite_master.tbl_name</c> と同じもの。
+    /// C# 文字列リテラルの中身としてエスケープ済み。スキーマの部分が無ければ図の名前そのもの）
+    /// </summary>
+    public required string LocalTableName { get; init; }
+
+    /// <summary>ローカルの表の名前のスキーマの部分を C# 文字列リテラル（前後の <c>"</c> 込み）にしたもの（スキーマの部分が無ければ空文字）</summary>
+    public string LocalDatabaseName { get; init; } = string.Empty;
+
+    /// <summary>主キーの列の DB の列名（C# 文字列リテラルの中身としてエスケープ済み）</summary>
+    public required string LocalKeyColumnName { get; init; }
+
+    /// <summary>
+    /// 除外した無制限バイナリ列の DB の列名を C# 文字列リテラルにしてカンマで並べたもの
+    /// （<see cref="BinaryColumnPropertyNames"/> と同じ並び・同じ数。除外列が無ければ空文字）
+    /// </summary>
+    public string LocalUnboundedBinaryColumnNames { get; init; } = string.Empty;
+
+    /// <summary>
     /// リモートエンドポイントのルート名（例 <c>SyncItem</c>）＝<see cref="CSharpRepositoryModel.RemoteRouteName"/> と同値。
     /// </summary>
     /// <remarks>

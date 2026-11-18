@@ -1104,9 +1104,9 @@ internal static partial class SourceRuleProbes
                     ),
                 ]
             ),
-            // CREATE TABLE・CREATE [UNIQUE] INDEX・CREATE TRIGGER（IF NOT EXISTS つきも・大文字小文字を問わない）の名前のうち、前置きで
-            // 始まらないもの（大文字の前置き・引用符で囲んだ前置きは補助の物）と、名前の代わりに補間・連結が続くものを拾う。
-            // 文の綴りだけを書いた XmlDoc（IF NOT EXISTS の直後に名前が無い）と、CREATE VIEW は拾わない
+            // CREATE TABLE・CREATE [UNIQUE] INDEX（IF NOT EXISTS つきも・大文字小文字を問わない）の名前のうち、前置きで始まらないもの
+            // （大文字の前置き・引用符で囲んだ前置きは補助の物）と、名前の代わりに補間・連結が続くものを拾う。
+            // 文の綴りだけを書いた XmlDoc（IF NOT EXISTS の直後に名前が無い）と、CREATE VIEW と、CREATE TRIGGER（別の規則が読む）は拾わない
             new SourceRuleProbe(
                 "sync-auxiliary-names-in-template-forms",
                 "sync-auxiliary-names-in-template",
@@ -1122,14 +1122,38 @@ internal static partial class SourceRuleProbes
                         "CREATE UNIQUE INDEX IF NOT EXISTS ix_journal ON quicker_sync_journal (id)"
                         "CREATE INDEX quicker_sync_ix ON quicker_sync_ack (key_text)"
                         "CREATE TRIGGER IF NOT EXISTS trg_{{ table.name }} AFTER INSERT"
-                        "CREATE TRIGGER quicker_sync_trg AFTER INSERT"
                         "CREATE TABLE " + name + " ("
                         "CREATE VIEW v AS SELECT 1"
                         """,
                         "TABLE sync_journal",
                         "INDEX ix_journal",
-                        "TRIGGER trg_{{",
                         "TABLE \""
+                    ),
+                ]
+            ),
+            // CREATE TRIGGER（IF NOT EXISTS つきも・大文字小文字を問わない）の名前のうち、前置きで始まらないもの（引用符で囲んだ前置き・
+            // 補間の穴の前に前置きを直書きした名前は補助の物）と、名前が補間の穴・Scriban の式で始まるものを拾う。
+            // 文の綴りだけを書いた XmlDoc と、CREATE TABLE・CREATE INDEX（別の規則が読む）は拾わない
+            new SourceRuleProbe(
+                "sync-auxiliary-trigger-names-in-template-forms",
+                "sync-auxiliary-trigger-names-in-template",
+                [
+                    new ProbeFile(
+                        "Probe.scriban",
+                        """
+                        /// <c>CREATE TRIGGER IF NOT EXISTS</c>.
+                        "CREATE TRIGGER IF NOT EXISTS trg_{{ table.name }} AFTER INSERT"
+                        "CREATE TRIGGER quicker_sync_trg AFTER INSERT"
+                        "create trigger QUICKER_SYNC_TRG_X after delete"
+                        $"CREATE TRIGGER \"quicker_sync_trg_{escapedTable}_{suffix}\" {timing} ON"
+                        $"CREATE TRIGGER \"{name}\" {timing} ON"
+                        "CREATE TRIGGER sync_trg_orders AFTER UPDATE"
+                        "CREATE TABLE IF NOT EXISTS sync_journal ("
+                        "CREATE INDEX ix_journal ON quicker_sync_journal (id)"
+                        """,
+                        "TRIGGER trg_{{",
+                        "TRIGGER \\\"{name}\\\"",
+                        "TRIGGER sync_trg_orders"
                     ),
                 ]
             ),

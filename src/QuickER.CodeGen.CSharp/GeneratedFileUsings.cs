@@ -542,7 +542,8 @@ internal static class GeneratedFileUsings
             //     ジャーナルの記録時刻と主キーの往復書式（System / System.Globalization）・
             //     洗い替えの所要時間計測（Stopwatch＝System.Diagnostics）。
             //   per-entity: DI 登録拡張（Microsoft.Extensions.DependencyInjection）＝キー付き解決とデコレーション。
-            //   ADO・EF Core・ASP.NET Core への依存は一切持たない（中立契約 ISqlExecutor / IRepositoryCore のみを使う）。
+            //   同期のコード（固定エンジンも per-entity も）は ADO のドライバ・EF Core・ASP.NET Core に依存しない
+            //   （中立契約 ISqlExecutor / IRepositoryCore と、固定エンジンの変更の記録が使う BCL の System.Data.Common だけを使う）。
             //   リモートサービス併用時: HTTP 差分ソース（HttpSyncServerSource 基底・per-entity クライアント・
             //     ベースアドレス版 DI の HttpClient / SocketsHttpHandler）が System.Net.Http を使う。
             case GenerationBucket.Sync:
@@ -556,6 +557,14 @@ internal static class GeneratedFileUsings
                 yield return "System.Linq";
                 yield return "System.Threading";
                 yield return "System.Threading.Tasks";
+
+                // 固定エンジンの変更の記録（SyncLocalTracking）は、状態の表とトリガーを ADO の抽象
+                // （DbConnection / DbCommand / DbException＝System.Data.Common）で張る。固定 infra を描画するファイルだけが持つ
+                // （テンプレートの emit_shared_infra と同条件＝パッケージ参照モードでは描画しない）
+                if (spec.EmitSharedInfra && !options.UseRuntimePackages)
+                {
+                    yield return "System.Data.Common";
+                }
 
                 if (options.GenerateRemoteServices)
                 {

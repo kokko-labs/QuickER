@@ -23,6 +23,14 @@ SQLite 方言エンジン（QuickER 版 Repository の ADO 実装）の固定コ
 - EF Core 版 Repository も同じ待ちを持つ（公開の `SqliteBusyTimeoutInterceptor`）。詳細は `src/QuickER.Runtime.EntityFrameworkCore/CLAUDE.md`。
 - ガード：`BusyTimeoutDefaultAdoSqliteRuntimeTests`（既定・`Default Timeout=5`・`0`・プールから戻った接続）、`SyncRuntimeTestsBase` の `JournaledWrite_WaitsForReaderOnAnotherConnection` / `RawSqlReturning_WaitsForReaderOnAnotherConnection`（別の接続の読み取りを持ったまま書き込みが待ち、読み取りの後に成功する。直結と HTTP）、`SqliteRepositoryDialectTests`（生成テキスト）。mutation 実証済み。
 
+### 接続ファクトリを包む型（ObservedSqlConnectionFactory）
+
+- `ObservedSqlConnectionFactory` は、内側の `ISqlConnectionFactory` が返す接続の `StateChange` にハンドラを足して返す、同期を知らない汎用の包み。ハンドラは内側が自分で足した購読（上の `busy_timeout`）の後に走り、接続を開く間にハンドラが投げた例外は `Open` から出る。
+  - 同期の開くたびの確認（`SyncLocalTrackingGuard`）は `new ObservedSqlConnectionFactory(inner, new SyncLocalTrackingGuard(tables).OnStateChange)` の形で使う（→ `src/QuickER.Runtime.Sync/CLAUDE.md`「開くたびの確認（SyncLocalTrackingGuard）」）。
+- 置き場の理由：ドライバの型（`SqliteConnection`）を名指しするコードは SQLite のエンジンの側に置く。同期の固定のエンジンは ADO のドライバに依存せず、パッケージ参照の形の生成コードは ADO のドライバを直接参照しないため。
+- 出す条件は `sync_support || runtime_package_export`（同期を生成する構成か、パッケージ用ソース）。同期を使わない構成の生成物には出ない。
+- ガード：`SyncSupportAdoSqliteTriggerRuntimeTests` が流す `table:SyncTriggerGuard`（行 `busy-timeout-is-set-before-the-check`・`custom-connection-factory-is-wrapped`）、パッケージ参照の形の生成の行 `compile-package-sync-support-*`。
+
 ## 複数の文を 1 つのトランザクションで流す口（ISqlBatchExecutor）
 
 - SQLite の `SqlExecutor` だけが Core の公開の口 `ISqlBatchExecutor.ExecuteSqlBatchAsync` を実装する（`_04_RepositoryContractCore.scriban` の `repository_dialect == "sqlite"` の分岐）。1 つの接続で `BeginTransactionAsync` → 文ごとに `ExecuteNonQueryAsync` → `CommitAsync`。どれかの文かコミットが失敗したら `SqlTransactions.RollbackQuietlyAsync` と `await using` で巻き戻してから接続を返す。

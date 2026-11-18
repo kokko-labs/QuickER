@@ -400,6 +400,34 @@
       ]
     },
     {
+      "name": "SyncTriggerRecording",
+      "title": "同期のトリガーの記録の表（ローカルの SQLite のトリガーが、書き込みの道ごとに行の状態の表へ何を残すか）",
+      "sourceFiles": [
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncTriggerRecordingRows.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncTriggerHarness.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncSupportAdoSqliteTriggerRuntimeTests.cs"
+      ],
+      "covers": [
+        "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_10_Sync.scriban",
+        "src/QuickER.Runtime.Sync"
+      ]
+    },
+    {
+      "name": "SyncTriggerGuard",
+      "title": "同期のトリガーの確認の表（包んだ接続ファクトリで開いて使う DB に外から何かが起きた後、次に開いた接続で確認のガードが何をするか）",
+      "sourceFiles": [
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncTriggerGuardRows.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncTriggerHarness.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncSupportAdoSqliteTriggerRuntimeTests.cs"
+      ],
+      "covers": [
+        "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_04_RepositoryContractCore.scriban",
+        "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_10_Sync.scriban",
+        "src/QuickER.Runtime.Sqlite",
+        "src/QuickER.Runtime.Sync"
+      ]
+    },
+    {
       "name": "SyncPlanExpectations",
       "title": "同期の差分と計画の期待の行（SyncPlan のエンジン〔SyncPlan/Fuzz・SyncPlan/CapabilityNet〕が流す。方言ごとの期待と実 DB の段の汎用の表明）",
       "sourceFiles": [

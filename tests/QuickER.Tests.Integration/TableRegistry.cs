@@ -39,6 +39,34 @@ internal static class TableRegistry
             ]
         ),
         new(
+            "SyncTriggerRecording",
+            "同期のトリガーの記録の表（ローカルの SQLite のトリガーが、書き込みの道ごとに行の状態の表へ何を残すか）",
+            [
+                Runtime + "SyncTriggerRecordingRows.cs",
+                Runtime + "SyncTriggerHarness.cs",
+                Runtime + "SyncSupportAdoSqliteTriggerRuntimeTests.cs",
+            ],
+            [
+                "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_10_Sync.scriban",
+                "src/QuickER.Runtime.Sync",
+            ]
+        ),
+        new(
+            "SyncTriggerGuard",
+            "同期のトリガーの確認の表（包んだ接続ファクトリで開いて使う DB に外から何かが起きた後、次に開いた接続で確認のガードが何をするか）",
+            [
+                Runtime + "SyncTriggerGuardRows.cs",
+                Runtime + "SyncTriggerHarness.cs",
+                Runtime + "SyncSupportAdoSqliteTriggerRuntimeTests.cs",
+            ],
+            [
+                "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_04_RepositoryContractCore.scriban",
+                "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_10_Sync.scriban",
+                "src/QuickER.Runtime.Sqlite",
+                "src/QuickER.Runtime.Sync",
+            ]
+        ),
+        new(
             "SyncPlanExpectations",
             "同期の差分と計画の期待の行（SyncPlan のエンジン〔SyncPlan/Fuzz・SyncPlan/CapabilityNet〕が流す。方言ごとの期待と実 DB の段の汎用の表明）",
             ["tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanExpectationRows.cs"],

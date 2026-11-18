@@ -75,6 +75,10 @@ public sealed class QuickER.Runtime.Sqlite.IncludeLoader
     public System.Threading.Tasks.Task LoadAsync(System.Collections.Generic.IReadOnlyList<object> parents, System.Collections.Generic.IReadOnlyList<QuickER.Runtime.IncludeNode> includes, Microsoft.Data.Sqlite.SqliteConnection connection, System.Threading.CancellationToken cancellationToken)
     public static QuickER.Runtime.Sqlite.IncludeLoader For(System.Type entityType)
 
+public sealed class QuickER.Runtime.Sqlite.ObservedSqlConnectionFactory : QuickER.Runtime.Sqlite.ISqlConnectionFactory
+    public .ctor(QuickER.Runtime.Sqlite.ISqlConnectionFactory inner, System.Data.StateChangeEventHandler onStateChange)
+    public Microsoft.Data.Sqlite.SqliteConnection CreateConnection()
+
 public sealed class QuickER.Runtime.Sqlite.SaveHookSession
     public .ctor(QuickER.Runtime.ISaveHookRegistry registry, System.Func<QuickER.Runtime.EntityBaseCore, QuickER.Runtime.ISaveHookContext> contextFactory)
     public System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBaseCore> Skipped { get; }

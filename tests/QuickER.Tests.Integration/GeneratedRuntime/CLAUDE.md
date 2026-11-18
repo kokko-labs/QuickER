@@ -352,6 +352,11 @@
 - 既知の失敗の一覧の乱数の項目のうち RegularSeeds / NightlySeeds の項目は、全部の種をまとめて照合して「起きない」も赤にする。種ごとの照合は「載っていない」しか見ないため。
 - 乱数の種の照合は、静止化で起きた例外を途中の同期の例外と同じに扱い、表明 2・3 の署名から表の名前を外して行う（`SyncModelRuntimeTests.Family`）。
 - 種の数は `QUICKER_SYNC_MODEL_SEEDS`（既定 60）と、広い世界の種の `QUICKER_SYNC_MODEL_WIDE_SEEDS`（既定 48・夜間 240）。広い世界の種は同じテストの中で既存の種の後に流し、種ごとの照合と再現の手順はその範囲の決め方で、既知の失敗の「起きない」の照合は既存の範囲の種だけで、網羅しない組の照合は 2 つの範囲がどちらも既定の種の数のときだけ行う。種の指紋は範囲ごとに別の記録（`SyncModel`・`SyncModelWide`）。時刻と乱数の出どころは種だけ。
+- 1 種だけ流すときは `QUICKER_SYNC_MODEL_SEED`（直結）か `QUICKER_SYNC_MODEL_TRANSPORT_SEED`（HTTP・実 SQL Server）を使う。
+- 広い世界の種（120000 以上）もこの変数で流せ、種の番号から世界の形が決まるので、番号の範囲が合う側の計画にだけ載せて 1 回だけ流す（`SyncModelSignatures.ResolvePlans`）。
+- 単独の種のとき、実 SQL Server は種を 4 で割った余りで失敗の注入なし（0・1）かあり（2・3）かが決まり、受け持つ側のテストだけが流す。
+- もう一方のテストは「もう一方が受け持つ」と出力へ 1 行書いて何も流さず、失敗にしない。
+- 単独の種のとき、既定の種の数を前提にした表明（網羅しない組の照合・空振りの守り）は外れる。
 
 ### 判定役の継ぎ目・台帳・実行ごとの照合
 
@@ -469,3 +474,19 @@
   - この網の行は 4 つの転送すべてで流れる（HTTP × 実 SQL Server は夜間）。洗い替え × `unique-holder-after-taker` × 更新 × 取得の前の点の 4 行は、上限を実行の始めに固定するサーバー役（実 SQL Server）では割り込みの版がその洗い替えに入らない（洗い替えは一意な値の持ち主を読み直さない）ので、期待の手 `WhenServerFixesCeilingOp` で「洗い替えの直後の端末に対象の行は無い → 次の同期で降りる」を表明してから、同じ後段へ進む。同期と親の前段は、持ち主の読み直し・親の解決役がキーで読み直して上限の後の版を拾うので、どのサーバー役でも同じ期待になる。
 - 割り込みは乱数の操作の列に入れない。生成器は毎歩実際の DB を読んで操作を選ぶので、派生の乱数で割り込みを選んでも既存の種の列が変わる。入れるなら別の種の列にする。
 - mutation 実証済み。
+
+### 同期のトリガーのテスト
+
+- ローカルの変更の記録（`SyncLocalTracking`）と開くたびの確認（`SyncLocalTrackingGuard`）は、`SyncSupportAdoSqliteTriggerRuntimeTests`（Theory 2 本・コンテナなし）が 2 つの行の表を 1 行ずつ流して確かめる。仕組みの正本は `src/QuickER.Runtime.Sync/CLAUDE.md`「ローカルの変更の記録（SyncLocalTracking）」「開くたびの確認（SyncLocalTrackingGuard）」。
+  - 行の表は「同期のトリガーの記録」（`SyncTriggerRecordingRows`・影響の地図の名前 `table:SyncTriggerRecording`）と「同期のトリガーの確認」（`SyncTriggerGuardRows`・`table:SyncTriggerGuard`）。端末の組み立ては `SyncTriggerHarness`（SyncModelFixture・SyncFixture・SyncVoFixture の 3 つのフィクスチャの SQLite の側）。
+- 記録の表の共通の表明
+  - 張った直後：初回の `Ensure` は渡した表を全部返し 2 回目は空・状態の表は 1 行・トリガーは渡した表にだけ付く・記録は空。
+  - 手の後：記録が期待の並びと一致する・連番が並びの順に厳密に増えて `next_seq` より小さい・適用中の印は 0 のまま・触らなかった前準備の行は記録に無い・記録したキーで元の表を引き直せる。
+- 確認の表の共通の表明
+  - 次に開く処理が速い道か 2 段目か・張り直しの回数がどう増えるか。
+  - 失敗するとき：例外の型と文の断片・接続が Closed・スキーマが開く前と同じ。
+  - 成功するとき：トリガーが `TriggersFor` と一致し状態の表に 1 行・その後の書き込みが記録に残る・もう一度開くと速い道。
+- 行に固めていないもの：同時に開く 2 つの接続の回数（範囲で期待する）。
+- 観測どおりに固めたもの：カスケードの記録の順（孫の削除 → 子の削除 → 子の NULL 化 → 親の削除）・`VACUUM` の後は 2 段目に入る・`Data Source=:memory:` は開くたびに別の空の DB になる・同期する表の名前を変えるとトリガーが変えた後の名前の表に付け替わり、古い表の名前で記録し続ける。
+- 生成の行：`CodegenCaseTests` の行 `exec-sync-dotted-table-name-local-tracking-refuses-attached-database`・`exec-sync-quoted-names-local-tracking-records-on-sqlite`。分割の Runtime 系ファイルの型の集合の行 `relation-runtime-type-set-split-multi-dialect` は、機能で出し分ける固定の部品（HTTP・同期）を有効にした構成で照らす。
+- mutation 実証済み（記録：適用中の印の条件を外す・連番を進めない・主キーを変える更新の古いキーを削除として記録しない・挿入し直しで無制限バイナリ列の名前を付け直さない／確認：速い道が DB ごとの印を見ない・失敗のときに接続を閉じない・読むだけの確かめが比べない・覚える鍵に定義のハッシュを入れない・張る前に列を確かめない）。
