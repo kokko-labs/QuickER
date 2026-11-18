@@ -387,6 +387,79 @@ internal static partial class SourceRules
                     "SyncPlanner の規則の表の要素"
                 ),
             },
+            // 計画器が自分で作った差分の項目に付ける印（SchemaDiffItem.PlanMark＝どこから来た項目か・外して付け直す対）は、計画器が
+            // 項目を作る所でだけ付け、製品のコードは読まない。読むのは、計画を文の並びとして読み取るテスト（網の関係 N4）だけ。
+            // 計画・同期スクリプト・警告・画面が印に頼ると、印を持たない項目（利用者が選んだ項目・差分が作った項目）と振る舞いが割れ、
+            // 計画器を文の組み立てへ置き換えるときに印を消せなくなる。付ける所は「含むメソッド: init」で集め、項目を作る所の一覧と
+            // 件数まで照合する（付ける所を足す・減らすと赤。項目を作って印を付け忘れた所は、網の関係 N4 の由来の形が名指しする）
+            SourceRule.Forbid(
+                "sync-plan-mark-owners",
+                "計画器の項目の印（SchemaDiffItem.PlanMark）は、計画器が項目を作る所でだけ付け、製品のコードは読まない",
+                SourceScope.Under("src/QuickER.Provider"),
+                GuardFinder.Nodes(PlanMarkUses.Describe),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "ExpandAlters: init",
+                    4,
+                    "外部キー・一意制約の作り直しを展開した削除と追加（元の作り直しの項目と、削除と追加の対）"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "ExcludeItemsRequiringUnselected: init",
+                    1,
+                    "型の変更も含む列の変更から NULL 許容化だけを外して残す代わりの項目（置き換えた選んだ項目）"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "InjectPrimaryKeyNotNullChanges: init",
+                    1,
+                    "主キーに加わる列の暗黙の NOT NULL 化"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "InjectVanishingUniqueConstraintDrops: init",
+                    1,
+                    "構成列が消える一意制約の暗黙の削除"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "InjectUniqueConstraintsReplacedByPrimaryKey: init",
+                    1,
+                    "主キーが置き換える一意制約の暗黙の削除"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "InjectImplicitForeignKeyRebuilds: init",
+                    1,
+                    "暗黙に外して付け直す外部キーの追加（削除と同じ対）"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "BuildImplicitForeignKeyDrop: init",
+                    1,
+                    "暗黙の外部キーの削除（端が消える外部キーと、外して付け直す外部キー。印は呼び出し側が渡す）"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "InjectImplicitPrimaryKeyRebuilds: init",
+                    1,
+                    "暗黙に外して付け直す主キー（1 項目が解除と付与の対になる）"
+                ),
+                new GuardKnown(
+                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "InjectImplicitUniqueConstraintRebuilds: init",
+                    2,
+                    "暗黙に外して付け直す一意制約の削除と追加（付け直すときだけ同じ対）"
+                )
+            ) with
+            {
+                // 印を付ける所を見つけられること（いまは計画器が項目を作る 13 か所）
+                Floor = new(
+                    GuardFinder.Nodes(PlanMarkUses.DescribeInit),
+                    13,
+                    "計画器が項目に印を付ける所"
+                ),
+            },
             // 同期の計画は、DB の今の図（live の表・リレーション）を live の状態（LiveSchema）からだけ読む。LiveSchema は計画の入口で
             // 1 回だけ作り、表の索引・列ペアを解いた外部キーの一覧・外部キーの実効名を持つ。各段が文脈の LiveEntities・LiveRelationships を
             // 直接読んで索引や一覧を作り直すと、同じ材料の作り方が段ごとに割れる（表の引き方・外部キーの解き方・実効名の求め方）。

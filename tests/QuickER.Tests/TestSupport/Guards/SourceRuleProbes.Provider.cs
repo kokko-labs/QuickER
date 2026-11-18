@@ -319,6 +319,82 @@ internal static partial class SourceRuleProbes
             {
                 InactiveBranch = true,
             },
+            // 印を付ける所（オブジェクトの初期化子の左辺）と読む所（素の・?. の読み。項目を作る所の外・別の型からも）を拾い、
+            // プロパティの宣言・XmlDoc の cref・文字列・コメント・名前の一部だけが同じメンバーは拾わない
+            new SourceRuleProbe(
+                "sync-plan-mark-owners-forms",
+                "sync-plan-mark-owners",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        internal sealed class Item
+                        {
+                            internal object? PlanMark { get; init; }
+
+                            internal object? PlanMarks { get; init; }
+
+                            public string Name { get; init; } = "";
+                        }
+
+                        internal static class Planner
+                        {
+                            /// <summary><see cref="Item.PlanMark"/> を付けた項目を作る</summary>
+                            public static Item Make() => new Item { Name = "a", PlanMark = new object() };
+
+                            // item.PlanMark
+                            public static Item Other() => new Item { PlanMarks = "PlanMark" };
+                        }
+
+                        internal static class Renderer
+                        {
+                            public static bool Read(Item item) => item.PlanMark is null;
+
+                            public static bool Conditional(Item? item) => item?.PlanMark is null;
+
+                            public static Item Copy(Item item) => new Item { PlanMark = item.PlanMark };
+                        }
+                        """,
+                        "Make: init",
+                        "Read: read",
+                        "Conditional: read",
+                        "Copy: init",
+                        "Copy: read"
+                    ),
+                ]
+            ),
+            // 構文の規則は、条件コンパイルの外れる分岐の中の印の読みも拾う
+            new SourceRuleProbe(
+                "sync-plan-mark-owners-inactive-branch",
+                "sync-plan-mark-owners",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        internal sealed class Item
+                        {
+                            internal object? PlanMark { get; init; }
+                        }
+
+                        internal static class Renderer
+                        {
+                            public static bool IsPlannerMade(Item item)
+                            {
+                        #if QUICKER_PROBE_BRANCH
+                                return item.PlanMark is not null;
+                        #else
+                                return false;
+                        #endif
+                            }
+                        }
+                        """,
+                        "IsPlannerMade: read"
+                    ),
+                ]
+            ) with
+            {
+                InactiveBranch = true,
+            },
             // 文脈の live の表・リレーションの読み（素の・?. ・ラムダの中）と外部キーの解決の呼び出しを拾い、live の状態の読み・
             // 初期化子の左辺・プロパティの宣言・nameof でない名前だけの一致（別の型の ResolveAll・文字列・コメント）は拾わない
             new SourceRuleProbe(

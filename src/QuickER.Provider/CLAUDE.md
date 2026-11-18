@@ -512,6 +512,24 @@
   - 前寄せの中の取り下げ（`KeepOneReaddedUnique`）は周の外で項目を外す（積み口は `ExcludeSelected`。使うのはここだけ）。取り下げの前に決めた警告と外部キーの追加の並びが見直されないことを N3 が見つけ、網の既知の失敗の一覧（`n3-kept-unique-stale-judgments`）に直す区切りつきで載せてある。
 - ガード：能力の組の網の関係 N3（`SyncPlanCapabilityNetRunner.ExclusionFixedPointProblems`）・`SourceRuleTests` の規則 `sync-exclusions-inside-stable-loop`（`SyncPlanner.cs` の `Exclude*` への参照＝呼び出しとメソッドグループのうち、規則の表 2 つの初期化子の中でも `Exclude*` の中でもないもの。`ExcludeSelected` と `ExcludeUntilStable` は数えない。自己検査の行 `sync-exclusions-inside-stable-loop-forms`・`sync-exclusions-inside-stable-loop-inactive-branch`）・規則 `sync-selection-rules-table-complete`（規則の形の `Exclude*` の宣言はどれも規則の表にちょうど 1 回あり、表の要素はどれも `SyncPlanner` に宣言のある規則の形の関数。表に無い・2 回ある・規則の形でない・宣言の無い要素を名指しする。自己検査の行 `sync-selection-rules-table-complete-forms`・`sync-selection-rules-table-complete-tidy`・`sync-selection-rules-table-complete-inactive-branch`）・規則の並びと取り下げの当て方の期待の行（網で流れる）`plan-selection-order-pk-column-drop-is-named-as-missing-pk-change-and-other-drop-stays`・`plan-selection-order-fk-add-missing-column-and-type-mismatch-is-named-as-missing-column`・`plan-selection-order-fk-add-missing-prerequisite-and-set-null-on-not-null-is-named-as-missing-prerequisite`・`plan-selection-order-colliding-table-is-named-before-missing-prerequisite`・`plan-selection-order-fk-add-type-mismatch-and-set-null-on-not-null-is-named-as-type-mismatch`・`plan-selection-withdrawals-keep-item-order`（1 つの規則の取り下げは取り下げの順に当てる）・`plan-selection-replacement-keeps-its-position`（代わりの項目は元の位置に入る）・期待の行 `realdb-name-collision-unique-with-excluded-last-column-drop`（網と 5 方言の実 DB）・`realdb-rebuild-skipped-when-import-discarded-excludes-fk-requiring-its-pk-change`（実 SQLite）・`plan-type-mismatch-excluded-alter-keeps-live-fk-with-same-definition-as-added-fk`・`plan-type-mismatch-excluded-add-with-same-definition-is-not-warned-for-set-null`（網と実 Oracle）。
 
+### 計画の文と由来と対
+
+- 計画の 1 文（DB へ流す変更 1 つ）の型は `Sync/Steps/` の `SyncStep`（閉じた階層・派生 15：表の追加と削除・列の追加と変更と削除・主キーを外すと付ける・一意制約を外すと付ける・外部キーを外すと付ける・表と列の説明・表の作り直し・列を動かす）。文は方言の SQL を組み立てるのに要る値だけを持つ。文の並びの計画は `StepPlan`（文の並び・先頭から前寄せした文の数・警告・外した項目）。
+  - 由来（`StepOrigin`）は 3 つ：選んだ項目から来た文（`SelectedOrigin`。作り直しを展開した削除と追加は元の作り直しの項目、主キーを外す文と付ける文は元の主キーの変更の項目を持つ）・計画器が足した文（`ImplicitOrigin`＝理由 `ImplicitStepReason` の 7 つと、足した側が組み立てた説明）・複数の項目をまとめた文（`MergedOrigin`＝表の作り直し）。
+  - 対（`ReaddPair`）は、制約を外す文と付け直す文が共有する参照の印。対になるのは、外部キー・一意制約の作り直しを展開した削除と追加、外部キー・一意制約・主キーの暗黙の外し直し、主キーの変更の解除と付与。利用者が別々に選んだ削除と追加は、同じ名前でも対にしない。
+  - 名前の無いこともある制約の名前（`null`）は、今の項目と同じ意味（外すときは同期スクリプトが DB から引き、付けるときは作る）。
+- `StepLowering.ToSyncPlan` が、文の並びの計画を今の計画の形（`SyncPlan`＝セクションと差分の項目）へ写す。方言ビルダー・計画の検証・画面・テストの期待の面は、この形を読む。
+  - セクションは、並びの隣り合う文を「種類・主キーのフェーズ・前寄せか」が同じ間 1 つにまとめる。主キーを外す文は解除のフェーズ、付ける文は付与のフェーズへ写す。列を動かす文は表ごとの `TableReorderPlan`、表を作り直す文は `TableRebuildPlan` へ戻す。
+  - 項目の作り方は 2 通り。
+    - 読み取り用の形（既定）：選んだ項目から来て種類の変わらない文は、元の項目そのもの（参照を保つ）。列の組を並べ替えた外部キーの追加は、列の組だけ違う複製。作り直しを展開した文と計画器が足した文は、文の値から組み立て、説明は由来から取る。対になった主キーの解除と付与は同じ 1 つの項目（主キーの列だけを持つ表の定義）になる。外部キーの追加の項目が名乗る列名（`ColumnName`）は、列の組を並べ替える前の宣言の順の先頭の組の子の列（作り直しを展開した追加は元の項目の列名、外して付け直す追加は対の外す文の先頭の組）。
+    - 文の値だけの形（`fieldsOnly`）：どの文も文の値だけから組み立てる（由来から読むのは説明だけ）。文の値が方言ビルダーに足りることを確かめるための形。
+- 製品の経路は今の計画器（`SyncPlanner.BuildPlan`）のままで、文は計画を組み立てる途中の形ではない。文を作るのは、今の計画を文として読み取るテスト側の読み取り器（`SyncPlanStepReader`）だけ。
+- 今の計画器は、自分で作った差分の項目に印（`SchemaDiffItem.PlanMark`＝`PlanItemMark`。internal）を付ける：計画器が足した項目の理由、作り直しを展開した項目と列の組を並べ替えた複製の元の項目、一部だけを外して残した代わりの項目が置き換えた項目、外す項目と付け直す項目の対。利用者が選んだ項目は印を持たない。
+  - 付けるのは計画器が項目を作る所だけ（`new SchemaDiffItem { … PlanMark = … }` の 13 か所と、並べ替えた複製 `WithRearrangedForeignKeyColumnPairs` へ渡す 1 か所）。印を持つ項目の複製は印をそのまま持つ。
+  - 計画・同期スクリプト・警告・画面は印を読まない。読むのは読み取り器だけ。
+- 理由：今の計画器は「計画器が足した項目か」「どの削除の付け直しか」を項目に持たず、段ごとに別の手段（識別の型の集合・参照の等価・名前・後ろの項目の走査）で後から推定している。由来と対は作った側しか知らないので、作る所で記録する。写しが今の計画の形を保たないと、文から計画を組み立てる側の計画が、方言ビルダーと期待の面へ違う形で届く。
+- ガード：能力の組の網の関係 N4（`SyncPlanCapabilityNetRunner.StepRoundTripProblems`＝今の計画を文へ読み、写しで戻すと、計画の全部の面と同期スクリプトが元と同じ。文の値だけの形の同期スクリプトも同じ。選んだ項目でも印のある項目でもない項目が無い。対・暗黙の理由・警告の形がそろう。 2 つのセクションに入る同じ項目は写した計画でも同じ項目。`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`「能力の組の網」）・期待の行 `plan-implicit-unique-rebuild-on-dropped-table-drops-only`（外すだけの暗黙の一意制約の外し直しは対を持たない）・`SourceRuleTests` の規則 `sync-plan-mark-owners`（`src/QuickER.Provider` の `PlanMark` の参照を「含むメソッド: init / read」で集め、付ける所の一覧と件数まで照合する。読みは 1 つも許さない。自己検査の行 `sync-plan-mark-owners-forms`・`sync-plan-mark-owners-inactive-branch`）。
+
 ### 構成列の削除と列が残らない表
 
 - 主キー・一意制約の構成列の削除は、それを前提にする変更を方言に依らず同じ形で扱う。

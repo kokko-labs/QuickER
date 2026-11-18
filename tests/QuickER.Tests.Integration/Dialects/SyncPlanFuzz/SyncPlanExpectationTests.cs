@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using QuickER.Tests.TestSupport.Engines;
 using Xunit;
@@ -18,9 +19,16 @@ public sealed class SyncPlanExpectationTests
     public void SyntheticAndComparisonRows_Match()
     {
         var rows = SyncPlanExpectationRows.ForSyntheticOrComparison().ToList();
-        var problems = rows.SelectMany(row => SyncPlanExpectationRunner.Run(row)).ToList();
+        var roundTrips = new List<string?>();
+        var problems = rows.SelectMany(row =>
+                SyncPlanExpectationRunner.Run(row, onStepRoundTrip: roundTrips.Add)
+            )
+            .ToList();
         TestContext.Current.TestOutputHelper?.WriteLine(
             $"synthetic or comparison rows {rows.Count}, problems {problems.Count}"
+        );
+        TestContext.Current.TestOutputHelper?.WriteLine(
+            $"{SyncPlanCapabilityNetRunner.DescribeStepRoundTrips(roundTrips)} plans of synthetic or comparison rows"
         );
 
         if (problems.Count > 0)
