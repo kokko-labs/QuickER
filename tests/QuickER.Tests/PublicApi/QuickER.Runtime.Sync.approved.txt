@@ -275,6 +275,7 @@ public enum QuickER.Runtime.Sync.SyncLocalRowChangeReason : int
     RemovedForUniqueValue = 3
 
 public static class QuickER.Runtime.Sync.SyncLocalTracking
+    public const string AnchorTableName = "quicker_sync_table"
     public const string RowTableName = "quicker_sync_row"
     public const string StateTableName = "quicker_sync_state"
     public const string TriggerNamePrefix = "quicker_sync_trg_"

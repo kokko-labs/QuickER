@@ -3705,6 +3705,673 @@ internal static partial class CodegenCases
                 )
         );
 
+    /// <summary>ローカルの口の検査の DB の接続ファクトリへ渡す接続文字列の Default Timeout（秒）</summary>
+    private const int QueryText_LocalRowStoreTimeoutSeconds = 7;
+
+    /// <summary>
+    /// 図の SQLite 方言の DDL を当てた一時のファイル DB を作り、生成物の SQLite の <c>SqlConnectionFactory</c>（Pooling を書かない
+    /// 接続文字列）の上に <c>SqliteLocalRowStore</c> を組んで <paramref name="run"/> を呼ぶ。終わった後、DB のファイルを移動して戻せる
+    /// （ローカルの口が開いた接続がファイルを掴んでいない）ことを確かめる
+    /// </summary>
+    /// <param name="assembly">読み込んだ生成物</param>
+    /// <param name="diagram">DDL を作る図（SQLite 方言）</param>
+    /// <param name="run">ローカルの口・DB のファイルのパス・プールしない読み書き用の接続文字列を受け取って問題を返す</param>
+    private static IReadOnlyList<string> QueryText_WithLocalRowStore(
+        Assembly assembly,
+        ErDiagram diagram,
+        Func<object, string, string, IEnumerable<string>> run
+    )
+    {
+        using var folder = new QuickER.Tests.TestSupport.TestTempFolder();
+        var path = System.IO.Path.Combine(folder.Path, "local.db");
+        var probeConnectionString = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Pooling = false,
+        }.ToString();
+
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection(probeConnectionString))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = new QuickER.Provider.Sqlite.SqliteDdlGenerator().Build(diagram);
+            command.ExecuteNonQuery();
+        }
+
+        var storeType = ProbeKit.Type(assembly, "SqliteLocalRowStore");
+        var factory = ProbeKit.Create(
+            ProbeKit.Type(assembly, "SqlConnectionFactory", storeType.Namespace),
+            $"Data Source={path};Default Timeout={QueryText_LocalRowStoreTimeoutSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
+        );
+        var store = ProbeKit.Create(storeType, factory);
+        var problems = run(store, path, probeConnectionString).ToList();
+
+        // プールした接続はファイルを開いたまま持つので、Windows では移動が共有違反になる
+        try
+        {
+            System.IO.File.Move(path, path + ".moved");
+            System.IO.File.Move(path + ".moved", path);
+        }
+        catch (System.IO.IOException ex)
+        {
+            problems.Add(
+                $"ローカルの口の接続を閉じた後に DB のファイルを移動できない（{ex.Message}）"
+            );
+        }
+
+        return problems;
+    }
+
+    /// <summary>ローカルの口の総称のメソッドを、エンティティの型で閉じて呼び、タスクの結果を返す</summary>
+    private static object? QueryText_CallStore(
+        object store,
+        string method,
+        Type entityType,
+        params object?[] arguments
+    ) =>
+        ProbeKit.Await(
+            store
+                .GetType()
+                .GetMethod(method, BindingFlags.Public | BindingFlags.Instance)!
+                .MakeGenericMethod(entityType)
+                .Invoke(store, arguments)
+        );
+
+    /// <summary>ローカルの口の総称のメソッドを呼び、投げた例外（反射の包みを外したもの。投げなければ null）を返す</summary>
+    private static Exception? QueryText_StoreThrows(
+        object store,
+        string method,
+        Type entityType,
+        params object?[] arguments
+    )
+    {
+        try
+        {
+            QueryText_CallStore(store, method, entityType, arguments);
+            return null;
+        }
+        catch (TargetInvocationException ex) when (ex.InnerException is { } inner)
+        {
+            return inner;
+        }
+        catch (Exception ex)
+        {
+            return ex;
+        }
+    }
+
+    /// <summary>識別子を SQLite の引用で囲む</summary>
+    private static string QueryText_QuoteSqlite(string name) =>
+        "\"" + name.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
+
+    /// <summary>生成物のエンティティの型のうち、表の名前が <paramref name="table"/> のもの（<c>[Table]</c> で引く）</summary>
+    private static Type QueryText_EntityOfTable(Assembly assembly, string table) =>
+        assembly
+            .GetTypes()
+            .Single(type =>
+                type.GetCustomAttribute<System.ComponentModel.DataAnnotations.Schema.TableAttribute>()?.Name
+                == table
+            );
+
+    /// <summary>エンティティの型の、列名が <paramref name="column"/> のプロパティ（<c>[Column]</c> で引く）</summary>
+    private static PropertyInfo QueryText_ColumnProperty(Type entityType, string column) =>
+        entityType
+            .GetProperties()
+            .Single(property =>
+                property
+                    .GetCustomAttribute<System.ComponentModel.DataAnnotations.Schema.ColumnAttribute>()
+                    ?.Name == column
+            );
+
+    /// <summary>
+    /// 表の 1 行を、<paramref name="skipped"/> 以外の列を名前の順に「列=格納の型:値」で並べたテキストにして読む（行が無ければ null）
+    /// </summary>
+    private static string? QueryText_ReadRowText(
+        System.Data.Common.DbConnection connection,
+        string table,
+        string keyColumn,
+        string sqlKey,
+        params string[] skipped
+    )
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText =
+            $"SELECT * FROM {QueryText_QuoteSqlite(table)} WHERE {QueryText_QuoteSqlite(keyColumn)} = {sqlKey}";
+        using var reader = command.ExecuteReader();
+
+        if (!reader.Read())
+        {
+            return null;
+        }
+
+        var parts = new List<string>();
+
+        for (var i = 0; i < reader.FieldCount; i++)
+        {
+            if (skipped.Contains(reader.GetName(i), StringComparer.Ordinal))
+            {
+                continue;
+            }
+
+            var value = reader.GetValue(i);
+            var text = value switch
+            {
+                DBNull => "null:",
+                long number => "integer:"
+                    + number.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                double real => "real:"
+                    + real.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
+                string s => "text:" + s,
+                byte[] bytes => "blob:" + Convert.ToHexString(bytes),
+                _ => "other:" + value,
+            };
+            parts.Add($"{reader.GetName(i)}={text}");
+        }
+
+        parts.Sort(StringComparer.Ordinal);
+        return string.Join(";", parts);
+    }
+
+    /// <summary>接続の上で文を 1 つ流す</summary>
+    private static void QueryText_Run(System.Data.Common.DbConnection connection, string sql)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// ローカルの口の行の操作を、呼び出し側が開いた専用の接続と <c>BEGIN IMMEDIATE</c> の中で確かめる：表に 2 行（キー
+    /// <paramref name="key1"/>・<paramref name="key2"/>）を生の文で入れてから、FindAsync・ExistsAsync（ある・無い）、DeleteAsync
+    /// （消す・もう無い）、読んだエンティティの InsertAsync（同じ内容で戻る）、2 行目の内容をキー 1 へ書く UpdateAsync（無いキーは false・
+    /// 除外 blob の列は元のまま）を流し、コミットの後の内容を確かめる
+    /// </summary>
+    /// <param name="store">ローカルの口</param>
+    /// <param name="readConnectionString">確かめに使うプールしない接続文字列</param>
+    /// <param name="entityType">表のエンティティの型</param>
+    /// <param name="table">表の名前（引用していない）</param>
+    /// <param name="keyColumn">キーの列の名前（引用していない）</param>
+    /// <param name="excludedColumn">除外 blob の列の名前（無ければ null）</param>
+    /// <param name="seedSql">2 行（と親の行）を入れる文</param>
+    /// <param name="key1">1 行目のキー（キーのプロパティの型）</param>
+    /// <param name="key2">2 行目のキー（キーのプロパティの型）</param>
+    /// <param name="missingKey">無い行のキー（キーのプロパティの型）</param>
+    /// <param name="sqlKey1">1 行目のキーの SQL のリテラル</param>
+    /// <param name="sqlKey2">2 行目のキーの SQL のリテラル</param>
+    /// <param name="notWritten">書き込みが値を書かない列（計算列）。内容の比べ方から外す</param>
+    private static IEnumerable<string> QueryText_LocalRowStoreCrud(
+        object store,
+        string readConnectionString,
+        Type entityType,
+        string table,
+        string keyColumn,
+        string? excludedColumn,
+        string seedSql,
+        object key1,
+        object key2,
+        object missingKey,
+        string sqlKey1,
+        string sqlKey2,
+        params string[] notWritten
+    )
+    {
+        var problems = new List<string>();
+        var keyProperty = QueryText_ColumnProperty(entityType, keyColumn);
+        string[] skipped =
+        [
+            keyColumn,
+            .. excludedColumn is null ? Array.Empty<string>() : [excludedColumn],
+            .. notWritten,
+        ];
+
+        string? ReadExcluded(System.Data.Common.DbConnection connection, string sqlKey)
+        {
+            if (excludedColumn is null)
+            {
+                return null;
+            }
+
+            using var command = connection.CreateCommand();
+            command.CommandText =
+                $"SELECT hex({QueryText_QuoteSqlite(excludedColumn)}) FROM {QueryText_QuoteSqlite(table)} "
+                + $"WHERE {QueryText_QuoteSqlite(keyColumn)} = {sqlKey}";
+            return command.ExecuteScalar() as string;
+        }
+
+        using var connection = (System.Data.Common.DbConnection)
+            ProbeKit.Call(store, "CreateDedicatedConnection")!;
+        connection.Open();
+        QueryText_Run(connection, seedSql);
+
+        var row2Before = QueryText_ReadRowText(connection, table, keyColumn, sqlKey2, skipped);
+        var excluded1Before = ReadExcluded(connection, sqlKey1);
+        var ct = CancellationToken.None;
+
+        QueryText_Run(connection, "BEGIN IMMEDIATE");
+
+        var found1 = QueryText_CallStore(store, "FindAsync", entityType, connection, key1, ct);
+
+        if (found1 is null || !Equals(keyProperty.GetValue(found1), key1))
+        {
+            problems.Add($"FindAsync({key1}) がキー {key1} の行を読まない（{found1 ?? "null"}）");
+        }
+
+        if (
+            QueryText_CallStore(store, "FindAsync", entityType, connection, missingKey, ct) is
+            { } ghost
+        )
+        {
+            problems.Add($"FindAsync({missingKey}) が無い行を読んだ（{ghost}）");
+        }
+
+        if (QueryText_CallStore(store, "ExistsAsync", entityType, connection, key1, ct) is not true)
+        {
+            problems.Add($"ExistsAsync({key1}) が true でない");
+        }
+
+        if (
+            QueryText_CallStore(store, "ExistsAsync", entityType, connection, missingKey, ct)
+            is not false
+        )
+        {
+            problems.Add($"ExistsAsync({missingKey}) が false でない");
+        }
+
+        var entity2 = QueryText_CallStore(store, "FindAsync", entityType, connection, key2, ct);
+
+        if (entity2 is null)
+        {
+            problems.Add($"FindAsync({key2}) が行を読まない");
+            QueryText_Run(connection, "ROLLBACK");
+            return problems;
+        }
+
+        if (
+            QueryText_CallStore(store, "DeleteAsync", entityType, connection, key2, ct) is not true
+            || QueryText_CallStore(store, "ExistsAsync", entityType, connection, key2, ct)
+                is not false
+            || QueryText_CallStore(store, "DeleteAsync", entityType, connection, key2, ct)
+                is not false
+        )
+        {
+            problems.Add($"DeleteAsync({key2}) が行を消して true、もう一度は false にならない");
+        }
+
+        QueryText_CallStore(store, "InsertAsync", entityType, connection, entity2, ct);
+        var row2Inserted = QueryText_ReadRowText(connection, table, keyColumn, sqlKey2, skipped);
+
+        if (row2Inserted != row2Before)
+        {
+            problems.Add(
+                $"読んだエンティティを InsertAsync で戻した行が元と違う（元 {row2Before}・戻した {row2Inserted ?? "無い"}）"
+            );
+        }
+
+        // 2 行目の内容をキー 1 へ書く（除外 blob の列は読んでいないので空のまま渡る）
+        keyProperty.SetValue(entity2, key1);
+
+        if (
+            QueryText_CallStore(store, "UpdateAsync", entityType, connection, entity2, ct)
+            is not true
+        )
+        {
+            problems.Add($"UpdateAsync（キー {key1}）が true でない");
+        }
+
+        var row1Updated = QueryText_ReadRowText(connection, table, keyColumn, sqlKey1, skipped);
+
+        if (row1Updated != row2Before)
+        {
+            problems.Add(
+                $"UpdateAsync の後のキー {key1} の行が 2 行目の内容でない（期待 {row2Before}・実際 {row1Updated ?? "無い"}）"
+            );
+        }
+
+        if (ReadExcluded(connection, sqlKey1) != excluded1Before)
+        {
+            problems.Add(
+                $"UpdateAsync が除外 blob の列 {excludedColumn} を変えた（元 {excluded1Before}・後 {ReadExcluded(connection, sqlKey1)}）"
+            );
+        }
+
+        keyProperty.SetValue(entity2, missingKey);
+
+        if (
+            QueryText_CallStore(store, "UpdateAsync", entityType, connection, entity2, ct)
+            is not false
+        )
+        {
+            problems.Add($"無いキー {missingKey} の UpdateAsync が false でない");
+        }
+
+        QueryText_Run(connection, "COMMIT");
+
+        using var reader = new Microsoft.Data.Sqlite.SqliteConnection(readConnectionString);
+        reader.Open();
+
+        if (
+            QueryText_ReadRowText(reader, table, keyColumn, sqlKey1, skipped) != row2Before
+            || QueryText_ReadRowText(reader, table, keyColumn, sqlKey2, skipped) != row2Before
+        )
+        {
+            problems.Add("コミットの後の 2 行が、トランザクションの中で書いた内容でない");
+        }
+
+        return problems;
+    }
+
+    /// <summary>
+    /// 同期の図の生成物の <c>SqliteLocalRowStore</c> を実際の SQLite で確かめる：専用の接続（プールしない・接続ファクトリの StateChange
+    /// の処理）、注文の表（int のキー・除外 blob）の行の操作、除外 blob に値を持つエンティティの更新の拒否、IsUniqueViolation の分類と
+    /// SAVEPOINT の後も外のトランザクションが続くこと
+    /// </summary>
+    /// <param name="sqliteDiagram">DDL を作る SQLite 方言の図</param>
+    /// <param name="ordersTable">注文の表の名前</param>
+    /// <param name="orderKey">注文のキーの列の名前</param>
+    /// <param name="attachment">注文の除外 blob の列の名前</param>
+    private static ExecCheck QueryText_SyncLocalRowStoreOnSqlite(
+        Func<ErDiagram> sqliteDiagram,
+        string ordersTable,
+        string orderKey,
+        string attachment
+    ) =>
+        new(
+            "local-row-store-on-sqlite",
+            assembly =>
+                QueryText_WithLocalRowStore(
+                    assembly,
+                    sqliteDiagram(),
+                    (store, path, readConnectionString) =>
+                    {
+                        var problems = new List<string>();
+                        var orderType = QueryText_EntityOfTable(assembly, ordersTable);
+                        var markerType = QueryText_EntityOfTable(assembly, "sync_markers");
+                        var orders = QueryText_QuoteSqlite(ordersTable);
+                        var ct = CancellationToken.None;
+
+                        // 専用の接続：開く前に返り、プールしない・接続ファクトリの StateChange の処理が働く
+                        using (
+                            var dedicated = (System.Data.Common.DbConnection)
+                                ProbeKit.Call(store, "CreateDedicatedConnection")!
+                        )
+                        {
+                            if (dedicated.State != System.Data.ConnectionState.Closed)
+                            {
+                                problems.Add(
+                                    $"CreateDedicatedConnection が {dedicated.State} の接続を返した"
+                                );
+                            }
+
+                            if (
+                                new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(
+                                    dedicated.ConnectionString
+                                ).Pooling
+                            )
+                            {
+                                problems.Add(
+                                    $"専用の接続の接続文字列がプールする（{dedicated.ConnectionString}）"
+                                );
+                            }
+
+                            dedicated.Open();
+
+                            using var pragma = dedicated.CreateCommand();
+                            pragma.CommandText = "PRAGMA busy_timeout";
+                            var busy = Convert.ToInt64(
+                                pragma.ExecuteScalar(),
+                                System.Globalization.CultureInfo.InvariantCulture
+                            );
+
+                            if (busy != QueryText_LocalRowStoreTimeoutSeconds * 1000)
+                            {
+                                problems.Add(
+                                    $"専用の接続の busy_timeout が {busy}（期待 {QueryText_LocalRowStoreTimeoutSeconds * 1000}＝接続ファクトリが開いたときに合わせる）"
+                                );
+                            }
+
+                            pragma.CommandText = "PRAGMA foreign_keys";
+
+                            if (
+                                Convert.ToInt64(
+                                    pragma.ExecuteScalar(),
+                                    System.Globalization.CultureInfo.InvariantCulture
+                                ) != 1
+                            )
+                            {
+                                problems.Add("専用の接続で外部キーの検査が入っていない");
+                            }
+                        }
+
+                        problems.AddRange(
+                            QueryText_LocalRowStoreCrud(
+                                store,
+                                readConnectionString,
+                                orderType,
+                                ordersTable,
+                                orderKey,
+                                attachment,
+                                $"INSERT INTO {orders} ({QueryText_QuoteSqlite(orderKey)}, customer_name, {QueryText_QuoteSqlite(attachment)}, row_ver, summary) "
+                                    + "VALUES (1, 'one', x'0101', x'01', 's1'), (2, 'two', x'0202', x'02', 's2');",
+                                1,
+                                2,
+                                99,
+                                "1",
+                                "2",
+                                // summary は図の計算列（書き込みが値を書かない）
+                                "summary"
+                            )
+                        );
+
+                        using var connection = (System.Data.Common.DbConnection)
+                            ProbeKit.Call(store, "CreateDedicatedConnection")!;
+                        connection.Open();
+                        QueryText_Run(
+                            connection,
+                            "INSERT INTO sync_markers (marker_id, code) VALUES (1, 'A')"
+                        );
+                        QueryText_Run(connection, "BEGIN IMMEDIATE");
+
+                        // 除外 blob に値を持つエンティティの更新は、書く前に断る
+                        var order = QueryText_CallStore(
+                            store,
+                            "FindAsync",
+                            orderType,
+                            connection,
+                            1,
+                            ct
+                        )!;
+                        var attachmentProperty = QueryText_ColumnProperty(orderType, attachment);
+                        attachmentProperty.SetValue(order, new byte[] { 9 });
+
+                        if (
+                            QueryText_StoreThrows(
+                                store,
+                                "UpdateAsync",
+                                orderType,
+                                connection,
+                                order,
+                                ct
+                            )
+                            is not InvalidOperationException
+                        )
+                        {
+                            problems.Add(
+                                "除外 blob に値を持つエンティティの UpdateAsync が InvalidOperationException で断らない"
+                            );
+                        }
+
+                        attachmentProperty.SetValue(order, null);
+
+                        // 違反の分類：SAVEPOINT の中で起こし、ROLLBACK TO で戻す
+                        void Classify(string label, Exception? failure, bool expected)
+                        {
+                            if (failure is not System.Data.Common.DbException db)
+                            {
+                                problems.Add(
+                                    $"{label} が DbException にならない（{failure?.GetType().Name ?? "成功した"}）"
+                                );
+                                return;
+                            }
+
+                            if (
+                                ProbeKit.Call(store, "IsUniqueViolation", db) is not bool answer
+                                || answer != expected
+                            )
+                            {
+                                problems.Add(
+                                    $"{label} の IsUniqueViolation が {expected} でない（{db.Message}）"
+                                );
+                            }
+                        }
+
+                        QueryText_Run(connection, "SAVEPOINT probe");
+                        Classify(
+                            "主キーの重なり",
+                            QueryText_StoreThrows(
+                                store,
+                                "InsertAsync",
+                                orderType,
+                                connection,
+                                order,
+                                ct
+                            ),
+                            expected: true
+                        );
+                        QueryText_Run(connection, "ROLLBACK TO probe");
+
+                        var marker = QueryText_CallStore(
+                            store,
+                            "FindAsync",
+                            markerType,
+                            connection,
+                            1,
+                            ct
+                        )!;
+                        QueryText_ColumnProperty(markerType, "marker_id").SetValue(marker, 2);
+                        Classify(
+                            "一意制約の違反",
+                            QueryText_StoreThrows(
+                                store,
+                                "InsertAsync",
+                                markerType,
+                                connection,
+                                marker,
+                                ct
+                            ),
+                            expected: true
+                        );
+                        QueryText_Run(connection, "ROLLBACK TO probe");
+
+                        var keyProperty = QueryText_ColumnProperty(orderType, orderKey);
+                        var nameProperty = QueryText_ColumnProperty(orderType, "customer_name");
+                        keyProperty.SetValue(order, 50);
+                        nameProperty.SetValue(order, null);
+                        Classify(
+                            "NOT NULL の違反",
+                            QueryText_StoreThrows(
+                                store,
+                                "InsertAsync",
+                                orderType,
+                                connection,
+                                order,
+                                ct
+                            ),
+                            expected: false
+                        );
+                        QueryText_Run(connection, "ROLLBACK TO probe");
+                        QueryText_Run(connection, "RELEASE probe");
+
+                        // 違反を戻した後も、外のトランザクションで書いてコミットできる
+                        keyProperty.SetValue(order, 60);
+                        nameProperty.SetValue(order, "sixty");
+                        QueryText_CallStore(store, "InsertAsync", orderType, connection, order, ct);
+                        QueryText_Run(connection, "COMMIT");
+
+                        using var reader = new Microsoft.Data.Sqlite.SqliteConnection(
+                            readConnectionString
+                        );
+                        reader.Open();
+                        using var count = reader.CreateCommand();
+                        count.CommandText =
+                            $"SELECT count(*) FROM {orders} WHERE {QueryText_QuoteSqlite(orderKey)} = 60";
+
+                        if (
+                            Convert.ToInt64(
+                                count.ExecuteScalar(),
+                                System.Globalization.CultureInfo.InvariantCulture
+                            ) != 1
+                        )
+                        {
+                            problems.Add(
+                                "違反を ROLLBACK TO で戻した後に外のトランザクションで入れた行が、コミットの後に無い"
+                            );
+                        }
+
+                        return problems;
+                    }
+                )
+        );
+
+    /// <summary>同期の値オブジェクトの図の生成物の <c>SqliteLocalRowStore</c> で、値オブジェクトのキーの表（syncvo_lines）の行の操作を確かめる</summary>
+    private static ExecCheck QueryText_SyncLocalRowStoreValueObjectKeyOnSqlite() =>
+        new(
+            "local-row-store-value-object-key-on-sqlite",
+            assembly =>
+                QueryText_WithLocalRowStore(
+                    assembly,
+                    QuickER.Tests.GeneratedSyncVoFixture.SyncVoFixtureDefinition.BuildSqliteMirror(),
+                    (store, _, readConnectionString) =>
+                    {
+                        var lineType = ProbeKit.Type(assembly, "SyncvoLineEntity");
+                        var keyType = QueryText_ColumnProperty(lineType, "line_id").PropertyType;
+                        object Key(int value) => ProbeKit.CallStatic(keyType, "Create", value)!;
+
+                        return QueryText_LocalRowStoreCrud(
+                            store,
+                            readConnectionString,
+                            lineType,
+                            "syncvo_lines",
+                            "line_id",
+                            null,
+                            "INSERT INTO syncvo_orders (order_id, title, row_ver, photo) VALUES (1, 'one', x'01', x'01'); "
+                                + "INSERT INTO syncvo_lines (line_id, order_id, qty, row_ver) VALUES (1, 1, 5, x'01'), (2, 1, 6, x'02');",
+                            Key(1),
+                            Key(2),
+                            Key(99),
+                            "1",
+                            "2"
+                        );
+                    }
+                )
+        );
+
+    /// <summary>同期のモデルの図の生成物の <c>SqliteLocalRowStore</c> で、文字列のキーの表（model_labels）の行の操作を確かめる</summary>
+    private static ExecCheck QueryText_SyncLocalRowStoreStringKeyOnSqlite() =>
+        new(
+            "local-row-store-string-key-on-sqlite",
+            assembly =>
+                QueryText_WithLocalRowStore(
+                    assembly,
+                    QuickER.Tests.GeneratedSyncModelFixture.SyncModelFixtureDefinition.BuildSqliteMirror(),
+                    (store, _, readConnectionString) =>
+                        QueryText_LocalRowStoreCrud(
+                            store,
+                            readConnectionString,
+                            ProbeKit.Type(assembly, "ModelLabelEntity"),
+                            "model_labels",
+                            "label_code",
+                            null,
+                            "INSERT INTO model_folders (folder_id, name) VALUES (1, 'root'); "
+                                + "INSERT INTO model_labels (label_code, folder_id, caption) VALUES ('L1', 1, 'one'), ('L2', 1, 'two');",
+                            "L1",
+                            "L2",
+                            "L9",
+                            "'L1'",
+                            "'L2'"
+                        )
+                )
+        );
+
     /// <summary>同期の記述子のうち、<paramref name="property"/>（<c>SyncNote</c> など）が版を持たない・持つの宣言を読む</summary>
     private static ExecCheck QueryText_SyncVersionShapes() =>
         new(
@@ -3943,6 +4610,81 @@ internal static partial class CodegenCases
                     DialectNames.SqlServer,
                     DiagnosticExpectation.Contains(),
                     Exec: [QueryText_SyncQuotedNamesTrackingOnSqlite()]
+                )
+            ),
+            new(
+                "exec-sync-local-row-store-on-sqlite",
+                null,
+                "生成した SqliteLocalRowStore（ILocalRowStore）を実際の SQLite のファイル DB で動かす：CreateDedicatedConnection はプールしない"
+                    + "接続を開かずに返し（閉じた直後に DB のファイルを移動できる）、接続ファクトリの StateChange の処理が働く（busy_timeout が "
+                    + "Default Timeout の値・外部キーの検査が入）。呼び出し側の BEGIN IMMEDIATE の中で int のキーの FindAsync・ExistsAsync・"
+                    + "InsertAsync・UpdateAsync・DeleteAsync が通り、UpdateAsync は除外 blob の列に触らず、除外 blob に値を持つエンティティの更新は "
+                    + "InvalidOperationException で断る。IsUniqueViolation は主キーの重なりと一意制約の違反で true・NOT NULL の違反で false で、"
+                    + "SAVEPOINT → 違反 → ROLLBACK TO の後も外のトランザクションを続けてコミットできる",
+                new CodegenCase(
+                    SyncFixtureDefinition.Build,
+                    SyncFixtureDefinition.Options,
+                    DialectNames.SqlServer,
+                    DiagnosticExpectation.Contains(),
+                    Exec:
+                    [
+                        QueryText_SyncLocalRowStoreOnSqlite(
+                            SyncFixtureDefinition.BuildSqliteMirror,
+                            "sync_orders",
+                            "order_id",
+                            "attachment"
+                        ),
+                    ]
+                )
+            ),
+            new(
+                "exec-sync-quoted-names-local-row-store-on-sqlite",
+                null,
+                "表名・キーの列名・除外 blob の列名に \" と ' と空白を含む図でも、生成した SqliteLocalRowStore の行の操作・接続・一意な値の"
+                    + "判定が、引用の要らない図と同じに通る（exec-sync-local-row-store-on-sqlite と同じ確かめ）",
+                new CodegenCase(
+                    () => QueryText_SyncQuotedNamesDiagram(SyncFixtureDefinition.Build()),
+                    SyncFixtureDefinition.Options,
+                    DialectNames.SqlServer,
+                    DiagnosticExpectation.Contains(),
+                    Exec:
+                    [
+                        QueryText_SyncLocalRowStoreOnSqlite(
+                            () =>
+                                QueryText_SyncQuotedNamesDiagram(
+                                    SyncFixtureDefinition.BuildSqliteMirror()
+                                ),
+                            QueryText_QuotedOrdersTable,
+                            QueryText_QuotedOrderKey,
+                            QueryText_QuotedAttachment
+                        ),
+                    ]
+                )
+            ),
+            new(
+                "exec-sync-local-row-store-value-object-key-on-sqlite",
+                null,
+                "値オブジェクトのキーの表（同期の値オブジェクトの図の syncvo_lines）でも、生成した SqliteLocalRowStore の FindAsync・"
+                    + "ExistsAsync・InsertAsync・UpdateAsync・DeleteAsync が、呼び出し側の BEGIN IMMEDIATE の中で通る（キーは値オブジェクトで渡す）",
+                new CodegenCase(
+                    QuickER.Tests.GeneratedSyncVoFixture.SyncVoFixtureDefinition.Build,
+                    QuickER.Tests.GeneratedSyncVoFixture.SyncVoFixtureDefinition.Options,
+                    DialectNames.SqlServer,
+                    DiagnosticExpectation.Contains(),
+                    Exec: [QueryText_SyncLocalRowStoreValueObjectKeyOnSqlite()]
+                )
+            ),
+            new(
+                "exec-sync-local-row-store-string-key-on-sqlite",
+                null,
+                "文字列のキーの表（同期のモデルの図の model_labels）でも、生成した SqliteLocalRowStore の FindAsync・ExistsAsync・InsertAsync・"
+                    + "UpdateAsync・DeleteAsync が、呼び出し側の BEGIN IMMEDIATE の中で通る",
+                new CodegenCase(
+                    QuickER.Tests.GeneratedSyncModelFixture.SyncModelFixtureDefinition.Build,
+                    QuickER.Tests.GeneratedSyncModelFixture.SyncModelFixtureDefinition.Options,
+                    DialectNames.SqlServer,
+                    DiagnosticExpectation.Contains(),
+                    Exec: [QueryText_SyncLocalRowStoreStringKeyOnSqlite()]
                 )
             ),
             QueryTextRow(

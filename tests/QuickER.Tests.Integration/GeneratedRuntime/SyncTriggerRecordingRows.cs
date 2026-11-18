@@ -221,6 +221,53 @@ internal static class SyncTriggerRecordingRows
             }
         };
 
+    /// <summary>
+    /// 前段の書き込みで記録した行のエンジンだけが書く列へ値を入れてから手を流し、手の後も前段で記録した行（表とキー）の
+    /// エンジンの列が、入れた値のまま残ることを表明する手
+    /// </summary>
+    /// <param name="seed">前段の書き込み（トリガーを張った後に流すので記録に残る）</param>
+    /// <param name="act">エンジンの列を保つはずの書き込み</param>
+    private static Func<SyncTriggerHarness, CancellationToken, Task> KeepsEngineColumns(
+        Func<SyncTriggerHarness, CancellationToken, Task> seed,
+        Func<SyncTriggerHarness, CancellationToken, Task> act
+    ) =>
+        async (h, ct) =>
+        {
+            await seed(h, ct);
+            await h.SetEngineColumnsAsync(ct);
+            var before = await h.ReadEngineColumnsAsync(ct);
+            before.Should().NotBeEmpty("前段の書き込みが記録した行にエンジンの列の値を入れる");
+
+            await act(h, ct);
+
+            var after = await h.ReadEngineColumnsAsync(ct);
+
+            foreach (var (key, columns) in before)
+            {
+                after
+                    .Should()
+                    .ContainKey(key, $"前段で記録した行 {key} は手の後も行の状態の表にある");
+                after[key]
+                    .Should()
+                    .Be(
+                        columns,
+                        $"前段で記録した行 {key} のエンジンの列は、トリガーの記録の後も保たれる"
+                    );
+            }
+        };
+
+    /// <summary>フォルダー 1 の名前を変える前段の書き込み</summary>
+    private static async Task RenameFolderAsync(SyncTriggerHarness h, CancellationToken ct) =>
+        (await h.Model.Folders.UpdateAsync(Folder(1, "seeded"), cancellationToken: ct))
+            .Should()
+            .BeTrue();
+
+    /// <summary>品目 10 の題名を変える前段の書き込み</summary>
+    private static async Task RetitleItemAsync(SyncTriggerHarness h, CancellationToken ct) =>
+        (await h.Model.Items.UpdateAsync(Item(10, 1, "c10", "seeded", []), cancellationToken: ct))
+            .Should()
+            .BeTrue();
+
     /// <summary>接続の上で文を 1 つ実行する</summary>
     private static void Execute(SqliteConnection connection, string sql)
     {
@@ -976,6 +1023,88 @@ internal static class SyncTriggerRecordingRows
                             .Should()
                             .Be(1),
                     [Live(Events, LaterEventAtText), Gone(Events, EventAtText)]
+                )
+            ),
+            // エンジンだけが書く列（トリガーの ON CONFLICT が名指ししない列）
+            Row(
+                "engine-columns-kept-by-update",
+                "エンジンの列に値を入れた行を更新しても、エンジンの列は保たれる",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    PrepareFolderAsync,
+                    KeepsEngineColumns(
+                        RenameFolderAsync,
+                        async (h, ct) =>
+                            (
+                                await h.Model.Folders.UpdateAsync(
+                                    Folder(1, "renamed"),
+                                    cancellationToken: ct
+                                )
+                            )
+                                .Should()
+                                .BeTrue()
+                    ),
+                    [Live(Folders, 1)]
+                )
+            ),
+            Row(
+                "engine-columns-kept-by-delete-then-reinsert",
+                "エンジンの列に値を入れた行を消して同じキーで入れ直しても、エンジンの列は保たれる",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    PrepareItemAsync,
+                    KeepsEngineColumns(
+                        RetitleItemAsync,
+                        async (h, ct) =>
+                        {
+                            (await h.Model.Items.DeleteAsync(10, ct)).Should().BeTrue();
+                            await h.Model.Items.InsertAsync(Item(10, 1, "c10", "again"), ct);
+                        }
+                    ),
+                    [Live(Items, 10, "Payload")]
+                )
+            ),
+            Row(
+                "engine-columns-kept-on-old-key-by-primary-key-change",
+                "エンジンの列に値を入れた行の主キーを変えても、古いキーの行（削除の記録）のエンジンの列は保たれる",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    PrepareFolderAsync,
+                    KeepsEngineColumns(
+                        RenameFolderAsync,
+                        async (h, ct) =>
+                            (
+                                await h.Model.Sql.ExecuteSqlAsync(
+                                    "UPDATE model_folders SET folder_id = 5 WHERE folder_id = 1",
+                                    cancellationToken: ct
+                                )
+                            )
+                                .Should()
+                                .Be(1)
+                    ),
+                    [Live(Folders, 5), Gone(Folders, 1)]
+                )
+            ),
+            Row(
+                "engine-columns-kept-by-blob-write",
+                "エンジンの列に値を入れた行の除外 blob を Stream で書いても、エンジンの列は保たれる",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    PrepareItemAsync,
+                    KeepsEngineColumns(
+                        RetitleItemAsync,
+                        async (h, ct) =>
+                            (
+                                await h.Model.Items.WritePayloadAsync(
+                                    10,
+                                    Bytes(7, 7),
+                                    cancellationToken: ct
+                                )
+                            )
+                                .Should()
+                                .BeTrue()
+                    ),
+                    [Live(Items, 10, "Payload")]
                 )
             ),
             // 失敗した書き込み

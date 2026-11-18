@@ -110,6 +110,11 @@ internal sealed partial class SyncModelRun
                             })
                             .ToList(),
                     (device, rows) => device.RawFolders.BulkInsertAsync(rows, _ct),
+                    row =>
+                        (
+                            ModelTables.Folders,
+                            GeneratedSyncTables.ModelFolder.FormatKey(row.FolderId)
+                        ),
                     (device, rows) => device.Folders.BulkInsertAsync(rows, _ct),
                     async rows =>
                     {
@@ -137,6 +142,7 @@ internal sealed partial class SyncModelRun
                             })
                             .ToList(),
                     (device, rows) => device.RawItems.BulkInsertAsync(rows, _ct),
+                    row => (ModelTables.Items, GeneratedSyncTables.ModelItem.FormatKey(row.ItemId)),
                     (device, rows) => device.Items.BulkInsertAsync(rows, _ct),
                     async rows =>
                     {
@@ -151,7 +157,8 @@ internal sealed partial class SyncModelRun
             case RecordJournalOp record:
                 await _world
                     .Device(record.Device)
-                    .Journal.RecordAsync(record.Table, record.KeyText, record.Operation, null, _ct);
+                    .RequireJournal(nameof(RecordJournalOp))
+                    .RecordAsync(record.Table, record.KeyText, record.Operation, null, _ct);
 
                 // エンジンの記録を直接作る手（照合 4 はこのキーを決められないとして数える）
                 NoteRecordTouched(
@@ -163,6 +170,9 @@ internal sealed partial class SyncModelRun
 
             case RefuseJournalRemovalOp refuse:
             {
+                // 製品のジャーナルの表にトリガーを仕掛ける手（持たない端末では SQL を流す前に断る）
+                _ = _world.Device(refuse.Device).RequireJournal(nameof(RefuseJournalRemovalOp));
+
                 // 表とキーはシナリオが書いた定数で、文字列リテラルとして引用して埋める
                 var sql = refuse.Refuse
                     ? "CREATE TRIGGER model_refuse_journal_removal BEFORE DELETE ON quicker_sync_journal "
@@ -177,7 +187,7 @@ internal sealed partial class SyncModelRun
 
             case ClearJournalOp clear:
             {
-                var journal = _world.Device(clear.Device).Journal;
+                var journal = _world.Device(clear.Device).RequireJournal(nameof(ClearJournalOp));
 
                 foreach (
                     var entry in (await journal.ReadAllAsync(_ct)).Where(e =>
@@ -243,8 +253,14 @@ internal sealed partial class SyncModelRun
                 return true;
 
             case OpenNewJournalOp open:
-                await new SyncJournal(_world.Device(open.Device).Sql).EnsureCreatedAsync(_ct);
+            {
+                // 製品のジャーナルを持つ端末だけの手（同じ DB に新しいインスタンスを開く）
+                var device = _world.Device(open.Device);
+                _ = device.RequireJournal(nameof(OpenNewJournalOp));
+                await new SyncJournal(device.Sql).EnsureCreatedAsync(_ct);
+
                 return true;
+            }
 
             case DropLocalTableOp drop:
             {
@@ -383,12 +399,23 @@ internal sealed partial class SyncModelRun
             : throw new InvalidOperationException($"The local database has no table {table}.");
     }
 
-    /// <summary>一括の書き込みを流し、変わった行を書き手の履歴へ積む（記録しない書き込みはキーに印を付ける）</summary>
+    /// <summary>
+    /// 一括の書き込みを流し、変わった行を書き手の履歴へ積む（記録しない書き込みはキーに印を付け、書いた行ごとに端末の未送信の
+    /// 記録から忘れさせる）
+    /// </summary>
+    /// <param name="actor">書き手</param>
+    /// <param name="mode">書き方</param>
+    /// <param name="build">書く行を作る</param>
+    /// <param name="raw">記録しない書き込み</param>
+    /// <param name="rawKey">記録しない書き込みで書いた行の、表の名前と記述子の書式のキーのテキスト</param>
+    /// <param name="journaled">記録する書き込み</param>
+    /// <param name="server">サーバーの他者の書き込み</param>
     private async Task BulkWriteAsync<TEntity>(
         ModelActor actor,
         ModelBulkMode mode,
         Func<List<TEntity>> build,
         Func<SyncModelDevice, List<TEntity>, Task<int>> raw,
+        Func<TEntity, (string Table, string KeyText)> rawKey,
         Func<SyncModelDevice, List<TEntity>, Task<int>> journaled,
         Func<List<TEntity>, Task> server
     )
@@ -409,8 +436,17 @@ internal sealed partial class SyncModelRun
                 break;
 
             case ModelBulkMode.Raw:
-                await raw(_world.Device(actor), rows);
+            {
+                var device = _world.Device(actor);
+                await raw(device, rows);
+
+                foreach (var (table, keyText) in rows.Select(rawKey))
+                {
+                    await device.ForgetUntrackedAsync(table, keyText, _ct);
+                }
+
                 break;
+            }
 
             case ModelBulkMode.Server:
                 await server(rows);
@@ -661,6 +697,10 @@ internal sealed partial class SyncModelRun
         }
     }
 
+    /// <summary>期待の手の、この端末では流せないときに名乗る手の名前（面ごとに分ける）</summary>
+    private static string FacetHand(ExpectFacetOp expect) =>
+        $"{nameof(ExpectFacetOp)}:{expect.Facet}";
+
     private async Task<IReadOnlyList<string>> FacetLinesAsync(ExpectFacetOp expect)
     {
         switch (expect.Facet)
@@ -683,7 +723,12 @@ internal sealed partial class SyncModelRun
             {
                 var old = _journalAtLastSync.GetValueOrDefault(expect.Actor) ?? [];
 
-                return (await _world.Device(expect.Actor).Journal.ReadAllAsync(_ct))
+                return (
+                    await _world
+                        .Device(expect.Actor)
+                        .RequireJournal(FacetHand(expect))
+                        .ReadAllAsync(_ct)
+                )
                     .OrderBy(e => e.Id)
                     .Select(e =>
                         $"{e.TableName} key={CanonicalKey(e.TableName, e.KeyText)} op={e.Operation} "
@@ -699,7 +744,12 @@ internal sealed partial class SyncModelRun
                 var table = TableOf(expect);
                 var server = await ServerVersionsAsync(table);
 
-                return (await _world.Device(expect.Actor).Journal.ReadAcksAsync(table, _ct))
+                return (
+                    await _world
+                        .Device(expect.Actor)
+                        .RequireJournal(FacetHand(expect))
+                        .ReadAcksAsync(table, _ct)
+                )
                     .Select(p => (Key: CanonicalKey(table, p.Key), Version: p.Value))
                     .OrderBy(p => p.Key, ModelKeyComparer.Instance)
                     .Select(p => $"key={p.Key} ver={Relation(p.Version, server, p.Key)}")
@@ -710,7 +760,12 @@ internal sealed partial class SyncModelRun
             {
                 var table = TableOf(expect);
 
-                return (await _world.Device(expect.Actor).Journal.ReadBlobCopiesAsync(table, _ct))
+                return (
+                    await _world
+                        .Device(expect.Actor)
+                        .RequireJournal(FacetHand(expect))
+                        .ReadBlobCopiesAsync(table, _ct)
+                )
                     .Select(r => (Key: CanonicalKey(table, r.KeyText), r.ColumnName))
                     .OrderBy(r => r.Key, ModelKeyComparer.Instance)
                     .Select(r => $"key={r.Key} col={r.ColumnName}")

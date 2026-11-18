@@ -436,6 +436,55 @@ internal sealed class SyncTriggerHarness : IDisposable
         return rows;
     }
 
+    /// <summary>
+    /// 行の状態の表のエンジンだけが書く列（<c>base_version</c>・<c>known</c>・<c>sw_seq</c>・<c>blob_owed</c>）を、表とキー
+    /// （型とテキスト）で引けるテキスト（列ごとに格納の型とテキスト）にして読む
+    /// </summary>
+    /// <param name="ct">キャンセルトークン</param>
+    public async Task<
+        IReadOnlyDictionary<(string Table, string KeyType, string KeyText), string>
+    > ReadEngineColumnsAsync(CancellationToken ct)
+    {
+        var columns = new Dictionary<(string, string, string), string>();
+        await using var connection = await OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT table_name, \"key\", base_version, known, sw_seq, blob_owed FROM quicker_sync_row";
+        await using var reader = await command.ExecuteReaderAsync(ct);
+
+        while (await reader.ReadAsync(ct))
+        {
+            var (keyType, keyText) = Describe(reader.GetValue(1));
+            var text = new StringBuilder();
+
+            for (var i = 2; i < reader.FieldCount; i++)
+            {
+                var (type, value) = Describe(reader.GetValue(i));
+                text.Append(reader.GetName(i))
+                    .Append('=')
+                    .Append(type)
+                    .Append(':')
+                    .Append(value)
+                    .Append(';');
+            }
+
+            columns[(reader.GetString(0), keyType, keyText)] = text.ToString();
+        }
+
+        return columns;
+    }
+
+    /// <summary>行の状態の表のどの行にも、エンジンだけが書く列の同じ値（既定と違う値）を入れる</summary>
+    /// <param name="ct">キャンセルトークン</param>
+    public async Task SetEngineColumnsAsync(CancellationToken ct)
+    {
+        await using var connection = await OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "UPDATE quicker_sync_row SET base_version = x'0A0B0C', known = 1, sw_seq = 42, blob_owed = 'Payload'";
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
     /// <summary>行の状態の表の 1 行のキーで、元の表の行を数える（キーの比較は SQLite の <c>=</c>）</summary>
     /// <param name="tableName">表の名前</param>
     /// <param name="changeSeq">行の状態の表の変更の番号（行を 1 つに決める）</param>

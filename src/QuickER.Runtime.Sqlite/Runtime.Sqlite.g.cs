@@ -157,6 +157,203 @@ public sealed class ObservedSqlConnectionFactory : ISqlConnectionFactory
     }
 }
 
+/// <summary>The <see cref="ILocalRowStore"/> of a SQLite database: entity rows read and written with the repositories' own SQL and mapping.</summary>
+/// <remarks>
+/// <para>
+/// A dedicated connection is the one the connection factory creates, with pooling turned off: closing it releases the
+/// database file at once. Whatever the factory subscribed to the connection's <c>StateChange</c> event (such as the busy
+/// timeout <see cref="SqlConnectionFactory"/> sets when a connection opens) keeps running.
+/// </para>
+/// <para>
+/// The row operations run the statements of <see cref="EntitySaveMetadata"/> on the connection passed in, outside any
+/// ADO.NET transaction object, so they join the transaction the caller started with an SQL statement. Behaviour the
+/// caller must know:
+/// </para>
+/// <list type="bullet">
+///   <item>An update does not touch the excluded unbounded binary columns. An entity that holds a non-empty value in one
+///   of them is refused with an <see cref="InvalidOperationException"/> before anything is written.</item>
+///   <item>An insert writes every column, the excluded ones included. A <c>NOT NULL</c> excluded column left null fails
+///   the insert with a <c>NOT NULL</c> constraint violation, so the caller fills it first.</item>
+///   <item>A row version column is an ordinary column in SQLite: an insert and an update write the entity's value.</item>
+///   <item>Computed columns and the identity columns the repositories leave out are not written either, exactly as
+///   the repositories do.</item>
+/// </list>
+/// <para>
+/// <see cref="IsUniqueViolation"/> answers true for SQLite's constraint error (code 19) when the extended code is a
+/// duplicate primary key (1555) or a unique constraint violation (2067), and false for every other constraint
+/// (<c>NOT NULL</c>, <c>CHECK</c>, foreign keys) and every other error.
+/// </para>
+/// </remarks>
+public sealed class SqliteLocalRowStore : ILocalRowStore
+{
+    /// <summary>SQLite's result code of a constraint violation (<c>SQLITE_CONSTRAINT</c>).</summary>
+    private const int ConstraintErrorCode = 19;
+
+    /// <summary>SQLite's extended result code of a duplicate primary key (<c>SQLITE_CONSTRAINT_PRIMARYKEY</c>).</summary>
+    private const int PrimaryKeyErrorCode = 1555;
+
+    /// <summary>SQLite's extended result code of a unique constraint violation (<c>SQLITE_CONSTRAINT_UNIQUE</c>).</summary>
+    private const int UniqueErrorCode = 2067;
+
+    /// <summary>The factory that creates the connections.</summary>
+    private readonly ISqlConnectionFactory _connectionFactory;
+
+    /// <summary>Creates the store over the factory whose connections it hands out.</summary>
+    /// <param name="connectionFactory">The factory that creates the connections.</param>
+    public SqliteLocalRowStore(ISqlConnectionFactory connectionFactory)
+    {
+        ArgumentNullException.ThrowIfNull(connectionFactory);
+        _connectionFactory = connectionFactory;
+    }
+
+    /// <inheritdoc />
+    /// <exception cref="InvalidOperationException">The connection factory returned a connection that is already open.</exception>
+    public DbConnection CreateDedicatedConnection()
+    {
+        var connection = _connectionFactory.CreateConnection();
+
+        if (connection.State != System.Data.ConnectionState.Closed)
+        {
+            connection.Dispose();
+            throw new InvalidOperationException(
+                "The connection factory returned a connection that is already open; a dedicated connection is created closed."
+            );
+        }
+
+        connection.ConnectionString = new SqliteConnectionStringBuilder(connection.ConnectionString)
+        {
+            Pooling = false,
+        }.ConnectionString;
+        return connection;
+    }
+
+    /// <inheritdoc />
+    public bool IsUniqueViolation(DbException exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        return exception is SqliteException
+            {
+                SqliteErrorCode: ConstraintErrorCode,
+                SqliteExtendedErrorCode: PrimaryKeyErrorCode or UniqueErrorCode,
+            };
+    }
+
+    /// <inheritdoc />
+    public async Task<TEntity?> FindAsync<TEntity>(
+        DbConnection connection,
+        object key,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new()
+    {
+        var sqlite = AsSqlite(connection);
+        ArgumentNullException.ThrowIfNull(key);
+        var metadata = EntitySaveMetadata.For(typeof(TEntity));
+
+        await using var command = new SqliteCommand(metadata.SelectByIdSql, sqlite);
+        metadata.BindKeyParameter(command, key);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        return metadata.MapEntity<TEntity>(reader);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> ExistsAsync<TEntity>(
+        DbConnection connection,
+        object key,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new()
+    {
+        var sqlite = AsSqlite(connection);
+        ArgumentNullException.ThrowIfNull(key);
+        var metadata = EntitySaveMetadata.For(typeof(TEntity));
+
+        await using var command = new SqliteCommand(metadata.ExistsByIdSql, sqlite);
+        metadata.BindKeyParameter(command, key);
+
+        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return Convert.ToInt64(result, CultureInfo.InvariantCulture) != 0;
+    }
+
+    /// <inheritdoc />
+    public async Task InsertAsync<TEntity>(
+        DbConnection connection,
+        TEntity entity,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new()
+    {
+        var sqlite = AsSqlite(connection);
+        ArgumentNullException.ThrowIfNull(entity);
+        var metadata = EntitySaveMetadata.For(typeof(TEntity));
+
+        await using var command = new SqliteCommand(metadata.InsertSql, sqlite);
+        metadata.BindInsertParameters(command, entity);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> UpdateAsync<TEntity>(
+        DbConnection connection,
+        TEntity entity,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new()
+    {
+        var sqlite = AsSqlite(connection);
+        ArgumentNullException.ThrowIfNull(entity);
+        var metadata = EntitySaveMetadata.For(typeof(TEntity));
+
+        await using var command = new SqliteCommand(metadata.UpdateSql, sqlite);
+        metadata.BindUpdateParameters(command, entity);
+
+        var affected = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        return affected > 0;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> DeleteAsync<TEntity>(
+        DbConnection connection,
+        object key,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new()
+    {
+        var sqlite = AsSqlite(connection);
+        ArgumentNullException.ThrowIfNull(key);
+        var metadata = EntitySaveMetadata.For(typeof(TEntity));
+
+        await using var command = new SqliteCommand(metadata.DeleteSql, sqlite);
+        metadata.BindKeyParameter(command, key);
+
+        var affected = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        return affected > 0;
+    }
+
+    /// <summary>The connection as the SQLite connection the statements need.</summary>
+    /// <param name="connection">The connection passed to a row operation.</param>
+    /// <exception cref="ArgumentNullException">The connection is null.</exception>
+    /// <exception cref="ArgumentException">The connection is not a SQLite connection.</exception>
+    private static SqliteConnection AsSqlite(DbConnection connection)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+
+        return connection as SqliteConnection
+            ?? throw new ArgumentException(
+                $"The connection must be a SQLite connection (got {connection.GetType().Name}).",
+                nameof(connection)
+            );
+    }
+}
+
 /// <summary>Creates a schema by running a DDL script against a SQLite database.</summary>
 /// <remarks>
 /// A bootstrap convenience for development, tests, and samples - it turns the DDL QuickER generates into a usable

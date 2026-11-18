@@ -228,6 +228,71 @@ internal static class SyncTriggerGuardRows
             .NotBe(ctx.DbIdBefore, "状態の表を作り直すと DB の識別子は新しい値になる");
     }
 
+    /// <summary>
+    /// 行の状態の表を、エンジンの列（base_version・known・sw_seq・blob_owed）の無い古い形で作り直し、未送信の行を 2 つ入れる文
+    /// </summary>
+    private const string LegacyRowTableSql =
+        "DROP TABLE quicker_sync_row; "
+        + "CREATE TABLE quicker_sync_row (table_name TEXT NOT NULL, \"key\", dirty INTEGER NOT NULL, "
+        + "deleted INTEGER NOT NULL, blob_columns TEXT NOT NULL DEFAULT '', change_seq INTEGER NOT NULL, "
+        + "PRIMARY KEY (table_name, \"key\")); "
+        + "INSERT INTO quicker_sync_row (table_name, \"key\", dirty, deleted, blob_columns, change_seq) "
+        + "VALUES ('model_items', 10, 1, 0, 'Payload', 7), ('model_labels', 'L1', 1, 1, '', 8);";
+
+    /// <summary>行の状態の表の列の名前を、表の列の順に読む</summary>
+    private static async Task<IReadOnlyList<string>> ReadRowColumnNamesAsync(
+        SyncTriggerGuardContext ctx,
+        CancellationToken ct
+    )
+    {
+        await using var connection = await ctx.Harness.OpenOutsideAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT name FROM pragma_table_info('quicker_sync_row') ORDER BY cid";
+
+        var names = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+
+        while (await reader.ReadAsync(ct))
+        {
+            names.Add(reader.GetString(0));
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// 古い形の行の状態の表に入れた 2 行（変更の番号 7 と 8）を、全部の列を格納の型とテキストにして変更の番号の順に読む
+    /// （列は表の列の順）
+    /// </summary>
+    private static async Task<IReadOnlyList<string>> ReadLegacyRowsAsync(
+        SyncTriggerGuardContext ctx,
+        CancellationToken ct
+    )
+    {
+        await using var connection = await ctx.Harness.OpenOutsideAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT * FROM quicker_sync_row WHERE change_seq IN (7, 8) ORDER BY change_seq";
+
+        var rows = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+
+        while (await reader.ReadAsync(ct))
+        {
+            var values = new List<string>();
+
+            for (var i = 0; i < reader.FieldCount; i++)
+            {
+                var (type, text) = SyncTriggerHarness.Describe(reader.GetValue(i));
+                values.Add(type + ":" + text);
+            }
+
+            rows.Add(string.Join("|", values));
+        }
+
+        return rows;
+    }
+
     /// <summary>出来事の表を作り直す（新しい表を作る → 行を写す → 元の表を落とす → 元の名前へ変える）</summary>
     private static async Task RebuildEventsAsync(SyncTriggerGuardContext ctx, CancellationToken ct)
     {
@@ -452,6 +517,60 @@ internal static class SyncTriggerGuardRows
                     Outside("DROP TABLE quicker_sync_state; DROP TABLE quicker_sync_row"),
                     Counts(1, 1),
                     After: DbIdChangedAsync
+                )
+            ),
+            Row(
+                "row-table-without-engine-columns-gets-them-and-keeps-unsent-rows",
+                "エンジンの列の無い古い形の行の状態の表（未送信の行つき）の DB を開くと、2 段目で足りないと答え、張り直しが列を足し、"
+                    + "未送信の行（dirty・deleted・blob_columns・change_seq）はそのまま残り、足した列は既定の値になる",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    Prepared: true,
+                    Outside(LegacyRowTableSql),
+                    Counts(1, 1),
+                    After: async (ctx, ct) =>
+                    {
+                        (await ReadRowColumnNamesAsync(ctx, ct))
+                            .Should()
+                            .Equal(
+                                [
+                                    "table_name",
+                                    "key",
+                                    "dirty",
+                                    "deleted",
+                                    "blob_columns",
+                                    "change_seq",
+                                    "base_version",
+                                    "known",
+                                    "sw_seq",
+                                    "blob_owed",
+                                ],
+                                "古い形の行の状態の表にエンジンの列が後ろへ足される"
+                            );
+                        (await ReadLegacyRowsAsync(ctx, ct))
+                            .Should()
+                            .Equal(
+                                [
+                                    "text:model_items|integer:10|integer:1|integer:0|text:Payload|integer:7|null:|integer:0|null:|text:",
+                                    "text:model_labels|text:L1|integer:1|integer:1|text:|integer:8|null:|integer:0|null:|text:",
+                                ],
+                                "未送信の行は消えずに残り、足した列は既定の値（base_version と sw_seq は NULL・known は 0・blob_owed は空）"
+                            );
+                    }
+                )
+            ),
+            Row(
+                "anchor-table-dropped-is-recreated",
+                "外で再開点の表（quicker_sync_table）だけを落とすと、次に開いたときに 2 段目で足りないと答え、作り直す",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    Prepared: true,
+                    Outside("DROP TABLE quicker_sync_table"),
+                    Counts(1, 1),
+                    After: async (ctx, ct) =>
+                        (await ctx.Harness.TableExistsAsync("quicker_sync_table", ct))
+                            .Should()
+                            .BeTrue("再開点の表は作り直される")
                 )
             ),
             Row(

@@ -366,6 +366,12 @@
   - 端末のエンジンの面 `IModelDeviceSync`（`RunAsync`・`RefreshAsync`）と、状態の面 `IModelDeviceSyncState`（未送信の行ごとの `ModelPendingRow`＝表・キー・追加か更新を含むか・削除を含むか・サーバーがその行を知っているか・変わる印）。製品のエンジンの実装は `ProductModelDeviceSync`・`JournalModelDeviceSyncState`。
   - 端末の作り方は `SyncModelWorldOptions.CreateDevice` で差し替える。判定役は、エンジンの記録の表（ジャーナル・受理記録）を直接読まずに、状態の面を読む。
   - エンジンの宣言 `IModelDeviceSync.CarriesServerWinsDecision`：ServerWins の実行が戻せなかった行の決定を、後の実行へ持ち越すか。製品のエンジンは偽。
+  - 端末の部品 `SyncModelDeviceParts` の口と、端末（`SyncModelDevice`）の読み口。今の端末は製品のジャーナルを持つ端末で、そこでの振る舞いを併せて書く。
+    - `ForgetUntrackedAsync`（表の名前・キーのテキスト）：記録しない書き込み（Raw 系のリポジトリ・判定役の壊し・任意の SQL）で書いた 1 行を、端末の未送信の記録から忘れさせる。同期のモデルが、記録しない書き込みの後に書いた行ごとに呼ぶ。口は省略でき、省略なら何もしない。今の端末は記録デコレータの内側で書くので記録が作られず、口は省略されている。
+    - `SyncModelDevice.ForgetUntrackedChangesAsync`：書く前に読んだ DB の内容と今の内容の差で変わった行（足した・変えた・消した。品目は blob も）を決めて、1 行ずつ忘れさせる。書いた行を SQL から決められない生の SQL の書き込みが使う。口の無い端末は何も読まない。
+    - `ClearPendingRecordsAsync`：1 行の未送信の記録を全部消す。判定役の対照の行の包みが、エンジンが記録を捨てた結果を作るのに使う。口を省略すると、製品のジャーナルの表（`quicker_sync_journal`）からその行の記録を消す（今の端末はこちら）。
+    - `RequireJournal`・`RequireEngine`（手の名前）：製品のジャーナル・エンジンを返す。持たない端末（別のエンジンへ載せ替えた端末）では、手の名前つきの `NotSupportedException` を投げる。メッセージは定数 `SyncModelDevice.UnsupportedPrefix` で始まり、手の名前は `SyncModelDevice.UnsupportedHand(exception)` で取り出す。今の端末は両方を持つので投げない。製品のジャーナルの表を読み書きする手は、SQL を流す前にこの口を通る。
+    - `CurrentParts()`：今の端末の部品を返す。部品の一部だけ差し替えて `Install` で載せ直す包みが使う（ほかの部品・口は今のまま持ち越す）。
 - 台帳「端末の持ち分」（`SyncModelRun.Ledger.cs`）：（端末・表・キー）→ その端末が自分で書いてまだ届いていない最後の内容。品目の blob は行と別の品目。
   - 作るのは、書き込みの手の前後の端末の DB の差分・実行の前後の端末とサーバーの DB・実行の公開の結果（競合・`LocalRowChanges`）・失敗の注入の控えだけ。状態の面・ジャーナル・受理記録は読まない（エンジンが印を間違えたときに、判定が一緒に間違えないため）。状態の面を読むのは、比べる相手にする照合（`5/facet:server-knows`）だけ。
 - 実行ごとの照合（署名は `5/` の族。根拠の判定と同じく実行の直後に確定し、静止化が失敗しても報告する）：
@@ -479,6 +485,9 @@
 
 - ローカルの変更の記録（`SyncLocalTracking`）と開くたびの確認（`SyncLocalTrackingGuard`）は、`SyncSupportAdoSqliteTriggerRuntimeTests`（Theory 2 本・コンテナなし）が 2 つの行の表を 1 行ずつ流して確かめる。仕組みの正本は `src/QuickER.Runtime.Sync/CLAUDE.md`「ローカルの変更の記録（SyncLocalTracking）」「開くたびの確認（SyncLocalTrackingGuard）」。
   - 行の表は「同期のトリガーの記録」（`SyncTriggerRecordingRows`・影響の地図の名前 `table:SyncTriggerRecording`）と「同期のトリガーの確認」（`SyncTriggerGuardRows`・`table:SyncTriggerGuard`）。端末の組み立ては `SyncTriggerHarness`（SyncModelFixture・SyncFixture・SyncVoFixture の 3 つのフィクスチャの SQLite の側）。
+  - 行の数は記録の表が 50 行・確認の表が 32 行。
+  - 記録の表には、行ごとの状態の表のエンジンだけが書く 4 列（`base_version`・`known`・`sw_seq`・`blob_owed`）を、更新・削除して入れ直す・主キーの変更（古いキー）・無制限バイナリ列の書き込みの後も保つ行（`engine-columns-kept-by-*`）がある。
+  - 確認の表には、エンジンの列が足りない状態の表へ列を足して未送信の行を保つ行（`row-table-without-engine-columns-gets-them-and-keeps-unsent-rows`）と、再開点の表（`quicker_sync_table`）だけを落としたときに 2 段目で足りないと答えて作り直す行（`anchor-table-dropped-is-recreated`）がある。
 - 記録の表の共通の表明
   - 張った直後：初回の `Ensure` は渡した表を全部返し 2 回目は空・状態の表は 1 行・トリガーは渡した表にだけ付く・記録は空。
   - 手の後：記録が期待の並びと一致する・連番が並びの順に厳密に増えて `next_seq` より小さい・適用中の印は 0 のまま・触らなかった前準備の行は記録に無い・記録したキーで元の表を引き直せる。

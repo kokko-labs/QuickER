@@ -48,7 +48,7 @@ internal enum JudgeBreakKind
 internal sealed record JudgeBreak(JudgeBreakKind Kind, ModelActor Device, int FolderId, int OnRun)
 {
     /// <summary>
-    /// 壊した後で、そのキーの製品の記録も消すか（<see cref="JudgeBreakKind.RestoreFromServer"/>・
+    /// 壊した後で、そのキーの未送信の記録も消すか（<see cref="JudgeBreakKind.RestoreFromServer"/>・
     /// <see cref="JudgeBreakKind.WriteLocalToServer"/>・<see cref="JudgeBreakKind.BringInFromServer"/>）
     /// </summary>
     public bool ClearsRecords { get; init; }
@@ -115,15 +115,8 @@ internal sealed record SyncModelJudgeDevice(
                             "A judge device writes to the server directly, so it runs only on the direct transport."
                         );
                     device.Install(
-                        new SyncModelDeviceParts
+                        device.CurrentParts() with
                         {
-                            Folders = device.Folders,
-                            Labels = device.Labels,
-                            Items = device.Items,
-                            Events = device.Events,
-                            RawFolders = device.RawFolders,
-                            RawLabels = device.RawLabels,
-                            RawItems = device.RawItems,
                             Sync = new SyncModelJudgeBreakSync(
                                 device.Sync,
                                 device,
@@ -255,7 +248,7 @@ internal sealed class SyncModelJudgeBreakSync(
         CancellationToken ct
     ) => inner.RefreshAsync(options, ct);
 
-    /// <summary>端末のフォルダーの行を、記録させずにサーバーの内容へ戻す（必要ならそのキーの製品の記録も消す）</summary>
+    /// <summary>端末のフォルダーの行を、記録させずにサーバーの内容へ戻す（必要ならそのキーの未送信の記録も消す）</summary>
     private async Task RestoreAsync(JudgeBreak brk, CancellationToken ct)
     {
         var current = await server.Folders.GetByIdAsync(brk.FolderId, ct);
@@ -284,6 +277,11 @@ internal sealed class SyncModelJudgeBreakSync(
             );
         }
 
+        await device.ForgetUntrackedAsync(
+            ModelTables.Folders,
+            GeneratedSyncTables.ModelFolder.FormatKey(brk.FolderId),
+            ct
+        );
         await ClearRecordsAsync(brk, ct);
     }
 
@@ -309,33 +307,51 @@ internal sealed class SyncModelJudgeBreakSync(
             ct
         );
 
+        await device.ForgetUntrackedAsync(
+            ModelTables.Folders,
+            GeneratedSyncTables.ModelFolder.FormatKey(brk.FolderId),
+            ct
+        );
         await ClearRecordsAsync(brk, ct);
     }
 
-    /// <summary>端末のローカル DB へ、外部キーの検査を切った専用の接続（プールしない）で文を順に流す</summary>
+    /// <summary>
+    /// 端末のローカル DB へ、外部キーの検査を切った専用の接続（プールしない）で文を順に流す。文が書いた行は SQL から決めず、
+    /// 流す前後の内容の差で忘れさせる（<see cref="SyncModelDevice.ForgetUntrackedChangesAsync"/>）
+    /// </summary>
     private async Task WriteWithoutForeignKeysAsync(JudgeBreak brk, CancellationToken ct)
     {
-        await using var connection = new SqliteConnection(
-            SyncModelRun.WithoutForeignKeys(device.ConnectionString)
-        );
-        await connection.OpenAsync(ct);
+        var before = device.ForgetsUntracked
+            ? await ModelDbState.ReadAsync(device.ConnectionString, ct, missingTablesAreEmpty: true)
+            : null;
 
-        foreach (var sql in brk.Statements)
+        await using (
+            var connection = new SqliteConnection(
+                SyncModelRun.WithoutForeignKeys(device.ConnectionString)
+            )
+        )
         {
-            await using var command = connection.CreateCommand();
-            command.CommandText = sql;
-            await command.ExecuteNonQueryAsync(ct);
+            await connection.OpenAsync(ct);
+
+            foreach (var sql in brk.Statements)
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = sql;
+                await command.ExecuteNonQueryAsync(ct);
+            }
         }
+
+        await device.ForgetUntrackedChangesAsync(before, ct);
     }
 
-    /// <summary>宣言していれば、そのキーの製品の記録を消す</summary>
+    /// <summary>宣言していれば、そのキーの未送信の記録を消す（消し方は端末ごと＝<see cref="SyncModelDevice.ClearPendingRecordsAsync"/>）</summary>
     private async Task ClearRecordsAsync(JudgeBreak brk, CancellationToken ct)
     {
         if (brk.ClearsRecords)
         {
-            await device.Sql.ExecuteSqlAsync(
-                "DELETE FROM quicker_sync_journal WHERE table_name = @table AND key_text = @key",
-                new { table = ModelTables.Folders, key = ModelDbState.Key(brk.FolderId) },
+            await device.ClearPendingRecordsAsync(
+                ModelTables.Folders,
+                ModelDbState.Key(brk.FolderId),
                 ct
             );
         }

@@ -253,6 +253,15 @@ public abstract class QuickER.Runtime.HttpRemoteRepositoryCore<TEntity, TKey> : 
     public System.Threading.Tasks.Task<int> SaveAsync(System.Collections.Generic.IEnumerable<TEntity> entities, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, QuickER.Runtime.ConcurrencyMode mode = 0, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<int> SaveAsync(TEntity entity, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, QuickER.Runtime.ConcurrencyMode mode = 0, System.Threading.CancellationToken cancellationToken = default)
 
+public interface QuickER.Runtime.ILocalRowStore
+    public virtual System.Data.Common.DbConnection CreateDedicatedConnection()
+    public virtual System.Threading.Tasks.Task InsertAsync<TEntity>(System.Data.Common.DbConnection connection, TEntity entity, System.Threading.CancellationToken cancellationToken)
+    public virtual System.Threading.Tasks.Task<TEntity> FindAsync<TEntity>(System.Data.Common.DbConnection connection, object key, System.Threading.CancellationToken cancellationToken)
+    public virtual System.Threading.Tasks.Task<bool> DeleteAsync<TEntity>(System.Data.Common.DbConnection connection, object key, System.Threading.CancellationToken cancellationToken)
+    public virtual System.Threading.Tasks.Task<bool> ExistsAsync<TEntity>(System.Data.Common.DbConnection connection, object key, System.Threading.CancellationToken cancellationToken)
+    public virtual System.Threading.Tasks.Task<bool> UpdateAsync<TEntity>(System.Data.Common.DbConnection connection, TEntity entity, System.Threading.CancellationToken cancellationToken)
+    public virtual bool IsUniqueViolation(System.Data.Common.DbException exception)
+
 public interface QuickER.Runtime.IRemoteRepositoryCore<TEntity, TKey>
     public virtual System.Threading.Tasks.Task InsertAsync(TEntity entity, System.Threading.CancellationToken cancellationToken = default)
     public virtual System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<QuickER.Runtime.UniquenessViolation>> CheckUniquenessAsync(TEntity entity, System.Threading.CancellationToken cancellationToken = default)

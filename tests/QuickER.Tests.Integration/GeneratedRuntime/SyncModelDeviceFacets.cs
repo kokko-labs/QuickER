@@ -198,7 +198,8 @@ internal sealed record SyncModelDeviceRequest(
 
 /// <summary>
 /// 別のエンジンの端末が <see cref="SyncModelDevice.Install"/> へ渡す部品。リポジトリはジャーナル記録デコレータで包まなくてよい
-/// （包まないなら Raw 系は省略して同じものを使う）。エンジンの面と状態の面は別の実装を持てる。
+/// （包まないなら Raw 系は省略して同じものを使う）。エンジンの面と状態の面は別の実装を持てる。今の端末の部品は
+/// <see cref="SyncModelDevice.CurrentParts"/> で読める（包みは一部だけ差し替えて載せ直す）。
 /// </summary>
 internal sealed record SyncModelDeviceParts
 {
@@ -222,4 +223,17 @@ internal sealed record SyncModelDeviceParts
     public required IModelDeviceSync Sync { get; init; }
 
     public required IModelDeviceSyncState State { get; init; }
+
+    /// <summary>
+    /// 記録しない書き込み（Raw 系のリポジトリで書いた行）を、端末の未送信の記録から忘れさせる口（引数は表の名前と、その表の
+    /// 記述子 <c>GeneratedSyncTables.*</c> の <c>FormatKey</c> の書式のキーのテキスト）。同期のモデルは記録しない書き込みの後、
+    /// 書いた行ごとに呼ぶ。省略なら何もしない（記録デコレータの内側のリポジトリで書く端末は、記録しない書き込みが記録を作らない）
+    /// </summary>
+    public Func<string, string, CancellationToken, Task>? ForgetUntrackedAsync { get; init; }
+
+    /// <summary>
+    /// 1 行（表の名前とキーのテキスト）の未送信の記録を全部消す口（判定役の対照の行の包みが、エンジンが記録を捨てた結果を作るのに
+    /// 使う）。省略なら製品のジャーナルの表からその行の記録を消す（<see cref="SyncModelDevice.ClearPendingRecordsAsync"/>）
+    /// </summary>
+    public Func<string, string, CancellationToken, Task>? ClearPendingRecordsAsync { get; init; }
 }
