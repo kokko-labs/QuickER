@@ -287,6 +287,30 @@ internal static partial class SyncPlanExpectationRows
                             "ForeignKeyRebuildMayLoseCandidateKey(child): FK_child_parent"
                         )
                 ),
+            // 再構築が落とす属性の警告は、候補キーを失う外部キーの警告より前に並ぶ（同じ親の表の主キーの付け替えで両方が出る形）
+            Row(
+                    "plan-warning-order-rebuild-dropped-attributes-before-candidate-key-loss",
+                    "警告の並び: 再構築が落とす属性の警告は、候補キーを失う外部キーの警告より前に並ぶ",
+                    DialectNames.Sqlite
+                )
+                .Live(s => CandidateKeyParentChild(s, uniqueOnId: false))
+                .Items(_ => [MovePrimaryKeyToCode()])
+                .Context(w => new SyncPlanContext
+                {
+                    LiveEntities = w.Live.Entities,
+                    LiveRelationships = w.Live.Relationships,
+                    TableCreateSql = new Dictionary<string, string>
+                    {
+                        ["parent"] =
+                            "CREATE TABLE parent (id INT PRIMARY KEY, code TEXT NOT NULL DEFAULT 'x')",
+                    },
+                })
+                .Expect(e =>
+                    e.Warnings.Exact(
+                        "TableRebuildDropsColumnAttribute(parent): DEFAULT",
+                        "ForeignKeyRebuildMayLoseCandidateKey(child): FK_child_parent"
+                    )
+                ),
             Row(
                     "plan-rebuild-referenced-pk-move-no-warning-with-unique",
                     "再構築: 被参照列に一意制約がある・子表を削除するなら候補キー喪失を警告しない",

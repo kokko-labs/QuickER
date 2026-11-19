@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using QuickER.Dialects;
 using QuickER.Model;
+using QuickER.Provider.Sync.TableRebuilds;
 
 namespace QuickER.Provider.Sync.State;
 
@@ -444,7 +445,7 @@ internal sealed class PostSyncSchema
 
         foreach (var dropFk in selected.Where(i => i.Kind == SchemaDiffKind.DropForeignKey))
         {
-            var signature = SyncPlanner.ResolveDroppedForeignKeySignature(dropFk);
+            var signature = TableRebuildForeignKeys.ResolveDroppedSignature(dropFk);
 
             if (signature is null || dropFk.ChildEntity is null)
             {

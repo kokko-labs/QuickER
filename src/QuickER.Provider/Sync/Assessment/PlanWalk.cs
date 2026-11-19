@@ -12,7 +12,8 @@ namespace QuickER.Provider.Sync.Assessment;
 /// <remarks>
 /// <para>
 /// 状態は DB の今の図の制約（<see cref="ConstraintState.From"/>）から始め、文を順に当てる（<see cref="ConstraintState.Apply"/>）。
-/// 歩きは文の並びも状態も書き換えない。
+/// 歩きは文の並びも状態も書き換えない。歩くのは逐次 DDL の方言の文の並びだけ（状態は表の作り直しの文を当てないので、テーブル再構築の
+/// 方言の計画は歩かない）。
 /// </para>
 /// <para>身元の求め方（<see cref="ConstraintIdentity"/>）：</para>
 /// <list type="bullet">

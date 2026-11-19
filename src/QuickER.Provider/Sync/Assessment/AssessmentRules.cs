@@ -33,6 +33,8 @@ internal static partial class AssessmentRules
         WarnDescriptionCharactersReplaced,
         WarnLiveForeignKeysWithPostSyncTypeMismatch,
         WarnDetachedForeignKeysAtRisk,
+        WarnTableRebuildsDroppingColumnAttributes,
+        WarnForeignKeysLosingCandidateKeyByTableRebuild,
     ];
 
     /// <summary>規則の表を順に流し、見つけた警告を積む</summary>

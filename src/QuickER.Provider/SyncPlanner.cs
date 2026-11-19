@@ -11,6 +11,7 @@ using QuickER.Provider.Sync.Scheduling;
 using QuickER.Provider.Sync.Selection;
 using QuickER.Provider.Sync.State;
 using QuickER.Provider.Sync.Steps;
+using QuickER.Provider.Sync.TableRebuilds;
 
 namespace QuickER.Provider;
 
@@ -188,7 +189,9 @@ public sealed class SyncPlanner
     /// <param name="injectedWarnings">
     /// 同期後の状態の差の項目を足す関数（列と一緒に消える一意制約・主キーが置き換える一意制約）の警告を積む先
     /// </param>
-    /// <returns>選んだ項目の最終形・評価の規則が読む事実・テーブル再構築の方言か</returns>
+    /// <returns>
+    /// 選んだ項目の最終形と、評価の規則が読む事実（テーブル再構築の方言かは <see cref="AssessmentFacts.IsTableRebuildDialect"/>）
+    /// </returns>
     /// <remarks>
     /// 返した後に、選んだ項目の最終形へ項目を足さない（同期後の事実は作ったときの並びの写しを持つ）。項目を足す段を入れるなら、
     /// この関数の中で、同期後の事実を作る前に足す。
@@ -204,8 +207,7 @@ public sealed class SyncPlanner
     )
     {
         // ALTER COLUMN も FK の後付けもできない方言はテーブル再構築が必要になる
-        var isRebuildDialect =
-            !capabilities.SupportsAlterColumn || !capabilities.SupportsForeignKeyAlter;
+        var isRebuildDialect = TableRebuildDialects.Requires(capabilities);
 
         // 選んだ項目を外す規則が読む文脈（選んだ項目に依らないので、除外の周の前に 1 回だけ作る）。テーブル再構築の方言では、
         // 作り直さない表も求める：取込が捨てた表の中の物（図に無い列・外部キー）がある表（作り直すと捨てた物がデータごと黙って
@@ -279,20 +281,14 @@ public sealed class SyncPlanner
                 Capabilities = capabilities,
                 Context = context,
             },
-            selected,
-            isRebuildDialect
+            selected
         );
     }
 
     /// <summary>計画の前半（<see cref="PrepareSelection"/>）の結果</summary>
     /// <param name="Facts">評価の規則が読む事実（周が止まったときの状態・選んだ項目の最終形の同期後の事実ほか）</param>
     /// <param name="Selected">選んだ項目の最終形（作り直しを展開し、同期後の状態の差の項目を足した並び）</param>
-    /// <param name="IsRebuildDialect">テーブル再構築の方言か</param>
-    internal sealed record PreparedSelection(
-        AssessmentFacts Facts,
-        List<SchemaDiffItem> Selected,
-        bool IsRebuildDialect
-    );
+    internal sealed record PreparedSelection(AssessmentFacts Facts, List<SchemaDiffItem> Selected);
 
     /// <summary>選択済みの差分項目から実行計画を組み立てる</summary>
     /// <param name="items">全差分項目（未選択・情報表示専用の項目を含んでよい）</param>
@@ -315,7 +311,7 @@ public sealed class SyncPlanner
     /// <param name="capabilities">対象方言の同期ケーパビリティ</param>
     /// <param name="context">live スキーマ</param>
     /// <param name="probe">
-    /// 結果を受け取る入れ物（<c>null</c> なら何も置かない）。逐次 DDL の方言の計画では、同じ引数から新しい計画器
+    /// 結果を受け取る入れ物（<c>null</c> なら何も置かない）。逐次 DDL の方言とテーブル再構築の方言の計画で、同じ引数から新しい計画器
     /// （<see cref="SequentialPlanner"/>）が作った結果を置く
     /// </param>
     /// <returns>計画（<paramref name="probe"/> の有無で変わらない）</returns>
@@ -349,7 +345,14 @@ public sealed class SyncPlanner
             injectedWarnings
         );
         var facts = prepared.Facts;
-        var isRebuildDialect = prepared.IsRebuildDialect;
+        var isRebuildDialect = facts.IsTableRebuildDialect;
+
+        // 入れ物を受け取ったら、同じ引数から新しい計画器が作った結果を置く（逐次 DDL の方言とテーブル再構築の方言の両方。
+        // 計画の入力の無い再構築の方言では、新しい計画器もここで同じ例外を投げる）
+        if (probe is not null)
+        {
+            probe.NewPlan = SequentialPlanner.Plan(items, capabilities, context);
+        }
         var beforeExpansion = facts.Settled.Items;
         var selected = prepared.Selected;
         var postSync = facts.PostSync;
@@ -452,11 +455,6 @@ public sealed class SyncPlanner
                 );
             }
 
-            if (probe is not null)
-            {
-                probe.NewPlan = SequentialPlanner.Plan(items, capabilities, context);
-            }
-
             if (!capabilities.TransactionalDdl)
             {
                 sections = MoveCertainFailureFirst(
@@ -496,15 +494,7 @@ public sealed class SyncPlanner
             );
         }
 
-        return BuildRebuildPlan(
-            postSync,
-            capabilities,
-            context,
-            liveSchema,
-            warnings,
-            excluded,
-            capabilities.IdentifierLengthLimit
-        );
+        return BuildRebuildPlan(facts, context, liveSchema, warnings, excluded);
     }
 
     /// <summary>
@@ -2977,81 +2967,6 @@ public sealed class SyncPlanner
         );
 
     /// <summary>
-    /// 再構築方言で、主キーを変える表を参照する live 外部キーのうち、被参照列が候補キーでなくなりうるものを警告する。
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// 再構築方言は外部キーを外して付け直すのではなく、子表の外部キー宣言を残したまま親表を作り直す。
-    /// 被参照列が候補キーでなくなると、同期後の <c>foreign_key_check</c> が foreign key mismatch で失敗する
-    /// （ロールバックされるので安全側だが、逐次 DDL の方言と同じく実行前に知らせる）。判定は
-    /// <see cref="StaysCandidateKey"/> を逐次 DDL の方言と共有する。
-    /// </para>
-    /// <para>
-    /// 明示的に削除する外部キー（選択済み DropForeignKey）と、削除する子表（選択済み DropTable）の外部キーは、
-    /// 同期後に残らないので対象外にする。
-    /// </para>
-    /// </remarks>
-    private static void WarnRebuildForeignKeysLosingCandidateKey(
-        PostSyncSchema postSync,
-        LiveSchema liveSchema,
-        List<SyncPlanWarning> warnings,
-        SyncDialectCapabilities capabilities
-    )
-    {
-        var limit = capabilities.IdentifierLengthLimit;
-        var pkChangedTables = postSync.PrimaryKeyChanges;
-
-        if (pkChangedTables.Count == 0)
-        {
-            return;
-        }
-
-        var postSyncUniques = postSync.UniqueColumnSets;
-        var dropped = postSync.Dropped;
-        var explicitlyDropped = postSync.DroppedForeignKeys;
-
-        foreach (var fk in liveSchema.ForeignKeys)
-        {
-            var childTable = SchemaDiffService.NormalizeTable(fk.Child);
-            var parentTable = SchemaDiffService.NormalizeTable(fk.Parent);
-
-            if (
-                !pkChangedTables.TryGetValue(parentTable, out var newPkColumns)
-                || dropped.Tables.Contains(childTable)
-                || explicitlyDropped.Contains(
-                    ForeignKeyKey(childTable, parentTable, fk.ColumnPairs, fk.Relationship, limit)
-                )
-            )
-            {
-                continue;
-            }
-
-            var referencedColumns = ForeignKeyColumnPairResolver
-                .ParentColumns(fk.ColumnPairs)
-                .ToList();
-
-            if (StaysCandidateKey(newPkColumns, postSyncUniques, parentTable, referencedColumns))
-            {
-                continue;
-            }
-
-            warnings.Add(
-                new SyncPlanWarning(
-                    SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey,
-                    childTable,
-                    ResolveForeignKeyName(
-                        fk.Relationship,
-                        childTable,
-                        parentTable,
-                        limit,
-                        liveSchema
-                    )
-                )
-            );
-        }
-    }
-
-    /// <summary>
     /// 作れない方言で、この外部キーの付け直しが必ず失敗するか（参照アクション <c>SET NULL</c> で、子の列が同期後に NOT NULL）
     /// </summary>
     internal static bool BlocksSetNullRebuild(
@@ -3620,88 +3535,39 @@ public sealed class SyncPlanner
     /// rebuild 方言の実行計画を組み立てる。逐次 DDL で表現できない変更をテーブル単位の再構築へ集約し、
     /// 残り（新規テーブル対象でない列追加・テーブル削除）はセクションへ残す。
     /// </summary>
+    /// <remarks>
+    /// 合成は <see cref="TableRebuildSynthesis.Synthesize"/> が行い、ここは警告 2 つを積んでセクションを組むだけ。
+    /// </remarks>
     private static SyncPlan BuildRebuildPlan(
-        PostSyncSchema postSync,
-        SyncDialectCapabilities capabilities,
+        AssessmentFacts facts,
         SyncPlanContext context,
         LiveSchema liveSchema,
         List<SyncPlanWarning> warnings,
-        IReadOnlyList<SchemaDiffItem> excluded,
-        IdentifierLengthLimit limit
+        IReadOnlyList<SchemaDiffItem> excluded
     )
     {
-        var selected = postSync.Items;
-
-        // 選択済み AddTable のテーブル名（新規テーブル＝CreateOnly の対象）
-        var addedTables = selected
-            .Where(i => i.Kind == SchemaDiffKind.AddTable)
-            .Select(i => SchemaNames.ToStoredForm(i.TableName))
-            .ToHashSet(SchemaNames.Comparer);
-
-        // live のテーブル索引（合成の土台）
-        var liveByName = liveSchema.Tables;
-
-        // 既存テーブルの再構築対象（新規テーブルを子とする AddForeignKey は CreateOnly へ畳むため除外）。
-        // live に実在するテーブルに限る——「新規テーブルの AddTable は未選択のまま、そのテーブルへの
-        // AddForeignKey だけ選択」のような組み合わせでは合成の土台が無く、該当項目はセクションへ残して
-        // レンダラーのスキップコメントに委ねる（例外にすると UI のチェック操作でクラッシュするため）
-        // 削除を選んだ表は作り直さない（作り直してから消すのは無駄で、意味の無い喪失警告も出る）。
-        // その表への作り直しの項目は、表ごと消えるので処理済みとして捨てる
-        var droppedTables = postSync.Dropped.Tables;
-        var existingRebuildTables = selected
-            .Where(i =>
-                IsRebuildTriggerKind(i.Kind)
-                && !addedTables.Contains(SchemaNames.ToStoredForm(i.TableName))
-                && !droppedTables.Contains(SchemaNames.ToStoredForm(i.TableName))
-            )
-            .Select(i => SchemaNames.ToStoredForm(i.TableName))
-            .Where(liveByName.Contains)
-            .ToHashSet(SchemaNames.Comparer);
-
-        // rebuild へ転用（畳み込み）が確定した項目の集合（SchemaDiffItem は参照同一性で比較する）
-        var diverted = new HashSet<SchemaDiffItem>();
-
-        foreach (
-            var item in selected.Where(i =>
-                droppedTables.Contains(SchemaNames.ToStoredForm(i.TableName))
-                && (IsRebuildTriggerKind(i.Kind) || i.Kind == SchemaDiffKind.AddColumn)
-            )
-        )
-        {
-            diverted.Add(item);
-        }
-
-        // live の外部キーは子表ごとに 1 回だけまとめる（作り直す表ごとに全外部キーを解決し直さない）
-        var liveForeignKeysByChild = liveSchema.ForeignKeys.ToLookup(
-            fk => SchemaDiffService.NormalizeTable(fk.Child),
-            SchemaNames.Comparer
+        var postSync = facts.PostSync;
+        var capabilities = facts.Capabilities;
+        var synthesis = TableRebuildSynthesis.Synthesize(
+            postSync,
+            liveSchema,
+            context,
+            capabilities
         );
-
-        var rebuilds = new List<TableRebuildPlan>();
-        rebuilds.AddRange(BuildCreateOnlyRebuilds(selected, addedTables, diverted, limit));
-        rebuilds.AddRange(
-            BuildExistingTableRebuilds(
-                selected,
-                existingRebuildTables,
-                liveByName,
-                diverted,
-                context,
-                liveSchema,
-                liveForeignKeysByChild,
-                limit,
-                capabilities
-            )
-        );
+        var rebuilds = synthesis.Rebuilds.ToList();
 
         // 既存テーブルの作り直し（CreateOnly=false）だけが列レベル属性を落とす。
         // 新規テーブル作成（CreateOnly=true）は落とす元の定義が無いので対象外
         WarnRebuildDropsColumnAttributes(rebuilds, context, warnings);
 
         // 主キーを付け替える親表を参照する外部キーの、候補キー喪失（逐次 DDL の方言と同じ判定）
-        WarnRebuildForeignKeysLosingCandidateKey(postSync, liveSchema, warnings, capabilities);
+        AssessmentRules.Add(
+            warnings,
+            AssessmentRules.WarnForeignKeysLosingCandidateKeyByTableRebuild(facts)
+        );
 
-        // 転用済みの項目を除いた残りをセクション化する（転用できなかった項目はレンダラーがスキップを明示する）
-        var sectionItems = selected.Where(i => !diverted.Contains(i)).ToList();
+        // 処理済みの項目を除いた残りをセクション化する（転用できなかった項目はレンダラーがスキップを明示する）
+        var sectionItems = postSync.Items.Where(i => !synthesis.Folded.Contains(i)).ToList();
 
         return new SyncPlan
         {
@@ -3762,455 +3628,6 @@ public sealed class SyncPlanner
                     rebuild.TableName,
                     string.Join(", ", lost)
                 )
-            );
-        }
-    }
-
-    /// <summary>選択済み AddTable を CreateOnly の再構築計画へ変換する（新規テーブルへの FK はインラインへ畳む）</summary>
-    /// <remarks>
-    /// 畳み込んだ項目を <paramref name="diverted"/> へ足す。遅延評価のイテレータにすると、呼び出し側が列挙するまで
-    /// <paramref name="diverted"/> が埋まらず、列挙の前にセクションを組むと転用済みの項目が二重に残るため、リストで返す。
-    /// </remarks>
-    private static List<TableRebuildPlan> BuildCreateOnlyRebuilds(
-        IReadOnlyList<SchemaDiffItem> selected,
-        HashSet<string> addedTables,
-        HashSet<SchemaDiffItem> diverted,
-        IdentifierLengthLimit limit
-    )
-    {
-        var rebuilds = new List<TableRebuildPlan>();
-
-        foreach (var addTable in selected.Where(i => i.Kind == SchemaDiffKind.AddTable))
-        {
-            var table = SchemaNames.ToStoredForm(addTable.TableName);
-            diverted.Add(addTable);
-
-            // その新テーブルを子とする選択済み AddForeignKey を FK 仕様として畳み込む。
-            // 解決できない FK は畳まずセクションへ残し、レンダラーのスキップコメントで明示する
-            var fkItems = selected
-                .Where(i =>
-                    i.Kind == SchemaDiffKind.AddForeignKey
-                    && SchemaNames.AreSame(SchemaNames.ToStoredForm(i.TableName), table)
-                )
-                .ToList();
-            var fks = new List<TableRebuildForeignKey>();
-            var source = new List<SchemaDiffItem> { addTable };
-
-            foreach (var fkItem in fkItems)
-            {
-                var resolved = ResolveAddedForeignKey(fkItem, limit);
-
-                if (resolved is null)
-                {
-                    continue;
-                }
-
-                fks.Add(resolved);
-                source.Add(fkItem);
-                diverted.Add(fkItem);
-            }
-
-            rebuilds.Add(
-                new TableRebuildPlan
-                {
-                    TableName = addTable.TableName,
-                    NewDefinition =
-                        addTable.Entity?.Clone(preserveId: true)
-                        ?? new Entity { TableName = addTable.TableName },
-                    ForeignKeys = fks,
-                    CreateOnly = true,
-                    CopyColumns = [],
-                    AuxiliaryObjects = [],
-                    SourceItems = source,
-                }
-            );
-        }
-
-        return rebuilds;
-    }
-
-    /// <summary>既存テーブルの再構築計画を組み立てる（live 定義に選択差分のみを適用して合成する）</summary>
-    /// <remarks>
-    /// 合成で解決できなかった項目（無い列の定義変更・構成列の無い一意制約・解決できない外部キー）は処理済みにせず、
-    /// セクションへ残す（レンダラーがスキップのコメントを出す）。処理済みにすると、何も変えずに成功扱いになり、次の差分で
-    /// 同じ項目がまた出る。作り直す理由になる項目が 1 つも解決できなければ、その表は作り直さない。
-    /// 畳み込んだ項目は <paramref name="diverted"/> へ足すので、<see cref="BuildCreateOnlyRebuilds"/> と同じくリストで返す。
-    /// </remarks>
-    private static List<TableRebuildPlan> BuildExistingTableRebuilds(
-        IReadOnlyList<SchemaDiffItem> selected,
-        HashSet<string> existingRebuildTables,
-        NameLookup<Entity> liveByName,
-        HashSet<SchemaDiffItem> diverted,
-        SyncPlanContext context,
-        LiveSchema liveSchema,
-        ILookup<string, ResolvedForeignKeyRelationship> liveForeignKeysByChild,
-        IdentifierLengthLimit limit,
-        SyncDialectCapabilities capabilities
-    )
-    {
-        var rebuilds = new List<TableRebuildPlan>();
-
-        foreach (var table in existingRebuildTables)
-        {
-            // existingRebuildTables は引ける名前だけに絞ってある
-            if (!liveByName.TryGet(table, out var live))
-            {
-                continue;
-            }
-
-            // このテーブルに畳み込む項目（再構築トリガー種別＋列追加）を確定する
-            var candidates = selected
-                .Where(i =>
-                    SchemaNames.AreSame(SchemaNames.ToStoredForm(i.TableName), table)
-                    && (IsRebuildTriggerKind(i.Kind) || i.Kind == SchemaDiffKind.AddColumn)
-                )
-                .ToList();
-
-            // 列の追加・削除・変更を先に当てた定義で、残りの項目が解決できるかを見る
-            var columnsOnly = live.Clone(preserveId: true);
-            ApplySelectedColumnChanges(columnsOnly, candidates);
-            var tableItems = candidates
-                .Where(i => IsResolvableInRebuild(i, live, columnsOnly, limit))
-                .ToList();
-
-            if (!tableItems.Any(i => IsRebuildTriggerKind(i.Kind)))
-            {
-                continue;
-            }
-
-            foreach (var item in tableItems)
-            {
-                diverted.Add(item);
-            }
-
-            // live 定義の深いコピーに、選択された差分のみを適用して合成する
-            var newDef = live.Clone(preserveId: true);
-
-            // 一意制約の削除は、列を消す前の live の列で照合する（列を先に消すと構成列を引き当てられず、
-            // 消える列を含む一意制約が合成後の定義に残る）
-            ApplySelectedUniqueConstraintDrops(newDef, tableItems);
-            ApplySelectedColumnChanges(newDef, tableItems);
-
-            // 主キー変更（AlterPrimaryKey）が選択されていれば、合成後の列へ target の主キー構成を反映する
-            ApplySelectedPrimaryKeyChange(newDef, tableItems);
-
-            // 列順変更（ReorderColumns）が選択されていれば、合成後の列を target の列名順へ並べ替える
-            ApplySelectedReorder(newDef, tableItems);
-
-            // 一意制約の追加が選択されていれば、合成後の一意制約集合へ反映する
-            ApplySelectedUniqueConstraintAdds(newDef, tableItems);
-
-            // FK 集合 = live の子側 FK − 選択済み DropForeignKey ＋ 選択済み AddForeignKey
-            var foreignKeys = SynthesizeForeignKeys(
-                tableItems,
-                liveForeignKeysByChild[table],
-                limit,
-                liveSchema
-            );
-
-            // データ移送対象 = live と合成後の両方に存在する列（合成後の列順で並べる）
-            var liveColumnNames = live.Columns.Select(c => c.Name).ToHashSet(SchemaNames.Comparer);
-            var copyColumns = newDef
-                .Columns.Select(c => c.Name)
-                .Where(liveColumnNames.Contains)
-                .ToList();
-
-            var auxiliaryObjects = context
-                .AuxiliaryObjects.Where(a =>
-                    SchemaNames.AreSame(SchemaNames.ToStoredForm(a.TableName), table)
-                )
-                .ToList();
-
-            rebuilds.Add(
-                new TableRebuildPlan
-                {
-                    TableName = live.TableName,
-                    NewDefinition = newDef,
-                    ForeignKeys = foreignKeys,
-                    CreateOnly = false,
-                    CopyColumns = copyColumns,
-                    RowidAliasNullGuardColumn = RowidAliasNullGuardColumn(
-                        live,
-                        newDef,
-                        copyColumns,
-                        capabilities
-                    ),
-                    AuxiliaryObjects = auxiliaryObjects,
-                    SourceItems = tableItems,
-                }
-            );
-        }
-
-        return rebuilds;
-    }
-
-    /// <summary>
-    /// 移送の前に NULL を断る写す列（<see cref="TableRebuildPlan.RowidAliasNullGuardColumn"/>）。合成後の主キーが単一列で、その宣言の型で
-    /// DB が NULL を採番の値へ置き換え、live ではその列が同じ置き換えをする主キーでなかった写す列。無ければ null
-    /// </summary>
-    /// <remarks>
-    /// live でも置き換える主キー（SQLite の rowid の別名）だった列は NULL を持てないので印さない。型の変更・主キーの移動・複合の主キーの
-    /// 縮小・主キーの付与のどれで別名になっても同じ判定になる。
-    /// </remarks>
-    private static string? RowidAliasNullGuardColumn(
-        Entity live,
-        Entity newDefinition,
-        IReadOnlyList<string> copyColumns,
-        SyncDialectCapabilities capabilities
-    )
-    {
-        var newKey = newDefinition.GetPrimaryKeyColumnsInOrder();
-
-        if (
-            newKey.Count != 1
-            || !capabilities.SingleColumnPrimaryKeyReplacesNull(newKey[0].DataType)
-            || !copyColumns.Any(c => SchemaNames.AreSame(c, newKey[0].Name))
-        )
-        {
-            return null;
-        }
-
-        var liveKey = live.GetPrimaryKeyColumnsInOrder();
-        var aliasInLive =
-            liveKey.Count == 1
-            && SchemaNames.AreSame(liveKey[0].Name, newKey[0].Name)
-            && capabilities.SingleColumnPrimaryKeyReplacesNull(liveKey[0].DataType);
-
-        return aliasInLive ? null : newKey[0].Name;
-    }
-
-    /// <summary>再構築の合成で項目を解決できるか（解決できない項目は再構築へ畳まずセクションへ残す）</summary>
-    /// <param name="item">再構築へ畳む候補の項目</param>
-    /// <param name="live">live の表</param>
-    /// <param name="columnsApplied">live に選んだ列の追加・削除・変更を当てた定義</param>
-    private static bool IsResolvableInRebuild(
-        SchemaDiffItem item,
-        Entity live,
-        Entity columnsApplied,
-        IdentifierLengthLimit limit
-    )
-    {
-        bool HasColumn(Entity entity, string? name) =>
-            name is not null && entity.Columns.Any(c => SchemaNames.AreSame(c.Name, name));
-
-        return item.Kind switch
-        {
-            SchemaDiffKind.AlterColumn => HasColumn(live, item.ColumnName),
-            SchemaDiffKind.AddUniqueConstraint => item.UniqueConstraintColumns.Count > 0
-                && item.UniqueConstraintColumns.All(c => HasColumn(columnsApplied, c)),
-            SchemaDiffKind.AddForeignKey => ResolveAddedForeignKey(item, limit) is { } fk
-                && fk.ChildColumns.All(c => HasColumn(columnsApplied, c)),
-            _ => true,
-        };
-    }
-
-    /// <summary>合成後の定義へ、選択された列変更（AlterColumn の写し込み / DropColumn 除去 / AddColumn 追加）を適用する</summary>
-    /// <remarks>
-    /// <para>
-    /// AlterColumn は live の列オブジェクトを残したまま、差分が語る性質（型・NULL 許容・計算列）だけを写す。
-    /// 図側の列へ差し替えてはいけない。図は live と別の Guid 空間にあるため、差し替えると live の
-    /// <see cref="Entity.UniqueConstraints"/> と <see cref="Entity.PrimaryKeyColumnIds"/> が指す列 ID が
-    /// 解決できなくなり、一意制約が再構築後の表から黙って消え、複合主キーの順序も変わる。
-    /// 図側の主キー指定も持ち込まれ、選んでいない主キー変更が紛れ込む。
-    /// </para>
-    /// <para>
-    /// AddColumn の列は主キーにしない。主キーの膜と順序を変えるのは選択済みの AlterPrimaryKey だけ
-    /// （<see cref="ApplySelectedPrimaryKeyChange"/>）で、それが無いのに図側の主キー指定を持ち込むと、
-    /// 選んでいない主キー変更が適用される。
-    /// </para>
-    /// </remarks>
-    private static void ApplySelectedColumnChanges(
-        Entity newDef,
-        IReadOnlyList<SchemaDiffItem> tableItems
-    )
-    {
-        // AlterColumn: 同名の live 列へ、型・NULL 許容・計算列だけを写す（Id・名前・主キー指定は live のまま）
-        foreach (var alter in tableItems.Where(i => i.Kind == SchemaDiffKind.AlterColumn))
-        {
-            var column = newDef.Columns.Find(c => SchemaNames.AreSame(c.Name, alter.ColumnName));
-
-            if (column is not null && alter.Column is not null)
-            {
-                column.DataType = alter.Column.DataType;
-                column.IsNullable = ColumnNullability.AllowsNull(alter.Column);
-                column.IsComputed = alter.Column.IsComputed;
-            }
-        }
-
-        // DropColumn: 同名の列を除去する
-        foreach (var drop in tableItems.Where(i => i.Kind == SchemaDiffKind.DropColumn))
-        {
-            newDef.Columns.RemoveAll(c => SchemaNames.AreSame(c.Name, drop.ColumnName));
-        }
-
-        // AddColumn: 末尾へ畳み込む（このテーブルが他理由で再構築される場合のみここへ来る）。
-        // 主キーにするかは AlterPrimaryKey の選択だけが決める
-        foreach (var add in tableItems.Where(i => i.Kind == SchemaDiffKind.AddColumn))
-        {
-            if (add.Column is not null)
-            {
-                var added = add.Column.Clone(preserveId: true);
-
-                // 主キーを外す前に実効の NULL 許容を写す（図の主キーの列は印に依らず NOT NULL で、逐次 DDL の方言の
-                // 列の追加も NOT NULL で作る。印のまま主キーを外すと、再構築の表だけが NULL 許容の列になる）
-                added.IsNullable = ColumnNullability.AllowsNull(add.Column);
-                added.IsPrimaryKey = false;
-                newDef.Columns.Add(added);
-            }
-        }
-    }
-
-    /// <summary>
-    /// 選択された AlterPrimaryKey があれば、合成後の各列の主キー指定と主キーの順序を target の構成で上書きする。
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// 上書きするのは <see cref="Column.IsPrimaryKey"/> と <see cref="Entity.PrimaryKeyColumnIds"/> のみで、
-    /// 列の型・NULL 許容などは他差分の選択状況に従う
-    /// （未選択の AlterColumn を主キー変更のついでに適用してしまわないため）。AlterPrimaryKey が未選択なら何もしない。
-    /// </para>
-    /// <para>
-    /// target は live とは別の図＝列 Guid の空間が違うため、順序は target の実効順を列名で
-    /// 合成後定義の列へ写像して作り直す（合成後定義に無い列名は読み飛ばす）。
-    /// live 由来の順序リストをそのまま残すと、上書きした主キーの膜と順序が食い違う。
-    /// </para>
-    /// </remarks>
-    private static void ApplySelectedPrimaryKeyChange(
-        Entity newDef,
-        IReadOnlyList<SchemaDiffItem> tableItems
-    )
-    {
-        var alterPk = tableItems.FirstOrDefault(i => i.Kind == SchemaDiffKind.AlterPrimaryKey);
-
-        if (alterPk?.Entity is null)
-        {
-            return;
-        }
-
-        var targetPkColumns = alterPk.Entity.GetPrimaryKeyColumnsInOrder();
-        var pkNames = targetPkColumns.Select(c => c.Name).ToHashSet(SchemaNames.Comparer);
-
-        foreach (var column in newDef.Columns)
-        {
-            column.IsPrimaryKey = pkNames.Contains(column.Name);
-        }
-
-        // target の実効順を列名で合成後定義の列 Guid へ写像し直す
-        newDef.PrimaryKeyColumnIds = targetPkColumns
-            .Select(pk => newDef.Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, pk.Name)))
-            .Where(c => c is not null)
-            .Select(c => c!.Id)
-            .ToList();
-    }
-
-    /// <summary>
-    /// 選択された ReorderColumns があれば、合成後の列を target（差分項目の Entity）の列名順へ並べ替える。
-    /// </summary>
-    /// <remarks>
-    /// target に存在する列を target の順序で先頭側へ並べ、target に無い列（未選択の削除で残った列）は
-    /// 元の相対順序を保ったまま末尾へ回す（安定ソート）。ReorderColumns が未選択なら何もしない。
-    /// </remarks>
-    private static void ApplySelectedReorder(
-        Entity newDef,
-        IReadOnlyList<SchemaDiffItem> tableItems
-    )
-    {
-        var reorder = tableItems.FirstOrDefault(i => i.Kind == SchemaDiffKind.ReorderColumns);
-
-        if (reorder?.Entity is null)
-        {
-            return;
-        }
-
-        // target 列名 → 目標順インデックス
-        var targetOrder = new Dictionary<string, int>(SchemaNames.Comparer);
-
-        for (var i = 0; i < reorder.Entity.Columns.Count; i++)
-        {
-            targetOrder.TryAdd(reorder.Entity.Columns[i].Name, i);
-        }
-
-        // target にある列は目標順、無い列は元の相対順を保って末尾へ（OrderBy は安定ソート）
-        var reordered = newDef
-            .Columns.Select((column, index) => (column, index))
-            .OrderBy(x => targetOrder.TryGetValue(x.column.Name, out var ti) ? ti : int.MaxValue)
-            .ThenBy(x => x.index)
-            .Select(x => x.column)
-            .ToList();
-
-        newDef.Columns.Clear();
-        newDef.Columns.AddRange(reordered);
-    }
-
-    /// <summary>
-    /// 選択された一意制約の削除を、合成後の定義（<paramref name="newDef"/>）の <see cref="Entity.UniqueConstraints"/>
-    /// へ反映する。列の変更を当てる前に呼ぶ（構成列を live の列で引き当てるため）。
-    /// </summary>
-    /// <remarks>
-    /// 合成後の定義は live の写しで、削除の項目も live の制約の名前を運ぶので、DB の一意制約の照合キー
-    /// （<see cref="UniqueConstraintKey"/>＝名前と列集合）で除去する（同じ列集合のほかの一意制約は残す）。
-    /// </remarks>
-    private static void ApplySelectedUniqueConstraintDrops(
-        Entity newDef,
-        IReadOnlyList<SchemaDiffItem> tableItems
-    )
-    {
-        foreach (var drop in tableItems.Where(i => i.Kind == SchemaDiffKind.DropUniqueConstraint))
-        {
-            var dropped = PostSyncSchema.ExplicitlyDroppedUniqueConstraints([drop]);
-            newDef.UniqueConstraints.RemoveAll(constraint =>
-                UniqueConstraintNaming.TryResolveColumnNames(newDef, constraint, out var columns)
-                && dropped.Contains(UniqueConstraintKey(drop.TableName, constraint.Name, columns))
-            );
-        }
-    }
-
-    /// <summary>
-    /// 選択された一意制約の追加を、合成後の定義（<paramref name="newDef"/>）の <see cref="Entity.UniqueConstraints"/>
-    /// へ反映する。
-    /// </summary>
-    /// <remarks>
-    /// 差分項目が運ぶ<b>列名</b>を合成後の列へ引き当てて新しい構成列 ID を作る
-    /// （差分項目の Entity は図側＝列 ID が live のクローンと一致しないため、ID をそのまま持ち込めない）。
-    /// 引き当てられない列を含む追加は黙って捨てる（DDL 生成が解決不能な制約を出力しないのと同じ流儀）。
-    /// </remarks>
-    private static void ApplySelectedUniqueConstraintAdds(
-        Entity newDef,
-        IReadOnlyList<SchemaDiffItem> tableItems
-    )
-    {
-        foreach (var add in tableItems.Where(i => i.Kind == SchemaDiffKind.AddUniqueConstraint))
-        {
-            if (add.UniqueConstraintColumns.Count == 0)
-            {
-                continue;
-            }
-
-            var columnIds = new List<Guid>(add.UniqueConstraintColumns.Count);
-            var allResolved = true;
-
-            foreach (var columnName in add.UniqueConstraintColumns)
-            {
-                var column = newDef.Columns.FirstOrDefault(c =>
-                    SchemaNames.AreSame(c.Name, columnName)
-                );
-
-                if (column is null)
-                {
-                    allResolved = false;
-                    break;
-                }
-
-                columnIds.Add(column.Id);
-            }
-
-            if (!allResolved)
-            {
-                continue;
-            }
-
-            newDef.UniqueConstraints.Add(
-                new UniqueConstraint { Name = add.UniqueConstraintName, ColumnIds = columnIds }
             );
         }
     }
@@ -4458,197 +3875,4 @@ public sealed class SyncPlanner
 
         return result;
     }
-
-    /// <summary>再構築後に張る FK 集合を合成する（live 集合から Drop を除き Add を足す）</summary>
-    /// <param name="tableItems">この表へ畳み込む選択済みの項目</param>
-    /// <param name="liveForeignKeys">この表を子に持つ live の外部キー</param>
-    private static List<TableRebuildForeignKey> SynthesizeForeignKeys(
-        IReadOnlyList<SchemaDiffItem> tableItems,
-        IEnumerable<ResolvedForeignKeyRelationship> liveForeignKeys,
-        IdentifierLengthLimit limit,
-        LiveSchema liveSchema
-    )
-    {
-        var foreignKeys = liveForeignKeys
-            .Select(fk => ToRebuildForeignKey(fk, limit, liveSchema))
-            .ToList();
-
-        // 選択済み DropForeignKey に一致する live FK を 1 本だけ除去する（親テーブル・構成列ペアで候補を絞り、
-        // 名前・参照アクションまで合うものを優先する）。同じ列ペアに外部キーが 2 本ある構成で、1 本の削除・作り直しが
-        // もう 1 本まで消さないため（以前は構成列だけで照合して 2 本とも外し、変えていない外部キーが黙って消えた）
-        foreach (var dropFk in tableItems.Where(i => i.Kind == SchemaDiffKind.DropForeignKey))
-        {
-            var signature = ResolveDroppedForeignKeySignature(dropFk);
-
-            if (signature is null)
-            {
-                continue;
-            }
-
-            var (parentTable, columnPairs) = signature.Value;
-            var candidates = foreignKeys
-                .Where(fk =>
-                    SchemaNames.AreSame(fk.ParentTable, parentTable)
-                    && fk.ChildColumns.SequenceEqual(
-                        ForeignKeyColumnPairResolver.ChildColumns(columnPairs),
-                        SchemaNames.Comparer
-                    )
-                    && fk.ParentColumns.SequenceEqual(
-                        ForeignKeyColumnPairResolver.ParentColumns(columnPairs),
-                        SchemaNames.Comparer
-                    )
-                )
-                .ToList();
-            var dropName = dropFk.ChildEntity is null
-                ? null
-                : ResolveForeignKeyName(
-                    dropFk.Relationship,
-                    SchemaDiffService.NormalizeTable(dropFk.ChildEntity),
-                    parentTable,
-                    limit
-                );
-            var onDelete = dropFk.Relationship?.OnDelete ?? ForeignKeyReferentialAction.NoAction;
-            var onUpdate = dropFk.Relationship?.OnUpdate ?? ForeignKeyReferentialAction.NoAction;
-            var removed =
-                candidates.FirstOrDefault(fk =>
-                    SchemaNames.AreSame(fk.ConstraintName, dropName)
-                    && fk.OnDelete == onDelete
-                    && fk.OnUpdate == onUpdate
-                )
-                ?? candidates.FirstOrDefault(fk =>
-                    fk.OnDelete == onDelete && fk.OnUpdate == onUpdate
-                )
-                ?? candidates.FirstOrDefault();
-
-            if (removed is not null)
-            {
-                foreignKeys.Remove(removed);
-            }
-        }
-
-        // 選択済み AddForeignKey を追加する
-        foreach (var addFk in tableItems.Where(i => i.Kind == SchemaDiffKind.AddForeignKey))
-        {
-            var resolved = ResolveAddedForeignKey(addFk, limit);
-
-            if (resolved is not null)
-            {
-                foreignKeys.Add(resolved);
-            }
-        }
-
-        return foreignKeys;
-    }
-
-    /// <summary>live の外部キーを、再構築の CREATE TABLE へ載せる FK 仕様へ変換する</summary>
-    /// <remarks>名前は警告・外し直しと同じく図全体から求めた live の実効名（<see cref="LiveSchema.ForeignKeyNames"/>）。</remarks>
-    private static TableRebuildForeignKey ToRebuildForeignKey(
-        ResolvedForeignKeyRelationship fk,
-        IdentifierLengthLimit limit,
-        LiveSchema liveSchema
-    )
-    {
-        var parentTable = SchemaDiffService.NormalizeTable(fk.Parent);
-
-        return new TableRebuildForeignKey(
-            ResolveForeignKeyName(
-                fk.Relationship,
-                SchemaDiffService.NormalizeTable(fk.Child),
-                parentTable,
-                limit,
-                liveSchema
-            ),
-            [.. ForeignKeyColumnPairResolver.ChildColumns(fk.ColumnPairs)],
-            parentTable,
-            [.. ForeignKeyColumnPairResolver.ParentColumns(fk.ColumnPairs)],
-            fk.Relationship.OnDelete,
-            fk.Relationship.OnUpdate
-        );
-    }
-
-    /// <summary>選択済み AddForeignKey 差分項目を解決済みの FK 仕様へ変換する（解決不能なら null）</summary>
-    private static TableRebuildForeignKey? ResolveAddedForeignKey(
-        SchemaDiffItem item,
-        IdentifierLengthLimit limit
-    )
-    {
-        if (item.ChildEntity is null || item.ParentEntity is null)
-        {
-            return null;
-        }
-
-        var columnPairs = SyncScriptBuilderHelper.ResolveColumnPairs(item);
-
-        if (columnPairs.Count == 0)
-        {
-            return null;
-        }
-
-        var childTable = SchemaDiffService.NormalizeTable(item.ChildEntity);
-        var parentTable = SchemaDiffService.NormalizeTable(item.ParentEntity);
-
-        return new TableRebuildForeignKey(
-            SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, limit),
-            [.. ForeignKeyColumnPairResolver.ChildColumns(columnPairs)],
-            parentTable,
-            [.. ForeignKeyColumnPairResolver.ParentColumns(columnPairs)],
-            item.Relationship?.OnDelete ?? ForeignKeyReferentialAction.NoAction,
-            item.Relationship?.OnUpdate ?? ForeignKeyReferentialAction.NoAction
-        );
-    }
-
-    /// <summary>
-    /// DropForeignKey 差分項目を、live FK 照合用のシグネチャ（親テーブル・構成列ペア）へ解決する
-    /// </summary>
-    internal static (
-        string ParentTable,
-        IReadOnlyList<ForeignKeyColumnNamePair> ColumnPairs
-    )? ResolveDroppedForeignKeySignature(SchemaDiffItem item)
-    {
-        if (item.Relationship is null || item.ParentEntity is null || item.ChildEntity is null)
-        {
-            return null;
-        }
-
-        // 差分項目に載った列ペアを優先し、無ければリレーションから解決し直す
-        // （差分計算が作った項目には必ず載るが、外部から組み立てた項目でもモデルから復元できるようにする）
-        IReadOnlyList<ForeignKeyColumnNamePair>? columnPairs =
-            SyncScriptBuilderHelper.ResolveColumnPairs(item);
-
-        if (columnPairs.Count == 0)
-        {
-            columnPairs = ForeignKeyColumnPairResolver.Resolve(
-                item.Relationship,
-                item.ParentEntity,
-                item.ChildEntity
-            );
-        }
-
-        if (columnPairs is null || columnPairs.Count == 0)
-        {
-            return null;
-        }
-
-        return (SchemaDiffService.NormalizeTable(item.ParentEntity), columnPairs);
-    }
-
-    /// <summary>
-    /// この種別が既存テーブルの再構築を要求するか
-    /// （列型変更・主キー変更・列削除・FK 変更・列順変更・一意制約の変更）
-    /// </summary>
-    /// <remarks>
-    /// rebuild 方言（SQLite）では列順変更・主キー変更・一意制約の追加削除もテーブル再構築で実現するため、
-    /// ReorderColumns / AlterPrimaryKey / Add・DropUniqueConstraint も再構築トリガーに含める
-    /// （それだけが選択された場合も CreateOnly=false の再構築になる）。
-    /// </remarks>
-    internal static bool IsRebuildTriggerKind(SchemaDiffKind kind) =>
-        kind
-            is SchemaDiffKind.AlterColumn
-                or SchemaDiffKind.AlterPrimaryKey
-                or SchemaDiffKind.DropColumn
-                or SchemaDiffKind.DropForeignKey
-                or SchemaDiffKind.AddForeignKey
-                or SchemaDiffKind.ReorderColumns
-                or SchemaDiffKind.AddUniqueConstraint
-                or SchemaDiffKind.DropUniqueConstraint;
 }

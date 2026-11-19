@@ -145,7 +145,7 @@ PK の順序の正本は `Entity.PrimaryKeyColumnIds`（列 Guid・宣言順）�
 - どの列が PK か（膜）の正本は `Column.IsPrimaryKey`。リストは順序の上書き情報で、書き手側の保守は要らない（GUI の PK トグル・列削除はリストに触れない。stale Guid は読み手が無視。OFF→ON は旧位置復活で Undo と整合する）。
 - 取込は 5 方言とも序数順に常時 populate する（SQL Server / MySQL＝ORDINAL_POSITION・PG＝unnest WITH ORDINALITY・Oracle＝position：いずれも ORDER BY 済みクエリの到着順を信頼する・SQLite＝PRAGMA table_info の pk 値を昇順ソート）。
 - 順序が意味を持つ読み手（DDL の PK 句・同期の PK ADD・SQLite 再構築・PK 差分比較・EF Core HasKey・署名・FK 自動ペア化）へ素の `Columns.Where(IsPrimaryKey)` を書かない。リスト空の図では同じ結果になるため、ビルドも既存テストも緑のまま、取込図でだけ列順へ退行する。
-  読み手切替済みの面は `TableConstraintLineBuilder`・SQLite の DDL／再構築・4 方言同期の PK ADD・`SchemaDiffService.PrimaryKeyColumnNames`（順序込みの比較。順序だけの差も AlterPrimaryKey）・`SyncPlanner.ApplySelectedPrimaryKeyChange`（target は別 Guid 空間のため名前写像で newDef のリストを丸ごと置換）・EF Core HasKey・`SchemaSignature`（実効順を署名。空リスト vs 同順 populate は署名一致）・`ForeignKeyColumnResolver`（自動ペア化の並び）。
+  読み手切替済みの面は `TableConstraintLineBuilder`・SQLite の DDL／再構築・4 方言同期の PK ADD・`SchemaDiffService.PrimaryKeyColumnNames`（順序込みの比較。順序だけの差も AlterPrimaryKey）・`TableRebuildDefinition.ApplyPrimaryKeyChange`（target は別 Guid 空間のため名前写像で newDef のリストを丸ごと置換）・EF Core HasKey・`SchemaSignature`（実効順を署名。空リスト vs 同順 populate は署名一致）・`ForeignKeyColumnResolver`（自動ペア化の並び）。
 - GUI は `EntityViewModel` が順序を保持する（防御コピー→`ToModel()` で書き戻し。VM に同一 merge 規則のミラーを持つので、相互参照 XmlDoc に従い片方だけ変えない）。パススルーを外すと「取込→保存」で順序が静かに消える。
 - 文書 JSON は v1 のまま（旧ファイルは空リスト・明示 null は Normalize が修復する）。Clone / `DiagramMergeReconciler` は columnIdMap で張り替える（`UniqueConstraint.ColumnIds` と同型）。
 - 編集経路は 2 つ。MCP／内蔵チャットの `set_primary_key`（テーブル名のみで照合する全体置換。挙げた列は NOT NULL 正規化・外れた列の NULL 許容は据え置き・列は最低 1 つ必要）と、GUI の「主キーの順序」カード（複合 PK のときだけ表示）。詳細は GUI・MCP の領域の CLAUDE.md に従う。一度でも順序を明示すると、その図では順序が固定される。

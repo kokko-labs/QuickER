@@ -1384,9 +1384,6 @@ internal static class SyncPlanCapabilityNetRunner
     public const string SchedulingParityEndStatePrefix =
         SchedulingParityRelationPrefix + "end state: ";
 
-    /// <summary>関係 N5 を掛けなかった理由：再構築の方言の計画（新しい組み立ては逐次 DDL の方言だけ）</summary>
-    public const string SchedulingParityRebuildDialect = "a rebuild dialect";
-
     /// <summary>関係 N5 の、取り下げのあるケースの関係の違反の頭（後ろに関係の番号を付ける）</summary>
     public const string SchedulingParityWithdrawalPrefix =
         SchedulingParityRelationPrefix + "withdrawal ";
@@ -1404,13 +1401,30 @@ internal static class SyncPlanCapabilityNetRunner
     /// <param name="NamedAroundRefusable">
     /// 取り下げの無いケースで全部の面を比べた計画が、断られうる文の前後の名指しの 2 種別の警告を持つか
     /// </param>
+    /// <param name="ExistingTableRebuild">
+    /// 取り下げの無いケースで全部の面を比べた計画が、既存の表の再構築（<see cref="TableRebuildPlan.CreateOnly"/> が偽）を持つか
+    /// </param>
+    /// <param name="CreateOnlyRebuild">
+    /// 取り下げの無いケースで全部の面を比べた計画が、表を作るだけの再構築（<see cref="TableRebuildPlan.CreateOnly"/> が真）を持つか
+    /// </param>
+    /// <param name="RebuildWithSections">
+    /// 取り下げの無いケースで全部の面を比べた計画が、再構築と、再構築へ畳まれずに残ったセクションの両方を持つか
+    /// </param>
+    /// <param name="TableRebuildDialect">
+    /// 新しい計画器の結果の事実が、その計画をテーブル再構築の方言の計画としたか（<see cref="AssessmentFacts.IsTableRebuildDialect"/>。
+    /// 新しい計画器の結果が無ければ null）。空振りの検査が網の宣言（<see cref="SyncPlanFuzzDialect.PlansTableRebuilds"/>）と照らす
+    /// </param>
     internal sealed record SchedulingParityResult(
         IReadOnlyList<string> Problems,
         string? NotApplied,
         int Withdrawals = 0,
         bool EndStateChecked = false,
         bool MovedFirst = false,
-        bool NamedAroundRefusable = false
+        bool NamedAroundRefusable = false,
+        bool ExistingTableRebuild = false,
+        bool CreateOnlyRebuild = false,
+        bool RebuildWithSections = false,
+        bool? TableRebuildDialect = null
     );
 
     /// <summary>
@@ -1444,8 +1458,10 @@ internal static class SyncPlanCapabilityNetRunner
     /// 取り下げも無く、計画の形（<paramref name="describe"/>）が同じ（<paramref name="describe"/> を渡したときだけ）。
     /// </item>
     /// </list>
-    /// <para>文で表せた計画には、歩きの終わりの状態の照合（<see cref="SchedulingEndStateProblems"/>）を掛ける。</para>
-    /// <para>再構築の方言の計画と、文で表せない計画には掛けず、理由を返す。</para>
+    /// <para>
+    /// 文で表せた計画には、歩きの終わりの状態の照合（<see cref="SchedulingEndStateProblems"/>）を掛ける（テーブル再構築の方言の計画を除く）。
+    /// </para>
+    /// <para>文で表せない計画には掛けず、理由を返す。</para>
     /// </remarks>
     /// <param name="items">差分の項目（元のケースの選び方のまま）</param>
     /// <param name="plan">元の計画（入れ物を渡さずに作ったもの）</param>
@@ -1495,10 +1511,17 @@ internal static class SyncPlanCapabilityNetRunner
 
         var planned = probe.NewPlan;
 
+        // 入れ物を渡した計画は、方言に依らず新しい計画器の結果を置く
         if (planned is null)
         {
-            return new SchedulingParityResult(problems, SchedulingParityRebuildDialect);
+            problems.Add(
+                $"{SchedulingParityRelationPrefix}the probe holds no plan of the new planner"
+            );
+            return new SchedulingParityResult(problems, null);
         }
+
+        // 新しい計画器がこの計画をテーブル再構築の方言の計画としたか（空振りの検査が網の宣言と照らす。文で表せない計画でも運ぶ）
+        var rebuildDialect = planned.Facts.IsTableRebuildDialect;
 
         var read = SyncPlanStepReader.Read(probed, items.Where(i => i.IsSelected));
         problems.AddRange(
@@ -1512,7 +1535,10 @@ internal static class SyncPlanCapabilityNetRunner
                 $"{SchedulingParityRelationPrefix}only one side can express the plan as steps: "
                     + $"[{planned.Unrepresentable ?? "expressed"}] <> [{read.Unrepresentable ?? "expressed"}]"
             );
-            return new SchedulingParityResult(problems, null);
+            return new SchedulingParityResult(problems, null)
+            {
+                TableRebuildDialect = rebuildDialect,
+            };
         }
 
         var currentSteps = read.Plan;
@@ -1520,11 +1546,15 @@ internal static class SyncPlanCapabilityNetRunner
 
         if (currentSteps is null || plannedSteps is null)
         {
-            return new SchedulingParityResult(problems, read.Unrepresentable);
+            return new SchedulingParityResult(problems, read.Unrepresentable)
+            {
+                TableRebuildDialect = rebuildDialect,
+            };
         }
 
-        // 歩きの終わりの状態（新しい側の文の並びだけを読む）
-        var endStateChecked = planned.Facts.Live is not null;
+        // 歩きの終わりの状態（新しい側の文の並びだけを読む）。テーブル再構築の方言の計画には掛けない（位置の状態は再構築の文を
+        // 当てない。再構築の結果が同期後の図と合うことは実 SQLite の総当たりが確かめる）
+        var endStateChecked = planned.Facts.Live is not null && !rebuildDialect;
 
         if (endStateChecked)
         {
@@ -1546,7 +1576,8 @@ internal static class SyncPlanCapabilityNetRunner
                 problems,
                 null,
                 planned.Withdrawn.Count,
-                endStateChecked
+                endStateChecked,
+                TableRebuildDialect: rebuildDialect
             );
         }
 
@@ -1555,7 +1586,13 @@ internal static class SyncPlanCapabilityNetRunner
         if (withdrawn.Count > 0)
         {
             WithdrawalProblems();
-            return new SchedulingParityResult(problems, null, withdrawn.Count, endStateChecked);
+            return new SchedulingParityResult(
+                problems,
+                null,
+                withdrawn.Count,
+                endStateChecked,
+                TableRebuildDialect: rebuildDialect
+            );
         }
 
         if (probed.Warnings.Any(IsWithdrawalWarning))
@@ -1580,7 +1617,11 @@ internal static class SyncPlanCapabilityNetRunner
             0,
             endStateChecked,
             probed.Sections.Any(s => s.IsMovedFirst),
-            probed.Warnings.Any(IsNamedAroundRefusable)
+            probed.Warnings.Any(IsNamedAroundRefusable),
+            probed.Rebuilds.Any(r => !r.CreateOnly),
+            probed.Rebuilds.Any(r => r.CreateOnly),
+            probed.Rebuilds.Count > 0 && probed.Sections.Count > 0,
+            rebuildDialect
         );
 
         // 取り下げのあるケースの関係 1〜5
@@ -1843,6 +1884,25 @@ internal static class SyncPlanCapabilityNetRunner
                 );
             }
 
+            // 再構築の成分のうち面の行が書かないもの（rowid の別名の NULL の守りの列・補助オブジェクトの表と CREATE 文）は、
+            // 位置で突き合わせて別に比べる（再構築の数の違いは面の行が見る）
+            foreach (
+                var (index, expectedRebuild, actualRebuild) in expected
+                    .Rebuilds.Zip(actual.Rebuilds)
+                    .Select((p, i) => (i, p.First, p.Second))
+            )
+            {
+                var expectedUnwritten = UnwrittenRebuildParts(expectedRebuild);
+                var actualUnwritten = UnwrittenRebuildParts(actualRebuild);
+
+                if (!expectedUnwritten.SequenceEqual(actualUnwritten, StringComparer.Ordinal))
+                {
+                    problems.Add(
+                        $"{SchedulingParityRelationPrefix}{what}: the rebuild {index} ({expectedRebuild.TableName}) differs in parts the facets do not write{FirstDifference(expectedUnwritten, actualUnwritten)}"
+                    );
+                }
+            }
+
             if (buildScript is null)
             {
                 return;
@@ -1889,6 +1949,18 @@ internal static class SyncPlanCapabilityNetRunner
 
         static string Describe(SchemaDiffItem item) => $"{item.Kind}: {item.Description}";
     }
+
+    /// <summary>
+    /// 再構築の成分のうち、計画の面の行（<see cref="SyncPlanProjection.Plan"/>）が書かないものの行：rowid の別名の NULL の守りの列と、
+    /// 補助オブジェクトの表と CREATE 文（種類と名前は面の行が書く）
+    /// </summary>
+    private static List<string> UnwrittenRebuildParts(TableRebuildPlan rebuild) =>
+        [
+            $"rowid-null-guard {rebuild.RowidAliasNullGuardColumn ?? "-"}",
+            .. rebuild.AuxiliaryObjects.Select(a =>
+                $"aux {a.Name} on {a.TableName}: {a.CreateSql}"
+            ),
+        ];
 
     /// <summary>一意制約の作り直しの取り下げの名指しか</summary>
     private static bool IsWithdrawalWarning(SyncPlanWarning warning) =>
@@ -2127,7 +2199,8 @@ internal static class SyncPlanCapabilityNetRunner
 
     /// <summary>
     /// 関係 N5 を掛けた数と掛けなかった数・全部の面を比べた数・取り下げのあるケースの数・終わりの状態の照合を掛けた数の要約
-    /// （「relation N5 on X of Y; not applied: 理由=数, …; compared in full F; withdrawals on W; end state on Z」）
+    /// （「relation N5 on X of Y; not applied: 理由=数, …; compared in full F; withdrawals on W; end state on Z; rebuilds in full:
+    /// existing E, create-only C, with sections S」）
     /// </summary>
     /// <param name="results">計画ごとの結果</param>
     internal static string DescribeSchedulingParity(
@@ -2137,7 +2210,10 @@ internal static class SyncPlanCapabilityNetRunner
         + Counts(results.Select(r => r.NotApplied))
         + $"; compared in full {results.Count(r => r.NotApplied is null && r.Withdrawals == 0)}"
         + $"; withdrawals on {results.Count(r => r.NotApplied is null && r.Withdrawals > 0)}"
-        + $"; end state on {results.Count(r => r.EndStateChecked)}";
+        + $"; end state on {results.Count(r => r.EndStateChecked)}"
+        + $"; rebuilds in full: existing {results.Count(r => r.ExistingTableRebuild)}"
+        + $", create-only {results.Count(r => r.CreateOnlyRebuild)}"
+        + $", with sections {results.Count(r => r.RebuildWithSections)}";
 
     /// <summary>理由ごとの数（「理由=数, …」。無ければ none）</summary>
     private static string Counts(IEnumerable<string?> reasons) =>
@@ -2151,8 +2227,9 @@ internal static class SyncPlanCapabilityNetRunner
         );
 
     /// <summary>
-    /// 関係 N5 が空振りしていないこと：逐次 DDL の方言は、計画を作れた全部のケースに掛けた（掛けなかったケースが無い）。再構築の方言で
-    /// 掛けない理由は「再構築の方言」だけ。DDL がトランザクションの方言には取り下げのあるケースが無い。掛けた計画があれば、取り下げの無い
+    /// 関係 N5 が空振りしていないこと：どの方言も、計画を作れた全部のケースに掛けた（掛けなかったケースが無い）。新しい計画器の結果の
+    /// 事実（テーブル再構築の方言の計画か）が、どの計画でも網の宣言（<paramref name="plansTableRebuilds"/>）と一致する。DDL がトランザクションの
+    /// 方言には取り下げのあるケースが無い。掛けた計画があれば、取り下げの無い
     /// （全部の面を比べた）計画も 1 つ以上ある。DDL が暗黙コミットされる方言で、流す種が普段の既定の種を全部含むときは、全部の面を比べた計画の
     /// 中に、前寄せのある計画と断られうる文の前後の名指しのある計画がそれぞれ 1 つ以上ある。決定的な行が取り下げの形を必ず出す方言
     /// （<see cref="SyncPlanFuzzDialect.ScenarioRowsWithdrawUniqueRebuild"/>）で決定的な行を流したときは、取り下げのあるケースが 1 つ以上ある
@@ -2164,32 +2241,44 @@ internal static class SyncPlanCapabilityNetRunner
     /// 前寄せと前後の名指しを全部の面で比べたことを表明するか（流す種が普段の既定の種を全部含むときだけ。必須の形の表明と同じ門）
     /// </param>
     /// <param name="expectsWithdrawal">取り下げのあるケースを比べたことを表明するか（決定的な行が取り下げの形を必ず出す方言で、決定的な行を流したとき）</param>
+    /// <param name="plansTableRebuilds">
+    /// 網の宣言で、方言がテーブル再構築の計画を組むか（<see cref="SyncPlanFuzzDialect.PlansTableRebuilds"/>。製品の判定を呼ばない）
+    /// </param>
     internal static IEnumerable<string> SchedulingParityCoverageProblems(
         string dialect,
         SyncDialectCapabilities capabilities,
         IReadOnlyCollection<SchedulingParityResult> results,
         bool assertsBehaviours,
-        bool expectsWithdrawal
+        bool expectsWithdrawal,
+        bool plansTableRebuilds
     )
     {
-        var isRebuildDialect =
-            !capabilities.SupportsAlterColumn || !capabilities.SupportsForeignKeyAlter;
-        string[] allowed = isRebuildDialect ? [SchedulingParityRebuildDialect] : [];
-
+        // 種・決定的な行・網羅の行は、どの方言でも全部が文で表せる（掛けなかった理由は文で表せないことだけで、ここには出ない）
         foreach (
             var unexpected in results
                 .Select(r => r.NotApplied)
                 .OfType<string>()
-                .Where(r => !allowed.Contains(r, StringComparer.Ordinal))
                 .Distinct(StringComparer.Ordinal)
         )
         {
             yield return $"{dialect}: relation N5 was not applied for an unexpected reason: {unexpected}";
         }
 
-        if (!isRebuildDialect && results.Count > 0 && results.All(r => r.NotApplied is not null))
+        if (results.Count > 0 && results.All(r => r.NotApplied is not null))
         {
             yield return $"{dialect}: relation N5 was not applied to any plan";
+        }
+
+        // 製品がテーブル再構築の方言かを決める判定を、網の独立した宣言で照らす（製品の判定が誤ると、歩きの終わりの状態の照合が
+        // 黙って飛ばされるか、再構築の方言に掛かる）
+        var disagreeing = results.Count(r =>
+            r.TableRebuildDialect is { } rebuild && rebuild != plansTableRebuilds
+        );
+
+        if (disagreeing > 0)
+        {
+            yield return $"{dialect}: relation N5: the planner treats the dialect as a table-rebuild dialect differently from the net's declaration "
+                + $"(declared {plansTableRebuilds}; {disagreeing} of {results.Count} plans disagree)";
         }
 
         // 前寄せの中の取り下げは DDL が暗黙コミットされる方言だけの振る舞い
@@ -2220,6 +2309,28 @@ internal static class SyncPlanCapabilityNetRunner
             if (!full.Any(r => r.NamedAroundRefusable))
             {
                 yield return $"{dialect}: relation N5 compared no plan naming constraints around refusable statements in full";
+            }
+        }
+
+        // テーブル再構築の計画を組む方言の普段の種では、全部の面を比べた計画に、既存の表の再構築・表を作るだけの再構築・再構築と
+        // 畳まれずに残ったセクションの両方を持つ計画が必ず出る（出ないなら再構築の比較が空振りしている）
+        if (assertsBehaviours && plansTableRebuilds)
+        {
+            var full = results.Where(r => r.NotApplied is null && r.Withdrawals == 0).ToList();
+
+            if (!full.Any(r => r.ExistingTableRebuild))
+            {
+                yield return $"{dialect}: relation N5 compared no plan with a rebuild of an existing table in full";
+            }
+
+            if (!full.Any(r => r.CreateOnlyRebuild))
+            {
+                yield return $"{dialect}: relation N5 compared no plan with a create-only rebuild in full";
+            }
+
+            if (!full.Any(r => r.RebuildWithSections))
+            {
+                yield return $"{dialect}: relation N5 compared no plan with both rebuilds and sections in full";
             }
         }
 
@@ -2818,8 +2929,7 @@ public abstract class SyncPlanCapabilityNetTestsBase
             }
         }
 
-        // 関係 N5 を掛けた数と掛けなかった数。逐次 DDL の方言は全部に掛ける（文で表せない計画は種・行に出ない）。
-        // 再構築の方言は全部を掛けない
+        // 関係 N5 を掛けた数と掛けなかった数。どの方言も全部に掛ける（文で表せない計画は種・行に出ない）
         var parityResults = outcomes
             .Concat(scenarioOutcomes)
             .Concat(coverageOutcomes)
@@ -2847,7 +2957,8 @@ public abstract class SyncPlanCapabilityNetTestsBase
                 capabilities,
                 parityResults,
                 assertsRequiredShapes,
-                !plan.IsSingle && dialect.ScenarioRowsWithdrawUniqueRebuild
+                !plan.IsSingle && dialect.ScenarioRowsWithdrawUniqueRebuild,
+                dialect.PlansTableRebuilds
             )
         );
 

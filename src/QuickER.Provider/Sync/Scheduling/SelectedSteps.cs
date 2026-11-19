@@ -205,6 +205,24 @@ internal static class SelectedSteps
         return (steps, null);
     }
 
+    /// <summary>
+    /// 選んだ項目の最終形のうち一意制約の削除の項目を、項目の順のまま文へ写す（畳む前・並べる前）
+    /// </summary>
+    /// <param name="items">選んだ項目の最終形</param>
+    /// <returns>一意制約を外す文（項目の順）</returns>
+    /// <remarks>
+    /// 一意制約の削除の項目は、文に要るメンバーの欠けで表せなくなることが無いので、いつも全部を写せる。由来の決め方は
+    /// <see cref="From"/> と同じ。
+    /// </remarks>
+    public static List<DropUniqueConstraintStep> UniqueConstraintDrops(
+        IReadOnlyList<SchemaDiffItem> items
+    )
+    {
+        var (steps, _) = From([.. items.Where(i => i.Kind == SchemaDiffKind.DropUniqueConstraint)]);
+
+        return [.. (steps ?? []).Select(s => s.Step).OfType<DropUniqueConstraintStep>()];
+    }
+
     /// <summary>項目の由来</summary>
     private static StepOrigin OriginOf(SchemaDiffItem item) =>
         item.PlanMark switch
