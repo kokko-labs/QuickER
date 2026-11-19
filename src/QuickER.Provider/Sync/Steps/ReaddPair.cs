@@ -8,4 +8,4 @@ namespace QuickER.Provider.Sync.Steps;
 /// 削除と追加、外部キー・一意制約・主キーの暗黙の外し直し、主キーの変更の解除と付与。利用者が別々に選んだ削除と追加は、
 /// 同じ名前でも対にしない。
 /// </remarks>
-internal sealed class ReaddPair;
+public sealed class ReaddPair;

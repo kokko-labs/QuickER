@@ -165,5 +165,35 @@ internal static partial class DialectDdlRows
                     }
                 )
                 .ExpectAll(e => e.Lines("pk pair * (b, a)*")),
+            DialectDdlRow
+                .SyncItems(
+                    "sync-other-primary-key-composite-follows-primary-key-column-ids",
+                    "AlterPrimaryKey の付与文は、複合の主キーの列を PrimaryKeyColumnIds の順で書く（列の宣言の順ではない）",
+                    DialectDdlPaths.SyncOther,
+                    E.PrimaryKey,
+                    F.Order,
+                    d =>
+                    {
+                        var a = Pk("key_a", IntType[d]);
+                        var b = Pk("key_b", IntType[d]);
+                        var entity = Table("pair", a, b);
+
+                        // 列宣言順（key_a → key_b）とは逆の主キー順
+                        entity.PrimaryKeyColumnIds = [b.Id, a.Id];
+                        return new DdlSyncItems(
+                            [
+                                new QuickER.Provider.SchemaDiffItem
+                                {
+                                    Kind = QuickER.Provider.SchemaDiffKind.AlterPrimaryKey,
+                                    TableName = "pair",
+                                    Entity = entity,
+                                    IsSelected = true,
+                                },
+                            ],
+                            QuickER.Tests.TestSupport.TestDialectCapabilities.Neutral
+                        );
+                    }
+                )
+                .Expect([Ss, Pg, My, Or], e => e.Text("*PRIMARY KEY (*key_b*, *key_a*)*")),
         ];
 }

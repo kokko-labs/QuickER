@@ -109,9 +109,8 @@ public sealed class SyncPlanContext
 /// </summary>
 /// <remarks>
 /// <para>
-/// 入口は <see cref="BuildPlan"/> の 1 つ。計画は計画器（<see cref="StepPlanner"/>）が文の並びとして作り、
-/// <see cref="StepLowering.ToSyncPlan"/> が計画の形（セクション・再構築・列順）へ写す。方言別レンダラー
-/// （<see cref="ISyncScriptBuilder"/> の実装）はこの計画を SQL へ変換するだけでよく、選択フィルタ・
+/// 入口は <see cref="BuildPlan"/> の 1 つ。計画は計画器（<see cref="StepPlanner"/>）が文の並びとして作る。方言別レンダラー
+/// （<see cref="ISyncScriptBuilder"/> の実装）はこの計画の文を SQL へ変換するだけでよく、選択フィルタ・
 /// 出力順序・種別グループ化の知識を各方言に重複させない。
 /// </para>
 /// <para>
@@ -244,8 +243,7 @@ public sealed class SyncPlanner
     /// 列順の項目を選んで <c>null</c> を渡すと <see cref="InvalidOperationException"/> を投げる（呼び出し側のバグ）。
     /// </param>
     /// <returns>
-    /// 選択済み項目のみを固定順序でセクション化した計画（空セクションは含まない）。文の並びの計画
-    /// （<see cref="StepPlanner"/>）を <see cref="StepLowering.ToSyncPlan"/> で計画の形（セクション・再構築・列順）へ写したもの
+    /// 選択済み項目から計画器（<see cref="StepPlanner"/>）が作った文の並びの計画（そのまま返す）
     /// </returns>
     /// <exception cref="InvalidOperationException">
     /// 文に要るメンバーの無い項目を渡したとき（項目の種類と無いメンバーを名指しする。差分〔<see cref="SchemaDiffService.Compute"/>〕が
@@ -268,7 +266,7 @@ public sealed class SyncPlanner
             );
         }
 
-        return StepLowering.ToSyncPlan(planned.Plan);
+        return planned.Plan;
     }
 
     /// <summary>

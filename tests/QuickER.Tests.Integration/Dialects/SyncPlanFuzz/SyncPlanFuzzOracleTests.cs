@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using AwesomeAssertions;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.MySql;
+using QuickER.Provider.Sync.Steps;
 
 namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 
@@ -20,6 +22,7 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 /// （外部キーの名前を保つ・DDL を暗黙コミットする＝1b が意味を持つ方言）。
 /// 同じく総当たりの判定の部品として、宣言した既存の行で断られる文の見分け方（表明 1）・消えた取込警告（表明 5）・静的な規則 R7・R8 が
 /// 予言する外部キーの型の組（<see cref="SyncPlanFuzzDialect.RefusesForeignKeyTypes"/>）も 1 行ずつの表で固定する。
+/// 計画をセクションと差分の項目の形で読む写しの補助（列の組だけを差し替えた複製＝<see cref="SyncPlanSections.WithForeignKeyColumnPairs"/>）の照合も置く。
 /// </remarks>
 public sealed class SyncPlanFuzzOracleTests
 {
@@ -1360,4 +1363,118 @@ public sealed class SyncPlanFuzzOracleTests
             )
             .Should()
             .Be(c.Refused, c.Name);
+
+    /// <summary>
+    /// 読み取り用の形の複製（<see cref="SyncPlanSections.WithForeignKeyColumnPairs"/>）が、列の組のほかの設定できるプロパティ（internal の
+    /// 計画器の印を含む）をすべて写すことを検証する。プロパティは反射で全数を列挙して既定と違う値を入れるので、プロパティを足したときに
+    /// 複製が値を落とせば赤になる（値を作れない型のプロパティを足しても赤になり、このテストの更新を求める）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] 同期計画の読み取り用の形: 列の組だけを差し替えた複製は、ほかの設定できるプロパティと選択の状態をすべて写す"
+    )]
+    public void WithForeignKeyColumnPairs_CopiesEveryOtherProperty()
+    {
+        var item = new SchemaDiffItem();
+        var properties = typeof(SchemaDiffItem)
+            .GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+            .Where(p => p.CanWrite)
+            .ToList();
+
+        properties.Select(p => p.Name).Should().Contain("PlanMark");
+
+        foreach (var property in properties)
+        {
+            property.SetValue(item, SampleValue(property));
+        }
+
+        var pairs = new List<ForeignKeyColumnNamePair> { new("p2", "c2"), new("p1", "c1") };
+        var copy = SyncPlanSections.WithForeignKeyColumnPairs(item, pairs);
+
+        copy.Should().NotBeSameAs(item);
+        copy.ForeignKeyColumnPairs.Should().BeSameAs(pairs);
+        item.ForeignKeyColumnPairs.Should()
+            .Equal(
+                new ForeignKeyColumnNamePair("p1", "c1"),
+                new ForeignKeyColumnNamePair("p2", "c2")
+            );
+
+        foreach (
+            var property in properties.Where(p =>
+                p.Name != nameof(SchemaDiffItem.ForeignKeyColumnPairs)
+            )
+        )
+        {
+            property.GetValue(copy).Should().Be(property.GetValue(item), property.Name);
+        }
+
+        copy.IsDestructive.Should().Be(item.IsDestructive);
+    }
+
+    /// <summary>プロパティの型ごとに、既定と違う値を作る</summary>
+    private static object SampleValue(PropertyInfo property)
+    {
+        var type = property.PropertyType;
+
+        if (type == typeof(string))
+        {
+            return "value-" + property.Name;
+        }
+
+        if (type == typeof(bool))
+        {
+            return !(bool)property.GetValue(new SchemaDiffItem())!;
+        }
+
+        if (type.IsEnum)
+        {
+            return Enum.GetValues(type).GetValue(1)!;
+        }
+
+        if (type == typeof(Entity))
+        {
+            return new Entity { TableName = property.Name };
+        }
+
+        if (type == typeof(Column))
+        {
+            return new Column { Name = property.Name, DataType = "int" };
+        }
+
+        if (type == typeof(Relationship))
+        {
+            return new Relationship { ConstraintName = property.Name };
+        }
+
+        if (type == typeof(SchemaDiffItem))
+        {
+            return new SchemaDiffItem { TableName = property.Name };
+        }
+
+        if (type == typeof(IReadOnlyList<string>))
+        {
+            return new List<string> { property.Name };
+        }
+
+        if (type == typeof(IReadOnlyList<ForeignKeyColumnNamePair>))
+        {
+            return new List<ForeignKeyColumnNamePair> { new("p1", "c1"), new("p2", "c2") };
+        }
+
+        if (type == typeof(IReadOnlyDictionary<UniqueConstraint, string>))
+        {
+            return new Dictionary<UniqueConstraint, string>
+            {
+                [new UniqueConstraint()] = property.Name,
+            };
+        }
+
+        if (type == typeof(PlanItemMark))
+        {
+            return PlanItemMark.Implicit(Enum.GetValues<ImplicitStepReason>()[0], new ReaddPair());
+        }
+
+        throw new InvalidOperationException(
+            $"SchemaDiffItem.{property.Name} の型 {type} の値の作り方がありません。SampleValue に足してください。"
+        );
+    }
 }

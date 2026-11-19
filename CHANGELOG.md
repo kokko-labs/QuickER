@@ -11,6 +11,7 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 #### DB sync & DDL
 
 - **A sync script keeps the other foreign-key rebuilds when one foreign key cannot be re-added** — A sync that fails on a foreign key with mismatched column types now lists the drop and re-add of the other foreign keys after the failing statement, and the confirmation shows the warnings about those re-adds too. The database ends up the same as before
+- **A sync script is refused only for the names it writes** — A table that holds a column or constraint name too long for the dialect, or one containing a line break or control character, no longer stops a sync whose selected changes do not write that name. DDL generation still checks every name in the diagram
 
 ### Fixed
 

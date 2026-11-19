@@ -1,6 +1,7 @@
 using System.Linq;
 using QuickER.Dialects;
 using QuickER.Model;
+using QuickER.Provider.Sync.Steps;
 
 namespace QuickER.Provider;
 
@@ -24,26 +25,28 @@ public static class SyncScriptBuilderHelper
     public static string GetNullabilityClause(Column column) =>
         ColumnNullability.AllowsNull(column) ? "NULL" : "NOT NULL";
 
-    /// <summary>構成列を解決できない一意制約のスキップコメントを組み立てる（固定文は英語が正本）</summary>
+    /// <summary>構成列を解決できない一意制約の追加のスキップコメントを組み立てる（固定文は英語が正本）</summary>
+    /// <param name="step">一意制約を付ける文</param>
     /// <remarks>
     /// 差分計算は構成列を解決できた一意制約しか出さないため通常は現れない防御。生成 SQL の決定性を保つため、
-    /// 表示用の <see cref="SchemaDiffItem.Description"/>（UI 言語で変わる）は使わない。
+    /// 表示用の項目の説明（UI 言語で変わる）は使わない。
     /// テーブル名は自由入力なので <see cref="SqlComment.Sanitize"/> でコメント行の突き破りを防ぐ。
     /// </remarks>
-    public static string BuildUniqueConstraintSkipComment(SchemaDiffItem item) =>
-        $"-- Skipped '{item.Kind}' on {SqlComment.Sanitize(item.TableName)}: "
+    public static string BuildUniqueConstraintSkipComment(AddUniqueConstraintStep step) =>
+        $"-- Skipped '{SchemaDiffKind.AddUniqueConstraint}' on {SqlComment.Sanitize(step.TableName)}: "
         + "the unique constraint has no resolvable columns.";
 
-    /// <summary>構成列を解決できない外部キーのスキップコメントを組み立てる（固定文は英語が正本・5 方言共通）</summary>
+    /// <summary>構成列を解決できない外部キーの追加のスキップコメントを組み立てる（固定文は英語が正本・5 方言共通）</summary>
+    /// <param name="step">外部キーを付ける文</param>
     /// <remarks>
     /// スキップ理由の識別子は生成 SQL の決定性を保つため方言中立・カルチャ非依存にする
-    /// （表示用の <see cref="SchemaDiffItem.Description"/> は UI 言語で変わるため使わない）。
+    /// （表示用の項目の説明は UI 言語で変わるため使わない）。
     /// テーブル名は自由入力なので <see cref="SqlComment.Sanitize"/> でコメント行の突き破りを防ぐ。
     /// </remarks>
-    public static string BuildForeignKeySkipComment(SchemaDiffItem item) =>
+    public static string BuildForeignKeySkipComment(AddForeignKeyStep step) =>
         "-- Skipped: could not resolve the column required to add the foreign key. ("
-        + $"{SqlComment.Sanitize(SchemaDiffService.NormalizeTable(item.ChildEntity!))} -> "
-        + $"{SqlComment.Sanitize(SchemaDiffService.NormalizeTable(item.ParentEntity!))})";
+        + $"{SqlComment.Sanitize(SchemaDiffService.NormalizeTable(step.ChildTable))} -> "
+        + $"{SqlComment.Sanitize(SchemaDiffService.NormalizeTable(step.ParentTable))})";
 
     /// <summary>付ける外部キーの名前を返す（AddForeignKey と再構築の外部キー）</summary>
     /// <param name="item">外部キーを付ける差分項目（子・親のエンティティが解決済み）</param>
@@ -63,12 +66,25 @@ public static class SyncScriptBuilderHelper
             limit
         );
 
-    /// <summary>外部キーの ON DELETE / ON UPDATE 参照アクション句を生成する</summary>
-    public static string BuildReferentialActionClause(Relationship? relationship) =>
-        relationship is null
-            ? string.Empty
-            : ForeignKeyReferentialActionHelper.BuildReferentialActionClause(
-                relationship.OnDelete,
-                relationship.OnUpdate
-            );
+    /// <summary>外部キーを付ける文が付ける名前を返す</summary>
+    /// <param name="step">外部キーを付ける文</param>
+    /// <param name="limit">既定名に使う識別子の長さの上限（同期の方言の上限）</param>
+    /// <returns>
+    /// 文の名前（差分が求めた名前か、リレーションの名前）。無ければ子と親の表名からの既定名
+    /// </returns>
+    /// <remarks>
+    /// 項目から求める <see cref="ForeignKeyNameToAdd(SchemaDiffItem, IdentifierLengthLimit)"/> と同じ名前になる（文の名前は、選んだ項目の
+    /// 差分が求めた名前を先に、無ければリレーションの名前を持つ）。求め方は計画器の歩きと共有する
+    /// （<see cref="ForeignKeyStepNames.Added"/>）。
+    /// </remarks>
+    public static string ForeignKeyNameToAdd(AddForeignKeyStep step, IdentifierLengthLimit limit) =>
+        ForeignKeyStepNames.Added(step, limit);
+
+    /// <summary>外部キーを付ける文の ON DELETE / ON UPDATE 参照アクション句を生成する</summary>
+    /// <param name="step">外部キーを付ける文</param>
+    public static string BuildReferentialActionClause(AddForeignKeyStep step) =>
+        ForeignKeyReferentialActionHelper.BuildReferentialActionClause(
+            step.OnDelete,
+            step.OnUpdate
+        );
 }

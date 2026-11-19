@@ -133,7 +133,254 @@ internal static partial class ParityRows
                         SyncSelectionRuleTable.Assessment
                     )
             ),
+            new(
+                "sync-step-switches-cover-every-step-type",
+                "同期の計画の文の型（SyncStep.cs の SyncStep の派生）のうちセクションに入る型は、文の型で振り分ける所（StepSwitchSites）の"
+                    + "どれにもちょうど 1 回現れ、セクションに入らない型（StepsOutsideSections）はどこにも現れない（文の型を足して振り分けに"
+                    + "足し忘れると、その文がセクションの種類を持たないか、同期スクリプトに書かれない。振り分けの既定の腕は例外にするが、"
+                    + "例外は計画を流したときにしか出ない）",
+                ParityCompare.Multiset,
+                () =>
+                    [
+                        .. StepSwitchSites.SelectMany(site =>
+                            SyncStepSwitches
+                                .DeclaredSteps([ReadRepoFile(StepTypesPath)!])
+                                .Where(step => !StepsOutsideSections.ContainsKey(step))
+                                .Select(step => $"{site.Label}: {step}")
+                        ),
+                    ],
+                () =>
+                    [
+                        .. StepSwitchSites.SelectMany(site =>
+                            SyncStepSwitches
+                                .SwitchedSteps(ReadRepoFile(site.RelativePath), site.Method)
+                                .Select(step => $"{site.Label}: {step}")
+                        ),
+                    ]
+            )
+            {
+                // いまの文の型は 15（セクションに入るのは 13）× 振り分ける所 4。拾い方が外れて正本が減ったら赤にする
+                MinimumCanon = 52,
+            },
+            new(
+                "sync-step-switches-declarations-probe",
+                "自己検査の行：照合の行 sync-step-switches-cover-every-step-type が文の型の宣言を集める形を、合成のソースで確かめる"
+                    + "（正本は合成のソースで集めるべき宣言）。主コンストラクターの引数つきの基底・引数の無い基底・条件コンパイルの外れる分岐の"
+                    + "宣言を拾い、SyncStep 自身・ほかの型を基底にした宣言・2 つ目以降の基底に SyncStep を書いた宣言は拾わない",
+                ParityCompare.Sequence,
+                () => ["FirstStep", "InBranchStep", "SecondStep"],
+                () => SyncStepSwitches.DeclaredSteps(ProbeStepSources)
+            ),
+            new(
+                "sync-step-switches-entries-probe",
+                "自己検査の行：照合の行 sync-step-switches-cover-every-step-type が振り分けの腕の型を集める形を、合成のソースで確かめる"
+                    + "（正本は合成のソースで集めるべき腕）。switch 式の型・定数・プロパティのパターンの腕、switch 文の型と変数・定数の case、"
+                    + "条件コンパイルの外れる分岐の腕を拾い、_・default・プロパティのパターンの中の型・ほかのメソッドの腕は拾わない",
+                ParityCompare.Sequence,
+                () =>
+                    [
+                        "FirstStep",
+                        "FirstStep",
+                        "InBranchStep",
+                        "QualifiedStep",
+                        "SecondStep",
+                        "SecondStep",
+                    ],
+                () => SyncStepSwitches.SwitchedSteps(ProbeStepSources[1], "Route")
+            ),
+            new(
+                "sync-step-name-members-declared",
+                "同期の計画の文の型（SyncStep.cs の SyncStep の派生）の、名前を運びうる型の位置指定の引数は、どれも同期の名前の入口"
+                    + "（SqlNameText.PlanNames）が拾う出どころとして方言の DDL の表の名前の出どころの宣言（経路の StepMember）にあるか、"
+                    + "理由つきの一覧（StepMembersNotNamed）にあるかの、ちょうど一方にある（文の型に名前のメンバーを足して入口が拾い忘れると、"
+                    + "その名前だけが検証されずに同期スクリプトへ書かれる。宣言の経路が無ければ、出どころだけへ表せない名前を入れた行も無い）",
+                ParityCompare.Multiset,
+                () => SyncStepSwitches.NameMembers([ReadRepoFile(StepTypesPath)!]),
+                () => [.. DeclaredStepMembers(), .. StepMembersNotNamed.Keys]
+            )
+            {
+                // いまの名前を運びうる引数は 37（宣言の経路 30・理由つきの一覧 7）。拾い方が外れて正本が減ったら赤にする
+                MinimumCanon = 37,
+            },
+            new(
+                "sync-step-name-members-probe",
+                "自己検査の行：照合の行 sync-step-name-members-declared が文の型の名前を運びうる引数を集める形を、合成のソースで確かめる"
+                    + "（正本は合成のソースで集めるべき引数）。名前を運びうる型の引数（null 許容・総称の型・空白を含む型の綴りを含む）と"
+                    + "条件コンパイルの外れる分岐の宣言の引数を拾い、決めていない型の引数は型を添えて拾い、文の由来と参照アクションの引数・"
+                    + "SyncStep 自身・ほかの型を基底にした宣言の引数は拾わない",
+                ParityCompare.Sequence,
+                () =>
+                    [
+                        "FirstStep.Columns",
+                        "FirstStep.Definition",
+                        "FirstStep.Name",
+                        "FirstStep.Names",
+                        "FirstStep.TableName",
+                        "FirstStep.When（名前を運ぶかを決めていない型 DateTime）",
+                        "InBranchStep.Pairs",
+                    ],
+                () => SyncStepSwitches.NameMembers(ProbeNameMemberSources)
+            ),
         ];
+
+    /// <summary>
+    /// 方言の DDL の表の名前の出どころの宣言が、経路の <c>StepMember</c> で名乗る文の型のメンバー（重なりを除く）
+    /// </summary>
+    private static IEnumerable<string> DeclaredStepMembers() =>
+        QuickER
+            .Tests.Provider.DialectDdlRows.NameSources.SelectMany(source => source.Routes)
+            .Select(route => route.StepMember)
+            .OfType<string>()
+            .Distinct(StringComparer.Ordinal);
+
+    /// <summary>
+    /// 文の型の名前を運びうる引数のうち、同期の名前の入口（SqlNameText.PlanNames の文の型の振り分け）が拾わないものと、その理由
+    /// （照合の行 sync-step-name-members-declared の写しの一方）
+    /// </summary>
+    private static readonly Dictionary<string, string> StepMembersNotNamed = new(
+        StringComparer.Ordinal
+    )
+    {
+        ["SetTableDescriptionStep.NewDescription"] =
+            "説明の本文で名前でない（改行が正当で、コメントの側の SqlComment.Sanitize が受け持つ）",
+        ["SetColumnDescriptionStep.NewDescription"] =
+            "説明の本文で名前でない（改行が正当で、コメントの側の SqlComment.Sanitize が受け持つ）",
+        ["CreateTableStep.UniqueConstraintNames"] =
+            "表の定義の一意制約（入口が CreateTableStep.Definition として検証する名前）から差分が解決した名前で、入口は読まない（今より検証を広げない）",
+        ["RebuildTableStep.Rebuild"] =
+            "表の作り直しは SyncPlan.Rebuilds のループが拾う（宣言の rebuild-* と rebuild-definition-* の経路）",
+        ["MoveColumnStep.TableName"] =
+            "列を動かす文は SyncPlan.Reorders のループが拾う（宣言の reorder-table の経路）",
+        ["MoveColumnStep.Column"] =
+            "列を動かす文は SyncPlan.Reorders のループが拾う（宣言の reorder-move-column の経路）",
+        ["MoveColumnStep.AfterColumn"] =
+            "列を動かす文は SyncPlan.Reorders のループが拾う（宣言の reorder-move-after-column の経路）",
+    };
+
+    /// <summary>名前を運びうる引数の自己検査の行の合成のソース</summary>
+    private static readonly string[] ProbeNameMemberSources =
+    [
+        """
+            internal abstract record SyncStep(StepOrigin Origin);
+
+            internal sealed record FirstStep(
+                StepOrigin Origin,
+                string TableName,
+                string? Name,
+                IReadOnlyList<string> Columns,
+                Entity Definition,
+                IReadOnlyDictionary<UniqueConstraint,  string>? Names,
+                ForeignKeyReferentialAction OnDelete,
+                DateTime When
+            ) : SyncStep(Origin);
+
+            internal sealed record OtherBased(StepOrigin Origin, string TableName) : OtherBase(Origin);
+
+            #if QUICKER_PROBE_BRANCH
+            internal sealed record InBranchStep(StepOrigin Origin, IReadOnlyList<ForeignKeyColumnNamePair> Pairs)
+                : SyncStep(Origin);
+            #endif
+            """,
+    ];
+
+    /// <summary>文の型を宣言するファイル（リポジトリの根からの相対パス）</summary>
+    private const string StepTypesPath = "src/QuickER.Provider/Sync/Steps/SyncStep.cs";
+
+    /// <summary>
+    /// 文の型で振り分ける所（照合の行 sync-step-switches-cover-every-step-type の写し）。振り分ける所を足すときは、ここに 1 行足す
+    /// </summary>
+    private static readonly SyncStepSwitches.Site[] StepSwitchSites =
+    [
+        new("section-of", "src/QuickER.Provider/Sync/Steps/StepSections.cs", "SectionOf"),
+        new("builder-base", "src/QuickER.Provider/SyncScriptBuilderBase.cs", "AppendStep"),
+        new(
+            "builder-oracle",
+            "src/QuickER.Provider.Oracle/OracleSyncScriptBuilder.cs",
+            "AppendStep"
+        ),
+        new("name-text", "src/QuickER.Provider/SqlNameText.cs", "PlanNames"),
+    ];
+
+    /// <summary>セクションに入らない文の型と、その理由（振り分ける所のどこにも現れない）</summary>
+    private static readonly Dictionary<string, string> StepsOutsideSections = new(
+        StringComparer.Ordinal
+    )
+    {
+        ["RebuildTableStep"] =
+            "表の作り直しは SyncPlan.Rebuilds として読み、SQLite のビルダーが再構築の文を織り交ぜる（セクションの文として書かない）",
+        ["MoveColumnStep"] =
+            "列を動かす文は SyncPlan.Reorders として読み、MySQL のビルダーが列順の節で書く（セクションの文として書かない）",
+    };
+
+    /// <summary>リポジトリの根からの相対パスのファイルの本文（無ければ null）</summary>
+    private static string? ReadRepoFile(string relativePath)
+    {
+        var path = Path.Combine(
+            WorkflowGuardTests.Root,
+            relativePath.Replace('/', Path.DirectorySeparatorChar)
+        );
+
+        return File.Exists(path) ? File.ReadAllText(path) : null;
+    }
+
+    /// <summary>文の型の自己検査の行の合成のソース（宣言のファイルと、振り分けのファイル）</summary>
+    private static readonly string[] ProbeStepSources =
+    [
+        """
+            internal abstract record SyncStep(StepOrigin Origin);
+
+            internal sealed record FirstStep(StepOrigin Origin, string TableName) : SyncStep(Origin);
+
+            internal sealed record SecondStep : SyncStep
+            {
+            }
+
+            internal sealed record OtherBased(StepOrigin Origin) : OtherBase(Origin);
+
+            internal sealed record LaterBase(StepOrigin Origin) : IStep, SyncStep;
+
+            #if QUICKER_PROBE_BRANCH
+            internal sealed record InBranchStep(StepOrigin Origin) : SyncStep(Origin);
+            #endif
+            """,
+        """
+            internal static class Router
+            {
+                private static int Route(SyncStep step)
+                {
+                    var kind = step switch
+                    {
+                        FirstStep => 1,
+                        SecondStep { Pair: OtherStep } => 2,
+                        Steps.QualifiedStep => 3,
+            #if QUICKER_PROBE_BRANCH
+                        InBranchStep => 4,
+            #endif
+                        _ => 0,
+                    };
+
+                    switch (step)
+                    {
+                        case FirstStep first:
+                            return first.Length;
+
+                        case SecondStep:
+                            return 2;
+
+                        default:
+                            return kind;
+                    }
+                }
+
+                private static int Other(SyncStep step) =>
+                    step switch
+                    {
+                        OutsideStep => 1,
+                        _ => 0,
+                    };
+            }
+            """,
+    ];
 
     /// <summary>評価の規則のフォルダ（src/QuickER.Provider/Sync/Assessment）のソースの本文</summary>
     private static IEnumerable<string> AssessmentSources() =>

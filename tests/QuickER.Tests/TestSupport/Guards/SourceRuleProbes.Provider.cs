@@ -949,7 +949,7 @@ internal static partial class SourceRuleProbes
             },
             // 受け手が names の Add を 1 本ずつ拾い、所属のメソッド・出どころの式・表の位置か・置き場所の表記にする（置き場所の関数は
             // ラムダの中でも名前で読む）。引数の形が違う names.Add（素の値・引数の数の違う生成）は「形の違う」として拾い、names 以外の
-            // 受け手の Add・名前の違う変数の Add は拾わない
+            // 受け手の Add・名前の違う変数の Add は拾わない。switch 文の腕の中の names.Add は、腕の最初のラベルが振り分ける型（修飾のまま）をメソッドに添える
             new SourceRuleProbe(
                 "sql-name-text-name-sources-forms",
                 "sql-name-text-name-sources",
@@ -959,7 +959,7 @@ internal static partial class SourceRuleProbes
                         """
                         internal static class SqlNameText
                         {
-                            private static void Collect(string table, Item item, List<NameSource> names, List<NameSource> others, List<NameSource> nameList)
+                            private static void Collect(string table, Item item, SyncStep step, List<NameSource> names, List<NameSource> others, List<NameSource> nameList)
                             {
                                 names.Add(new(table, true, TableLocation));
                                 names.Add(new NameSource(item.ColumnName, false, name => ColumnLocation(table, name)));
@@ -967,13 +967,32 @@ internal static partial class SourceRuleProbes
                                 nameList.Add(new(table, true, TableLocation));
                                 names.Add(table);
                                 names.Add(new(table, true, TableLocation, item));
+
+                                switch (step)
+                                {
+                                    case FirstStep s:
+                                        names.Add(new(s.TableName, true, TableLocation));
+                                        break;
+
+                                    case Steps.SecondStep { Name: not null } s:
+                                    {
+                                        foreach (var column in s.Columns)
+                                        {
+                                            names.Add(new(column, false, name => ColumnLocation(s.TableName, name)));
+                                        }
+
+                                        break;
+                                    }
+                                }
                             }
                         }
                         """,
                         "Collect: names.Add(table, true, TABLE)",
                         "Collect: names.Add(item.ColumnName, false, COLUMN)",
                         "Collect: 形の違う names.Add names.Add(table)",
-                        "Collect: 形の違う names.Add names.Add(new(table, true, TableLocation, item))"
+                        "Collect: 形の違う names.Add names.Add(new(table, true, TableLocation, item))",
+                        "Collect/FirstStep: names.Add(s.TableName, true, TABLE)",
+                        "Collect/Steps.SecondStep: names.Add(column, false, COLUMN)"
                     ),
                 ]
             ),
@@ -1214,8 +1233,7 @@ internal static partial class SourceRuleProbes
             {
                 InactiveBranch = true,
             },
-            // 差分の項目・警告を作る式と、差分の項目の複製を作る呼び出し（素の・?. の）を拾い、文の生成・with 式・型の宣言・
-            // メソッドの宣言・XmlDoc・文字列・名前の一部だけが同じ型と呼び出しは拾わない
+            // 差分の項目・警告を作る式を拾い、文の生成・with 式・型の宣言・XmlDoc・コメント・文字列・名前の一部だけが同じ型は拾わない
             new SourceRuleProbe(
                 "sync-scheduling-builds-steps-only-forms",
                 "sync-scheduling-builds-steps-only",
@@ -1226,9 +1244,6 @@ internal static partial class SourceRuleProbes
                         internal sealed class SchemaDiffItem
                         {
                             public string Name { get; init; } = "";
-
-                            public SchemaDiffItem WithForeignKeyColumnPairs(int pairs) => this;
-                            public SchemaDiffItem WithForeignKeyColumnPairsKept() => this;
                         }
 
                         internal sealed class SchemaDiffItems { }
@@ -1244,25 +1259,16 @@ internal static partial class SourceRuleProbes
 
                             public static object B() => new SyncPlanWarning("kind");
 
-                            public static object C(SchemaDiffItem item) => item.WithForeignKeyColumnPairs(1);
-
-                            public static object? D(SchemaDiffItem? item) =>
-                                item?.WithForeignKeyColumnPairs(2);
-
                             // new SchemaDiffItem()
                             public static object E() => new Step("new SyncPlanWarning");
 
                             public static object F(Step step) => step with { Name = "b" };
 
                             public static object G() => new SchemaDiffItems();
-
-                            public static object H(SchemaDiffItem item) => item.WithForeignKeyColumnPairsKept();
                         }
                         """,
                         "new SchemaDiffItem",
-                        "new SyncPlanWarning",
-                        "WithForeignKeyColumnPairs",
-                        "WithForeignKeyColumnPairs"
+                        "new SyncPlanWarning"
                     ),
                 ]
             ),
@@ -1400,8 +1406,7 @@ internal static partial class SourceRuleProbes
             {
                 InactiveBranch = true,
             },
-            // 差分の項目を作る式と項目の複製の呼び出し（?. の後ろも）を拾い、警告を作る式・名前の似た型・名前の似た呼び出し・
-            // XmlDoc の cref・コメント・文字列の中の綴りは拾わない
+            // 差分の項目を作る式を拾い、警告を作る式・名前の似た型・XmlDoc の cref・コメント・文字列の中の綴りは拾わない
             new SourceRuleProbe(
                 "sync-assessment-builds-warnings-only-forms",
                 "sync-assessment-builds-warnings-only",
@@ -1412,9 +1417,6 @@ internal static partial class SourceRuleProbes
                         internal sealed class SchemaDiffItem
                         {
                             public string Name { get; init; } = "";
-
-                            public SchemaDiffItem WithForeignKeyColumnPairs(int pairs) => this;
-                            public SchemaDiffItem WithForeignKeyColumnPairsKept() => this;
                         }
 
                         internal sealed class SchemaDiffItems { }
@@ -1428,22 +1430,13 @@ internal static partial class SourceRuleProbes
 
                             public static object B() => new SchemaDiffItem { Name = "b" };
 
-                            public static object C(SchemaDiffItem item) => item.WithForeignKeyColumnPairs(1);
-
-                            public static object? D(SchemaDiffItem? item) =>
-                                item?.WithForeignKeyColumnPairs(2);
-
                             // new SchemaDiffItem()
-                            public static object E(SchemaDiffItem item) => item.WithForeignKeyColumnPairsKept();
-
                             public static object F() => new SchemaDiffItems();
 
                             public static string G() => "new SchemaDiffItem()";
                         }
                         """,
-                        "new SchemaDiffItem",
-                        "WithForeignKeyColumnPairs",
-                        "WithForeignKeyColumnPairs"
+                        "new SchemaDiffItem"
                     ),
                 ]
             ),

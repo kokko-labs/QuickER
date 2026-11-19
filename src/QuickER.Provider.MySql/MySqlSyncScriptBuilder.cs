@@ -4,10 +4,11 @@ using System.Text;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.Sync.Steps;
 
 namespace QuickER.Provider.MySql;
 
-/// <summary>選択済みの <see cref="SchemaDiffItem"/> から MySQL 用の DDL バッチを生成する</summary>
+/// <summary>実行計画（<see cref="SyncPlan"/>）の文から MySQL 用の DDL バッチを生成する</summary>
 /// <remarks>
 /// <para>
 /// 依存関係による失敗を避けるため、以下の順序で出力する。文はすべて <c>;</c> で終端する。
@@ -84,19 +85,19 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
     /// 制約行は DDL 生成と同じヘルパーで組み立てる（同期で作ったテーブルにだけ UNIQUE が無い、という
     /// 食い違いを構造的に防ぐ）。
     /// </remarks>
-    protected override void AppendCreateTable(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendCreateTable(StringBuilder sb, CreateTableStep step)
     {
-        var e = item.Entity!;
-        sb.AppendLine($"CREATE TABLE {MySqlIdentifier.Quote(item.TableName)} (");
+        var e = step.Definition;
+        sb.AppendLine($"CREATE TABLE {MySqlIdentifier.Quote(step.TableName)} (");
 
         // 列定義の末尾カンマ判定に「後続制約行の有無」が必要なため、制約行を先に組み立てる
         var constraintLines = TableConstraintLineBuilder.Build(
             e,
-            item.TableName,
-            MySqlIdentifier.Quote(item.TableName),
+            step.TableName,
+            MySqlIdentifier.Quote(step.TableName),
             MySqlIdentifier.QuoteSimple,
             name => $"`{MySqlIdentifier.Escape(name)}`",
-            item.UniqueConstraintNames,
+            step.UniqueConstraintNames,
             IdentifierLimit,
             DialectName,
             UnsupportedFeature.Sync
@@ -129,9 +130,9 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
     }
 
     /// <summary>ALTER TABLE ... ADD COLUMN（列追加）文を生成する</summary>
-    protected override void AppendAddColumn(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendAddColumn(StringBuilder sb, AddColumnStep step)
     {
-        var col = item.Column!;
+        var col = step.Column;
 
         // 計算列は式が図に無い＝ここで足すのは普通の列。手で式を足す必要があることを添える
         ComputedColumnComment.Append(sb, col, string.Empty);
@@ -139,7 +140,7 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         // 採番の定義は図に無い＝ここで足すのは普通の列。扱いの表が注記とする方言だけ書き添える
         IdentityColumnComment.Append(sb, col, string.Empty, DialectName, UnsupportedFeature.Sync);
         sb.AppendLine(
-            $"ALTER TABLE {MySqlIdentifier.Quote(item.TableName)} "
+            $"ALTER TABLE {MySqlIdentifier.Quote(step.TableName)} "
                 + $"ADD COLUMN {MySqlIdentifier.QuoteSimple(col.Name)} {BuildColumnDefinition(col)};"
         );
     }
@@ -163,13 +164,13 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
     /// 何もしない（<see cref="AppendModifyColumnStatement"/>）。
     /// </para>
     /// </remarks>
-    protected override void AppendAlterColumn(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendAlterColumn(StringBuilder sb, AlterColumnStep step)
     {
-        var col = item.Column!;
+        var col = step.Column;
 
         AppendLiveColumnDefinitionLookup(
             sb,
-            item.TableName,
+            step.TableName,
             $"'{MySqlIdentifier.EscapeStringLiteral(col.Name)}'",
             includeAutoIncrement: true,
             typeOverride: col.DataType,
@@ -177,7 +178,7 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         );
         AppendModifyColumnStatement(
             sb,
-            item.TableName,
+            step.TableName,
             col.Name,
             position: null,
             missingColumnFails: true
@@ -199,12 +200,12 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
     /// 落とすのと同じ扱い。スクリプトに英語の注記を出す）。
     /// </para>
     /// </remarks>
-    protected override void AppendDropPrimaryKey(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropPrimaryKey(StringBuilder sb, DropPrimaryKeyStep step)
     {
         // クォートした名前をプリペアド動的 SQL の文字列リテラルへ埋めるため、リテラルエスケープ込みのヘルパーを通す
-        var table = MySqlIdentifier.QuoteForDynamicSql(item.TableName);
+        var table = MySqlIdentifier.QuoteForDynamicSql(step.TableName);
         var tableName = MySqlIdentifier.EscapeStringLiteral(
-            MySqlIdentifier.TableNameOnly(item.TableName)
+            MySqlIdentifier.TableNameOnly(step.TableName)
         );
 
         // 主キーの有無を information_schema で確かめてからプリペアド動的 SQL で外す。
@@ -214,7 +215,7 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         sb.AppendLine("SELECT tc.CONSTRAINT_NAME INTO @pk");
         sb.AppendLine("FROM information_schema.TABLE_CONSTRAINTS tc");
         sb.AppendLine(
-            $"WHERE {SchemaPredicate("tc.CONSTRAINT_SCHEMA", item.TableName)} "
+            $"WHERE {SchemaPredicate("tc.CONSTRAINT_SCHEMA", step.TableName)} "
                 + $"AND tc.TABLE_NAME = '{tableName}' "
                 + "AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY' LIMIT 1;"
         );
@@ -228,11 +229,11 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         sb.AppendLine("SELECT c.COLUMN_NAME INTO @ai");
         sb.AppendLine("FROM information_schema.COLUMNS c");
         sb.AppendLine(
-            $"WHERE {SchemaPredicate("c.TABLE_SCHEMA", item.TableName)} "
+            $"WHERE {SchemaPredicate("c.TABLE_SCHEMA", step.TableName)} "
                 + $"AND c.TABLE_NAME = '{tableName}' "
                 + "AND c.COLUMN_KEY = 'PRI' AND INSTR(c.EXTRA, 'auto_increment') > 0 LIMIT 1;"
         );
-        AppendLiveColumnDefinitionLookup(sb, item.TableName, "@ai", includeAutoIncrement: false);
+        AppendLiveColumnDefinitionLookup(sb, step.TableName, "@ai", includeAutoIncrement: false);
 
         // 主キーが無ければ無害な DO 0。AUTO_INCREMENT の列が無ければ素の DROP PRIMARY KEY。
         // 在れば AUTO_INCREMENT を外す MODIFY と同じ ALTER で外す（列名は実行時の値なので終端の ` を二重化して埋める）
@@ -246,14 +247,13 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
 
     /// <summary>主キー変更の付与フェーズ（新主キー制約の ADD）文を生成する</summary>
     /// <remarks>
-    /// 新しい主キー構成は <see cref="SchemaDiffItem.Entity"/>（target 側エンティティ）の主キー列を実効順
-    /// （<see cref="Entity.GetPrimaryKeyColumnsInOrder"/>）で読む。
+    /// 新しい主キー構成は文の主キーの列名（<see cref="AddPrimaryKeyStep.Columns"/>＝主キーの中の並びの順）で読む。
     /// MySQL の主キー名は <c>PRIMARY</c> 固定のため <c>CONSTRAINT</c> 名は指定しない。
     /// 主キー列が 1 つも無い場合（主キーの解除のみ）は付与文を出さない。
     /// </remarks>
-    protected override void AppendAddPrimaryKey(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendAddPrimaryKey(StringBuilder sb, AddPrimaryKeyStep step)
     {
-        var pks = item.Entity?.GetPrimaryKeyColumnsInOrder() ?? [];
+        var pks = step.Columns;
 
         // 新しい主キー列が無い（＝主キーの解除のみ）場合は付与文を出さない
         if (pks.Count == 0)
@@ -261,33 +261,33 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
             return;
         }
 
-        var pkCols = string.Join(", ", pks.Select(p => MySqlIdentifier.QuoteSimple(p.Name)));
+        var pkCols = string.Join(", ", pks.Select(MySqlIdentifier.QuoteSimple));
         sb.AppendLine(
-            $"ALTER TABLE {MySqlIdentifier.Quote(item.TableName)} ADD PRIMARY KEY ({pkCols});"
+            $"ALTER TABLE {MySqlIdentifier.Quote(step.TableName)} ADD PRIMARY KEY ({pkCols});"
         );
     }
 
     /// <summary>一意制約を追加する ALTER TABLE ... ADD CONSTRAINT ... UNIQUE 文を生成する</summary>
-    protected override void AppendAddUniqueConstraint(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendAddUniqueConstraint(
+        StringBuilder sb,
+        AddUniqueConstraintStep step
+    )
     {
-        if (item.UniqueConstraintColumns.Count == 0)
+        if (step.Columns.Count == 0)
         {
-            sb.AppendLine(SyncScriptBuilderHelper.BuildUniqueConstraintSkipComment(item));
+            sb.AppendLine(SyncScriptBuilderHelper.BuildUniqueConstraintSkipComment(step));
             return;
         }
 
         var name = UniqueConstraintNaming.Resolve(
-            item.UniqueConstraintName,
-            item.TableName,
-            item.UniqueConstraintColumns,
+            step.Name,
+            step.TableName,
+            step.Columns,
             IdentifierLimit
         );
-        var cols = string.Join(
-            ", ",
-            item.UniqueConstraintColumns.Select(MySqlIdentifier.QuoteSimple)
-        );
+        var cols = string.Join(", ", step.Columns.Select(MySqlIdentifier.QuoteSimple));
         sb.AppendLine(
-            $"ALTER TABLE {MySqlIdentifier.Quote(item.TableName)} ADD CONSTRAINT `{MySqlIdentifier.Escape(name)}` "
+            $"ALTER TABLE {MySqlIdentifier.Quote(step.TableName)} ADD CONSTRAINT `{MySqlIdentifier.Escape(name)}` "
                 + $"UNIQUE ({cols});"
         );
     }
@@ -297,59 +297,57 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
     /// MySQL の一意制約は実体が一意インデックスで、<c>DROP CONSTRAINT</c> は 8.0.19 未満で受け付けられない。
     /// どの版でも通る <c>DROP INDEX</c> 構文を使う（制約名＝インデックス名）。
     /// </remarks>
-    protected override void AppendDropUniqueConstraint(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropUniqueConstraint(
+        StringBuilder sb,
+        DropUniqueConstraintStep step
+    )
     {
         var name = UniqueConstraintNaming.Resolve(
-            item.UniqueConstraintName,
-            item.TableName,
-            item.UniqueConstraintColumns,
+            step.Name,
+            step.TableName,
+            step.Columns,
             IdentifierLimit
         );
         sb.AppendLine(
-            $"ALTER TABLE {MySqlIdentifier.Quote(item.TableName)} "
+            $"ALTER TABLE {MySqlIdentifier.Quote(step.TableName)} "
                 + $"DROP INDEX {MySqlIdentifier.QuoteSimple(name)};"
         );
     }
 
     /// <summary>ALTER TABLE ... DROP COLUMN（列削除）文を生成する</summary>
-    protected override void AppendDropColumn(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropColumn(StringBuilder sb, DropColumnStep step)
     {
         sb.AppendLine(
-            $"ALTER TABLE {MySqlIdentifier.Quote(item.TableName)} "
-                + $"DROP COLUMN {MySqlIdentifier.QuoteSimple(item.ColumnName!)};"
+            $"ALTER TABLE {MySqlIdentifier.Quote(step.TableName)} "
+                + $"DROP COLUMN {MySqlIdentifier.QuoteSimple(step.ColumnName)};"
         );
     }
 
     /// <summary>DROP TABLE（テーブル削除）文を生成する</summary>
-    protected override void AppendDropTable(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropTable(StringBuilder sb, DropTableStep step)
     {
-        sb.AppendLine($"DROP TABLE {MySqlIdentifier.Quote(item.TableName)};");
+        sb.AppendLine($"DROP TABLE {MySqlIdentifier.Quote(step.TableName)};");
     }
 
     /// <summary>外部キー制約を追加する ALTER TABLE 文を生成する</summary>
-    protected override void AppendAddForeignKey(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendAddForeignKey(StringBuilder sb, AddForeignKeyStep step)
     {
-        if (item.ChildEntity is null || item.ParentEntity is null)
-        {
-            return;
-        }
-
-        var columnPairs = SyncScriptBuilderHelper.ResolveColumnPairs(item);
+        var columnPairs = step.ColumnPairs;
 
         // 構成列が特定できない場合は不正な DDL を出さず、コメントでスキップを明示する
         if (columnPairs.Count == 0)
         {
-            sb.AppendLine(SyncScriptBuilderHelper.BuildForeignKeySkipComment(item));
+            sb.AppendLine(SyncScriptBuilderHelper.BuildForeignKeySkipComment(step));
             return;
         }
 
-        var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
-        var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
-        var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, IdentifierLimit);
-        var referentialActions = MySqlReferentialAction.BuildClause(item.Relationship);
+        var childTbl = SchemaDiffService.NormalizeTable(step.ChildTable);
+        var parentTbl = SchemaDiffService.NormalizeTable(step.ParentTable);
+        var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(step, IdentifierLimit);
+        var referentialActions = MySqlReferentialAction.BuildClause(step.OnDelete, step.OnUpdate);
 
         // InnoDB で効かない SET DEFAULT は句を省き、その旨を残す（DDL 生成と同じ注意コメント）
-        if (MySqlReferentialAction.UsesSetDefault(item.Relationship))
+        if (MySqlReferentialAction.UsesSetDefault(step.OnDelete, step.OnUpdate))
         {
             sb.AppendLine(MySqlReferentialAction.SetDefaultNote);
         }
@@ -381,27 +379,22 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
     /// <c>information_schema.REFERENTIAL_CONSTRAINTS</c> から制約名を引いてプリペアド動的 SQL で削除する。
     /// FK が見つからない場合は <c>DO 0</c> を実行して無害に済ませる。
     /// </remarks>
-    protected override void AppendDropForeignKey(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropForeignKey(StringBuilder sb, DropForeignKeyStep step)
     {
-        if (item.ChildEntity is null || item.ParentEntity is null)
-        {
-            return;
-        }
-
-        var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
-        var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
+        var childTbl = SchemaDiffService.NormalizeTable(step.ChildTable);
+        var parentTbl = SchemaDiffService.NormalizeTable(step.ParentTable);
 
         // 制約名が判明している場合は直接 DROP FOREIGN KEY する
-        if (!string.IsNullOrWhiteSpace(item.ForeignKeyName))
+        if (!string.IsNullOrWhiteSpace(step.Name))
         {
             sb.AppendLine(
                 $"ALTER TABLE {MySqlIdentifier.Quote(childTbl)} "
-                    + $"DROP FOREIGN KEY {MySqlIdentifier.QuoteSimple(item.ForeignKeyName)};"
+                    + $"DROP FOREIGN KEY {MySqlIdentifier.QuoteSimple(step.Name)};"
             );
             AppendDropForeignKeyIndex(
                 sb,
                 childTbl,
-                $"'{MySqlIdentifier.EscapeStringLiteral(item.ForeignKeyName)}'"
+                $"'{MySqlIdentifier.EscapeStringLiteral(step.Name)}'"
             );
             return;
         }
@@ -458,36 +451,30 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
     /// 先に外した外部キーの名前の索引を同じ条件でもう一度確かめる。名前の分からない外部キーは、実行時に引いた名前が
     /// 残らないので対象にしない。
     /// </remarks>
-    protected override void AppendSectionEnd(StringBuilder sb, SyncPlanSection section)
+    protected override void AppendSectionEnd(StringBuilder sb, StepSection section)
     {
         if (section.Kind != SchemaDiffKind.DropForeignKey)
         {
             return;
         }
 
-        var items = section.Items;
+        var drops = section.Steps.OfType<DropForeignKeyStep>().ToList();
 
-        for (var i = 0; i < items.Count; i++)
+        for (var i = 0; i < drops.Count; i++)
         {
-            var item = items[i];
+            var step = drops[i];
 
-            if (
-                item.ChildEntity is null
-                || item.ParentEntity is null
-                || string.IsNullOrWhiteSpace(item.ForeignKeyName)
-            )
+            if (string.IsNullOrWhiteSpace(step.Name))
             {
                 continue;
             }
 
-            var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
-            var droppedLaterOnSameTable = items
+            var childTbl = SchemaDiffService.NormalizeTable(step.ChildTable);
+            var droppedLaterOnSameTable = drops
                 .Skip(i + 1)
                 .Any(later =>
-                    later.ChildEntity is not null
-                    && later.ParentEntity is not null
-                    && SchemaNames.AreSame(
-                        SchemaDiffService.NormalizeTable(later.ChildEntity),
+                    SchemaNames.AreSame(
+                        SchemaDiffService.NormalizeTable(later.ChildTable),
                         childTbl
                     )
                 );
@@ -497,7 +484,7 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
                 AppendDropForeignKeyIndex(
                     sb,
                     childTbl,
-                    $"'{MySqlIdentifier.EscapeStringLiteral(item.ForeignKeyName)}'"
+                    $"'{MySqlIdentifier.EscapeStringLiteral(step.Name)}'"
                 );
             }
         }
@@ -582,11 +569,14 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
 
     /// <summary>テーブルの説明（ALTER TABLE ... COMMENT）設定文を生成する</summary>
     /// <remarks>新値が空なら空文字コメントを設定して説明を削除する</remarks>
-    protected override void AppendSetTableDescription(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendSetTableDescription(
+        StringBuilder sb,
+        SetTableDescriptionStep step
+    )
     {
-        var newVal = DescriptionText.Normalize(item.NewDescription);
+        var newVal = DescriptionText.Normalize(step.NewDescription);
         sb.AppendLine(
-            $"ALTER TABLE {MySqlIdentifier.Quote(item.TableName)} "
+            $"ALTER TABLE {MySqlIdentifier.Quote(step.TableName)} "
                 + $"COMMENT = '{MySqlIdentifier.EscapeStringLiteral(newVal)}';"
         );
     }
@@ -597,18 +587,21 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
     /// （<see cref="AppendLiveColumnDefinitionLookup"/>）、末尾の COMMENT だけを新しい値へ差し替える。
     /// 新値は生成時に確定するため <c>@cmt</c> へ代入し、リテラル化は実行時の <c>QUOTE()</c> が担う。
     /// </remarks>
-    protected override void AppendSetColumnDescription(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendSetColumnDescription(
+        StringBuilder sb,
+        SetColumnDescriptionStep step
+    )
     {
-        var columnName = item.ColumnName!;
-        AppendLiveColumnDefinitionLookup(sb, item.TableName, columnName);
+        var columnName = step.ColumnName;
+        AppendLiveColumnDefinitionLookup(sb, step.TableName, columnName);
 
         // ライブ再構成が拾った既存コメントを、同期する新しい説明で上書きする（順序が逆だと新値が消える）。
         // QUOTE() が実行時に安全な文字列リテラルへ再引用するため、ここでのエスケープは SET 文の 1 段だけ
         var newVal = MySqlIdentifier.EscapeStringLiteral(
-            DescriptionText.Normalize(item.NewDescription)
+            DescriptionText.Normalize(step.NewDescription)
         );
         sb.AppendLine($"SET @cmt = '{newVal}';");
-        AppendModifyColumnStatement(sb, item.TableName, columnName, position: null);
+        AppendModifyColumnStatement(sb, step.TableName, columnName, position: null);
     }
 
     // ---------------- 実行時の列定義再構成（ライブ再構成） ----------------

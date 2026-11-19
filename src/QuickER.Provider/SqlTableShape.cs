@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using QuickER.Dialects;
 using QuickER.Model;
+using QuickER.Provider.Sync.Steps;
 
 namespace QuickER.Provider;
 
@@ -28,7 +29,7 @@ public static class SqlTableShape
     /// <param name="entity">表</param>
     public static bool HasNoColumns(Entity entity) => entity.Columns.Count == 0;
 
-    /// <summary>差分の項目が列の無い表の追加か（計画の除外と同期スクリプトの入口が共有する）</summary>
+    /// <summary>差分の項目が列の無い表の追加か（計画の除外が使う。判定の本体は <see cref="HasNoColumns"/>）</summary>
     /// <param name="item">差分の項目</param>
     public static bool IsAddTableWithoutColumns(SchemaDiffItem item) =>
         item.Kind == SchemaDiffKind.AddTable && item.Entity is { } entity && HasNoColumns(entity);
@@ -41,16 +42,16 @@ public static class SqlTableShape
 
     /// <summary>実行計画に列の無い表を作る項目があれば名指しで例外を投げる（同期生成の入口）</summary>
     /// <remarks>
-    /// 表を作る経路は 2 つ＝表の追加のセクション項目（逐次 DDL の方言）と、テーブル再構築の合成後の定義（SQLite。表の追加は
+    /// 表を作る文は 2 つ＝表を作る文（<see cref="CreateTableStep"/>。逐次 DDL の方言）と、テーブル再構築の合成後の定義（SQLite。表の追加は
     /// 作るだけの再構築になる）。
     /// </remarks>
     /// <param name="plan">実行計画</param>
-    /// <exception cref="InvalidOperationException">列の無い表を作る項目がある場合</exception>
+    /// <exception cref="InvalidOperationException">列の無い表を作る文がある場合</exception>
     public static void Validate(SyncPlan plan) =>
         Validate(
-            plan.Sections.SelectMany(section => section.Items)
-                .Where(IsAddTableWithoutColumns)
-                .Select(item => item.TableName)
+            plan.Steps.OfType<CreateTableStep>()
+                .Where(create => HasNoColumns(create.Definition))
+                .Select(create => create.TableName)
                 .Concat(
                     plan.Rebuilds.Where(rebuild => HasNoColumns(rebuild.NewDefinition))
                         .Select(rebuild => rebuild.TableName)

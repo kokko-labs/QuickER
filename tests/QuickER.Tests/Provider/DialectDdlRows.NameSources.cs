@@ -1,5 +1,6 @@
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.Sync.Steps;
 using E = QuickER.Tests.Provider.DialectDdlElements;
 using F = QuickER.Tests.Provider.DialectDdlFacets;
 using P = QuickER.Tests.Provider.DialectDdlPaths;
@@ -12,17 +13,24 @@ namespace QuickER.Tests.Provider;
 /// <param name="IsTable">表の名前として測るか（<c>names.Add</c> の第 2 引数）</param>
 /// <param name="Location">例外文の置き場所の表記（<c>TABLE</c> / <c>COLUMN</c> / <c>UNIQUE</c> / <c>FOREIGN KEY</c>）</param>
 /// <param name="Routes">この出どころへ名前を 1 つだけ差し込んだ入力を作る経路（1 本以上）</param>
+/// <param name="Arm">
+/// <c>names.Add</c> を囲む switch の腕が振り分ける型の名前（<c>PlanNames</c> の文の型の腕。腕の外の <c>names.Add</c> は null）。
+/// 腕ごとに同じ綴りの式（<c>s.TableName</c> など）が現れるので、どの文の型の出どころかを鍵に含める
+/// </param>
 internal sealed record DdlNameSource(
     string Method,
     string Expression,
     bool IsTable,
     string Location,
-    IReadOnlyList<DdlNameRoute> Routes
+    IReadOnlyList<DdlNameRoute> Routes,
+    string? Arm = null
 )
 {
-    /// <summary>ソースを走査するガードが <c>names.Add</c> 1 本を表す表記（出どころの式・表の位置か・置き場所・所属のメソッド）</summary>
+    /// <summary>
+    /// ソースを走査するガードが <c>names.Add</c> 1 本を表す表記（所属のメソッドと switch の腕・出どころの式・表の位置か・置き場所）
+    /// </summary>
     public string What =>
-        $"{Method}: names.Add({Expression}, {(IsTable ? "true" : "false")}, {Location})";
+        $"{Method}{(Arm is null ? "" : "/" + Arm)}: names.Add({Expression}, {(IsTable ? "true" : "false")}, {Location})";
 }
 
 /// <summary>出どころへ名前を 1 つだけ差し込んだ入力を作る経路</summary>
@@ -33,11 +41,16 @@ internal sealed record DdlNameSource(
 /// 名前を受けて、その名前を出どころ 1 か所だけに持ち、ほかの名前はすべて安全な入力を作る
 /// （<see cref="Path"/> が DDL なら <see cref="ErDiagram"/>、それ以外は <see cref="SyncPlan"/>）
 /// </param>
+/// <param name="StepMember">
+/// この経路が名前を差し込む同期の計画の文の型のメンバー（<c>{文の型}.{メンバー}</c>。照合の行 <c>sync-step-name-members-declared</c> が
+/// 文の型の名前を運びうる引数と照合する）。文のメンバーへ名前を差し込まない経路（図・再構築・列順）は null
+/// </param>
 internal sealed record DdlNameRoute(
     string Id,
     string Path,
     string Description,
-    Func<string, object> Build
+    Func<string, object> Build,
+    string? StepMember = null
 );
 
 /// <summary>
@@ -60,7 +73,9 @@ internal sealed record DdlNameRoute(
 /// </description></item>
 /// </list>
 /// <para>
-/// 計画は SyncPlanner を経ずに直接組み、同期スクリプトの入口へ渡す（どの出どころも 1 本ずつ入れられる）。再構築・列順の計画は SQLite・MySQL だけが
+/// 計画は SyncPlanner を経ずに直接組み、同期スクリプトの入口へ渡す（どの出どころも 1 本ずつ入れられる）。セクションに入る文の出どころは、
+/// 文を直接組んで、その文の型の腕の出どころだけへ名前を入れる（経路の <see cref="DdlNameRoute.StepMember"/> が文のメンバーを名乗り、
+/// 照合の行 <c>sync-step-name-members-declared</c> が文の型の名前を運びうる引数と照合する）。再構築・列順の計画は SQLite・MySQL だけが
 /// 作るが、名前の入口は 5 方言とも同じ計画の全体を読むので、5 方言へ同じ計画を渡す（経路はそのほかの項目として数える）。
 /// </para>
 /// </remarks>
@@ -81,186 +96,446 @@ internal static partial class DialectDdlRows
     /// <summary>出どころの宣言の一覧（SqlNameText の <c>names.Add</c> の 1 本に 1 つ）</summary>
     public static IReadOnlyList<DdlNameSource> NameSources =>
         [
-            // ---- PlanNames：計画のセクションの項目 ----
-            NsSource(
-                "PlanNames",
-                "table",
+            // ---- PlanNames：セクションに入る文（文の型の腕ごと。経路は文を直接組み、StepMember はその文のメンバー） ----
+            NsStepSource(
+                "CreateTableStep",
+                "s.TableName",
                 true,
                 "TABLE",
-                NsRoute(
-                    "item-table",
-                    P.SyncOther,
-                    "表の削除の項目のテーブル名",
-                    name =>
-                        NsItems(
-                            new SchemaDiffItem { Kind = SchemaDiffKind.DropTable, TableName = name }
-                        )
+                NsStepRoute(
+                    "step-create-table-table-name",
+                    P.SyncAddTable,
+                    "表を作る文のテーブル名",
+                    "CreateTableStep.TableName",
+                    name => NsSteps(new CreateTableStep(NsOrigin, name, NsEntity(), null))
                 )
             ),
-            NsSource(
-                "PlanNames",
-                "item.ColumnName",
-                false,
-                "COLUMN",
-                NsRoute(
-                    "item-column-name",
+            NsStepSource(
+                "DropTableStep",
+                "s.TableName",
+                true,
+                "TABLE",
+                NsStepRoute(
+                    "step-drop-table-table-name",
                     P.SyncOther,
-                    "列の削除の項目の列名",
-                    name =>
-                        NsItems(
-                            new SchemaDiffItem
-                            {
-                                Kind = SchemaDiffKind.DropColumn,
-                                TableName = "orders",
-                                ColumnName = name,
-                            }
-                        )
+                    "表を消す文のテーブル名",
+                    "DropTableStep.TableName",
+                    name => NsSteps(new DropTableStep(NsOrigin, name))
                 )
             ),
-            NsSource(
-                "PlanNames",
-                "item.Column?.Name",
-                false,
-                "COLUMN",
-                NsRoute(
-                    "item-column",
+            NsStepSource(
+                "AddColumnStep",
+                "s.TableName",
+                true,
+                "TABLE",
+                NsStepRoute(
+                    "step-add-column-table-name",
                     P.SyncAddColumn,
-                    "列の追加の項目の列の定義の名前",
-                    name =>
-                        NsItems(
-                            new SchemaDiffItem
-                            {
-                                Kind = SchemaDiffKind.AddColumn,
-                                TableName = "orders",
-                                Column = DdlModel.Col(name, "int"),
-                            }
-                        )
+                    "列を足す文のテーブル名",
+                    "AddColumnStep.TableName",
+                    name => NsSteps(new AddColumnStep(NsOrigin, name, DdlModel.Col("note", "int")))
                 )
             ),
-            NsSource(
-                "PlanNames",
-                "item.OldColumn?.Name",
+            NsStepSource(
+                "AddColumnStep",
+                "s.Column.Name",
                 false,
                 "COLUMN",
-                NsRoute(
-                    "item-old-column",
-                    P.SyncOther,
-                    "列の変更の項目の変更前の列の名前",
+                NsStepRoute(
+                    "step-add-column-column",
+                    P.SyncAddColumn,
+                    "列を足す文の列の定義の名前",
+                    "AddColumnStep.Column",
                     name =>
-                        NsItems(
-                            new SchemaDiffItem
-                            {
-                                Kind = SchemaDiffKind.AlterColumn,
-                                TableName = "orders",
-                                ColumnName = "memo",
-                                Column = DdlModel.Col("memo", "int"),
-                                OldColumn = DdlModel.Col(name, "int"),
-                            }
-                        )
+                        NsSteps(new AddColumnStep(NsOrigin, "orders", DdlModel.Col(name, "int")))
                 )
             ),
-            NsSource(
-                "PlanNames",
-                "item.UniqueConstraintName",
-                false,
-                "UNIQUE",
-                NsRoute(
-                    "item-unique-constraint-name",
+            NsStepSource(
+                "AlterColumnStep",
+                "s.TableName",
+                true,
+                "TABLE",
+                NsStepRoute(
+                    "step-alter-column-table-name",
                     P.SyncOther,
-                    "一意制約の追加の項目の制約名",
-                    name => NsItems(NsAddUnique(name, "memo"))
+                    "列を変える文のテーブル名",
+                    "AlterColumnStep.TableName",
+                    name => NsSteps(NsAlterColumn(name, "memo", "memo"))
                 )
             ),
-            NsSource(
-                "PlanNames",
-                "item.ForeignKeyName",
+            NsStepSource(
+                "AlterColumnStep",
+                "s.Column.Name",
                 false,
-                "FOREIGN KEY",
-                NsRoute(
-                    "item-foreign-key-name",
+                "COLUMN",
+                NsStepRoute(
+                    "step-alter-column-column",
                     P.SyncOther,
-                    "外部キーの削除の項目の制約名",
-                    name =>
-                        NsItems(
-                            new SchemaDiffItem
-                            {
-                                Kind = SchemaDiffKind.DropForeignKey,
-                                TableName = "orders",
-                                ForeignKeyName = name,
-                            }
-                        )
+                    "列を変える文の新しい列の定義の名前",
+                    "AlterColumnStep.Column",
+                    name => NsSteps(NsAlterColumn("orders", name, "memo"))
                 )
             ),
-            NsSource(
-                "PlanNames",
-                "item.Relationship?.ConstraintName",
+            NsStepSource(
+                "AlterColumnStep",
+                "s.OldColumn?.Name",
                 false,
-                "FOREIGN KEY",
-                NsRoute(
-                    "item-relationship-constraint-name",
+                "COLUMN",
+                NsStepRoute(
+                    "step-alter-column-old-column",
                     P.SyncOther,
-                    "外部キーの追加の項目のリレーションの制約名",
-                    name => NsItems(NsAddForeignKey(relationshipName: name, foreignKeyName: null))
+                    "列を変える文の旧い列の定義の名前",
+                    "AlterColumnStep.OldColumn",
+                    name => NsSteps(NsAlterColumn("orders", "memo", name))
                 )
             ),
-            NsSource(
-                "PlanNames",
+            NsStepSource(
+                "DropColumnStep",
+                "s.TableName",
+                true,
+                "TABLE",
+                NsStepRoute(
+                    "step-drop-column-table-name",
+                    P.SyncOther,
+                    "列を消す文のテーブル名",
+                    "DropColumnStep.TableName",
+                    name => NsSteps(new DropColumnStep(NsOrigin, name, "memo"))
+                )
+            ),
+            NsStepSource(
+                "DropColumnStep",
+                "s.ColumnName",
+                false,
+                "COLUMN",
+                NsStepRoute(
+                    "step-drop-column-column-name",
+                    P.SyncOther,
+                    "列を消す文の列名",
+                    "DropColumnStep.ColumnName",
+                    name => NsSteps(new DropColumnStep(NsOrigin, "orders", name))
+                )
+            ),
+            NsStepSource(
+                "DropPrimaryKeyStep",
+                "s.TableName",
+                true,
+                "TABLE",
+                NsStepRoute(
+                    "step-drop-primary-key-table-name",
+                    P.SyncOther,
+                    "主キーを外す文のテーブル名",
+                    "DropPrimaryKeyStep.TableName",
+                    name => NsSteps(new DropPrimaryKeyStep(NsOrigin, name))
+                )
+            ),
+            NsStepSource(
+                "AddPrimaryKeyStep",
+                "s.TableName",
+                true,
+                "TABLE",
+                NsStepRoute(
+                    "step-add-primary-key-table-name",
+                    P.SyncOther,
+                    "主キーを付ける文のテーブル名",
+                    "AddPrimaryKeyStep.TableName",
+                    name => NsSteps(new AddPrimaryKeyStep(NsOrigin, name, ["id"]))
+                )
+            ),
+            NsStepSource(
+                "AddPrimaryKeyStep",
                 "column",
                 false,
                 "COLUMN",
-                NsRoute(
-                    "item-unique-constraint-column",
+                NsStepRoute(
+                    "step-add-primary-key-column",
                     P.SyncOther,
-                    "一意制約の追加の項目の構成列",
-                    name => NsItems(NsAddUnique("uq_orders_memo", name))
+                    "主キーを付ける文の主キーの列名",
+                    "AddPrimaryKeyStep.Columns",
+                    name => NsSteps(new AddPrimaryKeyStep(NsOrigin, "orders", ["id", name]))
                 )
             ),
-            NsSource(
-                "PlanNames",
+            NsStepSource(
+                "DropUniqueConstraintStep",
+                "s.TableName",
+                true,
+                "TABLE",
+                NsStepRoute(
+                    "step-drop-unique-table-name",
+                    P.SyncOther,
+                    "一意制約を外す文のテーブル名",
+                    "DropUniqueConstraintStep.TableName",
+                    name =>
+                        NsSteps(
+                            new DropUniqueConstraintStep(NsOrigin, name, "uq_orders_memo", ["memo"])
+                        )
+                )
+            ),
+            NsStepSource(
+                "DropUniqueConstraintStep",
+                "s.Name",
+                false,
+                "UNIQUE",
+                NsStepRoute(
+                    "step-drop-unique-name",
+                    P.SyncOther,
+                    "一意制約を外す文の制約名",
+                    "DropUniqueConstraintStep.Name",
+                    name =>
+                        NsSteps(new DropUniqueConstraintStep(NsOrigin, "orders", name, ["memo"]))
+                )
+            ),
+            NsStepSource(
+                "DropUniqueConstraintStep",
+                "column",
+                false,
+                "COLUMN",
+                NsStepRoute(
+                    "step-drop-unique-column",
+                    P.SyncOther,
+                    "一意制約を外す文の構成列",
+                    "DropUniqueConstraintStep.Columns",
+                    name =>
+                        NsSteps(
+                            new DropUniqueConstraintStep(
+                                NsOrigin,
+                                "orders",
+                                "uq_orders_memo",
+                                [name]
+                            )
+                        )
+                )
+            ),
+            NsStepSource(
+                "AddUniqueConstraintStep",
+                "s.TableName",
+                true,
+                "TABLE",
+                NsStepRoute(
+                    "step-add-unique-table-name",
+                    P.SyncOther,
+                    "一意制約を付ける文のテーブル名",
+                    "AddUniqueConstraintStep.TableName",
+                    name =>
+                        NsSteps(
+                            new AddUniqueConstraintStep(NsOrigin, name, "uq_orders_memo", ["memo"])
+                        )
+                )
+            ),
+            NsStepSource(
+                "AddUniqueConstraintStep",
+                "s.Name",
+                false,
+                "UNIQUE",
+                NsStepRoute(
+                    "step-add-unique-name",
+                    P.SyncOther,
+                    "一意制約を付ける文の制約名",
+                    "AddUniqueConstraintStep.Name",
+                    name => NsSteps(new AddUniqueConstraintStep(NsOrigin, "orders", name, ["memo"]))
+                )
+            ),
+            NsStepSource(
+                "AddUniqueConstraintStep",
+                "column",
+                false,
+                "COLUMN",
+                NsStepRoute(
+                    "step-add-unique-column",
+                    P.SyncOther,
+                    "一意制約を付ける文の構成列",
+                    "AddUniqueConstraintStep.Columns",
+                    name =>
+                        NsSteps(
+                            new AddUniqueConstraintStep(
+                                NsOrigin,
+                                "orders",
+                                "uq_orders_memo",
+                                [name]
+                            )
+                        )
+                )
+            ),
+            NsStepSource(
+                "DropForeignKeyStep",
+                "s.ChildTable",
+                true,
+                "TABLE",
+                NsStepRoute(
+                    "step-drop-foreign-key-child-table",
+                    P.SyncOther,
+                    "外部キーを外す文の子の表",
+                    "DropForeignKeyStep.ChildTable",
+                    name => NsSteps(NsDropForeignKey(childTable: name))
+                )
+            ),
+            NsStepSource(
+                "DropForeignKeyStep",
+                "s.ParentTable",
+                true,
+                "TABLE",
+                NsStepRoute(
+                    "step-drop-foreign-key-parent-table",
+                    P.SyncOther,
+                    "外部キーを外す文の親の表",
+                    "DropForeignKeyStep.ParentTable",
+                    name => NsSteps(NsDropForeignKey(parentTable: name))
+                )
+            ),
+            NsStepSource(
+                "DropForeignKeyStep",
+                "s.Name",
+                false,
+                "FOREIGN KEY",
+                NsStepRoute(
+                    "step-drop-foreign-key-name",
+                    P.SyncOther,
+                    "外部キーを外す文の制約名",
+                    "DropForeignKeyStep.Name",
+                    name => NsSteps(NsDropForeignKey(constraintName: name))
+                )
+            ),
+            NsStepSource(
+                "DropForeignKeyStep",
                 "pair.ParentColumn",
                 false,
                 "COLUMN",
-                NsRoute(
-                    "item-fk-pair-parent-column",
+                NsStepRoute(
+                    "step-drop-foreign-key-pair-parent-column",
                     P.SyncOther,
-                    "外部キーの追加の項目の列ペアの親の列",
-                    name => NsItems(NsAddForeignKey(parentColumn: name))
+                    "外部キーを外す文の列の組の親の列",
+                    "DropForeignKeyStep.ColumnPairs",
+                    name => NsSteps(NsDropForeignKey(parentColumn: name))
                 )
             ),
-            NsSource(
-                "PlanNames",
+            NsStepSource(
+                "DropForeignKeyStep",
                 "pair.ChildColumn",
                 false,
                 "COLUMN",
-                NsRoute(
-                    "item-fk-pair-child-column",
+                NsStepRoute(
+                    "step-drop-foreign-key-pair-child-column",
                     P.SyncOther,
-                    "外部キーの追加の項目の列ペアの子の列",
-                    name => NsItems(NsAddForeignKey(childColumn: name))
+                    "外部キーを外す文の列の組の子の列",
+                    "DropForeignKeyStep.ColumnPairs",
+                    name => NsSteps(NsDropForeignKey(childColumn: name))
                 )
             ),
-            NsSource(
-                "PlanNames",
-                "item.ParentEntity?.TableName",
+            NsStepSource(
+                "AddForeignKeyStep",
+                "s.ChildTable",
                 true,
                 "TABLE",
-                NsRoute(
-                    "item-parent-entity",
+                NsStepRoute(
+                    "step-add-foreign-key-child-table",
                     P.SyncOther,
-                    "外部キーの追加の項目の親の表のテーブル名",
-                    name => NsItems(NsAddForeignKey(parentTable: name))
+                    "外部キーを付ける文の子の表",
+                    "AddForeignKeyStep.ChildTable",
+                    name => NsSteps(NsAddForeignKeyStep(childTable: name))
                 )
             ),
-            NsSource(
-                "PlanNames",
-                "item.ChildEntity?.TableName",
+            NsStepSource(
+                "AddForeignKeyStep",
+                "s.ParentTable",
                 true,
                 "TABLE",
-                NsRoute(
-                    "item-child-entity",
+                NsStepRoute(
+                    "step-add-foreign-key-parent-table",
                     P.SyncOther,
-                    "外部キーの追加の項目の子の表のテーブル名",
-                    name => NsItems(NsAddForeignKey(childTable: name))
+                    "外部キーを付ける文の親の表",
+                    "AddForeignKeyStep.ParentTable",
+                    name => NsSteps(NsAddForeignKeyStep(parentTable: name))
+                )
+            ),
+            NsStepSource(
+                "AddForeignKeyStep",
+                "s.Name",
+                false,
+                "FOREIGN KEY",
+                NsStepRoute(
+                    "step-add-foreign-key-name",
+                    P.SyncOther,
+                    "外部キーを付ける文の制約名",
+                    "AddForeignKeyStep.Name",
+                    name => NsSteps(NsAddForeignKeyStep(constraintName: name))
+                ),
+                // 外部キーの追加の項目の名前（ForeignKeyName）が無いときは、リレーションの制約名が文の名前になる
+                // （SelectedSteps.From が ForeignKeyName ?? Relationship.ConstraintName を文の Name へ写す）。
+                // リレーションの名前だけを持つ項目からも、文の名前として検証されることを見る経路
+                NsStepRoute(
+                    "item-relationship-constraint-name",
+                    P.SyncOther,
+                    "外部キーの追加の項目のリレーションの制約名（文の制約名へ写る）",
+                    "AddForeignKeyStep.Name",
+                    name => NsItems(NsAddForeignKey(relationshipName: name, foreignKeyName: null))
+                )
+            ),
+            NsStepSource(
+                "AddForeignKeyStep",
+                "pair.ParentColumn",
+                false,
+                "COLUMN",
+                NsStepRoute(
+                    "step-add-foreign-key-pair-parent-column",
+                    P.SyncOther,
+                    "外部キーを付ける文の列の組の親の列",
+                    "AddForeignKeyStep.ColumnPairs",
+                    name => NsSteps(NsAddForeignKeyStep(parentColumn: name))
+                )
+            ),
+            NsStepSource(
+                "AddForeignKeyStep",
+                "pair.ChildColumn",
+                false,
+                "COLUMN",
+                NsStepRoute(
+                    "step-add-foreign-key-pair-child-column",
+                    P.SyncOther,
+                    "外部キーを付ける文の列の組の子の列",
+                    "AddForeignKeyStep.ColumnPairs",
+                    name => NsSteps(NsAddForeignKeyStep(childColumn: name))
+                )
+            ),
+            NsStepSource(
+                "SetTableDescriptionStep",
+                "s.TableName",
+                true,
+                "TABLE",
+                NsStepRoute(
+                    "step-set-table-description-table-name",
+                    P.SyncOther,
+                    "表の説明を設定する文のテーブル名",
+                    "SetTableDescriptionStep.TableName",
+                    name => NsSteps(new SetTableDescriptionStep(NsOrigin, name, "orders table"))
+                )
+            ),
+            NsStepSource(
+                "SetColumnDescriptionStep",
+                "s.TableName",
+                true,
+                "TABLE",
+                NsStepRoute(
+                    "step-set-column-description-table-name",
+                    P.SyncOther,
+                    "列の説明を設定する文のテーブル名",
+                    "SetColumnDescriptionStep.TableName",
+                    name =>
+                        NsSteps(new SetColumnDescriptionStep(NsOrigin, name, "memo", "memo column"))
+                )
+            ),
+            NsStepSource(
+                "SetColumnDescriptionStep",
+                "s.ColumnName",
+                false,
+                "COLUMN",
+                NsStepRoute(
+                    "step-set-column-description-column-name",
+                    P.SyncOther,
+                    "列の説明を設定する文の列名",
+                    "SetColumnDescriptionStep.ColumnName",
+                    name =>
+                        NsSteps(
+                            new SetColumnDescriptionStep(NsOrigin, "orders", name, "memo column")
+                        )
                 )
             ),
             // ---- PlanNames：テーブルの再構築 ----
@@ -396,10 +671,11 @@ internal static partial class DialectDdlRows
                     "図の表のテーブル名",
                     name => DdlModel.Diagram(NsEntity(tableName: name))
                 ),
-                NsRoute(
+                NsStepRoute(
                     "item-entity-table",
                     P.SyncAddTable,
                     "表の追加の項目の表の定義のテーブル名",
+                    "CreateTableStep.Definition",
                     name => NsItems(NsAddTable(NsEntity(tableName: name)))
                 ),
                 NsRoute(
@@ -420,10 +696,11 @@ internal static partial class DialectDdlRows
                     "図の表の列名",
                     name => DdlModel.Diagram(NsEntity(columnName: name))
                 ),
-                NsRoute(
+                NsStepRoute(
                     "item-entity-column",
                     P.SyncAddTable,
                     "表の追加の項目の表の定義の列名",
+                    "CreateTableStep.Definition",
                     name => NsItems(NsAddTable(NsEntity(columnName: name)))
                 ),
                 NsRoute(
@@ -444,10 +721,11 @@ internal static partial class DialectDdlRows
                     "図の表の一意制約名",
                     name => DdlModel.Diagram(NsEntity(uniqueName: name))
                 ),
-                NsRoute(
+                NsStepRoute(
                     "item-entity-unique-constraint",
                     P.SyncAddTable,
                     "表の追加の項目の表の定義の一意制約名",
+                    "CreateTableStep.Definition",
                     name => NsItems(NsAddTable(NsEntity(uniqueName: name)))
                 ),
                 NsRoute(
@@ -565,23 +843,81 @@ internal static partial class DialectDdlRows
         Func<string, object> build
     ) => new(id, path, description, build);
 
-    /// <summary>項目ごとに 1 セクションの計画</summary>
+    /// <summary>SqlNameText.PlanNames の文の型の腕（<paramref name="arm"/>）の中の出どころ</summary>
+    private static DdlNameSource NsStepSource(
+        string arm,
+        string expression,
+        bool isTable,
+        string location,
+        params DdlNameRoute[] routes
+    ) => new("PlanNames", expression, isTable, location, routes, arm);
+
+    /// <summary>文のメンバー（<paramref name="stepMember"/>＝<c>{文の型}.{メンバー}</c>）へ名前を差し込む経路</summary>
+    private static DdlNameRoute NsStepRoute(
+        string id,
+        string path,
+        string description,
+        string stepMember,
+        Func<string, object> build
+    ) => new(id, path, description, build, stepMember);
+
+    /// <summary>手で組む文の由来（方言ビルダーと入口の検証は由来を読まない）</summary>
+    private static StepOrigin NsOrigin => new MergedOrigin([]);
+
+    /// <summary>文を並べた計画</summary>
+    private static SyncPlan NsSteps(params SyncStep[] steps) => HandBuiltSyncPlans.FromSteps(steps);
+
+    /// <summary>列の型を変える文（int → bigint・名前はどれも差し替えられる）</summary>
+    private static AlterColumnStep NsAlterColumn(string table, string column, string oldColumn) =>
+        new(NsOrigin, table, DdlModel.Col(column, "bigint"), DdlModel.Col(oldColumn, "int"));
+
+    /// <summary>orders.customer_id → customers.id の外部キーを外す文（名前はどれも差し替えられる）</summary>
+    private static DropForeignKeyStep NsDropForeignKey(
+        string childTable = "orders",
+        string parentTable = "customers",
+        string constraintName = "fk_orders_customers",
+        string parentColumn = "id",
+        string childColumn = "customer_id"
+    ) =>
+        new(
+            NsOrigin,
+            childTable,
+            parentTable,
+            constraintName,
+            [new ForeignKeyColumnNamePair(parentColumn, childColumn)],
+            ForeignKeyReferentialAction.NoAction,
+            ForeignKeyReferentialAction.NoAction
+        );
+
+    /// <summary>orders.customer_id → customers.id の外部キーを付ける文（名前はどれも差し替えられる）</summary>
+    private static AddForeignKeyStep NsAddForeignKeyStep(
+        string childTable = "orders",
+        string parentTable = "customers",
+        string constraintName = "fk_orders_customers",
+        string parentColumn = "id",
+        string childColumn = "customer_id"
+    ) =>
+        new(
+            NsOrigin,
+            childTable,
+            parentTable,
+            constraintName,
+            [new ForeignKeyColumnNamePair(parentColumn, childColumn)],
+            ForeignKeyReferentialAction.NoAction,
+            ForeignKeyReferentialAction.NoAction
+        );
+
+    /// <summary>項目を項目の順に文へ写した計画</summary>
     private static SyncPlan NsItems(params SchemaDiffItem[] items) =>
-        new()
-        {
-            Sections =
-            [
-                .. items.Select(item => new SyncPlanSection { Kind = item.Kind, Items = [item] }),
-            ],
-        };
+        HandBuiltSyncPlans.FromItems(items);
 
     /// <summary>再構築だけの計画</summary>
     private static SyncPlan NsRebuilds(params TableRebuildPlan[] rebuilds) =>
-        new() { Rebuilds = rebuilds };
+        HandBuiltSyncPlans.FromRebuilds(rebuilds);
 
     /// <summary>列順の変更だけの計画</summary>
     private static SyncPlan NsReorders(params TableReorderPlan[] reorders) =>
-        new() { Reorders = reorders };
+        HandBuiltSyncPlans.FromReorders(reorders);
 
     /// <summary>orders（主キー id・memo）に一意制約 1 つを持つ表（名前はどれも差し替えられる）</summary>
     private static Entity NsEntity(
@@ -609,16 +945,6 @@ internal static partial class DialectDdlRows
             Kind = SchemaDiffKind.AddTable,
             TableName = "orders",
             Entity = entity,
-        };
-
-    /// <summary>orders の一意制約の追加の項目</summary>
-    private static SchemaDiffItem NsAddUnique(string constraintName, string columnName) =>
-        new()
-        {
-            Kind = SchemaDiffKind.AddUniqueConstraint,
-            TableName = "orders",
-            UniqueConstraintName = constraintName,
-            UniqueConstraintColumns = [columnName],
         };
 
     /// <summary>

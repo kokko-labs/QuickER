@@ -12,24 +12,16 @@ namespace QuickER.Tests.TestSupport.Guards;
 internal static class SyncSchedulingBoundaries
 {
     /// <summary>
-    /// 差分の項目（<c>SchemaDiffItem</c>）・警告（<c>SyncPlanWarning</c>）を作る式と、差分の項目の複製を作る呼び出し
-    /// （<c>WithForeignKeyColumnPairs</c>）。何かは「new 型」か呼び出しの名前
+    /// 差分の項目（<c>SchemaDiffItem</c>）・警告（<c>SyncPlanWarning</c>）を作る式。何かは「new 型」
     /// </summary>
     public static string? DescribeItemOrWarningCreation(SyntaxNode node) =>
-        node switch
-        {
-            ObjectCreationExpressionSyntax creation
-                when TypeName(creation.Type) is "SchemaDiffItem" or "SyncPlanWarning" =>
-                $"new {TypeName(creation.Type)}",
-            InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax member }
-                when IsItemCopy(member.Name) => member.Name.Identifier.ValueText,
-            InvocationExpressionSyntax { Expression: MemberBindingExpressionSyntax binding }
-                when IsItemCopy(binding.Name) => binding.Name.Identifier.ValueText,
-            _ => null,
-        };
+        node is ObjectCreationExpressionSyntax creation
+        && TypeName(creation.Type) is "SchemaDiffItem" or "SyncPlanWarning"
+            ? $"new {TypeName(creation.Type)}"
+            : null;
 
     /// <summary>
-    /// 差分の項目（<c>SchemaDiffItem</c>）を作る式と、差分の項目の複製を作る呼び出し。警告を作る式は数えない
+    /// 差分の項目（<c>SchemaDiffItem</c>）を作る式。警告を作る式は数えない
     /// （規則 <c>sync-assessment-builds-warnings-only</c> の見つける形）
     /// </summary>
     public static string? DescribeItemCreation(SyntaxNode node) =>
@@ -79,9 +71,6 @@ internal static class SyncSchedulingBoundaries
 
         return $"{method ?? "(member outside a method)"}: StepPlanner.Plan";
     }
-
-    private static bool IsItemCopy(SimpleNameSyntax name) =>
-        name.Identifier.ValueText is "WithForeignKeyColumnPairs";
 
     /// <summary>型の名前の右端（名前空間で修飾した名前は最後の部分）</summary>
     private static string? TypeName(TypeSyntax type) =>

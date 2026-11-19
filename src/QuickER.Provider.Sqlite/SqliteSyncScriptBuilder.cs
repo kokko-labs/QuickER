@@ -4,6 +4,7 @@ using System.Text;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.Sync.Steps;
 
 namespace QuickER.Provider.Sqlite;
 
@@ -58,11 +59,13 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
         // あわせて方言の上限を超える名前・方言が表せない文字を含む名前も、場所を名指しして止める
         SqlNameText.Validate(plan, IdentifierLimit);
 
-        // 列の無い表を作る項目も止める（計画は列の無い表の追加を外すので、計画を経ずに組んだ計画への二重の守り）
+        // 列の無い表を作る文も止める（計画は列の無い表の追加を外すので、計画を経ずに組んだ計画への二重の守り）
         SqlTableShape.Validate(plan);
 
+        var sections = StepSections.Of(plan);
+
         // 空の計画は空文字列（実行側は空スクリプトを no-op として COMMIT する）
-        if (plan.Sections.Count == 0 && plan.Rebuilds.Count == 0)
+        if (sections.Count == 0 && plan.Rebuilds.Count == 0)
         {
             return string.Empty;
         }
@@ -91,7 +94,7 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
         }
 
         // 2. 列追加セクション（SQLite は ADD COLUMN を逐次 DDL で直接扱える）
-        foreach (var section in plan.Sections.Where(s => s.Kind == SchemaDiffKind.AddColumn))
+        foreach (var section in sections.Where(s => s.Kind == SchemaDiffKind.AddColumn))
         {
             AppendSection(sb, section);
         }
@@ -103,14 +106,14 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
         }
 
         // 4. テーブル削除セクション
-        foreach (var section in plan.Sections.Where(s => s.Kind == SchemaDiffKind.DropTable))
+        foreach (var section in sections.Where(s => s.Kind == SchemaDiffKind.DropTable))
         {
             AppendSection(sb, section);
         }
 
         // 5. 想定外セクション（説明設定など・通常は capabilities で抑止済み）を防御的に描画する
         foreach (
-            var section in plan.Sections.Where(s =>
+            var section in sections.Where(s =>
                 s.Kind != SchemaDiffKind.AddColumn && s.Kind != SchemaDiffKind.DropTable
             )
         )
@@ -379,9 +382,9 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
     // ---------------- セクション項目のディスパッチ実装 ----------------
 
     /// <summary>列追加（<c>ALTER TABLE ... ADD COLUMN</c>）を出力する</summary>
-    protected override void AppendAddColumn(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendAddColumn(StringBuilder sb, AddColumnStep step)
     {
-        var col = item.Column!;
+        var col = step.Column;
 
         // 計算列は式が図に無い＝ここで足すのは普通の列。手で式を足す必要があることを添える
         ComputedColumnComment.Append(sb, col, string.Empty);
@@ -392,14 +395,14 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
         // 列定義の組み立ては DDL 生成と共有する（先頭インデントのみ除去してインライン化）
         var definition = SqliteDdlGenerator.BuildColumnDefinition(col).TrimStart();
         sb.AppendLine(
-            $"ALTER TABLE {SqliteIdentifier.Quote(item.TableName)} ADD COLUMN {definition};"
+            $"ALTER TABLE {SqliteIdentifier.Quote(step.TableName)} ADD COLUMN {definition};"
         );
     }
 
     /// <summary>テーブル削除（<c>DROP TABLE</c>）を出力する</summary>
-    protected override void AppendDropTable(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropTable(StringBuilder sb, DropTableStep step)
     {
-        sb.AppendLine($"DROP TABLE {SqliteIdentifier.Quote(item.TableName)};");
+        sb.AppendLine($"DROP TABLE {SqliteIdentifier.Quote(step.TableName)};");
     }
 
     // ---------------- 以下はプランナーが再構築へ畳めた項目では呼ばれない ----------------
@@ -407,40 +410,56 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
     // だけが選択された場合）がセクション経由で渡されたとき、英語のスキップコメントで明示する
 
     /// <inheritdoc />
-    protected override void AppendCreateTable(StringBuilder sb, SchemaDiffItem item) =>
-        AppendNotApplicable(sb, SchemaDiffKind.AddTable, item.TableName);
+    protected override void AppendCreateTable(StringBuilder sb, CreateTableStep step) =>
+        AppendNotApplicable(sb, SchemaDiffKind.AddTable, step.TableName);
 
     /// <inheritdoc />
-    protected override void AppendAlterColumn(StringBuilder sb, SchemaDiffItem item) =>
-        AppendNotApplicable(sb, SchemaDiffKind.AlterColumn, item.TableName);
+    protected override void AppendAlterColumn(StringBuilder sb, AlterColumnStep step) =>
+        AppendNotApplicable(sb, SchemaDiffKind.AlterColumn, step.TableName);
 
     /// <inheritdoc />
-    protected override void AppendDropColumn(StringBuilder sb, SchemaDiffItem item) =>
-        AppendNotApplicable(sb, SchemaDiffKind.DropColumn, item.TableName);
+    protected override void AppendDropColumn(StringBuilder sb, DropColumnStep step) =>
+        AppendNotApplicable(sb, SchemaDiffKind.DropColumn, step.TableName);
 
     /// <inheritdoc />
-    protected override void AppendAddForeignKey(StringBuilder sb, SchemaDiffItem item) =>
-        AppendNotApplicable(sb, SchemaDiffKind.AddForeignKey, item.TableName);
+    protected override void AppendAddForeignKey(StringBuilder sb, AddForeignKeyStep step) =>
+        AppendNotApplicable(
+            sb,
+            SchemaDiffKind.AddForeignKey,
+            SchemaDiffService.NormalizeTable(step.ChildTable)
+        );
 
     /// <inheritdoc />
-    protected override void AppendDropForeignKey(StringBuilder sb, SchemaDiffItem item) =>
-        AppendNotApplicable(sb, SchemaDiffKind.DropForeignKey, item.TableName);
+    protected override void AppendDropForeignKey(StringBuilder sb, DropForeignKeyStep step) =>
+        AppendNotApplicable(
+            sb,
+            SchemaDiffKind.DropForeignKey,
+            SchemaDiffService.NormalizeTable(step.ChildTable)
+        );
 
     /// <inheritdoc />
-    protected override void AppendAddUniqueConstraint(StringBuilder sb, SchemaDiffItem item) =>
-        AppendNotApplicable(sb, SchemaDiffKind.AddUniqueConstraint, item.TableName);
+    protected override void AppendAddUniqueConstraint(
+        StringBuilder sb,
+        AddUniqueConstraintStep step
+    ) => AppendNotApplicable(sb, SchemaDiffKind.AddUniqueConstraint, step.TableName);
 
     /// <inheritdoc />
-    protected override void AppendDropUniqueConstraint(StringBuilder sb, SchemaDiffItem item) =>
-        AppendNotApplicable(sb, SchemaDiffKind.DropUniqueConstraint, item.TableName);
+    protected override void AppendDropUniqueConstraint(
+        StringBuilder sb,
+        DropUniqueConstraintStep step
+    ) => AppendNotApplicable(sb, SchemaDiffKind.DropUniqueConstraint, step.TableName);
 
     /// <inheritdoc />
-    protected override void AppendSetTableDescription(StringBuilder sb, SchemaDiffItem item) =>
-        AppendDescriptionUnsupported(sb, item.TableName);
+    protected override void AppendSetTableDescription(
+        StringBuilder sb,
+        SetTableDescriptionStep step
+    ) => AppendDescriptionUnsupported(sb, step.TableName);
 
     /// <inheritdoc />
-    protected override void AppendSetColumnDescription(StringBuilder sb, SchemaDiffItem item) =>
-        AppendDescriptionUnsupported(sb, item.TableName);
+    protected override void AppendSetColumnDescription(
+        StringBuilder sb,
+        SetColumnDescriptionStep step
+    ) => AppendDescriptionUnsupported(sb, step.TableName);
 
     /// <summary>再構築へ畳み込めなかった項目のスキップコメント（英語が正本）</summary>
     private static void AppendNotApplicable(

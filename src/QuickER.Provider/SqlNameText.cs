@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using QuickER.Dialects;
 using QuickER.Model;
+using QuickER.Provider.Sync.Steps;
 
 namespace QuickER.Provider;
 
@@ -47,10 +48,16 @@ public static class SqlNameText
     public static void Validate(ErDiagram diagram, IdentifierLengthLimit limit) =>
         Validate(DiagramNames(diagram), limit);
 
-    /// <summary>実行計画に現れる全名前を検証し、出せない名前があれば名指しで例外を投げる（同期生成の入口）</summary>
+    /// <summary>実行計画が同期スクリプトへ書く全名前を検証し、出せない名前があれば名指しで例外を投げる（同期生成の入口）</summary>
     /// <remarks>
-    /// 名前を出力しうる経路をすべて拾う＝セクション項目（テーブル・列・制約・親子テーブル）、
-    /// テーブル再構築の合成後定義とインライン外部キー、ネイティブ列順変更の移動列。
+    /// <para>
+    /// 同期スクリプトに書く名前だけを拾う＝文の名前のメンバーの全部（表名・列名・制約名・外部キーの親子の表と列の組。表を作る文は
+    /// 表の定義の全部の名前）、テーブル再構築の合成後定義と写す列とインライン外部キー、ネイティブ列順変更の移動列。
+    /// </para>
+    /// <para>
+    /// スクリプトに書かない名前（差分の項目が持つ表の定義の、文が書かない列・一意制約の名前など）は見ない。断る理由は「その名前を SQL に書けない」
+    /// ことなので、書かない名前で同期を止めない（型の検証が型を書き出す文だけを見るのと同じ考え方）。DDL 生成の入口は図の全部の名前を見る。
+    /// </para>
     /// </remarks>
     /// <param name="plan">実行計画</param>
     /// <param name="limit">同期の方言の識別子の長さの上限（方言の識別子クラスの <c>Limit</c>）</param>
@@ -131,41 +138,140 @@ public static class SqlNameText
         return names;
     }
 
-    /// <summary>実行計画が同期スクリプトへ出す名前の一覧</summary>
+    /// <summary>実行計画が同期スクリプトへ書く名前の一覧</summary>
+    /// <remarks>
+    /// セクションに入る文（<see cref="StepSections"/>）を文の型で振り分け、その文の名前のメンバーを全部拾う。表を作り直す文と列を動かす文は、
+    /// <see cref="SyncPlan.Rebuilds"/>・<see cref="SyncPlan.Reorders"/> のループが拾う。外部キーの文の列の置き場所の表は、子の表の保存の形
+    /// （<see cref="SchemaNames.ToStoredForm"/>）で書く。
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">名前の拾い方を決めていない文の型があるとき</exception>
     private static List<NameOccurrence> PlanNames(SyncPlan plan)
     {
         var names = new List<NameOccurrence>();
 
-        foreach (var item in plan.Sections.SelectMany(section => section.Items))
+        foreach (var step in StepSections.Of(plan).SelectMany(section => section.Steps))
         {
-            var table = item.TableName;
-
-            names.Add(new(table, true, TableLocation));
-            names.Add(new(item.ColumnName, false, name => ColumnLocation(table, name)));
-            names.Add(new(item.Column?.Name, false, name => ColumnLocation(table, name)));
-            names.Add(new(item.OldColumn?.Name, false, name => ColumnLocation(table, name)));
-            names.Add(new(item.UniqueConstraintName, false, name => UniqueLocation(table, name)));
-            names.Add(new(item.ForeignKeyName, false, ForeignKeyLocation));
-            names.Add(new(item.Relationship?.ConstraintName, false, ForeignKeyLocation));
-
-            foreach (var column in item.UniqueConstraintColumns)
+            switch (step)
             {
-                names.Add(new(column, false, name => ColumnLocation(table, name)));
-            }
+                case CreateTableStep s:
+                    names.Add(new(s.TableName, true, TableLocation));
+                    AddEntityNames(names, s.TableName, s.Definition);
+                    break;
 
-            foreach (var pair in item.ForeignKeyColumnPairs)
-            {
-                names.Add(new(pair.ParentColumn, false, name => ColumnLocation(table, name)));
-                names.Add(new(pair.ChildColumn, false, name => ColumnLocation(table, name)));
-            }
+                case DropTableStep s:
+                    names.Add(new(s.TableName, true, TableLocation));
+                    break;
 
-            if (item.Entity is not null)
-            {
-                AddEntityNames(names, table, item.Entity);
-            }
+                case AddColumnStep s:
+                    names.Add(new(s.TableName, true, TableLocation));
+                    names.Add(new(s.Column.Name, false, name => ColumnLocation(s.TableName, name)));
+                    break;
 
-            names.Add(new(item.ParentEntity?.TableName, true, TableLocation));
-            names.Add(new(item.ChildEntity?.TableName, true, TableLocation));
+                case AlterColumnStep s:
+                    names.Add(new(s.TableName, true, TableLocation));
+                    names.Add(new(s.Column.Name, false, name => ColumnLocation(s.TableName, name)));
+                    names.Add(
+                        new(s.OldColumn?.Name, false, name => ColumnLocation(s.TableName, name))
+                    );
+                    break;
+
+                case DropColumnStep s:
+                    names.Add(new(s.TableName, true, TableLocation));
+                    names.Add(new(s.ColumnName, false, name => ColumnLocation(s.TableName, name)));
+                    break;
+
+                case DropPrimaryKeyStep s:
+                    names.Add(new(s.TableName, true, TableLocation));
+                    break;
+
+                case AddPrimaryKeyStep s:
+                    names.Add(new(s.TableName, true, TableLocation));
+
+                    foreach (var column in s.Columns)
+                    {
+                        names.Add(new(column, false, name => ColumnLocation(s.TableName, name)));
+                    }
+
+                    break;
+
+                case DropUniqueConstraintStep s:
+                    names.Add(new(s.TableName, true, TableLocation));
+                    names.Add(new(s.Name, false, name => UniqueLocation(s.TableName, name)));
+
+                    foreach (var column in s.Columns)
+                    {
+                        names.Add(new(column, false, name => ColumnLocation(s.TableName, name)));
+                    }
+
+                    break;
+
+                case AddUniqueConstraintStep s:
+                    names.Add(new(s.TableName, true, TableLocation));
+                    names.Add(new(s.Name, false, name => UniqueLocation(s.TableName, name)));
+
+                    foreach (var column in s.Columns)
+                    {
+                        names.Add(new(column, false, name => ColumnLocation(s.TableName, name)));
+                    }
+
+                    break;
+
+                case DropForeignKeyStep s:
+                {
+                    var child = SchemaNames.ToStoredForm(s.ChildTable);
+
+                    names.Add(new(s.ChildTable, true, TableLocation));
+                    names.Add(new(s.ParentTable, true, TableLocation));
+                    names.Add(new(s.Name, false, ForeignKeyLocation));
+
+                    foreach (var pair in s.ColumnPairs)
+                    {
+                        names.Add(
+                            new(pair.ParentColumn, false, name => ColumnLocation(child, name))
+                        );
+                        names.Add(
+                            new(pair.ChildColumn, false, name => ColumnLocation(child, name))
+                        );
+                    }
+
+                    break;
+                }
+
+                case AddForeignKeyStep s:
+                {
+                    var child = SchemaNames.ToStoredForm(s.ChildTable);
+
+                    names.Add(new(s.ChildTable, true, TableLocation));
+                    names.Add(new(s.ParentTable, true, TableLocation));
+                    names.Add(new(s.Name, false, ForeignKeyLocation));
+
+                    foreach (var pair in s.ColumnPairs)
+                    {
+                        names.Add(
+                            new(pair.ParentColumn, false, name => ColumnLocation(child, name))
+                        );
+                        names.Add(
+                            new(pair.ChildColumn, false, name => ColumnLocation(child, name))
+                        );
+                    }
+
+                    break;
+                }
+
+                case SetTableDescriptionStep s:
+                    names.Add(new(s.TableName, true, TableLocation));
+                    break;
+
+                case SetColumnDescriptionStep s:
+                    names.Add(new(s.TableName, true, TableLocation));
+                    names.Add(new(s.ColumnName, false, name => ColumnLocation(s.TableName, name)));
+                    break;
+
+                default:
+                    throw new InvalidOperationException(
+                        $"The step {step.GetType().Name} has no declared name sources."
+                    );
+            }
         }
 
         foreach (var rebuild in plan.Rebuilds)

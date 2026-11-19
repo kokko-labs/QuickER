@@ -3,7 +3,7 @@ namespace QuickER.Provider.Sync.Steps;
 /// <summary>
 /// 計画器が、利用者の選んでいない文を計画へ足す理由
 /// </summary>
-internal enum ImplicitStepReason
+public enum ImplicitStepReason
 {
     /// <summary>主キーの変更で新しく主キーに加わる NULL 許容の列を NOT NULL にする</summary>
     PrimaryKeyColumnNotNull,

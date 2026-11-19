@@ -236,18 +236,15 @@ internal static partial class DialectDdlRows
                     "同期 SQLite 再構築: 計算列の直前に注意コメントを出す",
                     E.Computed,
                     F.Note,
-                    _ => new SyncPlan
-                    {
-                        Rebuilds =
-                        [
+                    _ =>
+                        HandBuiltSyncPlans.FromRebuilds(
                             new TableRebuildPlan
                             {
                                 TableName = "items",
                                 NewDefinition = TrComputedEntity(computed: true),
                                 CreateOnly = true,
-                            },
-                        ],
-                    }
+                            }
+                        )
                 )
                 .Expect(Sl, e => e.Lines("note computed-column | -- Computed column 'total'*"))
                 .TreatsGroups(K.ComputedColumn, Ft.Sync, (Tm.Annotation, [Sl])),
@@ -257,18 +254,15 @@ internal static partial class DialectDdlRows
                     "同期 SQLite 再構築: 計算列が無ければ注意コメントは出ない",
                     E.Computed,
                     F.Note,
-                    _ => new SyncPlan
-                    {
-                        Rebuilds =
-                        [
+                    _ =>
+                        HandBuiltSyncPlans.FromRebuilds(
                             new TableRebuildPlan
                             {
                                 TableName = "items",
                                 NewDefinition = TrComputedEntity(computed: false),
                                 CreateOnly = true,
-                            },
-                        ],
-                    }
+                            }
+                        )
                 )
                 .Expect(Sl, e => e.NoText("*-- Computed column*")),
         ];
@@ -466,18 +460,15 @@ internal static partial class DialectDdlRows
                     "同期 SQLite 再構築: 採番列に注記は出さない（扱いの表が「なし」）",
                     E.Identity,
                     F.Note,
-                    _ => new SyncPlan
-                    {
-                        Rebuilds =
-                        [
+                    _ =>
+                        HandBuiltSyncPlans.FromRebuilds(
                             new TableRebuildPlan
                             {
                                 TableName = "items",
                                 NewDefinition = TrIdentityEntity(identity: true),
                                 CreateOnly = true,
-                            },
-                        ],
-                    }
+                            }
+                        )
                 )
                 .Expect(Sl, e => e.NoText("*-- Identity column*"))
                 .TreatsGroups(K.IdentityRejectingValues, Ft.Sync, (Tm.None, [Sl])),
