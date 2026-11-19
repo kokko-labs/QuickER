@@ -19,24 +19,16 @@ public sealed class SyncPlanExpectationTests
     public void SyntheticAndComparisonRows_Match()
     {
         var rows = SyncPlanExpectationRows.ForSyntheticOrComparison().ToList();
-        var roundTrips = new List<string?>();
-        var parities = new List<SyncPlanCapabilityNetRunner.SchedulingParityResult>();
+        var stepPlans = new List<SyncPlanCapabilityNetRunner.StepPlanResult>();
         var problems = rows.SelectMany(row =>
-                SyncPlanExpectationRunner.Run(
-                    row,
-                    onStepRoundTrip: roundTrips.Add,
-                    onSchedulingParity: parities.Add
-                )
+                SyncPlanExpectationRunner.Run(row, onStepPlan: stepPlans.Add)
             )
             .ToList();
         TestContext.Current.TestOutputHelper?.WriteLine(
             $"synthetic or comparison rows {rows.Count}, problems {problems.Count}"
         );
         TestContext.Current.TestOutputHelper?.WriteLine(
-            $"{SyncPlanCapabilityNetRunner.DescribeStepRoundTrips(roundTrips)} plans of synthetic or comparison rows"
-        );
-        TestContext.Current.TestOutputHelper?.WriteLine(
-            $"{SyncPlanCapabilityNetRunner.DescribeSchedulingParity(parities)} plans of synthetic or comparison rows"
+            $"{SyncPlanCapabilityNetRunner.DescribeStepPlans(stepPlans)} plans of synthetic or comparison rows"
         );
 
         if (problems.Count > 0)

@@ -33,15 +33,6 @@ internal enum PlanStage
     /// （計画の組み立ての選んだ項目の最終形）
     /// </summary>
     Selected,
-
-    /// <summary>
-    /// <see cref="Selected"/> に、暗黙の外し直し（外部キー・一意制約・主キー）を足した並び（前寄せの中で一意制約の作り直しを
-    /// 取り下げた後の並びも含む）
-    /// </summary>
-    WithRebuilds,
-
-    /// <summary>並べ終えた計画の全項目（主キーの変更は解除と付与の 2 回・列順の変更は無い）</summary>
-    Arranged,
 }
 
 /// <summary>
@@ -142,7 +133,7 @@ internal sealed class PostSyncSchema
 
     /// <summary>項目が外す外部キーの照合キー</summary>
     /// <remarks>
-    /// 同期後に無い外部キーとは限らない。<see cref="PlanStage.WithRebuilds"/> の並びでは、暗黙に外して付け直す外部キーも含む。
+    /// 同期後に無い外部キーとは限らない（作り直しを展開した削除の外部キーは、追加の側で定義を変えて付け直す）。
     /// </remarks>
     public IReadOnlySet<ForeignKeyId> DroppedForeignKeys =>
         _droppedForeignKeys ??= CollectExplicitlyDroppedForeignKeys(

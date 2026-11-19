@@ -41,7 +41,7 @@ internal static partial class ParityRows
             ),
             new(
                 "sync-rebuild-declarations-table-complete",
-                "同期の計画の新しい組み立ての外し直しの宣言（RebuildDeclarations の宣言の形の Require*）は、どれも宣言の表（All）に"
+                "同期の計画の組み立ての外し直しの宣言（RebuildDeclarations の宣言の形の Require*）は、どれも宣言の表（All）に"
                     + "ちょうど 1 回載り、表の要素はどれも宣言の形の関数にする（表から抜けた宣言は黙って一度も流れず、外れていなければならない"
                     + "制約を外さない計画が DB で断られる）",
                 ParityCompare.Multiset,
@@ -89,7 +89,7 @@ internal static partial class ParityRows
             new(
                 "sync-assessment-rules-table-complete",
                 "同期の計画の評価の規則（AssessmentRules の規則の形の Warn*）は、どれも規則の表（All）にちょうど 1 回載り、表の要素は"
-                    + "どれも規則の形の関数にする（表から抜けた規則は新しい計画器で一度も流れず、その警告が黙って消える）",
+                    + "どれも規則の形の関数にする（表から抜けた規則は一度も流れず、その警告が黙って消える）",
                 ParityCompare.Multiset,
                 () =>
                     SyncSelectionRuleTable.DeclaredRules(
@@ -208,7 +208,7 @@ internal static partial class ParityRows
             """,
     ];
 
-    /// <summary>新しい組み立てのフォルダ（src/QuickER.Provider/Sync/Scheduling）のソースの本文</summary>
+    /// <summary>組み立てのフォルダ（src/QuickER.Provider/Sync/Scheduling）のソースの本文</summary>
     private static IEnumerable<string> SchedulingSources() =>
         Directory
             .EnumerateFiles(

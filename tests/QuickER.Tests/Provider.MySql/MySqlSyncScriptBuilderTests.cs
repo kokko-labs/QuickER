@@ -161,13 +161,20 @@ public class MySqlSyncScriptBuilderTests
         string expectedSchema
     )
     {
+        var parent = new Entity { TableName = "customer" };
+        var child = new Entity { TableName = childTable };
         var sql = Build(
             new SchemaDiffItem
             {
                 Kind = SchemaDiffKind.DropForeignKey,
                 TableName = childTable,
-                ParentEntity = new Entity { TableName = "customer" },
-                ChildEntity = new Entity { TableName = childTable },
+                ParentEntity = parent,
+                ChildEntity = child,
+                Relationship = new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                },
                 ForeignKeyName = constraintName,
                 IsSelected = true,
             }
@@ -212,16 +219,26 @@ public class MySqlSyncScriptBuilderTests
     )]
     public void DropForeignKey_RechecksLeftoverIndexAfterLaterDropOnSameTable()
     {
-        static SchemaDiffItem Drop(string child, string name) =>
-            new()
+        static SchemaDiffItem Drop(string child, string name)
+        {
+            var parentEntity = new Entity { TableName = "customer" };
+            var childEntity = new Entity { TableName = child };
+
+            return new()
             {
                 Kind = SchemaDiffKind.DropForeignKey,
                 TableName = child,
-                ParentEntity = new Entity { TableName = "customer" },
-                ChildEntity = new Entity { TableName = child },
+                ParentEntity = parentEntity,
+                ChildEntity = childEntity,
+                Relationship = new Relationship
+                {
+                    SourceEntityId = parentEntity.Id,
+                    TargetEntityId = childEntity.Id,
+                },
                 ForeignKeyName = name,
                 IsSelected = true,
             };
+        }
 
         var sql = Build(Drop("order", "fk_a"), Drop("invoice", "fk_c"), Drop("order", "fk_b"));
 
@@ -258,6 +275,11 @@ public class MySqlSyncScriptBuilderTests
                 TableName = "order",
                 ParentEntity = customer,
                 ChildEntity = order,
+                Relationship = new Relationship
+                {
+                    SourceEntityId = customer.Id,
+                    TargetEntityId = order.Id,
+                },
                 IsSelected = true,
             }
         );
@@ -497,12 +519,19 @@ public class MySqlSyncScriptBuilderTests
     [Fact(DisplayName = "DropForeignKey の動的 SQL はテーブル名の ' を二重化する")]
     public void DropForeignKey_TableNameWithQuote_IsEscapedInDynamicSql()
     {
+        var parent = new Entity { TableName = "customer" };
+        var child = new Entity { TableName = "o'rders" };
         var item = new SchemaDiffItem
         {
             Kind = SchemaDiffKind.DropForeignKey,
             TableName = "o'rders",
-            ParentEntity = new Entity { TableName = "customer" },
-            ChildEntity = new Entity { TableName = "o'rders" },
+            ParentEntity = parent,
+            ChildEntity = child,
+            Relationship = new Relationship
+            {
+                SourceEntityId = parent.Id,
+                TargetEntityId = child.Id,
+            },
             IsSelected = true,
         };
 
@@ -519,13 +548,20 @@ public class MySqlSyncScriptBuilderTests
     [Fact(DisplayName = "DropForeignKey は逆引きの前に @fk を NULL 初期化する")]
     public void DropForeignKey_InitializesVariableBeforeLookup()
     {
+        var parent = new Entity { TableName = "customer" };
+        var child = new Entity { TableName = "order" };
         var sql = Build(
             new SchemaDiffItem
             {
                 Kind = SchemaDiffKind.DropForeignKey,
                 TableName = "order",
-                ParentEntity = new Entity { TableName = "customer" },
-                ChildEntity = new Entity { TableName = "order" },
+                ParentEntity = parent,
+                ChildEntity = child,
+                Relationship = new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                },
                 IsSelected = true,
             }
         );
@@ -601,6 +637,11 @@ public class MySqlSyncScriptBuilderTests
                 TableName = "other.order",
                 ParentEntity = parent,
                 ChildEntity = child,
+                Relationship = new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                },
                 IsSelected = true,
             }
         );
@@ -628,6 +669,11 @@ public class MySqlSyncScriptBuilderTests
                 TableName = "order",
                 ParentEntity = parent,
                 ChildEntity = child,
+                Relationship = new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                },
                 IsSelected = true,
             }
         );

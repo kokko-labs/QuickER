@@ -89,6 +89,11 @@ public class OracleSyncScriptBuilderTests
                 TableName = "order",
                 ParentEntity = customer,
                 ChildEntity = order,
+                Relationship = new Relationship
+                {
+                    SourceEntityId = customer.Id,
+                    TargetEntityId = order.Id,
+                },
                 IsSelected = true,
             }
         );
@@ -178,6 +183,11 @@ public class OracleSyncScriptBuilderTests
                 TableName = "order",
                 ParentEntity = customer,
                 ChildEntity = order,
+                Relationship = new Relationship
+                {
+                    SourceEntityId = customer.Id,
+                    TargetEntityId = order.Id,
+                },
                 IsSelected = true,
             }
         );
@@ -254,14 +264,21 @@ public class OracleSyncScriptBuilderTests
     )]
     public void RuntimeLookup_QualifiedTableName_IsScopedByOwner()
     {
+        var parent = new Entity { TableName = "P" };
+        var child = new Entity { TableName = "OTHER.C" };
         var sql = Build(
             AlterPk("OTHER.T", PkTarget("OTHER.T", "CODE")),
             new SchemaDiffItem
             {
                 Kind = SchemaDiffKind.DropForeignKey,
                 TableName = "OTHER.C",
-                ParentEntity = new Entity { TableName = "P" },
-                ChildEntity = new Entity { TableName = "OTHER.C" },
+                ParentEntity = parent,
+                ChildEntity = child,
+                Relationship = new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                },
                 IsSelected = true,
             }
         );
@@ -288,12 +305,19 @@ public class OracleSyncScriptBuilderTests
     [Fact(DisplayName = "DropForeignKey の PL/SQL ブロックはテーブル名の ' を二重化する")]
     public void DropForeignKey_TableNameWithQuote_IsEscapedInDynamicSql()
     {
+        var parent = new Entity { TableName = "customer" };
+        var child = new Entity { TableName = "o'rders" };
         var item = new SchemaDiffItem
         {
             Kind = SchemaDiffKind.DropForeignKey,
             TableName = "o'rders",
-            ParentEntity = new Entity { TableName = "customer" },
-            ChildEntity = new Entity { TableName = "o'rders" },
+            ParentEntity = parent,
+            ChildEntity = child,
+            Relationship = new Relationship
+            {
+                SourceEntityId = parent.Id,
+                TargetEntityId = child.Id,
+            },
             IsSelected = true,
         };
 

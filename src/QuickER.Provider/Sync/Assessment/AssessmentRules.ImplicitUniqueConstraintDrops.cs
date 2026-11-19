@@ -12,7 +12,7 @@ internal static partial class AssessmentRules
     /// <param name="assessment">計画の事実と、組み立ての結果（選んだ項目の最終形の一意制約を外す文）</param>
     /// <returns>名指しの警告（選んだ項目の最終形の項目の順。Detail は「制約名 (構成列, …)」）</returns>
     /// <remarks>
-    /// 選んだ項目の最終形から写した一意制約を外す文（<see cref="Scheduling.SequentialSchedule.SelectedUniqueConstraintDrops"/>。
+    /// 選んだ項目の最終形から写した一意制約を外す文（<see cref="Scheduling.StepSchedule.SelectedUniqueConstraintDrops"/>。
     /// テーブル再構築の方言で再構築へ畳む削除も含む）のうち、理由が <see cref="ImplicitStepReason.VanishingUniqueConstraint"/> の文
     /// 1 つにつき 1 件。警告は文の値から作るので、外す文の無い警告も、警告の無い外す文も出ない。
     /// </remarks>
@@ -32,7 +32,7 @@ internal static partial class AssessmentRules
     /// <param name="assessment">計画の事実と、組み立ての結果（選んだ項目の最終形の一意制約を外す文）</param>
     /// <returns>名指しの警告（選んだ項目の最終形の項目の順。Detail は「制約名 (構成列, …)」）</returns>
     /// <remarks>
-    /// 選んだ項目の最終形から写した一意制約を外す文（<see cref="Scheduling.SequentialSchedule.SelectedUniqueConstraintDrops"/>）のうち、
+    /// 選んだ項目の最終形から写した一意制約を外す文（<see cref="Scheduling.StepSchedule.SelectedUniqueConstraintDrops"/>）のうち、
     /// 理由が <see cref="ImplicitStepReason.UniqueConstraintReplacedByPrimaryKey"/> の文 1 つにつき 1 件。
     /// </remarks>
     public static IEnumerable<SyncPlanWarning> WarnUniqueConstraintsReplacedByPrimaryKey(

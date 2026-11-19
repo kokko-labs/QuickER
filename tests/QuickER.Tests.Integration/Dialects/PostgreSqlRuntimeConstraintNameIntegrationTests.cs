@@ -264,15 +264,25 @@ public sealed class PostgreSqlRuntimeConstraintNameIntegrationTests(
         );
 
     /// <summary>制約名を持たない外部キー削除の差分項目（名前不明パスを通す）を作る</summary>
-    private static SchemaDiffItem DropForeignKeyWithoutName(string child, string parent) =>
-        new()
+    private static SchemaDiffItem DropForeignKeyWithoutName(string child, string parent)
+    {
+        var childEntity = new Entity { TableName = child };
+        var parentEntity = new Entity { TableName = parent };
+
+        return new()
         {
             Kind = SchemaDiffKind.DropForeignKey,
             TableName = child,
-            ChildEntity = new Entity { TableName = child },
-            ParentEntity = new Entity { TableName = parent },
+            ChildEntity = childEntity,
+            ParentEntity = parentEntity,
+            Relationship = new Relationship
+            {
+                SourceEntityId = parentEntity.Id,
+                TargetEntityId = childEntity.Id,
+            },
             IsSelected = true,
         };
+    }
 
     /// <summary>public の全外部キーを「子テーブル -&gt; 制約名」の形で並べて返す</summary>
     private Task<List<string>> ForeignKeysAsync() =>

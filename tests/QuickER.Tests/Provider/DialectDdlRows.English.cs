@@ -370,6 +370,11 @@ internal static partial class DialectDdlRows
                 ColumnName = null,
                 ParentEntity = parentWithoutPk,
                 ChildEntity = childForSkip,
+                Relationship = new Relationship
+                {
+                    SourceEntityId = parentWithoutPk.Id,
+                    TargetEntityId = childForSkip.Id,
+                },
                 IsSelected = true,
             },
             new SchemaDiffItem

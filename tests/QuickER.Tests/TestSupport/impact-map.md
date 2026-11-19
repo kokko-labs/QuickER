@@ -234,9 +234,9 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Provider/Sync/Assessment` | `rule:sync-assessment-builds-warnings-only` |
 | `src/QuickER.Provider/Sync/Scheduling` | `rule:sync-scheduling-builds-steps-only` |
 | `src/QuickER.Provider/Sync/Selection` | `rule:sync-name-comparison-tokens` |
-| `src/QuickER.Provider/Sync/SequentialPlanner.cs` | `rule:sync-assessment-builds-warnings-only` |
 | `src/QuickER.Provider/Sync/State` | `rule:sync-name-comparison-tokens` |
 | `src/QuickER.Provider/Sync/State/ConstraintState.cs` | `rule:sync-assessment-builds-warnings-only` |
+| `src/QuickER.Provider/Sync/StepPlanner.cs` | `rule:sync-assessment-builds-warnings-only` |
 | `src/QuickER.Provider/Sync/TableRebuilds` | `rule:sync-name-comparison-tokens`・`rule:sync-scheduling-builds-steps-only` |
 | `src/QuickER.Provider/SyncDialectCapabilities.cs` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`rule:sync-capabilities-initializers` |
 | `src/QuickER.Provider/SyncPlan.cs` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`table:SyncPlanExpectations` |
@@ -821,7 +821,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 
 ### `rule:sync-assessment-builds-warnings-only`
 
-- 範囲：`src/QuickER.Provider/Sync/Assessment`・`src/QuickER.Provider/Sync/SequentialPlanner.cs`・`src/QuickER.Provider/Sync/State/ConstraintState.cs`
+- 範囲：`src/QuickER.Provider/Sync/Assessment`・`src/QuickER.Provider/Sync/StepPlanner.cs`・`src/QuickER.Provider/Sync/State/ConstraintState.cs`
 
 ### `rule:mutation-safe-mode-jump-guards`
 
@@ -919,8 +919,7 @@ src 全体か src の外を読む守り。単位の守りには数えない（�
 | `rule:schema-import-warning-kind-branches` | src/**/*.cs（除外 1 件） |
 | `rule:sqlite-file-connection-creations` | src/**/*.cs（除外 1 件） |
 | `rule:sqlite-script-executions` | src/**/*.cs（除外 29 件） |
-| `rule:sync-plan-probe-only-in-tests` | src/**/*.cs |
-| `rule:sync-sequential-planner-callers` | src/**/*.cs |
+| `rule:sync-step-planner-callers` | src/**/*.cs |
 | `rule:source-invisible-characters-src` | src/**/*.cs |
 | `rule:source-invisible-characters-tests` | tests/**/*.cs |
 | `rule:cjk-range-copies` | tests/**/*.cs |

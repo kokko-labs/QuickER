@@ -69,6 +69,11 @@ public sealed class MySqlSchemaSyncIntegrationTests(MySqlContainerFixture fixtur
             TableName = "child",
             ParentEntity = parentE,
             ChildEntity = childE,
+            Relationship = new Relationship
+            {
+                SourceEntityId = parentE.Id,
+                TargetEntityId = childE.Id,
+            },
             ForeignKeyName = null, // 不明 → プリペアド動的 SQL でカタログ逆引き
             IsSelected = true,
         };

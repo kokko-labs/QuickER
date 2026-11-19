@@ -29,7 +29,7 @@ internal sealed record ScheduledStep(SyncStep Step)
 /// 外し直しの宣言が「選んだ文を流す間、外れていなければならない」と答えた DB の今の制約（同じ計画が明示に外す制約と、
 /// 付け直せないので外さない制約も含む。DB の今の図が無いか、文で表せないか、テーブル再構築の方言なら null）
 /// </param>
-internal sealed record SequentialSchedule(
+internal sealed record StepSchedule(
     IReadOnlyList<SyncStep>? Steps,
     string? Unrepresentable,
     RequiredConstraints? Required = null

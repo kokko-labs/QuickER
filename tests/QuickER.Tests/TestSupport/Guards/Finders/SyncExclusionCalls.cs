@@ -10,8 +10,8 @@ namespace QuickER.Tests.TestSupport.Guards;
 /// <remarks>
 /// <para>
 /// 規則への参照は、名前が <c>Exclude</c> に大文字が続く識別子で、クラス <c>SelectionRules</c> か <c>SyncPlanner</c> の中にあるか、
-/// <c>SelectionRules.</c> で修飾したもの（呼び出しとメソッドグループの両方）。周そのもの（<c>ExcludeUntilStable</c>）と、外した項目を
-/// 積むだけの <c>ExcludeSelected</c> は数えない。規則の表への参照は、<c>SelectionRules.</c> で修飾した（か <c>SelectionRules</c> の
+/// <c>SelectionRules.</c> で修飾したもの（呼び出しとメソッドグループの両方）。周そのもの（<c>ExcludeUntilStable</c>）は数えない。
+/// 規則の表への参照は、<c>SelectionRules.</c> で修飾した（か <c>SelectionRules</c> の
 /// 中の）<c>BeforeRounds</c>・<c>EachRound</c> の読み。
 /// </para>
 /// <para>
@@ -30,7 +30,6 @@ internal static class SyncExclusionCalls
     private const string Rules = "SelectionRules";
     private const string Prefix = "Exclude";
     private const string Loop = "ExcludeUntilStable";
-    private const string Collector = "ExcludeSelected";
 
     private static readonly HashSet<string> RuleTables = new(StringComparer.Ordinal)
     {
@@ -91,7 +90,7 @@ internal static class SyncExclusionCalls
 
         var name = identifier.Identifier.ValueText;
 
-        if (!IsExclusionName(name) || name is Loop or Collector)
+        if (!IsExclusionName(name) || name == Loop)
         {
             return null;
         }

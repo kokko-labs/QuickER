@@ -16,18 +16,14 @@ internal static class SyncPlanExpectationRunner
     /// <param name="scopeAlias">
     /// 流す能力の鍵 → 期待の能力の鍵の読み替え（合成の能力の行を近い実方言で流してみるときに、合成の能力へ書いた期待をその実方言で照合する）
     /// </param>
-    /// <param name="onStepRoundTrip">
-    /// 計画を作った能力ごとに 1 回呼ぶ（関係 N4 を掛けたら null、計画を文で表せずに掛けなかったらその理由）
-    /// </param>
-    /// <param name="onSchedulingParity">
-    /// 計画を作った能力ごとに 1 回呼ぶ（関係 N5 の結果）
+    /// <param name="onStepPlan">
+    /// 計画を作った能力ごとに 1 回呼ぶ（関係 N4 の結果。計画を文で表せずに掛けなかったら、その理由を持つ）
     /// </param>
     public static IReadOnlyList<string> Run(
         ScenarioRow<SyncPlanExpectationInput> row,
         IEnumerable<string>? capabilities = null,
         IReadOnlyDictionary<string, string>? scopeAlias = null,
-        Action<string?>? onStepRoundTrip = null,
-        Action<SyncPlanCapabilityNetRunner.SchedulingParityResult>? onSchedulingParity = null
+        Action<SyncPlanCapabilityNetRunner.StepPlanResult>? onStepPlan = null
     )
     {
         var input = row.Input;
@@ -37,7 +33,7 @@ internal static class SyncPlanExpectationRunner
 
         foreach (var key in capabilities ?? input.Capabilities)
         {
-            var facets = Project(input, key, problems, onStepRoundTrip, onSchedulingParity);
+            var facets = Project(input, key, problems, onStepPlan);
             projections.Add((key, facets));
             var scope =
                 scopeAlias is not null && scopeAlias.TryGetValue(key, out var aliased)
@@ -104,8 +100,7 @@ internal static class SyncPlanExpectationRunner
         SyncPlanExpectationInput input,
         string key,
         List<string> problems,
-        Action<string?>? onStepRoundTrip,
-        Action<SyncPlanCapabilityNetRunner.SchedulingParityResult>? onSchedulingParity
+        Action<SyncPlanCapabilityNetRunner.StepPlanResult>? onStepPlan
     )
     {
         var facets = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
@@ -163,6 +158,10 @@ internal static class SyncPlanExpectationRunner
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             facets[ExpectationFacet.Exception] = [Describe(ex)];
+
+            // 製品が断った計画にも関係 N4 を掛ける（文で表せない項目なら「文で表せない」と数え、製品が理由を名指しして断ったことを見る。
+            // 計画器も例外を投げる計画は数えない）
+            RelationsOnStepPlan(null);
             return facets;
         }
 
@@ -201,48 +200,7 @@ internal static class SyncPlanExpectationRunner
             );
         }
 
-        // 関係 N4（文の往復）：手で組んだ項目の行にも掛ける（文で表せない計画は掛けずに理由を数える）。同期スクリプトは実方言だけ比べる
-        var roundTrip = SyncPlanCapabilityNetRunner.StepRoundTripProblems(
-            items,
-            plan,
-            labels,
-            world.Live.Entities,
-            isDialect ? SyncPlanExpectationCapabilities.Provider(key).SyncScriptBuilder.Build : null
-        );
-        problems.AddRange(roundTrip.Problems.Select(p => $"[{key}] {p}"));
-        onStepRoundTrip?.Invoke(roundTrip.Unrepresentable);
-
-        // 関係 N5（計画の新旧の一致）：手で組んだ項目の行にも掛ける。同期スクリプトは実方言だけ比べる。取り下げのあるケースの関係 5
-        // （新しい計画器の除外の不動点）は関係 N3 と同じ行にだけ、関係 4（新しい計画の静的な規則）は実方言の行にだけ掛ける
-        var parity = SyncPlanCapabilityNetRunner.SchedulingParityProblems(
-            items,
-            plan,
-            world.Capabilities,
-            context,
-            labels,
-            world.Live.Entities,
-            isDialect
-                ? SyncPlanExpectationCapabilities.Provider(key).SyncScriptBuilder.Build
-                : null,
-            input.Items is not null ? null
-                : isDialect ? SyncPlanExpectationCapabilities.Provider(key).SyncScriptBuilder.Build
-                : shape => PlanShape(shape, labels, world.Live.Entities),
-            isDialect
-                ? newPlan =>
-                    SyncPlanStaticRules
-                        .Evaluate(
-                            key,
-                            world.Live.Entities,
-                            world.Live.Relationships,
-                            [.. items.Where(i => i.IsSelected)],
-                            newPlan,
-                            world.Capabilities
-                        )
-                        .Violations
-                : null
-        );
-        problems.AddRange(parity.Problems.Select(p => $"[{key}] {p}"));
-        onSchedulingParity?.Invoke(parity);
+        RelationsOnStepPlan(plan);
 
         if (isDialect)
         {
@@ -276,6 +234,30 @@ internal static class SyncPlanExpectationRunner
         }
 
         return facets;
+
+        // 関係 N4 を製品の計画（製品が例外を投げたら null）に掛ける
+        void RelationsOnStepPlan(SyncPlan? product)
+        {
+            // 関係 N4（文の並びの計画の形）：手で組んだ項目の行にも掛ける（文で表せない計画は掛けずに理由を数える）。
+            // 同期スクリプトは実方言だけ比べる
+            var stepPlan = SyncPlanCapabilityNetRunner.StepPlanProblems(
+                items,
+                product,
+                world.Capabilities,
+                context,
+                labels,
+                world.Live.Entities,
+                isDialect
+                    ? SyncPlanExpectationCapabilities.Provider(key).SyncScriptBuilder.Build
+                    : null
+            );
+
+            if (stepPlan is not null)
+            {
+                problems.AddRange(stepPlan.Problems.Select(p => $"[{key}] {p}"));
+                onStepPlan?.Invoke(stepPlan);
+            }
+        }
     }
 
     /// <summary>計画の形（セクション・再構築・列順の 3 面）を 1 つの文字列にする（関係 N3 が能力の組だけの行で比べる）</summary>
