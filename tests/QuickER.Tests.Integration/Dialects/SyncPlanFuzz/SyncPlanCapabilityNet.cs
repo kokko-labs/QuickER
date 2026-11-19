@@ -563,15 +563,7 @@ internal static class SyncPlanCapabilityNetRunner
             )
         );
 
-        var stepPlan = StepPlanProblems(
-            diff.Items,
-            plan,
-            capabilities,
-            context,
-            new Dictionary<SchemaDiffItem, int>(ReferenceEqualityComparer.Instance),
-            before.Entities,
-            provider.SyncScriptBuilder.Build
-        )!;
+        var stepPlan = StepPlanProblems(diff.Items, plan, capabilities, context)!;
         outcome.Violations.AddRange(stepPlan.Problems);
         outcome.StepPlan = stepPlan;
 
@@ -952,6 +944,9 @@ internal static class SyncPlanCapabilityNetRunner
     /// 計画器の結果の事実が、その計画をテーブル再構築の方言の計画としたか（<see cref="AssessmentFacts.IsTableRebuildDialect"/>。
     /// 計画器の結果が無ければ null）。空振りの検査が網の宣言（<see cref="SyncPlanFuzzDialect.PlansTableRebuilds"/>）と照らす
     /// </param>
+    /// <param name="PairedPrimaryKey">
+    /// 製品の計画が、対になった主キーの解除と付与（同じ <see cref="ReaddPair"/> を持つ主キーを外す文と付ける文）を持つか
+    /// </param>
     internal sealed record StepPlanResult(
         IReadOnlyList<string> Problems,
         string? Unrepresentable,
@@ -962,23 +957,20 @@ internal static class SyncPlanCapabilityNetRunner
         bool ExistingTableRebuild = false,
         bool CreateOnlyRebuild = false,
         bool RebuildWithSections = false,
-        bool? TableRebuildDialect = null
+        bool? TableRebuildDialect = null,
+        bool PairedPrimaryKey = false
     );
 
     /// <summary>
-    /// 関係 N4（文の並びの計画の形）：計画器（<see cref="StepPlanner"/>）が作った文の並びの計画を、製品の写し
-    /// （<see cref="StepLowering.ToSyncPlan"/>）で計画へ写すと、読み取り用の形は製品の計画と全部の面が同じで、同期スクリプトは
-    /// 読み取り用の形も文の値だけの形も製品の計画と同じ。文の由来と対は、対の約束（外す文 1 つと付ける文 1 つ・同じ表・外すのが前）と
-    /// 暗黙の理由ごとの対の有無を守る
+    /// 関係 N4（文の並びの計画の形）：計画器（<see cref="StepPlanner"/>）が作った文の並びの計画（製品の入口がそのまま返す計画）の、
+    /// 文の由来と対は、対の約束（外す文 1 つと付ける文 1 つ・同じ表・外すのが前）と暗黙の理由ごとの対の有無を守る。読み取り用の形
+    /// （テストの側の写し <see cref="SyncPlanSections"/>）の前寄せの印は、計画の前寄せした文の数（<see cref="SyncPlan.MovedFirstCount"/>）と合い、
+    /// 写しは文を落とさず取り違えない（<see cref="ReadableFormProblems"/>）
     /// </summary>
     /// <remarks>
     /// <para>
-    /// 写しは計画・同期スクリプト・画面へ渡す形を作る。文の値だけの形の面が変われば、文の値が方言ビルダーに要る情報を落としている。
-    /// 同期スクリプトのビルダーが例外を投げる計画は、写した計画のビルダーも同じ型の例外を投げることを見る。
-    /// </para>
-    /// <para>
-    /// 再構築の成分のうち面の行が書かないもの（<see cref="UnwrittenRebuildParts"/>）は、製品の計画と写した計画を位置で突き合わせて比べる
-    /// （製品の計画は同じ文の並びの写しなので、写しが決定的であることの照合になる）。
+    /// 再構築の成分のうち面の行が書かないもの（<see cref="UnwrittenRebuildParts"/>）は、製品の計画と計画器の計画を位置で突き合わせて比べる
+    /// （製品は同じ計画器を流すので、計画が決定的であることの照合になる）。
     /// </para>
     /// <para>
     /// 取り下げた項目の並び K（<see cref="StepPlannerResult.Withdrawn"/>）について、種別 <see cref="SyncPlanWarningKind.UniqueConstraintRebuildKeptForForeignKey"/>
@@ -998,18 +990,12 @@ internal static class SyncPlanCapabilityNetRunner
     /// <param name="plan">製品の計画（<see cref="SyncPlanner.BuildPlan(IEnumerable{SchemaDiffItem}, SyncDialectCapabilities, SyncPlanContext?)"/> が例外を投げたら null）</param>
     /// <param name="capabilities">製品の計画と同じ能力</param>
     /// <param name="context">製品の計画と同じ文脈</param>
-    /// <param name="labels">手で組んだ項目の番号（無ければ空）</param>
-    /// <param name="liveEntities">DB 側の図</param>
-    /// <param name="buildScript">同期スクリプトを作る（実方言だけ。能力の組だけなら null）</param>
     /// <returns>結果（製品も計画器も例外を投げて、比べる計画が無ければ null）</returns>
     internal static StepPlanResult? StepPlanProblems(
         IReadOnlyList<SchemaDiffItem> items,
         SyncPlan? plan,
         SyncDialectCapabilities capabilities,
-        SyncPlanContext? context,
-        IReadOnlyDictionary<SchemaDiffItem, int> labels,
-        IReadOnlyList<Entity> liveEntities,
-        Func<SyncPlan, string>? buildScript
+        SyncPlanContext? context
     )
     {
         StepPlannerResult planned;
@@ -1063,79 +1049,17 @@ internal static class SyncPlanCapabilityNetRunner
                 : null;
         problems.AddRange(endState ?? []);
 
-        SyncPlan lowered;
-        SyncPlan loweredFields;
+        // 前寄せの印（読み取り用の形のセクションの印が、計画の前寄せした文の数と合う＝先頭から続く印のセクションの文の数がちょうどその数）
+        problems.AddRange(MovedFirstProblems(plan));
 
-        try
-        {
-            lowered = StepLowering.ToSyncPlan(steps);
-            loweredFields = StepLowering.ToSyncPlan(steps, fieldsOnly: true);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            problems.Add(
-                $"{StepPlanRelationPrefix}lowering threw: {ex.GetType().Name}: {ex.Message}"
-            );
-            return new StepPlanResult(
-                problems,
-                null,
-                planned.Withdrawn.Count,
-                endState is not null,
-                TableRebuildDialect: rebuildDialect
-            );
-        }
+        // 読み取り用の形（テストの側の写し）が文を落とさず取り違えない（数の一致・主キーの項目の共有・元の項目の参照）
+        problems.AddRange(ReadableFormProblems(plan));
 
-        // 文の値だけの形の項目は、どれも文から組み立てた項目（選んだ項目そのものを返すと、文の値がビルダーに足りるかを見ていない）
-        var selectedItems = new HashSet<SchemaDiffItem>(
-            items.Where(i => i.IsSelected),
-            ReferenceEqualityComparer.Instance
-        );
-
-        if (
-            loweredFields
-                .Sections.SelectMany(s => s.Items)
-                .FirstOrDefault(selectedItems.Contains) is
-            { } reused
-        )
-        {
-            problems.Add(
-                $"{StepPlanRelationPrefix}the fields-only form returns a selected item itself: "
-                    + $"{reused.Kind}: {reused.Description}"
-            );
-        }
-
-        var original = SyncPlanProjection.Plan(plan, labels, liveEntities);
-        var copied = SyncPlanProjection.Plan(lowered, labels, liveEntities);
-
-        foreach (var (facet, lines) in original)
-        {
-            var other = copied.TryGetValue(facet, out var found) ? found : [];
-
-            if (!lines.SequenceEqual(other, StringComparer.Ordinal))
-            {
-                problems.Add(
-                    $"{StepPlanRelationPrefix}the {facet} differ{FirstDifference(lines, other)}"
-                );
-            }
-        }
-
-        // 前寄せの印（面の行は印を書かないので別に比べる）
-        var moved = plan.Sections.Select(s => s.IsMovedFirst).ToList();
-        var loweredMoved = lowered.Sections.Select(s => s.IsMovedFirst).ToList();
-
-        if (!moved.SequenceEqual(loweredMoved))
-        {
-            problems.Add(
-                $"{StepPlanRelationPrefix}the readable form marks sections moved first differently: "
-                    + $"[{string.Join(",", loweredMoved.Select(m => m ? 1 : 0))}] <> [{string.Join(",", moved.Select(m => m ? 1 : 0))}]"
-            );
-        }
-
-        // 再構築の成分のうち面の行が書かないもの（rowid の別名の NULL の守りの列・補助オブジェクトの表と CREATE 文）は、位置で突き合わせて
-        // 別に比べる（再構築の数の違いは面の行が見る）
+        // 再構築の成分のうち面の行が書かないもの（rowid の別名の NULL の守りの列・補助オブジェクトの表と CREATE 文）は、製品の計画と
+        // 計画器の計画を位置で突き合わせて別に比べる（製品は同じ計画器を流すので、計画が決定的であることの照合になる）
         foreach (
             var (index, expectedRebuild, actualRebuild) in plan
-                .Rebuilds.Zip(lowered.Rebuilds)
+                .Rebuilds.Zip(steps.Rebuilds)
                 .Select((p, i) => (i, p.First, p.Second))
         )
         {
@@ -1150,57 +1074,7 @@ internal static class SyncPlanCapabilityNetRunner
             }
         }
 
-        // 2 つのセクションに入る同じ 1 つの項目（主キーの変更の解除と付与）は、写した計画でも同じ 1 つの項目（面の行は参照を見ない）
-        var sharing = SharedItemPattern(plan);
-
-        foreach (
-            var (form, copy) in new[] { ("readable", lowered), ("fields-only", loweredFields) }
-        )
-        {
-            if (!sharing.SequenceEqual(SharedItemPattern(copy)))
-            {
-                problems.Add(
-                    $"{StepPlanRelationPrefix}the {form} form shares items between sections differently: "
-                        + $"[{string.Join(",", SharedItemPattern(copy))}] <> [{string.Join(",", sharing)}]"
-                );
-            }
-        }
-
-        problems.AddRange(WithdrawalProblems(planned.Withdrawn, lowered));
-
-        if (buildScript is not null)
-        {
-            var (script, thrown) = Build(plan);
-            CompareScript("readable", lowered);
-            CompareScript("fields-only", loweredFields);
-
-            void CompareScript(string form, SyncPlan copy)
-            {
-                var (copyScript, copyThrown) = Build(copy);
-
-                if (thrown is not null || copyThrown is not null)
-                {
-                    if (thrown?.GetType() != copyThrown?.GetType())
-                    {
-                        problems.Add(
-                            $"{StepPlanRelationPrefix}the {form} script builder throws differently: "
-                                + $"[{Name(copyThrown)}] <> [{Name(thrown)}]"
-                        );
-                    }
-
-                    return;
-                }
-
-                if (!string.Equals(script, copyScript, StringComparison.Ordinal))
-                {
-                    var lines = script!.Split('\n');
-                    var copyLines = copyScript!.Split('\n');
-                    problems.Add(
-                        $"{StepPlanRelationPrefix}the {form} script differs{FirstDifference(lines, copyLines)}"
-                    );
-                }
-            }
-        }
+        problems.AddRange(WithdrawalProblems(planned.Withdrawn, steps));
 
         return new StepPlanResult(
             problems,
@@ -1212,7 +1086,8 @@ internal static class SyncPlanCapabilityNetRunner
             plan.Rebuilds.Any(r => !r.CreateOnly),
             plan.Rebuilds.Any(r => r.CreateOnly),
             plan.Rebuilds.Count > 0 && plan.Sections.Count > 0,
-            rebuildDialect
+            rebuildDialect,
+            HasPairedPrimaryKey(plan)
         );
 
         // 計画器が文で表せない計画は、製品が項目の種類と無いメンバーを名指しした InvalidOperationException で断る
@@ -1242,21 +1117,6 @@ internal static class SyncPlanCapabilityNetRunner
                 $"{StepPlanProductPrefix}the product built a plan although the planner cannot express it as steps: {reason}",
             ];
         }
-
-        (string? Script, Exception? Thrown) Build(SyncPlan target)
-        {
-            try
-            {
-                return (buildScript!(target), null);
-            }
-            catch (Exception ex) when (ex is not OutOfMemoryException)
-            {
-                return (null, ex);
-            }
-        }
-
-        static string Name(Exception? ex) =>
-            ex is null ? "no exception" : $"{ex.GetType().Name}: {ex.Message.Split('\n')[0]}";
     }
 
     /// <summary>
@@ -1264,13 +1124,13 @@ internal static class SyncPlanCapabilityNetRunner
     /// 2 種別より前・ほかの警告より後に並び、外した項目の末尾は K の順の K
     /// </summary>
     /// <param name="withdrawn">計画器が取り下げた項目の並び（<see cref="StepPlannerResult.Withdrawn"/>）</param>
-    /// <param name="lowered">計画器の文の並びの計画を写した計画</param>
+    /// <param name="stepPlan">計画器の計画</param>
     private static IEnumerable<string> WithdrawalProblems(
         IReadOnlyList<SchemaDiffItem> withdrawn,
-        SyncPlan lowered
+        SyncPlan stepPlan
     )
     {
-        var categories = lowered
+        var categories = stepPlan
             .Warnings.Select(w =>
                 IsNamedAroundRefusable(w) ? 2
                 : IsWithdrawalWarning(w) ? 1
@@ -1287,8 +1147,8 @@ internal static class SyncPlanCapabilityNetRunner
                 + string.Join(",", categories);
         }
 
-        var tail = lowered
-            .ExcludedItems.Skip(Math.Max(0, lowered.ExcludedItems.Count - withdrawn.Count))
+        var tail = stepPlan
+            .ExcludedItems.Skip(Math.Max(0, stepPlan.ExcludedItems.Count - withdrawn.Count))
             .ToList();
 
         if (
@@ -1299,30 +1159,151 @@ internal static class SyncPlanCapabilityNetRunner
             yield return $"{StepPlanWithdrawalPrefix}the excluded items do not end with the withdrawn items in order: "
                 + string.Join(
                     " / ",
-                    lowered.ExcludedItems.Select(i => $"{i.Kind}: {i.Description}")
+                    stepPlan.ExcludedItems.Select(i => $"{i.Kind}: {i.Description}")
                 );
         }
     }
 
-    /// <summary>セクションの項目ごとの、同じ項目（参照）が最初に現れた位置（計画の項目の共有の形）</summary>
-    private static List<int> SharedItemPattern(SyncPlan plan)
+    /// <summary>
+    /// 前寄せの印の違反：読み取り用の形のセクションのうち前寄せの印（<see cref="SyncPlanSection.IsMovedFirst"/>）を持つものは先頭から続き、
+    /// その文の数の和は計画の前寄せした文の数（<see cref="SyncPlan.MovedFirstCount"/>）とちょうど同じ
+    /// </summary>
+    /// <param name="plan">製品の計画</param>
+    private static IEnumerable<string> MovedFirstProblems(SyncPlan plan)
     {
-        var first = new Dictionary<SchemaDiffItem, int>(ReferenceEqualityComparer.Instance);
-        var pattern = new List<int>();
+        var marks = plan.Sections.Select(s => s.IsMovedFirst).ToList();
+        var leading = marks.TakeWhile(m => m).Count();
+        var movedSteps = plan.Sections.Take(leading).Sum(s => s.Items.Count);
 
-        foreach (var item in plan.Sections.SelectMany(s => s.Items))
+        if (marks.Skip(leading).Any(m => m) || movedSteps != plan.MovedFirstCount)
         {
-            if (!first.TryGetValue(item, out var at))
-            {
-                at = pattern.Count;
-                first[item] = at;
-            }
+            yield return $"{StepPlanRelationPrefix}the readable form marks sections moved first differently from the plan: "
+                + $"[{string.Join(",", marks.Select(m => m ? 1 : 0))}] for {plan.MovedFirstCount} statements moved first";
+        }
+    }
 
-            pattern.Add(at);
+    /// <summary>
+    /// 読み取り用の形（テストの側の写し <see cref="SyncPlanSections"/>）の違反：写しが文を落とさず、文と項目を取り違えない
+    /// </summary>
+    /// <remarks>
+    /// <para>(a) 数の一致：セクションの項目の数の和 ＋ 再構築の数 ＋ 列を動かす文の数 ＝ 計画の文の数。</para>
+    /// <para>
+    /// (b) 主キーの項目の共有：対を持つ主キーを外す文と付ける文は同じ 1 つの項目になる。ほかのどの文の項目も、ほかの文の項目と
+    /// 共有しない（1 つの項目が 2 つの文に入るのは、対になった主キーの解除と付与だけ）。
+    /// </para>
+    /// <para>
+    /// (c) 元の項目の参照：選んだ項目から来て、項目の種類が文の種類と同じ文は、元の項目そのもの。ただし列の組を並べ替えた外部キーの
+    /// 追加は、列の組が文の列の組と同じで、元の項目とは別の参照。
+    /// </para>
+    /// </remarks>
+    /// <param name="plan">製品の計画</param>
+    internal static IEnumerable<string> ReadableFormProblems(SyncPlan plan)
+    {
+        var sections = plan.Sections;
+        var itemCount = sections.Sum(s => s.Items.Count);
+        var moveCount = plan.Steps.Count(s => s is MoveColumnStep);
+
+        // (a) 数の一致（数が合わなければ、文と項目の対応が取れないので後の照合はしない）
+        if (itemCount + plan.Rebuilds.Count + moveCount != plan.Steps.Count)
+        {
+            yield return $"{StepPlanRelationPrefix}the readable form dropped or added statements: "
+                + $"{itemCount} items + {plan.Rebuilds.Count} rebuilds + {moveCount} column moves for {plan.Steps.Count} statements";
+            yield break;
         }
 
-        return pattern;
+        var pairs = sections
+            .SelectMany(s => s.Steps.Zip(s.Items, (step, item) => (Step: step, Item: item)))
+            .ToList();
+
+        // (b) 主キーの項目の共有：項目ごとに、その項目を持つ文を集める
+        foreach (
+            var group in pairs.GroupBy(p => p.Item, ReferenceEqualityComparer.Instance).ToList()
+        )
+        {
+            var steps = group.Select(p => p.Step).ToList();
+
+            if (steps.Count == 1)
+            {
+                continue;
+            }
+
+            var isKeyPair =
+                steps.Count == 2
+                && steps.OfType<DropPrimaryKeyStep>().Count() == 1
+                && steps.OfType<AddPrimaryKeyStep>().Count() == 1
+                && steps[0].Pair is { } pair
+                && ReferenceEquals(steps[1].Pair, pair);
+
+            if (!isKeyPair)
+            {
+                yield return $"{StepPlanRelationPrefix}the readable form shares one item between statements other than a paired primary key drop and add: "
+                    + string.Join(" / ", steps.Select(DescribeStep));
+            }
+        }
+
+        foreach (
+            var keyPair in pairs
+                .Where(p =>
+                    p.Step is DropPrimaryKeyStep or AddPrimaryKeyStep && p.Step.Pair is not null
+                )
+                .GroupBy(p => p.Step.Pair!)
+        )
+        {
+            if (
+                keyPair.Select(p => p.Item).Distinct(ReferenceEqualityComparer.Instance).Count()
+                != 1
+            )
+            {
+                yield return $"{StepPlanRelationPrefix}the readable form gives a paired primary key drop and add separate items: "
+                    + string.Join(" / ", keyPair.Select(p => DescribeStep(p.Step)));
+            }
+        }
+
+        // (c) 元の項目の参照
+        foreach (var (step, item) in pairs)
+        {
+            if (
+                step.Origin is not SelectedOrigin selected
+                || selected.Item.Kind != StepSections.SectionOf(step).Kind
+            )
+            {
+                continue;
+            }
+
+            if (
+                step is AddForeignKeyStep add
+                && !add.ColumnPairs.SequenceEqual(selected.Item.ForeignKeyColumnPairs)
+            )
+            {
+                if (
+                    ReferenceEquals(item, selected.Item)
+                    || !item.ForeignKeyColumnPairs.SequenceEqual(add.ColumnPairs)
+                )
+                {
+                    yield return $"{StepPlanRelationPrefix}the readable form does not give a reordered foreign key addition a copy with the statement's column pairs: "
+                        + DescribeStep(step);
+                }
+
+                continue;
+            }
+
+            if (!ReferenceEquals(item, selected.Item))
+            {
+                yield return $"{StepPlanRelationPrefix}the readable form does not return the selected item itself: "
+                    + DescribeStep(step);
+            }
+        }
     }
+
+    /// <summary>計画が、対になった主キーの解除と付与（同じ対を持つ主キーを外す文と付ける文）を持つか</summary>
+    private static bool HasPairedPrimaryKey(SyncPlan plan) =>
+        plan
+            .Steps.OfType<DropPrimaryKeyStep>()
+            .Any(drop =>
+                drop.Pair is { } pair
+                && plan.Steps.OfType<AddPrimaryKeyStep>()
+                    .Any(add => ReferenceEquals(add.Pair, pair))
+            );
 
     /// <summary>
     /// 関係 N4 を掛けた数と掛けなかった数の要約（「relation N4 on X of Y; unrepresentable: 理由=数, …; withdrawals on W; end state on Z;
@@ -1340,7 +1321,8 @@ internal static class SyncPlanCapabilityNetRunner
             + $"; moved first on {applied.Count(r => r.MovedFirst)}"
             + $"; rebuilds: existing {applied.Count(r => r.ExistingTableRebuild)}"
             + $", create-only {applied.Count(r => r.CreateOnlyRebuild)}"
-            + $", with sections {applied.Count(r => r.RebuildWithSections)}";
+            + $", with sections {applied.Count(r => r.RebuildWithSections)}"
+            + $"; paired primary keys on {applied.Count(r => r.PairedPrimaryKey)}";
     }
 
     /// <summary>2 つの行の並びの最初の違い（「: [写し] &lt;&gt; [元] at line n」）</summary>
@@ -1363,7 +1345,7 @@ internal static class SyncPlanCapabilityNetRunner
     }
 
     /// <summary>文の由来と対の形の違反（関係 N4 の 4 つ目の面）</summary>
-    private static IEnumerable<string> StepShapeProblems(StepPlan plan)
+    private static IEnumerable<string> StepShapeProblems(SyncPlan plan)
     {
         var steps = plan.Steps;
 
@@ -1586,7 +1568,7 @@ internal static class SyncPlanCapabilityNetRunner
     /// </remarks>
     /// <param name="plan">計画器の文の並びの計画</param>
     /// <param name="facts">計画を作るのに使った計画の事実（DB の今の図があること）</param>
-    private static IEnumerable<string> EndStateProblems(StepPlan plan, AssessmentFacts facts)
+    private static IEnumerable<string> EndStateProblems(SyncPlan plan, AssessmentFacts facts)
     {
         var live = facts.Live!;
         var postSync = facts.PostSync;
@@ -1762,7 +1744,8 @@ internal static class SyncPlanCapabilityNetRunner
     /// （テーブル再構築の方言の計画か）が、どの計画でも網の宣言（<paramref name="plansTableRebuilds"/>）と一致する。逐次 DDL の方言では
     /// 掛けた計画の全部に歩きの終わりの状態の照合を掛け、テーブル再構築の方言では 1 つにも掛けない。DDL がトランザクションの方言には
     /// 取り下げのあるケースが無い。DDL が暗黙コミットされる方言で、流す種が普段の既定の種を全部含むときは、前寄せのある計画と断られうる文の
-    /// 前後の名指しのある計画がそれぞれ 1 つ以上ある。テーブル再構築の計画を組む方言で同じとき、既存の表の再構築・表を作るだけの再構築・
+    /// 前後の名指しのある計画がそれぞれ 1 つ以上ある。逐次 DDL の方言で同じとき、対になった主キーの解除と付与を持つ計画が 1 つ以上ある。
+    /// テーブル再構築の計画を組む方言で同じとき、既存の表の再構築・表を作るだけの再構築・
     /// 再構築と残ったセクションの両方を持つ計画がそれぞれ 1 つ以上ある。決定的な行が取り下げの形を必ず出す方言
     /// （<see cref="SyncPlanFuzzDialect.ScenarioRowsWithdrawUniqueRebuild"/>）で決定的な行を流したときは、取り下げのあるケースが 1 つ以上ある
     /// </summary>
@@ -1843,6 +1826,13 @@ internal static class SyncPlanCapabilityNetRunner
             {
                 yield return $"{dialect}: relation N4 checked no plan naming constraints around refusable statements";
             }
+        }
+
+        // 逐次 DDL の方言の普段の種では、対になった主キーの解除と付与を持つ計画が必ず出る（出ないなら読み取り用の形の主キーの
+        // 項目の共有の照合が空振りしている）
+        if (assertsBehaviours && !plansTableRebuilds && !applied.Any(r => r.PairedPrimaryKey))
+        {
+            yield return $"{dialect}: relation N4 checked no plan with a paired primary key drop and add";
         }
 
         // テーブル再構築の計画を組む方言の普段の種では、既存の表の再構築・表を作るだけの再構築・再構築と畳まれずに残ったセクションの

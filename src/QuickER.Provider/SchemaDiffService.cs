@@ -1109,7 +1109,11 @@ public class SchemaDiffService
     }
 
     /// <summary>テーブル名を図へ保存する形にする（<see cref="SchemaNames.ToStoredForm"/>・綴りはそのまま）</summary>
-    public static string NormalizeTable(Entity e) => SchemaNames.ToStoredForm(e.TableName);
+    public static string NormalizeTable(Entity e) => NormalizeTable(e.TableName);
+
+    /// <summary>テーブル名を図へ保存する形にする（<see cref="SchemaNames.ToStoredForm"/>・綴りはそのまま）</summary>
+    /// <param name="tableName">テーブル名（計画の文が持つ図の表名）</param>
+    public static string NormalizeTable(string tableName) => SchemaNames.ToStoredForm(tableName);
 
     /// <summary>外部キーの同一性比較に使うシグネチャ（親子・構成列ペア・制約名・参照アクション）を生成する</summary>
     /// <param name="fk">親子・列ペアまで解決済みの外部キー</param>

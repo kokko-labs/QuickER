@@ -1,5 +1,7 @@
 using System.Collections.Generic;
+using System.Linq;
 using QuickER.Model;
+using QuickER.Provider.Sync.Steps;
 
 namespace QuickER.Provider;
 
@@ -13,8 +15,8 @@ namespace QuickER.Provider;
 /// NULL 許容化は主キー制約が残ったままでは失敗する（SQL Server Msg 5074 → 4922・Oracle ORA-01451 等）ため。
 /// </para>
 /// <para>
-/// <see cref="None"/> は主キー変更以外の全セクション（既定値）。主キー変更セクションに <see cref="None"/> が
-/// 現れた場合、レンダラーは DROP → ADD を 1 セクション内で連続出力する。
+/// <see cref="None"/> は主キー変更以外の全セクション（既定値）。主キーを外す文は <see cref="Drop"/>、付ける文は
+/// <see cref="Add"/> のセクションに入る（<see cref="StepSections"/>）。
 /// </para>
 /// </remarks>
 public enum PrimaryKeyPhase
@@ -27,38 +29,6 @@ public enum PrimaryKeyPhase
 
     /// <summary>新主キー制約の付与フェーズ（列定義変更より後に置く）。</summary>
     Add,
-}
-
-/// <summary>
-/// 同期スクリプトの 1 セクション分（同一種別の差分項目の集合）を表す実行計画の単位。
-/// </summary>
-/// <remarks>
-/// セクションは <see cref="SyncPlanner"/> が固定順序で並べて <see cref="SyncPlan"/> を構成する。
-/// 方言別レンダラー（<see cref="ISyncScriptBuilder"/> の実装）はこの単位を消費して SQL 化する。
-/// 同一 <see cref="Kind"/> のセクションが複数回・別位置に現れることがある（主キー変更の 2 フェーズ）。
-/// </remarks>
-public sealed class SyncPlanSection
-{
-    /// <summary>このセクションが担当する差分種別。</summary>
-    public SchemaDiffKind Kind { get; init; }
-
-    /// <summary>
-    /// 主キー変更セクションのフェーズ（主キー変更以外は既定の <see cref="PrimaryKeyPhase.None"/>）。
-    /// </summary>
-    public PrimaryKeyPhase PrimaryKeyPhase { get; init; } = PrimaryKeyPhase.None;
-
-    /// <summary>このセクションに含まれる差分項目（入力の出現順を保持する）。</summary>
-    public IReadOnlyList<SchemaDiffItem> Items { get; init; } = [];
-
-    /// <summary>
-    /// 必ず断られる文として計画の先頭へ移したセクションか（DDL が暗黙コミットされる方言の前寄せ＝
-    /// <see cref="Sync.Assessment.MoveFirst"/>）。
-    /// </summary>
-    /// <remarks>
-    /// レンダラーは見ない（文の並びはセクションの順のまま）。前寄せした文がその位置で断られることを、同期計画の総当たりの
-    /// 静的な規則が確かめるための印。
-    /// </remarks>
-    internal bool IsMovedFirst { get; init; }
 }
 
 /// <summary>
@@ -377,27 +347,45 @@ public sealed record SyncPlanWarning(
 );
 
 /// <summary>
-/// 差分項目から組み立てた方言中立の実行計画。
+/// 差分項目から組み立てた方言中立の実行計画（DB へ流す文の並び）。
 /// </summary>
 /// <remarks>
-/// <see cref="SyncPlanner.BuildPlan"/> が選択済み項目を種別ごとにグループ化し、依存関係を満たす
-/// 固定順序でセクションを並べたもの。方言別レンダラーはこの計画を SQL へ変換するだけでよい。
+/// <para>
+/// <see cref="SyncPlanner.BuildPlan"/> が選択済み項目から作る。方言別レンダラーは文の並び（<see cref="Steps"/>）を
+/// <see cref="StepSections"/> でセクションへまとめ、文の型ごとに SQL へ変換するだけでよい。
+/// </para>
+/// <para>
+/// <see cref="Rebuilds"/>・<see cref="Reorders"/> は文の並びから導く読み取り専用の形で、初めて読まれたときに導いて覚える。
+/// </para>
 /// </remarks>
 public sealed class SyncPlan
 {
-    /// <summary>実行順に並んだセクション一覧（空セクションは含まない）。</summary>
-    public IReadOnlyList<SyncPlanSection> Sections { get; init; } = [];
+    private IReadOnlyList<TableRebuildPlan>? rebuilds;
+    private IReadOnlyList<TableReorderPlan>? reorders;
 
     /// <summary>
-    /// 逐次 DDL で表現できない変更をテーブル再構築でまとめた計画（rebuild 方言のみ・他方言は空）。
+    /// 文の並び（実行順）。先頭の <see cref="MovedFirstCount"/> 個が前寄せした文で、その後ろに、種類の固定の順に並べた文、列を動かす文、
+    /// 表を作り直す文が続く。
     /// </summary>
-    public IReadOnlyList<TableRebuildPlan> Rebuilds { get; init; } = [];
+    public IReadOnlyList<SyncStep> Steps { get; init; } = [];
 
     /// <summary>
-    /// 列順をネイティブ DDL（<c>ALTER TABLE ... MODIFY ... AFTER</c>）で並べ替える計画
-    /// （Native 方言＝MySQL のみ・他方言は空。rebuild 方言では再構築へ畳むためここは常に空）。
+    /// 必ず断られる文として計画の先頭へ移した文の数（DDL が暗黙コミットされる方言の前寄せ＝<see cref="Sync.Assessment.MoveFirst"/>。
+    /// 無ければ 0）。
     /// </summary>
-    public IReadOnlyList<TableReorderPlan> Reorders { get; init; } = [];
+    internal int MovedFirstCount { get; init; }
+
+    /// <summary>
+    /// 逐次 DDL で表現できない変更をテーブル再構築でまとめた計画（表を作り直す文の中身を文の順に。rebuild 方言のみ・他方言は空）。
+    /// </summary>
+    public IReadOnlyList<TableRebuildPlan> Rebuilds =>
+        rebuilds ??= [.. Steps.OfType<RebuildTableStep>().Select(step => step.Rebuild)];
+
+    /// <summary>
+    /// 列順をネイティブ DDL（<c>ALTER TABLE ... MODIFY ... AFTER</c>）で並べ替える計画（列を動かす文を表ごとにまとめたもの。
+    /// Native 方言＝MySQL のみ・他方言は空。rebuild 方言では再構築へ畳むためここは常に空）。
+    /// </summary>
+    public IReadOnlyList<TableReorderPlan> Reorders => reorders ??= BuildReorders(Steps);
 
     /// <summary>
     /// この計画を実行する前に利用者へ伝えるべき警告（言語中立・SQL 生成には影響しない）。
@@ -434,8 +422,50 @@ public sealed class SyncPlan
     /// </remarks>
     public IReadOnlyList<SchemaDiffItem> ExcludedItems { get; init; } = [];
 
-    /// <summary>生成対象のセクション・再構築・並べ替えが 1 件も無いか。</summary>
-    public bool IsEmpty => Sections.Count == 0 && Rebuilds.Count == 0 && Reorders.Count == 0;
+    /// <summary>流す文が 1 つも無いか。</summary>
+    public bool IsEmpty => Steps.Count == 0;
+
+    /// <summary>計画の列を動かす文を、表ごとの並べ替えの計画へまとめる</summary>
+    /// <param name="steps">計画の文の並び</param>
+    /// <returns>
+    /// 並べ替えの計画（隣り合う、同じ表・同じ元の項目の列を動かす文を 1 つにまとめる。元の項目は選んだ項目から来た文のときだけ持つ）
+    /// </returns>
+    private static IReadOnlyList<TableReorderPlan> BuildReorders(IReadOnlyList<SyncStep> steps)
+    {
+        var reorders = new List<ReorderGroup>();
+
+        foreach (var move in steps.OfType<MoveColumnStep>())
+        {
+            var source = (move.Origin as SelectedOrigin)?.Item;
+
+            if (
+                reorders.Count == 0
+                || !SchemaNames.AreSame(reorders[^1].TableName, move.TableName)
+                || !ReferenceEquals(reorders[^1].Source, source)
+            )
+            {
+                reorders.Add(new ReorderGroup(move.TableName, source));
+            }
+
+            reorders[^1].Moves.Add(new ColumnMove(move.Column, move.AfterColumn));
+        }
+
+        return
+        [
+            .. reorders.Select(group => new TableReorderPlan
+            {
+                TableName = group.TableName,
+                Moves = group.Moves,
+                SourceItems = group.Source is null ? [] : [group.Source],
+            }),
+        ];
+    }
+
+    /// <summary>1 つの並べ替えの計画になる、隣り合う列を動かす文のまとまり</summary>
+    private sealed record ReorderGroup(string TableName, SchemaDiffItem? Source)
+    {
+        public List<ColumnMove> Moves { get; } = [];
+    }
 }
 
 /// <summary>

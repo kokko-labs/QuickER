@@ -31,12 +31,25 @@ public static class OracleReferentialAction
             return;
         }
 
-        if (relationship.OnUpdate != ForeignKeyReferentialAction.NoAction)
+        AppendNotes(sb, relationship.OnDelete, relationship.OnUpdate);
+    }
+
+    /// <summary>外部キーの文の前に、Oracle が持たない参照アクションを省いた旨の注意コメントを書く</summary>
+    /// <param name="sb">書き込み先</param>
+    /// <param name="onDelete">親の行の削除のときの参照アクション</param>
+    /// <param name="onUpdate">親のキーの更新のときの参照アクション</param>
+    public static void AppendNotes(
+        StringBuilder sb,
+        ForeignKeyReferentialAction onDelete,
+        ForeignKeyReferentialAction onUpdate
+    )
+    {
+        if (onUpdate != ForeignKeyReferentialAction.NoAction)
         {
             sb.AppendLine(OnUpdateNote);
         }
 
-        if (relationship.OnDelete == ForeignKeyReferentialAction.SetDefault)
+        if (onDelete == ForeignKeyReferentialAction.SetDefault)
         {
             sb.AppendLine(SetDefaultNote);
         }

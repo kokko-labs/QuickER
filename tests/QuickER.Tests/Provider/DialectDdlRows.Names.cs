@@ -413,6 +413,8 @@ internal static partial class DialectDdlRows
             .. CcShapeRows(),
             // ---- 名前の入口（改行・制御文字を含む名前を断る・クォートで扱える名前は通す） ----
             .. NameEntranceRows(),
+            // ---- 同期の名前の入口は、スクリプトに書く名前だけを見る（項目の表の定義の書かない名前では断らない） ----
+            .. UnwrittenNameRows(),
             // ---- 名前の出どころ（SqlNameText が名前を集める 1 か所ごとに、その出どころだけの表せない名前を入口が断る） ----
             .. NameSourceRows(),
             // ---- 表の形の入口（列の無い表は DDL が断り、同期は表の追加を外して名指しする） ----
@@ -493,38 +495,23 @@ internal static partial class DialectDdlRows
                     F.Reject,
                     dialect =>
                         dialect == Sl
-                            ? new SyncPlan
-                            {
-                                Rebuilds =
-                                [
-                                    new TableRebuildPlan
-                                    {
-                                        TableName = "empty",
-                                        NewDefinition = DdlModel.Table("empty"),
-                                        CreateOnly = true,
-                                    },
-                                ],
-                            }
-                            : new SyncPlan
-                            {
-                                Sections =
-                                [
-                                    new SyncPlanSection
-                                    {
-                                        Kind = SchemaDiffKind.AddTable,
-                                        Items =
-                                        [
-                                            new SchemaDiffItem
-                                            {
-                                                Kind = SchemaDiffKind.AddTable,
-                                                TableName = "empty",
-                                                Entity = DdlModel.Table("empty"),
-                                                IsSelected = true,
-                                            },
-                                        ],
-                                    },
-                                ],
-                            }
+                            ? HandBuiltSyncPlans.FromRebuilds(
+                                new TableRebuildPlan
+                                {
+                                    TableName = "empty",
+                                    NewDefinition = DdlModel.Table("empty"),
+                                    CreateOnly = true,
+                                }
+                            )
+                            : HandBuiltSyncPlans.FromItems(
+                                new SchemaDiffItem
+                                {
+                                    Kind = SchemaDiffKind.AddTable,
+                                    TableName = "empty",
+                                    Entity = DdlModel.Table("empty"),
+                                    IsSelected = true,
+                                }
+                            )
                 )
                 .ExpectAll(e => e.Throws("InvalidOperationException: *no columns*TABLE 'empty'*")),
         ];
@@ -625,19 +612,16 @@ internal static partial class DialectDdlRows
                     "SQLite の同期スクリプトは再構築の計画の改行入りのテーブル名を名指しで断る",
                     E.Table,
                     F.Reject,
-                    _ => new SyncPlan
-                    {
-                        Rebuilds =
-                        [
+                    _ =>
+                        HandBuiltSyncPlans.FromRebuilds(
                             new TableRebuildPlan
                             {
                                 TableName = CcInjected,
                                 NewDefinition = NnMinimal(CcInjected, "memo").Entities[0],
                                 CreateOnly = false,
                                 CopyColumns = ["id"],
-                            },
-                        ],
-                    }
+                            }
+                        )
                 )
                 .Expect(Sl, e => e.Throws("InvalidOperationException: *TABLE*")),
             DialectDdlRow
@@ -671,6 +655,212 @@ internal static partial class DialectDdlRows
                 )
                 .Expect(Ss, e => e.Throws("InvalidOperationException: *COLUMN*orders*")),
         ];
+
+    /// <summary>方言の識別子の上限（SQL Server・Oracle 128・PostgreSQL 63 バイト・MySQL 64）を超える列名</summary>
+    private static string UnOverlongColumn => "overlong_" + new string('x', 200);
+
+    /// <summary>改行入りの列名（スクリプトに出たら見分けられる印 <c>_zq</c> を持つ）</summary>
+    private const string UnNewlineColumn = "bad\ncolumn_zq";
+
+    /// <summary>改行入りの一意制約名（同じ印を持つ）</summary>
+    private const string UnNewlineUnique = "uq\nbad_zq";
+
+    /// <summary>
+    /// 同期の名前の入口は、スクリプトに書く名前（文の名前のメンバー）だけを見る行。差分の項目は、どの種類でもその表の定義の全部
+    /// （<see cref="SchemaDiffItem.Entity"/>）を持つが、項目が書かない列・一意制約の名前では断らない。項目が書く名前は今と同じく断る（対照の行）
+    /// </summary>
+    private static IEnumerable<DialectDdlRow> UnwrittenNameRows() =>
+        [
+            DialectDdlRow
+                .SyncItems(
+                    "sync-add-column-unwritten-overlong-column-in-definition-is-accepted",
+                    "同期スクリプトは、列の追加の項目の表の定義にある、方言の上限を超える名前の別の列（その列の追加は選んでいない）では断らず、選んだ列だけを足す",
+                    P.SyncAddColumn,
+                    E.Column,
+                    F.Reject,
+                    d => UnOverlongItems(d, includeOverlongAdd: false)
+                )
+                .ExpectAll(e => e.NoException().Text("*note*").NoText("*xxxxxxxxxx*")),
+            DialectDdlRow
+                .SyncItems(
+                    "sync-add-column-overlong-column-written-is-rejected",
+                    "同期スクリプトは、方言の上限を超える名前の列の追加を選ぶと、その列を名指しで断る（上限の無い SQLite は通す）",
+                    P.SyncAddColumn,
+                    E.Column,
+                    F.Reject,
+                    d => UnOverlongItems(d, includeOverlongAdd: true)
+                )
+                .Expect(
+                    [Ss, Pg, My, Or],
+                    e =>
+                        e.Throws(
+                            "InvalidOperationException: *cannot be used in this database: COLUMN 'orders'.'overlong_x*"
+                        )
+                )
+                .Expect(Sl, e => e.NoException().Text("*overlong_xxxxxxxxxx*")),
+            DialectDdlRow
+                .SyncItems(
+                    "sync-other-alter-column-unwritten-newline-names-in-definition-are-accepted",
+                    "同期スクリプトは、列の変更の項目の表の定義（DB から取り込んだ表）にある改行入りの名前の別の列・一意制約では断らず、選んだ列だけを変える"
+                        + "（SQLite は表を作り直して全部の列と一意制約を書くので断る）",
+                    P.SyncOther,
+                    E.Column,
+                    F.Reject,
+                    d =>
+                    {
+                        var live = UnNewlineTable(d, "orders");
+                        var altered = DdlModel.Col("memo", CvWideInt[d]);
+
+                        return CvLiveItems(
+                            [live],
+                            [],
+                            new SchemaDiffItem
+                            {
+                                Kind = SchemaDiffKind.AlterColumn,
+                                TableName = "orders",
+                                ColumnName = "memo",
+                                Entity = UnNewlineTable(d, "orders", memoType: CvWideInt[d]),
+                                Column = altered,
+                                OldColumn = live.Columns[1],
+                                IsSelected = true,
+                            }
+                        );
+                    }
+                )
+                .Expect([Ss, Pg, My, Or], e => e.NoException().Text("*memo*").NoText("*_zq*"))
+                .Expect(
+                    Sl,
+                    e => e.Throws("InvalidOperationException: *line break or control character*")
+                ),
+            DialectDdlRow
+                .SyncItems(
+                    "sync-other-drop-table-unwritten-newline-column-in-definition-is-accepted",
+                    "同期スクリプトは、表の削除の項目の表の定義（DB の側の表）にある改行入りの名前の列では断らず、表を消す",
+                    P.SyncOther,
+                    E.Column,
+                    F.Reject,
+                    d =>
+                    {
+                        var live = UnNewlineTable(d, "legacy");
+
+                        return CvLiveItems(
+                            [live],
+                            [],
+                            new SchemaDiffItem
+                            {
+                                Kind = SchemaDiffKind.DropTable,
+                                TableName = "legacy",
+                                Entity = live,
+                                IsSelected = true,
+                            }
+                        );
+                    }
+                )
+                .ExpectAll(e => e.NoException().Text("*legacy*").NoText("*_zq*")),
+            DialectDdlRow
+                .SyncItems(
+                    "sync-other-drop-column-newline-name-written-is-rejected",
+                    "同期スクリプトは、DB の側の表の改行入りの名前の列の削除を選ぶと、その列を名指しで断る（SQLite は表を作り直して残る列だけを書き、"
+                        + "消す列の名前もその列の一意制約の名前も書かないので通す）",
+                    P.SyncOther,
+                    E.Column,
+                    F.Reject,
+                    d =>
+                    {
+                        var live = UnNewlineTable(d, "orders");
+
+                        return CvLiveItems(
+                            [live],
+                            [],
+                            new SchemaDiffItem
+                            {
+                                Kind = SchemaDiffKind.DropColumn,
+                                TableName = "orders",
+                                ColumnName = UnNewlineColumn,
+                                Entity = live,
+                                IsSelected = true,
+                            }
+                        );
+                    }
+                )
+                .Expect(Sl, e => e.NoException().NoText("*_zq*"))
+                .Expect(
+                    [Ss, Pg, My, Or],
+                    e =>
+                        e.Throws(
+                            "InvalidOperationException: *line break or control character*COLUMN 'orders'.'bad column_zq'*"
+                        )
+                ),
+        ];
+
+    /// <summary>
+    /// orders（主キー id・memo）への列 note の追加の項目と、上限を超える名前の列を足した図の側の表の定義（DB の側は id・memo だけ）
+    /// </summary>
+    /// <param name="dialect">方言</param>
+    /// <param name="includeOverlongAdd">上限を超える名前の列の追加の項目も選ぶか</param>
+    private static DdlSyncItems UnOverlongItems(string dialect, bool includeOverlongAdd)
+    {
+        var type = DdlModel.IntType[dialect];
+        var live = DdlModel.Table("orders", DdlModel.Pk("id", type), DdlModel.Col("memo", type));
+        var note = DdlModel.Col("note", type);
+        var overlong = DdlModel.Col(UnOverlongColumn, type);
+        var target = DdlModel.Table(
+            "orders",
+            DdlModel.Pk("id", type),
+            DdlModel.Col("memo", type),
+            note,
+            overlong
+        );
+
+        List<SchemaDiffItem> items =
+        [
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AddColumn,
+                TableName = "orders",
+                ColumnName = "note",
+                Entity = target,
+                Column = note,
+                IsSelected = true,
+            },
+        ];
+
+        if (includeOverlongAdd)
+        {
+            items.Add(
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AddColumn,
+                    TableName = "orders",
+                    ColumnName = overlong.Name,
+                    Entity = target,
+                    Column = overlong,
+                    IsSelected = true,
+                }
+            );
+        }
+
+        return CvLiveItems([live], [], [.. items]);
+    }
+
+    /// <summary>
+    /// 主キー id・memo と、改行入りの名前の列とその列の一意制約（どちらも改行入りの名前）を持つ表（DB から取り込んだ表の形）
+    /// </summary>
+    private static Entity UnNewlineTable(string dialect, string tableName, string? memoType = null)
+    {
+        var type = DdlModel.IntType[dialect];
+        var entity = DdlModel.Table(
+            tableName,
+            DdlModel.Pk("id", type),
+            DdlModel.Col("memo", memoType ?? type),
+            DdlModel.Col(UnNewlineColumn, type)
+        );
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint { Name = UnNewlineUnique, ColumnIds = [entity.Columns[2].Id] }
+        );
+
+        return entity;
+    }
 
     /// <summary>
     /// customers（主キー id）と orders（主キー id・bill_customer_id・ship_customer_id）の図（型は方言の整数）

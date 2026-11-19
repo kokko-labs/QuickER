@@ -995,6 +995,11 @@ src 全体か src の外を読む守り。単位の守りには数えない（�
 | `parity:sync-assessment-rules-table-complete` | 正本と写しの照合 |
 | `parity:sync-assessment-rules-declarations-probe` | 正本と写しの照合 |
 | `parity:sync-assessment-rules-entries-probe` | 正本と写しの照合 |
+| `parity:sync-step-switches-cover-every-step-type` | 正本と写しの照合 |
+| `parity:sync-step-switches-declarations-probe` | 正本と写しの照合 |
+| `parity:sync-step-switches-entries-probe` | 正本と写しの照合 |
+| `parity:sync-step-name-members-declared` | 正本と写しの照合 |
+| `parity:sync-step-name-members-probe` | 正本と写しの照合 |
 | `english:neutral-resx-values` | 英語の文言の照合 |
 | `english:sample-files` | 英語の文言の照合 |
 | `english:tool-definitions-er-diagram-catalog` | 英語の文言の照合 |

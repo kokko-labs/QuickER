@@ -222,7 +222,7 @@ internal static partial class SourceRules
                 GuardFinder.File(GuardReader.Text, FindUnsanitizedCommentHoles),
                 new(
                     "src/QuickER.Provider/SyncScriptBuilderHelper.cs",
-                    "item.Kind",
+                    "SchemaDiffKind.AddUniqueConstraint",
                     1,
                     SqlCommentEnum
                 ),
@@ -247,7 +247,7 @@ internal static partial class SourceRules
                 ),
                 new(
                     "src/QuickER.Provider/SyncScriptBuilderBase.cs",
-                    "section.Items.Count",
+                    "section.Steps.Count",
                     1,
                     "件数＝int"
                 )
@@ -653,7 +653,7 @@ internal static partial class SourceRules
             // 足したのに宣言へ載せ忘れる（その出どころの行が無い）・消したのに宣言に残る（行が空振りする）の両方向を赤にする
             SourceRule.Require(
                 "sql-name-text-name-sources",
-                "SqlNameText の names.Add の 1 本ずつ（所属のメソッド・出どころの式・表の位置か・置き場所）が、方言の DDL の表の名前の出どころの宣言と一致する",
+                "SqlNameText の names.Add の 1 本ずつ（所属のメソッドと switch の腕の型・出どころの式・表の位置か・置き場所）が、方言の DDL の表の名前の出どころの宣言と一致する",
                 SourceScope.Files("src", DialectDdlRows.NameSourceFile),
                 GuardFinder.Nodes(DescribeNameSourceAdd),
                 [
@@ -747,8 +747,7 @@ internal static partial class SourceRules
             },
             // 組み立て（Sync/Scheduling）とテーブル再構築の合成（Sync/TableRebuilds）は文の並びと再構築の定義
             // （TableRebuildPlan・表の定義の写し）だけを組み、差分の項目も警告も作らない。項目を作ると、文で表した計画の途中に
-            // 差分の項目と印の形が戻り、警告を作ると、警告を決める段（組み立ての後の評価）と二重になる。差分の項目の複製
-            // （WithForeignKeyColumnPairs）も数える。型を書かない new() は拾わない
+            // 差分の項目と印の形が戻り、警告を作ると、警告を決める段（組み立ての後の評価）と二重になる。型を書かない new() は拾わない
             SourceRule.Forbid(
                 "sync-scheduling-builds-steps-only",
                 "同期の計画の組み立て（Sync/Scheduling）とテーブル再構築の合成（Sync/TableRebuilds）は文と再構築の定義だけを組み、差分の項目も警告も作らない",
@@ -763,21 +762,15 @@ internal static partial class SourceRules
                 Witness = new(
                     SourceScope.Files(
                         "src",
-                        "src/QuickER.Provider/Sync/Steps/StepLowering.cs",
+                        "src/QuickER.Provider/SyncPlanner.cs",
                         "src/QuickER.Provider/Sync/Selection/SelectionRules.TablesWithoutColumns.cs"
                     ),
                     [
                         new(
-                            "src/QuickER.Provider/Sync/Steps/StepLowering.cs",
+                            "src/QuickER.Provider/SyncPlanner.cs",
                             "new SchemaDiffItem",
-                            11,
-                            "文を計画の項目へ写す所（範囲の外の実在の項目の生成を拾えること）"
-                        ),
-                        new(
-                            "src/QuickER.Provider/Sync/Steps/StepLowering.cs",
-                            "WithForeignKeyColumnPairs",
-                            1,
-                            "列の組を並べ替えた外部キーの追加の複製（範囲の外の実在の複製を拾えること）"
+                            7,
+                            "選択の前半が作り直しの展開と同期後の状態の差の項目を作る所（範囲の外の実在の項目の生成を拾えること）"
                         ),
                         new(
                             "src/QuickER.Provider/Sync/Selection/SelectionRules.TablesWithoutColumns.cs",
@@ -807,7 +800,7 @@ internal static partial class SourceRules
             },
             // 計画の評価（Sync/Assessment。テーブル再構築の警告の規則 2 つを含む）と計画器の入口（Sync/StepPlanner.cs。
             // 逐次 DDL の方言と再構築の方言の両方）と位置の状態（Sync/State/ConstraintState.cs）は、
-            // 差分の項目を作らず、複製もしない（警告は作る）。項目を作ると、文で表した計画の途中に差分の項目と印の形が戻る。型を書かない new() は拾わない
+            // 差分の項目を作らない（警告は作る）。項目を作ると、文で表した計画の途中に差分の項目と印の形が戻る。型を書かない new() は拾わない
             SourceRule.Forbid(
                 "sync-assessment-builds-warnings-only",
                 "同期の計画の評価（Sync/Assessment）と計画器の入口と位置の状態は、差分の項目を作らない（警告だけを作る）",
@@ -821,19 +814,13 @@ internal static partial class SourceRules
             {
                 MinimumFiles = 26,
                 Witness = new(
-                    SourceScope.Files("src", "src/QuickER.Provider/Sync/Steps/StepLowering.cs"),
+                    SourceScope.Files("src", "src/QuickER.Provider/SyncPlanner.cs"),
                     [
                         new(
-                            "src/QuickER.Provider/Sync/Steps/StepLowering.cs",
+                            "src/QuickER.Provider/SyncPlanner.cs",
                             "new SchemaDiffItem",
-                            11,
-                            "文を計画の項目へ写す所（範囲の外の実在の項目の生成を拾えること）"
-                        ),
-                        new(
-                            "src/QuickER.Provider/Sync/Steps/StepLowering.cs",
-                            "WithForeignKeyColumnPairs",
-                            1,
-                            "列の組を並べ替えた外部キーの追加の複製（範囲の外の実在の複製を拾えること）"
+                            7,
+                            "選択の前半が作り直しの展開と同期後の状態の差の項目を作る所（範囲の外の実在の項目の生成を拾えること）"
                         ),
                     ]
                 ),
@@ -951,7 +938,7 @@ internal static partial class SourceRules
         };
 
     /// <summary>
-    /// 節が <c>names.Add(...)</c> の呼び出しなら <c>{メソッド}: names.Add({式}, {表の位置か}, {置き場所})</c>
+    /// 節が <c>names.Add(...)</c> の呼び出しなら <c>{メソッド}[/{腕の型}]: names.Add({式}, {表の位置か}, {置き場所})</c>
     /// （<see cref="DdlNameSource.What"/> と同じ表記。形が違えば節のテキストを添えて、宣言に無い出現にする）
     /// </summary>
     private static string? DescribeNameSourceAdd(SyntaxNode node)
@@ -979,6 +966,19 @@ internal static partial class SourceRules
                 ?.Identifier.Text
             ?? "?";
 
+        // switch 文の腕の中なら、腕が振り分ける型の名前をメソッドに添える（腕ごとに同じ綴りの式が現れるので、どの腕の出どころかを鍵に含める）
+        var arm = invocation
+            .Ancestors()
+            .TakeWhile(ancestor => ancestor is not MethodDeclarationSyntax)
+            .OfType<SwitchSectionSyntax>()
+            .FirstOrDefault()
+            ?.Labels.FirstOrDefault();
+
+        if (arm is not null)
+        {
+            method += "/" + NameSourceArm(arm);
+        }
+
         if (
             invocation.ArgumentList.Arguments
                 is not [{ Expression: BaseObjectCreationExpressionSyntax creation }]
@@ -999,6 +999,18 @@ internal static partial class SourceRules
 
         return $"{method}: names.Add({name.Expression}, {isTable.Expression}, {location})";
     }
+
+    /// <summary>switch 文の腕の最初のラベルが振り分ける型の名前（型のパターンでなければラベルのテキスト）</summary>
+    private static string NameSourceArm(SwitchLabelSyntax label) =>
+        label is CasePatternSwitchLabelSyntax { Pattern: var pattern }
+            ? pattern switch
+            {
+                DeclarationPatternSyntax declaration => declaration.Type.ToString(),
+                TypePatternSyntax type => type.Type.ToString(),
+                RecursivePatternSyntax { Type: { } type } => type.ToString(),
+                _ => label.ToString(),
+            }
+            : label.ToString();
 
     /// <summary>SQLite のファイルを開く接続の唯一の作り手</summary>
     private const string SqliteFileConnectionsFile =

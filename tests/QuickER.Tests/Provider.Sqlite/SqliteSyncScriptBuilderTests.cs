@@ -65,18 +65,14 @@ public class SqliteSyncScriptBuilderTests
     [Fact(DisplayName = "PRAGMA ヘッダ／フッタで包む")]
     public void Script_IsWrappedWithPragmas()
     {
-        var plan = new SyncPlan
-        {
-            Rebuilds =
-            [
-                new TableRebuildPlan
-                {
-                    TableName = "invoice",
-                    NewDefinition = new Entity { TableName = "invoice", Columns = { Pk("id") } },
-                    CreateOnly = true,
-                },
-            ],
-        };
+        var plan = HandBuiltSyncPlans.FromRebuilds(
+            new TableRebuildPlan
+            {
+                TableName = "invoice",
+                NewDefinition = new Entity { TableName = "invoice", Columns = { Pk("id") } },
+                CreateOnly = true,
+            }
+        );
 
         var script = Build(plan);
 
@@ -99,41 +95,25 @@ public class SqliteSyncScriptBuilderTests
     public void Rebuild_IsWrappedWithLegacyAlterTableOnlyForExistingTables()
     {
         var rebuild = Build(
-            new SyncPlan
-            {
-                Rebuilds =
-                [
-                    new TableRebuildPlan
-                    {
-                        TableName = "invoice",
-                        NewDefinition = new Entity
-                        {
-                            TableName = "invoice",
-                            Columns = { Pk("id") },
-                        },
-                        CreateOnly = false,
-                        CopyColumns = ["id"],
-                    },
-                ],
-            }
+            HandBuiltSyncPlans.FromRebuilds(
+                new TableRebuildPlan
+                {
+                    TableName = "invoice",
+                    NewDefinition = new Entity { TableName = "invoice", Columns = { Pk("id") } },
+                    CreateOnly = false,
+                    CopyColumns = ["id"],
+                }
+            )
         );
         var createOnly = Build(
-            new SyncPlan
-            {
-                Rebuilds =
-                [
-                    new TableRebuildPlan
-                    {
-                        TableName = "invoice",
-                        NewDefinition = new Entity
-                        {
-                            TableName = "invoice",
-                            Columns = { Pk("id") },
-                        },
-                        CreateOnly = true,
-                    },
-                ],
-            }
+            HandBuiltSyncPlans.FromRebuilds(
+                new TableRebuildPlan
+                {
+                    TableName = "invoice",
+                    NewDefinition = new Entity { TableName = "invoice", Columns = { Pk("id") } },
+                    CreateOnly = true,
+                }
+            )
         );
 
         rebuild
@@ -167,19 +147,15 @@ public class SqliteSyncScriptBuilderTests
             new UniqueConstraint { ColumnIds = [Col("gone", "int").Id] }
         );
 
-        var plan = new SyncPlan
-        {
-            Rebuilds =
-            [
-                new TableRebuildPlan
-                {
-                    TableName = "t",
-                    NewDefinition = newDefinition,
-                    CreateOnly = false,
-                    CopyColumns = ["id", "keep"],
-                },
-            ],
-        };
+        var plan = HandBuiltSyncPlans.FromRebuilds(
+            new TableRebuildPlan
+            {
+                TableName = "t",
+                NewDefinition = newDefinition,
+                CreateOnly = false,
+                CopyColumns = ["id", "keep"],
+            }
+        );
 
         var script = Build(plan);
 

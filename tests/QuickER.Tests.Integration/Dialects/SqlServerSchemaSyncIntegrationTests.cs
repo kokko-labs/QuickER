@@ -7,6 +7,7 @@ using Microsoft.Data.SqlClient;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.SqlServer;
+using QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.Dialects;

@@ -1000,6 +1000,7 @@ A type the dialect catalogue cannot parse is still carried as it is; it simply g
 ### Line breaks and control characters in names
 
 A table, column or constraint name holding a line break or a control character is refused by DDL generation and by schema-sync script generation, which name the place (`TABLE 'x'`, `COLUMN 'x'.'y'`) and produce nothing.
+Schema sync checks only the names its script writes, so a name that the selected changes do not write does not stop the script, while DDL generation checks every name in the diagram.
 The set is the C0 controls, DEL, and the three Unicode line separators U+0085, U+2028 and U+2029.
 C# code generation reports the same names as a pre-generation error.
 
@@ -1053,6 +1054,7 @@ Each dialect caps how long a table, column or constraint name may be, and the un
   No difference appears, and the foreign key is not renamed
 - **Names you type** are never shortened.
   DDL generation and schema-sync script generation refuse a name beyond the limit, naming the place and the limit (`TABLE 'x' is longer than the limit of 63 UTF-8 bytes`), and produce nothing.
+  Schema sync refuses only a name its script writes, so leaving the addition of a column with too long a name unselected lets the other changes to that table through.
   Without this check the DDL either fails when it is applied or, where the table above shows the name is silently cut, the table you import back has a different name.
   Two names that differ only beyond the cut would even collapse into one
 - **The editor and the AI tools warn when you enter such a name.**

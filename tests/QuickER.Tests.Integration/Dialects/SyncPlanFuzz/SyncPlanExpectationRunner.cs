@@ -238,18 +238,12 @@ internal static class SyncPlanExpectationRunner
         // 関係 N4 を製品の計画（製品が例外を投げたら null）に掛ける
         void RelationsOnStepPlan(SyncPlan? product)
         {
-            // 関係 N4（文の並びの計画の形）：手で組んだ項目の行にも掛ける（文で表せない計画は掛けずに理由を数える）。
-            // 同期スクリプトは実方言だけ比べる
+            // 関係 N4（文の並びの計画の形）：手で組んだ項目の行にも掛ける（文で表せない計画は掛けずに理由を数える）
             var stepPlan = SyncPlanCapabilityNetRunner.StepPlanProblems(
                 items,
                 product,
                 world.Capabilities,
-                context,
-                labels,
-                world.Live.Entities,
-                isDialect
-                    ? SyncPlanExpectationCapabilities.Provider(key).SyncScriptBuilder.Build
-                    : null
+                context
             );
 
             if (stepPlan is not null)

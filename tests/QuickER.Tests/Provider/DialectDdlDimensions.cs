@@ -89,7 +89,7 @@ internal static class DialectDdlDimensions
         // コメントへ埋まる名前・型は、全入口が改行・制御文字を先に断る
         const string namesReason =
             "コメントへ埋まる名前・型は、DDL・同期の全入口が改行・制御文字を先に断る（SqlNameText.Validate・SqlTypeText.Validate＝"
-            + "DdlGeneratorBase.cs:35・39・SyncScriptBuilderBase.cs:32・36・SqliteDdlGenerator.cs:58・62・SqliteSyncScriptBuilder.cs:55・59。"
+            + "DdlGeneratorBase.Build・SyncScriptBuilderBase.Build・OracleSyncScriptBuilder.Build・SqliteDdlGenerator.Build・SqliteSyncScriptBuilder.Build の入口。"
             + "判定は SqlComment.ContainsControlCharacter と同じ）ので、畳みの対象になる入力が届かない。説明を -- コメントへ書くのは"
             + " SQLite の DDL の表・列だけ（SqliteDdlGenerator.cs:138・205）で、同期の経路は説明をコメントへ書かない";
 

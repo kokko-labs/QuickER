@@ -25,7 +25,7 @@ internal sealed record SyncPlanStaticVerdict(
 /// </summary>
 /// <remarks>
 /// <para>
-/// 計画のセクションの項目を並び（<see cref="SyncPlan.Sections"/> の順）に沿って、DB 側の制約（主キー・一意制約・外部キー）と
+/// 計画のセクションの項目を並び（<see cref="SyncPlanSections"/> の順）に沿って、DB 側の制約（主キー・一意制約・外部キー）と
 /// 列の型の状態を追い、各項目を当てる直前の状態で、DB がその文を断るかを DB の規則で判定する。最初に断られる文までを見る
 /// （実行はそこで止まる）。
 /// </para>

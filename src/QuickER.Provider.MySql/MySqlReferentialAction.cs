@@ -21,18 +21,33 @@ public static class MySqlReferentialAction
     public static string BuildClause(Relationship? relationship) =>
         relationship is null
             ? string.Empty
-            : ForeignKeyReferentialActionHelper.BuildReferentialActionClause(
-                Effective(relationship.OnDelete),
-                Effective(relationship.OnUpdate)
-            );
+            : BuildClause(relationship.OnDelete, relationship.OnUpdate);
+
+    /// <summary><c>ON DELETE</c> / <c>ON UPDATE</c> 句を組み立てる（<c>SET DEFAULT</c> は句を出さない）</summary>
+    /// <param name="onDelete">親の行の削除のときの参照アクション</param>
+    /// <param name="onUpdate">親のキーの更新のときの参照アクション</param>
+    public static string BuildClause(
+        ForeignKeyReferentialAction onDelete,
+        ForeignKeyReferentialAction onUpdate
+    ) =>
+        ForeignKeyReferentialActionHelper.BuildReferentialActionClause(
+            Effective(onDelete),
+            Effective(onUpdate)
+        );
 
     /// <summary>リレーションが SET DEFAULT を使っていて、注意コメントを添えるべきか</summary>
     public static bool UsesSetDefault(Relationship? relationship) =>
-        relationship is not null
-        && (
-            relationship.OnDelete == ForeignKeyReferentialAction.SetDefault
-            || relationship.OnUpdate == ForeignKeyReferentialAction.SetDefault
-        );
+        relationship is not null && UsesSetDefault(relationship.OnDelete, relationship.OnUpdate);
+
+    /// <summary>参照アクションが SET DEFAULT を使っていて、注意コメントを添えるべきか</summary>
+    /// <param name="onDelete">親の行の削除のときの参照アクション</param>
+    /// <param name="onUpdate">親のキーの更新のときの参照アクション</param>
+    public static bool UsesSetDefault(
+        ForeignKeyReferentialAction onDelete,
+        ForeignKeyReferentialAction onUpdate
+    ) =>
+        onDelete == ForeignKeyReferentialAction.SetDefault
+        || onUpdate == ForeignKeyReferentialAction.SetDefault;
 
     /// <summary>MySQL で実際に効く参照アクション（SET DEFAULT は NO ACTION）</summary>
     private static ForeignKeyReferentialAction Effective(ForeignKeyReferentialAction action) =>

@@ -4,10 +4,11 @@ using System.Text;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.Sync.Steps;
 
 namespace QuickER.Provider.PostgreSql;
 
-/// <summary>選択済みの <see cref="SchemaDiffItem"/> から PostgreSQL 用の DDL バッチを生成する</summary>
+/// <summary>実行計画（<see cref="SyncPlan"/>）の文から PostgreSQL 用の DDL バッチを生成する</summary>
 /// <remarks>
 /// 依存関係による失敗を避けるため、以下の順序で出力する。文はすべて <c>;</c> で終端し、<c>GO</c> は使わない。
 /// <list type="number">
@@ -40,19 +41,19 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
     /// 制約行は DDL 生成と同じヘルパーで組み立てる（同期で作ったテーブルにだけ UNIQUE が無い、という
     /// 食い違いを構造的に防ぐ）。
     /// </remarks>
-    protected override void AppendCreateTable(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendCreateTable(StringBuilder sb, CreateTableStep step)
     {
-        var e = item.Entity!;
-        sb.AppendLine($"CREATE TABLE {PgIdentifier.Quote(item.TableName)} (");
+        var e = step.Definition;
+        sb.AppendLine($"CREATE TABLE {PgIdentifier.Quote(step.TableName)} (");
 
         // 列定義の末尾カンマ判定に「後続制約行の有無」が必要なため、制約行を先に組み立てる
         var constraintLines = TableConstraintLineBuilder.Build(
             e,
-            item.TableName,
-            PgIdentifier.Quote(item.TableName),
+            step.TableName,
+            PgIdentifier.Quote(step.TableName),
             PgIdentifier.QuoteSimple,
             name => $"\"{PgIdentifier.Escape(name)}\"",
-            item.UniqueConstraintNames,
+            step.UniqueConstraintNames,
             IdentifierLimit,
             DialectName,
             UnsupportedFeature.Sync
@@ -86,9 +87,9 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
     }
 
     /// <summary>ALTER TABLE ... ADD COLUMN（列追加）文を生成する</summary>
-    protected override void AppendAddColumn(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendAddColumn(StringBuilder sb, AddColumnStep step)
     {
-        var col = item.Column!;
+        var col = step.Column;
 
         // 計算列は式が図に無い＝ここで足すのは普通の列。手で式を足す必要があることを添える
         ComputedColumnComment.Append(sb, col, string.Empty);
@@ -96,7 +97,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         // 採番の定義は図に無い＝ここで足すのは普通の列。扱いの表が注記とする方言だけ書き添える
         IdentityColumnComment.Append(sb, col, string.Empty, DialectName, UnsupportedFeature.Sync);
         sb.AppendLine(
-            $"ALTER TABLE {PgIdentifier.Quote(item.TableName)} "
+            $"ALTER TABLE {PgIdentifier.Quote(step.TableName)} "
                 + $"ADD COLUMN {PgIdentifier.QuoteSimple(col.Name)} {col.DataType} {SyncScriptBuilderHelper.GetNullabilityClause(col)};"
         );
     }
@@ -110,12 +111,12 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
     /// <c>COLLATE</c> を書き添える（書かなければ新しい型の既定へ戻る）。表は <c>to_regclass</c> で <c>ALTER TABLE</c> と同じ
     /// 1 つの表に絞り、照合順序の名前は <c>quote_ident</c> で組む。
     /// </remarks>
-    protected override void AppendAlterColumn(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendAlterColumn(StringBuilder sb, AlterColumnStep step)
     {
-        var col = item.Column!;
-        var table = PgIdentifier.Quote(item.TableName);
+        var col = step.Column;
+        var table = PgIdentifier.Quote(step.TableName);
         var column = PgIdentifier.QuoteSimple(col.Name);
-        var usingClause = NeedsUsingCast(item.OldColumn?.DataType, col.DataType)
+        var usingClause = NeedsUsingCast(step.OldColumn?.DataType, col.DataType)
             ? $" USING {column}::{col.DataType}"
             : string.Empty;
 
@@ -124,7 +125,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
             // ALTER COLUMN … TYPE は COLLATE を書かなければ照合順序を新しい型の既定へ戻す。実行時に列の照合順序を読み、
             // 型の既定と違うときだけ書き添える（表は ALTER TABLE と同じ 1 つの表に to_regclass で絞る）。
             // COLLATE は USING より前に書く構文
-            var dynamicTable = PgIdentifier.QuoteForDynamicSql(item.TableName);
+            var dynamicTable = PgIdentifier.QuoteForDynamicSql(step.TableName);
             var body = new StringBuilder();
             body.AppendLine("DECLARE coll text;");
             body.AppendLine("BEGIN");
@@ -181,10 +182,10 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
     /// 表は <c>to_regclass('クォートした名前')</c> で、<c>ALTER TABLE</c> と同じ 1 つの表に絞る（ドット付きの名前は
     /// そのスキーマの表、修飾の無い名前は検索パスの表）。表が無ければ NULL になり、何もしない（外部キー側も同じ）。
     /// </remarks>
-    protected override void AppendDropPrimaryKey(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropPrimaryKey(StringBuilder sb, DropPrimaryKeyStep step)
     {
         // クォートした名前を EXECUTE の文字列リテラルへ埋めるため、リテラルエスケープ込みのヘルパーを通す
-        var table = PgIdentifier.QuoteForDynamicSql(item.TableName);
+        var table = PgIdentifier.QuoteForDynamicSql(step.TableName);
 
         // 旧主キーの制約名はシステムカタログを逆引きして特定し、見つかったときだけ DROP する
         var body = new StringBuilder();
@@ -220,14 +221,13 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
 
     /// <summary>主キー変更の付与フェーズ（新主キー制約の ADD）文を生成する</summary>
     /// <remarks>
-    /// 新しい主キー構成は <see cref="SchemaDiffItem.Entity"/>（target 側エンティティ）の主キー列を実効順
-    /// （<see cref="Entity.GetPrimaryKeyColumnsInOrder"/>）で読み、
+    /// 新しい主キー構成は文の主キーの列名（<see cref="AddPrimaryKeyStep.Columns"/>＝主キーの中の並びの順）で読み、
     /// 制約名は CREATE TABLE と同じ <c>PK_{テーブル名}</c> 規則で組み立てる。
     /// 主キー列が 1 つも無い場合（主キーの解除のみ）は付与文を出さない。
     /// </remarks>
-    protected override void AppendAddPrimaryKey(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendAddPrimaryKey(StringBuilder sb, AddPrimaryKeyStep step)
     {
-        var pks = item.Entity?.GetPrimaryKeyColumnsInOrder() ?? [];
+        var pks = step.Columns;
 
         // 新しい主キー列が無い（＝主キーの解除のみ）場合は付与文を出さない
         if (pks.Count == 0)
@@ -235,88 +235,87 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
             return;
         }
 
-        var pkCols = string.Join(", ", pks.Select(p => PgIdentifier.QuoteSimple(p.Name)));
+        var pkCols = string.Join(", ", pks.Select(PgIdentifier.QuoteSimple));
         sb.AppendLine(
-            $"ALTER TABLE {PgIdentifier.Quote(item.TableName)} ADD CONSTRAINT \"{PgIdentifier.Escape(ConstraintNames.PrimaryKey(item.TableName, IdentifierLimit))}\" "
+            $"ALTER TABLE {PgIdentifier.Quote(step.TableName)} ADD CONSTRAINT \"{PgIdentifier.Escape(ConstraintNames.PrimaryKey(step.TableName, IdentifierLimit))}\" "
                 + $"PRIMARY KEY ({pkCols});"
         );
     }
 
     /// <summary>一意制約を追加する ALTER TABLE ... ADD CONSTRAINT ... UNIQUE 文を生成する</summary>
-    protected override void AppendAddUniqueConstraint(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendAddUniqueConstraint(
+        StringBuilder sb,
+        AddUniqueConstraintStep step
+    )
     {
-        if (item.UniqueConstraintColumns.Count == 0)
+        if (step.Columns.Count == 0)
         {
-            sb.AppendLine(SyncScriptBuilderHelper.BuildUniqueConstraintSkipComment(item));
+            sb.AppendLine(SyncScriptBuilderHelper.BuildUniqueConstraintSkipComment(step));
             return;
         }
 
         var name = UniqueConstraintNaming.Resolve(
-            item.UniqueConstraintName,
-            item.TableName,
-            item.UniqueConstraintColumns,
+            step.Name,
+            step.TableName,
+            step.Columns,
             IdentifierLimit
         );
-        var cols = string.Join(", ", item.UniqueConstraintColumns.Select(PgIdentifier.QuoteSimple));
+        var cols = string.Join(", ", step.Columns.Select(PgIdentifier.QuoteSimple));
         sb.AppendLine(
-            $"ALTER TABLE {PgIdentifier.Quote(item.TableName)} ADD CONSTRAINT \"{PgIdentifier.Escape(name)}\" "
+            $"ALTER TABLE {PgIdentifier.Quote(step.TableName)} ADD CONSTRAINT \"{PgIdentifier.Escape(name)}\" "
                 + $"UNIQUE ({cols});"
         );
     }
 
     /// <summary>一意制約を削除する ALTER TABLE ... DROP CONSTRAINT 文を生成する</summary>
-    protected override void AppendDropUniqueConstraint(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropUniqueConstraint(
+        StringBuilder sb,
+        DropUniqueConstraintStep step
+    )
     {
         var name = UniqueConstraintNaming.Resolve(
-            item.UniqueConstraintName,
-            item.TableName,
-            item.UniqueConstraintColumns,
+            step.Name,
+            step.TableName,
+            step.Columns,
             IdentifierLimit
         );
         sb.AppendLine(
-            $"ALTER TABLE {PgIdentifier.Quote(item.TableName)} "
+            $"ALTER TABLE {PgIdentifier.Quote(step.TableName)} "
                 + $"DROP CONSTRAINT \"{PgIdentifier.Escape(name)}\";"
         );
     }
 
     /// <summary>ALTER TABLE ... DROP COLUMN（列削除）文を生成する</summary>
-    protected override void AppendDropColumn(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropColumn(StringBuilder sb, DropColumnStep step)
     {
         sb.AppendLine(
-            $"ALTER TABLE {PgIdentifier.Quote(item.TableName)} "
-                + $"DROP COLUMN {PgIdentifier.QuoteSimple(item.ColumnName!)};"
+            $"ALTER TABLE {PgIdentifier.Quote(step.TableName)} "
+                + $"DROP COLUMN {PgIdentifier.QuoteSimple(step.ColumnName)};"
         );
     }
 
     /// <summary>DROP TABLE（テーブル削除）文を生成する</summary>
-    protected override void AppendDropTable(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropTable(StringBuilder sb, DropTableStep step)
     {
-        sb.AppendLine($"DROP TABLE {PgIdentifier.Quote(item.TableName)};");
+        sb.AppendLine($"DROP TABLE {PgIdentifier.Quote(step.TableName)};");
     }
 
     /// <summary>外部キー制約を追加する ALTER TABLE 文を生成する</summary>
-    protected override void AppendAddForeignKey(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendAddForeignKey(StringBuilder sb, AddForeignKeyStep step)
     {
-        if (item.ChildEntity is null || item.ParentEntity is null)
-        {
-            return;
-        }
-
-        var columnPairs = SyncScriptBuilderHelper.ResolveColumnPairs(item);
+        var columnPairs = step.ColumnPairs;
 
         // 構成列が特定できない場合は不正な DDL を出さず、コメントでスキップを明示する
         if (columnPairs.Count == 0)
         {
-            sb.AppendLine(SyncScriptBuilderHelper.BuildForeignKeySkipComment(item));
+            sb.AppendLine(SyncScriptBuilderHelper.BuildForeignKeySkipComment(step));
             return;
         }
 
-        var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
-        var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
-        var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, IdentifierLimit);
-        var referentialActions = SyncScriptBuilderHelper.BuildReferentialActionClause(
-            item.Relationship
-        );
+        var childTbl = SchemaDiffService.NormalizeTable(step.ChildTable);
+        var parentTbl = SchemaDiffService.NormalizeTable(step.ParentTable);
+        var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(step, IdentifierLimit);
+        var referentialActions = SyncScriptBuilderHelper.BuildReferentialActionClause(step);
         // 複合外部キーは構成列を宣言順にカンマ区切りで並べる（単列なら従来と同一の出力）
         var childColumnList = string.Join(
             ", ",
@@ -339,22 +338,17 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
     /// 制約名が判明していれば <c>IF EXISTS</c> 付きで直接 DROP する 不明な場合は親子テーブル名から
     /// システムカタログを逆引きし、DO ブロックで動的に削除する
     /// </remarks>
-    protected override void AppendDropForeignKey(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropForeignKey(StringBuilder sb, DropForeignKeyStep step)
     {
-        if (item.ChildEntity is null || item.ParentEntity is null)
-        {
-            return;
-        }
-
-        var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
-        var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
+        var childTbl = SchemaDiffService.NormalizeTable(step.ChildTable);
+        var parentTbl = SchemaDiffService.NormalizeTable(step.ParentTable);
 
         // 制約名が判明している場合は IF EXISTS のうえ直接 DROP する
-        if (!string.IsNullOrWhiteSpace(item.ForeignKeyName))
+        if (!string.IsNullOrWhiteSpace(step.Name))
         {
             sb.AppendLine(
                 $"ALTER TABLE {PgIdentifier.Quote(childTbl)} "
-                    + $"DROP CONSTRAINT IF EXISTS \"{PgIdentifier.Escape(item.ForeignKeyName)}\";"
+                    + $"DROP CONSTRAINT IF EXISTS \"{PgIdentifier.Escape(step.Name)}\";"
             );
             return;
         }
@@ -385,10 +379,13 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
     // ---------------- COMMENT ON (説明) ----------------
 
     /// <summary>テーブルの説明（COMMENT ON TABLE）設定文を生成する</summary>
-    protected override void AppendSetTableDescription(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendSetTableDescription(
+        StringBuilder sb,
+        SetTableDescriptionStep step
+    )
     {
-        var newVal = DescriptionText.Normalize(item.NewDescription);
-        var target = PgIdentifier.Quote(item.TableName);
+        var newVal = DescriptionText.Normalize(step.NewDescription);
+        var target = PgIdentifier.Quote(step.TableName);
         // 新値が空なら IS NULL で説明を削除、それ以外は文字列リテラルで設定する
         var isClause = !DescriptionText.IsPresent(newVal)
             ? "NULL"
@@ -397,11 +394,14 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
     }
 
     /// <summary>カラムの説明（COMMENT ON COLUMN）設定文を生成する</summary>
-    protected override void AppendSetColumnDescription(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendSetColumnDescription(
+        StringBuilder sb,
+        SetColumnDescriptionStep step
+    )
     {
-        var newVal = DescriptionText.Normalize(item.NewDescription);
+        var newVal = DescriptionText.Normalize(step.NewDescription);
         var target =
-            $"{PgIdentifier.Quote(item.TableName)}.{PgIdentifier.QuoteSimple(item.ColumnName!)}";
+            $"{PgIdentifier.Quote(step.TableName)}.{PgIdentifier.QuoteSimple(step.ColumnName)}";
         var isClause = !DescriptionText.IsPresent(newVal)
             ? "NULL"
             : $"'{PgIdentifier.EscapeStringLiteral(newVal)}'";

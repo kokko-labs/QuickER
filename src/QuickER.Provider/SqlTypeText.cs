@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using QuickER.Model;
+using QuickER.Provider.Sync.Steps;
 
 namespace QuickER.Provider;
 
@@ -172,31 +173,34 @@ public static partial class SqlTypeText
 
     /// <summary>実行計画が書き出す列の型文字列を検証し、安全でない表記があれば名指しで例外を投げる（同期生成の入口）</summary>
     /// <remarks>
-    /// 列定義を書き出す経路をすべて拾う＝表の追加（<see cref="SchemaDiffItem.Entity"/> の全列）、列の追加・変更
-    /// （<see cref="SchemaDiffItem.Column"/>）、テーブル再構築の合成後定義。
-    /// 型を書き出さない項目（表・列・制約の削除など、live の定義を運ぶだけの項目と、実行時に DB から列定義を読み直して並べ替える
-    /// ネイティブ列順変更の移動列）は見ない。見ると、取込が持ち帰った安全でない型の表・列を、同期で消すことも並べ替えることもできなくなる。
+    /// 列定義を書き出す文をすべて拾う＝表を作る文（<see cref="CreateTableStep.Definition"/> の全列）、列を足す文・列を変える文の
+    /// 新しい定義（<see cref="AddColumnStep.Column"/>・<see cref="AlterColumnStep.Column"/>）、テーブル再構築の合成後定義。並びは計画の文の順で、
+    /// 再構築は最後。
+    /// 型を書き出さない文（表・列・制約を消す文、列を変える文の旧い定義、実行時に DB から列定義を読み直して並べ替える列を動かす文）は
+    /// 見ない。見ると、取込が持ち帰った安全でない型の表・列を、同期で消すことも並べ替えることもできなくなる。
     /// </remarks>
     /// <exception cref="InvalidOperationException">安全でない型文字列を含む列がある場合</exception>
     public static void Validate(SyncPlan plan)
     {
         var columns = new List<(string TableName, Column Column)>();
 
-        foreach (var item in plan.Sections.SelectMany(section => section.Items))
+        foreach (var step in plan.Steps)
         {
-            if (item.Kind == SchemaDiffKind.AddTable && item.Entity is not null)
+            switch (step)
             {
-                columns.AddRange(
-                    item.Entity.Columns.Select(column => (item.TableName, Column: column))
-                );
-            }
+                case CreateTableStep create:
+                    columns.AddRange(
+                        create.Definition.Columns.Select(column => (create.TableName, column))
+                    );
+                    break;
 
-            if (
-                item.Kind is SchemaDiffKind.AddColumn or SchemaDiffKind.AlterColumn
-                && item.Column is not null
-            )
-            {
-                columns.Add((item.TableName, item.Column));
+                case AddColumnStep add:
+                    columns.Add((add.TableName, add.Column));
+                    break;
+
+                case AlterColumnStep alter:
+                    columns.Add((alter.TableName, alter.Column));
+                    break;
             }
         }
 

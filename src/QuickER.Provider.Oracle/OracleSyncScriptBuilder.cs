@@ -4,10 +4,11 @@ using System.Text;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.Sync.Steps;
 
 namespace QuickER.Provider.Oracle;
 
-/// <summary>選択済みの <see cref="SchemaDiffItem"/> から Oracle 用の DDL バッチを生成する</summary>
+/// <summary>実行計画（<see cref="SyncPlan"/>）の文から Oracle 用の DDL バッチを生成する</summary>
 /// <remarks>
 /// <para>
 /// 依存関係による失敗を避けるため、以下の順序で出力する。
@@ -47,7 +48,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         // あわせて方言の上限を超える名前・方言が表せない文字を含む名前も、場所を名指しして止める
         SqlNameText.Validate(plan, OracleIdentifier.Limit);
 
-        // 列の無い表を作る項目も止める（計画は列の無い表の追加を外すので、計画を経ずに組んだ計画への二重の守り）
+        // 列の無い表を作る文も止める（計画は列の無い表の追加を外すので、計画を経ずに組んだ計画への二重の守り）
         SqlTableShape.Validate(plan);
 
         var sb = new StringBuilder();
@@ -55,9 +56,8 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         // 各文（末尾 ; を含む）を蓄積し、最後に連結する（PL/SQL ブロックの後ろにだけ「/」のみの行を置く）
         var statements = new List<string>();
 
-        // 計画は既に選択フィルタ済み・固定順序でセクション化されているため、
-        // 各セクションを順に平坦化して文へ変換する（見出しは付けない）
-        foreach (var section in plan.Sections)
+        // 計画の文の並びをセクションへまとめ、各セクションを順に平坦化して文へ変換する（見出しは付けない）
+        foreach (var section in StepSections.Of(plan))
         {
             AppendSection(statements, section);
         }
@@ -81,35 +81,13 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         return sb.ToString();
     }
 
-    /// <summary>1 セクションの各項目を対応する DDL 文へ変換し、<paramref name="statements"/> へ追加する</summary>
-    /// <remarks>writer が null / 空白を返した項目（スキップ）は文を追加しない</remarks>
-    private static void AppendSection(List<string> statements, SyncPlanSection section)
+    /// <summary>1 セクションの各文を対応する DDL 文へ変換し、<paramref name="statements"/> へ追加する</summary>
+    /// <remarks>writer が null / 空白を返した文（スキップ）は文を追加しない</remarks>
+    private static void AppendSection(List<string> statements, StepSection section)
     {
-        foreach (var item in section.Items)
+        foreach (var step in section.Steps)
         {
-            // 主キー変更は「旧主キーの解除」「新主キーの付与」がセクションのフェーズで分かれ、
-            // 解除は 1 文でない（PL/SQL ブロック）ため、1 項目 = 1 文の switch には載せず直接追加する
-            if (section.Kind == SchemaDiffKind.AlterPrimaryKey)
-            {
-                AppendPrimaryKeyPhase(statements, section.PrimaryKeyPhase, item);
-                continue;
-            }
-
-            var stmt = section.Kind switch
-            {
-                SchemaDiffKind.AddTable => AppendCreateTable(item),
-                SchemaDiffKind.AddColumn => AppendAddColumn(item),
-                SchemaDiffKind.AlterColumn => AppendAlterColumn(item),
-                SchemaDiffKind.DropForeignKey => AppendDropForeignKey(item),
-                SchemaDiffKind.AddUniqueConstraint => AppendAddUniqueConstraint(item),
-                SchemaDiffKind.DropUniqueConstraint => AppendDropUniqueConstraint(item),
-                SchemaDiffKind.DropColumn => AppendDropColumn(item),
-                SchemaDiffKind.DropTable => AppendDropTable(item),
-                SchemaDiffKind.AddForeignKey => AppendAddForeignKey(item),
-                SchemaDiffKind.SetTableDescription => AppendSetTableDescription(item),
-                SchemaDiffKind.SetColumnDescription => AppendSetColumnDescription(item),
-                _ => null,
-            };
+            var stmt = AppendStep(step);
 
             if (!string.IsNullOrWhiteSpace(stmt))
             {
@@ -118,6 +96,32 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         }
     }
 
+    /// <summary>1 つの文を文の型に応じた DDL 文へ振り分ける（スキップは null か空白）</summary>
+    /// <remarks>
+    /// 主キーの変更は、解除（PL/SQL ブロック）と付与が別の文で、セクションのフェーズで分かれる。
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">セクションに入らない文の型のとき（黙って飛ばさない）</exception>
+    private static string? AppendStep(SyncStep step) =>
+        step switch
+        {
+            CreateTableStep s => AppendCreateTable(s),
+            AddColumnStep s => AppendAddColumn(s),
+            AlterColumnStep s => AppendAlterColumn(s),
+            DropPrimaryKeyStep s => BuildDropPrimaryKey(s),
+            AddPrimaryKeyStep s => BuildAddPrimaryKey(s),
+            DropForeignKeyStep s => AppendDropForeignKey(s),
+            AddUniqueConstraintStep s => AppendAddUniqueConstraint(s),
+            DropUniqueConstraintStep s => AppendDropUniqueConstraint(s),
+            DropColumnStep s => AppendDropColumn(s),
+            DropTableStep s => AppendDropTable(s),
+            AddForeignKeyStep s => AppendAddForeignKey(s),
+            SetTableDescriptionStep s => AppendSetTableDescription(s),
+            SetColumnDescriptionStep s => AppendSetColumnDescription(s),
+            _ => throw new InvalidOperationException(
+                $"The step {step.GetType().Name} is not rendered in a section."
+            ),
+        };
+
     // ---------------- 各種 DDL ----------------
 
     /// <summary>CREATE TABLE 文（主キー制約・一意制約を含む）を生成する</summary>
@@ -125,20 +129,20 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
     /// 制約行は DDL 生成と同じヘルパーで組み立てる（同期で作ったテーブルにだけ UNIQUE が無い、という
     /// 食い違いを構造的に防ぐ）。
     /// </remarks>
-    private static string AppendCreateTable(SchemaDiffItem item)
+    private static string AppendCreateTable(CreateTableStep step)
     {
-        var e = item.Entity!;
+        var e = step.Definition;
         var sb = new StringBuilder();
-        sb.AppendLine($"CREATE TABLE {OracleIdentifier.Quote(item.TableName)} (");
+        sb.AppendLine($"CREATE TABLE {OracleIdentifier.Quote(step.TableName)} (");
 
         // 列定義の末尾カンマ判定に「後続制約行の有無」が必要なため、制約行を先に組み立てる
         var constraintLines = TableConstraintLineBuilder.Build(
             e,
-            item.TableName,
-            OracleIdentifier.Quote(item.TableName),
+            step.TableName,
+            OracleIdentifier.Quote(step.TableName),
             OracleIdentifier.QuoteSimple,
             name => $"\"{OracleIdentifier.Escape(name)}\"",
-            item.UniqueConstraintNames,
+            step.UniqueConstraintNames,
             OracleIdentifier.Limit,
             DialectName,
             UnsupportedFeature.Sync
@@ -173,15 +177,15 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
     }
 
     /// <summary>ALTER TABLE ... ADD（列追加）文を生成する</summary>
-    private static string AppendAddColumn(SchemaDiffItem item)
+    private static string AppendAddColumn(AddColumnStep step)
     {
-        var col = item.Column!;
+        var col = step.Column;
         // NULL は Oracle の既定のため句を付けず、余分な空白が入らないよう組み立てる
         var nullClause = GetNullabilityClauseForAdd(col);
         var colDef = string.IsNullOrEmpty(nullClause)
             ? $"{OracleIdentifier.QuoteSimple(col.Name)} {col.DataType}"
             : $"{OracleIdentifier.QuoteSimple(col.Name)} {col.DataType} {nullClause}";
-        var statement = $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} ADD ({colDef});";
+        var statement = $"ALTER TABLE {OracleIdentifier.Quote(step.TableName)} ADD ({colDef});";
 
         // 計算列は式が図に無い＝ここで足すのは普通の列。手で式を足す必要があることを添える
         // （Oracle は 1 文＝1 文字列で組み立てるため、コメント行は同じ文字列の先頭へ前置する）
@@ -203,45 +207,18 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
     /// 常に付けると型だけの変更が必ず失敗する。
     /// </para>
     /// <para>
-    /// 変更前の列（<see cref="SchemaDiffItem.OldColumn"/>）が無い項目では NULL 許容の差が分からないため、従来どおり句を付ける。
+    /// 変更前の列（<see cref="AlterColumnStep.OldColumn"/>）が無い文では NULL 許容の差が分からないため、従来どおり句を付ける。
     /// </para>
     /// </remarks>
-    private static string AppendAlterColumn(SchemaDiffItem item)
+    private static string AppendAlterColumn(AlterColumnStep step)
     {
-        var col = item.Column!;
+        var col = step.Column;
         var nullable = ColumnNullability.AllowsNull(col);
         var nullabilityChanged =
-            item.OldColumn is not { } old || ColumnNullability.AllowsNull(old) != nullable;
+            step.OldColumn is not { } old || ColumnNullability.AllowsNull(old) != nullable;
         var nullClause = nullabilityChanged ? (nullable ? " NULL" : " NOT NULL") : string.Empty;
-        return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} "
+        return $"ALTER TABLE {OracleIdentifier.Quote(step.TableName)} "
             + $"MODIFY ({OracleIdentifier.QuoteSimple(col.Name)} {col.DataType}{nullClause});";
-    }
-
-    /// <summary>主キー変更の 1 項目を、セクションのフェーズに応じた解除 / 付与の文へ振り分ける</summary>
-    /// <remarks>
-    /// フェーズ指定の無いセクション（<see cref="PrimaryKeyPhase.None"/>）は、
-    /// 解除 → 付与を連続して追加する。
-    /// </remarks>
-    private static void AppendPrimaryKeyPhase(
-        List<string> statements,
-        PrimaryKeyPhase phase,
-        SchemaDiffItem item
-    )
-    {
-        if (phase is PrimaryKeyPhase.None or PrimaryKeyPhase.Drop)
-        {
-            statements.Add(BuildDropPrimaryKey(item));
-        }
-
-        if (phase is PrimaryKeyPhase.None or PrimaryKeyPhase.Add)
-        {
-            var add = BuildAddPrimaryKey(item);
-
-            if (add is not null)
-            {
-                statements.Add(add);
-            }
-        }
     }
 
     /// <summary>主キー変更の解除フェーズ（旧主キー制約の DROP）を PL/SQL 無名ブロックとして生成する</summary>
@@ -250,14 +227,14 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
     /// PL/SQL 無名ブロックで動的に DROP する（主キーが無ければ NO_DATA_FOUND を握り潰して何もしない）。
     /// 所有者の絞り方は <see cref="OwnerPredicate"/>。
     /// </remarks>
-    private static string BuildDropPrimaryKey(SchemaDiffItem item)
+    private static string BuildDropPrimaryKey(DropPrimaryKeyStep step)
     {
         // 識別子はクォート付き作成のため、大文字小文字を保持した実名でカタログを照合する
         var tableName = OracleIdentifier.EscapeStringLiteral(
-            OracleIdentifier.TableNameOnly(item.TableName)
+            OracleIdentifier.TableNameOnly(step.TableName)
         );
         // クォートした名前を EXECUTE IMMEDIATE の文字列リテラルへ埋めるため、リテラルエスケープ込みのヘルパーを通す
-        var tableQuoted = OracleIdentifier.QuoteForDynamicSql(item.TableName);
+        var tableQuoted = OracleIdentifier.QuoteForDynamicSql(step.TableName);
 
         var drop = new StringBuilder();
         drop.AppendLine("DECLARE");
@@ -266,7 +243,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         drop.AppendLine("    SELECT c.constraint_name INTO v_name");
         drop.AppendLine("    FROM all_constraints c");
         drop.AppendLine(
-            $"    WHERE c.constraint_type = 'P' AND {OwnerPredicate("c.owner", item.TableName)} AND c.table_name = '{tableName}';"
+            $"    WHERE c.constraint_type = 'P' AND {OwnerPredicate("c.owner", step.TableName)} AND c.table_name = '{tableName}';"
         );
         drop.AppendLine(
             $"    EXECUTE IMMEDIATE 'ALTER TABLE {tableQuoted} DROP CONSTRAINT \"' || v_name || '\"';"
@@ -279,13 +256,12 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
 
     /// <summary>主キー変更の付与フェーズ（新主キー制約の ADD）文を生成する（解除のみなら null）</summary>
     /// <remarks>
-    /// 新しい主キー構成は <see cref="SchemaDiffItem.Entity"/>（target 側エンティティ）の主キー列を
-    /// 実効順（<see cref="Entity.GetPrimaryKeyColumnsInOrder"/>）で読み、
+    /// 新しい主キー構成は文の主キーの列名（<see cref="AddPrimaryKeyStep.Columns"/>＝主キーの中の並びの順）で読み、
     /// 制約名は CREATE TABLE と同じ <c>PK_{テーブル名}</c> 規則で組み立てる。
     /// </remarks>
-    private static string? BuildAddPrimaryKey(SchemaDiffItem item)
+    private static string? BuildAddPrimaryKey(AddPrimaryKeyStep step)
     {
-        var pks = item.Entity?.GetPrimaryKeyColumnsInOrder() ?? [];
+        var pks = step.Columns;
 
         // 新しい主キー列が無い（＝主キーの解除のみ）場合は付与文を出さない
         if (pks.Count == 0)
@@ -293,88 +269,78 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
             return null;
         }
 
-        var pkCols = string.Join(", ", pks.Select(p => OracleIdentifier.QuoteSimple(p.Name)));
-        return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} ADD CONSTRAINT \"{OracleIdentifier.Escape(ConstraintNames.PrimaryKey(item.TableName, OracleIdentifier.Limit))}\" "
+        var pkCols = string.Join(", ", pks.Select(OracleIdentifier.QuoteSimple));
+        return $"ALTER TABLE {OracleIdentifier.Quote(step.TableName)} ADD CONSTRAINT \"{OracleIdentifier.Escape(ConstraintNames.PrimaryKey(step.TableName, OracleIdentifier.Limit))}\" "
             + $"PRIMARY KEY ({pkCols});";
     }
 
     /// <summary>一意制約を追加する ALTER TABLE ... ADD CONSTRAINT ... UNIQUE 文を生成する</summary>
-    private static string AppendAddUniqueConstraint(SchemaDiffItem item)
+    private static string AppendAddUniqueConstraint(AddUniqueConstraintStep step)
     {
-        if (item.UniqueConstraintColumns.Count == 0)
+        if (step.Columns.Count == 0)
         {
-            return SyncScriptBuilderHelper.BuildUniqueConstraintSkipComment(item);
+            return SyncScriptBuilderHelper.BuildUniqueConstraintSkipComment(step);
         }
 
         var name = UniqueConstraintNaming.Resolve(
-            item.UniqueConstraintName,
-            item.TableName,
-            item.UniqueConstraintColumns,
+            step.Name,
+            step.TableName,
+            step.Columns,
             OracleIdentifier.Limit
         );
-        var cols = string.Join(
-            ", ",
-            item.UniqueConstraintColumns.Select(OracleIdentifier.QuoteSimple)
-        );
-        return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} ADD CONSTRAINT \"{OracleIdentifier.Escape(name)}\" "
+        var cols = string.Join(", ", step.Columns.Select(OracleIdentifier.QuoteSimple));
+        return $"ALTER TABLE {OracleIdentifier.Quote(step.TableName)} ADD CONSTRAINT \"{OracleIdentifier.Escape(name)}\" "
             + $"UNIQUE ({cols});";
     }
 
     /// <summary>一意制約を削除する ALTER TABLE ... DROP CONSTRAINT 文を生成する</summary>
-    private static string AppendDropUniqueConstraint(SchemaDiffItem item)
+    private static string AppendDropUniqueConstraint(DropUniqueConstraintStep step)
     {
         var name = UniqueConstraintNaming.Resolve(
-            item.UniqueConstraintName,
-            item.TableName,
-            item.UniqueConstraintColumns,
+            step.Name,
+            step.TableName,
+            step.Columns,
             OracleIdentifier.Limit
         );
-        return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} "
+        return $"ALTER TABLE {OracleIdentifier.Quote(step.TableName)} "
             + $"DROP CONSTRAINT \"{OracleIdentifier.Escape(name)}\";";
     }
 
     /// <summary>ALTER TABLE ... DROP COLUMN（列削除）文を生成する</summary>
-    private static string AppendDropColumn(SchemaDiffItem item)
+    private static string AppendDropColumn(DropColumnStep step)
     {
-        return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} "
-            + $"DROP COLUMN {OracleIdentifier.QuoteSimple(item.ColumnName!)};";
+        return $"ALTER TABLE {OracleIdentifier.Quote(step.TableName)} "
+            + $"DROP COLUMN {OracleIdentifier.QuoteSimple(step.ColumnName)};";
     }
 
     /// <summary>DROP TABLE（テーブル削除）文を生成する</summary>
-    private static string AppendDropTable(SchemaDiffItem item)
+    private static string AppendDropTable(DropTableStep step)
     {
-        return $"DROP TABLE {OracleIdentifier.Quote(item.TableName)};";
+        return $"DROP TABLE {OracleIdentifier.Quote(step.TableName)};";
     }
 
     /// <summary>外部キー制約を追加する ALTER TABLE 文を生成する</summary>
     /// <remarks>Oracle は <c>ON UPDATE</c> を出力しない。指定がある場合は注意コメントを先頭に付す</remarks>
-    private static string? AppendAddForeignKey(SchemaDiffItem item)
+    private static string? AppendAddForeignKey(AddForeignKeyStep step)
     {
-        if (item.ChildEntity is null || item.ParentEntity is null)
-        {
-            return null;
-        }
-
-        var columnPairs = SyncScriptBuilderHelper.ResolveColumnPairs(item);
+        var columnPairs = step.ColumnPairs;
 
         // 構成列が特定できない場合は不正な DDL を出さず、コメントでスキップを明示する
         if (columnPairs.Count == 0)
         {
-            return SyncScriptBuilderHelper.BuildForeignKeySkipComment(item);
+            return SyncScriptBuilderHelper.BuildForeignKeySkipComment(step);
         }
 
-        var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
-        var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
-        var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, OracleIdentifier.Limit);
+        var childTbl = SchemaDiffService.NormalizeTable(step.ChildTable);
+        var parentTbl = SchemaDiffService.NormalizeTable(step.ParentTable);
+        var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(step, OracleIdentifier.Limit);
 
         var sb = new StringBuilder();
 
         // Oracle が持たない ON UPDATE・ON DELETE SET DEFAULT を省いた旨を注意コメントで残す
-        OracleReferentialAction.AppendNotes(sb, item.Relationship);
+        OracleReferentialAction.AppendNotes(sb, step.OnDelete, step.OnUpdate);
 
-        var deleteClause = item.Relationship is null
-            ? string.Empty
-            : OracleReferentialAction.BuildOnDeleteClause(item.Relationship.OnDelete);
+        var deleteClause = OracleReferentialAction.BuildOnDeleteClause(step.OnDelete);
 
         // 複合外部キーは構成列を宣言順にカンマ区切りで並べる（単列なら従来と同一の出力）
         var childColumnList = string.Join(
@@ -405,21 +371,16 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
     /// （子と親の所有者はそれぞれの表名から別々に決める＝子が別のスキーマで親が自スキーマの外部キーも引ける。
     /// 所有者の絞り方は <see cref="OwnerPredicate"/>）。
     /// </remarks>
-    private static string AppendDropForeignKey(SchemaDiffItem item)
+    private static string AppendDropForeignKey(DropForeignKeyStep step)
     {
-        if (item.ChildEntity is null || item.ParentEntity is null)
-        {
-            return string.Empty;
-        }
-
-        var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
-        var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
+        var childTbl = SchemaDiffService.NormalizeTable(step.ChildTable);
+        var parentTbl = SchemaDiffService.NormalizeTable(step.ParentTable);
 
         // 制約名が判明している場合は直接 DROP する
-        if (!string.IsNullOrWhiteSpace(item.ForeignKeyName))
+        if (!string.IsNullOrWhiteSpace(step.Name))
         {
             return $"ALTER TABLE {OracleIdentifier.Quote(childTbl)} "
-                + $"DROP CONSTRAINT \"{OracleIdentifier.Escape(item.ForeignKeyName)}\";";
+                + $"DROP CONSTRAINT \"{OracleIdentifier.Escape(step.Name)}\";";
         }
 
         // 制約名不明時は親子テーブルの所有者と名前から all_constraints を逆引きして PL/SQL ブロックで削除する。
@@ -483,18 +444,18 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
     /// 改行・<c>&amp;</c> を含む説明は PL/SQL ブロックになる（<see cref="OracleCommentStatement"/>）。
     /// 文と文の間には常に「/」行が入るので、ブロックでもそのまま実行される
     /// </remarks>
-    private static string AppendSetTableDescription(SchemaDiffItem item) =>
+    private static string AppendSetTableDescription(SetTableDescriptionStep step) =>
         OracleCommentStatement.ForTable(
-            item.TableName,
-            DescriptionText.Normalize(item.NewDescription)
+            step.TableName,
+            DescriptionText.Normalize(step.NewDescription)
         );
 
     /// <summary>カラムの説明（COMMENT ON COLUMN）設定文を生成する</summary>
-    private static string AppendSetColumnDescription(SchemaDiffItem item) =>
+    private static string AppendSetColumnDescription(SetColumnDescriptionStep step) =>
         OracleCommentStatement.ForColumn(
-            item.TableName,
-            item.ColumnName!,
-            DescriptionText.Normalize(item.NewDescription)
+            step.TableName,
+            step.ColumnName,
+            DescriptionText.Normalize(step.NewDescription)
         );
 
     /// <summary>NULL 許容句を返す（主キーまたは非 NULL 許容なら NOT NULL、それ以外は空）</summary>

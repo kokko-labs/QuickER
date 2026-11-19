@@ -8,8 +8,8 @@ namespace QuickER.Provider.Sync.Assessment;
 /// 必ず断られる文（<see cref="Refusals.FindCertain"/>）を計画の先頭へ移す（DDL が暗黙コミットされる方言の前寄せ）
 /// </summary>
 /// <remarks>
-/// 移す文を判定が決めた順に先頭へ置き、残りの文は元の順のまま続ける。先頭へ移した文の数は、文の並びの計画の
-/// <see cref="StepPlan.MovedFirstCount"/> に入れる（計画の形へ写すと、先頭のその数の文が前寄せのセクションになる）。
+/// 移す文を判定が決めた順に先頭へ置き、残りの文は元の順のまま続ける。先頭へ移した文の数は、計画の
+/// <see cref="SyncPlan.MovedFirstCount"/> に入れる（セクションへまとめると、先頭のその数の文が前寄せのセクションになる）。
 /// </remarks>
 internal static class MoveFirst
 {

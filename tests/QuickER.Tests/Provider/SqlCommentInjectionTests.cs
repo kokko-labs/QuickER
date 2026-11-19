@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.Sync.Steps;
 using Xunit;
 
 namespace QuickER.Tests.Provider;
@@ -46,7 +47,12 @@ public class SqlCommentInjectionTests
     public void UniqueConstraintSkipComment_FoldsNewLines()
     {
         var comment = SyncScriptBuilderHelper.BuildUniqueConstraintSkipComment(
-            new SchemaDiffItem { Kind = SchemaDiffKind.AddUniqueConstraint, TableName = Injected }
+            new AddUniqueConstraintStep(
+                new SelectedOrigin(new SchemaDiffItem()),
+                Injected,
+                Name: null,
+                Columns: []
+            )
         );
 
         comment
@@ -63,13 +69,15 @@ public class SqlCommentInjectionTests
     public void ForeignKeySkipComment_FoldsNewLines()
     {
         var comment = SyncScriptBuilderHelper.BuildForeignKeySkipComment(
-            new SchemaDiffItem
-            {
-                Kind = SchemaDiffKind.AddForeignKey,
-                TableName = Injected,
-                ParentEntity = new Entity { TableName = "customer" },
-                ChildEntity = new Entity { TableName = Injected },
-            }
+            new AddForeignKeyStep(
+                new SelectedOrigin(new SchemaDiffItem()),
+                ChildTable: Injected,
+                ParentTable: "customer",
+                Name: null,
+                ColumnPairs: [],
+                ForeignKeyReferentialAction.NoAction,
+                ForeignKeyReferentialAction.NoAction
+            )
         );
 
         comment.Should().Contain($"({Sanitized} -> customer)");

@@ -4,10 +4,11 @@ using System.Text;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.Sync.Steps;
 
 namespace QuickER.Provider.SqlServer;
 
-/// <summary>選択済みの <see cref="SchemaDiffItem"/> から SQL Server 用の T-SQL バッチを生成する</summary>
+/// <summary>実行計画（<see cref="SyncPlan"/>）の文から SQL Server 用の T-SQL バッチを生成する</summary>
 /// <remarks>
 /// 依存関係による失敗を避けるため、以下の順序で出力する
 /// <list type="number">
@@ -40,19 +41,19 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
     /// 制約行は DDL 生成と同じヘルパーで組み立てる（同期で作ったテーブルにだけ UNIQUE が無い、という
     /// 食い違いを構造的に防ぐ）。
     /// </remarks>
-    protected override void AppendCreateTable(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendCreateTable(StringBuilder sb, CreateTableStep step)
     {
-        var e = item.Entity!;
-        sb.AppendLine($"CREATE TABLE {SqlIdentifier.Bracket(item.TableName)} (");
+        var e = step.Definition;
+        sb.AppendLine($"CREATE TABLE {SqlIdentifier.Bracket(step.TableName)} (");
 
         // 列定義の末尾カンマ判定に「後続制約行の有無」が必要なため、制約行を先に組み立てる
         var constraintLines = TableConstraintLineBuilder.Build(
             e,
-            item.TableName,
-            SqlIdentifier.Bracket(item.TableName),
+            step.TableName,
+            SqlIdentifier.Bracket(step.TableName),
             SqlIdentifier.BracketSimple,
             name => $"[{SqlIdentifier.Escape(name)}]",
-            item.UniqueConstraintNames,
+            step.UniqueConstraintNames,
             IdentifierLimit,
             DialectName,
             UnsupportedFeature.Sync
@@ -87,9 +88,9 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
     }
 
     /// <summary>ALTER TABLE ... ADD（列追加）文を生成する</summary>
-    protected override void AppendAddColumn(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendAddColumn(StringBuilder sb, AddColumnStep step)
     {
-        var col = item.Column!;
+        var col = step.Column;
 
         // 計算列は式が図に無い＝ここで足すのは普通の列。手で式を足す必要があることを添える
         ComputedColumnComment.Append(sb, col, string.Empty);
@@ -98,7 +99,7 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
         IdentityColumnComment.Append(sb, col, string.Empty, DialectName, UnsupportedFeature.Sync);
 
         sb.AppendLine(
-            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} "
+            $"ALTER TABLE {SqlIdentifier.Bracket(step.TableName)} "
                 + $"ADD {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {SyncScriptBuilderHelper.GetNullabilityClause(col)};"
         );
         sb.AppendLine("GO");
@@ -118,20 +119,20 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
     /// 実行する。表は <c>OBJECT_ID</c> で <c>ALTER TABLE</c> と同じ 1 つの表に絞る。
     /// </para>
     /// </remarks>
-    protected override void AppendAlterColumn(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendAlterColumn(StringBuilder sb, AlterColumnStep step)
     {
-        var col = item.Column!;
+        var col = step.Column;
         var nullability = SyncScriptBuilderHelper.GetNullabilityClause(col);
         var keepsCollation = IsCollatableType(col.DataType);
         var typeChanges =
-            item.OldColumn is null
-            || !DbTypeText.AreEquivalent(item.OldColumn.DataType, col.DataType);
+            step.OldColumn is null
+            || !DbTypeText.AreEquivalent(step.OldColumn.DataType, col.DataType);
 
         // 照合順序も DEFAULT 制約も関わらない変更（文字列型でない列の NULL 許容だけの変更）は、素の ALTER COLUMN で足りる
         if (!keepsCollation && !typeChanges)
         {
             sb.AppendLine(
-                $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} "
+                $"ALTER TABLE {SqlIdentifier.Bracket(step.TableName)} "
                     + $"ALTER COLUMN {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {nullability};"
             );
             sb.AppendLine("GO");
@@ -139,7 +140,7 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
         }
 
         // 動的 SQL の文字列リテラルへ埋める名前・型は、リテラルエスケープ込みで組む
-        var table = SqlIdentifier.QuoteForDynamicSql(item.TableName);
+        var table = SqlIdentifier.QuoteForDynamicSql(step.TableName);
         var column = SqlIdentifier.EscapeStringLiteral(SqlIdentifier.BracketSimple(col.Name));
         var columnName = SqlIdentifier.EscapeStringLiteral(col.Name);
         var type = SqlIdentifier.EscapeStringLiteral(col.DataType);
@@ -206,10 +207,10 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
     /// 動的 SQL へは必ず <c>QUOTENAME</c> を通して埋める（<c>]</c> を含む名前で構文が崩れないように）。
     /// </para>
     /// </remarks>
-    protected override void AppendDropPrimaryKey(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropPrimaryKey(StringBuilder sb, DropPrimaryKeyStep step)
     {
         // 括弧付けした名前を文字列リテラルへ埋めるため、リテラルエスケープ込みのヘルパーを通す
-        var table = SqlIdentifier.QuoteForDynamicSql(item.TableName);
+        var table = SqlIdentifier.QuoteForDynamicSql(step.TableName);
 
         // 旧主キーの制約名はカタログビューを逆引きして特定する（主キーが無ければ @pk は NULL のまま）
         sb.AppendLine("DECLARE @pk sysname;");
@@ -242,14 +243,13 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
 
     /// <summary>主キー変更の付与フェーズ（新主キー制約の ADD）文を生成する</summary>
     /// <remarks>
-    /// 新しい主キー構成は <see cref="SchemaDiffItem.Entity"/>（target 側エンティティ）の主キー列を実効順
-    /// （<see cref="Entity.GetPrimaryKeyColumnsInOrder"/>）で読み、
+    /// 新しい主キー構成は文の主キーの列名（<see cref="AddPrimaryKeyStep.Columns"/>＝主キーの中の並びの順）で読み、
     /// 制約名は CREATE TABLE と同じ <c>PK_{テーブル名}</c> 規則で組み立てる。
     /// 主キー列が 1 つも無い場合（主キーの解除のみ）は付与文を出さない。
     /// </remarks>
-    protected override void AppendAddPrimaryKey(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendAddPrimaryKey(StringBuilder sb, AddPrimaryKeyStep step)
     {
-        var pks = item.Entity?.GetPrimaryKeyColumnsInOrder() ?? [];
+        var pks = step.Columns;
 
         // 新しい主キー列が無い（＝主キーの解除のみ）場合は付与文を出さない
         if (pks.Count == 0)
@@ -257,51 +257,54 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
             return;
         }
 
-        var pkCols = string.Join(", ", pks.Select(p => SqlIdentifier.BracketSimple(p.Name)));
+        var pkCols = string.Join(", ", pks.Select(SqlIdentifier.BracketSimple));
         sb.AppendLine(
-            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} ADD CONSTRAINT [{SqlIdentifier.Escape(ConstraintNames.PrimaryKey(item.TableName, IdentifierLimit))}] "
+            $"ALTER TABLE {SqlIdentifier.Bracket(step.TableName)} ADD CONSTRAINT [{SqlIdentifier.Escape(ConstraintNames.PrimaryKey(step.TableName, IdentifierLimit))}] "
                 + $"PRIMARY KEY ({pkCols});"
         );
         sb.AppendLine("GO");
     }
 
     /// <summary>一意制約を追加する ALTER TABLE ... ADD CONSTRAINT ... UNIQUE 文を生成する</summary>
-    protected override void AppendAddUniqueConstraint(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendAddUniqueConstraint(
+        StringBuilder sb,
+        AddUniqueConstraintStep step
+    )
     {
-        if (item.UniqueConstraintColumns.Count == 0)
+        if (step.Columns.Count == 0)
         {
-            sb.AppendLine(SyncScriptBuilderHelper.BuildUniqueConstraintSkipComment(item));
+            sb.AppendLine(SyncScriptBuilderHelper.BuildUniqueConstraintSkipComment(step));
             return;
         }
 
         var name = UniqueConstraintNaming.Resolve(
-            item.UniqueConstraintName,
-            item.TableName,
-            item.UniqueConstraintColumns,
+            step.Name,
+            step.TableName,
+            step.Columns,
             IdentifierLimit
         );
-        var cols = string.Join(
-            ", ",
-            item.UniqueConstraintColumns.Select(SqlIdentifier.BracketSimple)
-        );
+        var cols = string.Join(", ", step.Columns.Select(SqlIdentifier.BracketSimple));
         sb.AppendLine(
-            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} ADD CONSTRAINT [{SqlIdentifier.Escape(name)}] "
+            $"ALTER TABLE {SqlIdentifier.Bracket(step.TableName)} ADD CONSTRAINT [{SqlIdentifier.Escape(name)}] "
                 + $"UNIQUE ({cols});"
         );
         sb.AppendLine("GO");
     }
 
     /// <summary>一意制約を削除する ALTER TABLE ... DROP CONSTRAINT 文を生成する</summary>
-    protected override void AppendDropUniqueConstraint(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropUniqueConstraint(
+        StringBuilder sb,
+        DropUniqueConstraintStep step
+    )
     {
         var name = UniqueConstraintNaming.Resolve(
-            item.UniqueConstraintName,
-            item.TableName,
-            item.UniqueConstraintColumns,
+            step.Name,
+            step.TableName,
+            step.Columns,
             IdentifierLimit
         );
         sb.AppendLine(
-            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} "
+            $"ALTER TABLE {SqlIdentifier.Bracket(step.TableName)} "
                 + $"DROP CONSTRAINT [{SqlIdentifier.Escape(name)}];"
         );
         sb.AppendLine("GO");
@@ -313,17 +316,17 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
     /// カタログから読み、列の変更と同じく <c>QUOTENAME</c> と <c>OBJECT_ID</c> で扱う。同じ列を参照する CHECK 制約や索引は
     /// 外さない（図が持たないもので、残っていれば列の削除は断られ、同期はトランザクションごと戻る）。
     /// </remarks>
-    protected override void AppendDropColumn(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropColumn(StringBuilder sb, DropColumnStep step)
     {
         sb.AppendLine("DECLARE @df sysname, @dfdef nvarchar(max), @sql nvarchar(max);");
         AppendDropDefaultConstraint(
             sb,
-            SqlIdentifier.QuoteForDynamicSql(item.TableName),
-            SqlIdentifier.EscapeStringLiteral(item.ColumnName!)
+            SqlIdentifier.QuoteForDynamicSql(step.TableName),
+            SqlIdentifier.EscapeStringLiteral(step.ColumnName)
         );
         sb.AppendLine(
-            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} "
-                + $"DROP COLUMN {SqlIdentifier.BracketSimple(item.ColumnName!)};"
+            $"ALTER TABLE {SqlIdentifier.Bracket(step.TableName)} "
+                + $"DROP COLUMN {SqlIdentifier.BracketSimple(step.ColumnName)};"
         );
         sb.AppendLine("GO");
     }
@@ -357,35 +360,28 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
     }
 
     /// <summary>DROP TABLE（テーブル削除）文を生成する</summary>
-    protected override void AppendDropTable(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropTable(StringBuilder sb, DropTableStep step)
     {
-        sb.AppendLine($"DROP TABLE {SqlIdentifier.Bracket(item.TableName)};");
+        sb.AppendLine($"DROP TABLE {SqlIdentifier.Bracket(step.TableName)};");
         sb.AppendLine("GO");
     }
 
     /// <summary>外部キー制約を追加する ALTER TABLE 文を生成する</summary>
-    protected override void AppendAddForeignKey(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendAddForeignKey(StringBuilder sb, AddForeignKeyStep step)
     {
-        if (item.ChildEntity is null || item.ParentEntity is null)
-        {
-            return;
-        }
-
-        var columnPairs = SyncScriptBuilderHelper.ResolveColumnPairs(item);
+        var columnPairs = step.ColumnPairs;
 
         // 構成列が特定できない場合は不正な DDL を出さず、コメントでスキップを明示する
         if (columnPairs.Count == 0)
         {
-            sb.AppendLine(SyncScriptBuilderHelper.BuildForeignKeySkipComment(item));
+            sb.AppendLine(SyncScriptBuilderHelper.BuildForeignKeySkipComment(step));
             return;
         }
 
-        var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
-        var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
-        var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, IdentifierLimit);
-        var referentialActions = SyncScriptBuilderHelper.BuildReferentialActionClause(
-            item.Relationship
-        );
+        var childTbl = SchemaDiffService.NormalizeTable(step.ChildTable);
+        var parentTbl = SchemaDiffService.NormalizeTable(step.ParentTable);
+        var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(step, IdentifierLimit);
+        var referentialActions = SyncScriptBuilderHelper.BuildReferentialActionClause(step);
         // 複合外部キーは構成列を宣言順にカンマ区切りで並べる（単列なら従来と同一の出力）
         var childColumnList = string.Join(
             ", ",
@@ -413,24 +409,19 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
     /// 制約名が判明していれば存在チェック付きで直接 DROP する 不明な場合は親子テーブル名から
     /// sys.foreign_keys を逆引きし、動的 SQL で削除する
     /// </remarks>
-    protected override void AppendDropForeignKey(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropForeignKey(StringBuilder sb, DropForeignKeyStep step)
     {
-        if (item.ChildEntity is null || item.ParentEntity is null)
-        {
-            return;
-        }
-
-        var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
-        var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
+        var childTbl = SchemaDiffService.NormalizeTable(step.ChildTable);
+        var parentTbl = SchemaDiffService.NormalizeTable(step.ParentTable);
 
         // 制約名が判明している場合は存在チェックのうえ直接 DROP する
-        if (!string.IsNullOrWhiteSpace(item.ForeignKeyName))
+        if (!string.IsNullOrWhiteSpace(step.Name))
         {
             sb.AppendLine(
-                $"IF EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'{SqlIdentifier.EscapeStringLiteral(item.ForeignKeyName)}')"
+                $"IF EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'{SqlIdentifier.EscapeStringLiteral(step.Name)}')"
             );
             sb.AppendLine(
-                $"    ALTER TABLE {SqlIdentifier.Bracket(childTbl)} DROP CONSTRAINT [{SqlIdentifier.Escape(item.ForeignKeyName)}];"
+                $"    ALTER TABLE {SqlIdentifier.Bracket(childTbl)} DROP CONSTRAINT [{SqlIdentifier.Escape(step.Name)}];"
             );
             sb.AppendLine("GO");
             return;
@@ -452,38 +443,42 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
     // ---------------- MS_Description (拡張プロパティ) ----------------
 
     /// <summary>テーブルの説明（MS_Description）設定文を生成する</summary>
-    protected override void AppendSetTableDescription(StringBuilder sb, SchemaDiffItem item) =>
-        AppendDescriptionStatement(sb, item, columnLevel: false);
+    protected override void AppendSetTableDescription(
+        StringBuilder sb,
+        SetTableDescriptionStep step
+    ) => AppendDescriptionStatement(sb, step.TableName, null, step.NewDescription);
 
     /// <summary>カラムの説明（MS_Description）設定文を生成する</summary>
-    protected override void AppendSetColumnDescription(StringBuilder sb, SchemaDiffItem item) =>
-        AppendDescriptionStatement(sb, item, columnLevel: true);
+    protected override void AppendSetColumnDescription(
+        StringBuilder sb,
+        SetColumnDescriptionStep step
+    ) => AppendDescriptionStatement(sb, step.TableName, step.ColumnName, step.NewDescription);
 
     /// <summary>拡張プロパティ MS_Description の設定・更新・削除文を生成する</summary>
     /// <remarks>
     /// 実行時点の存在状態を判定し、add / update / drop を切り替える 新値が空なら削除する
     /// </remarks>
-    /// <param name="columnLevel">true でカラムレベル、false でテーブルレベルの拡張プロパティを対象とする</param>
+    /// <param name="tableName">表名</param>
+    /// <param name="columnName">列名（カラムレベルの拡張プロパティのとき。テーブルレベルは null）</param>
+    /// <param name="newDescription">新しい説明（空なら削除）</param>
     private static void AppendDescriptionStatement(
         StringBuilder sb,
-        SchemaDiffItem item,
-        bool columnLevel
+        string tableName,
+        string? columnName,
+        string? newDescription
     )
     {
-        var newVal = DescriptionText.Normalize(item.NewDescription);
-        var levelArgs = SqlServerExtendedProperty.LevelArguments(
-            item.TableName,
-            columnLevel ? item.ColumnName! : null
-        );
-        var objectIdLiteral = SqlServerExtendedProperty.ObjectIdLiteral(item.TableName);
+        var newVal = DescriptionText.Normalize(newDescription);
+        var levelArgs = SqlServerExtendedProperty.LevelArguments(tableName, columnName);
+        var objectIdLiteral = SqlServerExtendedProperty.ObjectIdLiteral(tableName);
 
         // 修飾の無い表は既定スキーマを変数で渡す。文ごとに GO で区切るので、文ごとに宣言する
-        if (SqlServerExtendedProperty.UsesDefaultSchema(item.TableName))
+        if (SqlServerExtendedProperty.UsesDefaultSchema(tableName))
         {
             sb.AppendLine(SqlServerExtendedProperty.DeclareDefaultSchema);
         }
-        var minorIdCondition = columnLevel
-            ? $"      AND ep.minor_id = COLUMNPROPERTY({objectIdLiteral}, N'{SqlIdentifier.EscapeStringLiteral(item.ColumnName!)}', 'ColumnId')"
+        var minorIdCondition = columnName is not null
+            ? $"      AND ep.minor_id = COLUMNPROPERTY({objectIdLiteral}, N'{SqlIdentifier.EscapeStringLiteral(columnName)}', 'ColumnId')"
             : $"      AND ep.minor_id = 0";
 
         if (!DescriptionText.IsPresent(newVal))

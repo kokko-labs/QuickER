@@ -150,7 +150,13 @@ internal static class StepPlanner
             excluded.AddRange(carried.Select(c => c.Item));
 
             return new StepPlannerResult(
-                new StepPlan(steps, movedFirst, warnings, excluded),
+                new SyncPlan
+                {
+                    Steps = steps,
+                    MovedFirstCount = movedFirst,
+                    Warnings = warnings,
+                    ExcludedItems = excluded,
+                },
                 null,
                 prepared.Facts,
                 [.. carried.Select(c => c.Item)]
@@ -212,7 +218,12 @@ internal static class StepPlanner
         AssessmentRules.Assess(new PlanAssessment(prepared.Facts, schedule), warnings);
 
         return new StepPlannerResult(
-            new StepPlan(steps, 0, warnings, excluded),
+            new SyncPlan
+            {
+                Steps = steps,
+                Warnings = warnings,
+                ExcludedItems = excluded,
+            },
             null,
             prepared.Facts,
             []
@@ -221,7 +232,7 @@ internal static class StepPlanner
 }
 
 /// <summary>計画器（<see cref="StepPlanner"/>）の計画の結果（逐次 DDL の方言とテーブル再構築の方言）</summary>
-/// <param name="Plan">文の並びの計画（文で表せない項目があれば <c>null</c>）</param>
+/// <param name="Plan">文の並びの計画（製品の入口がそのまま返す。文で表せない項目があれば <c>null</c>）</param>
 /// <param name="Unrepresentable">文で表せない理由（表せれば <c>null</c>）</param>
 /// <param name="Facts">
 /// 最後の周の計画の事実（選んだ項目の最終形の同期後の事実・DB の今の図・方言の宣言ほか）。計画の外から計画を照らす照合
@@ -232,7 +243,7 @@ internal static class StepPlanner
 /// 同じ順で載る
 /// </param>
 internal sealed record StepPlannerResult(
-    StepPlan? Plan,
+    SyncPlan? Plan,
     string? Unrepresentable,
     AssessmentFacts Facts,
     IReadOnlyList<SchemaDiffItem> Withdrawn

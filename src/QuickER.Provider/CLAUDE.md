@@ -137,7 +137,7 @@
 ### SqlTypeText の安全パターン
 
 - 型は識別子でも文字列リテラルでもなく素通しで補間するしかない。`SqlTypeText.IsSafe`／`Validate(ErDiagram)`／`Validate(SyncPlan)` を 5 入口（`DdlGeneratorBase.Build`・`SqliteDdlGenerator.Build`・`SyncScriptBuilderBase.Build`・`OracleSyncScriptBuilder.Build`・`SqliteSyncScriptBuilder.Build`）で通し、不一致は「テーブル.列 = 型」を名指しして `InvalidOperationException`。
-- 同期側は型を書き出す項目（表の追加・列の追加と変更・再構築の合成後定義）だけを検証する。削除する表・列の live の型まで見ると、取込が持ち帰った安全でない型の表を同期で消せない。MySQL の列順の移動（`SyncPlan.Reorders`）は実行時に live の列定義を読み、型を書き出さないので検証しない（見ると、安全でない型の列を持つ表の並べ替えを止める）。
+- 同期側は型を書き出す文（表を作る文の定義・列を足す文と変える文の新しい定義・再構築の合成後定義）だけを検証する。削除する表・列の live の型まで見ると、取込が持ち帰った安全でない型の表を同期で消せない。MySQL の列順の移動（`SyncPlan.Reorders`）は実行時に live の列定義を読み、型を書き出さないので検証しない（見ると、安全でない型の列を持つ表の並べ替えを止める）。
 - ホワイトリストは構造的に作る（キーワード許可集合にしない）。
   - `;`・引用符・バッククォート・`\`・コメント記号・改行を通さない。語の並び＋括弧引数（`(max)`・`(n)`・`(p,s)`・Oracle の単位語）＋後続語＋末尾 `[]`＋MySQL の値リスト（`enum('a','b')` だけ引用符を許す）を通す。
   - キーワード許可集合にすると、取込が verbatim で持ち帰る実在型（`LONG RAW`・`SDO_GEOMETRY`・`VARYING CHARACTER(255)`・別名型の非 ASCII 名）を弾き、実 DB でのデータ欠落へ化ける。
@@ -207,7 +207,7 @@
 ### 2 段構造と方言の宣言
 
 - スキーマ同期は「`SchemaDiffService.Compute`（差分検出・方言中立）→ `SyncPlanner.BuildPlan`（選択済み差分から方言中立の `SyncPlan`）→ `ISyncScriptBuilder.Build`（方言別の SQL）」の 2 段。
-- `SyncPlanner.BuildPlan` は、計画器（`Sync/StepPlanner.cs` の `StepPlanner.Plan`）が作った文の並びの計画（`StepPlan`）を、`StepLowering.ToSyncPlan` で計画の形（セクション・再構築・列順）へ写して返す（「逐次 DDL の組み立て」「計画の文と由来と対」）。
+- `SyncPlanner.BuildPlan` は、計画器（`Sync/StepPlanner.cs` の `StepPlanner.Plan`）が作った文の並びの計画（`SyncPlan`）をそのまま返す（「逐次 DDL の組み立て」「計画の文と由来と対」）。方言ビルダーと入口の検証は、その文を読む（「文を読む方言ビルダー」）。
 - 文で表せない項目（差分が必ず持たせるメンバーの無い項目）を渡すと、`BuildPlan` は項目の種類と無いメンバーを名指しした `InvalidOperationException` で断る（差分〔`SchemaDiffService.Compute`〕が作る項目はどれも文で表せる）。
   - 壊すと：項目が黙って計画から落ちるか、方言ビルダーの奥で別の例外になる。
   - ガード：期待の行 `plan-item-without-required-member-is-refused`・能力の組の網の関係 N4（製品が文で表せない計画を理由つきで断る＝違反の頭 `relation N4: product plan:`。`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`「能力の組の網」）。
@@ -288,10 +288,17 @@
 
 - 利用者が付けた名前は縮めずに、DDL・同期の入口で上限と表せない文字を名指しして断る。
 - `SqlNameText.Validate(diagram / plan, limit)`（5 つの入口）が、制御文字の検査の後に、テーブル名は `IdentifierLengthLimit.AcceptsTableName`（最初の `.` で分けて部分ごと）、列名・制約名は `Accepts` で判定し、場所と理由（`DescribeViolation`＝英語）を並べて `InvalidOperationException` にする。上限は方言の `Limit`。
+- 同期スクリプトの入口（`Validate(plan, limit)`）が見るのは、スクリプトに書く名前（文の名前を運ぶメンバーの全部）だけ。DDL 生成の入口（`Validate(diagram, limit)`）は図の全部の名前を見る。
+  - 表の定義の全部（表名・列名・一意制約名）を見るのは、表を作る文と再構築の合成後定義だけ。差分の項目が持つ表の定義（`SchemaDiffItem.Entity`）は読まない。主キーを付ける文は主キーの列名だけ、外部キーの文は文の名前（差分が求めた名前か、リレーションの名前）だけを見る。
+  - 選んだ変更が書かない名前（選択から外した列の追加の列名・取り込んだ表のほかの列や一意制約の名前）では断らない。選んだ変更が書く名前は断る。
+  - テーブル再構築の方言（SQLite）は、作り直す表の合成後定義の全部の列と一意制約を書くので、その名前は書く名前になる（作り直しを伴う変更では、表に残るどの名前も検証される。消す列の名前は書かないので検証されない）。
+  - 壊すと：書かない名前で断ると、上限を超える名前の列の追加を選択から外しても同じ表のほかの変更を同期できず、制御文字の名前の列を持つ取り込んだ表を同期で消せない。
+  - ガード：`DialectDdlTableTests` の行 `sync-add-column-unwritten-overlong-column-in-definition-is-accepted`・`sync-other-alter-column-unwritten-newline-names-in-definition-are-accepted`（SQLite は作り直しが書くので断る）・`sync-other-drop-table-unwritten-newline-column-in-definition-is-accepted` と、対照の `sync-add-column-overlong-column-written-is-rejected`・`sync-other-drop-column-newline-name-written-is-rejected`（項目を手で組み、`SyncPlanner.BuildPlan` から方言ビルダーまで通す）。
 - 表せない文字の正本も QuickER.Dialects の宣言（`IdentifierLengthLimit.RepresentsSupplementaryCharacters`）。MySQL の帰結は `src/QuickER.Provider.MySql/CLAUDE.md`「識別子と説明の文字」。
-- 名前を拾う場所は `SqlNameText` の `DiagramNames`／`PlanNames` の 2 つだけ。1 つ拾い忘れると、その種類の名前だけが黙って DB に届く。
+- 名前を拾う場所は `SqlNameText` の `DiagramNames`／`PlanNames` の 2 つだけ。`PlanNames` は、文の型ごとの腕で文の名前を運ぶメンバーを拾い、再構築と列順は `plan.Rebuilds`・`plan.Reorders` のループで拾う。1 つ拾い忘れると、その種類の名前だけが黙って DB に届く。
   - 拾う 1 か所（`names.Add` の 1 本）ごとに、方言の DDL の表の名前の出どころの宣言（`DialectDdlRows.NameSources`）が行を作る。その出どころだけへ改行入りの名前を入れた計画・図を 5 方言が名指しで断ること（行 `sync-plan-name-source-*-newline`・`ddl-name-source-*-newline`）と、表の位置の印（MySQL で文字数は上限内・ファイル名では上限を超える名前を、表の位置は断り列・制約の位置は断らない。行 `sync-plan-name-source-*-table-file-name`・`ddl-name-source-*-table-file-name`）を見る。
-  - 宣言と製品の `names.Add`（所属のメソッド・出どころの式・表の位置か・置き場所）の食い違いは、`SourceRuleTests` の規則 `sql-name-text-name-sources` が両方向で赤にする（足したのに宣言へ載せ忘れる・消したのに宣言に残る）。あるべき出現は宣言から作る（写しを持たない）。見つける形は自己検査の行 `sql-name-text-name-sources-forms`（形の違う `names.Add` を拾い、`names` 以外の受け手を拾わない）・`sql-name-text-name-sources-inactive-branch` が確かめる。mutation 実証済み（文の削除・真偽値の反転・規則の 3 方向）。
+  - 宣言と製品の `names.Add`（所属のメソッド・文の型の腕・出どころの式・表の位置か・置き場所）の食い違いは、`SourceRuleTests` の規則 `sql-name-text-name-sources` が両方向で赤にする（足したのに宣言へ載せ忘れる・消したのに宣言に残る）。あるべき出現は宣言から作る（写しを持たない）。見つける形は自己検査の行 `sql-name-text-name-sources-forms`（形の違う `names.Add` を拾い、`names` 以外の受け手を拾わない）・`sql-name-text-name-sources-inactive-branch` が確かめる。mutation 実証済み（文の削除・真偽値の反転・規則の 3 方向）。
+  - 文の型（`Sync/Steps/SyncStep.cs`）の、名前を運びうる型のメンバー（文字列・文字列の並び・列・表の定義・列の組・再構築）は、宣言の経路（`DdlNameRoute.StepMember`）か、理由つきの「名前でない」の一覧（説明の本文・表を作る文の差分が解決した一意制約の名前・ループが拾う再構築と列順）のちょうど一方にある。メンバーを足して宣言を忘れると、`ParityTests` の行 `sync-step-name-members-declared` が赤にする（読み取りの自己検査の行 `sync-step-name-members-probe`。名前を運びうる型でないメンバーは型を添えて数えるので、新しい型のメンバーも赤になる）。
 - ガードは 2 つ。
   - `OutputIdentifierLimitGuardTests`：上限ちょうどの名前と上限を超える既定名の図から DDL と同期を作り、方言の区切りで囲まれた識別子を全文（動的 SQL のリテラルの中も）から取り出して、すべて `Accepts` を通ることと種類ごとの期待する識別子が現れることを 5 方言で表明する。
   - `IdentifierLimitEntryTests`：名前の種類 × 5 方言の表で、DDL と同期の両方の入口が断る／受け付けるを書き下した期待値で表明する。
@@ -318,7 +325,7 @@
 - 同期も同じ方言で、外部キーを付ける文（明示・作り直しの展開・暗黙の付け直し）の列の組を参照先の同期後のキー（主キーの変更を選んだ表は新しい主キー・追加を選んだ表は図の主キー・それ以外は live の主キー、続いて同期後の一意制約＝`PostSyncSchema.UniqueKeys`）の並びへ並べ替える（組み立ての `ForeignKeyPairOrder`・規則の本体は DDL と同じ `ForeignKeyColumnOrder.ArrangeToKey`）。
   - 図や live の並びのまま付け直すと、参照される複合主キーの並びだけの変更と、並びの違う外部キーの作り直しが必ず失敗する（暗黙コミットの方言では外部キーが消えたまま残る）。
   - 主キーと同じ列集合の一意制約があっても主キーを先に試す。どのキーとも列の集合が一致しない外部キーは並べ替えない。
-- 計画の形へ写すとき、列の組を並べ替えた外部キーの追加の項目は `SchemaDiffItem.WithForeignKeyColumnPairs`（メンバーごとの複製＋列ペアの差し替え・変更通知の購読は写さない）で作り（`StepLowering`）、プロパティを手で写さない。`SchemaDiffItemTests` が反射で全プロパティを照合する。
+- 並べ替えた列の組は、外部キーを付ける文の値（`AddForeignKeyStep.ColumnPairs`＝句に書く順）として持つ。差分の項目は書き換えない。
 - 複合 FK はフル対応で、FK の差分・暗黙の付け直し・候補キーの証明は列ペアのリスト（参照先の列は集合照合）で動く。
 - 固定は期待の行 `diff-fk-composite-pair-order-is-not-a-difference`・`plan-arrange-*`・`plan-composite-fk-reordered-parent-pk-rebuilds-all-pairs`・`ForeignKeyColumnOrderTests`・`SyncPlannerTests.AddForeignKey_PrimaryKeyAndUniqueOnSameColumns_FollowsPrimaryKey`・実 DB の行（`realdb-fk-composite-other-order-ddl-applies-no-diff`／`realdb-mysql-fk-composite-other-order-ddl-applies-no-diff`・`realdb-fk-reorder-referenced-composite-pk-rebuilds-in-new-order`／`realdb-mysql-fk-reorder-referenced-composite-pk-rebuilds-in-new-order`・`realdb-fk-alter-in-other-order-rebuilt-in-key-order`／`realdb-mysql-fk-alter-in-other-order-rebuilt-in-key-order`・`realdb-oracle-fk-composite-declared-other-order-no-diff`）・同期計画の総当たり。mutation 実証済み。
 
@@ -370,13 +377,13 @@
 
 - 主キー同期（`AlterPrimaryKey`）は PK の列構成（順序付きの名前のリスト）の差を表ごとに 1 項目で出す（既定未選択・`IsDestructive`）。
 - 旧 PK の制約名は取り込まず、方言のカタログを実行時に逆引きして DROP する（PK なしは no-op・解除だけなら ADD なし）。ADD は `PK_{テーブル名}` の固定命名。
-- 逐次方言は 3 フェーズ（`SyncPlanSection.PrimaryKeyPhase`＝Drop → AlterColumn → Add）。旧 PK 列の NULL 許容化を含む変更も 1 回の同期で通る。PK 変更なしの計画は出力バイト不変。SQLite は再構築へ畳む。
+- 逐次方言は 3 フェーズ（`StepSection.PrimaryKeyPhase`＝Drop → AlterColumn → Add）。旧 PK 列の NULL 許容化を含む変更も 1 回の同期で通る。PK 変更なしの計画は出力バイト不変。SQLite は再構築へ畳む。
   - MySQL で解除と付与を 1 つの ALTER TABLE にまとめる案は採らない（3 フェーズは列の変更に要り、1 文にできるのは列の変更を伴わない場合だけで規則が割れる）。
 - 依存 FK の自動の外し直し：選んだ `AlterPrimaryKey` の旧主キーに支えられた被参照 FK（旧主キーと同じ列集合を参照するもの・`ForeignKeyRequiresLeadingIndex` の方言では旧主キーの先頭の列だけを参照するものも）と、FK に関わる列の AlterColumn（`AlterColumnRequiresForeignKeyRebuild`）を、組み立てが外し直しの宣言（`RebuildDeclarations.RequireForeignKeysOffDroppedPrimaryKeys`・`RequireForeignKeysOffAlteredColumns`）から集め、外す文と付け直す文の対にする（「逐次 DDL の組み立て」）。
   - 一意制約を参照する FK は主キーの解除に巻き込まれないので外さない（`DependsOnOldPrimaryKey`）。
   - 同じ計画が明示に外す FK は外し直さず、付け直さない。
 - 主キーの変更で新しく主キーに加わる NULL 許容の列は、選んでいなくても live の型のまま NOT NULL にする（`InjectPrimaryKeyNotNullChanges`＝主キーの変更の意図に含まれる）。
-- 固定は期待の行 `plan-implicit-fk-pk-change-skips-fk-on-unique-constraint`・`plan-implicit-fk-pk-change-rebuilds-fk-on-old-pk-prefix-for-mysql-like`・`plan-sections-are-in-fixed-order`・実 DB の行 `realdb-pk-change-only-makes-new-key-column-not-null`。
+- 固定は期待の行 `plan-implicit-fk-pk-change-skips-fk-on-unique-constraint`・`plan-implicit-fk-pk-change-rebuilds-fk-on-old-pk-prefix-for-mysql-like`・`plan-sections-are-in-fixed-order`・実 DB の行 `realdb-pk-change-only-makes-new-key-column-not-null`・`DialectDdlTableTests` の行 `sync-other-primary-key-composite-follows-primary-key-column-ids`（付与の文は、複合の主キーの列を主キーの中の並びの順に書く。逐次 DDL の 4 方言）。
 
 ### 候補キーの証明
 
@@ -447,7 +454,7 @@
 - DDL が暗黙コミットされる方言（`TransactionalDdl` が偽）では、計画が残す外部キーに阻まれて必ず断られる文のうち計画の順で最初のもの（キーの削除は組）を、計画の先頭へ移す（判定は `Refusals.FindCertain`、移すのは `MoveFirst.Apply`＝何も変えずに失敗させる。主キーの変更は外す文だけを移す）。トランザクションの方言は並びを変えない。
   - 対象は、キーの削除（主キーの解除・一意制約の削除。主キーが置き換える一意制約の暗黙の削除を含む）で残す外部キーを支え得る親のキー（参照する列と同じ列の集合を持つ live の主キー・一意制約。`ForeignKeyRequiresLeadingIndex` の方言ではその列を先頭に持つキーも）がこの計画ですべて外れるとき・残す外部キーの両端の型を食い違わせる列の型の変更（`AlterColumnRequiresForeignKeyRebuild` の方言は外部キー単位で同期後の両端、ほかの方言はその列を含む組で、その列の新しい型と相手の端の live の型＝先頭へ移した位置の状態）・`SetNullRequiresNullableChildColumn` の方言で残す SET NULL の外部キーの子の列の NOT NULL 化。SET NULL の子の列の NOT NULL 化の前寄せのガード：期待の行 `plan-set-null-pk-change-and-alter-making-child-not-null-moves-alter-first-*`・網の静的な規則 R11（前寄せしないと、後ろの断られる文として予言して D9 が名指しの外の外した制約を数える）と M1・生成器の行の水準 `set-null-child-not-null`。
   - 外し直さない方言の型の判定を同期後の両端で行うと、両端を別々の型へ変える同期で、先頭では通る側の変更（長さを広げるなど）を移し、断られる側の変更が元の位置に残って、その間に外した制約が消えたまま残る。組の変更のどれも単独では先頭で断られない（DB が受け入れている型の違う組の両端を互いに並べられない型へ寄せる）ときは、組の変更を計画の順に移す（`Refusals.FindCertain` の両端の変更の組）。
-  - 移した文の数は `StepPlan.MovedFirstCount` で、写しがその文を印 `SyncPlanSection.IsMovedFirst`（internal・レンダラーは見ない）のセクションにする。印は同期計画の総当たりの静的な規則 M1（移したセクションの後ろへ予言された失敗が進まない）が読む。ガード：静的な規則 M1・形の行の因子 `TypeChange`=DivergentEnds と必ず含む行。
+  - 移した文の数は `SyncPlan.MovedFirstCount` で、その文は前寄せの印（`StepSection.IsMovedFirst`。internal・レンダラーは見ない）のセクションになる。印は同期計画の総当たりの静的な規則 M1（移したセクションの後ろへ予言された失敗が進まない）が読む。ガード：静的な規則 M1・形の行の因子 `TypeChange`=DivergentEnds と必ず含む行。
   - 支え得るキーを全部外すときは、最後の削除だけが断られ前の削除は通るので、外す文の組を先頭へ移す。組の中は、後ろで付け直すキーの削除（一意制約の作り直しを展開した削除・付与の段を持つ主キーの解除）を最後へ回し、前にはただの削除（消えてよい）を置く（`Refusals.FindCertain` が並べ、`MoveFirst.Apply` は移す文の並びのまま先頭に置く）。付け直すキーの削除を組の前に置いていたため、MySQL で外部キーが参照する列の一意制約の双子の片方の列を変え、もう片方を外す同期が、作り直しの削除が通った後にただの削除を 1553 で断られ、作り直す一意制約が消えたまま残った（夜間 CI の網の種 8169）。ガード：形の行（`SyncPlan/ShapeRows` の `ExplicitOp`=ChangeFirstDropOthers と必ず含む行。網の静的な規則の D9）・期待の行 `plan-move-first-key-drop-group-readded-drop-last-mysql-like`（実 DB）。組の中に付け直すキーの削除が 2 つ以上あると、どう並べても前の方の付け直すキーが消えるので、一意制約の作り直し 1 つ（組の最初の付け直す一意制約）を計画から外して `SyncPlanWarningKind.UniqueConstraintRebuildKeptForForeignKey`（Detail は「残した一意制約の名前 (支える外部キーの名前)」）で名指しし、取り下げた項目を除いて選択からやり直す（`UniqueRebuildWithdrawal.Find` と計画器の輪。判定は前寄せの組と同じ `Refusals.FindCertain`・`CanSupportForeignKey`。「位置の状態と歩き」）。外した一意制約が古い形で外部キーを支え続けるので、ほかの削除は通り、同期は消える物なしに進む。前寄せと同じく暗黙コミットの方言だけ（トランザクションの方言は失敗で巻き戻る。生成器はこの形を作らない＝`ChangeUniqueColumns` はいつも最初の名前つきの一意制約を移す）。ガード：形の行（`ExplicitOp`=ChangeAllUniques と必ず含む行。網の D9・実 DB の表明 1b の規則 2）・期待の行 `plan-move-first-key-drop-group-two-readded-keeps-one-rebuild-mysql-like`（実 DB・Detail の名指し）。ほかのキーを live だけで数えていたため、MySQL で一意制約の双子を両方外す同期が前寄せされず 2 つ目の削除が 1553 で断られて作り直しの外部キーが消えたまま残り（V3）、主キーと同じ列の一意制約が外部キーを支えるのに主キーの解除を必ず断られると先頭へ移して、通った解除の後の列の変更の失敗で主キーが消えたまま残った（3780。V6）。ガード：形の行（`SyncPlan/ShapeRows` の `ExplicitOp`=DropAllUniques・因子 `CollateralFk`・因子 `PrimaryKeyTwin` と必ず含む行 V3・V6。網の静的な規則の D9 と実 DB の表明 1b）。
   - 一意制約の削除を対象に入れていなかったため、Oracle で外部キー 2 本が参照する一意制約の列へ主キーを付け替え、片方の子の列の型を変える同期が、兄弟の外部キーを外した後に ORA-02273 で断られ、兄弟の外部キーが消えたまま残った。ガード：形の行の必ず含む行 L1（`SyncPlanShapeRows` の `PkChange`=MoveToUniqueColumn × `ReferencedKey`=Unique × 参照 2 本 × 子だけの型の変更。網の静的な規則の D9 と実 DB の表明 1b）。
 - 子表・親表・構成列が同じ計画で削除される外部キーは、外すだけで付け直さない。この「外すだけ」は端が消える live の外部キーすべてに掛ける（`SyncPlanner.InjectVanishingForeignKeyDrops`＝計画の入口で暗黙の DropForeignKey を足す）。
@@ -519,20 +526,29 @@
 
 ### 計画の文と由来と対
 
-- 計画の 1 文（DB へ流す変更 1 つ）の型は `Sync/Steps/` の `SyncStep`（閉じた階層・派生 15：表の追加と削除・列の追加と変更と削除・主キーを外すと付ける・一意制約を外すと付ける・外部キーを外すと付ける・表と列の説明・表の作り直し・列を動かす）。文は方言の SQL を組み立てるのに要る値だけを持つ。文の並びの計画は `StepPlan`（文の並び・先頭から前寄せした文の数・警告・外した項目）。
+- 計画の 1 文（DB へ流す変更 1 つ）の型は `Sync/Steps/` の `SyncStep`（閉じた階層・派生 15：表の追加と削除・列の追加と変更と削除・主キーを外すと付ける・一意制約を外すと付ける・外部キーを外すと付ける・表と列の説明・表の作り直し・列を動かす）。文は方言の SQL を組み立てるのに要る値だけを持つ。文の並びの計画は `SyncPlan`（文の並び `Steps`・先頭から前寄せした文の数 `MovedFirstCount`・警告・外した項目。`Rebuilds`・`Reorders` は文の並びから導く読み取り専用のメンバー）。文の型は public（方言ビルダーが別のアセンブリにあるため）。
   - 由来（`StepOrigin`）は 3 つ：選んだ項目から来た文（`SelectedOrigin`。作り直しを展開した削除と追加は元の作り直しの項目、主キーを外す文と付ける文は元の主キーの変更の項目を持つ）・計画器が足した文（`ImplicitOrigin`＝理由 `ImplicitStepReason` の 7 つと、足した側が組み立てた説明）・複数の項目をまとめた文（`MergedOrigin`＝表の作り直し）。
   - 対（`ReaddPair`）は、制約を外す文と付け直す文が共有する参照の印。対になるのは、外部キー・一意制約の作り直しを展開した削除と追加、外部キー・一意制約・主キーの暗黙の外し直し、主キーの変更の解除と付与。利用者が別々に選んだ削除と追加は、同じ名前でも対にしない。
   - 名前の無いこともある制約の名前（`null`）は、差分の項目と同じ意味（外すときは同期スクリプトが DB から引き、付けるときは作る）。
-- 計画は文の並びとして作り（文を作るのは組み立て＝`Sync/Scheduling/` と `Sync/TableRebuilds/TableRebuildScheduler`）、`StepLowering.ToSyncPlan` が計画の形（`SyncPlan`＝セクションと差分の項目）へ写す。方言ビルダー・計画の検証・画面・テストの期待の面は、この形を読む。
-  - セクションは、並びの隣り合う文を「種類・主キーのフェーズ・前寄せか」が同じ間 1 つにまとめる。主キーを外す文は解除のフェーズ、付ける文は付与のフェーズへ写す。列を動かす文は表ごとの `TableReorderPlan`、表を作り直す文は `TableRebuildPlan` へ戻す。
-  - 項目の作り方は 2 通り。
-    - 読み取り用の形（既定）：選んだ項目から来て種類の変わらない文は、元の項目そのもの（参照を保つ）。列の組を並べ替えた外部キーの追加は、列の組だけ違う複製。作り直しを展開した文と計画器が足した文は、文の値から組み立て、説明は由来から取る。対になった主キーの解除と付与は同じ 1 つの項目（主キーの列だけを持つ表の定義）になる。外部キーの追加の項目が名乗る列名（`ColumnName`）は、列の組を並べ替える前の宣言の順の先頭の組の子の列（作り直しを展開した追加は元の項目の列名、外して付け直す追加は対の外す文の先頭の組）。
-    - 文の値だけの形（`fieldsOnly`）：どの文も文の値だけから組み立てる（由来から読むのは説明だけ）。文の値が方言ビルダーに足りることを確かめるための形。
+- 計画は文の並びとして作り（文を作るのは組み立て＝`Sync/Scheduling/` と `Sync/TableRebuilds/TableRebuildScheduler`）、方言ビルダーと入口の検証は文を読む（「文を読む方言ビルダー」）。画面が読むのは警告と `Rebuilds` だけ。
+  - セクションと差分の項目で表した形（`plan.Sections`）は製品に無い。同期計画のテストが読む面で、Integration のテスト側の写し（`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanSections.cs`）が文の並びから導く（`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`「能力の組の網」）。製品のコードは、文から差分の項目を作らない。
 - 計画器は、選択の前半（`SyncPlanner.PrepareSelection`）で自分で作った差分の項目に印（`SchemaDiffItem.PlanMark`＝`PlanItemMark`。internal）を付ける：計画器が足した項目の理由、作り直しを展開した項目の元の項目、外す項目と付け直す項目の対。利用者が選んだ項目と、選んだ項目の一部だけを外して残した代わりの項目は印を持たない。
   - 付けるのは、作り直しの展開と同期後の状態の差の項目を足す関数が項目を作る所だけ（`new SchemaDiffItem { … PlanMark = … }` の 8 か所＝`ExpandAlters` の 4・`InjectPrimaryKeyNotNullChanges`・`InjectVanishingUniqueConstraintDrops`・`InjectUniqueConstraintsReplacedByPrimaryKey`・`BuildImplicitForeignKeyDrop` の 1 つずつ）。印を持つ項目の複製は印をそのまま持つ。
   - 計画・同期スクリプト・警告・画面は印を読まない。読むのは、組み立てが項目を文へ写す `SelectedSteps` の 2 か所（文の由来と、展開した項目の対）だけ。
-- 理由：由来と対は作った側しか知らないので、作る所で記録する（後から識別の型の集合・参照の等価・名前・後ろの項目の走査で推定すると、段ごとに推定が割れる）。写しが計画の形を保たないと、方言ビルダーと期待の面へ違う形で届く。印を付け忘れると計画器が足した項目が利用者の選んだ項目に見え、計画・画面が印に頼ると印を持たない項目と振る舞いが割れる。
-- ガード：能力の組の網の関係 N4（`SyncPlanCapabilityNetRunner.StepPlanProblems`＝製品の計画が計画器の文の並びの計画を写したものと同じ・文の値だけの形の同期スクリプトも同じ・文の値だけの形は選んだ項目そのものを返さない・由来と対の形・前寄せの印。`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`「能力の組の網」）・期待の行 `plan-implicit-unique-rebuild-on-dropped-table-drops-only`（外すだけの暗黙の一意制約の外し直しは対を持たない）・`SourceRuleTests` の規則 `sync-plan-mark-owners`（`src/QuickER.Provider` の `PlanMark` の参照を「含むメソッド: init / read」で集め、付ける所と読む所の一覧と件数まで照合する。付ける所の下限 8・読みは `SelectedSteps` の 2 か所だけ。自己検査の行 `sync-plan-mark-owners-forms`・`sync-plan-mark-owners-inactive-branch`）。
+- 理由：由来と対は作った側しか知らないので、作る所で記録する（後から識別の型の集合・参照の等価・名前・後ろの項目の走査で推定すると、段ごとに推定が割れる）。方言ビルダーが文のほかの形を読むと、計画器の作った文と違う物から SQL を組む経路ができる。印を付け忘れると計画器が足した項目が利用者の選んだ項目に見え、計画・画面が印に頼ると印を持たない項目と振る舞いが割れる。
+- ガード：能力の組の網の関係 N4（`SyncPlanCapabilityNetRunner.StepPlanProblems`＝由来と対の形・前寄せの印・テスト側の写しの形の自己検査ほか。`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`「能力の組の網」）・期待の行 `plan-implicit-unique-rebuild-on-dropped-table-drops-only`（外すだけの暗黙の一意制約の外し直しは対を持たない）・`SourceRuleTests` の規則 `sync-plan-mark-owners`（`src/QuickER.Provider` の `PlanMark` の参照を「含むメソッド: init / read」で集め、付ける所と読む所の一覧と件数まで照合する。付ける所の下限 8・読みは `SelectedSteps` の 2 か所だけ。自己検査の行 `sync-plan-mark-owners-forms`・`sync-plan-mark-owners-inactive-branch`）。
+
+### 文を読む方言ビルダー
+
+- 方言ビルダー（基底 `SyncScriptBuilderBase` と 5 方言）と入口の検証 3 つ（`SqlTypeText`・`SqlNameText`・`SqlTableShape` の `Validate(SyncPlan)`）は、計画の文（`SyncPlan.Steps`）だけを読む。差分の項目は読まない。
+- 文をセクションへまとめる所は `Sync/Steps/StepSections.cs` の `StepSections.Of(plan)` の 1 か所：文を順に見て、隣り合う文を「種類・主キーのフェーズ・前寄せか（文の位置が `SyncPlan.MovedFirstCount` より前か）」が同じ間 1 つの `StepSection` にまとめる。主キーを外す文は解除のフェーズ、付ける文は付与のフェーズ。表を作り直す文（`SyncPlan.Rebuilds`）と列を動かす文（`SyncPlan.Reorders`）はセクションに入れない。
+  - 見出し（`-- ===== {種類} ({n} items) =====`・主キーは `{種類}: {フェーズ}`）は、セクションの種類とフェーズの列挙の名前と、文の数から作る。
+- 基底は、セクションの文を文の型で `Append*`（引数は文の型）へ振り分ける（`AppendStep`）。Oracle は基底を継がず、自前の `AppendStep` を持つ。SQLite は `Build` を上書きし、種類でセクションを選んで再構築と織り交ぜる。
+- 文の型で振り分ける所は 4 つ（`StepSections.SectionOf`・基底の `AppendStep`・Oracle の `AppendStep`・`SqlNameText.PlanNames`）。どれも、セクションに入る文の型の全部を腕に持ち、知らない型は型の名前を名指しした `InvalidOperationException` にする（黙って飛ばさない）。
+  - 壊すと：文の型を足したのに振り分けへ足し忘れると、その文が SQL に出ないか、その名前が検証されない。
+  - ガード：`ParityTests` の行 `sync-step-switches-cover-every-step-type`（`Sync/Steps/SyncStep.cs` の派生の宣言から、セクションに入らない 2 つ〔表の作り直し・列を動かす。理由つきで宣言〕を除いた型と、4 つの振り分けの腕の型が、多重集合で一致する。足りない型・余る型・2 回ある型を名指しする。読み取りの自己検査の行 `sync-step-switches-declarations-probe`・`sync-step-switches-entries-probe`）。セクションのまとめ方は、期待の行 `plan-sections-are-in-fixed-order`（主キーのフェーズ）と能力の組の網の関係 N4 の前寄せの印が見る。mutation 実証済み（基底・Oracle の腕を 1 つ落とす・鍵から主キーのフェーズを外す・鍵から前寄せを外す）。読みの限界：腕に条件（`when`）を足して実質当たらなくした形は、照合の行は拾わない（方言の DDL の表の行が拾う）。
+- 付ける外部キーの名前は、文の名前（差分が求めた名前か、リレーションの名前）か、子と親の表名からの既定名（`SyncScriptBuilderHelper.ForeignKeyNameToAdd`＝`ForeignKeyStepNames.Added`。計画器の歩きと同じ求め方）。項目から求める名前（`SyncPlanner.SelectedForeignKeyName`＝選択と評価の警告）と同じ名前になる。
+- 計画を手で組むテストは、共有の補助（`tests/QuickER.Tests/Provider/HandBuiltSyncPlans.cs`）で文から組む（項目から組むときは、製品の `SelectedSteps.From` で文へ写す）。
 
 ### 逐次 DDL の組み立て
 
@@ -564,7 +580,7 @@
 - 制約 1 つと状態で決まる事実の述語は、`SyncPlanner` の internal static に在り、選択・組み立て・評価が共有する（`SyncPlanner.` で呼ぶ。`CanSupportForeignKey`・`DependsOnOldPrimaryKey`・`IsLeadingPrefix`・`StaysCandidateKey`・`HasPostSyncTypeMismatch`・`BlocksSetNullRebuild`・`ResolveForeignKeyName`・`HasNewPrimaryKeyColumns`）。集める・足す・並べるロジックは組み立ての側（`RebuildDeclarations`・`Readds`・`ForeignKeyPairOrder`・`StepOrder`・`ForeignKeyAddOrder`）に書く。
 - 外部キーの名前の求め方は 2 つ。項目から求める `SyncPlanner.SelectedForeignKeyName`（選んだ項目を外す規則と評価の規則が、警告で名指しする名前）と、文から求める `Sync/Steps/ForeignKeyStepNames.cs`（組み立てと歩き：付ける文は文の名前か既定名＝`ConstraintNames.EffectiveForeignKey`、外す文は DB の名前か `LiveSchema.ForeignKeyNames` の実効名）。外部キーの追加の並び（`ForeignKeyAddOrder`）と歩きの身元（次の節「位置の状態と歩き」）が文の側を通す。どちらもソースの規則 `sync-selected-foreign-key-names` の範囲（`SyncPlanner.cs` と `Sync/`）にある。
 - 組み立てが項目の印を読むのは `SelectedSteps` の 2 か所だけ（文の由来・展開した項目の対）。
-- 計画器の入口は `Sync/StepPlanner.cs` の `StepPlanner.Plan(items, capabilities, context)` で、呼ぶのは製品の入口 `SyncPlanner.BuildPlan` の 1 か所だけ。最終の計画を組む：選択（`SyncPlanner.PrepareSelection`＝除外の周・作り直しの展開・同期後の状態の差の項目・同期後の事実）→ 組み立て（`SequentialScheduler`）→ 評価（「計画の評価の規則」）→ 暗黙コミットの方言で DB の今の図があるときだけ、前寄せと取り下げの輪 → 前後の名指し（次の節「位置の状態と歩き」）。結果（`StepPlannerResult`）は、文の並びの計画（`StepPlan`＝文の並び・前寄せした文の数・警告・外した項目）か文で表せない理由と、最後の周の計画の事実（`Facts`）と、取り下げた項目の並び（`Withdrawn`）。
+- 計画器の入口は `Sync/StepPlanner.cs` の `StepPlanner.Plan(items, capabilities, context)` で、呼ぶのは製品の入口 `SyncPlanner.BuildPlan` の 1 か所だけ。最終の計画を組む：選択（`SyncPlanner.PrepareSelection`＝除外の周・作り直しの展開・同期後の状態の差の項目・同期後の事実）→ 組み立て（`SequentialScheduler`）→ 評価（「計画の評価の規則」）→ 暗黙コミットの方言で DB の今の図があるときだけ、前寄せと取り下げの輪 → 前後の名指し（次の節「位置の状態と歩き」）。結果（`StepPlannerResult`）は、文の並びの計画（`SyncPlan`）か文で表せない理由と、最後の周の計画の事実（`Facts`）と、取り下げた項目の並び（`Withdrawn`）。
   - テーブル再構築の方言（`TableRebuildDialects.Requires`）は private の `PlanTableRebuilds` が組む：選択（同じ `PrepareSelection`）→ 組み立て（`TableRebuildScheduler`。「テーブル再構築の合成」）→ 評価。前寄せ・取り下げ・前後の名指しは無く、周は 1 回だけ。計画の入力か DB の今の図が無ければ `InvalidOperationException`。
 - 壊すと：組み立てを変えると、同期スクリプトの文の並び・前寄せ・外し直し・警告が黙って変わる。表から抜けた宣言は一度も流れず、外れていなければならない制約を外さない計画が DB で断られる。入口をほかの所から呼ぶと、製品の計画と別の経路で計画を作る所が増える。
 - ガード：期待の行（`plan-implicit-fk-*`・`plan-arrange-*`・`plan-type-mismatch-one-intermediate-state-incompatible-rebuilds-fk`〔途中の状態の宣言の「どちらか」を「両方」にすると赤〕ほか）・同期計画の総当たりの静的な規則（D9・M1 ほか）と実 DB の総当たり・能力の組の網の関係 N3・N4（`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`「能力の組の網」）・`SourceRuleTests` の規則 `sync-step-planner-callers`（`src` の全体で、`StepPlanner.Plan` を呼ぶのは `BuildPlan` の 1 か所。自己検査の行 `sync-step-planner-callers-forms`・`sync-step-planner-callers-inactive-branch`）・規則 `sync-scheduling-builds-steps-only`（`Sync/Scheduling/` と `Sync/TableRebuilds/` に、差分の項目・警告の生成と項目の複製が無い。自己検査の行 `sync-scheduling-builds-steps-only-forms`・`sync-scheduling-builds-steps-only-inactive-branch`）・`ParityTests` の行 `sync-rebuild-declarations-table-complete`（`RebuildDeclarations` の宣言の形の `Require*` の宣言と、宣言の表の要素が、ファイルをまたいで多重集合で一致する。読み取りの自己検査の行 `sync-rebuild-declarations-declarations-probe`・`sync-rebuild-declarations-entries-probe`）・規則 `sync-plan-mark-owners`（印の読みは `SelectedSteps` の 2 か所だけ）。mutation 実証済み（宣言を 1 つずつ表から外す・付け直せない制約の判定を止める・明示に外す制約も外し直す・対を付けない・外す文と付け直す文の置き場を入れ替える・種類の順と外部キーの追加の順位を変える）。読みの限界：規則 2 つは型を書かない `new()` を拾わない。
@@ -581,7 +597,7 @@
 - 逐次 DDL の方言の文の並びを歩いた終わりの状態は、同期後に在る制約（`PostSyncSchema` の主キー・一意制約と、DB の外部キー − 外す ＋ 足す）と合う。
 - 前寄せ・取り下げ・前後の名指しの定義（この節と「外部キーの暗黙の外し直し」「既存の行で断られうる文の名指し」）は文で書く。制約 1 つと事実で決まる述語は共有する（`CanSupportForeignKey`・`HasPostSyncTypeMismatch`・`UsesSetNull`・`ColumnTypeOf`・`HoldsInLiveRows`・`ResolveForeignKeyName`）。
   - 必ず断られる文（`Refusals.FindCertain`）：残す外部キー（どの外す文も外さない DB の外部キー）があるとき、文の並びの順に最初の 1 件。キーの削除（支えうるキーがこの計画で全部外れる外部キーがあり、この文のキーがその 1 つ。移すのは支えうるキーを外す文の全部を、付け直す削除を最後へ安定に並べたもの）・型の変更（外し直しの方言は残す外部キーの同期後の両端、ほかの方言は相手の端の DB の今の型と並べられない）・SET NULL の子の列の NOT NULL 化（型の変更が当たらない列を変える文で続けて見る）・どれも無く外し直さない方言なら両端の変更の組。型の決まる列は計画の事実の `PostSync`（`PlanStage.Selected`）から読む。
-  - 前寄せ（`MoveFirst.Apply`）は移す文を判定の順に先頭へ置き、残りは元の順。先頭へ移した数が `StepPlan.MovedFirstCount` で、写しが前寄せのセクション（`IsMovedFirst`）にする。
+  - 前寄せ（`MoveFirst.Apply`）は移す文を判定の順に先頭へ置き、残りは元の順。先頭へ移した数が `SyncPlan.MovedFirstCount` で、その文が前寄せのセクション（`StepSection.IsMovedFirst`）になる。
   - 取り下げ（`UniqueRebuildWithdrawal.Find`）：キーの削除の組に後ろで付け直す削除が 2 つ以上あり、組の最初の付け直す一意制約の削除の由来が選んだ一意制約の作り直し（`SelectedOrigin` で項目の種類が `AlterUniqueConstraint`）なら、その項目を取り下げる。名指しは `UniqueConstraintRebuildKeptForForeignKey`（表は外す文の表名のまま・Detail は「一意制約の名前 (阻む外部キーの実効名)」）。
   - 取り下げと輪：取り下げた項目は周をまたいで持ち、次の周の選択から除いて選択からやり直す（周の数は選んだ項目の数 + 1 までで、超えたら例外）。警告の並びは選択の名指し → 評価の規則 → 取り下げの名指し（取り下げた順）→ 前後の名指し、外した項目の並びは選択が外した項目 → 取り下げた項目。
   - 前後の名指し（`RefusableChangeNaming.Constraints`）は、前寄せを当てた後の並びを歩き直して、既存の行で断られうる文（`Refusals.FindRefusable`＝列が空でないと通らない変更と、ほかの断られうる文。同じ位置は前者だけ）の前後で外れている制約を名指しする。範囲は外す文の位置から同じ身元を付ける最初の文まで（列が空でないと通らない変更は両端を含まず、ほかの断られうる文は付ける文を含む）。付ける文が無ければ、利用者が選んだ削除（`SelectedOrigin` で項目が作り直しでない）でない限り後ろの全部。警告は外す文の位置の順に、制約ごとに 2 種別の順。規則の表（`AssessmentRules.All`）には入れない。
@@ -641,7 +657,7 @@
 
 ### セクションの順序
 
-- 文の種類の順（組み立ての `StepOrder`）は DropFK → DropUnique → DropTable → AddTable → AddColumn → PK:Drop → AlterColumn → PK:Add → DropColumn → AddUnique → AddFK → SetTableDescription → SetColumnDescription。セクションは、写し（`StepLowering`）がこの順の文をまとめたもの。
+- 文の種類の順（組み立ての `StepOrder`）は DropFK → DropUnique → DropTable → AddTable → AddColumn → PK:Drop → AlterColumn → PK:Add → DropColumn → AddUnique → AddFK → SetTableDescription → SetColumnDescription。セクションは、`StepSections.Of` がこの順の文をまとめたもの（「文を読む方言ビルダー」）。
 - 表の削除を表の追加より前に置く。表の名前を変える同期で新しい表が古い表の一意制約の名前を引き継ぐと、制約名がスキーマの中で一意な方言では、追加が先だと同じ名前とぶつかって失敗する。古い表の削除を選ばなければ、表の追加は名前の重なりで外して名指しする（「選んでいない変更を前提にする項目」）。
   - 削除する表を参照する外部キーは、その前の FK 解除で外れている（`InjectVanishingForeignKeyDrops`）。
   - 暗黙コミットの方言では、削除の後の作成が失敗すると古い表は消えたまま残る（docs に明記）。

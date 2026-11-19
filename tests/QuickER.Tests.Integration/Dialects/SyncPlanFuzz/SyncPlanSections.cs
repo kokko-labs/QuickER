@@ -1,33 +1,115 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using QuickER.Model;
+using QuickER.Provider;
+using QuickER.Provider.Sync.Steps;
 
-namespace QuickER.Provider.Sync.Steps;
+namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 
 /// <summary>
-/// 文の並びで表した計画（<see cref="StepPlan"/>）を、セクションと差分の項目で表した計画（<see cref="SyncPlan"/>）へ写す
+/// 同期スクリプトの 1 セクション分を、差分の項目で表した読み取り用の形（テストの期待の面・静的な規則・計画の射影が読む）
+/// </summary>
+/// <remarks>
+/// まとめ方は方言ビルダーが文を読む製品の <see cref="StepSections"/> と同じ。同じ <see cref="Kind"/> のセクションが複数回・別の位置に
+/// 現れることがある（主キーの変更の 2 フェーズ・前寄せ）。
+/// </remarks>
+internal sealed class SyncPlanSection
+{
+    /// <summary>このセクションの差分の種類</summary>
+    public SchemaDiffKind Kind { get; init; }
+
+    /// <summary>主キーの変更のフェーズ（主キーの変更でなければ <see cref="PrimaryKeyPhase.None"/>）</summary>
+    public PrimaryKeyPhase PrimaryKeyPhase { get; init; } = PrimaryKeyPhase.None;
+
+    /// <summary>このセクションの差分の項目（計画の文の順）</summary>
+    public IReadOnlyList<SchemaDiffItem> Items { get; init; } = [];
+
+    /// <summary>このセクションの文（製品のセクション <see cref="StepSection.Steps"/> そのもの。写しの形の自己検査が項目と突き合わせる）</summary>
+    public IReadOnlyList<SyncStep> Steps { get; init; } = [];
+
+    /// <summary>
+    /// 必ず断られる文として計画の先頭へ移したセクションか（製品のセクションの印 <see cref="StepSection.IsMovedFirst"/> の写し）
+    /// </summary>
+    public bool IsMovedFirst { get; init; }
+}
+
+/// <summary>
+/// 計画（<see cref="SyncPlan"/>）の文の並びを、セクションと差分の項目の形（<see cref="SyncPlanSection"/>）へ写す
 /// </summary>
 /// <remarks>
 /// <para>
-/// セクションは、並びの隣り合う文を「種類・主キーのフェーズ・前寄せか」が同じ間 1 つにまとめて作る（セクションの中の順は文の順）。
-/// 主キーを外す文は主キーの変更の解除のフェーズへ、付ける文は付与のフェーズへ写す。列を動かす文は表ごとの並べ替えの計画へ、
-/// 表を作り直す文は再構築の計画へ写す。警告と外した項目はそのまま渡す。
+/// セクションへのまとめ方は製品の <see cref="StepSections.Of"/>。主キーを外す文は主キーの変更の解除のフェーズへ、付ける文は付与の
+/// フェーズへ入る。表を作り直す文と列を動かす文はセクションに入らない。
 /// </para>
 /// <para>
-/// 項目の作り方は 2 通り。
-/// 読み取り用の形（既定）は、選んだ項目から来て種類の変わらない文に元の項目そのものを返す（列の組を並べ替えた外部キーの追加は、
-/// 列の組だけ違う複製）。作り直しを展開した文と計画器が足した文は、文の値から項目を組み立てる。対になった主キーの解除と付与は
+/// 選んだ項目から来て種類の変わらない文は、元の項目そのものを返す（列の組を並べ替えた外部キーの追加は、列の組だけ違う複製）。
+/// 作り直しを展開した文と計画器が足した文は、文の値から項目を組み立てる（説明は由来から取る）。対になった主キーの解除と付与は
 /// 同じ 1 つの項目になる。
-/// 文の値だけの形は、どの文も文の値だけから項目を組み立てる（元の項目から読むのは説明だけ）。
+/// </para>
+/// <para>
+/// 計画ごとに 1 回だけ導いて覚えるので、同じ計画を何度読んでも同じセクション・同じ項目の参照を返す。写しが文を落とさず取り違えない
+/// ことは、能力の組の網の関係 N4（<see cref="SyncPlanCapabilityNetRunner.ReadableFormProblems"/>）が見る。
 /// </para>
 /// </remarks>
-internal static class StepLowering
+internal static class SyncPlanSections
 {
-    /// <summary>文の並びの計画を、セクションと差分の項目の計画へ写す</summary>
-    /// <param name="plan">文の並びの計画</param>
-    /// <param name="fieldsOnly">どの文も文の値だけから項目を組み立てるか（<c>false</c> なら読み取り用の形）</param>
-    /// <returns>同じ文を同じ順で持つ計画</returns>
-    public static SyncPlan ToSyncPlan(StepPlan plan, bool fieldsOnly = false)
+    /// <summary>計画ごとに導いたセクションの並び</summary>
+    private static readonly ConditionalWeakTable<SyncPlan, IReadOnlyList<SyncPlanSection>> Cache =
+        new();
+
+    extension(SyncPlan plan)
+    {
+        /// <summary>
+        /// 計画の文の並びを、セクションと差分の項目で表した形（空のセクションは含まない。表を作り直す文と列を動かす文は入らない）
+        /// </summary>
+        public IReadOnlyList<SyncPlanSection> Sections => Cache.GetValue(plan, ToSections);
+    }
+
+    /// <summary>
+    /// 列の組だけを差し替えた複製を返す（ほかの設定できるプロパティ〔internal の計画器の印を含む〕と選択の状態はそのまま写す）
+    /// </summary>
+    /// <param name="item">元の項目</param>
+    /// <param name="pairs">新しい列の組</param>
+    /// <returns>列の組だけが違う新しい項目（新しく組み立てるので、変更通知の購読は写さない）</returns>
+    /// <remarks>
+    /// プロパティを足したときに複製だけが値を落とさないことは、<see cref="SyncPlanFuzzOracleTests"/> の反射の照合が見る。
+    /// </remarks>
+    internal static SchemaDiffItem WithForeignKeyColumnPairs(
+        SchemaDiffItem item,
+        IReadOnlyList<ForeignKeyColumnNamePair> pairs
+    ) =>
+        new()
+        {
+            Kind = item.Kind,
+            Description = item.Description,
+            TableName = item.TableName,
+            ColumnName = item.ColumnName,
+            Entity = item.Entity,
+            Column = item.Column,
+            OldColumn = item.OldColumn,
+            Relationship = item.Relationship,
+            ParentEntity = item.ParentEntity,
+            ChildEntity = item.ChildEntity,
+            ForeignKeyName = item.ForeignKeyName,
+            ForeignKeyColumnPairs = pairs,
+            ReplacedForeignKey = item.ReplacedForeignKey,
+            ReplacedUniqueConstraint = item.ReplacedUniqueConstraint,
+            UniqueConstraintName = item.UniqueConstraintName,
+            UniqueConstraintNames = item.UniqueConstraintNames,
+            UniqueConstraintColumns = item.UniqueConstraintColumns,
+            NewDescription = item.NewDescription,
+            OldDescription = item.OldDescription,
+            IsSelectable = item.IsSelectable,
+            IsSelected = item.IsSelected,
+            PlanMark = item.PlanMark,
+        };
+
+    /// <summary>計画の文の並びを、セクションと差分の項目の並びへ写す</summary>
+    /// <param name="plan">計画</param>
+    /// <returns>同じ文を同じ順で持つセクションの並び（表を作り直す文と列を動かす文は入らない）</returns>
+    private static IReadOnlyList<SyncPlanSection> ToSections(SyncPlan plan)
     {
         // 対になった主キーの付与（解除の文から、同じ対の付与の列の並びを引く）
         var keyAdds = new Dictionary<ReaddPair, AddPrimaryKeyStep>();
@@ -51,144 +133,34 @@ internal static class StepLowering
         // 対ごとに 1 つだけ作る主キーの変更の項目（解除と付与の両方のセクションへ同じ項目を入れる）
         var keyItems = new Dictionary<ReaddPair, SchemaDiffItem>();
 
-        var sections = new List<SyncPlanSection>();
-        var rebuilds = new List<TableRebuildPlan>();
-        var reorders = new List<ReorderGroup>();
-        SectionKey? currentKey = null;
-        var currentItems = new List<SchemaDiffItem>();
-
-        for (var i = 0; i < plan.Steps.Count; i++)
-        {
-            var step = plan.Steps[i];
-
-            if (step is RebuildTableStep rebuild)
-            {
-                rebuilds.Add(rebuild.Rebuild);
-                continue;
-            }
-
-            if (step is MoveColumnStep move)
-            {
-                AddMove(reorders, move);
-                continue;
-            }
-
-            var (kind, phase) = SectionOf(step);
-            var key = new SectionKey(kind, phase, i < plan.MovedFirstCount);
-
-            if (key != currentKey)
-            {
-                Flush();
-                currentKey = key;
-            }
-
-            currentItems.Add(ItemOf(step, fieldsOnly, keyAdds, keyItems, foreignKeyDrops));
-        }
-
-        Flush();
-
-        return new SyncPlan
-        {
-            Sections = sections,
-            Rebuilds = rebuilds,
-            Reorders =
-            [
-                .. reorders.Select(group => new TableReorderPlan
+        return
+        [
+            .. StepSections
+                .Of(plan)
+                .Select(section => new SyncPlanSection
                 {
-                    TableName = group.TableName,
-                    Moves = group.Moves,
-                    SourceItems = group.Source is null ? [] : [group.Source],
+                    Kind = section.Kind,
+                    PrimaryKeyPhase = section.PrimaryKeyPhase,
+                    Items =
+                    [
+                        .. section.Steps.Select(step =>
+                            ItemOf(step, keyAdds, keyItems, foreignKeyDrops)
+                        ),
+                    ],
+                    Steps = section.Steps,
+                    IsMovedFirst = section.IsMovedFirst,
                 }),
-            ],
-            Warnings = plan.Warnings,
-            ExcludedItems = plan.ExcludedItems,
-        };
-
-        void Flush()
-        {
-            if (currentKey is { } closing && currentItems.Count > 0)
-            {
-                sections.Add(
-                    new SyncPlanSection
-                    {
-                        Kind = closing.Kind,
-                        PrimaryKeyPhase = closing.Phase,
-                        Items = [.. currentItems],
-                        IsMovedFirst = closing.MovedFirst,
-                    }
-                );
-            }
-
-            currentItems.Clear();
-        }
+        ];
     }
-
-    /// <summary>セクションをまとめる鍵（種類・主キーのフェーズ・前寄せか）</summary>
-    private readonly record struct SectionKey(
-        SchemaDiffKind Kind,
-        PrimaryKeyPhase Phase,
-        bool MovedFirst
-    );
-
-    /// <summary>1 つの並べ替えの計画になる、隣り合う列を動かす文のまとまり</summary>
-    private sealed record ReorderGroup(string TableName, SchemaDiffItem? Source)
-    {
-        public List<ColumnMove> Moves { get; } = [];
-    }
-
-    /// <summary>列を動かす文を、同じ表・同じ元の項目の直前のまとまりへ足す（違えば新しいまとまりを始める）</summary>
-    private static void AddMove(List<ReorderGroup> reorders, MoveColumnStep move)
-    {
-        var source = (move.Origin as SelectedOrigin)?.Item;
-
-        if (
-            reorders.Count == 0
-            || !SchemaNames.AreSame(reorders[^1].TableName, move.TableName)
-            || !ReferenceEquals(reorders[^1].Source, source)
-        )
-        {
-            reorders.Add(new ReorderGroup(move.TableName, source));
-        }
-
-        reorders[^1].Moves.Add(new ColumnMove(move.Column, move.AfterColumn));
-    }
-
-    /// <summary>文が入るセクションの種類と主キーのフェーズ</summary>
-    private static (SchemaDiffKind Kind, PrimaryKeyPhase Phase) SectionOf(SyncStep step) =>
-        step switch
-        {
-            CreateTableStep => (SchemaDiffKind.AddTable, PrimaryKeyPhase.None),
-            DropTableStep => (SchemaDiffKind.DropTable, PrimaryKeyPhase.None),
-            AddColumnStep => (SchemaDiffKind.AddColumn, PrimaryKeyPhase.None),
-            AlterColumnStep => (SchemaDiffKind.AlterColumn, PrimaryKeyPhase.None),
-            DropColumnStep => (SchemaDiffKind.DropColumn, PrimaryKeyPhase.None),
-            DropPrimaryKeyStep => (SchemaDiffKind.AlterPrimaryKey, PrimaryKeyPhase.Drop),
-            AddPrimaryKeyStep => (SchemaDiffKind.AlterPrimaryKey, PrimaryKeyPhase.Add),
-            DropUniqueConstraintStep => (SchemaDiffKind.DropUniqueConstraint, PrimaryKeyPhase.None),
-            AddUniqueConstraintStep => (SchemaDiffKind.AddUniqueConstraint, PrimaryKeyPhase.None),
-            DropForeignKeyStep => (SchemaDiffKind.DropForeignKey, PrimaryKeyPhase.None),
-            AddForeignKeyStep => (SchemaDiffKind.AddForeignKey, PrimaryKeyPhase.None),
-            SetTableDescriptionStep => (SchemaDiffKind.SetTableDescription, PrimaryKeyPhase.None),
-            SetColumnDescriptionStep => (SchemaDiffKind.SetColumnDescription, PrimaryKeyPhase.None),
-            _ => throw new System.InvalidOperationException(
-                $"The step {step.GetType().Name} does not belong to a section."
-            ),
-        };
 
     /// <summary>文をセクションの項目へ写す</summary>
     private static SchemaDiffItem ItemOf(
         SyncStep step,
-        bool fieldsOnly,
         Dictionary<ReaddPair, AddPrimaryKeyStep> keyAdds,
         Dictionary<ReaddPair, SchemaDiffItem> keyItems,
         Dictionary<ReaddPair, DropForeignKeyStep> foreignKeyDrops
     )
     {
-        if (fieldsOnly)
-        {
-            return FromFields(step, keyAdds, keyItems, foreignKeyColumnName: null);
-        }
-
         if (step.Origin is SelectedOrigin selected)
         {
             var item = selected.Item;
@@ -198,11 +170,11 @@ internal static class StepLowering
             {
                 return add.ColumnPairs.SequenceEqual(item.ForeignKeyColumnPairs)
                     ? item
-                    : item.WithForeignKeyColumnPairs(add.ColumnPairs);
+                    : WithForeignKeyColumnPairs(item, add.ColumnPairs);
             }
 
             // 種類の変わらない文は元の項目そのもの（主キーの解除と付与は、どちらも元の主キーの変更の項目）
-            if (SectionOf(step).Kind == item.Kind)
+            if (StepSections.SectionOf(step).Kind == item.Kind)
             {
                 return item;
             }
@@ -219,7 +191,7 @@ internal static class StepLowering
     }
 
     /// <summary>
-    /// 読み取り用の形の外部キーの追加の項目が名乗る列名（列の組を並べ替える前の、宣言の順の先頭の組の子の列）
+    /// 外部キーの追加の項目が名乗る列名（列の組を並べ替える前の、宣言の順の先頭の組の子の列）
     /// </summary>
     /// <remarks>
     /// 作り直しを展開した追加は元の作り直しの項目の列名、外して付け直す追加は対の外す文（DB の宣言の順）の先頭の組の子の列。
@@ -392,7 +364,7 @@ internal static class StepLowering
                 };
 
             default:
-                throw new System.InvalidOperationException(
+                throw new InvalidOperationException(
                     $"The step {step.GetType().Name} does not become a section item."
                 );
         }
@@ -400,8 +372,8 @@ internal static class StepLowering
 
     /// <summary>主キーを外す文・付ける文を、主キーの変更の項目へ写す</summary>
     /// <remarks>
-    /// 項目は主キーの列だけを持つ表の定義を持つ（同期スクリプトは付与のフェーズで主キーの列名を並びの順に読む）。
-    /// 対になった解除と付与は同じ 1 つの項目で、付与の列の並びを持つ。対の無い解除は主キーの列の無い定義を持つ。
+    /// 項目は主キーの列だけを持つ表の定義を持つ。対になった解除と付与は同じ 1 つの項目で、付与の列の並びを持つ。
+    /// 対の無い解除は主キーの列の無い定義を持つ。
     /// </remarks>
     private static SchemaDiffItem PrimaryKeyItem(
         SyncStep step,
@@ -447,7 +419,7 @@ internal static class StepLowering
             };
     }
 
-    /// <summary>読み取り用の形の項目の説明（選んだ項目から来た文は元の項目の説明、計画器が足した文は足した側の説明）</summary>
+    /// <summary>項目の説明（選んだ項目から来た文は元の項目の説明、計画器が足した文は足した側の説明）</summary>
     private static string DescriptionOf(StepOrigin origin) =>
         origin switch
         {
