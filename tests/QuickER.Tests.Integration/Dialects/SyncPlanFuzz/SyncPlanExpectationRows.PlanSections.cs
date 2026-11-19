@@ -17,7 +17,11 @@ internal static partial class SyncPlanExpectationRows
                 .Items(_ =>
                     [
                         I.Item(SchemaDiffKind.AddTable, selected: false),
-                        I.Item(SchemaDiffKind.AddColumn, selected: true),
+                        I.Item(
+                            SchemaDiffKind.AddColumn,
+                            selected: true,
+                            column: S.Nullable("added", "INT")
+                        ),
                     ]
                 )
                 .NoContext()
@@ -30,16 +34,16 @@ internal static partial class SyncPlanExpectationRows
                 // わざと逆順寄りに投入する
                 .Items(_ =>
                     [
-                        I.Item(SchemaDiffKind.SetColumnDescription),
+                        I.Item(SchemaDiffKind.SetColumnDescription, columnName: "described"),
                         I.Item(SchemaDiffKind.SetTableDescription),
-                        I.Item(SchemaDiffKind.AddForeignKey),
+                        I.ForeignKey(SchemaDiffKind.AddForeignKey),
                         I.Item(SchemaDiffKind.DropTable),
-                        I.Item(SchemaDiffKind.DropColumn),
+                        I.Item(SchemaDiffKind.DropColumn, columnName: "dropped"),
                         I.AlterPk("T", S.Detached("T", S.Pk("id", "INT"))),
-                        I.Item(SchemaDiffKind.DropForeignKey),
-                        I.Item(SchemaDiffKind.AlterColumn),
-                        I.Item(SchemaDiffKind.AddColumn),
-                        I.Item(SchemaDiffKind.AddTable),
+                        I.ForeignKey(SchemaDiffKind.DropForeignKey),
+                        I.Item(SchemaDiffKind.AlterColumn, column: S.Nullable("altered", "INT")),
+                        I.Item(SchemaDiffKind.AddColumn, column: S.Nullable("added", "INT")),
+                        I.Item(SchemaDiffKind.AddTable, entity: S.Detached("T", S.Pk("id", "INT"))),
                     ]
                 )
                 .NoContext()
@@ -77,9 +81,21 @@ internal static partial class SyncPlanExpectationRows
                 )
                 .Items(_ =>
                     [
-                        I.Item(SchemaDiffKind.AddColumn, table: "A"),
-                        I.Item(SchemaDiffKind.AddColumn, table: "B"),
-                        I.Item(SchemaDiffKind.AddColumn, table: "C"),
+                        I.Item(
+                            SchemaDiffKind.AddColumn,
+                            table: "A",
+                            column: S.Nullable("added", "INT")
+                        ),
+                        I.Item(
+                            SchemaDiffKind.AddColumn,
+                            table: "B",
+                            column: S.Nullable("added", "INT")
+                        ),
+                        I.Item(
+                            SchemaDiffKind.AddColumn,
+                            table: "C",
+                            column: S.Nullable("added", "INT")
+                        ),
                     ]
                 )
                 .NoContext()
@@ -87,9 +103,37 @@ internal static partial class SyncPlanExpectationRows
                     e.Sections.Exact("AddColumn: #0 AddColumn A; #1 AddColumn B; #2 AddColumn C")
                 ),
             Row("plan-empty-sections-are-omitted", "空セクションは含まれない", C.Neutral)
-                .Items(_ => [I.Item(SchemaDiffKind.AddTable)])
+                .Items(_ =>
+                    [I.Item(SchemaDiffKind.AddTable, entity: S.Detached("T", S.Pk("id", "INT")))]
+                )
                 .NoContext()
                 .Expect(e => e.Sections.Exact("AddTable: #0 AddTable T")),
+            Row(
+                    "plan-item-without-required-member-is-refused",
+                    "文に要るメンバーの無い項目は、項目の種類とメンバーを名指しして断る（差分が作る項目だけを受け付ける）",
+                    C.Neutral
+                )
+                // 外部キーの追加に要るリレーションが無い（親子の表はある）
+                .Items(_ =>
+                    [
+                        new SchemaDiffItem
+                        {
+                            Kind = SchemaDiffKind.AddForeignKey,
+                            TableName = "T",
+                            ParentEntity = S.Detached("P", S.Pk("id", "INT")),
+                            ChildEntity = S.Detached("T", S.Pk("id", "INT")),
+                            IsSelected = true,
+                        },
+                    ]
+                )
+                .NoContext()
+                .Plan()
+                .Expect(e =>
+                    e.Exception.Single(
+                        "InvalidOperationException: The sync plan cannot be built from an incomplete item: "
+                            + "AddForeignKey item without Relationship. *"
+                    )
+                ),
             Row(
                     "plan-rebuild-table-item-is-always-excluded",
                     "RebuildTable は選択されていても除外される",
@@ -98,7 +142,11 @@ internal static partial class SyncPlanExpectationRows
                 .Items(_ =>
                     [
                         I.Item(SchemaDiffKind.RebuildTable, selected: true),
-                        I.Item(SchemaDiffKind.AddTable, selected: true),
+                        I.Item(
+                            SchemaDiffKind.AddTable,
+                            selected: true,
+                            entity: S.Detached("T", S.Pk("id", "INT"))
+                        ),
                     ]
                 )
                 .NoContext()
@@ -125,8 +173,8 @@ internal static partial class SyncPlanExpectationRows
                 // SupportsDescriptions=false だけでは再構築の方言にならない（ALTER・FK 変更は可能なまま）
                 .Items(_ =>
                     [
-                        I.Item(SchemaDiffKind.AddTable),
-                        I.Item(SchemaDiffKind.AlterColumn),
+                        I.Item(SchemaDiffKind.AddTable, entity: S.Detached("T", S.Pk("id", "INT"))),
+                        I.Item(SchemaDiffKind.AlterColumn, column: S.Nullable("altered", "INT")),
                         I.Item(SchemaDiffKind.SetTableDescription),
                     ]
                 )

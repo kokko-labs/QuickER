@@ -64,11 +64,11 @@ internal static partial class SyncPlanExpectationRows
                 )
                 .Items(_ =>
                     [
-                        I.Item(SchemaDiffKind.AddForeignKey),
+                        I.ForeignKey(SchemaDiffKind.AddForeignKey),
                         I.Unique(SchemaDiffKind.AddUniqueConstraint, "T", null, ["code"]),
-                        I.Item(SchemaDiffKind.AlterColumn),
+                        I.Item(SchemaDiffKind.AlterColumn, column: S.Nullable("altered", "INT")),
                         I.Unique(SchemaDiffKind.DropUniqueConstraint, "T", "uq_old", ["memo"]),
-                        I.Item(SchemaDiffKind.DropForeignKey),
+                        I.ForeignKey(SchemaDiffKind.DropForeignKey),
                     ]
                 )
                 .NoContext()

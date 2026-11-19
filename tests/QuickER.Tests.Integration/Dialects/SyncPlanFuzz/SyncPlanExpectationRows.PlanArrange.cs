@@ -240,7 +240,7 @@ internal static partial class SyncPlanExpectationRows
                         x => AddedForeignKeyPairs(x, "FK_ref", "b>rb,a>ra")
                     );
                 }),
-            // 索引の喪失による外し直し（CollectLostIndexes）は、一意制約の削除を選んだときだけ働く
+            // 索引の喪失による外し直し（RebuildDeclarations.RequireForeignKeysOffLostIndexes）は、一意制約の削除を選んだときだけ働く
             Row(
                     "plan-arrange-unique-in-other-order-is-no-diff-and-keeps-fk",
                     "並べ替え: 一意制約の列の並びだけの違いは作り直しにならず、MySQL でも外部キーを外し直さない",

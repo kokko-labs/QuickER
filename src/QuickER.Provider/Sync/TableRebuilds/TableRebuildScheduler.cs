@@ -22,7 +22,7 @@ namespace QuickER.Provider.Sync.TableRebuilds;
 /// </list>
 /// <para>
 /// 外部キーの並べ替え・外し直し・列を動かす文は組まない（再構築の方言は表ごと作り直し、列順の変更も合成が列を並べ替える）。外し直しの
-/// 宣言は集めないので、結果の <see cref="SequentialSchedule.Required"/> は null。同期スクリプトの中の再構築と残りのセクションの順は、
+/// 宣言は集めないので、結果の <see cref="StepSchedule.Required"/> は null。同期スクリプトの中の再構築と残りのセクションの順は、
 /// 方言のスクリプトビルダーが決める。
 /// </para>
 /// <para>
@@ -37,7 +37,7 @@ internal static class TableRebuildScheduler
     /// <param name="context">計画の入力（合成が補助オブジェクトを読む）</param>
     /// <param name="capabilities">方言の宣言</param>
     /// <returns>組み立ての結果</returns>
-    public static SequentialSchedule Schedule(
+    public static StepSchedule Schedule(
         PostSyncSchema postSync,
         LiveSchema live,
         SyncPlanContext context,
@@ -53,12 +53,12 @@ internal static class TableRebuildScheduler
 
         if (remaining is null)
         {
-            return new SequentialSchedule(null, unrepresentable);
+            return new StepSchedule(null, unrepresentable);
         }
 
         var ordered = StepOrder.Arrange(remaining);
 
-        return new SequentialSchedule(
+        return new StepSchedule(
             [
                 .. ordered.Select(s => s.Step),
                 .. synthesis.Rebuilds.Select(rebuild => new RebuildTableStep(

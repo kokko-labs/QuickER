@@ -348,6 +348,12 @@ internal static partial class SyncPlanExpectationRows
                             ColumnName = null,
                             ParentEntity = w.Live["no_pk"],
                             ChildEntity = newChild,
+                            // 列の組の無いリレーション（解決できないまま、文では表せる）
+                            Relationship = new Relationship
+                            {
+                                SourceEntityId = w.Live["no_pk"].Id,
+                                TargetEntityId = newChild.Id,
+                            },
                             IsSelected = true,
                         },
                     ];

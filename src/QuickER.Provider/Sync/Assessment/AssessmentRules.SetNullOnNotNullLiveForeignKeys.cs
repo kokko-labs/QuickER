@@ -18,7 +18,7 @@ internal static partial class AssessmentRules
     /// <remarks>
     /// 名指しするのは、この同期で NOT NULL になる子の列があるときだけ（live の時点で既に NOT NULL の子の列を持つ外部キーは、
     /// 同期が変えるものではない）。列は同期後に NOT NULL の子の列をすべて並べる。作れない方言で外し直さないのは
-    /// <see cref="SyncPlanner.InjectImplicitForeignKeyRebuilds"/>。
+    /// 付け直せない制約の判定（<see cref="Scheduling.UnreaddableConstraints"/>）。
     /// </remarks>
     public static IEnumerable<SyncPlanWarning> WarnSetNullOnNotNullLiveForeignKeys(
         AssessmentFacts facts

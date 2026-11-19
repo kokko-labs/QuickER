@@ -27,7 +27,7 @@ internal static partial class SelectionRules
     /// 食い違う外部キーの追加は必ず失敗する。作り直しは展開前の 1 項目として外すので、削除だけが走って外部キーが
     /// 消えたまま残ることはない（DDL が暗黙コミットされる方言では、付け直しの失敗で消えたまま残っていた）。
     /// 作り直しを外した外部キーは live に残るので、列の変更で外部キーを外し直す方言では、暗黙の付け直しがこの外部キーを
-    /// 食い違う外部キーとして数え、ほかの外部キーも外し直さない（<see cref="SyncPlanner.InjectImplicitForeignKeyRebuilds"/>）。
+    /// 付け直せない外部キーとして数えて外さない（<see cref="Scheduling.UnreaddableConstraints"/>）。
     /// </para>
     /// </remarks>
     private static IReadOnlyList<Withdrawal> ExcludeForeignKeysWithPostSyncTypeMismatch(

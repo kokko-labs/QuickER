@@ -143,12 +143,19 @@ public class SqlServerSyncScriptBuilderTests
     [Fact(DisplayName = "DropForeignKey の動的 SQL はテーブル名の ' を二重化する")]
     public void DropForeignKey_TableNameWithQuote_IsEscapedInDynamicSql()
     {
+        var parent = new Entity { TableName = "Customer" };
+        var child = new Entity { TableName = "o'rders" };
         var item = new SchemaDiffItem
         {
             Kind = SchemaDiffKind.DropForeignKey,
             TableName = "o'rders",
-            ParentEntity = new Entity { TableName = "Customer" },
-            ChildEntity = new Entity { TableName = "o'rders" },
+            ParentEntity = parent,
+            ChildEntity = child,
+            Relationship = new Relationship
+            {
+                SourceEntityId = parent.Id,
+                TargetEntityId = child.Id,
+            },
             IsSelected = true,
         };
 
@@ -189,12 +196,19 @@ public class SqlServerSyncScriptBuilderTests
     [Fact(DisplayName = "DropForeignKey の逆引きは子・親とも OBJECT_ID でスキーマ込みに絞る")]
     public void DropForeignKey_Lookup_IsScopedByObjectId()
     {
+        var parent = new Entity { TableName = "sales.Orders" };
+        var child = new Entity { TableName = "sales.Lines" };
         var item = new SchemaDiffItem
         {
             Kind = SchemaDiffKind.DropForeignKey,
             TableName = "sales.Lines",
-            ParentEntity = new Entity { TableName = "sales.Orders" },
-            ChildEntity = new Entity { TableName = "sales.Lines" },
+            ParentEntity = parent,
+            ChildEntity = child,
+            Relationship = new Relationship
+            {
+                SourceEntityId = parent.Id,
+                TargetEntityId = child.Id,
+            },
             IsSelected = true,
         };
 
@@ -216,12 +230,19 @@ public class SqlServerSyncScriptBuilderTests
     [Fact(DisplayName = "実行時に読んだ制約名は QUOTENAME を通して動的 SQL へ埋める")]
     public void RuntimeConstraintName_IsAlwaysQuotenamed()
     {
+        var parent = new Entity { TableName = "Orders" };
+        var child = new Entity { TableName = "Lines" };
         var dropForeignKey = new SchemaDiffItem
         {
             Kind = SchemaDiffKind.DropForeignKey,
             TableName = "Lines",
-            ParentEntity = new Entity { TableName = "Orders" },
-            ChildEntity = new Entity { TableName = "Lines" },
+            ParentEntity = parent,
+            ChildEntity = child,
+            Relationship = new Relationship
+            {
+                SourceEntityId = parent.Id,
+                TargetEntityId = child.Id,
+            },
             IsSelected = true,
         };
 

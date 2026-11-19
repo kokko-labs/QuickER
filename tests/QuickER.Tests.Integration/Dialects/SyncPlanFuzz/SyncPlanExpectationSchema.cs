@@ -400,18 +400,47 @@ internal static class ExpectationScenarios
 /// <summary>手で組む項目の部品（計画の段の行が <c>.Items(...)</c> の中で使う）</summary>
 internal static class ExpectationItems
 {
-    /// <summary>種類・選択・表だけを持つ項目</summary>
+    /// <summary>種類・選択・表と、文に要るメンバー（表の定義・列・列名。要らない種類では省く）を持つ項目</summary>
     public static SchemaDiffItem Item(
         SchemaDiffKind kind,
         bool selected = true,
-        string table = "T"
+        string table = "T",
+        Entity? entity = null,
+        Column? column = null,
+        string? columnName = null
     ) =>
         new()
         {
             Kind = kind,
             TableName = table,
+            Entity = entity,
+            Column = column,
+            ColumnName = columnName,
             IsSelected = selected,
         };
+
+    /// <summary>
+    /// 外部キーの追加・削除の項目（表は子の表・親は列を持たない表 P・リレーションは名前も列の組も持たず、親子の表を項目の表に合わせる）
+    /// </summary>
+    public static SchemaDiffItem ForeignKey(SchemaDiffKind kind, string table = "T")
+    {
+        var parent = new Entity { TableName = "P" };
+        var child = new Entity { TableName = table };
+
+        return new()
+        {
+            Kind = kind,
+            TableName = table,
+            ParentEntity = parent,
+            ChildEntity = child,
+            Relationship = new Relationship
+            {
+                SourceEntityId = parent.Id,
+                TargetEntityId = child.Id,
+            },
+            IsSelected = true,
+        };
+    }
 
     /// <summary>主キーの変更の項目（<paramref name="target"/> が新しい主キーの構成の源）</summary>
     public static SchemaDiffItem AlterPk(string table, Entity target, bool selected = true) =>

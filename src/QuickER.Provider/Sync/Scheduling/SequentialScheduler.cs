@@ -23,7 +23,7 @@ namespace QuickER.Provider.Sync.Scheduling;
 /// <item>列順を同期する方言では、列を動かす文を後ろへ足す。</item>
 /// </list>
 /// <para>
-/// 結果には、選んだ項目の最終形の一意制約の削除を項目の順のまま写した文（<see cref="SequentialSchedule.SelectedUniqueConstraintDrops"/>）も
+/// 結果には、選んだ項目の最終形の一意制約の削除を項目の順のまま写した文（<see cref="StepSchedule.SelectedUniqueConstraintDrops"/>）も
 /// 添える。
 /// </para>
 /// <para>
@@ -38,7 +38,7 @@ internal static class SequentialScheduler
     /// <param name="live">DB の今の図（無ければ null）</param>
     /// <param name="capabilities">方言の宣言</param>
     /// <returns>組み立ての結果</returns>
-    public static SequentialSchedule Schedule(
+    public static StepSchedule Schedule(
         PostSyncSchema postSync,
         LiveSchema? live,
         SyncDialectCapabilities capabilities
@@ -48,7 +48,7 @@ internal static class SequentialScheduler
 
         if (selected is null)
         {
-            return new SequentialSchedule(null, unrepresentable);
+            return new StepSchedule(null, unrepresentable);
         }
 
         IEnumerable<ScheduledStep> steps = selected;
@@ -84,7 +84,7 @@ internal static class SequentialScheduler
             ordered = ForeignKeyAddOrder.Arrange(ordered, postSync, live, capabilities);
         }
 
-        return new SequentialSchedule(
+        return new StepSchedule(
             [.. ordered.Select(s => s.Step), .. ColumnMoves(postSync.Items, live, capabilities)],
             null,
             requiredOff

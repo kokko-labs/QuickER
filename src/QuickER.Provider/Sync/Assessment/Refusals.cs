@@ -16,7 +16,7 @@ namespace QuickER.Provider.Sync.Assessment;
 /// から読む。どちらの判定も文の並び・状態・事実を書き換えない。
 /// </para>
 /// <para>
-/// 制約 1 つと事実で決まる述語は今の計画器と共有する（<see cref="SyncPlanner.CanSupportForeignKey"/>・
+/// 制約 1 つと事実で決まる述語は、選択と評価の規則と共有する（<see cref="SyncPlanner.CanSupportForeignKey"/>・
 /// <see cref="SyncPlanner.HasPostSyncTypeMismatch"/>・<see cref="SyncPlanner.UsesSetNull"/>・<see cref="SyncPlanner.ColumnTypeOf"/>・
 /// <see cref="SyncPlanner.HoldsInLiveRows"/>）。
 /// </para>

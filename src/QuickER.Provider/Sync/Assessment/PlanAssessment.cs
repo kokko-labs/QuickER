@@ -16,7 +16,7 @@ internal sealed class PlanAssessment : AssessmentFacts
     /// <param name="facts">計画の事実</param>
     /// <param name="schedule">同じ事実から組み立てた結果</param>
     [SetsRequiredMembers]
-    public PlanAssessment(AssessmentFacts facts, SequentialSchedule schedule)
+    public PlanAssessment(AssessmentFacts facts, StepSchedule schedule)
     {
         Settled = facts.Settled;
         PostSync = facts.PostSync;
@@ -27,5 +27,5 @@ internal sealed class PlanAssessment : AssessmentFacts
     }
 
     /// <summary>組み立ての結果（文の並び）</summary>
-    public SequentialSchedule Schedule { get; }
+    public StepSchedule Schedule { get; }
 }

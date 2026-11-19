@@ -72,6 +72,11 @@ public sealed class OracleSchemaSyncIntegrationTests(OracleContainerFixture fixt
             TableName = "child",
             ParentEntity = parentE,
             ChildEntity = childE,
+            Relationship = new Relationship
+            {
+                SourceEntityId = parentE.Id,
+                TargetEntityId = childE.Id,
+            },
             ForeignKeyName = null, // 不明 → PL/SQL ブロックでカタログ逆引き
             IsSelected = true,
         };

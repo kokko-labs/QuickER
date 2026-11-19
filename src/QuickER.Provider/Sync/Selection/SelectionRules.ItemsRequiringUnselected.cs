@@ -132,7 +132,6 @@ internal static partial class SelectionRules
                         item.OldColumn.DataType,
                         column.DataType
                     ),
-                    PlanMark = PlanItemMark.Replacement(item),
                 };
             }
 

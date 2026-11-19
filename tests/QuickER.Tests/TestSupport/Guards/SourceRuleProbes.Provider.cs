@@ -58,7 +58,7 @@ internal static partial class SourceRuleProbes
             // 呼び出し・メソッドの中でデリゲートへ取るメソッドグループ・規則の表でないフィールドの初期化子のメソッドグループ・規則でない
             // メソッドからの呼び出し・ローカル関数とラムダの中の呼び出し・ほかのクラスからの SelectionRules. で修飾した呼び出しと、周の外の
             // 規則の表の読みを拾い、規則の表（BeforeRounds・EachRound）の初期化子のメソッドグループ・周（ExcludeUntilStable）の中の表の読み・
-            // ほかの規則の中からの呼び出し・積むだけの ExcludeSelected・周そのもの・警告だけの関数（Warn*）・nameof の中の名前・Excluded で
+            // ほかの規則の中からの呼び出し・周そのもの・警告だけの関数（Warn*）・nameof の中の名前・Excluded で
             // 始まるプロパティ・ほかのクラスの修飾しない Exclude* は拾わない
             new SourceRuleProbe(
                 "sync-exclusions-inside-stable-loop-forms",
@@ -118,13 +118,10 @@ internal static partial class SourceRuleProbes
                                     current = rule(current);
                                 }
 
-                                ExcludeSelected(current);
                                 return current;
                             }
 
                             private List<int> ExcludeQualified(List<int> items) => items;
-
-                            private static void ExcludeSelected(List<int> items) { }
 
                             private static void WarnOnly(List<int> items) { }
 
@@ -382,8 +379,8 @@ internal static partial class SourceRuleProbes
 
                         internal enum PlanStage
                         {
+                            Expanded,
                             Selected,
-                            Arranged,
                         }
 
                         internal sealed class PostSyncSchema
@@ -402,20 +399,20 @@ internal static partial class SourceRuleProbes
 
                         internal static class Planner
                         {
-                            // PostSyncSchema.From(PlanStage.Arranged, items)
+                            // PostSyncSchema.From(PlanStage.Expanded, items)
                             public static int Plain(List<int> items) =>
                                 PostSyncSchema.From(PlanStage.Selected, items).Count;
 
                             public static int Wrapped(List<int> items) =>
                                 PostSyncSchema
-                                    .From(PlanStage.Arranged, items)
+                                    .From(PlanStage.Expanded, items)
                                     .Count;
 
                             public static int Lambda(List<List<int>> all) =>
                                 all.Sum(items => PostSyncSchema.From(PlanStage.Selected, items).Count);
 
                             public static int Qualified(List<int> items) =>
-                                global::PostSyncSchema.From(PlanStage.Arranged, items).Count;
+                                global::PostSyncSchema.From(PlanStage.Expanded, items).Count;
 
                             public static int Variable(List<int> items, PlanStage stage) =>
                                 PostSyncSchema.From(stage, items).Count;
@@ -432,9 +429,9 @@ internal static partial class SourceRuleProbes
                         }
                         """,
                         "Plain: Selected",
-                        "Wrapped: Arranged",
+                        "Wrapped: Expanded",
                         "Lambda: Selected",
-                        "Qualified: Arranged",
+                        "Qualified: Expanded",
                         "Variable: ?",
                         "Direct: PostSyncPrimaryKeyOf",
                         "Property: Selected"
@@ -1217,78 +1214,6 @@ internal static partial class SourceRuleProbes
             {
                 InactiveBranch = true,
             },
-            // 入れ物を作る式（素の名前・名前空間で修飾した名前・初期化子つき）を拾い、型の宣言・引数の型・XmlDoc の cref・文字列・
-            // コメント・名前の一部だけが同じ型・型を書かない new() は拾わない
-            new SourceRuleProbe(
-                "sync-plan-probe-only-in-tests-forms",
-                "sync-plan-probe-only-in-tests",
-                [
-                    new ProbeFile(
-                        "Probe.cs",
-                        """
-                        namespace Scheduling
-                        {
-                            internal sealed class SyncPlanProbe
-                            {
-                                public int Count { get; set; }
-                            }
-
-                            internal sealed class SyncPlanProbes { }
-                        }
-
-                        internal static class Planner
-                        {
-                            /// <summary><see cref="Scheduling.SyncPlanProbe"/> を作る</summary>
-                            public static object A() => new Scheduling.SyncPlanProbe();
-
-                            public static object B() => new Scheduling.SyncPlanProbe { Count = 1 };
-
-                            // new SyncPlanProbe()
-                            public static object C() => new Scheduling.SyncPlanProbes();
-
-                            public static string D() => "new SyncPlanProbe()";
-
-                            public static Scheduling.SyncPlanProbe E(Scheduling.SyncPlanProbe? probe)
-                            {
-                                Scheduling.SyncPlanProbe made = new();
-                                return probe ?? made;
-                            }
-                        }
-                        """,
-                        "new SyncPlanProbe",
-                        "new SyncPlanProbe"
-                    ),
-                ]
-            ),
-            // 構文の規則は、条件コンパイルの外れる分岐の中の生成も拾う
-            new SourceRuleProbe(
-                "sync-plan-probe-only-in-tests-inactive-branch",
-                "sync-plan-probe-only-in-tests",
-                [
-                    new ProbeFile(
-                        "Probe.cs",
-                        """
-                        internal sealed class SyncPlanProbe { }
-
-                        internal static class Planner
-                        {
-                            public static object? Make()
-                            {
-                        #if QUICKER_PROBE_BRANCH
-                                return new SyncPlanProbe();
-                        #else
-                                return null;
-                        #endif
-                            }
-                        }
-                        """,
-                        "new SyncPlanProbe"
-                    ),
-                ]
-            ) with
-            {
-                InactiveBranch = true,
-            },
             // 差分の項目・警告を作る式と、差分の項目の複製を作る呼び出し（素の・?. の）を拾い、文の生成・with 式・型の宣言・
             // メソッドの宣言・XmlDoc・文字列・名前の一部だけが同じ型と呼び出しは拾わない
             new SourceRuleProbe(
@@ -1303,9 +1228,6 @@ internal static partial class SourceRuleProbes
                             public string Name { get; init; } = "";
 
                             public SchemaDiffItem WithForeignKeyColumnPairs(int pairs) => this;
-
-                            public SchemaDiffItem WithRearrangedForeignKeyColumnPairs(int pairs) => this;
-
                             public SchemaDiffItem WithForeignKeyColumnPairsKept() => this;
                         }
 
@@ -1325,7 +1247,7 @@ internal static partial class SourceRuleProbes
                             public static object C(SchemaDiffItem item) => item.WithForeignKeyColumnPairs(1);
 
                             public static object? D(SchemaDiffItem? item) =>
-                                item?.WithRearrangedForeignKeyColumnPairs(2);
+                                item?.WithForeignKeyColumnPairs(2);
 
                             // new SchemaDiffItem()
                             public static object E() => new Step("new SyncPlanWarning");
@@ -1340,7 +1262,7 @@ internal static partial class SourceRuleProbes
                         "new SchemaDiffItem",
                         "new SyncPlanWarning",
                         "WithForeignKeyColumnPairs",
-                        "WithRearrangedForeignKeyColumnPairs"
+                        "WithForeignKeyColumnPairs"
                     ),
                 ]
             ),
@@ -1492,9 +1414,6 @@ internal static partial class SourceRuleProbes
                             public string Name { get; init; } = "";
 
                             public SchemaDiffItem WithForeignKeyColumnPairs(int pairs) => this;
-
-                            public SchemaDiffItem WithRearrangedForeignKeyColumnPairs(int pairs) => this;
-
                             public SchemaDiffItem WithForeignKeyColumnPairsKept() => this;
                         }
 
@@ -1512,7 +1431,7 @@ internal static partial class SourceRuleProbes
                             public static object C(SchemaDiffItem item) => item.WithForeignKeyColumnPairs(1);
 
                             public static object? D(SchemaDiffItem? item) =>
-                                item?.WithRearrangedForeignKeyColumnPairs(2);
+                                item?.WithForeignKeyColumnPairs(2);
 
                             // new SchemaDiffItem()
                             public static object E(SchemaDiffItem item) => item.WithForeignKeyColumnPairsKept();
@@ -1524,7 +1443,7 @@ internal static partial class SourceRuleProbes
                         """,
                         "new SchemaDiffItem",
                         "WithForeignKeyColumnPairs",
-                        "WithRearrangedForeignKeyColumnPairs"
+                        "WithForeignKeyColumnPairs"
                     ),
                 ]
             ),
@@ -1557,11 +1476,11 @@ internal static partial class SourceRuleProbes
             {
                 InactiveBranch = true,
             },
-            // 新しい計画器の入口の呼び出し（修飾の有無とも）・メソッドグループ・フィールドの初期化子の中の呼び出しを拾い、入口の宣言・
-            // ほかのクラスの Plan・SequentialPlanner のほかのメンバー・nameof でない文字列・コメントは拾わない
+            // 計画器の入口の呼び出し（修飾の有無とも）・メソッドグループ・フィールドの初期化子の中の呼び出しを拾い、入口の宣言・
+            // ほかのクラスの Plan・StepPlanner のほかのメンバー・nameof でない文字列・コメントは拾わない
             new SourceRuleProbe(
-                "sync-sequential-planner-callers-forms",
-                "sync-sequential-planner-callers",
+                "sync-step-planner-callers-forms",
+                "sync-step-planner-callers",
                 [
                     new ProbeFile(
                         "Probe.cs",
@@ -1570,7 +1489,7 @@ internal static partial class SourceRuleProbes
 
                         namespace Probe.Sync
                         {
-                            internal static class SequentialPlanner
+                            internal static class StepPlanner
                             {
                                 public static int Plan(int items) => items;
 
@@ -1589,42 +1508,42 @@ internal static partial class SourceRuleProbes
 
                             internal sealed class SyncPlanner
                             {
-                                private static readonly int Eager = SequentialPlanner.Plan(0);
+                                private static readonly int Eager = StepPlanner.Plan(0);
 
                                 public int BuildPlan(int items)
                                 {
-                                    // SequentialPlanner.Plan(items)
-                                    var direct = SequentialPlanner.Plan(items);
-                                    var qualified = Probe.Sync.SequentialPlanner.Plan(items);
-                                    Func<int, int> held = SequentialPlanner.Plan;
-                                    var text = "SequentialPlanner.Plan(items)";
+                                    // StepPlanner.Plan(items)
+                                    var direct = StepPlanner.Plan(items);
+                                    var qualified = Probe.Sync.StepPlanner.Plan(items);
+                                    Func<int, int> held = StepPlanner.Plan;
+                                    var text = "StepPlanner.Plan(items)";
                                     return direct
                                         + qualified
                                         + held(items)
                                         + text.Length
                                         + OtherPlanner.Plan(items)
-                                        + SequentialPlanner.Other(items)
+                                        + StepPlanner.Other(items)
                                         + Eager;
                                 }
                             }
                         }
                         """,
-                        "(member outside a method): SequentialPlanner.Plan",
-                        "BuildPlan: SequentialPlanner.Plan",
-                        "BuildPlan: SequentialPlanner.Plan",
-                        "BuildPlan: SequentialPlanner.Plan"
+                        "(member outside a method): StepPlanner.Plan",
+                        "BuildPlan: StepPlanner.Plan",
+                        "BuildPlan: StepPlanner.Plan",
+                        "BuildPlan: StepPlanner.Plan"
                     ),
                 ]
             ),
             // 構文の規則は、条件コンパイルの外れる分岐の中の呼び出しも読む
             new SourceRuleProbe(
-                "sync-sequential-planner-callers-inactive-branch",
-                "sync-sequential-planner-callers",
+                "sync-step-planner-callers-inactive-branch",
+                "sync-step-planner-callers",
                 [
                     new ProbeFile(
                         "Probe.cs",
                         """
-                        internal static class SequentialPlanner
+                        internal static class StepPlanner
                         {
                             public static int Plan(int items) => items;
                         }
@@ -1634,14 +1553,14 @@ internal static partial class SourceRuleProbes
                             public int Run(int items)
                             {
                         #if QUICKER_PROBE_BRANCH
-                                return SequentialPlanner.Plan(items);
+                                return StepPlanner.Plan(items);
                         #else
                                 return items;
                         #endif
                             }
                         }
                         """,
-                        "Run: SequentialPlanner.Plan"
+                        "Run: StepPlanner.Plan"
                     ),
                 ]
             ) with

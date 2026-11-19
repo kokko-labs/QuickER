@@ -363,15 +363,15 @@ internal static partial class SourceRules
                 ),
             },
             // 計画器が自分で作った差分の項目に付ける印（SchemaDiffItem.PlanMark＝どこから来た項目か・外して付け直す対）は、計画器が
-            // 項目を作る所でだけ付け、計画・同期スクリプト・警告・画面は読まない。読むのは、計画を文の並びとして読み取るテスト
-            // （網の関係 N4）と、新しい組み立てが項目を文へ写す 1 か所（SelectedSteps＝製品の経路に無い。文の由来と対を決める）だけ。
-            // 計画・同期スクリプト・警告・画面が印に頼ると、印を持たない項目（利用者が選んだ項目・差分が作った項目）と振る舞いが割れ、
-            // 計画器を文の組み立てへ置き換えるときに印を消せなくなる。付ける所は「含むメソッド: init」、読む所は「含むメソッド: read」で
+            // 項目を作る所でだけ付け、計画・同期スクリプト・警告・画面は読まない。読むのは、組み立てが項目を文へ写す 1 か所
+            // （SelectedSteps。文の由来と対を決める）だけ。
+            // 計画・同期スクリプト・警告・画面が印に頼ると、印を持たない項目（利用者が選んだ項目・差分が作った項目・選んだ項目の一部だけを
+            // 外して残した代わりの項目）と振る舞いが割れる。付ける所は「含むメソッド: init」、読む所は「含むメソッド: read」で
             // 集め、理由つきの一覧と件数まで照合する（付ける所・読む所を足す・減らすと赤。項目を作って印を付け忘れた所は、網の関係 N4 の
             // 由来の形が名指しする）
             SourceRule.Forbid(
                 "sync-plan-mark-owners",
-                "計画器の項目の印（SchemaDiffItem.PlanMark）は、計画器が項目を作る所でだけ付け、読むのは新しい組み立てが項目を文へ写す所だけ",
+                "計画器の項目の印（SchemaDiffItem.PlanMark）は、計画器が項目を作る所でだけ付け、読むのは組み立てが項目を文へ写す所だけ",
                 SourceScope.Under("src/QuickER.Provider"),
                 GuardFinder.Nodes(PlanMarkUses.Describe),
                 new GuardKnown(
@@ -379,12 +379,6 @@ internal static partial class SourceRules
                     "ExpandAlters: init",
                     4,
                     "外部キー・一意制約の作り直しを展開した削除と追加（元の作り直しの項目と、削除と追加の対）"
-                ),
-                new GuardKnown(
-                    "src/QuickER.Provider/Sync/Selection/SelectionRules.ItemsRequiringUnselected.cs",
-                    "ExcludeItemsRequiringUnselected: init",
-                    1,
-                    "型の変更も含む列の変更から NULL 許容化だけを外して残す代わりの項目（置き換えた選んだ項目）"
                 ),
                 new GuardKnown(
                     "src/QuickER.Provider/SyncPlanner.cs",
@@ -406,48 +400,30 @@ internal static partial class SourceRules
                 ),
                 new GuardKnown(
                     "src/QuickER.Provider/SyncPlanner.cs",
-                    "InjectImplicitForeignKeyRebuilds: init",
-                    1,
-                    "暗黙に外して付け直す外部キーの追加（削除と同じ対）"
-                ),
-                new GuardKnown(
-                    "src/QuickER.Provider/SyncPlanner.cs",
                     "BuildImplicitForeignKeyDrop: init",
                     1,
                     "暗黙の外部キーの削除（端が消える外部キーと、外して付け直す外部キー。印は呼び出し側が渡す）"
                 ),
                 new GuardKnown(
-                    "src/QuickER.Provider/SyncPlanner.cs",
-                    "InjectImplicitPrimaryKeyRebuilds: init",
-                    1,
-                    "暗黙に外して付け直す主キー（1 項目が解除と付与の対になる）"
-                ),
-                new GuardKnown(
-                    "src/QuickER.Provider/SyncPlanner.cs",
-                    "InjectImplicitUniqueConstraintRebuilds: init",
-                    2,
-                    "暗黙に外して付け直す一意制約の削除と追加（付け直すときだけ同じ対）"
-                ),
-                new GuardKnown(
                     "src/QuickER.Provider/Sync/Scheduling/SelectedSteps.cs",
                     "From: read",
                     1,
-                    "新しい組み立てが項目を文へ写すときの対（作り直しを展開した削除と追加が共有する対をそのまま文へ持たせる）。"
+                    "組み立てが項目を文へ写すときの対（作り直しを展開した削除と追加が共有する対をそのまま文へ持たせる）。"
                         + "選んだ項目の最終形（展開・同期後の状態の差）を文として直接作る区切りで消す"
                 ),
                 new GuardKnown(
                     "src/QuickER.Provider/Sync/Scheduling/SelectedSteps.cs",
                     "OriginOf: read",
                     1,
-                    "新しい組み立てが項目を文へ写すときの由来（暗黙の理由・作り直しの展開の元の項目）。"
+                    "組み立てが項目を文へ写すときの由来（暗黙の理由・作り直しの展開の元の項目）。"
                         + "選んだ項目の最終形（展開・同期後の状態の差）を文として直接作る区切りで消す"
                 )
             ) with
             {
-                // 印を付ける所を見つけられること（いまは計画器が項目を作る 13 か所）
+                // 印を付ける所を見つけられること（いまは計画器が項目を作る 8 か所）
                 Floor = new(
                     GuardFinder.Nodes(PlanMarkUses.DescribeInit),
-                    13,
+                    8,
                     "計画器が項目に印を付ける所"
                 ),
             },
@@ -471,10 +447,10 @@ internal static partial class SourceRules
             ) with
             {
                 MinimumFiles = 3,
-                // live の状態の読みを見つけられること（いまは計画器に 29・同期後の状態に 2。計画器が LiveSchema を使わなくなったら空振りになる）
+                // live の状態の読みを見つけられること（いまは範囲の全体で 24。計画器が LiveSchema を使わなくなったら空振りになる）
                 Floor = new(
                     GuardFinder.Nodes(LiveSchemaBypasses.DescribeCandidate),
-                    26,
+                    24,
                     "計画器の LiveSchema の読み"
                 ),
             },
@@ -532,18 +508,6 @@ internal static partial class SourceRules
                     "主キーが置き換える一意制約を、それまでの並びが既に外す一意制約と比べて足す（自分が足す前の並びを見る）"
                 ),
                 new GuardKnown(
-                    "src/QuickER.Provider/SyncPlanner.cs",
-                    "MoveCertainFailureFirst: WithRebuilds",
-                    1,
-                    "前寄せは計画が一度外す外部キー（暗黙の外し直しを含む）を残す外部キーから除くので、付け直しを足した後の並びから求める。一意制約の作り直しを取り下げた再帰でも、取り下げた後の並びから作り直す"
-                ),
-                new GuardKnown(
-                    "src/QuickER.Provider/SyncPlanner.cs",
-                    "WarnConstraintsAroundRefusableChanges: Arranged",
-                    1,
-                    "並べ終えた計画の文の列そのものを見て、断られうる文の前後で外して付け直す制約を名指しする"
-                ),
-                new GuardKnown(
                     "src/QuickER.Provider/Sync/TableRebuilds/TableRebuildDefinition.cs",
                     "ApplyUniqueConstraintDrops: ExplicitlyDroppedUniqueConstraints",
                     1,
@@ -551,10 +515,10 @@ internal static partial class SourceRules
                 )
             ) with
             {
-                // 同期後の事実を求める呼び出しを見つけられること（いまは計画器に 8・除外の周の状態に 2。PostSyncSchema を使わなくなったら空振りになる）
+                // 同期後の事実を求める呼び出しを見つけられること（いまは計画器に 6・除外の周の状態に 2。PostSyncSchema を使わなくなったら空振りになる）
                 Floor = new(
                     GuardFinder.Nodes(PostSyncSchemaCalls.DescribeCandidate),
-                    10,
+                    8,
                     "計画器の PostSyncSchema の呼び出し"
                 ),
             },
@@ -781,38 +745,13 @@ internal static partial class SourceRules
                     ]
                 ),
             },
-            // 計画器の途中の結果を受け取る入れ物（SyncPlanProbe）は、今の計画器と新しい組み立て（Sync/Scheduling）を網の関係 N5 で
-            // 比べるための、移行の間だけの継ぎ目。作るのはテストだけで、製品のコードは作らない（製品の経路は入れ物を渡さずに計画を作る。
-            // 製品が渡すと、製品の経路で新しい組み立てが走る）。型を書かない new() は拾わない
-            SourceRule.Forbid(
-                "sync-plan-probe-only-in-tests",
-                "計画器の途中の結果を受け取る入れ物（SyncPlanProbe）を作るのはテストだけ（製品のコードは作らない）",
-                SourceScope.Under("src"),
-                GuardFinder.Nodes(SyncSchedulingBoundaries.DescribeProbeCreation)
-            ) with
-            {
-                Witness = new(
-                    SourceScope.Files(
-                        "tests",
-                        "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanCapabilityNet.cs"
-                    ),
-                    [
-                        new(
-                            "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanCapabilityNet.cs",
-                            "new SyncPlanProbe",
-                            2,
-                            "網の関係 N5 が入れ物を作る 2 か所（今の計画器との比較と、取り下げのあるケースの新しい計画器の除外の不動点。範囲の外の実在の生成を拾えること）"
-                        ),
-                    ]
-                ),
-            },
-            // 新しい組み立て（Sync/Scheduling）とテーブル再構築の合成（Sync/TableRebuilds）は文の並びと再構築の定義
+            // 組み立て（Sync/Scheduling）とテーブル再構築の合成（Sync/TableRebuilds）は文の並びと再構築の定義
             // （TableRebuildPlan・表の定義の写し）だけを組み、差分の項目も警告も作らない。項目を作ると、文で表した計画の途中に
-            // 今の計画器の形（項目と印）が戻り、警告を作ると、警告を決める段（組み立ての後の評価）と二重になる。差分の項目の複製
-            // （WithForeignKeyColumnPairs・WithRearrangedForeignKeyColumnPairs）も数える。型を書かない new() は拾わない
+            // 差分の項目と印の形が戻り、警告を作ると、警告を決める段（組み立ての後の評価）と二重になる。差分の項目の複製
+            // （WithForeignKeyColumnPairs）も数える。型を書かない new() は拾わない
             SourceRule.Forbid(
                 "sync-scheduling-builds-steps-only",
-                "同期の計画の新しい組み立て（Sync/Scheduling）とテーブル再構築の合成（Sync/TableRebuilds）は文と再構築の定義だけを組み、差分の項目も警告も作らない",
+                "同期の計画の組み立て（Sync/Scheduling）とテーブル再構築の合成（Sync/TableRebuilds）は文と再構築の定義だけを組み、差分の項目も警告も作らない",
                 SourceScope
                     .Under("src/QuickER.Provider")
                     .Within("Sync/Scheduling/")
@@ -820,7 +759,7 @@ internal static partial class SourceRules
                 GuardFinder.Nodes(SyncSchedulingBoundaries.DescribeItemOrWarningCreation)
             ) with
             {
-                MinimumFiles = 22,
+                MinimumFiles = 21,
                 Witness = new(
                     SourceScope.Files(
                         "src",
@@ -832,7 +771,7 @@ internal static partial class SourceRules
                             "src/QuickER.Provider/Sync/Steps/StepLowering.cs",
                             "new SchemaDiffItem",
                             11,
-                            "文を今の計画の項目へ写す所（範囲の外の実在の項目の生成を拾えること）"
+                            "文を計画の項目へ写す所（範囲の外の実在の項目の生成を拾えること）"
                         ),
                         new(
                             "src/QuickER.Provider/Sync/Steps/StepLowering.cs",
@@ -851,50 +790,31 @@ internal static partial class SourceRules
             },
             // 同期の計画の評価の規則（AssessmentRules の Warn*＝選んだ項目・同期後の事実・DB の今の図から警告を作る）を呼ぶ所を数える。
             // 規則は警告の並びを返すだけで、積む順と重ね方は呼ぶ側が決める。呼ぶ所が増えると、同じ警告を 2 回積む・積む順が割れる。
-            // 許すのは規則の表（AssessmentRules.All）の初期化子だけ。今の計画器（SyncPlanner.BuildPlan）が警告の段から 1 つずつ直接呼ぶ
-            // 9 か所と、テーブル再構築の枝（SyncPlanner.BuildRebuildPlan）が直接呼ぶ 1 か所は、理由つきの一覧に載せる（終わりの条件つき）。
-            // XmlDoc の cref と nameof の中の名前は数えない
+            // 許すのは規則の表（AssessmentRules.All）の初期化子だけ。例外は無い。XmlDoc の cref と nameof の中の名前は数えない
             SourceRule.Forbid(
                 "sync-assessment-rule-callers",
-                "同期の計画の評価の規則（AssessmentRules の Warn*）は規則の表から流す（今の計画器が警告の段から直接呼ぶ所は一覧のとおり）",
+                "同期の計画の評価の規則（AssessmentRules の Warn*）は規則の表から流す",
                 SourceScope.Under("src/QuickER.Provider"),
-                GuardFinder.Nodes(SyncAssessmentRuleCalls.Describe),
-                AssessmentRuleCalledByCurrentPlanner("WarnSetNullForeignKeysOnNotNullColumns"),
-                AssessmentRuleCalledByCurrentPlanner("WarnSetNullOnNotNullLiveForeignKeys"),
-                AssessmentRuleCalledByCurrentPlanner(
-                    "WarnUniqueConstraintDropsBreakingForeignKeys"
-                ),
-                AssessmentRuleCalledByCurrentPlanner("WarnAddedForeignKeysNotOnCandidateKey"),
-                AssessmentRuleCalledByCurrentPlanner("WarnSetDefaultOnNotNullColumns"),
-                AssessmentRuleCalledByCurrentPlanner("WarnSchemaQualifiedTableNames"),
-                AssessmentRuleCalledByCurrentPlanner("WarnDefaultsOnColumnTypeKindChange"),
-                AssessmentRuleCalledByCurrentPlanner("WarnDescriptionCharactersReplaced"),
-                AssessmentRuleCalledByCurrentPlanner("WarnLiveForeignKeysWithPostSyncTypeMismatch"),
-                new GuardKnown(
-                    "src/QuickER.Provider/SyncPlanner.cs",
-                    "BuildRebuildPlan: WarnForeignKeysLosingCandidateKeyByTableRebuild",
-                    1,
-                    "今の計画器がテーブル再構築の枝の、落ちる属性の警告の後の位置から直接呼ぶ（規則の表は組み立ての結果を読む規則も持ち、今の計画器は表を流せない）。今の計画器を消す区切りで一覧から消す"
-                )
+                GuardFinder.Nodes(SyncAssessmentRuleCalls.Describe)
             ) with
             {
-                // 規則への参照を見つけられること（許す場所の参照も数える。いまは今の計画器の 10 か所と、規則の表の要素 14）
+                // 規則への参照を見つけられること（許す場所の参照も数える。いまは規則の表の要素 14）
                 Floor = new(
                     GuardFinder.Nodes(SyncAssessmentRuleCalls.DescribeCandidate),
-                    24,
+                    14,
                     "評価の規則への参照"
                 ),
             },
-            // 計画の評価（Sync/Assessment。テーブル再構築の警告の規則 2 つを含む）と新しい計画器の入口（Sync/SequentialPlanner.cs。
+            // 計画の評価（Sync/Assessment。テーブル再構築の警告の規則 2 つを含む）と計画器の入口（Sync/StepPlanner.cs。
             // 逐次 DDL の方言と再構築の方言の両方）と位置の状態（Sync/State/ConstraintState.cs）は、
-            // 差分の項目を作らず、複製もしない（警告は作る）。項目を作ると、文で表した計画の途中に今の計画器の形（項目と印）が戻る。型を書かない new() は拾わない
+            // 差分の項目を作らず、複製もしない（警告は作る）。項目を作ると、文で表した計画の途中に差分の項目と印の形が戻る。型を書かない new() は拾わない
             SourceRule.Forbid(
                 "sync-assessment-builds-warnings-only",
-                "同期の計画の評価（Sync/Assessment）と新しい計画器の入口と位置の状態は、差分の項目を作らない（警告だけを作る）",
+                "同期の計画の評価（Sync/Assessment）と計画器の入口と位置の状態は、差分の項目を作らない（警告だけを作る）",
                 SourceScope
                     .Under("src/QuickER.Provider")
                     .Within("Sync/Assessment/")
-                    .Within("Sync/SequentialPlanner.cs")
+                    .Within("Sync/StepPlanner.cs")
                     .Within("Sync/State/ConstraintState.cs"),
                 GuardFinder.Nodes(SyncSchedulingBoundaries.DescribeItemCreation)
             ) with
@@ -907,7 +827,7 @@ internal static partial class SourceRules
                             "src/QuickER.Provider/Sync/Steps/StepLowering.cs",
                             "new SchemaDiffItem",
                             11,
-                            "文を今の計画の項目へ写す所（範囲の外の実在の項目の生成を拾えること）"
+                            "文を計画の項目へ写す所（範囲の外の実在の項目の生成を拾えること）"
                         ),
                         new(
                             "src/QuickER.Provider/Sync/Steps/StepLowering.cs",
@@ -918,36 +838,21 @@ internal static partial class SourceRules
                     ]
                 ),
             },
-            // 新しい計画器の入口（SequentialPlanner.Plan）を呼ぶのは、今の計画器が入れ物（SyncPlanProbe）を受け取ったときの 1 か所だけ。
-            // 入れ物を作るのはテストだけ（規則 sync-plan-probe-only-in-tests）なので、製品の経路では新しい計画器は走らない。ほかの所から
-            // 呼ぶと、今の計画器と比べ終える前に、新しい計画器の計画が製品の経路へ出る
+            // 計画器の入口（StepPlanner.Plan）を呼ぶのは、製品の入口（public の BuildPlan）の 1 か所だけ。ほかの所から呼ぶと、
+            // 製品の計画と別の経路で計画を作る所が増える
             SourceRule.Forbid(
-                "sync-sequential-planner-callers",
-                "同期の計画の新しい計画器の入口（SequentialPlanner.Plan）を呼ぶのは、今の計画器が入れ物を受け取ったときの 1 か所だけ",
+                "sync-step-planner-callers",
+                "同期の計画の計画器の入口（StepPlanner.Plan）を呼ぶのは、製品の入口の 1 か所だけ",
                 SourceScope.Under("src"),
-                GuardFinder.Nodes(SyncSchedulingBoundaries.DescribeSequentialPlannerCall),
+                GuardFinder.Nodes(SyncSchedulingBoundaries.DescribeStepPlannerCall),
                 new GuardKnown(
                     "src/QuickER.Provider/SyncPlanner.cs",
-                    "BuildPlan: SequentialPlanner.Plan",
+                    "BuildPlan: StepPlanner.Plan",
                     1,
-                    "今の計画器と新しい計画器を網の関係 N5 で比べるための、入れ物を受け取ったときだけの呼び出し。今の計画器を新しい計画器と入れ替える区切りで一覧から消す"
+                    "製品の入口（public の BuildPlan）が文の並びの計画を作って写す"
                 )
             ),
         ];
-
-    /// <summary>
-    /// 規則 <c>sync-assessment-rule-callers</c> の一覧の 1 行：今の計画器（<c>SyncPlanner.BuildPlan</c>）が評価の規則を直接呼ぶ 1 か所
-    /// </summary>
-    /// <remarks>
-    /// 終わりの条件：今の計画器を新しい計画器と入れ替えて消す区切りで、この一覧を消す（規則を流すのは規則の表だけになる）。
-    /// </remarks>
-    private static GuardKnown AssessmentRuleCalledByCurrentPlanner(string rule) =>
-        new(
-            "src/QuickER.Provider/SyncPlanner.cs",
-            $"BuildPlan: {rule}",
-            1,
-            "今の計画器が警告の段のその位置から直接呼ぶ（規則の表は組み立ての結果を読む規則も持ち、今の計画器は表を流せない）。今の計画器を消す区切りで一覧から消す"
-        );
 
     /// <summary>生成コードの双方向同期のテンプレートの部品</summary>
     private const string SyncTemplateFile =

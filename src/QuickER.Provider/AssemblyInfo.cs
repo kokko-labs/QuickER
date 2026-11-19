@@ -5,5 +5,5 @@ using System.Runtime.CompilerServices;
 
 // 同期計画の internal の面を、同期計画の総当たりと能力の組の網から参照できるように公開する：前寄せの印
 // （SyncPlanSection.IsMovedFirst）・計画器の項目の印（SchemaDiffItem.PlanMark）・計画の文の型と写し（Sync/Steps）・
-// 計画器の途中の結果を受け取る入れ物と新しい組み立ての結果（Sync/Scheduling の SyncPlanProbe・SequentialSchedule）
+// 計画器の文の並びの計画と組み立ての結果（Sync の StepPlanner・Sync/Scheduling の StepSchedule）
 [assembly: InternalsVisibleTo("QuickER.Tests.Integration")]

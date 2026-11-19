@@ -52,7 +52,7 @@ public sealed class SyncPlanSection
 
     /// <summary>
     /// 必ず断られる文として計画の先頭へ移したセクションか（DDL が暗黙コミットされる方言の前寄せ＝
-    /// <see cref="SyncPlanner"/> の <c>MoveCertainFailureFirst</c>）。
+    /// <see cref="Sync.Assessment.MoveFirst"/>）。
     /// </summary>
     /// <remarks>
     /// レンダラーは見ない（文の並びはセクションの順のまま）。前寄せした文がその位置で断られることを、同期計画の総当たりの

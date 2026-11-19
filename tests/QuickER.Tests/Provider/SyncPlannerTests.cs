@@ -44,38 +44,6 @@ public class SyncPlannerTests
             IsNullable = true,
         };
 
-    // ---------------- 主キー変更（AlterPrimaryKey）と依存 FK の自動 DROP → 再 ADD ----------------
-
-    /// <summary>customer(id) ← orders(customer_id) の live スキーマと、その FK リレーションを組み立てる</summary>
-    private static (
-        Entity Customer,
-        Entity Orders,
-        Relationship Rel,
-        SyncPlanContext Context
-    ) LiveFkScenario()
-    {
-        var customer = new Entity { TableName = "customer", Columns = { PkId() } };
-        var orders = new Entity
-        {
-            TableName = "orders",
-            Columns = { PkId(), Col("customer_id", "INT") },
-        };
-        var rel = new Relationship
-        {
-            SourceEntityId = customer.Id,
-            TargetEntityId = orders.Id,
-            ColumnPairs = [new(customer.Columns[0].Id, orders.Columns[1].Id)],
-            ConstraintName = "FK_orders_customer",
-        };
-
-        return (
-            customer,
-            orders,
-            rel,
-            new SyncPlanContext { LiveEntities = [customer, orders], LiveRelationships = [rel] }
-        );
-    }
-
     /// <summary>AlterPrimaryKey 差分項目を生成する（target＝新しい主キー構成の源）</summary>
     private static SchemaDiffItem AlterPk(string table, Entity target, bool selected = true) =>
         new()
@@ -85,78 +53,6 @@ public class SyncPlannerTests
             Entity = target,
             IsSelected = selected,
         };
-
-    /// <summary>
-    /// 計画が足した項目が、DB 側の図のオブジェクト（表・リレーション）をそのまま運ぶことを検証する
-    /// （書式の行では同一性を書けないので残す。項目の並び・選択・説明は同期計画の期待の行
-    /// <c>plan-alter-pk-injects-implicit-fk-drop-and-readd</c> が見る）。
-    /// </summary>
-    /// <param name="shape">形（implicit-fk-rebuild＝主キーの変更で参照している外部キーを自動で外して付け直す）</param>
-    [Theory(DisplayName = "計画が足した項目は DB 側の図のオブジェクトを運ぶ")]
-    [InlineData("implicit-fk-rebuild")]
-    public void PlanItems_CarryLiveObjects(string shape)
-    {
-        switch (shape)
-        {
-            case "implicit-fk-rebuild":
-            {
-                var (customer, orders, rel, context) = LiveFkScenario();
-                // 新しい主キーの列 code は live に在る（無ければ主キーの変更は「選んでいない列の追加」に依存して外れる）
-                customer.Columns.Add(
-                    new Column
-                    {
-                        Name = "code",
-                        DataType = "INT",
-                        IsNullable = false,
-                    }
-                );
-                // 新しい主キー構成（code を主キーにする）
-                var targetCustomer = new Entity
-                {
-                    TableName = "customer",
-                    Columns =
-                    {
-                        Col("id", "INT"),
-                        new Column
-                        {
-                            Name = "code",
-                            DataType = "INT",
-                            IsPrimaryKey = true,
-                            IsNullable = false,
-                        },
-                    },
-                };
-
-                var plan = new SyncPlanner().BuildPlan(
-                    [AlterPk("customer", targetCustomer)],
-                    TestDialectCapabilities.Neutral,
-                    context
-                );
-
-                var drop = plan
-                    .Sections.Single(s => s.Kind == SchemaDiffKind.DropForeignKey)
-                    .Items.Should()
-                    .ContainSingle()
-                    .Which;
-                drop.ChildEntity.Should().BeSameAs(orders);
-                drop.ParentEntity.Should().BeSameAs(customer);
-                drop.Relationship.Should().BeSameAs(rel);
-
-                var add = plan
-                    .Sections.Single(s => s.Kind == SchemaDiffKind.AddForeignKey)
-                    .Items.Should()
-                    .ContainSingle()
-                    .Which;
-                add.ChildEntity.Should().BeSameAs(orders);
-                add.ParentEntity.Should().BeSameAs(customer);
-                add.Relationship.Should().BeSameAs(rel);
-                break;
-            }
-
-            default:
-                throw new ArgumentOutOfRangeException(nameof(shape), shape, null);
-        }
-    }
 
     // ---------------- 主キー変更の 3 フェーズ出力（レンダラー経由で順序を固定する） ----------------
 

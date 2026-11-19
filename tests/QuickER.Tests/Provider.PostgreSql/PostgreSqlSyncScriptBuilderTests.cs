@@ -99,6 +99,11 @@ public class PostgreSqlSyncScriptBuilderTests
                 TableName = "order",
                 ParentEntity = customer,
                 ChildEntity = order,
+                Relationship = new Relationship
+                {
+                    SourceEntityId = customer.Id,
+                    TargetEntityId = order.Id,
+                },
                 IsSelected = true,
             }
         );
@@ -119,13 +124,20 @@ public class PostgreSqlSyncScriptBuilderTests
     public void RuntimeLookup_DottedTableName_UsesRegclassOfQualifiedName()
     {
         var primaryKey = Build(AlterPk("sales.orders", PkTarget("sales.orders", "code")));
+        var parent = new Entity { TableName = "sales.o'rders" };
+        var child = new Entity { TableName = "sales.lines" };
         var foreignKey = Build(
             new SchemaDiffItem
             {
                 Kind = SchemaDiffKind.DropForeignKey,
                 TableName = "sales.lines",
-                ParentEntity = new Entity { TableName = "sales.o'rders" },
-                ChildEntity = new Entity { TableName = "sales.lines" },
+                ParentEntity = parent,
+                ChildEntity = child,
+                Relationship = new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                },
                 IsSelected = true,
             }
         );
@@ -199,12 +211,19 @@ public class PostgreSqlSyncScriptBuilderTests
     [Fact(DisplayName = "DropForeignKey の DO ブロックはテーブル名の ' を二重化する")]
     public void DropForeignKey_TableNameWithQuote_IsEscapedInDynamicSql()
     {
+        var parent = new Entity { TableName = "customer" };
+        var child = new Entity { TableName = "o'rders" };
         var item = new SchemaDiffItem
         {
             Kind = SchemaDiffKind.DropForeignKey,
             TableName = "o'rders",
-            ParentEntity = new Entity { TableName = "customer" },
-            ChildEntity = new Entity { TableName = "o'rders" },
+            ParentEntity = parent,
+            ChildEntity = child,
+            Relationship = new Relationship
+            {
+                SourceEntityId = parent.Id,
+                TargetEntityId = child.Id,
+            },
             IsSelected = true,
         };
 
@@ -230,12 +249,19 @@ public class PostgreSqlSyncScriptBuilderTests
     [Fact(DisplayName = "実行時に読んだ制約名は quote_ident を通して動的 SQL へ埋める")]
     public void RuntimeConstraintName_IsAlwaysQuoteIdented()
     {
+        var parent = new Entity { TableName = "orders" };
+        var child = new Entity { TableName = "lines" };
         var dropForeignKey = new SchemaDiffItem
         {
             Kind = SchemaDiffKind.DropForeignKey,
             TableName = "lines",
-            ParentEntity = new Entity { TableName = "orders" },
-            ChildEntity = new Entity { TableName = "lines" },
+            ParentEntity = parent,
+            ChildEntity = child,
+            Relationship = new Relationship
+            {
+                SourceEntityId = parent.Id,
+                TargetEntityId = child.Id,
+            },
             IsSelected = true,
         };
 
@@ -257,13 +283,20 @@ public class PostgreSqlSyncScriptBuilderTests
     [Fact(DisplayName = "DropForeignKey の DO ブロックは $$ 入りテーブル名でも終端されない")]
     public void DropForeignKey_TableNameWithDollarTag_DoesNotTerminateBlock()
     {
+        var parent = new Entity { TableName = "customer" };
+        var child = new Entity { TableName = "o$$rders" };
         var sql = Build(
             new SchemaDiffItem
             {
                 Kind = SchemaDiffKind.DropForeignKey,
                 TableName = "o$$rders",
-                ParentEntity = new Entity { TableName = "customer" },
-                ChildEntity = new Entity { TableName = "o$$rders" },
+                ParentEntity = parent,
+                ChildEntity = child,
+                Relationship = new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                },
                 IsSelected = true,
             }
         );

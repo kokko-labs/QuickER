@@ -11,7 +11,7 @@ using QuickER.Provider.Sync.TableRebuilds;
 namespace QuickER.Provider.Sync;
 
 /// <summary>
-/// 計画を文の並びとして作る。逐次 DDL の方言は選択 → 組み立て → 評価 → 前寄せと取り下げの輪 → 前後の名指し、テーブル再構築の方言は
+/// 同期の計画を文の並びとして作る（呼ぶのは製品の入口 <see cref="SyncPlanner.BuildPlan"/> の 1 か所だけ）。逐次 DDL の方言は選択 → 組み立て → 評価 → 前寄せと取り下げの輪 → 前後の名指し、テーブル再構築の方言は
 /// 選択 → 組み立て → 評価
 /// </summary>
 /// <remarks>
@@ -48,7 +48,7 @@ namespace QuickER.Provider.Sync;
 /// 取り下げた項目（取り下げた順）。
 /// </para>
 /// </remarks>
-internal static class SequentialPlanner
+internal static class StepPlanner
 {
     /// <summary>選んだ差分の項目から、文の並びの計画を作る</summary>
     /// <param name="items">全差分項目（未選択の項目は読まない）</param>
@@ -58,7 +58,7 @@ internal static class SequentialPlanner
     /// <exception cref="InvalidOperationException">
     /// 周の数が上限を超えた（逐次 DDL の方言）か、テーブル再構築の方言で計画の入力が無い
     /// </exception>
-    public static SequentialPlan Plan(
+    public static StepPlannerResult Plan(
         IEnumerable<SchemaDiffItem> items,
         SyncDialectCapabilities capabilities,
         SyncPlanContext? context
@@ -84,15 +84,13 @@ internal static class SequentialPlanner
             var warnings = new List<SyncPlanWarning>();
             var excluded = new List<SchemaDiffItem>();
 
-            // 同期後の状態の差の項目を足す関数が積む警告は受け取るだけで使わない（同じ警告は、評価の規則が組み立てた文から作る）
             var prepared = SyncPlanner.PrepareSelection(
                 all.Where(i => !withdrawn.Contains(i)),
                 capabilities,
                 context,
                 live,
                 warnings,
-                excluded,
-                injectedWarnings: []
+                excluded
             );
 
             var schedule = SequentialScheduler.Schedule(
@@ -104,7 +102,7 @@ internal static class SequentialPlanner
 
             if (steps is null)
             {
-                return new SequentialPlan(
+                return new StepPlannerResult(
                     null,
                     schedule.Unrepresentable,
                     prepared.Facts,
@@ -151,7 +149,7 @@ internal static class SequentialPlanner
 
             excluded.AddRange(carried.Select(c => c.Item));
 
-            return new SequentialPlan(
+            return new StepPlannerResult(
                 new StepPlan(steps, movedFirst, warnings, excluded),
                 null,
                 prepared.Facts,
@@ -160,7 +158,7 @@ internal static class SequentialPlanner
         }
 
         throw new InvalidOperationException(
-            "The sequential planner did not settle within the round limit (the selected items + 1)."
+            "The step planner did not settle within the round limit (the selected items + 1)."
         );
     }
 
@@ -169,9 +167,9 @@ internal static class SequentialPlanner
     /// </summary>
     /// <remarks>
     /// 前寄せ・取り下げ・前後の名指しは無い（再構築の方言は表ごと作り直し、文を流す途中で外れたまま残る制約を作らない）ので、周は 1 回だけ。
-    /// 計画の入力か DB の今の図が無ければ、選択の後に <see cref="InvalidOperationException"/>（今の計画器と同じ文面）。
+    /// 計画の入力か DB の今の図が無ければ、選択の後に <see cref="InvalidOperationException"/>。
     /// </remarks>
-    private static SequentialPlan PlanTableRebuilds(
+    private static StepPlannerResult PlanTableRebuilds(
         List<SchemaDiffItem> all,
         SyncDialectCapabilities capabilities,
         SyncPlanContext? context,
@@ -181,15 +179,13 @@ internal static class SequentialPlanner
         var warnings = new List<SyncPlanWarning>();
         var excluded = new List<SchemaDiffItem>();
 
-        // 同期後の状態の差の項目を足す関数が積む警告は受け取るだけで使わない（同じ警告は、評価の規則が選んだ項目の最終形から作る）
         var prepared = SyncPlanner.PrepareSelection(
             all,
             capabilities,
             context,
             live,
             warnings,
-            excluded,
-            injectedWarnings: []
+            excluded
         );
 
         if (context is null || live is null)
@@ -210,12 +206,12 @@ internal static class SequentialPlanner
 
         if (steps is null)
         {
-            return new SequentialPlan(null, schedule.Unrepresentable, prepared.Facts, []);
+            return new StepPlannerResult(null, schedule.Unrepresentable, prepared.Facts, []);
         }
 
         AssessmentRules.Assess(new PlanAssessment(prepared.Facts, schedule), warnings);
 
-        return new SequentialPlan(
+        return new StepPlannerResult(
             new StepPlan(steps, 0, warnings, excluded),
             null,
             prepared.Facts,
@@ -224,7 +220,7 @@ internal static class SequentialPlanner
     }
 }
 
-/// <summary>新しい計画器の計画の結果（逐次 DDL の方言とテーブル再構築の方言）</summary>
+/// <summary>計画器（<see cref="StepPlanner"/>）の計画の結果（逐次 DDL の方言とテーブル再構築の方言）</summary>
 /// <param name="Plan">文の並びの計画（文で表せない項目があれば <c>null</c>）</param>
 /// <param name="Unrepresentable">文で表せない理由（表せれば <c>null</c>）</param>
 /// <param name="Facts">
@@ -235,7 +231,7 @@ internal static class SequentialPlanner
 /// 前寄せの組から取り下げた一意制約の作り直しの項目（取り下げた順。無ければ空。テーブル再構築の方言はいつも空）。計画の外した項目の末尾にも
 /// 同じ順で載る
 /// </param>
-internal sealed record SequentialPlan(
+internal sealed record StepPlannerResult(
     StepPlan? Plan,
     string? Unrepresentable,
     AssessmentFacts Facts,

@@ -268,20 +268,6 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
         return copy;
     }
 
-    /// <summary>計画器が列ペアを並べ替えた複製を返す（<see cref="WithForeignKeyColumnPairs"/> の複製に計画器の印を付ける）</summary>
-    /// <param name="pairs">並べ替えた列ペア</param>
-    /// <param name="markWhenUnmarked">この項目が印を持たないときに複製へ付ける印（印を持つ項目の複製は、その印のまま）</param>
-    /// <returns>列ペアだけが違い、計画器の印を持つ新しい項目</returns>
-    internal SchemaDiffItem WithRearrangedForeignKeyColumnPairs(
-        IReadOnlyList<ForeignKeyColumnNamePair> pairs,
-        PlanItemMark markWhenUnmarked
-    )
-    {
-        var copy = WithForeignKeyColumnPairs(pairs);
-        copy._planMark ??= markWhenUnmarked;
-        return copy;
-    }
-
     /// <inheritdoc/>
     public event PropertyChangedEventHandler? PropertyChanged;
 
