@@ -23,6 +23,10 @@ namespace QuickER.Provider.Sync.Scheduling;
 /// <item>列順を同期する方言では、列を動かす文を後ろへ足す。</item>
 /// </list>
 /// <para>
+/// 結果には、選んだ項目の最終形の一意制約の削除を項目の順のまま写した文（<see cref="SequentialSchedule.SelectedUniqueConstraintDrops"/>）も
+/// 添える。
+/// </para>
+/// <para>
 /// 結果は文の並びだけで、警告・外した項目・必ず断られる文の前寄せは持たない。差分の項目も警告も作らない。同期後の事実は受けた
 /// ものを読み、作り直さない。
 /// </para>
@@ -84,7 +88,10 @@ internal static class SequentialScheduler
             [.. ordered.Select(s => s.Step), .. ColumnMoves(postSync.Items, live, capabilities)],
             null,
             requiredOff
-        );
+        )
+        {
+            SelectedUniqueConstraintDrops = SelectedSteps.UniqueConstraintDrops(postSync.Items),
+        };
     }
 
     /// <summary>列を動かす文（列順を同期する方言で、選んだ列順の変更から）</summary>

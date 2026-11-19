@@ -19,6 +19,10 @@ namespace QuickER.Provider.Sync.State;
 /// 制約の識別は計画の照合と同じ型（<see cref="UniqueConstraintId"/>・<see cref="ForeignKeyId"/>）で持つ。外部キーの識別の名前は実効名
 /// （DB の外部キーは <see cref="LiveSchema.ForeignKeyNames"/>、付ける文は <see cref="ForeignKeyStepNames.Added"/>）。
 /// </para>
+/// <para>
+/// 状態は逐次 DDL の方言の文の並びのためのもので、表の作り直しの文（<see cref="RebuildTableStep"/>）は当てない（同じ状態を返す）。
+/// テーブル再構築の方言の計画は歩かない（前寄せも前後の名指しも無い）。作り直した表が同期後の図と合うことは、実 SQLite の総当たりが確かめる。
+/// </para>
 /// </remarks>
 internal sealed class ConstraintState
 {

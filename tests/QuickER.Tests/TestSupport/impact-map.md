@@ -237,6 +237,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Provider/Sync/SequentialPlanner.cs` | `rule:sync-assessment-builds-warnings-only` |
 | `src/QuickER.Provider/Sync/State` | `rule:sync-name-comparison-tokens` |
 | `src/QuickER.Provider/Sync/State/ConstraintState.cs` | `rule:sync-assessment-builds-warnings-only` |
+| `src/QuickER.Provider/Sync/TableRebuilds` | `rule:sync-name-comparison-tokens`・`rule:sync-scheduling-builds-steps-only` |
 | `src/QuickER.Provider/SyncDialectCapabilities.cs` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`rule:sync-capabilities-initializers` |
 | `src/QuickER.Provider/SyncPlan.cs` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`table:SyncPlanExpectations` |
 | `src/QuickER.Provider/SyncPlanner.cs` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/ShapeRows`・`rule:sync-live-schema-single-source`・`rule:sync-name-comparison-tokens`・`rule:sync-selected-foreign-key-names`・`rule:sync-type-deciding-column-copies`・`table:SyncPlanExpectations` |
@@ -760,7 +761,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 
 ### `rule:sync-name-comparison-tokens`
 
-- 範囲：`src/QuickER.Provider/SchemaDiffService.cs`・`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/NameMatching.cs`・`src/QuickER.Provider/UniqueConstraintNaming.cs`・`src/QuickER.Provider/Sync/State`・`src/QuickER.Provider/Sync/Selection`
+- 範囲：`src/QuickER.Provider/SchemaDiffService.cs`・`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/NameMatching.cs`・`src/QuickER.Provider/UniqueConstraintNaming.cs`・`src/QuickER.Provider/Sync/State`・`src/QuickER.Provider/Sync/Selection`・`src/QuickER.Provider/Sync/TableRebuilds`
 
 ### `rule:sync-type-deciding-column-copies`
 
@@ -812,7 +813,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 
 ### `rule:sync-scheduling-builds-steps-only`
 
-- 範囲：`src/QuickER.Provider/Sync/Scheduling`
+- 範囲：`src/QuickER.Provider/Sync/Scheduling`・`src/QuickER.Provider/Sync/TableRebuilds`
 
 ### `rule:sync-assessment-rule-callers`
 

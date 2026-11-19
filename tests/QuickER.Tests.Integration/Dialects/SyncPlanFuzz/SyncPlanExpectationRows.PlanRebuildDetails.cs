@@ -87,6 +87,42 @@ internal static partial class SyncPlanExpectationRows
                         .Rebuilds.Absent("* source #1 *", "* uq *")
                         .Items.Contains("* > #1 AddUniqueConstraint *")
                 ),
+            // 作り直す理由になる項目が 1 つも解決できない表は作り直さない（列の追加だけが解決できても、逐次の ADD COLUMN のまま残す）。
+            // 項目は手で組む：差分が作る入力では、前提の欠ける項目（DB に無い列の変更など）を選択の規則が先に外す
+            Row(
+                    "plan-rebuild-no-resolvable-trigger-does-not-rebuild",
+                    "再構築: 作り直す理由になる項目が 1 つも解決できない表は作り直さない",
+                    DialectNames.Sqlite
+                )
+                .Live(s => s.Tbl("t", ("id", "INT", true), ("x", "INT", false)))
+                // DB に無い列の変更（解決できない）と、列の追加（解決できるが、作り直す理由にならない）
+                .Items(_ =>
+                    [
+                        new SchemaDiffItem
+                        {
+                            Kind = SchemaDiffKind.AddColumn,
+                            TableName = "t",
+                            ColumnName = "c",
+                            Column = S.Nullable("c", "TEXT"),
+                            IsSelected = true,
+                        },
+                        new SchemaDiffItem
+                        {
+                            Kind = SchemaDiffKind.AlterColumn,
+                            TableName = "t",
+                            ColumnName = "ghost",
+                            Column = S.Nullable("ghost", "TEXT"),
+                            IsSelected = true,
+                        },
+                    ]
+                )
+                .Expect(e =>
+                    e.Rebuilds.Empty()
+                        .Sections.Exact(
+                            "AddColumn: #0 AddColumn t.c",
+                            "AlterColumn: #1 AlterColumn t.ghost"
+                        )
+                ),
             // 作り直してから消すのは無駄で、意味の無い喪失警告も出た。その表への作り直しの項目は表ごと消えるので捨てる
             Row(
                     "plan-rebuild-dropped-table-is-not-rebuilt",

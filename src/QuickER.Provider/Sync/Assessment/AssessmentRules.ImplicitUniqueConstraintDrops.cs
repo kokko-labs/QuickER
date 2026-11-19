@@ -9,11 +9,12 @@ internal static partial class AssessmentRules
     /// 選んだ列の削除で構成列が消えるので暗黙に外す一意制約を、
     /// <see cref="SyncPlanWarningKind.UniqueConstraintDroppedWithColumn"/> で名指しする
     /// </summary>
-    /// <param name="assessment">計画の事実と、組み立ての結果（文の並び）</param>
-    /// <returns>名指しの警告（文の並びの順。Detail は「制約名 (構成列, …)」）</returns>
+    /// <param name="assessment">計画の事実と、組み立ての結果（選んだ項目の最終形の一意制約を外す文）</param>
+    /// <returns>名指しの警告（選んだ項目の最終形の項目の順。Detail は「制約名 (構成列, …)」）</returns>
     /// <remarks>
-    /// 組み立てた文のうち、理由が <see cref="ImplicitStepReason.VanishingUniqueConstraint"/> の一意制約を外す文 1 つにつき 1 件。
-    /// 警告は文の値から作るので、外す文の無い警告も、警告の無い外す文も出ない。
+    /// 選んだ項目の最終形から写した一意制約を外す文（<see cref="Scheduling.SequentialSchedule.SelectedUniqueConstraintDrops"/>。
+    /// テーブル再構築の方言で再構築へ畳む削除も含む）のうち、理由が <see cref="ImplicitStepReason.VanishingUniqueConstraint"/> の文
+    /// 1 つにつき 1 件。警告は文の値から作るので、外す文の無い警告も、警告の無い外す文も出ない。
     /// </remarks>
     public static IEnumerable<SyncPlanWarning> WarnUniqueConstraintsDroppedWithColumns(
         PlanAssessment assessment
@@ -28,11 +29,11 @@ internal static partial class AssessmentRules
     /// 新しい主キーと同じ列集合なので暗黙に外す一意制約（主キーと同じ列集合の一意制約を持てない方言）を、
     /// <see cref="SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey"/> で名指しする
     /// </summary>
-    /// <param name="assessment">計画の事実と、組み立ての結果（文の並び）</param>
-    /// <returns>名指しの警告（文の並びの順。Detail は「制約名 (構成列, …)」）</returns>
+    /// <param name="assessment">計画の事実と、組み立ての結果（選んだ項目の最終形の一意制約を外す文）</param>
+    /// <returns>名指しの警告（選んだ項目の最終形の項目の順。Detail は「制約名 (構成列, …)」）</returns>
     /// <remarks>
-    /// 組み立てた文のうち、理由が <see cref="ImplicitStepReason.UniqueConstraintReplacedByPrimaryKey"/> の一意制約を外す文 1 つに
-    /// つき 1 件。
+    /// 選んだ項目の最終形から写した一意制約を外す文（<see cref="Scheduling.SequentialSchedule.SelectedUniqueConstraintDrops"/>）のうち、
+    /// 理由が <see cref="ImplicitStepReason.UniqueConstraintReplacedByPrimaryKey"/> の文 1 つにつき 1 件。
     /// </remarks>
     public static IEnumerable<SyncPlanWarning> WarnUniqueConstraintsReplacedByPrimaryKey(
         PlanAssessment assessment
@@ -53,12 +54,9 @@ internal static partial class AssessmentRules
         var limit = assessment.Capabilities.IdentifierLengthLimit;
         var warnings = new List<SyncPlanWarning>();
 
-        foreach (var step in assessment.Schedule.Steps ?? [])
+        foreach (var step in assessment.Schedule.SelectedUniqueConstraintDrops)
         {
-            if (
-                step is DropUniqueConstraintStep { Origin: ImplicitOrigin origin } drop
-                && origin.Reason == reason
-            )
+            if (step is { Origin: ImplicitOrigin origin } drop && origin.Reason == reason)
             {
                 warnings.Add(
                     new SyncPlanWarning(

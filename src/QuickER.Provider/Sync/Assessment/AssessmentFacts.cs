@@ -1,6 +1,7 @@
 using QuickER.Dialects;
 using QuickER.Provider.Sync.Selection;
 using QuickER.Provider.Sync.State;
+using QuickER.Provider.Sync.TableRebuilds;
 
 namespace QuickER.Provider.Sync.Assessment;
 
@@ -26,4 +27,9 @@ internal class AssessmentFacts
 
     /// <summary>live の図と図の外の情報を持つ計画の入力（無ければ <c>null</c>）</summary>
     public required SyncPlanContext? Context { get; init; }
+
+    /// <summary>
+    /// テーブル再構築の方言か（<see cref="TableRebuildDialects.Requires"/>。方言の宣言から求める）
+    /// </summary>
+    public bool IsTableRebuildDialect => TableRebuildDialects.Requires(Capabilities);
 }

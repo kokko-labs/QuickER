@@ -79,7 +79,15 @@
       "**/Refusals.cs",
       "**/MoveFirst.cs",
       "**/RefusableChangeNaming.cs",
-      "**/UniqueRebuildWithdrawal.cs"
+      "**/UniqueRebuildWithdrawal.cs",
+      "**/TableRebuildSynthesis.cs",
+      "**/TableRebuildDefinition.cs",
+      "**/TableRebuildForeignKeys.cs",
+      "**/TableRebuildRowidAlias.cs",
+      "**/TableRebuildDialects.cs",
+      "**/TableRebuildScheduler.cs",
+      "**/AssessmentRules.TableRebuildsDroppingColumnAttributes.cs",
+      "**/AssessmentRules.ForeignKeysLosingCandidateKeyByTableRebuild.cs"
     ]
   }
 }

@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using QuickER.Model;
 using QuickER.Provider.Sync.State;
+using QuickER.Provider.Sync.TableRebuilds;
 
 namespace QuickER.Provider.Sync.Selection;
 
@@ -146,7 +147,7 @@ internal static partial class SelectionRules
                 protectedTables.ContainsKey(table)
                 && !droppedTables.Contains(table)
                 && (
-                    SyncPlanner.IsRebuildTriggerKind(item.Kind)
+                    TableRebuildDialects.IsTriggerKind(item.Kind)
                     || item.Kind
                         is SchemaDiffKind.AlterForeignKey
                             or SchemaDiffKind.AlterUniqueConstraint

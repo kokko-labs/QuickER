@@ -22,18 +22,30 @@ internal sealed record ScheduledStep(SyncStep Step)
     public Entity? ParentDefinition { get; init; }
 }
 
-/// <summary>逐次 DDL の方言の組み立ての結果</summary>
+/// <summary>組み立ての結果（逐次 DDL の方言の組み立てと、テーブル再構築の方言の組み立ての両方）</summary>
 /// <param name="Steps">文の並び（文で表せない項目があれば null）</param>
 /// <param name="Unrepresentable">文で表せない理由（表せれば null）</param>
 /// <param name="Required">
 /// 外し直しの宣言が「選んだ文を流す間、外れていなければならない」と答えた DB の今の制約（同じ計画が明示に外す制約と、
-/// 付け直せないので外さない制約も含む。DB の今の図が無いか、文で表せなければ null）
+/// 付け直せないので外さない制約も含む。DB の今の図が無いか、文で表せないか、テーブル再構築の方言なら null）
 /// </param>
 internal sealed record SequentialSchedule(
     IReadOnlyList<SyncStep>? Steps,
     string? Unrepresentable,
     RequiredConstraints? Required = null
-);
+)
+{
+    /// <summary>
+    /// 選んだ項目の最終形（<see cref="PlanStage.Selected"/>）のうち一意制約の削除の項目を、項目の順のまま写した文（畳む前・並べる前。
+    /// 文で表せなければ空）
+    /// </summary>
+    /// <remarks>
+    /// テーブル再構築の方言では、列と一緒に消える一意制約の削除は再構築へ畳まれて <see cref="Steps"/> に残らないので、その名指しの規則は
+    /// <see cref="Steps"/> でなくこちらを読む（どちらの方言も同じ読み方）。
+    /// </remarks>
+    public IReadOnlyList<DropUniqueConstraintStep> SelectedUniqueConstraintDrops { get; init; } =
+    [];
+}
 
 /// <summary>外し直しを決める段の入力</summary>
 /// <param name="Steps">選んだ項目の最終形から写した文</param>

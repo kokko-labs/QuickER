@@ -6,14 +6,21 @@ using QuickER.Provider.Sync.Assessment;
 using QuickER.Provider.Sync.Scheduling;
 using QuickER.Provider.Sync.State;
 using QuickER.Provider.Sync.Steps;
+using QuickER.Provider.Sync.TableRebuilds;
 
 namespace QuickER.Provider.Sync;
 
 /// <summary>
-/// 逐次 DDL の方言の計画を、文の並びとして作る（選択 → 組み立て → 評価 → 前寄せと取り下げの輪 → 前後の名指し）
+/// 計画を文の並びとして作る。逐次 DDL の方言は選択 → 組み立て → 評価 → 前寄せと取り下げの輪 → 前後の名指し、テーブル再構築の方言は
+/// 選択 → 組み立て → 評価
 /// </summary>
 /// <remarks>
-/// <para>段（周ごとに繰り返す）：</para>
+/// <para>
+/// テーブル再構築の方言（<see cref="TableRebuildDialects.Requires"/>）は、選択（<see cref="SyncPlanner.PrepareSelection"/>）→ 組み立て
+/// （<see cref="TableRebuildScheduler"/>）→ 評価（<see cref="AssessmentRules.Assess"/>）を 1 回だけ流す。前寄せ・取り下げ・前後の名指しは無い。
+/// 計画の入力か DB の今の図が無ければ、選択の後に <see cref="InvalidOperationException"/>。
+/// </para>
+/// <para>逐次 DDL の方言の段（周ごとに繰り返す）：</para>
 /// <list type="number">
 /// <item>
 /// 選択：取り下げた項目を除いた選んだ項目を外し終え、選んだ項目の最終形とその同期後の事実を作る
@@ -45,11 +52,12 @@ internal static class SequentialPlanner
 {
     /// <summary>選んだ差分の項目から、文の並びの計画を作る</summary>
     /// <param name="items">全差分項目（未選択の項目は読まない）</param>
-    /// <param name="capabilities">対象方言の同期ケーパビリティ（逐次 DDL の方言）</param>
-    /// <param name="context">計画の入力（無ければ <c>null</c>）</param>
+    /// <param name="capabilities">対象方言の同期ケーパビリティ（逐次 DDL の方言とテーブル再構築の方言）</param>
+    /// <param name="context">計画の入力（無ければ <c>null</c>。テーブル再構築の方言では要る）</param>
     /// <returns>計画か、文で表せない理由</returns>
-    /// <exception cref="NotSupportedException">テーブル再構築の方言を渡した</exception>
-    /// <exception cref="InvalidOperationException">周の数が上限を超えた</exception>
+    /// <exception cref="InvalidOperationException">
+    /// 周の数が上限を超えた（逐次 DDL の方言）か、テーブル再構築の方言で計画の入力が無い
+    /// </exception>
     public static SequentialPlan Plan(
         IEnumerable<SchemaDiffItem> items,
         SyncDialectCapabilities capabilities,
@@ -58,6 +66,12 @@ internal static class SequentialPlanner
     {
         var all = items.ToList();
         var live = LiveSchema.From(context);
+
+        if (TableRebuildDialects.Requires(capabilities))
+        {
+            return PlanTableRebuilds(all, capabilities, context, live);
+        }
+
         var carried = new List<WithdrawnRebuild>();
         var rounds = all.Count(i => i.IsSelected) + 1;
 
@@ -80,13 +94,6 @@ internal static class SequentialPlanner
                 excluded,
                 injectedWarnings: []
             );
-
-            if (prepared.IsRebuildDialect)
-            {
-                throw new NotSupportedException(
-                    "The sequential planner does not plan table-rebuild dialects."
-                );
-            }
 
             var schedule = SequentialScheduler.Schedule(
                 prepared.Facts.PostSync,
@@ -156,9 +163,68 @@ internal static class SequentialPlanner
             "The sequential planner did not settle within the round limit (the selected items + 1)."
         );
     }
+
+    /// <summary>
+    /// テーブル再構築の方言の計画を、文の並びとして作る（選択 → 組み立て → 評価）
+    /// </summary>
+    /// <remarks>
+    /// 前寄せ・取り下げ・前後の名指しは無い（再構築の方言は表ごと作り直し、文を流す途中で外れたまま残る制約を作らない）ので、周は 1 回だけ。
+    /// 計画の入力か DB の今の図が無ければ、選択の後に <see cref="InvalidOperationException"/>（今の計画器と同じ文面）。
+    /// </remarks>
+    private static SequentialPlan PlanTableRebuilds(
+        List<SchemaDiffItem> all,
+        SyncDialectCapabilities capabilities,
+        SyncPlanContext? context,
+        LiveSchema? live
+    )
+    {
+        var warnings = new List<SyncPlanWarning>();
+        var excluded = new List<SchemaDiffItem>();
+
+        // 同期後の状態の差の項目を足す関数が積む警告は受け取るだけで使わない（同じ警告は、評価の規則が選んだ項目の最終形から作る）
+        var prepared = SyncPlanner.PrepareSelection(
+            all,
+            capabilities,
+            context,
+            live,
+            warnings,
+            excluded,
+            injectedWarnings: []
+        );
+
+        if (context is null || live is null)
+        {
+            // 再構築の合成には DB の今の図が要る（図の定義を直接使うと選んでいない変更が紛れ込む）
+            throw new InvalidOperationException(
+                "Rebuild dialects require a SyncPlanContext (live schema) to synthesize table rebuilds."
+            );
+        }
+
+        var schedule = TableRebuildScheduler.Schedule(
+            prepared.Facts.PostSync,
+            live,
+            context,
+            capabilities
+        );
+        var steps = schedule.Steps;
+
+        if (steps is null)
+        {
+            return new SequentialPlan(null, schedule.Unrepresentable, prepared.Facts, []);
+        }
+
+        AssessmentRules.Assess(new PlanAssessment(prepared.Facts, schedule), warnings);
+
+        return new SequentialPlan(
+            new StepPlan(steps, 0, warnings, excluded),
+            null,
+            prepared.Facts,
+            []
+        );
+    }
 }
 
-/// <summary>逐次 DDL の方言の計画の結果</summary>
+/// <summary>新しい計画器の計画の結果（逐次 DDL の方言とテーブル再構築の方言）</summary>
 /// <param name="Plan">文の並びの計画（文で表せない項目があれば <c>null</c>）</param>
 /// <param name="Unrepresentable">文で表せない理由（表せれば <c>null</c>）</param>
 /// <param name="Facts">
@@ -166,7 +232,8 @@ internal static class SequentialPlanner
 /// （文の並びを歩いた終わりの状態と、同期後に在る制約の突き合わせ）が読む
 /// </param>
 /// <param name="Withdrawn">
-/// 前寄せの組から取り下げた一意制約の作り直しの項目（取り下げた順。無ければ空）。計画の外した項目の末尾にも同じ順で載る
+/// 前寄せの組から取り下げた一意制約の作り直しの項目（取り下げた順。無ければ空。テーブル再構築の方言はいつも空）。計画の外した項目の末尾にも
+/// 同じ順で載る
 /// </param>
 internal sealed record SequentialPlan(
     StepPlan? Plan,
