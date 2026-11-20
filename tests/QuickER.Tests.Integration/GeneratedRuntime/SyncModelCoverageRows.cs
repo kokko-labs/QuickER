@@ -77,6 +77,7 @@ internal static class SyncModelCoverageRows
     /// <param name="coverage">操作を数える先</param>
     /// <param name="outcomes">同期の結果を数える先</param>
     /// <param name="ct">取り消し</param>
+    /// <param name="options">世界の組み方（既定は直結・SQLite のサーバー役。端末は行が決める）</param>
     public static async Task<(
         IReadOnlyList<ModelFailure> Failures,
         IReadOnlyList<string> Log
@@ -84,14 +85,15 @@ internal static class SyncModelCoverageRows
         ScenarioRow<SyncModelCoverageInput> row,
         CoverageCounter coverage,
         CoverageCounter outcomes,
-        CancellationToken ct
+        CancellationToken ct,
+        SyncModelWorldOptions? options = null
     )
     {
         var input = row.Input;
         await using var run = await SyncModelRun.StartAsync(
             [.. input.Setup, .. SyncModelScenarios.Tail],
             ct,
-            SyncModelWorldOptions.Direct with
+            (options ?? SyncModelWorldOptions.Direct) with
             {
                 Devices = input.Devices,
             },

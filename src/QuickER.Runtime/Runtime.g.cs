@@ -7053,6 +7053,113 @@ public interface ILocalRowStore
         CancellationToken cancellationToken
     )
         where TEntity : EntityBaseCore, new();
+
+    /// <summary>Reads the primary keys of every row of the table, as values of the key type of the entity (in no particular order).</summary>
+    /// <param name="connection">An open connection from <see cref="CreateDedicatedConnection"/>.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <typeparam name="TEntity">The entity type of the table.</typeparam>
+    Task<IReadOnlyList<object>> ListKeysAsync<TEntity>(
+        DbConnection connection,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new();
+
+    /// <summary>
+    /// Converts a primary key value as the database returned it (for example, the value <see cref="DbDataReader.GetValue"/>
+    /// read from the key column or from a table that records keys) into a value of the key type of the entity, the way the
+    /// row reader converts the key column. Whether a row with that key exists does not matter.
+    /// </summary>
+    /// <param name="rawKey">The key value as read from the database (a value already of the key type is returned as is).</param>
+    /// <typeparam name="TEntity">The entity type of the table.</typeparam>
+    /// <exception cref="ArgumentNullException">The value is null.</exception>
+    /// <exception cref="ArgumentException">The value is <see cref="DBNull"/>.</exception>
+    /// <exception cref="InvalidOperationException">The value cannot be converted to the key type.</exception>
+    object ConvertKey<TEntity>(object rawKey)
+        where TEntity : EntityBaseCore, new();
+
+    /// <summary>
+    /// Reads the length in bytes of an excluded unbounded binary column of the row with the given primary key (null when
+    /// there is no such row or the column is NULL).
+    /// </summary>
+    /// <remarks>
+    /// Starts no transaction. Run it inside the caller's transaction, so that the row cannot be replaced between this call
+    /// and the read of the content.
+    /// </remarks>
+    /// <param name="connection">An open connection from <see cref="CreateDedicatedConnection"/>.</param>
+    /// <param name="key">The primary key value (the key type of the entity).</param>
+    /// <param name="propertyName">The entity property of an excluded unbounded binary column.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <typeparam name="TEntity">The entity type of the table.</typeparam>
+    /// <exception cref="ArgumentException">The property is not an excluded unbounded binary column of the entity.</exception>
+    Task<long?> ReadBinaryLengthAsync<TEntity>(
+        DbConnection connection,
+        object key,
+        string propertyName,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new();
+
+    /// <summary>
+    /// Copies an excluded unbounded binary column of the row with the given primary key into the destination stream a chunk at
+    /// a time (the content is never held in memory as a whole), and returns false, writing nothing, when there is no such row
+    /// or the column is NULL.
+    /// </summary>
+    /// <remarks>
+    /// Starts no transaction. Run it inside the caller's transaction, so that the row cannot be replaced while it is read.
+    /// The destination stream is neither closed nor disposed.
+    /// </remarks>
+    /// <param name="connection">An open connection from <see cref="CreateDedicatedConnection"/>.</param>
+    /// <param name="key">The primary key value (the key type of the entity).</param>
+    /// <param name="propertyName">The entity property of an excluded unbounded binary column.</param>
+    /// <param name="destination">The stream the content is written to.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <typeparam name="TEntity">The entity type of the table.</typeparam>
+    /// <exception cref="ArgumentException">The property is not an excluded unbounded binary column of the entity.</exception>
+    Task<bool> ReadBinaryAsync<TEntity>(
+        DbConnection connection,
+        object key,
+        string propertyName,
+        Stream destination,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new();
+
+    /// <summary>
+    /// Writes the content of the source stream into an excluded unbounded binary column of the row with the given primary
+    /// key a chunk at a time (the content is never held in memory as a whole), or sets the column to NULL when the source is
+    /// null, and returns whether a row matched.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Starts, commits and rolls back no transaction: run it inside the caller's transaction. A write that fails leaves the
+    /// column as it was, and the caller's transaction goes on.
+    /// </para>
+    /// <para>
+    /// The rules are those of the repositories' stream accessors: a seekable source writes its remaining bytes and a given
+    /// length must equal them, a source that is not seekable requires the length, and a source that yields fewer or more
+    /// bytes than the length fails the write with an <see cref="ArgumentException"/>. A null source on a <c>NOT NULL</c>
+    /// column fails with the database's constraint error. The source stream is neither closed nor disposed.
+    /// </para>
+    /// </remarks>
+    /// <param name="connection">An open connection from <see cref="CreateDedicatedConnection"/>.</param>
+    /// <param name="key">The primary key value (the key type of the entity).</param>
+    /// <param name="propertyName">The entity property of an excluded unbounded binary column.</param>
+    /// <param name="source">The stream to write from, or null to set the column to NULL.</param>
+    /// <param name="length">The number of bytes to write (required when the source is not seekable).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <typeparam name="TEntity">The entity type of the table.</typeparam>
+    /// <exception cref="ArgumentException">
+    /// The property is not an excluded unbounded binary column of the entity, or the length and the source disagree.
+    /// </exception>
+    Task<bool> WriteBinaryAsync<TEntity>(
+        DbConnection connection,
+        object key,
+        string propertyName,
+        Stream? source,
+        long? length,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new();
 }
 
 /// <summary>The kind of DB operation performed for a single entity during a graph save (Save).</summary>

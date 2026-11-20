@@ -4372,6 +4372,810 @@ internal static partial class CodegenCases
                 )
         );
 
+    /// <summary>同期のモデルの図の model_items に 2 行（と親のフォルダ）を入れる文（payload は NOT NULL の除外 blob）</summary>
+    private const string QueryText_ModelItemsSeedSql =
+        "INSERT INTO model_folders (folder_id, name) VALUES (1, 'root'); "
+        + "INSERT INTO model_items (item_id, folder_id, code, title, payload) VALUES (1, 1, 'c1', 't1', x'00'), (2, 1, 'c2', 't2', x'00'); ";
+
+    /// <summary>
+    /// 同期の図の注文の表（int のキー・NULL 許容の除外 blob）で、ローカルの口のキーの読み方と除外 blob の読み書きを確かめる 2 つの検査
+    /// </summary>
+    /// <param name="sqliteDiagram">DDL を作る SQLite 方言の図</param>
+    /// <param name="ordersTable">注文の表の名前</param>
+    /// <param name="orderKey">注文のキーの列の名前</param>
+    /// <param name="attachment">注文の除外 blob の列の名前</param>
+    private static ExecCheck[] QueryText_SyncOrdersKeysAndBinaryOnSqlite(
+        Func<ErDiagram> sqliteDiagram,
+        string ordersTable,
+        string orderKey,
+        string attachment
+    )
+    {
+        var seed =
+            $"INSERT INTO {QueryText_QuoteSqlite(ordersTable)} ({QueryText_QuoteSqlite(orderKey)}, customer_name, {QueryText_QuoteSqlite(attachment)}, row_ver, summary) "
+            + "VALUES (1, 'one', x'0101', x'01', 's1'), (2, 'two', x'0202', x'02', 's2');";
+
+        return
+        [
+            QueryText_SyncLocalRowStoreKeysOnSqlite(
+                "local-row-store-keys-int-on-sqlite",
+                sqliteDiagram,
+                null,
+                ordersTable,
+                orderKey,
+                seed,
+                _ => [1, 2]
+            ),
+            QueryText_SyncLocalRowStoreBinaryOnSqlite(
+                "local-row-store-binary-on-sqlite",
+                sqliteDiagram,
+                ordersTable,
+                orderKey,
+                seed,
+                _ => 1,
+                "1",
+                _ => 99,
+                notNull: false
+            ),
+        ];
+    }
+
+    /// <summary>
+    /// 生成物の <c>SqliteLocalRowStore</c> の <c>ListKeysAsync</c>・<c>ConvertKey</c> を、図の SQLite 方言の DDL を当てた DB で確かめる
+    /// （<see cref="QueryText_LocalRowStoreKeys"/>）
+    /// </summary>
+    /// <param name="name">検査の名前</param>
+    /// <param name="sqliteDiagram">DDL を作る SQLite 方言の図</param>
+    /// <param name="entityTypeName">表のエンティティの型の名前（無ければ <paramref name="table"/> の <c>[Table]</c> で引く）</param>
+    /// <param name="table">表の名前（引用していない）</param>
+    /// <param name="keyColumn">キーの列の名前（引用していない）</param>
+    /// <param name="seedSql">行（と親の行）を入れる文</param>
+    /// <param name="keys">入れた行のキー（キーのプロパティの型で作る）</param>
+    private static ExecCheck QueryText_SyncLocalRowStoreKeysOnSqlite(
+        string name,
+        Func<ErDiagram> sqliteDiagram,
+        string? entityTypeName,
+        string table,
+        string keyColumn,
+        string seedSql,
+        Func<Type, object[]> keys
+    ) =>
+        new(
+            name,
+            assembly =>
+                QueryText_WithLocalRowStore(
+                    assembly,
+                    sqliteDiagram(),
+                    (store, _, _) =>
+                    {
+                        var entityType = entityTypeName is null
+                            ? QueryText_EntityOfTable(assembly, table)
+                            : ProbeKit.Type(assembly, entityTypeName);
+
+                        return QueryText_LocalRowStoreKeys(
+                            assembly,
+                            store,
+                            entityType,
+                            table,
+                            keyColumn,
+                            seedSql,
+                            keys(QueryText_ColumnProperty(entityType, keyColumn).PropertyType)
+                        );
+                    }
+                )
+        );
+
+    /// <summary>
+    /// ローカルの口のキーの読み方を、ローカルの変更の記録（<c>SyncLocalTracking.Ensure</c>）を張った DB の <c>BEGIN IMMEDIATE</c> の中で
+    /// 確かめる：<c>ListKeysAsync</c> が入れた全部のキーをキーのプロパティの型で返し、キーの列から読んだ生の値と行の状態の表の
+    /// <c>"key"</c>（挿入の記録と、<c>DeleteAsync</c> の後の削除の記録）を <c>ConvertKey</c> で変えたキーが、その型で、入れたキーと等しく、
+    /// 記述子の <c>FormatKey</c> のテキストが <c>FindAsync</c> で読んだ行から <c>ReadKey</c> → <c>FormatKey</c> したテキストと同じ
+    /// </summary>
+    /// <param name="assembly">読み込んだ生成物</param>
+    /// <param name="store">ローカルの口</param>
+    /// <param name="entityType">表のエンティティの型</param>
+    /// <param name="table">表の名前（引用していない・記述子の <c>TableName</c>）</param>
+    /// <param name="keyColumn">キーの列の名前（引用していない）</param>
+    /// <param name="seedSql">行（と親の行）を入れる文</param>
+    /// <param name="keys">入れた行のキー（キーのプロパティの型。最後のキーの行を消す）</param>
+    private static IEnumerable<string> QueryText_LocalRowStoreKeys(
+        Assembly assembly,
+        object store,
+        Type entityType,
+        string table,
+        string keyColumn,
+        string seedSql,
+        object[] keys
+    )
+    {
+        var problems = new List<string>();
+        var ct = CancellationToken.None;
+        var keyType = QueryText_ColumnProperty(entityType, keyColumn).PropertyType;
+        var all = QueryText_SyncDescriptors(assembly).Select(item => item.Descriptor).ToArray();
+        var descriptor = all.Single(item => (string)ProbeKit.Get(item, "TableName")! == table);
+        var deletedKey = keys[^1];
+
+        string Format(object key) =>
+            (string)((Delegate)ProbeKit.Get(descriptor, "FormatKey")!).DynamicInvoke(key)!;
+
+        string FormatEntity(object entity) =>
+            Format(((Delegate)ProbeKit.Get(descriptor, "ReadKey")!).DynamicInvoke(entity)!);
+
+        string Show(IEnumerable<object> values) =>
+            string.Join(
+                ", ",
+                values
+                    .Select(value => $"{value}（{value.GetType().Name}）")
+                    .Order(StringComparer.Ordinal)
+            );
+
+        using var connection = (System.Data.Common.DbConnection)
+            ProbeKit.Call(store, "CreateDedicatedConnection")!;
+        connection.Open();
+        ProbeKit.CallStatic(
+            ProbeKit.Type(assembly, "SyncLocalTracking"),
+            "Ensure",
+            connection,
+            QueryText_DescriptorList(assembly, all)
+        );
+        QueryText_Run(connection, seedSql);
+
+        List<object> ReadValues(string sql)
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = sql;
+
+            if (sql.Contains("@table", StringComparison.Ordinal))
+            {
+                var tableParameter = command.CreateParameter();
+                tableParameter.ParameterName = "@table";
+                tableParameter.Value = table;
+                command.Parameters.Add(tableParameter);
+            }
+
+            using var reader = command.ExecuteReader();
+            var values = new List<object>();
+
+            while (reader.Read())
+            {
+                values.Add(reader.GetValue(0));
+            }
+
+            return values;
+        }
+
+        // 生の値を ConvertKey で変え、型・入れたキーとの一致・FindAsync で引けること・キーのテキストを確かめる
+        void CheckConverted(string source, IReadOnlyList<object> rawKeys, bool rowExists)
+        {
+            foreach (var rawKey in rawKeys)
+            {
+                var converted = QueryText_CallStore(store, "ConvertKey", entityType, rawKey)!;
+
+                if (converted.GetType() != keyType)
+                {
+                    problems.Add(
+                        $"{source} の生の値 {rawKey}（{rawKey.GetType().Name}）の ConvertKey が {converted.GetType().Name}（期待 {keyType.Name}）"
+                    );
+                    continue;
+                }
+
+                if (!keys.Contains(converted))
+                {
+                    problems.Add(
+                        $"{source} の生の値 {rawKey}（{rawKey.GetType().Name}）の ConvertKey が {converted}（入れたキー [{Show(keys)}] に無い）"
+                    );
+                    continue;
+                }
+
+                var expectedText = Format(keys.First(key => key.Equals(converted)));
+
+                if (Format(converted) != expectedText)
+                {
+                    problems.Add(
+                        $"{source} の生の値 {rawKey} を変えたキーのテキストが {Format(converted)}（期待 {expectedText}）"
+                    );
+                }
+
+                var found = QueryText_CallStore(
+                    store,
+                    "FindAsync",
+                    entityType,
+                    connection,
+                    converted,
+                    ct
+                );
+
+                if (!rowExists)
+                {
+                    if (found is not null)
+                    {
+                        problems.Add(
+                            $"{source} の消した行のキー {converted} で FindAsync が行を読んだ"
+                        );
+                    }
+
+                    continue;
+                }
+
+                if (found is null)
+                {
+                    problems.Add(
+                        $"{source} の生の値 {rawKey} を変えたキー {converted} で FindAsync が行を読まない"
+                    );
+                }
+                else if (FormatEntity(found) != Format(converted))
+                {
+                    problems.Add(
+                        $"{source} の生の値 {rawKey} のキーのテキスト {Format(converted)} が、読んだ行の ReadKey → FormatKey（{FormatEntity(found)}）と違う"
+                    );
+                }
+            }
+        }
+
+        QueryText_Run(connection, "BEGIN IMMEDIATE");
+
+        var listed = (
+            (IEnumerable)QueryText_CallStore(store, "ListKeysAsync", entityType, connection, ct)!
+        )
+            .Cast<object>()
+            .ToList();
+
+        if (
+            listed.Count != keys.Length
+            || listed.Any(key => key.GetType() != keyType || !keys.Contains(key))
+        )
+        {
+            problems.Add($"ListKeysAsync が [{Show(listed)}]（期待 [{Show(keys)}]）");
+        }
+
+        var rawColumnKeys = ReadValues(
+            $"SELECT {QueryText_QuoteSqlite(keyColumn)} FROM {QueryText_QuoteSqlite(table)}"
+        );
+
+        if (rawColumnKeys.Count != keys.Length)
+        {
+            problems.Add($"キーの列から {rawColumnKeys.Count} 行を読んだ（期待 {keys.Length}）");
+        }
+
+        CheckConverted("キーの列", rawColumnKeys, rowExists: true);
+
+        const string recordedSql =
+            "SELECT \"key\" FROM quicker_sync_row WHERE table_name = @table AND deleted = ";
+        var recorded = ReadValues(recordedSql + "0");
+
+        if (recorded.Count != keys.Length)
+        {
+            problems.Add(
+                $"行の状態の表の挿入の記録が {recorded.Count} 行（期待 {keys.Length}＝トリガーが入れた行を記録する）"
+            );
+        }
+
+        CheckConverted("行の状態の表の挿入の記録", recorded, rowExists: true);
+
+        if (
+            QueryText_CallStore(store, "DeleteAsync", entityType, connection, deletedKey, ct)
+            is not true
+        )
+        {
+            problems.Add($"DeleteAsync({deletedKey}) が true でない");
+        }
+
+        var deletions = ReadValues(recordedSql + "1");
+
+        if (deletions.Count != 1)
+        {
+            problems.Add($"行の状態の表の削除の記録が {deletions.Count} 行（期待 1）");
+        }
+
+        CheckConverted("行の状態の表の削除の記録", deletions, rowExists: false);
+
+        if (
+            deletions.Count == 1
+            && !QueryText_CallStore(store, "ConvertKey", entityType, deletions[0])!
+                .Equals(deletedKey)
+        )
+        {
+            problems.Add($"削除の記録のキーが消したキー {deletedKey} にならない");
+        }
+
+        // 生の値の型の誤り・DBNull は断る
+        if (
+            QueryText_StoreThrows(store, "ConvertKey", entityType, DBNull.Value)
+            is not ArgumentException
+        )
+        {
+            problems.Add("ConvertKey(DBNull) が ArgumentException で断らない");
+        }
+
+        QueryText_Run(connection, "ROLLBACK");
+        return problems;
+    }
+
+    /// <summary>
+    /// 生成物の <c>SqliteLocalRowStore</c> の除外 blob の読み書き（<c>WriteBinaryAsync</c>・<c>ReadBinaryLengthAsync</c>・
+    /// <c>ReadBinaryAsync</c>）を、図の SQLite 方言の DDL を当てた DB で確かめる（<see cref="QueryText_LocalRowStoreBinary"/>）
+    /// </summary>
+    /// <param name="name">検査の名前</param>
+    /// <param name="sqliteDiagram">DDL を作る SQLite 方言の図</param>
+    /// <param name="table">表の名前（引用していない・記述子の <c>TableName</c>）</param>
+    /// <param name="keyColumn">キーの列の名前（引用していない）</param>
+    /// <param name="seedSql">行（と親の行）を入れる文</param>
+    /// <param name="key">書く行のキーを、キーのプロパティの型から作る</param>
+    /// <param name="sqlKey">書く行のキーの SQL のリテラル</param>
+    /// <param name="missingKey">無い行のキーを、キーのプロパティの型から作る</param>
+    /// <param name="notNull">除外 blob の列が NOT NULL か</param>
+    private static ExecCheck QueryText_SyncLocalRowStoreBinaryOnSqlite(
+        string name,
+        Func<ErDiagram> sqliteDiagram,
+        string table,
+        string keyColumn,
+        string seedSql,
+        Func<Type, object> key,
+        string sqlKey,
+        Func<Type, object> missingKey,
+        bool notNull
+    ) =>
+        new(
+            name,
+            assembly =>
+                QueryText_WithLocalRowStore(
+                    assembly,
+                    sqliteDiagram(),
+                    (store, _, readConnectionString) =>
+                    {
+                        var entityType = QueryText_EntityOfTable(assembly, table);
+                        var keyType = QueryText_ColumnProperty(entityType, keyColumn).PropertyType;
+
+                        return QueryText_LocalRowStoreBinary(
+                            assembly,
+                            store,
+                            readConnectionString,
+                            entityType,
+                            table,
+                            keyColumn,
+                            seedSql,
+                            key(keyType),
+                            sqlKey,
+                            missingKey(keyType),
+                            notNull
+                        );
+                    }
+                )
+        );
+
+    /// <summary>
+    /// ローカルの口の除外 blob の読み書きを、ローカルの変更の記録を張った DB の <c>BEGIN IMMEDIATE</c> の中で確かめる：数 KB と
+    /// コピーのバッファをまたぐ大きさ（200 KB）と、シークできない Stream に長さを添えた書き込みが内容どおりに読み戻せ、長さと内容の
+    /// 長さが食い違う書き込み（シークできる Stream の別の長さ・シークできない Stream の不足と超過）はリポジトリのアクセサと同じ
+    /// <see cref="ArgumentException"/> で断って列を変えず、無い行は false／null で何も書かず、除外 blob でないプロパティの名前は
+    /// <see cref="ArgumentException"/> で断り、<c>source: null</c> は NULL 許容の列を NULL にして NOT NULL の列では DB の制約の
+    /// 違反になる。適用中の印を立てた書き込みは行の状態の表を変えず（印を下ろした書き込みは変える＝対照）、ROLLBACK の後は元の
+    /// 内容のまま、コミットした書き込みは別の接続から読める
+    /// </summary>
+    /// <param name="assembly">読み込んだ生成物</param>
+    /// <param name="store">ローカルの口</param>
+    /// <param name="readConnectionString">確かめに使うプールしない接続文字列</param>
+    /// <param name="entityType">表のエンティティの型</param>
+    /// <param name="table">表の名前（引用していない・記述子の <c>TableName</c>）</param>
+    /// <param name="keyColumn">キーの列の名前（引用していない）</param>
+    /// <param name="seedSql">行（と親の行）を入れる文</param>
+    /// <param name="key">書く行のキー（キーのプロパティの型）</param>
+    /// <param name="sqlKey">書く行のキーの SQL のリテラル</param>
+    /// <param name="missingKey">無い行のキー（キーのプロパティの型）</param>
+    /// <param name="notNull">除外 blob の列が NOT NULL か</param>
+    private static IEnumerable<string> QueryText_LocalRowStoreBinary(
+        Assembly assembly,
+        object store,
+        string readConnectionString,
+        Type entityType,
+        string table,
+        string keyColumn,
+        string seedSql,
+        object key,
+        string sqlKey,
+        object missingKey,
+        bool notNull
+    )
+    {
+        var problems = new List<string>();
+        var ct = CancellationToken.None;
+        var all = QueryText_SyncDescriptors(assembly).Select(item => item.Descriptor).ToArray();
+        var descriptor = all.Single(item => (string)ProbeKit.Get(item, "TableName")! == table);
+        var property = QueryText_Strings(descriptor, "UnboundedBinaryColumnNames").Single();
+        var column = QueryText_Strings(descriptor, "LocalUnboundedBinaryColumnNames").Single();
+        var plainProperty = QueryText_ColumnProperty(entityType, keyColumn).Name;
+
+        static byte[] Content(int length, int seed) =>
+            Enumerable.Range(0, length).Select(i => (byte)((i * 31 + seed) % 251)).ToArray();
+
+        object? Call(string method, params object?[] arguments) =>
+            QueryText_CallStore(store, method, entityType, arguments);
+
+        Exception? Throws(string method, params object?[] arguments) =>
+            QueryText_StoreThrows(store, method, entityType, arguments);
+
+        string? StoredHex(System.Data.Common.DbConnection on)
+        {
+            using var command = on.CreateCommand();
+            command.CommandText =
+                $"SELECT hex({QueryText_QuoteSqlite(column)}) FROM {QueryText_QuoteSqlite(table)} "
+                + $"WHERE {QueryText_QuoteSqlite(keyColumn)} = {sqlKey}";
+            return command.ExecuteScalar() as string;
+        }
+
+        string RowStates(System.Data.Common.DbConnection on)
+        {
+            using var command = on.CreateCommand();
+            command.CommandText =
+                "SELECT table_name, \"key\", dirty, deleted, blob_columns, change_seq FROM quicker_sync_row "
+                + "ORDER BY table_name, \"key\"";
+            using var reader = command.ExecuteReader();
+            var rows = new List<string>();
+
+            while (reader.Read())
+            {
+                rows.Add(
+                    $"{reader.GetValue(0)}|{reader.GetValue(1)}|{reader.GetValue(2)}|{reader.GetValue(3)}|{reader.GetValue(4)}|{reader.GetValue(5)}"
+                );
+            }
+
+            return string.Join("; ", rows);
+        }
+
+        using var connection = (System.Data.Common.DbConnection)
+            ProbeKit.Call(store, "CreateDedicatedConnection")!;
+        connection.Open();
+
+        // 読めたら内容、false なら null（false なのに何かを書いたら空の配列）
+        byte[]? ReadBack(object rowKey)
+        {
+            using var copy = new System.IO.MemoryStream();
+
+            if (Call("ReadBinaryAsync", connection, rowKey, property, copy, ct) is true)
+            {
+                return copy.ToArray();
+            }
+
+            return copy.Length == 0 ? null : Array.Empty<byte>();
+        }
+
+        ProbeKit.CallStatic(
+            ProbeKit.Type(assembly, "SyncLocalTracking"),
+            "Ensure",
+            connection,
+            QueryText_DescriptorList(assembly, all)
+        );
+        QueryText_Run(connection, seedSql);
+
+        var seededHex = StoredHex(connection);
+        var statesBefore = RowStates(connection);
+
+        QueryText_Run(connection, "BEGIN IMMEDIATE");
+        QueryText_Run(connection, "UPDATE quicker_sync_state SET applying = 1");
+
+        // シークできる Stream（長さを添えない）：数 KB とコピーのバッファをまたぐ大きさ
+        foreach (var length in new[] { 3000, 200 * 1024 })
+        {
+            var content = Content(length, length % 7);
+
+            if (
+                Call(
+                    "WriteBinaryAsync",
+                    connection,
+                    key,
+                    property,
+                    new System.IO.MemoryStream(content),
+                    null,
+                    ct
+                )
+                is not true
+            )
+            {
+                problems.Add($"{length} バイトの WriteBinaryAsync が true でない");
+            }
+
+            if (Call("ReadBinaryLengthAsync", connection, key, property, ct) is not long stored)
+            {
+                problems.Add($"{length} バイトを書いた後の ReadBinaryLengthAsync が長さを返さない");
+            }
+            else if (stored != length)
+            {
+                problems.Add($"{length} バイトを書いた後の ReadBinaryLengthAsync が {stored}");
+            }
+
+            if (ReadBack(key) is not { } read || !read.SequenceEqual(content))
+            {
+                problems.Add(
+                    $"{length} バイトを書いた後の ReadBinaryAsync の内容が書いた内容と違う"
+                );
+            }
+        }
+
+        // シークできない Stream に長さを添える
+        var forward = Content(5000, 3);
+
+        if (
+            Call(
+                "WriteBinaryAsync",
+                connection,
+                key,
+                property,
+                new QueryTextForwardOnlyStream(forward),
+                (long?)forward.Length,
+                ct
+            )
+                is not true
+            || ReadBack(key) is not { } forwardRead
+            || !forwardRead.SequenceEqual(forward)
+        )
+        {
+            problems.Add(
+                "シークできない Stream に長さを添えた WriteBinaryAsync が内容どおりに書かない"
+            );
+        }
+
+        // 長さと内容の長さの食い違い：リポジトリのアクセサと同じ ArgumentException で断り、列を変えない
+        var lastHex = StoredHex(connection);
+        var mismatches = new (string Label, Func<System.IO.Stream> Source, long Length)[]
+        {
+            (
+                "シークできる Stream と別の長さ",
+                () => new System.IO.MemoryStream(Content(100, 1)),
+                101
+            ),
+            (
+                "シークできない Stream の不足",
+                () => new QueryTextForwardOnlyStream(Content(100, 1)),
+                101
+            ),
+            (
+                "シークできない Stream の超過",
+                () => new QueryTextForwardOnlyStream(Content(100, 1)),
+                99
+            ),
+        };
+
+        foreach (var (label, source, length) in mismatches)
+        {
+            if (
+                Throws("WriteBinaryAsync", connection, key, property, source(), (long?)length, ct)
+                is not ArgumentException
+            )
+            {
+                problems.Add($"{label} の WriteBinaryAsync が ArgumentException で断らない");
+            }
+
+            if (StoredHex(connection) != lastHex)
+            {
+                problems.Add($"{label} の WriteBinaryAsync が断った後に列が変わった");
+            }
+        }
+
+        // 無い行は false／null で、何も書かない
+        if (
+            Call(
+                "WriteBinaryAsync",
+                connection,
+                missingKey,
+                property,
+                new System.IO.MemoryStream(Content(10, 1)),
+                null,
+                ct
+            )
+            is not false
+        )
+        {
+            problems.Add($"無いキー {missingKey} の WriteBinaryAsync が false でない");
+        }
+
+        if (Call("ReadBinaryLengthAsync", connection, missingKey, property, ct) is not null)
+        {
+            problems.Add($"無いキー {missingKey} の ReadBinaryLengthAsync が null でない");
+        }
+
+        if (ReadBack(missingKey) is not null)
+        {
+            problems.Add(
+                $"無いキー {missingKey} の ReadBinaryAsync が false でないか、何かを書いた"
+            );
+        }
+
+        // 除外 blob でないプロパティの名前は断る
+        if (
+            Throws("ReadBinaryLengthAsync", connection, key, plainProperty, ct)
+            is not ArgumentException
+        )
+        {
+            problems.Add(
+                $"除外 blob でないプロパティ {plainProperty} の ReadBinaryLengthAsync が ArgumentException で断らない"
+            );
+        }
+
+        // 適用中の印を立てたトランザクションの書き込みは、行の状態の表を変えない
+        if (RowStates(connection) != statesBefore)
+        {
+            problems.Add(
+                $"適用中の印を立てた書き込みが行の状態の表を変えた（前 [{statesBefore}]・後 [{RowStates(connection)}]）"
+            );
+        }
+
+        // source: null
+        if (notNull)
+        {
+            if (
+                Throws("WriteBinaryAsync", connection, key, property, null, null, ct)
+                is not System.Data.Common.DbException
+            )
+            {
+                problems.Add(
+                    "NOT NULL の列への WriteBinaryAsync(source: null) が DB の制約の違反にならない"
+                );
+            }
+
+            if (StoredHex(connection) != lastHex)
+            {
+                problems.Add(
+                    "NOT NULL の列への WriteBinaryAsync(source: null) が断った後に列が変わった"
+                );
+            }
+        }
+        else
+        {
+            if (
+                Call("WriteBinaryAsync", connection, key, property, null, null, ct) is not true
+                || Call("ReadBinaryLengthAsync", connection, key, property, ct) is not null
+                || ReadBack(key) is not null
+            )
+            {
+                problems.Add("WriteBinaryAsync(source: null) が列を NULL にしない");
+            }
+        }
+
+        // 印を下ろした書き込みは記録される（上の「変えない」が空振りでないことの対照）
+        QueryText_Run(connection, "UPDATE quicker_sync_state SET applying = 0");
+        Call(
+            "WriteBinaryAsync",
+            connection,
+            key,
+            property,
+            new System.IO.MemoryStream(Content(10, 2)),
+            null,
+            ct
+        );
+
+        if (RowStates(connection) == statesBefore)
+        {
+            problems.Add("適用中の印を下ろした書き込みが行の状態の表を変えない（対照が働かない）");
+        }
+
+        QueryText_Run(connection, "ROLLBACK");
+
+        if (StoredHex(connection) != seededHex || RowStates(connection) != statesBefore)
+        {
+            problems.Add("ROLLBACK の後に、トランザクションの中で書いた内容か記録が残る");
+        }
+
+        // コミットした書き込みは別の接続から読める
+        var committed = Content(4096, 5);
+        QueryText_Run(connection, "BEGIN IMMEDIATE");
+        Call(
+            "WriteBinaryAsync",
+            connection,
+            key,
+            property,
+            new System.IO.MemoryStream(committed),
+            (long?)committed.Length,
+            ct
+        );
+        QueryText_Run(connection, "COMMIT");
+
+        using var reader = new Microsoft.Data.Sqlite.SqliteConnection(readConnectionString);
+        reader.Open();
+
+        if (StoredHex(reader) != Convert.ToHexString(committed))
+        {
+            problems.Add("コミットした WriteBinaryAsync の内容を別の接続から読めない");
+        }
+
+        return problems;
+    }
+
+    /// <summary>
+    /// 除外 blob の列を持たない同期の構成（<c>ExcludeUnboundedBinaryColumns</c> を切った同期の図）の生成物の <c>SqliteLocalRowStore</c>：
+    /// blob の 3 つはどのプロパティの名前も <see cref="ArgumentException"/> で断り、キーの 2 つは除外のある構成と同じに通る
+    /// </summary>
+    private static ExecCheck QueryText_SyncLocalRowStoreWithoutExcludedColumnsOnSqlite() =>
+        new(
+            "local-row-store-without-excluded-columns-on-sqlite",
+            assembly =>
+                QueryText_WithLocalRowStore(
+                    assembly,
+                    SyncFixtureDefinition.BuildSqliteMirror(),
+                    (store, _, _) =>
+                    {
+                        var orderType = QueryText_EntityOfTable(assembly, "sync_orders");
+                        var problems = QueryText_LocalRowStoreKeys(
+                                assembly,
+                                store,
+                                orderType,
+                                "sync_orders",
+                                "order_id",
+                                "INSERT INTO sync_orders (order_id, customer_name, attachment, row_ver, summary) "
+                                    + "VALUES (1, 'one', x'0101', x'01', 's1'), (2, 'two', x'0202', x'02', 's2');",
+                                [1, 2]
+                            )
+                            .ToList();
+                        var property = QueryText_ColumnProperty(orderType, "attachment").Name;
+                        using var connection = (System.Data.Common.DbConnection)
+                            ProbeKit.Call(store, "CreateDedicatedConnection")!;
+                        connection.Open();
+                        var ct = CancellationToken.None;
+                        var calls = new (string Method, object?[] Arguments)[]
+                        {
+                            ("ReadBinaryLengthAsync", [connection, 1, property, ct]),
+                            (
+                                "ReadBinaryAsync",
+                                [connection, 1, property, new System.IO.MemoryStream(), ct]
+                            ),
+                            (
+                                "WriteBinaryAsync",
+                                [connection, 1, property, new System.IO.MemoryStream([1]), null, ct]
+                            ),
+                        };
+
+                        foreach (var (method, arguments) in calls)
+                        {
+                            if (
+                                QueryText_StoreThrows(store, method, orderType, arguments)
+                                is not ArgumentException
+                            )
+                            {
+                                problems.Add(
+                                    $"除外 blob の列の無い構成の {method}({property}) が ArgumentException で断らない"
+                                );
+                            }
+                        }
+
+                        return problems;
+                    }
+                )
+        );
+
+    /// <summary>シークできない読み取り専用の Stream（ローカルの口の blob の書き込みの長さの規則を確かめる）</summary>
+    /// <param name="content">読ませる内容</param>
+    private sealed class QueryTextForwardOnlyStream(byte[] content) : System.IO.Stream
+    {
+        /// <summary>内容を読ませる元</summary>
+        private readonly System.IO.MemoryStream _inner = new(content);
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush() { }
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            _inner.Read(buffer, offset, count);
+
+        public override long Seek(long offset, System.IO.SeekOrigin origin) =>
+            throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+    }
+
     /// <summary>同期の記述子のうち、<paramref name="property"/>（<c>SyncNote</c> など）が版を持たない・持つの宣言を読む</summary>
     private static ExecCheck QueryText_SyncVersionShapes() =>
         new(
@@ -4620,7 +5424,9 @@ internal static partial class CodegenCases
                     + "Default Timeout の値・外部キーの検査が入）。呼び出し側の BEGIN IMMEDIATE の中で int のキーの FindAsync・ExistsAsync・"
                     + "InsertAsync・UpdateAsync・DeleteAsync が通り、UpdateAsync は除外 blob の列に触らず、除外 blob に値を持つエンティティの更新は "
                     + "InvalidOperationException で断る。IsUniqueViolation は主キーの重なりと一意制約の違反で true・NOT NULL の違反で false で、"
-                    + "SAVEPOINT → 違反 → ROLLBACK TO の後も外のトランザクションを続けてコミットできる",
+                    + "SAVEPOINT → 違反 → ROLLBACK TO の後も外のトランザクションを続けてコミットできる。int のキーの ListKeysAsync・"
+                    + "ConvertKey（キーの列と行の状態の表の生の値から）と、NULL 許容の除外 blob の WriteBinaryAsync・ReadBinaryLengthAsync・"
+                    + "ReadBinaryAsync（QueryText_LocalRowStoreKeys・QueryText_LocalRowStoreBinary の確かめ）が呼び出し側の BEGIN IMMEDIATE の中で通る",
                 new CodegenCase(
                     SyncFixtureDefinition.Build,
                     SyncFixtureDefinition.Options,
@@ -4634,6 +5440,12 @@ internal static partial class CodegenCases
                             "order_id",
                             "attachment"
                         ),
+                        .. QueryText_SyncOrdersKeysAndBinaryOnSqlite(
+                            SyncFixtureDefinition.BuildSqliteMirror,
+                            "sync_orders",
+                            "order_id",
+                            "attachment"
+                        ),
                     ]
                 )
             ),
@@ -4641,7 +5453,7 @@ internal static partial class CodegenCases
                 "exec-sync-quoted-names-local-row-store-on-sqlite",
                 null,
                 "表名・キーの列名・除外 blob の列名に \" と ' と空白を含む図でも、生成した SqliteLocalRowStore の行の操作・接続・一意な値の"
-                    + "判定が、引用の要らない図と同じに通る（exec-sync-local-row-store-on-sqlite と同じ確かめ）",
+                    + "判定と、キーの読み方・除外 blob の読み書きが、引用の要らない図と同じに通る（exec-sync-local-row-store-on-sqlite と同じ確かめ）",
                 new CodegenCase(
                     () => QueryText_SyncQuotedNamesDiagram(SyncFixtureDefinition.Build()),
                     SyncFixtureDefinition.Options,
@@ -4658,33 +5470,149 @@ internal static partial class CodegenCases
                             QueryText_QuotedOrderKey,
                             QueryText_QuotedAttachment
                         ),
+                        .. QueryText_SyncOrdersKeysAndBinaryOnSqlite(
+                            () =>
+                                QueryText_SyncQuotedNamesDiagram(
+                                    SyncFixtureDefinition.BuildSqliteMirror()
+                                ),
+                            QueryText_QuotedOrdersTable,
+                            QueryText_QuotedOrderKey,
+                            QueryText_QuotedAttachment
+                        ),
                     ]
+                )
+            ),
+            new(
+                "exec-sync-local-row-store-without-excluded-columns-on-sqlite",
+                null,
+                "無制限バイナリ列の除外を切った同期の図（除外 blob の列が無い構成）でも、生成した SqliteLocalRowStore がコンパイルでき、"
+                    + "ListKeysAsync・ConvertKey は除外のある構成と同じに通り、WriteBinaryAsync・ReadBinaryLengthAsync・ReadBinaryAsync は"
+                    + "どのプロパティの名前も ArgumentException で断る",
+                new CodegenCase(
+                    SyncFixtureDefinition.Build,
+                    SyncFixtureDefinition.Options with
+                    {
+                        ExcludeUnboundedBinaryColumns = false,
+                    },
+                    DialectNames.SqlServer,
+                    DiagnosticExpectation.Contains(),
+                    Exec: [QueryText_SyncLocalRowStoreWithoutExcludedColumnsOnSqlite()]
                 )
             ),
             new(
                 "exec-sync-local-row-store-value-object-key-on-sqlite",
                 null,
                 "値オブジェクトのキーの表（同期の値オブジェクトの図の syncvo_lines）でも、生成した SqliteLocalRowStore の FindAsync・"
-                    + "ExistsAsync・InsertAsync・UpdateAsync・DeleteAsync が、呼び出し側の BEGIN IMMEDIATE の中で通る（キーは値オブジェクトで渡す）",
+                    + "ExistsAsync・InsertAsync・UpdateAsync・DeleteAsync が、呼び出し側の BEGIN IMMEDIATE の中で通る（キーは値オブジェクトで渡す）。"
+                    + "ListKeysAsync・ConvertKey は値オブジェクトのキーを返し、値オブジェクトのキーの表（syncvo_orders）の NOT NULL の除外 blob の"
+                    + "読み書きが通る",
                 new CodegenCase(
                     QuickER.Tests.GeneratedSyncVoFixture.SyncVoFixtureDefinition.Build,
                     QuickER.Tests.GeneratedSyncVoFixture.SyncVoFixtureDefinition.Options,
                     DialectNames.SqlServer,
                     DiagnosticExpectation.Contains(),
-                    Exec: [QueryText_SyncLocalRowStoreValueObjectKeyOnSqlite()]
+                    Exec:
+                    [
+                        QueryText_SyncLocalRowStoreValueObjectKeyOnSqlite(),
+                        QueryText_SyncLocalRowStoreKeysOnSqlite(
+                            "local-row-store-keys-value-object-on-sqlite",
+                            QuickER
+                                .Tests
+                                .GeneratedSyncVoFixture
+                                .SyncVoFixtureDefinition
+                                .BuildSqliteMirror,
+                            "SyncvoLineEntity",
+                            "syncvo_lines",
+                            "line_id",
+                            "INSERT INTO syncvo_orders (order_id, title, row_ver, photo) VALUES (1, 'one', x'01', x'01'); "
+                                + "INSERT INTO syncvo_lines (line_id, order_id, qty, row_ver) VALUES (1, 1, 5, x'01'), (2, 1, 6, x'02');",
+                            keyType =>
+                                [
+                                    ProbeKit.CallStatic(keyType, "Create", 1)!,
+                                    ProbeKit.CallStatic(keyType, "Create", 2)!,
+                                ]
+                        ),
+                        QueryText_SyncLocalRowStoreBinaryOnSqlite(
+                            "local-row-store-binary-value-object-key-not-null-on-sqlite",
+                            QuickER
+                                .Tests
+                                .GeneratedSyncVoFixture
+                                .SyncVoFixtureDefinition
+                                .BuildSqliteMirror,
+                            "syncvo_orders",
+                            "order_id",
+                            "INSERT INTO syncvo_orders (order_id, title, row_ver, photo) VALUES (1, 'one', x'01', x'01');",
+                            keyType => ProbeKit.CallStatic(keyType, "Create", 1)!,
+                            "1",
+                            keyType => ProbeKit.CallStatic(keyType, "Create", 99)!,
+                            notNull: true
+                        ),
+                    ]
                 )
             ),
             new(
                 "exec-sync-local-row-store-string-key-on-sqlite",
                 null,
                 "文字列のキーの表（同期のモデルの図の model_labels）でも、生成した SqliteLocalRowStore の FindAsync・ExistsAsync・InsertAsync・"
-                    + "UpdateAsync・DeleteAsync が、呼び出し側の BEGIN IMMEDIATE の中で通る",
+                    + "UpdateAsync・DeleteAsync が、呼び出し側の BEGIN IMMEDIATE の中で通る。ListKeysAsync・ConvertKey は文字列のキー（model_labels）"
+                    + "と日時のキー（model_events）を返し、NOT NULL の除外 blob（model_items の payload）の読み書きが通る",
                 new CodegenCase(
                     QuickER.Tests.GeneratedSyncModelFixture.SyncModelFixtureDefinition.Build,
                     QuickER.Tests.GeneratedSyncModelFixture.SyncModelFixtureDefinition.Options,
                     DialectNames.SqlServer,
                     DiagnosticExpectation.Contains(),
-                    Exec: [QueryText_SyncLocalRowStoreStringKeyOnSqlite()]
+                    Exec:
+                    [
+                        QueryText_SyncLocalRowStoreStringKeyOnSqlite(),
+                        QueryText_SyncLocalRowStoreKeysOnSqlite(
+                            "local-row-store-keys-string-on-sqlite",
+                            QuickER
+                                .Tests
+                                .GeneratedSyncModelFixture
+                                .SyncModelFixtureDefinition
+                                .BuildSqliteMirror,
+                            "ModelLabelEntity",
+                            "model_labels",
+                            "label_code",
+                            "INSERT INTO model_folders (folder_id, name) VALUES (1, 'root'); "
+                                + "INSERT INTO model_labels (label_code, folder_id, caption) VALUES ('L1', 1, 'one'), ('L2', 1, 'two');",
+                            _ => ["L1", "L2"]
+                        ),
+                        QueryText_SyncLocalRowStoreKeysOnSqlite(
+                            "local-row-store-keys-datetime-on-sqlite",
+                            QuickER
+                                .Tests
+                                .GeneratedSyncModelFixture
+                                .SyncModelFixtureDefinition
+                                .BuildSqliteMirror,
+                            null,
+                            "model_events",
+                            "event_at",
+                            QueryText_ModelItemsSeedSql
+                                + "INSERT INTO model_events (event_at, item_id, memo) VALUES "
+                                + "('2026-01-02 03:04:05', 1, 'a'), ('2026-01-02 03:04:06.5', 1, 'b');",
+                            _ =>
+                                [
+                                    new DateTime(2026, 1, 2, 3, 4, 5),
+                                    new DateTime(2026, 1, 2, 3, 4, 6, 500),
+                                ]
+                        ),
+                        QueryText_SyncLocalRowStoreBinaryOnSqlite(
+                            "local-row-store-binary-not-null-on-sqlite",
+                            QuickER
+                                .Tests
+                                .GeneratedSyncModelFixture
+                                .SyncModelFixtureDefinition
+                                .BuildSqliteMirror,
+                            "model_items",
+                            "item_id",
+                            QueryText_ModelItemsSeedSql,
+                            _ => 1,
+                            "1",
+                            _ => 99,
+                            notNull: true
+                        ),
+                    ]
                 )
             ),
             QueryTextRow(

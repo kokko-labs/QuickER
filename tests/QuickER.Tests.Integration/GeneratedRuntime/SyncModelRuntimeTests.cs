@@ -82,7 +82,7 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         );
 
     /// <summary>根拠を確かめる競合・決着の種類（<see cref="SyncModelRun.BasisChecks"/> の鍵）</summary>
-    private static readonly string[] RefusalBasisKinds =
+    internal static readonly string[] RefusalBasisKinds =
     [
         nameof(SyncConflictReason.DeleteRefusedOnServer),
         nameof(SyncConflictReason.UniqueValueTakenOnServer),
@@ -94,7 +94,7 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
     /// 既定の種の数で 1 回以上確かめることを表明する実行ごとの照合（<see cref="SyncModelRun.RunChecks"/> の鍵。状態の面との比較は
     /// 決められないものを除いた件数）
     /// </summary>
-    private static readonly string[] GuardedRunChecks =
+    internal static readonly string[] GuardedRunChecks =
     [
         SyncModelRun.StaleOverwriteCheck,
         SyncModelRun.LocalDiscardCheck,
@@ -137,6 +137,10 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
     /// <param name="runTally">
     /// 実行ごとの照合の、照合ごとの確かめた件数と違反の件数を足し込む先（<see cref="SyncModelRun.RunChecks"/>。null なら数えない）
     /// </param>
+    /// <param name="declarations">
+    /// 流した端末のエンジンの宣言（<see cref="IModelDeviceSync.CarriesServerWinsDecision"/>）を足し込む先（null なら数えない）。
+    /// 空振りの守りに掛ける照合の並びを、組に手で書かずにこの値から決める
+    /// </param>
     internal static async Task<(
         IReadOnlyList<ModelFailure> Failures,
         IReadOnlyList<string> Log
@@ -149,7 +153,8 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         CoverageCounter? outcomes = null,
         ConcurrentDictionary<UniqueSpelling, int>? spellingTally = null,
         ConcurrentDictionary<string, int>? preloadTally = null,
-        ConcurrentDictionary<string, (int Checked, int Violations)>? runTally = null
+        ConcurrentDictionary<string, (int Checked, int Violations)>? runTally = null,
+        ConcurrentDictionary<bool, int>? declarations = null
     )
     {
         var generator = new SyncModelGenerator(seed);
@@ -164,6 +169,18 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             generator.Preloads(setup)
         );
         run.Log.Count.Should().BeGreaterThan(0);
+
+        if (declarations is not null)
+        {
+            foreach (var actor in run.World.Actors.Where(actor => actor != ModelActor.Server))
+            {
+                declarations.AddOrUpdate(
+                    run.World.Device(actor).Sync.CarriesServerWinsDecision,
+                    1,
+                    (_, sum) => sum + 1
+                );
+            }
+        }
 
         // 生成器の誤り（書き手の DB で成功しない手）は、書き込みの失敗と分けて名指しし、その種の残りの手を作らない
         ModelFailure? generatorFailure = null;
@@ -259,10 +276,35 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         DisplayName = "[Sync/モデル] 乱数の操作の列で、止まらず・収束し・消えない（既知の失敗の署名は除く）"
     )]
     [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
-    public async Task RandomSeeds_ConvergeWithoutLoss()
+    public Task RandomSeeds_ConvergeWithoutLoss() => RunRandomSeedsAsync(DirectSuite, output);
+
+    /// <summary>直結・製品の同期エンジンの端末で乱数の種を流すときの組（<see cref="RunRandomSeedsAsync"/> へ渡す）</summary>
+    internal static SyncModelRandomSuite DirectSuite { get; } =
+        new(
+            "SyncModel",
+            SyncModelWorldOptions.Direct,
+            SyncModelKnownFailures.Set,
+            SyncModelDimensions.Gaps,
+            SyncModelOutcomeDimensions.Gaps,
+            SyncModelDimensions.DirectScope,
+            RefusalBasisKinds,
+            GuardedRunChecks,
+            [SyncModelRun.CarryEditLostCheck]
+        );
+
+    /// <summary>
+    /// 乱数の種（既存の範囲の種と広い世界の種）と網羅の行を、渡した組の世界で流し、既知の失敗の一覧・網羅しない組・空振りの守りを
+    /// 照合する。種の決め方（<see cref="Seeds"/>・<see cref="WideSeeds"/>）と次元表はどの組でも同じ
+    /// </summary>
+    /// <param name="suite">世界の組み方と、照合に使う一覧・宣言</param>
+    /// <param name="output">テストの出力</param>
+    internal static async Task RunRandomSeedsAsync(
+        SyncModelRandomSuite suite,
+        ITestOutputHelper output
+    )
     {
         // 乱数の種では、途中の同期で起きたか静止化で起きたか、どの表で起きたかを区別しない（Family を参照）
-        var known = SyncModelKnownFailures.Set;
+        var known = suite.Known;
         var results =
             new ConcurrentDictionary<
                 int,
@@ -281,6 +323,7 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         var runTally = new ConcurrentDictionary<string, (int Checked, int Violations)>(
             StringComparer.Ordinal
         );
+        var declarations = new ConcurrentDictionary<bool, int>();
 
         var rowResults = new ConcurrentDictionary<
             string,
@@ -308,7 +351,8 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                                 row,
                                 coverage,
                                 outcomes,
-                                ct
+                                ct,
+                                suite.Options
                             )
                     );
                 }
@@ -327,11 +371,13 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                         results[seed] = await RunSeedAsync(
                             seed,
                             ct,
+                            suite.Options,
                             coverage: coverage,
                             basisTally: basisTally,
                             outcomes: outcomes,
                             preloadTally: preloadTally,
-                            runTally: runTally
+                            runTally: runTally,
+                            declarations: declarations
                         );
                         elapsed[seed] = watch.Elapsed;
                     }
@@ -343,19 +389,11 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         var coverageReport = coverage.Report();
         var outcomeReport = outcomes.Report();
         coverageReport.WriteSummary(output);
-        coverageReport.WriteGapUsage(
-            SyncModelDimensions.Gaps,
-            SyncModelDimensions.DirectScope,
-            output
-        );
+        coverageReport.WriteGapUsage(suite.Gaps, suite.Scope, output);
         outcomeReport.WriteSummary(output);
-        outcomeReport.WriteGapUsage(
-            SyncModelOutcomeDimensions.Gaps,
-            SyncModelDimensions.DirectScope,
-            output
-        );
+        outcomeReport.WriteGapUsage(suite.OutcomeGaps, suite.Scope, output);
 
-        var report = new EngineReport("SyncModel");
+        var report = new EngineReport(suite.Name);
         var knownCounts = new SortedDictionary<string, int>(StringComparer.Ordinal);
 
         foreach (var (seed, (failures, log)) in results.OrderBy(p => p.Key))
@@ -412,7 +450,7 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                         + Environment.NewLine
                         + string.Join(Environment.NewLine, rowLog)
                 ),
-                $"直結の乱数のテストを流す（網羅の行 `{id}` は種の前に必ず流れる）"
+                $"{suite.Name} の乱数のテストを流す（網羅の行 `{id}` は種の前に必ず流れる）"
             );
         }
 
@@ -486,21 +524,13 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         // エンジンの結果を表明してから網羅を照合する（網羅の赤がエンジンの失敗を隠さない）
         // 網羅しない組の照合は、2 つの範囲がどちらも既定の種の数のときだけ（広い世界の種の数を変えた実行は照合しない）
         var gapPlan = widePlan.IsDefaultCount ? plan : widePlan;
-        coverageReport.AssertGaps(
-            SyncModelDimensions.Gaps,
-            SyncModelDimensions.DirectScope,
-            gapPlan
-        );
-        outcomeReport.AssertGaps(
-            SyncModelOutcomeDimensions.Gaps,
-            SyncModelDimensions.DirectScope,
-            gapPlan
-        );
+        coverageReport.AssertGaps(suite.Gaps, suite.Scope, gapPlan);
+        outcomeReport.AssertGaps(suite.OutcomeGaps, suite.Scope, gapPlan);
 
         // 理由の根拠の確認が空振りしていない（既定の種の数で、どの理由も 1 回以上確かめ、根拠のある形を 1 回以上見る）
         if (plan.IsDefaultCount)
         {
-            foreach (var reason in RefusalBasisKinds)
+            foreach (var reason in suite.RefusalBasisKinds)
             {
                 var (count, withBasis) = basisTally.GetValueOrDefault(reason);
                 CoverageGuard.AtLeast($"refusal basis checks of {reason}", count, 1);
@@ -511,17 +541,32 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         // 実行ごとの照合が空振りしていない（2 つの範囲がどちらも既定の種の数のとき、どの照合も 1 回以上確かめる）
         if (plan.IsDefaultCount && widePlan.IsDefaultCount)
         {
-            foreach (var kind in GuardedRunChecks)
+            // 守りに掛ける照合は、流した端末のエンジンの宣言から決める（組の名前や手で書いた真偽で外さない）。組の中の端末は
+            // どれも同じ宣言のエンジンであること
+            declarations
+                .Keys.Should()
+                .ContainSingle("the devices of one suite run engines with the same declaration");
+
+            foreach (
+                var kind in SyncModelRun.GuardedRunChecksFor(
+                    suite.GuardedRunChecks,
+                    declarations.Keys.Single()
+                )
+            )
             {
                 var (count, _) = runTally.GetValueOrDefault(kind);
                 CoverageGuard.AtLeast($"run checks of {kind}", count, 1);
             }
 
-            // 決定の後の編集の消失は普段の種の数では起きないので、夜間の既定の種の数のときだけ表明する（普段は件数を出力へ書くだけ）
+            // 普段の種の数では起きない照合（決定の後の編集の消失）は、夜間の既定の種の数のときだけ表明する（普段は件数を出力へ
+            // 書くだけ）
             if (plan.Profile == EngineProfile.Nightly && widePlan.Profile == EngineProfile.Nightly)
             {
-                var (count, _) = runTally.GetValueOrDefault(SyncModelRun.CarryEditLostCheck);
-                CoverageGuard.AtLeast($"run checks of {SyncModelRun.CarryEditLostCheck}", count, 1);
+                foreach (var kind in suite.NightlyGuardedRunChecks)
+                {
+                    var (count, _) = runTally.GetValueOrDefault(kind);
+                    CoverageGuard.AtLeast($"run checks of {kind}", count, 1);
+                }
             }
         }
 

@@ -64,6 +64,11 @@ internal sealed record JudgeBreak(JudgeBreakKind Kind, ModelActor Device, int Fo
     /// </summary>
     public bool ReportsConflict { get; init; }
 
+    /// <summary>
+    /// 実行の結果の競合に、このフォルダーの削除の競合（<see cref="SyncConflictReason.DeleteRefusedOnServer"/>）を足すか
+    /// </summary>
+    public bool ReportsDeleteRefused { get; init; }
+
     /// <summary>この実行の壊し方を当てた後で、結果を返さずに例外を投げるか（内側のエンジンは呼ばない）</summary>
     public bool Throws { get; init; }
 
@@ -76,6 +81,7 @@ internal sealed record JudgeBreak(JudgeBreakKind Kind, ModelActor Device, int Fo
         + (ClearsRecords ? " clear-records" : "")
         + (ReportsDiscarded ? " report-discarded" : "")
         + (ReportsConflict ? " report-conflict" : "")
+        + (ReportsDeleteRefused ? " report-delete-refused" : "")
         + (Throws ? " throw" : "");
 }
 
@@ -156,6 +162,15 @@ internal sealed class SyncModelJudgeBreakSync(
 
     public bool CarriesServerWinsDecision => carriesServerWinsDecision;
 
+    /// <summary>包んだエンジンの宣言を引き継ぐ（包みは適用の書き方を変えない）</summary>
+    public bool AppliesThroughSaveHooks => inner.AppliesThroughSaveHooks;
+
+    /// <summary>包んだエンジンの宣言を引き継ぐ（包みは再開点の持ち方を変えない）</summary>
+    public bool DerivesResumePointFromLocalVersions => inner.DerivesResumePointFromLocalVersions;
+
+    /// <summary>包んだエンジンの宣言を引き継ぐ（包みは取得の仕方を変えない）</summary>
+    public bool RefetchesHeldRowsInSameRun => inner.RefetchesHeldRowsInSameRun;
+
     public async Task<ModelSyncOutcome> RunAsync(
         ModelSyncKind kind,
         SyncOptions options,
@@ -230,6 +245,17 @@ internal sealed class SyncModelJudgeBreakSync(
                 null,
                 null
             ))
+            .Concat(
+                due.Where(b => b.ReportsDeleteRefused)
+                    .Select(b => new SyncConflict(
+                        ModelTables.Folders,
+                        ModelDbState.Key(b.FolderId),
+                        SyncJournalOperation.Delete,
+                        SyncConflictReason.DeleteRefusedOnServer,
+                        null,
+                        null
+                    ))
+            )
             .ToList();
 
         fired.UnionWith(due);
@@ -253,35 +279,29 @@ internal sealed class SyncModelJudgeBreakSync(
     {
         var current = await server.Folders.GetByIdAsync(brk.FolderId, ct);
 
-        if (current is null)
-        {
-            await device.Sql.ExecuteSqlAsync(
-                "DELETE FROM model_folders WHERE folder_id = @id",
-                new { id = brk.FolderId },
-                ct
-            );
-        }
-        else
-        {
-            await device.Sql.ExecuteSqlAsync(
-                "UPDATE model_folders SET parent_id = @parent, name = @name, pinned_item_id = @pinned "
-                    + "WHERE folder_id = @id",
-                new
-                {
-                    id = brk.FolderId,
-                    parent = current.ParentId,
-                    name = current.Name,
-                    pinned = current.PinnedItemId,
-                },
-                ct
-            );
-        }
-
-        await device.ForgetUntrackedAsync(
-            ModelTables.Folders,
-            GeneratedSyncTables.ModelFolder.FormatKey(brk.FolderId),
+        await device.WriteUntrackedAsync(
+            () =>
+                current is null
+                    ? device.Sql.ExecuteSqlAsync(
+                        "DELETE FROM model_folders WHERE folder_id = @id",
+                        new { id = brk.FolderId },
+                        ct
+                    )
+                    : device.Sql.ExecuteSqlAsync(
+                        "UPDATE model_folders SET parent_id = @parent, name = @name, pinned_item_id = @pinned "
+                            + "WHERE folder_id = @id",
+                        new
+                        {
+                            id = brk.FolderId,
+                            parent = current.ParentId,
+                            name = current.Name,
+                            pinned = current.PinnedItemId,
+                        },
+                        ct
+                    ),
             ct
         );
+
         await ClearRecordsAsync(brk, ct);
     }
 
@@ -294,55 +314,48 @@ internal sealed class SyncModelJudgeBreakSync(
                 $"{brk.Describe()}: the server has no row to bring in."
             );
 
-        await device.Sql.ExecuteSqlAsync(
-            "INSERT INTO model_folders (folder_id, parent_id, name, pinned_item_id) "
-                + "VALUES (@id, @parent, @name, @pinned)",
-            new
-            {
-                id = brk.FolderId,
-                parent = current.ParentId,
-                name = current.Name,
-                pinned = current.PinnedItemId,
-            },
+        await device.WriteUntrackedAsync(
+            () =>
+                device.Sql.ExecuteSqlAsync(
+                    "INSERT INTO model_folders (folder_id, parent_id, name, pinned_item_id) "
+                        + "VALUES (@id, @parent, @name, @pinned)",
+                    new
+                    {
+                        id = brk.FolderId,
+                        parent = current.ParentId,
+                        name = current.Name,
+                        pinned = current.PinnedItemId,
+                    },
+                    ct
+                ),
             ct
         );
 
-        await device.ForgetUntrackedAsync(
-            ModelTables.Folders,
-            GeneratedSyncTables.ModelFolder.FormatKey(brk.FolderId),
-            ct
-        );
         await ClearRecordsAsync(brk, ct);
     }
 
     /// <summary>
-    /// 端末のローカル DB へ、外部キーの検査を切った専用の接続（プールしない）で文を順に流す。文が書いた行は SQL から決めず、
-    /// 流す前後の内容の差で忘れさせる（<see cref="SyncModelDevice.ForgetUntrackedChangesAsync"/>）
+    /// 端末のローカル DB へ、外部キーの検査を切った専用の接続（プールしない）で文を順に流す。記録しない書き込みの口
+    /// （<see cref="SyncModelDevice.WriteUntrackedAsync"/>）を通すので、文が書いた行は端末の記録に残らない
     /// </summary>
-    private async Task WriteWithoutForeignKeysAsync(JudgeBreak brk, CancellationToken ct)
-    {
-        var before = device.ForgetsUntracked
-            ? await ModelDbState.ReadAsync(device.ConnectionString, ct, missingTablesAreEmpty: true)
-            : null;
-
-        await using (
-            var connection = new SqliteConnection(
-                SyncModelRun.WithoutForeignKeys(device.ConnectionString)
-            )
-        )
-        {
-            await connection.OpenAsync(ct);
-
-            foreach (var sql in brk.Statements)
+    private Task WriteWithoutForeignKeysAsync(JudgeBreak brk, CancellationToken ct) =>
+        device.WriteUntrackedAsync(
+            async () =>
             {
-                await using var command = connection.CreateCommand();
-                command.CommandText = sql;
-                await command.ExecuteNonQueryAsync(ct);
-            }
-        }
+                await using var connection = new SqliteConnection(
+                    SyncModelRun.WithoutForeignKeys(device.ConnectionString)
+                );
+                await connection.OpenAsync(ct);
 
-        await device.ForgetUntrackedChangesAsync(before, ct);
-    }
+                foreach (var sql in brk.Statements)
+                {
+                    await using var command = connection.CreateCommand();
+                    command.CommandText = sql;
+                    await command.ExecuteNonQueryAsync(ct);
+                }
+            },
+            ct
+        );
 
     /// <summary>宣言していれば、そのキーの未送信の記録を消す（消し方は端末ごと＝<see cref="SyncModelDevice.ClearPendingRecordsAsync"/>）</summary>
     private async Task ClearRecordsAsync(JudgeBreak brk, CancellationToken ct)

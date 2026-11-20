@@ -43,8 +43,9 @@ SQLite 方言エンジン（QuickER 版 Repository の ADO 実装）の固定コ
   - 挿入は除外した無制限バイナリ列も含めて全列を書く。NOT NULL の除外列が null の挿入は NOT NULL 違反になる（呼び出し側が先に埋める）。
   - 更新は除外した無制限バイナリ列に触れない。その列に空でない値を持つエンティティの更新は、何も書かずに `InvalidOperationException`。
   - 行バージョンの列は SQLite では普通の列で、挿入も更新もエンティティの値を書く。計算列・Repository が外す採番列は書かない。
+- 除外した無制限バイナリ列の書き（`WriteBinaryAsync`）は、セーブポイントの中で `zeroblob` で長さちょうどの領域を取り、`SqliteBlob` で区切りごとに写す。失敗したらセーブポイントだけを巻き戻し（列は元のまま・呼び出し側のトランザクションは続く）、長さの規則は Repository の Stream アクセサと同じ。読み（`ReadBinaryAsync`）と長さ（`ReadBinaryLengthAsync`）は呼び出し側のトランザクションの中で読む。キーの列挙（`ListKeysAsync`）と生のキーの変換（`ConvertKey`）は行の読みと同じ変換を使う。
 - 出す条件は `sync_support || runtime_package_export`（`Runtime.Sqlite.g.cs`）。同期を使わない構成の生成物には出ない。
-- ガード：`CodegenConfig/Cases` の行 `exec-sync-local-row-store-on-sqlite`（実際に SQLite で流す）・`exec-sync-quoted-names-local-row-store-on-sqlite`（引用符を含む名前）・`exec-sync-local-row-store-value-object-key-on-sqlite`・`exec-sync-local-row-store-string-key-on-sqlite`。公開 API 面は `QuickER.Runtime.Sqlite.approved.txt`。mutation 実証済み（`Pooling=False` にしない・ファクトリを通さずに同じ接続文字列で接続を作る・主キーの重なりを一意な値の重なりと答えない・NOT NULL の違反を一意な値の重なりと答える、のどれでも生成の行が赤）。
+- ガード：`CodegenConfig/Cases` の行 `exec-sync-local-row-store-on-sqlite`（実際に SQLite で流す）・`exec-sync-quoted-names-local-row-store-on-sqlite`（引用符を含む名前）・`exec-sync-local-row-store-value-object-key-on-sqlite`・`exec-sync-local-row-store-string-key-on-sqlite`・`exec-sync-local-row-store-without-excluded-columns-on-sqlite`。公開 API 面は `QuickER.Runtime.Sqlite.approved.txt`。mutation 実証済み（`Pooling=False` にしない・ファクトリを通さずに同じ接続文字列で接続を作る・主キーの重なりを一意な値の重なりと答えない・NOT NULL の違反を一意な値の重なりと答える、のどれでも生成の行が赤）。
 
 ## 複数の文を 1 つのトランザクションで流す口（ISqlBatchExecutor）
 

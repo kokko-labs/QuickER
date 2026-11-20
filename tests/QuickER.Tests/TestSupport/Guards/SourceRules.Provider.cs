@@ -721,6 +721,25 @@ internal static partial class SourceRules
                     "同期のテンプレートの CREATE TRIGGER の文"
                 ),
             },
+            // 新しい同期のエンジンが「まだ持たない部分」として投げる決まった書式の例外は、エンジンを組み上げた後には 1 つも残さない
+            // （残ると、利用者の実行がテストの土台向けの例外で終わる）。生成テンプレートと、そこから再生成した同期のランタイムの
+            // 両方を読む（コメントの中の綴りも数える）
+            SourceRule.Forbid(
+                "sync-engine-pending-markers-in-templates",
+                "生成テンプレートに、同期のエンジンのまだ持たない部分の例外の書式（QUICKER-SYNC-PENDING）を置かない",
+                SourceScope.Under("src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime", ".scriban"),
+                GuardFinder.File(GuardReader.Text, FindSyncEnginePendingMarkers)
+            ) with
+            {
+                // 部品 11 本を読んでいること
+                MinimumFiles = 11,
+            },
+            SourceRule.Forbid(
+                "sync-engine-pending-markers-in-runtime",
+                "同期のランタイムのパッケージ用ソースに、同期のエンジンのまだ持たない部分の例外の書式（QUICKER-SYNC-PENDING）を置かない",
+                SourceScope.Files("src", SyncRuntimePackageSource),
+                GuardFinder.File(GuardReader.Text, FindSyncEnginePendingMarkers)
+            ),
             // 前置きの正本は QuickER.Dialects の SyncAuxiliaryNames 1 つで、QuickER.Provider* は文字列で写さず SyncAuxiliaryNames を通す
             // （写すと、前置きを変えたときに取込の判定だけが古い前置きのまま残る）。文字列リテラルと補間の文字の部分のうち、前置きを
             // 大文字小文字を無視して含むものを数える（コメント・XmlDoc は数えない。.g.cs は読まない）
@@ -844,6 +863,24 @@ internal static partial class SourceRules
     /// <summary>生成コードの双方向同期のテンプレートの部品</summary>
     private const string SyncTemplateFile =
         "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_10_Sync.scriban";
+
+    /// <summary>同期のランタイムのパッケージ用ソース（テンプレートから再生成する）</summary>
+    private const string SyncRuntimePackageSource = "src/QuickER.Runtime.Sync/Runtime.Sync.g.cs";
+
+    /// <summary>同期のエンジンのまだ持たない部分の例外の書式（番号と部分が続く形も含めて 1 つの出現）</summary>
+    private static readonly Regex SyncEnginePendingMarker = new(
+        @"QUICKER-SYNC-PENDING[:0-9A-Za-z_]*",
+        RegexOptions.CultureInvariant
+    );
+
+    /// <summary>同期のエンジンのまだ持たない部分の例外の書式の出現（何かは書式の綴り）</summary>
+    private static IEnumerable<GuardFinding> FindSyncEnginePendingMarkers(GuardFile file)
+    {
+        foreach (Match match in SyncEnginePendingMarker.Matches(file.Text))
+        {
+            yield return new GuardFinding(match.Value, file.LineAt(match.Index));
+        }
+    }
 
     /// <summary>
     /// CREATE [UNIQUE] TABLE / INDEX / TRIGGER [IF NOT EXISTS] の直後の名前（名前の代わりに IF が続く形＝文の綴りだけを書いた XmlDoc は拾わない。

@@ -67,6 +67,20 @@ internal static class TableRegistry
             ]
         ),
         new(
+            "SyncEngineFixed",
+            "新しいエンジンの決まった形の行（同じ DB の実行の直列化・保存フックの中の同期・空にした表・引数の検査と、主キーを変えた行と一意な値の回転の blob の運び方と、送信の決着の前の失敗の後の同期と、洗い替えの取得の失敗と、洗い替えと同期の後の再開点）",
+            [
+                Runtime + "SyncEngineFixedRows.cs",
+                Runtime + "SyncEngineFixedHarness.cs",
+                Runtime + "SyncSupportAdoSqliteEngineRuntimeTests.cs",
+            ],
+            [
+                "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_10_Sync.scriban",
+                "src/QuickER.Runtime.Sync",
+                "src/QuickER.Runtime.Sqlite",
+            ]
+        ),
+        new(
             "SyncPlanExpectations",
             "同期の差分と計画の期待の行（SyncPlan のエンジン〔SyncPlan/Fuzz・SyncPlan/CapabilityNet〕が流す。方言ごとの期待と実 DB の段の汎用の表明）",
             ["tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanExpectationRows.cs"],

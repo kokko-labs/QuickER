@@ -1173,6 +1173,47 @@ internal static partial class SourceRuleProbes
                     ),
                 ]
             ),
+            // まだ持たない部分の例外の書式を、文字列・コメントの中のどちらでも番号と部分ごと拾い、大文字小文字の違う綴りと
+            // 前置きの途中で切れた綴りは拾わない
+            new SourceRuleProbe(
+                "sync-engine-pending-markers-in-templates-forms",
+                "sync-engine-pending-markers-in-templates",
+                [
+                    new ProbeFile(
+                        "Probe.scriban",
+                        """
+                        throw new NotSupportedException("QUICKER-SYNC-PENDING:3:refresh");
+                        // QUICKER-SYNC-PENDING marks a part that is not built yet.
+                        throw new NotSupportedException("quicker-sync-pending:4:blob");
+                        throw new NotSupportedException("QUICKER-SYNC-PEND");
+                        const string Prefix = "QUICKER-SYNC-PENDING:";
+                        """,
+                        "QUICKER-SYNC-PENDING:3:refresh",
+                        "QUICKER-SYNC-PENDING",
+                        "QUICKER-SYNC-PENDING:"
+                    ),
+                ]
+            ),
+            new SourceRuleProbe(
+                "sync-engine-pending-markers-in-runtime-forms",
+                "sync-engine-pending-markers-in-runtime",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        internal static class Engine
+                        {
+                            internal const string Marker = "QUICKER-SYNC-PENDING:7:cycle";
+
+                            // QUICKER-SYNC-PENDING
+                            internal const string Other = "QUICKER_SYNC_PENDING";
+                        }
+                        """,
+                        "QUICKER-SYNC-PENDING:7:cycle",
+                        "QUICKER-SYNC-PENDING"
+                    ),
+                ]
+            ),
             // 文字列リテラル（普通・逐語・生・UTF-8）と補間の文字の部分の、前置きを大文字小文字を無視して含む値を拾い、コメント・XmlDoc・
             // 前置きの途中で切れた綴り・識別子は拾わない。.g.cs は読まない
             new SourceRuleProbe(

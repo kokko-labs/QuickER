@@ -462,11 +462,13 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
 - Core の公開の契約 `ILocalRowStore`（`ISqlBatchExecutor` の直後・`_04_RepositoryContractCore.scriban`）。同期のエンジンがローカルの行を、自分が開いた接続の上で、自分が始めたトランザクションの中で読み書きする口。
 - 方言中立。署名は BCL の型（`DbConnection`・`DbException`・`Task`）と `EntityBaseCore` だけで、ドライバの型を名指ししない。
   - 操作は `CreateDedicatedConnection`（プールしない・開く前の接続）・`IsUniqueViolation`（一意な値が取られているか）・`FindAsync`・`ExistsAsync`・`InsertAsync`・`UpdateAsync`（行を上書きして行があったかを返す）・`DeleteAsync`。
+  - 表の全部の主キーの列挙 `ListKeysAsync`（順は決めない）と、DB が返した生のキーの値をエンティティのキーの型へ変える `ConvertKey`（行の読みと同じ変換。行の有無は問わない）。
+  - 除外した無制限バイナリ列の長さ `ReadBinaryLengthAsync`・読み `ReadBinaryAsync`・書き `WriteBinaryAsync`。どれも除外した無制限バイナリ列だけを受け付け（ほかのプロパティは `ArgumentException`）、内容をまとめてメモリに持たずに区切りごとに流す。書きの長さの規則は Repository の Stream アクセサと同じ（長さちょうどのバイト数を要求する）で、失敗した書き込みは列を元のまま残し、呼び出し側のトランザクションは続く。
 - 実装は方言のエンジンの側に置く（今は SQLite の `SqliteLocalRowStore`・→ `src/QuickER.Runtime.Sqlite/CLAUDE.md`「ローカルの行を読み書きする口（SqliteLocalRowStore）」）。
 - どの操作もトランザクションを始めも終わりもしない。呼び出し側が接続を開き、SQL の文（SQLite なら `BEGIN IMMEDIATE`）で始め、同じ接続を全操作へ渡し、自分で終える。
 - 出す条件は `sync_support || runtime_package_export`（同期を生成する構成か、パッケージ用ソース＝`Runtime.g.cs`）。同期を使わない構成の生成物には出ない。
 - 行の対応づけ（値オブジェクト・日時・除外した無制限バイナリ列）は同じエンジンの Repository と同じ。ここだけに別の写しを作らない。
-- ガード：`CodegenConfig/Cases` の行 `exec-sync-local-row-store-on-sqlite`・`exec-sync-quoted-names-local-row-store-on-sqlite`・`exec-sync-local-row-store-value-object-key-on-sqlite`・`exec-sync-local-row-store-string-key-on-sqlite`。公開 API 面は `QuickER.Runtime.approved.txt`。
+- ガード：`CodegenConfig/Cases` の行 `exec-sync-local-row-store-on-sqlite`・`exec-sync-quoted-names-local-row-store-on-sqlite`・`exec-sync-local-row-store-value-object-key-on-sqlite`・`exec-sync-local-row-store-string-key-on-sqlite`・`exec-sync-local-row-store-without-excluded-columns-on-sqlite`。公開 API 面は `QuickER.Runtime.approved.txt`。
 
 ## 値オブジェクト
 

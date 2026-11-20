@@ -111,10 +111,32 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
 
     private ModelDbState _initial = new();
 
-    private SyncModelRun(SyncModelWorld world, CancellationToken ct)
+    private SyncModelRun(SyncModelWorld world, bool passesNotRunnableThrough, CancellationToken ct)
     {
         _world = world;
+        _passesNotRunnableThrough = passesNotRunnableThrough;
         _ct = ct;
+    }
+
+    /// <summary>「流せない」の例外を素通しにするか（<see cref="SyncModelWorldOptions.PassesNotRunnableThrough"/>）</summary>
+    private readonly bool _passesNotRunnableThrough;
+
+    /// <summary>
+    /// 例外を、違反として記録せずにシナリオの外へ素通しにするか（素通しの印が真で、「流せない」の例外のときだけ）
+    /// </summary>
+    private bool PassesThrough(Exception exception) =>
+        _passesNotRunnableThrough && SyncModelDevice.StopsScenario(exception);
+
+    /// <summary>
+    /// 適用の行をローカルの Save フックに飛ばさせる失敗の注入（ApplySkip）を仕掛ける前に、端末のエンジンの適用がフックを通るかを
+    /// 確かめる（通らないエンジンでは注入が働かないので、仕掛ける前に「流せない」で断る）
+    /// </summary>
+    private void RequireSaveHookApply(ModelActor device)
+    {
+        if (!_world.Device(device).Sync.AppliesThroughSaveHooks)
+        {
+            throw SyncModelDevice.Unsupported(nameof(ModelFaultKind.ApplySkip), "engine");
+        }
     }
 
     /// <summary>実行した操作の列（人が読める 1 行 1 操作）</summary>
@@ -146,8 +168,35 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
     )
     {
         options ??= SyncModelWorldOptions.Direct;
-        var run = new SyncModelRun(await SyncModelWorld.CreateAsync(options, ct), ct);
+        var run = new SyncModelRun(
+            await SyncModelWorld.CreateAsync(options, ct),
+            options.PassesNotRunnableThrough,
+            ct
+        );
 
+        // 世界を作った後の準備が例外で抜けたら（「流せない」の例外を含む）、世界（一時の DB・サーバー役）を破棄してから投げる
+        try
+        {
+            await SetUpAsync(run, setup, options, preloads, ct);
+        }
+        catch
+        {
+            await run.DisposeAsync();
+            throw;
+        }
+
+        return run;
+    }
+
+    /// <summary>作った世界へ初期データを入れ、端末を最初の形にする（<see cref="StartAsync"/> の本体）</summary>
+    private static async Task SetUpAsync(
+        SyncModelRun run,
+        IReadOnlyList<ModelWriteOp> setup,
+        SyncModelWorldOptions options,
+        IReadOnlyList<SyncModelPreload>? preloads,
+        CancellationToken ct
+    )
+    {
         foreach (var device in options.ExternalTables)
         {
             run._log.Add($"setup: {device} uses external ISyncTable implementations");
@@ -263,8 +312,6 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                 _ => true
             );
         }
-
-        return run;
     }
 
     /// <summary>
@@ -392,6 +439,11 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                 return await WriteAsync(write) && _world.Faults.Fired == fired;
 
             case ArmFaultOp arm:
+                if (arm.Kind == ModelFaultKind.ApplySkip)
+                {
+                    RequireSaveHookApply(arm.Device);
+                }
+
                 _world.Faults.Arm(arm.Kind, arm.Device);
                 break;
 
@@ -643,6 +695,11 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                     // 洗い替えの結果は自分から変えた行を名指ししない（空として照らす）
                     await EndRunAsync(frame, [], [], threw: false);
                 }
+                catch (Exception ex) when (PassesThrough(ex))
+                {
+                    // 素通しの印が真の世界（控えの Fact）では、「流せない」はシナリオをこの端末で流せないことの知らせ（そのまま外へ出す）
+                    throw;
+                }
                 catch (Exception ex) when (ConsumeExpectedThrow(refresh.Device, ex))
                 {
                     // 期待した例外（結果の面に残した）
@@ -745,6 +802,11 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                     new($"op/unexpected-success:{op.GetType().Name}", $"{op.Describe()} succeeded")
                 );
             }
+        }
+        catch (Exception ex) when (PassesThrough(ex))
+        {
+            // 素通しの印が真の世界（控えの Fact）では、「流せない」はシナリオをこの端末で流せないことの知らせ（そのまま外へ出す）
+            throw;
         }
         catch (Exception ex) when (op.ExpectFailure || InjectedFaultException.IsInjected(ex))
         {
@@ -893,6 +955,11 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         {
             outcome = await _world.SyncAsync(op, _ct);
         }
+        catch (Exception ex) when (PassesThrough(ex))
+        {
+            // 素通しの印が真の世界（控えの Fact）では、「流せない」はシナリオをこの端末で流せないことの知らせ（そのまま外へ出す）
+            throw;
+        }
         catch (Exception ex)
             when (InjectedFaultException.IsInjected(ex)
                 // HTTP 越しでは、サーバー側で起きた注入の例外は 500 の応答として届く（型が変わる）。その実行の間に
@@ -917,16 +984,13 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             // 実行の前の未送信の記録と突き合わせ、記録が消えた行を捨てた行とみなす（N11 の案 1）。決着の理由の根拠も確かめる
             if (settles)
             {
-                await CheckRefusalBasisAsync(
+                var (settled, fulfilled) = await RecordLastWriteWinsSettlementsAsync(
                     op,
                     before!,
-                    await RecordLastWriteWinsSettlementsAsync(
-                        op,
-                        before!,
-                        _lastLocalRowChanges[op.Device]
-                    ),
-                    []
+                    _lastLocalRowChanges[op.Device],
+                    frame.Carried
                 );
+                await CheckRefusalBasisAsync(op, before!, settled, fulfilled);
             }
 
             await ForgetSeenInitialAsync(op.Device);
@@ -1059,19 +1123,24 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                 )
                 .ToList();
 
+            // 競合を報告された行と、持ち越した決定を果たした行は、この実行でサーバーへ届いていない
+            var undelivered = outcome
+                .Conflicts.Select(c => (c.TableName, CanonicalKey(c.TableName, c.KeyText)))
+                .ToList();
+
             if (settles)
             {
-                refusals.AddRange(
-                    await RecordLastWriteWinsSettlementsAsync(op, before, outcome.LocalRowChanges)
+                var (settled, fulfilled) = await RecordLastWriteWinsSettlementsAsync(
+                    op,
+                    before,
+                    outcome.LocalRowChanges,
+                    frame.Carried
                 );
+                refusals.AddRange(settled);
+                undelivered.AddRange(fulfilled);
             }
 
-            await CheckRefusalBasisAsync(
-                op,
-                before,
-                refusals,
-                outcome.Conflicts.Select(c => (c.TableName, CanonicalKey(c.TableName, c.KeyText)))
-            );
+            await CheckRefusalBasisAsync(op, before, refusals, undelivered);
         }
 
         // 実行ごとの照合（根拠の判定と同じく実行の直後に確定する）
@@ -1213,14 +1282,33 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
     /// 送った値を書き込みの履歴の最後の値で代えてはいけない（blob だけを書いた品目は行の履歴に書き手が無く、「削除を書いた」と
     /// 取り違える）。送るものが無くて記録を捨てた行（行ありで削除だけ・行なしで削除なし）は決着ではない。
     /// </para>
+    /// <para>
+    /// 端末のエンジンが決定の持ち越しを宣言し（<see cref="IModelDeviceSync.CarriesServerWinsDecision"/>）、台帳が実行の前から
+    /// 戻せなかった行の決定（<c>_carried</c>）を持っていて、この実行が DiscardedByServerWins を報告した行は、サーバーが書き込みを
+    /// 断ったのではなく、その決定を果たした決着なので、根拠の確認へ渡さない。台帳の決定は宣言に依らず作るので、宣言が偽の
+    /// エンジンの決着は今までどおり根拠を確かめる（期待値から外すのと記録の
+    /// 行は同じに行う。決定の果たし方は実行ごとの照合の <see cref="CheckCarried"/> が照らす）。台帳はテスト側の記録だけで、
+    /// エンジンの状態の表は読まない。
+    /// </para>
+    /// <para>
+    /// 決定を果たした行は送られていない（エンジンはその行を送らずにサーバーの行で戻す）ので、根拠を確かめる行とは別に
+    /// 返す。ほかの行の拒否の根拠を確かめるとき、その行の未送信の付け替え・値の手放しは届いていないものとして数える
+    /// （<see cref="CheckRefusalBasisAsync"/> の届かなかった行）。
+    /// </para>
     /// </remarks>
-    /// <returns>捨てたとみなしたキー（理由はエンジンが返さないので null。根拠の確認へ渡す）</returns>
-    private async Task<
-        List<(string Table, string Key, SyncConflictReason? Reason)>
-    > RecordLastWriteWinsSettlementsAsync(
+    /// <param name="carried">実行の始めに、その端末の戻せなかった行の決定があったキー（<see cref="RunFrame.Carried"/>）</param>
+    /// <returns>
+    /// 捨てたとみなしたキーのうち根拠を確かめるもの（理由はエンジンが返さないので null）と、持ち越した決定を果たしたキー
+    /// （根拠は確かめない・この実行で届かなかった行）
+    /// </returns>
+    private async Task<(
+        List<(string Table, string Key, SyncConflictReason? Reason)> Settled,
+        List<(string Table, string Key)> Fulfilled
+    )> RecordLastWriteWinsSettlementsAsync(
         ModelSyncOp op,
         RunSnapshot before,
-        IReadOnlyList<SyncLocalRowChange> reported
+        IReadOnlyList<SyncLocalRowChange> reported,
+        IReadOnlySet<(string Table, string Key)> carried
     )
     {
         var pendingBefore = before.Pending;
@@ -1231,6 +1319,10 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             .Select(c => (c.TableName, CanonicalKey(c.TableName, c.KeyText)))
             .ToHashSet();
         var settled = new List<(string Table, string Key, SyncConflictReason? Reason)>();
+        var fulfilled = new List<(string Table, string Key)>();
+
+        // 決定を持ち越すと宣言するエンジンだけが、台帳の決定を果たす（宣言が偽のエンジンの決着は、サーバーが断った決着）
+        var carriesDecisions = _world.Device(op.Device).Sync.CarriesServerWinsDecision;
         var remaining = (await _world.Device(op.Device).State.ReadPendingAsync(_ct))
             .SelectMany(row => row.ChangeMarks)
             .ToHashSet();
@@ -1287,10 +1379,25 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             }
 
             set.Add(op.Device);
+
+            // 持ち越した決定を果たした決着は、サーバーが断った理由を持たない
+            if (
+                carriesDecisions
+                && carried.Contains((row.Table, row.Key))
+                && discarded.Contains((row.Table, row.Key))
+            )
+            {
+                _log.Add(
+                    $"  -> carried decision fulfilled {ModelTables.Short(row.Table)} key={row.Key}"
+                );
+                fulfilled.Add((row.Table, row.Key));
+                continue;
+            }
+
             settled.Add((row.Table, row.Key, null));
         }
 
-        return settled;
+        return (settled, fulfilled);
     }
 
     /// <summary>後勝ち＋ServerWins の upsert の決着（理由はエンジンが返さない）を数え・名指しするときの理由の名前</summary>
@@ -1445,8 +1552,8 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             .Select(h => (h.Table, h.Key))
             .ToHashSet();
         var pending = before.Pending.Select(e => (e.Table, e.Key)).ToHashSet();
-        // この実行で届かなかった行（理由を問わず競合になった行と決着させた行）。その行の付け替え・値の手放しは届いて
-        // いないので、根拠を打ち消さない
+        // この実行で届かなかった行（理由を問わず競合になった行・決着させた行・持ち越した決定を果たした行）。その行の
+        // 付け替え・値の手放しは届いていないので、根拠を打ち消さない
         var refused = refusals.Select(r => (r.Table, r.Key)).Concat(conflicted).ToHashSet();
 
         // その実行が送る表（Versioned は版なしの表を送らない・除外した表も送らない）。範囲外の表の未送信の付け替え・
@@ -2895,21 +3002,34 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             .ToList();
 
         var inner = frames.FirstOrDefault() ?? "?";
+        // 新しいエンジンの型（TrackedSync で始まる型と、表の部品の型を消した面 ITrackedSyncTable）も、今のエンジンの型と同じ
+        // 「同期の型」として数える
         var sync =
             frames.FirstOrDefault(f =>
                 f.StartsWith("Sync", StringComparison.Ordinal)
                 || f.StartsWith("VersionlessSync", StringComparison.Ordinal)
+                || f.StartsWith("TrackedSync", StringComparison.Ordinal)
+                || f.StartsWith("ITrackedSyncTable.", StringComparison.Ordinal)
             ) ?? "?";
 
         // 表の公開の入口（ダウンロード・ServerWins の適用・洗い替え・アップロード・削除伝搬のどれから来たか）。表の型
-        // （版あり・版なし）は落とす＝同じ不具合が表の種類で別の署名へ割れないように
+        // （版あり・版なし）は落とす＝同じ不具合が表の種類で別の署名へ割れないように。新しいエンジンは表ごとの入口を持たず、
+        // エンジンの段（取得と適用・送信・洗い替え）が入口に当たる
         var entry =
             frames.LastOrDefault(f =>
                 (
-                    f.StartsWith("SyncTableBase.", StringComparison.Ordinal)
-                    || f.StartsWith("SyncTable.", StringComparison.Ordinal)
-                    || f.StartsWith("VersionlessSyncTable.", StringComparison.Ordinal)
-                ) && EntryMethods.Contains(f[(f.IndexOf('.', StringComparison.Ordinal) + 1)..])
+                    (
+                        f.StartsWith("SyncTableBase.", StringComparison.Ordinal)
+                        || f.StartsWith("SyncTable.", StringComparison.Ordinal)
+                        || f.StartsWith("VersionlessSyncTable.", StringComparison.Ordinal)
+                    ) && EntryMethods.Contains(f[(f.IndexOf('.', StringComparison.Ordinal) + 1)..])
+                )
+                || (
+                    f.StartsWith("TrackedSyncEngine.", StringComparison.Ordinal)
+                    && TrackedEntryMethods.Contains(
+                        f[(f.IndexOf('.', StringComparison.Ordinal) + 1)..]
+                    )
+                )
             ) ?? sync;
         // 公開の入口の本体を分けた内部メソッド（〜CoreAsync）は、公開の名前へそろえる（実装の分け方で署名が割れないように）
         var entryMethod = entry[(entry.IndexOf('.', StringComparison.Ordinal) + 1)..]
@@ -2927,6 +3047,19 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         "RefreshAsync",
         "RefreshCoreAsync",
         "UploadAsync",
+    };
+
+    /// <summary>
+    /// 新しいエンジン（TrackedSyncEngine）の入口として名指しするメソッド：エンジンの段（取得と適用・送信）と、公開の入口の
+    /// 単独の取得・送信・洗い替え。同期の実行（SyncAsync）は段を順に呼ぶだけなので数えない（段の名前が入口になる）
+    /// </summary>
+    private static readonly HashSet<string> TrackedEntryMethods = new(StringComparer.Ordinal)
+    {
+        "DownloadAsync",
+        "DownloadCoreAsync",
+        "RefreshAsync",
+        "UploadAsync",
+        "UploadCoreAsync",
     };
 
     /// <summary>「名前空間.型.メソッド」から「型.メソッド」を取り出す（入れ子の型・状態機械・ラムダの名前は元へ戻す）</summary>

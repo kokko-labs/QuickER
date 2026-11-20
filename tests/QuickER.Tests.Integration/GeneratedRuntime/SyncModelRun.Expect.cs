@@ -97,6 +97,24 @@ internal sealed partial class SyncModelRun
                 return true;
             }
 
+            case WhenEngineDeclaresOp engine:
+            {
+                var holds = engine.Holds(_world.Device(engine.Device).Sync);
+                _log.Add(
+                    $"  -> the engine of {engine.Device} declares {engine.Declaration}={(holds ? "true" : "false")}"
+                );
+
+                foreach (var inner in holds ? engine.IfTrue : engine.IfFalse)
+                {
+                    if (!await ExecuteAsync(inner))
+                    {
+                        break;
+                    }
+                }
+
+                return true;
+            }
+
             case BulkAddFoldersOp folders:
                 await BulkWriteAsync(
                     folders.Actor,
@@ -110,11 +128,6 @@ internal sealed partial class SyncModelRun
                             })
                             .ToList(),
                     (device, rows) => device.RawFolders.BulkInsertAsync(rows, _ct),
-                    row =>
-                        (
-                            ModelTables.Folders,
-                            GeneratedSyncTables.ModelFolder.FormatKey(row.FolderId)
-                        ),
                     (device, rows) => device.Folders.BulkInsertAsync(rows, _ct),
                     async rows =>
                     {
@@ -142,7 +155,6 @@ internal sealed partial class SyncModelRun
                             })
                             .ToList(),
                     (device, rows) => device.RawItems.BulkInsertAsync(rows, _ct),
-                    row => (ModelTables.Items, GeneratedSyncTables.ModelItem.FormatKey(row.ItemId)),
                     (device, rows) => device.Items.BulkInsertAsync(rows, _ct),
                     async rows =>
                     {
@@ -228,6 +240,7 @@ internal sealed partial class SyncModelRun
                 return true;
 
             case ArmApplySkipOp skip:
+                RequireSaveHookApply(skip.Device);
                 _world.Faults.ArmApplySkip(skip.Device, skip.Table, skip.KeyText);
                 return true;
 
@@ -242,7 +255,18 @@ internal sealed partial class SyncModelRun
                 return true;
 
             case LocalSqlOp sql:
-                await LocalSqlAsync(sql.Device, [sql.Sql]);
+                RequireJournalForSql(sql.Device, nameof(LocalSqlOp), sql.Sql);
+
+                if (sql.Untracked)
+                {
+                    await _world
+                        .Device(sql.Device)
+                        .WriteUntrackedAsync(() => LocalSqlAsync(sql.Device, [sql.Sql]), _ct);
+                }
+                else
+                {
+                    await LocalSqlAsync(sql.Device, [sql.Sql]);
+                }
 
                 // 同期の補助の表に触れる文はエンジンの記録を直接変える（照合 4 はその端末を決められないとして数える）
                 if (sql.Sql.Contains("quicker_sync", StringComparison.OrdinalIgnoreCase))
@@ -325,6 +349,8 @@ internal sealed partial class SyncModelRun
 
             case ExpectLocalSqlOp expectSql:
             {
+                RequireJournalForSql(expectSql.Device, nameof(ExpectLocalSqlOp), expectSql.Sql);
+
                 await using var connection = new SqliteConnection(
                     _world.Device(expectSql.Device).ConnectionString
                 );
@@ -352,6 +378,27 @@ internal sealed partial class SyncModelRun
     }
 
     /// <summary>端末のローカル DB へ、外部キーの検査を切って文を順に流す（記録しない）</summary>
+    /// <summary>
+    /// 製品のジャーナル（<c>SyncJournal.EnsureCreatedAsync</c>）が端末の DB に作る補助の表 4 つの名前（記録・コピー待ち・受理記録・
+    /// 降ろし直す約束）。生の SQL がこのどれかを名指しする手は、製品のジャーナルを持つ端末だけの手として扱う
+    /// </summary>
+    private static readonly Regex JournalTableNames = new(
+        @"\bquicker_sync_(?:journal|blob_pending|ack|row_pending)\b",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase
+    );
+
+    /// <summary>
+    /// 生の SQL が製品のジャーナルの補助の表を名指しするなら、SQL を流す前に <see cref="SyncModelDevice.RequireJournal"/> を通す
+    /// （持たない端末では「流せない」で断る。手の名前は「手:表」）
+    /// </summary>
+    private void RequireJournalForSql(ModelActor device, string hand, string sql)
+    {
+        if (JournalTableNames.Match(sql) is { Success: true } table)
+        {
+            _ = _world.Device(device).RequireJournal($"{hand}:{table.Value}");
+        }
+    }
+
     private async Task LocalSqlAsync(ModelActor device, IEnumerable<string> statements)
     {
         // 専用の接続（外部キーの検査を切り、プールしない＝プールの接続の PRAGMA を変えない）
@@ -400,14 +447,13 @@ internal sealed partial class SyncModelRun
     }
 
     /// <summary>
-    /// 一括の書き込みを流し、変わった行を書き手の履歴へ積む（記録しない書き込みはキーに印を付け、書いた行ごとに端末の未送信の
-    /// 記録から忘れさせる）
+    /// 一括の書き込みを流し、変わった行を書き手の履歴へ積む（記録しない書き込みはキーに印を付け、端末の記録しない書き込みの口
+    /// <see cref="SyncModelDevice.WriteUntrackedAsync"/> を通して流す）
     /// </summary>
     /// <param name="actor">書き手</param>
     /// <param name="mode">書き方</param>
     /// <param name="build">書く行を作る</param>
     /// <param name="raw">記録しない書き込み</param>
-    /// <param name="rawKey">記録しない書き込みで書いた行の、表の名前と記述子の書式のキーのテキスト</param>
     /// <param name="journaled">記録する書き込み</param>
     /// <param name="server">サーバーの他者の書き込み</param>
     private async Task BulkWriteAsync<TEntity>(
@@ -415,7 +461,6 @@ internal sealed partial class SyncModelRun
         ModelBulkMode mode,
         Func<List<TEntity>> build,
         Func<SyncModelDevice, List<TEntity>, Task<int>> raw,
-        Func<TEntity, (string Table, string KeyText)> rawKey,
         Func<SyncModelDevice, List<TEntity>, Task<int>> journaled,
         Func<List<TEntity>, Task> server
     )
@@ -438,13 +483,7 @@ internal sealed partial class SyncModelRun
             case ModelBulkMode.Raw:
             {
                 var device = _world.Device(actor);
-                await raw(device, rows);
-
-                foreach (var (table, keyText) in rows.Select(rawKey))
-                {
-                    await device.ForgetUntrackedAsync(table, keyText, _ct);
-                }
-
+                await device.WriteUntrackedAsync(() => raw(device, rows), _ct);
                 break;
             }
 
@@ -522,6 +561,11 @@ internal sealed partial class SyncModelRun
 
             // 洗い替えの結果は自分から変えた行を名指ししない（空として照らす）
             await EndRunAsync(frame, [], [], threw: false);
+        }
+        catch (Exception ex) when (PassesThrough(ex))
+        {
+            // 素通しの印が真の世界（控えの Fact）では、「流せない」はシナリオをこの端末で流せないことの知らせ（そのまま外へ出す）
+            throw;
         }
         catch (Exception ex) when (ConsumeExpectedThrow(device, ex))
         {

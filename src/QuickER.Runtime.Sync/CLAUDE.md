@@ -500,12 +500,74 @@
 - 元の登録がシングルトン（インスタンスの登録を含む）なら、デコレータはスコープで登録し、内側はすべてのスコープで 1 つを共有する（内側は専用のキーのシングルトンとして登録し直し、コンテナがルートから 1 回だけ作って元どおりに持つ。インスタンスならそのインスタンス）。デコレータはスコープの `SyncJournal` に記録するので、シングルトンのままだとスコープを検査するプロバイダがルートからの解決を断り、検査しないプロバイダはすべてのスコープで 1 つのジャーナルを掴む。ガード：構成の行列の因子 `LocalKey` の水準 `UnkeyedInstance`（ローカルの同期する表のリポジトリをインスタンスの登録にした行。行列は `ValidateScopes` つきのプロバイダで解決する。mutation 実証済み）。
 - ガード：`SyncConfigMatrixRuntimeTests`（非 keyed の行を含む同期の構成の行列）・`SyncLocalSaveHookRegistrationTests`・`SyncConstructionExclusionTests`。
 
+## 新しいエンジン（TrackedSyncEngine）
+
+### 新しいエンジンの位置づけ
+
+- `TrackedSyncEngine`・`TrackedSyncTable<TEntity, TKey>`（公開）と `TrackedSyncState`・`ITrackedSyncTable`（internal）は、同期の固定のエンジン（このパッケージ）にある。ローカルの変更はトリガーの記録（「ローカルの変更の記録（SyncLocalTracking）」）から読み、ジャーナル・受理記録・記録デコレータを使わない。
+- DI の登録は使わない（`AddGeneratedSyncEngine` は今のエンジン `SyncEngine` を組む）。利用側が、記述子と差分ソースと `ILocalRowStore`（→ `src/QuickER.Runtime/CLAUDE.md`「接続を指定して行を読み書きする契約（ILocalRowStore）」）で `TrackedSyncTable` を表ごとに作り、エンジンへ渡す。実行の前に `SyncLocalTracking.Ensure` で記録の仕組みを置いておく。
+- 同期の固定の側は SQLite のドライバの型を名指ししない（接続は `ILocalRowStore.CreateDedicatedConnection` から得る）。
+- 状態の表（`quicker_sync_state`・`quicker_sync_row`・`quicker_sync_table`）の読み書きの SQL は `TrackedSyncState` の 1 か所にある。エンジンの本体と表の側に写しを置かない。
+
+### 新しいエンジンの段の順と適用
+
+- 1 回の同期の段は、送信 → 取得 → 適用 → blob の写しの順。取得の上限は 1 回の取得ごとに 1 つ取り、範囲の表どうしで共有する（表ごとに取ると、前の表の上限の後に書かれた親が外れたまま、後ろの表の上限の下の子だけが降りる）。
+- 適用は、外部キーの検査を切った専用の接続の 1 つの `BEGIN IMMEDIATE` のトランザクションで、適用中の印を立てて書く（トリガーが自分の書き込みを記録しない）。中では、全部の表の削除伝搬を書き込みの前に行い、行を書き、外部キーを確かめ、表ごとの再開点を保存する（全部か無しか）。
+  - 削除伝搬を書き込みの前に置かないと、消える行が持つ一意な値を書き込みが取れず、同じ適用で収束しない。
+  - 一意な値の重なりは、取得した集合の中で後回しと回転（削除して入れ直す）で解く。集合の外の行をキーで読みに行く解決役は持たない。
+  - 外部キーの違反は、試行を巻き戻してから、適用の前からある違反（巻き戻した後の DB で読み直す）を除き、書いた子を保留にするか消した親を残す（主キーでない列への外部キーは、その列の値で親を引き直す）。どれにも当たらない違反が残れば説明できない違反として `InvalidOperationException`。試行の数には上限がある。
+  - 保留した行（外部キーと一意な値で保留した行）がある取得は打ち切りを報告し、打ち切りがあれば、上限を取り直して再開点からもう 1 回だけ取得・適用する（2 回目は捨てる記録を渡さない）。2 回目の打ち切りは結果に残る。
+  - 再開点は保留した最初の行の手前までにする。保留の行を越えて進めると、その行が二度と降りない。
+- 適用はローカルの Save フックを呼ばない（`ILocalRowStore` で書く）。
+- 再開点は表ごとに状態の表（`quicker_sync_table`）に持ち、ローカルの行の版の列からは導かない。洗い替えも同期も再開点を書く。
+- 未送信の行で表の取得を打ち切らない。未送信の行はサーバーの行で上書きせずにローカルの内容を残す（ローカルの行が無く、サーバーがそのキーを知らないときだけサーバーの行が入る）。サーバーが知らないキーで端末が作った行は、その行の手前で表の再開点を止める（越えると、ローカルの行が消えた後にサーバーの行が二度と降りない）。
+- ガード：控え（`SyncSupportAdoSqliteEngineRuntimeTests.ScenarioLedgerDrift_MatchesRecord`。もう 1 回の取得は行 `fk-parent-created-between-table-fetches-arrives-in-same-sync`）・乱数の種（`SyncSupportAdoSqliteEngineRuntimeTests.RandomSeeds_ConvergeWithoutLoss`）・`SyncEngineFixedRows`（行 `refresh-and-sync-leave-nothing-to-fetch-again`・`unsent-insert-then-delete-of-unknown-key-takes-server-row-on-download`）。
+
+### 新しいエンジンの送信
+
+- 送り方は今のエンジンと同じ意味論（版で守る更新・後勝ちの上書き・LocalWins の強制・Versioned＋ServerWins は何も送らずに範囲の未送信を捨てる）。巡に分けて送り、断られた書き込みは進展がある限り次の巡へ回し、残りはサーバーの状態から理由（親が無い・参照する行がある・一意な値が取られている）を確かめる。理由の無い失敗はそのまま投げる。
+- 決着は、書き手が受け入れた行に書き戻した版を基準の版にする。サーバーを読み直すのは、書き手が版を書き戻さなかったときと、無制限バイナリ列を送った後（列の書き込みも版を進める）だけ。書き込みの後に読み直した版は、後から書いたほかの書き手の版でありうるので、基準にすると、その書き手の内容を競合なしに上書きする。
+- 行の変わる印（連番）が送る前に読んだものと同じときだけ未送信を外し、ローカルの行の版の列を基準の版に合わせる（適用中の印を立てて書く。行の内容と除外した無制限バイナリ列には触らない）。送る間にアプリが書いた変更は未送信のまま残る。
+- ServerWins が戻した行の版の列は、戻したサーバーの行の版になる。
+- ServerWins の実行が戻せなかった行の決定は、行の状態に印（`sw_seq`）を残して後の実行へ持ち越す（印の後に編集が無ければ、後の実行がその行を送らずにサーバーの行で戻す）。
+- 持ち越した決定は、後の書き込み（無制限バイナリ列だけの書き込みを含む）が行の連番を進めれば行ごと外れ、次の同期は行を列と一緒に送る（サーバーが知らない行なら挿入として全列を送る）。
+- ガード：控えと乱数の種（実行ごとの照合 `5/carry:*`・`5/stale-overwrite`・`5/local-discard`）・控えの行 `blob-only-edit-after-serverwins-discarded-unknown-insert-uploads-row-and-blob`・`SyncEngineFixedRows`（行 `failure-after-server-write-before-settle-is-reported-until-local-wins`）。
+
+### 新しいエンジンの無制限バイナリ列
+
+- 送る列は、サーバーが挿入として受けた行なら全列、それ以外は端末が書いた列。列を送る前に行の書き込みの版を仮に記録し、列の送信が失敗しても次の実行が自分の書き込みを競合と取り違えない。
+- 降ろした行の列は写し待ち（`blob_owed`）に記録し、列を運ぶ実行（`IncludeUnboundedBinary`）が、取得の前（前の実行の残り）と適用の後に、一時ファイルを通して行ごとに短いトランザクションで写す（内容をメモリに持たない）。その後に端末が書いた未送信の列は写さず、サーバーで NULL の列はローカルの列も空にし、サーバーかローカルに行が無ければ写し待ちだけを外す。列を運ばない実行は写し待ちを残す。
+- 一意な値の回転で入れ直した行は、端末の blob を保つ。
+- ガード：控えの `blob-*` の行（写さない列は `blob-owed-copy-keeps-unsent-local-blob`）・`SyncEngineFixedRows`（行 `primary-key-changed-row-sends-its-blob`・`unique-value-rotation-keeps-local-blobs`）。
+
+### 新しいエンジンの洗い替え
+
+- 拒否の順は、引数（取得の大きさ・除外の型）→ blob の損失 → 範囲の外からの参照 → 未送信（`Force` で捨てる）。`Force` で抜けられない拒否を先に出し、どれも何も変えない。
+- 表を空にせず、上限までのサーバーの行で置き換える（同じ適用でサーバーに無い行を消す）。件数は、消した行（サーバーに無かった行）・書いた行・捨てた未送信の行を数える。
+- blob を捨てる洗い替えは、範囲の表の全行の除外した無制限バイナリ列を適用の中で空にし（NOT NULL の列は空の値、ほかは NULL）、写し待ちを消す。洗い替えが捨てない未送信の行だけは残す。
+- 端末とサーバーの両方に無い行の状態を消す（残すと、同じキーで作った行を更新として送り、MissingOnServer になる）。
+- 保留で取り残した行は、もう 1 回の取得で取り直す。取り直しても残れば `InvalidOperationException`。取得の失敗は、端末・未送信・行の状態の表を洗い替えの前のまま残す。もう 1 回の取得は上限を取り直すので、上限を実行の始めに固定するサーバーでも、最初の取得の後に変わった保留の相手の行が同じ洗い替えに入る（ガード：`SyncSupportAdoSqlServerEngineRuntimeTests.CeilingScenario_MatchesDirect` の割り込みの網の行 `interrupt-server-BeforeServerFetch-unique-holder-after-taker-update-*-refresh` の族＝エンジンの宣言 `RefetchesHeldRowsInSameRun` の真の枝）。
+- ガード：控えの `refresh-*`・`blob-refresh-*` の行（`refresh-refusal-order-outside-reference-before-pending`・`refresh-refusal-order-blob-loss-before-outside-reference`・`refresh-force-forgets-row-gone-on-both-sides-and-same-key-is-inserted`・`blob-refresh-discard-leaves-no-blob-on-row-changed-after-ceiling` ほか）・`SyncEngineFixedRows`（行 `refresh-fetch-failure-leaves-device-as-before`・`invalid-arguments-refuse-before-anything`）。
+
+### 新しいエンジンの実行の入口
+
+- 同じ DB への実行は、プロセスの中で DB のファイルごとのロックで 1 本ずつ流す（メモリの DB はエンジンごと）。
+- 実行の前に、同期する表が同期の外で空にされていないかを確かめ、空なら `SyncLocalTableEmptiedException` で断る（再開点が進んだまま空の表を受け入れると、サーバーの行が端末へ二度と降りない。洗い替えで抜ける）。
+- 引数（取得の大きさが 0 以下・同期しない型の除外）は、同期・送信だけ・受信だけ・洗い替えの全部の入口で、何かをする前に断る。
+- ガード：`SyncEngineFixedRows`（行 `runs-on-same-database-are-serialized`・`emptied-table-refuses-every-entry`・`sync-inside-save-hook-fails-on-lock-wait-and-leaves-nothing`・`invalid-arguments-refuse-before-anything`）。
+
+### 新しいエンジンの既知の限界
+
+- 同じ DB へ 2 つのプロセスから同時に同期する形は直列にしない（ロックはプロセスの中だけ）。
+- サーバーへの書き込みが通った後に決着が失敗すると、次の Collect は自分が書いた行を相手に ModifiedOnServer を報告し続け、LocalWins の同期で収束する（docs の既知の制限）。ガード：`SyncEngineFixedRows`（行 `failure-after-server-write-before-settle-is-reported-until-local-wins`）。
+
 ## ガードテストの一覧
 
 - 決定的なシナリオは同期のモデル（`SyncModelRuntimeTests`＝直結・`SyncModelHttpRuntimeTests`＝HTTP・`SyncModelSqlServerRuntimeTests`＝実 SQL Server・`SyncSupportRemoteAdoSqlServerRuntimeTests`＝HTTP × 実 SQL Server、SQL Server だけの既知の失敗は `SyncModelSqlServerRuntimeTests.SqlServerOnly`）が流す。転送の軸の目印は `ISyncModelTransportTests`。行の分割は `SyncModelRuntimeTests.ScenarioParts_CoverEveryScenarioOncePerTransport`、割り込みのシナリオの全積は `SyncModelRuntimeTests.InterruptScenarios_CoverEveryPointAndShape`、乱数の種の照合の正規化は `SyncModelRuntimeTests.Family`。仕組みは `tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`「双方向同期のテスト」。
 - エンジンの外の仕組み（並行のロックと割り込み・記録の文の形・全書き込み入口の記録・登録簿なしの例外・別の DB の保存のフック・NULL 許容の計算列・サーバーで NULL になった blob・知らない除外の型・一覧に載らない参照）は `SyncRuntimeTestsBase` と転送別の派生 `SyncSqliteRuntimeTests`（直結・サーバー役も SQLite）・`SyncHttpRuntimeTests`（in-process Kestrel）。
 - 実 SQL Server の固有は `SyncSqlServerRuntimeTests`（NULL を許す一意制約・洗い替えの内容の一致の計測）と `SyncSqlServerHttpRuntimeTests`。
 - 値オブジェクト×同期は `SyncVoRuntimeTests`（オフライン新規行のアップロード・キーだけのスタブのグラフ削除記録・版書き戻し）。
+- 新しいエンジン（「新しいエンジン（TrackedSyncEngine）」）は、新しいエンジンの端末の 3 つのクラス（`SyncSupportAdoSqliteEngineRuntimeTests`＝直結・控え・乱数の種・決まった形の行の表 `SyncEngineFixedRows`／`SyncSupportRemoteAdoSqliteEngineRuntimeTests`＝HTTP の乱数の種／`SyncSupportAdoSqlServerEngineRuntimeTests`＝実 SQL Server の乱数の種と上限に依る決定的なシナリオ）。控えは `sync-engine-scenario-ledger.md`、`differs` の理由の宣言は `SyncModelEngineScenarioDifferences`。仕組みは `tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`「新しいエンジンの端末で流す同期のモデル」。
 - エンジンがローカルの行を読み書きする口 `ILocalRowStore`（Core）と SQLite の実装 `SqliteLocalRowStore` は `CodegenCaseTests` の行 `exec-sync-local-row-store-*`（`src/QuickER.Runtime.Sqlite/CLAUDE.md`「ローカルの行を読み書きする口（SqliteLocalRowStore）」）。
 - ローカルの変更の記録と開くたびの確認は `SyncSupportAdoSqliteTriggerRuntimeTests`（行の表 `SyncTriggerRecordingRows`・`SyncTriggerGuardRows`。コンテナなし。端末の組み立ては `SyncTriggerHarness`。仕組みは `tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`「同期のトリガーのテスト」）。
 - 構成の行列は `SyncConfigMatrixRuntimeTests`、構築時除外は `SyncConstructionExclusionTests`、洗い替えの計測は `SyncRefreshBenchmarkRuntimeTests`、閉包は `SyncKeptRowsTests`、キーのテキストは `SyncKeyTextRuntimeTests`・`CodegenCaseTests` の行 `probe-sync-key-text-decimal-key`、生成は `SyncSupportGenerationTests`・`CodegenCaseTests` の行 `diag-sync-fixed-length-key-*`（上の 6 行）、フックの登録簿は `SyncLocalSaveHookRegistrationTests`。

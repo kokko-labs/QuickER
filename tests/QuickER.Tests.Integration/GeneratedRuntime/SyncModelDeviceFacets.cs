@@ -28,6 +28,27 @@ internal interface IModelDeviceSync
     /// 判定役は、真のエンジンだけ、持ち越した決定の内容をサーバーへ書くことを違反にし、果たされた決定をその行の期待から外す
     /// </summary>
     bool CarriesServerWinsDecision { get; }
+
+    /// <summary>
+    /// サーバーの行の適用が、端末のローカルの Save フックを通るエンジンか（真＝適用はリポジトリのグラフ保存で書き、フックが行を
+    /// 飛ばせる。偽＝適用はフックを呼ばない）。偽のエンジンの端末では、適用の行をフックに飛ばさせる失敗の注入（ApplySkip）を
+    /// 仕掛ける手を「流せない」で断る
+    /// </summary>
+    bool AppliesThroughSaveHooks { get; }
+
+    /// <summary>
+    /// ダウンロードの再開点を、端末のローカルの行の版の列（ミラー版）の最大値から導くエンジンか（真＝版の列を書くのは
+    /// ダウンロードだけで、ServerWins で戻した行の版の列は据え置く。偽＝再開点は表ごとに別に持ち、戻した行の版の列は
+    /// サーバーの版になる）。決まった形の行の期待の手 <see cref="WhenEngineDeclaresOp"/> が枝を選ぶ
+    /// </summary>
+    bool DerivesResumePointFromLocalVersions { get; }
+
+    /// <summary>
+    /// 同期と洗い替えの取得で保留して取り残した行を、同じ実行の中で上限を取り直してもう 1 回取得するエンジンか（真＝1 回目の
+    /// 適用で保留した行と、その間にサーバーで変わった行が同じ実行に入る。偽＝取り残した行は後の実行が降ろす）。決まった形の行の
+    /// 期待の手 <see cref="WhenEngineDeclaresOp"/> が枝を選ぶ
+    /// </summary>
+    bool RefetchesHeldRowsInSameRun { get; }
 }
 
 /// <summary>
@@ -75,6 +96,15 @@ internal sealed class ProductModelDeviceSync(SyncEngine engine) : IModelDeviceSy
 {
     /// <summary>製品のエンジンは、戻せなかった行の記録を残し、後の実行がその行を送る（持ち越さない）</summary>
     public bool CarriesServerWinsDecision => false;
+
+    /// <summary>製品のエンジンは、サーバーの行をリポジトリのグラフ保存で適用する（ローカルの Save フックが走る）</summary>
+    public bool AppliesThroughSaveHooks => true;
+
+    /// <summary>製品のエンジンは、再開点をローカルの行のミラー版の最大値から導く</summary>
+    public bool DerivesResumePointFromLocalVersions => true;
+
+    /// <summary>製品のエンジンは、取得を同じ実行の中で取り直さない（打ち切った行は後の実行が降ろす）</summary>
+    public bool RefetchesHeldRowsInSameRun => false;
 
     public async Task<ModelSyncOutcome> RunAsync(
         ModelSyncKind kind,
@@ -225,11 +255,11 @@ internal sealed record SyncModelDeviceParts
     public required IModelDeviceSyncState State { get; init; }
 
     /// <summary>
-    /// 記録しない書き込み（Raw 系のリポジトリで書いた行）を、端末の未送信の記録から忘れさせる口（引数は表の名前と、その表の
-    /// 記述子 <c>GeneratedSyncTables.*</c> の <c>FormatKey</c> の書式のキーのテキスト）。同期のモデルは記録しない書き込みの後、
-    /// 書いた行ごとに呼ぶ。省略なら何もしない（記録デコレータの内側のリポジトリで書く端末は、記録しない書き込みが記録を作らない）
+    /// 記録しない書き込み（Raw 系のリポジトリ・判定役の包みの生の SQL）を流す関数を受け取り、流す間は端末の未送信の記録が
+    /// 残らないように流す口。前からある未送信の記録は変えない（記録を消すのは <see cref="ClearPendingRecordsAsync"/> の別の
+    /// 手順）。省略なら関数をそのまま流す（記録デコレータの内側のリポジトリ・生の SQL が記録を作らない端末）
     /// </summary>
-    public Func<string, string, CancellationToken, Task>? ForgetUntrackedAsync { get; init; }
+    public Func<Func<Task>, CancellationToken, Task>? WriteUntrackedAsync { get; init; }
 
     /// <summary>
     /// 1 行（表の名前とキーのテキスト）の未送信の記録を全部消す口（判定役の対照の行の包みが、エンジンが記録を捨てた結果を作るのに

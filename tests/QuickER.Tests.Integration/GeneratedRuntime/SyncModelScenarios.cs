@@ -2081,9 +2081,11 @@ internal static partial class SyncModelScenarios
             var row = $"{target} parent=null name=p-interrupt";
 
             // 洗い替え × 持ち主 × 取得の前の点 × 更新：上限を実行の始めに固定するサーバー役（実 SQL Server）では、割り込みの
-            // 版は上限より後なので洗い替えに入らない。洗い替えは表を空にしてから入れるので一意な値の持ち主の読み直しも走らず
-            // （親の前段は親の解決役がキーで読み直すので拾う）、洗い替えの直後の端末に対象の行は無い。次の同期で降りる
-            // （取りこぼさない）ことを表明してから、上限を持たないサーバー役と同じ後段へ進む
+            // 版は上限より後なので、洗い替えの最初の取得に入らない。保留した行を同じ実行の中で取り直さないエンジンは、表を空に
+            // してから入れるので一意な値の持ち主の読み直しも走らず（親の前段は親の解決役がキーで読み直すので拾う）、洗い替えの
+            // 直後の端末に対象の行は無く、次の同期で降りる（取りこぼさない）。取り直すエンジンは表を空にしないので、値を取る行が
+            // まだ値を持つ対象の行で保留され、上限を取り直したもう 1 回の取得が対象の行の新しい版を同じ洗い替えに入れる（次の
+            // 同期は何も降ろさない）。どちらも、上限を持たないサーバー役と同じ後段へ進む
             if (
                 run == InterruptRun.Refresh
                 && point == ModelInterruptPoint.BeforeServerFetch
@@ -2094,10 +2096,22 @@ internal static partial class SyncModelScenarios
                 ops.Add(
                     new WhenServerFixesCeilingOp(
                         [
-                            Expect.Rows(D1, ModelTables.Folders).Absent($"{target} *"),
-                            Sync(D1, policy: policy),
-                            Expect.Result(D1).Contains("downloaded=1").Absent("conflict *"),
-                            Expect.Rows(D1, ModelTables.Folders).Contains(row),
+                            new WhenEngineDeclaresOp(
+                                D1,
+                                EngineDeclaration.RefetchesHeldRowsInSameRun,
+                                [
+                                    Expect.Rows(D1, ModelTables.Folders).Contains(row),
+                                    Sync(D1, policy: policy),
+                                    Expect.Result(D1).Contains("downloaded=0").Absent("conflict *"),
+                                    Expect.Rows(D1, ModelTables.Folders).Contains(row),
+                                ],
+                                [
+                                    Expect.Rows(D1, ModelTables.Folders).Absent($"{target} *"),
+                                    Sync(D1, policy: policy),
+                                    Expect.Result(D1).Contains("downloaded=1").Absent("conflict *"),
+                                    Expect.Rows(D1, ModelTables.Folders).Contains(row),
+                                ]
+                            ),
                         ],
                         []
                     )

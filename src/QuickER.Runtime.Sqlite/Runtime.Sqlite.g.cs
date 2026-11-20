@@ -183,6 +183,17 @@ public sealed class ObservedSqlConnectionFactory : ISqlConnectionFactory
 /// duplicate primary key (1555) or a unique constraint violation (2067), and false for every other constraint
 /// (<c>NOT NULL</c>, <c>CHECK</c>, foreign keys) and every other error.
 /// </para>
+/// <para>
+/// The binary column operations cannot go through <c>UnboundedBinaryColumnEngine</c>, which either joins an ADO.NET
+/// transaction object or starts a transaction of its own; inside a transaction started with an SQL statement the latter
+/// fails. They run the same steps on the connection instead, and these rules must stay the same as the engine's: the
+/// rowid and the NULL test are read in one statement; the blob is opened with the database and the table taken apart by
+/// <c>EntitySaveMetadata.SplitTableName</c> (<c>main</c> for a name without a '.'); a write resolves the length with
+/// <c>UnboundedBinaryColumns.ResolveWriteLength</c>, allocates it with <c>zeroblob</c> and copies through
+/// <c>UnboundedBinaryColumns.WithExactLength</c>, inside a savepoint it goes back to on failure (as the engine's enlisted
+/// write does); a null source sets the column to NULL. Called outside a transaction, against the contract, the savepoint
+/// of a write acts as a transaction of its own and the write commits when it ends.
+/// </para>
 /// </remarks>
 public sealed class SqliteLocalRowStore : ILocalRowStore
 {
@@ -337,6 +348,307 @@ public sealed class SqliteLocalRowStore : ILocalRowStore
         var affected = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         return affected > 0;
     }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<object>> ListKeysAsync<TEntity>(
+        DbConnection connection,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new()
+    {
+        var sqlite = AsSqlite(connection);
+        var metadata = EntitySaveMetadata.For(typeof(TEntity));
+
+        await using var command = new SqliteCommand(
+            $"SELECT {EntitySaveMetadata.QuoteIdentifier(metadata.KeyColumnName)} FROM {metadata.TableName};",
+            sqlite
+        );
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        var keys = new List<object>();
+
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            keys.Add(ConvertKey<TEntity>(reader.GetValue(0)));
+        }
+
+        return keys;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A value object key is created from the stored value through its <c>Create</c>, and any other key is converted with
+    /// <see cref="RawValueConverter.ConvertRaw"/>: the split the row reader makes for every column, so a key converted here
+    /// equals the key of the same row read by <see cref="FindAsync{TEntity}"/>.
+    /// </remarks>
+    public object ConvertKey<TEntity>(object rawKey)
+        where TEntity : EntityBaseCore, new()
+    {
+        ArgumentNullException.ThrowIfNull(rawKey);
+
+        if (rawKey is DBNull)
+        {
+            throw new ArgumentException("A primary key value cannot be DBNull.", nameof(rawKey));
+        }
+
+        var keyType = EntitySaveMetadata.For(typeof(TEntity)).KeyProperty.PropertyType;
+
+        if (keyType.IsInstanceOfType(rawKey))
+        {
+            return rawKey;
+        }
+
+        try
+        {
+            return typeof(IValueObjectCore).IsAssignableFrom(keyType)
+                ? SqlValueObjectActivator.Wrap(rawKey, keyType)!
+                : RawValueConverter.ConvertRaw(rawKey, keyType);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new InvalidOperationException(
+                $"The key value read from SQLite ({rawKey.GetType().Name}) could not be converted to the key type {keyType.Name} of {typeof(TEntity).Name}: {ex.Message}",
+                ex
+            );
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<long?> ReadBinaryLengthAsync<TEntity>(
+        DbConnection connection,
+        object key,
+        string propertyName,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new()
+    {
+        var sqlite = AsSqlite(connection);
+        ArgumentNullException.ThrowIfNull(key);
+        var metadata = EntitySaveMetadata.For(typeof(TEntity));
+        var column = ExcludedColumn<TEntity>(metadata, propertyName);
+
+        if (await FindBinaryRowidAsync(sqlite, metadata, column, key, cancellationToken).ConfigureAwait(false) is not { } rowid)
+        {
+            return null;
+        }
+
+        await using var blob = OpenBlob(sqlite, metadata, column, rowid, readOnly: true);
+        return blob.Length;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> ReadBinaryAsync<TEntity>(
+        DbConnection connection,
+        object key,
+        string propertyName,
+        Stream destination,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new()
+    {
+        var sqlite = AsSqlite(connection);
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(destination);
+        var metadata = EntitySaveMetadata.For(typeof(TEntity));
+        var column = ExcludedColumn<TEntity>(metadata, propertyName);
+
+        if (await FindBinaryRowidAsync(sqlite, metadata, column, key, cancellationToken).ConfigureAwait(false) is not { } rowid)
+        {
+            return false;
+        }
+
+        await using var blob = OpenBlob(sqlite, metadata, column, rowid, readOnly: true);
+        await blob.CopyToAsync(
+            destination,
+            UnboundedBinaryColumns.StreamCopyBufferSize,
+            cancellationToken
+        ).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> WriteBinaryAsync<TEntity>(
+        DbConnection connection,
+        object key,
+        string propertyName,
+        Stream? source,
+        long? length,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new()
+    {
+        var sqlite = AsSqlite(connection);
+        ArgumentNullException.ThrowIfNull(key);
+        var metadata = EntitySaveMetadata.For(typeof(TEntity));
+        var column = ExcludedColumn<TEntity>(metadata, propertyName);
+        var quotedColumn = metadata.QuotedColumnName(column);
+        var keyCondition = $"{EntitySaveMetadata.QuoteIdentifier(metadata.KeyColumnName)} = @id";
+
+        // source=null sets the column to NULL, as the repositories' stream accessors do (one statement, so no savepoint)
+        if (source is null)
+        {
+            await using var nullCommand = new SqliteCommand(
+                $"UPDATE {metadata.TableName} SET {quotedColumn} = NULL WHERE {keyCondition};",
+                sqlite
+            );
+            metadata.BindKeyParameter(nullCommand, key);
+            return await nullCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
+        }
+
+        // The length is resolved before anything is written: a length that disagrees with the stream writes nothing
+        var payloadLength = UnboundedBinaryColumns.ResolveWriteLength(source, length);
+
+        // The write allocates the declared length and then copies into it, so a failure in between would leave zeros or a
+        // part of the content behind: it runs inside a savepoint and goes back to it on failure, without ending the
+        // caller's transaction
+        await RunAsync(sqlite, $"SAVEPOINT {BinaryWriteSavepoint};", cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            await using (
+                var allocate = new SqliteCommand(
+                    $"UPDATE {metadata.TableName} SET {quotedColumn} = zeroblob(@len) WHERE {keyCondition};",
+                    sqlite
+                )
+            )
+            {
+                allocate.Parameters.AddWithValue("@len", payloadLength);
+                metadata.BindKeyParameter(allocate, key);
+
+                if (await allocate.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 0)
+                {
+                    // No matching row, so nothing was written. CancellationToken.None: a canceled token must not be able
+                    // to leave the savepoint open
+                    await RunAsync(sqlite, $"RELEASE {BinaryWriteSavepoint};", CancellationToken.None).ConfigureAwait(false);
+                    return false;
+                }
+            }
+
+            long rowid;
+
+            await using (
+                var rowidCommand = new SqliteCommand(
+                    $"SELECT rowid FROM {metadata.TableName} WHERE {keyCondition};",
+                    sqlite
+                )
+            )
+            {
+                metadata.BindKeyParameter(rowidCommand, key);
+                rowid = (long)(await rowidCommand.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
+            }
+
+            await using (var blob = OpenBlob(sqlite, metadata, column, rowid, readOnly: false))
+            {
+                // The blob was allocated at the declared length, so a short stream would leave its tail as zeros: the
+                // exact-length wrapper fails the copy instead, and the catch below goes back to the savepoint
+                await UnboundedBinaryColumns.WithExactLength(source, payloadLength).CopyToAsync(
+                    blob,
+                    UnboundedBinaryColumns.StreamCopyBufferSize,
+                    cancellationToken
+                ).ConfigureAwait(false);
+            }
+
+            await RunAsync(sqlite, $"RELEASE {BinaryWriteSavepoint};", CancellationToken.None).ConfigureAwait(false);
+            return true;
+        }
+        catch
+        {
+            await RollbackBinaryWriteQuietlyAsync(sqlite).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>The savepoint a binary write runs inside, so that a failed write can be undone without ending the caller's transaction.</summary>
+    private const string BinaryWriteSavepoint = "quicker_local_row_store_binary_write";
+
+    /// <summary>
+    /// Finds the rowid of the row with the key whose column is not NULL (null when there is no such row or the column is
+    /// NULL), in one statement, as <see cref="UnboundedBinaryColumnEngine"/> does before it opens a blob.
+    /// </summary>
+    private static async Task<long?> FindBinaryRowidAsync(
+        SqliteConnection connection,
+        EntitySaveMetadata metadata,
+        PropertyInfo column,
+        object key,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var probe = new SqliteCommand(
+            $"SELECT rowid, {metadata.QuotedColumnName(column)} IS NULL FROM {metadata.TableName} WHERE {EntitySaveMetadata.QuoteIdentifier(metadata.KeyColumnName)} = @id;",
+            connection
+        );
+        metadata.BindKeyParameter(probe, key);
+        await using var reader = await probe.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false) || reader.GetInt64(1) != 0)
+        {
+            return null;
+        }
+
+        return reader.GetInt64(0);
+    }
+
+    /// <summary>
+    /// Opens the blob of the column in the row, with the database and the table taken apart by
+    /// <see cref="EntitySaveMetadata.SplitTableName"/> (a name without a '.' is in <c>main</c>), as
+    /// <see cref="UnboundedBinaryColumnEngine"/> opens it.
+    /// </summary>
+    private static SqliteBlob OpenBlob(
+        SqliteConnection connection,
+        EntitySaveMetadata metadata,
+        PropertyInfo column,
+        long rowid,
+        bool readOnly
+    )
+    {
+        var (blobDatabase, blobTable) = EntitySaveMetadata.SplitTableName(metadata.RawTableName);
+
+        return new SqliteBlob(
+            connection,
+            blobDatabase ?? "main",
+            blobTable,
+            metadata.RawColumnName(column),
+            rowid,
+            readOnly
+        );
+    }
+
+    /// <summary>The excluded unbounded binary column with the property name.</summary>
+    /// <exception cref="ArgumentException">The entity has no excluded unbounded binary column with that property name.</exception>
+    private static PropertyInfo ExcludedColumn<TEntity>(EntitySaveMetadata metadata, string propertyName) =>
+        metadata.ExcludedProperties.FirstOrDefault(property => property.Name == propertyName)
+        ?? throw NotAnExcludedColumn(typeof(TEntity), propertyName);
+
+    /// <summary>Runs one statement that returns no rows on the connection.</summary>
+    private static async Task RunAsync(
+        SqliteConnection connection,
+        string sql,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var command = new SqliteCommand(sql, connection);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Goes back to the savepoint of a failed binary write and releases it, swallowing a failure of its own so that the write's exception is the one that surfaces.</summary>
+    private static async Task RollbackBinaryWriteQuietlyAsync(SqliteConnection connection)
+    {
+        try
+        {
+            await RunAsync(connection, $"ROLLBACK TO {BinaryWriteSavepoint};", CancellationToken.None).ConfigureAwait(false);
+            await RunAsync(connection, $"RELEASE {BinaryWriteSavepoint};", CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // The write's own exception is rethrown by the caller; a failed rollback must not replace it
+        }
+    }
+
+    /// <summary>The exception for a property name that is not an excluded unbounded binary column of the entity.</summary>
+    private static ArgumentException NotAnExcludedColumn(Type entityType, string? propertyName) =>
+        new(
+            $"{entityType.Name} has no excluded unbounded binary column with the property name '{propertyName}'.",
+            nameof(propertyName)
+        );
 
     /// <summary>The connection as the SQLite connection the statements need.</summary>
     /// <param name="connection">The connection passed to a row operation.</param>

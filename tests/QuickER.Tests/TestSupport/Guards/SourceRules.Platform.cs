@@ -70,8 +70,8 @@ internal static partial class SourceRules
                 new(
                     "src/QuickER.Runtime.Sync/Runtime.Sync.g.cs",
                     "GetTempPath",
-                    1,
-                    "依存ゼロのランタイムのパッケージは QuickER.Platform を参照できない（同期の blob の一時ファイル）"
+                    2,
+                    "依存ゼロのランタイムのパッケージは QuickER.Platform を参照できない（同期の blob の一時ファイル。SyncTableBase と TrackedSyncEngine に 1 つずつ。どちらかの型を消したら 1 件に戻す）"
                 )
             ),
             // パスの 1 区間・相対パスの妥当性の判定は PathSegments だけが持つ。「フルパスか」を見る IsPathFullyQualified と、
@@ -199,8 +199,9 @@ internal static partial class SourceRules
                 new(
                     "src/QuickER.Runtime.Sync/Runtime.Sync.g.cs",
                     "new FileStream",
-                    1,
+                    2,
                     RuntimePackage
+                        + "。同期の blob の一時ファイルは SyncTableBase と TrackedSyncEngine に 1 つずつ（どちらかの型を消したら 1 件に戻す）"
                 ),
                 new("src/QuickER.Runtime/Runtime.g.cs", "File.Delete", 1, RuntimePackage),
                 new("src/QuickER.Runtime.Sync/Runtime.Sync.g.cs", "File.Delete", 1, RuntimePackage),

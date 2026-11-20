@@ -259,6 +259,63 @@ internal static partial class SyncModelScenarios
                     Expect.Mirror(D1, F).Contains("key=5 mirror=server"),
                 ]
             ),
+            // 送っている間（サーバーへ書く直前）に端末が編集した行は、送った版を端末の行へ持たない（端末の編集の版のまま）。
+            // 次の同期がその編集を送り、そこで端末の行もサーバーの版になる
+            Moved(
+                "ul-row-edited-before-settle-keeps-its-version-until-sent",
+                [.. Seed(1, "alice", 11, "widget")],
+                [
+                    Rename(D1, 1, "alice-before"),
+                    new ArmInterruptOp(
+                        D1,
+                        ModelInterruptPoint.BeforeServerWrite,
+                        Rename(D1, 1, "alice-during")
+                    ),
+                    Plain(D1),
+                    Expect.Result(D1).Absent("conflict *"),
+                    Expect.Rows(SV, F).Contains("1 parent=null name=alice-before"),
+                    Expect.Rows(D1, F).Contains("1 parent=null name=alice-during"),
+                    Expect.Mirror(D1, F).Contains("key=1 mirror=other"),
+                    Plain(D1),
+                    Expect.Result(D1).Absent("conflict *"),
+                    Expect.Rows(SV, F).Contains("1 parent=null name=alice-during"),
+                    Expect.Mirror(D1, F).Contains("key=1 mirror=server"),
+                ]
+            ),
+            // 同期の外で（記録させずに）空にされた表：再開点をミラー版から導くエンジンは、空の表の再開点が先頭へ戻るので全部を
+            // 降ろし直す。再開点を表ごとに別に持つエンジンは、何も送らず何も降ろさずに、表を名指しして洗い替えを促す例外で断る
+            Moved(
+                "dl-table-emptied-outside-sync",
+                [.. Seed(1, "alice", 11, "widget")],
+                [
+                    new LocalSqlOp(D1, $"DELETE FROM {ModelTables.Events}") { Untracked = true },
+                    Rename(D1, 1, "alice-local"),
+                    new WhenEngineDeclaresOp(
+                        D1,
+                        EngineDeclaration.DerivesResumePointFromLocalVersions,
+                        [
+                            Plain(D1),
+                            Expect.Result(D1).Contains("uploaded=1"),
+                            Expect.Rows(D1, ModelTables.Events).Contains("* item=999 memo=tail"),
+                        ],
+                        [
+                            new ExpectThrowOp(D1),
+                            Plain(D1),
+                            Expect
+                                .Result(D1)
+                                .Contains(
+                                    $"exception SyncLocalTableEmptiedException: *{ModelTables.Events}*RefreshAsync*"
+                                ),
+                            Expect.Rows(D1, ModelTables.Events).Count("*", 0),
+                            Expect.Rows(SV, F).Contains("1 parent=null name=alice"),
+                            // 例外が促すとおり洗い替えで作り直すと、空にされた表の行が戻る（端末の未送信の編集は洗い替えの
+                            // 拒否の規則に従う）
+                            RefreshAll(D1, force: true),
+                            Expect.Rows(D1, ModelTables.Events).Contains("* item=999 memo=tail"),
+                        ]
+                    ),
+                ]
+            ),
             Moved(
                 "ul-local-delete-is-uploaded",
                 [.. Seed(1, "alice", 11, "widget")],
@@ -431,7 +488,14 @@ internal static partial class SyncModelScenarios
                     new DeleteItemOp(D1, Direct, 11),
                     Plain(D1, policy: SyncConflictPolicy.ServerWins),
                     Expect.Rows(D1, I).Contains("11 folder=1 label=null code=c-11 title=widget"),
-                    Expect.Mirror(D1, I).Contains("key=11 mirror=null"),
+                    // 再開点をミラー版から導くエンジンは、戻した行のミラー版を書かない。再開点を表ごとに別に持つエンジンは、戻した
+                    // 行の版の列をサーバーの版にする
+                    new WhenEngineDeclaresOp(
+                        D1,
+                        EngineDeclaration.DerivesResumePointFromLocalVersions,
+                        [Expect.Mirror(D1, I).Contains("key=11 mirror=null")],
+                        [Expect.Mirror(D1, I).Contains("key=11 mirror=server")]
+                    ),
                     new UpdateItemOp(D1, Direct, 11, 1, null, "c-11", "widget-2"),
                     Plain(D1),
                     Expect.Result(D1).Contains("uploaded=1").Absent("conflict *"),

@@ -137,6 +137,59 @@ internal sealed record WhenServerFixesCeilingOp(
         + $"open [{string.Join("; ", IfOpen.Select(op => op.Describe()))}]";
 }
 
+/// <summary>端末のエンジンの宣言のうち、決まった形の行の期待の枝を選ぶもの（<see cref="WhenEngineDeclaresOp"/>）</summary>
+internal enum EngineDeclaration
+{
+    /// <summary>
+    /// <see cref="IModelDeviceSync.CarriesServerWinsDecision"/>：持ち越すエンジンは適用を全部か無しかで書くので、行を書いた後・
+    /// 帳簿を書く前に例外になる窓を持たない
+    /// </summary>
+    CarriesServerWinsDecision,
+
+    /// <summary>
+    /// <see cref="IModelDeviceSync.DerivesResumePointFromLocalVersions"/>：真のエンジンは ServerWins で戻した行の版の列を据え置き、
+    /// 偽のエンジンはサーバーの版にする
+    /// </summary>
+    DerivesResumePointFromLocalVersions,
+
+    /// <summary>
+    /// <see cref="IModelDeviceSync.RefetchesHeldRowsInSameRun"/>：真のエンジンは保留で取り残した行を同じ実行の中で取り直すので、
+    /// その間にサーバーで変わった行もその実行に入る
+    /// </summary>
+    RefetchesHeldRowsInSameRun,
+}
+
+/// <summary>
+/// 端末のエンジンの宣言（<see cref="EngineDeclaration"/>）で、続ける手を選ぶ。同じ決まった形の行を宣言の違うエンジンで流し、
+/// それぞれの期待（宣言で振る舞いが良くなるエンジンでは、良くなった結果）を表明する。エンジンや転送の名前では選ばない
+/// </summary>
+/// <param name="Device">宣言を読む端末</param>
+/// <param name="Declaration">枝を選ぶ宣言</param>
+/// <param name="IfTrue">宣言が真のエンジンの手</param>
+/// <param name="IfFalse">宣言が偽のエンジンの手</param>
+internal sealed record WhenEngineDeclaresOp(
+    ModelActor Device,
+    EngineDeclaration Declaration,
+    IReadOnlyList<ModelOp> IfTrue,
+    IReadOnlyList<ModelOp> IfFalse
+) : ModelOp
+{
+    /// <summary>端末のエンジンの、この宣言の値</summary>
+    public bool Holds(IModelDeviceSync engine) =>
+        Declaration switch
+        {
+            EngineDeclaration.CarriesServerWinsDecision => engine.CarriesServerWinsDecision,
+            EngineDeclaration.DerivesResumePointFromLocalVersions =>
+                engine.DerivesResumePointFromLocalVersions,
+            EngineDeclaration.RefetchesHeldRowsInSameRun => engine.RefetchesHeldRowsInSameRun,
+            _ => throw new ArgumentOutOfRangeException(nameof(Declaration), Declaration, null),
+        };
+
+    public override string Describe() =>
+        $"WhenEngineDeclares {Device} {Declaration}: true [{string.Join("; ", IfTrue.Select(op => op.Describe()))}] "
+        + $"false [{string.Join("; ", IfFalse.Select(op => op.Describe()))}]";
+}
+
 /// <summary>期待の手を組み立てる（<c>Expect.Result(D1).Exact(...)</c>）</summary>
 internal static class Expect
 {
@@ -442,7 +495,15 @@ internal sealed record SaveFolderGraphOp(
 /// </remarks>
 internal sealed record LocalSqlOp(ModelActor Device, string Sql) : ModelOp
 {
-    public override string Describe() => $"{Who(Device)} LocalSql {Sql}";
+    /// <summary>
+    /// SQL を端末の記録しない書き込みの口（<see cref="SyncModelDevice.WriteUntrackedAsync"/>）を通して流すか（既定は偽）。端末が
+    /// 前から持っていた状態・壊れた状態を作る手（利用者が送る編集でない業務の表の書き込み）に付ける。偽なら、トリガーで記録する
+    /// 端末では利用者の書き込みとして記録される
+    /// </summary>
+    public bool Untracked { get; init; }
+
+    public override string Describe() =>
+        $"{Who(Device)} LocalSql{(Untracked ? " untracked" : "")} {Sql}";
 }
 
 /// <summary>

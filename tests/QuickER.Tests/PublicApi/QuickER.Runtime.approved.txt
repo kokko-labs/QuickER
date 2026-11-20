@@ -256,11 +256,16 @@ public abstract class QuickER.Runtime.HttpRemoteRepositoryCore<TEntity, TKey> : 
 public interface QuickER.Runtime.ILocalRowStore
     public virtual System.Data.Common.DbConnection CreateDedicatedConnection()
     public virtual System.Threading.Tasks.Task InsertAsync<TEntity>(System.Data.Common.DbConnection connection, TEntity entity, System.Threading.CancellationToken cancellationToken)
+    public virtual System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<object>> ListKeysAsync<TEntity>(System.Data.Common.DbConnection connection, System.Threading.CancellationToken cancellationToken)
     public virtual System.Threading.Tasks.Task<TEntity> FindAsync<TEntity>(System.Data.Common.DbConnection connection, object key, System.Threading.CancellationToken cancellationToken)
     public virtual System.Threading.Tasks.Task<bool> DeleteAsync<TEntity>(System.Data.Common.DbConnection connection, object key, System.Threading.CancellationToken cancellationToken)
     public virtual System.Threading.Tasks.Task<bool> ExistsAsync<TEntity>(System.Data.Common.DbConnection connection, object key, System.Threading.CancellationToken cancellationToken)
+    public virtual System.Threading.Tasks.Task<bool> ReadBinaryAsync<TEntity>(System.Data.Common.DbConnection connection, object key, string propertyName, System.IO.Stream destination, System.Threading.CancellationToken cancellationToken)
     public virtual System.Threading.Tasks.Task<bool> UpdateAsync<TEntity>(System.Data.Common.DbConnection connection, TEntity entity, System.Threading.CancellationToken cancellationToken)
+    public virtual System.Threading.Tasks.Task<bool> WriteBinaryAsync<TEntity>(System.Data.Common.DbConnection connection, object key, string propertyName, System.IO.Stream source, long? length, System.Threading.CancellationToken cancellationToken)
+    public virtual System.Threading.Tasks.Task<long?> ReadBinaryLengthAsync<TEntity>(System.Data.Common.DbConnection connection, object key, string propertyName, System.Threading.CancellationToken cancellationToken)
     public virtual bool IsUniqueViolation(System.Data.Common.DbException exception)
+    public virtual object ConvertKey<TEntity>(object rawKey)
 
 public interface QuickER.Runtime.IRemoteRepositoryCore<TEntity, TKey>
     public virtual System.Threading.Tasks.Task InsertAsync(TEntity entity, System.Threading.CancellationToken cancellationToken = default)

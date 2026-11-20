@@ -12350,6 +12350,4013 @@ public sealed class VersionlessDirectSyncSource<TEntity, TKey>
         return new SyncChangeBatch<TEntity>(rows, rows.Count >= batchSize);
     }
 }
+
+/// <summary>
+/// Thrown when a run finds a synchronised table empty locally while the change tracking holds rows of it that the server
+/// knows and that have nothing to send: the table appears to have been made again empty.
+/// </summary>
+/// <remarks>
+/// The run throws before it sends or downloads anything, so neither the local database nor the server changes. A run
+/// would not bring the missing rows back (the download resumes after the rows it has already received) and could remove
+/// the server's copies of rows it believes the device deleted. Rebuild the tables from the server with a refresh
+/// (<c>RefreshAsync</c>).
+/// </remarks>
+public sealed class SyncLocalTableEmptiedException : InvalidOperationException
+{
+    /// <summary>Creates the exception from the tables found emptied.</summary>
+    /// <param name="tableNames">The tables found emptied.</param>
+    public SyncLocalTableEmptiedException(IReadOnlyList<string> tableNames)
+        : base(BuildMessage(tableNames))
+    {
+        TableNames = tableNames;
+    }
+
+    /// <summary>The tables found emptied.</summary>
+    public IReadOnlyList<string> TableNames { get; }
+
+    /// <summary>Builds the message, which names the tables and the way back.</summary>
+    private static string BuildMessage(IReadOnlyList<string> tableNames)
+    {
+        ArgumentNullException.ThrowIfNull(tableNames);
+
+        return "The local table(s) "
+            + string.Join(", ", tableNames)
+            + " are empty, while the change tracking holds rows of them that this device had received from the server: "
+            + "the tables appear to have been made again empty. Nothing was sent or downloaded. Rebuild them from the "
+            + "server with a refresh (RefreshAsync).";
+    }
+}
+
+/// <summary>One unsent row of the row state table of <see cref="SyncLocalTracking"/> (a row whose <c>dirty</c> is set).</summary>
+/// <param name="TableName">The synchronised table the row belongs to.</param>
+/// <param name="RawKey">The key exactly as the row state table stores it (the value the synchronised table stores).</param>
+/// <param name="Deleted">Whether the row's latest change deleted it.</param>
+/// <param name="Known">Whether the server is known to hold the row.</param>
+/// <param name="ChangeSequence">The number of the row's latest change.</param>
+/// <param name="BaseVersion">The server version the local content is based on (null when none is known).</param>
+/// <param name="BlobColumns">The unbounded binary columns written since the row was last sent (accessor names, comma separated).</param>
+/// <param name="ServerWinsSequence">The change number a <see cref="SyncConflictPolicy.ServerWins"/> run decided to discard and could not, or null.</param>
+internal sealed record TrackedSyncPendingRow(
+    string TableName,
+    object RawKey,
+    bool Deleted,
+    bool Known,
+    long ChangeSequence,
+    byte[]? BaseVersion,
+    string BlobColumns,
+    long? ServerWinsSequence
+)
+{
+    /// <summary>Whether the row's latest change inserted or updated it (rather than deleting it).</summary>
+    public bool Upserted => !Deleted;
+}
+
+/// <summary>What the row state table of <see cref="SyncLocalTracking"/> holds for one row.</summary>
+internal sealed record TrackedSyncRowState
+{
+    /// <summary>The key exactly as the row state table stores it.</summary>
+    public required object RawKey { get; init; }
+
+    /// <summary>The server version the local content is based on (null when none is known).</summary>
+    public byte[]? BaseVersion { get; init; }
+
+    /// <summary>Whether the server is known to hold the row.</summary>
+    public bool Known { get; init; }
+
+    /// <summary>Whether the row holds an unsent change.</summary>
+    public bool Dirty { get; init; }
+
+    /// <summary>The number of the row's latest change.</summary>
+    public long ChangeSequence { get; init; }
+
+    /// <summary>The unbounded binary columns written since the row was last sent (accessor names, comma separated).</summary>
+    public string BlobColumns { get; init; } = string.Empty;
+
+    /// <summary>The unbounded binary columns still to be copied down from the server (accessor names, comma separated).</summary>
+    public string BlobOwed { get; init; } = string.Empty;
+}
+
+/// <summary>
+/// Every read and write of the state tables of <see cref="SyncLocalTracking"/> that <see cref="TrackedSyncEngine"/>
+/// makes: the row state table, the state table and the anchor table.
+/// </summary>
+/// <remarks>
+/// The statements run on the connection passed in, inside whatever transaction the caller started with an SQL statement.
+/// Keys are bound exactly as the row state table stores them (the raw value the triggers copied from the synchronised
+/// table), so a key read from it can be bound back unchanged.
+/// </remarks>
+internal static class TrackedSyncState
+{
+    /// <summary>The columns of a row state read, in the order <see cref="ReadRowState"/> reads them.</summary>
+    private const string RowStateColumns =
+        "\"key\", base_version, known, dirty, change_seq, blob_columns, blob_owed";
+
+    /// <summary>
+    /// Reads every unsent row (the table, the key, whether it was inserted or updated or deleted, and the change number),
+    /// in the order of the changes.
+    /// </summary>
+    /// <param name="connection">An open connection to the local database.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static async Task<IReadOnlyList<TrackedSyncPendingRow>> ReadPendingAsync(
+        DbConnection connection,
+        CancellationToken cancellationToken
+    )
+    {
+        var pending = new List<TrackedSyncPendingRow>();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT table_name, \"key\", deleted, known, change_seq, base_version, blob_columns, sw_seq FROM "
+            + SyncLocalTracking.RowTableName
+            + " WHERE dirty = 1 ORDER BY change_seq";
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            pending.Add(
+                new TrackedSyncPendingRow(
+                    reader.GetString(0),
+                    reader.GetValue(1),
+                    reader.GetInt64(2) != 0,
+                    reader.GetInt64(3) != 0,
+                    reader.GetInt64(4),
+                    reader.IsDBNull(5) ? null : (byte[])reader.GetValue(5),
+                    reader.GetString(6),
+                    reader.IsDBNull(7) ? null : reader.GetInt64(7)
+                )
+            );
+        }
+
+        return pending;
+    }
+
+    /// <summary>
+    /// Clears the unsent change of one row, only while its change number is still the one read: a row written again in
+    /// the meantime keeps its unsent change.
+    /// </summary>
+    /// <param name="connection">An open connection to the local database.</param>
+    /// <param name="tableName">The synchronised table.</param>
+    /// <param name="rawKey">The key as the row state table stores it.</param>
+    /// <param name="changeSequence">The change number read with the row.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>Whether the row still had that change number (and so lost its unsent change).</returns>
+    public static async Task<bool> ClearPendingAsync(
+        DbConnection connection,
+        string tableName,
+        object rawKey,
+        long changeSequence,
+        CancellationToken cancellationToken
+    ) =>
+        await ExecuteAsync(
+                connection,
+                "UPDATE "
+                    + SyncLocalTracking.RowTableName
+                    + " SET dirty = 0, deleted = 0, blob_columns = '' "
+                    + "WHERE table_name = @table AND \"key\" = @key AND change_seq = @seq",
+                cancellationToken,
+                ("@table", tableName),
+                ("@key", rawKey),
+                ("@seq", changeSequence)
+            )
+            .ConfigureAwait(false) > 0;
+
+    /// <summary>
+    /// Drops the state of a row with nothing to send (gone locally and never on the server), only while its change number is
+    /// still the one read.
+    /// </summary>
+    /// <param name="connection">An open connection to the local database.</param>
+    /// <param name="tableName">The synchronised table.</param>
+    /// <param name="rawKey">The key as the row state table stores it.</param>
+    /// <param name="changeSequence">The change number read with the row.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static Task ForgetPendingAsync(
+        DbConnection connection,
+        string tableName,
+        object rawKey,
+        long changeSequence,
+        CancellationToken cancellationToken
+    ) =>
+        ExecuteAsync(
+            connection,
+            "DELETE FROM "
+                + SyncLocalTracking.RowTableName
+                + " WHERE table_name = @table AND \"key\" = @key AND change_seq = @seq",
+            cancellationToken,
+            ("@table", tableName),
+            ("@key", rawKey),
+            ("@seq", changeSequence)
+        );
+
+    /// <summary>
+    /// Records, before a row's unbounded binary columns are sent, the version its row write earned and that the server knows
+    /// it (the unsent change stays), widens the columns written to every column for a row the server took as an insert, and
+    /// adds the columns an overwrite leaves owing - so that a failure while the columns go leaves the next run guarding
+    /// against this device's own write and sending every column a new server row lacks.
+    /// </summary>
+    /// <param name="connection">An open connection to the local database.</param>
+    /// <param name="tableName">The synchronised table.</param>
+    /// <param name="rawKey">The key as the row state table stores it.</param>
+    /// <param name="version">The version the row write earned (null for a table without a version column).</param>
+    /// <param name="widen">Every unbounded binary column, for a row the server took as an insert; otherwise empty.</param>
+    /// <param name="owed">The unbounded binary columns an overwrite leaves owing from the server.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static async Task RecordInterimAsync(
+        DbConnection connection,
+        string tableName,
+        object rawKey,
+        byte[]? version,
+        IReadOnlyList<string> widen,
+        IReadOnlyList<string> owed,
+        CancellationToken cancellationToken
+    )
+    {
+        await ExecuteAsync(
+                connection,
+                "UPDATE "
+                    + SyncLocalTracking.RowTableName
+                    + " SET base_version = @version, known = 1, "
+                    + "blob_columns = CASE WHEN @widen = '' THEN blob_columns ELSE @widen END "
+                    + "WHERE table_name = @table AND \"key\" = @key",
+                cancellationToken,
+                ("@version", version),
+                ("@widen", string.Join(",", widen)),
+                ("@table", tableName),
+                ("@key", rawKey)
+            )
+            .ConfigureAwait(false);
+
+        if (owed.Count > 0)
+        {
+            await AddOwedAsync(connection, tableName, rawKey, owed, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Records that a row's write reached the server: its base version and that the server knows it, and - only while its
+    /// change number is still the one read - that it has nothing more to send.
+    /// </summary>
+    /// <param name="connection">An open connection to the local database.</param>
+    /// <param name="tableName">The synchronised table.</param>
+    /// <param name="rawKey">The key as the row state table stores it.</param>
+    /// <param name="version">The version the server now holds for the row (null for a table without a version column).</param>
+    /// <param name="changeSequence">The change number read with the row.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static Task SettleSentAsync(
+        DbConnection connection,
+        string tableName,
+        object rawKey,
+        byte[]? version,
+        long changeSequence,
+        CancellationToken cancellationToken
+    ) =>
+        ExecuteAsync(
+            connection,
+            "UPDATE "
+                + SyncLocalTracking.RowTableName
+                + " SET base_version = @version, known = 1, "
+                + "dirty = CASE WHEN change_seq = @seq THEN 0 ELSE dirty END, "
+                + "deleted = CASE WHEN change_seq = @seq THEN 0 ELSE deleted END, "
+                + "blob_columns = CASE WHEN change_seq = @seq THEN '' ELSE blob_columns END "
+                + "WHERE table_name = @table AND \"key\" = @key",
+            cancellationToken,
+            ("@version", version),
+            ("@seq", changeSequence),
+            ("@table", tableName),
+            ("@key", rawKey)
+        );
+
+    /// <summary>
+    /// Records that a row's delete reached the server: the state goes while its change number is still the one read, and a
+    /// row made again under the key since stays as a row the server does not have.
+    /// </summary>
+    /// <param name="connection">An open connection to the local database.</param>
+    /// <param name="tableName">The synchronised table.</param>
+    /// <param name="rawKey">The key as the row state table stores it.</param>
+    /// <param name="changeSequence">The change number read with the row.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static async Task SettleDeletedAsync(
+        DbConnection connection,
+        string tableName,
+        object rawKey,
+        long changeSequence,
+        CancellationToken cancellationToken
+    )
+    {
+        await ForgetPendingAsync(connection, tableName, rawKey, changeSequence, cancellationToken)
+            .ConfigureAwait(false);
+        await ExecuteAsync(
+                connection,
+                "UPDATE "
+                    + SyncLocalTracking.RowTableName
+                    + " SET known = 0, base_version = NULL WHERE table_name = @table AND \"key\" = @key",
+                cancellationToken,
+                ("@table", tableName),
+                ("@key", rawKey)
+            )
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Adds unbounded binary columns to the ones a row still has to copy down (merged, without repeats).</summary>
+    /// <param name="connection">An open connection to the local database.</param>
+    /// <param name="tableName">The synchronised table.</param>
+    /// <param name="rawKey">The key as the row state table stores it.</param>
+    /// <param name="columns">The columns (accessor names) to add.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static async Task AddOwedAsync(
+        DbConnection connection,
+        string tableName,
+        object rawKey,
+        IEnumerable<string> columns,
+        CancellationToken cancellationToken
+    )
+    {
+        if (await ReadRowAsync(connection, tableName, rawKey, cancellationToken).ConfigureAwait(false) is not { } row)
+        {
+            return;
+        }
+
+        var merged = row
+            .BlobOwed.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Concat(columns)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal);
+        await WriteOwedAsync(connection, tableName, rawKey, string.Join(",", merged), cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Clears the unsent change of a row a <see cref="SyncConflictPolicy.ServerWins"/> run discards.</summary>
+    /// <param name="connection">An open connection to the local database.</param>
+    /// <param name="tableName">The synchronised table.</param>
+    /// <param name="rawKey">The key as the row state table stores it.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static Task ClearDiscardedAsync(
+        DbConnection connection,
+        string tableName,
+        object rawKey,
+        CancellationToken cancellationToken
+    ) =>
+        ExecuteAsync(
+            connection,
+            "UPDATE "
+                + SyncLocalTracking.RowTableName
+                + " SET dirty = 0, deleted = 0, blob_columns = '', sw_seq = NULL WHERE table_name = @table AND \"key\" = @key",
+            cancellationToken,
+            ("@table", tableName),
+            ("@key", rawKey)
+        );
+
+    /// <summary>
+    /// Carries a <see cref="SyncConflictPolicy.ServerWins"/> decision the run could not carry out over to later runs: the row's
+    /// current change number is marked, so later runs do not send the row and put the server's content back instead. A
+    /// later local write moves the change number on, and the mark no longer applies.
+    /// </summary>
+    /// <param name="connection">An open connection to the local database.</param>
+    /// <param name="tableName">The synchronised table.</param>
+    /// <param name="rawKey">The key as the row state table stores it.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static Task MarkServerWinsAsync(
+        DbConnection connection,
+        string tableName,
+        object rawKey,
+        CancellationToken cancellationToken
+    ) =>
+        ExecuteAsync(
+            connection,
+            "UPDATE "
+                + SyncLocalTracking.RowTableName
+                + " SET sw_seq = change_seq WHERE table_name = @table AND \"key\" = @key AND dirty = 1",
+            cancellationToken,
+            ("@table", tableName),
+            ("@key", rawKey)
+        );
+
+    /// <summary>
+    /// Whether the local table is empty while the row state table holds rows of it the server knows and that have nothing
+    /// to send (the table appears to have been made again empty).
+    /// </summary>
+    /// <param name="connection">An open connection to the local database.</param>
+    /// <param name="tableName">The synchronised table.</param>
+    /// <param name="qualifiedLocalName">The local table's name, quoted.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static async Task<bool> IsEmptiedAsync(
+        DbConnection connection,
+        string tableName,
+        string qualifiedLocalName,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT NOT EXISTS (SELECT 1 FROM "
+            + qualifiedLocalName
+            + ") AND EXISTS (SELECT 1 FROM "
+            + SyncLocalTracking.RowTableName
+            + " WHERE table_name = @table AND known = 1 AND dirty = 0)";
+        AddParameter(command, "@table", tableName);
+
+        return Convert.ToInt64(
+                await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
+                CultureInfo.InvariantCulture
+            ) != 0;
+    }
+
+    /// <summary>Reads the state of every row of one table, by the key text the table gives each raw key.</summary>
+    /// <param name="connection">An open connection to the local database.</param>
+    /// <param name="tableName">The synchronised table.</param>
+    /// <param name="keyText">Renders a raw key into the table's key text.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static async Task<Dictionary<string, TrackedSyncRowState>> ReadRowsAsync(
+        DbConnection connection,
+        string tableName,
+        Func<object, string> keyText,
+        CancellationToken cancellationToken
+    )
+    {
+        var rows = new Dictionary<string, TrackedSyncRowState>(StringComparer.Ordinal);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT " + RowStateColumns + " FROM " + SyncLocalTracking.RowTableName + " WHERE table_name = @table";
+        AddParameter(command, "@table", tableName);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var state = ReadRowState(reader);
+            rows[keyText(state.RawKey)] = state;
+        }
+
+        return rows;
+    }
+
+    /// <summary>Reads the state of one row (null when the row state table has no row for it).</summary>
+    /// <param name="connection">An open connection to the local database.</param>
+    /// <param name="tableName">The synchronised table.</param>
+    /// <param name="rawKey">The key as the row state table stores it.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static async Task<TrackedSyncRowState?> ReadRowAsync(
+        DbConnection connection,
+        string tableName,
+        object rawKey,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT "
+            + RowStateColumns
+            + " FROM "
+            + SyncLocalTracking.RowTableName
+            + " WHERE table_name = @table AND \"key\" = @key";
+        AddParameter(command, "@table", tableName);
+        AddParameter(command, "@key", rawKey);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ReadRowState(reader) : null;
+    }
+
+    /// <summary>
+    /// Records that a row now holds the server's content: its base version, that the server knows it, and no unsent
+    /// change. A non-empty <paramref name="owed"/> replaces the columns still to be copied down; an empty one keeps them.
+    /// </summary>
+    /// <param name="connection">An open connection to the local database.</param>
+    /// <param name="tableName">The synchronised table.</param>
+    /// <param name="rawKey">The key as the synchronised table stores it.</param>
+    /// <param name="version">The server version of the content written (null for a table without a version column).</param>
+    /// <param name="owed">The unbounded binary columns to copy down from the server (accessor names, comma separated), or empty.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static Task WriteAppliedRowAsync(
+        DbConnection connection,
+        string tableName,
+        object rawKey,
+        byte[]? version,
+        string owed,
+        CancellationToken cancellationToken
+    ) =>
+        ExecuteAsync(
+            connection,
+            "INSERT INTO "
+                + SyncLocalTracking.RowTableName
+                + " (table_name, \"key\", dirty, deleted, blob_columns, change_seq, base_version, known, blob_owed) "
+                + "VALUES (@table, @key, 0, 0, '', 0, @version, 1, @owed) "
+                + "ON CONFLICT (table_name, \"key\") DO UPDATE SET base_version = excluded.base_version, known = 1, "
+                + "dirty = 0, deleted = 0, blob_columns = '', sw_seq = NULL, "
+                + "blob_owed = CASE WHEN @owed = '' THEN blob_owed ELSE @owed END",
+            cancellationToken,
+            ("@table", tableName),
+            ("@key", rawKey),
+            ("@version", version),
+            ("@owed", owed)
+        );
+
+    /// <summary>Drops the unbounded binary columns every row of one table still owes.</summary>
+    /// <param name="connection">An open connection to the local database.</param>
+    /// <param name="tableName">The synchronised table.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static Task ClearTableOwedAsync(
+        DbConnection connection,
+        string tableName,
+        CancellationToken cancellationToken
+    ) =>
+        ExecuteAsync(
+            connection,
+            "UPDATE " + SyncLocalTracking.RowTableName + " SET blob_owed = '' WHERE table_name = @table",
+            cancellationToken,
+            ("@table", tableName)
+        );
+
+    /// <summary>Removes the state of one row.</summary>
+    /// <param name="connection">An open connection to the local database.</param>
+    /// <param name="tableName">The synchronised table.</param>
+    /// <param name="rawKey">The key as the row state table stores it.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static Task RemoveRowAsync(
+        DbConnection connection,
+        string tableName,
+        object rawKey,
+        CancellationToken cancellationToken
+    ) =>
+        ExecuteAsync(
+            connection,
+            "DELETE FROM " + SyncLocalTracking.RowTableName + " WHERE table_name = @table AND \"key\" = @key",
+            cancellationToken,
+            ("@table", tableName),
+            ("@key", rawKey)
+        );
+
+    /// <summary>Reads the rows of one table that still have unbounded binary columns to copy down.</summary>
+    /// <param name="connection">An open connection to the local database.</param>
+    /// <param name="tableName">The synchronised table.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static async Task<IReadOnlyList<TrackedSyncRowState>> ReadOwedAsync(
+        DbConnection connection,
+        string tableName,
+        CancellationToken cancellationToken
+    )
+    {
+        var rows = new List<TrackedSyncRowState>();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT "
+            + RowStateColumns
+            + " FROM "
+            + SyncLocalTracking.RowTableName
+            + " WHERE table_name = @table AND blob_owed <> ''";
+        AddParameter(command, "@table", tableName);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            rows.Add(ReadRowState(reader));
+        }
+
+        return rows;
+    }
+
+    /// <summary>Replaces the unbounded binary columns one row still has to copy down.</summary>
+    /// <param name="connection">An open connection to the local database.</param>
+    /// <param name="tableName">The synchronised table.</param>
+    /// <param name="rawKey">The key as the row state table stores it.</param>
+    /// <param name="owed">The columns still owed (accessor names, comma separated; empty when none is).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static Task WriteOwedAsync(
+        DbConnection connection,
+        string tableName,
+        object rawKey,
+        string owed,
+        CancellationToken cancellationToken
+    ) =>
+        ExecuteAsync(
+            connection,
+            "UPDATE " + SyncLocalTracking.RowTableName + " SET blob_owed = @owed WHERE table_name = @table AND \"key\" = @key",
+            cancellationToken,
+            ("@owed", owed),
+            ("@table", tableName),
+            ("@key", rawKey)
+        );
+
+    /// <summary>Sets or clears the applying flag the triggers check (what the engine writes while it is set is not recorded).</summary>
+    /// <param name="connection">An open connection to the local database.</param>
+    /// <param name="applying">Whether the engine is applying.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static Task SetApplyingAsync(
+        DbConnection connection,
+        bool applying,
+        CancellationToken cancellationToken
+    ) =>
+        ExecuteAsync(
+            connection,
+            "UPDATE " + SyncLocalTracking.StateTableName + " SET applying = " + (applying ? "1" : "0"),
+            cancellationToken
+        );
+
+    /// <summary>Reads where each table's next download resumes, by table name.</summary>
+    /// <param name="connection">An open connection to the local database.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static async Task<Dictionary<string, byte[]?>> ReadAnchorsAsync(
+        DbConnection connection,
+        CancellationToken cancellationToken
+    )
+    {
+        var anchors = new Dictionary<string, byte[]?>(StringComparer.Ordinal);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT table_name, anchor FROM " + SyncLocalTracking.AnchorTableName;
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            anchors[reader.GetString(0)] = reader.IsDBNull(1) ? null : (byte[])reader.GetValue(1);
+        }
+
+        return anchors;
+    }
+
+    /// <summary>Saves where one table's next download resumes.</summary>
+    /// <param name="connection">An open connection to the local database.</param>
+    /// <param name="tableName">The synchronised table.</param>
+    /// <param name="anchor">The version to resume above (null to take everything).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static Task WriteAnchorAsync(
+        DbConnection connection,
+        string tableName,
+        byte[]? anchor,
+        CancellationToken cancellationToken
+    ) =>
+        ExecuteAsync(
+            connection,
+            "INSERT INTO "
+                + SyncLocalTracking.AnchorTableName
+                + " (table_name, anchor) VALUES (@table, @anchor) "
+                + "ON CONFLICT (table_name) DO UPDATE SET anchor = excluded.anchor",
+            cancellationToken,
+            ("@table", tableName),
+            ("@anchor", anchor)
+        );
+
+    /// <summary>Runs one statement that returns no rows, and returns the number of rows it changed.</summary>
+    /// <param name="connection">The connection.</param>
+    /// <param name="sql">One statement.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <param name="parameters">The parameters, by name (a null value is bound as NULL).</param>
+    internal static async Task<int> ExecuteAsync(
+        DbConnection connection,
+        string sql,
+        CancellationToken cancellationToken,
+        params (string Name, object? Value)[] parameters
+    )
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+
+        foreach (var (name, value) in parameters)
+        {
+            AddParameter(command, name, value);
+        }
+
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Adds a parameter to a command (null is bound as NULL).</summary>
+    internal static void AddParameter(DbCommand command, string name, object? value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value ?? DBNull.Value;
+        command.Parameters.Add(parameter);
+    }
+
+    /// <summary>Reads the columns of <see cref="RowStateColumns"/> off the current row of the reader.</summary>
+    private static TrackedSyncRowState ReadRowState(DbDataReader reader) =>
+        new()
+        {
+            RawKey = reader.GetValue(0),
+            BaseVersion = reader.IsDBNull(1) ? null : (byte[])reader.GetValue(1),
+            Known = reader.GetInt64(2) != 0,
+            Dirty = reader.GetInt64(3) != 0,
+            ChangeSequence = reader.GetInt64(4),
+            BlobColumns = reader.GetString(5),
+            BlobOwed = reader.GetString(6),
+        };
+}
+
+/// <summary>What one table's fetch brought into memory before an apply.</summary>
+/// <param name="Rows">The server rows, in the order they came (ascending version, or ascending key for a table without a version column).</param>
+/// <param name="ServerKeys">The key texts of every row the server holds, or null when delete propagation is off.</param>
+internal sealed record TrackedSyncFetch(IReadOnlyList<EntityBaseCore> Rows, IReadOnlySet<string>? ServerKeys);
+
+/// <summary>How one write of an unsent row to the server ended.</summary>
+internal enum TrackedSyncSendKind
+{
+    /// <summary>The write reached the server.</summary>
+    Sent,
+
+    /// <summary>The server's version disagreed (<see cref="SyncConflictReason.ModifiedOnServer"/>, <see cref="SyncConflictReason.MissingOnServer"/>, <see cref="SyncConflictReason.DuplicateOnServer"/>).</summary>
+    Conflict,
+
+    /// <summary>There was nothing to send (the row is gone locally and the server never had it).</summary>
+    Discarded,
+
+    /// <summary>The write to the server threw; why is for the engine to look up.</summary>
+    Failed,
+}
+
+/// <summary>What one write of an unsent row to the server did.</summary>
+/// <param name="Kind">How it ended.</param>
+internal sealed record TrackedSyncSend(TrackedSyncSendKind Kind)
+{
+    /// <summary>Whether the write deleted the row on the server.</summary>
+    public bool Deleted { get; init; }
+
+    /// <summary>Whether the write inserted the row on the server.</summary>
+    public bool Inserted { get; init; }
+
+    /// <summary>Whether the write overwrote the server row without a version check.</summary>
+    public bool Forced { get; init; }
+
+    /// <summary>The disagreement, for a <see cref="TrackedSyncSendKind.Conflict"/>.</summary>
+    public SyncConflictReason Reason { get; init; }
+
+    /// <summary>The local row sent (null for a delete).</summary>
+    public object? Local { get; init; }
+
+    /// <summary>The server row as it stands, for a <see cref="TrackedSyncSendKind.Conflict"/> (null when the server has none).</summary>
+    public object? Server { get; init; }
+
+    /// <summary>The exception the server write threw, for a <see cref="TrackedSyncSendKind.Failed"/>.</summary>
+    public Exception? Error { get; init; }
+
+    /// <summary>
+    /// The version the writer stamped on the row it accepted, for a <see cref="TrackedSyncSendKind.Sent"/> upsert (null when
+    /// the writer left the version the row carried before the write, or for a table without a version column).
+    /// </summary>
+    public byte[]? Version { get; init; }
+}
+
+/// <summary>What <see cref="TrackedSyncEngine"/> asks of one table, without the table's entity and key types.</summary>
+internal interface ITrackedSyncTable
+{
+    /// <summary>Reads the local row with the key (null when there is none).</summary>
+    Task<EntityBaseCore?> FindAsync(DbConnection connection, object key, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Writes one unsent row to the server: an update guarded by the base version when the local row is there and the
+    /// server knows it, an insert (after making sure the server has no such key) when the server does not know it, a delete
+    /// guarded by the base version when the local row is gone and the server knows it, and nothing when the local row is
+    /// gone and the server never had it. A forced write (or a table without a version column) overwrites without a version
+    /// check, inserting when the server has no such row, and deletes unconditionally. Only the row goes: the unbounded
+    /// binary columns are sent afterwards by the engine.
+    /// </summary>
+    Task<TrackedSyncSend> SendAsync(
+        TrackedSyncPendingRow pending,
+        object key,
+        EntityBaseCore? local,
+        bool force,
+        CancellationToken cancellationToken
+    );
+
+    /// <summary>Reads one unbounded binary column of the local row into the stream (false when the row is gone or the column is NULL).</summary>
+    Task<bool> ReadLocalBinaryAsync(
+        DbConnection connection,
+        object key,
+        string propertyName,
+        Stream destination,
+        CancellationToken cancellationToken
+    );
+
+    /// <summary>Writes one unbounded binary column of the server row from the stream (NULL when the stream is null).</summary>
+    Task WriteServerBinaryAsync(
+        string propertyName,
+        object key,
+        Stream? source,
+        long? length,
+        CancellationToken cancellationToken
+    );
+
+    /// <summary>The database column names of the unbounded binary columns, unquoted, in the same order.</summary>
+    IReadOnlyList<string> LocalUnboundedBinaryColumnNames { get; }
+
+    /// <summary>Returns the tables outside the given scope whose local rows refer to a local row of this table (what a refresh refuses to run for).</summary>
+    Task<IReadOnlyList<string>> FindReferencesFromOutsideAsync(
+        DbConnection connection,
+        IReadOnlySet<string> scopeTableNames,
+        CancellationToken cancellationToken
+    );
+
+    /// <summary>Reads the server row with the key (null when there is none).</summary>
+    Task<EntityBaseCore?> ReadServerAsync(object key, CancellationToken cancellationToken);
+
+    /// <summary>Whether the server holds the row with the key text.</summary>
+    Task<bool> ServerHasAsync(string keyText, CancellationToken cancellationToken);
+
+    /// <summary>Whether a server row of this table refers to the given row by its primary key.</summary>
+    Task<bool> ServerReferencesAsync(string parentTableName, string parentKeyText, CancellationToken cancellationToken);
+
+    /// <summary>Whether another server row holds one of the row's unique values.</summary>
+    Task<bool> CollidesOnServerAsync(EntityBaseCore local, CancellationToken cancellationToken);
+
+    /// <summary>The parents a row refers to by their primary keys (the parent's table and key text, null for no parent).</summary>
+    IEnumerable<(string TableName, string? KeyText)> ParentsOf(EntityBaseCore row);
+
+    /// <summary>The table name, as the row state table records it.</summary>
+    string TableName { get; }
+
+    /// <summary>The entity type the table synchronises.</summary>
+    Type EntityType { get; }
+
+    /// <summary>Whether the table has no version column.</summary>
+    bool IsVersionless { get; }
+
+    /// <summary>The excluded unbounded binary columns (accessor names).</summary>
+    IReadOnlyList<string> UnboundedBinaryColumnNames { get; }
+
+    /// <summary>The local table name without its schema part, unquoted.</summary>
+    string LocalTableName { get; }
+
+    /// <summary>The schema part of the local table name, unquoted (null when the name has none).</summary>
+    string? LocalDatabaseName { get; }
+
+    /// <summary>The local primary key column, unquoted.</summary>
+    string LocalKeyColumnName { get; }
+
+    /// <summary>The local row store the table reads and writes its rows through.</summary>
+    ILocalRowStore Rows { get; }
+
+    /// <summary>The key text of a key of the table's key type.</summary>
+    string KeyText(object key);
+
+    /// <summary>The key of the table's key type for a key as the database stores it.</summary>
+    object KeyOfRaw(object rawKey);
+
+    /// <summary>The key text of a key as the database stores it.</summary>
+    string KeyTextOfRaw(object rawKey);
+
+    /// <summary>The key of a row.</summary>
+    object KeyOf(EntityBaseCore row);
+
+    /// <summary>The server version a row carries (null for a table without a version column).</summary>
+    byte[]? VersionOf(EntityBaseCore row);
+
+    /// <summary>Sets the server version a row carries (nothing for a table without a version column).</summary>
+    void SetVersion(EntityBaseCore row, byte[]? version);
+
+    /// <summary>Gets the server's change ceiling (null for a table without a version column).</summary>
+    Task<byte[]?> GetCeilingAsync(CancellationToken cancellationToken);
+
+    /// <summary>Fetches every server row above the anchor and below the ceiling (every row for a table without a version column), and the server's keys when asked.</summary>
+    Task<TrackedSyncFetch> FetchAsync(
+        byte[]? anchor,
+        byte[]? ceiling,
+        int batchSize,
+        bool readKeys,
+        CancellationToken cancellationToken
+    );
+
+    /// <summary>Whether the local table has a row with the key.</summary>
+    Task<bool> ExistsAsync(DbConnection connection, object key, CancellationToken cancellationToken);
+
+    /// <summary>Inserts a server row locally, giving its unset NOT NULL excluded binary columns an empty value first.</summary>
+    Task InsertAsync(DbConnection connection, EntityBaseCore row, CancellationToken cancellationToken);
+
+    /// <summary>Overwrites the local row with a server row (the excluded binary columns are not touched).</summary>
+    Task UpdateAsync(DbConnection connection, EntityBaseCore row, CancellationToken cancellationToken);
+
+    /// <summary>Deletes the local row with the key.</summary>
+    Task<bool> DeleteAsync(DbConnection connection, object key, CancellationToken cancellationToken);
+
+    /// <summary>Reads every local key.</summary>
+    Task<IReadOnlyList<object>> ListKeysAsync(DbConnection connection, CancellationToken cancellationToken);
+
+    /// <summary>Copies one excluded binary column of the server row into the stream (false when the server has no such row or the column is NULL).</summary>
+    Task<bool> ReadServerBinaryAsync(
+        string propertyName,
+        object key,
+        Stream destination,
+        CancellationToken cancellationToken
+    );
+
+    /// <summary>Writes one excluded binary column of the local row from the stream (NULL when the stream is null), inside the caller's transaction.</summary>
+    Task<bool> WriteLocalBinaryAsync(
+        DbConnection connection,
+        object key,
+        string propertyName,
+        Stream? source,
+        long? length,
+        CancellationToken cancellationToken
+    );
+}
+
+/// <summary>
+/// One synchronised table of <see cref="TrackedSyncEngine"/>: its descriptor, the server's differential source, and the
+/// local row store its rows are read and written through.
+/// </summary>
+/// <typeparam name="TEntity">The entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+public sealed class TrackedSyncTable<TEntity, TKey> : ITrackedSyncTable
+    where TEntity : EntityBaseCore, new()
+{
+    private readonly SyncTableDescriptor<TEntity, TKey> _descriptor;
+    private readonly ISyncServerSource<TEntity, TKey> _source;
+    private readonly ILocalRowStore _rows;
+
+    /// <summary>Creates the table over its descriptor, the server's differential source and the local row store.</summary>
+    /// <param name="descriptor">The table's descriptor.</param>
+    /// <param name="source">The server's differential source of the table (and its unbounded binary columns).</param>
+    /// <param name="rows">The local row store (every table of one engine shares the same one).</param>
+    public TrackedSyncTable(
+        SyncTableDescriptor<TEntity, TKey> descriptor,
+        ISyncServerSource<TEntity, TKey> source,
+        ILocalRowStore rows
+    )
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(rows);
+        _descriptor = descriptor;
+        _source = source;
+        _rows = rows;
+    }
+
+    string ITrackedSyncTable.TableName => _descriptor.TableName;
+
+    Type ITrackedSyncTable.EntityType => typeof(TEntity);
+
+    bool ITrackedSyncTable.IsVersionless => _descriptor.IsVersionless;
+
+    IReadOnlyList<string> ITrackedSyncTable.UnboundedBinaryColumnNames => _descriptor.UnboundedBinaryColumnNames;
+
+    string ITrackedSyncTable.LocalTableName => _descriptor.LocalTableName;
+
+    string? ITrackedSyncTable.LocalDatabaseName => _descriptor.LocalDatabaseName;
+
+    string ITrackedSyncTable.LocalKeyColumnName => _descriptor.LocalKeyColumnName;
+
+    ILocalRowStore ITrackedSyncTable.Rows => _rows;
+
+    string ITrackedSyncTable.KeyText(object key) => _descriptor.FormatKey((TKey)key);
+
+    object ITrackedSyncTable.KeyOfRaw(object rawKey) => _rows.ConvertKey<TEntity>(rawKey);
+
+    string ITrackedSyncTable.KeyTextOfRaw(object rawKey) =>
+        _descriptor.FormatKey((TKey)_rows.ConvertKey<TEntity>(rawKey));
+
+    async Task<EntityBaseCore?> ITrackedSyncTable.FindAsync(
+        DbConnection connection,
+        object key,
+        CancellationToken cancellationToken
+    ) => await _rows.FindAsync<TEntity>(connection, key, cancellationToken).ConfigureAwait(false);
+
+    async Task<TrackedSyncSend> ITrackedSyncTable.SendAsync(
+        TrackedSyncPendingRow pending,
+        object key,
+        EntityBaseCore? local,
+        bool force,
+        CancellationToken cancellationToken
+    )
+    {
+        var typedKey = (TKey)key;
+        var writer = _source.Writer;
+        var versionless = _descriptor.IsVersionless;
+
+        try
+        {
+            if (local is null)
+            {
+                // Gone locally: a row the server never had has nothing to send (a table without a version column is always known)
+                if (!versionless && !pending.Known)
+                {
+                    return new(TrackedSyncSendKind.Discarded);
+                }
+
+                if (versionless || force)
+                {
+                    await writer.DeleteAsync(typedKey, cancellationToken).ConfigureAwait(false);
+
+                    return new(TrackedSyncSendKind.Sent) { Deleted = true };
+                }
+
+                // A delete guarded by the base version: a delete by key alone is not version-checked, so a stub carrying the
+                // version is saved as removed
+                var stub = new TEntity();
+                _descriptor.WriteKey(stub, typedKey);
+                _descriptor.WriteRowVersion(stub, pending.BaseVersion);
+                stub.MarkRemoved();
+
+                try
+                {
+                    await writer.SaveAsync(stub, cancellationToken: cancellationToken).ConfigureAwait(false);
+                }
+                catch (SaveConflictException conflict) when (conflict.Reason == SaveConflictReason.Modified)
+                {
+                    return new(TrackedSyncSendKind.Conflict)
+                    {
+                        Reason = SyncConflictReason.ModifiedOnServer,
+                        Server = await writer.GetByIdAsync(typedKey, cancellationToken).ConfigureAwait(false),
+                    };
+                }
+
+                return new(TrackedSyncSendKind.Sent) { Deleted = true };
+            }
+
+            var entity = (TEntity)local;
+
+            if (versionless || force)
+            {
+                var beforeOverwrite = VersionCarried(entity);
+
+                if (
+                    await writer
+                        .UpdateAsync(entity, ConcurrencyMode.ForceOverwrite, cancellationToken)
+                        .ConfigureAwait(false)
+                )
+                {
+                    return new(TrackedSyncSendKind.Sent) { Forced = true, Version = Stamped(entity, beforeOverwrite) };
+                }
+
+                // The server has no such row: it is inserted, and the engine then sends every binary column
+                _descriptor.FillUnsetUnboundedBinaries(entity);
+                var beforeForcedInsert = VersionCarried(entity);
+                await writer.InsertAsync(entity, cancellationToken).ConfigureAwait(false);
+
+                return new(TrackedSyncSendKind.Sent)
+                {
+                    Inserted = true,
+                    Forced = true,
+                    Version = Stamped(entity, beforeForcedInsert),
+                };
+            }
+
+            if (pending.Known)
+            {
+                _descriptor.WriteRowVersion(entity, pending.BaseVersion);
+
+                try
+                {
+                    if (
+                        !await writer
+                            .UpdateAsync(entity, ConcurrencyMode.Optimistic, cancellationToken)
+                            .ConfigureAwait(false)
+                    )
+                    {
+                        return new(TrackedSyncSendKind.Conflict)
+                        {
+                            Reason = SyncConflictReason.MissingOnServer,
+                            Local = entity,
+                        };
+                    }
+                }
+                catch (SaveConflictException conflict)
+                {
+                    var server = await writer.GetByIdAsync(typedKey, cancellationToken).ConfigureAwait(false);
+
+                    return new(TrackedSyncSendKind.Conflict)
+                    {
+                        Reason =
+                            conflict.Reason == SaveConflictReason.NotFound || server is null
+                                ? SyncConflictReason.MissingOnServer
+                                : SyncConflictReason.ModifiedOnServer,
+                        Local = entity,
+                        Server = server,
+                    };
+                }
+
+                return new(TrackedSyncSendKind.Sent) { Version = Stamped(entity, pending.BaseVersion) };
+            }
+
+            // Made here under a key the server does not know: the server must not have the key already
+            if (await writer.GetByIdAsync(typedKey, cancellationToken).ConfigureAwait(false) is { } existing)
+            {
+                return new(TrackedSyncSendKind.Conflict)
+                {
+                    Reason = SyncConflictReason.DuplicateOnServer,
+                    Local = entity,
+                    Server = existing,
+                };
+            }
+
+            _descriptor.FillUnsetUnboundedBinaries(entity);
+            var beforeInsert = VersionCarried(entity);
+            await writer.InsertAsync(entity, cancellationToken).ConfigureAwait(false);
+
+            return new(TrackedSyncSendKind.Sent) { Inserted = true, Version = Stamped(entity, beforeInsert) };
+        }
+        catch (Exception failure) when (failure is not OperationCanceledException)
+        {
+            return new(TrackedSyncSendKind.Failed) { Error = failure, Local = local };
+        }
+
+        // The version the row carries before a write (null for a table without a version column)
+        byte[]? VersionCarried(TEntity row) => versionless ? null : _descriptor.ReadRowVersion(row);
+
+        // The version the writer stamped on the row it accepted: null when it left the version the row carried before
+        // the write, which the engine then reads back from the server instead
+        byte[]? Stamped(TEntity row, byte[]? before) =>
+            !versionless
+            && _descriptor.ReadRowVersion(row) is { Length: > 0 } after
+            && !(before is not null && after.AsSpan().SequenceEqual(before))
+                ? after
+                : null;
+    }
+
+    async Task<EntityBaseCore?> ITrackedSyncTable.ReadServerAsync(object key, CancellationToken cancellationToken) =>
+        await _source.Writer.GetByIdAsync((TKey)key, cancellationToken).ConfigureAwait(false);
+
+    async Task<bool> ITrackedSyncTable.ServerHasAsync(string keyText, CancellationToken cancellationToken) =>
+        await _source.Writer.GetByIdAsync(_descriptor.ParseKey(keyText), cancellationToken).ConfigureAwait(false)
+            is not null;
+
+    async Task<bool> ITrackedSyncTable.ServerReferencesAsync(
+        string parentTableName,
+        string parentKeyText,
+        CancellationToken cancellationToken
+    )
+    {
+        if (!_descriptor.ParentReferences.Any(reference => reference.ParentTableName == parentTableName))
+        {
+            return false;
+        }
+
+        var rows = await _source.Writer.GetAllAsync(cancellationToken).ConfigureAwait(false);
+
+        return rows.Any(row =>
+            _descriptor.ParentReferences.Any(reference =>
+                reference.ParentTableName == parentTableName
+                && string.Equals(reference.ReadParentKeyText(row), parentKeyText, StringComparison.Ordinal)
+            )
+        );
+    }
+
+    async Task<bool> ITrackedSyncTable.CollidesOnServerAsync(EntityBaseCore local, CancellationToken cancellationToken) =>
+        (await _source.Writer.CheckUniquenessAsync((TEntity)local, cancellationToken).ConfigureAwait(false)).Count > 0;
+
+    IEnumerable<(string TableName, string? KeyText)> ITrackedSyncTable.ParentsOf(EntityBaseCore row) =>
+        _descriptor.ParentReferences.Select(reference =>
+            (reference.ParentTableName, reference.ReadParentKeyText((TEntity)row))
+        );
+
+    object ITrackedSyncTable.KeyOf(EntityBaseCore row) => _descriptor.ReadKey((TEntity)row)!;
+
+    byte[]? ITrackedSyncTable.VersionOf(EntityBaseCore row) =>
+        _descriptor.IsVersionless ? null : _descriptor.ReadRowVersion((TEntity)row);
+
+    void ITrackedSyncTable.SetVersion(EntityBaseCore row, byte[]? version)
+    {
+        if (!_descriptor.IsVersionless)
+        {
+            _descriptor.WriteRowVersion((TEntity)row, version);
+        }
+    }
+
+    async Task<byte[]?> ITrackedSyncTable.GetCeilingAsync(CancellationToken cancellationToken) =>
+        _descriptor.IsVersionless
+            ? null
+            : await _source.GetChangeCeilingAsync(cancellationToken).ConfigureAwait(false);
+
+    async Task<TrackedSyncFetch> ITrackedSyncTable.FetchAsync(
+        byte[]? anchor,
+        byte[]? ceiling,
+        int batchSize,
+        bool readKeys,
+        CancellationToken cancellationToken
+    )
+    {
+        var rows = new List<EntityBaseCore>();
+
+        if (_descriptor.IsVersionless)
+        {
+            var page = await _source.GetFirstPageAsync(batchSize, cancellationToken).ConfigureAwait(false);
+            rows.AddRange(page.Rows);
+
+            while (page.HasMore && page.Rows.Count > 0)
+            {
+                page = await _source
+                    .GetPageAfterAsync(_descriptor.ReadKey(page.Rows[^1]), batchSize, cancellationToken)
+                    .ConfigureAwait(false);
+                rows.AddRange(page.Rows);
+            }
+        }
+        else
+        {
+            var resume = anchor;
+
+            while (true)
+            {
+                var batch = await _source
+                    .GetChangesAsync(resume, ceiling, batchSize, cancellationToken)
+                    .ConfigureAwait(false);
+                rows.AddRange(batch.Rows);
+
+                if (!batch.HasMore || batch.Rows.Count == 0)
+                {
+                    break;
+                }
+
+                resume = _descriptor.ReadRowVersion(batch.Rows[^1]);
+            }
+        }
+
+        IReadOnlySet<string>? serverKeys = null;
+
+        if (readKeys)
+        {
+            var keys = await _source.GetAllKeysAsync(cancellationToken).ConfigureAwait(false);
+            serverKeys = keys.Select(_descriptor.FormatKey).ToHashSet(StringComparer.Ordinal);
+        }
+
+        return new TrackedSyncFetch(rows, serverKeys);
+    }
+
+    Task<bool> ITrackedSyncTable.ExistsAsync(
+        DbConnection connection,
+        object key,
+        CancellationToken cancellationToken
+    ) => _rows.ExistsAsync<TEntity>(connection, key, cancellationToken);
+
+    Task ITrackedSyncTable.InsertAsync(
+        DbConnection connection,
+        EntityBaseCore row,
+        CancellationToken cancellationToken
+    )
+    {
+        var entity = (TEntity)row;
+        _descriptor.FillUnsetUnboundedBinaries(entity);
+
+        return _rows.InsertAsync(connection, entity, cancellationToken);
+    }
+
+    Task ITrackedSyncTable.UpdateAsync(
+        DbConnection connection,
+        EntityBaseCore row,
+        CancellationToken cancellationToken
+    ) => _rows.UpdateAsync(connection, (TEntity)row, cancellationToken);
+
+    Task<bool> ITrackedSyncTable.DeleteAsync(
+        DbConnection connection,
+        object key,
+        CancellationToken cancellationToken
+    ) => _rows.DeleteAsync<TEntity>(connection, key, cancellationToken);
+
+    Task<IReadOnlyList<object>> ITrackedSyncTable.ListKeysAsync(
+        DbConnection connection,
+        CancellationToken cancellationToken
+    ) => _rows.ListKeysAsync<TEntity>(connection, cancellationToken);
+
+    async Task<bool> ITrackedSyncTable.ReadServerBinaryAsync(
+        string propertyName,
+        object key,
+        Stream destination,
+        CancellationToken cancellationToken
+    ) =>
+        _source.BinaryColumns is { } binaries
+        && await binaries
+            .ReadUnboundedBinaryAsync(propertyName, (TKey)key, destination, cancellationToken)
+            .ConfigureAwait(false);
+
+    Task<bool> ITrackedSyncTable.WriteLocalBinaryAsync(
+        DbConnection connection,
+        object key,
+        string propertyName,
+        Stream? source,
+        long? length,
+        CancellationToken cancellationToken
+    ) => _rows.WriteBinaryAsync<TEntity>(connection, key, propertyName, source, length, cancellationToken);
+
+    Task<bool> ITrackedSyncTable.ReadLocalBinaryAsync(
+        DbConnection connection,
+        object key,
+        string propertyName,
+        Stream destination,
+        CancellationToken cancellationToken
+    ) => _rows.ReadBinaryAsync<TEntity>(connection, key, propertyName, destination, cancellationToken);
+
+    async Task ITrackedSyncTable.WriteServerBinaryAsync(
+        string propertyName,
+        object key,
+        Stream? source,
+        long? length,
+        CancellationToken cancellationToken
+    )
+    {
+        // A server without the binary surface has nothing to write to (its rows carry no excluded columns)
+        if (_source.BinaryColumns is { } binaries)
+        {
+            await binaries
+                .WriteUnboundedBinaryAsync(propertyName, (TKey)key, source, length, cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
+    IReadOnlyList<string> ITrackedSyncTable.LocalUnboundedBinaryColumnNames =>
+        _descriptor.LocalUnboundedBinaryColumnNames;
+
+    /// <remarks>
+    /// A table outside the scope is asked through <see cref="SyncTableDescriptor{TEntity, TKey}.LocalReferences"/>, against
+    /// every local key of this table (the refresh may delete any of them). A table the local database does not have is
+    /// skipped. A table that refers to this one only through a foreign key those references do not list
+    /// (<see cref="SyncTableDescriptor{TEntity, TKey}.UnlistedReferencingTableNames"/>) cannot be asked, so it counts whenever
+    /// the local database has it.
+    /// </remarks>
+    async Task<IReadOnlyList<string>> ITrackedSyncTable.FindReferencesFromOutsideAsync(
+        DbConnection connection,
+        IReadOnlySet<string> scopeTableNames,
+        CancellationToken cancellationToken
+    )
+    {
+        var listed = _descriptor
+            .LocalReferences.Where(reference => !scopeTableNames.Contains(reference.TableName))
+            .ToList();
+        var unlisted = _descriptor
+            .UnlistedReferencingTableNames.Where(name => !scopeTableNames.Contains(name))
+            .ToList();
+
+        if (listed.Count == 0 && unlisted.Count == 0)
+        {
+            return [];
+        }
+
+        var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table'";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                present.Add(reader.GetString(0));
+            }
+        }
+
+        var referring = unlisted.Where(present.Contains).Distinct(StringComparer.Ordinal).ToList();
+        var localKeys =
+            "SELECT "
+            + TrackedSyncEngine.Identifier(_descriptor.LocalKeyColumnName)
+            + " FROM "
+            + TrackedSyncEngine.QualifiedName(this);
+
+        foreach (var reference in listed)
+        {
+            if (
+                !present.Contains(reference.TableName)
+                || referring.Contains(reference.TableName, StringComparer.Ordinal)
+            )
+            {
+                continue;
+            }
+
+            // The reference reads the referring values among a set of keys (its one "IN (@keys)"); here the set is every
+            // local key. A reference of any other form is not one the generator writes
+            const string KeySet = "IN (@keys)";
+            var at = reference.Sql.IndexOf(KeySet, StringComparison.Ordinal);
+
+            if (
+                at < 0
+                || reference.Sql.IndexOf("@keys", at + KeySet.Length, StringComparison.Ordinal) >= 0
+                || reference.Sql.IndexOf("@keys", StringComparison.Ordinal) != at + 4
+            )
+            {
+                throw new InvalidOperationException(
+                    $"The local reference from '{reference.TableName}' to '{_descriptor.TableName}' does not read one key set."
+                );
+            }
+
+            await using var probe = connection.CreateCommand();
+            probe.CommandText =
+                "SELECT EXISTS ("
+                + reference.Sql[..at]
+                + "IN ("
+                + localKeys
+                + ")"
+                + reference.Sql[(at + KeySet.Length)..]
+                + ")";
+
+            if (
+                Convert.ToInt64(
+                    await probe.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
+                    CultureInfo.InvariantCulture
+                ) != 0
+            )
+            {
+                referring.Add(reference.TableName);
+            }
+        }
+
+        return referring;
+    }
+}
+
+/// <summary>
+/// The sync engine over the change tracking of <see cref="SyncLocalTracking"/>: local changes are recorded by triggers in
+/// the row state table, and a download brings the server's changes into memory and applies them in one local transaction.
+/// </summary>
+/// <remarks>
+/// <para>
+/// A download takes the change ceiling once at the start of the run and shares it among the tables, fetches every table
+/// of the run's scope, and then applies everything on a dedicated connection (foreign keys checked off, one
+/// <c>BEGIN IMMEDIATE</c> transaction, the applying flag set so that the triggers do not record what it writes). Within
+/// that transaction it first removes, in every table, the local rows the server no longer has (delete propagation), then
+/// writes the server rows, then checks the foreign keys, and finally saves each table's resume point - all or nothing.
+/// When the apply holds rows back, the run takes the ceiling again and fetches and applies once more from the resume
+/// points.
+/// </para>
+/// <para>
+/// The apply never calls the local save hooks. It writes rows through <see cref="ILocalRowStore"/>, which leaves the
+/// excluded unbounded binary columns alone on an update; when the run carries those columns, each row the apply wrote
+/// owes them, and they are copied down from the server afterwards, each through a temporary file and a short transaction
+/// of its own, so no blob is held in memory.
+/// </para>
+/// <para>
+/// The change tracking (<see cref="SyncLocalTracking.Ensure"/>) must be in place in the local database before a run.
+/// </para>
+/// </remarks>
+public sealed class TrackedSyncEngine
+{
+    /// <summary>
+    /// The most attempts one apply makes. Every attempt that finds a foreign key violation holds a row back or keeps a
+    /// parent, so the attempts are bounded by the rows; this only stops a runaway.
+    /// </summary>
+    private const int MaxApplyAttempts = 200;
+
+    /// <summary>The savepoint one row write runs inside.</summary>
+    private const string WriteSavepoint = "quicker_sync_apply_write";
+
+    /// <summary>The savepoint one rotation (delete and insert again) runs inside.</summary>
+    private const string RotateSavepoint = "quicker_sync_apply_rotate";
+
+    /// <summary>The buffer size of the temporary file an owed binary column passes through.</summary>
+    private const int TemporaryFileBufferSize = 81920;
+
+    private readonly IReadOnlyList<ITrackedSyncTable> _tables;
+    private readonly ILocalRowStore _rows;
+
+    /// <summary>Creates the engine over the synchronised tables, ordered parents first.</summary>
+    /// <param name="tables">The synchronised tables in foreign-key order; every one shares the same local row store.</param>
+    /// <exception cref="ArgumentException">No table is given, or the tables do not share one local row store.</exception>
+    internal TrackedSyncEngine(IEnumerable<ITrackedSyncTable> tables)
+    {
+        ArgumentNullException.ThrowIfNull(tables);
+        _tables = tables.ToList();
+
+        if (_tables.Count == 0)
+        {
+            throw new ArgumentException("The engine needs at least one table.", nameof(tables));
+        }
+
+        _rows = _tables[0].Rows;
+
+        if (_tables.Any(table => !ReferenceEquals(table.Rows, _rows)))
+        {
+            throw new ArgumentException("Every table of one engine shares the same local row store.", nameof(tables));
+        }
+    }
+
+    /// <summary>Runs one full sync: sends the local changes, then pulls the server's changes down.</summary>
+    /// <param name="options">The knobs for this run (null takes the defaults).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <remarks>
+    /// A run that throws hands the local rows it had changed on its own on in the exception's
+    /// <see cref="Exception.Data"/>, under <see cref="SyncEngine.LocalRowChangesDataKey"/>.
+    /// </remarks>
+    public async Task<SyncResult> SyncAsync(
+        SyncOptions? options = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        options ??= new SyncOptions();
+        var scope = ResolveScope(options);
+        var changes = new SyncLocalRowChangeLog();
+
+        try
+        {
+            return await RunExclusiveAsync(
+                    async () =>
+                    {
+                        await RefuseEmptiedTablesAsync(scope, cancellationToken).ConfigureAwait(false);
+                        var discards = await ReadCarriedDecisionsAsync(scope, cancellationToken)
+                            .ConfigureAwait(false);
+                        var conflicts = new List<SyncConflict>();
+                        var (uploaded, discarded) = await UploadCoreAsync(
+                                scope,
+                                options,
+                                conflicts,
+                                discards,
+                                cancellationToken
+                            )
+                            .ConfigureAwait(false);
+                        var download = await DownloadCoreAsync(
+                                scope,
+                                options,
+                                discards,
+                                fetch: true,
+                                changes,
+                                cancellationToken
+                            )
+                            .ConfigureAwait(false);
+
+                        return new SyncResult(
+                            uploaded,
+                            download.Downloaded,
+                            download.DeletedLocally,
+                            discarded + download.Discarded,
+                            conflicts
+                        )
+                        {
+                            Truncations = download.Truncations,
+                            LocalRowChanges = changes.ToList(),
+                        };
+                    },
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+        }
+        catch (Exception failure)
+        {
+            failure.Data[SyncEngine.LocalRowChangesDataKey] = changes.ToList();
+            throw;
+        }
+    }
+
+    /// <summary>Sends the local changes and returns how many went and how many were dropped.</summary>
+    /// <param name="options">The knobs for this run.</param>
+    /// <param name="conflicts">The collection the collected conflicts are added to.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public async Task<(int Uploaded, int Discarded)> UploadAsync(
+        SyncOptions options,
+        ICollection<SyncConflict> conflicts,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(conflicts);
+        var scope = ResolveScope(options);
+
+        return await RunExclusiveAsync(
+                async () =>
+                {
+                    await RefuseEmptiedTablesAsync(scope, cancellationToken).ConfigureAwait(false);
+                    var discards = await ReadCarriedDecisionsAsync(scope, cancellationToken).ConfigureAwait(false);
+                    var (uploaded, discarded) = await UploadCoreAsync(
+                            scope,
+                            options,
+                            conflicts,
+                            discards,
+                            cancellationToken
+                        )
+                        .ConfigureAwait(false);
+
+                    // With no download to follow, the rows ServerWins discards are put back here, each read from the server
+                    // by key (nothing is fetched and no resume point moves)
+                    if (discards.Count == 0)
+                    {
+                        return (uploaded, discarded);
+                    }
+
+                    var settled = await DownloadOnceAsync(
+                            scope,
+                            options,
+                            discards,
+                            fetch: false,
+                            changes: null,
+                            cancellationToken
+                        )
+                        .ConfigureAwait(false);
+
+                    return (uploaded, discarded + settled.Discarded);
+                },
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Pulls the server's changes down and, unless it is turned off, removes the local rows the server dropped.</summary>
+    /// <param name="options">The knobs for this run.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public async Task<(int Downloaded, int DeletedLocally)> DownloadAsync(
+        SyncOptions options,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var scope = ResolveScope(options);
+
+        return await RunExclusiveAsync(
+                async () =>
+                {
+                    await RefuseEmptiedTablesAsync(scope, cancellationToken).ConfigureAwait(false);
+                    var discards = await ReadCarriedDecisionsAsync(scope, cancellationToken).ConfigureAwait(false);
+                    var download = await DownloadCoreAsync(
+                            scope,
+                            options,
+                            discards,
+                            fetch: true,
+                            changes: null,
+                            cancellationToken
+                        )
+                        .ConfigureAwait(false);
+
+                    return (download.Downloaded, download.DeletedLocally);
+                },
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Rebuilds the tables of the run's scope as a copy of the server's.</summary>
+    /// <param name="options">The knobs for this run (null takes the defaults).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <remarks>
+    /// <para>
+    /// The refusals come first, in this order, each before anything is read or written: a batch size that is not greater
+    /// than zero, an excluded type the engine does not synchronise, unbounded binary columns neither carried nor given up
+    /// (decided from the tables alone, without reading the database), a local row of a table outside the scope referring
+    /// to a row of a table inside it, and unsent changes in the scope's tables unless <see cref="SyncRefreshOptions.Force"/>
+    /// is set. A table found emptied outside a run is not refused: the refresh is what rebuilds it.
+    /// </para>
+    /// <para>
+    /// The refresh then fetches every row of the scope's tables below one change ceiling and applies them the way a
+    /// download does - one transaction, the same holding back for missing parents and colliding unique values - except
+    /// that no row is skipped as an echo, every local row the server does not hold goes, and the unsent changes are
+    /// discarded when forced. Rows held back are fetched once more from the resume points; when some are still held, the
+    /// run throws. A row the server changed after the ceiling is left to the next run.
+    /// </para>
+    /// <para>
+    /// The counts are per table: <see cref="SyncRefreshTableResult.Deleted"/> is the local rows removed because the server
+    /// does not hold them, and <see cref="SyncRefreshTableResult.Inserted"/> the server rows written locally, inserted or
+    /// overwritten. <see cref="SyncRefreshResult.DiscardedChanges"/> is the number of rows whose unsent change was
+    /// discarded.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="SyncUnboundedBinaryLossException">A table of the scope has unbounded binary columns and neither <see cref="SyncRefreshOptions.IncludeUnboundedBinary"/> nor <see cref="SyncRefreshOptions.DiscardLocalUnboundedBinaries"/> was set.</exception>
+    /// <exception cref="SyncRefreshScopeException">A local row of a table outside the refresh refers to a row of a table it rebuilds.</exception>
+    /// <exception cref="SyncPendingChangesException">The scope's tables hold unsent local changes and <see cref="SyncRefreshOptions.Force"/> was not set.</exception>
+    public async Task<SyncRefreshResult> RefreshAsync(
+        SyncRefreshOptions? options = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        options ??= new SyncRefreshOptions();
+
+        if (options.BatchSize <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.BatchSize,
+                "The refresh batch size must be greater than zero."
+            );
+        }
+
+        var scope = ResolveScope(options.Mode, options.ExcludedEntityTypes);
+
+        if (!options.IncludeUnboundedBinary && !options.DiscardLocalUnboundedBinaries)
+        {
+            var atStake = scope
+                .Where(table => table.UnboundedBinaryColumnNames.Count > 0)
+                .Select(table => new SyncUnboundedBinaryColumns(table.TableName, table.UnboundedBinaryColumnNames))
+                .ToList();
+
+            if (atStake.Count > 0)
+            {
+                throw new SyncUnboundedBinaryLossException(atStake);
+            }
+        }
+
+        var startedAt = Stopwatch.GetTimestamp();
+
+        return await RunExclusiveAsync(
+                () => RefreshCoreAsync(options, scope, startedAt, cancellationToken),
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>The body of <see cref="RefreshAsync"/>, run under the run lock once the arguments have been checked.</summary>
+    private async Task<SyncRefreshResult> RefreshCoreAsync(
+        SyncRefreshOptions options,
+        List<ITrackedSyncTable> scope,
+        long startedAt,
+        CancellationToken cancellationToken
+    )
+    {
+        var scopeTableNames = scope.Select(table => table.TableName).ToHashSet(StringComparer.Ordinal);
+        var blocking = new List<SyncRefreshScopeReference>();
+        IReadOnlyList<TrackedSyncPendingRow> pending;
+
+        await using (var connection = await OpenDedicatedAsync(cancellationToken).ConfigureAwait(false))
+        {
+            foreach (var table in scope)
+            {
+                foreach (
+                    var referring in await table
+                        .FindReferencesFromOutsideAsync(connection, scopeTableNames, cancellationToken)
+                        .ConfigureAwait(false)
+                )
+                {
+                    blocking.Add(new SyncRefreshScopeReference(referring, table.TableName));
+                }
+            }
+
+            if (blocking.Count > 0)
+            {
+                throw new SyncRefreshScopeException(blocking);
+            }
+
+            pending = (await TrackedSyncState.ReadPendingAsync(connection, cancellationToken).ConfigureAwait(false))
+                .Where(row => scopeTableNames.Contains(row.TableName))
+                .ToList();
+        }
+
+        if (pending.Count > 0 && !options.Force)
+        {
+            throw new SyncPendingChangesException(
+                pending
+                    .GroupBy(row => row.TableName, StringComparer.Ordinal)
+                    .Select(group => new SyncPendingChange(group.Key, group.Count()))
+                    .ToList()
+            );
+        }
+
+        if (scope.Count == 0)
+        {
+            return new SyncRefreshResult([], pending.Count, Stopwatch.GetElapsedTime(startedAt));
+        }
+
+        // Forced: every unsent row of the scope is discarded, taking the server's row when the fetch brings it
+        var discards = new Dictionary<(string Table, string Key), TrackedSyncDiscard>();
+
+        foreach (var row in pending)
+        {
+            var table = scope.First(candidate => candidate.TableName == row.TableName);
+            var key = table.KeyOfRaw(row.RawKey);
+            discards[(table.TableName, table.KeyText(key))] = new TrackedSyncDiscard(key, row.ChangeSequence);
+        }
+
+        var syncOptions = new SyncOptions
+        {
+            Mode = options.Mode,
+            DownloadBatchSize = options.BatchSize,
+            PropagateDeletes = true,
+            IncludeUnboundedBinary = options.IncludeUnboundedBinary,
+        };
+        var refresh = new TrackedSyncRefresh(BlankBinaries: !options.IncludeUnboundedBinary);
+        var first = await DownloadOnceAsync(scope, syncOptions, discards, true, null, cancellationToken, refresh)
+            .ConfigureAwait(false);
+        var outcome = first;
+
+        if (first.Truncations.Count > 0)
+        {
+            // The rows held back are fetched once more from the resume points the refresh left
+            var second = await DownloadOnceAsync(scope, syncOptions, [], true, null, cancellationToken)
+                .ConfigureAwait(false);
+            outcome = new TrackedSyncDownload(
+                first.Downloaded + second.Downloaded,
+                first.DeletedLocally + second.DeletedLocally,
+                second.Truncations
+            )
+            {
+                PerTable = scope.ToDictionary(
+                    table => table.TableName,
+                    table =>
+                    {
+                        var a = first.PerTable.GetValueOrDefault(table.TableName);
+                        var b = second.PerTable.GetValueOrDefault(table.TableName);
+
+                        return (a.Deleted + b.Deleted, a.Written + b.Written);
+                    },
+                    StringComparer.Ordinal
+                ),
+            };
+        }
+
+        if (outcome.Truncations.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "The refresh could not replace every row; these are held back: "
+                    + string.Join(
+                        ", ",
+                        outcome.Truncations.Select(truncation => truncation.TableName + "/" + truncation.PendingKeyText)
+                    )
+            );
+        }
+
+        return new SyncRefreshResult(
+            scope
+                .Select(table =>
+                {
+                    var counts = outcome.PerTable.GetValueOrDefault(table.TableName);
+
+                    return new SyncRefreshTableResult(table.TableName, counts.Deleted, counts.Written);
+                })
+                .ToList(),
+            pending.Count,
+            Stopwatch.GetElapsedTime(startedAt)
+        );
+    }
+
+    /// <summary>The tables a run covers, after checking the run's arguments.</summary>
+    /// <param name="options">The knobs for the run.</param>
+    /// <exception cref="ArgumentOutOfRangeException">The download batch size is not greater than zero.</exception>
+    /// <exception cref="ArgumentException">An excluded type is not one the engine synchronises.</exception>
+    private List<ITrackedSyncTable> ResolveScope(SyncOptions options)
+    {
+        if (options.DownloadBatchSize <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.DownloadBatchSize,
+                "The download batch size must be greater than zero."
+            );
+        }
+
+        return ResolveScope(options.Mode, options.ExcludedEntityTypes);
+    }
+
+    /// <summary>The tables a mode and a set of excluded types cover.</summary>
+    /// <param name="mode">The run's mode (<see cref="SyncMode.Versioned"/> leaves the tables without a version column out).</param>
+    /// <param name="excludedEntityTypes">The entity types the run leaves out.</param>
+    /// <exception cref="ArgumentException">An excluded type is not one the engine synchronises.</exception>
+    private List<ITrackedSyncTable> ResolveScope(SyncMode mode, IReadOnlyCollection<Type> excludedEntityTypes)
+    {
+        var known = _tables.Select(table => table.EntityType).ToHashSet();
+        var unknown = excludedEntityTypes.Where(type => !known.Contains(type)).ToList();
+
+        if (unknown.Count > 0)
+        {
+            throw new ArgumentException(
+                "The engine does not synchronise "
+                    + string.Join(", ", unknown.Select(type => type.Name))
+                    + "; exclude only the types it synchronises.",
+                "options"
+            );
+        }
+
+        var excluded = excludedEntityTypes.ToHashSet();
+
+        return _tables
+            .Where(table => !(mode == SyncMode.Versioned && table.IsVersionless))
+            .Where(table => !excluded.Contains(table.EntityType))
+            .ToList();
+    }
+
+    /// <summary>The locks that keep the runs on one local database in this process one at a time, by database file.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> RunLocks =
+        new(StringComparer.Ordinal);
+
+    /// <summary>The lock of this engine's runs when the database has no file name to share a lock by (an in-memory database).</summary>
+    private readonly SemaphoreSlim _ownRunLock = new(1, 1);
+
+    /// <summary>
+    /// Runs the body while no other run on the same local database (the same <see cref="DbConnection.DataSource"/> once
+    /// open) in this process is running: a run waits for the one before it to end.
+    /// </summary>
+    private async Task<T> RunExclusiveAsync<T>(Func<Task<T>> body, CancellationToken cancellationToken)
+    {
+        string dataSource;
+
+        await using (var connection = await OpenDedicatedAsync(cancellationToken).ConfigureAwait(false))
+        {
+            dataSource = connection.DataSource;
+        }
+
+        var runLock = string.IsNullOrEmpty(dataSource)
+            ? _ownRunLock
+            : RunLocks.GetOrAdd(dataSource, static _ => new SemaphoreSlim(1, 1));
+        await runLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            return await body().ConfigureAwait(false);
+        }
+        finally
+        {
+            runLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Refuses the run when a table of its scope is empty locally while the row state table holds rows of it the server knows
+    /// and that have nothing to send: the table appears to have been made again empty, and a run would send nothing for its
+    /// missing rows and download only what changed since its resume point.
+    /// </summary>
+    /// <exception cref="SyncLocalTableEmptiedException">A table of the run's scope appears to have been made again empty.</exception>
+    private async Task RefuseEmptiedTablesAsync(List<ITrackedSyncTable> scope, CancellationToken cancellationToken)
+    {
+        var emptied = new List<string>();
+
+        await using (var connection = await OpenDedicatedAsync(cancellationToken).ConfigureAwait(false))
+        {
+            foreach (var table in scope)
+            {
+                if (
+                    await TrackedSyncState
+                        .IsEmptiedAsync(connection, table.TableName, QualifiedName(table), cancellationToken)
+                        .ConfigureAwait(false)
+                )
+                {
+                    emptied.Add(table.TableName);
+                }
+            }
+        }
+
+        if (emptied.Count > 0)
+        {
+            throw new SyncLocalTableEmptiedException(emptied);
+        }
+    }
+
+    /// <summary>
+    /// Reads the <see cref="SyncConflictPolicy.ServerWins"/> decisions earlier runs could not carry out (rows still marked
+    /// at their current change number): whatever this run's policy, such a row is not sent, and the server's content is put
+    /// back over it.
+    /// </summary>
+    private async Task<Dictionary<(string Table, string Key), TrackedSyncDiscard>> ReadCarriedDecisionsAsync(
+        List<ITrackedSyncTable> scope,
+        CancellationToken cancellationToken
+    )
+    {
+        var byName = scope.ToDictionary(table => table.TableName, StringComparer.Ordinal);
+        var discards = new Dictionary<(string Table, string Key), TrackedSyncDiscard>();
+
+        await using var connection = await OpenDedicatedAsync(cancellationToken).ConfigureAwait(false);
+
+        foreach (var row in await TrackedSyncState.ReadPendingAsync(connection, cancellationToken).ConfigureAwait(false))
+        {
+            if (row.ServerWinsSequence != row.ChangeSequence || !byName.TryGetValue(row.TableName, out var table))
+            {
+                continue;
+            }
+
+            var key = table.KeyOfRaw(row.RawKey);
+            discards[(table.TableName, table.KeyText(key))] = new TrackedSyncDiscard(key, row.ChangeSequence);
+        }
+
+        return discards;
+    }
+
+    /// <summary>
+    /// Sends the unsent changes of the run's tables, in rounds: the inserts and updates parents first, then the deletes
+    /// children first; a write the server refused goes into the next round as long as the round got anything through.
+    /// </summary>
+    /// <remarks>
+    /// A <see cref="SyncMode.Versioned"/> run under <see cref="SyncConflictPolicy.ServerWins"/> sends nothing and discards
+    /// every unsent change of its tables. A <see cref="SyncMode.LastWriteWins"/> run (and every table without a version
+    /// column) overwrites without a version check; <see cref="SyncConflictPolicy.LocalWins"/> settles a version conflict by
+    /// overwriting. A failed write is explained by the server's state (a missing parent, a row still referring to the deleted
+    /// one, another row holding a unique value); a failure nothing explains is thrown back unchanged. The rows a
+    /// last-write-wins run under <see cref="SyncConflictPolicy.ServerWins"/> sees refused are discarded instead of reported.
+    /// </remarks>
+    /// <returns>How many changes reached the server, and how many were dropped with nothing to send.</returns>
+    private async Task<(int Uploaded, int Discarded)> UploadCoreAsync(
+        List<ITrackedSyncTable> scope,
+        SyncOptions options,
+        ICollection<SyncConflict> conflicts,
+        Dictionary<(string Table, string Key), TrackedSyncDiscard> discards,
+        CancellationToken cancellationToken
+    )
+    {
+        var byName = scope.ToDictionary(table => table.TableName, StringComparer.Ordinal);
+        List<TrackedSyncQueued> queue;
+
+        await using (var connection = await OpenDedicatedAsync(cancellationToken).ConfigureAwait(false))
+        {
+            queue = [];
+
+            foreach (
+                var row in await TrackedSyncState.ReadPendingAsync(connection, cancellationToken).ConfigureAwait(false)
+            )
+            {
+                if (!byName.TryGetValue(row.TableName, out var table))
+                {
+                    continue;
+                }
+
+                var key = table.KeyOfRaw(row.RawKey);
+                var keyText = table.KeyText(key);
+
+                // A row a carried decision is discarding is not sent
+                if (!discards.ContainsKey((table.TableName, keyText)))
+                {
+                    queue.Add(new TrackedSyncQueued(table, row, key, keyText));
+                }
+            }
+        }
+
+        if (options is { Mode: SyncMode.Versioned, ConflictPolicy: SyncConflictPolicy.ServerWins })
+        {
+            foreach (var queued in queue)
+            {
+                discards[(queued.Table.TableName, queued.KeyText)] = new TrackedSyncDiscard(
+                    queued.Key,
+                    queued.Row.ChangeSequence
+                );
+            }
+
+            return (0, 0);
+        }
+
+        var lastWriteWins = options.Mode == SyncMode.LastWriteWins;
+        var uploaded = 0;
+        var discarded = 0;
+        var refused = new List<(TrackedSyncQueued Queued, EntityBaseCore? Local, SyncConflictReason Reason)>();
+
+        while (queue.Count > 0)
+        {
+            refused.Clear();
+            var progress = false;
+            var withLocal = new List<(TrackedSyncQueued Queued, EntityBaseCore? Local)>(queue.Count);
+
+            await using (var connection = await OpenDedicatedAsync(cancellationToken).ConfigureAwait(false))
+            {
+                foreach (var queued in queue)
+                {
+                    withLocal.Add(
+                        (
+                            queued,
+                            await queued.Table.FindAsync(connection, queued.Key, cancellationToken).ConfigureAwait(false)
+                        )
+                    );
+                }
+            }
+
+            var order = withLocal
+                .Where(item => item.Local is not null)
+                .OrderBy(item => IndexOf(item.Queued.Table))
+                .ThenBy(item => item.Queued.Row.ChangeSequence)
+                .Concat(
+                    withLocal
+                        .Where(item => item.Local is null)
+                        .OrderByDescending(item => IndexOf(item.Queued.Table))
+                        .ThenBy(item => item.Queued.Row.ChangeSequence)
+                )
+                .ToList();
+
+            foreach (var (queued, local) in order)
+            {
+                var force = lastWriteWins || queued.Table.IsVersionless;
+                var result = await queued
+                    .Table.SendAsync(queued.Row, queued.Key, local, force, cancellationToken)
+                    .ConfigureAwait(false);
+
+                // LocalWins settles a version conflict by overwriting (a write the server refused is not settled this way)
+                if (
+                    result.Kind == TrackedSyncSendKind.Conflict
+                    && options.ConflictPolicy == SyncConflictPolicy.LocalWins
+                )
+                {
+                    result = await queued
+                        .Table.SendAsync(
+                            queued.Row,
+                            queued.Key,
+                            local,
+                            force: true,
+                            cancellationToken
+                        )
+                        .ConfigureAwait(false);
+                }
+
+                switch (result.Kind)
+                {
+                    case TrackedSyncSendKind.Discarded:
+                        await using (
+                            var connection = await OpenDedicatedAsync(cancellationToken).ConfigureAwait(false)
+                        )
+                        {
+                            await TrackedSyncState
+                                .ForgetPendingAsync(
+                                    connection,
+                                    queued.Table.TableName,
+                                    queued.Row.RawKey,
+                                    queued.Row.ChangeSequence,
+                                    cancellationToken
+                                )
+                                .ConfigureAwait(false);
+                        }
+
+                        discarded++;
+                        break;
+
+                    case TrackedSyncSendKind.Sent:
+                        await SettleSentAsync(queued, result, options.IncludeUnboundedBinary, cancellationToken)
+                            .ConfigureAwait(false);
+                        uploaded++;
+                        progress = true;
+                        break;
+
+                    case TrackedSyncSendKind.Conflict:
+                        conflicts.Add(
+                            new SyncConflict(
+                                queued.Table.TableName,
+                                queued.KeyText,
+                                local is null ? SyncJournalOperation.Delete : SyncJournalOperation.Upsert,
+                                result.Reason,
+                                result.Local,
+                                result.Server
+                            )
+                        );
+                        break;
+
+                    default:
+                        SyncConflictReason? reason;
+
+                        try
+                        {
+                            reason = await ExplainRefusalAsync(queued, local, cancellationToken).ConfigureAwait(false);
+                        }
+                        catch (Exception lookup) when (lookup is not OperationCanceledException)
+                        {
+                            throw new AggregateException(result.Error!, lookup);
+                        }
+
+                        if (reason is null)
+                        {
+                            // A failure none of the three reasons explains (a dropped connection, say) is thrown back as it was
+                            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(result.Error!);
+                        }
+
+                        refused.Add((queued, local, reason.Value));
+                        break;
+                }
+            }
+
+            if (refused.Count == 0 || !progress)
+            {
+                break;
+            }
+
+            queue = [.. refused.Select(item => item.Queued)];
+        }
+
+        foreach (var (queued, local, reason) in refused)
+        {
+            // A last-write-wins run under ServerWins gives up the change the server refused and puts the server's row back
+            if (lastWriteWins && options.ConflictPolicy == SyncConflictPolicy.ServerWins)
+            {
+                discards[(queued.Table.TableName, queued.KeyText)] = new TrackedSyncDiscard(
+                    queued.Key,
+                    queued.Row.ChangeSequence
+                );
+                continue;
+            }
+
+            conflicts.Add(
+                new SyncConflict(
+                    queued.Table.TableName,
+                    queued.KeyText,
+                    local is null ? SyncJournalOperation.Delete : SyncJournalOperation.Upsert,
+                    reason,
+                    local,
+                    await queued.Table.ReadServerAsync(queued.Key, cancellationToken).ConfigureAwait(false)
+                )
+            );
+        }
+
+        return (uploaded, discarded);
+    }
+
+    /// <summary>
+    /// Records a write that reached the server and sends its unbounded binary columns. When there are columns to send, the
+    /// version the row write earned is recorded first (with every column kept as written for a row the server took as an
+    /// insert), so that a failure while the columns go leaves the next run guarding against this device's own write; the
+    /// columns are then copied up one by one through a temporary file, and the version is read back from the server, since
+    /// writing a column moves it on. Last, in one short local transaction: the version becomes the row's base version and,
+    /// while the row's change number is still the one read, the version the local row carries (its content stays as sent and
+    /// the change is not recorded), and the row loses its unsent change only while its change number is still the one read.
+    /// An overwrite without a version check leaves the server's other unbounded binary columns as they were, so the row owes
+    /// them from the server.
+    /// </summary>
+    /// <remarks>
+    /// The columns sent are every one for a row the server took as an insert (it gets its blobs from this device or not at
+    /// all), otherwise the ones the device wrote; none at all for a run that does not carry them, whose settlement then
+    /// drops the columns written along with the rest of the change.
+    /// </remarks>
+    private async Task SettleSentAsync(
+        TrackedSyncQueued queued,
+        TrackedSyncSend result,
+        bool includeBinaries,
+        CancellationToken cancellationToken
+    )
+    {
+        var table = queued.Table;
+
+        if (result.Deleted)
+        {
+            await using var deleteConnection = await OpenDedicatedAsync(cancellationToken).ConfigureAwait(false);
+            await TrackedSyncState
+                .SettleDeletedAsync(
+                    deleteConnection,
+                    table.TableName,
+                    queued.Row.RawKey,
+                    queued.Row.ChangeSequence,
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+            return;
+        }
+
+        // The version the writer stamped on the row it accepted; read back from the server only when the writer left none
+        // (a version read back can already be another writer's, written after this one)
+        var version =
+            table.IsVersionless ? null
+            : result.Version is { } stamped ? stamped
+            : await ReadBackVersionAsync(queued, cancellationToken).ConfigureAwait(false);
+
+        List<string> columns =
+            !includeBinaries || table.UnboundedBinaryColumnNames.Count == 0 ? []
+            : result.Inserted ? table.UnboundedBinaryColumnNames.ToList()
+            : SplitColumns(queued.Row.BlobColumns)
+                .Where(column => table.UnboundedBinaryColumnNames.Contains(column, StringComparer.Ordinal))
+                .ToList();
+
+        // An overwrite without a version check does not touch the server's columns this run does not send
+        List<string> owedByOverwrite =
+            result.Forced && !result.Inserted
+                ? table.UnboundedBinaryColumnNames.Except(columns, StringComparer.Ordinal).ToList()
+                : [];
+
+        if (columns.Count > 0)
+        {
+            await using (var interim = await OpenDedicatedAsync(cancellationToken).ConfigureAwait(false))
+            {
+                await TrackedSyncState
+                    .RecordInterimAsync(
+                        interim,
+                        table.TableName,
+                        queued.Row.RawKey,
+                        version,
+                        result.Inserted ? table.UnboundedBinaryColumnNames : [],
+                        owedByOverwrite,
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+            }
+
+            owedByOverwrite = [];
+
+            foreach (var column in columns)
+            {
+                await SendBinaryAsync(table, queued.Key, column, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (!table.IsVersionless)
+            {
+                version = await ReadBackVersionAsync(queued, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        await using var connection = await OpenDedicatedAsync(cancellationToken).ConfigureAwait(false);
+        await TrackedSyncState.ExecuteAsync(connection, "BEGIN IMMEDIATE", cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            if (owedByOverwrite.Count > 0)
+            {
+                await TrackedSyncState
+                    .AddOwedAsync(connection, table.TableName, queued.Row.RawKey, owedByOverwrite, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            // The local row takes the version the server gave it, its content left as sent - only while its change number
+            // is still the one read: a row edited since keeps what the device wrote
+            if (version is not null)
+            {
+                var current = await TrackedSyncState
+                    .ReadRowAsync(connection, table.TableName, queued.Row.RawKey, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (
+                    current?.ChangeSequence == queued.Row.ChangeSequence
+                    && await table.FindAsync(connection, queued.Key, cancellationToken).ConfigureAwait(false) is { } local
+                )
+                {
+                    await TrackedSyncState.SetApplyingAsync(connection, true, cancellationToken).ConfigureAwait(false);
+                    table.SetVersion(local, version);
+                    await table.UpdateAsync(connection, local, cancellationToken).ConfigureAwait(false);
+                    await TrackedSyncState.SetApplyingAsync(connection, false, cancellationToken).ConfigureAwait(false);
+                }
+            }
+
+            await TrackedSyncState
+                .SettleSentAsync(
+                    connection,
+                    table.TableName,
+                    queued.Row.RawKey,
+                    version,
+                    queued.Row.ChangeSequence,
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+            await TrackedSyncState.ExecuteAsync(connection, "COMMIT", cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            try
+            {
+                await TrackedSyncState.ExecuteAsync(connection, "ROLLBACK", CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (DbException)
+            {
+                // The rollback failing must not hide what went wrong first
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>Reads the version the server holds for a row this run has just written.</summary>
+    private static async Task<byte[]?> ReadBackVersionAsync(TrackedSyncQueued queued, CancellationToken cancellationToken) =>
+        queued.Table.VersionOf(
+            await queued.Table.ReadServerAsync(queued.Key, cancellationToken).ConfigureAwait(false)
+                ?? throw new InvalidOperationException(
+                    $"The row of '{queued.Table.TableName}' with the key '{queued.KeyText}' was written to the server but cannot be read back."
+                )
+        );
+
+    /// <summary>
+    /// Copies one unbounded binary column of a local row up to the server through a temporary file: the local column is read
+    /// on a connection of its own, closed before the server write, so no local lock is held while the bytes travel. A column
+    /// NULL locally sets the server's column to NULL, so the two sides end up alike. A row gone locally since it was read
+    /// sends nothing: its delete is a later change, which keeps the row unsent and goes next.
+    /// </summary>
+    private async Task SendBinaryAsync(
+        ITrackedSyncTable table,
+        object key,
+        string column,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var file = CreateTemporaryFile();
+        bool present;
+
+        await using (var connection = await OpenDedicatedAsync(cancellationToken).ConfigureAwait(false))
+        {
+            present = await table
+                .ReadLocalBinaryAsync(connection, key, column, file, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!present && !await table.ExistsAsync(connection, key, cancellationToken).ConfigureAwait(false))
+            {
+                return;
+            }
+        }
+
+        if (!present)
+        {
+            await table.WriteServerBinaryAsync(column, key, null, null, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        file.Position = 0;
+        await table.WriteServerBinaryAsync(column, key, file, file.Length, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>A temporary file that goes when it is closed (where unbounded binary columns pass between the two sides).</summary>
+    private static FileStream CreateTemporaryFile() =>
+        new(
+            Path.Combine(Path.GetTempPath(), "quicker-sync-" + Guid.NewGuid().ToString("N") + ".tmp"),
+            FileMode.CreateNew,
+            FileAccess.ReadWrite,
+            FileShare.None,
+            TemporaryFileBufferSize,
+            FileOptions.DeleteOnClose | FileOptions.Asynchronous
+        );
+
+    /// <summary>
+    /// Why the server refused a write, by its state: a parent the row points at is gone (an insert or update), a row of a
+    /// synchronised table still refers to it (a delete of a row the server still holds), or another row holds one of its
+    /// unique values; null when none of these holds.
+    /// </summary>
+    private async Task<SyncConflictReason?> ExplainRefusalAsync(
+        TrackedSyncQueued queued,
+        EntityBaseCore? local,
+        CancellationToken cancellationToken
+    )
+    {
+        if (local is not null)
+        {
+            foreach (var (parentTableName, parentKeyText) in queued.Table.ParentsOf(local))
+            {
+                if (
+                    parentKeyText is not null
+                    && TableNamedInEngine(parentTableName) is { } parent
+                    && !await parent.ServerHasAsync(parentKeyText, cancellationToken).ConfigureAwait(false)
+                )
+                {
+                    return SyncConflictReason.ParentMissingOnServer;
+                }
+            }
+
+            return await queued.Table.CollidesOnServerAsync(local, cancellationToken).ConfigureAwait(false)
+                ? SyncConflictReason.UniqueValueTakenOnServer
+                : null;
+        }
+
+        if (await queued.Table.ReadServerAsync(queued.Key, cancellationToken).ConfigureAwait(false) is null)
+        {
+            return null;
+        }
+
+        foreach (var table in _tables)
+        {
+            if (
+                await table
+                    .ServerReferencesAsync(queued.Table.TableName, queued.KeyText, cancellationToken)
+                    .ConfigureAwait(false)
+            )
+            {
+                return SyncConflictReason.DeleteRefusedOnServer;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The position of a table in foreign-key order.</summary>
+    private int IndexOf(ITrackedSyncTable table)
+    {
+        for (var index = 0; index < _tables.Count; index++)
+        {
+            if (ReferenceEquals(_tables[index], table))
+            {
+                return index;
+            }
+        }
+
+        throw new ArgumentOutOfRangeException(nameof(table));
+    }
+
+    /// <summary>The table of the engine with the table name (null when none has).</summary>
+    private ITrackedSyncTable? TableNamedInEngine(string tableName) =>
+        _tables.FirstOrDefault(table => string.Equals(table.TableName, tableName, StringComparison.Ordinal));
+
+    /// <summary>
+    /// Fetches and applies the server's changes, and - when the apply held rows back - takes the ceiling again and
+    /// fetches and applies once more from the resume points.
+    /// </summary>
+    private async Task<TrackedSyncDownload> DownloadCoreAsync(
+        List<ITrackedSyncTable> scope,
+        SyncOptions options,
+        Dictionary<(string Table, string Key), TrackedSyncDiscard> discards,
+        bool fetch,
+        SyncLocalRowChangeLog? changes,
+        CancellationToken cancellationToken
+    )
+    {
+        var first = await DownloadOnceAsync(scope, options, discards, fetch, changes, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (first.Truncations.Count == 0)
+        {
+            return first;
+        }
+
+        // The second pass does not discard again: the rows the first pass could not put back are marked and carried
+        var second = await DownloadOnceAsync(scope, options, [], fetch, changes, cancellationToken)
+            .ConfigureAwait(false);
+
+        return new TrackedSyncDownload(
+            first.Downloaded + second.Downloaded,
+            first.DeletedLocally + second.DeletedLocally,
+            second.Truncations
+        )
+        {
+            Discarded = first.Discarded + second.Discarded,
+        };
+    }
+
+    /// <summary>
+    /// One fetch and one apply of every table of the run (the owed binary columns are copied before and after). Without a
+    /// fetch, only the rows being discarded are put back, each read from the server by key. A refresh fetches every row
+    /// from the start and reads no row by key: a row being discarded that the fetch did not bring only loses its change.
+    /// </summary>
+    private async Task<TrackedSyncDownload> DownloadOnceAsync(
+        List<ITrackedSyncTable> scope,
+        SyncOptions options,
+        Dictionary<(string Table, string Key), TrackedSyncDiscard> discards,
+        bool fetch,
+        SyncLocalRowChangeLog? changes,
+        CancellationToken cancellationToken,
+        TrackedSyncRefresh? refresh = null
+    )
+    {
+        if (fetch && options.IncludeUnboundedBinary)
+        {
+            await CopyOwedBinariesAsync(scope, cancellationToken).ConfigureAwait(false);
+        }
+
+        Dictionary<string, byte[]?> anchors;
+
+        await using (var connection = await OpenDedicatedAsync(cancellationToken).ConfigureAwait(false))
+        {
+            anchors = await TrackedSyncState.ReadAnchorsAsync(connection, cancellationToken).ConfigureAwait(false);
+        }
+
+        // The ceiling is taken once and shared by every table: a ceiling per table would leave a parent written after an
+        // earlier table's ceiling out while its child, under a later table's ceiling, comes down
+        var versioned = scope.FirstOrDefault(table => !table.IsVersionless);
+        var ceiling =
+            !fetch || versioned is null
+                ? null
+                : await versioned.GetCeilingAsync(cancellationToken).ConfigureAwait(false);
+        var plans = new List<TrackedSyncPlan>(scope.Count);
+
+        foreach (var table in scope)
+        {
+            var anchor = table.IsVersionless || refresh is not null ? null : anchors.GetValueOrDefault(table.TableName);
+            var fetched = fetch
+                ? await table
+                    .FetchAsync(anchor, ceiling, options.DownloadBatchSize, options.PropagateDeletes, cancellationToken)
+                    .ConfigureAwait(false)
+                : new TrackedSyncFetch([], null);
+
+            // A row being discarded takes the server's row from what was fetched, or else is read from the server by key
+            // (a row nobody else changed is not among the changes)
+            var tableDiscards = new Dictionary<string, TrackedSyncPlanDiscard>(StringComparer.Ordinal);
+            var wanted = discards
+                .Where(discard => discard.Key.Table == table.TableName)
+                .ToDictionary(discard => discard.Key.Key, discard => discard.Value, StringComparer.Ordinal);
+
+            if (wanted.Count > 0)
+            {
+                var fetchedByKey = new Dictionary<string, EntityBaseCore>(StringComparer.Ordinal);
+
+                foreach (var row in fetched.Rows)
+                {
+                    var keyText = table.KeyText(table.KeyOf(row));
+
+                    if (wanted.ContainsKey(keyText))
+                    {
+                        fetchedByKey[keyText] = row;
+                    }
+                }
+
+                foreach (var (keyText, discard) in wanted)
+                {
+                    tableDiscards[keyText] = new TrackedSyncPlanDiscard(
+                        discard.Key,
+                        discard.Sequence,
+                        fetchedByKey.TryGetValue(keyText, out var server) ? server
+                        : refresh is not null ? null
+                        : await table.ReadServerAsync(discard.Key, cancellationToken).ConfigureAwait(false)
+                    );
+                }
+            }
+
+            plans.Add(
+                new TrackedSyncPlan(table, fetched.Rows, fetched.ServerKeys, anchor)
+                {
+                    Discards = tableDiscards,
+                    Refresh = refresh,
+                }
+            );
+        }
+
+        var outcome = await ApplyAsync(plans, options.IncludeUnboundedBinary, advanceAnchors: fetch, cancellationToken)
+            .ConfigureAwait(false);
+
+        // The rows the apply changed on its own are noted right after its commit, so a failed copy below still hands
+        // them on
+        foreach (var change in outcome.Changes)
+        {
+            changes?.Add(change.TableName, change.KeyText, change.Reason);
+        }
+
+        if (options.IncludeUnboundedBinary)
+        {
+            await CopyOwedBinariesAsync(scope, cancellationToken).ConfigureAwait(false);
+        }
+
+        return outcome;
+    }
+
+    /// <summary>
+    /// Applies the fetched rows in one transaction. A foreign key violation rolls the attempt back and starts it again
+    /// with the child it wrote held back, or with the parent it deleted kept.
+    /// </summary>
+    private async Task<TrackedSyncDownload> ApplyAsync(
+        List<TrackedSyncPlan> plans,
+        bool owesBinaries,
+        bool advanceAnchors,
+        CancellationToken cancellationToken
+    )
+    {
+        // Rows held back (table, key text -> the missing parent's table, or null) and parents not to delete
+        var held = new Dictionary<(string Table, string Key), string?>();
+        var keep = new HashSet<(string Table, string Key)>();
+
+        // The violations the database already had before the apply wrote anything: not this apply's doing, so they do not
+        // stop it. Read only once an attempt finds violations (the check scans the whole database, and an apply that
+        // leaves none needs one check, not two), and kept across the attempts
+        HashSet<(string ChildTable, string ChildKey, string ParentTable, long ForeignKey)>? existing = null;
+
+        for (var attempt = 0; attempt < MaxApplyAttempts; attempt++)
+        {
+            await using var connection = await OpenDedicatedAsync(cancellationToken).ConfigureAwait(false);
+            await TrackedSyncState.ExecuteAsync(connection, "BEGIN IMMEDIATE", cancellationToken).ConfigureAwait(false);
+            var open = true;
+
+            try
+            {
+                await TrackedSyncState.SetApplyingAsync(connection, true, cancellationToken).ConfigureAwait(false);
+
+                var run = new ApplyAttempt(connection, held, keep);
+
+                // Delete propagation runs in every table before any row is written, so a value a removed row holds is
+                // free for the server row that takes it
+                foreach (var plan in plans)
+                {
+                    run.States[plan.Table.TableName] = await TrackedSyncState
+                        .ReadRowsAsync(connection, plan.Table.TableName, plan.Table.KeyTextOfRaw, cancellationToken)
+                        .ConfigureAwait(false);
+                    await SettleDiscardsWithoutServerRowAsync(run, plan, cancellationToken).ConfigureAwait(false);
+                    await PropagateDeletesAsync(run, plan, cancellationToken).ConfigureAwait(false);
+
+                    if (plan.Refresh is not null)
+                    {
+                        await ForgetRowsGoneOnBothSidesAsync(run, plan, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+
+                foreach (var plan in plans)
+                {
+                    await WriteRowsAsync(run, plan, owesBinaries, cancellationToken).ConfigureAwait(false);
+                }
+
+                var violations = (await ForeignKeyViolationsAsync(connection, cancellationToken).ConfigureAwait(false))
+                    .Where(violation => existing is null || !existing.Contains(violation.Identity))
+                    .ToList();
+
+                if (violations.Count > 0)
+                {
+                    await TrackedSyncState.ExecuteAsync(connection, "ROLLBACK", CancellationToken.None).ConfigureAwait(false);
+                    open = false;
+
+                    // With the attempt rolled back, the database is as it was before the apply wrote anything: what it
+                    // reports now is what it already had
+                    if (existing is null)
+                    {
+                        existing = (await ForeignKeyViolationsAsync(connection, cancellationToken).ConfigureAwait(false))
+                            .Select(violation => violation.Identity)
+                            .ToHashSet();
+                        violations = violations.Where(violation => !existing.Contains(violation.Identity)).ToList();
+
+                        if (violations.Count == 0)
+                        {
+                            continue;
+                        }
+                    }
+
+                    var changed = false;
+                    var lookups = new List<TrackedSyncViolation>();
+
+                    foreach (var violation in violations)
+                    {
+                        if (run.Written.Contains(violation.Child) && !held.ContainsKey(violation.Child))
+                        {
+                            held[violation.Child] = violation.ParentTable;
+                            changed = true;
+                        }
+                        else if (violation.Parent is { } parent && run.Deleted.Contains(parent) && keep.Add(parent))
+                        {
+                            changed = true;
+                        }
+                        else if (violation.Parent is null && violation.LookupColumns is not null)
+                        {
+                            lookups.Add(violation);
+                        }
+                    }
+
+                    // A foreign key to a column other than the primary key names its parent by that column's values:
+                    // with the delete rolled back the parent is there again, and is looked up by them
+                    foreach (var violation in lookups)
+                    {
+                        if (
+                            await FindParentKeyTextAsync(connection, violation, cancellationToken).ConfigureAwait(false)
+                                is { } parentKey
+                            && run.Deleted.Contains(parentKey)
+                            && keep.Add(parentKey)
+                        )
+                        {
+                            changed = true;
+                        }
+                    }
+
+                    if (!changed)
+                    {
+                        throw new InvalidOperationException(
+                            "The download left foreign key violations it cannot explain: "
+                                + string.Join(
+                                    "; ",
+                                    violations.Select(violation =>
+                                        violation.Child.Table
+                                        + "/"
+                                        + violation.Child.Key
+                                        + " -> "
+                                        + violation.ParentTable
+                                        + "/"
+                                        + (violation.Parent?.Key ?? "?")
+                                    )
+                                )
+                        );
+                    }
+
+                    continue;
+                }
+
+                var truncations = new List<SyncDownloadTruncation>();
+
+                foreach (var plan in plans)
+                {
+                    await SaveResumePointAsync(run, plan, truncations, advanceAnchors, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
+                await TrackedSyncState.SetApplyingAsync(connection, false, cancellationToken).ConfigureAwait(false);
+                await TrackedSyncState.ExecuteAsync(connection, "COMMIT", cancellationToken).ConfigureAwait(false);
+                open = false;
+
+                return new TrackedSyncDownload(run.Downloaded, run.DeletedLocally, truncations)
+                {
+                    Discarded = run.Discarded,
+                    Changes = run.Changes,
+                    PerTable = plans.ToDictionary(
+                        plan => plan.Table.TableName,
+                        plan =>
+                            (
+                                run.Deleted.Count(row => row.Table == plan.Table.TableName),
+                                run.Written.Count(row => row.Table == plan.Table.TableName)
+                            ),
+                        StringComparer.Ordinal
+                    ),
+                };
+            }
+            catch
+            {
+                if (open)
+                {
+                    try
+                    {
+                        await TrackedSyncState
+                            .ExecuteAsync(connection, "ROLLBACK", CancellationToken.None)
+                            .ConfigureAwait(false);
+                    }
+                    catch (DbException)
+                    {
+                        // The rollback failing must not hide what went wrong first
+                    }
+                }
+
+                throw;
+            }
+        }
+
+        throw new InvalidOperationException(
+            "The download did not settle within "
+                + MaxApplyAttempts.ToString(CultureInfo.InvariantCulture)
+                + " attempts."
+        );
+    }
+
+    /// <summary>
+    /// Deletes the local rows of one table the server no longer has, except the rows with an unsent change and the
+    /// parents an earlier attempt found it must keep.
+    /// </summary>
+    private static async Task PropagateDeletesAsync(
+        ApplyAttempt run,
+        TrackedSyncPlan plan,
+        CancellationToken cancellationToken
+    )
+    {
+        if (plan.ServerKeys is not { } serverKeys)
+        {
+            return;
+        }
+
+        var table = plan.Table;
+        var states = run.States[table.TableName];
+
+        foreach (var key in await table.ListKeysAsync(run.Connection, cancellationToken).ConfigureAwait(false))
+        {
+            var keyText = table.KeyText(key);
+
+            if (
+                serverKeys.Contains(keyText)
+                || run.Keep.Contains((table.TableName, keyText))
+                || states.GetValueOrDefault(keyText) is { Dirty: true }
+            )
+            {
+                continue;
+            }
+
+            await table.DeleteAsync(run.Connection, key, cancellationToken).ConfigureAwait(false);
+
+            if (states.Remove(keyText, out var state))
+            {
+                await TrackedSyncState
+                    .RemoveRowAsync(run.Connection, table.TableName, state.RawKey, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            run.Deleted.Add((table.TableName, keyText));
+            run.DeletedLocally++;
+        }
+    }
+
+    /// <summary>
+    /// For a refresh: removes the states of the rows neither side holds any more (the server does not, and the local table
+    /// has no such row), so that a row made later under the same key is not taken for one the server knows; and, when the
+    /// refresh gives the unbounded binary columns up, drops what earlier runs left owing.
+    /// </summary>
+    private static async Task ForgetRowsGoneOnBothSidesAsync(
+        ApplyAttempt run,
+        TrackedSyncPlan plan,
+        CancellationToken cancellationToken
+    )
+    {
+        var table = plan.Table;
+        var states = run.States[table.TableName];
+
+        foreach (var (keyText, state) in states.ToList())
+        {
+            if (
+                state.Dirty
+                || plan.ServerKeys is { } serverKeys && serverKeys.Contains(keyText)
+                || await table
+                    .ExistsAsync(run.Connection, table.KeyOfRaw(state.RawKey), cancellationToken)
+                    .ConfigureAwait(false)
+            )
+            {
+                continue;
+            }
+
+            await TrackedSyncState
+                .RemoveRowAsync(run.Connection, table.TableName, state.RawKey, cancellationToken)
+                .ConfigureAwait(false);
+            states.Remove(keyText);
+        }
+
+        if (plan.Refresh is { BlankBinaries: true } && table.UnboundedBinaryColumnNames.Count > 0)
+        {
+            // Every local row of the table loses its columns here, in the apply's transaction - also a row the refresh does
+            // not write (one the server changed after the ceiling) and a row written later by a fetch held back: what a row
+            // written afterwards brings carries no columns either. A row with an unsent change the refresh does not discard
+            // keeps them (it was written while the refresh ran)
+            var discarding = run.LiveDiscards[table.TableName];
+            var kept = states
+                .Where(pair => pair.Value.Dirty && !discarding.ContainsKey(pair.Key))
+                .Select(pair => pair.Value.RawKey)
+                .ToList();
+            await BlankLocalBinariesAsync(run.Connection, table, kept, cancellationToken).ConfigureAwait(false);
+            await TrackedSyncState
+                .ClearTableOwedAsync(run.Connection, table.TableName, cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Empties the unbounded binary columns of every local row of a table but the given ones: NULL in a column that allows
+    /// it, an empty value in a NOT NULL column (what a row written without the columns holds).
+    /// </summary>
+    private static async Task BlankLocalBinariesAsync(
+        DbConnection connection,
+        ITrackedSyncTable table,
+        IReadOnlyList<object> keptRawKeys,
+        CancellationToken cancellationToken
+    )
+    {
+        var notNull = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        await using (var info = connection.CreateCommand())
+        {
+            info.CommandText =
+                "PRAGMA "
+                + Identifier(table.LocalDatabaseName ?? "main")
+                + ".table_info("
+                + Identifier(table.LocalTableName)
+                + ")";
+            await using var reader = await info.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (reader.GetInt64(3) != 0)
+                {
+                    notNull.Add(reader.GetString(1));
+                }
+            }
+        }
+
+        await using var blank = connection.CreateCommand();
+        blank.CommandText =
+            "UPDATE "
+            + QualifiedName(table)
+            + " SET "
+            + string.Join(
+                ", ",
+                table.LocalUnboundedBinaryColumnNames.Select(column =>
+                    Identifier(column) + " = " + (notNull.Contains(column) ? "X''" : "NULL")
+                )
+            );
+
+        if (keptRawKeys.Count > 0)
+        {
+            blank.CommandText +=
+                " WHERE "
+                + Identifier(table.LocalKeyColumnName)
+                + " NOT IN ("
+                + string.Join(", ", keptRawKeys.Select((_, index) => "@k" + index.ToString(CultureInfo.InvariantCulture)))
+                + ")";
+
+            for (var index = 0; index < keptRawKeys.Count; index++)
+            {
+                TrackedSyncState.AddParameter(
+                    blank,
+                    "@k" + index.ToString(CultureInfo.InvariantCulture),
+                    keptRawKeys[index]
+                );
+            }
+        }
+
+        await blank.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Settles the rows of one table that <see cref="SyncConflictPolicy.ServerWins"/> is discarding: only the rows still at
+    /// the change number read at the start of the run are discarded (a row written again in the meantime keeps its local
+    /// content), and a row the server no longer has only loses its unsent change - the row itself is left to the delete
+    /// propagation.
+    /// </summary>
+    private static async Task SettleDiscardsWithoutServerRowAsync(
+        ApplyAttempt run,
+        TrackedSyncPlan plan,
+        CancellationToken cancellationToken
+    )
+    {
+        var table = plan.Table;
+        var states = run.States[table.TableName];
+        var live = new Dictionary<string, TrackedSyncPlanDiscard>(StringComparer.Ordinal);
+
+        foreach (var (keyText, discard) in plan.Discards)
+        {
+            if (states.TryGetValue(keyText, out var current) && current.ChangeSequence != discard.Sequence)
+            {
+                continue;
+            }
+
+            live[keyText] = discard;
+        }
+
+        run.LiveDiscards[table.TableName] = live;
+
+        foreach (var (keyText, discard) in live)
+        {
+            if (discard.Server is not null || run.Held.ContainsKey((table.TableName, keyText)))
+            {
+                continue;
+            }
+
+            if (states.TryGetValue(keyText, out var state))
+            {
+                await TrackedSyncState
+                    .ClearDiscardedAsync(run.Connection, table.TableName, state.RawKey, cancellationToken)
+                    .ConfigureAwait(false);
+                states[keyText] = state with { Dirty = false };
+            }
+
+            run.NoteDiscarded(table.TableName, keyText);
+        }
+    }
+
+    /// <summary>
+    /// Writes the fetched rows of one table: a row with an unsent change keeps the local content, a row this device
+    /// already holds the server's version of is skipped, and a row that collides on a unique value goes after the
+    /// others, then into a rotation with the rows left, and is held back when even that cannot place it.
+    /// </summary>
+    private async Task WriteRowsAsync(
+        ApplyAttempt run,
+        TrackedSyncPlan plan,
+        bool owesBinaries,
+        CancellationToken cancellationToken
+    )
+    {
+        var table = plan.Table;
+        var states = run.States[table.TableName];
+        var owed =
+            owesBinaries && table.UnboundedBinaryColumnNames.Count > 0
+                ? string.Join(",", table.UnboundedBinaryColumnNames)
+                : string.Empty;
+        var writes = new List<TrackedSyncRowWrite>();
+        var discards = run.LiveDiscards[table.TableName];
+        var fetchedKeys = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var row in plan.Rows)
+        {
+            var key = table.KeyOf(row);
+            var keyText = table.KeyText(key);
+            fetchedKeys.Add(keyText);
+
+            if (run.Held.ContainsKey((table.TableName, keyText)))
+            {
+                continue;
+            }
+
+            states.TryGetValue(keyText, out var state);
+
+            // A row ServerWins is discarding takes the server's row whatever the local row holds
+            if (discards.ContainsKey(keyText))
+            {
+                writes.Add(new TrackedSyncRowWrite(row, key, keyText, state) { Discard = true });
+                continue;
+            }
+
+            // A row with an unsent change keeps the local content - unless the local row is gone and the server never
+            // had it: then there is nothing to send, and the server row takes its place
+            if (
+                state is { Dirty: true }
+                && (
+                    state.Known
+                    || table.IsVersionless
+                    || await table.ExistsAsync(run.Connection, key, cancellationToken).ConfigureAwait(false)
+                )
+            )
+            {
+                // A local row made under a key the server does not know holds the table's resume point before it:
+                // past it, the server row would never come down again once the local row goes
+                if (!state.Known && !table.IsVersionless)
+                {
+                    run.UniqueHeld.Add((table.TableName, keyText));
+                }
+
+                continue;
+            }
+
+            // The echo of what this device sent: the server row carries the version the local content is based on (a refresh
+            // skips no echo: it rewrites every row, which brings back the columns a run that did not carry them left out)
+            if (
+                plan.Refresh is null
+                && !table.IsVersionless
+                && state?.BaseVersion is { } baseVersion
+                && table.VersionOf(row) is { } version
+                && baseVersion.AsSpan().SequenceEqual(version)
+                && await table.ExistsAsync(run.Connection, key, cancellationToken).ConfigureAwait(false)
+            )
+            {
+                continue;
+            }
+
+            writes.Add(new TrackedSyncRowWrite(row, key, keyText, state));
+        }
+
+        // A row being discarded that was not among the changes takes the server's row read by key
+        foreach (var (keyText, discard) in discards)
+        {
+            if (
+                discard.Server is not { } server
+                || fetchedKeys.Contains(keyText)
+                || run.Held.ContainsKey((table.TableName, keyText))
+            )
+            {
+                continue;
+            }
+
+            states.TryGetValue(keyText, out var state);
+            writes.Add(new TrackedSyncRowWrite(server, discard.Key, keyText, state) { Discard = true });
+        }
+
+        // A row that collides on a unique value goes after the others, as long as the others make progress
+        var remaining = writes;
+
+        while (remaining.Count > 0)
+        {
+            var deferred = new List<TrackedSyncRowWrite>();
+
+            foreach (var write in remaining)
+            {
+                if (await TryWriteAsync(run, table, write, owed, cancellationToken).ConfigureAwait(false))
+                {
+                    run.Note(table, write);
+                }
+                else
+                {
+                    deferred.Add(write);
+                }
+            }
+
+            if (deferred.Count == remaining.Count)
+            {
+                break;
+            }
+
+            remaining = deferred;
+        }
+
+        if (remaining.Count == 0)
+        {
+            return;
+        }
+
+        // The rows left take values from one another (a swap or a rotation): they are deleted and inserted again together,
+        // and a row that still collides is held back
+        var stillHeld = await RotateAsync(run, table, remaining, owed, cancellationToken).ConfigureAwait(false);
+
+        foreach (var write in remaining)
+        {
+            if (stillHeld.Contains(write))
+            {
+                run.UniqueHeld.Add((table.TableName, write.KeyText));
+            }
+            else
+            {
+                run.Note(table, write);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Writes one row (an update when the local row is there, an insert otherwise) and its state, inside a savepoint;
+    /// false, with nothing written, when a unique value is already taken.
+    /// </summary>
+    private async Task<bool> TryWriteAsync(
+        ApplyAttempt run,
+        ITrackedSyncTable table,
+        TrackedSyncRowWrite write,
+        string owed,
+        CancellationToken cancellationToken
+    )
+    {
+        var connection = run.Connection;
+        await TrackedSyncState
+            .ExecuteAsync(connection, "SAVEPOINT " + WriteSavepoint, cancellationToken)
+            .ConfigureAwait(false);
+
+        try
+        {
+            var exists = await table.ExistsAsync(connection, write.Key, cancellationToken).ConfigureAwait(false);
+
+            if (exists)
+            {
+                await table.UpdateAsync(connection, write.Row, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                await table.InsertAsync(connection, write.Row, cancellationToken).ConfigureAwait(false);
+            }
+
+            var rawKey =
+                write.State?.RawKey
+                ?? await run.RawKeyAsync(table, write.KeyText, inserted: !exists, cancellationToken).ConfigureAwait(false);
+            await TrackedSyncState
+                .WriteAppliedRowAsync(
+                    connection,
+                    table.TableName,
+                    rawKey,
+                    table.VersionOf(write.Row),
+                    owed,
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+            await TrackedSyncState
+                .ExecuteAsync(connection, "RELEASE " + WriteSavepoint, cancellationToken)
+                .ConfigureAwait(false);
+
+            return true;
+        }
+        catch (DbException failure) when (_rows.IsUniqueViolation(failure))
+        {
+            await TrackedSyncState
+                .ExecuteAsync(connection, "ROLLBACK TO " + WriteSavepoint, CancellationToken.None)
+                .ConfigureAwait(false);
+            await TrackedSyncState
+                .ExecuteAsync(connection, "RELEASE " + WriteSavepoint, CancellationToken.None)
+                .ConfigureAwait(false);
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Deletes the local rows of the set and inserts the whole set again inside a savepoint; when a row still collides,
+    /// goes back to the savepoint and tries again without it. Returns the rows held back.
+    /// </summary>
+    /// <remarks>
+    /// The rows written carry no unbounded binary columns, so the local rows' columns are kept in a table of the
+    /// connection's temporary schema before the rows go (copied inside the database, never through memory) and written back
+    /// onto the rows inserted again; the temporary schema leaves the main database's schema version alone. A row the
+    /// savepoint puts back keeps its own columns.
+    /// </remarks>
+    private async Task<HashSet<TrackedSyncRowWrite>> RotateAsync(
+        ApplyAttempt run,
+        ITrackedSyncTable table,
+        List<TrackedSyncRowWrite> rows,
+        string owed,
+        CancellationToken cancellationToken
+    )
+    {
+        var connection = run.Connection;
+        var heldBack = new HashSet<TrackedSyncRowWrite>();
+        var set = rows.ToList();
+        var kept = new Dictionary<TrackedSyncRowWrite, object>();
+
+        if (table.UnboundedBinaryColumnNames.Count > 0)
+        {
+            await TrackedSyncState.ExecuteAsync(connection, CreateRotateTableSql, cancellationToken).ConfigureAwait(false);
+
+            foreach (var write in set)
+            {
+                if (!await table.ExistsAsync(connection, write.Key, cancellationToken).ConfigureAwait(false))
+                {
+                    continue;
+                }
+
+                var rawKey = await run
+                    .RawKeyAsync(table, write.KeyText, inserted: false, cancellationToken)
+                    .ConfigureAwait(false);
+
+                foreach (var column in table.LocalUnboundedBinaryColumnNames)
+                {
+                    await TrackedSyncState
+                        .ExecuteAsync(
+                            connection,
+                            "INSERT INTO temp."
+                                + RotateTableName
+                                + " (table_name, k, column_name, v) SELECT @table, "
+                                + Identifier(table.LocalKeyColumnName)
+                                + ", @column, "
+                                + Identifier(column)
+                                + " FROM "
+                                + QualifiedName(table)
+                                + " WHERE "
+                                + Identifier(table.LocalKeyColumnName)
+                                + " = @key",
+                            cancellationToken,
+                            ("@table", table.TableName),
+                            ("@column", column),
+                            ("@key", rawKey)
+                        )
+                        .ConfigureAwait(false);
+                }
+
+                kept[write] = rawKey;
+            }
+        }
+
+        while (set.Count > 0)
+        {
+            await TrackedSyncState
+                .ExecuteAsync(connection, "SAVEPOINT " + RotateSavepoint, cancellationToken)
+                .ConfigureAwait(false);
+
+            foreach (var write in set)
+            {
+                await table.DeleteAsync(connection, write.Key, cancellationToken).ConfigureAwait(false);
+            }
+
+            var failing = new List<TrackedSyncRowWrite>();
+
+            foreach (var write in set)
+            {
+                if (!await TryWriteAsync(run, table, write, owed, cancellationToken).ConfigureAwait(false))
+                {
+                    failing.Add(write);
+                }
+            }
+
+            if (failing.Count == 0)
+            {
+                // The rows inserted again take back the unbounded binary columns their local rows had
+                foreach (var write in set)
+                {
+                    if (kept.TryGetValue(write, out var rawKey))
+                    {
+                        await RestoreKeptBinariesAsync(connection, table, rawKey, cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+                }
+
+                await TrackedSyncState
+                    .ExecuteAsync(connection, "RELEASE " + RotateSavepoint, CancellationToken.None)
+                    .ConfigureAwait(false);
+                break;
+            }
+
+            // CancellationToken.None: a canceled token must not be able to leave the savepoint half undone
+            await TrackedSyncState
+                .ExecuteAsync(connection, "ROLLBACK TO " + RotateSavepoint, CancellationToken.None)
+                .ConfigureAwait(false);
+            await TrackedSyncState
+                .ExecuteAsync(connection, "RELEASE " + RotateSavepoint, CancellationToken.None)
+                .ConfigureAwait(false);
+            heldBack.UnionWith(failing);
+            set = set.Except(failing).ToList();
+        }
+
+        // The kept copies go with the rotation; on a failure the apply's rollback takes them back with everything else
+        if (kept.Count > 0)
+        {
+            await TrackedSyncState
+                .ExecuteAsync(
+                    connection,
+                    "DELETE FROM temp." + RotateTableName + " WHERE table_name = @table",
+                    cancellationToken,
+                    ("@table", table.TableName)
+                )
+                .ConfigureAwait(false);
+        }
+
+        return heldBack;
+    }
+
+    /// <summary>Writes the kept unbounded binary columns back onto a row the rotation inserted again.</summary>
+    private static async Task RestoreKeptBinariesAsync(
+        DbConnection connection,
+        ITrackedSyncTable table,
+        object rawKey,
+        CancellationToken cancellationToken
+    )
+    {
+        foreach (var column in table.LocalUnboundedBinaryColumnNames)
+        {
+            await TrackedSyncState
+                .ExecuteAsync(
+                    connection,
+                    "UPDATE "
+                        + QualifiedName(table)
+                        + " SET "
+                        + Identifier(column)
+                        + " = (SELECT v FROM temp."
+                        + RotateTableName
+                        + " WHERE table_name = @table AND column_name = @column AND k = @key) WHERE "
+                        + Identifier(table.LocalKeyColumnName)
+                        + " = @key",
+                    cancellationToken,
+                    ("@table", table.TableName),
+                    ("@column", column),
+                    ("@key", rawKey)
+                )
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>The table of the connection's temporary schema that keeps the unbounded binary columns of rotated rows.</summary>
+    private const string RotateTableName = "quicker_sync_rotate";
+
+    /// <summary>Creates the table that keeps the unbounded binary columns of rotated rows (in the temporary schema).</summary>
+    private const string CreateRotateTableSql =
+        "CREATE TEMP TABLE IF NOT EXISTS quicker_sync_rotate (table_name TEXT NOT NULL, k, column_name TEXT NOT NULL, v BLOB)";
+
+    /// <summary>
+    /// Reports the rows of one table held back, and saves its resume point: just before the first row held back, or the
+    /// last fetched version when nothing was (never the ceiling itself, which is exclusive).
+    /// </summary>
+    private static async Task SaveResumePointAsync(
+        ApplyAttempt run,
+        TrackedSyncPlan plan,
+        List<SyncDownloadTruncation> truncations,
+        bool advanceAnchors,
+        CancellationToken cancellationToken
+    )
+    {
+        var table = plan.Table;
+        var firstHeld = -1;
+
+        for (var index = 0; index < plan.Rows.Count; index++)
+        {
+            var keyText = table.KeyText(table.KeyOf(plan.Rows[index]));
+            var heldForParent = run.Held.TryGetValue((table.TableName, keyText), out var missingParent);
+
+            if (!heldForParent && !run.UniqueHeld.Contains((table.TableName, keyText)))
+            {
+                continue;
+            }
+
+            truncations.Add(
+                new SyncDownloadTruncation(table.TableName, keyText, null)
+                {
+                    MissingParentTableName = heldForParent ? missingParent : null,
+                }
+            );
+
+            if (firstHeld < 0)
+            {
+                firstHeld = index;
+            }
+        }
+
+        // A row ServerWins could not put back keeps its unsent change, marked so that later runs carry the decision out
+        var states = run.States[table.TableName];
+        var fetched = plan.Rows.Select(row => table.KeyText(table.KeyOf(row))).ToHashSet(StringComparer.Ordinal);
+
+        foreach (var keyText in run.LiveDiscards[table.TableName].Keys)
+        {
+            var heldForParent = run.Held.TryGetValue((table.TableName, keyText), out var missingParent);
+
+            if (!heldForParent && !run.UniqueHeld.Contains((table.TableName, keyText)))
+            {
+                continue;
+            }
+
+            if (!fetched.Contains(keyText))
+            {
+                truncations.Add(
+                    new SyncDownloadTruncation(table.TableName, keyText, null)
+                    {
+                        MissingParentTableName = heldForParent ? missingParent : null,
+                    }
+                );
+            }
+
+            if (states.TryGetValue(keyText, out var state))
+            {
+                await TrackedSyncState
+                    .MarkServerWinsAsync(run.Connection, table.TableName, state.RawKey, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        if (!advanceAnchors || table.IsVersionless)
+        {
+            return;
+        }
+
+        var anchor =
+            firstHeld == 0 ? plan.OldAnchor
+            : firstHeld > 0 ? table.VersionOf(plan.Rows[firstHeld - 1])
+            : plan.Rows.Count > 0 ? table.VersionOf(plan.Rows[^1])
+            : plan.OldAnchor;
+
+        await TrackedSyncState
+            .WriteAnchorAsync(run.Connection, table.TableName, anchor, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The foreign key violations the local database has now (<c>PRAGMA foreign_key_check</c>), each with the child row's
+    /// key and, when the foreign key refers to the parent's primary key, the parent row's key.
+    /// </summary>
+    private async Task<List<TrackedSyncViolation>> ForeignKeyViolationsAsync(
+        DbConnection connection,
+        CancellationToken cancellationToken
+    )
+    {
+        var found = new List<(string Table, object RowId, string Parent, long ForeignKey)>();
+
+        await using (var check = connection.CreateCommand())
+        {
+            check.CommandText = "PRAGMA foreign_key_check";
+            await using var reader = await check.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                found.Add((reader.GetString(0), reader.GetValue(1), reader.GetString(2), reader.GetInt64(3)));
+            }
+        }
+
+        var violations = new List<TrackedSyncViolation>(found.Count);
+
+        foreach (var (tableName, rowId, parentName, foreignKey) in found)
+        {
+            var child = TableNamed(tableName);
+            var parent = TableNamed(parentName);
+            var childTable = child?.TableName ?? tableName;
+            var parentTable = parent?.TableName ?? parentName;
+            var columns = new List<(string From, string? To)>();
+
+            await using (var list = connection.CreateCommand())
+            {
+                list.CommandText = "PRAGMA foreign_key_list(" + Identifier(tableName) + ")";
+                await using var reader = await list.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+                while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    if (reader.GetInt64(0) == foreignKey)
+                    {
+                        columns.Add((reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetString(4)));
+                    }
+                }
+            }
+
+            if (rowId is DBNull || columns.Count == 0)
+            {
+                violations.Add(
+                    new TrackedSyncViolation((childTable, "?"), parentTable, foreignKey, null, null, null, parent)
+                );
+                continue;
+            }
+
+            var referencesKey =
+                parent is not null
+                && columns.Count == 1
+                && (
+                    columns[0].To is null
+                    || string.Equals(columns[0].To, parent.LocalKeyColumnName, StringComparison.OrdinalIgnoreCase)
+                );
+
+            await using var read = connection.CreateCommand();
+            read.CommandText =
+                "SELECT "
+                + (child is null ? "rowid" : Identifier(child.LocalKeyColumnName))
+                + ", "
+                + string.Join(", ", columns.Select(column => Identifier(column.From)))
+                + " FROM "
+                + Identifier(tableName)
+                + " WHERE rowid = @rowid";
+            TrackedSyncState.AddParameter(read, "@rowid", rowId);
+            await using var values = await read.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+            if (!await values.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                violations.Add(
+                    new TrackedSyncViolation((childTable, "?"), parentTable, foreignKey, null, null, null, parent)
+                );
+                continue;
+            }
+
+            var childKey = child is null
+                ? "rowid:" + Convert.ToString(values.GetValue(0), CultureInfo.InvariantCulture)
+                : child.KeyTextOfRaw(values.GetValue(0));
+            (string Table, string Key)? parentKey =
+                referencesKey && !values.IsDBNull(1) ? (parentTable, parent!.KeyTextOfRaw(values.GetValue(1))) : null;
+            var lookupColumns =
+                !referencesKey && parent is not null && columns.All(column => column.To is not null)
+                    ? columns.Select(column => column.To!).ToArray()
+                    : null;
+            var lookupValues = lookupColumns is null
+                ? null
+                : columns.Select((_, index) => values.GetValue(index + 1)).ToArray();
+            violations.Add(
+                new TrackedSyncViolation(
+                    (childTable, childKey),
+                    parentTable,
+                    foreignKey,
+                    parentKey,
+                    lookupColumns,
+                    lookupValues,
+                    parent
+                )
+            );
+        }
+
+        return violations;
+    }
+
+    /// <summary>The key of the parent row a violation's foreign key names by the values of columns other than the primary key (null when no such row is there).</summary>
+    private static async Task<(string Table, string Key)?> FindParentKeyTextAsync(
+        DbConnection connection,
+        TrackedSyncViolation violation,
+        CancellationToken cancellationToken
+    )
+    {
+        var parent = violation.ParentDescriptor!;
+        var columns = violation.LookupColumns!;
+        var values = violation.LookupValues!;
+
+        await using var find = connection.CreateCommand();
+        find.CommandText =
+            "SELECT "
+            + Identifier(parent.LocalKeyColumnName)
+            + " FROM "
+            + QualifiedName(parent)
+            + " WHERE "
+            + string.Join(
+                " AND ",
+                columns.Select((column, index) => Identifier(column) + " = @v" + index.ToString(CultureInfo.InvariantCulture))
+            );
+
+        for (var index = 0; index < values.Length; index++)
+        {
+            TrackedSyncState.AddParameter(find, "@v" + index.ToString(CultureInfo.InvariantCulture), values[index]);
+        }
+
+        return await find.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is { } rawKey and not DBNull
+            ? (parent.TableName, parent.KeyTextOfRaw(rawKey))
+            : null;
+    }
+
+    /// <summary>
+    /// Copies the owed unbounded binary columns down from the server: each row's columns go through temporary files,
+    /// then into the local row in a short transaction of their own, and the row stops owing them. A column the local
+    /// device wrote since (still unsent) is not copied; a column NULL on the server clears the local column; a row the
+    /// server no longer has, or a row gone locally, only stops owing.
+    /// </summary>
+    private async Task CopyOwedBinariesAsync(List<ITrackedSyncTable> scope, CancellationToken cancellationToken)
+    {
+        foreach (var table in scope)
+        {
+            if (table.UnboundedBinaryColumnNames.Count == 0)
+            {
+                continue;
+            }
+
+            IReadOnlyList<TrackedSyncRowState> owedRows;
+
+            await using (var connection = await OpenDedicatedAsync(cancellationToken).ConfigureAwait(false))
+            {
+                owedRows = await TrackedSyncState
+                    .ReadOwedAsync(connection, table.TableName, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            foreach (var owedRow in owedRows)
+            {
+                await CopyOwedRowAsync(table, owedRow, cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>Copies the owed columns of one row (see <see cref="CopyOwedBinariesAsync"/>).</summary>
+    private async Task CopyOwedRowAsync(
+        ITrackedSyncTable table,
+        TrackedSyncRowState owedRow,
+        CancellationToken cancellationToken
+    )
+    {
+        var key = table.KeyOfRaw(owedRow.RawKey);
+        var owed = SplitColumns(owedRow.BlobOwed);
+        var written = SplitColumns(owedRow.BlobColumns);
+        var wanted = owed.Where(column => !written.Contains(column)).ToList();
+
+        // A column NULL on the server comes down as null and clears the local column, so the two sides end up alike rather
+        // than a stale blob staying under the row
+        var files = new List<(string Column, FileStream? File)>();
+
+        try
+        {
+            foreach (var column in wanted)
+            {
+                var file = CreateTemporaryFile();
+
+                if (await table.ReadServerBinaryAsync(column, key, file, cancellationToken).ConfigureAwait(false))
+                {
+                    file.Position = 0;
+                    files.Add((column, file));
+                }
+                else
+                {
+                    await file.DisposeAsync().ConfigureAwait(false);
+                    files.Add((column, null));
+                }
+            }
+
+            // A row the server no longer has leaves the local columns as they are (the row goes with the delete propagation
+            // or stays because something refers to it, and a NOT NULL column cannot be cleared); it only stops owing
+            if (
+                files.Any(entry => entry.File is null)
+                && !await table.ServerHasAsync(table.KeyText(key), cancellationToken).ConfigureAwait(false)
+            )
+            {
+                foreach (var (_, file) in files)
+                {
+                    if (file is not null)
+                    {
+                        await file.DisposeAsync().ConfigureAwait(false);
+                    }
+                }
+
+                files.Clear();
+            }
+
+            await using var connection = await OpenDedicatedAsync(cancellationToken).ConfigureAwait(false);
+            await TrackedSyncState.ExecuteAsync(connection, "BEGIN IMMEDIATE", cancellationToken).ConfigureAwait(false);
+
+            try
+            {
+                await TrackedSyncState.SetApplyingAsync(connection, true, cancellationToken).ConfigureAwait(false);
+
+                // Read again under the write lock: the device may have written a column, or an apply may have added one
+                var current = await TrackedSyncState
+                    .ReadRowAsync(connection, table.TableName, owedRow.RawKey, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (current is not null)
+                {
+                    var currentOwed = SplitColumns(current.BlobOwed);
+                    var currentWritten = SplitColumns(current.BlobColumns);
+
+                    foreach (var (column, file) in files)
+                    {
+                        if (currentOwed.Contains(column) && !currentWritten.Contains(column))
+                        {
+                            await table
+                                .WriteLocalBinaryAsync(connection, key, column, file, file?.Length, cancellationToken)
+                                .ConfigureAwait(false);
+                        }
+                    }
+
+                    await TrackedSyncState
+                        .WriteOwedAsync(
+                            connection,
+                            table.TableName,
+                            owedRow.RawKey,
+                            string.Join(",", currentOwed.Where(column => !owed.Contains(column))),
+                            cancellationToken
+                        )
+                        .ConfigureAwait(false);
+                }
+
+                await TrackedSyncState.SetApplyingAsync(connection, false, cancellationToken).ConfigureAwait(false);
+                await TrackedSyncState.ExecuteAsync(connection, "COMMIT", cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                try
+                {
+                    await TrackedSyncState
+                        .ExecuteAsync(connection, "ROLLBACK", CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+                catch (DbException)
+                {
+                    // The rollback failing must not hide what went wrong first
+                }
+
+                throw;
+            }
+        }
+        finally
+        {
+            foreach (var (_, file) in files)
+            {
+                if (file is not null)
+                {
+                    await file.DisposeAsync().ConfigureAwait(false);
+                }
+            }
+        }
+    }
+
+    /// <summary>Opens a dedicated connection with foreign keys checked off (it is not pooled, so the setting goes with it).</summary>
+    private async Task<DbConnection> OpenDedicatedAsync(CancellationToken cancellationToken)
+    {
+        var connection = _rows.CreateDedicatedConnection();
+
+        try
+        {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await TrackedSyncState
+                .ExecuteAsync(connection, "PRAGMA foreign_keys = OFF", cancellationToken)
+                .ConfigureAwait(false);
+
+            return connection;
+        }
+        catch
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>The table of the engine whose local table has the name (null when none has).</summary>
+    private ITrackedSyncTable? TableNamed(string localTableName) =>
+        _tables.FirstOrDefault(table =>
+            string.Equals(table.LocalTableName, localTableName, StringComparison.OrdinalIgnoreCase)
+            && (table.LocalDatabaseName is null
+                || string.Equals(table.LocalDatabaseName, "main", StringComparison.OrdinalIgnoreCase))
+        );
+
+    /// <summary>The columns of a comma-separated list.</summary>
+    private static HashSet<string> SplitColumns(string columns) =>
+        columns.Split(',', StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>A name quoted as an SQLite identifier.</summary>
+    internal static string Identifier(string name) => "\"" + name.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
+
+    /// <summary>The local table's name, quoted, with its schema part when it has one.</summary>
+    internal static string QualifiedName(ITrackedSyncTable table) =>
+        table.LocalDatabaseName is { } database
+            ? Identifier(database) + "." + Identifier(table.LocalTableName)
+            : Identifier(table.LocalTableName);
+
+    /// <summary>What one apply attempt has done so far, on its connection.</summary>
+    private sealed class ApplyAttempt(
+        DbConnection connection,
+        Dictionary<(string Table, string Key), string?> held,
+        HashSet<(string Table, string Key)> keep
+    )
+    {
+        /// <summary>The connection of the attempt (inside its transaction).</summary>
+        public DbConnection Connection { get; } = connection;
+
+        /// <summary>The rows held back for a missing parent (kept across attempts).</summary>
+        public Dictionary<(string Table, string Key), string?> Held { get; } = held;
+
+        /// <summary>The parents the delete propagation must not delete (kept across attempts).</summary>
+        public HashSet<(string Table, string Key)> Keep { get; } = keep;
+
+        /// <summary>The rows held back in this attempt for a unique value, or for an unsent change under a key the server does not know.</summary>
+        public HashSet<(string Table, string Key)> UniqueHeld { get; } = [];
+
+        /// <summary>The rows this attempt wrote.</summary>
+        public HashSet<(string Table, string Key)> Written { get; } = [];
+
+        /// <summary>The rows this attempt deleted.</summary>
+        public HashSet<(string Table, string Key)> Deleted { get; } = [];
+
+        /// <summary>The row states of each table, by table name and key text.</summary>
+        public Dictionary<string, Dictionary<string, TrackedSyncRowState>> States { get; } =
+            new(StringComparer.Ordinal);
+
+        /// <summary>The number of server rows written.</summary>
+        public int Downloaded { get; set; }
+
+        /// <summary>The number of local rows deleted by the delete propagation.</summary>
+        public int DeletedLocally { get; set; }
+
+        /// <summary>The raw keys of each table's rows read so far, by key text.</summary>
+        private readonly Dictionary<string, Dictionary<string, object>> _rawKeys = new(StringComparer.Ordinal);
+
+        /// <summary>The rows ServerWins discards in this attempt, by table name and key text (still at the change number read).</summary>
+        public Dictionary<string, Dictionary<string, TrackedSyncPlanDiscard>> LiveDiscards { get; } =
+            new(StringComparer.Ordinal);
+
+        /// <summary>The number of rows whose unsent change ServerWins discarded.</summary>
+        public int Discarded { get; private set; }
+
+        /// <summary>The local rows the attempt changed on its own, in the order they were changed.</summary>
+        public List<SyncLocalRowChange> Changes { get; } = [];
+
+        /// <summary>Notes a row written.</summary>
+        public void Note(ITrackedSyncTable table, TrackedSyncRowWrite write)
+        {
+            if (!Written.Add((table.TableName, write.KeyText)))
+            {
+                return;
+            }
+
+            if (write.Discard)
+            {
+                NoteDiscarded(table.TableName, write.KeyText);
+            }
+            else
+            {
+                Downloaded++;
+            }
+        }
+
+        /// <summary>Notes a row whose unsent change ServerWins discarded.</summary>
+        public void NoteDiscarded(string tableName, string keyText)
+        {
+            Changes.Add(new SyncLocalRowChange(tableName, keyText, SyncLocalRowChangeReason.DiscardedByServerWins));
+            Discarded++;
+        }
+
+        /// <summary>
+        /// The key of a row just written, exactly as the table stores it: read through the rowid of an insert, or else
+        /// from a read of the table's keys.
+        /// </summary>
+        public async Task<object> RawKeyAsync(
+            ITrackedSyncTable table,
+            string keyText,
+            bool inserted,
+            CancellationToken cancellationToken
+        )
+        {
+            if (inserted)
+            {
+                await using var last = Connection.CreateCommand();
+                last.CommandText =
+                    "SELECT "
+                    + Identifier(table.LocalKeyColumnName)
+                    + " FROM "
+                    + QualifiedName(table)
+                    + " WHERE rowid = last_insert_rowid()";
+
+                if (await last.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is { } rawKey and not DBNull)
+                {
+                    return rawKey;
+                }
+            }
+
+            if (!_rawKeys.TryGetValue(table.TableName, out var keys))
+            {
+                keys = new Dictionary<string, object>(StringComparer.Ordinal);
+
+                await using var read = Connection.CreateCommand();
+                read.CommandText =
+                    "SELECT " + Identifier(table.LocalKeyColumnName) + " FROM " + QualifiedName(table);
+                await using var reader = await read.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+                while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    var rawKey = reader.GetValue(0);
+                    keys[table.KeyTextOfRaw(rawKey)] = rawKey;
+                }
+
+                _rawKeys[table.TableName] = keys;
+            }
+
+            return keys.TryGetValue(keyText, out var found)
+                ? found
+                : throw new InvalidOperationException(
+                    $"The row of '{table.TableName}' with the key '{keyText}' was written but cannot be read back."
+                );
+        }
+    }
+}
+
+/// <summary>One table's fetched rows, ready to apply.</summary>
+/// <param name="Table">The table.</param>
+/// <param name="Rows">The fetched server rows, in fetch order.</param>
+/// <param name="ServerKeys">The server's key texts (null when delete propagation is off).</param>
+/// <param name="OldAnchor">The resume point the fetch started from.</param>
+internal sealed record TrackedSyncPlan(
+    ITrackedSyncTable Table,
+    IReadOnlyList<EntityBaseCore> Rows,
+    IReadOnlySet<string>? ServerKeys,
+    byte[]? OldAnchor
+)
+{
+    /// <summary>The rows of the table <see cref="SyncConflictPolicy.ServerWins"/> discards, by key text.</summary>
+    public IReadOnlyDictionary<string, TrackedSyncPlanDiscard> Discards { get; init; } =
+        new Dictionary<string, TrackedSyncPlanDiscard>(StringComparer.Ordinal);
+
+    /// <summary>The refresh the plan belongs to (null for an ordinary download).</summary>
+    public TrackedSyncRefresh? Refresh { get; init; }
+}
+
+/// <summary>How a refresh writes the rows it fetched.</summary>
+/// <param name="BlankBinaries">Whether the refresh gives the unbounded binary columns up (the rows it writes come in with them empty).</param>
+internal sealed record TrackedSyncRefresh(bool BlankBinaries);
+
+/// <summary>An unsent row <see cref="SyncConflictPolicy.ServerWins"/> discards.</summary>
+/// <param name="Key">The row's key.</param>
+/// <param name="Sequence">The change number read at the start of the run (a row written again since is not discarded).</param>
+internal sealed record TrackedSyncDiscard(object Key, long Sequence);
+
+/// <summary>An unsent row <see cref="SyncConflictPolicy.ServerWins"/> discards, with the server's row to put back.</summary>
+/// <param name="Key">The row's key.</param>
+/// <param name="Sequence">The change number read at the start of the run.</param>
+/// <param name="Server">The server's row (null when the server no longer has it).</param>
+internal sealed record TrackedSyncPlanDiscard(object Key, long Sequence, EntityBaseCore? Server);
+
+/// <summary>One unsent row queued for the upload.</summary>
+/// <param name="Table">The row's table.</param>
+/// <param name="Row">The row's state as read.</param>
+/// <param name="Key">The row's key.</param>
+/// <param name="KeyText">The row's key text.</param>
+internal sealed record TrackedSyncQueued(
+    ITrackedSyncTable Table,
+    TrackedSyncPendingRow Row,
+    object Key,
+    string KeyText
+);
+
+/// <summary>One server row to write locally.</summary>
+/// <param name="Row">The server row.</param>
+/// <param name="Key">Its key.</param>
+/// <param name="KeyText">Its key text.</param>
+/// <param name="State">The row state the local database holds for it (null when it holds none).</param>
+internal sealed record TrackedSyncRowWrite(EntityBaseCore Row, object Key, string KeyText, TrackedSyncRowState? State)
+{
+    /// <summary>Whether the write puts the server's row back over a row <see cref="SyncConflictPolicy.ServerWins"/> discards.</summary>
+    public bool Discard { get; init; }
+}
+
+/// <summary>What a download did.</summary>
+/// <param name="Downloaded">The number of server rows written locally.</param>
+/// <param name="DeletedLocally">The number of local rows the delete propagation removed.</param>
+/// <param name="Truncations">The rows held back, one per row.</param>
+internal sealed record TrackedSyncDownload(
+    int Downloaded,
+    int DeletedLocally,
+    IReadOnlyList<SyncDownloadTruncation> Truncations
+)
+{
+    /// <summary>The number of rows whose unsent change <see cref="SyncConflictPolicy.ServerWins"/> discarded.</summary>
+    public int Discarded { get; init; }
+
+    /// <summary>The local rows the download changed on its own (the rows ServerWins discarded).</summary>
+    public IReadOnlyList<SyncLocalRowChange> Changes { get; init; } = [];
+
+    /// <summary>The rows deleted and written in each table, by table name.</summary>
+    public IReadOnlyDictionary<string, (int Deleted, int Written)> PerTable { get; init; } =
+        new Dictionary<string, (int Deleted, int Written)>(StringComparer.Ordinal);
+}
+
+/// <summary>One foreign key violation of the local database.</summary>
+/// <param name="Child">The child row's table and key text (the key is "?" when it cannot be read).</param>
+/// <param name="ParentTable">The parent's table.</param>
+/// <param name="ForeignKey">The foreign key's number in its table.</param>
+/// <param name="Parent">The parent row's table and key text, when the foreign key refers to the parent's primary key.</param>
+/// <param name="LookupColumns">The parent's columns the foreign key refers to, when they are not the primary key.</param>
+/// <param name="LookupValues">The child row's values for those columns.</param>
+/// <param name="ParentDescriptor">The parent's table, when the engine synchronises it.</param>
+internal sealed record TrackedSyncViolation(
+    (string Table, string Key) Child,
+    string ParentTable,
+    long ForeignKey,
+    (string Table, string Key)? Parent,
+    string[]? LookupColumns,
+    object?[]? LookupValues,
+    ITrackedSyncTable? ParentDescriptor
+)
+{
+    /// <summary>What tells one violation from another across two checks (not the rowid, which a rewrite can change).</summary>
+    public (string ChildTable, string ChildKey, string ParentTable, long ForeignKey) Identity =>
+        (Child.Table, Child.Key, ParentTable, ForeignKey);
+}
 {{~ if remote_services || runtime_package_export ~}}
 
 /// <summary>The operation names of the sync-only endpoints (<c>POST {prefix}/{entity}/{operation}</c>).</summary>
