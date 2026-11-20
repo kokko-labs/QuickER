@@ -283,6 +283,8 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         new(
             "SyncModel",
             SyncModelWorldOptions.Direct,
+            Seeds,
+            WideSeeds,
             SyncModelKnownFailures.Set,
             SyncModelDimensions.Gaps,
             SyncModelOutcomeDimensions.Gaps,
@@ -294,7 +296,8 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
 
     /// <summary>
     /// 乱数の種（既存の範囲の種と広い世界の種）と網羅の行を、渡した組の世界で流し、既知の失敗の一覧・網羅しない組・空振りの守りを
-    /// 照合する。種の決め方（<see cref="Seeds"/>・<see cref="WideSeeds"/>）と次元表はどの組でも同じ
+    /// 照合する。流す種は組の決め方（<see cref="SyncModelRandomSuite.Seeds"/>・<see cref="SyncModelRandomSuite.WideSeeds"/>）で
+    /// 決め、次元表はどの組でも同じ
     /// </summary>
     /// <param name="suite">世界の組み方と、照合に使う一覧・宣言</param>
     /// <param name="output">テストの出力</param>
@@ -311,7 +314,7 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                 (IReadOnlyList<ModelFailure> Failures, IReadOnlyList<string> Log)
             >();
         var elapsed = new ConcurrentDictionary<int, TimeSpan>();
-        var (plan, widePlan) = SyncModelSignatures.ResolvePlans(Seeds, WideSeeds);
+        var (plan, widePlan) = SyncModelSignatures.ResolvePlans(suite.Seeds, suite.WideSeeds);
         plan.WriteWarnings(output);
         widePlan.WriteWarnings(output);
         var coverage = new CoverageCounter(SyncModelDimensions.Table);
