@@ -90,6 +90,44 @@ internal static class SyncModelOutcomeDimensions
             ]
         );
 
+    /// <summary>今のエンジンの解決役・段にだけある、実行が自分から変えた行の理由</summary>
+    private static readonly string[] CurrentEngineOnlyChanges =
+    [
+        nameof(SyncLocalRowChangeReason.ReloadedForUniqueValue),
+        nameof(SyncLocalRowChangeReason.RemovedBeforeDownload),
+        nameof(SyncLocalRowChangeReason.RemovedForUniqueValue),
+    ];
+
+    private const string CurrentEngineOnlyReason =
+        "新しいエンジンは、集合の外の行をキーで読みに行く解決役（一意な値の持ち主の読み直し＝ReloadedForUniqueValue・引き留める行の削除＝RemovedForUniqueValue）と、ダウンロードの前の削除伝搬の段（RemovedBeforeDownload）を持たない（取得した集合の中で後回し・回転・同じ適用の削除伝搬で同じ形を収束させる）。この理由はどの実行も返さない";
+
+    /// <summary>
+    /// 新しいエンジンの端末の乱数の種の網羅しない組の一覧（範囲は <see cref="SyncModelDimensions.EngineScope"/> だけ）：今の
+    /// エンジンの解決役・段にだけある理由の組
+    /// </summary>
+    public static CoverageGapSet EngineGaps { get; } =
+        CoverageGap.Set(
+            EngineIds.SyncModel,
+            [
+                CoverageGap.AcceptedMatching(
+                    SyncModelDimensions.EngineScope,
+                    "tracked-engine-has-no-resolver",
+                    CurrentEngineOnlyReason,
+                    Outcome,
+                    Mode,
+                    (outcome, _) => CurrentEngineOnlyChanges.Contains(outcome)
+                ),
+                CoverageGap.AcceptedMatching(
+                    SyncModelDimensions.EngineScope,
+                    "tracked-engine-has-no-resolver",
+                    CurrentEngineOnlyReason,
+                    Outcome,
+                    Policy,
+                    (outcome, _) => CurrentEngineOnlyChanges.Contains(outcome)
+                ),
+            ]
+        );
+
     /// <summary>台帳の行</summary>
     public static EngineDescriptor Descriptor { get; } =
         new(

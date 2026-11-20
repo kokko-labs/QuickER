@@ -425,15 +425,15 @@ IncludeGraph の edge-skip（自己参照ナビを展開しない）
 
 双方向同期支援（差分ダウンロード・ジャーナル再生・削除伝搬・競合収集・ループ防止）
 
-- QuickER 版 SQL Server：担当＝`SyncConfigMatrixRuntimeTests`・`SyncModelSqlServerRuntimeTests`・`SyncSqlServerRuntimeTests`
-- QuickER 版 SQLite：担当＝`SyncConstructionExclusionTests`・`SyncKeyTextRuntimeTests`・`SyncLocalSaveHookRegistrationTests`・`SyncModelRuntimeTests`・`SyncModelRuntimeTestsPart2`・`SyncNullKeyRuntimeTests`・`SyncSqliteRuntimeTests`・`SyncSupportAdoSqliteTriggerRuntimeTests`・`SyncVoRuntimeTests`
+- QuickER 版 SQL Server：担当＝`SyncConfigMatrixRuntimeTests`・`SyncModelSqlServerRuntimeTests`・`SyncSqlServerRuntimeTests`・`SyncSupportAdoSqlServerEngineRuntimeTests`
+- QuickER 版 SQLite：担当＝`SyncConstructionExclusionTests`・`SyncKeyTextRuntimeTests`・`SyncLocalSaveHookRegistrationTests`・`SyncModelRuntimeTests`・`SyncModelRuntimeTestsPart2`・`SyncNullKeyRuntimeTests`・`SyncSqliteRuntimeTests`・`SyncSupportAdoSqliteEngineRuntimeTests`・`SyncSupportAdoSqliteTriggerRuntimeTests`・`SyncVoRuntimeTests`
 - EF Core SQL Server：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - EF Core SQLite：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - EF Core PostgreSQL：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - EF Core MySQL：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - EF Core Oracle：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - インメモリ：非該当＝同期はサーバー DB とローカル DB の 2 つの実 DB の間の話で、インメモリにはミラーすべきサーバー版を採番する主体が居ない
-- リモート：担当＝`SyncBinaryTransferResponseRuntimeTests`（サーバー：リポジトリなし）・`SyncConfigMatrixRuntimeTests`（サーバー：QuickER 版 SQL Server）・`SyncEndpointRegistrationRuntimeTests`（サーバー：リポジトリなし）・`SyncHttpRuntimeTests`（サーバー：QuickER 版 SQLite）・`SyncModelHttpRuntimeTests`（サーバー：QuickER 版 SQLite）・`SyncModelHttpRuntimeTestsPart2`（サーバー：QuickER 版 SQLite）・`SyncModelHttpRuntimeTestsPart3`（サーバー：QuickER 版 SQLite）・`SyncModelHttpRuntimeTestsPart4`（サーバー：QuickER 版 SQLite）・`SyncSqlServerHttpRuntimeTests`（サーバー：QuickER 版 SQL Server）・`SyncSupportRemoteAdoSqlServerRuntimeTests`（サーバー：QuickER 版 SQL Server）
+- リモート：担当＝`SyncBinaryTransferResponseRuntimeTests`（サーバー：リポジトリなし）・`SyncConfigMatrixRuntimeTests`（サーバー：QuickER 版 SQL Server）・`SyncEndpointRegistrationRuntimeTests`（サーバー：リポジトリなし）・`SyncHttpRuntimeTests`（サーバー：QuickER 版 SQLite）・`SyncModelHttpRuntimeTests`（サーバー：QuickER 版 SQLite）・`SyncModelHttpRuntimeTestsPart2`（サーバー：QuickER 版 SQLite）・`SyncModelHttpRuntimeTestsPart3`（サーバー：QuickER 版 SQLite）・`SyncModelHttpRuntimeTestsPart4`（サーバー：QuickER 版 SQLite）・`SyncSqlServerHttpRuntimeTests`（サーバー：QuickER 版 SQL Server）・`SyncSupportRemoteAdoSqlServerRuntimeTests`（サーバー：QuickER 版 SQL Server）・`SyncSupportRemoteAdoSqliteEngineRuntimeTests`（サーバー：QuickER 版 SQLite）
 
 ### `SyncRefresh`
 

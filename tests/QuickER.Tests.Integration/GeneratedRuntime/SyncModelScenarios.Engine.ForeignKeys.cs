@@ -37,6 +37,35 @@ internal static partial class SyncModelScenarios
                     Expect.Journal(D1).Empty(),
                 ]
             ),
+            // フォルダーの表の取得の後・品目の表の取得の前に、サーバーの他者が新しいフォルダーとその下の品目を作る：品目の取得は
+            // 親の無い品目を返す。取得の上限を固定しないサーバー役では、その 1 回の同期で親と子の両方が端末に入り、打ち切りは
+            // 残らない（親を読み直すか、保留した子を取り直す）。固定するサーバー役では、どちらもその同期に入らず、次の同期で入る
+            Moved(
+                "fk-parent-created-between-table-fetches-arrives-in-same-sync",
+                [.. Seed(1, "alice", 11, "widget")],
+                [
+                    Rename(SV, 1, "alice-server"),
+                    new ArmInterruptOp(
+                        D1,
+                        ModelInterruptPoint.AfterServerFetchBeforeApply,
+                        [Folder(SV, 3, name: "carol"), Line(SV, 31, 3, "late")]
+                    ),
+                    Plain(D1),
+                    Expect.Result(D1).Absent("exception *", "conflict *", "truncation *"),
+                    Expect.Rows(D1, F).Contains("1 parent=null name=alice-server"),
+                    new WhenServerFixesCeilingOp(
+                        [
+                            Expect.Rows(D1, F).Absent("3 *"),
+                            Expect.Rows(D1, I).Absent("31 *"),
+                            Plain(D1),
+                            Expect.Result(D1).Absent("conflict *", "truncation *"),
+                        ],
+                        []
+                    ),
+                    Expect.Rows(D1, F).Contains("3 parent=null name=carol"),
+                    Expect.Rows(D1, I).Contains("31 folder=3 label=null code=c-31 title=late"),
+                ]
+            ),
             Moved(
                 "fk-propagation-keeps-parents-of-rows-it-keeps",
                 [.. Seed(1, "alice", 11, "widget")],
@@ -84,6 +113,46 @@ internal static partial class SyncModelScenarios
                     Expect.Journal(D1).Empty(),
                 ]
             ),
+            // 端末がラベル L1 を消し、L1 を参照する品目 11 を別のラベル M1 へ付け替える（どちらも未送信）。Versioned × ServerWins は
+            // 版なしの表（ラベル）を範囲に持たないので、品目 11 を L1 へ戻せない（戻すと消したラベルを参照する）。続く後勝ち ×
+            // ServerWins で、ラベルの削除はサーバーの品目 11 が L1 を参照しているので断られる（根拠のある拒否）
+            Moved(
+                "fk-lww-serverwins-label-delete-refused-while-item-reparent-is-held",
+                [
+                    Folder(SV, 1, name: "alice"),
+                    new AddLabelOp(SV, Direct, "L1", 1, "old"),
+                    new AddLabelOp(SV, Direct, "M1", 1, "new"),
+                    Item(SV, 11, folder: 1, label: "L1"),
+                ],
+                [
+                    new UpdateItemOp(D1, Direct, 11, 1, "M1", "c-11", "t11"),
+                    new DeleteLabelOp(D1, Direct, "L1"),
+                    Plain(D1, policy: SyncConflictPolicy.ServerWins),
+                    Plain(D1, mode: SyncMode.LastWriteWins, policy: SyncConflictPolicy.ServerWins),
+                    // 決定を持ち越すエンジンは、後勝ち × ServerWins の実行で品目 11 を送らずにサーバーの行で戻し（L1 を参照する）、
+                    // ラベルの削除は断られて L1 も戻る。持ち越さないエンジンは、残った品目 11 の付け替えを送り、L1 の削除はその後の
+                    // 巡で通る
+                    new WhenEngineDeclaresOp(
+                        D1,
+                        EngineDeclaration.CarriesServerWinsDecision,
+                        [
+                            Expect
+                                .Result(D1)
+                                .Contains($"local-change {I} key=11 reason=DiscardedByServerWins"),
+                            Expect.Rows(SV, L).Contains("L1 folder=1 caption=old"),
+                            Expect.Rows(SV, I).Contains("11 folder=1 label=L1 code=c-11 title=t11"),
+                            Expect.Rows(D1, L).Contains("L1 folder=1 caption=old"),
+                            Expect.Rows(D1, I).Contains("11 folder=1 label=L1 code=c-11 title=t11"),
+                        ],
+                        [
+                            Expect.Rows(SV, L).Absent("L1 *"),
+                            Expect.Rows(SV, I).Contains("11 folder=1 label=M1 code=c-11 title=t11"),
+                            Expect.Rows(D1, L).Absent("L1 *"),
+                            Expect.Rows(D1, I).Contains("11 folder=1 label=M1 code=c-11 title=t11"),
+                        ]
+                    ),
+                ]
+            ),
             Moved(
                 "fk-lww-serverwins-uploads-ordinary-changes",
                 [.. Seed(1, "alice", 11, "widget")],
@@ -115,6 +184,31 @@ internal static partial class SyncModelScenarios
                         .Count($"truncation {L} *", 1)
                         .Single($"truncation {L} pending=L101 missing-parent=- *"),
                     Expect.Rows(D1, L).Contains("L102 folder=1 caption=b2"),
+                ]
+            ),
+            // 同じ形を、打ち切りの観測に依らずに確かめる：親の無い付け替えは競合 1 件で知らせ、端末の行はローカルの内容のまま、
+            // 走査は続いて後ろの行が降り、サーバーの行は変わらない
+            Moved(
+                "fk-versionless-pending-row-keeps-local-content-after-scan",
+                [
+                    Folder(SV, 1, name: "alice"),
+                    Folder(SV, 2, name: "bob"),
+                    new AddLabelOp(SV, Direct, "L101", 1, "a"),
+                    new AddLabelOp(SV, Direct, "L102", 1, "b"),
+                ],
+                [
+                    new UpdateLabelOp(D1, Direct, "L101", 2, "a"),
+                    new DeleteFolderOp(SV, Direct, 2),
+                    new UpdateLabelOp(SV, Direct, "L102", 1, "b2"),
+                    Plain(D1, mode: SyncMode.LastWriteWins),
+                    Expect
+                        .Result(D1)
+                        .Count("conflict *", 1)
+                        .Single($"conflict {L} key=L101 * reason=ParentMissingOnServer *"),
+                    Expect
+                        .Rows(D1, L)
+                        .Contains("L101 folder=2 caption=a", "L102 folder=1 caption=b2"),
+                    Expect.Rows(SV, L).Contains("L101 folder=1 caption=a"),
                 ]
             ),
             Moved(
@@ -166,6 +260,30 @@ internal static partial class SyncModelScenarios
                     Plain(D1),
                     Expect.Journal(D1).Empty(),
                     Expect.Rows(SV, F).Contains("1 parent=null name=alice-during"),
+                ]
+            ),
+            // 同じ形を、エンジンの記録を読まずに確かめる：ServerWins の実行の途中で編集された行は戻さず（サーバーも変えない）、
+            // 次の同期がその編集を競合なしに上げ、その後は送るものが残らない
+            Moved(
+                "sw-leaves-row-edited-during-the-run-then-uploads-it",
+                [.. Seed(1, "alice", 11, "widget")],
+                [
+                    Rename(D1, 1, "alice-before"),
+                    new ArmInterruptOp(
+                        D1,
+                        ModelInterruptPoint.BeforeServerFetch,
+                        Rename(D1, 1, "alice-during")
+                    ),
+                    Plain(D1, policy: SyncConflictPolicy.ServerWins),
+                    Expect.Result(D1).Absent("conflict *"),
+                    Expect.Rows(D1, F).Contains("1 parent=null name=alice-during"),
+                    Expect.Rows(SV, F).Contains("1 parent=null name=alice"),
+                    Plain(D1),
+                    Expect.Result(D1).Absent("conflict *"),
+                    Expect.Rows(SV, F).Contains("1 parent=null name=alice-during"),
+                    Expect.Rows(D1, F).Contains("1 parent=null name=alice-during"),
+                    Plain(D1),
+                    Expect.Result(D1).Contains("uploaded=0").Absent("conflict *"),
                 ]
             ),
             Moved(

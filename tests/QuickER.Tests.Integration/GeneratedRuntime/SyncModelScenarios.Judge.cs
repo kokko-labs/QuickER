@@ -58,6 +58,115 @@ internal static partial class SyncModelScenarios
             ExpectedJudgeSignatures = new HashSet<string> { "5/carry:overwrote:model_folders" },
         };
 
+        // 照合 2（blob の上書き）：持ち越しを宣言したエンジンで、後勝ち＋ServerWins の実行が何も戻さずに終わった品目の blob
+        // （決定）を、決定の後に行を編集しないまま、後の Collect の実行がサーバーへ書く
+        yield return new(
+            "judge-carry-blob-overwrite-is-a-violation",
+            [Folder(SV, 977), Item(SV, 977, folder: 977)],
+            [
+                new WritePayloadOp(D1, 977, "0A0977"),
+                Sync(D1, mode: SyncMode.LastWriteWins, policy: SyncConflictPolicy.ServerWins),
+                Sync(D1, mode: SyncMode.LastWriteWins),
+            ]
+        )
+        {
+            Transports = DirectOnly,
+            JudgeDevice = new(true, [new JudgeBreak(JudgeBreakKind.SkipRun, D1, 977, OnRun: 2)]),
+            ExpectedJudgeSignatures = new HashSet<string>
+            {
+                "5/carry:overwrote:model_items:payload",
+            },
+        };
+
+        // 照合 2（品目の行の上書き）：持ち越しを宣言したエンジンで、後勝ち＋ServerWins の実行が何も戻さずに終わった品目の行
+        // （決定）を、決定の後に行も blob も編集しないまま、後の Collect の実行がサーバーへ書く（blob の編集で行の決定を外す
+        // 逆向きの規則は、blob が変わっていない品目には掛からない）
+        yield return new(
+            "judge-carry-item-row-overwrite-is-a-violation",
+            [Folder(SV, 976), Item(SV, 976, folder: 976)],
+            [
+                new UpdateItemOp(D1, Direct, 976, 976, null, "c-976", "local-edit"),
+                Sync(D1, mode: SyncMode.LastWriteWins, policy: SyncConflictPolicy.ServerWins),
+                Sync(D1, mode: SyncMode.LastWriteWins),
+            ]
+        )
+        {
+            Transports = DirectOnly,
+            JudgeDevice = new(true, [new JudgeBreak(JudgeBreakKind.SkipRun, D1, 976, OnRun: 2)]),
+            ExpectedJudgeSignatures = new HashSet<string> { "5/carry:overwrote:model_items" },
+        };
+
+        // 照合 2（エンジンが写した blob）：持ち越しを宣言したエンジンで、品目の行の決定の後に、サーバーの他者が書いた blob を
+        // エンジンが端末へ写す（端末の書き込みではない）。端末の blob の内容は決定を作ったときと変わるが、行の決定は外れず、
+        // 後の実行が行の内容をサーバーへ書けば上書きとして名指しする
+        yield return new(
+            "judge-carry-item-row-overwrite-after-engine-copied-blob-is-a-violation",
+            [Folder(SV, 975), Item(SV, 975, folder: 975)],
+            [
+                new UpdateItemOp(D1, Direct, 975, 975, null, "c-975", "local-edit"),
+                Sync(D1, mode: SyncMode.LastWriteWins, policy: SyncConflictPolicy.ServerWins),
+                new WritePayloadOp(SV, 975, "0B0975"),
+                Sync(D1),
+                Sync(D1, mode: SyncMode.LastWriteWins),
+            ]
+        )
+        {
+            Transports = DirectOnly,
+            JudgeDevice = new(
+                true,
+                [
+                    new JudgeBreak(JudgeBreakKind.SkipRun, D1, 975, OnRun: 2),
+                    new JudgeBreak(JudgeBreakKind.SkipRun, D1, 975, OnRun: 3),
+                    new JudgeBreak(JudgeBreakKind.WriteLocalWithoutForeignKeys, D1, 975, OnRun: 3)
+                    {
+                        Statements =
+                        [
+                            "UPDATE model_items SET payload = X'0B0975' WHERE item_id = 975",
+                        ],
+                    },
+                ]
+            ),
+            ExpectedJudgeSignatures = new HashSet<string> { "5/carry:overwrote:model_items" },
+        };
+
+        // 照合 2（行の単位）：持ち越しを宣言したエンジンで、行と blob の決定を持つ品目の行を決定の後に編集すると、同じ行の
+        // blob の決定も外れる。後の Collect の実行が行と一緒に blob を送っても上書きにしない
+        yield return new(
+            "judge-carry-blob-decision-voided-by-row-edit-is-not-overwrite",
+            [Folder(SV, 978), Item(SV, 978, folder: 978)],
+            [
+                new UpdateItemOp(D1, Direct, 978, 978, null, "c-978", "local-edit"),
+                new WritePayloadOp(D1, 978, "0A0978"),
+                Sync(D1, mode: SyncMode.LastWriteWins, policy: SyncConflictPolicy.ServerWins),
+                new UpdateItemOp(D1, Direct, 978, 978, null, "c-978", "edited-after-decision"),
+                Sync(D1, mode: SyncMode.LastWriteWins),
+            ]
+        )
+        {
+            Transports = DirectOnly,
+            JudgeDevice = new(true, [new JudgeBreak(JudgeBreakKind.SkipRun, D1, 978, OnRun: 2)]),
+            ExpectedJudgeSignatures = new HashSet<string>(),
+        };
+
+        // 照合 2（行の単位の逆向き）：持ち越しを宣言したエンジンで、決定の後に blob だけを書いた行は、行の決定も外れる。
+        // 後の実行が行の内容を blob と一緒に送っても、決定の内容の上書きにしない（決定を作ったときに blob の持ち分が無く、
+        // blob の決定が無い形）
+        yield return new(
+            "judge-carry-row-decision-voided-by-blob-edit-is-not-overwrite",
+            [Folder(SV, 979), Item(SV, 979, folder: 979)],
+            [
+                new UpdateItemOp(D1, Direct, 979, 979, null, "c-979", "local-edit"),
+                Sync(D1, mode: SyncMode.LastWriteWins, policy: SyncConflictPolicy.ServerWins),
+                new WritePayloadOp(D1, 979, "0A0979"),
+                Sync(D1, mode: SyncMode.LastWriteWins),
+            ]
+        )
+        {
+            Transports = DirectOnly,
+            JudgeDevice = new(true, [new JudgeBreak(JudgeBreakKind.SkipRun, D1, 979, OnRun: 2)]),
+            ExpectedJudgeSignatures = new HashSet<string>(),
+        };
+
         // 照合 2（果たされた決定）：持ち越しを宣言したエンジンで、後の実行がその行を端末でサーバーの内容へ戻し、記録を消し、
         // DiscardedByServerWins で報告する。消失なしの期待から外れる
         yield return new(
@@ -83,6 +192,122 @@ internal static partial class SyncModelScenarios
                 ]
             ),
             ExpectedJudgeSignatures = new HashSet<string>(),
+        };
+
+        // 根拠の確認（持ち越した決定を果たした決着）：持ち越しを宣言したエンジンで、決定の行を後の後勝ち＋ServerWins の実行が
+        // 端末でサーバーの内容へ戻し、記録を消し、DiscardedByServerWins で報告する。サーバーが断った決着ではないので、根拠の
+        // 確認（3/spurious）に掛けない
+        yield return new(
+            "judge-carry-fulfilled-by-lww-serverwins-is-not-spurious",
+            [Folder(SV, 966)],
+            [
+                new UpdateFolderOp(D1, Direct, 966, null, "local-edit"),
+                Sync(D1, mode: SyncMode.LastWriteWins, policy: SyncConflictPolicy.ServerWins),
+                Sync(D1, mode: SyncMode.LastWriteWins, policy: SyncConflictPolicy.ServerWins),
+            ]
+        )
+        {
+            Transports = DirectOnly,
+            JudgeDevice = new(
+                true,
+                [
+                    new JudgeBreak(JudgeBreakKind.SkipRun, D1, 966, OnRun: 2),
+                    new JudgeBreak(JudgeBreakKind.RestoreFromServer, D1, 966, OnRun: 3)
+                    {
+                        ClearsRecords = true,
+                        ReportsDiscarded = true,
+                    },
+                ]
+            ),
+            ExpectedJudgeSignatures = new HashSet<string>(),
+        };
+
+        // 根拠の確認（宣言なしの対照）：持ち越しを宣言しないエンジンで、台帳が決定を持つ行を、後の後勝ち＋ServerWins の実行が
+        // 端末でサーバーの内容へ戻し、記録を消し、DiscardedByServerWins で報告する。宣言の無いエンジンは決定を果たさないので、
+        // この決着はサーバーが断った決着として根拠を確かめ、根拠が無いので 3/spurious になる
+        yield return new(
+            "judge-undeclared-carry-lww-serverwins-settlement-without-basis-is-spurious",
+            [Folder(SV, 968)],
+            [
+                new UpdateFolderOp(D1, Direct, 968, null, "local-edit"),
+                Sync(D1, mode: SyncMode.LastWriteWins, policy: SyncConflictPolicy.ServerWins),
+                Sync(D1, mode: SyncMode.LastWriteWins, policy: SyncConflictPolicy.ServerWins),
+            ]
+        )
+        {
+            Transports = DirectOnly,
+            JudgeDevice = new(
+                false,
+                [
+                    new JudgeBreak(JudgeBreakKind.SkipRun, D1, 968, OnRun: 2),
+                    new JudgeBreak(JudgeBreakKind.RestoreFromServer, D1, 968, OnRun: 3)
+                    {
+                        ClearsRecords = true,
+                        ReportsDiscarded = true,
+                    },
+                ]
+            ),
+            ExpectedJudgeSignatures = new HashSet<string>
+            {
+                "3/spurious:model_folders:settled-upsert:no-basis",
+            },
+        };
+
+        // 根拠の確認（対照）：決定を持たない行を、後勝ち＋ServerWins の実行が、サーバーが断っていないのに端末でサーバーの内容へ
+        // 戻し、記録を消し、DiscardedByServerWins で報告する（親も一意な値の持ち主もサーバーにある更新の決着）
+        yield return new(
+            "judge-lww-serverwins-settlement-without-basis-is-spurious",
+            [Folder(SV, 967)],
+            [
+                new UpdateFolderOp(D1, Direct, 967, null, "local-edit"),
+                Sync(D1, mode: SyncMode.LastWriteWins, policy: SyncConflictPolicy.ServerWins),
+            ]
+        )
+        {
+            Transports = DirectOnly,
+            JudgeDevice = new(
+                false,
+                [
+                    new JudgeBreak(JudgeBreakKind.RestoreFromServer, D1, 967, OnRun: 2)
+                    {
+                        ClearsRecords = true,
+                        ReportsDiscarded = true,
+                    },
+                ]
+            ),
+            ExpectedJudgeSignatures = new HashSet<string>
+            {
+                "3/spurious:model_folders:settled-upsert:no-basis",
+            },
+        };
+
+        // 根拠の確認（付け替えの対照）：端末がフォルダー 982 の親を 980 から 981 へ付け替え、980 を消す（どちらも未送信）。実行は
+        // 何も送らずに 980 の削除を DeleteRefusedOnServer で報告する。982 の付け替えは競合にも決着にも持ち越した決定を果たした
+        // 行にも入らないので、届いたとみなして根拠を打ち消し、サーバーで 982 がまだ 980 を参照していても pending-reparent になる
+        yield return new(
+            "judge-unfulfilled-reparent-delete-refusal-without-basis-is-spurious",
+            [Folder(SV, 980), Folder(SV, 981), Folder(SV, 982, parent: 980)],
+            [
+                new UpdateFolderOp(D1, Direct, 982, 981, "f982"),
+                new DeleteFolderOp(D1, Direct, 980),
+                Sync(D1),
+            ]
+        )
+        {
+            Transports = DirectOnly,
+            JudgeDevice = new(
+                true,
+                [
+                    new JudgeBreak(JudgeBreakKind.SkipRun, D1, 980, OnRun: 2)
+                    {
+                        ReportsDeleteRefused = true,
+                    },
+                ]
+            ),
+            ExpectedJudgeSignatures = new HashSet<string>
+            {
+                "3/spurious:model_folders:DeleteRefusedOnServer:pending-reparent",
+            },
         };
 
         // 照合 2（決定の後の編集）：持ち越しを宣言しないエンジンで、決定の後に端末が編集した行を、後の Collect の実行が報告なしに
@@ -562,9 +787,11 @@ internal static partial class SyncModelScenarios
         "INSERT INTO model_labels (label_code, folder_id, caption) "
         + $"VALUES ('{code}', {missingFolderId.ToString(System.Globalization.CultureInfo.InvariantCulture)}, 'orphan')";
 
-    /// <summary>利用者の手で、端末に親の無いラベルを入れる（記録しない・外部キーの検査を切る）</summary>
+    /// <summary>
+    /// 端末が前から持っていた親の無いラベルを入れる（外部キーの検査を切り、記録しない書き込みの口を通す＝利用者が送る編集でない）
+    /// </summary>
     private static LocalSqlOp OrphanLabel(ModelActor device, string code, int missingFolderId) =>
-        new(device, OrphanLabelSql(code, missingFolderId));
+        new(device, OrphanLabelSql(code, missingFolderId)) { Untracked = true };
 
     /// <summary>端末の親の無いラベルの件数を確かめる</summary>
     private static ExpectLocalSqlOp ExpectOrphanLabels(ModelActor device, int count) =>

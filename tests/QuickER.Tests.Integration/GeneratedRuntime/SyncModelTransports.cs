@@ -102,6 +102,13 @@ internal sealed record SyncModelWorldOptions
 
     /// <summary>この組み方の短い名前（出力用）</summary>
     public string Name { get; init; } = "direct";
+
+    /// <summary>
+    /// 「流せない」の例外（<see cref="SyncModelDevice.StopsScenario"/>）を、モデルの違反として記録せずにシナリオの外へ
+    /// 素通しにするか（既定は偽）。真にするのは、新しいエンジンの端末で決定的なシナリオを流して行ごとの結果を控える控えの
+    /// Fact だけ。偽のとき、この例外はほかの例外と同じ扱い（違反として記録されるか、テストの例外になる）
+    /// </summary>
+    public bool PassesNotRunnableThrough { get; init; }
 }
 
 /// <summary>サーバー役をリモートのエンドポイントの背後へ置くための、リモート面だけの薄いアダプタ</summary>

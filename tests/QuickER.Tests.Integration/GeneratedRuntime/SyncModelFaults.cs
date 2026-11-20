@@ -413,6 +413,12 @@ internal sealed class SyncModelFaults
         }
     }
 
+    /// <summary>
+    /// サーバー役の割り込みの点に来るたびに、割り込みの有無に依らず呼ぶ観測（新しいエンジンの決まった形の行が、実行どうしの
+    /// 順序を記録するのに使う。無ければ null）
+    /// </summary>
+    public Action<ModelInterruptPoint>? ObservePoint { get; set; }
+
     /// <summary>割り込みの書き込みが上限の時間で終わらなかった点（待ち合いの疑い。無ければ null）</summary>
     public ModelInterruptPoint? InterruptTimedOut { get; private set; }
 
@@ -445,6 +451,8 @@ internal sealed class SyncModelFaults
     /// </summary>
     public async Task InterruptAsync(ModelInterruptPoint point)
     {
+        ObservePoint?.Invoke(point);
+
         Func<Task> write;
 
         lock (_interruptLock)

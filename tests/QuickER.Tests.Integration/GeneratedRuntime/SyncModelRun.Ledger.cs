@@ -76,7 +76,11 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 ///   行の決定とする（<see cref="IModelDeviceSync.CarriesServerWinsDecision"/> に依らず作る）。宣言が真のエンジンだけ、生きている
 ///   決定の内容をサーバーへ書くことを違反にし、果たされた決定をその行の消失なし・根拠のない競合の期待から外す。宣言が偽の
 ///   エンジンは同じ形を数えるだけで、期待に触れない。決定の後の編集が報告なしに端末からもサーバーからも消えるのは、宣言に依らず
-///   違反。例外で終わった ServerWins の実行は決定を作らない。その実行の後の決定の扱いは、エンジンが持ち越しを宣言するときに、
+///   違反。宣言が真のエンジンでは決定を行の単位で持つ：行の決定が決定の後のその行の編集で外れたら同じ行の blob の決定も外し、
+///   決定の後に端末が記録つきの書き込みで blob を書いた品目は行の決定も外し（エンジンは後の書き込みが blob だけでも行を blob と
+///   一緒に送る。blob の内容では決めず、エンジンが写した blob では外さない）、
+///   実行の間に行（blob を除く列）が変わった品目には blob の決定を作らない。宣言が偽のエンジンでは台帳の作り方を変えない。
+///   例外で終わった ServerWins の実行は決定を作らない。その実行の後の決定の扱いは、エンジンが持ち越しを宣言するときに、
 ///   そのエンジンの振る舞いに合わせて決める。</item>
 ///   <item><c>5/local-discard:{表}</c>：実行の始めに持ち分があり、実行の後にその内容が端末にもサーバーにも無く、その消え方が
 ///   許されていない。許されるのは、その実行がそのキーを <see cref="SyncLocalRowChange"/> で報告した・Force の洗い替え・単独の
@@ -242,6 +246,41 @@ internal sealed partial class SyncModelRun
     /// </summary>
     public const string LedgerInvariantCheck = "ledger-invariant";
 
+    /// <summary>
+    /// 端末のエンジンの宣言（<see cref="IModelDeviceSync.CarriesServerWinsDecision"/>）が決まった値のときだけ件数が出る照合の
+    /// 種類と、その値（ここに無い種類はどちらの宣言でも数える）。宣言が違うエンジンでは定義から 0 件なので、空振りの守りから外す
+    /// （<see cref="GuardedRunChecksFor"/>）
+    /// </summary>
+    public static IReadOnlyDictionary<string, bool> RunCheckCountedOnlyWhenCarrying { get; } =
+        new Dictionary<string, bool>(StringComparer.Ordinal)
+        {
+            // 真のエンジンで起きれば違反（1 件以上を求める守りと両立しない）。偽のエンジンでは数えるだけの件数
+            [CarryOverwroteCheck] = false,
+            [LocalDiscardAfterUnreportedServerWinsCheck] = false,
+            [LocalDiscardAfterThrownServerWinsCheck] = true,
+            [UnreportedOverwriteAfterThrownServerWinsCheck] = false,
+            [LocalDiscardUnreportedInThrownServerWinsCheck] = false,
+            [ResendAfterThrownServerWinsCheck] = false,
+            [LocalDiscardOfDeleteOnRowBroughtInByThrownRunCheck] = false,
+        };
+
+    /// <summary>
+    /// 空振りの守りに掛ける照合の並びを、端末のエンジンの宣言から決める（<paramref name="checks"/> から、その宣言のエンジンでは
+    /// 定義から件数の出ない種類＝<see cref="RunCheckCountedOnlyWhenCarrying"/> を除く。並びの順は保つ）
+    /// </summary>
+    /// <param name="checks">守りに掛けたい照合の並び</param>
+    /// <param name="carriesServerWinsDecision">流した端末のエンジンの宣言</param>
+    public static IReadOnlyList<string> GuardedRunChecksFor(
+        IReadOnlyList<string> checks,
+        bool carriesServerWinsDecision
+    ) =>
+        [
+            .. checks.Where(kind =>
+                !RunCheckCountedOnlyWhenCarrying.TryGetValue(kind, out var countedWhen)
+                || countedWhen == carriesServerWinsDecision
+            ),
+        ];
+
     /// <summary>照合の種類（<see cref="RunChecks"/> の鍵）</summary>
     public static IReadOnlyList<string> RunCheckKinds { get; } =
     [
@@ -307,6 +346,18 @@ internal sealed partial class SyncModelRun
     /// </summary>
     private readonly Dictionary<(ModelActor Device, string Table, string Key), string?> _carried =
     [];
+
+    /// <summary>
+    /// 品目の行の決定を作った後に、その端末が記録つきの書き込みで blob を書いた品目：（端末・品目の表・キー）。宣言が真の
+    /// エンジンは決定を行の単位で持つので、決定の後に端末が blob を書いた行の行の決定を外すのに使う
+    /// （<see cref="CheckCarried"/>）。端末の blob の持ち分を立てる所（<see cref="NoteWrite"/>）で足し、行の決定を作るときに
+    /// 消す。blob の内容では決めない（エンジンがサーバーの blob を端末へ写しても、端末の書き込みではないので決定は外れない）
+    /// </summary>
+    private readonly HashSet<(
+        ModelActor Device,
+        string Table,
+        string Key
+    )> _blobWrittenAfterHeld = [];
 
     /// <summary>
     /// 例外で終わった ServerWins の実行（ダウンロード以外）が戻せなかった行：（端末・表・キー）→ その実行の直後の端末の内容。
@@ -604,6 +655,16 @@ internal sealed partial class SyncModelRun
             _rowSeenWhenHeld[(actor, key.Table, key.Key)] = _lastSeen.GetValueOrDefault(
                 (actor, RowKey(key).Table, RowKey(key).Key)
             );
+
+            // 行の決定がある品目の blob を、端末が記録つきの書き込みで書いた（決定の後の端末の書き込み）
+            if (
+                tracked
+                && key.Table == PayloadTable
+                && _carried.ContainsKey((actor, ModelTables.Items, key.Key))
+            )
+            {
+                _blobWrittenAfterHeld.Add((actor, ModelTables.Items, key.Key));
+            }
         }
 
         // 立てたときに端末に行が無く、実行を挟まずに削除で終わった持ち分は、差し引き何も書いていない（blob の品目も一緒に下ろす）
@@ -955,7 +1016,7 @@ internal sealed partial class SyncModelRun
 
         if (!threw && frame.ServerWinsRun)
         {
-            HoldServerWinsDecisions(frame, serverAfter, localAfter, conflicted);
+            HoldServerWinsDecisions(frame, serverAfter, localAfter, conflicted, carries);
         }
 
         ObserveServerKnows(
@@ -1849,14 +1910,56 @@ internal sealed partial class SyncModelRun
     {
         var editLost = new HashSet<(string Table, string Key)>();
         var fulfilled = new HashSet<(string Table, string Key)>();
+        var entries = _carried.Where(p => p.Key.Device == frame.Device).ToList();
 
-        foreach (var (entry, decided) in _carried.Where(p => p.Key.Device == frame.Device).ToList())
+        // 宣言が真のエンジンは決定を行の単位で持ち越す：行の決定が決定の後のその行の編集で外れたら、同じ行の blob の決定も
+        // 外す（編集した行はもう決定の行ではない）。宣言が偽のエンジンは数えるだけなので、台帳の作り方を変えない
+        var editedRows = carries
+            ? entries
+                .Where(p =>
+                    p.Key.Table != PayloadTable
+                    && !string.Equals(
+                        frame.LocalBefore.GetValueOrDefault((p.Key.Table, p.Key.Key)),
+                        p.Value,
+                        StringComparison.Ordinal
+                    )
+                )
+                .Select(p => (p.Key.Table, p.Key.Key))
+                .ToHashSet()
+            : [];
+
+        foreach (var (entry, decided) in entries)
         {
             var key = (entry.Table, entry.Key);
             var localBefore = frame.LocalBefore.GetValueOrDefault(key);
             var localNow = localAfter.GetValueOrDefault(key);
             var serverBefore = frame.ServerBefore.GetValueOrDefault(key);
             var serverNow = serverAfter.GetValueOrDefault(key);
+
+            // 行の決定が編集で外れた行の blob の決定（blob 自身の編集は下の枝が見る）
+            if (
+                entry.Table == PayloadTable
+                && editedRows.Contains(RowKey(key))
+                && string.Equals(localBefore, decided, StringComparison.Ordinal)
+            )
+            {
+                _carried.Remove(entry);
+                continue;
+            }
+
+            // 逆向き：決定の後に端末が blob を書いた品目の行の決定（宣言が真のエンジンは、後の書き込みが blob だけでも決定を
+            // 行ごと外し、行を blob と一緒に送る。サーバーが知らない行の blob は、行を送らなければ届かない）。端末の書き込み
+            // だけを数え、エンジンが写した blob では外さない。blob 自身の編集が消えないかは、blob の決定の枝と照合 3 が見る
+            if (
+                carries
+                && entry.Table == ModelTables.Items
+                && string.Equals(localBefore, decided, StringComparison.Ordinal)
+                && _blobWrittenAfterHeld.Contains(entry)
+            )
+            {
+                _carried.Remove(entry);
+                continue;
+            }
 
             // 決定の後に編集された：決定は消える。その編集は報告なしに消えてはならない（宣言に依らず違反）
             if (!string.Equals(localBefore, decided, StringComparison.Ordinal))
@@ -2122,18 +2225,33 @@ internal sealed partial class SyncModelRun
 
     /// <summary>
     /// ServerWins の実行の後、戻せなかった行の決定を作る：実行の始めに持ち分があり、実行の後も端末の行がサーバーと違い、
-    /// 実行の間に端末の行が変わっておらず、そのキーの競合が報告されなかった（範囲の表だけ）
+    /// 実行の間に端末の行が変わっておらず、そのキーの競合が報告されなかった（範囲の表だけ）。宣言が真のエンジンは決定を
+    /// 行の単位で持つので、実行の間にその行（blob を除く列）が変わった品目の blob の決定も作らない
     /// </summary>
     private void HoldServerWinsDecisions(
         RunFrame frame,
         IReadOnlyDictionary<(string Table, string Key), string> serverAfter,
         IReadOnlyDictionary<(string Table, string Key), string> localAfter,
-        HashSet<(string, string)> conflicted
+        HashSet<(string, string)> conflicted,
+        bool carries
     )
     {
         foreach (var key in frame.Holdings.Keys)
         {
             var localNow = localAfter.GetValueOrDefault(key);
+
+            if (
+                carries
+                && key.Table == PayloadTable
+                && !string.Equals(
+                    localAfter.GetValueOrDefault(RowKey(key)),
+                    frame.LocalBefore.GetValueOrDefault(RowKey(key)),
+                    StringComparison.Ordinal
+                )
+            )
+            {
+                continue;
+            }
 
             if (
                 !frame.InScope(RowKey(key).Table)
@@ -2155,6 +2273,10 @@ internal sealed partial class SyncModelRun
             }
 
             _carried[(frame.Device, key.Table, key.Key)] = localNow;
+
+            // 新しい決定の前の blob の書き込みは、この決定の後の書き込みではない
+            _blobWrittenAfterHeld.Remove((frame.Device, key.Table, key.Key));
+
             Tally(CarryHeldCheck, violation: false);
         }
     }

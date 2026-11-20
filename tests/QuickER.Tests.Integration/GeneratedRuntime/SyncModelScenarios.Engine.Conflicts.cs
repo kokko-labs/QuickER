@@ -101,7 +101,14 @@ internal static partial class SyncModelScenarios
                     PlainOnly(D1, ModelSyncKind.Upload, policy: SyncConflictPolicy.ServerWins),
                     Expect.Result(D1).Contains("uploaded=0", "discarded=1").Absent("conflict *"),
                     Expect.Rows(D1, F).Contains("2 parent=null name=server-x"),
-                    Expect.Mirror(D1, F).Contains("key=2 mirror=other before=same"),
+                    // 再開点をミラー版から導くエンジンは、戻した行のミラー版を据え置く。再開点を表ごとに別に持つエンジンは、戻した
+                    // 行の版の列をサーバーの版にする（どちらでも、続くダウンロードが戻した行より前の版のフォルダー 1 を降ろす）
+                    new WhenEngineDeclaresOp(
+                        D1,
+                        EngineDeclaration.DerivesResumePointFromLocalVersions,
+                        [Expect.Mirror(D1, F).Contains("key=2 mirror=other before=same")],
+                        [Expect.Mirror(D1, F).Contains("key=2 mirror=server before=changed")]
+                    ),
                     PlainOnly(D1, ModelSyncKind.Download, policy: SyncConflictPolicy.ServerWins),
                     Expect.Result(D1).Contains("downloaded=1"),
                     Expect
@@ -314,6 +321,28 @@ internal static partial class SyncModelScenarios
                         .Result(D1)
                         .Count("conflict *", 1)
                         .Single($"conflict {F} key=7 * reason=DuplicateOnServer *"),
+                    Expect.Rows(SV, F).Contains("7 parent=null name=server-side"),
+                ]
+            ),
+            // サーバーと同じキーで端末が入れた行（DuplicateOnServer）を、端末が自分で消すと、送るものが無くなる。その行で
+            // 止めていたダウンロードは、消した後の同期でサーバーの行を降ろす（同期のたびに先へ進めると、サーバーの行は
+            // 二度と降りない）
+            Moved(
+                "conflict-duplicate-key-then-local-delete-brings-server-row-down",
+                [],
+                [
+                    Folder(SV, 7, name: "server-side"),
+                    Folder(D1, 7, name: "local-side"),
+                    Plain(D1),
+                    Expect
+                        .Result(D1)
+                        .Count("conflict *", 1)
+                        .Single($"conflict {F} key=7 * reason=DuplicateOnServer *"),
+                    Expect.Rows(D1, F).Contains("7 parent=null name=local-side"),
+                    new DeleteFolderOp(D1, Direct, 7),
+                    Plain(D1),
+                    Expect.Result(D1).Absent("conflict *"),
+                    Expect.Rows(D1, F).Contains("7 parent=null name=server-side"),
                     Expect.Rows(SV, F).Contains("7 parent=null name=server-side"),
                 ]
             ),

@@ -178,7 +178,7 @@ internal static partial class SyncModelScenarios
                         .Contains("11 folder=1 label=null code=c-11 title=edited-offline"),
                     Expect.Journal(D1).Exact($"{I} key=11 *"),
                     Plain(D1),
-                    new LocalSqlOp(D1, $"DELETE FROM {I} WHERE item_id = 11"),
+                    new LocalSqlOp(D1, $"DELETE FROM {I} WHERE item_id = 11") { Untracked = true },
                     RefreshAll(D1, excluded: [I]),
                     Expect
                         .Result(D1)
@@ -202,6 +202,25 @@ internal static partial class SyncModelScenarios
                         .Count("table *", 2)
                         .Contains($"table {F} *", $"table {I} *"),
                     new RestoreLocalTableOp(D1, ModelTables.Events),
+                    // 作り直した空の表：再開点をミラー版から導くエンジンは次の同期が全部を降ろし直す。再開点を表ごとに別に
+                    // 持つエンジンは、同期が空にされた表として断るので、その表を範囲に含む洗い替えで作り直す
+                    new WhenEngineDeclaresOp(
+                        D1,
+                        EngineDeclaration.DerivesResumePointFromLocalVersions,
+                        [],
+                        [
+                            new ExpectThrowOp(D1),
+                            Plain(D1),
+                            Expect
+                                .Result(D1)
+                                .Contains(
+                                    $"exception SyncLocalTableEmptiedException: *{ModelTables.Events}*"
+                                ),
+                            RefreshAll(D1),
+                            Expect.Result(D1).Absent("exception *"),
+                            Expect.Rows(D1, ModelTables.Events).Contains("* item=999 memo=tail"),
+                        ]
+                    ),
                 ]
             ),
             Moved(
@@ -257,6 +276,168 @@ internal static partial class SyncModelScenarios
                     Expect.Rows(D1, F).Contains("710 parent=null name=f710"),
                 ]
             ),
+            // 以下の 5 行は、エンジンの記録の面（ジャーナル・受理記録）を読まずに、洗い替えの振る舞いを実行の結果・例外・
+            // 端末とサーバーの行・その後の同期が送るか送らないかで見る（どちらの端末でも流れる）
+            Moved(
+                "refresh-cycle-force-replaces-pending-and-next-sync-sends-nothing",
+                [],
+                [
+                    .. CyclePinned(),
+                    Plain(D1),
+                    Rename(D1, 710, "offline-edit"),
+                    RefreshAll(D1, force: true),
+                    Expect.Result(D1).Absent("exception *").Contains("discarded-changes=1"),
+                    Expect
+                        .Rows(D1, F)
+                        .Contains(
+                            "710 parent=null name=f710",
+                            "700 parent=null name=f700 pinned=711"
+                        ),
+                    Plain(D1),
+                    Expect.Result(D1).Contains("uploaded=0").Absent("conflict *"),
+                    Expect.Rows(SV, F).Contains("710 parent=null name=f710"),
+                ]
+            ),
+            Moved(
+                "refresh-pending-refused-keeps-edit-that-next-sync-sends",
+                [.. Seed(1, "alice", 11, "widget")],
+                [
+                    Rename(D1, 1, "offline-edit"),
+                    new ExpectThrowOp(D1),
+                    RefreshAll(D1),
+                    Expect.Result(D1).Contains($"exception SyncPendingChangesException: *{F}*"),
+                    Expect.Rows(D1, F).Contains("1 parent=null name=offline-edit"),
+                    Plain(D1),
+                    Expect.Result(D1).Contains("uploaded=1").Absent("conflict *"),
+                    Expect.Rows(SV, F).Contains("1 parent=null name=offline-edit"),
+                ]
+            ),
+            Moved(
+                "refresh-force-discards-pending-and-next-sync-sends-nothing",
+                [.. Seed(1, "alice", 11, "widget")],
+                [
+                    Rename(D1, 1, "offline-edit"),
+                    RefreshAll(D1, force: true),
+                    Expect.Result(D1).Contains("discarded-changes=1"),
+                    Expect.Rows(D1, F).Contains("1 parent=null name=alice"),
+                    Plain(D1),
+                    Expect.Result(D1).Contains("uploaded=0").Absent("conflict *"),
+                    Expect.Rows(SV, F).Contains("1 parent=null name=alice"),
+                ]
+            ),
+            // 端末が消した（未送信の）行をサーバーの他者も消し、Force の洗い替えがその削除を捨てる。その後に端末が同じキーで
+            // 作った行は、サーバーに一度も無かった行として挿入で上がる（洗い替えが、両方に無い行の跡を残さない）
+            Moved(
+                "refresh-force-forgets-row-gone-on-both-sides-and-same-key-is-inserted",
+                [new AddFolderOp(SV, Direct, 5, null, "e5")],
+                [
+                    new DeleteFolderOp(D1, Direct, 5),
+                    new DeleteFolderOp(SV, Direct, 5),
+                    RefreshAll(D1, force: true),
+                    Expect.Result(D1).Contains("discarded-changes=1"),
+                    Expect.Rows(D1, F).Absent("5 *"),
+                    new AddFolderOp(D1, Direct, 5, null, "again"),
+                    Plain(D1),
+                    Expect.Result(D1).Contains("uploaded=1").Absent("conflict *"),
+                    Expect.Rows(SV, F).Contains("5 parent=null name=again"),
+                ]
+            ),
+            // 拒否の順：範囲の中に未送信（フォルダーの編集）があり、範囲の外の表（イベント）の行が範囲の中の行（品目 999）を
+            // 参照すると、未送信の例外より先に範囲の外の参照で断る（Force で抜けられない拒否を先に出す）。端末は変わらず、
+            // 次の同期が編集を送る
+            Moved(
+                "refresh-refusal-order-outside-reference-before-pending",
+                [.. Seed(1, "alice", 11, "widget")],
+                [
+                    Rename(D1, 1, "offline-edit"),
+                    new ExpectThrowOp(D1),
+                    RefreshAll(D1, excluded: [ModelTables.Events]),
+                    Expect
+                        .Result(D1)
+                        .Contains(
+                            "exception SyncRefreshScopeException: *",
+                            $"scope-reference {ModelTables.Events}->{I}"
+                        ),
+                    Expect.Rows(D1, F).Contains("1 parent=null name=offline-edit"),
+                    Expect.Rows(D1, I).Contains("11 *", "999 *"),
+                    Plain(D1),
+                    Expect.Result(D1).Contains("uploaded=1").Absent("conflict *"),
+                    Expect.Rows(SV, F).Contains("1 parent=null name=offline-edit"),
+                ]
+            ),
+            // 拒否の順：上と同じ形で blob の指定が無い（範囲の品目の表に除外した無制限バイナリ列がある）と、範囲の外の参照より
+            // 先に blob の損失で断る。端末は変わらない
+            Moved(
+                "refresh-refusal-order-blob-loss-before-outside-reference",
+                [.. Seed(1, "alice", 11, "widget")],
+                [
+                    Rename(D1, 1, "offline-edit"),
+                    new ExpectThrowOp(D1),
+                    new RefreshWithOptionsOp(
+                        D1,
+                        SyncMode.LastWriteWins,
+                        false,
+                        false,
+                        false,
+                        [ModelTables.Events]
+                    ),
+                    Expect
+                        .Result(D1)
+                        .Contains(
+                            "exception SyncUnboundedBinaryLossException: *Payload*",
+                            $"blob-loss {I} cols=(Payload)"
+                        ),
+                    Expect.Rows(D1, F).Contains("1 parent=null name=offline-edit"),
+                    Expect.Rows(D1, I).Contains("11 *", "999 *"),
+                    Plain(D1),
+                    Expect.Result(D1).Contains("uploaded=1").Absent("conflict *"),
+                ]
+            ),
+            Moved(
+                "refresh-written-rows-are-not-sent-by-next-sync",
+                [],
+                [
+                    .. Seed(1, "alice", 11, "widget"),
+                    .. Seed(2, "bob", 12, "gadget"),
+                    RefreshAll(D1),
+                    Expect
+                        .Rows(D1, F)
+                        .Contains("1 parent=null name=alice", "2 parent=null name=bob"),
+                    Plain(D1),
+                    Expect.Result(D1).Contains("uploaded=0").Absent("conflict *"),
+                    Expect
+                        .Rows(SV, F)
+                        .Exact("1 parent=null name=alice", "2 parent=null name=bob", "999 *"),
+                ]
+            ),
+            Moved(
+                "refresh-excluding-referring-child-refuses-and-next-sync-sends-edit",
+                [.. Seed(1, "alice", 11, "widget")],
+                [
+                    new MakeLocalCascadeOp(D1, I, F),
+                    new UpdateItemOp(D1, Direct, 11, 1, null, "c-11", "edited-offline"),
+                    new ExpectThrowOp(D1),
+                    RefreshAll(D1, excluded: [I]),
+                    Expect
+                        .Result(D1)
+                        .Contains(
+                            "exception SyncRefreshScopeException: *",
+                            $"scope-reference {I}->{F}"
+                        ),
+                    Expect.Rows(D1, F).Contains("1 parent=null name=alice"),
+                    Expect
+                        .Rows(D1, I)
+                        .Contains("11 folder=1 label=null code=c-11 title=edited-offline"),
+                    Plain(D1),
+                    Expect.Result(D1).Contains("uploaded=1").Absent("conflict *"),
+                    Expect
+                        .Rows(SV, I)
+                        .Contains("11 folder=1 label=null code=c-11 title=edited-offline"),
+                ]
+            ) with
+            {
+                OmitsTail = true,
+            },
             // 循環の全消しは 1 つのトランザクション：最後の表（親のフォルダー）の DELETE が断られると、先に消した表も含めて
             // 何も消えず、受理記録も残り、開いたトランザクションも残らない（次の書き込みと同期が普通に通る）
             Moved(
@@ -378,7 +559,10 @@ internal static partial class SyncModelScenarios
                 "blob-default-preserves-existing-local-blobs-new-rows-arrive-empty",
                 [.. Seed(1, "alice", 11, "widget")],
                 [
-                    new LocalSqlOp(D1, $"UPDATE {I} SET payload = X'0707' WHERE item_id = 11"),
+                    new LocalSqlOp(D1, $"UPDATE {I} SET payload = X'0707' WHERE item_id = 11")
+                    {
+                        Untracked = true,
+                    },
                     new UpdateItemOp(SV, Direct, 11, 1, null, "c-11", "widget-updated"),
                     new WritePayloadOp(SV, 11, "010101"),
                     .. Seed(2, "bob", 12, "gadget"),

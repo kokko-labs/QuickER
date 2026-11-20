@@ -119,11 +119,16 @@ public sealed class QuickER.Runtime.Sqlite.SqliteLocalRowStore : QuickER.Runtime
     public .ctor(QuickER.Runtime.Sqlite.ISqlConnectionFactory connectionFactory)
     public System.Data.Common.DbConnection CreateDedicatedConnection()
     public System.Threading.Tasks.Task InsertAsync<TEntity>(System.Data.Common.DbConnection connection, TEntity entity, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<object>> ListKeysAsync<TEntity>(System.Data.Common.DbConnection connection, System.Threading.CancellationToken cancellationToken)
     public System.Threading.Tasks.Task<TEntity> FindAsync<TEntity>(System.Data.Common.DbConnection connection, object key, System.Threading.CancellationToken cancellationToken)
     public System.Threading.Tasks.Task<bool> DeleteAsync<TEntity>(System.Data.Common.DbConnection connection, object key, System.Threading.CancellationToken cancellationToken)
     public System.Threading.Tasks.Task<bool> ExistsAsync<TEntity>(System.Data.Common.DbConnection connection, object key, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<bool> ReadBinaryAsync<TEntity>(System.Data.Common.DbConnection connection, object key, string propertyName, System.IO.Stream destination, System.Threading.CancellationToken cancellationToken)
     public System.Threading.Tasks.Task<bool> UpdateAsync<TEntity>(System.Data.Common.DbConnection connection, TEntity entity, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<bool> WriteBinaryAsync<TEntity>(System.Data.Common.DbConnection connection, object key, string propertyName, System.IO.Stream source, long? length, System.Threading.CancellationToken cancellationToken)
+    public System.Threading.Tasks.Task<long?> ReadBinaryLengthAsync<TEntity>(System.Data.Common.DbConnection connection, object key, string propertyName, System.Threading.CancellationToken cancellationToken)
     public bool IsUniqueViolation(System.Data.Common.DbException exception)
+    public object ConvertKey<TEntity>(object rawKey)
 
 public abstract class QuickER.Runtime.Sqlite.SqliteRepositoryCore<TEntity, TKey> : QuickER.Runtime.IRemoteRepositoryCore<TEntity, TKey>, QuickER.Runtime.IRepositoryCore<TEntity, TKey>
     protected .ctor(QuickER.Runtime.Sqlite.ISqlConnectionFactory connectionFactory, QuickER.Runtime.ISaveHookRegistry saveHooks = null, QuickER.Runtime.ISqlExecutor sqlExecutor = null)

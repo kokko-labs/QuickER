@@ -26,6 +26,9 @@ internal static class SyncModelDimensions
     /// <summary>網羅しない組の照合の範囲（直結の乱数の種）</summary>
     public const string DirectScope = "direct";
 
+    /// <summary>網羅しない組の照合の範囲（直結・新しいエンジンの端末の乱数の種）</summary>
+    public const string EngineScope = "engine";
+
     /// <summary>同期のモード</summary>
     public const string Mode = "Mode";
 
@@ -333,7 +336,16 @@ internal static class SyncModelDimensions
         );
 
     /// <summary>網羅しない組の一覧（範囲は <see cref="DirectScope"/> だけ）</summary>
-    public static CoverageGapSet Gaps { get; } =
+    public static CoverageGapSet Gaps { get; } = GapsFor(DirectScope);
+
+    /// <summary>
+    /// 新しいエンジンの端末の乱数の種の網羅しない組の一覧（範囲は <see cref="EngineScope"/> だけ。次元表は生成器の操作を数える
+    /// ので、項目は直結と同じ）
+    /// </summary>
+    public static CoverageGapSet EngineGaps { get; } = GapsFor(EngineScope);
+
+    /// <summary>網羅しない組の一覧を、照合の範囲を付けて作る</summary>
+    private static CoverageGapSet GapsFor(string scope) =>
         CoverageGap.Set(
             EngineIds.SyncModel,
             [
@@ -343,7 +355,7 @@ internal static class SyncModelDimensions
                     .Factors.Where(factor => factor.Name != Blobs)
                     .Select(factor =>
                         CoverageGap.AcceptedMatching(
-                            DirectScope,
+                            scope,
                             "P2-3",
                             "blob を運ぶかは端末ごとに一貫させる製品の割り切り（docs/code-generation.md の「Unbounded binary columns」の節の「Choose once per device whether to carry the columns, and keep to it.」）。運ばない実行を挟むと、その間に動いた行の blob は後の運ぶ実行でも動かず、収束の表明が成り立たないので、乱数の同期は常に運ぶ（運ばない実行は決定的なシナリオ n12-* が受け持つ）",
                             factor.Name,
@@ -353,7 +365,7 @@ internal static class SyncModelDimensions
                     ),
                 // サーバーの他者（経路を持たない書き込み＝Via=None も同じ書き手）は、ぶつかり得る別表記を書かない
                 CoverageGap.AcceptedMatching(
-                    DirectScope,
+                    scope,
                     "G4",
                     ServerSpellingReason,
                     Actor,
@@ -362,7 +374,7 @@ internal static class SyncModelDimensions
                         actor == nameof(ModelActor.Server) && IsCollidingSpelling(spelling)
                 ),
                 CoverageGap.AcceptedMatching(
-                    DirectScope,
+                    scope,
                     "G4",
                     ServerSpellingReason,
                     Via,
@@ -396,6 +408,7 @@ internal static class SyncModelDimensions
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelCoverageRows.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelDeviceFacets.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelDimensions.cs",
+                "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelEngineTransportRuntimeTests.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelExpectationOperations.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelFaults.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelGenerator.cs",

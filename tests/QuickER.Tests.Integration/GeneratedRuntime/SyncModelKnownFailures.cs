@@ -129,6 +129,13 @@ internal static class SyncModelKnownFailures
             SeedNamedRandomEntries
         );
 
+    /// <summary>
+    /// 新しいエンジンの端末の乱数の種の既知の失敗の一覧（<see cref="SyncSupportAdoSqliteEngineRuntimeTests.RandomSeeds_ConvergeWithoutLoss"/>）。
+    /// 今の端末の一覧とは別に持ち、空で始める（載せる項目は、新しいエンジンの端末で出た失敗から理由つきで足す）
+    /// </summary>
+    public static KnownFailureSet EngineSet { get; } =
+        Build("SyncModel", [], SyncModelRuntimeTests.Family);
+
     /// <summary>決定的なシナリオの項目を作る</summary>
     /// <param name="finding">指摘の番号（三巡目レビューのまとめの番号。新しく見つけたものはその番号の案）</param>
     /// <param name="fixedIn">直す区切り（区切りの名前か、きっかけを待つ台帳の項目）</param>
