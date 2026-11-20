@@ -5,10 +5,12 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
 /// 乱数の種を流す 1 つの組（<see cref="SyncModelRuntimeTests.RunRandomSeedsAsync"/> へ渡す）。世界の組み方（サーバー役・端末の
-/// 作り方）と、その世界の結果を照合する一覧・宣言をまとめる。種の決め方・次元表・生成器は組に依らない。
+/// 作り方）と、流す種の決め方と、その世界の結果を照合する一覧・宣言をまとめる。次元表・生成器は組に依らない。
 /// </summary>
 /// <param name="Name">組の名前（失敗の報告の見出しと、再現の手順の文に使う）</param>
 /// <param name="Options">世界の組み方（端末の数は種が決める）</param>
+/// <param name="Seeds">既存の範囲の種（端末 2 台）の決め方</param>
+/// <param name="WideSeeds">広い世界の種（端末 3 台）の決め方（単独の種の変数は <paramref name="Seeds"/> と同じ）</param>
 /// <param name="Known">既知の失敗の一覧</param>
 /// <param name="Gaps">操作の次元表（<see cref="SyncModelDimensions"/>）の網羅しない組の一覧</param>
 /// <param name="OutcomeGaps">実行の結果の表（<see cref="SyncModelOutcomeDimensions"/>）の網羅しない組の一覧</param>
@@ -27,6 +29,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 internal sealed record SyncModelRandomSuite(
     string Name,
     SyncModelWorldOptions Options,
+    SeedSettings Seeds,
+    SeedSettings WideSeeds,
     KnownFailureSet Known,
     CoverageGapSet Gaps,
     CoverageGapSet OutcomeGaps,

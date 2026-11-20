@@ -37,13 +37,50 @@ public sealed class SyncSupportAdoSqliteEngineRuntimeTests(ITestOutputHelper out
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     /// <summary>
-    /// 直結・新しいエンジンの端末（<see cref="SyncModelEngineDevice"/>）で乱数の種を流すときの組。種の決め方・次元表・生成器は
-    /// 今の端末の直結の組と同じで、既知の失敗の一覧と網羅しない組の範囲を別に持つ
+    /// 夜間の既定の種の数（今の端末の直結の <see cref="SyncModelRuntimeTests.NightlySeedCount"/> の 3 分の 1）。種を並列に流して
+    /// ランナーの CPU を使い切るので、夜間の Integration のジョブ（50 分未満の目安）で同時に流れるほかのテストを遅らせない数にする
+    /// （4 コアのランナーで、広い世界の種と合わせて 1,440 種が 14 分）
+    /// </summary>
+    public const int NightlySeedCount = 400;
+
+    /// <summary>夜間の広い世界の種の既定の数（<see cref="SyncModelRuntimeTests.NightlyWideSeedCount"/> の 3 分の 1）</summary>
+    public const int NightlyWideSeedCount = 80;
+
+    /// <summary>
+    /// 乱数の種の決め方。今の端末の直結（<see cref="SyncModelRuntimeTests.Seeds"/>）と環境変数・普段の数・開始番号が同じで、
+    /// 夜間の数だけ <see cref="NightlySeedCount"/>
+    /// </summary>
+    public static SeedSettings Seeds { get; } =
+        WithNightlyCount(SyncModelRuntimeTests.Seeds, NightlySeedCount);
+
+    /// <summary>
+    /// 広い世界の種の決め方。今の端末の直結（<see cref="SyncModelRuntimeTests.WideSeeds"/>）と夜間の数だけが違う
+    /// （<see cref="NightlyWideSeedCount"/>）
+    /// </summary>
+    public static SeedSettings WideSeeds { get; } =
+        WithNightlyCount(SyncModelRuntimeTests.WideSeeds, NightlyWideSeedCount);
+
+    /// <summary>夜間の数だけを替えた決め方を作る（普段の種が同じなので、種の指紋の記録は元の決め方と共有できる）</summary>
+    private static SeedSettings WithNightlyCount(SeedSettings settings, int nightlyCount) =>
+        new(
+            settings.CountVariable,
+            settings.RegularCount,
+            nightlyCount,
+            settings.FirstSeed,
+            settings.SingleVariable
+        );
+
+    /// <summary>
+    /// 直結・新しいエンジンの端末（<see cref="SyncModelEngineDevice"/>）で乱数の種を流すときの組。次元表・生成器は今の端末の
+    /// 直結の組と同じで、夜間の種の数（<see cref="Seeds"/>・<see cref="WideSeeds"/>）と、既知の失敗の一覧と網羅しない組の
+    /// 範囲を別に持つ
     /// </summary>
     internal static SyncModelRandomSuite EngineSuite { get; } =
         new(
             "SyncModelEngine",
             SyncModelEngineDevice.On(SyncModelWorldOptions.Direct),
+            Seeds,
+            WideSeeds,
             SyncModelKnownFailures.EngineSet,
             SyncModelDimensions.EngineGaps,
             SyncModelOutcomeDimensions.EngineGaps,

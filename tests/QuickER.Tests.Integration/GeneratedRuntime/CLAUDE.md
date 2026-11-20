@@ -507,7 +507,7 @@
     - 新しい端末の組は `EngineSuite`：既知の失敗の一覧は `SyncModelKnownFailures.EngineSet`（空）、網羅しない組は範囲 `SyncModelDimensions.EngineScope` の `EngineGaps`（次元表は今の直結と同じ）と `SyncModelOutcomeDimensions.EngineGaps`。
     - 結果の表の `EngineGaps` は、今のエンジンの解決役と段にだけある理由（`ReloadedForUniqueValue`・`RemovedBeforeDownload`・`RemovedForUniqueValue`）を、新しい端末の範囲にだけ「出ない組」として宣言する（新しいエンジンは集合の外の行をキーで読みに行かず、取得した集合の中で後回し・回転・同じ適用の削除伝搬で収束させる）。
     - 種の指紋の記録は今の直結と共有する（指紋は生成器の設定と最初の形の中身から作り、端末に依らない）。
-    - 夜間の目印を持ち（`NightlyEngineTrait.Selected`）、夜間は今の直結と同じ種の数（1,200＋広い世界 240）で流す。1,440 種で 6 分半ほど（今の端末の約 2 倍）。
+    - 夜間の目印を持つ（`NightlyEngineTrait.Selected`）。種の決め方は組が持ち（`SyncModelRandomSuite.Seeds`・`WideSeeds`）、今の直結と環境変数・普段の数・開始番号が同じで、夜間の数だけ 3 分の 1（400＋広い世界 80）。種を並列に流してランナーの CPU を使い切るので、夜間の Integration のジョブ（50 分未満の目安）で同時に流れるほかのテストを遅らせない数にする（4 コアのランナーで 1,440 種が 14 分。手元では 1,440 種で 6 分半ほど＝今の端末の約 2 倍）。
   - 決まった形の行（下の節）。
 - 直結のほかの転送は、今の端末の転送のクラスと同じ本体（`SyncModelSignatures.RunSeedsAsync`・種の決め方・正規化）に新しい端末の世界の作り方（`SyncModelEngineDevice.On(...)`）を渡す 2 つのクラスが流す（`SyncModelEngineTransportRuntimeTests.cs`）。既知の失敗の一覧は今の端末と別の `SyncModelEngineTransports.Known`（空）と `SyncModelEngineTransports.SqlServerOnly`（空）。
   - `SyncSupportRemoteAdoSqliteEngineRuntimeTests`（HTTP・SQLite のサーバー役・コンテナなし）：乱数の種（転送の種の数＝既定 10＋広い世界 4）。
