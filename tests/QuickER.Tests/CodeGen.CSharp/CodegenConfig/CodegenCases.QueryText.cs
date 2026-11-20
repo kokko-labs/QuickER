@@ -3700,6 +3700,72 @@ internal static partial class CodegenCases
                             );
                         }
 
+                        // 記録させずに書く（生成した WriteUntrackedAsync）：渡した接続で書いた行は記録されず、終わった後の
+                        // 書き込みは記録される
+                        ProbeKit.Await(
+                            ProbeKit.CallStatic(
+                                tracking,
+                                "WriteUntrackedAsync",
+                                connection,
+                                (Func<System.Data.Common.DbConnection, CancellationToken, Task>)(
+                                    (inside, _) =>
+                                    {
+                                        using var command = inside.CreateCommand();
+                                        command.CommandText =
+                                            $"INSERT INTO {Quote(QueryText_QuotedOrdersTable)} ({Quote(QueryText_QuotedOrderKey)}, customer_name) VALUES (8, 'eight')";
+                                        command.ExecuteNonQuery();
+
+                                        return Task.CompletedTask;
+                                    }
+                                ),
+                                CancellationToken.None
+                            )
+                        );
+                        Run(
+                            $"INSERT INTO {Quote(QueryText_QuotedOrdersTable)} ({Quote(QueryText_QuotedOrderKey)}, customer_name) VALUES (9, 'nine')"
+                        );
+
+                        var recorded = new List<string>();
+
+                        using (var command = connection.CreateCommand())
+                        {
+                            command.CommandText =
+                                "SELECT \"key\" FROM quicker_sync_row ORDER BY \"key\"";
+                            using var reader = command.ExecuteReader();
+
+                            while (reader.Read())
+                            {
+                                recorded.Add(
+                                    Convert.ToString(
+                                        reader.GetValue(0),
+                                        System.Globalization.CultureInfo.InvariantCulture
+                                    )!
+                                );
+                            }
+                        }
+
+                        if (!recorded.SequenceEqual(["7", "9"]))
+                        {
+                            problems.Add(
+                                $"記録させずに書いた行（キー 8）の後の行の状態の表のキーが [{string.Join(", ", recorded)}]（期待 [7, 9]）"
+                            );
+                        }
+
+                        using (var command = connection.CreateCommand())
+                        {
+                            command.CommandText = "SELECT applying FROM quicker_sync_state";
+
+                            if (
+                                Convert.ToInt64(
+                                    command.ExecuteScalar(),
+                                    System.Globalization.CultureInfo.InvariantCulture
+                                ) != 0
+                            )
+                            {
+                                problems.Add("記録させずに書いた後、適用中の印が 0 に戻っていない");
+                            }
+                        }
+
                         return Task.FromResult<IEnumerable<string>>(problems);
                     }
                 )
@@ -5407,7 +5473,8 @@ internal static partial class CodegenCases
                 "exec-sync-quoted-names-local-tracking-records-on-sqlite",
                 null,
                 "表名・キーの列名・除外 blob の列名に \" と ' と空白を含む図でも、生成した SyncLocalTracking.Ensure が実際の SQLite で通り、"
-                    + "トリガーの名前と sqlite_master の tbl_name が生の名前と一致し、行の挿入と除外 blob の更新が quicker_sync_row に残る",
+                    + "トリガーの名前と sqlite_master の tbl_name が生の名前と一致し、行の挿入と除外 blob の更新が quicker_sync_row に残る。"
+                    + "生成した SyncLocalTracking.WriteUntrackedAsync が渡した接続で書いた行は残らず、終わった後の挿入は残り、適用中の印は 0",
                 new CodegenCase(
                     () => QueryText_SyncQuotedNamesDiagram(SyncFixtureDefinition.Build()),
                     SyncFixtureDefinition.Options,

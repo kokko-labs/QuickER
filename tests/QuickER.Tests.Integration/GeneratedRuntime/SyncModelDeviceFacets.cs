@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -255,11 +256,19 @@ internal sealed record SyncModelDeviceParts
     public required IModelDeviceSyncState State { get; init; }
 
     /// <summary>
-    /// 記録しない書き込み（Raw 系のリポジトリ・判定役の包みの生の SQL）を流す関数を受け取り、流す間は端末の未送信の記録が
-    /// 残らないように流す口。前からある未送信の記録は変えない（記録を消すのは <see cref="ClearPendingRecordsAsync"/> の別の
-    /// 手順）。省略なら関数をそのまま流す（記録デコレータの内側のリポジトリ・生の SQL が記録を作らない端末）
+    /// 記録しない書き込みを流す関数を受け取り、流す間は端末の未送信の記録が残らないように流す口。口は接続を開き、製品の
+    /// 記録しない書き込みの API（<c>SyncLocalTracking.WriteUntrackedAsync</c>）の上で、その接続を関数へ渡す（関数は渡された
+    /// 接続の SQL か <c>ILocalRowStore</c> だけで書く）。第 3 引数が真なら外部キーの検査を切った接続を渡す。前からある未送信の
+    /// 記録は変えない（記録を消すのは <see cref="ClearPendingRecordsAsync"/> の別の手順）。省略なら、接続の無い関数
+    /// （<see cref="SyncModelDevice.WriteUntrackedAsync"/> が null を渡す）をそのまま流す（記録デコレータの内側のリポジトリ・
+    /// 生の SQL が記録を作らない端末）
     /// </summary>
-    public Func<Func<Task>, CancellationToken, Task>? WriteUntrackedAsync { get; init; }
+    public Func<
+        Func<DbConnection, Task>,
+        CancellationToken,
+        bool,
+        Task
+    >? WriteUntrackedAsync { get; init; }
 
     /// <summary>
     /// 1 行（表の名前とキーのテキスト）の未送信の記録を全部消す口（判定役の対照の行の包みが、エンジンが記録を捨てた結果を作るのに

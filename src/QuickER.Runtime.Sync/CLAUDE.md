@@ -167,6 +167,19 @@
 - 記録しないもの：`REPLACE`（`INSERT OR REPLACE`・`UPDATE OR REPLACE`）が一意制約で消す別の行の削除。`recursive_triggers` が切のとき、SQLite が削除のトリガーを発火させない。
 - ガード：`SyncSupportAdoSqliteTriggerRuntimeTests` が行の表 `SyncTriggerRecordingRows`（影響の地図の名前 `table:SyncTriggerRecording`）を流す。主な行は `int-key-insert`・`primary-key-change-int`・エンジンの列を保つ行 `engine-columns-kept-by-update`・`engine-columns-kept-by-delete-then-reinsert`・`engine-columns-kept-on-old-key-by-primary-key-change`・`engine-columns-kept-by-blob-write`・`stream-write-names-blob-column`・`delete-then-reinsert-without-blob-write-names-all-blob-columns`・`applying-within-transaction-is-not-recorded`・`cascade-delete-and-set-null`。生成の行は `exec-sync-dotted-table-name-local-tracking-refuses-attached-database`（別の DB の表を断る）・`exec-sync-quoted-names-local-tracking-records-on-sqlite`（引用符を含む名前でも記録する）。名前の前置きは規則 `sync-auxiliary-trigger-names-in-template`。mutation 実証済み（適用中の印の条件を外す・連番を進めない・主キーを変える更新の古いキーを削除として記録しない・挿入し直しで無制限バイナリ列の名前を付け直さない・張る前に列を確かめない）。
 
+### 記録させずに書く（SyncLocalTracking.WriteUntrackedAsync）
+
+- `SyncLocalTracking.WriteUntrackedAsync(connection, write, cancellationToken)` は、開いた接続（トランザクションの外）を受け取り、その接続の 1 つのトランザクションの中で、適用中の印を立てる → `write(connection, ct)` → 印を戻す → コミット、を流す。トリガーは印が立っている間は記録しないので、`write` が書いた行は未送信にならず、前からある記録（未送信の行・エンジンの列・変更の連番）も変わらない。
+  - 最初の文は `BEGIN`（ロックを取らず待たない）で、次の「印を立てる `UPDATE`」が書き込みのロックを取る（ほかの書き手を接続の `busy_timeout` まで待つ）。`BEGIN` が失敗するのは接続がすでにトランザクションの中のときだけなので、入れ子と利用者のトランザクションの中の呼び出しを、ドライバの例外の文を読まずに `InvalidOperationException` で名指しできる（同期の固定の側は ADO のドライバの型を参照しない）。このとき利用者のトランザクションには触らない。
+  - 印はコミットの前に戻すので、ほかの接続から印が 1 に見えることは無い（ほかの接続の読み取りは待たずにコミットの前の内容を読み、書き込みはコミットまで待ってから通り、記録される）。
+  - 入口は、印が 0 でないことを理由に断らない。書き込みのロックを持った後に見える印の 1 は、コミットされて残ったものだけなので、立てて戻せば直る。
+- **どの出口でもトランザクションを終わらせる**：`write` の例外・取り消し・印を立てる文の失敗（ロック待ちの時間切れ）・コミットの失敗のどれでも、`ROLLBACK` を試みてから元の例外を投げ直す（`ROLLBACK` の失敗は元の例外を隠さない）。印を戻す文・`COMMIT`・`ROLLBACK` は `CancellationToken.None` で流す。
+  - 理由：Microsoft.Data.Sqlite は、SQL の `BEGIN` で始めたトランザクションを、接続を閉じても巻き戻さない。プールの接続は、トランザクションと書き込みのロックを持ったままプールへ戻り、ほかの接続の書き込みが `database is locked` で失敗し、次にその接続を借りた処理はそのトランザクションの中で動く。
+  - 残る限界：`ROLLBACK` 自体が失敗したプールの接続と、`write` の中で閉じられたプールの接続は、トランザクションとロックを持ったままプールへ戻る。`write` が接続を閉じたら `InvalidOperationException` で知らせる。その接続を次に開くのが開くたびの確認で包んだ接続ファクトリなら、確認が巻き戻す（「開くたびの確認」）。プールしない接続（`ILocalRowStore.CreateDedicatedConnection`）は、閉じればロックを手放す。
+- `write` の中の制約（XmlDoc に書いてある）：渡された接続だけで書く（SQL か `ILocalRowStore`）。生成の Repository・`ISqlExecutor` は自分の接続を開くので、ロック待ちで失敗する。トランザクションを始めない・終わらせない（セーブポイントは可）・接続を閉じない・この API と同期を呼ばない。外部キーの検査は渡した接続の設定のまま。
+- `DbTransaction`（`connection.BeginTransaction()`）の形にしない：中のコマンドがどれもトランザクションを持つ必要があり、接続だけを受け取る `ILocalRowStore` と、`write` の中の素の SQL が動かない。
+- ガード：`SyncEngineFixedRows`（影響の地図の名前 `table:SyncEngineFixed`）の行 `untracked-write-is-not-recorded-and-keeps-earlier-records`・`untracked-write-that-throws-leaves-nothing-and-no-transaction`・`untracked-write-cancelled-leaves-nothing-and-no-transaction`・`untracked-write-holds-off-other-writers-until-commit`・`untracked-write-through-repository-fails-on-lock-wait`・`untracked-write-refuses-connection-in-transaction-and-nested-call`・`untracked-write-refuses-closed-connection-and-missing-tracking`・`untracked-write-clears-applying-flag-left-set`・`untracked-write-closed-pooled-connection-is-rolled-back-on-next-open`。生成の行は `CodegenCaseTests` の行 `exec-sync-quoted-names-local-tracking-records-on-sqlite`（生成し直したコードの API が、書いた行を記録せず、印を 0 に戻す）。同期のモデルの新しい端末は、記録しない書き込みをこの API で流す（`tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`「判定役の継ぎ目・台帳・実行ごとの照合」）。mutation 実証済み（失敗の出口で巻き戻さない・巻き戻しを呼び出し側の取り消しのトークンで流す・印を立てない・印を戻さずにコミットする・トランザクションの中の接続を名指しで断らない・関数の中で閉じた接続を確かめない・状態の表の行を確かめない）。
+
 ### 開くたびの確認（SyncLocalTrackingGuard）
 
 - 接続が開いたときに、トリガーがそろっているかを確かめ、違えば張り直す部品。利用側が `new ObservedSqlConnectionFactory(inner, new SyncLocalTrackingGuard(tables).OnStateChange)` の形で組む（`ObservedSqlConnectionFactory` は SQLite の固定の側の汎用の包みで、同期を知らない。→ `src/QuickER.Runtime.Sqlite/CLAUDE.md`「接続ファクトリを包む型（ObservedSqlConnectionFactory）」）。DI の登録は組まない。
@@ -179,6 +192,15 @@
   - 鍵に定義のハッシュを含める理由：同じ DB に、同期する表の集合が違う 2 つのガードが向きうる。
   - インスタンスでなく静的に覚える理由：包む接続ファクトリが scoped・transient で登録されると、インスタンスごとに確かめ直すことになる。
 - 失敗したら、**接続を閉じてから**例外を投げ、覚えた値は進めない（`StateChange` のハンドラが投げるだけだと、例外が出たのに接続が開いたまま残る）。`DbException` は `InvalidOperationException` で包む。
+- 残った適用中の印を戻す：確認がそろったと答えた後（3 段のどれでも）、状態の表の印が 0 でなければ `UPDATE … SET applying = 0 WHERE applying <> 0` で戻す。
+  - エンジンと `WriteUntrackedAsync` は印を 1 つのトランザクションの中で立てて戻し、開いているトランザクションの印はほかの接続からは見えない（戻さないし、書き込みのロックも待たない）。開いたばかりの接続から印が 1 に見えるのは 2 つの場合だけ。
+    - 印を戻さずにコミットされた（`write` が自分でコミットした・生成の外の何かが立てた）。
+    - プールの接続が、そのトランザクションの途中で閉じられてプールへ戻っていた（`write` が接続を閉じた・`ROLLBACK` が失敗した）。印はその接続の残ったトランザクションの中にあり、トランザクションは書き込みのロックを持ったまま。
+  - 印を見たら、先に `ROLLBACK` を試み（残ったトランザクションが無ければ失敗して何も変わらない）、読み直してまだ 1 のときだけ戻す文を流す。`ROLLBACK` を挟まないと、残ったトランザクションの中で印を 0 に書くだけになり、トランザクションとロックが残り続ける。
+  - 残っていた間の書き込みは記録されておらず、取り戻せない。戻した後の書き込みは記録される。
+  - 印は速い道の 1 文で一緒に読む（文の数は増えない）。戻す文は書き込みのロックが要るので、張り直しと同じ形で失敗する（接続を閉じてから `InvalidOperationException`。読み取り専用の接続も同じ）。
+  - 戻さないと、端末のどの書き込みも記録されないまま、同期が何も送らずに成功し続ける。
+  - ガード：行の表 `SyncTriggerGuardRows` の行 `applying-flag-left-set-is-cleared-on-fast-path-open`・`applying-flag-left-set-is-cleared-after-full-check`・`applying-flag-left-set-is-cleared-after-repair`・`applying-flag-left-set-lock-timeout-closes-connection-and-is-cleared-after-rollback`・`applying-flag-left-set-refuses-read-only-open`・`applying-flag-inside-open-transaction-does-not-block-open`と、`SyncEngineFixedRows` の行 `untracked-write-closed-pooled-connection-is-rolled-back-on-next-open`（プールに残ったトランザクションの巻き戻し）。mutation 実証済み（印を戻さない・速い道でしか戻さない・戻す文を開くたびに流す・プールに残ったトランザクションを巻き戻さない）。
 - 診断の値（`FullCheckCount`・`RepairCount`）は internal で、公開の面に出さない。
 - 限界
   - 確認が走るのは、包んだ接続ファクトリが返した接続だけ。ほかの道で開いた接続（自前の `ISqlExecutor` が開く接続・生成の外の接続）では走らない（トリガーが張ってあれば記録はされる）。
